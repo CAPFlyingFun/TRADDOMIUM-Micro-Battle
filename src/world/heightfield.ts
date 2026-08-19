@@ -22,10 +22,19 @@ export interface IslandParams {
   seed: number;
 }
 
+/**
+ * One world unit is roughly a centimetre — the player ant is about 1.4
+ * units nose to gaster. So this island runs ~10 m across with hills the
+ * better part of a metre high: minutes of walking to cross, not
+ * seconds, which is the "huge tiny world" the design asks for.
+ *
+ * Growing it much beyond this wants a streaming/LOD pass, because the
+ * terrain is still drawn as one flat grid (see IslandScene).
+ */
 export const DEFAULT_ISLAND: IslandParams = {
-  radius: 40,
-  peak: 7,
-  roughness: 1.6,
+  radius: 500,
+  peak: 90,
+  roughness: 25,
   seed: 7,
 };
 
@@ -56,11 +65,31 @@ function valueNoise(x: number, y: number, seed: number): number {
   return top + (bottom - top) * fy;
 }
 
-/** Two octaves centred on 0, in [-1, 1]. */
-function terrainNoise(x: number, y: number, seed: number): number {
-  const coarse = valueNoise(x * 0.08, y * 0.08, seed);
-  const fine = valueNoise(x * 0.23, y * 0.23, seed + 1);
-  return (coarse * 0.72 + fine * 0.28) * 2 - 1;
+/**
+ * Octaves, expressed as cycles ACROSS THE ISLAND rather than in world
+ * units, so the landform keeps its proportions at any radius. Resizing
+ * the island can therefore never turn the hills into gravel.
+ *
+ * Frequency f means a wavelength of radius/f, so the finest octave here
+ * still spans tens of world units — comfortably wider than a terrain
+ * mesh quad, which keeps the drawn surface close to the true one.
+ */
+const OCTAVES = [
+  { freq: 2.3, amp: 1 }, // broad landforms: a couple of hills and a valley
+  { freq: 5.9, amp: 0.42 }, // ridges and shoulders
+  { freq: 14.6, amp: 0.16 }, // local relief underfoot
+];
+const AMP_TOTAL = OCTAVES.reduce((sum, o) => sum + o.amp, 0);
+
+/** Summed octaves centred on 0, in [-1, 1]. */
+function terrainNoise(x: number, y: number, params: IslandParams): number {
+  let sum = 0;
+  for (let i = 0; i < OCTAVES.length; i++) {
+    const { freq, amp } = OCTAVES[i];
+    const s = freq / params.radius;
+    sum += (valueNoise(x * s, y * s, params.seed + i) * 2 - 1) * amp;
+  }
+  return sum / AMP_TOTAL;
 }
 
 /**
@@ -76,11 +105,27 @@ export function groundHeight(
   const d = Math.hypot(x, z) / params.radius;
   // Dome: peak at the centre, exactly 0 at d = 1, negative beyond.
   const dome = params.peak * (1 - d * d);
-  // Noise fades to nothing at the rim so it cannot lift the coastline
-  // back out of the water and turn the island into an archipelago.
-  const rimFade = Math.max(0, 1 - d);
-  const noise = terrainNoise(x, z, params.seed) * params.roughness * rimFade;
+  // Noise fades out over the last stretch before the rim, so it cannot
+  // lift the coastline back out of the water and scatter the island
+  // into an archipelago. Confining the fade to that band matters: taper
+  // it across the whole radius and the entire outer half of the island
+  // flattens into bare dome, which is a long walk over nothing.
+  const rimFade = Math.min(1, Math.max(0, (1 - d) / 0.18));
+  const noise = terrainNoise(x, z, params) * params.roughness * rimFade;
   return dome + noise;
+}
+
+/**
+ * Fine surface variation in [-1, 1], for SHADING ONLY — the walker must
+ * not read this, so tinting the ground can never move where she stands.
+ */
+export function groundDetail(
+  x: number,
+  z: number,
+  params: IslandParams = DEFAULT_ISLAND,
+): number {
+  const s = 30 / params.radius;
+  return valueNoise(x * s, z * s, params.seed + 91) * 2 - 1;
 }
 
 /** Elevation bands the island mesh paints with. */

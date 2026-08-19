@@ -39,6 +39,27 @@ describe('island heightfield', () => {
     expect(groundHeight(r * 2, 0)).toBeLessThan(groundHeight(r * 1.2, 0));
   });
 
+  it('keeps the same landform when the island is resized', () => {
+    // Octaves are cycles across the island, not world-unit frequencies,
+    // so scaling radius/peak/roughness together must scale the terrain
+    // exactly — never re-roll it into different, finer-grained ground.
+    const small = { radius: 100, peak: 10, roughness: 2, seed: 3 };
+    const big = { radius: 200, peak: 20, roughness: 4, seed: 3 };
+    for (const t of [0, 0.3, 0.62, 0.95]) {
+      const a = groundHeight(small.radius * t, small.radius * t * 0.4, small);
+      const b = groundHeight(big.radius * t, big.radius * t * 0.4, big);
+      expect(b).toBeCloseTo(a * 2, 9);
+    }
+  });
+
+  it('is big enough that a minute of walking stays inland', () => {
+    // Guards the "huge tiny world" pillar: the ant walks ~6 units/s, so
+    // a minute covers ~360 units and must not reach open water.
+    const reach = 6 * 60;
+    expect(reach).toBeLessThan(DEFAULT_ISLAND.radius);
+    expect(groundHeight(0, reach)).toBeGreaterThan(0);
+  });
+
   it('maps heights to the expected bands', () => {
     const peak = DEFAULT_ISLAND.peak;
     expect(bandFor(-1)).toBe('seabed');

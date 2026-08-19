@@ -27,9 +27,10 @@ export class PlayerAnt {
     this.root.add(this.body);
   }
 
-  placeAt(x: number, z: number): void {
+  placeAt(x: number, z: number, heading = 0): void {
+    this.heading = heading;
     this.root.position.set(x, groundHeight(x, z), z);
-    this.root.rotation.set(0, this.heading, 0);
+    this.root.rotation.set(0, heading, 0);
   }
 
   /**
@@ -40,7 +41,10 @@ export class PlayerAnt {
   update(move: MoveInput, cameraYaw: number, dt: number): void {
     const strength = Math.min(1, Math.hypot(move.x, move.y));
     if (strength > 0.05) {
-      const targetHeading = cameraYaw + Math.atan2(move.x, move.y) + Math.PI;
+      // move.x is negated because headings here run clockwise when read
+      // as atan2(sin, cos) over (x, z), while the viewer's right in a
+      // camera looking along +Z is world -X. See tests/playerAnt.test.ts.
+      const targetHeading = cameraYaw + Math.atan2(-move.x, move.y) + Math.PI;
       let diff = targetHeading - this.heading;
       diff = Math.atan2(Math.sin(diff), Math.cos(diff));
       const maxTurn = this.turnRate * dt;

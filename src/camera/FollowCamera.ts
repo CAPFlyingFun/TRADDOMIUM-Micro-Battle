@@ -16,7 +16,9 @@ export class FollowCamera {
     private readonly back = 7,
     private readonly up = 3.4,
   ) {
-    this.camera = new THREE.PerspectiveCamera(58, aspect, 0.1, 400);
+    // Far enough to reach the open water; near kept off the floor so
+    // the wide range does not cost depth precision on the terrain.
+    this.camera = new THREE.PerspectiveCamera(58, aspect, 0.3, 4000);
   }
 
   snapTo(target: THREE.Object3D): void {
