@@ -1,7 +1,12 @@
 name: Build & Deploy
 
 # Every push to main is gated on typecheck + tests, then published to
-# GitHub Pages so Joshua can play the current build on a device.
+# GitHub Pages so the current build is playable on a device.
+#
+# ONE-TIME SETUP (repo owner, once per repo):
+#   Settings → Pages → Build and deployment → Source: "GitHub Actions"
+# The workflow token is not allowed to enable Pages itself, so the
+# deploy job fails until that switch is flipped.
 on:
   push:
     branches: [main]
@@ -14,9 +19,8 @@ permissions:
   pages: write
   id-token: write
 
-# One deploy at a time; a newer push supersedes an in-flight one.
 concurrency:
-  group: pages
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -38,12 +42,9 @@ jobs:
       - run: npm test
       - run: npm run build
 
-      - name: Configure Pages
-        if: github.event_name != 'pull_request'
-        uses: actions/configure-pages@v5
-        with:
-          enablement: true
-
+      # No configure-pages step: the Vite base is relative ('./'), so the
+      # build already works from the Pages project subpath and needs no
+      # injected base_path.
       - name: Upload site artifact
         if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@v3
