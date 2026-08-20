@@ -19,8 +19,17 @@ control), ARK (living ecosystem, hard stat tradeoffs), Smalland
 
 ## Design source of truth
 
-The Trello board is the living design document:
-https://trello.com/b/DoBMcBRT/traddomium-micro-battle
+`MASTERROADMAP.md` in this repo is the long-form product vision — the
+acts, the phases, and what the game is eventually for. It is
+deliberately broader than the current build: a feature appearing there
+does not mean it should be implemented now.
+
+The Trello board is the shorter execution layer — what is being built
+right now, acceptance criteria, bugs, ownership:
+https://trello.com/b/DoBMcBRT/traddomium-micro-battle-typescript
+
+Order when they disagree: Joshua's newest instruction, then the
+roadmap, then Trello, then this file and `CLAUDE.md`.
 
 This is a CLEAN REBUILD. Requirements, research, art and lessons from
 the earlier implementations are reused; code is written fresh, one

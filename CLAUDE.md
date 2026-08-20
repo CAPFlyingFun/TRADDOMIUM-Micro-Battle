@@ -5,19 +5,32 @@ RPG built with three.js + TypeScript + Vite, tested primarily on mobile
 landscape. The player controls ONE ant inside a persistent colony/world;
 individual ants can die, the colony continues.
 
-## Trello is the living source of truth
+## Where the truth lives, in order
 
-**Board:** https://trello.com/b/DoBMcBRT/traddomium-micro-battle
+When sources disagree, this is the order:
 
-Trello is authoritative for the current roadmap, gameplay design, UI
-direction, bugs, acceptance criteria and work ownership. Scan the board
-BEFORE starting substantial work and AGAIN before finishing. This file
-is a stable operating guide, not a design bible — when it conflicts with
-a newer Trello card or Joshua's explicit instruction, flag the conflict
-and follow the newer source.
+1. **Joshua's newest explicit instruction.**
+2. **`MASTERROADMAP.md`** in this repo — the long-form product vision.
+   A feature appearing there does NOT mean build it now.
+3. **Trello** — current execution: what is being built, acceptance
+   criteria, bugs, ownership. Cards stay short because the roadmap
+   holds the long form.
+4. **This file and the README** — stable engineering guidance.
+5. Older experiments and prototypes, as references only.
 
-Key reference cards live in "Planning — 2026 Direct-Control Rebuild":
-"The pillars" and "The spine".
+**Board:** https://trello.com/b/DoBMcBRT/traddomium-micro-battle-typescript
+
+There is a SEPARATE Godot board for the Godot prototype. This repo is
+the TypeScript one; do not take work from the Godot board.
+
+Scan Trello BEFORE starting substantial work and AGAIN before finishing.
+When this file conflicts with a newer card or instruction, flag the
+conflict and follow the newer source.
+
+Some Trello lists still hold cards from the Trail of Ants / voxel build
+— tunnels, SoilQuery, corner climbing. Those describe a codebase this
+repo does not contain. Check that a card's subject actually exists in
+`src/` before starting it.
 
 ## Clean-rebuild rule
 
@@ -36,8 +49,13 @@ order, with an integration gate before the next layer. Labs register in
 Screen space near the thumbs is the scarcest resource in this game, and
 the action controls (grab, dig, bite) have first claim on it. Before
 adding a control, check whether a gesture can carry it instead: the
-camera is a drag rather than a button for exactly this reason, and gait
-rides the stick's own deflection rather than costing three slots.
+camera is a drag rather than a button for exactly this reason, and Auto
+is a drag past the stick's rim rather than a permanent button.
+
+Movement itself is settled (see README "Controls"): the stick is
+camera-relative, pace is a CEILING rather than propulsion, and steering
+is looking. An earlier note here said gait rides the stick's own
+deflection — that was the pre-v0.4 design and is no longer true.
 
 ## The feeling bar
 
