@@ -20,6 +20,7 @@ const TRACK_WIDTH = 50;
 const NOTCH_HEIGHT = 30;
 
 export class Throttle {
+  private readonly column: HTMLDivElement;
   private readonly track: HTMLDivElement;
   private readonly fill: HTMLDivElement;
   private readonly readout: HTMLDivElement;
@@ -34,6 +35,7 @@ export class Throttle {
   private shownSpent = false;
 
   constructor(host: HTMLElement) {
+    this.column = document.createElement('div');
     this.track = document.createElement('div');
     this.fill = document.createElement('div');
     this.readout = document.createElement('div');
@@ -74,7 +76,8 @@ export class Throttle {
     }
 
     this.styleReadout();
-    host.append(this.track, this.readout);
+    this.column.append(this.track, this.readout);
+    host.appendChild(this.column);
 
     // W and S work the telegraph, A and D steer — the arrangement the
     // warship games settled on, and the reason this control exists.
@@ -151,17 +154,32 @@ export class Throttle {
 
   dispose(): void {
     for (const off of this.detach) off();
-    this.track.remove();
-    this.readout.remove();
+    this.column.remove();
   }
 
   private styleTrack(): void {
-    Object.assign(this.track.style, {
+    // Anchored top AND bottom rather than given a height. A fixed
+    // 7-notch ladder overflows the top of a short screen — a browser
+    // toolbar is enough to cause it — and the notches you lose are the
+    // fast ones. Bounded this way it always fits, shrinking instead.
+    Object.assign(this.column.style, {
       position: 'fixed',
       left: 'calc(10px + env(safe-area-inset-left))',
-      bottom: 'calc(196px + env(safe-area-inset-bottom))',
+      top: 'calc(10px + env(safe-area-inset-top))',
+      bottom: 'calc(166px + env(safe-area-inset-bottom))',
       width: `${TRACK_WIDTH}px`,
-      height: `${NOTCH_HEIGHT * NOTCHES.length}px`,
+      display: 'flex',
+      flexDirection: 'column',
+      justifyContent: 'flex-end',
+      gap: '4px',
+      zIndex: '12',
+    } as Partial<CSSStyleDeclaration>);
+
+    Object.assign(this.track.style, {
+      position: 'relative',
+      flex: '1 1 auto',
+      minHeight: '0',
+      maxHeight: `${NOTCH_HEIGHT * NOTCHES.length}px`,
       display: 'flex',
       flexDirection: 'column',
       borderRadius: '14px',
@@ -170,7 +188,6 @@ export class Throttle {
       overflow: 'hidden',
       touchAction: 'none',
       userSelect: 'none',
-      zIndex: '12',
     } as Partial<CSSStyleDeclaration>);
 
     Object.assign(this.fill.style, {
@@ -190,7 +207,8 @@ export class Throttle {
       appearance: 'none',
       border: '0',
       background: 'transparent',
-      flex: '1',
+      flex: '1 1 0',
+      minHeight: '0',
       padding: '0',
       display: 'flex',
       alignItems: 'center',
@@ -219,10 +237,7 @@ export class Throttle {
 
   private styleReadout(): void {
     Object.assign(this.readout.style, {
-      position: 'fixed',
-      left: 'calc(10px + env(safe-area-inset-left))',
-      bottom: 'calc(170px + env(safe-area-inset-bottom))',
-      width: `${TRACK_WIDTH}px`,
+      flex: '0 0 auto',
       textAlign: 'center',
       font: '600 11px/1 "JetBrains Mono", ui-monospace, monospace',
       color: 'rgba(255, 226, 160, .72)',

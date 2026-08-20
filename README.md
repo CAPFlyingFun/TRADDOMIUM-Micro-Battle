@@ -71,6 +71,24 @@ checkout: `python3 scripts/bakeKauai.py <BE-repo>/artifacts/beyond-extinction`.
 Its band textures (`public/kauai-tex/` in Thronemound) are not used yet
 — the terrain is vertex-coloured by elevation for now.
 
+## Add it to your home screen
+
+The game ships a web manifest and icons, so adding it to a phone's home
+screen runs it with **no browser chrome at all** — which is worth doing,
+because a browser's URL bar can overlay the top of the screen and take
+the fastest notches of the throttle with it.
+
+- iOS: Share → Add to Home Screen.
+- Android: the browser's menu → Install app / Add to Home screen.
+
+There is deliberately **no service worker**, so it is not an offline PWA.
+While the game is changing daily, a cache that serves yesterday's build
+is worse than a fetch. `npm run icons` regenerates the icon set.
+
+The layout survives a browser bar either way: it sizes itself from
+`visualViewport` rather than trusting the layout viewport, and the
+throttle is bounded top and bottom so it shrinks instead of overflowing.
+
 ## Landscape only
 
 On a touch device the game asks you to turn the phone sideways before it

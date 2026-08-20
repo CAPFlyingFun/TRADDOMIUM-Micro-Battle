@@ -145,19 +145,26 @@ try {
 
   await page.setViewportSize({ width: 430, height: 932 });
   await fitted('portrait');
-  const gated = await page.evaluate(
+  // Poll rather than sample once: the gate deliberately waits for the
+  // viewport to hold still before it moves, and a frame here is worth
+  // hundreds of milliseconds under a software renderer.
+  await page.waitForFunction(
     () => [...document.querySelectorAll('[role="alertdialog"]')]
       .some((el) => getComputedStyle(el).display !== 'none'),
-  );
-  if (!gated) throw new Error('portrait did not ask the player to rotate');
+    { timeout: 10000 },
+  ).catch(() => {
+    throw new Error('portrait did not ask the player to rotate');
+  });
 
   await page.setViewportSize({ width: 932, height: 430 });
   await fitted('back in landscape');
-  const ungated = await page.evaluate(
+  await page.waitForFunction(
     () => [...document.querySelectorAll('[role="alertdialog"]')]
       .every((el) => getComputedStyle(el).display === 'none'),
-  );
-  if (!ungated) throw new Error('the rotate prompt stayed up in landscape');
+    { timeout: 10000 },
+  ).catch(() => {
+    throw new Error('the rotate prompt stayed up in landscape');
+  });
 
   // The case the observer exists for: the canvas host changes size
   // WITHOUT a trustworthy window resize event. On a phone that happens
@@ -190,6 +197,39 @@ try {
     app.style.bottom = '';
   });
   await page.waitForTimeout(500);
+
+  // Nothing may hang off the top of the screen. A browser toolbar eats
+  // enough height to push a fixed-height control off, and the notches
+  // lost are the fast ones — which is what a third-party iOS browser
+  // did to the throttle.
+  const onScreen = async (label) => {
+    await page.waitForTimeout(500);
+    const strays = await page.evaluate(() => {
+      const out = [];
+      for (const el of document.querySelectorAll('button, [role="alertdialog"]')) {
+        const box = el.getBoundingClientRect();
+        if (box.width === 0 || box.height === 0) continue;
+        if (box.top < -1 || box.bottom > innerHeight + 1
+          || box.left < -1 || box.right > innerWidth + 1) {
+          out.push(`${el.getAttribute('aria-label') ?? el.tagName} `
+            + `at ${Math.round(box.top)}..${Math.round(box.bottom)}`);
+        }
+      }
+      return out;
+    });
+    if (strays.length) {
+      throw new Error(`controls off screen in ${label}:\n  ${strays.join('\n  ')}`);
+    }
+  };
+  await onScreen('landscape');
+
+  // A short landscape window, the shape a browser toolbar leaves.
+  await page.setViewportSize({ width: 932, height: 330 });
+  await onScreen('a toolbar-height landscape window');
+  await page.setViewportSize({ width: 844, height: 280 });
+  await onScreen('a very short window');
+  await page.setViewportSize({ width: 932, height: 430 });
+  await page.waitForTimeout(400);
 
   await page.screenshot({ path: 'probe-island.png' });
   if (errors.length) throw new Error(`page errors:\n${errors.join('\n')}`);

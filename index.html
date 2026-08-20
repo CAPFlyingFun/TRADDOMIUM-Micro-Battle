@@ -6,7 +6,17 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
     />
+    <!-- Added to the home screen, this runs with no browser chrome at
+         all, which is the only way to get the whole HUD on an iPhone.
+         iOS reads its own apple- prefixed tags rather than the
+         manifest, so both sets are here. -->
     <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="TRADDOMIUM" />
+    <meta name="theme-color" content="#0E0B05" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
     <title>TRADDOMIUM: Micro Battle!</title>
     <link
       rel="icon"
@@ -35,7 +45,15 @@
       }
       #app {
         position: fixed;
-        inset: 0;
+        top: 0;
+        left: 0;
+        right: 0;
+        /* Not `inset: 0`. A browser toolbar can overlay the layout
+           viewport instead of shrinking it, and the HUD then runs on
+           underneath it. --app-height is the visualViewport height, set
+           from viewportFit.ts; dvh covers anything without it. */
+        height: 100dvh;
+        height: var(--app-height, 100dvh);
       }
       #app canvas {
         display: block;

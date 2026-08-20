@@ -10,7 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -b",
-    "probe:island": "node scripts/probe-island.mjs"
+    "probe:island": "node scripts/probe-island.mjs",
+    "icons": "node scripts/make-icons.mjs"
   },
   "dependencies": {
     "three": "^0.180.0"

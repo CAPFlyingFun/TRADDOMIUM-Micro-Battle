@@ -1,0 +1,17 @@
+{
+  "name": "TRADDOMIUM: Micro Battle!",
+  "short_name": "TRADDOMIUM",
+  "description": "A direct-control ant survival RPG in a huge tiny world.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
+  "orientation": "landscape",
+  "background_color": "#0E0B05",
+  "theme_color": "#0E0B05",
+  "icons": [
+    { "src": "./icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "./icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "./icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

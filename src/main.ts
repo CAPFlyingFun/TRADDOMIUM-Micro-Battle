@@ -1,5 +1,6 @@
 import { IslandScene } from './scenes/IslandScene';
 import { RotateGate } from './ui/rotateGate';
+import { fitViewport } from './ui/viewportFit';
 import { useGrid } from './world/heightfield';
 import { loadGrid, type HeightGrid } from './world/kauai';
 
@@ -13,6 +14,9 @@ import { loadGrid, type HeightGrid } from './world/kauai';
  * The island is 2 MB of baked elevation, so booting waits on a fetch
  * before any scene can ask how high the ground is.
  */
+
+// Before anything measures itself.
+fitViewport();
 
 const host = document.getElementById('app');
 if (!host) throw new Error('missing #app element');
