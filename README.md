@@ -151,11 +151,14 @@ you steer by swinging the view, and because her body ends up aligned
 with it, a sideways push still reads as a proper sidestep on screen:
 she crabs, she does not pivot.
 
-At **rest** she is left alone. You can walk the camera most of the way
-round her and she just watches you over her shoulder; past 60° she
-turns, and only back to the *edge* of that arc, because chasing the
-camera onto her nose would mean she could never be looked at from the
-side at all.
+At **rest** she is left alone. You can look well round her and she just
+watches you over her shoulder; past 45° she turns, and only back to the
+*edge* of that arc, because chasing the camera onto her nose would mean
+she could never be looked at from the side at all.
+
+Godot uses 60° at an ease of 4, which is tuned for a mouse. A thumb-drag
+covers ground far more slowly, so waiting out 60° of it read as her
+ignoring you — 45° at an ease of 7 is the device answer.
 
 Two earlier schemes were tried and rejected on the device: slow-to-turn,
 where nothing steered her above a crawl, and lean-into-the-turn, where a

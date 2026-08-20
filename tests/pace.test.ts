@@ -54,10 +54,12 @@ describe('the feel constants', () => {
     expect(TURN_RATE).toBeGreaterThan(REST_EASE * 2);
   });
 
-  it('leaves a generous deadzone to be looked at within', () => {
-    // Small enough and she can never be seen from the side at all.
-    expect(REST_DEADZONE).toBeGreaterThan(Math.PI / 4);
-    expect(REST_DEADZONE).toBeLessThan(Math.PI);
+  it('leaves a real deadzone to be looked at within', () => {
+    // Small enough and she can never be seen from the side at all;
+    // large enough and a thumb-drag never reaches it. 45 degrees is
+    // exactly PI/4, so this bound includes its endpoint on purpose.
+    expect(REST_DEADZONE).toBeGreaterThanOrEqual(Math.PI / 4);
+    expect(REST_DEADZONE).toBeLessThan(Math.PI / 2);
   });
 
   it('changes her mind more slowly than it changes her speed', () => {

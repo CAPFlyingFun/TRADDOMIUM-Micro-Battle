@@ -102,15 +102,23 @@ export const TURN_RATE = 18;
  * How far the camera may swing off her nose, at rest, before she turns
  * to meet it.
  *
- * Generous, and she only comes back to the EDGE of it rather than onto
- * her nose — chasing it to zero would mean she could never be looked at
- * from the side at all. Standing still you can walk the camera most of
- * the way round her and she just watches you over her shoulder.
+ * She only comes back to the EDGE of it rather than onto her nose —
+ * chasing it to zero would mean she could never be looked at from the
+ * side at all. Standing still you can look this far round her and she
+ * just watches you over her shoulder.
+ *
+ * The Godot build uses 60, tuned for a mouse. A thumb-drag covers
+ * ground far more slowly, so waiting out 60 degrees of it felt like she
+ * was ignoring you; 45 is the device answer.
  */
-export const REST_DEADZONE = (60 * Math.PI) / 180;
+export const REST_DEADZONE = (45 * Math.PI) / 180;
 
-/** How briskly she closes that gap once past it. */
-export const REST_EASE = 4;
+/**
+ * How briskly she closes that gap once past it. Faster than Godot's 4,
+ * for the same reason: the whole gesture has to pay for itself sooner
+ * when the input driving it is a thumb rather than a mouse.
+ */
+export const REST_EASE = 7;
 
 /**
  * How fast her speed closes on what the stick is asking for. An
