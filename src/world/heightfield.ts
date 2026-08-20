@@ -1,46 +1,46 @@
 /**
- * The island heightfield — a pure, deterministic height function.
+ * THE GROUND — one answer to "how high is it here", for everyone.
  *
- * TRADDOMIUM's first world is a small island: a soft dome that falls away
- * into water on every side, roughened by a couple of octaves of value
- * noise so the surface reads as terrain rather than a bump. Everything
- * that needs the ground (the mesh builder, the walker, tests) samples
- * this one function, so the visual island and the walkable island can
- * never disagree.
+ * The island mesh, the walking ant, the camera's floor clamp and the
+ * tests all come through this module, so the island you see and the
+ * island you walk can never drift apart.
  *
- * All heights are in world units where the waterline sits at 0.
+ * Underneath is real Kauai (see `kauai.ts`). On top of it sits a little
+ * procedural relief, because the baked grid samples every 5.47 units
+ * and interpolates dead smooth between them, which at ant scale reads
+ * as polished stone. That relief is deliberately kept at wavelengths
+ * the terrain mesh can actually draw — put finer bumps in the height
+ * and the ant walks a surface the mesh never shows, so she floats.
+ *
+ * Heights are world units with the waterline at 0.
  */
+import {
+  heightAt, SPAN, STEP, type HeightGrid,
+} from './kauai';
 
-export interface IslandParams {
-  /** Distance from the centre at which the land dips under the water. */
-  radius: number;
-  /** Height of the smooth dome at the island's centre. */
-  peak: number;
-  /** Amplitude of the noise roughening the dome. */
-  roughness: number;
-  /** Seed for the noise field; same seed, same island. */
-  seed: number;
+/** Wavelength of the added relief, in world units. */
+const RELIEF_WAVELENGTH = 64;
+
+/** How tall that relief gets, in world units. */
+const RELIEF_HEIGHT = 1.1;
+
+/** Wavelength of the shading mottle, in world units. */
+const DETAIL_WAVELENGTH = 19;
+
+let grid: HeightGrid | null = null;
+
+/** Hand the module the loaded island. Everything below stays flat until then. */
+export function useGrid(loaded: HeightGrid): void {
+  grid = loaded;
 }
 
-/**
- * One world unit is roughly a centimetre — the player ant is about 1.4
- * units nose to gaster. So this island runs ~10 m across with hills the
- * better part of a metre high: minutes of walking to cross, not
- * seconds, which is the "huge tiny world" the design asks for.
- *
- * Growing it much beyond this wants a streaming/LOD pass, because the
- * terrain is still drawn as one flat grid (see IslandScene).
- */
-export const DEFAULT_ISLAND: IslandParams = {
-  radius: 500,
-  peak: 90,
-  roughness: 25,
-  seed: 7,
-};
+export function hasGrid(): boolean {
+  return grid !== null;
+}
 
-/** Integer-lattice hash → [0, 1). Deterministic across platforms. */
-function latticeHash(ix: number, iy: number, seed: number): number {
-  let h = (ix * 374761393 + iy * 668265263 + seed * 144665461) | 0;
+/** Integer-lattice hash to [0, 1). Deterministic across platforms. */
+function latticeHash(ix: number, iy: number, salt: number): number {
+  let h = (ix * 374761393 + iy * 668265263 + salt * 144665461) | 0;
   h = Math.imul(h ^ (h >>> 13), 1274126177);
   h ^= h >>> 16;
   return (h >>> 0) / 4294967296;
@@ -50,96 +50,73 @@ function smooth(t: number): number {
   return t * t * (3 - 2 * t);
 }
 
-/** One octave of value noise: bilinear blend of lattice hashes. */
-function valueNoise(x: number, y: number, seed: number): number {
+/** Value noise in [0, 1): bilinear blend of lattice hashes. */
+function valueNoise(x: number, y: number, salt: number): number {
   const ix = Math.floor(x);
   const iy = Math.floor(y);
   const fx = smooth(x - ix);
   const fy = smooth(y - iy);
-  const a = latticeHash(ix, iy, seed);
-  const b = latticeHash(ix + 1, iy, seed);
-  const c = latticeHash(ix, iy + 1, seed);
-  const d = latticeHash(ix + 1, iy + 1, seed);
+  const a = latticeHash(ix, iy, salt);
+  const b = latticeHash(ix + 1, iy, salt);
+  const c = latticeHash(ix, iy + 1, salt);
+  const d = latticeHash(ix + 1, iy + 1, salt);
   const top = a + (b - a) * fx;
   const bottom = c + (d - c) * fx;
   return top + (bottom - top) * fy;
 }
 
 /**
- * Octaves, expressed as cycles ACROSS THE ISLAND rather than in world
- * units, so the landform keeps its proportions at any radius. Resizing
- * the island can therefore never turn the hills into gravel.
- *
- * Frequency f means a wavelength of radius/f, so the finest octave here
- * still spans tens of world units — comfortably wider than a terrain
- * mesh quad, which keeps the drawn surface close to the true one.
+ * Ground height at (x, z): real Kauai plus a touch of relief, which
+ * fades out below the waterline so it cannot pimple the sea.
  */
-const OCTAVES = [
-  { freq: 2.3, amp: 1 }, // broad landforms: a couple of hills and a valley
-  { freq: 5.9, amp: 0.42 }, // ridges and shoulders
-  { freq: 14.6, amp: 0.16 }, // local relief underfoot
-];
-const AMP_TOTAL = OCTAVES.reduce((sum, o) => sum + o.amp, 0);
-
-/** Summed octaves centred on 0, in [-1, 1]. */
-function terrainNoise(x: number, y: number, params: IslandParams): number {
-  let sum = 0;
-  for (let i = 0; i < OCTAVES.length; i++) {
-    const { freq, amp } = OCTAVES[i];
-    const s = freq / params.radius;
-    sum += (valueNoise(x * s, y * s, params.seed + i) * 2 - 1) * amp;
-  }
-  return sum / AMP_TOTAL;
+export function groundHeight(x: number, z: number): number {
+  if (!grid) return 0;
+  const base = heightAt(grid, x, z);
+  if (base <= 0) return base;
+  const s = 1 / RELIEF_WAVELENGTH;
+  const relief = (valueNoise(x * s, z * s, 17) * 2 - 1) * RELIEF_HEIGHT;
+  // Ease the relief in over the first metre of land so the beach still
+  // meets the water cleanly.
+  const shore = Math.min(1, base / 10);
+  return base + relief * shore;
 }
 
 /**
- * Ground height at (x, z). Positive is dry land, negative is seabed.
- * Beyond ~1.4x the radius the seabed keeps falling so the horizon
- * never shows a shelf poking out of the water.
+ * Fine surface variation in [-1, 1] for SHADING ONLY. The walker never
+ * reads this, so tinting the ground can never move where she stands.
  */
-export function groundHeight(
-  x: number,
-  z: number,
-  params: IslandParams = DEFAULT_ISLAND,
-): number {
-  const d = Math.hypot(x, z) / params.radius;
-  // Dome: peak at the centre, exactly 0 at d = 1, negative beyond.
-  const dome = params.peak * (1 - d * d);
-  // Noise fades out over the last stretch before the rim, so it cannot
-  // lift the coastline back out of the water and scatter the island
-  // into an archipelago. Confining the fade to that band matters: taper
-  // it across the whole radius and the entire outer half of the island
-  // flattens into bare dome, which is a long walk over nothing.
-  const rimFade = Math.min(1, Math.max(0, (1 - d) / 0.18));
-  const noise = terrainNoise(x, z, params) * params.roughness * rimFade;
-  return dome + noise;
-}
-
-/**
- * Fine surface variation in [-1, 1], for SHADING ONLY — the walker must
- * not read this, so tinting the ground can never move where she stands.
- */
-export function groundDetail(
-  x: number,
-  z: number,
-  params: IslandParams = DEFAULT_ISLAND,
-): number {
-  const s = 30 / params.radius;
-  return valueNoise(x * s, z * s, params.seed + 91) * 2 - 1;
+export function groundDetail(x: number, z: number): number {
+  const s = 1 / DETAIL_WAVELENGTH;
+  return valueNoise(x * s, z * s, 91) * 2 - 1;
 }
 
 /** Elevation bands the island mesh paints with. */
-export type Band = 'seabed' | 'sand' | 'grass' | 'forest' | 'rock';
+export type Band = 'seabed' | 'reef' | 'sand' | 'lowland' | 'jungle' | 'cliff' | 'peak';
 
 /**
- * Which band a given height belongs to. Thresholds are fractions of the
- * island's peak so re-tuning the peak keeps the bands proportioned.
+ * Bands are keyed to REAL Kauai elevations, converted through the
+ * 1:1000 scale, so the island wears the biomes the actual place does.
+ * One real metre is a tenth of a world unit.
  */
-export function bandFor(height: number, params: IslandParams = DEFAULT_ISLAND): Band {
-  if (height <= 0) return 'seabed';
-  const t = height / params.peak;
-  if (t < 0.1) return 'sand';
-  if (t < 0.45) return 'grass';
-  if (t < 0.8) return 'forest';
-  return 'rock';
+const M = 0.1;
+const BAND_STEPS: Array<{ upTo: number; band: Band }> = [
+  { upTo: -8 * M, band: 'seabed' },
+  { upTo: 0, band: 'reef' },
+  { upTo: 12 * M, band: 'sand' },
+  { upTo: 220 * M, band: 'lowland' },
+  { upTo: 700 * M, band: 'jungle' },
+  { upTo: 1150 * M, band: 'cliff' },
+];
+
+export function bandFor(height: number): Band {
+  for (const step of BAND_STEPS) {
+    if (height <= step.upTo) return step.band;
+  }
+  return 'peak';
 }
+
+/** The island's full extent in world units, for scene setup. */
+export const ISLAND_SPAN = SPAN;
+
+/** Spacing of the underlying elevation samples, in world units. */
+export const SAMPLE_STEP = STEP;

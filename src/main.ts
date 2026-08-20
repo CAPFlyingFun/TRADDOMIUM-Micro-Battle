@@ -1,4 +1,6 @@
 import { IslandScene } from './scenes/IslandScene';
+import { useGrid } from './world/heightfield';
+import { loadGrid, type HeightGrid } from './world/kauai';
 
 /**
  * Boot — scene-by-scene rebuild entry point.
@@ -6,14 +8,42 @@ import { IslandScene } from './scenes/IslandScene';
  * Every approved system gets its own development scene reachable via
  * `?scene=`; the island lab is the first and the default. New labs
  * register here as their rebuild steps land.
+ *
+ * The island is 2 MB of baked elevation, so booting waits on a fetch
+ * before any scene can ask how high the ground is.
  */
-const scenes: Record<string, (host: HTMLElement) => unknown> = {
-  island: (host) => new IslandScene(host),
-};
 
 const host = document.getElementById('app');
 if (!host) throw new Error('missing #app element');
 
-const requested = new URLSearchParams(location.search).get('scene') ?? 'island';
-const build = scenes[requested] ?? scenes['island'];
-build(host);
+const notice = document.createElement('div');
+Object.assign(notice.style, {
+  position: 'fixed',
+  inset: '0',
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  color: 'rgba(255, 226, 160, 0.92)',
+  font: '600 17px/1.5 system-ui, sans-serif',
+  textAlign: 'center',
+  whiteSpace: 'pre-wrap',
+  padding: '24px',
+  zIndex: '20',
+} satisfies Partial<CSSStyleDeclaration>);
+notice.textContent = 'Surveying the island…';
+host.appendChild(notice);
+
+const scenes: Record<string, (h: HTMLElement, grid: HeightGrid) => unknown> = {
+  island: (h, grid) => new IslandScene(h, grid),
+};
+
+try {
+  const grid = await loadGrid();
+  useGrid(grid);
+  const requested = new URLSearchParams(location.search).get('scene') ?? 'island';
+  (scenes[requested] ?? scenes['island'])(host, grid);
+  notice.remove();
+} catch (error) {
+  notice.textContent = `The island failed to load.\n${String(error)}`;
+  throw error;
+}

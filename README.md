@@ -50,10 +50,39 @@ npm run build        # production build (dist/)
 npm run probe:island # headless boot + screenshot (needs a preview server)
 ```
 
+## The island
+
+The island is real Kauai, not procedural terrain. Beyond Extinction
+ships it as Terrarium height tiles baked from USGS elevation data;
+`scripts/bakeKauai.py` folds those into `public/kauai-1025.bin`, a
+1025-square grid of int16 decimetres.
+
+It runs at 1:1000, with one world unit to the centimetre — so 56 km of
+Kauai becomes 56 m of world, and the 1592 m summit becomes 1.59 m. To
+an ant that is a continent four thousand body-lengths across.
+
+`src/world/heightfield.ts` is the single ground truth: the terrain
+mesh, the walking ant, the camera's floor clamp and the tests all ask
+it how high the ground is, so what you see and what you walk can never
+disagree.
+
+To re-bake from source, point the script at a Beyond Extinction
+checkout: `python3 scripts/bakeKauai.py <BE-repo>/artifacts/beyond-extinction`.
+Its band textures (`public/kauai-tex/` in Thronemound) are not used yet
+— the terrain is vertex-coloured by elevation for now.
+
 ## Controls
+
+Movement:
 
 - Desktop: WASD / arrow keys.
 - Touch: drag on the left half of the screen for the movement stick.
+
+Camera — the "‹ 🎥 ›" pad, bottom right. Drag it sideways to swing the
+view around her, up and down to lift toward top-down or drop in behind
+her. Let go and it eases back to resting: behind the player. On desktop,
+Q / E swing and R / F lift. The resting angle becomes a setting later
+(see the camera-angle card on the board).
 
 ## Deployment
 
