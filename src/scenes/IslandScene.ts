@@ -1,10 +1,12 @@
 import * as THREE from 'three';
 import { PlayerAnt } from '../ant/PlayerAnt';
 import { FollowCamera } from '../camera/FollowCamera';
-import { Throttle } from '../input/Throttle';
+import { PaceSelector } from '../input/PaceSelector';
 import { LookDrag } from '../input/LookDrag';
 import { MoveStick } from '../input/MoveStick';
-import { NOTCH_SPEED, shift, slower, type Notch } from '../ant/gait';
+import { AutoRun } from '../input/autoRun';
+import { resolve } from '../ant/locomotion';
+import { fasterPace, PACE_SPEED, slowerPace, type Pace } from '../ant/pace';
 import { Stamina } from '../ant/stamina';
 import {
   bandFor, groundDetail, groundHeight, ISLAND_SPAN, type Band,
@@ -67,14 +69,21 @@ export class IslandScene {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly follow: FollowCamera;
   private readonly stick: MoveStick;
-  private readonly throttle: Throttle;
+  private readonly paceUI: PaceSelector;
   private readonly look: LookDrag;
   private readonly ant = new PlayerAnt();
   private readonly clock = new THREE.Clock();
   private readonly sections: Section[] = [];
-  /** Where the telegraph is set. Persists until moved, like a ship's. */
-  private notch: Notch = 'stop';
+  /**
+   * The CEILING on a full push of the stick — not propulsion. She does
+   * not move because this is set; she moves because a thumb asks.
+   */
+  private pace: Pace = 'walk';
+  /** A sprint asked for and not yet given up. */
+  private sprintOn = false;
+  private readonly auto = new AutoRun();
   private readonly stamina = new Stamina();
+  private speed = 0;
   /**
    * Watches the canvas host itself. Orientation changes fire `resize`
    * before the viewport has settled on some phones, so a handler that
@@ -106,7 +115,7 @@ export class IslandScene {
     this.scene.add(this.ant.root);
 
     this.stick = new MoveStick(host);
-    this.throttle = new Throttle(host);
+    this.paceUI = new PaceSelector(host);
     this.look = new LookDrag(host);
     this.follow = new FollowCamera(this.aspect());
     this.follow.snapTo(this.ant.root);
@@ -125,10 +134,14 @@ export class IslandScene {
       cameraAt: () => this.follow.camera.position.toArray(),
       groundUnderfoot: () =>
         groundHeight(this.ant.root.position.x, this.ant.root.position.z),
-      notch: () => this.notch,
+      pace: () => this.pace,
+      setPace: (to: Pace) => { this.pace = to; },
       stamina: () => this.stamina.fraction,
-      setNotch: (to: Notch) => { this.notch = to; },
-      shiftNotch: (by: number) => { this.notch = shift(this.notch, by); },
+      speed: () => this.speed,
+      auto: () => this.auto.state,
+      sprinting: () => this.sprintOn,
+      setSprint: (on: boolean) => { this.sprintOn = on; },
+      bearing: () => this.ant.bearing,
     };
   }
 
@@ -139,7 +152,7 @@ export class IslandScene {
     window.removeEventListener('resize', this.onResize);
     window.removeEventListener('orientationchange', this.onResize);
     this.stick.dispose();
-    this.throttle.dispose();
+    this.paceUI.dispose();
     this.look.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
@@ -152,32 +165,52 @@ export class IslandScene {
     const look = this.look.read(dt);
     const stick = this.stick.read();
 
-    // The throttle is a setting, not a thing to hold. Tapping a notch
-    // goes straight there, so easing off one step and slamming from a
-    // sprint to astern are the same gesture.
-    const stepped = this.throttle.takeStep();
-    if (stepped !== 0) this.notch = shift(this.notch, stepped);
-    const asked = this.throttle.takeRequest();
-    if (asked !== null && !(asked === 'sprint' && this.stamina.spent)) {
-      this.notch = asked;
+    // The pace is a ceiling, so changing it moves nothing on its own.
+    const asked = this.paceUI.takeRequest();
+    if (asked === 'faster') this.pace = fasterPace(this.pace);
+    else if (asked === 'slower') this.pace = slowerPace(this.pace);
+    else if (asked !== null) this.pace = asked;
+
+    // Auto: armed by dragging past the rim, engaged on release, given
+    // up the moment a clear fore/aft push asks for manual control back.
+    this.auto.update(stick.lane, stick.released, stick);
+    if (this.stick.takeAutoKey()) {
+      if (this.auto.active) this.auto.cancel();
+      else this.auto.engage();
     }
 
-    // Sprinting is the one setting that costs something to hold. Run
-    // out and she drops a notch rather than simply stopping, which
-    // would be a worse surprise than slowing down.
-    const winded = this.stamina.update(
-      this.notch === 'sprint',
-      NOTCH_SPEED[this.notch] === 0,
-      dt,
+    if (this.paceUI.takeSprintTaps() % 2 === 1) this.sprintOn = !this.sprintOn;
+    const wants = (this.sprintOn || this.paceUI.sprintHeld) && !this.stamina.spent;
+
+    const travel = resolve({
+      stick,
+      pace: this.pace,
+      sprinting: wants,
+      auto: this.auto.active,
+    });
+    this.speed = travel.speed;
+
+    // Only charge her for a sprint she is actually getting: calling for
+    // one while stopped or reversing costs nothing.
+    const sprinting = wants && travel.speed > PACE_SPEED[this.pace] + 1e-3;
+    const winded = this.stamina.update(sprinting, travel.speed < 0.01, dt);
+    // Exhaustion drops her to the sustainable pace, never to a halt —
+    // and the next sprint has to be asked for deliberately.
+    if (winded) this.sprintOn = false;
+
+    this.paceUI.show(
+      this.pace, sprinting, this.stamina.fraction, this.stamina.spent,
+      travel.speed, this.auto.active,
     );
-    if (winded) this.notch = slower(this.notch);
-    this.throttle.show(this.notch, this.stamina.fraction, this.stamina.spent);
 
     const cameraYaw = Math.atan2(
       this.follow.camera.position.x - this.ant.root.position.x,
       this.follow.camera.position.z - this.ant.root.position.z,
     );
-    this.ant.update({ move: stick, notch: this.notch }, cameraYaw, dt);
+    // She may turn to catch the camera up at low speed; the view has to
+    // give that angle back, or it rides round with her and never closes.
+    const turned = this.ant.update(travel, cameraYaw, dt);
+    if (turned !== 0) look.yaw = this.look.absorb(turned);
     this.follow.update(this.ant.root, look, dt);
     this.chooseDetail();
     this.renderer.render(this.scene, this.follow.camera);

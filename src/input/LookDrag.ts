@@ -9,6 +9,13 @@
  * Taps are deliberately left alone. When grab, dig and bite arrive they
  * take taps, and a drag that happens to start on one of them still turns
  * the camera, which is how the big mobile action games handle it.
+ *
+ * THE VIEW STAYS WHERE IT IS PUT. It used to ease back behind her the
+ * moment you let go, which quietly made "travel north while watching a
+ * beetle to the west" impossible — the whole point of an independent
+ * camera. What brings the two back into line now is the other end: at
+ * or below a crawl her BODY comes round to the camera, and absorb()
+ * below is how that turn is taken out of this offset.
  */
 
 export interface LookInput {
@@ -96,16 +103,21 @@ export class LookDrag {
       held = true;
     }
 
-    if (!held) {
-      // Ease home at a rate that is stable across frame rates.
-      const settle = Math.exp(-3.5 * dt);
-      this.yaw *= settle;
-      this.pitch *= settle;
-      if (Math.abs(this.yaw) < 1e-4) this.yaw = 0;
-      if (Math.abs(this.pitch) < 1e-4) this.pitch = 0;
-    }
-
     return { yaw: this.yaw, pitch: this.pitch, active: held };
+  }
+
+  /**
+   * Take a body turn out of the view offset.
+   *
+   * The camera rests behind her, so when her body rotates the camera
+   * rotates with it — and an offset measured against her heading would
+   * never close. Absorbing the same angle here keeps the camera still
+   * in the WORLD while she comes round underneath it, which is what
+   * makes the low-speed catch-up converge instead of spinning.
+   */
+  absorb(radians: number): number {
+    this.yaw = Math.max(-YAW_LIMIT, Math.min(YAW_LIMIT, this.yaw + radians));
+    return this.yaw;
   }
 
   dispose(): void {

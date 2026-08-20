@@ -1,7 +1,8 @@
 /**
- * probe:island — boots the island lab headless, walks the ant and
- * swings the camera. Fails on console/page errors, on her standing off
- * the island, or on the camera not moving or not settling back.
+ * probe:island — boots the island lab headless and drives it through
+ * the real controls: the stick, the Auto drag-to-lock gesture, the pace
+ * selector and a camera drag. Fails on console/page errors, on her
+ * standing off the island, or on any of the movement rules breaking.
  *
  * Writes probe-island.png for eyes-on checks. Expects a server on
  * PROBE_URL (default vite preview :4173).
@@ -30,148 +31,271 @@ try {
   await page.waitForFunction(() => window.__island !== undefined, { timeout: 60000 });
   await page.waitForTimeout(1200);
 
-  const start = await page.evaluate(() => ({
-    where: window.__island.where(),
+  const island = (fn) => page.evaluate(fn);
+  const where = () => island(() => window.__island.where());
+  const bearing = () => island(() => window.__island.bearing());
+  const auto = () => island(() => window.__island.auto());
+  const gap = (a, b) => Math.hypot(a[0] - b[0], a[2] - b[2]);
+
+  const start = await island(() => ({
     ground: window.__island.groundUnderfoot(),
     triangles: window.__island.triangles(),
     drawCalls: window.__island.drawCalls(),
   }));
   if (start.ground <= 0) {
-    throw new Error(`she spawned in the sea: ground ${start.ground.toFixed(2)}`);
+    throw new Error(`she spawned in the sea: ${start.ground.toFixed(2)}`);
   }
 
-  // The telegraph. W steps it up; she must then travel with nothing
-  // held, which is the whole point of a setting rather than a stick.
-  await page.keyboard.press('KeyW');
-  await page.keyboard.press('KeyW');
-  await page.waitForTimeout(400);
-  const set = await page.evaluate(() => window.__island.notch());
-  if (set !== 'walk') throw new Error(`two steps up from stop gave ${set}, not walk`);
-
-  const parked = await page.evaluate(() => window.__island.where());
-  await page.waitForTimeout(1400);
-  const after = await page.evaluate(() => ({
-    where: window.__island.where(),
-    ground: window.__island.groundUnderfoot(),
-  }));
-  const moved = Math.hypot(after.where[0] - parked[0], after.where[2] - parked[2]);
-  if (moved < 2) throw new Error(`the telegraph did not carry her: ${moved.toFixed(2)} units`);
-  if (after.ground <= 0) throw new Error('she walked off into the sea');
-
-  // Down through stop into astern, from ahead, without a mode change.
-  await page.evaluate(() => window.__island.setNotch('crawl'));
-  for (let i = 0; i < 2; i++) await page.keyboard.press('KeyS');
-  await page.waitForTimeout(400);
-  const astern = await page.evaluate(() => window.__island.notch());
-  if (astern !== 'backCrawl') {
-    throw new Error(`two steps down from crawl gave ${astern}, not backCrawl`);
-  }
-  const beforeBack = await page.evaluate(() => window.__island.where());
+  // ── The pace is a CEILING ────────────────────────────────────────
+  // Choosing a pace must not move her. That is the whole reason the
+  // telegraph was scrapped, so it is the first thing checked.
+  await island(() => window.__island.setPace('run'));
+  const parked = await where();
   await page.waitForTimeout(900);
-  const backed = await page.evaluate(() => window.__island.where());
-  if (Math.hypot(backed[0] - beforeBack[0], backed[2] - beforeBack[2]) < 0.5) {
-    throw new Error('astern did not move her');
+  if (gap(await where(), parked) > 0.01) {
+    throw new Error('selecting a pace moved her — it is a ceiling, not a throttle');
   }
 
-  // Sprinting must cost stamina and drop her a notch when it runs dry.
-  await page.evaluate(() => window.__island.setNotch('sprint'));
-  await page.waitForTimeout(600);
-  const mid = await page.evaluate(() => window.__island.stamina());
-  if (mid >= 1) throw new Error('sprinting cost no stamina');
-  await page.waitForTimeout(9000);
-  const spentNotch = await page.evaluate(() => window.__island.notch());
-  if (spentNotch === 'sprint') throw new Error('an exhausted sprint never eased off');
+  // ── Manual: she travels while asked, and stops when let go ───────
+  await page.keyboard.down('KeyW');
+  await page.waitForTimeout(1200);
+  const covered = gap(await where(), parked);
+  if (covered < 2) throw new Error(`a held push did not move her: ${covered.toFixed(2)}`);
+  await page.keyboard.up('KeyW');
+  await page.waitForTimeout(150);
+  const released = await where();
+  await page.waitForTimeout(900);
+  if (gap(await where(), released) > 0.2) {
+    throw new Error('she kept going after the stick was released');
+  }
 
-  // And it must come back on its own — a bar that only falls is a trap.
-  await page.evaluate(() => window.__island.setNotch('stop'));
-  const dry = await page.evaluate(() => window.__island.stamina());
+  // Reverse exists, and is slower than going forward.
+  const measure = async (key, seconds) => {
+    const from = await where();
+    await page.keyboard.down(key);
+    await page.waitForTimeout(seconds * 1000);
+    await page.keyboard.up(key);
+    const travelled = gap(await where(), from);
+    await page.waitForTimeout(150);
+    return travelled;
+  };
+  const ahead = await measure('KeyW', 0.8);
+  const astern = await measure('KeyS', 0.8);
+  if (astern < 0.2) throw new Error('she would not back up');
+  if (astern >= ahead) {
+    throw new Error(`reverse was not slower: ${astern.toFixed(1)} against ${ahead.toFixed(1)}`);
+  }
+
+  // Sidestep moves her without turning her.
+  const faced = await bearing();
+  const sideways = await measure('KeyD', 0.8);
+  if (sideways < 0.2) throw new Error('she would not sidestep');
+  if (Math.abs((await bearing()) - faced) > 1e-6) {
+    throw new Error('a sidestep turned her — it has to be a strafe');
+  }
+
+  // ── Auto: drag past the rim, release on the lock ─────────────────
+  const stick = await page.evaluate(() => {
+    const box = document.querySelector('[data-control="stick"]').getBoundingClientRect();
+    return { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+  });
+
+  // Full forward INSIDE the ring must not arm it: that happens constantly.
+  await page.mouse.move(stick.x, stick.y);
+  await page.mouse.down();
+  await page.mouse.move(stick.x, stick.y - 64, { steps: 6 });
+  await page.mouse.up();
+  await page.waitForTimeout(250);
+  if ((await auto()) !== 'off') {
+    throw new Error('a full-forward push engaged Auto on its own');
+  }
+
+  // Reaching the lock only ARMS it — sliding back out is a free
+  // change of mind.
+  await page.mouse.move(stick.x, stick.y);
+  await page.mouse.down();
+  await page.mouse.move(stick.x, stick.y - 135, { steps: 10 });
+  await page.waitForTimeout(200);
+  if ((await auto()) !== 'ready') {
+    throw new Error('the lock zone did not mark Auto ready');
+  }
+  await page.mouse.move(stick.x, stick.y - 80, { steps: 6 });
+  await page.mouse.up();
+  await page.waitForTimeout(250);
+  if ((await auto()) === 'active') {
+    throw new Error('leaving the lock before release still engaged Auto');
+  }
+
+  // The whole gesture: out to the lock, released there.
+  await page.mouse.move(stick.x, stick.y);
+  await page.mouse.down();
+  await page.mouse.move(stick.x, stick.y - 135, { steps: 10 });
+  await page.waitForTimeout(200);
+  await page.mouse.up();
+  await page.waitForTimeout(250);
+  if ((await auto()) !== 'active') {
+    throw new Error('releasing inside the lock did not engage Auto');
+  }
+
+  const before = await where();
+  await page.waitForTimeout(1200);
+  const carried = gap(await where(), before);
+  if (carried < 2) throw new Error(`Auto did not carry her: ${carried.toFixed(2)}`);
+
+  // Sidestepping under Auto must not cancel it. Do it with a REAL
+  // thumb, not the D key: a key gives exactly y = 0, which no cancel
+  // rule however sloppy could ever trip, so it proves nothing. A thumb
+  // aiming sideways lands around x 0.9 / y 0.09, and that is the case
+  // an over-eager cone kills.
+  await page.mouse.move(stick.x, stick.y);
+  await page.mouse.down();
+  await page.mouse.move(stick.x + 58, stick.y - 6, { steps: 6 });
+  await page.waitForTimeout(400);
+  const wobbled = await auto();
+  await page.mouse.up();
+  await page.waitForTimeout(200);
+  if (wobbled !== 'active') throw new Error('a wobbly sidestep cancelled Auto');
+
+  await page.keyboard.down('KeyD');
+  await page.waitForTimeout(400);
+  const stillAuto = await auto();
+  await page.keyboard.up('KeyD');
+  if (stillAuto !== 'active') throw new Error('a sidestep cancelled Auto');
+
+  // A clear forward push takes manual control back.
+  await page.keyboard.down('KeyW');
+  await page.waitForTimeout(300);
+  const handedBack = await auto();
+  await page.keyboard.up('KeyW');
+  if (handedBack !== 'off') throw new Error('a clear forward push did not cancel Auto');
+
+  // Desktop parity: a keyboard cannot drag past a rim, so Auto has a key.
+  await page.keyboard.press('Equal');
+  await page.waitForTimeout(250);
+  if ((await auto()) !== 'active') throw new Error('the Auto key did not engage it');
+  await page.keyboard.press('Equal');
+  await page.waitForTimeout(250);
+  if ((await auto()) !== 'off') throw new Error('the Auto key did not turn it off again');
+
+  // And the pace keys must not be the camera keys: binding both to Q/E
+  // meant a look-around changed her speed, which switched the low-speed
+  // catch-up back on and steered her.
+  await island(() => window.__island.setPace('walk'));
+  await page.keyboard.press('KeyQ');
+  await page.waitForTimeout(200);
+  if ((await island(() => window.__island.pace())) !== 'walk') {
+    throw new Error('a camera key changed the pace');
+  }
+  await page.keyboard.press('Digit3');
+  await page.waitForTimeout(200);
+  if ((await island(() => window.__island.pace())) !== 'run') {
+    throw new Error('the pace keys did not pick a pace');
+  }
+
+  // ── Sprint: costs stamina, and exhaustion does not stop her ──────
+  await island(() => window.__island.setPace('run'));
+  await page.keyboard.down('Shift');
+  await page.keyboard.down('KeyW');
+  await page.waitForTimeout(800);
+  const sprint = await island(() => ({
+    speed: window.__island.speed(),
+    stamina: window.__island.stamina(),
+  }));
+  if (sprint.stamina >= 1) throw new Error('sprinting cost no stamina');
+  if (sprint.speed <= 12.5) {
+    throw new Error(`a sprint was no faster than a run: ${sprint.speed.toFixed(1)}`);
+  }
+  await page.waitForTimeout(8000);
+  const spent = await island(() => window.__island.speed());
+  if (spent > 12.5) throw new Error('an exhausted sprint never eased off');
+  if (spent < 1) throw new Error('exhaustion stopped her — it must fall back to the pace');
+  await page.keyboard.up('Shift');
+  await page.keyboard.up('KeyW');
+
+  // And the bar comes back on its own — a bar that only falls is a trap.
+  const dry = await island(() => window.__island.stamina());
   await page.waitForTimeout(3000);
-  const recovered = await page.evaluate(() => window.__island.stamina());
-  if (recovered <= dry) throw new Error('stamina did not recover at rest');
-  // Stopped still reads a speed. A dash reads as "no reading", and the
-  // gauge always has one — 0.0 is a measurement, not a blank.
-  const readout = () =>
-    page.evaluate(() =>
-      document.querySelector('[data-control="throttle"]').lastElementChild.textContent);
-  await page.evaluate(() => window.__island.setNotch('stop'));
-  await page.waitForTimeout(300);
-  const stopped = await readout();
-  if (!/^0\.0 /.test(stopped)) {
-    throw new Error(`stopped read "${stopped}", not a zero in the moving format`);
-  }
-  await page.evaluate(() => window.__island.setNotch('walk'));
-  await page.waitForTimeout(300);
-  const walking = await readout();
-  if (walking.replace(/^[\d.]+/, '') !== stopped.replace(/^[\d.]+/, '')) {
-    throw new Error(`stopped reads "${stopped}" but moving reads "${walking}"`);
+  if ((await island(() => window.__island.stamina())) <= dry) {
+    throw new Error('stamina did not recover at rest');
   }
 
-
-  // Swing the camera with the keyboard. Compare camera positions
-  // rather than pixels: the WebGL canvas has no preserved drawing
-  // buffer, so toDataURL would read back blank every time and the
-  // check would pass or fail for reasons that have nothing to do with
-  // the camera.
+  // ── Camera: independent, and only leads her when she is slow ─────
+  // Compare camera positions rather than pixels: the WebGL canvas has
+  // no preserved drawing buffer, so toDataURL reads back blank and the
+  // check would pass or fail for reasons unrelated to the camera.
   const orbit = () =>
     page.evaluate(() => {
       const c = window.__island.cameraAt();
       const a = window.__island.where();
       return Math.atan2(c[0] - a[0], c[2] - a[2]);
     });
+  const arc = (a, b) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
+
   const restYaw = await orbit();
   await page.keyboard.down('KeyE');
-  await page.waitForTimeout(900);
-  const swungYaw = await orbit();
+  await page.waitForTimeout(700);
   await page.keyboard.up('KeyE');
-  const swing = Math.abs(Math.atan2(
-    Math.sin(swungYaw - restYaw), Math.cos(swungYaw - restYaw),
-  ));
-  if (swing < 0.2) {
-    throw new Error(`the look pad barely moved the camera: ${swing.toFixed(3)} rad`);
+  if (arc(await orbit(), restYaw) < 0.2) {
+    throw new Error('the look control barely moved the camera');
   }
 
-  // And it must come home on its own once released.
-  await page.waitForTimeout(2200);
-  const homeYaw = await orbit();
-  const strayed = Math.abs(Math.atan2(
-    Math.sin(homeYaw - restYaw), Math.cos(homeYaw - restYaw),
-  ));
-  if (strayed > 0.15) {
-    throw new Error(`the camera did not settle back behind her: ${strayed.toFixed(3)} rad`);
+  // At a walk, looking around must NOT redirect her.
+  await island(() => window.__island.setPace('walk'));
+  await page.keyboard.down('KeyW');
+  await page.waitForTimeout(250);
+  const held = await bearing();
+  await page.keyboard.down('KeyQ');
+  await page.waitForTimeout(900);
+  await page.keyboard.up('KeyQ');
+  await page.waitForTimeout(700);
+  const afterLook = await bearing();
+  await page.keyboard.up('KeyW');
+  if (Math.abs(afterLook - held) > 0.02) {
+    throw new Error(
+      `looking around at a walk steered her: ${(afterLook - held).toFixed(3)} rad`,
+    );
   }
 
-  // Rotation. Turning a phone fires resize before the viewport has
-  // settled, so a handler that trusts the event reads the old size and
-  // strands the canvas at the wrong dimensions — which is what going
-  // landscape -> portrait -> landscape used to do.
+  // Stopped, a sustained look DOES bring her round after a beat.
+  await page.waitForTimeout(500);
+  const parkedBearing = await bearing();
+  await page.keyboard.down('KeyE');
+  await page.waitForTimeout(900);
+  await page.keyboard.up('KeyE');
+  await page.waitForTimeout(1600);
+  const cameRound = arc(await bearing(), parkedBearing);
+  if (cameRound < 0.15) {
+    throw new Error(`stopped, she never came round to the camera: ${cameRound.toFixed(3)} rad`);
+  }
+
+  // ── Rotation ─────────────────────────────────────────────────────
+  // Turning a phone fires resize before the viewport has settled, so a
+  // handler that trusts the event reads the old size and strands the
+  // canvas — which is what landscape -> portrait -> landscape used to do.
   const fitted = async (label) => {
     await page.waitForTimeout(700);
     const box = await page.evaluate(() => {
       const c = document.querySelector('canvas');
       return { cw: c.clientWidth, ch: c.clientHeight, vw: innerWidth, vh: innerHeight };
     });
-    const slack = 2;
-    if (Math.abs(box.cw - box.vw) > slack || Math.abs(box.ch - box.vh) > slack) {
+    if (Math.abs(box.cw - box.vw) > 2 || Math.abs(box.ch - box.vh) > 2) {
       throw new Error(
         `canvas did not track the viewport in ${label}: `
         + `${box.cw}x${box.ch} against ${box.vw}x${box.vh}`,
       );
     }
-    return box;
   };
 
   await page.setViewportSize({ width: 430, height: 932 });
   await fitted('portrait');
   // Poll rather than sample once: the gate deliberately waits for the
-  // viewport to hold still before it moves, and a frame here is worth
-  // hundreds of milliseconds under a software renderer.
+  // viewport to hold still, and a frame here is worth hundreds of ms
+  // under a software renderer.
   await page.waitForFunction(
     () => [...document.querySelectorAll('[role="alertdialog"]')]
       .some((el) => getComputedStyle(el).display !== 'none'),
     { timeout: 10000 },
-  ).catch(() => {
-    throw new Error('portrait did not ask the player to rotate');
-  });
+  ).catch(() => { throw new Error('portrait did not ask the player to rotate'); });
 
   await page.setViewportSize({ width: 932, height: 430 });
   await fitted('back in landscape');
@@ -179,15 +303,10 @@ try {
     () => [...document.querySelectorAll('[role="alertdialog"]')]
       .every((el) => getComputedStyle(el).display === 'none'),
     { timeout: 10000 },
-  ).catch(() => {
-    throw new Error('the rotate prompt stayed up in landscape');
-  });
+  ).catch(() => { throw new Error('the rotate prompt stayed up in landscape'); });
 
   // The case the observer exists for: the canvas host changes size
-  // WITHOUT a trustworthy window resize event. On a phone that happens
-  // because orientationchange fires before the viewport settles, so the
-  // event carries the old numbers; here we reproduce the same shape by
-  // shrinking the host directly, which fires no window event at all.
+  // WITHOUT a trustworthy window resize event.
   await page.evaluate(() => {
     const app = document.getElementById('app');
     app.style.right = '200px';
@@ -215,67 +334,60 @@ try {
   });
   await page.waitForTimeout(500);
 
-  // Nothing may hang off the top of the screen. A browser toolbar eats
-  // enough height to push a fixed-height control off, and the notches
-  // lost are the fast ones — which is what a third-party iOS browser
-  // did to the throttle.
-  const onScreen = async (label) => {
+  // ── Layout ───────────────────────────────────────────────────────
+  const layout = async (label) => {
     await page.waitForTimeout(500);
-    const strays = await page.evaluate(() => {
-      const out = [];
-      for (const el of document.querySelectorAll('button, [role="alertdialog"]')) {
+    const found = await page.evaluate(() => {
+      const strays = [];
+      const controls = 'button, [role="alertdialog"], [data-control]';
+      for (const el of document.querySelectorAll(controls)) {
         const box = el.getBoundingClientRect();
         if (box.width === 0 || box.height === 0) continue;
         if (box.top < -1 || box.bottom > innerHeight + 1
           || box.left < -1 || box.right > innerWidth + 1) {
-          out.push(`${el.getAttribute('aria-label') ?? el.tagName} `
+          strays.push(`${el.dataset.control ?? el.getAttribute('aria-label') ?? el.tagName} `
             + `at ${Math.round(box.top)}..${Math.round(box.bottom)}`);
         }
       }
-      return out;
-    });
-    if (strays.length) {
-      throw new Error(`controls off screen in ${label}:\n  ${strays.join('\n  ')}`);
-    }
-  };
-  await onScreen('landscape');
-
-  // And the controls the left thumb works must be where the left thumb
-  // is. Stacking the ladder above the stick pushed it into the top-left
-  // corner — on screen, but a reach away from the hand that works it.
-  const withinReach = async (label) => {
-    const laid = await page.evaluate(() => {
-      const box = (sel) => {
-        const el = document.querySelector(sel);
-        return el ? el.getBoundingClientRect() : null;
+      const box = (sel) => document.querySelector(sel)?.getBoundingClientRect() ?? null;
+      const hits = (a, b) => Boolean(a && b
+        && a.right > b.left && a.left < b.right && a.bottom > b.top && a.top < b.bottom);
+      const pace = box('[data-control="pace"]');
+      return {
+        strays,
+        // Both left-thumb controls must sit where the left thumb is.
+        paceGap: innerHeight - pace.bottom,
+        stickGap: innerHeight - box('[data-control="stick"]').bottom,
+        laneOnPace: hits(box('[data-control="auto-lane"]'), pace),
+        stickOnPace: hits(box('[data-control="stick"]'), pace),
+        // The action controls land here later; nothing may creep in.
+        intoTheRight: [...document.querySelectorAll('[data-control]')]
+          .some((el) => el.getBoundingClientRect().right > innerWidth * 0.66),
       };
-      const t = box('[data-control="throttle"]');
-      const s = box('[data-control="stick"]');
-      return t && s
-        ? {
-          gap: innerHeight - t.bottom,
-          overlap: t.right > s.left && t.left < s.right
-            && t.bottom > s.top && t.top < s.bottom,
-        }
-        : null;
     });
-    if (!laid) throw new Error(`could not find both left-thumb controls in ${label}`);
-    if (laid.gap > 60) {
+
+    if (found.strays.length) {
+      throw new Error(`controls off screen in ${label}:\n  ${found.strays.join('\n  ')}`);
+    }
+    if (found.stickGap > 60 || found.paceGap > 60) {
       throw new Error(
-        `the throttle floats ${Math.round(laid.gap)}px off the bottom in ${label}`,
+        `controls float off the bottom in ${label}: `
+        + `stick ${Math.round(found.stickGap)}px, pace ${Math.round(found.paceGap)}px`,
       );
     }
-    if (laid.overlap) throw new Error(`the throttle sits on the stick in ${label}`);
+    if (found.laneOnPace) throw new Error(`the Auto lane covers the pace column in ${label}`);
+    if (found.stickOnPace) throw new Error(`the stick covers the pace column in ${label}`);
+    if (found.intoTheRight) {
+      throw new Error(`a movement control reached into the action area in ${label}`);
+    }
   };
-  await withinReach('landscape');
 
+  await layout('landscape');
   // A short landscape window, the shape a browser toolbar leaves.
   await page.setViewportSize({ width: 932, height: 330 });
-  await onScreen('a toolbar-height landscape window');
-  await withinReach('a toolbar-height landscape window');
+  await layout('a toolbar-height landscape window');
   await page.setViewportSize({ width: 844, height: 280 });
-  await onScreen('a very short window');
-  await withinReach('a very short window');
+  await layout('a very short window');
   await page.setViewportSize({ width: 932, height: 430 });
   await page.waitForTimeout(400);
 
@@ -283,11 +395,13 @@ try {
   if (errors.length) throw new Error(`page errors:\n${errors.join('\n')}`);
 
   console.log(
-    `probe:island OK — spawned ${start.ground.toFixed(1)} units above the sea, `
-    + `telegraph carried her ${moved.toFixed(1)} units and reversed, `
-    + `sprint drained to ${mid.toFixed(2)} and eased off, stamina recovered, `
-    + `camera swings and settles back, survives a rotation, `
-    + `left-thumb controls sit together at the bottom\n`
+    `probe:island OK — spawned ${start.ground.toFixed(1)} units above the sea; `
+    + `a pace alone moves nothing, a held push carried her ${covered.toFixed(1)} units `
+    + 'and releasing stopped her; reverse and sidestep work; '
+    + 'drag-to-lock arms, un-arms and engages, and survives a sidestep; '
+    + `sprint reached ${sprint.speed.toFixed(1)} and fell back to ${spent.toFixed(1)}; `
+    + 'the camera does not steer her at a walk but leads her at rest; '
+    + 'survives a rotation and fits every window\n'
     + `  ${start.triangles.toLocaleString()} triangles in ${start.drawCalls} draw calls`,
   );
 } finally {

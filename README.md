@@ -101,55 +101,82 @@ fine either way.
 
 ## Controls
 
-**Throttle** — a ship's telegraph at bottom left, just inboard of the
-stick rather than stacked above it, and the only speed control. It is a *setting*: pick a notch and she holds it, so crossing
-an island that takes minutes needs no separate auto-move mode to arm
-and cancel. Tap any notch to go straight there, which makes easing off
-one step and slamming from a sprint to astern the same gesture.
+Three separate ideas, deliberately not merged: **pace** is the ceiling,
+the **stick** is how much of it you are asking for, and **Auto** keeps
+her travelling without a thumb held down.
+
+**Pace** — bottom left, inboard of the stick. It sets how fast a FULL
+push of the stick is; it does **not** move her. Choosing WALK does not
+make her walk.
 
 ```
-  ››››  sprint   — costs stamina
+  ››››  sprint  — an override, not a pace: costs stamina
   ›››   run
   ››    walk
   ›     crawl
-  ■     stop
-  ‹     reverse crawl
-  ‹‹    reverse walk
 ```
 
-Reverse only goes as fast as a crawl or a walk; an ant hauling
-something backwards is not sprinting. The fill runs from the Stop line
-out to the live notch, so ahead and astern read as opposite directions
-rather than more or less of the same thing, and the readout underneath
-gives her speed in cm/s — one world unit is about a centimetre.
-Stopped reads `0.0 cm/s`, in the same shape as every other notch: a
-dash would read as no reading, and the gauge always has one.
+There is no Stop row and no reverse row, because neither is a maximum
+forward speed: stop is letting go of the stick, and reverse is pushing
+it down.
 
-**Stamina** — sprinting is the one notch that costs anything, and the
-sprint notch doubles as its meter. Run it dry and she eases down to a
-run rather than stopping dead; it refills on its own whenever she is
-not sprinting, and faster still standing still. Per the project rule, a
-bar may only move if there is a way to move it back, and this one has
-one that needs no mechanic that does not exist yet.
+The reason for a ceiling rather than speed-by-deflection is measured,
+not theoretical. A thumb-sized stick has about 64 px of travel, which
+is not enough to divide into four reliable bands — the earlier build
+proved that on the device. Pick a pace and the *whole* radius becomes
+precision inside it.
 
-**Steering** — a fixed stick in the bottom-left corner, outboard of
-the telegraph, which aims her and nothing else. Push and she comes round to that heading at a rate the throttle
-sets: she pivots freely at Stop and takes a wide line at a sprint. Let
-go and she holds her heading.
+**Stick** — bottom-left corner. Push forward and she goes, from a
+creep to the full selected pace; let go and she stops. Left and right
+**sidestep**: she is a six-legged animal and crabs sideways without
+turning. Reverse is capped at a reverse walk however high the pace,
+and cannot be sprinted.
 
-A push dead astern does *not* spin her a direction nobody chose — at a
-half-turn neither way round is shorter, so with no lean to read she
-holds her heading. Lean the push to one side and she comes round that
-way; to actually travel backwards, use an astern notch.
+**Auto** — drag the stick *past its rim* into the lane that appears
+above it, and release on the lock.
 
-On desktop, **W** and **S** work the telegraph and **A** / **D** steer,
-which is the arrangement the warship games settled on.
+```
+        🔒        ← release here to engage
+        ▲
+        ▲
+        ▲
+     ( stick )
+```
 
-**Camera** — drag anywhere the controls are not. There is no camera
-button: it would spend a slot the action controls will want, and a drag
-is unambiguous because controls claim their own pointers first. Taps are
-left free for grab, dig and bite later. The view eases back behind her
-when you let go. On desktop, Q / E swing and R / F lift.
+Reaching full forward does **not** engage it — full forward is just
+fast, and it happens constantly, so the lane needs real extra travel
+beyond the ordinary radius. Reaching the lock only *arms* it: Auto
+engages when you lift your thumb inside the lock, so sliding back out
+first is a free change of mind. There is no permanent Auto button —
+the right side of the screen belongs to bite, grab, dig and abilities.
+
+While Auto runs, sidestepping and looking around leave it alone; a
+clear push forward or back takes manual control back. The cancel test
+is which axis wins, not how far the thumb went, because a real thumb
+aiming sideways lands at about `x 0.90, y 0.08`.
+
+**Sprint** — raises the ceiling rather than adding a gear, and is the
+only thing that costs anything. Run it dry and she drops to the
+selected pace rather than stopping, Auto included; it refills on its
+own, faster standing still, and the next sprint has to be asked for
+deliberately. Per the project rule, a bar may only move if there is a
+way to move it back.
+
+**Camera** — drag anywhere the controls are not. It is independent:
+she travels north while you watch a beetle to the west, and the view
+stays where you put it rather than snapping back behind her.
+
+At **stop or crawl** the camera may lead her. Pan within ~30° and
+nothing happens — a few degrees of thumb must never make her wiggle —
+but hold it further out and after ~0.35 s she comes round to it. Above
+a crawl she holds her heading whatever the view does, **so you slow
+down to turn**. That is a deliberate choice with its cost accepted;
+`CATCHUP_MAX_SPEED` in `src/ant/pace.ts` is the single constant that
+opens turning up at speed if it plays badly.
+
+On desktop: **W / S** manual forward and back, **A / D** sidestep,
+**1 / 2 / 3** pick a pace, **Shift** sprints, **=** toggles Auto,
+**Q / E** swing the camera and **R / F** lift it.
 
 ## Deployment
 
