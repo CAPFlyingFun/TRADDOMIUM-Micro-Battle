@@ -31,6 +31,14 @@ Build one focused development scene (lab) per system, in the spine's
 order, with an integration gate before the next layer. Labs register in
 `src/main.ts` and stay reachable via `?scene=` permanently.
 
+## Controls belong to the thumbs, not the screen
+
+Screen space near the thumbs is the scarcest resource in this game, and
+the action controls (grab, dig, bite) have first claim on it. Before
+adding a control, check whether a gesture can carry it instead: the
+camera is a drag rather than a button for exactly this reason, and gait
+rides the stick's own deflection rather than costing three slots.
+
 ## The feeling bar
 
 BAD: press GRAB → object teleports to the ant.

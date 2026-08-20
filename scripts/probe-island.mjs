@@ -1,7 +1,8 @@
 /**
- * probe:island — boots the island lab headless, walks the ant, swings
- * the look pad, and fails on console/page errors, on her standing off
- * the island, or on the camera pad not moving the view.
+ * probe:island — boots the island lab headless, walks the ant, arms
+ * auto-walk, and swings the camera. Fails on console/page errors, on
+ * her standing off the island, on auto-walk not carrying her, or on the
+ * camera drag not moving or not settling back.
  *
  * Writes probe-island.png for eyes-on checks. Expects a server on
  * PROBE_URL (default vite preview :4173).
@@ -49,6 +50,31 @@ try {
   if (moved < 1) throw new Error(`she barely moved: ${moved.toFixed(2)} units`);
   if (after.ground <= 0) throw new Error('she walked off into the sea');
 
+  // Auto-walk: hold forward past the 2s arm, then confirm she keeps
+  // going with nothing touching the controls.
+  await page.keyboard.down('KeyW');
+  await page.waitForTimeout(2600);
+  const armed = await page.evaluate(() => window.__island.autoWalking());
+  await page.keyboard.up('KeyW');
+  if (!armed) throw new Error('holding a bearing did not arm auto-walk');
+  await page.waitForTimeout(50);
+  const parked = await page.evaluate(() => window.__island.where());
+  await page.waitForTimeout(1200);
+  const drifted = await page.evaluate(() => window.__island.where());
+  const coasted = Math.hypot(drifted[0] - parked[0], drifted[2] - parked[2]);
+  const held = await page.evaluate(() => ({
+    walking: window.__island.autoWalking(),
+    gait: window.__island.gait(),
+  }));
+  if (coasted < 2) {
+    throw new Error(`auto-walk locked but she stopped: ${coasted.toFixed(2)} units`);
+  }
+  // She must keep the gait she locked at. Falling to a crawl the moment
+  // the stick recentres is the bug this check exists for.
+  if (held.walking && held.gait === 'crawl') {
+    throw new Error('auto-walk dropped to a crawl once the stick recentred');
+  }
+
   // Swing the look pad with the keyboard. Compare camera positions
   // rather than pixels: the WebGL canvas has no preserved drawing
   // buffer, so toDataURL would read back blank every time and the
@@ -87,7 +113,8 @@ try {
 
   console.log(
     `probe:island OK — spawned ${start.ground.toFixed(1)} units above the sea, `
-    + `walked ${moved.toFixed(1)} units, look pad swings the view\n`
+    + `walked ${moved.toFixed(1)} units, auto-walk coasted ${coasted.toFixed(1)} more at a ${held.gait}, `
+    + `drag swings the view and it settles back\n`
     + `  ${start.triangles.toLocaleString()} triangles in ${start.drawCalls} draw calls`,
   );
 } finally {

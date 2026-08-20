@@ -1,12 +1,14 @@
 import * as THREE from 'three';
 import { PlayerAnt } from '../ant/PlayerAnt';
 import { FollowCamera } from '../camera/FollowCamera';
-import { DirectControl } from '../input/DirectControl';
-import { LookPad } from '../input/LookPad';
+import { GaitThrottle } from '../input/GaitThrottle';
+import { LookDrag } from '../input/LookDrag';
+import { MoveStick } from '../input/MoveStick';
+import { gaitFromDeflection, type Gait } from '../ant/gait';
 import {
   bandFor, groundDetail, groundHeight, ISLAND_SPAN, type Band,
 } from '../world/heightfield';
-import { findLandfall, type HeightGrid } from '../world/kauai';
+import { findLandfall, slopeAt, type HeightGrid } from '../world/kauai';
 
 /**
  * THE ISLAND — Kauai at 1:1000, walked by one ant.
@@ -63,17 +65,27 @@ export class IslandScene {
   private readonly scene = new THREE.Scene();
   private readonly renderer: THREE.WebGLRenderer;
   private readonly follow: FollowCamera;
-  private readonly control: DirectControl;
-  private readonly look: LookPad;
+  private readonly stick: MoveStick;
+  private readonly throttle: GaitThrottle;
+  private readonly look: LookDrag;
   private readonly ant = new PlayerAnt();
   private readonly clock = new THREE.Clock();
   private readonly sections: Section[] = [];
+  private readonly grid: HeightGrid;
+  /** Bearing auto-walk is holding, or null when she is hand-steered. */
+  private autoBearing: number | null = null;
+  /** Gait captured when the lock engaged, so letting go does not slow her. */
+  private autoGait: Gait | null = null;
+  /** Last gait she was actually travelling at, for the double-tap lock. */
+  private lastMovingGait: Gait = 'walk';
+  private currentGait: Gait = 'walk';
   private disposed = false;
 
   constructor(
     private readonly host: HTMLElement,
     grid: HeightGrid,
   ) {
+    this.grid = grid;
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     host.appendChild(this.renderer.domElement);
@@ -91,8 +103,9 @@ export class IslandScene {
     this.ant.placeAt(start.x, start.z, Math.atan2(-start.x, -start.z));
     this.scene.add(this.ant.root);
 
-    this.control = new DirectControl(host);
-    this.look = new LookPad(host);
+    this.stick = new MoveStick(host);
+    this.throttle = new GaitThrottle(host);
+    this.look = new LookDrag(host);
     this.follow = new FollowCamera(this.aspect());
     this.follow.snapTo(this.ant.root);
 
@@ -108,6 +121,9 @@ export class IslandScene {
       cameraAt: () => this.follow.camera.position.toArray(),
       groundUnderfoot: () =>
         groundHeight(this.ant.root.position.x, this.ant.root.position.z),
+      autoWalking: () => this.autoBearing !== null,
+      gait: () => this.currentGait,
+      pinnedGait: () => this.throttle.pinned,
     };
   }
 
@@ -115,7 +131,8 @@ export class IslandScene {
     this.disposed = true;
     this.renderer.setAnimationLoop(null);
     window.removeEventListener('resize', this.onResize);
-    this.control.dispose();
+    this.stick.dispose();
+    this.throttle.dispose();
     this.look.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
@@ -126,15 +143,57 @@ export class IslandScene {
     // Clamp dt so a backgrounded tab does not teleport the ant on return.
     const dt = Math.min(this.clock.getDelta(), 0.1);
     const look = this.look.read(dt);
+    const stick = this.stick.read(dt);
+
+    // The stick's deflection asks for a gait; the rail can overrule it.
+    const fromStick = gaitFromDeflection(stick.deflection);
+    if (stick.deflection > 0) this.lastMovingGait = fromStick;
+
+    if (stick.wantsRelease) {
+      this.autoBearing = null;
+      this.autoGait = null;
+    }
+    if (stick.wantsLock) {
+      this.autoBearing = this.ant.bearing;
+      // Hold the gait she was travelling at, not the one the released
+      // stick reads now — otherwise auto-walk drops to a crawl the
+      // instant you take your thumb off, which is the opposite of the
+      // point. A double-tap arrives with the stick centred, so the
+      // remembered gait is the only honest answer there.
+      this.autoGait = this.lastMovingGait;
+    }
+    if (this.autoBearing !== null && this.shouldBail()) {
+      this.autoBearing = null;
+      this.autoGait = null;
+    }
+    this.stick.showLocked(this.autoBearing !== null);
+
+    const gait = this.throttle.resolve(this.autoGait ?? fromStick);
+    this.currentGait = gait;
+
     const cameraYaw = Math.atan2(
       this.follow.camera.position.x - this.ant.root.position.x,
       this.follow.camera.position.z - this.ant.root.position.z,
     );
-    this.ant.update(this.control.read(), cameraYaw, dt);
+    this.ant.update({ move: stick, gait, bearing: this.autoBearing }, cameraYaw, dt);
     this.follow.update(this.ant.root, look, dt);
     this.chooseDetail();
     this.renderer.render(this.scene, this.follow.camera);
   };
+
+  /**
+   * Whether auto-walk should hand the wheel back on its own. Marching
+   * her into the sea or up a cliff unattended is how a convenience turns
+   * into a thing people switch off, so it stops at both.
+   */
+  private shouldBail(): boolean {
+    const { x, z } = this.ant.root.position;
+    const ahead = 6;
+    const bx = x + Math.sin(this.autoBearing ?? 0) * ahead;
+    const bz = z + Math.cos(this.autoBearing ?? 0) * ahead;
+    if (groundHeight(bx, bz) <= 0) return true;
+    return slopeAt(this.grid, bx, bz) > 1.2;
+  }
 
   private readonly onResize = (): void => {
     const { clientWidth, clientHeight } = this.host;

@@ -1,6 +1,17 @@
 import * as THREE from 'three';
 import { groundHeight } from '../world/heightfield';
-import type { MoveInput } from '../input/DirectControl';
+import type { MoveInput } from '../input/MoveStick';
+import { GAIT_SPEED, GAIT_TURN, type Gait } from './gait';
+
+/** Everything the controls ask of her in one frame. */
+export interface Drive {
+  /** Stick vector, camera-relative (x right, y forward). */
+  move: MoveInput;
+  /** How hard she is pushing herself. */
+  gait: Gait;
+  /** Locked world bearing while auto-walking, or null when hand-steered. */
+  bearing: number | null;
+}
 
 /**
  * The player's ant — rebuild step 01: movement.
@@ -12,10 +23,6 @@ import type { MoveInput } from '../input/DirectControl';
  */
 export class PlayerAnt {
   readonly root = new THREE.Group();
-  /** Radians per second at full stick deflection. */
-  turnRate = 3.4;
-  /** World units per second at full stick deflection. */
-  walkSpeed = 6;
 
   private heading = 0;
   private gaitPhase = 0;
@@ -33,12 +40,32 @@ export class PlayerAnt {
     this.root.rotation.set(0, heading, 0);
   }
 
+  /** Which way she is facing, in world radians. */
+  get bearing(): number {
+    return this.heading;
+  }
+
   /**
-   * @param move stick vector, camera-relative (x right, y forward)
+   * @param drive what the controls are asking of her this frame
    * @param cameraYaw yaw of the camera, so "stick up" means "away from
    *   the camera" no matter where the ant is facing
    */
-  update(move: MoveInput, cameraYaw: number, dt: number): void {
+  update(drive: Drive, cameraYaw: number, dt: number): void {
+    const { move, gait } = drive;
+    const speed = GAIT_SPEED[gait];
+
+    // Auto-walk: she holds a WORLD bearing, so swinging the camera to
+    // look at the scenery cannot steer her into the sea.
+    if (drive.bearing !== null) {
+      this.heading = drive.bearing;
+      const step = speed * dt;
+      this.root.position.x += Math.sin(this.heading) * step;
+      this.root.position.z += Math.cos(this.heading) * step;
+      this.gaitPhase += step * 2.2;
+      this.settle();
+      return;
+    }
+
     const strength = Math.min(1, Math.hypot(move.x, move.y));
     if (strength > 0.05) {
       // move.x is negated because headings here run clockwise when read
@@ -47,18 +74,23 @@ export class PlayerAnt {
       const targetHeading = cameraYaw + Math.atan2(-move.x, move.y) + Math.PI;
       let diff = targetHeading - this.heading;
       diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-      const maxTurn = this.turnRate * dt;
+      const maxTurn = GAIT_TURN[gait] * dt;
       this.heading += THREE.MathUtils.clamp(diff, -maxTurn, maxTurn);
 
       // She walks where her body points, so a hard stick reversal turns
       // her around rather than strafing her backwards.
       const forwardness = Math.max(0, Math.cos(diff));
-      const step = this.walkSpeed * strength * forwardness * dt;
+      const step = speed * strength * forwardness * dt;
       this.root.position.x += Math.sin(this.heading) * step;
       this.root.position.z += Math.cos(this.heading) * step;
       this.gaitPhase += step * 2.2;
     }
 
+    this.settle();
+  }
+
+  /** Put her on the ground, facing her heading, leaning with the slope. */
+  private settle(): void {
     const { x, z } = this.root.position;
     this.root.position.y = groundHeight(x, z);
     this.root.rotation.y = this.heading;

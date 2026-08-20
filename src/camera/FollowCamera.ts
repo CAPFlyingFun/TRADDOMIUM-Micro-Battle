@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { LookInput } from '../input/LookPad';
+import type { LookInput } from '../input/LookDrag';
 import { groundHeight } from '../world/heightfield';
 
 /**

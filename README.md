@@ -73,16 +73,33 @@ Its band textures (`public/kauai-tex/` in Thronemound) are not used yet
 
 ## Controls
 
-Movement:
+**Move** — a fixed stick, bottom left. How far you push it picks the
+gait: near the centre is a crawl, the rim is a run. On desktop, WASD and
+the arrow keys read as full deflection, so the keyboard runs by default.
 
-- Desktop: WASD / arrow keys.
-- Touch: drag on the left half of the screen for the movement stick.
+**Throttle** — the notched bar on the left edge reads out the gait the
+stick is currently asking for, as a level that rises through the
+notches. Tap a notch to PIN that gait so it stops changing under your
+thumb; tap the pinned one again to hand it back to the stick. A pinned
+notch wears a green outline. The glyphs (snail / ant / bolt) are
+placeholders standing in for real art.
 
-Camera — the "‹ 🎥 ›" pad, bottom right. Drag it sideways to swing the
-view around her, up and down to lift toward top-down or drop in behind
-her. Let go and it eases back to resting: behind the player. On desktop,
-Q / E swing and R / F lift. The resting angle becomes a setting later
-(see the camera-angle card on the board).
+**Auto-walk** — hold a steady bearing at full push for two seconds and a
+ring sweeps the stick's rim; when it completes, the bearing locks and
+she keeps going with your thumb off the screen. Double-tap the stick to
+lock immediately at the gait you were last travelling at. Any touch on
+the stick takes the wheel back. It also lets go by itself at the
+waterline and at slopes too steep to climb, so it cannot march you into
+the sea unattended. `L` locks from the keyboard.
+
+She holds a **world bearing** while locked, so swinging the camera to
+look around never steers her.
+
+**Camera** — drag anywhere the controls are not. There is no camera
+button: it would spend a slot the action controls will want, and a drag
+is unambiguous because controls claim their own pointers first. Taps are
+left free for grab, dig and bite later. The view eases back behind her
+when you let go. On desktop, Q / E swing and R / F lift.
 
 ## Deployment
 
