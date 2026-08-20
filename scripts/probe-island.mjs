@@ -374,6 +374,20 @@ try {
   // actually reaches the game.
   await page.click('[data-ui="settings"]');
   await page.waitForSelector('[data-ui="settings-panel"]', { state: 'visible' });
+  // The build has to identify itself. Testing from a deployed page
+  // with nothing on screen to name it means the honest answer to "is
+  // this the new one?" is always "probably".
+  const stamped = await page.evaluate(() => ({
+    version: document.querySelector('[data-ui="version"]')?.textContent ?? '',
+    build: document.querySelector('[data-ui="build"]')?.textContent ?? '',
+  }));
+  if (!/v\d+\.\d+\.\d+/.test(stamped.version)) {
+    throw new Error(`the panel shows no version: ${JSON.stringify(stamped.version)}`);
+  }
+  if (!stamped.build.trim() || stamped.build.includes('undefined')) {
+    throw new Error(`the panel shows no build stamp: ${JSON.stringify(stamped.build)}`);
+  }
+
   const wasFov = await island(() => window.__island.fov());
   await page.evaluate(() => {
     const slider = document.querySelector('input[data-dial="fov"]');
@@ -545,7 +559,8 @@ try {
     + `sprint reached ${sprint.speed.toFixed(1)} and fell back to ${spent.toFixed(1)}; `
     + `looking steered her ${steered.toFixed(2)} rad while driven and left her `
     + 'alone at rest inside the deadzone; '
-    + 'the settings panel reaches the camera and persists; '
+    + `the settings panel says ${stamped.version.replace('TRADDOMIUM', '').trim()} `
+    + `(${stamped.build}), reaches the camera and persists; `
     + 'survives a rotation and fits every window\n'
     + `  ${start.triangles.toLocaleString()} triangles in ${start.drawCalls} draw calls`,
   );

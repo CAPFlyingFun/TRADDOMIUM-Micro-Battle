@@ -255,6 +255,12 @@ The defaults ARE the tuned values, so the game out of the box is the
 game before the panel existed. Settings widen what is possible; they do
 not decide what is good.
 
+The panel also names the build: the version at the top, and the commit
+it came from at the bottom. That is not decoration. Testing happens
+against the deployed Pages build, and with nothing on screen to
+identify it the honest answer to "am I looking at the new one?" was
+always "probably" — a semver cannot settle that, but a commit hash can.
+
 Choices are saved per device. What comes back is treated as untrusted:
 unknown keys are dropped, wrong types ignored, and every number clamped
 to its range, so an old or hand-edited store degrades to the defaults

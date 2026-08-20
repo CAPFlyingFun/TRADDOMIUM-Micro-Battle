@@ -13,6 +13,7 @@
 import {
   DEFAULTS, LIMITS, reset, set, settings, type Dial, type Toggle,
 } from './settings';
+import { buildStamp, VERSION } from '../build';
 
 const GOLD = 'rgba(255, 226, 160, .9)';
 const LIVE = 'rgba(110, 255, 150, .95)';
@@ -119,9 +120,61 @@ export class SettingsPanel {
     // A drag inside the panel is a drag on the panel, never on the view.
     this.claim(this.panel, () => {});
 
+    this.panel.appendChild(this.buildTitle());
     for (const dial of DIALS) this.panel.appendChild(this.buildDial(dial));
     for (const toggle of TOGGLES) this.panel.appendChild(this.buildToggle(toggle));
     this.panel.appendChild(this.buildReset());
+    this.panel.appendChild(this.buildStampLine());
+  }
+
+  /**
+   * The version, at the top where it is read as identity.
+   *
+   * It lives in here rather than on the HUD because it is not part of
+   * playing — but it has to live SOMEWHERE, because testing from a
+   * deployed build with nothing on screen to identify it means the
+   * honest answer to "is this the new one?" is always "probably".
+   */
+  private buildTitle(): HTMLElement {
+    const row = document.createElement('div');
+    row.dataset.ui = 'version';
+    Object.assign(row.style, {
+      display: 'flex',
+      alignItems: 'baseline',
+      justifyContent: 'space-between',
+      gap: '8px',
+      paddingBottom: '7px',
+      marginBottom: '2px',
+      borderBottom: '1px solid rgba(255, 216, 130, .28)',
+    } as Partial<CSSStyleDeclaration>);
+
+    const name = document.createElement('span');
+    name.textContent = 'TRADDOMIUM';
+    name.style.letterSpacing = '1.2px';
+
+    const version = document.createElement('span');
+    version.textContent = `v${VERSION}`;
+    version.style.color = LIVE;
+    version.style.font = '600 12px/1 "JetBrains Mono", ui-monospace, monospace';
+
+    row.append(name, version);
+    return row;
+  }
+
+  /** And the build itself at the bottom, where a footer belongs. */
+  private buildStampLine(): HTMLElement {
+    const line = document.createElement('div');
+    line.dataset.ui = 'build';
+    line.textContent = buildStamp();
+    Object.assign(line.style, {
+      textAlign: 'center',
+      paddingTop: '6px',
+      borderTop: '1px solid rgba(255, 216, 130, .22)',
+      font: '600 10px/1.4 "JetBrains Mono", ui-monospace, monospace',
+      color: 'rgba(255, 226, 160, .5)',
+      userSelect: 'text',
+    } as Partial<CSSStyleDeclaration>);
+    return line;
   }
 
   private buildDial(dial: Dialer): HTMLElement {
