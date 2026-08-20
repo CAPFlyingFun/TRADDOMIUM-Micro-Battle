@@ -79,28 +79,54 @@ export function slowerPace(from: Pace): Pace {
 }
 
 /*
- * ── Camera / body catch-up ──────────────────────────────────────────
+ * ── Feel ────────────────────────────────────────────────────────────
  *
- * At low speed the camera may lead and the body follows it after a
- * beat, the way the Godot prototype does. Above CATCHUP_MAX_SPEED it is
- * off entirely: looking around at a run must never yank her onto a new
- * heading.
+ * Matched to the Godot build, which is the reference Joshua likes.
+ * Slow-to-turn and lean-into-the-turn were both tried here first and
+ * both felt wrong on the device.
  *
- * These four are deliberately one place. CATCHUP_MAX_SPEED especially:
- * Joshua chose "you must slow down to turn" with the cost in front of
- * him, and if a chase turns out to feel bad on the phone, raising this
- * to PACE_SPEED.walk or .run opens turning up at speed without touching
- * a line of logic anywhere else.
+ * The scheme those replaced: input is CAMERA-relative, and while she is
+ * being driven her body points where the camera points. Travelling
+ * somewhere is already a statement about which way she means to face,
+ * so steering is just looking — no turn control at all.
  */
 
-/** How far the camera may stray before her body takes an interest. */
-export const FREE_LOOK_ANGLE = (30 * Math.PI) / 180;
+/**
+ * How fast her body comes onto the camera's heading while she is being
+ * driven, as an exponential rate. Brisk on purpose: this is steering,
+ * and steering that lags reads as ice.
+ */
+export const TURN_RATE = 18;
 
-/** How long it must stay strayed before she starts coming round. */
-export const BODY_CATCHUP_DELAY = 0.35;
+/**
+ * How far the camera may swing off her nose, at rest, before she turns
+ * to meet it.
+ *
+ * Generous, and she only comes back to the EDGE of it rather than onto
+ * her nose — chasing it to zero would mean she could never be looked at
+ * from the side at all. Standing still you can walk the camera most of
+ * the way round her and she just watches you over her shoulder.
+ */
+export const REST_DEADZONE = (60 * Math.PI) / 180;
 
-/** How fast she comes round once she does, in radians per second. */
-export const BODY_CATCHUP_RATE = 2.4;
+/** How briskly she closes that gap once past it. */
+export const REST_EASE = 4;
 
-/** At or below this speed the camera may lead her. Above it, never. */
-export const CATCHUP_MAX_SPEED = PACE_SPEED.crawl + 0.001;
+/**
+ * How fast her speed closes on what the stick is asking for. An
+ * exponential ease rather than a fixed acceleration, so a standing
+ * start and a small correction settle in the same time and neither
+ * depends on the frame rate.
+ */
+export const SPEED_EASE = 7;
+
+/**
+ * How fast the DIRECTION she is trying to go swings round.
+ *
+ * Separate from SPEED_EASE deliberately. One is "how fast does she get
+ * up to pace", the other is "how fast does she change her mind", and
+ * they want different answers: flicking the stick from left to right
+ * reversed her travel inside a single frame, which no six-legged
+ * animal does — the legs are still mid-stride the old way.
+ */
+export const DIRECTION_EASE = 6;

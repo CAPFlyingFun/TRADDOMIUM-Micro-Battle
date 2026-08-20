@@ -32,7 +32,7 @@ function orbit(input: LookInput): THREE.Vector3 {
 }
 
 describe('the chase camera', () => {
-  it('rests behind her', () => {
+  it('sits on the bearing the view holds, not on her nose', () => {
     const at = orbit(look({ active: false }));
     expect(at.z).toBeLessThan(-4);
     expect(Math.abs(at.x)).toBeLessThan(0.5);

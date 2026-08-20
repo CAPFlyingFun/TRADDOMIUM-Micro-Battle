@@ -68,8 +68,21 @@ disagree.
 
 To re-bake from source, point the script at a Beyond Extinction
 checkout: `python3 scripts/bakeKauai.py <BE-repo>/artifacts/beyond-extinction`.
-Its band textures (`public/kauai-tex/` in Thronemound) are not used yet
-— the terrain is vertex-coloured by elevation for now.
+
+The surface wears seven band textures (`public/kauai-tex/`) blended by
+elevation and tiled from WORLD position — the same shape as the Godot
+prototype's terrain shader. World-position tiling is not a detail: the
+mesh is cut into sections, and a per-section parameterisation prints
+the section grid across the island every time the tiling restarts.
+
+It matters more than it looks. A flat-coloured surface gives the eye
+nothing to measure motion against, so at ant scale a sprint and a crawl
+look identical, and that reads as dull controls when the controls are
+fine. A procedural noise tile (`src/world/groundTexture.ts`, baked at
+boot, no asset to ship) rides on top at a tile size sharing no factor
+with the band tile, so the repeat never lines up. The vertex colours
+carry only shading now — soil showing through where the ground steepens,
+and the macro relief mottle.
 
 ## Add it to your home screen
 
@@ -126,11 +139,35 @@ is not enough to divide into four reliable bands — the earlier build
 proved that on the device. Pick a pace and the *whole* radius becomes
 precision inside it.
 
-**Stick** — bottom-left corner. Push forward and she goes, from a
-creep to the full selected pace; let go and she stops. Left and right
-**sidestep**: she is a six-legged animal and crabs sideways without
-turning. Reverse is capped at a reverse walk however high the pace,
-and cannot be sprinted.
+**Stick** — bottom-left corner, and read in the **camera's** frame:
+forward is away from the view, left and right are across it. Let go
+and she stops. Reverse is capped at a reverse walk however high the
+pace, and cannot be sprinted.
+
+**Steering is looking.** There is no turn control. While she is being
+driven her body comes onto the camera's heading, briskly — travelling
+somewhere is already a statement about which way she means to face. So
+you steer by swinging the view, and because her body ends up aligned
+with it, a sideways push still reads as a proper sidestep on screen:
+she crabs, she does not pivot.
+
+At **rest** she is left alone. You can walk the camera most of the way
+round her and she just watches you over her shoulder; past 60° she
+turns, and only back to the *edge* of that arc, because chasing the
+camera onto her nose would mean she could never be looked at from the
+side at all.
+
+Two earlier schemes were tried and rejected on the device: slow-to-turn,
+where nothing steered her above a crawl, and lean-into-the-turn, where a
+diagonal push arced her round like a car. This one matches the Godot
+prototype, which is the reference for how it should feel.
+
+**Nothing snaps.** The direction she is trying to go eases, and her
+speed eases onto it separately — one is "how fast does she get up to
+pace" and the other is "how fast does she change her mind", and they
+want different answers. Flicking the stick across used to reverse her
+travel inside a single frame, and the legs are still mid-stride the old
+way when that happens.
 
 **Auto** — drag the stick *past its rim* into the lane that appears
 above it, and release on the lock.
@@ -158,21 +195,15 @@ aiming sideways lands at about `x 0.90, y 0.08`.
 **Sprint** — raises the ceiling rather than adding a gear, and is the
 only thing that costs anything. Run it dry and she drops to the
 selected pace rather than stopping, Auto included; it refills on its
-own, faster standing still, and the next sprint has to be asked for
-deliberately. Per the project rule, a bar may only move if there is a
+own, faster standing still, and the next sprint has to be *asked for
+again* — a held key will not pick it back up as the bar creeps over its
+re-arm mark. Per the project rule, a bar may only move if there is a
 way to move it back.
 
-**Camera** — drag anywhere the controls are not. It is independent:
-she travels north while you watch a beetle to the west, and the view
-stays where you put it rather than snapping back behind her.
-
-At **stop or crawl** the camera may lead her. Pan within ~30° and
-nothing happens — a few degrees of thumb must never make her wiggle —
-but hold it further out and after ~0.35 s she comes round to it. Above
-a crawl she holds her heading whatever the view does, **so you slow
-down to turn**. That is a deliberate choice with its cost accepted;
-`CATCHUP_MAX_SPEED` in `src/ant/pace.ts` is the single constant that
-opens turning up at speed if it plays badly.
+**Camera** — drag anywhere the controls are not. It holds a **world**
+bearing and stays where you put it. It cannot be bolted to her facing,
+because her facing follows it: if the view chased her too, the pair
+would spin.
 
 On desktop: **W / S** manual forward and back, **A / D** sidestep,
 **1 / 2 / 3** pick a pace, **Shift** sprints, **=** toggles Auto,

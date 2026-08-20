@@ -10,12 +10,11 @@
  * take taps, and a drag that happens to start on one of them still turns
  * the camera, which is how the big mobile action games handle it.
  *
- * THE VIEW STAYS WHERE IT IS PUT. It used to ease back behind her the
- * moment you let go, which quietly made "travel north while watching a
- * beetle to the west" impossible — the whole point of an independent
- * camera. What brings the two back into line now is the other end: at
- * or below a crawl her BODY comes round to the camera, and absorb()
- * below is how that turn is taken out of this offset.
+ * THE VIEW STAYS WHERE IT IS PUT, and it is measured in WORLD terms
+ * rather than relative to her. That is what makes steering-by-looking
+ * work: the camera holds a bearing, her body comes onto it while she is
+ * driven, and the two can never chase each other round in a circle the
+ * way a view bolted to her heading would.
  */
 
 export interface LookInput {
@@ -29,7 +28,12 @@ export interface LookInput {
 
 const YAW_PER_PX = 0.008;
 const PITCH_PER_PX = 0.006;
-const YAW_LIMIT = Math.PI * 0.9;
+/**
+ * No limit worth the name. The view is world-absolute now, so a limit
+ * would stop her being steered past it — this only exists to keep the
+ * accumulated number from growing without bound over a long session.
+ */
+const YAW_LIMIT = Math.PI * 1000;
 const PITCH_UP = 0.95;
 const PITCH_DOWN = -0.3;
 /** How far a pointer must travel before it counts as a look rather than a tap. */
@@ -106,18 +110,9 @@ export class LookDrag {
     return { yaw: this.yaw, pitch: this.pitch, active: held };
   }
 
-  /**
-   * Take a body turn out of the view offset.
-   *
-   * The camera rests behind her, so when her body rotates the camera
-   * rotates with it — and an offset measured against her heading would
-   * never close. Absorbing the same angle here keeps the camera still
-   * in the WORLD while she comes round underneath it, which is what
-   * makes the low-speed catch-up converge instead of spinning.
-   */
-  absorb(radians: number): number {
-    this.yaw = Math.max(-YAW_LIMIT, Math.min(YAW_LIMIT, this.yaw + radians));
-    return this.yaw;
+  /** Point the view at a bearing outright — used to open behind her. */
+  setYaw(radians: number): void {
+    this.yaw = radians;
   }
 
   dispose(): void {

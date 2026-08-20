@@ -1,17 +1,27 @@
 import * as THREE from 'three';
 import { groundHeight } from '../world/heightfield';
 import {
-  BODY_CATCHUP_DELAY, BODY_CATCHUP_RATE, CATCHUP_MAX_SPEED, FREE_LOOK_ANGLE,
+  DIRECTION_EASE, REST_DEADZONE, REST_EASE, SPEED_EASE, TURN_RATE,
 } from './pace';
 
-/** Everything the controls ask of her in one frame, in HER OWN frame. */
+/** Everything the controls ask of her in one frame, in the CAMERA's frame. */
 export interface Drive {
-  /** Along her heading, world units per second. Negative is astern. */
-  forward: number;
-  /** Her right, world units per second — sidestep, not a turn. */
-  strafe: number;
+  /** Away from the camera, world units per second. Negative backs up. */
+  ahead: number;
+  /** The camera's right, world units per second. */
+  across: number;
   /** Ground speed, whatever the direction. */
   speed: number;
+}
+
+/** Shortest way round from a to b. */
+function shortest(from: number, to: number): number {
+  return Math.atan2(Math.sin(to - from), Math.cos(to - from));
+}
+
+/** Frame-rate-independent exponential ease, 0 to 1. */
+function closes(rate: number, dt: number): number {
+  return 1 - Math.exp(-rate * dt);
 }
 
 /**
@@ -22,27 +32,38 @@ export interface Drive {
  * bob. Real six-leg IK is its own rebuild step later; this stage only
  * has to make direct control feel right.
  *
- * SHE IS DRIVEN IN HER OWN FRAME. Forward is where she is facing and
- * strafe is her right, which is what makes a sidestep a sidestep: a
- * six-legged animal crabs sideways without turning, and a
- * camera-relative stick cannot say that.
+ * STEERING IS LOOKING. There is no turn control: the stick is
+ * camera-relative, and while she is being driven her body comes onto
+ * the camera's heading. Travelling somewhere is already a statement
+ * about which way she means to face. Because her body ends up aligned
+ * with the view, a sideways push still reads as a proper sidestep on
+ * screen — she crabs, she does not pivot.
  *
- * TURNING IS THE CAMERA'S JOB, AND ONLY AT LOW SPEED. At or below a
- * crawl the camera may lead and her body comes round to it after a
- * beat. Above that she holds her heading wherever the view points, so
- * looking around mid-run never yanks her off course — which does mean
- * she has to slow down to change direction. That is deliberate, and
- * CATCHUP_MAX_SPEED in pace.ts is the single number that reverses it.
+ * Two earlier schemes were tried here and both felt wrong on the
+ * device: slow-to-turn, where nothing steered her above a crawl, and
+ * lean-into-the-turn, where a diagonal push arced her round like a car.
+ * This one matches the Godot build, which is the reference.
+ *
+ * AT REST she is left alone. You can walk the camera most of the way
+ * round her and she just watches you over her shoulder; past
+ * REST_DEADZONE she turns, and only back to the EDGE of it, because
+ * chasing the camera onto her nose would mean she could never be
+ * looked at from the side at all.
+ *
+ * NOTHING HERE SNAPS. The direction she is trying to go eases, and her
+ * speed eases onto it separately — a standing start, a change of mind
+ * and letting go are all the same exponential, so she carries a little
+ * of her own weight instead of switching between velocities.
  */
 export class PlayerAnt {
   readonly root = new THREE.Group();
 
   private heading = 0;
   private gaitPhase = 0;
-  /** How long the camera has been outside the free-look cone. */
-  private lookHeld = 0;
-  /** True once she has committed to coming round to it. */
-  private chasing = false;
+  /** Where she is trying to go, camera frame, eased. */
+  private wish = { x: 0, y: 0 };
+  /** What she is actually doing, camera frame, world units per second. */
+  private velocity = { x: 0, y: 0 };
   private readonly body = new THREE.Group();
   private readonly slopeAhead = new THREE.Vector3();
 
@@ -53,8 +74,8 @@ export class PlayerAnt {
 
   placeAt(x: number, z: number, heading = 0): void {
     this.heading = heading;
-    this.lookHeld = 0;
-    this.chasing = false;
+    this.wish = { x: 0, y: 0 };
+    this.velocity = { x: 0, y: 0 };
     this.root.position.set(x, groundHeight(x, z), z);
     this.root.rotation.set(0, heading, 0);
   }
@@ -64,80 +85,60 @@ export class PlayerAnt {
     return this.heading;
   }
 
-  /**
-   * @param drive what the controls are asking of her this frame
-   * @param cameraYaw direction from her to the camera, in world radians
-   * @returns radians her body turned. The caller MUST hand this back to
-   *   the look control: the camera rides round with her, so without it
-   *   the offset she is chasing never closes and she spins forever.
-   */
-  update(drive: Drive, cameraYaw: number, dt: number): number {
-    const turned = this.catchUp(drive.speed, cameraYaw, dt);
-
-    // Her own frame. Facing +Z her right is -X, since right = forward
-    // cross up = (0,0,1) x (0,1,0) = (-1,0,0).
-    const ahead = drive.forward * dt;
-    const across = drive.strafe * dt;
-    if (ahead !== 0 || across !== 0) {
-      const sin = Math.sin(this.heading);
-      const cos = Math.cos(this.heading);
-      this.root.position.x += sin * ahead - cos * across;
-      this.root.position.z += cos * ahead + sin * across;
-      this.gaitPhase += Math.hypot(ahead, across) * 2.2;
-    }
-
-    this.settle();
-    return turned;
+  /** How fast she is actually travelling, after the easing. */
+  get pace(): number {
+    return Math.hypot(this.velocity.x, this.velocity.y);
   }
 
   /**
-   * Let the camera lead her, softly, and only when she is slow enough
-   * for a pan to mean "look at that" rather than "go there".
+   * @param drive what the controls are asking of her this frame
+   * @param view the heading the player is LOOKING along, world radians
    *
-   * Inside the cone nothing happens at all — a few degrees of thumb
-   * must never make her wiggle. A sustained offset commits her after a
-   * delay, and from then she turns until she is actually lined up, so
-   * she settles once rather than hunting across the cone edge.
+   * Deliberately the look input rather than a bearing measured off the
+   * camera's actual position. The camera eases toward where it is
+   * wanted, so a measured bearing moves as SHE moves — which closes a
+   * loop: she turns onto it, that shifts it again, and a straight run
+   * curls into a circle. Ask the input what it wants; do not ask the
+   * follow where it got to.
    */
-  private catchUp(speed: number, cameraYaw: number, dt: number): number {
-    if (speed > CATCHUP_MAX_SPEED) {
-      this.lookHeld = 0;
-      this.chasing = false;
-      return 0;
+  update(drive: Drive, view: number, dt: number): void {
+    const asked = Math.hypot(drive.ahead, drive.across);
+
+    // Swing the wish round rather than letting it jump. Flicking the
+    // stick from one side to the other used to reverse her travel
+    // inside a frame, and the legs are still mid-stride the old way.
+    const bend = closes(DIRECTION_EASE, dt);
+    this.wish.x += (drive.across - this.wish.x) * bend;
+    this.wish.y += (drive.ahead - this.wish.y) * bend;
+
+    const gather = closes(SPEED_EASE, dt);
+    this.velocity.x += (this.wish.x - this.velocity.x) * gather;
+    this.velocity.y += (this.wish.y - this.velocity.y) * gather;
+
+    if (asked > 0.01) {
+      // Driven: she points where the camera points.
+      this.heading += shortest(this.heading, view) * closes(TURN_RATE, dt);
+    } else {
+      // At rest: only once looking is not enough on its own, and only
+      // back to the edge of the deadzone.
+      const off = shortest(this.heading, view);
+      const excess = Math.abs(off) - REST_DEADZONE;
+      if (excess > 0) this.heading += Math.sign(off) * excess * closes(REST_EASE, dt);
     }
 
-    // The camera looks from where it sits back at her, so the heading
-    // it looks along is half a turn from its bearing.
-    const target = cameraYaw + Math.PI;
-    const off = Math.atan2(
-      Math.sin(target - this.heading),
-      Math.cos(target - this.heading),
-    );
-
-    // Committing is what the cone and the delay gate. Once she has
-    // committed she finishes the turn: stopping the moment the cone is
-    // re-entered would leave her permanently 30 degrees off whatever
-    // the player was looking at, which is the opposite of the point.
-    if (!this.chasing) {
-      if (Math.abs(off) <= FREE_LOOK_ANGLE) {
-        this.lookHeld = 0;
-        return 0;
-      }
-      this.lookHeld += dt;
-      if (this.lookHeld < BODY_CATCHUP_DELAY) return 0;
-      this.chasing = true;
+    // Travel is in the CAMERA's frame, not hers: the stick means what
+    // the player sees, and her body follows it rather than steering it.
+    const step = dt;
+    if (this.velocity.x !== 0 || this.velocity.y !== 0) {
+      const right = view - Math.PI / 2;
+      this.root.position.x
+        += (Math.sin(view) * this.velocity.y + Math.sin(right) * this.velocity.x) * step;
+      this.root.position.z
+        += (Math.cos(view) * this.velocity.y + Math.cos(right) * this.velocity.x) * step;
+      this.gaitPhase += this.pace * step * 2.2;
     }
 
-    if (Math.abs(off) < 0.02) {
-      this.chasing = false;
-      this.lookHeld = 0;
-      return 0;
-    }
-
-    const most = BODY_CATCHUP_RATE * dt;
-    const turned = THREE.MathUtils.clamp(off, -most, most);
-    this.heading += turned;
-    return turned;
+    this.settle();
   }
 
   /** Put her on the ground, facing her heading, leaning with the slope. */

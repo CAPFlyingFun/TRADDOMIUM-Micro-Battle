@@ -6,17 +6,18 @@
  * it does not implement movement, and this file is what lets the whole
  * manual/auto/sprint rule set be tested without a browser.
  *
- * The frame is HER OWN BODY: forward is where she is facing, strafe is
- * her right. That is what makes sidestep mean sidestep — a six-legged
- * animal crabs sideways without turning, which a camera-relative stick
- * cannot express.
+ * The frame is THE CAMERA'S: `ahead` is away from the view and `across`
+ * is to its right. She turns to face the camera while she is driven, so
+ * her body ends up aligned with `ahead` anyway — which is what lets
+ * `across` still read as a proper sidestep on screen while the stick
+ * stays camera-relative and never fights the view.
  */
 import {
   PACE_SPEED, REVERSE_CAP, SPRINT_SPEED, STRAFE_SHARE, type Pace,
 } from './pace';
 
 export interface Demand {
-  /** Stick vector, her own frame: x is her right, y is her forward. */
+  /** Stick vector, camera frame: x is the view's right, y is away. */
   stick: { x: number; y: number };
   pace: Pace;
   /** Whether a sprint is being called for AND is affordable. */
@@ -26,10 +27,10 @@ export interface Demand {
 }
 
 export interface Travel {
-  /** Along her heading, world units per second. Negative is astern. */
-  forward: number;
-  /** Her right, world units per second. */
-  strafe: number;
+  /** Away from the camera, world units per second. Negative backs up. */
+  ahead: number;
+  /** The camera's right, world units per second. */
+  across: number;
   /** Ground speed, whatever the direction. */
   speed: number;
 }
@@ -50,16 +51,16 @@ export function resolve({ stick, pace, sprinting, auto }: Demand): Travel {
 
   // Astern is capped at a reverse walk however fast the pace allows.
   const back = Math.min(1, REVERSE_CAP / ceiling);
-  let forward = (push < 0 ? push * back : push) * ceiling;
-  let strafe = stick.x * STRAFE_SHARE * ceiling;
+  let ahead = (push < 0 ? push * back : push) * ceiling;
+  let across = stick.x * STRAFE_SHARE * ceiling;
 
   // A diagonal must not outrun the ceiling by going two ways at once.
-  const speed = Math.hypot(forward, strafe);
+  const speed = Math.hypot(ahead, across);
   if (speed > ceiling) {
     const trim = ceiling / speed;
-    forward *= trim;
-    strafe *= trim;
+    ahead *= trim;
+    across *= trim;
   }
 
-  return { forward, strafe, speed: Math.min(speed, ceiling) };
+  return { ahead, across, speed: Math.min(speed, ceiling) };
 }

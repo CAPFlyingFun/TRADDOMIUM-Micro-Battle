@@ -24,19 +24,19 @@ describe('the pace is a ceiling, not propulsion', () => {
   });
 
   it('gives full speed only at a full push', () => {
-    expect(ask({ ...push(1), pace: 'walk' }).forward).toBeCloseTo(PACE_SPEED.walk, 6);
+    expect(ask({ ...push(1), pace: 'walk' }).ahead).toBeCloseTo(PACE_SPEED.walk, 6);
   });
 
   it('is slower at half a push than at a full one', () => {
-    const half = ask({ ...push(0.5), pace: 'walk' }).forward;
-    const full = ask({ ...push(1), pace: 'walk' }).forward;
+    const half = ask({ ...push(0.5), pace: 'walk' }).ahead;
+    const full = ask({ ...push(1), pace: 'walk' }).ahead;
     expect(half).toBeGreaterThan(0);
     expect(half).toBeLessThan(full);
   });
 
   it('spends the whole stick inside whichever pace is chosen', () => {
     // Same push, three ceilings — this is the point of the redesign.
-    const at = (pace: Pace) => ask({ ...push(0.5), pace }).forward;
+    const at = (pace: Pace) => ask({ ...push(0.5), pace }).ahead;
     expect(at('crawl')).toBeCloseTo(PACE_SPEED.crawl / 2, 6);
     expect(at('walk')).toBeCloseTo(PACE_SPEED.walk / 2, 6);
     expect(at('run')).toBeCloseTo(PACE_SPEED.run / 2, 6);
@@ -45,46 +45,46 @@ describe('the pace is a ceiling, not propulsion', () => {
 
 describe('reverse', () => {
   it('backs her up', () => {
-    expect(ask(push(-1)).forward).toBeLessThan(0);
+    expect(ask(push(-1)).ahead).toBeLessThan(0);
   });
 
   it('is slower than going forward at the same pace', () => {
-    const ahead = ask({ ...push(1), pace: 'run' }).forward;
-    const astern = Math.abs(ask({ ...push(-1), pace: 'run' }).forward);
+    const ahead = ask({ ...push(1), pace: 'run' }).ahead;
+    const astern = Math.abs(ask({ ...push(-1), pace: 'run' }).ahead);
     expect(astern).toBeLessThan(ahead);
   });
 
   it('never exceeds a reverse walk, however high the pace', () => {
     for (const pace of ['crawl', 'walk', 'run'] as Pace[]) {
-      expect(Math.abs(ask({ ...push(-1), pace }).forward)).toBeLessThanOrEqual(REVERSE_CAP);
+      expect(Math.abs(ask({ ...push(-1), pace }).ahead)).toBeLessThanOrEqual(REVERSE_CAP);
     }
   });
 
   it('cannot be sprinted', () => {
-    const astern = Math.abs(ask({ ...push(-1), pace: 'run', sprinting: true }).forward);
+    const astern = Math.abs(ask({ ...push(-1), pace: 'run', sprinting: true }).ahead);
     expect(astern).toBeLessThanOrEqual(REVERSE_CAP);
   });
 });
 
-describe('sidestep', () => {
-  it('comes out sideways, not as a turn', () => {
+describe('sideways', () => {
+  it('comes out across the view, not as a turn', () => {
     const travel = ask(push(0, 1));
-    expect(travel.strafe).toBeGreaterThan(0);
-    expect(travel.forward).toBe(0);
+    expect(travel.across).toBeGreaterThan(0);
+    expect(travel.ahead).toBe(0);
   });
 
-  it('goes her left on a left push', () => {
-    expect(ask(push(0, -1)).strafe).toBeLessThan(0);
+  it('goes the other way on a left push', () => {
+    expect(ask(push(0, -1)).across).toBeLessThan(0);
   });
 
   it('is slower than striding forward', () => {
-    expect(Math.abs(ask(push(0, 1)).strafe)).toBeLessThan(ask(push(1)).forward);
+    expect(Math.abs(ask(push(0, 1)).across)).toBeLessThan(ask(push(1)).ahead);
   });
 });
 
 describe('sprint', () => {
   it('raises the ceiling rather than adding a gear', () => {
-    expect(ask({ ...push(1), pace: 'run', sprinting: true }).forward)
+    expect(ask({ ...push(1), pace: 'run', sprinting: true }).ahead)
       .toBeCloseTo(SPRINT_SPEED, 6);
   });
 
@@ -95,17 +95,17 @@ describe('sprint', () => {
 
 describe('auto', () => {
   it('supplies the forward push itself', () => {
-    expect(ask({ auto: true, pace: 'run' }).forward).toBeCloseTo(PACE_SPEED.run, 6);
+    expect(ask({ auto: true, pace: 'run' }).ahead).toBeCloseTo(PACE_SPEED.run, 6);
   });
 
-  it('still sidesteps under the player', () => {
-    expect(ask({ auto: true, ...push(0, 1) }).strafe).toBeGreaterThan(0);
+  it('can still be pushed sideways under the player', () => {
+    expect(ask({ auto: true, ...push(0, 1) }).across).toBeGreaterThan(0);
   });
 
   it('falls back to the sustainable pace when a sprint is spent', () => {
     // The exhausted case: sprinting goes false, she keeps travelling.
     const spent = ask({ auto: true, pace: 'run', sprinting: false });
-    expect(spent.forward).toBeCloseTo(PACE_SPEED.run, 6);
+    expect(spent.ahead).toBeCloseTo(PACE_SPEED.run, 6);
     expect(spent.speed).toBeGreaterThan(0);
   });
 });

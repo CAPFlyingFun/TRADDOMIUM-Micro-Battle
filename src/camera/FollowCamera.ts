@@ -5,9 +5,10 @@ import { groundHeight } from '../world/heightfield';
 /**
  * Third-person chase camera.
  *
- * It orbits the ant rather than hanging off her tail, so the look pad
- * can swing it around and lift it without fighting the follow. With no
- * look input it sits at rest: directly behind her, a little above.
+ * It orbits the ant on a WORLD bearing and follows her position, so it
+ * never turns because she turned. That is deliberate: her body is what
+ * comes onto the view, not the other way round, and a camera that also
+ * chased her heading would make the pair spin.
  *
  * Elevation is measured ABOVE THE HORIZON here. The camera-angle
  * setting on the board counts from straight down instead, so a setting
@@ -35,8 +36,8 @@ export class FollowCamera {
     this.camera = new THREE.PerspectiveCamera(58, aspect, 0.5, 9000);
   }
 
-  snapTo(target: THREE.Object3D): void {
-    const rest: LookInput = { yaw: 0, pitch: 0, active: false };
+  snapTo(target: THREE.Object3D, yaw = 0): void {
+    const rest: LookInput = { yaw, pitch: 0, active: false };
     this.place(target, rest, this.desired);
     this.camera.position.copy(this.desired);
     this.aim(target);
@@ -57,13 +58,19 @@ export class FollowCamera {
   }
 
   private place(target: THREE.Object3D, look: LookInput, out: THREE.Vector3): void {
-    // Rest is directly behind her: her heading plus half a turn.
+    // A WORLD bearing, not one measured off her nose.
+    //
+    // It used to be her heading plus half a turn, which bolted the
+    // camera to her facing. That cannot work now that looking is how
+    // she is steered: her body follows the view, and if the view also
+    // followed her body the two would chase each other round forever.
+    // She comes to the camera; the camera holds still.
     //
     // The look yaw is SUBTRACTED. A drag reports positive yaw when it
     // travels right across the screen, and swinging the camera the same
     // way round the ant read as backwards on the device, so a rightward
     // drag walks the camera the other way. See tests/followCamera.test.ts.
-    const yaw = target.rotation.y + Math.PI - look.yaw;
+    const yaw = Math.PI - look.yaw;
     const elevation = THREE.MathUtils.clamp(
       this.restElevation + look.pitch,
       this.minElevation,

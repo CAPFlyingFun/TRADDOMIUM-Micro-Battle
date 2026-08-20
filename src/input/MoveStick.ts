@@ -224,8 +224,11 @@ export class MoveStick {
       width: `${RANGE * 2}px`,
       height: `${RANGE * 2}px`,
       borderRadius: '50%',
-      border: '3px solid rgba(255, 210, 110, .55)',
-      background: 'rgba(18, 14, 6, .3)',
+      border: '3px solid rgba(255, 216, 130, .8)',
+      // Darker and outlined since the ground gained its texture: over
+      // pale sand in sunlight the old glass was barely there.
+      background: 'rgba(18, 14, 6, .42)',
+      boxShadow: '0 0 0 2px rgba(0, 0, 0, .35), 0 2px 10px rgba(0, 0, 0, .35)',
       touchAction: 'none',
       userSelect: 'none',
       zIndex: '12',
@@ -240,7 +243,9 @@ export class MoveStick {
       marginLeft: '-26px',
       marginTop: '-26px',
       borderRadius: '50%',
-      background: 'rgba(255, 210, 110, .72)',
+      background: 'rgba(255, 210, 110, .85)',
+      border: '2px solid rgba(40, 28, 10, .5)',
+      boxSizing: 'border-box',
       pointerEvents: 'none',
     } as Partial<CSSStyleDeclaration>);
 

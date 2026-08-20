@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
-  CATCHUP_MAX_SPEED, fasterPace, PACE_MARK, PACE_NAME, PACE_SPEED, PACES,
-  REVERSE_CAP, slowerPace, SPRINT_SPEED, type Pace,
+  DIRECTION_EASE, fasterPace, PACE_MARK, PACE_NAME, PACE_SPEED, PACES,
+  REST_DEADZONE, REST_EASE, REVERSE_CAP, slowerPace, SPEED_EASE,
+  SPRINT_SPEED, TURN_RATE, type Pace,
 } from '../src/ant/pace';
 
 describe('the pace ladder', () => {
@@ -45,12 +46,24 @@ describe('stepping the pace', () => {
   });
 });
 
-describe('the catch-up ceiling', () => {
-  it('covers a crawl and nothing faster', () => {
-    // Joshua's call: you slow down to turn. This is the one constant
-    // that reverses it, so it is worth pinning where it sits.
-    expect(CATCHUP_MAX_SPEED).toBeGreaterThanOrEqual(PACE_SPEED.crawl);
-    expect(CATCHUP_MAX_SPEED).toBeLessThan(PACE_SPEED.walk);
+describe('the feel constants', () => {
+  it('steers faster than it settles at rest', () => {
+    // While she is driven, steering IS looking, so it has to be brisk.
+    // At rest she is only shuffling round to face you, and that should
+    // not read as a snap.
+    expect(TURN_RATE).toBeGreaterThan(REST_EASE * 2);
+  });
+
+  it('leaves a generous deadzone to be looked at within', () => {
+    // Small enough and she can never be seen from the side at all.
+    expect(REST_DEADZONE).toBeGreaterThan(Math.PI / 4);
+    expect(REST_DEADZONE).toBeLessThan(Math.PI);
+  });
+
+  it('changes her mind more slowly than it changes her speed', () => {
+    // Flicking the stick across must not reverse her travel in a frame,
+    // which needs the direction to swing slower than the speed eases.
+    expect(DIRECTION_EASE).toBeLessThan(SPEED_EASE);
   });
 });
 

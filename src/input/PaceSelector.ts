@@ -72,7 +72,8 @@ export class PaceSelector {
       textAlign: 'center',
       font: '700 9px/1 "Chakra Petch", system-ui, sans-serif',
       letterSpacing: '1.5px',
-      color: 'rgba(255, 226, 160, .55)',
+      color: 'rgba(255, 232, 178, .9)',
+      textShadow: '0 1px 3px rgba(0, 0, 0, .8)',
       pointerEvents: 'none',
     } as Partial<CSSStyleDeclaration>);
 
@@ -246,8 +247,10 @@ export class PaceSelector {
       display: 'flex',
       flexDirection: 'column',
       borderRadius: '10px',
-      border: '2px solid rgba(255, 210, 110, .45)',
-      background: 'rgba(18, 14, 6, .44)',
+      border: '2px solid rgba(255, 216, 130, .7)',
+      // See MoveStick: the textured ground took the old glass with it.
+      background: 'rgba(18, 14, 6, .6)',
+      boxShadow: '0 0 0 2px rgba(0, 0, 0, .3), 0 2px 10px rgba(0, 0, 0, .3)',
       overflow: 'hidden',
       touchAction: 'none',
       userSelect: 'none',
@@ -283,7 +286,8 @@ export class PaceSelector {
       textAlign: 'center',
       whiteSpace: 'nowrap',
       font: '600 10px/1 "JetBrains Mono", ui-monospace, monospace',
-      color: 'rgba(255, 226, 160, .72)',
+      color: 'rgba(255, 232, 178, .95)',
+      textShadow: '0 1px 3px rgba(0, 0, 0, .85)',
       userSelect: 'none',
       pointerEvents: 'none',
     } as Partial<CSSStyleDeclaration>);

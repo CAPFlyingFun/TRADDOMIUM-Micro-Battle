@@ -8,10 +8,10 @@ import { AutoRun } from '../input/autoRun';
 import { resolve } from '../ant/locomotion';
 import { fasterPace, PACE_SPEED, slowerPace, type Pace } from '../ant/pace';
 import { Stamina } from '../ant/stamina';
-import {
-  bandFor, groundDetail, groundHeight, ISLAND_SPAN, type Band,
-} from '../world/heightfield';
+import { groundDetail, groundHeight, ISLAND_SPAN } from '../world/heightfield';
 import { findLandfall, type HeightGrid } from '../world/kauai';
+import { bakeGrain, GRAIN_SIZE } from '../world/groundTexture';
+import { loadBands, terrainMaterial } from '../world/terrainMaterial';
 
 /**
  * THE ISLAND — Kauai at 1:1000, walked by one ant.
@@ -28,18 +28,14 @@ import { findLandfall, type HeightGrid } from '../world/kauai';
  * into the lighting.
  */
 
-const BAND_COLORS: Record<Band, THREE.Color> = {
-  seabed: new THREE.Color(0x2f4757),
-  reef: new THREE.Color(0x6f8f7d),
-  sand: new THREE.Color(0xdccb88),
-  lowland: new THREE.Color(0x6f9a48),
-  jungle: new THREE.Color(0x3d6b32),
-  cliff: new THREE.Color(0x8a7d6b),
-  peak: new THREE.Color(0xa9a396),
-};
-
-/** Bare earth shown through the cover wherever the ground steepens. */
-const SOIL_COLOR = new THREE.Color(0x6d5940);
+/**
+ * Bare earth shown through the cover wherever the ground steepens.
+ *
+ * A MULTIPLIER now, not a colour. The band textures carry what the
+ * ground looks like; the vertex stream only shades it, so this warms
+ * and darkens a slope toward soil rather than painting brown over it.
+ */
+const SOIL_TINT = new THREE.Color(1.22, 0.98, 0.72);
 
 const SKY_COLOR = 0x9cc8e8;
 
@@ -81,9 +77,18 @@ export class IslandScene {
   private pace: Pace = 'walk';
   /** A sprint asked for and not yet given up. */
   private sprintOn = false;
+  /**
+   * Set when a sprint runs dry, cleared when the ask stops. A held key
+   * must not quietly start sprinting again the moment the bar creeps
+   * back over its re-arm mark: that stutters between a sprint and a run
+   * without the player asking for either. The next one is deliberate.
+   */
+  private reask = false;
   private readonly auto = new AutoRun();
   private readonly stamina = new Stamina();
   private speed = 0;
+  /** Simulated seconds since boot — what the probes wait on. */
+  private elapsed = 0;
   /**
    * Watches the canvas host itself. Orientation changes fire `resize`
    * before the viewport has settled on some phones, so a handler that
@@ -111,14 +116,18 @@ export class IslandScene {
     // Pick the opening spot from the real terrain rather than a
     // hand-typed coordinate a re-bake could drop into the sea.
     const start = findLandfall(grid, 3, 20);
-    this.ant.placeAt(start.x, start.z, Math.atan2(-start.x, -start.z));
+    const facing = Math.atan2(-start.x, -start.z);
+    this.ant.placeAt(start.x, start.z, facing);
     this.scene.add(this.ant.root);
 
     this.stick = new MoveStick(host);
     this.paceUI = new PaceSelector(host);
     this.look = new LookDrag(host);
+    // The view is a world bearing, so it has to be told where behind
+    // her IS. Without this she opens side-on to her own camera.
+    this.look.setYaw(-facing);
     this.follow = new FollowCamera(this.aspect());
-    this.follow.snapTo(this.ant.root);
+    this.follow.snapTo(this.ant.root, -facing);
 
     this.watchSize.observe(host);
     window.addEventListener('resize', this.onResize);
@@ -138,6 +147,10 @@ export class IslandScene {
       setPace: (to: Pace) => { this.pace = to; },
       stamina: () => this.stamina.fraction,
       speed: () => this.speed,
+      // Wall clock is not game time here: a frame under a software
+      // renderer is worth hundreds of milliseconds, so every check that
+      // means "after N seconds of PLAY" has to wait on this instead.
+      simTime: () => this.elapsed,
       auto: () => this.auto.state,
       sprinting: () => this.sprintOn,
       setSprint: (on: boolean) => { this.sprintOn = on; },
@@ -162,6 +175,7 @@ export class IslandScene {
     if (this.disposed) return;
     // Clamp dt so a backgrounded tab does not teleport the ant on return.
     const dt = Math.min(this.clock.getDelta(), 0.1);
+    this.elapsed += dt;
     const look = this.look.read(dt);
     const stick = this.stick.read();
 
@@ -180,7 +194,9 @@ export class IslandScene {
     }
 
     if (this.paceUI.takeSprintTaps() % 2 === 1) this.sprintOn = !this.sprintOn;
-    const wants = (this.sprintOn || this.paceUI.sprintHeld) && !this.stamina.spent;
+    const asking = this.sprintOn || this.paceUI.sprintHeld;
+    if (!asking) this.reask = false;
+    const wants = asking && !this.reask && !this.stamina.spent;
 
     const travel = resolve({
       stick,
@@ -188,29 +204,31 @@ export class IslandScene {
       sprinting: wants,
       auto: this.auto.active,
     });
-    this.speed = travel.speed;
 
     // Only charge her for a sprint she is actually getting: calling for
     // one while stopped or reversing costs nothing.
     const sprinting = wants && travel.speed > PACE_SPEED[this.pace] + 1e-3;
-    const winded = this.stamina.update(sprinting, travel.speed < 0.01, dt);
+    const winded = this.stamina.update(sprinting, this.ant.pace < 0.05, dt);
     // Exhaustion drops her to the sustainable pace, never to a halt —
     // and the next sprint has to be asked for deliberately.
-    if (winded) this.sprintOn = false;
+    if (winded) {
+      this.sprintOn = false;
+      this.reask = true;
+    }
 
     this.paceUI.show(
       this.pace, sprinting, this.stamina.fraction, this.stamina.spent,
-      travel.speed, this.auto.active,
+      this.ant.pace, this.auto.active,
     );
 
-    const cameraYaw = Math.atan2(
-      this.follow.camera.position.x - this.ant.root.position.x,
-      this.follow.camera.position.z - this.ant.root.position.z,
-    );
-    // She may turn to catch the camera up at low speed; the view has to
-    // give that angle back, or it rides round with her and never closes.
-    const turned = this.ant.update(travel, cameraYaw, dt);
-    if (turned !== 0) look.yaw = this.look.absorb(turned);
+    // The heading the player is LOOKING along. Taken from the input,
+    // not from where the camera happens to have eased to: a measured
+    // bearing moves as she moves, and steering off it curls a straight
+    // run into a circle.
+    this.ant.update(travel, -look.yaw, dt);
+    // Read AFTER she has moved: this is what she is actually doing,
+    // which the easing makes different from what was asked for.
+    this.speed = this.ant.pace;
     this.follow.update(this.ant.root, look, dt);
     this.chooseDetail();
     this.renderer.render(this.scene, this.follow.camera);
@@ -243,10 +261,21 @@ export class IslandScene {
   }
 
   private buildTerrain(): void {
-    const material = new THREE.MeshStandardMaterial({
-      vertexColors: true,
-      roughness: 0.95,
-    });
+    // A baked tile rather than a shipped asset: no fetch to wait on,
+    // and it exists to break up the band textures' own repeat at very
+    // close range, where the camera spends its whole life.
+    const grain = new THREE.DataTexture(
+      bakeGrain(GRAIN_SIZE), GRAIN_SIZE, GRAIN_SIZE, THREE.RGBAFormat,
+    );
+    grain.wrapS = THREE.RepeatWrapping;
+    grain.wrapT = THREE.RepeatWrapping;
+    grain.anisotropy = this.renderer.capabilities.getMaxAnisotropy();
+    grain.generateMipmaps = true;
+    grain.minFilter = THREE.LinearMipmapLinearFilter;
+    grain.magFilter = THREE.LinearFilter;
+    grain.needsUpdate = true;
+
+    const material = terrainMaterial(loadBands(this.renderer), grain);
     const span = ISLAND_SPAN / SECTIONS;
     for (let sz = 0; sz < SECTIONS; sz++) {
       for (let sx = 0; sx < SECTIONS; sx++) {
@@ -340,6 +369,7 @@ function buildSection(
       positions[i * 3 + 1] = h;
       positions[i * 3 + 2] = z;
 
+
       // Central differences give the true surface gradient, so sections
       // agree along their shared edges and the seams disappear.
       const dhdx = (at(ix + 2, iz + 1) - at(ix, iz + 1)) / (2 * step);
@@ -349,9 +379,11 @@ function buildSection(
       normals[i * 3 + 1] = 1 / len;
       normals[i * 3 + 2] = -dhdz / len;
 
+      // Shading only — what the ground IS comes from the band textures
+      // in terrainMaterial.ts, which this multiplies.
       const slope = Math.hypot(dhdx, dhdz);
-      tint.copy(BAND_COLORS[bandFor(h)]);
-      if (h > 0) tint.lerp(SOIL_COLOR, Math.min(0.68, slope * 0.55));
+      tint.setRGB(1, 1, 1);
+      if (h > 0) tint.lerp(SOIL_TINT, Math.min(0.6, slope * 0.55));
       tint.multiplyScalar(1 + groundDetail(x, z) * 0.11);
       colors[i * 3] = tint.r;
       colors[i * 3 + 1] = tint.g;

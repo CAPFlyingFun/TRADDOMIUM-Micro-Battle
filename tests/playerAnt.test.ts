@@ -1,120 +1,171 @@
 import { describe, expect, it } from 'vitest';
 import { PlayerAnt, type Drive } from '../src/ant/PlayerAnt';
-import { CATCHUP_MAX_SPEED, FREE_LOOK_ANGLE, PACE_SPEED } from '../src/ant/pace';
+import { PACE_SPEED, REST_DEADZONE } from '../src/ant/pace';
 
 /**
- * Camera parked behind her on -Z. `cameraYaw` is the bearing FROM her
- * TO the camera, which is what IslandScene measures, so directly behind
- * an ant facing +Z is atan2(0, -7) = PI. Add to it to swing the camera.
+ * The heading the player is LOOKING along. An ant facing +Z with the
+ * camera behind her is being looked at along +Z, which is heading 0.
+ * Add to it to swing the view round to her left.
  */
-const BEHIND = Math.atan2(0, -7);
+const BEHIND = 0;
 
 const DT = 1 / 60;
 
 function drive(over: Partial<Drive> = {}): Drive {
-  return { forward: 0, strafe: 0, speed: 0, ...over };
+  const full = { ahead: 0, across: 0, speed: 0, ...over };
+  // Callers give the components; the magnitude follows from them.
+  full.speed = Math.hypot(full.ahead, full.across);
+  return full;
 }
 
 /** Run her for a while and report where she ended up. */
-function travel(over: Partial<Drive>, seconds = 2, cameraYaw = BEHIND) {
+function travel(over: Partial<Drive>, seconds = 2, view = BEHIND) {
   const ant = new PlayerAnt();
-  ant.placeAt(0, 0, 0); // facing +Z
+  ant.placeAt(0, 0, 0); // facing +Z, camera behind on -Z
   for (let i = 0; i < Math.round(seconds / DT); i++) {
-    ant.update(drive(over), cameraYaw, DT);
+    ant.update(drive(over), view, DT);
   }
-  return { x: ant.root.position.x, z: ant.root.position.z, bearing: ant.bearing };
+  return {
+    x: ant.root.position.x,
+    z: ant.root.position.z,
+    bearing: ant.bearing,
+    pace: ant.pace,
+  };
 }
 
-/** Hold the camera at a fixed world bearing and see if she comes round. */
-function watched(swing: number, speed: number, seconds = 2) {
-  const ant = new PlayerAnt();
-  ant.placeAt(0, 0, 0);
-  let absorbed = 0;
-  for (let i = 0; i < Math.round(seconds / DT); i++) {
-    // The scene hands each turn back to the look control so the camera
-    // stays put in the world; holding cameraYaw fixed here is the same
-    // thing seen from the other side.
-    absorbed += ant.update(drive({ speed }), BEHIND + swing, DT);
-  }
-  return { bearing: ant.bearing, absorbed };
-}
-
-describe('she moves in her own frame', () => {
+describe('the stick is in the camera’s frame', () => {
   it('stands still when nothing is asked of her', () => {
     // Release the stick and she stops. No setting carries her.
     const end = travel({});
     expect(Math.hypot(end.x, end.z)).toBe(0);
   });
 
-  it('walks forward along her heading', () => {
-    const end = travel({ forward: PACE_SPEED.walk, speed: PACE_SPEED.walk });
-    expect(end.z).toBeCloseTo(PACE_SPEED.walk * 2, 0);
-    expect(Math.abs(end.x)).toBeLessThan(1e-9);
+  it('sends her away from the camera on a forward push', () => {
+    const end = travel({ ahead: PACE_SPEED.walk });
+    expect(end.z).toBeGreaterThan(1);
+    expect(Math.abs(end.x)).toBeLessThan(0.5);
   });
 
-  it('backs up without turning round', () => {
-    const end = travel({ forward: -2.2, speed: 2.2 });
-    expect(end.z).toBeLessThan(-1);
-    expect(end.bearing).toBe(0);
+  it('backs her toward the camera on a reverse push', () => {
+    expect(travel({ ahead: -2.2 }).z).toBeLessThan(-1);
   });
 
-  it('sidesteps to her right without turning', () => {
-    // Facing +Z, her right is -X: right = forward cross up.
-    const end = travel({ strafe: 4, speed: 4 });
-    expect(end.x).toBeLessThan(-1);
-    expect(Math.abs(end.z)).toBeLessThan(1e-9);
-    expect(end.bearing).toBe(0);
+  it('sends her to the view’s right on a sideways push', () => {
+    // Looking along +Z, the viewer's right is world -X.
+    expect(travel({ across: 4 }).x).toBeLessThan(-1);
   });
 
-  it('sidesteps to her left on a left push', () => {
-    expect(travel({ strafe: -4, speed: 4 }).x).toBeGreaterThan(1);
+  it('sends her to the view’s left on a left push', () => {
+    expect(travel({ across: -4 }).x).toBeGreaterThan(1);
   });
 
-  it('carries the sidestep round with her heading', () => {
-    const ant = new PlayerAnt();
-    ant.placeAt(0, 0, Math.PI / 2); // facing +X, so her right is +Z
-    for (let i = 0; i < 60; i++) ant.update(drive({ strafe: 4, speed: 4 }), BEHIND, DT);
-    expect(ant.root.position.z).toBeGreaterThan(1);
+  it('goes where the CAMERA points, not where she is facing', () => {
+    // This is the whole scheme in one check. She starts facing +Z with
+    // the view swung a quarter turn; a forward push must follow the
+    // view, and her body must come round to it rather than resist.
+    const end = travel({ ahead: PACE_SPEED.walk }, 2, BEHIND + Math.PI / 2);
+    expect(Math.abs(end.x)).toBeGreaterThan(1);
+    expect(Math.abs(end.bearing)).toBeGreaterThan(1);
   });
 });
 
-describe('the camera may lead her, but only slowly', () => {
-  it('ignores a small pan — she must not wiggle', () => {
-    expect(watched(FREE_LOOK_ANGLE * 0.6, 0).bearing).toBe(0);
+describe('steering is looking', () => {
+  it('brings her onto the view while she is driven', () => {
+    const end = travel({ ahead: PACE_SPEED.walk }, 1, BEHIND + 0.9);
+    expect(end.bearing).toBeCloseTo(0.9, 1);
   });
 
-  it('comes round to a sustained look, after a beat', () => {
-    expect(watched(0.9, 0).bearing).toBeGreaterThan(0.5);
+  it('does it briskly — steering that lags reads as ice', () => {
+    // Most of the way round inside a fifth of a second.
+    const end = travel({ ahead: PACE_SPEED.walk }, 0.2, BEHIND + 1.0);
+    expect(end.bearing).toBeGreaterThan(0.9);
   });
 
-  it('waits out the delay before starting', () => {
-    // Nothing has moved yet at 0.3 s; BODY_CATCHUP_DELAY is 0.35.
-    expect(watched(0.9, 0, 0.3).bearing).toBe(0);
+  it('leaves her alone at rest inside the deadzone', () => {
+    // Standing still you can look most of the way round her and she
+    // just watches you over her shoulder.
+    expect(travel({}, 2, BEHIND + REST_DEADZONE * 0.8).bearing).toBe(0);
   });
 
-  it('lines up with the look rather than stopping at the cone edge', () => {
-    expect(watched(0.9, 0, 3).bearing).toBeCloseTo(0.9, 1);
+  it('turns at rest once looking is not enough on its own', () => {
+    expect(travel({}, 2, BEHIND + 1.9).bearing).toBeGreaterThan(0.4);
+  });
+
+  it('comes back only to the EDGE of the deadzone, not onto her nose', () => {
+    // Chasing it to zero would mean she could never be looked at from
+    // the side at all.
+    const swing = 1.9;
+    const end = travel({}, 4, BEHIND + swing);
+    expect(end.bearing).toBeCloseTo(swing - REST_DEADZONE, 1);
   });
 
   it('turns the other way for a look the other way', () => {
-    expect(watched(-0.9, 0).bearing).toBeLessThan(-0.5);
+    expect(travel({}, 2, BEHIND - 1.9).bearing).toBeLessThan(-0.4);
+  });
+});
+
+describe('nothing snaps', () => {
+  it('takes a moment to get up to speed', () => {
+    // A standing start must not reach full pace in one frame.
+    const ant = new PlayerAnt();
+    ant.placeAt(0, 0, 0);
+    ant.update(drive({ ahead: PACE_SPEED.run }), BEHIND, DT);
+    expect(ant.pace).toBeGreaterThan(0);
+    expect(ant.pace).toBeLessThan(PACE_SPEED.run * 0.5);
   });
 
-  it('still leads her at a crawl', () => {
-    expect(watched(0.9, CATCHUP_MAX_SPEED).bearing).toBeGreaterThan(0.3);
+  it('gets there soon enough to feel connected', () => {
+    expect(travel({ ahead: PACE_SPEED.run }, 1).pace)
+      .toBeGreaterThan(PACE_SPEED.run * 0.95);
   });
 
-  it('does NOT redirect her at a walk', () => {
-    // Looking around at speed must never yank her onto a new heading.
-    expect(watched(0.9, PACE_SPEED.walk).bearing).toBe(0);
+  it('coasts to a stop rather than halting dead', () => {
+    const ant = new PlayerAnt();
+    ant.placeAt(0, 0, 0);
+    for (let i = 0; i < 90; i++) ant.update(drive({ ahead: PACE_SPEED.run }), BEHIND, DT);
+    const running = ant.pace;
+    ant.update(drive({}), BEHIND, DT);
+    expect(ant.pace).toBeLessThan(running);
+    expect(ant.pace).toBeGreaterThan(0);
   });
 
-  it('does NOT redirect her at a sprint', () => {
-    expect(watched(2.5, 18).bearing).toBe(0);
+  it('does stop, and soon', () => {
+    const ant = new PlayerAnt();
+    ant.placeAt(0, 0, 0);
+    for (let i = 0; i < 90; i++) ant.update(drive({ ahead: PACE_SPEED.run }), BEHIND, DT);
+    for (let i = 0; i < 90; i++) ant.update(drive({}), BEHIND, DT);
+    expect(ant.pace).toBeLessThan(0.05);
   });
 
-  it('reports every radian it turned, so the view can absorb them', () => {
-    const end = watched(0.9, 0, 3);
-    expect(end.absorbed).toBeCloseTo(end.bearing, 6);
+  it('does not reverse her travel inside a frame', () => {
+    // Flicking the stick across used to do exactly that, and the legs
+    // are still mid-stride the old way when it happens.
+    const ant = new PlayerAnt();
+    ant.placeAt(0, 0, 0);
+    for (let i = 0; i < 90; i++) ant.update(drive({ across: 5 }), BEHIND, DT);
+    const before = ant.root.position.x;
+    ant.update(drive({ across: -5 }), BEHIND, DT);
+    // Still travelling the old way one frame after the reversal.
+    expect(ant.root.position.x).toBeLessThan(before);
+  });
+
+  it('is frame-rate independent', () => {
+    // A per-frame lerp factor with no dt in it — the usual mistake —
+    // makes a 30 fps phone and a 120 fps one play at different speeds.
+    // Chaining two exponentials leaves a few percent of discretisation
+    // in the standing start; a missing dt leaves several hundred.
+    const run = (dt: number, seconds: number) => {
+      const ant = new PlayerAnt();
+      ant.placeAt(0, 0, 0);
+      for (let i = 0; i < Math.round(seconds / dt); i++) {
+        ant.update(drive({ ahead: PACE_SPEED.walk }), BEHIND, dt);
+      }
+      return { z: ant.root.position.z, pace: ant.pace };
+    };
+    const slow = run(1 / 30, 1);
+    const fast = run(1 / 120, 1);
+    expect(Math.abs(slow.z - fast.z) / fast.z).toBeLessThan(0.05);
+    // Once the ease has settled they must agree exactly.
+    expect(run(1 / 30, 3).pace).toBeCloseTo(run(1 / 120, 3).pace, 4);
   });
 });
