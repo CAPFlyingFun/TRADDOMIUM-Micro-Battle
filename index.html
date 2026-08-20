@@ -24,6 +24,14 @@
         touch-action: none;
         overscroll-behavior: none;
         font-family: system-ui, sans-serif;
+        /* Hold the stick down on iOS and Safari otherwise decides you
+           are trying to select and copy the controls. Nothing on this
+           page is text you would ever want to lift, so none of it is
+           selectable and none of it raises the callout. */
+        -webkit-touch-callout: none;
+        -webkit-user-select: none;
+        user-select: none;
+        -webkit-tap-highlight-color: transparent;
       }
       #app {
         position: fixed;

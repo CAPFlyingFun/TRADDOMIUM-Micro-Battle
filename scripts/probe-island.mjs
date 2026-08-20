@@ -54,6 +54,43 @@ try {
   if (moved < 1) throw new Error(`she barely moved: ${moved.toFixed(2)} units`);
   if (after.ground <= 0) throw new Error('she walked off into the sea');
 
+  // Auto-move: L stands in for the double-tap. She must keep going
+  // with nothing touching the controls, and stop when toggled off.
+  await page.keyboard.press('KeyL');
+  await page.waitForTimeout(400);
+  if (!(await page.evaluate(() => window.__island.autoMoving()))) {
+    throw new Error('the auto-move toggle did not engage');
+  }
+  const parked = await page.evaluate(() => window.__island.where());
+  await page.waitForTimeout(1400);
+  const cruised = await page.evaluate(() => ({
+    where: window.__island.where(),
+    gait: window.__island.gait(),
+  }));
+  const coasted = Math.hypot(
+    cruised.where[0] - parked[0], cruised.where[2] - parked[2],
+  );
+  if (coasted < 2) {
+    throw new Error(`auto-move engaged but she stopped: ${coasted.toFixed(2)} units`);
+  }
+  // She must keep the gait she was travelling at, not fall to a crawl
+  // the moment the stick recentres.
+  if (cruised.gait === 'crawl') {
+    throw new Error('auto-move dropped to a crawl once the stick recentred');
+  }
+  await page.keyboard.press('KeyL');
+  await page.waitForTimeout(400);
+  if (await page.evaluate(() => window.__island.autoMoving())) {
+    throw new Error('the auto-move toggle did not disengage');
+  }
+  const stopped = await page.evaluate(() => window.__island.where());
+  await page.waitForTimeout(700);
+  const afterStop = await page.evaluate(() => window.__island.where());
+  const drifted = Math.hypot(
+    afterStop[0] - stopped[0], afterStop[2] - stopped[2],
+  );
+  if (drifted > 1) throw new Error(`she kept going after auto-move was off: ${drifted.toFixed(2)}`);
+
   // Swing the camera with the keyboard. Compare camera positions
   // rather than pixels: the WebGL canvas has no preserved drawing
   // buffer, so toDataURL would read back blank every time and the
@@ -161,6 +198,7 @@ try {
   console.log(
     `probe:island OK — spawned ${start.ground.toFixed(1)} units above the sea, `
     + `walked ${moved.toFixed(1)} units at a ${gait}, `
+    + `auto-move cruised ${coasted.toFixed(1)} at a ${cruised.gait} and stopped on demand, `
     + `camera swings and settles back, survives a rotation\n`
     + `  ${start.triangles.toLocaleString()} triangles in ${start.drawCalls} draw calls`,
   );

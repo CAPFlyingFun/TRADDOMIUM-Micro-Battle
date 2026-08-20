@@ -72,6 +72,16 @@ export class IslandScene {
   private readonly clock = new THREE.Clock();
   private readonly sections: Section[] = [];
   private currentGait: Gait = 'walk';
+  /** Bearing auto-move is holding, or null while she is hand-driven. */
+  private autoBearing: number | null = null;
+  /** Cruising gait, chosen on the throttle while auto-move runs. */
+  private autoGait: Gait = 'walk';
+  /**
+   * The last gait she was actually travelling at. Auto-move engages
+   * from a centred stick — always, for a double-tap — so reading the
+   * live deflection there would lock in a crawl every time.
+   */
+  private lastMovingGait: Gait = 'walk';
   /**
    * Watches the canvas host itself. Orientation changes fire `resize`
    * before the viewport has settled on some phones, so a handler that
@@ -123,6 +133,7 @@ export class IslandScene {
       groundUnderfoot: () =>
         groundHeight(this.ant.root.position.x, this.ant.root.position.z),
       gait: () => this.currentGait,
+      autoMoving: () => this.autoBearing !== null,
     };
   }
 
@@ -144,18 +155,48 @@ export class IslandScene {
     // Clamp dt so a backgrounded tab does not teleport the ant on return.
     const dt = Math.min(this.clock.getDelta(), 0.1);
     const look = this.look.read(dt);
-    const stick = this.stick.read();
+    const stick = this.stick.read(dt);
 
-    // Gait lives entirely on the stick: how far she is pushed decides it.
-    const gait = gaitFromDeflection(stick.deflection);
+    const fromStick = gaitFromDeflection(stick.deflection);
+    const driving = stick.deflection > 0;
+    if (driving) this.lastMovingGait = fromStick;
+
+    // Auto-move. A double-tap toggles it; a released hold starts it.
+    if (stick.toggleAuto) {
+      this.autoBearing = this.autoBearing === null ? this.ant.bearing : null;
+      if (this.autoBearing !== null) this.autoGait = this.lastMovingGait;
+    } else if (stick.engageAuto && this.autoBearing === null) {
+      this.autoBearing = this.ant.bearing;
+      this.autoGait = this.lastMovingGait;
+    }
+
+    const auto = this.autoBearing !== null;
+    // The throttle only takes taps while auto-move is running, because
+    // that is the only time there is no thumb on the stick to read.
+    const picked = this.throttle.takeRequest();
+    if (picked && auto) this.autoGait = picked;
+
+    // A hand on the stick always wins, and steers what auto-move will
+    // carry on doing once the thumb lifts — cruise control, not a rail.
+    if (auto && driving) {
+      this.autoGait = fromStick;
+      this.autoBearing = this.ant.bearing;
+    }
+
+    const gait = driving || !auto ? fromStick : this.autoGait;
     this.currentGait = gait;
     this.throttle.show(gait);
+    this.throttle.setLive(auto);
+    this.stick.showAuto(auto);
 
     const cameraYaw = Math.atan2(
       this.follow.camera.position.x - this.ant.root.position.x,
       this.follow.camera.position.z - this.ant.root.position.z,
     );
-    this.ant.update({ move: stick, gait }, cameraYaw, dt);
+    // Read the field directly: it is null whenever auto-move is off,
+    // so a hand on the stick is the only other thing to rule out.
+    const bearing = driving ? null : this.autoBearing;
+    this.ant.update({ move: stick, gait, bearing }, cameraYaw, dt);
     this.follow.update(this.ant.root, look, dt);
     this.chooseDetail();
     this.renderer.render(this.scene, this.follow.camera);

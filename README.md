@@ -82,21 +82,37 @@ fine either way.
 ## Controls
 
 **Move** — a fixed stick, bottom left. How far you push it picks the
-gait as well as the direction: near the centre is a crawl, the rim is a
-run. That is the whole movement control; there is nothing to toggle and
-nothing to lock. On desktop, WASD and the arrow keys read as full
-deflection, so the keyboard always runs.
+gait, in zones you can see rather than feel for: inside the dashed inner
+circle is a **crawl**, the outer half of the ring is a **walk**, and
+pushing your thumb past the ring entirely is a **sprint** — the nub
+travels a little past the rim and turns amber so the sprint is visible,
+not just felt. Speed is flat within a zone; that is what the zones are
+for.
 
 Pull straight back and she **backs up** keeping her heading, rather than
 spinning on the spot. A half-turn has no shorter side, so choosing one
 would be arbitrary; lean the push off-centre and the turn direction
 becomes unambiguous, so she comes round to it instead.
 
-**Throttle** — the notched bar on the left edge is a READOUT, not a
-control. Nothing on it is tappable; it exists so the stick's analog
-gait is never invisible, showing a level that rises through the notches
-as she pushes harder. The glyphs (snail / ant / bolt) are placeholders
-standing in for real art.
+On desktop, WASD and the arrows read as a walk, and holding Shift
+sprints.
+
+**Auto-move** — for crossing an island that takes minutes to walk.
+Double-tap the stick to start it, and double-tap again to stop. Or hold
+a steady bearing: a ring fills round the rim over two seconds, and
+letting go while it is full sets her going — the *release* commits, so
+moving the stick again before you lift always backs out.
+
+She holds a **world bearing** while cruising, so swinging the camera to
+look around never steers her. Touching the stick always takes over, and
+what you steer to becomes the new cruise — it is cruise control, not a
+rail. The throttle's notches become tappable while she is cruising, so
+that is where you change the speed; the rest of the time the stick is
+already saying it and the notches stay inert.
+
+**Throttle** — the notched bar on the left edge. A readout while you
+drive, a speed picker while auto-move runs. The glyphs (snail / ant /
+bolt) are placeholders standing in for real art.
 
 **Camera** — drag anywhere the controls are not. There is no camera
 button: it would spend a slot the action controls will want, and a drag

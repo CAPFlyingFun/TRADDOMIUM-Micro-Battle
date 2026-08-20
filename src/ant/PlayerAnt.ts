@@ -20,6 +20,8 @@ export interface Drive {
   move: MoveInput;
   /** How hard she is pushing herself. */
   gait: Gait;
+  /** Bearing auto-move is holding, or null when she is hand-driven. */
+  bearing: number | null;
 }
 
 /**
@@ -62,6 +64,23 @@ export class PlayerAnt {
   update(drive: Drive, cameraYaw: number, dt: number): void {
     const { move, gait } = drive;
     const speed = GAIT_SPEED[gait];
+
+    // Auto-move holds a WORLD bearing, so swinging the camera to look
+    // around cannot steer her into the sea.
+    //
+    // Tested for a number rather than against null on purpose: an
+    // absent bearing used to pass a `!== null` check and drive her
+    // heading to NaN, which corrupts her position silently and cannot
+    // be recovered from.
+    if (typeof drive.bearing === 'number') {
+      this.heading = drive.bearing;
+      const step = speed * dt;
+      this.root.position.x += Math.sin(this.heading) * step;
+      this.root.position.z += Math.cos(this.heading) * step;
+      this.gaitPhase += step * 2.2;
+      this.settle();
+      return;
+    }
 
     const strength = Math.min(1, Math.hypot(move.x, move.y));
     if (strength > 0.05) {

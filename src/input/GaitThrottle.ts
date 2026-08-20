@@ -1,14 +1,15 @@
 /**
- * THE THROTTLE — a readout, not a control.
+ * THE THROTTLE — a readout that becomes a control when auto-move is on.
  *
- * Gait lives entirely on the stick: how far you push decides it. This
- * bar exists so that analog control is never invisible — one slim
- * track with a fill that rises through the notches, so a glance reads
- * how hard she is pushing.
+ * While you are driving, gait lives entirely on the stick and this bar
+ * only reports it, so the zones you cannot see under your thumb are at
+ * least legible. The moment auto-move takes over there is no thumb on
+ * the stick to read, so the notches become tappable and this is where
+ * the cruising speed is chosen.
  *
- * Nothing here is tappable. Buttons that pin a gait were tried and cut:
- * they re-introduce the state the stick was meant to replace, and spend
- * screen space the action controls will want.
+ * That split is deliberate: a control that does nothing most of the
+ * time would be clutter, and one that competes with the stick would be
+ * two ways to say the same thing.
  *
  * The glyphs are placeholders standing in for real art.
  */
@@ -17,7 +18,7 @@ import { GAITS, type Gait } from '../ant/gait';
 const GLYPH: Record<Gait, string> = {
   crawl: '🐌',
   walk: '🐜',
-  run: '⚡',
+  sprint: '⚡',
 };
 
 const TRACK_WIDTH = 34;
@@ -26,9 +27,13 @@ const NOTCH_HEIGHT = 44;
 export class GaitThrottle {
   private readonly track: HTMLDivElement;
   private readonly fill: HTMLDivElement;
-  private readonly notches = new Map<Gait, HTMLDivElement>();
+  private readonly notches = new Map<Gait, HTMLButtonElement>();
+  private readonly detach: Array<() => void> = [];
 
   private shown: Gait | null = null;
+  private live = false;
+  /** Set when a notch is tapped, for the scene to pick up. */
+  private asked: Gait | null = null;
 
   constructor(host: HTMLElement) {
     this.track = document.createElement('div');
@@ -38,10 +43,19 @@ export class GaitThrottle {
 
     // Fastest at the top, the way a throttle reads.
     for (const gait of [...GAITS].reverse()) {
-      const notch = document.createElement('div');
+      const notch = document.createElement('button');
+      notch.type = 'button';
       notch.textContent = GLYPH[gait];
       notch.setAttribute('aria-label', gait);
       this.styleNotch(notch);
+      const onTap = (e: PointerEvent) => {
+        if (!this.live) return;
+        this.asked = gait;
+        e.stopPropagation();
+        e.preventDefault();
+      };
+      notch.addEventListener('pointerdown', onTap);
+      this.detach.push(() => notch.removeEventListener('pointerdown', onTap));
       this.notches.set(gait, notch);
       this.track.appendChild(notch);
     }
@@ -49,7 +63,27 @@ export class GaitThrottle {
     host.appendChild(this.track);
   }
 
-  /** Move the throttle to whatever gait the stick is asking for. */
+  /** Whether the notches can be tapped — true only while auto-move runs. */
+  setLive(live: boolean): void {
+    if (this.live === live) return;
+    this.live = live;
+    this.track.style.borderColor = live
+      ? 'rgba(143, 224, 168, .8)'
+      : 'rgba(255, 210, 110, .5)';
+    for (const notch of this.notches.values()) {
+      notch.style.pointerEvents = live ? 'auto' : 'none';
+      notch.style.cursor = live ? 'pointer' : 'default';
+    }
+  }
+
+  /** A gait tapped since the last read, or null. */
+  takeRequest(): Gait | null {
+    const asked = this.asked;
+    this.asked = null;
+    return asked;
+  }
+
+  /** Move the throttle to whatever gait is in force. */
   show(gait: Gait): void {
     if (this.shown === gait) return;
     this.shown = gait;
@@ -67,6 +101,7 @@ export class GaitThrottle {
   }
 
   dispose(): void {
+    for (const off of this.detach) off();
     this.track.remove();
   }
 
@@ -84,8 +119,8 @@ export class GaitThrottle {
       border: '2px solid rgba(255, 210, 110, .5)',
       background: 'rgba(18, 14, 6, .42)',
       overflow: 'hidden',
-      pointerEvents: 'none',
       zIndex: '12',
+      transition: 'border-color 140ms ease',
     } satisfies Partial<CSSStyleDeclaration>);
 
     Object.assign(this.fill.style, {
@@ -100,9 +135,11 @@ export class GaitThrottle {
     } satisfies Partial<CSSStyleDeclaration>);
   }
 
-  private styleNotch(notch: HTMLDivElement): void {
+  private styleNotch(notch: HTMLButtonElement): void {
     Object.assign(notch.style, {
       position: 'relative',
+      appearance: 'none',
+      border: '0',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',

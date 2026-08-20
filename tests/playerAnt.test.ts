@@ -19,7 +19,7 @@ const CAMERA_BEHIND_YAW = Math.atan2(0, -7);
 const DT = 1 / 60;
 
 function drive(over: Partial<Drive> = {}): Drive {
-  return { move: { x: 0, y: 0 }, gait: 'walk', ...over };
+  return { move: { x: 0, y: 0 }, gait: 'walk', bearing: null, ...over };
 }
 
 /** Hold one stick direction for a while and report where she ends up. */
@@ -73,15 +73,15 @@ describe('gaits', () => {
   it('covers more ground the harder she is pushed', () => {
     const crawl = walk({ x: 0, y: 1 }, 2, 'crawl').z;
     const walked = walk({ x: 0, y: 1 }, 2, 'walk').z;
-    const ran = walk({ x: 0, y: 1 }, 2, 'run').z;
+    const sprinted = walk({ x: 0, y: 1 }, 2, 'sprint').z;
     expect(crawl).toBeLessThan(walked);
-    expect(walked).toBeLessThan(ran);
+    expect(walked).toBeLessThan(sprinted);
   });
 
   it('travels at about the gait’s stated speed', () => {
     // Flat ground with no grid loaded, so this is pure horizontal travel.
     const seconds = 2;
-    for (const gait of ['crawl', 'walk', 'run'] as Gait[]) {
+    for (const gait of ['crawl', 'walk', 'sprint'] as Gait[]) {
       const end = walk({ x: 0, y: 1 }, seconds, gait);
       expect(end.z).toBeCloseTo(GAIT_SPEED[gait] * seconds, 0);
     }
