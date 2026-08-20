@@ -58,7 +58,12 @@ export class FollowCamera {
 
   private place(target: THREE.Object3D, look: LookInput, out: THREE.Vector3): void {
     // Rest is directly behind her: her heading plus half a turn.
-    const yaw = target.rotation.y + Math.PI + look.yaw;
+    //
+    // The look yaw is SUBTRACTED. A drag reports positive yaw when it
+    // travels right across the screen, and swinging the camera the same
+    // way round the ant read as backwards on the device, so a rightward
+    // drag walks the camera the other way. See tests/followCamera.test.ts.
+    const yaw = target.rotation.y + Math.PI - look.yaw;
     const elevation = THREE.MathUtils.clamp(
       this.restElevation + look.pitch,
       this.minElevation,

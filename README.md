@@ -74,26 +74,16 @@ Its band textures (`public/kauai-tex/` in Thronemound) are not used yet
 ## Controls
 
 **Move** — a fixed stick, bottom left. How far you push it picks the
-gait: near the centre is a crawl, the rim is a run. On desktop, WASD and
-the arrow keys read as full deflection, so the keyboard runs by default.
+gait as well as the direction: near the centre is a crawl, the rim is a
+run. That is the whole movement control; there is nothing to toggle and
+nothing to lock. On desktop, WASD and the arrow keys read as full
+deflection, so the keyboard always runs.
 
-**Throttle** — the notched bar on the left edge reads out the gait the
-stick is currently asking for, as a level that rises through the
-notches. Tap a notch to PIN that gait so it stops changing under your
-thumb; tap the pinned one again to hand it back to the stick. A pinned
-notch wears a green outline. The glyphs (snail / ant / bolt) are
-placeholders standing in for real art.
-
-**Auto-walk** — hold a steady bearing at full push for two seconds and a
-ring sweeps the stick's rim; when it completes, the bearing locks and
-she keeps going with your thumb off the screen. Double-tap the stick to
-lock immediately at the gait you were last travelling at. Any touch on
-the stick takes the wheel back. It also lets go by itself at the
-waterline and at slopes too steep to climb, so it cannot march you into
-the sea unattended. `L` locks from the keyboard.
-
-She holds a **world bearing** while locked, so swinging the camera to
-look around never steers her.
+**Throttle** — the notched bar on the left edge is a READOUT, not a
+control. Nothing on it is tappable; it exists so the stick's analog
+gait is never invisible, showing a level that rises through the notches
+as she pushes harder. The glyphs (snail / ant / bolt) are placeholders
+standing in for real art.
 
 **Camera** — drag anywhere the controls are not. There is no camera
 button: it would spend a slot the action controls will want, and a drag

@@ -9,8 +9,6 @@ export interface Drive {
   move: MoveInput;
   /** How hard she is pushing herself. */
   gait: Gait;
-  /** Locked world bearing while auto-walking, or null when hand-steered. */
-  bearing: number | null;
 }
 
 /**
@@ -53,18 +51,6 @@ export class PlayerAnt {
   update(drive: Drive, cameraYaw: number, dt: number): void {
     const { move, gait } = drive;
     const speed = GAIT_SPEED[gait];
-
-    // Auto-walk: she holds a WORLD bearing, so swinging the camera to
-    // look at the scenery cannot steer her into the sea.
-    if (drive.bearing !== null) {
-      this.heading = drive.bearing;
-      const step = speed * dt;
-      this.root.position.x += Math.sin(this.heading) * step;
-      this.root.position.z += Math.cos(this.heading) * step;
-      this.gaitPhase += step * 2.2;
-      this.settle();
-      return;
-    }
 
     const strength = Math.min(1, Math.hypot(move.x, move.y));
     if (strength > 0.05) {

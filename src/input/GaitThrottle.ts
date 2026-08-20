@@ -1,14 +1,14 @@
 /**
- * THE THROTTLE — gait as a notched bar on the screen edge.
+ * THE THROTTLE — a readout, not a control.
  *
- * Warship-style rather than three buttons: one slim track with a fill
- * that rises through the notches, so a glance reads how hard she is
- * pushing without any of it costing thumb space on the right.
+ * Gait lives entirely on the stick: how far you push decides it. This
+ * bar exists so that analog control is never invisible — one slim
+ * track with a fill that rises through the notches, so a glance reads
+ * how hard she is pushing.
  *
- * Two jobs, as before. It reads out the gait the stick's deflection is
- * asking for, so the analog control is never invisible; and tapping a
- * notch PINS that gait so it stops shifting under your thumb. Tap the
- * pinned notch again to hand it back to the stick.
+ * Nothing here is tappable. Buttons that pin a gait were tried and cut:
+ * they re-introduce the state the stick was meant to replace, and spend
+ * screen space the action controls will want.
  *
  * The glyphs are placeholders standing in for real art.
  */
@@ -26,12 +26,9 @@ const NOTCH_HEIGHT = 44;
 export class GaitThrottle {
   private readonly track: HTMLDivElement;
   private readonly fill: HTMLDivElement;
-  private readonly notches = new Map<Gait, HTMLButtonElement>();
-  private readonly detach: Array<() => void> = [];
+  private readonly notches = new Map<Gait, HTMLDivElement>();
 
-  private pinnedGait: Gait | null = null;
   private shown: Gait | null = null;
-  private paintedPin: Gait | null = null;
 
   constructor(host: HTMLElement) {
     this.track = document.createElement('div');
@@ -41,19 +38,10 @@ export class GaitThrottle {
 
     // Fastest at the top, the way a throttle reads.
     for (const gait of [...GAITS].reverse()) {
-      const notch = document.createElement('button');
-      notch.type = 'button';
+      const notch = document.createElement('div');
       notch.textContent = GLYPH[gait];
-      notch.setAttribute('aria-label', `${gait} — tap to hold this gait`);
+      notch.setAttribute('aria-label', gait);
       this.styleNotch(notch);
-      const onTap = (e: PointerEvent) => {
-        this.pinnedGait = this.pinnedGait === gait ? null : gait;
-        this.repaint(this.shown ?? gait, true);
-        e.stopPropagation();
-        e.preventDefault();
-      };
-      notch.addEventListener('pointerdown', onTap);
-      this.detach.push(() => notch.removeEventListener('pointerdown', onTap));
       this.notches.set(gait, notch);
       this.track.appendChild(notch);
     }
@@ -61,44 +49,25 @@ export class GaitThrottle {
     host.appendChild(this.track);
   }
 
-  /**
-   * Settle what gait she is actually using this frame, given what the
-   * stick is asking for, and move the throttle to match.
-   */
-  resolve(asked: Gait): Gait {
-    const effective = this.pinnedGait ?? asked;
-    this.repaint(effective, false);
-    return effective;
-  }
-
-  get pinned(): Gait | null {
-    return this.pinnedGait;
-  }
-
-  dispose(): void {
-    for (const off of this.detach) off();
-    this.track.remove();
-  }
-
-  private repaint(effective: Gait, force: boolean): void {
-    if (!force && this.shown === effective && this.paintedPin === this.pinnedGait) return;
-    this.shown = effective;
-    this.paintedPin = this.pinnedGait;
+  /** Move the throttle to whatever gait the stick is asking for. */
+  show(gait: Gait): void {
+    if (this.shown === gait) return;
+    this.shown = gait;
 
     // Fill rises to the top of the active notch, so the bar reads as a
     // level rather than a highlighted cell.
-    const step = GAITS.indexOf(effective) + 1;
+    const step = GAITS.indexOf(gait) + 1;
     this.fill.style.height = `${(step / GAITS.length) * 100}%`;
 
-    for (const [gait, notch] of this.notches) {
-      const live = gait === effective;
-      const held = gait === this.pinnedGait;
+    for (const [at, notch] of this.notches) {
+      const live = at === gait;
       notch.style.opacity = live ? '1' : '.45';
       notch.style.transform = live ? 'scale(1.12)' : 'scale(1)';
-      // A pinned gait keeps its outline even when it is also lit, so
-      // "held here" reads differently from "the stick asked for this".
-      notch.style.boxShadow = held ? 'inset 0 0 0 2px rgba(143, 224, 168, .95)' : 'none';
     }
+  }
+
+  dispose(): void {
+    this.track.remove();
   }
 
   private styleTrack(): void {
@@ -115,7 +84,7 @@ export class GaitThrottle {
       border: '2px solid rgba(255, 210, 110, .5)',
       background: 'rgba(18, 14, 6, .42)',
       overflow: 'hidden',
-      touchAction: 'none',
+      pointerEvents: 'none',
       zIndex: '12',
     } satisfies Partial<CSSStyleDeclaration>);
 
@@ -131,19 +100,19 @@ export class GaitThrottle {
     } satisfies Partial<CSSStyleDeclaration>);
   }
 
-  private styleNotch(notch: HTMLButtonElement): void {
+  private styleNotch(notch: HTMLDivElement): void {
     Object.assign(notch.style, {
       position: 'relative',
-      appearance: 'none',
-      border: '0',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
       borderRadius: `${TRACK_WIDTH / 2}px`,
       flex: '1',
       padding: '0',
       background: 'transparent',
       font: '17px/1 system-ui, sans-serif',
       color: 'rgba(255, 226, 160, .95)',
-      touchAction: 'none',
-      cursor: 'pointer',
+      pointerEvents: 'none',
       transition: 'opacity 130ms ease, transform 130ms ease',
     } satisfies Partial<CSSStyleDeclaration>);
   }

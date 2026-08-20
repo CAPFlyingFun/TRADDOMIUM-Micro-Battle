@@ -19,7 +19,7 @@ const CAMERA_BEHIND_YAW = Math.atan2(0, -7);
 const DT = 1 / 60;
 
 function drive(over: Partial<Drive> = {}): Drive {
-  return { move: { x: 0, y: 0 }, gait: 'walk', bearing: null, ...over };
+  return { move: { x: 0, y: 0 }, gait: 'walk', ...over };
 }
 
 /** Hold one stick direction for a while and report where she ends up. */
@@ -85,33 +85,5 @@ describe('gaits', () => {
       const end = walk({ x: 0, y: 1 }, seconds, gait);
       expect(end.z).toBeCloseTo(GAIT_SPEED[gait] * seconds, 0);
     }
-  });
-});
-
-describe('auto-walk', () => {
-  it('holds its bearing no matter what the stick says', () => {
-    const ant = new PlayerAnt();
-    ant.placeAt(0, 0, 0);
-    const bearing = Math.PI / 2; // due +X
-    for (let i = 0; i < 120; i++) {
-      // Stick shoved hard the other way; the lock must win.
-      ant.update(drive({ move: { x: 0, y: -1 }, bearing }), CAMERA_BEHIND_YAW, DT);
-    }
-    expect(ant.root.position.x).toBeGreaterThan(10);
-    expect(Math.abs(ant.root.position.z)).toBeLessThan(0.5);
-    expect(ant.bearing).toBeCloseTo(bearing, 6);
-  });
-
-  it('is not steered by where the camera is pointing', () => {
-    const run = (cameraYaw: number) => {
-      const ant = new PlayerAnt();
-      ant.placeAt(0, 0, 0);
-      for (let i = 0; i < 60; i++) {
-        ant.update(drive({ bearing: 0 }), cameraYaw, DT);
-      }
-      return ant.root.position.z;
-    };
-    // Swinging the camera right round must not change where she goes.
-    expect(run(0)).toBeCloseTo(run(Math.PI * 0.75), 6);
   });
 });
