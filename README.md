@@ -221,6 +221,32 @@ On desktop: **W / S** manual forward and back, **A / D** sidestep,
 **1 / 2 / 3** pick a pace, **Shift** sprints, **=** toggles Auto,
 **Q / E** swing the camera and **R / F** lift it.
 
+Dragging **down** lifts the view — you are pushing the view, not the
+ant — and both look axes can be inverted in settings.
+
+## Settings
+
+A gear at the top right opens a panel for the numbers that are matters
+of taste: turn speed, the angle at which she starts turning at rest,
+how briskly she closes it, field of view, camera distance, and inverts
+for look X, look Y and stick forward.
+
+It arrived ahead of its milestone on purpose. Every one of those values
+had been tuned by pushing a build and waiting for Pages — change a
+number, deploy, test on the phone, repeat — and that loop was the
+expensive part. A slider on the device settles the same argument in
+seconds.
+
+The defaults ARE the tuned values, so the game out of the box is the
+game before the panel existed. Settings widen what is possible; they do
+not decide what is good.
+
+Choices are saved per device. What comes back is treated as untrusted:
+unknown keys are dropped, wrong types ignored, and every number clamped
+to its range, so an old or hand-edited store degrades to the defaults
+rather than to an unplayable game. Blocked storage — a private window —
+is not an error, just defaults.
+
 ## Deployment
 
 Every push to `main` runs typecheck, tests and the production build,

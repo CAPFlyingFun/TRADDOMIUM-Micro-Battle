@@ -11,6 +11,7 @@
  * screen is exactly what the last build got wrong.
  */
 import { laneAt, LANE_FROM, LANE_LOCK, type Lane } from './autoRun';
+import { settings } from '../ui/settings';
 
 export interface MoveInput {
   x: number;
@@ -123,7 +124,12 @@ export class MoveStick {
     this.lifted = false;
     this.paint();
 
-    return { x: raw.x * scale, y: raw.y * scale, deflection: live, lane, released };
+    // The lane is read off the RAW reach, deliberately: inverting the
+    // stick must not put the Auto lock underneath the thumb.
+    const flip = settings().invertStickY ? -1 : 1;
+    return {
+      x: raw.x * scale, y: raw.y * scale * flip, deflection: live, lane, released,
+    };
   }
 
   /** Whether the desktop Auto key was struck since the last read. */

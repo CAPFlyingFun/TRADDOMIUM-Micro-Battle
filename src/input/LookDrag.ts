@@ -17,6 +17,8 @@
  * way a view bolted to her heading would.
  */
 
+import { settings } from '../ui/settings';
+
 export interface LookInput {
   /** Radians swung around the ant, away from directly behind her. */
   yaw: number;
@@ -70,12 +72,13 @@ export class LookDrag {
         this.last = { x: e.clientX, y: e.clientY };
         return;
       }
+      // Dragging DOWN lifts the camera by default — you are pushing
+      // the view, not the ant — and either axis can be flipped in
+      // settings without either sign living in two places.
+      const dial = settings();
       this.swing(
-        (e.clientX - this.last.x) * YAW_PER_PX,
-        // Dragging DOWN lifts the camera. Joshua's call, and the
-        // convention most flight and console games use: you are pushing
-        // the view, not the ant.
-        (e.clientY - this.last.y) * PITCH_PER_PX,
+        (e.clientX - this.last.x) * YAW_PER_PX * (dial.invertLookX ? -1 : 1),
+        (e.clientY - this.last.y) * PITCH_PER_PX * (dial.invertLookY ? -1 : 1),
       );
       this.last = { x: e.clientX, y: e.clientY };
     });

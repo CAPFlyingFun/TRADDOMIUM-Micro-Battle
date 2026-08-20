@@ -353,6 +353,36 @@ try {
   const strode = (await island(() => window.__island.stride())) - strideBefore;
   if (strode <= 0) throw new Error('she turned on the spot with her legs frozen');
 
+  // ── Settings ─────────────────────────────────────────────────────
+  // The panel exists so a feel argument can be settled on the phone
+  // rather than by a build, so what matters is that moving a dial
+  // actually reaches the game.
+  await page.click('[data-ui="settings"]');
+  await page.waitForSelector('[data-ui="settings-panel"]', { state: 'visible' });
+  const wasFov = await island(() => window.__island.fov());
+  await page.evaluate(() => {
+    const slider = document.querySelector('input[data-dial="fov"]');
+    slider.value = String(Number(slider.value) + 20);
+    slider.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await advance(0.3);
+  const nowFov = await island(() => window.__island.fov());
+  if (Math.abs(nowFov - wasFov) < 5) {
+    throw new Error(`moving the FOV dial did not reach the camera: ${wasFov} -> ${nowFov}`);
+  }
+  // And it must persist, or it is a toy rather than a setting.
+  const kept = await page.evaluate(
+    () => JSON.parse(localStorage.getItem('traddomium.settings') ?? '{}').fov,
+  );
+  if (kept !== nowFov) throw new Error(`the FOV was not saved: ${kept} against ${nowFov}`);
+  await page.evaluate(() => {
+    const slider = document.querySelector('input[data-dial="fov"]');
+    slider.value = '58';
+    slider.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await page.click('[data-ui="settings"]');
+  await advance(0.3);
+
   // ── Rotation ─────────────────────────────────────────────────────
   // Turning a phone fires resize before the viewport has settled, so a
   // handler that trusts the event reads the old size and strands the
@@ -500,6 +530,7 @@ try {
     + `sprint reached ${sprint.speed.toFixed(1)} and fell back to ${spent.toFixed(1)}; `
     + `looking steered her ${steered.toFixed(2)} rad while driven and left her `
     + 'alone at rest inside the deadzone; '
+    + 'the settings panel reaches the camera and persists; '
     + 'survives a rotation and fits every window\n'
     + `  ${start.triangles.toLocaleString()} triangles in ${start.drawCalls} draw calls`,
   );

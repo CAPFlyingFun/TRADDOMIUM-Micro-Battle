@@ -14,6 +14,8 @@ import { groundDetail, groundHeight, ISLAND_SPAN } from '../world/heightfield';
 import { findLandfall, type HeightGrid } from '../world/kauai';
 import { bakeGrain, GRAIN_SIZE } from '../world/groundTexture';
 import { loadBands, terrainMaterial } from '../world/terrainMaterial';
+import { SettingsPanel } from '../ui/SettingsPanel';
+import { onChange } from '../ui/settings';
 
 /**
  * THE ISLAND — Kauai at 1:1000, walked by one ant.
@@ -69,6 +71,7 @@ export class IslandScene {
   private readonly stick: MoveStick;
   private readonly paceUI: PaceSelector;
   private readonly look: LookDrag;
+  private readonly panel: SettingsPanel;
   private readonly ant = new PlayerAnt();
   private readonly clock = new THREE.Clock();
   private readonly sections: Section[] = [];
@@ -91,6 +94,7 @@ export class IslandScene {
   private speed = 0;
   /** Simulated seconds since boot — what the probes wait on. */
   private elapsed = 0;
+  private readonly detachSettings: () => void;
   /**
    * Watches the canvas host itself. Orientation changes fire `resize`
    * before the viewport has settled on some phones, so a handler that
@@ -125,6 +129,8 @@ export class IslandScene {
     this.stick = new MoveStick(host);
     this.paceUI = new PaceSelector(host);
     this.look = new LookDrag(host);
+    this.panel = new SettingsPanel(host);
+    this.detachSettings = onChange(() => this.follow.reshape());
     // The view is a world bearing, so it has to be told where behind
     // her IS. Without this she opens side-on to her own camera.
     this.look.setYaw(-facing);
@@ -159,6 +165,7 @@ export class IslandScene {
       bearing: () => this.ant.bearing,
       stride: () => this.ant.stridePhase,
       deadzone: () => REST_DEADZONE,
+      fov: () => this.follow.camera.fov,
     };
   }
 
@@ -171,6 +178,8 @@ export class IslandScene {
     this.stick.dispose();
     this.paceUI.dispose();
     this.look.dispose();
+    this.panel.dispose();
+    this.detachSettings();
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }

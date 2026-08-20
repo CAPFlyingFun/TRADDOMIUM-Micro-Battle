@@ -1,6 +1,7 @@
 import { IslandScene } from './scenes/IslandScene';
 import { RotateGate } from './ui/rotateGate';
 import { fitViewport } from './ui/viewportFit';
+import { load as loadSettings } from './ui/settings';
 import { useGrid } from './world/heightfield';
 import { loadGrid, type HeightGrid } from './world/kauai';
 
@@ -15,8 +16,9 @@ import { loadGrid, type HeightGrid } from './world/kauai';
  * before any scene can ask how high the ground is.
  */
 
-// Before anything measures itself.
+// Before anything measures itself, or reads a dial.
 fitViewport();
+loadSettings();
 
 const host = document.getElementById('app');
 if (!host) throw new Error('missing #app element');

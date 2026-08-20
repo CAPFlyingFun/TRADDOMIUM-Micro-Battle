@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { LookInput } from '../input/LookDrag';
 import { groundHeight } from '../world/heightfield';
+import { settings } from '../ui/settings';
 
 /**
  * Third-person chase camera.
@@ -27,13 +28,24 @@ export class FollowCamera {
   private readonly desired = new THREE.Vector3();
   private readonly lookTarget = new THREE.Vector3();
 
-  constructor(
-    aspect: number,
-    private readonly distance = 7.8,
-  ) {
+  private distance: number;
+
+  constructor(aspect: number) {
+    const dial = settings();
+    this.distance = dial.cameraDistance;
     // Far enough to reach the open water; near kept off the floor so
     // the wide range does not cost depth precision on the terrain.
-    this.camera = new THREE.PerspectiveCamera(58, aspect, 0.5, 9000);
+    this.camera = new THREE.PerspectiveCamera(dial.fov, aspect, 0.5, 9000);
+  }
+
+  /** Take the shape the settings ask for. */
+  reshape(): void {
+    const dial = settings();
+    this.distance = dial.cameraDistance;
+    if (this.camera.fov !== dial.fov) {
+      this.camera.fov = dial.fov;
+      this.camera.updateProjectionMatrix();
+    }
   }
 
   snapTo(target: THREE.Object3D, yaw = 0): void {

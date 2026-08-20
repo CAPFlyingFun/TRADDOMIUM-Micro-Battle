@@ -1,8 +1,7 @@
 import * as THREE from 'three';
 import { groundHeight } from '../world/heightfield';
-import {
-  DIRECTION_EASE, REST_DEADZONE, REST_EASE, SPEED_EASE, TURN_RATE,
-} from './pace';
+import { DIRECTION_EASE, SPEED_EASE } from './pace';
+import { settings } from '../ui/settings';
 
 /** Everything the controls ask of her in one frame, in the CAMERA's frame. */
 export interface Drive {
@@ -127,15 +126,18 @@ export class PlayerAnt {
     this.velocity.x += (this.wish.x - this.velocity.x) * gather;
     this.velocity.y += (this.wish.y - this.velocity.y) * gather;
 
+    // Read every frame: these are the dials the settings panel moves,
+    // and a value cached at construction would ignore it.
+    const dial = settings();
     if (asked > 0.01) {
       // Driven: she points where the camera points.
-      this.heading += shortest(this.heading, view) * closes(TURN_RATE, dt);
+      this.heading += shortest(this.heading, view) * closes(dial.turnRate, dt);
     } else {
       // At rest: only once looking is not enough on its own, and only
       // back to the edge of the deadzone.
       const off = shortest(this.heading, view);
-      const excess = Math.abs(off) - REST_DEADZONE;
-      if (excess > 0) this.heading += Math.sign(off) * excess * closes(REST_EASE, dt);
+      const excess = Math.abs(off) - dial.turnStart;
+      if (excess > 0) this.heading += Math.sign(off) * excess * closes(dial.turnEase, dt);
     }
 
     this.turned = Math.atan2(
