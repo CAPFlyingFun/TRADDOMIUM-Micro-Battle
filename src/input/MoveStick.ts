@@ -41,6 +41,7 @@ export class MoveStick {
   constructor(host: HTMLElement) {
     this.ring = document.createElement('div');
     this.nub = document.createElement('div');
+    this.ring.dataset.control = 'stick';
     this.style();
     this.ring.appendChild(this.nub);
     host.appendChild(this.ring);
@@ -145,7 +146,9 @@ export class MoveStick {
   private style(): void {
     Object.assign(this.ring.style, {
       position: 'fixed',
-      left: 'calc(24px + env(safe-area-inset-left))',
+      // Clear of the throttle ladder, which now runs up the left edge
+      // beside it rather than sitting on top of it.
+      left: 'calc(78px + env(safe-area-inset-left))',
       bottom: 'calc(24px + env(safe-area-inset-bottom))',
       width: `${RANGE * 2}px`,
       height: `${RANGE * 2}px`,

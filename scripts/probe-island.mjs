@@ -223,11 +223,42 @@ try {
   };
   await onScreen('landscape');
 
+  // And the controls the left thumb works must be where the left thumb
+  // is. Stacking the ladder above the stick pushed it into the top-left
+  // corner — on screen, but a reach away from the hand that works it.
+  const withinReach = async (label) => {
+    const laid = await page.evaluate(() => {
+      const box = (sel) => {
+        const el = document.querySelector(sel);
+        return el ? el.getBoundingClientRect() : null;
+      };
+      const t = box('[data-control="throttle"]');
+      const s = box('[data-control="stick"]');
+      return t && s
+        ? {
+          gap: innerHeight - t.bottom,
+          overlap: t.right > s.left && t.left < s.right
+            && t.bottom > s.top && t.top < s.bottom,
+        }
+        : null;
+    });
+    if (!laid) throw new Error(`could not find both left-thumb controls in ${label}`);
+    if (laid.gap > 60) {
+      throw new Error(
+        `the throttle floats ${Math.round(laid.gap)}px off the bottom in ${label}`,
+      );
+    }
+    if (laid.overlap) throw new Error(`the throttle sits on the stick in ${label}`);
+  };
+  await withinReach('landscape');
+
   // A short landscape window, the shape a browser toolbar leaves.
   await page.setViewportSize({ width: 932, height: 330 });
   await onScreen('a toolbar-height landscape window');
+  await withinReach('a toolbar-height landscape window');
   await page.setViewportSize({ width: 844, height: 280 });
   await onScreen('a very short window');
+  await withinReach('a very short window');
   await page.setViewportSize({ width: 932, height: 430 });
   await page.waitForTimeout(400);
 
@@ -238,7 +269,8 @@ try {
     `probe:island OK — spawned ${start.ground.toFixed(1)} units above the sea, `
     + `telegraph carried her ${moved.toFixed(1)} units and reversed, `
     + `sprint drained to ${mid.toFixed(2)} and eased off, stamina recovered, `
-    + `camera swings and settles back, survives a rotation\n`
+    + `camera swings and settles back, survives a rotation, `
+    + `left-thumb controls sit together at the bottom\n`
     + `  ${start.triangles.toLocaleString()} triangles in ${start.drawCalls} draw calls`,
   );
 } finally {

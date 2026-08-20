@@ -16,8 +16,8 @@ import {
   COSTS_STAMINA, NOTCHES, NOTCH_MARK, NOTCH_NAME, NOTCH_SPEED, type Notch,
 } from '../ant/gait';
 
-const TRACK_WIDTH = 50;
-const NOTCH_HEIGHT = 30;
+const TRACK_WIDTH = 46;
+const NOTCH_HEIGHT = 28;
 
 export class Throttle {
   private readonly column: HTMLDivElement;
@@ -39,6 +39,7 @@ export class Throttle {
     this.track = document.createElement('div');
     this.fill = document.createElement('div');
     this.readout = document.createElement('div');
+    this.column.dataset.control = 'throttle';
     this.styleTrack();
     this.track.append(this.fill);
 
@@ -158,15 +159,21 @@ export class Throttle {
   }
 
   private styleTrack(): void {
-    // Anchored top AND bottom rather than given a height. A fixed
+    // BESIDE the stick, not above it. Stacking the ladder on top of the
+    // stick pushed it into the top-left corner, which is the far side of
+    // the screen from the thumb that works it; side by side, both land
+    // in the same reach and the ladder sits at the bottom where the
+    // hand already is. The right half stays clear for action controls.
+    //
+    // Still anchored top AND bottom rather than given a height. A fixed
     // 7-notch ladder overflows the top of a short screen — a browser
     // toolbar is enough to cause it — and the notches you lose are the
     // fast ones. Bounded this way it always fits, shrinking instead.
     Object.assign(this.column.style, {
       position: 'fixed',
       left: 'calc(10px + env(safe-area-inset-left))',
-      top: 'calc(10px + env(safe-area-inset-top))',
-      bottom: 'calc(166px + env(safe-area-inset-bottom))',
+      top: 'calc(8px + env(safe-area-inset-top))',
+      bottom: 'calc(24px + env(safe-area-inset-bottom))',
       width: `${TRACK_WIDTH}px`,
       display: 'flex',
       flexDirection: 'column',
@@ -239,7 +246,10 @@ export class Throttle {
     Object.assign(this.readout.style, {
       flex: '0 0 auto',
       textAlign: 'center',
-      font: '600 11px/1 "JetBrains Mono", ui-monospace, monospace',
+      // Narrower than the readout, so let it hang over rather than wrap
+      // "7.0 cm/s" onto two lines. It takes no pointers either way.
+      whiteSpace: 'nowrap',
+      font: '600 10px/1 "JetBrains Mono", ui-monospace, monospace',
       color: 'rgba(255, 226, 160, .72)',
       userSelect: 'none',
       pointerEvents: 'none',

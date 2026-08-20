@@ -88,6 +88,8 @@ is worse than a fetch. `npm run icons` regenerates the icon set.
 The layout survives a browser bar either way: it sizes itself from
 `visualViewport` rather than trusting the layout viewport, and the
 throttle is bounded top and bottom so it shrinks instead of overflowing.
+Both left-thumb controls are anchored to the BOTTOM, so a shorter window
+takes height off the top of the ladder — never off the reach.
 
 ## Landscape only
 
@@ -99,8 +101,8 @@ fine either way.
 
 ## Controls
 
-**Throttle** — a ship's telegraph on the left edge, and the only speed
-control. It is a *setting*: pick a notch and she holds it, so crossing
+**Throttle** — a ship's telegraph on the left edge, beside the stick
+rather than above it, and the only speed control. It is a *setting*: pick a notch and she holds it, so crossing
 an island that takes minutes needs no separate auto-move mode to arm
 and cancel. Tap any notch to go straight there, which makes easing off
 one step and slamming from a sprint to astern the same gesture.
@@ -128,8 +130,8 @@ not sprinting, and faster still standing still. Per the project rule, a
 bar may only move if there is a way to move it back, and this one has
 one that needs no mechanic that does not exist yet.
 
-**Steering** — a fixed stick, bottom left, which aims her and nothing
-else. Push and she comes round to that heading at a rate the throttle
+**Steering** — a fixed stick, bottom left just inboard of the
+telegraph, which aims her and nothing else. Push and she comes round to that heading at a rate the throttle
 sets: she pivots freely at Stop and takes a wide line at a sprint. Let
 go and she holds her heading.
 
