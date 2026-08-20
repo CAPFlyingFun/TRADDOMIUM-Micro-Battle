@@ -23,9 +23,17 @@ export function shouldAskToRotate(
   return coarsePointer && height > width;
 }
 
+/**
+ * Frames the viewport must hold still before the veil comes down. The
+ * turn is not one event but a burst of them, and the scene needs a beat
+ * to resize and redraw behind the cover.
+ */
+const SETTLE_FRAMES = 3;
+
 export class RotateGate {
   private readonly veil: HTMLDivElement;
   private readonly detach: Array<() => void> = [];
+  private settling = 0;
 
   constructor(host: HTMLElement) {
     this.veil = document.createElement('div');
@@ -52,13 +60,49 @@ export class RotateGate {
 
   dispose(): void {
     for (const off of this.detach) off();
+    if (this.settling) cancelAnimationFrame(this.settling);
     this.veil.remove();
   }
 
   private apply(): void {
     const coarse = window.matchMedia?.('(pointer: coarse)').matches ?? false;
     const ask = shouldAskToRotate(window.innerWidth, window.innerHeight, coarse);
-    this.veil.style.display = ask ? 'flex' : 'none';
+
+    if (ask) {
+      // Cover instantly on the way in: the turn is what we are hiding.
+      if (this.settling) {
+        cancelAnimationFrame(this.settling);
+        this.settling = 0;
+      }
+      this.veil.style.display = 'flex';
+      return;
+    }
+    if (this.veil.style.display === 'none' || this.settling) return;
+    this.holdUntilSettled();
+  }
+
+  /**
+   * Landscape is reported the moment the device passes the threshold,
+   * but the viewport keeps changing for several frames after that and
+   * the canvas has not caught up yet. Dropping the veil on the first
+   * report shows exactly that changeover. So wait for the size to hold
+   * still, and let the scene redraw behind the cover.
+   */
+  private holdUntilSettled(): void {
+    let held = 0;
+    let last = `${window.innerWidth}x${window.innerHeight}`;
+    const step = () => {
+      const now = `${window.innerWidth}x${window.innerHeight}`;
+      held = now === last ? held + 1 : 0;
+      last = now;
+      if (held >= SETTLE_FRAMES) {
+        this.settling = 0;
+        this.veil.style.display = 'none';
+        return;
+      }
+      this.settling = requestAnimationFrame(step);
+    };
+    this.settling = requestAnimationFrame(step);
   }
 
   private style(): void {

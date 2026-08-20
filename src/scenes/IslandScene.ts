@@ -168,6 +168,12 @@ export class IslandScene {
     if (clientWidth === 0 || clientHeight === 0) return;
     this.renderer.setSize(clientWidth, clientHeight);
     this.follow.resize(clientWidth / clientHeight);
+
+    // Draw again right now. Resizing the canvas clears it, and the next
+    // scheduled frame does not land until after the browser has already
+    // painted — which shows as a flash of stretched or blank canvas at
+    // the moment the device turns.
+    if (!this.disposed) this.renderer.render(this.scene, this.follow.camera);
   };
 
   private aspect(): number {
