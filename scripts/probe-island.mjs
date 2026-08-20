@@ -15,7 +15,10 @@ const browser = await chromium.launch({
 });
 
 try {
-  const page = await browser.newPage({ viewport: { width: 932, height: 430 } });
+  const page = await browser.newPage({
+    viewport: { width: 932, height: 430 },
+    hasTouch: true,
+  });
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
   page.on('console', (m) => {
@@ -84,13 +87,81 @@ try {
     throw new Error(`the camera did not settle back behind her: ${strayed.toFixed(3)} rad`);
   }
 
+  // Rotation. Turning a phone fires resize before the viewport has
+  // settled, so a handler that trusts the event reads the old size and
+  // strands the canvas at the wrong dimensions — which is what going
+  // landscape -> portrait -> landscape used to do.
+  const fitted = async (label) => {
+    await page.waitForTimeout(700);
+    const box = await page.evaluate(() => {
+      const c = document.querySelector('canvas');
+      return { cw: c.clientWidth, ch: c.clientHeight, vw: innerWidth, vh: innerHeight };
+    });
+    const slack = 2;
+    if (Math.abs(box.cw - box.vw) > slack || Math.abs(box.ch - box.vh) > slack) {
+      throw new Error(
+        `canvas did not track the viewport in ${label}: `
+        + `${box.cw}x${box.ch} against ${box.vw}x${box.vh}`,
+      );
+    }
+    return box;
+  };
+
+  await page.setViewportSize({ width: 430, height: 932 });
+  await fitted('portrait');
+  const gated = await page.evaluate(
+    () => [...document.querySelectorAll('[role="alertdialog"]')]
+      .some((el) => getComputedStyle(el).display !== 'none'),
+  );
+  if (!gated) throw new Error('portrait did not ask the player to rotate');
+
+  await page.setViewportSize({ width: 932, height: 430 });
+  await fitted('back in landscape');
+  const ungated = await page.evaluate(
+    () => [...document.querySelectorAll('[role="alertdialog"]')]
+      .every((el) => getComputedStyle(el).display === 'none'),
+  );
+  if (!ungated) throw new Error('the rotate prompt stayed up in landscape');
+
+  // The case the observer exists for: the canvas host changes size
+  // WITHOUT a trustworthy window resize event. On a phone that happens
+  // because orientationchange fires before the viewport settles, so the
+  // event carries the old numbers; here we reproduce the same shape by
+  // shrinking the host directly, which fires no window event at all.
+  await page.evaluate(() => {
+    const app = document.getElementById('app');
+    app.style.right = '200px';
+    app.style.bottom = '100px';
+  });
+  await page.waitForTimeout(700);
+  const squeezed = await page.evaluate(() => {
+    const c = document.querySelector('canvas');
+    const app = document.getElementById('app');
+    return {
+      cw: c.clientWidth, ch: c.clientHeight,
+      hw: app.clientWidth, hh: app.clientHeight,
+    };
+  });
+  if (Math.abs(squeezed.cw - squeezed.hw) > 2 || Math.abs(squeezed.ch - squeezed.hh) > 2) {
+    throw new Error(
+      'canvas ignored a host resize that fired no window event: '
+      + `${squeezed.cw}x${squeezed.ch} against ${squeezed.hw}x${squeezed.hh}`,
+    );
+  }
+  await page.evaluate(() => {
+    const app = document.getElementById('app');
+    app.style.right = '';
+    app.style.bottom = '';
+  });
+  await page.waitForTimeout(500);
+
   await page.screenshot({ path: 'probe-island.png' });
   if (errors.length) throw new Error(`page errors:\n${errors.join('\n')}`);
 
   console.log(
     `probe:island OK — spawned ${start.ground.toFixed(1)} units above the sea, `
     + `walked ${moved.toFixed(1)} units at a ${gait}, `
-    + `camera swings and settles back\n`
+    + `camera swings and settles back, survives a rotation\n`
     + `  ${start.triangles.toLocaleString()} triangles in ${start.drawCalls} draw calls`,
   );
 } finally {

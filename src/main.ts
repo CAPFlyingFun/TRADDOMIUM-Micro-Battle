@@ -1,4 +1,5 @@
 import { IslandScene } from './scenes/IslandScene';
+import { RotateGate } from './ui/rotateGate';
 import { useGrid } from './world/heightfield';
 import { loadGrid, type HeightGrid } from './world/kauai';
 
@@ -43,6 +44,8 @@ try {
   const requested = new URLSearchParams(location.search).get('scene') ?? 'island';
   (scenes[requested] ?? scenes['island'])(host, grid);
   notice.remove();
+  // Sits above whatever scene is running, so every lab gets it.
+  new RotateGate(host);
 } catch (error) {
   notice.textContent = `The island failed to load.\n${String(error)}`;
   throw error;

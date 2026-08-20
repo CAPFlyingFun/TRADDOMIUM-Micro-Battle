@@ -71,6 +71,14 @@ checkout: `python3 scripts/bakeKauai.py <BE-repo>/artifacts/beyond-extinction`.
 Its band textures (`public/kauai-tex/` in Thronemound) are not used yet
 — the terrain is vertex-coloured by elevation for now.
 
+## Landscape only
+
+On a touch device the game asks you to turn the phone sideways before it
+will play. The HUD puts a stick under the left thumb and keeps the right
+side clear for the action controls, and portrait has room for neither.
+Desktop is never blocked, however narrow the window — a keyboard plays
+fine either way.
+
 ## Controls
 
 **Move** — a fixed stick, bottom left. How far you push it picks the

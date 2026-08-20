@@ -72,6 +72,13 @@ export class IslandScene {
   private readonly clock = new THREE.Clock();
   private readonly sections: Section[] = [];
   private currentGait: Gait = 'walk';
+  /**
+   * Watches the canvas host itself. Orientation changes fire `resize`
+   * before the viewport has settled on some phones, so a handler that
+   * only listens for the event reads the OLD size and leaves the canvas
+   * at the wrong dimensions. An observer fires after layout instead.
+   */
+  private readonly watchSize = new ResizeObserver(() => this.onResize());
   private disposed = false;
 
   constructor(
@@ -101,7 +108,9 @@ export class IslandScene {
     this.follow = new FollowCamera(this.aspect());
     this.follow.snapTo(this.ant.root);
 
+    this.watchSize.observe(host);
     window.addEventListener('resize', this.onResize);
+    window.addEventListener('orientationchange', this.onResize);
     this.onResize();
     this.renderer.setAnimationLoop(this.tick);
 
@@ -120,7 +129,9 @@ export class IslandScene {
   dispose(): void {
     this.disposed = true;
     this.renderer.setAnimationLoop(null);
+    this.watchSize.disconnect();
     window.removeEventListener('resize', this.onResize);
+    window.removeEventListener('orientationchange', this.onResize);
     this.stick.dispose();
     this.throttle.dispose();
     this.look.dispose();
@@ -152,8 +163,11 @@ export class IslandScene {
 
   private readonly onResize = (): void => {
     const { clientWidth, clientHeight } = this.host;
+    // Mid-rotation the host can measure zero. Resizing to that leaves a
+    // collapsed canvas that never recovers, so wait for a real box.
+    if (clientWidth === 0 || clientHeight === 0) return;
     this.renderer.setSize(clientWidth, clientHeight);
-    this.follow.resize(this.aspect());
+    this.follow.resize(clientWidth / clientHeight);
   };
 
   private aspect(): number {
