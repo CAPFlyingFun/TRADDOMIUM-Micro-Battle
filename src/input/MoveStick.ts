@@ -146,9 +146,9 @@ export class MoveStick {
   private style(): void {
     Object.assign(this.ring.style, {
       position: 'fixed',
-      // Clear of the throttle ladder, which now runs up the left edge
-      // beside it rather than sitting on top of it.
-      left: 'calc(78px + env(safe-area-inset-left))',
+      // Outboard of the throttle ladder, hard against the edge the
+      // thumb rests on; the ladder sits one reach further in.
+      left: 'calc(10px + env(safe-area-inset-left))',
       bottom: 'calc(24px + env(safe-area-inset-bottom))',
       width: `${RANGE * 2}px`,
       height: `${RANGE * 2}px`,

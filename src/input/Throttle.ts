@@ -133,9 +133,11 @@ export class Throttle {
       }
 
       // One world unit is about a centimetre, which is a speed an ant
-      // can be described in.
+      // can be described in. Stopped reads 0.0 in the same shape as
+      // every other notch rather than a dash: a dash reads as "no
+      // reading", and the gauge always has one.
       const speed = Math.abs(NOTCH_SPEED[notch]);
-      this.readout.textContent = speed === 0 ? '—' : `${speed.toFixed(1)} cm/s`;
+      this.readout.textContent = `${speed.toFixed(1)} cm/s`;
     }
 
     if (stamina !== this.shownStamina || spent !== this.shownSpent) {
@@ -159,11 +161,13 @@ export class Throttle {
   }
 
   private styleTrack(): void {
-    // BESIDE the stick, not above it. Stacking the ladder on top of the
-    // stick pushed it into the top-left corner, which is the far side of
-    // the screen from the thumb that works it; side by side, both land
-    // in the same reach and the ladder sits at the bottom where the
-    // hand already is. The right half stays clear for action controls.
+    // BESIDE the stick, not above it, and INBOARD of it. Stacking the
+    // ladder on top of the stick pushed it into the top-left corner,
+    // which is the far side of the screen from the thumb that works it;
+    // side by side, both land in the same reach and the ladder sits at
+    // the bottom where the hand already is. The stick takes the outboard
+    // edge, where a thumb rests, and the ladder sits one reach further
+    // in. The right half stays clear for action controls.
     //
     // Still anchored top AND bottom rather than given a height. A fixed
     // 7-notch ladder overflows the top of a short screen — a browser
@@ -171,7 +175,7 @@ export class Throttle {
     // fast ones. Bounded this way it always fits, shrinking instead.
     Object.assign(this.column.style, {
       position: 'fixed',
-      left: 'calc(10px + env(safe-area-inset-left))',
+      left: 'calc(154px + env(safe-area-inset-left))',
       top: 'calc(8px + env(safe-area-inset-top))',
       bottom: 'calc(24px + env(safe-area-inset-bottom))',
       width: `${TRACK_WIDTH}px`,
@@ -255,6 +259,6 @@ export class Throttle {
       pointerEvents: 'none',
       zIndex: '12',
     } as Partial<CSSStyleDeclaration>);
-    this.readout.textContent = '—';
+    this.readout.textContent = '0.0 cm/s';
   }
 }

@@ -88,7 +88,24 @@ try {
   await page.waitForTimeout(3000);
   const recovered = await page.evaluate(() => window.__island.stamina());
   if (recovered <= dry) throw new Error('stamina did not recover at rest');
+  // Stopped still reads a speed. A dash reads as "no reading", and the
+  // gauge always has one — 0.0 is a measurement, not a blank.
+  const readout = () =>
+    page.evaluate(() =>
+      document.querySelector('[data-control="throttle"]').lastElementChild.textContent);
+  await page.evaluate(() => window.__island.setNotch('stop'));
+  await page.waitForTimeout(300);
+  const stopped = await readout();
+  if (!/^0\.0 /.test(stopped)) {
+    throw new Error(`stopped read "${stopped}", not a zero in the moving format`);
+  }
   await page.evaluate(() => window.__island.setNotch('walk'));
+  await page.waitForTimeout(300);
+  const walking = await readout();
+  if (walking.replace(/^[\d.]+/, '') !== stopped.replace(/^[\d.]+/, '')) {
+    throw new Error(`stopped reads "${stopped}" but moving reads "${walking}"`);
+  }
+
 
   // Swing the camera with the keyboard. Compare camera positions
   // rather than pixels: the WebGL canvas has no preserved drawing

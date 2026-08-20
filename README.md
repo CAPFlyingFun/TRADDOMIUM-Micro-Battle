@@ -101,8 +101,8 @@ fine either way.
 
 ## Controls
 
-**Throttle** — a ship's telegraph on the left edge, beside the stick
-rather than above it, and the only speed control. It is a *setting*: pick a notch and she holds it, so crossing
+**Throttle** — a ship's telegraph at bottom left, just inboard of the
+stick rather than stacked above it, and the only speed control. It is a *setting*: pick a notch and she holds it, so crossing
 an island that takes minutes needs no separate auto-move mode to arm
 and cancel. Tap any notch to go straight there, which makes easing off
 one step and slamming from a sprint to astern the same gesture.
@@ -122,6 +122,8 @@ something backwards is not sprinting. The fill runs from the Stop line
 out to the live notch, so ahead and astern read as opposite directions
 rather than more or less of the same thing, and the readout underneath
 gives her speed in cm/s — one world unit is about a centimetre.
+Stopped reads `0.0 cm/s`, in the same shape as every other notch: a
+dash would read as no reading, and the gauge always has one.
 
 **Stamina** — sprinting is the one notch that costs anything, and the
 sprint notch doubles as its meter. Run it dry and she eases down to a
@@ -130,8 +132,8 @@ not sprinting, and faster still standing still. Per the project rule, a
 bar may only move if there is a way to move it back, and this one has
 one that needs no mechanic that does not exist yet.
 
-**Steering** — a fixed stick, bottom left just inboard of the
-telegraph, which aims her and nothing else. Push and she comes round to that heading at a rate the throttle
+**Steering** — a fixed stick in the bottom-left corner, outboard of
+the telegraph, which aims her and nothing else. Push and she comes round to that heading at a rate the throttle
 sets: she pivots freely at Stop and takes a wide line at a sprint. Let
 go and she holds her heading.
 
