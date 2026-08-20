@@ -1,27 +1,23 @@
 import * as THREE from 'three';
 import { groundHeight } from '../world/heightfield';
 import type { MoveInput } from '../input/MoveStick';
-import { GAIT_SPEED, GAIT_TURN, type Gait } from './gait';
+import { NOTCH_SPEED, NOTCH_TURN, type Notch } from './gait';
 
 /**
- * Within this arc of dead astern she backs up rather than turning
- * round. A half-turn has no shorter side, so the turn direction comes
- * down to which way a floating-point zero happened to be signed.
+ * Beyond this far off her heading, a push is close enough to dead
+ * astern that neither way round is shorter. Which way she turned then
+ * came down to the sign of a floating-point zero, so past this arc the
+ * lateral push decides instead — and if there is none, she holds her
+ * heading rather than spinning a direction nobody asked for.
  */
-const ASTERN_ARC = (30 * Math.PI) / 180;
-const ASTERN = Math.cos(Math.PI - ASTERN_ARC);
-
-/** Backing up is slower than walking into it, as it is for a real ant. */
-const REVERSE_SCALE = 0.45;
+const ASTERN = Math.cos(Math.PI - (30 * Math.PI) / 180);
 
 /** Everything the controls ask of her in one frame. */
 export interface Drive {
-  /** Stick vector, camera-relative (x right, y forward). */
+  /** Stick vector, camera-relative (x right, y forward). Aims her. */
   move: MoveInput;
-  /** How hard she is pushing herself. */
-  gait: Gait;
-  /** Bearing auto-move is holding, or null when she is hand-driven. */
-  bearing: number | null;
+  /** The throttle setting she is travelling at. */
+  notch: Notch;
 }
 
 /**
@@ -62,54 +58,33 @@ export class PlayerAnt {
    *   the camera" no matter where the ant is facing
    */
   update(drive: Drive, cameraYaw: number, dt: number): void {
-    const { move, gait } = drive;
-    const speed = GAIT_SPEED[gait];
+    const { move, notch } = drive;
 
-    // Auto-move holds a WORLD bearing, so swinging the camera to look
-    // around cannot steer her into the sea.
-    //
-    // Tested for a number rather than against null on purpose: an
-    // absent bearing used to pass a `!== null` check and drive her
-    // heading to NaN, which corrupts her position silently and cannot
-    // be recovered from.
-    if (typeof drive.bearing === 'number') {
-      this.heading = drive.bearing;
-      const step = speed * dt;
-      this.root.position.x += Math.sin(this.heading) * step;
-      this.root.position.z += Math.cos(this.heading) * step;
-      this.gaitPhase += step * 2.2;
-      this.settle();
-      return;
-    }
-
-    const strength = Math.min(1, Math.hypot(move.x, move.y));
-    if (strength > 0.05) {
+    // The stick aims; the throttle drives. She travels whether or not a
+    // thumb is on the stick, which is what makes the throttle a setting
+    // rather than a thing to hold.
+    const pushed = Math.hypot(move.x, move.y) > 0.05;
+    if (pushed) {
       // move.x is negated because headings here run clockwise when read
       // as atan2(sin, cos) over (x, z), while the viewer's right in a
       // camera looking along +Z is world -X. See tests/playerAnt.test.ts.
-      const targetHeading = cameraYaw + Math.atan2(-move.x, move.y) + Math.PI;
-      let diff = targetHeading - this.heading;
+      const wanted = cameraYaw + Math.atan2(-move.x, move.y) + Math.PI;
+      let diff = wanted - this.heading;
       diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-      const facing = Math.cos(diff);
 
-      let step: number;
-      if (facing > ASTERN) {
-        // She turns toward the push and walks into it. Her body leads,
-        // so the further off the push is the less ground she covers
-        // while coming round to it.
-        const maxTurn = GAIT_TURN[gait] * dt;
-        this.heading += THREE.MathUtils.clamp(diff, -maxTurn, maxTurn);
-        step = speed * strength * Math.max(0, facing) * dt;
-      } else {
-        // Pushed within ASTERN_ARC of dead astern: back up, keeping her
-        // heading. Spinning here looked wrong on the device for a good
-        // reason — at a half-turn neither way round is shorter, so the
-        // choice fell to the sign of a zero and never matched intent.
-        // Lean the push off-centre and the turn becomes unambiguous
-        // again, which is the branch above.
-        step = -speed * REVERSE_SCALE * strength * dt;
+      let turn = diff;
+      if (Math.cos(diff) <= ASTERN) {
+        // Near enough a half-turn that the shorter side is meaningless.
+        // Take the side the thumb is leaning; if it leans nowhere, do
+        // not invent one.
+        turn = move.x > 0 ? -Math.PI : move.x < 0 ? Math.PI : 0;
       }
+      const most = NOTCH_TURN[notch] * dt;
+      this.heading += THREE.MathUtils.clamp(turn, -most, most);
+    }
 
+    const step = NOTCH_SPEED[notch] * dt;
+    if (step !== 0) {
       this.root.position.x += Math.sin(this.heading) * step;
       this.root.position.z += Math.cos(this.heading) * step;
       this.gaitPhase += Math.abs(step) * 2.2;

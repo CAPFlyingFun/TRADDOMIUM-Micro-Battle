@@ -40,56 +40,55 @@ try {
     throw new Error(`she spawned in the sea: ground ${start.ground.toFixed(2)}`);
   }
 
-  // Walk, and confirm she actually travelled.
-  await page.keyboard.down('KeyW');
-  await page.waitForTimeout(1800);
-  await page.keyboard.up('KeyW');
+  // The telegraph. W steps it up; she must then travel with nothing
+  // held, which is the whole point of a setting rather than a stick.
+  await page.keyboard.press('KeyW');
+  await page.keyboard.press('KeyW');
+  await page.waitForTimeout(400);
+  const set = await page.evaluate(() => window.__island.notch());
+  if (set !== 'walk') throw new Error(`two steps up from stop gave ${set}, not walk`);
+
+  const parked = await page.evaluate(() => window.__island.where());
+  await page.waitForTimeout(1400);
   const after = await page.evaluate(() => ({
     where: window.__island.where(),
     ground: window.__island.groundUnderfoot(),
-    gait: window.__island.gait(),
   }));
-  const gait = after.gait;
-  const moved = Math.hypot(after.where[0] - start.where[0], after.where[2] - start.where[2]);
-  if (moved < 1) throw new Error(`she barely moved: ${moved.toFixed(2)} units`);
+  const moved = Math.hypot(after.where[0] - parked[0], after.where[2] - parked[2]);
+  if (moved < 2) throw new Error(`the telegraph did not carry her: ${moved.toFixed(2)} units`);
   if (after.ground <= 0) throw new Error('she walked off into the sea');
 
-  // Auto-move: L stands in for the double-tap. She must keep going
-  // with nothing touching the controls, and stop when toggled off.
-  await page.keyboard.press('KeyL');
+  // Down through stop into astern, from ahead, without a mode change.
+  await page.evaluate(() => window.__island.setNotch('crawl'));
+  for (let i = 0; i < 2; i++) await page.keyboard.press('KeyS');
   await page.waitForTimeout(400);
-  if (!(await page.evaluate(() => window.__island.autoMoving()))) {
-    throw new Error('the auto-move toggle did not engage');
+  const astern = await page.evaluate(() => window.__island.notch());
+  if (astern !== 'backCrawl') {
+    throw new Error(`two steps down from crawl gave ${astern}, not backCrawl`);
   }
-  const parked = await page.evaluate(() => window.__island.where());
-  await page.waitForTimeout(1400);
-  const cruised = await page.evaluate(() => ({
-    where: window.__island.where(),
-    gait: window.__island.gait(),
-  }));
-  const coasted = Math.hypot(
-    cruised.where[0] - parked[0], cruised.where[2] - parked[2],
-  );
-  if (coasted < 2) {
-    throw new Error(`auto-move engaged but she stopped: ${coasted.toFixed(2)} units`);
+  const beforeBack = await page.evaluate(() => window.__island.where());
+  await page.waitForTimeout(900);
+  const backed = await page.evaluate(() => window.__island.where());
+  if (Math.hypot(backed[0] - beforeBack[0], backed[2] - beforeBack[2]) < 0.5) {
+    throw new Error('astern did not move her');
   }
-  // She must keep the gait she was travelling at, not fall to a crawl
-  // the moment the stick recentres.
-  if (cruised.gait === 'crawl') {
-    throw new Error('auto-move dropped to a crawl once the stick recentred');
-  }
-  await page.keyboard.press('KeyL');
-  await page.waitForTimeout(400);
-  if (await page.evaluate(() => window.__island.autoMoving())) {
-    throw new Error('the auto-move toggle did not disengage');
-  }
-  const stopped = await page.evaluate(() => window.__island.where());
-  await page.waitForTimeout(700);
-  const afterStop = await page.evaluate(() => window.__island.where());
-  const drifted = Math.hypot(
-    afterStop[0] - stopped[0], afterStop[2] - stopped[2],
-  );
-  if (drifted > 1) throw new Error(`she kept going after auto-move was off: ${drifted.toFixed(2)}`);
+
+  // Sprinting must cost stamina and drop her a notch when it runs dry.
+  await page.evaluate(() => window.__island.setNotch('sprint'));
+  await page.waitForTimeout(600);
+  const mid = await page.evaluate(() => window.__island.stamina());
+  if (mid >= 1) throw new Error('sprinting cost no stamina');
+  await page.waitForTimeout(9000);
+  const spentNotch = await page.evaluate(() => window.__island.notch());
+  if (spentNotch === 'sprint') throw new Error('an exhausted sprint never eased off');
+
+  // And it must come back on its own — a bar that only falls is a trap.
+  await page.evaluate(() => window.__island.setNotch('stop'));
+  const dry = await page.evaluate(() => window.__island.stamina());
+  await page.waitForTimeout(3000);
+  const recovered = await page.evaluate(() => window.__island.stamina());
+  if (recovered <= dry) throw new Error('stamina did not recover at rest');
+  await page.evaluate(() => window.__island.setNotch('walk'));
 
   // Swing the camera with the keyboard. Compare camera positions
   // rather than pixels: the WebGL canvas has no preserved drawing
@@ -197,8 +196,8 @@ try {
 
   console.log(
     `probe:island OK — spawned ${start.ground.toFixed(1)} units above the sea, `
-    + `walked ${moved.toFixed(1)} units at a ${gait}, `
-    + `auto-move cruised ${coasted.toFixed(1)} at a ${cruised.gait} and stopped on demand, `
+    + `telegraph carried her ${moved.toFixed(1)} units and reversed, `
+    + `sprint drained to ${mid.toFixed(2)} and eased off, stamina recovered, `
     + `camera swings and settles back, survives a rotation\n`
     + `  ${start.triangles.toLocaleString()} triangles in ${start.drawCalls} draw calls`,
   );

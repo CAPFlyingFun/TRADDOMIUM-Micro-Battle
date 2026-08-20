@@ -1,46 +1,76 @@
 import { describe, expect, it } from 'vitest';
 import {
-  CRAWL_UNTIL, GAITS, GAIT_SPEED, GAIT_TURN, WALK_UNTIL, gaitFromDeflection,
+  NOTCHES, NOTCH_MARK, NOTCH_SPEED, NOTCH_TURN, shift, slower, type Notch,
 } from '../src/ant/gait';
 
-describe('gait from how hard the stick is pushed', () => {
-  it('splits the ring in half, and sprints past its rim', () => {
-    expect(gaitFromDeflection(0.2)).toBe('crawl');
-    expect(gaitFromDeflection(0.75)).toBe('walk');
-    expect(gaitFromDeflection(1.1)).toBe('sprint');
+describe('the throttle ladder', () => {
+  it('runs astern, through stop, up to a sprint', () => {
+    expect(NOTCHES).toEqual([
+      'backWalk', 'backCrawl', 'stop', 'crawl', 'walk', 'run', 'sprint',
+    ]);
   });
 
-  it('gives the crawl and the walk equal room to sit in', () => {
-    // The complaint that started this: a 64 px stick with uneven bands
-    // jumps from crawl to flat out with nowhere to hold a middle speed.
-    expect(CRAWL_UNTIL).toBeCloseTo(WALK_UNTIL / 2, 6);
+  it('only reverses at a crawl or a walk', () => {
+    // An ant hauling something backwards is not sprinting.
+    const astern = NOTCHES.filter((n) => NOTCH_SPEED[n] < 0);
+    expect(astern).toHaveLength(2);
+    expect(Math.abs(NOTCH_SPEED.backCrawl)).toBe(NOTCH_SPEED.crawl);
+    expect(Math.abs(NOTCH_SPEED.backWalk)).toBe(NOTCH_SPEED.walk);
   });
 
-  it('changes gait exactly at the drawn boundaries', () => {
-    expect(gaitFromDeflection(CRAWL_UNTIL - 1e-6)).toBe('crawl');
-    expect(gaitFromDeflection(CRAWL_UNTIL)).toBe('walk');
-    expect(gaitFromDeflection(WALK_UNTIL - 1e-6)).toBe('walk');
-    expect(gaitFromDeflection(WALK_UNTIL)).toBe('sprint');
+  it('gets faster with every notch ahead', () => {
+    expect(NOTCH_SPEED.stop).toBe(0);
+    expect(NOTCH_SPEED.crawl).toBeLessThan(NOTCH_SPEED.walk);
+    expect(NOTCH_SPEED.walk).toBeLessThan(NOTCH_SPEED.run);
+    expect(NOTCH_SPEED.run).toBeLessThan(NOTCH_SPEED.sprint);
   });
 
-  it('never leaves a deflection without a gait', () => {
-    for (let d = 0; d <= 1.3001; d += 0.01) {
-      expect(GAITS).toContain(gaitFromDeflection(d));
-    }
+  it('trades agility for speed, and pivots freely at rest', () => {
+    expect(NOTCH_TURN.crawl).toBeGreaterThan(NOTCH_TURN.walk);
+    expect(NOTCH_TURN.walk).toBeGreaterThan(NOTCH_TURN.run);
+    expect(NOTCH_TURN.run).toBeGreaterThan(NOTCH_TURN.sprint);
+    expect(NOTCH_TURN.stop).toBeGreaterThan(NOTCH_TURN.crawl);
+  });
+
+  it('marks each notch the way the sketch drew it', () => {
+    expect(NOTCH_MARK.crawl).toBe('›');
+    expect(NOTCH_MARK.walk).toBe('››');
+    expect(NOTCH_MARK.run).toBe('›››');
+    expect(NOTCH_MARK.sprint).toBe('››››');
+    expect(NOTCH_MARK.backCrawl).toBe('‹');
+    expect(NOTCH_MARK.backWalk).toBe('‹‹');
   });
 });
 
-describe('gait tuning', () => {
-  it('gets faster and less nimble as she pushes harder', () => {
-    expect(GAIT_SPEED.crawl).toBeLessThan(GAIT_SPEED.walk);
-    expect(GAIT_SPEED.walk).toBeLessThan(GAIT_SPEED.sprint);
-    // Momentum costs agility: running turns wider than crawling.
-    expect(GAIT_TURN.crawl).toBeGreaterThan(GAIT_TURN.walk);
-    expect(GAIT_TURN.walk).toBeGreaterThan(GAIT_TURN.sprint);
+describe('shifting the telegraph', () => {
+  it('steps one notch at a time', () => {
+    expect(shift('walk', 1)).toBe('run');
+    expect(shift('walk', -1)).toBe('crawl');
   });
 
-  it('keeps a sprint from making the island trivial to cross', () => {
-    // 5600 units flat out should still be minutes of travel.
-    expect(5600 / GAIT_SPEED.sprint).toBeGreaterThan(200);
+  it('carries on down through stop into astern', () => {
+    // Tapping down from ahead must reach reverse without a mode change.
+    expect(shift('crawl', -1)).toBe('stop');
+    expect(shift('stop', -1)).toBe('backCrawl');
+    expect(shift('backCrawl', -1)).toBe('backWalk');
+  });
+
+  it('stops at the ends rather than wrapping round', () => {
+    // Wrapping would put full astern one tap past full ahead.
+    expect(shift('sprint', 1)).toBe('sprint');
+    expect(shift('backWalk', -1)).toBe('backWalk');
+    expect(shift('stop', 99)).toBe('sprint');
+    expect(shift('stop', -99)).toBe('backWalk');
+  });
+
+  it('eases a spent sprint down one, not to a halt', () => {
+    expect(slower('sprint')).toBe('run');
+  });
+
+  it('never leaves a notch without a mark or a speed', () => {
+    for (const notch of NOTCHES) {
+      expect(NOTCH_MARK[notch as Notch]).toBeTruthy();
+      expect(Number.isFinite(NOTCH_SPEED[notch as Notch])).toBe(true);
+    }
   });
 });

@@ -1,10 +1,11 @@
 import * as THREE from 'three';
 import { PlayerAnt } from '../ant/PlayerAnt';
 import { FollowCamera } from '../camera/FollowCamera';
-import { GaitThrottle } from '../input/GaitThrottle';
+import { Throttle } from '../input/Throttle';
 import { LookDrag } from '../input/LookDrag';
 import { MoveStick } from '../input/MoveStick';
-import { gaitFromDeflection, type Gait } from '../ant/gait';
+import { NOTCH_SPEED, shift, slower, type Notch } from '../ant/gait';
+import { Stamina } from '../ant/stamina';
 import {
   bandFor, groundDetail, groundHeight, ISLAND_SPAN, type Band,
 } from '../world/heightfield';
@@ -66,22 +67,14 @@ export class IslandScene {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly follow: FollowCamera;
   private readonly stick: MoveStick;
-  private readonly throttle: GaitThrottle;
+  private readonly throttle: Throttle;
   private readonly look: LookDrag;
   private readonly ant = new PlayerAnt();
   private readonly clock = new THREE.Clock();
   private readonly sections: Section[] = [];
-  private currentGait: Gait = 'walk';
-  /** Bearing auto-move is holding, or null while she is hand-driven. */
-  private autoBearing: number | null = null;
-  /** Cruising gait, chosen on the throttle while auto-move runs. */
-  private autoGait: Gait = 'walk';
-  /**
-   * The last gait she was actually travelling at. Auto-move engages
-   * from a centred stick — always, for a double-tap — so reading the
-   * live deflection there would lock in a crawl every time.
-   */
-  private lastMovingGait: Gait = 'walk';
+  /** Where the telegraph is set. Persists until moved, like a ship's. */
+  private notch: Notch = 'stop';
+  private readonly stamina = new Stamina();
   /**
    * Watches the canvas host itself. Orientation changes fire `resize`
    * before the viewport has settled on some phones, so a handler that
@@ -113,7 +106,7 @@ export class IslandScene {
     this.scene.add(this.ant.root);
 
     this.stick = new MoveStick(host);
-    this.throttle = new GaitThrottle(host);
+    this.throttle = new Throttle(host);
     this.look = new LookDrag(host);
     this.follow = new FollowCamera(this.aspect());
     this.follow.snapTo(this.ant.root);
@@ -132,8 +125,10 @@ export class IslandScene {
       cameraAt: () => this.follow.camera.position.toArray(),
       groundUnderfoot: () =>
         groundHeight(this.ant.root.position.x, this.ant.root.position.z),
-      gait: () => this.currentGait,
-      autoMoving: () => this.autoBearing !== null,
+      notch: () => this.notch,
+      stamina: () => this.stamina.fraction,
+      setNotch: (to: Notch) => { this.notch = to; },
+      shiftNotch: (by: number) => { this.notch = shift(this.notch, by); },
     };
   }
 
@@ -155,48 +150,34 @@ export class IslandScene {
     // Clamp dt so a backgrounded tab does not teleport the ant on return.
     const dt = Math.min(this.clock.getDelta(), 0.1);
     const look = this.look.read(dt);
-    const stick = this.stick.read(dt);
+    const stick = this.stick.read();
 
-    const fromStick = gaitFromDeflection(stick.deflection);
-    const driving = stick.deflection > 0;
-    if (driving) this.lastMovingGait = fromStick;
-
-    // Auto-move. A double-tap toggles it; a released hold starts it.
-    if (stick.toggleAuto) {
-      this.autoBearing = this.autoBearing === null ? this.ant.bearing : null;
-      if (this.autoBearing !== null) this.autoGait = this.lastMovingGait;
-    } else if (stick.engageAuto && this.autoBearing === null) {
-      this.autoBearing = this.ant.bearing;
-      this.autoGait = this.lastMovingGait;
+    // The throttle is a setting, not a thing to hold. Tapping a notch
+    // goes straight there, so easing off one step and slamming from a
+    // sprint to astern are the same gesture.
+    const stepped = this.throttle.takeStep();
+    if (stepped !== 0) this.notch = shift(this.notch, stepped);
+    const asked = this.throttle.takeRequest();
+    if (asked !== null && !(asked === 'sprint' && this.stamina.spent)) {
+      this.notch = asked;
     }
 
-    const auto = this.autoBearing !== null;
-    // The throttle only takes taps while auto-move is running, because
-    // that is the only time there is no thumb on the stick to read.
-    const picked = this.throttle.takeRequest();
-    if (picked && auto) this.autoGait = picked;
-
-    // A hand on the stick always wins, and steers what auto-move will
-    // carry on doing once the thumb lifts — cruise control, not a rail.
-    if (auto && driving) {
-      this.autoGait = fromStick;
-      this.autoBearing = this.ant.bearing;
-    }
-
-    const gait = driving || !auto ? fromStick : this.autoGait;
-    this.currentGait = gait;
-    this.throttle.show(gait);
-    this.throttle.setLive(auto);
-    this.stick.showAuto(auto);
+    // Sprinting is the one setting that costs something to hold. Run
+    // out and she drops a notch rather than simply stopping, which
+    // would be a worse surprise than slowing down.
+    const winded = this.stamina.update(
+      this.notch === 'sprint',
+      NOTCH_SPEED[this.notch] === 0,
+      dt,
+    );
+    if (winded) this.notch = slower(this.notch);
+    this.throttle.show(this.notch, this.stamina.fraction, this.stamina.spent);
 
     const cameraYaw = Math.atan2(
       this.follow.camera.position.x - this.ant.root.position.x,
       this.follow.camera.position.z - this.ant.root.position.z,
     );
-    // Read the field directly: it is null whenever auto-move is off,
-    // so a hand on the stick is the only other thing to rule out.
-    const bearing = driving ? null : this.autoBearing;
-    this.ant.update({ move: stick, gait, bearing }, cameraYaw, dt);
+    this.ant.update({ move: stick, notch: this.notch }, cameraYaw, dt);
     this.follow.update(this.ant.root, look, dt);
     this.chooseDetail();
     this.renderer.render(this.scene, this.follow.camera);

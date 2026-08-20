@@ -1,54 +1,92 @@
 /**
- * GAITS — how hard she is pushing herself.
+ * THE THROTTLE LADDER — what speed she is set to, not how hard a thumb
+ * is pushing.
  *
- * Chosen by how far the stick travels, in zones rather than a curve:
- * inside half the ring is a crawl, the outer half is a walk, and pushing
- * the thumb past the ring entirely is a sprint. Zones because a phone
- * stick is only ~64 px of travel, and a continuous ramp across that
- * distance gives no room to sit at a middle speed.
+ * Warship-style: the setting persists, so you pick a speed and steer,
+ * rather than holding a stick at a distance and hoping. Tapping a notch
+ * goes straight to it, which covers both stepping one along and
+ * dropping from a sprint to reverse in a single reach.
  *
- * Speed is flat within a zone. That is the point of having zones: a
- * crawl is a crawl wherever in the crawl band your thumb happens to be.
+ * Reverse only goes as fast as a crawl or a walk. An ant hauling
+ * something backwards is not sprinting.
  *
  * Numbers are GAME TUNING inspired by biology, not measured biology.
- * Real workers walk in the low centimetres per second and sprint several
- * times that; at a centimetre per world unit these sit in that shape
- * while keeping a 56 m island crossable.
+ * Real workers forage in the low centimetres per second and move
+ * several times that when pressed; at a centimetre per world unit these
+ * sit in that shape while keeping a 56 m island crossable.
  */
 
-export type Gait = 'crawl' | 'walk' | 'sprint';
+export type Notch =
+  | 'backWalk'
+  | 'backCrawl'
+  | 'stop'
+  | 'crawl'
+  | 'walk'
+  | 'run'
+  | 'sprint';
 
-/** Slowest first — the order the throttle stacks them in. */
-export const GAITS: readonly Gait[] = ['crawl', 'walk', 'sprint'];
+/** Slowest (most astern) first — the order the gauge stacks them in. */
+export const NOTCHES: readonly Notch[] = [
+  'backWalk', 'backCrawl', 'stop', 'crawl', 'walk', 'run', 'sprint',
+];
 
-/** World units per second. */
-export const GAIT_SPEED: Record<Gait, number> = {
+/** World units per second. Negative is astern. */
+export const NOTCH_SPEED: Record<Notch, number> = {
+  backWalk: -7,
+  backCrawl: -2.2,
+  stop: 0,
   crawl: 2.2,
   walk: 7,
-  sprint: 16,
+  run: 12,
+  sprint: 18,
 };
 
 /**
- * Radians per second of turning. Momentum costs agility: a sprinting
- * ant takes a wider line than one picking her way along at a crawl.
+ * Radians per second of turning. Momentum costs agility, so the faster
+ * settings take a wider line; standing still she pivots freely.
  */
-export const GAIT_TURN: Record<Gait, number> = {
+export const NOTCH_TURN: Record<Notch, number> = {
+  backWalk: 2.6,
+  backCrawl: 3.2,
+  stop: 4.5,
   crawl: 4.2,
   walk: 3.4,
-  sprint: 2.3,
+  run: 2.8,
+  sprint: 2.1,
 };
 
-/**
- * Zone edges, as a fraction of the stick's ring radius. Half the ring
- * divides crawl from walk; the ring's own edge divides walk from
- * sprint, so the boundary you have to feel for is one you can see.
- */
-export const CRAWL_UNTIL = 0.5;
-export const WALK_UNTIL = 1;
+/** How the gauge writes each notch — Joshua's own chevron notation. */
+export const NOTCH_MARK: Record<Notch, string> = {
+  backWalk: '‹‹',
+  backCrawl: '‹',
+  stop: '■',
+  crawl: '›',
+  walk: '››',
+  run: '›››',
+  sprint: '››››',
+};
 
-/** The gait a given stick deflection asks for. */
-export function gaitFromDeflection(deflection: number): Gait {
-  if (deflection < CRAWL_UNTIL) return 'crawl';
-  if (deflection < WALK_UNTIL) return 'walk';
-  return 'sprint';
+export const NOTCH_NAME: Record<Notch, string> = {
+  backWalk: 'reverse walk',
+  backCrawl: 'reverse crawl',
+  stop: 'stop',
+  crawl: 'crawl',
+  walk: 'walk',
+  run: 'run',
+  sprint: 'sprint',
+};
+
+/** The only notch that costs anything to hold. */
+export const COSTS_STAMINA: Notch = 'sprint';
+
+/** Step the throttle by one notch, clamped at either end of the ladder. */
+export function shift(from: Notch, steps: number): Notch {
+  const at = NOTCHES.indexOf(from);
+  const to = Math.max(0, Math.min(NOTCHES.length - 1, at + steps));
+  return NOTCHES[to];
+}
+
+/** The next notch down from here — what an exhausted sprint falls back to. */
+export function slower(from: Notch): Notch {
+  return shift(from, -1);
 }

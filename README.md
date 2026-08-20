@@ -81,38 +81,47 @@ fine either way.
 
 ## Controls
 
-**Move** — a fixed stick, bottom left. How far you push it picks the
-gait, in zones you can see rather than feel for: inside the dashed inner
-circle is a **crawl**, the outer half of the ring is a **walk**, and
-pushing your thumb past the ring entirely is a **sprint** — the nub
-travels a little past the rim and turns amber so the sprint is visible,
-not just felt. Speed is flat within a zone; that is what the zones are
-for.
+**Throttle** — a ship's telegraph on the left edge, and the only speed
+control. It is a *setting*: pick a notch and she holds it, so crossing
+an island that takes minutes needs no separate auto-move mode to arm
+and cancel. Tap any notch to go straight there, which makes easing off
+one step and slamming from a sprint to astern the same gesture.
 
-Pull straight back and she **backs up** keeping her heading, rather than
-spinning on the spot. A half-turn has no shorter side, so choosing one
-would be arbitrary; lean the push off-centre and the turn direction
-becomes unambiguous, so she comes round to it instead.
+```
+  ››››  sprint   — costs stamina
+  ›››   run
+  ››    walk
+  ›     crawl
+  ■     stop
+  ‹     reverse crawl
+  ‹‹    reverse walk
+```
 
-On desktop, WASD and the arrows read as a walk, and holding Shift
-sprints.
+Reverse only goes as fast as a crawl or a walk; an ant hauling
+something backwards is not sprinting. The fill runs from the Stop line
+out to the live notch, so ahead and astern read as opposite directions
+rather than more or less of the same thing, and the readout underneath
+gives her speed in cm/s — one world unit is about a centimetre.
 
-**Auto-move** — for crossing an island that takes minutes to walk.
-Double-tap the stick to start it, and double-tap again to stop. Or hold
-a steady bearing: a ring fills round the rim over two seconds, and
-letting go while it is full sets her going — the *release* commits, so
-moving the stick again before you lift always backs out.
+**Stamina** — sprinting is the one notch that costs anything, and the
+sprint notch doubles as its meter. Run it dry and she eases down to a
+run rather than stopping dead; it refills on its own whenever she is
+not sprinting, and faster still standing still. Per the project rule, a
+bar may only move if there is a way to move it back, and this one has
+one that needs no mechanic that does not exist yet.
 
-She holds a **world bearing** while cruising, so swinging the camera to
-look around never steers her. Touching the stick always takes over, and
-what you steer to becomes the new cruise — it is cruise control, not a
-rail. The throttle's notches become tappable while she is cruising, so
-that is where you change the speed; the rest of the time the stick is
-already saying it and the notches stay inert.
+**Steering** — a fixed stick, bottom left, which aims her and nothing
+else. Push and she comes round to that heading at a rate the throttle
+sets: she pivots freely at Stop and takes a wide line at a sprint. Let
+go and she holds her heading.
 
-**Throttle** — the notched bar on the left edge. A readout while you
-drive, a speed picker while auto-move runs. The glyphs (snail / ant /
-bolt) are placeholders standing in for real art.
+A push dead astern does *not* spin her a direction nobody chose — at a
+half-turn neither way round is shorter, so with no lean to read she
+holds her heading. Lean the push to one side and she comes round that
+way; to actually travel backwards, use an astern notch.
+
+On desktop, **W** and **S** work the telegraph and **A** / **D** steer,
+which is the arrangement the warship games settled on.
 
 **Camera** — drag anywhere the controls are not. There is no camera
 button: it would spend a slot the action controls will want, and a drag
