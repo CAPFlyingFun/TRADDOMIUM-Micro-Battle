@@ -69,6 +69,7 @@ export function cancelsAuto(move: { x: number; y: number }): boolean {
  */
 export class AutoRun {
   private current: AutoState = 'off';
+  private direction: 1 | -1 = 1;
 
   get state(): AutoState {
     return this.current;
@@ -76,6 +77,23 @@ export class AutoRun {
 
   get active(): boolean {
     return this.current === 'active';
+  }
+
+  /**
+   * Which way it is carrying her: +1 ahead, -1 astern.
+   *
+   * Astern exists for hauling — an ant dragging something walks
+   * backwards, and holding reverse across a long haul is exactly the
+   * fatigue Auto is for. For now the player flips it; when carrying
+   * arrives it can be chosen from what she has hold of.
+   */
+  get way(): 1 | -1 {
+    return this.direction;
+  }
+
+  /** Turn Auto around without giving it up. */
+  flip(): void {
+    this.direction = this.direction === 1 ? -1 : 1;
   }
 
   /**
@@ -95,17 +113,23 @@ export class AutoRun {
       return this.current;
     }
 
+    // The lane only ever locks her AHEAD; astern is flipped afterwards.
+    // A downward lane would have to reach below the stick, and there is
+    // not that much screen under a thumb resting in the corner.
+    if (lane !== 'none') this.direction = 1;
     this.current = lane === 'ready' ? 'ready' : lane === 'arming' ? 'arming' : 'off';
     return this.current;
   }
 
   /** Engage Auto outright, with no gesture — the desktop key. */
-  engage(): void {
+  engage(way: 1 | -1 = 1): void {
+    this.direction = way;
     this.current = 'active';
   }
 
   /** Stop Auto outright — an explicit cancel rather than a stick push. */
   cancel(): void {
     this.current = 'off';
+    this.direction = 1;
   }
 }

@@ -100,6 +100,43 @@ describe('once auto is running', () => {
   });
 });
 
+describe('which way it carries her', () => {
+  function running() {
+    const auto = new AutoRun();
+    auto.update('ready', false, { x: 0, y: 1 });
+    auto.update('none', true, { x: 0, y: 0 });
+    return auto;
+  }
+
+  it('goes ahead by default', () => {
+    expect(running().way).toBe(1);
+  });
+
+  it('turns round without giving up the lock', () => {
+    const auto = running();
+    auto.flip();
+    expect(auto.way).toBe(-1);
+    expect(auto.active).toBe(true);
+  });
+
+  it('faces forward again when it is engaged afresh', () => {
+    // A stale astern would send the next lock the wrong way entirely.
+    const auto = running();
+    auto.flip();
+    auto.cancel();
+    expect(running().way).toBe(1);
+    auto.update('arming', false, { x: 0, y: 1 });
+    expect(auto.way).toBe(1);
+  });
+
+  it('can be engaged astern outright, for the desktop key', () => {
+    const auto = new AutoRun();
+    auto.engage(-1);
+    expect(auto.active).toBe(true);
+    expect(auto.way).toBe(-1);
+  });
+});
+
 describe('the cancel cone', () => {
   it('wants the fore/aft axis to actually win', () => {
     expect(cancelsAuto({ x: 0, y: 1 })).toBe(true);

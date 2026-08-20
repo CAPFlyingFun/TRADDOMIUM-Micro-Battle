@@ -22,8 +22,8 @@ export interface Demand {
   pace: Pace;
   /** Whether a sprint is being called for AND is affordable. */
   sprinting: boolean;
-  /** Whether Auto is carrying her — it supplies the forward push. */
-  auto: boolean;
+  /** Auto: 0 is off, +1 carries her ahead, -1 astern for hauling. */
+  auto: 0 | 1 | -1;
 }
 
 export interface Travel {
@@ -43,8 +43,10 @@ export interface Travel {
  * rather than adding a gear.
  */
 export function resolve({ stick, pace, sprinting, auto }: Demand): Travel {
-  // Auto drives forward; the stick is then only steering and cancelling.
-  const push = auto ? 1 : stick.y;
+  // Auto supplies the push; the stick is then only steering and
+  // cancelling. Astern goes through the same reverse cap below, so a
+  // locked haul is a reverse walk and never a reverse sprint.
+  const push = auto !== 0 ? auto : stick.y;
 
   // Sprint is a forward effort. There is no reverse sprint.
   const ceiling = sprinting && push > 0 ? SPRINT_SPEED : PACE_SPEED[pace];

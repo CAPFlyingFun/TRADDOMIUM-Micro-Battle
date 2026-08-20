@@ -227,6 +227,21 @@ try {
   if (sprint.speed <= 12.5) {
     throw new Error(`a sprint was no faster than a run: ${sprint.speed.toFixed(1)}`);
   }
+
+  // Picking a pace MID-SPRINT has to take. Sprint raises the ceiling
+  // over whatever is selected, so leaving it on made every pace tap
+  // look ignored: she stayed at a sprint until the reserve ran out.
+  await page.click('[aria-label="crawl"]');
+  await advance(1.5);
+  const obeyed = await island(() => window.__island.speed());
+  if (obeyed > 4) {
+    throw new Error(`picking a pace mid-sprint was ignored: ${obeyed.toFixed(1)}`);
+  }
+  await island(() => window.__island.setPace('run'));
+  await page.keyboard.up('Shift');
+  await advance(0.3);
+  await page.keyboard.down('Shift');
+  await advance(1);
   // Wait for the bar itself rather than guessing at a duration: the
   // reserve refills, so a fixed wait races its re-arm mark and the
   // check passes or fails on timing rather than on behaviour.

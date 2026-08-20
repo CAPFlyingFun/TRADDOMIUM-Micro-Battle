@@ -199,13 +199,27 @@ engages when you lift your thumb inside the lock, so sliding back out
 first is a free change of mind. There is no permanent Auto button —
 the right side of the screen belongs to bite, grab, dig and abilities.
 
+Once it is running, the lane collapses to a compact **🔒 AUTO ▲** chip
+beside the pace column. Tapping that chip turns Auto round — **▼** hauls
+her astern at the reverse cap, which is how something gets dragged, and
+holding reverse across a long haul is exactly the fatigue Auto exists to
+remove. It flips rather than cancels, and a fresh lock always starts
+ahead. The lane itself only ever locks forward: a downward one would
+have to reach below the stick, and there is not that much screen under
+a thumb resting in the corner.
+
 While Auto runs, sidestepping and looking around leave it alone; a
 clear push forward or back takes manual control back. The cancel test
 is which axis wins, not how far the thumb went, because a real thumb
 aiming sideways lands at about `x 0.90, y 0.08`.
 
 **Sprint** — raises the ceiling rather than adding a gear, and is the
-only thing that costs anything. Run it dry and she drops to the
+only thing that costs anything. Picking a pace turns it off: asking for
+a walk means a walk, and a sprint sitting over the top of the selection
+made every pace tap look ignored. Its reserve reads as an amber bar
+down the RIGHT edge of the sprint row — green means live, and a green
+fill there read as "sprint is selected" when it only ever meant "there
+is sprint left in her". Run it dry and she drops to the
 selected pace rather than stopping, Auto included; it refills on its
 own, faster standing still, and the next sprint has to be *asked for
 again* — a held key will not pick it back up as the bar creeps over its

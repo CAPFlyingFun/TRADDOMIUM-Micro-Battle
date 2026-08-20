@@ -197,6 +197,17 @@ export class IslandScene {
     if (asked === 'faster') this.pace = fasterPace(this.pace);
     else if (asked === 'slower') this.pace = slowerPace(this.pace);
     else if (asked !== null) this.pace = asked;
+    // Asking for a pace MEANS it. Sprint raises the ceiling over
+    // whatever is selected, so leaving it on made every pace tap look
+    // ignored — she stayed at a sprint until the reserve ran out.
+    //
+    // It has to suppress a HELD key too, not just the tap toggle, or
+    // the rule holds on the phone and not on the desktop. Same
+    // mechanism as exhaustion: let go and ask again.
+    if (asked !== null) {
+      this.sprintOn = false;
+      this.reask = true;
+    }
 
     // Auto: armed by dragging past the rim, engaged on release, given
     // up the moment a clear fore/aft push asks for manual control back.
@@ -205,6 +216,10 @@ export class IslandScene {
       if (this.auto.active) this.auto.cancel();
       else this.auto.engage();
     }
+    // Tapping the chip turns Auto round rather than giving it up —
+    // hauling something is walked backwards, and holding reverse across
+    // a long drag is exactly the fatigue Auto exists to take away.
+    if (this.paceUI.takeAutoFlips() % 2 === 1) this.auto.flip();
 
     if (this.paceUI.takeSprintTaps() % 2 === 1) this.sprintOn = !this.sprintOn;
     const asking = this.sprintOn || this.paceUI.sprintHeld;
@@ -215,7 +230,7 @@ export class IslandScene {
       stick,
       pace: this.pace,
       sprinting: wants,
-      auto: this.auto.active,
+      auto: this.auto.active ? this.auto.way : 0,
     });
 
     // Only charge her for a sprint she is actually getting: calling for
@@ -231,7 +246,7 @@ export class IslandScene {
 
     this.paceUI.show(
       this.pace, sprinting, this.stamina.fraction, this.stamina.spent,
-      this.ant.pace, this.auto.active,
+      this.ant.pace, this.auto.active, this.auto.way,
     );
 
     // The heading the player is LOOKING along. Taken from the input,

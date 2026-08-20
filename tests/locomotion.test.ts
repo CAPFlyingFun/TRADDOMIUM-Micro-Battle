@@ -7,7 +7,7 @@ function ask(over: Partial<Demand> = {}) {
     stick: { x: 0, y: 0 },
     pace: 'walk',
     sprinting: false,
-    auto: false,
+    auto: 0,
     ...over,
   });
 }
@@ -95,16 +95,24 @@ describe('sprint', () => {
 
 describe('auto', () => {
   it('supplies the forward push itself', () => {
-    expect(ask({ auto: true, pace: 'run' }).ahead).toBeCloseTo(PACE_SPEED.run, 6);
+    expect(ask({ auto: 1, pace: 'run' }).ahead).toBeCloseTo(PACE_SPEED.run, 6);
   });
 
   it('can still be pushed sideways under the player', () => {
-    expect(ask({ auto: true, ...push(0, 1) }).across).toBeGreaterThan(0);
+    expect(ask({ auto: 1, ...push(0, 1) }).across).toBeGreaterThan(0);
+  });
+
+  it('hauls her backwards when it is turned round', () => {
+    // Dragging something is walked backwards, and it goes through the
+    // same reverse cap — a locked haul is never a reverse sprint.
+    const back = ask({ auto: -1, pace: 'run', sprinting: true });
+    expect(back.ahead).toBeLessThan(0);
+    expect(Math.abs(back.ahead)).toBeLessThanOrEqual(REVERSE_CAP);
   });
 
   it('falls back to the sustainable pace when a sprint is spent', () => {
     // The exhausted case: sprinting goes false, she keeps travelling.
-    const spent = ask({ auto: true, pace: 'run', sprinting: false });
+    const spent = ask({ auto: 1, pace: 'run', sprinting: false });
     expect(spent.ahead).toBeCloseTo(PACE_SPEED.run, 6);
     expect(spent.speed).toBeGreaterThan(0);
   });

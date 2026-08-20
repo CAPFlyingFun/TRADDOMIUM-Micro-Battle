@@ -26,14 +26,23 @@ const ROW_HEIGHT = 26;
 /** The one non-gold colour on the HUD: what is live RIGHT NOW. */
 const LIVE = 'rgba(110, 255, 150, .95)';
 const LIVE_TEXT = 'rgba(214, 255, 226, 1)';
+/**
+ * Stamina is amber and lives on the RIGHT edge, because green now
+ * means live and a green fill on the sprint row read as "sprint is
+ * selected" when it only ever meant "there is sprint left in her".
+ * Left edge is what is live; right edge is what it costs.
+ */
+const FUEL = 'rgba(255, 196, 92, .9)';
+const FUEL_SPENT = 'rgba(255, 110, 90, .95)';
 
 export class PaceSelector {
   private readonly column: HTMLDivElement;
   private readonly rows: HTMLDivElement;
-  private readonly auto: HTMLDivElement;
+  private readonly auto: HTMLButtonElement;
   private readonly readout: HTMLDivElement;
   private readonly sprintCell: HTMLButtonElement;
   private readonly reserve: HTMLDivElement;
+  private reserveTrack!: HTMLDivElement;
   private readonly cells = new Map<Pace, HTMLButtonElement>();
   private readonly detach: Array<() => void> = [];
 
@@ -45,13 +54,14 @@ export class PaceSelector {
   private shownSprint: boolean | null = null;
   private shownStamina = -1;
   private shownSpent = false;
-  private shownAuto: boolean | null = null;
+  private shownAuto = '';
+  private flips = 0;
   private shownSpeed = -1;
 
   constructor(host: HTMLElement) {
     this.column = document.createElement('div');
     this.rows = document.createElement('div');
-    this.auto = document.createElement('div');
+    this.auto = document.createElement('button');
     this.readout = document.createElement('div');
     this.reserve = document.createElement('div');
     this.column.dataset.control = 'pace';
@@ -59,7 +69,7 @@ export class PaceSelector {
 
     // Sprint on top, then the sustainable rows fastest-first.
     this.sprintCell = this.makeCell(SPRINT_MARK, 'sprint');
-    this.sprintCell.appendChild(this.reserve);
+    this.sprintCell.append(this.reserveTrack, this.reserve);
     this.listenTap(this.sprintCell, () => { this.sprintTaps += 1; });
     this.rows.appendChild(this.sprintCell);
 
@@ -117,6 +127,13 @@ export class PaceSelector {
     return asked;
   }
 
+  /** How many times the Auto chip was tapped since the last read. */
+  takeAutoFlips(): number {
+    const flips = this.flips;
+    this.flips = 0;
+    return flips;
+  }
+
   /** Shift is the desktop sprint: held, not toggled. */
   get sprintHeld(): boolean {
     return this.shiftDown;
@@ -137,6 +154,7 @@ export class PaceSelector {
     spent: boolean,
     speed: number,
     auto: boolean,
+    way: 1 | -1,
   ): void {
     if (this.shownPace !== pace) {
       this.shownPace = pace;
@@ -152,17 +170,19 @@ export class PaceSelector {
       this.shownStamina = stamina;
       this.shownSpent = spent;
       this.reserve.style.height = `${Math.max(0, Math.min(1, stamina)) * 100}%`;
-      this.reserve.style.background = spent
-        ? 'rgba(255, 120, 96, .38)'
-        : 'rgba(110, 255, 150, .30)';
+      this.reserve.style.background = spent ? FUEL_SPENT : FUEL;
       this.sprintCell.style.filter = spent ? 'grayscale(1)' : 'none';
     }
 
-    if (this.shownAuto !== auto) {
-      this.shownAuto = auto;
-      // Once Auto is running the lane collapses; this compact chip is
-      // all that is left of it, which keeps the screen for the fight.
+    const chip = auto ? (way > 0 ? 'ahead' : 'astern') : 'off';
+    if (this.shownAuto !== chip) {
+      this.shownAuto = chip;
+      // Once Auto is running the lane collapses; this chip is all that
+      // is left of it, and it doubles as the direction control — there
+      // is no room for a second lane below the stick.
       this.auto.style.opacity = auto ? '1' : '0';
+      this.auto.style.pointerEvents = auto ? 'auto' : 'none';
+      this.auto.textContent = way > 0 ? '🔒 AUTO ▲' : '🔒 AUTO ▼';
     }
 
     // One world unit is about a centimetre. Rounded to a tenth, so a
@@ -272,19 +292,45 @@ export class PaceSelector {
       userSelect: 'none',
     } as Partial<CSSStyleDeclaration>);
 
+    // A bar on the edge, not a fill of the row: whatever colour a fill
+    // is, it competes with the row highlight for the same meaning.
+    const track = document.createElement('div');
+    Object.assign(track.style, {
+      position: 'absolute',
+      right: '3px',
+      top: '3px',
+      bottom: '3px',
+      width: '4px',
+      borderRadius: '2px',
+      background: 'rgba(255, 196, 92, .16)',
+      pointerEvents: 'none',
+    } as Partial<CSSStyleDeclaration>);
+    this.reserveTrack = track;
+
     Object.assign(this.reserve.style, {
       position: 'absolute',
-      left: '0',
-      right: '0',
-      bottom: '0',
+      right: '3px',
+      bottom: '3px',
+      width: '4px',
       height: '100%',
-      background: 'rgba(143, 224, 168, .34)',
+      maxHeight: 'calc(100% - 6px)',
+      borderRadius: '2px',
+      background: FUEL,
       pointerEvents: 'none',
-      transition: 'background 160ms ease',
+      transition: 'background 160ms ease, height 160ms ease',
     } as Partial<CSSStyleDeclaration>);
 
-    this.auto.textContent = '🔒 AUTO';
+    this.auto.type = 'button';
+    this.auto.setAttribute('aria-label', 'auto direction');
+    this.auto.dataset.control = 'auto-chip';
+    this.auto.textContent = '🔒 AUTO ▲';
+    this.listenTap(this.auto, () => { this.flips += 1; });
     Object.assign(this.auto.style, {
+      appearance: 'none',
+      border: '0',
+      width: '100%',
+      cursor: 'pointer',
+      touchAction: 'none',
       textAlign: 'center',
       font: '700 9px/1.6 "Chakra Petch", system-ui, sans-serif',
       letterSpacing: '.5px',
