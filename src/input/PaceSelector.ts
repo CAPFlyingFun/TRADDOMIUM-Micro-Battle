@@ -50,8 +50,7 @@ export class PaceSelector {
   private sprintTaps = 0;
   private shiftDown = false;
 
-  private shownPace: Pace | null = null;
-  private shownSprint: boolean | null = null;
+  private shownLit = '';
   private shownStamina = -1;
   private shownSpent = false;
   private shownAuto = '';
@@ -156,14 +155,17 @@ export class PaceSelector {
     auto: boolean,
     way: 1 | -1,
   ): void {
-    if (this.shownPace !== pace) {
-      this.shownPace = pace;
-      for (const [at, cell] of this.cells) this.markLive(cell, at === pace);
-    }
-
-    if (this.shownSprint !== sprinting) {
-      this.shownSprint = sprinting;
-      this.markLive(this.sprintCell, sprinting);
+    // ONE row is green, and it is whatever is actually in force. Pace
+    // and sprint were lit independently, so a sprint over a crawl lit
+    // both — truthful and unreadable, since green is supposed to answer
+    // "what speed am I doing" with one row.
+    const lit = `${pace}|${sprinting}`;
+    if (this.shownLit !== lit) {
+      this.shownLit = lit;
+      for (const [at, cell] of this.cells) {
+        this.mark(cell, at !== pace ? 'off' : sprinting ? 'chosen' : 'live');
+      }
+      this.mark(this.sprintCell, sprinting ? 'live' : 'off');
     }
 
     if (stamina !== this.shownStamina || spent !== this.shownSpent) {
@@ -234,19 +236,25 @@ export class PaceSelector {
   }
 
   /**
-   * The selected row is lit; the others are legible but quiet.
+   * How a row reads.
    *
-   * A brighter gold was not enough — every row is gold, so at a glance
-   * the whole ladder read as one speed. The live row gets a different
-   * COLOUR rather than a different amount of the same one: a green bar
-   * down its inside edge, a green wash, and a glow.
+   * LIVE is the speed she is actually doing — green, because a brighter
+   * gold was not enough: every row is gold, so at a glance the whole
+   * ladder read as one speed. CHOSEN is the pace still selected
+   * underneath a sprint that is overriding it: marked in gold so it is
+   * clearly picked without claiming to be what is happening.
    */
-  private markLive(cell: HTMLButtonElement, live: boolean): void {
-    cell.style.color = live ? LIVE_TEXT : 'rgba(255, 226, 160, .55)';
-    cell.style.background = live ? 'rgba(90, 255, 130, .17)' : 'transparent';
-    cell.style.borderLeft = live ? `3px solid ${LIVE}` : '3px solid transparent';
-    cell.style.boxShadow = live ? `inset 0 0 12px rgba(90, 255, 130, .28)` : 'none';
-    cell.style.textShadow = live ? `0 0 8px rgba(90, 255, 130, .8)` : 'none';
+  private mark(cell: HTMLButtonElement, as: 'live' | 'chosen' | 'off'): void {
+    const live = as === 'live';
+    const chosen = as === 'chosen';
+    cell.style.color = live ? LIVE_TEXT
+      : chosen ? 'rgba(255, 236, 190, .95)' : 'rgba(255, 226, 160, .55)';
+    cell.style.background = live ? 'rgba(90, 255, 130, .17)'
+      : chosen ? 'rgba(255, 210, 110, .12)' : 'transparent';
+    cell.style.borderLeft = live ? `3px solid ${LIVE}`
+      : chosen ? '3px solid rgba(255, 210, 110, .75)' : '3px solid transparent';
+    cell.style.boxShadow = live ? 'inset 0 0 12px rgba(90, 255, 130, .28)' : 'none';
+    cell.style.textShadow = live ? '0 0 8px rgba(90, 255, 130, .8)' : 'none';
   }
 
   private listenTap(cell: HTMLElement, run: () => void): void {

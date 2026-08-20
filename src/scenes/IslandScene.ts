@@ -244,8 +244,12 @@ export class IslandScene {
       this.reask = true;
     }
 
+    // Show what was ASKED for, not what she is getting. `sprinting` is
+    // only true once she is actually exceeding the pace, so standing
+    // still the sprint row stayed dark until she got moving — the one
+    // moment you most want to know it is armed.
     this.paceUI.show(
-      this.pace, sprinting, this.stamina.fraction, this.stamina.spent,
+      this.pace, wants, this.stamina.fraction, this.stamina.spent,
       this.ant.pace, this.auto.active, this.auto.way,
     );
 
