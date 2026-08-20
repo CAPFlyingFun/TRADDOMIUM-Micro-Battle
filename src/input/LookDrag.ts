@@ -72,7 +72,10 @@ export class LookDrag {
       }
       this.swing(
         (e.clientX - this.last.x) * YAW_PER_PX,
-        (e.clientY - this.last.y) * -PITCH_PER_PX,
+        // Dragging DOWN lifts the camera. Joshua's call, and the
+        // convention most flight and console games use: you are pushing
+        // the view, not the ant.
+        (e.clientY - this.last.y) * PITCH_PER_PX,
       );
       this.last = { x: e.clientX, y: e.clientY };
     });

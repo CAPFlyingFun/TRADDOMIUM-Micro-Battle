@@ -23,6 +23,10 @@ import {
 const COLUMN_WIDTH = 44;
 const ROW_HEIGHT = 26;
 
+/** The one non-gold colour on the HUD: what is live RIGHT NOW. */
+const LIVE = 'rgba(110, 255, 150, .95)';
+const LIVE_TEXT = 'rgba(214, 255, 226, 1)';
+
 export class PaceSelector {
   private readonly column: HTMLDivElement;
   private readonly rows: HTMLDivElement;
@@ -150,7 +154,7 @@ export class PaceSelector {
       this.reserve.style.height = `${Math.max(0, Math.min(1, stamina)) * 100}%`;
       this.reserve.style.background = spent
         ? 'rgba(255, 120, 96, .38)'
-        : 'rgba(143, 224, 168, .34)';
+        : 'rgba(110, 255, 150, .30)';
       this.sprintCell.style.filter = spent ? 'grayscale(1)' : 'none';
     }
 
@@ -184,6 +188,8 @@ export class PaceSelector {
       appearance: 'none',
       border: '0',
       borderBottom: '1px solid rgba(255, 210, 110, .18)',
+      // Reserved so lighting a row does not shift its contents sideways.
+      borderLeft: '3px solid transparent',
       background: 'transparent',
       flex: '1 1 0',
       minHeight: '0',
@@ -207,10 +213,20 @@ export class PaceSelector {
     return cell;
   }
 
-  /** The selected row is lit; the others are legible but quiet. */
+  /**
+   * The selected row is lit; the others are legible but quiet.
+   *
+   * A brighter gold was not enough — every row is gold, so at a glance
+   * the whole ladder read as one speed. The live row gets a different
+   * COLOUR rather than a different amount of the same one: a green bar
+   * down its inside edge, a green wash, and a glow.
+   */
   private markLive(cell: HTMLButtonElement, live: boolean): void {
-    cell.style.color = live ? 'rgba(255, 244, 214, 1)' : 'rgba(255, 226, 160, .55)';
-    cell.style.background = live ? 'rgba(255, 210, 110, .16)' : 'transparent';
+    cell.style.color = live ? LIVE_TEXT : 'rgba(255, 226, 160, .55)';
+    cell.style.background = live ? 'rgba(90, 255, 130, .17)' : 'transparent';
+    cell.style.borderLeft = live ? `3px solid ${LIVE}` : '3px solid transparent';
+    cell.style.boxShadow = live ? `inset 0 0 12px rgba(90, 255, 130, .28)` : 'none';
+    cell.style.textShadow = live ? `0 0 8px rgba(90, 255, 130, .8)` : 'none';
   }
 
   private listenTap(cell: HTMLElement, run: () => void): void {
@@ -286,7 +302,7 @@ export class PaceSelector {
       textAlign: 'center',
       whiteSpace: 'nowrap',
       font: '600 10px/1 "JetBrains Mono", ui-monospace, monospace',
-      color: 'rgba(255, 232, 178, .95)',
+      color: LIVE_TEXT,
       textShadow: '0 1px 3px rgba(0, 0, 0, .85)',
       userSelect: 'none',
       pointerEvents: 'none',
