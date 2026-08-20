@@ -55,11 +55,12 @@ describe('the feel constants', () => {
   });
 
   it('leaves a real deadzone to be looked at within', () => {
-    // Small enough and she can never be seen from the side at all;
-    // large enough and a thumb-drag never reaches it. 45 degrees is
-    // exactly PI/4, so this bound includes its endpoint on purpose.
-    expect(REST_DEADZONE).toBeGreaterThanOrEqual(Math.PI / 4);
-    expect(REST_DEADZONE).toBeLessThan(Math.PI / 2);
+    // It has to be big enough that she can be seen from the side at
+    // all, and small enough that it is not felt as lag — she settles at
+    // its EDGE, so whatever this is, it is how far behind the view she
+    // permanently sits.
+    expect(REST_DEADZONE).toBeGreaterThan(Math.PI / 18);
+    expect(REST_DEADZONE).toBeLessThan(Math.PI / 4);
   });
 
   it('changes her mind more slowly than it changes her speed', () => {

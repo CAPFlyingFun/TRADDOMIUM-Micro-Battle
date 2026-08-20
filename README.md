@@ -151,14 +151,23 @@ you steer by swinging the view, and because her body ends up aligned
 with it, a sideways push still reads as a proper sidestep on screen:
 she crabs, she does not pivot.
 
-At **rest** she is left alone. You can look well round her and she just
-watches you over her shoulder; past 45° she turns, and only back to the
+At **rest** she is left alone. You can look round her and she just
+watches you over her shoulder; past 30° she turns, and only back to the
 *edge* of that arc, because chasing the camera onto her nose would mean
 she could never be looked at from the side at all.
 
-Godot uses 60° at an ease of 4, which is tuned for a mouse. A thumb-drag
-covers ground far more slowly, so waiting out 60° of it read as her
-ignoring you — 45° at an ease of 7 is the device answer.
+That arc IS the lag: she settles at its edge, so whatever it is set to
+is how far behind the view she permanently sits. Godot's 60° was tuned
+for a mouse and read as her trailing you; 30° at a gentle ease of 3 is
+the device answer. If she still feels like she is dragging, the
+deadzone is the number to change, not the rate.
+
+**Her legs move.** The placeholder body strides in an alternating
+tripod — front and back one side with the middle of the other — driven
+by the ground she covers *and* the ground she turns through. Turning on
+the spot with six frozen legs is most of why a rotation used to read as
+a model sliding round. This is not the six-leg IK milestone; it is the
+placeholder moving so the movement can be judged on the movement.
 
 Two earlier schemes were tried and rejected on the device: slow-to-turn,
 where nothing steered her above a crawl, and lean-into-the-turn, where a

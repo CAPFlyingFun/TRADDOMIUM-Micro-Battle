@@ -109,16 +109,25 @@ export const TURN_RATE = 18;
  *
  * The Godot build uses 60, tuned for a mouse. A thumb-drag covers
  * ground far more slowly, so waiting out 60 degrees of it felt like she
- * was ignoring you; 45 is the device answer.
+ * was ignoring you.
+ *
+ * It is also the size of the lag itself, which is the part that reads
+ * as sluggish: she settles at the EDGE of this arc, so whatever it is
+ * set to is how far behind the view she permanently sits. Halving it
+ * from 60 halves that. If she still reads as trailing the camera, this
+ * is the number, not the rate below.
  */
-export const REST_DEADZONE = (45 * Math.PI) / 180;
+export const REST_DEADZONE = (30 * Math.PI) / 180;
 
 /**
- * How briskly she closes that gap once past it. Faster than Godot's 4,
- * for the same reason: the whole gesture has to pay for itself sooner
- * when the input driving it is a thumb rather than a mouse.
+ * How briskly she closes that gap once past it, as an exponential rate
+ * — so HIGHER is quicker, and 3 is gentler than the 7 it replaces.
+ *
+ * Deliberately gentle now that the deadzone is small: she starts coming
+ * round much sooner, so the movement has time to be a shuffle rather
+ * than a snap.
  */
-export const REST_EASE = 7;
+export const REST_EASE = 3;
 
 /**
  * How fast her speed closes on what the stick is asking for. An

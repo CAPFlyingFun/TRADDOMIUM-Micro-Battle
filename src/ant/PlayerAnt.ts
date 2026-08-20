@@ -60,6 +60,12 @@ export class PlayerAnt {
 
   private heading = 0;
   private gaitPhase = 0;
+  /** Radians per second she turned last frame — the gait reads it. */
+  private turned = 0;
+  /** The six legs, with their rest pose and tripod phase. */
+  private readonly legs: Array<{
+    mesh: THREE.Mesh; yaw: number; roll: number; phase: number;
+  }> = [];
   /** Where she is trying to go, camera frame, eased. */
   private wish = { x: 0, y: 0 };
   /** What she is actually doing, camera frame, world units per second. */
@@ -90,6 +96,11 @@ export class PlayerAnt {
     return Math.hypot(this.velocity.x, this.velocity.y);
   }
 
+  /** How far through her stride cycle she is — the legs run off this. */
+  get stridePhase(): number {
+    return this.gaitPhase;
+  }
+
   /**
    * @param drive what the controls are asking of her this frame
    * @param view the heading the player is LOOKING along, world radians
@@ -103,6 +114,7 @@ export class PlayerAnt {
    */
   update(drive: Drive, view: number, dt: number): void {
     const asked = Math.hypot(drive.ahead, drive.across);
+    const wasFacing = this.heading;
 
     // Swing the wish round rather than letting it jump. Flicking the
     // stick from one side to the other used to reverse her travel
@@ -126,6 +138,11 @@ export class PlayerAnt {
       if (excess > 0) this.heading += Math.sign(off) * excess * closes(REST_EASE, dt);
     }
 
+    this.turned = Math.atan2(
+      Math.sin(this.heading - wasFacing),
+      Math.cos(this.heading - wasFacing),
+    ) / Math.max(dt, 1e-6);
+
     // Travel is in the CAMERA's frame, not hers: the stick means what
     // the player sees, and her body follows it rather than steering it.
     const step = dt;
@@ -135,8 +152,12 @@ export class PlayerAnt {
         += (Math.sin(view) * this.velocity.y + Math.sin(right) * this.velocity.x) * step;
       this.root.position.z
         += (Math.cos(view) * this.velocity.y + Math.cos(right) * this.velocity.x) * step;
-      this.gaitPhase += this.pace * step * 2.2;
     }
+    // Stride on the ground she covers AND on the ground she turns
+    // through. Driving the gait off travel alone left her turning on
+    // the spot with six legs frozen underneath her, which is most of
+    // why a rotation read as a slide rather than as an ant.
+    this.gaitPhase += (this.pace * 2.2 + Math.abs(this.turned) * 5) * dt;
 
     this.settle();
   }
@@ -150,6 +171,26 @@ export class PlayerAnt {
 
     // Gait bob: subtle, and only while striding.
     this.body.position.y = 0.34 + Math.abs(Math.sin(this.gaitPhase)) * 0.05;
+    this.stride();
+  }
+
+  /**
+   * Swing the placeholder legs in an alternating tripod — front and
+   * back one side with the middle of the other, which is how an ant
+   * actually walks, and what makes a turn read as legs rather than as
+   * a model sliding round.
+   *
+   * This is NOT the six-leg IK milestone: nothing here reaches for
+   * the ground or knows where it is. It is the placeholder body
+   * moving, so the movement can be judged on the movement.
+   */
+  private stride(): void {
+    for (const leg of this.legs) {
+      const swing = Math.sin(this.gaitPhase + leg.phase);
+      // Fore and aft along her body, lifted at the top of the swing.
+      leg.mesh.rotation.y = leg.yaw + swing * 0.5;
+      leg.mesh.rotation.z = leg.roll - Math.max(0, swing) * 0.28 * Math.sign(leg.roll);
+    }
   }
 
   /** Pitch the body to the terrain sampled a body-length ahead/behind. */
@@ -184,9 +225,15 @@ export class PlayerAnt {
       for (let i = 0; i < 3; i++) {
         const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.012, 0.62, 5), chitin);
         leg.position.set(0.3 * side, -0.16, 0.26 - i * 0.26);
-        leg.rotation.z = side * 1.05;
-        leg.rotation.y = side * (i - 1) * 0.35;
+        const roll = side * 1.05;
+        const yaw = side * (i - 1) * 0.35;
+        leg.rotation.z = roll;
+        leg.rotation.y = yaw;
         this.body.add(leg);
+        // Alternating tripod: front and back on one side share a
+        // phase with the middle leg of the other.
+        const tripod = (side < 0) === (i === 1);
+        this.legs.push({ mesh: leg, yaw, roll, phase: tripod ? 0 : Math.PI });
       }
 
       const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.008, 0.45, 5), chitin);

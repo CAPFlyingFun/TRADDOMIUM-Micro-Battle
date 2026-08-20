@@ -6,7 +6,9 @@ import { LookDrag } from '../input/LookDrag';
 import { MoveStick } from '../input/MoveStick';
 import { AutoRun } from '../input/autoRun';
 import { resolve } from '../ant/locomotion';
-import { fasterPace, PACE_SPEED, slowerPace, type Pace } from '../ant/pace';
+import {
+  fasterPace, PACE_SPEED, REST_DEADZONE, slowerPace, type Pace,
+} from '../ant/pace';
 import { Stamina } from '../ant/stamina';
 import { groundDetail, groundHeight, ISLAND_SPAN } from '../world/heightfield';
 import { findLandfall, type HeightGrid } from '../world/kauai';
@@ -155,6 +157,8 @@ export class IslandScene {
       sprinting: () => this.sprintOn,
       setSprint: (on: boolean) => { this.sprintOn = on; },
       bearing: () => this.ant.bearing,
+      stride: () => this.ant.stridePhase,
+      deadzone: () => REST_DEADZONE,
     };
   }
 

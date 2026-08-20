@@ -104,6 +104,36 @@ describe('steering is looking', () => {
   });
 });
 
+describe('her legs run off what she is doing', () => {
+  it('strides while travelling', () => {
+    const ant = new PlayerAnt();
+    ant.placeAt(0, 0, 0);
+    const from = ant.stridePhase;
+    for (let i = 0; i < 60; i++) ant.update(drive({ ahead: PACE_SPEED.walk }), BEHIND, DT);
+    expect(ant.stridePhase).toBeGreaterThan(from);
+  });
+
+  it('strides while turning on the spot, going nowhere', () => {
+    // Driving the gait off travel alone left her spinning with six legs
+    // frozen underneath her, which is most of why a rotation read as a
+    // slide rather than as an ant.
+    const ant = new PlayerAnt();
+    ant.placeAt(0, 0, 0);
+    const from = ant.stridePhase;
+    for (let i = 0; i < 60; i++) ant.update(drive({}), BEHIND + 1.9, DT);
+    expect(ant.pace).toBe(0);
+    expect(ant.stridePhase).toBeGreaterThan(from);
+  });
+
+  it('is still when she is', () => {
+    const ant = new PlayerAnt();
+    ant.placeAt(0, 0, 0);
+    const from = ant.stridePhase;
+    for (let i = 0; i < 60; i++) ant.update(drive({}), BEHIND, DT);
+    expect(ant.stridePhase).toBe(from);
+  });
+});
+
 describe('nothing snaps', () => {
   it('takes a moment to get up to speed', () => {
     // A standing start must not reach full pace in one frame.

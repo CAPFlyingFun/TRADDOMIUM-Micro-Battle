@@ -312,15 +312,34 @@ try {
   // round her and she just watches you over her shoulder.
   await advance(2);
   const idle = await bearing();
+  // Swing the view to a FRACTION OF THE DEADZONE rather than for a
+  // fixed time. A hard-coded duration silently stops being a "small
+  // look" the moment either the deadzone or the key rate is retuned —
+  // which is exactly what happened when the deadzone came down to 30.
+  const deadzone = await island(() => window.__island.deadzone());
   await page.keyboard.down('KeyE');
-  await advance(0.35);
+  await page.waitForFunction((want) => {
+    const c = window.__island.cameraAt();
+    const a = window.__island.where();
+    // The camera sits OPPOSITE her, so the heading it looks along is
+    // half a turn from its bearing. Getting this backwards waits for
+    // the camera to reach her nose, which never happens.
+    const view = Math.atan2(c[0] - a[0], c[2] - a[2]) + Math.PI;
+    const off = view - window.__island.bearing();
+    return Math.abs(Math.atan2(Math.sin(off), Math.cos(off))) >= want;
+  }, deadzone * 0.6, { timeout: 60000 }).catch(() => {
+    throw new Error('the view never swung to a fraction of the deadzone');
+  });
   await page.keyboard.up('KeyE');
   await advance(1);
   const shrugged = arc(await bearing(), idle);
   if (shrugged > 0.05) {
-    throw new Error(`a small look turned her at rest: ${shrugged.toFixed(3)} rad`);
+    throw new Error(`a look inside the deadzone turned her: ${shrugged.toFixed(3)} rad`);
   }
 
+  // Her legs have to be moving while she does it. Turning on the spot
+  // with six frozen legs is most of why a rotation read as a slide.
+  const strideBefore = await island(() => window.__island.stride());
   // Past it she does come round — but only to the edge of the deadzone.
   const before2 = await bearing();
   await page.keyboard.down('KeyE');
@@ -331,6 +350,8 @@ try {
   if (cameRound < 0.2) {
     throw new Error(`a long look never brought her round: ${cameRound.toFixed(3)} rad`);
   }
+  const strode = (await island(() => window.__island.stride())) - strideBefore;
+  if (strode <= 0) throw new Error('she turned on the spot with her legs frozen');
 
   // ── Rotation ─────────────────────────────────────────────────────
   // Turning a phone fires resize before the viewport has settled, so a
