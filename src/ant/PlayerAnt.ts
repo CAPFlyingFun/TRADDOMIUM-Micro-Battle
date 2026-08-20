@@ -3,6 +3,17 @@ import { groundHeight } from '../world/heightfield';
 import type { MoveInput } from '../input/MoveStick';
 import { GAIT_SPEED, GAIT_TURN, type Gait } from './gait';
 
+/**
+ * Within this arc of dead astern she backs up rather than turning
+ * round. A half-turn has no shorter side, so the turn direction comes
+ * down to which way a floating-point zero happened to be signed.
+ */
+const ASTERN_ARC = (30 * Math.PI) / 180;
+const ASTERN = Math.cos(Math.PI - ASTERN_ARC);
+
+/** Backing up is slower than walking into it, as it is for a real ant. */
+const REVERSE_SCALE = 0.45;
+
 /** Everything the controls ask of her in one frame. */
 export interface Drive {
   /** Stick vector, camera-relative (x right, y forward). */
@@ -60,16 +71,29 @@ export class PlayerAnt {
       const targetHeading = cameraYaw + Math.atan2(-move.x, move.y) + Math.PI;
       let diff = targetHeading - this.heading;
       diff = Math.atan2(Math.sin(diff), Math.cos(diff));
-      const maxTurn = GAIT_TURN[gait] * dt;
-      this.heading += THREE.MathUtils.clamp(diff, -maxTurn, maxTurn);
+      const facing = Math.cos(diff);
 
-      // She walks where her body points, so a hard stick reversal turns
-      // her around rather than strafing her backwards.
-      const forwardness = Math.max(0, Math.cos(diff));
-      const step = speed * strength * forwardness * dt;
+      let step: number;
+      if (facing > ASTERN) {
+        // She turns toward the push and walks into it. Her body leads,
+        // so the further off the push is the less ground she covers
+        // while coming round to it.
+        const maxTurn = GAIT_TURN[gait] * dt;
+        this.heading += THREE.MathUtils.clamp(diff, -maxTurn, maxTurn);
+        step = speed * strength * Math.max(0, facing) * dt;
+      } else {
+        // Pushed within ASTERN_ARC of dead astern: back up, keeping her
+        // heading. Spinning here looked wrong on the device for a good
+        // reason — at a half-turn neither way round is shorter, so the
+        // choice fell to the sign of a zero and never matched intent.
+        // Lean the push off-centre and the turn becomes unambiguous
+        // again, which is the branch above.
+        step = -speed * REVERSE_SCALE * strength * dt;
+      }
+
       this.root.position.x += Math.sin(this.heading) * step;
       this.root.position.z += Math.cos(this.heading) * step;
-      this.gaitPhase += step * 2.2;
+      this.gaitPhase += Math.abs(step) * 2.2;
     }
 
     this.settle();

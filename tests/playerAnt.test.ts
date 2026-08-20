@@ -87,3 +87,62 @@ describe('gaits', () => {
     }
   });
 });
+
+describe('backing up', () => {
+  it('reverses on a straight pull back instead of spinning', () => {
+    const ant = new PlayerAnt();
+    ant.placeAt(0, 0, 0); // facing +Z, camera behind at -Z
+    for (let i = 0; i < 120; i++) {
+      ant.update(drive({ move: { x: 0, y: -1 } }), CAMERA_BEHIND_YAW, DT);
+    }
+    // Still facing the way she started, having walked backwards.
+    expect(ant.bearing).toBeCloseTo(0, 5);
+    expect(ant.root.position.z).toBeLessThan(-1);
+    expect(Math.abs(ant.root.position.x)).toBeLessThan(0.2);
+  });
+
+  it('does not let the sign of a zero decide anything', () => {
+    // `-move.x` is -0 for a dead-astern push, and Math.atan2(-0, -1) is
+    // -PI where Math.atan2(0, -1) is +PI. That sign used to pick which
+    // way she spun, so the two must now be indistinguishable.
+    const run = (x: number) => {
+      const ant = new PlayerAnt();
+      ant.placeAt(0, 0, 0);
+      for (let i = 0; i < 60; i++) {
+        ant.update(drive({ move: { x, y: -1 } }), CAMERA_BEHIND_YAW, DT);
+      }
+      return { bearing: ant.bearing, z: ant.root.position.z };
+    };
+    expect(run(0)).toEqual(run(-0));
+  });
+
+  it('backs up slower than it walks forward', () => {
+    const forward = walk({ x: 0, y: 1 }, 1).z;
+    const ant = new PlayerAnt();
+    ant.placeAt(0, 0, 0);
+    for (let i = 0; i < 60; i++) {
+      ant.update(drive({ move: { x: 0, y: -1 } }), CAMERA_BEHIND_YAW, DT);
+    }
+    expect(Math.abs(ant.root.position.z)).toBeLessThan(forward);
+  });
+
+  it('turns, not reverses, once the push leans off dead astern', () => {
+    // Back-and-to-the-left is unambiguous, so she should come round to
+    // it rather than back up. Stick left is the viewer's left, +X.
+    const ant = new PlayerAnt();
+    ant.placeAt(0, 0, 0);
+    for (let i = 0; i < 120; i++) {
+      ant.update(drive({ move: { x: -0.7, y: -0.7 } }), CAMERA_BEHIND_YAW, DT);
+    }
+    expect(ant.bearing).toBeGreaterThan(0.5);
+  });
+
+  it('turns the other way for a push leaning the other side', () => {
+    const ant = new PlayerAnt();
+    ant.placeAt(0, 0, 0);
+    for (let i = 0; i < 120; i++) {
+      ant.update(drive({ move: { x: 0.7, y: -0.7 } }), CAMERA_BEHIND_YAW, DT);
+    }
+    expect(ant.bearing).toBeLessThan(-0.5);
+  });
+});

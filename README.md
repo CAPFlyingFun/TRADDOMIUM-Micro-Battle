@@ -79,6 +79,11 @@ run. That is the whole movement control; there is nothing to toggle and
 nothing to lock. On desktop, WASD and the arrow keys read as full
 deflection, so the keyboard always runs.
 
+Pull straight back and she **backs up** keeping her heading, rather than
+spinning on the spot. A half-turn has no shorter side, so choosing one
+would be arbitrary; lean the push off-centre and the turn direction
+becomes unambiguous, so she comes round to it instead.
+
 **Throttle** — the notched bar on the left edge is a READOUT, not a
 control. Nothing on it is tappable; it exists so the stick's analog
 gait is never invisible, showing a level that rises through the notches
