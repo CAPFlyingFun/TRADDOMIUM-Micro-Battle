@@ -15,6 +15,7 @@ import { findLandfall, type HeightGrid } from '../world/kauai';
 import { bakeGrain, GRAIN_SIZE } from '../world/groundTexture';
 import { loadBands, terrainMaterial } from '../world/terrainMaterial';
 import { SettingsPanel } from '../ui/SettingsPanel';
+import { Vitals } from '../ui/Vitals';
 import { onChange } from '../ui/settings';
 
 /**
@@ -72,6 +73,7 @@ export class IslandScene {
   private readonly paceUI: PaceSelector;
   private readonly look: LookDrag;
   private readonly panel: SettingsPanel;
+  private readonly vitals: Vitals;
   private readonly ant = new PlayerAnt();
   private readonly clock = new THREE.Clock();
   private readonly sections: Section[] = [];
@@ -130,6 +132,7 @@ export class IslandScene {
     this.paceUI = new PaceSelector(host);
     this.look = new LookDrag(host);
     this.panel = new SettingsPanel(host);
+    this.vitals = new Vitals(host);
     this.detachSettings = onChange(() => this.follow.reshape());
     // The view is a world bearing, so it has to be told where behind
     // her IS. Without this she opens side-on to her own camera.
@@ -179,6 +182,7 @@ export class IslandScene {
     this.paceUI.dispose();
     this.look.dispose();
     this.panel.dispose();
+    this.vitals.dispose();
     this.detachSettings();
     this.renderer.dispose();
     this.renderer.domElement.remove();
@@ -252,6 +256,8 @@ export class IslandScene {
       this.pace, wants, this.stamina.fraction, this.stamina.spent,
       this.ant.pace, this.auto.active, this.auto.way,
     );
+
+    this.vitals.show(this.stamina.fraction, this.stamina.spent);
 
     // The heading the player is LOOKING along. Taken from the input,
     // not from where the camera happens to have eased to: a measured

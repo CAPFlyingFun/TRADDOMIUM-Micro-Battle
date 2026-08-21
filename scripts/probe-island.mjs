@@ -496,13 +496,17 @@ try {
     await page.waitForTimeout(500);
     const found = await page.evaluate(() => {
       const strays = [];
-      const controls = 'button, [role="alertdialog"], [data-control]';
+      // [data-ui] covers the readouts too — the vitals cluster is not a
+      // control, but it is still a panel that must not run off a small
+      // window. The settings panel is display:none until opened, so it
+      // measures zero and is skipped below rather than needing a case.
+      const controls = 'button, [role="alertdialog"], [data-control], [data-ui]';
       for (const el of document.querySelectorAll(controls)) {
         const box = el.getBoundingClientRect();
         if (box.width === 0 || box.height === 0) continue;
         if (box.top < -1 || box.bottom > innerHeight + 1
           || box.left < -1 || box.right > innerWidth + 1) {
-          strays.push(`${el.dataset.control ?? el.getAttribute('aria-label') ?? el.tagName} `
+          strays.push(`${el.dataset.control ?? el.dataset.ui ?? el.getAttribute('aria-label') ?? el.tagName} `
             + `at ${Math.round(box.top)}..${Math.round(box.bottom)}`);
         }
       }
@@ -516,6 +520,7 @@ try {
         paceGap: innerHeight - pace.bottom,
         stickGap: innerHeight - box('[data-control="stick"]').bottom,
         laneOnPace: hits(box('[data-control="auto-lane"]'), pace),
+        vitalsOnPace: hits(box('[data-ui="vitals"]'), box('[data-ui="pace-rows"]')),
         stickOnPace: hits(box('[data-control="stick"]'), pace),
         // The action controls land here later; nothing may creep in.
         intoTheRight: [...document.querySelectorAll('[data-control]')]
@@ -533,6 +538,7 @@ try {
       );
     }
     if (found.laneOnPace) throw new Error(`the Auto lane covers the pace column in ${label}`);
+    if (found.vitalsOnPace) throw new Error(`the vitals cluster covers the pace rows in ${label}`);
     if (found.stickOnPace) throw new Error(`the stick covers the pace column in ${label}`);
     if (found.intoTheRight) {
       throw new Error(`a movement control reached into the action area in ${label}`);

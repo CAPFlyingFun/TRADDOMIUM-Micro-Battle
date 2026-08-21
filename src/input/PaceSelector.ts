@@ -64,6 +64,10 @@ export class PaceSelector {
     this.readout = document.createElement('div');
     this.reserve = document.createElement('div');
     this.column.dataset.control = 'pace';
+    // The column runs the full height so a short window eats it from
+    // the top; the ROWS are where it actually draws, and the only
+    // box worth testing another panel against.
+    this.rows.dataset.ui = 'pace-rows';
     this.style();
 
     // Sprint on top, then the sustainable rows fastest-first.
