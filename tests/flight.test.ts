@@ -388,7 +388,24 @@ describe('the coordinated turn', () => {
     const was = f.heading;
     for (let i = 0; i < 60; i++) f.update(rightStick, 1, false, 1 / 60);
     // A second of full stick at the 70% share.
-    expect(f.heading - was).toBeCloseTo(FLIGHT_TURN_RATE * TURN_SHARE, 2);
+    expect(Math.abs(f.heading - was)).toBeCloseTo(FLIGHT_TURN_RATE * TURN_SHARE, 2);
+  });
+
+  it('turns the same way it slips — the sign bug that reached the device', () => {
+    // My first version had these opposite: a positive heading turns her
+    // toward +X while the slip term pushes toward -X, so the stick
+    // steered her the wrong way while the 30% sidestep fought the turn
+    // it was supposed to be part of. Sign conventions are exactly the
+    // thing to assert as a RELATIONSHIP rather than as a number, since
+    // asserting the number is how the wrong one got a passing test.
+    const f = flying();
+    const was = f.heading;
+    const step = f.update(rightStick, 1, false, 1 / 60);
+    const turnedToward = Math.sign(f.heading - was);
+    // `across` is applied along (facing - PI/2), which is the opposite
+    // sense to a rising heading — hence the negation here.
+    const slippedToward = -Math.sign(step.across);
+    expect(turnedToward).toBe(slippedToward);
   });
 
   it('splits a lateral input 70 turn / 30 slip', () => {
@@ -401,10 +418,13 @@ describe('the coordinated turn', () => {
   it('banks and turns the other way for the other way', () => {
     const f = flying();
     const was = f.heading;
+    const right = flying();
+    for (let i = 0; i < 60; i++) right.update(rightStick, 1, false, 1 / 60);
     for (let i = 0; i < 60; i++) {
       f.update({ ...neutral, push: 1, side: -1 }, 1, false, 1 / 60);
     }
-    expect(f.heading).toBeLessThan(was);
+    // Mirrored, whichever way the engine's signs happen to run.
+    expect(Math.sign(f.heading - was)).toBe(-Math.sign(right.heading - was));
     expect(f.roll).toBeLessThan(0);
   });
 

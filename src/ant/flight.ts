@@ -358,7 +358,13 @@ export class Flight {
    */
   private steer(demand: FlightDemand, dt: number): void {
     const side = Math.max(-1, Math.min(1, demand.side));
-    this.facing += FLIGHT_TURN_RATE * TURN_SHARE * side * dt;
+    // MINUS. A positive heading turns her toward +X while the slip term
+    // pushes toward -X, so the two were pulling opposite ways and the
+    // stick turned her the wrong way — Joshua flew it and the roll was
+    // right while the yaw was mirrored. One sign fixes both: she now
+    // turns the way the stick points AND slips the same way she turns,
+    // which is what "30% sidestep in that direction" asked for.
+    this.facing -= FLIGHT_TURN_RATE * TURN_SHARE * side * dt;
     const wants = MAX_BANK * side;
     this.bank += (wants - this.bank) * Math.min(1, dt * BANK_EASE);
   }
