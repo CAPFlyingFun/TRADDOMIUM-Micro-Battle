@@ -524,8 +524,12 @@ try {
     }
     return { top, aloft: island.airborne(), reserve: island.stamina() };
   });
-  if (peak.top - groundY < 0.4) {
-    throw new Error(`the jump did not leave the ground: rose ${(peak.top - groundY).toFixed(2)}`);
+  // The arc is solved rather than stepped, so this device gets the same
+  // height as a 60fps one and the check can name the design number
+  // instead of a loose "did she leave the ground at all".
+  const rose = peak.top - groundY;
+  if (rose < 0.9 || rose > 1.05) {
+    throw new Error(`the jump reached ${rose.toFixed(2)} units, not the 1.0 it is tuned for`);
   }
   if (peak.aloft) throw new Error('she never came down from the jump');
   if (peak.reserve > reserveBefore - 0.1) {
@@ -655,7 +659,7 @@ try {
     + 'and releasing stopped her; reverse and sidestep work; '
     + 'drag-to-lock arms, un-arms and engages, and survives a sidestep; '
     + `sprint reached ${sprint.speed.toFixed(1)} and fell back to ${spent.toFixed(1)}; `
-    + 'jump leaves the ground, costs her, and gives eight in a row and no ninth; '
+    + `jump reached ${rose.toFixed(2)} units, cost her, and gave eight in a row and no ninth; `
     + `looking steered her ${steered.toFixed(2)} rad while driven and left her `
     + 'alone at rest inside the deadzone; '
     + `the settings panel says ${stamped.version.replace('TRADDOMIUM', '').trim()} `

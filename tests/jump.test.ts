@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  GRAVITY, Jump, JUMP_COST, JUMP_HOLD, JUMP_SPEED, JUMPS_FROM_FULL,
+  GRAVITY, Jump, JUMP_AIRTIME, JUMP_COST, JUMP_HEIGHT, JUMP_HOLD,
+  JUMP_SPEED, JUMPS_FROM_FULL,
 } from '../src/ant/jump';
 import { RECOVER_SECONDS, Stamina } from '../src/ant/stamina';
 
@@ -86,15 +87,45 @@ describe('the arc', () => {
     expect(arc(1 / 30)).toBeCloseTo(arc(1 / 120), 1);
   });
 
-  it('peaks near the height the numbers predict', () => {
+  it('peaks at the height the design asks for, not near it', () => {
+    // JUMP_HEIGHT is the number a person picks; the launch speed is
+    // derived from it. Reading a height back off a hand-tuned speed
+    // means the height is whatever the maths happened to give.
     const jump = new Jump();
     jump.ask(1);
     let top = 0;
-    for (let i = 0; i < 600; i++) {
-      jump.update(1 / 240);
+    for (let i = 0; i < 6000; i++) {
+      jump.update(1 / 2400);
       top = Math.max(top, jump.height);
     }
-    expect(top).toBeCloseTo((JUMP_SPEED * JUMP_SPEED) / (2 * GRAVITY), 1);
+    expect(top).toBeCloseTo(JUMP_HEIGHT, 3);
+    expect(JUMP_SPEED).toBeCloseTo(Math.sqrt(2 * GRAVITY * JUMP_HEIGHT), 9);
+  });
+
+  it('reaches the same height however coarse the frames are', () => {
+    // The bug: stepping a velocity and then a height loses energy at
+    // big steps, so the SAME jump peaked at 1.02 units at 60fps, 0.96
+    // at 30 and 0.72 at 10. A slow phone jumped lower for no reason the
+    // player could see — the same shape of bug as the jump count, in
+    // the arc rather than the reserve.
+    for (const step of [1 / 120, 1 / 60, 1 / 30, 1 / 10]) {
+      const jump = new Jump();
+      jump.ask(1);
+      let top = 0;
+      for (let i = 0; i < 200; i++) {
+        jump.update(step);
+        top = Math.max(top, jump.height);
+        if (!jump.aloft) break;
+      }
+      // Sampling on a coarse grid can MISS the peak instant, but must
+      // never fall short of the arc itself — 1/10 lands within 1%.
+      expect(top, `at ${(1 / step).toFixed(0)}fps`).toBeGreaterThan(JUMP_HEIGHT * 0.98);
+      expect(top, `at ${(1 / step).toFixed(0)}fps`).toBeLessThanOrEqual(JUMP_HEIGHT + 1e-9);
+    }
+  });
+
+  it('agrees with itself about how long she is up there', () => {
+    expect(arc(1 / 240)).toBeCloseTo(JUMP_AIRTIME, 2);
   });
 
   it('does nothing at all while she is on the ground', () => {
