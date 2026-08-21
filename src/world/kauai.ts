@@ -44,6 +44,46 @@ const SEA_FLOOR = -60;
 export type HeightGrid = Int16Array;
 
 /**
+ * A blurred copy of the grid — the smoothing dial's other end.
+ *
+ * The same five-tap kernel StormTracker uses on its storm terrain:
+ * the centre counted twice against its four neighbours. Run it a few
+ * times rather than once with a wider kernel, because repeated small
+ * passes approach a Gaussian and a wide box does not.
+ *
+ * Blurring the DATA is a different lever from scaling the height. A
+ * height scale makes every crease shallower in proportion — a 67 degree
+ * fold at half height is still a 34 degree fold. Blurring removes the
+ * fold. That is why the two want separate dials.
+ *
+ * The sea is blurred along with the land on purpose. Holding the
+ * coastline fixed would leave a sharp step exactly where the smoothing
+ * is meant to be gentlest, which is the shore.
+ */
+export function blurGrid(grid: HeightGrid, passes: number): HeightGrid {
+  let from: HeightGrid = grid;
+  let to: HeightGrid = new Int16Array(grid.length);
+  for (let pass = 0; pass < passes; pass++) {
+    for (let r = 0; r < SAMPLES; r++) {
+      for (let c = 0; c < SAMPLES; c++) {
+        const i = r * SAMPLES + c;
+        const up = r > 0 ? from[i - SAMPLES] : from[i];
+        const down = r < SAMPLES - 1 ? from[i + SAMPLES] : from[i];
+        const left = c > 0 ? from[i - 1] : from[i];
+        const right = c < SAMPLES - 1 ? from[i + 1] : from[i];
+        to[i] = Math.round((from[i] * 2 + up + down + left + right) / 6);
+      }
+    }
+    // Never write back over the caller's grid: the raw one is still
+    // the other end of the blend.
+    const swap: HeightGrid = from === grid ? new Int16Array(grid.length) : from;
+    from = to;
+    to = swap;
+  }
+  return from;
+}
+
+/**
  * Read the baked grid from an ArrayBuffer. Kept separate from fetching
  * so tests can feed it bytes straight off disk.
  */

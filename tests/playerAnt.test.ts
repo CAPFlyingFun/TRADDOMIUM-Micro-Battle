@@ -1,3 +1,4 @@
+import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { PlayerAnt, type Drive } from '../src/ant/PlayerAnt';
 import { PACE_SPEED, REST_DEADZONE } from '../src/ant/pace';
@@ -197,5 +198,34 @@ describe('nothing snaps', () => {
     expect(Math.abs(slow.z - fast.z) / fast.z).toBeLessThan(0.05);
     // Once the ease has settled they must agree exactly.
     expect(run(1 / 30, 3).pace).toBeCloseTo(run(1 / 120, 3).pace, 4);
+  });
+});
+
+describe('putting the real body on', () => {
+  it('leaves nothing of the placeholder behind', () => {
+    // Her eyes were parented to the body rather than to the
+    // placeholder group, so swapping in the real mesh removed the
+    // stick legs and left two black orbs floating in mid-air where the
+    // old, larger head had been. Counting what survives is the check
+    // that no future part gets parented to the wrong thing.
+    const ant = new PlayerAnt();
+    const model = new THREE.Group();
+    model.name = 'queen';
+    ant.wear(model);
+
+    const left: string[] = [];
+    ant.root.traverse((part) => {
+      if (part instanceof THREE.Mesh) left.push(part.name || part.type);
+    });
+    expect(left, `orphans: ${left.join(', ')}`).toHaveLength(0);
+  });
+
+  it('still has the placeholder before the model arrives', () => {
+    // The other half of it: she must be visible from the first frame,
+    // so an empty body would be its own bug.
+    const ant = new PlayerAnt();
+    let meshes = 0;
+    ant.root.traverse((part) => { if (part instanceof THREE.Mesh) meshes += 1; });
+    expect(meshes).toBeGreaterThan(10);
   });
 });

@@ -23,7 +23,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import {
   groundHeight, ISLAND_SPAN, NEAR_STEP, NEAR_VERTS, SECTIONS, setRelief,
-  terrainHeight, useGrid,
+  setSmoothing, terrainHeight, useGrid,
 } from '../src/world/heightfield';
 import { decodeGrid, findLandfall, type HeightGrid } from '../src/world/kauai';
 
@@ -84,7 +84,7 @@ function worstGap(reach: number, step: number): { worst: number; where: [number,
   return { worst, where };
 }
 
-afterEach(() => setRelief(1));
+afterEach(() => { setRelief(1); setSmoothing(0); });
 
 describe('the walked surface is the drawn surface', () => {
   it('never differs anywhere near the spawn', () => {
@@ -151,6 +151,57 @@ describe('the walked surface is the drawn surface', () => {
     const full = rise(1);
     expect(rise(0.5)).toBeCloseTo(full * 0.5, 9);
     expect(rise(0.1)).toBeCloseTo(full * 0.1, 9);
+  });
+
+  it('still agrees when the smoothing dial blurs the island', () => {
+    // Smoothing moves the vertices themselves rather than scaling them,
+    // so the mesh is genuinely rebuilt. Both sides read terrainHeight,
+    // which is where the blend lives — but that is the kind of thing
+    // worth checking rather than reasoning about.
+    for (const amount of [0.25, 0.6, 1]) {
+      setSmoothing(amount);
+      const start = findLandfall(grid, 3, 20);
+      let worst = 0;
+      for (let dx = -120; dx <= 120; dx += 3.1) {
+        for (let dz = -120; dz <= 120; dz += 3.1) {
+          const x = start.x + dx;
+          const z = start.z + dz;
+          if (terrainHeight(x, z) <= 0) continue;
+          worst = Math.max(worst, Math.abs(meshHeight(x, z) - groundHeight(x, z)));
+        }
+      }
+      expect(worst, `at smoothing ${amount}`).toBeLessThan(1e-6);
+    }
+  });
+
+  it('actually takes the creases out, which is what it is for', () => {
+    // The claim the dial makes to the player. A height scale could not
+    // make this claim: it makes a crease shallower in proportion, so
+    // the ratio between neighbouring folds never changes.
+    const start = findLandfall(grid, 3, 20);
+    const roughness = () => {
+      let worst = 0;
+      for (let dx = -400; dx <= 400; dx += NEAR_STEP) {
+        for (let dz = -400; dz <= 400; dz += NEAR_STEP) {
+          const x = start.x + dx;
+          const z = start.z + dz;
+          if (terrainHeight(x, z) <= 0) continue;
+          const a = Math.atan2(
+            terrainHeight(x, z) - terrainHeight(x - NEAR_STEP, z), NEAR_STEP,
+          );
+          const b = Math.atan2(
+            terrainHeight(x + NEAR_STEP, z) - terrainHeight(x, z), NEAR_STEP,
+          );
+          worst = Math.max(worst, Math.abs(b - a));
+        }
+      }
+      return (worst * 180) / Math.PI;
+    };
+    setSmoothing(0);
+    const sharp = roughness();
+    setSmoothing(1);
+    const soft = roughness();
+    expect(soft, `${sharp.toFixed(1)}deg -> ${soft.toFixed(1)}deg`).toBeLessThan(sharp * 0.6);
   });
 
   it('still reads the sea as the sea', () => {

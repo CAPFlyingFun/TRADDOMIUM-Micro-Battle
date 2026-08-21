@@ -32,6 +32,12 @@ export interface Settings {
    * scale; lower flattens every slope by the same factor.
    */
   terrainRelief: number;
+  /**
+   * How far toward the blurred island to go. 0 is real Kauai. Separate
+   * from the height dial because they do different things: height makes
+   * a crease shallower in proportion, smoothing removes it.
+   */
+  terrainSmoothing: number;
   invertLookX: boolean;
   /** False is the shipped feel: dragging DOWN lifts the view. */
   invertLookY: boolean;
@@ -45,6 +51,7 @@ export const DEFAULTS: Readonly<Settings> = {
   fov: 58,
   cameraDistance: 7.8,
   terrainRelief: 1,
+  terrainSmoothing: 0,
   invertLookX: false,
   invertLookY: false,
   invertStickY: false,
@@ -58,6 +65,7 @@ export const LIMITS = {
   fov: { min: 40, max: 100, step: 1 },
   cameraDistance: { min: 3.5, max: 16, step: 0.2 },
   terrainRelief: { min: 0.1, max: 1.5, step: 0.05 },
+  terrainSmoothing: { min: 0, max: 1, step: 0.05 },
 } as const;
 
 export type Dial = keyof typeof LIMITS;

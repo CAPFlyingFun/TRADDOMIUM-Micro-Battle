@@ -21,6 +21,13 @@ const LIVE = 'rgba(110, 255, 150, .95)';
 interface Dialer {
   key: Dial;
   label: string;
+  /**
+   * True for a dial whose change is EXPENSIVE — it lands on release
+   * rather than mid-drag. Terrain smoothing rebuilds every section's
+   * geometry, and doing that sixty times a second while a thumb moves
+   * would lock the phone solid.
+   */
+  onRelease?: boolean;
   /** Turns the stored value into what the player should read. */
   show: (value: number) => string;
   /** Turns a slider position back into the stored value. */
@@ -38,6 +45,12 @@ const DIALS: Dialer[] = [
   { key: 'turnEase', label: 'Turn ease', show: (v) => v.toFixed(1) },
   { key: 'fov', label: 'Field of view', show: (v) => `${v.toFixed(0)}°` },
   { key: 'cameraDistance', label: 'Camera distance', show: (v) => v.toFixed(1) },
+  {
+    key: 'terrainSmoothing',
+    label: 'Terrain smoothing',
+    onRelease: true,
+    show: (v) => (v <= 0 ? 'Real Kauai' : `${(v * 100).toFixed(0)}%`),
+  },
   {
     key: 'terrainRelief',
     label: 'Terrain height',
@@ -222,12 +235,27 @@ export class SettingsPanel {
     paint();
     this.redraw.push(paint);
 
+    // An expensive dial still MOVES and still reads out while dragged;
+    // only the commit waits. Showing nothing until release would feel
+    // like a dead control.
     const onInput = () => {
+      if (dial.onRelease) {
+        value.textContent = dial.show(Number(slider.value));
+        return;
+      }
+      set(dial.key, Number(slider.value));
+      value.textContent = dial.show(settings()[dial.key]);
+    };
+    const onCommit = () => {
       set(dial.key, Number(slider.value));
       value.textContent = dial.show(settings()[dial.key]);
     };
     slider.addEventListener('input', onInput);
     this.detach.push(() => slider.removeEventListener('input', onInput));
+    if (dial.onRelease) {
+      slider.addEventListener('change', onCommit);
+      this.detach.push(() => slider.removeEventListener('change', onCommit));
+    }
 
     row.append(head, slider);
     return row;

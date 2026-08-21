@@ -35,7 +35,7 @@
  * Heights are world units with the waterline at 0.
  */
 import {
-  heightAt, SPAN, STEP, type HeightGrid,
+  blurGrid, heightAt, SPAN, STEP, type HeightGrid,
 } from './kauai';
 
 /** Wavelength of the added relief, in world units. */
@@ -48,10 +48,52 @@ const RELIEF_HEIGHT = 1.1;
 const DETAIL_WAVELENGTH = 19;
 
 let grid: HeightGrid | null = null;
+/**
+ * The same island, blurred. Baked once at load so the smoothing dial
+ * is a blend between two grids rather than a blur per frame.
+ */
+let softGrid: HeightGrid | null = null;
+/** 0 is real Kauai, 1 is the blurred copy. */
+let smoothing = 0;
 
 /** Hand the module the loaded island. Everything below stays flat until then. */
 export function useGrid(loaded: HeightGrid): void {
   grid = loaded;
+  softGrid = blurGrid(loaded, SMOOTH_PASSES);
+}
+
+/**
+ * Blur passes at the dial's far end. Measured against the worst crease
+ * within 400 units of the spawn, which starts at 66.8 degrees:
+ *
+ *    4 passes -> 35.3 deg, ground moves up to 5.77u
+ *   10 passes -> 23.2 deg, up to 8.29u
+ *   18 passes -> 16.6 deg, up to 10.19u
+ *
+ * Ten, because the returns fall off after it — eight more passes buy
+ * another seven degrees and cost two more units of drift. It only has
+ * to be the FURTHEST anyone would want; the dial picks how much of it.
+ */
+export const SMOOTH_PASSES = 10;
+
+/**
+ * TERRAIN SMOOTHING — 0 for real Kauai, 1 for the blurred copy.
+ *
+ * A different lever from the height dial and they are both worth
+ * having. Scaling the height makes every crease shallower in
+ * proportion: a 67 degree fold at half height is still 34 degrees.
+ * Blurring removes the fold and leaves the island its size.
+ *
+ * Unlike the height scale, this CANNOT be a transform on the meshes —
+ * a blur mixes neighbours, so the geometry has to be rebuilt. That is
+ * why it lands on release rather than during a drag.
+ */
+export function setSmoothing(amount: number): void {
+  smoothing = Math.min(1, Math.max(0, amount));
+}
+
+export function smoothingAmount(): number {
+  return smoothing;
 }
 
 export function hasGrid(): boolean {
@@ -94,7 +136,13 @@ function valueNoise(x: number, y: number, salt: number): number {
  */
 export function terrainHeight(x: number, z: number): number {
   if (!grid) return 0;
-  const base = heightAt(grid, x, z);
+  const raw = heightAt(grid, x, z);
+  // Blend the two grids rather than blurring on the fly. The soft one
+  // is baked once at load, so a dial halfway along costs one extra
+  // lookup and a lerp instead of a twenty-five-tap convolution.
+  const base = smoothing > 0 && softGrid
+    ? raw + (heightAt(softGrid, x, z) - raw) * smoothing
+    : raw;
   if (base <= 0) return base;
   const s = 1 / RELIEF_WAVELENGTH;
   const relief = (valueNoise(x * s, z * s, 17) * 2 - 1) * RELIEF_HEIGHT;

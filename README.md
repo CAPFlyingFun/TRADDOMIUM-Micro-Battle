@@ -289,6 +289,25 @@ same arithmetic as scaling the answer. The band shader divides the same
 number back out, so a flattened island keeps sand at the shore and snow
 on the peaks rather than going green to the summit.
 
+**Terrain smoothing** is the other half, and it is a different lever
+rather than more of the same. The height dial makes every crease
+shallower *in proportion* — a 67 degree fold at half height is still 34
+degrees. Smoothing removes the fold and leaves the island its size:
+
+```
+  smoothing    mean crease    worst    ground moves
+      0%          4.5°        66.8°        —
+     50%          3.4°        52.1°       2.9u
+    100%          2.5°        23.2°       8.3u
+```
+
+Its far end is ten passes of a five-tap blur over the baked grid, baked
+once at load; the dial blends between that copy and real Kauai. Unlike
+the height scale it CANNOT be a transform — a blur mixes neighbours, so
+the vertices genuinely move and every section is cut again. That takes
+about 140 ms, so this one slider commits on release rather than during
+the drag.
+
 ## Settings
 
 A gear at the top right opens a panel for the numbers that are matters

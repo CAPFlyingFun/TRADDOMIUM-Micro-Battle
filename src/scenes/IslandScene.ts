@@ -12,7 +12,7 @@ import {
 import { Stamina } from '../ant/stamina';
 import {
   FAR_VERTS, groundDetail, groundHeight, ISLAND_SPAN, NEAR_VERTS, SECTIONS,
-  setRelief, terrainHeight,
+  setRelief, setSmoothing, smoothingAmount, terrainHeight,
 } from '../world/heightfield';
 import { findLandfall, type HeightGrid } from '../world/kauai';
 import { bakeGrain, GRAIN_SIZE } from '../world/groundTexture';
@@ -127,6 +127,13 @@ export class IslandScene {
     this.scene.fog = new THREE.Fog(SKY_COLOR, 400, 3800);
 
     this.buildLights();
+    // SMOOTHING FIRST, because it decides what the vertices ARE and
+    // the mesh is about to be cut from them. Relief comes after, in
+    // reshapeIsland, because that one is a transform ON the finished
+    // mesh. Get either the wrong side of its build and the island is
+    // drawn at one shape while she walks another — which is precisely
+    // the bug that put her inside an invisible hill last release.
+    setSmoothing(settings().terrainSmoothing);
     this.buildTerrain();
     this.buildWater();
 
@@ -162,6 +169,7 @@ export class IslandScene {
     this.detachSettings = onChange(() => {
       this.follow.reshape();
       this.reshapeIsland();
+      this.resmoothIsland();
     });
     // The view is a world bearing, so it has to be told where behind
     // her IS. Without this she opens side-on to her own camera.
@@ -237,6 +245,35 @@ export class IslandScene {
       section.far.scale.y = relief;
     }
     // She is standing on ground that just moved under her.
+    this.ant.reground();
+  }
+
+  /**
+   * Re-cut the island at a new smoothing.
+   *
+   * Unlike the height dial this CANNOT be a transform: a blur mixes
+   * neighbouring samples, so the vertices genuinely move and every
+   * section's geometry has to be built again. Roughly six hundred
+   * thousand height lookups, which is why the slider commits on release
+   * rather than on every pixel of a drag.
+   */
+  private resmoothIsland(): void {
+    const wanted = settings().terrainSmoothing;
+    if (wanted === smoothingAmount()) return;
+    setSmoothing(wanted);
+
+    const span = ISLAND_SPAN / SECTIONS;
+    for (const section of this.sections) {
+      const originX = section.x - span / 2;
+      const originZ = section.z - span / 2;
+      // Dispose before dropping the reference: geometry lives on the
+      // GPU and the collector cannot free it for us.
+      section.near.geometry.dispose();
+      section.far.geometry.dispose();
+      section.near.geometry = buildSection(originX, originZ, span, NEAR_VERTS);
+      section.far.geometry = buildSection(originX, originZ, span, FAR_VERTS);
+    }
+    // The ground she is standing on just changed shape under her.
     this.ant.reground();
   }
 

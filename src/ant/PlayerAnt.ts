@@ -76,7 +76,14 @@ export class PlayerAnt {
   /** What she is actually doing, camera frame, world units per second. */
   private velocity = { x: 0, y: 0 };
   private readonly body = new THREE.Group();
-  /** The placeholder parts, kept together so they can be taken off. */
+  /**
+   * The placeholder parts, kept together so they can be taken off.
+   *
+   * EVERY stick-legged part belongs in here and nothing belongs on
+   * `body` directly. Her eyes were added to `body` by mistake, so
+   * `wear` took the placeholder away and left two black orbs hanging
+   * in the air where the old, larger head used to be.
+   */
   private readonly placeholder = new THREE.Group();
   /** How high the body rides above her feet. Zero once she is real. */
   private lift = 0.34;
@@ -296,7 +303,7 @@ export class PlayerAnt {
     for (const side of [-1, 1]) {
       const orb = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 8), eye);
       orb.position.set(0.12 * side, 0.12, 0.58);
-      this.body.add(orb);
+      this.placeholder.add(orb);
 
       for (let i = 0; i < 3; i++) {
         const leg = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.012, 0.62, 5), chitin);
