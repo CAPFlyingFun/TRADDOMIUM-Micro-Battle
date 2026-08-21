@@ -270,6 +270,24 @@ exponentially and therefore approaches 7 without ever arriving. Set it
 at the ceiling and a walk could never take off, only a run, which is
 the opposite of the intent.
 
+**In the air the stick flies her, not the camera.** On the ground
+steering is looking; airborne, her heading is her own, so the player can
+look sideways at something while she carries on flying straight. Left
+and right are a COORDINATED TURN — one input, three effects, the way an
+aircraft with the rudder handled for you behaves:
+
+```
+  100%  bank, to a ceiling of 30°
+   70%  turn — her heading actually changes
+   30%  sidestep — she slips a little across her own path
+```
+
+Level the stick and she levels out on her own, which is half of what
+makes it feel like a wing rather than a cursor. The camera CHASES
+gently rather than steering: leave the view where you put it and it
+drifts back behind her, so free look survives without her flying out
+of frame.
+
 **Altitude is stored energy**, and it is the whole model:
 
 ```

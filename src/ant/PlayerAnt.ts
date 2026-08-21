@@ -85,6 +85,12 @@ export class PlayerAnt {
   private readonly legs: Array<{
     mesh: THREE.Mesh; yaw: number; roll: number; phase: number;
   }> = [];
+  /**
+   * Her airborne attitude — roll and pitch. Null on the ground, where
+   * the terrain decides how she sits instead.
+   */
+  private attitude: { bank: number; pitch: number } | null = null;
+
   /** Where she is trying to go, camera frame, eased. */
   private wish = { x: 0, y: 0 };
   /** What she is actually doing, camera frame, world units per second. */
@@ -196,6 +202,7 @@ export class PlayerAnt {
    * follow where it got to.
    */
   update(drive: Drive, view: number, dt: number, above = 0): void {
+    this.attitude = null;
     const asked = Math.hypot(drive.ahead, drive.across);
     const wasFacing = this.heading;
 
@@ -259,27 +266,38 @@ export class PlayerAnt {
    * running it through the same easing would smear one model over the
    * other and make both feel wrong.
    *
-   * She still comes onto the camera's heading, because steering is
-   * still looking, and her legs still do not cycle: there is nothing
-   * under them.
+   * SHE FLIES WHERE SHE IS POINTED, not where the camera looks. On the
+   * ground steering is looking; in the air her heading is her own and
+   * the stick turns her, which is what lets the player look sideways at
+   * something while she carries on flying straight.
+   *
+   * Her legs still do not cycle. There is nothing under them.
+   *
+   * @param facing her nose direction, world radians
+   * @param bank her roll — right wing down is positive
+   * @param pitch her nose attitude, from climbing or diving
    */
-  fly(drive: Drive, view: number, dt: number, above: number): void {
+  fly(
+    drive: Drive, facing: number, bank: number, pitch: number,
+    dt: number, above: number,
+  ): void {
     const wasFacing = this.heading;
     this.wish = { x: drive.across, y: drive.ahead };
     this.velocity = { x: drive.across, y: drive.ahead };
-
-    this.heading += shortest(this.heading, view) * closes(settings().turnRate, dt);
+    this.heading = facing;
     this.turned = Math.atan2(
       Math.sin(this.heading - wasFacing),
       Math.cos(this.heading - wasFacing),
     ) / Math.max(dt, 1e-6);
 
-    const right = view - Math.PI / 2;
+    // Travel in HER frame: along the nose, plus the slip across it.
+    const right = facing - Math.PI / 2;
     this.at.x
-      += (Math.sin(view) * this.velocity.y + Math.sin(right) * this.velocity.x) * dt;
+      += (Math.sin(facing) * this.velocity.y + Math.sin(right) * this.velocity.x) * dt;
     this.at.z
-      += (Math.cos(view) * this.velocity.y + Math.cos(right) * this.velocity.x) * dt;
+      += (Math.cos(facing) * this.velocity.y + Math.cos(right) * this.velocity.x) * dt;
 
+    this.attitude = { bank, pitch };
     this.settle(above, dt);
   }
 
@@ -292,6 +310,15 @@ export class PlayerAnt {
     const seat = toLocal(world(x, z));
     this.root.position.set(seat.lx, groundHeight(x, z) + above, seat.lz);
     this.root.rotation.y = this.heading;
+    if (this.attitude) {
+      // Airborne: her own attitude, not the hill she is over.
+      this.body.rotation.x = this.attitude.pitch;
+      this.body.rotation.z = this.attitude.bank;
+      this.body.position.y = this.lift;
+      this.tuck();
+      return;
+    }
+    this.body.rotation.z = 0;
     // Still lean with the ground she is over: an ant tips with the
     // hill she launched off, and losing that mid-jump reads as a snap.
     this.alignToSlope(x, z, dt);

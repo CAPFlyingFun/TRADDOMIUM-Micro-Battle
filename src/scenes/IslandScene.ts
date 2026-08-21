@@ -238,6 +238,7 @@ export class IslandScene {
       sprinting: () => this.sprintOn,
       setSprint: (on: boolean) => { this.sprintOn = on; },
       bearing: () => this.ant.bearing,
+      roll: () => this.flight.roll,
       stride: () => this.ant.stridePhase,
       deadzone: () => REST_DEADZONE,
       fov: () => this.follow.camera.fov,
@@ -358,8 +359,9 @@ export class IslandScene {
     // picking Run and then barely moving must not get her airborne.
     const wantsUp = this.climbButton.takeTaps() > 0;
     if (!this.flight.aloft && wantsUp) {
+      // She keeps the way she was running. A takeoff does not turn her.
       const paid = this.flight.takeOff(
-        this.ant.pace, this.stamina.fraction, stick.y, stick.x,
+        this.ant.pace, this.stamina.fraction, this.ant.bearing,
       );
       if (paid > 0) this.stamina.spend(paid);
     }
@@ -383,8 +385,15 @@ export class IslandScene {
       // one model over the other.
       this.ant.fly(
         { ahead: step.ahead, across: step.across, speed: Math.hypot(step.ahead, step.across) },
-        -look.yaw, dt, this.flight.height,
+        this.flight.heading, this.flight.roll, this.flight.pitch,
+        dt, this.flight.height,
       );
+      // The camera CHASES in flight rather than steering. Her heading
+      // is her own up here, so a view left where the player put it
+      // would watch her fly out of frame — but snapping it to her nose
+      // would take the free look away, which the design is explicit
+      // about keeping. So it eases, and only while nobody is dragging.
+      if (!look.active) this.look.chase(-this.flight.heading, dt);
       // Landing needs no button: descend until the ground arrives.
       if (this.flight.height <= 0) this.flight.land();
     } else {

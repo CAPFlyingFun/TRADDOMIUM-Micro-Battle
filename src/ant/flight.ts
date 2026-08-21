@@ -103,6 +103,40 @@ export const CLIMB_RATE = 16;
 /** How hard a deliberate descent pushes the nose down. */
 export const DESCENT_RATE = 26;
 
+/**
+ * THE COORDINATED TURN — what the stick's left and right actually do.
+ *
+ * On the ground steering is looking: her body comes onto the camera's
+ * heading and a sideways push crabs. In the air that is wrong. An
+ * animal with wings banks into a turn and the turn follows from the
+ * bank, so lateral stick here does three things at once, the way an
+ * aircraft with the rudder handled for you does:
+ *
+ *   100%  bank, to a ceiling of 30 degrees
+ *    70%  turn — her heading actually changes
+ *    30%  sidestep — she slips a little across her own path
+ *
+ * Level the stick and she levels out. The bank is a VISUAL and a
+ * feeling; the turn is what moves her, and the slip is what stops a
+ * turn feeling like a rail.
+ *
+ * Her heading in the air is HERS, not the camera's. That is the whole
+ * difference: the player can look wherever they like while she flies
+ * where she is pointed, which is what the design asks for and what
+ * "steering is looking" cannot give.
+ */
+export const MAX_BANK = (30 * Math.PI) / 180;
+/** Radians per second of heading change at full stick, before the split. */
+export const FLIGHT_TURN_RATE = 1.4;
+/** How much of a lateral input turns her. */
+export const TURN_SHARE = 0.7;
+/** How much of it slides her sideways, as a fraction of her airspeed. */
+export const SIDESTEP_SHARE = 0.3;
+/** How briskly the bank arrives and how briskly it lets go. */
+export const BANK_EASE = 5;
+/** Nose attitude per unit of climb rate. Visual only. */
+export const PITCH_PER_RISE = 0.012;
+
 /** Fractions of the reserve per second. Positive spends. */
 export const CRUISE_DRAIN = 1 / 330;
 export const CLIMB_DRAIN = 1 / 55;
@@ -185,8 +219,10 @@ export class Flight {
   private state: FlightState = 'grounded';
   private above = 0;
   private speed = 0;
-  /** Where the airspeed is pointed, in the camera's frame. */
-  private heading = { ahead: 1, across: 0 };
+  /** Where her NOSE points, in world radians. Hers, not the camera's. */
+  private facing = 0;
+  /** Roll, radians. Positive banks to her right. */
+  private bank = 0;
   private rise = 0;
 
   get where(): FlightState {
@@ -203,6 +239,28 @@ export class Flight {
 
   get climbing(): number {
     return this.rise;
+  }
+
+  /** Her nose direction, world radians. */
+  get heading(): number {
+    return this.facing;
+  }
+
+  /** Her roll. Positive is right wing down. */
+  get roll(): number {
+    return this.bank;
+  }
+
+  /**
+   * Her nose attitude, from what she is doing vertically. Visual only.
+   *
+   * POSITIVE IS NOSE UP, matching the slope alignment on the ground —
+   * where higher terrain ahead gives a positive rotation. This had the
+   * sign the other way, which pointed her nose at the floor as she
+   * climbed and at the sky as she dived.
+   */
+  get pitch(): number {
+    return this.rise * PITCH_PER_RISE;
   }
 
   get aloft(): boolean {
@@ -230,12 +288,16 @@ export class Flight {
    *
    * @returns the reserve it cost, or 0 if she was refused
    */
-  takeOff(groundSpeed: number, reserve: number, ahead: number, across: number): number {
+  /**
+   * @param facing which way she is pointed as she leaves the ground,
+   *   world radians. She keeps it: a takeoff does not turn her.
+   */
+  takeOff(groundSpeed: number, reserve: number, facing: number): number {
     if (!this.canTakeOff(groundSpeed, reserve)) return 0;
     this.state = 'takeoff';
     this.speed = groundSpeed * TAKEOFF_BOOST;
-    const length = Math.hypot(ahead, across) || 1;
-    this.heading = { ahead: ahead / length, across: across / length };
+    this.facing = facing;
+    this.bank = 0;
     this.rise = CLIMB_RATE * scale * 0.5;
     this.above = 0.01;
     return TAKEOFF_COST;
@@ -247,6 +309,7 @@ export class Flight {
     this.above = 0;
     this.speed = 0;
     this.rise = 0;
+    this.bank = 0;
   }
 
   /**
@@ -261,7 +324,7 @@ export class Flight {
 
     const empty = spent || reserve <= 0;
     const asked = Math.hypot(demand.push, demand.side);
-    this.steer(demand, asked, dt);
+    this.steer(demand, dt);
     this.thrust(demand, asked, empty, dt);
 
     const effort = this.rising(demand, reserve, empty, dt);
@@ -275,28 +338,29 @@ export class Flight {
     this.speed = Math.max(0, Math.min(cap, this.speed));
     this.above = Math.max(0, this.above + this.rise * dt);
 
+    // Along her nose, plus the slip across it. Both in HER frame; the
+    // caller turns them into world travel using her heading, which is
+    // why the camera can point anywhere without moving her.
     return {
       effort,
-      ahead: this.heading.ahead * this.speed,
-      across: this.heading.across * this.speed,
+      ahead: this.speed,
+      across: this.speed * SIDESTEP_SHARE * Math.max(-1, Math.min(1, demand.side)),
       rise: this.rise,
     };
   }
 
   /**
-   * Point the airspeed where the stick asks, easing rather than
-   * snapping: an ant with momentum cannot change her mind instantly,
-   * and the turn reading as a curve is most of what sells flight.
+   * The coordinated turn: bank, yaw and slip from one lateral input.
+   *
+   * The bank is eased both ways, so it arrives as she rolls in and
+   * bleeds off when the stick centres — levelling out on its own is
+   * half of what makes this feel like a wing rather than a cursor.
    */
-  private steer(demand: FlightDemand, asked: number, dt: number): void {
-    if (asked <= 0.05) return;
-    const want = { ahead: demand.push / asked, across: demand.side / asked };
-    const turn = Math.min(1, dt * 2.4);
-    this.heading.ahead += (want.ahead - this.heading.ahead) * turn;
-    this.heading.across += (want.across - this.heading.across) * turn;
-    const length = Math.hypot(this.heading.ahead, this.heading.across) || 1;
-    this.heading.ahead /= length;
-    this.heading.across /= length;
+  private steer(demand: FlightDemand, dt: number): void {
+    const side = Math.max(-1, Math.min(1, demand.side));
+    this.facing += FLIGHT_TURN_RATE * TURN_SHARE * side * dt;
+    const wants = MAX_BANK * side;
+    this.bank += (wants - this.bank) * Math.min(1, dt * BANK_EASE);
   }
 
   /**

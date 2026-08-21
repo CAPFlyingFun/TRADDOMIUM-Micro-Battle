@@ -43,6 +43,9 @@ const DRAG_SLOP = 10;
 /** Keyboard swing rate, radians per second. */
 const KEY_RATE = 1.5;
 
+/** How briskly the view drifts back behind her in flight. */
+const CHASE_EASE = 1.1;
+
 export class LookDrag {
   private yaw = 0;
   private pitch = 0;
@@ -119,6 +122,22 @@ export class LookDrag {
   /** Point the view at a bearing outright — used to open behind her. */
   setYaw(radians: number): void {
     this.yaw = radians;
+  }
+
+  /**
+   * Ease the view toward a bearing — the flight chase.
+   *
+   * Gentle on purpose. In the air her heading is her own, so a view
+   * left where the player put it would watch her fly out of frame;
+   * snapping it to her nose would take the free look away, which the
+   * flight design keeps deliberately. This does neither: look wherever
+   * you like, and let go and it drifts back behind her.
+   */
+  chase(radians: number, dt: number): void {
+    const shortest = Math.atan2(
+      Math.sin(radians - this.yaw), Math.cos(radians - this.yaw),
+    );
+    this.yaw += shortest * (1 - Math.exp(-CHASE_EASE * dt));
   }
 
   dispose(): void {

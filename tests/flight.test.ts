@@ -6,9 +6,10 @@
 import { describe, expect, it } from 'vitest';
 import { afterEach } from 'vitest';
 import {
-  BEST_GLIDE_RATIO, BEST_GLIDE_SPEED, CRUISE_SPEED, Flight, glideRatio,
-  MAX_DIVE_SPEED, MAX_POWERED_SPEED, setFlightScale, STALL_SPEED,
-  TAKEOFF_COST, TAKEOFF_SPEED, THRUST, type FlightDemand,
+  BEST_GLIDE_RATIO, BEST_GLIDE_SPEED, CRUISE_SPEED, Flight, FLIGHT_TURN_RATE,
+  glideRatio, MAX_BANK, MAX_DIVE_SPEED, MAX_POWERED_SPEED, setFlightScale,
+  SIDESTEP_SHARE, STALL_SPEED, TAKEOFF_COST, TAKEOFF_SPEED, THRUST,
+  TURN_SHARE, type FlightDemand,
 } from '../src/ant/flight';
 import { PACE_SPEED, SPEED_EASE } from '../src/ant/pace';
 import { REARM_AT, Stamina } from '../src/ant/stamina';
@@ -23,7 +24,7 @@ afterEach(() => setFlightScale(1));
 /** Get her airborne and up to a given airspeed. */
 function flying(speed = CRUISE_SPEED): Flight {
   const f = new Flight();
-  f.takeOff(TAKEOFF_SPEED, 1, 1, 0);
+  f.takeOff(TAKEOFF_SPEED, 1, 0);
   for (let i = 0; i < 600 && (f.airspeed < speed || f.where === 'takeoff'); i++) {
     f.update(forward, 1, false, 1 / 60);
   }
@@ -62,14 +63,14 @@ describe('takeoff', () => {
   it('is refused when there is nothing to pay with', () => {
     const f = new Flight();
     expect(f.canTakeOff(TAKEOFF_SPEED * 2, TAKEOFF_COST / 2)).toBe(false);
-    expect(f.takeOff(TAKEOFF_SPEED * 2, TAKEOFF_COST / 2, 1, 0)).toBe(0);
+    expect(f.takeOff(TAKEOFF_SPEED * 2, TAKEOFF_COST / 2, 0)).toBe(0);
     expect(f.aloft).toBe(false);
   });
 
   it('keeps her momentum instead of teleporting her upward', () => {
     const f = new Flight();
     const ran = 14;
-    expect(f.takeOff(ran, 1, 1, 0)).toBe(TAKEOFF_COST);
+    expect(f.takeOff(ran, 1, 0)).toBe(TAKEOFF_COST);
     expect(f.airspeed).toBeGreaterThan(ran);
     // Off the ground, but only just: no launch.
     expect(f.height).toBeLessThan(1);
@@ -77,7 +78,7 @@ describe('takeoff', () => {
 
   it('becomes ordinary flight once she is properly up', () => {
     const f = new Flight();
-    f.takeOff(TAKEOFF_SPEED * 2, 1, 1, 0);
+    f.takeOff(TAKEOFF_SPEED * 2, 1, 0);
     expect(f.where).toBe('takeoff');
     for (let i = 0; i < 120; i++) f.update(forward, 1, false, 1 / 60);
     expect(f.where).not.toBe('takeoff');
@@ -281,7 +282,7 @@ describe('the speed dial', () => {
   /** Seconds of full stick to reach a fraction of the top speed. */
   const timeToSpeed = (fraction: number) => {
     const f = new Flight();
-    f.takeOff(TAKEOFF_SPEED, 1, 1, 0);
+    f.takeOff(TAKEOFF_SPEED, 1, 0);
     const target = MAX_POWERED_SPEED * flightScaleNow() * fraction;
     for (let i = 0; i < 6000; i++) {
       f.update(forward, 1, false, 1 / 120);
@@ -293,7 +294,7 @@ describe('the speed dial', () => {
     // Read the scale back through the model rather than tracking it
     // here, so the test cannot disagree with what was actually set.
     const f = new Flight();
-    f.takeOff(TAKEOFF_SPEED, 1, 1, 0);
+    f.takeOff(TAKEOFF_SPEED, 1, 0);
     for (let i = 0; i < 4000; i++) f.update(forward, 1, false, 1 / 120);
     return f.airspeed / MAX_POWERED_SPEED;
   };
@@ -351,7 +352,7 @@ describe('acceleration', () => {
     // says how long it should take, so a future retune has to argue
     // with a number rather than with a memory.
     const f = new Flight();
-    f.takeOff(TAKEOFF_SPEED, 1, 1, 0);
+    f.takeOff(TAKEOFF_SPEED, 1, 0);
     let seconds = Infinity;
     for (let i = 0; i < 3000; i++) {
       f.update(forward, 1, false, 1 / 120);
@@ -360,5 +361,74 @@ describe('acceleration', () => {
     expect(seconds).toBeGreaterThan(3);
     expect(seconds).toBeLessThan(12);
     expect(THRUST).toBeLessThan(20);
+  });
+});
+
+describe('the coordinated turn', () => {
+  const rightStick: FlightDemand = { ...neutral, push: 1, side: 1 };
+
+  it('banks into the turn, up to thirty degrees', () => {
+    const f = flying();
+    for (let i = 0; i < 120; i++) f.update(rightStick, 1, false, 1 / 60);
+    expect(f.roll).toBeCloseTo(MAX_BANK, 2);
+    expect((MAX_BANK * 180) / Math.PI).toBeCloseTo(30, 6);
+  });
+
+  it('levels out when the stick centres', () => {
+    // Half of what makes it feel like a wing rather than a cursor.
+    const f = flying();
+    for (let i = 0; i < 120; i++) f.update(rightStick, 1, false, 1 / 60);
+    expect(Math.abs(f.roll)).toBeGreaterThan(0.4);
+    for (let i = 0; i < 180; i++) f.update(forward, 1, false, 1 / 60);
+    expect(Math.abs(f.roll)).toBeLessThan(0.02);
+  });
+
+  it('actually turns her, rather than sliding her sideways', () => {
+    const f = flying();
+    const was = f.heading;
+    for (let i = 0; i < 60; i++) f.update(rightStick, 1, false, 1 / 60);
+    // A second of full stick at the 70% share.
+    expect(f.heading - was).toBeCloseTo(FLIGHT_TURN_RATE * TURN_SHARE, 2);
+  });
+
+  it('splits a lateral input 70 turn / 30 slip', () => {
+    const f = flying();
+    const step = f.update(rightStick, 1, false, 1 / 60);
+    expect(step.across / step.ahead).toBeCloseTo(SIDESTEP_SHARE, 6);
+    expect(TURN_SHARE + SIDESTEP_SHARE).toBeCloseTo(1, 6);
+  });
+
+  it('banks and turns the other way for the other way', () => {
+    const f = flying();
+    const was = f.heading;
+    for (let i = 0; i < 60; i++) {
+      f.update({ ...neutral, push: 1, side: -1 }, 1, false, 1 / 60);
+    }
+    expect(f.heading).toBeLessThan(was);
+    expect(f.roll).toBeLessThan(0);
+  });
+
+  it('keeps her heading when the camera is not touching it', () => {
+    // The point of flying where she is pointed: nothing outside the
+    // stick may turn her, so the player can look around freely.
+    const f = flying();
+    const held = f.heading;
+    for (let i = 0; i < 300; i++) f.update(forward, 1, false, 1 / 60);
+    expect(f.heading).toBe(held);
+  });
+
+  it('takes the heading she was running on, and does not turn her', () => {
+    const f = new Flight();
+    f.takeOff(TAKEOFF_SPEED, 1, 1.234);
+    expect(f.heading).toBe(1.234);
+    expect(f.roll).toBe(0);
+  });
+
+  it('pitches her nose with what she is doing vertically', () => {
+    const f = flying();
+    for (let i = 0; i < 60; i++) f.update({ ...neutral, climb: true }, 1, false, 1 / 60);
+    const up = f.pitch;
+    for (let i = 0; i < 60; i++) f.update(diving, 1, false, 1 / 60);
+    expect(f.pitch).toBeLessThan(up);
   });
 });
