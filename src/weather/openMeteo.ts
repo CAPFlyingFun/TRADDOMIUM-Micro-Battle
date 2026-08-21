@@ -34,7 +34,13 @@ const ENDPOINT = 'https://api.open-meteo.com/v1/forecast';
 const CURRENT_FIELDS = [
   'temperature_2m',
   'relative_humidity_2m',
+  // ALL THREE. `precipitation` is the total and the one the game reads;
+  // the other two are kept because a future effect may care whether it
+  // is steady rain or a passing shower, and asking for them costs
+  // nothing on a request already being made.
+  'precipitation',
   'rain',
+  'showers',
   'cloud_cover',
   'wind_speed_10m',
   'wind_direction_10m',
@@ -104,7 +110,15 @@ export function readPlace(place: unknown): Conditions {
   return {
     temperature: num(current.temperature_2m, TYPICAL.temperature),
     humidity: num(current.relative_humidity_2m, TYPICAL.humidity),
+    // If the total is missing, rebuild it from the parts rather than
+    // reporting a dry day: a reply that has been reshaped by an API
+    // version should degrade to slightly-wrong, never to silently-dry.
+    precipitation: Math.max(0, num(
+      current.precipitation,
+      Math.max(0, num(current.rain, 0)) + Math.max(0, num(current.showers, 0)),
+    )),
     rain: Math.max(0, num(current.rain, 0)),
+    showers: Math.max(0, num(current.showers, 0)),
     cloud: num(current.cloud_cover, TYPICAL.cloud),
     windSpeed: Math.max(0, num(current.wind_speed_10m, TYPICAL.windSpeed)),
     windFrom: ((num(current.wind_direction_10m, TYPICAL.windFrom) % 360) + 360) % 360,

@@ -23,12 +23,20 @@
  * Three empty numbers is clutter; it can arrive whole when there is a
  * colony behind it.
  */
-import { SPRINT_SECONDS } from '../ant/stamina';
+
 
 const GOLD = 'rgba(255, 226, 160, .9)';
 const GOLD_DIM = 'rgba(255, 226, 160, .55)';
 /** Real, and resting: a number that is true and has nowhere to go yet. */
 const RESTING = 'rgba(255, 226, 160, .42)';
+
+/**
+ * Below this the reserve is not meaningfully moving either way, in
+ * fractions per second. A thousandth of a bar a second is sixteen
+ * minutes to empty — a countdown at that rate is noise dressed as
+ * information.
+ */
+const IDLE_RATE = 0.001;
 const FUEL = 'rgba(255, 196, 92, .95)';
 const SPENT = 'rgba(255, 110, 90, .95)';
 
@@ -130,18 +138,40 @@ export class Vitals {
    * @param fraction the reserve, 0 to 1
    * @param spent whether she is too winded to be asked for another
    */
-  show(fraction: number, spent: boolean): void {
+  /**
+   * @param rate what the reserve is doing RIGHT NOW, fractions of a
+   *   full bar per second. Positive spends, negative recovers.
+   *
+   * THE NUMBER IS TIME, NOT A SCORE. It used to be the fraction times
+   * thirty, which is "how many seconds of GROUND SPRINTING this much
+   * reserve is worth" — a fair answer to a question nobody was asking.
+   * Joshua watched a real second pass and the readout drop by two
+   * tenths, because he was cruising, and cruising is not sprinting.
+   *
+   * What it says now is how long the CURRENT activity can go on:
+   * reserve divided by what that activity is costing. Sprint reads
+   * thirty seconds from full, a hard climb fifty-five, a cruise five
+   * and a half minutes — and the moment she changes what she is doing,
+   * so does the number.
+   *
+   * A countdown is only honest while something is being spent. While
+   * she is catching her breath it counts the other way, to full, and
+   * when nothing is happening it says so rather than inventing a
+   * deadline.
+   */
+  show(fraction: number, spent: boolean, rate: number): void {
     const left = Math.max(0, Math.min(1, fraction));
-    const seconds = Math.round(left * SPRINT_SECONDS * 10) / 10;
-    const state = `${seconds}|${spent}`;
+    const label = enduranceWords(left, rate);
+    const state = `${label}|${spent}|${Math.round(left * 200)}`;
     if (state === this.shown) return;
     this.shown = state;
 
     this.stamina.fill.style.width = `${left * 100}%`;
     this.stamina.fill.style.background = spent ? SPENT : FUEL;
     this.stamina.icon.style.color = spent ? SPENT : FUEL;
-    this.stamina.read.style.color = spent ? SPENT : GOLD;
-    this.stamina.read.textContent = `${seconds.toFixed(1)}s`;
+    this.stamina.read.style.color = spent ? SPENT
+      : rate > IDLE_RATE ? GOLD : RESTING;
+    this.stamina.read.textContent = label;
   }
 
   /**
@@ -236,7 +266,9 @@ export class Vitals {
     track.appendChild(fill);
 
     const read = document.createElement('span');
-    read.textContent = live ? `${SPRINT_SECONDS.toFixed(1)}s` : `${Math.round(held)}`;
+    // The opening value, replaced on the first frame. FULL rather than
+    // a number, because at rest there is no countdown to show.
+    read.textContent = live ? 'FULL' : `${Math.round(held)}`;
     Object.assign(read.style, {
       font: '600 10px/1 "JetBrains Mono", ui-monospace, monospace',
       textAlign: 'right',
@@ -268,4 +300,22 @@ export class Vitals {
       zIndex: '13',
     } as Partial<CSSStyleDeclaration>);
   }
+}
+
+/** m:ss for anything over a minute, seconds with a decimal below it. */
+function clockWords(seconds: number): string {
+  if (seconds >= 60) {
+    const mins = Math.floor(seconds / 60);
+    return `${mins}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
+  }
+  return `${seconds.toFixed(1)}s`;
+}
+
+/** What the endurance readout says, given the reserve and the rate. */
+export function enduranceWords(fraction: number, rate: number): string {
+  const left = Math.max(0, Math.min(1, fraction));
+  if (rate > IDLE_RATE) return clockWords(left / rate);
+  if (left >= 0.999) return 'FULL';
+  if (rate < -IDLE_RATE) return `FULL IN ${clockWords((1 - left) / -rate)}`;
+  return 'READY';
 }

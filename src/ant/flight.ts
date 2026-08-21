@@ -61,6 +61,38 @@ export const MAX_POWERED_SPEED = 70;
 /** Nose down, gravity doing the work. */
 export const MAX_DIVE_SPEED = 110;
 
+/**
+ * What Auto holds at each pace, in world units per second.
+ *
+ * NOT the ground pace speeds. A crawl is 2.2 units/s, which is not a
+ * flight — an ant that slow is not flying, she is falling with her
+ * wings out. Flight has its own scale, so Auto has its own targets on
+ * it, anchored to the numbers the model already uses: cruise is what
+ * powered flight settles at, run is flat out.
+ */
+export const AUTO_AIRSPEED = { crawl: 20, walk: CRUISE_SPEED, run: MAX_POWERED_SPEED };
+
+/**
+ * UNPOWERED TERMINAL FALL, world units per second — 1.78 m/s.
+ *
+ * PROVISIONAL, AND NOT MEASURED FIRE-ANT DATA. I could find no
+ * published terminal velocity for a Solenopsis invicta queen
+ * specifically. This is an insect-scale figure of the right order:
+ * small insects fall slowly because drag scales with area while weight
+ * scales with volume, which is the same reason they survive the
+ * landing. Treat it as game tuning with a plausible basis, and replace
+ * it if a real measurement turns up.
+ *
+ * It is a CEILING on passive descent, not a speed she is dropped at.
+ */
+export const TERMINAL_FALL = 178;
+
+/**
+ * How quickly vertical speed answers a change in what is holding her
+ * up. Seconds, as a time constant rather than a per-frame fraction.
+ */
+export const SINK_EASE = 1.1;
+
 /** Forward units per unit of height lost, at BEST_GLIDE_SPEED. */
 export const BEST_GLIDE_RATIO = 5;
 /** The floor: minimum-power flight on an empty reserve. */
@@ -175,6 +207,17 @@ export interface FlightDemand {
   readonly side: number;
   readonly climb: boolean;
   readonly descend: boolean;
+  /**
+   * AUTO: hold this AIRSPEED without the stick, world units per second.
+   *
+   * Airspeed, and the distinction is the point. Auto removes the need
+   * to keep a thumb on forward; it is not an autopilot and it does not
+   * know where she is going. Into a headwind stronger than she is, Auto
+   * holds her at full power flying forwards and she goes backwards over
+   * the island — because that is what happens, and hiding it would mean
+   * secretly giving her an engine she has not got.
+   */
+  readonly hold?: number | null;
 }
 
 /** What one frame of flight did, for the caller to apply and charge. */
@@ -375,16 +418,70 @@ export class Flight {
    * low-speed handling, which is what the input is actually for.
    */
   private thrust(demand: FlightDemand, asked: number, empty: boolean, dt: number): void {
+    const hold = demand.hold ?? null;
     if (empty) {
       this.speed -= this.speed * DRAG * dt;
     } else if (demand.push < -0.05) {
       this.speed -= THRUST * scale * Math.abs(demand.push) * 0.8 * dt;
     } else if (asked > 0.05) {
       this.speed += THRUST * scale * asked * dt;
+    } else if (hold !== null && hold > 0) {
+      // AUTO: fly AT a speed rather than hold a stick position.
+      //
+      // Holding an arbitrary stick percentage would give a different
+      // speed on every dial setting and every wind, and would sit at
+      // full thrust forever once it reached the cap. A target closes
+      // the gap and then stops — accelerating hard when far off, easing
+      // in as it arrives, and answering drag on its own. Exponential
+      // rather than a fixed step per frame, so a phone at 30 fps and a
+      // probe at 4 reach the same speed at the same simulated moment.
+      const gap = hold * scale - this.speed;
+      this.speed += gap * (1 - Math.exp(-dt * (THRUST * scale) / Math.max(1, hold * scale)));
     } else {
       this.speed -= this.speed * DRAG * dt;
     }
     this.speed = Math.max(0, this.speed);
+  }
+
+  /**
+   * How much of her weight the wings are still carrying, 0 to 1.
+   *
+   * One at a healthy airspeed, nothing at all at a standstill. Squared
+   * because lift goes with the square of airspeed, which also makes the
+   * hand-over gentle at the top and decisive at the bottom — she does
+   * not fall out of a fast glide, and she does not hang at zero.
+   */
+  private lift(): number {
+    const flying = this.speed / Math.max(1e-6, STALL_SPEED * scale);
+    const held = Math.min(1, Math.max(0, flying));
+    return held * held;
+  }
+
+  /**
+   * Ease the vertical toward a target sink, frame-rate independently.
+   *
+   * A queen has mass. Losing her wings does not switch her descent to
+   * terminal velocity between two frames; it takes it away over about a
+   * second, which is what this is for.
+   */
+  private sinkToward(target: number, dt: number): void {
+    this.rise += (target - this.rise) * (1 - Math.exp(-dt / SINK_EASE));
+  }
+
+  /**
+   * The passive descent at the current airspeed.
+   *
+   * A GLIDE while she has speed to glide on, a FALL when she has not,
+   * and a smooth hand-over between the two. The old model was the first
+   * half alone — `sink = airspeed / glideRatio` — which is right at
+   * speed and absurd at rest: as airspeed decayed toward zero, so did
+   * the sinking, so a queen who stopped asking for anything eventually
+   * hung motionless in the sky. Nothing hangs in the sky.
+   */
+  private passiveSink(): number {
+    const held = this.lift();
+    const glide = this.speed / Math.max(0.1, glideRatio(this.speed));
+    return glide * held + TERMINAL_FALL * scale * (1 - held);
   }
 
   /**
@@ -431,22 +528,32 @@ export class Flight {
       // Zero stamina must never mean the wings switch off.
       this.state = 'exhausted';
       const sinking = Math.max(EXHAUSTED_GLIDE_RATIO, glideRatio(this.speed) * 0.35);
-      this.rise = -this.speed / sinking;
+      const held = this.lift();
+      const target = -Math.min(
+        TERMINAL_FALL * scale,
+        (this.speed / sinking) * held + TERMINAL_FALL * scale * (1 - held),
+      );
+      this.sinkToward(target, dt);
       return GLIDE_RECOVERY * 0.4;
     }
 
     const asked = Math.hypot(demand.push, demand.side);
-    if (asked > 0.05) {
+    // AUTO IS POWERED FLIGHT. Without this it read as neutral, so Auto
+    // would have held the airspeed while the model sank as though she
+    // were gliding on it — thrust and lift disagreeing about whether
+    // the wings were working.
+    const powered = asked > 0.05 || (demand.hold ?? 0) > 0;
+    if (powered) {
       this.state = 'powered';
       // Powered flight holds height, easing rather than snapping level.
       this.rise += (0 - this.rise) * Math.min(1, dt * 3);
       return this.speed > CRUISE_SPEED * scale ? FAST_DRAIN : CRUISE_DRAIN;
     }
 
-    // Neutral is a GLIDE, not a hover. She keeps her momentum and pays
-    // for distance in height at whatever ratio her airspeed earns.
+    // Neutral is a GLIDE while there is airspeed to glide on, and a
+    // fall once there is not. Never a hover.
     this.state = 'glide';
-    this.rise = -this.speed / Math.max(0.1, glideRatio(this.speed));
+    this.sinkToward(-Math.min(TERMINAL_FALL * scale, this.passiveSink()), dt);
     return GLIDE_RECOVERY;
   }
 }

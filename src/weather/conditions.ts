@@ -21,8 +21,24 @@ export interface Conditions {
   readonly temperature: number;
   /** Relative humidity, 0–100 PERCENT. */
   readonly humidity: number;
-  /** Rainfall, MILLIMETRES PER HOUR. */
+  /**
+   * TOTAL precipitation, MILLIMETRES PER HOUR — the authority on
+   * whether anything is actually falling.
+   *
+   * Open-Meteo splits precipitation three ways: `rain` is large-scale
+   * rain, `showers` is the convective kind, and `precipitation` is the
+   * sum of everything including drizzle and snow. Reading only `rain`
+   * is how the panel came to say DRIZZLE and "Rain: none" in the same
+   * breath — the code was describing drizzle, which is not counted as
+   * rain, so the number underneath it was a legitimate zero.
+   *
+   * Anything deciding whether a drop is visible reads THIS.
+   */
+  readonly precipitation: number;
+  /** Large-scale rain alone, MILLIMETRES PER HOUR. */
   readonly rain: number;
+  /** Convective showers alone, MILLIMETRES PER HOUR. */
+  readonly showers: number;
   /** Cloud cover, 0–100 PERCENT. */
   readonly cloud: number;
   /** Wind at ten metres, KILOMETRES PER HOUR. */
@@ -79,7 +95,9 @@ export interface WeatherProvider {
 export const TYPICAL: Conditions = {
   temperature: 25,
   humidity: 74,
+  precipitation: 0,
   rain: 0,
+  showers: 0,
   cloud: 45,
   windSpeed: 20,
   windFrom: 65, // ENE — the trades, which blow here most of the year.

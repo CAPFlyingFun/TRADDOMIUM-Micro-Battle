@@ -93,7 +93,12 @@ export class WeatherBlend {
     this.shown = {
       temperature: ease(from.temperature, to.temperature, TAU.temperature, dt),
       humidity: ease(from.humidity, to.humidity, TAU.humidity, dt),
+      // All three precipitation figures move on the rain clock: they
+      // are the same weather counted three ways and must not drift out
+      // of step with one another.
+      precipitation: ease(from.precipitation, to.precipitation, TAU.rain, dt),
       rain: ease(from.rain, to.rain, TAU.rain, dt),
+      showers: ease(from.showers, to.showers, TAU.rain, dt),
       cloud: ease(from.cloud, to.cloud, TAU.cloud, dt),
       windSpeed: ease(from.windSpeed, to.windSpeed, TAU.windSpeed, dt),
       windFrom,

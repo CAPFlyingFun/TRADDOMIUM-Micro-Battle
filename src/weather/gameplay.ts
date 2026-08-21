@@ -22,6 +22,65 @@
 import { UNITS_PER_METRE } from '../world/kauai';
 import type { Conditions } from './conditions';
 
+/**
+ * THE SMALLEST PRECIPITATION A WET WMO CODE MAY IMPLY, in mm/h.
+ *
+ * The panel said DRIZZLE and, underneath it, "Rain: none", with nothing
+ * falling. Both halves were honest: the code genuinely was drizzle, and
+ * drizzle genuinely is not counted as rain. The contradiction was in
+ * showing them together.
+ *
+ * Reading the TOTAL precipitation fixes almost all of it. What is left
+ * is that a real drizzle can still round to 0.0 mm/h at the provider,
+ * and can be interpolated toward zero between stations — so the code
+ * says wet and the number says nothing at all. Where that happens the
+ * description wins by a hair: just enough falling to be seen, and no
+ * more.
+ *
+ * These are NOT invented rainfall. A drizzle floor of 0.08 mm/h is
+ * below what most gauges resolve, which is exactly why the provider
+ * reported zero. The point is only that the world must never say one
+ * thing and show another.
+ */
+const CODE_FLOOR: ReadonlyArray<{ from: number; floor: number }> = [
+  { from: 95, floor: 1.2 }, // thunderstorm
+  { from: 80, floor: 0.5 }, // showers
+  { from: 71, floor: 0.3 }, // snow
+  { from: 61, floor: 0.4 }, // rain
+  { from: 51, floor: 0.08 }, // drizzle
+];
+
+/**
+ * THE ONE THRESHOLD FOR "IS ANYTHING FALLING", in mm/h.
+ *
+ * Shared by the words and by the drops, and it has to be, because the
+ * bug this whole section exists to fix is those two answering
+ * differently. A test sweeps every code against every intensity and
+ * checks that a wet description and a visible drop always agree; it
+ * failed the first time round, on a hundredth of a millimetre under a
+ * fog code — words dry, drops falling. One constant, both readers.
+ */
+export const VISIBLE_PRECIP = 0.05;
+
+/** The least that can be falling, given what the code claims. */
+export function floorFor(code: number): number {
+  for (const band of CODE_FLOOR) if (code >= band.from) return band.floor;
+  return 0;
+}
+
+/**
+ * What is VISIBLY falling — the number the drops are drawn from.
+ *
+ * Two directions, both needed. A wet code with no measurable total is
+ * lifted to its floor, so drizzle drizzles. A measurable total under a
+ * dry code is left alone and believed, so rain that is actually
+ * falling is drawn whatever a stale code says about it.
+ */
+export function fallingNow(now: Conditions): number {
+  const falling = Math.max(Math.max(0, now.precipitation), floorFor(now.code));
+  return falling < VISIBLE_PRECIP ? 0 : falling;
+}
+
 export interface GameWeather {
   /** 0–1. A dial, not a speed. Nothing may treat this as km/h. */
   readonly windStrength: number;
@@ -34,6 +93,8 @@ export interface GameWeather {
   readonly windHeading: number;
   /** 0–1. Particle density and the sound of it. */
   readonly rainfall: number;
+  /** What is visibly falling, MILLIMETRES PER HOUR, after reconciling. */
+  readonly precipitation: number;
   /** 0–1. */
   readonly cloudiness: number;
   /** 0–1. How much the light is taken out of the day. */
@@ -44,6 +105,28 @@ export interface GameWeather {
   readonly warmth: number;
   /** 0–1. Humidity and rain together; the wet-ground feel later. */
   readonly damp: number;
+  /**
+   * THE WIND AS A PHYSICAL VELOCITY, metres per second.
+   *
+   * Separate from `windStrength` on purpose and not a replacement for
+   * it. The dial is for looks — how hard the rain slants, how much the
+   * grass would bend. This is for arithmetic, and it has units.
+   */
+  readonly windMps: number;
+  /**
+   * The same wind as a WORLD VELOCITY, units per second, pointing the
+   * way the air is travelling.
+   *
+   * One world unit is a centimetre, so this is the m/s figure times a
+   * hundred. It is added to her AIR velocity to get her velocity over
+   * the ground, which is the whole of the wind model:
+   *
+   *   ground = air + wind
+   *
+   * and it is why a queen at full power into a stronger wind flies
+   * forwards through the air while travelling backwards over Kauaʻi.
+   */
+  readonly windVelocity: { readonly x: number; readonly z: number };
 }
 
 /**
@@ -96,8 +179,12 @@ export function headingFromBearing(degrees: number): number {
 }
 
 export function toGameWeather(now: Conditions): GameWeather {
-  const rainfall = clamp01(Math.sqrt(Math.max(0, now.rain) / RAIN_FULL));
+  const precipitation = fallingNow(now);
+  const rainfall = clamp01(Math.sqrt(precipitation / RAIN_FULL));
   const cloudiness = clamp01(now.cloud / 100);
+  const windHeading = headingFromBearing(now.windFrom + 180);
+  const windMps = Math.max(0, now.windSpeed) / 3.6;
+  const windUnits = windMps * UNITS_PER_METRE;
 
   return {
     windStrength: clamp01(now.windSpeed / WIND_FULL),
@@ -106,8 +193,16 @@ export function toGameWeather(now: Conditions): GameWeather {
     // south. Half a turn, and the reason this is spelled out rather
     // than folded into the maths is that getting it wrong blows the
     // whole island backwards in a way nobody notices for weeks.
-    windHeading: headingFromBearing(now.windFrom + 180),
+    windHeading,
+    windMps,
+    // A heading travels along (sin, cos) in this world, same convention
+    // as hers, so the wind vector is built the same way her own is.
+    windVelocity: {
+      x: Math.sin(windHeading) * windUnits,
+      z: Math.cos(windHeading) * windUnits,
+    },
     rainfall,
+    precipitation,
     cloudiness,
     // Overcast takes most of the light; rain takes a little more. It
     // never reaches 1: this is a dimmer, and a game you cannot see is
@@ -122,6 +217,26 @@ export function toGameWeather(now: Conditions): GameWeather {
   };
 }
 
+/**
+ * What to CALL the weather, given both halves.
+ *
+ * The code is the better describer when it has anything to say, since
+ * it distinguishes drizzle from rain from a squall. But a code can be
+ * stale or dry while water is measurably falling, and "Clear" over
+ * visible rain is the same contradiction the other way round — so
+ * precipitation gets the last word on whether it is wet at all.
+ */
+export function describeWeather(code: number, precipitation: number): string {
+  if (floorFor(code) > 0 || precipitation < VISIBLE_PRECIP) return describe(code);
+  return precipitation >= 2.5 ? 'Rain'
+    : precipitation >= 0.5 ? 'Light rain' : 'Drizzle';
+}
+
+/** Metres per second, which is the unit flight arithmetic wants. */
+export function mps(kmh: number): number {
+  return kmh / 3.6;
+}
+
 /** WMO present-weather code to something a player can read. */
 export function describe(code: number): string {
   if (code >= 95) return 'Thunderstorms';
@@ -134,6 +249,12 @@ export function describe(code: number): string {
   if (code === 2) return 'Partly cloudy';
   if (code === 1) return 'Mostly clear';
   return 'Clear';
+}
+
+/** The glyph, reconciled the same way the description is. */
+export function glyphFor(code: number, precipitation: number): string {
+  if (floorFor(code) > 0 || precipitation < VISIBLE_PRECIP) return glyph(code);
+  return precipitation >= 0.5 ? '🌧️' : '🌦️';
 }
 
 /** The little glyph the HUD chip wears. */

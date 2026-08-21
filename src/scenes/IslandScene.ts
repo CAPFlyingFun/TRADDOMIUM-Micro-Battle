@@ -28,7 +28,7 @@ import { liveStat } from '../ant/castes';
 import { ActionPad, type Action } from '../input/ActionPad';
 import { DebugDie } from '../ui/DebugDie';
 import { WeatherChip } from '../ui/WeatherChip';
-import { Flight, setFlightScale } from '../ant/flight';
+import { AUTO_AIRSPEED, Flight, setFlightScale } from '../ant/flight';
 import { Grace } from '../ant/grace';
 import {
   MOVING_RECOVERY, RESTING_RECOVERY, SPRINT_DRAIN,
@@ -96,6 +96,13 @@ export class IslandScene {
   private readonly grace = new Grace();
   /** Seconds the "protection ended" warning still has to run. */
   private noticeLeft = 0;
+  /**
+   * What the reserve is doing this frame, fractions per second.
+   *
+   * Held because the HUD needs the same number the reserve was charged,
+   * and deriving it twice is how the two come to disagree.
+   */
+  private effort = 0;
   private rain!: Rain;
   private sun!: THREE.DirectionalLight;
   private skyLight!: THREE.HemisphereLight;
@@ -472,7 +479,15 @@ export class IslandScene {
       const paid = this.flight.takeOff(
         this.ant.pace, this.stamina.fraction, this.ant.bearing,
       );
-      if (paid > 0) this.stamina.spend(paid);
+      if (paid > 0) {
+        this.stamina.spend(paid);
+        // AN AIRBORNE QUEEN DOES NOT FLY TAIL-FIRST. Auto astern is for
+        // hauling something backwards along the ground; carried into
+        // the air it would mean powered reverse flight, which no winged
+        // animal does. Turned round rather than cancelled, so a player
+        // who locked Auto and took off keeps the thing they asked for.
+        if (this.auto.active && this.auto.way === -1) this.auto.flip();
+      }
     }
 
     let winded = false;
@@ -483,11 +498,18 @@ export class IslandScene {
           side: stick.x,
           climb: this.climbButton.held,
           descend: this.descendButton.held,
+          // AUTO IN THE AIR holds an airspeed for the selected pace, so
+          // the thumb is free to steer, look and climb. Lateral input,
+          // the camera and both buttons leave it engaged; only a
+          // deliberate fore/aft push takes manual control back, which
+          // is the same rule it follows on the ground.
+          hold: this.auto.active ? AUTO_AIRSPEED[this.pace] : null,
         },
         this.stamina.fraction,
         this.stamina.spent,
         dt,
       );
+      this.effort = step.effort;
       winded = this.stamina.update(step.effort, dt);
       // Flight owns her velocity outright — it already carries her
       // momentum, so handing it through the walk's easing would smear
@@ -496,6 +518,8 @@ export class IslandScene {
         { ahead: step.ahead, across: step.across, speed: Math.hypot(step.ahead, step.across) },
         this.flight.heading, this.flight.roll, this.flight.pitch,
         dt, this.flight.height,
+        // The wind reaches her ONLY here. Walking gets nothing.
+        this.windOnHer(),
       );
       // The camera CHASES in flight rather than steering. Her heading
       // is her own up here, so a view left where the player put it
@@ -510,10 +534,9 @@ export class IslandScene {
       // for one while stopped or reversing costs nothing.
       const sprinting = wants && travel.speed > PACE_SPEED[this.pace] + 1e-3;
       const resting = this.ant.pace < 0.05;
-      winded = this.stamina.update(
-        sprinting ? SPRINT_DRAIN : resting ? RESTING_RECOVERY : MOVING_RECOVERY,
-        dt,
-      );
+      this.effort = sprinting ? SPRINT_DRAIN
+        : resting ? RESTING_RECOVERY : MOVING_RECOVERY;
+      winded = this.stamina.update(this.effort, dt);
       this.ant.update(travel, -look.yaw, dt, 0);
     }
 
@@ -528,7 +551,10 @@ export class IslandScene {
       this.pace, wants, this.stamina.spent,
       this.ant.pace, this.auto.active, this.auto.way,
     );
-    this.vitals.show(this.stamina.fraction, this.stamina.spent);
+    // The RATE goes with the reserve, so the readout can say how long
+    // what she is doing right now can go on rather than how much
+    // sprinting the bar would be worth.
+    this.vitals.show(this.stamina.fraction, this.stamina.spent, this.effort);
     // NOTHING TO TICK. The grace is a deadline, so the only question
     // each frame is what time it is — which is why backgrounding the
     // tab or losing the page can no longer buy extra protection.
@@ -591,6 +617,9 @@ export class IslandScene {
     if (reading) {
       this.weatherChip.update(
         reading, service.source, service.field.ageSeconds(Date.now()),
+        // Her heading only matters aloft: the headwind warning is about
+        // whether she can make progress the way she is pointed.
+        this.flight.aloft ? this.flight.heading : null,
       );
     }
 
@@ -786,6 +815,21 @@ export class IslandScene {
       middle: top([middle]),
       backdrop: top([backdrop]),
     };
+  }
+
+  /**
+   * The wind as it actually reaches her, world units per second.
+   *
+   * The full measured vector, scaled by the influence dial. At the
+   * default of 1 this is simply the real wind — see settings for why
+   * the dial exists at all, which is that the real wind on this island
+   * is several times what she can fly against.
+   */
+  private windOnHer(): { x: number; z: number } | null {
+    const wind = this.nowWeather?.windVelocity;
+    if (!wind) return null;
+    const share = settings().windInfluence;
+    return { x: wind.x * share, z: wind.z * share };
   }
 
   private aspect(): number {

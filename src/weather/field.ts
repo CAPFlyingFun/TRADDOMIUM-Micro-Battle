@@ -71,7 +71,9 @@ export class WeatherField {
     let total = 0;
     let temperature = 0;
     let humidity = 0;
+    let precipitation = 0;
     let rain = 0;
+    let showers = 0;
     let cloud = 0;
     let windSpeed = 0;
     let windGust = 0;
@@ -106,7 +108,9 @@ export class WeatherField {
       const c = sample.conditions;
       temperature += c.temperature * weight;
       humidity += c.humidity * weight;
+      precipitation += c.precipitation * weight;
       rain += c.rain * weight;
+      showers += c.showers * weight;
       cloud += c.cloud * weight;
       windSpeed += c.windSpeed * weight;
       windGust += c.windGust * weight;
@@ -128,7 +132,9 @@ export class WeatherField {
     return {
       temperature: temperature / total,
       humidity: humidity / total,
+      precipitation: precipitation / total,
       rain: rain / total,
+      showers: showers / total,
       cloud: cloud / total,
       windSpeed: windSpeed / total,
       windFrom,

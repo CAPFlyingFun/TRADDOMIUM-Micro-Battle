@@ -103,7 +103,11 @@ export function simulate(where: GeoPoint, atMs: number): Conditions {
   return {
     temperature,
     humidity,
+    // The offline model has no convective/large-scale split to make, so
+    // everything it produces is simply the total.
+    precipitation: rain,
     rain,
+    showers: 0,
     cloud,
     windSpeed,
     // The trades wander a little either side of ENE.

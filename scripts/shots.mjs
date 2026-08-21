@@ -37,14 +37,32 @@ try {
     await page.click('[data-ui="spawn-here"]');
     await page.waitForFunction(() => Boolean(window.__island), null, { timeout: 120000 });
     await page.waitForFunction(() => window.__island.simTime() > 3, null, { timeout: 180000 });
-    await page.addStyleTag({
-      content: '[data-ui]:not([data-ui="island-canvas"]){visibility:hidden!important}',
-    });
-    await page.waitForFunction(() => {
-      const v = document.querySelector('[data-ui="vitals"]');
-      return v === null || getComputedStyle(v).visibility === 'hidden';
-    }, null, { timeout: 20000 });
+    if (process.env.KEEP_HUD === '1') {
+      // The HUD is the subject rather than the obstacle: open the
+      // weather panel and let her work, so the endurance readout has a
+      // workload to report on rather than sitting at FULL.
+      await page.click('[data-ui="weather-chip"]').catch(() => {});
+      await page.evaluate(() => {
+        window.__island.setPace('run');
+        window.__island.setSprint(true);
+      });
+      // Real time, not simulated: the readout reports the rate she is
+      // working at RIGHT NOW, so it only needs her to be sprinting at
+      // the moment of the shot, not to have sprinted for a while. Under
+      // a software renderer a few simulated seconds is several minutes.
+      await page.keyboard.down('KeyW');
+      await page.waitForTimeout(12000);
+    } else {
+      await page.addStyleTag({
+        content: '[data-ui]:not([data-ui="island-canvas"]){visibility:hidden!important}',
+      });
+      await page.waitForFunction(() => {
+        const v = document.querySelector('[data-ui="vitals"]');
+        return v === null || getComputedStyle(v).visibility === 'hidden';
+      }, null, { timeout: 20000 });
+    }
     await page.screenshot({ path: `${tag}-${spot}.png` });
+    await page.keyboard.up('KeyW').catch(() => {});
     if (errors.length) {
       console.log(`${spot}: FAILED — ${errors[0].split('\n')[0]}`);
       process.exitCode = 1;

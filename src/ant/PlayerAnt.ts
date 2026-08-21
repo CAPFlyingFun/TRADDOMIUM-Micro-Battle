@@ -280,6 +280,8 @@ export class PlayerAnt {
   fly(
     drive: Drive, facing: number, bank: number, pitch: number,
     dt: number, above: number,
+    /** World units per second the AIR is moving. Flight only. */
+    wind?: { readonly x: number; readonly z: number } | null,
   ): void {
     const wasFacing = this.heading;
     this.wish = { x: drive.across, y: drive.ahead };
@@ -291,11 +293,31 @@ export class PlayerAnt {
     ) / Math.max(dt, 1e-6);
 
     // Travel in HER frame: along the nose, plus the slip across it.
+    // THIS IS HER AIR VELOCITY — what the wings are doing against the
+    // air around her, and nothing to do with where that air is going.
     const right = facing - Math.PI / 2;
     this.at.x
       += (Math.sin(facing) * this.velocity.y + Math.sin(right) * this.velocity.x) * dt;
     this.at.z
       += (Math.cos(facing) * this.velocity.y + Math.cos(right) * this.velocity.x) * dt;
+
+    // AND THEN THE AIR ITSELF MOVES. Ground velocity is the vector sum
+    // of what she flies and what the sky is doing:
+    //
+    //   ground = air + wind
+    //
+    // Added here rather than folded into her drive, because the two are
+    // different things and the difference is the whole point: she is
+    // still flying north at full power in a southerly that is carrying
+    // her backwards over the island. Her heading, her airspeed and her
+    // wings are unaffected; only her track over Kauaʻi changes.
+    //
+    // This is the FLIGHT path only. Walking is untouched — a queen on
+    // the ground has six legs on it and does not get blown sideways.
+    if (wind) {
+      this.at.x += wind.x * dt;
+      this.at.z += wind.z * dt;
+    }
 
     this.attitude = { bank, pitch };
     this.settle(above, dt);

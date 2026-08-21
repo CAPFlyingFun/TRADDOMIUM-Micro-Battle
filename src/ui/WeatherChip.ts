@@ -22,8 +22,10 @@
  */
 import type { Conditions, WeatherSource } from '../weather/conditions';
 import {
-  compass, describe, fahrenheit, glyph, mph,
+  compass, describeWeather, fahrenheit, fallingNow, glyphFor, mph, mps,
 } from '../weather/gameplay';
+import { MAX_POWERED_SPEED } from '../ant/flight';
+import { UNITS_PER_METRE } from '../world/kauai';
 
 const SOURCE_WORDS: Record<WeatherSource, string> = {
   live: 'Live Kauaʻi',
@@ -98,10 +100,21 @@ export class WeatherChip {
    * continuously, so without this every frame would rewrite two nodes
    * to say what they already said.
    */
-  update(now: Conditions, source: WeatherSource, age: number): void {
+  /**
+   * @param heading which way her nose points, world radians, or null on
+   *   the ground. Only used to work out whether the wind is against
+   *   her, which is the difference between a warning worth reading and
+   *   a warning that is always on.
+   */
+  update(
+    now: Conditions, source: WeatherSource, age: number,
+    heading: number | null = null,
+  ): void {
     const degrees = Math.round(fahrenheit(now.temperature));
     const wind = Math.round(mph(now.windSpeed));
-    const line = `${glyph(now.code)} ${degrees}°\n${compass(now.windFrom)} ${wind}`;
+    const falling = fallingNow(now);
+    const line = `${glyphFor(now.code, falling)} ${degrees}°\n`
+      + `${compass(now.windFrom)} ${wind}`;
     if (line !== this.shownChip) {
       this.shownChip = line;
       this.chip.textContent = '';
@@ -118,16 +131,32 @@ export class WeatherChip {
     if (!this.open) return;
 
     const rows: Array<[string, string]> = [
-      ['', describe(now.code)],
+      ['', describeWeather(now.code, falling)],
       ['Temp', `${degrees}°F`],
       ['Humidity', `${Math.round(now.humidity)}%`],
-      ['Wind', `${compass(now.windFrom)} ${wind} mph`],
-      ['Gusts', `${Math.round(mph(now.windGust))} mph`],
-      ['Rain', now.rain < 0.05 ? 'none' : `${now.rain.toFixed(1)} mm/h`],
+      // METRES PER SECOND FIRST, because that is the unit that means
+      // something in the air: her top powered airspeed is 0.7 m/s, so
+      // a 2.2 reading says at a glance that the sky is in charge today.
+      // The mph stays alongside it for the forecast-reading half of the
+      // brain.
+      ['Wind', `${compass(now.windFrom)} ${mps(now.windSpeed).toFixed(1)} m/s `
+        + `(${wind} mph)`],
+      ['Gusts', `${mps(now.windGust).toFixed(1)} m/s `
+        + `(${Math.round(mph(now.windGust))} mph)`],
+      // PRECIPITATION, NOT RAIN. Drizzle is not rain, which is exactly
+      // how the panel came to say DRIZZLE over "Rain: none".
+      // `fallingNow` has already zeroed anything below the visible
+      // threshold, so "none" here means genuinely nothing — and it can
+      // never sit under a wet description, because the same threshold
+      // decided both.
+      ['Precip', falling === 0 ? 'none' : `${falling.toFixed(2)} mm/h`],
       ['Visibility', visibilityWords(now.visibility)],
       ['Source', SOURCE_WORDS[source]],
       ['Updated', agoWords(age)],
     ];
+
+    const warning = windWarning(now, heading);
+    if (warning) rows.push(['', warning]);
     const text = rows.map(([a, b]) => `${a}${b}`).join('|');
     if (text === this.shownPanel) return;
     this.shownPanel = text;
@@ -137,9 +166,10 @@ export class WeatherChip {
       const row = document.createElement('div');
       if (label === '') {
         row.textContent = value;
+        const alarm = value.startsWith('⚠');
         row.style.cssText = 'font-weight:700;letter-spacing:.08em;'
-          + 'text-transform:uppercase;font-size:10px;color:#f0d99a;'
-          + 'margin-bottom:4px';
+          + `text-transform:uppercase;font-size:10px;color:${alarm ? '#ffb98a' : '#f0d99a'};`
+          + (alarm ? 'margin-top:8px;line-height:1.35' : 'margin-bottom:4px');
       } else {
         row.style.cssText = 'display:flex;justify-content:space-between;gap:14px';
         const key = document.createElement('span');
@@ -170,4 +200,36 @@ function agoWords(seconds: number): string {
   if (minutes < 60) return `${minutes} min ago`;
   const hours = Math.round(minutes / 60);
   return `${hours} h ago`;
+}
+
+/**
+ * Whether the sky is about to have more say in where she goes than she
+ * does — and only then.
+ *
+ * INFORMATION, NOT A GATE. Nothing here stops her taking off. A queen
+ * launching into a wind that will carry her across the island is
+ * making a decision, possibly a deliberate one, and the game's job is
+ * to make sure she knows rather than to argue.
+ *
+ * Two thresholds, because they mean different things. Wind stronger
+ * than she is means she cannot hold a course against it anywhere.
+ * Wind stronger than she is ALONG HER NOSE means she cannot make
+ * headway the way she is currently pointed, which is the more useful
+ * warning and the reason her heading is passed in when there is one.
+ */
+export function windWarning(
+  now: Conditions, heading: number | null,
+): string | null {
+  const windUnits = mps(now.windSpeed) * UNITS_PER_METRE;
+  if (windUnits > MAX_POWERED_SPEED) return '⚠ Wind exceeds queen airspeed';
+  if (heading !== null) {
+    // How much of the wind is blowing straight back at her. The wind
+    // travels toward (windFrom + 180); a component along her nose that
+    // is negative is a headwind.
+    const blowing = Math.PI - ((now.windFrom + 180) * Math.PI) / 180;
+    const along = Math.cos(blowing - heading) * windUnits;
+    if (-along > MAX_POWERED_SPEED) return '⚠ Headwind exceeds airspeed';
+  }
+  if (windUnits > MAX_POWERED_SPEED * 0.6) return '⚠ Strong wind — major drift';
+  return null;
 }

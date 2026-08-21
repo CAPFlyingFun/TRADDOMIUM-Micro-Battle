@@ -63,6 +63,11 @@ const DIALS: Dialer[] = [
     // "45%" says what it is: an island not quite half as tall.
     show: (v) => `${(v * 100).toFixed(0)}%`,
   },
+  {
+    key: 'windInfluence',
+    label: 'Wind on flight',
+    show: (v) => (v === 0 ? 'off' : `${(v * 100).toFixed(0)}%`),
+  },
 ];
 
 const TOGGLES: Array<{ key: Toggle; label: string; on: string; off: string }> = [

@@ -78,8 +78,11 @@ describe('turning weather into game numbers', () => {
   });
 
   it('makes drizzle visible without making it a downpour', () => {
-    const drizzle = toGameWeather(at({ rain: 0.2 })).rainfall;
-    const downpour = toGameWeather(at({ rain: RAIN_FULL })).rainfall;
+    // PRECIPITATION, not `rain`. Drizzle is not counted as rain by the
+    // provider, which is the whole reason the panel could say DRIZZLE
+    // and "none" at once.
+    const drizzle = toGameWeather(at({ precipitation: 0.2 })).rainfall;
+    const downpour = toGameWeather(at({ precipitation: RAIN_FULL })).rainfall;
     expect(drizzle).toBeGreaterThan(0.1);
     expect(drizzle).toBeLessThan(0.3);
     expect(downpour).toBeCloseTo(1, 6);

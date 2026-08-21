@@ -44,6 +44,26 @@ export interface Settings {
    * thing anyone derives at a keyboard.
    */
   flightSpeed: number;
+  /**
+   * How much of the real wind actually reaches her in flight, 0 to 1.
+   *
+   * ONE is the honest answer and the default: the measured wind, added
+   * to her air velocity, exactly as the physics says. It is on a dial
+   * because the honest answer may not be a playable one, and that is a
+   * judgement to make on a phone rather than at a keyboard.
+   *
+   * The arithmetic behind the worry: her best powered airspeed is
+   * 0.70 m/s, and Kauaʻi's ordinary trade winds run 15–25 km/h, which
+   * is 4.2–6.9 m/s — six to ten times what she can fly. At 1.0 a queen
+   * who takes off in normal weather is a leaf, every time, everywhere.
+   * That is real, and it is also why fire ants hold their nuptial
+   * flights on still evenings rather than in the trades.
+   *
+   * Lower it and the wind still does everything it should — headwind,
+   * tailwind, crosswind drift, the lot — at a share of its true
+   * strength. Nothing else about the model changes.
+   */
+  windInfluence: number;
   invertLookX: boolean;
   /** False is the shipped feel: dragging DOWN lifts the view. */
   invertLookY: boolean;
@@ -86,6 +106,7 @@ export const DEFAULTS: Readonly<Settings> = {
   terrainRelief: 1.5,
   terrainSmoothing: 1,
   flightSpeed: 1,
+  windInfluence: 1,
   invertLookX: false,
   invertLookY: false,
   invertStickY: false,
@@ -102,6 +123,7 @@ export const LIMITS = {
   terrainRelief: { min: 0.1, max: 1.5, step: 0.05 },
   terrainSmoothing: { min: 0, max: 1, step: 0.05 },
   flightSpeed: { min: 0.25, max: 2, step: 0.05 },
+  windInfluence: { min: 0, max: 1, step: 0.05 },
 } as const;
 
 export type Dial = keyof typeof LIMITS;
