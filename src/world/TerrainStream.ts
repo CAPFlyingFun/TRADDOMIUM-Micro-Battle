@@ -20,23 +20,58 @@
  * cell's vertex grid is in phase with every other and with the global
  * lattice `groundHeight` reads. That is what lets her stand on the
  * triangle that is drawn without knowing which cell she is over.
+ *
+ * CELLS ARE ADDRESSED GLOBALLY. A chunk's identity comes from world
+ * coordinates alone (coords.ts), so moving the floating origin cannot
+ * change which ground belongs where. The same chunk id generates the
+ * same terrain on any device, after any reload, at any origin — which
+ * is the property that lets a nest built here still be here tomorrow.
  */
 import * as THREE from 'three';
 import {
-  CELL_SPAN, CELL_VERTS, CELLS, COARSE_VERTS, FINE_CELLS, groundDetail,
+  CELL_VERTS, CELLS, COARSE_VERTS, FINE_CELLS, groundDetail,
   ISLAND_SPAN, terrainHeight,
 } from './heightfield';
-import { localX, localZ } from './origin';
+import {
+  chunkAt, chunkKey, chunkOrigin, CHUNK_SPAN, sameChunk, world,
+  type ChunkId, type WorldPoint,
+} from './coords';
+import { toLocal } from './origin';
 
 const SOIL_TINT = new THREE.Color(1.22, 0.98, 0.72);
+
+/**
+ * THREE DISTANCE TIERS, and each draws only where it is the best one.
+ *
+ * The island is the same island at every tier; they differ only in how
+ * finely it is cut. Drawn together they overlap and the coarse surface
+ * pokes through the fine one — which is exactly what "there are two
+ * terrains, I flew through one and landed on the other" is. So each
+ * tier discards fragments nearer than the tier inside it (see
+ * terrainMaterial's nearCut).
+ *
+ *   CELLS     out to  2,304 units    8 or 32 units a vertex
+ *   MIDDLE    out to  200,000        3,125 units a vertex
+ *   BACKDROP  the whole island       43,750 units a vertex
+ *
+ * The middle tier exists because the step from the streamed window to
+ * the whole island was a factor of nineteen in resolution, and a join
+ * that violent reads as a wall however much fog is thrown at it.
+ */
+const CELL_REACH = ((CELLS - 1) / 2) * CHUNK_SPAN;
+
+/** Half-width of the middle tier — two kilometres of ground. */
+const MIDDLE_REACH = 200_000;
+const MIDDLE_VERTS = 129;
+/** It follows her, snapped, so its vertices never crawl as she moves. */
+const MIDDLE_STEP = (MIDDLE_REACH * 2) / (MIDDLE_VERTS - 1);
 
 /** Vertices a side for the distant whole-island backdrop. */
 const BACKDROP_VERTS = 129;
 
 interface Cell {
-  readonly key: string;
-  readonly cx: number;
-  readonly cz: number;
+  /** The GLOBAL address. Never a rendered position. */
+  readonly id: ChunkId;
   readonly mesh: THREE.Mesh;
   fine: boolean;
 }
@@ -49,8 +84,10 @@ interface Cell {
  * exact at the cell's edges and the seams disappear.
  */
 export function buildCell(
-  worldX: number, worldZ: number, span: number, verts: number,
+  at: WorldPoint, span: number, verts: number,
 ): THREE.BufferGeometry {
+  const worldX = at.wx;
+  const worldZ = at.wz;
   const quads = verts - 1;
   const step = span / quads;
   const wide = verts + 2;
@@ -122,24 +159,46 @@ export function buildCell(
   return geometry;
 }
 
+/** How far each tier reaches, for the tier outside it to cut against. */
+/**
+ * Just inside the tier it replaces, so the seam is a thin overlap
+ * rather than a gap. A gap shows sky through the ground; an overlap of
+ * a couple of percent, at two thousand units, shows nothing.
+ */
+export const TIER_CUTS = {
+  middle: CELL_REACH * 0.97,
+  backdrop: MIDDLE_REACH * 0.97,
+};
+
 export class TerrainStream {
   private readonly cells = new Map<string, Cell>();
   private readonly backdrop: THREE.Mesh;
-  private atX = Number.NaN;
-  private atZ = Number.NaN;
+  private readonly middle: THREE.Mesh;
+  /** Where the middle tier is currently cut, in world units. */
+  private middleAt: WorldPoint | null = null;
+  /** The chunk she was in last time, so the window only moves when she does. */
+  private at: ChunkId | null = null;
   private relief = 1;
 
   constructor(
     private readonly scene: THREE.Scene,
     private readonly material: THREE.Material,
+    middleMaterial: THREE.Material,
+    backdropMaterial: THREE.Material,
   ) {
+    this.middle = new THREE.Mesh(
+      buildCell(world(-MIDDLE_REACH, -MIDDLE_REACH), MIDDLE_REACH * 2, MIDDLE_VERTS),
+      middleMaterial,
+    );
+    this.middle.frustumCulled = false;
+    scene.add(this.middle);
     // The whole island, once, coarsely, far away. At true scale she can
     // physically see a few metres of ground — but a game where the
     // island exists only as fog is a worse game than one where the
     // mountains are visible and merely very small.
     this.backdrop = new THREE.Mesh(
-      buildCell(-ISLAND_SPAN / 2, -ISLAND_SPAN / 2, ISLAND_SPAN, BACKDROP_VERTS),
-      material,
+      buildCell(world(-ISLAND_SPAN / 2, -ISLAND_SPAN / 2), ISLAND_SPAN, BACKDROP_VERTS),
+      backdropMaterial,
     );
     this.backdrop.frustumCulled = false;
     scene.add(this.backdrop);
@@ -153,22 +212,22 @@ export class TerrainStream {
    * Bring the window to her, building what has come into view and
    * dropping what has left it.
    */
-  follow(worldX: number, worldZ: number): void {
-    const cx = Math.floor(worldX / CELL_SPAN);
-    const cz = Math.floor(worldZ / CELL_SPAN);
-    if (cx === this.atX && cz === this.atZ) {
+  follow(at: WorldPoint): void {
+    const here = chunkAt(at);
+    if (this.at && sameChunk(here, this.at)) {
       this.place();
       return;
     }
-    this.atX = cx;
-    this.atZ = cz;
+    this.at = here;
+    this.recutMiddle(at);
 
     const reach = (CELLS - 1) / 2;
     const fine = (FINE_CELLS - 1) / 2;
     const wanted = new Set<string>();
     for (let dz = -reach; dz <= reach; dz++) {
       for (let dx = -reach; dx <= reach; dx++) {
-        const key = `${cx + dx},${cz + dz}`;
+        const id: ChunkId = { cx: here.cx + dx, cz: here.cz + dz };
+        const key = chunkKey(id);
         wanted.add(key);
         const detailed = Math.abs(dx) <= fine && Math.abs(dz) <= fine;
         const had = this.cells.get(key);
@@ -177,14 +236,14 @@ export class TerrainStream {
           // Same ground, different cut: swap the geometry rather than
           // the whole mesh so nothing flickers out and back.
           had.mesh.geometry.dispose();
-          had.mesh.geometry = this.cut(cx + dx, cz + dz, detailed);
+          had.mesh.geometry = this.cut(id, detailed);
           had.fine = detailed;
           continue;
         }
-        const mesh = new THREE.Mesh(this.cut(cx + dx, cz + dz, detailed), this.material);
+        const mesh = new THREE.Mesh(this.cut(id, detailed), this.material);
         mesh.scale.y = this.relief;
         this.scene.add(mesh);
-        this.cells.set(key, { key, cx: cx + dx, cz: cz + dz, mesh, fine: detailed });
+        this.cells.set(key, { id, mesh, fine: detailed });
       }
     }
 
@@ -197,20 +256,52 @@ export class TerrainStream {
     this.place();
   }
 
-  /** Re-seat every mesh against the current origin. */
+  /**
+   * Re-seat every mesh against the current origin.
+   *
+   * The only place a cell's rendered position is computed, and it is
+   * computed FROM its global address every time rather than stored.
+   * There is no local position to go stale.
+   */
   place(): void {
     for (const cell of this.cells.values()) {
-      cell.mesh.position.set(
-        localX(cell.cx * CELL_SPAN), 0, localZ(cell.cz * CELL_SPAN),
-      );
+      const seat = toLocal(chunkOrigin(cell.id));
+      cell.mesh.position.set(seat.lx, 0, seat.lz);
     }
-    this.backdrop.position.set(localX(-ISLAND_SPAN / 2), 0, localZ(-ISLAND_SPAN / 2));
+    const far = toLocal(world(-ISLAND_SPAN / 2, -ISLAND_SPAN / 2));
+    this.backdrop.position.set(far.lx, 0, far.lz);
+    if (this.middleAt) {
+      const mid = toLocal(this.middleAt);
+      this.middle.position.set(mid.lx, 0, mid.lz);
+    }
+  }
+
+  /**
+   * Re-cut the middle tier around her, SNAPPED to its own step.
+   *
+   * Snapped because its vertices are three thousand units apart: let it
+   * follow her continuously and every vertex re-rounds every frame,
+   * which is the whole distant landscape crawling as she walks. It only
+   * needs re-cutting when she has left the step it was built for.
+   */
+  private recutMiddle(at: WorldPoint): void {
+    const corner = world(
+      Math.round((at.wx - MIDDLE_REACH) / MIDDLE_STEP) * MIDDLE_STEP,
+      Math.round((at.wz - MIDDLE_REACH) / MIDDLE_STEP) * MIDDLE_STEP,
+    );
+    if (this.middleAt && this.middleAt.wx === corner.wx && this.middleAt.wz === corner.wz) {
+      return;
+    }
+    this.middleAt = corner;
+    this.middle.geometry.dispose();
+    this.middle.geometry = buildCell(corner, MIDDLE_REACH * 2, MIDDLE_VERTS);
   }
 
   /** Vertical exaggeration, as a transform — see the terrain dials. */
   setRelief(times: number): void {
     this.relief = times;
     for (const cell of this.cells.values()) cell.mesh.scale.y = times;
+    this.middle.scale.y = times;
     this.backdrop.scale.y = times;
   }
 
@@ -218,12 +309,15 @@ export class TerrainStream {
   rebuild(): void {
     for (const cell of this.cells.values()) {
       cell.mesh.geometry.dispose();
-      cell.mesh.geometry = this.cut(cell.cx, cell.cz, cell.fine);
+      cell.mesh.geometry = this.cut(cell.id, cell.fine);
     }
     this.backdrop.geometry.dispose();
     this.backdrop.geometry = buildCell(
-      -ISLAND_SPAN / 2, -ISLAND_SPAN / 2, ISLAND_SPAN, BACKDROP_VERTS,
+      world(-ISLAND_SPAN / 2, -ISLAND_SPAN / 2), ISLAND_SPAN, BACKDROP_VERTS,
     );
+    const held = this.middleAt;
+    this.middleAt = null;
+    if (held) this.recutMiddle(world(held.wx + MIDDLE_REACH, held.wz + MIDDLE_REACH));
   }
 
   dispose(): void {
@@ -234,11 +328,13 @@ export class TerrainStream {
     this.cells.clear();
     this.scene.remove(this.backdrop);
     this.backdrop.geometry.dispose();
+    this.scene.remove(this.middle);
+    this.middle.geometry.dispose();
   }
 
-  private cut(cx: number, cz: number, fine: boolean): THREE.BufferGeometry {
-    return buildCell(
-      cx * CELL_SPAN, cz * CELL_SPAN, CELL_SPAN, fine ? CELL_VERTS : COARSE_VERTS,
-    );
+  private cut(id: ChunkId, fine: boolean): THREE.BufferGeometry {
+    // Sampled at the chunk's WORLD corner, so the geometry is a pure
+    // function of the global address and nothing else.
+    return buildCell(chunkOrigin(id), CHUNK_SPAN, fine ? CELL_VERTS : COARSE_VERTS);
   }
 }

@@ -4,3 +4,7 @@ dist/
 .DS_Store
 probe-island.png
 tsconfig.tsbuildinfo
+
+# Scratch renders from headless checks
+*.png
+!public/*.png

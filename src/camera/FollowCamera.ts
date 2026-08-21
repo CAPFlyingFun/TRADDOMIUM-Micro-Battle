@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import type { LookInput } from '../input/LookDrag';
 import { groundHeight } from '../world/heightfield';
-import { originAt } from '../world/origin';
+import { local } from '../world/coords';
+import { toWorld } from '../world/origin';
 import { settings } from '../ui/settings';
 
 /**
@@ -108,14 +109,14 @@ export class FollowCamera {
     // camera sink under the waves whenever she stood near the shore and
     // the view swung out over open water.
     //
-    // ASKED IN WORLD COORDINATES. The camera lives in rendered space
-    // now, which is measured from the floating origin, and handing
-    // those straight to the heightfield asks about a spot near the
-    // middle of the island. That put the camera two kilometres up on a
-    // mountain summit while she stood on a beach, looking at nothing
-    // but sky.
-    const origin = originAt();
-    const floor = Math.max(groundHeight(out.x + origin.x, out.z + origin.z), 0) + 1.6;
+    // ASKED IN WORLD COORDINATES, through the named conversion. The
+    // camera lives in RENDER space — measured from the floating origin
+    // — and the heightfield only answers about the world. Handing it a
+    // rendered position asked about a spot near the middle of the
+    // island, which put the camera two kilometres up a mountain summit
+    // while she stood on a beach looking at empty sky.
+    const above = toWorld(local(out.x, out.z));
+    const floor = Math.max(groundHeight(above.wx, above.wz), 0) + 1.6;
     if (out.y < floor) out.y = floor;
   }
 

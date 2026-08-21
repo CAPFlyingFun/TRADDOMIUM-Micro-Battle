@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
-  localX, localZ, ORIGIN_STEP, originAt, REBASE_AT, rebaseFor, setOrigin,
+  ORIGIN_STEP, originAt, REBASE_AT, rebaseFor, setOrigin, toLocal,
 } from '../src/world/origin';
+import { world } from '../src/world/coords';
 import { SPAN } from '../src/world/kauai';
 
 beforeEach(() => setOrigin(0, 0));
@@ -69,7 +70,7 @@ describe('rebasing', () => {
     let worst = 0;
     for (let x = -SPAN / 2; x <= SPAN / 2; x += REBASE_AT / 3) {
       rebaseFor(x, 0);
-      worst = Math.max(worst, Math.abs(localX(x)));
+      worst = Math.max(worst, Math.abs(toLocal(world(x, 0)).lx));
     }
     expect(worst).toBeLessThan(REBASE_AT + ORIGIN_STEP);
   });
@@ -77,7 +78,8 @@ describe('rebasing', () => {
   it('renders the origin itself at zero', () => {
     setOrigin(SPAN / 3, -SPAN / 3);
     const at = originAt();
-    expect(localX(at.x)).toBe(0);
-    expect(localZ(at.z)).toBe(0);
+    const seat = toLocal(world(at.x, at.z));
+    expect(seat.lx).toBe(0);
+    expect(seat.lz).toBe(0);
   });
 });

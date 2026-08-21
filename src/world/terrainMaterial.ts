@@ -94,10 +94,18 @@ const EDGES = `
  *
  * @param textures the seven band maps, keyed by BAND_FILES
  * @param grain the fine tiling detail that breaks up the band repeat
+ * @param nearCut discard anything closer to the camera than this, in
+ *   world units. THE FIX FOR TWO GROUNDS: the distance tiers all cover
+ *   the same island at different resolutions, so without a cut they
+ *   overlap and the coarse one pokes through the fine one. She flew
+ *   through one surface and landed on another, and the far one slid
+ *   about as the camera turned because its vertices are kilometres
+ *   apart. Each tier now draws only where it is the best one available.
  */
 export function terrainMaterial(
   textures: Record<string, THREE.Texture>,
   grain: THREE.Texture,
+  nearCut = 0,
 ): THREE.MeshStandardMaterial {
   const material = new THREE.MeshStandardMaterial({
     // The vertex colours no longer carry the biome tint — the textures
@@ -125,6 +133,7 @@ export function terrainMaterial(
     // the whole ground texture sideways every time the origin moved —
     // and it moves in 1024-unit steps, which no tile size divides.
     shader.uniforms.worldOffset = ORIGIN_UNIFORM;
+    shader.uniforms.nearCut = { value: nearCut };
 
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vGround;')
@@ -142,12 +151,21 @@ export function terrainMaterial(
         uniform float relief;
         uniform float grainTile;
         uniform vec2 worldOffset;
+        uniform float nearCut;
 
         float span(float x, float lo, float hi, float feather) {
           return smoothstep(lo - feather, lo + feather, x)
                * (1.0 - smoothstep(hi - feather, hi + feather, x));
         }`)
       .replace('#include <map_fragment>', `
+        // Where a finer tier exists, this one is not wanted at all.
+        //
+        // A SQUARE test, because the tier inside is a square window. A
+        // radial cut either leaves gaps along the axes or doubles up in
+        // the corners — and doubling up in the corners is the bug this
+        // exists to fix, just moved somewhere harder to notice.
+        vec2 fromEye = abs(vGround.xz - cameraPosition.xz);
+        if (nearCut > 0.0 && max(fromEye.x, fromEye.y) < nearCut) discard;
         vec2 bandUv = (vGround.xz + worldOffset) / bandTile;
         float h = vGround.y / max(relief, 0.0001);
         ${EDGES}

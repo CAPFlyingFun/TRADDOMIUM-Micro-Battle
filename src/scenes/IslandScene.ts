@@ -14,7 +14,7 @@ import {
   groundHeight, ISLAND_SPAN, setRelief, setSmoothing, smoothingAmount,
 } from '../world/heightfield';
 import { findLandfall, type HeightGrid } from '../world/kauai';
-import { TerrainStream } from '../world/TerrainStream';
+import { TerrainStream, TIER_CUTS } from '../world/TerrainStream';
 import { originAt, rebaseFor, setOrigin } from '../world/origin';
 import { bakeGrain, GRAIN_SIZE } from '../world/groundTexture';
 import {
@@ -130,7 +130,13 @@ export class IslandScene {
     // enormous. FogExp2 rather than linear: with a backdrop 56 km away
     // a linear fog's far plane has to sit somewhere, and anywhere it
     // sits is a visible wall.
-    this.scene.fog = new THREE.FogExp2(SKY_COLOR, 0.00055);
+    // Thin enough to SEE with. It was 0.00055, which is a hundred
+    // percent fogged by three thousand units — a metre and a half of
+    // visibility, so the sea and the mountains and every landmark were
+    // gone and flying was instrument-only. At this density she can make
+    // out ground a few hundred metres off and the island beyond it,
+    // while the air still stacks up over real distance.
+    this.scene.fog = new THREE.FogExp2(SKY_COLOR, 0.0000075);
 
     this.buildLights();
     // SMOOTHING FIRST, because it decides what the vertices ARE and
@@ -160,7 +166,7 @@ export class IslandScene {
     ORIGIN_UNIFORM.value.set(seated.x, seated.z);
     const facing = Math.atan2(-start.x, -start.z);
     this.ant.placeAt(start.x, start.z, facing);
-    this.terrain.follow(start.x, start.z);
+    this.terrain.follow(this.ant.where);
     this.reshapeIsland();
     this.scene.add(this.ant.root);
 
@@ -211,7 +217,7 @@ export class IslandScene {
     (window as unknown as Record<string, unknown>).__island = {
       triangles: () => this.renderer.info.render.triangles,
       drawCalls: () => this.renderer.info.render.calls,
-      where: () => [this.ant.where.x, this.ant.root.position.y, this.ant.where.z],
+      where: () => [this.ant.where.wx, this.ant.root.position.y, this.ant.where.wz],
       origin: () => originAt(),
       cells: () => this.terrain.cellCount,
       cameraAt: () => this.follow.camera.position.toArray(),
@@ -219,7 +225,7 @@ export class IslandScene {
       // measured from the floating origin now, so asking the heightfield
       // about it samples a spot near the middle of the island instead
       // of the ground she is standing on.
-      groundUnderfoot: () => groundHeight(this.ant.where.x, this.ant.where.z),
+      groundUnderfoot: () => groundHeight(this.ant.where.wx, this.ant.where.wz),
       pace: () => this.pace,
       setPace: (to: Pace) => { this.pace = to; },
       stamina: () => this.stamina.fraction,
@@ -424,7 +430,7 @@ export class IslandScene {
     // She has just travelled, so this is the moment to decide whether
     // the scene needs shifting and which ground should exist.
     const at = this.ant.where;
-    const shift = rebaseFor(at.x, at.z);
+    const shift = rebaseFor(at.wx, at.wz);
     if (shift) {
       // Everything already placed moves by exactly the delta. The
       // camera included: it lives in rendered space, and leaving it
@@ -440,7 +446,7 @@ export class IslandScene {
       ORIGIN_UNIFORM.value.set(now.x, now.z);
       this.terrain.place();
     }
-    this.terrain.follow(at.x, at.z);
+    this.terrain.follow(at);
 
     // Read AFTER she has moved: this is what she is actually doing,
     // which the easing makes different from what was asked for.
@@ -490,8 +496,15 @@ export class IslandScene {
     grain.magFilter = THREE.LinearFilter;
     grain.needsUpdate = true;
 
+    // One material per distance tier, each cutting away the range the
+    // tier inside it already covers. They share the textures; only the
+    // cut differs.
+    const bands = loadBands(this.renderer);
     this.terrain = new TerrainStream(
-      this.scene, terrainMaterial(loadBands(this.renderer), grain),
+      this.scene,
+      terrainMaterial(bands, grain),
+      terrainMaterial(bands, grain, TIER_CUTS.middle),
+      terrainMaterial(bands, grain, TIER_CUTS.backdrop),
     );
   }
 

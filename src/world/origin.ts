@@ -24,11 +24,16 @@
  * world is free. Only what reaches the GPU needs rebasing, and it never
  * sees a coordinate larger than the view distance.
  *
- * Everything renders at `logical - origin`. The origin snaps to a
- * coarse lattice rather than following her exactly, so it moves in
- * jumps: a continuously-shifting origin would re-round every vertex
- * every frame and reintroduce the shimmer it exists to prevent.
+ * Everything renders at `world - origin`. The origin snaps to a coarse
+ * lattice rather than following her exactly, so it moves in jumps: a
+ * continuously-shifting origin would re-round every vertex every frame
+ * and reintroduce the shimmer it exists to prevent.
+ *
+ * THIS IS A TRANSFORM, NOT A LOCATION SYSTEM. Nothing should ask it
+ * where anything IS. Where things are lives in coords.ts, in world
+ * coordinates, and this only says where to draw them today.
  */
+import { local, world, type LocalPoint, type WorldPoint } from './coords';
 
 /** How far she may stray before the world is shifted under her. */
 export const REBASE_AT = 4096;
@@ -43,13 +48,28 @@ export function originAt(): { x: number; z: number } {
   return { x: originX, z: originZ };
 }
 
-/** Logical to rendered. */
-export function localX(worldX: number): number {
-  return worldX - originX;
+/**
+ * The conversions, and the ONLY ones.
+ *
+ * There were loose `localX(number)` / `localZ(number)` helpers beside
+ * these. They took bare numbers, so nothing stopped a rendered value
+ * going in where a world one belonged — which is the whole class of bug
+ * this file exists to prevent. Gone: if it converts, it goes through a
+ * typed point.
+ */
+export function toLocal(at: WorldPoint): LocalPoint {
+  return local(at.wx - originX, at.wz - originZ);
 }
 
-export function localZ(worldZ: number): number {
-  return worldZ - originZ;
+/**
+ * Rendered back to world.
+ *
+ * Needed wherever something only knows where it is on screen and has to
+ * ask the world a question — the camera's floor clamp being the one
+ * that got this wrong and ended up two kilometres up a mountain.
+ */
+export function toWorld(at: LocalPoint): WorldPoint {
+  return world(at.lx + originX, at.lz + originZ);
 }
 
 /**

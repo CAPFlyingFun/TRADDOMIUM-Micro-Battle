@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { groundHeight } from '../world/heightfield';
-import { localX, localZ } from '../world/origin';
+import { world, type WorldPoint } from '../world/coords';
+import { toLocal } from '../world/origin';
 import { DIRECTION_EASE, SPEED_EASE } from './pace';
 
 /**
@@ -135,7 +136,8 @@ export class PlayerAnt {
     this.wish = { x: 0, y: 0 };
     this.velocity = { x: 0, y: 0 };
     this.at = { x, z };
-    this.root.position.set(localX(x), groundHeight(x, z), localZ(z));
+    const seat = toLocal(world(x, z));
+    this.root.position.set(seat.lx, groundHeight(x, z), seat.lz);
     this.root.rotation.set(0, heading, 0);
     this.body.rotation.x = 0;
   }
@@ -152,9 +154,16 @@ export class PlayerAnt {
     this.settle(0, 1);
   }
 
-  /** Where she is in the WORLD, not where she is drawn. */
-  get where(): { x: number; z: number } {
-    return { x: this.at.x, z: this.at.z };
+  /**
+   * Where she is in the WORLD — the authoritative answer.
+   *
+   * A WorldPoint rather than a bare pair, so it cannot be handed to
+   * something expecting a rendered position. Her saved location, her
+   * position on a network and her distance to anything are all this,
+   * never `root.position`.
+   */
+  get where(): WorldPoint {
+    return world(this.at.x, this.at.z);
   }
 
   /** Which way she is facing, in world radians. */
@@ -277,9 +286,11 @@ export class PlayerAnt {
   /** Put her on the ground — or `above` it — facing her heading. */
   private settle(above: number, dt: number): void {
     const { x, z } = this.at;
-    // Logical in, LOCAL out: everything the GPU sees is measured from
-    // the floating origin rather than from the island's corner.
-    this.root.position.set(localX(x), groundHeight(x, z) + above, localZ(z));
+    // WORLD in, LOCAL out, and the conversion named at the one place
+    // it happens: everything the GPU sees is measured from the floating
+    // origin rather than from the island's corner.
+    const seat = toLocal(world(x, z));
+    this.root.position.set(seat.lx, groundHeight(x, z) + above, seat.lz);
     this.root.rotation.y = this.heading;
     // Still lean with the ground she is over: an ant tips with the
     // hill she launched off, and losing that mid-jump reads as a snap.

@@ -5,6 +5,49 @@ RPG built with three.js + TypeScript + Vite, tested primarily on mobile
 landscape. The player controls ONE ant inside a persistent colony/world;
 individual ants can die, the colony continues.
 
+## World position is authoritative; the floating origin is not
+
+TRADDOMIUM runs at TRUE SCALE. The island is 5,600,000 world units
+across and a world unit is a centimetre to the terrain and to the ant
+alike. Nothing may be handed to the GPU in those coordinates: float32
+resolves 0.25 units at that range, a quarter of her body length.
+
+So there are two coordinate concepts, and they are two TYPES with
+different field names so they cannot be swapped by accident:
+
+```
+WorldPoint  { wx, wz }   MACRO. Authoritative. Persistent.
+LocalPoint  { lx, lz }   Rendered. Temporary. Meaningless alone.
+```
+
+**The rule.** Anything that outlives a frame is addressed in WORLD
+coordinates — nests, players, creatures, food sites, death markers,
+saved objects, and every position that will one day cross a network. A
+`LocalPoint` is measured from an origin that moves as she walks, so the
+same value means a different place ten seconds later. Storing one as a
+location is a bug that surfaces only after a reload, or when two
+machines compare notes.
+
+`origin.ts` is a TRANSFORM into render space. It is not the location
+system, and nothing should ask it where anything *is*. Convert at the
+boundary, through `toLocal` / `toWorld`, and never by hand.
+
+**Chunks are global.** A chunk's identity comes from world position
+alone (`coords.ts`), so moving the origin cannot change what belongs
+where. Generate and load microterrain — and later everything else that
+lives in a chunk — by GLOBAL chunk coordinate. That is what lets the
+same ground appear identically on two devices, after a reload, or a
+week later.
+
+This is not a style preference. Going to true scale produced four bugs
+in one afternoon and every one was this mistake: a camera clamped its
+height against its own rendered position and sat two kilometres up a
+mountain; a ground readout did the same; a texture tiled off rendered
+position and would have slid sideways on every shift; and the shader's
+biome bands were bare literals from the old scale, so a beach rendered
+as cliff rubble. Convention did not survive one change.
+
+
 ## Where the truth lives, in order
 
 When sources disagree, this is the order:
