@@ -270,7 +270,17 @@ export class SpawnMap {
       touchAction: 'manipulation',
     } as Partial<CSSStyleDeclaration>);
     go.addEventListener('click', () => {
-      const candidate = chooseCandidate(region);
+      // A PROBE MAY PIN THE ROLL. The spot within a region is chosen at
+      // random, which is right for play and wrong for a regression
+      // test: the terrain artefact this exists to catch lives at one
+      // candidate and not its neighbours, so a randomised probe passes
+      // half the time on a broken build. `?spawnRoll=` makes a run
+      // repeatable without making the game predictable.
+      const pinned = new URLSearchParams(location.search).get('spawnRoll');
+      const roll = pinned === null ? undefined : Number(pinned);
+      const candidate = chooseCandidate(
+        region, Number.isFinite(roll) ? roll : undefined,
+      );
       if (candidate) this.onSpawn({ region, candidate });
     });
     this.panel.appendChild(go);

@@ -41,7 +41,7 @@ import { toLocal } from './origin';
 const SOIL_TINT = new THREE.Color(1.22, 0.98, 0.72);
 
 /**
- * THREE DISTANCE TIERS, and each draws only where it is the best one.
+ * FOUR DISTANCE TIERS, and each draws only where it is the best one.
  *
  * The island is the same island at every tier; they differ only in how
  * finely it is cut. Drawn together they overlap and the coarse surface
@@ -50,15 +50,53 @@ const SOIL_TINT = new THREE.Color(1.22, 0.98, 0.72);
  * tier discards fragments nearer than the tier inside it (see
  * terrainMaterial's nearCut).
  *
- *   CELLS     out to  2,304 units    8 or 32 units a vertex
- *   MIDDLE    out to  200,000        3,125 units a vertex
- *   BACKDROP  the whole island       43,750 units a vertex
+ *   CELLS       out to      2,304 units    8 or 32 units a vertex
+ *   TRANSITION  out to     20,000            312.5 units a vertex
+ *   MIDDLE      out to    200,000          3,125 units a vertex
+ *   BACKDROP    the whole island          43,750 units a vertex
  *
- * The middle tier exists because the step from the streamed window to
- * the whole island was a factor of nineteen in resolution, and a join
- * that violent reads as a wall however much fog is thrown at it.
+ * A CUT IS NOT A COVER. This is the lesson the transition tier was
+ * bought with. Discarding the coarse tier where a finer one exists
+ * assumes the finer one is standing in the same place — and vertically
+ * it is not. Measured on the Līhuʻe Plain, out along one bearing:
+ *
+ *   900 units out   cells 6354   middle 6392   middle is 38 HIGHER
+ *  1700 units out   cells 6163   middle 6220   57 higher
+ *  2100 units out   cells 6088   middle 6132   44 higher
+ *
+ * The middle tier is discarded inside 1,986, so that 40-to-60-unit
+ * bulge is invisible — and a sight line grazing the cells passes UNDER
+ * the bulge, over the cells, and out the far side into open sea. The
+ * probe caught rays doing exactly that: no cell hit at all, one
+ * discarded middle hit around 900, and then the water plane at 28,000.
+ * That is the slit of blue, and it is why walking at it "closed" it —
+ * the geometry that hid it moved with her.
+ *
+ * The cure is not a bigger cut or more fog. It is that the two
+ * surfaces meeting at a seam should be near enough the same surface.
+ * The old ladder went 32 units a vertex to 3,125 in one step — ninety
+ * eight times coarser across a single seam, which is where 40-to-60
+ * units of disagreement comes from. Adding one tier makes each step
+ * about ten times rather than one step of a hundred:
+ *
+ *   8 → 32 → 312.5 → 3,125 → 43,750
+ *
+ * and a tenfold step leaves a fraction of a unit between neighbours
+ * rather than half a metre.
  */
 const CELL_REACH = ((CELLS - 1) / 2) * CHUNK_SPAN;
+
+/**
+ * Half-width of the transition tier — two hundred metres of ground.
+ *
+ * Cheap for what it fixes: 129 squared is under seventeen thousand
+ * vertices for the whole ring, against the hundreds of streamed cells
+ * it would take to cover the same ground finely. The detail goes where
+ * the seam is, not everywhere.
+ */
+const TRANSITION_REACH = 20_000;
+const TRANSITION_VERTS = 129;
+const TRANSITION_STEP = (TRANSITION_REACH * 2) / (TRANSITION_VERTS - 1);
 
 /** Half-width of the middle tier — two kilometres of ground. */
 const MIDDLE_REACH = 200_000;
@@ -233,7 +271,8 @@ export function buildCell(
  * a couple of percent, at two thousand units, shows nothing.
  */
 export const TIER_CUTS = {
-  middle: CELL_REACH * 0.97,
+  transition: CELL_REACH * 0.97,
+  middle: TRANSITION_REACH * 0.97,
   backdrop: MIDDLE_REACH * 0.97,
 };
 
@@ -271,8 +310,10 @@ export class TerrainStream {
   private readonly cells = new Map<string, Cell>();
   private readonly backdrop: THREE.Mesh;
   private readonly middle: THREE.Mesh;
+  private readonly transition: THREE.Mesh;
   /** Where the middle tier is currently cut, in world units. */
   private middleAt: WorldPoint | null = null;
+  private transitionAt: WorldPoint | null = null;
   /** The chunk she was in last time, so the window only moves when she does. */
   private at: ChunkId | null = null;
   private relief = 1;
@@ -280,9 +321,21 @@ export class TerrainStream {
   constructor(
     private readonly scene: THREE.Scene,
     private readonly material: THREE.Material,
+    transitionMaterial: THREE.Material,
     middleMaterial: THREE.Material,
     backdropMaterial: THREE.Material,
   ) {
+    // The one that closes the hole: fine enough to agree with the
+    // streamed cells at the seam, coarse enough to be nearly free.
+    this.transition = new THREE.Mesh(
+      buildCell(
+        world(-TRANSITION_REACH, -TRANSITION_REACH),
+        TRANSITION_REACH * 2, TRANSITION_VERTS, true,
+      ),
+      transitionMaterial,
+    );
+    this.transition.frustumCulled = false;
+    scene.add(this.transition);
     this.middle = new THREE.Mesh(
       buildCell(world(-MIDDLE_REACH, -MIDDLE_REACH), MIDDLE_REACH * 2, MIDDLE_VERTS, true),
       middleMaterial,
@@ -306,6 +359,55 @@ export class TerrainStream {
   }
 
   /**
+   * What the terrain COSTS, independent of where the camera is looking.
+   *
+   * `renderer.info` counts what survived frustum culling, which moves
+   * with the view and cannot compare one build against another. This
+   * counts the geometry that exists.
+   */
+  get cost(): { triangles: number; meshes: number; vertices: number } {
+    let triangles = 0;
+    let vertices = 0;
+    let meshes = 0;
+    const add = (mesh: THREE.Mesh) => {
+      const index = mesh.geometry.getIndex();
+      const position = mesh.geometry.getAttribute('position');
+      triangles += index ? index.count / 3 : 0;
+      vertices += position ? position.count : 0;
+      meshes += 1;
+    };
+    for (const cell of this.cells.values()) add(cell.mesh);
+    add(this.transition);
+    add(this.middle);
+    add(this.backdrop);
+    return { triangles, meshes, vertices };
+  }
+
+  /**
+   * The three tiers, for a probe to shoot rays at.
+   *
+   * Raycasting hits GEOMETRY, and a tier's geometry covers ground the
+   * tier does not draw — the near cut is a fragment discard, so it
+   * exists only at render time. A hole is therefore a direction where
+   * every tier that has geometry there is being discarded, which is
+   * something a caller can only work out with both the meshes and the
+   * cuts in hand. Hence both.
+   */
+  get tiers(): {
+    cells: THREE.Mesh[];
+    transition: THREE.Mesh;
+    middle: THREE.Mesh;
+    backdrop: THREE.Mesh;
+  } {
+    return {
+      cells: [...this.cells.values()].map((c) => c.mesh),
+      transition: this.transition,
+      middle: this.middle,
+      backdrop: this.backdrop,
+    };
+  }
+
+  /**
    * Bring the window to her, building what has come into view and
    * dropping what has left it.
    */
@@ -316,6 +418,7 @@ export class TerrainStream {
       return;
     }
     this.at = here;
+    this.recutTransition(at);
     this.recutMiddle(at);
 
     const reach = (CELLS - 1) / 2;
@@ -367,6 +470,10 @@ export class TerrainStream {
     }
     const far = toLocal(world(-ISLAND_SPAN / 2, -ISLAND_SPAN / 2));
     this.backdrop.position.set(far.lx, 0, far.lz);
+    if (this.transitionAt) {
+      const near = toLocal(this.transitionAt);
+      this.transition.position.set(near.lx, 0, near.lz);
+    }
     if (this.middleAt) {
       const mid = toLocal(this.middleAt);
       this.middle.position.set(mid.lx, 0, mid.lz);
@@ -381,6 +488,23 @@ export class TerrainStream {
    * which is the whole distant landscape crawling as she walks. It only
    * needs re-cutting when she has left the step it was built for.
    */
+  /** The same snapping as the middle tier, at its own step. */
+  private recutTransition(at: WorldPoint): void {
+    const corner = world(
+      Math.round((at.wx - TRANSITION_REACH) / TRANSITION_STEP) * TRANSITION_STEP,
+      Math.round((at.wz - TRANSITION_REACH) / TRANSITION_STEP) * TRANSITION_STEP,
+    );
+    if (this.transitionAt
+      && this.transitionAt.wx === corner.wx && this.transitionAt.wz === corner.wz) {
+      return;
+    }
+    this.transitionAt = corner;
+    this.transition.geometry.dispose();
+    this.transition.geometry = buildCell(
+      corner, TRANSITION_REACH * 2, TRANSITION_VERTS, true,
+    );
+  }
+
   private recutMiddle(at: WorldPoint): void {
     const corner = world(
       Math.round((at.wx - MIDDLE_REACH) / MIDDLE_STEP) * MIDDLE_STEP,
@@ -398,6 +522,7 @@ export class TerrainStream {
   setRelief(times: number): void {
     this.relief = times;
     for (const cell of this.cells.values()) cell.mesh.scale.y = times;
+    this.transition.scale.y = times;
     this.middle.scale.y = times;
     this.backdrop.scale.y = times;
   }
@@ -412,6 +537,13 @@ export class TerrainStream {
     this.backdrop.geometry = buildCell(
       world(-ISLAND_SPAN / 2, -ISLAND_SPAN / 2), ISLAND_SPAN, BACKDROP_VERTS, true,
     );
+    const near = this.transitionAt;
+    this.transitionAt = null;
+    if (near) {
+      this.recutTransition(
+        world(near.wx + TRANSITION_REACH, near.wz + TRANSITION_REACH),
+      );
+    }
     const held = this.middleAt;
     this.middleAt = null;
     if (held) this.recutMiddle(world(held.wx + MIDDLE_REACH, held.wz + MIDDLE_REACH));
@@ -425,6 +557,8 @@ export class TerrainStream {
     this.cells.clear();
     this.scene.remove(this.backdrop);
     this.backdrop.geometry.dispose();
+    this.scene.remove(this.transition);
+    this.transition.geometry.dispose();
     this.scene.remove(this.middle);
     this.middle.geometry.dispose();
   }

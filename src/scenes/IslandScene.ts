@@ -16,7 +16,8 @@ import {
 import { findLandfall, type HeightGrid } from '../world/kauai';
 import { world, type WorldPoint } from '../world/coords';
 import { TerrainStream, TIER_CUTS } from '../world/TerrainStream';
-import { originAt, rebaseFor, setOrigin } from '../world/origin';
+import { originAt, rebaseFor, setOrigin, toLocal,
+} from '../world/origin';
 import { bakeGrain, GRAIN_SIZE } from '../world/groundTexture';
 import {
   loadBands, ORIGIN_UNIFORM, reliefUniform, terrainMaterial,
@@ -66,6 +67,12 @@ const SKY_COLOR = 0x9cc8e8;
 
 /** How long the lapse warning stays up, in seconds. */
 const PROTECTION_NOTICE = 6;
+
+/**
+ * How far a replacement surface may sit behind a discarded one before
+ * it counts as a seam, in world units. A metre at ant scale.
+ */
+const GAP_TOLERANCE = 100;
 
 /** Section meshes per side. */
 /** Vertices per side within a section, up close and far away. */
@@ -317,6 +324,10 @@ export class IslandScene {
       disarmed: () => this.grace.disarmed,
       ignoredByHostiles: () => this.grace.ignoredByHostiles,
       graceRecord: () => this.grace.issued,
+      sightLine: (pitchDeg: number, yawDeg = 0) => this.sightLine(pitchDeg, yawDeg),
+      sightThroughPixel: (u: number, v: number) => this.sightThroughPixel(u, v),
+      tierHeights: (wx: number, wz: number) => this.tierHeights(wx, wz),
+      terrainCost: () => this.terrain.cost,
       weather: () => this.nowWeather,
       reading: () => weather().reading,
       weatherSource: () => weather().source,
@@ -605,6 +616,162 @@ export class IslandScene {
     if (!this.disposed) this.renderer.render(this.scene, this.follow.camera);
   };
 
+  /**
+   * SHOOT A RAY AND SAY WHAT IT WOULD ACTUALLY SEE.
+   *
+   * A hole in the ground is not something a screenshot can diagnose:
+   * you can see that there is sky where ground should be, but not WHICH
+   * tier failed to cover it or how far away the failure is. This casts
+   * a ray the way the camera looks and reports every tier's geometry it
+   * crosses, each marked with whether the fragment shader would have
+   * kept it — the near cut is a discard, so a tier's geometry reaches
+   * places the tier does not draw.
+   *
+   * A direction is a HOLE when nothing survives the cuts, or when the
+   * nearest thing that does is the sea.
+   *
+   * @param pitchDeg degrees BELOW where the camera is pointing.
+   * @param yawDeg degrees right of where the camera is pointing.
+   */
+  private sightLine(pitchDeg: number, yawDeg = 0): unknown {
+    const camera = this.follow.camera;
+    const way = new THREE.Vector3();
+    camera.getWorldDirection(way);
+    way.applyAxisAngle(new THREE.Vector3(0, 1, 0), (-yawDeg * Math.PI) / 180);
+    const right = new THREE.Vector3().crossVectors(way, new THREE.Vector3(0, 1, 0))
+      .normalize();
+    // MINUS: rotating about `right` by a positive angle tips the nose
+    // UP, and a sweep that thinks it is looking at the ground while it
+    // is looking at the sky reports the sky as a hole in the ground.
+    way.applyAxisAngle(right, (-pitchDeg * Math.PI) / 180).normalize();
+    return this.alongRay(camera.position.clone(), way, { pitch: pitchDeg, yaw: yawDeg });
+  }
+
+  /**
+   * The same question, asked through a SCREEN PIXEL.
+   *
+   * Which is the honest way to ask it: the complaint is about something
+   * visible at a place on the screen, so the ray that matters is the
+   * one the camera actually cast through that pixel — not an angle
+   * guessed to be nearby.
+   *
+   * @param u 0..1 across the canvas, @param v 0..1 down it.
+   */
+  private sightThroughPixel(u: number, v: number): unknown {
+    const camera = this.follow.camera;
+    const way = new THREE.Vector3(u * 2 - 1, -(v * 2 - 1), 0.5)
+      .unproject(camera)
+      .sub(camera.position)
+      .normalize();
+    return this.alongRay(camera.position.clone(), way, { u, v });
+  }
+
+  private alongRay(
+    from: THREE.Vector3, way: THREE.Vector3, about: Record<string, number>,
+  ): unknown {
+    const caster = new THREE.Raycaster(from, way, 0.1, ISLAND_SPAN);
+    const { cells, transition, middle, backdrop } = this.terrain.tiers;
+    const look = (
+      targets: THREE.Object3D[], tier: string, cut: number,
+    ) => caster.intersectObjects(targets, false).map((hit) => {
+      // The shader's own test, repeated exactly: a SQUARE measured from
+      // the camera, because the tier inside is a square window.
+      const square = Math.max(
+        Math.abs(hit.point.x - from.x), Math.abs(hit.point.z - from.z),
+      );
+      return {
+        tier,
+        distance: hit.distance,
+        square,
+        drawn: cut <= 0 || square >= cut,
+      };
+    });
+
+    const hits = [
+      ...look(cells, 'cells', 0),
+      ...look([transition], 'transition', TIER_CUTS.transition),
+      ...look([middle], 'middle', TIER_CUTS.middle),
+      ...look([backdrop], 'backdrop', TIER_CUTS.backdrop),
+      ...look([this.water], 'sea', 0),
+    ].sort((a, b) => a.distance - b.distance);
+
+    const seen = hits.find((hit) => hit.drawn) ?? null;
+    // The nearest surface that WAS there and was thrown away. A tier
+    // cut is a promise that something finer is covering this ground; a
+    // discarded surface in front of everything else is that promise
+    // being broken.
+    const dropped = hits.find((hit) => !hit.drawn && hit.tier !== 'sea') ?? null;
+    const uncovered = dropped !== null
+      && (seen === null || dropped.distance < seen.distance);
+
+    return {
+      ...about,
+      seen,
+      dropped,
+      /**
+       * SKY OR WATER THROUGH LAND — the thing being tested for.
+       *
+       * Not merely "no ground here": above the horizon there is
+       * correctly no ground, and past a real coastline the sea is
+       * correctly the sea. It is a hole only when ground WAS there,
+       * was discarded in favour of a finer tier, and no finer tier
+       * turned up to cover it.
+       */
+      hole: uncovered && (seen === null || seen.tier === 'sea'),
+      /**
+       * Ground still visible, but a long way behind where the
+       * discarded surface was.
+       *
+       * The tolerance is not decoration. Tiers overlap ON PURPOSE, so
+       * in the overlap band the outer tier is routinely a couple of
+       * units above the inner one and every ray "passes through" it
+       * before hitting the ground that covers it. Counting those made
+       * 89% of a flying sweep look like a defect when nothing was
+       * wrong. What matters is whether the replacement ground is where
+       * the discarded ground WAS — a metre out is a seam nobody can
+       * see, a hundred is a step.
+       */
+      gap: uncovered && seen !== null && seen.tier !== 'sea'
+        && seen.distance - (dropped as { distance: number }).distance > GAP_TOLERANCE,
+      /** How far behind the discarded surface the replacement is. */
+      behind: uncovered && seen !== null
+        ? seen.distance - (dropped as { distance: number }).distance
+        : 0,
+      hits,
+    };
+  }
+
+  /**
+   * How high each tier DRAWS the ground at one global point.
+   *
+   * Straight down from far above, against one tier at a time. The tiers
+   * describe the same island at different resolutions, so where they
+   * disagree vertically is where a sight line can pass between them —
+   * and a number is a great deal easier to argue with than a
+   * screenshot.
+   */
+  private tierHeights(wx: number, wz: number): unknown {
+    const seat = toLocal(world(wx, wz));
+    const from = new THREE.Vector3(seat.lx, ISLAND_SPAN, seat.lz);
+    const down = new THREE.Vector3(0, -1, 0);
+    const caster = new THREE.Raycaster(from, down, 0.1, ISLAND_SPAN * 2);
+    const { cells, transition, middle, backdrop } = this.terrain.tiers;
+    const top = (targets: THREE.Object3D[]) => {
+      const hit = caster.intersectObjects(targets, false)[0];
+      return hit ? hit.point.y : null;
+    };
+    return {
+      // What she would WALK on. `groundHeight` already carries the
+      // relief dial — multiplying by it again here was a bug in this
+      // diagnostic that made every tier look 33% too low.
+      truth: groundHeight(wx, wz),
+      cells: top(cells),
+      transition: top([transition]),
+      middle: top([middle]),
+      backdrop: top([backdrop]),
+    };
+  }
+
   private aspect(): number {
     return this.host.clientWidth / Math.max(1, this.host.clientHeight);
   }
@@ -665,6 +832,7 @@ export class IslandScene {
     this.terrain = new TerrainStream(
       this.scene,
       terrainMaterial(bands, grain),
+      terrainMaterial(bands, grain, TIER_CUTS.transition),
       terrainMaterial(bands, grain, TIER_CUTS.middle),
       terrainMaterial(bands, grain, TIER_CUTS.backdrop),
     );
