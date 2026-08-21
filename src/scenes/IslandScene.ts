@@ -26,6 +26,7 @@ import { Vitals } from '../ui/Vitals';
 import { liveStat } from '../ant/castes';
 import { ActionPad, type Action } from '../input/ActionPad';
 import { DebugDie } from '../ui/DebugDie';
+import { WeatherChip } from '../ui/WeatherChip';
 import { Flight, setFlightScale } from '../ant/flight';
 import { Grace } from '../ant/grace';
 import {
@@ -33,6 +34,10 @@ import {
 } from '../ant/stamina';
 import { loadQueen } from '../ant/queenModel';
 import { onChange, settings } from '../ui/settings';
+import { weather } from '../weather/WeatherService';
+import { skyLook } from '../weather/sky';
+import { Rain } from '../weather/Rain';
+import type { GameWeather } from '../weather/gameplay';
 
 /**
  * THE ISLAND — Kauai at 1:1000, walked by one ant.
@@ -73,11 +78,17 @@ export class IslandScene {
   private readonly vitals: Vitals;
   private readonly actions: ActionPad;
   private readonly debugDie: DebugDie;
+  private readonly weatherChip: WeatherChip;
   private readonly climbButton: Action;
   private readonly descendButton: Action;
   private readonly flight = new Flight();
   /** Five minutes of being left alone, and of leaving everything alone. */
   private readonly grace = new Grace();
+  private rain!: Rain;
+  private sun!: THREE.DirectionalLight;
+  private skyLight!: THREE.HemisphereLight;
+  /** The weather she is actually standing in, eased. */
+  private nowWeather: GameWeather | null = null;
   private readonly ant = new PlayerAnt();
   private readonly clock = new THREE.Clock();
   private terrain!: TerrainStream;
@@ -159,6 +170,7 @@ export class IslandScene {
     this.scene.fog = new THREE.FogExp2(SKY_COLOR, 0.0000075);
 
     this.buildLights();
+    this.rain = new Rain(this.scene);
     // SMOOTHING FIRST, because it decides what the vertices ARE and
     // the mesh is about to be cut from them. Relief comes after, in
     // reshapeIsland, because that one is a transform ON the finished
@@ -166,6 +178,7 @@ export class IslandScene {
     // drawn at one shape while she walks another — which is precisely
     // the bug that put her inside an invisible hill last release.
     setFlightScale(settings().flightSpeed);
+    weather().setMode(settings().liveWeather ? 'live' : 'simulated');
     setSmoothing(settings().terrainSmoothing);
     this.buildTerrain();
     this.buildWater();
@@ -204,6 +217,7 @@ export class IslandScene {
     // file and the HUD meet, and it is a read, not a copy.
     this.actions = new ActionPad(host);
     this.debugDie = new DebugDie(host, () => this.kill());
+    this.weatherChip = new WeatherChip(host);
     // Both buttons are ALWAYS there. A control that appears and
     // disappears under a thumb already resting on it is worse than one
     // that greys out, and the design says so explicitly.
@@ -219,12 +233,19 @@ export class IslandScene {
       this.reshapeIsland();
       this.resmoothIsland();
       setFlightScale(settings().flightSpeed);
+      weather().setMode(settings().liveWeather ? 'live' : 'simulated');
     });
     // The view is a world bearing, so it has to be told where behind
     // her IS. Without this she opens side-on to her own camera.
     this.look.setYaw(-facing);
     this.follow = new FollowCamera(this.aspect());
     this.follow.snapTo(this.ant.root, -facing);
+
+    // ARRIVE IN THE WEATHER, do not fade into it. Everything the sky
+    // does eases over minutes, which is right while she is walking and
+    // wrong at the instant she appears: without this she would spawn
+    // into a default afternoon and watch the real one wash over her.
+    this.applyWeather(weather().settleAt(found.at));
 
     // She plays in stick-legs from the first frame and becomes herself
     // when the mesh lands. A failed load leaves the placeholder up,
@@ -283,6 +304,13 @@ export class IslandScene {
       grace: () => this.grace.seconds,
       shielded: () => this.grace.shielded,
       disarmed: () => this.grace.disarmed,
+      weather: () => this.nowWeather,
+      reading: () => weather().reading,
+      weatherSource: () => weather().source,
+      fogDensity: () => (this.scene.fog as THREE.FogExp2).density,
+      sunlight: () => this.sun.intensity,
+      raindrops: () => this.rain.drawing,
+      weatherAt: (wx: number, wz: number) => weather().peek(world(wx, wz)),
       airborne: () => this.flight.aloft,
       height: () => this.flight.height,
       flightState: () => this.flight.where,
@@ -354,6 +382,8 @@ export class IslandScene {
     this.vitals.dispose();
     this.actions.dispose();
     this.debugDie.dispose();
+    this.weatherChip.dispose();
+    this.rain.dispose();
     this.detachSettings();
     this.detachKill();
     this.renderer.dispose();
@@ -514,6 +544,24 @@ export class IslandScene {
     }
     this.terrain.follow(at);
 
+    // WEATHER IS ASKED IN GLOBAL COORDINATES and drawn in local ones.
+    // Her position decides what the sky is doing; the CAMERA's rendered
+    // position decides where the drops go. Handing the second of those
+    // to the field would make a shower follow the floating origin
+    // around, which is exactly the confusion the typed coordinates
+    // exist to prevent.
+    const service = weather();
+    const sky = service.update(at, dt);
+    this.nowWeather = sky;
+    this.applyWeather(sky);
+    this.rain.update(this.follow.camera.position, sky, dt);
+    const reading = service.reading;
+    if (reading) {
+      this.weatherChip.update(
+        reading, service.source, service.field.ageSeconds(Date.now()),
+      );
+    }
+
     // Read AFTER she has moved: this is what she is actually doing,
     // which the easing makes different from what was asked for.
     this.speed = this.ant.pace;
@@ -541,10 +589,37 @@ export class IslandScene {
   }
 
   private buildLights(): void {
-    const sun = new THREE.DirectionalLight(0xfff2dd, 2.3);
-    sun.position.set(2000, 3000, 1400);
-    const sky = new THREE.HemisphereLight(SKY_COLOR, 0x5a4a38, 0.85);
-    this.scene.add(sun, sky);
+    // Held rather than dropped into the scene and forgotten: the
+    // weather dims and warms them every frame.
+    this.sun = new THREE.DirectionalLight(0xfff2dd, 2.3);
+    this.sun.position.set(2000, 3000, 1400);
+    this.skyLight = new THREE.HemisphereLight(SKY_COLOR, 0x5a4a38, 0.85);
+    this.scene.add(this.sun, this.skyLight);
+  }
+
+  /**
+   * Put the weather on the scene.
+   *
+   * The fog density comes from the reported VISIBILITY rather than
+   * from a constant, which is the whole difference between fog as a
+   * weather effect and fog as a place to hide the streaming seam.
+   */
+  private applyWeather(now: GameWeather): void {
+    const look = skyLook(now);
+    const sky = new THREE.Color(look.sky.r, look.sky.g, look.sky.b);
+    (this.scene.background as THREE.Color).copy(sky);
+    const fog = this.scene.fog as THREE.FogExp2;
+    fog.color.copy(sky);
+    fog.density = look.density;
+
+    this.sun.intensity = look.sun;
+    // Sunlight goes from golden to flat grey as the cloud thickens.
+    this.sun.color.setRGB(
+      1, 0.949 + (1 - 0.949) * (1 - look.warmth),
+      0.867 + (1 - 0.867) * (1 - look.warmth),
+    );
+    this.skyLight.intensity = look.ambient;
+    this.skyLight.color.copy(sky);
   }
 
   private buildTerrain(): void {

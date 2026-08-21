@@ -22,6 +22,14 @@ try {
   page.on('pageerror', (e) => errors.push(e.message));
   page.on('console', (m) => { if (m.type() === 'error') errors.push(`console: ${m.text()}`); });
 
+  // THE FRONT DOOR MUST NOT NEED THE WEATHER SERVICE. Refusing the
+  // request here is both a test — every check below runs with weather
+  // unavailable — and a way to keep this probe about the front door
+  // rather than about somebody else's uptime. The browser logs its own
+  // line for a refused request, which is expected and filtered at the
+  // end; a thrown error or an unhandled rejection is not.
+  await page.route('**://api.open-meteo.com/**', (route) => route.abort());
+
   await page.goto(url, { waitUntil: 'domcontentloaded' });
 
   // ── Menu ─────────────────────────────────────────────────────────
@@ -208,7 +216,10 @@ try {
   notes.push('died and respawned three times over with nothing left behind');
 
   await page.screenshot({ path: 'probe-spawn.png' });
-  if (errors.length) throw new Error(`page errors:\n${errors.join('\n')}`);
+  const real = errors.filter((e) =>
+    !/ERR_FAILED|ERR_TUNNEL_CONNECTION_FAILED|ERR_INTERNET_DISCONNECTED|Failed to load resource/
+      .test(e));
+  if (real.length) throw new Error(`page errors:\n${real.join('\n')}`);
 } finally {
   await browser.close();
 }

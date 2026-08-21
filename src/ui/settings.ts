@@ -48,6 +48,17 @@ export interface Settings {
   /** False is the shipped feel: dragging DOWN lifts the view. */
   invertLookY: boolean;
   invertStickY: boolean;
+  /**
+   * Whether to use the real island's current weather.
+   *
+   * Off is the offline model — no network, plausible Kauaʻi conditions
+   * built on the same orographic gradient. It is here as a CHOICE and
+   * not only as a fallback: on a plane, on a bad connection, or when
+   * someone would simply rather the sky did not depend on a third
+   * party, "simulated" should be a thing you can ask for rather than a
+   * thing that happens to you.
+   */
+  liveWeather: boolean;
 }
 
 export const DEFAULTS: Readonly<Settings> = {
@@ -78,6 +89,7 @@ export const DEFAULTS: Readonly<Settings> = {
   invertLookX: false,
   invertLookY: false,
   invertStickY: false,
+  liveWeather: true,
 };
 
 /** What a slider may ask for. Anything outside is clamped, not refused. */
@@ -93,7 +105,8 @@ export const LIMITS = {
 } as const;
 
 export type Dial = keyof typeof LIMITS;
-export type Toggle = 'invertLookX' | 'invertLookY' | 'invertStickY';
+export type Toggle = 'invertLookX' | 'invertLookY' | 'invertStickY'
+  | 'liveWeather';
 
 const STORE = 'traddomium.settings';
 

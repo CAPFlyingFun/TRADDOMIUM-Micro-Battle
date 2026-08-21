@@ -69,6 +69,7 @@ const TOGGLES: Array<{ key: Toggle; label: string; on: string; off: string }> = 
   { key: 'invertLookX', label: 'Look left/right', on: 'Inverted', off: 'Normal' },
   { key: 'invertLookY', label: 'Look up/down', on: 'Drag down lowers', off: 'Drag down lifts' },
   { key: 'invertStickY', label: 'Stick forward', on: 'Inverted', off: 'Normal' },
+  { key: 'liveWeather', label: 'World weather', on: 'Live Kauaʻi', off: 'Simulated' },
 ];
 
 export class SettingsPanel {

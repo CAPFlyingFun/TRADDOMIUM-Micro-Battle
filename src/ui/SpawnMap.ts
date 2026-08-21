@@ -16,6 +16,11 @@ import {
 import { bakeIsland, MAP_SIZE, worldToMap } from './islandMap';
 import { geoToWorld } from '../world/geo';
 import { UNITS_PER_METRE } from '../world/kauai';
+import { weather } from '../weather/WeatherService';
+import { settings } from './settings';
+import {
+  compass, describe as describeCode, fahrenheit, glyph, mph,
+} from '../weather/gameplay';
 
 const GOLD = 'rgba(255, 216, 130, .85)';
 const LIVE = 'rgb(110, 255, 150)';
@@ -106,8 +111,20 @@ export class SpawnMap {
     this.canvas.addEventListener('pointerdown', tap as EventListener);
     this.detach.push(() => this.canvas.removeEventListener('pointerdown', tap as EventListener));
 
+    // Ask for readings the moment the map opens, so choosing a spawn
+    // is also the loading screen for the weather. By the time she
+    // lands, the island's real sky is usually already in hand.
+    weather().setMode(settings().liveWeather ? 'live' : 'simulated');
+    weather().poll();
+
     this.show(null);
     this.paint();
+    // Where the map's weather stands, for the probe. The map is the
+    // one screen that asks for readings and then shows them, so it is
+    // the honest place to check that the live path actually completed
+    // before she is dropped into the world.
+    (window as unknown as Record<string, unknown>).__weather =
+      () => weather().source;
     // What the probe drives the map by: region ids with both their map
     // pixel (presentation) and their world position (the truth), so a
     // test can click the right dot and then check she arrived near the
@@ -227,6 +244,7 @@ export class SpawnMap {
         <div>Elevation: <b>~${metres} m</b></div>
         <div>Difficulty: <b style="letter-spacing:.1em">${stars}</b></div>
       </div>
+      ${weatherLines(region)}
       <p style="margin:12px 0 0;opacity:.85">${region.description}</p>
       <p style="margin:10px 0 0;opacity:.5;font-size:12px">
         ${region.candidates.length} possible starts in this region.
@@ -257,4 +275,46 @@ export class SpawnMap {
     });
     this.panel.appendChild(go);
   }
+}
+
+/**
+ * WHAT THE SKY IS DOING THERE, RIGHT NOW.
+ *
+ * The point of choosing a spawn on a real island is that the choice
+ * means something, and on Kauaʻi the difference between the windward
+ * and leeward coasts is the most real thing about it. Showing each
+ * region's actual current conditions turns "pick a dot" into "the north
+ * shore is under rain today, so let us begin on the south".
+ *
+ * DIFFICULTY IS NOT WEATHER, though — the stars stay where they are.
+ * Making a shower raise the difficulty rating would mean the same
+ * region taught the player two different things on two different days,
+ * and there is no survival system yet for rain to actually be hard on.
+ * For now it is INFORMATION, honestly labelled with where it came from.
+ */
+function weatherLines(region: ReadyRegion): string {
+  const service = weather();
+  const at = region.candidates[0]?.at ?? geoToWorld(region.around);
+  let now;
+  try {
+    now = service.peek(at);
+  } catch {
+    return '';
+  }
+  const source = service.source === 'live' ? 'Live Kauaʻi'
+    : service.source === 'cached' ? 'Last known' : 'Simulated';
+
+  return `
+    <div style="margin-top:12px;padding-top:10px;
+                border-top:1px solid rgba(226,194,122,.18);opacity:.85">
+      <div style="font-size:15px">
+        ${glyph(now.code)} ${Math.round(fahrenheit(now.temperature))}°F
+        &nbsp;<span style="opacity:.7;font-size:12px">${describeCode(now.code)}</span>
+      </div>
+      <div style="margin-top:4px;font-size:12px;opacity:.75">
+        Humidity: <b>${Math.round(now.humidity)}%</b>
+        &nbsp;·&nbsp; Wind: <b>${compass(now.windFrom)} ${Math.round(mph(now.windSpeed))} mph</b>
+      </div>
+      <div style="margin-top:3px;font-size:11px;opacity:.45">${source}</div>
+    </div>`;
 }
