@@ -20,18 +20,37 @@ const GOLD = 'rgba(255, 216, 130, .7)';
 export interface Action {
   /** How many times it was pressed since the last read. */
   takeTaps(): number;
+  /** Whether it is being held right now — for climb and descend. */
+  readonly held: boolean;
   /** Grey it out and stop it taking taps. */
   enable(on: boolean): void;
+  /** Change the glyph without rebuilding the button. */
+  label(glyph: string): void;
 }
 
 class PadButton implements Action {
   private taps = 0;
   private on = true;
+  private down = false;
 
   constructor(readonly el: HTMLButtonElement) {}
 
+  get held(): boolean {
+    return this.on && this.down;
+  }
+
   press(): void {
-    if (this.on) this.taps += 1;
+    if (!this.on) return;
+    this.taps += 1;
+    this.down = true;
+  }
+
+  release(): void {
+    this.down = false;
+  }
+
+  label(glyph: string): void {
+    if (this.el.textContent !== glyph) this.el.textContent = glyph;
   }
 
   takeTaps(): number {
@@ -46,7 +65,10 @@ class PadButton implements Action {
     this.el.style.opacity = on ? '1' : '.4';
     this.el.style.filter = on ? 'none' : 'grayscale(1)';
     // Taps banked while it was live would otherwise fire late.
-    if (!on) this.taps = 0;
+    if (!on) {
+      this.taps = 0;
+      this.down = false;
+    }
   }
 }
 
@@ -106,7 +128,10 @@ export class ActionPad {
       el.style.transform = 'scale(.92)';
       button.press();
     };
-    const up = () => { el.style.transform = 'none'; };
+    const up = () => {
+      el.style.transform = 'none';
+      button.release();
+    };
     el.addEventListener('pointerdown', down as EventListener);
     el.addEventListener('pointerup', up);
     el.addEventListener('pointercancel', up);
@@ -119,14 +144,26 @@ export class ActionPad {
     });
 
     if (key) {
+      // Held matters now — climb and descend are held, not tapped — so
+      // the key has to track down AND up, and the auto-repeat has to be
+      // ignored or one hold reads as a hundred presses.
       const tap = (event: KeyboardEvent) => {
-        // Ignore the auto-repeat: holding it down is not eight jumps.
         if (event.code !== key || event.repeat) return;
         event.preventDefault();
         button.press();
       };
+      const lift = (event: KeyboardEvent) => {
+        if (event.code === key) button.release();
+      };
+      const blur = () => button.release();
       window.addEventListener('keydown', tap);
-      this.detach.push(() => window.removeEventListener('keydown', tap));
+      window.addEventListener('keyup', lift);
+      window.addEventListener('blur', blur);
+      this.detach.push(() => {
+        window.removeEventListener('keydown', tap);
+        window.removeEventListener('keyup', lift);
+        window.removeEventListener('blur', blur);
+      });
     }
 
     this.pad.appendChild(el);

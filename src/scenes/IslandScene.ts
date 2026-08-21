@@ -21,7 +21,10 @@ import { SettingsPanel } from '../ui/SettingsPanel';
 import { Vitals } from '../ui/Vitals';
 import { liveStat } from '../ant/castes';
 import { ActionPad, type Action } from '../input/ActionPad';
-import { Jump, JUMP_HOLD } from '../ant/jump';
+import { Flight } from '../ant/flight';
+import {
+  MOVING_RECOVERY, RESTING_RECOVERY, SPRINT_DRAIN,
+} from '../ant/stamina';
 import { loadQueen } from '../ant/queenModel';
 import { onChange, settings } from '../ui/settings';
 
@@ -79,8 +82,9 @@ export class IslandScene {
   private readonly panel: SettingsPanel;
   private readonly vitals: Vitals;
   private readonly actions: ActionPad;
-  private readonly jumpButton: Action;
-  private readonly jump = new Jump();
+  private readonly climbButton: Action;
+  private readonly descendButton: Action;
+  private readonly flight = new Flight();
   /** The relief the island is currently BUILT at. NaN until shaped. */
   private shaped = Number.NaN;
   private readonly ant = new PlayerAnt();
@@ -160,7 +164,11 @@ export class IslandScene {
     // rather than being typed here — this is the only place the data
     // file and the HUD meet, and it is a read, not a copy.
     this.actions = new ActionPad(host);
-    this.jumpButton = this.actions.add('⬆️', 'jump', 'Space');
+    // Both buttons are ALWAYS there. A control that appears and
+    // disappears under a thumb already resting on it is worse than one
+    // that greys out, and the design says so explicitly.
+    this.climbButton = this.actions.add('⬆️', 'climb', 'Space');
+    this.descendButton = this.actions.add('⬇️', 'descend', 'ShiftLeft');
     this.vitals = new Vitals(host, {
       health: liveStat('maxHealth'),
       food: liveStat('maxHunger'),
@@ -213,8 +221,11 @@ export class IslandScene {
       stride: () => this.ant.stridePhase,
       deadzone: () => REST_DEADZONE,
       fov: () => this.follow.camera.fov,
-      airborne: () => this.jump.aloft,
-      height: () => this.jump.height,
+      airborne: () => this.flight.aloft,
+      height: () => this.flight.height,
+      flightState: () => this.flight.where,
+      airspeed: () => this.flight.airspeed,
+      canTakeOff: () => this.flight.canTakeOff(this.ant.pace, this.stamina.fraction),
     };
   }
 
@@ -343,32 +354,52 @@ export class IslandScene {
       auto: this.auto.active ? this.auto.way : 0,
     });
 
-    // A jump is a lump out of the same reserve, taken on one frame.
-    // Asked for BEFORE the sprint is charged so a jump and a sprint in
-    // the same frame both come out of the same number, in order.
-    if (this.jumpButton.takeTaps() > 0) {
-      const paid = this.jump.ask(this.stamina.fraction);
-      if (paid > 0) {
-        this.stamina.spend(paid);
-        // Counted in seconds rather than "while she is airborne": how
-        // many frames a jump lasts is a property of the device, and the
-        // eight-in-a-row ceiling must not be.
-        this.stamina.hold(JUMP_HOLD);
-      }
+    // ── Air or ground ────────────────────────────────────────────
+    // Takeoff is offered on ACTUAL speed, never the selected pace:
+    // picking Run and then barely moving must not get her airborne.
+    const wantsUp = this.climbButton.takeTaps() > 0;
+    if (!this.flight.aloft && wantsUp) {
+      const paid = this.flight.takeOff(
+        this.ant.pace, this.stamina.fraction, stick.y, stick.x,
+      );
+      if (paid > 0) this.stamina.spend(paid);
     }
-    this.jump.update(dt);
 
-    // Only charge her for a sprint she is actually getting: calling for
-    // one while stopped or reversing costs nothing.
-    const sprinting = wants && travel.speed > PACE_SPEED[this.pace] + 1e-3;
-    // Aloft, nothing comes BACK — but a sprint still costs. Catching
-    // your breath in mid-leap is what would turn eight jumps in a row
-    // into as many as you like; a free sprint would be a different
-    // cheat in the same place.
-    const recovering = !this.jump.aloft;
-    const winded = sprinting || recovering
-      ? this.stamina.update(sprinting, recovering && this.ant.pace < 0.05, dt)
-      : false;
+    let winded = false;
+    if (this.flight.aloft) {
+      const step = this.flight.update(
+        {
+          push: stick.y,
+          side: stick.x,
+          climb: this.climbButton.held,
+          descend: this.descendButton.held,
+        },
+        this.stamina.fraction,
+        this.stamina.spent,
+        dt,
+      );
+      winded = this.stamina.update(step.effort, dt);
+      // Flight owns her velocity outright — it already carries her
+      // momentum, so handing it through the walk's easing would smear
+      // one model over the other.
+      this.ant.fly(
+        { ahead: step.ahead, across: step.across, speed: Math.hypot(step.ahead, step.across) },
+        -look.yaw, dt, this.flight.height,
+      );
+      // Landing needs no button: descend until the ground arrives.
+      if (this.flight.height <= 0) this.flight.land();
+    } else {
+      // Only charge her for a sprint she is actually getting: calling
+      // for one while stopped or reversing costs nothing.
+      const sprinting = wants && travel.speed > PACE_SPEED[this.pace] + 1e-3;
+      const resting = this.ant.pace < 0.05;
+      winded = this.stamina.update(
+        sprinting ? SPRINT_DRAIN : resting ? RESTING_RECOVERY : MOVING_RECOVERY,
+        dt,
+      );
+      this.ant.update(travel, -look.yaw, dt, 0);
+    }
+
     // Exhaustion drops her to the sustainable pace, never to a halt —
     // and the next sprint has to be asked for deliberately.
     if (winded) {
@@ -376,23 +407,26 @@ export class IslandScene {
       this.reask = true;
     }
 
-    // Show what was ASKED for, not what she is getting. `sprinting` is
-    // only true once she is actually exceeding the pace, so standing
-    // still the sprint row stayed dark until she got moving — the one
-    // moment you most want to know it is armed.
     this.paceUI.show(
       this.pace, wants, this.stamina.spent,
       this.ant.pace, this.auto.active, this.auto.way,
     );
-
     this.vitals.show(this.stamina.fraction, this.stamina.spent);
 
-    // The heading the player is LOOKING along. Taken from the input,
-    // not from where the camera happens to have eased to: a measured
-    // bearing moves as she moves, and steering off it curls a straight
-    // run into a circle.
-    this.ant.update(travel, -look.yaw, dt, this.jump.height);
-    this.jumpButton.enable(this.jump.canJump(this.stamina.fraction));
+    // The buttons say what they DO right now. On the ground the up
+    // button is a takeoff and the down button has nothing to descend
+    // from; in the air they are climb and descend.
+    if (this.flight.aloft) {
+      this.climbButton.label('⬆️');
+      this.climbButton.enable(!this.stamina.spent);
+      this.descendButton.enable(true);
+    } else {
+      this.climbButton.label('🪽');
+      this.climbButton.enable(
+        this.flight.canTakeOff(this.ant.pace, this.stamina.fraction),
+      );
+      this.descendButton.enable(false);
+    }
     // Read AFTER she has moved: this is what she is actually doing,
     // which the easing makes different from what was asked for.
     this.speed = this.ant.pace;

@@ -347,13 +347,27 @@ runs out.
   FULL again, the same shape as the sprint re-arm rule: you do not get
   to stutter in and out of a mechanic on an empty bar.
 
-## 7.4 Jump first (shipped)
+## 7.4 Jump: shipped, then removed
 
-A jump button was built before any of this, deliberately: it is the
-smallest piece that needs a body with a height above the terrain and a
-vertical velocity, and none of the parts that make flight hard. 12% of
-the reserve per jump, eight in a row from full, and nothing recovers
-while she is off the ground. Flight is that arc held open under power.
+A jump was built first on purpose — the smallest piece needing a body
+with a height above the terrain and a vertical velocity, and none of
+the parts that make flight hard. It did its job: that height and that
+velocity are what flight now stands on.
+
+It was removed when flight landed, as intended. An ant that jumps is
+not a mechanic anyone asked for; the arc was scaffolding.
+
+## 7.5 Flight v1 (shipped)
+
+Built to `FLIGHT.md`. Takeoff off a running start at actual walking
+speed, assisted horizontal flight on the stick, climb and descend on
+two always-visible buttons, glide with a smooth ratio curve, one
+stamina reserve taking a RATE rather than two booleans, minimum-power
+flight at zero, recovery descent, and landing on ground contact.
+
+NOT built, and deliberately: hard-impact stun, the climbable-surface
+bounce and second-contact grip. Both need surfaces to hit, and there
+are no trees yet.
 
 Possible future stats:
 

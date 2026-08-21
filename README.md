@@ -249,19 +249,45 @@ again* — a held key will not pick it back up as the bar creeps over its
 re-arm mark. Per the project rule, a bar may only move if there is a
 way to move it back.
 
-**Jump** — the ⬆️ button, bottom right, on the action thumb. 12% of the
-reserve per jump, which is eight in a row from full and no ninth.
-Nothing comes back while she is off the ground: catching your breath
-mid-leap is what would turn eight jumps into as many as you like. A
-sprint still costs while airborne, because a free sprint would be the
-same cheat wearing a different hat. The button goes dim when she cannot
-afford one.
+**Flight** — two buttons on the action thumb, both always visible.
 
-It is deliberately the smallest piece of getting off the ground.
-Flight is the real target, and it needs a body with a height above the
-terrain and a vertical velocity — which is all a jump is. Flight will
-be that arc held open under power, spending the SAME reserve: see
-`MASTERROADMAP.md` §7.
+```
+  🪽 / ⬆️   takeoff, then climb        (Space)
+  ⬇️        descend, then landing      (Left Shift)
+```
+
+The design is `FLIGHT.md`: simple controls on the surface, believable
+aerodynamic behaviour underneath. The stick steers horizontally, the
+camera stays free-look, and the game handles airspeed, momentum, glide
+and what it all costs.
+
+**Takeoff needs a running start**, and it reads her ACTUAL speed rather
+than the pace selected — picking Run and then barely moving must not
+get her airborne. The threshold sits just under a full walk rather than
+at it, because her ground speed eases onto the pace ceiling
+exponentially and therefore approaches 7 without ever arriving. Set it
+at the ceiling and a walk could never take off, only a run, which is
+the opposite of the intent.
+
+**Altitude is stored energy**, and it is the whole model:
+
+```
+  descend   →  airspeed rises, wings work less, the reserve refills
+  climb     →  airspeed falls, wings work harder, the reserve drains
+  neutral   →  a glide, not a hover: momentum carries her, and she
+               pays for distance in height
+```
+
+Best glide is about 5 forward for 1 down, and the curve collapses at
+low airspeed — a queen who lets her speed decay does not drift gently
+down, she falls out of the sky.
+
+**An empty reserve does not switch the wings off.** She drops to
+minimum-power flight: still steerable, sinking badly, and recoverable
+by diving. Height becomes a survival resource — run out high and a dive
+can still save the flight; run out low and she lands.
+
+Landing needs no button. Descend until the ground arrives.
 
 **Camera** — drag anywhere the controls are not. It holds a **world**
 bearing and stays where you put it. It cannot be bolted to her facing,

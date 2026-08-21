@@ -186,11 +186,15 @@ export const QUEEN: CasteStats = {
 
     /**
      * Seconds of sprint — the reserve IS a clock, so it is stored as
-     * one. Adult meets SPRINT_SECONDS exactly; a test holds it there.
-     * That also means the cost of a sprint is one second per second by
-     * definition, so there is no second "sprint cost" number to drift.
+     * one. Adult meets SPRINT_SECONDS exactly; a test holds it there,
+     * and that test is what caught this curve still claiming six when
+     * flight rebalanced the ground sprint to thirty.
+     *
+     * Thirty because the bar now has to cover escaping a predator,
+     * reaching cover AND getting up to takeoff speed. Six bought a
+     * dash, which was the whole game when a dash was the whole game.
      */
-    maxStamina: [3.5, 4.2, 4.9, 5.5, 6.0],
+    maxStamina: [17.5, 21, 24.5, 27.5, 30],
 
     /** Multiplies the pace ceilings in pace.ts. Adult meets them. */
     speed: [0.72, 0.82, 0.9, 0.96, 1.0],
@@ -202,8 +206,12 @@ export const QUEEN: CasteStats = {
     /** Chitin. Game tuning. */
     armour: [0.6, 0.75, 0.85, 0.95, 1.0],
 
-    /** Fraction of the reserve per second. Adult meets RECOVER_SECONDS. */
-    staminaRecovery: [0.105, 0.096, 0.088, 0.08, 0.0714],
+    /**
+     * Fraction of the reserve per second. Adult meets RECOVER_SECONDS,
+     * which is now sixty: the longer reserve is paid for with slower
+     * recovery, or thirty seconds of sprint would just be free.
+     */
+    staminaRecovery: [0.0245, 0.0224, 0.0206, 0.0187, 0.0167],
     /** Points per second. Game tuning; small things mend quickly. */
     healthRecovery: [1.4, 1.3, 1.2, 1.1, 1.0],
 
@@ -233,7 +241,7 @@ export const QUEEN: CasteStats = {
 
   multipliers: {
     /** Standing still catches her breath faster. Matches RESTING_BONUS. */
-    'staminaRecovery.resting': [2.2, 2.2, 2.2, 2.2, 2.2],
+    'staminaRecovery.resting': [2.0, 2.0, 2.0, 2.0, 2.0],
     'staminaRecovery.walking': [1.0, 1.0, 1.0, 1.0, 1.0],
     'staminaRecovery.running': [0.8, 0.8, 0.8, 0.8, 0.8],
     /** Nothing comes back while she is spending it. */

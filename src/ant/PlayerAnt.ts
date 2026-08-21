@@ -222,6 +222,39 @@ export class PlayerAnt {
     this.settle(above, dt);
   }
 
+  /**
+   * Fly one frame: the velocity is GIVEN, not eased into.
+   *
+   * The walk eases a wish onto a velocity because a thumb can flick
+   * across a stick faster than an ant can change her mind. Flight has
+   * its own momentum already — that is most of what the model is — so
+   * running it through the same easing would smear one model over the
+   * other and make both feel wrong.
+   *
+   * She still comes onto the camera's heading, because steering is
+   * still looking, and her legs still do not cycle: there is nothing
+   * under them.
+   */
+  fly(drive: Drive, view: number, dt: number, above: number): void {
+    const wasFacing = this.heading;
+    this.wish = { x: drive.across, y: drive.ahead };
+    this.velocity = { x: drive.across, y: drive.ahead };
+
+    this.heading += shortest(this.heading, view) * closes(settings().turnRate, dt);
+    this.turned = Math.atan2(
+      Math.sin(this.heading - wasFacing),
+      Math.cos(this.heading - wasFacing),
+    ) / Math.max(dt, 1e-6);
+
+    const right = view - Math.PI / 2;
+    this.root.position.x
+      += (Math.sin(view) * this.velocity.y + Math.sin(right) * this.velocity.x) * dt;
+    this.root.position.z
+      += (Math.cos(view) * this.velocity.y + Math.cos(right) * this.velocity.x) * dt;
+
+    this.settle(above, dt);
+  }
+
   /** Put her on the ground — or `above` it — facing her heading. */
   private settle(above: number, dt: number): void {
     const { x, z } = this.root.position;
