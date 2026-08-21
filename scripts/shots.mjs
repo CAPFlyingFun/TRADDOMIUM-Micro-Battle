@@ -22,6 +22,17 @@ try {
       }
     });
     await page.route('**://api.open-meteo.com/**', (r) => r.abort());
+    if (process.env.CLOSE_UP === '1') {
+      // Pull the camera in through the SAVED SETTINGS rather than a
+      // debug hook: the game already reads these on boot and clamps
+      // them, so this is the player's own zoom rather than a back door
+      // that has to be maintained.
+      await page.addInitScript(() => {
+        localStorage.setItem('traddomium.settings', JSON.stringify({
+          cameraDistance: 3.5, fov: 40,
+        }));
+      });
+    }
     await page.goto(`${url}?spawnRoll=0.25`, { waitUntil: 'domcontentloaded' });
     await page.waitForSelector('[data-ui="main-menu"]', { timeout: 60000 });
     await page.click('[data-ui="new-colony"]');
@@ -36,7 +47,21 @@ try {
     await page.waitForSelector('[data-ui="spawn-here"]', { timeout: 20000 });
     await page.click('[data-ui="spawn-here"]');
     await page.waitForFunction(() => Boolean(window.__island), null, { timeout: 120000 });
-    await page.waitForFunction(() => window.__island.simTime() > 3, null, { timeout: 180000 });
+    // A skinned queen of a hundred thousand triangles is very slow
+    // under a software renderer; a fraction of a simulated second is
+    // plenty for a still.
+    await page.waitForFunction(() => window.__island.simTime() > 0.4,
+      null, { timeout: 240000 });
+    if (process.env.WINGS !== undefined) {
+      // Look at HER, close up, from the side. The default chase camera
+      // is behind and above, which is the worst angle for judging a
+      // wing.
+      await page.evaluate(async (on) => {
+        window.__island.setWings(on === '1');
+        window.__island.setPace('crawl');
+      }, process.env.WINGS);
+      await page.waitForTimeout(3000);
+    }
     if (process.env.KEEP_HUD === '1') {
       // The HUD is the subject rather than the obstacle: open the
       // weather panel and let her work, so the endurance readout has a

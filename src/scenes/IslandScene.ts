@@ -33,7 +33,7 @@ import { Grace } from '../ant/grace';
 import {
   MOVING_RECOVERY, RESTING_RECOVERY, SPRINT_DRAIN,
 } from '../ant/stamina';
-import { loadQueen } from '../ant/queenModel';
+import { loadQueen, type QueenBody } from '../ant/queenModel';
 import { onChange, settings } from '../ui/settings';
 import { weather } from '../weather/WeatherService';
 import { skyLook } from '../weather/sky';
@@ -96,6 +96,17 @@ export class IslandScene {
   private readonly grace = new Grace();
   /** Seconds the "protection ended" warning still has to run. */
   private noticeLeft = 0;
+  /** Her body, once it has loaded. Null while the placeholder is up. */
+  private queen: QueenBody | null = null;
+  /**
+   * Whether she still has her wings.
+   *
+   * Held HERE rather than only on the model, because the model arrives
+   * asynchronously and the answer has to survive that gap — and because
+   * when dealation becomes a real event it will be the game that
+   * decides, not the renderer.
+   */
+  private winged = true;
   /**
    * What the reserve is doing this frame, fractions per second.
    *
@@ -276,13 +287,24 @@ export class IslandScene {
     // when the mesh lands. A failed load leaves the placeholder up,
     // which is a playable game rather than an ant-shaped hole.
     void loadQueen()
-      .then(({ model }) => { if (!this.disposed) this.ant.wear(model); })
+      .then((queen) => {
+        if (this.disposed) return;
+        this.ant.wear(queen.model);
+        this.queen = queen;
+        // Whatever was asked for before she arrived still holds: the
+        // model lands a second or two late and must not undo a decision
+        // taken in the meantime.
+        queen.setWings(this.winged);
+      })
       .catch((why) => console.warn('the queen model did not load', why));
 
     // Debug kill, so the death/restart loop can be walked through
     // before anything in the world is able to hurt her.
     const debugKill = (event: KeyboardEvent) => {
       if (event.code === 'KeyK' && !event.repeat) this.kill();
+      // Until dealation is a real event, G is how the two states get
+      // looked at side by side.
+      if (event.code === 'KeyG' && !event.repeat) this.setWings(!this.winged);
     };
     window.addEventListener('keydown', debugKill);
     this.detachKill = () => window.removeEventListener('keydown', debugKill);
@@ -330,6 +352,25 @@ export class IslandScene {
       shielded: () => this.grace.shielded,
       disarmed: () => this.grace.disarmed,
       ignoredByHostiles: () => this.grace.ignoredByHostiles,
+      wings: () => this.winged,
+      // What the loader actually produced, so a missing wing mesh is a
+      // finding rather than a mystery.
+      queenParts: () => {
+        const found: unknown[] = [];
+        this.ant.root.traverse((part) => {
+          const mesh = part as THREE.Mesh & { isMesh?: boolean; isSkinnedMesh?: boolean };
+          if (!mesh.isMesh) return;
+          const geo = mesh.geometry as THREE.BufferGeometry;
+          found.push({
+            name: part.name,
+            skinned: Boolean(mesh.isSkinnedMesh),
+            visible: part.visible,
+            tris: geo.getIndex() ? (geo.getIndex() as THREE.BufferAttribute).count / 3 : 0,
+          });
+        });
+        return found;
+      },
+      setWings: (on: boolean) => this.setWings(on),
       graceRecord: () => this.grace.issued,
       sightLine: (pitchDeg: number, yawDeg = 0) => this.sightLine(pitchDeg, yawDeg),
       sightThroughPixel: (u: number, v: number) => this.sightThroughPixel(u, v),
@@ -830,6 +871,21 @@ export class IslandScene {
     if (!wind) return null;
     const share = settings().windInfluence;
     return { x: wind.x * share, z: wind.z * share };
+  }
+
+  /**
+   * Take her wings, or give them back.
+   *
+   * TEMPORARY IN THE SENSE THAT NOTHING CALLS IT YET. Dealation is a
+   * real event in an ant's life — she sheds her wings after the mating
+   * flight and never flies again — and when that event exists it calls
+   * this. Until then it is reachable from the debug key and from a
+   * probe, so the two states can be looked at and tested rather than
+   * taken on trust.
+   */
+  private setWings(on: boolean): void {
+    this.winged = on;
+    this.queen?.setWings(on);
   }
 
   private aspect(): number {

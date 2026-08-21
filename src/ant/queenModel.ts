@@ -1,11 +1,22 @@
 /**
- * THE QUEEN'S BODY — the real mesh, replacing the placeholder.
+ * THE QUEEN'S BODY — one winged queen, whose wings can be taken away.
  *
- * The model is Thronemound's wingless fire ant queen, the compressed
- * copy that ships in that repo. She is rigged (54 bones) but carries NO
- * animations, which is deliberate for now: getting the right animal on
+ * A WINGED fire ant queen, rigged to 74 bones with both mandibles
+ * articulated, carrying no animations yet: getting the right animal on
  * screen at the right size is a separate job from making her walk, and
  * doing them together means never knowing which one is wrong.
+ *
+ * SHE STAYS ONE MODEL FOR HER WHOLE LIFE. A queen who has shed her
+ * wings is not a different ant, and swapping in a second asset at that
+ * moment would mean two files to keep in step forever — two rigs, two
+ * sets of mandibles, two things to re-export — plus a visible pop at
+ * the one instant the player is watching her closely.
+ *
+ * So the wings are their own MESH on the same skeleton, split off at
+ * bake time by the geometry each bone owns (see scripts/bakeQueen.mjs,
+ * which explains how the wing bones are found). Losing them is
+ * `wings.visible = false` and nothing else: same body, same bones, same
+ * material, same draw of everything that is left.
  *
  * SCALE IS MEASURED, NOT TYPED. The model's own units mean nothing —
  * it is whatever the exporter emitted. So she is measured on load and
@@ -36,7 +47,11 @@ import { liveStat } from './castes';
 export const MM_PER_UNIT = 10;
 
 /** Where the file sits once built. */
-const QUEEN_URL = `${import.meta.env.BASE_URL}models/queen.glb`;
+const QUEEN_URL = `${import.meta.env.BASE_URL}models/queen-winged.glb`;
+
+/** What the bake calls the two halves. */
+const BODY_MESH = 'queen_body';
+const WINGS_MESH = 'queen_wings';
 
 /**
  * Longest horizontal side of a box.
@@ -56,6 +71,16 @@ export interface QueenBody {
   readonly model: THREE.Object3D;
   /** Her length in world units, after scaling. */
   readonly length: number;
+  /**
+   * Show or hide her wings.
+   *
+   * The whole of dealation, as far as the renderer is concerned. What
+   * is left behind is the wing ROOTS, because the bake keeps any
+   * triangle that is partly thorax with the body — which is what a
+   * shed wing actually leaves: a scar, not a clean socket.
+   */
+  setWings(on: boolean): void;
+  readonly hasWings: boolean;
 }
 
 /**
@@ -71,7 +96,17 @@ export async function loadQueen(): Promise<QueenBody> {
   const gltf = await loader.loadAsync(QUEEN_URL);
   const model = gltf.scene;
 
-  const measured = longestSide(new THREE.Box3().setFromObject(model));
+  const wings = model.getObjectByName(WINGS_MESH) ?? null;
+  const body = model.getObjectByName(BODY_MESH) ?? null;
+
+  // MEASURE HER BODY, NOT HER WINGSPAN. This is the trap in a winged
+  // model: her wings reach 2.5 units either side against a body three
+  // long, so the widest thing about her is no longer her length.
+  // Measuring the whole object would scale the WINGSPAN down to a
+  // queen's body length and leave an ant two thirds too small — and
+  // she would look plausible while being wrong, which is the worst
+  // kind of wrong. The body mesh is measured on its own.
+  const measured = longestSide(new THREE.Box3().setFromObject(body ?? model));
   if (!(measured > 0)) throw new Error('the queen model measured nothing');
 
   const wanted = liveStat('bodyLength') / MM_PER_UNIT;
@@ -84,6 +119,21 @@ export async function loadQueen(): Promise<QueenBody> {
   model.position.y -= stood.min.y;
 
   for (const part of model.children) part.frustumCulled = false;
+  // She is drawn at a few centimetres with the camera right behind her;
+  // culling her by a bounding sphere that a skeleton can move is how a
+  // limb or a wing blinks out at the edge of the view.
+  model.traverse((part) => { part.frustumCulled = false; });
 
-  return { model, length: wanted };
+  let winged = true;
+  const setWings = (on: boolean): void => {
+    winged = on;
+    if (wings) wings.visible = on;
+  };
+
+  return {
+    model,
+    length: wanted,
+    setWings,
+    get hasWings() { return winged && wings !== null; },
+  };
 }
