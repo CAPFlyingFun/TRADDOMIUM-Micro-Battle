@@ -121,6 +121,34 @@ const SECTION_SPAN = SPAN / SECTIONS;
 export const NEAR_STEP = SECTION_SPAN / (NEAR_VERTS - 1);
 
 /**
+ * VERTICAL RELIEF — how tall the island is, as a multiple.
+ *
+ * Kauai is one of the steepest landscapes on Earth: measured off this
+ * grid, the median land slope is 11.5 degrees and a third of it is over
+ * 20. At human scale that reads as scenery; at ant scale the camera is
+ * a centimetre off the ground and every fold is in your face. So the
+ * height gets a dial.
+ *
+ * It is applied HERE and as a scale on the section meshes, and the two
+ * cannot disagree: a triangle's height interpolates linearly between
+ * its corners, so scaling the corners and scaling the result are the
+ * same arithmetic. Nothing is rebuilt when it moves — the terrain is a
+ * mesh with a Y scale on it, which is why the slider is instant.
+ *
+ * It does NOT touch `terrainHeight`. That is what the mesh is built
+ * from, once, at full height; flattening is a transform on top.
+ */
+let relief = 1;
+
+export function setRelief(scale: number): void {
+  relief = Math.max(0.01, scale);
+}
+
+export function reliefScale(): number {
+  return relief;
+}
+
+/**
  * Ground height at (x, z): the height of the TRIANGLE THAT IS DRAWN.
  *
  * The mesh splits each quad along the bl-tr diagonal (see the index
@@ -152,12 +180,13 @@ export function groundHeight(x: number, z: number): number {
   // through three corners, read off two edge gradients.
   if (fx + fz <= 1) {
     const tl = corner(ix, iz);
-    return tl + (corner(ix + 1, iz) - tl) * fx + (corner(ix, iz + 1) - tl) * fz;
+    return relief
+      * (tl + (corner(ix + 1, iz) - tl) * fx + (corner(ix, iz + 1) - tl) * fz);
   }
   const br = corner(ix + 1, iz + 1);
-  return br
+  return relief * (br
     + (corner(ix, iz + 1) - br) * (1 - fx)
-    + (corner(ix + 1, iz) - br) * (1 - fz);
+    + (corner(ix + 1, iz) - br) * (1 - fz));
 }
 
 /**

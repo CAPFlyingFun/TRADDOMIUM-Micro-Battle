@@ -26,6 +26,12 @@ export interface Settings {
   fov: number;
   /** How far behind her the camera sits, in world units. */
   cameraDistance: number;
+  /**
+   * How tall the island is, as a multiple. 1 is real Kauai, which is
+   * one of the steepest landscapes on Earth and reads rough at ant
+   * scale; lower flattens every slope by the same factor.
+   */
+  terrainRelief: number;
   invertLookX: boolean;
   /** False is the shipped feel: dragging DOWN lifts the view. */
   invertLookY: boolean;
@@ -38,6 +44,7 @@ export const DEFAULTS: Readonly<Settings> = {
   turnEase: REST_EASE,
   fov: 58,
   cameraDistance: 7.8,
+  terrainRelief: 1,
   invertLookX: false,
   invertLookY: false,
   invertStickY: false,
@@ -50,6 +57,7 @@ export const LIMITS = {
   turnEase: { min: 1, max: 14, step: 0.5 },
   fov: { min: 40, max: 100, step: 1 },
   cameraDistance: { min: 3.5, max: 16, step: 0.2 },
+  terrainRelief: { min: 0.1, max: 1.5, step: 0.05 },
 } as const;
 
 export type Dial = keyof typeof LIMITS;

@@ -38,6 +38,13 @@ const DIALS: Dialer[] = [
   { key: 'turnEase', label: 'Turn ease', show: (v) => v.toFixed(1) },
   { key: 'fov', label: 'Field of view', show: (v) => `${v.toFixed(0)}°` },
   { key: 'cameraDistance', label: 'Camera distance', show: (v) => v.toFixed(1) },
+  {
+    key: 'terrainRelief',
+    label: 'Terrain height',
+    // As a percentage of real Kauai, because "0.45" means nothing and
+    // "45%" says what it is: an island not quite half as tall.
+    show: (v) => `${(v * 100).toFixed(0)}%`,
+  },
 ];
 
 const TOGGLES: Array<{ key: Toggle; label: string; on: string; off: string }> = [

@@ -97,7 +97,13 @@ export class FollowCamera {
     // Never let the camera sink into a hillside. The margin is a body
     // length or so, enough that a slope behind her crops the frame
     // rather than filling it with dirt.
-    const floor = groundHeight(out.x, out.z) + 1.6;
+    // The higher of the ground and the WATERLINE. Over the sea the
+    // ground is the seabed — fifty units down — so clamping to it alone
+    // let the camera sink under the waves whenever she stood near the
+    // shore and the view swung out over open water. Easy to hit with
+    // the relief dial down, since the whole island then sits lower, but
+    // it was always there.
+    const floor = Math.max(groundHeight(out.x, out.z), 0) + 1.6;
     if (out.y < floor) out.y = floor;
   }
 

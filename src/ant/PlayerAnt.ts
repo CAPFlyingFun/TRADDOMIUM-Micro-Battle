@@ -119,6 +119,18 @@ export class PlayerAnt {
     this.body.rotation.x = 0;
   }
 
+  /**
+   * Put her back on the ground where she stands.
+   *
+   * The relief dial moves the whole island under her feet. Without
+   * this she keeps the height she had until the next frame settles
+   * her, which at a big change is a visible drop or a moment inside
+   * a hill.
+   */
+  reground(): void {
+    this.settle(0, 1);
+  }
+
   /** Which way she is facing, in world radians. */
   get bearing(): number {
     return this.heading;

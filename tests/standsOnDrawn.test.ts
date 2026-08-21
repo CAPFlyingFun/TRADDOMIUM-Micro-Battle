@@ -20,9 +20,10 @@
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import {
-  groundHeight, ISLAND_SPAN, NEAR_STEP, NEAR_VERTS, SECTIONS, terrainHeight, useGrid,
+  groundHeight, ISLAND_SPAN, NEAR_STEP, NEAR_VERTS, SECTIONS, setRelief,
+  terrainHeight, useGrid,
 } from '../src/world/heightfield';
 import { decodeGrid, findLandfall, type HeightGrid } from '../src/world/kauai';
 
@@ -83,6 +84,8 @@ function worstGap(reach: number, step: number): { worst: number; where: [number,
   return { worst, where };
 }
 
+afterEach(() => setRelief(1));
+
 describe('the walked surface is the drawn surface', () => {
   it('never differs anywhere near the spawn', () => {
     const { worst, where } = worstGap(200, 1.7);
@@ -111,6 +114,43 @@ describe('the walked surface is the drawn surface', () => {
     const z = Math.round(start.z / NEAR_STEP) * NEAR_STEP;
     const flat = (terrainHeight(x, z) + terrainHeight(x + NEAR_STEP, z)) / 2;
     expect(groundHeight(x + NEAR_STEP / 2, z)).toBeCloseTo(flat, 6);
+  });
+
+  it('still agrees when the relief dial flattens the island', () => {
+    // The dial scales the section meshes on Y and scales groundHeight
+    // by the same number. If those two ever drift, she walks through a
+    // flattened island exactly as she used to walk through a full one —
+    // so the invariant is retested rather than assumed to carry over.
+    for (const relief of [0.1, 0.35, 0.7, 1.5]) {
+      setRelief(relief);
+      const start = findLandfall(grid, 3, 20);
+      let worst = 0;
+      for (let dx = -120; dx <= 120; dx += 3.1) {
+        for (let dz = -120; dz <= 120; dz += 3.1) {
+          const x = start.x + dx;
+          const z = start.z + dz;
+          if (terrainHeight(x, z) <= 0) continue;
+          // The mesh is BUILT at full height and scaled, so the drawn
+          // height is the unscaled triangle times the dial.
+          worst = Math.max(worst, Math.abs(meshHeight(x, z) * relief - groundHeight(x, z)));
+        }
+      }
+      expect(worst, `at relief ${relief}`).toBeLessThan(1e-6);
+    }
+  });
+
+  it('flattens every slope by the dial, which is the point of it', () => {
+    // Halving the height halves every rise over the same run, so the
+    // tangent of every slope halves with it. That is the claim the
+    // slider is making to the player.
+    const start = findLandfall(grid, 3, 20);
+    const rise = (r: number) => {
+      setRelief(r);
+      return groundHeight(start.x + NEAR_STEP, start.z) - groundHeight(start.x, start.z);
+    };
+    const full = rise(1);
+    expect(rise(0.5)).toBeCloseTo(full * 0.5, 9);
+    expect(rise(0.1)).toBeCloseTo(full * 0.1, 9);
   });
 
   it('still reads the sea as the sea', () => {

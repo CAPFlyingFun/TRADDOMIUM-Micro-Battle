@@ -12,18 +12,18 @@ import {
 import { Stamina } from '../ant/stamina';
 import {
   FAR_VERTS, groundDetail, groundHeight, ISLAND_SPAN, NEAR_VERTS, SECTIONS,
-  terrainHeight,
+  setRelief, terrainHeight,
 } from '../world/heightfield';
 import { findLandfall, type HeightGrid } from '../world/kauai';
 import { bakeGrain, GRAIN_SIZE } from '../world/groundTexture';
-import { loadBands, terrainMaterial } from '../world/terrainMaterial';
+import { loadBands, reliefUniform, terrainMaterial } from '../world/terrainMaterial';
 import { SettingsPanel } from '../ui/SettingsPanel';
 import { Vitals } from '../ui/Vitals';
 import { liveStat } from '../ant/castes';
 import { ActionPad, type Action } from '../input/ActionPad';
 import { Jump, JUMP_HOLD } from '../ant/jump';
 import { loadQueen } from '../ant/queenModel';
-import { onChange } from '../ui/settings';
+import { onChange, settings } from '../ui/settings';
 
 /**
  * THE ISLAND — Kauai at 1:1000, walked by one ant.
@@ -81,6 +81,8 @@ export class IslandScene {
   private readonly actions: ActionPad;
   private readonly jumpButton: Action;
   private readonly jump = new Jump();
+  /** The relief the island is currently BUILT at. NaN until shaped. */
+  private shaped = Number.NaN;
   private readonly ant = new PlayerAnt();
   private readonly clock = new THREE.Clock();
   private readonly sections: Section[] = [];
@@ -128,6 +130,14 @@ export class IslandScene {
     this.buildTerrain();
     this.buildWater();
 
+    // AFTER the terrain exists and BEFORE she is placed. Both halves
+    // matter: the sections have to be there to be scaled, and she has
+    // to be put down on the island's final height or she spawns inside
+    // a hill. Getting this wrong drew the island at full height while
+    // she stood at the flattened one — and since backfaces are culled,
+    // the hill she was buried in simply vanished and left open sea.
+    this.reshapeIsland();
+
     // Pick the opening spot from the real terrain rather than a
     // hand-typed coordinate a re-bake could drop into the sea.
     const start = findLandfall(grid, 3, 20);
@@ -149,7 +159,10 @@ export class IslandScene {
       food: liveStat('maxHunger'),
       water: liveStat('maxThirst'),
     });
-    this.detachSettings = onChange(() => this.follow.reshape());
+    this.detachSettings = onChange(() => {
+      this.follow.reshape();
+      this.reshapeIsland();
+    });
     // The view is a world bearing, so it has to be told where behind
     // her IS. Without this she opens side-on to her own camera.
     this.look.setYaw(-facing);
@@ -195,6 +208,36 @@ export class IslandScene {
       airborne: () => this.jump.aloft,
       height: () => this.jump.height,
     };
+  }
+
+  /**
+   * Flatten or raise the island to the relief dial.
+   *
+   * A SCALE, not a rebuild. Rebuilding 128 section geometries on every
+   * drag of a slider would hitch for seconds; scaling the meshes on Y
+   * is free and cannot disagree with the walker, because a triangle's
+   * height interpolates linearly between its corners — scaling the
+   * corners and scaling the answer are the same arithmetic.
+   *
+   * The band shader divides the same number back out, so a flattened
+   * Kauai keeps sand at the shore and snow on the peaks instead of
+   * going green to the summit.
+   */
+  private reshapeIsland(): void {
+    const relief = settings().terrainRelief;
+    // Against its own record rather than the uniform: seeding the
+    // uniform early made the first call look like a no-op, so the
+    // meshes were never scaled at all.
+    if (relief === this.shaped) return;
+    this.shaped = relief;
+    setRelief(relief);
+    reliefUniform.value = relief;
+    for (const section of this.sections) {
+      section.near.scale.y = relief;
+      section.far.scale.y = relief;
+    }
+    // She is standing on ground that just moved under her.
+    this.ant.reground();
   }
 
   dispose(): void {

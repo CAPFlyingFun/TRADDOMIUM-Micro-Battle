@@ -27,6 +27,13 @@ import * as THREE from 'three';
 export const BAND_TILE = 10;
 
 /**
+ * Shared with every section's shader, so one write re-tints the island.
+ * A uniform object rather than a number because three.js reads it by
+ * reference each frame.
+ */
+export const reliefUniform = { value: 1 };
+
+/**
  * The fine grain is tiled much tighter and at a size that shares no
  * common factor with the band tile, so the two patterns never line up
  * and the repeat stops reading as a grid.
@@ -78,6 +85,12 @@ export function terrainMaterial(
     }
     shader.uniforms.t_grain = { value: grain };
     shader.uniforms.bandTile = { value: BAND_TILE };
+    // The relief slider flattens the island by scaling the meshes on Y,
+    // which moves every world height and would drag the bands down with
+    // it — a flattened Kauai would go green to the summit. Dividing it
+    // back out keeps sand at the shore and snow on the peaks whatever
+    // the slider is doing, so the knob changes the SHAPE and not the map.
+    shader.uniforms.relief = reliefUniform;
     shader.uniforms.grainTile = { value: GRAIN_TILE };
 
     shader.vertexShader = shader.vertexShader
@@ -93,6 +106,7 @@ export function terrainMaterial(
         uniform sampler2D t_reef, t_sand, t_grass, t_jungle;
         uniform sampler2D t_cliff, t_mountain, t_snow, t_grain;
         uniform float bandTile;
+        uniform float relief;
         uniform float grainTile;
 
         float span(float x, float lo, float hi, float feather) {
@@ -101,7 +115,7 @@ export function terrainMaterial(
         }`)
       .replace('#include <map_fragment>', `
         vec2 bandUv = vGround.xz / bandTile;
-        float h = vGround.y;
+        float h = vGround.y / max(relief, 0.0001);
         ${EDGES}
         float total = wReef + wSand + wGrass + wJung + wCliff + wMount + wSnow;
         // Below the deepest band and above the highest, the weights all

@@ -275,6 +275,20 @@ On desktop: **W / S** manual forward and back, **A / D** sidestep,
 Dragging **down** lifts the view — you are pushing the view, not the
 ant — and both look axes can be inverted in settings.
 
+**Terrain height** is a dial, 10% to 150% of real Kauai. Measured off
+our own heightfield, this island has a median land slope of 11.5 degrees
+with a third of it steeper than 20 — Kauai is one of the most eroded,
+steepest landscapes on Earth, and at ant scale the camera is a
+centimetre off the ground so every fold is in your face. The dial scales
+every slope by the same factor: at 50%, an 11 degree slope becomes 5.8.
+
+It is a SCALE on the section meshes, not a rebuild, so it is instant —
+and it cannot disagree with the walker, because a triangle's height
+interpolates linearly between its corners and scaling the corners is the
+same arithmetic as scaling the answer. The band shader divides the same
+number back out, so a flattened island keeps sand at the shore and snow
+on the peaks rather than going green to the summit.
+
 ## Settings
 
 A gear at the top right opens a panel for the numbers that are matters
