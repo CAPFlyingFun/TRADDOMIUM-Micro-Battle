@@ -56,8 +56,39 @@ npm run dev          # local dev server
 npm test             # vitest
 npm run typecheck    # tsc -b
 npm run build        # production build (dist/)
-npm run probe:island # headless boot + screenshot (needs a preview server)
+npm run probe:island  # headless boot + screenshot (needs a preview server)
+npm run probe:spawn   # menu → island map → spawn → death → respawn, three times
+npm run probe:weather # canned storm, canned clear day, and the network refused
 ```
+
+The last two want a preview server (`npm run build && npm run preview`).
+`probe:weather` intercepts Open-Meteo rather than calling it: a probe
+that depends on a third-party service tests that service, and cannot be
+made to rain on demand.
+
+## The weather
+
+The sky is the real island's, and the island does not have one sky.
+Waiʻaleʻale takes about 9,500 mm of rain a year while Kekaha, twenty-five
+kilometres downwind, takes around 500 — the sharpest rainfall gradient
+measured anywhere. Twenty-two real coordinates are read from Open-Meteo
+in a single request and interpolated to wherever she is standing, so one
+coast can be under a shower while the other is in the sun.
+
+Four rules hold it together:
+
+- **Global, always.** A station is a place on Kauaʻi. Moving the
+  floating origin does not move a front.
+- **One wall between real and game.** `src/weather/gameplay.ts` is the
+  only crossing. She is 5.5 mm long; an ordinary 20 mph trade wind
+  reaching her physics as "20" of anything would put her in the next
+  valley. The game sees dimensionless dials.
+- **Nothing here can stop a launch.** Live → cached → simulated, with a
+  usable field before the first request exists. The offline model is
+  built on the same orographic gradient, not on noise.
+- **Fog is a weather effect.** Not a place to hide the streaming seam.
+  Clear weather is genuinely clear, and the density is fitted to the
+  meteorological definition of visibility rather than tuned by eye.
 
 ## The island
 
