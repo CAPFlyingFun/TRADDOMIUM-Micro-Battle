@@ -301,6 +301,16 @@ degrees. Smoothing removes the fold and leaves the island its size:
     100%          2.5°        23.2°       8.3u
 ```
 
+**The two together are the default**, and the pairing was an accident
+worth keeping: 100% smoothing with the height at 150%. Measured on the
+drawn surface, that is gentler than the old default on both counts —
+mean crease 2.24 degrees against 3.24, worst fold 30.2 against 46.1 —
+while standing 40% taller. Smoothing takes the drama away along with
+the creases; the height dial puts the drama back, and being
+proportional it cannot put the creases back with it. Note that 150% is
+game tuning rather than the island: it makes this Kauai steeper than
+the real one.
+
 Its far end is ten passes of a five-tap blur over the baked grid, baked
 once at load; the dial blends between that copy and real Kauai. Unlike
 the height scale it CANNOT be a transform — a blur mixes neighbours, so

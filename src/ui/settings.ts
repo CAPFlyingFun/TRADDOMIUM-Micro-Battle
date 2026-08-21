@@ -50,8 +50,24 @@ export const DEFAULTS: Readonly<Settings> = {
   turnEase: REST_EASE,
   fov: 58,
   cameraDistance: 7.8,
-  terrainRelief: 1,
-  terrainSmoothing: 0,
+  // FOUND BY ACCIDENT, KEPT ON PURPOSE. Joshua left the height dial at
+  // 150% while testing smoothing and the pair read better than either
+  // alone. Measured on the drawn surface within 400 units of the spawn:
+  //
+  //   0% / 100% (was)   mean crease 3.24deg  worst 46.1deg  peak 53u
+  //   100% / 100%       mean 1.52deg         worst 20.5deg  peak 49u
+  //   100% / 150%       mean 2.24deg         worst 30.2deg  peak 74u
+  //
+  // Better than the old default on BOTH counts: a third gentler on
+  // average, worst fold cut from 46 to 30 degrees, and 40% taller.
+  // Smoothing takes the drama away with the creases; the height dial
+  // puts the drama back, and being proportional it cannot put the
+  // creases back with it.
+  //
+  // The height is game TUNING, not the island: 150% makes this Kauai
+  // steeper than the real one, whose relief ratio is 2.84%.
+  terrainRelief: 1.5,
+  terrainSmoothing: 1,
   invertLookX: false,
   invertLookY: false,
   invertStickY: false,
