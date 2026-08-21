@@ -87,8 +87,15 @@ export const TAKEOFF_BOOST = 1.35;
 /** Height above the ground at which takeoff becomes real flight. */
 export const AIRBORNE_HEIGHT = 2.5;
 
-/** How briskly airspeed answers the stick. Units per second squared. */
-export const THRUST = 34;
+/**
+ * How briskly airspeed answers the stick. Units per second squared.
+ *
+ * Was 34, which took her from a walk to maximum airspeed in about two
+ * seconds and read as a missile launch rather than as an ant getting
+ * going. Twelve makes it roughly six seconds — she builds speed instead
+ * of arriving at it.
+ */
+export const THRUST = 12;
 /** Fraction of airspeed bled off per second with no thrust. */
 export const DRAG = 0.22;
 /** How hard she can haul herself upward, units per second. */
@@ -102,6 +109,31 @@ export const CLIMB_DRAIN = 1 / 55;
 export const FAST_DRAIN = 1 / 150;
 export const GLIDE_RECOVERY = -0.005;
 export const RECOVERY_DESCENT_RECOVERY = -0.018;
+
+/**
+ * A whole-model speed dial, so the feel can be found on the device
+ * rather than guessed at here.
+ *
+ * It scales everything with the dimensions of a speed or an
+ * acceleration TOGETHER — airspeeds, thrust, climb and descent rates —
+ * so the shape of the model is untouched and only its tempo changes.
+ * Time to reach full speed stays the same, glide angles stay the same,
+ * and the ratio between a climb and a dive stays the same. A dial that
+ * moved top speed without moving thrust would quietly retune the
+ * acceleration too.
+ *
+ * TAKEOFF_SPEED deliberately does NOT scale: it is tied to her ground
+ * walk, which this dial has nothing to do with.
+ */
+let scale = 1;
+
+export function setFlightScale(times: number): void {
+  scale = Math.max(0.1, times);
+}
+
+export function flightScale(): number {
+  return scale;
+}
 
 export interface FlightDemand {
   /** Horizontal request in the CAMERA's frame, each -1 to 1. */
@@ -135,10 +167,13 @@ export interface FlightStep {
  */
 export function glideRatio(airspeed: number): number {
   if (airspeed <= 0) return EXHAUSTED_GLIDE_RATIO;
-  const off = airspeed / BEST_GLIDE_SPEED;
+  // Dimensionless, so it reads the airspeed in UNSCALED terms: a glide
+  // ratio is a shape, and the speed dial must not bend it.
+  const off = airspeed / (BEST_GLIDE_SPEED * scale);
   if (off >= 1) {
     // Past best glide, drag takes it back gradually.
-    const over = Math.min(1, (airspeed - BEST_GLIDE_SPEED) / (MAX_DIVE_SPEED - BEST_GLIDE_SPEED));
+    const over = Math.min(1, (airspeed - BEST_GLIDE_SPEED * scale)
+      / ((MAX_DIVE_SPEED - BEST_GLIDE_SPEED) * scale));
     return BEST_GLIDE_RATIO - (BEST_GLIDE_RATIO - 2.6) * over;
   }
   // Below best glide it falls away fast, and off a cliff below stall.
@@ -201,7 +236,7 @@ export class Flight {
     this.speed = groundSpeed * TAKEOFF_BOOST;
     const length = Math.hypot(ahead, across) || 1;
     this.heading = { ahead: ahead / length, across: across / length };
-    this.rise = CLIMB_RATE * 0.5;
+    this.rise = CLIMB_RATE * scale * 0.5;
     this.above = 0.01;
     return TAKEOFF_COST;
   }
@@ -234,9 +269,9 @@ export class Flight {
     // One cap, chosen by what she is doing. A dive outranks everything,
     // including an empty reserve — trading height for speed is exactly
     // what an exhausted queen is supposed to reach for.
-    const cap = demand.descend ? MAX_DIVE_SPEED
+    const cap = (demand.descend ? MAX_DIVE_SPEED
       : empty ? STALL_SPEED * 1.6
-        : MAX_POWERED_SPEED;
+        : MAX_POWERED_SPEED) * scale;
     this.speed = Math.max(0, Math.min(cap, this.speed));
     this.above = Math.max(0, this.above + this.rise * dt);
 
@@ -273,9 +308,9 @@ export class Flight {
     if (empty) {
       this.speed -= this.speed * DRAG * dt;
     } else if (demand.push < -0.05) {
-      this.speed -= THRUST * Math.abs(demand.push) * 0.8 * dt;
+      this.speed -= THRUST * scale * Math.abs(demand.push) * 0.8 * dt;
     } else if (asked > 0.05) {
-      this.speed += THRUST * asked * dt;
+      this.speed += THRUST * scale * asked * dt;
     } else {
       this.speed -= this.speed * DRAG * dt;
     }
@@ -296,15 +331,15 @@ export class Flight {
     // Still leaving the ground. Held here rather than in the branches
     // below, which would each overwrite it before it could be read.
     if (this.state === 'takeoff') {
-      this.rise = CLIMB_RATE * 0.5;
+      this.rise = CLIMB_RATE * scale * 0.5;
       if (this.above + this.rise * dt >= AIRBORNE_HEIGHT) this.state = 'powered';
       return CRUISE_DRAIN;
     }
 
     if (demand.descend) {
-      this.rise = -DESCENT_RATE;
+      this.rise = -DESCENT_RATE * scale;
       // Diving converts height into airspeed, which is the whole trick.
-      this.speed += DESCENT_RATE * 0.55 * dt;
+      this.speed += DESCENT_RATE * scale * 0.55 * dt;
       // A descent counts as RECOVERY only when she actually needs it.
       // Naming it off the reserve rather than off the button means the
       // state describes her situation, not the player's thumb.
@@ -314,10 +349,10 @@ export class Flight {
     }
 
     if (demand.climb && !empty) {
-      this.rise = CLIMB_RATE;
+      this.rise = CLIMB_RATE * scale;
       this.state = 'powered';
       // A climb is not free: it costs airspeed as well as breath.
-      this.speed = Math.max(0, this.speed - CLIMB_RATE * 0.45 * dt);
+      this.speed = Math.max(0, this.speed - CLIMB_RATE * scale * 0.45 * dt);
       return CLIMB_DRAIN;
     }
 
@@ -335,7 +370,7 @@ export class Flight {
       this.state = 'powered';
       // Powered flight holds height, easing rather than snapping level.
       this.rise += (0 - this.rise) * Math.min(1, dt * 3);
-      return this.speed > CRUISE_SPEED ? FAST_DRAIN : CRUISE_DRAIN;
+      return this.speed > CRUISE_SPEED * scale ? FAST_DRAIN : CRUISE_DRAIN;
     }
 
     // Neutral is a GLIDE, not a hover. She keeps her momentum and pays

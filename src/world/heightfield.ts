@@ -35,17 +35,39 @@
  * Heights are world units with the waterline at 0.
  */
 import {
-  blurGrid, heightAt, SPAN, STEP, type HeightGrid,
+  blurGrid, heightAt, SPAN, STEP, UNITS_PER_METRE, type HeightGrid,
 } from './kauai';
 
-/** Wavelength of the added relief, in world units. */
-const RELIEF_WAVELENGTH = 64;
-
-/** How tall that relief gets, in world units. */
-const RELIEF_HEIGHT = 1.1;
+/**
+ * THE SYNTHESISED GROUND.
+ *
+ * At true scale the baked grid is 1025 samples across 5.6 million
+ * units — one sample every 5,469 units, or 55 metres of real Kauai.
+ * That carries the island: its coastline, its valleys, its mountains,
+ * every slope at the angle the real place has. What it cannot carry is
+ * anything an ant could see. Bilinear interpolation between samples
+ * 55 metres apart is a polished ramp.
+ *
+ * So the landforms are REAL and the surface is INVENTED, and the two
+ * meet at the resolution the data runs out. These octaves cover from
+ * twenty metres down to about a quarter of a metre, each roughly a
+ * third the wavelength and a third the height of the one before —
+ * self-affine, which is how ground actually behaves across scales.
+ *
+ * Nothing finer than 27 units, because the terrain lattice is 8 and an
+ * octave near the sampling limit aliases into exactly the random hard
+ * edges this game already spent a release removing.
+ */
+const OCTAVES: ReadonlyArray<readonly [wavelength: number, height: number]> = [
+  [2048, 60],
+  [700, 22],
+  [240, 8],
+  [80, 3],
+  [27, 1.1],
+];
 
 /** Wavelength of the shading mottle, in world units. */
-const DETAIL_WAVELENGTH = 19;
+const DETAIL_WAVELENGTH = 190;
 
 let grid: HeightGrid | null = null;
 /**
@@ -144,11 +166,15 @@ export function terrainHeight(x: number, z: number): number {
     ? raw + (heightAt(softGrid, x, z) - raw) * smoothing
     : raw;
   if (base <= 0) return base;
-  const s = 1 / RELIEF_WAVELENGTH;
-  const relief = (valueNoise(x * s, z * s, 17) * 2 - 1) * RELIEF_HEIGHT;
-  // Ease the relief in over the first metre of land so the beach still
-  // meets the water cleanly.
-  const shore = Math.min(1, base / 10);
+  let relief = 0;
+  for (let i = 0; i < OCTAVES.length; i++) {
+    const [wavelength, height] = OCTAVES[i];
+    const s = 1 / wavelength;
+    relief += (valueNoise(x * s, z * s, 17 + i * 31) * 2 - 1) * height;
+  }
+  // Ease the relief in over the first stretch of land so the beach
+  // still meets the water cleanly rather than in a cliff of noise.
+  const shore = Math.min(1, base / 400);
   return base + relief * shore;
 }
 
@@ -161,12 +187,20 @@ export function terrainHeight(x: number, z: number): number {
  * mesh built on one lattice and a walker standing on another is
  * exactly the bug this module now exists to prevent.
  */
-export const SECTIONS = 8;
-export const NEAR_VERTS = 65;
-export const FAR_VERTS = 17;
-const SECTION_SPAN = SPAN / SECTIONS;
+/**
+ * A terrain cell, and how finely it is drawn. The island is no longer
+ * one mesh cut into eight — at 5.6 million units that is not a thing
+ * that can exist — but a small grid of cells STREAMED around her.
+ */
+export const CELL_SPAN = 512;
+export const CELL_VERTS = 65;
 /** Distance between drawn vertices, in world units. */
-export const NEAR_STEP = SECTION_SPAN / (NEAR_VERTS - 1);
+export const NEAR_STEP = CELL_SPAN / (CELL_VERTS - 1);
+/** Cells a side in the streamed window. Odd, so she is in the middle. */
+export const CELLS = 9;
+/** The inner cells drawn at full detail; the rest get the coarse cut. */
+export const FINE_CELLS = 3;
+export const COARSE_VERTS = 17;
 
 /**
  * VERTICAL RELIEF — how tall the island is, as a multiple.
@@ -212,9 +246,11 @@ export function reliefScale(): number {
 export function groundHeight(x: number, z: number): number {
   if (!grid) return 0;
   const step = NEAR_STEP;
-  // Snap to the lattice the mesh is built on. Sections start at the
-  // island's corner, and every section's grid is in phase with every
-  // other, so one global lattice describes them all.
+  // Snap to the lattice the mesh is built on. Cells are placed on
+  // multiples of their own span, so every cell's vertex grid is in
+  // phase with every other and one global lattice describes them all —
+  // which is what lets a walker read the drawn triangle without
+  // knowing which cell it belongs to.
   const gx = (x + SPAN / 2) / step;
   const gz = (z + SPAN / 2) / step;
   const ix = Math.floor(gx);
@@ -250,11 +286,17 @@ export function groundDetail(x: number, z: number): number {
 export type Band = 'seabed' | 'reef' | 'sand' | 'lowland' | 'jungle' | 'cliff' | 'peak';
 
 /**
- * Bands are keyed to REAL Kauai elevations, converted through the
- * 1:1000 scale, so the island wears the biomes the actual place does.
- * One real metre is a tenth of a world unit.
+ * Bands are keyed to REAL Kauai elevations, so the island wears the
+ * biomes the actual place does. One real metre is UNITS_PER_METRE world
+ * units — a hundred of them at true scale.
+ *
+ * This constant was 0.1, which was the 1:1000 conversion, and it stayed
+ * 0.1 when the world went to true scale. Every threshold was then a
+ * thousandth of what it should be, so a beach at 78 units — 78
+ * centimetres above the sea — wore the textures of a 780-metre
+ * mountainside.
  */
-const M = 0.1;
+const M = UNITS_PER_METRE;
 const BAND_STEPS: Array<{ upTo: number; band: Band }> = [
   { upTo: -8 * M, band: 'seabed' },
   { upTo: 0, band: 'reef' },

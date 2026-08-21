@@ -11,17 +11,20 @@ import {
 } from '../ant/pace';
 import { Stamina } from '../ant/stamina';
 import {
-  FAR_VERTS, groundDetail, groundHeight, ISLAND_SPAN, NEAR_VERTS, SECTIONS,
-  setRelief, setSmoothing, smoothingAmount, terrainHeight,
+  groundHeight, ISLAND_SPAN, setRelief, setSmoothing, smoothingAmount,
 } from '../world/heightfield';
 import { findLandfall, type HeightGrid } from '../world/kauai';
+import { TerrainStream } from '../world/TerrainStream';
+import { originAt, rebaseFor, setOrigin } from '../world/origin';
 import { bakeGrain, GRAIN_SIZE } from '../world/groundTexture';
-import { loadBands, reliefUniform, terrainMaterial } from '../world/terrainMaterial';
+import {
+  loadBands, ORIGIN_UNIFORM, reliefUniform, terrainMaterial,
+} from '../world/terrainMaterial';
 import { SettingsPanel } from '../ui/SettingsPanel';
 import { Vitals } from '../ui/Vitals';
 import { liveStat } from '../ant/castes';
 import { ActionPad, type Action } from '../input/ActionPad';
-import { Flight } from '../ant/flight';
+import { Flight, setFlightScale } from '../ant/flight';
 import {
   MOVING_RECOVERY, RESTING_RECOVERY, SPRINT_DRAIN,
 } from '../ant/stamina';
@@ -50,27 +53,11 @@ import { onChange, settings } from '../ui/settings';
  * ground looks like; the vertex stream only shades it, so this warms
  * and darkens a slope toward soil rather than painting brown over it.
  */
-const SOIL_TINT = new THREE.Color(1.22, 0.98, 0.72);
 
 const SKY_COLOR = 0x9cc8e8;
 
 /** Section meshes per side. */
 /** Vertices per side within a section, up close and far away. */
-/**
- * How far the detailed geometry reaches. Drawing the whole island at
- * full resolution is half a million triangles a frame, most of it
- * kilometres of ant-scale distance away; this keeps the detail where
- * she can see it and spends a fortieth of the triangles on the rest.
- * Generous on purpose, so the swap happens where it cannot be seen.
- */
-const NEAR_RANGE = 1250;
-
-interface Section {
-  readonly x: number;
-  readonly z: number;
-  readonly near: THREE.Mesh;
-  readonly far: THREE.Mesh;
-}
 
 export class IslandScene {
   private readonly scene = new THREE.Scene();
@@ -85,11 +72,14 @@ export class IslandScene {
   private readonly climbButton: Action;
   private readonly descendButton: Action;
   private readonly flight = new Flight();
-  /** The relief the island is currently BUILT at. NaN until shaped. */
-  private shaped = Number.NaN;
   private readonly ant = new PlayerAnt();
   private readonly clock = new THREE.Clock();
-  private readonly sections: Section[] = [];
+  private terrain!: TerrainStream;
+  /**
+   * The sea. It is centred on the island rather than on her, so it
+   * moves with every rebase like everything else already placed.
+   */
+  private water!: THREE.Mesh;
   /**
    * The CEILING on a full push of the stick — not propulsion. She does
    * not move because this is set; she moves because a thumb asks.
@@ -123,12 +113,24 @@ export class IslandScene {
     private readonly host: HTMLElement,
     grid: HeightGrid,
   ) {
-    this.renderer = new THREE.WebGLRenderer({ antialias: true });
+    this.renderer = new THREE.WebGLRenderer({
+      antialias: true,
+      // The camera has to see from half a unit to six million. No
+      // ordinary depth buffer spans that; a logarithmic one does, and
+      // without it the distant island z-fights itself to pieces.
+      logarithmicDepthBuffer: true,
+    });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     host.appendChild(this.renderer.domElement);
 
     this.scene.background = new THREE.Color(SKY_COLOR);
-    this.scene.fog = new THREE.Fog(SKY_COLOR, 400, 3800);
+    // At true scale an ant's world ends a few dozen metres out. The
+    // fog hides where the streamed cells stop and hands off to the
+    // backdrop, which is the island itself, correctly and distantly
+    // enormous. FogExp2 rather than linear: with a backdrop 56 km away
+    // a linear fog's far plane has to sit somewhere, and anywhere it
+    // sits is a visible wall.
+    this.scene.fog = new THREE.FogExp2(SKY_COLOR, 0.00055);
 
     this.buildLights();
     // SMOOTHING FIRST, because it decides what the vertices ARE and
@@ -137,6 +139,7 @@ export class IslandScene {
     // mesh. Get either the wrong side of its build and the island is
     // drawn at one shape while she walks another — which is precisely
     // the bug that put her inside an invisible hill last release.
+    setFlightScale(settings().flightSpeed);
     setSmoothing(settings().terrainSmoothing);
     this.buildTerrain();
     this.buildWater();
@@ -147,13 +150,18 @@ export class IslandScene {
     // a hill. Getting this wrong drew the island at full height while
     // she stood at the flattened one — and since backfaces are culled,
     // the hill she was buried in simply vanished and left open sea.
-    this.reshapeIsland();
-
     // Pick the opening spot from the real terrain rather than a
     // hand-typed coordinate a re-bake could drop into the sea.
     const start = findLandfall(grid, 3, 20);
+    // Put the origin where she starts, so the first frame is already
+    // rendering small numbers rather than five-million-unit ones.
+    setOrigin(start.x, start.z);
+    const seated = originAt();
+    ORIGIN_UNIFORM.value.set(seated.x, seated.z);
     const facing = Math.atan2(-start.x, -start.z);
     this.ant.placeAt(start.x, start.z, facing);
+    this.terrain.follow(start.x, start.z);
+    this.reshapeIsland();
     this.scene.add(this.ant.root);
 
     this.stick = new MoveStick(host);
@@ -178,6 +186,7 @@ export class IslandScene {
       this.follow.reshape();
       this.reshapeIsland();
       this.resmoothIsland();
+      setFlightScale(settings().flightSpeed);
     });
     // The view is a world bearing, so it has to be told where behind
     // her IS. Without this she opens side-on to her own camera.
@@ -202,10 +211,15 @@ export class IslandScene {
     (window as unknown as Record<string, unknown>).__island = {
       triangles: () => this.renderer.info.render.triangles,
       drawCalls: () => this.renderer.info.render.calls,
-      where: () => this.ant.root.position.toArray(),
+      where: () => [this.ant.where.x, this.ant.root.position.y, this.ant.where.z],
+      origin: () => originAt(),
+      cells: () => this.terrain.cellCount,
       cameraAt: () => this.follow.camera.position.toArray(),
-      groundUnderfoot: () =>
-        groundHeight(this.ant.root.position.x, this.ant.root.position.z),
+      // Her WORLD position, not her rendered one. root.position is
+      // measured from the floating origin now, so asking the heightfield
+      // about it samples a spot near the middle of the island instead
+      // of the ground she is standing on.
+      groundUnderfoot: () => groundHeight(this.ant.where.x, this.ant.where.z),
       pace: () => this.pace,
       setPace: (to: Pace) => { this.pace = to; },
       stamina: () => this.stamina.fraction,
@@ -242,49 +256,28 @@ export class IslandScene {
    * Kauai keeps sand at the shore and snow on the peaks instead of
    * going green to the summit.
    */
+  /** Vertical exaggeration — a transform, so it is free. */
   private reshapeIsland(): void {
-    const relief = settings().terrainRelief;
-    // Against its own record rather than the uniform: seeding the
-    // uniform early made the first call look like a no-op, so the
-    // meshes were never scaled at all.
-    if (relief === this.shaped) return;
-    this.shaped = relief;
-    setRelief(relief);
-    reliefUniform.value = relief;
-    for (const section of this.sections) {
-      section.near.scale.y = relief;
-      section.far.scale.y = relief;
-    }
-    // She is standing on ground that just moved under her.
-    this.ant.reground();
+    const times = settings().terrainRelief;
+    this.terrain.setRelief(times);
+    setRelief(times);
+    // The band shader picks its texture by world height, so an
+    // exaggerated island would wear the wrong biomes without this.
+    reliefUniform.value = times;
   }
 
   /**
-   * Re-cut the island at a new smoothing.
+   * Re-cut the ground at a new smoothing.
    *
-   * Unlike the height dial this CANNOT be a transform: a blur mixes
-   * neighbouring samples, so the vertices genuinely move and every
-   * section's geometry has to be built again. Roughly six hundred
-   * thousand height lookups, which is why the slider commits on release
-   * rather than on every pixel of a drag.
+   * Unlike the height dial this cannot be a transform: a blur mixes
+   * neighbouring samples, so the vertices genuinely move and every cell
+   * has to be built again. That is why the slider commits on release.
    */
   private resmoothIsland(): void {
     const wanted = settings().terrainSmoothing;
     if (wanted === smoothingAmount()) return;
     setSmoothing(wanted);
-
-    const span = ISLAND_SPAN / SECTIONS;
-    for (const section of this.sections) {
-      const originX = section.x - span / 2;
-      const originZ = section.z - span / 2;
-      // Dispose before dropping the reference: geometry lives on the
-      // GPU and the collector cannot free it for us.
-      section.near.geometry.dispose();
-      section.far.geometry.dispose();
-      section.near.geometry = buildSection(originX, originZ, span, NEAR_VERTS);
-      section.far.geometry = buildSection(originX, originZ, span, FAR_VERTS);
-    }
-    // The ground she is standing on just changed shape under her.
+    this.terrain.rebuild();
     this.ant.reground();
   }
 
@@ -427,11 +420,32 @@ export class IslandScene {
       );
       this.descendButton.enable(false);
     }
+    // ── The world moves under her ─────────────────────────────────
+    // She has just travelled, so this is the moment to decide whether
+    // the scene needs shifting and which ground should exist.
+    const at = this.ant.where;
+    const shift = rebaseFor(at.x, at.z);
+    if (shift) {
+      // Everything already placed moves by exactly the delta. The
+      // camera included: it lives in rendered space, and leaving it
+      // behind would read as the world lurching sideways.
+      this.ant.reground();
+      this.follow.camera.position.x -= shift.x;
+      this.follow.camera.position.z -= shift.z;
+      this.water.position.x -= shift.x;
+      this.water.position.z -= shift.z;
+      // The ground texture tiles off world position, not rendered
+      // position, or it slides sideways on every shift.
+      const now = originAt();
+      ORIGIN_UNIFORM.value.set(now.x, now.z);
+      this.terrain.place();
+    }
+    this.terrain.follow(at.x, at.z);
+
     // Read AFTER she has moved: this is what she is actually doing,
     // which the easing makes different from what was asked for.
     this.speed = this.ant.pace;
     this.follow.update(this.ant.root, look, dt);
-    this.chooseDetail();
     this.renderer.render(this.scene, this.follow.camera);
   };
 
@@ -476,42 +490,13 @@ export class IslandScene {
     grain.magFilter = THREE.LinearFilter;
     grain.needsUpdate = true;
 
-    const material = terrainMaterial(loadBands(this.renderer), grain);
-    const span = ISLAND_SPAN / SECTIONS;
-    for (let sz = 0; sz < SECTIONS; sz++) {
-      for (let sx = 0; sx < SECTIONS; sx++) {
-        const originX = -ISLAND_SPAN / 2 + sx * span;
-        const originZ = -ISLAND_SPAN / 2 + sz * span;
-        const near = new THREE.Mesh(buildSection(originX, originZ, span, NEAR_VERTS), material);
-        const far = new THREE.Mesh(buildSection(originX, originZ, span, FAR_VERTS), material);
-        this.scene.add(near, far);
-        this.sections.push({
-          x: originX + span / 2,
-          z: originZ + span / 2,
-          near,
-          far,
-        });
-      }
-    }
-    this.chooseDetail();
-  }
-
-  /**
-   * Show each section at the resolution its distance deserves. The
-   * coarse mesh samples a subset of the fine one's grid, so the two
-   * agree at the corners and the swap does not pop the skyline.
-   */
-  private chooseDetail(): void {
-    const { x, z } = this.ant.root.position;
-    for (const section of this.sections) {
-      const close = Math.hypot(section.x - x, section.z - z) < NEAR_RANGE;
-      section.near.visible = close;
-      section.far.visible = !close;
-    }
+    this.terrain = new TerrainStream(
+      this.scene, terrainMaterial(loadBands(this.renderer), grain),
+    );
   }
 
   private buildWater(): void {
-    const water = new THREE.Mesh(
+    this.water = new THREE.Mesh(
       new THREE.CircleGeometry(ISLAND_SPAN * 0.95, 96),
       new THREE.MeshStandardMaterial({
         color: 0x2a6a8f,
@@ -522,98 +507,8 @@ export class IslandScene {
         roughness: 0.25,
       }),
     );
-    water.rotation.x = -Math.PI / 2;
-    this.scene.add(water);
+    this.water.rotation.x = -Math.PI / 2;
+    this.water.frustumCulled = false;
+    this.scene.add(this.water);
   }
-}
-
-/**
- * One patch of island. Heights are sampled on a grid one ring WIDER
- * than the patch so every vertex has neighbours on all sides, which is
- * what lets the normals be exact at the section's edges.
- */
-function buildSection(
-  originX: number,
-  originZ: number,
-  span: number,
-  verts: number,
-): THREE.BufferGeometry {
-  const quads = verts - 1;
-  const step = span / quads;
-  const wide = verts + 2;
-
-  const heights = new Float32Array(wide * wide);
-  for (let r = 0; r < wide; r++) {
-    for (let c = 0; c < wide; c++) {
-      heights[r * wide + c] = terrainHeight(
-        originX + (c - 1) * step,
-        originZ + (r - 1) * step,
-      );
-    }
-  }
-
-  const count = verts * verts;
-  const positions = new Float32Array(count * 3);
-  const normals = new Float32Array(count * 3);
-  const colors = new Float32Array(count * 3);
-  const tint = new THREE.Color();
-
-  for (let iz = 0; iz < verts; iz++) {
-    for (let ix = 0; ix < verts; ix++) {
-      const i = iz * verts + ix;
-      const x = originX + ix * step;
-      const z = originZ + iz * step;
-      const at = (c: number, r: number) => heights[r * wide + c];
-      const h = at(ix + 1, iz + 1);
-
-      positions[i * 3] = x;
-      positions[i * 3 + 1] = h;
-      positions[i * 3 + 2] = z;
-
-
-      // Central differences give the true surface gradient, so sections
-      // agree along their shared edges and the seams disappear.
-      const dhdx = (at(ix + 2, iz + 1) - at(ix, iz + 1)) / (2 * step);
-      const dhdz = (at(ix + 1, iz + 2) - at(ix + 1, iz)) / (2 * step);
-      const len = Math.hypot(dhdx, 1, dhdz);
-      normals[i * 3] = -dhdx / len;
-      normals[i * 3 + 1] = 1 / len;
-      normals[i * 3 + 2] = -dhdz / len;
-
-      // Shading only — what the ground IS comes from the band textures
-      // in terrainMaterial.ts, which this multiplies.
-      const slope = Math.hypot(dhdx, dhdz);
-      tint.setRGB(1, 1, 1);
-      if (h > 0) tint.lerp(SOIL_TINT, Math.min(0.6, slope * 0.55));
-      tint.multiplyScalar(1 + groundDetail(x, z) * 0.11);
-      colors[i * 3] = tint.r;
-      colors[i * 3 + 1] = tint.g;
-      colors[i * 3 + 2] = tint.b;
-    }
-  }
-
-  const indices = new Uint32Array(quads * quads * 6);
-  let at = 0;
-  for (let iz = 0; iz < quads; iz++) {
-    for (let ix = 0; ix < quads; ix++) {
-      const tl = iz * verts + ix;
-      const tr = tl + 1;
-      const bl = tl + verts;
-      const br = bl + 1;
-      indices[at++] = tl;
-      indices[at++] = bl;
-      indices[at++] = tr;
-      indices[at++] = tr;
-      indices[at++] = bl;
-      indices[at++] = br;
-    }
-  }
-
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
-  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  geometry.setIndex(new THREE.BufferAttribute(indices, 1));
-  geometry.computeBoundingSphere();
-  return geometry;
 }

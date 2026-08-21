@@ -18,13 +18,20 @@
  * lookup is swapped out.
  */
 import * as THREE from 'three';
+import { UNITS_PER_METRE } from './kauai';
 
 /**
  * World units per repeat of a band texture. About 10 cm — small enough
  * that detail streams past at a walk, which is the entire point, and
  * large enough not to alias into noise at a distance.
  */
-export const BAND_TILE = 10;
+/**
+ * World units per repeat of a band texture. At true scale a unit is a
+ * centimetre, so this is a 4 cm patch of sand or grass — about right
+ * for an animal one centimetre long, where ten was a whole hand-span
+ * stretched across the view and read as blocks.
+ */
+export const BAND_TILE = 4;
 
 /**
  * Shared with every section's shader, so one write re-tints the island.
@@ -34,11 +41,18 @@ export const BAND_TILE = 10;
 export const reliefUniform = { value: 1 };
 
 /**
+ * The floating origin, for texture tiling. Kept as a shared uniform
+ * object so every cell's material sees the same value the moment the
+ * world shifts under her.
+ */
+export const ORIGIN_UNIFORM = { value: new THREE.Vector2() };
+
+/**
  * The fine grain is tiled much tighter and at a size that shares no
  * common factor with the band tile, so the two patterns never line up
  * and the repeat stops reading as a grid.
  */
-export const GRAIN_TILE = 2.7;
+export const GRAIN_TILE = 1.1;
 
 /** Which file carries which band, ordered as they stack up the island. */
 export const BAND_FILES = [
@@ -47,18 +61,32 @@ export const BAND_FILES = [
 
 /**
  * Band edges in WORLD units, from the same real Kauai elevations
- * heightfield.ts uses — one real metre is a tenth of a world unit. The
- * feather either side is what keeps a biome change a gradient rather
- * than a contour line drawn round the hill.
+ * heightfield.ts uses. Written in METRES and converted, because these
+ * were bare world-unit literals from the 1:1000 days: at true scale a
+ * queen standing 78 centimetres above the sea was inside the CLIFF and
+ * MOUNTAIN bands, so a beach rendered as blocky grey rubble.
+ *
+ * The feather either side is what keeps a biome change a gradient
+ * rather than a contour line drawn round the hill.
  */
+const M = UNITS_PER_METRE;
+/**
+ * Metres to a GLSL float literal.
+ *
+ * The `.toFixed(1)` is load-bearing: interpolating `1200 * 100` gives
+ * "120000", which GLSL reads as an int, and smoothstep wants floats.
+ * The shader failed to compile and the whole terrain vanished.
+ */
+const m = (metres: number) => (metres * M).toFixed(1);
+
 const EDGES = `
-  float wReef  = 1.0 - smoothstep(-0.35, 0.05, h);
-  float wSand  = span(h, -0.05, 1.2, 0.35);
-  float wGrass = span(h, 1.0, 22.0, 1.4);
-  float wJung  = span(h, 20.0, 70.0, 4.0);
-  float wCliff = span(h, 66.0, 100.0, 6.0);
-  float wMount = span(h, 95.0, 128.0, 8.0);
-  float wSnow  = smoothstep(120.0, 145.0, h);
+  float wReef  = 1.0 - smoothstep(${m(-3.5)}, ${m(0.5)}, h);
+  float wSand  = span(h, ${m(-0.5)}, ${m(12)}, ${m(3.5)});
+  float wGrass = span(h, ${m(10)}, ${m(220)}, ${m(14)});
+  float wJung  = span(h, ${m(200)}, ${m(700)}, ${m(40)});
+  float wCliff = span(h, ${m(660)}, ${m(1000)}, ${m(60)});
+  float wMount = span(h, ${m(950)}, ${m(1280)}, ${m(80)});
+  float wSnow  = smoothstep(${m(1200)}, ${m(1450)}, h);
 `;
 
 /**
@@ -92,6 +120,11 @@ export function terrainMaterial(
     // the slider is doing, so the knob changes the SHAPE and not the map.
     shader.uniforms.relief = reliefUniform;
     shader.uniforms.grainTile = { value: GRAIN_TILE };
+    // WHERE THE WORLD ACTUALLY IS. Vertices reach the shader measured
+    // from the floating origin, so tiling straight off them would slide
+    // the whole ground texture sideways every time the origin moved —
+    // and it moves in 1024-unit steps, which no tile size divides.
+    shader.uniforms.worldOffset = ORIGIN_UNIFORM;
 
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vGround;')
@@ -108,13 +141,14 @@ export function terrainMaterial(
         uniform float bandTile;
         uniform float relief;
         uniform float grainTile;
+        uniform vec2 worldOffset;
 
         float span(float x, float lo, float hi, float feather) {
           return smoothstep(lo - feather, lo + feather, x)
                * (1.0 - smoothstep(hi - feather, hi + feather, x));
         }`)
       .replace('#include <map_fragment>', `
-        vec2 bandUv = vGround.xz / bandTile;
+        vec2 bandUv = (vGround.xz + worldOffset) / bandTile;
         float h = vGround.y / max(relief, 0.0001);
         ${EDGES}
         float total = wReef + wSand + wGrass + wJung + wCliff + wMount + wSnow;
@@ -139,7 +173,7 @@ export function terrainMaterial(
         // The fine grain rides on top at a tile size that shares no
         // factor with the band tile, so close up there is always
         // something moving past even mid-way through one band tile.
-        float g = texture2D(t_grain, vGround.xz / grainTile).g;
+        float g = texture2D(t_grain, (vGround.xz + worldOffset) / grainTile).g;
         ground *= 0.80 + g * 0.42;
 
         diffuseColor.rgb *= ground;

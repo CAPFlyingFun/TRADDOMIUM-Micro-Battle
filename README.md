@@ -66,7 +66,8 @@ ships it as Terrarium height tiles baked from USGS elevation data;
 `scripts/bakeKauai.py` folds those into `public/kauai-1025.bin`, a
 1025-square grid of int16 decimetres.
 
-It runs at 1:1000, with one world unit to the centimetre — so 56 km of
+It runs at TRUE SCALE, with one world unit to the centimetre for the
+terrain as well as the ant — so 56 km of
 Kauai becomes 56 m of world, and the 1592 m summit becomes 1.59 m. To
 an ant that is a continent four thousand body-lengths across.
 

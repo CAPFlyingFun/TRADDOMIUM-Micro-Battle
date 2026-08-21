@@ -22,7 +22,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import {
-  groundHeight, ISLAND_SPAN, NEAR_STEP, NEAR_VERTS, SECTIONS, setRelief,
+  CELL_SPAN, CELL_VERTS, groundHeight, ISLAND_SPAN, NEAR_STEP, setRelief,
   setSmoothing, terrainHeight, useGrid,
 } from '../src/world/heightfield';
 import { decodeGrid, findLandfall, type HeightGrid } from '../src/world/kauai';
@@ -40,15 +40,14 @@ beforeAll(() => {
 
 /**
  * The height the DRAWN mesh has at (x, z), worked out the long way:
- * find the section, find the quad, pick the triangle, interpolate its
- * plane. This mirrors `buildSection`'s vertex grid and its index order
+ * find the cell, find the quad, pick the triangle, interpolate its
+ * plane. This mirrors `buildCell`'s vertex grid and its index order
  * (tl, bl, tr / tr, bl, br — so the diagonal runs bl to tr).
  */
 function meshHeight(x: number, z: number): number {
-  const span = ISLAND_SPAN / SECTIONS;
-  const step = span / (NEAR_VERTS - 1);
-  const originX = Math.floor((x + ISLAND_SPAN / 2) / span) * span - ISLAND_SPAN / 2;
-  const originZ = Math.floor((z + ISLAND_SPAN / 2) / span) * span - ISLAND_SPAN / 2;
+  const step = CELL_SPAN / (CELL_VERTS - 1);
+  const originX = Math.floor(x / CELL_SPAN) * CELL_SPAN;
+  const originZ = Math.floor(z / CELL_SPAN) * CELL_SPAN;
   const ix = Math.floor((x - originX) / step);
   const iz = Math.floor((z - originZ) / step);
   const fx = (x - originX) / step - ix;
@@ -174,34 +173,48 @@ describe('the walked surface is the drawn surface', () => {
     }
   });
 
-  it('actually takes the creases out, which is what it is for', () => {
-    // The claim the dial makes to the player. A height scale could not
-    // make this claim: it makes a crease shallower in proportion, so
-    // the ratio between neighbouring folds never changes.
+  it('is already smooth at TRUE scale, which is what fixed the creases', () => {
+    // The headline of the scale change, kept as a measurement.
+    //
+    // At 1:1000 the mesh drew flat triangles 10.94 units apart across
+    // terrain sampled every 55 metres of real Kauai, and the worst
+    // fold near the spawn was 46 degrees — the visible hard V-shaped
+    // edges. At true scale the same 55-metre features are drawn across
+    // 5,469 units with hundreds of vertices between them, so the
+    // landforms arrive as gentle slopes and the surface detail is
+    // synthesised at wavelengths the lattice can actually carry.
     const start = findLandfall(grid, 3, 20);
-    const roughness = () => {
-      let worst = 0;
-      for (let dx = -400; dx <= 400; dx += NEAR_STEP) {
-        for (let dz = -400; dz <= 400; dz += NEAR_STEP) {
-          const x = start.x + dx;
-          const z = start.z + dz;
-          if (terrainHeight(x, z) <= 0) continue;
-          const a = Math.atan2(
-            terrainHeight(x, z) - terrainHeight(x - NEAR_STEP, z), NEAR_STEP,
-          );
-          const b = Math.atan2(
-            terrainHeight(x + NEAR_STEP, z) - terrainHeight(x, z), NEAR_STEP,
-          );
-          worst = Math.max(worst, Math.abs(b - a));
-        }
+    let worst = 0;
+    for (let dx = -400; dx <= 400; dx += NEAR_STEP) {
+      for (let dz = -400; dz <= 400; dz += NEAR_STEP) {
+        const x = start.x + dx;
+        const z = start.z + dz;
+        if (terrainHeight(x, z) <= 0) continue;
+        const a = Math.atan2(
+          groundHeight(x, z) - groundHeight(x - NEAR_STEP, z), NEAR_STEP,
+        );
+        const b = Math.atan2(
+          groundHeight(x + NEAR_STEP, z) - groundHeight(x, z), NEAR_STEP,
+        );
+        worst = Math.max(worst, Math.abs(b - a));
       }
-      return (worst * 180) / Math.PI;
-    };
+    }
+    const degrees = (worst * 180) / Math.PI;
+    expect(degrees, `worst crease ${degrees.toFixed(2)}deg`).toBeLessThan(5);
+  });
+
+  it('leaves the smoothing dial pointed at LANDFORMS, not creases', () => {
+    // Worth being explicit, because the dial was built to fix creases
+    // that the scale change then removed. What it still moves is the
+    // baked grid — the island's own shape — and at ant scale that is
+    // 55-metre features, not the ground under her feet. It is not
+    // useless, but it no longer does the job it was named for.
+    const start = findLandfall(grid, 3, 20);
     setSmoothing(0);
-    const sharp = roughness();
+    const sharp = terrainHeight(start.x, start.z);
     setSmoothing(1);
-    const soft = roughness();
-    expect(soft, `${sharp.toFixed(1)}deg -> ${soft.toFixed(1)}deg`).toBeLessThan(sharp * 0.6);
+    const soft = terrainHeight(start.x, start.z);
+    expect(Math.abs(soft - sharp)).toBeGreaterThan(0);
   });
 
   it('still reads the sea as the sea', () => {

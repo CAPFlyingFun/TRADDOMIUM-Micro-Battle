@@ -1285,13 +1285,53 @@ second climbable contact during grip-ready window
 
 ---
 
+# 33.5 ANSWERED SINCE v1 SHIPPED
+
+## Airspeed scale (was open question 3)
+
+One world unit is one centimetre, and the Queen is 1.0 unit nose to
+gaster, so units per second doubles as body lengths per second.
+
+```text
+walk           7 u/s     7 cm/s
+sprint        18 u/s    18 cm/s
+best glide    30 u/s    30 cm/s
+cruise        40 u/s     0.4 m/s
+max powered   70 u/s     0.7 m/s   ~2.5 km/h
+max dive     110 u/s     1.1 m/s   ~4 km/h
+```
+
+For a flying insect that is conservative — winged ants are commonly
+reported around 0.5 to 1.5 m/s — so nothing about her airspeed is
+excessive.
+
+## Why it FELT excessive, which is a different question
+
+The island is Kauai at 1:1000. Its 5,600 world units represent 56 km,
+so one world unit is 1 cm to the Queen and 10 m to the terrain. She and
+the ground she flies over are using two different rulers, a thousand
+apart. Measured against the land, 70 u/s is about 700 m/s and she
+crosses the whole island in 80 seconds.
+
+That is a WORLD SCALE decision, not a flight tuning one, and it is
+recorded in MASTERROADMAP.md rather than here.
+
+## Acceleration
+
+THRUST was 34 u/s², which took her from a walk to top speed in about
+two seconds. Lowered to 12, roughly six seconds. A flight-speed dial
+now scales every speed and acceleration together, so the tempo can be
+found on the device without bending the model's shape.
+
+---
+
 # 34. OPEN QUESTIONS / TUNING ITEMS
 
 These are NOT locked yet:
 
 1. Exact takeoff speed
 2. Exact takeoff stamina cost
-3. Exact airspeed scale in world units
+3. ~~Exact airspeed scale in world units~~ — see 33.5
 4. Exact best-glide airspeed
 5. Exact glide-curve equation
 6. Exact climb rates

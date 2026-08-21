@@ -22,24 +22,62 @@
 /** Samples per side of the baked grid. */
 export const SAMPLES = 1025;
 
-/** World units spanned by the whole grid (56 km of Kauai at 1:1000). */
-export const SPAN = 5600;
+/**
+ * World units spanned by the whole grid — 56 km of Kauai at TRUE SCALE.
+ *
+ * A world unit is a centimetre, and it is a centimetre to the terrain
+ * as well as to the ant now. It was not: the island ran at 1:1000, so a
+ * unit meant 1 cm to her and 10 m to the ground, and the two were using
+ * rulers a thousand apart. That is why flight read as a missile — she
+ * crossed the whole island in eighty seconds — and why the world felt
+ * like a tabletop model, because it was one.
+ *
+ * 56 km is 5,600,000 centimetres, so that is the number. At her 0.7 m/s
+ * top flight speed a straight crossing is about 22 hours; walking it is
+ * nine days. That is the point rather than a problem: an expedition to
+ * the far side of the island should be an expedition.
+ *
+ * TWO CONSEQUENCES, both handled elsewhere and both worth knowing:
+ *
+ * 1. float32 spacing at 5.6 million is 0.25 units — a quarter of her
+ *    body length — so nothing may be handed to the GPU in absolute
+ *    world coordinates. See origin.ts. JavaScript numbers are float64,
+ *    where the spacing at this range is 1e-9 units, so the LOGICAL
+ *    world costs nothing; only the render needs rebasing.
+ *
+ * 2. The baked grid is 1025 samples across all of it, which is one
+ *    sample per 5,469 units. It carries the island's shape and nothing
+ *    at ant scale. Everything finer is synthesised — see heightfield.
+ */
+export const SPAN = 5_600_000;
 
 /** Distance between neighbouring samples, in world units. */
 export const STEP = SPAN / (SAMPLES - 1);
 
 /**
- * Decimetres of real elevation to world units. One real metre is one
- * in-world millimetre at 1:1000, and a world unit is ten millimetres,
- * so a decimetre of real height is a hundredth of a world unit.
+ * World units to a real metre. A unit is a centimetre, so a hundred.
+ *
+ * Named because it is the ONE number that defines the scale, and
+ * because two tests silently encoded it as a literal and broke when it
+ * moved. Anything converting between the world and real measurements
+ * should go through this rather than through arithmetic on
+ * HEIGHT_SCALE, which is a different question.
  */
-export const HEIGHT_SCALE = 0.01;
+export const UNITS_PER_METRE = 100;
+
+/**
+ * Decimetres of real elevation to world units. At true scale a world
+ * unit IS a centimetre, so a decimetre of real height is ten of them —
+ * a thousand times what it was, exactly as the horizontal span grew.
+ * Scaling one without the other would flatten or spike the island.
+ */
+export const HEIGHT_SCALE = 10;
 
 /** The bake's nodata marker; only ~70 samples carry it. */
 const NODATA = -32768;
 
 /** Deepest the seabed is allowed to reach, in world units. */
-const SEA_FLOOR = -60;
+const SEA_FLOOR = -60_000;
 
 export type HeightGrid = Int16Array;
 

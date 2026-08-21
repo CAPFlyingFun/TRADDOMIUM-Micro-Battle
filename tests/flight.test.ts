@@ -4,10 +4,11 @@
  * do. Where a number here disagrees with the module, the design wins.
  */
 import { describe, expect, it } from 'vitest';
+import { afterEach } from 'vitest';
 import {
   BEST_GLIDE_RATIO, BEST_GLIDE_SPEED, CRUISE_SPEED, Flight, glideRatio,
-  MAX_DIVE_SPEED, STALL_SPEED, TAKEOFF_COST, TAKEOFF_SPEED,
-  type FlightDemand,
+  MAX_DIVE_SPEED, MAX_POWERED_SPEED, setFlightScale, STALL_SPEED,
+  TAKEOFF_COST, TAKEOFF_SPEED, THRUST, type FlightDemand,
 } from '../src/ant/flight';
 import { PACE_SPEED, SPEED_EASE } from '../src/ant/pace';
 import { REARM_AT, Stamina } from '../src/ant/stamina';
@@ -16,6 +17,8 @@ const neutral: FlightDemand = { push: 0, side: 0, climb: false, descend: false }
 const forward: FlightDemand = { ...neutral, push: 1 };
 const climbing: FlightDemand = { ...forward, climb: true };
 const diving: FlightDemand = { ...neutral, descend: true };
+
+afterEach(() => setFlightScale(1));
 
 /** Get her airborne and up to a given airspeed. */
 function flying(speed = CRUISE_SPEED): Flight {
@@ -271,5 +274,91 @@ describe('the ground', () => {
     expect(f.where).toBe('grounded');
     expect(f.height).toBe(0);
     expect(f.airspeed).toBe(0);
+  });
+});
+
+describe('the speed dial', () => {
+  /** Seconds of full stick to reach a fraction of the top speed. */
+  const timeToSpeed = (fraction: number) => {
+    const f = new Flight();
+    f.takeOff(TAKEOFF_SPEED, 1, 1, 0);
+    const target = MAX_POWERED_SPEED * flightScaleNow() * fraction;
+    for (let i = 0; i < 6000; i++) {
+      f.update(forward, 1, false, 1 / 120);
+      if (f.airspeed >= target) return i / 120;
+    }
+    return Infinity;
+  };
+  const flightScaleNow = () => {
+    // Read the scale back through the model rather than tracking it
+    // here, so the test cannot disagree with what was actually set.
+    const f = new Flight();
+    f.takeOff(TAKEOFF_SPEED, 1, 1, 0);
+    for (let i = 0; i < 4000; i++) f.update(forward, 1, false, 1 / 120);
+    return f.airspeed / MAX_POWERED_SPEED;
+  };
+
+  it('changes the tempo without changing the shape', () => {
+    // Scaling speeds AND accelerations together means the time to reach
+    // full speed is the same at every setting. A dial that moved the
+    // top speed alone would quietly retune the acceleration too, which
+    // is the exact feel being tuned.
+    setFlightScale(1);
+    const normal = timeToSpeed(0.9);
+    setFlightScale(2);
+    const quick = timeToSpeed(0.9);
+    setFlightScale(0.5);
+    const slow = timeToSpeed(0.9);
+    // Within a sixth of each other rather than identical: the takeoff
+    // speed deliberately does NOT scale, so at a high setting she
+    // starts from proportionally less and takes a little longer to
+    // reach the same fraction of a higher top speed. That is the dial
+    // being right, not the tempo drifting.
+    for (const [name, at] of [['fast', quick], ['slow', slow]] as const) {
+      expect(Math.abs(at - normal) / normal, `${name}: ${at.toFixed(2)}s vs ${normal.toFixed(2)}s`)
+        .toBeLessThan(0.17);
+    }
+  });
+
+  it('actually moves the top speed', () => {
+    setFlightScale(2);
+    expect(flightScaleNow()).toBeCloseTo(2, 1);
+    setFlightScale(0.5);
+    expect(flightScaleNow()).toBeCloseTo(0.5, 1);
+  });
+
+  it('leaves the glide ratio alone — a shape, not a speed', () => {
+    setFlightScale(1);
+    const best = glideRatio(BEST_GLIDE_SPEED);
+    setFlightScale(2);
+    expect(glideRatio(BEST_GLIDE_SPEED * 2)).toBeCloseTo(best, 6);
+    setFlightScale(0.4);
+    expect(glideRatio(BEST_GLIDE_SPEED * 0.4)).toBeCloseTo(best, 6);
+  });
+
+  it('leaves the takeoff threshold alone — that is a GROUND speed', () => {
+    const f = new Flight();
+    setFlightScale(2);
+    expect(f.canTakeOff(TAKEOFF_SPEED, 1)).toBe(true);
+    expect(f.canTakeOff(TAKEOFF_SPEED - 0.1, 1)).toBe(false);
+  });
+});
+
+describe('acceleration', () => {
+  it('builds speed rather than arriving at it', () => {
+    // Thrust was 34, which took her from a walk to top speed in about
+    // two seconds and read as a missile launch. This is the check that
+    // says how long it should take, so a future retune has to argue
+    // with a number rather than with a memory.
+    const f = new Flight();
+    f.takeOff(TAKEOFF_SPEED, 1, 1, 0);
+    let seconds = Infinity;
+    for (let i = 0; i < 3000; i++) {
+      f.update(forward, 1, false, 1 / 120);
+      if (f.airspeed >= MAX_POWERED_SPEED * 0.9) { seconds = i / 120; break; }
+    }
+    expect(seconds).toBeGreaterThan(3);
+    expect(seconds).toBeLessThan(12);
+    expect(THRUST).toBeLessThan(20);
   });
 });

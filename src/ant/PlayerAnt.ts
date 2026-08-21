@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { groundHeight } from '../world/heightfield';
+import { localX, localZ } from '../world/origin';
 import { DIRECTION_EASE, SPEED_EASE } from './pace';
 
 /**
@@ -63,6 +64,18 @@ function closes(rate: number, dt: number): number {
 export class PlayerAnt {
   readonly root = new THREE.Group();
 
+  /**
+   * WHERE SHE IS IN THE WORLD, in float64.
+   *
+   * Not `root.position`, which is where she is DRAWN. At true scale the
+   * island runs to 5.6 million units and float32 cannot hold that
+   * usefully — a quarter of her body length between representable
+   * values at the far corner. So the logical position lives here as an
+   * ordinary JavaScript number, which is float64 and has a billionth of
+   * a unit to spare, and `settle` rebases it for the renderer.
+   */
+  private at = { x: 0, z: 0 };
+
   private heading = 0;
   private gaitPhase = 0;
   /** Radians per second she turned last frame — the gait reads it. */
@@ -121,7 +134,8 @@ export class PlayerAnt {
     this.heading = heading;
     this.wish = { x: 0, y: 0 };
     this.velocity = { x: 0, y: 0 };
-    this.root.position.set(x, groundHeight(x, z), z);
+    this.at = { x, z };
+    this.root.position.set(localX(x), groundHeight(x, z), localZ(z));
     this.root.rotation.set(0, heading, 0);
     this.body.rotation.x = 0;
   }
@@ -129,13 +143,18 @@ export class PlayerAnt {
   /**
    * Put her back on the ground where she stands.
    *
-   * The relief dial moves the whole island under her feet. Without
-   * this she keeps the height she had until the next frame settles
-   * her, which at a big change is a visible drop or a moment inside
-   * a hill.
+   * The relief dial moves the whole island under her feet, and a
+   * rebase moves the whole scene. Without this she keeps the position
+   * she had until the next frame settles her, which at a big change is
+   * a visible drop, a moment inside a hill, or a lurch across the map.
    */
   reground(): void {
     this.settle(0, 1);
+  }
+
+  /** Where she is in the WORLD, not where she is drawn. */
+  get where(): { x: number; z: number } {
+    return { x: this.at.x, z: this.at.z };
   }
 
   /** Which way she is facing, in world radians. */
@@ -206,9 +225,9 @@ export class PlayerAnt {
     const step = dt;
     if (this.velocity.x !== 0 || this.velocity.y !== 0) {
       const right = view - Math.PI / 2;
-      this.root.position.x
+      this.at.x
         += (Math.sin(view) * this.velocity.y + Math.sin(right) * this.velocity.x) * step;
-      this.root.position.z
+      this.at.z
         += (Math.cos(view) * this.velocity.y + Math.cos(right) * this.velocity.x) * step;
     }
     // Stride on the ground she covers AND on the ground she turns
@@ -247,9 +266,9 @@ export class PlayerAnt {
     ) / Math.max(dt, 1e-6);
 
     const right = view - Math.PI / 2;
-    this.root.position.x
+    this.at.x
       += (Math.sin(view) * this.velocity.y + Math.sin(right) * this.velocity.x) * dt;
-    this.root.position.z
+    this.at.z
       += (Math.cos(view) * this.velocity.y + Math.cos(right) * this.velocity.x) * dt;
 
     this.settle(above, dt);
@@ -257,8 +276,10 @@ export class PlayerAnt {
 
   /** Put her on the ground — or `above` it — facing her heading. */
   private settle(above: number, dt: number): void {
-    const { x, z } = this.root.position;
-    this.root.position.y = groundHeight(x, z) + above;
+    const { x, z } = this.at;
+    // Logical in, LOCAL out: everything the GPU sees is measured from
+    // the floating origin rather than from the island's corner.
+    this.root.position.set(localX(x), groundHeight(x, z) + above, localZ(z));
     this.root.rotation.y = this.heading;
     // Still lean with the ground she is over: an ant tips with the
     // hill she launched off, and losing that mid-jump reads as a snap.

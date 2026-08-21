@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
-  decodeGrid, findLandfall, heightAt, HEIGHT_SCALE, SAMPLES, slopeAt, SPAN, STEP,
+  decodeGrid, findLandfall, heightAt, HEIGHT_SCALE, UNITS_PER_METRE, SAMPLES, slopeAt, SPAN, STEP,
   type HeightGrid,
 } from '../src/world/kauai';
 
@@ -34,7 +34,10 @@ describe('the baked Kauai grid', () => {
       if (raw > 0) land++;
     }
     // Kauai's high point is 1598 m; the striding bake lands just under.
-    const summitMetres = (max * HEIGHT_SCALE) / 0.1;
+    // Through UNITS_PER_METRE rather than arithmetic on HEIGHT_SCALE:
+    // this line said `/ 0.1`, which quietly meant "and a unit is ten
+    // metres" and broke the moment the world went to true scale.
+    const summitMetres = (max * HEIGHT_SCALE) / UNITS_PER_METRE;
     expect(summitMetres).toBeGreaterThan(1500);
     expect(summitMetres).toBeLessThan(1650);
     // Roughly half the square is island, the rest is sea.
@@ -80,12 +83,13 @@ describe('sampling the grid', () => {
   });
 
   it('never returns the raw nodata marker as a height', () => {
-    // -32768 decimetres would be a 327-unit hole; the floor catches it.
+    // -32768 decimetres would be a 327,680-unit hole; the floor
+    // catches it at 600 metres down, which is deeper than the bake goes.
     for (let i = 0; i < grid.length; i += 997) {
       const col = i % SAMPLES;
       const row = (i - col) / SAMPLES;
       const h = heightAt(grid, col * STEP - SPAN / 2, row * STEP - SPAN / 2);
-      expect(h).toBeGreaterThan(-61);
+      expect(h).toBeGreaterThan(-600 * UNITS_PER_METRE - 1);
     }
   });
 

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { LookInput } from '../input/LookDrag';
 import { groundHeight } from '../world/heightfield';
+import { originAt } from '../world/origin';
 import { settings } from '../ui/settings';
 
 /**
@@ -33,9 +34,14 @@ export class FollowCamera {
   constructor(aspect: number) {
     const dial = settings();
     this.distance = dial.cameraDistance;
-    // Far enough to reach the open water; near kept off the floor so
+    // FAR reaches the whole island now — 5.6 million units — because
+    // the backdrop mesh is the real Kauai sitting at true distance. A
+    // range that wide would destroy an ordinary depth buffer, which is
+    // why the renderer runs a logarithmic one.
+    //
+    // Near kept off the floor so
     // the wide range does not cost depth precision on the terrain.
-    this.camera = new THREE.PerspectiveCamera(dial.fov, aspect, 0.5, 9000);
+    this.camera = new THREE.PerspectiveCamera(dial.fov, aspect, 0.5, 6_000_000);
   }
 
   /** Take the shape the settings ask for. */
@@ -98,12 +104,18 @@ export class FollowCamera {
     // length or so, enough that a slope behind her crops the frame
     // rather than filling it with dirt.
     // The higher of the ground and the WATERLINE. Over the sea the
-    // ground is the seabed — fifty units down — so clamping to it alone
-    // let the camera sink under the waves whenever she stood near the
-    // shore and the view swung out over open water. Easy to hit with
-    // the relief dial down, since the whole island then sits lower, but
-    // it was always there.
-    const floor = Math.max(groundHeight(out.x, out.z), 0) + 1.6;
+    // ground is the seabed — far down — so clamping to it alone let the
+    // camera sink under the waves whenever she stood near the shore and
+    // the view swung out over open water.
+    //
+    // ASKED IN WORLD COORDINATES. The camera lives in rendered space
+    // now, which is measured from the floating origin, and handing
+    // those straight to the heightfield asks about a spot near the
+    // middle of the island. That put the camera two kilometres up on a
+    // mountain summit while she stood on a beach, looking at nothing
+    // but sky.
+    const origin = originAt();
+    const floor = Math.max(groundHeight(out.x + origin.x, out.z + origin.z), 0) + 1.6;
     if (out.y < floor) out.y = floor;
   }
 

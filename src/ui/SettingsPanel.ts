@@ -46,6 +46,11 @@ const DIALS: Dialer[] = [
   { key: 'fov', label: 'Field of view', show: (v) => `${v.toFixed(0)}°` },
   { key: 'cameraDistance', label: 'Camera distance', show: (v) => v.toFixed(1) },
   {
+    key: 'flightSpeed',
+    label: 'Flight speed',
+    show: (v) => `${(v * 100).toFixed(0)}%`,
+  },
+  {
     key: 'terrainSmoothing',
     label: 'Terrain smoothing',
     onRelease: true,

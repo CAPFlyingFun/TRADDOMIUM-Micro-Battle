@@ -38,6 +38,12 @@ export interface Settings {
    * a crease shallower in proportion, smoothing removes it.
    */
   terrainSmoothing: number;
+  /**
+   * Whole-model flight tempo. 1 is the tuned baseline; the dial exists
+   * because the right number is a thing you feel on a phone, not a
+   * thing anyone derives at a keyboard.
+   */
+  flightSpeed: number;
   invertLookX: boolean;
   /** False is the shipped feel: dragging DOWN lifts the view. */
   invertLookY: boolean;
@@ -68,6 +74,7 @@ export const DEFAULTS: Readonly<Settings> = {
   // steeper than the real one, whose relief ratio is 2.84%.
   terrainRelief: 1.5,
   terrainSmoothing: 1,
+  flightSpeed: 1,
   invertLookX: false,
   invertLookY: false,
   invertStickY: false,
@@ -82,6 +89,7 @@ export const LIMITS = {
   cameraDistance: { min: 3.5, max: 16, step: 0.2 },
   terrainRelief: { min: 0.1, max: 1.5, step: 0.05 },
   terrainSmoothing: { min: 0, max: 1, step: 0.05 },
+  flightSpeed: { min: 0.25, max: 2, step: 0.05 },
 } as const;
 
 export type Dial = keyof typeof LIMITS;
