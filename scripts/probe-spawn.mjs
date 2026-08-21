@@ -146,16 +146,66 @@ try {
   if (walked < 5) throw new Error(`she would not walk after spawning: ${walked.toFixed(1)}`);
   notes.push(`walked ${walked.toFixed(0)} units after arriving`);
 
-  // ── Death and restart ────────────────────────────────────────────
-  // The loop has to close, or "start again" is a promise nothing keeps.
-  await page.evaluate(() => window.__island.kill());
-  await page.waitForSelector('[data-ui="death"]', { timeout: 20000 });
-  await page.click('[data-ui="choose-new-start"]');
-  await page.waitForSelector('[data-ui="island-canvas"]', { timeout: 30000 });
-  if (await page.$('[data-ui="death"]') !== null) {
-    throw new Error('the death screen survived the restart');
+  // ── Grace ────────────────────────────────────────────────────────
+  const grace = await page.evaluate(() => ({
+    seconds: window.__island.grace(),
+    shielded: window.__island.shielded(),
+    disarmed: window.__island.disarmed(),
+    chip: document.querySelector('[data-ui="grace"]')?.textContent ?? '',
+  }));
+  if (grace.seconds < 280) throw new Error(`she arrived with ${grace.seconds}s of grace`);
+  // The rule the whole thing exists for: never one without the other.
+  if (grace.shielded !== grace.disarmed) {
+    throw new Error('grace protected her without disarming her');
   }
-  notes.push('death returned to the spawn map');
+  if (!/SAFE/.test(grace.chip) || !/UNARMED/.test(grace.chip)) {
+    throw new Error(`the grace chip reads "${grace.chip}" — it must say both halves`);
+  }
+  notes.push(`grace ${Math.round(grace.seconds)}s, shield and disarm together`);
+
+  // ── The loop, three times over ───────────────────────────────────
+  // Once proves it can happen. Three proves nothing is leaking between
+  // runs — a scene left listening, a HUD left on screen, an origin left
+  // where the last queen died.
+  for (let round = 1; round <= 3; round++) {
+    await page.click('[data-ui="debug-die"]');
+    await page.waitForSelector('[data-ui="death"]', { timeout: 20000 });
+    await page.click('[data-ui="choose-new-start"]');
+    await page.waitForSelector('[data-ui="island-canvas"]', { timeout: 30000 });
+    if (await page.$('[data-ui="death"]') !== null) {
+      throw new Error(`the death screen survived restart ${round}`);
+    }
+
+    const next = await page.evaluate(() =>
+      window.__regions.find((r) => r.id === 'kealia') ?? window.__regions[0]);
+    const at = await page.evaluate(() => {
+      const r = document.querySelector('[data-ui="island-canvas"]').getBoundingClientRect();
+      return [r.left, r.top, r.width];
+    });
+    await page.mouse.click(at[0] + next.mapX * at[2], at[1] + next.mapY * at[2]);
+    await page.waitForSelector('[data-ui="spawn-here"]', { timeout: 20000 });
+    await page.click('[data-ui="spawn-here"]');
+    await page.waitForFunction(() => Boolean(window.__island), null, { timeout: 120000 });
+    await page.waitForFunction(() => window.__island.simTime() > 1, null, { timeout: 120000 });
+
+    const fresh = await page.evaluate(() => ({
+      grace: window.__island.grace(),
+      canvases: document.querySelectorAll('canvas').length,
+      deaths: document.querySelectorAll('[data-ui="death"]').length,
+      dieButtons: document.querySelectorAll('[data-ui="debug-die"]').length,
+      vitals: document.querySelectorAll('[data-ui="vitals"]').length,
+    }));
+    if (fresh.grace < 280) throw new Error(`round ${round} began with ${fresh.grace}s of grace`);
+    // One of everything. Two means the last life is still on screen.
+    for (const [what, many] of Object.entries(fresh)) {
+      if (what === 'grace') continue;
+      const want = what === 'deaths' ? 0 : 1;
+      if (many !== want) {
+        throw new Error(`round ${round} left ${many} ${what} on screen, wanted ${want}`);
+      }
+    }
+  }
+  notes.push('died and respawned three times over with nothing left behind');
 
   await page.screenshot({ path: 'probe-spawn.png' });
   if (errors.length) throw new Error(`page errors:\n${errors.join('\n')}`);

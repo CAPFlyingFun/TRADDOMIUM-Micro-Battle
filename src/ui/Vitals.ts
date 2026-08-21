@@ -48,7 +48,9 @@ interface Meter {
 export class Vitals {
   private readonly panel: HTMLDivElement;
   private readonly stamina: Meter;
+  private readonly grace: HTMLDivElement;
   private shown = '';
+  private shownGrace = '';
 
   constructor(host: HTMLElement, reserves: Reserves, caste = 'Queen') {
     this.panel = document.createElement('div');
@@ -96,6 +98,25 @@ export class Vitals {
       this.meter('💧', 'water', reserves.water).icon.parentElement!,
     );
 
+    // The grace chip. Hidden unless it is running, because a control
+    // or a state that is not doing anything should not be taking up
+    // room in the corner of a phone.
+    this.grace = document.createElement('div');
+    this.grace.dataset.ui = 'grace';
+    Object.assign(this.grace.style, {
+      display: 'none',
+      marginTop: '2px',
+      padding: '3px 7px',
+      borderRadius: '6px',
+      alignSelf: 'flex-start',
+      background: 'rgba(120, 190, 255, .16)',
+      border: '1px solid rgba(150, 205, 255, .5)',
+      color: 'rgba(190, 225, 255, .95)',
+      font: '600 10px/1.3 "JetBrains Mono", ui-monospace, monospace',
+      whiteSpace: 'nowrap',
+    } as Partial<CSSStyleDeclaration>);
+    stack.appendChild(this.grace);
+
     this.panel.append(portrait, stack);
     host.appendChild(this.panel);
   }
@@ -116,6 +137,27 @@ export class Vitals {
     this.stamina.icon.style.color = spent ? SPENT : FUEL;
     this.stamina.read.style.color = spent ? SPENT : GOLD;
     this.stamina.read.textContent = `${seconds.toFixed(1)}s`;
+  }
+
+  /**
+   * @param seconds how much grace is left, or null when it is over
+   *
+   * Says BOTH halves, always. "Safe" alone would read as a buff and
+   * send her looking for a fight she cannot win — she has no weapon
+   * either, and the chip has to say so in the same breath.
+   */
+  showGrace(seconds: number | null): void {
+    const state = seconds === null ? '' : `${Math.ceil(seconds)}`;
+    if (state === this.shownGrace) return;
+    this.shownGrace = state;
+    if (seconds === null) {
+      this.grace.style.display = 'none';
+      return;
+    }
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.ceil(seconds % 60);
+    this.grace.style.display = 'block';
+    this.grace.textContent = `🛡 SAFE · UNARMED  ${mins}:${String(secs % 60).padStart(2, '0')}`;
   }
 
   dispose(): void {

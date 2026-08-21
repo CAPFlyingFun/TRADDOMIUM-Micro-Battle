@@ -25,7 +25,9 @@ import { SettingsPanel } from '../ui/SettingsPanel';
 import { Vitals } from '../ui/Vitals';
 import { liveStat } from '../ant/castes';
 import { ActionPad, type Action } from '../input/ActionPad';
+import { DebugDie } from '../ui/DebugDie';
 import { Flight, setFlightScale } from '../ant/flight';
+import { Grace } from '../ant/grace';
 import {
   MOVING_RECOVERY, RESTING_RECOVERY, SPRINT_DRAIN,
 } from '../ant/stamina';
@@ -70,9 +72,12 @@ export class IslandScene {
   private readonly panel: SettingsPanel;
   private readonly vitals: Vitals;
   private readonly actions: ActionPad;
+  private readonly debugDie: DebugDie;
   private readonly climbButton: Action;
   private readonly descendButton: Action;
   private readonly flight = new Flight();
+  /** Five minutes of being left alone, and of leaving everything alone. */
+  private readonly grace = new Grace();
   private readonly ant = new PlayerAnt();
   private readonly clock = new THREE.Clock();
   private terrain!: TerrainStream;
@@ -198,6 +203,7 @@ export class IslandScene {
     // rather than being typed here — this is the only place the data
     // file and the HUD meet, and it is a read, not a copy.
     this.actions = new ActionPad(host);
+    this.debugDie = new DebugDie(host, () => this.kill());
     // Both buttons are ALWAYS there. A control that appears and
     // disappears under a thumb already resting on it is worse than one
     // that greys out, and the design says so explicitly.
@@ -235,6 +241,9 @@ export class IslandScene {
     window.addEventListener('keydown', debugKill);
     this.detachKill = () => window.removeEventListener('keydown', debugKill);
 
+    // A fresh queen gets her five minutes from the moment she arrives.
+    this.grace.begin();
+
     this.watchSize.observe(host);
     window.addEventListener('resize', this.onResize);
     window.addEventListener('orientationchange', this.onResize);
@@ -271,6 +280,9 @@ export class IslandScene {
       deadzone: () => REST_DEADZONE,
       fov: () => this.follow.camera.fov,
       kill: () => this.kill(),
+      grace: () => this.grace.seconds,
+      shielded: () => this.grace.shielded,
+      disarmed: () => this.grace.disarmed,
       airborne: () => this.flight.aloft,
       height: () => this.flight.height,
       flightState: () => this.flight.where,
@@ -341,6 +353,7 @@ export class IslandScene {
     this.panel.dispose();
     this.vitals.dispose();
     this.actions.dispose();
+    this.debugDie.dispose();
     this.detachSettings();
     this.detachKill();
     this.renderer.dispose();
@@ -461,7 +474,9 @@ export class IslandScene {
       this.pace, wants, this.stamina.spent,
       this.ant.pace, this.auto.active, this.auto.way,
     );
+    this.grace.update(dt);
     this.vitals.show(this.stamina.fraction, this.stamina.spent);
+    this.vitals.showGrace(this.grace.active ? this.grace.seconds : null);
 
     // The buttons say what they DO right now. On the ground the up
     // button is a takeoff and the down button has nothing to descend
