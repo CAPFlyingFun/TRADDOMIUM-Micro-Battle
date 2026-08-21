@@ -54,6 +54,41 @@ export const ORIGIN_UNIFORM = { value: new THREE.Vector2() };
  */
 export const GRAIN_TILE = 1.1;
 
+/**
+ * WHERE THE FINE DETAIL STOPS BEING DETAIL AND STARTS BEING NOISE.
+ *
+ * Measured in TILES PER PIXEL, not in metres, and that distinction is
+ * the whole fix. A four-centimetre tile stretched across fifty-six
+ * kilometres repeats about five thousand times in a two-hundred-metre
+ * view; mip-mapping copes with that seen head-on, but the ground is
+ * almost never seen head-on. At a grazing angle one pixel's footprint
+ * is enormously longer than it is wide, far past the sixteen-to-one an
+ * anisotropic filter will do, so the hardware blurs along one axis and
+ * keeps detail along the other — and the ground turns into long streaks
+ * running to the horizon. Joshua found it at Mānā Flats, which is the
+ * flattest ground on the island and therefore the most grazing.
+ *
+ * A distance threshold would not have fixed it, because the same
+ * distance is fine on a hillside and ruinous on a plain. The pixel
+ * FOOTPRINT knows the difference, and the shader can ask for it
+ * directly. Past this many tiles in one pixel there is no detail left
+ * to resolve, only aliasing, so the texture gives way to its own
+ * average colour and the ground goes quietly smooth.
+ */
+const DETAIL_FADE_FROM = 0.4;
+const DETAIL_FADE_TO = 3.0;
+
+/**
+ * EACH BAND'S OWN AVERAGE COLOUR, filled in when its image lands.
+ *
+ * The distance fade needs something to fade TO, and the honest answer
+ * is the colour that band actually is. Read off the loaded image rather
+ * than hand-picked, so re-baking a texture cannot leave the far
+ * hillside a colour the near one stopped being. The opening value is a
+ * mid grey, used only in the moment before the image arrives.
+ */
+export const BAND_AVERAGE: Record<string, { value: THREE.Color }> = {};
+
 /** Which file carries which band, ordered as they stack up the island. */
 export const BAND_FILES = [
   'reef', 'sand', 'grass', 'jungle', 'cliff', 'mountain', 'snow',
@@ -128,6 +163,12 @@ export function terrainMaterial(
     // the slider is doing, so the knob changes the SHAPE and not the map.
     shader.uniforms.relief = reliefUniform;
     shader.uniforms.grainTile = { value: GRAIN_TILE };
+    for (const name of BAND_FILES) {
+      shader.uniforms[`avg_${name}`] = BAND_AVERAGE[name]
+        ?? { value: new THREE.Color(0.5, 0.5, 0.5) };
+    }
+    shader.uniforms.fadeFrom = { value: DETAIL_FADE_FROM };
+    shader.uniforms.fadeTo = { value: DETAIL_FADE_TO };
     // WHERE THE WORLD ACTUALLY IS. Vertices reach the shader measured
     // from the floating origin, so tiling straight off them would slide
     // the whole ground texture sideways every time the origin moved —
@@ -150,6 +191,9 @@ export function terrainMaterial(
         uniform float bandTile;
         uniform float relief;
         uniform float grainTile;
+        uniform float fadeFrom, fadeTo;
+        uniform vec3 avg_reef, avg_sand, avg_grass, avg_jungle;
+        uniform vec3 avg_cliff, avg_mountain, avg_snow;
         uniform vec2 worldOffset;
         uniform float nearCut;
 
@@ -188,17 +232,84 @@ export function terrainMaterial(
           + texture2D(t_snow, bandUv).rgb * wSnow;
         ground /= total;
 
+        // HOW MUCH OF THE TEXTURE THIS PIXEL IS ACTUALLY COVERING.
+        // The derivatives give the footprint in tile units directly, so
+        // this reads "tiles per pixel" and needs no guess about how far
+        // away anything is. Whichever axis is longer wins, because it
+        // is the long axis that the anisotropic filter gives up on.
+        vec2 duvdx = dFdx(bandUv);
+        vec2 duvdy = dFdy(bandUv);
+        float tilesPerPixel = max(length(duvdx), length(duvdy));
+        float far = smoothstep(fadeFrom, fadeTo, tilesPerPixel);
+
+        // Past that, there is nothing left to resolve. Fade to the
+        // colour the band actually is, so the far hillside stays the
+        // right green instead of dissolving into streaks.
+        // NOT NAMED f-l-a-t. That is an interpolation qualifier in
+        // GLSL ES 3.0, so declaring a variable with the name is a
+        // syntax error, the shader fails to compile, and the terrain
+        // silently disappears — which is precisely how this read on the
+        // first attempt: an ant floating in an empty blue world.
+        vec3 mean =
+            avg_reef * wReef + avg_sand * wSand + avg_grass * wGrass
+          + avg_jungle * wJung + avg_cliff * wCliff
+          + avg_mountain * wMount + avg_snow * wSnow;
+        ground = mix(ground, mean / total, far);
+
         // The fine grain rides on top at a tile size that shares no
         // factor with the band tile, so close up there is always
         // something moving past even mid-way through one band tile.
+        // It is tiled tighter still, so it aliases sooner and has to go
+        // sooner — leaving it in would put the streaks back on its own.
         float g = texture2D(t_grain, (vGround.xz + worldOffset) / grainTile).g;
-        ground *= 0.80 + g * 0.42;
+        ground *= mix(0.80 + g * 0.42, 1.0, far);
 
         diffuseColor.rgb *= ground;
       `);
   };
 
   return material;
+}
+
+/**
+ * Read a band's average colour off the image itself.
+ *
+ * Drawn small and averaged rather than trusted to a one-pixel downscale,
+ * because how a browser filters an extreme reduction is its own
+ * business and not always a mean. Failure is not worth interrupting
+ * anything for: the opening grey is a perfectly serviceable colour to
+ * fade a distant hillside to, and the near ground is unaffected either
+ * way.
+ */
+function measureAverage(name: string, texture: THREE.Texture): void {
+  const image = texture.image as CanvasImageSource | undefined;
+  if (!image) return;
+  try {
+    const size = 8;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const paper = canvas.getContext('2d', { willReadFrequently: true });
+    if (!paper) return;
+    paper.drawImage(image, 0, 0, size, size);
+    const { data } = paper.getImageData(0, 0, size, size);
+    let r = 0;
+    let g = 0;
+    let b = 0;
+    for (let i = 0; i < data.length; i += 4) {
+      r += data[i];
+      g += data[i + 1];
+      b += data[i + 2];
+    }
+    const pixels = data.length / 4;
+    // The maps are sRGB and the shader works in linear light, so the
+    // average has to be converted or the far ground reads too bright.
+    BAND_AVERAGE[name].value
+      .setRGB(r / pixels / 255, g / pixels / 255, b / pixels / 255)
+      .convertSRGBToLinear();
+  } catch {
+    // A tainted canvas or a blocked context. Keep the grey.
+  }
 }
 
 /** Load the band maps, tiling and mip-mapped, from the public folder. */
@@ -209,7 +320,11 @@ export function loadBands(
   const anisotropy = renderer.capabilities.getMaxAnisotropy();
   const bands: Record<string, THREE.Texture> = {};
   for (const name of BAND_FILES) {
-    const texture = loader.load(`${import.meta.env.BASE_URL}kauai-tex/${name}.jpg`);
+    BAND_AVERAGE[name] ??= { value: new THREE.Color(0.5, 0.5, 0.5) };
+    const texture = loader.load(
+      `${import.meta.env.BASE_URL}kauai-tex/${name}.jpg`,
+      (loaded) => measureAverage(name, loaded),
+    );
     texture.wrapS = THREE.RepeatWrapping;
     texture.wrapT = THREE.RepeatWrapping;
     texture.colorSpace = THREE.SRGBColorSpace;
