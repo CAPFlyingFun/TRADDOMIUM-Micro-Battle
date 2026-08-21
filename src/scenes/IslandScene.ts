@@ -10,7 +10,10 @@ import {
   fasterPace, PACE_SPEED, REST_DEADZONE, slowerPace, type Pace,
 } from '../ant/pace';
 import { Stamina } from '../ant/stamina';
-import { groundDetail, groundHeight, ISLAND_SPAN } from '../world/heightfield';
+import {
+  FAR_VERTS, groundDetail, groundHeight, ISLAND_SPAN, NEAR_VERTS, SECTIONS,
+  terrainHeight,
+} from '../world/heightfield';
 import { findLandfall, type HeightGrid } from '../world/kauai';
 import { bakeGrain, GRAIN_SIZE } from '../world/groundTexture';
 import { loadBands, terrainMaterial } from '../world/terrainMaterial';
@@ -49,10 +52,7 @@ const SOIL_TINT = new THREE.Color(1.22, 0.98, 0.72);
 const SKY_COLOR = 0x9cc8e8;
 
 /** Section meshes per side. */
-const SECTIONS = 8;
 /** Vertices per side within a section, up close and far away. */
-const NEAR_VERTS = 65;
-const FAR_VERTS = 17;
 /**
  * How far the detailed geometry reaches. Drawing the whole island at
  * full resolution is half a million triangles a frame, most of it
@@ -431,7 +431,7 @@ function buildSection(
   const heights = new Float32Array(wide * wide);
   for (let r = 0; r < wide; r++) {
     for (let c = 0; c < wide; c++) {
-      heights[r * wide + c] = groundHeight(
+      heights[r * wide + c] = terrainHeight(
         originX + (c - 1) * step,
         originZ + (r - 1) * step,
       );

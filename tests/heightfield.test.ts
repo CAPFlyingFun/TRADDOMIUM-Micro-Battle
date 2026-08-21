@@ -2,7 +2,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
-  bandFor, groundDetail, groundHeight, hasGrid, ISLAND_SPAN, SAMPLE_STEP, useGrid,
+  bandFor, groundDetail, groundHeight, hasGrid, ISLAND_SPAN, SAMPLE_STEP,
+  terrainHeight, useGrid,
 } from '../src/world/heightfield';
 import { decodeGrid, heightAt, type HeightGrid } from '../src/world/kauai';
 
@@ -36,12 +37,16 @@ describe('the ground everyone shares', () => {
   it('leaves the sea alone', () => {
     // Relief must not pimple the water into islands, so anywhere the
     // baked grid is at or below the waterline the height passes through.
+    //
+    // Asked of the SOURCE, because that is where the relief is added.
+    // The drawn surface flattens each quad to a plane, which moves a
+    // seabed sample by a hair without any relief being involved.
     let checked = 0;
     for (let x = -ISLAND_SPAN / 2; x < ISLAND_SPAN / 2; x += 137) {
       for (let z = -ISLAND_SPAN / 2; z < ISLAND_SPAN / 2; z += 149) {
         const base = heightAt(grid, x, z);
         if (base > 0) continue;
-        expect(groundHeight(x, z)).toBe(base);
+        expect(terrainHeight(x, z)).toBe(base);
         checked++;
       }
     }
@@ -49,15 +54,23 @@ describe('the ground everyone shares', () => {
   });
 
   it('adds relief on land, but stays close to the real elevation', () => {
-    // The mesh draws quads about 11 units wide, so added relief has to
-    // stay small enough that the ant is never far off the drawn surface.
+    // This was written to keep the ant near the drawn surface, and it
+    // could never have done that. Bounding the RELIEF says nothing
+    // about the gap, because the larger term was the baked terrain
+    // itself being sampled at 10.94 units by a mesh drawing flat
+    // triangles between those samples — she sank 3.36 units with the
+    // relief comfortably inside this bound the whole time.
+    //
+    // standsOnDrawn.test.ts holds the real invariant. What is left
+    // here is the honest, narrower claim: the relief does not wander
+    // far from real Kauai.
     let moved = 0;
     let worst = 0;
     for (let x = -1200; x <= 1200; x += 53) {
       for (let z = -1200; z <= 1200; z += 61) {
         const base = heightAt(grid, x, z);
         if (base <= 10) continue;
-        const drift = Math.abs(groundHeight(x, z) - base);
+        const drift = Math.abs(terrainHeight(x, z) - base);
         worst = Math.max(worst, drift);
         if (drift > 1e-6) moved++;
       }

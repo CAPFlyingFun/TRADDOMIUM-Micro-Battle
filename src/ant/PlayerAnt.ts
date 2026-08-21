@@ -1,6 +1,12 @@
 import * as THREE from 'three';
 import { groundHeight } from '../world/heightfield';
 import { DIRECTION_EASE, SPEED_EASE } from './pace';
+
+/**
+ * How briskly her body takes up a new slope. Higher is quicker; this
+ * only has to outrun the eye, not the terrain.
+ */
+const SLOPE_EASE = 9;
 import { settings } from '../ui/settings';
 
 /** Everything the controls ask of her in one frame, in the CAMERA's frame. */
@@ -110,6 +116,7 @@ export class PlayerAnt {
     this.velocity = { x: 0, y: 0 };
     this.root.position.set(x, groundHeight(x, z), z);
     this.root.rotation.set(0, heading, 0);
+    this.body.rotation.x = 0;
   }
 
   /** Which way she is facing, in world radians. */
@@ -193,17 +200,17 @@ export class PlayerAnt {
     // the running-in-the-air cartoon, and it reads as a bug.
     if (above <= 0) this.gaitPhase += (this.pace * 2.2 + Math.abs(this.turned) * 5) * dt;
 
-    this.settle(above);
+    this.settle(above, dt);
   }
 
   /** Put her on the ground — or `above` it — facing her heading. */
-  private settle(above: number): void {
+  private settle(above: number, dt: number): void {
     const { x, z } = this.root.position;
     this.root.position.y = groundHeight(x, z) + above;
     this.root.rotation.y = this.heading;
     // Still lean with the ground she is over: an ant tips with the
     // hill she launched off, and losing that mid-jump reads as a snap.
-    this.alignToSlope(x, z);
+    this.alignToSlope(x, z, dt);
 
     // Gait bob: subtle, and only while striding.
     this.body.position.y = this.lift + Math.abs(Math.sin(this.gaitPhase)) * 0.05;
@@ -241,13 +248,22 @@ export class PlayerAnt {
     }
   }
 
-  /** Pitch the body to the terrain sampled a body-length ahead/behind. */
-  private alignToSlope(x: number, z: number): void {
+  /**
+   * Pitch the body to the terrain sampled a body-length ahead/behind.
+   *
+   * EASED, because the ground is flat triangles. She reads the surface
+   * that is drawn (see heightfield.ts), and a drawn triangle is 10.94
+   * units across against her 1 — so both samples usually land on the
+   * same plane and the pitch is constant right up until she crosses an
+   * edge, where it would step. The ease turns the step into a lean.
+   */
+  private alignToSlope(x: number, z: number, dt: number): void {
     const look = 0.9;
     this.slopeAhead.set(Math.sin(this.heading) * look, 0, Math.cos(this.heading) * look);
     const ahead = groundHeight(x + this.slopeAhead.x, z + this.slopeAhead.z);
     const behind = groundHeight(x - this.slopeAhead.x, z - this.slopeAhead.z);
-    this.body.rotation.x = Math.atan2(ahead - behind, look * 2) * 0.8;
+    const wants = Math.atan2(ahead - behind, look * 2) * 0.8;
+    this.body.rotation.x += (wants - this.body.rotation.x) * closes(SLOPE_EASE, dt);
   }
 
   private buildBody(): void {

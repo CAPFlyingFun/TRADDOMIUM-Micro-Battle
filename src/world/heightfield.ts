@@ -5,6 +5,26 @@
  * tests all come through this module, so the island you see and the
  * island you walk can never drift apart.
  *
+ * THEY HAD DRIFTED APART. That claim was true of the SOURCE and false
+ * of the surface. `terrainHeight` is a smooth continuous function, but
+ * the mesh drawn from it is flat triangles 10.94 units across — eleven
+ * times the length of the ant — sampling that function only at their
+ * corners. Between corners the two disagree, and measured across the
+ * spawn area the drawn surface sat as much as 3.36 units ABOVE the
+ * walked one. She stood correctly on a surface nobody could see, three
+ * body lengths under the one they could, and clipped through it.
+ *
+ * So there are two heights now and the distinction is the whole point:
+ *
+ *   terrainHeight  the smooth source. What the mesh is BUILT from.
+ *   groundHeight   the drawn triangle. What anything STANDS on.
+ *
+ * Everything that stands, walks, or clamps to the floor uses the
+ * second, which makes the gap zero by construction rather than small
+ * by luck. Raising the mesh resolution alone could not have fixed
+ * this: at 513 verts a section — a quarter of a million vertices —
+ * she still sank 0.06 units, and the cost is not payable on a phone.
+ *
  * Underneath is real Kauai (see `kauai.ts`). On top of it sits a little
  * procedural relief, because the baked grid samples every 5.47 units
  * and interpolates dead smooth between them, which at ant scale reads
@@ -66,10 +86,13 @@ function valueNoise(x: number, y: number, salt: number): number {
 }
 
 /**
- * Ground height at (x, z): real Kauai plus a touch of relief, which
- * fades out below the waterline so it cannot pimple the sea.
+ * The SOURCE surface at (x, z): real Kauai plus a touch of relief,
+ * which fades out below the waterline so it cannot pimple the sea.
+ *
+ * This is what the terrain mesh is built from. It is not what anything
+ * stands on — see `groundHeight`, which is the surface that gets drawn.
  */
-export function groundHeight(x: number, z: number): number {
+export function terrainHeight(x: number, z: number): number {
   if (!grid) return 0;
   const base = heightAt(grid, x, z);
   if (base <= 0) return base;
@@ -79,6 +102,62 @@ export function groundHeight(x: number, z: number): number {
   // meets the water cleanly.
   const shore = Math.min(1, base / 10);
   return base + relief * shore;
+}
+
+/**
+ * THE TERRAIN LATTICE.
+ *
+ * The island is drawn as SECTIONS sections a side, each a grid of
+ * NEAR_VERTS vertices. These live here rather than in the scene
+ * because the surface anything stands on is a function of them: a
+ * mesh built on one lattice and a walker standing on another is
+ * exactly the bug this module now exists to prevent.
+ */
+export const SECTIONS = 8;
+export const NEAR_VERTS = 65;
+export const FAR_VERTS = 17;
+const SECTION_SPAN = SPAN / SECTIONS;
+/** Distance between drawn vertices, in world units. */
+export const NEAR_STEP = SECTION_SPAN / (NEAR_VERTS - 1);
+
+/**
+ * Ground height at (x, z): the height of the TRIANGLE THAT IS DRAWN.
+ *
+ * The mesh splits each quad along the bl-tr diagonal (see the index
+ * order in the scene's `buildSection`), so which of the two triangles
+ * a point falls in decides its height, and the answer is a plane
+ * rather than the smooth source. Reproducing that here is what puts
+ * the ant on the surface the player can see.
+ *
+ * The lattice is the NEAR mesh's, because the section she is standing
+ * in is always the near one — the far meshes only take over past
+ * NEAR_RANGE, which is a thousand body lengths away.
+ */
+export function groundHeight(x: number, z: number): number {
+  if (!grid) return 0;
+  const step = NEAR_STEP;
+  // Snap to the lattice the mesh is built on. Sections start at the
+  // island's corner, and every section's grid is in phase with every
+  // other, so one global lattice describes them all.
+  const gx = (x + SPAN / 2) / step;
+  const gz = (z + SPAN / 2) / step;
+  const ix = Math.floor(gx);
+  const iz = Math.floor(gz);
+  const fx = gx - ix;
+  const fz = gz - iz;
+  const corner = (cx: number, cz: number) =>
+    terrainHeight(cx * step - SPAN / 2, cz * step - SPAN / 2);
+
+  // Upper-left triangle, then the lower-right one. Each is a plane
+  // through three corners, read off two edge gradients.
+  if (fx + fz <= 1) {
+    const tl = corner(ix, iz);
+    return tl + (corner(ix + 1, iz) - tl) * fx + (corner(ix, iz + 1) - tl) * fz;
+  }
+  const br = corner(ix + 1, iz + 1);
+  return br
+    + (corner(ix, iz + 1) - br) * (1 - fx)
+    + (corner(ix + 1, iz) - br) * (1 - fz);
 }
 
 /**
