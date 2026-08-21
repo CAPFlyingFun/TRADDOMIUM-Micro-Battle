@@ -210,29 +210,45 @@ try {
       // THE ACCEPTANCE CRITERION, in Joshua's words: at any playable
       // camera angle, approaching an LOD boundary must never reveal sky
       // or water through land.
+      //
+      // The pixels only nominate; the rays convict. Of twenty-eight
+      // suspects in one frame, three were holes and the rest were the
+      // open Pacific and coarse shoreline painted in reef colours — and
+      // at Hanalei a whole bay looked like a fault because the backdrop
+      // bridges it at 437 metres a vertex. So a frame is judged by how
+      // many of its suspects survive a ray, not by how many it has.
       if (seen > 0) {
         const rows = pass.pixels.found.map((p) => p.y);
         // Say WHICH two tiers met there. A pixel count tells you the
         // build is broken; only the ray tells you where to go.
         const picks = pass.pixels.found.filter((_, i) =>
-          i % Math.max(1, Math.floor(seen / 6)) === 0).slice(0, 6);
+          i % Math.max(1, Math.floor(seen / 10)) === 0).slice(0, 10);
         const rays = await page.evaluate(
           ({ list, w, h }) => list.map((p) =>
             window.__island.sightThroughPixel(p.x / w, p.y / h)),
           { list: picks, w: pass.pixels.width, h: pass.pixels.height },
         );
+        const guilty = rays.filter((r) => r.hole).length;
         for (const ray of rays) {
           console.log(
             `      px ${(ray.u * pass.pixels.width).toFixed(0)},`
             + `${(ray.v * pass.pixels.height).toFixed(0)}  `
             + ray.hits.map((x) =>
-              `${x.drawn ? '' : '~'}${x.tier}@${Math.round(x.square)}`).join(' '),
+              `${x.drawn ? '' : '~'}${x.tier}@${Math.round(x.square)}`
+              + (x.tier === 'sea' ? `[ground ${Math.round(x.truth)}]` : '')).join(' '),
           );
         }
-        throw new Error(
-          `${region} candidate ${rolls.indexOf(roll)}, ${pass.tag}: `
-          + `${seen} pixels show sky or water through land `
-          + `(screen rows ${Math.min(...rows)}-${Math.max(...rows)})`,
+        if (guilty > 0) {
+          throw new Error(
+            `${region} candidate ${rolls.indexOf(roll)}, ${pass.tag}: `
+            + `${guilty} of ${rays.length} sampled suspects are real holes, `
+            + `from ${seen} suspect pixels `
+            + `(screen rows ${Math.min(...rows)}-${Math.max(...rows)})`,
+          );
+        }
+        console.log(
+          `      ${seen} suspects, none of ${rays.length} sampled `
+          + 'survived a ray — sea where the heightfield says sea',
         );
       }
       // THE SEAM NUMBER IS CONTEXT, NOT A VERDICT — and it took a run

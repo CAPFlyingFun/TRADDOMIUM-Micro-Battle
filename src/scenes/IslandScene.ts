@@ -14,9 +14,9 @@ import {
   groundHeight, ISLAND_SPAN, setRelief, setSmoothing, smoothingAmount,
 } from '../world/heightfield';
 import { findLandfall, type HeightGrid } from '../world/kauai';
-import { world, type WorldPoint } from '../world/coords';
+import { local, world, type WorldPoint } from '../world/coords';
 import { TerrainStream, TIER_CUTS } from '../world/TerrainStream';
-import { originAt, rebaseFor, setOrigin, toLocal,
+import { originAt, rebaseFor, setOrigin, toLocal, toWorld,
 } from '../world/origin';
 import { bakeGrain, GRAIN_SIZE } from '../world/groundTexture';
 import {
@@ -674,6 +674,7 @@ export class IslandScene {
     const look = (
       targets: THREE.Object3D[], tier: string, cut: number,
     ) => caster.intersectObjects(targets, false).map((hit) => {
+      const there = toWorld(local(hit.point.x, hit.point.z));
       // The shader's own test, repeated exactly: a SQUARE measured from
       // the camera, because the tier inside is a square window.
       const square = Math.max(
@@ -684,6 +685,17 @@ export class IslandScene {
         distance: hit.distance,
         square,
         drawn: cut <= 0 || square >= cut,
+        /**
+         * What the heightfield says is HERE — the one authority.
+         *
+         * Needed because a coarse tier bridges water. The backdrop has
+         * a vertex every 437 metres, so at Hanalei it draws land clean
+         * across the mouth of the bay; the finer tier, which knows
+         * better, draws the bay. Discarding the backdrop there and
+         * showing water is the tiers working, not failing, and without
+         * this the probe cries wolf at every bay on the island.
+         */
+        truth: groundHeight(there.wx, there.wz),
       };
     });
 
@@ -717,7 +729,11 @@ export class IslandScene {
        * was discarded in favour of a finer tier, and no finer tier
        * turned up to cover it.
        */
-      hole: uncovered && (seen === null || seen.tier === 'sea'),
+      // Sea in front of land is only a fault where there should BE
+      // land. Ask the heightfield rather than the picture.
+      hole: uncovered
+        && (seen === null
+          || (seen.tier === 'sea' && (seen as { truth: number }).truth > 0)),
       /**
        * Ground still visible, but a long way behind where the
        * discarded surface was.
