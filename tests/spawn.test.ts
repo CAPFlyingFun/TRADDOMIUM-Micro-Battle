@@ -17,6 +17,7 @@ import { geoApart, geoToWorld, ISLAND_CENTRE, worldToGeo } from '../src/world/ge
 import { groundHeight, ISLAND_SPAN, useGrid } from '../src/world/heightfield';
 import { decodeGrid, UNITS_PER_METRE, type HeightGrid } from '../src/world/kauai';
 import { chunkAt, sameChunk, world } from '../src/world/coords';
+import { MAP_SIZE, mapToWorld, worldToMap } from '../src/ui/islandMap';
 
 const ASSET = fileURLToPath(new URL('../public/kauai-1025.bin', import.meta.url));
 let grid: HeightGrid;
@@ -188,5 +189,34 @@ describe('spawns are global, not rendered', () => {
         expect(sameChunk(chunkAt(world(candidate.at.wx, candidate.at.wz)), owner)).toBe(true);
       }
     }
+  });
+});
+
+describe('the map is presentation, never a location', () => {
+  it('round-trips a world point through map pixels', () => {
+    for (const region of REGIONS) {
+      const at = geoToWorld(region.around);
+      const dot = worldToMap(at.wx, at.wz);
+      const back = mapToWorld(dot.x, dot.y);
+      expect(back.wx).toBeCloseTo(at.wx, 3);
+      expect(back.wz).toBeCloseTo(at.wz, 3);
+    }
+  });
+
+  it('puts every region inside the drawn map', () => {
+    for (const region of REGIONS) {
+      const at = geoToWorld(region.around);
+      const dot = worldToMap(at.wx, at.wz);
+      expect(dot.x, region.id).toBeGreaterThan(0);
+      expect(dot.x, region.id).toBeLessThan(MAP_SIZE);
+      expect(dot.y, region.id).toBeGreaterThan(0);
+      expect(dot.y, region.id).toBeLessThan(MAP_SIZE);
+    }
+  });
+
+  it('draws north at the top', () => {
+    const north = geoToWorld({ lat: 22.2, lon: -159.5 });
+    const south = geoToWorld({ lat: 21.9, lon: -159.5 });
+    expect(worldToMap(north.wx, north.wz).y).toBeLessThan(worldToMap(south.wx, south.wz).y);
   });
 });

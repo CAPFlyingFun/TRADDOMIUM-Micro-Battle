@@ -14,6 +14,7 @@ import {
   groundHeight, ISLAND_SPAN, setRelief, setSmoothing, smoothingAmount,
 } from '../world/heightfield';
 import { findLandfall, type HeightGrid } from '../world/kauai';
+import { world, type WorldPoint } from '../world/coords';
 import { TerrainStream, TIER_CUTS } from '../world/TerrainStream';
 import { originAt, rebaseFor, setOrigin } from '../world/origin';
 import { bakeGrain, GRAIN_SIZE } from '../world/groundTexture';
@@ -112,6 +113,12 @@ export class IslandScene {
   constructor(
     private readonly host: HTMLElement,
     grid: HeightGrid,
+    /**
+     * Where the colony begins, in GLOBAL coordinates. Comes from the
+     * spawn map; falls back to a search of the real terrain so the
+     * island lab still boots straight into a scene on its own.
+     */
+    start?: { at: WorldPoint; heading: number },
   ) {
     this.renderer = new THREE.WebGLRenderer({
       antialias: true,
@@ -158,14 +165,19 @@ export class IslandScene {
     // the hill she was buried in simply vanished and left open sea.
     // Pick the opening spot from the real terrain rather than a
     // hand-typed coordinate a re-bake could drop into the sea.
-    const start = findLandfall(grid, 3, 20);
-    // Put the origin where she starts, so the first frame is already
-    // rendering small numbers rather than five-million-unit ones.
-    setOrigin(start.x, start.z);
+    const found = start ?? (() => {
+      const spot = findLandfall(grid, 3, 20);
+      return { at: world(spot.x, spot.z), heading: Math.atan2(-spot.x, -spot.z) };
+    })();
+    // ORIGIN FIRST. Put it where she starts, so the very first frame
+    // renders small numbers rather than five-million-unit ones — and
+    // so the terrain that gets cut below is cut around HER, not around
+    // wherever the origin happened to be left.
+    setOrigin(found.at.wx, found.at.wz);
     const seated = originAt();
     ORIGIN_UNIFORM.value.set(seated.x, seated.z);
-    const facing = Math.atan2(-start.x, -start.z);
-    this.ant.placeAt(start.x, start.z, facing);
+    const facing = found.heading;
+    this.ant.placeAt(found.at.wx, found.at.wz, facing);
     this.terrain.follow(this.ant.where);
     this.reshapeIsland();
     this.scene.add(this.ant.root);

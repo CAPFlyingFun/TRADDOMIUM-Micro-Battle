@@ -1,4 +1,5 @@
 import { IslandScene } from './scenes/IslandScene';
+import { GameFlow } from './ui/GameFlow';
 import { RotateGate } from './ui/rotateGate';
 import { fitViewport } from './ui/viewportFit';
 import { load as loadSettings } from './ui/settings';
@@ -40,14 +41,21 @@ Object.assign(notice.style, {
 notice.textContent = 'Surveying the island…';
 host.appendChild(notice);
 
+/**
+ * `?scene=island` still drops straight into the world, because the
+ * island lab is how movement and terrain get worked on and a menu in
+ * front of it is thirty seconds a day of nothing. The GAME boots into
+ * the menu; the lab boots into the island. Both are real entry points.
+ */
 const scenes: Record<string, (h: HTMLElement, grid: HeightGrid) => unknown> = {
   island: (h, grid) => new IslandScene(h, grid),
+  game: (h, grid) => new GameFlow(h, grid),
 };
 
 try {
   const grid = await loadGrid();
   useGrid(grid);
-  const requested = new URLSearchParams(location.search).get('scene') ?? 'island';
+  const requested = new URLSearchParams(location.search).get('scene') ?? 'game';
   (scenes[requested] ?? scenes['island'])(host, grid);
   notice.remove();
   // Sits above whatever scene is running, so every lab gets it.

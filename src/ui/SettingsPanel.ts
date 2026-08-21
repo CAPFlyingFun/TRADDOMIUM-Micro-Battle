@@ -91,6 +91,11 @@ export class SettingsPanel {
     this.panel.remove();
   }
 
+  /** Open it from outside — the main menu's SETTINGS button. */
+  reveal(): void {
+    this.show(true);
+  }
+
   private show(open: boolean): void {
     this.open = open;
     this.panel.style.display = open ? 'flex' : 'none';
