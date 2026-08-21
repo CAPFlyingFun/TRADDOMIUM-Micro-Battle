@@ -171,7 +171,19 @@ for a mouse and read as her trailing you; 30° at a gentle ease of 3 is
 the device answer. If she still feels like she is dragging, the
 deadzone is the number to change, not the rate.
 
-**Her legs move.** The placeholder body strides in an alternating
+**Her body** is Thronemound's wingless fire ant queen — rigged, but
+carrying no animations yet, so she does not stride. Her size is
+MEASURED rather than typed: the mesh is scaled on load until its length
+matches `bodyLength` in `castes.ts`, which makes the stat table the
+authority on how big she is. The placeholder she replaced was about
+14 mm against a stat sheet that says 10, so she is now visibly smaller
+and correctly so.
+
+She is playable in the placeholder from the first frame and quietly
+becomes herself when the file lands; a failed load leaves the
+placeholder up rather than an ant-shaped hole.
+
+**The placeholder's legs move.** It strides in an alternating
 tripod — front and back one side with the middle of the other — driven
 by the ground she covers *and* the ground she turns through. Turning on
 the spot with six frozen legs is most of why a rotation used to read as

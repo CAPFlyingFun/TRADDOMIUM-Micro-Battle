@@ -19,6 +19,7 @@ import { Vitals } from '../ui/Vitals';
 import { liveStat } from '../ant/castes';
 import { ActionPad, type Action } from '../input/ActionPad';
 import { Jump, JUMP_HOLD } from '../ant/jump';
+import { loadQueen } from '../ant/queenModel';
 import { onChange } from '../ui/settings';
 
 /**
@@ -154,6 +155,13 @@ export class IslandScene {
     this.look.setYaw(-facing);
     this.follow = new FollowCamera(this.aspect());
     this.follow.snapTo(this.ant.root, -facing);
+
+    // She plays in stick-legs from the first frame and becomes herself
+    // when the mesh lands. A failed load leaves the placeholder up,
+    // which is a playable game rather than an ant-shaped hole.
+    void loadQueen()
+      .then(({ model }) => { if (!this.disposed) this.ant.wear(model); })
+      .catch((why) => console.warn('the queen model did not load', why));
 
     this.watchSize.observe(host);
     window.addEventListener('resize', this.onResize);

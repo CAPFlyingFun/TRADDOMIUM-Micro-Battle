@@ -70,11 +70,38 @@ export class PlayerAnt {
   /** What she is actually doing, camera frame, world units per second. */
   private velocity = { x: 0, y: 0 };
   private readonly body = new THREE.Group();
+  /** The placeholder parts, kept together so they can be taken off. */
+  private readonly placeholder = new THREE.Group();
+  /** How high the body rides above her feet. Zero once she is real. */
+  private lift = 0.34;
   private readonly slopeAhead = new THREE.Vector3();
 
   constructor() {
     this.buildBody();
     this.root.add(this.body);
+  }
+
+  /**
+   * Put the real mesh on and take the placeholder off.
+   *
+   * Done as a swap rather than as a constructor argument because the
+   * model arrives over the network: she is playable in stick-legs from
+   * the first frame and quietly becomes herself when the file lands,
+   * instead of the island waiting on a download.
+   *
+   * The legs go with the placeholder. The real model has a rig but no
+   * animations yet, so there is nothing to swing — and a stride cycle
+   * driving bones that are not there would be a silent no-op pretending
+   * to be a gait.
+   */
+  wear(model: THREE.Object3D): void {
+    this.body.remove(this.placeholder);
+    this.legs.length = 0;
+    // Her feet are already on her own zero; the bob is what is left of
+    // the placeholder's stilts.
+    this.lift = 0;
+    this.body.position.y = 0;
+    this.body.add(model);
   }
 
   placeAt(x: number, z: number, heading = 0): void {
@@ -179,7 +206,7 @@ export class PlayerAnt {
     this.alignToSlope(x, z);
 
     // Gait bob: subtle, and only while striding.
-    this.body.position.y = 0.34 + Math.abs(Math.sin(this.gaitPhase)) * 0.05;
+    this.body.position.y = this.lift + Math.abs(Math.sin(this.gaitPhase)) * 0.05;
     if (above > 0) this.tuck(); else this.stride();
   }
 
@@ -250,7 +277,7 @@ export class PlayerAnt {
         const yaw = side * (i - 1) * 0.35;
         leg.rotation.z = roll;
         leg.rotation.y = yaw;
-        this.body.add(leg);
+        this.placeholder.add(leg);
         // Alternating tripod: front and back on one side share a
         // phase with the middle leg of the other.
         const tripod = (side < 0) === (i === 1);
@@ -261,10 +288,11 @@ export class PlayerAnt {
       antenna.position.set(0.1 * side, 0.24, 0.62);
       antenna.rotation.x = -0.9;
       antenna.rotation.z = side * 0.5;
-      this.body.add(antenna);
+      this.placeholder.add(antenna);
     }
 
-    this.body.add(thorax, head, gaster);
-    this.body.position.y = 0.34;
+    this.placeholder.add(thorax, head, gaster);
+    this.body.add(this.placeholder);
+    this.body.position.y = this.lift;
   }
 }
