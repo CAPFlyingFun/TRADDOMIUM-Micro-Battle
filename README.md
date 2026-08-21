@@ -225,15 +225,31 @@ aiming sideways lands at about `x 0.90, y 0.08`.
 **Sprint** — raises the ceiling rather than adding a gear, and is the
 only thing that costs anything. Picking a pace turns it off: asking for
 a walk means a walk, and a sprint sitting over the top of the selection
-made every pace tap look ignored. Its reserve reads as an amber bar
-down the RIGHT edge of the sprint row — green means live, and a green
-fill there read as "sprint is selected" when it only ever meant "there
-is sprint left in her". Run it dry and she drops to the
-selected pace rather than stopping, Auto included; it refills on its
+made every pace tap look ignored. Its reserve reads as the amber ⚡
+row in the vitals cluster, top left — the meters about her all live in
+one place, and two gauges of the same number in two corners is one
+gauge too many. All that stays on the sprint row is the row itself
+going grey when there is nothing left to sprint on, which is a
+statement about the button rather than a second meter. Run it dry and
+she drops to the selected pace rather than stopping, Auto included; it refills on its
 own, faster standing still, and the next sprint has to be *asked for
 again* — a held key will not pick it back up as the bar creeps over its
 re-arm mark. Per the project rule, a bar may only move if there is a
 way to move it back.
+
+**Jump** — the ⬆️ button, bottom right, on the action thumb. 12% of the
+reserve per jump, which is eight in a row from full and no ninth.
+Nothing comes back while she is off the ground: catching your breath
+mid-leap is what would turn eight jumps into as many as you like. A
+sprint still costs while airborne, because a free sprint would be the
+same cheat wearing a different hat. The button goes dim when she cannot
+afford one.
+
+It is deliberately the smallest piece of getting off the ground.
+Flight is the real target, and it needs a body with a height above the
+terrain and a vertical velocity — which is all a jump is. Flight will
+be that arc held open under power, spending the SAME reserve: see
+`MASTERROADMAP.md` §7.
 
 **Camera** — drag anywhere the controls are not. It holds a **world**
 bearing and stays where you put it. It cannot be bolted to her facing,
@@ -241,7 +257,7 @@ because her facing follows it: if the view chased her too, the pair
 would spin.
 
 On desktop: **W / S** manual forward and back, **A / D** sidestep,
-**1 / 2 / 3** pick a pace, **Shift** sprints, **=** toggles Auto,
+**1 / 2 / 3** pick a pace, **Shift** sprints, **Space** jumps, **=** toggles Auto,
 **Q / E** swing the camera and **R / F** lift it.
 
 Dragging **down** lifts the view — you are pushing the view, not the

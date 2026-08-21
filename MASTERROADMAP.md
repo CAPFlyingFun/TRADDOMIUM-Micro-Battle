@@ -305,17 +305,68 @@ Flight is not a decorative animation. It is a gameplay capability used for:
 - searching for a mate
 - landing to found the colony
 
+## 7.1 One stamina pool (decided 2026-08-21, Joshua)
+
+**Supersedes the `flightStamina` line that used to sit in the stat list
+below.** Flight spends the SAME reserve a sprint spends. Two pools would
+be two bars on the HUD, two recovery rates to tune, and two answers to
+the question "how tired is she" — which is one bar, one rate and one
+answer too many.
+
+Everything that costs her effort now draws on the one number: sprinting,
+jumping, taking off, holding airspeed.
+
+## 7.2 Flight as an energy trade
+
+Flight is modelled the way an aircraft trades energy, not as a hover
+with a fuel gauge:
+
+- **Altitude is stored energy.** Climbing costs the reserve. Descending
+  pays some of it back.
+- **The pace selector still selects.** The same crawl / walk / run /
+  sprint column sets a target airspeed in the air, and the faster the
+  setting the harder the drain.
+- **Airspeed above the setting is free lift.** Give up height and she
+  goes faster than the setting asks for; while airspeed exceeds the
+  selected speed she is gaining rather than spending, so a dive is how
+  you get your breath back in the air.
+- **Height costs.** Sitting high and slow drains; the reserve is what
+  keeps her up there.
+
+The result is a loop the player can actually fly: climb while you have
+it, trade height for speed when you run low, and land before the trade
+runs out.
+
+## 7.3 Getting up and getting down
+
+- **Takeoff needs a running start.** Press fly while running or
+  sprinting; standing still is not enough.
+- **Landing is a button** — or it happens to you. Run the reserve out
+  and she glides down rather than dropping.
+- **A landing forced by exhaustion locks flight** until the reserve is
+  FULL again, the same shape as the sprint re-arm rule: you do not get
+  to stutter in and out of a mechanic on an empty bar.
+
+## 7.4 Jump first (shipped)
+
+A jump button was built before any of this, deliberately: it is the
+smallest piece that needs a body with a height above the terrain and a
+vertical velocity, and none of the parts that make flight hard. 12% of
+the reserve per jump, eight in a row from full, and nothing recovers
+while she is off the ground. Flight is that arc held open under power.
+
 Possible future stats:
 
 - flightSpeed
-- flightStamina
+- flightDrain (multiple of the ground sprint cost, at full airspeed)
 - flightAcceleration
 - flightTurnRate
 - takeoffCost
 - landingRecovery
 - aerial maneuverability
 
-These do not need to be implemented until flight reaches its proper development milestone.
+These do not need to be implemented until flight reaches its proper
+development milestone.
 
 The Queen eventually loses normal flight after committing to founding and shedding her wings.
 
@@ -2091,6 +2142,12 @@ Flight is now a known future Queen mechanic.
 
 The schema should allow it without pretending it is already wired.
 
+**Done, with one change of direction.** `castes.ts` carries inert
+`flightSpeed`, `climbRate` and `flightDrain` slots, and every life state
+after the wings come off scales all three to zero, so flight cannot
+arrive able to launch a laying queen. There is deliberately NO
+`flightStamina` — see 7.1: one pool.
+
 ## 49.4 Male ant domain model
 
 Add a male Fire Ant model later.
@@ -2098,6 +2155,11 @@ Add a male Fire Ant model later.
 Decide whether male reproductive ants belong in the same `CasteStats` abstraction or deserve a separate ant/reproductive profile.
 
 Do not force the wrong abstraction simply to reuse an enum.
+
+**Decided.** He is declared OUTSIDE `Caste`, as `MALE` with its own
+handle and a null stat table. He is a sex, not a colony job; folding him
+into the enum would put him in every switch over work he does not do.
+His stat table arrives the day he does — a short one.
 
 ## 49.5 Nest blueprint data
 

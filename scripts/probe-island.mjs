@@ -55,6 +55,20 @@ try {
     );
   };
 
+  /**
+   * Wait for the reserve to come back rather than for a fixed number of
+   * simulated seconds. A refill is ~14 seconds of PLAY, and 14 seconds
+   * of play under SwiftShader is a long wall-clock wait to spend on a
+   * fixed guess — this stops the moment she is actually full.
+   */
+  const catchBreath = async () => {
+    await page.waitForFunction(
+      () => window.__island.stamina() >= 0.999,
+      null,
+      { timeout: 300000 },
+    );
+  };
+
   const start = await island(() => ({
     ground: window.__island.groundUnderfoot(),
     triangles: window.__island.triangles(),
@@ -491,6 +505,66 @@ try {
   });
   await page.waitForTimeout(500);
 
+  // ── Jump ─────────────────────────────────────────────────────────
+  // Full bar before counting anything, or "eight in a row" is a
+  // measurement of whatever she happened to have left.
+  await catchBreath();
+  const reserveBefore = await page.evaluate(() => window.__island.stamina());
+
+  const groundY = await page.evaluate(() => window.__island.where()[1]);
+  await page.click('[data-action="jump"]');
+  const peak = await page.evaluate(async () => {
+    const island = window.__island;
+    let top = 0;
+    // Watch the WORLD position, not the mechanic's own number: the
+    // question is whether the body actually left the terrain.
+    for (let i = 0; i < 400 && (i < 4 || island.airborne()); i++) {
+      top = Math.max(top, island.where()[1]);
+      await new Promise((go) => requestAnimationFrame(go));
+    }
+    return { top, aloft: island.airborne(), reserve: island.stamina() };
+  });
+  if (peak.top - groundY < 0.4) {
+    throw new Error(`the jump did not leave the ground: rose ${(peak.top - groundY).toFixed(2)}`);
+  }
+  if (peak.aloft) throw new Error('she never came down from the jump');
+  if (peak.reserve > reserveBefore - 0.1) {
+    throw new Error(
+      `the jump was free: ${reserveBefore.toFixed(2)} -> ${peak.reserve.toFixed(2)}`,
+    );
+  }
+
+  // Eight in a row, then a refusal. Clicking as fast as the page will
+  // take it, which is the thing a player actually does.
+  await catchBreath();
+  const hammered = await page.evaluate(async () => {
+    const island = window.__island;
+    const button = document.querySelector('[data-action="jump"]');
+    const frame = () => new Promise((go) => requestAnimationFrame(go));
+    let given = 0;
+    for (let i = 0; i < 2000; i++) {
+      if (island.airborne()) {
+        await frame();
+        continue;
+      }
+      button.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+      // Count what she DOES, not what the button looks like. Reading
+      // the dim styling instead would count a 140ms opacity fade as a
+      // refusal every time she landed.
+      await frame();
+      await frame();
+      if (!island.airborne()) break;
+      given += 1;
+    }
+    return { given, reserve: island.stamina() };
+  });
+  if (hammered.given !== 8) {
+    throw new Error(`expected eight jumps in a row, got ${hammered.given}`);
+  }
+  if (hammered.reserve > 0.12) {
+    throw new Error(`eight jumps barely cost her: ${hammered.reserve.toFixed(2)} left`);
+  }
+
   // ── Layout ───────────────────────────────────────────────────────
   const layout = async (label) => {
     await page.waitForTimeout(500);
@@ -516,15 +590,20 @@ try {
       const pace = box('[data-control="pace"]');
       return {
         strays,
+        width: innerWidth,
+        height: innerHeight,
         // Both left-thumb controls must sit where the left thumb is.
         paceGap: innerHeight - pace.bottom,
         stickGap: innerHeight - box('[data-control="stick"]').bottom,
         laneOnPace: hits(box('[data-control="auto-lane"]'), pace),
         vitalsOnPace: hits(box('[data-ui="vitals"]'), box('[data-ui="pace-rows"]')),
         stickOnPace: hits(box('[data-control="stick"]'), pace),
-        // The action controls land here later; nothing may creep in.
+        // The right third is the action thumb's. Movement controls may
+        // not creep into it — and the jump button had better BE in it,
+        // or the pad has drifted back over the driving hand.
         intoTheRight: [...document.querySelectorAll('[data-control]')]
           .some((el) => el.getBoundingClientRect().right > innerWidth * 0.66),
+        jumpBox: box('[data-action="jump"]'),
       };
     });
 
@@ -542,6 +621,19 @@ try {
     if (found.stickOnPace) throw new Error(`the stick covers the pace column in ${label}`);
     if (found.intoTheRight) {
       throw new Error(`a movement control reached into the action area in ${label}`);
+    }
+    if (!found.jumpBox) throw new Error(`the jump button is missing in ${label}`);
+    if (found.jumpBox.left < found.width * 0.66) {
+      throw new Error(
+        `the jump button left the action area in ${label}: `
+        + `left edge at ${Math.round(found.jumpBox.left)} of ${found.width}`,
+      );
+    }
+    if (found.height - found.jumpBox.bottom > 60) {
+      throw new Error(
+        `the jump button floats off the bottom in ${label}: `
+        + `${Math.round(found.height - found.jumpBox.bottom)}px`,
+      );
     }
   };
 
@@ -563,6 +655,7 @@ try {
     + 'and releasing stopped her; reverse and sidestep work; '
     + 'drag-to-lock arms, un-arms and engages, and survives a sidestep; '
     + `sprint reached ${sprint.speed.toFixed(1)} and fell back to ${spent.toFixed(1)}; `
+    + 'jump leaves the ground, costs her, and gives eight in a row and no ninth; '
     + `looking steered her ${steered.toFixed(2)} rad while driven and left her `
     + 'alone at rest inside the deadzone; '
     + `the settings panel says ${stamped.version.replace('TRADDOMIUM', '').trim()} `

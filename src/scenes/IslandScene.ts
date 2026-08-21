@@ -16,6 +16,9 @@ import { bakeGrain, GRAIN_SIZE } from '../world/groundTexture';
 import { loadBands, terrainMaterial } from '../world/terrainMaterial';
 import { SettingsPanel } from '../ui/SettingsPanel';
 import { Vitals } from '../ui/Vitals';
+import { liveStat } from '../ant/castes';
+import { ActionPad, type Action } from '../input/ActionPad';
+import { Jump, JUMP_HOLD } from '../ant/jump';
 import { onChange } from '../ui/settings';
 
 /**
@@ -74,6 +77,9 @@ export class IslandScene {
   private readonly look: LookDrag;
   private readonly panel: SettingsPanel;
   private readonly vitals: Vitals;
+  private readonly actions: ActionPad;
+  private readonly jumpButton: Action;
+  private readonly jump = new Jump();
   private readonly ant = new PlayerAnt();
   private readonly clock = new THREE.Clock();
   private readonly sections: Section[] = [];
@@ -132,7 +138,16 @@ export class IslandScene {
     this.paceUI = new PaceSelector(host);
     this.look = new LookDrag(host);
     this.panel = new SettingsPanel(host);
-    this.vitals = new Vitals(host);
+    // Her health, food and water come off the queen's stat table
+    // rather than being typed here — this is the only place the data
+    // file and the HUD meet, and it is a read, not a copy.
+    this.actions = new ActionPad(host);
+    this.jumpButton = this.actions.add('⬆️', 'jump', 'Space');
+    this.vitals = new Vitals(host, {
+      health: liveStat('maxHealth'),
+      food: liveStat('maxHunger'),
+      water: liveStat('maxThirst'),
+    });
     this.detachSettings = onChange(() => this.follow.reshape());
     // The view is a world bearing, so it has to be told where behind
     // her IS. Without this she opens side-on to her own camera.
@@ -169,6 +184,8 @@ export class IslandScene {
       stride: () => this.ant.stridePhase,
       deadzone: () => REST_DEADZONE,
       fov: () => this.follow.camera.fov,
+      airborne: () => this.jump.aloft,
+      height: () => this.jump.height,
     };
   }
 
@@ -183,6 +200,7 @@ export class IslandScene {
     this.look.dispose();
     this.panel.dispose();
     this.vitals.dispose();
+    this.actions.dispose();
     this.detachSettings();
     this.renderer.dispose();
     this.renderer.domElement.remove();
@@ -237,10 +255,32 @@ export class IslandScene {
       auto: this.auto.active ? this.auto.way : 0,
     });
 
+    // A jump is a lump out of the same reserve, taken on one frame.
+    // Asked for BEFORE the sprint is charged so a jump and a sprint in
+    // the same frame both come out of the same number, in order.
+    if (this.jumpButton.takeTaps() > 0) {
+      const paid = this.jump.ask(this.stamina.fraction);
+      if (paid > 0) {
+        this.stamina.spend(paid);
+        // Counted in seconds rather than "while she is airborne": how
+        // many frames a jump lasts is a property of the device, and the
+        // eight-in-a-row ceiling must not be.
+        this.stamina.hold(JUMP_HOLD);
+      }
+    }
+    this.jump.update(dt);
+
     // Only charge her for a sprint she is actually getting: calling for
     // one while stopped or reversing costs nothing.
     const sprinting = wants && travel.speed > PACE_SPEED[this.pace] + 1e-3;
-    const winded = this.stamina.update(sprinting, this.ant.pace < 0.05, dt);
+    // Aloft, nothing comes BACK — but a sprint still costs. Catching
+    // your breath in mid-leap is what would turn eight jumps in a row
+    // into as many as you like; a free sprint would be a different
+    // cheat in the same place.
+    const recovering = !this.jump.aloft;
+    const winded = sprinting || recovering
+      ? this.stamina.update(sprinting, recovering && this.ant.pace < 0.05, dt)
+      : false;
     // Exhaustion drops her to the sustainable pace, never to a halt —
     // and the next sprint has to be asked for deliberately.
     if (winded) {
@@ -253,7 +293,7 @@ export class IslandScene {
     // still the sprint row stayed dark until she got moving — the one
     // moment you most want to know it is armed.
     this.paceUI.show(
-      this.pace, wants, this.stamina.fraction, this.stamina.spent,
+      this.pace, wants, this.stamina.spent,
       this.ant.pace, this.auto.active, this.auto.way,
     );
 
@@ -263,7 +303,8 @@ export class IslandScene {
     // not from where the camera happens to have eased to: a measured
     // bearing moves as she moves, and steering off it curls a straight
     // run into a circle.
-    this.ant.update(travel, -look.yaw, dt);
+    this.ant.update(travel, -look.yaw, dt, this.jump.height);
+    this.jumpButton.enable(this.jump.canJump(this.stamina.fraction));
     // Read AFTER she has moved: this is what she is actually doing,
     // which the easing makes different from what was asked for.
     this.speed = this.ant.pace;

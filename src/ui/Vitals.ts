@@ -1,29 +1,43 @@
 /**
  * THE VITALS CLUSTER — top left, and honest about what it knows.
  *
- * The reference layout puts a portrait, four bars and a colony row up
- * here. Today the game can fill exactly ONE of them: stamina, which is
- * the sprint reserve and already real. Health has no damage and no
- * healing, food has no eating, water has no drinking, and there is no
- * colony to count workers or brood in.
+ * Every meter here now reads a REAL number off the queen's stat table
+ * rather than an em-dash placeholder: her health, food and water are
+ * resolved from castes.ts at the live reference point, so the cluster
+ * says what she actually has. What it does not do is pretend they are
+ * in play. Nothing damages her, nothing feeds her and nothing dries her
+ * out, so those three sit full and still — which is not a lie, it is
+ * the true reading of a value that has no way to change yet.
  *
- * So the empty ones keep their place in the layout and sit visibly
- * ASLEEP — dim label, hollow track, an em-dash where a number goes.
- * That previews the shape without ever looking like it works, which is
- * the project rule: a bar may only move if there is a way to move it
- * back, and an unavailable thing must never look functional.
+ * That is the project rule kept exactly: a bar may only MOVE if there
+ * is a way to move it back. A full bar that never moves breaks no
+ * promise. A falling one with no food in the world would.
  *
- * The colony row is CUT rather than dimmed. Three dimmed empty numbers
- * is clutter; the row can arrive whole when there is a colony behind it.
+ * Stamina is the one that lives, so it is the one in amber, and the
+ * others sit a shade back to say which meter to watch. Stamina reads in
+ * SECONDS because that is the unit the reserve is stored in and the one
+ * the player feels; the rest read in points, because points is what
+ * they are.
+ *
+ * The colony row from the reference layout is CUT rather than dimmed.
+ * Three empty numbers is clutter; it can arrive whole when there is a
+ * colony behind it.
  */
 import { SPRINT_SECONDS } from '../ant/stamina';
 
 const GOLD = 'rgba(255, 226, 160, .9)';
 const GOLD_DIM = 'rgba(255, 226, 160, .55)';
-/** Asleep: present, placed, and obviously not running. */
-const DORMANT = 'rgba(255, 226, 160, .22)';
+/** Real, and resting: a number that is true and has nowhere to go yet. */
+const RESTING = 'rgba(255, 226, 160, .42)';
 const FUEL = 'rgba(255, 196, 92, .95)';
 const SPENT = 'rgba(255, 110, 90, .95)';
+
+/** What the queen's stat table says she has, resolved for the live ant. */
+export interface Reserves {
+  readonly health: number;
+  readonly food: number;
+  readonly water: number;
+}
 
 interface Meter {
   readonly icon: HTMLElement;
@@ -36,7 +50,7 @@ export class Vitals {
   private readonly stamina: Meter;
   private shown = '';
 
-  constructor(host: HTMLElement, caste = 'Queen') {
+  constructor(host: HTMLElement, reserves: Reserves, caste = 'Queen') {
     this.panel = document.createElement('div');
     this.panel.dataset.ui = 'vitals';
     this.style();
@@ -73,13 +87,13 @@ export class Vitals {
       textShadow: '0 1px 3px rgba(0,0,0,.85)',
     } as Partial<CSSStyleDeclaration>);
 
-    this.stamina = this.meter('⚡', 'stamina', true);
+    this.stamina = this.meter('⚡', 'stamina', null);
     stack.append(
       who,
       this.stamina.icon.parentElement!,
-      this.meter('♥', 'health', false).icon.parentElement!,
-      this.meter('🌾', 'food', false).icon.parentElement!,
-      this.meter('💧', 'water', false).icon.parentElement!,
+      this.meter('♥', 'health', reserves.health).icon.parentElement!,
+      this.meter('🌾', 'food', reserves.food).icon.parentElement!,
+      this.meter('💧', 'water', reserves.water).icon.parentElement!,
     );
 
     this.panel.append(portrait, stack);
@@ -91,8 +105,6 @@ export class Vitals {
    * @param spent whether she is too winded to be asked for another
    */
   show(fraction: number, spent: boolean): void {
-    // Seconds of sprint, not an invented point total: it is a number
-    // the game can actually answer, and the one the player feels.
     const left = Math.max(0, Math.min(1, fraction));
     const seconds = Math.round(left * SPRINT_SECONDS * 10) / 10;
     const state = `${seconds}|${spent}`;
@@ -110,7 +122,11 @@ export class Vitals {
     this.panel.remove();
   }
 
-  private meter(glyph: string, name: string, live: boolean): Meter {
+  /**
+   * @param held the stat's value, or null for the one meter that moves
+   */
+  private meter(glyph: string, name: string, held: number | null): Meter {
+    const live = held === null;
     const row = document.createElement('div');
     row.dataset.meter = name;
     Object.assign(row.style, {
@@ -125,7 +141,7 @@ export class Vitals {
     Object.assign(icon.style, {
       font: '11px/1 system-ui, sans-serif',
       textAlign: 'center',
-      color: live ? FUEL : DORMANT,
+      color: live ? FUEL : RESTING,
     } as Partial<CSSStyleDeclaration>);
 
     const track = document.createElement('div');
@@ -133,31 +149,29 @@ export class Vitals {
       height: '7px',
       borderRadius: '4px',
       overflow: 'hidden',
-      background: live ? 'rgba(255, 226, 160, .10)' : 'rgba(255, 226, 160, .05)',
-      boxShadow: live
-        ? 'inset 0 0 0 1px rgba(255, 216, 130, .16)'
-        : 'inset 0 0 0 1px rgba(255, 216, 130, .10)',
+      background: 'rgba(255, 226, 160, .10)',
+      boxShadow: 'inset 0 0 0 1px rgba(255, 216, 130, .16)',
     } as Partial<CSSStyleDeclaration>);
 
     const fill = document.createElement('div');
     Object.assign(fill.style, {
       height: '100%',
-      width: live ? '100%' : '0',
+      // Full either way: a fresh reserve, and three stats with nothing
+      // in the world able to spend them.
+      width: '100%',
       borderRadius: '4px',
-      background: FUEL,
-      transition: 'width 180ms ease, background 180ms ease',
+      background: live ? FUEL : RESTING,
+      transition: live ? 'width 180ms ease, background 180ms ease' : 'none',
     } as Partial<CSSStyleDeclaration>);
     track.appendChild(fill);
 
     const read = document.createElement('span');
-    // An em-dash, not a zero: zero is a reading, and these are not
-    // reading anything yet.
-    read.textContent = live ? '0.0s' : '—';
+    read.textContent = live ? `${SPRINT_SECONDS.toFixed(1)}s` : `${Math.round(held)}`;
     Object.assign(read.style, {
       font: '600 10px/1 "JetBrains Mono", ui-monospace, monospace',
       textAlign: 'right',
       fontVariantNumeric: 'tabular-nums',
-      color: live ? GOLD : DORMANT,
+      color: live ? GOLD : RESTING,
       textShadow: '0 1px 3px rgba(0,0,0,.85)',
     } as Partial<CSSStyleDeclaration>);
 

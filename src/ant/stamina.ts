@@ -27,6 +27,8 @@ export class Stamina {
   /** Full is 1, empty is 0. */
   private level = 1;
   private winded = false;
+  /** Seconds of recovery still blocked by a burst of effort. */
+  private held = 0;
 
   get fraction(): number {
     return this.level;
@@ -35,6 +37,40 @@ export class Stamina {
   /** True while she is too winded to be asked for another sprint. */
   get spent(): boolean {
     return this.winded;
+  }
+
+  /**
+   * Take a lump out of the reserve — a jump, and later a takeoff.
+   *
+   * Separate from `update` because a burst is not a rate: it happens on
+   * one frame and must cost the same whatever the frame rate is. Emptying
+   * her this way winds her exactly as running her dry does, so a jump
+   * cannot leave her at zero and still able to call for a sprint.
+   *
+   * @param cost fraction of a full reserve, 0 to 1
+   * @returns what was actually taken
+   */
+  /**
+   * Block recovery for a while — the aftermath of a burst.
+   *
+   * Without this the cost of a burst depends on the frame rate: a jump
+   * only stops recovery for as long as she is off the ground, and how
+   * many frames that is decides how much creeps back between one jump
+   * and the next. On a slow phone that was NINE jumps where a fast one
+   * gave eight, which is a slow phone playing an easier game.
+   *
+   * Counted in simulated seconds, so the answer is the same everywhere.
+   * The longest hold wins; a second burst cannot shorten the first.
+   */
+  hold(seconds: number): void {
+    this.held = Math.max(this.held, seconds);
+  }
+
+  spend(cost: number): number {
+    const taken = Math.min(this.level, Math.max(0, cost));
+    this.level -= taken;
+    if (this.level <= 0) this.winded = true;
+    return taken;
   }
 
   /**
@@ -48,6 +84,11 @@ export class Stamina {
       if (this.level > 0) return false;
       this.winded = true;
       return true;
+    }
+
+    if (this.held > 0) {
+      this.held = Math.max(0, this.held - dt);
+      return false;
     }
 
     const rate = (resting ? RESTING_BONUS : 1) / RECOVER_SECONDS;

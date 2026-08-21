@@ -267,10 +267,16 @@ export const QUEEN: CasteStats = {
   flight: {
     /** INERT. Multiplies a flight speed that does not exist yet. */
     flightSpeed: [0, 0, 0, 0.8, 1.0],
-    /** INERT. Seconds aloft. The nuptial flight is minutes, not hours. */
-    flightStamina: [0, 0, 0, 120, 240],
-    /** INERT. World units per second climbed. */
+    /** INERT. World units per second climbed under power. */
     climbRate: [0, 0, 0, 20, 30],
+    /**
+     * INERT. How many times faster the reserve drains at full airspeed
+     * than at a sprint on the ground. There is ONE stamina pool: flight
+     * spends the same reserve running does, so there is one number to
+     * tune, one bar to read, and no way for the two to disagree about
+     * how tired she is.
+     */
+    flightDrain: [0, 0, 0, 1.6, 1.4],
   },
 
   states: {
@@ -319,8 +325,8 @@ export const QUEEN: CasteStats = {
         // Her first eggs, laid in the dark on borrowed tissue.
         eggsPerDay: 0.01,
         flightSpeed: 0,
-        flightStamina: 0,
         climbRate: 0,
+        flightDrain: 0,
       },
     },
 
@@ -342,8 +348,8 @@ export const QUEEN: CasteStats = {
         dig: 0.3,
         eggsPerDay: 0.05,
         flightSpeed: 0,
-        flightStamina: 0,
         climbRate: 0,
+        flightDrain: 0,
       },
     },
 
@@ -366,8 +372,8 @@ export const QUEEN: CasteStats = {
         eggsPerDay: 0.35,
         'incomingDamage.resting': 1.3,
         flightSpeed: 0,
-        flightStamina: 0,
         climbRate: 0,
+        flightDrain: 0,
       },
     },
 
@@ -396,8 +402,8 @@ export const QUEEN: CasteStats = {
         stingDamage: 0.6,
         'incomingDamage.resting': 1.6,
         flightSpeed: 0,
-        flightStamina: 0,
         climbRate: 0,
+        flightDrain: 0,
       },
     },
   },
@@ -423,6 +429,18 @@ export const LIVE_STATE: QueenState = 'alateMated';
  * Everything else in the tables is recorded design, inert until the
  * mechanic behind it exists. Moving those numbers changes nothing.
  */
+/**
+ * The bridge between this file and the running game.
+ *
+ * Anything that wants a number for the ant the player is actually
+ * driving asks here, so there is exactly one place that knows which
+ * growth and which state "live" means — and changing it is one edit
+ * rather than a hunt.
+ */
+export function liveStat(name: string, stats: CasteStats = QUEEN): number {
+  return statOf(stats, name, LIVE_GROWTH, stats.states?.[LIVE_STATE]);
+}
+
 export const WIRED = [
   'maxStamina',
   'speed',

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  CASTES, curveOf, GROWTH_STAGES, LIVE_GROWTH, LIVE_STATE, MALE, QUEEN,
-  QUEEN_STATES, sample, statOf, WIRED, type Curve, type LifeState,
+  CASTES, curveOf, GROWTH_STAGES, LIVE_GROWTH, LIVE_STATE, liveStat, MALE,
+  QUEEN, QUEEN_STATES, sample, statOf, WIRED, type Curve, type LifeState,
 } from '../src/ant/castes';
 import { RECOVER_SECONDS, RESTING_BONUS, SPRINT_SECONDS } from '../src/ant/stamina';
 
@@ -254,6 +254,38 @@ describe('what is wired', () => {
     // The whole value of a reference point is that it is unscaled.
     for (const name of WIRED) {
       expect(state(LIVE_STATE).scale[name], name).toBeUndefined();
+    }
+  });
+});
+
+describe('one stamina pool, not two', () => {
+  it('keeps no separate flight reserve to disagree with the ground one', () => {
+    // Flight spends the SAME bar a sprint does. A second pool would be
+    // a second recovery rate and a second answer to "how tired is she".
+    for (const name of Object.keys(QUEEN.flight)) {
+      expect(name, name).not.toMatch(/stamina/i);
+    }
+    expect(() => curveOf(QUEEN, 'flightStamina')).toThrow();
+  });
+
+  it('prices airspeed against the sprint she already knows', () => {
+    // The drain is a multiple of the ground sprint, so the two costs
+    // cannot drift apart: retune the sprint and flight follows.
+    expect(QUEEN.flight.flightDrain[4]).toBeGreaterThan(0);
+  });
+});
+
+describe('the live bridge', () => {
+  it('resolves at the reference point without anyone naming it again', () => {
+    // One place knows what "the ant being driven" means. Everything
+    // else asks, so moving the reference is one edit.
+    expect(liveStat('maxStamina'))
+      .toBeCloseTo(statOf(QUEEN, 'maxStamina', LIVE_GROWTH, QUEEN.states![LIVE_STATE]), 9);
+  });
+
+  it('answers the three reserves the HUD draws', () => {
+    for (const name of ['maxHealth', 'maxHunger', 'maxThirst']) {
+      expect(liveStat(name), name).toBeGreaterThan(0);
     }
   });
 });

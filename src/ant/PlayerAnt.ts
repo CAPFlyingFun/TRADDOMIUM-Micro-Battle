@@ -103,6 +103,9 @@ export class PlayerAnt {
   /**
    * @param drive what the controls are asking of her this frame
    * @param view the heading the player is LOOKING along, world radians
+   * @param above how far off the terrain she is — a jump, later a
+   *   flight. She does not own it: the arc is a mechanic of its own and
+   *   this only has to put her body where the arc says.
    *
    * Deliberately the look input rather than a bearing measured off the
    * camera's actual position. The camera eases toward where it is
@@ -111,7 +114,7 @@ export class PlayerAnt {
    * curls into a circle. Ask the input what it wants; do not ask the
    * follow where it got to.
    */
-  update(drive: Drive, view: number, dt: number): void {
+  update(drive: Drive, view: number, dt: number, above = 0): void {
     const asked = Math.hypot(drive.ahead, drive.across);
     const wasFacing = this.heading;
 
@@ -159,21 +162,37 @@ export class PlayerAnt {
     // through. Driving the gait off travel alone left her turning on
     // the spot with six legs frozen underneath her, which is most of
     // why a rotation read as a slide rather than as an ant.
-    this.gaitPhase += (this.pace * 2.2 + Math.abs(this.turned) * 5) * dt;
+    // No stride in mid-air: legs cycling with nothing under them is
+    // the running-in-the-air cartoon, and it reads as a bug.
+    if (above <= 0) this.gaitPhase += (this.pace * 2.2 + Math.abs(this.turned) * 5) * dt;
 
-    this.settle();
+    this.settle(above);
   }
 
-  /** Put her on the ground, facing her heading, leaning with the slope. */
-  private settle(): void {
+  /** Put her on the ground — or `above` it — facing her heading. */
+  private settle(above: number): void {
     const { x, z } = this.root.position;
-    this.root.position.y = groundHeight(x, z);
+    this.root.position.y = groundHeight(x, z) + above;
     this.root.rotation.y = this.heading;
+    // Still lean with the ground she is over: an ant tips with the
+    // hill she launched off, and losing that mid-jump reads as a snap.
     this.alignToSlope(x, z);
 
     // Gait bob: subtle, and only while striding.
     this.body.position.y = 0.34 + Math.abs(Math.sin(this.gaitPhase)) * 0.05;
-    this.stride();
+    if (above > 0) this.tuck(); else this.stride();
+  }
+
+  /**
+   * Legs drawn in, the way an ant's are the instant it leaves a
+   * surface. Not an animation — one pose, held — but it is the
+   * difference between a jump and a model being moved upward.
+   */
+  private tuck(): void {
+    for (const leg of this.legs) {
+      leg.mesh.rotation.y = leg.yaw + 0.34;
+      leg.mesh.rotation.z = leg.roll - 0.42 * Math.sign(leg.roll);
+    }
   }
 
   /**

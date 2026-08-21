@@ -27,13 +27,13 @@ const ROW_HEIGHT = 26;
 const LIVE = 'rgba(110, 255, 150, .95)';
 const LIVE_TEXT = 'rgba(214, 255, 226, 1)';
 /**
- * Stamina is amber and lives on the RIGHT edge, because green now
- * means live and a green fill on the sprint row read as "sprint is
- * selected" when it only ever meant "there is sprint left in her".
- * Left edge is what is live; right edge is what it costs.
+ * The reserve itself is NOT drawn here any more. It moved to the vitals
+ * cluster, which is where every meter about her belongs; two gauges of
+ * the same number, in two colours, in two corners, is one gauge too
+ * many. What stays is the sprint row going grey when there is nothing
+ * left to sprint on — that is a statement about the CONTROL, not a
+ * meter: this button will not do anything if you press it.
  */
-const FUEL = 'rgba(255, 196, 92, .9)';
-const FUEL_SPENT = 'rgba(255, 110, 90, .95)';
 
 export class PaceSelector {
   private readonly column: HTMLDivElement;
@@ -41,8 +41,6 @@ export class PaceSelector {
   private readonly auto: HTMLButtonElement;
   private readonly readout: HTMLDivElement;
   private readonly sprintCell: HTMLButtonElement;
-  private readonly reserve: HTMLDivElement;
-  private reserveTrack!: HTMLDivElement;
   private readonly cells = new Map<Pace, HTMLButtonElement>();
   private readonly detach: Array<() => void> = [];
 
@@ -51,7 +49,6 @@ export class PaceSelector {
   private shiftDown = false;
 
   private shownLit = '';
-  private shownStamina = -1;
   private shownSpent = false;
   private shownAuto = '';
   private flips = 0;
@@ -62,7 +59,6 @@ export class PaceSelector {
     this.rows = document.createElement('div');
     this.auto = document.createElement('button');
     this.readout = document.createElement('div');
-    this.reserve = document.createElement('div');
     this.column.dataset.control = 'pace';
     // The column runs the full height so a short window eats it from
     // the top; the ROWS are where it actually draws, and the only
@@ -72,7 +68,6 @@ export class PaceSelector {
 
     // Sprint on top, then the sustainable rows fastest-first.
     this.sprintCell = this.makeCell(SPRINT_MARK, 'sprint');
-    this.sprintCell.append(this.reserveTrack, this.reserve);
     this.listenTap(this.sprintCell, () => { this.sprintTaps += 1; });
     this.rows.appendChild(this.sprintCell);
 
@@ -149,11 +144,10 @@ export class PaceSelector {
     return taps;
   }
 
-  /** Show what is selected, what it costs, and how fast she is going. */
+  /** Show what is selected, whether it can be had, and how fast she is going. */
   show(
     pace: Pace,
     sprinting: boolean,
-    stamina: number,
     spent: boolean,
     speed: number,
     auto: boolean,
@@ -172,12 +166,10 @@ export class PaceSelector {
       this.mark(this.sprintCell, sprinting ? 'live' : 'off');
     }
 
-    if (stamina !== this.shownStamina || spent !== this.shownSpent) {
-      this.shownStamina = stamina;
+    if (spent !== this.shownSpent) {
       this.shownSpent = spent;
-      this.reserve.style.height = `${Math.max(0, Math.min(1, stamina)) * 100}%`;
-      this.reserve.style.background = spent ? FUEL_SPENT : FUEL;
       this.sprintCell.style.filter = spent ? 'grayscale(1)' : 'none';
+      this.sprintCell.style.opacity = spent ? '0.55' : '1';
     }
 
     const chip = auto ? (way > 0 ? 'ahead' : 'astern') : 'off';
@@ -302,34 +294,6 @@ export class PaceSelector {
       overflow: 'hidden',
       touchAction: 'none',
       userSelect: 'none',
-    } as Partial<CSSStyleDeclaration>);
-
-    // A bar on the edge, not a fill of the row: whatever colour a fill
-    // is, it competes with the row highlight for the same meaning.
-    const track = document.createElement('div');
-    Object.assign(track.style, {
-      position: 'absolute',
-      right: '3px',
-      top: '3px',
-      bottom: '3px',
-      width: '4px',
-      borderRadius: '2px',
-      background: 'rgba(255, 196, 92, .16)',
-      pointerEvents: 'none',
-    } as Partial<CSSStyleDeclaration>);
-    this.reserveTrack = track;
-
-    Object.assign(this.reserve.style, {
-      position: 'absolute',
-      right: '3px',
-      bottom: '3px',
-      width: '4px',
-      height: '100%',
-      maxHeight: 'calc(100% - 6px)',
-      borderRadius: '2px',
-      background: FUEL,
-      pointerEvents: 'none',
-      transition: 'background 160ms ease, height 160ms ease',
     } as Partial<CSSStyleDeclaration>);
 
     this.auto.type = 'button';
