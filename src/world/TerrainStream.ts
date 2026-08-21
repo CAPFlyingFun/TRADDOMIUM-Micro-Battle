@@ -69,6 +69,24 @@ const MIDDLE_STEP = (MIDDLE_REACH * 2) / (MIDDLE_VERTS - 1);
 /** Vertices a side for the distant whole-island backdrop. */
 const BACKDROP_VERTS = 129;
 
+/**
+ * How far each cell's edge hangs down below the ground — the fix for
+ * the holes.
+ *
+ * A fine cell has a vertex every 8 units and a coarse one every 32,
+ * over the same 512-unit span. Along the edge they share, the coarse
+ * side draws a straight line between vertices four times further apart
+ * than the fine side's, so the two surfaces do not meet: there is a
+ * sliver of nothing between them and you see sky or sea through it.
+ * That is why the holes closed up as she approached — the cell flipped
+ * to fine and the mismatch went away.
+ *
+ * The classic fix, and still the right one: hang a skirt off every
+ * cell edge so a crack shows ground-coloured wall instead of sky.
+ * Invisible otherwise, because it is under the terrain.
+ */
+const SKIRT_DROP = 250;
+
 interface Cell {
   /** The GLOBAL address. Never a rendered position. */
   readonly id: ChunkId;
@@ -83,8 +101,12 @@ interface Cell {
  * vertex has neighbours on all sides, which is what lets the normals be
  * exact at the cell's edges and the seams disappear.
  */
+/**
+ * @param coarse true for the distance tiers, which need the coastline
+ *   held above water — see `dryLand`.
+ */
 export function buildCell(
-  at: WorldPoint, span: number, verts: number,
+  at: WorldPoint, span: number, verts: number, coarse = false,
 ): THREE.BufferGeometry {
   const worldX = at.wx;
   const worldZ = at.wz;
@@ -95,16 +117,20 @@ export function buildCell(
   const heights = new Float32Array(wide * wide);
   for (let r = 0; r < wide; r++) {
     for (let c = 0; c < wide; c++) {
-      heights[r * wide + c] = terrainHeight(
-        worldX + (c - 1) * step, worldZ + (r - 1) * step,
-      );
+      const x = worldX + (c - 1) * step;
+      const z = worldZ + (r - 1) * step;
+      heights[r * wide + c] = coarse ? dryLand(x, z, step) : terrainHeight(x, z);
     }
   }
 
   const count = verts * verts;
-  const positions = new Float32Array(count * 3);
-  const normals = new Float32Array(count * 3);
-  const colors = new Float32Array(count * 3);
+  // Plus a skirt vertex for every vertex on the perimeter. The corners
+  // get counted twice, which costs four vertices and saves a special
+  // case in every loop below.
+  const skirts = verts * 4;
+  const positions = new Float32Array((count + skirts) * 3);
+  const normals = new Float32Array((count + skirts) * 3);
+  const colors = new Float32Array((count + skirts) * 3);
   const tint = new THREE.Color();
 
   for (let iz = 0; iz < verts; iz++) {
@@ -137,7 +163,30 @@ export function buildCell(
     }
   }
 
-  const indices = new Uint32Array(quads * quads * 6);
+  // The skirt: each perimeter vertex copied straight down.
+  const edges: number[][] = [
+    Array.from({ length: verts }, (_, i) => i),                       // north
+    Array.from({ length: verts }, (_, i) => (verts - 1) * verts + i), // south
+    Array.from({ length: verts }, (_, i) => i * verts),               // west
+    Array.from({ length: verts }, (_, i) => i * verts + (verts - 1)), // east
+  ];
+  edges.forEach((edge, e) => {
+    edge.forEach((source, i) => {
+      const to = count + e * verts + i;
+      positions[to * 3] = positions[source * 3];
+      positions[to * 3 + 1] = positions[source * 3 + 1] - SKIRT_DROP;
+      positions[to * 3 + 2] = positions[source * 3 + 2];
+      normals[to * 3] = normals[source * 3];
+      normals[to * 3 + 1] = normals[source * 3 + 1];
+      normals[to * 3 + 2] = normals[source * 3 + 2];
+      colors[to * 3] = colors[source * 3];
+      colors[to * 3 + 1] = colors[source * 3 + 1];
+      colors[to * 3 + 2] = colors[source * 3 + 2];
+    });
+  });
+
+  const skirtTris = 4 * (verts - 1) * 2 * 2;
+  const indices = new Uint32Array(quads * quads * 6 + skirtTris * 3);
   let n = 0;
   for (let iz = 0; iz < quads; iz++) {
     for (let ix = 0; ix < quads; ix++) {
@@ -149,6 +198,24 @@ export function buildCell(
       indices[n++] = tr; indices[n++] = bl; indices[n++] = br;
     }
   }
+
+  // BOTH WINDINGS for the skirt, deliberately. Which face of a crack
+  // you are looking through depends on which side of it you stand, and
+  // four edges in four orientations is four chances to get a winding
+  // backwards and leave the hole exactly where it was. Doubling a few
+  // hundred triangles buys certainty; the cell itself stays one-sided.
+  edges.forEach((edge, e) => {
+    for (let i = 0; i < verts - 1; i++) {
+      const a = edge[i];
+      const b = edge[i + 1];
+      const c = count + e * verts + i;
+      const d = count + e * verts + i + 1;
+      indices[n++] = a; indices[n++] = b; indices[n++] = c;
+      indices[n++] = b; indices[n++] = d; indices[n++] = c;
+      indices[n++] = c; indices[n++] = b; indices[n++] = a;
+      indices[n++] = c; indices[n++] = d; indices[n++] = b;
+    }
+  });
 
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
@@ -170,6 +237,36 @@ export const TIER_CUTS = {
   backdrop: MIDDLE_REACH * 0.97,
 };
 
+/**
+ * A coarse vertex height that will not drown a coastline.
+ *
+ * THE BLUE PATCHES. Kauaʻi's beaches are tens of metres wide and the
+ * middle tier has a vertex every 3,125 units — thirty metres — so a
+ * vertex lands in the sea while every fine cell around it is dry sand.
+ * The triangle between them crosses sea level, the water plane covers
+ * the part underneath, and a lagoon appears in the middle of a beach.
+ * It closed up as she walked toward it because the fine cells, which
+ * know the beach is there, took over.
+ *
+ * So a coarse vertex that falls in the water while its NEIGHBOURHOOD is
+ * land gets lifted to the shoreline. Only that case: open ocean stays
+ * ocean, and a vertex already on land is left exactly as it is, so
+ * nothing about the island's shape or height changes. It is the honest
+ * reading of "this sample cannot see the beach it is standing on".
+ */
+function dryLand(x: number, z: number, step: number): number {
+  const here = terrainHeight(x, z);
+  if (here > 0) return here;
+  const reach = step * 0.5;
+  const around = Math.max(
+    terrainHeight(x + reach, z), terrainHeight(x - reach, z),
+    terrainHeight(x, z + reach), terrainHeight(x, z - reach),
+  );
+  // Just above the waterline, not up to the neighbour's height: the
+  // point is to stop the sea showing through, not to invent a cliff.
+  return around > 0 ? Math.min(around, 1) : here;
+}
+
 export class TerrainStream {
   private readonly cells = new Map<string, Cell>();
   private readonly backdrop: THREE.Mesh;
@@ -187,7 +284,7 @@ export class TerrainStream {
     backdropMaterial: THREE.Material,
   ) {
     this.middle = new THREE.Mesh(
-      buildCell(world(-MIDDLE_REACH, -MIDDLE_REACH), MIDDLE_REACH * 2, MIDDLE_VERTS),
+      buildCell(world(-MIDDLE_REACH, -MIDDLE_REACH), MIDDLE_REACH * 2, MIDDLE_VERTS, true),
       middleMaterial,
     );
     this.middle.frustumCulled = false;
@@ -197,7 +294,7 @@ export class TerrainStream {
     // island exists only as fog is a worse game than one where the
     // mountains are visible and merely very small.
     this.backdrop = new THREE.Mesh(
-      buildCell(world(-ISLAND_SPAN / 2, -ISLAND_SPAN / 2), ISLAND_SPAN, BACKDROP_VERTS),
+      buildCell(world(-ISLAND_SPAN / 2, -ISLAND_SPAN / 2), ISLAND_SPAN, BACKDROP_VERTS, true),
       backdropMaterial,
     );
     this.backdrop.frustumCulled = false;
@@ -294,7 +391,7 @@ export class TerrainStream {
     }
     this.middleAt = corner;
     this.middle.geometry.dispose();
-    this.middle.geometry = buildCell(corner, MIDDLE_REACH * 2, MIDDLE_VERTS);
+    this.middle.geometry = buildCell(corner, MIDDLE_REACH * 2, MIDDLE_VERTS, true);
   }
 
   /** Vertical exaggeration, as a transform — see the terrain dials. */
@@ -313,7 +410,7 @@ export class TerrainStream {
     }
     this.backdrop.geometry.dispose();
     this.backdrop.geometry = buildCell(
-      world(-ISLAND_SPAN / 2, -ISLAND_SPAN / 2), ISLAND_SPAN, BACKDROP_VERTS,
+      world(-ISLAND_SPAN / 2, -ISLAND_SPAN / 2), ISLAND_SPAN, BACKDROP_VERTS, true,
     );
     const held = this.middleAt;
     this.middleAt = null;

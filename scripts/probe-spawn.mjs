@@ -146,6 +146,17 @@ try {
   if (walked < 5) throw new Error(`she would not walk after spawning: ${walked.toFixed(1)}`);
   notes.push(`walked ${walked.toFixed(0)} units after arriving`);
 
+  // ── Death and restart ────────────────────────────────────────────
+  // The loop has to close, or "start again" is a promise nothing keeps.
+  await page.evaluate(() => window.__island.kill());
+  await page.waitForSelector('[data-ui="death"]', { timeout: 20000 });
+  await page.click('[data-ui="choose-new-start"]');
+  await page.waitForSelector('[data-ui="island-canvas"]', { timeout: 30000 });
+  if (await page.$('[data-ui="death"]') !== null) {
+    throw new Error('the death screen survived the restart');
+  }
+  notes.push('death returned to the spawn map');
+
   await page.screenshot({ path: 'probe-spawn.png' });
   if (errors.length) throw new Error(`page errors:\n${errors.join('\n')}`);
 } finally {

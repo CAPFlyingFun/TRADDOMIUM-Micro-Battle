@@ -101,6 +101,7 @@ export class IslandScene {
   /** Simulated seconds since boot — what the probes wait on. */
   private elapsed = 0;
   private readonly detachSettings: () => void;
+  private detachKill: () => void = () => {};
   /**
    * Watches the canvas host itself. Orientation changes fire `resize`
    * before the viewport has settled on some phones, so a handler that
@@ -109,6 +110,7 @@ export class IslandScene {
    */
   private readonly watchSize = new ResizeObserver(() => this.onResize());
   private disposed = false;
+  private dying = false;
 
   constructor(
     private readonly host: HTMLElement,
@@ -119,6 +121,12 @@ export class IslandScene {
      * island lab still boots straight into a scene on its own.
      */
     start?: { at: WorldPoint; heading: number },
+    /**
+     * Called when she dies. Nothing kills her yet — there is no damage
+     * and no predator — so today this only fires from the debug kill,
+     * which is enough to build and test the loop against.
+     */
+    private readonly onDeath?: () => void,
   ) {
     this.renderer = new THREE.WebGLRenderer({
       antialias: true,
@@ -219,6 +227,14 @@ export class IslandScene {
       .then(({ model }) => { if (!this.disposed) this.ant.wear(model); })
       .catch((why) => console.warn('the queen model did not load', why));
 
+    // Debug kill, so the death/restart loop can be walked through
+    // before anything in the world is able to hurt her.
+    const debugKill = (event: KeyboardEvent) => {
+      if (event.code === 'KeyK' && !event.repeat) this.kill();
+    };
+    window.addEventListener('keydown', debugKill);
+    this.detachKill = () => window.removeEventListener('keydown', debugKill);
+
     this.watchSize.observe(host);
     window.addEventListener('resize', this.onResize);
     window.addEventListener('orientationchange', this.onResize);
@@ -254,6 +270,7 @@ export class IslandScene {
       stride: () => this.ant.stridePhase,
       deadzone: () => REST_DEADZONE,
       fov: () => this.follow.camera.fov,
+      kill: () => this.kill(),
       airborne: () => this.flight.aloft,
       height: () => this.flight.height,
       flightState: () => this.flight.where,
@@ -300,6 +317,18 @@ export class IslandScene {
     this.ant.reground();
   }
 
+  /**
+   * End the run. Debug-only for now: `K`, or __island.kill().
+   *
+   * Real deaths arrive with damage and predators. Having the path
+   * exist first means those land as a cause rather than as a system.
+   */
+  kill(): void {
+    if (this.dying) return;
+    this.dying = true;
+    this.onDeath?.();
+  }
+
   dispose(): void {
     this.disposed = true;
     this.renderer.setAnimationLoop(null);
@@ -313,6 +342,7 @@ export class IslandScene {
     this.vitals.dispose();
     this.actions.dispose();
     this.detachSettings();
+    this.detachKill();
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }

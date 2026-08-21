@@ -17,6 +17,7 @@ import { IslandScene } from '../scenes/IslandScene';
 import { MainMenu } from './MainMenu';
 import { SpawnMap, type Chosen } from './SpawnMap';
 import { SettingsPanel } from './SettingsPanel';
+import { DeathScreen } from './DeathScreen';
 import type { HeightGrid } from '../world/kauai';
 
 export class GameFlow {
@@ -24,6 +25,7 @@ export class GameFlow {
   private map: SpawnMap | null = null;
   private scene: IslandScene | null = null;
   private menuSettings: SettingsPanel | null = null;
+  private death: DeathScreen | null = null;
   /** Where she started, so a restart can offer the same island again. */
   private lastStart: Chosen | null = null;
 
@@ -60,10 +62,22 @@ export class GameFlow {
   spawn(chosen: Chosen): void {
     this.lastStart = chosen;
     this.clear();
-    this.scene = new IslandScene(this.host, this.grid, {
-      at: chosen.candidate.at,
-      heading: chosen.candidate.heading,
-    });
+    this.scene = new IslandScene(
+      this.host,
+      this.grid,
+      { at: chosen.candidate.at, heading: chosen.candidate.heading },
+      () => this.died(),
+    );
+  }
+
+  /**
+   * She died. The world stays up behind the screen — she is still lying
+   * there, and clearing the scene under the player's feet the instant
+   * it happens reads as a crash rather than as a death.
+   */
+  private died(): void {
+    this.death?.dispose();
+    this.death = new DeathScreen(this.host, () => this.toMap());
   }
 
   /** Start again somewhere new — the pre-colony death path. */
@@ -76,6 +90,8 @@ export class GameFlow {
   }
 
   private clear(): void {
+    this.death?.dispose();
+    this.death = null;
     this.scene?.dispose();
     this.scene = null;
     this.map?.dispose();
