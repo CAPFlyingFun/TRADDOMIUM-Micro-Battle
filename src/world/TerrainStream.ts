@@ -264,16 +264,33 @@ export function buildCell(
   return geometry;
 }
 
-/** How far each tier reaches, for the tier outside it to cut against. */
 /**
- * Just inside the tier it replaces, so the seam is a thin overlap
- * rather than a gap. A gap shows sky through the ground; an overlap of
- * a couple of percent, at two thousand units, shows nothing.
+ * HOW FAR INSIDE THE INNER TIER THE OUTER ONE STARTS DRAWING.
+ *
+ * It was three percent, and three percent is not enough. A ray leaving
+ * the camera at a shallow angle runs nearly parallel to the ground, so
+ * where two tiers disagree vertically it can slip BETWEEN them and
+ * travel an enormous horizontal distance in the gap. Traced through
+ * the pixels of an actual hole, every escaping ray crossed the middle
+ * tier between 19,177 and 19,337 units — just inside a cut at 19,400 —
+ * while every neighbouring ray that crossed it at 19,417 or beyond saw
+ * ground. Six hundred units of overlap sounds generous and is nothing
+ * at a grazing angle.
+ *
+ * So the overlap is now a fifth of the inner tier's reach, which buys
+ * the ray thousands of units in which the two surfaces converge. What
+ * it costs is the coarse tier drawing a little nearer, where it can sit
+ * a few tens of units above the fine one — and at the distance this
+ * happens that is a fifth of a degree. Invisible, which is the whole
+ * argument: a seam you cannot see beats a hole you can.
  */
+const OVERLAP = 0.8;
+
+/** How far each tier reaches, for the tier outside it to cut against. */
 export const TIER_CUTS = {
-  transition: CELL_REACH * 0.97,
-  middle: TRANSITION_REACH * 0.97,
-  backdrop: MIDDLE_REACH * 0.97,
+  transition: CELL_REACH * OVERLAP,
+  middle: TRANSITION_REACH * OVERLAP,
+  backdrop: MIDDLE_REACH * OVERLAP,
 };
 
 /**

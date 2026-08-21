@@ -37,8 +37,14 @@ import { chromium } from 'playwright';
 import { readPng } from './readPng.mjs';
 
 const url = process.env.PROBE_URL ?? 'http://localhost:4173/';
-const regions = (process.env.PROBE_REGIONS ?? 'lihue,hanalei,waimea-rim,kokee')
-  .split(',');
+/**
+ * Five real regions, deliberately unalike: a lowland plain, a north
+ * shore bay, a dry west coast, a canyon rim and the high interior. The
+ * artefact is a seam between distance tiers, and how badly two tiers
+ * disagree depends entirely on how creased the ground under them is.
+ */
+const regions = (process.env.PROBE_REGIONS
+  ?? 'lihue,hanalei-bay,kekaha,waimea-rim,kokee').split(',');
 /**
  * EVERY CANDIDATE, NOT A RANDOM ONE.
  *
@@ -62,7 +68,10 @@ try {
   for (const { region, roll } of runs) {
     // Walking and flying are what make this slow, so they run once per
     // region. Every candidate still gets looked at from where it lands.
-    const deep = roll === rolls[0];
+    // PROBE_DEEP=0 keeps the walk and the flight out of it, for when
+    // the question is only "does this build show sky through land at
+    // these four starts" and the answer is wanted from both builds.
+    const deep = roll === rolls[0] && process.env.PROBE_DEEP !== '0';
     const page = await browser.newPage({ viewport: { width: 932, height: 430 } });
     const errors = [];
     page.on('pageerror', (e) => errors.push(e.message));
@@ -203,22 +212,47 @@ try {
       // or water through land.
       if (seen > 0) {
         const rows = pass.pixels.found.map((p) => p.y);
+        // Say WHICH two tiers met there. A pixel count tells you the
+        // build is broken; only the ray tells you where to go.
+        const picks = pass.pixels.found.filter((_, i) =>
+          i % Math.max(1, Math.floor(seen / 6)) === 0).slice(0, 6);
+        const rays = await page.evaluate(
+          ({ list, w, h }) => list.map((p) =>
+            window.__island.sightThroughPixel(p.x / w, p.y / h)),
+          { list: picks, w: pass.pixels.width, h: pass.pixels.height },
+        );
+        for (const ray of rays) {
+          console.log(
+            `      px ${(ray.u * pass.pixels.width).toFixed(0)},`
+            + `${(ray.v * pass.pixels.height).toFixed(0)}  `
+            + ray.hits.map((x) =>
+              `${x.drawn ? '' : '~'}${x.tier}@${Math.round(x.square)}`).join(' '),
+          );
+        }
         throw new Error(
           `${region} candidate ${rolls.indexOf(roll)}, ${pass.tag}: `
           + `${seen} pixels show sky or water through land `
           + `(screen rows ${Math.min(...rows)}-${Math.max(...rows)})`,
         );
       }
-      // A seam this wide is the artefact even where no sky got through:
-      // the ground that replaced the discarded surface turned up
-      // hundreds of metres further away. On the old ladder this reached
-      // 20,366 units in flight.
-      if (worstGap > 8_000) {
-        throw new Error(
-          `${region} candidate ${rolls.indexOf(roll)}, ${pass.tag}: `
-          + `a tier hands off ${worstGap} units late`,
-        );
-      }
+      // THE SEAM NUMBER IS CONTEXT, NOT A VERDICT — and it took a run
+      // against both builds to learn that. It was a gate at first, on
+      // the assumption that a late hand-off was the defect's signature.
+      // Measured on the same candidate, the two builds are the same:
+      //
+      //              old ladder   new ladder
+      //   arrival        2,821       3,230
+      //   walking        4,720       4,738
+      //   flying        20,366      20,424
+      //
+      // It has no discriminating power because it is not measuring the
+      // defect. A ray leaving the camera at a shallow angle runs nearly
+      // parallel to the ground, so a few units of height between two
+      // surfaces becomes tens of thousands of units of distance — which
+      // is ordinary geometry, worst from the air, and true of any
+      // ladder. Failing on it would have been failing on trigonometry.
+      // The pixel count above is the criterion; this stays logged
+      // because a sudden change in it is worth looking at.
       if (pass.holes.length) {
         const worst = pass.holes.slice(0, 3);
         for (const h of worst) {
