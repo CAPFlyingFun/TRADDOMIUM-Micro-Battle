@@ -64,6 +64,9 @@ import type { GameWeather } from '../weather/gameplay';
 
 const SKY_COLOR = 0x9cc8e8;
 
+/** How long the lapse warning stays up, in seconds. */
+const PROTECTION_NOTICE = 6;
+
 /** Section meshes per side. */
 /** Vertices per side within a section, up close and far away. */
 
@@ -84,6 +87,8 @@ export class IslandScene {
   private readonly flight = new Flight();
   /** Five minutes of being left alone, and of leaving everything alone. */
   private readonly grace = new Grace();
+  /** Seconds the "protection ended" warning still has to run. */
+  private noticeLeft = 0;
   private rain!: Rain;
   private sun!: THREE.DirectionalLight;
   private skyLight!: THREE.HemisphereLight;
@@ -221,8 +226,14 @@ export class IslandScene {
     // Both buttons are ALWAYS there. A control that appears and
     // disappears under a thumb already resting on it is worse than one
     // that greys out, and the design says so explicitly.
-    this.climbButton = this.actions.add('⬆️', 'climb', 'Space');
+    //
+    // DESCEND IS ADDED FIRST AND SITS AT THE BOTTOM. The pad is a
+    // `column-reverse`, so the order here is the order up the screen,
+    // not down it. Up belongs physically above down — reading a climb
+    // button below a descend button costs a beat every time, and it is
+    // the sort of beat that gets someone killed mid-flight.
     this.descendButton = this.actions.add('⬇️', 'descend', 'ShiftLeft');
+    this.climbButton = this.actions.add('⬆️', 'climb', 'Space');
     this.vitals = new Vitals(host, {
       health: liveStat('maxHealth'),
       food: liveStat('maxHunger'),
@@ -304,6 +315,8 @@ export class IslandScene {
       grace: () => this.grace.seconds,
       shielded: () => this.grace.shielded,
       disarmed: () => this.grace.disarmed,
+      ignoredByHostiles: () => this.grace.ignoredByHostiles,
+      graceRecord: () => this.grace.issued,
       weather: () => this.nowWeather,
       reading: () => weather().reading,
       weatherSource: () => weather().source,
@@ -504,9 +517,17 @@ export class IslandScene {
       this.pace, wants, this.stamina.spent,
       this.ant.pace, this.auto.active, this.auto.way,
     );
-    this.grace.update(dt);
     this.vitals.show(this.stamina.fraction, this.stamina.spent);
-    this.vitals.showGrace(this.grace.active ? this.grace.seconds : null);
+    // NOTHING TO TICK. The grace is a deadline, so the only question
+    // each frame is what time it is — which is why backgrounding the
+    // tab or losing the page can no longer buy extra protection.
+    if (this.grace.takeExpiry()) this.noticeLeft = PROTECTION_NOTICE;
+    if (this.noticeLeft > 0) {
+      this.noticeLeft = Math.max(0, this.noticeLeft - dt);
+      this.vitals.showGraceEnded();
+    } else {
+      this.vitals.showGrace(this.grace.active ? this.grace.seconds : null);
+    }
 
     // The buttons say what they DO right now. On the ground the up
     // button is a takeoff and the down button has nothing to descend

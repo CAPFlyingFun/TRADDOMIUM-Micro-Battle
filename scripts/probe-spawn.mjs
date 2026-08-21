@@ -156,25 +156,56 @@ try {
 
   // ── Grace ────────────────────────────────────────────────────────
   const grace = await page.evaluate(() => ({
+    record: window.__island.graceRecord(),
     seconds: window.__island.grace(),
     shielded: window.__island.shielded(),
     disarmed: window.__island.disarmed(),
+    ignored: window.__island.ignoredByHostiles(),
     chip: document.querySelector('[data-ui="grace"]')?.textContent ?? '',
+    now: Date.now(),
   }));
-  if (grace.seconds < 280) throw new Error(`she arrived with ${grace.seconds}s of grace`);
+
+  // IT IS A DEADLINE, NOT A COUNTDOWN, and this probe is the clearest
+  // demonstration of why that matters: under SwiftShader the game gets
+  // through roughly a thirtieth of real time, so a subtracted timer
+  // would still read close to a full five minutes here no matter how
+  // long the probe had actually taken. What is checked is the ISSUED
+  // SPAN — exactly five minutes — and that what remains agrees with the
+  // wall clock rather than with how many frames the game managed.
+  if (!grace.record) throw new Error('she arrived with no grace record');
+  const span = (grace.record.endsAt - grace.record.spawnedAt) / 1000;
+  if (Math.abs(span - 300) > 0.001) {
+    throw new Error(`grace was issued for ${span}s rather than five minutes`);
+  }
+  const wallLeft = (grace.record.endsAt - grace.now) / 1000;
+  if (Math.abs(grace.seconds - wallLeft) > 1) {
+    throw new Error(
+      `grace says ${grace.seconds.toFixed(1)}s left but the clock says `
+      + `${wallLeft.toFixed(1)}s — it is being ticked, not read`,
+    );
+  }
+  if (!grace.shielded) throw new Error('she is not protected after arriving');
   // The rule the whole thing exists for: never one without the other.
   if (grace.shielded !== grace.disarmed) {
     throw new Error('grace protected her without disarming her');
   }
+  // And nothing may even choose her as a target while it runs.
+  if (grace.ignored !== grace.shielded) {
+    throw new Error('grace protected her while leaving her huntable');
+  }
   if (!/SAFE/.test(grace.chip) || !/UNARMED/.test(grace.chip)) {
     throw new Error(`the grace chip reads "${grace.chip}" — it must say both halves`);
   }
-  notes.push(`grace ${Math.round(grace.seconds)}s, shield and disarm together`);
+  notes.push(
+    `grace issued for ${span}s, ${Math.round(grace.seconds)}s left by the wall clock, `
+    + 'shield and disarm and hostile-blindness together',
+  );
 
   // ── The loop, three times over ───────────────────────────────────
   // Once proves it can happen. Three proves nothing is leaking between
   // runs — a scene left listening, a HUD left on screen, an origin left
   // where the last queen died.
+  let lastSpawnedAt = grace.record.spawnedAt;
   for (let round = 1; round <= 3; round++) {
     await page.click('[data-ui="debug-die"]');
     await page.waitForSelector('[data-ui="death"]', { timeout: 20000 });
@@ -197,16 +228,32 @@ try {
     await page.waitForFunction(() => window.__island.simTime() > 1, null, { timeout: 120000 });
 
     const fresh = await page.evaluate(() => ({
-      grace: window.__island.grace(),
+      record: window.__island.graceRecord(),
+      shielded: window.__island.shielded(),
       canvases: document.querySelectorAll('canvas').length,
       deaths: document.querySelectorAll('[data-ui="death"]').length,
       dieButtons: document.querySelectorAll('[data-ui="debug-die"]').length,
       vitals: document.querySelectorAll('[data-ui="vitals"]').length,
     }));
-    if (fresh.grace < 280) throw new Error(`round ${round} began with ${fresh.grace}s of grace`);
+
+    // A NEW queen gets a NEW five minutes — not a top-up of the last
+    // one, and not the remains of it. The span is checked rather than
+    // the seconds remaining, because the seconds remaining are correct
+    // only for the instant they were read and this probe is slow.
+    if (!fresh.record) throw new Error(`round ${round} began with no grace`);
+    const span = (fresh.record.endsAt - fresh.record.spawnedAt) / 1000;
+    if (Math.abs(span - 300) > 0.001) {
+      throw new Error(`round ${round} was issued ${span}s of grace`);
+    }
+    if (fresh.record.spawnedAt <= lastSpawnedAt) {
+      throw new Error(`round ${round} inherited the previous queen's grace`);
+    }
+    lastSpawnedAt = fresh.record.spawnedAt;
+    if (!fresh.shielded) throw new Error(`round ${round} spawned unprotected`);
+
     // One of everything. Two means the last life is still on screen.
     for (const [what, many] of Object.entries(fresh)) {
-      if (what === 'grace') continue;
+      if (what === 'record' || what === 'shielded') continue;
       const want = what === 'deaths' ? 0 : 1;
       if (many !== want) {
         throw new Error(`round ${round} left ${many} ${what} on screen, wanted ${want}`);
@@ -214,6 +261,90 @@ try {
     }
   }
   notes.push('died and respawned three times over with nothing left behind');
+
+  // ── The flight pair reads the way the screen points ──────────────
+  const readPad = () => page.evaluate(() => {
+    const seen = [...document.querySelectorAll('[data-ui="actions"] [data-action]')]
+      .map((el) => {
+        const b = el.getBoundingClientRect();
+        return {
+          action: el.dataset.action,
+          top: Math.round(b.top),
+          left: Math.round(b.left),
+          w: Math.round(b.width),
+          h: Math.round(b.height),
+          // Greyed out is presented as opacity and greyscale rather
+          // than the disabled attribute, so that is what gets read.
+          dim: Number(getComputedStyle(el).opacity) < 0.95,
+          glyph: el.textContent,
+        };
+      })
+      .sort((a, b) => a.top - b.top);
+    return seen;
+  });
+
+  const pad = await readPad();
+  if (pad.length !== 2) throw new Error(`the action pad holds ${pad.length} buttons`);
+  const [upper, lower] = pad;
+  if (upper.action !== 'climb') {
+    throw new Error(`the upper action button is "${upper.action}", not climb`);
+  }
+  if (lower.action !== 'descend') {
+    throw new Error(`the lower action button is "${lower.action}", not descend`);
+  }
+  // Same slots as before the swap: one column, matching sizes, and the
+  // gap between them unchanged. A reorder must not become a relayout.
+  if (upper.left !== lower.left) throw new Error('the pair is no longer one column');
+  if (upper.w !== lower.w || upper.h !== lower.h) {
+    throw new Error('the two action buttons are different sizes');
+  }
+  const gap = lower.top - (upper.top + upper.h);
+  if (gap < 4 || gap > 18) throw new Error(`the pad gap is now ${gap}px`);
+  if (upper.w < 44 || upper.h < 44) {
+    throw new Error(`an action button is ${upper.w}x${upper.h} — too small for a thumb`);
+  }
+  // On the ground there is nothing to descend from, so the lower button
+  // must still be the one that greys out.
+  // On the ground the upper button is a TAKEOFF, and says so.
+  if (upper.glyph !== '🪽') {
+    throw new Error(`the upper button shows "${upper.glyph}" on the ground`);
+  }
+  // Nothing to descend from down here, so the lower one is greyed.
+  if (!lower.dim) throw new Error('DESCEND is not greyed out on the ground');
+  // And she is standing still, so she cannot take off either.
+  if (!upper.dim) {
+    throw new Error('TAKEOFF is offered to a queen who is standing still');
+  }
+
+  // THE WIRING, not merely the order. Run, and the button that lights
+  // up must be the UPPER one — takeoff needs airspeed, descending never
+  // becomes available on the ground. Had the swap crossed the actions
+  // with the slots, this is the check that would catch it.
+  await page.keyboard.down('KeyW');
+  // Wait for the BUTTON, not for the flight model. `canTakeOff` turns
+  // true a frame before the HUD is repainted, and under SwiftShader a
+  // frame is most of a second — reading the pad on the model's word
+  // catches the button in its old state.
+  await page.waitForFunction(
+    () => {
+      const el = document.querySelector('[data-action="climb"]');
+      return el !== null && Number(getComputedStyle(el).opacity) >= 0.95;
+    },
+    null,
+    { timeout: 90000 },
+  );
+  const running = await readPad();
+  await page.keyboard.up('KeyW');
+  const [runUpper, runLower] = running;
+  if (runUpper.dim) throw new Error('TAKEOFF stayed greyed out at a run');
+  if (!runLower.dim) throw new Error('DESCEND lit up while she was on the ground');
+  if (runUpper.top !== upper.top || runLower.top !== lower.top) {
+    throw new Error('the buttons moved when their state changed');
+  }
+  notes.push(
+    `action pad: climb above descend, ${upper.w}x${upper.h}, ${gap}px apart, `
+    + 'takeoff lights the upper slot at a run',
+  );
 
   await page.screenshot({ path: 'probe-spawn.png' });
   const real = errors.filter((e) =>

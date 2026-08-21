@@ -45,6 +45,11 @@ interface Meter {
   readonly read: HTMLElement;
 }
 
+/** The protected chip's colours, so the warning can put them back. */
+const SAFE_FILL = 'rgba(120, 190, 255, .16)';
+const SAFE_EDGE = 'rgba(150, 205, 255, .5)';
+const SAFE_TEXT = 'rgba(190, 225, 255, .95)';
+
 export class Vitals {
   private readonly panel: HTMLDivElement;
   private readonly stamina: Meter;
@@ -109,9 +114,9 @@ export class Vitals {
       padding: '3px 7px',
       borderRadius: '6px',
       alignSelf: 'flex-start',
-      background: 'rgba(120, 190, 255, .16)',
-      border: '1px solid rgba(150, 205, 255, .5)',
-      color: 'rgba(190, 225, 255, .95)',
+      background: SAFE_FILL,
+      border: `1px solid ${SAFE_EDGE}`,
+      color: SAFE_TEXT,
       font: '600 10px/1.3 "JetBrains Mono", ui-monospace, monospace',
       whiteSpace: 'nowrap',
     } as Partial<CSSStyleDeclaration>);
@@ -157,7 +162,30 @@ export class Vitals {
     const mins = Math.floor(seconds / 60);
     const secs = Math.ceil(seconds % 60);
     this.grace.style.display = 'block';
+    this.grace.style.background = SAFE_FILL;
+    this.grace.style.borderColor = SAFE_EDGE;
+    this.grace.style.color = SAFE_TEXT;
     this.grace.textContent = `🛡 SAFE · UNARMED  ${mins}:${String(secs % 60).padStart(2, '0')}`;
+  }
+
+  /**
+   * The moment it lapses, said out loud.
+   *
+   * Sliding silently from protected to ecosystem rules is the one thing
+   * this chip must not do. It went from telling her she was safe to
+   * telling her nothing, and a player who looked away for six seconds
+   * would never learn which of those two worlds they were now in. The
+   * warning wears the same chip in a different colour so the eye finds
+   * it in the place it was already looking.
+   */
+  showGraceEnded(): void {
+    if (this.shownGrace === 'ended') return;
+    this.shownGrace = 'ended';
+    this.grace.style.display = 'block';
+    this.grace.style.background = 'rgba(255, 140, 90, .18)';
+    this.grace.style.borderColor = 'rgba(255, 170, 110, .6)';
+    this.grace.style.color = 'rgba(255, 205, 165, .96)';
+    this.grace.textContent = '⚠️ PROTECTION ENDED';
   }
 
   dispose(): void {
