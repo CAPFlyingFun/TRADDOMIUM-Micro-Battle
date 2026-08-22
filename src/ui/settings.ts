@@ -82,8 +82,8 @@ export interface Settings {
   /**
    * How far the full-detail ground texture reaches, as a multiple of
    * the tuned baseline. Distance goes with the square root: 4x here is
-   * 2x the radius. At 1 the detail holds to roughly 7 cm around her
-   * and is gone by 17 from the default camera.
+   * 2x the radius. At 1 the detail holds to roughly 14 cm around her
+   * and is gone by 33 from the default camera.
    */
   detailRange: number;
 }

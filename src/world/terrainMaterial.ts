@@ -135,8 +135,19 @@ export const GRAIN_TILE = 1.1;
  *
  * Tuned from headless renders; the phone gets the final word.
  */
-const FADE_FROM_TEXELS = 2.0;
-const FADE_TO_TEXELS = 12.0;
+/**
+ * RAISED 4x ONCE THE COORDINATES WERE FIXED. The original 2-to-12 was
+ * tuned against float32-quantised UVs, where holding detail longer
+ * only held the streaks longer. With exact coordinates the hardware
+ * filters honestly out to much deeper minification, so full detail now
+ * reaches about twice as far (distance goes with the square root) and
+ * the wider from-to span makes the hand-over gentler as well — the
+ * blend covers 8 to 48 rather than 2 to 12, so no ring is visible
+ * where it happens. Joshua asked for the doubling; the dial in
+ * settings still scales it either way from here.
+ */
+const FADE_FROM_TEXELS = 8.0;
+const FADE_TO_TEXELS = 48.0;
 
 /**
  * The fade thresholds as LIVE uniforms, scaled by the detail-range
