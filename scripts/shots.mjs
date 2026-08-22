@@ -52,6 +52,11 @@ try {
     await page.waitForSelector('[data-ui="spawn-here"]', { timeout: 20000 });
     await page.click('[data-ui="spawn-here"]');
     await page.waitForFunction(() => Boolean(window.__island), null, { timeout: 120000 });
+    // The world is behind a loading screen now: everything below
+    // this measures a half-built island unless it waits for the
+    // veil to lift.
+    await page.waitForFunction(
+      () => !document.querySelector('[data-ui="loading"]'), null, { timeout: 240000 });
     // A skinned queen of a hundred thousand triangles is very slow
     // under a software renderer; a fraction of a simulated second is
     // plenty for a still.

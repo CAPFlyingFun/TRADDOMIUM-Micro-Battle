@@ -37,6 +37,7 @@
  */
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import type { LoadReport } from '../ui/loadPlan';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { liveStat } from './castes';
 import { Wingbeat, type WingPose } from './wingbeat';
@@ -49,6 +50,17 @@ export const MM_PER_UNIT = 10;
 
 /** Where the file sits once built. */
 const QUEEN_URL = `${import.meta.env.BASE_URL}models/queen-winged.glb`;
+
+/** The plan's name for her download. */
+export const QUEEN_JOB = 'queen';
+
+/** Rough size of the queen, until the response says otherwise. */
+const QUEEN_GUESS = 2_070_000;
+
+/** Declare her download on a plan, before it starts. */
+export function planQueen(report: LoadReport): void {
+  report.add(QUEEN_JOB, 'The queen', QUEEN_GUESS, true);
+}
 
 /** What the bake calls the two halves. */
 const BODY_MESH = 'queen_body';
@@ -99,10 +111,15 @@ export interface QueenBody {
  * until this resolves, so a failure here leaves a playable game with
  * the old body rather than an ant-shaped hole.
  */
-export async function loadQueen(): Promise<QueenBody> {
+export async function loadQueen(report?: LoadReport): Promise<QueenBody> {
   const loader = new GLTFLoader();
   loader.setMeshoptDecoder(MeshoptDecoder);
-  const gltf = await loader.loadAsync(QUEEN_URL);
+  // GLTFLoader goes through FileLoader, which unlike the texture path
+  // does report bytes as they land — so this one needs no help.
+  const gltf = await loader.loadAsync(QUEEN_URL, (event) => {
+    if (event.total > 0) report?.resize(QUEEN_JOB, event.total);
+    report?.advance(QUEEN_JOB, event.loaded);
+  });
   const model = gltf.scene;
 
   const wings = model.getObjectByName(WINGS_MESH) ?? null;

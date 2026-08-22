@@ -36,12 +36,13 @@ import { Grace } from '../ant/grace';
 import {
   MOVING_RECOVERY, RESTING_RECOVERY, SPRINT_DRAIN,
 } from '../ant/stamina';
-import { loadQueen, type QueenBody } from '../ant/queenModel';
+import { loadQueen, QUEEN_JOB, type QueenBody } from '../ant/queenModel';
 import { onChange, settings } from '../ui/settings';
 import { weather } from '../weather/WeatherService';
 import { skyLook } from '../weather/sky';
 import { Rain } from '../weather/Rain';
 import type { GameWeather } from '../weather/gameplay';
+import { FIRST_LIGHT_JOB, TERRAIN_JOB, type LoadReport } from '../ui/loadPlan';
 import { LiveWind, windProfile } from '../weather/windField';
 
 /**
@@ -127,6 +128,20 @@ export class IslandScene {
   private rain!: Rain;
   private sun!: THREE.DirectionalLight;
   private skyLight!: THREE.HemisphereLight;
+  /** Resolves when every ground map has pixels in it. */
+  private bandsReady!: Promise<void>;
+  /**
+   * Resolves when the world is worth looking at.
+   *
+   * NOT when the constructor returns. The scene is alive long before it
+   * is presentable: the terrain is cut, but until the band maps arrive
+   * the shader samples them as black and the ground under her is a
+   * void. Whoever put the loading screen up waits on this.
+   */
+  readonly ready: Promise<void>;
+  /** Set once a frame has been drawn with everything in place. */
+  private shown = false;
+  private showFirstFrame: (() => void) | null = null;
   /** The weather she is actually standing in, eased. */
   private nowWeather: GameWeather | null = null;
   /**
@@ -192,6 +207,12 @@ export class IslandScene {
      * which is enough to build and test the loop against.
      */
     private readonly onDeath?: () => void,
+    /**
+     * Where the loading screen finds out how the world is coming
+     * along. Optional: the island lab boots straight in with nobody
+     * watching, and the scene must not require an audience.
+     */
+    private readonly report?: LoadReport,
   ) {
     this.renderer = new THREE.WebGLRenderer({
       antialias: true,
@@ -319,7 +340,7 @@ export class IslandScene {
     // She plays in stick-legs from the first frame and becomes herself
     // when the mesh lands. A failed load leaves the placeholder up,
     // which is a playable game rather than an ant-shaped hole.
-    void loadQueen()
+    const queenArrived = loadQueen(this.report)
       .then((queen) => {
         if (this.disposed) return;
         this.ant.wear(queen.model);
@@ -329,7 +350,8 @@ export class IslandScene {
         // taken in the meantime.
         queen.setWings(this.winged);
       })
-      .catch((why) => console.warn('the queen model did not load', why));
+      .catch((why) => console.warn('the queen model did not load', why))
+      .finally(() => this.report?.finish(QUEEN_JOB));
 
     // Debug kill, so the death/restart loop can be walked through
     // before anything in the world is able to hurt her.
@@ -350,6 +372,27 @@ export class IslandScene {
     window.addEventListener('orientationchange', this.onResize);
     this.onResize();
     this.renderer.setAnimationLoop(this.tick);
+
+    // The terrain was cut synchronously up in the constructor, so by
+    // the time anyone can await this it is already standing.
+    this.report?.finish(TERRAIN_JOB);
+
+    /**
+     * Presentable, in three steps that have to happen in this order.
+     *
+     * The maps and the queen first — those are the five megabytes, and
+     * the black ground is what their absence looks like. Then ONE MORE
+     * DRAWN FRAME, because a texture is not on screen the moment its
+     * promise resolves: three uploads it to the GPU and compiles
+     * against it during the next render, and lifting the veil before
+     * that shows the very frame the veil was for.
+     */
+    this.ready = (async () => {
+      await Promise.allSettled([this.bandsReady, queenArrived]);
+      if (this.disposed) return;
+      await new Promise<void>((drawn) => { this.showFirstFrame = drawn; });
+      this.report?.finish(FIRST_LIGHT_JOB);
+    })();
 
     // What the headless probes measure the scene by.
     (window as unknown as Record<string, unknown>).__island = {
@@ -777,6 +820,15 @@ export class IslandScene {
     this.speed = this.ant.pace;
     this.follow.update(this.ant.root, look, dt);
     this.renderer.render(this.scene, this.follow.camera);
+
+    // A frame has now been drawn with whatever had arrived by the time
+    // it started. That is the one the loading screen was waiting for.
+    if (!this.shown && this.showFirstFrame) {
+      this.shown = true;
+      const drawn = this.showFirstFrame;
+      this.showFirstFrame = null;
+      drawn();
+    }
   };
 
   private readonly onResize = (): void => {
@@ -1063,13 +1115,15 @@ export class IslandScene {
     // One material per distance tier, each cutting away the range the
     // tier inside it already covers. They share the textures; only the
     // cut differs.
-    const bands = loadBands(this.renderer);
+    const bands = loadBands(this.renderer, this.report);
+    this.bandsReady = bands.ready;
+    const maps = bands.textures;
     this.terrain = new TerrainStream(
       this.scene,
-      terrainMaterial(bands, grain),
-      terrainMaterial(bands, grain, TIER_CUTS.transition),
-      terrainMaterial(bands, grain, TIER_CUTS.middle),
-      terrainMaterial(bands, grain, TIER_CUTS.backdrop),
+      terrainMaterial(maps, grain),
+      terrainMaterial(maps, grain, TIER_CUTS.transition),
+      terrainMaterial(maps, grain, TIER_CUTS.middle),
+      terrainMaterial(maps, grain, TIER_CUTS.backdrop),
     );
   }
 

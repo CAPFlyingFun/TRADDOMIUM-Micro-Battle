@@ -16,6 +16,10 @@
 import { IslandScene } from '../scenes/IslandScene';
 import { MainMenu } from './MainMenu';
 import { SpawnMap, type Chosen } from './SpawnMap';
+import { LoadingScreen } from './LoadingScreen';
+import { FIRST_LIGHT_JOB, LoadPlan, TERRAIN_JOB, WORK_WEIGHT } from './loadPlan';
+import { planBands } from '../world/terrainMaterial';
+import { planQueen } from '../ant/queenModel';
 import { SettingsPanel } from './SettingsPanel';
 import { DeathScreen } from './DeathScreen';
 import type { HeightGrid } from '../world/kauai';
@@ -24,6 +28,7 @@ export class GameFlow {
   private menu: MainMenu | null = null;
   private map: SpawnMap | null = null;
   private scene: IslandScene | null = null;
+  private loading: LoadingScreen | null = null;
   private menuSettings: SettingsPanel | null = null;
   private death: DeathScreen | null = null;
   /** Where she started, so a restart can offer the same island again. */
@@ -62,12 +67,44 @@ export class GameFlow {
   spawn(chosen: Chosen): void {
     this.lastStart = chosen;
     this.clear();
-    this.scene = new IslandScene(
+
+    // THE VEIL GOES UP FIRST, before the scene exists. The scene starts
+    // downloading the moment it is constructed and renders from its
+    // very first frame — a frame in which the ground has no textures
+    // yet and draws as a black void. Building it behind the screen is
+    // the whole point; putting the screen up afterwards would show
+    // exactly the frame it is meant to hide.
+    const plan = new LoadPlan();
+    planBands(plan);
+    planQueen(plan);
+    plan.add(TERRAIN_JOB, 'Cutting the terrain', WORK_WEIGHT);
+    plan.add(FIRST_LIGHT_JOB, 'First light', WORK_WEIGHT);
+
+    const screen = new LoadingScreen(this.host, chosen.region.name);
+    this.loading = screen;
+    screen.follow(() => plan.read());
+
+    const scene = new IslandScene(
       this.host,
       this.grid,
       { at: chosen.candidate.at, heading: chosen.candidate.heading },
       () => this.died(),
+      plan,
     );
+    this.scene = scene;
+
+    void scene.ready
+      .then(async () => {
+        // She may have been sent back to the map while the island was
+        // still arriving; there is nothing to reveal in that case.
+        if (this.scene !== scene) return;
+        await screen.lift();
+        if (this.loading === screen) this.loading = null;
+      })
+      .catch((why) => {
+        console.warn('the island did not finish loading', why);
+        screen.fail('The island failed to load.');
+      });
   }
 
   /**
@@ -92,6 +129,8 @@ export class GameFlow {
   private clear(): void {
     this.death?.dispose();
     this.death = null;
+    this.loading?.dispose();
+    this.loading = null;
     this.scene?.dispose();
     this.scene = null;
     this.map?.dispose();

@@ -18,6 +18,8 @@
  * lookup is swapped out.
  */
 import * as THREE from 'three';
+import { pullBytes } from './fetchBytes';
+import type { LoadReport } from '../ui/loadPlan';
 import { GRAIN_SIZE } from './groundTexture';
 import { UNITS_PER_METRE } from './kauai';
 
@@ -466,26 +468,97 @@ function measureAverage(name: string, texture: THREE.Texture): void {
   }
 }
 
+/**
+ * What a band load hands back: the textures now, and a promise for the
+ * moment they actually have pixels in them.
+ *
+ * Both halves matter. The textures have to exist immediately because
+ * the material is built around them, and the promise has to exist
+ * because UNTIL IT RESOLVES THEY SAMPLE AS BLACK — which is the
+ * half-black world Joshua photographed, not a bug in the shader but
+ * the shader faithfully drawing nothing.
+ */
+export interface BandLoad {
+  readonly textures: Record<string, THREE.Texture>;
+  readonly ready: Promise<void>;
+}
+
+/**
+ * Rough size of one band map, until the response says otherwise.
+ *
+ * Close to the real average on purpose. The browser only opens so many
+ * connections at once, so the later files' headers do not land until
+ * the earlier ones finish — the declared total is a mix of guesses and
+ * facts for most of the load, and a guess that is nearly right keeps it
+ * from visibly drifting while the player reads it.
+ */
+const BAND_GUESS = 445_000;
+
 /** Load the band maps, tiling and mip-mapped, from the public folder. */
 export function loadBands(
   renderer: THREE.WebGLRenderer,
-): Record<string, THREE.Texture> {
+  report?: LoadReport,
+): BandLoad {
   const loader = new THREE.TextureLoader();
   const anisotropy = renderer.capabilities.getMaxAnisotropy();
-  const bands: Record<string, THREE.Texture> = {};
+  const textures: Record<string, THREE.Texture> = {};
+  const waiting: Promise<unknown>[] = [];
+
   for (const name of BAND_FILES) {
     BAND_AVERAGE[name] ??= { value: new THREE.Color(0.5, 0.5, 0.5) };
-    const texture = loader.load(
-      `${import.meta.env.BASE_URL}kauai-tex/${name}.jpg`,
-      (loaded) => measureAverage(name, loaded),
-    );
+    const texture = new THREE.Texture();
     texture.wrapS = THREE.RepeatWrapping;
     texture.wrapT = THREE.RepeatWrapping;
     texture.colorSpace = THREE.SRGBColorSpace;
     // The ground is seen at a grazing angle almost all the time, which
     // is exactly where a tiled map turns to mush without this.
     texture.anisotropy = anisotropy;
-    bands[name] = texture;
+    textures[name] = texture;
+
+    const id = `band:${name}`;
+    const url = `${import.meta.env.BASE_URL}kauai-tex/${name}.jpg`;
+    // Pulled as bytes first so the loading screen has a real number to
+    // show, then handed to the ordinary loader as a blob — everything
+    // below this line is the same work it always did, and the blob is
+    // same-origin so the average-colour measurement can still read the
+    // canvas back.
+    waiting.push(
+      pullBytes(
+        url,
+        (size) => report?.resize(id, size),
+        (got) => report?.advance(id, got),
+      )
+        .then((pull) => new Promise<void>((settled) => {
+          loader.load(
+            pull.url,
+            (loaded) => {
+              texture.image = loaded.image;
+              texture.needsUpdate = true;
+              measureAverage(name, texture);
+              URL.revokeObjectURL(pull.url);
+              report?.finish(id);
+              settled();
+            },
+            undefined,
+            () => { URL.revokeObjectURL(pull.url); report?.finish(id); settled(); },
+          );
+        }))
+        // A band that will not load leaves its average grey and the
+        // ground a little wrong. That is a far better outcome than a
+        // loading screen that never lifts.
+        .catch((why) => {
+          console.warn(`the ${name} band did not load`, why);
+          report?.finish(id);
+        }),
+    );
   }
-  return bands;
+
+  return { textures, ready: Promise.all(waiting).then(() => undefined) };
+}
+
+/** Declare the band downloads on a plan, before any of them start. */
+export function planBands(report: LoadReport): void {
+  for (const name of BAND_FILES) {
+    report.add(`band:${name}`, 'Ground textures', BAND_GUESS, true);
+  }
 }

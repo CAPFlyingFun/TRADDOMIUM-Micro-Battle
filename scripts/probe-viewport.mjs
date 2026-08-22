@@ -26,6 +26,10 @@ await p.mouse.click(map.left + r.mapX*map.size, map.top + r.mapY*map.size);
 await p.waitForSelector('[data-ui="spawn-here"]', {timeout:20000});
 await p.click('[data-ui="spawn-here"]');
 await p.waitForFunction(() => Boolean(window.__island), null, {timeout:120000});
+// The world is behind a loading screen now; measuring the app box while
+// the veil is still up would measure the veil.
+await p.waitForFunction(() => !document.querySelector('[data-ui="loading"]'),
+  null, {timeout:240000});
 await p.waitForFunction(() => window.__island.simTime() > 0.4, null, {timeout:240000});
 
 const appH = () => p.evaluate(() => Math.round(document.getElementById('app').getBoundingClientRect().height));

@@ -102,6 +102,11 @@ try {
   // ── Spawn ────────────────────────────────────────────────────────
   await page.click('[data-ui="spawn-here"]');
   await page.waitForFunction(() => Boolean(window.__island), null, { timeout: 120000 });
+  // The world is behind a loading screen now: everything below
+  // this measures a half-built island unless it waits for the
+  // veil to lift.
+  await page.waitForFunction(
+    () => !document.querySelector('[data-ui="loading"]'), null, { timeout: 240000 });
   await page.waitForFunction(() => window.__island.simTime() > 1, null, { timeout: 120000 });
 
   const landed = await page.evaluate(() => {

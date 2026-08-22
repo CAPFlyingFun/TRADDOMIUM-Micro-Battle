@@ -92,6 +92,11 @@ try {
     await page.waitForSelector('[data-ui="spawn-here"]', { timeout: 20000 });
     await page.click('[data-ui="spawn-here"]');
     await page.waitForFunction(() => Boolean(window.__island), null, { timeout: 120000 });
+    // The world is behind a loading screen now: everything below
+    // this measures a half-built island unless it waits for the
+    // veil to lift.
+    await page.waitForFunction(
+      () => !document.querySelector('[data-ui="loading"]'), null, { timeout: 240000 });
     await page.waitForFunction(() => window.__island.simTime() > 2, null, { timeout: 180000 });
 
     /** Render the frame with the HUD out of the way, and read it. */
