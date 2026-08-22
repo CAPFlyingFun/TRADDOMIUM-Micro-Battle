@@ -229,3 +229,59 @@ describe('putting the real body on', () => {
     expect(meshes).toBeGreaterThan(10);
   });
 });
+
+/**
+ * THE FLASH EVERY SEVEN SECONDS, as a test.
+ *
+ * A floating-origin rebase calls `reground()`, and `reground()` used to
+ * settle her at zero — on the floor. Airborne that is a landing, and
+ * since the chase camera is placed from her position AFTER the rebase,
+ * the camera took the fall too: one frame rendered from ankle height,
+ * with the detail fade suddenly showing full texture on ground that had
+ * been flat colour from altitude. It ran on a timer because rebases do.
+ *
+ * Negative control: reverting `reground()` to `this.settle(0, 1, false)`
+ * fails the first case with 0 against her flying height, and leaves the
+ * other two passing — which is why the walking cases are here too.
+ */
+describe('re-seating her is not a landing', () => {
+  const HIGH = 2_000;
+
+  function flying(above: number) {
+    const ant = new PlayerAnt();
+    ant.placeAt(0, 0, 0);
+    ant.fly(drive({ ahead: 100 }), 0, 0, 0, DT, above);
+    return ant;
+  }
+
+  it('keeps her altitude when the island moves under her', () => {
+    const ant = flying(HIGH);
+    const wasY = ant.root.position.y;
+    expect(wasY).toBeGreaterThan(HIGH - 1);
+
+    ant.reground();
+    expect(ant.root.position.y).toBeCloseTo(wasY, 6);
+  });
+
+  it('still puts a walking ant back on the ground', () => {
+    const ant = new PlayerAnt();
+    ant.placeAt(0, 0, 0);
+    ant.update(drive({ ahead: 2 }), BEHIND, DT);
+    const floor = ant.root.position.y;
+
+    ant.reground();
+    expect(ant.root.position.y).toBeCloseTo(floor, 6);
+  });
+
+  it('forgets her height on a spawn', () => {
+    // A spawn is not a journey and it is not a flight either: she must
+    // not be re-seated two thousand units up over her new island.
+    const ant = flying(HIGH);
+    ant.placeAt(500, 500, 0);
+    const floor = ant.root.position.y;
+
+    ant.reground();
+    expect(ant.root.position.y).toBeCloseTo(floor, 6);
+    expect(ant.root.position.y).toBeLessThan(HIGH / 2);
+  });
+});

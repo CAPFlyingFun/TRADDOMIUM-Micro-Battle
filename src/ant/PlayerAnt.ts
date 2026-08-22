@@ -147,6 +147,7 @@ export class PlayerAnt {
     // island away — and reports it as speed.
     this.wasAt = null;
     this.travelled = { x: 0, z: 0 };
+    this.above = 0;
     const seat = toLocal(world(x, z));
     this.root.position.set(seat.lx, groundHeight(x, z), seat.lz);
     this.root.rotation.set(0, heading, 0);
@@ -162,8 +163,9 @@ export class PlayerAnt {
    * a visible drop, a moment inside a hill, or a lurch across the map.
    */
   reground(): void {
-    // Not a frame of movement — the island moved, not her.
-    this.settle(0, 1, false);
+    // Not a frame of movement — the island moved, not her. And not a
+    // landing either: she keeps the height she was at.
+    this.settle(this.above, 1, false);
   }
 
   /**
@@ -349,9 +351,34 @@ export class PlayerAnt {
   private travelled = { x: 0, z: 0 };
   private wasAt: { x: number; z: number } | null = null;
 
+  /**
+   * HOW FAR OFF THE GROUND SHE WAS LAST SETTLED, so that re-seating her
+   * is a re-seating and not a landing.
+   *
+   * THE FLASH EVERY SEVEN SECONDS. A rebase calls `reground()`, which
+   * used to settle her at zero — on the floor. Airborne, that dropped
+   * her the whole way to the ground for the remainder of the frame,
+   * and because the chase camera is placed AFTER the rebase and from
+   * her position, the camera went with her: one rendered frame taken
+   * from ankle height instead of twenty metres up. The detail fade
+   * hands over within a metre of the eye, so ground that had been flat
+   * average colour from altitude burst into full texture for that
+   * frame — Joshua's "all the terrain clear with no LOD". It arrived
+   * on a timer because rebases do: the origin moves when she has
+   * strayed 4096 units, which at a flown 5.6 m/s is every seven to
+   * eight seconds, and at walking pace is every few minutes. Same bug,
+   * both reports.
+   *
+   * Kept here rather than passed in because `reground()`'s callers —
+   * the rebase, the relief dial — know that the ISLAND moved. They do
+   * not know, and should not have to know, how high she was over it.
+   */
+  private above = 0;
+
   /** Put her on the ground — or `above` it — facing her heading. */
   private settle(above: number, dt: number, moved = true): void {
     const { x, z } = this.at;
+    this.above = above;
     if (moved && this.wasAt && dt > 1e-6) {
       this.travelled = {
         x: (x - this.wasAt.x) / dt,
