@@ -1,7 +1,7 @@
 {
   "name": "traddomium-micro-battle",
   "private": true,
-  "version": "0.31.0",
+  "version": "0.32.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -13,6 +13,8 @@
     "probe:spawn": "node scripts/probe-spawn.mjs",
     "probe:weather": "node scripts/probe-weather.mjs",
     "probe:lod": "node scripts/probe-lod.mjs",
+    "probe:reach": "node scripts/probe-reach.mjs",
+    "probe:viewport": "node scripts/probe-viewport.mjs",
     "probe:streak": "node scripts/probe-streak.mjs",
     "shots": "node scripts/shots.mjs",
     "probe:island": "node scripts/probe-island.mjs",

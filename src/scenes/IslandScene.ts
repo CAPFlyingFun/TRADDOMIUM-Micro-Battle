@@ -20,6 +20,7 @@ import { originAt, rebaseFor, setOrigin, toLocal, toWorld,
 } from '../world/origin';
 import { bakeGrain, GRAIN_SIZE } from '../world/groundTexture';
 import {
+  BAND_TILE, FADE_FROM_UNIFORM, FADE_TO_UNIFORM,
   loadBands, reliefUniform, setDetailRange, setTextureOrigin, terrainMaterial,
 } from '../world/terrainMaterial';
 import { SettingsPanel } from '../ui/SettingsPanel';
@@ -408,6 +409,55 @@ export class IslandScene {
         return found;
       },
       setWings: (on: boolean) => this.setWings(on),
+      // HOW FAR THE GROUND DETAIL ACTUALLY REACHES, which is a
+      // question no screenshot answers and every fade tuning needs.
+      // Walks the centre column, unprojects each row onto the ground
+      // plane under her, and differences neighbouring pixels — the
+      // same footprint the shader's own derivatives report, in the
+      // same texels, against a distance in metres. `probe:reach` turns
+      // it into a table. Kept because the first four attempts at this
+      // fade were all tuned by eye, and the eye had them ten times too
+      // tight.
+      fadeProfile: () => {
+        const cam = this.follow.camera;
+        const w = this.renderer.domElement.clientWidth;
+        const h = this.renderer.domElement.clientHeight;
+        const groundY = this.ant.root.position.y;
+        const hit = (px: number, py: number): THREE.Vector3 | null => {
+          const ndc = new THREE.Vector3((px / w) * 2 - 1, 1 - (py / h) * 2, 0.5);
+          ndc.unproject(cam);
+          const dir = ndc.sub(cam.position).normalize();
+          if (dir.y >= -1e-6) return null;
+          const t = (groundY - cam.position.y) / dir.y;
+          if (t <= 0) return null;
+          return cam.position.clone().addScaledVector(dir, t);
+        };
+        const rows: unknown[] = [];
+        for (let py = 2; py < h; py += 2) {
+          const a = hit(w / 2, py);
+          const b = hit(w / 2, py + 1);
+          const c = hit(w / 2 + 1, py);
+          if (!a || !b || !c) continue;
+          const long = Math.max(a.distanceTo(b), a.distanceTo(c));
+          rows.push({
+            py,
+            // Horizontal ground distance from her, in metres.
+            metres: Math.hypot(a.x - this.ant.root.position.x,
+                               a.z - this.ant.root.position.z) / 100,
+            texels: (long / BAND_TILE) * 1024,
+          });
+        }
+        return {
+          camHeightCm: cam.position.y - groundY,
+          fov: cam.fov,
+          tileCm: BAND_TILE,
+          // The LIVE thresholds, dial included, so the probe reports
+          // what actually ships rather than what it was told once.
+          fadeFrom: FADE_FROM_UNIFORM.value,
+          fadeTo: FADE_TO_UNIFORM.value,
+          rows,
+        };
+      },
       graceRecord: () => this.grace.issued,
       sightLine: (pitchDeg: number, yawDeg = 0) => this.sightLine(pitchDeg, yawDeg),
       sightThroughPixel: (u: number, v: number) => this.sightThroughPixel(u, v),

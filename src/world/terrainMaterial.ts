@@ -136,18 +136,34 @@ export const GRAIN_TILE = 1.1;
  * Tuned from headless renders; the phone gets the final word.
  */
 /**
- * RAISED 4x ONCE THE COORDINATES WERE FIXED. The original 2-to-12 was
- * tuned against float32-quantised UVs, where holding detail longer
- * only held the streaks longer. With exact coordinates the hardware
- * filters honestly out to much deeper minification, so full detail now
- * reaches about twice as far (distance goes with the square root) and
- * the wider from-to span makes the hand-over gentler as well — the
- * blend covers 8 to 48 rather than 2 to 12, so no ring is visible
- * where it happens. Joshua asked for the doubling; the dial in
- * settings still scales it either way from here.
+ * RAISED AGAIN, 16x, AND THIS TIME AGAINST A MEASUREMENT.
+ *
+ * Every previous value here was picked by looking at renders, which
+ * turns out to be a poor way to judge a threshold whose units are
+ * texels per pixel. `npm run probe:reach` now answers the question
+ * directly — it unprojects the centre column onto the ground and
+ * reports the footprint against distance — and what it found is that
+ * the 8-to-48 shipped here was fully flat by NINE CENTIMETRES. Barely
+ * past her own body. That is what Joshua meant by "not enough
+ * texture": there was almost none of it, anywhere but underfoot.
+ *
+ * The cause is the camera, which sits FOUR CENTIMETRES above her. At
+ * that height the ground falls away to a grazing angle within a body
+ * length, and the footprint grows with the square of the distance, so
+ * by half a metre one pixel is already averaging several hundred
+ * texels. Nothing about the maps or the filtering was wrong; the range
+ * they were being asked to cover was simply a tenth of what it should
+ * have been.
+ *
+ * 16x is where the measurement and the renders agree. Full detail now
+ * reaches 21 cm and the hand-over completes at 64 cm, seven times the
+ * old radius. 9x and 16x are both clean; 36x brings back the diagonal
+ * smearing this whole fade exists to prevent, plainly visible in a
+ * side-by-side crop. So the ceiling is real and it is a little above
+ * here, which is also why the dial below no longer goes to 4x.
  */
-const FADE_FROM_TEXELS = 8.0;
-const FADE_TO_TEXELS = 48.0;
+const FADE_FROM_TEXELS = 128.0;
+const FADE_TO_TEXELS = 768.0;
 
 /**
  * The fade thresholds as LIVE uniforms, scaled by the detail-range
@@ -155,12 +171,11 @@ const FADE_TO_TEXELS = 48.0;
  *
  * A dial rather than a constant for the usual reason (see settings.ts:
  * anything the player can feel gets tuned on the device, not by
- * redeploying), and for one more that is specific to this number: the
- * baseline of 12 was chosen while the texture coordinates were still
- * quantised, when pushing detail further out only pushed the streaks
- * further out. With exact coordinates the ceiling is far higher and
- * nobody has found it yet. Distance scales with the SQUARE ROOT of the
- * multiplier — 4x the texels is 2x the radius.
+ * redeploying). Distance scales with the SQUARE ROOT of the multiplier
+ * — 4x the texels is 2x the radius — so the dial's 0.25-to-2 spans
+ * roughly 32 cm to 1.4 m of reach. The top of that range is now a
+ * MEASURED edge rather than a guess: 36x the baseline streaks, so 2x
+ * on the dial is about as far as the maps will honestly go.
  */
 export const FADE_FROM_UNIFORM = { value: FADE_FROM_TEXELS };
 export const FADE_TO_UNIFORM = { value: FADE_TO_TEXELS };

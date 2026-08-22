@@ -132,7 +132,7 @@ export const LIMITS = {
   terrainSmoothing: { min: 0, max: 1, step: 0.05 },
   flightSpeed: { min: 0.25, max: 2, step: 0.05 },
   windInfluence: { min: 0, max: 1, step: 0.05 },
-  detailRange: { min: 0.5, max: 4, step: 0.25 },
+  detailRange: { min: 0.25, max: 2, step: 0.25 },
 } as const;
 
 export type Dial = keyof typeof LIMITS;
