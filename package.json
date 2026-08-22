@@ -16,6 +16,8 @@
     "probe:reach": "node scripts/probe-reach.mjs",
     "probe:viewport": "node scripts/probe-viewport.mjs",
     "probe:loading": "node scripts/probe-loading.mjs",
+    "plates": "node scripts/plates.mjs",
+    "hud:draft": "node scripts/hudDraft.mjs",
     "probe:streak": "node scripts/probe-streak.mjs",
     "shots": "node scripts/shots.mjs",
     "probe:island": "node scripts/probe-island.mjs",
