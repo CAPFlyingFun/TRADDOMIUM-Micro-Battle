@@ -226,7 +226,13 @@ export function windWarning(
   now: Conditions, heading: number | null,
 ): string | null {
   const windUnits = mps(now.windSpeed) * UNITS_PER_METRE;
-  if (windUnits > MAX_POWERED_SPEED) return '⚠ Wind exceeds queen airspeed';
+  // THE HEADWIND CHECK GOES FIRST, and the order is the whole point.
+  // The component along her nose can never exceed the wind's own speed,
+  // so asking "is the wind faster than she is" first means the headwind
+  // question can never be reached — it was dead code for weeks, saying
+  // in its own comment that it was the more useful warning. Reversed,
+  // both are reachable and the sharper one wins: air she cannot out-fly
+  // matters much less when it is behind her.
   if (heading !== null) {
     // How much of the wind is blowing straight back at her. The wind
     // travels toward (windFrom + 180); a component along her nose that
@@ -235,6 +241,7 @@ export function windWarning(
     const along = Math.cos(blowing - heading) * windUnits;
     if (-along > MAX_POWERED_SPEED) return '⚠ Headwind exceeds airspeed';
   }
+  if (windUnits > MAX_POWERED_SPEED) return '⚠ Wind exceeds queen airspeed';
   if (windUnits > MAX_POWERED_SPEED * 0.6) return '⚠ Strong wind — major drift';
   return null;
 }

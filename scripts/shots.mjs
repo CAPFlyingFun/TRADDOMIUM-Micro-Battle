@@ -89,7 +89,12 @@ try {
       // The HUD is the subject rather than the obstacle: open the
       // weather panel and let her work, so the endurance readout has a
       // workload to report on rather than sitting at FULL.
-      await page.click('[data-ui="weather-chip"]').catch(() => {});
+      // PANEL=0 leaves the weather panel shut: it is a big opaque card
+      // over the right of the screen, which is exactly where the flight
+      // instruments live.
+      if (process.env.PANEL !== '0') {
+        await page.click('[data-ui="weather-chip"]').catch(() => {});
+      }
       await page.evaluate(() => {
         window.__island.setPace('run');
         window.__island.setSprint(true);

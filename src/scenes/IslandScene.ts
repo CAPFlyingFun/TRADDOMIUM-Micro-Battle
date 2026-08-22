@@ -29,6 +29,7 @@ import { liveStat } from '../ant/castes';
 import { ActionPad, type Action } from '../input/ActionPad';
 import { DebugDie } from '../ui/DebugDie';
 import { WeatherChip } from '../ui/WeatherChip';
+import { FlightHud } from '../ui/FlightHud';
 import { Compass } from '../ui/Compass';
 import { bearingOf, type CompassMarker } from '../ui/compassMath';
 import { AUTO_AIRSPEED, Flight, setFlightScale } from '../ant/flight';
@@ -94,6 +95,8 @@ export class IslandScene {
   private readonly actions: ActionPad;
   private readonly debugDie: DebugDie;
   private readonly weatherChip: WeatherChip;
+  /** Altitude, vertical speed and the wind — flight only. */
+  private readonly flightHud: FlightHud;
   private readonly compass: Compass;
   /**
    * What the compass points at. GLOBAL positions, recomputed into
@@ -289,6 +292,7 @@ export class IslandScene {
     this.actions = new ActionPad(host);
     this.debugDie = new DebugDie(host, () => this.kill());
     this.weatherChip = new WeatherChip(host);
+    this.flightHud = new FlightHud(host);
     this.compass = new Compass(host);
     // Both buttons are ALWAYS there. A control that appears and
     // disappears under a thumb already resting on it is worse than one
@@ -579,6 +583,7 @@ export class IslandScene {
     window.removeEventListener('orientationchange', this.onResize);
     this.stick.dispose();
     this.paceUI.dispose();
+    this.flightHud.dispose();
     this.look.dispose();
     this.panel.dispose();
     this.vitals.dispose();
@@ -726,7 +731,39 @@ export class IslandScene {
     this.paceUI.show(
       this.pace, wants, this.stamina.spent,
       this.ant.pace, this.auto.active, this.auto.way,
+      this.flight.aloft ? this.flight.airspeed : null,
     );
+    // THE WIND AS SHE FEELS IT, not as the station reported it: the
+    // same vector the flight model is actually adding to her, height
+    // profile and gusts and all, so the arrow agrees with what is
+    // happening to her rather than with a number from ten metres up.
+    const felt = this.windOnHer();
+    // WHERE THE HORIZON REALLY IS. The camera hangs behind and above
+    // her and looks down, so the horizon is nowhere near the middle of
+    // the screen and a ladder drawn there would be decoration. Straight
+    // out of the projection the renderer is already using: how far the
+    // eye is tilted, and what a degree of it is worth in pixels.
+    const eye = new THREE.Vector3();
+    this.follow.camera.getWorldDirection(eye);
+    const tall = this.renderer.domElement.clientHeight;
+    const halfFov = (this.follow.camera.fov * Math.PI) / 360;
+    const perRadian = tall / 2 / Math.tan(halfFov);
+    const elevation = Math.asin(Math.max(-1, Math.min(1, eye.y)));
+    this.flightHud.show({
+      horizon: Math.tan(elevation) * perRadian,
+      perDegree: (perRadian * Math.PI) / 180,
+      aloft: this.flight.aloft,
+      height: this.flight.height,
+      climbing: this.flight.climbing,
+      roll: this.flight.roll,
+      pitch: this.flight.pitch,
+      airspeed: this.flight.airspeed,
+      ground: this.ant.pace,
+      heading: this.flight.heading,
+      wind: felt
+        ? { speed: Math.hypot(felt.x, felt.z), heading: Math.atan2(felt.x, felt.z) }
+        : null,
+    });
     // The RATE goes with the reserve, so the readout can say how long
     // what she is doing right now can go on rather than how much
     // sprinting the bar would be worth.

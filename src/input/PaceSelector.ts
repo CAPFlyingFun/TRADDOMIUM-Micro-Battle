@@ -40,6 +40,8 @@ export class PaceSelector {
   private readonly rows: HTMLDivElement;
   private readonly auto: HTMLButtonElement;
   private readonly readout: HTMLDivElement;
+  /** The second line, in flight: her speed over the ground. */
+  private readonly overGround: HTMLDivElement;
   private readonly sprintCell: HTMLButtonElement;
   private readonly cells = new Map<Pace, HTMLButtonElement>();
   private readonly detach: Array<() => void> = [];
@@ -53,12 +55,14 @@ export class PaceSelector {
   private shownAuto = '';
   private flips = 0;
   private shownSpeed = -1;
+  private shownAir: number | null = null;
 
   constructor(host: HTMLElement) {
     this.column = document.createElement('div');
     this.rows = document.createElement('div');
     this.auto = document.createElement('button');
     this.readout = document.createElement('div');
+    this.overGround = document.createElement('div');
     this.column.dataset.control = 'pace';
     // The column runs the full height so a short window eats it from
     // the top; the ROWS are where it actually draws, and the only
@@ -89,7 +93,7 @@ export class PaceSelector {
       pointerEvents: 'none',
     } as Partial<CSSStyleDeclaration>);
 
-    this.column.append(this.auto, label, this.rows, this.readout);
+    this.column.append(this.auto, label, this.rows, this.readout, this.overGround);
     host.appendChild(this.column);
 
     // Desktop: 1 / 2 / 3 pick a pace outright and Shift calls for a
@@ -152,6 +156,16 @@ export class PaceSelector {
     speed: number,
     auto: boolean,
     way: 1 | -1,
+    /**
+     * Her AIRSPEED, when she is flying. Null on the ground.
+     *
+     * On the ground these are the same number and one line says it. In
+     * the air they part company — the wind is added to her airspeed to
+     * get her speed over the ground — and that difference is the whole
+     * of the flight model. Better said here, where the speed already
+     * is, than as a second instrument somewhere else.
+     */
+    air: number | null = null,
   ): void {
     // ONE row is green, and it is whatever is actually in force. Pace
     // and sprint were lit independently, so a sprint over a crawl lit
@@ -186,9 +200,15 @@ export class PaceSelector {
     // One world unit is about a centimetre. Rounded to a tenth, so a
     // continuously varying speed does not flicker every frame.
     const shown = Math.round(Math.abs(speed) * 10) / 10;
-    if (shown !== this.shownSpeed) {
+    const flying = air === null ? null : Math.round(Math.abs(air) * 10) / 10;
+    if (shown !== this.shownSpeed || flying !== this.shownAir) {
       this.shownSpeed = shown;
-      this.readout.textContent = `${shown.toFixed(1)} cm/s`;
+      this.shownAir = flying;
+      this.readout.textContent = flying === null
+        ? `${shown.toFixed(1)} cm/s`
+        : `AIR ${flying.toFixed(1)}`;
+      this.overGround.textContent = flying === null ? '' : `GND ${shown.toFixed(1)} cm/s`;
+      this.overGround.style.display = flying === null ? 'none' : 'block';
     }
   }
 
@@ -330,5 +350,18 @@ export class PaceSelector {
       pointerEvents: 'none',
     } as Partial<CSSStyleDeclaration>);
     this.readout.textContent = '0.0 cm/s';
+
+    Object.assign(this.overGround.style, {
+      flex: '0 0 auto',
+      textAlign: 'center',
+      whiteSpace: 'nowrap',
+      display: 'none',
+      marginTop: '2px',
+      font: '600 9px/1 "JetBrains Mono", ui-monospace, monospace',
+      color: 'rgba(169, 242, 201, .82)',
+      textShadow: '0 1px 3px rgba(0, 0, 0, .85)',
+      userSelect: 'none',
+      pointerEvents: 'none',
+    } as Partial<CSSStyleDeclaration>);
   }
 }
