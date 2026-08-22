@@ -11,6 +11,8 @@
  * perfectly playable with a keyboard, and blocking it would be rude.
  */
 
+import { SPLASH_PORTRAIT } from './splashFrame';
+
 /**
  * Whether to ask for a rotation. Kept free of the DOM so the rule can
  * be tested without a browser.
@@ -112,11 +114,35 @@ export class RotateGate {
       display: 'none',
       flexDirection: 'column',
       alignItems: 'center',
-      justifyContent: 'center',
+      // The message sits LOW, in the dark of the forest floor. Centred
+      // it would land squarely on the wordmark, and the art has nothing
+      // to say once you have read it twice.
+      justifyContent: 'flex-end',
       gap: '10px',
       textAlign: 'center',
-      padding: '32px',
-      background: '#0F0C06',
+      padding: '32px 32px 14vh',
+      // THE PORTRAIT SPLASH BEHIND THE ASK. This screen only ever
+      // appears on a phone held the tall way, which is exactly the
+      // shape that artwork is composed for — and it is already
+      // downloaded and decoded, because the boot screen just spent the
+      // elevation download showing it. A flat dark void here would
+      // throw that away and make turning the phone feel like the game
+      // had crashed and come back.
+      // A light hand with the scrim: the artwork is already vignetted
+      // almost to black below the bar, and the 72% wash this started
+      // with turned two thirds of it into a flat void. Enough to sit
+      // text on, no more.
+      backgroundImage:
+        `linear-gradient(rgba(6, 9, 5, .18), rgba(6, 9, 5, .52)), `
+        + `url("${import.meta.env.BASE_URL}${SPLASH_PORTRAIT.file}")`,
+      backgroundSize: 'cover',
+      backgroundPosition: 'center',
+      // SHOWS THROUGH THE BAR. The artwork has the loading bar's
+      // interior cut out of it, and by the time this screen appears the
+      // island has finished loading — so the colour behind the picture
+      // reads as a full bar rather than an empty one waiting on
+      // something. A dark background here looked like a stall.
+      backgroundColor: '#ffae35',
       color: 'rgba(255, 226, 160, .95)',
       zIndex: '50',
     } satisfies Partial<CSSStyleDeclaration>);
@@ -133,11 +159,13 @@ export class RotateGate {
         margin: 0;
         font: 600 21px/1.3 "Chakra Petch", system-ui, sans-serif;
         letter-spacing: .02em;
+        text-shadow: 0 2px 12px rgba(0, 0, 0, .95);
       }
       .rotate-why {
         margin: 0;
         font: 15px/1.5 system-ui, sans-serif;
         color: rgba(255, 226, 160, .62);
+        text-shadow: 0 2px 12px rgba(0, 0, 0, .95);
       }
       @keyframes rotate-hint {
         0%, 30% { transform: rotate(0deg); }

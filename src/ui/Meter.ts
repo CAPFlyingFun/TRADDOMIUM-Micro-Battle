@@ -70,23 +70,23 @@ export class Meter {
 
   /** The one box every layer is positioned inside. Size this. */
   readonly root: HTMLDivElement;
+  private readonly fill: HTMLDivElement;
+  private readonly backing: HTMLDivElement;
+  private readonly clip: HTMLDivElement;
+  private frame: HTMLImageElement;
+
   /**
    * The three layers, BACK TO FRONT, in the order they are stacked.
    *
-   * Held as a list rather than as three fields because that is what
-   * they are: one stack, sized by one box, and anything that has to
-   * walk them (a resize, a theme, a debug overlay) should not need to
-   * know their names.
+   * Read rather than stored because the front one can be swapped —
+   * turning the phone changes the artwork — and a stored list would go
+   * stale the first time it happened.
    */
-  readonly layers: readonly HTMLElement[];
-  private readonly fill: HTMLDivElement;
+  get layers(): readonly HTMLElement[] {
+    return [this.backing, this.clip, this.frame];
+  }
 
   constructor(look: MeterLook) {
-    const { left, right, top, bottom } = look.window;
-    const tall = bottom - top;
-    const bleed = tall * BLEED;
-    const pc = (n: number): string => `${(n * 100).toFixed(3)}%`;
-
     this.root = document.createElement('div');
     Object.assign(this.root.style, {
       position: 'relative',
@@ -94,24 +94,12 @@ export class Meter {
       lineHeight: '0',
     } as Partial<CSSStyleDeclaration>);
 
-    const seat = (el: HTMLElement): void => {
-      Object.assign(el.style, {
-        position: 'absolute',
-        left: pc(left),
-        top: pc(top - bleed),
-        width: pc(right - left),
-        height: pc(tall + bleed * 2),
-      } as Partial<CSSStyleDeclaration>);
-    };
-
     // BACK — the empty bar.
     const backing = document.createElement('div');
-    seat(backing);
     backing.style.background = look.backing ?? 'rgba(6, 8, 5, 0.92)';
 
     // MIDDLE — the only thing that ever changes.
     const clip = document.createElement('div');
-    seat(clip);
     clip.style.overflow = 'hidden';
     this.fill = document.createElement('div');
     // Named so a probe can read the value off the DOM. The fill is the
@@ -141,8 +129,45 @@ export class Meter {
       pointerEvents: 'none',
     } as Partial<CSSStyleDeclaration>);
 
-    this.layers = [backing, clip, frame];
-    this.root.append(...this.layers);
+    this.backing = backing;
+    this.clip = clip;
+    this.frame = frame;
+    this.root.append(backing, clip, frame);
+    this.aim(look.window);
+  }
+
+  /**
+   * Point the hidden layers at a (new) hole.
+   *
+   * Called again when the artwork is swapped — turning a phone changes
+   * the picture, and the bar is somewhere else in the portrait one.
+   */
+  aim(window: Window): void {
+    const { left, right, top, bottom } = window;
+    const tall = bottom - top;
+    const bleed = tall * BLEED;
+    const pc = (n: number): string => `${(n * 100).toFixed(3)}%`;
+    for (const el of [this.backing, this.clip]) {
+      Object.assign(el.style, {
+        position: 'absolute',
+        left: pc(left),
+        top: pc(top - bleed),
+        width: pc(right - left),
+        height: pc(tall + bleed * 2),
+      } as Partial<CSSStyleDeclaration>);
+    }
+  }
+
+  /** Swap the artwork on the front. */
+  wear(art: HTMLImageElement): void {
+    if (art === this.frame) return;
+    this.frame.replaceWith(art);
+    this.frame = art;
+  }
+
+  /** What is on the front right now. */
+  get worn(): HTMLImageElement {
+    return this.frame;
   }
 
   /** Set the reading, 0 to 1. */

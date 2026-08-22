@@ -17,7 +17,12 @@
     <meta name="theme-color" content="#0B0F07" />
     <link rel="manifest" href="./manifest.webmanifest" />
     <!-- The splash is the first paint, so it is asked for first. -->
-    <link rel="preload" as="image" href="./splash.webp" type="image/webp" />
+    <!-- The splash is the first paint, so it is asked for first — and
+         only the one this screen will actually show. -->
+    <link rel="preload" as="image" href="./splash.webp" type="image/webp"
+          media="(orientation: landscape)" />
+    <link rel="preload" as="image" href="./splash-portrait.webp" type="image/webp"
+          media="(orientation: portrait)" />
     <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
     <title>TRADDOMIUM: Micro Battle!</title>
     <link
@@ -93,11 +98,12 @@
       }
       /* COVERING the screen, sized from viewport units so the picture
          is right on the FIRST paint — #boot is fixed to the viewport,
-         so these describe its box exactly. fitCover re-measures it once
-         the module runs, which is also what slides the crop up far
-         enough to keep the caption on a very wide phone. Behind the
-         cut-out window is this element's own dark background: the empty
-         bar. */
+         so these describe its box exactly. Landscape by default;
+         portrait gets the other artwork's shape below. fitCover
+         re-measures once the module runs, which is what slides the crop
+         up far enough to keep the caption on an extreme phone and what
+         notices a turn. Behind the cut-out window is this element's own
+         dark background: the empty bar. */
       #boot .stage {
         position: relative;
         width: max(100vw, calc(100dvh * 16 / 9));
@@ -105,6 +111,15 @@
         background: rgba(6, 8, 5, 0.92);
         container-type: size;
         line-height: 0;
+      }
+      @media (orientation: portrait) {
+        #boot .stage {
+          width: max(100vw, calc(100dvh * 9 / 16));
+          height: max(100dvh, calc(100vw * 16 / 9));
+        }
+      }
+      #boot .stage picture {
+        display: contents;
       }
       #boot .stage img {
         position: relative;
@@ -120,7 +135,13 @@
     <!-- Removed by main.ts once the island's elevation has landed. -->
     <div id="boot">
       <div class="stage">
-        <img src="./splash.webp" alt="TRADDOMIUM — Micro Battle!" />
+        <!-- The browser picks one before any script runs, and having
+             chosen, keeps it: bootBar reads `currentSrc` rather than
+             asking the window its shape a second time. -->
+        <picture>
+          <source media="(orientation: portrait)" srcset="./splash-portrait.webp" />
+          <img src="./splash.webp" alt="TRADDOMIUM — Micro Battle!" />
+        </picture>
       </div>
     </div>
     <script type="module" src="/src/main.ts"></script>

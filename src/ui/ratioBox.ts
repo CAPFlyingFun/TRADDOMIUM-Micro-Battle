@@ -20,11 +20,10 @@
  * can be while keeping the bottom of the readout on screen.
  */
 
-export interface CoverFit {
-  /** The layers, back to front. They all share the one box. */
-  readonly layers: readonly HTMLElement[];
-  /** Stop watching. */
-  readonly stop: () => void;
+/** What the artwork currently in the box needs. */
+export interface Shape {
+  readonly ratio: number;
+  readonly keepVisible: number;
 }
 
 /**
@@ -32,21 +31,22 @@ export interface CoverFit {
  *
  * @param box the single element every layer is positioned inside
  * @param parent what it has to cover
- * @param ratio width over height of the artwork
- * @param keepVisible fraction of the box's HEIGHT that must stay on
- *   screen — the bottom of the lowest caption. Pass 1 to keep all of it
- *   and accept letterboxing on extreme shapes.
+ * @param shape asked on every resize rather than fixed once: turning
+ *   the phone swaps the artwork for one composed the other way round,
+ *   and its ratio and its caption are both somewhere else. Returns the
+ *   artwork's width over height, and the fraction of its HEIGHT that
+ *   must stay on screen — the bottom of the lowest caption.
  */
 export function fitCover(
   box: HTMLElement,
   parent: HTMLElement,
-  ratio: number,
-  keepVisible = 1,
+  shape: () => { ratio: number; keepVisible: number },
 ): () => void {
   const apply = (): void => {
     const wide = parent.clientWidth;
     const tall = parent.clientHeight;
     if (wide <= 0 || tall <= 0) return;
+    const { ratio, keepVisible } = shape();
 
     // Cover: whichever side falls short decides the size.
     const width = Math.max(wide, tall * ratio);
