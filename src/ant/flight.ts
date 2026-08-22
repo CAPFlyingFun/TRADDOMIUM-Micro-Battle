@@ -33,6 +33,7 @@
  * readable rather than true.
  */
 import { REARM_AT } from './stamina';
+import { Wander } from './wander';
 
 /**
  * Where she is in the flight, as a state rather than a pile of
@@ -303,6 +304,18 @@ export class Flight {
   /** Roll, radians. Positive banks to her right. */
   private bank = 0;
   private rise = 0;
+  /**
+   * The air she is in, as a vertical rate — see wander.ts.
+   *
+   * HELD APART FROM `rise` ON PURPOSE. `rise` is a state the model
+   * eases toward a target, so folding a disturbance into it would
+   * compound: next frame's ease starts from the disturbed value and the
+   * wander leaks into her real rate. This is added at the points of
+   * USE, and only there, so the model's own vertical is untouched and
+   * the disturbance stays exactly as bounded as its own maths says.
+   */
+  private readonly air = new Wander();
+  private drift = 0;
 
   get where(): FlightState {
     return this.state;
@@ -316,8 +329,12 @@ export class Flight {
     return this.speed;
   }
 
+  /**
+   * WHAT SHE IS ACTUALLY DOING VERTICALLY: the model's rate plus the
+   * air's. The one number everything downstream should ask for.
+   */
   get climbing(): number {
-    return this.rise;
+    return this.rise + this.drift;
   }
 
   /** Her nose direction, world radians. */
@@ -339,7 +356,7 @@ export class Flight {
    * climbed and at the sky as she dived.
    */
   get pitch(): number {
-    return this.rise * PITCH_PER_RISE;
+    return this.climbing * PITCH_PER_RISE;
   }
 
   get aloft(): boolean {
@@ -379,6 +396,8 @@ export class Flight {
     this.bank = 0;
     this.rise = CLIMB_RATE * scale * 0.5;
     this.above = 0.01;
+    this.air.reset();
+    this.drift = 0;
     return TAKEOFF_COST;
   }
 
@@ -388,7 +407,9 @@ export class Flight {
     this.above = 0;
     this.speed = 0;
     this.rise = 0;
+    this.drift = 0;
     this.bank = 0;
+    this.air.reset();
   }
 
   /**
@@ -407,6 +428,9 @@ export class Flight {
     this.thrust(demand, asked, empty, dt);
 
     const effort = this.rising(demand, reserve, empty, dt);
+    // The air, once a frame, after the model has had its say. A takeoff
+    // is a scripted climb off the soil and does not get jostled.
+    this.drift = this.state === 'takeoff' ? 0 : this.air.advance(dt);
 
     // One cap, chosen by what she is doing. A dive outranks everything,
     // including an empty reserve — trading height for speed is exactly
@@ -415,7 +439,7 @@ export class Flight {
       : empty ? STALL_SPEED * 1.6
         : MAX_POWERED_SPEED) * scale;
     this.speed = Math.max(0, Math.min(cap, this.speed));
-    this.above = Math.max(0, this.above + this.rise * dt);
+    this.above = Math.max(0, this.above + this.climbing * dt);
 
     // Along her nose, plus the slip across it. Both in HER frame; the
     // caller turns them into world travel using her heading, which is
@@ -424,7 +448,7 @@ export class Flight {
       effort,
       ahead: this.speed,
       across: this.speed * SIDESTEP_SHARE * Math.max(-1, Math.min(1, demand.side)),
-      rise: this.rise,
+      rise: this.climbing,
     };
   }
 

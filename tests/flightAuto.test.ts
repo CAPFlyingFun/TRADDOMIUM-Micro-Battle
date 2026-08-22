@@ -3,6 +3,7 @@ import {
   AUTO_AIRSPEED, CRUISE_SPEED, Flight, MAX_POWERED_SPEED, STALL_SPEED,
   TERMINAL_FALL, setFlightScale,
 } from '../src/ant/flight';
+import { WANDER_RATE } from '../src/ant/wander';
 import { cancelsAuto } from '../src/input/autoRun';
 
 const NEUTRAL = { push: 0, side: 0, climb: false, descend: false };
@@ -149,11 +150,17 @@ describe('nothing hangs in the sky', () => {
   });
 
   it('never falls faster than terminal under its own weight', () => {
+    // TERMINAL IS RELATIVE TO THE AIR, not to the island. Her own
+    // weight against her own drag settles at TERMINAL_FALL; air that is
+    // itself sinking carries her that much faster over the ground, and
+    // pretending otherwise would be the model lying about which frame
+    // the number is measured in. The wander is bounded, so the ceiling
+    // is still a ceiling — just a named one.
     const flight = aloft(null, 6);
     const dt = 1 / 60;
     for (let t = 0; t < 200; t += dt) {
       const step = flight.update(NEUTRAL, 1, false, dt);
-      expect(-step.rise).toBeLessThanOrEqual(TERMINAL_FALL + 1e-6);
+      expect(-step.rise).toBeLessThanOrEqual(TERMINAL_FALL + WANDER_RATE + 1e-6);
     }
   });
 

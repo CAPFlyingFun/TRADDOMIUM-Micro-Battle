@@ -1,5 +1,6 @@
 import { MAX_POWERED_SPEED } from '../ant/flight';
-import type { FlightTelemetry } from '../ant/telemetry';
+import { WANDER_RATE } from '../ant/wander';
+import { SOON, type FlightTelemetry } from '../ant/telemetry';
 import { UNITS_PER_METRE } from '../world/kauai';
 import { wrap360 } from './compassMath';
 
@@ -89,6 +90,14 @@ export function ladderFade(horizon: number, halfScreen: number): number {
 }
 
 /** Height of the altitude tape, and the centimetres it spans each way. */
+/**
+ * How fast she has to be going vertically before the arrow appears.
+ *
+ * Comfortably above the air's own wander (see wander.ts), so a level
+ * cruise shows a number that breathes and an arrow that does not.
+ */
+const VS_QUIET = WANDER_RATE * 1.5;
+
 const TAPE_TALL = 200;
 const TAPE_SPAN = 500;
 /** How many tick elements the tape keeps. Enough to cover the span. */
@@ -153,6 +162,8 @@ export class FlightHud {
   private readonly ladder: SVGElement;
   private readonly tapeTicks: { line: SVGElement; text: SVGElement }[] = [];
   private readonly tapeRead: SVGElement;
+  private readonly mslRead: HTMLSpanElement;
+  private readonly landRead: HTMLSpanElement;
   private readonly vs: HTMLSpanElement;
   private readonly vsArrow: HTMLSpanElement;
   private readonly windSpeed: HTMLSpanElement;
@@ -163,6 +174,8 @@ export class FlightHud {
   private readonly watch: ResizeObserver;
   private up = false;
   private shownAlt = Number.NaN;
+  private shownMsl = '';
+  private shownLand = '';
   private shownVs = Number.NaN;
   private shownWind = Number.NaN;
   private shownCall = '';
@@ -238,6 +251,20 @@ export class FlightHud {
     const right = this.cluster(null, '48%', 'translateY(-50%)', 'right center');
     right.style.right = 'calc(88px + min(env(safe-area-inset-right), 14px))';
     right.appendChild(box);
+
+    // THREE ALTITUDES, because one cannot answer the question.
+    //
+    // The tape and its pointer are AGL — the ground directly beneath
+    // her, which is what a radio altimeter reads and what stops her
+    // hitting the thing she is over. MSL is her height over the sea,
+    // which is the only one that does not jump when the ground does.
+    // LND is her height above the ground she is ACTUALLY GOING TO LAND
+    // ON, which is the one that governs a descent and the one Joshua's
+    // worked example computes before anything else.
+    this.mslRead = document.createElement('span');
+    this.landRead = document.createElement('span');
+    right.appendChild(this.railRow('MSL', this.mslRead));
+    right.appendChild(this.railRow('LND', this.landRead));
 
     const under = document.createElement('div');
     Object.assign(under.style, {
@@ -410,6 +437,29 @@ export class FlightHud {
 
   private readonly rungs: { deg: number; parts: SVGElement[]; label: SVGElement | null }[] = [];
 
+  /**
+   * One labelled line on the right rail, sized to sit under the tape.
+   *
+   * The value is monospaced and the label is not merely decoration: with
+   * three altitudes stacked, an unlabelled number is a number nobody can
+   * use.
+   */
+  private railRow(label: string, value: HTMLSpanElement): HTMLDivElement {
+    const row = document.createElement('div');
+    Object.assign(row.style, {
+      display: 'flex', alignItems: 'baseline', justifyContent: 'flex-end',
+      gap: '6px', marginTop: '4px',
+      font: '600 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace',
+      letterSpacing: '0.16em', color: DIM,
+    } as Partial<CSSStyleDeclaration>);
+    value.style.color = INK;
+    value.style.fontSize = '12px';
+    value.style.fontWeight = '700';
+    value.style.letterSpacing = '0.04em';
+    row.append(span(label), value);
+    return row;
+  }
+
   private buildTape(): {
     box: SVGElement;
     ticks: { line: SVGElement; text: SVGElement }[];
@@ -424,6 +474,18 @@ export class FlightHud {
       x1: spine, y1: 0, x2: spine, y2: TAPE_TALL, stroke: DIM, 'stroke-width': 1.4,
     });
     root.appendChild(rail);
+
+    // WHICH ALTITUDE THIS TAPE IS. It was the only one on the screen and
+    // needed no saying; beside a labelled MSL and a labelled LND, an
+    // unlabelled tape is a third number nobody can name.
+    const caption = svg('text');
+    set(caption, {
+      x: spine + 6, y: 11, fill: DIM, 'font-size': 9,
+      'letter-spacing': 1.6,
+      'font-family': 'ui-monospace, Menlo, monospace',
+    });
+    caption.textContent = 'AGL';
+    root.appendChild(caption);
 
     const ticks: { line: SVGElement; text: SVGElement }[] = [];
     for (let i = 0; i < TICKS; i++) {
@@ -542,30 +604,51 @@ export class FlightHud {
         text.setAttribute('opacity', label ? '1' : '0');
         if (label) {
           set(text, { y: (y + 3.5).toFixed(1) });
-          text.textContent = readHeight(cm);
+          // A BARE ZERO ON THE GROUND LINE. `readHeight` reports
+          // millimetres down here, which is right for a live reading and
+          // absurd for a tick: "0.0 mm" beside "2.0 m" reads as a unit
+          // change rather than as the floor.
+          text.textContent = cm === 0 ? '0' : readHeight(cm);
         }
       }
+    }
+
+    // MSL IS NOT SMOOTHED. Her height over the sea is a fact about her,
+    // not a sample of anything, and it is the one readout where the
+    // three-millimetre breathing of the air is honest rather than noise.
+    const msl = readHeight(now.altitude);
+    if (msl !== this.shownMsl) {
+      this.shownMsl = msl;
+      this.mslRead.textContent = msl;
+    }
+    const land = now.shownAtLanding === null
+      ? '——' : readHeight(now.shownAtLanding);
+    if (land !== this.shownLand) {
+      this.shownLand = land;
+      this.landRead.textContent = land;
     }
 
     const climb = Math.round(now.climbing * 10) / 10;
     if (climb !== this.shownVs) {
       this.shownVs = climb;
       this.vs.textContent = climb > 0 ? `+${climb.toFixed(1)}` : climb.toFixed(1);
-      this.vsArrow.textContent = climb > 0.15 ? '↑' : climb < -0.15 ? '↓' : '';
+      // DEADBAND ABOVE THE WANDER. The air moves her a quarter of a
+      // centimetre a second even when she is holding a cruise, so a
+      // threshold below that is an arrow that blinks on and off
+      // forever and means nothing when it is on.
+      this.vsArrow.textContent = climb > VS_QUIET ? '↑' : climb < -VS_QUIET ? '↓' : '';
     }
 
-    // WHAT SHE IS ABOUT TO HAVE UNDER HER, which is the number raw
-    // altitude cannot give: level flight toward a rising ridge reads as
-    // a steady altitude and a shrinking clearance.
-    const target = Math.round(now.shownTarget);
-    const hurry = now.shownImpact;
-    const line = hurry === null
-      ? `TGT ${readHeight(Math.max(0, target))}`
-      : `TGT ${readHeight(Math.max(0, target))} · ${hurry.toFixed(1)}s`;
+    // THE TOUCHDOWN ZONE, as a distance and a time — the two numbers
+    // Joshua's worked example ends in, and the pair raw altitude cannot
+    // give between them. A steady altitude flown at a rising ridge
+    // reads as perfectly level right up until it does not.
+    const line = touchdownCall(now.shownRange, now.shownWhen);
     if (line !== this.shownTgt) {
       this.shownTgt = line;
       this.tgt.textContent = line;
-      this.tgt.style.color = hurry !== null && hurry < 3 ? WARN : DIM;
+      this.tgt.style.color = now.shownWhen !== null && now.shownWhen < SOON
+        ? WARN : DIM;
     }
 
     // DRIFT, only when there is any worth reporting. A permanent
@@ -641,8 +724,37 @@ export class FlightHud {
  * Centimetres while she is close enough for them to mean something,
  * metres once they stop: "1,240 cm" is a number, "12.4 m" is a height.
  */
+/**
+ * THE TOUCHDOWN LINE: how far ahead she meets the ground, and when.
+ *
+ * Em-dashes rather than a hidden row when there is no touchdown. A
+ * readout that vanishes takes its label with it, and the player is left
+ * to work out whether the instrument is saying "nothing ahead" or has
+ * simply stopped working. Holding the label and blanking the value says
+ * which — and it keeps the strip from reflowing every time a cruise
+ * levels off.
+ */
+export function touchdownCall(
+  range: number | null, when: number | null,
+): string {
+  if (range === null || when === null) return 'TGT ——';
+  // Seconds while the number is small enough to count, minutes after
+  // that: "560s" is a figure to be converted, "9.3m" is one to be read.
+  const wait = when < 100 ? `${Math.round(when)}s` : `${(when / 60).toFixed(1)}m`;
+  return `TGT ${readHeight(Math.max(0, range))} · ${wait}`;
+}
+
 export function readHeight(cm: number): string {
   const size = Math.abs(cm);
+  // MILLIMETRES AT THE BOTTOM, because this is an ant's altimeter and
+  // the bottom is where she lives. One world unit is a centimetre, so
+  // rounding to whole centimetres made every height below one into
+  // "0 cm" — the entire takeoff roll, the whole of a hover over a
+  // pebble, and any clearance worth the name. Joshua wrote the mock in
+  // millimetres for exactly that reason.
+  if (size < 1) return `${(cm * 10).toFixed(1)} mm`;
+  // Between there and a body length, the tenth is the news.
+  if (size < 10) return `${cm.toFixed(1)} cm`;
   if (size < 100) return `${Math.round(cm)} cm`;
   // A tenth of a metre stays useful a long way up — the brief's own
   // example is 12.7 m — and only stops being a distinction she can act

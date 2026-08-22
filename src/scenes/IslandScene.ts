@@ -31,7 +31,7 @@ import { DebugDie } from '../ui/DebugDie';
 import { WeatherChip } from '../ui/WeatherChip';
 import { FlightHud, type FlightView } from '../ui/FlightHud';
 import {
-  Eased, LOOK_AHEAD, driftOf, predict, terrainIntercept, trackOf,
+  Eased, SOON, driftOf, touchdown, trackOf,
   type FlightTelemetry,
 } from '../ant/telemetry';
 import { bearingFromHeading, bearingOf } from '../ui/compassMath';
@@ -109,8 +109,29 @@ export class IslandScene {
   private heldTrack = 0;
   /** The HUD's own numbers, eased. The physics above is never touched. */
   private readonly easedAgl = new Eased();
-  private readonly easedTarget = new Eased();
-  private readonly easedImpact = new Eased();
+  private readonly easedLanding = new Eased();
+  private readonly easedRange = new Eased();
+  private readonly easedWhen = new Eased();
+  /**
+   * HER SETTLED VERTICAL RATE, and the reason the touchdown marker
+   * holds still.
+   *
+   * The touchdown point divides the height she has to lose by the rate
+   * she is losing it at, so a small wobble in the rate is a LARGE
+   * wobble in the answer: at thirteen metres up, a sink rate breathing
+   * between 20 and 30 centimetres a second moves the marker from 360
+   * metres out to 240 and back, several times a minute. Her real
+   * vertical never holds perfectly still — the air wanders, by design
+   * now, see wander.ts — so the prediction is fed a rate averaged over
+   * about a second and a half.
+   *
+   * SMOOTHING THE INPUT TO A DISPLAY, not the physics. Her actual
+   * vertical speed, the one the model integrates and the VS readout
+   * shows, is untouched. This is the same rule as the eased readouts
+   * below, applied one step earlier because the arithmetic in between
+   * amplifies rather than attenuates.
+   */
+  private readonly easedRise = new Eased(1.5);
   private readonly compass: Compass;
   /**
    * What the compass points at. GLOBAL positions, recomputed into
@@ -1109,18 +1130,22 @@ export class IslandScene {
       ));
     }
 
-    // The ground point: where the terrain gets in the way if it does,
-    // otherwise the plain two-second look-ahead.
-    const aim = now.impact ?? now.soon;
-    const seat = toLocal(world(aim.wx, aim.wz));
-    const spot = onScreen(new THREE.Vector3(seat.lx, aim.terrain, seat.lz));
+    // THE TOUCHDOWN ZONE, drawn on the island where she will meet it.
+    // Nothing stands in for it when there is none: a cruise that is not
+    // coming down has no touchdown point, and drawing a placeholder
+    // there would be inventing one.
+    let mark: { x: number; y: number } | null = null;
+    if (now.touchdown) {
+      const seat = toLocal(world(now.touchdown.wx, now.touchdown.wz));
+      mark = onScreen(new THREE.Vector3(seat.lx, now.touchdown.terrain, seat.lz));
+    }
 
     return {
       horizon: Math.tan(elevation) * perRadian,
       perDegree: (perRadian * Math.PI) / 180,
       path,
-      target: spot && now.groundSpeed > 2
-        ? { ...spot, hit: now.impact !== null }
+      target: mark && now.touchdown
+        ? { ...mark, hit: now.touchdown.after < SOON }
         : null,
       her: onScreen(her),
     };
@@ -1166,12 +1191,18 @@ export class IslandScene {
     // drift input would be describing air she is not in.
     const felt = this.windOnHer();
 
-    const soon = predict(from, ground, climbing, LOOK_AHEAD, sample);
-    // Only worth walking the path while she is actually flying it.
-    const impact = this.flight.aloft
-      ? terrainIntercept(from, ground, climbing, sample)
+    // THE TOUCHDOWN ZONE. Fed the settled rate, not the instantaneous
+    // one — see easedRise. Only worth walking the path while she is
+    // actually flying it.
+    const settled = this.easedRise.push(climbing, dt);
+    const spot = this.flight.aloft
+      ? touchdown(from, ground, settled, sample)
       : null;
-    if (!impact) this.easedImpact.set(Number.NaN);
+    if (!spot) {
+      this.easedLanding.set(Number.NaN);
+      this.easedRange.set(Number.NaN);
+      this.easedWhen.set(Number.NaN);
+    }
 
     return {
       airspeed: this.flight.airspeed,
@@ -1187,15 +1218,20 @@ export class IslandScene {
         speed: felt ? Math.hypot(felt.x, felt.z) : 0,
         bearing: felt ? bearingOf(felt.x, felt.z) : 0,
       },
-      soon,
-      impact,
+      touchdown: spot,
       // SMOOTHED FOR THE EYE ONLY. Terrain sampled along a moving path
       // is genuinely spiky — a metre sideways can be a different
       // hillside — and every one of those reported honestly is
       // unreadable. Nothing above this line is eased.
       shownAgl: this.easedAgl.push(agl, dt),
-      shownTarget: this.easedTarget.push(soon.agl, dt),
-      shownImpact: impact ? this.easedImpact.push(impact.after, dt) : null,
+      // HOW FAR SHE STILL HAS TO COME DOWN: her altitude measured
+      // against the ground at the landing spot, not the ground under
+      // her feet. Joshua's "altitude difference".
+      shownAtLanding: spot
+        ? this.easedLanding.push(altitude - spot.terrain, dt)
+        : null,
+      shownRange: spot ? this.easedRange.push(spot.range, dt) : null,
+      shownWhen: spot ? this.easedWhen.push(spot.after, dt) : null,
     };
   }
 

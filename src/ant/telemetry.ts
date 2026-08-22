@@ -74,36 +74,98 @@ export interface FlightTelemetry {
   readonly ground: Drift;
   /** The wind SHE IS IN, after height and gusts — not the forecast. */
   readonly wind: { readonly speed: number; readonly bearing: number };
-  /** The short look-ahead. Always present. */
-  readonly soon: Predicted;
-  /** Where the ground gets in the way, if it does within the horizon. */
-  readonly impact: Predicted | null;
+  /**
+   * WHERE SHE MEETS THE GROUND on her present path, or null when the
+   * ground does not come up within the horizon. The touchdown zone.
+   */
+  readonly touchdown: Predicted | null;
 
   // ── FOR THE EYE ONLY ─────────────────────────────────────────────
   // Eased over about two seconds so the readouts settle instead of
   // flickering. Never used for physics, collision or the markers'
   // positions — those take the raw values above, because a smoothed
-  // impact time is a late one.
+  // touchdown time is a late one.
+  /** Her clearance over the ground DIRECTLY BENEATH her. */
   readonly shownAgl: number;
-  readonly shownTarget: number;
-  readonly shownImpact: number | null;
+  /**
+   * HER HEIGHT ABOVE THE GROUND SHE IS GOING TO LAND ON — the
+   * "altitude difference" in Joshua's worked example, and the number
+   * that actually governs the descent.
+   *
+   * It is not the same question as `shownAgl` and the gap between them
+   * is the whole reason both are shown. Gliding out over a sea cliff,
+   * the ground beneath her drops four hundred metres in a wingbeat and
+   * her AGL leaps; the ground she is aimed at has not moved, so this
+   * does not. Descending into a valley toward a rising far wall, AGL
+   * grows while this shrinks. Null when there is no touchdown to be
+   * above.
+   */
+  readonly shownAtLanding: number | null;
+  readonly shownRange: number | null;
+  readonly shownWhen: number | null;
 }
+
+/**
+ * HOW FAR AHEAD THE TOUCHDOWN IS LOOKED FOR, in world units of GROUND
+ * DISTANCE. Two kilometres.
+ *
+ * DISTANCE, NOT TIME, and the unit is the design. Joshua stated the
+ * problem the way a pilot does — three thousand feet to lose at three
+ * hundred a minute is nine and a third minutes, and at a mile a minute
+ * that is nine and a third miles ahead — and the answer he wants drawn
+ * is the PLACE. A time horizon answers a different question badly: a
+ * shallow descent from cruise is minutes away in time and a few hundred
+ * metres away on the ground, so a ten-second horizon says "no
+ * touchdown" about a landing she can already see.
+ *
+ * Two kilometres because that is exactly how far the middle terrain
+ * tier reaches. Past it there is no drawn ground for a marker to sit
+ * on, so a marker there would be a claim about scenery that is not
+ * being rendered. A descent too shallow to reach the ground inside two
+ * kilometres simply has no touchdown point, which is the honest
+ * answer and needs no threshold to express.
+ */
+export const TOUCHDOWN_RANGE = 200_000;
+
+/**
+ * THE NEAR MARCH: fine steps out to two hundred metres.
+ *
+ * Two ranges rather than one, because the two ends of the search are
+ * different questions. Close in, the answer is "am I about to hit that
+ * ridge" and a two-metre step is what stops a narrow spur passing
+ * between samples. Far out, the answer is "roughly where does this
+ * glide end", a twenty-metre step is a fifth of a pixel at that
+ * distance, and paying near-field precision for it would be a hundred
+ * heightfield lookups a frame spent on nothing.
+ */
+export const NEAR_RANGE = 20_000;
+export const NEAR_STEP = 200;
+export const FAR_STEP = 2_000;
+
+/**
+ * Bisections once a step brackets the ground.
+ *
+ * The march finds WHICH segment the crossing is in; this finds where in
+ * it. Twelve halvings take the far step's twenty metres down to five
+ * millimetres, which is finer than her body and far finer than the
+ * heightfield's own sample spacing — so the limit on the answer is the
+ * terrain data, as it should be, not the search.
+ */
+export const REFINE = 12;
+
+/**
+ * When a touchdown stops being information and starts being a warning,
+ * in seconds.
+ *
+ * At a cruise over the ground of five and a half metres a second, three
+ * seconds is about sixteen metres of warning. Short for an aircraft and
+ * generous for an ant: she turns in her own length and climbs out of it
+ * in one wingbeat, so the useful alarm is "now", not "eventually".
+ */
+export const SOON = 3;
 
 /** How far ahead the short prediction looks, in seconds. */
 export const LOOK_AHEAD = 2;
-
-/** How far the terrain search runs before giving up. */
-export const MAX_LOOKAHEAD = 10;
-
-/**
- * Seconds between terrain samples along the predicted path.
- *
- * A hundred samples at the far end of the horizon, which is a hundred
- * heightfield lookups a frame in the worst case — the lookup is four
- * array reads and a bilinear blend, so this is cheap even on a phone.
- * Coarser than this and a ridge can pass between two samples.
- */
-export const STEP = 0.1;
 
 /**
  * How close counts as hitting it, in world units.
@@ -176,32 +238,114 @@ export function predict(
 }
 
 /**
- * WHERE THE GROUND GETS IN THE WAY — walked, not solved.
+ * WHERE SHE MEETS THE GROUND, if she carries on exactly like this.
  *
- * There is a closed-form answer for a flat island and this is not it.
- * Kauaʻi has ridges and valleys and sea cliffs, and the useful warning
- * is exactly the one flat maths cannot give: she is level, losing
- * nothing, and the land ahead is coming up to meet her. So the path is
- * stepped forward and the terrain asked at every step.
+ * The touchdown zone, and the marker Joshua asked to be drawn on the
+ * island. Over flat ground it reduces to precisely the arithmetic in
+ * his worked example — height to lose, divided by sink rate, times
+ * ground speed — and `tests/telemetry.test.ts` runs that example, in
+ * his own numbers, as a test.
  *
- * Returns null when nothing is in the way inside the horizon — which is
- * most of the time, and is not a failure.
+ * BUT IT IS NOT THAT FORMULA, because Kauaʻi is not flat, and the
+ * closed form gets the interesting cases wrong in both directions. It
+ * puts a descent over the Nāpali coast a kilometre out to sea when the
+ * cliff is four hundred metres away, and it reports no touchdown at all
+ * for a queen holding a dead-level cruise straight at Waiʻaleʻale —
+ * which is the exact case where she most needs to be told. So the path
+ * is walked and the terrain asked at every step.
+ *
+ * WALKED IN DISTANCE, NOT IN TIME. The whole thing is then a
+ * one-dimensional root find along her ground track:
+ *
+ *   agl(s) = altitude + (climb / speed)·s − terrain(track at s)
+ *
+ * which is worth writing out because it says why level flight is not a
+ * special case needing a special rule. Level means the middle term is
+ * zero; the function still crosses wherever the land rises to meet
+ * her, and the search does not know or care that anything is unusual.
+ * The only genuinely level answer is over open water, where the ground
+ * never comes up — and then there is no touchdown, honestly, and the
+ * flight-path vector sitting on the horizon says exactly that.
+ *
+ * Returns null when the ground does not come up within the horizon,
+ * which is most of a cruise, and is not a failure.
  */
-export function terrainIntercept(
+export function touchdown(
   from: { wx: number; wz: number; altitude: number },
   ground: Drift,
   climbing: number,
   terrainAt: (wx: number, wz: number) => number,
-  horizon = MAX_LOOKAHEAD,
-  step = STEP,
+  horizon = TOUCHDOWN_RANGE,
 ): Predicted | null {
-  // Standing still and not sinking, she never arrives anywhere.
-  if (Math.hypot(ground.x, ground.z) < 1e-6 && climbing >= 0) return null;
-  for (let after = step; after <= horizon + 1e-9; after += step) {
-    const at = predict(from, ground, climbing, after, terrainAt);
-    if (at.agl <= CLEARANCE) return at;
+  const speed = Math.hypot(ground.x, ground.z);
+
+  // HOVERING, OR NEARLY. There is no track to walk, so the root find
+  // has nothing to find along; she comes down where she already is.
+  // Kept as its own branch rather than nudged with an epsilon, because
+  // dividing a real sink rate by a near-zero speed is how a marker ends
+  // up thirty kilometres away on the strength of a rounding error.
+  if (speed < STILL) {
+    if (climbing >= -1e-6) return null;
+    const terrain = terrainAt(from.wx, from.wz);
+    const fall = from.altitude - terrain - CLEARANCE;
+    if (fall <= 0) return null;
+    return {
+      wx: from.wx,
+      wz: from.wz,
+      altitude: terrain + CLEARANCE,
+      terrain,
+      agl: CLEARANCE,
+      after: fall / -climbing,
+      range: 0,
+    };
   }
-  return null;
+
+  const ux = ground.x / speed;
+  const uz = ground.z / speed;
+  // Height lost per unit travelled over the ground — the glide slope,
+  // and the only place her vertical rate enters at all.
+  const slope = climbing / speed;
+
+  /** How far above the ground she is, `s` units along the track. */
+  const clearing = (s: number): number =>
+    from.altitude + slope * s - terrainAt(from.wx + ux * s, from.wz + uz * s);
+
+  // Already in the dirt: do not report a touchdown behind her.
+  if (clearing(0) <= CLEARANCE) return null;
+
+  let lo = 0;
+  let hi = -1;
+  const walk = (until: number, step: number, start: number): boolean => {
+    for (let s = start; s <= until + 1e-9; s += step) {
+      if (clearing(s) <= CLEARANCE) { hi = s; return true; }
+      lo = s;
+    }
+    return false;
+  };
+  const near = Math.min(NEAR_RANGE, horizon);
+  if (!walk(near, NEAR_STEP, NEAR_STEP) && !walk(horizon, FAR_STEP, near + FAR_STEP)) {
+    return null;
+  }
+
+  // Bisect the bracketing segment. `lo` is known clear and `hi` known
+  // blocked, so the invariant holds by construction at every halving.
+  for (let i = 0; i < REFINE; i++) {
+    const mid = (lo + hi) / 2;
+    if (clearing(mid) <= CLEARANCE) hi = mid; else lo = mid;
+  }
+
+  const range = hi;
+  const wx = from.wx + ux * range;
+  const wz = from.wz + uz * range;
+  const terrain = terrainAt(wx, wz);
+  return {
+    wx, wz,
+    altitude: from.altitude + slope * range,
+    terrain,
+    agl: from.altitude + slope * range - terrain,
+    after: range / speed,
+    range,
+  };
 }
 
 /**

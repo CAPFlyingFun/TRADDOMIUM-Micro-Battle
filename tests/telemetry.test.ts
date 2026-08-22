@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  CLEARANCE, Eased, LOOK_AHEAD, driftOf, groundVelocity, predict,
-  terrainIntercept, trackOf,
+  CLEARANCE, Eased, FAR_STEP, LOOK_AHEAD, NEAR_RANGE, NEAR_STEP,
+  TOUCHDOWN_RANGE, driftOf, groundVelocity, predict, touchdown, trackOf,
 } from '../src/ant/telemetry';
 import { bearingFromHeading } from '../src/ui/compassMath';
 
@@ -111,65 +111,118 @@ describe('walking the path into the terrain', () => {
 
   it('G — descending over flat ground, when basic arithmetic says', () => {
     // 400 above the ground, sinking 40 a second: ten seconds, less the
-    // clearance she is allowed.
+    // clearance she is allowed. Bisected rather than stepped now, so
+    // this is held to two decimals where it used to want a tenth.
     const ground = groundVelocity(70, facing(0), null);
-    const hit = terrainIntercept(here, ground, -40, flat(100));
+    const hit = touchdown(here, ground, -40, flat(100));
     expect(hit).not.toBeNull();
-    const plain = (500 - 100 - CLEARANCE) / 40;
-    expect((hit as { after: number }).after).toBeGreaterThanOrEqual(plain - 0.1);
-    expect((hit as { after: number }).after).toBeLessThanOrEqual(plain + 0.1);
+    expect((hit as { after: number }).after).toBeCloseTo((500 - 100 - CLEARANCE) / 40, 2);
+  });
+
+  it('JOSHUA’S WORKED EXAMPLE, in his own numbers', () => {
+    // "Current altitude 3000, ground altitude 20, difference 2800.
+    //  Ground speed 60 mph — a mile a minute. Descending 300 fpm, with
+    //  2800 to lose: 2800/300 = 9.333 minutes = 560 seconds. At a mile
+    //  a minute that is exactly 9.333 miles ahead of the ant."
+    //
+    // Read in feet and feet-per-second, which the solver neither knows
+    // nor needs to: it is a root find along a line and carries whatever
+    // unit it is handed. 300 fpm is 5 a second; 60 mph is 88.
+    const from = { wx: 0, wz: 0, altitude: 2820 };
+    const ground = { x: 88, z: 0 };
+    const hit = touchdown(from, ground, -5, flat(20), 60_000);
+    expect(hit).not.toBeNull();
+    const found = hit as { after: number; range: number };
+
+    // His arithmetic, less the clearance she is allowed to keep.
+    const toLose = 2820 - 20 - CLEARANCE;
+    expect(found.after).toBeCloseTo(toLose / 5, 1);
+    expect(found.range).toBeCloseTo((toLose / 5) * 88, 0);
+    // And in his terms: nine and a third minutes, nine and a third
+    // miles, to within the four feet of clearance.
+    expect(found.after / 60).toBeCloseTo(9.333, 1);
+    expect(found.range / 5280).toBeCloseTo(9.333, 1);
   });
 
   it('F — level flight into rising ground still finds the hill', () => {
-    // NOT SOLVABLE BY FLAT MATHS. She is not descending at all; the
-    // island is coming up to meet her, and that is exactly the warning
-    // worth having.
+    // NOT SOLVABLE BY FLAT MATHS, and the case that makes "what if she
+    // is exactly level" a non-question: she is not descending at all;
+    // the island is coming up to meet her.
     const ground = groundVelocity(100, facing(0), null);
-    // Ground climbing one unit for every unit travelled north.
     const hill = (_wx: number, wz: number) => 400 + Math.max(0, -wz);
-    const hit = terrainIntercept(here, ground, 0, hill);
+    const hit = touchdown(here, ground, 0, hill);
     expect(hit).not.toBeNull();
     const found = hit as { after: number; agl: number };
-    // She flies north at 100; the ground starts 100 below and gains on
-    // her at 100 a second, so it reaches her at about a second.
     expect(found.after).toBeGreaterThan(0.8);
     expect(found.after).toBeLessThan(1.2);
-    expect(found.agl).toBeLessThanOrEqual(CLEARANCE);
+    expect(found.agl).toBeLessThanOrEqual(CLEARANCE + 1e-3);
   });
 
   it('finds a ridge sooner than flat ground under the same descent', () => {
     const ground = groundVelocity(70, facing(0), null);
-    const overFlat = terrainIntercept(here, ground, -40, flat(100));
+    const overFlat = touchdown(here, ground, -40, flat(100));
     const ridge = (_wx: number, wz: number) => 100 + Math.max(0, -wz) * 1.5;
-    const overRidge = terrainIntercept(here, ground, -40, ridge);
+    const overRidge = touchdown(here, ground, -40, ridge);
     expect(overRidge).not.toBeNull();
     expect((overRidge as { after: number }).after)
       .toBeLessThan((overFlat as { after: number }).after);
   });
 
   it('says nothing when the island stays out of her way', () => {
+    // Level over open water is the one genuinely level answer: no
+    // touchdown, honestly, rather than one invented at infinity.
     const ground = groundVelocity(70, facing(0), null);
-    expect(terrainIntercept(here, ground, 0, flat(0))).toBeNull();
-    // Climbing away from it, certainly not.
-    expect(terrainIntercept(here, ground, 30, flat(100))).toBeNull();
+    expect(touchdown(here, ground, 0, flat(0))).toBeNull();
+    expect(touchdown(here, ground, 30, flat(100))).toBeNull();
+  });
+
+  it('reaches far past the near march for a shallow descent', () => {
+    // The whole reason the horizon is a DISTANCE. Losing a hundredth of
+    // a unit for every unit travelled, from 400 up, lands her 39,600
+    // out — twice past the fine-stepped near range and still well
+    // inside the horizon, where a ten-second time horizon would have
+    // reported nothing at all.
+    const ground = { x: 100, z: 0 };
+    const hit = touchdown(here, ground, -1, flat(100));
+    expect(hit).not.toBeNull();
+    const found = hit as { range: number };
+    expect(found.range).toBeGreaterThan(NEAR_RANGE);
+    expect(found.range).toBeCloseTo((500 - 100 - CLEARANCE) * 100, 0);
+  });
+
+  it('gives up rather than marking ground it is not drawing', () => {
+    // Past the horizon there is no terrain tier under the marker, so a
+    // marker there would be a claim about scenery that is not rendered.
+    const ground = { x: 100, z: 0 };
+    const gentle = -(500 - 100 - CLEARANCE) / (TOUCHDOWN_RANGE / 100) / 2;
+    expect(touchdown(here, ground, gentle, flat(100))).toBeNull();
   });
 
   it('does not hunt forever for a queen who is not going anywhere', () => {
-    expect(terrainIntercept(here, { x: 0, z: 0 }, 0, flat(0))).toBeNull();
+    expect(touchdown(here, { x: 0, z: 0 }, 0, flat(0))).toBeNull();
   });
 
   it('finds the ground under a queen dropping straight down', () => {
-    const hit = terrainIntercept(here, { x: 0, z: 0 }, -100, flat(100));
+    const hit = touchdown(here, { x: 0, z: 0 }, -100, flat(100));
     expect(hit).not.toBeNull();
-    expect((hit as { after: number }).after).toBeCloseTo(4, 0);
+    const found = hit as { after: number; range: number };
+    expect(found.after).toBeCloseTo((500 - 100 - CLEARANCE) / 100, 6);
+    expect(found.range).toBe(0);
+  });
+
+  it('refuses to mark a touchdown behind her when she is already in it', () => {
+    expect(touchdown(here, { x: 100, z: 0 }, -10, flat(600))).toBeNull();
   });
 
   it('costs a bounded number of terrain lookups', () => {
-    // A phone pays for every one of these, every frame.
+    // A phone pays for every one of these, every frame. Worst case is
+    // both marches run to their ends and find nothing.
     let asked = 0;
     const counted = () => { asked++; return -10_000; };
-    terrainIntercept(here, groundVelocity(70, facing(0), null), 0, counted);
-    expect(asked).toBeLessThanOrEqual(Math.ceil(10 / 0.1) + 1);
+    touchdown(here, groundVelocity(70, facing(0), null), 0, counted);
+    const march = NEAR_RANGE / NEAR_STEP + (TOUCHDOWN_RANGE - NEAR_RANGE) / FAR_STEP;
+    expect(asked).toBeLessThanOrEqual(march + 2);
+    expect(asked).toBeGreaterThan(march / 2);
   });
 });
 
