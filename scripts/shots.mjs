@@ -33,7 +33,7 @@ try {
         }));
       });
     }
-    await page.goto(`${url}?spawnRoll=0.25`, { waitUntil: 'domcontentloaded' });
+    await page.goto(`${url}?spawnRoll=${process.env.SPAWN_ROLL ?? '0.25'}${process.env.EXTRA ?? ''}`, { waitUntil: 'domcontentloaded' });
     await page.waitForSelector('[data-ui="main-menu"]', { timeout: 60000 });
     await page.click('[data-ui="new-colony"]');
     await page.waitForSelector('[data-ui="island-canvas"]', { timeout: 60000 });

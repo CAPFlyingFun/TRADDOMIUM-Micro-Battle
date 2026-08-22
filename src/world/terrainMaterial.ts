@@ -79,6 +79,20 @@ const DETAIL_FADE_FROM = 0.4;
 const DETAIL_FADE_TO = 3.0;
 
 /**
+ * How much tighter the grain is tiled than the bands.
+ *
+ * THE BUG THIS FIXES. The grain repeats every 1.1 units against the
+ * bands' 4, so a pixel covers three and a half times as much of it —
+ * and it therefore turns to noise three and a half times sooner. Both
+ * were being faded on the BANDS' schedule, so at every distance where
+ * the bands were still fine the grain was already streaking, which is
+ * why the smearing came back in places the first fix had cleaned up.
+ * The comment beside it even said the grain "aliases sooner and has to
+ * go sooner"; the code handed it the same number anyway.
+ */
+const GRAIN_RATIO = BAND_TILE / GRAIN_TILE;
+
+/**
  * EACH BAND'S OWN AVERAGE COLOUR, filled in when its image lands.
  *
  * The distance fade needs something to fade TO, and the honest answer
@@ -141,6 +155,12 @@ export function terrainMaterial(
   textures: Record<string, THREE.Texture>,
   grain: THREE.Texture,
   nearCut = 0,
+  /**
+   * How far this GPU's anisotropic filtering can stretch a sample.
+   * Needed because the fade has to start where the HARDWARE gives up,
+   * and that is a different place on different devices.
+   */
+  maxAnisotropy = 16,
 ): THREE.MeshStandardMaterial {
   const material = new THREE.MeshStandardMaterial({
     // The vertex colours no longer carry the biome tint — the textures
@@ -169,6 +189,8 @@ export function terrainMaterial(
     }
     shader.uniforms.fadeFrom = { value: DETAIL_FADE_FROM };
     shader.uniforms.fadeTo = { value: DETAIL_FADE_TO };
+    shader.uniforms.grainRatio = { value: GRAIN_RATIO };
+    shader.uniforms.maxAniso = { value: Math.max(1, maxAnisotropy) };
     // WHERE THE WORLD ACTUALLY IS. Vertices reach the shader measured
     // from the floating origin, so tiling straight off them would slide
     // the whole ground texture sideways every time the origin moved —
@@ -191,7 +213,7 @@ export function terrainMaterial(
         uniform float bandTile;
         uniform float relief;
         uniform float grainTile;
-        uniform float fadeFrom, fadeTo;
+        uniform float fadeFrom, fadeTo, grainRatio, maxAniso;
         uniform vec3 avg_reef, avg_sand, avg_grass, avg_jungle;
         uniform vec3 avg_cliff, avg_mountain, avg_snow;
         uniform vec2 worldOffset;
@@ -232,14 +254,37 @@ export function terrainMaterial(
           + texture2D(t_snow, bandUv).rgb * wSnow;
         ground /= total;
 
-        // HOW MUCH OF THE TEXTURE THIS PIXEL IS ACTUALLY COVERING.
-        // The derivatives give the footprint in tile units directly, so
-        // this reads "tiles per pixel" and needs no guess about how far
-        // away anything is. Whichever axis is longer wins, because it
-        // is the long axis that the anisotropic filter gives up on.
+        // HOW MUCH OF THE TEXTURE THIS PIXEL IS ACTUALLY COVERING,
+        // AFTER the hardware has done what it can.
+        //
+        // The derivatives give the footprint in tile units, and a
+        // grazing pixel's footprint is enormously longer than it is
+        // wide. Anisotropic filtering exists for exactly that and
+        // handles it up to a ratio of maxAniso — sixteen, usually.
+        // PAST that ratio it cannot, and has to fall back to a mip
+        // chosen by the long axis instead of the short one: detail
+        // survives across the streak and is smeared along it. So the
+        // number that predicts streaking is not the raw footprint but
+        // what is left of it once anisotropy has been spent, which is
+        // what this computes. Measuring the raw long axis alone said
+        // "still fine" on ground that was visibly smearing.
         vec2 duvdx = dFdx(bandUv);
         vec2 duvdy = dFdy(bandUv);
-        float tilesPerPixel = max(length(duvdx), length(duvdy));
+        float wide = max(length(duvdx), length(duvdy));
+        float thin = max(1e-7, min(length(duvdx), length(duvdy)));
+        // THE LONG AXIS, PLAIN. An earlier version divided this by the
+        // hardware's anisotropic limit, on the reasoning that anything
+        // within that limit is filtered properly and needs no help.
+        // Painting the fade as greyscale showed what that was really
+        // doing: black — no fade at all — across the whole of the
+        // ground that was visibly smearing. Anisotropic filtering is
+        // not the clean cutoff that reasoning assumed; it degrades well
+        // before its nominal ratio, so crediting it in full switched
+        // the fade off exactly where it was needed. The raw long axis
+        // is what predicts streaking, and the thresholds below come
+        // from measuring it on ground that was streaking rather than
+        // from an argument about what the hardware ought to manage.
+        float tilesPerPixel = wide;
         float far = smoothstep(fadeFrom, fadeTo, tilesPerPixel);
 
         // Past that, there is nothing left to resolve. Fade to the
@@ -259,10 +304,17 @@ export function terrainMaterial(
         // The fine grain rides on top at a tile size that shares no
         // factor with the band tile, so close up there is always
         // something moving past even mid-way through one band tile.
-        // It is tiled tighter still, so it aliases sooner and has to go
-        // sooner — leaving it in would put the streaks back on its own.
+        //
+        // ON ITS OWN SCHEDULE. Same pixel and the same derivatives, but
+        // the grain is tiled several times tighter, so its footprint is
+        // that much larger and it becomes noise that much sooner. It
+        // used to be faded on the BANDS' number, which meant that at
+        // every distance where the bands were still fine the grain was
+        // already streaking. (No backticks in here: this is inside a
+        // template literal, and one of those ends the shader.)
+        float grainFar = smoothstep(fadeFrom, fadeTo, tilesPerPixel * grainRatio);
         float g = texture2D(t_grain, (vGround.xz + worldOffset) / grainTile).g;
-        ground *= mix(0.80 + g * 0.42, 1.0, far);
+        ground *= mix(0.80 + g * 0.42, 1.0, grainFar);
 
         diffuseColor.rgb *= ground;
       `);
