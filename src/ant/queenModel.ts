@@ -39,6 +39,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { liveStat } from './castes';
+import { Wingbeat, type WingPose } from './wingbeat';
 
 /**
  * Millimetres to a world unit. The island runs at 1:1000, which puts a
@@ -81,6 +82,14 @@ export interface QueenBody {
    */
   setWings(on: boolean): void;
   readonly hasWings: boolean;
+  /**
+   * Beat her wings, or let them settle.
+   *
+   * @param dt simulated seconds
+   * @param beating true while she is working them — airborne, or about
+   *   to be
+   */
+  beat(dt: number, beating: boolean): void;
 }
 
 /**
@@ -130,10 +139,58 @@ export async function loadQueen(): Promise<QueenBody> {
     if (wings) wings.visible = on;
   };
 
+  // THE FOUR SHOULDERS, by name, out of the asset.
+  //
+  // The bake worked out which bones these are by measuring the geometry
+  // each one owns, and wrote the answer into the file — so nothing here
+  // repeats that measurement and hopes for the same result. Turning a
+  // root sweeps its whole wing, the way a shoulder does.
+  const roots = (gltf.parser.json.extras?.wingRoots ?? {}) as Record<string, string>;
+  const shoulder = (key: string) => {
+    const name = roots[key];
+    return name ? (model.getObjectByName(name) as THREE.Bone | undefined) ?? null : null;
+  };
+  const hinges = {
+    leftFore: shoulder('leftFore'),
+    rightFore: shoulder('rightFore'),
+    leftHind: shoulder('leftHind'),
+    rightHind: shoulder('rightHind'),
+  };
+  // Their rest pose, to swing AROUND rather than replace: the bind
+  // rotation carries how the wing is folded and angled on her back, and
+  // overwriting it would lay all four flat.
+  const rest = Object.fromEntries(
+    Object.entries(hinges).map(([k, bone]) => [k, bone?.quaternion.clone() ?? null]),
+  ) as Record<string, THREE.Quaternion | null>;
+
+  const wingbeat = new Wingbeat();
+  const swing = new THREE.Quaternion();
+  // She sweeps her wings fore-and-aft about her own vertical, which is
+  // the stroke plane seen from her back.
+  const axis = new THREE.Vector3(0, 1, 0);
+
+  const apply = (key: string, angle: number, mirror: boolean): void => {
+    const bone = hinges[key as keyof typeof hinges];
+    const base = rest[key];
+    if (!bone || !base) return;
+    swing.setFromAxisAngle(axis, mirror ? -angle : angle);
+    bone.quaternion.copy(base).multiply(swing);
+  };
+
+  const beat = (dt: number, beating: boolean): void => {
+    if (!winged || !wings) return;
+    const pose: WingPose = wingbeat.update(dt, beating);
+    apply('leftFore', pose.fore, false);
+    apply('rightFore', pose.fore, true);
+    apply('leftHind', pose.hind, false);
+    apply('rightHind', pose.hind, true);
+  };
+
   return {
     model,
     length: wanted,
     setWings,
+    beat,
     get hasWings() { return winged && wings !== null; },
   };
 }

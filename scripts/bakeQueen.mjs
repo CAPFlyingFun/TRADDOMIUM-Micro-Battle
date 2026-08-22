@@ -126,6 +126,45 @@ for (let v = 0; v < position.length; v += 1) {
 const isWingBone = skin.joints.map(
   (_, i) => bindY[i] >= WING_MIN_Y && reach[i] >= WING_MIN_REACH,
 );
+
+// WHICH WING IS WHICH, worked out here so the game never has to guess.
+//
+// Each wing is a chain of three bones and the ROOT of that chain is the
+// one to rotate: turning it sweeps the whole wing, exactly as the
+// shoulder does. Roots are the wing bones nothing else in the wing set
+// is the parent of. Left and right come from the sign of X. Fore and
+// hind come from Z — the forewing roots sit further toward the head
+// than the hindwing roots do, which on this model is the LARGER Z.
+const parentOf = new Map();
+for (const [i, node] of json.nodes.entries()) {
+  for (const child of node.children ?? []) parentOf.set(child, i);
+}
+const bindPos = skin.joints.map((_, i) => {
+  const m = ibm[i];
+  return {
+    x: -(m[0] * m[12] + m[1] * m[13] + m[2] * m[14]),
+    z: -(m[8] * m[12] + m[9] * m[13] + m[10] * m[14]),
+  };
+});
+const wingJoints = new Set(skin.joints.filter((_, i) => isWingBone[i]));
+const roots = skin.joints
+  .map((joint, i) => ({ joint, i }))
+  .filter(({ joint, i }) => isWingBone[i] && !wingJoints.has(parentOf.get(joint)));
+
+if (roots.length !== 4) {
+  throw new Error(`found ${roots.length} wing roots, expected four wings`);
+}
+// Two on each side; on each side the one nearer the head is the fore.
+const named = {};
+for (const side of [-1, 1]) {
+  const pair = roots
+    .filter(({ i }) => Math.sign(bindPos[i].x) === side)
+    .sort((a, b) => bindPos[b.i].z - bindPos[a.i].z);
+  if (pair.length !== 2) throw new Error('wings are not two a side');
+  const hand = side < 0 ? 'left' : 'right';
+  named[`${hand}Fore`] = json.nodes[pair[0].joint].name;
+  named[`${hand}Hind`] = json.nodes[pair[1].joint].name;
+}
 const wingBones = isWingBone.filter(Boolean).length;
 if (wingBones < 6 || wingBones > 20) {
   throw new Error(
@@ -201,6 +240,14 @@ json.meshes = [
   { name: 'queen_wings', primitives: [{ ...prim, indices: wingIndex }] },
 ];
 
+// Carried IN THE ASSET, so the game reads a name instead of repeating
+// this measurement at runtime and hoping for the same answer.
+json.extras = {
+  ...(json.extras ?? {}),
+  wingRoots: named,
+  wingBones: skin.joints.filter((_, i) => isWingBone[i]).map((j) => json.nodes[j].name),
+};
+
 // Both meshes hang off the same skin, so one skeleton drives both and
 // the wings follow the thorax without anything having to sync them.
 const meshNodeAt = json.nodes.findIndex((n) => n.mesh != null);
@@ -264,3 +311,4 @@ console.log(
   `body ${(bodyTris.length / 3).toLocaleString()} tris, `
   + `wings ${(wingTris.length / 3).toLocaleString()} tris`,
 );
+console.log('wing roots:', JSON.stringify(named));

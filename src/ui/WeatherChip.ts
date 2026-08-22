@@ -113,8 +113,14 @@ export class WeatherChip {
     const degrees = Math.round(fahrenheit(now.temperature));
     const wind = Math.round(mph(now.windSpeed));
     const falling = fallingNow(now);
+    const warning = windWarning(now, heading);
+    // THE SIREN GOES ON THE WIND LINE, at the front of it, because the
+    // wind is what it is about. The chip stays two short lines: this
+    // adds one glyph rather than a third row, and it is only there when
+    // there is something to say — a warning that is always on is
+    // wallpaper.
     const line = `${glyphFor(now.code, falling)} ${degrees}°\n`
-      + `${compass(now.windFrom)} ${wind}`;
+      + `${warning ? '🚨 ' : ''}${compass(now.windFrom)} ${wind}`;
     if (line !== this.shownChip) {
       this.shownChip = line;
       this.chip.textContent = '';
@@ -155,7 +161,6 @@ export class WeatherChip {
       ['Updated', agoWords(age)],
     ];
 
-    const warning = windWarning(now, heading);
     if (warning) rows.push(['', warning]);
     const text = rows.map(([a, b]) => `${a}${b}`).join('|');
     if (text === this.shownPanel) return;

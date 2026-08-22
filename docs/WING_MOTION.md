@@ -1,8 +1,8 @@
 # Fire ant wing motion — what is measured, and what is not
 
-Reference for animating the queen's wings. Nothing here is implemented
-yet: the model carries no animations, and this exists so that when it
-does, the numbers come from a measurement rather than from taste.
+Where the queen's wing motion comes from. `src/ant/wingbeat.ts`
+implements it and `tests/wingbeat.test.ts` checks it against the
+figures below, so a change to either has to argue with the paper.
 
 ## The source
 
@@ -58,6 +58,28 @@ surface angles (γ, α). That is a measured keyframe set for one complete
 wingbeat. When the wings are animated, that table is the animation —
 there is no need to invent a curve.
 
+## Ninety-six hertz cannot be drawn at sixty
+
+This is arithmetic, not a limitation to engineer around. A beat and a
+half passes between one frame and the next, so anything sampled at
+60 Hz is aliasing rather than motion — a strobe. Real wings at this
+frequency read to the eye as a blur, and a renderer insisting on the
+true rate produces a worse lie than one that slows down.
+
+So the truth and the picture are kept apart. `WINGBEAT_HZ` is 96 and
+never changes; anything physical takes it. `SHOWN_HZ` is 12, which is
+the fastest that still reads as beating wings, and only the animation
+takes that. A test pins them apart so nobody later "fixes" the
+animation by setting it to the real frequency.
+
+The 83-phase table is not used. It describes a TETHERED ant against a
+blower at a resolution no display can show, and its fine structure —
+the slight asymmetry between upstroke and downstroke — is exactly what
+aliases away first. What survives at a watchable rate is the amplitude
+and the fore/hind relationship, and those are what the code
+reproduces. The table is there in the paper if a slow-motion shot or
+the wing sound ever wants it.
+
 ## Flight behaviour, from the same paper's introduction
 
 Second-hand and cited as such:
@@ -68,10 +90,13 @@ Second-hand and cited as such:
   flew in a layer 60–150 m; **females remained aloft 30 minutes or
   less**; 95% returned inseminated.
 
-Against the game as it stands: her top powered airspeed is 0.70 m/s and
-a full reserve buys about 5½ minutes of cruising. Thirty minutes aloft
-and five kilometres are both far beyond that, which is a gap to decide
-about deliberately rather than to close by accident.
+**The thirty minutes is now the game's number.** A full reserve buys
+1,800 seconds of level flight; a hard climb costs six times that rate
+and flat-out twice, both still game tuning. At her 0.70 m/s top
+airspeed, thirty minutes is 1.26 km of still air — comfortably under
+Vogt's 5 km ceiling, at the low end of it. The two figures come from
+different experiments rather than one flight, so they should not be
+multiplied together.
 
 ## What NOT to use
 

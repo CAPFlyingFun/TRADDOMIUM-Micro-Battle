@@ -24,12 +24,23 @@ describe('the endurance readout', () => {
     expect(secondsIn(enduranceWords(1, SPRINT_DRAIN))).toBeCloseTo(30, 0);
   });
 
-  it('reads fifty-five seconds of hard climbing from a full bar', () => {
-    expect(secondsIn(enduranceWords(1, CLIMB_DRAIN))).toBeCloseTo(55, 0);
+  it('reads five minutes of hard climbing from a full bar', () => {
+    expect(secondsIn(enduranceWords(1, CLIMB_DRAIN))).toBeCloseTo(300, -1);
   });
 
-  it('reads about five and a half minutes of cruising from a full bar', () => {
-    expect(secondsIn(enduranceWords(1, CRUISE_DRAIN))).toBeCloseTo(330, -1);
+  /**
+   * THIRTY MINUTES, because that is how long a real one stays up.
+   * Markin et al. tracked mating flights and had the females down
+   * again inside half an hour; the five and a half minutes this used
+   * to say was invented.
+   */
+  it('reads thirty minutes of cruising from a full bar', () => {
+    expect(secondsIn(enduranceWords(1, CRUISE_DRAIN))).toBeCloseTo(1800, -1);
+  });
+
+  it('costs more to climb than to cruise, and more still to sprint', () => {
+    expect(CLIMB_DRAIN).toBeGreaterThan(CRUISE_DRAIN);
+    expect(SPRINT_DRAIN).toBeGreaterThan(CLIMB_DRAIN);
   });
 
   it('halves when the reserve halves', () => {

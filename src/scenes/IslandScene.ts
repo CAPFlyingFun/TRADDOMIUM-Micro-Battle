@@ -595,6 +595,13 @@ export class IslandScene {
     // The RATE goes with the reserve, so the readout can say how long
     // what she is doing right now can go on rather than how much
     // sprinting the bar would be worth.
+    // WINGS BEAT WHEN SHE IS FLYING THEM. A glide is not a beat — she
+    // is holding them out, not working them — and neither is standing
+    // on the ground with them folded.
+    this.queen?.beat(
+      dt,
+      this.flight.aloft && this.flight.where !== 'glide',
+    );
     this.vitals.show(this.stamina.fraction, this.stamina.spent, this.effort);
     // NOTHING TO TICK. The grace is a deadline, so the only question
     // each frame is what time it is — which is why backgrounding the

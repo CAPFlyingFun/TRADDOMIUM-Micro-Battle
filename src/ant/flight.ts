@@ -169,10 +169,46 @@ export const BANK_EASE = 5;
 /** Nose attitude per unit of climb rate. Visual only. */
 export const PITCH_PER_RISE = 0.012;
 
+/**
+ * HOW LONG SHE CAN STAY UP — anchored to a measurement, at last.
+ *
+ * Markin et al. followed *S. invicta* mating flights with aircraft and
+ * light traps and found that FEMALES REMAINED ALOFT THIRTY MINUTES OR
+ * LESS, with 95% back on the ground inseminated.
+ *
+ *   [Markin GP, Dillier JH, Hill SO, Blum MS, Hermann HR (1971).
+ *    Nuptial flight and flight ranges of the imported fire ant,
+ *    Solenopsis saevissima richteri. J. Georgia Entomol. Soc. 6:145–156,
+ *    as reported in Gui et al. 2010, J. Insect Sci. 10:19.]
+ *
+ * So a full reserve now buys thirty minutes of cruising rather than the
+ * five and a half it used to. That is a sixfold change and it is not a
+ * tuning nudge: the old number was invented, and this one is the
+ * animal's.
+ *
+ * THE OTHER TWO ARE STILL GAME TUNING, and are set as multiples of the
+ * cruise so the relationship survives the next re-anchoring:
+ *
+ *   cruise   1800 s   measured
+ *   flat out  900 s   twice the cost of cruising
+ *   climbing  300 s   six times — hauling herself upward is the
+ *                     expensive thing an insect does
+ *
+ * WHAT THIS COSTS IN RANGE, written down so nobody has to re-derive it:
+ * thirty minutes at her 0.70 m/s top airspeed is 1.26 km of still air.
+ * Vogt et al. (2000) flew *S. invicta* females on a mill and got LESS
+ * THAN 5 km, so 1.26 sits comfortably under the ceiling — consistent,
+ * at the low end, and the two figures come from different experiments
+ * rather than one flight, so they should not be multiplied together.
+ */
+
+/** Seconds of level powered flight a full reserve buys. MEASURED. */
+export const CRUISE_SECONDS = 30 * 60;
+
 /** Fractions of the reserve per second. Positive spends. */
-export const CRUISE_DRAIN = 1 / 330;
-export const CLIMB_DRAIN = 1 / 55;
-export const FAST_DRAIN = 1 / 150;
+export const CRUISE_DRAIN = 1 / CRUISE_SECONDS;
+export const CLIMB_DRAIN = 6 / CRUISE_SECONDS;
+export const FAST_DRAIN = 2 / CRUISE_SECONDS;
 export const GLIDE_RECOVERY = -0.005;
 export const RECOVERY_DESCENT_RECOVERY = -0.018;
 

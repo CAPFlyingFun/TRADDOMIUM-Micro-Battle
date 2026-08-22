@@ -52,6 +52,19 @@ try {
     // plenty for a still.
     await page.waitForFunction(() => window.__island.simTime() > 0.4,
       null, { timeout: 240000 });
+    if (process.env.FLYING === '1') {
+      // Get her airborne and hold her there, so the wings are working
+      // rather than folded.
+      await page.evaluate(() => {
+        window.__island.setPace('run');
+        window.__island.setSprint(true);
+      });
+      await page.keyboard.down('KeyW');
+      await page.waitForFunction(() => window.__island.canTakeOff(),
+        null, { timeout: 300000 });
+      await page.keyboard.down('Space');
+      await page.waitForTimeout(2200);
+    }
     if (process.env.WINGS !== undefined) {
       // Look at HER, close up, from the side. The default chase camera
       // is behind and above, which is the worst angle for judging a

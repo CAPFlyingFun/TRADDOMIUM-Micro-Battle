@@ -32,11 +32,17 @@ const RESTING = 'rgba(255, 226, 160, .42)';
 
 /**
  * Below this the reserve is not meaningfully moving either way, in
- * fractions per second. A thousandth of a bar a second is sixteen
- * minutes to empty — a countdown at that rate is noise dressed as
- * information.
+ * fractions per second.
+ *
+ * IT HAS TO SIT UNDER THE SLOWEST REAL ACTIVITY. It was a thousandth
+ * of a bar a second, on the reasoning that sixteen minutes to empty is
+ * too slow to be worth a countdown — and then cruising was re-anchored
+ * to the measured thirty minutes aloft, which is slower than that. A
+ * queen in level flight was told she was FULL and given no countdown at
+ * all. One ten-thousandth is nearly three hours to empty, which is
+ * genuinely nothing happening.
  */
-const IDLE_RATE = 0.001;
+const IDLE_RATE = 0.0001;
 const FUEL = 'rgba(255, 196, 92, .95)';
 const SPENT = 'rgba(255, 110, 90, .95)';
 
