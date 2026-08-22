@@ -28,6 +28,8 @@ import { liveStat } from '../ant/castes';
 import { ActionPad, type Action } from '../input/ActionPad';
 import { DebugDie } from '../ui/DebugDie';
 import { WeatherChip } from '../ui/WeatherChip';
+import { Compass } from '../ui/Compass';
+import { bearingOf, type CompassMarker } from '../ui/compassMath';
 import { AUTO_AIRSPEED, Flight, setFlightScale } from '../ant/flight';
 import { Grace } from '../ant/grace';
 import {
@@ -89,6 +91,12 @@ export class IslandScene {
   private readonly actions: ActionPad;
   private readonly debugDie: DebugDie;
   private readonly weatherChip: WeatherChip;
+  private readonly compass: Compass;
+  /**
+   * What the compass points at. GLOBAL positions, recomputed into
+   * bearings every frame — nothing here caches a direction.
+   */
+  private readonly markers: CompassMarker[] = [];
   private readonly climbButton: Action;
   private readonly descendButton: Action;
   private readonly flight = new Flight();
@@ -248,6 +256,7 @@ export class IslandScene {
     this.actions = new ActionPad(host);
     this.debugDie = new DebugDie(host, () => this.kill());
     this.weatherChip = new WeatherChip(host);
+    this.compass = new Compass(host);
     // Both buttons are ALWAYS there. A control that appears and
     // disappears under a thumb already resting on it is worse than one
     // that greys out, and the design says so explicitly.
@@ -282,6 +291,17 @@ export class IslandScene {
     // wrong at the instant she appears: without this she would spawn
     // into a default afternoon and watch the real one wash over her.
     this.applyWeather(weather().settleAt(found.at));
+
+    // THE FIRST MARKER, and for now the only one: where she started.
+    // It is a real marker rather than a mock — same list, same
+    // projection, same edge-pinning — so what comes next (a nest, a
+    // death site, a target) is a push onto this array and nothing else.
+    this.markers.push({
+      id: 'spawn',
+      label: 'START',
+      at: found.at,
+      colour: 'rgba(150, 235, 160, .95)',
+    });
 
     // She plays in stick-legs from the first frame and becomes herself
     // when the mesh lands. A failed load leaves the placeholder up,
@@ -353,6 +373,11 @@ export class IslandScene {
       disarmed: () => this.grace.disarmed,
       ignoredByHostiles: () => this.grace.ignoredByHostiles,
       wings: () => this.winged,
+      compass: () => {
+        const view = new THREE.Vector3();
+        this.follow.camera.getWorldDirection(view);
+        return bearingOf(view.x, view.z);
+      },
       // What the loader actually produced, so a missing wing mesh is a
       // finding rather than a mystery.
       queenParts: () => {
@@ -455,6 +480,7 @@ export class IslandScene {
     this.actions.dispose();
     this.debugDie.dispose();
     this.weatherChip.dispose();
+    this.compass.dispose();
     this.rain.dispose();
     this.detachSettings();
     this.detachKill();
@@ -601,6 +627,15 @@ export class IslandScene {
     this.queen?.beat(
       dt,
       this.flight.aloft && this.flight.where !== 'glide',
+    );
+    // THE CAMERA, not her body. Asked of the camera itself rather than
+    // of the look controller, so there is no second convention to keep
+    // in step: whatever is actually being rendered from is what the
+    // compass reports.
+    const view = new THREE.Vector3();
+    this.follow.camera.getWorldDirection(view);
+    this.compass.update(
+      bearingOf(view.x, view.z), this.ant.where, this.markers, dt,
     );
     this.vitals.show(this.stamina.fraction, this.stamina.spent, this.effort);
     // NOTHING TO TICK. The grace is a deadline, so the only question
