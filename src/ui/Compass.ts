@@ -51,6 +51,12 @@ const MAJOR_EVERY = 15;
  */
 const EASE = 0.02;
 
+/** Widest the strip is allowed to be, and the least it is worth. */
+const MAX_WIDTH = 320;
+const MIN_WIDTH = 150;
+/** Clear space to leave between the strip and whatever it sits beside. */
+const CLEARANCE = 12;
+
 const GOLD = 'rgba(255, 226, 160, .92)';
 const GOLD_DIM = 'rgba(255, 226, 160, .34)';
 const GOLD_FAINT = 'rgba(255, 226, 160, .16)';
@@ -69,6 +75,7 @@ export class Compass {
   private shown = 0;
   private started = false;
   private lastRead = '';
+  private readonly watch: ResizeObserver;
 
   constructor(host: HTMLElement) {
     this.root = document.createElement('div');
@@ -78,10 +85,12 @@ export class Compass {
       top: 'calc(8px + min(env(safe-area-inset-top), 12px))',
       left: '50%',
       transform: 'translateX(-50%)',
-      // Narrow enough to clear the vitals panel on the left and the
-      // weather chip on the right, on the smallest landscape this game
-      // supports. It is a strip, not a dial; it does not need width.
-      width: 'min(320px, 34vw)',
+      // Sized by `fit()` against what is actually on screen — see
+      // there. A viewport fraction cannot do this job: the vitals panel
+      // is content-sized, so it takes a LARGER share of a smaller
+      // phone, and the 34vw that cleared it in a 932-wide render
+      // overlapped it on Joshua's device.
+      width: '320px',
       pointerEvents: 'none',
       zIndex: '13',
     } as Partial<CSSStyleDeclaration>);
@@ -141,6 +150,65 @@ export class Compass {
     this.root.appendChild(this.readout);
 
     host.appendChild(this.root);
+
+    // Re-fit whenever anything around it changes shape: a rotation, a
+    // longer readout in the vitals panel, the weather chip gaining its
+    // siren glyph.
+    this.watch = new ResizeObserver(() => this.fit());
+    this.watch.observe(host);
+    this.fit();
+  }
+
+  /**
+   * Fit the strip into the gap between the vitals panel and the
+   * weather chip, MEASURED rather than assumed.
+   *
+   * The first version reserved a fraction of the viewport, which is
+   * exactly the assumption that fails: the vitals panel is sized by its
+   * contents, so on a narrower phone it occupies a bigger share and the
+   * strip that cleared it at 932 wide ran straight over the queen's
+   * card. Asking the elements where they actually end costs one layout
+   * read on resize and cannot be wrong.
+   *
+   * Centred on the screen while that fits, because a compass reads as
+   * centred or as broken. When the neighbours leave no room for a
+   * usable strip there, it centres in the GAP instead — off-centre but
+   * legible beats centred and overlapped.
+   */
+  private fit(): void {
+    const wide = window.innerWidth;
+    // A hidden or unbuilt panel measures zero and must not be read as
+    // one sitting against the left edge of the screen.
+    const box = (selector: string): DOMRect | null => {
+      const found = document.querySelector(selector);
+      if (!found) return null;
+      const rect = found.getBoundingClientRect();
+      return rect.width > 0 ? rect : null;
+    };
+    const rightOf = (selector: string): number => box(selector)?.right ?? 0;
+    const leftOf = (selector: string): number => box(selector)?.left ?? wide;
+
+    const leftEdge = rightOf('[data-ui="vitals"]') + CLEARANCE;
+    const rightEdge = Math.min(
+      leftOf('[data-ui="weather-chip"]'),
+      leftOf('[data-ui="settings"]'),
+    ) - CLEARANCE;
+
+    const room = rightEdge - leftEdge;
+    const middle = wide / 2;
+    // How wide it can be while staying centred on the screen.
+    const centred = Math.min(middle - leftEdge, rightEdge - middle) * 2;
+
+    if (centred >= MIN_WIDTH) {
+      this.root.style.width = `${Math.min(MAX_WIDTH, centred)}px`;
+      this.root.style.left = '50%';
+      this.root.style.transform = 'translateX(-50%)';
+      return;
+    }
+    // Not enough room either side of centre: sit in the gap.
+    this.root.style.width = `${Math.max(0, Math.min(MAX_WIDTH, room))}px`;
+    this.root.style.left = `${Math.max(0, leftEdge)}px`;
+    this.root.style.transform = 'none';
   }
 
   /**
@@ -266,6 +334,7 @@ export class Compass {
   }
 
   dispose(): void {
+    this.watch.disconnect();
     this.root.remove();
   }
 }

@@ -114,6 +114,15 @@ export interface GameWeather {
    */
   readonly windMps: number;
   /**
+   * THE REPORTED GUST, metres per second, never below `windMps`.
+   *
+   * The pair of them is what the live wind needs: a station's two
+   * numbers bound the band the air actually wanders inside. On a steady
+   * day the provider reports no gust and this equals the sustained
+   * speed, which correctly means "the wind is the wind".
+   */
+  readonly gustMps: number;
+  /**
    * The same wind as a WORLD VELOCITY, units per second, pointing the
    * way the air is travelling.
    *
@@ -184,6 +193,7 @@ export function toGameWeather(now: Conditions): GameWeather {
   const cloudiness = clamp01(now.cloud / 100);
   const windHeading = headingFromBearing(now.windFrom + 180);
   const windMps = Math.max(0, now.windSpeed) / 3.6;
+  const gustMps = Math.max(windMps, Math.max(0, now.windGust) / 3.6);
   const windUnits = windMps * UNITS_PER_METRE;
 
   return {
@@ -195,6 +205,7 @@ export function toGameWeather(now: Conditions): GameWeather {
     // whole island backwards in a way nobody notices for weeks.
     windHeading,
     windMps,
+    gustMps,
     // A heading travels along (sin, cos) in this world, same convention
     // as hers, so the wind vector is built the same way her own is.
     windVelocity: {

@@ -13,7 +13,7 @@ import { Stamina } from '../ant/stamina';
 import {
   groundHeight, ISLAND_SPAN, setRelief, setSmoothing, smoothingAmount,
 } from '../world/heightfield';
-import { findLandfall, type HeightGrid } from '../world/kauai';
+import { findLandfall, UNITS_PER_METRE, type HeightGrid } from '../world/kauai';
 import { local, world, type WorldPoint } from '../world/coords';
 import { TerrainStream, TIER_CUTS } from '../world/TerrainStream';
 import { originAt, rebaseFor, setOrigin, toLocal, toWorld,
@@ -41,6 +41,7 @@ import { weather } from '../weather/WeatherService';
 import { skyLook } from '../weather/sky';
 import { Rain } from '../weather/Rain';
 import type { GameWeather } from '../weather/gameplay';
+import { LiveWind, windProfile } from '../weather/windField';
 
 /**
  * THE ISLAND — Kauai at 1:1000, walked by one ant.
@@ -127,6 +128,15 @@ export class IslandScene {
   private skyLight!: THREE.HemisphereLight;
   /** The weather she is actually standing in, eased. */
   private nowWeather: GameWeather | null = null;
+  /**
+   * The reported wind turned back into moving air.
+   *
+   * Advanced every frame whether she is flying or not — the air over
+   * the island does not wait for her to take off, and a gust that
+   * started while she was walking should already be underway when she
+   * leaves the ground.
+   */
+  private readonly liveWind = new LiveWind();
   private readonly ant = new PlayerAnt();
   private readonly clock = new THREE.Clock();
   private terrain!: TerrainStream;
@@ -495,6 +505,10 @@ export class IslandScene {
     // Clamp dt so a backgrounded tab does not teleport the ant on return.
     const dt = Math.min(this.clock.getDelta(), 0.1);
     this.elapsed += dt;
+    // The air breathes on its own clock, above the ant and beside her.
+    this.liveWind.update(
+      this.nowWeather?.windMps ?? 0, this.nowWeather?.gustMps ?? 0, dt,
+    );
     const look = this.look.read(dt);
     const stick = this.stick.read();
 
@@ -911,10 +925,21 @@ export class IslandScene {
    * is several times what she can fly against.
    */
   private windOnHer(): { x: number; z: number } | null {
-    const wind = this.nowWeather?.windVelocity;
-    if (!wind) return null;
-    const share = settings().windInfluence;
-    return { x: wind.x * share, z: wind.z * share };
+    const sky = this.nowWeather;
+    if (!sky) return null;
+    // Nothing at her feet, all of it at ten metres. Cheapest possible
+    // exit too: on the ground this is exactly zero and the vector maths
+    // below never runs.
+    const reach = windProfile(this.flight.height) * settings().windInfluence;
+    if (reach <= 0) return null;
+
+    const live = this.liveWind.sample;
+    // The reported bearing plus however far the air has wandered off
+    // it. Veer is clockwise in compass terms, which is anticlockwise in
+    // heading terms — hence the sign, and hence saying so.
+    const heading = sky.windHeading - (live.veerDegrees * Math.PI) / 180;
+    const speed = live.speedMps * UNITS_PER_METRE * reach;
+    return { x: Math.sin(heading) * speed, z: Math.cos(heading) * speed };
   }
 
   /**

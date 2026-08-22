@@ -3,13 +3,18 @@ import { chromium } from 'playwright';
 const url = process.env.PROBE_URL ?? 'http://localhost:4173/';
 const spots = (process.env.SHOTS ?? 'mana,lihue,poipu,kokee,hanalei-bay').split(',');
 const tag = process.env.TAG ?? 'shot';
+// The design canvas by default, but the HUD's crowding problems live at
+// the NARROW end — Joshua's phone in landscape is a good deal tighter
+// than 932, and a strip that fits here can still sit on the queen's
+// card there. VIEW=844x390 to shoot one.
+const [vw, vh] = (process.env.VIEW ?? '932x430').split('x').map(Number);
 const browser = await chromium.launch({
   executablePath: process.env.PLAYWRIGHT_CHROMIUM ?? undefined,
   args: ['--use-gl=angle', '--use-angle=swiftshader', '--disable-dev-shm-usage'],
 });
 try {
   for (const spot of spots) {
-    const page = await browser.newPage({ viewport: { width: 932, height: 430 } });
+    const page = await browser.newPage({ viewport: { width: vw, height: vh } });
     // A SHADER THAT WILL NOT COMPILE FAILS QUIETLY — the terrain just
     // is not there, and a screenshot of an empty blue world looks like
     // a spawn in the sea rather than like a broken build. The error is
@@ -105,7 +110,7 @@ try {
       console.log(`${spot}: FAILED — ${errors[0].split('\n')[0]}`);
       process.exitCode = 1;
     } else {
-      console.log(`${tag}-${spot}.png`);
+      console.log(`${tag}-${spot}.png  (${vw}x${vh})`);
     }
     await page.close();
   }
