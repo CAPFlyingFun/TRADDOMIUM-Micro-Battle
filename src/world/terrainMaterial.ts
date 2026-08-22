@@ -171,8 +171,18 @@ export function setDetailRange(times: number): void {
   FADE_TO_UNIFORM.value = FADE_TO_TEXELS * factor;
 }
 
-/** Texels across one band map. All seven ship at 512. */
-const BAND_TEXELS = 512;
+/**
+ * Texels across one band map. All seven ship at 1024 — Beyond
+ * Extinction's HD island set for the six it has, and the snow that was
+ * already this size. 1024 is the mobile compromise on purpose: double
+ * the sharpness beside the Queen for about 39 MB of GPU memory across
+ * the whole set, where the 4K textures a desktop could afford would be
+ * over 600 — the exact trap BE's own web build had to dig itself out
+ * of. This constant feeds the detail fade, so it MUST follow the maps:
+ * leaving it at 512 after this upgrade would have quietly halved the
+ * fade's reach in real texels.
+ */
+const BAND_TEXELS = 1024;
 
 /**
  * How much tighter the grain is tiled than the bands.
@@ -448,27 +458,10 @@ export function loadBands(
   const loader = new THREE.TextureLoader();
   const anisotropy = renderer.capabilities.getMaxAnisotropy();
   const bands: Record<string, THREE.Texture> = {};
-  // A/B EXPERIMENT, LIVE ON THE DEVICE. `?grass=be` swaps in Beyond
-  // Extinction's 1024-texel Open Plains Grass in place of the 512
-  // grass.jpg — same shader, same tiling, same filtering, so the only
-  // variable is the source art. It exists because two questions are
-  // tangled together: the chunky look UP CLOSE is resolution, and the
-  // streaking AT RANGE is sampling, and a texture swap can only fix
-  // the first. Comparing both URLs on the phone at the same spawn
-  // separates them. Remove once the texture decision is made.
-  const grassBe = (() => {
-    try {
-      return new URLSearchParams(location.search).get('grass') === 'be';
-    } catch {
-      return false;
-    }
-  })();
-
   for (const name of BAND_FILES) {
     BAND_AVERAGE[name] ??= { value: new THREE.Color(0.5, 0.5, 0.5) };
-    const file = name === 'grass' && grassBe ? 'grass-be' : name;
     const texture = loader.load(
-      `${import.meta.env.BASE_URL}kauai-tex/${file}.jpg`,
+      `${import.meta.env.BASE_URL}kauai-tex/${name}.jpg`,
       (loaded) => measureAverage(name, loaded),
     );
     texture.wrapS = THREE.RepeatWrapping;
