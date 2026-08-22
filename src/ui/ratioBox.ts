@@ -23,7 +23,10 @@
 /** What the artwork currently in the box needs. */
 export interface Shape {
   readonly ratio: number;
+  /** Fraction of the artwork's HEIGHT that must stay on screen. */
   readonly keepVisible: number;
+  /** Fraction of its WIDTH that must stay on screen. */
+  readonly keepWide: number;
 }
 
 /**
@@ -40,16 +43,26 @@ export interface Shape {
 export function fitCover(
   box: HTMLElement,
   parent: HTMLElement,
-  shape: () => { ratio: number; keepVisible: number },
+  shape: () => Shape,
 ): () => void {
   const apply = (): void => {
     const wide = parent.clientWidth;
     const tall = parent.clientHeight;
     if (wide <= 0 || tall <= 0) return;
-    const { ratio, keepVisible } = shape();
+    const { ratio, keepVisible, keepWide } = shape();
 
     // Cover: whichever side falls short decides the size.
-    const width = Math.max(wide, tall * ratio);
+    let width = Math.max(wide, tall * ratio);
+
+    // EXCEPT WHEN COVERING WOULD CUT THE BAR IN HALF. A phone taller
+    // than the artwork crops its sides, and the loading bar runs most
+    // of the way across — on Joshua's phone that sliced the rounded end
+    // clean off and left the bar running out of the screen. Where the
+    // two demands collide the bar wins: the picture stops covering and
+    // is let out to the dark at the top and bottom, which looks
+    // deliberate, where a bar with no end looks broken.
+    const widest = wide / keepWide;
+    if (width > widest) width = Math.max(wide, widest);
     const height = width / ratio;
 
     // Centred, then slid up if centring would push the caption off the

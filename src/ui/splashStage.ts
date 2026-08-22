@@ -39,6 +39,19 @@ const CAPTION_DROP = 0.075;
 /** The gap above the hole where the place name sits. */
 const PLACE_LIFT = 0.048;
 
+/** Clear space to leave beyond a CUT-OUT bar before cropping into it. */
+const SIDE_MARGIN = 0.02;
+
+/**
+ * How wide a DRAWN bar may get, against the screen rather than the
+ * picture. A tall phone crops the sides off a portrait picture, so a
+ * bar measured in the picture's width runs off them.
+ */
+const DRAWN_CAP = 'min(78vw, 460px)';
+
+/** The rim on a drawn bar. A cut-out one gets its edge from the art. */
+const RIM = 'rgba(255, 214, 140, .75)';
+
 /**
  * THE ONE COPY OF EACH PICTURE, moved from screen to screen.
  *
@@ -110,7 +123,12 @@ export function buildStage(): Stage {
   } as Partial<CSSStyleDeclaration>);
 
   let cut = splashFor(window.innerWidth, window.innerHeight);
-  const meter = new Meter({ frame: artFor(cut), window: cut });
+  const meter = new Meter({
+    frame: artFor(cut),
+    window: cut,
+    behind: cut.kind === 'drawn',
+    rim: RIM,
+  });
   meter.root.style.containerType = 'size';
 
   const above = document.createElement('div');
@@ -142,9 +160,10 @@ export function buildStage(): Stage {
   }
   meter.root.append(above, below);
 
-  /** Put the captions where this picture's hole is. */
+  /** Put the bar and the captions where this picture wants them. */
   const place = (): void => {
     const pc = (n: number): string => `${(n * 100).toFixed(3)}%`;
+    meter.aim(cut, cut.kind === 'drawn' ? DRAWN_CAP : undefined);
     above.style.bottom = pc(1 - cut.top + PLACE_LIFT);
     below.style.top = pc(cut.bottom + CAPTION_DROP * 0.5);
   };
@@ -159,10 +178,15 @@ export function buildStage(): Stage {
     if (now.file !== cut.file) {
       cut = now;
       meter.wear(artFor(cut));
-      meter.aim(cut);
       place();
     }
-    return { ratio: cut.ratio, keepVisible: cut.bottom + CAPTION_DROP };
+    return {
+      ratio: cut.ratio,
+      keepVisible: cut.bottom + CAPTION_DROP,
+      // A drawn bar is already capped to the screen, so nothing about
+      // it needs the crop held back; only a cut-out one does.
+      keepWide: cut.kind === 'cutout' ? cut.right - cut.left + SIDE_MARGIN * 2 : 0,
+    };
   });
 
   return { root, meter, above, below, stopFitting };

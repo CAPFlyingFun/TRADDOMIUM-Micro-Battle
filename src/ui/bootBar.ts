@@ -1,7 +1,7 @@
 import { readableBytes } from './loadPlan';
 import { fitCover } from './ratioBox';
 import { Meter } from './Meter';
-import { splashFor, type SplashCut } from './splashFrame';
+import { splashFor } from './splashFrame';
 import { GOLD, GOLD_DIM, keepSplashArt } from './splashStage';
 
 /**
@@ -28,6 +28,9 @@ import { GOLD, GOLD_DIM, keepSplashArt } from './splashStage';
 
 const FILL = 'linear-gradient(90deg, #f6c24b 0%, #ff9e2c 52%, #ff5a36 100%)';
 const CAPTION_DROP = 0.075;
+const SIDE_MARGIN = 0.02;
+const DRAWN_CAP = 'min(78vw, 460px)';
+const RIM = 'rgba(255, 214, 140, .75)';
 const pc = (n: number): string => `${(n * 100).toFixed(3)}%`;
 
 /**
@@ -43,12 +46,21 @@ export function fitBootBar(
   if (!stage || !art) return () => {};
 
   let cut = splashFor(window.innerWidth, window.innerHeight);
+  // PIN THE SOURCE. The markup uses a `<picture>` with an orientation
+  // query, which is how the right image is on screen before any script
+  // runs — but an `<img>` inside a `<picture>` only resolves that way
+  // WHILE IT IS THERE. Re-parent it into the loading screen later and
+  // the browser re-runs the selection with no `<source>` beside it, and
+  // silently falls back to the `src` attribute: the landscape picture,
+  // stretched into a portrait box. Pinning the URL here ends the
+  // element's dependence on its neighbours, and `aim` maintains it.
+  art.src = `${import.meta.env.BASE_URL}${cut.file}`;
   // Claim it now, while the boot screen still exists: the in-game
   // loading screen re-parents this very element rather than asking the
-  // browser for the picture a second time. Which picture the markup
-  // actually chose is on the element, not in our guess about it.
-  keepSplashArt(fromSrc(art) ?? cut, art);
+  // browser for the picture a second time.
+  keepSplashArt(cut, art);
 
+  const backing = document.createElement('div');
   const clip = document.createElement('div');
   clip.style.overflow = 'hidden';
   const fill = document.createElement('div');
@@ -80,27 +92,55 @@ export function fitBootBar(
   caption.style.setProperty('font-size', '2.6cqmin');
   caption.textContent = 'SURVEYING THE ISLAND…';
 
-  /** Point the fill and the caption at this picture's hole. */
+  /**
+   * Point the bar and the caption at this picture, and stack them the
+   * way this picture wants.
+   *
+   * A CUT-OUT picture goes in front, so the bar is inserted BEFORE it —
+   * the reference node is the `<picture>` rather than the `<img>`, as
+   * the image's parent is the picture and inserting against the wrong
+   * one throws. A DRAWN one goes behind, so the bar is appended after
+   * it, gets its own rounded edge and rim, and is capped to the screen
+   * rather than to the picture, which a tall phone crops.
+   */
   const aim = (): void => {
-    const bleed = (cut.bottom - cut.top) * Meter.BLEED;
-    Object.assign(clip.style, {
-      position: 'absolute',
-      left: pc(cut.left),
-      top: pc(cut.top - bleed),
-      width: pc(cut.right - cut.left),
-      height: pc(cut.bottom - cut.top + bleed * 2),
-    } as Partial<CSSStyleDeclaration>);
+    const want = `${import.meta.env.BASE_URL}${cut.file}`;
+    if (!art.src.endsWith(cut.file)) art.src = want;
+    const drawn = cut.kind === 'drawn';
+    const bleed = drawn ? 0 : (cut.bottom - cut.top) * Meter.BLEED;
+    const round = drawn ? '999px' : '0';
+    for (const el of [backing, clip]) {
+      Object.assign(el.style, {
+        position: 'absolute',
+        top: pc(cut.top - bleed),
+        height: pc(cut.bottom - cut.top + bleed * 2),
+        borderRadius: round,
+      } as Partial<CSSStyleDeclaration>);
+      if (drawn) {
+        el.style.left = '50%';
+        el.style.transform = 'translateX(-50%)';
+        el.style.width = `min(${pc(cut.right - cut.left)}, ${DRAWN_CAP})`;
+      } else {
+        el.style.left = pc(cut.left);
+        el.style.transform = 'none';
+        el.style.width = pc(cut.right - cut.left);
+      }
+    }
+    fill.style.borderRadius = round;
+    backing.style.background = drawn ? 'rgba(6, 8, 5, 0.78)' : 'transparent';
+    backing.style.boxShadow = drawn
+      ? `0 0 0 1.5px ${RIM}, 0 2px 14px rgba(0,0,0,.55)` : 'none';
     caption.style.top = pc(cut.bottom + CAPTION_DROP * 0.5);
+
+    const picture = art.closest('picture') ?? art;
+    if (drawn) stage.append(backing, clip, caption);
+    else {
+      stage.insertBefore(backing, picture);
+      stage.insertBefore(clip, picture);
+      stage.appendChild(caption);
+    }
   };
   aim();
-
-  // BEFORE the image: that is what puts it behind the hole. The
-  // reference node is the `<picture>` rather than the `<img>` inside
-  // it — the image's parent is the picture, and inserting against the
-  // wrong one throws. (`display: contents` on the picture is why the
-  // image still lays out as though it were a child of the stage.)
-  stage.insertBefore(clip, art.closest('picture') ?? art);
-  stage.appendChild(caption);
 
   // The markup sized the stage from viewport units, which is right for
   // the first paint and cannot do the two things that need measuring:
@@ -112,7 +152,11 @@ export function fitBootBar(
       cut = now;
       aim();
     }
-    return { ratio: cut.ratio, keepVisible: cut.bottom + CAPTION_DROP };
+    return {
+      ratio: cut.ratio,
+      keepVisible: cut.bottom + CAPTION_DROP,
+      keepWide: cut.kind === 'cutout' ? cut.right - cut.left + SIDE_MARGIN * 2 : 0,
+    };
   });
 
   return (done, total, trouble) => {
@@ -127,20 +171,4 @@ export function fitBootBar(
       `SURVEYING THE ISLAND · ${readableBytes(done)} / ${readableBytes(total)}`;
     caption.style.color = done >= total ? GOLD : GOLD_DIM;
   };
-}
-
-/**
- * Which cut the markup's `<picture>` actually settled on.
- *
- * `currentSrc` is the browser's answer to the media query, and it is
- * the only honest one — asking the window its shape a second time can
- * disagree with what was chosen a frame earlier.
- */
-function fromSrc(art: HTMLImageElement): SplashCut | null {
-  const src = art.currentSrc || art.src;
-  for (const wide of [true, false]) {
-    const cut = splashFor(wide ? 2 : 1, wide ? 1 : 2);
-    if (src.endsWith(cut.file)) return cut;
-  }
-  return null;
 }

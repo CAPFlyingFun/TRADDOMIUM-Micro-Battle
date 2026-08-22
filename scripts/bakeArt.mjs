@@ -32,8 +32,24 @@ import { readFileSync, writeFileSync } from 'node:fs';
  * greets a portrait phone has to be composed for one.
  */
 const SPLASHES = [
-  { key: 'LANDSCAPE', source: 'art/splash-cutout.png', out: 'splash.webp', width: 1600 },
-  { key: 'PORTRAIT', source: 'art/splash-portrait-source.png', out: 'splash-portrait.webp', width: 1080 },
+  // CUT OUT: the bar's interior is missing from the artwork, so the
+  // fill shows through it and the picture is the front layer.
+  {
+    key: 'LANDSCAPE', kind: 'cutout',
+    source: 'art/splash-cutout.png', out: 'splash.webp', width: 1600,
+  },
+  // DRAWN: a plain picture, and the bar is built in CSS on top of it.
+  // Simpler to re-art — there is nothing to cut and nothing to line up
+  // — and it is the only way to keep the bar off the crop on a tall
+  // phone, since a drawn bar can be sized against the SCREEN while the
+  // picture is sized against itself. `bar` is measured from where the
+  // wordmark actually ends, not typed: gap below it, then thickness,
+  // both as fractions of the picture's height.
+  {
+    key: 'PORTRAIT', kind: 'drawn',
+    source: 'art/splash-portrait-source.jpg', out: 'splash-portrait.webp', width: 1080,
+    bar: { gap: 0.052, height: 0.012, left: 0.12, right: 0.88 },
+  },
 ];
 const ICON = 'art/icon-source.png';
 
@@ -43,8 +59,10 @@ const browser = await chromium.launch({
 });
 const page = await browser.newPage({ viewport: { width: 64, height: 64 } });
 
-const asDataUrl = (path) =>
-  `data:image/png;base64,${readFileSync(path).toString('base64')}`;
+const asDataUrl = (path) => {
+  const kind = path.endsWith('.jpg') || path.endsWith('.jpeg') ? 'jpeg' : 'png';
+  return `data:image/${kind};base64,${readFileSync(path).toString('base64')}`;
+};
 
 /**
  * Redraw one source at a target size.
@@ -149,32 +167,53 @@ async function findWindow(source) {
 
 const cuts = [];
 for (const splash of SPLASHES) {
-  console.log(`${splash.out} — the hole in the picture`);
-  const win = await findWindow(splash.source);
-  if (!win) throw new Error(`${splash.source} has no transparent window cut in it`);
-  const boxed = (win.right - win.left) * win.width * (win.bottom - win.top) * win.height;
-  console.log(`  x ${(win.left * 100).toFixed(2)}% to ${(win.right * 100).toFixed(2)}%`);
-  console.log(`  y ${(win.top * 100).toFixed(2)}% to ${(win.bottom * 100).toFixed(2)}%`);
-  console.log(`  ${win.clear} clear pixels, ${((win.clear / boxed) * 100).toFixed(1)}% of that box`);
-  // Under about 85% the cutout is not a rectangle or a rounded one — it
-  // is ragged, and the fill would show outside the shape that was drawn.
-  // A stadium end costs a few per cent; anything more is a warning.
-  if (win.clear / boxed < 0.85) {
-    console.log('  WARNING: ragged cutout — the fill may show past the drawn shape');
-  }
-  const smudge = await findSmudge(splash.source, win);
-  if (smudge > 0) {
-    console.log(`  ${smudge} half-clear pixels inside the hole — scrubbing them out`);
+  console.log(`${splash.out} — ${splash.kind}`);
+  let win;
+  let shape;
+
+  if (splash.kind === 'cutout') {
+    win = await findWindow(splash.source);
+    if (!win) throw new Error(`${splash.source} has no transparent window cut in it`);
+    shape = { width: win.width, height: win.height };
+    const boxed = (win.right - win.left) * win.width * (win.bottom - win.top) * win.height;
+    console.log(`  hole x ${(win.left * 100).toFixed(2)}% to ${(win.right * 100).toFixed(2)}%`);
+    console.log(`  hole y ${(win.top * 100).toFixed(2)}% to ${(win.bottom * 100).toFixed(2)}%`);
+    console.log(`  ${win.clear} clear pixels, ${((win.clear / boxed) * 100).toFixed(1)}% of that box`);
+    // A stadium end costs a few per cent; much more than that and the
+    // cutout is ragged, and the fill would show outside the drawn shape.
+    if (win.clear / boxed < 0.85) {
+      console.log('  WARNING: ragged cutout — the fill may show past the drawn shape');
+    }
+    const smudge = await findSmudge(splash.source, win);
+    if (smudge > 0) {
+      console.log(`  ${smudge} half-clear pixels inside the hole — scrubbing them out`);
+    }
+  } else {
+    const logo = await findLogoBottom(splash.source);
+    if (!logo) throw new Error(`${splash.source} — could not find where the wordmark ends`);
+    shape = { width: logo.width, height: logo.height };
+    const top = logo.bottom + splash.bar.gap;
+    win = {
+      left: splash.bar.left, right: splash.bar.right,
+      top, bottom: top + splash.bar.height,
+      width: logo.width, height: logo.height,
+    };
+    console.log(`  wordmark ends at ${(logo.bottom * 100).toFixed(2)}%`);
+    console.log(`  bar y ${(win.top * 100).toFixed(2)}% to ${(win.bottom * 100).toFixed(2)}%`);
+    if (win.bottom > 0.94) {
+      console.log('  WARNING: the bar is very near the bottom of the picture');
+    }
   }
 
-  const height = Math.round(splash.width * (win.height / win.width));
-  // The FRONT layer, alpha and all. WebP because a photograph with an
-  // alpha channel is a PNG the size of the rest of the game, and every
-  // browser that can run three.js has read WebP since 2020.
+  const height = Math.round(splash.width * (shape.height / shape.width));
+  // WebP because a photograph with an alpha channel is a PNG the size
+  // of the rest of the game, and every browser that can run three.js
+  // has read WebP since 2020. Only a cut-out one needs its hole
+  // re-erased; there is no hole in a drawn one to keep clean.
   await bake({
     source: splash.source, out: `public/${splash.out}`,
     width: splash.width, height, type: 'image/webp', quality: 0.82,
-    scrub: win,
+    scrub: splash.kind === 'cutout' ? win : undefined,
   });
   cuts.push({ ...splash, win, ratio: splash.width / height });
 }
@@ -198,6 +237,7 @@ await bake({
 
 const asConst = (cut) => `export const SPLASH_${cut.key} = {
   file: '${cut.out}',
+  kind: '${cut.kind}',
   left: ${cut.win.left.toFixed(5)},
   right: ${cut.win.right.toFixed(5)},
   top: ${cut.win.top.toFixed(5)},
@@ -210,20 +250,24 @@ writeFileSync('src/ui/splashFrame.ts', `/**
  *
  * GENERATED by scripts/bakeArt.mjs — do not edit by hand.
  *
- * Each splash is the FRONT layer of the loading bar: a picture with the
- * bar's interior cut out of it. The progress fill goes behind, and only
- * the part of it framed by the hole is ever seen — which is also how
- * the portrait bar gets its rounded ends for nothing. These fractions
- * are measured off each artwork's alpha channel at bake time, so
- * re-cutting the art moves them with it.
+ * Two of them, because the boot screen appears before anyone has been
+ * asked to turn the phone and a landscape picture on a portrait phone
+ * is either letterboxed or cropped to the middle of a tree. They work
+ * differently on purpose:
  *
- * Two of them because the boot screen appears before anyone has been
- * asked to turn the phone, and a landscape picture on a portrait phone
- * is either letterboxed or cropped to the middle of a tree.
+ *   CUTOUT  the bar's interior is missing from the artwork, so the
+ *           picture is the FRONT layer and the fill shows through it.
+ *           The rectangle is the bounding box of the art's own alpha.
+ *   DRAWN   a plain picture, with the bar built in CSS on top. The
+ *           rectangle is placed from where the wordmark actually ends.
+ *
+ * Either way these are measured at bake time, so new art moves them.
  */
 export interface SplashCut {
   /** Filename under the base URL. */
   readonly file: string;
+  /** Whether the artwork carries the bar, or the bar is drawn on it. */
+  readonly kind: 'cutout' | 'drawn';
   readonly left: number;
   readonly right: number;
   readonly top: number;
@@ -248,6 +292,43 @@ console.log('\n  src/ui/splashFrame.ts written');
  * loudly, because a leftover here is invisible in a paint program and
  * very visible over a bright fill.
  */
+/**
+ * FIND WHERE THE WORDMARK ENDS, so a drawn bar can be put below it.
+ *
+ * The subtitle is near-white and neutral; everything else down there is
+ * warm — lit path, moss, soil — so one test separates them. Measured
+ * rather than typed because "just under the logo" is the whole design
+ * intent, and it should survive the art being re-rendered an inch
+ * further up.
+ */
+async function findLogoBottom(source) {
+  return page.evaluate(async (src) => {
+    const img = new Image();
+    img.src = src;
+    await img.decode();
+    const canvas = document.createElement('canvas');
+    canvas.width = img.width;
+    canvas.height = img.height;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0);
+    const d = ctx.getImageData(0, 0, img.width, img.height).data;
+    let bottom = -1;
+    for (let y = Math.floor(img.height * 0.35); y < Math.floor(img.height * 0.85); y++) {
+      let white = 0;
+      for (let px = Math.floor(img.width * 0.12); px < Math.floor(img.width * 0.88); px++) {
+        const i = (y * img.width + px) * 4;
+        const r = d[i];
+        const g = d[i + 1];
+        const b = d[i + 2];
+        if (r > 210 && g > 210 && b > 200 && Math.abs(r - b) < 42) white++;
+      }
+      if (white >= 10) bottom = y;
+    }
+    if (bottom < 0) return null;
+    return { bottom: bottom / img.height, width: img.width, height: img.height };
+  }, asDataUrl(source));
+}
+
 async function findSmudge(source, win) {
   return page.evaluate(async (job) => {
     const img = new Image();

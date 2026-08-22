@@ -11,7 +11,7 @@
  * perfectly playable with a keyboard, and blocking it would be rude.
  */
 
-import { SPLASH_PORTRAIT } from './splashFrame';
+import { buildStage, type Stage } from './splashStage';
 
 /**
  * Whether to ask for a rotation. Kept free of the DOM so the rule can
@@ -33,17 +33,38 @@ export function shouldAskToRotate(
 const SETTLE_FRAMES = 3;
 
 export class RotateGate {
+  private readonly stage: Stage;
   private readonly veil: HTMLDivElement;
   private readonly detach: Array<() => void> = [];
   private settling = 0;
 
   constructor(host: HTMLElement) {
-    this.veil = document.createElement('div');
+    // THE SAME SPLASH THE BOOT SCREEN SHOWED, on the same stage, with
+    // its bar full. This screen only ever appears on a phone held the
+    // tall way, which is exactly the shape that artwork is composed
+    // for, and it is already decoded — the boot screen spent the
+    // elevation download showing it. A flat void here would throw that
+    // away and make turning the phone feel like a crash.
+    //
+    // Built on `buildStage` rather than a background-image so it gets
+    // the real fit: a background cannot be stopped from cropping the
+    // bar's ends off on a tall phone, and cannot put anything BEHIND
+    // the picture to show through the cut-out.
+    this.stage = buildStage();
+    this.veil = this.stage.root;
     this.veil.setAttribute('role', 'alertdialog');
-    this.veil.innerHTML =
+    // Loading finished long before this screen appears. An empty bar
+    // here reads as a stall.
+    this.stage.meter.set(1);
+
+    const say = document.createElement('div');
+    say.className = 'rotate-say';
+    say.innerHTML =
       '<div class="rotate-mark" aria-hidden="true">▭</div>'
       + '<p class="rotate-call">Turn your device sideways</p>'
       + '<p class="rotate-why">TRADDOMIUM plays in landscape.</p>';
+    this.veil.appendChild(say);
+
     this.style();
     host.appendChild(this.veil);
 
@@ -63,6 +84,7 @@ export class RotateGate {
   dispose(): void {
     for (const off of this.detach) off();
     if (this.settling) cancelAnimationFrame(this.settling);
+    this.stage.stopFitting();
     this.veil.remove();
   }
 
@@ -76,7 +98,9 @@ export class RotateGate {
         cancelAnimationFrame(this.settling);
         this.settling = 0;
       }
-      this.veil.style.display = 'flex';
+            // Block, not flex: the picture inside is a sized box positioned
+      // by margins, and a flex parent would fight it.
+      this.veil.style.display = 'block';
       return;
     }
     if (this.veil.style.display === 'none' || this.settling) return;
@@ -112,43 +136,26 @@ export class RotateGate {
       position: 'fixed',
       inset: '0',
       display: 'none',
-      flexDirection: 'column',
-      alignItems: 'center',
-      // The message sits LOW, in the dark of the forest floor. Centred
-      // it would land squarely on the wordmark, and the art has nothing
-      // to say once you have read it twice.
-      justifyContent: 'flex-end',
-      gap: '10px',
-      textAlign: 'center',
-      padding: '32px 32px 14vh',
-      // THE PORTRAIT SPLASH BEHIND THE ASK. This screen only ever
-      // appears on a phone held the tall way, which is exactly the
-      // shape that artwork is composed for — and it is already
-      // downloaded and decoded, because the boot screen just spent the
-      // elevation download showing it. A flat dark void here would
-      // throw that away and make turning the phone feel like the game
-      // had crashed and come back.
-      // A light hand with the scrim: the artwork is already vignetted
-      // almost to black below the bar, and the 72% wash this started
-      // with turned two thirds of it into a flat void. Enough to sit
-      // text on, no more.
-      backgroundImage:
-        `linear-gradient(rgba(6, 9, 5, .18), rgba(6, 9, 5, .52)), `
-        + `url("${import.meta.env.BASE_URL}${SPLASH_PORTRAIT.file}")`,
-      backgroundSize: 'cover',
-      backgroundPosition: 'center',
-      // SHOWS THROUGH THE BAR. The artwork has the loading bar's
-      // interior cut out of it, and by the time this screen appears the
-      // island has finished loading — so the colour behind the picture
-      // reads as a full bar rather than an empty one waiting on
-      // something. A dark background here looked like a stall.
-      backgroundColor: '#ffae35',
-      color: 'rgba(255, 226, 160, .95)',
       zIndex: '50',
+      color: 'rgba(255, 226, 160, .95)',
     } satisfies Partial<CSSStyleDeclaration>);
 
     const sheet = document.createElement('style');
     sheet.textContent = `
+      /* The message sits LOW, in the dark of the forest floor. Centred
+         it would land squarely on the wordmark, and a scrim heavy
+         enough to sit text on top of the art would bury the art. */
+      .rotate-say {
+        position: absolute;
+        inset: auto 0 0 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+        text-align: center;
+        padding: 0 32px 14vh;
+        background: linear-gradient(rgba(6, 9, 5, 0), rgba(6, 9, 5, .72) 40%);
+      }
       .rotate-mark {
         font-size: 68px;
         line-height: 1;

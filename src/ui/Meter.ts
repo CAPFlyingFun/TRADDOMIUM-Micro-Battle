@@ -35,13 +35,25 @@ export interface Window {
 
 export interface MeterLook {
   /**
-   * The decorative image, with the bar's interior cut out of it.
-   *
-   * An element rather than a URL is allowed, and for the splash it is
-   * the point: the same already-decoded picture moves from the boot
-   * screen into the loading screen instead of being fetched twice.
+   * The picture. An element rather than a URL is allowed, and for the
+   * splash it is the point: the same already-decoded image moves from
+   * the boot screen into the loading screen instead of being fetched
+   * twice.
    */
   readonly frame: string | HTMLImageElement;
+  /**
+   * Whether the picture goes IN FRONT of the fill, with the bar cut out
+   * of it, or BEHIND, with the bar drawn on top.
+   *
+   * In front is the better-looking of the two — the artwork does all
+   * the decoration and hides every rounding error. Behind is the easier
+   * one to art, needs no cutting, and is the only one whose bar can be
+   * sized against the screen rather than the picture, which is what
+   * keeps it off the crop on a tall phone.
+   */
+  readonly behind?: boolean;
+  /** A rim around the bar. For a drawn one, which has no artwork rim. */
+  readonly rim?: string;
   readonly window: Window;
   /** The empty bar behind the fill. */
   readonly backing?: string;
@@ -74,6 +86,9 @@ export class Meter {
   private readonly backing: HTMLDivElement;
   private readonly clip: HTMLDivElement;
   private frame: HTMLImageElement;
+  private readonly behind: boolean;
+  /** A CSS length the bar may not exceed. See `aim`. */
+  private cap: string | null = null;
 
   /**
    * The three layers, BACK TO FRONT, in the order they are stacked.
@@ -83,7 +98,9 @@ export class Meter {
    * stale the first time it happened.
    */
   get layers(): readonly HTMLElement[] {
-    return [this.backing, this.clip, this.frame];
+    return this.behind
+      ? [this.frame, this.backing, this.clip]
+      : [this.backing, this.clip, this.frame];
   }
 
   constructor(look: MeterLook) {
@@ -114,7 +131,7 @@ export class Meter {
     } as Partial<CSSStyleDeclaration>);
     clip.appendChild(this.fill);
 
-    // FRONT — the artwork, over the top of both.
+    // The artwork, in front of both layers or behind them.
     const frame = typeof look.frame === 'string'
       ? document.createElement('img')
       : look.frame;
@@ -129,10 +146,24 @@ export class Meter {
       pointerEvents: 'none',
     } as Partial<CSSStyleDeclaration>);
 
+    if (look.behind) {
+      Object.assign(frame.style, { position: 'absolute', inset: '0' } as Partial<CSSStyleDeclaration>);
+      // A drawn bar needs its own edges: rounded, and rimmed if asked,
+      // because there is no artwork around it doing that job.
+      const round = '999px';
+      backing.style.borderRadius = round;
+      clip.style.borderRadius = round;
+      this.fill.style.borderRadius = round;
+      if (look.rim) {
+        backing.style.boxShadow = `0 0 0 1.5px ${look.rim}, 0 2px 14px rgba(0,0,0,.55)`;
+      }
+    }
+
     this.backing = backing;
     this.clip = clip;
     this.frame = frame;
-    this.root.append(backing, clip, frame);
+    this.behind = Boolean(look.behind);
+    this.root.append(...(look.behind ? [frame, backing, clip] : [backing, clip, frame]));
     this.aim(look.window);
   }
 
@@ -142,19 +173,33 @@ export class Meter {
    * Called again when the artwork is swapped — turning a phone changes
    * the picture, and the bar is somewhere else in the portrait one.
    */
-  aim(window: Window): void {
+  aim(window: Window, cap?: string): void {
     const { left, right, top, bottom } = window;
     const tall = bottom - top;
-    const bleed = tall * BLEED;
+    // A cut-out bar bleeds past the hole so no seam shows at its edge.
+    // A drawn one IS its own edge, so bleeding would just make it fat.
+    const bleed = this.behind ? 0 : tall * BLEED;
     const pc = (n: number): string => `${(n * 100).toFixed(3)}%`;
+    this.cap = cap ?? this.cap;
     for (const el of [this.backing, this.clip]) {
       Object.assign(el.style, {
         position: 'absolute',
-        left: pc(left),
         top: pc(top - bleed),
-        width: pc(right - left),
         height: pc(tall + bleed * 2),
       } as Partial<CSSStyleDeclaration>);
+      if (this.cap) {
+        // CENTRED AND CAPPED. The picture is wider than the screen when
+        // a tall phone crops it, so a bar measured in the picture's
+        // width runs off the sides — which is exactly how the first
+        // portrait bar lost its left end. Both boxes share a centre, so
+        // centring on the picture centres on the screen.
+        el.style.left = '50%';
+        el.style.transform = 'translateX(-50%)';
+        el.style.width = `min(${pc(right - left)}, ${this.cap})`;
+      } else {
+        el.style.left = pc(left);
+        el.style.width = pc(right - left);
+      }
     }
   }
 
