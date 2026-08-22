@@ -58,3 +58,63 @@ describe('the chase camera', () => {
     expect(Math.abs(orbit(look({ yaw: 0, active: false })).x)).toBeLessThan(0.5);
   });
 });
+
+describe('holding station on a moving queen', () => {
+  /**
+   * THE WIND BUG. A 4 mph wind moves her at 179 units a second —
+   * two and a half times her own top airspeed — and the old camera,
+   * lerping its world position, trailed thirty units upwind while
+   * aiming at her, which pointed the view downwind whatever the stick
+   * said. The camera must keep the same station relative to her at any
+   * carry speed, because smoothing lives in offset space now.
+   */
+  it('keeps its station behind a queen carried by wind', () => {
+    const ant = antFacingNorth();
+    const follow = new FollowCamera(2);
+    follow.snapTo(ant);
+    const rest = follow.camera.position.clone().sub(ant.position);
+
+    const input = look({ active: false });
+    for (let i = 0; i < 400; i++) {
+      ant.position.x += 179 / 60; // a 4 mph wind, at 60 fps
+      follow.update(ant, input, 1 / 60);
+    }
+    const now = follow.camera.position.clone().sub(ant.position);
+    // Same offset as at rest — no trail, however fast she is carried.
+    expect(now.distanceTo(rest)).toBeLessThan(0.05);
+  });
+
+  it('keeps the view pointed past her, not back along the drift', () => {
+    const ant = antFacingNorth();
+    const follow = new FollowCamera(2);
+    follow.snapTo(ant);
+    const input = look({ active: false });
+    for (let i = 0; i < 400; i++) {
+      ant.position.x += 179 / 60;
+      follow.update(ant, input, 1 / 60);
+    }
+    // The rest bearing puts the camera at -Z of her; carried east at
+    // any speed, it must STAY at her -Z rather than falling to her -X
+    // and staring east. The offset says which way the camera faces,
+    // since it always aims at her.
+    const offset = follow.camera.position.clone().sub(ant.position);
+    expect(offset.z).toBeLessThan(-4);
+    expect(Math.abs(offset.x)).toBeLessThan(0.5);
+  });
+
+  it('still eases a drag while she is being carried', () => {
+    const ant = antFacingNorth();
+    const follow = new FollowCamera(2);
+    follow.snapTo(ant);
+    // One frame of a hard drag: the offset must move toward the new
+    // bearing but not arrive — that smoothing is what the lerp is FOR,
+    // and holding station must not have thrown it away.
+    const before = follow.camera.position.clone().sub(ant.position);
+    follow.update(ant, look({ yaw: 1.2 }), 1 / 60);
+    const after = follow.camera.position.clone().sub(ant.position);
+    expect(after.distanceTo(before)).toBeGreaterThan(0.01);
+    for (let i = 0; i < 400; i++) follow.update(ant, look({ yaw: 1.2 }), 1 / 60);
+    const settled = follow.camera.position.clone().sub(ant.position);
+    expect(settled.distanceTo(after)).toBeGreaterThan(0.5);
+  });
+});

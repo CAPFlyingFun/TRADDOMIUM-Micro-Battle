@@ -29,6 +29,21 @@ export class FollowCamera {
 
   private readonly desired = new THREE.Vector3();
   private readonly lookTarget = new THREE.Vector3();
+  /**
+   * Where the camera sits RELATIVE TO HER, which is the thing that is
+   * smoothed. It used to lerp the camera's WORLD position instead, and
+   * an exponential follower trails a moving target by speed over rate
+   * — at the follow rate of six, a queen drifting on a 4 mph wind (179
+   * units a second at this scale) left the camera thirty units behind
+   * its station, upwind of her, aimed at her, and therefore facing
+   * wherever the wind was going no matter which way she flew. Joshua
+   * flew a full circle with the camera staring downwind the whole way.
+   * Smoothing the OFFSET keeps every soft quality the lerp was there
+   * for — eased drags, calm elevation changes — while her own motion
+   * carries the camera rigidly, however fast the air is moving her.
+   */
+  private readonly offset = new THREE.Vector3();
+  private readonly wantOffset = new THREE.Vector3();
 
   private distance: number;
 
@@ -58,7 +73,9 @@ export class FollowCamera {
   snapTo(target: THREE.Object3D, yaw = 0): void {
     const rest: LookInput = { yaw, pitch: 0, active: false };
     this.place(target, rest, this.desired);
+    this.offset.copy(this.desired).sub(target.position);
     this.camera.position.copy(this.desired);
+    this.keepAboveGround(this.camera.position);
     this.aim(target);
   }
 
@@ -66,8 +83,13 @@ export class FollowCamera {
     this.place(target, look, this.desired);
     // Snappier while the player is steering the view, softer when it is
     // just following, so a drag feels connected but walking feels calm.
+    // The smoothing applies to the OFFSET only — see its declaration —
+    // so her translation reaches the camera the same frame it happens.
     const rate = look.active ? 14 : 6;
-    this.camera.position.lerp(this.desired, 1 - Math.exp(-rate * dt));
+    this.wantOffset.copy(this.desired).sub(target.position);
+    this.offset.lerp(this.wantOffset, 1 - Math.exp(-rate * dt));
+    this.camera.position.copy(target.position).add(this.offset);
+    this.keepAboveGround(this.camera.position);
     this.aim(target);
   }
 
@@ -101,20 +123,25 @@ export class FollowCamera {
       target.position.y + Math.sin(elevation) * this.distance,
       target.position.z + Math.cos(yaw) * flat,
     );
-    // Never let the camera sink into a hillside. The margin is a body
-    // length or so, enough that a slope behind her crops the frame
-    // rather than filling it with dirt.
-    // The higher of the ground and the WATERLINE. Over the sea the
-    // ground is the seabed — far down — so clamping to it alone let the
-    // camera sink under the waves whenever she stood near the shore and
-    // the view swung out over open water.
-    //
-    // ASKED IN WORLD COORDINATES, through the named conversion. The
-    // camera lives in RENDER space — measured from the floating origin
-    // — and the heightfield only answers about the world. Handing it a
-    // rendered position asked about a spot near the middle of the
-    // island, which put the camera two kilometres up a mountain summit
-    // while she stood on a beach looking at empty sky.
+  }
+
+  /**
+   * Never let the camera sink into a hillside — or under the sea.
+   *
+   * Applied to the FINAL position, after the offset smoothing, because
+   * a clamp folded into the desired position gets averaged away by the
+   * lerp on its way through. The floor is the higher of the ground and
+   * the waterline: over the sea the ground is the seabed, far down,
+   * and clamping to it alone let the camera slip under the waves near
+   * the shore.
+   *
+   * ASKED IN WORLD COORDINATES, through the named conversion. The
+   * camera lives in render space, measured from the floating origin,
+   * and the heightfield only answers about the world — a rendered
+   * position once put the camera two kilometres up a summit while she
+   * stood on a beach.
+   */
+  private keepAboveGround(out: THREE.Vector3): void {
     const above = toWorld(local(out.x, out.z));
     const floor = Math.max(groundHeight(above.wx, above.wz), 0) + 1.6;
     if (out.y < floor) out.y = floor;

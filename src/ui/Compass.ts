@@ -39,8 +39,17 @@ const PX_PER_DEGREE = 2.6;
 const TICK_EVERY = 5;
 const MAJOR_EVERY = 15;
 
-/** How quickly the strip settles onto the camera. Seconds. */
-const EASE = 0.09;
+/**
+ * How quickly the strip settles onto the camera. Seconds.
+ *
+ * NEARLY NOTHING, on purpose. The camera's own yaw is already eased
+ * upstream, so any smoothing added here is smoothing a smooth signal —
+ * pure lag, no polish. At the original 0.09 a brisk turn left the
+ * whole strip trailing ten to eighteen degrees and sliding back into
+ * place after the thumb stopped, which read as the ticker drifting
+ * right. What remains only irons out single-frame jitter.
+ */
+const EASE = 0.02;
 
 const GOLD = 'rgba(255, 226, 160, .92)';
 const GOLD_DIM = 'rgba(255, 226, 160, .34)';
@@ -158,7 +167,9 @@ export class Compass {
     const slide = half - (this.shown + 360) * PX_PER_DEGREE;
     this.tape.style.transform = `translateX(${slide.toFixed(1)}px)`;
 
-    const degrees = Math.round(this.shown);
+    // Modulo AFTER rounding: 359.7 rounds to 360, and a compass that
+    // says "N 360" instead of "N 000" is wrong once a revolution.
+    const degrees = Math.round(this.shown) % 360;
     const words = `${cardinalOf(this.shown)} ${String(degrees).padStart(3, '0')}°`;
     if (words !== this.lastRead) {
       this.lastRead = words;
