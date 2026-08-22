@@ -987,15 +987,12 @@ export class IslandScene {
     // tier inside it already covers. They share the textures; only the
     // cut differs.
     const bands = loadBands(this.renderer);
-    // What this device can actually filter, which decides where the
-    // detail has to give way. A phone and a desktop are not the same.
-    const aniso = this.renderer.capabilities.getMaxAnisotropy();
     this.terrain = new TerrainStream(
       this.scene,
-      terrainMaterial(bands, grain, 0, aniso),
-      terrainMaterial(bands, grain, TIER_CUTS.transition, aniso),
-      terrainMaterial(bands, grain, TIER_CUTS.middle, aniso),
-      terrainMaterial(bands, grain, TIER_CUTS.backdrop, aniso),
+      terrainMaterial(bands, grain),
+      terrainMaterial(bands, grain, TIER_CUTS.transition),
+      terrainMaterial(bands, grain, TIER_CUTS.middle),
+      terrainMaterial(bands, grain, TIER_CUTS.backdrop),
     );
   }
 

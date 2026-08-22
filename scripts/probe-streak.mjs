@@ -52,7 +52,8 @@ try {
     for (const roll of rolls) {
       const page = await browser.newPage({ viewport: { width: 932, height: 430 } });
       await page.route('**://api.open-meteo.com/**', (r) => r.abort());
-      await page.goto(`${url}?spawnRoll=${roll}`, { waitUntil: 'domcontentloaded' });
+      await page.goto(`${url}?spawnRoll=${roll}${process.env.EXTRA ?? ''}`,
+        { waitUntil: 'domcontentloaded' });
       await page.waitForSelector('[data-ui="main-menu"]', { timeout: 60000 });
       await page.click('[data-ui="new-colony"]');
       await page.waitForSelector('[data-ui="island-canvas"]', { timeout: 60000 });

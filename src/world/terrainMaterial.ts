@@ -18,6 +18,7 @@
  * lookup is swapped out.
  */
 import * as THREE from 'three';
+import { GRAIN_SIZE } from './groundTexture';
 import { UNITS_PER_METRE } from './kauai';
 
 /**
@@ -75,8 +76,34 @@ export const GRAIN_TILE = 1.1;
  * to resolve, only aliasing, so the texture gives way to its own
  * average colour and the ground goes quietly smooth.
  */
-const DETAIL_FADE_FROM = 0.4;
-const DETAIL_FADE_TO = 3.0;
+/**
+ * The fade thresholds, in TEXELS PER PIXEL — and the unit is the story.
+ *
+ * Every earlier version of this fade measured the footprint in TILES
+ * per pixel and reasoned about it as though small numbers meant
+ * magnification. They did not. The band maps are 512 texels across, so
+ * 0.4 tiles per pixel — where the old fade BEGAN — is two hundred and
+ * five source texels averaged into every screen pixel, minification so
+ * deep the streaking was long established. Even the "extreme" test
+ * value of 0.05 was twenty-six texels a pixel. The whole range the
+ * fade operated over was past the point where the damage happens,
+ * which is why no amount of tuning it ever reached the smear. Joshua
+ * caught the unit error from the screenshots.
+ *
+ * In texels the scale is meaningful: at one texel per pixel the
+ * texture is shown at its native resolution; hardware filtering is
+ * comfortable for a few times that; by eight to sixteen it is
+ * averaging hundreds of texels down a grazing footprint and the
+ * high-contrast maps turn to streaks. So the fade now starts where
+ * filtering starts to strain and is done before the smear territory.
+ *
+ * Tuned from headless renders; the phone gets the final word.
+ */
+const FADE_FROM_TEXELS = 2.0;
+const FADE_TO_TEXELS = 12.0;
+
+/** Texels across one band map. All seven ship at 512. */
+const BAND_TEXELS = 512;
 
 /**
  * How much tighter the grain is tiled than the bands.
@@ -155,12 +182,6 @@ export function terrainMaterial(
   textures: Record<string, THREE.Texture>,
   grain: THREE.Texture,
   nearCut = 0,
-  /**
-   * How far this GPU's anisotropic filtering can stretch a sample.
-   * Needed because the fade has to start where the HARDWARE gives up,
-   * and that is a different place on different devices.
-   */
-  maxAnisotropy = 16,
 ): THREE.MeshStandardMaterial {
   const material = new THREE.MeshStandardMaterial({
     // The vertex colours no longer carry the biome tint — the textures
@@ -187,10 +208,16 @@ export function terrainMaterial(
       shader.uniforms[`avg_${name}`] = BAND_AVERAGE[name]
         ?? { value: new THREE.Color(0.5, 0.5, 0.5) };
     }
-    shader.uniforms.fadeFrom = { value: DETAIL_FADE_FROM };
-    shader.uniforms.fadeTo = { value: DETAIL_FADE_TO };
-    shader.uniforms.grainRatio = { value: GRAIN_RATIO };
-    shader.uniforms.maxAniso = { value: Math.max(1, maxAnisotropy) };
+    shader.uniforms.fadeFrom = { value: FADE_FROM_TEXELS };
+    shader.uniforms.fadeTo = { value: FADE_TO_TEXELS };
+    shader.uniforms.bandTexels = { value: BAND_TEXELS };
+    // The grain is also 512 texels but tiled 3.6 times tighter, so its
+    // texel footprint is that much larger at the same distance and it
+    // fades that much sooner — on the SAME texel thresholds, which is
+    // the point of working in texels: one perceptual scale for both.
+    shader.uniforms.grainTexelScale = {
+      value: GRAIN_RATIO * (GRAIN_SIZE / BAND_TEXELS),
+    };
     // WHERE THE WORLD ACTUALLY IS. Vertices reach the shader measured
     // from the floating origin, so tiling straight off them would slide
     // the whole ground texture sideways every time the origin moved —
@@ -213,7 +240,7 @@ export function terrainMaterial(
         uniform float bandTile;
         uniform float relief;
         uniform float grainTile;
-        uniform float fadeFrom, fadeTo, grainRatio, maxAniso;
+        uniform float fadeFrom, fadeTo, bandTexels, grainTexelScale;
         uniform vec3 avg_reef, avg_sand, avg_grass, avg_jungle;
         uniform vec3 avg_cliff, avg_mountain, avg_snow;
         uniform vec2 worldOffset;
@@ -254,38 +281,18 @@ export function terrainMaterial(
           + texture2D(t_snow, bandUv).rgb * wSnow;
         ground /= total;
 
-        // HOW MUCH OF THE TEXTURE THIS PIXEL IS ACTUALLY COVERING,
-        // AFTER the hardware has done what it can.
-        //
-        // The derivatives give the footprint in tile units, and a
-        // grazing pixel's footprint is enormously longer than it is
-        // wide. Anisotropic filtering exists for exactly that and
-        // handles it up to a ratio of maxAniso — sixteen, usually.
-        // PAST that ratio it cannot, and has to fall back to a mip
-        // chosen by the long axis instead of the short one: detail
-        // survives across the streak and is smeared along it. So the
-        // number that predicts streaking is not the raw footprint but
-        // what is left of it once anisotropy has been spent, which is
-        // what this computes. Measuring the raw long axis alone said
-        // "still fine" on ground that was visibly smearing.
+        // HOW MANY SOURCE TEXELS THIS PIXEL IS AVERAGING, along the
+        // long axis of its footprint — the axis anisotropic filtering
+        // strains on and the axis the streaks run along. The
+        // derivatives give the footprint in tiles; times the map's
+        // resolution it becomes texels, which is the unit the eye
+        // actually cares about: one texel a pixel is the texture at
+        // its native sharpness, hundreds is a smear whatever the
+        // hardware claims to filter.
         vec2 duvdx = dFdx(bandUv);
         vec2 duvdy = dFdy(bandUv);
-        float wide = max(length(duvdx), length(duvdy));
-        float thin = max(1e-7, min(length(duvdx), length(duvdy)));
-        // THE LONG AXIS, PLAIN. An earlier version divided this by the
-        // hardware's anisotropic limit, on the reasoning that anything
-        // within that limit is filtered properly and needs no help.
-        // Painting the fade as greyscale showed what that was really
-        // doing: black — no fade at all — across the whole of the
-        // ground that was visibly smearing. Anisotropic filtering is
-        // not the clean cutoff that reasoning assumed; it degrades well
-        // before its nominal ratio, so crediting it in full switched
-        // the fade off exactly where it was needed. The raw long axis
-        // is what predicts streaking, and the thresholds below come
-        // from measuring it on ground that was streaking rather than
-        // from an argument about what the hardware ought to manage.
-        float tilesPerPixel = wide;
-        float far = smoothstep(fadeFrom, fadeTo, tilesPerPixel);
+        float texels = max(length(duvdx), length(duvdy)) * bandTexels;
+        float far = smoothstep(fadeFrom, fadeTo, texels);
 
         // Past that, there is nothing left to resolve. Fade to the
         // colour the band actually is, so the far hillside stays the
@@ -312,7 +319,7 @@ export function terrainMaterial(
         // every distance where the bands were still fine the grain was
         // already streaking. (No backticks in here: this is inside a
         // template literal, and one of those ends the shader.)
-        float grainFar = smoothstep(fadeFrom, fadeTo, tilesPerPixel * grainRatio);
+        float grainFar = smoothstep(fadeFrom, fadeTo, texels * grainTexelScale);
         float g = texture2D(t_grain, (vGround.xz + worldOffset) / grainTile).g;
         ground *= mix(0.80 + g * 0.42, 1.0, grainFar);
 
@@ -371,10 +378,27 @@ export function loadBands(
   const loader = new THREE.TextureLoader();
   const anisotropy = renderer.capabilities.getMaxAnisotropy();
   const bands: Record<string, THREE.Texture> = {};
+  // A/B EXPERIMENT, LIVE ON THE DEVICE. `?grass=be` swaps in Beyond
+  // Extinction's 1024-texel Open Plains Grass in place of the 512
+  // grass.jpg — same shader, same tiling, same filtering, so the only
+  // variable is the source art. It exists because two questions are
+  // tangled together: the chunky look UP CLOSE is resolution, and the
+  // streaking AT RANGE is sampling, and a texture swap can only fix
+  // the first. Comparing both URLs on the phone at the same spawn
+  // separates them. Remove once the texture decision is made.
+  const grassBe = (() => {
+    try {
+      return new URLSearchParams(location.search).get('grass') === 'be';
+    } catch {
+      return false;
+    }
+  })();
+
   for (const name of BAND_FILES) {
     BAND_AVERAGE[name] ??= { value: new THREE.Color(0.5, 0.5, 0.5) };
+    const file = name === 'grass' && grassBe ? 'grass-be' : name;
     const texture = loader.load(
-      `${import.meta.env.BASE_URL}kauai-tex/${name}.jpg`,
+      `${import.meta.env.BASE_URL}kauai-tex/${file}.jpg`,
       (loaded) => measureAverage(name, loaded),
     );
     texture.wrapS = THREE.RepeatWrapping;
