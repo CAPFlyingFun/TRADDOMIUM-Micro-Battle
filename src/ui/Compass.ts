@@ -27,7 +27,7 @@
  * is deciding what deserves a marker.
  */
 import {
-  cardinalOf, easeBearing, place, rangeWords, wrap360,
+  cardinalOf, easeBearing, place, rangeWords, wrap180, wrap360,
   type CompassMarker, type PlacedMarker,
 } from './compassMath';
 import type { WorldPoint } from '../world/coords';
@@ -51,6 +51,45 @@ const MAJOR_EVERY = 15;
  */
 const EASE = 0.02;
 
+/**
+ * How far ahead the turn trend looks, in seconds.
+ *
+ * A G1000 draws six seconds of turn — far enough to be a decision and
+ * near enough to still be true. The bar reaches from the centre mark to
+ * where the heading will be if she holds this rate, so rolling out when
+ * its end touches the bearing she wants rolls out ON it.
+ */
+const TREND_SECONDS = 6;
+
+/** Turn rates below this are hand tremor, not a turn. */
+const TREND_FLOOR = 1.5;
+
+/** And the bar stops growing here, so a spin does not fill the strip. */
+const TREND_CAP = 45;
+
+/**
+ * How hard the rate is smoothed, in seconds.
+ *
+ * The derivative of an already-eased signal is noisy — differencing
+ * amplifies exactly what easing suppressed — so the RATE needs more
+ * smoothing than the heading ever did, or the bar flickers in and out
+ * of existence while she flies straight.
+ */
+const TREND_EASE = 0.28;
+
+/**
+ * How far the trend bar reaches, in degrees of tape.
+ *
+ * Zero means "not turning enough to draw" — a bar that never quite
+ * vanishes while she flies straight is worse than no bar, because then
+ * its absence stops meaning anything.
+ */
+export function trendReach(degreesPerSecond: number): number {
+  if (Math.abs(degreesPerSecond) < TREND_FLOOR) return 0;
+  const reach = degreesPerSecond * TREND_SECONDS;
+  return Math.max(-TREND_CAP, Math.min(TREND_CAP, reach));
+}
+
 /** Widest the strip is allowed to be, and the least it is worth. */
 const MAX_WIDTH = 320;
 const MIN_WIDTH = 150;
@@ -73,6 +112,9 @@ export class Compass {
   private readonly pins = new Map<string, HTMLDivElement>();
   /** What the strip is SHOWING, which chases what the camera is doing. */
   private shown = 0;
+  /** Degrees per second the tape is turning, heavily smoothed. */
+  private swing = 0;
+  private trend!: HTMLDivElement;
   private started = false;
   private lastRead = '';
   private readonly watch: ResizeObserver;
@@ -120,6 +162,26 @@ export class Compass {
     this.window.appendChild(this.tape);
 
     // The centre mark: a gold notch reading down onto the tape.
+    // THE TURN TREND, over the tape and under the centre mark: a bar
+    // growing out of the middle toward where this rate of turn is
+    // taking her. It is anchored at the centre and given a width, so
+    // it reads as reaching out rather than as a second needle.
+    this.trend = document.createElement('div');
+    Object.assign(this.trend.style, {
+      position: 'absolute',
+      left: '50%',
+      top: '3px',
+      height: '3px',
+      width: '0px',
+      borderRadius: '2px',
+      background: 'rgba(169, 242, 201, .92)',
+      boxShadow: '0 0 6px rgba(169, 242, 201, .45)',
+      transformOrigin: 'left center',
+      pointerEvents: 'none',
+      opacity: '0',
+    } as Partial<CSSStyleDeclaration>);
+    this.window.appendChild(this.trend);
+
     const mark = document.createElement('div');
     Object.assign(mark.style, {
       position: 'absolute',
@@ -223,6 +285,7 @@ export class Compass {
     bearing: number, from: WorldPoint, markers: readonly CompassMarker[],
     dt: number,
   ): void {
+    const before = this.shown;
     // Arrive pointing the right way rather than spinning up to it.
     this.shown = this.started
       ? easeBearing(this.shown, bearing, dt, EASE)
@@ -245,6 +308,42 @@ export class Compass {
     }
 
     this.drawMarkers(from, markers, half);
+    // MEASURED OFF THE TAPE ITSELF. The trend has to predict the strip
+    // it is drawn on, so its source is the strip's own movement rather
+    // than a turn rate plumbed in from somewhere that might disagree
+    // with it by a frame or by a convention.
+    this.drawTrend(wrap180(this.shown - before) / Math.max(dt, 1e-6), dt);
+  }
+
+  /**
+   * WHERE THIS TURN IS TAKING HER — the G1000's trend bar.
+   *
+   * Not a second compass and not a rate needle with its own scale: it
+   * is drawn in the tape's own units, so its far end sits exactly over
+   * the heading she will have in six seconds. The tape already says
+   * where she is pointing; this says where she is about to be, which is
+   * the one thing a heading readout cannot tell you and the reason
+   * every glass cockpit has one.
+   */
+  private drawTrend(turning: number, dt: number): void {
+    if (!this.started) return;
+    // Smoothed hard: differencing an eased signal amplifies precisely
+    // the jitter the easing removed.
+    const alpha = 1 - Math.exp(-Math.max(0, dt) / TREND_EASE);
+    this.swing += (turning - this.swing) * alpha;
+
+    const reach = trendReach(this.swing);
+    if (reach === 0) {
+      this.trend.style.opacity = '0';
+      return;
+    }
+    this.trend.style.opacity = '1';
+    const pixels = Math.abs(reach) * PX_PER_DEGREE;
+    this.trend.style.width = `${pixels.toFixed(1)}px`;
+    // Right of centre for a right turn, left for a left one — the bar
+    // grows from the middle either way, which is what `scaleX(-1)`
+    // buys against moving the anchor.
+    this.trend.style.transform = reach < 0 ? 'scaleX(-1)' : 'none';
   }
 
   /**

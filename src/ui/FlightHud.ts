@@ -1,5 +1,7 @@
 import { MAX_POWERED_SPEED } from '../ant/flight';
+import type { FlightTelemetry } from '../ant/telemetry';
 import { UNITS_PER_METRE } from '../world/kauai';
+import { wrap360 } from './compassMath';
 
 /**
  * THE INSTRUMENTS SHE FLIES ON.
@@ -18,6 +20,13 @@ import { UNITS_PER_METRE } from '../world/kauai';
  * is that ground speed and AIRSPEED stop being the same thing once
  * there is wind — so the pace readout grows a second line rather than
  * growing a tape.
+ *
+ * THE HEADING REFERENCE IS NOT HERE. It was a little ant reticle above
+ * her, and it was the wrong instrument in the wrong place: her nose is
+ * a heading, and headings belong on the heading tape. It moved there as
+ * a G1000-style turn trend, which says the thing the reticle never
+ * could — not where she is pointing, but where this rate of turn is
+ * about to put her.
  *
  * MINT, NOT GOLD. The rest of this game's interface is black and gold,
  * and so is the ground: at ant scale the world is soil and dry grass,
@@ -88,39 +97,27 @@ const TICKS = 13;
 /** The layout is drawn for this height and scaled from it. */
 const DESIGN_TALL = 430;
 
-export interface FlightReading {
-  readonly aloft: boolean;
-  /** Above the ground, in world units — centimetres. */
-  readonly height: number;
-  /** Vertical speed, cm/s. Positive is up. */
-  readonly climbing: number;
-  /** Radians. */
-  readonly roll: number;
-  readonly pitch: number;
-  /** Through the air, cm/s. */
-  readonly airspeed: number;
-  /** Over the ground, cm/s — airspeed plus whatever the wind is doing. */
-  readonly ground: number;
-  /**
-   * The wind AS SHE FEELS IT, which is not what the station reported:
-   * it is scaled by how high she is and it breathes. Null before the
-   * weather has landed.
-   */
-  readonly wind: {
-    /** Units per second, at her height. */
-    readonly speed: number;
-    /** Where it is pushing her, radians, in the same frame as her heading. */
-    readonly heading: number;
-  } | null;
-  /** Her own heading, radians, so the wind can be drawn relative to it. */
-  readonly heading: number;
-  /**
-   * Where the true horizon is, in pixels below the middle of the
-   * screen, and what one degree of it is worth. From the camera, not
-   * from her — see the note on the ladder.
-   */
+/**
+ * What the scene has already worked out on the HUD's behalf.
+ *
+ * Projection lives with the camera, not here: the scene owns three.js
+ * and the floating origin, so it converts her global position to a
+ * LOCAL one and projects that. Screen pixels arrive; no world
+ * coordinate ever reaches this file, which is exactly the rule the
+ * ground texture had to learn.
+ */
+export interface FlightView {
+  /** Pixels below the middle of the screen, from the camera. */
   readonly horizon: number;
   readonly perDegree: number;
+  /** Where her ground-relative velocity is carrying her. */
+  readonly path: { readonly x: number; readonly y: number } | null;
+  /** The predicted ground point: the look-ahead, or the terrain hit. */
+  readonly target:
+    | { readonly x: number; readonly y: number; readonly hit: boolean }
+    | null;
+  /** Her own position on screen, for the line out to the target. */
+  readonly her: { readonly x: number; readonly y: number } | null;
 }
 
 /**
@@ -154,7 +151,6 @@ function set(el: Element, attrs: Record<string, string | number>): void {
 export class FlightHud {
   private readonly root: HTMLDivElement;
   private readonly ladder: SVGElement;
-  private readonly mark: HTMLDivElement;
   private readonly tapeTicks: { line: SVGElement; text: SVGElement }[] = [];
   private readonly tapeRead: SVGElement;
   private readonly vs: HTMLSpanElement;
@@ -170,6 +166,15 @@ export class FlightHud {
   private shownVs = Number.NaN;
   private shownWind = Number.NaN;
   private shownCall = '';
+  private shownTgt = '';
+  private shownDrift = Number.NaN;
+  private readonly path: HTMLDivElement;
+  private readonly target: HTMLDivElement;
+  private readonly targetMark: SVGElement;
+  private readonly trail: SVGSVGElement;
+  private readonly trailLine: SVGElement;
+  private readonly tgt: HTMLDivElement;
+  private readonly drift: HTMLDivElement;
 
   constructor(host: HTMLElement) {
     this.root = document.createElement('div');
@@ -191,8 +196,38 @@ export class FlightHud {
     const centre = this.cluster('50%', '50%', 'translate(-50%, -50%)', 'center center');
     centre.appendChild(this.ladder);
 
-    this.mark = this.cluster('50%', '31%', 'translate(-50%, -50%)', 'center center');
-    this.mark.appendChild(this.buildQueenMark());
+    // THE FLIGHT-PATH VECTOR. Not the reticle: that is where her nose
+    // is, this is where her velocity over the ground is taking her. In
+    // still air the two sit almost on top of each other; in a crosswind
+    // this one slides off to the side, which is the picture that
+    // explains the whole wind model without a word of text.
+    this.path = document.createElement('div');
+    this.path.style.position = 'absolute';
+    this.path.style.opacity = '0';
+    this.path.appendChild(this.buildPathMark());
+    this.root.appendChild(this.path);
+
+    // Where the ground is coming up to meet her.
+    this.target = document.createElement('div');
+    this.target.style.position = 'absolute';
+    this.target.style.opacity = '0';
+    this.targetMark = this.buildTargetMark();
+    this.target.appendChild(this.targetMark);
+    this.root.appendChild(this.target);
+
+    // The path between the two, drawn under both.
+    this.trail = svg('svg') as SVGSVGElement;
+    Object.assign(this.trail.style, {
+      position: 'absolute', inset: '0', width: '100%', height: '100%',
+      opacity: '0', transition: 'opacity 200ms ease',
+    } as Partial<CSSStyleDeclaration>);
+    this.trailLine = svg('line');
+    set(this.trailLine, {
+      stroke: INK, 'stroke-width': 1.2, 'stroke-dasharray': '4 6',
+      'stroke-linecap': 'round',
+    });
+    this.trail.appendChild(this.trailLine);
+    this.root.insertBefore(this.trail, this.root.firstChild);
 
     const { box, ticks, read } = this.buildTape();
     this.tapeTicks.push(...ticks);
@@ -219,6 +254,17 @@ export class FlightHud {
     under.append(span('VS'), this.vs, span('cm/s'), this.vsArrow);
     right.appendChild(under);
 
+    // ONE compact line for what is coming: the clearance she will have
+    // at the look-ahead point, and how long until the ground arrives
+    // when it is going to.
+    this.tgt = document.createElement('div');
+    Object.assign(this.tgt.style, {
+      textAlign: 'right', marginTop: '3px',
+      font: '600 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace',
+      letterSpacing: '0.14em', color: DIM,
+    } as Partial<CSSStyleDeclaration>);
+    right.appendChild(this.tgt);
+
     this.windStrip = this.cluster('50%', null, 'translateX(-50%)', 'center bottom');
     this.windStrip.style.bottom = 'calc(16px + min(env(safe-area-inset-bottom), 14px))';
     Object.assign(this.windStrip.style, {
@@ -238,6 +284,18 @@ export class FlightHud {
     this.windStrip.append(
       span('WIND'), this.windArrow, this.windSpeed, span('m/s'), this.windCall,
     );
+
+    // DRIFT sits with the speeds, because it is the same story: how
+    // far what she is doing has come apart from what she is asking for.
+    // Hidden below a few degrees — a permanent "0°" is a number nobody
+    // has ever read.
+    this.drift = this.cluster('152px', null, '', 'left bottom');
+    this.drift.style.bottom = 'calc(70px + min(env(safe-area-inset-bottom), 14px))';
+    Object.assign(this.drift.style, {
+      font: '600 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace',
+      letterSpacing: '0.12em', color: INK, whiteSpace: 'nowrap',
+      opacity: '0', transition: 'opacity 200ms ease',
+    } as Partial<CSSStyleDeclaration>);
 
     host.appendChild(this.root);
     this.watch = new ResizeObserver(() => this.fit());
@@ -352,33 +410,6 @@ export class FlightHud {
 
   private readonly rungs: { deg: number; parts: SVGElement[]; label: SVGElement | null }[] = [];
 
-  /**
-   * HER OWN SILHOUETTE AS THE FIXED REFERENCE.
-   *
-   * A fighter's boresight is a W and a dot. Hers is an ant, which costs
-   * nothing to draw and makes the instrument belong to this game. It
-   * sits ABOVE the model rather than over it: dead centre the two
-   * silhouettes fought each other and neither read.
-   */
-  private buildQueenMark(): SVGElement {
-    const root = svg('svg');
-    set(root, {
-      width: 72, height: 40, viewBox: '0 0 72 40', fill: 'none',
-      stroke: INK, 'stroke-width': 1.9, 'stroke-linecap': 'round',
-    });
-    const draw = (tag: string, attrs: Record<string, string | number>) => {
-      const el = svg(tag);
-      set(el, attrs);
-      root.appendChild(el);
-    };
-    draw('path', { d: 'M4 15 L22 20 M68 15 L50 20' });
-    draw('path', { d: 'M30 9 L24 2 M42 9 L48 2' });
-    draw('ellipse', { cx: 36, cy: 12.5, rx: 5.2, ry: 4.4 });
-    draw('ellipse', { cx: 36, cy: 21, rx: 4.4, ry: 5 });
-    draw('ellipse', { cx: 36, cy: 31.5, rx: 6, ry: 7 });
-    return root;
-  }
-
   private buildTape(): {
     box: SVGElement;
     ticks: { line: SVGElement; text: SVGElement }[];
@@ -425,6 +456,39 @@ export class FlightHud {
     return { box: root, ticks, read };
   }
 
+  /**
+   * A circle with wings — the standard flight-path symbol, and it
+   * happens to read as an ant seen from behind, which is convenient.
+   */
+  private buildPathMark(): SVGElement {
+    const root = svg('svg');
+    set(root, {
+      width: 46, height: 22, viewBox: '0 0 46 22', fill: 'none',
+      stroke: INK, 'stroke-width': 1.8, 'stroke-linecap': 'round',
+    });
+    const ring = svg('circle');
+    set(ring, { cx: 23, cy: 11, r: 4.6 });
+    const wings = svg('path');
+    set(wings, { d: 'M18.4 11 L6 11 M27.6 11 L40 11 M23 6.4 L23 1.5' });
+    root.append(ring, wings);
+    return root;
+  }
+
+  /** Where the ground is going to be, if she carries on like this. */
+  private buildTargetMark(): SVGElement {
+    const root = svg('svg');
+    set(root, {
+      width: 30, height: 30, viewBox: '0 0 30 30', fill: 'none',
+      stroke: INK, 'stroke-width': 1.7, 'stroke-linecap': 'round',
+    });
+    const ring = svg('circle');
+    set(ring, { cx: 15, cy: 15, r: 7.5, 'stroke-dasharray': '3.6 3.2' });
+    const cross = svg('path');
+    set(cross, { d: 'M15 3.5 L15 8 M15 22 L15 26.5 M3.5 15 L8 15 M22 15 L26.5 15' });
+    root.append(ring, cross);
+    return root;
+  }
+
   private buildWindArrow(): SVGElement {
     const root = svg('svg');
     set(root, { width: 22, height: 22, viewBox: '0 0 22 22', fill: 'none' });
@@ -437,26 +501,35 @@ export class FlightHud {
     return root;
   }
 
-  /** Put the instruments where the reading says. */
-  show(now: FlightReading): void {
-    if (now.aloft !== this.up) {
-      this.up = now.aloft;
-      this.root.style.opacity = now.aloft ? '1' : '0';
+  /** Put the instruments where the telemetry says. */
+  show(now: FlightTelemetry, aloft: boolean, view: FlightView): void {
+    if (aloft !== this.up) {
+      this.up = aloft;
+      this.root.style.opacity = aloft ? '1' : '0';
     }
-    if (!now.aloft) return;
+    if (!aloft) return;
 
     // The horizon goes where the horizon is; SHE banks, so the reticle
     // banks. The camera never does.
-    this.hangLadder(LADDER_H / 2 + now.horizon, now.perDegree);
+    this.hangLadder(LADDER_H / 2 + view.horizon, view.perDegree);
     this.ladder.style.opacity =
-      ladderFade(now.horizon, window.innerHeight / 2).toFixed(2);
-    this.mark.dataset.roll = `rotate(${((-now.roll * 180) / Math.PI).toFixed(2)}deg)`;
-    this.fitOne(this.mark);
+      ladderFade(view.horizon, window.innerHeight / 2).toFixed(2);
 
-    const alt = Math.max(0, Math.round(now.height));
+    // WHERE SHE IS ACTUALLY GOING, which is not where she is pointing.
+    // Projected from her real ground-relative velocity, so a crosswind
+    // slides it off her nose and a descent drops it below the horizon
+    // — the one marker that tells her the wind is winning.
+    this.place(this.path, view.path);
+    this.place(this.target, view.target);
+    if (view.target) {
+      this.targetMark.setAttribute('stroke', view.target.hit ? WARN : INK);
+    }
+    this.drawTrail(view.her, view.target);
+
+    const alt = Math.max(0, Math.round(now.shownAgl));
     if (alt !== this.shownAlt) {
       this.shownAlt = alt;
-      this.tapeRead.textContent = String(alt);
+      this.tapeRead.textContent = readHeight(alt);
       const from = Math.floor((alt - TAPE_SPAN) / 100) * 100;
       for (let i = 0; i < TICKS; i++) {
         const cm = from + i * 100;
@@ -469,7 +542,7 @@ export class FlightHud {
         text.setAttribute('opacity', label ? '1' : '0');
         if (label) {
           set(text, { y: (y + 3.5).toFixed(1) });
-          text.textContent = String(cm);
+          text.textContent = readHeight(cm);
         }
       }
     }
@@ -481,20 +554,51 @@ export class FlightHud {
       this.vsArrow.textContent = climb > 0.15 ? '↑' : climb < -0.15 ? '↓' : '';
     }
 
-    this.windStrip.style.opacity = now.wind ? '1' : '0';
-    if (!now.wind) return;
+    // WHAT SHE IS ABOUT TO HAVE UNDER HER, which is the number raw
+    // altitude cannot give: level flight toward a rising ridge reads as
+    // a steady altitude and a shrinking clearance.
+    const target = Math.round(now.shownTarget);
+    const hurry = now.shownImpact;
+    const line = hurry === null
+      ? `TGT ${readHeight(Math.max(0, target))}`
+      : `TGT ${readHeight(Math.max(0, target))} · ${hurry.toFixed(1)}s`;
+    if (line !== this.shownTgt) {
+      this.shownTgt = line;
+      this.tgt.textContent = line;
+      this.tgt.style.color = hurry !== null && hurry < 3 ? WARN : DIM;
+    }
+
+    // DRIFT, only when there is any worth reporting. A permanent
+    // "0°" is a number that has never once been read.
+    const drift = Math.round(now.drift);
+    if (drift !== this.shownDrift) {
+      this.shownDrift = drift;
+      const show = Math.abs(drift) >= 3;
+      this.drift.style.opacity = show ? '1' : '0';
+      this.drift.textContent = show
+        ? `${drift < 0 ? '←' : '→'} ${Math.abs(drift)}°  TRK ${
+          String(Math.round(wrap360(now.track))).padStart(3, '0')}°`
+        : '';
+    }
+
+    this.windStrip.style.opacity = now.wind.speed > 0.005 ? '1' : '0';
     // Where the wind is pushing her, RELATIVE TO HER NOSE. Screen up is
     // the way she is pointing, so an arrow pointing up is a tailwind and
     // one pointing down is the wind she is fighting.
-    const relative = ((now.wind.heading - now.heading) * 180) / Math.PI;
-    set(this.windArrow, { style: `transform: rotate(${(relative + 180).toFixed(1)}deg)` });
+    set(this.windArrow, {
+      style: `transform: rotate(${wrap360(now.wind.bearing - now.heading).toFixed(1)}deg)`,
+    });
 
     const felt = Math.round((now.wind.speed / UNITS_PER_METRE) * 10) / 10;
     if (felt !== this.shownWind) {
       this.shownWind = felt;
       this.windSpeed.textContent = felt.toFixed(1);
     }
-    const along = Math.cos(now.wind.heading - now.heading) * now.wind.speed;
+    // How much of it is straight back at her: a crosswind she can
+    // crab into, a headwind she may simply not beat.
+    const along = Math.cos(
+      ((now.wind.bearing - now.heading) * Math.PI) / 180,
+    ) * now.wind.speed;
     const call = windCall(now.wind.speed, along) ?? '';
     if (call !== this.shownCall) {
       this.shownCall = call;
@@ -502,10 +606,49 @@ export class FlightHud {
     }
   }
 
+  private place(el: HTMLElement, at: { x: number; y: number } | null): void {
+    el.style.opacity = at ? '1' : '0';
+    if (!at) return;
+    el.style.transform =
+      `translate(${at.x.toFixed(1)}px, ${at.y.toFixed(1)}px) translate(-50%, -50%)`;
+  }
+
+  /**
+   * A thin line from under her out to where she is headed.
+   *
+   * A navigation aid and not a laser: faint, and gone the moment there
+   * is nothing to point at.
+   */
+  private drawTrail(
+    her: { x: number; y: number } | null,
+    target: { x: number; y: number } | null,
+  ): void {
+    const on = Boolean(her && target);
+    this.trail.style.opacity = on ? '0.5' : '0';
+    if (!her || !target) return;
+    set(this.trailLine, { x1: her.x, y1: her.y, x2: target.x, y2: target.y });
+  }
+
   dispose(): void {
     this.watch.disconnect();
     this.root.remove();
   }
+}
+
+/**
+ * A height a person can read.
+ *
+ * Centimetres while she is close enough for them to mean something,
+ * metres once they stop: "1,240 cm" is a number, "12.4 m" is a height.
+ */
+export function readHeight(cm: number): string {
+  const size = Math.abs(cm);
+  if (size < 100) return `${Math.round(cm)} cm`;
+  // A tenth of a metre stays useful a long way up — the brief's own
+  // example is 12.7 m — and only stops being a distinction she can act
+  // on when she is high enough that the whole number is the news.
+  if (size < 10_000) return `${(cm / 100).toFixed(1)} m`;
+  return `${Math.round(cm / 100)} m`;
 }
 
 function span(text: string): HTMLSpanElement {

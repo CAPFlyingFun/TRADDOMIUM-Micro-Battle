@@ -1,7 +1,7 @@
 {
   "name": "traddomium-micro-battle",
   "private": true,
-  "version": "0.39.0",
+  "version": "0.40.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -16,6 +16,7 @@
     "probe:reach": "node scripts/probe-reach.mjs",
     "probe:viewport": "node scripts/probe-viewport.mjs",
     "probe:loading": "node scripts/probe-loading.mjs",
+    "probe:telemetry": "node scripts/probe-telemetry.mjs",
     "plates": "node scripts/plates.mjs",
     "hud:draft": "node scripts/hudDraft.mjs",
     "probe:streak": "node scripts/probe-streak.mjs",

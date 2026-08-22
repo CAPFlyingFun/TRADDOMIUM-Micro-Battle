@@ -29,9 +29,14 @@ import { liveStat } from '../ant/castes';
 import { ActionPad, type Action } from '../input/ActionPad';
 import { DebugDie } from '../ui/DebugDie';
 import { WeatherChip } from '../ui/WeatherChip';
-import { FlightHud } from '../ui/FlightHud';
+import { FlightHud, type FlightView } from '../ui/FlightHud';
+import {
+  Eased, LOOK_AHEAD, driftOf, predict, terrainIntercept, trackOf,
+  type FlightTelemetry,
+} from '../ant/telemetry';
+import { bearingFromHeading, bearingOf } from '../ui/compassMath';
 import { Compass } from '../ui/Compass';
-import { bearingOf, type CompassMarker } from '../ui/compassMath';
+import { type CompassMarker } from '../ui/compassMath';
 import { AUTO_AIRSPEED, Flight, setFlightScale } from '../ant/flight';
 import { Grace } from '../ant/grace';
 import {
@@ -97,6 +102,15 @@ export class IslandScene {
   private readonly weatherChip: WeatherChip;
   /** Altitude, vertical speed and the wind — flight only. */
   private readonly flightHud: FlightHud;
+  /**
+   * Her track, held through the moment a headwind cancels her exactly.
+   * A zero velocity has no direction; the last real one stands.
+   */
+  private heldTrack = 0;
+  /** The HUD's own numbers, eased. The physics above is never touched. */
+  private readonly easedAgl = new Eased();
+  private readonly easedTarget = new Eased();
+  private readonly easedImpact = new Eased();
   private readonly compass: Compass;
   /**
    * What the compass points at. GLOBAL positions, recomputed into
@@ -456,6 +470,12 @@ export class IslandScene {
         return found;
       },
       setWings: (on: boolean) => this.setWings(on),
+      // The whole flight picture as the HUD received it, so a probe can
+      // check the WIRING and not just the arithmetic — the unit tests
+      // cannot tell whether the scene handed the HUD airspeed where it
+      // meant ground speed, which is a mistake this code has already
+      // made once.
+      telemetry: () => this.lastFlight,
       // HOW FAR THE GROUND DETAIL ACTUALLY REACHES, which is a
       // question no screenshot answers and every fade tuning needs.
       // Walks the centre column, unprojects each row onto the ground
@@ -728,42 +748,18 @@ export class IslandScene {
       this.reask = true;
     }
 
+    const telemetry = this.readFlight(dt);
+    this.lastFlight = telemetry;
     this.paceUI.show(
       this.pace, wants, this.stamina.spent,
-      this.ant.pace, this.auto.active, this.auto.way,
-      this.flight.aloft ? this.flight.airspeed : null,
+      // Over the GROUND. On foot that is her pace; in the air it is the
+      // vector sum with the wind, which is a different number and the
+      // one the second line exists to contrast with.
+      this.flight.aloft ? Math.hypot(telemetry.ground.x, telemetry.ground.z) : this.ant.pace,
+      this.auto.active, this.auto.way,
+      this.flight.aloft ? telemetry.airspeed : null,
     );
-    // THE WIND AS SHE FEELS IT, not as the station reported it: the
-    // same vector the flight model is actually adding to her, height
-    // profile and gusts and all, so the arrow agrees with what is
-    // happening to her rather than with a number from ten metres up.
-    const felt = this.windOnHer();
-    // WHERE THE HORIZON REALLY IS. The camera hangs behind and above
-    // her and looks down, so the horizon is nowhere near the middle of
-    // the screen and a ladder drawn there would be decoration. Straight
-    // out of the projection the renderer is already using: how far the
-    // eye is tilted, and what a degree of it is worth in pixels.
-    const eye = new THREE.Vector3();
-    this.follow.camera.getWorldDirection(eye);
-    const tall = this.renderer.domElement.clientHeight;
-    const halfFov = (this.follow.camera.fov * Math.PI) / 360;
-    const perRadian = tall / 2 / Math.tan(halfFov);
-    const elevation = Math.asin(Math.max(-1, Math.min(1, eye.y)));
-    this.flightHud.show({
-      horizon: Math.tan(elevation) * perRadian,
-      perDegree: (perRadian * Math.PI) / 180,
-      aloft: this.flight.aloft,
-      height: this.flight.height,
-      climbing: this.flight.climbing,
-      roll: this.flight.roll,
-      pitch: this.flight.pitch,
-      airspeed: this.flight.airspeed,
-      ground: this.ant.pace,
-      heading: this.flight.heading,
-      wind: felt
-        ? { speed: Math.hypot(felt.x, felt.z), heading: Math.atan2(felt.x, felt.z) }
-        : null,
-    });
+    this.flightHud.show(telemetry, this.flight.aloft, this.seeFlight(telemetry));
     // The RATE goes with the reserve, so the readout can say how long
     // what she is doing right now can go on rather than how much
     // sprinting the bar would be worth.
@@ -1063,6 +1059,146 @@ export class IslandScene {
    * the dial exists at all, which is that the real wind on this island
    * is several times what she can fly against.
    */
+  /**
+   * THE TELEMETRY, SEEN THROUGH THIS CAMERA.
+   *
+   * The one place flight numbers become screen pixels, and the one
+   * place the floating origin matters to them. Everything the
+   * prediction computed is in the island's real million-unit
+   * coordinates; every one of them is converted to a LOCAL position
+   * before it goes anywhere near a projection matrix. Rebuilding big
+   * global numbers inside a float32 pipeline is what tore the ground
+   * texture apart, and a marker would fare no better.
+   */
+  private seeFlight(now: FlightTelemetry): FlightView {
+    const camera = this.follow.camera;
+    const wide = this.renderer.domElement.clientWidth;
+    const tall = this.renderer.domElement.clientHeight;
+
+    // Where the true horizon falls. The camera hangs behind and above
+    // her looking DOWN, so it is nowhere near the middle of the screen
+    // and a ladder drawn there would be decoration.
+    camera.getWorldDirection(this.eye);
+    const perRadian = tall / 2 / Math.tan((camera.fov * Math.PI) / 360);
+    const elevation = Math.asin(Math.max(-1, Math.min(1, this.eye.y)));
+
+    /** A LOCAL point to screen pixels, or null if it is behind us. */
+    const onScreen = (
+      point: THREE.Vector3,
+    ): { x: number; y: number } | null => {
+      const seen = point.clone().project(camera);
+      if (seen.z > 1) return null;
+      return { x: ((seen.x + 1) / 2) * wide, y: ((1 - seen.y) / 2) * tall };
+    };
+
+    const at = toLocal(this.ant.where);
+    const herY = now.altitude;
+    const her = new THREE.Vector3(at.lx, herY, at.lz);
+
+    // THE FLIGHT-PATH VECTOR: her real three-dimensional velocity over
+    // the ground, projected as a direction. Below a crawl the direction
+    // of a near-zero vector is noise, so it is simply not drawn.
+    let path: { x: number; y: number } | null = null;
+    const rate = Math.hypot(now.ground.x, now.ground.z, now.climbing);
+    if (now.groundSpeed > 2 && rate > 1e-6) {
+      const REACH = 400;
+      path = onScreen(new THREE.Vector3(
+        at.lx + (now.ground.x / rate) * REACH,
+        herY + (now.climbing / rate) * REACH,
+        at.lz + (now.ground.z / rate) * REACH,
+      ));
+    }
+
+    // The ground point: where the terrain gets in the way if it does,
+    // otherwise the plain two-second look-ahead.
+    const aim = now.impact ?? now.soon;
+    const seat = toLocal(world(aim.wx, aim.wz));
+    const spot = onScreen(new THREE.Vector3(seat.lx, aim.terrain, seat.lz));
+
+    return {
+      horizon: Math.tan(elevation) * perRadian,
+      perDegree: (perRadian * Math.PI) / 180,
+      path,
+      target: spot && now.groundSpeed > 2
+        ? { ...spot, hit: now.impact !== null }
+        : null,
+      her: onScreen(her),
+    };
+  }
+
+  private readonly eye = new THREE.Vector3();
+  /** The last reading, for the debug handle and the probes. */
+  private lastFlight: FlightTelemetry | null = null;
+
+  /**
+   * EVERY FLIGHT NUMBER, WORKED OUT ONCE.
+   *
+   * The one place physics becomes instrumentation. Nothing downstream
+   * recomputes any of it — an altimeter and a flight-path marker that
+   * disagree about her sink rate are worse than either alone, and the
+   * only way they can disagree is if they each did the arithmetic.
+   *
+   * GLOBAL COORDINATES HERE, deliberately: the heightfield is indexed
+   * by the island's real million-unit coordinates and doing the
+   * prediction in float64 on the CPU costs nothing. Only the drawing
+   * goes through the floating origin — which is the rule the ground
+   * texture had to learn the hard way.
+   */
+  private readFlight(dt: number): FlightTelemetry {
+    const here = this.ant.where;
+    const terrain = groundHeight(here.wx, here.wz);
+    const agl = this.flight.height;
+    const altitude = terrain + agl;
+    // MEASURED, not reconstructed: her actual displacement over the
+    // island, which already contains her airspeed, the wind, and
+    // anything the movement pipeline grows later.
+    const ground = this.ant.overGround;
+    this.heldTrack = trackOf(ground, this.heldTrack);
+
+    const from = { wx: here.wx, wz: here.wz, altitude };
+    const climbing = this.flight.climbing;
+    const sample = (wx: number, wz: number): number => groundHeight(wx, wz);
+
+    // THE WIND SHE IS IN, not the one the station reported: the same
+    // vector the flight model is adding to her, height profile and
+    // gusts and all. At twenty centimetres up that is a fraction of the
+    // ten-metre figure, and describing the ten-metre figure as her
+    // drift input would be describing air she is not in.
+    const felt = this.windOnHer();
+
+    const soon = predict(from, ground, climbing, LOOK_AHEAD, sample);
+    // Only worth walking the path while she is actually flying it.
+    const impact = this.flight.aloft
+      ? terrainIntercept(from, ground, climbing, sample)
+      : null;
+    if (!impact) this.easedImpact.set(Number.NaN);
+
+    return {
+      airspeed: this.flight.airspeed,
+      groundSpeed: Math.hypot(ground.x, ground.z),
+      heading: bearingFromHeading(this.flight.heading),
+      track: this.heldTrack,
+      drift: driftOf(this.heldTrack, this.flight.heading),
+      climbing,
+      agl,
+      altitude,
+      ground,
+      wind: {
+        speed: felt ? Math.hypot(felt.x, felt.z) : 0,
+        bearing: felt ? bearingOf(felt.x, felt.z) : 0,
+      },
+      soon,
+      impact,
+      // SMOOTHED FOR THE EYE ONLY. Terrain sampled along a moving path
+      // is genuinely spiky — a metre sideways can be a different
+      // hillside — and every one of those reported honestly is
+      // unreadable. Nothing above this line is eased.
+      shownAgl: this.easedAgl.push(agl, dt),
+      shownTarget: this.easedTarget.push(soon.agl, dt),
+      shownImpact: impact ? this.easedImpact.push(impact.after, dt) : null,
+    };
+  }
+
   private windOnHer(): { x: number; z: number } | null {
     const sky = this.nowWeather;
     if (!sky) return null;

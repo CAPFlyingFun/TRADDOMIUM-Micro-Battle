@@ -142,6 +142,11 @@ export class PlayerAnt {
     this.wish = { x: 0, y: 0 };
     this.velocity = { x: 0, y: 0 };
     this.at = { x, z };
+    // A SPAWN IS NOT A JOURNEY. Without this the next frame differences
+    // her new position against wherever she was last standing — half an
+    // island away — and reports it as speed.
+    this.wasAt = null;
+    this.travelled = { x: 0, z: 0 };
     const seat = toLocal(world(x, z));
     this.root.position.set(seat.lx, groundHeight(x, z), seat.lz);
     this.root.rotation.set(0, heading, 0);
@@ -157,7 +162,8 @@ export class PlayerAnt {
    * a visible drop, a moment inside a hill, or a lurch across the map.
    */
   reground(): void {
-    this.settle(0, 1);
+    // Not a frame of movement — the island moved, not her.
+    this.settle(0, 1, false);
   }
 
   /**
@@ -323,9 +329,36 @@ export class PlayerAnt {
     this.settle(above, dt);
   }
 
+  /**
+   * HER ACTUAL VELOCITY OVER THE ISLAND, measured where she moves.
+   *
+   * Not `pace`, which is the magnitude of her DRIVE — what the wings
+   * are doing against the air — and therefore identical to her airspeed
+   * in flight however hard the wind is blowing her sideways. The HUD
+   * asked `pace` for ground speed and got airspeed back, printing the
+   * same number twice under two labels.
+   *
+   * Differenced from her global position at the one point every path
+   * through this class ends at, so it is right by construction: walk,
+   * fly, wind, anything added later. World units per second.
+   */
+  get overGround(): { readonly x: number; readonly z: number } {
+    return this.travelled;
+  }
+
+  private travelled = { x: 0, z: 0 };
+  private wasAt: { x: number; z: number } | null = null;
+
   /** Put her on the ground — or `above` it — facing her heading. */
-  private settle(above: number, dt: number): void {
+  private settle(above: number, dt: number, moved = true): void {
     const { x, z } = this.at;
+    if (moved && this.wasAt && dt > 1e-6) {
+      this.travelled = {
+        x: (x - this.wasAt.x) / dt,
+        z: (z - this.wasAt.z) / dt,
+      };
+    }
+    this.wasAt = { x, z };
     // WORLD in, LOCAL out, and the conversion named at the one place
     // it happens: everything the GPU sees is measured from the floating
     // origin rather than from the island's corner.
