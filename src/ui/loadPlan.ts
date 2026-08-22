@@ -93,6 +93,13 @@ interface Job {
  * The first fraction of a second of a download is all handshake and no
  * throughput, and an estimate taken there says four minutes and then
  * corrects itself to three seconds, which is worse than saying nothing.
+ *
+ * Measured from the FIRST BYTE, not from when the plan was made. The
+ * two used to be the same moment and are not any more: the loading
+ * screen now waits for its own picture to decode before the island
+ * starts arriving, so a plan can sit for a couple of seconds with
+ * nothing moving. Counting that as slow throughput made the estimate
+ * jump thirty seconds the wrong way before settling.
  */
 const WARMUP_SECONDS = 0.4;
 
@@ -134,13 +141,13 @@ export interface LoadState {
 export class LoadPlan {
   private readonly jobs: Job[] = [];
   private readonly now: () => number;
-  private started: number;
   private readonly samples: { at: number; bytes: number }[] = [];
+  /** When the download actually began. Zero until it has. */
+  private firstByteAt = 0;
 
   /** @param now milliseconds, injectable so the tests are not timed */
   constructor(now: () => number = () => performance.now()) {
     this.now = now;
-    this.started = now();
   }
 
   /**
@@ -233,6 +240,11 @@ export class LoadPlan {
    */
   private estimate(bytes: number, total: number): number | null {
     const at = this.now();
+    // A download that has not started has no rate, and idling is not
+    // slowness. Nothing is recorded until the first byte lands.
+    if (bytes <= 0) return null;
+    if (this.firstByteAt === 0) this.firstByteAt = at;
+
     const newest = this.samples[this.samples.length - 1];
     // Idempotent within a sample interval, so reading the plan twice in
     // one frame cannot disturb the measurement it is reading.
@@ -243,7 +255,7 @@ export class LoadPlan {
       }
     }
 
-    const elapsed = (at - this.started) / 1000;
+    const elapsed = (at - this.firstByteAt) / 1000;
     if (elapsed < WARMUP_SECONDS || bytes < total * WARMUP_SHARE) return null;
 
     const first = this.samples[0];

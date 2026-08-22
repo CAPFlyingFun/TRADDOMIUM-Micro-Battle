@@ -52,9 +52,18 @@ export class GameFlow {
     this.menuSettings = new SettingsPanel(this.host);
   }
 
+  /**
+   * Longest the island will wait for its own loading screen to appear.
+   *
+   * Generous, because the wait is normally a frame or two and the only
+   * thing that makes it long is a cold cache on a slow connection —
+   * exactly when the screen is most worth having.
+   */
+  private static readonly REVEAL_LIMIT = 4000;
+
   toMap(): void {
     this.clear();
-    this.map = new SpawnMap(this.host, (chosen) => this.spawn(chosen));
+    this.map = new SpawnMap(this.host, (chosen) => { void this.spawn(chosen); });
   }
 
   /**
@@ -64,7 +73,7 @@ export class GameFlow {
    * candidate, hand it to the scene, and let the scene seat the origin
    * and cut terrain around it. Nothing local survives this call.
    */
-  spawn(chosen: Chosen): void {
+  async spawn(chosen: Chosen): Promise<void> {
     this.lastStart = chosen;
     this.clear();
 
@@ -83,6 +92,23 @@ export class GameFlow {
     const screen = new LoadingScreen(this.host, chosen.region.name);
     this.loading = screen;
     screen.follow(() => plan.read());
+
+    // WAIT FOR THE SCREEN TO ACTUALLY BE ON SCREEN. Building the island
+    // is a second or more of blocked main thread — terrain cut, context
+    // made, shaders compiled — and it used to run in the same task that
+    // put the veil up, so the browser had no chance to paint the veil
+    // until all of it was done. What arrived first was whatever needed
+    // no decoding: the bar and the captions, with the forest behind
+    // them a second or two later.
+    //
+    // Capped, because a picture that never decodes must not mean a game
+    // that never starts.
+    await Promise.race([
+      screen.shown,
+      new Promise((go) => setTimeout(go, GameFlow.REVEAL_LIMIT)),
+    ]);
+    // Sent back to the map while that was happening.
+    if (this.loading !== screen) return;
 
     const scene = new IslandScene(
       this.host,

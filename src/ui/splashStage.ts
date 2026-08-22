@@ -79,16 +79,8 @@ export function keepSplashArt(cut: SplashCut, img: HTMLImageElement): void {
   if (!kept.has(cut.file)) kept.set(cut.file, img);
 }
 
-function artFor(cut: SplashCut): HTMLImageElement {
-  const had = kept.get(cut.file);
-  // Verified, not trusted: the boot screen's copy lives inside a
-  // `<picture>` with an orientation query, so turning the phone while
-  // it is still there swaps what it is showing out from under the key
-  // it was filed by.
-  if (had && (had.currentSrc || had.src).endsWith(cut.file)) return had;
-  const img = new Image();
-  img.src = `${import.meta.env.BASE_URL}${cut.file}`;
-  img.alt = 'TRADDOMIUM — Micro Battle!';
+/** Style an image the way every stage needs it. */
+function dressed(img: HTMLImageElement): HTMLImageElement {
   Object.assign(img.style, {
     position: 'relative',
     display: 'block',
@@ -97,6 +89,24 @@ function artFor(cut: SplashCut): HTMLImageElement {
     objectFit: 'fill',
     pointerEvents: 'none',
   } as Partial<CSSStyleDeclaration>);
+  return img;
+}
+
+function freshArt(cut: SplashCut): HTMLImageElement {
+  const img = new Image();
+  img.src = `${import.meta.env.BASE_URL}${cut.file}`;
+  img.alt = 'TRADDOMIUM — Micro Battle!';
+  return dressed(img);
+}
+
+function artFor(cut: SplashCut): HTMLImageElement {
+  const had = kept.get(cut.file);
+  // Verified, not trusted: the boot screen's copy lives inside a
+  // `<picture>` with an orientation query, so turning the phone while
+  // it is still there swaps what it is showing out from under the key
+  // it was filed by.
+  if (had && (had.currentSrc || had.src).endsWith(cut.file)) return dressed(had);
+  const img = freshArt(cut);
   kept.set(cut.file, img);
   return img;
 }
@@ -104,6 +114,17 @@ function artFor(cut: SplashCut): HTMLImageElement {
 export interface Stage {
   readonly root: HTMLDivElement;
   readonly meter: Meter;
+  /**
+   * Resolves when the picture has PIXELS, not merely bytes.
+   *
+   * `decode()` rather than `load`: an image that has finished
+   * downloading still has to be turned into something paintable, and
+   * that work queues behind whatever else the main thread is doing. At
+   * spawn the main thread is cutting a landscape, so it loses — which
+   * is how the bar and the captions arrived a second or two before the
+   * forest behind them.
+   */
+  readonly whenPainted: Promise<void>;
   /** A caption above the bar, clear of "MICRO BATTLE!". */
   readonly above: HTMLDivElement;
   /** A caption below the bar, in the art's open forest floor. */
@@ -111,7 +132,7 @@ export interface Stage {
   readonly stopFitting: () => void;
 }
 
-export function buildStage(): Stage {
+export function buildStage(opts: { fresh?: boolean } = {}): Stage {
   const root = document.createElement('div');
   Object.assign(root.style, {
     position: 'absolute',
@@ -123,8 +144,15 @@ export function buildStage(): Stage {
   } as Partial<CSSStyleDeclaration>);
 
   let cut = splashFor(window.innerWidth, window.innerHeight);
+  // FRESH means do not take the shared copy. A long-lived hidden screen
+  // — the rotate gate — would otherwise hold it inside a `display:none`
+  // subtree for the whole session, where a browser is entitled to throw
+  // the decoded pixels away, and hand it back needing a fresh decode at
+  // the exact moment the main thread is busiest. The bytes are cached
+  // either way, so a second element costs a decode and no network.
+  const art = opts.fresh ? freshArt(cut) : artFor(cut);
   const meter = new Meter({
-    frame: artFor(cut),
+    frame: art,
     window: cut,
     behind: cut.kind === 'drawn',
     rim: RIM,
@@ -207,5 +235,10 @@ export function buildStage(): Stage {
     };
   });
 
-  return { root, meter, above, below, stopFitting };
+  const whenPainted = (async () => {
+    // A picture that will not decode must not hold the screen shut.
+    await meter.worn.decode().catch(() => {});
+  })();
+
+  return { root, meter, above, below, stopFitting, whenPainted };
 }

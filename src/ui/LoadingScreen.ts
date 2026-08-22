@@ -1,5 +1,5 @@
 import { readableBytes, readableWait, type LoadState } from './loadPlan';
-import { buildStage, GOLD, type Stage } from './splashStage';
+import { buildStage, GOLD, GOLD_DIM, type Stage } from './splashStage';
 
 /**
  * THE WAY IN.
@@ -36,14 +36,28 @@ const FADE_MS = 800;
 
 export class LoadingScreen {
   private readonly stage: Stage;
+  private readonly standby: HTMLDivElement;
+  /**
+   * Resolves once the screen is really on screen — picture decoded,
+   * everything faded up, and a frame painted with it.
+   */
+  readonly shown: Promise<void>;
   private readonly step: HTMLSpanElement;
   private readonly numbers: HTMLSpanElement;
-  private shown = 0;
+  /** The bar's eased position, which trails the real fraction. */
+  private eased = 0;
   private raf = 0;
   private gone = false;
 
   constructor(host: HTMLElement, place: string) {
     this.stage = buildStage();
+    // EVERYTHING ARRIVES TOGETHER. The picture needs a decode and the
+    // bar and captions do not, so left to themselves they turn up
+    // seconds apart and the screen looks half-built. It is held at
+    // nothing until the picture is ready, and then the whole thing
+    // fades up as one.
+    this.stage.meter.root.style.opacity = '0';
+    this.stage.meter.root.style.transition = 'opacity 220ms ease';
     this.stage.root.dataset.ui = 'loading';
     this.stage.root.style.zIndex = '60';
     this.stage.root.style.opacity = '1';
@@ -64,7 +78,39 @@ export class LoadingScreen {
     this.numbers.style.color = GOLD;
     this.stage.below.append(this.step, this.numbers);
 
+    // Something to look at in the meanwhile. It is usually a fraction
+    // of a second; on a cold cache over a phone connection it is not,
+    // and a black rectangle with nothing on it reads as a crash.
+    this.standby = document.createElement('div');
+    this.standby.textContent = 'PREPARING THE ISLAND…';
+    Object.assign(this.standby.style, {
+      position: 'absolute',
+      inset: '0',
+      display: 'grid',
+      placeItems: 'center',
+      font: '600 clamp(10px, 1.6vmin, 15px)/1 ui-monospace, SFMono-Regular, Menlo, monospace',
+      letterSpacing: '0.28em',
+      textIndent: '0.28em',
+      color: GOLD_DIM,
+      transition: 'opacity 220ms ease',
+      pointerEvents: 'none',
+    } as Partial<CSSStyleDeclaration>);
+    this.stage.root.appendChild(this.standby);
+
     host.appendChild(this.stage.root);
+
+    this.shown = this.stage.whenPainted.then(() => {
+      if (this.gone) return;
+      this.stage.meter.root.style.opacity = '1';
+      this.standby.style.opacity = '0';
+      // Two frames: one for the styles to land, one for the browser to
+      // actually paint them. Whoever is waiting on this is about to
+      // block the main thread for a second, so the paint has to have
+      // happened before they start.
+      return new Promise<void>((painted) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => painted()));
+      });
+    });
   }
 
   /**
@@ -77,9 +123,9 @@ export class LoadingScreen {
    */
   update(state: LoadState): void {
     if (this.gone) return;
-    this.shown += (state.fraction - this.shown) * 0.22;
-    if (state.complete) this.shown = state.fraction;
-    this.stage.meter.set(this.shown);
+    this.eased += (state.fraction - this.eased) * 0.22;
+    if (state.complete) this.eased = state.fraction;
+    this.stage.meter.set(this.eased);
 
     this.step.textContent = state.label;
     const bytes = state.bytesTotal > 0
@@ -126,6 +172,8 @@ export class LoadingScreen {
   fail(why: string): void {
     cancelAnimationFrame(this.raf);
     this.gone = true;
+    this.standby.style.opacity = '0';
+    this.stage.meter.root.style.opacity = '1';
     this.stage.below.textContent = why;
     this.stage.below.style.color = 'rgba(255, 150, 130, 0.95)';
   }

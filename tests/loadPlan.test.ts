@@ -206,6 +206,36 @@ describe('the load plan', () => {
     }
   });
 
+  it('does not count the wait before the download as slowness', () => {
+    // THE REGRESSION. The loading screen now waits for its own picture
+    // to decode before the island starts arriving, so a plan can sit
+    // for seconds with nothing moving. Counting that idle stretch as
+    // throughput made the estimate jump thirty seconds the WRONG WAY
+    // and then settle — which is the one thing an estimate may not do.
+    const { plan, tick } = planAt();
+    plan.add('file', 'File', 4_000_000, true);
+    // Two seconds of the screen getting itself ready.
+    for (let i = 0; i < 120; i++) { tick(1 / 60); plan.read(); }
+    expect(plan.read().secondsLeft).toBeNull();
+    // Then a steady megabyte a second.
+    let got = 0;
+    const readings: number[] = [];
+    for (let i = 0; i < 180; i++) {
+      tick(1 / 60);
+      got += 1_000_000 / 60;
+      plan.advance('file', got);
+      const left = plan.read().secondsLeft;
+      if (left !== null) readings.push(left);
+    }
+    expect(readings.length).toBeGreaterThan(60);
+    // Four megabytes at one a second: the first honest reading is about
+    // three and a half left, and it only ever falls.
+    expect(readings[0]).toBeLessThan(5);
+    for (let i = 1; i < readings.length; i++) {
+      expect(readings[i]).toBeLessThan(readings[0] + 0.5);
+    }
+  });
+
   it('reads the same however often it is asked', () => {
     // `read()` samples the rate, so calling it twice in one frame used
     // to feed the estimator a zero-length interval and poison it.

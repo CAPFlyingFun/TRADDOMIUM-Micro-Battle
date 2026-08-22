@@ -55,6 +55,35 @@ const read = () => page.evaluate(() => {
   };
 });
 
+// WATCH THE HAND-OVER. Everything on the loading screen has to arrive
+// together: the picture needs decoding, the bar and the captions do
+// not, and building the island blocks the main thread for a second or
+// more right afterwards. Left alone they turned up seconds apart and
+// the screen looked half-built, which is what Joshua saw.
+await page.evaluate(() => {
+  const w = window;
+  w.__seen = { barAt: 0, artAt: 0, standbyAt: 0 };
+  const started = performance.now();
+  const look = () => {
+    const veil = document.querySelector('[data-ui="loading"]');
+    if (veil) {
+      const art = veil.querySelector('img');
+      const meter = art?.parentElement;
+      const lit = meter && getComputedStyle(meter).opacity === '1';
+      const painted = art?.complete && art.naturalWidth > 0;
+      if (!w.__seen.standbyAt && veil.textContent.includes('PREPARING')) {
+        w.__seen.standbyAt = performance.now() - started;
+      }
+      if (!w.__seen.barAt && lit && veil.querySelector('[data-ui="meter-fill"]')) {
+        w.__seen.barAt = performance.now() - started;
+      }
+      if (!w.__seen.artAt && lit && painted) w.__seen.artAt = performance.now() - started;
+    }
+    requestAnimationFrame(look);
+  };
+  requestAnimationFrame(look);
+});
+
 await page.click('[data-ui="spawn-here"]');
 
 // THE VEIL MUST BE UP BEFORE THE SCENE DRAWS ANYTHING. The scene starts
@@ -101,6 +130,19 @@ if (etas.length < 4) {
   process.exitCode = 1;
 } else if (worst > 4) {
   console.log(`probe:loading FAILED — the estimate climbed by ${worst}s`);
+  process.exitCode = 1;
+}
+
+// The picture and the bar must become visible in the same breath.
+const timing = await page.evaluate(() => window.__seen);
+const apart = Math.abs(timing.artAt - timing.barAt);
+console.log(`\nrevealed: bar at ${timing.barAt.toFixed(0)}ms, picture at ${timing.artAt.toFixed(0)}ms`
+  + ` (${apart.toFixed(0)}ms apart)`);
+if (!timing.artAt || !timing.barAt) {
+  console.log('probe:loading FAILED — never saw the screen fully revealed');
+  process.exitCode = 1;
+} else if (apart > 250) {
+  console.log(`probe:loading FAILED — the picture arrived ${apart.toFixed(0)}ms after the bar`);
   process.exitCode = 1;
 }
 

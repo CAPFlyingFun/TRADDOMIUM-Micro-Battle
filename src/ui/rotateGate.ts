@@ -50,7 +50,13 @@ export class RotateGate {
     // the real fit: a background cannot be stopped from cropping the
     // bar's ends off on a tall phone, and cannot put anything BEHIND
     // the picture to show through the cut-out.
-    this.stage = buildStage();
+    // FRESH, not the shared copy. This screen lives for the whole
+    // session and spends most of it hidden, and an image inside a
+    // `display: none` subtree can have its decoded pixels reclaimed —
+    // so holding the one the loading screen needs would hand it back
+    // needing a fresh decode at the worst possible moment. The bytes
+    // are cached; a second element costs a decode and no network.
+    this.stage = buildStage({ fresh: true });
     this.veil = this.stage.root;
     this.veil.setAttribute('role', 'alertdialog');
     // Loading finished long before this screen appears. An empty bar
