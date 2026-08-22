@@ -99,7 +99,7 @@ try {
         return v === null || getComputedStyle(v).visibility === 'hidden';
       }, null, { timeout: 20000 });
     }
-    await page.screenshot({ path: `${tag}-${spot}.png` });
+    await page.screenshot({ path: `${tag}-${spot}.png`, timeout: 240000 });
     await page.keyboard.up('KeyW').catch(() => {});
     if (errors.length) {
       console.log(`${spot}: FAILED — ${errors[0].split('\n')[0]}`);

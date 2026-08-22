@@ -77,7 +77,7 @@ try {
         const v = document.querySelector('[data-ui="vitals"]');
         return v === null || getComputedStyle(v).visibility === 'hidden';
       }, null, { timeout: 20000 });
-      await page.screenshot({ path: 'streak.png' });
+      await page.screenshot({ path: 'streak.png', timeout: 240000 });
       const png = readPng('streak.png');
       // The middle band: near enough to be ground, far enough to be
       // grazing. The bottom of the frame is underfoot and never smears.

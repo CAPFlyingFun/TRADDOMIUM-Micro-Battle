@@ -20,7 +20,7 @@ import { originAt, rebaseFor, setOrigin, toLocal, toWorld,
 } from '../world/origin';
 import { bakeGrain, GRAIN_SIZE } from '../world/groundTexture';
 import {
-  loadBands, ORIGIN_UNIFORM, reliefUniform, terrainMaterial,
+  loadBands, reliefUniform, setTextureOrigin, terrainMaterial,
 } from '../world/terrainMaterial';
 import { SettingsPanel } from '../ui/SettingsPanel';
 import { Vitals } from '../ui/Vitals';
@@ -239,7 +239,7 @@ export class IslandScene {
     // wherever the origin happened to be left.
     setOrigin(found.at.wx, found.at.wz);
     const seated = originAt();
-    ORIGIN_UNIFORM.value.set(seated.x, seated.z);
+    setTextureOrigin(seated.x, seated.z);
     const facing = found.heading;
     this.ant.placeAt(found.at.wx, found.at.wz, facing);
     this.terrain.follow(this.ant.where);
@@ -680,7 +680,7 @@ export class IslandScene {
       // The ground texture tiles off world position, not rendered
       // position, or it slides sideways on every shift.
       const now = originAt();
-      ORIGIN_UNIFORM.value.set(now.x, now.z);
+      setTextureOrigin(now.x, now.z);
       this.terrain.place();
     }
     this.terrain.follow(at);

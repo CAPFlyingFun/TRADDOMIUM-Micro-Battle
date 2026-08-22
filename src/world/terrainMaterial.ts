@@ -42,11 +42,47 @@ export const BAND_TILE = 4;
 export const reliefUniform = { value: 1 };
 
 /**
- * The floating origin, for texture tiling. Kept as a shared uniform
- * object so every cell's material sees the same value the moment the
- * world shifts under her.
+ * The floating origin, for texture tiling — passed MODULO THE TILE,
+ * never whole.
+ *
+ * THE STRIPES THAT RAN EAST TO WEST. The tiling used to hand the
+ * shader the raw origin and add it to the rendered position, which
+ * rebuilds the FULL world coordinate in float32 — the exact number the
+ * floating origin exists to keep away from the GPU. At Kapaʻa the
+ * world X is around 2.2 million units, where float32 steps by a
+ * quarter of a unit; divided by the four-unit tile that quantises the
+ * texture coordinate to jumps of THIRTY-TWO TEXELS. The ground became
+ * runs of one repeated texel, locked to the world axes — Joshua's
+ * east-west lines — and the derivatives of that staircase are zero
+ * then a spike, which is what had been thrashing the mip and
+ * anisotropy selection and smearing the ground all along. It looked
+ * worst at Mānā and Kapaʻa and mild near the island's centre because
+ * the error scales with the magnitude of the world coordinate itself.
+ *
+ * The remainder is taken here in FLOAT64, where 2.2 million is
+ * nothing, and only that remainder — a number smaller than one tile —
+ * reaches the shader. Adding it to the local position shifts the
+ * pattern by a whole number of tiles relative to true world tiling,
+ * which is invisible, and the near cells' local coordinates are a few
+ * thousand at most, so the texture coordinate is exact to a fraction
+ * of a texel. The far tiers still see big locals, and do not matter:
+ * past the detail fade there is no pattern left to quantise.
+ *
+ * The origin moves in 1024-unit steps. 1024 is a multiple of the
+ * four-unit band tile, so the band offset never changes across a
+ * rebase; the 1.1-unit grain tile does not divide 1024, so its offset
+ * changes by a whole number of tiles — also invisible, and why each
+ * tile size needs ITS OWN remainder rather than sharing one.
  */
-export const ORIGIN_UNIFORM = { value: new THREE.Vector2() };
+export const BAND_OFFSET_UNIFORM = { value: new THREE.Vector2() };
+export const GRAIN_OFFSET_UNIFORM = { value: new THREE.Vector2() };
+
+/** Fold a world origin into per-tile remainders. Call on every rebase. */
+export function setTextureOrigin(x: number, z: number): void {
+  const fold = (v: number, tile: number) => ((v % tile) + tile) % tile;
+  BAND_OFFSET_UNIFORM.value.set(fold(x, BAND_TILE), fold(z, BAND_TILE));
+  GRAIN_OFFSET_UNIFORM.value.set(fold(x, GRAIN_TILE), fold(z, GRAIN_TILE));
+}
 
 /**
  * The fine grain is tiled much tighter and at a size that shares no
@@ -222,7 +258,8 @@ export function terrainMaterial(
     // from the floating origin, so tiling straight off them would slide
     // the whole ground texture sideways every time the origin moved —
     // and it moves in 1024-unit steps, which no tile size divides.
-    shader.uniforms.worldOffset = ORIGIN_UNIFORM;
+    shader.uniforms.bandOffset = BAND_OFFSET_UNIFORM;
+    shader.uniforms.grainOffset = GRAIN_OFFSET_UNIFORM;
     shader.uniforms.nearCut = { value: nearCut };
 
     shader.vertexShader = shader.vertexShader
@@ -243,7 +280,7 @@ export function terrainMaterial(
         uniform float fadeFrom, fadeTo, bandTexels, grainTexelScale;
         uniform vec3 avg_reef, avg_sand, avg_grass, avg_jungle;
         uniform vec3 avg_cliff, avg_mountain, avg_snow;
-        uniform vec2 worldOffset;
+        uniform vec2 bandOffset, grainOffset;
         uniform float nearCut;
 
         float span(float x, float lo, float hi, float feather) {
@@ -259,7 +296,7 @@ export function terrainMaterial(
         // exists to fix, just moved somewhere harder to notice.
         vec2 fromEye = abs(vGround.xz - cameraPosition.xz);
         if (nearCut > 0.0 && max(fromEye.x, fromEye.y) < nearCut) discard;
-        vec2 bandUv = (vGround.xz + worldOffset) / bandTile;
+        vec2 bandUv = (vGround.xz + bandOffset) / bandTile;
         float h = vGround.y / max(relief, 0.0001);
         ${EDGES}
         float total = wReef + wSand + wGrass + wJung + wCliff + wMount + wSnow;
@@ -320,7 +357,7 @@ export function terrainMaterial(
         // already streaking. (No backticks in here: this is inside a
         // template literal, and one of those ends the shader.)
         float grainFar = smoothstep(fadeFrom, fadeTo, texels * grainTexelScale);
-        float g = texture2D(t_grain, (vGround.xz + worldOffset) / grainTile).g;
+        float g = texture2D(t_grain, (vGround.xz + grainOffset) / grainTile).g;
         ground *= mix(0.80 + g * 0.42, 1.0, grainFar);
 
         diffuseColor.rgb *= ground;
