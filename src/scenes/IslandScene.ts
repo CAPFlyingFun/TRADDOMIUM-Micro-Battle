@@ -20,7 +20,7 @@ import { originAt, rebaseFor, setOrigin, toLocal, toWorld,
 } from '../world/origin';
 import { bakeGrain, GRAIN_SIZE } from '../world/groundTexture';
 import {
-  loadBands, reliefUniform, setTextureOrigin, terrainMaterial,
+  loadBands, reliefUniform, setDetailRange, setTextureOrigin, terrainMaterial,
 } from '../world/terrainMaterial';
 import { SettingsPanel } from '../ui/SettingsPanel';
 import { Vitals } from '../ui/Vitals';
@@ -217,6 +217,7 @@ export class IslandScene {
     // the bug that put her inside an invisible hill last release.
     setFlightScale(settings().flightSpeed);
     weather().setMode(settings().liveWeather ? 'live' : 'simulated');
+    setDetailRange(settings().detailRange);
     setSmoothing(settings().terrainSmoothing);
     this.buildTerrain();
     this.buildWater();
@@ -279,6 +280,7 @@ export class IslandScene {
       this.resmoothIsland();
       setFlightScale(settings().flightSpeed);
       weather().setMode(settings().liveWeather ? 'live' : 'simulated');
+      setDetailRange(settings().detailRange);
     });
     // The view is a world bearing, so it has to be told where behind
     // her IS. Without this she opens side-on to her own camera.

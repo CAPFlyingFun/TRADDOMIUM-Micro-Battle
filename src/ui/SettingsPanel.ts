@@ -68,6 +68,11 @@ const DIALS: Dialer[] = [
     label: 'Wind on flight',
     show: (v) => (v === 0 ? 'off' : `${(v * 100).toFixed(0)}%`),
   },
+  {
+    key: 'detailRange',
+    label: 'Ground detail range',
+    show: (v) => `${(v * 100).toFixed(0)}%`,
+  },
 ];
 
 const TOGGLES: Array<{ key: Toggle; label: string; on: string; off: string }> = [

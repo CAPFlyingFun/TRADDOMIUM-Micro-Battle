@@ -79,6 +79,13 @@ export interface Settings {
    * thing that happens to you.
    */
   liveWeather: boolean;
+  /**
+   * How far the full-detail ground texture reaches, as a multiple of
+   * the tuned baseline. Distance goes with the square root: 4x here is
+   * 2x the radius. At 1 the detail holds to roughly 7 cm around her
+   * and is gone by 17 from the default camera.
+   */
+  detailRange: number;
 }
 
 export const DEFAULTS: Readonly<Settings> = {
@@ -111,6 +118,7 @@ export const DEFAULTS: Readonly<Settings> = {
   invertLookY: false,
   invertStickY: false,
   liveWeather: true,
+  detailRange: 1,
 };
 
 /** What a slider may ask for. Anything outside is clamped, not refused. */
@@ -124,6 +132,7 @@ export const LIMITS = {
   terrainSmoothing: { min: 0, max: 1, step: 0.05 },
   flightSpeed: { min: 0.25, max: 2, step: 0.05 },
   windInfluence: { min: 0, max: 1, step: 0.05 },
+  detailRange: { min: 0.5, max: 4, step: 0.25 },
 } as const;
 
 export type Dial = keyof typeof LIMITS;

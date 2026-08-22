@@ -138,6 +138,28 @@ export const GRAIN_TILE = 1.1;
 const FADE_FROM_TEXELS = 2.0;
 const FADE_TO_TEXELS = 12.0;
 
+/**
+ * The fade thresholds as LIVE uniforms, scaled by the detail-range
+ * dial in settings.
+ *
+ * A dial rather than a constant for the usual reason (see settings.ts:
+ * anything the player can feel gets tuned on the device, not by
+ * redeploying), and for one more that is specific to this number: the
+ * baseline of 12 was chosen while the texture coordinates were still
+ * quantised, when pushing detail further out only pushed the streaks
+ * further out. With exact coordinates the ceiling is far higher and
+ * nobody has found it yet. Distance scales with the SQUARE ROOT of the
+ * multiplier — 4x the texels is 2x the radius.
+ */
+export const FADE_FROM_UNIFORM = { value: FADE_FROM_TEXELS };
+export const FADE_TO_UNIFORM = { value: FADE_TO_TEXELS };
+
+export function setDetailRange(times: number): void {
+  const factor = Math.max(0.1, times);
+  FADE_FROM_UNIFORM.value = FADE_FROM_TEXELS * factor;
+  FADE_TO_UNIFORM.value = FADE_TO_TEXELS * factor;
+}
+
 /** Texels across one band map. All seven ship at 512. */
 const BAND_TEXELS = 512;
 
@@ -244,8 +266,8 @@ export function terrainMaterial(
       shader.uniforms[`avg_${name}`] = BAND_AVERAGE[name]
         ?? { value: new THREE.Color(0.5, 0.5, 0.5) };
     }
-    shader.uniforms.fadeFrom = { value: FADE_FROM_TEXELS };
-    shader.uniforms.fadeTo = { value: FADE_TO_TEXELS };
+    shader.uniforms.fadeFrom = FADE_FROM_UNIFORM;
+    shader.uniforms.fadeTo = FADE_TO_UNIFORM;
     shader.uniforms.bandTexels = { value: BAND_TEXELS };
     // The grain is also 512 texels but tiled 3.6 times tighter, so its
     // texel footprint is that much larger at the same distance and it
