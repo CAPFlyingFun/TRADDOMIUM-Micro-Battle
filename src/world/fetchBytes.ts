@@ -28,25 +28,26 @@ export interface Pull {
  * @param onSize called once, as soon as the size is known
  * @param onBytes called repeatedly with the running total
  */
-export async function pullBytes(
+async function pullParts(
   url: string,
   onSize: (bytes: number) => void,
   onBytes: (bytes: number) => void,
-): Promise<Pull> {
+): Promise<{ parts: Uint8Array[]; size: number; type: string }> {
   const response = await fetch(url);
   if (!response.ok) throw new Error(`${url} — ${response.status}`);
 
   const declared = Number(response.headers.get('content-length') ?? 0);
   if (declared > 0) onSize(declared);
+  const type = response.headers.get('content-type') ?? 'application/octet-stream';
 
   // No stream to read (an old browser, or a response with no body) —
   // take the whole thing and report it as one arrival. The bar still
   // moves, it just moves in one step for this file.
   if (!response.body) {
-    const whole = await response.blob();
-    onSize(whole.size);
-    onBytes(whole.size);
-    return { size: whole.size, url: URL.createObjectURL(whole) };
+    const whole = new Uint8Array(await response.arrayBuffer());
+    onSize(whole.byteLength);
+    onBytes(whole.byteLength);
+    return { parts: [whole], size: whole.byteLength, type };
   }
 
   const reader = response.body.getReader();
@@ -61,8 +62,37 @@ export async function pullBytes(
   }
   // A server that did not declare a length still knows one now.
   if (declared <= 0) onSize(got);
+  return { parts, size: got, type };
+}
 
-  const type = response.headers.get('content-type') ?? 'application/octet-stream';
-  const blob = new Blob(parts as BlobPart[], { type });
-  return { size: got, url: URL.createObjectURL(blob) };
+/**
+ * Fetch a file, reporting bytes as they arrive, as a blob URL.
+ *
+ * @param url what to fetch
+ * @param onSize called once, as soon as the size is known
+ * @param onBytes called repeatedly with the running total
+ */
+export async function pullBytes(
+  url: string,
+  onSize: (bytes: number) => void,
+  onBytes: (bytes: number) => void,
+): Promise<Pull> {
+  const { parts, size, type } = await pullParts(url, onSize, onBytes);
+  return { size, url: URL.createObjectURL(new Blob(parts as BlobPart[], { type })) };
+}
+
+/** The same, for something that wants the bytes rather than a URL. */
+export async function pullBuffer(
+  url: string,
+  onSize: (bytes: number) => void,
+  onBytes: (bytes: number) => void,
+): Promise<ArrayBuffer> {
+  const { parts, size } = await pullParts(url, onSize, onBytes);
+  const whole = new Uint8Array(size);
+  let at = 0;
+  for (const part of parts) {
+    whole.set(part, at);
+    at += part.byteLength;
+  }
+  return whole.buffer;
 }

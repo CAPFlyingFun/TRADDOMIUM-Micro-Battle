@@ -5,6 +5,7 @@ import { fitViewport } from './ui/viewportFit';
 import { load as loadSettings } from './ui/settings';
 import { useGrid } from './world/heightfield';
 import { loadGrid, type HeightGrid } from './world/kauai';
+import { fitBootBar } from './ui/bootBar';
 
 /**
  * Boot — scene-by-scene rebuild entry point.
@@ -24,22 +25,23 @@ loadSettings();
 const host = document.getElementById('app');
 if (!host) throw new Error('missing #app element');
 
-const notice = document.createElement('div');
-Object.assign(notice.style, {
-  position: 'fixed',
-  inset: '0',
-  display: 'flex',
-  alignItems: 'center',
-  justifyContent: 'center',
-  color: 'rgba(255, 226, 160, 0.92)',
-  font: '600 17px/1.5 system-ui, sans-serif',
-  textAlign: 'center',
-  whiteSpace: 'pre-wrap',
-  padding: '24px',
-  zIndex: '20',
-} satisfies Partial<CSSStyleDeclaration>);
-notice.textContent = 'Surveying the island…';
-host.appendChild(notice);
+/**
+ * The splash is already on screen — `index.html` painted it with the
+ * document, which is the only way to be there before this file runs.
+ * What it cannot do is show progress, because the frame's coordinates
+ * are generated and the download has not started. Both arrive here.
+ */
+const boot = document.getElementById('boot');
+const bootBar = boot ? fitBootBar(boot) : null;
+
+/** Lift the splash, and take it out of the tree once it has faded. */
+function clearBoot(): void {
+  if (!boot) return;
+  boot.classList.add('gone');
+  // Matches the CSS transition. Removed rather than left invisible: it
+  // is a fixed full-screen element and would eat every tap.
+  setTimeout(() => boot.remove(), 750);
+}
 
 /**
  * `?scene=island` still drops straight into the world, because the
@@ -53,14 +55,17 @@ const scenes: Record<string, (h: HTMLElement, grid: HeightGrid) => unknown> = {
 };
 
 try {
-  const grid = await loadGrid();
+  // TWO MEGABYTES OF ELEVATION, and the art has a bar drawn in it, so
+  // there is no excuse for the old silent wait. Same measured bytes the
+  // spawn screen shows, in the same frame.
+  const grid = await loadGrid((done, total) => bootBar?.(done, total));
   useGrid(grid);
   const requested = new URLSearchParams(location.search).get('scene') ?? 'game';
   (scenes[requested] ?? scenes['island'])(host, grid);
-  notice.remove();
+  clearBoot();
   // Sits above whatever scene is running, so every lab gets it.
   new RotateGate(host);
 } catch (error) {
-  notice.textContent = `The island failed to load.\n${String(error)}`;
+  bootBar?.(0, 0, 'THE ISLAND FAILED TO LOAD');
   throw error;
 }

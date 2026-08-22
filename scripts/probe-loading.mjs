@@ -46,12 +46,12 @@ await page.waitForSelector('[data-ui="spawn-here"]', { timeout: 20000 });
 const read = () => page.evaluate(() => {
   const veil = document.querySelector('[data-ui="loading"]');
   if (!veil) return null;
-  const fill = veil.querySelector('div > div');
-  const line = veil.lastElementChild;
+  const fill = veil.querySelector('[data-ui="meter-fill"]');
+  const line = veil.querySelector('[data-ui="loading"] > div > div:last-child');
   return {
     opacity: getComputedStyle(veil).opacity,
-    width: veil.querySelectorAll('div')[3]?.style.width ?? '',
-    text: [...line.children].map((c) => c.textContent).join(' | '),
+    width: fill ? fill.style.width : '',
+    text: line ? line.textContent.replace(/\s+/g, ' ').trim() : '',
   };
 });
 
@@ -106,7 +106,7 @@ if (etas.length < 4) {
 
 // And the byte counter has to actually count.
 const bytes = seen
-  .map((line) => /\|\s*([\d.]+) (KB|MB) \//.exec(line))
+  .map((line) => /([\d.]+)\s*(KB|MB)\s*\//.exec(line))
   .filter(Boolean)
   .map((m) => Number(m[1]) * (m[2] === 'MB' ? 1024 : 1));
 if (bytes.length < 4 || bytes[bytes.length - 1] <= bytes[0]) {

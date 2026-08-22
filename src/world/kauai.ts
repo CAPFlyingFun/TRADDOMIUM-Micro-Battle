@@ -20,6 +20,8 @@
  */
 
 /** Samples per side of the baked grid. */
+import { pullBuffer } from './fetchBytes';
+
 export const SAMPLES = 1025;
 
 /**
@@ -136,13 +138,18 @@ export function decodeGrid(buffer: ArrayBuffer): HeightGrid {
 }
 
 /** Fetch and decode the baked grid that ships with the build. */
-export async function loadGrid(): Promise<HeightGrid> {
+export async function loadGrid(
+  /** Bytes as they land, for the boot screen's bar. */
+  onProgress?: (done: number, total: number) => void,
+): Promise<HeightGrid> {
   const url = `${import.meta.env.BASE_URL}kauai-1025.bin`;
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`kauai grid ${url} failed: ${response.status}`);
-  }
-  return decodeGrid(await response.arrayBuffer());
+  let total = 0;
+  const buffer = await pullBuffer(
+    url,
+    (size) => { total = size; onProgress?.(0, total); },
+    (done) => onProgress?.(done, total),
+  );
+  return decodeGrid(buffer);
 }
 
 /** One raw sample as world height, with nodata and the abyss handled. */
