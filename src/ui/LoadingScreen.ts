@@ -37,8 +37,7 @@ const FADE_MS = 800;
 export class LoadingScreen {
   private readonly stage: Stage;
   private readonly step: HTMLSpanElement;
-  private readonly tally: HTMLSpanElement;
-  private readonly eta: HTMLSpanElement;
+  private readonly numbers: HTMLSpanElement;
   private shown = 0;
   private raf = 0;
   private gone = false;
@@ -58,11 +57,12 @@ export class LoadingScreen {
     // what is happening, how much of it has arrived, how long is left.
     // One centred line rather than three spread across the frame — the
     // hole is 42% of the picture and they will not fit beside it.
+    // Two pieces so the line can break between them on a narrow phone
+    // rather than running off both edges — see `below` in splashStage.
     this.step = document.createElement('span');
-    this.tally = document.createElement('span');
-    this.eta = document.createElement('span');
-    this.tally.style.color = GOLD;
-    this.stage.below.append(this.step, dot(), this.tally, dot(), this.eta);
+    this.numbers = document.createElement('span');
+    this.numbers.style.color = GOLD;
+    this.stage.below.append(this.step, this.numbers);
 
     host.appendChild(this.stage.root);
   }
@@ -82,12 +82,13 @@ export class LoadingScreen {
     this.stage.meter.set(this.shown);
 
     this.step.textContent = state.label;
-    this.tally.textContent = state.bytesTotal > 0
+    const bytes = state.bytesTotal > 0
       ? `${readableBytes(state.bytesDone)} / ${readableBytes(state.bytesTotal)}`
       : '';
-    this.eta.textContent = state.complete
+    const left = state.complete
       ? 'ready'
       : state.secondsLeft === null ? '' : `${readableWait(state.secondsLeft)} left`;
+    this.numbers.textContent = [bytes, left].filter(Boolean).join(' · ');
   }
 
   /** Drive it from a plan until the plan says it is finished. */
@@ -114,7 +115,7 @@ export class LoadingScreen {
     cancelAnimationFrame(this.raf);
     this.stage.meter.set(1);
     this.step.textContent = 'Ready';
-    this.eta.textContent = 'ready';
+    this.numbers.textContent = '';
     await new Promise((done) => setTimeout(done, 260));
     this.stage.root.style.opacity = '0';
     await new Promise((done) => setTimeout(done, FADE_MS));
@@ -135,12 +136,4 @@ export class LoadingScreen {
     this.stage.stopFitting();
     this.stage.root.remove();
   }
-}
-
-/** The separator between readouts. */
-function dot(): HTMLSpanElement {
-  const span = document.createElement('span');
-  span.textContent = ' · ';
-  span.style.opacity = '0.45';
-  return span;
 }

@@ -1,4 +1,4 @@
-import { readableBytes } from './loadPlan';
+import { LoadPlan, readableBytes, readableWait } from './loadPlan';
 import { fitCover } from './ratioBox';
 import { Meter } from './Meter';
 import { splashFor } from './splashFrame';
@@ -30,6 +30,7 @@ const FILL = 'linear-gradient(90deg, #f6c24b 0%, #ff9e2c 52%, #ff5a36 100%)';
 const CAPTION_DROP = 0.075;
 const SIDE_MARGIN = 0.02;
 const DRAWN_CAP = 'min(78vw, 460px)';
+const GRID_JOB = 'grid';
 const RIM = 'rgba(255, 214, 140, .75)';
 const pc = (n: number): string => `${(n * 100).toFixed(3)}%`;
 
@@ -73,12 +74,29 @@ export function fitBootBar(
   clip.appendChild(fill);
 
   const caption = document.createElement('div');
+  // TWO PIECES, ALLOWED TO WRAP. "Surveying the island · 1.8 MB /
+  // 2.0 MB · 6s left" does not fit across a portrait phone on one line,
+  // and `nowrap` would have run it off both edges. Split at the one
+  // sensible place and let it break there when it has to; on anything
+  // wider it stays on a single line.
+  const what = document.createElement('span');
+  what.textContent = 'SURVEYING THE ISLAND';
+  const numbers = document.createElement('span');
+  caption.append(what, numbers);
   Object.assign(caption.style, {
     position: 'absolute',
-    left: '0',
-    width: '100%',
+    // Capped to the SCREEN, not the picture — see the same note in
+    // splashStage. A tall phone crops the picture's sides and a caption
+    // laid out at 100% of it hangs off both edges.
+    left: '50%',
+    transform: 'translateX(-50%)',
+    width: 'min(100%, 92vw)',
+    display: 'flex',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    columnGap: '0.7em',
+    rowGap: '0.25em',
     textAlign: 'center',
-    whiteSpace: 'nowrap',
     lineHeight: '1.2',
     color: GOLD_DIM,
     textShadow: '0 1px 2px rgba(0,0,0,.95), 0 2px 10px rgba(0,0,0,.9), 0 0 22px rgba(0,0,0,.85)',
@@ -90,7 +108,6 @@ export function fitBootBar(
     pointerEvents: 'none',
   } as Partial<CSSStyleDeclaration>);
   caption.style.setProperty('font-size', '2.6cqmin');
-  caption.textContent = 'SURVEYING THE ISLAND…';
 
   /**
    * Point the bar and the caption at this picture, and stack them the
@@ -159,16 +176,28 @@ export function fitBootBar(
     };
   });
 
+  // The same plan the spawn screen runs on, with one job in it. Reused
+  // rather than reimplemented so both screens estimate the same way —
+  // a trailing window over the bytes, which is what stops the number
+  // climbing while a download runs perfectly.
+  const plan = new LoadPlan();
+  plan.add(GRID_JOB, 'Surveying the island', 1, true);
+
   return (done, total, trouble) => {
     if (trouble) {
-      caption.textContent = trouble;
+      what.textContent = trouble;
+      numbers.textContent = '';
       caption.style.color = 'rgba(255, 150, 130, 0.95)';
       return;
     }
     if (total <= 0) return;
+    plan.resize(GRID_JOB, total);
+    plan.advance(GRID_JOB, done);
+    const state = plan.read();
     fill.style.width = `${Math.min(100, (done / total) * 100).toFixed(1)}%`;
-    caption.textContent =
-      `SURVEYING THE ISLAND · ${readableBytes(done)} / ${readableBytes(total)}`;
+    const left = state.secondsLeft;
+    numbers.textContent = `${readableBytes(done)} / ${readableBytes(total)}`
+      + (done >= total ? '' : left === null ? '' : ` · ${readableWait(left)} left`);
     caption.style.color = done >= total ? GOLD : GOLD_DIM;
   };
 }

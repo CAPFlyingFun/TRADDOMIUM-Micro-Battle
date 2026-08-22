@@ -36,8 +36,18 @@ async function pullParts(
   const response = await fetch(url);
   if (!response.ok) throw new Error(`${url} — ${response.status}`);
 
-  const declared = Number(response.headers.get('content-length') ?? 0);
-  if (declared > 0) onSize(declared);
+  // `Content-Length` counts what came down the WIRE. When the server
+  // compresses on the way, the stream below yields the DECOMPRESSED
+  // bytes, and there is no header that says how many of those there
+  // will be — so a readout built on it counts past its own maximum. It
+  // is right for the images and the model, which are already
+  // compressed formats no server bothers to gzip; anything that does
+  // get gzipped should pass its own known size instead (see loadGrid).
+  // Either way the guard below means `done` can never exceed `total`.
+  const encoded = Boolean(response.headers.get('content-encoding'));
+  let declared = Number(response.headers.get('content-length') ?? 0);
+  if (declared > 0 && !encoded) onSize(declared);
+  else declared = 0;
   const type = response.headers.get('content-type') ?? 'application/octet-stream';
 
   // No stream to read (an old browser, or a response with no body) —
@@ -58,6 +68,13 @@ async function pullParts(
     if (done) break;
     parts.push(value);
     got += value.byteLength;
+    // Never report past the total. A declared length that turns out to
+    // be short — compression, a truncated header, a proxy rewriting
+    // things — must move, not be exceeded.
+    if (declared > 0 && got > declared) {
+      declared = got;
+      onSize(declared);
+    }
     onBytes(got);
   }
   // A server that did not declare a length still knows one now.

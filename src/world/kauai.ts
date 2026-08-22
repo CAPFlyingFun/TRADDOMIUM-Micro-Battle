@@ -143,11 +143,19 @@ export async function loadGrid(
   onProgress?: (done: number, total: number) => void,
 ): Promise<HeightGrid> {
   const url = `${import.meta.env.BASE_URL}kauai-1025.bin`;
-  let total = 0;
+  // THE SIZE IS KNOWN, so it is not asked for. `Content-Length` counts
+  // what came down the WIRE, and a page host gzips a file of 16-bit
+  // integers to about five sixths — so the bar was told 1.7 MB and then
+  // handed 2.0 MB of decompressed bytes, and counted past its own
+  // maximum. This is the number `decodeGrid` already insists on below,
+  // which makes it the honest total and removes the server from the
+  // question entirely.
+  const total = SAMPLES * SAMPLES * 2;
+  onProgress?.(0, total);
   const buffer = await pullBuffer(
     url,
-    (size) => { total = size; onProgress?.(0, total); },
-    (done) => onProgress?.(done, total),
+    () => {},
+    (done) => onProgress?.(Math.min(done, total), total),
   );
   return decodeGrid(buffer);
 }

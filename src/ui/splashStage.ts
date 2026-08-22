@@ -136,8 +136,14 @@ export function buildStage(): Stage {
   for (const [line, side] of [[above, 'above'], [below, 'below']] as const) {
     Object.assign(line.style, {
       position: 'absolute',
-      left: '0',
-      width: '100%',
+      // CAPPED TO THE SCREEN, not to the picture. A tall phone crops
+      // the picture's sides, so a caption laid out at 100% of it hangs
+      // off both edges — which is exactly how "SURVEYING THE ISLAND"
+      // lost its S and its "left". Centred the same way the bar is:
+      // both boxes share a centre, so this centres on the screen too.
+      left: '50%',
+      transform: 'translateX(-50%)',
+      width: 'min(100%, 92vw)',
       textAlign: 'center',
       whiteSpace: 'nowrap',
       lineHeight: '1.2',
@@ -158,6 +164,18 @@ export function buildStage(): Stage {
     } as Partial<CSSStyleDeclaration>);
     line.style.setProperty('font-size', '2.6cqmin');
   }
+  // THE LOWER LINE WRAPS. "Ground textures · 2.1 MB / 5.1 MB · 28s
+  // left" does not fit across a portrait phone, and `nowrap` would run
+  // it off both edges. Flex with a wrap lets it break at the one
+  // sensible place and stay on one line anywhere wider.
+  Object.assign(below.style, {
+    whiteSpace: 'normal',
+    display: 'flex',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    columnGap: '0.7em',
+    rowGap: '0.25em',
+  } as Partial<CSSStyleDeclaration>);
   meter.root.append(above, below);
 
   /** Put the bar and the captions where this picture wants them. */
