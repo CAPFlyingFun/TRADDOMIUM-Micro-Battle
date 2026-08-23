@@ -527,6 +527,19 @@ export class IslandScene {
         return { ...body, drawn, depth: drawn - groundHeight(wx, wz) };
       },
       cameraAt: () => this.follow.camera.position.toArray(),
+      /**
+       * SHOW OR HIDE ONE WATER LAYER — for telling them apart.
+       *
+       * Three of them can put blue on the screen and a screenshot
+       * cannot say which did. Turning them off one at a time answers
+       * in one frame what an afternoon of reasoning about polygon
+       * offsets does not.
+       */
+      showWater: (which: 'sea' | 'lakes' | 'rivers', on: boolean) => {
+        if (which === 'sea') this.water.mesh.visible = on;
+        if (which === 'lakes') this.lakes.setVisible(on);
+        if (which === 'rivers') this.streams?.setVisible(on);
+      },
       paused: () => this.halted,
       /**
        * THE POSITION FIX AS A STRING — the same one under the compass.
@@ -1591,6 +1604,7 @@ export class IslandScene {
     // is how four reproduced frames came back pitched 22 degrees down
     // when the fix said 11.
     this.look.aim(this.follow.offsetFor(look));
+    this.look.face(-heading);
     this.follow.snapTo(this.ant.root, -heading, look);
     return true;
   }

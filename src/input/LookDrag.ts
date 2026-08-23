@@ -158,6 +158,16 @@ export class LookDrag {
     this.pitch = Math.max(PITCH_DOWN, Math.min(PITCH_UP, pitch));
   }
 
+  /**
+   * And which way it looks. THE OTHER HALF OF `aim`, and leaving it out
+   * meant a restored fix came back pointing 106 degrees off — the pitch
+   * stuck and the yaw did not, because in flight the camera chases her
+   * heading and covers for it, and on the ground nothing does.
+   */
+  face(yaw: number): void {
+    this.yaw = yaw;
+  }
+
   private swing(dYaw: number, dPitch: number): void {
     this.yaw = Math.max(-YAW_LIMIT, Math.min(YAW_LIMIT, this.yaw + dYaw));
     this.pitch = Math.max(PITCH_DOWN, Math.min(PITCH_UP, this.pitch + dPitch));

@@ -44,8 +44,31 @@ import { channelDepth, riverPointLevels } from './rivers';
  * position the way a flat lake can.
  */
 
-/** How far from her a river is worth drawing. The middle tier's reach. */
-const REACH = 200_000;
+/**
+ * HOW FAR A RIVER IS WORTH DRAWING — the transition tier's reach, two
+ * hundred metres, and it used to be two kilometres.
+ *
+ * MEASURED, after three releases of blaming the wrong thing. At the
+ * fix Joshua sent, the ribbon sits within seven CENTIMETRES of the
+ * ground along its whole length — it is not floating and it never was.
+ * What it does is stretch two kilometres away at a grazing angle, and
+ * a 6.7 m channel seen nearly edge-on for two kilometres paints a dark
+ * stripe across the middle of the screen with a dead-straight near
+ * edge. That edge is the "gap": you can see the ground under it,
+ * because the channel it lies in is 66 cm deep and invisible at that
+ * distance.
+ *
+ * There is no shader fix for that. A stream can only read as a stream
+ * while the valley holding it is resolved, and past the transition
+ * tier it is not — a vertex every 3,125 units cannot show a 66 cm
+ * trench. So the ribbons stop where their channel stops being
+ * visible. It is the same resolution gate the terrain tiers already
+ * live by, applied to the water at last instead of argued with.
+ */
+const REACH = 20_000;
+
+/** Where the ribbons start fading, so the cut is not a pop. */
+const FADE_FROM = 13_000;
 /** Resample target along the spline, world units. Six real metres. */
 const STEP = 600;
 /** The ribbon stops just short of the channel edge — see the alpha fade. */
@@ -264,6 +287,7 @@ export class RiverWater {
       if (!geometry) continue;
       const mesh = new THREE.Mesh(geometry, this.material);
       mesh.renderOrder = 1;
+      mesh.visible = this.shownAll;
       this.scene.add(mesh);
       this.drawn.set(index, { mesh, cx, cz });
     }
@@ -289,6 +313,15 @@ export class RiverWater {
   get shown(): number {
     return this.drawn.size;
   }
+
+  /** Hide or show every surface this owns — see __island.showWater. */
+  setVisible(on: boolean): void {
+    this.shownAll = on;
+    for (const it of this.drawn.values()) it.mesh.visible = on;
+  }
+
+  /** Remembered, so surfaces built after the toggle honour it too. */
+  private shownAll = true;
 
   dispose(): void {
     for (const reach of this.drawn.values()) {
@@ -365,9 +398,24 @@ export class RiverWater {
             // banks. v runs 0..1 bank to bank.
             float mid = 1.0 - abs(vFlow.y * 2.0 - 1.0);
             float body = vDeep * (0.35 + 0.65 * mid);
-            float shallow = 1.0 - smoothstep(6.0, 120.0, body);
+            // CALIBRATED TO A STREAM, not to an ocean, and this is why
+            // the rivers read as blue ribbon laid on the ground.
+            //
+            // channelDepth gives a median Kauai reach 80 units — eighty
+            // CENTIMETRES. Against a ramp that saturated at 120 that is
+            // 79% of the way to the deep tint, so every stream on the
+            // island was painted the colour of open sea: one flat dark
+            // navy band, no shading across it, no bed showing through.
+            // A knee-deep stream over sand is bright, not black.
+            //
+            // Ramped over 20 to 600 instead, so 80 sits near the
+            // shallow end where it belongs and only a real pool goes
+            // dark. Squared the other way round too: shallow is now the
+            // default and depth has to be earned.
+            float shallow = 1.0 - smoothstep(20.0, 600.0, body);
             diffuseColor.rgb = mix(
-              vec3(0.010, 0.13, 0.19), vec3(0.11, 0.30, 0.29), shallow * shallow);
+              vec3(0.020, 0.16, 0.22), vec3(0.26, 0.46, 0.42),
+              shallow * shallow);
 
             // THE WATERLINE, which is the thing that was missing.
             //
@@ -382,7 +430,15 @@ export class RiverWater {
             // The fade was there to hide the polygon boundary against
             // ground that had no trench in it. It has a trench now
             // (see farHeight), so the edge can be an edge.
-            diffuseColor.a *= smoothstep(0.0, 0.16, mid) * 0.45 + 0.55;
+            // SHALLOW WATER IS SEE-THROUGH. Holding a stream at 90%
+            // opaque hid the bed under it, which is most of what makes
+            // shallow water look like water rather than like paint.
+            diffuseColor.a *= (smoothstep(0.0, 0.16, mid) * 0.45 + 0.55)
+              * mix(0.55, 1.0, 1.0 - shallow);
+            // AND OUT WITH DISTANCE. vViewPosition is the fragment's
+            // offset from the eye, so its length is how far away this
+            // piece of river is — no uniform, no per-frame upload.
+            diffuseColor.a *= 1.0 - smoothstep(${FADE_FROM}.0, ${REACH}.0, length(vViewPosition));
 
             // And a bright rim ON the boundary. At her scale this is
             // not decoration: a meniscus a millimetre wide is a body

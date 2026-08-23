@@ -146,6 +146,7 @@ export class LakeWater {
       if (!cut) continue;
       const mesh = new THREE.Mesh(cut.geometry, this.material);
       mesh.renderOrder = 1;
+      mesh.visible = this.shownAll;
       this.scene.add(mesh);
       this.drawn.set(index, { at: index, mesh, cx, cz, level: box.level });
     }
@@ -175,6 +176,15 @@ export class LakeWater {
   get shown(): number {
     return this.drawn.size;
   }
+
+  /** Hide or show every surface this owns — see __island.showWater. */
+  setVisible(on: boolean): void {
+    this.shownAll = on;
+    for (const it of this.drawn.values()) it.mesh.visible = on;
+  }
+
+  /** Remembered, so surfaces built after the toggle honour it too. */
+  private shownAll = true;
 
   dispose(): void {
     for (const lake of this.drawn.values()) {
