@@ -43,6 +43,19 @@ export class DebugDie {
     host.appendChild(this.button);
   }
 
+  /**
+   * SCAFFOLDING KEEPS SCAFFOLDING HOURS.
+   *
+   * It reads as debug UI because it IS debug UI, and it was sitting in
+   * the top right next to the weather and the settings cog — the one
+   * corner of the interface that should be nothing but the game's own
+   * furniture. It rides with the developer overlay now, so turning
+   * that off leaves weather and settings alone up there.
+   */
+  show(on: boolean): void {
+    this.button.style.display = on ? '' : 'none';
+  }
+
   dispose(): void {
     this.button.remove();
   }

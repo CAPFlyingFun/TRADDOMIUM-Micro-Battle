@@ -1,7 +1,6 @@
 import { MAX_POWERED_SPEED } from '../ant/flight';
 import { WANDER_RATE } from '../ant/wander';
 import { SOON, type FlightTelemetry } from '../ant/telemetry';
-import { wrap360 } from './compassMath';
 
 /**
  * THE INSTRUMENTS SHE FLIES ON.
@@ -41,7 +40,31 @@ import { wrap360 } from './compassMath';
 const INK = '#a9f2c9';
 const DIM = 'rgba(169, 242, 201, .58)';
 const WARN = '#ffb03a';
-const SHADOW = 'drop-shadow(0 1px 3px rgba(0, 0, 0, .92))';
+
+/**
+ * Below this sink rate she counts as descending, world units a second.
+ *
+ * Two millimetres. Not zero, because she is never exactly level — the
+ * air wanders (see wander.ts) and a threshold at zero would blink the
+ * approach rail on and off every few seconds.
+ */
+const SETTLED_SINK = 0.2;
+/**
+ * TWO SHADOWS, NOT ONE — a tight dark edge and a soft halo behind it.
+ *
+ * The canyon shot is the worst case this game has: bright sunlit sand
+ * filling the frame behind thin mint numerals, and one 3-pixel shadow
+ * was not separating them. The alternative was a translucent backing
+ * panel behind each readout, which works and turns the sky into a
+ * dashboard full of rectangles. A halo does the same job and leaves
+ * the instruments floating, which is what a HUD is.
+ *
+ * A filter on the root rather than a text-shadow, so the SVG tape and
+ * the markers get it too — they are the thinnest strokes here and the
+ * ones that were dissolving first.
+ */
+const SHADOW = 'drop-shadow(0 1px 2px rgba(0, 0, 0, .95)) '
+  + 'drop-shadow(0 0 6px rgba(0, 0, 0, .7))';
 
 /**
  * THE LADDER IS DRAWN ON THE WORLD, NOT ON HER.
@@ -163,12 +186,10 @@ export class FlightHud {
   private readonly tapeRead: SVGElement;
   private readonly mslRead: HTMLSpanElement;
   private readonly landRead: HTMLSpanElement;
+  private landRow!: HTMLDivElement;
+  private shownAhead = '';
   private readonly vs: HTMLSpanElement;
   private readonly vsArrow: HTMLSpanElement;
-  private readonly windSpeed: HTMLSpanElement;
-  private readonly windArrow: SVGElement;
-  private readonly windCall: HTMLSpanElement;
-  private readonly windStrip: HTMLDivElement;
   private readonly clusters: HTMLElement[] = [];
   private readonly watch: ResizeObserver;
   private up = false;
@@ -176,17 +197,13 @@ export class FlightHud {
   private shownMsl = '';
   private shownLand = '';
   private shownVs = Number.NaN;
-  private shownWind = Number.NaN;
-  private shownCall = '';
   private shownTgt = '';
-  private shownDrift = '';
   private readonly path: HTMLDivElement;
   private readonly target: HTMLDivElement;
   private readonly targetMark: SVGElement;
   private readonly trail: SVGSVGElement;
   private readonly trailLine: SVGElement;
   private readonly tgt: HTMLDivElement;
-  private readonly drift: HTMLDivElement;
 
   constructor(host: HTMLElement) {
     this.root = document.createElement('div');
@@ -262,8 +279,10 @@ export class FlightHud {
     // worked example computes before anything else.
     this.mslRead = document.createElement('span');
     this.landRead = document.createElement('span');
-    right.appendChild(this.railRow('MSL', this.mslRead));
-    right.appendChild(this.railRow('LND', this.landRead));
+    right.appendChild(this.railRow('MSL', this.mslRead, true));
+    this.landRow = this.railRow('LND', this.landRead);
+    this.landRow.style.transition = 'opacity 260ms ease';
+    right.appendChild(this.landRow);
 
     const under = document.createElement('div');
     Object.assign(under.style, {
@@ -291,49 +310,10 @@ export class FlightHud {
     } as Partial<CSSStyleDeclaration>);
     right.appendChild(this.tgt);
 
-    this.windStrip = this.cluster('50%', null, 'translateX(-50%)', 'center bottom');
-    this.windStrip.style.bottom = 'calc(16px + min(env(safe-area-inset-bottom), 14px))';
-    Object.assign(this.windStrip.style, {
-      display: 'flex', alignItems: 'center', gap: '9px',
-      font: '600 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace',
-      letterSpacing: '0.16em', color: DIM, whiteSpace: 'nowrap',
-    } as Partial<CSSStyleDeclaration>);
-    this.windArrow = this.buildWindArrow();
-    this.windSpeed = document.createElement('span');
-    this.windSpeed.style.color = INK;
-    this.windSpeed.style.fontSize = '13px';
-    this.windSpeed.style.fontWeight = '700';
-    this.windCall = document.createElement('span');
-    Object.assign(this.windCall.style, {
-      color: WARN, fontWeight: '700', letterSpacing: '0.1em',
-    } as Partial<CSSStyleDeclaration>);
-    this.windStrip.append(
-      span('WIND'), this.windArrow, this.windSpeed, span('cm/s'), this.windCall,
-    );
-
-    // THE GROUND LINE: where she is actually going, and how fast over
-    // the island. The bottom half of the aviation pairing — the
-    // compass carries her heading and airspeed, this carries her track
-    // and ground speed, and the difference between the two is the
-    // wind. Said as a pair they are readable; said as a bare AIR over
-    // a bare GND, as they were, the two numbers differed for a reason
-    // nothing on screen accounted for.
-    //
-    // The drift angle rides on the end, still hidden below a few
-    // degrees — a permanent "0°" is a number nobody has ever read.
-    //
-    // DIRECTLY OVER THE WIND STRIP, and centred like it, because the
-    // two are one sentence: ground is air plus wind. It used to sit out
-    // at 152px on the left, where the short "→ 5° TRK 131°" already
-    // ran behind the pace column; a line carrying a speed as well
-    // would have buried it.
-    this.drift = this.cluster('50%', null, 'translateX(-50%)', 'center bottom');
-    this.drift.style.bottom = 'calc(42px + min(env(safe-area-inset-bottom), 14px))';
-    Object.assign(this.drift.style, {
-      font: '600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace',
-      letterSpacing: '0.10em', color: INK, whiteSpace: 'nowrap',
-      opacity: '0', transition: 'opacity 200ms ease',
-    } as Partial<CSSStyleDeclaration>);
+    // GROUND AND WIND USED TO LIVE HERE, bottom centre, while airspeed
+    // sat under the compass. Three readings of one story, told across
+    // four hundred pixels of sky. They are stacked under the tape now
+    // (see Compass) and the middle of the screen is the world again.
 
     host.appendChild(this.root);
     this.watch = new ResizeObserver(() => this.fit());
@@ -455,7 +435,15 @@ export class FlightHud {
    * three altitudes stacked, an unlabelled number is a number nobody can
    * use.
    */
-  private railRow(label: string, value: HTMLSpanElement): HTMLDivElement {
+  /**
+   * @param lead whether this is the PRIMARY altitude. Exactly one row
+   *   is, and it is MSL, because MSL is now the altitude she actually
+   *   holds — see the flight model. Before that change the rail was
+   *   three numbers of equal weight and no answer to "how high am I".
+   */
+  private railRow(
+    label: string, value: HTMLSpanElement, lead = false,
+  ): HTMLDivElement {
     const row = document.createElement('div');
     Object.assign(row.style, {
       display: 'flex', alignItems: 'baseline', justifyContent: 'flex-end',
@@ -464,7 +452,7 @@ export class FlightHud {
       letterSpacing: '0.16em', color: DIM,
     } as Partial<CSSStyleDeclaration>);
     value.style.color = INK;
-    value.style.fontSize = '12px';
+    value.style.fontSize = lead ? '17px' : '12px';
     value.style.fontWeight = '700';
     value.style.letterSpacing = '0.04em';
     row.append(span(label), value);
@@ -562,17 +550,6 @@ export class FlightHud {
     return root;
   }
 
-  private buildWindArrow(): SVGElement {
-    const root = svg('svg');
-    set(root, { width: 22, height: 22, viewBox: '0 0 22 22', fill: 'none' });
-    const shaft = svg('path');
-    set(shaft, {
-      d: 'M11 19 L11 4 M11 4 L7 9 M11 4 L15 9',
-      stroke: INK, 'stroke-width': 1.8, 'stroke-linecap': 'round',
-    });
-    root.appendChild(shaft);
-    return root;
-  }
 
   /** Put the instruments where the telemetry says. */
   show(now: FlightTelemetry, aloft: boolean, view: FlightView): void {
@@ -662,58 +639,26 @@ export class FlightHud {
         ? WARN : DIM;
     }
 
-    // DRIFT, only when there is any worth reporting. A permanent
-    // "0°" is a number that has never once been read.
-    const drift = Math.round(now.drift);
-    const ground = `GND ${
-      String(Math.round(wrap360(now.track)) % 360).padStart(3, '0')}° @ ${
-      now.groundSpeed.toFixed(1)} cm/s${
-      Math.abs(drift) >= 3 ? `  ${drift < 0 ? '←' : '→'} ${Math.abs(drift)}°` : ''}`;
-    if (ground !== this.shownDrift) {
-      this.shownDrift = ground;
-      this.drift.textContent = ground;
-    }
-    this.drift.style.opacity = aloft ? '1' : '0';
-
-    this.windStrip.style.opacity = now.wind.speed >= 0.05 ? '1' : '0';
-    // Where the wind is pushing her, RELATIVE TO HER NOSE. Screen up is
-    // the way she is pointing, so an arrow pointing up is a tailwind and
-    // one pointing down is the wind she is fighting.
-    set(this.windArrow, {
-      style: `transform: rotate(${wrap360(now.wind.bearing - now.heading).toFixed(1)}deg)`,
-    });
-
-    // CENTIMETRES PER SECOND, NOT METRES — and this was a real bug
-    // rather than a preference.
+    // WHAT IS COMING, ONLY WHEN SOMETHING IS.
     //
-    // The wind was printed in m/s to one decimal while everything it
-    // explains — airspeed, ground speed — is in cm/s to one decimal.
-    // Two orders of magnitude apart, so "0.0" covered any wind under
-    // 5 cm/s, which is not a rounding error at this scale: it is more
-    // than a body length a second. Worse, the wind she feels is scaled
-    // by height (windProfile), and below about half a metre even a
-    // full 25 km/h trade wind lands under that threshold. So the
-    // ordinary case — flying low, in real weather — showed WIND 0.0
-    // while ground speed and airspeed visibly disagreed, and nothing
-    // on screen could account for the difference.
+    // Four instruments lived on this rail at once and three of them
+    // were answering a question nobody had asked: cruising level over
+    // open ground, where she lands and when is not information, it is
+    // furniture. So LND and TGT appear when there is a descent to fly
+    // — sinking at all, or a touchdown solved inside the horizon — and
+    // stand down when she is holding her altitude with nothing ahead.
     //
-    // Same unit, same precision, and the arithmetic closes: ground
-    // speed is airspeed plus this, component by component.
-    const felt = Math.round(now.wind.speed * 10) / 10;
-    if (felt !== this.shownWind) {
-      this.shownWind = felt;
-      this.windSpeed.textContent = felt.toFixed(1);
+    // MSL and VS never go, because those two ARE the flight.
+    const approaching = now.shownWhen !== null
+      || now.shownAtLanding !== null
+      || now.climbing < -SETTLED_SINK;
+    const want = approaching ? '1' : '0';
+    if (want !== this.shownAhead) {
+      this.shownAhead = want;
+      this.landRow.style.opacity = want;
+      this.tgt.style.opacity = want;
     }
-    // How much of it is straight back at her: a crosswind she can
-    // crab into, a headwind she may simply not beat.
-    const along = Math.cos(
-      ((now.wind.bearing - now.heading) * Math.PI) / 180,
-    ) * now.wind.speed;
-    const call = windCall(now.wind.speed, along) ?? '';
-    if (call !== this.shownCall) {
-      this.shownCall = call;
-      this.windCall.textContent = call ? `⚠ ${call}` : '';
-    }
+
   }
 
   private place(el: HTMLElement, at: { x: number; y: number } | null): void {

@@ -198,7 +198,7 @@ export class PaceSelector {
       // is no room for a second lane below the stick.
       this.auto.style.opacity = auto ? '1' : '0';
       this.auto.style.pointerEvents = auto ? 'auto' : 'none';
-      this.auto.textContent = way > 0 ? '🔒 AUTO ▲' : '🔒 AUTO ▼';
+      this.auto.textContent = way > 0 ? 'AUTO ▲' : 'AUTO ▼';
     }
 
     // ON THE GROUND, HER SPEED. IN THE AIR, HER POWER.
@@ -221,9 +221,14 @@ export class PaceSelector {
     if (shown !== this.shownSpeed || flying !== this.shownAir) {
       this.shownSpeed = shown;
       this.shownAir = flying;
+      // THE LABEL GOES, THE NUMBER STAYS. The lit row already says
+      // which setting is in force, so "PWR" was naming a thing the
+      // column is titled after; the percentage is the part that is not
+      // already on screen, and the floor warning below needs something
+      // to be a percentage OF.
       this.readout.textContent = flying === null
         ? `${shown.toFixed(1)} cm/s`
-        : `PWR ${flying}%`;
+        : `${flying}%`;
       // Under the floor she is descending whatever else she does. A
       // mark, not a verdict: the model lets her fly slower than this,
       // it just will not hold her up while she does.
@@ -341,7 +346,7 @@ export class PaceSelector {
     this.auto.type = 'button';
     this.auto.setAttribute('aria-label', 'auto direction');
     this.auto.dataset.control = 'auto-chip';
-    this.auto.textContent = '🔒 AUTO ▲';
+    this.auto.textContent = 'AUTO ▲';
     this.listenTap(this.auto, () => { this.flips += 1; });
     Object.assign(this.auto.style, {
       appearance: 'none',
@@ -352,6 +357,12 @@ export class PaceSelector {
       textAlign: 'center',
       font: '700 9px/1.6 "Chakra Petch", system-ui, sans-serif',
       letterSpacing: '.5px',
+      // ONE LINE. The label wrapped to three inside a 44-pixel column
+      // and drew a square the size of the pace rows themselves for
+      // what is a status chip. The padlock went with it — the widest
+      // glyph in the string, and the amber already says locked.
+      whiteSpace: 'nowrap',
+      padding: '3px 0',
       color: '#1a1206',
       background: 'rgba(255, 210, 110, .9)',
       borderRadius: '6px',

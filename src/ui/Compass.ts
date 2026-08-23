@@ -137,11 +137,56 @@ export interface AirLine {
   readonly speed: number;
 }
 
-/** The lines under the tape. Absent members simply do not draw. */
+/** Where she is actually going, and how fast over the island. */
+export interface GroundLine {
+  readonly track: number;
+  readonly speed: number;
+  /** Track minus heading, signed degrees. Drawn only when it matters. */
+  readonly drift: number;
+}
+
+/** The air she is in, relative to her nose. */
+export interface WindLine {
+  /** World units per second — the same unit as the two speeds above. */
+  readonly speed: number;
+  /** Degrees clockwise from her nose. Screen up is where she points. */
+  readonly relative: number;
+  /** A warning, or empty. */
+  readonly call: string;
+}
+
+/**
+ * The lines under the tape. Absent members simply do not draw.
+ *
+ * ALL THREE SPEEDS LIVE HERE NOW, and they did not used to. Airspeed
+ * was under the compass and ground speed and wind were at the bottom
+ * of the screen, which meant the one story they tell together — this
+ * is where she points, this is where she goes, this is the difference
+ * and it is the wind — was told across 400 pixels of sky. Reading it
+ * meant looking away from the ant twice. Stacked, it reads at a
+ * glance, and the bottom centre of the screen goes back to being the
+ * world.
+ */
 export interface UnderTape {
   readonly fix?: FixSource | null;
   readonly air?: AirLine | null;
+  readonly ground?: GroundLine | null;
+  readonly wind?: WindLine | null;
 }
+
+/**
+ * A HARDER SHADOW THAN THE REST OF THE HUD WEARS.
+ *
+ * Thin mint numerals over sunlit sand were dissolving into it — the
+ * canyon shot is the worst case the game has, bright ground filling
+ * the frame behind exactly the rows that matter. Two stacked shadows,
+ * one tight and one soft, read as an edge rather than as a box, which
+ * is the alternative and would have turned the sky into a dashboard.
+ */
+const SHADOW = '0 1px 2px rgba(0,0,0,.95), 0 0 7px rgba(0,0,0,.7)';
+
+/** Matches the flight panel's. */
+const WARN = '#ffb03a';
 
 export class Compass {
   private readonly root: HTMLDivElement;
@@ -152,6 +197,12 @@ export class Compass {
   private lastFix = '';
   private readonly airLine: HTMLDivElement;
   private lastAir = '';
+  private readonly groundLine: HTMLDivElement;
+  private lastGround = '';
+  private readonly windLine: HTMLDivElement;
+  private readonly windArrow: SVGSVGElement;
+  private readonly windText: HTMLSpanElement;
+  private lastWind = '';
   private readonly pins = new Map<string, HTMLDivElement>();
   /** What the strip is SHOWING, which chases what the camera is doing. */
   private shown = 0;
@@ -266,10 +317,54 @@ export class Compass {
       whiteSpace: 'nowrap',
       letterSpacing: '.04em',
       color: 'rgba(169, 242, 201, .92)',
-      textShadow: '0 1px 3px rgba(0,0,0,.8)',
+      textShadow: SHADOW,
       display: 'none',
     } as Partial<CSSStyleDeclaration>);
     this.root.appendChild(this.airLine);
+
+    // GROUND AND WIND, quieter than the air line above them. A
+    // hierarchy rather than three equal rows: the top one is what she
+    // is doing, the two under it are what it is coming out as and why.
+    this.groundLine = document.createElement('div');
+    this.groundLine.dataset.ui = 'compass-ground';
+    Object.assign(this.groundLine.style, {
+      marginTop: '1px',
+      textAlign: 'center',
+      font: '600 9px/1 "JetBrains Mono", ui-monospace, monospace',
+      fontVariantNumeric: 'tabular-nums',
+      whiteSpace: 'nowrap',
+      letterSpacing: '.04em',
+      color: 'rgba(169, 242, 201, .74)',
+      textShadow: SHADOW,
+      display: 'none',
+    } as Partial<CSSStyleDeclaration>);
+    this.root.appendChild(this.groundLine);
+
+    this.windLine = document.createElement('div');
+    this.windLine.dataset.ui = 'compass-wind';
+    Object.assign(this.windLine.style, {
+      marginTop: '1px',
+      display: 'none',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: '4px',
+      font: '600 9px/1 "JetBrains Mono", ui-monospace, monospace',
+      fontVariantNumeric: 'tabular-nums',
+      whiteSpace: 'nowrap',
+      letterSpacing: '.04em',
+      color: 'rgba(169, 242, 201, .74)',
+      textShadow: SHADOW,
+    } as Partial<CSSStyleDeclaration>);
+    this.windArrow = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    this.windArrow.setAttribute('width', '9');
+    this.windArrow.setAttribute('height', '9');
+    this.windArrow.setAttribute('viewBox', '0 0 22 22');
+    this.windArrow.innerHTML = '<path d="M11 19 L11 4 M11 4 L7 9 M11 4 L15 9" '
+      + 'stroke="rgba(169,242,201,.85)" stroke-width="2.4" '
+      + 'stroke-linecap="round" fill="none"/>';
+    this.windText = document.createElement('span');
+    this.windLine.append(this.windArrow, this.windText);
+    this.root.appendChild(this.windLine);
 
     // THE POSITION FIX, under the heading and deliberately quieter than
     // it. A development instrument (see fix.ts): the heading above it
@@ -284,7 +379,7 @@ export class Compass {
       fontVariantNumeric: 'tabular-nums',
       whiteSpace: 'nowrap',
       color: 'rgba(214, 190, 140, .68)',
-      textShadow: '0 1px 3px rgba(0,0,0,.85)',
+      textShadow: SHADOW,
       display: 'none',
     } as Partial<CSSStyleDeclaration>);
     this.root.appendChild(this.fixLine);
@@ -403,6 +498,41 @@ export class Compass {
     } else if (this.airLine.style.display !== 'none') {
       this.airLine.style.display = 'none';
       this.lastAir = '';
+    }
+
+    const ground = under?.ground ?? null;
+    if (ground) {
+      const line = `GND ${
+        String(Math.round(wrap360(ground.track)) % 360).padStart(3, '0')}° @ ${
+        ground.speed.toFixed(1)}${
+        Math.abs(ground.drift) >= 3
+          ? `  ${ground.drift < 0 ? '←' : '→'}${Math.abs(Math.round(ground.drift))}°`
+          : ''}`;
+      if (line !== this.lastGround) {
+        this.lastGround = line;
+        this.groundLine.textContent = line;
+      }
+      if (this.groundLine.style.display === 'none') this.groundLine.style.display = '';
+    } else if (this.groundLine.style.display !== 'none') {
+      this.groundLine.style.display = 'none';
+      this.lastGround = '';
+    }
+
+    const wind = under?.wind ?? null;
+    if (wind) {
+      const line = `${wind.speed.toFixed(1)} cm/s${wind.call ? `  ⚠ ${wind.call}` : ''}`;
+      if (line !== this.lastWind) {
+        this.lastWind = line;
+        this.windText.textContent = line;
+        this.windText.style.color = wind.call ? WARN : '';
+        // Screen up is her nose, so an arrow pointing up is a tailwind
+        // and one pointing down is what she is fighting.
+        this.windArrow.style.transform = `rotate(${wind.relative.toFixed(0)}deg)`;
+      }
+      if (this.windLine.style.display === 'none') this.windLine.style.display = 'flex';
+    } else if (this.windLine.style.display !== 'none') {
+      this.windLine.style.display = 'none';
+      this.lastWind = '';
     }
 
     const fix = under?.fix ?? null;

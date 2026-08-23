@@ -87,7 +87,8 @@ export interface Settings {
    */
   detailRange: number;
   /**
-   * Whether the compass carries a position fix under it.
+   * The developer overlay: the position fix under the compass, and the
+   * DIE button.
    *
    * A DEVELOPMENT INSTRUMENT, on by default while the island is being
    * built. It is the cheapest way to close the loop between a phone
@@ -95,6 +96,11 @@ export interface Settings {
    * tape put the camera back exactly where the picture was taken. It
    * is a toggle rather than a fixture because the contextual-HUD rule
    * is real and a coordinate is not something the game is about.
+   *
+   * The DIE button rides with it for the same reason. It reads as
+   * scaffolding because it is scaffolding, and it was sitting in the
+   * top right beside the weather and the settings cog — the corner
+   * that should be nothing but the game's own furniture.
    */
   showFix: boolean;
 }

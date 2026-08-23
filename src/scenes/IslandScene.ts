@@ -48,7 +48,7 @@ import { MM_PER_UNIT } from '../ant/queenModel';
 import { ActionPad, type Action } from '../input/ActionPad';
 import { DebugDie } from '../ui/DebugDie';
 import { WeatherChip } from '../ui/WeatherChip';
-import { FlightHud, type FlightView } from '../ui/FlightHud';
+import { FlightHud, windCall, type FlightView } from '../ui/FlightHud';
 import {
   Eased, SOON, driftOf, touchdown, trackOf,
   type FlightTelemetry,
@@ -382,7 +382,9 @@ export class IslandScene {
       setFlightScale(settings().flightSpeed);
       weather().setMode(settings().liveWeather ? 'live' : 'simulated');
       setDetailRange(settings().detailRange);
+      this.debugDie.show(settings().showFix);
     });
+    this.debugDie.show(settings().showFix);
     // The view is a world bearing, so it has to be told where behind
     // her IS. Without this she opens side-on to her own camera.
     this.look.setYaw(-facing);
@@ -927,8 +929,31 @@ export class IslandScene {
         air: this.flight.aloft
           ? { heading: telemetry.heading, speed: telemetry.airspeed }
           : null,
+        ground: this.flight.aloft
+          ? {
+            track: telemetry.track,
+            speed: telemetry.groundSpeed,
+            drift: telemetry.drift,
+          }
+          : null,
+        // Only when there is a wind to speak of. The readout resolves
+        // to a tenth of a centimetre a second; below that there is
+        // nothing to say and a permanent "0.0" is a row nobody reads.
+        wind: this.flight.aloft && telemetry.wind.speed >= 0.05
+          ? {
+            speed: telemetry.wind.speed,
+            relative: telemetry.wind.bearing - telemetry.heading,
+            call: windCall(
+              telemetry.wind.speed,
+              Math.cos(
+                ((telemetry.wind.bearing - telemetry.heading) * Math.PI) / 180,
+              ) * telemetry.wind.speed,
+            ) ?? '',
+          }
+          : null,
       },
     );
+    this.vitals.aloft(this.flight.aloft);
     this.vitals.show(this.stamina.fraction, this.stamina.spent, this.effort);
 
     // ── DRINKING, and the thirst that finally moves ─────────────────

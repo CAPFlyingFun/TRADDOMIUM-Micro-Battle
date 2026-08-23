@@ -172,6 +172,31 @@ export class Vitals {
    * when nothing is happening it says so rather than inventing a
    * deadline.
    */
+  /**
+   * TRIM THE CARD WHILE SHE IS FLYING.
+   *
+   * Not a redesign — the card is right and it stays exactly as it is
+   * on the ground. But the flight instruments arrive on top of an
+   * interface that was composed without them, and this panel owns the
+   * whole upper left while they do. Scaled from its own top-left
+   * corner so it stays anchored, and eased, so that the interface
+   * visibly changes mode when the wings come out rather than
+   * flickering between two layouts.
+   *
+   * A SCALE RATHER THAN A SECOND LAYOUT, deliberately: two layouts is
+   * two things to keep right, and the one that is only ever seen in
+   * flight is the one that would rot.
+   */
+  aloft(flying: boolean): void {
+    if (flying === this.flying) return;
+    this.flying = flying;
+    this.panel.style.transformOrigin = 'left top';
+    this.panel.style.transition = 'transform 260ms ease';
+    this.panel.style.transform = flying ? 'scale(0.84)' : '';
+  }
+
+  private flying = false;
+
   show(fraction: number, spent: boolean, rate: number): void {
     const left = Math.max(0, Math.min(1, fraction));
     const label = enduranceWords(left, rate);
