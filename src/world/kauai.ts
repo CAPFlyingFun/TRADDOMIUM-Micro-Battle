@@ -181,6 +181,42 @@ function sampleAt(grid: HeightGrid, col: number, row: number): number {
 }
 
 /**
+ * HOW STEEP THE BAKED ISLAND IS HERE — rise over run, from the same
+ * four corners `heightAt` reads.
+ *
+ * Free, near enough: the bilinear patch these corners describe has an
+ * analytic gradient, so this costs four array reads and no extra
+ * interpolation. That matters because the caller is `baseLand`, which
+ * is the hottest function in the game.
+ *
+ * The slope is the BAKED island's, deliberately — the real landform at
+ * 55 m a sample, not the procedural relief laid over it. Asking the
+ * relief how steep it is to decide how much relief to add is a loop.
+ *
+ * NOT `slopeAt`, and the two are not redundant. That one differences
+ * across a whole sample either side and answers "is this NEIGHBOURHOOD
+ * flat enough to stand a camera on", which is what a spawn wants. This
+ * one is the gradient of the patch she is actually standing in, which
+ * is what a shader-side decision wants, and it is four reads instead
+ * of sixteen.
+ */
+export function cellSlope(grid: HeightGrid, x: number, z: number): number {
+  const gx = (x + SPAN / 2) / STEP;
+  const gz = (z + SPAN / 2) / STEP;
+  const c = Math.floor(gx);
+  const r = Math.floor(gz);
+  const fx = gx - c;
+  const fz = gz - r;
+  const h00 = sampleAt(grid, c, r);
+  const h10 = sampleAt(grid, c + 1, r);
+  const h01 = sampleAt(grid, c, r + 1);
+  const h11 = sampleAt(grid, c + 1, r + 1);
+  const dx = (h10 - h00) * (1 - fz) + (h11 - h01) * fz;
+  const dz = (h01 - h00) * (1 - fx) + (h11 - h10) * fx;
+  return Math.hypot(dx, dz) / STEP;
+}
+
+/**
  * Bilinear ground height at a world position, with the island centred
  * on the origin. Outside the grid the edge sample is held, which is
  * open ocean on every side.

@@ -35,7 +35,7 @@
  * Heights are world units with the waterline at 0.
  */
 import {
-  blurGrid, heightAt, SPAN, STEP, UNITS_PER_METRE, type HeightGrid,
+  blurGrid, cellSlope, heightAt, SPAN, STEP, UNITS_PER_METRE, type HeightGrid,
 } from './kauai';
 import { lakeBed } from './lakes';
 import { riverBed } from './rivers';
@@ -67,6 +67,18 @@ const OCTAVES: ReadonlyArray<readonly [wavelength: number, height: number]> = [
   [80, 3],
   [27, 1.1],
 ];
+
+/**
+ * Where the procedural relief starts giving way, as a gradient.
+ *
+ * Half — a 27° slope. Gentle hills keep all their texture; anything
+ * approaching a wall loses it in proportion.
+ */
+const STEEP_FROM = 0.5;
+/** And where it has given up all it is going to. A 63° face. */
+const STEEP_TO = 2;
+/** What a sheer face keeps. Bare rock is not glass. */
+const CLIFF_KEEPS = 0.34;
 
 /** Wavelength of the shading mottle, in world units. */
 const DETAIL_WAVELENGTH = 190;
@@ -165,6 +177,18 @@ function valueNoise(x: number, y: number, salt: number): number {
  * a tuning edit made to one and not the other is a visible height seam
  * at the tier boundary.
  */
+/**
+ * How much of the procedural relief this ground should get, 0 to 1.
+ * One on the flat, CLIFF_KEEPS on a wall, smooth in between.
+ */
+function calm(x: number, z: number): number {
+  if (!grid) return 1;
+  const steep = cellSlope(grid, x, z);
+  const t = Math.min(1, Math.max(0, (steep - STEEP_FROM) / (STEEP_TO - STEEP_FROM)));
+  const eased = t * t * (3 - 2 * t);
+  return 1 - (1 - CLIFF_KEEPS) * eased;
+}
+
 function baseLand(x: number, z: number): number {
   if (!grid) return 0;
   const raw = heightAt(grid, x, z);
@@ -184,7 +208,23 @@ function baseLand(x: number, z: number): number {
   // Ease the relief in over the first stretch of land so the beach
   // still meets the water cleanly rather than in a cliff of noise.
   const shore = Math.min(1, base / 400);
-  return base + relief * shore;
+
+  // AND EASE IT OUT AGAIN ON THE STEEP GROUND, for the same reason at
+  // the other end of the island.
+  //
+  // The octaves are ninety-four units of noise, which is what makes
+  // flat ground read as ground rather than as polished stone. On a
+  // near-vertical face it is what makes the skyline a row of teeth:
+  // the lattice is 8 to 32 units across, the noise is three times
+  // that, and every triangle on the silhouette gets its own spike.
+  // Kauaʻi has some of the steepest terrain on Earth in it, so this is
+  // not a rare case — it is the Nāpali coast and every valley wall.
+  //
+  // Faded on the BAKED slope rather than on the finished one, because
+  // asking the relief how steep it is to decide how much relief to add
+  // is a loop. A cliff keeps a third of it: bare rock is not glass,
+  // and taking it all away trades teeth for plastic.
+  return base + relief * shore * calm(x, z);
 }
 
 export function terrainHeight(x: number, z: number): number {

@@ -21,6 +21,7 @@ import { LakeWater } from '../world/LakeWater';
 import { RiverWater } from '../world/RiverWater';
 import { hydro, waterBodyAt } from '../world/water';
 import { Thirst, TOO_DEEP } from '../ant/thirst';
+import { Swim } from '../ant/swim';
 import { shoreward, surfAt, type Surf } from '../world/surf';
 
 /**
@@ -998,12 +999,27 @@ export class IslandScene {
       // for one while stopped or reversing costs nothing.
       const sprinting = wants && travel.speed > PACE_SPEED[this.pace] + 1e-3;
       const resting = this.ant.pace < 0.05;
-      this.effort = sprinting ? SPRINT_DRAIN
-        : resting ? RESTING_RECOVERY : MOVING_RECOVERY;
+      // THE WATER GETS A VOTE, and it has to be counted BEFORE she
+      // moves: what it does to her is not only a push, it is how fast
+      // she can go, what it costs her, and — new — how high off the
+      // bed she is sitting. On the ground the wind already has her.
+      const carry = this.swept(dt);
+      const wet = this.swim.afloat;
+      this.effort = (sprinting ? SPRINT_DRAIN
+        : resting ? RESTING_RECOVERY : MOVING_RECOVERY) + wet.cost;
       winded = this.stamina.update(this.effort, dt);
-      // THE SEA GETS A VOTE. On the ground she is only ever carried by
-      // water she is standing in; in the air the wind already has her.
-      this.ant.update(travel, -look.yaw, dt, 0, this.swept(dt));
+      // ROWING IS NOT WALKING. Slower through it than on top of it,
+      // and slower still under.
+      const through = wet.pace === 1 ? travel : {
+        ahead: travel.ahead * wet.pace,
+        across: travel.across * wet.pace,
+        speed: travel.speed * wet.pace,
+      };
+      // SHE STANDS ON WHATEVER IS HOLDING HER UP. `above` was always
+      // zero here — she was welded to the bed — so floating needs no
+      // new machinery in the walker: the surface is simply a higher
+      // floor. See swim.ts.
+      this.ant.update(through, -look.yaw, dt, wet.ride, carry);
     }
 
     // Exhaustion drops her to the sustainable pace, never to a halt —
@@ -1662,15 +1678,27 @@ export class IslandScene {
     const body = waterBodyAt(at.wx, at.wz, this.elapsed);
     if (body && body.kind !== 'sea') {
       // Lake and river levels are RAW; she stands on the DRAWN ground.
-      const depth = body.level * reliefScale() - ground;
-      if (depth > 0) {
-        const wet = Math.min(1, Math.max(0, depth / Math.max(1e-6, draft)));
-        const grip = wet * wet * (3 - 2 * wet);
-        this.surf = { depth, grip, x: body.flowX, z: body.flowZ };
-      } else {
-        this.surf = { depth: 0, grip: 0, x: 0, z: 0 };
-      }
+      const level = body.level * reliefScale();
+      // HOW MUCH OF HER THE WATER HAS — see swim.ts. The old answer was
+      // "all of it, one body length in", which is a centimetre against
+      // channels one to two hundred deep: stepping into a river went
+      // from nothing to fully swept inside a stride. It also had no
+      // way to say she was standing ON the water, which at her size is
+      // the ordinary case rather than a trick.
+      const wet = this.swim.update(
+        level > ground ? { level, bed: ground } : null,
+        draft, this.stamina.fraction,
+        // Driving the lever down IS a dive once she is afloat.
+        this.liftSlider.lift < -0.35, dt,
+      );
+      this.surf = {
+        depth: Math.max(0, level - ground),
+        grip: wet.grip,
+        x: body.flowX,
+        z: body.flowZ,
+      };
     } else {
+      this.swim.update(null, draft, this.stamina.fraction, false, dt);
       // No uphill means flat ground, where a broken wave has no
       // direction to run in and the orbital flow is the whole story.
       this.surf = surfAt(
@@ -1694,6 +1722,9 @@ export class IslandScene {
   }
 
   private readonly carried = { x: 0, z: 0 };
+
+  /** What the water is doing to her — surface, swimming, submerged. */
+  private readonly swim = new Swim();
 
   private windOnHer(): { x: number; z: number } | null {
     const sky = this.nowWeather;

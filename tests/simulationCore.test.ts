@@ -56,6 +56,7 @@ const CORE = [
   'src/ant/wander.ts',
   'src/ant/wingbeat.ts',
   'src/ant/grace.ts',
+  'src/ant/swim.ts',
 ];
 
 /** Strip comments, so prose about a "streamed window" is not a hit. */
@@ -83,7 +84,7 @@ describe('the simulation core runs without a browser', () => {
   it('and the list has not quietly emptied itself', () => {
     // A guard that guards nothing passes forever. If the core is
     // refactored, this number moves deliberately.
-    expect(CORE.length).toBeGreaterThanOrEqual(23);
+    expect(CORE.length).toBeGreaterThanOrEqual(24);
     for (const path of CORE) expect(code(path).length).toBeGreaterThan(200);
   });
 });
