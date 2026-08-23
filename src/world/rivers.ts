@@ -70,6 +70,25 @@ export const BANK_GRADE = 0.8;
 const BANK_REACH = 400;
 
 /**
+ * THE WIDEST FOOTPRINT A COARSE TIER MAY ASK ABOUT, in world units.
+ *
+ * A distance tier's vertices stand 312 to 3,125 units apart and a
+ * river is 550 across, so a tier that samples the trench AT its
+ * vertices mostly misses it — which is why `farHeight` used to refuse
+ * rivers altogether, and why every ribbon past the streamed cells was
+ * drawn over ground that had no channel in it. Measured on the whole
+ * drainage, 76% of the river surface sat BELOW the drawn terrain, by a
+ * median of 196 units and as much as 6,656.
+ *
+ * The cure is not a finer tier — it is asking the honest question. A
+ * coarse vertex does not stand for a point, it stands for the square
+ * around it, and the lowest ground in that square is the answer the
+ * mesh should carry. Bounded here because the query walks one cell of
+ * neighbours (see `riverAt`) and must not out-reach the walk.
+ */
+export const CARVE_SLACK = 5_000;
+
+/**
  * Flow speed from the water-surface slope.
  *
  * GAME TUNING with the right shape: open-channel flow goes with the
@@ -234,21 +253,45 @@ export function useRivers(hydro: Hydro): void {
  * keeps the junction wet rather than letting a shallow tributary carve
  * a notch through the trunk's surface.
  */
-export function riverAt(x: number, z: number): RiverSpot | null {
+export function riverAt(x: number, z: number, slack = 0): RiverSpot | null {
   if (!heads || !counts || !buckets) return null;
+  const give = Math.max(0, Math.min(slack, CARVE_SLACK));
   const cx = Math.floor((x + SPAN / 2) / CELL);
   const cz = Math.floor((z + SPAN / 2) / CELL);
   if (cx < 0 || cz < 0 || cx >= CELLS || cz >= CELLS) return null;
-  const cell = cz * CELLS + cx;
-  const from = heads[cell];
-  if (from < 0) return null;
 
+  // WITH SLACK, ONE CELL IS NOT ENOUGH. A segment is bucketed by its
+  // own influence, which is a few hundred units; a coarse vertex asks
+  // about a footprint of up to CARVE_SLACK. The neighbouring cells
+  // reach at least CELL units in every direction, and CARVE_SLACK is
+  // bounded below that, so the walk cannot miss a claimant. The hot
+  // path — slack zero, which is every fine query — still reads one.
   let best: RiverSpot | null = null;
-  const many = counts[cell];
+  if (give === 0) return scan(cz * CELLS + cx, x, z, 0, null);
+  for (let dz = -1; dz <= 1; dz++) {
+    const nz = cz + dz;
+    if (nz < 0 || nz >= CELLS) continue;
+    for (let dx = -1; dx <= 1; dx++) {
+      const nx = cx + dx;
+      if (nx < 0 || nx >= CELLS) continue;
+      best = scan(nz * CELLS + nx, x, z, give, best);
+    }
+  }
+  return best;
+}
+
+/** One bucket's worth of candidates, folded into `best`. */
+function scan(
+  cell: number, x: number, z: number, give: number, best: RiverSpot | null,
+): RiverSpot | null {
+  const from = heads![cell];
+  if (from < 0) return best;
+
+  const many = counts![cell];
   for (let n = 0; n < many; n++) {
-    const s = buckets[from + n];
+    const s = buckets![from + n];
     const half = wide![s] / 2;
-    const cut = half + Math.min(BANK_REACH + half, 2_000);
+    const cut = half + Math.min(BANK_REACH + half, 2_000) + give;
     // Cheap box reject before the projection.
     if (x < Math.min(ax![s], bx![s]) - cut || x > Math.max(ax![s], bx![s]) + cut) continue;
     if (z < Math.min(az![s], bz![s]) - cut || z > Math.max(az![s], bz![s]) + cut) continue;
@@ -269,24 +312,43 @@ export function riverAt(x: number, z: number): RiverSpot | null {
     const deep = channelDepth(width);
     // The carve profile: flat bed in the middle, eased wall to the
     // channel edge, then the bank grade climbing away from it.
+    //
+    // READ AT THE NEAREST POINT OF THE FOOTPRINT, not at the vertex.
+    // `give` is half a coarse tier's vertex spacing, so this answers
+    // "how low does the ground get anywhere this vertex stands for" —
+    // and a vertex that stands for a piece of channel is put in the
+    // channel. Zero for every fine query, where the vertex is the only
+    // place it speaks for.
+    const inner = Math.max(0, off - give);
     let bed: number;
-    if (off <= half) {
-      const wall = Math.max(0, (off / half - FLAT_BED) / (1 - FLAT_BED));
+    if (inner <= half) {
+      const wall = Math.max(0, (inner / half - FLAT_BED) / (1 - FLAT_BED));
       const eased = wall * wall * (3 - 2 * wall);
       bed = level - deep * (1 - eased);
     } else {
-      bed = level + (off - half) * BANK_GRADE;
+      bed = level + (inner - half) * BANK_GRADE;
     }
 
+    const spot = {
+      level, bed, width, off,
+      flowX: fx![s] * speed![s],
+      flowZ: fz![s] * speed![s],
+    };
+    if (give > 0) {
+      // A FOOTPRINT WANTS THE LOWEST BED, and only that. The crossing
+      // rule below is the right answer to "whose water is this" and
+      // the wrong answer to "how low does the ground get here": on
+      // ground this steep a tributary a hundred metres off can stand
+      // twenty metres higher, and letting it win lifts the bed back
+      // over the reach the vertex was supposed to hold. Measured, the
+      // rule alone made a wider footprint WORSE — 37% of the river
+      // surface buried at 0.75 of a step, 52% at 1.45.
+      if (!best || bed < best.bed) best = spot;
+      continue;
+    }
     if (!best || level > best.level - 1e-9) {
       // Higher water wins at a crossing; nearer wins a tie.
-      if (!best || level > best.level + 1e-9 || off < best.off) {
-        best = {
-          level, bed, width, off,
-          flowX: fx![s] * speed![s],
-          flowZ: fz![s] * speed![s],
-        };
-      }
+      if (!best || level > best.level + 1e-9 || off < best.off) best = spot;
     }
   }
   return best;
@@ -300,8 +362,8 @@ export function riverAt(x: number, z: number): RiverSpot | null {
  * from the channel it climbs past any sensible terrain and stops
  * mattering on its own.
  */
-export function riverBed(x: number, z: number): number | null {
-  const spot = riverAt(x, z);
+export function riverBed(x: number, z: number, slack = 0): number | null {
+  const spot = riverAt(x, z, slack);
   return spot ? spot.bed : null;
 }
 

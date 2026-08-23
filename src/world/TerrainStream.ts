@@ -284,6 +284,13 @@ export function buildCell(
  * happens that is a fifth of a degree. Invisible, which is the whole
  * argument: a seam you cannot see beats a hole you can.
  */
+/**
+ * How much of a coarse tier's vertex spacing one vertex answers for,
+ * when it is asked how low the ground gets. Measured rather than
+ * chosen: see the water-containment test.
+ */
+const FOOTPRINT = 1;
+
 const OVERLAP = 0.8;
 
 /** How far each tier reaches, for the tier outside it to cut against. */
@@ -311,16 +318,19 @@ export const TIER_CUTS = {
  * reading of "this sample cannot see the beach it is standing on".
  */
 function dryLand(x: number, z: number, step: number): number {
-  // `farHeight`, not `terrainHeight`: the distance tiers do not get the
-  // river trench, because their vertices cannot hold one — see the
-  // comment on farHeight. This function is only ever called for those
-  // tiers, so the resolution gate and the coastline fix share a door.
-  const here = farHeight(x, z);
+  // `farHeight` WITH THE FOOTPRINT, not `terrainHeight`: this function
+  // is only ever called for the distance tiers, and out there a vertex
+  // stands for the square around it rather than for a point. Passing
+  // the footprint is what puts the rivers and lakes back into the
+  // coarse surface at a width its triangles can actually hold — see
+  // the comment on farHeight. The two neighbourhood questions, MIN for
+  // the water and MAX for the coastline, share a door.
+  const reach = step * FOOTPRINT;
+  const here = farHeight(x, z, reach);
   if (here > 0) return here;
-  const reach = step * 0.5;
   const around = Math.max(
-    farHeight(x + reach, z), farHeight(x - reach, z),
-    farHeight(x, z + reach), farHeight(x, z - reach),
+    farHeight(x + reach, z, reach), farHeight(x - reach, z, reach),
+    farHeight(x, z + reach, reach), farHeight(x, z - reach, reach),
   );
   // Just above the waterline, not up to the neighbour's height: the
   // point is to stop the sea showing through, not to invent a cliff.

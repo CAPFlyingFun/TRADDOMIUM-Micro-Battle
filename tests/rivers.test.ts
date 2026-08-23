@@ -98,16 +98,43 @@ describe('the channel carve', () => {
     expect(checked).toBeGreaterThan(150);
   });
 
-  it('does not exist in the far tiers, which cannot hold it', () => {
-    // farHeight is the distance tiers' surface. A carve applied there
-    // lands on one vertex and misses the next — pockmarks, not rivers.
-    let differs = 0;
+  it('reaches the far tiers as a footprint, not as a point', () => {
+    // THIS TEST USED TO ASSERT THE OPPOSITE, and asserting it is how
+    // the floating-water bug survived: farHeight refused the channel
+    // outright, on the argument that a point sample at 312 or 3,125
+    // units lands on one vertex and misses the next — pockmarks, not
+    // rivers. True of a POINT sample. The ribbons were drawn out there
+    // regardless, over ground with no channel in it, and ended up
+    // inside the hillside. See waterFits.test.ts for the measurement.
+    //
+    // Asked about a footprint instead, a coarse vertex answers with the
+    // lowest ground it stands for, and the channel arrives at a width
+    // the tier's triangles can hold. So: no carve at a bare point far
+    // from the channel, a carve once the footprint reaches it, and
+    // never above what terrainHeight already said.
+    let widened = 0;
     for (let i = 0; i < hydro.x.length; i += 397) {
-      if (farHeight(hydro.x[i], hydro.z[i]) - terrainHeight(hydro.x[i], hydro.z[i]) > 1) {
-        differs++;
+      const x = hydro.x[i];
+      const z = hydro.z[i];
+      // A stride away — outside the channel, inside a coarse footprint.
+      const off = 1_200;
+      const point = farHeight(x + off, z);
+      const square = farHeight(x + off, z, 3_125);
+      expect(square).toBeLessThanOrEqual(point + 1e-6);
+      if (point - square > 1) widened++;
+    }
+    expect(widened).toBeGreaterThan(50);
+  });
+
+  it('and the footprint never lifts the ground', () => {
+    for (let i = 0; i < hydro.x.length; i += 397) {
+      const x = hydro.x[i];
+      const z = hydro.z[i];
+      const bare = farHeight(x, z);
+      for (const slack of [312.5, 3_125]) {
+        expect(farHeight(x, z, slack)).toBeLessThanOrEqual(bare + 1e-6);
       }
     }
-    expect(differs).toBeGreaterThan(50);
   });
 });
 

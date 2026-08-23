@@ -309,9 +309,22 @@ export class RiverWater {
       side: THREE.DoubleSide,
       // LIFTED, not sunk — see the class comment. The opposite sign to
       // the ocean and the lakes, and it is BE's lesson, not a typo.
+      //
+      // CONSTANT, THOUGH, NOT SLOPE-SCALED, and that part WAS a bug.
+      // GL's offset is `factor x depthSlope + units x epsilon`, and the
+      // depth slope of a ribbon seen nearly edge-on is enormous — so a
+      // factor of -2 stopped being a tie-break and became a licence to
+      // draw over whatever was in front. With the trench missing from
+      // every tier past the streamed cells (see farHeight), half the
+      // drainage was buried in hillside and this floated it back out as
+      // a pale sheet you could fly through. The tier fix removes the
+      // burial; dropping the factor removes the licence. What is left
+      // is what was actually wanted: a constant nudge, enough to break
+      // the tie where the surface meets its own bank and the bed and
+      // the water really are coplanar.
       polygonOffset: true,
-      polygonOffsetFactor: -2,
-      polygonOffsetUnits: -4,
+      polygonOffsetFactor: 0,
+      polygonOffsetUnits: -8,
     });
 
     material.onBeforeCompile = (shader) => {

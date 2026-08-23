@@ -195,10 +195,14 @@ export class LakeWater {
       side: THREE.DoubleSide,
       // The bed is only two metres under at most, and at the bank it is
       // no distance at all — so the surface and the ground are very
-      // nearly coplanar exactly where the eye is drawn.
+      // nearly coplanar exactly where the eye is drawn. Sunk rather
+      // than lifted, so the bank wins the tie and the edge reads as a
+      // shoreline. CONSTANT, not slope-scaled, for the reason
+      // RiverWater's offset spells out: a factor runs away at grazing
+      // angles, and a lake seen from an ant's eye is always grazing.
       polygonOffset: true,
-      polygonOffsetFactor: 2,
-      polygonOffsetUnits: 10,
+      polygonOffsetFactor: 0,
+      polygonOffsetUnits: 12,
     });
 
     material.onBeforeCompile = (shader) => {

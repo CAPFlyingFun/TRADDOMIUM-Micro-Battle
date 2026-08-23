@@ -56,6 +56,25 @@ export const LAKE_FEATHER = 1_000;
 export const SHALLOWEST = 20;
 
 /**
+ * How far under the waterline the ground just OUTSIDE a lake is taken
+ * when a coarse vertex stands for a piece of that lake.
+ *
+ * Only far enough that the surface is not coplanar with the ground it
+ * is drawn against. The rim is not a bank — the bank belongs to the
+ * eased profile inside the shore — it is the smallest concession that
+ * stops a plate poking through the vertex next to it.
+ */
+const BRIM = 20;
+
+/**
+ * THE WIDEST FOOTPRINT A COARSE TIER MAY ASK ABOUT, in world units.
+ * Bounded well under CELL so the one-cell neighbour walk in `lakeBed`
+ * cannot miss a basin. See the
+ * matching constant in rivers.ts for why any of this exists.
+ */
+export const CARVE_SLACK = 5_000;
+
+/**
  * Index cell size. Five hundred metres: comfortably larger than all but
  * the biggest lake, so most lakes touch one or two cells, and coarse
  * enough that the whole island is a 112-square grid rather than a
@@ -289,35 +308,71 @@ function toEdge(ring: Float64Array, x: number, z: number): number {
  * lake still buried in it. Taken as a minimum, never a maximum, so a
  * lake can only ever lower the island.
  */
-export function lakeBed(x: number, z: number): number | null {
+export function lakeBed(x: number, z: number, slack = 0): number | null {
   if (!heads || !counts || !buckets) return null;
-  const cell = cellOf(x, z);
-  if (cell < 0) return null;
-  const from = heads[cell];
+  const give = Math.max(0, Math.min(slack, CARVE_SLACK));
+  const cx = Math.floor((x + SPAN / 2) / CELL);
+  const cz = Math.floor((z + SPAN / 2) / CELL);
+  if (cx < 0 || cz < 0 || cx >= CELLS || cz >= CELLS) return null;
+  if (give === 0) return claim(cz * CELLS + cx, x, z, 0);
+
+  // One cell of neighbours, for the reason rivers.ts gives: a lake
+  // whose box is wholly in the next cell can still be inside a coarse
+  // vertex's footprint. CELL is 50,000 and the footprint is bounded at
+  // 2,000, so the walk is generous by a wide margin.
+  let low: number | null = null;
+  for (let dz = -1; dz <= 1; dz++) {
+    const nz = cz + dz;
+    if (nz < 0 || nz >= CELLS) continue;
+    for (let dx = -1; dx <= 1; dx++) {
+      const nx = cx + dx;
+      if (nx < 0 || nx >= CELLS) continue;
+      const bed = claim(nz * CELLS + nx, x, z, give);
+      if (bed !== null && (low === null || bed < low)) low = bed;
+    }
+  }
+  return low;
+}
+
+/** The lowest bed any lake in one bucket presses here, or null. */
+function claim(cell: number, x: number, z: number, give: number): number | null {
+  const from = heads![cell];
   if (from < 0) return null;
 
-  const many = counts[cell];
+  let low: number | null = null;
+  const many = counts![cell];
   for (let n = 0; n < many; n++) {
-    const lake = basins[buckets[from + n]];
-    if (x < lake.minX || x > lake.maxX || z < lake.minZ || z > lake.maxZ) continue;
-    if (!inside(lake.rings[0], x, z)) continue;
-    // An island in the lake is not the lake.
-    let onLand = false;
-    for (let r = 1; r < lake.rings.length; r++) {
-      if (inside(lake.rings[r], x, z)) { onLand = true; break; }
-    }
-    if (onLand) continue;
+    const lake = basins[buckets![from + n]];
+    if (x < lake.minX - give || x > lake.maxX + give) continue;
+    if (z < lake.minZ - give || z > lake.maxZ + give) continue;
 
-    // Eased in from the shore, so the bank is a bank and not a wall.
+    // How far in from the water's edge this point is: positive inside
+    // the lake, negative on the bank or on an island in it.
     let near = toEdge(lake.rings[0], x, z);
+    let wet = inside(lake.rings[0], x, z);
     for (let r = 1; r < lake.rings.length; r++) {
       near = Math.min(near, toEdge(lake.rings[r], x, z));
+      // An island in the lake is not the lake.
+      if (inside(lake.rings[r], x, z)) wet = false;
     }
-    const t = Math.min(1, near / lake.feather);
+    if (!wet) near = -near;
+
+    // The footprint reaches `give` further in than the vertex does.
+    const reach = near + give;
+    if (reach <= 0) continue;
+
+    // Inside, the eased profile, so the bank is a bank and not a wall.
+    // Outside — a vertex that merely STANDS FOR some water — only the
+    // brim, because the ground there is still ground and lowering it to
+    // the floor would dig a moat the finer tier does not have.
+    const t = Math.min(1, reach / lake.feather);
     const eased = t * t * (3 - 2 * t);
-    return lake.level + (lake.floor - lake.level) * eased;
+    const bed = near > 0
+      ? lake.level + (lake.floor - lake.level) * eased
+      : lake.level - BRIM;
+    if (low === null || bed < low) low = bed;
   }
-  return null;
+  return low;
 }
 
 /** The surface height of the lake at this point, or null. */

@@ -208,22 +208,50 @@ export function terrainHeight(x: number, z: number): number {
 }
 
 /**
- * The surface WITHOUT the river trench — for the distance tiers.
+ * THE SURFACE A DISTANCE TIER SHOULD CARRY, given how coarsely it is
+ * cut. `slack` is how much ground one of its vertices stands for.
  *
- * A tier whose vertices cannot hold a channel must not be given one:
- * the transition tier samples every 312.5 units and a median river is
- * 550 wide, so the carve lands on one vertex here, none there, and the
- * river line becomes a run of pockmarks — the floating-plates bug
- * wearing a new hat. Those tiers keep the lakes (130 m wide, forty
- * vertices even at the transition step) and skip the rivers; the river
- * SURFACE out there is the ribbon's job, and the near tiers, where she
- * actually walks and lands, carry the real trench.
+ * THIS USED TO REFUSE RIVERS, and refusing them was the bug. The
+ * argument was sound as far as it went — the transition tier samples
+ * every 312.5 units, a median river is 550 wide, so a POINT sample of
+ * the trench lands on one vertex and misses the next, and the channel
+ * becomes a run of pockmarks. The conclusion drawn from it was that
+ * those tiers must have no channel at all.
+ *
+ * But the ribbons were still drawn out there, at their true water
+ * level, over ground with nothing to hold them. Measured across the
+ * whole drainage, the drawn terrain sat ABOVE the river surface at 76%
+ * of samples on the transition tier and 87% on the middle one, by a
+ * median of two metres and a worst case of sixty-six. Half of every
+ * distant river was inside a hill, and the material's negative polygon
+ * offset — which scales with the depth slope, so it runs away at
+ * grazing angles — floated the buried half back out over the hillside.
+ * That is the pale sheet you could fly through, and it is the same
+ * "two terrains" fault the tier ladder was built to cure, one layer up.
+ *
+ * The fix is not a point sample of a finer thing. It is to stop point
+ * sampling: a coarse vertex stands for the square around it, and the
+ * honest height for that square is the LOWEST ground in it. Ask that,
+ * and a vertex beside a river goes in the river — no pockmarks,
+ * because the answer varies smoothly with the footprint, and no
+ * floating water, because every triangle that overlaps a channel has
+ * its corners in one. The trench comes out a little wider than life at
+ * the coarsest tiers, which at two kilometres is a groove in a valley
+ * that already has one.
+ *
+ * It is the exact mirror of `dryLand`'s neighbourhood MAX for the
+ * coastline: max to keep the sea out of the beach, min to keep the
+ * island out of the water.
  */
-export function farHeight(x: number, z: number): number {
+export function farHeight(x: number, z: number, slack = 0): number {
   const land = baseLand(x, z);
   if (land <= 0) return land;
-  const lake = lakeBed(x, z);
-  return lake !== null && lake < land ? lake : land;
+  let low = land;
+  const lake = lakeBed(x, z, slack);
+  if (lake !== null && lake < low) low = lake;
+  const river = riverBed(x, z, slack);
+  if (river !== null && river < low) low = river;
+  return low;
 }
 
 /**
