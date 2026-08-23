@@ -30,7 +30,7 @@
 import * as THREE from 'three';
 import {
   CELL_VERTS, CELLS, COARSE_VERTS, FINE_CELLS, groundDetail,
-  ISLAND_SPAN, terrainHeight,
+  farHeight, ISLAND_SPAN, terrainHeight,
 } from './heightfield';
 import {
   chunkAt, chunkKey, chunkOrigin, CHUNK_SPAN, sameChunk, world,
@@ -311,12 +311,16 @@ export const TIER_CUTS = {
  * reading of "this sample cannot see the beach it is standing on".
  */
 function dryLand(x: number, z: number, step: number): number {
-  const here = terrainHeight(x, z);
+  // `farHeight`, not `terrainHeight`: the distance tiers do not get the
+  // river trench, because their vertices cannot hold one — see the
+  // comment on farHeight. This function is only ever called for those
+  // tiers, so the resolution gate and the coastline fix share a door.
+  const here = farHeight(x, z);
   if (here > 0) return here;
   const reach = step * 0.5;
   const around = Math.max(
-    terrainHeight(x + reach, z), terrainHeight(x - reach, z),
-    terrainHeight(x, z + reach), terrainHeight(x, z - reach),
+    farHeight(x + reach, z), farHeight(x - reach, z),
+    farHeight(x, z + reach), farHeight(x, z - reach),
   );
   // Just above the waterline, not up to the neighbour's height: the
   // point is to stop the sea showing through, not to invent a cliff.

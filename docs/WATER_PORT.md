@@ -235,12 +235,27 @@ system a reason to exist before anything can kill her.
    said "111 static polygons at baked waterlines, no carve needed, they
    already sit in basins". They do not; see §3f. Lakes turned out to be
    the right place to build the carve machinery rivers will reuse.
-4. **River ribbons, far tier only.** Visual, no carve, no trench.
-5. **River carve, near tiers** — inside `terrainHeight`, with the spatial
-   index and a measured cost. The handover from (4) is the risk.
-6. **Water queries** — `waterLevelAt`, depth, flow. No gameplay yet.
-7. **Drinking**, then wading, then the meniscus, then currents, then
-   drowning — in that order, each with its own way back out.
+4. **River ribbons** — DONE (v0.47.0). All 1,121 reaches, streamed
+   within the middle tier's reach, centripetal Catmull-Rom over
+   [x, y, z, width] with the levelling re-imposed after the spline, flat
+   +Y normals and the NEGATIVE polygon offset — all three ported BE
+   lessons. Elevations forced monotonic downstream at load.
+5. **River carve** — DONE (v0.47.0), resolution-gated: `terrainHeight`
+   carries the trench (channel at true width, depth 0.12×width clamped
+   0.3–2.5 m, bank grade 0.8); `farHeight` — used by the distance tiers
+   through `dryLand` — does not, because 312.5-unit vertices cannot hold
+   a 550-unit channel. Segment bucket index over 48,544 segments:
+   +55 % on `terrainHeight` for random points (~0.5 µs absolute).
+6. **Water queries** — DONE (v0.47.0). `waterBodyAt` answers sea, lake
+   or river with level and flow; compared in the DRAWN frame (the
+   review caught the raw-vs-sea mix), returned raw.
+7. **Drinking** — DONE (v0.47.0): thirst drains (~30 min, zeroed for
+   the claustral founding state by the caste table) and a held
+   contextual DRINK refills in 5 s at any water's edge. **Currents** —
+   DONE: rivers carry her at √slope-shaped speed (0.1–1.5 m/s),
+   grip-scaled by her own draft. Wading is the grip model itself.
+   STILL AHEAD: the meniscus (surface tension is the dominant force at
+   her scale), drowning (needs a way back out first), swimming.
 
 Landscaping is a separate audit (`KauaiTrees.ts`, `islandTrees.ts`,
 `islandBillboardTrees.ts`, `islandFoliage.ts`, `BerryBushes.ts` all exist in

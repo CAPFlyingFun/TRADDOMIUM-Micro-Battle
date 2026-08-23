@@ -67,6 +67,8 @@ const SAFE_TEXT = 'rgba(190, 225, 255, .95)';
 export class Vitals {
   private readonly panel: HTMLDivElement;
   private readonly stamina: Meter;
+
+  private readonly water: Meter;
   private readonly grace: HTMLDivElement;
   private shown = '';
   private shownGrace = '';
@@ -109,12 +111,17 @@ export class Vitals {
     } as Partial<CSSStyleDeclaration>);
 
     this.stamina = this.meter('⚡', 'stamina', null);
+    // LIVE now, like stamina — the reference is kept because the bar
+    // finally has something to say. It sat here for weeks built inline
+    // with its Meter discarded, which was correct exactly as long as
+    // thirst had no way to move.
+    this.water = this.meter('💧', 'water', null);
     stack.append(
       who,
       this.stamina.icon.parentElement!,
       this.meter('♥', 'health', reserves.health).icon.parentElement!,
       this.meter('🌾', 'food', reserves.food).icon.parentElement!,
-      this.meter('💧', 'water', reserves.water).icon.parentElement!,
+      this.water.icon.parentElement!,
     );
 
     // The grace chip. Hidden unless it is running, because a control
@@ -178,6 +185,20 @@ export class Vitals {
     this.stamina.read.style.color = spent ? SPENT
       : rate > IDLE_RATE ? GOLD : RESTING;
     this.stamina.read.textContent = label;
+  }
+
+  /**
+   * The water bar. A number while it is moving or missing, quiet FULL
+   * when it is full — the stamina bar's manners.
+   */
+  showWater(fraction: number, drinking: boolean): void {
+    const left = Math.max(0, Math.min(1, fraction));
+    this.water.fill.style.width = `${left * 100}%`;
+    this.water.fill.style.background = drinking ? RESTING : FUEL;
+    this.water.icon.style.color = drinking ? RESTING : FUEL;
+    this.water.read.style.color = left <= 0.15 ? SPENT : drinking ? RESTING : GOLD;
+    this.water.read.textContent = drinking ? 'DRINK'
+      : left >= 0.995 ? 'FULL' : `${Math.round(left * 100)}`;
   }
 
   /**

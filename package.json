@@ -1,7 +1,7 @@
 {
   "name": "traddomium-micro-battle",
   "private": true,
-  "version": "0.46.0",
+  "version": "0.47.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -31,7 +31,8 @@
     "probe:ocean": "node scripts/probe-ocean.mjs",
     "probe:update": "node scripts/probe-update.mjs",
     "probe:lakes": "node scripts/probe-lakes.mjs",
-    "probe:surf": "node scripts/probe-surf.mjs"
+    "probe:surf": "node scripts/probe-surf.mjs",
+    "probe:rivers": "node scripts/probe-rivers.mjs"
   },
   "dependencies": {
     "three": "^0.180.0"

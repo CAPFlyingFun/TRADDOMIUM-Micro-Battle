@@ -38,6 +38,7 @@ import {
   blurGrid, heightAt, SPAN, STEP, UNITS_PER_METRE, type HeightGrid,
 } from './kauai';
 import { lakeBed } from './lakes';
+import { riverBed } from './rivers';
 
 /**
  * THE SYNTHESISED GROUND.
@@ -157,7 +158,14 @@ function valueNoise(x: number, y: number, salt: number): number {
  * This is what the terrain mesh is built from. It is not what anything
  * stands on — see `groundHeight`, which is the surface that gets drawn.
  */
-export function terrainHeight(x: number, z: number): number {
+/**
+ * The land before any water has had its say: grid, smoothing blend,
+ * relief noise, shore ease. ONE function, factored out because
+ * terrainHeight and farHeight each carried a copy and copies diverge —
+ * a tuning edit made to one and not the other is a visible height seam
+ * at the tier boundary.
+ */
+function baseLand(x: number, z: number): number {
   if (!grid) return 0;
   const raw = heightAt(grid, x, z);
   // Blend the two grids rather than blurring on the fly. The soft one
@@ -176,18 +184,46 @@ export function terrainHeight(x: number, z: number): number {
   // Ease the relief in over the first stretch of land so the beach
   // still meets the water cleanly rather than in a cliff of noise.
   const shore = Math.min(1, base / 400);
-  const land = base + relief * shore;
+  return base + relief * shore;
+}
 
-  // A LAKE PRESSES THE GROUND DOWN, and only down. The island's basins
-  // are not resolved at 55 m a sample — 72 of the 111 lakes have
-  // terrain ABOVE their own waterline — so without this most of them
-  // would be drawn buried in a hillside. See lakes.ts.
+export function terrainHeight(x: number, z: number): number {
+  const land = baseLand(x, z);
+  if (land <= 0) return land;
+
+  // WATER PRESSES THE GROUND DOWN, and only down. The island's basins
+  // and channels are not resolved at 55 m a sample — 72 of the 111
+  // lakes have terrain ABOVE their own waterline, and a 5.5 m stream
+  // does not exist in the grid at all — so without this the water would
+  // be drawn buried in a hillside. See lakes.ts and rivers.ts.
   //
-  // LAST, and after the relief noise, because a lake bed with dunes in
-  // it is not a lake bed. Free when there is no lake here, which is
-  // almost everywhere: one array read says so.
-  const bed = lakeBed(x, z);
-  return bed !== null && bed < land ? bed : land;
+  // Free when there is no water here, which is almost everywhere: one
+  // array read per index says so.
+  const lake = lakeBed(x, z);
+  let low = land;
+  if (lake !== null && lake < low) low = lake;
+  const river = riverBed(x, z);
+  if (river !== null && river < low) low = river;
+  return low;
+}
+
+/**
+ * The surface WITHOUT the river trench — for the distance tiers.
+ *
+ * A tier whose vertices cannot hold a channel must not be given one:
+ * the transition tier samples every 312.5 units and a median river is
+ * 550 wide, so the carve lands on one vertex here, none there, and the
+ * river line becomes a run of pockmarks — the floating-plates bug
+ * wearing a new hat. Those tiers keep the lakes (130 m wide, forty
+ * vertices even at the transition step) and skip the rivers; the river
+ * SURFACE out there is the ribbon's job, and the near tiers, where she
+ * actually walks and lands, carry the real trench.
+ */
+export function farHeight(x: number, z: number): number {
+  const land = baseLand(x, z);
+  if (land <= 0) return land;
+  const lake = lakeBed(x, z);
+  return lake !== null && lake < land ? lake : land;
 }
 
 /**

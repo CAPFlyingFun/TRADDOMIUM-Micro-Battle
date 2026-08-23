@@ -18,6 +18,9 @@ import { local, world, type WorldPoint } from '../world/coords';
 import { TerrainStream, TIER_CUTS } from '../world/TerrainStream';
 import { Ocean } from '../world/Ocean';
 import { LakeWater } from '../world/LakeWater';
+import { RiverWater } from '../world/RiverWater';
+import { hydro, waterBodyAt } from '../world/water';
+import { Thirst, TOO_DEEP } from '../ant/thirst';
 import { shoreward, surfAt, type Surf } from '../world/surf';
 
 /**
@@ -155,6 +158,7 @@ export class IslandScene {
    */
   private readonly markers: CompassMarker[] = [];
   private readonly climbButton: Action;
+  private readonly drinkButton: Action;
   private readonly descendButton: Action;
   private readonly flight = new Flight();
   /** Five minutes of being left alone, and of leaving everything alone. */
@@ -216,6 +220,9 @@ export class IslandScene {
    */
   private water!: Ocean;
   private lakes!: LakeWater;
+  private streams: RiverWater | null = null;
+  private readonly thirst = new Thirst();
+  private drinking = false;
   /**
    * The CEILING on a full push of the stick — not propulsion. She does
    * not move because this is set; she moves because a thumb asks.
@@ -357,6 +364,11 @@ export class IslandScene {
     // the sort of beat that gets someone killed mid-flight.
     this.descendButton = this.actions.add('⬇️', 'descend', 'ShiftLeft');
     this.climbButton = this.actions.add('⬆️', 'climb', 'Space');
+    // CONTEXTUAL, per the HUD rule: it exists because water now exists,
+    // and it only lights when she is actually standing at some. Held,
+    // not tapped — drinking is an act, and an act can be interrupted.
+    this.drinkButton = this.actions.add('💧', 'drink', 'KeyE');
+    this.drinkButton.enable(false);
     this.vitals = new Vitals(host, {
       health: liveStat('maxHealth'),
       food: liveStat('maxHunger'),
@@ -459,6 +471,16 @@ export class IslandScene {
       cells: () => this.terrain.cellCount,
       lakesDrawn: () => this.lakes.shown,
       surf: () => ({ ...this.surf, carriedX: this.carried.x, carriedZ: this.carried.z }),
+      thirst: () => this.thirst.fraction,
+      parch: () => this.thirst.parch(),
+      drinking: () => this.drinking,
+      riversDrawn: () => this.streams?.shown ?? 0,
+      waterBody: (wx: number, wz: number) => {
+        const body = waterBodyAt(wx, wz, this.elapsed);
+        if (!body) return null;
+        const drawn = body.kind === 'sea' ? body.level : body.level * reliefScale();
+        return { ...body, drawn, depth: drawn - groundHeight(wx, wz) };
+      },
       cameraAt: () => this.follow.camera.position.toArray(),
       // Her WORLD position, not her rendered one. root.position is
       // measured from the floating origin now, so asking the heightfield
@@ -485,6 +507,7 @@ export class IslandScene {
         this.terrain.place();
         this.water.reorigin();
         this.lakes.follow(this.ant.where);
+        this.streams?.follow(this.ant.where);
         this.follow.snapTo(this.ant.root, -heading);
       },
       seaAt: (wx: number, wz: number) => seaHeightAt(wx, wz, this.elapsed),
@@ -642,6 +665,12 @@ export class IslandScene {
     // The band shader picks its texture by world height, so an
     // exaggerated island would wear the wrong biomes without this.
     reliefUniform.value = times;
+    // THE DIAL REACHES THE WATER, explicitly. The lakes only ever
+    // survived a relief change because their follow() happens to re-seat
+    // every frame; the rivers' follow() early-returns and kept the old
+    // scale until she crossed a decision cell — minutes, at ant pace.
+    this.lakes?.place();
+    this.streams?.place();
   }
 
   /**
@@ -690,6 +719,7 @@ export class IslandScene {
     this.rain.dispose();
     this.water.dispose();
     this.lakes.dispose();
+    this.streams?.dispose();
     this.detachSettings();
     this.detachKill();
     this.renderer.dispose();
@@ -860,6 +890,41 @@ export class IslandScene {
       bearingOf(view.x, view.z), this.ant.where, this.markers, dt,
     );
     this.vitals.show(this.stamina.fraction, this.stamina.spent, this.effort);
+
+    // ── DRINKING, and the thirst that finally moves ─────────────────
+    // The button lights when there is water at her feet — or a nose
+    // length ahead, so she can stand dry at the edge and reach down —
+    // shallow enough that drinking it is not being swept by it. An act,
+    // not a tap: held, still, on the ground.
+    const draft = liveStat('bodyLength') / MM_PER_UNIT;
+    const nose = this.ant.where;
+    // ANY water within three body lengths of her nose, at ANY depth.
+    // The first version also demanded the water AHEAD be shallow, which
+    // multiplied two conditions into a drinkable strip about one
+    // centimetre wide along every bank — a control nobody could ever
+    // line up. She drinks from the SURFACE at the edge; how deep the
+    // river is under that surface is the river's business. The depth
+    // condition that matters is on HER: she must not currently be
+    // gripped by the water she is trying to drink.
+    const sip = (wx: number, wz: number): boolean => {
+      const body = waterBodyAt(wx, wz, this.elapsed);
+      if (!body) return false;
+      const drawn = body.kind === 'sea' ? body.level : body.level * reliefScale();
+      return drawn - groundHeight(wx, wz) > 0;
+    };
+    let reached = sip(nose.wx, nose.wz);
+    for (let out = 1; !reached && out <= 3; out++) {
+      reached = sip(
+        nose.wx + Math.sin(this.ant.bearing) * draft * out,
+        nose.wz + Math.cos(this.ant.bearing) * draft * out,
+      );
+    }
+    const canDrink = !this.flight.aloft
+      && this.surf.grip < TOO_DEEP
+      && reached;
+    this.drinkButton.enable(canDrink);
+    this.drinking = canDrink && this.drinkButton.held && this.ant.pace < 5;
+    this.vitals.showWater(this.thirst.update(this.drinking, dt), this.drinking);
     // NOTHING TO TICK. The grace is a deadline, so the only question
     // each frame is what time it is — which is why backgrounding the
     // tab or losing the page can no longer buy extra protection.
@@ -902,6 +967,7 @@ export class IslandScene {
       // Ocean.reorigin, and the test that proves a rebase leaves the
       // water alone.
       this.water.reorigin();
+      this.streams?.place();
       // A lake IS at a fixed place, so its surfaces are re-seated
       // rather than refolded — the TerrainStream pattern, and for the
       // same reason: their geometry is built around their own centres
@@ -915,6 +981,7 @@ export class IslandScene {
     }
     this.terrain.follow(at);
     this.lakes.follow(at);
+    this.streams?.follow(at);
 
     // WEATHER IS ASKED IN GLOBAL COORDINATES and drawn in local ones.
     // Her position decides what the sky is doing; the CAMERA's rendered
@@ -933,6 +1000,7 @@ export class IslandScene {
     // island is. See Ocean.
     this.water.update(this.follow.camera.position, dt);
     this.lakes.update(dt);
+    this.streams?.update(dt);
     const reading = service.reading;
     if (reading) {
       this.weatherChip.update(
@@ -1332,15 +1400,34 @@ export class IslandScene {
     const at = this.ant.where;
     const ground = groundHeight(at.wx, at.wz);
     const uphill = shoreward(at.wx, at.wz, groundHeight);
-    // No uphill means flat ground, where a broken wave has no direction
-    // to run in and the orbital flow is the whole story.
     // HER OWN LENGTH OF WATER TAKES HER, and she grows: a founding
     // queen is 5.5 mm where an adult is 10, so the same puddle carries
     // the young one off and only wets the old one's feet.
-    this.surf = surfAt(
-      at.wx, at.wz, this.elapsed, ground, uphill ?? { x: 0, z: 0 },
-      liveStat('bodyLength') / MM_PER_UNIT,
-    );
+    const draft = liveStat('bodyLength') / MM_PER_UNIT;
+
+    // WHICH WATER HAS HER. The sea gets the full surf model — orbits,
+    // bores, the shoreward rail. A river is simpler and different: no
+    // waves, just the current, downstream, scaled by how much of her is
+    // in it. A lake is still water and carries nobody anywhere.
+    const body = waterBodyAt(at.wx, at.wz, this.elapsed);
+    if (body && body.kind !== 'sea') {
+      // Lake and river levels are RAW; she stands on the DRAWN ground.
+      const depth = body.level * reliefScale() - ground;
+      if (depth > 0) {
+        const wet = Math.min(1, Math.max(0, depth / Math.max(1e-6, draft)));
+        const grip = wet * wet * (3 - 2 * wet);
+        this.surf = { depth, grip, x: body.flowX, z: body.flowZ };
+      } else {
+        this.surf = { depth: 0, grip: 0, x: 0, z: 0 };
+      }
+    } else {
+      // No uphill means flat ground, where a broken wave has no
+      // direction to run in and the orbital flow is the whole story.
+      this.surf = surfAt(
+        at.wx, at.wz, this.elapsed, ground, uphill ?? { x: 0, z: 0 },
+        draft,
+      );
+    }
     const want = this.surf.grip;
     if (want <= 0 && Math.hypot(this.carried.x, this.carried.z) < 0.01) {
       this.carried.x = 0;
@@ -1471,6 +1558,10 @@ export class IslandScene {
   private buildWater(grid: HeightGrid): void {
     this.water = new Ocean(this.scene, grid, null);
     this.lakes = new LakeWater(this.scene);
+    // The rivers need the hydrography, which the island lab may boot
+    // without. No hydrography, no ribbons — the lab still runs.
+    const flows = hydro();
+    this.streams = flows ? new RiverWater(this.scene, flows) : null;
     new THREE.TextureLoader().load(
       `${import.meta.env.BASE_URL}kauai-tex/water-normal.webp`,
       (texture) => {
@@ -1479,6 +1570,7 @@ export class IslandScene {
         // very different scales, but they ripple off the same map.
         this.water.wear(texture);
         this.lakes.wear(texture);
+        this.streams?.wear(texture);
       },
       undefined,
       () => {},

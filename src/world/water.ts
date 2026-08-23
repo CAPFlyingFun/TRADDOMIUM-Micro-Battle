@@ -41,3 +41,65 @@ export function hydro(): Hydro | null {
 export function forgetHydro(): void {
   loaded = null;
 }
+
+/**
+ * ONE QUESTION, THREE WATERS: what water is here, and what is it doing?
+ *
+ * The sea, the lakes and the rivers each answer for themselves in their
+ * own modules; this is the place that asks all three and hands back the
+ * one that stands highest — a river entering a lake is under the lake's
+ * surface, a lake behind the beach outranks the sea that cannot reach
+ * it. Everything downstream of gameplay (drinking, wading, currents,
+ * one day swimming) talks to this and never to the parts.
+ *
+ * RAW FRAME. Lake and river levels come out of the hydrography
+ * unscaled; the sea is its own frame (relief cannot move zero). The
+ * caller who wants to compare against `groundHeight` multiplies by the
+ * relief dial — the scene's `waterAt` handle does exactly that.
+ */
+import { seaHeightAt } from './swell';
+import { reliefScale } from './heightfield';
+import { lakeLevel } from './lakes';
+import { riverAt } from './rivers';
+
+export type WaterKind = 'sea' | 'lake' | 'river';
+
+export interface WaterBody {
+  readonly kind: WaterKind;
+  /** The surface, in the raw (unscaled) world frame. */
+  readonly level: number;
+  /** What the water itself is doing, world units a second. */
+  readonly flowX: number;
+  readonly flowZ: number;
+}
+
+export function waterBodyAt(
+  wx: number, wz: number, seconds: number,
+): WaterBody | null {
+  // COMPARED IN THE DRAWN FRAME, RETURNED IN THE RAW ONE. Fresh levels
+  // are raw and the sea is not, and the first version compared them
+  // anyway — so at the shipped relief of 1.5, a river mouth whose
+  // surface is DRAWN above the swell still answered "sea", and the surf
+  // model ran on standing river water. The review caught it; the
+  // returned level stays raw because every caller already scales it.
+  const relief = reliefScale();
+
+  const sea = seaHeightAt(wx, wz, seconds);
+  let best: WaterBody = { kind: 'sea', level: sea, flowX: 0, flowZ: 0 };
+  let drawn = sea;
+
+  const lake = lakeLevel(wx, wz);
+  if (lake !== null && lake * relief > drawn) {
+    best = { kind: 'lake', level: lake, flowX: 0, flowZ: 0 };
+    drawn = lake * relief;
+  }
+
+  const river = riverAt(wx, wz);
+  if (river && river.off <= river.width / 2 && river.level * relief > drawn) {
+    best = {
+      kind: 'river', level: river.level,
+      flowX: river.flowX, flowZ: river.flowZ,
+    };
+  }
+  return best;
+}

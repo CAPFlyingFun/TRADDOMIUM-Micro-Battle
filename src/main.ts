@@ -7,6 +7,7 @@ import { useGrid } from './world/heightfield';
 import { HYDRO_BYTES, loadHydro } from './world/hydro';
 import { useHydro } from './world/water';
 import { useLakes } from './world/lakes';
+import { useRivers } from './world/rivers';
 import { GRID_BYTES, loadGrid, type HeightGrid } from './world/kauai';
 import { fitBootBar } from './ui/bootBar';
 
@@ -85,6 +86,7 @@ try {
   // would be cut without its basins — and the ant placed on it would
   // stand on ground the mesh no longer has.
   useLakes(hydro);
+  useRivers(hydro);
   const requested = new URLSearchParams(location.search).get('scene') ?? 'game';
   (scenes[requested] ?? scenes['island'])(host, grid);
   clearBoot();
