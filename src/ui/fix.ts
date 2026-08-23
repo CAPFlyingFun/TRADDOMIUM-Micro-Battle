@@ -46,6 +46,19 @@ export const PLACES = 8;
 export interface Fix extends GeoPoint {
   /** Her altitude above sea level, in WORLD UNITS. */
   readonly msl: number;
+  /**
+   * THE RELIEF DIAL THE FIX WAS TAKEN UNDER.
+   *
+   * Altitude is not a property of the island alone. `groundHeight`
+   * returns `relief x height`, so the same spot is 192 m up at a dial
+   * of 1 and 288 m at 1.5 — and a fix restored on the other dial put
+   * the queen ninety-five metres inside a hill, where the floor clamp
+   * dutifully stood her on the summit. Rendered side by side it was
+   * obvious; from the numbers alone it looked like drift.
+   *
+   * Carried so the altitude can be converted rather than trusted.
+   */
+  readonly relief: number;
   /** Where the camera looks, degrees from north. */
   readonly bearing: number;
   /** Camera attitude, degrees. Positive is looking up. */
@@ -55,9 +68,10 @@ export interface Fix extends GeoPoint {
 /** Build a fix from what the scene already has to hand. */
 export function fixAt(
   at: WorldPoint, msl: number, bearing: number, pitch: number,
+  relief: number,
 ): Fix {
   const geo = worldToGeo(at);
-  return { lat: geo.lat, lon: geo.lon, msl, bearing, pitch };
+  return { lat: geo.lat, lon: geo.lon, msl, bearing, pitch, relief };
 }
 
 /** Where on the island a fix points. */
@@ -79,6 +93,7 @@ export function formatFix(fix: Fix): string {
     `${(fix.msl / UNITS_PER_METRE).toFixed(2)}m`,
     `${wrap360(fix.bearing).toFixed(1)}°`,
     `${fix.pitch.toFixed(1)}°`,
+    `×${fix.relief.toFixed(2)}`,
   ].join(' ');
 }
 
@@ -98,9 +113,15 @@ export function parseFix(text: string): Fix | null {
   if (!found || found.length < 5) return null;
   const [lat, lon, msl, bearing, pitch] = found.slice(0, 5).map(Number);
   if (![lat, lon, msl, bearing, pitch].every(Number.isFinite)) return null;
+  // The dial is the sixth and it is OPTIONAL, because fixes typed off
+  // older screenshots do not have one. Absent, the caller's own dial
+  // is the honest assumption — it is what the fix was taken under if
+  // nobody has touched it since.
+  const dial = found.length > 5 ? Number(found[5]) : Number.NaN;
+  const relief = Number.isFinite(dial) && dial > 0 ? dial : Number.NaN;
   // Kauaʻi, generously. A fix from a different game is not a fix.
   if (lat < 21 || lat > 23 || lon < -161 || lon > -158) return null;
-  return { lat, lon, msl: msl * UNITS_PER_METRE, bearing, pitch };
+  return { lat, lon, msl: msl * UNITS_PER_METRE, bearing, pitch, relief };
 }
 
 /** Degrees into 0..360, so a fix never reads 361 or -3. */

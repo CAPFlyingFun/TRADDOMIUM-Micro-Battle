@@ -82,7 +82,10 @@ export class ActionPad {
     Object.assign(this.pad.style, {
       position: 'fixed',
       right: 'calc(14px + min(env(safe-area-inset-right), 14px))',
-      bottom: 'calc(20px + min(env(safe-area-inset-bottom), 12px))',
+      // ABOVE THE LIFT LEVER, which owns the bottom of this column
+      // now that climb and descend are no longer buttons. Left where
+      // it was, the remaining actions drew straight through it.
+      bottom: 'calc(198px + min(env(safe-area-inset-bottom), 12px))',
       display: 'flex',
       flexDirection: 'column-reverse',
       gap: '10px',

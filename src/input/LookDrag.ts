@@ -144,6 +144,20 @@ export class LookDrag {
     for (const off of this.detach) off();
   }
 
+  /**
+   * POINT IT SOMEWHERE AND LEAVE IT THERE.
+   *
+   * `FollowCamera.snapTo` can only place the camera for one frame,
+   * because this supplies a fresh look every frame afterwards and
+   * overwrites it. Restoring a position fix needs the aim to persist,
+   * which means writing it here rather than at the camera.
+   *
+   * @param pitch offset from the camera's resting elevation, radians.
+   */
+  aim(pitch: number): void {
+    this.pitch = Math.max(PITCH_DOWN, Math.min(PITCH_UP, pitch));
+  }
+
   private swing(dYaw: number, dPitch: number): void {
     this.yaw = Math.max(-YAW_LIMIT, Math.min(YAW_LIMIT, this.yaw + dYaw));
     this.pitch = Math.max(PITCH_DOWN, Math.min(PITCH_UP, this.pitch + dPitch));

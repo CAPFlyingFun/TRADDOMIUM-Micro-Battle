@@ -70,8 +70,33 @@ export class FollowCamera {
     }
   }
 
-  snapTo(target: THREE.Object3D, yaw = 0): void {
-    const rest: LookInput = { yaw, pitch: 0, active: false };
+  /**
+   * @param pitch where the camera should LOOK, radians, positive up —
+   *   not a look-drag offset. Omitted, it rests where it rests.
+   *   Restoring a position fix needs it: without the look angle a
+   *   reproduced frame is the right place seen from the wrong attitude,
+   *   which is a different picture.
+   */
+  /**
+   * The look-drag offset that would point the camera at `pitch`.
+   *
+   * Exposed because the offset is measured from a resting elevation
+   * this class owns, and the thing that has to REMEMBER the aim is the
+   * look input rather than the camera — see LookDrag.aim.
+   */
+  offsetFor(pitch: number): number {
+    return -pitch - this.restElevation;
+  }
+
+  snapTo(target: THREE.Object3D, yaw = 0, pitch?: number): void {
+    // The camera sits ABOVE what it looks at, so a view pitched down
+    // by p is an elevation of p above the target — and `look.pitch` is
+    // measured from the resting elevation rather than from level.
+    const rest: LookInput = {
+      yaw,
+      pitch: pitch === undefined ? 0 : this.offsetFor(pitch),
+      active: false,
+    };
     this.place(target, rest, this.desired);
     this.offset.copy(this.desired).sub(target.position);
     this.camera.position.copy(this.desired);

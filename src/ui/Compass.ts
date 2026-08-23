@@ -118,6 +118,8 @@ export interface FixSource {
   readonly msl: number;
   /** Camera attitude, degrees, positive looking up. */
   readonly pitch: number;
+  /** The relief dial in force — see fix.ts for why altitude needs it. */
+  readonly relief: number;
 }
 
 /**
@@ -549,7 +551,7 @@ export class Compass {
 
     const fix = under?.fix ?? null;
     if (fix) {
-      const line = formatFix(fixAt(from, fix.msl, this.shown, fix.pitch));
+      const line = formatFix(fixAt(from, fix.msl, this.shown, fix.pitch, fix.relief));
       if (line !== this.lastFix) {
         this.lastFix = line;
         this.fixLine.textContent = line;

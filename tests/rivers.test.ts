@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { decodeHydro, type Hydro } from '../src/world/hydro';
 import {
   BANK_GRADE, channelDepth, flowSpeed, forgetRivers, riverAt, riverBed,
-  riverFlow, riverIndexSize, riverPointLevels, riverSegment, useRivers,
+  riverFlow, riverIndexSize, riverPointLevels, riverSegment, useRivers, riverDamp, DAMP_REACH,
 } from '../src/world/rivers';
 import { farHeight, terrainHeight, useGrid } from '../src/world/heightfield';
 import { decodeGrid, UNITS_PER_METRE } from '../src/world/kauai';
@@ -233,4 +233,43 @@ describe('the index', () => {
     expect(segments).toBe(48_544);
     expect(entries).toBeGreaterThanOrEqual(segments);
   });
+});
+
+describe('the ground a river keeps wet', () => {
+  it('is a corridor, widest at the bank and gone by the edge of it', () => {
+    const seg = riverSegment(2_000)!;
+    const x = (seg.ax + seg.bx) / 2;
+    const z = (seg.az + seg.bz) / 2;
+    // Relative to the reach, not to a number that was true when the
+    // reach was twelve metres.
+    const across = [0, 0.5, 1, 1.5, 2.5]
+      .map((of) => riverDamp(x + of * DAMP_REACH, z));
+    // Monotonic outward, saturated over the channel, gone past the band.
+    for (let i = 1; i < across.length; i++) {
+      expect(across[i]).toBeLessThanOrEqual(across[i - 1] + 1e-9);
+    }
+    expect(across[0]).toBe(1);
+    expect(across[across.length - 1]).toBeLessThan(0.1);
+  });
+
+  it('is dry almost everywhere, which is the point', () => {
+    // A corridor, not a wash of colour over the island. If this ever
+    // creeps up, the tint has stopped meaning "there is a river here".
+    let wet = 0;
+    let n = 0;
+    for (let i = 0; i < 200; i++) {
+      for (let j = 0; j < 200; j++) {
+        n++;
+        if (riverDamp(-1_400_000 + i * 8_000, -400_000 + j * 8_000) > 0) wet++;
+      }
+    }
+    expect(wet / n).toBeLessThan(0.12);
+    expect(wet).toBeGreaterThan(0);
+  });
+
+  // A trunk waters more ground than a headwater — true by the band
+  // formula, and NOT tested here. Marching outward from a reach to
+  // find the corridor's edge walks straight into the next reach on a
+  // drainage this dense, so the measurement came back inverted and was
+  // measuring meander spacing rather than corridor width.
 });

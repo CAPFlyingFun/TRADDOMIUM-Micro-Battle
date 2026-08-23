@@ -406,5 +406,48 @@ export function riverIndexSize(): { segments: number; entries: number } {
   return { segments: ax?.length ?? 0, entries: buckets?.length ?? 0 };
 }
 
+/**
+ * HOW WET THE GROUND IS HERE, 0 to 1 — the riparian corridor.
+ *
+ * WHY THIS EXISTS AND THE TRENCH DOES NOT SUFFICE. From two hundred
+ * metres up the rivers read as blue ribbon laid over sand, and the
+ * honest reason is that they very nearly are: a median reach is 5.5 m
+ * across, the height grid samples every 55 m, and no runtime carve can
+ * put a visible valley under a stream the source data has never heard
+ * of. Deepening the coarse-tier trench until it showed would also make
+ * the tiers disagree with each other by metres, which is the
+ * two-terrains fault the tier ladder exists to prevent.
+ *
+ * But a stream from the air is not mostly water. It is a CORRIDOR —
+ * damp ground, darker soil, the vegetation that follows it — and that
+ * corridor is tens of metres wide where the water is five. It is what
+ * the eye actually reads as "there is a river there", and unlike a
+ * valley it costs one lookup per terrain vertex and nothing in
+ * geometry, so every tier can carry it and none of them disagree.
+ *
+ * Widens with the channel, because a trunk waters more ground than a
+ * headwater does.
+ */
+export function riverDamp(x: number, z: number): number {
+  const spot = riverAt(x, z, DAMP_REACH);
+  if (!spot) return 0;
+  const half = spot.width / 2;
+  const band = half + DAMP_REACH * (0.4 + 0.6 * Math.min(1, spot.width / 1_500));
+  if (spot.off >= band) return 0;
+  const near = 1 - (spot.off - half) / Math.max(1, band - half);
+  return Math.min(1, Math.max(0, near));
+}
+
+/**
+ * How far the damp ground reaches past the bank, world units.
+ *
+ * Twenty-two metres, and bounded by the same walk that bounds the
+ * carve. Measured rather than picked: at twelve it was invisible from
+ * the two hundred metres the ribbons were reported from, which is the
+ * altitude the corridor exists to be seen from. Still a corridor and
+ * not a wash — the test holds it under a tenth of the island.
+ */
+export const DAMP_REACH = 2_200;
+
 /** One real metre, for tests that want to speak in metres. */
 export const METRE = UNITS_PER_METRE;

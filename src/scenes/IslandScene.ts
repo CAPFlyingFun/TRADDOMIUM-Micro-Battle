@@ -54,7 +54,7 @@ import {
   Eased, SOON, driftOf, touchdown, trackOf,
   type FlightTelemetry,
 } from '../ant/telemetry';
-import { bearingFromHeading, bearingOf, pitchOf } from '../ui/compassMath';
+import { bearingFromHeading, bearingOf, headingFromBearing, pitchOf } from '../ui/compassMath';
 import { Compass } from '../ui/Compass';
 import { type CompassMarker } from '../ui/compassMath';
 import { AUTO_AIRSPEED, Flight, setFlightScale } from '../ant/flight';
@@ -496,7 +496,7 @@ export class IslandScene {
         this.follow.camera.getWorldDirection(view);
         return formatFix(fixAt(
           this.ant.where, this.mslNow(),
-          bearingOf(view.x, view.z), pitchOf(view.y),
+          bearingOf(view.x, view.z), pitchOf(view.y), reliefScale(),
         ));
       },
       /** Put the camera back where a fix says it was. */
@@ -927,7 +927,7 @@ export class IslandScene {
       bearingOf(view.x, view.z), this.ant.where, this.markers, dt,
       {
         fix: settings().showFix
-          ? { msl: this.mslNow(), pitch: pitchOf(view.y) }
+          ? { msl: this.mslNow(), pitch: pitchOf(view.y), relief: reliefScale() }
           : null,
         // HER NOSE, not the camera's. In flight they part company the
         // moment she looks around, and the pairing with the flight
@@ -1408,17 +1408,38 @@ export class IslandScene {
     const fix = parseFix(text);
     if (!fix) return false;
     const at = fixToWorld(fix);
-    // Radians, her convention: bearing is degrees clockwise from north.
-    const heading = (fix.bearing * Math.PI) / 180;
+    // HER CONVENTION, NOT THE COMPASS'S. A bearing counts clockwise
+    // from north and north is −Z; a heading is radians along
+    // (sin h, cos h). Converting with `bearing * PI / 180`, as this
+    // did, is not a conversion at all — it put the camera 142 degrees
+    // off the frame it was reproducing, and looked plausible enough
+    // that only a rendered comparison caught it.
+    const heading = headingFromBearing(fix.bearing);
     const handle = (window as unknown as Record<string, {
       putAt: (wx: number, wz: number, heading?: number) => void;
     }>).__island;
     handle.putAt(at.wx, at.wz, heading);
-    const agl = fix.msl - groundHeight(at.wx, at.wz);
-    if (agl > 1) {
-      this.flight.hold(agl, heading);
-      this.follow.snapTo(this.ant.root, -heading);
-    }
+
+    // ALTITUDE IS NOT A PROPERTY OF THE ISLAND ALONE. The relief dial
+    // scales every height, so a fix taken at 1.0 and restored at 1.5
+    // asks for a spot ninety-five metres inside a hill — where the
+    // floor clamp obligingly stands her on the summit and the whole
+    // frame is wrong in a way that reads as drift. Converted rather
+    // than trusted; a fix with no dial recorded is assumed to be ours.
+    const dial = reliefScale();
+    const msl = Number.isFinite(fix.relief)
+      ? (fix.msl / fix.relief) * dial
+      : fix.msl;
+    const agl = msl - groundHeight(at.wx, at.wz);
+    const look = (fix.pitch * Math.PI) / 180;
+    if (agl > 1) this.flight.hold(agl, heading);
+    // BOTH, and they are not the same act. The snap places the camera
+    // for this frame; the aim is what stops the next frame's look
+    // input putting it straight back at its resting elevation, which
+    // is how four reproduced frames came back pitched 22 degrees down
+    // when the fix said 11.
+    this.look.aim(this.follow.offsetFor(look));
+    this.follow.snapTo(this.ant.root, -heading, look);
     return true;
   }
 

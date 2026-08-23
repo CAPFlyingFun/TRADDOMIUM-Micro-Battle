@@ -10,6 +10,9 @@
 import { describe, expect, it } from 'vitest';
 import { fixAt, fixToWorld, formatFix, parseFix, PLACES } from '../src/ui/fix';
 import { geoToWorld, ISLAND_CENTRE, worldToGeo } from '../src/world/geo';
+import {
+  bearingFromHeading, headingFromBearing, wrap360,
+} from '../src/ui/compassMath';
 import { world } from '../src/world/coords';
 import { UNITS_PER_METRE } from '../src/world/kauai';
 
@@ -26,7 +29,7 @@ const SPOTS = [
 describe('the position fix round-trips', () => {
   it('to well under a body length, everywhere on the island', () => {
     for (const at of SPOTS) {
-      const line = formatFix(fixAt(at, 1_281, 125.34, -4.2));
+      const line = formatFix(fixAt(at, 1_281, 125.34, -4.2, 1.5));
       const back = parseFix(line);
       expect(back).not.toBeNull();
       const there = fixToWorld(back!);
@@ -49,19 +52,19 @@ describe('the position fix round-trips', () => {
   });
 
   it('keeps the altitude to a centimetre', () => {
-    const back = parseFix(formatFix(fixAt(world(0, 0), 1_281, 0, 0)));
+    const back = parseFix(formatFix(fixAt(world(0, 0), 1_281, 0, 0, 1.5)));
     expect(back!.msl).toBeCloseTo(1_281, 0);
   });
 
   it('carries the heading and the attitude', () => {
-    const back = parseFix(formatFix(fixAt(world(0, 0), 0, 125.34, -4.24)));
+    const back = parseFix(formatFix(fixAt(world(0, 0), 0, 125.34, -4.24, 1.5)));
     expect(back!.bearing).toBeCloseTo(125.3, 1);
     expect(back!.pitch).toBeCloseTo(-4.2, 1);
   });
 });
 
 describe('parsing is liberal about everything but the order', () => {
-  const line = formatFix(fixAt(world(1_000, 2_000), 1_281, 125.3, -4.2));
+  const line = formatFix(fixAt(world(1_000, 2_000), 1_281, 125.3, -4.2, 1.5));
 
   it('reads its own output', () => {
     expect(parseFix(line)).not.toBeNull();
@@ -85,5 +88,36 @@ describe('parsing is liberal about everything but the order', () => {
     // Joshua's worked example was 27.6 / 55.2 — the Persian Gulf. A
     // fix that would teleport her off the map is a typo, not a place.
     expect(parseFix('27.636363 55.222770 12.81m 125.3° -4.2°')).toBeNull();
+  });
+});
+
+describe('what a rendered comparison caught that the numbers did not', () => {
+  it('converts a bearing to her heading rather than to radians', () => {
+    // The bug: `bearing * PI / 180`. North is −Z and a heading runs
+    // along (sin h, cos h), so the two systems are 180° and a
+    // reflection apart — and the wrong one is a plausible-looking
+    // angle, which is why four reproduced frames looked merely
+    // "drifted" instead of obviously broken.
+    for (const bearing of [0, 45, 105.2, 180, 213.2, 300, 359.9]) {
+      expect(wrap360(bearingFromHeading(headingFromBearing(bearing))))
+        .toBeCloseTo(bearing, 6);
+    }
+  });
+
+  it('and carries the dial, because altitude is not the island alone', () => {
+    // groundHeight is `relief x height`, so the same spot is 192 m up
+    // at 1.0 and 288 m at 1.5. A fix restored on the other dial asked
+    // for a point inside a hill.
+    const line = formatFix(fixAt(world(0, 0), 19_200, 0, 0, 1));
+    const back = parseFix(line)!;
+    expect(back.relief).toBe(1);
+    // What goTo does with it: the same PLACE on a different dial.
+    expect((back.msl / back.relief) * 1.5).toBeCloseTo(28_800, 0);
+  });
+
+  it('assumes our own dial when a fix predates the field', () => {
+    const back = parseFix('22.04 -159.53 12.81m 125.3° -4.2°');
+    expect(back).not.toBeNull();
+    expect(Number.isFinite(back!.relief)).toBe(false);
   });
 });

@@ -59,6 +59,21 @@ export function bearingFromHeading(radians: number): number {
   return bearingOf(Math.sin(radians), Math.cos(radians));
 }
 
+/**
+ * And back again — a compass bearing in DEGREES to a game heading in
+ * RADIANS.
+ *
+ * The transform is its own inverse, which is a pleasant accident of
+ * north being −Z and not a licence to skip it: a fix restored with
+ * `bearing * PI / 180` instead of this put the camera 142 degrees off
+ * the frame it was meant to be reproducing, and looked plausible
+ * enough doing it that only a rendered comparison caught it.
+ */
+export function headingFromBearing(degrees: number): number {
+  const at = (degrees * Math.PI) / 180;
+  return Math.atan2(Math.sin(at), -Math.cos(at));
+}
+
 /** The bearing from one global point to another. */
 export function bearingTo(from: WorldPoint, to: WorldPoint): number {
   return bearingOf(to.wx - from.wx, to.wz - from.wz);
