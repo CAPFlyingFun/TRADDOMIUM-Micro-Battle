@@ -85,10 +85,17 @@ export const SKATE_BACK = 0.68;
 export const BOB_RATE = 9;
 
 /**
- * The longest a dive holds her under before buoyancy wins outright, in
- * seconds. Game tuning; a real one has hours.
+ * WHAT ENDS A DIVE, now that it is not a stopwatch.
+ *
+ * This used to be UNDER_FOR — four seconds, chosen because a dive had
+ * to end somehow, invisible to the player, and indistinguishable from
+ * the game simply deciding. It is her AIR that ends it now (breath.ts),
+ * which is a thing she can see, spend and get back.
+ *
+ * Kept only as the ceiling on how long buoyancy can be argued with at
+ * all, so a bug in the meter cannot pin her to the bed for ever.
  */
-export const UNDER_FOR = 4;
+export const UNDER_FOR = 120;
 
 /** How much of the current has her, by state. */
 const GRIP = {
@@ -168,6 +175,8 @@ export class Swim {
   update(
     water: Water | null, body: number, reserve: number,
     dived: boolean, dt: number,
+    /** What is left in her lungs, 0 to 1 — see breath.ts. */
+    air = 1,
   ): Afloat {
     const deep = water ? water.level - water.bed : 0;
     this.depth = deep;
@@ -200,7 +209,10 @@ export class Swim {
     // DEEP ENOUGH TO TAKE HER. Which of the three depends on what she
     // has left and what she is asking for.
     if (!dived) this.ducked = false;
-    if (dived && !this.ducked && this.state !== 'under') {
+    // OUT OF AIR IS NOT A CHOICE. She can decline to go down, but she
+    // cannot decline to come up.
+    const canHold = dived && air > 0;
+    if (canHold && !this.ducked && this.state !== 'under') {
       this.state = 'under';
       this.under = 0;
     }
@@ -210,8 +222,8 @@ export class Swim {
       // Buoyancy is not optional and not a timer she can extend: she is
       // a cork with legs. Holding the lever down buys the four seconds
       // and no more.
-      if (!dived || this.under >= UNDER_FOR) {
-        if (this.under >= UNDER_FOR) this.ducked = true;
+      if (!canHold || this.under >= UNDER_FOR) {
+        if (this.under >= UNDER_FOR || air <= 0) this.ducked = true;
         this.state = reserve >= SKATE_BACK ? 'skating' : 'swimming';
       }
     } else if (this.state === 'skating' || this.state === 'dry' || this.state === 'wading') {

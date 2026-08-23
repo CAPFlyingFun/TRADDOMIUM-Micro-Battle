@@ -64,9 +64,20 @@ const SAFE_FILL = 'rgba(120, 190, 255, .16)';
 const SAFE_EDGE = 'rgba(150, 205, 255, .5)';
 const SAFE_TEXT = 'rgba(190, 225, 255, .95)';
 
+const SVG = 'http://www.w3.org/2000/svg';
+/** Radius of the air ring, inside the 46-pixel box its portrait uses. */
+const AIR_R = 19.5;
+const AIR_ROUND = 2 * Math.PI * AIR_R;
+const AIR_FULL = 'rgba(150, 214, 255, .92)';
+const AIR_LOW = '#ffb03a';
+const AIR_OUT = '#ff7a5c';
+
 export class Vitals {
   private readonly panel: HTMLDivElement;
   private readonly stamina: Meter;
+  private readonly airRing: SVGCircleElement;
+  private readonly airText: SVGTextElement;
+  private shownAir = -1;
 
   private readonly water: Meter;
   private readonly grace: HTMLDivElement;
@@ -91,6 +102,57 @@ export class Vitals {
       placeItems: 'center',
       font: '22px/1 system-ui, sans-serif',
     } as Partial<CSSStyleDeclaration>);
+
+    // HER AIR, under the portrait, because it belongs to the ANT
+    // rather than to the row of bars — it is the only meter that is
+    // about where she is rather than what she has been doing.
+    //
+    // A ring rather than a fourth bar: three bars and a fourth reads
+    // as a longer list, and this one is not always relevant. Full and
+    // dry it sits back; underwater it is the only thing on the card
+    // worth looking at.
+    this.airRing = document.createElementNS(SVG, 'circle');
+    const gauge = document.createElementNS(SVG, 'svg');
+    gauge.setAttribute('width', '46');
+    gauge.setAttribute('height', '46');
+    gauge.setAttribute('viewBox', '0 0 46 46');
+    gauge.style.display = 'block';
+    gauge.style.marginTop = '4px';
+    const track = document.createElementNS(SVG, 'circle');
+    for (const ring of [track, this.airRing]) {
+      ring.setAttribute('cx', '23');
+      ring.setAttribute('cy', '23');
+      ring.setAttribute('r', String(AIR_R));
+      ring.setAttribute('fill', 'none');
+      ring.setAttribute('stroke-width', '3.5');
+      ring.setAttribute('stroke-linecap', 'round');
+      // Twelve o'clock, filling clockwise, which is where a gauge
+      // reads from whatever it is measuring.
+      ring.setAttribute('transform', 'rotate(-90 23 23)');
+    }
+    track.setAttribute('stroke', 'rgba(255, 216, 130, .18)');
+    this.airRing.setAttribute('stroke', AIR_FULL);
+    this.airRing.setAttribute('stroke-dasharray', String(AIR_ROUND));
+    this.airRing.setAttribute('stroke-dashoffset', '0');
+    this.airText = document.createElementNS(SVG, 'text');
+    this.airText.setAttribute('x', '23');
+    this.airText.setAttribute('y', '23');
+    this.airText.setAttribute('text-anchor', 'middle');
+    this.airText.setAttribute('dominant-baseline', 'central');
+    this.airText.setAttribute('fill', AIR_FULL);
+    this.airText.setAttribute(
+      'style',
+      'font: 700 11px/1 "JetBrains Mono", ui-monospace, monospace',
+    );
+    this.airText.textContent = '100%';
+    gauge.append(track, this.airRing, this.airText);
+
+    const left = document.createElement('div');
+    Object.assign(left.style, {
+      display: 'flex', flexDirection: 'column', alignItems: 'center',
+      flex: '0 0 auto',
+    } as Partial<CSSStyleDeclaration>);
+    left.append(portrait, gauge);
 
     const stack = document.createElement('div');
     Object.assign(stack.style, {
@@ -143,7 +205,7 @@ export class Vitals {
     } as Partial<CSSStyleDeclaration>);
     stack.appendChild(this.grace);
 
-    this.panel.append(portrait, stack);
+    this.panel.append(left, stack);
     host.appendChild(this.panel);
   }
 
@@ -196,6 +258,32 @@ export class Vitals {
   }
 
   private flying = false;
+
+  /**
+   * HOW MUCH BREATH SHE HAS LEFT, 0 to 1.
+   *
+   * Rounded before it is compared, so a gauge that changes by a
+   * thousandth a frame rewrites the DOM once a percent instead of
+   * sixty times a second.
+   */
+  air(fraction: number): void {
+    const shown = Math.round(Math.min(1, Math.max(0, fraction)) * 100);
+    if (shown === this.shownAir) return;
+    this.shownAir = shown;
+    this.airText.textContent = `${shown}%`;
+    this.airRing.setAttribute(
+      'stroke-dashoffset', String(AIR_ROUND * (1 - shown / 100)),
+    );
+    const tone = shown <= 0 ? AIR_OUT : shown < 25 ? AIR_LOW : AIR_FULL;
+    this.airRing.setAttribute('stroke', tone);
+    this.airText.setAttribute('fill', tone);
+    // FULL AND DRY IT SITS BACK. A gauge that reads 100% for an hour
+    // is a number nobody looks at; the same gauge at 40% should be the
+    // only thing on this card worth reading.
+    this.airRing.parentElement?.style.setProperty(
+      'opacity', shown >= 100 ? '0.34' : '1',
+    );
+  }
 
   show(fraction: number, spent: boolean, rate: number): void {
     const left = Math.max(0, Math.min(1, fraction));

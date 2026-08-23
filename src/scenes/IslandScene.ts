@@ -22,6 +22,7 @@ import { RiverWater } from '../world/RiverWater';
 import { hydro, waterBodyAt } from '../world/water';
 import { Thirst, TOO_DEEP } from '../ant/thirst';
 import { Swim } from '../ant/swim';
+import { Breath } from '../ant/breath';
 import { shoreward, surfAt, type Surf } from '../world/surf';
 
 /**
@@ -1093,6 +1094,12 @@ export class IslandScene {
           : null,
       },
     );
+    // HER HEAD IS EITHER UNDER OR IT IS NOT, and that is the only
+    // question this meter asks. Ticked here rather than inside the
+    // water branch so surfacing on dry land still refills her — she
+    // does not hold her breath standing on a riverbank.
+    this.breath.update(this.swim.afloat.state === 'under', dt);
+    this.vitals.air(this.breath.fraction);
     this.vitals.aloft(this.flight.aloft);
     this.vitals.show(this.stamina.fraction, this.stamina.spent, this.effort);
 
@@ -1690,6 +1697,7 @@ export class IslandScene {
         draft, this.stamina.fraction,
         // Driving the lever down IS a dive once she is afloat.
         this.liftSlider.lift < -0.35, dt,
+        this.breath.fraction,
       );
       this.surf = {
         depth: Math.max(0, level - ground),
@@ -1725,6 +1733,8 @@ export class IslandScene {
 
   /** What the water is doing to her — surface, swimming, submerged. */
   private readonly swim = new Swim();
+  /** What is left in her lungs. Refills the moment her head is out. */
+  private readonly breath = new Breath();
 
   private windOnHer(): { x: number; z: number } | null {
     const sky = this.nowWeather;
