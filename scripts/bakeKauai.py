@@ -12,9 +12,11 @@ at -6000 m), assembles the 4097-square global grid, downsamples it by STRIDING
 corrupts heights across the 256-wraps, and striding keeps tile-edge samples
 bit-exact) to 1025-square, and writes little-endian int16 DECIMETRES.
 
-At the ant world's 1:1000 scale, one real metre is one in-world millimetre —
-so the scene reads a sample, divides by ten, and has millimetres. 1025 samples
-over 56,000 mm is one sample every 54.7 mm.
+The scene reads a sample and divides by ten to get real metres, then scales by
+UNITS_PER_METRE. At the current 1:1 scale one world unit is a CENTIMETRE, so
+the island is 5,600,000 units across and 1025 samples is one every 5,463 of
+them — 54.6 real metres. (This paragraph described a 1:1000 world where a
+metre was a millimetre. The output never changed; the comment went stale.)
 
 Usage:  python3 scripts/bakeKauai.py <BE-repo>/artifacts/beyond-extinction
 Writes: public/kauai-1025.bin (~2.1 MB)
