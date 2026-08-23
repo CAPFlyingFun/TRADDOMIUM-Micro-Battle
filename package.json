@@ -32,7 +32,8 @@
     "probe:update": "node scripts/probe-update.mjs",
     "probe:lakes": "node scripts/probe-lakes.mjs",
     "probe:surf": "node scripts/probe-surf.mjs",
-    "probe:rivers": "node scripts/probe-rivers.mjs"
+    "probe:rivers": "node scripts/probe-rivers.mjs",
+    "bake:veg": "python3 scripts/bakeVeg.py"
   },
   "dependencies": {
     "three": "^0.180.0"
