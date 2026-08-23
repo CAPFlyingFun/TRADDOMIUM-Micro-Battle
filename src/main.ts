@@ -6,6 +6,7 @@ import { load as loadSettings } from './ui/settings';
 import { useGrid } from './world/heightfield';
 import { HYDRO_BYTES, loadHydro } from './world/hydro';
 import { useHydro } from './world/water';
+import { useLakes } from './world/lakes';
 import { GRID_BYTES, loadGrid, type HeightGrid } from './world/kauai';
 import { fitBootBar } from './ui/bootBar';
 
@@ -79,6 +80,11 @@ try {
   ]);
   useGrid(grid);
   useHydro(hydro);
+  // BEFORE ANY SCENE ASKS HOW HIGH THE GROUND IS. The lakes press the
+  // island down under them (see lakes.ts), so a terrain cut before this
+  // would be cut without its basins — and the ant placed on it would
+  // stand on ground the mesh no longer has.
+  useLakes(hydro);
   const requested = new URLSearchParams(location.search).get('scene') ?? 'game';
   (scenes[requested] ?? scenes['island'])(host, grid);
   clearBoot();

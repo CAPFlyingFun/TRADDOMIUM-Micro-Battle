@@ -141,6 +141,44 @@ It also sits awkwardly with §3b: a shallow-water sim wants a **mutable bed**
 it can own, and TMB's bed is a pure function. If we ever want it, it runs on
 its own patch grid and reports back, rather than editing the island.
 
+### 3f. Lakes DO need the carve — the island has no room for them
+
+Phase 3 was specified as "no carve needed, they already sit in basins".
+They do not, and the measurement is not close:
+
+| | |
+|---|---|
+| median lake width | **130 m** |
+| height-grid sample spacing | **55 m** |
+| lakes whose terrain sits ABOVE their own waterline | **72 of 111** |
+
+A lake two or three samples across has no basin in a grid this coarse —
+the hollow is averaged flat, and the waterline ends up buried in a
+hillside by a median of eighty centimetres. Drawn as flat polygons at
+their stated level, most of the hundred and eleven would be underground.
+
+**The good news is that lakes are the easy half of the carve.** A river
+is 5.5 m across and cannot survive the transition tier's 312.5-unit
+vertex spacing (§3a); a lake is 130 m across and gets forty vertices
+there. The tier-handover problem that makes rivers hard simply does not
+arise, so the lake carve is a clean first outing for the machinery
+rivers will reuse: the spatial index, the point-in-polygon test, and
+the rule that a carve is a function inside `terrainHeight` (§3b) rather
+than a bake.
+
+Two things the lake carve settled that rivers will inherit:
+
+- **The floor is absolute, never relative.** A cut of "two metres below
+  the existing ground" digs a trench in a hilltop and leaves the lake
+  still buried in it. The bed is set to `waterline − depth` and taken as
+  a MINIMUM against the existing ground, so a carve can only ever lower
+  the island. There is a test that walks a grid over every lake to say
+  so.
+- **The cost is real but small.** 200,000 `terrainHeight` calls went
+  from 52 ms to 75 ms with the lakes indexed — and the index is what
+  keeps it to that, because the answer for almost every point on the
+  island is "no lake here" and has to be one array read.
+
 ### 3e. Ship the hydrography as a binary, not as JSON
 
 2.2 MB of JSON would roughly double the download and lands on a loading
@@ -193,8 +231,10 @@ system a reason to exist before anything can kill her.
 2. **Ocean upgrade** — swell, coast mask, depth colour, Fresnel, and a
    `seaHeightAt(x, z, t)` that the CPU and the shader share. Self-contained,
    visible immediately, and it touches nothing else.
-3. **Lakes** — 111 static polygons at baked waterlines. No carve needed
-   (they already sit in basins), so this is the cheapest real water.
+3. **Lakes** — carved basins and drawn surfaces. The original line here
+   said "111 static polygons at baked waterlines, no carve needed, they
+   already sit in basins". They do not; see §3f. Lakes turned out to be
+   the right place to build the carve machinery rivers will reuse.
 4. **River ribbons, far tier only.** Visual, no carve, no trench.
 5. **River carve, near tiers** — inside `terrainHeight`, with the spatial
    index and a measured cost. The handover from (4) is the risk.

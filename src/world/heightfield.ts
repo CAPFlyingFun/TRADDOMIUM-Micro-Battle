@@ -37,6 +37,7 @@
 import {
   blurGrid, heightAt, SPAN, STEP, UNITS_PER_METRE, type HeightGrid,
 } from './kauai';
+import { lakeBed } from './lakes';
 
 /**
  * THE SYNTHESISED GROUND.
@@ -175,7 +176,18 @@ export function terrainHeight(x: number, z: number): number {
   // Ease the relief in over the first stretch of land so the beach
   // still meets the water cleanly rather than in a cliff of noise.
   const shore = Math.min(1, base / 400);
-  return base + relief * shore;
+  const land = base + relief * shore;
+
+  // A LAKE PRESSES THE GROUND DOWN, and only down. The island's basins
+  // are not resolved at 55 m a sample — 72 of the 111 lakes have
+  // terrain ABOVE their own waterline — so without this most of them
+  // would be drawn buried in a hillside. See lakes.ts.
+  //
+  // LAST, and after the relief noise, because a lake bed with dunes in
+  // it is not a lake bed. Free when there is no lake here, which is
+  // almost everywhere: one array read says so.
+  const bed = lakeBed(x, z);
+  return bed !== null && bed < land ? bed : land;
 }
 
 /**

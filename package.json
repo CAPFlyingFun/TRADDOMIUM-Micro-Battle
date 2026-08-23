@@ -1,7 +1,7 @@
 {
   "name": "traddomium-micro-battle",
   "private": true,
-  "version": "0.44.0",
+  "version": "0.45.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -29,7 +29,8 @@
     "bake:hydro": "python3 scripts/bakeHydro.py",
     "rivers:scale": "python3 scripts/riversToScale.py",
     "probe:ocean": "node scripts/probe-ocean.mjs",
-    "probe:update": "node scripts/probe-update.mjs"
+    "probe:update": "node scripts/probe-update.mjs",
+    "probe:lakes": "node scripts/probe-lakes.mjs"
   },
   "dependencies": {
     "three": "^0.180.0"

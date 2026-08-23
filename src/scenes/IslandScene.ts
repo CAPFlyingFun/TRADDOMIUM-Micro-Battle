@@ -11,12 +11,14 @@ import {
 } from '../ant/pace';
 import { Stamina } from '../ant/stamina';
 import {
-  groundHeight, ISLAND_SPAN, setRelief, setSmoothing, smoothingAmount,
+  groundHeight, ISLAND_SPAN, reliefScale, setRelief, setSmoothing, smoothingAmount,
 } from '../world/heightfield';
 import { findLandfall, UNITS_PER_METRE, type HeightGrid } from '../world/kauai';
 import { local, world, type WorldPoint } from '../world/coords';
 import { TerrainStream, TIER_CUTS } from '../world/TerrainStream';
 import { Ocean } from '../world/Ocean';
+import { LakeWater } from '../world/LakeWater';
+import { lakeLevel } from '../world/lakes';
 import { seaHeightAt } from '../world/swell';
 import { originAt, rebaseFor, setOrigin, toLocal, toWorld,
 } from '../world/origin';
@@ -201,6 +203,7 @@ export class IslandScene {
    * moves with every rebase like everything else already placed.
    */
   private water!: Ocean;
+  private lakes!: LakeWater;
   /**
    * The CEILING on a full push of the stick — not propulsion. She does
    * not move because this is set; she moves because a thumb asks.
@@ -442,6 +445,7 @@ export class IslandScene {
       where: () => [this.ant.where.wx, this.ant.root.position.y, this.ant.where.wz],
       origin: () => originAt(),
       cells: () => this.terrain.cellCount,
+      lakesDrawn: () => this.lakes.shown,
       cameraAt: () => this.follow.camera.position.toArray(),
       // Her WORLD position, not her rendered one. root.position is
       // measured from the floating origin now, so asking the heightfield
@@ -467,9 +471,23 @@ export class IslandScene {
         this.terrain.follow(this.ant.where);
         this.terrain.place();
         this.water.reorigin();
+        this.lakes.follow(this.ant.where);
         this.follow.snapTo(this.ant.root, -heading);
       },
       seaAt: (wx: number, wz: number) => seaHeightAt(wx, wz, this.elapsed),
+      /**
+       * The DRAWN surface of a lake here, or null.
+       *
+       * Scaled by the relief dial, exactly as the mesh and
+       * `groundHeight` are, so a caller can compare it with the ground
+       * without knowing the dial exists. A probe that compared a scaled
+       * bed against an unscaled waterline convicted the carve of being
+       * thirty-four metres wrong; it was off by a factor of 1.5.
+       */
+      waterAt: (wx: number, wz: number) => {
+        const level = lakeLevel(wx, wz);
+        return level === null ? null : level * reliefScale();
+      },
       pace: () => this.pace,
       setPace: (to: Pace) => { this.pace = to; },
       stamina: () => this.stamina.fraction,
@@ -658,6 +676,7 @@ export class IslandScene {
     this.compass.dispose();
     this.rain.dispose();
     this.water.dispose();
+    this.lakes.dispose();
     this.detachSettings();
     this.detachKill();
     this.renderer.dispose();
@@ -868,6 +887,11 @@ export class IslandScene {
       // Ocean.reorigin, and the test that proves a rebase leaves the
       // water alone.
       this.water.reorigin();
+      // A lake IS at a fixed place, so its surfaces are re-seated
+      // rather than refolded — the TerrainStream pattern, and for the
+      // same reason: their geometry is built around their own centres
+      // and only the seat depends on where the origin is.
+      this.lakes.place();
       // The ground texture tiles off world position, not rendered
       // position, or it slides sideways on every shift.
       const now = originAt();
@@ -875,6 +899,7 @@ export class IslandScene {
       this.terrain.place();
     }
     this.terrain.follow(at);
+    this.lakes.follow(at);
 
     // WEATHER IS ASKED IN GLOBAL COORDINATES and drawn in local ones.
     // Her position decides what the sky is doing; the CAMERA's rendered
@@ -892,6 +917,7 @@ export class IslandScene {
     // on the eye, while every wave on it is a function of where the
     // island is. See Ocean.
     this.water.update(this.follow.camera.position, dt);
+    this.lakes.update(dt);
     const reading = service.reading;
     if (reading) {
       this.weatherChip.update(
@@ -1380,9 +1406,16 @@ export class IslandScene {
    */
   private buildWater(grid: HeightGrid): void {
     this.water = new Ocean(this.scene, grid, null);
+    this.lakes = new LakeWater(this.scene);
     new THREE.TextureLoader().load(
       `${import.meta.env.BASE_URL}kauai-tex/water-normal.webp`,
-      (texture) => { if (!this.disposed) this.water.wear(texture); },
+      (texture) => {
+        if (this.disposed) return;
+        // ONE TEXTURE, TWO WATERS. The sea and the reservoirs ripple at
+        // very different scales, but they ripple off the same map.
+        this.water.wear(texture);
+        this.lakes.wear(texture);
+      },
       undefined,
       () => {},
     );
