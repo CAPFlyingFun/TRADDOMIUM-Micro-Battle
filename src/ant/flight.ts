@@ -230,6 +230,20 @@ export const PITCH_PER_RISE = 0.012;
  */
 export const MAX_TILT = (18 * Math.PI) / 180;
 
+/**
+ * HOW MUCH FURTHER SHE TIPS TO GAIN SPEED THAN TO SHED IT.
+ *
+ * Flown on the device, the brake read clearly and the acceleration
+ * barely did, and the asymmetry in the reading is an asymmetry in the
+ * thing being read: slowing down is a flare, a deliberate held
+ * attitude with the whole underside presented to the camera, while
+ * speeding up is a nose already pointed away from it. Foreshortening
+ * eats the second one. So the nose-down gets half as much again —
+ * 27 degrees against the brake's 18 — to arrive at the same apparent
+ * change from behind.
+ */
+export const TILT_DOWN = 1.5;
+
 /** How briskly the tip arrives and lets go. Slower than the bank. */
 export const TILT_EASE = 4;
 
@@ -379,6 +393,14 @@ export class Flight {
   private bank = 0;
   /** Nose attitude asked for by the stick, radians. Positive is up. */
   private tilt = 0;
+  /**
+   * The terrain under her at the last frame, or null before the first.
+   *
+   * Only ever used as a DIFFERENCE, so the absolute value does not
+   * matter and null simply means "no difference yet" — which is the
+   * right answer on the frame she leaves the ground.
+   */
+  private ground: number | null = null;
   private rise = 0;
   /**
    * The air she is in, as a vertical rate — see wander.ts.
@@ -468,6 +490,7 @@ export class Flight {
   takeOff(groundSpeed: number, reserve: number, facing: number): number {
     if (!this.canTakeOff(groundSpeed, reserve)) return 0;
     this.state = 'takeoff';
+    this.ground = null;
     this.speed = groundSpeed * TAKEOFF_BOOST;
     this.facing = facing;
     this.bank = 0;
@@ -492,6 +515,7 @@ export class Flight {
    */
   hold(above: number, facing: number): void {
     this.state = 'powered';
+    this.ground = null;
     this.above = Math.max(0.01, above);
     this.speed = CRUISE_SPEED;
     this.facing = facing;
@@ -505,6 +529,7 @@ export class Flight {
   /** Put her flat on the ground — landings, respawns, scene resets. */
   land(): void {
     this.state = 'grounded';
+    this.ground = null;
     this.above = 0;
     this.speed = 0;
     this.rise = 0;
@@ -521,8 +546,24 @@ export class Flight {
    * @param spent whether the reserve has latched empty
    * @returns what she did and what it cost
    */
-  update(demand: FlightDemand, reserve: number, spent: boolean, dt: number): FlightStep {
-    if (!this.aloft) return { effort: 0, ahead: 0, across: 0, rise: 0 };
+  update(
+    demand: FlightDemand, reserve: number, spent: boolean, dt: number,
+    /**
+     * The terrain elevation directly under her, world units — the
+     * DRAWN surface, the one she would land on. What makes her hold an
+     * altitude instead of a clearance; see the integration below.
+     *
+     * DEFAULTS TO SEA LEVEL, which is not a fallback so much as the
+     * flat world the unit tests fly in: constant ground means no
+     * shift, and no shift is the old behaviour exactly. Anything with
+     * an island under it must pass the real height — the scene does.
+     */
+    ground = 0,
+  ): FlightStep {
+    if (!this.aloft) {
+      this.ground = ground;
+      return { effort: 0, ahead: 0, across: 0, rise: 0 };
+    }
 
     const empty = spent || reserve <= 0;
     const asked = Math.hypot(demand.push, demand.side);
@@ -541,7 +582,31 @@ export class Flight {
       : empty ? STALL_SPEED * 1.6
         : MAX_POWERED_SPEED) * scale;
     this.speed = Math.max(0, Math.min(cap, this.speed));
-    this.above = Math.max(0, this.above + this.climbing * dt);
+
+    // SHE HOLDS AN ALTITUDE, NOT A CLEARANCE.
+    //
+    // This used to be `above + climbing * dt` and nothing else, which
+    // is an AGL hold: the terrain moving under her moved HER. Flying
+    // down a canyon she rode the floor up and out of it and could not
+    // simply fly on past the far wall, because she was never at an
+    // altitude in the first place — she was at a distance from the
+    // ground, and the ground was steering.
+    //
+    // Her state is still stored as a clearance, because that is what
+    // every reader downstream wants (the wind profile, the AGL rail,
+    // where to draw her). The difference is that a change in the
+    // ground under her is subtracted out: ground up by ten means
+    // clearance down by ten, and her height above the sea is the same
+    // number it was. That IS an MSL hold, expressed in the variable
+    // that was already here.
+    //
+    // The floor stays. Clamping at zero is what stops her flying
+    // through a wall that rises into her — she rides up it instead,
+    // which is forgiving rather than correct, and much better than
+    // the inside of a hill.
+    const shift = this.ground === null ? 0 : this.ground - ground;
+    this.ground = ground;
+    this.above = Math.max(0, this.above + shift + this.climbing * dt);
 
     // Along her nose, plus the slip across it. Both in HER frame; the
     // caller turns them into world travel using her heading, which is
@@ -584,7 +649,8 @@ export class Flight {
     // Auto holds a speed, and something holding a speed is not
     // accelerating, so it flies level.
     const push = Math.max(-1, Math.min(1, demand.push));
-    this.tilt += (-MAX_TILT * push - this.tilt) * Math.min(1, dt * TILT_EASE);
+    const reach = MAX_TILT * (push > 0 ? TILT_DOWN : 1);
+    this.tilt += (-reach * push - this.tilt) * Math.min(1, dt * TILT_EASE);
   }
 
   /**

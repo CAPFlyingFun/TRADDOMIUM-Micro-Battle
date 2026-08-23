@@ -69,7 +69,7 @@ import { skyLook } from '../weather/sky';
 import { Rain } from '../weather/Rain';
 import type { GameWeather } from '../weather/gameplay';
 import { FIRST_LIGHT_JOB, TERRAIN_JOB, type LoadReport } from '../ui/loadPlan';
-import { LiveWind, windProfile } from '../weather/windField';
+import { LiveWind, shelter, windProfile } from '../weather/windField';
 
 /**
  * THE ISLAND — Kauai at 1:1000, walked by one ant.
@@ -842,6 +842,10 @@ export class IslandScene {
         this.stamina.fraction,
         this.stamina.spent,
         dt,
+        // The DRAWN ground under her, the same surface she would land
+        // on — so holding an altitude means holding it against the
+        // island the player can actually see.
+        groundHeight(this.ant.where.wx, this.ant.where.wz),
       );
       this.effort = step.effort;
       winded = this.stamina.update(step.effort, dt);
@@ -1528,6 +1532,9 @@ export class IslandScene {
     // Nothing at her feet, all of it at ten metres. Cheapest possible
     // exit too: on the ground this is exactly zero and the vector maths
     // below never runs.
+    // AGL for the profile, and that stays AGL on purpose: how much
+    // wind there is depends on how far off the deck she is, which is a
+    // different question from what altitude she is holding.
     const reach = windProfile(this.flight.height) * settings().windInfluence;
     if (reach <= 0) return null;
 
@@ -1536,7 +1543,18 @@ export class IslandScene {
     // it. Veer is clockwise in compass terms, which is anticlockwise in
     // heading terms — hence the sign, and hence saying so.
     const heading = sky.windHeading - (live.veerDegrees * Math.PI) / 180;
-    const speed = live.speedMps * UNITS_PER_METRE * reach;
+    // WHAT IS UPWIND OF HER, which in a gorge is most of the answer.
+    // `heading` is where the air is GOING, so the way back along it is
+    // where it comes from — and that is the direction to look for rock
+    // standing between her and the weather. MSL, not AGL: a ridge
+    // shelters her if it is higher THAN SHE IS, and how far she
+    // happens to be off the floor at the time is beside the point.
+    const here = this.ant.where;
+    const kept = shelter(
+      here.wx, here.wz, groundHeight(here.wx, here.wz) + this.flight.height,
+      -Math.sin(heading), -Math.cos(heading), groundHeight,
+    );
+    const speed = live.speedMps * UNITS_PER_METRE * reach * kept;
     return { x: Math.sin(heading) * speed, z: Math.cos(heading) * speed };
   }
 

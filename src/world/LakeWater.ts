@@ -191,7 +191,7 @@ export class LakeWater {
       roughness: 0.22,
       metalness: 0.08,
       transparent: true,
-      opacity: 0.8,
+      opacity: 0.9,
       side: THREE.DoubleSide,
       // The bed is only two metres under at most, and at the bank it is
       // no distance at all — so the surface and the ground are very
@@ -245,10 +245,19 @@ export class LakeWater {
             // the shallows and the middle really is the middle.
             float shallow = 1.0 - smoothstep(8.0, 150.0, vDeep);
             diffuseColor.rgb = mix(
-              vec3(0.020, 0.16, 0.20), vec3(0.16, 0.30, 0.26), shallow * shallow);
+              vec3(0.014, 0.16, 0.22), vec3(0.14, 0.32, 0.31), shallow * shallow);
             // Gone entirely where there is no water left to draw, so
-            // the edge is a waterline and not a cut polygon.
-            diffuseColor.a *= smoothstep(0.0, 12.0, vDeep);
+            // the edge is a waterline and not a cut polygon — but over
+            // six centimetres rather than twelve, because the point of
+            // the fade is to end the polygon on water rather than to
+            // spend a hand's width of shallows being invisible.
+            diffuseColor.a *= smoothstep(0.0, 6.0, vDeep);
+            // The meniscus, as on the rivers: at an ant's eye the
+            // bright curved rim is what says "edge of water" long
+            // before the colour does.
+            float rim = 1.0 - smoothstep(2.0, 26.0, vDeep);
+            diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.42, 0.56, 0.55), rim * 0.7);
+            diffuseColor.a = clamp(diffuseColor.a + rim * 0.3, 0.0, 1.0);
             if (diffuseColor.a < 0.01) discard;
           }`)
         .replace('#include <dithering_fragment>', `#include <dithering_fragment>

@@ -422,3 +422,86 @@ export class LiveWind {
     };
   }
 }
+
+// ── Shelter ────────────────────────────────────────────────────────
+
+/**
+ * HOW MUCH OF THE WIND ACTUALLY REACHES HER, given what is upwind.
+ *
+ * The height profile above answers "how far off the deck is she",
+ * which on open ground is the whole question and in a canyon is not
+ * the question at all. Flown down one on the device, she was carried
+ * about by a wind that in reality would have been broken up by two
+ * hundred metres of rock standing between her and it. A gorge is a
+ * calm place unless the wind runs ALONG it.
+ *
+ * So: look upwind. Walk out along the bearing the air is coming from
+ * and ask how much of the terrain out there stands above her. That
+ * single test gives the canyon answer for free and WITHOUT KNOWING
+ * WHAT A CANYON IS — cross the gorge and the wall is right there, turn
+ * along it and the fetch runs clear to the end. Joshua's condition,
+ * "basically 0.0 unless the winds run through them", falls out of the
+ * geometry rather than being written in.
+ *
+ * WHAT COUNTS IS THE ANGLE, not the height and not the distance. A
+ * ridge two metres up and six away shelters exactly as well as one
+ * four up and twelve, because shelter is about how much sky is cut
+ * off, and that is a slope: rise over run. Measuring the two
+ * separately, as this first did, needed a fudge factor to trade them
+ * off and got a six-metre gorge wrong by a third.
+ *
+ * NOT A FLUID MODEL, and it should not pretend to be. Real shelter
+ * involves separation, recirculation and a wake that reattaches
+ * downstream; a lee slope can gust harder than the open. This is
+ * line-of-sight occlusion, which gets the first-order thing right —
+ * you are out of the wind when something is between you and it — for
+ * six heightfield samples.
+ *
+ * @param wx her position, world units
+ * @param wz her position, world units
+ * @param altitude HER height above the sea, world units — not her AGL.
+ *   A ridge shelters her if it stands higher THAN SHE IS; how far she
+ *   happens to be off the floor at the time is beside the point.
+ * @param fromX unit vector pointing INTO the wind (where it comes from)
+ * @param fromZ
+ * @param groundAt the drawn terrain, injected so this module stays free
+ *   of the heightfield and the tests can hand it a shape
+ * @returns the share of the wind that gets through, 0 to 1
+ */
+export function shelter(
+  wx: number, wz: number, altitude: number,
+  fromX: number, fromZ: number,
+  groundAt: (x: number, z: number) => number,
+): number {
+  let worst = 0;
+  for (const reach of SHELTER_REACH) {
+    const over = groundAt(wx + fromX * reach, wz + fromZ * reach) - altitude;
+    if (over <= 0) continue;
+    // The tangent of the angle that ridge subtends from where she is.
+    const slope = Math.min(1, over / reach / SHELTER_TAN);
+    const blocked = slope * slope * (3 - 2 * slope);
+    if (blocked > worst) worst = blocked;
+  }
+  return 1 - worst;
+}
+
+/**
+ * How far upwind to look, in world units — one to twelve metres.
+ *
+ * Geometric rather than even, because the near samples are the ones
+ * that decide whether she is tucked in behind something and the far
+ * ones only refine it. Six of them, which is enough that a wall does
+ * not slide between two samples in a gorge as narrow as she can fly.
+ */
+export const SHELTER_REACH = [100, 200, 350, 550, 800, 1_200] as const;
+
+/**
+ * The elevation angle at which terrain blocks the wind completely,
+ * as a tangent. Fifteen degrees.
+ *
+ * Generous compared with a wind-engineering rule of thumb, which puts
+ * useful shelter within a few ridge-heights downwind — but this is a
+ * queen two centimetres long, and the surface roughness she flies
+ * through is not the roughness a weather station stands in.
+ */
+export const SHELTER_TAN = Math.tan((15 * Math.PI) / 180);

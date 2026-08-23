@@ -305,7 +305,7 @@ export class RiverWater {
       roughness: 0.24,
       metalness: 0.06,
       transparent: true,
-      opacity: 0.82,
+      opacity: 0.9,
       side: THREE.DoubleSide,
       // LIFTED, not sunk — see the class comment. The opposite sign to
       // the ocean and the lakes, and it is BE's lesson, not a typo.
@@ -367,8 +367,32 @@ export class RiverWater {
             float body = vDeep * (0.35 + 0.65 * mid);
             float shallow = 1.0 - smoothstep(6.0, 120.0, body);
             diffuseColor.rgb = mix(
-              vec3(0.016, 0.13, 0.17), vec3(0.13, 0.28, 0.24), shallow * shallow);
-            diffuseColor.a *= smoothstep(0.0, 0.5, mid) * 0.95 + 0.05;
+              vec3(0.010, 0.13, 0.19), vec3(0.11, 0.30, 0.29), shallow * shallow);
+
+            // THE WATERLINE, which is the thing that was missing.
+            //
+            // Reported from the device: "the water's edge and even the
+            // water is hard to see, it looks clear". It did, and this
+            // line is why — the alpha ramped from nothing at the bank
+            // to full only halfway across, so the outer HALF of every
+            // channel was glass laid over sand. On a 5.5 m river that
+            // is a metre and a half of invisible water either side,
+            // and no edge at all to see.
+            //
+            // The fade was there to hide the polygon boundary against
+            // ground that had no trench in it. It has a trench now
+            // (see farHeight), so the edge can be an edge.
+            diffuseColor.a *= smoothstep(0.0, 0.16, mid) * 0.45 + 0.55;
+
+            // And a bright rim ON the boundary. At her scale this is
+            // not decoration: a meniscus a millimetre wide is a body
+            // length of curved, sky-catching water, and it is the
+            // single most legible thing about a puddle from an ant's
+            // eye. A proper surface-tension model is still owed; this
+            // is the read it would give.
+            float rim = 1.0 - smoothstep(0.0, 0.10, mid);
+            diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.42, 0.56, 0.55), rim * 0.8);
+            diffuseColor.a = clamp(diffuseColor.a + rim * 0.35, 0.0, 1.0);
             if (diffuseColor.a < 0.02) discard;
           }`)
         .replace('#include <dithering_fragment>', `#include <dithering_fragment>

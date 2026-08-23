@@ -11,7 +11,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  Flight, MAX_PITCH, MAX_TILT, type FlightDemand,
+  Flight, MAX_PITCH, MAX_TILT, TILT_DOWN, type FlightDemand,
 } from '../src/ant/flight';
 
 const STILL: FlightDemand = { push: 0, side: 0, climb: false, descend: false };
@@ -21,7 +21,7 @@ function attitude(demand: Partial<FlightDemand>, seconds = 2): number {
   const flight = new Flight();
   flight.takeOff(60, 1, 0);
   for (let t = 0; t < seconds; t += 1 / 60) {
-    flight.update({ ...STILL, ...demand }, 1, false, 1 / 60);
+    flight.update({ ...STILL, ...demand }, 1, false, 1 / 60, 0);
   }
   return flight.pitch;
 }
@@ -41,17 +41,28 @@ describe('the cyclic', () => {
     expect(attitude({ push: 1 })).toBeLessThan(attitude({ push: 0.4 }));
   });
 
+  it('drops the nose further than it raises it', () => {
+    // NOT SYMMETRY, AND ON PURPOSE. Flown on the device the brake read
+    // clearly and the acceleration barely did: slowing is a flare, a
+    // held attitude showing the whole underside to a camera sitting
+    // behind her, while speeding up points the nose away and
+    // foreshortening eats it. Half as much again to look the same.
+    const down = Math.abs(attitude({ push: 1 }));
+    const up = Math.abs(attitude({ push: -1 }));
+    expect(down / up).toBeCloseTo(TILT_DOWN, 1);
+  });
+
   it('reaches about the tilt it promises, and lets go again', () => {
     const flight = new Flight();
     flight.takeOff(60, 1, 0);
     for (let t = 0; t < 3; t += 1 / 60) {
-      flight.update({ ...STILL, push: 1 }, 1, false, 1 / 60);
+      flight.update({ ...STILL, push: 1 }, 1, false, 1 / 60, 0);
     }
     const level = flight.climbing * 0.012;
-    expect(flight.pitch - level).toBeCloseTo(-MAX_TILT, 2);
+    expect(flight.pitch - level).toBeCloseTo(-MAX_TILT * TILT_DOWN, 2);
 
     // Centre the stick and she comes back to whatever her climb says.
-    for (let t = 0; t < 3; t += 1 / 60) flight.update(STILL, 1, false, 1 / 60);
+    for (let t = 0; t < 3; t += 1 / 60) flight.update(STILL, 1, false, 1 / 60, 0);
     expect(flight.pitch - flight.climbing * 0.012).toBeCloseTo(0, 2);
   });
 
@@ -59,7 +70,7 @@ describe('the cyclic', () => {
     const flight = new Flight();
     flight.takeOff(60, 1, 0);
     for (let t = 0; t < 3; t += 1 / 60) {
-      flight.update({ ...STILL, hold: 40 }, 1, false, 1 / 60);
+      flight.update({ ...STILL, hold: 40 }, 1, false, 1 / 60, 0);
     }
     expect(flight.pitch - flight.climbing * 0.012).toBeCloseTo(0, 3);
   });
@@ -70,7 +81,7 @@ describe('the cyclic', () => {
     const flight = new Flight();
     flight.takeOff(60, 1, 0);
     for (let t = 0; t < 40; t += 1 / 60) {
-      flight.update({ ...STILL, push: 1, descend: true }, 1, false, 1 / 60);
+      flight.update({ ...STILL, push: 1, descend: true }, 1, false, 1 / 60, 0);
     }
     expect(Math.abs(flight.pitch)).toBeLessThanOrEqual(MAX_PITCH + 1e-9);
   });
@@ -82,7 +93,7 @@ describe('the cyclic', () => {
     flight.takeOff(60, 1, 0);
     const from = flight.airspeed;
     for (let t = 0; t < 1; t += 1 / 60) {
-      flight.update({ ...STILL, push: -1 }, 1, false, 1 / 60);
+      flight.update({ ...STILL, push: -1 }, 1, false, 1 / 60, 0);
     }
     expect(flight.airspeed).toBeLessThan(from);
     expect(flight.airspeed).toBeGreaterThanOrEqual(0);
