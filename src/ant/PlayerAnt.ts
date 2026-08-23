@@ -209,7 +209,17 @@ export class PlayerAnt {
    * curls into a circle. Ask the input what it wants; do not ask the
    * follow where it got to.
    */
-  update(drive: Drive, view: number, dt: number, above = 0): void {
+  /**
+   * @param carry world units a second that something ELSE is moving her
+   *   at — surf, a current, anything that does not ask her legs.
+   *   Added to her travel exactly as the wind is added in `fly`, and at
+   *   the same point, so it lands in `overGround` for free and the HUD
+   *   reports what actually happened rather than what she asked for.
+   */
+  update(
+    drive: Drive, view: number, dt: number, above = 0,
+    carry?: { readonly x: number; readonly z: number } | null,
+  ): void {
     this.attitude = null;
     const asked = Math.hypot(drive.ahead, drive.across);
     const wasFacing = this.heading;
@@ -253,6 +263,15 @@ export class PlayerAnt {
         += (Math.sin(view) * this.velocity.y + Math.sin(right) * this.velocity.x) * step;
       this.at.z
         += (Math.cos(view) * this.velocity.y + Math.cos(right) * this.velocity.x) * step;
+    }
+    // CARRIED. Separate from her drive because the two are different
+    // things and the difference is the point: a queen sprinting up a
+    // beach into a breaking wave is running at full effort and going
+    // backwards, and her legs, her gait and her heading are all
+    // unaffected by that. Only her position over the island changes.
+    if (carry) {
+      this.at.x += carry.x * dt;
+      this.at.z += carry.z * dt;
     }
     // Stride on the ground she covers AND on the ground she turns
     // through. Driving the gait off travel alone left her turning on

@@ -150,6 +150,47 @@ export function seaSlopeAt(
 }
 
 /**
+ * HOW FAST THE WATER ITSELF IS MOVING, and which way.
+ *
+ * The sea surface going up and down is only half of a wave. The water
+ * under it travels in orbits — forward under a crest, back under a
+ * trough — and that is the half that picks a queen up and puts her
+ * somewhere else.
+ *
+ * FREE, AND EXACT, from the table already here. For a linear deep-water
+ * wave the horizontal particle velocity at the surface is
+ *
+ *     u = A · ω · sin(θ)  along the wave's direction
+ *       = ω · η
+ *
+ * — in phase with the elevation, so it is literally the surface height
+ * times the angular frequency. No second model, no tuning constant, and
+ * no way for the water to flow one way while the wave that carries it
+ * goes another. That is the same discipline as `swellGLSL`, and it is
+ * most of the reason a sum of sines was chosen over a Gerstner wave.
+ *
+ * Peak here is about half a metre a second. A queen is ELEVEN
+ * MILLIMETRES long and runs at a quarter of a metre a second, so the
+ * open sea moves twice as fast as she does before a wave has broken.
+ */
+export function seaFlowAt(
+  wx: number, wz: number, seconds: number,
+): { x: number; z: number } {
+  let x = 0;
+  let z = 0;
+  for (const wave of WAVES) {
+    const rise = wave.height
+      * Math.sin(turn(wave) * (wave.dx * wx + wave.dz * wz) - wave.speed * seconds);
+    x += wave.speed * rise * wave.dx;
+    z += wave.speed * rise * wave.dz;
+  }
+  return { x, z };
+}
+
+/** The fastest the open sea can ever carry her, world units a second. */
+export const FLOW = WAVES.reduce((sum, w) => sum + w.height * w.speed, 0);
+
+/**
  * The same swell, as GLSL, generated from the same table.
  *
  * WRITTEN RATHER THAN WRITTEN TWICE. The constants are baked into the

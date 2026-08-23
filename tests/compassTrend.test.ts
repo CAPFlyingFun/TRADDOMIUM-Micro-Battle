@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { trendReach } from '../src/ui/Compass';
+import { TREND_SECONDS, trendReach } from '../src/ui/Compass';
 
 describe('the turn trend on the heading tape', () => {
   it('shows nothing while she is flying straight', () => {
@@ -10,11 +10,15 @@ describe('the turn trend on the heading tape', () => {
     expect(trendReach(-1.4)).toBe(0);
   });
 
-  it('reaches six seconds ahead, in degrees of tape', () => {
+  it('reaches TREND_SECONDS ahead, in degrees of tape', () => {
     // The G1000 contract: roll out when the bar's end touches the
-    // bearing you want, and you roll out ON it.
-    expect(trendReach(5)).toBeCloseTo(30, 6);
-    expect(trendReach(-4)).toBeCloseTo(-24, 6);
+    // bearing you want, and you roll out ON it. Written against the
+    // constant rather than against a number, because the horizon is a
+    // tuning decision — six seconds is right for an aeroplane turning
+    // at three degrees a second and far too long for a queen who turns
+    // in her own length.
+    expect(trendReach(5)).toBeCloseTo(5 * TREND_SECONDS, 6);
+    expect(trendReach(-4)).toBeCloseTo(-4 * TREND_SECONDS, 6);
   });
 
   it('leans the way she is turning', () => {

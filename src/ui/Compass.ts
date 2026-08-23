@@ -54,12 +54,19 @@ const EASE = 0.02;
 /**
  * How far ahead the turn trend looks, in seconds.
  *
- * A G1000 draws six seconds of turn — far enough to be a decision and
- * near enough to still be true. The bar reaches from the centre mark to
- * where the heading will be if she holds this rate, so rolling out when
- * its end touches the bearing she wants rolls out ON it.
+ * A G1000 draws six, and six is right for an aeroplane: a standard-rate
+ * turn is three degrees a second, so the bar reaches eighteen degrees
+ * and a pilot rolling out when its end touches the bearing they want
+ * rolls out ON it.
+ *
+ * TWO, HERE, BECAUSE A QUEEN IS NOT AN AEROPLANE. She turns in her own
+ * length. Her rate runs an order of magnitude above standard, so six
+ * seconds of it is most of a circle — the bar spends its life pinned at
+ * the cap, which says only "turning", which the tape already said.
+ * Joshua asked for two. At two the bar is a rate she can read and act
+ * on, and the cap is somewhere she has to work to reach.
  */
-const TREND_SECONDS = 6;
+export const TREND_SECONDS = 2;
 
 /** Turn rates below this are hand tremor, not a turn. */
 const TREND_FLOOR = 1.5;

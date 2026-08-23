@@ -18,6 +18,17 @@ import { local, world, type WorldPoint } from '../world/coords';
 import { TerrainStream, TIER_CUTS } from '../world/TerrainStream';
 import { Ocean } from '../world/Ocean';
 import { LakeWater } from '../world/LakeWater';
+import { shoreward, surfAt, type Surf } from '../world/surf';
+
+/**
+ * How quickly she takes the water's speed, in seconds.
+ *
+ * Short, because a body eleven millimetres long in water moving half a
+ * metre a second has essentially no say in the matter — but not zero,
+ * because "almost at once" and "instantly" look completely different at
+ * the moment a wave arrives, and only one of them is true.
+ */
+const SWEPT_EASE = 0.18;
 import { lakeLevel } from '../world/lakes';
 import { seaHeightAt } from '../world/swell';
 import { originAt, rebaseFor, setOrigin, toLocal, toWorld,
@@ -30,6 +41,7 @@ import {
 import { SettingsPanel } from '../ui/SettingsPanel';
 import { Vitals } from '../ui/Vitals';
 import { liveStat } from '../ant/castes';
+import { MM_PER_UNIT } from '../ant/queenModel';
 import { ActionPad, type Action } from '../input/ActionPad';
 import { DebugDie } from '../ui/DebugDie';
 import { WeatherChip } from '../ui/WeatherChip';
@@ -446,6 +458,7 @@ export class IslandScene {
       origin: () => originAt(),
       cells: () => this.terrain.cellCount,
       lakesDrawn: () => this.lakes.shown,
+      surf: () => ({ ...this.surf, carriedX: this.carried.x, carriedZ: this.carried.z }),
       cameraAt: () => this.follow.camera.position.toArray(),
       // Her WORLD position, not her rendered one. root.position is
       // measured from the floating origin now, so asking the heightfield
@@ -803,7 +816,9 @@ export class IslandScene {
       this.effort = sprinting ? SPRINT_DRAIN
         : resting ? RESTING_RECOVERY : MOVING_RECOVERY;
       winded = this.stamina.update(this.effort, dt);
-      this.ant.update(travel, -look.yaw, dt, 0);
+      // THE SEA GETS A VOTE. On the ground she is only ever carried by
+      // water she is standing in; in the air the wind already has her.
+      this.ant.update(travel, -look.yaw, dt, 0, this.swept(dt));
     }
 
     // Exhaustion drops her to the sustainable pace, never to a halt —
@@ -1293,6 +1308,55 @@ export class IslandScene {
       shownWhen: spot ? this.easedWhen.push(spot.after, dt) : null,
     };
   }
+
+  /** The last surf reading, for the HUD, the probes and the debug handle. */
+  private surf: Surf = { depth: 0, grip: 0, x: 0, z: 0 };
+
+  /**
+   * WHAT THE SEA IS DOING TO HER, RIGHT WHERE SHE IS.
+   *
+   * The one place the ocean stops being scenery. Nothing here is tuned:
+   * the orbital flow comes out of the same wave table the shader is
+   * generated from, and a broken wave runs at the square root of
+   * gravity times depth. At eleven millimetres long she loses to all of
+   * it — see surf.ts for the numbers.
+   *
+   * DRAG, NOT A SHOVE. She is not teleported at the water's speed; her
+   * carry eases toward it over a fraction of a second, scaled by how
+   * much of her is actually in it. A body this small in water this fast
+   * reaches the water's speed almost at once, which is why the constant
+   * is short — but "almost at once" and "instantly" look very different
+   * at the moment a wave arrives, and the first is the true one.
+   */
+  private swept(dt: number): { x: number; z: number } | null {
+    const at = this.ant.where;
+    const ground = groundHeight(at.wx, at.wz);
+    const uphill = shoreward(at.wx, at.wz, groundHeight);
+    // No uphill means flat ground, where a broken wave has no direction
+    // to run in and the orbital flow is the whole story.
+    // HER OWN LENGTH OF WATER TAKES HER, and she grows: a founding
+    // queen is 5.5 mm where an adult is 10, so the same puddle carries
+    // the young one off and only wets the old one's feet.
+    this.surf = surfAt(
+      at.wx, at.wz, this.elapsed, ground, uphill ?? { x: 0, z: 0 },
+      liveStat('bodyLength') / MM_PER_UNIT,
+    );
+    const want = this.surf.grip;
+    if (want <= 0 && Math.hypot(this.carried.x, this.carried.z) < 0.01) {
+      this.carried.x = 0;
+      this.carried.z = 0;
+      return null;
+    }
+    // Eased both ways: into the water's speed while it has her, and
+    // back to nothing as it leaves. A carry that stopped dead the frame
+    // her feet found sand would read as hitting a wall.
+    const take = 1 - Math.exp(-dt / SWEPT_EASE);
+    this.carried.x += (this.surf.x * want - this.carried.x) * take;
+    this.carried.z += (this.surf.z * want - this.carried.z) * take;
+    return this.carried;
+  }
+
+  private readonly carried = { x: 0, z: 0 };
 
   private windOnHer(): { x: number; z: number } | null {
     const sky = this.nowWeather;
