@@ -1,13 +1,21 @@
 /**
  * HER AIR — the meter that replaced a timer.
  *
+ * NOT HER LUNGS, and this file said lungs until the biology reference
+ * caught it. An ant has no lungs: air enters through spiracles along
+ * her body and reaches the tissue through tracheae, and a submerged
+ * one closes those spiracles and lives off the film held against her
+ * cuticle. The HUD can keep saying O2 because that is readable
+ * shorthand; the code should not keep saying something false.
+ *
  * The dive used to last UNDER_FOR seconds, four of them, chosen
  * because a dive had to end somehow. A number with no meaning behind
  * it and nothing on screen to read: the player could not tell whether
  * they had three seconds left or none, so the surfacing always felt
  * like the game deciding rather than the ant running out.
  *
- * Air is a RESOURCE, and it satisfies the survival invariant properly
+ * Her air reserve is a RESOURCE, and it satisfies the survival
+ * invariant properly
  * — it only falls where it can be refilled, and the refill is the
  * surface, which is never more than a swim away. That is the whole
  * reason it can exist as a bar at all when health and food still
@@ -35,6 +43,7 @@
  * is a choice with a clock on it.
  */
 export const HOLD = 45;
+/** GAME TUNING. See docs/FIRE_ANT_BIOLOGY.md §13 and §38. */
 
 /**
  * How long a full breath takes to come back at the surface.
@@ -43,6 +52,7 @@ export const HOLD = 45;
  * interesting decision is whether to go down, not how long to bob.
  */
 export const REFILL = 12;
+/** GAME TUNING. */
 
 /**
  * Below this the gauge is warning her.

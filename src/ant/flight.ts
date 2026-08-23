@@ -57,8 +57,32 @@ export const STALL_SPEED = 12;
 export const BEST_GLIDE_SPEED = 30;
 /** What level powered flight settles at. */
 export const CRUISE_SPEED = 40;
+
+/**
+ * A NOTE ON WHERE THE MEASURED NUMBER SITS IN THIS LADDER, because it
+ * is not where it should be and the reference caught it.
+ *
+ * A flight-mill study of *S. invicta* alates puts the MEAN female
+ * flight speed at about 0.7 m/s — seventy centimetres a second, which
+ * is MAX_POWERED_SPEED below. So the published average is our
+ * flat-out ceiling, and an ordinary cruising queen flies at 40, about
+ * 57% of what a real one averages.
+ *
+ * That is very probably backwards: a mean over a sustained mill run is
+ * a cruise, not a sprint. Moving 70 to CRUISE and lifting the ceiling
+ * above it would put the measurement where the measurement belongs.
+ *
+ * NOT CHANGED HERE. It moves AUTO_AIRSPEED, the power percentages,
+ * the endurance arithmetic and how far a founding flight can reach —
+ * a feel change across the whole flight model, and Joshua's call
+ * rather than a comment's. Written down so the next person to look at
+ * this ladder knows the coincidence is not a confirmation.
+ *
+ * See docs/FIRE_ANT_BIOLOGY.md §14.
+ */
 /** Flat out, wings working. */
 export const MAX_POWERED_SPEED = 70;
+/** MEASURED-adjacent — but see the note on CRUISE_SPEED. */
 
 /**
  * AIRSPEED AS A POWER SETTING — five notches of twenty per cent.

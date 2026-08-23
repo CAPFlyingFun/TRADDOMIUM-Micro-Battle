@@ -1736,7 +1736,8 @@ export class IslandScene {
 
   /** What the water is doing to her — surface, swimming, submerged. */
   private readonly swim = new Swim();
-  /** What is left in her lungs. Refills the moment her head is out. */
+  /** Her air reserve — spiracles and trachea, not lungs. Refills the
+   * moment her head is out of the water. */
   private readonly breath = new Breath();
 
   private windOnHer(): { x: number; z: number } | null {

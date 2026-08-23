@@ -47,6 +47,7 @@ export type Wetness = 'dry' | 'wading' | 'skating' | 'swimming' | 'under';
  * true: a body around this size or smaller is held by the skin.
  */
 export const CAPILLARY = 0.27;
+/** MEASURED. docs/FIRE_ANT_BIOLOGY.md §38 names these three labels. */
 
 /**
  * How deep the water has to be before her feet leave the bottom, as a
@@ -59,12 +60,14 @@ export const CAPILLARY = 0.27;
  * nothing to fully swept inside a single stride.
  */
 export const AFLOAT_AT = 1.6;
+/** GAME TUNING. */
 
 /** Where the water first gets a grip at all — over her feet. */
 export const ANKLE = 0.18;
 
 /** Stamina a second to hold herself on top of the film. */
 export const SKATE_COST = 1 / 90;
+/** GAME TUNING — a real one does not tire of standing on water. */
 
 /** Stamina a second to row, which is harder than standing on it. */
 export const SWIM_COST = 1 / 55;
@@ -77,12 +80,14 @@ export const SWIM_COST = 1 / 55;
  * than either state.
  */
 export const BREAK_THROUGH = 0.5;
+/** GAME TUNING. */
 
 /** And she has to earn a good deal more than that to climb back out. */
 export const SKATE_BACK = 0.68;
 
 /** How fast buoyancy returns her to the surface, world units a second. */
 export const BOB_RATE = 9;
+/** BIOLOGICAL SHAPE — she really does come back up; the rate is ours. */
 
 /** Past this the lever counts as asking. Matches the flight deadzone. */
 export const LIFT_SLACK = 0.35;
@@ -182,7 +187,7 @@ export class Swim {
    *   the medium decides what that costs — air, wings, or nothing.
    *   Joshua's plan for it goes further; jaws and other modes can take
    *   the same lever when they exist.
-   * @param air what is left in her lungs, 0 to 1 — see breath.ts
+   * @param air what is left of her air reserve, 0 to 1 — see breath.ts
    */
   update(
     water: Water | null, body: number, reserve: number,
