@@ -4,7 +4,9 @@ import { RotateGate } from './ui/rotateGate';
 import { fitViewport } from './ui/viewportFit';
 import { load as loadSettings } from './ui/settings';
 import { useGrid } from './world/heightfield';
-import { loadGrid, type HeightGrid } from './world/kauai';
+import { HYDRO_BYTES, loadHydro } from './world/hydro';
+import { useHydro } from './world/water';
+import { GRID_BYTES, loadGrid, type HeightGrid } from './world/kauai';
 import { fitBootBar } from './ui/bootBar';
 
 /**
@@ -14,8 +16,9 @@ import { fitBootBar } from './ui/bootBar';
  * `?scene=`; the island lab is the first and the default. New labs
  * register here as their rebuild steps land.
  *
- * The island is 2 MB of baked elevation, so booting waits on a fetch
- * before any scene can ask how high the ground is.
+ * The island is 2 MB of baked elevation plus three quarters of a
+ * megabyte of real hydrography, so booting waits on both before any
+ * scene can ask how high the ground is or where the water runs.
  */
 
 // Before anything measures itself, or reads a dial.
@@ -58,8 +61,24 @@ try {
   // TWO MEGABYTES OF ELEVATION, and the art has a bar drawn in it, so
   // there is no excuse for the old silent wait. Same measured bytes the
   // spawn screen shows, in the same frame.
-  const grid = await loadGrid((done, total) => bootBar?.(done, total));
+  // BOTH FILES ON ONE BAR. They are fetched together rather than in
+  // sequence because a bar that fills, resets and fills again reads as
+  // a stall and a restart; two running totals summed into one reads as
+  // what it is. The grid's size is a constant it insists on itself and
+  // the hydrography's is a constant its own bake keeps honest, so the
+  // maximum is known before either byte arrives — which is the whole
+  // reason neither asks the server for a Content-Length.
+  const total = GRID_BYTES + HYDRO_BYTES;
+  let gridDone = 0;
+  let hydroDone = 0;
+  const moved = () => bootBar?.(gridDone + hydroDone, total);
+  bootBar?.(0, total);
+  const [grid, hydro] = await Promise.all([
+    loadGrid((done) => { gridDone = done; moved(); }),
+    loadHydro((done) => { hydroDone = done; moved(); }),
+  ]);
   useGrid(grid);
+  useHydro(hydro);
   const requested = new URLSearchParams(location.search).get('scene') ?? 'game';
   (scenes[requested] ?? scenes['island'])(host, grid);
   clearBoot();

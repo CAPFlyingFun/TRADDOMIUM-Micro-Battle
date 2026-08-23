@@ -1,7 +1,7 @@
 {
   "name": "traddomium-micro-battle",
   "private": true,
-  "version": "0.41.0",
+  "version": "0.42.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -24,7 +24,9 @@
     "probe:island": "node scripts/probe-island.mjs",
     "icons": "node scripts/make-icons.mjs",
     "bake:queen": "node scripts/bakeQueen.mjs",
-    "shots:hud": "node scripts/hudshot.mjs"
+    "shots:hud": "node scripts/hudshot.mjs",
+    "probe:hydro": "node scripts/probe-hydro.mjs",
+    "bake:hydro": "python3 scripts/bakeHydro.py"
   },
   "dependencies": {
     "three": "^0.180.0"

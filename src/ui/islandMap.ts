@@ -12,6 +12,7 @@
  */
 import { bandFor, terrainHeight } from '../world/heightfield';
 import { world } from '../world/coords';
+import { hydro } from '../world/water';
 import { ISLAND_SPAN } from '../world/heightfield';
 
 /** Pixels a side. Enough to read the coastline, cheap enough to bake. */
@@ -120,8 +121,69 @@ export function bakeIsland(): HTMLCanvasElement {
   }
 
   ink.putImageData(pixels, 0, 0);
+  drawWater(ink);
   baked = canvas;
   return canvas;
+}
+
+/**
+ * The real rivers and lakes, over the real island.
+ *
+ * DRAWN FOR LEGIBILITY, NOT TO SCALE, and the difference is worth
+ * saying out loud because everything else on this map is to scale. The
+ * whole island is 768 pixels, so one pixel is 73 metres: a median
+ * Kauaʻi stream 5.5 m across is a thirteenth of a pixel wide and a
+ * faithful line would be invisible. So the WIDTH here comes from
+ * Strahler stream order — how much of the island drains through a reach
+ * — which is what a printed map does and is the thing a player actually
+ * wants to know when picking a spawn. The COURSE is exact.
+ *
+ * Silently absent before the hydrography lands. The island lab boots
+ * without waiting for it.
+ */
+function drawWater(ink: CanvasRenderingContext2D): void {
+  const water = hydro();
+  if (!water) return;
+
+  ink.lineCap = 'round';
+  ink.lineJoin = 'round';
+  ink.strokeStyle = 'rgba(96, 168, 206, 0.92)';
+  // Headwaters hairline, the Wailua and the Waimea drawn like rivers.
+  const WEIGHT = [0, 0.6, 0.9, 1.3, 1.9, 2.6];
+  // ONE PATH PER ORDER, not one per reach: 1,121 separate strokes each
+  // needing their own width would be 1,121 state changes, and this bake
+  // already costs six hundred thousand terrain samples.
+  for (let order = 1; order <= 5; order++) {
+    ink.beginPath();
+    for (const river of water.rivers) {
+      if (river.order !== order) continue;
+      for (let i = 0; i < river.count; i++) {
+        const at = river.first + i;
+        const { x, y } = worldToMap(water.x[at], water.z[at]);
+        if (i === 0) ink.moveTo(x, y); else ink.lineTo(x, y);
+      }
+    }
+    ink.lineWidth = WEIGHT[order];
+    ink.stroke();
+  }
+
+  // Lakes and reservoirs. Most are a pixel or two across, so they get a
+  // stroke as well as a fill or they vanish into a single pale dot.
+  ink.fillStyle = 'rgba(74, 148, 190, 0.95)';
+  ink.lineWidth = 1.1;
+  ink.beginPath();
+  for (const lake of water.lakes) {
+    for (const ring of lake.rings) {
+      for (let i = 0; i < ring.count; i++) {
+        const at = ring.first + i;
+        const { x, y } = worldToMap(water.ringX[at], water.ringZ[at]);
+        if (i === 0) ink.moveTo(x, y); else ink.lineTo(x, y);
+      }
+      ink.closePath();
+    }
+  }
+  ink.fill('evenodd');
+  ink.stroke();
 }
 
 /** Throw the bake away — for tests, and for a re-baked heightfield. */

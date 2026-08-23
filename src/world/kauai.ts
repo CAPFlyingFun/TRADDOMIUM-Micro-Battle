@@ -137,6 +137,16 @@ export function decodeGrid(buffer: ArrayBuffer): HeightGrid {
   return new Int16Array(buffer);
 }
 
+/**
+ * Exactly how big `kauai-1025.bin` is, and why the loader never asks.
+ *
+ * See `loadGrid` below: `Content-Length` counts the WIRE, the host
+ * gzips, and a bar built on that header is handed more bytes than its
+ * own maximum. This is the same number `decodeGrid` already refuses to
+ * proceed without, which makes it the honest total.
+ */
+export const GRID_BYTES = SAMPLES * SAMPLES * 2;
+
 /** Fetch and decode the baked grid that ships with the build. */
 export async function loadGrid(
   /** Bytes as they land, for the boot screen's bar. */
@@ -150,7 +160,7 @@ export async function loadGrid(
   // maximum. This is the number `decodeGrid` already insists on below,
   // which makes it the honest total and removes the server from the
   // question entirely.
-  const total = SAMPLES * SAMPLES * 2;
+  const total = GRID_BYTES;
   onProgress?.(0, total);
   const buffer = await pullBuffer(
     url,
