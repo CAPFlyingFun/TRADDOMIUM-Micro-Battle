@@ -36,6 +36,18 @@ export function bearingOf(x: number, z: number): number {
 }
 
 /**
+ * How far above the horizon a direction vector looks, in degrees.
+ *
+ * Positive is up, matching the pitch convention everything else here
+ * uses. The vector is expected normalised — it comes from three's
+ * `getWorldDirection` — but the clamp costs nothing and a rounding
+ * error of 1.0000001 would otherwise be NaN rather than 90.
+ */
+export function pitchOf(y: number): number {
+  return (Math.asin(Math.max(-1, Math.min(1, y))) * 180) / Math.PI;
+}
+
+/**
  * A game heading (radians, travel along `(sin h, cos h)`) as a bearing.
  *
  * The two systems disagree twice over — one is radians and one degrees,

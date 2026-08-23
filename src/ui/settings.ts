@@ -86,6 +86,17 @@ export interface Settings {
    * and is gone by 33 from the default camera.
    */
   detailRange: number;
+  /**
+   * Whether the compass carries a position fix under it.
+   *
+   * A DEVELOPMENT INSTRUMENT, on by default while the island is being
+   * built. It is the cheapest way to close the loop between a phone
+   * screenshot and the same frame here: five numbers under the heading
+   * tape put the camera back exactly where the picture was taken. It
+   * is a toggle rather than a fixture because the contextual-HUD rule
+   * is real and a coordinate is not something the game is about.
+   */
+  showFix: boolean;
 }
 
 export const DEFAULTS: Readonly<Settings> = {
@@ -119,6 +130,7 @@ export const DEFAULTS: Readonly<Settings> = {
   invertStickY: false,
   liveWeather: true,
   detailRange: 1,
+  showFix: true,
 };
 
 /** What a slider may ask for. Anything outside is clamped, not refused. */
@@ -137,7 +149,7 @@ export const LIMITS = {
 
 export type Dial = keyof typeof LIMITS;
 export type Toggle = 'invertLookX' | 'invertLookY' | 'invertStickY'
-  | 'liveWeather';
+  | 'liveWeather' | 'showFix';
 
 const STORE = 'traddomium.settings';
 

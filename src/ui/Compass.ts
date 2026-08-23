@@ -31,6 +31,7 @@ import {
   type CompassMarker, type PlacedMarker,
 } from './compassMath';
 import type { WorldPoint } from '../world/coords';
+import { fixAt, formatFix } from './fix';
 
 /** Pixels per degree of tape. Sets how fast the strip slides. */
 const PX_PER_DEGREE = 2.6;
@@ -111,11 +112,21 @@ const CARDINALS: Record<number, string> = {
   0: 'N', 45: 'NE', 90: 'E', 135: 'SE', 180: 'S', 225: 'SW', 270: 'W', 315: 'NW',
 };
 
+/** What the scene has to add to make a fix — the rest is the compass's. */
+export interface FixSource {
+  /** Her altitude above sea level, world units. */
+  readonly msl: number;
+  /** Camera attitude, degrees, positive looking up. */
+  readonly pitch: number;
+}
+
 export class Compass {
   private readonly root: HTMLDivElement;
   private readonly window: HTMLDivElement;
   private readonly tape: HTMLDivElement;
   private readonly readout: HTMLDivElement;
+  private readonly fixLine: HTMLDivElement;
+  private lastFix = '';
   private readonly pins = new Map<string, HTMLDivElement>();
   /** What the strip is SHOWING, which chases what the camera is doing. */
   private shown = 0;
@@ -218,6 +229,24 @@ export class Compass {
     } as Partial<CSSStyleDeclaration>);
     this.root.appendChild(this.readout);
 
+    // THE POSITION FIX, under the heading and deliberately quieter than
+    // it. A development instrument (see fix.ts): the heading above it
+    // is the fifth number of the same fix, which is why this line does
+    // not have to fight the readout for attention to be useful.
+    this.fixLine = document.createElement('div');
+    this.fixLine.dataset.ui = 'compass-fix';
+    Object.assign(this.fixLine.style, {
+      marginTop: '2px',
+      textAlign: 'center',
+      font: '500 8px/1 "JetBrains Mono", ui-monospace, monospace',
+      fontVariantNumeric: 'tabular-nums',
+      whiteSpace: 'nowrap',
+      color: 'rgba(214, 190, 140, .68)',
+      textShadow: '0 1px 3px rgba(0,0,0,.85)',
+      display: 'none',
+    } as Partial<CSSStyleDeclaration>);
+    this.root.appendChild(this.fixLine);
+
     host.appendChild(this.root);
 
     // Re-fit whenever anything around it changes shape: a rotation, a
@@ -290,7 +319,7 @@ export class Compass {
    */
   update(
     bearing: number, from: WorldPoint, markers: readonly CompassMarker[],
-    dt: number,
+    dt: number, fix?: FixSource | null,
   ): void {
     const before = this.shown;
     // Arrive pointing the right way rather than spinning up to it.
@@ -312,6 +341,21 @@ export class Compass {
     if (words !== this.lastRead) {
       this.lastRead = words;
       this.readout.textContent = words;
+    }
+
+    // THE FIX USES THE TAPE'S OWN BEARING, not the one passed in. They
+    // differ by an ease, and a line that disagreed with the heading
+    // two pixels above it would be read as a bug every time.
+    if (fix) {
+      const line = formatFix(fixAt(from, fix.msl, this.shown, fix.pitch));
+      if (line !== this.lastFix) {
+        this.lastFix = line;
+        this.fixLine.textContent = line;
+      }
+      if (this.fixLine.style.display === 'none') this.fixLine.style.display = '';
+    } else if (this.fixLine.style.display !== 'none') {
+      this.fixLine.style.display = 'none';
+      this.lastFix = '';
     }
 
     this.drawMarkers(from, markers, half);

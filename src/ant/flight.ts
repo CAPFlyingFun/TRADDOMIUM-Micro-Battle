@@ -401,6 +401,28 @@ export class Flight {
     return TAKEOFF_COST;
   }
 
+  /**
+   * PUT HER IN THE AIR, level, at a height and a heading — the only
+   * way to restore an airborne position fix (see ui/fix.ts).
+   *
+   * Not a gameplay move and not reachable from the controls: a fix
+   * says "the camera was here, this high, pointed this way", and the
+   * model has no other door that takes a height. Level and at cruise,
+   * because a fix records where she was rather than what she was
+   * doing, and level is the one attitude that does not immediately
+   * change the first of those.
+   */
+  hold(above: number, facing: number): void {
+    this.state = 'powered';
+    this.above = Math.max(0.01, above);
+    this.speed = CRUISE_SPEED;
+    this.facing = facing;
+    this.bank = 0;
+    this.rise = 0;
+    this.air.reset();
+    this.drift = 0;
+  }
+
   /** Put her flat on the ground — landings, respawns, scene resets. */
   land(): void {
     this.state = 'grounded';

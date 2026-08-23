@@ -53,7 +53,7 @@ import {
   Eased, SOON, driftOf, touchdown, trackOf,
   type FlightTelemetry,
 } from '../ant/telemetry';
-import { bearingFromHeading, bearingOf } from '../ui/compassMath';
+import { bearingFromHeading, bearingOf, pitchOf } from '../ui/compassMath';
 import { Compass } from '../ui/Compass';
 import { type CompassMarker } from '../ui/compassMath';
 import { AUTO_AIRSPEED, Flight, setFlightScale } from '../ant/flight';
@@ -63,6 +63,7 @@ import {
 } from '../ant/stamina';
 import { loadQueen, QUEEN_JOB, type QueenBody } from '../ant/queenModel';
 import { onChange, settings } from '../ui/settings';
+import { fixAt, formatFix, fixToWorld, parseFix } from '../ui/fix';
 import { weather } from '../weather/WeatherService';
 import { skyLook } from '../weather/sky';
 import { Rain } from '../weather/Rain';
@@ -482,6 +483,23 @@ export class IslandScene {
         return { ...body, drawn, depth: drawn - groundHeight(wx, wz) };
       },
       cameraAt: () => this.follow.camera.position.toArray(),
+      /**
+       * THE POSITION FIX AS A STRING — the same one under the compass.
+       *
+       * Paired with `goTo`, this is how a screenshot becomes a frame
+       * that can be re-rendered: read the line off the picture, hand it
+       * back, stand in the same place. See ui/fix.ts.
+       */
+      fix: () => {
+        const view = new THREE.Vector3();
+        this.follow.camera.getWorldDirection(view);
+        return formatFix(fixAt(
+          this.ant.where, this.mslNow(),
+          bearingOf(view.x, view.z), pitchOf(view.y),
+        ));
+      },
+      /** Put the camera back where a fix says it was. */
+      goTo: (text: string) => this.goTo(text),
       // Her WORLD position, not her rendered one. root.position is
       // measured from the floating origin now, so asking the heightfield
       // about it samples a spot near the middle of the island instead
@@ -642,6 +660,13 @@ export class IslandScene {
       airspeed: () => this.flight.airspeed,
       canTakeOff: () => this.flight.canTakeOff(this.ant.pace, this.stamina.fraction),
     };
+
+    // `?fix=...` — the other half of the screenshot loop. A fix read
+    // off a phone picture goes in the address bar and the same frame
+    // comes back, with no walking and nothing typed at a console.
+    // Deliberately after the handle above, because it goes through it.
+    const asked = new URLSearchParams(location.search).get('fix');
+    if (asked) this.goTo(asked);
   }
 
   /**
@@ -888,6 +913,9 @@ export class IslandScene {
     this.follow.camera.getWorldDirection(view);
     this.compass.update(
       bearingOf(view.x, view.z), this.ant.where, this.markers, dt,
+      settings().showFix
+        ? { msl: this.mslNow(), pitch: pitchOf(view.y) }
+        : null,
     );
     this.vitals.show(this.stamina.fraction, this.stamina.spent, this.effort);
 
@@ -1311,6 +1339,47 @@ export class IslandScene {
    * goes through the floating origin — which is the rule the ground
    * texture had to learn the hard way.
    */
+  /**
+   * Her altitude above the sea, world units.
+   *
+   * The SAME expression the flight panel's MSL comes from, on purpose:
+   * a fix printed two pixels under a readout that disagreed with it
+   * would be read as a bug every time it was read at all.
+   */
+  private mslNow(): number {
+    const here = this.ant.where;
+    return groundHeight(here.wx, here.wz) + this.flight.height;
+  }
+
+  /**
+   * PUT THE CAMERA BACK WHERE A FIX SAYS IT WAS.
+   *
+   * Everything a spawn does — `putAt` handles the origin, the terrain,
+   * the sea's folded phase and the camera snap — and then, if the fix
+   * was taken in the air, puts her back in the air at the height it
+   * recorded. Landing her instead would reproduce the coordinates and
+   * not the picture, which is the whole point of the exercise.
+   *
+   * @returns whether the text was a fix at all.
+   */
+  private goTo(text: string): boolean {
+    const fix = parseFix(text);
+    if (!fix) return false;
+    const at = fixToWorld(fix);
+    // Radians, her convention: bearing is degrees clockwise from north.
+    const heading = (fix.bearing * Math.PI) / 180;
+    const handle = (window as unknown as Record<string, {
+      putAt: (wx: number, wz: number, heading?: number) => void;
+    }>).__island;
+    handle.putAt(at.wx, at.wz, heading);
+    const agl = fix.msl - groundHeight(at.wx, at.wz);
+    if (agl > 1) {
+      this.flight.hold(agl, heading);
+      this.follow.snapTo(this.ant.root, -heading);
+    }
+    return true;
+  }
+
   private readFlight(dt: number): FlightTelemetry {
     const here = this.ant.where;
     const terrain = groundHeight(here.wx, here.wz);

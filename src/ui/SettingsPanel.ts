@@ -81,6 +81,7 @@ const DIALS: Dialer[] = [
 const TOGGLES: Array<{ key: Toggle; label: string; on: string; off: string }> = [
   { key: 'invertLookX', label: 'Look left/right', on: 'Inverted', off: 'Normal' },
   { key: 'invertLookY', label: 'Look up/down', on: 'Drag down lowers', off: 'Drag down lifts' },
+  { key: 'showFix', label: 'Position fix', on: 'Under compass', off: 'Hidden' },
   { key: 'invertStickY', label: 'Stick forward', on: 'Inverted', off: 'Normal' },
   { key: 'liveWeather', label: 'World weather', on: 'Live Kauaʻi', off: 'Simulated' },
 ];
