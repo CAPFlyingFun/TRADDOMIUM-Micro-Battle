@@ -152,6 +152,14 @@ export class LiftSlider {
   private listen(): void {
     const down = (e: PointerEvent) => {
       if (!this.on) return;
+      // STOPS HERE. LookDrag listens on the host and claims the first
+      // pointer it sees without asking what it landed on — every other
+      // control on this screen stops the bubble for exactly that
+      // reason, and this one did not. Holding the lever therefore also
+      // dragged the camera: keep it pressed and turn, and the view
+      // stopped following her because the drag had swung it off her
+      // tail. preventDefault alone does not do this; propagation does.
+      e.stopPropagation();
       e.preventDefault();
       this.root.setPointerCapture(e.pointerId);
       this.gripped = e.pointerId;
@@ -160,11 +168,13 @@ export class LiftSlider {
     };
     const move = (e: PointerEvent) => {
       if (this.gripped !== e.pointerId) return;
+      e.stopPropagation();
       e.preventDefault();
       this.grab(e);
     };
     const up = (e: PointerEvent) => {
       if (this.gripped !== e.pointerId) return;
+      e.stopPropagation();
       this.gripped = null;
       this.root.releasePointerCapture?.(e.pointerId);
     };

@@ -99,3 +99,20 @@ describe('the cyclic', () => {
     expect(flight.airspeed).toBeGreaterThanOrEqual(0);
   });
 });
+
+describe('which way is up', () => {
+  it('keeps the model convention out of the flight model', () => {
+    // THE FLIGHT MODEL SPEAKS NOSE-UP and always did; what was wrong
+    // was the renderer, which wrote `pitch` straight into rotation.x.
+    // She faces +Z, and a positive rotation about +X carries +Z toward
+    // −Y — so that assignment put her nose in the dirt and every
+    // caller that thought it meant "up" meant the opposite.
+    //
+    // Asserted here because it is the flight model's contract that the
+    // fix must NOT have changed: forward is still a negative pitch,
+    // and PlayerAnt.nose() is the single place that turns that into a
+    // rotation. If this ever flips, the renderer flipped underneath it.
+    expect(attitude({ push: 1 })).toBeLessThan(0);
+    expect(attitude({ push: -1 })).toBeGreaterThan(0);
+  });
+});

@@ -152,6 +152,7 @@ export class PlayerAnt {
     this.root.position.set(seat.lx, groundHeight(x, z), seat.lz);
     this.root.rotation.set(0, heading, 0);
     this.body.rotation.x = 0;
+    this.lean = 0;
   }
 
   /**
@@ -413,7 +414,7 @@ export class PlayerAnt {
     this.root.rotation.y = this.heading;
     if (this.attitude) {
       // Airborne: her own attitude, not the hill she is over.
-      this.body.rotation.x = this.attitude.pitch;
+      this.nose(this.attitude.pitch);
       this.body.rotation.z = this.attitude.bank;
       this.body.position.y = this.lift;
       this.tuck();
@@ -475,7 +476,36 @@ export class PlayerAnt {
     const ahead = groundHeight(x + this.slopeAhead.x, z + this.slopeAhead.z);
     const behind = groundHeight(x - this.slopeAhead.x, z - this.slopeAhead.z);
     const wants = Math.atan2(ahead - behind, look * 2) * 0.8;
-    this.body.rotation.x += (wants - this.body.rotation.x) * closes(SLOPE_EASE, dt);
+    this.lean += (wants - this.lean) * closes(SLOPE_EASE, dt);
+    this.nose(this.lean);
+  }
+
+  /** How far she is tipped by the ground, radians, positive nose up. */
+  private lean = 0;
+
+  /**
+   * POINT HER NOSE, radians, POSITIVE IS UP — and the one place in the
+   * game that knows this costs a minus sign.
+   *
+   * She faces +Z (queenModel.ts says so), and a positive rotation
+   * about +X carries +Z toward −Y. So a positive rotation.x puts her
+   * nose in the DIRT, and every caller that thought it was writing
+   * "nose up" was writing the opposite.
+   *
+   * Both callers were wrong and only one was noticed: pushing the
+   * stick forward reared her up instead of tipping her into the
+   * acceleration, which Joshua flew and reported. The other is the
+   * walking lean, which has been tipping her nose down every time she
+   * climbed a hill — at eight tenths of a gentle slope, quietly enough
+   * that nobody caught it.
+   *
+   * Fixed HERE rather than at each caller, because a convention that
+   * lives in two places is a convention that disagrees with itself.
+   * `pitch` and `lean` both mean nose-up everywhere else, including in
+   * the flight model, the telemetry and the tests.
+   */
+  private nose(up: number): void {
+    this.body.rotation.x = -up;
   }
 
   private buildBody(): void {
