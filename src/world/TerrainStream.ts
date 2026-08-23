@@ -310,6 +310,23 @@ export function buildCell(
  */
 const FOOTPRINT = 1;
 
+/**
+ * AND THE MOST ANY TIER MAY ASK FOR, in world units.
+ *
+ * The footprint exists so a tier's triangles hold the water drawn over
+ * them. The middle tier's vertices are 3,125 apart, so it was asking
+ * about 3,125 — and the carve answered by flattening a shelf twice
+ * that wide, 62 metres, at the waterline along every river on the
+ * island. Joshua's screenshots are the result: grass plateaus the size
+ * of car parks ending in vertical walls.
+ *
+ * It was never needed. Water stops at the transition tier (RiverWater's
+ * REACH), so no tier coarser than that ever has any water over it to
+ * contain. Capped at the transition step, the widest carve on the
+ * island is six metres and the plateaus are gone.
+ */
+const CARVE_CAP = TRANSITION_STEP;
+
 const OVERLAP = 0.8;
 
 /** How far each tier reaches, for the tier outside it to cut against. */
@@ -344,7 +361,7 @@ function dryLand(x: number, z: number, step: number): number {
   // coarse surface at a width its triangles can actually hold — see
   // the comment on farHeight. The two neighbourhood questions, MIN for
   // the water and MAX for the coastline, share a door.
-  const reach = step * FOOTPRINT;
+  const reach = Math.min(step * FOOTPRINT, CARVE_CAP);
   const here = farHeight(x, z, reach);
   if (here > 0) return here;
   const around = Math.max(

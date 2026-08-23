@@ -39,8 +39,25 @@ const hydro: Hydro = decodeHydro(read('public/kauai-hydro.bin'));
  */
 const TIERS = [
   { name: 'transition', step: 312.5 },
-  { name: 'middle', step: 3_125 },
 ] as const;
+
+/**
+ * THE MIDDLE TIER IS NOT HERE, and its absence is the point.
+ *
+ * It used to be, and satisfying it is what broke the island. Its
+ * vertices are 3,125 apart, so containing water under them meant a
+ * carve that flattened 62 metres of shelf at the waterline along every
+ * river — grass plateaus ending in vertical walls, which is what
+ * Joshua photographed.
+ *
+ * It was never needed. RiverWater stops at the transition tier's
+ * reach, so nothing coarser ever has water drawn over it, and a tier
+ * with no water to hold has nothing to contain. TerrainStream caps the
+ * carve footprint at the transition step for exactly this reason.
+ *
+ * If water is ever drawn further out again, this list is the first
+ * thing that has to grow — and the cap with it.
+ */
 
 /**
  * How far over the water a tier may be before it counts as burying it.
