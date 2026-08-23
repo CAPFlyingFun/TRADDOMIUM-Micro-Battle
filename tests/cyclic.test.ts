@@ -14,7 +14,7 @@ import {
   Flight, MAX_PITCH, MAX_TILT, TILT_DOWN, type FlightDemand,
 } from '../src/ant/flight';
 
-const STILL: FlightDemand = { push: 0, side: 0, climb: false, descend: false };
+const STILL: FlightDemand = { push: 0, side: 0, lift: 0 };
 
 /** Fly her for a while on one stick position and report her attitude. */
 function attitude(demand: Partial<FlightDemand>, seconds = 2): number {
@@ -81,7 +81,7 @@ describe('the cyclic', () => {
     const flight = new Flight();
     flight.takeOff(60, 1, 0);
     for (let t = 0; t < 40; t += 1 / 60) {
-      flight.update({ ...STILL, push: 1, descend: true }, 1, false, 1 / 60, 0);
+      flight.update({ ...STILL, push: 1, lift: -1 }, 1, false, 1 / 60, 0);
     }
     expect(Math.abs(flight.pitch)).toBeLessThanOrEqual(MAX_PITCH + 1e-9);
   });

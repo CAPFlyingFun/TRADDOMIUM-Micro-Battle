@@ -211,6 +211,7 @@ export class Compass {
   private trend!: HTMLDivElement;
   private started = false;
   private lastRead = '';
+  private paired = false;
   private readonly watch: ResizeObserver;
 
   constructor(host: HTMLElement) {
@@ -478,6 +479,17 @@ export class Compass {
     if (words !== this.lastRead) {
       this.lastRead = words;
       this.readout.textContent = words;
+    }
+    // ONE HEADING, NOT TWO. In flight the camera chases her nose, so
+    // this row and the AIR row under it print the same number two
+    // pixels apart — and the AIR row is the better of the pair,
+    // because it carries the speed that goes with the heading. So this
+    // one stands down whenever that one is up. On the ground there is
+    // no AIR row and this is the only heading there is.
+    const paired = Boolean(under?.air);
+    if (paired !== this.paired) {
+      this.paired = paired;
+      this.readout.style.display = paired ? 'none' : '';
     }
 
     // THE FIX USES THE TAPE'S OWN BEARING, not the one passed in. They

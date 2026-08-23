@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { WANDER, WANDER_RATE, Wander } from '../src/ant/wander';
 import { Flight, setFlightScale } from '../src/ant/flight';
 
-const NEUTRAL = { push: 0, side: 0, climb: false, descend: false };
-const HOLD = { push: 1, side: 0, climb: false, descend: false };
+const NEUTRAL = { push: 0, side: 0, lift: 0 };
+const HOLD = { push: 1, side: 0, lift: 0 };
 
 describe('the air she is in', () => {
   it('never carries her outside the band, however long she flies', () => {

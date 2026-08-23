@@ -92,9 +92,17 @@ export const POWER_STEP = 20;
  */
 export const POWER_FLOOR = 40;
 
-/** Her airspeed as a percentage of full power, to the nearest notch. */
+/**
+ * Her airspeed as a percentage of full power, to the nearest notch.
+ *
+ * AGAINST THE SCALED MAXIMUM, which it was not. `scale` is the flight
+ * tempo dial, and at anything above 1 the true cap is above
+ * MAX_POWERED_SPEED — so the readout saturated and sat at 100% no
+ * matter which pace was lit. Two thirds of the dial's range made the
+ * instrument a constant.
+ */
 export function powerOf(airspeed: number): number {
-  const share = (Math.abs(airspeed) / MAX_POWERED_SPEED) * 100;
+  const share = (Math.abs(airspeed) / (MAX_POWERED_SPEED * scale)) * 100;
   const notched = Math.round(share / POWER_STEP) * POWER_STEP;
   return Math.max(0, Math.min(100, notched));
 }
@@ -172,6 +180,41 @@ export const THRUST = 12;
 export const DRAG = 0.22;
 /** How hard she can haul herself upward, units per second. */
 export const CLIMB_RATE = 16;
+
+/**
+ * WHAT THE LEVER IS WORTH, in world units a second, at first touch and
+ * held to the stop.
+ *
+ * The old fixed rates — 16 up, 26 down — are what "stuck like a glider
+ * in a thermal" was made of: a wind carrying her up faster than the
+ * only descent she could ask for. Twenty at the start so a tap is a
+ * nudge and not a drop, three hundred at the end so there is always
+ * something left to reach for.
+ */
+export const LIFT_START = 20;
+export const LIFT_MAX = 300;
+
+/**
+ * Seconds of holding it at the stop to earn the whole three metres a
+ * second. SQUARED on the way, so the first second is nearly all
+ * nudge and the authority arrives late — full deflection must not
+ * throw her twenty metres in the first second.
+ *
+ * The model's own vertical easing (SINK_EASE) sits on top of this and
+ * is doing a different job: this is how much she MAY ask for, that is
+ * how fast the answer arrives.
+ */
+export const LIFT_RAMP = 4;
+
+/** Below this the lever is centred and she is holding her altitude. */
+export const LIFT_DEADZONE = 0.08;
+
+/** What the lever is worth after `held` seconds at `amount` deflection. */
+export function liftAuthority(amount: number, held: number): number {
+  const wound = Math.min(1, Math.max(0, held) / LIFT_RAMP);
+  const reach = LIFT_START + (LIFT_MAX - LIFT_START) * wound * wound;
+  return reach * Math.max(-1, Math.min(1, amount));
+}
 /** How hard a deliberate descent pushes the nose down. */
 export const DESCENT_RATE = 26;
 
@@ -330,8 +373,26 @@ export interface FlightDemand {
   /** Horizontal request in the CAMERA's frame, each -1 to 1. */
   readonly push: number;
   readonly side: number;
-  readonly climb: boolean;
-  readonly descend: boolean;
+  /**
+   * HOW HARD SHE IS BEING ASKED TO CLIMB, −1 to 1.
+   *
+   * Was two booleans, which can only ever ask for one rate. Held in
+   * the mountains on a rising wind that was exactly the problem: full
+   * descent was a fixed 26 cm/s whether she needed a nudge or needed
+   * out, and there was nothing left to press.
+   */
+  readonly lift: number;
+  /**
+   * The most airspeed the selected pace will give her, world units a
+   * second, or null for no limit.
+   *
+   * THE PACE ROW MEANS SOMETHING IN THE AIR NOW. It did not: Auto
+   * flew at the pace's airspeed, but under the stick she ran to the
+   * model's own cap whatever row was lit, so the lowest setting and
+   * the highest were the same flight and the power readout sat at 100%
+   * either way. A pace is a power setting; this is the power.
+   */
+  readonly ceiling?: number | null;
   /**
    * AUTO: hold this AIRSPEED without the stick, world units per second.
    *
@@ -393,6 +454,11 @@ export class Flight {
   private bank = 0;
   /** Nose attitude asked for by the stick, radians. Positive is up. */
   private tilt = 0;
+  /**
+   * How long the lever has been held, SIGNED — the sign is how the
+   * ramp knows a reversal from a continuation.
+   */
+  private leaning = 0;
   /**
    * The terrain under her at the last frame, or null before the first.
    *
@@ -578,9 +644,13 @@ export class Flight {
     // One cap, chosen by what she is doing. A dive outranks everything,
     // including an empty reserve — trading height for speed is exactly
     // what an exhausted queen is supposed to reach for.
-    const cap = (demand.descend ? MAX_DIVE_SPEED
+    // A DIVE OUTRANKS EVERYTHING, including an empty reserve and the
+    // pace — trading height for speed is exactly what an exhausted
+    // queen is supposed to reach for, and it is not a power setting.
+    const ceiling = demand.ceiling ?? MAX_POWERED_SPEED;
+    const cap = (demand.lift < -LIFT_DEADZONE ? MAX_DIVE_SPEED
       : empty ? STALL_SPEED * 1.6
-        : MAX_POWERED_SPEED) * scale;
+        : Math.min(ceiling, MAX_POWERED_SPEED)) * scale;
     this.speed = Math.max(0, Math.min(cap, this.speed));
 
     // SHE HOLDS AN ALTITUDE, NOT A CLEARANCE.
@@ -744,25 +814,37 @@ export class Flight {
       return CRUISE_DRAIN;
     }
 
-    if (demand.descend) {
-      this.rise = -DESCENT_RATE * scale;
-      // Diving converts height into airspeed, which is the whole trick.
-      this.speed += DESCENT_RATE * scale * 0.55 * dt;
-      // A descent counts as RECOVERY only when she actually needs it.
-      // Naming it off the reserve rather than off the button means the
-      // state describes her situation, not the player's thumb.
-      const desperate = empty || reserve < REARM_AT;
-      this.state = desperate ? 'recovery' : 'glide';
-      return desperate ? RECOVERY_DESCENT_RECOVERY : GLIDE_RECOVERY * 1.6;
-    }
-
-    if (demand.climb && !empty) {
-      this.rise = CLIMB_RATE * scale;
+    // THE LEVER, as one branch rather than two. Up and down were
+    // separate booleans with separate fixed rates; they are one signed
+    // amount now, and the only asymmetry left is the one that is real
+    // — coming down is free and going up is not.
+    const lever = Math.max(-1, Math.min(1, demand.lift));
+    const wants = Math.abs(lever) > LIFT_DEADZONE && !(lever > 0 && empty);
+    if (wants) {
+      // Hold time resets when she lets go OR reverses, so a change of
+      // mind starts gentle again instead of inheriting the authority
+      // she wound up going the other way.
+      this.leaning = this.leaning * lever > 0 ? this.leaning + dt * lever : dt * lever;
+      const target = liftAuthority(lever, Math.abs(this.leaning)) * scale;
+      this.sinkToward(target, dt);
+      if (lever < 0) {
+        // Diving converts height into airspeed, which is the whole
+        // trick, and in proportion to how hard she is asking.
+        this.speed += -target * 0.55 * dt;
+        // A descent counts as RECOVERY only when she actually needs
+        // it. Naming it off the reserve rather than off the lever
+        // means the state describes her situation, not the thumb.
+        const desperate = empty || reserve < REARM_AT;
+        this.state = desperate ? 'recovery' : 'glide';
+        return desperate ? RECOVERY_DESCENT_RECOVERY : GLIDE_RECOVERY * 1.6;
+      }
       this.state = 'powered';
-      // A climb is not free: it costs airspeed as well as breath.
-      this.speed = Math.max(0, this.speed - CLIMB_RATE * scale * 0.45 * dt);
-      return CLIMB_DRAIN;
+      // A climb is not free: it costs airspeed as well as breath, and
+      // both in proportion to the rate she is asking for.
+      this.speed = Math.max(0, this.speed - target * 0.45 * dt);
+      return CLIMB_DRAIN * Math.min(1, target / (CLIMB_RATE * scale));
     }
+    this.leaning = 0;
 
     if (empty) {
       // Minimum-power flight: hers to steer, but she is coming down.

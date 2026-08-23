@@ -14,10 +14,10 @@ import {
 import { PACE_SPEED, SPEED_EASE } from '../src/ant/pace';
 import { REARM_AT, Stamina } from '../src/ant/stamina';
 
-const neutral: FlightDemand = { push: 0, side: 0, climb: false, descend: false };
+const neutral: FlightDemand = { push: 0, side: 0, lift: 0 };
 const forward: FlightDemand = { ...neutral, push: 1 };
-const climbing: FlightDemand = { ...forward, climb: true };
-const diving: FlightDemand = { ...neutral, descend: true };
+const climbing: FlightDemand = { ...forward, lift: 1 };
+const diving: FlightDemand = { ...neutral, lift: -1 };
 
 afterEach(() => setFlightScale(1));
 
@@ -172,7 +172,7 @@ describe('altitude is stored energy', () => {
   it('takes airspeed back on the way up', () => {
     const f = flying();
     const was = f.airspeed;
-    for (let i = 0; i < 60; i++) f.update({ ...neutral, climb: true }, 1, false, 1 / 60);
+    for (let i = 0; i < 60; i++) f.update({ ...neutral, lift: 1 }, 1, false, 1 / 60);
     expect(f.airspeed).toBeLessThan(was);
     expect(f.climbing).toBeGreaterThan(0);
   });
@@ -446,7 +446,7 @@ describe('the coordinated turn', () => {
 
   it('pitches her nose with what she is doing vertically', () => {
     const f = flying();
-    for (let i = 0; i < 60; i++) f.update({ ...neutral, climb: true }, 1, false, 1 / 60);
+    for (let i = 0; i < 60; i++) f.update({ ...neutral, lift: 1 }, 1, false, 1 / 60);
     const up = f.pitch;
     for (let i = 0; i < 60; i++) f.update(diving, 1, false, 1 / 60);
     expect(f.pitch).toBeLessThan(up);

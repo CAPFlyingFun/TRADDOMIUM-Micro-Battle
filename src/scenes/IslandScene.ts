@@ -46,6 +46,7 @@ import { Vitals } from '../ui/Vitals';
 import { liveStat } from '../ant/castes';
 import { MM_PER_UNIT } from '../ant/queenModel';
 import { ActionPad, type Action } from '../input/ActionPad';
+import { LiftSlider } from '../input/LiftSlider';
 import { DebugDie } from '../ui/DebugDie';
 import { WeatherChip } from '../ui/WeatherChip';
 import { FlightHud, windCall, type FlightView } from '../ui/FlightHud';
@@ -158,9 +159,8 @@ export class IslandScene {
    * bearings every frame — nothing here caches a direction.
    */
   private readonly markers: CompassMarker[] = [];
-  private readonly climbButton: Action;
+  private readonly liftSlider: LiftSlider;
   private readonly drinkButton: Action;
-  private readonly descendButton: Action;
   private readonly flight = new Flight();
   /** Five minutes of being left alone, and of leaving everything alone. */
   private readonly grace = new Grace();
@@ -363,8 +363,7 @@ export class IslandScene {
     // not down it. Up belongs physically above down — reading a climb
     // button below a descend button costs a beat every time, and it is
     // the sort of beat that gets someone killed mid-flight.
-    this.descendButton = this.actions.add('⬇️', 'descend', 'ShiftLeft');
-    this.climbButton = this.actions.add('⬆️', 'climb', 'Space');
+    this.liftSlider = new LiftSlider(host);
     // CONTEXTUAL, per the HUD rule: it exists because water now exists,
     // and it only lights when she is actually standing at some. Held,
     // not tapped — drinking is an act, and an act can be interrupted.
@@ -740,6 +739,7 @@ export class IslandScene {
     this.panel.dispose();
     this.vitals.dispose();
     this.actions.dispose();
+    this.liftSlider.dispose();
     this.debugDie.dispose();
     this.weatherChip.dispose();
     this.compass.dispose();
@@ -809,7 +809,9 @@ export class IslandScene {
     // ── Air or ground ────────────────────────────────────────────
     // Takeoff is offered on ACTUAL speed, never the selected pace:
     // picking Run and then barely moving must not get her airborne.
-    const wantsUp = this.climbButton.takeTaps() > 0;
+    // The lever comes home on its own when nobody is holding it.
+    this.liftSlider.update(dt);
+    const wantsUp = this.liftSlider.takeTakeoff();
     if (!this.flight.aloft && wantsUp) {
       // She keeps the way she was running. A takeoff does not turn her.
       const paid = this.flight.takeOff(
@@ -832,8 +834,12 @@ export class IslandScene {
         {
           push: stick.y,
           side: stick.x,
-          climb: this.climbButton.held,
-          descend: this.descendButton.held,
+          lift: this.liftSlider.lift,
+          // THE LIT PACE ROW IS THE POWER SETTING, in the air as well
+          // as on the ground. Auto already flew at it; the stick did
+          // not, so the lowest row and the highest were the same
+          // flight and the readout sat at 100% either way.
+          ceiling: AUTO_AIRSPEED[this.pace],
           // AUTO IN THE AIR holds an airspeed for the selected pace, so
           // the thumb is free to steer, look and climb. Lateral input,
           // the camera and both buttons leave it engaged; only a
@@ -1005,15 +1011,14 @@ export class IslandScene {
     // button is a takeoff and the down button has nothing to descend
     // from; in the air they are climb and descend.
     if (this.flight.aloft) {
-      this.climbButton.label('⬆️');
-      this.climbButton.enable(!this.stamina.spent);
-      this.descendButton.enable(true);
+      // Never off in the air, even spent: coming DOWN is always hers,
+      // and the model already refuses the up half on an empty reserve.
+      this.liftSlider.enable('full');
     } else {
-      this.climbButton.label('🪽');
-      this.climbButton.enable(
-        this.flight.canTakeOff(this.ant.pace, this.stamina.fraction),
+      this.liftSlider.enable(
+        this.flight.canTakeOff(this.ant.pace, this.stamina.fraction)
+          ? 'takeoff' : 'off',
       );
-      this.descendButton.enable(false);
     }
     // ── The world moves under her ─────────────────────────────────
     // She has just travelled, so this is the moment to decide whether

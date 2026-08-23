@@ -6,7 +6,7 @@ import {
 import { WANDER_RATE } from '../src/ant/wander';
 import { cancelsAuto } from '../src/input/autoRun';
 
-const NEUTRAL = { push: 0, side: 0, climb: false, descend: false };
+const NEUTRAL = { push: 0, side: 0, lift: 0 };
 
 /** Get her airborne and settled, then hand back the model. */
 function aloft(hold: number | null = null, seconds = 3, fps = 60) {
@@ -84,11 +84,11 @@ describe('Auto in the air', () => {
 
   it('climbs and descends without giving Auto up', () => {
     const climb = aloft(AUTO_AIRSPEED.walk);
-    const up = run(climb, { hold: AUTO_AIRSPEED.walk, climb: true }, 1);
+    const up = run(climb, { hold: AUTO_AIRSPEED.walk, lift: 1 }, 1);
     expect(up.rise).toBeGreaterThan(0);
 
     const dive = aloft(AUTO_AIRSPEED.walk);
-    const down = run(dive, { hold: AUTO_AIRSPEED.walk, descend: true }, 1);
+    const down = run(dive, { hold: AUTO_AIRSPEED.walk, lift: -1 }, 1);
     expect(down.rise).toBeLessThan(0);
     // Neither button is a fore/aft stick push.
     expect(cancelsAuto({ x: 0, y: 0 })).toBe(false);
@@ -182,9 +182,17 @@ describe('nothing hangs in the sky', () => {
   });
 
   it('still answers a climb after it has stalled', () => {
+    // IT ANSWERS BY ARRESTING THE SINK FIRST, which is a change: the
+    // climb used to be assigned straight to her vertical rate, so a
+    // metre-a-second descent became a climb between two frames. The
+    // lever ramps its authority and the model eases toward it — you
+    // cannot reverse a queen's descent instantly and should not look
+    // as though you can — so half a second buys a large improvement
+    // and a few seconds buys the climb.
     const flight = aloft(null, 6);
-    run(flight, {}, 60);
-    const up = run(flight, { climb: true }, 0.5);
-    expect(up.rise).toBeGreaterThan(0);
+    const sinking = run(flight, {}, 60);
+    const pulled = run(flight, { lift: 1 }, 0.5);
+    expect(pulled.rise).toBeGreaterThan(sinking.rise + 30);
+    expect(run(flight, { lift: 1 }, 4).rise).toBeGreaterThan(0);
   });
 });

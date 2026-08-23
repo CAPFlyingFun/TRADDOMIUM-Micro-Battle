@@ -16,7 +16,7 @@
 import { describe, expect, it } from 'vitest';
 import { Flight, type FlightDemand } from '../src/ant/flight';
 
-const STILL: FlightDemand = { push: 0, side: 0, climb: false, descend: false };
+const STILL: FlightDemand = { push: 0, side: 0, lift: 0 };
 const TICK = 1 / 60;
 
 /**
