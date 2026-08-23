@@ -1695,8 +1695,11 @@ export class IslandScene {
       const wet = this.swim.update(
         level > ground ? { level, bed: ground } : null,
         draft, this.stamina.fraction,
-        // Driving the lever down IS a dive once she is afloat.
-        this.liftSlider.lift < -0.35, dt,
+        // THE SAME LEVER THAT FLIES HER. In the air it is climb and
+        // descend; in the water it is surface and dive. One control,
+        // one meaning — which way is she pushing herself vertically —
+        // and the medium decides what it costs.
+        this.liftSlider.lift, dt,
         this.breath.fraction,
       );
       this.surf = {
@@ -1706,7 +1709,7 @@ export class IslandScene {
         z: body.flowZ,
       };
     } else {
-      this.swim.update(null, draft, this.stamina.fraction, false, dt);
+      this.swim.update(null, draft, this.stamina.fraction, 0, dt);
       // No uphill means flat ground, where a broken wave has no
       // direction to run in and the orbital flow is the whole story.
       this.surf = surfAt(

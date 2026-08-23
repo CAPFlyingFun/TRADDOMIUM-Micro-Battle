@@ -16,11 +16,11 @@ const BODY = 1;
 const TICK = 1 / 60;
 
 /** Hold her in water `deep` units deep for `seconds` and report. */
-function soak(deep: number, reserve: number, seconds = 1, dived = false) {
+function soak(deep: number, reserve: number, seconds = 1, drive = 0) {
   const swim = new Swim();
-  let out = swim.update(null, BODY, reserve, false, TICK);
+  let out = swim.update(null, BODY, reserve, 0, TICK);
   for (let t = 0; t < seconds; t += TICK) {
-    out = swim.update({ level: deep, bed: 0 }, BODY, reserve, dived, TICK);
+    out = swim.update({ level: deep, bed: 0 }, BODY, reserve, drive, TICK);
   }
   return { out, swim };
 }
@@ -76,18 +76,18 @@ describe('standing on the water', () => {
     // switch states several times a second.
     const swim = new Swim();
     const water = { level: BODY * 6, bed: 0 };
-    swim.update(water, BODY, 0.2, false, TICK);
+    swim.update(water, BODY, 0.2, 0, TICK);
     expect(swim.afloat.state).toBe('swimming');
-    swim.update(water, BODY, BREAK_THROUGH + 0.02, false, TICK);
+    swim.update(water, BODY, BREAK_THROUGH + 0.02, 0, TICK);
     expect(swim.afloat.state).toBe('swimming');
-    swim.update(water, BODY, SKATE_BACK + 0.01, false, TICK);
+    swim.update(water, BODY, SKATE_BACK + 0.01, 0, TICK);
     expect(swim.afloat.state).toBe('skating');
   });
 });
 
 describe('going under, and coming back up', () => {
   it('sinks her while she is driving down', () => {
-    const { out } = soak(BODY * 8, 1, 1, true);
+    const { out } = soak(BODY * 8, 1, 1, -1);
     expect(out.state).toBe('under');
     expect(out.ride).toBeLessThan(BODY * 8);
   });
@@ -95,9 +95,9 @@ describe('going under, and coming back up', () => {
   it('floats her back up like a cork when she stops', () => {
     const swim = new Swim();
     const water = { level: BODY * 8, bed: 0 };
-    for (let t = 0; t < 1; t += TICK) swim.update(water, BODY, 1, true, TICK);
+    for (let t = 0; t < 1; t += TICK) swim.update(water, BODY, 1, -1, TICK);
     const sunk = swim.afloat.ride;
-    for (let t = 0; t < 2; t += TICK) swim.update(water, BODY, 1, false, TICK);
+    for (let t = 0; t < 2; t += TICK) swim.update(water, BODY, 1, 0, TICK);
     expect(swim.afloat.ride).toBeGreaterThan(sunk);
     expect(swim.afloat.state).not.toBe('under');
   });
@@ -108,7 +108,7 @@ describe('going under, and coming back up', () => {
     const swim = new Swim();
     const water = { level: BODY * 8, bed: 0 };
     for (let t = 0; t < UNDER_FOR + 1; t += TICK) {
-      swim.update(water, BODY, 1, true, TICK);
+      swim.update(water, BODY, 1, -1, TICK);
     }
     expect(swim.afloat.state).not.toBe('under');
   });
@@ -134,5 +134,34 @@ describe('nothing here can drown her', () => {
     const { out } = soak(BODY * 20, 0, 6);
     expect(['swimming', 'under']).toContain(out.state);
     expect(out.pace).toBeGreaterThan(0);
+  });
+});
+
+describe('one lever, two media', () => {
+  const water = { level: BODY * 8, bed: 0 };
+
+  it('brings her up faster when she swims for the surface', () => {
+    // The other half of reusing the flight lever. Buoyancy alone gets
+    // her back; a queen who WANTS the surface should beat one who has
+    // given up on it.
+    const sink = () => {
+      const swim = new Swim();
+      for (let t = 0; t < 1.5; t += TICK) swim.update(water, BODY, 1, -1, TICK);
+      return swim;
+    };
+    const idle = sink();
+    const pulling = sink();
+    // Sampled mid-rise, deliberately: buoyancy alone clears three
+    // body lengths in a third of a second, so a longer window has
+    // them both already at the top and compares nothing.
+    for (let t = 0; t < 0.12; t += TICK) idle.update(water, BODY, 1, 0, TICK);
+    for (let t = 0; t < 0.12; t += TICK) pulling.update(water, BODY, 1, 1, TICK);
+    expect(pulling.afloat.ride).toBeGreaterThan(idle.afloat.ride);
+  });
+
+  it('ignores a lever inside the deadzone, as the flight model does', () => {
+    const swim = new Swim();
+    for (let t = 0; t < 1; t += TICK) swim.update(water, BODY, 1, -0.2, TICK);
+    expect(swim.afloat.state).not.toBe('under');
   });
 });

@@ -53,7 +53,7 @@ describe('what it does to a dive', () => {
 
   it('holds her down while she has air', () => {
     const swim = new Swim();
-    for (let t = 0; t < 1; t += TICK) swim.update(water, BODY, 1, true, TICK, 1);
+    for (let t = 0; t < 1; t += TICK) swim.update(water, BODY, 1, -1, TICK, 1);
     expect(swim.afloat.state).toBe('under');
   });
 
@@ -61,15 +61,15 @@ describe('what it does to a dive', () => {
     // OUT OF AIR IS NOT A CHOICE. She can decline to go down; she
     // cannot decline to come up.
     const swim = new Swim();
-    for (let t = 0; t < 1; t += TICK) swim.update(water, BODY, 1, true, TICK, 1);
+    for (let t = 0; t < 1; t += TICK) swim.update(water, BODY, 1, -1, TICK, 1);
     expect(swim.afloat.state).toBe('under');
-    swim.update(water, BODY, 1, true, TICK, 0);
+    swim.update(water, BODY, 1, -1, TICK, 0);
     expect(swim.afloat.state).not.toBe('under');
   });
 
   it('and will not let her duck straight back under on the same breath', () => {
     const swim = new Swim();
-    for (let t = 0; t < 1; t += TICK) swim.update(water, BODY, 1, true, TICK, 0);
+    for (let t = 0; t < 1; t += TICK) swim.update(water, BODY, 1, -1, TICK, 0);
     expect(swim.afloat.state).not.toBe('under');
   });
 });
@@ -83,7 +83,7 @@ describe('it still cannot drown her', () => {
     const air = new Breath();
     const water = { level: 20, bed: 0 };
     for (let t = 0; t < HOLD + 10; t += TICK) {
-      const wet = swim.update(water, 1, 1, true, TICK, air.fraction);
+      const wet = swim.update(water, 1, 1, -1, TICK, air.fraction);
       air.update(wet.state === 'under', TICK);
     }
     expect(air.fraction).toBeGreaterThan(0);

@@ -84,6 +84,12 @@ export const SKATE_BACK = 0.68;
 /** How fast buoyancy returns her to the surface, world units a second. */
 export const BOB_RATE = 9;
 
+/** Past this the lever counts as asking. Matches the flight deadzone. */
+export const LIFT_SLACK = 0.35;
+
+/** How much faster she rises when she is swimming for the surface. */
+export const SWIM_UP = 2.4;
+
 /**
  * WHAT ENDS A DIVE, now that it is not a stopwatch.
  *
@@ -170,12 +176,17 @@ export class Swim {
    * @param water where the surface and the bed are, or null on land
    * @param body her length in world units
    * @param reserve stamina left, 0 to 1
-   * @param dived whether she is actively driving herself downward
+   * @param drive the vertical lever, −1 to 1. THE SAME CONTROL THAT
+   *   FLIES HER: down dives, up climbs toward the surface. It is one
+   *   lever meaning "which way is she pushing herself vertically", and
+   *   the medium decides what that costs — air, wings, or nothing.
+   *   Joshua's plan for it goes further; jaws and other modes can take
+   *   the same lever when they exist.
+   * @param air what is left in her lungs, 0 to 1 — see breath.ts
    */
   update(
     water: Water | null, body: number, reserve: number,
-    dived: boolean, dt: number,
-    /** What is left in her lungs, 0 to 1 — see breath.ts. */
+    drive: number, dt: number,
     air = 1,
   ): Afloat {
     const deep = water ? water.level - water.bed : 0;
@@ -208,6 +219,8 @@ export class Swim {
 
     // DEEP ENOUGH TO TAKE HER. Which of the three depends on what she
     // has left and what she is asking for.
+    const dived = drive < -LIFT_SLACK;
+    const climbing = drive > LIFT_SLACK;
     if (!dived) this.ducked = false;
     // OUT OF AIR IS NOT A CHOICE. She can decline to go down, but she
     // cannot decline to come up.
@@ -237,7 +250,7 @@ export class Swim {
       state: this.state,
       grip: GRIP[this.state],
       pace: PACE[this.state],
-      ride: this.rideFor(deep, body, dt),
+      ride: this.rideFor(deep, body, dt, climbing),
       cost: this.state === 'skating' ? SKATE_COST
         : this.state === 'swimming' ? SWIM_COST : SWIM_COST,
     };
@@ -252,16 +265,26 @@ export class Swim {
    * wherever she has got to, rising at BOB_RATE, which is what makes
    * a dive feel like a dive and a resurfacing feel like a cork.
    */
-  private rideFor(deep: number, body: number, dt: number): number {
-    const top = deep;
+  private rideFor(
+    deep: number, body: number, dt: number, climbing = false,
+  ): number {
     const swimming = Math.max(0, deep - body * 0.45);
-    if (this.state === 'skating') return top;
-    if (this.state === 'swimming') return swimming;
-    // Under: sink toward the bed while she is driving down, and rise
-    // back whenever she is not.
-    const want = this.under >= UNDER_FOR ? swimming : Math.max(0, deep - body * 3);
+    // WHERE SHE BELONGS in this state: on top of the film, half in it,
+    // or down where she pushed herself.
+    const want = this.state === 'skating' ? deep
+      : this.state === 'swimming' ? swimming
+        : this.under >= UNDER_FOR ? swimming
+          : Math.max(0, deep - body * 3);
+    // AND SHE MOVES THERE, rather than appearing there. Only the dive
+    // used to ease; surfacing read the new state's height and jumped,
+    // so letting go of the lever teleported her to the top and there
+    // was nothing for a swim-up to be faster THAN. A test asking
+    // whether pulling up beat drifting up found both already there.
     const from = this.last.ride;
-    const step = BOB_RATE * dt;
+    // PULLING UP HELPS, which is the other half of reusing the lever:
+    // buoyancy alone brings her back, but a queen who wants the
+    // surface should reach it sooner than one who has given up.
+    const step = BOB_RATE * (climbing ? SWIM_UP : 1) * dt;
     return from < want ? Math.min(want, from + step) : Math.max(want, from - step);
   }
 

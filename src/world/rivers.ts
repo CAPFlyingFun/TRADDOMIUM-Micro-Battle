@@ -70,6 +70,15 @@ export const BANK_GRADE = 0.8;
 const BANK_REACH = 400;
 
 /**
+ * How far under the waterline a coarse vertex sits when its footprint
+ * touches the channel but it is not in the channel itself.
+ *
+ * Small on purpose: enough that the water sheet is never pierced,
+ * little enough that the ground beside a stream is still the ground.
+ */
+const BRIM = 12;
+
+/**
  * THE WIDEST FOOTPRINT A COARSE TIER MAY ASK ABOUT, in world units.
  *
  * A distance tier's vertices stand 312 to 3,125 units apart and a
@@ -319,20 +328,50 @@ function scan(
     // and a vertex that stands for a piece of channel is put in the
     // channel. Zero for every fine query, where the vertex is the only
     // place it speaks for.
-    const inner = Math.max(0, off - give);
     let bed: number;
-    if (inner <= half) {
-      const wall = Math.max(0, (inner / half - FLAT_BED) / (1 - FLAT_BED));
+    if (off <= half) {
+      // IN the channel: the true profile, read where she actually is.
+      const wall = Math.max(0, (off / half - FLAT_BED) / (1 - FLAT_BED));
       const eased = wall * wall * (3 - 2 * wall);
       bed = level - deep * (1 - eased);
+    } else if (off - give <= half) {
+      // THE FOOTPRINT REACHES THE CHANNEL BUT THE VERTEX DOES NOT, and
+      // this branch is the whole correction. It used to slide the
+      // entire profile outward, which dug the FLAT BED out to the edge
+      // of the footprint: at the middle tier a 5.5 m stream got a
+      // thirty-one metre trench at full depth with water down the
+      // middle of it, and from a low angle the ribbon hung in the air
+      // over a dry ditch. Joshua photographed the gap.
+      //
+      // A vertex that stands for some water must not stand ABOVE it —
+      // that is the containment rule and it is why any of this exists.
+      // It must not be dug to the BED either, because it is not in the
+      // channel. Just under the waterline is both.
+      bed = level - BRIM;
     } else {
-      bed = level + (inner - half) * BANK_GRADE;
+      // Outside the footprint: the bank, climbing from the brim so the
+      // two meet rather than step. Measured on the true offset, so a
+      // coarse tier does not flatten the whole valley side.
+      bed = level - BRIM + (off - give - half) * BANK_GRADE;
     }
 
+    // HOW FAST THE WATER IS GOING *HERE*, which is not how fast the
+    // reach is going. A channel's velocity profile is roughly
+    // parabolic across it — friction holds the margins nearly still
+    // while the thread down the middle carries everything — and
+    // ignoring that gave every square centimetre of a stream the
+    // midstream speed. At ant scale that is the difference between a
+    // ford and a wall of water: she could not get a body length in
+    // before a metre a second took her.
+    //
+    // Real, and it happens to be the playable answer too: the edge of
+    // a river is crossable and the middle of one is not.
+    const across = Math.min(1, off / Math.max(1e-6, half));
+    const thread = Math.max(0, 1 - across * across);
     const spot = {
       level, bed, width, off,
-      flowX: fx![s] * speed![s],
-      flowZ: fz![s] * speed![s],
+      flowX: fx![s] * speed![s] * thread,
+      flowZ: fz![s] * speed![s] * thread,
     };
     if (give > 0) {
       // A FOOTPRINT WANTS THE LOWEST BED, and only that. The crossing
