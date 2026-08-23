@@ -42,8 +42,12 @@ import {
   loadBands, reliefUniform, setDetailRange, setTextureOrigin, terrainMaterial,
 } from '../world/terrainMaterial';
 import { SettingsPanel } from '../ui/SettingsPanel';
+import { PauseMenu } from '../ui/PauseMenu';
+import {
+  newSaveId, writeSave, type Snapshot, type SoloSave,
+} from '../game/save';
 import { Vitals } from '../ui/Vitals';
-import { liveStat } from '../ant/castes';
+import { LIVE_GROWTH, liveStat } from '../ant/castes';
 import { MM_PER_UNIT } from '../ant/queenModel';
 import { ActionPad, type Action } from '../input/ActionPad';
 import { LiftSlider } from '../input/LiftSlider';
@@ -160,6 +164,33 @@ export class IslandScene {
    */
   private readonly markers: CompassMarker[] = [];
   private readonly liftSlider: LiftSlider;
+  private readonly pauseMenu: PauseMenu;
+  /**
+   * SOLO PAUSE. The whole simulation stops — physics, weather, the
+   * survival timers, the sea. Rendering does not, because a frozen
+   * frame the player can still look at is what "paused" means and a
+   * black screen is what "crashed" looks like.
+   */
+  private halted = false;
+  /** Which slot this run writes to. One run, one slot, all sitting. */
+  private readonly slot = newSaveId();
+  /** Simulated seconds lived, carried across sittings by the save. */
+  private lived = 0;
+  /** Sim seconds since the last autosave. */
+  private sinceSaved = 0;
+  private savedRegion = 'Kauaʻi';
+  /** What to do when she is asked to leave. Set by the flow. */
+  private leaving: (() => void) | null = null;
+
+  /**
+   * How often the run writes itself, in SIMULATED seconds.
+   *
+   * A minute. Frequent enough that the worst loss is a minute of
+   * walking, rare enough that a phone is not writing JSON every few
+   * frames — and on the simulated clock, so a long pause is not a
+   * flurry of saves the moment she resumes.
+   */
+  private static readonly AUTOSAVE_EVERY = 60;
   private readonly drinkButton: Action;
   private readonly flight = new Flight();
   /** Five minutes of being left alone, and of leaving everything alone. */
@@ -346,6 +377,16 @@ export class IslandScene {
     this.paceUI = new PaceSelector(host);
     this.look = new LookDrag(host);
     this.panel = new SettingsPanel(host, true);
+    this.pauseMenu = new PauseMenu(host, {
+      resume: () => { this.halted = false; },
+      save: () => this.save(),
+      settings: () => this.panel.reveal(),
+      quit: () => this.leaving?.(),
+    });
+    this.panel.intercept(() => {
+      this.halted = true;
+      this.pauseMenu.show();
+    });
     // Her health, food and water come off the queen's stat table
     // rather than being typed here — this is the only place the data
     // file and the HUD meet, and it is a read, not a copy.
@@ -484,6 +525,7 @@ export class IslandScene {
         return { ...body, drawn, depth: drawn - groundHeight(wx, wz) };
       },
       cameraAt: () => this.follow.camera.position.toArray(),
+      paused: () => this.halted,
       /**
        * THE POSITION FIX AS A STRING — the same one under the compass.
        *
@@ -740,6 +782,7 @@ export class IslandScene {
     this.vitals.dispose();
     this.actions.dispose();
     this.liftSlider.dispose();
+    this.pauseMenu.dispose();
     this.debugDie.dispose();
     this.weatherChip.dispose();
     this.compass.dispose();
@@ -753,11 +796,86 @@ export class IslandScene {
     this.renderer.domElement.remove();
   }
 
+  /**
+   * WHAT SHE IS AND WHERE, for the save. Global coordinates and
+   * fractions — nothing local, nothing rendered, nothing that means a
+   * different thing on a different relief dial.
+   */
+  snapshot(): Snapshot {
+    return {
+      region: this.savedRegion,
+      at: {
+        wx: this.ant.where.wx,
+        wz: this.ant.where.wz,
+        heading: this.ant.bearing,
+        agl: this.flight.height,
+      },
+      body: { stage: LIVE_GROWTH, winged: this.winged },
+      meters: { stamina: this.stamina.fraction, thirst: this.thirst.fraction },
+      elapsed: this.elapsed,
+      playedSeconds: this.lived,
+    };
+  }
+
+  /** Where QUIT TO MENU goes. */
+  onLeave(run: () => void): void {
+    this.leaving = run;
+  }
+
+  /** Write this run to its slot. Cheap enough to call on a whim. */
+  save(): void {
+    writeSave(localStorage, this.snapshot(), this.slot, new Date().toISOString());
+  }
+
+  /**
+   * Put a loaded run back into the world.
+   *
+   * POSITION IS NOT DONE HERE — the scene is built around a start
+   * point, so where she stands came from the save before this object
+   * existed. What is left is the state a constructor argument could
+   * not carry.
+   *
+   * Growth is recorded and not restored, and saying so is better than
+   * pretending: `LIVE_GROWTH` is a constant today because she does not
+   * grow yet. The field is in the save so that the first run of the
+   * release that adds growth is not the run that loses it.
+   */
+  resume(save: SoloSave): void {
+    this.savedRegion = save.region;
+    this.lived = save.playedSeconds;
+    this.elapsed = save.elapsed;
+    this.stamina.restore(save.meters.stamina);
+    this.thirst.restore(save.meters.thirst);
+    this.setWings(save.body.winged);
+  }
+
   private readonly tick = (): void => {
     if (this.disposed) return;
     // Clamp dt so a backgrounded tab does not teleport the ant on return.
     const dt = Math.min(this.clock.getDelta(), 0.1);
+
+    // PAUSED: draw the frame, advance nothing.
+    //
+    // The delta is still READ, and that is the point of taking it
+    // before this line — `getDelta` measures from the last call, so
+    // skipping it would hand the first resumed frame every second the
+    // menu was open. The clamp would cap it at a tenth of a second and
+    // she would still lurch.
+    if (this.halted) {
+      this.renderer.render(this.scene, this.follow.camera);
+      return;
+    }
+
     this.elapsed += dt;
+    this.lived += dt;
+
+    // AUTOSAVE. Off the SIMULATED clock, so a paused menu is not a
+    // save and a slow frame is not a missed one.
+    this.sinceSaved += dt;
+    if (this.sinceSaved >= IslandScene.AUTOSAVE_EVERY) {
+      this.sinceSaved = 0;
+      this.save();
+    }
     // The air breathes on its own clock, above the ant and beside her.
     this.liveWind.update(
       this.nowWeather?.windMps ?? 0, this.nowWeather?.gustMps ?? 0, dt,

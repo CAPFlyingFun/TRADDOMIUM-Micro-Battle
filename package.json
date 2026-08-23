@@ -1,7 +1,7 @@
 {
   "name": "traddomium-micro-battle",
   "private": true,
-  "version": "0.53.0",
+  "version": "0.54.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -33,6 +33,7 @@
     "probe:lakes": "node scripts/probe-lakes.mjs",
     "probe:surf": "node scripts/probe-surf.mjs",
     "probe:rivers": "node scripts/probe-rivers.mjs",
+    "probe:save": "node scripts/probe-save.mjs",
     "probe:revisit": "node scripts/probe-revisit.mjs",
     "bake:veg": "python3 scripts/bakeVeg.py"
   },

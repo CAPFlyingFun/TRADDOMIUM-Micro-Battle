@@ -65,6 +65,11 @@ export class Thirst {
     this.level = 1;
   }
 
+  /** Put it back where a save left it. */
+  restore(fraction: number): void {
+    this.level = Math.min(1, Math.max(0, fraction));
+  }
+
   /**
    * Empty NOW — the debug kill's little sibling. The natural drain is
    * half an hour, which is right for the game and useless for a probe

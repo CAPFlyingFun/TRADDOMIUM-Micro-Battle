@@ -100,6 +100,13 @@ export class SettingsPanel {
    *   update throws the founding away, and a control that does that on
    *   one tap is a control that will do it by accident.
    */
+  private taken: (() => void) | null = null;
+
+  /** Let something else answer the cog. Null gives it back. */
+  intercept(run: (() => void) | null): void {
+    this.taken = run;
+  }
+
   constructor(host: HTMLElement, private readonly inGame = false) {
     this.gear = document.createElement('button');
     this.panel = document.createElement('div');
@@ -144,9 +151,23 @@ export class SettingsPanel {
       font: '600 17px/1 system-ui, sans-serif',
       cursor: 'pointer',
       touchAction: 'none',
-      zIndex: '14',
+      // ABOVE THE PAUSE VEIL (40). The cog is how the settings page is
+      // closed again, and the veil is drawn over the whole screen —
+      // left at 14 it was underneath, and the way out was covered by
+      // the thing it leads out of.
+      zIndex: '45',
     } as Partial<CSSStyleDeclaration>);
-    this.claim(this.gear, () => this.show(!this.open));
+    this.claim(this.gear, () => {
+      // THE COG IS THE WAY OUT OF THE GAME, and in Solo the way out of
+      // the game stops the game. When something has claimed it — the
+      // pause menu does — the panel becomes a page of that rather than
+      // the whole of it. Unclaimed, it behaves exactly as it did.
+      // Claimed only while the panel is SHUT. Open, the cog is still
+      // the way to close it — otherwise the pause menu would swallow
+      // the one gesture that gets you out of the page it opened.
+      if (this.taken && !this.open) this.taken();
+      else this.show(!this.open);
+    });
 
     this.panel.dataset.ui = 'settings-panel';
     Object.assign(this.panel.style, {

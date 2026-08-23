@@ -73,6 +73,17 @@ export class Stamina {
   }
 
   /**
+   * Put the reserve back where a save left it.
+   *
+   * Clears the winded latch when the level is healthy, because the
+   * latch is a memory of running dry and a resumed run has not.
+   */
+  restore(fraction: number): void {
+    this.level = Math.min(1, Math.max(0, fraction));
+    this.winded = this.level < REARM_AT;
+  }
+
+  /**
    * Take a lump out of the reserve — a takeoff, and once anything else
    * costs a one-off price.
    *

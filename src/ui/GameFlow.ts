@@ -21,9 +21,12 @@ import { FIRST_LIGHT_JOB, LoadPlan, TERRAIN_JOB, WORK_WEIGHT } from './loadPlan'
 import { planBands } from '../world/terrainMaterial';
 import { planQueen } from '../ant/queenModel';
 import { SettingsPanel } from './SettingsPanel';
+import { latestSave, livedFor, type SoloSave } from '../game/save';
 import { autoUpdate } from './updates';
 import { DeathScreen } from './DeathScreen';
 import type { HeightGrid } from '../world/kauai';
+import { world } from '../world/coords';
+import { chooseCandidate, readyRegions } from '../world/spawn';
 
 export class GameFlow {
   private menu: MainMenu | null = null;
@@ -54,11 +57,44 @@ export class GameFlow {
      * launch to fix a problem that happens on a few of them.
      */
     void autoUpdate();
+
+    /**
+     * WHAT THE PROBES DRIVE THE FLOW WITH.
+     *
+     * The menu-to-world path runs through a map the player picks a
+     * region on by tapping the island, which a headless probe cannot
+     * do without knowing where Līhuʻe is in screen pixels. `__island`
+     * has been the scene's handle for a while; this is the same idea
+     * one level up, and it exists so an acceptance test can say "start
+     * a run" without also encoding the map's layout.
+     */
+    (window as unknown as Record<string, unknown>).__flow = {
+      play: () => { void this.toFirstRegion(); },
+      toMenu: () => this.toMenu(),
+    };
+  }
+
+  /** Straight into the world at the first region's first candidate. */
+  private async toFirstRegion(): Promise<void> {
+    const region = readyRegions().find((r) => r.candidates.length > 0);
+    if (!region) return;
+    const candidate = chooseCandidate(region, 0);
+    if (!candidate) return;
+    await this.spawn({ region, candidate });
   }
 
   toMenu(): void {
     this.clear();
+    // CONTINUE IS OFFERED ONLY IF THERE IS SOMETHING TO CONTINUE, and
+    // the label says what it is rather than just that it exists — a
+    // button that reads "CONTINUE" and drops you somewhere unexpected
+    // is worse than one that reads "CONTINUE · LIHUE · 2h 14m".
+    const found = latestSave(localStorage);
     this.menu = new MainMenu(this.host, {
+      resume: found
+        ? { label: `${found.region.toUpperCase()} · ${livedFor(found.playedSeconds)}`,
+          run: () => { void this.spawn(null, found); } }
+        : null,
       newColony: () => this.toMap(),
       settings: () => this.menuSettings?.reveal(),
     });
@@ -88,8 +124,9 @@ export class GameFlow {
    * candidate, hand it to the scene, and let the scene seat the origin
    * and cut terrain around it. Nothing local survives this call.
    */
-  async spawn(chosen: Chosen): Promise<void> {
-    this.lastStart = chosen;
+  async spawn(chosen: Chosen | null, resuming: SoloSave | null = null): Promise<void> {
+    if (!chosen && !resuming) return;
+    if (chosen) this.lastStart = chosen;
     this.clear();
 
     // THE VEIL GOES UP FIRST, before the scene exists. The scene starts
@@ -104,7 +141,8 @@ export class GameFlow {
     plan.add(TERRAIN_JOB, 'Cutting the terrain', WORK_WEIGHT);
     plan.add(FIRST_LIGHT_JOB, 'First light', WORK_WEIGHT);
 
-    const screen = new LoadingScreen(this.host, chosen.region.name);
+    const where = chosen?.region.name ?? resuming?.region ?? 'Kauaʻi';
+    const screen = new LoadingScreen(this.host, where);
     this.loading = screen;
     screen.follow(() => plan.read());
 
@@ -125,14 +163,25 @@ export class GameFlow {
     // Sent back to the map while that was happening.
     if (this.loading !== screen) return;
 
+    // WHERE SHE STANDS COMES FROM THE SAVE when there is one, because
+    // the scene is built around a start point and cuts its terrain
+    // there. Putting her back afterwards would build one island and
+    // then need another.
+    const start = resuming
+      ? {
+        at: world(resuming.at.wx, resuming.at.wz),
+        heading: resuming.at.heading,
+      }
+      : { at: chosen!.candidate.at, heading: chosen!.candidate.heading };
+
     const scene = new IslandScene(
-      this.host,
-      this.grid,
-      { at: chosen.candidate.at, heading: chosen.candidate.heading },
-      () => this.died(),
-      plan,
+      this.host, this.grid, start, () => this.died(), plan,
     );
     this.scene = scene;
+    // The rest of the run — her meters, her wings, the world clock —
+    // is state a constructor argument cannot carry.
+    if (resuming) scene.resume(resuming);
+    scene.onLeave(() => this.toMenu());
 
     void scene.ready
       .then(async () => {

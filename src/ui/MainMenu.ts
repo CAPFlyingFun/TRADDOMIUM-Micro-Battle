@@ -13,7 +13,21 @@ import { buildStamp, VERSION } from '../build';
 
 const LIVE = 'rgb(110, 255, 150)';
 
+/** What CONTINUE would do, and what it should say it does. */
+export interface Resume {
+  readonly label: string;
+  readonly run: () => void;
+}
+
 export interface MenuChoice {
+  /**
+   * The run waiting to be picked up, or null when there is none.
+   *
+   * NULL IS A REAL STATE and it stays visible: the button greys out
+   * rather than vanishing, because a menu whose buttons move depending
+   * on history teaches the player nothing about where things are.
+   */
+  readonly resume: Resume | null;
   readonly newColony: () => void;
   readonly settings: () => void;
 }
@@ -48,7 +62,11 @@ export class MainMenu {
 
     this.root.append(
       title,
-      this.button('CONTINUE COLONY', 'continue', null, 'No colony yet'),
+      this.button(
+        'CONTINUE COLONY', 'continue',
+        choose.resume?.run ?? null,
+        choose.resume?.label ?? 'No colony yet',
+      ),
       this.button('NEW COLONY', 'new-colony', choose.newColony),
       // NOT 'settings'. The gear the panel puts on screen already
       // carries that name, and two different controls under one
