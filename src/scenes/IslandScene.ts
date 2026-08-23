@@ -16,6 +16,8 @@ import {
 import { findLandfall, UNITS_PER_METRE, type HeightGrid } from '../world/kauai';
 import { local, world, type WorldPoint } from '../world/coords';
 import { TerrainStream, TIER_CUTS } from '../world/TerrainStream';
+import { Ocean } from '../world/Ocean';
+import { seaHeightAt } from '../world/swell';
 import { originAt, rebaseFor, setOrigin, toLocal, toWorld,
 } from '../world/origin';
 import { bakeGrain, GRAIN_SIZE } from '../world/groundTexture';
@@ -198,7 +200,7 @@ export class IslandScene {
    * The sea. It is centred on the island rather than on her, so it
    * moves with every rebase like everything else already placed.
    */
-  private water!: THREE.Mesh;
+  private water!: Ocean;
   /**
    * The CEILING on a full push of the stick — not propulsion. She does
    * not move because this is set; she moves because a thumb asks.
@@ -290,7 +292,7 @@ export class IslandScene {
     setDetailRange(settings().detailRange);
     setSmoothing(settings().terrainSmoothing);
     this.buildTerrain();
-    this.buildWater();
+    this.buildWater(grid);
 
     // AFTER the terrain exists and BEFORE she is placed. Both halves
     // matter: the sections have to be there to be scaled, and she has
@@ -446,6 +448,28 @@ export class IslandScene {
       // about it samples a spot near the middle of the island instead
       // of the ground she is standing on.
       groundUnderfoot: () => groundHeight(this.ant.where.wx, this.ant.where.wz),
+      /**
+       * PUT HER SOMEWHERE, in GLOBAL coordinates — for probes that need
+       * a particular piece of island and cannot walk five kilometres to
+       * it at ant pace under a software renderer.
+       *
+       * Does everything a spawn does, in the same order and for the
+       * same reasons: the origin first so nothing large is ever
+       * rendered, then her, then the terrain around her, then the sea's
+       * folded phase, then the camera snapped rather than eased.
+       */
+      putAt: (wx: number, wz: number, heading = 0) => {
+        setOrigin(wx, wz);
+        const seat = originAt();
+        setTextureOrigin(seat.x, seat.z);
+        this.ant.placeAt(wx, wz, heading);
+        this.flight.land();
+        this.terrain.follow(this.ant.where);
+        this.terrain.place();
+        this.water.reorigin();
+        this.follow.snapTo(this.ant.root, -heading);
+      },
+      seaAt: (wx: number, wz: number) => seaHeightAt(wx, wz, this.elapsed),
       pace: () => this.pace,
       setPace: (to: Pace) => { this.pace = to; },
       stamina: () => this.stamina.fraction,
@@ -633,6 +657,7 @@ export class IslandScene {
     this.weatherChip.dispose();
     this.compass.dispose();
     this.rain.dispose();
+    this.water.dispose();
     this.detachSettings();
     this.detachKill();
     this.renderer.dispose();
@@ -838,8 +863,11 @@ export class IslandScene {
       this.ant.reground();
       this.follow.camera.position.x -= shift.x;
       this.follow.camera.position.z -= shift.z;
-      this.water.position.x -= shift.x;
-      this.water.position.z -= shift.z;
+      // The sea is a function of WORLD position, so a rebase does not
+      // move it — it refolds the phase that keeps it where it is. See
+      // Ocean.reorigin, and the test that proves a rebase leaves the
+      // water alone.
+      this.water.reorigin();
       // The ground texture tiles off world position, not rendered
       // position, or it slides sideways on every shift.
       const now = originAt();
@@ -859,6 +887,11 @@ export class IslandScene {
     this.nowWeather = sky;
     this.applyWeather(sky);
     this.rain.update(this.follow.camera.position, sky, dt);
+    // The sea takes the camera's RENDERED position, which is the one
+    // thing about it that is allowed to be local: the grid is recentred
+    // on the eye, while every wave on it is a function of where the
+    // island is. See Ocean.
+    this.water.update(this.follow.camera.position, dt);
     const reading = service.reading;
     if (reading) {
       this.weatherChip.update(
@@ -988,7 +1021,7 @@ export class IslandScene {
       ...look([transition], 'transition', TIER_CUTS.transition),
       ...look([middle], 'middle', TIER_CUTS.middle),
       ...look([backdrop], 'backdrop', TIER_CUTS.backdrop),
-      ...look([this.water], 'sea', 0),
+      ...look([this.water.mesh], 'sea', 0),
     ].sort((a, b) => a.distance - b.distance);
 
     const seen = hits.find((hit) => hit.drawn) ?? null;
@@ -1336,20 +1369,23 @@ export class IslandScene {
     );
   }
 
-  private buildWater(): void {
-    this.water = new THREE.Mesh(
-      new THREE.CircleGeometry(ISLAND_SPAN * 0.95, 96),
-      new THREE.MeshStandardMaterial({
-        color: 0x2a6a8f,
-        transparent: true,
-        // Clear enough to show the reef near the beach, opaque enough
-        // that the deep seabed never reads through as a stain.
-        opacity: 0.88,
-        roughness: 0.25,
-      }),
+  /**
+   * THE SEA. Was a flat translucent disc; is now the ported ocean —
+   * see Ocean.ts and swell.ts.
+   *
+   * The ripple normal map is fetched rather than awaited: the sea is
+   * drawn from the first frame with a flat normal and gains its chop
+   * when the texture lands. A boot that blocked on it would hold the
+   * whole island for twelve kilobytes.
+   */
+  private buildWater(grid: HeightGrid): void {
+    this.water = new Ocean(this.scene, grid, null);
+    new THREE.TextureLoader().load(
+      `${import.meta.env.BASE_URL}kauai-tex/water-normal.webp`,
+      (texture) => { if (!this.disposed) this.water.wear(texture); },
+      undefined,
+      () => {},
     );
-    this.water.rotation.x = -Math.PI / 2;
-    this.water.frustumCulled = false;
-    this.scene.add(this.water);
   }
+
 }
