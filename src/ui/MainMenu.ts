@@ -50,7 +50,12 @@ export class MainMenu {
       title,
       this.button('CONTINUE COLONY', 'continue', null, 'No colony yet'),
       this.button('NEW COLONY', 'new-colony', choose.newColony),
-      this.button('SETTINGS', 'settings', choose.settings),
+      // NOT 'settings'. The gear the panel puts on screen already
+      // carries that name, and two different controls under one
+      // selector is how a click lands on whichever one the DOM happens
+      // to reach first — which for a probe meant tapping a gear hidden
+      // behind this very menu.
+      this.button('SETTINGS', 'menu-settings', choose.settings),
       this.stamp(),
     );
     host.appendChild(this.root);

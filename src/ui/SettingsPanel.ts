@@ -14,6 +14,9 @@ import {
   DEFAULTS, LIMITS, reset, set, settings, type Dial, type Toggle,
 } from './settings';
 import { buildStamp, VERSION } from '../build';
+import {
+  isNewer, liveBuild, takeUpdate, updateLabel, type Live,
+} from './updates';
 
 const GOLD = 'rgba(255, 226, 160, .9)';
 const LIVE = 'rgba(110, 255, 150, .95)';
@@ -89,7 +92,14 @@ export class SettingsPanel {
   private readonly redraw: Array<() => void> = [];
   private open = false;
 
-  constructor(host: HTMLElement) {
+  /**
+   * @param inGame whether a reload would cost her a run. The update
+   *   button is the same button either way; what changes is whether it
+   *   asks twice. There is no save yet, so from inside a founding an
+   *   update throws the founding away, and a control that does that on
+   *   one tap is a control that will do it by accident.
+   */
+  constructor(host: HTMLElement, private readonly inGame = false) {
     this.gear = document.createElement('button');
     this.panel = document.createElement('div');
     this.build();
@@ -156,7 +166,21 @@ export class SettingsPanel {
       color: GOLD,
       font: '600 12px/1.3 "Chakra Petch", system-ui, sans-serif',
       touchAction: 'pan-y',
-      zIndex: '14',
+      /**
+       * ABOVE EVERYTHING, INCLUDING THE MAIN MENU.
+       *
+       * It was 14, and the main menu is a full-screen opaque panel at
+       * 50 — so tapping SETTINGS on the menu opened a panel behind it
+       * that could be neither seen nor touched. It went unnoticed
+       * because the gear in game is the way anyone actually reaches
+       * settings, and in game there is nothing above 14 to hide it.
+       *
+       * An open settings panel is modal by nature: whatever else is on
+       * screen, this is the thing being used. The GEAR stays at 14 on
+       * purpose, so the menu keeps hiding it and its own SETTINGS
+       * button remains the single way in from there.
+       */
+      zIndex: '60',
     } as Partial<CSSStyleDeclaration>);
     // A drag inside the panel is a drag on the panel, never on the view.
     this.claim(this.panel, () => {});
@@ -164,6 +188,7 @@ export class SettingsPanel {
     this.panel.appendChild(this.buildTitle());
     for (const dial of DIALS) this.panel.appendChild(this.buildDial(dial));
     for (const toggle of TOGGLES) this.panel.appendChild(this.buildToggle(toggle));
+    this.panel.appendChild(this.buildUpdate());
     this.panel.appendChild(this.buildReset());
     this.panel.appendChild(this.buildStampLine());
   }
@@ -329,6 +354,78 @@ export class SettingsPanel {
 
     row.append(name, button);
     return row;
+  }
+
+  /**
+   * CHECK FOR UPDATES — the button that answers "am I actually looking
+   * at the build we just pushed?"
+   *
+   * It exists because the honest answer was no, repeatedly, and for a
+   * reason nothing on screen could show: the deploy had landed and the
+   * device was serving a cached document. See updates.ts.
+   *
+   * One button, four states, and it never lies about which one it is
+   * in. "Checking" is a real state rather than a spinner over a stale
+   * label, and a failed check says it could not tell rather than
+   * quietly claiming everything is fine — those are different answers.
+   */
+  private buildUpdate(): HTMLElement {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.dataset.ui = 'check-updates';
+    button.textContent = 'Check for updates';
+    Object.assign(button.style, {
+      appearance: 'none',
+      marginTop: '2px',
+      border: '1px solid rgba(255, 216, 130, .4)',
+      borderRadius: '7px',
+      padding: '6px',
+      background: 'transparent',
+      color: 'rgba(255, 226, 160, .7)',
+      font: 'inherit',
+      cursor: 'pointer',
+      touchAction: 'none',
+    } as Partial<CSSStyleDeclaration>);
+
+    let waiting: Live | null = null;
+    let armed = false;
+    let busy = false;
+
+    const say = (text: string, lit = false) => {
+      button.textContent = text;
+      button.style.color = lit ? LIVE : 'rgba(255, 226, 160, .7)';
+      button.style.borderColor = lit
+        ? 'rgba(150, 255, 190, .55)' : 'rgba(255, 216, 130, .4)';
+    };
+
+    this.claim(button, () => {
+      if (busy) return;
+
+      // Second tap on a found update: take it.
+      if (waiting) {
+        if (this.inGame && !armed) {
+          armed = true;
+          say('Tap again — this restarts the game', true);
+          return;
+        }
+        say('Updating…');
+        busy = true;
+        void takeUpdate(waiting);
+        return;
+      }
+
+      busy = true;
+      say('Checking…');
+      void liveBuild().then((live) => {
+        busy = false;
+        if (!live) { say('Could not check — no connection?'); return; }
+        if (!isNewer(live)) { say(`Up to date · v${VERSION}`); return; }
+        waiting = live;
+        armed = false;
+        say(`${updateLabel(live)} — tap to update`, true);
+      });
+    });
+    return button;
   }
 
   private buildReset(): HTMLElement {

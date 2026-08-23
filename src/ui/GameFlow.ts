@@ -21,6 +21,7 @@ import { FIRST_LIGHT_JOB, LoadPlan, TERRAIN_JOB, WORK_WEIGHT } from './loadPlan'
 import { planBands } from '../world/terrainMaterial';
 import { planQueen } from '../ant/queenModel';
 import { SettingsPanel } from './SettingsPanel';
+import { autoUpdate } from './updates';
 import { DeathScreen } from './DeathScreen';
 import type { HeightGrid } from '../world/kauai';
 
@@ -39,6 +40,20 @@ export class GameFlow {
     private readonly grid: HeightGrid,
   ) {
     this.toMenu();
+    /**
+     * TAKE A NEWER BUILD ON THE WAY IN.
+     *
+     * Here and nowhere else: the menu is the one moment where a reload
+     * costs nothing, because there is no run to lose. Once she is
+     * founding, an update is a button that says what it will cost.
+     *
+     * Not awaited. The menu is already on screen and playable; if there
+     * is a newer build this replaces the page a moment later, and if
+     * there is not, nothing happened. A menu that waited on the network
+     * before it would respond would be a worse menu on every single
+     * launch to fix a problem that happens on a few of them.
+     */
+    void autoUpdate();
   }
 
   toMenu(): void {

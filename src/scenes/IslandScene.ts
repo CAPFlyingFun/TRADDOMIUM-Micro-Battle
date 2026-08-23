@@ -322,7 +322,7 @@ export class IslandScene {
     this.stick = new MoveStick(host);
     this.paceUI = new PaceSelector(host);
     this.look = new LookDrag(host);
-    this.panel = new SettingsPanel(host);
+    this.panel = new SettingsPanel(host, true);
     // Her health, food and water come off the queen's stat table
     // rather than being typed here — this is the only place the data
     // file and the HUD meet, and it is a read, not a copy.
