@@ -122,6 +122,65 @@ def read_bed() -> np.ndarray:
     return (rows[:, c] * (1 - f)[None, :] + rows[:, c + 1] * f[None, :]).astype(np.float32)
 
 
+def fill_depressions(bed: np.ndarray) -> np.ndarray:
+    """
+    THE STEP THE TIME-STEPPING SOLVE WAS SUBSTITUTING FOR, done exactly.
+
+    Priority-flood (Barnes, Lehman & Mulla 2014). Start from the sea,
+    walk inland always taking the lowest unvisited cell, and raise each
+    one to at least the level you arrived at. What comes back is the
+    surface after every pit in the elevation model has been filled to
+    its spill point — which IS the answer to "where does standing water
+    sit, and at what level".
+
+    WHY THIS AND NOT MORE SIM STEPS. The virtual-pipes run converged in
+    volume and then kept concentrating: wet area fell from 5.4% to
+    2.8% while the deepest cell climbed past 21 m. It was draining into
+    the DEM's pits and staying there, because a 55 m elevation model is
+    a chain of unconnected hollows and a fluid solve will faithfully
+    find every one. Twelve thousand steps did not fix it and twelve
+    million would not either — the outlet is missing from the data, and
+    no amount of integration invents one.
+
+    Filling the pits first is the standard hydrological answer and it
+    is not an approximation of the solve, it is stricter: exact,
+    deterministic, one pass, seconds rather than ten minutes. And it
+    makes the invariant that has failed three times TRUE BY
+    CONSTRUCTION rather than true to a tolerance — the filled surface
+    is never below the bed, so water is never drawn over dry ground.
+    """
+    import heapq
+    n = bed.shape[0]
+    filled = np.full_like(bed, np.inf)
+    seen = np.zeros(bed.shape, dtype=bool)
+    heap: list[tuple[float, int, int]] = []
+
+    # THE OUTLETS: the sea, and the edge of the world. Everything drains
+    # to one or the other, and a cell that can reach neither is a pit
+    # that genuinely holds water.
+    edge = np.zeros(bed.shape, dtype=bool)
+    edge[0, :] = edge[-1, :] = edge[:, 0] = edge[:, -1] = True
+    starts = edge | (bed <= SEA)
+    for z, x in zip(*np.nonzero(starts)):
+        filled[z, x] = bed[z, x]
+        seen[z, x] = True
+        heap.append((float(bed[z, x]), int(z), int(x)))
+    heapq.heapify(heap)
+    print(f"priority-flood from {len(heap):,} outlet cells", flush=True)
+
+    while heap:
+        level, z, x = heapq.heappop(heap)
+        for dz, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            nz, nx = z + dz, x + dx
+            if nz < 0 or nx < 0 or nz >= n or nx >= n or seen[nz, nx]:
+                continue
+            seen[nz, nx] = True
+            raised = max(float(bed[nz, nx]), level)
+            filled[nz, nx] = raised
+            heapq.heappush(heap, (raised, nz, nx))
+    return filled
+
+
 def read_corridor() -> np.ndarray:
     """
     WHERE WATER IS ALLOWED TO BE — the real drainage, rasterised.
@@ -254,7 +313,17 @@ def solve(bed: np.ndarray, steps: int, corridor: np.ndarray) -> np.ndarray:
 def main() -> None:
     bed = read_bed()
     corridor = read_corridor()
-    water = solve(bed, STEPS, corridor)
+    filled = fill_depressions(bed)
+    ponded = np.maximum(filled - bed, 0.0)
+    held = ponded > MIN_DEPTH
+    print(f"\nponds: {held.sum():,} cells ({held.mean() * 100:.2f}%), "
+          f"median {np.median(ponded[held]) if held.any() else 0:.2f} m, "
+          f"max {ponded.max():.2f} m")
+    # Standing water is what the fill found; the corridor decides where
+    # a channel may additionally run.
+    water = np.where(held, ponded, 0.0)
+    if STEPS > 0:
+        water = np.maximum(water, solve(bed, STEPS, corridor))
 
     wet = water > MIN_DEPTH
     surface = np.where(wet, bed + water, np.nan)
