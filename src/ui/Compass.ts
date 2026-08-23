@@ -120,6 +120,29 @@ export interface FixSource {
   readonly pitch: number;
 }
 
+/**
+ * HER NOSE AND HER AIRSPEED — the top half of the aviation pairing.
+ *
+ * The tape says where the CAMERA looks, which in flight is frequently
+ * not where she is pointed. This says where she is pointed and how
+ * fast she is going through the air; the flight panel says where she
+ * is actually going and how fast over the ground. The difference
+ * between the two IS the wind, which is the one thing about the flight
+ * model that was previously only inferable.
+ */
+export interface AirLine {
+  /** Compass degrees. Where her nose points. */
+  readonly heading: number;
+  /** Through the air, world units per second. */
+  readonly speed: number;
+}
+
+/** The lines under the tape. Absent members simply do not draw. */
+export interface UnderTape {
+  readonly fix?: FixSource | null;
+  readonly air?: AirLine | null;
+}
+
 export class Compass {
   private readonly root: HTMLDivElement;
   private readonly window: HTMLDivElement;
@@ -127,6 +150,8 @@ export class Compass {
   private readonly readout: HTMLDivElement;
   private readonly fixLine: HTMLDivElement;
   private lastFix = '';
+  private readonly airLine: HTMLDivElement;
+  private lastAir = '';
   private readonly pins = new Map<string, HTMLDivElement>();
   /** What the strip is SHOWING, which chases what the camera is doing. */
   private shown = 0;
@@ -229,6 +254,23 @@ export class Compass {
     } as Partial<CSSStyleDeclaration>);
     this.root.appendChild(this.readout);
 
+    // HER NOSE AND HER AIRSPEED, between the heading and the fix. Above
+    // the fix because it is flight information and the fix is a tool.
+    this.airLine = document.createElement('div');
+    this.airLine.dataset.ui = 'compass-air';
+    Object.assign(this.airLine.style, {
+      marginTop: '2px',
+      textAlign: 'center',
+      font: '700 10px/1 "JetBrains Mono", ui-monospace, monospace',
+      fontVariantNumeric: 'tabular-nums',
+      whiteSpace: 'nowrap',
+      letterSpacing: '.04em',
+      color: 'rgba(169, 242, 201, .92)',
+      textShadow: '0 1px 3px rgba(0,0,0,.8)',
+      display: 'none',
+    } as Partial<CSSStyleDeclaration>);
+    this.root.appendChild(this.airLine);
+
     // THE POSITION FIX, under the heading and deliberately quieter than
     // it. A development instrument (see fix.ts): the heading above it
     // is the fifth number of the same fix, which is why this line does
@@ -319,7 +361,7 @@ export class Compass {
    */
   update(
     bearing: number, from: WorldPoint, markers: readonly CompassMarker[],
-    dt: number, fix?: FixSource | null,
+    dt: number, under?: UnderTape | null,
   ): void {
     const before = this.shown;
     // Arrive pointing the right way rather than spinning up to it.
@@ -346,6 +388,24 @@ export class Compass {
     // THE FIX USES THE TAPE'S OWN BEARING, not the one passed in. They
     // differ by an ease, and a line that disagreed with the heading
     // two pixels above it would be read as a bug every time.
+    const air = under?.air ?? null;
+    if (air) {
+      // Her heading, not the tape's: they are different questions and
+      // showing the tape's twice would answer neither.
+      const line = `AIR ${
+        String(Math.round(wrap360(air.heading)) % 360).padStart(3, '0')}° @ ${
+        air.speed.toFixed(1)} cm/s`;
+      if (line !== this.lastAir) {
+        this.lastAir = line;
+        this.airLine.textContent = line;
+      }
+      if (this.airLine.style.display === 'none') this.airLine.style.display = '';
+    } else if (this.airLine.style.display !== 'none') {
+      this.airLine.style.display = 'none';
+      this.lastAir = '';
+    }
+
+    const fix = under?.fix ?? null;
     if (fix) {
       const line = formatFix(fixAt(from, fix.msl, this.shown, fix.pitch));
       if (line !== this.lastFix) {

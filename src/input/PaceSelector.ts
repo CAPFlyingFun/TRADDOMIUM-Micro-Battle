@@ -19,6 +19,10 @@
 import {
   PACE_MARK, PACE_NAME, PACES, SPRINT_MARK, type Pace,
 } from '../ant/pace';
+import { POWER_FLOOR, powerOf } from '../ant/flight';
+
+/** Matches the flight panel's, because they are read together. */
+const WARN = '#ffb03a';
 
 const COLUMN_WIDTH = 44;
 const ROW_HEIGHT = 26;
@@ -197,18 +201,36 @@ export class PaceSelector {
       this.auto.textContent = way > 0 ? '🔒 AUTO ▲' : '🔒 AUTO ▼';
     }
 
-    // One world unit is about a centimetre. Rounded to a tenth, so a
-    // continuously varying speed does not flicker every frame.
+    // ON THE GROUND, HER SPEED. IN THE AIR, HER POWER.
+    //
+    // One world unit is about a centimetre, rounded to a tenth so a
+    // continuously varying speed does not flicker every frame. That is
+    // the right readout for walking, where the number IS the thing she
+    // is doing, and the wrong one for flying, where 41.6 cm/s tells a
+    // pilot nothing actionable and the digit that keeps moving is the
+    // one that matters least. Airborne it becomes five notches against
+    // a floor — see powerOf.
+    //
+    // The speeds themselves have not gone away, they have gone where
+    // they mean something: airspeed with her heading under the compass,
+    // ground speed with her track on the flight panel. Read as a pair
+    // they show the wind doing its work, which is what the old
+    // AIR-over-GND stack here was reaching for without the headings.
     const shown = Math.round(Math.abs(speed) * 10) / 10;
-    const flying = air === null ? null : Math.round(Math.abs(air) * 10) / 10;
+    const flying = air === null ? null : powerOf(air);
     if (shown !== this.shownSpeed || flying !== this.shownAir) {
       this.shownSpeed = shown;
       this.shownAir = flying;
       this.readout.textContent = flying === null
         ? `${shown.toFixed(1)} cm/s`
-        : `AIR ${flying.toFixed(1)}`;
-      this.overGround.textContent = flying === null ? '' : `GND ${shown.toFixed(1)} cm/s`;
-      this.overGround.style.display = flying === null ? 'none' : 'block';
+        : `PWR ${flying}%`;
+      // Under the floor she is descending whatever else she does. A
+      // mark, not a verdict: the model lets her fly slower than this,
+      // it just will not hold her up while she does.
+      const low = flying !== null && flying < POWER_FLOOR;
+      this.readout.style.color = low ? WARN : LIVE_TEXT;
+      this.overGround.textContent = low ? `\u26a0 MIN ${POWER_FLOOR}%` : '';
+      this.overGround.style.display = low ? 'block' : 'none';
     }
   }
 
@@ -358,7 +380,7 @@ export class PaceSelector {
       display: 'none',
       marginTop: '2px',
       font: '600 9px/1 "JetBrains Mono", ui-monospace, monospace',
-      color: 'rgba(169, 242, 201, .82)',
+      color: WARN,
       textShadow: '0 1px 3px rgba(0, 0, 0, .85)',
       userSelect: 'none',
       pointerEvents: 'none',

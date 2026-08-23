@@ -913,9 +913,17 @@ export class IslandScene {
     this.follow.camera.getWorldDirection(view);
     this.compass.update(
       bearingOf(view.x, view.z), this.ant.where, this.markers, dt,
-      settings().showFix
-        ? { msl: this.mslNow(), pitch: pitchOf(view.y) }
-        : null,
+      {
+        fix: settings().showFix
+          ? { msl: this.mslNow(), pitch: pitchOf(view.y) }
+          : null,
+        // HER NOSE, not the camera's. In flight they part company the
+        // moment she looks around, and the pairing with the flight
+        // panel's ground line only means anything if this one is hers.
+        air: this.flight.aloft
+          ? { heading: telemetry.heading, speed: telemetry.airspeed }
+          : null,
+      },
     );
     this.vitals.show(this.stamina.fraction, this.stamina.spent, this.effort);
 

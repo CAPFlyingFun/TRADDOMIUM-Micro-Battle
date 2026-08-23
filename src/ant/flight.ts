@@ -59,6 +59,45 @@ export const BEST_GLIDE_SPEED = 30;
 export const CRUISE_SPEED = 40;
 /** Flat out, wings working. */
 export const MAX_POWERED_SPEED = 70;
+
+/**
+ * AIRSPEED AS A POWER SETTING — five notches of twenty per cent.
+ *
+ * A DISPLAY UNIT, not a control and not a model. The wings do not have
+ * a throttle; she has a commanded airspeed, and this is that airspeed
+ * said in the language a pilot reads without arithmetic. Nothing
+ * downstream of the readout uses it.
+ *
+ * Exact centimetres per second are the wrong number to put in front of
+ * someone flying: 41.6 tells you nothing you can act on, and the digit
+ * that keeps changing is the one that matters least. Five notches
+ * against a floor is a glance.
+ */
+export const POWER_STEP = 20;
+
+/**
+ * The notch below which she is sinking rather than cruising.
+ *
+ * NOT AN INVENTED FIGURE, though it is a rounded one. Best glide is
+ * 30 units per second, which is 43% of full power — the least speed at
+ * which the wings still hold her up efficiently, and below it she
+ * trades height whatever she does. That lands between the 40 and 60
+ * notches, and 40 is the honest side to round it to.
+ *
+ * It is a MARK on the readout and not a rule in the model: she does
+ * not fall out of the sky at 39%, she sinks, and the stall proper is
+ * lower still at STALL_SPEED. The band says "you are descending now",
+ * which is true, rather than "you are about to stop flying", which
+ * would not be.
+ */
+export const POWER_FLOOR = 40;
+
+/** Her airspeed as a percentage of full power, to the nearest notch. */
+export function powerOf(airspeed: number): number {
+  const share = (Math.abs(airspeed) / MAX_POWERED_SPEED) * 100;
+  const notched = Math.round(share / POWER_STEP) * POWER_STEP;
+  return Math.max(0, Math.min(100, notched));
+}
 /** Nose down, gravity doing the work. */
 export const MAX_DIVE_SPEED = 110;
 

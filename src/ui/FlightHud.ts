@@ -1,7 +1,6 @@
 import { MAX_POWERED_SPEED } from '../ant/flight';
 import { WANDER_RATE } from '../ant/wander';
 import { SOON, type FlightTelemetry } from '../ant/telemetry';
-import { UNITS_PER_METRE } from '../world/kauai';
 import { wrap360 } from './compassMath';
 
 /**
@@ -180,7 +179,7 @@ export class FlightHud {
   private shownWind = Number.NaN;
   private shownCall = '';
   private shownTgt = '';
-  private shownDrift = Number.NaN;
+  private shownDrift = '';
   private readonly path: HTMLDivElement;
   private readonly target: HTMLDivElement;
   private readonly targetMark: SVGElement;
@@ -309,18 +308,30 @@ export class FlightHud {
       color: WARN, fontWeight: '700', letterSpacing: '0.1em',
     } as Partial<CSSStyleDeclaration>);
     this.windStrip.append(
-      span('WIND'), this.windArrow, this.windSpeed, span('m/s'), this.windCall,
+      span('WIND'), this.windArrow, this.windSpeed, span('cm/s'), this.windCall,
     );
 
-    // DRIFT sits with the speeds, because it is the same story: how
-    // far what she is doing has come apart from what she is asking for.
-    // Hidden below a few degrees — a permanent "0°" is a number nobody
-    // has ever read.
-    this.drift = this.cluster('152px', null, '', 'left bottom');
-    this.drift.style.bottom = 'calc(70px + min(env(safe-area-inset-bottom), 14px))';
+    // THE GROUND LINE: where she is actually going, and how fast over
+    // the island. The bottom half of the aviation pairing — the
+    // compass carries her heading and airspeed, this carries her track
+    // and ground speed, and the difference between the two is the
+    // wind. Said as a pair they are readable; said as a bare AIR over
+    // a bare GND, as they were, the two numbers differed for a reason
+    // nothing on screen accounted for.
+    //
+    // The drift angle rides on the end, still hidden below a few
+    // degrees — a permanent "0°" is a number nobody has ever read.
+    //
+    // DIRECTLY OVER THE WIND STRIP, and centred like it, because the
+    // two are one sentence: ground is air plus wind. It used to sit out
+    // at 152px on the left, where the short "→ 5° TRK 131°" already
+    // ran behind the pace column; a line carrying a speed as well
+    // would have buried it.
+    this.drift = this.cluster('50%', null, 'translateX(-50%)', 'center bottom');
+    this.drift.style.bottom = 'calc(42px + min(env(safe-area-inset-bottom), 14px))';
     Object.assign(this.drift.style, {
-      font: '600 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace',
-      letterSpacing: '0.12em', color: INK, whiteSpace: 'nowrap',
+      font: '600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace',
+      letterSpacing: '0.10em', color: INK, whiteSpace: 'nowrap',
       opacity: '0', transition: 'opacity 200ms ease',
     } as Partial<CSSStyleDeclaration>);
 
@@ -654,17 +665,17 @@ export class FlightHud {
     // DRIFT, only when there is any worth reporting. A permanent
     // "0°" is a number that has never once been read.
     const drift = Math.round(now.drift);
-    if (drift !== this.shownDrift) {
-      this.shownDrift = drift;
-      const show = Math.abs(drift) >= 3;
-      this.drift.style.opacity = show ? '1' : '0';
-      this.drift.textContent = show
-        ? `${drift < 0 ? '←' : '→'} ${Math.abs(drift)}°  TRK ${
-          String(Math.round(wrap360(now.track))).padStart(3, '0')}°`
-        : '';
+    const ground = `GND ${
+      String(Math.round(wrap360(now.track)) % 360).padStart(3, '0')}° @ ${
+      now.groundSpeed.toFixed(1)} cm/s${
+      Math.abs(drift) >= 3 ? `  ${drift < 0 ? '←' : '→'} ${Math.abs(drift)}°` : ''}`;
+    if (ground !== this.shownDrift) {
+      this.shownDrift = ground;
+      this.drift.textContent = ground;
     }
+    this.drift.style.opacity = aloft ? '1' : '0';
 
-    this.windStrip.style.opacity = now.wind.speed > 0.005 ? '1' : '0';
+    this.windStrip.style.opacity = now.wind.speed >= 0.05 ? '1' : '0';
     // Where the wind is pushing her, RELATIVE TO HER NOSE. Screen up is
     // the way she is pointing, so an arrow pointing up is a tailwind and
     // one pointing down is the wind she is fighting.
@@ -672,7 +683,23 @@ export class FlightHud {
       style: `transform: rotate(${wrap360(now.wind.bearing - now.heading).toFixed(1)}deg)`,
     });
 
-    const felt = Math.round((now.wind.speed / UNITS_PER_METRE) * 10) / 10;
+    // CENTIMETRES PER SECOND, NOT METRES — and this was a real bug
+    // rather than a preference.
+    //
+    // The wind was printed in m/s to one decimal while everything it
+    // explains — airspeed, ground speed — is in cm/s to one decimal.
+    // Two orders of magnitude apart, so "0.0" covered any wind under
+    // 5 cm/s, which is not a rounding error at this scale: it is more
+    // than a body length a second. Worse, the wind she feels is scaled
+    // by height (windProfile), and below about half a metre even a
+    // full 25 km/h trade wind lands under that threshold. So the
+    // ordinary case — flying low, in real weather — showed WIND 0.0
+    // while ground speed and airspeed visibly disagreed, and nothing
+    // on screen could account for the difference.
+    //
+    // Same unit, same precision, and the arithmetic closes: ground
+    // speed is airspeed plus this, component by component.
+    const felt = Math.round(now.wind.speed * 10) / 10;
     if (felt !== this.shownWind) {
       this.shownWind = felt;
       this.windSpeed.textContent = felt.toFixed(1);
