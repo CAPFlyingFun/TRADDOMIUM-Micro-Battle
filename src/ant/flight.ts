@@ -210,6 +210,41 @@ export const BANK_EASE = 5;
 export const PITCH_PER_RISE = 0.012;
 
 /**
+ * HOW FAR SHE TIPS TO GO FASTER OR SLOWER — the cyclic, in radians.
+ *
+ * She had roll and no pitch from the stick, which made her a thing
+ * that banked into turns and then accelerated flat, like a cursor with
+ * a tilt animation. A helicopter tips its disc the way it wants to go;
+ * so does a flying insect, and for the same reason — the lift vector
+ * has to point somewhere other than straight up for her to change
+ * speed at all. Nose down to gain it, nose up to shed it.
+ *
+ * Eighteen degrees against the thirty of MAX_BANK: enough to read
+ * clearly from behind at this camera distance, short of the attitude
+ * that would look like a dive rather than an acceleration.
+ *
+ * VISUAL, like the climb term it adds to. Attitude does not feed back
+ * into the speed it came from — she tips because she is accelerating,
+ * she does not accelerate because she tipped, and closing that loop
+ * would be a different flight model rather than a nicer-looking one.
+ */
+export const MAX_TILT = (18 * Math.PI) / 180;
+
+/** How briskly the tip arrives and lets go. Slower than the bank. */
+export const TILT_EASE = 4;
+
+/**
+ * The most she will ever be drawn tipped, radians.
+ *
+ * The climb term is unbounded by construction — a long dive drives it
+ * as far as the sink rate goes — and adding the cyclic on top of that
+ * can put her past vertical, at which point the model is drawn
+ * standing on its nose. Sixty degrees is well beyond anything ordinary
+ * flight reaches, so the clamp only ever catches the absurd case.
+ */
+export const MAX_PITCH = (60 * Math.PI) / 180;
+
+/**
  * HOW LONG SHE CAN STAY UP — anchored to a measurement, at last.
  *
  * Markin et al. followed *S. invicta* mating flights with aircraft and
@@ -342,6 +377,8 @@ export class Flight {
   private facing = 0;
   /** Roll, radians. Positive banks to her right. */
   private bank = 0;
+  /** Nose attitude asked for by the stick, radians. Positive is up. */
+  private tilt = 0;
   private rise = 0;
   /**
    * The air she is in, as a vertical rate — see wander.ts.
@@ -395,7 +432,8 @@ export class Flight {
    * climbed and at the sky as she dived.
    */
   get pitch(): number {
-    return this.climbing * PITCH_PER_RISE;
+    const total = this.climbing * PITCH_PER_RISE + this.tilt;
+    return Math.max(-MAX_PITCH, Math.min(MAX_PITCH, total));
   }
 
   get aloft(): boolean {
@@ -433,6 +471,7 @@ export class Flight {
     this.speed = groundSpeed * TAKEOFF_BOOST;
     this.facing = facing;
     this.bank = 0;
+    this.tilt = 0;
     this.rise = CLIMB_RATE * scale * 0.5;
     this.above = 0.01;
     this.air.reset();
@@ -457,6 +496,7 @@ export class Flight {
     this.speed = CRUISE_SPEED;
     this.facing = facing;
     this.bank = 0;
+    this.tilt = 0;
     this.rise = 0;
     this.air.reset();
     this.drift = 0;
@@ -470,6 +510,7 @@ export class Flight {
     this.rise = 0;
     this.drift = 0;
     this.bank = 0;
+    this.tilt = 0;
     this.air.reset();
   }
 
@@ -531,6 +572,19 @@ export class Flight {
     this.facing -= FLIGHT_TURN_RATE * TURN_SHARE * side * dt;
     const wants = MAX_BANK * side;
     this.bank += (wants - this.bank) * Math.min(1, dt * BANK_EASE);
+
+    // THE CYCLIC. Forward on the stick tips her nose DOWN — the sign
+    // is the whole content of the line, and it is the way round a
+    // helicopter works: you point the lift where you want to go, so
+    // asking for speed lowers the nose and asking to slow raises it.
+    // The same expression covers the brake, because a brake is
+    // negative push.
+    //
+    // Nothing here in Auto, and that is right rather than an omission:
+    // Auto holds a speed, and something holding a speed is not
+    // accelerating, so it flies level.
+    const push = Math.max(-1, Math.min(1, demand.push));
+    this.tilt += (-MAX_TILT * push - this.tilt) * Math.min(1, dt * TILT_EASE);
   }
 
   /**
