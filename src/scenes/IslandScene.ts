@@ -1151,9 +1151,20 @@ export class IslandScene {
     // The buttons say what they DO right now. On the ground the up
     // button is a takeoff and the down button has nothing to descend
     // from; in the air they are climb and descend.
-    if (this.flight.aloft) {
-      // Never off in the air, even spent: coming DOWN is always hers,
-      // and the model already refuses the up half on an empty reserve.
+    // AFLOAT COUNTS AS ALOFT, as far as this lever is concerned.
+    //
+    // It was gated on takeoff: on the ground it only came alive when
+    // she was running fast enough to fly, and `off` forces the lever
+    // to read zero. So a queen standing in a river — not flying, and
+    // never going to reach takeoff speed while the water has her — had
+    // no vertical control at all. She could not dive and she could not
+    // swim up, which is the entire control the last release was about.
+    const swimming = this.swim.afloat.state !== 'dry'
+      && this.swim.afloat.state !== 'wading';
+    if (this.flight.aloft || swimming) {
+      // Never off in the air or in the water, even spent: coming DOWN
+      // is always hers, and the models refuse the up half themselves
+      // when there is nothing left to spend on it.
       this.liftSlider.enable('full');
     } else {
       this.liftSlider.enable(

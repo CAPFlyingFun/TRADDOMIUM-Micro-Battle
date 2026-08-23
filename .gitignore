@@ -12,3 +12,7 @@ tsconfig.tsbuildinfo
 # public/ AND to measure the loading bar's cutout, so a clone without
 # them cannot rebuild the splash.
 !art/*.png
+
+# The water solve is baked, not authored — scripts/bakeWater.py writes it.
+# Committed only once it is converged and wired in.
+public/kauai-water.bin
