@@ -39,6 +39,7 @@ import {
 } from './kauai';
 import { lakeBed } from './lakes';
 import { riverBed } from './rivers';
+import { pondLevel } from './pond';
 
 /**
  * THE SYNTHESISED GROUND.
@@ -230,6 +231,16 @@ function baseLand(x: number, z: number): number {
 export function terrainHeight(x: number, z: number): number {
   const land = baseLand(x, z);
   if (land <= 0) return land;
+  // THE BAKED STANDING WATER WINS, wherever it found any.
+  //
+  // scripts/bakeWater.py priority-floods the real island, so its
+  // surface is derived FROM this bed and is never below it. What it is
+  // never below is the BAKED bed, though — and this function adds
+  // ninety-odd units of procedural relief on top, which can and does
+  // poke through a pond. Measured: 4.9% of wet cells, worst 61 units.
+  // Clamped here, the two can no longer disagree at all.
+  const pond = pondLevel(x, z);
+  if (pond !== null && land > pond) return pond;
 
   // WATER PRESSES THE GROUND DOWN, and only down. The island's basins
   // and channels are not resolved at 55 m a sample — 72 of the 111
@@ -286,6 +297,8 @@ export function terrainHeight(x: number, z: number): number {
 export function farHeight(x: number, z: number, slack = 0): number {
   const land = baseLand(x, z);
   if (land <= 0) return land;
+  const pond = pondLevel(x, z);
+  if (pond !== null && land > pond) return pond;
   let low = land;
   const lake = lakeBed(x, z, slack);
   if (lake !== null && lake < low) low = lake;

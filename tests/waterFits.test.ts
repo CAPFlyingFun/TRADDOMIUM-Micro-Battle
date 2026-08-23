@@ -42,6 +42,24 @@ const TIERS = [
   { name: 'middle', step: 3_125 },
 ] as const;
 
+/**
+ * How far over the water a tier may be before it counts as burying it.
+ *
+ * A MICRON, which is to say nothing at all.
+ *
+ * The brim is zero now, so the ground beside a channel meets the
+ * surface EXACTLY, and exact equality run through a bilinear
+ * interpolation lands either side of zero by a picometre. That is the
+ * only thing this tolerance is for.
+ *
+ * IT WAS BRIEFLY ONE CENTIMETRE, while the coarsest tier was still
+ * burying the river by 2.5 of them, and that was the wrong move —
+ * widening a tolerance until the failure fits inside it is how a test
+ * stops being one. The shelf was widened instead (see rivers.ts) and
+ * the number went to zero on its own.
+ */
+const TIE = 1e-6;
+
 /** What the tier actually DRAWS at (x, z): its triangles, interpolated. */
 function drawnAt(step: number, slack: number, x: number, z: number): number {
   const gx = Math.floor(x / step) * step;
@@ -65,7 +83,7 @@ function lakesOverdrawn(step: number, slack: number): number[] {
       for (let z = box.minZ; z <= box.maxZ; z += walk) {
         if (!insideLake(i, x, z)) continue;
         const gap = drawnAt(step, slack, x, z) - box.level;
-        if (gap > 0) over.push(gap);
+        if (gap > TIE) over.push(gap);
       }
     }
   }
@@ -83,7 +101,7 @@ function riversOverdrawn(step: number, slack: number): number[] {
     const level = riverLevel(x, z);
     if (level === null) continue;
     const gap = drawnAt(step, slack, x, z) - level;
-    if (gap > 0) over.push(gap);
+    if (gap > TIE) over.push(gap);
   }
   return over;
 }

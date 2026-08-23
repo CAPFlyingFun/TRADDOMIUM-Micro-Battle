@@ -38,6 +38,7 @@ const CORE = [
   'src/world/lakes.ts',
   'src/world/rivers.ts',
   'src/world/hydro.ts',
+  'src/world/pond.ts',
   'src/world/coords.ts',
   'src/world/origin.ts',
   'src/world/geo.ts',
@@ -85,7 +86,7 @@ describe('the simulation core runs without a browser', () => {
   it('and the list has not quietly emptied itself', () => {
     // A guard that guards nothing passes forever. If the core is
     // refactored, this number moves deliberately.
-    expect(CORE.length).toBeGreaterThanOrEqual(25);
+    expect(CORE.length).toBeGreaterThanOrEqual(26);
     for (const path of CORE) expect(code(path).length).toBeGreaterThan(200);
   });
 });

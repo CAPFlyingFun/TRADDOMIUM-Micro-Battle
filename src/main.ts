@@ -5,8 +5,10 @@ import { fitViewport } from './ui/viewportFit';
 import { load as loadSettings } from './ui/settings';
 import { useGrid } from './world/heightfield';
 import { HYDRO_BYTES, loadHydro } from './world/hydro';
+import { POND_BYTES, loadPond } from './world/pond';
 import { useHydro } from './world/water';
 import { useLakes } from './world/lakes';
+import { usePond } from './world/pond';
 import { useRivers } from './world/rivers';
 import { GRID_BYTES, loadGrid, type HeightGrid } from './world/kauai';
 import { fitBootBar } from './ui/bootBar';
@@ -70,17 +72,24 @@ try {
   // the hydrography's is a constant its own bake keeps honest, so the
   // maximum is known before either byte arrives — which is the whole
   // reason neither asks the server for a Content-Length.
-  const total = GRID_BYTES + HYDRO_BYTES;
+  const total = GRID_BYTES + HYDRO_BYTES + POND_BYTES;
   let gridDone = 0;
   let hydroDone = 0;
-  const moved = () => bootBar?.(gridDone + hydroDone, total);
+  let pondDone = 0;
+  const moved = () => bootBar?.(gridDone + hydroDone + pondDone, total);
   bootBar?.(0, total);
-  const [grid, hydro] = await Promise.all([
+  const [grid, hydro, pond] = await Promise.all([
     loadGrid((done) => { gridDone = done; moved(); }),
     loadHydro((done) => { hydroDone = done; moved(); }),
+    loadPond((done) => { pondDone = done; moved(); }),
   ]);
   useGrid(grid);
   useHydro(hydro);
+  // BEFORE THE LAKES, because they take their waterline from it. The
+  // baked surface is derived from the bed by a priority-flood, so a
+  // level that comes from here cannot be above the ground holding it —
+  // which is what 72 of the 111 NHD waterlines were.
+  usePond(pond);
   // BEFORE ANY SCENE ASKS HOW HIGH THE GROUND IS. The lakes press the
   // island down under them (see lakes.ts), so a terrain cut before this
   // would be cut without its basins — and the ant placed on it would

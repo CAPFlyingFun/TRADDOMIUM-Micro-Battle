@@ -28,6 +28,7 @@
  * level it is not allowed to exceed.
  */
 import { SPAN, SAMPLES, UNITS_PER_METRE } from './kauai';
+import { pullBuffer } from './fetchBytes';
 
 const MAGIC = 0x57424d54; // "TMBW", little-endian
 
@@ -51,6 +52,22 @@ export interface PondField {
 }
 
 let field: PondField | null = null;
+
+/** Fetch and decode the bake that ships with the build. */
+export async function loadPond(
+  onProgress?: (done: number, total: number) => void,
+): Promise<PondField> {
+  // The size is known and never asked for, the same way the grid and
+  // the hydrography handle it: Content-Length counts the compressed
+  // wire, and this file gzips to a fifteenth of itself.
+  const url = `${import.meta.env.BASE_URL}kauai-water.bin`;
+  onProgress?.(0, POND_BYTES);
+  return decodePond(await pullBuffer(
+    url,
+    () => {},
+    (done) => onProgress?.(Math.min(done, POND_BYTES), POND_BYTES),
+  ));
+}
 
 export function decodePond(buffer: ArrayBuffer): PondField {
   if (buffer.byteLength !== POND_BYTES) {
@@ -76,6 +93,7 @@ export function forgetPond(): void {
   field = null;
 }
 
+/** Add the bake to the simulation core's Node-runnable guard. */
 export function havePond(): boolean {
   return field !== null;
 }

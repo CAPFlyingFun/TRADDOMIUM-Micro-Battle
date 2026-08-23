@@ -70,13 +70,23 @@ export const BANK_GRADE = 0.8;
 const BANK_REACH = 400;
 
 /**
- * How far under the waterline a coarse vertex sits when its footprint
- * touches the channel but it is not in the channel itself.
+ * How far under the waterline the ground sits where a footprint
+ * touches the channel but the vertex is not in it.
  *
- * Small on purpose: enough that the water sheet is never pierced,
- * little enough that the ground beside a stream is still the ground.
+ * ZERO, AND IT USED TO BE TWELVE, which is where the gap came from.
+ * Twelve world units sounds small and is not: a unit is a CENTIMETRE
+ * and the queen is one centimetre long, so the ground beside every
+ * channel was set twelve BODY LENGTHS below the water while the ribbon
+ * ended flush at the surface. From her eye that is a ledge you can see
+ * under, all the way along both banks — "water is not covering the
+ * ground so there is a gap", exactly as reported, and written by me
+ * while calling it small on purpose.
+ *
+ * At zero the shelf meets the sheet at the waterline and there is
+ * nothing to see under. Containment is untouched: level is not above
+ * level, which was the only thing the drop was ever protecting.
  */
-const BRIM = 12;
+const BRIM = 0;
 
 /**
  * THE WIDEST FOOTPRINT A COARSE TIER MAY ASK ABOUT, in world units.
@@ -348,11 +358,25 @@ function scan(
       // It must not be dug to the BED either, because it is not in the
       // channel. Just under the waterline is both.
       bed = level - BRIM;
+    } else if (off - give * 2 <= half) {
+      // THE SHELF RUNS TO TWICE THE FOOTPRINT, and the second half of
+      // it is what keeps the bank out of the channel's own cell.
+      //
+      // A tier interpolates bilinearly across a cell one step wide. At
+      // the coarsest that is 3,125 units, wide enough to hold channel,
+      // shelf AND rising bank at once — and the rise then lifts the
+      // interpolated surface back over the water in the middle of the
+      // channel. Measured, that buried the river by up to 2.5 cm,
+      // which is two and a half queens standing in it.
+      //
+      // One footprint of shelf beyond the footprint guarantees every
+      // cell containing channel has its other corners on the flat.
+      bed = level - BRIM;
     } else {
-      // Outside the footprint: the bank, climbing from the brim so the
-      // two meet rather than step. Measured on the true offset, so a
-      // coarse tier does not flatten the whole valley side.
-      bed = level - BRIM + (off - give - half) * BANK_GRADE;
+      // And then the bank, climbing from the shelf so the two meet
+      // rather than step. Measured on the true offset, so a coarse
+      // tier does not flatten the whole valley side.
+      bed = level - BRIM + (off - give * 2 - half) * BANK_GRADE;
     }
 
     // HOW FAST THE WATER IS GOING *HERE*, which is not how fast the
