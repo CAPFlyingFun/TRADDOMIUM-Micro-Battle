@@ -3,10 +3,8 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { CHUNK_SPAN, chunkAt, chunkKey, chunkOrigin, sameChunk,
   type ChunkId, type WorldPoint } from './coords';
 import { toLocal } from './origin';
-import { groundHeight, reliefScale } from './heightfield';
+import { groundHeight } from './heightfield';
 import { BARE, BUILT, GRASS, SHRUB, TREE, WATER, coverAt, haveVeg } from './landcover';
-import { lakeLevel } from './lakes';
-import { riverAt } from './rivers';
 
 /**
  * WHAT SHE ACTUALLY WALKS THROUGH.
@@ -172,10 +170,11 @@ export function canGrow(wx: number, wz: number): boolean {
   if (cover.kind === WATER || cover.kind === 0) return false;
   const ground = groundHeight(wx, wz);
   if (ground <= 0) return false;
-  const river = riverAt(wx, wz);
-  if (river && river.off <= river.width / 2) return false;
-  const lake = lakeLevel(wx, wz);
-  if (lake !== null && lake * reliefScale() > ground) return false;
+  // THE RASTER IS THE ONLY WATER LEFT. `coverAt` above still refuses
+  // the WATER class, because that comes from the vegetation bake and
+  // not from the hydrography — which is gone. Channels and lake
+  // waterlines used to be refused here as well; they will need to be
+  // again, because the raster is 146 m a pixel and cannot see a stream.
   return true;
 }
 

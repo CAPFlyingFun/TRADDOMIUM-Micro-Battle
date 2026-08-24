@@ -50,6 +50,32 @@ for (let i = 0; i < SHOTS.length; i++) {
   const went = await page.evaluate((fix) => window.__island.goTo(fix), SHOTS[i]);
   if (!went) { console.log(`shot ${i + 1}: REFUSED "${SHOTS[i]}"`); continue; }
   await settle(3);
+
+  // CONVERGE ON THE PITCH, because one call does not land it.
+  //
+  // `goTo` aims the camera and the next frames move it again — the rig
+  // keeps itself above the ground, the flight model settles toward its
+  // held altitude, and the offset smooths. Measured: four frames asked
+  // for -11.1 degrees and came back at -6.7, and one asked for -8.9 and
+  // came back at -87.4 with the camera shoved through a hillside. A
+  // frame that is not the frame the fix describes cannot be compared
+  // with the screenshot it came from, which is the entire point of this
+  // probe. So ask again with the residual folded in, and stop when it
+  // is close or when it stops improving.
+  const wanted = Number(SHOTS[i].split(/\s+/)[4]?.replace(/[^\d.-]/g, '') ?? NaN);
+  let drift = NaN;
+  if (Number.isFinite(wanted)) {
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const now = await page.evaluate(() => window.__island.fix());
+      const got = Number(now.split(/\s+/)[4]?.replace(/[^\d.-]/g, '') ?? NaN);
+      drift = got - wanted;
+      if (!Number.isFinite(drift) || Math.abs(drift) < 0.4) break;
+      const corrected = SHOTS[i].split(/\s+/);
+      corrected[4] = `${(Number(corrected[4].replace(/[^\d.-]/g, '')) - drift).toFixed(1)}°`;
+      await page.evaluate((fix) => window.__island.goTo(fix), corrected.join(' '));
+      await settle(2);
+    }
+  }
   const file = `revisit-${i + 1}.png`;
   await page.screenshot({ path: file });
 
@@ -69,15 +95,17 @@ for (let i = 0; i < SHOTS.length; i++) {
   const seen = await page.evaluate(() => ({
     fix: window.__island.fix(),
     msl: window.__island.where()[1],
-    rivers: window.__island.riversDrawn(),
   }));
   console.log(
     `shot ${i + 1}: water ${(100 * water / (width * height)).toFixed(2)}%`
     + `  ground ${(100 * ground / (width * height)).toFixed(1)}%`
-    + `  reaches ${seen.rivers}`,
+    ,
   );
   console.log(`         asked ${SHOTS[i]}`);
   console.log(`         got   ${seen.fix}`);
+  if (Number.isFinite(drift)) {
+    console.log(`         pitch drift after converging: ${drift.toFixed(2)}°`);
+  }
 }
 
 const broken = shouts.filter((s) => /shader|glsl|program|compile/i.test(s));

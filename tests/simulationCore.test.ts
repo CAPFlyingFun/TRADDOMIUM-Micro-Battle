@@ -35,16 +35,9 @@ import { describe, expect, it } from 'vitest';
 const CORE = [
   'src/world/heightfield.ts',
   'src/world/kauai.ts',
-  'src/world/lakes.ts',
-  'src/world/rivers.ts',
-  'src/world/hydro.ts',
-  'src/world/pond.ts',
   'src/world/coords.ts',
   'src/world/origin.ts',
   'src/world/geo.ts',
-  'src/world/swell.ts',
-  'src/world/surf.ts',
-  'src/world/water.ts',
   'src/world/spawn.ts',
   'src/weather/windField.ts',
   'src/ant/flight.ts',
@@ -53,12 +46,9 @@ const CORE = [
   'src/ant/pace.ts',
   'src/ant/stamina.ts',
   'src/ant/telemetry.ts',
-  'src/ant/thirst.ts',
   'src/ant/wander.ts',
   'src/ant/wingbeat.ts',
   'src/ant/grace.ts',
-  'src/ant/swim.ts',
-  'src/ant/breath.ts',
 ];
 
 /** Strip comments, so prose about a "streamed window" is not a hit. */
@@ -86,7 +76,14 @@ describe('the simulation core runs without a browser', () => {
   it('and the list has not quietly emptied itself', () => {
     // A guard that guards nothing passes forever. If the core is
     // refactored, this number moves deliberately.
-    expect(CORE.length).toBeGreaterThanOrEqual(26);
+    //
+    // IT WAS 26 AND IS NOW 16. Ten of them were water — lakes, rivers,
+    // hydro, pond, swell, surf, water, thirst, swim, breath — and they
+    // went out together when the water layer was removed. This test
+    // caught the drop, which is what it is for; the number is moved by
+    // hand here rather than softened, because the day it stops being
+    // asserted is the day the guard becomes decoration.
+    expect(CORE.length).toBeGreaterThanOrEqual(16);
     for (const path of CORE) expect(code(path).length).toBeGreaterThan(200);
   });
 });
