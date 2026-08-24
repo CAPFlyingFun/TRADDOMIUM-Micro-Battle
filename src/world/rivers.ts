@@ -33,6 +33,7 @@
  * GLOBAL COORDINATES, float64, nothing near the GPU. As everywhere.
  */
 import { SPAN, UNITS_PER_METRE } from './kauai';
+import { RIBBON_EDGE, level as levelStations, resample } from './centreline';
 import type { Hydro } from './hydro';
 
 /**
@@ -138,18 +139,41 @@ export interface RiverSpot {
 const CELL = 8_192;
 const CELLS = Math.ceil(SPAN / CELL);
 
-/** Segment data, flattened for the cache. One entry per segment. */
+/**
+ * Segment data, flattened for the cache. One entry per segment.
+ *
+ * THREE OF THEM ARE FLOAT32, which this table did not need while it
+ * held the 48,544 raw segments and does now that it holds 281,069
+ * resampled ones (centreline.ts). An elevation tops out at 155,000 and
+ * a width at 3,620, so single precision resolves both to well under a
+ * millimetre and saves seven megabytes on a phone.
+ *
+ * THE FLOW VECTOR IS NOT AMONG THEM, and the tests said so before I
+ * did: `flowSpeed` clamps between 10 and 150, and a unit vector
+ * rounded to float32 has a length of 1 ± 3e-8, so a current pinned at
+ * the ceiling came back as 150.000004 and one at the floor as
+ * 9.99999999. Those are harmless numbers and a bound that is not
+ * actually a bound is not harmless, so the direction and the speed
+ * keep their doubles.
+ */
 let ax: Float64Array | null = null;
 let az: Float64Array | null = null;
 let bx: Float64Array | null = null;
 let bz: Float64Array | null = null;
-let ay: Float64Array | null = null;
-let by: Float64Array | null = null;
-let wide: Float64Array | null = null;
+let ay: Float32Array | null = null;
+let by: Float32Array | null = null;
+let wide: Float32Array | null = null;
 let fx: Float64Array | null = null;
 let fz: Float64Array | null = null;
 let speed: Float64Array | null = null;
 let reachOf: Int32Array | null = null;
+
+/**
+ * The resampled centreline of each reach, [x, y, z, width] per row —
+ * exactly the stations the index below is built from, handed to
+ * RiverWater so the ribbon is drawn through the same points.
+ */
+let stations: (Float64Array | null)[] = [];
 
 let heads: Int32Array | null = null;
 let counts: Int32Array | null = null;
@@ -162,11 +186,24 @@ export function riverPointLevels(): Float64Array | null {
   return levelled;
 }
 
+/**
+ * The stations of one reach, [x, y, z, width] per row, or null.
+ *
+ * THE ONLY CENTRELINE THERE IS. RiverWater used to spline the raw
+ * points itself and drew a river the index did not agree existed; it
+ * reads this instead, so the ribbon and the water are the same curve
+ * by construction rather than by two implementations staying in step.
+ */
+export function reachStations(reach: number): Float64Array | null {
+  return stations[reach] ?? null;
+}
+
 export function forgetRivers(): void {
   ax = az = bx = bz = ay = by = wide = fx = fz = speed = null;
   reachOf = null;
   heads = counts = buckets = null;
   levelled = null;
+  stations = [];
 }
 
 /**
@@ -193,16 +230,42 @@ export function useRivers(hydro: Hydro): void {
   }
   levelled = level;
 
-  // ── Segments ────────────────────────────────────────────────────
+  // ── The centreline, resampled once ──────────────────────────────
+  // THE SPLINE RUNS BEFORE THE INDEX DOES, not after and not
+  // elsewhere. The shipped points sit 35 metres apart on channels five
+  // metres wide, and the ribbon has always been drawn through a
+  // centripetal Catmull-Rom rather than through those chords — so
+  // indexing the chords meant the water pushed her along a course the
+  // screen never showed. See centreline.ts for what that cost, in
+  // measurements taken before this line existed.
+  stations = [];
   let segments = 0;
-  for (const river of hydro.rivers) segments += river.count - 1;
+  for (const river of hydro.rivers) {
+    const raw = new Float64Array(river.count * 4);
+    for (let i = 0; i < river.count; i++) {
+      const p = river.first + i;
+      raw[i * 4] = hydro.x[p];
+      raw[i * 4 + 1] = level[p];
+      raw[i * 4 + 2] = hydro.z[p];
+      raw[i * 4 + 3] = hydro.width[p];
+    }
+    const row = resample(raw);
+    // The spline can bend a levelled profile back uphill; take it out
+    // again here, where the index will read the same numbers the
+    // ribbon does.
+    levelStations(row);
+    stations.push(row);
+    segments += Math.max(0, row.length / 4 - 1);
+  }
+
+  // ── Segments ────────────────────────────────────────────────────
   ax = new Float64Array(segments);
   az = new Float64Array(segments);
   bx = new Float64Array(segments);
   bz = new Float64Array(segments);
-  ay = new Float64Array(segments);
-  by = new Float64Array(segments);
-  wide = new Float64Array(segments);
+  ay = new Float32Array(segments);
+  by = new Float32Array(segments);
+  wide = new Float32Array(segments);
   fx = new Float64Array(segments);
   fz = new Float64Array(segments);
   speed = new Float64Array(segments);
@@ -210,17 +273,17 @@ export function useRivers(hydro: Hydro): void {
 
   let at = 0;
   for (let r = 0; r < hydro.rivers.length; r++) {
-    const river = hydro.rivers[r];
-    for (let i = 0; i < river.count - 1; i++) {
-      const p = river.first + i;
-      ax[at] = hydro.x[p];
-      az[at] = hydro.z[p];
-      bx[at] = hydro.x[p + 1];
-      bz[at] = hydro.z[p + 1];
-      ay[at] = level[p];
-      by[at] = level[p + 1];
+    const row = stations[r]!;
+    const rows = row.length / 4;
+    for (let i = 0; i < rows - 1; i++) {
+      ax[at] = row[i * 4];
+      az[at] = row[i * 4 + 2];
+      bx[at] = row[(i + 1) * 4];
+      bz[at] = row[(i + 1) * 4 + 2];
+      ay[at] = row[i * 4 + 1];
+      by[at] = row[(i + 1) * 4 + 1];
       // The channel is as wide as its wider end says.
-      wide[at] = Math.max(hydro.width[p], hydro.width[p + 1]);
+      wide[at] = Math.max(row[i * 4 + 3], row[(i + 1) * 4 + 3]);
       reachOf[at] = r;
       const dx = bx[at] - ax[at];
       const dz = bz[at] - az[at];
@@ -303,6 +366,10 @@ export function riverAt(x: number, z: number, slack = 0): RiverSpot | null {
 function scan(
   cell: number, x: number, z: number, give: number, best: RiverSpot | null,
 ): RiverSpot | null {
+  // Whether `best` holds the point inside its channel or merely claims its
+  // bank. Recovered from `best` rather than threaded through the nine-cell
+  // walk, so a claimant found in an earlier cell is ranked the same way.
+  let bestInside = best !== null && best.off <= best.width / 2;
   const from = heads![cell];
   if (from < 0) return best;
 
@@ -409,9 +476,37 @@ function scan(
       if (!best || bed < best.bed) best = spot;
       continue;
     }
-    if (!best || level > best.level - 1e-9) {
-      // Higher water wins at a crossing; nearer wins a tie.
-      if (!best || level > best.level + 1e-9 || off < best.off) best = spot;
+    // IN-CHANNEL BEATS BANK, AND ONLY THEN DOES HIGHER WATER WIN.
+    //
+    // The crossing rule on its own is "highest level among everything that
+    // claims this point", and a claim reaches hundreds of units past the
+    // channel because the BANK has to be shaped too. That was wrong the whole
+    // time and could not show it: a river runs DOWNHILL, so a segment upstream
+    // of you always stands higher than the one you are standing in, and the
+    // rule prefers it the moment it comes inside the claim radius. At the
+    // shipped 3,500-unit chords it never did — the next segment's nearest
+    // point was 3,500 away, outside the reach of the cut — so the fault sat
+    // there masked by segment length until the centreline was resampled to 600
+    // and every station's neighbour landed 583 units away.
+    //
+    // Measured at that point: standing dead centre in reach 2, `riverAt`
+    // answered with a bank-only segment 583 units upstream, off = 2.2
+    // half-widths, and `inChannel` therefore said dry land. Two thirds of the
+    // shipped points on the island reported themselves out of their own river.
+    //
+    // The crossing rule is still right for what it was written for — where two
+    // channels genuinely overlap, the trunk's higher surface should win so the
+    // junction stays wet — so it keeps its meaning, applied within the class
+    // that actually contains the point.
+    const inside = off <= half;
+    const better = !best
+      || (inside && !bestInside)
+      || (inside === bestInside
+        && (level > best.level + 1e-9
+          || (level > best.level - 1e-9 && off < best.off)));
+    if (better) {
+      best = spot;
+      bestInside = inside;
     }
   }
   return best;
@@ -430,10 +525,24 @@ export function riverBed(x: number, z: number, slack = 0): number | null {
   return spot ? spot.bed : null;
 }
 
+/**
+ * IS THIS POINT UNDER THE DRAWN WATER? The one test, asked once.
+ *
+ * `riverAt` claims a much wider footprint than the channel — the bank
+ * cut goes out hundreds of units past it, because the GROUND has to
+ * come down to meet the water somewhere. Only the part inside the
+ * channel is wet, and "inside the channel" has to mean exactly what
+ * the ribbon covers or she is swimming in ground again. Same
+ * centreline (centreline.ts), same half-width, same edge inset.
+ */
+export function inChannel(spot: RiverSpot): boolean {
+  return spot.off <= (spot.width / 2) * RIBBON_EDGE;
+}
+
 /** The water surface here, or null — only INSIDE the channel. */
 export function riverLevel(x: number, z: number): number | null {
   const spot = riverAt(x, z);
-  if (!spot || spot.off > spot.width / 2) return null;
+  if (!spot || !inChannel(spot)) return null;
   return spot.level;
 }
 
@@ -443,7 +552,7 @@ export function riverLevel(x: number, z: number): number | null {
  */
 export function riverFlow(x: number, z: number): { x: number; z: number } | null {
   const spot = riverAt(x, z);
-  if (!spot || spot.off > spot.width / 2) return null;
+  if (!spot || !inChannel(spot)) return null;
   return { x: spot.flowX, z: spot.flowZ };
 }
 

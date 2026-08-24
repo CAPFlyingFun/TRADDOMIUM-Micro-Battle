@@ -62,6 +62,11 @@ describe('one question, three waters, ONE frame', () => {
     setRelief(1);
     const body = waterBodyAt(LOW.wx, LOW.wz, 0);
     expect(body?.kind).toBe('river');
-    expect(Math.hypot(body!.flowX, body!.flowZ)).toBeGreaterThanOrEqual(10);
+    // 10 is `flowSpeed`'s floor, and the reading is that floor times the
+    // length of a unit vector — which is 1 ± 2e-16 in doubles, so an exact
+    // `>= 10` is a coin toss on the last bit rather than a statement about
+    // the water. It landed heads before the centreline was resampled and
+    // tails after; neither outcome meant anything.
+    expect(Math.hypot(body!.flowX, body!.flowZ)).toBeGreaterThan(10 - 1e-9);
   });
 });
