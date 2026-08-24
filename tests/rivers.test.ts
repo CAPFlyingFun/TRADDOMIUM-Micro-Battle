@@ -213,7 +213,12 @@ describe('the index', () => {
       seed = (seed * 1103515245 + 12345) & 0x7fffffff;
       return seed / 0x7fffffff;
     };
-    for (let n = 0; n < 400; n++) {
+    // FEWER SAMPLES, SAME QUESTION. The definition this checks against is
+    // now 281,069 station segments rather than 48,544 shipped chords, so 400
+    // probes is 112 million projections and does not fit the default budget.
+    // What is being tested is the bucket grid, and a misfiled segment is a
+    // hole at one exact spot that any decent sample count will walk into.
+    for (let n = 0; n < 60; n++) {
       const p = Math.floor(rnd() * hydro.x.length);
       const x = hydro.x[p] + (rnd() - 0.5) * 3_000;
       const z = hydro.z[p] + (rnd() - 0.5) * 3_000;

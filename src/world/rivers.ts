@@ -366,6 +366,10 @@ export function riverAt(x: number, z: number, slack = 0): RiverSpot | null {
 function scan(
   cell: number, x: number, z: number, give: number, best: RiverSpot | null,
 ): RiverSpot | null {
+  // Whether `best` holds the point inside its channel or merely claims its
+  // bank. Recovered from `best` rather than threaded through the nine-cell
+  // walk, so a claimant found in an earlier cell is ranked the same way.
+  let bestInside = best !== null && best.off <= best.width / 2;
   const from = heads![cell];
   if (from < 0) return best;
 
@@ -472,9 +476,37 @@ function scan(
       if (!best || bed < best.bed) best = spot;
       continue;
     }
-    if (!best || level > best.level - 1e-9) {
-      // Higher water wins at a crossing; nearer wins a tie.
-      if (!best || level > best.level + 1e-9 || off < best.off) best = spot;
+    // IN-CHANNEL BEATS BANK, AND ONLY THEN DOES HIGHER WATER WIN.
+    //
+    // The crossing rule on its own is "highest level among everything that
+    // claims this point", and a claim reaches hundreds of units past the
+    // channel because the BANK has to be shaped too. That was wrong the whole
+    // time and could not show it: a river runs DOWNHILL, so a segment upstream
+    // of you always stands higher than the one you are standing in, and the
+    // rule prefers it the moment it comes inside the claim radius. At the
+    // shipped 3,500-unit chords it never did — the next segment's nearest
+    // point was 3,500 away, outside the reach of the cut — so the fault sat
+    // there masked by segment length until the centreline was resampled to 600
+    // and every station's neighbour landed 583 units away.
+    //
+    // Measured at that point: standing dead centre in reach 2, `riverAt`
+    // answered with a bank-only segment 583 units upstream, off = 2.2
+    // half-widths, and `inChannel` therefore said dry land. Two thirds of the
+    // shipped points on the island reported themselves out of their own river.
+    //
+    // The crossing rule is still right for what it was written for — where two
+    // channels genuinely overlap, the trunk's higher surface should win so the
+    // junction stays wet — so it keeps its meaning, applied within the class
+    // that actually contains the point.
+    const inside = off <= half;
+    const better = !best
+      || (inside && !bestInside)
+      || (inside === bestInside
+        && (level > best.level + 1e-9
+          || (level > best.level - 1e-9 && off < best.off)));
+    if (better) {
+      best = spot;
+      bestInside = inside;
     }
   }
   return best;
