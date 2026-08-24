@@ -1,7 +1,7 @@
 {
   "name": "traddomium-micro-battle",
   "private": true,
-  "version": "0.0.42",
+  "version": "0.0.43",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -24,6 +24,9 @@
     "probe:island": "node scripts/probe-island.mjs",
     "icons": "node scripts/make-icons.mjs",
     "bake:queen": "node scripts/bakeQueen.mjs",
+    "bake:ground": "vite-node scripts/sampleGround.ts",
+    "probe:flow": "node scripts/probe-flow.mjs",
+    "bake:flow": "npm run bake:ground && python3 scripts/bakeFlow.py",
     "shots:hud": "node scripts/hudshot.mjs",
     "probe:update": "node scripts/probe-update.mjs",
     "probe:save": "node scripts/probe-save.mjs",

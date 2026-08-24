@@ -229,10 +229,23 @@ export function terrainHeight(x: number, z: number): number {
   const land = baseLand(x, z);
   if (land <= 0) return land;
 
-  // NO WATER CARVES IT ANY MORE. The lake and river beds used to press
-  // this surface down so the drawn water had somewhere to sit; the
-  // whole water layer came out (see the strip commit), and with it the
-  // trenches. The island is the height grid and nothing else again.
+  // NOTHING CARVES THIS. The ground is the ground.
+  //
+  // Two attempts at a channel trench damaged the terrain, both because
+  // a carve that only ever LOWERS ground will happily lower a valley
+  // wall it merely passes near: pale flat wedges cut out of both sides
+  // of a gorge, visible from the air, still there with the water layer
+  // switched off. A bound would have stopped that. Joshua's call was
+  // simpler and better — do not cut at all, and let the water find the
+  // valleys the island already has.
+  //
+  // It can afford to. The channels came out of THIS surface (flow.ts,
+  // and see scripts/sampleGround.ts for how the bake reads the same
+  // ground the game draws), so a stream is already in a valley floor
+  // before anything is drawn. Depth is then a live subtraction — the
+  // water's surface less the ground under it — rather than a hole cut
+  // to make room for it, which means the terrain cannot be broken by
+  // the water no matter what the water does.
   return land;
 }
 

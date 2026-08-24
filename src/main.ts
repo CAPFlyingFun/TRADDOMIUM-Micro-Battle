@@ -6,6 +6,7 @@ import { load as loadSettings } from './ui/settings';
 import { useGrid } from './world/heightfield';
 import { GRID_BYTES, loadGrid, type HeightGrid } from './world/kauai';
 import { fitBootBar } from './ui/bootBar';
+import { loadFlow, useFlow } from './world/flow';
 
 /**
  * Boot — scene-by-scene rebuild entry point.
@@ -71,6 +72,11 @@ try {
   bootBar?.(0, total);
   const grid = await loadGrid((done: number) => { gridDone = done; moved(); });
   useGrid(grid);
+  // BEFORE ANY SCENE ASKS HOW HIGH THE GROUND IS. The channels press
+  // the island down under them (flow.ts), so terrain cut before this
+  // would be cut without its valleys — and the queen placed on it would
+  // stand on ground the mesh no longer has.
+  useFlow(await loadFlow());
   const requested = new URLSearchParams(location.search).get('scene') ?? 'game';
   (scenes[requested] ?? scenes['island'])(host, grid);
   clearBoot();

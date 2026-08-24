@@ -12,7 +12,7 @@
  * possible; they do not decide what is good.
  */
 import {
-  REST_DEADZONE, REST_EASE, TURN_RATE,
+  REST_DEADZONE, TURN_RATE,
 } from '../ant/pace';
 
 export interface Settings {
@@ -108,8 +108,8 @@ export interface Settings {
 export const DEFAULTS: Readonly<Settings> = {
   turnRate: TURN_RATE,
   turnStart: REST_DEADZONE,
-  turnEase: REST_EASE,
-  fov: 58,
+  turnEase: 8,
+  fov: 60,
   cameraDistance: 7.8,
   // FOUND BY ACCIDENT, KEPT ON PURPOSE. Joshua left the height dial at
   // 150% while testing smoothing and the pair read better than either
@@ -127,15 +127,15 @@ export const DEFAULTS: Readonly<Settings> = {
   //
   // The height is game TUNING, not the island: 150% makes this Kauai
   // steeper than the real one, whose relief ratio is 2.84%.
-  terrainRelief: 1.5,
+  terrainRelief: 1,
   terrainSmoothing: 1,
   flightSpeed: 1,
-  windInfluence: 1,
+  windInfluence: 0.5,
   invertLookX: false,
   invertLookY: false,
   invertStickY: false,
   liveWeather: true,
-  detailRange: 1,
+  detailRange: 2,
   showFix: true,
 };
 

@@ -15,6 +15,7 @@ import {
 } from '../world/heightfield';
 import { findLandfall, UNITS_PER_METRE, type HeightGrid } from '../world/kauai';
 import { local, world, type WorldPoint } from '../world/coords';
+import { FlowWater } from '../world/FlowWater';
 import { TerrainStream, TIER_CUTS } from '../world/TerrainStream';
 
 import { originAt, rebaseFor, setOrigin, toLocal, toWorld,
@@ -227,6 +228,8 @@ export class IslandScene {
   private readonly ant = new PlayerAnt();
   private readonly clock = new THREE.Clock();
   private terrain!: TerrainStream;
+  /** The streams the island makes for itself. See flow.ts. */
+  private streams!: FlowWater;
   /**
    * The CEILING on a full push of the stick — not propulsion. She does
    * not move because this is set; she moves because a thumb asks.
@@ -487,6 +490,8 @@ export class IslandScene {
       origin: () => originAt(),
       cells: () => this.terrain.cellCount,
       cameraAt: () => this.follow.camera.position.toArray(),
+      riversDrawn: () => this.streams.shown,
+      showWater: (on: boolean) => this.streams.setVisible(on),
       paused: () => this.halted,
       /**
        * THE POSITION FIX AS A STRING — the same one under the compass.
@@ -528,6 +533,7 @@ export class IslandScene {
         this.flight.land();
         this.terrain.follow(this.ant.where);
         this.terrain.place();
+        this.streams.follow(this.ant.where);
         this.follow.snapTo(this.ant.root, -heading);
       },
       pace: () => this.pace,
@@ -732,6 +738,7 @@ export class IslandScene {
     this.rain.dispose();
     this.detachSettings();
     this.detachKill();
+    this.streams.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }
@@ -1091,8 +1098,11 @@ export class IslandScene {
       const now = originAt();
       setTextureOrigin(now.x, now.z);
       this.terrain.place();
+      this.streams.place();
     }
     this.terrain.follow(at);
+    this.streams.follow(at);
+    this.streams.update(dt);
 
     // WEATHER IS ASKED IN GLOBAL COORDINATES and drawn in local ones.
     // Her position decides what the sky is doing; the CAMERA's rendered
@@ -1682,6 +1692,7 @@ export class IslandScene {
       terrainMaterial(maps, grain, TIER_CUTS.middle),
       terrainMaterial(maps, grain, TIER_CUTS.backdrop),
     );
+    this.streams = new FlowWater(this.scene);
   }
 
 

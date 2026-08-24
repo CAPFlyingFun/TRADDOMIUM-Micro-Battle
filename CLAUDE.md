@@ -119,6 +119,18 @@ combat. Prefer physical, readable interactions over instant state flips.
 - Automated/headless environments can run far slower than real time;
   don't retune per-second systems from wall-clock observations.
 
+## Screenshots and probes mean STOP before pushing
+
+If a change was checked with a screenshot or a probe, show Joshua the
+result and wait before pushing. He catches things in a rendered frame
+that no test does, and it is much cheaper for him to say "the water is
+too wide" once than for three corrective pushes to land on his device.
+
+Anything not verified visually — a refactor, a test, a doc, a fix with
+a unit test behind it — push without asking, as before.
+
+(Joshua's standing instruction, 2026-08-24.)
+
 ## Git and collaboration
 
 - Inspect current main and Trello before writing; don't duplicate work
