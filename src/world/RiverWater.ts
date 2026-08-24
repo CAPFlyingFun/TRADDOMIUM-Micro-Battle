@@ -4,6 +4,7 @@ import { world } from './coords';
 import { reliefScale } from './heightfield';
 import type { Hydro } from './hydro';
 import { channelDepth, riverPointLevels } from './rivers';
+import { BEYOND_RIVER_DRAW, beyondMetres } from './beyondFoundation';
 
 /**
  * THE SURFACE OF EVERY RIVER — 1,121 ribbons of moving water.
@@ -65,12 +66,12 @@ import { channelDepth, riverPointLevels } from './rivers';
  * visible. It is the same resolution gate the terrain tiers already
  * live by, applied to the water at last instead of argued with.
  */
-const REACH = 20_000;
+const REACH = beyondMetres(BEYOND_RIVER_DRAW.reach);
 
 /** Where the ribbons start fading, so the cut is not a pop. */
-const FADE_FROM = 13_000;
+const FADE_FROM = beyondMetres(BEYOND_RIVER_DRAW.fadeFrom);
 /** Resample target along the spline, world units. Six real metres. */
-const STEP = 600;
+const STEP = beyondMetres(BEYOND_RIVER_DRAW.splineStep);
 /** The ribbon stops just short of the channel edge — see the alpha fade. */
 const EDGE = 0.98;
 

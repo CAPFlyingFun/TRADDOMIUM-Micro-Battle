@@ -1,6 +1,6 @@
 # Porting Beyond Extinction's water
 
-**Status:** specification and audit. Nothing built.
+**Status:** the shared-frame bridge is active on the Beyond island foundation branch. The ant game now validates imported hydrography against the shared origin-centred Kauaʻi frame and expresses Beyond's river draw distances through one explicit metres-to-centimetres boundary. The remaining rendering work stays deliberately staged.
 **Verdict:** agree — port and adapt, do not rebuild. The hydrography alone is
 worth it, and four of the five adaptations are mechanical. The fifth is not,
 and is the reason this document exists.
