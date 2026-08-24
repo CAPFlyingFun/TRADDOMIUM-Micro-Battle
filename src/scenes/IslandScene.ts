@@ -768,6 +768,7 @@ export class IslandScene {
     if (wanted === smoothingAmount()) return;
     setSmoothing(wanted);
     this.terrain.rebuild();
+    this.lakes.invalidateTerrain(this.ant.where);
     this.ant.reground();
   }
 

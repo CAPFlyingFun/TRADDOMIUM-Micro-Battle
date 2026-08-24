@@ -44,13 +44,11 @@
 export const STATION_STEP = 600;
 
 /**
- * The ribbon stops just short of the channel edge, so the alpha fade
- * has somewhere to finish. Exported because the WATER TEST has to use
- * the same number: two per cent of a half-width is only five units,
- * but five units is half a queen, and the whole point of this module
- * is that there is no daylight between what is drawn and what is wet.
+ * The drawn ribbon and the collision channel end at exactly the same
+ * full-width boundary. Edge opacity belongs in the shader, not geometry:
+ * shrinking the strip left visible-but-dry bank slivers.
  */
-export const RIBBON_EDGE = 0.98;
+export const RIBBON_EDGE = 1;
 
 /**
  * Centripetal Catmull-Rom over one four-channel point row —

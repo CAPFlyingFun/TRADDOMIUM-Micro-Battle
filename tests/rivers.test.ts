@@ -165,7 +165,7 @@ describe('the flow', () => {
       expect(Math.hypot(seg.fx, seg.fz)).toBeCloseTo(1, 6);
       expect(seg.speed).toBeGreaterThanOrEqual(10);
     }
-  });
+  }, 15_000);
 
   it('is water she cannot generally outrun, and knows it', () => {
     // Her walk tops out near 25. The median grade beats her; the

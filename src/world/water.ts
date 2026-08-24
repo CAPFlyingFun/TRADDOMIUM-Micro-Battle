@@ -58,9 +58,10 @@ export function forgetHydro(): void {
  * relief dial — the scene's `waterAt` handle does exactly that.
  */
 import { seaHeightAt } from './swell';
-import { reliefScale } from './heightfield';
+import { reliefScale, terrainHeight } from './heightfield';
 import { lakeLevel } from './lakes';
 import { riverAt, inChannel } from './rivers';
+import { containedPondLevel } from './pond';
 
 export type WaterKind = 'sea' | 'lake' | 'river';
 
@@ -88,14 +89,29 @@ export function waterBodyAt(
   let best: WaterBody = { kind: 'sea', level: sea, flowX: 0, flowZ: 0 };
   let drawn = sea;
 
+  const river = riverAt(wx, wz);
+  const inRiver = river !== null && inChannel(river);
+  const pond = containedPondLevel(wx, wz, terrainHeight(wx, wz));
+  if (pond !== null && pond * relief > drawn) {
+    // A priority-flood cell is the authority wherever it resolves water.
+    // Keep the vector centreline's current, but never its independent
+    // elevation: the terrain-derived spill level is the waterline.
+    best = inRiver
+      ? {
+        kind: 'river', level: pond,
+        flowX: river.flowX, flowZ: river.flowZ,
+      }
+      : { kind: 'lake', level: pond, flowX: 0, flowZ: 0 };
+    drawn = pond * relief;
+  }
+
   const lake = lakeLevel(wx, wz);
-  if (lake !== null && lake * relief > drawn) {
+  if (pond === null && lake !== null && lake * relief > drawn) {
     best = { kind: 'lake', level: lake, flowX: 0, flowZ: 0 };
     drawn = lake * relief;
   }
 
-  const river = riverAt(wx, wz);
-  if (river && inChannel(river) && river.level * relief > drawn) {
+  if (pond === null && inRiver && river.level * relief > drawn) {
     best = {
       kind: 'river', level: river.level,
       flowX: river.flowX, flowZ: river.flowZ,

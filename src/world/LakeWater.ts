@@ -3,6 +3,7 @@ import { toLocal } from './origin';
 import { world } from './coords';
 import { reliefScale, terrainHeight } from './heightfield';
 import { insideLake, lakeShape, lakesNear } from './lakes';
+import { containedPondLevel, pondCellsIn, pondLevel, type PondCell } from './pond';
 
 /**
  * THE SURFACE OF A LAKE, over the bed that lakes.ts pressed for it.
@@ -36,6 +37,111 @@ const REACH = 200_000;
 const STEPS = 32;
 /** And never finer than this, so a small pond is not over-tessellated. */
 const FINEST = 250;
+/** Terrain sampling for the baked field: five metres, bounded per wet cell. */
+const POND_FINEST = 500;
+const POND_REACH = 50_000;
+const POND_TRIANGLE_TARGET = 100_000;
+
+interface CutPoint {
+  x: number;
+  z: number;
+  depth: number;
+}
+
+/**
+ * Clip one triangle first to a horizontal containment mask and then to the
+ * final terrain. Boundary points are found on the actual predicates rather
+ * than by dropping the whole triangle when one corner is dry.
+ */
+function clippedTriangle(
+  triangle: readonly CutPoint[],
+  allowed: (x: number, z: number) => boolean,
+  level: number,
+  bedAt: (x: number, z: number) => number,
+): CutPoint[] {
+  let polygon = [...triangle];
+  const mask = polygon.map((p) => allowed(p.x, p.z));
+  const next: CutPoint[] = [];
+  for (let i = 0; i < polygon.length; i++) {
+    const a = polygon[i];
+    const b = polygon[(i + 1) % polygon.length];
+    const ain = mask[i];
+    const bin = mask[(i + 1) % polygon.length];
+    if (ain) next.push(a);
+    if (ain === bin) continue;
+    let lo = a;
+    let hi = b;
+    let loIn = ain;
+    // A dozen halvings puts a 5 m terrain tile's edge within 1.3 mm.
+    for (let n = 0; n < 12; n++) {
+      const mid = {
+        x: (lo.x + hi.x) / 2,
+        z: (lo.z + hi.z) / 2,
+        depth: 0,
+      };
+      if (allowed(mid.x, mid.z) === loIn) lo = mid;
+      else hi = mid;
+    }
+    const edge = {
+      x: (lo.x + hi.x) / 2,
+      z: (lo.z + hi.z) / 2,
+      depth: 0,
+    };
+    edge.depth = level - bedAt(edge.x, edge.z);
+    next.push(edge);
+  }
+  polygon = next;
+  if (polygon.length < 3) return [];
+
+  const held: CutPoint[] = [];
+  for (let i = 0; i < polygon.length; i++) {
+    const a = polygon[i];
+    const b = polygon[(i + 1) % polygon.length];
+    const ain = a.depth > 0;
+    const bin = b.depth > 0;
+    if (ain) held.push(a);
+    if (ain === bin) continue;
+    let lo = a;
+    let hi = b;
+    let loIn = ain;
+    for (let n = 0; n < 12; n++) {
+      const mid = {
+        x: (lo.x + hi.x) / 2,
+        z: (lo.z + hi.z) / 2,
+        depth: 0,
+      };
+      mid.depth = level - bedAt(mid.x, mid.z);
+      if ((mid.depth > 0) === loIn) lo = mid;
+      else hi = mid;
+    }
+    held.push({
+      x: (lo.x + hi.x) / 2,
+      z: (lo.z + hi.z) / 2,
+      depth: 0,
+    });
+  }
+  return held;
+}
+
+function addTop(
+  polygon: readonly CutPoint[],
+  topY: number,
+  centreX: number,
+  centreZ: number,
+  points: number[],
+  depths: number[],
+  faces: number[],
+): void {
+  if (polygon.length < 3) return;
+  const top = points.length / 3;
+  for (const p of polygon) {
+    points.push(p.x - centreX, topY, p.z - centreZ);
+    depths.push(p.depth);
+  }
+  for (let i = 1; i < polygon.length - 1; i++) {
+    faces.push(top, top + i, top + i + 1);
+  }
+}
 
 interface Drawn {
   readonly at: number;
@@ -63,40 +169,35 @@ export function tessellate(
   const cols = Math.ceil((box.maxX - box.minX) / step) + 1;
   const rows = Math.ceil((box.maxZ - box.minZ) / step) + 1;
 
-  // One pass to find which grid points are water, a second to stitch
-  // the quads whose four corners all are. A quad with a dry corner is
-  // dropped rather than clipped: at this spacing the loss is a sliver
-  // at the bank, and the alternative is a clipper.
-  const wet = new Uint8Array(cols * rows);
-  const seat = new Int32Array(cols * rows).fill(-1);
   const points: number[] = [];
   const depths: number[] = [];
-  let deepest = 0;
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      const x = box.minX + c * step;
-      const z = box.minZ + r * step;
-      if (!insideLake(at, x, z)) continue;
-      wet[r * cols + c] = 1;
-      seat[r * cols + c] = points.length / 3;
-      const deep = Math.max(0, box.level - terrainHeight(x, z));
-      if (deep > deepest) deepest = deep;
-      points.push(x - centreX, 0, z - centreZ);
-      depths.push(deep);
-    }
-  }
-
   const faces: number[] = [];
+  let deepest = 0;
   for (let r = 0; r < rows - 1; r++) {
     for (let c = 0; c < cols - 1; c++) {
-      const a = r * cols + c;
-      const b = a + 1;
-      const d = a + cols;
-      const e = d + 1;
-      if (!wet[a] || !wet[b] || !wet[d] || !wet[e]) continue;
-      // Wound for a +Y normal, so the surface is lit from above.
-      faces.push(seat[a], seat[d], seat[b]);
-      faces.push(seat[b], seat[d], seat[e]);
+      const x0 = box.minX + c * step;
+      const z0 = box.minZ + r * step;
+      const x1 = Math.min(box.maxX, x0 + step);
+      const z1 = Math.min(box.maxZ, z0 + step);
+      const point = (x: number, z: number): CutPoint => {
+        const depth = box.level - terrainHeight(x, z);
+        if (depth > deepest) deepest = depth;
+        return { x, z, depth };
+      };
+      const a = point(x0, z0);
+      const b = point(x1, z0);
+      const d = point(x0, z1);
+      const e = point(x1, z1);
+      for (const triangle of [[a, d, b], [b, d, e]]) {
+        addTop(
+          clippedTriangle(
+            triangle, (x, z) => insideLake(at, x, z)
+              && containedPondLevel(x, z, terrainHeight(x, z)) === null,
+            box.level, terrainHeight,
+          ),
+          0, centreX, centreZ, points, depths, faces,
+        );
+      }
     }
   }
   if (!faces.length) return null;
@@ -109,8 +210,109 @@ export function tessellate(
   return { geometry, depth: deepest };
 }
 
+/** Build terrain-intersected surfaces and exterior edges from pond cells. */
+export function tessellatePonds(
+  cells: readonly PondCell[],
+  centreX: number,
+  centreZ: number,
+  bedAt: (x: number, z: number) => number = terrainHeight,
+  finest = POND_FINEST,
+): THREE.BufferGeometry | null {
+  const points: number[] = [];
+  const depths: number[] = [];
+  const faces: number[] = [];
+  const perCell = Math.max(1, Math.floor(Math.sqrt(
+    POND_TRIANGLE_TARGET / Math.max(1, cells.length * 2),
+  )));
+  for (const cell of cells) {
+    const segments = Math.max(1, Math.min(
+      Math.ceil(cell.size / finest), perCell,
+    ));
+    const step = cell.size / segments;
+    const minX = cell.x - cell.size / 2;
+    const minZ = cell.z - cell.size / 2;
+    const allowed = (x: number, z: number) => pondLevel(x, z) === cell.level;
+    for (let r = 0; r < segments; r++) {
+      for (let c = 0; c < segments; c++) {
+        const x0 = minX + c * step;
+        const z0 = minZ + r * step;
+        const x1 = x0 + step;
+        const z1 = z0 + step;
+        const point = (x: number, z: number): CutPoint => ({
+          x, z, depth: cell.level - bedAt(x, z),
+        });
+        const a = point(x0, z0);
+        const b = point(x1, z0);
+        const d = point(x0, z1);
+        const e = point(x1, z1);
+        for (const triangle of [[a, d, b], [b, d, e]]) {
+          addTop(
+            clippedTriangle(triangle, allowed, cell.level, bedAt),
+            cell.level, centreX, centreZ, points, depths, faces,
+          );
+        }
+      }
+    }
+    // Only the field's true exterior gets a vertical edge. Equal-level
+    // neighbours share one continuous surface and deliberately get none.
+    const edge = (dx: number, dz: number) =>
+      pondLevel(cell.x + dx * cell.size, cell.z + dz * cell.size) !== cell.level;
+    const wall = (ax: number, az: number, bx: number, bz: number) => {
+      for (let n = 0; n < segments; n++) {
+        const t0 = n / segments;
+        const t1 = (n + 1) / segments;
+        let x0 = ax + (bx - ax) * t0;
+        let z0 = az + (bz - az) * t0;
+        let x1 = ax + (bx - ax) * t1;
+        let z1 = az + (bz - az) * t1;
+        let d0 = cell.level - bedAt(x0, z0);
+        let d1 = cell.level - bedAt(x1, z1);
+        if (d0 <= 0 && d1 <= 0) continue;
+        if ((d0 > 0) !== (d1 > 0)) {
+          let lx = x0; let lz = z0; let ld = d0;
+          let hx = x1; let hz = z1;
+          for (let i = 0; i < 12; i++) {
+            const mx = (lx + hx) / 2;
+            const mz = (lz + hz) / 2;
+            const md = cell.level - bedAt(mx, mz);
+            if ((md > 0) === (ld > 0)) { lx = mx; lz = mz; ld = md; }
+            else { hx = mx; hz = mz; }
+          }
+          if (d0 > 0) { x1 = (lx + hx) / 2; z1 = (lz + hz) / 2; d1 = 0; }
+          else { x0 = (lx + hx) / 2; z0 = (lz + hz) / 2; d0 = 0; }
+        }
+        const top = points.length / 3;
+        points.push(x0 - centreX, cell.level, z0 - centreZ,
+          x1 - centreX, cell.level, z1 - centreZ,
+          x0 - centreX, cell.level - Math.max(0, d0), z0 - centreZ,
+          x1 - centreX, cell.level - Math.max(0, d1), z1 - centreZ);
+        depths.push(Math.max(0, d0), Math.max(0, d1), Math.max(0, d0), Math.max(0, d1));
+        faces.push(top, top + 2, top + 1, top + 1, top + 2, top + 3);
+      }
+    };
+    const x0 = minX;
+    const z0 = minZ;
+    const x1 = minX + cell.size;
+    const z1 = minZ + cell.size;
+    if (edge(-1, 0)) wall(x0, z0, x0, z1);
+    if (edge(1, 0)) wall(x1, z1, x1, z0);
+    if (edge(0, -1)) wall(x1, z0, x0, z0);
+    if (edge(0, 1)) wall(x0, z1, x1, z1);
+  }
+  if (!faces.length) return null;
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
+  geometry.setAttribute('deep', new THREE.Float32BufferAttribute(depths, 1));
+  geometry.setIndex(faces);
+  geometry.computeVertexNormals();
+  return geometry;
+}
+
 export class LakeWater {
   private readonly drawn = new Map<number, Drawn>();
+  private pond: THREE.Mesh | null = null;
+  private pondCentre = { x: 0, z: 0 };
+  private pondCell = '';
   private readonly material: THREE.MeshStandardMaterial;
   private readonly clock = { value: 0 };
   private readonly rippleMap: { value: THREE.Texture };
@@ -150,6 +352,28 @@ export class LakeWater {
       this.scene.add(mesh);
       this.drawn.set(index, { at: index, mesh, cx, cz, level: box.level });
     }
+    const decision = `${Math.round(at.wx / 50_000)}:${Math.round(at.wz / 50_000)}`;
+    if (decision !== this.pondCell) {
+      this.pondCell = decision;
+      if (this.pond) {
+        this.scene.remove(this.pond);
+        this.pond.geometry.dispose();
+        this.pond = null;
+      }
+      const cx = Math.round(at.wx / 50_000) * 50_000;
+      const cz = Math.round(at.wz / 50_000) * 50_000;
+      const cells = pondCellsIn(
+        cx - POND_REACH, cz - POND_REACH, cx + POND_REACH, cz + POND_REACH,
+      );
+      const geometry = tessellatePonds(cells, cx, cz);
+      if (geometry) {
+        this.pond = new THREE.Mesh(geometry, this.material);
+        this.pond.renderOrder = 1;
+        this.pond.visible = this.shownAll;
+        this.pondCentre = { x: cx, z: cz };
+        this.scene.add(this.pond);
+      }
+    }
     this.place();
   }
 
@@ -165,6 +389,11 @@ export class LakeWater {
       const seat = toLocal(world(lake.cx, lake.cz));
       lake.mesh.position.set(seat.lx, lake.level * relief, seat.lz);
     }
+    if (this.pond) {
+      const seat = toLocal(world(this.pondCentre.x, this.pondCentre.z));
+      this.pond.position.set(seat.lx, 0, seat.lz);
+      this.pond.scale.y = relief;
+    }
   }
 
   update(dt: number): void {
@@ -174,13 +403,30 @@ export class LakeWater {
 
   /** How many surfaces exist right now — for the probes. */
   get shown(): number {
-    return this.drawn.size;
+    return this.drawn.size + (this.pond ? 1 : 0);
   }
 
   /** Hide or show every surface this owns — see __island.showWater. */
   setVisible(on: boolean): void {
     this.shownAll = on;
     for (const it of this.drawn.values()) it.mesh.visible = on;
+    if (this.pond) this.pond.visible = on;
+  }
+
+  /** Terrain smoothing moves banks, so every terrain-derived cut must move too. */
+  invalidateTerrain(at: { wx: number; wz: number }): void {
+    for (const lake of this.drawn.values()) {
+      this.scene.remove(lake.mesh);
+      lake.mesh.geometry.dispose();
+    }
+    this.drawn.clear();
+    if (this.pond) {
+      this.scene.remove(this.pond);
+      this.pond.geometry.dispose();
+      this.pond = null;
+    }
+    this.pondCell = '';
+    this.follow(at);
   }
 
   /** Remembered, so surfaces built after the toggle honour it too. */
@@ -192,6 +438,11 @@ export class LakeWater {
       lake.mesh.geometry.dispose();
     }
     this.drawn.clear();
+    if (this.pond) {
+      this.scene.remove(this.pond);
+      this.pond.geometry.dispose();
+      this.pond = null;
+    }
     this.material.dispose();
   }
 
@@ -268,6 +519,13 @@ export class LakeWater {
             float rim = 1.0 - smoothstep(2.0, 26.0, vDeep);
             diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.42, 0.56, 0.55), rim * 0.7);
             diffuseColor.a = clamp(diffuseColor.a + rim * 0.3, 0.0, 1.0);
+            // A single terrain-intersected sheet has no duplicated bottom
+            // faces. Treat its back face as the underwater view instead:
+            // it reads deeper and remains opaque enough to be a body.
+            if (!gl_FrontFacing) {
+              diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.005, 0.055, 0.11), 0.72);
+              diffuseColor.a = max(diffuseColor.a, 0.82);
+            }
             if (diffuseColor.a < 0.01) discard;
           }`)
         .replace('#include <dithering_fragment>', `#include <dithering_fragment>

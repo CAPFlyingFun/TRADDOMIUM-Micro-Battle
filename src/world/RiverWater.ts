@@ -104,8 +104,8 @@ export function buildReach(
   let along = 0;
   for (let i = 0; i < rows; i++) {
     const x = smooth[i * 4];
-    const y = smooth[i * 4 + 1];
     const z = smooth[i * 4 + 2];
+    const y = smooth[i * 4 + 1];
     const width = smooth[i * 4 + 3];
     // Central difference for the axis, ends falling back one-sided.
     const back = Math.max(0, i - 1);

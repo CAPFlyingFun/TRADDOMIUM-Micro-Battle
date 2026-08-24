@@ -51,6 +51,14 @@ export interface PondField {
   readonly level: Int16Array;
 }
 
+export interface PondCell {
+  /** Centre of the nearest-sampled cell, in global world coordinates. */
+  readonly x: number;
+  readonly z: number;
+  readonly level: number;
+  readonly size: number;
+}
+
 let field: PondField | null = null;
 
 /** Fetch and decode the bake that ships with the build. */
@@ -118,6 +126,47 @@ export function pondLevel(x: number, z: number): number | null {
   if (raw === DRY) return null;
   // Decimetres of real metres to world units.
   return (raw / 10) * UNITS_PER_METRE;
+}
+
+/**
+ * Standing water after the final terrain has had the last word.
+ *
+ * The bake supplies a possible spill level, not permission to draw through
+ * later terrain detail. Keeping this test beside the sampler makes render
+ * and gameplay use the same containment rule.
+ */
+export function containedPondLevel(
+  x: number, z: number, bed: number,
+): number | null {
+  const level = pondLevel(x, z);
+  return level !== null && level > bed ? level : null;
+}
+
+/** Wet nearest-sample cells whose square can overlap the requested box. */
+export function pondCellsIn(
+  minX: number, minZ: number, maxX: number, maxZ: number,
+): PondCell[] {
+  if (!field) return [];
+  const grid = field.grid;
+  const step = SPAN / (grid - 1);
+  const firstC = Math.max(0, Math.ceil((minX + SPAN / 2) / step - 0.5));
+  const lastC = Math.min(grid - 1, Math.floor((maxX + SPAN / 2) / step + 0.5));
+  const firstR = Math.max(0, Math.ceil((minZ + SPAN / 2) / step - 0.5));
+  const lastR = Math.min(grid - 1, Math.floor((maxZ + SPAN / 2) / step + 0.5));
+  const found: PondCell[] = [];
+  for (let r = firstR; r <= lastR; r++) {
+    for (let c = firstC; c <= lastC; c++) {
+      const raw = field.level[r * grid + c];
+      if (raw === DRY) continue;
+      found.push({
+        x: c * step - SPAN / 2,
+        z: r * step - SPAN / 2,
+        level: (raw / 10) * UNITS_PER_METRE,
+        size: step,
+      });
+    }
+  }
+  return found;
 }
 
 /** How much standing water is over this ground, or zero. */

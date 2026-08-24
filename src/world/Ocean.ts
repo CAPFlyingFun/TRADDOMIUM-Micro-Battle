@@ -397,6 +397,15 @@ export class Ocean {
             // with depth so deep water is a body of water and not a film.
             diffuseColor.a = clamp(
               diffuseColor.a * mix(1.45, 0.85, shallow) + foam * 0.5, 0.0, 1.0);
+            // FROM BELOW, THE SURFACE IS THE CEILING OF A BODY OF WATER,
+            // not the back of a transparent sheet. Total internal
+            // reflection is far beyond this material, but the visual
+            // contract is the same one the contained inland water uses:
+            // darker, bluer and opaque enough to close the world above.
+            if (!gl_FrontFacing) {
+              diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.003, 0.035, 0.10), 0.76);
+              diffuseColor.a = max(diffuseColor.a, 0.86);
+            }
           }`)
         // The sky, at a grazing angle. Cheap Schlick against the surface
         // normal — the one thing that stops flat water reading as paint.
