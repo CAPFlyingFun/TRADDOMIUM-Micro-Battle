@@ -60,7 +60,7 @@ export function forgetHydro(): void {
 import { seaHeightAt } from './swell';
 import { reliefScale } from './heightfield';
 import { lakeLevel } from './lakes';
-import { riverAt } from './rivers';
+import { riverAt, inChannel } from './rivers';
 
 export type WaterKind = 'sea' | 'lake' | 'river';
 
@@ -95,7 +95,7 @@ export function waterBodyAt(
   }
 
   const river = riverAt(wx, wz);
-  if (river && river.off <= river.width / 2 && river.level * relief > drawn) {
+  if (river && inChannel(river) && river.level * relief > drawn) {
     best = {
       kind: 'river', level: river.level,
       flowX: river.flowX, flowZ: river.flowZ,

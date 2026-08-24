@@ -3,7 +3,8 @@ import { toLocal } from './origin';
 import { world } from './coords';
 import { reliefScale } from './heightfield';
 import type { Hydro } from './hydro';
-import { channelDepth, riverPointLevels } from './rivers';
+import { RIBBON_EDGE } from './centreline';
+import { channelDepth, reachStations } from './rivers';
 
 /**
  * THE SURFACE OF EVERY RIVER — 1,121 ribbons of moving water.
@@ -69,10 +70,12 @@ const REACH = 20_000;
 
 /** Where the ribbons start fading, so the cut is not a pop. */
 const FADE_FROM = 13_000;
-/** Resample target along the spline, world units. Six real metres. */
-const STEP = 600;
-/** The ribbon stops just short of the channel edge — see the alpha fade. */
-const EDGE = 0.98;
+/**
+ * The edge inset lives in centreline.ts now, because the INDEX has to
+ * apply the same one — see the note there. The resampling moved with
+ * it, which is why this file no longer holds a STEP at all.
+ */
+const EDGE = RIBBON_EDGE;
 
 interface Drawn {
   readonly mesh: THREE.Mesh;
@@ -80,74 +83,20 @@ interface Drawn {
   readonly cz: number;
 }
 
-/** Centripetal Catmull-Rom on one four-channel point row. */
-function spline(
-  points: Float64Array, out: number[],
-): void {
-  const rows = points.length / 4;
-  if (rows < 2) return;
-  const at = (i: number, c: number) => points[Math.max(0, Math.min(rows - 1, i)) * 4 + c];
-  for (let i = 0; i < rows - 1; i++) {
-    // Knots from PLANAR spacing, α = ½ — the centripetal family.
-    const knot = (a: number, b: number) => Math.max(
-      Math.hypot(at(b, 0) - at(a, 0), at(b, 2) - at(a, 2)), 1e-4,
-    ) ** 0.5;
-    const t0 = 0;
-    const t1 = t0 + knot(i - 1, i);
-    const t2 = t1 + knot(i, i + 1);
-    const t3 = t2 + knot(i + 1, i + 2);
-    const span = Math.hypot(at(i + 1, 0) - at(i, 0), at(i + 1, 2) - at(i, 2));
-    const steps = Math.max(1, Math.round(span / STEP));
-    for (let s = i === 0 ? 0 : 1; s <= steps; s++) {
-      const t = t1 + ((t2 - t1) * s) / steps;
-      for (let c = 0; c < 4; c++) {
-        // Barry–Goldman, one channel at a time.
-        const p0 = at(i - 1, c);
-        const p1 = at(i, c);
-        const p2 = at(i + 1, c);
-        const p3 = at(i + 2, c);
-        const a1 = t1 - t0 > 0 ? p0 + ((p1 - p0) * (t - t0)) / (t1 - t0) : p1;
-        const a2 = t2 - t1 > 0 ? p1 + ((p2 - p1) * (t - t1)) / (t2 - t1) : p2;
-        const a3 = t3 - t2 > 0 ? p2 + ((p3 - p2) * (t - t2)) / (t3 - t2) : p3;
-        const b1 = t2 - t0 > 0 ? a1 + ((a2 - a1) * (t - t0)) / (t2 - t0) : a2;
-        const b2 = t3 - t1 > 0 ? a2 + ((a3 - a2) * (t - t1)) / (t3 - t1) : a3;
-        out.push(t2 - t1 > 0 ? b1 + ((b2 - b1) * (t - t1)) / (t2 - t1) : b1);
-      }
-    }
-  }
-}
-
 /**
  * One reach as a triangle strip, positions relative to (cx, 0, cz).
  *
- * Water level must stay monotonic AFTER the spline too: Catmull-Rom
- * can locally overshoot in Y where the drop is uneven, and an
- * overshoot on a river profile is a ripple of uphill water. Clamped
- * along the resampled row.
+ * TAKES STATIONS, DOES NOT MAKE THEM. The resampling and the downhill
+ * clamp both happen in centreline.ts, once, and rivers.ts builds its
+ * collision index out of the same rows — which is the whole repair.
+ * This function's only remaining opinion is how to turn a centreline
+ * into two banks.
  */
 export function buildReach(
-  stations: Float64Array, cx: number, cz: number,
+  smooth: Float64Array, cx: number, cz: number,
 ): THREE.BufferGeometry | null {
-  const smooth: number[] = [];
-  spline(stations, smooth);
   const rows = smooth.length / 4;
   if (rows < 2) return null;
-
-  // Re-impose the levelling the spline may have bent.
-  const downhill = smooth[1] >= smooth[(rows - 1) * 4 + 1];
-  if (downhill) {
-    for (let i = 1; i < rows; i++) {
-      if (smooth[i * 4 + 1] > smooth[(i - 1) * 4 + 1]) {
-        smooth[i * 4 + 1] = smooth[(i - 1) * 4 + 1];
-      }
-    }
-  } else {
-    for (let i = rows - 2; i >= 0; i--) {
-      if (smooth[i * 4 + 1] > smooth[(i + 1) * 4 + 1]) {
-        smooth[i * 4 + 1] = smooth[(i + 1) * 4 + 1];
-      }
-    }
-  }
 
   const positions = new Float32Array(rows * 2 * 3);
   const deep = new Float32Array(rows * 2);
@@ -244,8 +193,6 @@ export class RiverWater {
     }
     this.lastCell = cell;
 
-    const levels = riverPointLevels();
-    if (!levels) return;
     const wanted = new Set<number>();
     for (let r = 0; r < this.hydro.rivers.length; r++) {
       const river = this.hydro.rivers[r];
@@ -268,21 +215,17 @@ export class RiverWater {
     }
     for (const index of wanted) {
       if (this.drawn.has(index)) continue;
-      const river = this.hydro.rivers[index];
-      const stations = new Float64Array(river.count * 4);
+      const stations = reachStations(index);
+      if (!stations) continue;
+      const rows = stations.length / 4;
       let cx = 0;
       let cz = 0;
-      for (let i = 0; i < river.count; i++) {
-        const p = river.first + i;
-        stations[i * 4] = this.hydro.x[p];
-        stations[i * 4 + 1] = levels[p];
-        stations[i * 4 + 2] = this.hydro.z[p];
-        stations[i * 4 + 3] = this.hydro.width[p];
-        cx += this.hydro.x[p];
-        cz += this.hydro.z[p];
+      for (let i = 0; i < rows; i++) {
+        cx += stations[i * 4];
+        cz += stations[i * 4 + 2];
       }
-      cx /= river.count;
-      cz /= river.count;
+      cx /= rows;
+      cz /= rows;
       const geometry = buildReach(stations, cx, cz);
       if (!geometry) continue;
       const mesh = new THREE.Mesh(geometry, this.material);

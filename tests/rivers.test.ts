@@ -4,6 +4,7 @@ import { decodeHydro, type Hydro } from '../src/world/hydro';
 import {
   BANK_GRADE, channelDepth, flowSpeed, forgetRivers, riverAt, riverBed,
   riverFlow, riverIndexSize, riverPointLevels, riverSegment, useRivers, riverDamp, DAMP_REACH,
+  reachStations,
 } from '../src/world/rivers';
 import { farHeight, terrainHeight, useGrid } from '../src/world/heightfield';
 import { decodeGrid, UNITS_PER_METRE } from '../src/world/kauai';
@@ -168,17 +169,35 @@ describe('the flow', () => {
 
   it('is water she cannot generally outrun, and knows it', () => {
     // Her walk tops out near 25. The median grade beats her; the
-    // clamps mean nothing is ever slower than 10 or faster than 150.
+    // clamps mean nothing on the thread is ever slower than 10 or
+    // faster than 150.
+    //
+    // THE FLOOR IS NOT A PROPERTY OF `riverFlow` AND NEVER WAS. The
+    // current falls off parabolically to nothing at each bank — the
+    // fix that stopped a river taking her from a standstill to full
+    // speed inside a stride — and at a confluence the trunk claims
+    // points that sit near ITS bank, so a legitimate reading there is
+    // a unit a second. The 10-unit floor belongs to `flowSpeed`, and
+    // the segment test above already holds it to that. This test
+    // passed a per-sample floor only while it sampled the shipped
+    // points and the index walked the shipped chords, which made every
+    // sample exactly mid-channel by accident. Both halves of that
+    // coincidence are gone (centreline.ts), so what is asserted here
+    // is what this test was actually named for: the ceiling, and how
+    // often the water beats her walk.
     let fast = 0;
     let total = 0;
-    for (let i = 0; i < hydro.x.length; i += 149) {
-      const flow = riverFlow(hydro.x[i], hydro.z[i]);
-      if (!flow) continue;
-      const speed = Math.hypot(flow.x, flow.z);
-      expect(speed).toBeGreaterThanOrEqual(10 - 1e-9);
-      expect(speed).toBeLessThanOrEqual(150 + 1e-9);
-      total++;
-      if (speed > 25) fast++;
+    for (let r = 0; r < hydro.rivers.length; r += 7) {
+      const row = reachStations(r)!;
+      for (let i = 0; i < row.length / 4; i += 11) {
+        const flow = riverFlow(row[i * 4], row[i * 4 + 2]);
+        if (!flow) continue;
+        const speed = Math.hypot(flow.x, flow.z);
+        expect(speed).toBeGreaterThan(0);
+        expect(speed).toBeLessThanOrEqual(150 + 1e-9);
+        total++;
+        if (speed > 25) fast++;
+      }
     }
     expect(fast / total).toBeGreaterThan(0.3);
   });
@@ -200,22 +219,31 @@ describe('the index', () => {
       const z = hydro.z[p] + (rnd() - 0.5) * 3_000;
       const indexed = riverAt(x, z);
       // Brute force: the nearest claiming segment across every reach.
+      //
+      // OVER THE STATIONS, NOT THE SHIPPED POINTS. The index is built
+      // from the resampled centreline now (centreline.ts) — the same
+      // rows the ribbon is drawn through — so brute-forcing the raw
+      // 35-metre chords here would only re-measure the gap between
+      // spline and chord, which is the thing that was deliberately
+      // closed. What this test is for is the BUCKET GRID: a segment
+      // folded into the wrong cell, found only by the queen who walks
+      // there. Same definition, same rows.
       let truth: number | null = null;
-      const levels = riverPointLevels()!;
-      for (const river of hydro.rivers) {
-        for (let i = 0; i < river.count - 1; i++) {
-          const a = river.first + i;
-          const ax = hydro.x[a];
-          const az = hydro.z[a];
-          const ex = hydro.x[a + 1] - ax;
-          const ez = hydro.z[a + 1] - az;
+      for (let r = 0; r < hydro.rivers.length; r++) {
+        const row = reachStations(r)!;
+        for (let i = 0; i < row.length / 4 - 1; i++) {
+          const ax = row[i * 4];
+          const az = row[i * 4 + 2];
+          const ex = row[(i + 1) * 4] - ax;
+          const ez = row[(i + 1) * 4 + 2] - az;
           const run = ex * ex + ez * ez;
           const t = run > 0
             ? Math.max(0, Math.min(1, ((x - ax) * ex + (z - az) * ez) / run)) : 0;
           const off = Math.hypot(x - ax - ex * t, z - az - ez * t);
-          const width = Math.max(hydro.width[a], hydro.width[a + 1]);
+          const width = Math.max(row[i * 4 + 3], row[(i + 1) * 4 + 3]);
           if (off > width / 2) continue;
-          const level = levels[a] + (levels[a + 1] - levels[a]) * t;
+          const level = row[i * 4 + 1]
+            + (row[(i + 1) * 4 + 1] - row[i * 4 + 1]) * t;
           if (truth === null || level > truth) truth = level;
         }
       }
@@ -228,9 +256,13 @@ describe('the index', () => {
     }
   });
 
-  it('covers all 48,544 segments', () => {
+  it('covers all 281,069 stations of the resampled centreline', () => {
+    // It was 48,544 while the index walked the shipped chords. The
+    // ribbon was never drawn through those, so the water and the
+    // picture disagreed by most of a channel width on every bend —
+    // see centreline.ts. Both read these rows now.
     const { segments, entries } = riverIndexSize();
-    expect(segments).toBe(48_544);
+    expect(segments).toBe(281_069);
     expect(entries).toBeGreaterThanOrEqual(segments);
   });
 });
