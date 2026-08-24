@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import { toLocal } from './origin';
 import { world } from './coords';
-import { reliefScale, terrainHeight } from './heightfield';
+import { reliefScale } from './heightfield';
 import type { Hydro } from './hydro';
-import { channelDepth, FLAT_BED, riverPointLevels } from './rivers';
+import { channelDepth, riverPointLevels } from './rivers';
 
 /**
  * THE SURFACE OF EVERY RIVER — 1,121 ribbons of moving water.
@@ -74,42 +74,8 @@ const STEP = 600;
 /** The ribbon stops just short of the channel edge — see the alpha fade. */
 const EDGE = 0.98;
 
-/**
- * THE STREAMBED, and why a river needs one drawn for it.
- *
- * The last pass ended by naming the fault rather than fixing it: "the
- * trench has to be visible wherever the ribbon is, or the ribbon has
- * to stop sooner than the trench does". The ribbon was shortened to
- * the transition tier and it was still a flat band lying on a slope,
- * because 200 m is not the limit of the water — it is the limit of the
- * TERRAIN's ability to show a channel. A tier with a vertex every
- * 3,125 units cannot render a 550-unit-wide, 80-unit-deep trench at
- * any distance, near or far. Shortening the reach could never have
- * worked; it was chasing a distance problem that is a resolution one.
- *
- * So the channel gets drawn by the water, not by the ground. This is a
- * sheet three vertices wide — bank, thread, bank — laid on the SAME
- * carved field the walker reads (`terrainHeight`, which carries
- * `riverBed`), sampled every 600 units along instead of every 3,125.
- * The trench is in that field already and always was; nothing on
- * screen had the resolution to draw it.
- *
- * BEYOND EXTINCTION DID THIS TOO, and the difference in how is the
- * point. Its answer was to widen the carve until the render grid could
- * see it — a 96 m trench for a 6 m stream, which works when the camera
- * is a person and is absurd when it is an ant standing in the water.
- * We keep the true 5.5 m channel and give it its own geometry instead.
- * BE's numbers still apply, converted: a lift off the field so the
- * sheet beats the terrain mesh in a tie, and a hard cap under the
- * surface so it can never poke through the water it lies beneath.
- */
-const BED_LIFT = 1.5;
-/** ...but always this far under the surface, whatever the ground does. */
-const BED_SINK = 1;
-
 interface Drawn {
   readonly mesh: THREE.Mesh;
-  readonly bed: THREE.Mesh | null;
   readonly cx: number;
   readonly cz: number;
 }
@@ -159,7 +125,9 @@ function spline(
  * overshoot on a river profile is a ripple of uphill water. Clamped
  * along the resampled row.
  */
-export function channelRows(stations: Float64Array): number[] | null {
+export function buildReach(
+  stations: Float64Array, cx: number, cz: number,
+): THREE.BufferGeometry | null {
   const smooth: number[] = [];
   spline(stations, smooth);
   const rows = smooth.length / 4;
@@ -180,34 +148,6 @@ export function channelRows(stations: Float64Array): number[] | null {
       }
     }
   }
-  return smooth;
-}
-
-/**
- * The cross-channel axis at row `i`, by central difference.
- *
- * Shared so the bed and the surface cannot disagree about which way is
- * across: a bed half a degree out of step with the water it lies under
- * shows as one bank submerged and the other dry.
- */
-function acrossAt(smooth: number[], rows: number, i: number): [number, number] {
-  const back = Math.max(0, i - 1);
-  const fore = Math.min(rows - 1, i + 1);
-  let dx = smooth[fore * 4] - smooth[back * 4];
-  let dz = smooth[fore * 4 + 2] - smooth[back * 4 + 2];
-  const run = Math.hypot(dx, dz);
-  if (run < 1e-6) return [1, 0];
-  dx /= run;
-  dz /= run;
-  return [dx, dz];
-}
-
-export function buildReach(
-  stations: Float64Array, cx: number, cz: number,
-): THREE.BufferGeometry | null {
-  const smooth = channelRows(stations);
-  if (!smooth) return null;
-  const rows = smooth.length / 4;
 
   const positions = new Float32Array(rows * 2 * 3);
   const deep = new Float32Array(rows * 2);
@@ -218,7 +158,13 @@ export function buildReach(
     const y = smooth[i * 4 + 1];
     const z = smooth[i * 4 + 2];
     const width = smooth[i * 4 + 3];
-    const [dx, dz] = acrossAt(smooth, rows, i);
+    // Central difference for the axis, ends falling back one-sided.
+    const back = Math.max(0, i - 1);
+    const fore = Math.min(rows - 1, i + 1);
+    let dx = smooth[fore * 4] - smooth[back * 4];
+    let dz = smooth[fore * 4 + 2] - smooth[back * 4 + 2];
+    const run = Math.hypot(dx, dz);
+    if (run < 1e-6) { dx = 1; dz = 0; } else { dx /= run; dz /= run; }
     const half = (width / 2) * EDGE;
     if (i > 0) {
       along += Math.hypot(x - smooth[(i - 1) * 4], z - smooth[(i - 1) * 4 + 2]);
@@ -259,93 +205,9 @@ export function buildReach(
   return geometry;
 }
 
-/**
- * The streambed under one reach — bank, thread, bank.
- *
- * THREE VERTICES ACROSS, not two, and that is the whole shape of it: a
- * two-vertex strip can only ever be a flat plane between its banks,
- * which is what the surface already is. The middle vertex is the
- * thread of the channel, and dropping it to the carved bed is what
- * turns a painted band into water with something under it.
- *
- * SAMPLED, NOT ASSUMED. The Y comes from `terrainHeight` — the same
- * pure field the walker, the camera and the tests read — so the bed a
- * player sees is the bed she swims in, and a change to the carve moves
- * both together or neither. Capped under the surface so it can never
- * pierce the water, and lifted off the field so it wins the tie
- * against whatever the terrain tier happens to have drawn there.
- *
- * The edges use the SAME half-width as the surface, so the bed meets
- * the water exactly at the waterline and the ribbon gains a real edge
- * instead of a polygon boundary cut against open ground.
- */
-export function buildStreambed(
-  stations: Float64Array, cx: number, cz: number,
-): THREE.BufferGeometry | null {
-  const smooth = channelRows(stations);
-  if (!smooth) return null;
-  const rows = smooth.length / 4;
-
-  const positions = new Float32Array(rows * 3 * 3);
-  const normals = new Float32Array(rows * 3 * 3);
-  for (let i = 0; i < rows; i++) {
-    const x = smooth[i * 4];
-    const level = smooth[i * 4 + 1];
-    const z = smooth[i * 4 + 2];
-    const width = smooth[i * 4 + 3];
-    const [dx, dz] = acrossAt(smooth, rows, i);
-    const half = (width / 2) * EDGE;
-    const deep = channelDepth(width);
-    for (let k = 0; k < 3; k++) {
-      // k = 0 left bank, 1 the thread, 2 right bank.
-      const side = k - 1;
-      const wx = x + -dz * half * side;
-      const wz = z + dx * half * side;
-      // THE PROFILE THE CARVE ITSELF CUTS, read at this vertex's own
-      // offset — flat-bottomed out to FLAT_BED, then a smoothstep wall
-      // up to the rim. Not a second opinion about the channel's shape:
-      // the same arithmetic as rivers.ts, so the drawn bed and the
-      // carved one cannot drift apart.
-      const across = k === 1 ? 0 : EDGE;
-      const wall = Math.max(0, (across - FLAT_BED) / (1 - FLAT_BED));
-      const eased = wall * wall * (3 - 2 * wall);
-      const sink = Math.max(deep * (1 - eased), BED_SINK);
-      // THE DEEPER OF THE TWO, and this is the correction the test
-      // caught. Sampling the ground ALONE looks right and fails
-      // silently: where the carve is muted — a tier reading it with
-      // slack, a reach the footprint could not reach — the sample
-      // comes back at or above the waterline, the cap flattens it, and
-      // the bed is a flat sheet a centimetre under a flat surface,
-      // which is the painted band this set out to remove. The profile
-      // is the floor under that failure: a channel is drawn wherever a
-      // ribbon is, and real ground deeper than the profile still wins.
-      const v = i * 3 + k;
-      positions[v * 3] = wx - cx;
-      positions[v * 3 + 1] = Math.min(terrainHeight(wx, wz) + BED_LIFT, level - sink);
-      positions[v * 3 + 2] = wz - cz;
-      normals[v * 3 + 1] = 1;
-    }
-  }
-
-  const faces: number[] = [];
-  for (let i = 0; i < rows - 1; i++) {
-    const a = i * 3;
-    const b = a + 3;
-    // Two quads per station pair — left half, then right half.
-    faces.push(a, b, a + 1, a + 1, b, b + 1);
-    faces.push(a + 1, b + 1, a + 2, a + 2, b + 1, b + 2);
-  }
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
-  geometry.setIndex(faces);
-  return geometry;
-}
-
 export class RiverWater {
   private readonly drawn = new Map<number, Drawn>();
   private readonly material: THREE.MeshStandardMaterial;
-  private readonly bedMaterial: THREE.MeshStandardMaterial;
   private readonly clock = { value: 0 };
   private readonly rippleMap: { value: THREE.Texture };
   private seconds = 0;
@@ -359,7 +221,6 @@ export class RiverWater {
     flat.needsUpdate = true;
     this.rippleMap = { value: flat };
     this.material = this.build();
-    this.bedMaterial = this.buildBed();
   }
 
   wear(texture: THREE.Texture): void {
@@ -403,10 +264,6 @@ export class RiverWater {
       if (wanted.has(index)) continue;
       this.scene.remove(reach.mesh);
       reach.mesh.geometry.dispose();
-      if (reach.bed) {
-        this.scene.remove(reach.bed);
-        reach.bed.geometry.dispose();
-      }
       this.drawn.delete(index);
     }
     for (const index of wanted) {
@@ -429,21 +286,10 @@ export class RiverWater {
       const geometry = buildReach(stations, cx, cz);
       if (!geometry) continue;
       const mesh = new THREE.Mesh(geometry, this.material);
-      // The bed BEFORE the surface: both are transparent, and three
-      // sorts transparent draws by renderOrder first, so this is what
-      // says the water goes over its own bed rather than under it.
       mesh.renderOrder = 1;
       mesh.visible = this.shownAll;
       this.scene.add(mesh);
-      const bedGeometry = buildStreambed(stations, cx, cz);
-      let bed: THREE.Mesh | null = null;
-      if (bedGeometry) {
-        bed = new THREE.Mesh(bedGeometry, this.bedMaterial);
-        bed.renderOrder = 0;
-        bed.visible = this.shownAll && this.shownBed;
-        this.scene.add(bed);
-      }
-      this.drawn.set(index, { mesh, bed, cx, cz });
+      this.drawn.set(index, { mesh, cx, cz });
     }
     this.place();
   }
@@ -456,13 +302,6 @@ export class RiverWater {
       reach.mesh.position.set(seat.lx, 0, seat.lz);
       // The dial, as a scale: vertex Y is absolute water elevation.
       reach.mesh.scale.y = relief;
-      // The bed is built in the same frame off the same field, so it
-      // takes the same seat and the same dial — anything else and the
-      // water would slide off its own channel on the relief slider.
-      if (reach.bed) {
-        reach.bed.position.set(seat.lx, 0, seat.lz);
-        reach.bed.scale.y = relief;
-      }
     }
   }
 
@@ -478,118 +317,19 @@ export class RiverWater {
   /** Hide or show every surface this owns — see __island.showWater. */
   setVisible(on: boolean): void {
     this.shownAll = on;
-    for (const it of this.drawn.values()) {
-      it.mesh.visible = on;
-      if (it.bed) it.bed.visible = on && this.shownBed;
-    }
+    for (const it of this.drawn.values()) it.mesh.visible = on;
   }
 
   /** Remembered, so surfaces built after the toggle honour it too. */
   private shownAll = true;
 
-  /** The bed alone — a measurement hook, see __island.showWater. */
-  setBedVisible(on: boolean): void {
-    this.shownBed = on;
-    for (const it of this.drawn.values()) if (it.bed) it.bed.visible = on;
-  }
-
-  private shownBed = true;
-
   dispose(): void {
     for (const reach of this.drawn.values()) {
       this.scene.remove(reach.mesh);
       reach.mesh.geometry.dispose();
-      if (reach.bed) {
-        this.scene.remove(reach.bed);
-        reach.bed.geometry.dispose();
-      }
     }
     this.drawn.clear();
     this.material.dispose();
-    this.bedMaterial.dispose();
-  }
-
-  /**
-   * What the bed is made of.
-   *
-   * NO TEXTURE, DELIBERATELY. The band maps tile every 4 units, which
-   * is 4 cm and right for ground under her feet; a bed running two
-   * hundred metres out repeats them fifty thousand times and turns to
-   * moire long before it turns to gravel. The terrain carries a
-   * distance fade to survive that. Rather than a second copy of it,
-   * the bed makes its own grain from position — two octaves of value
-   * noise at gravel and sand scale, which cannot alias into a grid
-   * because it never was one.
-   *
-   * IN THE REACH'S OWN FRAME, not the world's. Local position is
-   * float32-safe at this scale where world position is not, and the
-   * bed does not move relative to its own centroid, so the grain stays
-   * glued to the gravel it is drawn on when the origin shifts.
-   *
-   * IT FADES ON THE SAME CURVE AS THE WATER. Anything else and the
-   * ribbon would dissolve at 130 m over a streambed that did not,
-   * leaving a bare trench painted on a hillside — a worse artefact
-   * than the one this set out to fix.
-   */
-  private buildBed(): THREE.MeshStandardMaterial {
-    const material = new THREE.MeshStandardMaterial({
-      // DARKER THAN THE BANK IT RUNS UNDER, and that is the whole
-      // colour brief. The water is nearly clear at its margins — the
-      // surface alpha falls off toward the banks by design, so the
-      // shallows show what they are lying on — which means a bed mixed
-      // to dry-sand brightness comes through the margin unfiltered and
-      // reads as a towpath beside the river rather than as the bottom
-      // of it. Wet ground is darker than the same ground dry; mixed
-      // that way it reads as submerged, which is what it is.
-      color: 0x4a4133,
-      roughness: 0.92,
-      metalness: 0,
-      transparent: true,
-      side: THREE.DoubleSide,
-      // Sunk, the opposite of the surface above it: where the bed runs
-      // out to the bank it IS the terrain, and there the terrain
-      // should win rather than flicker against a duplicate of itself.
-      polygonOffset: true,
-      polygonOffsetFactor: 0,
-      polygonOffsetUnits: 4,
-    });
-
-    material.onBeforeCompile = (shader) => {
-      shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', `#include <common>
-          varying vec3 vBed;`)
-        .replace('#include <begin_vertex>', `#include <begin_vertex>
-          vBed = position;`);
-
-      shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', `#include <common>
-          varying vec3 vBed;
-          float bedHash(vec2 p) {
-            return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
-          }
-          float bedNoise(vec2 p) {
-            vec2 i = floor(p);
-            vec2 f = fract(p);
-            vec2 u = f * f * (3.0 - 2.0 * f);
-            return mix(
-              mix(bedHash(i), bedHash(i + vec2(1.0, 0.0)), u.x),
-              mix(bedHash(i + vec2(0.0, 1.0)), bedHash(i + vec2(1.0, 1.0)), u.x),
-              u.y);
-          }`)
-        .replace('#include <map_fragment>', `#include <map_fragment>
-          {
-            // Stones, then the sand between them. 30 units is a
-            // pebble at her scale; 8 is grit.
-            float grain = bedNoise(vBed.xz / 30.0) * 0.65
-              + bedNoise(vBed.xz / 8.0) * 0.35;
-            diffuseColor.rgb *= mix(0.80, 1.16, grain);
-            // Out on the same curve as the surface above it.
-            diffuseColor.a *= 1.0 - smoothstep(${FADE_FROM}.0, ${REACH}.0, length(vViewPosition));
-            if (diffuseColor.a < 0.02) discard;
-          }`);
-    };
-
-    return material;
   }
 
   private build(): THREE.MeshStandardMaterial {
