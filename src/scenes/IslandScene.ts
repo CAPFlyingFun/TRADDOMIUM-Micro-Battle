@@ -320,7 +320,7 @@ export class IslandScene {
     weather().setMode(settings().liveWeather ? 'live' : 'simulated');
     setDetailRange(settings().detailRange);
     setSmoothing(settings().terrainSmoothing);
-    this.buildTerrain();
+    this.buildTerrain(grid);
 
     // AFTER the terrain exists and BEFORE she is placed. Both halves
     // matter: the sections have to be there to be scaled, and she has
@@ -492,6 +492,7 @@ export class IslandScene {
       cameraAt: () => this.follow.camera.position.toArray(),
       riversDrawn: () => this.streams.shown,
       showWater: (on: boolean) => this.streams.setVisible(on),
+      showLayer: (w: 'reaches' | 'ponds', on: boolean) => this.streams.setLayer(w, on),
       paused: () => this.halted,
       /**
        * THE POSITION FIX AS A STRING — the same one under the compass.
@@ -1664,7 +1665,7 @@ export class IslandScene {
     this.skyLight.color.copy(sky);
   }
 
-  private buildTerrain(): void {
+  private buildTerrain(grid: HeightGrid): void {
     // A baked tile rather than a shipped asset: no fetch to wait on,
     // and it exists to break up the band textures' own repeat at very
     // close range, where the camera spends its whole life.
@@ -1692,7 +1693,7 @@ export class IslandScene {
       terrainMaterial(maps, grain, TIER_CUTS.middle),
       terrainMaterial(maps, grain, TIER_CUTS.backdrop),
     );
-    this.streams = new FlowWater(this.scene);
+    this.streams = new FlowWater(this.scene, grid);
   }
 
 

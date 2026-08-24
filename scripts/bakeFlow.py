@@ -21,6 +21,11 @@ cannot be anywhere the grid does not already have a valley.
      receiver.
   4. Trace the channels above a discharge threshold into centrelines,
      and size each one from the flow it carries.
+  5. Store, per station, both the BED (the filled ground) and the water
+     LEVEL over it. The renderer used to float a surface a fixed guess
+     above the floor; that guess is now measured data baked here, and
+     one runtime function -- waterLevelAt -- reads it for wet, dry, and
+     depth alike.
 
 MEASURED against USGS NHD before any of this was written to disk: 82% of
 the channels this finds land within 120 m of a real mapped river, from
@@ -190,6 +195,10 @@ def channel_depth_m(width):
     so a PERSON can swim in every stream; she is a centimetre long and a
     three-metre trench for a five-metre creek is a canyon three hundred
     body lengths deep. The true channel stays true.
+
+    THE SAME LAW AS THE RUNTIME'S channelDepth(), which takes units:
+    clip(0.12*w, 30, 250). Keep them identical -- the bake writes LEVEL
+    with this number, and the decoder trusts LEVEL - BED to obey it.
     """
     return float(np.clip(width * 0.12, 0.30, 2.5))
 
@@ -242,13 +251,31 @@ def to_world(x, y):
 
 def write(reaches, filled, dem, path):
     """
-    TMBF: a header, one row per reach, then the shared station arrays.
+    TMBF version 2: a header, one row per reach, then the station arrays.
 
       magic u32 | version u16 | pad u16 | reaches u32 | points u32
       ponds u32 | threshold f32 | pad u32 | pad u32      (32 bytes)
       per reach: first u32, count u32
-      points:  x i32, z i32, y i32 (world units), width u16
+      points:  x i32, z i32, level i32, bed i32 (world units), width u16,
+               then zero-pad to a 4-byte boundary
       ponds:   x i32, z i32, level i32, depth u16   (world units)
+
+    LEVEL IS THE WATER SURFACE AND BED IS THE GROUND UNDER IT. Version 1
+    stored only the floor and left the renderer to float a surface some
+    fixed height above it, so the one number wet, dry, and depth all hang
+    on lived in a shader, out of gameplay's reach. Now the bake owns it:
+    level = bed + channel_depth_m(width), then clamped never to rise
+    downstream along the reach, because water does not step uphill. BED
+    is the priority-flood surface itself -- equal to the sampled ground
+    everywhere outside a pond -- which is exactly what v1 called Y. Pond
+    LEVEL is unchanged: a pond is already full, its spill level IS the
+    surface, no depth is added.
+
+    THE PAD AFTER WIDTH is load-bearing, not politeness. The decoder
+    views the pond arrays as Int32Array, which needs 4-byte alignment;
+    v1 only ever decoded because nPoints happened to be even. Version 2
+    guarantees it -- 0 or 2 zero bytes -- and the decoder's total-length
+    check counts them.
     """
     pts = [p for r in reaches for p in r]
     depth = np.where(dem > 0.0, filled - dem, 0.0)
@@ -259,17 +286,54 @@ def write(reaches, filled, dem, path):
     # decoder's own length check would have caught it at boot, which is
     # exactly what that check is for — but it is cheaper to make the
     # header the size it claims than to find out on a device.
-    head = struct.pack('<IHHIIIfII', 0x46424D54, 1, 0,
+    head = struct.pack('<IHHIIIfII', 0x46424D54, 2, 0,
                        len(reaches), len(pts), len(px), WATER_THRESHOLD, 0, 0)
     rows = b''.join(struct.pack('<II', off, len(r))
                     for off, r in zip(np.cumsum([0] + [len(r) for r in reaches]), reaches))
     X = np.empty(len(pts), '<i4'); Z = np.empty(len(pts), '<i4')
-    Y = np.empty(len(pts), '<i4'); W = np.empty(len(pts), '<u2')
-    for k, (gx, gy, elev, wm) in enumerate(pts):
-        wx, wz = to_world(gx, gy)
-        X[k] = int(round(wx)); Z[k] = int(round(wz))
-        Y[k] = int(round(elev * UNITS_PER_METRE))
-        W[k] = int(round(min(65535, wm * UNITS_PER_METRE)))
+    L = np.empty(len(pts), '<i4'); B = np.empty(len(pts), '<i4')
+    W = np.empty(len(pts), '<u2')
+    k = 0
+    ponded = depth > 0.05
+    for r in reaches:
+        # CLAMPED IN INTEGER UNITS, after rounding, head to tail -- so the
+        # non-increasing invariant holds in the numbers the decoder sees,
+        # not just in the floats they came from.
+        prev = None
+        for gx, gy, elev, wm in r:
+            wx, wz = to_world(gx, gy)
+            X[k] = int(round(wx)); Z[k] = int(round(wz))
+            bed = int(round(elev * UNITS_PER_METRE))
+            if ponded[gy, gx]:
+                # THE POND OWNS THE WATER HERE. A stream crossing a pond
+                # used to ride its own bed-plus-depth ABOVE the pond's
+                # surface -- a raised band across every lake. Its level
+                # tucks two units UNDER the spill level instead: the pond
+                # sheet wins the depth test cleanly (exactly coplanar
+                # would shimmer, two different triangulations never
+                # interpolate to identical depths), and the stream
+                # re-emerges where it leaves the pond.
+                lvl = bed - 2
+                if prev is not None and lvl > prev:
+                    lvl = prev
+                # THE CLAMP CARRIES THE SPILL, NOT THE TUCK. Handing the
+                # tucked level downstream buried the outlet stream under
+                # its own bed for as long as the ground stayed flat --
+                # station 48 of the first bake with this rule, two units
+                # under ground just past a pond it was not in. A stream
+                # leaves a pond AT the pond's surface; it hugs the bed
+                # from there and deepens as the ground falls away.
+                carry = bed if prev is None else min(prev + 2, bed)
+            else:
+                lvl = int(round((elev + channel_depth_m(wm)) * UNITS_PER_METRE))
+                if prev is not None and lvl > prev:
+                    lvl = prev
+                carry = lvl
+            B[k] = bed; L[k] = lvl
+            W[k] = int(round(min(65535, wm * UNITS_PER_METRE)))
+            prev = carry
+            k += 1
+    pad = b'\0' * ((4 - W.nbytes % 4) % 4)
     PX = np.empty(len(px), '<i4'); PZ = np.empty(len(px), '<i4')
     PL = np.empty(len(px), '<i4'); PD = np.empty(len(px), '<u2')
     for k in range(len(px)):
@@ -277,10 +341,10 @@ def write(reaches, filled, dem, path):
         PX[k] = int(round(wx)); PZ[k] = int(round(wz))
         PL[k] = int(round(filled[py[k], px[k]] * UNITS_PER_METRE))
         PD[k] = int(round(min(65535, depth[py[k], px[k]] * UNITS_PER_METRE)))
-    path.write_bytes(head + rows + X.tobytes() + Z.tobytes() + Y.tobytes()
-                     + W.tobytes() + PX.tobytes() + PZ.tobytes()
-                     + PL.tobytes() + PD.tobytes())
-    return len(pts), len(px)
+    path.write_bytes(head + rows + X.tobytes() + Z.tobytes() + L.tobytes()
+                     + B.tobytes() + W.tobytes() + pad + PX.tobytes()
+                     + PZ.tobytes() + PL.tobytes() + PD.tobytes())
+    return len(pts), len(px), L - B
 
 def main():
     global WATER_THRESHOLD
@@ -307,11 +371,13 @@ def main():
     print(f'flow   biggest {q[land].max():.1f} m3/s'
           f'   channels {chan.sum():,} cells'
           f'   ({chan.sum()*CELL_M/1000:.0f} km at Q > {WATER_THRESHOLD})')
-    npts, nponds = write(reaches, filled, dem, OUT)
+    npts, nponds, over = write(reaches, filled, dem, OUT)
     widths = [w for r in reaches for (_,_,_,w) in r]
     print(f'reaches {len(reaches):,}  points {npts:,}  ponds {nponds:,}')
     print(f'width  {min(widths):.1f}-{max(widths):.1f} m,'
           f' median {np.median(widths):.1f} m')
+    print(f'level  {over.min()/UNITS_PER_METRE:.2f}-{over.max()/UNITS_PER_METRE:.2f} m'
+          f' over bed as written, median {np.median(over)/UNITS_PER_METRE:.2f} m')
     print(f'wrote  {OUT.relative_to(ROOT)}  {OUT.stat().st_size/1e6:.2f} MB')
 
 if __name__ == '__main__':
