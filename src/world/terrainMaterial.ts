@@ -29,10 +29,11 @@ import { UNITS_PER_METRE } from './kauai';
  * large enough not to alias into noise at a distance.
  */
 /**
- * World units per repeat of a band texture. At true scale a unit is a
- * centimetre, so this is a 4 cm patch of sand or grass — about right
- * for an animal one centimetre long, where ten was a whole hand-span
- * stretched across the view and read as blocks.
+ * World units per source repeat of a band texture. At true scale a unit
+ * is a centimetre, so this is a 4 cm patch of sand or grass. A single
+ * square repeat at that scale read as a checkerboard, so the shader
+ * below samples deterministic rotated, incommensurate copies rather
+ * than exposing this source lattice directly.
  */
 export const BAND_TILE = 4;
 
@@ -44,8 +45,7 @@ export const BAND_TILE = 4;
 export const reliefUniform = { value: 1 };
 
 /**
- * The floating origin, for texture tiling — passed MODULO THE TILE,
- * never whole.
+ * Floating-origin phases for the rotated texture lattices.
  *
  * THE STRIPES THAT RAN EAST TO WEST. The tiling used to hand the
  * shader the raw origin and add it to the rendered position, which
@@ -61,35 +61,50 @@ export const reliefUniform = { value: 1 };
  * worst at Mānā and Kapaʻa and mild near the island's centre because
  * the error scales with the magnitude of the world coordinate itself.
  *
- * The remainder is taken here in FLOAT64, where 2.2 million is
- * nothing, and only that remainder — a number smaller than one tile —
- * reaches the shader. Adding it to the local position shifts the
- * pattern by a whole number of tiles relative to true world tiling,
- * which is invisible, and the near cells' local coordinates are a few
- * thousand at most, so the texture coordinate is exact to a fraction
- * of a texel. The far tiers still see big locals, and do not matter:
- * past the detail fade there is no pattern left to quantise.
- *
- * The origin moves in 1024-unit steps. 1024 is a multiple of the
- * four-unit band tile, so the band offset never changes across a
- * rebase; the 1.1-unit grain tile does not divide 1024, so its offset
- * changes by a whole number of tiles — also invisible, and why each
- * tile size needs ITS OWN remainder rather than sharing one.
+ * Folding x and z before rotating is not equivalent: an axis-aligned
+ * whole tile becomes a fractional shift after rotation. Rotate in
+ * FLOAT64 here, then retain the fractional UV phase. The shader adds it
+ * to the rotated LOCAL coordinate, reproducing R * world / tile modulo
+ * one without ever sending the large world coordinate to the GPU.
  */
 export const BAND_OFFSET_UNIFORM = { value: new THREE.Vector2() };
 export const GRAIN_OFFSET_UNIFORM = { value: new THREE.Vector2() };
+export const BAND_WARP_PHASE_UNIFORM = { value: new THREE.Vector2() };
+export const GRAIN_WARP_PHASE_UNIFORM = { value: new THREE.Vector2() };
 
-/** Fold a world origin into per-tile remainders. Call on every rebase. */
+/** Row-major forms of the exact matrices authored in the shader. */
+export const BAND_ROTATION = [0.8660254, 0.5, -0.5, 0.8660254] as const;
+export const GRAIN_ROTATION = [0.7071068, 0.7071068, -0.7071068, 0.7071068] as const;
+
+/** Radians per world unit; non-axis-aligned and unrelated to either tile size. */
+export const BAND_WARP_FREQUENCIES = [0.0191, 0.0277, -0.0233, 0.0149] as const;
+export const GRAIN_WARP_FREQUENCIES = [0.0317, -0.0211, 0.0173, 0.0367] as const;
+
+/** Fold rotated UV and world-wave phases. Call on every rebase. */
 export function setTextureOrigin(x: number, z: number): void {
-  const fold = (v: number, tile: number) => ((v % tile) + tile) % tile;
-  BAND_OFFSET_UNIFORM.value.set(fold(x, BAND_TILE), fold(z, BAND_TILE));
-  GRAIN_OFFSET_UNIFORM.value.set(fold(x, GRAIN_TILE), fold(z, GRAIN_TILE));
+  const fold = (v: number, period: number) => ((v % period) + period) % period;
+  const rotated = (
+    matrix: readonly [number, number, number, number],
+    tile: number,
+  ) => [
+    fold((matrix[0] * x + matrix[1] * z) / tile, 1),
+    fold((matrix[2] * x + matrix[3] * z) / tile, 1),
+  ] as const;
+  const phase = (frequencies: readonly [number, number, number, number]) => [
+    fold(x * frequencies[0] + z * frequencies[1], Math.PI * 2),
+    fold(x * frequencies[2] + z * frequencies[3], Math.PI * 2),
+  ] as const;
+  BAND_OFFSET_UNIFORM.value.fromArray(rotated(BAND_ROTATION, BAND_TILE));
+  GRAIN_OFFSET_UNIFORM.value.fromArray(rotated(GRAIN_ROTATION, GRAIN_TILE));
+  BAND_WARP_PHASE_UNIFORM.value.fromArray(phase(BAND_WARP_FREQUENCIES));
+  GRAIN_WARP_PHASE_UNIFORM.value.fromArray(phase(GRAIN_WARP_FREQUENCIES));
 }
 
 /**
- * The fine grain is tiled much tighter and at a size that shares no
- * common factor with the band tile, so the two patterns never line up
- * and the repeat stops reading as a grid.
+ * The fine grain is tiled much tighter than the bands. Its source tile
+ * is also rotated and blended in the material: merely choosing 1.1
+ * against 4 delayed the common repeat, but did not remove the two
+ * axis-aligned square lattices from a close ant-scale view.
  */
 export const GRAIN_TILE = 1.1;
 
@@ -202,20 +217,6 @@ export function setDetailRange(times: number): void {
 const BAND_TEXELS = 1024;
 
 /**
- * How much tighter the grain is tiled than the bands.
- *
- * THE BUG THIS FIXES. The grain repeats every 1.1 units against the
- * bands' 4, so a pixel covers three and a half times as much of it —
- * and it therefore turns to noise three and a half times sooner. Both
- * were being faded on the BANDS' schedule, so at every distance where
- * the bands were still fine the grain was already streaking, which is
- * why the smearing came back in places the first fix had cleaned up.
- * The comment beside it even said the grain "aliases sooner and has to
- * go sooner"; the code handed it the same number anyway.
- */
-const GRAIN_RATIO = BAND_TILE / GRAIN_TILE;
-
-/**
  * EACH BAND'S OWN AVERAGE COLOUR, filled in when its image lands.
  *
  * The distance fade needs something to fade TO, and the honest answer
@@ -307,19 +308,15 @@ export function terrainMaterial(
     shader.uniforms.fadeFrom = FADE_FROM_UNIFORM;
     shader.uniforms.fadeTo = FADE_TO_UNIFORM;
     shader.uniforms.bandTexels = { value: BAND_TEXELS };
-    // The grain is also 512 texels but tiled 3.6 times tighter, so its
-    // texel footprint is that much larger at the same distance and it
-    // fades that much sooner — on the SAME texel thresholds, which is
-    // the point of working in texels: one perceptual scale for both.
-    shader.uniforms.grainTexelScale = {
-      value: GRAIN_RATIO * (GRAIN_SIZE / BAND_TEXELS),
-    };
+    shader.uniforms.grainTexels = { value: GRAIN_SIZE };
     // WHERE THE WORLD ACTUALLY IS. Vertices reach the shader measured
     // from the floating origin, so tiling straight off them would slide
     // the whole ground texture sideways every time the origin moved —
     // and it moves in 1024-unit steps, which no tile size divides.
     shader.uniforms.bandOffset = BAND_OFFSET_UNIFORM;
     shader.uniforms.grainOffset = GRAIN_OFFSET_UNIFORM;
+    shader.uniforms.bandWarpPhase = BAND_WARP_PHASE_UNIFORM;
+    shader.uniforms.grainWarpPhase = GRAIN_WARP_PHASE_UNIFORM;
     shader.uniforms.nearCut = { value: nearCut };
 
     shader.vertexShader = shader.vertexShader
@@ -337,10 +334,10 @@ export function terrainMaterial(
         uniform float bandTile;
         uniform float relief;
         uniform float grainTile;
-        uniform float fadeFrom, fadeTo, bandTexels, grainTexelScale;
+        uniform float fadeFrom, fadeTo, bandTexels, grainTexels;
         uniform vec3 avg_reef, avg_sand, avg_grass, avg_jungle;
         uniform vec3 avg_cliff, avg_mountain, avg_snow;
-        uniform vec2 bandOffset, grainOffset;
+        uniform vec2 bandOffset, grainOffset, bandWarpPhase, grainWarpPhase;
         uniform float nearCut;
 
         float span(float x, float lo, float hi, float feather) {
@@ -356,7 +353,16 @@ export function terrainMaterial(
         // exists to fix, just moved somewhere harder to notice.
         vec2 fromEye = abs(vGround.xz - cameraPosition.xz);
         if (nearCut > 0.0 && max(fromEye.x, fromEye.y) < nearCut) discard;
-        vec2 bandUv = (vGround.xz + bandOffset) / bandTile;
+         // The source maps are square, but their UVs are not: rotate
+         // then smoothly warp one world-deterministic coordinate. This
+         // breaks the visible straight repeat lattice without doubling
+         // the eight texture reads on a phone.
+         mat2 bandTurn = mat2(0.8660254, -0.5, 0.5, 0.8660254);
+         vec2 bandUv = bandTurn * vGround.xz / bandTile + bandOffset;
+         bandUv += vec2(
+           sin(mod(dot(vGround.xz, vec2(0.0191, 0.0277)) + bandWarpPhase.x, 6.2831853)),
+           sin(mod(dot(vGround.xz, vec2(-0.0233, 0.0149)) + bandWarpPhase.y, 6.2831853))
+         ) * 0.075;
         float h = vGround.y / max(relief, 0.0001);
         ${EDGES}
         float total = wReef + wSand + wGrass + wJung + wCliff + wMount + wSnow;
@@ -368,16 +374,6 @@ export function terrainMaterial(
           wSnow = h < 0.0 ? 0.0 : 1.0;
           total = 1.0;
         }
-        vec3 ground =
-            texture2D(t_reef, bandUv).rgb * wReef
-          + texture2D(t_sand, bandUv).rgb * wSand
-          + texture2D(t_grass, bandUv).rgb * wGrass
-          + texture2D(t_jungle, bandUv).rgb * wJung
-          + texture2D(t_cliff, bandUv).rgb * wCliff
-          + texture2D(t_mountain, bandUv).rgb * wMount
-          + texture2D(t_snow, bandUv).rgb * wSnow;
-        ground /= total;
-
         // HOW MANY SOURCE TEXELS THIS PIXEL IS AVERAGING, along the
         // long axis of its footprint — the axis anisotropic filtering
         // strains on and the axis the streaks run along. The
@@ -386,9 +382,9 @@ export function terrainMaterial(
         // actually cares about: one texel a pixel is the texture at
         // its native sharpness, hundreds is a smear whatever the
         // hardware claims to filter.
-        vec2 duvdx = dFdx(bandUv);
-        vec2 duvdy = dFdy(bandUv);
-        float texels = max(length(duvdx), length(duvdy)) * bandTexels;
+         vec2 duvdx = dFdx(bandUv);
+         vec2 duvdy = dFdy(bandUv);
+         float texels = max(length(duvdx), length(duvdy)) * bandTexels;
         float far = smoothstep(fadeFrom, fadeTo, texels);
 
         // Past that, there is nothing left to resolve. Fade to the
@@ -403,22 +399,33 @@ export function terrainMaterial(
             avg_reef * wReef + avg_sand * wSand + avg_grass * wGrass
           + avg_jungle * wJung + avg_cliff * wCliff
           + avg_mountain * wMount + avg_snow * wSnow;
-        ground = mix(ground, mean / total, far);
+         vec3 ground = mean / total;
 
-        // The fine grain rides on top at a tile size that shares no
-        // factor with the band tile, so close up there is always
-        // something moving past even mid-way through one band tile.
-        //
-        // ON ITS OWN SCHEDULE. Same pixel and the same derivatives, but
-        // the grain is tiled several times tighter, so its footprint is
-        // that much larger and it becomes noise that much sooner. It
-        // used to be faded on the BANDS' number, which meant that at
-        // every distance where the bands were still fine the grain was
-        // already streaking. (No backticks in here: this is inside a
-        // template literal, and one of those ends the shader.)
-        float grainFar = smoothstep(fadeFrom, fadeTo, texels * grainTexelScale);
-        float g = texture2D(t_grain, (vGround.xz + grainOffset) / grainTile).g;
-        ground *= mix(0.80 + g * 0.42, 1.0, grainFar);
+         // Its footprint is also decided before sampling, allowing far
+         // transition, middle and backdrop fragments to stop at averages.
+         mat2 grainTurn = mat2(0.7071068, -0.7071068, 0.7071068, 0.7071068);
+         vec2 grainUv = grainTurn * vGround.xz / grainTile + grainOffset;
+         grainUv += vec2(
+           sin(mod(dot(vGround.xz, vec2(0.0317, -0.0211)) + grainWarpPhase.x, 6.2831853)),
+           sin(mod(dot(vGround.xz, vec2(0.0173, 0.0367)) + grainWarpPhase.y, 6.2831853))
+         ) * 0.09;
+         float grainFootprint = max(length(dFdx(grainUv)), length(dFdy(grainUv))) * grainTexels;
+        float grainFar = smoothstep(fadeFrom, fadeTo, grainFootprint);
+         if (far < 0.999) {
+           vec3 detailed =
+               texture2D(t_reef, bandUv).rgb * wReef
+             + texture2D(t_sand, bandUv).rgb * wSand
+             + texture2D(t_grass, bandUv).rgb * wGrass
+             + texture2D(t_jungle, bandUv).rgb * wJung
+             + texture2D(t_cliff, bandUv).rgb * wCliff
+             + texture2D(t_mountain, bandUv).rgb * wMount
+             + texture2D(t_snow, bandUv).rgb * wSnow;
+           ground = mix(detailed / total, ground, far);
+           if (grainFar < 0.999) {
+             float g = texture2D(t_grain, grainUv).g;
+             ground *= mix(0.80 + g * 0.42, 1.0, grainFar);
+           }
+         }
 
         diffuseColor.rgb *= ground;
       `);

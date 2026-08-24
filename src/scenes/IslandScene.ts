@@ -769,6 +769,7 @@ export class IslandScene {
     setSmoothing(wanted);
     this.terrain.rebuild();
     this.lakes.invalidateTerrain(this.ant.where);
+    this.streams?.invalidateTerrain(this.ant.where);
     this.ant.reground();
   }
 

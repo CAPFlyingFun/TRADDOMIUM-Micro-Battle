@@ -188,7 +188,7 @@ export class Ocean {
     this.material = this.build(grid);
     this.mesh = new THREE.Mesh(buildOceanGrid(SPAN * 0.95), this.material);
     this.mesh.frustumCulled = false;
-    this.mesh.renderOrder = 1;
+    this.mesh.renderOrder = 0;
     scene.add(this.mesh);
     this.reorigin();
   }
@@ -271,6 +271,10 @@ export class Ocean {
       // below supplies the sky glint at grazing angles instead.
       metalness: 0.1,
       transparent: true,
+      // Dry coastline fragments are discarded in the shader. Wet fragments
+      // own depth so inland transparent water cannot blend sea through it.
+      depthTest: true,
+      depthWrite: true,
       opacity: 0.62,
       side: THREE.DoubleSide,
       // Z-FIGHT GUARD at the waterline, where the wet-sand shelf is

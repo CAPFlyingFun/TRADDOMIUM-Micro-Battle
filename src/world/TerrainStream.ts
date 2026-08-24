@@ -118,8 +118,7 @@ const MIDDLE_STEP = (MIDDLE_REACH * 2) / (MIDDLE_VERTS - 1);
 const BACKDROP_VERTS = 129;
 
 /**
- * How far each cell's edge hangs down below the ground — the fix for
- * the holes.
+ * The small amount a real LOD seam may overlap vertically.
  *
  * A fine cell has a vertex every 8 units and a coarse one every 32,
  * over the same 512-unit span. Along the edge they share, the coarse
@@ -129,17 +128,29 @@ const BACKDROP_VERTS = 129;
  * That is why the holes closed up as she approached — the cell flipped
  * to fine and the mismatch went away.
  *
- * The classic fix, and still the right one: hang a skirt off every
- * cell edge so a crack shows ground-coloured wall instead of sky.
- * Invisible otherwise, because it is under the terrain.
+ * A skirt on EVERY cell edge was not the right fix: equal-resolution
+ * neighbours share the exact same edge, so those skirts were just
+ * 2.5-metre cardboard curtains printed across otherwise continuous
+ * ground. Only an edge where the adjacent cell changes resolution needs
+ * protection. Its depth is measured from that edge's local disagreement
+ * and capped below; this is a seam overlap, not a wall.
  */
-const SKIRT_DROP = 250;
+export const MAX_SEAM_DROP = 8;
+
+export type CellEdge = 'north' | 'south' | 'west' | 'east';
+
+/** The vertex spacing on the cell across this one actual LOD seam. */
+export interface CellSeam {
+  readonly edge: CellEdge;
+  readonly neighbourStep: number;
+}
 
 interface Cell {
   /** The GLOBAL address. Never a rendered position. */
   readonly id: ChunkId;
   readonly mesh: THREE.Mesh;
   fine: boolean;
+  seamKey: string;
 }
 
 /**
@@ -155,6 +166,7 @@ interface Cell {
  */
 export function buildCell(
   at: WorldPoint, span: number, verts: number, coarse = false,
+  seams: readonly CellSeam[] = [],
 ): THREE.BufferGeometry {
   const worldX = at.wx;
   const worldZ = at.wz;
@@ -172,10 +184,9 @@ export function buildCell(
   }
 
   const count = verts * verts;
-  // Plus a skirt vertex for every vertex on the perimeter. The corners
-  // get counted twice, which costs four vertices and saves a special
-  // case in every loop below.
-  const skirts = verts * 4;
+  // Only actual LOD seams have a bridge ring. Same-LOD neighbours have
+  // identical edge vertices, so adding one there can only make a wall.
+  const skirts = verts * seams.length;
   const positions = new Float32Array((count + skirts) * 3);
   const normals = new Float32Array((count + skirts) * 3);
   const colors = new Float32Array((count + skirts) * 3);
@@ -220,18 +231,42 @@ export function buildCell(
     }
   }
 
-  // The skirt: each perimeter vertex copied straight down.
-  const edges: number[][] = [
-    Array.from({ length: verts }, (_, i) => i),                       // north
-    Array.from({ length: verts }, (_, i) => (verts - 1) * verts + i), // south
-    Array.from({ length: verts }, (_, i) => i * verts),               // west
-    Array.from({ length: verts }, (_, i) => i * verts + (verts - 1)), // east
-  ];
-  edges.forEach((edge, e) => {
+  const perimeter = (edge: CellEdge): number[] => {
+    switch (edge) {
+      case 'north': return Array.from({ length: verts }, (_, i) => i);
+      case 'south': return Array.from({ length: verts }, (_, i) => (verts - 1) * verts + i);
+      case 'west': return Array.from({ length: verts }, (_, i) => i * verts);
+      case 'east': return Array.from({ length: verts }, (_, i) => i * verts + (verts - 1));
+    }
+  };
+
+  // Measure the fine edge against the straight line its coarser
+  // neighbour draws. The fine side owns this bridge: it spans the
+  // actual disagreement in either direction, so a second coarse skirt
+  // would only duplicate triangles.
+  const seamHeight = (seam: CellSeam, along: number, sourceHeight: number): number => {
+    const coarseStep = Math.max(step, seam.neighbourStep);
+    const lo = Math.floor(along / coarseStep) * coarseStep;
+    const hi = Math.min(span, lo + coarseStep);
+    const t = hi === lo ? 0 : (along - lo) / (hi - lo);
+    const point = (distance: number) => {
+      switch (seam.edge) {
+        case 'north': return terrainHeight(worldX + distance, worldZ);
+        case 'south': return terrainHeight(worldX + distance, worldZ + span);
+        case 'west': return terrainHeight(worldX, worldZ + distance);
+        case 'east': return terrainHeight(worldX + span, worldZ + distance);
+      }
+    };
+    const straight = point(lo) + (point(hi) - point(lo)) * t;
+    return sourceHeight + Math.max(-MAX_SEAM_DROP, Math.min(MAX_SEAM_DROP, straight - sourceHeight));
+  };
+
+  const edges = seams.map((seam) => ({ edge: perimeter(seam.edge), seam }));
+  edges.forEach(({ edge, seam }, e) => {
     edge.forEach((source, i) => {
       const to = count + e * verts + i;
       positions[to * 3] = positions[source * 3];
-      positions[to * 3 + 1] = positions[source * 3 + 1] - SKIRT_DROP;
+      positions[to * 3 + 1] = seamHeight(seam, i * step, positions[source * 3 + 1]);
       positions[to * 3 + 2] = positions[source * 3 + 2];
       normals[to * 3] = normals[source * 3];
       normals[to * 3 + 1] = normals[source * 3 + 1];
@@ -242,7 +277,7 @@ export function buildCell(
     });
   });
 
-  const skirtTris = 4 * (verts - 1) * 2 * 2;
+  const skirtTris = seams.length * (verts - 1) * 2 * 2;
   const indices = new Uint32Array(quads * quads * 6 + skirtTris * 3);
   let n = 0;
   for (let iz = 0; iz < quads; iz++) {
@@ -261,7 +296,7 @@ export function buildCell(
   // four edges in four orientations is four chances to get a winding
   // backwards and leave the hole exactly where it was. Doubling a few
   // hundred triangles buys certainty; the cell itself stays one-sided.
-  edges.forEach((edge, e) => {
+  edges.forEach(({ edge }, e) => {
     for (let i = 0; i < verts - 1; i++) {
       const a = edge[i];
       const b = edge[i + 1];
@@ -497,20 +532,22 @@ export class TerrainStream {
         const key = chunkKey(id);
         wanted.add(key);
         const detailed = Math.abs(dx) <= fine && Math.abs(dz) <= fine;
+        const seamKey = this.seamsFor(id, detailed).map((seam) => seam.edge).join(',');
         const had = this.cells.get(key);
-        if (had && had.fine === detailed) continue;
+        if (had && had.fine === detailed && had.seamKey === seamKey) continue;
         if (had) {
           // Same ground, different cut: swap the geometry rather than
           // the whole mesh so nothing flickers out and back.
           had.mesh.geometry.dispose();
           had.mesh.geometry = this.cut(id, detailed);
           had.fine = detailed;
+          had.seamKey = seamKey;
           continue;
         }
         const mesh = new THREE.Mesh(this.cut(id, detailed), this.material);
         mesh.scale.y = this.relief;
         this.scene.add(mesh);
-        this.cells.set(key, { id, mesh, fine: detailed });
+        this.cells.set(key, { id, mesh, fine: detailed, seamKey });
       }
     }
 
@@ -633,6 +670,36 @@ export class TerrainStream {
   private cut(id: ChunkId, fine: boolean): THREE.BufferGeometry {
     // Sampled at the chunk's WORLD corner, so the geometry is a pure
     // function of the global address and nothing else.
-    return buildCell(chunkOrigin(id), CHUNK_SPAN, fine ? CELL_VERTS : COARSE_VERTS);
+    return buildCell(
+      chunkOrigin(id), CHUNK_SPAN, fine ? CELL_VERTS : COARSE_VERTS,
+      false, this.seamsFor(id, fine),
+    );
+  }
+
+  /**
+   * Only the border between the inner fine square and its coarse ring
+   * needs crack protection. The outer streamed edge overlaps the
+   * transition tier, and every other shared edge has matching vertices.
+   */
+  private seamsFor(id: ChunkId, fine: boolean): CellSeam[] {
+    if (!this.at) return [];
+    const reach = (FINE_CELLS - 1) / 2;
+    const detailAt = (cx: number, cz: number) =>
+      Math.abs(cx - this.at!.cx) <= reach && Math.abs(cz - this.at!.cz) <= reach;
+    const step = (detailed: boolean) =>
+      CHUNK_SPAN / ((detailed ? CELL_VERTS : COARSE_VERTS) - 1);
+    const here = fine;
+    const neighbours: ReadonlyArray<readonly [CellEdge, number, number]> = [
+      ['north', 0, -1], ['south', 0, 1], ['west', -1, 0], ['east', 1, 0],
+    ];
+    return neighbours
+      // The fine side owns the bridge. It joins its detailed edge to the
+      // coarse line above or below it, so emitting the same bridge from
+      // the coarse cell would spend twice the triangles on one seam.
+      .filter(([, dx, dz]) => here && !detailAt(id.cx + dx, id.cz + dz))
+      .map(([edge, dx, dz]) => ({
+        edge,
+        neighbourStep: step(detailAt(id.cx + dx, id.cz + dz)),
+      }));
   }
 }

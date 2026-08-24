@@ -3,7 +3,8 @@ import { toLocal } from './origin';
 import { world } from './coords';
 import { reliefScale, terrainHeight } from './heightfield';
 import { insideLake, lakeShape, lakesNear } from './lakes';
-import { containedPondLevel, pondCellsIn, pondLevel, type PondCell } from './pond';
+import { pondCellsIn, pondLevel, type PondCell } from './pond';
+import { inlandOwnerAt } from './waterOwnership';
 
 /**
  * THE SURFACE OF A LAKE, over the bed that lakes.ts pressed for it.
@@ -192,7 +193,7 @@ export function tessellate(
         addTop(
           clippedTriangle(
             triangle, (x, z) => insideLake(at, x, z)
-              && containedPondLevel(x, z, terrainHeight(x, z)) === null,
+              && inlandOwnerAt(x, z, false) === 'lake',
             box.level, terrainHeight,
           ),
           0, centreX, centreZ, points, depths, faces,
@@ -347,7 +348,7 @@ export class LakeWater {
       const cut = tessellate(index, cx, cz);
       if (!cut) continue;
       const mesh = new THREE.Mesh(cut.geometry, this.material);
-      mesh.renderOrder = 1;
+        mesh.renderOrder = 2;
       mesh.visible = this.shownAll;
       this.scene.add(mesh);
       this.drawn.set(index, { at: index, mesh, cx, cz, level: box.level });
@@ -368,7 +369,7 @@ export class LakeWater {
       const geometry = tessellatePonds(cells, cx, cz);
       if (geometry) {
         this.pond = new THREE.Mesh(geometry, this.material);
-        this.pond.renderOrder = 1;
+        this.pond.renderOrder = 3;
         this.pond.visible = this.shownAll;
         this.pondCentre = { x: cx, z: cz };
         this.scene.add(this.pond);
@@ -452,6 +453,8 @@ export class LakeWater {
       roughness: 0.22,
       metalness: 0.08,
       transparent: true,
+      depthTest: true,
+      depthWrite: true,
       opacity: 0.9,
       side: THREE.DoubleSide,
       // The bed is only two metres under at most, and at the bank it is

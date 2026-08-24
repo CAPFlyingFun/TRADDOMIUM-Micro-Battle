@@ -5,6 +5,7 @@ import { reliefScale } from './heightfield';
 import type { Hydro } from './hydro';
 import { RIBBON_EDGE } from './centreline';
 import { channelDepth, reachStations } from './rivers';
+import { inlandOwnerAt } from './waterOwnership';
 
 /**
  * THE SURFACE OF EVERY RIVER — 1,121 ribbons of moving water.
@@ -94,6 +95,7 @@ interface Drawn {
  */
 export function buildReach(
   smooth: Float64Array, cx: number, cz: number,
+  owns?: (wx: number, wz: number) => boolean,
 ): THREE.BufferGeometry | null {
   const rows = smooth.length / 4;
   if (rows < 2) return null;
@@ -137,7 +139,22 @@ export function buildReach(
   const faces: number[] = [];
   for (let i = 0; i < rows - 1; i++) {
     const a = i * 2;
-    faces.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+    if (!owns) {
+      faces.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+      continue;
+    }
+    // Four bounded ownership samples per reach quad. A rejected sample
+    // conservatively removes the quad rather than leaving a transparent
+    // sheet continuing beneath a pond or vector lake.
+    let owned = true;
+    for (const u of [0.25, 0.75]) for (const v of [0.25, 0.75]) {
+      const x0 = THREE.MathUtils.lerp(positions[a * 3], positions[(a + 1) * 3], v);
+      const z0 = THREE.MathUtils.lerp(positions[a * 3 + 2], positions[(a + 1) * 3 + 2], v);
+      const x1 = THREE.MathUtils.lerp(positions[(a + 2) * 3], positions[(a + 3) * 3], v);
+      const z1 = THREE.MathUtils.lerp(positions[(a + 2) * 3 + 2], positions[(a + 3) * 3 + 2], v);
+      owned &&= owns(cx + THREE.MathUtils.lerp(x0, x1, u), cz + THREE.MathUtils.lerp(z0, z1, u));
+    }
+    if (owned) faces.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
   }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
@@ -226,7 +243,8 @@ export class RiverWater {
       }
       cx /= rows;
       cz /= rows;
-      const geometry = buildReach(stations, cx, cz);
+      const geometry = buildReach(stations, cx, cz,
+        (wx, wz) => inlandOwnerAt(wx, wz, true) === 'river');
       if (!geometry) continue;
       const mesh = new THREE.Mesh(geometry, this.material);
       mesh.renderOrder = 1;
@@ -235,6 +253,21 @@ export class RiverWater {
       this.drawn.set(index, { mesh, cx, cz });
     }
     this.place();
+  }
+
+  /**
+   * Ownership samples terrain-contained ponds, so a terrain smoothing pass
+   * changes the answer even though neither hydrography nor the decision cell
+   * moved. Tear down and force the normal follow path to build fresh strips.
+   */
+  invalidateTerrain(at: { wx: number; wz: number }): void {
+    for (const reach of this.drawn.values()) {
+      this.scene.remove(reach.mesh);
+      reach.mesh.geometry.dispose();
+    }
+    this.drawn.clear();
+    this.lastCell = '';
+    this.follow(at);
   }
 
   /** Re-seat against the origin and the relief dial. */
@@ -281,6 +314,8 @@ export class RiverWater {
       roughness: 0.24,
       metalness: 0.06,
       transparent: true,
+      depthTest: true,
+      depthWrite: true,
       opacity: 0.9,
       side: THREE.DoubleSide,
       // LIFTED, not sunk — see the class comment. The opposite sign to

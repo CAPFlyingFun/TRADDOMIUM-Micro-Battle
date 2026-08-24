@@ -47,9 +47,10 @@ export function forgetHydro(): void {
  *
  * The sea, the lakes and the rivers each answer for themselves in their
  * own modules; this is the place that asks all three and hands back the
- * one that stands highest — a river entering a lake is under the lake's
- * surface, a lake behind the beach outranks the sea that cannot reach
- * it. Everything downstream of gameplay (drinking, wading, currents,
+ * one explicit owner: contained pond, vector lake, river, then sea. A
+ * river entering a lake is under the lake's surface; a contained pond
+ * retains that river's current while owning its spill elevation. Everything
+ * downstream of gameplay (drinking, wading, currents,
  * one day swimming) talks to this and never to the parts.
  *
  * RAW FRAME. Lake and river levels come out of the hydrography
@@ -58,10 +59,11 @@ export function forgetHydro(): void {
  * relief dial — the scene's `waterAt` handle does exactly that.
  */
 import { seaHeightAt } from './swell';
-import { reliefScale, terrainHeight } from './heightfield';
+import { terrainHeight } from './heightfield';
 import { lakeLevel } from './lakes';
 import { riverAt, inChannel } from './rivers';
 import { containedPondLevel } from './pond';
+import { waterOwner } from './waterOwnership';
 
 export type WaterKind = 'sea' | 'lake' | 'river';
 
@@ -77,45 +79,26 @@ export interface WaterBody {
 export function waterBodyAt(
   wx: number, wz: number, seconds: number,
 ): WaterBody | null {
-  // COMPARED IN THE DRAWN FRAME, RETURNED IN THE RAW ONE. Fresh levels
-  // are raw and the sea is not, and the first version compared them
-  // anyway — so at the shipped relief of 1.5, a river mouth whose
-  // surface is DRAWN above the swell still answered "sea", and the surf
-  // model ran on standing river water. The review caught it; the
-  // returned level stays raw because every caller already scales it.
-  const relief = reliefScale();
-
-  const sea = seaHeightAt(wx, wz, seconds);
-  let best: WaterBody = { kind: 'sea', level: sea, flowX: 0, flowZ: 0 };
-  let drawn = sea;
-
   const river = riverAt(wx, wz);
   const inRiver = river !== null && inChannel(river);
   const pond = containedPondLevel(wx, wz, terrainHeight(wx, wz));
-  if (pond !== null && pond * relief > drawn) {
+  const lake = lakeLevel(wx, wz);
+  switch (waterOwner({ pond: pond !== null, lake: lake !== null, river: inRiver })) {
+    case 'pond':
     // A priority-flood cell is the authority wherever it resolves water.
     // Keep the vector centreline's current, but never its independent
     // elevation: the terrain-derived spill level is the waterline.
-    best = inRiver
+    return inRiver
       ? {
-        kind: 'river', level: pond,
+        kind: 'river', level: pond!,
         flowX: river.flowX, flowZ: river.flowZ,
       }
-      : { kind: 'lake', level: pond, flowX: 0, flowZ: 0 };
-    drawn = pond * relief;
+      : { kind: 'lake', level: pond!, flowX: 0, flowZ: 0 };
+    case 'lake':
+      return { kind: 'lake', level: lake!, flowX: 0, flowZ: 0 };
+    case 'river':
+      return { kind: 'river', level: river!.level, flowX: river!.flowX, flowZ: river!.flowZ };
+    case 'sea':
+      return { kind: 'sea', level: seaHeightAt(wx, wz, seconds), flowX: 0, flowZ: 0 };
   }
-
-  const lake = lakeLevel(wx, wz);
-  if (pond === null && lake !== null && lake * relief > drawn) {
-    best = { kind: 'lake', level: lake, flowX: 0, flowZ: 0 };
-    drawn = lake * relief;
-  }
-
-  if (pond === null && inRiver && river.level * relief > drawn) {
-    best = {
-      kind: 'river', level: river.level,
-      flowX: river.flowX, flowZ: river.flowZ,
-    };
-  }
-  return best;
 }
