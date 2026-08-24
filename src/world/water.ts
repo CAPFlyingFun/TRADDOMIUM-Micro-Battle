@@ -17,11 +17,13 @@
  * that rule is broken.
  */
 import type { Hydro } from './hydro';
+import { validateBeyondHydroFrame } from './beyondFoundation';
 
 let loaded: Hydro | null = null;
 
 /** Hand over the hydrography, once, at boot. */
 export function useHydro(from: Hydro): void {
+  validateBeyondHydroFrame(from.x, from.z);
   loaded = from;
 }
 
