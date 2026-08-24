@@ -36,11 +36,26 @@ const settle = async (s) => {
 await settle(1);
 await page.evaluate((f) => window.__island.goTo(f), FIX);
 await settle(3);
+// THE CAMERA MUST NOT MOVE BETWEEN THEM, and it does if she is
+// airborne — the hold drifts and descends, so a pixel that was sky in
+// one frame is hillside in the next and the difference is measuring
+// her flight rather than the bed. The fix line is printed either side
+// of each shot; if they are not identical the comparison is void and
+// this says so instead of quietly reporting nonsense.
+const seen = [];
 for (const on of [true, false]) {
   await page.evaluate((v) => window.__island.showWater('riverbed', v), on);
-  await page.waitForTimeout(400);
+  await page.waitForTimeout(120);
+  const before = await page.evaluate(() => window.__island.fix());
   await page.screenshot({ path: `/tmp/bed-${on ? 'on' : 'off'}.png` });
+  const after = await page.evaluate(() => window.__island.fix());
+  seen.push({ on, before, after });
 }
+const held = seen.every((s) => s.before === s.after)
+  && seen[0].before === seen[1].before;
+for (const s of seen) console.log(`  ${s.on ? 'on ' : 'off'}: ${s.before}`);
+console.log(held ? 'CAMERA HELD — frames are comparable'
+  : 'CAMERA MOVED — pixel comparison below is NOT valid');
 const a = readPng('/tmp/bed-on.png');
 const b = readPng('/tmp/bed-off.png');
 let n = 0, minX = 1e9, maxX = -1, minY = 1e9, maxY = -1;

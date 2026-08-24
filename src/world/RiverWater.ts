@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { toLocal } from './origin';
 import { world } from './coords';
-import { reliefScale, terrainHeight } from './heightfield';
+import { reliefScale } from './heightfield';
 import type { Hydro } from './hydro';
 import { channelDepth, FLAT_BED, riverPointLevels } from './rivers';
 
@@ -88,23 +88,22 @@ const EDGE = 0.98;
  * worked; it was chasing a distance problem that is a resolution one.
  *
  * So the channel gets drawn by the water, not by the ground. This is a
- * sheet three vertices wide — bank, thread, bank — laid on the SAME
- * carved field the walker reads (`terrainHeight`, which carries
- * `riverBed`), sampled every 600 units along instead of every 3,125.
- * The trench is in that field already and always was; nothing on
- * screen had the resolution to draw it.
+ * sheet three vertices wide — bank, thread, bank — cut to the SAME
+ * profile `rivers.ts` carves into the heightfield, at a station every
+ * 600 units instead of a vertex every 3,125. The trench was always in
+ * that field; nothing on screen had the resolution to draw it.
  *
  * BEYOND EXTINCTION DID THIS TOO, and the difference in how is the
  * point. Its answer was to widen the carve until the render grid could
  * see it — a 96 m trench for a 6 m stream, which works when the camera
  * is a person and is absurd when it is an ant standing in the water.
  * We keep the true 5.5 m channel and give it its own geometry instead.
- * BE's numbers still apply, converted: a lift off the field so the
- * sheet beats the terrain mesh in a tie, and a hard cap under the
- * surface so it can never poke through the water it lies beneath.
+ * BE's cap carries over converted: the sheet is always at least this
+ * far under the surface, so it can never poke through the water it
+ * lies beneath. (BE also lifted its bed off the sampled ground; ours
+ * is not sampled from the ground at all — see buildStreambed — so
+ * there is nothing to lift it off.)
  */
-const BED_LIFT = 1.5;
-/** ...but always this far under the surface, whatever the ground does. */
 const BED_SINK = 1;
 
 interface Drawn {
@@ -268,16 +267,19 @@ export function buildReach(
  * thread of the channel, and dropping it to the carved bed is what
  * turns a painted band into water with something under it.
  *
- * SAMPLED, NOT ASSUMED. The Y comes from `terrainHeight` — the same
- * pure field the walker, the camera and the tests read — so the bed a
- * player sees is the bed she swims in, and a change to the carve moves
- * both together or neither. Capped under the surface so it can never
- * pierce the water, and lifted off the field so it wins the tie
- * against whatever the terrain tier happens to have drawn there.
+ * THE PROFILE, NOT A SAMPLE — and the difference is two bug reports
+ * long. The Y is the carve's own cross-channel profile evaluated at
+ * this vertex's offset: the same arithmetic as `rivers.ts`, so the
+ * drawn bed and the carved one cannot drift apart, and a change to
+ * the carve moves both or neither. Earlier versions ALSO sampled
+ * `terrainHeight` on the reasoning that real ground deeper than the
+ * profile ought to win; see buildStreambed for why that had to go.
  *
- * The edges use the SAME half-width as the surface, so the bed meets
- * the water exactly at the waterline and the ribbon gains a real edge
- * instead of a polygon boundary cut against open ground.
+ * The rim uses the SAME half-width as the surface AND sits at the
+ * waterline, so the bed meets the water exactly where the water ends.
+ * That is what stops any part of it showing outside the ribbon, and
+ * it is what gives the ribbon a real edge instead of a polygon
+ * boundary cut against open ground.
  */
 export function buildStreambed(
   stations: Float64Array, cx: number, cz: number,
@@ -287,7 +289,6 @@ export function buildStreambed(
   const rows = smooth.length / 4;
 
   const positions = new Float32Array(rows * 3 * 3);
-  const normals = new Float32Array(rows * 3 * 3);
   for (let i = 0; i < rows; i++) {
     const x = smooth[i * 4];
     const level = smooth[i * 4 + 1];
@@ -310,20 +311,30 @@ export function buildStreambed(
       const wall = Math.max(0, (across - FLAT_BED) / (1 - FLAT_BED));
       const eased = wall * wall * (3 - 2 * wall);
       const sink = Math.max(deep * (1 - eased), BED_SINK);
-      // THE DEEPER OF THE TWO, and this is the correction the test
-      // caught. Sampling the ground ALONE looks right and fails
-      // silently: where the carve is muted — a tier reading it with
-      // slack, a reach the footprint could not reach — the sample
-      // comes back at or above the waterline, the cap flattens it, and
-      // the bed is a flat sheet a centimetre under a flat surface,
-      // which is the painted band this set out to remove. The profile
-      // is the floor under that failure: a channel is drawn wherever a
-      // ribbon is, and real ground deeper than the profile still wins.
+      // AND NOTHING ELSE. Two versions of this sampled `terrainHeight`
+      // as well, on the reasoning that real ground deeper than the
+      // profile ought to win. It cost both of Joshua's reports and
+      // bought nothing.
+      //
+      // What it did was let the BANK vertices follow ground lying
+      // below the waterline — which happens all along a reach whose
+      // trench the tier could not resolve. The surface is a flat
+      // ribbon ending at the half-width; a bed whose rim ends at that
+      // same half-width but two metres lower leaves a wall of trough
+      // standing OUTSIDE the water's own silhouette. Nothing covers
+      // it, because there is nothing there to cover it — that is the
+      // "gap", and the exposed wall, angled away from the sun against
+      // bright grass, is the "black". Measured, not guessed: 66,60,50
+      // against the bank's 88,73,41.
+      //
+      // A real river's surface meets its bank exactly where the bed
+      // rises to the waterline. Pinning the rim to the profile is that
+      // sentence as arithmetic, and it is why the bed can no longer
+      // appear anywhere the water does not.
       const v = i * 3 + k;
       positions[v * 3] = wx - cx;
-      positions[v * 3 + 1] = Math.min(terrainHeight(wx, wz) + BED_LIFT, level - sink);
+      positions[v * 3 + 1] = level - sink;
       positions[v * 3 + 2] = wz - cz;
-      normals[v * 3 + 1] = 1;
     }
   }
 
@@ -331,14 +342,31 @@ export function buildStreambed(
   for (let i = 0; i < rows - 1; i++) {
     const a = i * 3;
     const b = a + 3;
-    // Two quads per station pair — left half, then right half.
-    faces.push(a, b, a + 1, a + 1, b, b + 1);
-    faces.push(a + 1, b + 1, a + 2, a + 2, b + 1, b + 2);
+    // ACROSS FIRST, THEN DOWNSTREAM — the same order buildReach winds
+    // its surface in, and the first version of this got it backwards.
+    // Wound the other way every triangle's normal comes out -Y: with
+    // DoubleSide they still DRAW, so nothing looked missing, but three
+    // flips the shading normal on a back face and a sheet declared to
+    // face the sun gets lit from underneath. It rendered black, in a
+    // band along the near bank, which is what Joshua saw. `windingUp`
+    // in the tests measures the cross product now rather than trusting
+    // the order they are typed in.
+    faces.push(a, a + 1, b, a + 1, b + 1, b);
+    faces.push(a + 1, a + 2, b + 1, a + 2, b + 2, b + 1);
   }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
   geometry.setIndex(faces);
+  // REAL NORMALS, unlike the surface above it. The water is deliberately
+  // flat-shaded — a long thin strip with computed normals shades each
+  // facet visibly through the transparency. The bed is the opposite
+  // case: its whole job is to have a shape, and a channel that is not
+  // shaded like one is a painted band again. The dial is the caveat —
+  // these are cut at relief 1 and the mesh takes the dial as a Y scale
+  // afterwards, so a heavily flattened island shades its beds slightly
+  // steeper than they lie. Cosmetic, and cheaper than re-cutting every
+  // bed on the slider.
+  geometry.computeVertexNormals();
   return geometry;
 }
 
@@ -512,19 +540,22 @@ export class RiverWater {
   /**
    * What the bed is made of.
    *
-   * NO TEXTURE, DELIBERATELY. The band maps tile every 4 units, which
-   * is 4 cm and right for ground under her feet; a bed running two
-   * hundred metres out repeats them fifty thousand times and turns to
-   * moire long before it turns to gravel. The terrain carries a
-   * distance fade to survive that. Rather than a second copy of it,
-   * the bed makes its own grain from position — two octaves of value
-   * noise at gravel and sand scale, which cannot alias into a grid
-   * because it never was one.
+   * FLAT COLOUR, AND THE SECOND THING JOSHUA CAUGHT. This carried two
+   * octaves of hash noise for gravel, seeded off the vertex position —
+   * and at true scale a reach's own local coordinates reach the
+   * hundred thousands, so the hash fed `sin()` arguments in the
+   * millions. Past a few thousand that is undefined in practice: the
+   * mantissa has no fraction left to take a sine of, and ANGLE and
+   * SwiftShader hand back garbage or NaN rather than a number in
+   * [-1, 1]. NaN through `mix` is NaN, and a NaN colour rasterises
+   * BLACK — a black bed along the whole far half of every long reach,
+   * exactly where the coordinates get big. It looked like a lighting
+   * or a winding fault and was arithmetic.
    *
-   * IN THE REACH'S OWN FRAME, not the world's. Local position is
-   * float32-safe at this scale where world position is not, and the
-   * bed does not move relative to its own centroid, so the grain stays
-   * glued to the gravel it is drawn on when the origin shifts.
+   * Grain is worth having and will come back as a tiled map with UVs
+   * folded on the CPU in float64, the way terrainMaterial already
+   * handles the same problem (see BAND_OFFSET_UNIFORM). It is not
+   * worth a hash that cannot survive the coordinates this world uses.
    *
    * IT FADES ON THE SAME CURVE AS THE WATER. Anything else and the
    * ribbon would dissolve at 130 m over a streambed that did not,
@@ -541,7 +572,7 @@ export class RiverWater {
       // reads as a towpath beside the river rather than as the bottom
       // of it. Wet ground is darker than the same ground dry; mixed
       // that way it reads as submerged, which is what it is.
-      color: 0x4a4133,
+      color: 0x5e5341,
       roughness: 0.92,
       metalness: 0,
       transparent: true,
@@ -555,34 +586,9 @@ export class RiverWater {
     });
 
     material.onBeforeCompile = (shader) => {
-      shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', `#include <common>
-          varying vec3 vBed;`)
-        .replace('#include <begin_vertex>', `#include <begin_vertex>
-          vBed = position;`);
-
       shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', `#include <common>
-          varying vec3 vBed;
-          float bedHash(vec2 p) {
-            return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
-          }
-          float bedNoise(vec2 p) {
-            vec2 i = floor(p);
-            vec2 f = fract(p);
-            vec2 u = f * f * (3.0 - 2.0 * f);
-            return mix(
-              mix(bedHash(i), bedHash(i + vec2(1.0, 0.0)), u.x),
-              mix(bedHash(i + vec2(0.0, 1.0)), bedHash(i + vec2(1.0, 1.0)), u.x),
-              u.y);
-          }`)
         .replace('#include <map_fragment>', `#include <map_fragment>
           {
-            // Stones, then the sand between them. 30 units is a
-            // pebble at her scale; 8 is grit.
-            float grain = bedNoise(vBed.xz / 30.0) * 0.65
-              + bedNoise(vBed.xz / 8.0) * 0.35;
-            diffuseColor.rgb *= mix(0.80, 1.16, grain);
             // Out on the same curve as the surface above it.
             diffuseColor.a *= 1.0 - smoothstep(${FADE_FROM}.0, ${REACH}.0, length(vViewPosition));
             if (diffuseColor.a < 0.02) discard;
