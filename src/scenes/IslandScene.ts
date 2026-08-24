@@ -535,10 +535,15 @@ export class IslandScene {
        * in one frame what an afternoon of reasoning about polygon
        * offsets does not.
        */
-      showWater: (which: 'sea' | 'lakes' | 'rivers', on: boolean) => {
+      showWater: (which: 'sea' | 'lakes' | 'rivers' | 'riverbed', on: boolean) => {
         if (which === 'sea') this.water.mesh.visible = on;
         if (which === 'lakes') this.lakes.setVisible(on);
         if (which === 'rivers') this.streams?.setVisible(on);
+        // The bed on its own, because "is it visible, and where" is not
+        // answerable from two builds photographed a minute apart — the
+        // sun moves, the weather rolls, and a third of the frame
+        // changes for reasons that are not the thing being measured.
+        if (which === 'riverbed') this.streams?.setBedVisible(on);
       },
       paused: () => this.halted,
       /**
