@@ -28,7 +28,6 @@
  * is the property that lets a nest built here still be here tomorrow.
  */
 import * as THREE from 'three';
-import { riverDamp } from './rivers';
 import {
   CELL_VERTS, CELLS, COARSE_VERTS, FINE_CELLS, groundDetail,
   farHeight, ISLAND_SPAN, terrainHeight,
@@ -41,14 +40,6 @@ import { toLocal } from './origin';
 
 const SOIL_TINT = new THREE.Color(1.22, 0.98, 0.72);
 
-/**
- * Ground that a river keeps wet: darker, cooler, a little green.
- *
- * A multiplier like SOIL_TINT, so it darkens whatever the ground
- * already is rather than painting a colour over it — wet sand and wet
- * basalt are both still themselves.
- */
-const DAMP_TINT = new THREE.Color(0.62, 0.74, 0.66);
 
 /**
  * FOUR DISTANCE TIERS, and each draws only where it is the best one.
@@ -204,15 +195,13 @@ export function buildCell(
       const slope = Math.hypot(dhdx, dhdz);
       tint.setRGB(1, 1, 1);
       if (h > 0) tint.lerp(SOIL_TINT, Math.min(0.6, slope * 0.55));
-      // THE RIPARIAN CORRIDOR. A stream seen from the air is mostly
-      // not water — it is the damp ground and the growth that follow
-      // it, tens of metres wide where the channel is five. Without it
-      // the ribbons sit on the sand like tape; with it they lie in
-      // something. See riverDamp for why this and not a deeper trench.
-      if (h > 0) {
-        const wet = riverDamp(worldX + ix * step, worldZ + iz * step);
-        if (wet > 0) tint.lerp(DAMP_TINT, wet * 0.72);
-      }
+      // THE RIPARIAN CORRIDOR WENT WITH THE RIVERS. A damp band of
+      // darker ground used to follow every channel — tens of metres
+      // wide where the channel was five — because a ribbon lying on
+      // bare sand reads as tape rather than as a stream. There is no
+      // channel to follow now. Whatever replaces the water will want
+      // this back: the corridor did more for how a river read than the
+      // ribbon itself did.
       tint.multiplyScalar(1 + groundDetail(worldX + ix * step, worldZ + iz * step) * 0.11);
       colors[i * 3] = tint.r;
       colors[i * 3 + 1] = tint.g;

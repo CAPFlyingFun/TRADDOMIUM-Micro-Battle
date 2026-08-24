@@ -31,8 +31,6 @@
  * on Kauaʻi, not a place in this frame's render space.
  */
 import { chunkAt, chunkKey, world, type WorldPoint } from './coords';
-import { riverLevel } from './rivers';
-import { lakeLevel } from './lakes';
 import { geoToWorld, type GeoPoint } from './geo';
 import { bandFor, groundHeight, terrainHeight } from './heightfield';
 import { UNITS_PER_METRE } from './kauai';
@@ -208,14 +206,11 @@ export function refuse(at: WorldPoint, want: Environment): Refusal | null {
   const height = terrainHeight(at.wx, at.wz);
   if (height <= 0) return 'underwater';
 
-  // FRESH water counts too. This check predates the lakes and rivers,
-  // so 'underwater' meant only the sea — and a founding chamber dug at
-  // the bottom of the Wailua is not a founding, it is a burial at sea
-  // in fresh water. Inside a channel or under a lake's waterline is
-  // refused for the same reason the ocean is.
-  if (riverLevel(at.wx, at.wz) !== null) return 'underwater';
-  const lake = lakeLevel(at.wx, at.wz);
-  if (lake !== null && lake > height) return 'underwater';
+  // 'UNDERWATER' MEANS THE SEA AGAIN, which is all it meant before the
+  // lakes and rivers existed and all it can mean now they are gone. It
+  // has to come back the moment fresh water does: a founding chamber
+  // dug at the bottom of the Wailua is not a founding, it is a burial
+  // at sea in fresh water.
 
   // The surface she will STAND on, which is the drawn triangle rather
   // than the smooth source — see heightfield. A candidate validated

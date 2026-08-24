@@ -37,8 +37,6 @@
 import {
   blurGrid, cellSlope, heightAt, SPAN, STEP, UNITS_PER_METRE, type HeightGrid,
 } from './kauai';
-import { lakeBed } from './lakes';
-import { riverBed } from './rivers';
 
 /**
  * THE SYNTHESISED GROUND.
@@ -231,67 +229,33 @@ export function terrainHeight(x: number, z: number): number {
   const land = baseLand(x, z);
   if (land <= 0) return land;
 
-  // WATER PRESSES THE GROUND DOWN, and only down. The island's basins
-  // and channels are not resolved at 55 m a sample — 72 of the 111
-  // lakes have terrain ABOVE their own waterline, and a 5.5 m stream
-  // does not exist in the grid at all — so without this the water would
-  // be drawn buried in a hillside. See lakes.ts and rivers.ts.
-  //
-  // Free when there is no water here, which is almost everywhere: one
-  // array read per index says so.
-  const lake = lakeBed(x, z);
-  let low = land;
-  if (lake !== null && lake < low) low = lake;
-  const river = riverBed(x, z);
-  if (river !== null && river < low) low = river;
-  return low;
+  // NO WATER CARVES IT ANY MORE. The lake and river beds used to press
+  // this surface down so the drawn water had somewhere to sit; the
+  // whole water layer came out (see the strip commit), and with it the
+  // trenches. The island is the height grid and nothing else again.
+  return land;
 }
 
 /**
  * THE SURFACE A DISTANCE TIER SHOULD CARRY, given how coarsely it is
  * cut. `slack` is how much ground one of its vertices stands for.
  *
- * THIS USED TO REFUSE RIVERS, and refusing them was the bug. The
- * argument was sound as far as it went — the transition tier samples
- * every 312.5 units, a median river is 550 wide, so a POINT sample of
- * the trench lands on one vertex and misses the next, and the channel
- * becomes a run of pockmarks. The conclusion drawn from it was that
- * those tiers must have no channel at all.
+ * IT IS `baseLand` AND NOTHING ELSE NOW. This function existed to solve
+ * a problem the water made: a coarse vertex point-sampling a 5.5 m
+ * channel landed in the trench or missed it, so distant rivers came out
+ * as pockmarks or as ribbons floating over ground that had never been
+ * cut for them. The answer was to ask for the LOWEST ground a vertex
+ * stands for rather than the height at its exact spot, and `slack` is
+ * what carried that footprint.
  *
- * But the ribbons were still drawn out there, at their true water
- * level, over ground with nothing to hold them. Measured across the
- * whole drainage, the drawn terrain sat ABOVE the river surface at 76%
- * of samples on the transition tier and 87% on the middle one, by a
- * median of two metres and a worst case of sixty-six. Half of every
- * distant river was inside a hill, and the material's negative polygon
- * offset — which scales with the depth slope, so it runs away at
- * grazing angles — floated the buried half back out over the hillside.
- * That is the pale sheet you could fly through, and it is the same
- * "two terrains" fault the tier ladder was built to cure, one layer up.
- *
- * The fix is not a point sample of a finer thing. It is to stop point
- * sampling: a coarse vertex stands for the square around it, and the
- * honest height for that square is the LOWEST ground in it. Ask that,
- * and a vertex beside a river goes in the river — no pockmarks,
- * because the answer varies smoothly with the footprint, and no
- * floating water, because every triangle that overlaps a channel has
- * its corners in one. The trench comes out a little wider than life at
- * the coarsest tiers, which at two kilometres is a groove in a valley
- * that already has one.
- *
- * It is the exact mirror of `dryLand`'s neighbourhood MAX for the
- * coastline: max to keep the sea out of the beach, min to keep the
- * island out of the water.
+ * With the water layer gone there is no trench to find and no footprint
+ * to search, so every tier can read the grid directly. `slack` is kept
+ * in the signature because the tiers still pass it and because whatever
+ * replaces the water will need it back — the lesson it encodes is not
+ * about rivers, it is about what a coarse vertex is allowed to claim.
  */
-export function farHeight(x: number, z: number, slack = 0): number {
-  const land = baseLand(x, z);
-  if (land <= 0) return land;
-  let low = land;
-  const lake = lakeBed(x, z, slack);
-  if (lake !== null && lake < low) low = lake;
-  const river = riverBed(x, z, slack);
-  if (river !== null && river < low) low = river;
-  return low;
+export function farHeight(x: number, z: number, _slack = 0): number {
+  return baseLand(x, z);
 }
 
 /**

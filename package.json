@@ -1,7 +1,7 @@
 {
   "name": "traddomium-micro-battle",
   "private": true,
-  "version": "0.62.0",
+  "version": "0.0.42",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -25,19 +25,10 @@
     "icons": "node scripts/make-icons.mjs",
     "bake:queen": "node scripts/bakeQueen.mjs",
     "shots:hud": "node scripts/hudshot.mjs",
-    "probe:hydro": "node scripts/probe-hydro.mjs",
-    "bake:hydro": "python3 scripts/bakeHydro.py",
-    "rivers:scale": "python3 scripts/riversToScale.py",
-    "probe:ocean": "node scripts/probe-ocean.mjs",
     "probe:update": "node scripts/probe-update.mjs",
-    "probe:lakes": "node scripts/probe-lakes.mjs",
-    "probe:surf": "node scripts/probe-surf.mjs",
-    "probe:rivers": "node scripts/probe-rivers.mjs",
     "probe:save": "node scripts/probe-save.mjs",
     "probe:revisit": "node scripts/probe-revisit.mjs",
-    "probe:whichwater": "node scripts/probe-whichwater.mjs",
-    "bake:veg": "python3 scripts/bakeVeg.py",
-    "bake:water": "python3 scripts/bakeWater.py"
+    "bake:veg": "python3 scripts/bakeVeg.py"
   },
   "dependencies": {
     "three": "^0.180.0"

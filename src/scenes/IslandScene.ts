@@ -16,26 +16,7 @@ import {
 import { findLandfall, UNITS_PER_METRE, type HeightGrid } from '../world/kauai';
 import { local, world, type WorldPoint } from '../world/coords';
 import { TerrainStream, TIER_CUTS } from '../world/TerrainStream';
-import { Ocean } from '../world/Ocean';
-import { LakeWater } from '../world/LakeWater';
-import { RiverWater } from '../world/RiverWater';
-import { hydro, waterBodyAt } from '../world/water';
-import { Thirst, TOO_DEEP } from '../ant/thirst';
-import { Swim } from '../ant/swim';
-import { Breath } from '../ant/breath';
-import { shoreward, surfAt, type Surf } from '../world/surf';
 
-/**
- * How quickly she takes the water's speed, in seconds.
- *
- * Short, because a body eleven millimetres long in water moving half a
- * metre a second has essentially no say in the matter — but not zero,
- * because "almost at once" and "instantly" look completely different at
- * the moment a wave arrives, and only one of them is true.
- */
-const SWEPT_EASE = 0.18;
-import { lakeLevel } from '../world/lakes';
-import { seaHeightAt } from '../world/swell';
 import { originAt, rebaseFor, setOrigin, toLocal, toWorld,
 } from '../world/origin';
 import { bakeGrain, GRAIN_SIZE } from '../world/groundTexture';
@@ -50,8 +31,7 @@ import {
 } from '../game/save';
 import { Vitals } from '../ui/Vitals';
 import { LIVE_GROWTH, liveStat } from '../ant/castes';
-import { MM_PER_UNIT } from '../ant/queenModel';
-import { ActionPad, type Action } from '../input/ActionPad';
+import { ActionPad } from '../input/ActionPad';
 import { LiftSlider } from '../input/LiftSlider';
 import { DebugDie } from '../ui/DebugDie';
 import { WeatherChip } from '../ui/WeatherChip';
@@ -69,7 +49,7 @@ import {
   MOVING_RECOVERY, RESTING_RECOVERY, SPRINT_DRAIN,
 } from '../ant/stamina';
 import { loadQueen, QUEEN_JOB, type QueenBody } from '../ant/queenModel';
-import { onChange, settings } from '../ui/settings';
+import { onChange, set as setSetting, settings } from '../ui/settings';
 import { fixAt, formatFix, fixToWorld, parseFix } from '../ui/fix';
 import { weather } from '../weather/WeatherService';
 import { skyLook } from '../weather/sky';
@@ -193,7 +173,6 @@ export class IslandScene {
    * flurry of saves the moment she resumes.
    */
   private static readonly AUTOSAVE_EVERY = 60;
-  private readonly drinkButton: Action;
   private readonly flight = new Flight();
   /** Five minutes of being left alone, and of leaving everything alone. */
   private readonly grace = new Grace();
@@ -248,15 +227,6 @@ export class IslandScene {
   private readonly ant = new PlayerAnt();
   private readonly clock = new THREE.Clock();
   private terrain!: TerrainStream;
-  /**
-   * The sea. It is centred on the island rather than on her, so it
-   * moves with every rebase like everything else already placed.
-   */
-  private water!: Ocean;
-  private lakes!: LakeWater;
-  private streams: RiverWater | null = null;
-  private readonly thirst = new Thirst();
-  private drinking = false;
   /**
    * The CEILING on a full push of the stick — not propulsion. She does
    * not move because this is set; she moves because a thumb asks.
@@ -348,7 +318,6 @@ export class IslandScene {
     setDetailRange(settings().detailRange);
     setSmoothing(settings().terrainSmoothing);
     this.buildTerrain();
-    this.buildWater(grid);
 
     // AFTER the terrain exists and BEFORE she is placed. Both halves
     // matter: the sections have to be there to be scaled, and she has
@@ -410,8 +379,11 @@ export class IslandScene {
     // CONTEXTUAL, per the HUD rule: it exists because water now exists,
     // and it only lights when she is actually standing at some. Held,
     // not tapped — drinking is an act, and an act can be interrupted.
-    this.drinkButton = this.actions.add('💧', 'drink', 'KeyE');
-    this.drinkButton.enable(false);
+    // THE DRINK BUTTON WENT WITH THE WATER. It stayed on the pad for
+    // one build after the water came out, permanently disabled, which
+    // is the state the contextual-HUD rule exists to forbid: a control
+    // for a mechanic the game does not have is clutter even when it is
+    // greyed. It comes back when there is something to drink.
     this.vitals = new Vitals(host, {
       health: liveStat('maxHealth'),
       food: liveStat('maxHunger'),
@@ -514,32 +486,7 @@ export class IslandScene {
       where: () => [this.ant.where.wx, this.ant.root.position.y, this.ant.where.wz],
       origin: () => originAt(),
       cells: () => this.terrain.cellCount,
-      lakesDrawn: () => this.lakes.shown,
-      surf: () => ({ ...this.surf, carriedX: this.carried.x, carriedZ: this.carried.z }),
-      thirst: () => this.thirst.fraction,
-      parch: () => this.thirst.parch(),
-      drinking: () => this.drinking,
-      riversDrawn: () => this.streams?.shown ?? 0,
-      waterBody: (wx: number, wz: number) => {
-        const body = waterBodyAt(wx, wz, this.elapsed);
-        if (!body) return null;
-        const drawn = body.kind === 'sea' ? body.level : body.level * reliefScale();
-        return { ...body, drawn, depth: drawn - groundHeight(wx, wz) };
-      },
       cameraAt: () => this.follow.camera.position.toArray(),
-      /**
-       * SHOW OR HIDE ONE WATER LAYER — for telling them apart.
-       *
-       * Three of them can put blue on the screen and a screenshot
-       * cannot say which did. Turning them off one at a time answers
-       * in one frame what an afternoon of reasoning about polygon
-       * offsets does not.
-       */
-      showWater: (which: 'sea' | 'lakes' | 'rivers', on: boolean) => {
-        if (which === 'sea') this.water.mesh.visible = on;
-        if (which === 'lakes') this.lakes.setVisible(on);
-        if (which === 'rivers') this.streams?.setVisible(on);
-      },
       paused: () => this.halted,
       /**
        * THE POSITION FIX AS A STRING — the same one under the compass.
@@ -581,24 +528,7 @@ export class IslandScene {
         this.flight.land();
         this.terrain.follow(this.ant.where);
         this.terrain.place();
-        this.water.reorigin();
-        this.lakes.follow(this.ant.where);
-        this.streams?.follow(this.ant.where);
         this.follow.snapTo(this.ant.root, -heading);
-      },
-      seaAt: (wx: number, wz: number) => seaHeightAt(wx, wz, this.elapsed),
-      /**
-       * The DRAWN surface of a lake here, or null.
-       *
-       * Scaled by the relief dial, exactly as the mesh and
-       * `groundHeight` are, so a caller can compare it with the ground
-       * without knowing the dial exists. A probe that compared a scaled
-       * bed against an unscaled waterline convicted the carve of being
-       * thirty-four metres wrong; it was off by a factor of 1.5.
-       */
-      waterAt: (wx: number, wz: number) => {
-        const level = lakeLevel(wx, wz);
-        return level === null ? null : level * reliefScale();
       },
       pace: () => this.pace,
       setPace: (to: Pace) => { this.pace = to; },
@@ -752,8 +682,6 @@ export class IslandScene {
     // survived a relief change because their follow() happens to re-seat
     // every frame; the rivers' follow() early-returns and kept the old
     // scale until she crossed a decision cell — minutes, at ant pace.
-    this.lakes?.place();
-    this.streams?.place();
   }
 
   /**
@@ -802,9 +730,6 @@ export class IslandScene {
     this.weatherChip.dispose();
     this.compass.dispose();
     this.rain.dispose();
-    this.water.dispose();
-    this.lakes.dispose();
-    this.streams?.dispose();
     this.detachSettings();
     this.detachKill();
     this.renderer.dispose();
@@ -826,7 +751,9 @@ export class IslandScene {
         agl: this.flight.height,
       },
       body: { stage: LIVE_GROWTH, winged: this.winged },
-      meters: { stamina: this.stamina.fraction, thirst: this.thirst.fraction },
+      // `thirst` stays in the schema so saves written while the water
+      // existed still load; nothing feeds it now.
+      meters: { stamina: this.stamina.fraction, thirst: 1 },
       elapsed: this.elapsed,
       playedSeconds: this.lived,
     };
@@ -860,7 +787,6 @@ export class IslandScene {
     this.lived = save.playedSeconds;
     this.elapsed = save.elapsed;
     this.stamina.restore(save.meters.stamina);
-    this.thirst.restore(save.meters.thirst);
     this.setWings(save.body.winged);
   }
 
@@ -1013,27 +939,16 @@ export class IslandScene {
       // for one while stopped or reversing costs nothing.
       const sprinting = wants && travel.speed > PACE_SPEED[this.pace] + 1e-3;
       const resting = this.ant.pace < 0.05;
-      // THE WATER GETS A VOTE, and it has to be counted BEFORE she
-      // moves: what it does to her is not only a push, it is how fast
-      // she can go, what it costs her, and — new — how high off the
-      // bed she is sitting. On the ground the wind already has her.
-      const carry = this.swept(dt);
-      const wet = this.swim.afloat;
-      this.effort = (sprinting ? SPRINT_DRAIN
-        : resting ? RESTING_RECOVERY : MOVING_RECOVERY) + wet.cost;
+      // THE WATER USED TO GET A VOTE HERE, counted before she moved:
+      // what it did to her was not only a push but how fast she could
+      // go, what it cost her, and how high off the bed she sat. All
+      // three came back from one call. Whatever replaces the water
+      // should plug in at this line and nowhere else — that shape was
+      // right even though what filled it was not.
+      this.effort = sprinting ? SPRINT_DRAIN
+        : resting ? RESTING_RECOVERY : MOVING_RECOVERY;
       winded = this.stamina.update(this.effort, dt);
-      // ROWING IS NOT WALKING. Slower through it than on top of it,
-      // and slower still under.
-      const through = wet.pace === 1 ? travel : {
-        ahead: travel.ahead * wet.pace,
-        across: travel.across * wet.pace,
-        speed: travel.speed * wet.pace,
-      };
-      // SHE STANDS ON WHATEVER IS HOLDING HER UP. `above` was always
-      // zero here — she was welded to the bed — so floating needs no
-      // new machinery in the walker: the surface is simply a higher
-      // floor. See swim.ts.
-      this.ant.update(through, -look.yaw, dt, wet.ride, carry);
+      this.ant.update(travel, -look.yaw, dt, 0, null);
     }
 
     // Exhaustion drops her to the sustainable pace, never to a halt —
@@ -1111,45 +1026,16 @@ export class IslandScene {
     // question this meter asks. Ticked here rather than inside the
     // water branch so surfacing on dry land still refills her — she
     // does not hold her breath standing on a riverbank.
-    this.breath.update(this.swim.afloat.state === 'under', dt);
-    this.vitals.air(this.breath.fraction);
     this.vitals.aloft(this.flight.aloft);
     this.vitals.show(this.stamina.fraction, this.stamina.spent, this.effort);
 
-    // ── DRINKING, and the thirst that finally moves ─────────────────
-    // The button lights when there is water at her feet — or a nose
-    // length ahead, so she can stand dry at the edge and reach down —
-    // shallow enough that drinking it is not being swept by it. An act,
-    // not a tap: held, still, on the ground.
-    const draft = liveStat('bodyLength') / MM_PER_UNIT;
-    const nose = this.ant.where;
-    // ANY water within three body lengths of her nose, at ANY depth.
-    // The first version also demanded the water AHEAD be shallow, which
-    // multiplied two conditions into a drinkable strip about one
-    // centimetre wide along every bank — a control nobody could ever
-    // line up. She drinks from the SURFACE at the edge; how deep the
-    // river is under that surface is the river's business. The depth
-    // condition that matters is on HER: she must not currently be
-    // gripped by the water she is trying to drink.
-    const sip = (wx: number, wz: number): boolean => {
-      const body = waterBodyAt(wx, wz, this.elapsed);
-      if (!body) return false;
-      const drawn = body.kind === 'sea' ? body.level : body.level * reliefScale();
-      return drawn - groundHeight(wx, wz) > 0;
-    };
-    let reached = sip(nose.wx, nose.wz);
-    for (let out = 1; !reached && out <= 3; out++) {
-      reached = sip(
-        nose.wx + Math.sin(this.ant.bearing) * draft * out,
-        nose.wz + Math.cos(this.ant.bearing) * draft * out,
-      );
-    }
-    const canDrink = !this.flight.aloft
-      && this.surf.grip < TOO_DEEP
-      && reached;
-    this.drinkButton.enable(canDrink);
-    this.drinking = canDrink && this.drinkButton.held && this.ant.pace < 5;
-    this.vitals.showWater(this.thirst.update(this.drinking, dt), this.drinking);
+    // ── DRINKING WENT WITH THE WATER ────────────────────────────────
+    // A button lit when there was water at her feet or a nose length
+    // ahead, and holding it still on the ground refilled her. There is
+    // nothing to drink from now, so the thirst meter went too — a bar
+    // may only move if there is a way to move it back, and with no
+    // water there is no way back. That rule is why this whole block is
+    // gone rather than left drifting downward.
     // NOTHING TO TICK. The grace is a deadline, so the only question
     // each frame is what time it is — which is why backgrounding the
     // tab or losing the page can no longer buy extra protection.
@@ -1168,16 +1054,15 @@ export class IslandScene {
     //
     // It was gated on takeoff: on the ground it only came alive when
     // she was running fast enough to fly, and `off` forces the lever
-    // to read zero. So a queen standing in a river — not flying, and
-    // never going to reach takeoff speed while the water has her — had
-    // no vertical control at all. She could not dive and she could not
-    // swim up, which is the entire control the last release was about.
-    const swimming = this.swim.afloat.state !== 'dry'
-      && this.swim.afloat.state !== 'wading';
-    if (this.flight.aloft || swimming) {
-      // Never off in the air or in the water, even spent: coming DOWN
-      // is always hers, and the models refuse the up half themselves
-      // when there is nothing left to spend on it.
+    // to read zero. A queen standing in a river — not flying, and never
+    // going to reach takeoff speed while the water had her — was left
+    // with no vertical control at all, which is worth remembering when
+    // the water comes back: being HELD by something is not the same as
+    // being unable to act.
+    if (this.flight.aloft) {
+      // Never off in the air, even spent: coming DOWN is always hers,
+      // and the model refuses the up half itself when there is nothing
+      // left to spend on it.
       this.liftSlider.enable('full');
     } else {
       this.liftSlider.enable(
@@ -1201,13 +1086,6 @@ export class IslandScene {
       // move it — it refolds the phase that keeps it where it is. See
       // Ocean.reorigin, and the test that proves a rebase leaves the
       // water alone.
-      this.water.reorigin();
-      this.streams?.place();
-      // A lake IS at a fixed place, so its surfaces are re-seated
-      // rather than refolded — the TerrainStream pattern, and for the
-      // same reason: their geometry is built around their own centres
-      // and only the seat depends on where the origin is.
-      this.lakes.place();
       // The ground texture tiles off world position, not rendered
       // position, or it slides sideways on every shift.
       const now = originAt();
@@ -1215,8 +1093,6 @@ export class IslandScene {
       this.terrain.place();
     }
     this.terrain.follow(at);
-    this.lakes.follow(at);
-    this.streams?.follow(at);
 
     // WEATHER IS ASKED IN GLOBAL COORDINATES and drawn in local ones.
     // Her position decides what the sky is doing; the CAMERA's rendered
@@ -1233,9 +1109,6 @@ export class IslandScene {
     // thing about it that is allowed to be local: the grid is recentred
     // on the eye, while every wave on it is a function of where the
     // island is. See Ocean.
-    this.water.update(this.follow.camera.position, dt);
-    this.lakes.update(dt);
-    this.streams?.update(dt);
     const reading = service.reading;
     if (reading) {
       this.weatherChip.update(
@@ -1365,7 +1238,6 @@ export class IslandScene {
       ...look([transition], 'transition', TIER_CUTS.transition),
       ...look([middle], 'middle', TIER_CUTS.middle),
       ...look([backdrop], 'backdrop', TIER_CUTS.backdrop),
-      ...look([this.water.mesh], 'sea', 0),
     ].sort((a, b) => a.distance - b.distance);
 
     const seen = hits.find((hit) => hit.drawn) ?? null;
@@ -1589,12 +1461,24 @@ export class IslandScene {
     // scales every height, so a fix taken at 1.0 and restored at 1.5
     // asks for a spot ninety-five metres inside a hill — where the
     // floor clamp obligingly stands her on the summit and the whole
-    // frame is wrong in a way that reads as drift. Converted rather
-    // than trusted; a fix with no dial recorded is assumed to be ours.
-    const dial = reliefScale();
-    const msl = Number.isFinite(fix.relief)
-      ? (fix.msl / fix.relief) * dial
-      : fix.msl;
+    // frame is wrong in a way that reads as drift.
+    //
+    // SO SET THE DIAL, rather than converting the altitude to survive a
+    // different one. Converting put her at the right height above the
+    // wrong island: at 1.5 every ridge stands half again as tall and
+    // every valley half again as deep, which is not the terrain the
+    // screenshot was taken of. A reproduced frame that gets the height
+    // right and the SHAPE wrong is worse than no reproduction, because
+    // it looks like a reproduction. Measured: asked for ×1.00 at
+    // 22.32 m and got ×1.50 at 33.49 m — exactly 1.5 times, exactly
+    // wrong, and a completely different hillside.
+    //
+    // A fix with no dial recorded predates the field and is assumed to
+    // be ours, so nothing moves and the altitude is taken at face value.
+    if (Number.isFinite(fix.relief) && fix.relief !== reliefScale()) {
+      setSetting('terrainRelief', fix.relief);
+    }
+    const msl = fix.msl;
     const agl = msl - groundHeight(at.wx, at.wz);
     const look = (fix.pitch * Math.PI) / 180;
     if (agl > 1) this.flight.hold(agl, heading);
@@ -1675,95 +1559,15 @@ export class IslandScene {
     };
   }
 
-  /** The last surf reading, for the HUD, the probes and the debug handle. */
-  private surf: Surf = { depth: 0, grip: 0, x: 0, z: 0 };
-
-  /**
-   * WHAT THE SEA IS DOING TO HER, RIGHT WHERE SHE IS.
-   *
-   * The one place the ocean stops being scenery. Nothing here is tuned:
-   * the orbital flow comes out of the same wave table the shader is
-   * generated from, and a broken wave runs at the square root of
-   * gravity times depth. At eleven millimetres long she loses to all of
-   * it — see surf.ts for the numbers.
-   *
-   * DRAG, NOT A SHOVE. She is not teleported at the water's speed; her
-   * carry eases toward it over a fraction of a second, scaled by how
-   * much of her is actually in it. A body this small in water this fast
-   * reaches the water's speed almost at once, which is why the constant
-   * is short — but "almost at once" and "instantly" look very different
-   * at the moment a wave arrives, and the first is the true one.
-   */
-  private swept(dt: number): { x: number; z: number } | null {
-    const at = this.ant.where;
-    const ground = groundHeight(at.wx, at.wz);
-    const uphill = shoreward(at.wx, at.wz, groundHeight);
-    // HER OWN LENGTH OF WATER TAKES HER, and she grows: a founding
-    // queen is 5.5 mm where an adult is 10, so the same puddle carries
-    // the young one off and only wets the old one's feet.
-    const draft = liveStat('bodyLength') / MM_PER_UNIT;
-
-    // WHICH WATER HAS HER. The sea gets the full surf model — orbits,
-    // bores, the shoreward rail. A river is simpler and different: no
-    // waves, just the current, downstream, scaled by how much of her is
-    // in it. A lake is still water and carries nobody anywhere.
-    const body = waterBodyAt(at.wx, at.wz, this.elapsed);
-    if (body && body.kind !== 'sea') {
-      // Lake and river levels are RAW; she stands on the DRAWN ground.
-      const level = body.level * reliefScale();
-      // HOW MUCH OF HER THE WATER HAS — see swim.ts. The old answer was
-      // "all of it, one body length in", which is a centimetre against
-      // channels one to two hundred deep: stepping into a river went
-      // from nothing to fully swept inside a stride. It also had no
-      // way to say she was standing ON the water, which at her size is
-      // the ordinary case rather than a trick.
-      const wet = this.swim.update(
-        level > ground ? { level, bed: ground } : null,
-        draft, this.stamina.fraction,
-        // THE SAME LEVER THAT FLIES HER. In the air it is climb and
-        // descend; in the water it is surface and dive. One control,
-        // one meaning — which way is she pushing herself vertically —
-        // and the medium decides what it costs.
-        this.liftSlider.lift, dt,
-        this.breath.fraction,
-      );
-      this.surf = {
-        depth: Math.max(0, level - ground),
-        grip: wet.grip,
-        x: body.flowX,
-        z: body.flowZ,
-      };
-    } else {
-      this.swim.update(null, draft, this.stamina.fraction, 0, dt);
-      // No uphill means flat ground, where a broken wave has no
-      // direction to run in and the orbital flow is the whole story.
-      this.surf = surfAt(
-        at.wx, at.wz, this.elapsed, ground, uphill ?? { x: 0, z: 0 },
-        draft,
-      );
-    }
-    const want = this.surf.grip;
-    if (want <= 0 && Math.hypot(this.carried.x, this.carried.z) < 0.01) {
-      this.carried.x = 0;
-      this.carried.z = 0;
-      return null;
-    }
-    // Eased both ways: into the water's speed while it has her, and
-    // back to nothing as it leaves. A carry that stopped dead the frame
-    // her feet found sand would read as hitting a wall.
-    const take = 1 - Math.exp(-dt / SWEPT_EASE);
-    this.carried.x += (this.surf.x * want - this.carried.x) * take;
-    this.carried.z += (this.surf.z * want - this.carried.z) * take;
-    return this.carried;
-  }
-
-  private readonly carried = { x: 0, z: 0 };
-
-  /** What the water is doing to her — surface, swimming, submerged. */
-  private readonly swim = new Swim();
-  /** Her air reserve — spiracles and trachea, not lungs. Refills the
-   * moment her head is out of the water. */
-  private readonly breath = new Breath();
+  // ── WHAT THE WATER DID TO HER ───────────────────────────────────
+  // A surf reading, a carry eased in and out over a fraction of a
+  // second, a swim model with four states, and an air reserve. All of
+  // it read one question — which water has her, right where she is —
+  // and answered it in the units the walker wanted. It is gone with
+  // the water it measured. The one part worth carrying forward is that
+  // the carry was DRAG rather than a shove: she was never teleported
+  // at the water's speed, her own eased toward it, and at the moment a
+  // wave arrives those two look completely different.
 
   private windOnHer(): { x: number; z: number } | null {
     const sky = this.nowWeather;
@@ -1880,35 +1684,5 @@ export class IslandScene {
     );
   }
 
-  /**
-   * THE SEA. Was a flat translucent disc; is now the ported ocean —
-   * see Ocean.ts and swell.ts.
-   *
-   * The ripple normal map is fetched rather than awaited: the sea is
-   * drawn from the first frame with a flat normal and gains its chop
-   * when the texture lands. A boot that blocked on it would hold the
-   * whole island for twelve kilobytes.
-   */
-  private buildWater(grid: HeightGrid): void {
-    this.water = new Ocean(this.scene, grid, null);
-    this.lakes = new LakeWater(this.scene);
-    // The rivers need the hydrography, which the island lab may boot
-    // without. No hydrography, no ribbons — the lab still runs.
-    const flows = hydro();
-    this.streams = flows ? new RiverWater(this.scene, flows) : null;
-    new THREE.TextureLoader().load(
-      `${import.meta.env.BASE_URL}kauai-tex/water-normal.webp`,
-      (texture) => {
-        if (this.disposed) return;
-        // ONE TEXTURE, TWO WATERS. The sea and the reservoirs ripple at
-        // very different scales, but they ripple off the same map.
-        this.water.wear(texture);
-        this.lakes.wear(texture);
-        this.streams?.wear(texture);
-      },
-      undefined,
-      () => {},
-    );
-  }
 
 }
