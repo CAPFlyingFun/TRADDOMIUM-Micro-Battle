@@ -1872,7 +1872,7 @@ export class IslandScene {
       terrainMaterial(maps, grain, TIER_CUTS.middle),
       terrainMaterial(maps, grain, TIER_CUTS.backdrop),
     );
-    this.streams = new FlowWater(this.scene);
+    this.streams = new FlowWater(this.scene, this.report);
   }
 
 

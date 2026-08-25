@@ -6,6 +6,9 @@ import { flowData, halfAt, type Flow } from './flow';
 import { baseLand } from './heightfield';
 import { BANK_GLSL, cutHalf, WATER_DEPTH_GLSL } from './carve';
 import { SPAN } from './kauai';
+import type { LoadReport } from '../ui/loadPlan';
+import { assetBytes } from '../ui/assetSizes';
+import { pullBytes } from './fetchBytes';
 
 /**
  * THE SURFACE OF EVERY STREAM AND POND THE ISLAND MAKES FOR ITSELF.
@@ -139,6 +142,9 @@ const POND_QUAD = SPAN / 1024;
 
 /** Which way a lake's ripples travel. Any direction; one direction. */
 const POND_DRIFT = { x: 0.8, z: 0.6 };
+
+/** How many pond cells the ripple coordinate runs before it repeats. */
+const TILES = 16;
 
 interface Drawn { readonly mesh: THREE.Mesh; readonly cx: number; readonly cz: number; }
 
@@ -373,21 +379,26 @@ export function buildPonds(
 ): THREE.BufferGeometry {
   const half = POND_QUAD / 2;
   const positions = new Float32Array(cells.length * 4 * 3);
-  // A POND IS FLAT, and the bake measured its depth for it. `across`
-  // zero and `span` one put every corner at the middle of the profile,
-  // where the bank curve answers exactly 1, so the cell comes out at
-  // that measured depth from edge to edge; `rise` matching it keeps
-  // the formula in build() at the same answer either way.
+  // A POND IS FLAT, and the bake measured its depth for it. `rise` is
+  // set to that same depth, and that ALONE fixes the answer: with rise
+  // positive, waterDepth's `min(rise, 0)` is nought and its `max` picks
+  // rise over anything the bank curve can return, because the curve
+  // never exceeds one. So a pond is its measured depth corner to
+  // corner whatever `across` and `span` say.
+  //
+  // Which frees `across` to do the other job it is asked for — half of
+  // the ripple's texture coordinate. See build(); the reaches use the
+  // real offset across the channel, and a pond, having no channel, uses
+  // its own place on the island instead.
   const deep = new Float32Array(cells.length * 4);
   const across = new Float32Array(cells.length * 4);
   const span = new Float32Array(cells.length * 4).fill(1);
   const rise = new Float32Array(cells.length * 4);
   // A POND HAS NO DIRECTION, so it is given one — a fixed compass
-  // bearing shared by every cell, with `along` measured along it from
-  // the island's own origin. Still water is not still at this scale;
-  // it drifts on whatever the wind is doing, and one direction across
-  // a whole lake reads as exactly that. What it must not do is differ
-  // per cell, which would put a seam on every cell boundary.
+  // bearing shared by every cell. Still water is not still at this
+  // scale; it drifts on whatever the wind is doing, and one direction
+  // across a whole lake reads as exactly that. What it must not do is
+  // differ per cell, which would put a seam on every cell boundary.
   const along = new Float32Array(cells.length * 4);
   const flowx = new Float32Array(cells.length * 4).fill(POND_DRIFT.x);
   const flowz = new Float32Array(cells.length * 4).fill(POND_DRIFT.z);
@@ -397,6 +408,11 @@ export function buildPonds(
     const i = cells[q];
     const x = flow.pondX[i] - cx;
     const z = flow.pondZ[i] - cz;
+    // Which cell of the bake's grid this is. Non-negative before the
+    // modulo, because a remainder of a negative number is negative and
+    // would fold the ripple back on itself across the island's middle.
+    const gi = Math.round((flow.pondX[i] + SPAN / 2) / POND_QUAD) + TILES * 4;
+    const gj = Math.round((flow.pondZ[i] + SPAN / 2) / POND_QUAD) + TILES * 4;
     for (let corner = 0; corner < 4; corner++) {
       const v = q * 4 + corner;
       positions[v * 3] = x + (corner % 2 === 0 ? -half : half);
@@ -404,7 +420,22 @@ export function buildPonds(
       positions[v * 3 + 2] = z + (corner < 2 ? -half : half);
       deep[v] = flow.pondDepth[i];
       rise[v] = flow.pondDepth[i];
-      along[v] = (x + cx) * POND_DRIFT.x + (z + cz) * POND_DRIFT.z;
+      // WHERE ON THE ISLAND THIS CELL IS, WRAPPED SMALL.
+      //
+      // The ripple is a texture lookup, and a texture coordinate of
+      // four million in float32 has a precision of a quarter of a
+      // unit — coarse enough to quantise a 23-unit wavelet into
+      // steps. So the coordinate is the cell's own GRID INDEX, taken
+      // modulo TILES, which keeps it under a kilometre and is stable:
+      // it depends on where the cell is, never on where the camera is
+      // or when the sheet was last rebuilt. A batch-relative
+      // coordinate would have been bounded too and would have jumped
+      // the whole pattern every five hundred metres of travel.
+      //
+      // The pattern repeats every TILES cells, which is 875 m of lake.
+      // Kauaʻi has no standing water that wide.
+      across[v] = (gi % TILES) * POND_QUAD + (corner % 2 === 0 ? -half : half);
+      along[v] = (gj % TILES) * POND_QUAD + (corner < 2 ? -half : half);
       normals[v * 3 + 1] = 1;
     }
     const a = q * 4;
@@ -491,31 +522,57 @@ export function waterShader(
       // Nothing is displaced: the surface stays the flat level field
       // the whole game agrees on — she floats on it, waterLevelAt
       // answers from it, and moving the geometry would put the drawn
-      // water somewhere the simulation is not, which is the fault
-      // three versions of this file existed to remove. Only the NORMAL
-      // moves, so the sun and the sky slide across the surface and the
-      // water reads as moving while being exactly where it was.
+      // water somewhere the simulation is not, which is the fault three
+      // versions of this file existed to remove. Only the NORMAL moves,
+      // so the sun and the sky slide across the surface while the water
+      // stays exactly where it was.
       //
-      // Two components. A long swell at 60 cm running at 12 cm/s, and
-      // a shorter chop at 17 cm running at 6 cm/s, skewed across the
-      // channel so the crests are not a marching picket fence. At her
-      // size — one centimetre — a 60 cm wave is a rolling swell she
-      // rides over and 12 cm/s is slower than she walks.
+      // FOUR SAMPLES OF ONE TEXTURE, at scales with no common factor,
+      // each rotated by its own odd angle. Both of those are load-
+      // bearing and both are Beyond Extinction's findings rather than
+      // mine: harmonic scales beat into a moiré, and unrotated ones
+      // stack their repeats into a visible grid. This shipped as two
+      // travelling sines an hour ago, which is the shape BE already
+      // tried and removed.
       //
-      // The tilt leans along vFlowView, so a stream's ripples run DOWN
-      // it and a lake's drift one way across the whole sheet.
+      // The two finer octaves fade OUT with distance so far water
+      // cannot alias into speckle, and the finest fades IN close up,
+      // which is what stops the surface reading as flat when she is
+      // standing in it.
+      //
+      // The coordinate is the channel's own: `across` the stream and
+      // `along` it. So the drift runs DOWNSTREAM by construction, no
+      // reach has to know which way north is, and the floating origin
+      // cannot move it — which is the one thing sampling by world
+      // position, as BE does, would not have survived here.
       fragmentShader = fragmentShader.replace(
         '#include <normal_fragment_begin>',
         `#include <normal_fragment_begin>
         {
-          float swell = (v_along / 60.0 - clock * 0.20) * 6.2831853;
-          float chop = (v_along / 17.0 + v_across / 23.0 - clock * 0.35) * 6.2831853;
-          float tilt = 0.055 * cos(swell) + 0.025 * cos(chop);
-          normal = normalize(normal - vFlowView * tilt);
+          vec2 wp = vec2(v_across, v_along);
+          float camD = length(vViewPosition);
+          float far = 1.0 - smoothstep(${RIPPLE_FAR}.0 * 0.08, ${RIPPLE_FAR}.0, camD);
+          float near = 1.0 - smoothstep(${RIPPLE_NEAR}.0 * 0.08, ${RIPPLE_NEAR}.0, camD);
+          vec3 rn = vec3(0.0);
+          rn += (texture2D(ripple, tmbSpin(0.0) * wp / 263.0
+                 + clock * vec2(0.0021, -0.0080)).xyz - 0.5);
+          rn += (texture2D(ripple, tmbSpin(2.1) * wp / 127.0
+                 - clock * vec2(0.0037, 0.0125)).xyz - 0.5) * (0.8 * far);
+          rn += (texture2D(ripple, tmbSpin(4.3) * wp / 59.0
+                 + clock * vec2(0.0062, -0.0210)).xyz - 0.5) * (0.65 * far);
+          rn += (texture2D(ripple, tmbSpin(1.2) * wp / 23.0
+                 + clock * vec2(-0.0090, -0.0330)).xyz - 0.5) * (0.7 * near);
+          // Into the surface's own frame. The geometry is flat +Y, so
+          // \`normal\` is the up of that frame and vFlowView is its
+          // downstream axis; their cross product is the third.
+          vec3 sideways = normalize(cross(normal, vFlowView));
+          normal = normalize(normal + (rn.x * sideways + rn.y * vFlowView) * 0.55);
         }`);
       fragmentShader =
         'uniform float clock;\nuniform float relief;\n'
+        + 'uniform sampler2D ripple;\n'
         + 'varying vec3 vFlowView;\n'
+        + 'mat2 tmbSpin(float a){float s=sin(a),c=cos(a);return mat2(c,-s,s,c);}\n'
         + ins.map((a) => `varying float v_${a};`).join('\n') + '\n'
         + BANK_GLSL + WATER_DEPTH_GLSL
         + fragmentShader.replace(
@@ -540,12 +597,19 @@ export function waterShader(
         // sampled only the finished ground left 6.1% of the island's
         // water invisible whatever density it was cut at.
         float depth = tmbWaterDepth(v_deep, v_across, v_span, v_rise) * relief;
-        // GREEN OVER BLUE, THREE TO ONE, which is Joshua's recipe and
-        // not a guess: "a blue/green tint with 75% green, 25% blue".
-        // Both tones hold that ratio, so the water reads as one body
-        // getting deeper rather than as a hue sliding toward the sea.
-        // The red is small and deliberate — pure green and blue makes
-        // pond scum, and a little red is what turns it into water.
+        // GREEN OVER BLUE, but not three to one. That was the recipe
+        // as given — "75% green, 25% blue" — and it came back "a
+        // little too green and looks a little sick". It does: at 3:1
+        // the hue lands near 150 degrees, which is the green of algae
+        // rather than of water, and the sun on it makes that worse
+        // rather than better.
+        //
+        // Nearer three to two instead, and more red in both tones.
+        // Green stays the larger share — that was the instruction, and
+        // it still reads as green rather than blue — but the hue moves
+        // to 154 and 162 degrees, a shallow tropical teal, and the
+        // saturation drops from 0.60 to 0.45. What is given up is the
+        // strength of the green, not the green.
         //
         // AND THE RAMP RUNS OVER THE DEPTH THE WATER ACTUALLY HAS.
         // This was 0 to 250 units, and the trench is capped at 100, so
@@ -553,7 +617,7 @@ export function waterShader(
         // wore the shallow one at 20% strength. The whole palette was
         // being spent on the first tenth of its range.
         float deepness = smoothstep(0.0, 90.0, depth);
-        diffuseColor.rgb = mix(vec3(0.09, 0.36, 0.12), vec3(0.014, 0.115, 0.04), deepness);
+        diffuseColor.rgb = mix(vec3(0.13, 0.34, 0.25), vec3(0.020, 0.105, 0.080), deepness);
         // THE SHORELINE IS AN ALPHA RAMP, not an edge — but it was a
         // forty-five centimetre one, and that is the whole width of
         // most of the water on this island. Joshua: "the edges of the
@@ -587,11 +651,50 @@ export function waterShader(
   return { vertexShader, fragmentShader };
 }
 
+/**
+ * THE RIPPLE MAP, AND WHY IT IS BORROWED.
+ *
+ * Beyond Extinction solved this surface already, and its shader comment
+ * carries the finding that matters: a sum of cosine wavelets "beat into
+ * a hard diamond grid/moiré (playtest); removed". The version of this
+ * file that shipped an hour ago is that same idea — two travelling
+ * sines — and it was on its way to the same grid. What replaced it
+ * there is a tiling normal map sampled at several NON-HARMONIC scales,
+ * each rotated by its own odd angle so the repeats never line up, and
+ * that is what is used here.
+ *
+ * The texture is Beyond Extinction's water_normal.png, unchanged. The
+ * scales are not: that ocean is measured in metres and this island in
+ * centimetres, and a queen is one unit long, so its 17 m swell would be
+ * a wave seventeen hundred times her length.
+ */
+const RIPPLE_URL = 'water-normal.png';
+
+/** The plan's name for the ripple map's download. */
+export const RIPPLE_JOB = 'ripple';
+
+/**
+ * Declare the ripple map on a plan, before it starts.
+ *
+ * IT IS 206 KB AND THE LOADING SCREEN HAS TO KNOW. A download the plan
+ * has never heard of does not make the bar wrong — it makes it lie by
+ * omission, finishing while two hundred kilobytes are still in flight,
+ * which is the exact complaint the plan was built to answer.
+ */
+export function planRipple(report: LoadReport): void {
+  report.add(RIPPLE_JOB, 'The water', assetBytes(RIPPLE_URL) ?? 206_000, true);
+}
+
+/** Distances over which the finer ripples give way, in world units. */
+const RIPPLE_FAR = 40_000;
+const RIPPLE_NEAR = 600;
+
 export class FlowWater {
   private readonly drawn = new Map<number, Drawn>();
   private ponds: Drawn | null = null;
   private readonly material: THREE.MeshStandardMaterial;
   private readonly clock = { value: 0 };
+  private readonly ripple: { value: THREE.Texture };
   private lastCell = '';
   private shownAll = true;
 
@@ -615,8 +718,49 @@ export class FlowWater {
    * removes a description of the island rather than adding a sixth.
    */
 
-  constructor(private readonly scene: THREE.Scene) {
+  constructor(
+    private readonly scene: THREE.Scene,
+    report?: LoadReport,
+  ) {
+    // FLAT UNTIL IT ARRIVES. 128,128,255 is the normal map that says
+    // "no bump at all", so the water is a calm sheet for the first
+    // second and then starts moving. Handing the material no texture
+    // until the load resolves would recompile the shader mid-scene.
+    const flat = new THREE.DataTexture(new Uint8Array([128, 128, 255, 255]), 1, 1);
+    flat.needsUpdate = true;
+    this.ripple = { value: flat };
     this.material = this.build();
+    // PULLED AS BYTES FIRST, exactly as the band maps are, so the
+    // loading screen counts this one too rather than finishing while
+    // it is still in flight.
+    void pullBytes(
+      `${import.meta.env.BASE_URL}${RIPPLE_URL}`,
+      (size) => report?.resize(RIPPLE_JOB, size),
+      (got) => report?.advance(RIPPLE_JOB, got),
+    ).then((pull) => new THREE.TextureLoader().load(
+      pull.url,
+      (tex) => {
+        // NOT sRGB: these are vectors, not colours, and decoding them
+        // through a gamma curve bends every one of them.
+        tex.colorSpace = THREE.NoColorSpace;
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.RepeatWrapping;
+        tex.needsUpdate = true;
+        this.ripple.value = tex;
+        URL.revokeObjectURL(pull.url);
+        report?.finish(RIPPLE_JOB);
+      },
+      undefined,
+      () => {
+        URL.revokeObjectURL(pull.url);
+        report?.finish(RIPPLE_JOB);
+      },
+    )).catch((why) => {
+      // Water that will not ripple is still water. A loading screen
+      // that never lifts is not.
+      console.warn('the water ripple map did not load', why);
+      report?.finish(RIPPLE_JOB);
+    });
   }
 
   /** Drawn reaches, plus one for the pond sheet when it exists. */
@@ -732,6 +876,7 @@ export class FlowWater {
     material.onBeforeCompile = (shader) => {
       shader.uniforms.clock = this.clock;
       shader.uniforms.relief = reliefUniform;
+      shader.uniforms.ripple = this.ripple;
       const patched = waterShader(shader.vertexShader, shader.fragmentShader);
       shader.vertexShader = patched.vertexShader;
       shader.fragmentShader = patched.fragmentShader;

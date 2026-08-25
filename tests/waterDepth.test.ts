@@ -247,7 +247,7 @@ describe('the water shader as it goes to the driver', () => {
     const { vertexShader, fragmentShader } = await built();
     // The depth expression, the waves, the bias, and the discard.
     expect(fragmentShader).toContain('tmbWaterDepth(');
-    expect(fragmentShader).toContain('vFlowView * tilt');
+    expect(fragmentShader).toContain('texture2D(ripple');
     expect(fragmentShader).toContain('gl_FragDepth -=');
     expect(fragmentShader).toContain('discard;');
     // And the vertex side that feeds them.
@@ -266,7 +266,7 @@ describe('the water shader as it goes to the driver', () => {
     // Everything the fragment side uses that three.js does not provide.
     for (const name of [
       'v_deep', 'v_across', 'v_span', 'v_rise', 'v_along',
-      'vFlowView', 'clock', 'relief',
+      'vFlowView', 'clock', 'relief', 'ripple',
     ]) {
       expect(fragmentShader).toMatch(new RegExp(`(varying|uniform)[^;]*\\b${name}\\b`));
     }
@@ -350,5 +350,70 @@ describe('the water where it meets the land', () => {
     // And it must not be so long that the rim goes clear again.
     expect(EDGE_FADE).toBeLessThan(15);
     expect(alphaAt(EDGE_FADE)).toBeCloseTo(SURFACE_ALPHA, 6);
+  });
+});
+
+/**
+ * THE RIPPLE'S SCALES, AND THE MOIRÉ THEY EXIST TO AVOID.
+ *
+ * The surface is one tiling normal map sampled four times. Beyond
+ * Extinction shipped the same idea twice: first as a sum of cosine
+ * wavelets, which "beat into a hard diamond grid/moiré (playtest)",
+ * and then as this. The property that makes the second one work is
+ * that the four sample scales share no factor and each is rotated by
+ * its own angle, so their repeats never come into register.
+ *
+ * That property is four numbers in a shader string. Nothing about the
+ * code stops someone rounding 263 and 127 to 250 and 125, which would
+ * put a repeat every 250 units in both and hand the water its grid
+ * back — and it would look fine in a still and wrong in motion, which
+ * is the hardest kind of regression to catch. So it is checked.
+ */
+describe("the ripple's octaves", () => {
+  async function scales(): Promise<number[]> {
+    const THREE = await import('three');
+    const { fragmentShader } = waterShader(
+      THREE.ShaderLib.standard.vertexShader,
+      THREE.ShaderLib.standard.fragmentShader,
+    );
+    return [...fragmentShader.matchAll(/tmbSpin\([\d.]+\) \* wp \/ ([\d.]+)/g)]
+      .map((m) => Number(m[1]));
+  }
+
+  it('samples the map at four scales', async () => {
+    expect(await scales()).toHaveLength(4);
+  });
+
+  it('shares no factor between any two of them', async () => {
+    const gcd = (a: number, b: number): number => (b ? gcd(b, a % b) : a);
+    const found = await scales();
+    for (let i = 0; i < found.length; i++) {
+      for (let j = i + 1; j < found.length; j++) {
+        expect(Number.isInteger(found[i])).toBe(true);
+        expect(gcd(found[i], found[j])).toBe(1);
+      }
+    }
+  });
+
+  it('turns each one by a different angle', async () => {
+    const THREE = await import('three');
+    const { fragmentShader } = waterShader(
+      THREE.ShaderLib.standard.vertexShader,
+      THREE.ShaderLib.standard.fragmentShader,
+    );
+    const angles = [...fragmentShader.matchAll(/tmbSpin\(([\d.]+)\)/g)].map((m) => m[1]);
+    expect(angles).toHaveLength(4);
+    expect(new Set(angles).size).toBe(4);
+  });
+
+  it('keeps every wavelength something she could see', async () => {
+    // She is one unit long. A ripple finer than a few units is noise
+    // she can never resolve and aliases in the distance; one coarser
+    // than a stream is wide stops reading as a ripple at all — the
+    // median trench is 480 units across.
+    for (const scale of await scales()) {
+      expect(scale).toBeGreaterThan(10);
+      expect(scale).toBeLessThan(480);
+    }
   });
 });

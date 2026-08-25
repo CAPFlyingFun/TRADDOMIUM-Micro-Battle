@@ -38,6 +38,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import type { LoadReport } from '../ui/loadPlan';
+import { assetBytes } from '../ui/assetSizes';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { liveStat } from './castes';
 import { Wingbeat, type WingPose } from './wingbeat';
@@ -54,12 +55,15 @@ const QUEEN_URL = `${import.meta.env.BASE_URL}models/queen-winged.glb`;
 /** The plan's name for her download. */
 export const QUEEN_JOB = 'queen';
 
-/** Rough size of the queen, until the response says otherwise. */
+/** Her size if nobody baked one — see scripts/bakeSizes.ts. */
 const QUEEN_GUESS = 2_070_000;
 
 /** Declare her download on a plan, before it starts. */
 export function planQueen(report: LoadReport): void {
-  report.add(QUEEN_JOB, 'The queen', QUEEN_GUESS, true);
+  report.add(
+    QUEEN_JOB, 'The queen',
+    assetBytes('models/queen-winged.glb') ?? QUEEN_GUESS, true,
+  );
 }
 
 /** What the bake calls the two halves. */

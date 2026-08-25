@@ -20,6 +20,7 @@
 import * as THREE from 'three';
 import { pullBytes } from './fetchBytes';
 import type { LoadReport } from '../ui/loadPlan';
+import { assetBytes } from '../ui/assetSizes';
 import { GRAIN_SIZE } from './groundTexture';
 import { UNITS_PER_METRE } from './kauai';
 
@@ -484,13 +485,15 @@ export interface BandLoad {
 }
 
 /**
- * Rough size of one band map, until the response says otherwise.
+ * Fallback size of one band map, for a file nobody baked a size for.
  *
- * Close to the real average on purpose. The browser only opens so many
- * connections at once, so the later files' headers do not land until
- * the earlier ones finish — the declared total is a mix of guesses and
- * facts for most of the load, and a guess that is nearly right keeps it
- * from visibly drifting while the player reads it.
+ * IT USED TO BE THE ONLY ANSWER, and being close to the real AVERAGE
+ * turned out not to be enough: snow.jpg is 143 KB under it and
+ * grass.jpg 84 KB over, so the declared total lurched by that much as
+ * each file landed, in whatever order the browser finished them.
+ * Joshua watched it: "it said 5.0mb, but then dropped to 4.6mb". The
+ * real sizes are baked now (see assetSizes.ts) and this is only what
+ * happens if someone adds a band without re-running the script.
  */
 const BAND_GUESS = 445_000;
 
@@ -559,6 +562,9 @@ export function loadBands(
 /** Declare the band downloads on a plan, before any of them start. */
 export function planBands(report: LoadReport): void {
   for (const name of BAND_FILES) {
-    report.add(`band:${name}`, 'Ground textures', BAND_GUESS, true);
+    report.add(
+      `band:${name}`, 'Ground textures',
+      assetBytes(`kauai-tex/${name}.jpg`) ?? BAND_GUESS, true,
+    );
   }
 }
