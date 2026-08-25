@@ -28,7 +28,7 @@
  * is stuck to and the current owns.
  */
 import { flowAt, waterLevelAt } from '../world/flow';
-import { reliefScale } from '../world/heightfield';
+import { groundHeight, reliefScale } from '../world/heightfield';
 
 /**
  * HOW DEEP SHE CAN STILL PUSH THROUGH — four millimetres, which is
@@ -134,4 +134,60 @@ export function wadeAt(
     afloat,
     drinkable: true,
   };
+}
+
+/**
+ * HOW FAR SHE CAN REACH TO DRINK — sixteen centimetres.
+ *
+ * GAME TUNING, not biology, and the measurement that forced it. A
+ * queen crossing the median stream on this island gets TWO CENTIMETRES
+ * of ground she can stand on while wet before the bed drops away and
+ * she is swimming, and on a quarter of the crossings measured she gets
+ * none at all: dry, then over her head, in one step. That is what
+ * Joshua found — "it's like right at the edge and very small of an
+ * area" — and it is not a bug in the water. It is a one-metre trench
+ * seen by something a centimetre long. The walkable shoreline of a
+ * real stream, at her scale, genuinely is a couple of body lengths
+ * wide.
+ *
+ * So drinking stops being a question about the ground UNDER her and
+ * becomes one about water she can get her head into. Sixteen
+ * centimetres is about a quarter-second of walking at her ordinary
+ * pace — enough that the shoreline is somewhere she can arrive rather
+ * than something she has to hit, and short enough that she is plainly
+ * standing at the water rather than drinking across it.
+ *
+ * She can still drink while afloat, and that has always worked: there
+ * are 5.7 m of water she floats on for every 2 cm she can wade in.
+ */
+const DRINK_REACH = 16;
+/**
+ * Eight points around the ring. Enough that a shoreline crossing the
+ * ring at any angle is caught; few enough that this is nothing beside
+ * the terrain sample each one costs.
+ */
+const PROBES = 8;
+
+/**
+ * Is there water here she could drink, or any within reach?
+ *
+ * Fresh only, and that falls out of `waterLevelAt` rather than needing
+ * a rule — it answers for the flow index and the ponds, and the sea is
+ * in neither.
+ */
+export function canDrink(wx: number, wz: number, ground: number): boolean {
+  // Under her feet first, which is the common case and costs nothing.
+  const here = waterLevelAt(wx, wz);
+  if (here !== null && here * reliefScale() - ground > 0) return true;
+  for (let i = 0; i < PROBES; i++) {
+    const a = (i / PROBES) * Math.PI * 2;
+    const x = wx + Math.cos(a) * DRINK_REACH;
+    const z = wz + Math.sin(a) * DRINK_REACH;
+    const level = waterLevelAt(x, z);
+    // The ground AT THE PROBE, not under her — she is on the bank
+    // looking down at the water, so the two are different by exactly
+    // the thing that makes this necessary.
+    if (level !== null && level * reliefScale() - groundHeight(x, z) > 0) return true;
+  }
+  return false;
 }

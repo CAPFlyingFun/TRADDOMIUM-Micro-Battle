@@ -31,6 +31,39 @@ export const DEADZONE = 0.08;
 /** Shove it this far up on the ground and she takes off. */
 export const TAKEOFF_DETENT = 0.55;
 
+/** What the lever is for right now. */
+export type Lever = 'full' | 'takeoff' | 'dive' | 'off';
+
+/**
+ * WHICH OF THOSE IT IS, given where she is — and this is a pure
+ * function because the version of it that was three lines inline cost
+ * us the whole of diving.
+ *
+ * The old rule had two cases: flying, or on the ground. Afloat is
+ * neither. She is not flying and she is never going to reach takeoff
+ * speed while the water has her, so she fell through to `off` — and
+ * `off` forces `lift` to read zero, so the dive demand downstream was
+ * multiplied by nothing every frame it was ever asked for. Diving was
+ * written, wired, tested against its own model, and unreachable.
+ * Joshua, twice, over two releases: "can't dive underwater yet."
+ *
+ * Being HELD by something is not the same as being unable to act. That
+ * was written in a comment next to the bug, correctly, and the code
+ * under it still said otherwise.
+ */
+export function leverFor(
+  aloft: boolean, afloat: boolean, canTakeOff: boolean,
+): Lever {
+  // Never off in the air, even spent: coming DOWN is always hers, and
+  // the flight model refuses the up half itself when there is nothing
+  // left to spend on it.
+  if (aloft) return 'full';
+  // Afloat beats takeoff: she cannot run up to speed on water, and
+  // down is the direction that means something there.
+  if (afloat) return 'dive';
+  return canTakeOff ? 'takeoff' : 'off';
+}
+
 const TRACK_H = 168;
 const KNOB_H = 46;
 
@@ -117,12 +150,20 @@ export class LiftSlider {
     return asked;
   }
 
-  /** Grey it out — an exhausted queen cannot ask to climb. */
-  enable(state: 'full' | 'takeoff' | 'off'): void {
+  /**
+   * Grey it out — an exhausted queen cannot ask to climb.
+   *
+   * `dive` is live like `full` and reads as something else, because it
+   * IS something else: in the water this lever is how deep she swims,
+   * not how high she flies. Same lever, same gesture, and the glyph is
+   * the only thing that has to say which.
+   */
+  enable(state: Lever): void {
     const was = this.on;
     this.on = state !== 'off';
     this.root.style.opacity = this.on ? '1' : '.45';
-    this.knob.textContent = state === 'takeoff' ? '🪽' : '⇕';
+    this.knob.textContent = state === 'takeoff' ? '🪽'
+      : state === 'dive' ? '🌊' : '⇕';
     if (was && !this.on) {
       this.gripped = null;
       this.at = 0;

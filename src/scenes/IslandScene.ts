@@ -18,7 +18,7 @@ import { local, world, type WorldPoint } from '../world/coords';
 import { FlowWater } from '../world/FlowWater';
 import { TerrainStream, TIER_CUTS } from '../world/TerrainStream';
 import { submersion, Underwater } from '../world/Underwater';
-import { wadeAt } from '../ant/wading';
+import { canDrink, wadeAt } from '../ant/wading';
 
 import { originAt, rebaseFor, setOrigin, toLocal, toWorld,
 } from '../world/origin';
@@ -36,7 +36,7 @@ import { Vitals } from '../ui/Vitals';
 import { LIVE_GROWTH, liveStat } from '../ant/castes';
 import { ActionPad, type Action } from '../input/ActionPad';
 import { Thirst } from '../ant/thirst';
-import { LiftSlider } from '../input/LiftSlider';
+import { LiftSlider, leverFor } from '../input/LiftSlider';
 import { DebugDie } from '../ui/DebugDie';
 import { WeatherChip } from '../ui/WeatherChip';
 import { FlightHud, windCall, type FlightView } from '../ui/FlightHud';
@@ -130,6 +130,11 @@ export class IslandScene {
    */
   private dive = 0;
   private drinking = false;
+  /**
+   * Whether the water has her feet off the bed — read a hundred lines
+   * later by the lever, which is the whole of the dive fix.
+   */
+  private afloat = false;
   private readonly debugDie: DebugDie;
   private readonly weatherChip: WeatherChip;
   /** Altitude, vertical speed and the wind — flight only. */
@@ -1066,12 +1071,28 @@ export class IslandScene {
         groundHeight(this.ant.where.wx, this.ant.where.wz),
         this.dive,
       );
+      this.afloat = wade.afloat;
       // DRINKING IS AN ACT, and an act can be interrupted. Held, not
       // tapped: she stops where she is, and letting go or walking off
-      // ends it. She has to be IN the water rather than near it, which
-      // at a centimetre long is a step.
-      this.drinkButton.show(wade.drinkable);
-      this.drinking = wade.drinkable && this.drinkButton.held
+      // ends it.
+      //
+      // AND IT REACHES NOW, which is a correction. This used to ask
+      // whether she was standing IN the water, on the grounds that at
+      // a centimetre long being near it is a step — and the ground
+      // disagreed. Measured across 732 stream crossings: a median of
+      // TWO CENTIMETRES of wet ground she can stand on, and on 25% of
+      // them none at all, dry to over her head in a single step. So
+      // the button appeared for about a fifth of a second of walking
+      // and Joshua could not find it. canDrink() asks whether there is
+      // water within reach of where she stands, which puts the whole
+      // bank in play without pretending the trench is shallower than
+      // it is.
+      const drinkable = canDrink(
+        this.ant.where.wx, this.ant.where.wz,
+        groundHeight(this.ant.where.wx, this.ant.where.wz),
+      );
+      this.drinkButton.show(drinkable);
+      this.drinking = drinkable && this.drinkButton.held
         && travel.speed < 1;
       this.effort = sprinting ? SPRINT_DRAIN
         : resting ? RESTING_RECOVERY : MOVING_RECOVERY;
@@ -1175,13 +1196,6 @@ export class IslandScene {
       this.thirst.fraction, this.thirst.parched, this.drinking, this.thirst.drain,
     );
 
-    // ── DRINKING WENT WITH THE WATER ────────────────────────────────
-    // A button lit when there was water at her feet or a nose length
-    // ahead, and holding it still on the ground refilled her. There is
-    // nothing to drink from now, so the thirst meter went too — a bar
-    // may only move if there is a way to move it back, and with no
-    // water there is no way back. That rule is why this whole block is
-    // gone rather than left drifting downward.
     // NOTHING TO TICK. The grace is a deadline, so the only question
     // each frame is what time it is — which is why backgrounding the
     // tab or losing the page can no longer buy extra protection.
@@ -1193,29 +1207,15 @@ export class IslandScene {
       this.vitals.showGrace(this.grace.active ? this.grace.seconds : null);
     }
 
-    // The buttons say what they DO right now. On the ground the up
-    // button is a takeoff and the down button has nothing to descend
-    // from; in the air they are climb and descend.
-    // AFLOAT COUNTS AS ALOFT, as far as this lever is concerned.
-    //
-    // It was gated on takeoff: on the ground it only came alive when
-    // she was running fast enough to fly, and `off` forces the lever
-    // to read zero. A queen standing in a river — not flying, and never
-    // going to reach takeoff speed while the water had her — was left
-    // with no vertical control at all, which is worth remembering when
-    // the water comes back: being HELD by something is not the same as
-    // being unable to act.
-    if (this.flight.aloft) {
-      // Never off in the air, even spent: coming DOWN is always hers,
-      // and the model refuses the up half itself when there is nothing
-      // left to spend on it.
-      this.liftSlider.enable('full');
-    } else {
-      this.liftSlider.enable(
-        this.flight.canTakeOff(this.ant.pace, this.stamina.fraction)
-          ? 'takeoff' : 'off',
-      );
-    }
+    // The lever says what it DOES right now: a takeoff on the ground,
+    // climb and descent in the air, and how deep she swims on the
+    // water. leverFor() owns that choice and carries the reason the
+    // third case had to be added.
+    this.liftSlider.enable(leverFor(
+      this.flight.aloft,
+      this.afloat,
+      this.flight.canTakeOff(this.ant.pace, this.stamina.fraction),
+    ));
     // ── The world moves under her ─────────────────────────────────
     // She has just travelled, so this is the moment to decide whether
     // the scene needs shifting and which ground should exist.

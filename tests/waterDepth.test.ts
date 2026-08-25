@@ -178,3 +178,41 @@ describe('the depth the water is shaded with', () => {
     g.dispose();
   });
 });
+
+/**
+ * THE TWO THINGS THE WATER ASKS OF three.js BY NAME.
+ *
+ * Both are strings. Neither is typechecked, neither is compiled by
+ * anything in this repo, and a three.js upgrade that renames either
+ * one leaves the water looking *almost* right — which is the failure
+ * mode this whole file exists to catch. The water already lost a depth
+ * bias this way: `polygonOffsetUnits = -8` sat in the material for
+ * three releases doing nothing at all, because a logarithmic depth
+ * buffer makes the fragment shader write gl_FragDepth and a written
+ * depth discards the rasteriser's offset.
+ */
+describe('the shader chunks the water patches', () => {
+  it('still has the include points the material replaces', async () => {
+    const THREE = await import('three');
+    const fs = THREE.ShaderLib.standard.fragmentShader;
+    // Where the depth bias goes, and where the colour is decided.
+    expect(fs).toContain('#include <logdepthbuf_fragment>');
+    expect(fs).toContain('#include <color_fragment>');
+    expect(THREE.ShaderLib.standard.vertexShader).toContain('#include <begin_vertex>');
+  });
+
+  it('still spells the logarithmic-depth macro the way the bias guards it', async () => {
+    const THREE = await import('three');
+    // The macro three.js actually guards the chunk with...
+    const macro = /#if defined\( (\w+) \)/.exec(THREE.ShaderChunk.logdepthbuf_fragment)?.[1];
+    // ...must be the one FlowWater's injected #ifdef names.
+    const src = readFileSync(
+      fileURLToPath(new URL('../src/world/FlowWater.ts', import.meta.url)), 'utf8');
+    expect(macro).toBeTruthy();
+    expect(src).toContain(`#ifdef ${macro}`);
+    expect(src).toContain('gl_FragDepth -=');
+    // A #ifdef on a macro that no longer exists is not an error. It is
+    // silence, and the water goes back to fighting the land for the
+    // same pixels with nothing in the build to say why.
+  });
+});

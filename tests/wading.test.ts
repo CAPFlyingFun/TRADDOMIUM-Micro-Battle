@@ -263,3 +263,119 @@ describe('what she may drink', () => {
     expect(wadeAt(2_600_000, 2_600_000, -5_000).drinkable).toBe(false);
   });
 });
+
+/**
+ * DRINKING REACHES, AND THE MEASUREMENT THAT SAYS WHY.
+ *
+ * This used to ask whether she was standing IN the water, on the
+ * reasonable-sounding grounds that at a centimetre long, being near it
+ * is a step. The island disagreed. Across 732 stream crossings she got
+ * a median of TWO CENTIMETRES of wet ground she could stand on before
+ * the bed dropped away, and on a quarter of them none at all — dry,
+ * then over her head, in one step. Joshua found exactly that: "it's
+ * like right at the edge and very small of an area."
+ *
+ * That is not a bug in the water. A one-metre trench seen by something
+ * a centimetre long really does have a shoreline two body lengths
+ * wide. So the rule changed instead: she drinks from water she can
+ * reach, which puts the bank in play without pretending the trench is
+ * shallower than it is.
+ */
+describe('the water she can reach to drink', () => {
+  let grid: Awaited<ReturnType<typeof loadGrid>>;
+
+  async function loadGrid() {
+    const { decodeGrid } = await import('../src/world/kauai');
+    const { useGrid, setSmoothing } = await import('../src/world/heightfield');
+    const { DEFAULTS } = await import('../src/ui/settings');
+    const file = readFileSync(
+      fileURLToPath(new URL('../public/kauai-1025.bin', import.meta.url)));
+    useGrid(decodeGrid(
+      file.buffer.slice(file.byteOffset, file.byteOffset + file.byteLength) as ArrayBuffer));
+    // The dial the game ships at: she drinks from the ground she walks
+    // on, so a test at some other smoothing is testing another island.
+    setSmoothing(DEFAULTS.terrainSmoothing);
+    return true;
+  }
+
+  beforeAll(async () => { grid = await loadGrid(); });
+
+  /** Walk out from a station until the water is behind her. */
+  async function shorelines(): Promise<Array<{ x: number; z: number; out: number }>> {
+    const { groundHeight } = await import('../src/world/heightfield');
+    const found: Array<{ x: number; z: number; out: number }> = [];
+    for (let p = 0; p < flow.x.length && found.length < 60; p += 211) {
+      if (flow.level[p] < flow.bed[p]) continue;
+      const fore = Math.min(flow.x.length - 1, p + 1);
+      let dx = flow.x[fore] - flow.x[p], dz = flow.z[fore] - flow.z[p];
+      const run = Math.hypot(dx, dz);
+      if (run < 1e-6) continue;
+      dx /= run; dz /= run;
+      for (let d = 2; d < 4_000; d += 2) {
+        const x = flow.x[p] + -dz * d, z = flow.z[p] + dx * d;
+        if (wadeAt(x, z, groundHeight(x, z)).depth <= 0) { found.push({ x, z, out: d }); break; }
+      }
+    }
+    return found;
+  }
+
+  it('lets her drink from the bank, standing on dry ground', async () => {
+    expect(grid).toBe(true);
+    const { canDrink } = await import('../src/ant/wading');
+    const { groundHeight } = await import('../src/world/heightfield');
+    const banks = await shorelines();
+    expect(banks.length).toBeGreaterThan(20);
+    let dry = 0, reached = 0;
+    for (const b of banks) {
+      // Dry underfoot — this is the ground the old rule refused.
+      expect(wadeAt(b.x, b.z, groundHeight(b.x, b.z)).depth).toBeLessThanOrEqual(0);
+      dry++;
+      if (canDrink(b.x, b.z, groundHeight(b.x, b.z))) reached++;
+    }
+    // Not every one: a bank can rise steeply enough that the water is
+    // out of reach a step past the edge, and that is the trench being
+    // honest rather than a fault. Most of them, though — the old rule
+    // scored zero here by construction.
+    expect(reached / dry).toBeGreaterThan(0.8);
+  });
+
+  it('does not reach further than it says it does', async () => {
+    const { canDrink } = await import('../src/ant/wading');
+    const { groundHeight } = await import('../src/world/heightfield');
+    const banks = await shorelines();
+    let tested = 0, wrong = 0;
+    for (const b of banks) {
+      // Two metres further out, an order of magnitude past the reach.
+      const x = b.x + 200, z = b.z + 200;
+      // Is there ANY drinkable water within twice the reach of there?
+      // Asking the index at the single point (x, z) would be the wrong
+      // question and was the first version of this test: canDrink
+      // samples a RING, so water 16 cm away is water it is entitled to
+      // find. A dense disc is the honest check.
+      let near = false;
+      for (let r = 0; r <= 32 && !near; r += 4) {
+        for (let a = 0; a < 16 && !near; a++) {
+          const px = x + Math.cos(a / 16 * Math.PI * 2) * r;
+          const pz = z + Math.sin(a / 16 * Math.PI * 2) * r;
+          const level = waterLevelAt(px, pz);
+          if (level !== null && level - groundHeight(px, pz) > 0) near = true;
+        }
+      }
+      if (near) continue;                     // fair game; not this test
+      tested++;
+      if (canDrink(x, z, groundHeight(x, z))) wrong++;
+    }
+    expect(tested).toBeGreaterThan(10);
+    // Nowhere within twice the reach has water she could drink, so the
+    // answer has to be no. Anything else means the ring is sampling
+    // somewhere it should not.
+    expect(wrong).toBe(0);
+  });
+
+  it('still drinks from under her own feet', async () => {
+    const { canDrink } = await import('../src/ant/wading');
+    // The common case, and the one the old rule got right: standing in
+    // it. Ground well below the level, so she is certainly wet.
+    expect(canDrink(stream.x, stream.z, stream.level - 50)).toBe(true);
+  });
+});

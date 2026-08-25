@@ -431,12 +431,23 @@ export class FlowWater {
       // surface from below.
       side: THREE.DoubleSide,
     });
-    // Water lies close over its own bed for its whole length, so
-    // pushing its fragments DEEPER lets the bed win the depth test and
-    // freckle through the surface. Lifted toward the camera instead.
-    material.polygonOffset = true;
-    material.polygonOffsetFactor = 0;
-    material.polygonOffsetUnits = -8;
+    // THE POLYGON OFFSET THAT USED TO BE HERE NEVER DID ANYTHING.
+    //
+    // Water lies close over its own bed for its whole length — at the
+    // shoreline the two surfaces are millimetres apart — so it was
+    // given polygonOffsetUnits -8 to lift its fragments toward the eye
+    // and stop the bed freckling through. But the renderer runs with
+    // logarithmicDepthBuffer, and that makes every fragment shader
+    // WRITE gl_FragDepth. Polygon offset is applied by the rasteriser
+    // to the depth it interpolated; a shader that writes its own depth
+    // replaces that value outright, offset and all. So the lift was
+    // silently discarded for as long as both settings have been on,
+    // and Joshua is watching the water and the land fight over the
+    // same pixels.
+    //
+    // The bias has to be applied where the depth is actually decided,
+    // which is in the shader below. Nothing is set here, so nothing
+    // reads as though it were handled.
     // DEPTH IS THE ONLY THING THIS SHADER NEEDS AND IT TOOK FOUR
     // SHIPPED VERSIONS TO GET IT FROM THE RIGHT PLACE.
     //
@@ -488,6 +499,34 @@ export class FlowWater {
           '#include <begin_vertex>',
           '#include <begin_vertex>\n'
           + ins.map((a) => `  v_${a} = ${a};`).join('\n'));
+      // AND THE DEPTH BIAS THE POLYGON OFFSET COULD NOT GIVE IT.
+      //
+      // Under a logarithmic depth buffer three.js writes
+      //     gl_FragDepth = log2(vFragDepth) * logDepthBufFC * 0.5
+      // so a constant subtracted here is a constant in LOG space,
+      // which is a fixed RATIO in distance — the same relative lift a
+      // centimetre from the eye and a kilometre away. That is exactly
+      // the right shape for an island 56 km across seen by something a
+      // centimetre long, and it is why the fixed-function offset,
+      // which works in absolute depth units, was the wrong tool even
+      // before it stopped being applied at all.
+      //
+      // Small enough to be invisible, and it has to be: this decides
+      // depth ONLY, so a lift big enough to see would let the water
+      // draw over a bank standing in front of it.
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <logdepthbuf_fragment>',
+        [
+          '#include <logdepthbuf_fragment>',
+          // The macro is three.js's own, spelt exactly as r180 spells
+          // it — a guard on a name that does not exist compiles
+          // perfectly and does nothing, which is the same silent
+          // nothing the polygon offset was doing. A test in
+          // tests/waterDepth.test.ts holds this name to the chunk.
+          '#ifdef USE_LOGARITHMIC_DEPTH_BUFFER',
+          '  gl_FragDepth -= 3e-6;',
+          '#endif',
+        ].join('\n'));
       shader.fragmentShader =
         'uniform float clock;\nuniform float relief;\n'
         + ins.map((a) => `varying float v_${a};`).join('\n') + '\n'
@@ -526,6 +565,15 @@ export class FlowWater {
         // Fade out where the channel stops being resolved, so the cut
         // is not a pop.
         diffuseColor.a *= 1.0 - smoothstep(${FADE_FROM}.0, ${REACH}.0, length(vViewPosition));
+        // WATER NOBODY CAN SEE MUST NOT WRITE DEPTH. The material
+        // writes depth so two overlapping sheets cannot blend twice,
+        // and that is right — but a fragment whose alpha has ramped to
+        // nothing at the shoreline was writing it too, and there it
+        // sits within millimetres of the bank. Two surfaces that
+        // close, both writing depth, is the speckle along a waterline.
+        // Dropping the invisible ones costs nothing that was ever
+        // drawn and takes the whole quarrel off the table.
+        if (diffuseColor.a < 0.004) discard;
       `);
     };
     return material;
