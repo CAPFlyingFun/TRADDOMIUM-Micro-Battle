@@ -4,7 +4,7 @@ import { reliefScale } from './heightfield';
 import { reliefUniform } from './terrainMaterial';
 import { originAt } from './origin';
 import { SAMPLES, type HeightGrid } from './kauai';
-import { flowData, slabHalf, type Flow } from './flow';
+import { flowData, halfAt, type Flow } from './flow';
 import { SPAN } from './kauai';
 
 /**
@@ -18,6 +18,23 @@ import { SPAN } from './kauai';
  * the water's edge, its curves, and the mid-stream stones all come out
  * of the depth test rather than out of anything drawn here. NOTHING IS
  * CARVED.
+ *
+ * OVER-WIDE IS MEASURED NOW, NOT GUESSED FROM THE CHANNEL. Version 2
+ * sized every slab with slabHalf(width), and WIDTH is the TRUE
+ * hydraulic channel — a median of 0.60 m across, which really is how
+ * wide the water runs, and which slabHalf() drew as a 5.8 m ribbon. The
+ * trouble is that the ground either side of that channel stays BELOW
+ * the water surface for a median of about 106 m: the island has broad
+ * valley floors and we were painting a thread down the middle of them.
+ * Over 598 sampled stations, 92.6% had their wetted reach cut off by
+ * the EDGE OF THE SLAB rather than by the terrain, so the water looked
+ * narrow because it was drawn narrow, not because Kauai is. Version 3
+ * carries a half-width per side per station, walked outward on the real
+ * ground until it rises through the level or falls away into somebody
+ * else's basin, and this file draws that number. Median drawn width
+ * 5.8 m becomes 49.8 m, p95 165 m, max 347 m. The terrain still clips
+ * the final shoreline exactly as it always did; it simply gets the
+ * chance to.
  *
  * ONE RULE, BOTH SIDES: drawn level = level * reliefScale(); wet iff
  * that beats groundHeight(); depth = the difference. `flow.ts`'s
@@ -40,6 +57,21 @@ import { SPAN } from './kauai';
  * cannot show a metre-wide trench, so the slab stretches away at a
  * grazing angle and paints a flat stripe with a dead-straight near
  * edge. The water stops where its channel stops being visible.
+ *
+ * BOTH NUMBERS ARE STILL THE THIN-RIBBON ONES, AND THE STRIPE SHOULD
+ * GET WORSE. The artefact is what a slab does once the terrain drawn at
+ * that distance can no longer clip it, so it scales with the slab, and
+ * the slab is now twenty times wider: a dead-straight near edge as much
+ * as 600 m across instead of 6 m, over something like a hundred times
+ * the area, with exactly the same FADE_FROM..REACH ramp left to hide
+ * it. There is a second reason to expect it worse — the half-widths
+ * were walked over the full-resolution ground while the transition tier
+ * draws a smoothed one, so the mismatch between what was measured and
+ * what is rendered is widest precisely where the stripe lives. These
+ * two numbers are deliberately untouched all the same: they were tuned
+ * against a rendered frame across three releases of blaming the wrong
+ * thing, and the next value for either of them has to come from another
+ * rendered frame rather than from this reasoning.
  */
 const REACH = 20_000;
 const FADE_FROM = 13_000;
@@ -89,9 +121,19 @@ export function buildReach(
     let dz = flow.z[fore] - flow.z[back];
     const run = Math.hypot(dx, dz);
     if (run < 1e-6) { dx = 1; dz = 0; } else { dx /= run; dz /= run; }
-    // OVER-WIDE ON PURPOSE: the terrain clips the slab back to the
-    // water the valley actually holds, and the same slabHalf() bounds
-    // the collision index's claim, so drawn and wet share one edge.
+    // OVER-WIDE ON PURPOSE, AND ASYMMETRIC. The terrain clips the slab
+    // back to the water the valley actually holds, and the same
+    // halfAt() bounds the collision index's claim, so drawn and wet
+    // share one edge. What is new is that the two sides no longer have
+    // to agree. A stream sitting hard against one valley wall reaches a
+    // couple of metres on the wall side and a couple of hundred across
+    // the floor on the other, and drawing it that way is most of what
+    // makes the widening read as a VALLEY rather than as a fat ribbon
+    // laid over one: a single number for both sides would have to take
+    // the smaller of the two to avoid painting the wall, which is how
+    // we ended up drawing a thread in the first place. halfAt() falls
+    // back to slabHalf() for any station the bake has not walked, and
+    // floors every measured value at it, so this can only ever widen.
     //
     // COLLAPSED TO NOTHING WHERE A POND OWNS THE WATER. The bake tucks
     // a ponded station two units UNDER the spill level so the pond
@@ -106,9 +148,14 @@ export function buildReach(
     // the run degenerate, so the rasteriser discards them and the pond
     // is alone on those pixels — one owner, in geometry as well as in
     // level.
+    //
+    // The collapse is asked BEFORE the side, and answers for both: a
+    // pond owning the water owns all of it, and a half-width that was
+    // zero on one side only would leave the run a sliver rather than
+    // degenerate, which is the same double-blend by a thinner name.
     const owned = flow.level[p] < flow.bed[p];
-    const half = owned ? 0 : slabHalf(flow.width[p]) * EDGE;
-    for (const side of [-1, 1]) {
+    for (const side of [-1, 1] as const) {
+      const half = owned ? 0 : halfAt(flow, p, side) * EDGE;
       const v = i * 2 + (side + 1) / 2;
       positions[v * 3] = x - cx + -dz * half * side;
       positions[v * 3 + 1] = flow.level[p];
@@ -116,6 +163,60 @@ export function buildReach(
       deep[v] = flow.level[p] - flow.bed[p];
     }
   }
+  // WHAT TWENTY TIMES THE WIDTH DOES AT A BEND, WRITTEN DOWN BEFORE
+  // ANYONE LOOKS AT A FRAME. Stations are one grid cell apart, about
+  // 55 m, so the polyline's own radius of curvature through a turn is
+  // 27.5 m divided by the sine of half that turn, and the strip folds
+  // over itself on the INSIDE of a bend as soon as a half-width beats
+  // it. At the new median half-width of 25 m that cannot happen at any
+  // angle at all, which is why the question never arose while the
+  // ribbon was three metres across. At the p95 of 83 m it folds on any
+  // turn past about forty degrees, and at the widest stations, 174 m,
+  // past about eighteen — and a steepest-descent path turns forty-five
+  // degrees at a time as a matter of course. So the folding is real,
+  // and it is concentrated in the widest reaches, which are the lowland
+  // ones she will be standing beside.
+  //
+  // The OUTSIDE of a bend cannot open a wedge, at any width. The two
+  // quads meeting at a station share that station's pair of vertices,
+  // so the strip is closed by construction and a corner comes out
+  // mitred rather than gapped. What the mitre does instead is give reach
+  // away: the offset vertex sits one half-width along the bisector
+  // normal, so its clearance from each adjoining segment is only that
+  // times the cosine of half the turn, which is 7.6% short at
+  // forty-five degrees and 29% short at a right angle. That was
+  // millimetres when the slab was three metres wide and is twenty-four
+  // metres at a p95 station now, reach the bake walked out for and the
+  // geometry quietly declines to draw.
+  //
+  // Nothing drawn here can escape the collision index whatever the fold
+  // does. Every corner lies within the largest halfAt() of its own
+  // station, and distance to a segment is a convex function, so the
+  // whole quad sits inside the radius useFlow() claims for that
+  // segment. Drawn stays a subset of wet by construction rather than by
+  // two numbers being kept in step, which is the fault the version 2
+  // rebuild existed to remove.
+  //
+  // WHETHER AN OVERLAP SHOWS IS NOT SETTLED BY THE DEPTH TEST ALONE.
+  // Where one lap hides another the winner swaps exactly along the line
+  // where the two surfaces cross, and on that line they are the same
+  // point at the same height; the fragment shades from where it stands
+  // and how far the ground is below it, never from which quad painted
+  // it, so both answer identically there and the seam is a crease in
+  // the depth ramp rather than a step in it. That much holds from any
+  // camera. What it does not cover is draw ORDER. Triangles within one
+  // geometry go down in index order, which is downstream order, and
+  // depth writing only rejects a later fragment that is FARTHER, so
+  // wherever the downstream lap happens to be the nearer one it passes
+  // the test and blends over an upstream lap that has already blended.
+  // Two coats of the same sheet are darker than one, and near the
+  // shoreline, where the alpha ramp is still small, the doubling is
+  // very nearly exact and the band would carry the straight silhouette
+  // edge of the later quad. That is the same shape of fault as the pond
+  // lattice and the 1.12-cell overlap before it, and it would come and
+  // go as she walks around the bend. It is the thing to look for in the
+  // render, and it is deliberately not fixed here: a guess dressed up
+  // as a fix costs a probe run to disprove.
   const faces: number[] = [];
   for (let i = 0; i < count - 1; i++) {
     const a = i * 2;

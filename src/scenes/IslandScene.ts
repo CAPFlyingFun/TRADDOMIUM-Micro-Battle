@@ -17,6 +17,7 @@ import { findLandfall, UNITS_PER_METRE, type HeightGrid } from '../world/kauai';
 import { local, world, type WorldPoint } from '../world/coords';
 import { FlowWater } from '../world/FlowWater';
 import { TerrainStream, TIER_CUTS } from '../world/TerrainStream';
+import { submersion, Underwater } from '../world/Underwater';
 
 import { originAt, rebaseFor, setOrigin, toLocal, toWorld,
 } from '../world/origin';
@@ -231,6 +232,15 @@ export class IslandScene {
   /** The streams the island makes for itself. See flow.ts. */
   private streams!: FlowWater;
   /**
+   * What the frame looks like when the water is over her head.
+   *
+   * A LOOK, not a mechanic. It tints, fogs and dims; it does not swim,
+   * wade, float or drown. When those arrive they read the same
+   * waterLevelAt() this does, so the picture and the rules cannot end up
+   * disagreeing about where the water is.
+   */
+  private underwater!: Underwater;
+  /**
    * The CEILING on a full push of the stick — not propulsion. She does
    * not move because this is set; she moves because a thumb asks.
    */
@@ -408,6 +418,13 @@ export class IslandScene {
     this.follow = new FollowCamera(this.aspect());
     this.follow.snapTo(this.ant.root, -facing);
 
+    // HERE RATHER THAN WITH THE TERRAIN AND THE STREAMS, because it
+    // watches the camera and the camera does not exist until the line
+    // above. Everything it needs is standing by now: the water it reads
+    // is the flow index, not the drawn sheet, so it does not care that
+    // FlowWater was built several steps earlier.
+    this.underwater = new Underwater(this.scene, this.follow.camera);
+
     // ARRIVE IN THE WEATHER, do not fade into it. Everything the sky
     // does eases over minutes, which is right while she is walking and
     // wrong at the instant she appears: without this she would spawn
@@ -493,6 +510,25 @@ export class IslandScene {
       riversDrawn: () => this.streams.shown,
       showWater: (on: boolean) => this.streams.setVisible(on),
       showLayer: (w: 'reaches' | 'ponds', on: boolean) => this.streams.setLayer(w, on),
+      /**
+       * HOW FAR THE EYE IS UNDER THE WATER, in DRAWN units, 0 when dry.
+       *
+       * The camera's x and z are RENDERED — measured from the floating
+       * origin — so they are put back into world coordinates before the
+       * water is asked about them, while y is already absolute and goes
+       * through untouched. Skip that and this samples the water somewhere
+       * near the middle of the island and answers plausibly, which is the
+       * dangerous kind of wrong.
+       *
+       * Deliberately a read and nothing more. Whether the LOOK was
+       * actually applied is a separate question, and `fogDensity` and
+       * `sunlight` below already answer it.
+       */
+      submerged: () => {
+        const eye = this.follow.camera.position;
+        const seat = originAt();
+        return submersion(eye.x + seat.x, eye.y, eye.z + seat.z);
+      },
       paused: () => this.halted,
       /**
        * THE POSITION FIX AS A STRING — the same one under the compass.
@@ -740,6 +776,7 @@ export class IslandScene {
     this.detachSettings();
     this.detachKill();
     this.streams.dispose();
+    this.underwater.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }
@@ -1134,6 +1171,27 @@ export class IslandScene {
     // which the easing makes different from what was asked for.
     this.speed = this.ant.pace;
     this.follow.update(this.ant.root, look, dt);
+    // AFTER THE WEATHER AND AFTER THE CAMERA, and it needs both.
+    //
+    // After the weather because applyWeather stamps the fog colour and
+    // density, the background, the sun and the skylight from the
+    // current sky on every single frame, so an underwater look written
+    // before it is overwritten before anyone sees it. That is also why
+    // there is no restore when she surfaces, which otherwise reads as a
+    // missing branch: the next applyWeather IS the restore.
+    //
+    // After the camera because the near pane is a screen-filling quad
+    // seated on the camera's pose, and it is sized with barely over a
+    // degree of angular slack. Seated one line earlier — before
+    // follow.update writes the position and re-aims the lookAt — it
+    // would be placed for the pose of the PREVIOUS frame, and a turn of
+    // more than about a degree in a frame would swing its edge inside
+    // the frustum. Since it draws with depthTest off over the whole
+    // image, that edge is a hard straight seam with the water tint
+    // simply missing on one side of it. A key-held turn is 1.43 degrees
+    // a frame at sixty, so this would have shown every time she looked
+    // around underwater rather than in some corner case.
+    this.underwater.update(this.sun, this.skyLight);
     this.renderer.render(this.scene, this.follow.camera);
 
     // A frame has now been drawn with whatever had arrived by the time
@@ -1158,7 +1216,17 @@ export class IslandScene {
     // scheduled frame does not land until after the browser has already
     // painted — which shows as a flash of stretched or blank canvas at
     // the moment the device turns.
-    if (!this.disposed) this.renderer.render(this.scene, this.follow.camera);
+    //
+    // The underwater pane has to be re-seated first. It is cut to the
+    // frustum, the frustum's aspect has just changed, and this path
+    // renders without going through tick() at all — so without this the
+    // one frame the device turn is there to rescue would draw the pane
+    // at the old shape, with its edge inside the new view. Turning a
+    // phone while she is under water is exactly when that happens.
+    if (!this.disposed) {
+      this.underwater.update(this.sun, this.skyLight);
+      this.renderer.render(this.scene, this.follow.camera);
+    }
   };
 
   /**

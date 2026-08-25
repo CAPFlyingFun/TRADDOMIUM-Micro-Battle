@@ -78,11 +78,31 @@ async function revisit(fix, tag) {
   await diff(tag);
 }
 
-// The frame from Joshua's device screenshot of v0.0.43.
-await revisit('22.06941233 -159.34311146 26.49m 324.5° -13.3° ×1.00', 'joshua-frame');
+// The frame from Joshua's device screenshot of v0.0.40, the one he sent
+// saying the water was still not wide enough.
+await revisit('22.06941483 -159.34310113 23.59m 310.7° -6.3° ×1.00', 'joshua-frame');
 // A mid-sized stream, beside it and from above.
 await look(1039062, 371875, 8, -18, 'stream-eye');
 await look(1039062, 371875, 60, -55, 'stream-above');
+// AND FROM HER OWN EYE HEIGHT, which is the only view that really
+// answers "is that a body of water". Eight metres up is a map. She is
+// a centimetre long, so even thirty centimetres of lift is thirty body
+// lengths — a bird's view of a stream — and whatever the water fails to
+// be at this height it fails to be in the game.
+await look(1039062, 371875, 0.3, -6, 'stream-ant');
+// A TYPICAL station now that width is measured — 58 m across, which is
+// the median of the whole island and so the one frame that says what
+// the change actually did.
+await look(1252344, -426562, 0.3, -6, 'wide-median');
+// AND THE WORST CASE FOR THE GEOMETRY: 600 m across at a 45-degree
+// turn, one of 1,517 stations over 120 m that also turn past 40. The
+// strip folds on the inside of a bend once a half-width beats the
+// polyline's own 27.5 m radius, and at 300 m of half-width it folds
+// hard. Two laps of a transparent sheet blend twice where the later
+// one happens to be nearer, which is the same fault as the pond
+// lattice by another route, so this is the frame that would show it.
+await look(142188, -1815625, 0.3, -6, 'fold-eye');
+await look(142188, -1815625, 120, -50, 'fold-above');
 // The Mana pond field (388 flooded cells at one 3 m level) and the deepest pond.
 await look(-2364571, 384207, 40, -45, 'ponds-mana');
 await look(-481250, -1826562, 35, -40, 'pond-deep');

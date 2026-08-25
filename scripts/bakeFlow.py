@@ -26,6 +26,14 @@ cannot be anywhere the grid does not already have a valley.
      above the floor; that guess is now measured data baked here, and
      one runtime function -- waterLevelAt -- reads it for wet, dry, and
      depth alike.
+  6. Leave the DRAWN half-width of each station unmeasured, and hand
+     that question to `scripts/bakeWidth.ts`. This script knows where
+     the water goes; how far it SPREADS sideways is a question about
+     the ground the game draws at centimetre resolution, and every cell
+     here is 54.7 m across. `npm run bake:width` walks the real ground
+     outward from each station until the water stops and writes the
+     answer back into the same file. A bake is not finished until it
+     has run.
 
 MEASURED against USGS NHD before any of this was written to disk: 82% of
 the channels this finds land within 120 m of a real mapped river, from
@@ -251,13 +259,13 @@ def to_world(x, y):
 
 def write(reaches, filled, dem, path):
     """
-    TMBF version 2: a header, one row per reach, then the station arrays.
+    TMBF version 3: a header, one row per reach, then the station arrays.
 
       magic u32 | version u16 | pad u16 | reaches u32 | points u32
       ponds u32 | threshold f32 | pad u32 | pad u32      (32 bytes)
       per reach: first u32, count u32
       points:  x i32, z i32, level i32, bed i32 (world units), width u16,
-               then zero-pad to a 4-byte boundary
+               left u16, right u16, then zero-pad to a 4-byte boundary
       ponds:   x i32, z i32, level i32, depth u16   (world units)
 
     LEVEL IS THE WATER SURFACE AND BED IS THE GROUND UNDER IT. Version 1
@@ -271,11 +279,41 @@ def write(reaches, filled, dem, path):
     LEVEL is unchanged: a pond is already full, its spill level IS the
     surface, no depth is added.
 
-    THE PAD AFTER WIDTH is load-bearing, not politeness. The decoder
-    views the pond arrays as Int32Array, which needs 4-byte alignment;
-    v1 only ever decoded because nPoints happened to be even. Version 2
-    guarantees it -- 0 or 2 zero bytes -- and the decoder's total-length
-    check counts them.
+    LEFT AND RIGHT ARE THE DRAWN HALF-WIDTHS, and this file cannot know
+    them, so it writes 0xFFFF -- UNMEASURED -- into every entry of both.
+    WIDTH is the TRUE hydraulic channel and it is honest: a median of
+    0.60 m, which really is how wide the water runs. The trouble is that
+    the ground either side of it stays BELOW the water surface for a
+    median of about 106 m, so a slab sized from the channel paints a
+    thread down the middle of a broad valley floor. Over 598 sampled
+    stations, 92.6% had their wetted reach cut off by the slab rather
+    than by the terrain -- the water looked narrow because we drew it
+    narrow, not because the island is. Finding the real edge means
+    walking outward from each station on the ground the GAME draws,
+    until it rises through the level or falls away into somebody else's
+    basin, and that ground is sampled at centimetre resolution while
+    every cell in this script is 54.7 m across. `scripts/bakeWidth.ts`
+    takes that walk and overwrites these two arrays in place with
+    measured half-widths, which are always 30000 or under, so the
+    sentinel can never be mistaken for a value. The pair is named for
+    the DIRECTION OF TRAVEL down the reach and not for any compass:
+    right is the +n side of the station's tangent, left the -n side. A
+    reader that still finds 0xFFFF falls back to slabHalf(width), so
+    the file loads perfectly and draws exactly the old narrow water --
+    which is why a bake must never ship without `npm run bake:width`
+    after it. That failure is silent and looks like nothing changed.
+
+    THE PAD AFTER THE u16 ARRAYS is load-bearing, not politeness. The
+    decoder views the pond arrays as Int32Array, which needs 4-byte
+    alignment; v1 only ever decoded because nPoints happened to be even.
+    Version 2 guarantees it -- 0 or 2 zero bytes -- and the decoder's
+    total-length check counts them. Version 3 adds two more u16 arrays
+    of the same length, so the three together are six bytes a station
+    and the parity survives untouched: still nothing when points is
+    even, two bytes when it is odd. Compute the pad from all three
+    arrays even so. That agreement is a coincidence of six being even,
+    and the next array added at some other width would break it in
+    silence.
     """
     pts = [p for r in reaches for p in r]
     depth = np.where(dem > 0.0, filled - dem, 0.0)
@@ -286,13 +324,19 @@ def write(reaches, filled, dem, path):
     # decoder's own length check would have caught it at boot, which is
     # exactly what that check is for — but it is cheaper to make the
     # header the size it claims than to find out on a device.
-    head = struct.pack('<IHHIIIfII', 0x46424D54, 2, 0,
+    head = struct.pack('<IHHIIIfII', 0x46424D54, 3, 0,
                        len(reaches), len(pts), len(px), WATER_THRESHOLD, 0, 0)
     rows = b''.join(struct.pack('<II', off, len(r))
                     for off, r in zip(np.cumsum([0] + [len(r) for r in reaches]), reaches))
     X = np.empty(len(pts), '<i4'); Z = np.empty(len(pts), '<i4')
     L = np.empty(len(pts), '<i4'); B = np.empty(len(pts), '<i4')
     W = np.empty(len(pts), '<u2')
+    # UNMEASURED, both sides, every station. Filling them here with
+    # anything derived from WIDTH would be a guess wearing the clothes of
+    # a measurement, and the reader could never tell the two apart;
+    # 0xFFFF says plainly that nobody has looked yet.
+    WL = np.full(len(pts), 0xFFFF, '<u2')
+    WR = np.full(len(pts), 0xFFFF, '<u2')
     k = 0
     ponded = depth > 0.05
     for r in reaches:
@@ -333,7 +377,7 @@ def write(reaches, filled, dem, path):
             W[k] = int(round(min(65535, wm * UNITS_PER_METRE)))
             prev = carry
             k += 1
-    pad = b'\0' * ((4 - W.nbytes % 4) % 4)
+    pad = b'\0' * ((4 - (W.nbytes + WL.nbytes + WR.nbytes) % 4) % 4)
     PX = np.empty(len(px), '<i4'); PZ = np.empty(len(px), '<i4')
     PL = np.empty(len(px), '<i4'); PD = np.empty(len(px), '<u2')
     for k in range(len(px)):
@@ -342,7 +386,8 @@ def write(reaches, filled, dem, path):
         PL[k] = int(round(filled[py[k], px[k]] * UNITS_PER_METRE))
         PD[k] = int(round(min(65535, depth[py[k], px[k]] * UNITS_PER_METRE)))
     path.write_bytes(head + rows + X.tobytes() + Z.tobytes() + L.tobytes()
-                     + B.tobytes() + W.tobytes() + pad + PX.tobytes()
+                     + B.tobytes() + W.tobytes() + WL.tobytes() + WR.tobytes()
+                     + pad + PX.tobytes()
                      + PZ.tobytes() + PL.tobytes() + PD.tobytes())
     return len(pts), len(px), L - B
 
@@ -379,6 +424,15 @@ def main():
     print(f'level  {over.min()/UNITS_PER_METRE:.2f}-{over.max()/UNITS_PER_METRE:.2f} m'
           f' over bed as written, median {np.median(over)/UNITS_PER_METRE:.2f} m')
     print(f'wrote  {OUT.relative_to(ROOT)}  {OUT.stat().st_size/1e6:.2f} MB')
+    # SAY IT PLAINLY, because the half-finished file is not broken -- it
+    # loads, it draws, and what it draws is the narrow water this whole
+    # change exists to widen. Nothing else will complain.
+    print(f'NEXT   left/right are UNMEASURED (0xFFFF) at all {npts:,} stations.'
+          ' Run `npm run bake:width` now.')
+    print('       Without it every reader falls back to slabHalf(width),'
+          ' which is the old narrow water:')
+    print('       a 5.8 m slab down the middle of a valley floor that stays'
+          ' wet for a median of 106 m either side.')
 
 if __name__ == '__main__':
     main()

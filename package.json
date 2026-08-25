@@ -1,7 +1,7 @@
 {
   "name": "traddomium-micro-battle",
   "private": true,
-  "version": "0.0.40",
+  "version": "0.0.41",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -26,12 +26,16 @@
     "bake:queen": "node scripts/bakeQueen.mjs",
     "bake:ground": "vite-node scripts/sampleGround.ts",
     "probe:flow": "node scripts/probe-flow.mjs",
-    "bake:flow": "npm run bake:ground && python3 scripts/bakeFlow.py",
+    "bake:flow": "npm run bake:ground && python3 scripts/bakeFlow.py && npm run bake:width",
+    "bake:width": "vite-node scripts/bakeWidth.ts",
     "shots:hud": "node scripts/hudshot.mjs",
     "probe:update": "node scripts/probe-update.mjs",
     "probe:save": "node scripts/probe-save.mjs",
     "probe:revisit": "node scripts/probe-revisit.mjs",
-    "bake:veg": "python3 scripts/bakeVeg.py"
+    "bake:veg": "python3 scripts/bakeVeg.py",
+    "probe:underwater": "node scripts/probe-underwater.mjs",
+    "measure:spread": "vite-node scripts/measureSpread.ts",
+    "measure:wet": "vite-node scripts/measureWet.ts"
   },
   "dependencies": {
     "three": "^0.180.0"
