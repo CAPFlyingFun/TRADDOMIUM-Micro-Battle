@@ -53,19 +53,26 @@ const DIALS: Dialer[] = [
     label: 'Flight speed',
     show: (v) => `${(v * 100).toFixed(0)}%`,
   },
-  {
-    key: 'terrainSmoothing',
-    label: 'Terrain smoothing',
-    onRelease: true,
-    show: (v) => (v <= 0 ? 'Real Kauai' : `${(v * 100).toFixed(0)}%`),
-  },
-  {
-    key: 'terrainRelief',
-    label: 'Terrain height',
-    // As a percentage of real Kauai, because "0.45" means nothing and
-    // "45%" says what it is: an island not quite half as tall.
-    show: (v) => `${(v * 100).toFixed(0)}%`,
-  },
+  // TERRAIN SMOOTHING AND TERRAIN HEIGHT ARE NOT DIALS ANY MORE, and
+  // taking them out is the point rather than a tidy-up.
+  //
+  // The water is baked against a particular island. `bake:ground`
+  // samples the terrain at smoothing 1 and height 1, `bakeFlow.py`
+  // routes every stream over that surface, and `bakeWidth.ts` walks
+  // outward on it to find where each shoreline falls. Move either dial
+  // afterwards and the ground moves while the water does not: the
+  // streams sit inside hillsides or hang above valley floors, and the
+  // widths were measured for a cross-section that no longer exists.
+  // Height is not the harmless one of the two — the marched width is
+  // the distance at which the GROUND rises through the water surface,
+  // so scaling the island vertically changes every width horizontally.
+  //
+  // They were exploratory dials from before there was any water, they
+  // did their job, and the numbers they settled on are now baked into
+  // three artifacts. Joshua's call, and the right one: "settings
+  // shouldn't be allowed to custom now that you have the numbers."
+  // DEFAULTS still carries both, so the setting exists, the save
+  // format is unchanged, and a future re-bake can move them together.
   {
     key: 'windInfluence',
     label: 'Wind on flight',

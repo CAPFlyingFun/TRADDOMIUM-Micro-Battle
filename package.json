@@ -1,7 +1,7 @@
 {
   "name": "traddomium-micro-battle",
   "private": true,
-  "version": "0.0.42",
+  "version": "0.0.43",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -35,7 +35,8 @@
     "bake:veg": "python3 scripts/bakeVeg.py",
     "probe:underwater": "node scripts/probe-underwater.mjs",
     "measure:spread": "vite-node scripts/measureSpread.ts",
-    "measure:wet": "vite-node scripts/measureWet.ts"
+    "measure:wet": "vite-node scripts/measureWet.ts",
+    "map:water": "vite-node scripts/mapWater.ts"
   },
   "dependencies": {
     "three": "^0.180.0"

@@ -1,9 +1,9 @@
 import * as THREE from 'three';
 import { toLocal } from './origin';
-import { reliefScale } from './heightfield';
+import { reliefScale, smoothingAmount, SMOOTH_PASSES } from './heightfield';
 import { reliefUniform } from './terrainMaterial';
 import { originAt } from './origin';
-import { SAMPLES, type HeightGrid } from './kauai';
+import { blurGrid, SAMPLES, type HeightGrid } from './kauai';
 import { flowData, halfAt, type Flow } from './flow';
 import { SPAN } from './kauai';
 
@@ -289,9 +289,36 @@ export class FlowWater {
   private readonly worldOrigin = { value: new THREE.Vector2() };
 
   constructor(private readonly scene: THREE.Scene, grid: HeightGrid) {
+    // THE GROUND THE GAME DRAWS, NOT THE GRID IT WAS BAKED FROM — and
+    // this file learnt that lesson last, having watched the bake learn
+    // it first.
+    //
+    // The texture used to be the RAW grid, and the terrain is not the
+    // raw grid: baseLand() blends it toward a pre-blurred copy by the
+    // smoothing dial, which ships at 1, meaning the island she walks on
+    // is the FULLY BLURRED grid. Measured against groundHeight over
+    // 352,993 points the water claims, the raw grid is a mean of 8.07 m
+    // out, and the shader and the level field disagreed about wet or
+    // dry on 28.7% of them: 9.3% of the water was drawn at zero alpha
+    // over ground the shader believed was above it, and 19.4% was
+    // painted over dry land the shader believed was below it. Joshua
+    // photographed both halves of that in one session — a stream he was
+    // standing in that was not there, and slabs hanging in the sky over
+    // brown hillside with their own straight edges showing.
+    //
+    // Blended here exactly as baseLand blends it. What is left out is
+    // the procedural relief, and that is correct rather than a
+    // compromise: the bake solved the hydrology on a 4x4-supersampled
+    // average of the same surface, in which the noise averages away, so
+    // this matches the ground the LEVELS were measured against as well
+    // as the one the terrain is built from.
+    const soft = blurGrid(grid, SMOOTH_PASSES);
+    const blend = smoothingAmount();
     const units = new Float32Array(SAMPLES * SAMPLES);
     // The grid is int16 DECIMETRES; a unit is a centimetre.
-    for (let i = 0; i < units.length; i++) units[i] = grid[i] * 10;
+    for (let i = 0; i < units.length; i++) {
+      units[i] = (grid[i] + (soft[i] - grid[i]) * blend) * 10;
+    }
     this.groundTex = new THREE.DataTexture(
       units, SAMPLES, SAMPLES, THREE.RedFormat, THREE.FloatType,
     );
