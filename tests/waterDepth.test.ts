@@ -38,7 +38,9 @@ import {
 } from '../src/world/heightfield';
 import { decodeGrid } from '../src/world/kauai';
 import { decodeFlow, useFlow, waterLevelAt, type Flow } from '../src/world/flow';
-import { buildReach } from '../src/world/FlowWater';
+import {
+  buildPonds, buildReach, EDGE_FADE, SURFACE_ALPHA, waterShader,
+} from '../src/world/FlowWater';
 import { MAX_DEPTH, waterDepth as shaded } from '../src/world/carve';
 import { DEFAULTS } from '../src/ui/settings';
 
@@ -214,5 +216,139 @@ describe('the shader chunks the water patches', () => {
     // A #ifdef on a macro that no longer exists is not an error. It is
     // silence, and the water goes back to fighting the land for the
     // same pixels with nothing in the build to say why.
+  });
+});
+
+/**
+ * THE SHADER THE WATER ACTUALLY COMPILES.
+ *
+ * Seven `.replace` calls against three.js's source, and a replace that
+ * misses is silent. Both silent misses this file knows about shipped:
+ * a varying named `vUv` that three.js only declares when the material
+ * has a map, which failed to link and drew every stream black; and a
+ * `#ifdef` on a macro that does not exist, which compiled perfectly
+ * and left the water fighting the land for the same pixels.
+ *
+ * Nothing here compiles GLSL — that needs a GPU. What it does is check
+ * the two things a missed replace breaks: that the injection is
+ * present at all, and that every name the injected code reads has been
+ * declared somewhere ahead of it.
+ */
+describe('the water shader as it goes to the driver', () => {
+  async function built() {
+    const THREE = await import('three');
+    return waterShader(
+      THREE.ShaderLib.standard.vertexShader,
+      THREE.ShaderLib.standard.fragmentShader,
+    );
+  }
+
+  it('landed every injection', async () => {
+    const { vertexShader, fragmentShader } = await built();
+    // The depth expression, the waves, the bias, and the discard.
+    expect(fragmentShader).toContain('tmbWaterDepth(');
+    expect(fragmentShader).toContain('vFlowView * tilt');
+    expect(fragmentShader).toContain('gl_FragDepth -=');
+    expect(fragmentShader).toContain('discard;');
+    // And the vertex side that feeds them.
+    expect(vertexShader).toContain('vFlowView = normalize(normalMatrix');
+    // Each injection sits after the chunk it replaced, not instead of
+    // it — dropping three.js's own code would break the material in
+    // ways that have nothing to do with water.
+    for (const chunk of ['normal_fragment_begin', 'color_fragment', 'logdepthbuf_fragment']) {
+      expect(fragmentShader).toContain(`#include <${chunk}>`);
+    }
+    expect(vertexShader).toContain('#include <begin_vertex>');
+  });
+
+  it('declares every name the injected code reads', async () => {
+    const { vertexShader, fragmentShader } = await built();
+    // Everything the fragment side uses that three.js does not provide.
+    for (const name of [
+      'v_deep', 'v_across', 'v_span', 'v_rise', 'v_along',
+      'vFlowView', 'clock', 'relief',
+    ]) {
+      expect(fragmentShader).toMatch(new RegExp(`(varying|uniform)[^;]*\\b${name}\\b`));
+    }
+    // A varying has to be declared and WRITTEN on the vertex side too,
+    // or it reads as zero and the failure is a look rather than an
+    // error. This is the exact shape of the vUv bug.
+    for (const name of ['v_deep', 'v_across', 'v_span', 'v_rise', 'v_along', 'vFlowView']) {
+      expect(vertexShader).toMatch(new RegExp(`varying[^;]*\\b${name}\\b`));
+      expect(vertexShader).toMatch(new RegExp(`\\b${name}\\s*=`));
+    }
+  });
+
+  it('asks for exactly the attributes the geometry supplies', async () => {
+    // THE CROSS-CHECK THAT NOTHING ELSE MAKES. The shader names its
+    // attributes in a string; buildReach names them in another string;
+    // nothing has ever compared the two. A typo in either is a black
+    // stream or a dead wave, with a clean build either way.
+    const { vertexShader } = await built();
+    const asked = new Set(
+      [...vertexShader.matchAll(/attribute float (\w+);/g)].map((m) => m[1]));
+    const { first, count } = flow.reaches[0];
+    const geometry = buildReach(flow, first, count, 0, 0)!;
+    const supplied = new Set(Object.keys(geometry.attributes));
+    for (const name of asked) expect(supplied).toContain(name);
+    geometry.dispose();
+    // And the ponds, which are built by a different function and have
+    // been given a different attribute set before now.
+    const ponds = buildPonds(flow, [0, 1, 2], 0, 0);
+    const onPonds = new Set(Object.keys(ponds.attributes));
+    for (const name of asked) expect(onPonds).toContain(name);
+    ponds.dispose();
+  });
+});
+
+/**
+ * AND WHETHER THE WATER LOOKS LIKE WATER WHERE IT MEETS THE LAND.
+ *
+ * Depth being right is not the same as the water reading as water. The
+ * shoreline ramp was 45 cm on an island whose median stream is 50 cm
+ * deep, so it was spread over the whole range the water has, and the
+ * shallow rim came out at a mean alpha of 0.11 — clear enough that
+ * Joshua reported both halves of it in one sentence: the edges look
+ * almost clear, and the water does not appear to reach the land.
+ *
+ * These hold the fix to the island rather than to the constant.
+ */
+describe('the water where it meets the land', () => {
+  /** What the fragment shader's alpha comes to, at one depth. */
+  function alphaAt(depth: number): number {
+    const t = Math.min(1, Math.max(0, depth / EDGE_FADE));
+    return SURFACE_ALPHA * (t * t * (3 - 2 * t));
+  }
+
+  it('reads as water along the shallow rim, not as glass', () => {
+    // Area-weighted, because the tessellation crowds vertices where
+    // the shape is and counting samples would count those twice.
+    let rim = 0, lit = 0;
+    for (const s of slabs()) {
+      for (let v = 0; v < s.deep.length; v++) {
+        const wx = s.pos[v * 3], wz = s.pos[v * 3 + 2], level = s.pos[v * 3 + 1];
+        if (wx === 0 && wz === 0) continue;
+        const depth = level - terrainHeight(wx, wz);
+        // The rim: real water, under 20 cm of it.
+        if (depth <= 0 || depth >= 20) continue;
+        rim++;
+        lit += alphaAt(depth);
+      }
+    }
+    expect(rim).toBeGreaterThan(1_000);
+    // 0.11 before. Anything back near that is the old ramp returning.
+    expect(lit / rim).toBeGreaterThan(0.4);
+  });
+
+  it('still fades rather than ending in a cut edge', () => {
+    // The ramp has to keep two jobs it was already doing: hide the
+    // terrain clip under a fade, and leave the discard something to
+    // catch so invisible water does not write depth and fight the
+    // bank for the same pixels.
+    expect(alphaAt(0)).toBe(0);
+    expect(alphaAt(0.2)).toBeLessThan(0.004);
+    // And it must not be so long that the rim goes clear again.
+    expect(EDGE_FADE).toBeLessThan(15);
+    expect(alphaAt(EDGE_FADE)).toBeCloseTo(SURFACE_ALPHA, 6);
   });
 });

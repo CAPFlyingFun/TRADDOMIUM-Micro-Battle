@@ -112,7 +112,33 @@ const EDGE = 0.98;
  * The hairline float cracks exact fit risks are invisible against
  * terrain; the double-blend was not.
  */
+/**
+ * HOW DEEP THE WATER HAS TO BE BEFORE IT IS FULLY OPAQUE, and how
+ * opaque that is.
+ *
+ * IT WAS FORTY-FIVE CENTIMETRES, and the median stream on this island
+ * is fifty deep, so the ramp was spread across the entire depth range
+ * the water has. Measured over the shipped island: the shallow rim —
+ * water under 20 cm, which is 19% of the surface and the whole of what
+ * you look at to see whether water reaches land — came out at a mean
+ * alpha of 0.11. Clear glass. Joshua: "the edges of the water looks
+ * almost clear, and in one spot, I don't see any water making it to
+ * land, but I did land on water."
+ *
+ * Six centimetres puts that rim at 0.63 and the water as a whole at
+ * 0.86, against 0.66 before. Short enough that water is water a few
+ * body lengths from shore; long enough that the terrain clip still
+ * happens under a fade the eye cannot follow, and that the discard
+ * which keeps invisible water from writing depth still has something
+ * to catch.
+ */
+export const EDGE_FADE = 6;
+export const SURFACE_ALPHA = 0.92;
+
 const POND_QUAD = SPAN / 1024;
+
+/** Which way a lake's ripples travel. Any direction; one direction. */
+const POND_DRIFT = { x: 0.8, z: 0.6 };
 
 interface Drawn { readonly mesh: THREE.Mesh; readonly cx: number; readonly cz: number; }
 
@@ -153,13 +179,18 @@ const ACROSS = 9;
  *     8      3.5%      1.8%
  *
  * FOUR, NOT EIGHT, AND THE REASON IS THE PHONE. Every vertex costs a
- * baseLand() and the rebuild lands whole in one frame. Per
- * scripts/waterCost.ts, at the island's busiest view: 58,563 vertices,
- * 26 ms here and about 158 ms on a phone at six times slower — but
- * that is paid ONCE, while the game is loading, because follow() diffs
- * its wanted set. What lands in a frame is one decision cell of travel,
- * five hundred metres, which is 29 new reaches, 2.3 ms here and about
- * 14 ms on a phone. Eight would double both.
+ * baseLand(), which scripts/waterProfile.ts puts at 64% of a rebuild —
+ * so the density here IS the cost, and nothing else in this file is
+ * worth optimising ahead of it. Per scripts/waterCost.ts, at the
+ * island's busiest view: 58,563 vertices, 57 ms here and about 340 ms
+ * on a phone at six times slower. That is paid ONCE, while the game is
+ * loading, because follow() diffs its wanted set.
+ *
+ * What lands in a frame is one decision cell of travel — 50,000 units,
+ * five hundred metres — which is 29 new reaches and about 40 ms on a
+ * phone. At the 80 cm/s she actually moves that is a two-frame hitch
+ * every ten minutes. Eight rows would double it for another 1.9% of
+ * the water, which is not the trade.
  */
 const ALONG = 4;
 
@@ -185,6 +216,17 @@ export function buildReach(
   const across = new Float32Array(rows * ACROSS);
   const span = new Float32Array(rows * ACROSS);
   const rise = new Float32Array(rows * ACROSS);
+  // AND TWO MORE, SO THE SURFACE CAN MOVE. `along` is how far
+  // downstream this vertex is, in world units, measured up the reach
+  // rather than guessed from a texture coordinate; `flowx`/`flowz` are
+  // the unit direction the water is going there. The waves are a
+  // travelling function of the first and lean along the second, so a
+  // stream's ripples run DOWN it — which is the whole reason the water
+  // needs to move at all rather than just shimmer.
+  const along = new Float32Array(rows * ACROSS);
+  const flowx = new Float32Array(rows * ACROSS);
+  const flowz = new Float32Array(rows * ACROSS);
+  let run_ = 0;
   for (let row = 0; row < rows; row++) {
     // Which station-to-station span this row falls in, and how far
     // along it. The last row is the final station exactly.
@@ -282,6 +324,20 @@ export function buildReach(
       // water: that is what takes the alpha to nothing at the shore
       // instead of leaving the terrain to hide a fully opaque sheet.
       rise[v] = level - baseLand(wx, wz);
+      along[v] = run_;
+      // The LOCAL segment again, for the same reason the offset uses
+      // it: this is which way the water is actually going here.
+      flowx[v] = sx;
+      flowz[v] = sz;
+    }
+    // Arc length accumulates once per row, after the row is written,
+    // so every vertex across a row shares its station's distance. The
+    // wave crest is therefore straight across the channel and travels
+    // down it, which is what a ripple on a stream does.
+    if (row + 1 < rows) {
+      const nx = flow.x[p] + (flow.x[q] - flow.x[p]) * ((row + 1 - i * ALONG) / ALONG);
+      const nz = flow.z[p] + (flow.z[q] - flow.z[p]) * ((row + 1 - i * ALONG) / ALONG);
+      run_ += Math.hypot(nx - x, nz - z);
     }
   }
   const faces: number[] = [];
@@ -298,6 +354,9 @@ export function buildReach(
   geometry.setAttribute('across', new THREE.Float32BufferAttribute(across, 1));
   geometry.setAttribute('span', new THREE.Float32BufferAttribute(span, 1));
   geometry.setAttribute('rise', new THREE.Float32BufferAttribute(rise, 1));
+  geometry.setAttribute('along', new THREE.Float32BufferAttribute(along, 1));
+  geometry.setAttribute('flowx', new THREE.Float32BufferAttribute(flowx, 1));
+  geometry.setAttribute('flowz', new THREE.Float32BufferAttribute(flowz, 1));
   geometry.setIndex(faces);
   // FLAT +Y NORMALS, written rather than computed: computeVertexNormals
   // shades each quad facet visibly through transparent water, and a
@@ -323,6 +382,15 @@ export function buildPonds(
   const across = new Float32Array(cells.length * 4);
   const span = new Float32Array(cells.length * 4).fill(1);
   const rise = new Float32Array(cells.length * 4);
+  // A POND HAS NO DIRECTION, so it is given one — a fixed compass
+  // bearing shared by every cell, with `along` measured along it from
+  // the island's own origin. Still water is not still at this scale;
+  // it drifts on whatever the wind is doing, and one direction across
+  // a whole lake reads as exactly that. What it must not do is differ
+  // per cell, which would put a seam on every cell boundary.
+  const along = new Float32Array(cells.length * 4);
+  const flowx = new Float32Array(cells.length * 4).fill(POND_DRIFT.x);
+  const flowz = new Float32Array(cells.length * 4).fill(POND_DRIFT.z);
   const normals = new Float32Array(cells.length * 4 * 3);
   const faces: number[] = [];
   for (let q = 0; q < cells.length; q++) {
@@ -336,6 +404,7 @@ export function buildPonds(
       positions[v * 3 + 2] = z + (corner < 2 ? -half : half);
       deep[v] = flow.pondDepth[i];
       rise[v] = flow.pondDepth[i];
+      along[v] = (x + cx) * POND_DRIFT.x + (z + cz) * POND_DRIFT.z;
       normals[v * 3 + 1] = 1;
     }
     const a = q * 4;
@@ -347,9 +416,175 @@ export function buildPonds(
   geometry.setAttribute('across', new THREE.Float32BufferAttribute(across, 1));
   geometry.setAttribute('span', new THREE.Float32BufferAttribute(span, 1));
   geometry.setAttribute('rise', new THREE.Float32BufferAttribute(rise, 1));
+  geometry.setAttribute('along', new THREE.Float32BufferAttribute(along, 1));
+  geometry.setAttribute('flowx', new THREE.Float32BufferAttribute(flowx, 1));
+  geometry.setAttribute('flowz', new THREE.Float32BufferAttribute(flowz, 1));
   geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
   geometry.setIndex(faces);
   return geometry;
+}
+
+
+/**
+ * THE STRING SURGERY, ON ITS OWN, WHERE A TEST CAN REACH IT.
+ *
+ * Everything below is `.replace` against three.js's own shader source,
+ * and a replace that does not match is not an error — it is silence,
+ * and the water comes back subtly wrong with nothing in the build to
+ * say why. That has now happened twice: `vUv` was never declared, so
+ * the program failed to link and every stream drew black; and a guard
+ * spelt `USE_LOGDEPTHBUF` instead of `USE_LOGARITHMIC_DEPTH_BUFFER`
+ * compiled perfectly and did nothing at all.
+ *
+ * Pulled out of onBeforeCompile so tests/waterDepth.test.ts can run it
+ * against the real ShaderLib source and check that every injection
+ * landed and every name it uses is declared.
+ */
+export function waterShader(
+  vert: string, frag: string,
+): { vertexShader: string; fragmentShader: string } {
+  let vertexShader = vert;
+  let fragmentShader = frag;
+      const ins = ['deep', 'across', 'span', 'rise', 'along', 'flowx', 'flowz'];
+      vertexShader =
+        ins.map((a) => `attribute float ${a};`).join('\n') + '\n'
+        + ins.map((a) => `varying float v_${a};`).join('\n') + '\n'
+        + vertexShader.replace(
+          '#include <begin_vertex>',
+          '#include <begin_vertex>\n'
+          + ins.map((a) => `  v_${a} = ${a};`).join('\n')
+          // The wave leans along the flow, and the fragment shades in
+          // VIEW space, so the direction has to be carried there. Only
+          // the vertex shader has normalMatrix.
+          + '\n  vFlowView = normalize(normalMatrix * vec3(flowx, 0.0, flowz));');
+      vertexShader = 'varying vec3 vFlowView;\n' + vertexShader;
+      // AND THE DEPTH BIAS THE POLYGON OFFSET COULD NOT GIVE IT.
+      //
+      // Under a logarithmic depth buffer three.js writes
+      //     gl_FragDepth = log2(vFragDepth) * logDepthBufFC * 0.5
+      // so a constant subtracted here is a constant in LOG space,
+      // which is a fixed RATIO in distance — the same relative lift a
+      // centimetre from the eye and a kilometre away. That is exactly
+      // the right shape for an island 56 km across seen by something a
+      // centimetre long, and it is why the fixed-function offset,
+      // which works in absolute depth units, was the wrong tool even
+      // before it stopped being applied at all.
+      //
+      // Small enough to be invisible, and it has to be: this decides
+      // depth ONLY, so a lift big enough to see would let the water
+      // draw over a bank standing in front of it.
+      fragmentShader = fragmentShader.replace(
+        '#include <logdepthbuf_fragment>',
+        [
+          '#include <logdepthbuf_fragment>',
+          // The macro is three.js's own, spelt exactly as r180 spells
+          // it — a guard on a name that does not exist compiles
+          // perfectly and does nothing, which is the same silent
+          // nothing the polygon offset was doing. A test in
+          // tests/waterDepth.test.ts holds this name to the chunk.
+          '#ifdef USE_LOGARITHMIC_DEPTH_BUFFER',
+          '  gl_FragDepth -= 3e-6;',
+          '#endif',
+        ].join('\n'));
+      // LITTLE WAVES, TRAVELLING DOWNSTREAM.
+      //
+      // Nothing is displaced: the surface stays the flat level field
+      // the whole game agrees on — she floats on it, waterLevelAt
+      // answers from it, and moving the geometry would put the drawn
+      // water somewhere the simulation is not, which is the fault
+      // three versions of this file existed to remove. Only the NORMAL
+      // moves, so the sun and the sky slide across the surface and the
+      // water reads as moving while being exactly where it was.
+      //
+      // Two components. A long swell at 60 cm running at 12 cm/s, and
+      // a shorter chop at 17 cm running at 6 cm/s, skewed across the
+      // channel so the crests are not a marching picket fence. At her
+      // size — one centimetre — a 60 cm wave is a rolling swell she
+      // rides over and 12 cm/s is slower than she walks.
+      //
+      // The tilt leans along vFlowView, so a stream's ripples run DOWN
+      // it and a lake's drift one way across the whole sheet.
+      fragmentShader = fragmentShader.replace(
+        '#include <normal_fragment_begin>',
+        `#include <normal_fragment_begin>
+        {
+          float swell = (v_along / 60.0 - clock * 0.20) * 6.2831853;
+          float chop = (v_along / 17.0 + v_across / 23.0 - clock * 0.35) * 6.2831853;
+          float tilt = 0.055 * cos(swell) + 0.025 * cos(chop);
+          normal = normalize(normal - vFlowView * tilt);
+        }`);
+      fragmentShader =
+        'uniform float clock;\nuniform float relief;\n'
+        + 'varying vec3 vFlowView;\n'
+        + ins.map((a) => `varying float v_${a};`).join('\n') + '\n'
+        + BANK_GLSL + WATER_DEPTH_GLSL
+        + fragmentShader.replace(
+          '#include <color_fragment>', `#include <color_fragment>
+        // THE DEPTH, EXACTLY — the same expression terrainHeight
+        // arrives at, rearranged so a fragment can evaluate it.
+        //
+        // terrainHeight cuts the trench as
+        //     cut = min(D*bank, max(0, land - bed)),  bed = level - D*bank
+        // and the water over it stands level - (land - cut) deep. Take
+        // that apart by cases and the whole of it collapses to the two
+        // lines below: on a bank the trench profile carries the depth
+        // and the ground above the waterline eats into it; on ground
+        // already lower than the water, the ground wins outright.
+        //
+        // Which matters because the two halves want opposite things
+        // from the geometry. \`rise\` is the island with no channel in
+        // it and is smooth, so it interpolates across a fifty-metre
+        // slab without complaint; the trench is under eight metres
+        // wide and would need thirty-odd vertices per station to
+        // interpolate at all, so it is computed instead. A build that
+        // sampled only the finished ground left 6.1% of the island's
+        // water invisible whatever density it was cut at.
+        float depth = tmbWaterDepth(v_deep, v_across, v_span, v_rise) * relief;
+        // GREEN OVER BLUE, THREE TO ONE, which is Joshua's recipe and
+        // not a guess: "a blue/green tint with 75% green, 25% blue".
+        // Both tones hold that ratio, so the water reads as one body
+        // getting deeper rather than as a hue sliding toward the sea.
+        // The red is small and deliberate — pure green and blue makes
+        // pond scum, and a little red is what turns it into water.
+        //
+        // AND THE RAMP RUNS OVER THE DEPTH THE WATER ACTUALLY HAS.
+        // This was 0 to 250 units, and the trench is capped at 100, so
+        // the deep tone was unreachable and every stream on the island
+        // wore the shallow one at 20% strength. The whole palette was
+        // being spent on the first tenth of its range.
+        float deepness = smoothstep(0.0, 90.0, depth);
+        diffuseColor.rgb = mix(vec3(0.09, 0.36, 0.12), vec3(0.014, 0.115, 0.04), deepness);
+        // THE SHORELINE IS AN ALPHA RAMP, not an edge — but it was a
+        // forty-five centimetre one, and that is the whole width of
+        // most of the water on this island. Joshua: "the edges of the
+        // water looks almost clear, and in one spot, I don't see any
+        // water making it to land." Both halves of that are this line.
+        // A stream a hand deep was drawn at a fifth of full opacity
+        // along its entire width, so it never looked like it arrived
+        // anywhere — it faded out before it got to the bank, and the
+        // bank is exactly where you look to see whether water reaches
+        // land.
+        //
+        // SIX CENTIMETRES. Long enough that the terrain clip happens
+        // under a transparency the eye cannot follow, short enough
+        // that water is water a few body lengths from shore. Past the
+        // bank the depth goes NEGATIVE and this is already at zero, so
+        // nothing is left for the depth test to have to hide.
+        diffuseColor.a = mix(0.0, ${SURFACE_ALPHA}, smoothstep(0.0, ${EDGE_FADE}.0, depth));
+        // Fade out where the channel stops being resolved, so the cut
+        // is not a pop.
+        diffuseColor.a *= 1.0 - smoothstep(${FADE_FROM}.0, ${REACH}.0, length(vViewPosition));
+        // WATER NOBODY CAN SEE MUST NOT WRITE DEPTH. The material
+        // writes depth so two overlapping sheets cannot blend twice,
+        // and that is right — but a fragment whose alpha has ramped to
+        // nothing at the shoreline was writing it too, and there it
+        // sits within millimetres of the bank. Two surfaces that
+        // close, both writing depth, is the speckle along a waterline.
+        // Dropping the invisible ones costs nothing that was ever
+        // drawn and takes the whole quarrel off the table.
+        if (diffuseColor.a < 0.004) discard;
+      `);
+  return { vertexShader, fragmentShader };
 }
 
 export class FlowWater {
@@ -417,7 +652,13 @@ export class FlowWater {
       // rather than as water; the colour work below then has nothing
       // left to say.
       color: 0x1d4a5c, transparent: true, opacity: 0.72,
-      roughness: 0.62, metalness: 0.0,
+      // SMOOTHER THAN IT WAS, because the waves have to have
+      // something to catch. 0.62 was set when the surface was flat and
+      // a mirror would have read as plastic; a rippled surface at that
+      // roughness scatters the sun into a uniform sheen and the swell
+      // does not show up at all. 0.34 keeps a broad highlight that
+      // travels with the crests.
+      roughness: 0.34, metalness: 0.0,
       // ONE WATER OWNER PER PIXEL. The water writes depth, so where two
       // transparent sheets overlap — a tributary's slab across its
       // trunk's at every junction, the strip folding at a sharp bend,
@@ -491,90 +732,9 @@ export class FlowWater {
     material.onBeforeCompile = (shader) => {
       shader.uniforms.clock = this.clock;
       shader.uniforms.relief = reliefUniform;
-      const ins = ['deep', 'across', 'span', 'rise'];
-      shader.vertexShader =
-        ins.map((a) => `attribute float ${a};`).join('\n') + '\n'
-        + ins.map((a) => `varying float v_${a};`).join('\n') + '\n'
-        + shader.vertexShader.replace(
-          '#include <begin_vertex>',
-          '#include <begin_vertex>\n'
-          + ins.map((a) => `  v_${a} = ${a};`).join('\n'));
-      // AND THE DEPTH BIAS THE POLYGON OFFSET COULD NOT GIVE IT.
-      //
-      // Under a logarithmic depth buffer three.js writes
-      //     gl_FragDepth = log2(vFragDepth) * logDepthBufFC * 0.5
-      // so a constant subtracted here is a constant in LOG space,
-      // which is a fixed RATIO in distance — the same relative lift a
-      // centimetre from the eye and a kilometre away. That is exactly
-      // the right shape for an island 56 km across seen by something a
-      // centimetre long, and it is why the fixed-function offset,
-      // which works in absolute depth units, was the wrong tool even
-      // before it stopped being applied at all.
-      //
-      // Small enough to be invisible, and it has to be: this decides
-      // depth ONLY, so a lift big enough to see would let the water
-      // draw over a bank standing in front of it.
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <logdepthbuf_fragment>',
-        [
-          '#include <logdepthbuf_fragment>',
-          // The macro is three.js's own, spelt exactly as r180 spells
-          // it — a guard on a name that does not exist compiles
-          // perfectly and does nothing, which is the same silent
-          // nothing the polygon offset was doing. A test in
-          // tests/waterDepth.test.ts holds this name to the chunk.
-          '#ifdef USE_LOGARITHMIC_DEPTH_BUFFER',
-          '  gl_FragDepth -= 3e-6;',
-          '#endif',
-        ].join('\n'));
-      shader.fragmentShader =
-        'uniform float clock;\nuniform float relief;\n'
-        + ins.map((a) => `varying float v_${a};`).join('\n') + '\n'
-        + BANK_GLSL + WATER_DEPTH_GLSL
-        + shader.fragmentShader.replace(
-          '#include <color_fragment>', `#include <color_fragment>
-        // THE DEPTH, EXACTLY — the same expression terrainHeight
-        // arrives at, rearranged so a fragment can evaluate it.
-        //
-        // terrainHeight cuts the trench as
-        //     cut = min(D*bank, max(0, land - bed)),  bed = level - D*bank
-        // and the water over it stands level - (land - cut) deep. Take
-        // that apart by cases and the whole of it collapses to the two
-        // lines below: on a bank the trench profile carries the depth
-        // and the ground above the waterline eats into it; on ground
-        // already lower than the water, the ground wins outright.
-        //
-        // Which matters because the two halves want opposite things
-        // from the geometry. \`rise\` is the island with no channel in
-        // it and is smooth, so it interpolates across a fifty-metre
-        // slab without complaint; the trench is under eight metres
-        // wide and would need thirty-odd vertices per station to
-        // interpolate at all, so it is computed instead. A build that
-        // sampled only the finished ground left 6.1% of the island's
-        // water invisible whatever density it was cut at.
-        float depth = tmbWaterDepth(v_deep, v_across, v_span, v_rise) * relief;
-        float deepness = smoothstep(0.0, 250.0, depth);
-        diffuseColor.rgb = mix(vec3(0.10, 0.28, 0.30), vec3(0.014, 0.10, 0.15), deepness);
-        // THE SHORELINE IS AN ALPHA RAMP, not an edge. Where the water
-        // meets the bank the depth runs out and the surface fades with
-        // it — the hard terrain clip happens under a transparency the
-        // eye cannot see. Past the bank vDeep is NEGATIVE and the ramp
-        // is already at zero, so nothing is left for the depth test to
-        // have to hide.
-        diffuseColor.a = mix(0.0, 0.85, smoothstep(0.0, 45.0, depth));
-        // Fade out where the channel stops being resolved, so the cut
-        // is not a pop.
-        diffuseColor.a *= 1.0 - smoothstep(${FADE_FROM}.0, ${REACH}.0, length(vViewPosition));
-        // WATER NOBODY CAN SEE MUST NOT WRITE DEPTH. The material
-        // writes depth so two overlapping sheets cannot blend twice,
-        // and that is right — but a fragment whose alpha has ramped to
-        // nothing at the shoreline was writing it too, and there it
-        // sits within millimetres of the bank. Two surfaces that
-        // close, both writing depth, is the speckle along a waterline.
-        // Dropping the invisible ones costs nothing that was ever
-        // drawn and takes the whole quarrel off the table.
-        if (diffuseColor.a < 0.004) discard;
-      `);
+      const patched = waterShader(shader.vertexShader, shader.fragmentShader);
+      shader.vertexShader = patched.vertexShader;
+      shader.fragmentShader = patched.fragmentShader;
     };
     return material;
   }

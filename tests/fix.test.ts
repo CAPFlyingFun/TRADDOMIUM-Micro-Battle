@@ -56,10 +56,76 @@ describe('the position fix round-trips', () => {
     expect(back!.msl).toBeCloseTo(1_281, 0);
   });
 
-  it('carries the heading and the attitude', () => {
-    const back = parseFix(formatFix(fixAt(world(0, 0), 0, 125.34, -4.24, 1.5)));
+  it('carries the attitude, and no longer the heading', () => {
+    const line = formatFix(fixAt(world(0, 0), 0, 125.34, -4.24, 1.5));
+    // THE HEADING IS GONE FROM THE LINE ON PURPOSE. The compass ribbon
+    // prints it directly above, and one number on screen twice is one
+    // too many — Joshua: "there are two headings and can drop the one
+    // in the stat numbers."
+    expect(line).not.toContain('125.3');
+    const back = parseFix(line);
+    expect(back!.pitch).toBeCloseTo(-4.2, 1);
+    // Absent rather than wrong. goTo reads this and leaves the camera
+    // facing where it already is; a zero here would snap it to north
+    // and call that a reproduction.
+    expect(Number.isFinite(back!.bearing)).toBe(false);
+  });
+});
+
+/**
+ * EVERY SHAPE THIS GAME HAS EVER PRINTED STILL READS.
+ *
+ * The fix line is an address typed off a photograph, so the ones in
+ * Joshua's camera roll and in old cards outlive any change to the
+ * format. Dropping the bearing made the five-number case ambiguous —
+ * five numbers is `lat lon msl bearing pitch` in the old shape and
+ * `lat lon msl pitch dial` in the new — and the `×` on the dial is
+ * what tells them apart. These are the four shapes and the rule.
+ */
+describe('the four shapes of a fix', () => {
+  it('reads the old six-number line, bearing and all', () => {
+    const back = parseFix('22.04768893 -159.37047816 95.99m 199.4° -18.0° ×1.00');
+    expect(back).not.toBeNull();
+    expect(back!.bearing).toBeCloseTo(199.4, 1);
+    expect(back!.pitch).toBeCloseTo(-18, 1);
+    expect(back!.relief).toBe(1);
+  });
+
+  it('reads the old five-number line, which predates the dial', () => {
+    // Unmarked last number, so the five are the OLD shape and the
+    // fourth is a bearing.
+    const back = parseFix('22.04 -159.53 12.81m 125.3° -4.2°');
+    expect(back).not.toBeNull();
     expect(back!.bearing).toBeCloseTo(125.3, 1);
     expect(back!.pitch).toBeCloseTo(-4.2, 1);
+    expect(Number.isFinite(back!.relief)).toBe(false);
+  });
+
+  it('reads the new five-number line, where the ×dial marks it', () => {
+    const back = parseFix('22.04 -159.53 12.81m -4.2° ×1.00');
+    expect(back).not.toBeNull();
+    // Same count as the line above and a different meaning. The marker
+    // is the whole of the difference, which is why formatFix always
+    // prints it.
+    expect(Number.isFinite(back!.bearing)).toBe(false);
+    expect(back!.pitch).toBeCloseTo(-4.2, 1);
+    expect(back!.relief).toBe(1);
+  });
+
+  it('reads a new line with the dial typed off', () => {
+    // Four numbers is unambiguous, and someone copying off a screen
+    // drops the tail more often than the head.
+    const back = parseFix('22.04 -159.53 12.81m -4.2°');
+    expect(back).not.toBeNull();
+    expect(back!.pitch).toBeCloseTo(-4.2, 1);
+    expect(Number.isFinite(back!.relief)).toBe(false);
+  });
+
+  it('still refuses a line that is not a fix', () => {
+    expect(parseFix('22.04352187 -159.53850470')).toBeNull();
+    expect(parseFix('nothing here at all')).toBeNull();
+    // And somewhere that is not Kauaʻi, however well-formed.
+    expect(parseFix('27.636363 55.222770 12.81m -4.2° ×1.00')).toBeNull();
   });
 });
 

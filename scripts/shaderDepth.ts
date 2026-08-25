@@ -44,7 +44,11 @@ useFlow(flow);
 let n = 0, sumReal = 0, sumShader = 0, zero = 0, dry = 0, dryPainted = 0;
 const errs: number[] = [];
 const missed: number[] = [];
-let elsewhere = 0, orphan = 0;
+let elsewhere = 0, orphan = 0, faint = 0, sumA = 0, edge = 0, sumEdgeA = 0;
+const smoothstep = (a: number, b: number, x: number) => {
+  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
 // Every eleventh reach, which is 300-odd of them and a couple of
 // million sample points — a whole-island answer in under a minute.
 for (let r = 0; r < flow.reaches.length; r += 11) {
@@ -91,6 +95,16 @@ for (let r = 0; r < flow.reaches.length; r += 11) {
       }
       n += area; sumReal += real * area; sumShader += shader * area;
       errs.push(shader - real);
+      // What the eye gets, not just whether the depth is positive:
+      // the ramp is the thing Joshua was looking at when he said the
+      // edges were almost clear.
+      const alpha = 0.92 * smoothstep(0, 6, shader);
+      if (alpha < 0.10) faint += area;
+      sumA += alpha * area;
+      // THE EDGE, which is the part Joshua was looking at. Anything
+      // under 20 cm is the shallow rim of a body of water, and it is
+      // where the eye goes to ask whether the water reaches the land.
+      if (shader < 20) { edge += area; sumEdgeA += alpha * area; }
       if (shader <= 0) {
         zero += area; missed.push(real);
         // WHOSE WATER IS THIS? The index answers with the level of the
@@ -110,6 +124,9 @@ const q = (xs: number[], p: number) => [...xs].sort((a, b) => a - b)[Math.floor(
 console.log(`\n${WAY}\nwet water drawn              ${(n / 1e6).toFixed(2)} km2`);
 console.log(`mean depth the game has      ${(sumReal / n / 100).toFixed(2)} m`);
 console.log(`mean depth the shader sees   ${(sumShader / n / 100).toFixed(2)} m`);
+console.log(`mean alpha, all water         ${(sumA / n).toFixed(2)}`);
+console.log(`mean alpha, the shallow rim   ${(sumEdgeA / edge).toFixed(2)}  (${(100 * edge / n).toFixed(0)}% of the water)`);
+console.log(`too FAINT to read as water   ${(100 * faint / n).toFixed(1)}%`);
 console.log(`drawn at ZERO alpha          ${(100 * zero / n).toFixed(1)}%`);
 console.log(`error p05/p50/p95            ${(q(errs,.05)/100).toFixed(2)} / ${(q(errs,.5)/100).toFixed(2)} / ${(q(errs,.95)/100).toFixed(2)} m`);
 console.log(`  depth of that, p50/p95     ${(q(missed,.5)/100).toFixed(2)} / ${(q(missed,.95)/100).toFixed(2)} m`);

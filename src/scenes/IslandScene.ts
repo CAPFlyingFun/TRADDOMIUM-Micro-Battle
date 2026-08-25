@@ -1631,7 +1631,17 @@ export class IslandScene {
     // did, is not a conversion at all — it put the camera 142 degrees
     // off the frame it was reproducing, and looked plausible enough
     // that only a rendered comparison caught it.
-    const heading = headingFromBearing(fix.bearing);
+    // A FIX WITHOUT A BEARING LEAVES HER FACING WHERE SHE IS FACING.
+    // The line stopped printing one when the compass ribbon above it
+    // was found to be saying the same number — so a fix taken today
+    // reproduces the SPOT, and a fix off an older screenshot, which
+    // still carries its bearing, reproduces the whole frame. Snapping
+    // to north on a missing number would be inventing a fact.
+    // `face(-heading)` is how the yaw is set, so `-look.yaw` is the
+    // heading she is on now — which is the honest answer when the fix
+    // does not carry one.
+    const heading = Number.isFinite(fix.bearing)
+      ? headingFromBearing(fix.bearing) : -this.look.facing;
     const handle = (window as unknown as Record<string, {
       putAt: (wx: number, wz: number, heading?: number) => void;
     }>).__island;

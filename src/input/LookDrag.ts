@@ -168,6 +168,16 @@ export class LookDrag {
     this.yaw = yaw;
   }
 
+  /**
+   * Which way it is looking now.
+   *
+   * The counterpart of `face`, and it exists for the same reason: a
+   * restored fix that carries no bearing must leave the camera where
+   * it is rather than snapping it to north, and it cannot do that
+   * without being able to ask.
+   */
+  get facing(): number { return this.yaw; }
+
   private swing(dYaw: number, dPitch: number): void {
     this.yaw = Math.max(-YAW_LIMIT, Math.min(YAW_LIMIT, this.yaw + dYaw));
     this.pitch = Math.max(PITCH_DOWN, Math.min(PITCH_UP, this.pitch + dPitch));
