@@ -1,10 +1,10 @@
 import * as THREE from 'three';
 import { toLocal } from './origin';
-import { reliefScale, smoothingAmount, SMOOTH_PASSES } from './heightfield';
+import { reliefScale } from './heightfield';
 import { reliefUniform } from './terrainMaterial';
-import { originAt } from './origin';
-import { blurGrid, SAMPLES, type HeightGrid } from './kauai';
 import { flowData, halfAt, type Flow } from './flow';
+import { baseLand } from './heightfield';
+import { BANK_GLSL, cutHalf, WATER_DEPTH_GLSL } from './carve';
 import { SPAN } from './kauai';
 
 /**
@@ -116,23 +116,85 @@ const POND_QUAD = SPAN / 1024;
 
 interface Drawn { readonly mesh: THREE.Mesh; readonly cx: number; readonly cz: number; }
 
-/** One reach as a triangle strip of level slab, relative to (cx, 0, cz). */
+/**
+ * HOW MANY VERTICES A SLAB GETS ACROSS ITS WIDTH.
+ *
+ * It was TWO — one per bank — and two is enough to place a flat sheet
+ * but not to say how deep the water on it runs. A median slab is fifty
+ * metres across and the ground under it is a valley floor, not a plane;
+ * one straight line from bank to bank across fifty metres of Kauaʻi is
+ * a guess.
+ *
+ * NINE, AND NOT MORE, BECAUSE THE HARD PART ISN'T INTERPOLATED. The
+ * sharp feature under a slab is the trench, which is under eight metres
+ * wide, and no spacing worth paying for resolves it: five across scored
+ * 10.3% of the water drawn at zero alpha and thirty-three scored 9.6%.
+ * The trench is ANALYTIC here (see build()); these vertices carry only
+ * baseLand, the island with no channel in it, which is smooth at this
+ * scale and interpolates honestly. Nine is a sample every six metres
+ * across a median slab.
+ */
+const ACROSS = 9;
+
+/**
+ * HOW MANY ROWS OF THOSE VERTICES EACH STATION-TO-STATION SPAN GETS.
+ *
+ * Stations are one grid cell apart, about 55 m, and for four versions
+ * that was the only spacing the water had ALONG its own length. Across
+ * the slab the spacing was measured and argued about; along it, never
+ * — and along it is where the error turned out to live. The ground
+ * between two stations is 55 m of Kauaʻi and a straight line through it
+ * misses whole banks. Per scripts/shaderDepth.ts, water drawn at zero
+ * alpha and dry ground painted blue:
+ *
+ *     1     10.1%     36.0%
+ *     2      8.0%     14.7%
+ *     4      5.4%      5.7%
+ *     8      3.5%      1.8%
+ *
+ * FOUR, NOT EIGHT, AND THE REASON IS THE PHONE. Every vertex costs a
+ * baseLand() and the rebuild lands whole in one frame. Per
+ * scripts/waterCost.ts, at the island's busiest view: 58,563 vertices,
+ * 26 ms here and about 158 ms on a phone at six times slower — but
+ * that is paid ONCE, while the game is loading, because follow() diffs
+ * its wanted set. What lands in a frame is one decision cell of travel,
+ * five hundred metres, which is 29 new reaches, 2.3 ms here and about
+ * 14 ms on a phone. Eight would double both.
+ */
+const ALONG = 4;
+
+/** One reach as a strip of level slab, relative to (cx, 0, cz). */
 export function buildReach(
   flow: Flow, first: number, count: number, cx: number, cz: number,
 ): THREE.BufferGeometry | null {
   if (count < 2) return null;
-  const positions = new Float32Array(count * 2 * 3);
-  // HOW DEEP THE WATER RUNS MID-CHANNEL, AS OUR OWN ATTRIBUTE. `vUv`
-  // looked like the obvious thing to feed the fragment shader and is
-  // not declared at all unless the material carries a map — three.js
-  // gates it behind USE_UV, so the program failed to link and every
-  // stream came out untextured black. Ours is always there.
-  const deep = new Float32Array(count * 2);
-  for (let i = 0; i < count; i++) {
-    const p = first + i;
-    const x = flow.x[p], z = flow.z[p];
+  const rows = (count - 1) * ALONG + 1;
+  const positions = new Float32Array(rows * ACROSS * 3);
+  // THE FOUR NUMBERS A FRAGMENT NEEDS TO KNOW HOW DEEP IT IS, as our
+  // own attributes. `vUv` looked like the obvious carrier and is not
+  // declared at all unless the material has a map — three.js gates it
+  // behind USE_UV, the program failed to link, and every stream came
+  // out untextured black. Ours are always there.
+  //
+  // `deep` is the trench's full depth here and `across`/`span` say
+  // where in its profile the vertex sits; `rise` is how far the water
+  // surface stands above the UNCUT island, which is the one of the four
+  // that has to be sampled from the ground. build() has the formula
+  // that puts them together.
+  const deep = new Float32Array(rows * ACROSS);
+  const across = new Float32Array(rows * ACROSS);
+  const span = new Float32Array(rows * ACROSS);
+  const rise = new Float32Array(rows * ACROSS);
+  for (let row = 0; row < rows; row++) {
+    // Which station-to-station span this row falls in, and how far
+    // along it. The last row is the final station exactly.
+    const i = Math.min(count - 2, Math.floor(row / ALONG));
+    const t = (row - i * ALONG) / ALONG;
+    const p = first + i, q = p + 1;
+    const at = (a: Int32Array | Uint16Array) => a[p] + (a[q] - a[p]) * t;
+    const x = at(flow.x), z = at(flow.z);
     const back = first + Math.max(0, i - 1);
-    const fore = first + Math.min(count - 1, i + 1);
+    const fore = first + Math.min(count - 1, i + 2);
     let dx = flow.x[fore] - flow.x[back];
     let dz = flow.z[fore] - flow.z[back];
     const run = Math.hypot(dx, dz);
@@ -169,84 +231,79 @@ export function buildReach(
     // pond owning the water owns all of it, and a half-width that was
     // zero on one side only would leave the run a sliver rather than
     // degenerate, which is the same double-blend by a thinner name.
-    const owned = flow.level[p] < flow.bed[p];
-    for (const side of [-1, 1] as const) {
-      const half = owned ? 0 : halfAt(flow, p, side) * EDGE;
-      const v = i * 2 + (side + 1) / 2;
-      positions[v * 3] = x - cx + -dz * half * side;
-      positions[v * 3 + 1] = flow.level[p];
-      positions[v * 3 + 2] = z - cz + dx * half * side;
-      deep[v] = flow.level[p] - flow.bed[p];
+    // A span with a ponded station at EITHER end collapses whole: the
+    // rows between them are the ones straddling the pond's edge.
+    const owned = flow.level[p] < flow.bed[p] || flow.level[q] < flow.bed[q];
+    const level = at(flow.level);
+    // THE TRENCH PROFILE IS READ OFF THE STATION THE GROUND WAS CARVED
+    // BY, which is the NEAREST one — flowAt picks a station, not a
+    // blend, so blending its numbers here describes a trench nobody
+    // dug. The surface level still interpolates: that is a water
+    // surface and has to be continuous, and it is the one number the
+    // bake stores per station rather than per cut.
+    const near = t < 0.5 ? p : q;
+    const full = flow.level[near] - flow.bed[near];
+    const reach = cutHalf(flow.width[near]);
+    // AND SO IS THE PERPENDICULAR. The vertices are laid out along a
+    // SMOOTHED normal, because a strip that kinks at every station
+    // opens wedges on the outside of every bend — but flowAt measures
+    // its offset against the LOCAL segment, and at a forty-five degree
+    // turn the two normals differ enough to put a vertex a third of
+    // the way across the trench from where the ground thinks it is.
+    // Measured: 99.3% of the vertices whose shaded depth disagreed
+    // with terrainHeight were inside the trench, which is the only
+    // place a wrong offset can cost a whole metre.
+    //
+    // So the vertex is PLACED with the smooth normal and MEASURED with
+    // the true one. There is no conflict: where the vertex sits is a
+    // question about geometry, and how deep it is is a question about
+    // the cut.
+    let sx = flow.x[q] - flow.x[p], sz = flow.z[q] - flow.z[p];
+    const leg = Math.hypot(sx, sz);
+    if (leg < 1e-6) { sx = dx; sz = dz; } else { sx /= leg; sz /= leg; }
+    for (let k = 0; k < ACROSS; k++) {
+      // -1 at the left bank, 0 on the centreline, +1 at the right.
+      const u = (k / (ACROSS - 1)) * 2 - 1;
+      const side = u < 0 ? -1 : 1;
+      const half = owned ? 0
+        : (halfAt(flow, p, side) + (halfAt(flow, q, side) - halfAt(flow, p, side)) * t) * EDGE;
+      const off = half * u;
+      const wx = x + -dz * off, wz = z + dx * off;
+      const v = row * ACROSS + k;
+      positions[v * 3] = wx - cx;
+      positions[v * 3 + 1] = level;
+      positions[v * 3 + 2] = wz - cz;
+      deep[v] = full;
+      across[v] = (wx - x) * -sz + (wz - z) * sx;
+      span[v] = reach;
+      // THE ONLY THING HERE THAT HAS TO ASK THE GROUND, and it asks the
+      // island the terrain is built from, at the exact point the vertex
+      // sits. Negative where the bank has already risen through the
+      // water: that is what takes the alpha to nothing at the shore
+      // instead of leaving the terrain to hide a fully opaque sheet.
+      rise[v] = level - baseLand(wx, wz);
     }
   }
-  // WHAT TWENTY TIMES THE WIDTH DOES AT A BEND, WRITTEN DOWN BEFORE
-  // ANYONE LOOKS AT A FRAME. Stations are one grid cell apart, about
-  // 55 m, so the polyline's own radius of curvature through a turn is
-  // 27.5 m divided by the sine of half that turn, and the strip folds
-  // over itself on the INSIDE of a bend as soon as a half-width beats
-  // it. At the new median half-width of 25 m that cannot happen at any
-  // angle at all, which is why the question never arose while the
-  // ribbon was three metres across. At the p95 of 83 m it folds on any
-  // turn past about forty degrees, and at the widest stations, 174 m,
-  // past about eighteen — and a steepest-descent path turns forty-five
-  // degrees at a time as a matter of course. So the folding is real,
-  // and it is concentrated in the widest reaches, which are the lowland
-  // ones she will be standing beside.
-  //
-  // The OUTSIDE of a bend cannot open a wedge, at any width. The two
-  // quads meeting at a station share that station's pair of vertices,
-  // so the strip is closed by construction and a corner comes out
-  // mitred rather than gapped. What the mitre does instead is give reach
-  // away: the offset vertex sits one half-width along the bisector
-  // normal, so its clearance from each adjoining segment is only that
-  // times the cosine of half the turn, which is 7.6% short at
-  // forty-five degrees and 29% short at a right angle. That was
-  // millimetres when the slab was three metres wide and is twenty-four
-  // metres at a p95 station now, reach the bake walked out for and the
-  // geometry quietly declines to draw.
-  //
-  // Nothing drawn here can escape the collision index whatever the fold
-  // does. Every corner lies within the largest halfAt() of its own
-  // station, and distance to a segment is a convex function, so the
-  // whole quad sits inside the radius useFlow() claims for that
-  // segment. Drawn stays a subset of wet by construction rather than by
-  // two numbers being kept in step, which is the fault the version 2
-  // rebuild existed to remove.
-  //
-  // WHETHER AN OVERLAP SHOWS IS NOT SETTLED BY THE DEPTH TEST ALONE.
-  // Where one lap hides another the winner swaps exactly along the line
-  // where the two surfaces cross, and on that line they are the same
-  // point at the same height; the fragment shades from where it stands
-  // and how far the ground is below it, never from which quad painted
-  // it, so both answer identically there and the seam is a crease in
-  // the depth ramp rather than a step in it. That much holds from any
-  // camera. What it does not cover is draw ORDER. Triangles within one
-  // geometry go down in index order, which is downstream order, and
-  // depth writing only rejects a later fragment that is FARTHER, so
-  // wherever the downstream lap happens to be the nearer one it passes
-  // the test and blends over an upstream lap that has already blended.
-  // Two coats of the same sheet are darker than one, and near the
-  // shoreline, where the alpha ramp is still small, the doubling is
-  // very nearly exact and the band would carry the straight silhouette
-  // edge of the later quad. That is the same shape of fault as the pond
-  // lattice and the 1.12-cell overlap before it, and it would come and
-  // go as she walks around the bend. It is the thing to look for in the
-  // render, and it is deliberately not fixed here: a guess dressed up
-  // as a fix costs a probe run to disprove.
   const faces: number[] = [];
-  for (let i = 0; i < count - 1; i++) {
-    const a = i * 2;
-    faces.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+  for (let i = 0; i < rows - 1; i++) {
+    for (let k = 0; k < ACROSS - 1; k++) {
+      const a = i * ACROSS + k;
+      const b = a + ACROSS;
+      faces.push(a, a + 1, b, a + 1, b + 1, b);
+    }
   }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geometry.setAttribute('deep', new THREE.Float32BufferAttribute(deep, 1));
+  geometry.setAttribute('across', new THREE.Float32BufferAttribute(across, 1));
+  geometry.setAttribute('span', new THREE.Float32BufferAttribute(span, 1));
+  geometry.setAttribute('rise', new THREE.Float32BufferAttribute(rise, 1));
   geometry.setIndex(faces);
   // FLAT +Y NORMALS, written rather than computed: computeVertexNormals
   // shades each quad facet visibly through transparent water, and a
   // stream's real slope is metres over kilometres, which is flat.
-  const normals = new Float32Array(count * 2 * 3);
-  for (let v = 0; v < count * 2; v++) normals[v * 3 + 1] = 1;
+  const normals = new Float32Array(rows * ACROSS * 3);
+  for (let v = 0; v < rows * ACROSS; v++) normals[v * 3 + 1] = 1;
   geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
   return geometry;
 }
@@ -257,7 +314,15 @@ export function buildPonds(
 ): THREE.BufferGeometry {
   const half = POND_QUAD / 2;
   const positions = new Float32Array(cells.length * 4 * 3);
+  // A POND IS FLAT, and the bake measured its depth for it. `across`
+  // zero and `span` one put every corner at the middle of the profile,
+  // where the bank curve answers exactly 1, so the cell comes out at
+  // that measured depth from edge to edge; `rise` matching it keeps
+  // the formula in build() at the same answer either way.
   const deep = new Float32Array(cells.length * 4);
+  const across = new Float32Array(cells.length * 4);
+  const span = new Float32Array(cells.length * 4).fill(1);
+  const rise = new Float32Array(cells.length * 4);
   const normals = new Float32Array(cells.length * 4 * 3);
   const faces: number[] = [];
   for (let q = 0; q < cells.length; q++) {
@@ -270,6 +335,7 @@ export function buildPonds(
       positions[v * 3 + 1] = flow.pondLevel[i];
       positions[v * 3 + 2] = z + (corner < 2 ? -half : half);
       deep[v] = flow.pondDepth[i];
+      rise[v] = flow.pondDepth[i];
       normals[v * 3 + 1] = 1;
     }
     const a = q * 4;
@@ -278,6 +344,9 @@ export function buildPonds(
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geometry.setAttribute('deep', new THREE.Float32BufferAttribute(deep, 1));
+  geometry.setAttribute('across', new THREE.Float32BufferAttribute(across, 1));
+  geometry.setAttribute('span', new THREE.Float32BufferAttribute(span, 1));
+  geometry.setAttribute('rise', new THREE.Float32BufferAttribute(rise, 1));
   geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
   geometry.setIndex(faces);
   return geometry;
@@ -292,56 +361,26 @@ export class FlowWater {
   private shownAll = true;
 
   /**
-   * THE GROUND, AS A TEXTURE THE WATER CAN ASK. Depth used to ride the
-   * geometry — each slab carried its own baked level-minus-bed — and
-   * Joshua's screenshot showed what that does: every sheet its own
-   * tone, every ownership boundary a straight polygon edge, the island
-   * wearing shards instead of water. Depth is a property of WHERE the
-   * fragment is, not of which slab painted it, so the fragment asks
-   * the height grid: one texture, one answer, one continuous body —
-   * and shorelines fade out on their own as the depth reaches zero.
+   * NO COPY OF THE GROUND LIVES HERE ANY MORE.
+   *
+   * There used to be one: a DataTexture of the height grid, so the
+   * fragment could ask how far the bed lay below it. Depth is a
+   * property of WHERE the fragment is rather than of which slab
+   * painted it, and that much was right — but the island had five
+   * separate descriptions of its own surface by then (the raw grid,
+   * the blurred grid, terrainHeight's carve, farHeight's coarse
+   * answer, and this texture), and every water bug of the last four
+   * releases was two of them disagreeing. This one disagreed worst:
+   * the trench is cut at RUNTIME, so a texture built from the grid
+   * has no trench in it, and the shader was asked how deep the water
+   * stood over ground nobody had dug.
+   *
+   * The depth now comes from the trench's own profile, evaluated per
+   * pixel from the same function that cuts it — see build(). That
+   * removes a description of the island rather than adding a sixth.
    */
-  private readonly groundTex: THREE.DataTexture;
-  private readonly worldOrigin = { value: new THREE.Vector2() };
 
-  constructor(private readonly scene: THREE.Scene, grid: HeightGrid) {
-    // THE GROUND THE GAME DRAWS, NOT THE GRID IT WAS BAKED FROM — and
-    // this file learnt that lesson last, having watched the bake learn
-    // it first.
-    //
-    // The texture used to be the RAW grid, and the terrain is not the
-    // raw grid: baseLand() blends it toward a pre-blurred copy by the
-    // smoothing dial, which ships at 1, meaning the island she walks on
-    // is the FULLY BLURRED grid. Measured against groundHeight over
-    // 352,993 points the water claims, the raw grid is a mean of 8.07 m
-    // out, and the shader and the level field disagreed about wet or
-    // dry on 28.7% of them: 9.3% of the water was drawn at zero alpha
-    // over ground the shader believed was above it, and 19.4% was
-    // painted over dry land the shader believed was below it. Joshua
-    // photographed both halves of that in one session — a stream he was
-    // standing in that was not there, and slabs hanging in the sky over
-    // brown hillside with their own straight edges showing.
-    //
-    // Blended here exactly as baseLand blends it. What is left out is
-    // the procedural relief, and that is correct rather than a
-    // compromise: the bake solved the hydrology on a 4x4-supersampled
-    // average of the same surface, in which the noise averages away, so
-    // this matches the ground the LEVELS were measured against as well
-    // as the one the terrain is built from.
-    const soft = blurGrid(grid, SMOOTH_PASSES);
-    const blend = smoothingAmount();
-    const units = new Float32Array(SAMPLES * SAMPLES);
-    // The grid is int16 DECIMETRES; a unit is a centimetre.
-    for (let i = 0; i < units.length; i++) {
-      units[i] = (grid[i] + (soft[i] - grid[i]) * blend) * 10;
-    }
-    this.groundTex = new THREE.DataTexture(
-      units, SAMPLES, SAMPLES, THREE.RedFormat, THREE.FloatType,
-    );
-    this.groundTex.magFilter = THREE.LinearFilter;
-    this.groundTex.minFilter = THREE.LinearFilter;
-    this.groundTex.generateMipmaps = false;
-    this.groundTex.needsUpdate = true;
+  constructor(private readonly scene: THREE.Scene) {
     this.material = this.build();
   }
 
@@ -398,39 +437,91 @@ export class FlowWater {
     material.polygonOffset = true;
     material.polygonOffsetFactor = 0;
     material.polygonOffsetUnits = -8;
+    // DEPTH IS THE ONLY THING THIS SHADER NEEDS AND IT TOOK FOUR
+    // SHIPPED VERSIONS TO GET IT FROM THE RIGHT PLACE.
+    //
+    // First it rode the geometry: one baked level-minus-bed per slab.
+    // Every sheet came out its own flat tone with a straight polygon
+    // edge at every ownership boundary — the island wearing shards.
+    //
+    // Then it came from a ground-height TEXTURE, which is right in
+    // principle (depth belongs to WHERE the fragment is, not to which
+    // slab painted it) and wrong three times over in fact. The texture
+    // was the RAW grid where the terrain is the BLURRED one: 8.07 m
+    // out on average, wet-or-dry disagreeing on 28.7% of the water.
+    // Blending it as baseLand does fixed that and left the real fault
+    // standing: the trench is cut at RUNTIME and no grid has one in
+    // it, so the shader was asked how deep the water stood over ground
+    // nobody had dug. Measured on the shipped build — mean depth
+    // -0.11 m against the 0.90 m the game actually had, and 66.6% of
+    // the island's water drawn at zero alpha. Joshua, for three
+    // versions running: the water is there and you cannot see it. Nor
+    // could any texture have saved it. 1025 samples over 56 km is one
+    // texel every 54.7 m, and a twelve-metre channel is a quarter of a
+    // texel.
+    //
+    // Then the trench's own profile, evaluated per pixel from the
+    // curve carve.ts digs with. That fixed the invisible water — down
+    // to 1.6% — and broke the other half, because a curve knows the
+    // channel but not the ground either side of it: depth overstated
+    // by 54% and 74.6% of the DRY ground under a slab painted blue.
+    //
+    // What all four have in common is that the water was shaded from a
+    // SECOND description of the island, and a second description
+    // drifts. So now there is one. The fragment evaluates the depth
+    // terrainHeight itself arrives at, derived in carve.ts's
+    // waterDepth() and shared with the shader verbatim: the trench
+    // half is computed from the same curve that cuts it, and the
+    // ground half is one baseLand() sample per vertex. Against the
+    // game's own 0.50 m mean it now reads 0.49 m, with 4.6% at zero
+    // alpha and 6.6% of dry ground painted. tests/waterDepth.test.ts
+    // holds all three of those numbers to the shipped island, and
+    // tests/carve.test.ts holds this GLSL to its JavaScript twin.
     material.onBeforeCompile = (shader) => {
       shader.uniforms.clock = this.clock;
-      shader.uniforms.groundTex = { value: this.groundTex };
-      shader.uniforms.worldOrigin = this.worldOrigin;
       shader.uniforms.relief = reliefUniform;
+      const ins = ['deep', 'across', 'span', 'rise'];
       shader.vertexShader =
-        'varying vec3 vWater;\n'
+        ins.map((a) => `attribute float ${a};`).join('\n') + '\n'
+        + ins.map((a) => `varying float v_${a};`).join('\n') + '\n'
         + shader.vertexShader.replace(
           '#include <begin_vertex>',
-          `#include <begin_vertex>
-  vec4 tmbWorld = modelMatrix * vec4(transformed, 1.0);
-  vWater = tmbWorld.xyz;`);
+          '#include <begin_vertex>\n'
+          + ins.map((a) => `  v_${a} = ${a};`).join('\n'));
       shader.fragmentShader =
-        'uniform float clock;\nuniform sampler2D groundTex;\n'
-        + 'uniform vec2 worldOrigin;\nuniform float relief;\nvarying vec3 vWater;\n'
+        'uniform float clock;\nuniform float relief;\n'
+        + ins.map((a) => `varying float v_${a};`).join('\n') + '\n'
+        + BANK_GLSL + WATER_DEPTH_GLSL
         + shader.fragmentShader.replace(
           '#include <color_fragment>', `#include <color_fragment>
-        // DEPTH FROM WHERE THE FRAGMENT STANDS. The rendered frame is
-        // the floating-origin one; worldOrigin puts the fragment back
-        // in the island's own coordinates and the height grid answers
-        // what the ground is under it. Every sheet — reach slab, pond
-        // quad, whoever won the depth test — shades from the same
-        // field, so no boundary between them can show.
-        vec2 wxz = vWater.xz + worldOrigin;
-        vec2 guv = (wxz + vec2(2800000.0)) / 5600000.0;
-        float ground = texture2D(groundTex, guv).r * relief;
-        float depth = vWater.y - ground;
+        // THE DEPTH, EXACTLY — the same expression terrainHeight
+        // arrives at, rearranged so a fragment can evaluate it.
+        //
+        // terrainHeight cuts the trench as
+        //     cut = min(D*bank, max(0, land - bed)),  bed = level - D*bank
+        // and the water over it stands level - (land - cut) deep. Take
+        // that apart by cases and the whole of it collapses to the two
+        // lines below: on a bank the trench profile carries the depth
+        // and the ground above the waterline eats into it; on ground
+        // already lower than the water, the ground wins outright.
+        //
+        // Which matters because the two halves want opposite things
+        // from the geometry. \`rise\` is the island with no channel in
+        // it and is smooth, so it interpolates across a fifty-metre
+        // slab without complaint; the trench is under eight metres
+        // wide and would need thirty-odd vertices per station to
+        // interpolate at all, so it is computed instead. A build that
+        // sampled only the finished ground left 6.1% of the island's
+        // water invisible whatever density it was cut at.
+        float depth = tmbWaterDepth(v_deep, v_across, v_span, v_rise) * relief;
         float deepness = smoothstep(0.0, 250.0, depth);
         diffuseColor.rgb = mix(vec3(0.10, 0.28, 0.30), vec3(0.014, 0.10, 0.15), deepness);
         // THE SHORELINE IS AN ALPHA RAMP, not an edge. Where the water
         // meets the bank the depth runs out and the surface fades with
         // it — the hard terrain clip happens under a transparency the
-        // eye cannot see.
+        // eye cannot see. Past the bank vDeep is NEGATIVE and the ramp
+        // is already at zero, so nothing is left for the depth test to
+        // have to hide.
         diffuseColor.a = mix(0.0, 0.85, smoothstep(0.0, 45.0, depth));
         // Fade out where the channel stops being resolved, so the cut
         // is not a pop.
@@ -514,11 +605,6 @@ export class FlowWater {
 
   /** Re-seat against the floating origin and the relief dial. */
   place(): void {
-    // The fragment shader reconstructs island coordinates from the
-    // rendered frame; a rebase moves that frame, so the offset rides
-    // along here with the meshes.
-    const seat = originAt();
-    this.worldOrigin.value.set(seat.x, seat.z);
     const relief = reliefScale();
     for (const d of this.drawn.values()) this.seat(d, relief);
     if (this.ponds) this.seat(this.ponds, relief);

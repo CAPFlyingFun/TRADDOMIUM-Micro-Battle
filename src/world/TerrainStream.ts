@@ -294,10 +294,14 @@ export function buildCell(
  */
 /**
  * How much of a coarse tier's vertex spacing one vertex answers for,
- * when it is asked how low the ground gets. Measured rather than
- * chosen: see the water-containment test.
+ * when it is asked how low the ground gets.
+ *
+ * HALF, so a vertex speaks for its own square and not for its
+ * neighbours'. It was a whole spacing, which asked each vertex about
+ * ground the vertex beside it was already answering for and doubled
+ * the width of every carve out here. See CARVE_CAP.
  */
-const FOOTPRINT = 1;
+const FOOTPRINT = 0.5;
 
 /**
  * AND THE MOST ANY TIER MAY ASK FOR, in world units.
@@ -309,12 +313,35 @@ const FOOTPRINT = 1;
  * island. Joshua's screenshots are the result: grass plateaus the size
  * of car parks ending in vertical walls.
  *
- * It was never needed. Water stops at the transition tier (RiverWater's
- * REACH), so no tier coarser than that ever has any water over it to
- * contain. Capped at the transition step, the widest carve on the
- * island is six metres and the plateaus are gone.
+ * It was never needed then. Water stopped at the transition tier, so no
+ * tier coarser than that had any water over it to contain, and capping
+ * at the transition step put the widest carve on the island at six
+ * metres.
+ *
+ * THAT ARGUMENT DIED WHEN THE WATER'S DRAW DISTANCE MOVED. FlowWater's
+ * REACH was two hundred metres and is now two kilometres, which is the
+ * MIDDLE tier's reach — so the middle tier does have water over it, and
+ * the cap left it asking about three metres of ground either side of a
+ * vertex standing thirty-one metres apart from its neighbours. It found
+ * no channel, kept its uncut ground, and the water lay on top of it.
+ * That is the second half of Joshua's floating rivers; `flowNear` was
+ * the first.
+ *
+ * Half the vertex spacing is the honest footprint: a vertex answers for
+ * its own half-cell in each direction and no more, so every square with
+ * a channel in it takes that channel's depth and no square takes a
+ * neighbour's. Capped at the middle tier's half-step because nothing
+ * coarser has water over it — the same reasoning as before, moved to
+ * where the water actually stops now.
+ *
+ * The old cap existed to stop a wide carve flattening plateaus. That
+ * carve was unbounded; this one cannot lower any point by more than a
+ * metre and tapers to nothing at its edge, so a wide footprint out here
+ * is a gentle metre-deep dip across sixty metres, seen from at least
+ * two hundred. It is what puts the water IN the ground rather than on
+ * it.
  */
-const CARVE_CAP = TRANSITION_STEP;
+const CARVE_CAP = MIDDLE_STEP / 2;
 
 const OVERLAP = 0.8;
 

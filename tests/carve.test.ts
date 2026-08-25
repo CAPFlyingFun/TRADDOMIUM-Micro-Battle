@@ -14,7 +14,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  cutHalf, MAX_DEPTH, trenchCut, trenchDepth, trenchWidth,
+  bank, BANK_GLSL, cutHalf, MAX_DEPTH, trenchCut, trenchDepth, trenchWidth,
+  waterDepth, WATER_DEPTH_GLSL,
 } from '../src/world/carve';
 
 const M = 100;
@@ -132,5 +133,127 @@ describe('the cut, and what it refuses to do', () => {
     for (let off = 0; off < half; off += half / 23) {
       expect(trenchCut(20 * M, 900 * M, off, WIDTH)).toBeGreaterThanOrEqual(0);
     }
+  });
+});
+
+/**
+ * THE SHADER'S COPY OF THE CURVE, HELD TO THE ORIGINAL.
+ *
+ * The water's colour and its transparency now come from the trench's
+ * own profile — the fragment shader evaluates the same bank curve the
+ * carve uses, because a ground-height TEXTURE could not hold a twelve
+ * metre channel at one texel every 54.7 m and, worse, was built from a
+ * grid the runtime trench had never been cut into. Measured on the
+ * shipped build: the shader believed the mean depth was -0.11 m where
+ * the game had 0.90 m, and 66.6% of the island's water was drawn at
+ * zero alpha. Joshua, for three versions: the water is there and you
+ * cannot see it.
+ *
+ * That fix is only as good as the two copies staying ONE function. GLSL
+ * is a string here; nothing compiles it, nothing typechecks it, and a
+ * tweak to bank() would leave the shader on the old shape with no
+ * complaint from anything. So the string is read back, transliterated,
+ * and made to answer identically. If this test ever fails, the water is
+ * being shaded by a curve the ground is not cut to.
+ */
+/**
+ * A GLSL function, run as JavaScript.
+ *
+ * GLSL and JS share arithmetic; what differs in these two functions is
+ * `float` declarations, float literals, and the three built-ins below,
+ * all of which translate exactly. Nothing here would survive a real
+ * shader — it survives THESE shaders, which are deliberately kept to
+ * arithmetic so that this check is possible at all.
+ */
+function transliterate(glsl: string, ...args: string[]): (...xs: number[]) => number {
+  const body = glsl.slice(glsl.indexOf('{') + 1, glsl.lastIndexOf('}'));
+  return new Function(...args, body
+    .replace(/\bfloat\b/g, 'const')
+    // Built-ins BEFORE clamp: clamp expands to Math.min/Math.max, and
+    // a later \bmin\b pass would find the `min` inside `Math.min`.
+    .replace(/\b(abs|max|min)\(/g, (_, f) => `Math.${f}(`)
+    .replace(/\bclamp\(([^;]+?), ([^;]+?), ([^;]+?)\)/g,
+      'Math.min($3, Math.max($2, $1))')) as (...xs: number[]) => number;
+}
+
+describe('the bank curve the shader draws with', () => {
+  const glsl = transliterate(BANK_GLSL, 't') as (t: number) => number;
+
+  it('is the same function the ground is cut with', () => {
+    for (let i = 0; i <= 64; i++) {
+      const t = i / 64;
+      expect(glsl(t)).toBeCloseTo(bank(t), 12);
+    }
+  });
+
+  it('agrees outside the trench as well as inside it', () => {
+    // The slab is drawn wider than the cut, so the shader is asked for
+    // t past 1 on every shoreline pixel. Both must clamp, or the water
+    // gets an alpha from a polynomial running away past its domain.
+    for (const t of [-4, -1, -0.001, 1.001, 2, 40]) {
+      expect(glsl(t)).toBeCloseTo(bank(t), 12);
+    }
+  });
+
+  it('is full depth mid-channel and nothing at the lip', () => {
+    // The two ends the whole profile hangs off: a pond passes t = 0 and
+    // must come out at its own full depth; the bank must reach zero, or
+    // the shoreline is a step in the alpha instead of a ramp.
+    expect(glsl(0)).toBe(1);
+    expect(glsl(1)).toBe(0);
+  });
+});
+
+/**
+ * AND THE DEPTH EXPRESSION BUILT ON IT, held to its twin the same way.
+ *
+ * This is the one that decides whether a fragment of water is drawn at
+ * all, and four separate shipped versions of the water got it wrong —
+ * see tests/waterDepth.test.ts for the list. Those tests hold the JS
+ * side to the actual island; this one holds the GLSL side to the JS,
+ * which is the only part of the chain nothing else can reach: the
+ * shader is a string here, nothing compiles it, and a fix applied to
+ * one copy and not the other would look exactly like a fix.
+ */
+describe('the depth expression the shader draws with', () => {
+  const glsl = transliterate(WATER_DEPTH_GLSL, 'deep', 'across', 'span', 'rise');
+  // tmbWaterDepth calls tmbBank, and a `new Function` body resolves
+  // free names against the global scope, so that is where it goes.
+  const run = (d: number, a: number, s: number, r: number) => {
+    (globalThis as Record<string, unknown>).tmbBank = bank;
+    try { return glsl(d, a, s, r); } finally {
+      delete (globalThis as Record<string, unknown>).tmbBank;
+    }
+  };
+
+  it('is the same expression the JS side uses', () => {
+    // Across the three cases the derivation splits into: bank above the
+    // water, floor between bed and waterline, floor below the bed.
+    for (const deep of [0, 30, 100]) {
+      for (const span of [1, 384, 3200]) {
+        for (const across of [0, 100, 383, 384, 2000, 12000]) {
+          for (const rise of [-4000, -100, -1, 0, 1, 60, 500]) {
+            expect(run(deep, across, span, rise))
+              .toBeCloseTo(waterDepth(deep, across, span, rise), 10);
+          }
+        }
+      }
+    }
+  });
+
+  it('never claims water where the ground is above it and the trench is dry', () => {
+    // Past the trench lip the profile is nothing, so all that is left
+    // is the bank — and a bank standing above the waterline must come
+    // out negative, or the shoreline is a hard edge held back only by
+    // the depth test.
+    expect(waterDepth(100, 5000, 384, -300)).toBeLessThan(0);
+    expect(run(100, 5000, 384, -300)).toBeLessThan(0);
+  });
+
+  it('gives a pond its measured depth from edge to edge', () => {
+    // buildPonds passes across 0 and span 1, which puts every corner at
+    // the middle of the profile where the curve answers exactly 1.
+    expect(waterDepth(240, 0, 1, 240)).toBeCloseTo(240, 10);
+    expect(run(240, 0, 1, 240)).toBeCloseTo(240, 10);
   });
 });

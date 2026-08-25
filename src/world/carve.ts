@@ -122,10 +122,36 @@ export function cutHalf(trueWidth: number): number {
  * There is nothing for a shaded surface to catch on at the top, and no
  * crease down the middle at the bottom.
  */
-function bank(t: number): number {
-  const s = t * t * t * (t * (t * 6 - 15) + 10);
+export function bank(t: number): number {
+  const at = Math.min(1, Math.max(0, t));
+  const s = at * at * at * (at * (at * 6 - 15) + 10);
   return 1 - s;
 }
+
+/**
+ * THE SAME CURVE, FOR THE SHADER — and it has to be the same one.
+ *
+ * FlowWater shades the water by how deep it is, and the depth inside a
+ * trench is this profile times the depth at the middle. It used to ask
+ * a ground-height TEXTURE instead, and that texture is one texel every
+ * 54.7 m: a twelve-metre channel is a quarter of a texel, so no texture
+ * at that resolution can hold a trench however it is sampled. Measured
+ * on the shipped build, the shader saw a MEAN DEPTH OF -0.11 m over
+ * water the game had at 0.90 m, and drew 66.6% of the island's water at
+ * zero alpha. Joshua, for three versions: the water is there but you
+ * cannot see it.
+ *
+ * Evaluating the real curve per pixel needs no second copy of the
+ * ground to disagree with. Keep the two identical — a divergence here
+ * is invisible until somebody stands in a river that is not there.
+ */
+export const BANK_GLSL = `
+float tmbBank(float t) {
+  float at = clamp(t, 0.0, 1.0);
+  float s = at * at * at * (at * (at * 6.0 - 15.0) + 10.0);
+  return 1.0 - s;
+}
+`;
 
 /**
  * HOW FAR THE GROUND IS CUT at `off` from the centreline — never
@@ -173,3 +199,49 @@ export function trenchCut(
   // nothing, so the trench always leaves the ground where it found it.
   return Math.min(depth * shape, Math.max(0, land - bed));
 }
+
+/**
+ * HOW DEEP THE WATER STANDS, from the four numbers a slab vertex can
+ * carry — the same depth `trenchCut` above leaves under the level.
+ *
+ * `deep` is the trench's full depth at the station, `across` how far
+ * off its centreline the point sits, `span` how far the trench reaches,
+ * and `rise` how far the water surface stands above the UNCUT island
+ * here. The first three describe the cut and are computed; the fourth
+ * is the only one that has to be sampled from the ground.
+ *
+ * The derivation, because a rearranged formula that nobody can check is
+ * how this went wrong the first four times. terrainHeight leaves the
+ * ground at `land - cut`, so the water over it is `level - land + cut`
+ * deep, and with `D` for `deep * bank(across / span)`:
+ *
+ *     cut  = min(D, max(0, land - bed)),  bed = level - D
+ *     rise = level - land
+ *
+ * Three cases, and no others. Ground above the waterline: `land - bed`
+ * exceeds `D`, so `cut = D` and the depth is `rise + D`, with `rise`
+ * negative — the bank eating into the trench, which is what makes a
+ * shoreline. Ground between the bed and the waterline: `cut` is
+ * `land - bed` and everything cancels to `D` exactly. Ground already
+ * below the bed: nothing is cut at all and the depth is `rise`, which
+ * in that case is the largest of the three. So:
+ *
+ *     depth = max(rise, D + min(rise, 0))
+ *
+ * which is the line below, and the line in WATER_DEPTH_GLSL, and the
+ * only description of water depth this game has left.
+ */
+export function waterDepth(
+  deep: number, across: number, span: number, rise: number,
+): number {
+  const shape = bank(Math.abs(across) / Math.max(span, 1));
+  return Math.max(rise, deep * shape + Math.min(rise, 0));
+}
+
+/** waterDepth(), for the fragment shader. Held to its twin by a test. */
+export const WATER_DEPTH_GLSL = `
+float tmbWaterDepth(float deep, float across, float span, float rise) {
+  float shape = tmbBank(abs(across) / max(span, 1.0));
+  return max(rise, deep * shape + min(rise, 0.0));
+}
+`;

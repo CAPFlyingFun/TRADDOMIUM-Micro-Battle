@@ -453,6 +453,71 @@ export function flowAt(wx: number, wz: number): FlowSpot | null {
   return best;
 }
 
+/** What a coarse terrain vertex needs to know about a channel near it. */
+export interface NearChannel {
+  readonly level: number;
+  readonly bed: number;
+  readonly width: number;
+  /** True distance from the centreline, which may exceed the claim. */
+  readonly off: number;
+}
+
+/**
+ * THE NEAREST CHANNEL WITHIN `slack`, for the tiers drawn too coarsely
+ * to have found it any other way.
+ *
+ * `flowAt` answers only inside a segment's CLAIM, which since the bed
+ * was cut is a handful of metres — right for gameplay, and useless to
+ * a middle-tier vertex standing 31 m from the water it is supposed to
+ * be holding. That mismatch is what put Joshua's rivers on stilts: the
+ * near mesh cut its trench and the coarse mesh did not, so past twenty
+ * metres the water lay on top of uncut ground with its edges showing.
+ * "Floating like highways."
+ *
+ * Deliberately NOT the hot path and deliberately not a FlowSpot: this
+ * returns the four numbers a carve needs and no current, so nothing
+ * here has to keep step with the velocity thread, and `flowAt` stays
+ * exactly as fast as it was.
+ */
+export function flowNear(wx: number, wz: number, slack: number): NearChannel | null {
+  if (!heads || !counts || !buckets || !loaded) return null;
+  // The bucket grid holds each segment under every cell its claim
+  // touches, so widening the question by `slack` means widening the
+  // SEARCH by the same, one bucket at a time.
+  const span = Math.ceil(slack / CELL);
+  const cx = Math.floor((wx + SPAN / 2) / CELL);
+  const cz = Math.floor((wz + SPAN / 2) / CELL);
+  let best: NearChannel | null = null;
+  for (let dz = -span; dz <= span; dz++) {
+    for (let dx = -span; dx <= span; dx++) {
+      const ax2 = cx + dx;
+      const az2 = cz + dz;
+      if (ax2 < 0 || az2 < 0 || ax2 >= CELLS || az2 >= CELLS) continue;
+      const cell = az2 * CELLS + ax2;
+      const from = heads[cell];
+      if (from < 0) continue;
+      const many = counts[cell];
+      for (let n = 0; n < many; n++) {
+        const s = buckets[from + n];
+        const ex = bx![s] - ax![s];
+        const ez = bz![s] - az![s];
+        const run = ex * ex + ez * ez;
+        const t = run > 0
+          ? Math.max(0, Math.min(1, ((wx - ax![s]) * ex + (wz - az![s]) * ez) / run)) : 0;
+        const offX = wx - (ax![s] + ex * t);
+        const offZ = wz - (az![s] + ez * t);
+        const off = Math.hypot(offX, offZ);
+        if (off > claim![s] + slack) continue;
+        if (best && off >= best.off) continue;
+        const level = aLev![s] + (bLev![s] - aLev![s]) * t;
+        const bed = aBed![s] + (bBed![s] - aBed![s]) * t;
+        best = { level, bed, width: wide![s], off };
+      }
+    }
+  }
+  return best;
+}
+
 /**
  * How fast water runs down a grade, world units a second.
  *

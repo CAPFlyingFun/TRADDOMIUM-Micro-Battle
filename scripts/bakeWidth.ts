@@ -76,18 +76,33 @@ const CAP = 30_000;
  */
 const MARGIN = 200;
 /**
- * How far below the water level the ground may fall before the march
- * decides it has left this valley — two metres.
+ * HOW FAR BELOW THE LEVEL THE GROUND MAY FALL before the march decides
+ * it has left this channel — the channel's OWN DEPTH, not a constant.
  *
- * Ground that keeps dropping is not a valley floor this water covers,
- * it is a hillside draining somewhere else, and the slab has no
- * business being painted down it. The figure was chosen against an
- * independent HAND calculation — Height Above Nearest Drainage, Rennó
- * et al. 2008 and Nobre et al. 2011 — run over the same flow routing,
- * which put the corridor at about one grid cell. The two agree, which
- * is the only reason to trust either.
+ * It was a flat two metres, chosen back when nothing was carved and the
+ * question was which drainage basin a piece of flat ground belonged to.
+ * It was checked then against an independent HAND calculation (Rennó et
+ * al. 2008, Nobre et al. 2011) and the two agreed, and for that question
+ * it was right.
+ *
+ * It is the wrong question now. There is a bed, it is one metre deep,
+ * and the march runs along the bottom of it — so two metres of licence
+ * let the slab run two metres out over ground that had dropped away
+ * from the channel entirely. At a centimetre long that is a sheet of
+ * water hanging two hundred body lengths above the ground with daylight
+ * under it. Joshua: "placing water too high and floating like
+ * highways." Measured before the change, 26% of slab edges on the near
+ * mesh hung over air, by 0.48 m on average and up to the full 2 m.
+ *
+ * Tying it to the trench makes the rule say what it means: inside the
+ * bed the ground is never more than one depth under the water, so this
+ * cannot fire there; the moment it does fire, the ground has left the
+ * channel. Twenty units of slack so the bed's own floor does not trip
+ * it on a rounding.
  */
-const DROP = 200;
+function dropFor(trueWidth: number): number {
+  return trenchDepth(trenchWidth(trueWidth)) + 20;
+}
 /**
  * HOW MANY TRUE CHANNEL WIDTHS THE WATER MAY SPREAD ACROSS, or ZERO for
  * no bound at all. It is ZERO, and that is Joshua's call.
@@ -235,10 +250,33 @@ for (const reach of flow.reaches) {
   for (let i = 0; i < reach.count; i++) {
     const p = reach.first + i;
     if (ponded[p]) continue;
+    // THE LOWER OF ITS OWN TWO BANKS, and this is what containment
+    // actually requires. Setting the level from the ground AT THE
+    // STATION contains the water only if the station is the lowest
+    // point across the channel, and on any cross-slope it is not — the
+    // downhill lip sits below a level taken from the middle, so the
+    // sheet runs out over it and ends in mid-air. Measured that way,
+    // 26% of slab edges on the near mesh hung over ground, by up to
+    // 1.2 m. At a centimetre long that is Joshua's floating highway.
+    //
+    // Taking the LOWER lip puts the water under both of them by
+    // construction, so the march finds a bank on either side and the
+    // sheet has somewhere to stop.
+    const back = reach.first + Math.max(0, i - 1);
+    const fore = reach.first + Math.min(reach.count - 1, i + 1);
+    let ndx = flow.x[fore] - flow.x[back];
+    let ndz = flow.z[fore] - flow.z[back];
+    const nrun = Math.hypot(ndx, ndz);
+    if (nrun < 1e-6) { ndx = 1; ndz = 0; } else { ndx /= nrun; ndz /= nrun; }
+    const lip = cutHalf(flow.width[p]);
+    const land = Math.min(
+      farHeight(flow.x[p], flow.z[p]),
+      farHeight(flow.x[p] + -ndz * lip, flow.z[p] + ndx * lip),
+      farHeight(flow.x[p] - -ndz * lip, flow.z[p] - ndx * lip),
+    );
     // INTEGERS FROM HERE ON. The invariant below has to hold in the
     // numbers the decoder will actually see rather than in the floats
     // they came from — bakeFlow.py's write() learnt that one first.
-    const land = farHeight(flow.x[p], flow.z[p]);
     const set = Math.round(land - FREEBOARD);
     drops.push(flow.level[p] - set);
     level[p] = set;
@@ -330,7 +368,7 @@ let samples = 0;
  *   CAPPED three hundred metres. Reported, never silent.
  */
 function reachOut(
-  x: number, z: number, nx: number, nz: number, water: number,
+  x: number, z: number, nx: number, nz: number, water: number, drop: number,
 ): { far: number; why: Stop } {
   for (let d = STRIDE; d <= CAP; d += STRIDE) {
     const sx = x + nx * d;
@@ -339,7 +377,7 @@ function reachOut(
     samples++;
     const ground = groundHeight(sx, sz);
     if (ground >= water) return { far: d - STRIDE, why: BANK };
-    if (ground < water - DROP) return { far: d - STRIDE, why: CLIFF };
+    if (ground < water - drop) return { far: d - STRIDE, why: CLIFF };
   }
   return { far: CAP, why: CAPPED };
 }
@@ -402,7 +440,7 @@ for (const reach of flow.reaches) {
     let total = 0;
     let held = 0;
     for (const side of [-1, 1] as const) {
-      const found = reachOut(x, z, nx * side, nz * side, water);
+      const found = reachOut(x, z, nx * side, nz * side, water, dropFor(flow.width[p]));
       const wet = found.why === BANK ? found.far + MARGIN : found.far;
       // Clamped to the cap, which is 30,000 — comfortably under the
       // 0xFFFF the Python bake leaves in these fields, so a measurement

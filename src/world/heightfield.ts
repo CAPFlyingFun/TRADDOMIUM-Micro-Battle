@@ -34,8 +34,8 @@
  *
  * Heights are world units with the waterline at 0.
  */
-import { trenchCut } from './carve';
-import { flowAt } from './flow';
+import { MAX_DEPTH, trenchCut } from './carve';
+import { flowAt, flowNear } from './flow';
 import {
   blurGrid, cellSlope, heightAt, SPAN, STEP, UNITS_PER_METRE, type HeightGrid,
 } from './kauai';
@@ -189,7 +189,16 @@ function calm(x: number, z: number): number {
   return 1 - (1 - CLIFF_KEEPS) * eased;
 }
 
-function baseLand(x: number, z: number): number {
+/**
+ * The island BEFORE any channel is cut into it.
+ *
+ * Exported for the water, which needs both this and the trench profile
+ * to say how deep it stands: the trench is analytic and sharp, this is
+ * smooth, and a slab vertex that carries them separately can
+ * interpolate the smooth one across fifty metres without losing the
+ * sharp one down the middle. See FlowWater's build().
+ */
+export function baseLand(x: number, z: number): number {
   if (!grid) return 0;
   const raw = heightAt(grid, x, z);
   // Blend the two grids rather than blurring on the fly. The soft one
@@ -269,17 +278,35 @@ export function terrainHeight(x: number, z: number): number {
 export function farHeight(x: number, z: number, slack = 0): number {
   const land = baseLand(x, z);
   if (land <= 0 || slack <= 0) return land;
-  const spot = flowAt(x, z);
+  // `flowNear` AND NOT `flowAt`, and that difference is half the bug
+  // Joshua photographed. flowAt answers only inside a segment's claim,
+  // which since the bed was cut is a handful of metres; a middle-tier
+  // vertex stands 31 m from the water it has to hold and got nothing
+  // back, so the coarse mesh kept its uncut ground while the water was
+  // still drawn at the level. Past the near tier every river lay on top
+  // of the island with its edges showing. "Floating like highways."
+  const spot = flowNear(x, z, slack);
   if (!spot || spot.level < spot.bed) return land;
-  // THE FOOTPRINT IS THE WHOLE POINT. This vertex stands for `slack` of
-  // ground in every direction, and a channel anywhere inside that has
-  // to come through, or a river drawn at this distance floats over
-  // ground that was never cut for it. So the cut is taken at the
-  // CLOSEST the channel comes within the footprint rather than at the
-  // vertex's exact spot — the same "lowest ground I stand for" rule
-  // this function was written for, back when there was a trench to
-  // find. There is one again.
-  return land - trenchCut(land, spot.level, Math.max(0, spot.off - slack), spot.width);
+
+  // AND THE COARSE TIERS AIM AT THE WATER LINE, not at the trench bed.
+  // That is the other half, and cutting the real trench out here made
+  // it WORSE rather than better: measured, the middle tier went from
+  // 18% of slab edges hanging over air to 90%, because a vertex thirty
+  // metres from the channel took the full depth and left the ten-metre
+  // sheet sitting proud of a thirty-metre trough.
+  //
+  // The trench is a shape these triangles cannot hold — a 7 m channel
+  // between vertices 31 m apart is not a channel, it is a rounding
+  // error. What they CAN hold is the waterline itself. Bringing the
+  // ground to exactly the level means the river reads at distance as a
+  // flat ribbon lying flush in the ground, with nothing to see under
+  // it, which is the honest coarse reading of a trench too small to
+  // draw. The near mesh still cuts the real bed; this is only ever
+  // called for the tiers that cannot.
+  //
+  // Bounded by the same metre as the trench, so no footprint anywhere
+  // can take more ground than the carve is allowed to.
+  return land - Math.min(MAX_DEPTH, Math.max(0, land - spot.level));
 }
 
 /**
