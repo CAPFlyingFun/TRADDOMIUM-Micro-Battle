@@ -34,7 +34,8 @@ import {
 } from '../game/save';
 import { Vitals } from '../ui/Vitals';
 import { LIVE_GROWTH, liveStat } from '../ant/castes';
-import { ActionPad } from '../input/ActionPad';
+import { ActionPad, type Action } from '../input/ActionPad';
+import { Thirst } from '../ant/thirst';
 import { LiftSlider } from '../input/LiftSlider';
 import { DebugDie } from '../ui/DebugDie';
 import { WeatherChip } from '../ui/WeatherChip';
@@ -85,6 +86,16 @@ import { LiveWind, shelter, windProfile } from '../weather/windField';
  */
 
 const SKY_COLOR = 0x9cc8e8;
+/**
+ * How fast she sinks and rises when the lever moves — the fraction of
+ * the remaining depth she closes each second.
+ *
+ * Slow enough to read as swimming rather than as a lift. Two and a bit
+ * seconds from the surface to the bed of a metre-deep trench, which at
+ * her scale is a hundred body lengths of water and ought to take a
+ * moment.
+ */
+const DIVE_EASE = 1.8;
 
 /** How long the lapse warning stays up, in seconds. */
 const PROTECTION_NOTICE = 6;
@@ -108,6 +119,17 @@ export class IslandScene {
   private readonly panel: SettingsPanel;
   private readonly vitals: Vitals;
   private readonly actions: ActionPad;
+  /** The drink button. On the pad only where there is water to drink. */
+  private readonly drinkButton: Action;
+  private readonly thirst = new Thirst();
+  /**
+   * HOW FAR DOWN SHE IS SWIMMING, nought at the surface and one on the
+   * bed. Eased rather than set, because the lever is a position and a
+   * swimming animal is not: snapping her to the bottom the instant a
+   * thumb reaches the end of the track reads as a teleport.
+   */
+  private dive = 0;
+  private drinking = false;
   private readonly debugDie: DebugDie;
   private readonly weatherChip: WeatherChip;
   /** Altitude, vertical speed and the wind — flight only. */
@@ -376,6 +398,15 @@ export class IslandScene {
     // rather than being typed here — this is the only place the data
     // file and the HUD meet, and it is a read, not a copy.
     this.actions = new ActionPad(host);
+    // THE DRINK BUTTON IS BACK, and the note that used to sit here is
+    // why it went: it stayed on the pad for one build after the water
+    // came out, permanently disabled, which is the state the
+    // contextual-HUD rule exists to forbid. It comes back now there is
+    // something to drink, and it comes back CONTEXTUAL — off the pad
+    // entirely unless she is standing in fresh water, rather than
+    // greyed on every dry hillside on the island.
+    this.drinkButton = this.actions.add('💧', 'drink', 'e');
+    this.drinkButton.show(false);
     this.debugDie = new DebugDie(host, () => this.kill());
     this.weatherChip = new WeatherChip(host);
     this.flightHud = new FlightHud(host);
@@ -943,7 +974,15 @@ export class IslandScene {
     }
 
     let winded = false;
+    // CLEARED EVERY FRAME, and set again only on the branch that can
+    // earn it. `drinking` is assigned inside the on-foot path, so
+    // taking off mid-sip would otherwise leave it latched and she
+    // would drink her way across the island at two hundred metres.
+    this.drinking = false;
     if (this.flight.aloft) {
+      // And the button goes with her: there is nothing to drink from up
+      // here, whatever is underneath.
+      this.drinkButton.show(false);
       const step = this.flight.update(
         {
           push: stick.y,
@@ -1013,20 +1052,40 @@ export class IslandScene {
       // may only move if there is a way to move it back, and there is
       // no drying off yet. Water may slow her and carry her; it may not
       // start a clock she cannot stop.
+      // HOW DEEP SHE IS SWIMMING, from the lever that already means up
+      // and down. Reusing it rather than adding a control: it is the
+      // climb lever in the air and the dive lever in the water, which
+      // is one idea in one place on the screen instead of two.
+      const wantDive = this.flight.aloft ? 0 : Math.max(0, -this.liftSlider.lift);
+      // Frame-rate independent easing, the same shape PlayerAnt uses
+      // for every other approach: a fixed fraction of the remaining
+      // gap per second rather than per frame.
+      this.dive += (wantDive - this.dive) * (1 - Math.exp(-DIVE_EASE * dt));
       const wade = wadeAt(
         this.ant.where.wx, this.ant.where.wz,
         groundHeight(this.ant.where.wx, this.ant.where.wz),
+        this.dive,
       );
+      // DRINKING IS AN ACT, and an act can be interrupted. Held, not
+      // tapped: she stops where she is, and letting go or walking off
+      // ends it. She has to be IN the water rather than near it, which
+      // at a centimetre long is a step.
+      this.drinkButton.show(wade.drinkable);
+      this.drinking = wade.drinkable && this.drinkButton.held
+        && travel.speed < 1;
       this.effort = sprinting ? SPRINT_DRAIN
         : resting ? RESTING_RECOVERY : MOVING_RECOVERY;
       winded = this.stamina.update(this.effort, dt);
+      // Drinking holds her still, which is what makes it an act she
+      // can be knocked out of rather than a passive trickle.
+      const hold = this.drinking ? 0 : wade.pace;
       this.ant.update(
         {
-          ahead: travel.ahead * wade.pace,
-          across: travel.across * wade.pace,
-          speed: travel.speed * wade.pace,
+          ahead: travel.ahead * hold,
+          across: travel.across * hold,
+          speed: travel.speed * hold,
         },
-        -look.yaw, dt, wade.above, wade.carry,
+        -look.yaw, dt, wade.above, this.drinking ? null : wade.carry,
       );
     }
 
@@ -1105,8 +1164,16 @@ export class IslandScene {
     // question this meter asks. Ticked here rather than inside the
     // water branch so surfacing on dry land still refills her — she
     // does not hold her breath standing on a riverbank.
+    // THE RESERVE RUNS WHATEVER SHE IS DOING — walking, flying, or
+    // standing still — because thirst is not an activity. Advanced
+    // here rather than inside the on-foot branch above, where a long
+    // flight would have paused it.
+    this.thirst.update(dt, this.drinking);
     this.vitals.aloft(this.flight.aloft);
     this.vitals.show(this.stamina.fraction, this.stamina.spent, this.effort);
+    this.vitals.thirst(
+      this.thirst.fraction, this.thirst.parched, this.drinking, this.thirst.drain,
+    );
 
     // ── DRINKING WENT WITH THE WATER ────────────────────────────────
     // A button lit when there was water at her feet or a nose length

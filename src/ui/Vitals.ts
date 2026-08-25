@@ -45,6 +45,8 @@ const RESTING = 'rgba(255, 226, 160, .42)';
 const IDLE_RATE = 0.0001;
 const FUEL = 'rgba(255, 196, 92, .95)';
 const SPENT = 'rgba(255, 110, 90, .95)';
+/** The water bar's own blue, so a full reserve does not read as fuel. */
+const WATER = 'rgba(120, 190, 255, .92)';
 
 /** What the queen's stat table says she has, resolved for the live ant. */
 export interface Reserves {
@@ -126,15 +128,21 @@ export class Vitals {
     } as Partial<CSSStyleDeclaration>);
 
     this.stamina = this.meter('⚡', 'stamina', null);
-    // BACK TO A PLACEHOLDER. It was live for a while, fed by a thirst
-    // that drinking refilled; the water it drank from is gone, and a
-    // bar may only move if there is a way to move it back.
+    // AND THE WATER BAR IS LIVE AGAIN. It was a placeholder for three
+    // versions, and the note here said exactly why: it had been fed by
+    // a thirst that drinking refilled, the water it drank from was
+    // gone, and a bar may only move if there is a way to move it back.
+    // There is a bed with water in it now and she can stand in it, so
+    // the drain and its refill arrive in the same change rather than a
+    // build apart. Health and food are still held: nothing heals her
+    // and nothing feeds her yet.
+    this.water = this.meter('💧', 'water', null);
     stack.append(
       who,
       this.stamina.icon.parentElement!,
       this.meter('♥', 'health', reserves.health).icon.parentElement!,
       this.meter('🌾', 'food', reserves.food).icon.parentElement!,
-      this.meter('💧', 'water', reserves.water).icon.parentElement!,
+      this.water.icon.parentElement!,
     );
 
     // The grace chip. Hidden unless it is running, because a control
@@ -209,6 +217,8 @@ export class Vitals {
   }
 
   private flying = false;
+  private readonly water: Meter;
+  private shownWater = '';
 
   show(fraction: number, spent: boolean, rate: number): void {
     const left = Math.max(0, Math.min(1, fraction));
@@ -225,6 +235,35 @@ export class Vitals {
     this.stamina.read.textContent = label;
   }
 
+
+  /**
+   * WHAT SHE HAS LEFT TO DRINK, and whether she is drinking it.
+   *
+   * Read as a count of seconds rather than a percentage, the same way
+   * stamina is: "14.7s" tells her whether she can reach the next
+   * stream and "23%" does not. The colour is the bar's own state and
+   * not a warning level — blue while she is fine, the spent red once
+   * the parched latch is set, and the fuel colour while she is
+   * actually drinking so the act reads on the card as well as on the
+   * button.
+   */
+  thirst(fraction: number, parched: boolean, drinking: boolean, drain: number): void {
+    const left = Math.max(0, Math.min(1, fraction));
+    const seconds = drain > 0 ? left / drain : Infinity;
+    const label = drinking ? 'drinking'
+      : !Number.isFinite(seconds) ? 'full'
+      : seconds >= 120 ? `${Math.round(seconds / 60)}m`
+      : `${seconds.toFixed(1)}s`;
+    const state = `${label}|${parched}|${drinking}|${Math.round(left * 200)}`;
+    if (state === this.shownWater) return;
+    this.shownWater = state;
+    const tone = drinking ? FUEL : parched ? SPENT : WATER;
+    this.water.fill.style.width = `${left * 100}%`;
+    this.water.fill.style.background = tone;
+    this.water.icon.style.color = tone;
+    this.water.read.style.color = parched ? SPENT : drinking ? GOLD : RESTING;
+    this.water.read.textContent = label;
+  }
 
   /**
    * @param seconds how much grace is left, or null when it is over

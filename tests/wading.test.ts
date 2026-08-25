@@ -207,3 +207,59 @@ describe('the two ways this could be silently wrong', () => {
     expect(inside).toBeGreaterThan(10);
   });
 });
+
+describe('diving', () => {
+  it('rides the surface at nought and stands on the bed at one', () => {
+    // The lever that means climb in the air means dive in the water,
+    // and scaling the height she floats at is what makes the bed the
+    // limit for free: at full dive `above` is zero, which is standing
+    // on the bottom, however deep the trench happens to be.
+    for (const depth of [1, 10, 100]) {
+      const ground = stream.level - depth;
+      expect(wadeAt(stream.x, stream.z, ground, 0).above)
+        .toBeCloseTo(depth - 0.15, 6);
+      expect(wadeAt(stream.x, stream.z, ground, 1).above).toBe(0);
+      // Halfway down is halfway down, not a step at either end.
+      expect(wadeAt(stream.x, stream.z, ground, 0.5).above)
+        .toBeCloseTo((depth - 0.15) / 2, 6);
+    }
+  });
+
+  it('cannot be pushed through the bed or lifted off the water', () => {
+    // Out-of-range input is the caller's mistake and must not become
+    // her problem: a dive past one would put her under the floor and a
+    // negative one would fly her.
+    const ground = stream.level - 20;
+    expect(wadeAt(stream.x, stream.z, ground, 5).above).toBe(0);
+    expect(wadeAt(stream.x, stream.z, ground, -5).above)
+      .toBeCloseTo(20 - 0.15, 6);
+  });
+
+  it('does nothing at all to an ant who is only wading', () => {
+    // Her feet are on the bed already. A dive that lowered her further
+    // would put her inside it.
+    const shallow = wadeAt(stream.x, stream.z, stream.level - 0.2, 1);
+    expect(shallow.afloat).toBe(false);
+    expect(shallow.above).toBe(0);
+  });
+});
+
+describe('what she may drink', () => {
+  it('says so for the water in a channel', () => {
+    expect(wadeAt(stream.x, stream.z, stream.level - 2).drinkable).toBe(true);
+  });
+
+  it('says nothing on dry land', () => {
+    expect(wadeAt(stream.x, stream.z, stream.level + 500).drinkable).toBe(false);
+  });
+
+  it('says nothing over the sea, which she cannot drink', () => {
+    // Fresh only, and it falls out of where the number came from rather
+    // than needing a rule of its own: waterLevelAt answers for the flow
+    // index and the ponds, and the sea is in neither. Asserted well off
+    // the coast and well under the surface, which is exactly where a
+    // sea-blind implementation would wrongly say yes.
+    expect(waterLevelAt(2_600_000, 2_600_000)).toBeNull();
+    expect(wadeAt(2_600_000, 2_600_000, -5_000).drinkable).toBe(false);
+  });
+});

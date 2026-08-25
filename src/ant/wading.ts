@@ -76,9 +76,20 @@ export interface Wade {
   readonly carry: { readonly x: number; readonly z: number } | null;
   /** True once her feet are off the bottom. */
   readonly afloat: boolean;
+  /**
+   * Whether this is water she can DRINK.
+   *
+   * Fresh only, and that falls out of where the number came from
+   * rather than needing a rule: `waterLevelAt` answers for the flow
+   * index and the ponds, and the sea is in neither. She cannot drink
+   * the sea, and nothing here has to remember that.
+   */
+  readonly drinkable: boolean;
 }
 
-const DRY: Wade = { depth: 0, above: 0, pace: 1, carry: null, afloat: false };
+const DRY: Wade = {
+  depth: 0, above: 0, pace: 1, carry: null, afloat: false, drinkable: false,
+};
 
 /**
  * What the water at (wx, wz) is doing to something standing on
@@ -86,7 +97,9 @@ const DRY: Wade = { depth: 0, above: 0, pace: 1, carry: null, afloat: false };
  * is actually on, so this agrees with what the player can see by
  * construction rather than by two numbers being kept in step.
  */
-export function wadeAt(wx: number, wz: number, ground: number): Wade {
+export function wadeAt(
+  wx: number, wz: number, ground: number, dive = 0,
+): Wade {
   const raw = waterLevelAt(wx, wz);
   if (raw === null) return DRY;
   // Levels are stored at relief 1 and the dial is applied by the
@@ -105,11 +118,20 @@ export function wadeAt(wx: number, wz: number, ground: number): Wade {
     // her on the bed, where `above` must stay exactly zero: lifting a
     // walking ant off the ground by a fraction of the water she is in
     // is a hover, and it reads as one.
-    above: afloat ? Math.max(0, depth - DRAUGHT) : 0,
+    //
+    // AND `dive` PULLS HER DOWN THROUGH IT, nought at the surface and
+    // one on the bottom, which is the whole of swimming underwater.
+    // Scaling the height she floats at is what makes the bed the
+    // limit for free: at dive 1 she is standing on it however deep the
+    // trench is, and there is no separate clamp to keep in step.
+    above: afloat
+      ? Math.max(0, (depth - DRAUGHT) * (1 - Math.min(1, Math.max(0, dive))))
+      : 0,
     pace: afloat ? PADDLE_PACE : 1 - (1 - WADE_PACE) * sunk,
     carry: spot && (spot.flowX !== 0 || spot.flowZ !== 0)
       ? { x: spot.flowX * pull, z: spot.flowZ * pull }
       : null,
     afloat,
+    drinkable: true,
   };
 }

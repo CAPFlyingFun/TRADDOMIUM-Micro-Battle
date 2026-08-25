@@ -24,6 +24,17 @@ export interface Action {
   readonly held: boolean;
   /** Grey it out and stop it taking taps. */
   enable(on: boolean): void;
+  /**
+   * Take it off the pad entirely, or put it back.
+   *
+   * NOT the same as enable(), and the difference is the contextual-HUD
+   * rule. A control for something she COULD do here but cannot right
+   * now is greyed; a control for something that has nothing to do with
+   * where she is standing should not be taking up room in the corner
+   * of a phone at all. Drinking is the second kind — there is no water
+   * on most of the island.
+   */
+  show(on: boolean): void;
   /** Change the glyph without rebuilding the button. */
   label(glyph: string): void;
 }
@@ -32,6 +43,7 @@ class PadButton implements Action {
   private taps = 0;
   private on = true;
   private down = false;
+  private there = true;
 
   constructor(readonly el: HTMLButtonElement) {}
 
@@ -57,6 +69,13 @@ class PadButton implements Action {
     const had = this.taps;
     this.taps = 0;
     return had;
+  }
+
+  show(on: boolean): void {
+    if (on === this.there) return;
+    this.there = on;
+    this.el.style.display = on ? '' : 'none';
+    if (!on) { this.taps = 0; this.down = false; }
   }
 
   enable(on: boolean): void {
