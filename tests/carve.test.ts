@@ -13,7 +13,9 @@
  * failure mode is not a wrong number on a screen, it is the island.
  */
 import { describe, expect, it } from 'vitest';
-import { MAX_DEPTH, trenchCut, trenchDepth, trenchWidth } from '../src/world/carve';
+import {
+  cutHalf, MAX_DEPTH, trenchCut, trenchDepth, trenchWidth,
+} from '../src/world/carve';
 
 const M = 100;
 
@@ -45,13 +47,20 @@ describe('the channel a stream is given', () => {
 describe('the cut, and what it refuses to do', () => {
   const WIDTH = 5 * M;                    // true width -> a 40 m channel
   const half = trenchWidth(WIDTH) / 2;
+  // The cut reaches PAST the channel, so the bank has room to flatten
+  // out above the waterline instead of turning the whole corner in the
+  // last few centimetres. That shoulder is what Joshua asked for.
+  const reach = cutHalf(WIDTH);
   const depth = trenchDepth(half * 2);
 
-  it('touches nothing outside half a channel width', () => {
-    // The bank, and everything past it. Exactly at the half-width the
-    // cut is zero — not nearly zero — so the trench meets untouched
-    // ground rather than leaving a step for the mesh to find.
-    for (const off of [half, half + 1, half * 2, 10_000, 1e9]) {
+  it('touches nothing outside the shoulder', () => {
+    // Exactly at the reach the cut is zero — not nearly zero — so the
+    // trench meets untouched ground rather than leaving a step for the
+    // mesh to find. Inside it, it is not zero, or this would pass on a
+    // carve that had stopped working.
+    expect(reach).toBeGreaterThan(half);
+    expect(trenchCut(50_000, 49_990, reach * 0.99, WIDTH)).toBeGreaterThan(0);
+    for (const off of [reach, reach + 1, reach * 2, 1e9]) {
       expect(trenchCut(50_000, 49_990, off, WIDTH)).toBe(0);
     }
   });
@@ -81,28 +90,38 @@ describe('the cut, and what it refuses to do', () => {
     expect(trenchCut(land, level, 0, WIDTH)).toBeCloseTo(depth, 6);
   });
 
-  it('curves smoothly: no crease down the middle, no lip at the bank', () => {
-    // "Curved smoothly" is a raised cosine and not a wedge. A wedge has
-    // a kink on the centreline that shows as a seam in a mesh cut at 8
-    // units; the cosine is flat at both ends, so the trench leaves and
-    // rejoins the ground tangentially.
+  it('curves smoothly: no crease down the middle, no CORNER at the lip', () => {
+    // JOSHUA SAW A CORNER AT THE TOP and a raised cosine is why. Its
+    // SLOPE is zero at the bank, so the trench does meet flat ground
+    // tangentially — but its CURVATURE is not, and it arrives at the
+    // lip bending hard while the ground outside is not bending at all.
+    // A shaded surface shows a curvature step as an edge.
+    //
+    // Smootherstep has zero first AND second derivative at both ends,
+    // so this checks the second difference and not just the first. A
+    // cosine profile fails the curvature assertion below while sailing
+    // through the slope one, which is exactly the bug being fixed.
     const land = 50 * M;
     const level = land - 10;
     const at = (off: number) => land - trenchCut(land, level, off, WIDTH);
-    const step = half / 400;
+    const step = reach / 500;
     // Symmetric about the centreline, and deepest there.
     expect(at(step)).toBeCloseTo(at(-step), 6);
-    for (let off = step; off < half; off += step) {
+    // Monotonic: the bed only ever climbs on the way out. A wedge or a
+    // double-dip would break this.
+    for (let off = step; off < reach; off += step) {
       expect(at(off)).toBeGreaterThan(at(off - step) - 1e-9);
     }
-    // Flat at the middle and flat at the bank: the second sample either
-    // side of both differs from the first by far less than the middle of
-    // the slope does, which is what "no kink" means numerically.
-    const nearMid = at(step * 2) - at(step);
-    const nearBank = at(half - step) - at(half - step * 2);
-    const midSlope = at(half / 2 + step) - at(half / 2);
-    expect(nearMid).toBeLessThan(midSlope * 0.2);
-    expect(nearBank).toBeLessThan(midSlope * 0.2);
+    const slope = (off: number) => (at(off + step) - at(off)) / step;
+    const bend = (off: number) => (slope(off + step) - slope(off)) / step;
+    // FLAT AT THE LIP, in both derivatives. Measured against the
+    // steepest part of the bank so the bound is relative to the trench
+    // rather than to a magic number.
+    const steepest = Math.abs(slope(reach / 2));
+    expect(Math.abs(slope(reach - step * 2))).toBeLessThan(steepest * 0.02);
+    expect(Math.abs(slope(step))).toBeLessThan(steepest * 0.02);
+    const hardest = Math.abs(bend(reach * 0.25));
+    expect(Math.abs(bend(reach - step * 3))).toBeLessThan(hardest * 0.1);
   });
 
   it('never raises the ground, only ever lowers it', () => {

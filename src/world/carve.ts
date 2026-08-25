@@ -36,9 +36,8 @@
  *   Here the worst case anywhere on the island is one metre, whatever
  *   the ground beside the water is doing.
  *
- * The profile is a raised cosine: deepest on the centreline, easing to
- * nothing at the bank, flat at both ends. Not a wedge, which leaves a
- * crease down the middle, and not a step.
+ * The profile eases to nothing at the bank and is flat at both ends.
+ * Not a wedge, which leaves a crease down the middle, and not a step.
  */
 import { UNITS_PER_METRE as M } from './kauai';
 
@@ -82,6 +81,53 @@ export function trenchDepth(width: number): number {
 }
 
 /**
+ * HOW FAR PAST THE CHANNEL THE CUT REACHES, as a multiple of the
+ * channel's own half-width.
+ *
+ * Joshua, on the first trenched build: "can the trenches have more
+ * rounded edges at the top to look natural, like a normal curve into
+ * the water vs shape angle?"
+ *
+ * Two things were making that corner, and this is the second of them.
+ * A trench whose cut ENDS at the waterline has all its bank crammed
+ * into the strip between the water and the untouched ground, so however
+ * smooth the curve is it has to turn through the whole angle in a few
+ * centimetres. Giving the cut half again as much ground as the water
+ * needs puts a shoulder above the waterline: the bank keeps rising
+ * gently after the water has run out, and the lip is where a gentle
+ * slope meets flat ground rather than where a steep one does.
+ *
+ * It costs almost nothing. The cut touched 0.21% of the island before
+ * this, and the depth bound is untouched, so the worst case anywhere is
+ * still one metre.
+ */
+const SHOULDER = 1.6;
+
+export function cutHalf(trueWidth: number): number {
+  return (trenchWidth(trueWidth) / 2) * SHOULDER;
+}
+
+/**
+ * THE BANK ITSELF: 1 on the centreline, 0 at the outer edge of the cut.
+ *
+ * A raised cosine was the first answer and it is smooth in the sense
+ * that matters least. Its slope is zero at both ends, so the trench
+ * does meet flat ground tangentially — but its CURVATURE is not, and it
+ * arrives at the lip bending hard while the ground outside is not
+ * bending at all. The eye reads a curvature step as an edge, which is
+ * exactly the corner Joshua saw.
+ *
+ * Smootherstep has zero first AND second derivative at both ends, so
+ * the bank leaves the flat and reaches the bed with no step in either.
+ * There is nothing for a shaded surface to catch on at the top, and no
+ * crease down the middle at the bottom.
+ */
+function bank(t: number): number {
+  const s = t * t * t * (t * (t * 6 - 15) + 10);
+  return 1 - s;
+}
+
+/**
  * HOW FAR THE GROUND IS CUT at `off` from the centreline — never
  * negative, never more than the depth, and zero outside the channel.
  *
@@ -93,18 +139,37 @@ export function trenchDepth(width: number): number {
 export function trenchCut(
   land: number, level: number, off: number, trueWidth: number,
 ): number {
-  const half = trenchWidth(trueWidth) / 2;
-  if (off >= half) return 0;
-  const depth = trenchDepth(half * 2);
-  // 1 on the centreline, 0 at the bank, and flat at both — which is
-  // what "curved smoothly" has to mean if the trench is not to leave a
-  // crease down its middle or a lip along its edge.
-  const shape = 0.5 * (1 + Math.cos(Math.PI * (off / half)));
+  const reach = cutHalf(trueWidth);
+  // ABSOLUTE, because the profile is not an even function any more.
+  // A cosine is symmetric about zero for free and smootherstep is not:
+  // fed a small negative offset it returns slightly MORE than one, and
+  // the cut comes out deeper than the depth on one side of the
+  // centreline. `flowAt` only ever hands this a hypot, so nothing in
+  // the game could reach it — which is exactly the kind of trap worth
+  // closing while it is still cheap.
+  const from = Math.abs(off);
+  if (from >= reach) return 0;
+  const depth = trenchDepth(trenchWidth(trueWidth));
+  const shape = bank(from / reach);
   const bed = level - depth * shape;
-  // THE BOUND. Aim for the bed, but refuse to lower this point by more
-  // than one depth however far above the water it stands. A bank high
-  // over its stream simply keeps its height; the trench is cut where
-  // there is a trench to cut.
-  const floor = land - depth;
-  return land - Math.max(floor, Math.min(land, bed));
+  // THE BOUND, AND IT IS SHAPED TOO — which is the second half of
+  // Joshua's rounded edges and was a real wall before.
+  //
+  // The rule is still that no point may be lowered by more than one
+  // depth however far above the water it stands, because a carve that
+  // presses ground toward a LEVEL cut benches out of the Napali walls
+  // last time. But a FLAT bound does something ugly on any slope: once
+  // the ground is more than a depth above the bed the bound is what
+  // answers, so the cut sits at exactly one depth all the way out and
+  // then falls to nothing at the edge. That is a vertical metre of
+  // wall along both sides of every trench on sloping ground, and it is
+  // the angular top edge in Joshua's screenshot. Measured before the
+  // fix, the mean cut where anything was cut at all came to 0.80 m of
+  // a 1.00 m maximum — nearly every cut point was against the flat
+  // bound rather than following the curve.
+  //
+  // Shaping the bound with the same curve as the bed keeps the promise
+  // and loses the wall: the most that may be taken at the outer edge is
+  // nothing, so the trench always leaves the ground where it found it.
+  return Math.min(depth * shape, Math.max(0, land - bed));
 }

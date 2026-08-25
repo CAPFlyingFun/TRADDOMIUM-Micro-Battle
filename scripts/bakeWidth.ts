@@ -44,7 +44,7 @@ import {
 import {
   decodeFlow, flowBytes, pondLevelAt, slabHalf, UNMEASURED, useFlow, type Flow,
 } from '../src/world/flow';
-import { trenchDepth, trenchWidth } from '../src/world/carve';
+import { cutHalf, trenchDepth, trenchWidth } from '../src/world/carve';
 import { DEFAULTS } from '../src/ui/settings';
 
 const GRID = 'public/kauai-1025.bin';
@@ -397,7 +397,7 @@ for (const reach of flow.reaches) {
     // extra metre was a metre the terrain would clip anyway. With a bed
     // it is the wrong direction: it would push the claim back out past
     // the bank the trench just established.
-    const bound = trenchWidth(flow.width[p]) / 2 + MARGIN;
+    const bound = cutHalf(flow.width[p]) + MARGIN;
 
     let total = 0;
     let held = 0;

@@ -18,6 +18,7 @@ import { local, world, type WorldPoint } from '../world/coords';
 import { FlowWater } from '../world/FlowWater';
 import { TerrainStream, TIER_CUTS } from '../world/TerrainStream';
 import { submersion, Underwater } from '../world/Underwater';
+import { wadeAt } from '../ant/wading';
 
 import { originAt, rebaseFor, setOrigin, toLocal, toWorld,
 } from '../world/origin';
@@ -524,6 +525,15 @@ export class IslandScene {
        * actually applied is a separate question, and `fogDensity` and
        * `sunlight` below already answer it.
        */
+      /**
+       * WHAT THE WATER IS DOING TO HER, at her feet rather than at the
+       * camera — `submerged` above answers for the eye, which is on a
+       * boom and can be over dry ground while she is in a stream.
+       */
+      wading: () => wadeAt(
+        this.ant.where.wx, this.ant.where.wz,
+        groundHeight(this.ant.where.wx, this.ant.where.wz),
+      ),
       submerged: () => {
         const eye = this.follow.camera.position;
         const seat = originAt();
@@ -984,16 +994,40 @@ export class IslandScene {
       // for one while stopped or reversing costs nothing.
       const sprinting = wants && travel.speed > PACE_SPEED[this.pace] + 1e-3;
       const resting = this.ant.pace < 0.05;
-      // THE WATER USED TO GET A VOTE HERE, counted before she moved:
-      // what it did to her was not only a push but how fast she could
-      // go, what it cost her, and how high off the bed she sat. All
-      // three came back from one call. Whatever replaces the water
-      // should plug in at this line and nowhere else — that shape was
-      // right even though what filled it was not.
+      // AND THE WATER GETS ITS VOTE BACK, at the one line the old
+      // comment here said it should plug into — that shape was right
+      // even though what filled it was not. `flowAt` has returned a
+      // current for three versions and nothing has ever read it, so
+      // until now she crossed every stream on the island dry and at
+      // full pace.
+      //
+      // The DRAWN ground, not the source surface: `wadeAt` compares the
+      // water against the ground she is standing on, so what slows her
+      // and what the player can see are one thing rather than two kept
+      // in step. Pace scales the whole demand, which preserves her
+      // direction and drops her gait with it; `above` floats her; and
+      // `carry` is the push, which PlayerAnt has always accepted and
+      // has never once been given.
+      //
+      // No stamina cost, deliberately. CLAUDE.md's rule is that a bar
+      // may only move if there is a way to move it back, and there is
+      // no drying off yet. Water may slow her and carry her; it may not
+      // start a clock she cannot stop.
+      const wade = wadeAt(
+        this.ant.where.wx, this.ant.where.wz,
+        groundHeight(this.ant.where.wx, this.ant.where.wz),
+      );
       this.effort = sprinting ? SPRINT_DRAIN
         : resting ? RESTING_RECOVERY : MOVING_RECOVERY;
       winded = this.stamina.update(this.effort, dt);
-      this.ant.update(travel, -look.yaw, dt, 0, null);
+      this.ant.update(
+        {
+          ahead: travel.ahead * wade.pace,
+          across: travel.across * wade.pace,
+          speed: travel.speed * wade.pace,
+        },
+        -look.yaw, dt, wade.above, wade.carry,
+      );
     }
 
     // Exhaustion drops her to the sustainable pace, never to a halt —

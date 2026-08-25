@@ -55,7 +55,7 @@ import {
   slabHalf, UNMEASURED, useFlow, waterLevelAt,
   type Flow,
 } from '../src/world/flow';
-import { trenchDepth, trenchWidth } from '../src/world/carve';
+import { cutHalf, trenchDepth, trenchWidth } from '../src/world/carve';
 
 const ASSET = fileURLToPath(new URL('../public/kauai-flow.bin', import.meta.url));
 
@@ -443,12 +443,20 @@ describe('the shipped bake', () => {
       let over = '';
       let measured = 0;
       for (let p = 0; p < flow.width.length; p++) {
-        const bound = trenchWidth(flow.width[p]) / 2 + MARGIN;
+        // The SHOULDER, not the channel: the cut reaches past the
+        // water so the bank has room to flatten out above the
+        // waterline, and the claim may follow it that far.
+        const bound = cutHalf(flow.width[p]) + MARGIN;
         for (const side of [-1, 1] as const) {
           const stored = side < 0 ? flow.left[p] : flow.right[p];
           if (stored === UNMEASURED) continue;
           measured++;
-          if (stored > bound && !over) {
+          // CEILED, because the file holds integers and the bound does
+          // not: a bank at 596.8 is stored as 597. One centimetre, and
+          // pretending otherwise would mean either a test that fails on
+          // arithmetic or a bake that throws away a unit everywhere to
+          // flatter it.
+          if (stored > Math.ceil(bound) && !over) {
             over = `station ${p} side ${side}: claims ${stored} past a bank at ${bound}`;
           }
         }
