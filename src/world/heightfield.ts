@@ -34,6 +34,8 @@
  *
  * Heights are world units with the waterline at 0.
  */
+import { trenchCut } from './carve';
+import { flowAt } from './flow';
 import {
   blurGrid, cellSlope, heightAt, SPAN, STEP, UNITS_PER_METRE, type HeightGrid,
 } from './kauai';
@@ -229,24 +231,21 @@ export function terrainHeight(x: number, z: number): number {
   const land = baseLand(x, z);
   if (land <= 0) return land;
 
-  // NOTHING CARVES THIS. The ground is the ground.
-  //
-  // Two attempts at a channel trench damaged the terrain, both because
-  // a carve that only ever LOWERS ground will happily lower a valley
-  // wall it merely passes near: pale flat wedges cut out of both sides
-  // of a gorge, visible from the air, still there with the water layer
-  // switched off. A bound would have stopped that. Joshua's call was
-  // simpler and better — do not cut at all, and let the water find the
-  // valleys the island already has.
-  //
-  // It can afford to. The channels came out of THIS surface (flow.ts,
-  // and see scripts/sampleGround.ts for how the bake reads the same
-  // ground the game draws), so a stream is already in a valley floor
-  // before anything is drawn. Depth is then a live subtraction — the
-  // water's surface less the ground under it — rather than a hole cut
-  // to make room for it, which means the terrain cannot be broken by
-  // the water no matter what the water does.
-  return land;
+  // AND NOW IT CARVES AGAIN, WITH BOUNDS. See carve.ts for the whole
+  // argument; the short of it is that two versions of not cutting
+  // proved an island with no channels gives water nowhere to sit, so it
+  // spreads across every flat valley floor it can reach. The trench is
+  // bounded so it cannot repeat the damage that stopped the first
+  // attempt: nothing outside half a channel width is touched, and no
+  // point anywhere is lowered by more than one metre.
+  const spot = flowAt(x, z);
+  if (!spot) return land;
+  // A POND OWNS ITS OWN HOLE. The bake tucks a ponded station below its
+  // bed to say the sheet owns that water, and a pond is a depression
+  // the island already has — cutting a channel through the middle of a
+  // lake would be inventing a trench in a floor that is already flat.
+  if (spot.level < spot.bed) return land;
+  return land - trenchCut(land, spot.level, spot.off, spot.width);
 }
 
 /**
@@ -267,8 +266,20 @@ export function terrainHeight(x: number, z: number): number {
  * replaces the water will need it back — the lesson it encodes is not
  * about rivers, it is about what a coarse vertex is allowed to claim.
  */
-export function farHeight(x: number, z: number, _slack = 0): number {
-  return baseLand(x, z);
+export function farHeight(x: number, z: number, slack = 0): number {
+  const land = baseLand(x, z);
+  if (land <= 0 || slack <= 0) return land;
+  const spot = flowAt(x, z);
+  if (!spot || spot.level < spot.bed) return land;
+  // THE FOOTPRINT IS THE WHOLE POINT. This vertex stands for `slack` of
+  // ground in every direction, and a channel anywhere inside that has
+  // to come through, or a river drawn at this distance floats over
+  // ground that was never cut for it. So the cut is taken at the
+  // CLOSEST the channel comes within the footprint rather than at the
+  // vertex's exact spot — the same "lowest ground I stand for" rule
+  // this function was written for, back when there was a trench to
+  // find. There is one again.
+  return land - trenchCut(land, spot.level, Math.max(0, spot.off - slack), spot.width);
 }
 
 /**

@@ -253,8 +253,15 @@ export function slabHalf(width: number): number {
  */
 export function halfAt(flow: Flow, p: number, side: -1 | 1): number {
   const measured = side < 0 ? flow.left[p] : flow.right[p];
-  const floor = slabHalf(flow.width[p]);
-  return measured === UNMEASURED ? floor : Math.max(measured, floor);
+  // A MEASUREMENT WINS OUTRIGHT, with no floor under it.
+  //
+  // It used to be floored at slabHalf, which made version 3 strictly a
+  // widening: with no bed cut for the water, every extra metre was a
+  // metre the terrain would clip anyway, so a floor could only help.
+  // `carve.ts` cut a bed, and the floor became the wrong direction —
+  // it would push the claim back out past the bank the trench had just
+  // established, and claim water on ground nothing had touched.
+  return measured === UNMEASURED ? slabHalf(flow.width[p]) : measured;
 }
 
 const CELL = 8_192;

@@ -38,10 +38,13 @@
  */
 import { readFileSync, statSync, writeFileSync } from 'node:fs';
 import { decodeGrid } from '../src/world/kauai';
-import { groundHeight, setRelief, setSmoothing, useGrid } from '../src/world/heightfield';
+import {
+  farHeight, groundHeight, setRelief, setSmoothing, useGrid,
+} from '../src/world/heightfield';
 import {
   decodeFlow, flowBytes, pondLevelAt, slabHalf, UNMEASURED, useFlow, type Flow,
 } from '../src/world/flow';
+import { trenchDepth, trenchWidth } from '../src/world/carve';
 import { DEFAULTS } from '../src/ui/settings';
 
 const GRID = 'public/kauai-1025.bin';
@@ -130,10 +133,18 @@ const DROP = 200;
  * straight edge through the middle of a lake.
  */
 const SPREAD = 0;
-/** Ten units of water — ten centimetres — over the drawn ground. */
-const SKIN = 10;
-/** And at most a metre of lift, so one noisy station cannot raise a reach. */
-const LIFT_CAP = 100;
+/**
+ * HOW FAR BELOW THE ORIGINAL GROUND THE WATER SURFACE STANDS — ten
+ * centimetres, which is ten of her body lengths.
+ *
+ * The trench is cut one depth below this level, so the freeboard is
+ * what keeps the water inside it: at the lip the untouched ground
+ * stands FREEBOARD above the surface, and there is no path out. Set it
+ * to zero and the water is flush with the surrounding ground, where any
+ * dip in the noise becomes a leak and the sheet spreads again — which
+ * is precisely the failure the bed was cut to end.
+ */
+const FREEBOARD = 10;
 /**
  * Stations between progress lines. The whole march is 19.2 million
  * ground samples and takes about 25 seconds, which is long enough that
@@ -199,47 +210,50 @@ const ponded = new Uint8Array(nPts);
 for (let p = 0; p < nPts; p++) ponded[p] = flow.level[p] < flow.bed[p] ? 1 : 0;
 
 // ---------------------------------------------------------------------
-// THE LEVEL TOUCH-UP.
+// WHERE THE WATER SURFACE STANDS, now that there is a bed for it.
 //
-// The bake's level is bed + channelDepth, and bed is a 4x4-supersampled
-// cell average. The ground the game DRAWS carries every noise octave on
-// top of that average, so 7.4% of stations came out DRY AT THEIR OWN
-// CENTRELINE — a hole in the stream, and a march from one measures
-// nothing at all. Lifting the level to a skin of water over the drawn
-// ground closes them: measured 7.4% -> 0.7%, median lift 0.00 m, max
-// 1.00 m, which is the ceiling doing its job rather than a coincidence.
+// It used to be the bake's bed plus a channel depth, then lifted a
+// little to clear the noise on the drawn ground. That was the right
+// answer while nothing was cut: the water had to find its own height
+// over an uncarved surface. It is the wrong answer now. `carve.ts` cuts
+// a trench one depth below THIS level, so the level is no longer a
+// consequence of the ground — it is the thing the ground is cut to fit.
+//
+// So it is set from the UNCARVED surface, a freeboard below it. The
+// water then stands just under the lip of its own trench: contained by
+// construction, with nothing left for a spread rule to decide. That is
+// the whole reason the trench exists.
+//
+// farHeight(x, z) with no slack is baseLand and nothing else, which is
+// exactly the surface before any cut — asking groundHeight here would
+// ask the carved ground how deep to carve it.
 // ---------------------------------------------------------------------
 const level = Int32Array.from(flow.level);
-const lifts: number[] = [];
-let dryBefore = 0;
-let dryAfter = 0;
+const drops: number[] = [];
 let fresh = 0;
 for (const reach of flow.reaches) {
   for (let i = 0; i < reach.count; i++) {
     const p = reach.first + i;
     if (ponded[p]) continue;
-    const base = flow.level[p];
-    const ground = groundHeight(flow.x[p], flow.z[p]);
     // INTEGERS FROM HERE ON. The invariant below has to hold in the
     // numbers the decoder will actually see rather than in the floats
     // they came from — bakeFlow.py's write() learnt that one first.
-    const lifted = Math.round(Math.min(Math.max(base, ground + SKIN), base + LIFT_CAP));
-    level[p] = lifted;
+    const land = farHeight(flow.x[p], flow.z[p]);
+    const set = Math.round(land - FREEBOARD);
+    drops.push(flow.level[p] - set);
+    level[p] = set;
     fresh++;
-    if (ground >= base) dryBefore++;
-    if (ground >= lifted) dryAfter++;
-    lifts.push(lifted - base);
   }
 }
 
-// RESTORE NON-INCREASING DOWNSTREAM BY RAISING UPSTREAM. Water does not
-// step uphill along a reach, and a per-station lift can break that.
-// Raising is the safe direction: LOWERING would hand one station's
+// NON-INCREASING DOWNSTREAM, RESTORED BY RAISING UPSTREAM. Water does
+// not step uphill along a reach, and baseLand is not monotonic the way
+// the priority-flood surface it replaced was: it carries the noise
+// octaves, so a station can sit a few centimetres above the one behind
+// it. Raising is the safe direction — LOWERING would hand one station's
 // undershoot to everything below it, which is a bug this project has
-// already had once and does not want again. The lift is at most a metre
-// and the ground downstream is lower, so it cannot run away. Ponded
-// stations are left out of it entirely, on both sides of the
-// comparison — the tuck neither moves nor pushes.
+// already had once. Ponded stations stay out of it on both sides of the
+// comparison; the tuck neither moves nor pushes.
 let repaired = 0;
 for (const reach of flow.reaches) {
   for (let i = reach.count - 2; i >= 0; i--) {
@@ -248,6 +262,46 @@ for (const reach of flow.reaches) {
     if (level[p] < level[p + 1]) { level[p] = level[p + 1]; repaired++; }
   }
 }
+
+// AND THE BED FOLLOWS THE LEVEL DOWN, because after `carve.ts` the bed
+// is not the priority-flood surface any more — it is the bottom of the
+// trench, one depth under the water.
+//
+// This is not bookkeeping. `level < bed` is the flag that says A POND
+// OWNS THIS WATER, read by FlowWater to collapse the slab and by
+// terrainHeight to leave a lake floor uncut, and re-seating levels on
+// the uncarved ground without moving the bed made ordinary stations
+// satisfy it by accident. Their water would have stopped being drawn
+// and their trench would have stopped being cut, which is a silent
+// failure wearing the costume of a deliberate one. Writing the real bed
+// keeps the flag meaning exactly what it says, and makes level - bed
+// the true depth of the water rather than a number left over from an
+// earlier model.
+const bed = Int32Array.from(flow.bed);
+for (const reach of flow.reaches) {
+  for (let i = 0; i < reach.count; i++) {
+    const p = reach.first + i;
+    if (ponded[p]) continue;                  // the tuck stays as it is
+    bed[p] = level[p] - Math.round(trenchDepth(trenchWidth(flow.width[p])));
+  }
+}
+
+// RE-INDEX BEFORE MARCHING, and this is load-bearing rather than
+// housekeeping. `terrainHeight` cuts its trench from what `flowAt`
+// answers, and `flowAt` answers from the index built at the top of this
+// file — which still holds the OLD levels. March now and every stride
+// would be taken over ground carved to fit a water surface that no
+// longer exists. Hand the index the levels just decided, and the ground
+// the march walks is the ground the game will draw.
+// BOTH ARRAYS, and the second one is not a detail. `terrainHeight`
+// skips the carve where `level < bed`, which is how a pond says it owns
+// its own floor — and the levels just written sit on the UNCARVED
+// ground, routinely below the priority-flood surface the old bed held.
+// Re-index with the new level and the old bed and every station on the
+// island looks pond-owned, the trench is never cut, and the march finds
+// a bank at the first stride. Measured that way it did: a median
+// half-width of exactly MARGIN, and 3,331 stations drawing nothing.
+useFlow({ ...flow, level, bed });
 
 // ---------------------------------------------------------------------
 // THE MARCH.
@@ -327,12 +381,23 @@ for (const reach of flow.reaches) {
     // stride and falls back here on its own, which is the answer we
     // want anyway — the sheet owns it, and the reach should claim no
     // more than it did before.
-    const floor = slabHalf(flow.width[p]);
-    // AND THE STREAM ONLY GETS AS MUCH FLOOR AS IT IS BIG ENOUGH TO
-    // HOLD. See SPREAD: the march finds where the GROUND stops the
-    // water, and on a broad flat valley floor that is a long way from
-    // a trickle that has no business filling it.
-    const bound = SPREAD > 0 ? Math.max(floor, SPREAD * flow.width[p] / 2) : Infinity;
+    // THE TRENCH IS THE BOUND NOW, and it is a hard one.
+    //
+    // The march asks where the GROUND stops the water, and a horizontal
+    // surface on sloping ground is not stopped by anything downhill:
+    // measured on the first trenched bake, a median station cut a clean
+    // 4.8 m channel and still reported wet for thirty metres down the
+    // slope beside it, over ground nothing had touched. Drawn width and
+    // claimed width both have to end at the bank of the bed, or she
+    // walks into water that was never drawn — which is the whole of
+    // "some spots look like land, but suddenly turn into water".
+    //
+    // No slabHalf floor either. That floor made version 3 strictly a
+    // widening, which was right when the water had no bed and every
+    // extra metre was a metre the terrain would clip anyway. With a bed
+    // it is the wrong direction: it would push the claim back out past
+    // the bank the trench just established.
+    const bound = trenchWidth(flow.width[p]) / 2 + MARGIN;
 
     let total = 0;
     let held = 0;
@@ -342,21 +407,20 @@ for (const reach of flow.reaches) {
       // Clamped to the cap, which is 30,000 — comfortably under the
       // 0xFFFF the Python bake leaves in these fields, so a measurement
       // can never be mistaken for UNMEASURED.
-      const half = Math.max(floor, Math.min(CAP, wet, bound));
+      const half = Math.min(CAP, wet, bound);
       const drawn = Math.max(0, Math.min(CAP, Math.round(half)));
       if (side < 0) left[p] = drawn; else right[p] = drawn;
       if (found.why === CAPPED) cappedSides++;
       if (wet > bound) boundSides++;
-      // Asked of the measurement rather than of the rounded result: the
-      // floor is a half-unit number often enough that rounding lifts it
-      // off itself, and a side that only reached today's width is held
-      // whatever the arithmetic looks like afterwards.
-      if (wet <= floor) { flooredSides++; held++; }
+      // A side the TRENCH stopped rather than the ground: the bed ran
+      // out before the bank did, which is the normal case on open
+      // valley floor and the whole reason the bound exists.
+      if (wet >= bound) { flooredSides++; held++; }
       halves.push(drawn);
       total += drawn;
     }
     totals.push(total);
-    slabTotals.push(floor * 2);
+    slabTotals.push(slabHalf(flow.width[p]) * 2);
     if (held === 2) heldStations++;
     if (total === 0) empty++;
 
@@ -399,7 +463,7 @@ const u16 = (n: number) => { const v = new Uint16Array(out, at, n); at += n * 2;
 i32(nPts).set(flow.x);
 i32(nPts).set(flow.z);
 i32(nPts).set(level);
-i32(nPts).set(flow.bed);
+i32(nPts).set(bed);
 u16(nPts).set(flow.width);
 u16(nPts).set(left);
 u16(nPts).set(right);
@@ -436,7 +500,7 @@ function col(name: string, xs: number[]): string {
 console.log(`\n${nPts.toLocaleString()} stations, both sides,`
   + ` ${samples.toLocaleString()} ground samples in ${marched.toFixed(0)}s`);
 console.log(`  smoothing ${DEFAULTS.terrainSmoothing}  relief 1, the frame levels are stored in\n`);
-console.log(col('slab today', slabTotals));
+console.log(col('old slab', slabTotals));
 console.log(col('DRAWN now', totals));
 console.log(col('one side', halves));
 console.log(`\nheld at today's width  ${heldStations.toLocaleString()} of ${nPts.toLocaleString()}`
@@ -447,11 +511,13 @@ console.log(`sides at the ${CAP / 100} m cap  ${cappedSides.toLocaleString()}`
   + `  (${pc(cappedSides, 2 * nPts)})`);
 console.log(`sides held by SPREAD  ${SPREAD === 0 ? 'none — unbounded' : boundSides.toLocaleString()}`
   + `${SPREAD === 0 ? '' : '  (' + pc(boundSides, 2 * nPts) + ')  — the bound, not the bank, drew that shore'}`);
-console.log(`drawing nothing        ${empty.toLocaleString()}`);
-const sortedLift = [...lifts].sort((a, b) => a - b);
-console.log(`\ndry at the centreline  ${pc(dryBefore, fresh)} before the touch-up,`
-  + ` ${pc(dryAfter, fresh)} after  (${fresh.toLocaleString()} unponded stations)`);
-console.log(`level lift             median ${m(sortedLift[Math.floor(fresh / 2)])},`
-  + ` max ${m(sortedLift[fresh - 1])};`
-  + ` ${repaired.toLocaleString()} raised again for the downstream invariant`);
+console.log(`drawing nothing        ${empty.toLocaleString()}`
+  + '  — pond-owned stations, whose first stride lands in the sheet that owns them');
+const sortedDrop = [...drops].sort((a, b) => a - b);
+console.log(`\nlevel re-seated on the uncarved ground, ${FREEBOARD} units under it,`
+  + ` at ${fresh.toLocaleString()} unponded stations`);
+console.log(`  moved from the old level by  median ${m(sortedDrop[Math.floor(fresh / 2)])},`
+  + ` p05 ${m(sortedDrop[Math.floor(fresh * 0.05)])},`
+  + ` p95 ${m(sortedDrop[Math.floor(fresh * 0.95)])}`);
+console.log(`  ${repaired.toLocaleString()} raised again for the downstream invariant`);
 console.log(`\nwrote ${FLOW}  ${(statSync(FLOW).size / 1e6).toFixed(2)} MB  version ${VERSION}`);

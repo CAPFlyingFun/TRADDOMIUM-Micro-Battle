@@ -5,12 +5,20 @@
  * stands at (LEVEL), the bake's filled ground under it (BED), the TRUE
  * hydraulic channel (WIDTH), and — new — how far the water actually
  * reaches either side of the centreline, LEFT and RIGHT of the direction
- * of travel. Nothing is carved: the renderer draws flat slabs at LEVEL
- * out to those half-widths and lets the terrain clip them, and
- * waterLevelAt() is the one answer to wet/dry/depth that rendering and
- * gameplay both read. Every comparison here is in raw world units at
- * relief 1 — LEVEL and BED scale together, so the relief slider cannot
- * change a verdict.
+ * of travel. The renderer draws flat slabs at LEVEL out to those
+ * half-widths and lets the terrain clip them, and waterLevelAt() is the
+ * one answer to wet/dry/depth that rendering and gameplay both read.
+ * Every comparison here is in raw world units at relief 1 — LEVEL and
+ * BED scale together, so the relief slider cannot change a verdict.
+ *
+ * AND THE GROUND IS CARVED AGAIN, which reverses what this header said
+ * for two versions. `carve.ts` cuts a bounded trench along every
+ * centreline, so BED is now the bottom of that trench rather than the
+ * priority-flood surface, and LEVEL - BED is the true depth of the
+ * water rather than a law applied to a width. Two versions of not
+ * cutting proved the case: an island with no channels gives water
+ * nowhere to sit, so it spreads across every flat valley floor it can
+ * reach — 20.9% of Kauai, at the end of it.
  *
  * WHY LEFT AND RIGHT EXIST, written down here next to the numbers that
  * prove it. WIDTH is honest and tiny — a median of 0.60 m across this
@@ -19,13 +27,14 @@
  * median of about 106 m. Over 598 sampled stations, 92.6% had their
  * wetted reach cut off by the EDGE OF THE SLAB rather than by the
  * terrain: the water looked narrow because we drew it narrow.
- * `scripts/bakeWidth.ts` now walks outward on the ground the game draws
- * until the water has a reason to stop, and across the whole island the
- * median full width goes 5.8 m -> 53.5 m, p95 189.5 m. The tests below
- * have to be able to tell a
- * file that pass wrote from one it did not, because a bake WITHOUT it
- * loads perfectly, decodes perfectly, and draws exactly the old narrow
- * water — a failure that looks like nothing changed.
+ * `scripts/bakeWidth.ts` walks outward on the ground the game draws
+ * until the water has a reason to stop. Unbounded and uncarved that
+ * took the median full width from 5.8 m to 53.5 m; with a bed cut for
+ * it the same march comes back at 6.3 m, because the trench stops it.
+ * The tests below still have to tell a file that pass wrote from one it
+ * did not, because a bake WITHOUT it loads perfectly, decodes
+ * perfectly, and draws water at the wrong height over an uncut floor —
+ * a failure that looks like nothing changed.
  *
  * The synthetic bake below has FIVE stations on purpose. Five is odd, so
  * the u16 arrays end two bytes short of a four-byte boundary and the
@@ -42,21 +51,14 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
-  channelDepth, decodeFlow, flowAt, flowBytes, forgetFlow, halfAt, pondLevelAt,
+  decodeFlow, flowAt, flowBytes, forgetFlow, halfAt, pondLevelAt,
   slabHalf, UNMEASURED, useFlow, waterLevelAt,
   type Flow,
 } from '../src/world/flow';
+import { trenchDepth, trenchWidth } from '../src/world/carve';
 
 const ASSET = fileURLToPath(new URL('../public/kauai-flow.bin', import.meta.url));
 
-/**
- * The most `scripts/bakeWidth.ts` may raise one station's level, from
- * its own LIFT_CAP — a metre. Written out here rather than imported,
- * deliberately: this file is the thing checking the bake kept to its
- * ceiling, and a test that imports the ceiling agrees with whatever the
- * script currently says instead of with what was decided.
- */
-const LIFT_CAP = 100;
 /** bakeWidth.ts's CAP: three hundred metres and no further, per side. */
 const MEASURED_CAP = 30_000;
 
@@ -79,8 +81,10 @@ const POINTS = {
  * apart rather than to be plausible hydrology. Their slab floors are
  * 1475, 1550, 1512.5, 1130 and 1100, so station 0 is measured wider on
  * both sides; station 1 sits EXACTLY on its floor on the right; station
- * 2 is measured NARROWER than its floor on the left, which the real bake
- * never writes and halfAt() must lift anyway; station 3 was never
+ * 2 is measured NARROWER than slabHalf would answer on the left, which
+ * halfAt() must now report AS MEASURED rather than lifting — the floor
+ * went when the bed came in, because a floor over a cut channel claims
+ * water past its own bank; station 3 was never
  * marched at all on the left; and station 4 is at the 300 m cap on one
  * side and under its floor on the other. Left and right differ at every
  * station but the third, so a decoder that read one array into the other
@@ -142,16 +146,6 @@ function bakeTiny(): ArrayBuffer {
   return buffer;
 }
 
-/**
- * Middle value of a column, sorted once. Sorted rather than selected
- * because these columns are 74,962 long and the clarity is worth more
- * than the milliseconds; the bake's own report does it the same way.
- */
-function median(xs: number[]): number {
-  const sorted = [...xs].sort((a, b) => a - b);
-  return sorted[Math.floor(sorted.length / 2)];
-}
-
 describe('the TMBF version 3 format', () => {
   it('actually needs the pad: five stations end the half-widths off a boundary', () => {
     // 32 header + 16 of reaches + 5 * 22 of points = 158, and 158 % 4 =
@@ -187,24 +181,34 @@ describe('the TMBF version 3 format', () => {
     expect(flow.threshold).toBeCloseTo(THRESHOLD, 6);
   });
 
-  it('reads halfAt off the measurement, the sentinel, and the floor, by hand', () => {
+  it('reads halfAt off the measurement, or off the sentinel, by hand', () => {
     // Side -1 is LEFT of the direction of travel and +1 is RIGHT, which
     // is the convention FlowWater.ts's strip already runs on: it offsets
-    // by (-dz, dx) * half * side, so +1 is the +n side. Every number
-    // below is slabHalf(width) = width * 1.5 + 200 worked out by hand
-    // against the fixture, so this fails if either the sides or the
-    // fallback are wired the other way round.
+    // by (-dz, dx) * half * side, so +1 is the +n side. This fails if
+    // either the sides or the fallback are wired the other way round.
+    //
+    // A MEASUREMENT IS REPORTED AS MEASURED, high or low. slabHalf is
+    // the answer for a station nobody walked and nothing else; it was a
+    // floor under every value until `carve.ts` cut a bed, and a floor
+    // over a cut channel claims water past its own bank. Station 2's
+    // left and station 3's right are both under what slabHalf would
+    // say, and both come back untouched — that is the whole reversal,
+    // in two lines.
     const flow = decodeFlow(bakeTiny());
-    expect(halfAt(flow, 0, -1)).toBe(4_200);   // measured, over its 1475 floor
+    expect(halfAt(flow, 0, -1)).toBe(4_200);
     expect(halfAt(flow, 0, 1)).toBe(7_000);
-    expect(halfAt(flow, 1, 1)).toBe(1_550);    // measured, exactly its floor
-    expect(halfAt(flow, 2, -1)).toBe(1_512.5); // measured UNDER the floor: floored
+    expect(halfAt(flow, 1, 1)).toBe(1_550);
+    expect(halfAt(flow, 2, -1)).toBe(1_200);   // under slabHalf's 1512.5
     expect(halfAt(flow, 2, 1)).toBe(26_000);
-    expect(halfAt(flow, 3, -1)).toBe(slabHalf(POINTS.width[3])); // never marched
+    expect(halfAt(flow, 3, 1)).toBe(640);      // under slabHalf's 1130
+    // The one station never marched, which is the only case slabHalf
+    // still answers. Asserted twice on purpose: once against the
+    // function, so the fallback is really slabHalf, and once against
+    // the number, so slabHalf itself cannot drift unnoticed.
+    expect(halfAt(flow, 3, -1)).toBe(slabHalf(POINTS.width[3]));
     expect(halfAt(flow, 3, -1)).toBe(1_130);
-    expect(halfAt(flow, 3, 1)).toBe(1_130);    // measured 640, floored to the same
-    expect(halfAt(flow, 4, -1)).toBe(30_000);  // the 300 m cap survives the floor
-    expect(halfAt(flow, 4, 1)).toBe(1_100);
+    expect(halfAt(flow, 4, -1)).toBe(30_000);  // the 300 m cap
+    expect(halfAt(flow, 4, 1)).toBe(300);
   });
 
   it('rejects a file that is not TMBF', () => {
@@ -301,59 +305,47 @@ describe('the shipped bake', () => {
       expect(tucked).toBeGreaterThan(100);
     });
 
-    it('keeps the channel depth law as a FLOOR now, plus the metre bakeWidth may lift', () => {
-      // The law bakeFlow.py writes is depth = clip(0.12 * width, 30,
-      // 250), and until version 3 it was an equality. It is not one any
-      // more, and saying so plainly is the point of this rewrite: a
-      // test that silently loosens is worse than one that fails.
-      // bakeWidth.ts lifts a station's level to a ten-centimetre skin
-      // over the ground the game DRAWS, because the bed is a 4x4 cell
-      // average while the drawn triangle carries every noise octave on
-      // top of it — 7.4% of stations came out dry at their own
-      // centreline, and a march outward from a hole in the stream
-      // measures nothing at all. That lift is capped at a metre. The
-      // pass that then restores non-increasing-downstream can only
-      // raise a station to a downstream neighbour's lifted level, and
-      // the bake's own levels are already non-increasing within every
-      // unponded run — measured on the shipped file, that repair adds
-      // nothing whatever beyond the lift — so a metre is the whole of
-      // it. Two units of slack on top for the rounding the bake always
-      // had, one from LEVEL's and one from BED's, measured at 1.04 at
-      // its worst today.
+    it('cuts each bed exactly one trench depth under its own water', () => {
+      // THE LAW CHANGED WHEN THE GROUND DID, and this says so rather
+      // than widening a bound until nothing fails. Until version 3
+      // nothing was carved, so BED was the priority-flood surface and
+      // LEVEL was that plus clip(0.12 * width, 30, 250) — a stream
+      // finding its own height over ground nobody had cut for it.
+      // `carve.ts` cuts a bed now, so BED is the bottom of that trench
+      // and the law is exact rather than approximate:
       //
-      // BELOW the law is where the two sanctioned behaviours live, and
-      // this names them rather than widening the bound until nothing
-      // fails. INSIDE A POND the reach tucks two units under the spill
-      // so the pond owns the pixel. JUST DOWNSTREAM of one the stream
-      // leaves at the pond's surface, hugs the bed, and only deepens as
-      // the ground falls away; that hug cannot be told from its
-      // neighbours station by station, so it is bounded by count
-      // instead — 627 of them, which is 0.84% of stations under a flat
-      // 25-unit floor and 1.14% under their own channelDepth, against a
-      // 2% budget that any drift between the bake and channelDepth()
-      // would blow straight through. The lift only ever RAISES a level,
-      // so both counts can only fall from where they are measured here.
+      //     level - bed === trenchDepth(trenchWidth(width))
+      //
+      // which is Joshua's rule — as deep as it is wide, never over a
+      // metre — with the width scaled for a player who is a centimetre
+      // long. Exact because bakeWidth.ts writes the bed FROM the level
+      // by subtracting that number, so any drift at all means the two
+      // have stopped being written together.
+      //
+      // It is also the discriminator this whole suite needs. A file
+      // bakeFlow.py wrote and bakeWidth.ts never touched carries
+      // channelDepth() here instead, which for the median 0.6 m channel
+      // is 30 units against this law's 100. The old width comparison
+      // cannot tell them apart any more — a trench-contained stream and
+      // an unmeasured one both come out at the slab floor — so the
+      // depth is what proves the second pass ran.
       let first = '';
-      let shallow = 0;
-      let underLaw = 0;
+      let checked = 0;
       for (let p = 0; p < flow.level.length; p++) {
-        const deep = flow.level[p] - flow.bed[p];
-        const law = channelDepth(flow.width[p]);
-        if (deep < -2 || deep > law + LIFT_CAP + 2) {
-          if (!first) {
-            first = `station ${p}: ${deep} deep at width ${flow.width[p]}, law ${law}`;
-          }
-        }
-        // Pond-owned stations are licensed shallow by the tuck rule and
-        // tested by name above; counting them here would double-charge
-        // them against a budget meant for the OUTLET hug.
+        // A pond owns its own water and keeps the two-unit tuck that
+        // says so; the trench is not cut through a lake floor and no
+        // depth law applies there. Tested by name in its own case above.
         if (pondLevelAt(flow.x[p], flow.z[p]) !== null) continue;
-        if (deep < 25) shallow++;
-        if (deep < law - 2) underLaw++;
+        checked++;
+        const deep = flow.level[p] - flow.bed[p];
+        const law = Math.round(trenchDepth(trenchWidth(flow.width[p])));
+        if (deep !== law && !first) {
+          first = `station ${p}: ${deep} deep at width ${flow.width[p]}, law ${law}`;
+        }
       }
       expect(first).toBe('');
-      expect(shallow / flow.level.length).toBeLessThan(0.02);
-      expect(underLaw / flow.level.length).toBeLessThan(0.02);
+      // And it really did look at the island rather than at nothing.
+      expect(checked).toBeGreaterThan(50_000);
     });
 
     it('never steps uphill downstream, except off a pond tuck by the tuck plus the lift', () => {
@@ -376,9 +368,17 @@ describe('the shipped bake', () => {
           const p = reach.first + i;
           const rise = flow.level[p] - flow.level[p - 1];
           if (rise <= 0) continue;
-          const offTuck = rise <= LIFT_CAP + 2
-            && pondLevelAt(flow.x[p - 1], flow.z[p - 1]) !== null;
-          if (!offTuck && !first) {
+          // EITHER END being pond-owned voids the comparison, not just
+          // the upstream one. A tucked station is written two units
+          // under its spill so the pond sheet wins the pixel; that
+          // number is a rendering trick and not a water surface, so a
+          // step measured against it says nothing about whether water
+          // runs uphill. The old form asked only about the upstream
+          // station and so charged the bake for steps INTO a lake as
+          // well as out of one.
+          const atPond = pondLevelAt(flow.x[p], flow.z[p]) !== null
+            || pondLevelAt(flow.x[p - 1], flow.z[p - 1]) !== null;
+          if (!atPond && !first) {
             first = `station ${p} rises ${rise} above upstream`;
           }
         }
@@ -428,94 +428,55 @@ describe('the shipped bake', () => {
       expect(unmeasured).toBe(0);
     });
 
-    it('never stores less than the slab it replaced, so nothing regressed', () => {
-      // THE FLOOR IS TODAY'S SLAB. bakeWidth.ts takes
-      // max(slabHalf(width), march) before it rounds, which makes the
-      // move to measured widths strictly a widening: whatever the
-      // ground says, no station comes out narrower than it drew before.
-      // Checked on the STORED number rather than on halfAt(), because
-      // halfAt() applies the same floor itself and would answer
-      // correctly over a bake that had forgotten it — the floor has two
-      // owners on purpose, and this is the one that can be caught
-      // skipping. slabHalf() is a half-unit number wherever width is
-      // odd, and Math.round takes that half upward, so the floor
-      // survives the rounding as an integer and needs no slack.
-      //
-      // Then halfAt() itself, which is where the drawn slab and the
-      // index claim agree: the sentinel answers slabHalf() exactly, and
-      // a measurement answers ITSELF exactly. That second equality is
-      // not a restatement of the implementation — it holds only because
-      // the stored value cleared the floor, so it fails loudly on a
-      // bake that wrote a raw march distance straight out of reachOut().
-      let below = '';
-      let wrong = '';
-      for (let p = 0; p < flow.left.length; p++) {
-        const floor = slabHalf(flow.width[p]);
+    it('never claims wider than the bed that was cut for it', () => {
+      // THE INVARIANT THAT REPLACED THE FLOOR. Version 3 floored every
+      // measurement at slabHalf and called the change strictly a
+      // widening, which was right while nothing was carved: the water
+      // had no bed, so an extra metre was a metre the terrain would
+      // clip anyway. `carve.ts` cut a bed and reversed the direction.
+      // A claim past the bank is water she can walk into that was never
+      // drawn — Joshua, from the air: "some spots look like land, but
+      // suddenly turn into water when I try to land on it" — so the
+      // trench, plus the two metres of overshoot the terrain is meant
+      // to clip, is now a ceiling and not a floor.
+      const MARGIN = 200;
+      let over = '';
+      let measured = 0;
+      for (let p = 0; p < flow.width.length; p++) {
+        const bound = trenchWidth(flow.width[p]) / 2 + MARGIN;
         for (const side of [-1, 1] as const) {
           const stored = side < 0 ? flow.left[p] : flow.right[p];
-          const half = halfAt(flow, p, side);
-          if (stored !== UNMEASURED && stored < floor && !below) {
-            below = `station ${p} side ${side}: stored ${stored} under its ${floor} floor`;
-          }
-          const want = stored === UNMEASURED ? floor : stored;
-          if (half !== want && !wrong) {
-            wrong = `station ${p} side ${side}: halfAt ${half}, stored ${stored}, floor ${floor}`;
-          }
-          if (half < floor && !wrong) {
-            wrong = `station ${p} side ${side}: halfAt ${half} under its ${floor} floor`;
+          if (stored === UNMEASURED) continue;
+          measured++;
+          if (stored > bound && !over) {
+            over = `station ${p} side ${side}: claims ${stored} past a bank at ${bound}`;
           }
         }
       }
-      expect(below).toBe('');
-      expect(wrong).toBe('');
+      expect(over).toBe('');
+      expect(measured).toBeGreaterThan(100_000);
     });
 
-    it('draws water measurably wider than the thread it used to', () => {
-      // THE TEST THAT FAILS IF bakeWidth.ts NEVER RAN. Sentinels
-      // everywhere would still load, still decode, and still draw — at
-      // exactly the old width, because halfAt() would fall back to
-      // slabHalf() at every station and the two medians below would come
-      // out identical. So the assertion is the COMPARISON and not a
-      // number in isolation. Measured over 598 sampled stations, the
-      // full drawn width goes from a median of 5.8 m to 49.8 m, p95
-      // 165 m, max 347 m, with 9.0% of stations held at today's width in
-      // steep gorges and 0.5% of sides against the 300 m cap. Twenty
-      // metres of median is comfortably above the 5.8 m thread and
-      // comfortably below the 49.8 m measured, so it survives a re-bake
-      // moving the distribution about without surviving the pass being
-      // skipped.
-      const slab: number[] = [];
-      const drawn: number[] = [];
-      let widened = 0;
+    it('walked the ground rather than answering from the width alone', () => {
+      // THE TEST THAT FAILS IF bakeWidth.ts NEVER RAN. A file
+      // bakeFlow.py wrote and this pass never touched answers
+      // slabHalf(width) on every side of every station, exactly, and
+      // loads and draws while looking perfectly healthy. So the
+      // discriminator is disagreement WITH slabHalf, in either
+      // direction — narrower where the bed is narrow, wider where the
+      // march found a real bank past it.
+      let differs = 0;
+      let sides = 0;
       for (let p = 0; p < flow.width.length; p++) {
-        const before = slabHalf(flow.width[p]) * 2;
-        const now = halfAt(flow, p, -1) + halfAt(flow, p, 1);
-        slab.push(before);
-        drawn.push(now);
-        if (now > before) widened++;
+        const slab = slabHalf(flow.width[p]);
+        for (const side of [-1, 1] as const) {
+          sides++;
+          if (halfAt(flow, p, side) !== slab) differs++;
+        }
       }
-      // THE ABSOLUTE MOVES WITH A DIAL AND THE RELATIONSHIP DOES NOT,
-      // so these pin the relationship. bakeWidth.ts's SPREAD decides
-      // how many true channel widths the water may cross — game tuning,
-      // Joshua's to turn — and it has already been turned once: at 32
-      // the median came out 19.2 m, unbounded it is 53.5 m, and the old
-      // thread was 5.8 m. An assertion written against any one of those
-      // would have broken the moment the dial moved while saying
-      // nothing about whether the pass had run, which is the one thing
-      // this test is here to know. Twelve metres sits below every
-      // setting anybody has argued for and above the thread.
-      const wasWide = median(slab);
-      const isWide = median(drawn);
-      expect(wasWide).toBeLessThan(1_000);        // the 5.8 m thread, as shipped
-      expect(isWide).toBeGreaterThan(1_200);      // twelve metres, against 19.2 measured
-      expect(isWide).toBeGreaterThan(2 * wasWide);
-      // 12.5% hold at today's width; the rest of the island widened.
-      // Nothing draws nothing, which the bake also reports — but that
-      // is not asserted here, because the floor test above already
-      // proves every station draws at least the slab it drew before,
-      // and a second, weaker way of saying so would only look like
-      // cover it does not give.
-      expect(widened / flow.width.length).toBeGreaterThan(0.5);
+      // 96% of sides on the shipped file, against exactly 0% on a bake
+      // of sentinels.
+      expect(differs / sides).toBeGreaterThan(0.5);
     });
   });
 
@@ -642,13 +603,18 @@ describe('the shipped bake', () => {
           dx /= run; dz /= run;
           for (const side of [-1, 1] as const) {
             const half = halfAt(flow, p, side);
-            // Only a side the march actually widened can separate the
-            // two numbers at all: 5,000 units is 50 m, past the widest
-            // half-channel on the island by more than a factor of three,
-            // and past the old 26 m cap outright. On a bake where the
-            // pass never ran, nothing clears this and the counts below
-            // fail the test rather than passing it vacuously.
-            if (half < 5_000) continue;
+            // Wide enough that the query point lands well outside the
+            // TRUE channel, which is what the zero-current claim is
+            // about. Six metres was fifty before `carve.ts`, when the
+            // water spread across whole valley floors; the trench caps
+            // a half-width at its own bank now, and the widest on the
+            // island is 22 m. On a bake of sentinels the widest
+            // slabHalf can answer is 26 m, so this still clears — but
+            // the counts are not what discriminates here, the current
+            // is: a thread shaped on the CLAIM instead of the channel
+            // would push her at the far bank, and nothing else in this
+            // suite would notice.
+            if (half < 600) continue;
             const out = 0.9 * half;
             const spot = flowAt(
               flow.x[p] + -dz * out * side, flow.z[p] + dx * out * side,

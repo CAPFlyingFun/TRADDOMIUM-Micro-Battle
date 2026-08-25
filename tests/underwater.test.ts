@@ -132,7 +132,12 @@ beforeAll(() => {
   for (let p = 0; p < flow.level.length; p++) {
     if (flow.level[p] > 100) continue;
     const raw = waterLevelAt(flow.x[p], flow.z[p]);
-    if (raw === null || raw <= 10 || raw > 100) continue;
+    // STRICTLY under a metre, matching the guard below exactly. These
+    // two read `> 100` and `< 100` for a long time, which let the
+    // search accept a station the guard would reject; nothing failed
+    // until a re-bake put one at exactly 100 and the fixture and its
+    // own check disagreed about whether it counted.
+    if (raw === null || raw <= 10 || raw >= 100) continue;
     coast = { x: flow.x[p], z: flow.z[p], raw };
     break;
   }
