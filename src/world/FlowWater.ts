@@ -58,23 +58,39 @@ import { SPAN } from './kauai';
  * grazing angle and paints a flat stripe with a dead-straight near
  * edge. The water stops where its channel stops being visible.
  *
- * BOTH NUMBERS ARE STILL THE THIN-RIBBON ONES, AND THE STRIPE SHOULD
- * GET WORSE. The artefact is what a slab does once the terrain drawn at
- * that distance can no longer clip it, so it scales with the slab, and
- * the slab is now twenty times wider: a dead-straight near edge as much
- * as 600 m across instead of 6 m, over something like a hundred times
- * the area, with exactly the same FADE_FROM..REACH ramp left to hide
- * it. There is a second reason to expect it worse — the half-widths
- * were walked over the full-resolution ground while the transition tier
- * draws a smoothed one, so the mismatch between what was measured and
- * what is rendered is widest precisely where the stripe lives. These
- * two numbers are deliberately untouched all the same: they were tuned
- * against a rendered frame across three releases of blaming the wrong
- * thing, and the next value for either of them has to come from another
- * rendered frame rather than from this reasoning.
+ * TWO HUNDRED METRES WAS THE THIN-RIBBON ANSWER AND IT WAS COSTING US
+ * THE WORST BUG IN THE WATER. Joshua, from the air: "some spots look
+ * like land, but suddenly turn into water when I try to land on it."
+ * That is not hydrology and not the level field. The TERRAIN draws to
+ * the backdrop tens of kilometres out; the WATER stopped at two hundred
+ * metres. Every approach from altitude therefore crossed dry-looking
+ * ground that became a river underneath her at the moment she got close
+ * enough for it to be drawn. Nothing was in the wrong place — it simply
+ * was not there yet.
+ *
+ * The old limit was honest about a five-metre ribbon: past the
+ * transition tier a vertex stands for thirty metres of ground, which
+ * cannot clip a metre-wide trench, so the slab stretched away at a
+ * grazing angle as a flat stripe with a dead-straight near edge. A
+ * fifty-metre body of water is a different object. The tier that could
+ * not resolve a ribbon resolves this easily, and the clip that used to
+ * fail now works.
+ *
+ * MEASURED BEFORE MOVING IT, because the reason to stop was never
+ * really the artefact — it was the fear of the geometry. Averaged over
+ * twelve places she might stand:
+ *
+ *     200 m       1 reach,     22 stations,      44 vertices
+ *     2,000 m   111 reaches, 1,506 stations,  3,012 vertices
+ *     4,000 m   406 reaches, 4,524 stations,  9,048 vertices
+ *
+ * Three thousand vertices is nothing next to the terrain it sits on. So
+ * the water now reaches as far as the MIDDLE terrain tier does, which
+ * is the furthest distance at which the ground under it is still cut
+ * from real heights rather than from the backdrop.
  */
-const REACH = 20_000;
-const FADE_FROM = 13_000;
+const REACH = 200_000;
+const FADE_FROM = 160_000;
 /** The slab stops just short of the index claim, for the alpha fade. */
 const EDGE = 0.98;
 
