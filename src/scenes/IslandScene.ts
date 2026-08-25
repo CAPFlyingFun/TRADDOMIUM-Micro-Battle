@@ -135,6 +135,50 @@ export class IslandScene {
    * later by the lever, which is the whole of the dive fix.
    */
   private afloat = false;
+  /**
+   * HOW FAST SHE IS ACTUALLY GOING, and which way — for the water row.
+   *
+   * Measured from where she WAS, not from what she asked for, which is
+   * the whole point of it. A queen adrift in a stream is demanding
+   * nothing and moving several centimetres a second, and the pace
+   * column reads 0.0 because that column shows the demand.
+   *
+   * Smoothed, because a per-frame delta at 60 Hz over a body-length
+   * step is mostly quantisation, and a readout that flickers between
+   * 8 and 14 is one nobody can use.
+   */
+  private wake = { wx: 0, wz: 0, vx: 0, vz: 0, started: false };
+  /** Water over the ground under her this frame; zero on dry land. */
+  private wet = 0;
+
+  /** Her smoothed over-ground speed, world units a second. */
+  private get swimSpeed(): number {
+    return Math.hypot(this.wake.vx, this.wake.vz);
+  }
+
+  /**
+   * Fold this frame's movement into the smoothed velocity.
+   *
+   * Frame-rate independent, the same shape every other approach in this
+   * scene uses: a fixed fraction of the gap per SECOND rather than per
+   * frame, so the readout settles at the same rate on a phone as on a
+   * desktop.
+   */
+  private trackWake(dt: number): void {
+    const at = this.ant.where;
+    if (!this.wake.started) {
+      this.wake.started = true;
+      this.wake.wx = at.wx; this.wake.wz = at.wz;
+      return;
+    }
+    if (dt <= 0) return;
+    const vx = (at.wx - this.wake.wx) / dt;
+    const vz = (at.wz - this.wake.wz) / dt;
+    this.wake.wx = at.wx; this.wake.wz = at.wz;
+    const ease = 1 - Math.exp(-6 * dt);
+    this.wake.vx += (vx - this.wake.vx) * ease;
+    this.wake.vz += (vz - this.wake.vz) * ease;
+  }
   private readonly debugDie: DebugDie;
   private readonly weatherChip: WeatherChip;
   /** Altitude, vertical speed and the wind — flight only. */
@@ -984,6 +1028,10 @@ export class IslandScene {
     // taking off mid-sip would otherwise leave it latched and she
     // would drink her way across the island at two hundred metres.
     this.drinking = false;
+    // Cleared for the same reason and set on the same branch: the
+    // water row must not stay up while she is two hundred metres over
+    // the stream she was standing in.
+    this.wet = 0;
     if (this.flight.aloft) {
       // And the button goes with her: there is nothing to drink from up
       // here, whatever is underneath.
@@ -1072,6 +1120,7 @@ export class IslandScene {
         this.dive,
       );
       this.afloat = wade.afloat;
+      this.wet = wade.depth;
       // DRINKING IS AN ACT, and an act can be interrupted. Held, not
       // tapped: she stops where she is, and letting go or walking off
       // ends it.
@@ -1109,6 +1158,11 @@ export class IslandScene {
         -look.yaw, dt, wade.above, this.drinking ? null : wade.carry,
       );
     }
+    // AFTER SHE HAS MOVED, whichever way she moved. Flight has its own
+    // ground-speed telemetry, but this costs a subtraction and being
+    // one number for both means the water row cannot disagree with
+    // where she actually is.
+    this.trackWake(dt);
 
     // Exhaustion drops her to the sustainable pace, never to a halt —
     // and the next sprint has to be asked for deliberately.
@@ -1162,6 +1216,17 @@ export class IslandScene {
             track: telemetry.track,
             speed: telemetry.groundSpeed,
             drift: telemetry.drift,
+          }
+          : null,
+        // THE WATER'S ROW. Any water at all, not just afloat: wading
+        // is where the current first starts to move her and it is
+        // exactly when she wants to know. Below a tenth of a
+        // centimetre a second there is nothing to say.
+        swim: !this.flight.aloft && this.wet > 0 && this.swimSpeed >= 0.05
+          ? {
+            track: bearingOf(this.wake.vx, this.wake.vz),
+            speed: this.swimSpeed,
+            afloat: this.afloat,
           }
           : null,
         // Only when there is a wind to speak of. The readout resolves

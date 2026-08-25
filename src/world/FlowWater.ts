@@ -94,8 +94,24 @@ import { pullBytes } from './fetchBytes';
  */
 const REACH = 200_000;
 const FADE_FROM = 160_000;
-/** The slab stops just short of the index claim, for the alpha fade. */
-const EDGE = 0.98;
+/**
+ * How much of the index's claim the slab draws.
+ *
+ * IT WAS 0.98, AND THE TWO PER CENT WAS A HOLE. `waterLevelAt` claims a
+ * radius around each segment sized from halfAt, and the slab drew 98%
+ * of it — so a two-per-cent rind of every stream on the island was
+ * water the game would let her swim in with nothing drawn over it. The
+ * shortfall used to be justified by an alpha fade that no longer works
+ * that way: the fade comes from DEPTH now, and depth goes to nothing on
+ * its own at the bank.
+ *
+ * Slightly OVER instead. Past the claim the ground has risen through
+ * the level, so the depth expression is already negative there and the
+ * fragments discard themselves — over-drawing costs nothing and cannot
+ * put water on dry land, while under-drawing leaves a hole that no
+ * amount of shading can fill.
+ */
+const EDGE = 1.02;
 
 // THE BAKE OWNS THE LEVEL NOW. Version 1 stored the valley floor and
 // this file lifted the surface half a channel depth off it (RIDE);
@@ -315,7 +331,26 @@ export function buildReach(
       const side = u < 0 ? -1 : 1;
       const half = owned ? 0
         : (halfAt(flow, p, side) + (halfAt(flow, q, side) - halfAt(flow, p, side)) * t) * EDGE;
-      const off = half * u;
+      // MITRED, so the drawn edge is as far from the SEGMENT as the
+      // collision index says the water reaches.
+      //
+      // The vertices are laid along a SMOOTHED normal — see above, it
+      // is what stops the strip kinking at every station — but the
+      // index measures its claim perpendicular to the LOCAL segment.
+      // Offsetting by `half` along a normal that is φ off the true one
+      // leaves a clearance of only half·cos(φ), and the gap is worst
+      // exactly where a steepest-descent path turns hardest. Measured
+      // before this line existed: 7.8% of the ground the game called
+      // wet had no geometry over it at all, none of it pond-owned.
+      // That is Joshua's "still water not showing in a deep part".
+      //
+      // Dividing by the cosine is the standard miter join, and it has
+      // the standard problem: at a hairpin the cosine approaches zero
+      // and the offset runs away. Capped at twice, which covers every
+      // turn up to 120 degrees and lets anything sharper stay short
+      // rather than fire a spike across the valley.
+      const lean = Math.max(0.5, -dz * -sz + dx * sx);
+      const off = half * u / lean;
       const wx = x + -dz * off, wz = z + dx * off;
       const v = row * ACROSS + k;
       positions[v * 3] = wx - cx;
@@ -565,8 +600,11 @@ export function waterShader(
           // Into the surface's own frame. The geometry is flat +Y, so
           // \`normal\` is the up of that frame and vFlowView is its
           // downstream axis; their cross product is the third.
+          // STRONGER, because the texture is the texture now. At 0.55
+          // the octaves were a sheen under a specular blob; the blob
+          // has gone and this is what is left to read the surface by.
           vec3 sideways = normalize(cross(normal, vFlowView));
-          normal = normalize(normal + (rn.x * sideways + rn.y * vFlowView) * 0.55);
+          normal = normalize(normal + (rn.x * sideways + rn.y * vFlowView) * 1.15);
         }`);
       fragmentShader =
         'uniform float clock;\nuniform float relief;\n'
@@ -796,13 +834,19 @@ export class FlowWater {
       // rather than as water; the colour work below then has nothing
       // left to say.
       color: 0x1d4a5c, transparent: true, opacity: 0.72,
-      // SMOOTHER THAN IT WAS, because the waves have to have
-      // something to catch. 0.62 was set when the surface was flat and
-      // a mirror would have read as plastic; a rippled surface at that
-      // roughness scatters the sun into a uniform sheen and the swell
-      // does not show up at all. 0.34 keeps a broad highlight that
-      // travels with the crests.
-      roughness: 0.34, metalness: 0.0,
+      // BACK UP AGAIN, because 0.34 bought a mirror. It was dropped
+      // there when the ripple was two sine waves and needed gloss to
+      // show at all; with a normal map doing the work the gloss is not
+      // paying for anything, and what it buys instead is one enormous
+      // white specular blob sitting on the middle of every stream.
+      // Joshua: "water too shiny with not much texture" — those are
+      // the same sentence. The blob IS the missing texture, because a
+      // near-mirror returns the sun as a single lobe and everything
+      // outside that lobe as flat dark.
+      //
+      // 0.58 spreads the sun across the whole surface, so the ripples
+      // shade instead of one of them flaring.
+      roughness: 0.58, metalness: 0.0,
       // ONE WATER OWNER PER PIXEL. The water writes depth, so where two
       // transparent sheets overlap — a tributary's slab across its
       // trunk's at every junction, the strip folding at a sharp bend,

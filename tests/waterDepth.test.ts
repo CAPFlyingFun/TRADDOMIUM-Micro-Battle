@@ -417,3 +417,111 @@ describe("the ripple's octaves", () => {
     }
   });
 });
+
+/**
+ * EVERY POINT THE GAME CALLS WET MUST HAVE WATER DRAWN OVER IT.
+ *
+ * The depth is right and the shoreline is opaque and Joshua still found
+ * places with none in them: "still water not showing in a deep part".
+ * Nothing about depth could explain that, because there was no geometry
+ * there to shade. Measured over six 4 km squares of island, 7.8% of
+ * everything waterLevelAt called wet had no slab above it at all — she
+ * could swim in it and could not see it.
+ *
+ * Four separate causes, none of them the drawing:
+ *
+ *   the slab drew 98% of the claim, for an alpha fade that moved to
+ *     depth two versions ago                                   0.5 pt
+ *   vertices offset along a SMOOTHED normal, so their clearance from
+ *     the local segment was half·cos(φ)                        2.5 pt
+ *   the index claimed the MAX of a segment's two ends while the
+ *     geometry tapered between them                            2.1 pt
+ *   the index claimed spans a pond had taken, where buildReach
+ *     collapses the strip to nothing                           0.6 pt
+ *
+ * Which is one fault wearing four hats: the index and the geometry were
+ * each computing the reach of the water, separately, and drifting. They
+ * are now the same computation, and this is what says so.
+ */
+describe('the water the game claims', () => {
+  it('has geometry over essentially all of it', async () => {
+    const { pondLevelAt } = await import('../src/world/flow');
+    // SIX SQUARES OF ISLAND, not one. The first version of this test
+    // sampled a single 2 km box and could not tell any of the four
+    // fixes from their absence — 561 wet points, and reverting the
+    // miter moved it from 1.78% to 1.96%. Six 4 km squares on a 16 m
+    // lattice is 8,671 wet points, runs in two seconds, and separates
+    // them: 1.4% as it stands, 2.3% with the miter gone, 4.4% with the
+    // taper gone.
+    const HALF = 200_000, STEP = 1600;
+    const N = (HALF * 2) / STEP;
+    const SPOTS: Array<[number, number]> = [
+      [-1.2e6, 1.1e6], [0, 0], [8e5, -6e5], [-2e6, -1e6], [1.5e6, 9e5], [-6e5, 4e5],
+    ];
+    const side = (px: number, pz: number, qx: number, qz: number, rx: number, rz: number) =>
+      (qx - px) * (rz - pz) - (qz - pz) * (rx - px);
+    let wet = 0, holed = 0;
+    for (const [cx, cz] of SPOTS) {
+      const hit = new Uint8Array(N * N);
+      const eat = (geo: ReturnType<typeof buildPonds> | null) => {
+        if (!geo) return;
+        const pos = geo.getAttribute('position').array as Float32Array;
+        const idx = geo.getIndex()!.array as ArrayLike<number>;
+        for (let t = 0; t < idx.length; t += 3) {
+          const [a2, b2, c2] = [idx[t], idx[t + 1], idx[t + 2]];
+          const xs = [pos[a2 * 3] - cx, pos[b2 * 3] - cx, pos[c2 * 3] - cx];
+          const zs = [pos[a2 * 3 + 2] - cz, pos[b2 * 3 + 2] - cz, pos[c2 * 3 + 2] - cz];
+          const lo = (v: number) => Math.max(0, Math.floor((v + HALF) / STEP));
+          const hi = (v: number) => Math.min(N - 1, Math.ceil((v + HALF) / STEP));
+          for (let j = lo(Math.min(...zs)); j <= hi(Math.max(...zs)); j++) {
+            for (let i = lo(Math.min(...xs)); i <= hi(Math.max(...xs)); i++) {
+              const px = i * STEP - HALF, pz = j * STEP - HALF;
+              const s1 = side(xs[0], zs[0], xs[1], zs[1], px, pz);
+              const s2 = side(xs[1], zs[1], xs[2], zs[2], px, pz);
+              const s3 = side(xs[2], zs[2], xs[0], zs[0], px, pz);
+              if ((s1 >= 0 && s2 >= 0 && s3 >= 0) || (s1 <= 0 && s2 <= 0 && s3 <= 0)) {
+                hit[j * N + i] = 1;
+              }
+            }
+          }
+        }
+        geo.dispose();
+      };
+      for (const { first, count } of flow.reaches) {
+        for (let i = 0; i < count; i++) {
+          const p = first + i;
+          if (Math.abs(flow.x[p] - cx) < HALF * 1.6 && Math.abs(flow.z[p] - cz) < HALF * 1.6) {
+            eat(buildReach(flow, first, count, 0, 0));
+            break;
+          }
+        }
+      }
+      const cells: number[] = [];
+      for (let i = 0; i < flow.pondX.length; i++) {
+        if (Math.abs(flow.pondX[i] - cx) < HALF * 1.6
+          && Math.abs(flow.pondZ[i] - cz) < HALF * 1.6) cells.push(i);
+      }
+      if (cells.length) eat(buildPonds(flow, cells, 0, 0));
+
+      for (let j = 0; j < N; j++) {
+        for (let i = 0; i < N; i++) {
+          const wx = cx + i * STEP - HALF, wz = cz + j * STEP - HALF;
+          const level = waterLevelAt(wx, wz);
+          if (level === null || level - terrainHeight(wx, wz) <= 0) continue;
+          // A pond answers for its own ground whether or not a reach
+          // slab reaches it, and its sheet is built from the same cells.
+          if (pondLevelAt(wx, wz) !== null) continue;
+          wet++;
+          if (!hit[j * N + i]) holed++;
+        }
+      }
+    }
+    expect(wet).toBeGreaterThan(5_000);
+    // 7.8% before the four fixes and 1.4% after, with what is left
+    // sitting a few metres from a station — slivers this lattice
+    // cannot resolve rather than anywhere she could stand. Set at 2%,
+    // which is under the score of every single one of the four faults
+    // on its own.
+    expect(holed / wet).toBeLessThan(0.02);
+  });
+});

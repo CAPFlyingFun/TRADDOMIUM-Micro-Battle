@@ -278,6 +278,35 @@ let aBed: Float32Array | null = null;
 let bBed: Float32Array | null = null;
 let wide: Float32Array | null = null;
 let claim: Float32Array | null = null;
+/**
+ * THE SAME CLAIM, PER SIDE — two floats a segment, left then right.
+ *
+ * `claim` above is the max of both sides at both ends, because the
+ * broad phase is a circle swept along a line and a circle has no
+ * sides. That is right for the bucket footprint and the bounding box,
+ * and it was ALSO doing the final accept, which is where it went
+ * wrong: a stream hugging a valley wall reaches two metres on the wall
+ * side and two hundred across the floor, and the symmetric claim said
+ * "wet" two hundred metres up the wall on a bench the bake had never
+ * walked. Nothing was DRAWN there — buildReach uses the per-side
+ * half-width — so the game let her swim in water she could not see.
+ *
+ * Measured: 7.8% of everything waterLevelAt called wet had no geometry
+ * over it, and none of it was pond-owned. That is Joshua's "still
+ * water not showing in a deep part".
+ *
+ * So the broad phase stays generous and the narrow phase gets exact.
+ *
+ * FOUR FLOATS, NOT TWO: each side at each END of the segment. Two was
+ * the max along the whole segment, and the slab does not do that — it
+ * INTERPOLATES between its stations, so a segment running from a
+ * forty-metre reach to a five-metre one is a taper in the geometry and
+ * was a forty-metre rectangle in the index. That gap sits mid-segment,
+ * which is exactly where the holes were: a median of 17 m from the
+ * nearest station, on a stream whose half-widths comfortably covered
+ * 17 m at one end. Ordered [aLeft, aRight, bLeft, bRight].
+ */
+let sideClaim: Float32Array | null = null;
 let heads: Int32Array | null = null;
 let counts: Int32Array | null = null;
 let buckets: Int32Array | null = null;
@@ -286,7 +315,7 @@ let ponds: Map<string, number> | null = null;
 export function forgetFlow(): void {
   loaded = null;
   ax = az = bx = bz = null;
-  aLev = bLev = aBed = bBed = wide = claim = null;
+  aLev = bLev = aBed = bBed = wide = claim = sideClaim = null;
   heads = counts = buckets = null;
   ponds = null;
 }
@@ -303,6 +332,7 @@ export function useFlow(flow: Flow): void {
   aBed = new Float32Array(segments); bBed = new Float32Array(segments);
   wide = new Float32Array(segments);
   claim = new Float32Array(segments);
+  sideClaim = new Float32Array(segments * 4);
   let at = 0;
   for (const r of flow.reaches) {
     for (let i = 0; i < r.count - 1; i++) {
@@ -323,10 +353,23 @@ export function useFlow(flow: Flow): void {
       // only a geometry test, and never a drop of water where there
       // should be none: waterLevelAt()'s caller still has to beat the
       // ground with the level before anything is wet.
-      claim[at] = Math.max(
-        halfAt(flow, p, -1), halfAt(flow, p, 1),
-        halfAt(flow, p + 1, -1), halfAt(flow, p + 1, 1),
-      );
+      // A SPAN A POND HAS TAKEN OVER CLAIMS NOTHING, because nothing
+      // is drawn over it. The bake tucks a ponded station under the
+      // spill level — level below bed, the only case that writes one —
+      // and buildReach collapses the whole span to a degenerate strip
+      // if EITHER end is flagged, so the pond sheet owns those pixels
+      // alone. The index was still claiming them, which is water the
+      // game would let her swim in with nothing over it, and it is the
+      // last of the holes that widening the slab could not close.
+      // pondLevelAt answers for that ground, as it should.
+      const taken = flow.level[p] < flow.bed[p] || flow.level[p + 1] < flow.bed[p + 1];
+      const aL = taken ? 0 : halfAt(flow, p, -1), aR = taken ? 0 : halfAt(flow, p, 1);
+      const bL = taken ? 0 : halfAt(flow, p + 1, -1), bR = taken ? 0 : halfAt(flow, p + 1, 1);
+      claim[at] = Math.max(aL, aR, bL, bR);
+      sideClaim[at * 4] = aL;
+      sideClaim[at * 4 + 1] = aR;
+      sideClaim[at * 4 + 2] = bL;
+      sideClaim[at * 4 + 3] = bR;
       at++;
     }
   }
@@ -414,6 +457,19 @@ export function flowAt(wx: number, wz: number): FlowSpot | null {
     const dz = wz - (az![s] + ez * t);
     const off = Math.hypot(dx, dz);
     if (off > far) continue;
+    // AND NOW HOW FAR THE SLAB ACTUALLY REACHES HERE — on this side,
+    // at this point along the segment.
+    //
+    // buildReach offsets its `side = +1` vertices along (-ez, ex), and
+    // the cross product of the segment with that is positive, so a
+    // positive cross here is that same side. The lerp on `t` is the
+    // taper: the geometry interpolates its half-width between the two
+    // stations and this has to follow it, or the index claims a
+    // rectangle where the slab draws a wedge.
+    const hand = ex * dz - ez * dx >= 0 ? 1 : 0;
+    const reach = sideClaim![s * 4 + hand]
+      + (sideClaim![s * 4 + 2 + hand] - sideClaim![s * 4 + hand]) * t;
+    if (off > reach) continue;
 
     const level = aLev![s] + (bLev![s] - aLev![s]) * t;
     const bed = aBed![s] + (bBed![s] - aBed![s]) * t;

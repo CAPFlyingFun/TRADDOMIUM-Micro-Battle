@@ -609,6 +609,19 @@ describe('the shipped bake', () => {
           const run = Math.hypot(dx, dz);
           if (run < 1e-6) continue;
           dx /= run; dz /= run;
+          // A SPAN A POND HAS TAKEN CLAIMS NOTHING, and asking it to
+          // is asking for the bug this guard exists to prevent. The
+          // bake tucks a ponded station under the spill level,
+          // buildReach collapses the whole span to a degenerate strip,
+          // and useFlow now zeroes its claim to match — so the pond
+          // sheet owns those pixels alone and pondLevelAt answers for
+          // that ground. Before the claim was zeroed the index said
+          // "wet" over water nothing was drawing, which was a fifth of
+          // all the holes on the island. Measured: 5 of these 4,356
+          // queries, and every refusal is one of them.
+          if ([p - 1, p, p + 1].some(
+            (q) => q >= 0 && q < flow.x.length && flow.level[q] < flow.bed[q],
+          )) continue;
           for (const side of [-1, 1] as const) {
             const half = halfAt(flow, p, side);
             // Wide enough that the query point lands well outside the
