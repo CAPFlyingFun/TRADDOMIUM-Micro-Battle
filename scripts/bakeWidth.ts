@@ -40,7 +40,7 @@ import { readFileSync, statSync, writeFileSync } from 'node:fs';
 import { decodeGrid } from '../src/world/kauai';
 import { groundHeight, setRelief, setSmoothing, useGrid } from '../src/world/heightfield';
 import {
-  decodeFlow, flowBytes, pondLevelAt, slabHalf, useFlow, type Flow,
+  decodeFlow, flowBytes, pondLevelAt, slabHalf, UNMEASURED, useFlow, type Flow,
 } from '../src/world/flow';
 import { DEFAULTS } from '../src/ui/settings';
 
@@ -86,45 +86,50 @@ const MARGIN = 200;
  */
 const DROP = 200;
 /**
- * HOW MANY TRUE CHANNEL WIDTHS THE WATER MAY SPREAD ACROSS, and the one
- * number here that is GAME TUNING rather than measurement.
+ * HOW MANY TRUE CHANNEL WIDTHS THE WATER MAY SPREAD ACROSS, or ZERO for
+ * no bound at all. It is ZERO, and that is Joshua's call.
  *
  * The march answers "where does the GROUND stop the water", and on a
- * broad flat valley floor the answer is: nowhere near. Left unbounded
- * it put 20.86% of Kauai under fresh water — 317 km2, with 17.73% of
- * the island over 30 cm deep and 10.48% over a metre. At a centimetre
- * long she would be swimming across a fifth of the island. Real Kauai
- * carries well under one per cent.
+ * broad flat valley floor the answer is: a long way out. Bounding that
+ * by the size of the stream is defensible hydrology — a river should
+ * get a floodplain and a five-litre-a-second trickle should not — and
+ * at a bound of 32 it put 8.92% of the island under fresh water against
+ * 20.86% unbounded.
  *
- * The reason is worth stating plainly rather than hiding in a constant.
- * A stream over the threshold here carries five litres a second and is
- * 0.6 m across, and its water level is its bed plus 30 cm because that
- * is how deep a 0.6 m channel runs. Let that same level spread 53 m
- * over a flat floor and you have claimed a 16 m2 cross-section for five
- * litres a second, which is a velocity of a third of a millimetre a
- * second. That is not a stream, it is a standing sheet, and the
- * terrain is only offering it because we deliberately do not carve a
- * channel for the water to sit in.
+ * IT ALSO CUT MORE THAN HALF THE SHORELINE OFF THE TERRAIN. At 32 the
+ * bound was the thing that stopped the march on 83,696 of 149,924
+ * sides, 55.8% of them. Every one of those is a slab that ends in a
+ * STRAIGHT LINE across water the ground was still willing to hold,
+ * rather than at a bank rising through the surface. The whole point of
+ * this pass is that the terrain owns the water's edge; a bound that
+ * owns it more often than the terrain does has taken the feature back.
+ * Unbounded, the only thing that ends a march early is the 300 m cap,
+ * which fires on 0.6% of sides.
  *
- * So the spread scales with the stream: a river gets a floodplain, a
- * trickle gets a channel. Measured across the whole island, at 40 m
- * sampling:
+ * So the island is wetter than Kauai really is, deliberately, and the
+ * reason is that a shoreline the ground drew beats a shoreline a
+ * constant drew. For the record, unbounded:
+ *
+ *     wet 20.86% of land, 317 km2, of which 17.73% of the island is
+ *     over 30 cm deep and 10.48% over a metre
+ *     median drawn width 53.5 m, p95 189.5 m
+ *
+ * and the alternatives, measured by scripts/measureSpread.ts:
  *
  *     k     wet % of land    median width    p95 width
  *     0          3.86%           5.8 m         23.7 m   <- before this pass
  *     8          4.57%           5.8 m         36.3 m
  *     16         6.32%           9.6 m         50.1 m
- *     32         8.92%          19.2 m         64.1 m   <- here
+ *     32         8.92%          19.2 m         64.1 m
  *     64        12.18%          34.9 m         79.5 m
- *     none      20.86%          53.5 m        189.5 m
+ *     none      20.86%          53.5 m        189.5 m   <- here
  *
- * Below about 16 the bound does nothing to the median stream, because
- * half of 8 x 0.6 m is already under slabHalf's own two-metre floor.
- * THIS IS A DIAL AND IT IS JOSHUA'S TO TURN — the hydrology above it is
- * measured, this number is a judgement about how much of the island
- * should be water.
+ * THIS IS A DIAL AND IT IS JOSHUA'S TO TURN. The hydrology above it is
+ * measured; this number is a judgement about how much of the island
+ * should be water, and it has been made in favour of not putting a
+ * straight edge through the middle of a lake.
  */
-const SPREAD = 32;
+const SPREAD = 0;
 /** Ten units of water — ten centimetres — over the drawn ground. */
 const SKIN = 10;
 /** And at most a metre of lift, so one noisy station cannot raise a reach. */
@@ -154,6 +159,35 @@ useFlow(flow);
 
 const nPts = flow.x.length;
 const nPond = flow.pondX.length;
+
+// A FRESH BAKE, OR NOTHING. This pass is NOT idempotent and must not
+// pretend to be: the level touch-up below reads the level already in
+// the file and lifts it toward the drawn ground, so a station that hit
+// LIFT_CAP the first time gets another metre the second, and another
+// the third. Run twice by hand, the water climbs out of its own valley
+// a metre at a time and nothing complains.
+//
+// The bake:flow chain always feeds this the Python output, where every
+// half-width is UNMEASURED, so the correct input is exactly the input
+// that has not been through here yet. Check for it and say so, rather
+// than leaving a foot-gun for whoever re-runs one step of a pipeline
+// because the last one was slow.
+{
+  let measured = 0;
+  for (let p = 0; p < nPts; p++) {
+    if (flow.left[p] !== UNMEASURED || flow.right[p] !== UNMEASURED) measured++;
+  }
+  if (measured > 0) {
+    console.error(
+      `${FLOW} already carries measured widths at ${measured.toLocaleString()}`
+      + ` of ${nPts.toLocaleString()} stations.\n`
+      + 'This pass lifts levels off the level already in the file, so running'
+      + ' it again would lift them twice.\n'
+      + 'Run `python3 scripts/bakeFlow.py` first (or `npm run bake:flow` for'
+      + ' the whole chain), which rewrites them UNMEASURED.');
+    process.exit(1);
+  }
+}
 
 /**
  * A ponded station, which is the bake's tuck: `level` two units UNDER
@@ -298,7 +332,7 @@ for (const reach of flow.reaches) {
     // HOLD. See SPREAD: the march finds where the GROUND stops the
     // water, and on a broad flat valley floor that is a long way from
     // a trickle that has no business filling it.
-    const bound = Math.max(floor, SPREAD * flow.width[p] / 2);
+    const bound = SPREAD > 0 ? Math.max(floor, SPREAD * flow.width[p] / 2) : Infinity;
 
     let total = 0;
     let held = 0;
@@ -411,8 +445,8 @@ console.log(`sides floored          ${flooredSides.toLocaleString()} of ${(2 * n
   + `  (${pc(flooredSides, 2 * nPts)})`);
 console.log(`sides at the ${CAP / 100} m cap  ${cappedSides.toLocaleString()}`
   + `  (${pc(cappedSides, 2 * nPts)})`);
-console.log(`sides held by SPREAD=${SPREAD}  ${boundSides.toLocaleString()}`
-  + `  (${pc(boundSides, 2 * nPts)})  — ground offered more floor than the stream can fill`);
+console.log(`sides held by SPREAD  ${SPREAD === 0 ? 'none — unbounded' : boundSides.toLocaleString()}`
+  + `${SPREAD === 0 ? '' : '  (' + pc(boundSides, 2 * nPts) + ')  — the bound, not the bank, drew that shore'}`);
 console.log(`drawing nothing        ${empty.toLocaleString()}`);
 const sortedLift = [...lifts].sort((a, b) => a - b);
 console.log(`\ndry at the centreline  ${pc(dryBefore, fresh)} before the touch-up,`

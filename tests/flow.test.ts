@@ -20,8 +20,9 @@
  * wetted reach cut off by the EDGE OF THE SLAB rather than by the
  * terrain: the water looked narrow because we drew it narrow.
  * `scripts/bakeWidth.ts` now walks outward on the ground the game draws
- * until the water has a reason to stop, and the median full width goes
- * 5.8 m -> 49.8 m, p95 165 m. The tests below have to be able to tell a
+ * until the water has a reason to stop, and across the whole island the
+ * median full width goes 5.8 m -> 53.5 m, p95 189.5 m. The tests below
+ * have to be able to tell a
  * file that pass wrote from one it did not, because a bake WITHOUT it
  * loads perfectly, decodes perfectly, and draws exactly the old narrow
  * water — a failure that looks like nothing changed.
@@ -496,11 +497,13 @@ describe('the shipped bake', () => {
       // THE ABSOLUTE MOVES WITH A DIAL AND THE RELATIONSHIP DOES NOT,
       // so these pin the relationship. bakeWidth.ts's SPREAD decides
       // how many true channel widths the water may cross — game tuning,
-      // Joshua's to turn — and at 32 the median comes out 19.2 m where
-      // an unbounded march gave 49.8 m and the old thread gave 5.8 m.
-      // An assertion written against 49.8 would have broken the moment
-      // that dial moved while saying nothing about whether the pass had
-      // run, which is the one thing this test is here to know.
+      // Joshua's to turn — and it has already been turned once: at 32
+      // the median came out 19.2 m, unbounded it is 53.5 m, and the old
+      // thread was 5.8 m. An assertion written against any one of those
+      // would have broken the moment the dial moved while saying
+      // nothing about whether the pass had run, which is the one thing
+      // this test is here to know. Twelve metres sits below every
+      // setting anybody has argued for and above the thread.
       const wasWide = median(slab);
       const isWide = median(drawn);
       expect(wasWide).toBeLessThan(1_000);        // the 5.8 m thread, as shipped
