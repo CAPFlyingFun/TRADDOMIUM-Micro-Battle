@@ -18,12 +18,19 @@
  * changes, and it spans the measured disagreement rather than an
  * arbitrary wall. These tests hold both halves: no geometry below a
  * cell that needs no bridge, and a bounded bridge on one that does.
+ *
+ * The window's outer rim keeps a small one. It used to bridge two
+ * different height functions meeting — a full metre of wall — and that
+ * disagreement is gone, because the cells and the tiers read one
+ * surface now. What is left is honest resolution: the tier's lattice is
+ * 312.5 units and slides with her, so a cell cannot know at build time
+ * where its neighbour's vertices fall.
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
-  buildCell, MAX_SEAM_DROP, MAX_TIER_DROP, type CellSeam,
+  buildCell, MAX_SEAM_DROP, MAX_RIM_DROP, type CellSeam,
 } from '../src/world/TerrainStream';
 import { setRelief, setSmoothing, useGrid } from '../src/world/heightfield';
 import { decodeGrid } from '../src/world/kauai';
@@ -40,9 +47,8 @@ beforeAll(() => {
   useGrid(decodeGrid(g.buffer.slice(g.byteOffset, g.byteOffset + g.byteLength) as ArrayBuffer));
   setSmoothing(DEFAULTS.terrainSmoothing);
   setRelief(1);
-  // The trench is what the two surfaces disagree ABOUT — the cells cut
-  // it and the tier behind them does not — so the tier seam below
-  // measures nothing without the flow loaded.
+  // The channel lives in `baseLand` now, so the ground these cells are
+  // cut from is only the real island with the flow loaded.
   const f = readFileSync(fileURLToPath(new URL('../public/kauai-flow.bin', import.meta.url)));
   useFlow(decodeFlow(f.buffer.slice(f.byteOffset, f.byteOffset + f.byteLength) as ArrayBuffer));
 });
@@ -112,32 +118,28 @@ describe('a cell on a real resolution boundary', () => {
   });
 
   it('reaches down to the tier behind the window, and only down', () => {
-    // THE OTHER SEAM, and the one removing the cardboard revealed. The
-    // streamed window stops at 20.48 m and the transition tier carries
-    // on from there — cut from a different height function, because the
-    // cells carve a real trench and the tier does not. Around Joshua's
-    // own fix the two disagree by a full metre, so the cells' outer
-    // edge stands that proud of the ground behind it.
+    // THE ONE SKIRT LEFT, and it is a resolution seam now rather than a
+    // disagreement of rule. The cells and the tier read one surface —
+    // the metre of wall between two height functions is gone — but the
+    // tier draws it on a 312.5-unit lattice anchored on HER, so a cell
+    // cannot know at build time where its neighbour's vertices land.
+    // Hence a flat bounded drop rather than a measured bridge.
     const at = geoToWorld({ lat: 22.04110839, lon: -159.37390526 });
     const rim: CellSeam[] = [{ edge: 'east', neighbourStep: SPAN_CELL / 16, tier: true }];
     const geo = buildCell(world(at.wx, at.wz), SPAN_CELL, VERTS, false, rim);
     const pos = geo.getAttribute('position').array as Float32Array;
     expect(geo.getAttribute('position').count).toBe(VERTS * VERTS + VERTS);
-    let moved = 0, worst = 0;
     for (let i = 0; i < VERTS; i++) {
       const from = pos[(i * VERTS + (VERTS - 1)) * 3 + 1];
       const to = pos[(VERTS * VERTS + i) * 3 + 1];
       // NEVER UP. Lifting the rim would put cell geometry above the
-      // tier and turn the wall to face the other way, which is the
-      // same tooth seen from behind.
-      expect(to).toBeLessThanOrEqual(from + 1e-6);
-      worst = Math.max(worst, from - to);
-      if (from - to > 0.01) moved++;
+      // tier and turn the wall to face the other way.
+      expect(to).toBeLessThan(from);
+      expect(from - to).toBeCloseTo(MAX_RIM_DROP, 6);
     }
-    expect(worst).toBeLessThanOrEqual(MAX_TIER_DROP + 1e-6);
-    // And it has to actually reach: a rim that never moves is not
-    // bridging the surfaces, it is just more vertices.
-    expect(moved).toBeGreaterThan(0);
+    // And it stays a rim, not a curtain: a quarter of the 250-unit
+    // skirt that used to hang off all four edges of every cell.
+    expect(MAX_RIM_DROP).toBeLessThan(250);
     geo.dispose();
   });
 

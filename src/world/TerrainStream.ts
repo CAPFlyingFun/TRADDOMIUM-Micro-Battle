@@ -145,22 +145,33 @@ export const MAX_SEAM_DROP = 8;
 export type CellEdge = 'north' | 'south' | 'west' | 'east';
 
 /**
- * How far the OUTERMOST cells may reach down to the tier behind them.
+ * How far the OUTERMOST cells reach down to meet the tier behind them.
  *
- * The streamed window stops at CELL_REACH — 20.48 m — and the
- * transition tier carries on from there, cut from a different height
- * function: the cells cut carve.ts's real trench, the tier aims at the
- * waterline instead. Measured around Joshua's own fix, those two
- * disagree by up to a full metre, so the cells' outer edge stands that
- * proud of the surface behind it and shows a wall.
+ * This is the one skirt left on the island, and it is worth saying why
+ * it survived when the cardboard did not.
  *
- * The old 2.5 m skirt on every edge covered this by accident, which is
- * why removing the cardboard revealed it. This is the same seam idea
- * as a cell-to-cell bridge, sized for a boundary between two different
- * SURFACES rather than two resolutions of one: two metres, enough for
- * the measured metre and its margin, and only ever on the outer ring.
+ * It used to bridge a disagreement of RULE: the cells cut carve.ts's
+ * trench and the transition tier aimed at the waterline instead, two
+ * different islands meeting at the window's edge, a full metre apart.
+ * That is gone — the channel lives in `baseLand` now, so both read one
+ * surface and the rule disagreement is zero by construction.
+ *
+ * What is left is a disagreement of RESOLUTION, which is real and
+ * cannot be bridged exactly. The cells' lattice is 8 to 32 units; the
+ * tier's is 312.5, and between its vertices it draws a straight line
+ * across ground that curves. Measured along the rim on the shipped
+ * island: median 2 cm, p99 33 cm, worst 62 cm.
+ *
+ * A cell cannot compute that gap, because the tier's lattice is
+ * anchored on HER — it slides as she walks — so at build time a cell
+ * does not know where the tier's vertices will fall. So the rim drops a
+ * flat, bounded, downward-only metre: enough to cover the measured
+ * worst case with margin, and a quarter of the 2.5 m curtain that used
+ * to hang off all four edges of every cell in the window. Downward
+ * only, because where the tier draws ABOVE the cell edge the tier's own
+ * geometry already covers the gap.
  */
-export const MAX_TIER_DROP = 200;
+export const MAX_RIM_DROP = 100;
 
 /**
  * The vertex spacing on the cell across this one actual LOD seam.
@@ -282,16 +293,10 @@ export function buildCell(
         case 'east': return [worldX + span, worldZ + distance];
       }
     };
-    // THE WINDOW'S OWN RIM. Past it the transition tier is the ground,
-    // and it is cut from a different height function — so the bridge
-    // reaches for THAT surface rather than for a straighter reading of
-    // this one. Down only: lifting the rim would put cell geometry
-    // above the tier and make the wall face the other way.
-    if (seam.tier) {
-      const [tx, tz] = edgePoint(along);
-      const behind = dryLand(tx, tz, TRANSITION_STEP);
-      return sourceHeight + Math.max(-MAX_TIER_DROP, Math.min(0, behind - sourceHeight));
-    }
+    // THE WINDOW'S OWN RIM — a flat bounded drop, for the reason set
+    // out at MAX_RIM_DROP: the tier's lattice slides with her, so there
+    // is no line here to measure against.
+    if (seam.tier) return sourceHeight - MAX_RIM_DROP;
     const coarseStep = Math.max(step, seam.neighbourStep);
     const lo = Math.floor(along / coarseStep) * coarseStep;
     const hi = Math.min(span, lo + coarseStep);
@@ -459,13 +464,13 @@ export const TIER_CUTS = {
  * reading of "this sample cannot see the beach it is standing on".
  */
 function dryLand(x: number, z: number, step: number): number {
-  // `farHeight` WITH THE FOOTPRINT, not `terrainHeight`: this function
-  // is only ever called for the distance tiers, and out there a vertex
-  // stands for the square around it rather than for a point. Passing
-  // the footprint is what puts the rivers and lakes back into the
-  // coarse surface at a width its triangles can actually hold — see
-  // the comment on farHeight. The two neighbourhood questions, MIN for
-  // the water and MAX for the coastline, share a door.
+  // THE COASTLINE QUESTION ONLY, NOW. This used to carry a second job:
+  // `farHeight` took the footprint and brought the coarse tiers down to
+  // the waterline, because the cells cut a trench the tiers did not.
+  // With the channel in `baseLand` there is one surface and no second
+  // reading to reconcile, so `farHeight` is `baseLand` and the reach
+  // below serves the MAX question that is left — a vertex standing in
+  // the sea whose neighbourhood is land.
   const reach = Math.min(step * FOOTPRINT, CARVE_CAP);
   const here = farHeight(x, z, reach);
   if (here > 0) return here;

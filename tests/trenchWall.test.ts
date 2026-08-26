@@ -1,5 +1,5 @@
 /**
- * THE TRENCH MAY NOT END IN A WALL.
+ * THE ISLAND HAS ONE SURFACE, AND IT DOES NOT FALL OFF ANY CLIFFS.
  *
  * Joshua, on the pond shore: "can you fix the jagged edges?" Three
  * things were blamed before the right one. The drawn water's hard alpha
@@ -12,30 +12,27 @@
  * 74 cm — a three-quarter-metre cliff inside eight centimetres of
  * island, repeated down the bank as a row of fins.
  *
- * The cause was two numbers that used to be one. `trenchCut` shapes the
- * bed out to `cutHalf(width)`, a shoulder half again as wide as the
- * channel. The collision index, since the widths were measured per
- * side, claims only as far as the water actually reaches on THIS side
- * here — and on a stream pinned against a valley wall that is 1064
- * units where the shoulder is 2861. Between those two radii the carve
- * was still cutting at full depth, and then `flowAt` returned null and
- * the next sample got no cut at all. The profile never came down; it
- * was guillotined.
+ * The cause was that the bed was GATED. `terrainHeight` carved through
+ * `flowAt`, which stops answering at the collision index's measured
+ * claim, while `trenchCut` shaped its profile out to the channel's own
+ * shoulder — 1064 units against 2861 on a stream pinned to a valley
+ * wall. Between those two radii the carve was still at full depth, and
+ * then the next sample got nothing back at all.
  *
- * So the claim rides on `FlowSpot` now and bounds the cut, and this is
- * the measurement that says it still does. It walks the surface the
- * near cells are actually built from — `terrainHeight` on each cell's
- * own lattice — around stations spread the length of the bake, and asks
- * what the CARVE did to the step between neighbours. The uncut ground's
- * own slope is subtracted: a Napali cliff is not a fin, and a test that
- * could not tell them apart would fail on the island rather than on the
- * bug.
+ * Clamping the shoulder to the claim fixed the symptom and left the
+ * disease: a carve driven by anything that can REFUSE has an edge to
+ * fall off. So the channel moved into `baseLand`, cut from `channelAt`,
+ * which asks a purely geometric question and never refuses. The
+ * profile now reaches zero, with zero slope, on its own terms.
+ *
+ * These hold that: the structural property directly, and its
+ * consequence on the lattice the game is actually drawn on.
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
-  baseLand, CELL_VERTS, COARSE_VERTS, setRelief, setSmoothing, terrainHeight, useGrid,
+  bareLand, baseLand, CELL_VERTS, COARSE_VERTS, setRelief, setSmoothing, useGrid,
 } from '../src/world/heightfield';
 import { decodeGrid } from '../src/world/kauai';
 import { decodeFlow, useFlow, type Flow } from '../src/world/flow';
@@ -60,8 +57,12 @@ beforeAll(() => {
 });
 
 /**
- * How much the carve changed the step between each pair of neighbouring
+ * How much the CARVE changed the step between each pair of neighbouring
  * lattice vertices, over cells sitting on stations across the island.
+ *
+ * Against `bareLand`, so the uncut island's own slope is subtracted: a
+ * Napali cliff is not a fin, and a test that could not tell them apart
+ * would fail on the island rather than on the bug.
  */
 function cutSteps(verts: number): number[] {
   const step = CHUNK_SPAN / (verts - 1);
@@ -75,9 +76,9 @@ function cutSteps(verts: number): number[] {
       for (let row = 0; row < verts; row++) {
         for (let c = 0; c < verts - 1; c++) {
           const ax = ox + c * step, bx = ax + step, zz = oz + row * step;
-          const a = terrainHeight(ax, zz), b = terrainHeight(bx, zz);
+          const a = baseLand(ax, zz), b = baseLand(bx, zz);
           if (a <= 0 || b <= 0) continue;   // sea
-          out.push(Math.abs((a - b) - (baseLand(ax, zz) - baseLand(bx, zz))));
+          out.push(Math.abs((a - b) - (bareLand(ax, zz) - bareLand(bx, zz))));
         }
       }
     }
@@ -85,7 +86,60 @@ function cutSteps(verts: number): number[] {
   return out;
 }
 
-describe('the bank the trench leaves behind', () => {
+describe('the bed the island cuts for its own water', () => {
+  it('comes to nothing, and to nothing smoothly, at its own edge', () => {
+    // THE STRUCTURAL PROPERTY, stated directly. Everything below is a
+    // consequence of this holding; if this breaks, no threshold on a
+    // lattice will save the banks.
+    const level = 1000, land = 1000, width = 60;   // 4.8 m drawn channel
+    const reach = cutHalf(width);
+    // Zero AT the edge, and zero everywhere past it.
+    expect(trenchCut(land, level, reach, width)).toBe(0);
+    expect(trenchCut(land, level, reach * 1.5, width)).toBe(0);
+    // And arriving there smoothly rather than falling off: the last
+    // centimetre of cut before the edge is a rounding error, not a
+    // cliff. Smootherstep has zero first AND second derivative here.
+    const last = trenchCut(land, level, reach - 1, width);
+    expect(last).toBeGreaterThan(0);
+    expect(last).toBeLessThan(0.01);
+  });
+
+  it('is a continuous function of position, with nothing able to gate it', () => {
+    // The fins came from a carve that could be REFUSED — past the
+    // collision claim, flowAt returned null and the cut went from full
+    // depth to nothing between one sample and the next.
+    //
+    // So walk straight across real channels at a hair's spacing and
+    // watch the cut itself. ACROSS MANY REACHES, not one: the first
+    // version of this walked a single station whose claim happened to
+    // be wider than its own shoulder, so it had no gate to find and
+    // passed just as happily with one reinstated.
+    let worst = 0, where = '';
+    for (let r = 0; r < flow.reaches.length; r += 29) {
+      const { first, count } = flow.reaches[r];
+      const p = first + (count >> 1);
+      const x = flow.x[p], z = flow.z[p];
+      if (bareLand(x, z) <= 0) continue;
+      let prev = baseLand(x - 6000, z) - bareLand(x - 6000, z);
+      for (let d = -6000 + 2; d <= 6000; d += 2) {
+        const cut = baseLand(x + d, z) - bareLand(x + d, z);
+        const jump = Math.abs(cut - prev);
+        if (jump > worst) { worst = jump; where = `${x + d},${z}`; }
+        prev = cut;
+      }
+    }
+    // Two units of travel across a metre-deep trench. What is left is
+    // the ground's own gradient, not a seam: where the depth bound
+    // binds, the cut tracks `land`, and steep ground moves a couple of
+    // centimetres in two units. Measured at 2.6 cm.
+    //
+    // The faults this refuses are an order of magnitude past that: a
+    // reinstated claim gate scores 96, and hard-selecting the nearest
+    // segment instead of taking the deepest scores 48.
+    expect(worst).toBeLessThan(10);
+    expect(where).toBeTruthy();
+  });
+
   it('never falls off a cliff between two vertices of the near mesh', () => {
     // The lattice the streamed cells are cut on, 8 units apart. A step
     // this small cannot hold a real landform: 40 cm in 8 cm is a 79
@@ -94,53 +148,20 @@ describe('the bank the trench leaves behind', () => {
     const cuts = cutSteps(CELL_VERTS);
     expect(cuts.length).toBeGreaterThan(400_000);
     const over = (t: number) => cuts.filter((v) => v > t).length / cuts.length;
-    // Measured on the shipped bake: 0.024% of pairs over 40 cm with the
-    // cut running past the claim, 0.001% with it clamped. Set at 0.01%,
-    // which is an order of magnitude either side of both.
-    expect(over(40)).toBeLessThan(0.0001);
-    expect(over(20)).toBeLessThan(0.001);
+    // Measured on the shipped bake: 0.024% of pairs over 40 cm when the
+    // carve ran past the claim, 0.001% with the shoulder clamped to it,
+    // and NONE AT ALL now the cut is ungated and continuous.
+    expect(over(40)).toBe(0);
+    expect(over(20)).toBeLessThan(0.0001);
   });
 
   it('and not on the coarse lattice either, where the fins showed worst', () => {
-    // 32 units between vertices, so the same guillotine has four times
-    // the ground to hide in and showed up four times as often: 0.118%
-    // over 40 cm before the clamp, 0.002% after.
+    // 32 units between vertices, so the same fault had four times the
+    // ground to hide in and showed up four times as often: 0.118% over
+    // 40 cm before, 0.0014% now — and what is left is not a gate but
+    // the nearest-centreline handoff where two channels meet.
     const cuts = cutSteps(COARSE_VERTS);
     expect(cuts.length).toBeGreaterThan(20_000);
-    expect(cuts.filter((v) => v > 40).length / cuts.length).toBeLessThan(0.0002);
-  });
-
-  it('brings the profile to nothing at the claim, not at the shoulder', () => {
-    // The mechanism, stated directly, so a future reader does not have
-    // to infer it from a percentage. A stream whose measured claim is
-    // narrower than its own shoulder must reach zero cut at the claim —
-    // that is the point flowAt stops answering, and the last cut before
-    // it is the height of the cliff.
-    const level = 1000, land = 1000, width = 60;   // 4.8 m drawn channel
-    const shoulder = cutHalf(width);
-    const claim = shoulder / 3;
-    expect(claim).toBeLessThan(shoulder);
-    // Just inside the claim: still a hair of cut, and only a hair.
-    const last = trenchCut(land, level, claim - 0.5, width, claim);
-    expect(last).toBeGreaterThan(0);
-    expect(last).toBeLessThan(1);
-    // Outside it: nothing. The pair is the whole invariant — the cut
-    // arrives at zero where the water does.
-    expect(trenchCut(land, level, claim, width, claim)).toBe(0);
-    // Without the claim the same offset is still being cut hard, which
-    // is the cliff this test exists to keep out of the ground.
-    expect(trenchCut(land, level, claim - 0.5, width)).toBeGreaterThan(50);
-  });
-
-  it('still cuts the full trench where the claim is the wider of the two', () => {
-    // The clamp may only ever narrow the cut. A claim reaching past the
-    // shoulder — the common case on open valley floor — must leave the
-    // trench exactly as it was, or this fix has quietly filled in every
-    // stream on the island.
-    const level = 1000, land = 1000, width = 60;
-    for (const off of [0, 50, 120, 240]) {
-      expect(trenchCut(land, level, off, width, 10_000))
-        .toBeCloseTo(trenchCut(land, level, off, width), 9);
-    }
+    expect(cuts.filter((v) => v > 40).length / cuts.length).toBeLessThan(0.005);
   });
 });

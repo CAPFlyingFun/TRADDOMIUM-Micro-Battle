@@ -43,6 +43,7 @@
  * GLOBAL COORDINATES, float64, nothing near the GPU — as everywhere.
  */
 import { SPAN, STEP } from './kauai';
+import { cutHalf, trenchCut } from './carve';
 
 /** `TMBF`, little-endian, as the bake writes it. */
 const MAGIC = 0x46424d54;
@@ -389,7 +390,17 @@ export function useFlow(flow: Flow): void {
   // probe in flowAt().
   const found: number[][] = [];
   for (let s = 0; s < segments; s++) {
-    const far = claim[s];
+    // THE CARVE'S REACH GOES IN TOO, and it is not the claim. A stream
+    // pinned against a valley wall claims a few metres on that side
+    // and still shapes its bed out to the full shoulder — 1064 units
+    // against 2861, measured. Folding by the claim alone left the
+    // wider of the two able to fall outside the footprint, so a point
+    // inside the trench could probe a cell the segment was never
+    // listed in, get nothing back, and take no cut at all while its
+    // neighbour eight units away took 73 cm of one. That is the row of
+    // fins along every bank. The footprint has to cover whichever
+    // question reaches further.
+    const far = Math.max(claim[s], cutHalf(wide[s]));
     const x0 = Math.max(0, Math.floor((Math.min(ax[s], bx[s]) - far + SPAN / 2) / CELL));
     const x1 = Math.min(CELLS - 1, Math.floor((Math.max(ax[s], bx[s]) + far + SPAN / 2) / CELL));
     const z0 = Math.max(0, Math.floor((Math.min(az[s], bz[s]) - far + SPAN / 2) / CELL));
@@ -506,19 +517,6 @@ export interface FlowSpot {
   readonly width: number;
   /** Distance from the centreline. */
   readonly off: number;
-  /**
-   * How far the water reaches on THIS side, here — the claim that
-   * admitted this point.
-   *
-   * Carried because the carve has to stop where the claim does. The
-   * trench's own shoulder is cutHalf(width), which can be three times
-   * this on a stream pinned against a valley wall; shaping the bed to
-   * the shoulder and then having flowAt refuse the point a centimetre
-   * later leaves the cut hanging at full depth — a 73 cm cliff in
-   * 8 cm of ground, repeated along the bank as a row of fins. See
-   * terrainHeight.
-   */
-  readonly reach: number;
   /** Downstream, scaled by how far from the bank she is. */
   readonly flowX: number;
   readonly flowZ: number;
@@ -587,7 +585,7 @@ export function flowAt(wx: number, wz: number): FlowSpot | null {
     const sign = bLev![s] <= aLev![s] ? 1 : -1;
     const speed = flowSpeed(runLen > 0 ? Math.abs(aLev![s] - bLev![s]) / runLen : 0);
     const spot: FlowSpot = {
-      level, bed, width, off, reach,
+      level, bed, width, off,
       flowX: runLen > 0 ? (ex / runLen) * sign * speed * thread : 0,
       flowZ: runLen > 0 ? (ez / runLen) * sign * speed * thread : 0,
     };
@@ -604,69 +602,71 @@ export function flowAt(wx: number, wz: number): FlowSpot | null {
   return best;
 }
 
-/** What a coarse terrain vertex needs to know about a channel near it. */
-export interface NearChannel {
-  readonly level: number;
-  readonly bed: number;
-  readonly width: number;
-  /** True distance from the centreline, which may exceed the claim. */
-  readonly off: number;
-}
-
 /**
- * THE NEAREST CHANNEL WITHIN `slack`, for the tiers drawn too coarsely
- * to have found it any other way.
+ * HOW DEEP THE ISLAND'S OWN CHANNELS CUT THE GROUND HERE.
  *
- * `flowAt` answers only inside a segment's CLAIM, which since the bed
- * was cut is a handful of metres — right for gameplay, and useless to
- * a middle-tier vertex standing 31 m from the water it is supposed to
- * be holding. That mismatch is what put Joshua's rivers on stilts: the
- * near mesh cut its trench and the coarse mesh did not, so past twenty
- * metres the water lay on top of uncut ground with its edges showing.
- * "Floating like highways."
+ * `flowAt` answers a GAMEPLAY question: is she in water, and which way
+ * is it pushing. It is gated by the measured claim, so it stops
+ * answering at the water's edge. That is right for gameplay and wrong
+ * for a carve, because a bed gated by anything is a bed that ends in a
+ * cliff: past the gate the cut goes from full depth to nothing between
+ * one lattice vertex and the next. That is the row of fins down every
+ * bank, 74 cm tall in 8 cm of ground.
  *
- * Deliberately NOT the hot path and deliberately not a FlowSpot: this
- * returns the four numbers a carve needs and no current, so nothing
- * here has to keep step with the velocity thread, and `flowAt` stays
- * exactly as fast as it was.
+ * So this asks only the geometric question and is ungated. `trenchCut`
+ * brings its profile to zero, and to zero SLOPE, at cutHalf(width), so
+ * every term here is a continuous function of position and there is
+ * nothing to clamp.
+ *
+ * AND IT TAKES THE DEEPEST, NOT THE NEAREST. Selecting one segment and
+ * carving from its numbers looks equivalent and is not: two adjacent
+ * points either side of a Voronoi boundary pick DIFFERENT segments, and
+ * those segments carry different levels and widths, so the cut jumps
+ * where the choice flips. Measured before this: 48 cm in two units of
+ * travel — a fresh half-metre wall, in a carve that had just been made
+ * continuous everywhere else. A maximum of continuous functions is
+ * continuous, which selection is not, and it is also the better answer
+ * on its own terms: where two channels overlap the ground is cut by
+ * whichever digs deeper, so a confluence gets one merged hollow instead
+ * of a seam down the middle of it.
+ *
+ * A pond-owned span carves nothing: the bake tucks a ponded station
+ * under its bed to say the sheet owns that water, and a lake is a
+ * depression the island already has.
  */
-export function flowNear(wx: number, wz: number, slack: number): NearChannel | null {
-  if (!heads || !counts || !buckets || !loaded) return null;
-  // The bucket grid holds each segment under every cell its claim
-  // touches, so widening the question by `slack` means widening the
-  // SEARCH by the same, one bucket at a time.
-  const span = Math.ceil(slack / CELL);
+export function channelCut(wx: number, wz: number, land: number): number {
+  if (!heads || !counts || !buckets) return 0;
   const cx = Math.floor((wx + SPAN / 2) / CELL);
   const cz = Math.floor((wz + SPAN / 2) / CELL);
-  let best: NearChannel | null = null;
-  for (let dz = -span; dz <= span; dz++) {
-    for (let dx = -span; dx <= span; dx++) {
-      const ax2 = cx + dx;
-      const az2 = cz + dz;
-      if (ax2 < 0 || az2 < 0 || ax2 >= CELLS || az2 >= CELLS) continue;
-      const cell = az2 * CELLS + ax2;
-      const from = heads[cell];
-      if (from < 0) continue;
-      const many = counts[cell];
-      for (let n = 0; n < many; n++) {
-        const s = buckets[from + n];
-        const ex = bx![s] - ax![s];
-        const ez = bz![s] - az![s];
-        const run = ex * ex + ez * ez;
-        const t = run > 0
-          ? Math.max(0, Math.min(1, ((wx - ax![s]) * ex + (wz - az![s]) * ez) / run)) : 0;
-        const offX = wx - (ax![s] + ex * t);
-        const offZ = wz - (az![s] + ez * t);
-        const off = Math.hypot(offX, offZ);
-        if (off > claim![s] + slack) continue;
-        if (best && off >= best.off) continue;
-        const level = aLev![s] + (bLev![s] - aLev![s]) * t;
-        const bed = aBed![s] + (bBed![s] - aBed![s]) * t;
-        best = { level, bed, width: wide![s], off };
-      }
-    }
+  if (cx < 0 || cz < 0 || cx >= CELLS || cz >= CELLS) return 0;
+  const cell = cz * CELLS + cx;
+  const from = heads[cell];
+  if (from < 0) return 0;
+
+  let deepest = 0;
+  const many = counts[cell];
+  for (let n = 0; n < many; n++) {
+    const s = buckets[from + n];
+    // A pond owns its own hole; see above.
+    if (aLev![s] < aBed![s] || bLev![s] < bBed![s]) continue;
+    const width = wide![s];
+    const reach = cutHalf(width);
+    if (wx < Math.min(ax![s], bx![s]) - reach || wx > Math.max(ax![s], bx![s]) + reach) continue;
+    if (wz < Math.min(az![s], bz![s]) - reach || wz > Math.max(az![s], bz![s]) + reach) continue;
+    const ex = bx![s] - ax![s];
+    const ez = bz![s] - az![s];
+    const run = ex * ex + ez * ez;
+    const t = run > 0
+      ? Math.max(0, Math.min(1, ((wx - ax![s]) * ex + (wz - az![s]) * ez) / run)) : 0;
+    const dx = wx - (ax![s] + ex * t);
+    const dz = wz - (az![s] + ez * t);
+    const off = Math.hypot(dx, dz);
+    if (off >= reach) continue;
+    const level = aLev![s] + (bLev![s] - aLev![s]) * t;
+    const cut = trenchCut(land, level, off, width);
+    if (cut > deepest) deepest = cut;
   }
-  return best;
+  return deepest;
 }
 
 /**

@@ -3,7 +3,7 @@ import { toLocal } from './origin';
 import { reliefScale } from './heightfield';
 import { reliefUniform } from './terrainMaterial';
 import { flowData, halfAt, pondSheet, type Flow, type PondSheet } from './flow';
-import { baseLand } from './heightfield';
+import { bareLand } from './heightfield';
 import { BANK_GLSL, cutHalf, WATER_DEPTH_GLSL } from './carve';
 import { SPAN } from './kauai';
 import type { LoadReport } from '../ui/loadPlan';
@@ -201,7 +201,7 @@ const ACROSS = 9;
  *     8      3.5%      1.8%
  *
  * FOUR, NOT EIGHT, AND THE REASON IS THE PHONE. Every vertex costs a
- * baseLand(), which scripts/waterProfile.ts puts at 64% of a rebuild —
+ * bareLand(), which scripts/waterProfile.ts puts at 64% of a rebuild —
  * so the density here IS the cost, and nothing else in this file is
  * worth optimising ahead of it. Handing the far field to the terrain's
  * wet-mask paint shrank the build box from 2 km to 800 m and took most
@@ -376,18 +376,18 @@ export function buildReach(
       positions[v * 3 + 2] = wz - cz;
       deep[v] = full;
       across[v] = (wx - x) * -sz + (wz - z) * sx;
-      // NEVER PAST THE CLAIM, because trenchCut is not either. The
-      // shoulder cutHalf(width) can be three times the claim on a
-      // stream pinned against a valley wall, and the ground clamps the
-      // two together — see carve.ts. Leaving the full shoulder here
-      // would shade a metre of depth over bank that was never lowered.
-      span[v] = Math.min(reach, claim);
+      // THE FULL SHOULDER, because the ground's cut is ungated too.
+      // This briefly took min(reach, claim) to match a carve that
+      // stopped where the collision index did; the carve now lives in
+      // baseLand and stops where its own profile reaches zero, so the
+      // claim has nothing to say about the shape of the bed.
+      span[v] = reach;
       // THE ONLY THING HERE THAT HAS TO ASK THE GROUND, and it asks the
       // island the terrain is built from, at the exact point the vertex
       // sits. Negative where the bank has already risen through the
       // water: that is what takes the alpha to nothing at the shore
       // instead of leaving the terrain to hide a fully opaque sheet.
-      rise[v] = level - baseLand(wx, wz);
+      rise[v] = level - bareLand(wx, wz);
       hem[v] = (k === 0 || k === ACROSS - 1 || row === 0 || row === rows - 1) ? 0 : 1;
       along[v] = run_;
       // The LOCAL segment again, for the same reason the offset uses
@@ -537,7 +537,7 @@ export function buildPonds(
     let shallowest = Infinity;
     let deepest = -Infinity;
     for (const [ux, uz] of [[0, 0], [1, 0], [0, 1], [1, 1]] as const) {
-      const r = level - baseLand(pond.x[i] + (ux - 0.5) * POND_QUAD,
+      const r = level - bareLand(pond.x[i] + (ux - 0.5) * POND_QUAD,
                                  pond.z[i] + (uz - 0.5) * POND_QUAD);
       if (r < shallowest) shallowest = r;
       if (r > deepest) deepest = r;
@@ -577,7 +577,7 @@ export function buildPonds(
         positions.push(wx - cx, level, wz - cz);
         deep.push(0);
         span.push(1);
-        let lift = level - baseLand(wx, wz);
+        let lift = level - bareLand(wx, wz);
         if (near.length > 0) {
           let gap = Infinity;
           for (const [lx, lz] of near) {
@@ -1071,7 +1071,7 @@ export class FlowWater {
     // terrainHeight itself arrives at, derived in carve.ts's
     // waterDepth() and shared with the shader verbatim: the trench
     // half is computed from the same curve that cuts it, and the
-    // ground half is one baseLand() sample per vertex. Against the
+    // ground half is one bareLand() sample per vertex. Against the
     // game's own 0.50 m mean it now reads 0.49 m, with 4.6% at zero
     // alpha and 6.6% of dry ground painted. tests/waterDepth.test.ts
     // holds all three of those numbers to the shipped island, and

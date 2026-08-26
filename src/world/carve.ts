@@ -164,15 +164,24 @@ float tmbBank(float t) {
  */
 export function trenchCut(
   land: number, level: number, off: number, trueWidth: number,
-  claim = Infinity,
 ): number {
-  // NEVER PAST THE CLAIM. The bed exists for water, and the water
-  // stops where the index says it does — so a shoulder wider than the
-  // claim carves dry ground and, worse, is still at full depth when
-  // flowAt refuses the next sample. That guillotine is a vertical
-  // cliff the width of one lattice step. Clamping the reach makes the
-  // profile arrive at zero exactly where the water does.
-  const reach = Math.min(cutHalf(trueWidth), claim);
+  // THE PROFILE'S OWN REACH, AND NOTHING ELSE BOUNDS IT.
+  //
+  // This briefly took a `claim` argument and clamped the shoulder to
+  // it, because terrainHeight carved through `flowAt` — which stops
+  // answering at the collision index's measured claim — and a shoulder
+  // wider than that claim was still at full depth when the next sample
+  // got nothing back. That guillotine was a 73 cm cliff in 8 cm of
+  // ground, repeated down every bank as a row of fins.
+  //
+  // Clamping it was treating the symptom. The disease was that the bed
+  // was gated at all: a carve driven by anything that can refuse to
+  // answer has an edge to fall off. The channel is cut in `baseLand`
+  // now, from `channelAt`, which asks a purely geometric question and
+  // never refuses — so the profile reaches zero, with zero slope, on
+  // its own terms, and the surface is continuous everywhere by
+  // construction. Nothing is left to clamp.
+  const reach = cutHalf(trueWidth);
   if (reach <= 0) return 0;
   // ABSOLUTE, because the profile is not an even function any more.
   // A cosine is symmetric about zero for free and smootherstep is not:

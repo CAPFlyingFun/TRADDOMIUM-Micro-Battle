@@ -34,8 +34,7 @@
  *
  * Heights are world units with the waterline at 0.
  */
-import { MAX_DEPTH, trenchCut } from './carve';
-import { flowAt, flowNear } from './flow';
+import { channelCut } from './flow';
 import {
   blurGrid, cellSlope, heightAt, SPAN, STEP, UNITS_PER_METRE, type HeightGrid,
 } from './kauai';
@@ -198,7 +197,19 @@ function calm(x: number, z: number): number {
  * interpolate the smooth one across fifty metres without losing the
  * sharp one down the middle. See FlowWater's build().
  */
-export function baseLand(x: number, z: number): number {
+/**
+ * THE ISLAND WITH NO CHANNEL IN IT — grid, smoothing and noise, and
+ * nothing that knows water exists.
+ *
+ * Exported for one reason: the water's slab vertices carry `rise`, how
+ * far the surface stands above the ground, and the fragment shader adds
+ * the trench profile to it analytically because a trench is sharper
+ * than the slab's own vertex spacing. That sum only equals `baseLand`
+ * if `rise` is measured against the ground BEFORE the cut. Sampling the
+ * carved island here and then adding the carve again in the shader
+ * would count the trench twice and drown every bank on the island.
+ */
+export function bareLand(x: number, z: number): number {
   if (!grid) return 0;
   const raw = heightAt(grid, x, z);
   // Blend the two grids rather than blurring on the fly. The soft one
@@ -236,27 +247,53 @@ export function baseLand(x: number, z: number): number {
   return base + relief * shore * calm(x, z);
 }
 
-export function terrainHeight(x: number, z: number): number {
-  const land = baseLand(x, z);
+/**
+ * THE GROUND, AND THERE IS ONLY ONE OF IT NOW.
+ *
+ * The island used to be described four times over. `baseLand` was the
+ * uncut land; `terrainHeight` subtracted a trench from it for the near
+ * cells; `farHeight` subtracted a DIFFERENT thing — the waterline
+ * rather than the bed — for the tiers; and FlowWater's fragment shader
+ * rebuilt the trench a fourth time from four attributes on each slab
+ * vertex. Four descriptions of one surface, and every one of this
+ * summer's water bugs was two of them drifting apart: rivers on stilts
+ * where the tiers had not cut what the cells had, a metre of wall at
+ * the window rim between those two rules, blue paint over dry bank
+ * where the shader's profile outran the ground's, and a row of fins
+ * down every bank where the carve was gated by a claim the profile
+ * knew nothing about.
+ *
+ * Joshua, ending it: "terrain doesn't match water, but water matches
+ * the terrain." So the channel is part of the ISLAND now, cut here,
+ * once, at the bottom of everything. Every consumer — streamed cells,
+ * every distance tier, the backdrop, the wet mask, the walker, and the
+ * water's own `rise` — reads this one function and therefore cannot
+ * disagree. There is no second description left to drift.
+ *
+ * It is ungated, and that is the whole reason it is safe. `channelAt`
+ * asks a purely geometric question and `trenchCut` brings its profile
+ * to zero, with zero slope, at cutHalf(width) — so the cut is a
+ * continuous function of position everywhere on the island. Nothing
+ * clips it, nothing clamps it, and there is no edge for it to fall off.
+ */
+export function baseLand(x: number, z: number): number {
+  const land = bareLand(x, z);
   if (land <= 0) return land;
+  return land - channelCut(x, z, land);
+}
 
-  // AND NOW IT CARVES AGAIN, WITH BOUNDS. See carve.ts for the whole
-  // argument; the short of it is that two versions of not cutting
-  // proved an island with no channels gives water nowhere to sit, so it
-  // spreads across every flat valley floor it can reach. The trench is
-  // bounded so it cannot repeat the damage that stopped the first
-  // attempt: nothing outside half a channel width is touched, and no
-  // point anywhere is lowered by more than one metre.
-  const spot = flowAt(x, z);
-  if (!spot) return land;
-  // A POND OWNS ITS OWN HOLE. The bake tucks a ponded station below its
-  // bed to say the sheet owns that water, and a pond is a depression
-  // the island already has — cutting a channel through the middle of a
-  // lake would be inventing a trench in a floor that is already flat.
-  if (spot.level < spot.bed) return land;
-  // The claim goes in too: the trench may not outlast the water that
-  // justifies it, or it ends in a cliff where flowAt stops answering.
-  return land - trenchCut(land, spot.level, spot.off, spot.width, spot.reach);
+/**
+ * THE SURFACE SHE STANDS ON — now exactly `baseLand`, because the
+ * channel is cut into the island itself rather than laid over it here.
+ *
+ * Kept as its own name because half the codebase asks for it by that
+ * name and because the DISTINCTION it used to draw is worth a line of
+ * history: this was the near mesh's private reading of the ground, and
+ * a mesh built on one reading with a walker standing on another is the
+ * bug this module exists to prevent. There is now nothing to prevent.
+ */
+export function terrainHeight(x: number, z: number): number {
+  return baseLand(x, z);
 }
 
 /**
@@ -278,37 +315,28 @@ export function terrainHeight(x: number, z: number): number {
  * about rivers, it is about what a coarse vertex is allowed to claim.
  */
 export function farHeight(x: number, z: number, slack = 0): number {
-  const land = baseLand(x, z);
-  if (land <= 0 || slack <= 0) return land;
-  // `flowNear` AND NOT `flowAt`, and that difference is half the bug
-  // Joshua photographed. flowAt answers only inside a segment's claim,
-  // which since the bed was cut is a handful of metres; a middle-tier
-  // vertex stands 31 m from the water it has to hold and got nothing
-  // back, so the coarse mesh kept its uncut ground while the water was
-  // still drawn at the level. Past the near tier every river lay on top
-  // of the island with its edges showing. "Floating like highways."
-  const spot = flowNear(x, z, slack);
-  if (!spot || spot.level < spot.bed) return land;
-
-  // AND THE COARSE TIERS AIM AT THE WATER LINE, not at the trench bed.
-  // That is the other half, and cutting the real trench out here made
-  // it WORSE rather than better: measured, the middle tier went from
-  // 18% of slab edges hanging over air to 90%, because a vertex thirty
-  // metres from the channel took the full depth and left the ten-metre
-  // sheet sitting proud of a thirty-metre trough.
+  // ONE SURFACE, SAMPLED COARSELY — not a second rule.
   //
-  // The trench is a shape these triangles cannot hold — a 7 m channel
-  // between vertices 31 m apart is not a channel, it is a rounding
-  // error. What they CAN hold is the waterline itself. Bringing the
-  // ground to exactly the level means the river reads at distance as a
-  // flat ribbon lying flush in the ground, with nothing to see under
-  // it, which is the honest coarse reading of a trench too small to
-  // draw. The near mesh still cuts the real bed; this is only ever
-  // called for the tiers that cannot.
+  // This used to bring the coarse tiers down to the WATERLINE while the
+  // near cells cut the real bed, because a 7 m channel between vertices
+  // 31 m apart is not a channel, it is a rounding error, and cutting
+  // the true trench out here put 90% of the middle tier's slab edges
+  // over air. That reasoning was sound and the fix was in the wrong
+  // place: it made the tiers a different island from the one she walks
+  // on, and the seam between the two stood a metre proud at the edge of
+  // the streamed window.
   //
-  // Bounded by the same metre as the trench, so no footprint anywhere
-  // can take more ground than the carve is allowed to.
-  return land - Math.min(MAX_DEPTH, Math.max(0, land - spot.level));
+  // With the channel in `baseLand`, a tier vertex that lands in a
+  // trench reads the trench and one that lands beside it reads the
+  // bank, which is simply what point-sampling a small feature on a
+  // coarse lattice looks like. It is the same island either way, so
+  // whatever the tier draws agrees with its neighbours by construction.
+  // `slack` stays in the signature: what a coarse vertex should be
+  // allowed to claim for its footprint is a real question, and it will
+  // be needed again the moment anyone wants these tiers filtered
+  // rather than sampled.
+  void slack;
+  return baseLand(x, z);
 }
 
 /**
