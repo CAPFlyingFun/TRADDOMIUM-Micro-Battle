@@ -128,7 +128,34 @@ export const DEFAULTS: Readonly<Settings> = {
   // The height is game TUNING, not the island: 150% makes this Kauai
   // steeper than the real one, whose relief ratio is 2.84%.
   terrainRelief: 1,
-  terrainSmoothing: 1,
+  // SMOOTHING OFF, AND IT IS THE WATER THAT DECIDED IT.
+  //
+  // The dial was 1 — a ten-pass blur, near enough a Gaussian of sigma
+  // 100 m — for as long as the island was a 54.7 m grid, where point
+  // sampling looks faceted and there is no real detail to protect. The
+  // HD tiles changed both halves of that: there is now real Kauaʻi at
+  // 13.67 m to lose, and losing it turns out to cost more than a look.
+  //
+  // Measured against USGS's own surveyed hydrography, on the ground the
+  // game draws, how far the island stands ABOVE the water that belongs
+  // in it:
+  //
+  //   dial 0     -0.52 m median     70.3% of the network already wet
+  //   dial 0.25   2.85 m             7.5%
+  //   dial 0.5    6.52 m             4.4%
+  //   dial 1     13.63 m, p99 80.8   4.0%
+  //
+  // At 1 a river has to be dug out of an eighty-metre burial before it
+  // can be seen. That is not a carve, it is a canyon, and inventing one
+  // per river is exactly what produced the cardboard banks and floating
+  // water this project spent a summer removing. At 0 the valleys are
+  // real, most of the water simply sits in them, and what is left is a
+  // streambed a metre deep.
+  //
+  // The dial itself stays: it is still the right control, and a device
+  // pass may want a little of it back. It is the DEFAULT that was
+  // wrong, and only once the island had something worth keeping.
+  terrainSmoothing: 0,
   flightSpeed: 1,
   windInfluence: 0.5,
   invertLookX: false,
