@@ -35,6 +35,7 @@
  * Heights are world units with the waterline at 0.
  */
 import { hdHeightAt } from './kauaiHd';
+import { riverCut } from './riverBed';
 import {
   blurGrid, cellSlope, heightAt, SPAN, STEP, UNITS_PER_METRE, type HeightGrid,
 } from './kauai';
@@ -219,7 +220,21 @@ export function baseLand(x: number, z: number): number {
   const base = smoothing > 0 && softGrid
     ? raw + (heightAt(softGrid, x, z) - raw) * smoothing
     : raw;
-  if (base <= 0) return base;
+  // THE SEA GETS NO PROCEDURAL RELIEF — but it does get the river
+  // bed, and that is the whole difference between a continuous surface
+  // and a cliff. Returning here used to skip the carve as well, so the
+  // moment a run's ground dipped under 0 m the cut stopped dead: 1.55 m
+  // of bed at one sample and none at the next, two units later. Every
+  // river mouth on the island wore one. A carve that can be REFUSED is
+  // the fault this project has now shipped twice.
+  const shaped = base <= 0
+    ? base
+    : shapeLand(x, z, base);
+  return shaped - riverCut(x, z, shaped);
+}
+
+/** The procedural relief over the baked island, eased at both ends. */
+function shapeLand(x: number, z: number, base: number): number {
   let relief = 0;
   for (let i = 0; i < OCTAVES.length; i++) {
     const [wavelength, height] = OCTAVES[i];

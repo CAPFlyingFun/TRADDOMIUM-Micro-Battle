@@ -18,6 +18,7 @@ import { local, world, type WorldPoint } from '../world/coords';
 import { TerrainStream, TIER_CUTS } from '../world/TerrainStream';
 import { followHd, forgetHd, hdResident, onHdTile } from '../world/kauaiHd';
 import { forgetHydro, hydro, loadHydro, useHydro } from '../world/hydro';
+import { forgetRiverBeds, indexRiverBeds } from '../world/riverBed';
 import { WaterSurface } from '../world/WaterSurface';
 
 import { originAt, rebaseFor, setOrigin, toLocal, toWorld,
@@ -483,6 +484,13 @@ export class IslandScene {
       .then((data) => {
         if (this.disposed) return;
         useHydro(data);
+        // THE BED BEFORE THE WATER, and the terrain re-cut after both.
+        // The cells standing right now were built from an island with
+        // no rivers in it; leaving them would put a flat surface over
+        // unbroken ground and call it a river.
+        indexRiverBeds();
+        this.terrain.rebuild();
+        this.ant.reground();
         this.water.follow(this.ant.where);
       })
       .catch(() => {});
@@ -783,6 +791,7 @@ export class IslandScene {
     forgetHd();
     this.water.dispose();
     forgetHydro();
+    forgetRiverBeds();
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }
