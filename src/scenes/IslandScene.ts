@@ -16,6 +16,7 @@ import {
 import { findLandfall, UNITS_PER_METRE, type HeightGrid } from '../world/kauai';
 import { local, world, type WorldPoint } from '../world/coords';
 import { TerrainStream, TIER_CUTS } from '../world/TerrainStream';
+import { followHd, forgetHd, hdResident, onHdTile } from '../world/kauaiHd';
 
 import { originAt, rebaseFor, setOrigin, toLocal, toWorld,
 } from '../world/origin';
@@ -462,6 +463,14 @@ export class IslandScene {
 
     // The terrain was cut synchronously up in the constructor, so by
     // the time anyone can await this it is already standing.
+    // AND RE-CUT WHEN THE FINE GROUND LANDS. The cells above were built
+    // from whatever `baseLand` could answer at the time, which for the
+    // first frames is the coarse grid; a tile arriving afterwards moves
+    // the answer without moving the mesh, and she would stand on
+    // 54.7 m triangles over 13.67 m ground.
+    onHdTile(() => { if (!this.disposed) this.terrain.rebuild(); });
+    followHd(this.ant.where.wx, this.ant.where.wz);
+
     this.report?.finish(TERRAIN_JOB);
 
     /**
@@ -488,6 +497,19 @@ export class IslandScene {
       where: () => [this.ant.where.wx, this.ant.root.position.y, this.ant.where.wz],
       origin: () => originAt(),
       cells: () => this.terrain.cellCount,
+      /** How many fine tiles are resident — 0 until the first lands. */
+      hdTiles: () => hdResident(),
+      /**
+       * Move the smoothing dial and re-cut, for the comparison rig.
+       * The same path the slider takes on release; a blur mixes
+       * neighbouring samples, so the vertices genuinely move.
+       */
+      smoothing: () => smoothingAmount(),
+      setSmoothing: (to: number) => {
+        setSmoothing(to);
+        this.terrain.rebuild();
+        this.ant.reground();
+      },
       cameraAt: () => this.follow.camera.position.toArray(),
       paused: () => this.halted,
       /**
@@ -738,6 +760,8 @@ export class IslandScene {
     this.rain.dispose();
     this.detachSettings();
     this.detachKill();
+    onHdTile(null);
+    forgetHd();
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }
@@ -1078,6 +1102,11 @@ export class IslandScene {
       setTextureOrigin(now.x, now.z);
       this.terrain.place();
     }
+    // THE FINE GROUND FOLLOWS HER TOO. Fire-and-forget: a tile that has
+    // not landed is answered by the coarse grid, which holds the same
+    // number at every sample the two share, so the ground sharpens
+    // rather than moves when one arrives.
+    followHd(at.wx, at.wz);
     this.terrain.follow(at);
 
     // WEATHER IS ASKED IN GLOBAL COORDINATES and drawn in local ones.

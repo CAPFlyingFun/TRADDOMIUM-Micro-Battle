@@ -34,6 +34,7 @@
  *
  * Heights are world units with the waterline at 0.
  */
+import { hdHeightAt } from './kauaiHd';
 import {
   blurGrid, cellSlope, heightAt, SPAN, STEP, UNITS_PER_METRE, type HeightGrid,
 } from './kauai';
@@ -200,7 +201,18 @@ function calm(x: number, z: number): number {
  */
 export function baseLand(x: number, z: number): number {
   if (!grid) return 0;
-  const raw = heightAt(grid, x, z);
+  // THE FINE ISLAND WHERE IT HAS ARRIVED, the coarse one everywhere
+  // else. The two hold the same number at every sample they share — the
+  // bake asserts it on all 1,050,625 of them — so a tile landing adds
+  // detail BETWEEN samples and never moves the ground under her.
+  //
+  // Note which end of the dial this is: the blend below runs from THIS
+  // to the blurred copy of the coarse grid, so smoothing 0 is now real
+  // Kauaʻi at 13.67 m and smoothing 1 is what the island has always
+  // looked like. The dial did not change meaning; its sharp end simply
+  // got sixteen times more island in it.
+  const fine = hdHeightAt(x, z);
+  const raw = fine ?? heightAt(grid, x, z);
   // Blend the two grids rather than blurring on the fly. The soft one
   // is baked once at load, so a dial halfway along costs one extra
   // lookup and a lerp instead of a twenty-five-tap convolution.

@@ -17,3 +17,5 @@ scripts/.ground.f32
 __pycache__/
 shots/
 shots-hem/
+shots-smooth/
+shots-new/
