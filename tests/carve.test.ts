@@ -259,37 +259,48 @@ describe('the depth expression the shader draws with', () => {
 });
 
 /**
- * A POND'S DEPTH DOES NOT DEPEND ON THE PROFILE, and FlowWater now
- * relies on that.
+ * A POND CARRIES ZERO `deep`, AND ITS DEPTH IS THE GROUND'S ALONE.
  *
- * A pond carries `rise` equal to its own measured depth, and with rise
- * positive the expression's `min(rise, 0)` is nought and its `max`
- * picks rise over anything the bank curve can return — the curve never
- * exceeds one. So the answer is the measured depth corner to corner
- * whatever `across` and `span` say.
+ * buildPonds samples `rise` per vertex from the uncut island and sets
+ * `deep` to nought, so waterDepth collapses to max(rise, min(rise, 0))
+ * — the rise itself: positive underwater, negative on the bank, with
+ * the same six-centimetre alpha ramp as every stream at the crossing.
+ * That is the whole of the smooth pond shoreline, and it also retires
+ * a sliver: `across` is the ripple coordinate on ponds, and wherever
+ * it passed near nought the bank curve came back positive — a
+ * non-zero `deep` would have punched a full-depth stripe through the
+ * shore ramp every 875 m.
  *
- * Which is why buildPonds is free to use `across` for something else
- * entirely: half of the ripple's texture coordinate. That is a real
- * coupling between two files and it is invisible in both, so it is
- * written down here. If this stops being true, every lake on the
- * island gets a bank profile carved across it out of a number that
- * means "where on the map am I".
+ * This coupling between three files is invisible in all of them, so
+ * it is written down here. If waterDepth stops answering `rise` when
+ * `deep` is nought, every lake shoreline goes back to a sawtooth.
  */
-describe('a pond, whatever the profile says', () => {
-  it('is its measured depth wherever you stand on it', () => {
-    const depth = 240;
-    for (const across of [0, 1, 500, 87_500, -87_500]) {
-      for (const span of [1, 384, 5000]) {
-        expect(waterDepth(depth, across, span, depth)).toBeCloseTo(depth, 9);
+describe('a pond, which has no profile at all', () => {
+  it('is exactly as deep as the water stands over the ground', () => {
+    for (const across of [0, 0.4, 500, 87_500, -87_500]) {
+      for (const span of [1, 384]) {
+        for (const rise of [1, 45, 240, 900]) {
+          expect(waterDepth(0, across, span, rise)).toBe(rise);
+        }
       }
     }
   });
 
+  it('is dry on the bank, whatever the ripple coordinate does', () => {
+    // Negative rise must come out non-positive even at across near
+    // nought, where the bank curve answers 1 — this is the stripe a
+    // non-zero deep would have drawn.
+    for (const across of [0, 0.4, 2, 500]) {
+      expect(waterDepth(0, across, 1, -30)).toBeLessThanOrEqual(0);
+    }
+    // And with a deep, the stripe is real — which is why ponds must
+    // never carry one.
+    expect(waterDepth(240, 0, 1, -30)).toBeGreaterThan(0);
+  });
+
   it('and that is not true of a reach, which is the point', () => {
-    // A reach's rise is NOT its depth — it is how far the water stands
-    // above the uncut island, and on a bank it is negative. There the
-    // profile decides everything, which is what the coupling above is
-    // borrowing the spare parameter from.
+    // A reach's rise is NOT its depth — on a bank it is negative and
+    // the trench profile decides everything.
     expect(waterDepth(100, 0, 384, -50)).toBeGreaterThan(waterDepth(100, 300, 384, -50));
   });
 });

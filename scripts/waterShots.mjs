@@ -25,6 +25,11 @@ const SHOTS = [
   ['aerial-shards-3', '22.04280928 -159.36848060 316.66m 251° -17.0° ×1.00'],
   // Low approach over the pond edge (was AGL 8 m, descending).
   ['low-pond', '22.04107133 -159.37387763 93.19m 21° -5.8° ×1.00'],
+  // Standing at that lake's shore, looking along the waterline — the
+  // jagged-edge complaint of v0.0.53, kept as its regression frame.
+  ['pond-shore', '22.04107133 -159.37387763 85.6m 300° -20° ×1.00'],
+  // And the same shore from 25 m up, where the staircase showed most.
+  ['pond-above', '22.04107133 -159.37387763 111m 300° -35° ×1.00'],
   // Ground level: the green-water closeup and standing in deep water.
   ['ground-green', '22.04770247 -159.37176130 89.95m 113° -33.6° ×1.00'],
   ['ground-deep', '22.04768893 -159.37047816 95.99m 199.4° -18.0° ×1.00'],

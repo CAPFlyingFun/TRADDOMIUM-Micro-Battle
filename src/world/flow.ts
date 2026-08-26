@@ -283,6 +283,7 @@ let aBed: Float32Array | null = null;
 let bBed: Float32Array | null = null;
 let wide: Float32Array | null = null;
 let claim: Float32Array | null = null;
+let sheet: PondSheet | null = null;
 /**
  * THE SAME CLAIM, PER SIDE — two floats a segment, left then right.
  *
@@ -321,6 +322,7 @@ export function forgetFlow(): void {
   loaded = null;
   ax = az = bx = bz = null;
   aLev = bLev = aBed = bBed = wide = claim = sideClaim = null;
+  sheet = null;
   heads = counts = buckets = null;
   ponds = null;
 }
@@ -414,11 +416,86 @@ export function useFlow(flow: Flow): void {
   // O(1) whatever shape the pond grew into.
   ponds = new Map();
   const many = flow.pondX.length;
+  const listed = new Map<string, number>();
   for (let i = 0; i < many; i++) {
     const cx = Math.round((flow.pondX[i] + SPAN / 2) / STEP);
     const cz = Math.round((flow.pondZ[i] + SPAN / 2) / STEP);
-    ponds.set(cx + ',' + cz, flow.pondLevel[i]);
+    listed.set(cx + ',' + cz, flow.pondLevel[i]);
   }
+  // AND ONE RING OF RIM CELLS AROUND EVERY LISTED ONE, at the spill
+  // level of the flooded neighbour. The bake lists a cell only when
+  // its own SAMPLE floods, so a lake's true waterline — where the
+  // spill level meets the rising ground — usually crosses the ring of
+  // cells just OUTSIDE the listed set. Without the rim, both the
+  // drawn sheet and the physical answer stopped dead at the last
+  // listed cell's edge: a 55-metre staircase of quad borders standing
+  // in open water, which is most of the jagged pond shoreline in
+  // Joshua's screenshots. The rim cell carries its neighbour's level
+  // and the ordinary rule — wet iff level beats ground — finds the
+  // real shoreline inside it. Where the rim's ground is above the
+  // spill, the rim answers a level the ground beats, which is DRY,
+  // exactly as before; this can only extend water downhill of a lip,
+  // never invent it on a bank.
+  //
+  // Where two basins' rims meet, the higher spill owns the cell — the
+  // same rule waterLevelAt already applies when surfaces overlap.
+  const rim = new Map<string, number>();
+  for (const [key, level] of listed) {
+    const [cx, cz] = key.split(',').map(Number);
+    for (let dz = -1; dz <= 1; dz++) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (dx === 0 && dz === 0) continue;
+        const at = (cx + dx) + ',' + (cz + dz);
+        if (listed.has(at)) continue;
+        const held = rim.get(at);
+        if (held === undefined || level > held) rim.set(at, level);
+      }
+    }
+  }
+  for (const [key, level] of listed) ponds.set(key, level);
+  for (const [key, level] of rim) ponds.set(key, level);
+  // The drawable sheet: every cell the hash answers for, listed and
+  // rim alike, as coordinates the renderer can batch. Kept here so
+  // the drawn cells and the answering cells are one set by
+  // construction — a rim that answered but was not drawn would be
+  // swimmable invisible water, and that bug has been shipped before.
+  const cells = ponds.size;
+  sheet = {
+    x: new Int32Array(cells), z: new Int32Array(cells),
+    spill: new Int32Array(cells), rim: new Uint8Array(cells),
+  };
+  let put = 0;
+  for (const [key, level] of ponds) {
+    const [cx, cz] = key.split(',').map(Number);
+    sheet.x[put] = Math.round(cx * STEP - SPAN / 2);
+    sheet.z[put] = Math.round(cz * STEP - SPAN / 2);
+    sheet.spill[put] = level;
+    sheet.rim[put] = listed.has(key) ? 0 : 1;
+    put++;
+  }
+}
+
+/**
+ * Every cell the pond hash answers for, as drawable coordinates.
+ *
+ * The surface field is `spill`, not `level`, and the odd name is a
+ * guard: `Flow` also carries x/z/level (the STATION arrays), so a
+ * sheet shaped exactly like it would let a Flow pass anywhere a sheet
+ * is wanted — structurally typed, silently, with station data where
+ * pond cells belong. That exact mistake compiled clean during this
+ * change; the distinct field name is what stops it compiling.
+ */
+export interface PondSheet {
+  readonly x: Int32Array;
+  readonly z: Int32Array;
+  readonly spill: Int32Array;
+  /** 1 where the cell is rim — outside the bake's own listing. */
+  readonly rim: Uint8Array;
+}
+
+/** The standing water's drawable cells, or null before useFlow. */
+export function pondSheet(): PondSheet | null {
+  return sheet;
 }
 
 export interface FlowSpot {

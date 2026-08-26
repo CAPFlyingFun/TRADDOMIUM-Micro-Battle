@@ -37,7 +37,7 @@ import {
   setRelief, setSmoothing, terrainHeight, useGrid,
 } from '../src/world/heightfield';
 import { decodeGrid } from '../src/world/kauai';
-import { decodeFlow, useFlow, waterLevelAt, type Flow } from '../src/world/flow';
+import { decodeFlow, pondSheet, useFlow, waterLevelAt, type Flow } from '../src/world/flow';
 import {
   buildPonds, buildReach, EDGE_FADE, SURFACE_ALPHA, waterShader,
 } from '../src/world/FlowWater';
@@ -294,7 +294,7 @@ describe('the water shader as it goes to the driver', () => {
     geometry.dispose();
     // And the ponds, which are built by a different function and have
     // been given a different attribute set before now.
-    const ponds = buildPonds(flow, [0, 1, 2], 0, 0);
+    const ponds = buildPonds(pondSheet()!, [0, 1, 2], 0, 0);
     const onPonds = new Set(Object.keys(ponds.attributes));
     for (const name of asked) expect(onPonds).toContain(name);
     ponds.dispose();
@@ -496,12 +496,19 @@ describe('the water the game claims', () => {
           }
         }
       }
+      // The SHEET, exactly as followPonds selects it — the first
+      // version of this block scanned flow.pondX and then handed
+      // buildPonds the whole Flow, which is structurally sheet-shaped
+      // and compiled clean while rasterising STATION coordinates as
+      // pond cells. The renamed spill field now makes that a type
+      // error, and this uses the real thing.
+      const pond = pondSheet()!;
       const cells: number[] = [];
-      for (let i = 0; i < flow.pondX.length; i++) {
-        if (Math.abs(flow.pondX[i] - cx) < HALF * 1.6
-          && Math.abs(flow.pondZ[i] - cz) < HALF * 1.6) cells.push(i);
+      for (let i = 0; i < pond.x.length; i++) {
+        if (Math.abs(pond.x[i] - cx) < HALF * 1.6
+          && Math.abs(pond.z[i] - cz) < HALF * 1.6) cells.push(i);
       }
-      if (cells.length) eat(buildPonds(flow, cells, 0, 0));
+      if (cells.length) eat(buildPonds(pond, cells, 0, 0));
 
       for (let j = 0; j < N; j++) {
         for (let i = 0; i < N; i++) {
@@ -523,5 +530,121 @@ describe('the water the game claims', () => {
     // which is under the score of every single one of the four faults
     // on its own.
     expect(holed / wet).toBeLessThan(0.02);
+  });
+});
+
+/**
+ * THE POND SHORELINE — the jagged edge, retired.
+ *
+ * Joshua: "can you fix the jagged edges?" They were two edges wearing
+ * one look. The drawn sheet ended in a hard constant-alpha cut along
+ * whatever terrain triangles clipped it, because pond fragments
+ * carried their bake depth instead of the ground's — no ramp, pure
+ * sawtooth. And the sheet stopped at the last LISTED cell, while a
+ * lake's true waterline usually crosses the ring just outside the
+ * listed set — a 55-metre staircase of quad borders standing in open
+ * water. The fixes: a rim ring in the pond hash, and per-vertex
+ * ground-sampled rise with the same six-centimetre fade the streams
+ * use.
+ */
+describe('the pond shoreline', () => {
+  it('answers the rim ring, one cell beyond the bake', async () => {
+    const { pondLevelAt } = await import('../src/world/flow');
+    const { SPAN } = await import('../src/world/kauai');
+    const step = SPAN / 1024;
+    let rims = 0, twoOut = 0, wrong = 0;
+    for (let i = 0; i < flow.pondX.length && rims < 200; i += 3) {
+      // March east until the listed cells run out; the next cell is
+      // rim and must answer, the one after may not (unless another
+      // pond owns it, so only count clean misses).
+      let x = flow.pondX[i];
+      while (pondLevelAt(x + step, flow.pondZ[i]) !== null
+        && x < flow.pondX[i] + 40 * step) x += step;
+      const rim = pondLevelAt(x, flow.pondZ[i]);
+      if (rim === null) { wrong++; continue; }
+      rims++;
+      // Rim water is downhill of a lip, never uphill: the level it
+      // answers is a real pond's spill, at least this basin's.
+      expect(rim).toBeGreaterThan(0);
+    }
+    expect(rims).toBeGreaterThan(150);
+    expect(wrong).toBe(0);
+    expect(twoOut).toBe(0);
+  });
+
+  it('draws every cell the hash answers for', async () => {
+    const { pondSheet, pondLevelAt } = await import('../src/world/flow');
+    const pond = pondSheet()!;
+    // One set by construction: each sheet cell answers, and each
+    // listed bake cell is in the sheet. A rim that answered but was
+    // not drawable would be swimmable invisible water.
+    expect(pond.x.length).toBeGreaterThan(flow.pondX.length);
+    for (let i = 0; i < pond.x.length; i += 97) {
+      expect(pondLevelAt(pond.x[i], pond.z[i])).not.toBeNull();
+    }
+  });
+
+  it('fades at the true waterline instead of ending in a sawtooth', async () => {
+    const { pondSheet } = await import('../src/world/flow');
+    const { baseLand } = await import('../src/world/heightfield');
+    const pond = pondSheet()!;
+    // LISTED and RIM cells carry different contracts, so they are
+    // built and judged apart. A listed vertex's rise is the ground's
+    // exact truth. A rim vertex's rise may only be LOWERED — that is
+    // the feather that keeps flat marsh from ending on a raw cell
+    // border — and some of it must actually be lowered, or the
+    // feather is not there.
+    // Collected separately: the sheet lists every bake cell before
+    // any rim cell, so one capped loop never reaches the rim at all —
+    // which is exactly how the first version of this test managed to
+    // assert things about zero rim vertices.
+    const listed: number[] = [];
+    const rims: number[] = [];
+    for (let i = 0; i < pond.x.length && listed.length < 300; i += 5) {
+      if (pond.rim[i] === 0) listed.push(i);
+    }
+    for (let i = 0; i < pond.x.length && rims.length < 300; i += 5) {
+      if (pond.rim[i] === 1) rims.push(i);
+    }
+    const exact = buildPonds(pond, listed, 0, 0);
+    let pos = exact.getAttribute('position').array as Float32Array;
+    let rise = exact.getAttribute('rise').array as Float32Array;
+    let deep = exact.getAttribute('deep').array as Float32Array;
+    let banks = 0, wets = 0;
+    for (let v = 0; v < rise.length; v += 7) {
+      expect(deep[v]).toBe(0);
+      const truth = pos[v * 3 + 1] - baseLand(pos[v * 3], pos[v * 3 + 2]);
+      expect(rise[v]).toBeCloseTo(truth, 0);
+      if (truth < -EDGE_FADE) banks++;
+      if (truth > EDGE_FADE) wets++;
+    }
+    exact.dispose();
+    // The sheet must actually CROSS the waterline — vertices on both
+    // sides — or there is no ramp to have, and the shoreline is back
+    // to being whatever the depth test cuts.
+    expect(banks).toBeGreaterThan(20);
+    expect(wets).toBeGreaterThan(20);
+
+    const fringe = buildPonds(pond, rims, 0, 0);
+    pos = fringe.getAttribute('position').array as Float32Array;
+    rise = fringe.getAttribute('rise').array as Float32Array;
+    deep = fringe.getAttribute('deep').array as Float32Array;
+    let feathered = 0, over = 0, seen = 0;
+    for (let v = 0; v < rise.length; v += 3) {
+      const truth = pos[v * 3 + 1] - baseLand(pos[v * 3], pos[v * 3 + 2]);
+      seen++;
+      if (rise[v] > truth + 0.5) over++;
+      if (truth > EDGE_FADE && rise[v] < Math.min(truth, 6) - 0.5) feathered++;
+    }
+    fringe.dispose();
+    expect(seen).toBeGreaterThan(500);
+    // Never raised — a feather that ADDS water would be the floating
+    // slab bug with a soft edge.
+    expect(over).toBe(0);
+    // And genuinely lowered somewhere: underwater rim vertices whose
+    // alpha the feather has pulled below full. Measured at 36 on the
+    // shipped bake — most rim ground is rising anyway, so the feather
+    // only shows on the flat marsh fringes it exists for.
+    expect(feathered).toBeGreaterThan(20);
   });
 });

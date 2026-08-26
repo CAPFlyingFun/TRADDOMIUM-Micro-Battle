@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { toLocal } from './origin';
 import { reliefScale } from './heightfield';
 import { reliefUniform } from './terrainMaterial';
-import { flowData, halfAt, type Flow } from './flow';
+import { flowData, halfAt, pondSheet, type Flow, type PondSheet } from './flow';
 import { baseLand } from './heightfield';
 import { BANK_GLSL, cutHalf, WATER_DEPTH_GLSL } from './carve';
 import { SPAN } from './kauai';
@@ -153,6 +153,9 @@ export const SURFACE_ALPHA = 0.92;
 
 const POND_QUAD = SPAN / 1024;
 
+/** Pond blocks are diffed on this pitch — the decision cell's own. */
+const PBLOCK = 50_000;
+
 /** Which way a lake's ripples travel. Any direction; one direction. */
 const POND_DRIFT = { x: 0.8, z: 0.6 };
 
@@ -243,6 +246,20 @@ export function buildReach(
   const along = new Float32Array(rows * ACROSS);
   const flowx = new Float32Array(rows * ACROSS);
   const flowz = new Float32Array(rows * ACROSS);
+  // THE HEM — nought on the strip's own border, one everywhere else.
+  //
+  // Depth is the shoreline everywhere the ground cooperates: the bank
+  // rises through the level and the alpha ramps out. Flat marsh does
+  // not cooperate. Joshua zoomed into the Mana screenshots and found
+  // the waterway edge "still hard and smooth": the ground under the
+  // slab stays below the level all the way out, so the fade never
+  // fires and the water ends on the slab's own dead-straight border at
+  // full opacity — the same failure the pond rim's feather fixed, on
+  // the reaches. The hem multiplies the alpha, so the outermost column
+  // and the strip's two end rows fade over their own last panel.
+  // Wherever the real bank rises first, the depth ramp hits zero
+  // before the hem does and the hem never shows.
+  const hem = new Float32Array(rows * ACROSS);
   let run_ = 0;
   for (let row = 0; row < rows; row++) {
     // Which station-to-station span this row falls in, and how far
@@ -360,6 +377,7 @@ export function buildReach(
       // water: that is what takes the alpha to nothing at the shore
       // instead of leaving the terrain to hide a fully opaque sheet.
       rise[v] = level - baseLand(wx, wz);
+      hem[v] = (k === 0 || k === ACROSS - 1 || row === 0 || row === rows - 1) ? 0 : 1;
       along[v] = run_;
       // The LOCAL segment again, for the same reason the offset uses
       // it: this is which way the water is actually going here.
@@ -393,6 +411,7 @@ export function buildReach(
   geometry.setAttribute('along', new THREE.Float32BufferAttribute(along, 1));
   geometry.setAttribute('flowx', new THREE.Float32BufferAttribute(flowx, 1));
   geometry.setAttribute('flowz', new THREE.Float32BufferAttribute(flowz, 1));
+  geometry.setAttribute('hem', new THREE.Float32BufferAttribute(hem, 1));
   geometry.setIndex(faces);
   // FLAT +Y NORMALS, written rather than computed: computeVertexNormals
   // shades each quad facet visibly through transparent water, and a
@@ -403,74 +422,184 @@ export function buildReach(
   return geometry;
 }
 
-/** The listed pond cells as one batch of quads, relative to (cx, 0, cz). */
+/**
+ * How finely a SHORE cell is meshed — a vertex every 6.8 m.
+ *
+ * A pond cell is 54.7 m across, and a cell the waterline passes
+ * through needs enough vertices for the interpolated ground to follow
+ * it: four corners across 55 m is the same mistake the reaches made
+ * along their length, in square form. Interior cells, where every
+ * corner is comfortably underwater, stay single quads — the alpha
+ * saturates six centimetres down, so interpolation error there cannot
+ * show.
+ */
+// Six, not eight: a vertex every 9.1 m on a shore cell. Eight was a
+// vertex every 6.8 m and forty per cent more of everything, and the
+// marsh is where both the cells and the frame budget live.
+const SHORE_GRID = 6;
+/**
+ * A corner closer to the surface than this makes the cell a shore.
+ *
+ * MEASURED BEFORE CHOOSING: at three metres, 13,700 of the island's
+ * 17,583 pond cells subdivided — Kauaʻi's standing water is marsh, and
+ * almost everything is within three metres of its own surface. At
+ * 60 units the grid goes only to cells the waterline actually runs
+ * through (12,189 — still most of them, which is why the sheet is
+ * block-diffed below rather than rebuilt whole).
+ */
+const SHORE = 60;
+/**
+ * A cell whose every corner stands this far above the water is not
+ * drawn at all. Two metres of margin, because the corners are 55 m
+ * apart and the smoothed island can dip between them — a dropped cell
+ * with a wet hollow inside it would be swimmable invisible water.
+ * Measured: drops 2,600-odd rim cells that are pure bank.
+ */
+const DRY = -200;
+
+/** The given pond-sheet cells as one batch, relative to (cx, 0, cz). */
 export function buildPonds(
-  flow: Flow, cells: readonly number[], cx: number, cz: number,
+  pond: PondSheet, cells: readonly number[], cx: number, cz: number,
 ): THREE.BufferGeometry {
   const half = POND_QUAD / 2;
-  const positions = new Float32Array(cells.length * 4 * 3);
-  // A POND IS FLAT, and the bake measured its depth for it. `rise` is
-  // set to that same depth, and that ALONE fixes the answer: with rise
-  // positive, waterDepth's `min(rise, 0)` is nought and its `max` picks
-  // rise over anything the bank curve can return, because the curve
-  // never exceeds one. So a pond is its measured depth corner to
-  // corner whatever `across` and `span` say.
+  const positions: number[] = [];
+  // `deep` IS ZERO FOR A POND, and that is the depth formula working,
+  // not idling: waterDepth(0, a, s, rise) = max(rise, min(rise, 0)) =
+  // rise, so a pond fragment's depth is exactly how far the water
+  // surface stands above the ground beneath it — sampled per vertex
+  // from baseLand, the same half of the formula the reaches use. The
+  // shoreline therefore fades out on the same six-centimetre ramp as
+  // every stream, instead of ending in the hard sawtooth of whatever
+  // terrain triangles happened to clip the old constant-alpha sheet —
+  // which was most of the rest of the jagged pond edge.
   //
-  // Which frees `across` to do the other job it is asked for — half of
-  // the ripple's texture coordinate. See build(); the reaches use the
-  // real offset across the channel, and a pond, having no channel, uses
-  // its own place on the island instead.
-  const deep = new Float32Array(cells.length * 4);
-  const across = new Float32Array(cells.length * 4);
-  const span = new Float32Array(cells.length * 4).fill(1);
-  const rise = new Float32Array(cells.length * 4);
+  // (Zero also retires a live sliver: `across` is the ripple
+  // coordinate now, and wherever it passed near nought the bank curve
+  // came back positive and a non-zero `deep` would punch a
+  // full-depth stripe through the shore ramp.)
+  //
+  // Depth from the ground also buys the colour for free: lakes now
+  // shade shallow-teal at the rim to dark in the middle, like the
+  // streams, instead of wearing one flat tone.
+  const deep: number[] = [];
+  const across: number[] = [];
+  const span: number[] = [];
+  const rise: number[] = [];
   // A POND HAS NO DIRECTION, so it is given one — a fixed compass
   // bearing shared by every cell. Still water is not still at this
   // scale; it drifts on whatever the wind is doing, and one direction
   // across a whole lake reads as exactly that. What it must not do is
   // differ per cell, which would put a seam on every cell boundary.
-  const along = new Float32Array(cells.length * 4);
-  const flowx = new Float32Array(cells.length * 4).fill(POND_DRIFT.x);
-  const flowz = new Float32Array(cells.length * 4).fill(POND_DRIFT.z);
-  const normals = new Float32Array(cells.length * 4 * 3);
+  const along: number[] = [];
+  // Ponds hem nothing: a cell border is usually another cell, and the
+  // sheet's true outline already fades through the rim feather below.
+  const hem: number[] = [];
   const faces: number[] = [];
-  for (let q = 0; q < cells.length; q++) {
-    const i = cells[q];
-    const x = flow.pondX[i] - cx;
-    const z = flow.pondZ[i] - cz;
+
+  // Listed cell centres, for feathering the rim (see below). Built
+  // from the WHOLE sheet, not the block's slice: a rim cell's listed
+  // neighbour is often in the next block over, and feathering against
+  // a partial set would put a hard edge exactly on the block seam.
+  const listedAt: Array<[number, number]> = [];
+  for (let i = 0; i < pond.x.length; i++) {
+    if (pond.rim[i] === 0) listedAt.push([pond.x[i], pond.z[i]]);
+  }
+
+  for (const i of cells) {
+    const level = pond.spill[i];
     // Which cell of the bake's grid this is. Non-negative before the
     // modulo, because a remainder of a negative number is negative and
     // would fold the ripple back on itself across the island's middle.
-    const gi = Math.round((flow.pondX[i] + SPAN / 2) / POND_QUAD) + TILES * 4;
-    const gj = Math.round((flow.pondZ[i] + SPAN / 2) / POND_QUAD) + TILES * 4;
-    for (let corner = 0; corner < 4; corner++) {
-      const v = q * 4 + corner;
-      positions[v * 3] = x + (corner % 2 === 0 ? -half : half);
-      positions[v * 3 + 1] = flow.pondLevel[i];
-      positions[v * 3 + 2] = z + (corner < 2 ? -half : half);
-      deep[v] = flow.pondDepth[i];
-      rise[v] = flow.pondDepth[i];
-      // WHERE ON THE ISLAND THIS CELL IS, WRAPPED SMALL.
-      //
-      // The ripple is a texture lookup, and a texture coordinate of
-      // four million in float32 has a precision of a quarter of a
-      // unit — coarse enough to quantise a 23-unit wavelet into
-      // steps. So the coordinate is the cell's own GRID INDEX, taken
-      // modulo TILES, which keeps it under a kilometre and is stable:
-      // it depends on where the cell is, never on where the camera is
-      // or when the sheet was last rebuilt. A batch-relative
-      // coordinate would have been bounded too and would have jumped
-      // the whole pattern every five hundred metres of travel.
-      //
-      // The pattern repeats every TILES cells, which is 875 m of lake.
-      // Kauaʻi has no standing water that wide.
-      across[v] = (gi % TILES) * POND_QUAD + (corner % 2 === 0 ? -half : half);
-      along[v] = (gj % TILES) * POND_QUAD + (corner < 2 ? -half : half);
-      normals[v * 3 + 1] = 1;
+    //
+    // The ripple coordinate is the cell's own GRID INDEX, wrapped at
+    // TILES so it stays small enough for float32, and stable: it
+    // depends on where the cell is, never on where the camera is or
+    // when the sheet was last rebuilt. The pattern repeats every 875 m
+    // of lake; Kauaʻi has no standing water that wide.
+    const gi = Math.round((pond.x[i] + SPAN / 2) / POND_QUAD) + TILES * 4;
+    const gj = Math.round((pond.z[i] + SPAN / 2) / POND_QUAD) + TILES * 4;
+
+    // Shore or interior? Ask the corners. A cell that straddles the
+    // waterline — or comes near it — gets the fine grid; one that is
+    // deep at all four corners cannot show its interpolation error
+    // through a saturated alpha and stays four vertices.
+    let shallowest = Infinity;
+    let deepest = -Infinity;
+    for (const [ux, uz] of [[0, 0], [1, 0], [0, 1], [1, 1]] as const) {
+      const r = level - baseLand(pond.x[i] + (ux - 0.5) * POND_QUAD,
+                                 pond.z[i] + (uz - 0.5) * POND_QUAD);
+      if (r < shallowest) shallowest = r;
+      if (r > deepest) deepest = r;
     }
-    const a = q * 4;
-    faces.push(a, a + 2, a + 1, a + 1, a + 2, a + 3);
+    if (deepest <= DRY) continue;
+    // A rim cell is always meshed fine: its job is the feather, and a
+    // feather across four vertices is a gradient nobody drew.
+    const n = shallowest < SHORE || pond.rim[i] === 1 ? SHORE_GRID : 1;
+    // FEATHERED AT THE OUTER EDGE, because flat marsh defeats the
+    // shoreline. Everywhere else the water's edge is where the ground
+    // rises through the level and the depth ramp finds it; on the Mana
+    // plain the ground barely rises, the waterline never materialises
+    // inside the rim cell, and the sheet used to end on a raw cell
+    // border — the blocky outlines still standing in the v0.0.53 pond
+    // screenshots after the shoreline itself was fixed. So a RIM
+    // vertex's rise is scaled by how far it stands from the nearest
+    // LISTED cell: full at the bake's own edge, nothing one and a half
+    // cells out. Where real ground rises first, the smaller of the two
+    // fades wins and the feather never shows.
+    //
+    // The fringe is drawn fainter than pondLevelAt feels it — a
+    // one-cell strip of marsh edge, accepted and written down here:
+    // the honest alternative was a hard border in open water.
+    const near: Array<[number, number]> = [];
+    if (pond.rim[i] === 1) {
+      for (const [lx, lz] of listedAt) {
+        if (Math.abs(lx - pond.x[i]) <= POND_QUAD * 1.5
+          && Math.abs(lz - pond.z[i]) <= POND_QUAD * 1.5) near.push([lx, lz]);
+      }
+    }
+
+    const first = positions.length / 3;
+    for (let vj = 0; vj <= n; vj++) {
+      for (let vi = 0; vi <= n; vi++) {
+        const wx = pond.x[i] + (vi / n - 0.5) * POND_QUAD;
+        const wz = pond.z[i] + (vj / n - 0.5) * POND_QUAD;
+        positions.push(wx - cx, level, wz - cz);
+        deep.push(0);
+        span.push(1);
+        let lift = level - baseLand(wx, wz);
+        if (near.length > 0) {
+          let gap = Infinity;
+          for (const [lx, lz] of near) {
+            const d = Math.max(Math.abs(wx - lx), Math.abs(wz - lz)) - POND_QUAD / 2;
+            if (d < gap) gap = d;
+          }
+          const feather = Math.min(1, Math.max(0, 1 - gap / POND_QUAD));
+          lift = Math.min(lift, feather * 90);
+        } else if (pond.rim[i] === 1) {
+          // A rim cell with no listed neighbour in reach should not
+          // exist; drawing it full would be a floating square.
+          lift = Math.min(lift, 0);
+        }
+        rise.push(lift);
+        hem.push(1);
+        across.push((gi % TILES) * POND_QUAD + (vi / n) * POND_QUAD - half);
+        along.push((gj % TILES) * POND_QUAD + (vj / n) * POND_QUAD - half);
+      }
+    }
+    for (let vj = 0; vj < n; vj++) {
+      for (let vi = 0; vi < n; vi++) {
+        const a = first + vj * (n + 1) + vi;
+        const b = a + n + 1;
+        faces.push(a, b, a + 1, a + 1, b, b + 1);
+      }
+    }
   }
+
+  const count = positions.length / 3;
+  const flowx = new Float32Array(count).fill(POND_DRIFT.x);
+  const flowz = new Float32Array(count).fill(POND_DRIFT.z);
+  const normals = new Float32Array(count * 3);
+  for (let v = 0; v < count; v++) normals[v * 3 + 1] = 1;
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geometry.setAttribute('deep', new THREE.Float32BufferAttribute(deep, 1));
@@ -480,11 +609,11 @@ export function buildPonds(
   geometry.setAttribute('along', new THREE.Float32BufferAttribute(along, 1));
   geometry.setAttribute('flowx', new THREE.Float32BufferAttribute(flowx, 1));
   geometry.setAttribute('flowz', new THREE.Float32BufferAttribute(flowz, 1));
+  geometry.setAttribute('hem', new THREE.Float32BufferAttribute(hem, 1));
   geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
   geometry.setIndex(faces);
   return geometry;
 }
-
 
 /**
  * THE STRING SURGERY, ON ITS OWN, WHERE A TEST CAN REACH IT.
@@ -506,7 +635,7 @@ export function waterShader(
 ): { vertexShader: string; fragmentShader: string } {
   let vertexShader = vert;
   let fragmentShader = frag;
-      const ins = ['deep', 'across', 'span', 'rise', 'along', 'flowx', 'flowz'];
+      const ins = ['deep', 'across', 'span', 'rise', 'along', 'flowx', 'flowz', 'hem'];
       vertexShader =
         ins.map((a) => `attribute float ${a};`).join('\n') + '\n'
         + ins.map((a) => `varying float v_${a};`).join('\n') + '\n'
@@ -675,6 +804,10 @@ export function waterShader(
         // with, on the same two constants, so at every eye distance
         // exactly one owner is at full strength.
         diffuseColor.a *= 1.0 - smoothstep(${FADE_FROM}.0, ${FADE_TO}.0, length(vViewPosition));
+        // THE HEM: where flat ground never rises to end the water, the
+        // strip's own border fades over its last panel instead of
+        // cutting off dead straight at full opacity. See buildReach.
+        diffuseColor.a *= v_hem;
         // WATER NOBODY CAN SEE MUST NOT WRITE DEPTH. The material
         // writes depth so two overlapping sheets cannot blend twice,
         // and that is right — but a fragment whose alpha has ramped to
@@ -729,7 +862,22 @@ const RIPPLE_NEAR = 600;
 
 export class FlowWater {
   private readonly drawn = new Map<number, Drawn>();
-  private ponds: Drawn | null = null;
+  /**
+   * THE POND SHEET, IN 50,000-UNIT BLOCKS, DIFFED LIKE THE REACHES.
+   *
+   * It used to be one geometry rebuilt whole on every decision cell —
+   * written when "the visibility box holds at most a few dozen
+   * cells", which the rim ring and the shore grid quietly repealed:
+   * the densest view over the Mana marsh holds 771 cells and 62,000
+   * vertices, 78 ms here and near half a second on a phone, every
+   * five hundred metres of travel. Blocks make a crossing build only
+   * the strip of blocks that just came into range.
+   */
+  private readonly pondBlocks = new Map<string, Drawn>();
+  private pondIndex: Map<string, number[]> | null = null;
+  private pondIndexOf: PondSheet | null = null;
+  /** Blocks owed to the scene, nearest first. Paid one per frame. */
+  private pondQueue: string[] = [];
   private readonly material: THREE.MeshStandardMaterial;
   private readonly clock = { value: 0 };
   private readonly ripple: { value: THREE.Texture };
@@ -801,13 +949,13 @@ export class FlowWater {
     });
   }
 
-  /** Drawn reaches, plus one for the pond sheet when it exists. */
-  get shown(): number { return this.drawn.size + (this.ponds ? 1 : 0); }
+  /** Drawn reaches plus drawn pond blocks. */
+  get shown(): number { return this.drawn.size + this.pondBlocks.size; }
 
   setVisible(on: boolean): void {
     this.shownAll = on;
     for (const d of this.drawn.values()) d.mesh.visible = on;
-    if (this.ponds) this.ponds.mesh.visible = on;
+    for (const d of this.pondBlocks.values()) d.mesh.visible = on;
   }
 
   /**
@@ -821,8 +969,8 @@ export class FlowWater {
   setLayer(which: 'reaches' | 'ponds', on: boolean): void {
     if (which === 'reaches') {
       for (const d of this.drawn.values()) d.mesh.visible = on;
-    } else if (this.ponds) {
-      this.ponds.mesh.visible = on;
+    } else {
+      for (const d of this.pondBlocks.values()) d.mesh.visible = on;
     }
   }
 
@@ -935,7 +1083,7 @@ export class FlowWater {
     const flow = flowData();
     if (!flow) return;
     const cell = `${Math.round(at.wx / 50_000)}:${Math.round(at.wz / 50_000)}`;
-    if (cell === this.lastCell) { this.place(); return; }
+    if (cell === this.lastCell) { this.pumpPonds(); this.place(); return; }
     this.lastCell = cell;
 
     const wanted = new Set<number>();
@@ -968,28 +1116,71 @@ export class FlowWater {
     this.place();
   }
 
-  /**
-   * THE POND SHEET IS REBUILT WHOLE, not diffed. The decision cell
-   * changes every 50,000 units of travel and the visibility box holds
-   * at most a few dozen cells, so one batch geometry per rebuild is
-   * cheaper than the bookkeeping that would avoid it.
-   */
-  private followPonds(flow: Flow, at: { wx: number; wz: number }): void {
-    if (this.ponds) {
-      this.scene.remove(this.ponds.mesh);
-      this.ponds.mesh.geometry.dispose();
-      this.ponds = null;
-    }
-    const cells: number[] = [];
-    let cx = 0, cz = 0;
-    for (let i = 0; i < flow.pondX.length; i++) {
-      if (Math.abs(flow.pondX[i] - at.wx) < REACH && Math.abs(flow.pondZ[i] - at.wz) < REACH) {
-        cells.push(i); cx += flow.pondX[i]; cz += flow.pondZ[i];
+  private followPonds(_flow: Flow, at: { wx: number; wz: number }): void {
+    const pond = pondSheet();
+    if (!pond) return;
+    // Cells grouped by block, once per bake. The keys here and the
+    // wanted set below must use the same arithmetic or a block could
+    // be wanted forever and never buildable.
+    if (this.pondIndexOf !== pond) {
+      this.pondIndexOf = pond;
+      this.pondIndex = new Map();
+      for (let i = 0; i < pond.x.length; i++) {
+        const key = Math.floor(pond.x[i] / PBLOCK) + ':' + Math.floor(pond.z[i] / PBLOCK);
+        const list = this.pondIndex.get(key);
+        if (list) list.push(i); else this.pondIndex.set(key, [i]);
       }
     }
-    if (cells.length === 0) return;
-    cx /= cells.length; cz /= cells.length;
-    this.ponds = { mesh: this.show(buildPonds(flow, cells, cx, cz)), cx, cz };
+    const wanted = new Set<string>();
+    for (let bx = Math.floor((at.wx - REACH) / PBLOCK); bx <= Math.floor((at.wx + REACH) / PBLOCK); bx++) {
+      for (let bz = Math.floor((at.wz - REACH) / PBLOCK); bz <= Math.floor((at.wz + REACH) / PBLOCK); bz++) {
+        wanted.add(bx + ':' + bz);
+      }
+    }
+    for (const [key, block] of this.pondBlocks) {
+      if (wanted.has(key)) continue;
+      this.scene.remove(block.mesh);
+      block.mesh.geometry.dispose();
+      this.pondBlocks.delete(key);
+    }
+    // OWED, NOT BUILT. A crossing near the Mana marsh can bring in a
+    // strip of blocks at up to 11 ms each here — sixty-odd on a phone
+    // — and paying them all in the frame that crossed the line is a
+    // stutter with her name on it. They go on a queue instead,
+    // nearest water first, and pumpPonds() pays one per frame; the
+    // farthest owed block is 400 m out and a few frames late, which
+    // nothing can see.
+    this.pondQueue = [...wanted]
+      .filter((key) => !this.pondBlocks.has(key) && this.pondIndex!.has(key))
+      .sort((a, b) => this.blockGap(a, at) - this.blockGap(b, at));
+    this.pumpPonds();
+  }
+
+  /** Chebyshev distance from her to a block's centre. */
+  private blockGap(key: string, at: { wx: number; wz: number }): number {
+    const [bx, bz] = key.split(':').map(Number);
+    return Math.max(
+      Math.abs((bx + 0.5) * PBLOCK - at.wx),
+      Math.abs((bz + 0.5) * PBLOCK - at.wz),
+    );
+  }
+
+  /** Build the next owed pond block, if any. One per call. */
+  private pumpPonds(): void {
+    const pond = this.pondIndexOf;
+    while (this.pondQueue.length > 0) {
+      const key = this.pondQueue.shift()!;
+      if (this.pondBlocks.has(key)) continue;
+      const cells = pond && this.pondIndex?.get(key);
+      if (!cells) continue;
+      const [bx, bz] = key.split(':').map(Number);
+      const cx = (bx + 0.5) * PBLOCK;
+      const cz = (bz + 0.5) * PBLOCK;
+      const geometry = buildPonds(pond!, cells, cx, cz);
+      if (geometry.getIndex()!.count === 0) { geometry.dispose(); continue; }
+      this.pondBlocks.set(key, { mesh: this.show(geometry), cx, cz });
+      return;
+    }
   }
 
   private show(geometry: THREE.BufferGeometry): THREE.Mesh {
@@ -1004,7 +1195,7 @@ export class FlowWater {
   place(): void {
     const relief = reliefScale();
     for (const d of this.drawn.values()) this.seat(d, relief);
-    if (this.ponds) this.seat(this.ponds, relief);
+    for (const d of this.pondBlocks.values()) this.seat(d, relief);
   }
 
   private seat(d: Drawn, relief: number): void {
@@ -1021,11 +1212,11 @@ export class FlowWater {
       d.mesh.geometry.dispose();
     }
     this.drawn.clear();
-    if (this.ponds) {
-      this.scene.remove(this.ponds.mesh);
-      this.ponds.mesh.geometry.dispose();
-      this.ponds = null;
+    for (const d of this.pondBlocks.values()) {
+      this.scene.remove(d.mesh);
+      d.mesh.geometry.dispose();
     }
+    this.pondBlocks.clear();
     this.material.dispose();
   }
 }
