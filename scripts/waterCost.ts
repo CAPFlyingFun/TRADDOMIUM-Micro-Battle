@@ -21,7 +21,7 @@ setSmoothing(DEFAULTS.terrainSmoothing); setRelief(1);
 const bin = readFileSync('public/kauai-flow.bin');
 const flow = decodeFlow(bin.buffer.slice(bin.byteOffset, bin.byteOffset + bin.byteLength));
 useFlow(flow);
-const REACH = 200_000;
+const REACH = 80_000;
 // The Wailua mouth: the busiest water on the island, which is the
 // number that matters rather than an average one.
 let best = { wx: 0, wz: 0, n: 0 };

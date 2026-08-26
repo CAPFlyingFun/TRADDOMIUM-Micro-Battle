@@ -53,9 +53,11 @@ describe('the baked asset sizes', () => {
     }
   });
 
-  it('cover the queen and the water', () => {
+  it('cover the queen and both halves of the water', () => {
     expect(assetBytes('models/queen-winged.glb')).toBeGreaterThan(1_000_000);
     expect(assetBytes('water-normal.png')).toBeGreaterThan(10_000);
+    // The far-water mask: 8-byte header plus 1024 squared wet bytes.
+    expect(assetBytes('kauai-wet.bin')).toBe(8 + 1024 * 1024);
   });
 
   it('answer null for something nobody baked', () => {

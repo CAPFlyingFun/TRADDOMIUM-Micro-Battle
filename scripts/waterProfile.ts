@@ -11,7 +11,7 @@ setSmoothing(DEFAULTS.terrainSmoothing); setRelief(1);
 const f = readFileSync('public/kauai-flow.bin');
 const flow = decodeFlow(f.buffer.slice(f.byteOffset, f.byteOffset + f.byteLength));
 useFlow(flow);
-const REACH = 200_000, wx = -1.2e6, wz = 1.1e6;
+const REACH = 80_000, wx = -1.2e6, wz = 1.1e6;
 const want = flow.reaches.filter(({ first, count }) => {
   for (let i = 0; i < count; i += 4) {
     const p = first + i;

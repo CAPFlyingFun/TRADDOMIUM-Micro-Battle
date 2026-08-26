@@ -299,3 +299,89 @@ describe('the load plan', () => {
     expect(Math.abs(after - before)).toBeLessThan(before * 0.6);
   });
 });
+
+/**
+ * A BAKED SIZE IS A FACT AND THE WIRE MAY NOT VOTE ON IT.
+ *
+ * v0.0.51 baked every counted download's real byte count and declared
+ * the total-drift bug over — and Joshua watched the total go from
+ * 5.1 MB to 4.8 MB anyway. The leak was resize(): the loaders still
+ * reported what the transport told them, and a compressed response's
+ * Content-Length counts COMPRESSED bytes. The queen's 2.07 MB GLB is
+ * served as ~1.7 MB of gzip; the fetch progress event's total is that
+ * smaller number; one resize() swapped the fact for it and the
+ * denominator shrank on screen, again, exactly as before the bake.
+ *
+ * So a job now declares whether its weight is a fact, and resize()
+ * refuses to touch a fact. One measuring stick — the file's real
+ * bytes — for the whole screen.
+ */
+describe('a firm job', () => {
+  it('keeps its baked weight against a compressed Content-Length', () => {
+    const plan = new LoadPlan(() => 0);
+    plan.add('queen', 'The queen', 2_066_824, true, true);
+    // The gzip total lands, as it really does on Pages.
+    plan.resize('queen', 1_712_000);
+    expect(plan.read().bytesTotal).toBe(2_066_824);
+    // And the whole-screen consequence: the denominator cannot move.
+    plan.add('band', 'Ground textures', 461_843, true, true);
+    const before = plan.read().bytesTotal;
+    plan.resize('band', 300_000);
+    plan.resize('queen', 999);
+    expect(plan.read().bytesTotal).toBe(before);
+  });
+
+  it('still lets a guessed job learn its real size', () => {
+    // The fallback path — an asset added without re-running the bake —
+    // keeps the old behavior: the wire corrects a guess.
+    const plan = new LoadPlan(() => 0);
+    plan.add('new-thing', 'Something unbaked', 445_000, true);
+    plan.resize('new-thing', 528_690);
+    expect(plan.read().bytesTotal).toBe(528_690);
+  });
+
+  it('finishes at its own weight whatever progress reported', () => {
+    // With a firm weight in real bytes and progress arriving in
+    // compressed bytes, advance() undercounts — and finish() must
+    // close the gap so the bar completes.
+    const plan = new LoadPlan(() => 0);
+    plan.add('queen', 'The queen', 2_066_824, true, true);
+    plan.advance('queen', 1_712_000);
+    expect(plan.read().bytesDone).toBe(1_712_000);
+    plan.finish('queen');
+    expect(plan.read().bytesDone).toBe(2_066_824);
+    expect(plan.complete).toBe(true);
+  });
+});
+
+/**
+ * AND THE REAL PLANNERS DECLARE FIRM JOBS — the resize() guard is only
+ * a fix if something actually uses it. This walks the exact planning
+ * calls GameFlow makes, then feeds every job the hostile numbers a
+ * wire can produce, and the declared total may not move a byte.
+ */
+describe('the shipped loading plan', () => {
+  it('declares a total no transport number can move', async () => {
+    const { planBands } = await import('../src/world/terrainMaterial');
+    const { planQueen } = await import('../src/ant/queenModel');
+    const { planRipple } = await import('../src/world/FlowWater');
+    const { planFarWater } = await import('../src/world/farWater');
+    const plan = new LoadPlan(() => 0);
+    planBands(plan);
+    planQueen(plan);
+    planRipple(plan);
+    planFarWater(plan);
+    const declared = plan.read().bytesTotal;
+    // The baked truth, straight from the manifest.
+    const { ASSET_BYTES } = await import('../src/ui/assetSizes');
+    const baked = Object.values(ASSET_BYTES).reduce((a, b) => a + b, 0);
+    expect(declared).toBe(baked);
+    // Now the wire lies the way it really does: compressed
+    // Content-Lengths, zeros, garbage. Nothing may move.
+    for (const id of ['queen', 'ripple', 'far-water']) plan.resize(id, 1_712_000);
+    for (const name of ['reef', 'sand', 'grass', 'jungle', 'cliff', 'mountain', 'snow']) {
+      plan.resize('band:' + name, 123_456);
+    }
+    expect(plan.read().bytesTotal).toBe(declared);
+  });
+});

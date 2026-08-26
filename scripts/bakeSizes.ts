@@ -37,6 +37,7 @@ const COUNTED = [
   ...readdirSync('public/kauai-tex').sort().map((f) => `kauai-tex/${f}`),
   'models/queen-winged.glb',
   'water-normal.png',
+  'kauai-wet.bin',
 ];
 
 const rows = COUNTED.map((path) => `  '${path}': ${statSync(join('public', path)).size},`);

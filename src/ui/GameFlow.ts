@@ -21,6 +21,7 @@ import { FIRST_LIGHT_JOB, LoadPlan, TERRAIN_JOB, WORK_WEIGHT } from './loadPlan'
 import { planBands } from '../world/terrainMaterial';
 import { planQueen } from '../ant/queenModel';
 import { planRipple } from '../world/FlowWater';
+import { planFarWater } from '../world/farWater';
 import { SettingsPanel } from './SettingsPanel';
 import { latestSave, livedFor, type SoloSave } from '../game/save';
 import { autoUpdate } from './updates';
@@ -140,6 +141,7 @@ export class GameFlow {
     planBands(plan);
     planQueen(plan);
     planRipple(plan);
+    planFarWater(plan);
     plan.add(TERRAIN_JOB, 'Cutting the terrain', WORK_WEIGHT);
     plan.add(FIRST_LIGHT_JOB, 'First light', WORK_WEIGHT);
 

@@ -16,6 +16,7 @@ import {
 import { findLandfall, UNITS_PER_METRE, type HeightGrid } from '../world/kauai';
 import { local, world, type WorldPoint } from '../world/coords';
 import { FlowWater } from '../world/FlowWater';
+import { loadWetMask } from '../world/farWater';
 import { TerrainStream, TIER_CUTS } from '../world/TerrainStream';
 import { submersion, Underwater } from '../world/Underwater';
 import { canDrink, wadeAt } from '../ant/wading';
@@ -653,6 +654,12 @@ export class IslandScene {
        * folded phase, then the camera snapped rather than eased.
        */
       putAt: (wx: number, wz: number, heading = 0) => {
+        // A teleport is not travel. The water-speed row smooths her
+        // measured velocity, and folding a jump in reads as thousands
+        // of centimetres a second of "current" for the next second —
+        // the screenshot rig caught SWIM @ 1553 cm/s on a fix restore.
+        this.wake.started = false;
+        this.wake.vx = 0; this.wake.vz = 0;
         setOrigin(wx, wz);
         const seat = originAt();
         setTextureOrigin(seat.x, seat.z);
@@ -1938,6 +1945,10 @@ export class IslandScene {
       terrainMaterial(maps, grain, TIER_CUTS.backdrop),
     );
     this.streams = new FlowWater(this.scene, this.report);
+    // The far half of the same water: past FAR_WATER the terrain
+    // wears it as paint from this mask, and the slabs above fade out
+    // on the same pair of constants.
+    loadWetMask(this.report);
   }
 
 

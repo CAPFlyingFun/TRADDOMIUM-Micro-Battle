@@ -22,6 +22,7 @@ import { pullBytes } from './fetchBytes';
 import type { LoadReport } from '../ui/loadPlan';
 import { assetBytes } from '../ui/assetSizes';
 import { GRAIN_SIZE } from './groundTexture';
+import { farWaterShader, wetMaskUniform, wetSeatUniform } from './farWater';
 import { UNITS_PER_METRE } from './kauai';
 
 /**
@@ -85,6 +86,10 @@ export function setTextureOrigin(x: number, z: number): void {
   const fold = (v: number, tile: number) => ((v % tile) + tile) % tile;
   BAND_OFFSET_UNIFORM.value.set(fold(x, BAND_TILE), fold(z, BAND_TILE));
   GRAIN_OFFSET_UNIFORM.value.set(fold(x, GRAIN_TILE), fold(z, GRAIN_TILE));
+  // The far-water mask is one picture of the whole island, so it gets
+  // the origin WHOLE — a per-tile remainder would slide the rivers to
+  // a different valley on every rebase.
+  wetSeatUniform.value.set(x, z);
 }
 
 /**
@@ -275,62 +280,28 @@ const EDGES = `
  *   about as the camera turned because its vertices are kilometres
  *   apart. Each tier now draws only where it is the best one available.
  */
-export function terrainMaterial(
-  textures: Record<string, THREE.Texture>,
-  grain: THREE.Texture,
-  nearCut = 0,
-): THREE.MeshStandardMaterial {
-  const material = new THREE.MeshStandardMaterial({
-    // The vertex colours no longer carry the biome tint — the textures
-    // do. What is left there is shading: the soil showing through where
-    // the ground steepens, and the macro relief mottle.
-    vertexColors: true,
-    roughness: 0.95,
-  });
-
-  material.onBeforeCompile = (shader) => {
-    for (const name of BAND_FILES) {
-      shader.uniforms[`t_${name}`] = { value: textures[name] };
-    }
-    shader.uniforms.t_grain = { value: grain };
-    shader.uniforms.bandTile = { value: BAND_TILE };
-    // The relief slider flattens the island by scaling the meshes on Y,
-    // which moves every world height and would drag the bands down with
-    // it — a flattened Kauai would go green to the summit. Dividing it
-    // back out keeps sand at the shore and snow on the peaks whatever
-    // the slider is doing, so the knob changes the SHAPE and not the map.
-    shader.uniforms.relief = reliefUniform;
-    shader.uniforms.grainTile = { value: GRAIN_TILE };
-    for (const name of BAND_FILES) {
-      shader.uniforms[`avg_${name}`] = BAND_AVERAGE[name]
-        ?? { value: new THREE.Color(0.5, 0.5, 0.5) };
-    }
-    shader.uniforms.fadeFrom = FADE_FROM_UNIFORM;
-    shader.uniforms.fadeTo = FADE_TO_UNIFORM;
-    shader.uniforms.bandTexels = { value: BAND_TEXELS };
-    // The grain is also 512 texels but tiled 3.6 times tighter, so its
-    // texel footprint is that much larger at the same distance and it
-    // fades that much sooner — on the SAME texel thresholds, which is
-    // the point of working in texels: one perceptual scale for both.
-    shader.uniforms.grainTexelScale = {
-      value: GRAIN_RATIO * (GRAIN_SIZE / BAND_TEXELS),
-    };
-    // WHERE THE WORLD ACTUALLY IS. Vertices reach the shader measured
-    // from the floating origin, so tiling straight off them would slide
-    // the whole ground texture sideways every time the origin moved —
-    // and it moves in 1024-unit steps, which no tile size divides.
-    shader.uniforms.bandOffset = BAND_OFFSET_UNIFORM;
-    shader.uniforms.grainOffset = GRAIN_OFFSET_UNIFORM;
-    shader.uniforms.nearCut = { value: nearCut };
-
-    shader.vertexShader = shader.vertexShader
+/**
+ * THE GROUND'S STRING SURGERY, on its own where a test can reach it.
+ *
+ * Pulled out of onBeforeCompile for the same reason FlowWater's was: a
+ * `.replace` against three.js source that stops matching is not an
+ * error, it is silence, and the ground comes back subtly wrong with a
+ * clean build. tests/farWater.test.ts composes this with the far-water
+ * injection exactly as the material does and checks both landed.
+ */
+export function groundShader(
+  vert: string, frag: string,
+): { vertexShader: string; fragmentShader: string } {
+  let vertexShader = vert;
+  let fragmentShader = frag;
+    vertexShader = vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vGround;')
       .replace(
         '#include <begin_vertex>',
         '#include <begin_vertex>\nvGround = (modelMatrix * vec4(position, 1.0)).xyz;',
       );
 
-    shader.fragmentShader = shader.fragmentShader
+    fragmentShader = fragmentShader
       .replace('#include <common>', `#include <common>
         varying vec3 vGround;
         uniform sampler2D t_reef, t_sand, t_grass, t_jungle;
@@ -423,6 +394,66 @@ export function terrainMaterial(
 
         diffuseColor.rgb *= ground;
       `);
+  return { vertexShader, fragmentShader };
+}
+
+export function terrainMaterial(
+  textures: Record<string, THREE.Texture>,
+  grain: THREE.Texture,
+  nearCut = 0,
+): THREE.MeshStandardMaterial {
+  const material = new THREE.MeshStandardMaterial({
+    // The vertex colours no longer carry the biome tint — the textures
+    // do. What is left there is shading: the soil showing through where
+    // the ground steepens, and the macro relief mottle.
+    vertexColors: true,
+    roughness: 0.95,
+  });
+
+  material.onBeforeCompile = (shader) => {
+    for (const name of BAND_FILES) {
+      shader.uniforms[`t_${name}`] = { value: textures[name] };
+    }
+    shader.uniforms.t_grain = { value: grain };
+    shader.uniforms.bandTile = { value: BAND_TILE };
+    // The relief slider flattens the island by scaling the meshes on Y,
+    // which moves every world height and would drag the bands down with
+    // it — a flattened Kauai would go green to the summit. Dividing it
+    // back out keeps sand at the shore and snow on the peaks whatever
+    // the slider is doing, so the knob changes the SHAPE and not the map.
+    shader.uniforms.relief = reliefUniform;
+    shader.uniforms.grainTile = { value: GRAIN_TILE };
+    for (const name of BAND_FILES) {
+      shader.uniforms[`avg_${name}`] = BAND_AVERAGE[name]
+        ?? { value: new THREE.Color(0.5, 0.5, 0.5) };
+    }
+    shader.uniforms.fadeFrom = FADE_FROM_UNIFORM;
+    shader.uniforms.fadeTo = FADE_TO_UNIFORM;
+    shader.uniforms.bandTexels = { value: BAND_TEXELS };
+    // The grain is also 512 texels but tiled 3.6 times tighter, so its
+    // texel footprint is that much larger at the same distance and it
+    // fades that much sooner — on the SAME texel thresholds, which is
+    // the point of working in texels: one perceptual scale for both.
+    shader.uniforms.grainTexelScale = {
+      value: GRAIN_RATIO * (GRAIN_SIZE / BAND_TEXELS),
+    };
+    // WHERE THE WORLD ACTUALLY IS. Vertices reach the shader measured
+    // from the floating origin, so tiling straight off them would slide
+    // the whole ground texture sideways every time the origin moved —
+    // and it moves in 1024-unit steps, which no tile size divides.
+    shader.uniforms.bandOffset = BAND_OFFSET_UNIFORM;
+    shader.uniforms.grainOffset = GRAIN_OFFSET_UNIFORM;
+    shader.uniforms.nearCut = { value: nearCut };
+    // The far water rides every tier — it is the only water past the
+    // transition reach, and the backdrop is where rivers meet the
+    // horizon.
+    shader.uniforms.wetMask = wetMaskUniform;
+    shader.uniforms.wetSeat = wetSeatUniform;
+
+    const ground = groundShader(shader.vertexShader, shader.fragmentShader);
+    const whole = farWaterShader(ground.vertexShader, ground.fragmentShader);
+    shader.vertexShader = whole.vertexShader;
+    shader.fragmentShader = whole.fragmentShader;
   };
 
   return material;
@@ -562,9 +593,9 @@ export function loadBands(
 /** Declare the band downloads on a plan, before any of them start. */
 export function planBands(report: LoadReport): void {
   for (const name of BAND_FILES) {
-    report.add(
-      `band:${name}`, 'Ground textures',
-      assetBytes(`kauai-tex/${name}.jpg`) ?? BAND_GUESS, true,
-    );
+    const baked = assetBytes(`kauai-tex/${name}.jpg`);
+    // FIRM when the bake knows the file: the wire's numbers are
+    // transport trivia then, not corrections. See LoadPlan.resize.
+    report.add(`band:${name}`, 'Ground textures', baked ?? BAND_GUESS, true, baked !== null);
   }
 }

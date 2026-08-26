@@ -60,10 +60,12 @@ const QUEEN_GUESS = 2_070_000;
 
 /** Declare her download on a plan, before it starts. */
 export function planQueen(report: LoadReport): void {
-  report.add(
-    QUEEN_JOB, 'The queen',
-    assetBytes('models/queen-winged.glb') ?? QUEEN_GUESS, true,
-  );
+  const baked = assetBytes('models/queen-winged.glb');
+  // FIRM: her GLB is served gzipped, so the fetch progress event's
+  // total is the COMPRESSED byte count — about 0.3 MB under the truth
+  // — and letting it resize this job is exactly the 5.1-to-4.8 MB
+  // shrink on the loading screen. The baked size is the real one.
+  report.add(QUEEN_JOB, 'The queen', baked ?? QUEEN_GUESS, true, baked !== null);
 }
 
 /** What the bake calls the two halves. */

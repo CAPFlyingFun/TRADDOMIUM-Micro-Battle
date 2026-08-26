@@ -64,7 +64,7 @@ export const WORK_WEIGHT = 300_000;
  * what a bar looks like. `LoadPlan` satisfies this as it stands.
  */
 export interface LoadReport {
-  add(id: string, label: string, weight: number, counted?: boolean): void;
+  add(id: string, label: string, weight: number, counted?: boolean, firm?: boolean): void;
   resize(id: string, weight: number): void;
   advance(id: string, done: number): void;
   finish(id: string): void;
@@ -82,6 +82,8 @@ interface Job {
   readonly label: string;
   /** True when this job's weight is real bytes off the wire. */
   readonly counted: boolean;
+  /** True when the weight is a baked fact resize() may not touch. */
+  readonly firm: boolean;
   weight: number;
   done: number;
   finished: boolean;
@@ -157,16 +159,32 @@ export class LoadPlan {
    * real Content-Length replaces it the moment the headers land, which
    * is early enough that the total settles before anyone reads it.
    */
-  add(id: string, label: string, weight: number, counted = false): void {
+  add(id: string, label: string, weight: number, counted = false, firm = false): void {
     this.jobs.push({
-      id, label, counted, weight: Math.max(1, weight), done: 0, finished: false,
+      id, label, counted, firm, weight: Math.max(1, weight), done: 0, finished: false,
     });
   }
 
-  /** The real size, once the response headers say so. */
+  /**
+   * The real size, once the response headers say so — for a job whose
+   * declared weight was a GUESS.
+   *
+   * A FIRM job keeps its baked weight, whatever the wire says, and that
+   * rule is the loading total finally holding still. v0.0.51 baked the
+   * real byte counts and declared drift over; Joshua watched the total
+   * go 5.1 MB to 4.8 MB anyway. The leak was this method: the loaders
+   * still reported their transport numbers, and a compressed response's
+   * Content-Length counts COMPRESSED bytes — the queen's 2.07 MB GLB
+   * arrives as ~1.7 MB of gzip, the fetch progress event's total is
+   * that smaller number, and one resize() swapped a fact for it.
+   *
+   * One measuring stick for the whole screen: a baked size is the
+   * file's real bytes, so the file's real bytes are what every job
+   * counts in. The wire may only correct what was guessed.
+   */
   resize(id: string, weight: number): void {
     const job = this.jobs.find((j) => j.id === id);
-    if (job && weight > 0) job.weight = weight;
+    if (job && !job.firm && weight > 0) job.weight = weight;
   }
 
   /** How far along one job is, in its own units. */

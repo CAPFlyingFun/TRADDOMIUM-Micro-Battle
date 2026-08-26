@@ -95,7 +95,10 @@ const CELL_REACH = ((CELLS - 1) / 2) * CHUNK_SPAN;
  * it would take to cover the same ground finely. The detail goes where
  * the seam is, not everywhere.
  */
-const TRANSITION_REACH = 20_000;
+/** Exported for the water: the crossfade to far-water paint must
+ * finish INSIDE this reach, because past it the ground is 31-metre
+ * triangles that clip a flat sheet into shards. */
+export const TRANSITION_REACH = 20_000;
 const TRANSITION_VERTS = 129;
 const TRANSITION_STEP = (TRANSITION_REACH * 2) / (TRANSITION_VERTS - 1);
 

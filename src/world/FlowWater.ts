@@ -9,6 +9,7 @@ import { SPAN } from './kauai';
 import type { LoadReport } from '../ui/loadPlan';
 import { assetBytes } from '../ui/assetSizes';
 import { pullBytes } from './fetchBytes';
+import { FAR_WATER, NEAR_WATER } from './farWater';
 
 /**
  * THE SURFACE OF EVERY STREAM AND POND THE ISLAND MAKES FOR ITSELF.
@@ -19,8 +20,11 @@ import { pullBytes } from './fetchBytes';
  * This file draws deliberately over-wide flat slabs AT that level and
  * lets the terrain clip them: the banks rise through the surface, so
  * the water's edge, its curves, and the mid-stream stones all come out
- * of the depth test rather than out of anything drawn here. NOTHING IS
- * CARVED.
+ * of the depth test rather than out of anything drawn here. The ground
+ * doing the clipping carries carve.ts's bounded trench (since
+ * v0.0.45), so the slab has a bed to sit in — an earlier version of
+ * this header said NOTHING IS CARVED, which was true for two versions
+ * and is not any more.
  *
  * OVER-WIDE IS MEASURED NOW, NOT GUESSED FROM THE CHANNEL. Version 2
  * sized every slab with slabHalf(width), and WIDTH is the TRUE
@@ -52,48 +56,41 @@ import { pullBytes } from './fetchBytes';
  */
 
 /**
- * How far water is worth drawing — the transition tier's reach.
+ * How far the water GEOMETRY is worth building — the near field plus
+ * margin for the crossfade.
  *
- * MEASURED, over three releases of blaming the wrong thing. A channel
- * can only read as a channel while the valley holding it is resolved,
- * and past the transition tier it is not: a vertex every 3,125 units
- * cannot show a metre-wide trench, so the slab stretches away at a
- * grazing angle and paints a flat stripe with a dead-straight near
- * edge. The water stops where its channel stops being visible.
+ * This dial has now been pushed both ways and both ends were wrong for
+ * the same reason. At 200 m the water simply stopped existing while
+ * the terrain drew to the horizon, and every approach from altitude
+ * crossed dry-looking ground that turned into a river underneath her
+ * — "some spots look like land, but suddenly turn into water when I
+ * try to land on it." So it went to 2 km, the middle tier's reach —
+ * and the middle tier's 31-metre triangles cannot clip a flat sheet,
+ * so from two hundred metres up the island wore turquoise shards.
+ * Measured at Joshua's own aerial fix: 99.7% of the 2,806 wet points
+ * within draw range lay beyond the 200 m transition reach, median
+ * 1,442 m out. Essentially everything on screen was the failure case,
+ * and no slab tuning could touch it, because the ground out there is
+ * not resolved BY DESIGN.
  *
- * TWO HUNDRED METRES WAS THE THIN-RIBBON ANSWER AND IT WAS COSTING US
- * THE WORST BUG IN THE WATER. Joshua, from the air: "some spots look
- * like land, but suddenly turn into water when I try to land on it."
- * That is not hydrology and not the level field. The TERRAIN draws to
- * the backdrop tens of kilometres out; the WATER stopped at two hundred
- * metres. Every approach from altitude therefore crossed dry-looking
- * ground that became a river underneath her at the moment she got close
- * enough for it to be drawn. Nothing was in the wrong place — it simply
- * was not there yet.
- *
- * The old limit was honest about a five-metre ribbon: past the
- * transition tier a vertex stands for thirty metres of ground, which
- * cannot clip a metre-wide trench, so the slab stretched away at a
- * grazing angle as a flat stripe with a dead-straight near edge. A
- * fifty-metre body of water is a different object. The tier that could
- * not resolve a ribbon resolves this easily, and the clip that used to
- * fail now works.
- *
- * MEASURED BEFORE MOVING IT, because the reason to stop was never
- * really the artefact — it was the fear of the geometry. Averaged over
- * twelve places she might stand:
- *
- *     200 m       1 reach,     22 stations,      44 vertices
- *     2,000 m   111 reaches, 1,506 stations,  3,012 vertices
- *     4,000 m   406 reaches, 4,524 stations,  9,048 vertices
- *
- * Three thousand vertices is nothing next to the terrain it sits on. So
- * the water now reaches as far as the MIDDLE terrain tier does, which
- * is the furthest distance at which the ground under it is still cut
- * from real heights rather than from the backdrop.
+ * The answer is not a better distance for the geometry — it is a
+ * different OWNER past the distance where geometry can work. The slabs
+ * now fade out across NEAR_WATER..FAR_WATER (150–250 m, inside the
+ * transition tier, whose 3-metre vertices can still clip a channel),
+ * and past that the terrain itself wears the water as paint from a
+ * baked mask — see farWater.ts. The build box only needs to cover the
+ * fade plus her own movement between decision cells.
  */
-const REACH = 200_000;
-const FADE_FROM = 160_000;
+// SIZED TO OUTLAST THE DECISION CELL, which is the review catch that
+// mattered here: follow() only rebuilds when she crosses a 50,000-unit
+// cell, so between rebuilds she can stand up to 50,000 units from the
+// spot the box was built around. A 40,000 box left the far edge of
+// that walk with NO geometry inside the crossfade band — water missing
+// right next to her, the one place the paint cannot cover. The box
+// must reach cell travel plus FAR_WATER plus margin.
+const REACH = 80_000;
+const FADE_FROM = NEAR_WATER;
+const FADE_TO = FAR_WATER;
 /**
  * How much of the index's claim the slab draws.
  *
@@ -203,16 +200,14 @@ const ACROSS = 9;
  * FOUR, NOT EIGHT, AND THE REASON IS THE PHONE. Every vertex costs a
  * baseLand(), which scripts/waterProfile.ts puts at 64% of a rebuild —
  * so the density here IS the cost, and nothing else in this file is
- * worth optimising ahead of it. Per scripts/waterCost.ts, at the
- * island's busiest view: 58,563 vertices, 57 ms here and about 340 ms
- * on a phone at six times slower. That is paid ONCE, while the game is
- * loading, because follow() diffs its wanted set.
- *
- * What lands in a frame is one decision cell of travel — 50,000 units,
- * five hundred metres — which is 29 new reaches and about 40 ms on a
- * phone. At the 80 cm/s she actually moves that is a two-frame hitch
- * every ten minutes. Eight rows would double it for another 1.9% of
- * the water, which is not the trade.
+ * worth optimising ahead of it. Handing the far field to the terrain's
+ * wet-mask paint shrank the build box from 2 km to 800 m and took most
+ * of the bill with it: per scripts/waterCost.ts the busiest view is
+ * now 20,691 vertices, 19 ms here and about 115 ms on a phone at six
+ * times slower, paid once at load because follow() diffs its wanted
+ * set; a decision cell of travel is 28 new reaches, about 30 ms on a
+ * phone, once per five hundred metres. Eight rows would double that
+ * for another 1.9% of the water, which is still not the trade.
  */
 const ALONG = 4;
 
@@ -675,7 +670,11 @@ export function waterShader(
         diffuseColor.a = mix(0.0, ${SURFACE_ALPHA}, smoothstep(0.0, ${EDGE_FADE}.0, depth));
         // Fade out where the channel stops being resolved, so the cut
         // is not a pop.
-        diffuseColor.a *= 1.0 - smoothstep(${FADE_FROM}.0, ${REACH}.0, length(vViewPosition));
+        // THE GEOMETRY'S HALF OF THE CROSSFADE — the exact complement
+        // of the smoothstep the terrain's far-water paint fades in
+        // with, on the same two constants, so at every eye distance
+        // exactly one owner is at full strength.
+        diffuseColor.a *= 1.0 - smoothstep(${FADE_FROM}.0, ${FADE_TO}.0, length(vViewPosition));
         // WATER NOBODY CAN SEE MUST NOT WRITE DEPTH. The material
         // writes depth so two overlapping sheets cannot blend twice,
         // and that is right — but a fragment whose alpha has ramped to
@@ -720,7 +719,8 @@ export const RIPPLE_JOB = 'ripple';
  * which is the exact complaint the plan was built to answer.
  */
 export function planRipple(report: LoadReport): void {
-  report.add(RIPPLE_JOB, 'The water', assetBytes(RIPPLE_URL) ?? 206_000, true);
+  const baked = assetBytes(RIPPLE_URL);
+  report.add(RIPPLE_JOB, 'The water', baked ?? 206_000, true, baked !== null);
 }
 
 /** Distances over which the finer ripples give way, in world units. */

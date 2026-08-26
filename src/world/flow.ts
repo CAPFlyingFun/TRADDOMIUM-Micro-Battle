@@ -10,16 +10,21 @@
  * land. A channel here cannot be anywhere the grid has no valley,
  * because the grid is where it came from.
  *
- * A LEVEL FIELD, NOT A CARVE. Version 1 cut the channel bed into the
+ * A LEVEL FIELD, OVER A CARVED BED. Version 1 cut the channel bed into the
  * ground at runtime, and the carve broke the terrain twice — a channel
  * at the bottom of a gorge claimed cells partway up its own wall and
  * pressed them toward ITS level, slicing pale benches out of both
  * valley sides. Version 2 stores the water-surface LEVEL at every
  * station and every pond cell, exactly as the ocean is a level, and
- * touches the ground never: the renderer draws over-wide flat slabs AT
- * the level and lets the terrain clip them, so the water's edge, the
- * curves, and the mid-stream stones all emerge from the depth test
- * instead of from geometry this file would have to get right.
+ * touched the ground never — and version 3 brought a carve BACK, this
+ * time bounded so it cannot repeat the damage: carve.ts cuts a trench
+ * no wider than the channel's own shoulder and no deeper than a metre,
+ * and terrainHeight applies it. The renderer still draws over-wide
+ * flat slabs AT the level and lets the terrain clip them, so the
+ * water's edge, the curves, and the mid-stream stones all emerge from
+ * the depth test instead of from geometry this file would have to get
+ * right — the difference is that the terrain doing the clipping now
+ * has a bed in it for the water to sit in.
  *
  * WET OR DRY, ONE RULE, ASKED IN ONE PLACE. drawn level =
  * level * reliefScale(); a point is wet iff that beats

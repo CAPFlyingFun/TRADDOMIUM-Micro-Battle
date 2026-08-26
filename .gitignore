@@ -15,3 +15,4 @@ tsconfig.tsbuildinfo
 # Regenerable intermediate: `npm run bake:ground` writes it, bakeFlow reads it.
 scripts/.ground.f32
 __pycache__/
+shots/
