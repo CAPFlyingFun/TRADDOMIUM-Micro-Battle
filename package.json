@@ -1,7 +1,7 @@
 {
   "name": "traddomium-micro-battle",
   "private": true,
-  "version": "0.0.57",
+  "version": "0.0.58",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -26,6 +26,8 @@
     "bake:queen": "node scripts/bakeQueen.mjs",
     "bake:ground": "vite-node scripts/sampleGround.ts",
     "bake:flow": "npm run bake:ground && python3 scripts/bakeFlow.py",
+    "bake:hd": "python3 scripts/bakeKauaiHd.py",
+    "bake:hydro": "python3 scripts/bakeHydro.py",
     "shots:hud": "node scripts/hudshot.mjs",
     "probe:update": "node scripts/probe-update.mjs",
     "probe:save": "node scripts/probe-save.mjs",
