@@ -254,7 +254,9 @@ export function terrainHeight(x: number, z: number): number {
   // the island already has — cutting a channel through the middle of a
   // lake would be inventing a trench in a floor that is already flat.
   if (spot.level < spot.bed) return land;
-  return land - trenchCut(land, spot.level, spot.off, spot.width);
+  // The claim goes in too: the trench may not outlast the water that
+  // justifies it, or it ends in a cliff where flowAt stops answering.
+  return land - trenchCut(land, spot.level, spot.off, spot.width, spot.reach);
 }
 
 /**

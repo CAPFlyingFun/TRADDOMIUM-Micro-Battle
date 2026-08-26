@@ -28,6 +28,14 @@ const SHOTS = [
   // Standing at that lake's shore, looking along the waterline — the
   // jagged-edge complaint of v0.0.53, kept as its regression frame.
   ['pond-shore', '22.04107133 -159.37387763 85.6m 300° -20° ×1.00'],
+  // AND THE SAME SHORE LOOKING NNE, which is Joshua's own view and not
+  // this rig's. The shot above looks 300°, along the bank; his looks
+  // 020-024°, ACROSS it — and that eighty degrees is the whole
+  // difference between "organic now" and a row of terrain-cell
+  // curtains standing in the water. A regression gallery that only
+  // ever faces one way is a gallery of one bearing's bugs.
+  ['pond-across', '22.04110839 -159.37390526 86.88m 024° -7.9° ×1.00'],
+  ['pond-across-2', '22.04112252 -159.37389852 86.88m 020° -7.9° ×1.00'],
   // And the same shore from 25 m up, where the staircase showed most.
   ['pond-above', '22.04107133 -159.37387763 111m 300° -35° ×1.00'],
   // Ground level: the green-water closeup and standing in deep water.

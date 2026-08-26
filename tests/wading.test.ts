@@ -379,3 +379,61 @@ describe('the water she can reach to drink', () => {
     expect(canDrink(stream.x, stream.z, stream.level - 50)).toBe(true);
   });
 });
+
+/**
+ * THE ALTIMETER MUST COUNT THE WATER THAT IS HOLDING HER UP.
+ *
+ * mslNow was groundHeight + flight.height, and afloat that is the BED:
+ * the water's lift lives in the `above` PlayerAnt is placed with, and
+ * nothing could ask how high that was. So the HUD under-reported by
+ * the depth she was floating in — 79 cm on the reach in Joshua's
+ * swimming screenshots, where the bed sits at 86.88 m and her feet
+ * ride at 87.67 m.
+ *
+ * That was not merely a wrong readout. The position fix RECORDS the
+ * altimeter, so every fix taken afloat wrote the riverbed down as her
+ * height; restoring one put her a metre low, and `goTo` then read that
+ * height as airborne and held her in FLIGHT over the water. A replay
+ * of his own swimming frame came back as a flight over dry grass, and
+ * the screenshot rig reported the water missing.
+ *
+ * Joshua, from the picture alone: "check your altitude."
+ */
+describe('how high the water holds her', () => {
+  it('lifts her to the surface, less her draught', () => {
+    // A bed a metre under the fixture's own water — the shape of
+    // Joshua's reach, where the bed sits at 86.88 m under a surface at
+    // 87.82 m and his altimeter reported the bed.
+    const bed = stream.level - 100;
+    const wade = wadeAt(stream.x, stream.z, bed);
+    expect(wade.afloat).toBe(true);
+    expect(wade.depth).toBeCloseTo(100, 6);
+    // The contract the altimeter depends on: she rides the depth less
+    // her draught, so ground + above is the SURFACE she is floating
+    // on, never the bed. (DRAUGHT is 0.15 of a unit — a millimetre and
+    // a half of a centimetre-long ant, not 15 of anything; assuming
+    // otherwise is how the first version of this test failed.)
+    expect(wade.above).toBeCloseTo(wade.depth - 0.15, 6);
+    expect(bed + wade.above).toBeCloseTo(stream.level - 0.15, 6);
+    // And the under-report it exists to prevent: reading the bed alone
+    // loses very nearly the whole metre.
+    expect(wade.above).toBeGreaterThan(99);
+  });
+
+  it('rides nothing at all on dry land', () => {
+    // The other half of the sum: on land the lift is zero, so adding
+    // it to the altimeter can never double-count against the wings.
+    const dry = wadeAt(stream.x, stream.z, stream.level + 500);
+    expect(dry.above).toBe(0);
+    expect(dry.afloat).toBe(false);
+  });
+
+  it('sinks to the bed as she dives, and the altimeter follows her down', () => {
+    const deep = wadeAt(stream.x, stream.z, stream.level - 200);
+    if (!deep.afloat) return;
+    const top = wadeAt(stream.x, stream.z, stream.level - 200, 0).above;
+    const bottom = wadeAt(stream.x, stream.z, stream.level - 200, 1).above;
+    expect(bottom).toBe(0);
+    expect(top).toBeGreaterThan(bottom);
+  });
+});

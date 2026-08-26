@@ -164,8 +164,16 @@ float tmbBank(float t) {
  */
 export function trenchCut(
   land: number, level: number, off: number, trueWidth: number,
+  claim = Infinity,
 ): number {
-  const reach = cutHalf(trueWidth);
+  // NEVER PAST THE CLAIM. The bed exists for water, and the water
+  // stops where the index says it does — so a shoulder wider than the
+  // claim carves dry ground and, worse, is still at full depth when
+  // flowAt refuses the next sample. That guillotine is a vertical
+  // cliff the width of one lattice step. Clamping the reach makes the
+  // profile arrive at zero exactly where the water does.
+  const reach = Math.min(cutHalf(trueWidth), claim);
+  if (reach <= 0) return 0;
   // ABSOLUTE, because the profile is not an even function any more.
   // A cosine is symmetric about zero for free and smootherstep is not:
   // fed a small negative offset it returns slightly MORE than one, and

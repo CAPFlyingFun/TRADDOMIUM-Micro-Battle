@@ -78,6 +78,29 @@ export interface Fix extends GeoPoint {
   readonly pitch: number;
 }
 
+/**
+ * HOW HIGH SHE IS, from the three things that can hold her up.
+ *
+ * A pure function because the inline version cost us the altimeter.
+ * It was `ground + flight.height`, which is right on land and in the
+ * air and WRONG on water: the water's lift lives in the `above`
+ * PlayerAnt is placed with, so the readout showed the riverbed she was
+ * floating over — 79 cm low on the reach in Joshua's swimming
+ * screenshots. He caught it from the picture: "check your altitude."
+ *
+ * It was not only a readout. The position fix records this number, so
+ * every fix taken afloat wrote the bed down as her height, and
+ * restoring one put her a metre low — then read that height as
+ * airborne and held her in FLIGHT over the water. Replaying his own
+ * swimming frame came back as a flight over dry grass.
+ *
+ * The terms never double-count: `riding` is zero in the air (the
+ * wings' lift is `flying`) and zero on land.
+ */
+export function mslOf(ground: number, flying: number, riding: number): number {
+  return ground + flying + riding;
+}
+
 /** Build a fix from what the scene already has to hand. */
 export function fixAt(
   at: WorldPoint, msl: number, bearing: number, pitch: number,

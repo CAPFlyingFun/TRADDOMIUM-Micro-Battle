@@ -341,8 +341,14 @@ export function buildReach(
       // -1 at the left bank, 0 on the centreline, +1 at the right.
       const u = (k / (ACROSS - 1)) * 2 - 1;
       const side = u < 0 ? -1 : 1;
-      const half = owned ? 0
-        : (halfAt(flow, p, side) + (halfAt(flow, q, side) - halfAt(flow, p, side)) * t) * EDGE;
+      // THE CLAIM, LERPED EXACTLY AS flowAt LERPS IT — per side, per
+      // station, interpolated along the segment. It sizes the slab, and
+      // below it bounds the trench profile, and those two have to be
+      // the same number: the ground stops cutting where the claim ends,
+      // so a shader that shades past it is describing a bed nothing dug.
+      const claim = owned ? 0
+        : halfAt(flow, p, side) + (halfAt(flow, q, side) - halfAt(flow, p, side)) * t;
+      const half = claim * EDGE;
       // MITRED, so the drawn edge is as far from the SEGMENT as the
       // collision index says the water reaches.
       //
@@ -370,7 +376,12 @@ export function buildReach(
       positions[v * 3 + 2] = wz - cz;
       deep[v] = full;
       across[v] = (wx - x) * -sz + (wz - z) * sx;
-      span[v] = reach;
+      // NEVER PAST THE CLAIM, because trenchCut is not either. The
+      // shoulder cutHalf(width) can be three times the claim on a
+      // stream pinned against a valley wall, and the ground clamps the
+      // two together — see carve.ts. Leaving the full shoulder here
+      // would shade a metre of depth over bank that was never lowered.
+      span[v] = Math.min(reach, claim);
       // THE ONLY THING HERE THAT HAS TO ASK THE GROUND, and it asks the
       // island the terrain is built from, at the exact point the vertex
       // sits. Negative where the bank has already risen through the

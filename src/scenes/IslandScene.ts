@@ -20,6 +20,7 @@ import { loadWetMask } from '../world/farWater';
 import { TerrainStream, TIER_CUTS } from '../world/TerrainStream';
 import { submersion, Underwater } from '../world/Underwater';
 import { canDrink, wadeAt } from '../ant/wading';
+import { waterLevelAt } from '../world/flow';
 
 import { originAt, rebaseFor, setOrigin, toLocal, toWorld,
 } from '../world/origin';
@@ -55,7 +56,7 @@ import {
 } from '../ant/stamina';
 import { loadQueen, QUEEN_JOB, type QueenBody } from '../ant/queenModel';
 import { onChange, set as setSetting, settings } from '../ui/settings';
-import { fixAt, formatFix, fixToWorld, parseFix } from '../ui/fix';
+import { fixAt, formatFix, fixToWorld, mslOf, parseFix } from '../ui/fix';
 import { weather } from '../weather/WeatherService';
 import { skyLook } from '../weather/sky';
 import { Rain } from '../weather/Rain';
@@ -1679,7 +1680,19 @@ export class IslandScene {
    */
   private mslNow(): number {
     const here = this.ant.where;
-    return groundHeight(here.wx, here.wz) + this.flight.height;
+    // PLUS WHATEVER IS HOLDING HER UP — wings OR water.
+    //
+    // This was ground + flight.height, and afloat that is the BED: the
+    // water's lift lives in the `above` PlayerAnt is placed with, and
+    // the altimeter could not see it. So the whole HUD under-reported
+    // by the depth she was floating in — most of a metre on the Wailua
+    // — and worse, the position fix RECORDED that number. Restoring
+    // such a fix put her a metre low, on the bed of the river she had
+    // been swimming in, which is how a replay of Joshua's own swimming
+    // screenshot came back standing on dry grass.
+    //
+    // The sum itself lives in fix.ts, where a test can reach it.
+    return mslOf(groundHeight(here.wx, here.wz), this.flight.height, this.ant.riding);
   }
 
   /**
@@ -1742,8 +1755,17 @@ export class IslandScene {
     }
     const msl = fix.msl;
     const agl = msl - groundHeight(at.wx, at.wz);
+    // WAS SHE FLYING, OR FLOATING? Both stand her off the ground, and
+    // a fix records only the height — so restoring one blind put her
+    // in the AIR over every river she had been swimming in, which is
+    // how a replay of Joshua's own swimming screenshot came back as a
+    // flight over dry-looking grass. If the recorded altitude is at or
+    // under the water standing here, the water is what was holding
+    // her: land her and let wadeAt lift her back to the surface.
+    const surface = waterLevelAt(at.wx, at.wz);
+    const wasAfloat = surface !== null && msl <= surface * reliefScale() + 5;
     const look = (fix.pitch * Math.PI) / 180;
-    if (agl > 1) this.flight.hold(agl, heading);
+    if (agl > 1 && !wasAfloat) this.flight.hold(agl, heading);
     // BOTH, and they are not the same act. The snap places the camera
     // for this frame; the aim is what stops the next frame's look
     // input putting it straight back at its resting elevation, which

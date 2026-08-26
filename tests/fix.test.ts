@@ -8,7 +8,7 @@
  * where it started" — measured in world units, at the scale she is.
  */
 import { describe, expect, it } from 'vitest';
-import { fixAt, fixToWorld, formatFix, parseFix, PLACES } from '../src/ui/fix';
+import { fixAt, fixToWorld, formatFix, mslOf, parseFix, PLACES } from '../src/ui/fix';
 import { geoToWorld, ISLAND_CENTRE, worldToGeo } from '../src/world/geo';
 import {
   bearingFromHeading, headingFromBearing, wrap360,
@@ -185,5 +185,46 @@ describe('what a rendered comparison caught that the numbers did not', () => {
     const back = parseFix('22.04 -159.53 12.81m 125.3° -4.2°');
     expect(back).not.toBeNull();
     expect(Number.isFinite(back!.relief)).toBe(false);
+  });
+});
+
+/**
+ * THE ALTIMETER COUNTS EVERYTHING HOLDING HER UP.
+ *
+ * It counted the wings and not the water. Afloat, the lift lives in
+ * the `above` PlayerAnt is placed with, so `ground + flight.height`
+ * reported the BED — 79 cm low on the reach in Joshua's swimming
+ * screenshots, where the bed sits at 86.88 m and her feet ride at
+ * 87.67 m. He spotted it from the picture alone: "check your
+ * altitude."
+ *
+ * The fix line records this number, which is what made it more than a
+ * cosmetic slip: every fix taken afloat wrote the riverbed down as her
+ * height, and restoring one put her a metre low and then read that
+ * height as AIRBORNE, holding her in flight over the water she had
+ * been swimming in.
+ */
+describe('how high she is', () => {
+  it('adds the water that is holding her up', () => {
+    // His own numbers, in world units.
+    expect(mslOf(8688, 0, 79)).toBe(8767);
+    // Dropping the float term is the bug, and it is 79 units of it.
+    expect(mslOf(8688, 0, 79) - mslOf(8688, 0, 0)).toBe(79);
+  });
+
+  it('adds the wings, and never both at once', () => {
+    // Aloft the wings carry her and riding is zero; afloat the water
+    // does and flight.height is zero. The sum is safe either way.
+    expect(mslOf(8688, 5000, 0)).toBe(13688);
+    expect(mslOf(8688, 0, 0)).toBe(8688);
+  });
+
+  it('survives the round trip through a fix line', () => {
+    // The whole reason this matters: what the altimeter says is what
+    // the address records, and what the address records is where a
+    // replay puts her.
+    const afloat = mslOf(8688, 0, 79);
+    const back = parseFix(formatFix(fixAt(world(0, 0), afloat, 0, 0, 1)));
+    expect(back!.msl).toBeCloseTo(afloat, 0);
   });
 });

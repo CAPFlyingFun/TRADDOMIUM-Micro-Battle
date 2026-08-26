@@ -395,6 +395,16 @@ export class PlayerAnt {
    */
   private above = 0;
 
+  /**
+   * How far off the ground she is riding, world units.
+   *
+   * A jump, or — the case this exists for — the water holding her up.
+   * `settle` has always placed her at groundHeight + above; nothing
+   * could ASK how high that was, so the altimeter reported the bed
+   * she was floating over. See IslandScene.mslNow.
+   */
+  get riding(): number { return this.above; }
+
   /** Put her on the ground — or `above` it — facing her heading. */
   private settle(above: number, dt: number, moved = true): void {
     const { x, z } = this.at;

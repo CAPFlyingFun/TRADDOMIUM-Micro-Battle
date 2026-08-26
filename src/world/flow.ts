@@ -506,6 +506,19 @@ export interface FlowSpot {
   readonly width: number;
   /** Distance from the centreline. */
   readonly off: number;
+  /**
+   * How far the water reaches on THIS side, here — the claim that
+   * admitted this point.
+   *
+   * Carried because the carve has to stop where the claim does. The
+   * trench's own shoulder is cutHalf(width), which can be three times
+   * this on a stream pinned against a valley wall; shaping the bed to
+   * the shoulder and then having flowAt refuse the point a centimetre
+   * later leaves the cut hanging at full depth — a 73 cm cliff in
+   * 8 cm of ground, repeated along the bank as a row of fins. See
+   * terrainHeight.
+   */
+  readonly reach: number;
   /** Downstream, scaled by how far from the bank she is. */
   readonly flowX: number;
   readonly flowZ: number;
@@ -574,7 +587,7 @@ export function flowAt(wx: number, wz: number): FlowSpot | null {
     const sign = bLev![s] <= aLev![s] ? 1 : -1;
     const speed = flowSpeed(runLen > 0 ? Math.abs(aLev![s] - bLev![s]) / runLen : 0);
     const spot: FlowSpot = {
-      level, bed, width, off,
+      level, bed, width, off, reach,
       flowX: runLen > 0 ? (ex / runLen) * sign * speed * thread : 0,
       flowZ: runLen > 0 ? (ez / runLen) * sign * speed * thread : 0,
     };

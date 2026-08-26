@@ -112,8 +112,7 @@ const MIDDLE_STEP = (MIDDLE_REACH * 2) / (MIDDLE_VERTS - 1);
 const BACKDROP_VERTS = 129;
 
 /**
- * How far each cell's edge hangs down below the ground — the fix for
- * the holes.
+ * The small amount a real LOD seam may overlap vertically.
  *
  * A fine cell has a vertex every 8 units and a coarse one every 32,
  * over the same 512-unit span. Along the edge they share, the coarse
@@ -123,17 +122,66 @@ const BACKDROP_VERTS = 129;
  * That is why the holes closed up as she approached — the cell flipped
  * to fine and the mismatch went away.
  *
- * The classic fix, and still the right one: hang a skirt off every
- * cell edge so a crack shows ground-coloured wall instead of sky.
- * Invisible otherwise, because it is under the terrain.
+ * A SKIRT ON EVERY CELL EDGE WAS NOT THE RIGHT FIX: equal-resolution
+ * neighbours share the exact same edge, so those skirts were just
+ * 2.5-metre cardboard curtains printed across otherwise continuous
+ * ground. Only an edge where the adjacent cell changes resolution
+ * needs protection. Its depth is measured from that edge's local
+ * disagreement and capped below; this is a seam overlap, not a wall.
+ *
+ * THE CURTAINS WERE INVISIBLE FOR AS LONG AS NOTHING CUT THROUGH THEM,
+ * which is why a 250-unit drop survived so long: it hangs under the
+ * ground and the ground hides it. Then flat water arrived at a level
+ * ABOVE the bottom of the skirt, and every cell boundary crossing the
+ * waterline stood up out of the surface as a row of dark teeth —
+ * Joshua, on the far shore of the Mana pond: "I think I found the
+ * cardboard." This file had already said so, in the commit that
+ * merged the dry tree, and the seam implementation below is ported
+ * from the branch that note pointed at (f3e3641). Terrain only: no
+ * water code moved with it.
  */
-const SKIRT_DROP = 250;
+export const MAX_SEAM_DROP = 8;
+
+export type CellEdge = 'north' | 'south' | 'west' | 'east';
+
+/**
+ * How far the OUTERMOST cells may reach down to the tier behind them.
+ *
+ * The streamed window stops at CELL_REACH — 20.48 m — and the
+ * transition tier carries on from there, cut from a different height
+ * function: the cells cut carve.ts's real trench, the tier aims at the
+ * waterline instead. Measured around Joshua's own fix, those two
+ * disagree by up to a full metre, so the cells' outer edge stands that
+ * proud of the surface behind it and shows a wall.
+ *
+ * The old 2.5 m skirt on every edge covered this by accident, which is
+ * why removing the cardboard revealed it. This is the same seam idea
+ * as a cell-to-cell bridge, sized for a boundary between two different
+ * SURFACES rather than two resolutions of one: two metres, enough for
+ * the measured metre and its margin, and only ever on the outer ring.
+ */
+export const MAX_TIER_DROP = 200;
+
+/**
+ * The vertex spacing on the cell across this one actual LOD seam.
+ *
+ * `tier` marks the other kind of seam: not a finer cell meeting a
+ * coarser one, but the streamed window meeting the transition tier
+ * that continues past it.
+ */
+export interface CellSeam {
+  readonly edge: CellEdge;
+  readonly neighbourStep: number;
+  readonly tier?: boolean;
+}
 
 interface Cell {
   /** The GLOBAL address. Never a rendered position. */
   readonly id: ChunkId;
   readonly mesh: THREE.Mesh;
   fine: boolean;
+  /** Which edges were seams when this geometry was cut. */
+  seamKey: string;
 }
 
 /**
@@ -149,6 +197,7 @@ interface Cell {
  */
 export function buildCell(
   at: WorldPoint, span: number, verts: number, coarse = false,
+  seams: readonly CellSeam[] = [],
 ): THREE.BufferGeometry {
   const worldX = at.wx;
   const worldZ = at.wz;
@@ -166,10 +215,9 @@ export function buildCell(
   }
 
   const count = verts * verts;
-  // Plus a skirt vertex for every vertex on the perimeter. The corners
-  // get counted twice, which costs four vertices and saves a special
-  // case in every loop below.
-  const skirts = verts * 4;
+  // Only actual LOD seams have a bridge ring. Same-LOD neighbours have
+  // identical edge vertices, so adding one there can only make a wall.
+  const skirts = verts * seams.length;
   const positions = new Float32Array((count + skirts) * 3);
   const normals = new Float32Array((count + skirts) * 3);
   const colors = new Float32Array((count + skirts) * 3);
@@ -212,18 +260,56 @@ export function buildCell(
     }
   }
 
-  // The skirt: each perimeter vertex copied straight down.
-  const edges: number[][] = [
-    Array.from({ length: verts }, (_, i) => i),                       // north
-    Array.from({ length: verts }, (_, i) => (verts - 1) * verts + i), // south
-    Array.from({ length: verts }, (_, i) => i * verts),               // west
-    Array.from({ length: verts }, (_, i) => i * verts + (verts - 1)), // east
-  ];
-  edges.forEach((edge, e) => {
+  const perimeter = (edge: CellEdge): number[] => {
+    switch (edge) {
+      case 'north': return Array.from({ length: verts }, (_, i) => i);
+      case 'south': return Array.from({ length: verts }, (_, i) => (verts - 1) * verts + i);
+      case 'west': return Array.from({ length: verts }, (_, i) => i * verts);
+      case 'east': return Array.from({ length: verts }, (_, i) => i * verts + (verts - 1));
+    }
+  };
+
+  // Measure the fine edge against the straight line its coarser
+  // neighbour draws. The fine side owns this bridge: it spans the
+  // actual disagreement in either direction, so a second coarse skirt
+  // would only duplicate triangles.
+  const seamHeight = (seam: CellSeam, along: number, sourceHeight: number): number => {
+    const edgePoint = (distance: number): [number, number] => {
+      switch (seam.edge) {
+        case 'north': return [worldX + distance, worldZ];
+        case 'south': return [worldX + distance, worldZ + span];
+        case 'west': return [worldX, worldZ + distance];
+        case 'east': return [worldX + span, worldZ + distance];
+      }
+    };
+    // THE WINDOW'S OWN RIM. Past it the transition tier is the ground,
+    // and it is cut from a different height function — so the bridge
+    // reaches for THAT surface rather than for a straighter reading of
+    // this one. Down only: lifting the rim would put cell geometry
+    // above the tier and make the wall face the other way.
+    if (seam.tier) {
+      const [tx, tz] = edgePoint(along);
+      const behind = dryLand(tx, tz, TRANSITION_STEP);
+      return sourceHeight + Math.max(-MAX_TIER_DROP, Math.min(0, behind - sourceHeight));
+    }
+    const coarseStep = Math.max(step, seam.neighbourStep);
+    const lo = Math.floor(along / coarseStep) * coarseStep;
+    const hi = Math.min(span, lo + coarseStep);
+    const t = hi === lo ? 0 : (along - lo) / (hi - lo);
+    const point = (distance: number) => {
+      const [px, pz] = edgePoint(distance);
+      return terrainHeight(px, pz);
+    };
+    const straight = point(lo) + (point(hi) - point(lo)) * t;
+    return sourceHeight + Math.max(-MAX_SEAM_DROP, Math.min(MAX_SEAM_DROP, straight - sourceHeight));
+  };
+
+  const edges = seams.map((seam) => ({ edge: perimeter(seam.edge), seam }));
+  edges.forEach(({ edge, seam }, e) => {
     edge.forEach((source, i) => {
       const to = count + e * verts + i;
       positions[to * 3] = positions[source * 3];
-      positions[to * 3 + 1] = positions[source * 3 + 1] - SKIRT_DROP;
+      positions[to * 3 + 1] = seamHeight(seam, i * step, positions[source * 3 + 1]);
       positions[to * 3 + 2] = positions[source * 3 + 2];
       normals[to * 3] = normals[source * 3];
       normals[to * 3 + 1] = normals[source * 3 + 1];
@@ -234,7 +320,7 @@ export function buildCell(
     });
   });
 
-  const skirtTris = 4 * (verts - 1) * 2 * 2;
+  const skirtTris = seams.length * (verts - 1) * 2 * 2;
   const indices = new Uint32Array(quads * quads * 6 + skirtTris * 3);
   let n = 0;
   for (let iz = 0; iz < quads; iz++) {
@@ -253,7 +339,7 @@ export function buildCell(
   // four edges in four orientations is four chances to get a winding
   // backwards and leave the hole exactly where it was. Doubling a few
   // hundred triangles buys certainty; the cell itself stays one-sided.
-  edges.forEach((edge, e) => {
+  edges.forEach(({ edge }, e) => {
     for (let i = 0; i < verts - 1; i++) {
       const a = edge[i];
       const b = edge[i + 1];
@@ -517,19 +603,26 @@ export class TerrainStream {
         wanted.add(key);
         const detailed = Math.abs(dx) <= fine && Math.abs(dz) <= fine;
         const had = this.cells.get(key);
-        if (had && had.fine === detailed) continue;
+        // A cell must also be re-cut when its NEIGHBOURS change tier:
+        // its seam bridges belong to edges, not to itself, so a cell
+        // that keeps its own resolution can still need a bridge added
+        // or dropped. Missing this leaves the old crack open.
+        const seamKey = this.seamsFor(id, detailed)
+          .map((seam) => `${seam.edge}${seam.tier ? '!' : ''}`).join(',');
+        if (had && had.fine === detailed && had.seamKey === seamKey) continue;
         if (had) {
           // Same ground, different cut: swap the geometry rather than
           // the whole mesh so nothing flickers out and back.
           had.mesh.geometry.dispose();
           had.mesh.geometry = this.cut(id, detailed);
           had.fine = detailed;
+          had.seamKey = seamKey;
           continue;
         }
         const mesh = new THREE.Mesh(this.cut(id, detailed), this.material);
         mesh.scale.y = this.relief;
         this.scene.add(mesh);
-        this.cells.set(key, { id, mesh, fine: detailed });
+        this.cells.set(key, { id, mesh, fine: detailed, seamKey });
       }
     }
 
@@ -652,6 +745,46 @@ export class TerrainStream {
   private cut(id: ChunkId, fine: boolean): THREE.BufferGeometry {
     // Sampled at the chunk's WORLD corner, so the geometry is a pure
     // function of the global address and nothing else.
-    return buildCell(chunkOrigin(id), CHUNK_SPAN, fine ? CELL_VERTS : COARSE_VERTS);
+    return buildCell(
+      chunkOrigin(id), CHUNK_SPAN, fine ? CELL_VERTS : COARSE_VERTS,
+      false, this.seamsFor(id, fine),
+    );
+  }
+
+  /** Which of this cell's four edges are genuine resolution changes. */
+  private seamsFor(id: ChunkId, fine: boolean): CellSeam[] {
+    if (!this.at) return [];
+    const reach = (FINE_CELLS - 1) / 2;
+    const detailAt = (cx: number, cz: number) =>
+      Math.abs(cx - this.at!.cx) <= reach && Math.abs(cz - this.at!.cz) <= reach;
+    const step = (detailed: boolean) =>
+      CHUNK_SPAN / ((detailed ? CELL_VERTS : COARSE_VERTS) - 1);
+    const here = fine;
+    // The outer rim of the streamed window: past this there is no cell
+    // at all, only the transition tier.
+    const window = (CELLS - 1) / 2;
+    const inside = (cx: number, cz: number) =>
+      Math.abs(cx - this.at!.cx) <= window && Math.abs(cz - this.at!.cz) <= window;
+    const neighbours: ReadonlyArray<readonly [CellEdge, number, number]> = [
+      ['north', 0, -1], ['south', 0, 1], ['west', -1, 0], ['east', 1, 0],
+    ];
+    const seams: CellSeam[] = [];
+    for (const [edge, dx, dz] of neighbours) {
+      const nx = id.cx + dx, nz = id.cz + dz;
+      if (!inside(nx, nz)) {
+        // The window's rim, whatever this cell's own resolution — a
+        // coarse edge cell needs this bridge just as much as a fine
+        // one, and requiring `fine` here is what left the wall.
+        seams.push({ edge, neighbourStep: step(false), tier: true });
+        continue;
+      }
+      // The fine side owns a cell-to-cell bridge. It joins its detailed
+      // edge to the coarse line above or below it, so emitting the same
+      // bridge from the coarse cell would spend twice the triangles.
+      if (here && !detailAt(nx, nz)) {
+        seams.push({ edge, neighbourStep: step(detailAt(nx, nz)) });
+      }
+    }
+    return seams;
   }
 }
