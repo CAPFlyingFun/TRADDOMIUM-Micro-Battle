@@ -36,7 +36,14 @@ import { join } from 'node:path';
 const COUNTED = [
   ...readdirSync('public/kauai-tex').sort().map((f) => `kauai-tex/${f}`),
   'models/queen-winged.glb',
+  'water-normal.png',
+  'kauai-hydro.bin',
 ];
+
+// THE HD TILES ARE NOT COUNTED, deliberately. All 64 are 33.7 MB and
+// she stands on one: they stream on demand behind a frame that has
+// already been drawn, so putting them on a bar that must finish before
+// the world appears would be declaring a wait nobody is waiting for.
 
 const rows = COUNTED.map((path) => `  '${path}': ${statSync(join('public', path)).size},`);
 const total = COUNTED.reduce((sum, p) => sum + statSync(join('public', p)).size, 0);

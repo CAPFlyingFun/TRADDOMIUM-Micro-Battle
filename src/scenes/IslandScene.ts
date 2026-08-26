@@ -20,6 +20,7 @@ import { followHd, forgetHd, hdResident, onHdTile } from '../world/kauaiHd';
 import { forgetHydro, hydro, loadHydro, useHydro } from '../world/hydro';
 import { forgetRiverBeds, indexRiverBeds } from '../world/riverBed';
 import { WaterSurface } from '../world/WaterSurface';
+import { HYDRO_JOB, loadRipple, RIPPLE_JOB } from '../world/waterLook';
 
 import { originAt, rebaseFor, setOrigin, toLocal, toWorld,
 } from '../world/origin';
@@ -480,7 +481,8 @@ export class IslandScene {
     // drawn at the level the survey states, and the terrain — which is
     // already standing — clips it. A late arrival adds rivers to a
     // frame rather than moving anything already in one.
-    void loadHydro()
+    void loadRipple().catch(() => {}).finally(() => this.report?.finish(RIPPLE_JOB));
+    void loadHydro((done) => this.report?.advance(HYDRO_JOB, done))
       .then((data) => {
         if (this.disposed) return;
         useHydro(data);
@@ -493,7 +495,8 @@ export class IslandScene {
         this.ant.reground();
         this.water.follow(this.ant.where);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => this.report?.finish(HYDRO_JOB));
 
     this.report?.finish(TERRAIN_JOB);
 
@@ -1139,6 +1142,7 @@ export class IslandScene {
     followHd(at.wx, at.wz);
     this.terrain.follow(at);
     if (hydro()) this.water.follow(at);
+    this.water.update(dt);
 
     // WEATHER IS ASKED IN GLOBAL COORDINATES and drawn in local ones.
     // Her position decides what the sky is doing; the CAMERA's rendered

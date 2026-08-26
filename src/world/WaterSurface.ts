@@ -1,9 +1,10 @@
 import * as THREE from 'three';
 import { toLocal } from './origin';
-import { reliefScale } from './heightfield';
+import { baseLand, reliefScale } from './heightfield';
 import { hydro, hydroTile, type Hydro, type Lake, type River } from './hydro';
 import { hdTilesNear, hdTileIndex, HD_TILE, HD_STEP } from './kauaiHd';
 import { SPAN } from './kauai';
+import { clockUniform, waterMaterial } from './waterLook';
 import { world, type WorldPoint } from './coords';
 
 /**
@@ -54,6 +55,18 @@ const OVER = 1.5;
 /** Nothing narrower than this reads as water at all. */
 const MIN_HALF = 60;
 
+/**
+ * Columns of vertices across a run.
+ *
+ * Two would be enough to DRAW the ribbon and is what this started with,
+ * but the shading needs the ground: depth is sampled per vertex and
+ * interpolated between them, so a two-column strip can only ever fade
+ * linearly from bank to bank. The bed under it is a smootherstep bowl.
+ * Five columns follows the bowl closely enough that the shallows read
+ * as shallows, and costs a few thousand triangles on the worst tile.
+ */
+const ACROSS = 5;
+
 interface Tile {
   readonly mesh: THREE.Mesh;
   /** Where the geometry was built about, in world units. */
@@ -67,6 +80,8 @@ function build(
 ): THREE.BufferGeometry | null {
   const pos: number[] = [];
   const idx: number[] = [];
+  const rise: number[] = [];
+  const flow: number[] = [];
 
   for (const river of rivers) {
     if (river.count < 2) continue;
@@ -82,14 +97,27 @@ function build(
       const len = Math.hypot(tx, tz);
       if (len < 1e-6) { tx = 1; tz = 0; } else { tx /= len; tz /= len; }
       const half = Math.max(MIN_HALF, (data.width[p] / 2) * OVER);
-      const nx = -tz * half, nz = tx * half;
       const y = data.level[p];
-      pos.push(x - nx - cx, y, z - nz - cz);
-      pos.push(x + nx - cx, y, z + nz - cz);
+      for (let k = 0; k < ACROSS; k++) {
+        const u = (k / (ACROSS - 1)) * 2 - 1;
+        const wx = x + -tz * half * u;
+        const wz = z + tx * half * u;
+        pos.push(wx - cx, y, wz - cz);
+        // THE ONE THING HERE THAT ASKS THE GROUND. `baseLand` already
+        // carries the bed, so this IS the depth — there is no profile
+        // to reconstruct and nothing to keep in step. Every previous
+        // version of this file carried four numbers and rebuilt the
+        // trench in the shader, which is how the water and the land
+        // ended up disagreeing about where the shore was.
+        rise.push(y - baseLand(wx, wz));
+        flow.push(tx, tz);
+      }
     }
     for (let i = 0; i < river.count - 1; i++) {
-      const q = base + i * 2;
-      idx.push(q, q + 1, q + 2, q + 1, q + 3, q + 2);
+      for (let k = 0; k < ACROSS - 1; k++) {
+        const q = base + i * ACROSS + k;
+        idx.push(q, q + 1, q + ACROSS, q + 1, q + ACROSS + 1, q + ACROSS);
+      }
     }
   }
 
@@ -117,13 +145,21 @@ function build(
     const faces = THREE.ShapeUtils.triangulateShape(outer, holes);
     const all = [outer, ...holes].flat();
     const base = pos.length / 3;
-    for (const v of all) pos.push(v.x - cx, lake.level, v.y - cz);
+    for (const v of all) {
+      pos.push(v.x - cx, lake.level, v.y - cz);
+      rise.push(lake.level - baseLand(v.x, v.y));
+      // Standing water goes nowhere, so its ripple only breathes.
+      flow.push(0, 0);
+    }
     for (const f of faces) idx.push(base + f[0], base + f[1], base + f[2]);
   }
 
   if (idx.length === 0) return null;
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geometry.setAttribute('rise', new THREE.Float32BufferAttribute(rise, 1));
+  geometry.setAttribute('flowx', new THREE.Float32BufferAttribute(flow.filter((_, i) => i % 2 === 0), 1));
+  geometry.setAttribute('flowz', new THREE.Float32BufferAttribute(flow.filter((_, i) => i % 2 === 1), 1));
   geometry.setIndex(idx);
   geometry.computeVertexNormals();
   return geometry;
@@ -145,17 +181,7 @@ export class WaterSurface {
   private readonly material: THREE.MeshStandardMaterial;
 
   constructor(private readonly scene: THREE.Scene) {
-    this.material = new THREE.MeshStandardMaterial({
-      color: new THREE.Color(0.10, 0.30, 0.36),
-      transparent: true,
-      opacity: 0.82,
-      roughness: 0.42,
-      metalness: 0,
-      // The terrain owns the shoreline, and it can only do that from
-      // both sides: she stands on either bank and swims between them.
-      side: THREE.DoubleSide,
-      depthWrite: false,
-    });
+    this.material = waterMaterial();
     this.group.renderOrder = 2;
     this.scene.add(this.group);
   }
@@ -187,6 +213,11 @@ export class WaterSurface {
       this.group.add(mesh);
     }
     this.place();
+  }
+
+  /** Move the ripple on. Seconds of game time. */
+  update(dt: number): void {
+    clockUniform.value += dt;
   }
 
   /** Re-seat every tile after a rebase, and follow the relief dial. */
