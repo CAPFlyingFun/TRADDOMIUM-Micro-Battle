@@ -26,6 +26,7 @@
  * "this water connects to that water" is a fact in the file rather than
  * something a renderer has to be trusted not to break.
  */
+import { pullBuffer } from './fetchBytes';
 import { UNITS_PER_METRE } from './kauai';
 
 /** One surveyed run of water, from a source or junction to the next. */
@@ -166,4 +167,64 @@ export function decodeHydro(buffer: ArrayBuffer): Hydro {
 /** Metres of real Kauaʻi, for anything that wants to talk in them. */
 export function metres(units: number): number {
   return units / UNITS_PER_METRE;
+}
+
+/** The hydrography's own asset, and what the loading bar declares. */
+export const HYDRO_FILE = 'kauai-hydro.bin';
+
+let loaded: Hydro | null = null;
+/** Runs and lakes grouped by BE's 8×8 tile, so a scene can stream them. */
+let byTile: Map<number, { rivers: River[]; lakes: Lake[] }> | null = null;
+
+/** Hand the module the decoded hydrography. */
+export function useHydro(data: Hydro): void {
+  loaded = data;
+  byTile = new Map();
+  const bucket = (tile: number) => {
+    let t = byTile!.get(tile);
+    if (!t) { t = { rivers: [], lakes: [] }; byTile!.set(tile, t); }
+    return t;
+  };
+  // A run the bake could not place still has to be DRAWN, or a stretch
+  // of river silently goes missing and nothing in the scene can tell
+  // you which. Unplaced work is filed under the tile its first point
+  // falls in rather than dropped.
+  for (const r of data.rivers) bucket(r.tile === NO_TILE ? tileOf(data.x[r.first], data.z[r.first]) : r.tile).rivers.push(r);
+  for (const l of data.lakes) {
+    const v = data.ringFirst[l.firstRing];
+    bucket(l.tile === NO_TILE ? tileOf(data.vertX[v], data.vertZ[v]) : l.tile).lakes.push(l);
+  }
+}
+
+/** Which of the 64 tiles a world point falls in. */
+function tileOf(x: number, z: number): number {
+  const half = 2_800_000;
+  const col = Math.min(7, Math.max(0, Math.floor(((x + half) / (half * 2)) * 8)));
+  const row = Math.min(7, Math.max(0, Math.floor(((z + half) / (half * 2)) * 8)));
+  return col * 8 + row;
+}
+
+/** The loaded hydrography, or null before useHydro. */
+export function hydro(): Hydro | null {
+  return loaded;
+}
+
+/** Everything to draw for one tile. */
+export function hydroTile(tile: number): { rivers: River[]; lakes: Lake[] } | null {
+  return byTile?.get(tile) ?? null;
+}
+
+/** Forget it all — for tests and for leaving the island. */
+export function forgetHydro(): void {
+  loaded = null;
+  byTile = null;
+}
+
+/** Fetch and decode the hydrography. */
+export async function loadHydro(
+  onProgress?: (done: number, total: number) => void,
+  url = HYDRO_FILE,
+): Promise<Hydro> {
+  const buffer = await pullBuffer(url, () => {}, (done) => onProgress?.(done, 0));
+  return decodeHydro(buffer);
 }
