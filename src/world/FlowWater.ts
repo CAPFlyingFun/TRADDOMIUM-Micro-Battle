@@ -75,7 +75,7 @@ import { FAR_WATER, NEAR_WATER } from './farWater';
  *
  * The answer is not a better distance for the geometry — it is a
  * different OWNER past the distance where geometry can work. The slabs
- * now fade out across NEAR_WATER..FAR_WATER (150–250 m, inside the
+ * now fade out across NEAR_WATER..FAR_WATER (120–190 m, inside the
  * transition tier, whose 3-metre vertices can still clip a channel),
  * and past that the terrain itself wears the water as paint from a
  * baked mask — see farWater.ts. The build box only needs to cover the
@@ -88,7 +88,7 @@ import { FAR_WATER, NEAR_WATER } from './farWater';
 // that walk with NO geometry inside the crossfade band — water missing
 // right next to her, the one place the paint cannot cover. The box
 // must reach cell travel plus FAR_WATER plus margin.
-const REACH = 80_000;
+export const REACH = 80_000;
 const FADE_FROM = NEAR_WATER;
 const FADE_TO = FAR_WATER;
 /**

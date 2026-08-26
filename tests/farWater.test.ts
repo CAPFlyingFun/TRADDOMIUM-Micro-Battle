@@ -24,6 +24,7 @@ import {
 import { decodeGrid, SPAN } from '../src/world/kauai';
 import { DEFAULTS } from '../src/ui/settings';
 import { TRANSITION_REACH } from '../src/world/TerrainStream';
+import { REACH } from '../src/world/FlowWater';
 
 const WET = fileURLToPath(new URL('../public/kauai-wet.bin', import.meta.url));
 let mask: WetMask;
@@ -182,6 +183,13 @@ describe('the far-water paint, as the terrain compiles it', () => {
       const geometry = 1 - smooth(NEAR_WATER, FAR_WATER, d);
       expect(paint + geometry).toBeCloseTo(1, 12);
     }
+    // The geometry's build box must outlast the walk between rebuilds:
+    // follow() only rebuilds on a 50,000-unit decision-cell crossing,
+    // so slabs can be built around a spot up to 50,000 units behind
+    // her, and the box has to still cover everything the crossfade can
+    // show from where she now stands. 40,000 shipped for about an hour
+    // and meant water missing at her feet at a cell edge.
+    expect(REACH).toBeGreaterThanOrEqual(50_000 + FAR_WATER);
     // And the band finishes INSIDE the transition tier's reach, where
     // the ground can still clip a channel — the first draft ended it
     // 50 m past that, over the middle tier's 31-metre triangles, which
