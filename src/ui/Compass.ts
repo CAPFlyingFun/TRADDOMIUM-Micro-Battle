@@ -158,14 +158,6 @@ export interface GroundLine {
  * missing is what she is actually DOING, which on land is the same
  * number and in water is not.
  */
-export interface SwimLine {
-  /** Degrees from north she is actually travelling. */
-  readonly track: number;
-  /** World units a second, over the ground. */
-  readonly speed: number;
-  /** True once her feet are off the bed. */
-  readonly afloat: boolean;
-}
 
 /** The air she is in, relative to her nose. */
 export interface WindLine {
@@ -194,7 +186,6 @@ export interface UnderTape {
   readonly air?: AirLine | null;
   readonly ground?: GroundLine | null;
   readonly wind?: WindLine | null;
-  readonly swim?: SwimLine | null;
 }
 
 /**
@@ -222,8 +213,6 @@ export class Compass {
   private lastAir = '';
   private readonly groundLine: HTMLDivElement;
   private lastGround = '';
-  private readonly swimLine: HTMLDivElement;
-  private lastSwim = '';
   private readonly windLine: HTMLDivElement;
   private readonly windArrow: SVGSVGElement;
   private readonly windText: HTMLSpanElement;
@@ -369,20 +358,6 @@ export class Compass {
     // THE WATER'S ROW, in the air rows' place and never at the same
     // time as them — she is in a stream or she is flying, and the two
     // readouts answer the same question about different fluids.
-    this.swimLine = document.createElement('div');
-    this.swimLine.dataset.ui = 'compass-swim';
-    Object.assign(this.swimLine.style, {
-      marginTop: '1px',
-      textAlign: 'center',
-      font: '600 10px/1 "JetBrains Mono", ui-monospace, monospace',
-      fontVariantNumeric: 'tabular-nums',
-      whiteSpace: 'nowrap',
-      letterSpacing: '.04em',
-      color: 'rgba(150, 226, 236, .92)',
-      textShadow: SHADOW,
-      display: 'none',
-    } as Partial<CSSStyleDeclaration>);
-    this.root.appendChild(this.swimLine);
 
     this.windLine = document.createElement('div');
     this.windLine.dataset.ui = 'compass-wind';
@@ -571,24 +546,6 @@ export class Compass {
     } else if (this.groundLine.style.display !== 'none') {
       this.groundLine.style.display = 'none';
       this.lastGround = '';
-    }
-
-    const swim = under?.swim ?? null;
-    if (swim) {
-      // AFLOAT OR WADING, said in a word rather than a second number.
-      // They are different situations — one is her legs and one is the
-      // current — and the speed alone cannot tell them apart.
-      const line = `${swim.afloat ? 'SWIM' : 'WADE'} ${
-        String(Math.round(wrap360(swim.track)) % 360).padStart(3, '0')}° @ ${
-        swim.speed.toFixed(1)} cm/s`;
-      if (line !== this.lastSwim) {
-        this.lastSwim = line;
-        this.swimLine.textContent = line;
-      }
-      if (this.swimLine.style.display === 'none') this.swimLine.style.display = '';
-    } else if (this.swimLine.style.display !== 'none') {
-      this.swimLine.style.display = 'none';
-      this.lastSwim = '';
     }
 
     const wind = under?.wind ?? null;

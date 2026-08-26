@@ -364,13 +364,9 @@ describe('the shipped loading plan', () => {
   it('declares a total no transport number can move', async () => {
     const { planBands } = await import('../src/world/terrainMaterial');
     const { planQueen } = await import('../src/ant/queenModel');
-    const { planRipple } = await import('../src/world/FlowWater');
-    const { planFarWater } = await import('../src/world/farWater');
     const plan = new LoadPlan(() => 0);
     planBands(plan);
     planQueen(plan);
-    planRipple(plan);
-    planFarWater(plan);
     const declared = plan.read().bytesTotal;
     // The baked truth, straight from the manifest.
     const { ASSET_BYTES } = await import('../src/ui/assetSizes');

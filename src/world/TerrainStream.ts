@@ -398,42 +398,19 @@ export function buildCell(
 const FOOTPRINT = 0.5;
 
 /**
- * AND THE MOST ANY TIER MAY ASK FOR, in world units.
+ * THE WIDEST SQUARE A COARSE VERTEX MAY ANSWER FOR.
  *
- * The footprint exists so a tier's triangles hold the water drawn over
- * them. The middle tier's vertices are 3,125 apart, so it was asking
- * about 3,125 — and the carve answered by flattening a shelf twice
- * that wide, 62 metres, at the waterline along every river on the
- * island. Joshua's screenshots are the result: grass plateaus the size
- * of car parks ending in vertical walls.
+ * `dryLand` asks its neighbourhood a question — is this sample sitting
+ * in the sea while the ground around it is land — and the answer is
+ * only honest if the neighbourhood is the vertex's own footprint. Half
+ * the vertex spacing is that footprint: a vertex answers for its own
+ * half-cell in each direction and no more.
  *
- * It was never needed then. Water stopped at the transition tier, so no
- * tier coarser than that had any water over it to contain, and capping
- * at the transition step put the widest carve on the island at six
- * metres.
- *
- * THAT ARGUMENT DIED WHEN THE WATER'S DRAW DISTANCE MOVED. FlowWater's
- * REACH was two hundred metres and is now two kilometres, which is the
- * MIDDLE tier's reach — so the middle tier does have water over it, and
- * the cap left it asking about three metres of ground either side of a
- * vertex standing thirty-one metres apart from its neighbours. It found
- * no channel, kept its uncut ground, and the water lay on top of it.
- * That is the second half of Joshua's floating rivers; `flowNear` was
- * the first.
- *
- * Half the vertex spacing is the honest footprint: a vertex answers for
- * its own half-cell in each direction and no more, so every square with
- * a channel in it takes that channel's depth and no square takes a
- * neighbour's. Capped at the middle tier's half-step because nothing
- * coarser has water over it — the same reasoning as before, moved to
- * where the water actually stops now.
- *
- * The old cap existed to stop a wide carve flattening plateaus. That
- * carve was unbounded; this one cannot lower any point by more than a
- * metre and tapers to nothing at its edge, so a wide footprint out here
- * is a gentle metre-deep dip across sixty metres, seen from at least
- * two hundred. It is what puts the water IN the ground rather than on
- * it.
+ * The cap is what stops the backdrop, whose vertices stand kilometres
+ * apart, asking about a square the size of a district and calling a
+ * whole coastline one thing. It is named for a carve that no longer
+ * exists — the water's trench used to be widened out here to the same
+ * footprint — and kept because the bound is still the right one.
  */
 const CARVE_CAP = MIDDLE_STEP / 2;
 

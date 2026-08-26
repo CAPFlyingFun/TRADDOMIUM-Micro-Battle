@@ -22,7 +22,6 @@ import { pullBytes } from './fetchBytes';
 import type { LoadReport } from '../ui/loadPlan';
 import { assetBytes } from '../ui/assetSizes';
 import { GRAIN_SIZE } from './groundTexture';
-import { farWaterShader, wetMaskUniform, wetSeatUniform } from './farWater';
 import { UNITS_PER_METRE } from './kauai';
 
 /**
@@ -86,10 +85,6 @@ export function setTextureOrigin(x: number, z: number): void {
   const fold = (v: number, tile: number) => ((v % tile) + tile) % tile;
   BAND_OFFSET_UNIFORM.value.set(fold(x, BAND_TILE), fold(z, BAND_TILE));
   GRAIN_OFFSET_UNIFORM.value.set(fold(x, GRAIN_TILE), fold(z, GRAIN_TILE));
-  // The far-water mask is one picture of the whole island, so it gets
-  // the origin WHOLE — a per-tile remainder would slide the rivers to
-  // a different valley on every rebase.
-  wetSeatUniform.value.set(x, z);
 }
 
 /**
@@ -283,11 +278,11 @@ const EDGES = `
 /**
  * THE GROUND'S STRING SURGERY, on its own where a test can reach it.
  *
- * Pulled out of onBeforeCompile for the same reason FlowWater's was: a
+ * Pulled out of onBeforeCompile so a test can compose it directly: a
  * `.replace` against three.js source that stops matching is not an
  * error, it is silence, and the ground comes back subtly wrong with a
- * clean build. tests/farWater.test.ts composes this with the far-water
- * injection exactly as the material does and checks both landed.
+ * clean build. tests/groundTexture.test.ts composes it exactly as the
+ * material does and checks the injection landed.
  */
 export function groundShader(
   vert: string, frag: string,
@@ -444,16 +439,9 @@ export function terrainMaterial(
     shader.uniforms.bandOffset = BAND_OFFSET_UNIFORM;
     shader.uniforms.grainOffset = GRAIN_OFFSET_UNIFORM;
     shader.uniforms.nearCut = { value: nearCut };
-    // The far water rides every tier — it is the only water past the
-    // transition reach, and the backdrop is where rivers meet the
-    // horizon.
-    shader.uniforms.wetMask = wetMaskUniform;
-    shader.uniforms.wetSeat = wetSeatUniform;
-
     const ground = groundShader(shader.vertexShader, shader.fragmentShader);
-    const whole = farWaterShader(ground.vertexShader, ground.fragmentShader);
-    shader.vertexShader = whole.vertexShader;
-    shader.fragmentShader = whole.fragmentShader;
+    shader.vertexShader = ground.vertexShader;
+    shader.fragmentShader = ground.fragmentShader;
   };
 
   return material;

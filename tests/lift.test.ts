@@ -120,45 +120,18 @@ describe('the power readout', () => {
 });
 
 /**
- * WHICH JOB THE LEVER HAS, AND THE ONE IT WAS NEVER GIVEN.
- *
- * Diving was written, wired to this lever, and unreachable for two
- * releases. The reason was three lines of inline branching that knew
- * about exactly two places she could be — in the air, or on the
- * ground. Afloat is neither, so it fell through to `off`, and `off`
- * makes the lever read zero however far it is pushed. Every frame, the
- * dive demand was a real number multiplied by nothing.
- *
- * Joshua reported it twice, in the same words, over two versions:
- * "can't dive underwater yet." Nothing in the build could have said
- * which of the four things between the lever and the water was at
- * fault, because the decision had no name and no test. It has both
- * now, and this is the test.
+ * WHICH LEVER THE THUMB GETS, and it is a pure function of where she
+ * is. The dive case went out with the water: there is nothing on the
+ * island to be afloat on, and a lever that cannot do anything is
+ * exactly what the contextual-HUD rule forbids.
  */
-describe('what the lever is for', () => {
-  it('lets her dive when the water has her', () => {
-    // The case that did not exist. Not flying, and no chance of
-    // reaching takeoff speed while afloat — which is exactly why the
-    // old rule switched the lever off and diving never worked.
-    expect(leverFor(false, true, false)).toBe('dive');
-  });
-
-  it('never leaves her afloat with no vertical control', () => {
-    // Whatever else is true of her, being in the water means down is
-    // an option. This is the assertion that would have caught it.
-    for (const canTakeOff of [false, true]) {
-      expect(leverFor(false, true, canTakeOff)).not.toBe('off');
-    }
-  });
-
+describe('the lift lever', () => {
   it('still flies, still takes off, and still greys out on dry land', () => {
-    // Flying beats everything: she may be over water, or in the middle
-    // of falling into it, and coming down is always hers.
-    expect(leverFor(true, false, false)).toBe('full');
-    expect(leverFor(true, true, false)).toBe('full');
-    // On dry ground it is a takeoff when she can, and dead when she
+    // Flying beats everything, and coming down is always hers.
+    expect(leverFor(true, false)).toBe('full');
+    // On the ground it is a takeoff when she can, and dead when she
     // cannot — an exhausted queen may not ask to climb.
-    expect(leverFor(false, false, true)).toBe('takeoff');
-    expect(leverFor(false, false, false)).toBe('off');
+    expect(leverFor(false, true)).toBe('takeoff');
+    expect(leverFor(false, false)).toBe('off');
   });
 });

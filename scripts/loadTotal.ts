@@ -3,14 +3,13 @@ import { statSync } from 'node:fs';
 import { LoadPlan, readableBytes, TERRAIN_JOB, FIRST_LIGHT_JOB, WORK_WEIGHT } from '../src/ui/loadPlan';
 import { BAND_FILES } from '../src/world/terrainMaterial';
 
-// planBands/planQueen/planRipple, without importing three.js.
+// planBands/planQueen, without importing three.js.
 import { assetBytes } from '../src/ui/assetSizes';
 const plan = new LoadPlan(() => 0);
 for (const name of BAND_FILES) {
   plan.add(`band:${name}`, 'Ground textures', assetBytes(`kauai-tex/${name}.jpg`)!, true);
 }
 plan.add('queen', 'The queen', assetBytes('models/queen-winged.glb')!, true);
-plan.add('ripple', 'The water', assetBytes('water-normal.png')!, true);
 plan.add(TERRAIN_JOB, 'Cutting the terrain', WORK_WEIGHT);
 plan.add(FIRST_LIGHT_JOB, 'First light', WORK_WEIGHT);
 const guessed = plan.read().bytesTotal;
@@ -19,7 +18,6 @@ for (const name of BAND_FILES) {
   plan.resize(`band:${name}`, statSync(`public/kauai-tex/${name}.jpg`).size);
 }
 plan.resize('queen', statSync('public/models/queen-winged.glb').size);
-plan.resize('ripple', statSync('public/water-normal.png').size);
 const real = plan.read().bytesTotal;
 
 console.log(`declared at the start  ${guessed} B  -> "${readableBytes(guessed)}"`);

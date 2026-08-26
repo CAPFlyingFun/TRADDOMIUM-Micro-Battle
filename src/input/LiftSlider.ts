@@ -32,7 +32,7 @@ export const DEADZONE = 0.08;
 export const TAKEOFF_DETENT = 0.55;
 
 /** What the lever is for right now. */
-export type Lever = 'full' | 'takeoff' | 'dive' | 'off';
+export type Lever = 'full' | 'takeoff' | 'off';
 
 /**
  * WHICH OF THOSE IT IS, given where she is — and this is a pure
@@ -51,16 +51,11 @@ export type Lever = 'full' | 'takeoff' | 'dive' | 'off';
  * was written in a comment next to the bug, correctly, and the code
  * under it still said otherwise.
  */
-export function leverFor(
-  aloft: boolean, afloat: boolean, canTakeOff: boolean,
-): Lever {
+export function leverFor(aloft: boolean, canTakeOff: boolean): Lever {
   // Never off in the air, even spent: coming DOWN is always hers, and
   // the flight model refuses the up half itself when there is nothing
   // left to spend on it.
   if (aloft) return 'full';
-  // Afloat beats takeoff: she cannot run up to speed on water, and
-  // down is the direction that means something there.
-  if (afloat) return 'dive';
   return canTakeOff ? 'takeoff' : 'off';
 }
 
@@ -162,8 +157,7 @@ export class LiftSlider {
     const was = this.on;
     this.on = state !== 'off';
     this.root.style.opacity = this.on ? '1' : '.45';
-    this.knob.textContent = state === 'takeoff' ? '🪽'
-      : state === 'dive' ? '🌊' : '⇕';
+    this.knob.textContent = state === 'takeoff' ? '🪽' : '⇕';
     if (was && !this.on) {
       this.gripped = null;
       this.at = 0;

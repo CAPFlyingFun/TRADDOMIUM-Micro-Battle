@@ -15,12 +15,7 @@ import {
 } from '../world/heightfield';
 import { findLandfall, UNITS_PER_METRE, type HeightGrid } from '../world/kauai';
 import { local, world, type WorldPoint } from '../world/coords';
-import { FlowWater } from '../world/FlowWater';
-import { loadWetMask } from '../world/farWater';
 import { TerrainStream, TIER_CUTS } from '../world/TerrainStream';
-import { submersion, Underwater } from '../world/Underwater';
-import { canDrink, wadeAt } from '../ant/wading';
-import { waterLevelAt } from '../world/flow';
 
 import { originAt, rebaseFor, setOrigin, toLocal, toWorld,
 } from '../world/origin';
@@ -36,7 +31,7 @@ import {
 } from '../game/save';
 import { Vitals } from '../ui/Vitals';
 import { LIVE_GROWTH, liveStat } from '../ant/castes';
-import { ActionPad, type Action } from '../input/ActionPad';
+import { ActionPad } from '../input/ActionPad';
 import { Thirst } from '../ant/thirst';
 import { LiftSlider, leverFor } from '../input/LiftSlider';
 import { DebugDie } from '../ui/DebugDie';
@@ -88,16 +83,6 @@ import { LiveWind, shelter, windProfile } from '../weather/windField';
  */
 
 const SKY_COLOR = 0x9cc8e8;
-/**
- * How fast she sinks and rises when the lever moves — the fraction of
- * the remaining depth she closes each second.
- *
- * Slow enough to read as swimming rather than as a lift. Two and a bit
- * seconds from the surface to the bed of a metre-deep trench, which at
- * her scale is a hundred body lengths of water and ought to take a
- * moment.
- */
-const DIVE_EASE = 1.8;
 
 /** How long the lapse warning stays up, in seconds. */
 const PROTECTION_NOTICE = 6;
@@ -121,66 +106,7 @@ export class IslandScene {
   private readonly panel: SettingsPanel;
   private readonly vitals: Vitals;
   private readonly actions: ActionPad;
-  /** The drink button. On the pad only where there is water to drink. */
-  private readonly drinkButton: Action;
   private readonly thirst = new Thirst();
-  /**
-   * HOW FAR DOWN SHE IS SWIMMING, nought at the surface and one on the
-   * bed. Eased rather than set, because the lever is a position and a
-   * swimming animal is not: snapping her to the bottom the instant a
-   * thumb reaches the end of the track reads as a teleport.
-   */
-  private dive = 0;
-  private drinking = false;
-  /**
-   * Whether the water has her feet off the bed — read a hundred lines
-   * later by the lever, which is the whole of the dive fix.
-   */
-  private afloat = false;
-  /**
-   * HOW FAST SHE IS ACTUALLY GOING, and which way — for the water row.
-   *
-   * Measured from where she WAS, not from what she asked for, which is
-   * the whole point of it. A queen adrift in a stream is demanding
-   * nothing and moving several centimetres a second, and the pace
-   * column reads 0.0 because that column shows the demand.
-   *
-   * Smoothed, because a per-frame delta at 60 Hz over a body-length
-   * step is mostly quantisation, and a readout that flickers between
-   * 8 and 14 is one nobody can use.
-   */
-  private wake = { wx: 0, wz: 0, vx: 0, vz: 0, started: false };
-  /** Water over the ground under her this frame; zero on dry land. */
-  private wet = 0;
-
-  /** Her smoothed over-ground speed, world units a second. */
-  private get swimSpeed(): number {
-    return Math.hypot(this.wake.vx, this.wake.vz);
-  }
-
-  /**
-   * Fold this frame's movement into the smoothed velocity.
-   *
-   * Frame-rate independent, the same shape every other approach in this
-   * scene uses: a fixed fraction of the gap per SECOND rather than per
-   * frame, so the readout settles at the same rate on a phone as on a
-   * desktop.
-   */
-  private trackWake(dt: number): void {
-    const at = this.ant.where;
-    if (!this.wake.started) {
-      this.wake.started = true;
-      this.wake.wx = at.wx; this.wake.wz = at.wz;
-      return;
-    }
-    if (dt <= 0) return;
-    const vx = (at.wx - this.wake.wx) / dt;
-    const vz = (at.wz - this.wake.wz) / dt;
-    this.wake.wx = at.wx; this.wake.wz = at.wz;
-    const ease = 1 - Math.exp(-6 * dt);
-    this.wake.vx += (vx - this.wake.vx) * ease;
-    this.wake.vz += (vz - this.wake.vz) * ease;
-  }
   private readonly debugDie: DebugDie;
   private readonly weatherChip: WeatherChip;
   /** Altitude, vertical speed and the wind — flight only. */
@@ -303,17 +229,6 @@ export class IslandScene {
   private readonly ant = new PlayerAnt();
   private readonly clock = new THREE.Clock();
   private terrain!: TerrainStream;
-  /** The streams the island makes for itself. See flow.ts. */
-  private streams!: FlowWater;
-  /**
-   * What the frame looks like when the water is over her head.
-   *
-   * A LOOK, not a mechanic. It tints, fogs and dims; it does not swim,
-   * wade, float or drown. When those arrive they read the same
-   * waterLevelAt() this does, so the picture and the rules cannot end up
-   * disagreeing about where the water is.
-   */
-  private underwater!: Underwater;
   /**
    * The CEILING on a full push of the stick — not propulsion. She does
    * not move because this is set; she moves because a thumb asks.
@@ -449,15 +364,6 @@ export class IslandScene {
     // rather than being typed here — this is the only place the data
     // file and the HUD meet, and it is a read, not a copy.
     this.actions = new ActionPad(host);
-    // THE DRINK BUTTON IS BACK, and the note that used to sit here is
-    // why it went: it stayed on the pad for one build after the water
-    // came out, permanently disabled, which is the state the
-    // contextual-HUD rule exists to forbid. It comes back now there is
-    // something to drink, and it comes back CONTEXTUAL — off the pad
-    // entirely unless she is standing in fresh water, rather than
-    // greyed on every dry hillside on the island.
-    this.drinkButton = this.actions.add('💧', 'drink', 'e');
-    this.drinkButton.show(false);
     this.debugDie = new DebugDie(host, () => this.kill());
     this.weatherChip = new WeatherChip(host);
     this.flightHud = new FlightHud(host);
@@ -500,13 +406,6 @@ export class IslandScene {
     this.look.setYaw(-facing);
     this.follow = new FollowCamera(this.aspect());
     this.follow.snapTo(this.ant.root, -facing);
-
-    // HERE RATHER THAN WITH THE TERRAIN AND THE STREAMS, because it
-    // watches the camera and the camera does not exist until the line
-    // above. Everything it needs is standing by now: the water it reads
-    // is the flow index, not the drawn sheet, so it does not care that
-    // FlowWater was built several steps earlier.
-    this.underwater = new Underwater(this.scene, this.follow.camera);
 
     // ARRIVE IN THE WEATHER, do not fade into it. Everything the sky
     // does eases over minutes, which is right while she is walking and
@@ -590,37 +489,6 @@ export class IslandScene {
       origin: () => originAt(),
       cells: () => this.terrain.cellCount,
       cameraAt: () => this.follow.camera.position.toArray(),
-      riversDrawn: () => this.streams.shown,
-      showWater: (on: boolean) => this.streams.setVisible(on),
-      showLayer: (w: 'reaches' | 'ponds', on: boolean) => this.streams.setLayer(w, on),
-      /**
-       * HOW FAR THE EYE IS UNDER THE WATER, in DRAWN units, 0 when dry.
-       *
-       * The camera's x and z are RENDERED — measured from the floating
-       * origin — so they are put back into world coordinates before the
-       * water is asked about them, while y is already absolute and goes
-       * through untouched. Skip that and this samples the water somewhere
-       * near the middle of the island and answers plausibly, which is the
-       * dangerous kind of wrong.
-       *
-       * Deliberately a read and nothing more. Whether the LOOK was
-       * actually applied is a separate question, and `fogDensity` and
-       * `sunlight` below already answer it.
-       */
-      /**
-       * WHAT THE WATER IS DOING TO HER, at her feet rather than at the
-       * camera — `submerged` above answers for the eye, which is on a
-       * boom and can be over dry ground while she is in a stream.
-       */
-      wading: () => wadeAt(
-        this.ant.where.wx, this.ant.where.wz,
-        groundHeight(this.ant.where.wx, this.ant.where.wz),
-      ),
-      submerged: () => {
-        const eye = this.follow.camera.position;
-        const seat = originAt();
-        return submersion(eye.x + seat.x, eye.y, eye.z + seat.z);
-      },
       paused: () => this.halted,
       /**
        * THE POSITION FIX AS A STRING — the same one under the compass.
@@ -659,8 +527,6 @@ export class IslandScene {
         // measured velocity, and folding a jump in reads as thousands
         // of centimetres a second of "current" for the next second —
         // the screenshot rig caught SWIM @ 1553 cm/s on a fix restore.
-        this.wake.started = false;
-        this.wake.vx = 0; this.wake.vz = 0;
         setOrigin(wx, wz);
         const seat = originAt();
         setTextureOrigin(seat.x, seat.z);
@@ -668,7 +534,6 @@ export class IslandScene {
         this.flight.land();
         this.terrain.follow(this.ant.where);
         this.terrain.place();
-        this.streams.follow(this.ant.where);
         this.follow.snapTo(this.ant.root, -heading);
       },
       pace: () => this.pace,
@@ -873,8 +738,6 @@ export class IslandScene {
     this.rain.dispose();
     this.detachSettings();
     this.detachKill();
-    this.streams.dispose();
-    this.underwater.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }
@@ -1031,19 +894,7 @@ export class IslandScene {
     }
 
     let winded = false;
-    // CLEARED EVERY FRAME, and set again only on the branch that can
-    // earn it. `drinking` is assigned inside the on-foot path, so
-    // taking off mid-sip would otherwise leave it latched and she
-    // would drink her way across the island at two hundred metres.
-    this.drinking = false;
-    // Cleared for the same reason and set on the same branch: the
-    // water row must not stay up while she is two hundred metres over
-    // the stream she was standing in.
-    this.wet = 0;
     if (this.flight.aloft) {
-      // And the button goes with her: there is nothing to drink from up
-      // here, whatever is underneath.
-      this.drinkButton.show(false);
       const step = this.flight.update(
         {
           push: stick.y,
@@ -1094,83 +945,14 @@ export class IslandScene {
       // for one while stopped or reversing costs nothing.
       const sprinting = wants && travel.speed > PACE_SPEED[this.pace] + 1e-3;
       const resting = this.ant.pace < 0.05;
-      // AND THE WATER GETS ITS VOTE BACK, at the one line the old
-      // comment here said it should plug into — that shape was right
-      // even though what filled it was not. `flowAt` has returned a
-      // current for three versions and nothing has ever read it, so
-      // until now she crossed every stream on the island dry and at
-      // full pace.
-      //
-      // The DRAWN ground, not the source surface: `wadeAt` compares the
-      // water against the ground she is standing on, so what slows her
-      // and what the player can see are one thing rather than two kept
-      // in step. Pace scales the whole demand, which preserves her
-      // direction and drops her gait with it; `above` floats her; and
-      // `carry` is the push, which PlayerAnt has always accepted and
-      // has never once been given.
-      //
-      // No stamina cost, deliberately. CLAUDE.md's rule is that a bar
-      // may only move if there is a way to move it back, and there is
-      // no drying off yet. Water may slow her and carry her; it may not
-      // start a clock she cannot stop.
-      // HOW DEEP SHE IS SWIMMING, from the lever that already means up
-      // and down. Reusing it rather than adding a control: it is the
-      // climb lever in the air and the dive lever in the water, which
-      // is one idea in one place on the screen instead of two.
-      const wantDive = this.flight.aloft ? 0 : Math.max(0, -this.liftSlider.lift);
-      // Frame-rate independent easing, the same shape PlayerAnt uses
-      // for every other approach: a fixed fraction of the remaining
-      // gap per second rather than per frame.
-      this.dive += (wantDive - this.dive) * (1 - Math.exp(-DIVE_EASE * dt));
-      const wade = wadeAt(
-        this.ant.where.wx, this.ant.where.wz,
-        groundHeight(this.ant.where.wx, this.ant.where.wz),
-        this.dive,
-      );
-      this.afloat = wade.afloat;
-      this.wet = wade.depth;
-      // DRINKING IS AN ACT, and an act can be interrupted. Held, not
-      // tapped: she stops where she is, and letting go or walking off
-      // ends it.
-      //
-      // AND IT REACHES NOW, which is a correction. This used to ask
-      // whether she was standing IN the water, on the grounds that at
-      // a centimetre long being near it is a step — and the ground
-      // disagreed. Measured across 732 stream crossings: a median of
-      // TWO CENTIMETRES of wet ground she can stand on, and on 25% of
-      // them none at all, dry to over her head in a single step. So
-      // the button appeared for about a fifth of a second of walking
-      // and Joshua could not find it. canDrink() asks whether there is
-      // water within reach of where she stands, which puts the whole
-      // bank in play without pretending the trench is shallower than
-      // it is.
-      const drinkable = canDrink(
-        this.ant.where.wx, this.ant.where.wz,
-        groundHeight(this.ant.where.wx, this.ant.where.wz),
-      );
-      this.drinkButton.show(drinkable);
-      this.drinking = drinkable && this.drinkButton.held
-        && travel.speed < 1;
       this.effort = sprinting ? SPRINT_DRAIN
         : resting ? RESTING_RECOVERY : MOVING_RECOVERY;
       winded = this.stamina.update(this.effort, dt);
-      // Drinking holds her still, which is what makes it an act she
-      // can be knocked out of rather than a passive trickle.
-      const hold = this.drinking ? 0 : wade.pace;
       this.ant.update(
-        {
-          ahead: travel.ahead * hold,
-          across: travel.across * hold,
-          speed: travel.speed * hold,
-        },
-        -look.yaw, dt, wade.above, this.drinking ? null : wade.carry,
+        { ahead: travel.ahead, across: travel.across, speed: travel.speed },
+        -look.yaw, dt,
       );
     }
-    // AFTER SHE HAS MOVED, whichever way she moved. Flight has its own
-    // ground-speed telemetry, but this costs a subtraction and being
-    // one number for both means the water row cannot disagree with
-    // where she actually is.
-    this.trackWake(dt);
 
     // Exhaustion drops her to the sustainable pace, never to a halt —
     // and the next sprint has to be asked for deliberately.
@@ -1226,17 +1008,6 @@ export class IslandScene {
             drift: telemetry.drift,
           }
           : null,
-        // THE WATER'S ROW. Any water at all, not just afloat: wading
-        // is where the current first starts to move her and it is
-        // exactly when she wants to know. Below a tenth of a
-        // centimetre a second there is nothing to say.
-        swim: !this.flight.aloft && this.wet > 0 && this.swimSpeed >= 0.05
-          ? {
-            track: bearingOf(this.wake.vx, this.wake.vz),
-            speed: this.swimSpeed,
-            afloat: this.afloat,
-          }
-          : null,
         // Only when there is a wind to speak of. The readout resolves
         // to a tenth of a centimetre a second; below that there is
         // nothing to say and a permanent "0.0" is a row nobody reads.
@@ -1256,18 +1027,15 @@ export class IslandScene {
     );
     // HER HEAD IS EITHER UNDER OR IT IS NOT, and that is the only
     // question this meter asks. Ticked here rather than inside the
-    // water branch so surfacing on dry land still refills her — she
-    // does not hold her breath standing on a riverbank.
-    // THE RESERVE RUNS WHATEVER SHE IS DOING — walking, flying, or
-    // standing still — because thirst is not an activity. Advanced
-    // here rather than inside the on-foot branch above, where a long
-    // flight would have paused it.
-    this.thirst.update(dt, this.drinking);
+    // THE RESERVE IS HELD, NOT DRAINING. CLAUDE.md's survival rule is
+    // that a bar may only move if there is a way to move it back, and
+    // with the water gone there is nothing on the island to drink
+    // from. So it is shown full and still rather than counting down to
+    // a state she cannot leave. `Thirst` keeps its drain law intact for
+    // when water returns; nothing here advances it.
     this.vitals.aloft(this.flight.aloft);
     this.vitals.show(this.stamina.fraction, this.stamina.spent, this.effort);
-    this.vitals.thirst(
-      this.thirst.fraction, this.thirst.parched, this.drinking, this.thirst.drain,
-    );
+    this.vitals.thirst(this.thirst.fraction, this.thirst.parched, false, 0);
 
     // NOTHING TO TICK. The grace is a deadline, so the only question
     // each frame is what time it is — which is why backgrounding the
@@ -1286,7 +1054,6 @@ export class IslandScene {
     // third case had to be added.
     this.liftSlider.enable(leverFor(
       this.flight.aloft,
-      this.afloat,
       this.flight.canTakeOff(this.ant.pace, this.stamina.fraction),
     ));
     // ── The world moves under her ─────────────────────────────────
@@ -1310,11 +1077,8 @@ export class IslandScene {
       const now = originAt();
       setTextureOrigin(now.x, now.z);
       this.terrain.place();
-      this.streams.place();
     }
     this.terrain.follow(at);
-    this.streams.follow(at);
-    this.streams.update(dt);
 
     // WEATHER IS ASKED IN GLOBAL COORDINATES and drawn in local ones.
     // Her position decides what the sky is doing; the CAMERA's rendered
@@ -1365,7 +1129,6 @@ export class IslandScene {
     // simply missing on one side of it. A key-held turn is 1.43 degrees
     // a frame at sixty, so this would have shown every time she looked
     // around underwater rather than in some corner case.
-    this.underwater.update(this.sun, this.skyLight);
     this.renderer.render(this.scene, this.follow.camera);
 
     // A frame has now been drawn with whatever had arrived by the time
@@ -1398,8 +1161,7 @@ export class IslandScene {
     // at the old shape, with its edge inside the new view. Turning a
     // phone while she is under water is exactly when that happens.
     if (!this.disposed) {
-      this.underwater.update(this.sun, this.skyLight);
-      this.renderer.render(this.scene, this.follow.camera);
+        this.renderer.render(this.scene, this.follow.camera);
     }
   };
 
@@ -1755,17 +1517,8 @@ export class IslandScene {
     }
     const msl = fix.msl;
     const agl = msl - groundHeight(at.wx, at.wz);
-    // WAS SHE FLYING, OR FLOATING? Both stand her off the ground, and
-    // a fix records only the height — so restoring one blind put her
-    // in the AIR over every river she had been swimming in, which is
-    // how a replay of Joshua's own swimming screenshot came back as a
-    // flight over dry-looking grass. If the recorded altitude is at or
-    // under the water standing here, the water is what was holding
-    // her: land her and let wadeAt lift her back to the surface.
-    const surface = waterLevelAt(at.wx, at.wz);
-    const wasAfloat = surface !== null && msl <= surface * reliefScale() + 5;
     const look = (fix.pitch * Math.PI) / 180;
-    if (agl > 1 && !wasAfloat) this.flight.hold(agl, heading);
+    if (agl > 1) this.flight.hold(agl, heading);
     // BOTH, and they are not the same act. The snap places the camera
     // for this frame; the aim is what stops the next frame's look
     // input putting it straight back at its resting elevation, which
@@ -1966,11 +1719,6 @@ export class IslandScene {
       terrainMaterial(maps, grain, TIER_CUTS.middle),
       terrainMaterial(maps, grain, TIER_CUTS.backdrop),
     );
-    this.streams = new FlowWater(this.scene, this.report);
-    // The far half of the same water: past FAR_WATER the terrain
-    // wears it as paint from this mask, and the slabs above fade out
-    // on the same pair of constants.
-    loadWetMask(this.report);
   }
 
 

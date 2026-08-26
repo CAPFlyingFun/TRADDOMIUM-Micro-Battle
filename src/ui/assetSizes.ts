@@ -20,8 +20,6 @@ export const ASSET_BYTES: Readonly<Record<string, number>> = {
   'kauai-tex/sand.jpg': 477379,
   'kauai-tex/snow.jpg': 302340,
   'models/queen-winged.glb': 2066824,
-  'water-normal.png': 205703,
-  'kauai-wet.bin': 1048584,
 };
 
 /** What a file weighs, or null if it was not baked. */

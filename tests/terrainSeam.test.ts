@@ -34,8 +34,6 @@ import {
 } from '../src/world/TerrainStream';
 import { setRelief, setSmoothing, useGrid } from '../src/world/heightfield';
 import { decodeGrid } from '../src/world/kauai';
-import { decodeFlow, useFlow } from '../src/world/flow';
-import { geoToWorld } from '../src/world/geo';
 import { world } from '../src/world/coords';
 import { DEFAULTS } from '../src/ui/settings';
 
@@ -47,10 +45,6 @@ beforeAll(() => {
   useGrid(decodeGrid(g.buffer.slice(g.byteOffset, g.byteOffset + g.byteLength) as ArrayBuffer));
   setSmoothing(DEFAULTS.terrainSmoothing);
   setRelief(1);
-  // The channel lives in `baseLand` now, so the ground these cells are
-  // cut from is only the real island with the flow loaded.
-  const f = readFileSync(fileURLToPath(new URL('../public/kauai-flow.bin', import.meta.url)));
-  useFlow(decodeFlow(f.buffer.slice(f.byteOffset, f.byteOffset + f.byteLength) as ArrayBuffer));
 });
 
 /** The lowest a cell's geometry reaches under its own surface. */
@@ -124,9 +118,8 @@ describe('a cell on a real resolution boundary', () => {
     // tier draws it on a 312.5-unit lattice anchored on HER, so a cell
     // cannot know at build time where its neighbour's vertices land.
     // Hence a flat bounded drop rather than a measured bridge.
-    const at = geoToWorld({ lat: 22.04110839, lon: -159.37390526 });
     const rim: CellSeam[] = [{ edge: 'east', neighbourStep: SPAN_CELL / 16, tier: true }];
-    const geo = buildCell(world(at.wx, at.wz), SPAN_CELL, VERTS, false, rim);
+    const geo = buildCell(world(-600_000, 300_000), SPAN_CELL, VERTS, false, rim);
     const pos = geo.getAttribute('position').array as Float32Array;
     expect(geo.getAttribute('position').count).toBe(VERTS * VERTS + VERTS);
     for (let i = 0; i < VERTS; i++) {
