@@ -16,6 +16,8 @@ export interface WaterSpot {
   /** The current, world units a second, at the surface. */
   readonly flowX: number;
   readonly flowZ: number;
+  /** The sea. Floats her like any water; drinks like none. */
+  readonly salt?: boolean;
 }
 
 type Query = (wx: number, wz: number) => WaterSpot | null;
