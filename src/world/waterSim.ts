@@ -72,6 +72,24 @@ export interface SimOpts {
   readonly damping: number;
   /** Depth below which a cell is dry to everything downstream. */
   readonly dryDepth: number;
+  /**
+   * SOAK — depth removed per second, everywhere. The paper's step 5.
+   *
+   * Implemented as a flat SUBTRACTION rather than a proportional decay,
+   * and the difference is the whole point. Proportional loss takes the
+   * same fraction from a film and from a pool, so a hillside stays
+   * damp forever and the island reads as a flood plain. A flat rate
+   * takes a fixed depth from both: a film two units deep is gone in
+   * seconds, a channel two hundred deep barely notices — and a channel
+   * that is being fed does not notice at all.
+   *
+   * That is also the honest physics for this island. Kauaʻi is porous
+   * volcanic soil; the dominant loss on a hillside is water going INTO
+   * the ground, not off it. Sheet flow soaks away and the drainage
+   * keeps running, which is what a real island looks like an hour
+   * after rain.
+   */
+  readonly soak: number;
 }
 
 export const DEFAULTS: SimOpts = {
@@ -80,6 +98,7 @@ export const DEFAULTS: SimOpts = {
   dt: 0.02,
   damping: 0.995,
   dryDepth: 0.05,
+  soak: 0,
 };
 
 /**
@@ -211,7 +230,18 @@ export class WaterSim {
     }
     this.depth.set(this.next);
 
-    // 4. The rim, if it is open. A ring one cell wide loses what it
+    // 4. SOAK — the paper's fifth step, and the one that separates a
+    //    river from a wet island. Flat rate, so films go and channels
+    //    stay. See SimOpts.soak.
+    if (opts.soak > 0) {
+      const loss = opts.soak * dt;
+      for (let i = 0; i < this.depth.length; i++) {
+        const d = this.depth[i] - loss;
+        this.depth[i] = d > 0 ? d : 0;
+      }
+    }
+
+    // 5. The rim, if it is open. A ring one cell wide loses what it
     //    would have sent into the patch that is not simulated.
     if (drainEdge) {
       for (let c = 0; c < n; c++) {

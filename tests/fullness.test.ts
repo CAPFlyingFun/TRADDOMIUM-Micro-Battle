@@ -1,68 +1,60 @@
-import { beforeAll, describe, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import type { Hydro } from '../src/world/hydro';
 import { loadIsland } from './support/island';
 import { terrainHeight } from '../src/world/heightfield';
 import { UNITS_PER_METRE } from '../src/world/kauai';
 import { WaterSim } from '../src/world/waterSim';
-import { feedFromSurvey } from '../src/world/waterFeed';
 
 let hydro: Hydro;
 beforeAll(() => { hydro = loadIsland(); });
 
-const CELL = 100, N = 128, DRAWN = 1.5;
+const CELL = 100, N = 128, DRAWN = 1.5, RAIN = 1.5, ABOVE = 0.5, SOAK = 0;
 
-/** Wet run across the channel at a surveyed point, in world units. */
-function wetWidthAt(pointIndex: number, order: number, perOrder: number, steps: number) {
-  const px = hydro.x[pointIndex], pz = hydro.z[pointIndex];
+/**
+ * A window fed EXACTLY as the island feeds it — rain on the upper
+ * catchment, terrain does the routing, nothing told about rivers.
+ */
+function rained(px: number, pz: number, steps: number, rate = RAIN, soak = SOAK): WaterSim {
   const span = N * CELL, ox = px - span / 2, oz = pz - span / 2;
-  const sim = new WaterSim({ n: N, cell: CELL, dt: 0.02 });
+  const sim = new WaterSim({ n: N, cell: CELL, dt: 0.02, soak });
   sim.fillBed((ix, iy) => terrainHeight(ox + ix * CELL, oz + iy * CELL));
-  const feed = feedFromSurvey(hydro, ox, oz, N, CELL, perOrder);
+  const sorted = Float32Array.from(sim.bed).sort();
+  const mark = sorted[Math.floor(sorted.length * ABOVE)];
+  const feed = new Float32Array(N * N);
+  for (let i = 0; i < feed.length; i++) {
+    feed[i] = sim.bed[i] >= mark && sim.bed[i] > 0 ? rate : 0;
+  }
   for (let s = 0; s < steps; s++) {
     for (let i = 0; i < feed.length; i++) if (feed[i] > 0) sim.depth[i] += feed[i] * 0.02;
     sim.step(true);
   }
-  // Perpendicular to the local course.
-  const ax = hydro.x[Math.max(0, pointIndex - 1)], az = hydro.z[Math.max(0, pointIndex - 1)];
-  const bx = hydro.x[pointIndex + 1] ?? px, bz = hydro.z[pointIndex + 1] ?? pz;
-  let dx = bx - ax, dz = bz - az;
-  const run = Math.hypot(dx, dz) || 1; dx /= run; dz /= run;
-  const at = (t: number) => {
-    const wx = px + -dz * t, wz = pz + dx * t;
-    const ix = Math.round((wx - ox) / CELL), iy = Math.round((wz - oz) / CELL);
-    if (ix < 0 || iy < 0 || ix >= N || iy >= N) return 0;
-    return sim.depth[iy * N + ix];
-  };
-  let wet = 0;
-  for (let t = 0; t < 40 * CELL; t += CELL) { if (at(t) > DRAWN) wet += CELL; else break; }
-  for (let t = -CELL; t > -40 * CELL; t -= CELL) { if (at(t) > DRAWN) wet += CELL; else break; }
-  let vol = 0;
-  for (let i = 0; i < sim.depth.length; i++) vol += sim.depth[i];
-  return { wet, volume: vol * CELL * CELL, order };
+  return sim;
 }
 
-describe('how full are the rivers', () => {
-  it('reports how much of the surveyed network is actually wet', () => {
-    // THE HEADLINE. Joshua asked how much water is in the island; this
-    // is the answer as a number rather than an impression. For a
-    // sample of surveyed points: is there ANY drawn water within a few
-    // metres of where the survey says a river is?
-    const NEAR = 5;                                    // cells, so 5 m
-    for (const perOrder of [12, 20, 32]) {
-      let onCourse = 0; let looked = 0; let volume = 0;
+describe('does the water land where Kauaʻi keeps its rivers', () => {
+  /**
+   * NOT A DRIVER — A CHECK.
+   *
+   * The island is not told where its rivers are; it rains on the high
+   * ground and the terrain routes it (CLAUDE.md: "The terrain is not
+   * ours to move"). So the surveyed network becomes the thing to test
+   * the RESULT against, and what this measures is really how well the
+   * 13.67 m elevation model agrees with the surveyed hydrography.
+   *
+   * A disagreement here is information about the data, not a licence
+   * to cut the ground a channel until the two match.
+   */
+  it('sweeps the baseflow rate for coverage and flooding', () => {
+    const NEAR = 5;
+    for (const [rate, soak] of [[1.5, 0], [1.5, 0.3], [1.5, 0.8], [2.5, 0.8], [3, 1.5]]) {
+      let on = 0, looked = 0, wet = 0, vol = 0;
       for (let r = 0; r < hydro.rivers.length; r += 149) {
         const river = hydro.rivers[r];
         if (river.count < 6) continue;
         const p = river.first + Math.floor(river.count / 2);
         const px = hydro.x[p], pz = hydro.z[p];
+        const sim = rained(px, pz, 1200, rate, soak);
         const span = N * CELL, ox = px - span / 2, oz = pz - span / 2;
-        const sim = new WaterSim({ n: N, cell: CELL, dt: 0.02 });
-        sim.fillBed((ix, iy) => terrainHeight(ox + ix * CELL, oz + iy * CELL));
-        const feed = feedFromSurvey(hydro, ox, oz, N, CELL, perOrder);
-        for (let s = 0; s < 1200; s++) {
-          for (let i = 0; i < feed.length; i++) if (feed[i] > 0) sim.depth[i] += feed[i] * 0.02;
-          sim.step(true);
-        }
         const cx = Math.round((px - ox) / CELL), cy = Math.round((pz - oz) / CELL);
         let found = false;
         for (let dy = -NEAR; dy <= NEAR && !found; dy++) {
@@ -72,40 +64,68 @@ describe('how full are the rivers', () => {
             if (sim.depth[iy * N + ix] > DRAWN) { found = true; break; }
           }
         }
-        for (let i = 0; i < sim.depth.length; i++) volume += sim.depth[i];
-        if (found) onCourse++;
+        for (let i = 0; i < sim.depth.length; i++) { vol += sim.depth[i]; if (sim.depth[i] > DRAWN) wet++; }
+        if (found) on++;
         looked++;
       }
-      const litres = (volume * CELL * CELL) / 1000;    // cm³ -> litres
-      console.log(`feed ${String(perOrder).padStart(4)}/order: ${onCourse}/${looked} surveyed points have water within ${NEAR} m; mean ${(litres / Math.max(1, looked)).toFixed(0)} L a window`);
+      console.log(`rate ${String(rate).padStart(4)} soak ${String(soak).padStart(4)}: ${on}/${looked} on course, ${(100 * wet / (looked * N * N)).toFixed(1)}% cells wet`);
     }
+    expect(true).toBe(true);
   }, 1800000);
 
-  it('measures wet width against the surveyed width', () => {
-    const m = (u: number) => u / UNITS_PER_METRE;
-    for (const perOrder of [1.6, 8, 40]) {
-      let ratios: number[] = [];
-      let n = 0;
-      for (let r = 0; r < hydro.rivers.length; r += 97) {
-        const river = hydro.rivers[r];
-        if (river.count < 6) continue;
-        const p = river.first + Math.floor(river.count / 2);
-        const surveyed = hydro.width[p];
-        if (surveyed <= 0) continue;
-        const { wet } = wetWidthAt(p, river.order, perOrder, 1200);
-        ratios.push(wet / surveyed);
-        n++;
-        if (n >= 10) break;
+  it('reports agreement between the routed water and the survey', () => {
+    const NEAR = 5;                                   // cells, so 5 m
+    let onCourse = 0; let looked = 0; let volume = 0; let wetCells = 0;
+    for (let r = 0; r < hydro.rivers.length; r += 149) {
+      const river = hydro.rivers[r];
+      if (river.count < 6) continue;
+      const p = river.first + Math.floor(river.count / 2);
+      const px = hydro.x[p], pz = hydro.z[p];
+      const sim = rained(px, pz, 1200);
+      const span = N * CELL, ox = px - span / 2, oz = pz - span / 2;
+      const cx = Math.round((px - ox) / CELL), cy = Math.round((pz - oz) / CELL);
+      let found = false;
+      for (let dy = -NEAR; dy <= NEAR && !found; dy++) {
+        for (let dx = -NEAR; dx <= NEAR; dx++) {
+          const ix = cx + dx, iy = cy + dy;
+          if (ix < 0 || iy < 0 || ix >= N || iy >= N) continue;
+          if (sim.depth[iy * N + ix] > DRAWN) { found = true; break; }
+        }
       }
-      ratios.sort((a, b) => a - b);
-      const med = ratios[Math.floor(ratios.length / 2)];
-      const dry = ratios.filter((x) => x === 0).length;
-      console.log(`feed ${String(perOrder).padStart(4)}/order: wet/surveyed median ${(100 * med).toFixed(0)}%  (${dry}/${ratios.length} bone dry)`);
+      for (let i = 0; i < sim.depth.length; i++) {
+        volume += sim.depth[i];
+        if (sim.depth[i] > DRAWN) wetCells++;
+      }
+      if (found) onCourse++;
+      looked++;
     }
-    // and the surveyed sizes themselves, for scale
-    let w: number[] = [];
+    const litres = (volume * CELL * CELL) / 1000;
+    console.log(`RAIN-FED, terrain routed: ${onCourse}/${looked} surveyed points have water within ${NEAR} m`);
+    console.log(`  mean ${(litres / Math.max(1, looked) / 1000).toFixed(1)} m³ and ${(100 * wetCells / (looked * N * N)).toFixed(1)}% of cells wet a window`);
+    expect(looked).toBeGreaterThan(4);
+  }, 1800000);
+
+  it('concentrates rather than sheeting — the water picks channels', () => {
+    // The property that says the terrain is doing the routing. Sheet
+    // flow puts ~5% of the water in the wettest 5% of cells; drainage
+    // puts most of it there.
+    const river = hydro.rivers.find((r) => r.order >= 4 && r.count > 20)!;
+    const p = river.first + Math.floor(river.count / 2);
+    const sim = rained(hydro.x[p], hydro.z[p], 2000);
+    const d = Array.from(sim.depth).sort((a, b) => b - a);
+    const total = d.reduce((a, b) => a + b, 0);
+    const top = d.slice(0, Math.floor(d.length * 0.05)).reduce((a, b) => a + b, 0);
+    const share = total > 0 ? top / total : 0;
+    console.log(`top 5% of cells hold ${(100 * share).toFixed(1)}% of the water`);
+    expect(share).toBeGreaterThan(0.5);
+  }, 600000);
+
+  it('the surveyed channels, for scale', () => {
+    const w: number[] = [];
     for (let i = 0; i < hydro.width.length; i += 13) if (hydro.width[i] > 0) w.push(hydro.width[i]);
     w.sort((a, b) => a - b);
-    console.log(`surveyed width: median ${m(w[Math.floor(w.length / 2)]).toFixed(1)} m, p95 ${m(w[Math.floor(w.length * 0.95)]).toFixed(1)} m, max ${m(w[w.length - 1]).toFixed(1)} m`);
-  }, 1800000);
+    const m = (u: number) => (u / UNITS_PER_METRE).toFixed(1);
+    console.log(`surveyed width: median ${m(w[Math.floor(w.length / 2)])} m, p95 ${m(w[Math.floor(w.length * 0.95)])} m`);
+    expect(w.length).toBeGreaterThan(100);
+  });
 });

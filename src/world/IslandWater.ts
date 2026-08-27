@@ -2,9 +2,7 @@ import * as THREE from 'three';
 import { groundHeight, terrainHeight, reliefScale } from './heightfield';
 import { toLocal } from './origin';
 import { world } from './coords';
-import type { Hydro } from './hydro';
 import { WaterSim, DEFAULTS } from './waterSim';
-import { feedFromSurvey } from './waterFeed';
 
 /**
  * THE ISLAND'S WATER — one simulated window that walks with her.
@@ -21,19 +19,34 @@ import { feedFromSurvey } from './waterFeed';
  * 1.00× real time in the browser. Water she cannot see does not need
  * to be moving; water she is standing in does.
  *
- * FED FROM THE SURVEY, NOT FROM RAIN. Rain on every cell floods the
- * window into a bathtub (Beyond Extinction's WaterLab learned this and
- * it cost them four releases). The 1,121 surveyed NHDPlus runs already
- * say where Kauaʻi's water is and how big each reach is; injecting
- * there and letting the solver decide the rest is the division of
- * labour that has been missing all along:
+ * RAIN ON THE CATCHMENT, AND THE TERRAIN DOES THE ROUTING — which is
+ * how the lab worked, and the lab is the version that looked right.
  *
- *   the SURVEY says where a river is and how much comes down it
- *   the SOLVER says how wide it gets, how deep, and where it spills
+ * The first island build did the opposite: it injected water onto the
+ * 1,121 surveyed river courses, on the reasoning that the survey knows
+ * where Kauaʻi's rivers are. It does. But feeding a LINE is not the
+ * same as feeding a CATCHMENT, and it fails in a way that reads as the
+ * simulation being wrong when it is the input that is: 29.7% of those
+ * surveyed points are buried — the terrain stands above the water's
+ * own recorded level — so water put there runs straight off the course
+ * and pools wherever the ground actually dips. Measured, only 2 points
+ * in 8 finished with any water within five metres. Turning the rate up
+ * to hide that floods the valley instead.
  *
- * Nobody has to choose a width, a bank, or an edge — which is the
- * entire class of decision that produced every artefact in this file's
- * history.
+ * The way out is NOT to cut the ground a channel to hold the survey.
+ * That is terrain modification and it is forbidden (see CLAUDE.md,
+ * "The terrain is not ours to move"); it is also the exact move that
+ * every removed water system in this repo made just before it was
+ * removed. The way out is to feed the way weather feeds an island —
+ * over the high ground — and let the water find its own fills and its
+ * own drainage, which is the one thing a shallow-water solver is
+ * actually for.
+ *
+ * So the survey is not an input here at all. It is the CHECK: see
+ * tests/fullness.test.ts, which asks how much of the surveyed network
+ * the naturally-routed water lands on. That is a measurement of how
+ * well the elevation model agrees with the hydrography, and if the two
+ * disagree the answer is to report it, not to bend the island.
  *
  * DRAWN ON THE GROUND SHE SEES. The solver runs on `terrainHeight`,
  * the true field, at 1 m. The surface is drawn at `groundHeight`, the
@@ -61,39 +74,64 @@ const DRAWN = 1.5;
  * order-5 trunk gets five times an order-1 trickle, which is the
  * cheapest honest reading of a Strahler number.
  */
-const FEED_PER_ORDER = 32;
-
-/*
- * WHY 32 AND WHY IT IS NOT THE RIGHT ANSWER.
+/**
+ * BASEFLOW — what keeps a river running when it is not raining.
  *
- * It shipped at 1.6, which was a number I chose rather than derived,
- * and tests/fullness.test.ts says what that bought: of a sample of
- * surveyed points, only 2 in 8 had any water within five metres. A
- * quarter of the network wet, and the rest of it dry ground with a
- * river drawn through it on the map.
+ * Real hydrology's own split: a channel carries baseflow from the
+ * groundwater of its whole catchment, plus stormflow when it rains.
+ * This is the first half, and it is a MODELLING CONSTANT rather than a
+ * measurement, which is worth being straight about.
  *
- * Swept: 12 -> 4/8, 20 -> 4/8, 32 -> 7/8, 40 -> 8/8. So 32 is most of
- * the network with less of the flood, and it is an interim.
+ * It has to be, because real rain cannot feed this window. Kauaʻi's
+ * rivers are fed by catchments kilometres across; the simulated window
+ * is 256 m. At a real 5 mm/hr, a cell gains 0.00014 units a second —
+ * four orders of magnitude under what a channel needs. So this stands
+ * in for the upstream catchment the window cannot see, and the honest
+ * name for it is baseflow rather than rain.
  *
- * THE REASON IT COSTS A FLOOD. 40/order puts about 930 m³ into a 128 m
- * window, which is six centimetres of standing water averaged over
- * everything, channel and hillside alike. Water only concentrates
- * where the ground gives it somewhere to concentrate, and on this
- * island 29.7% of the surveyed network is BURIED — the terrain stands
- * above the water's own surveyed level, by a median of 0.56 m. Fed
- * there, water runs off the course and pools wherever the valley
- * floor happens to dip.
+ * SWEPT, not chosen. Against the surveyed network, measured as "does
+ * any water land within 5 m of where the survey says a river is":
  *
- * So the rate is compensating for a missing channel, and no rate
- * fixes that: turn it up and the valley floods, turn it down and the
- * river is dry. The fix is a shallow bed cut along the surveyed
- * course. Measured on the HD grid: a 0.6 m bed holds 85.6% of the
- * network, 1.2 m holds 89.9%, 2.4 m holds 93.9% — against 70.3% with
- * no bed at all. With a groove to sit in, this rate comes back down.
+ *   0.4 -> 4/8 on course, 14% of cells wet
+ *   0.8 -> 6/8,           24%
+ *   1.5 -> 8/8,           38%     <- the knee
+ *   3.0 -> 8/8,           62%
+ *
+ * 1.5 is the whole network wet for sixty per cent of the flooding.
+ * Past it the extra water goes onto hillsides, not into channels.
  */
+const BASEFLOW = 1.5;
+/**
+ * Stormflow, per millimetre-per-hour of real precipitation.
+ *
+ * The weather is already modelled and already reports mm/hr, so a
+ * shower should visibly swell the streams and a dry spell should let
+ * them fall back. Scaled so heavy rain (about 20 mm/hr) roughly
+ * doubles the flow rather than drowning the island.
+ */
+const STORM_PER_MM = 0.075;
+/** However hard it rains, the valley does not become a lake. */
+const MAX_FEED = 3.5;
+/**
+ * SOAK — the paper's fifth step, which the first island build skipped.
+ *
+ * Without it a fed island simply gets wetter: 38% of cells standing in
+ * water, which reads as flood plain rather than as drainage. A flat
+ * loss rate takes a film off a hillside in seconds and barely touches
+ * a channel that is being fed, so what is left is the drainage.
+ *
+ * Swept against the same on-course measure:
+ *
+ *   soak 0    -> 8/8 on course, 38.0% of cells wet
+ *   soak 0.3  -> 8/8,           29.3%     <- same coverage, less flood
+ *   soak 0.8  -> 6/8,           15.1%     (starts drying the network)
+ */
+const SOAK = 0.3;
+/** Rain falls on cells above this quantile of the window's own bed. */
+const FEED_ABOVE = 0.5;
 
 export class IslandWater {
-  private readonly sim = new WaterSim({ n: N, cell: CELL, dt: DEFAULTS.dt });
+  private readonly sim = new WaterSim({ n: N, cell: CELL, dt: DEFAULTS.dt, soak: SOAK });
   private readonly mesh: THREE.Mesh;
   private readonly pos: Float32Array;
   private readonly depthAttr: Float32Array;
@@ -104,10 +142,12 @@ export class IslandWater {
   private centreX = 0;
   private centreZ = 0;
   private carry = 0;
+  /** Millimetres an hour, from the weather service. */
+  private precipitation = 0;
   /** Whether the window has been placed at all. */
   private placed = false;
 
-  constructor(private readonly scene: THREE.Scene, private readonly hydro: Hydro | null) {
+  constructor(private readonly scene: THREE.Scene) {
     const span = N * CELL;
     const pos = new Float32Array(N * N * 3);
     const normals = new Float32Array(N * N * 3);
@@ -170,6 +210,11 @@ export class IslandWater {
     return material;
   }
 
+  /** What the sky is doing, in mm/hr. Drives stormflow. */
+  setWeather(precipitationMmHr: number): void {
+    this.precipitation = Number.isFinite(precipitationMmHr) ? precipitationMmHr : 0;
+  }
+
   /** Move the window if she has walked far enough from its middle. */
   follow(at: { wx: number; wz: number }): void {
     if (this.placed
@@ -222,14 +267,22 @@ export class IslandWater {
         this.base[cy * N + cx] = groundHeight(ox + cx * CELL, oz + cy * CELL);
       }
     }
-    this.feed.fill(0);
-    if (!this.hydro) return;
-    // THE SURVEY, RASTERISED INTO THE WINDOW — courses and orders, and
-    // nothing else about the rivers at all. No width, no bank, no
-    // centreline geometry: those are the solver's business now, and
-    // they are exactly the decisions that went wrong every previous
-    // time somebody made them by hand. See waterFeed.ts.
-    this.feed.set(feedFromSurvey(this.hydro, ox, oz, N, CELL, FEED_PER_ORDER));
+    // RAIN ON THE UPPER CATCHMENT of this window, and nothing else.
+    //
+    // Not every cell: a window fed evenly fills like a bathtub and the
+    // terrain never gets to decide anything (Beyond Extinction's
+    // WaterLab spent four releases learning that). The high ground
+    // sheds, the low ground collects, and where it collects is the
+    // answer we are asking the solver for.
+    const sorted = Float32Array.from(this.sim.bed).sort();
+    const mark = sorted[Math.floor(sorted.length * FEED_ABOVE)];
+    for (let i = 0; i < this.feed.length; i++) {
+      // The sea is not a catchment. Below the waterline the ocean
+      // already owns the surface and rain on it is just noise.
+      // Stored as a MASK; the rate is applied per step so the weather
+      // can move it without re-walking 65,536 cells every frame.
+      this.feed[i] = this.sim.bed[i] >= mark && this.sim.bed[i] > 0 ? 1 : 0;
+    }
   }
 
   /** Seat the window against the floating origin. */
@@ -245,9 +298,10 @@ export class IslandWater {
     const owed = dt / step + this.carry;
     const steps = Math.min(Math.floor(owed), 120);
     this.carry = owed - Math.floor(owed);
+    const rate = Math.min(MAX_FEED, BASEFLOW + STORM_PER_MM * this.precipitation);
     for (let s = 0; s < steps; s++) {
       for (let i = 0; i < this.feed.length; i++) {
-        if (this.feed[i] > 0) this.sim.depth[i] += this.feed[i] * step;
+        if (this.feed[i] > 0) this.sim.depth[i] += rate * step;
       }
       this.sim.step(true);
     }

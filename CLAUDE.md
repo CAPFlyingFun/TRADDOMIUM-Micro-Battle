@@ -107,6 +107,28 @@ GOOD: approach → head aims → jaws open → reach → grab → carry.
 That physical language connects locomotion, digging, carrying and
 combat. Prefer physical, readable interactions over instant state flips.
 
+## The terrain is not ours to move
+
+**Standing rule (Joshua, and it overrides anything below).** The island
+is surveyed Kauaʻi and stays surveyed. **No system may modify terrain
+height** — no carving a channel for a river, no flattening a shelf for a
+lake, no pressing the ground down to meet a water level. The only
+sanctioned change to the surface is the **smoothing dial**.
+
+Water is not an exception; water is the reason the rule exists. Every
+inland-water system this repo has shipped and removed did the same
+thing in the end: when the water would not sit where a dataset said it
+should, it moved the ground to make it fit. That is backwards. Water
+runs off terrain, finds its own fills and its own drainage, and if it
+ends up somewhere the map did not predict then the map is what is
+approximate — a 13.67 m elevation sample has no 5 m stream bed in it,
+and inventing one does not add information, it just hides the
+disagreement.
+
+So: a water system may READ `terrainHeight` and it may never write it.
+A surveyed river is a thing to **check the simulation against**, not a
+thing to reshape the island for.
+
 ## Engineering invariants
 
 - The heightfield (`src/world/heightfield.ts`) is the single source of

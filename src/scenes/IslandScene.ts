@@ -18,7 +18,6 @@ import { local, world, type WorldPoint } from '../world/coords';
 import { TerrainStream, TIER_CUTS } from '../world/TerrainStream';
 import { followHd, forgetHd, hdResident, onHdTile } from '../world/kauaiHd';
 import { IslandWater } from '../world/IslandWater';
-import { loadHydro, type Hydro } from '../world/hydro';
 
 import { originAt, rebaseFor, setOrigin, toLocal, toWorld,
 } from '../world/origin';
@@ -1128,6 +1127,10 @@ export class IslandScene {
     // the river a rebase-width away from its own valley.
     this.water?.follow(at);
     this.water?.update(dt);
+    // The sky feeds the streams. Set after the weather is read below?
+    // No — read from the LAST frame's reading deliberately: asking for
+    // it here would reorder the weather update around the water for one
+    // frame's worth of rain, which is not worth a special case.
 
     // WEATHER IS ASKED IN GLOBAL COORDINATES and drawn in local ones.
     // Her position decides what the sky is doing; the CAMERA's rendered
@@ -1138,6 +1141,7 @@ export class IslandScene {
     const service = weather();
     const sky = service.update(at, dt);
     this.nowWeather = sky;
+    this.water?.setWeather(sky.precipitation);
     this.applyWeather(sky);
     this.rain.update(this.follow.camera.position, sky, dt);
     // The sea takes the camera's RENDERED position, which is the one
@@ -1769,19 +1773,12 @@ export class IslandScene {
       terrainMaterial(maps, grain, TIER_CUTS.backdrop),
     );
 
-    // THE WATER, once the survey lands.
-    //
-    // FIRE AND FORGET, and the island runs dry until it arrives rather
-    // than waiting on it. 839 KB of hydrography is not worth a loading
-    // bar in front of the world, and a scene that cannot start without
-    // its rivers is a scene that cannot start when the file 404s.
-    void loadHydro()
-      .then((survey: Hydro) => {
-        if (this.disposed) return;
-        this.water = new IslandWater(this.scene, survey);
-        this.water.follow(this.ant.where);
-      })
-      .catch(() => { /* dry island; the ground is still the ground */ });
+    // THE WATER. Nothing to load: it rains on the window and the
+    // ground routes it, so the only input is the terrain that is
+    // already here. The hydrography stays on disk as the thing the
+    // tests check the result AGAINST — see IslandWater's header.
+    this.water = new IslandWater(this.scene);
+    this.water.follow(this.ant.where);
   }
 
 

@@ -4,7 +4,6 @@ import { loadIsland } from './support/island';
 import { terrainHeight } from '../src/world/heightfield';
 
 import { WaterSim } from '../src/world/waterSim';
-import { feedFromSurvey } from '../src/world/waterFeed';
 
 let hydro: Hydro;
 beforeAll(() => { hydro = loadIsland(); });
@@ -19,15 +18,21 @@ const CELL = 100;
  * solver and the survey, and neither cares how wide the window is.
  */
 function runAt(cx: number, cz: number, n = 64, steps = 600) {
-  const sim = new WaterSim({ n, cell: CELL, dt: 0.02 });
+  const sim = new WaterSim({ n, cell: CELL, dt: 0.02, soak: 0.3 });
   const span = n * CELL;
   const ox = cx - span / 2;
   const oz = cz - span / 2;
   sim.fillBed((ix, iy) => terrainHeight(ox + ix * CELL, oz + iy * CELL));
-  // THE GAME'S OWN FEED, not a copy of it. A test that rasterises the
-  // survey its own way proves a property of a function nobody calls —
-  // this repo has been burned by exactly that before.
-  const feed = feedFromSurvey(hydro, ox, oz, n, CELL, 1.6);
+  // FED THE WAY THE ISLAND FEEDS — rain on the upper catchment, and
+  // the terrain does the routing. The survey is not an input to the
+  // water any more (CLAUDE.md: "The terrain is not ours to move"); it
+  // is what tests/fullness.test.ts checks the RESULT against.
+  const sorted = Float32Array.from(sim.bed).sort();
+  const mark = sorted[Math.floor(sorted.length * 0.5)];
+  const feed = new Float32Array(n * n);
+  for (let i = 0; i < feed.length; i++) {
+    feed[i] = sim.bed[i] >= mark && sim.bed[i] > 0 ? 1.5 : 0;
+  }
   let fedHeight = 0; let fedCount = 0;
   for (let i = 0; i < feed.length; i++) {
     if (feed[i] > 0) { fedHeight += sim.bed[i]; fedCount++; }
@@ -108,36 +113,6 @@ describe('the island under water, checked rather than looked at', () => {
     expect(checked).toBeGreaterThan(5);
   }, 900_000);
 
-  it('feeds a CONTINUOUS course, not a dotted line of vertices', () => {
-    // THE REGRESSION GUARD for the bug this file found on its first
-    // run. NHDPlus vertices are ~35 m apart and cells are 1 m, so
-    // rasterising vertices alone fed every thirty-fifth cell: eight
-    // dots in a 256 m window, and a chain of puddles instead of a
-    // river. If the segment walk is ever lost, fed cells collapse back
-    // to roughly the vertex count and this fails.
-    const river = hydro.rivers.find((r) => r.count > 8 && r.order >= 3)!;
-    const mid = river.first + Math.floor(river.count / 2);
-    const n = 256;
-    const span = n * CELL;
-    const ox = hydro.x[mid] - span / 2;
-    const oz = hydro.z[mid] - span / 2;
-    const feed = feedFromSurvey(hydro, ox, oz, n, CELL, 1.6);
-    let fedCells = 0;
-    for (let i = 0; i < feed.length; i++) if (feed[i] > 0) fedCells++;
-    // Vertices inside this window, for the comparison that matters.
-    let vertices = 0;
-    for (const r of hydro.rivers) {
-      for (let p = r.first; p < r.first + r.count; p++) {
-        const ix = Math.round((hydro.x[p] - ox) / CELL);
-        const iy = Math.round((hydro.z[p] - oz) / CELL);
-        if (ix >= 1 && iy >= 1 && ix < n - 1 && iy < n - 1) vertices++;
-      }
-    }
-    expect(vertices).toBeGreaterThan(0);
-    // A walked course covers many cells per vertex gap; a dotted one
-    // covers about one.
-    expect(fedCells).toBeGreaterThan(vertices * 8);
-  }, 300_000);
 
   it('is deterministic — the same window twice is the same water', () => {
     // A world that reloads to a different river is a world that cannot
@@ -148,16 +123,4 @@ describe('the island under water, checked rather than looked at', () => {
     for (let i = 0; i < a.depth.length; i++) expect(a.depth[i]).toBe(b.depth[i]);
   }, 300_000);
 
-  it('finds the survey where the survey says it is', () => {
-    // Not a solver property — a wiring one. If the hydro rasterises
-    // into the window at the wrong scale or a swapped axis, every test
-    // above still passes on an island with no rivers fed at all.
-    let withFeed = 0;
-    const spots = sample();
-    for (const spot of spots) {
-      const { fedCount } = runAt(spot.x, spot.z, 48, 1);
-      if (fedCount > 0) withFeed++;
-    }
-    expect(withFeed).toBe(spots.length);
-  }, 900_000);
 });
