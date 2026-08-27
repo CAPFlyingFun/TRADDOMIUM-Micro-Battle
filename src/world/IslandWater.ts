@@ -61,7 +61,36 @@ const DRAWN = 1.5;
  * order-5 trunk gets five times an order-1 trickle, which is the
  * cheapest honest reading of a Strahler number.
  */
-const FEED_PER_ORDER = 1.6;
+const FEED_PER_ORDER = 32;
+
+/*
+ * WHY 32 AND WHY IT IS NOT THE RIGHT ANSWER.
+ *
+ * It shipped at 1.6, which was a number I chose rather than derived,
+ * and tests/fullness.test.ts says what that bought: of a sample of
+ * surveyed points, only 2 in 8 had any water within five metres. A
+ * quarter of the network wet, and the rest of it dry ground with a
+ * river drawn through it on the map.
+ *
+ * Swept: 12 -> 4/8, 20 -> 4/8, 32 -> 7/8, 40 -> 8/8. So 32 is most of
+ * the network with less of the flood, and it is an interim.
+ *
+ * THE REASON IT COSTS A FLOOD. 40/order puts about 930 m³ into a 128 m
+ * window, which is six centimetres of standing water averaged over
+ * everything, channel and hillside alike. Water only concentrates
+ * where the ground gives it somewhere to concentrate, and on this
+ * island 29.7% of the surveyed network is BURIED — the terrain stands
+ * above the water's own surveyed level, by a median of 0.56 m. Fed
+ * there, water runs off the course and pools wherever the valley
+ * floor happens to dip.
+ *
+ * So the rate is compensating for a missing channel, and no rate
+ * fixes that: turn it up and the valley floods, turn it down and the
+ * river is dry. The fix is a shallow bed cut along the surveyed
+ * course. Measured on the HD grid: a 0.6 m bed holds 85.6% of the
+ * network, 1.2 m holds 89.9%, 2.4 m holds 93.9% — against 70.3% with
+ * no bed at all. With a groove to sit in, this rate comes back down.
+ */
 
 export class IslandWater {
   private readonly sim = new WaterSim({ n: N, cell: CELL, dt: DEFAULTS.dt });

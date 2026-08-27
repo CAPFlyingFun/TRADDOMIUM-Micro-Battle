@@ -1,21 +1,13 @@
-import { readFileSync } from 'node:fs';
 import { beforeAll, describe, expect, it } from 'vitest';
-import { decodeHydro, type Hydro } from '../src/world/hydro';
-import { terrainHeight, useGrid, setSmoothing } from '../src/world/heightfield';
-import { decodeGrid } from '../src/world/kauai';
+import type { Hydro } from '../src/world/hydro';
+import { loadIsland } from './support/island';
+import { terrainHeight } from '../src/world/heightfield';
+
 import { WaterSim } from '../src/world/waterSim';
 import { feedFromSurvey } from '../src/world/waterFeed';
 
-function read(p: string): ArrayBuffer {
-  const f = readFileSync(p);
-  return f.buffer.slice(f.byteOffset, f.byteOffset + f.byteLength) as ArrayBuffer;
-}
 let hydro: Hydro;
-beforeAll(() => {
-  useGrid(decodeGrid(read('public/kauai-1025.bin')));
-  setSmoothing(0);
-  hydro = decodeHydro(read('public/kauai-hydro.bin'));
-});
+beforeAll(() => { hydro = loadIsland(); });
 
 const CELL = 100;
 
