@@ -17,6 +17,8 @@ import { findLandfall, UNITS_PER_METRE, type HeightGrid } from '../world/kauai';
 import { local, world, type WorldPoint } from '../world/coords';
 import { TerrainStream, TIER_CUTS } from '../world/TerrainStream';
 import { followHd, forgetHd, hdResident, onHdTile } from '../world/kauaiHd';
+import { IslandWater } from '../world/IslandWater';
+import { loadHydro, type Hydro } from '../world/hydro';
 
 import { originAt, rebaseFor, setOrigin, toLocal, toWorld,
 } from '../world/origin';
@@ -230,6 +232,7 @@ export class IslandScene {
   private readonly ant = new PlayerAnt();
   private readonly clock = new THREE.Clock();
   private terrain!: TerrainStream;
+  private water: IslandWater | null = null;
   /**
    * The CEILING on a full push of the stick — not propulsion. She does
    * not move because this is set; she moves because a thumb asks.
@@ -534,6 +537,16 @@ export class IslandScene {
       // measured from the floating origin now, so asking the heightfield
       // about it samples a spot near the middle of the island instead
       // of the ground she is standing on.
+      /**
+       * WATER, FOR PROBES AND FOR TESTS.
+       *
+       * The whole argument for the simulated water is that it can be
+       * CHECKED instead of looked at, and a check needs a way in. This
+       * is it: depth under any world point, and how much of the window
+       * is currently drawn.
+       */
+      waterDepth: (wx: number, wz: number) => this.water?.depthAt(wx, wz) ?? 0,
+      waterDrawn: () => this.water?.drawnCells() ?? -1,
       groundUnderfoot: () => groundHeight(this.ant.where.wx, this.ant.where.wz),
       /**
        * PUT HER SOMEWHERE, in GLOBAL coordinates — for probes that need
@@ -1102,6 +1115,7 @@ export class IslandScene {
       const now = originAt();
       setTextureOrigin(now.x, now.z);
       this.terrain.place();
+      this.water?.place();
     }
     // THE FINE GROUND FOLLOWS HER TOO. Fire-and-forget: a tile that has
     // not landed is answered by the coarse grid, which holds the same
@@ -1109,6 +1123,11 @@ export class IslandScene {
     // rather than moves when one arrives.
     followHd(at.wx, at.wz);
     this.terrain.follow(at);
+    // THE WATER FOLLOWS HER TOO, and is seated in the same breath as
+    // the terrain — a window left against the old origin would draw
+    // the river a rebase-width away from its own valley.
+    this.water?.follow(at);
+    this.water?.update(dt);
 
     // WEATHER IS ASKED IN GLOBAL COORDINATES and drawn in local ones.
     // Her position decides what the sky is doing; the CAMERA's rendered
@@ -1749,6 +1768,20 @@ export class IslandScene {
       terrainMaterial(maps, grain, TIER_CUTS.middle),
       terrainMaterial(maps, grain, TIER_CUTS.backdrop),
     );
+
+    // THE WATER, once the survey lands.
+    //
+    // FIRE AND FORGET, and the island runs dry until it arrives rather
+    // than waiting on it. 839 KB of hydrography is not worth a loading
+    // bar in front of the world, and a scene that cannot start without
+    // its rivers is a scene that cannot start when the file 404s.
+    void loadHydro()
+      .then((survey: Hydro) => {
+        if (this.disposed) return;
+        this.water = new IslandWater(this.scene, survey);
+        this.water.follow(this.ant.where);
+      })
+      .catch(() => { /* dry island; the ground is still the ground */ });
   }
 
 
