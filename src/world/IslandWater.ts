@@ -3,7 +3,8 @@ import { groundHeight, terrainHeight, reliefScale } from './heightfield';
 import { toLocal } from './origin';
 import { world } from './coords';
 import { WaterSim, DEFAULTS } from './waterSim';
-import { channels } from './drainage';
+import type { Hydro } from './hydro';
+import { bakeChannelMap, isChannelCell, bedCarveDepth } from './hydroChannel';
 
 /**
  * THE ISLAND'S WATER — one simulated window that walks with her.
@@ -128,12 +129,6 @@ const MAX_FEED = 3.5;
  *   soak 0.8  -> 6/8,           15.1%     (starts drying the network)
  */
 const SOAK = 0.3;
-/**
- * How much of the window must drain through a cell for it to count as
- * a watercourse and carry baseflow. 0.4% of a 256 m window is about
- * 260 cells upstream — a stream, not a rill.
- */
-const CHANNEL_SHARE = 0.004;
 /** Storm rain falls on cells above this quantile of the window's bed. */
 const FEED_ABOVE = 0.35;
 
@@ -155,6 +150,8 @@ export class IslandWater {
   private precipitation = 0;
   /** Whether the window has been placed at all. */
   private placed = false;
+  /** Shader clock, advanced every frame to scroll the surface downstream. */
+  private readonly uniforms = { uTime: { value: 0 } };
 
   constructor(private readonly scene: THREE.Scene) {
     const span = N * CELL;
@@ -200,11 +197,18 @@ export class IslandWater {
       polygonOffset: true, polygonOffsetFactor: 0, polygonOffsetUnits: -6,
     });
     material.onBeforeCompile = (shader) => {
+      // Share the class clock so update() can scroll the surface.
+      shader.uniforms.uTime = this.uniforms.uTime;
       shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', '#include <common>\n attribute float depth;\n varying float vDepth;')
-        .replace('#include <begin_vertex>', '#include <begin_vertex>\n vDepth = depth;');
-      shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', '#include <common>\n varying float vDepth;')
+        .replace('#include <common>',
+          '#include <common>\n attribute float depth;\n varying float vDepth;\n varying vec2 vFlowUv;')
+        .replace('#include <begin_vertex>',
+          // The mesh is a flat grid in its own local frame; use the
+          // vertex's local x/z as a stable UV so the scroll reads as
+          // water moving across the ground rather than with the camera.
+          '#include <begin_vertex>\n vDepth = depth;\n vFlowUv = vec2(position.x, position.z) * 0.01;');
+      shader.fragmentShader = ('uniform float uTime;\n' + shader.fragmentShader)
+        .replace('#include <common>', '#include <common>\n varying float vDepth;\n varying vec2 vFlowUv;')
         .replace('#include <map_fragment>', `#include <map_fragment>
           {
             if (vDepth < ${DRAWN.toFixed(4)}) discard;
@@ -214,9 +218,29 @@ export class IslandWater {
             float t = clamp(vDepth / 60.0, 0.0, 1.0);
             diffuseColor.rgb = mix(vec3(0.60, 0.84, 0.86), vec3(0.05, 0.24, 0.55), t * t);
             diffuseColor.a = mix(0.62, 0.97, t);
+            // SCROLLING FLOW. Two travelling wave-fronts drift downstream
+            // (−V as time runs), giving the surface a sense of current
+            // without moving a single vertex. Subtle: a few percent of
+            // brightness, enough to read as living water, not a barcode.
+            float flow = sin((vFlowUv.x + vFlowUv.y) - uTime * 1.6)
+                       + 0.5 * sin(2.0 * (vFlowUv.x - vFlowUv.y) - uTime * 2.3);
+            diffuseColor.rgb *= 1.0 + 0.06 * flow;
           }`);
     };
     return material;
+  }
+
+  /**
+   * Hand the water the surveyed hydrography, ONCE, at startup.
+   *
+   * Bakes the world-space channel map (hydroChannel.ts) and, if the
+   * window is already placed, re-samples so the channels appear on the
+   * next frame rather than after the next re-centre. Idempotent-ish: a
+   * second call simply rebakes.
+   */
+  initHydro(hydro: Hydro): void {
+    bakeChannelMap(hydro);
+    if (this.placed) this.resample();
   }
 
   /** What the sky is doing, in mm/hr. Drives stormflow. */
@@ -270,7 +294,18 @@ export class IslandWater {
     const span = N * CELL;
     const ox = this.centreX - span / 2;
     const oz = this.centreZ - span / 2;
-    this.sim.fillBed((cx, cy) => terrainHeight(ox + cx * CELL, oz + cy * CELL));
+    // CARVE THE SIM BED, NOT THE TERRAIN. The heightmap, the mesh,
+    // terrainHeight and groundHeight are all left exactly as they are
+    // (CLAUDE.md, "the terrain is not ours to move"). We only lower the
+    // solver's OWN copy of the bed along the surveyed channels, with a
+    // Gaussian cross-section so the banks are a slope, not a wall — so
+    // the water pools in the real river beds and reads as a natural
+    // channel instead of the cardboard trench the earlier attempts cut.
+    this.sim.fillBed((cx, cy) => {
+      const wx = ox + cx * CELL;
+      const wz = oz + cy * CELL;
+      return terrainHeight(wx, wz) - bedCarveDepth(wx, wz);
+    });
     for (let cy = 0; cy < N; cy++) {
       for (let cx = 0; cx < N; cx++) {
         this.base[cy * N + cx] = groundHeight(ox + cx * CELL, oz + cy * CELL);
@@ -291,10 +326,23 @@ export class IslandWater {
     // soak away while the channel keeps running.
     //
     // So the course carries baseflow always, and the catchment carries
-    // rain only while it is actually raining. The channels come from
-    // D8 on this window's own bed — read-only analysis of the ground,
-    // no survey and nothing moved.
-    this.course.set(channels(this.sim.bed, N, CHANNEL_SHARE));
+    // rain only while it is actually raining.
+    //
+    // THE CHANNELS ARE WORLD-SPACE FIXED NOW. They used to come from D8
+    // (drainage.ts) run on THIS window's bed every move — and D8 on a
+    // moving, finite window gives a different answer depending on where
+    // the rim falls, so the network shifted and rebuilt as she flew
+    // toward it. That was the morphing bug. Instead we look each cell up
+    // in the surveyed channel map (hydroChannel.ts), baked once from
+    // kauai-hydro.bin: the same world position always gives the same
+    // answer, so the rivers are locked to the real Kauaʻi hydrology.
+    for (let cy = 0; cy < N; cy++) {
+      for (let cx = 0; cx < N; cx++) {
+        const wx = ox + cx * CELL;
+        const wz = oz + cy * CELL;
+        this.course[cy * N + cx] = isChannelCell(wx, wz) ? 1 : 0;
+      }
+    }
     const sorted = Float32Array.from(this.sim.bed).sort();
     const mark = sorted[Math.floor(sorted.length * FEED_ABOVE)];
     for (let i = 0; i < this.catchment.length; i++) {
@@ -315,6 +363,8 @@ export class IslandWater {
   /** Advance the water and lift the surface onto the drawn ground. */
   update(dt: number): void {
     if (!this.placed) return;
+    // Advance the surface clock so the flow scroll keeps moving.
+    this.uniforms.uTime.value += dt;
     const step = this.sim.opts.dt;
     const owed = dt / step + this.carry;
     const steps = Math.min(Math.floor(owed), 120);

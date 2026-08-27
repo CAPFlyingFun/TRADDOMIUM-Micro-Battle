@@ -18,6 +18,7 @@ import { local, world, type WorldPoint } from '../world/coords';
 import { TerrainStream, TIER_CUTS } from '../world/TerrainStream';
 import { followHd, forgetHd, hdResident, onHdTile } from '../world/kauaiHd';
 import { IslandWater } from '../world/IslandWater';
+import { loadHydro, useHydro } from '../world/hydro';
 
 import { originAt, rebaseFor, setOrigin, toLocal, toWorld,
 } from '../world/origin';
@@ -1779,6 +1780,19 @@ export class IslandScene {
     // tests check the result AGAINST — see IslandWater's header.
     this.water = new IslandWater(this.scene);
     this.water.follow(this.ant.where);
+
+    // THE SURVEYED CHANNELS, LOADED ONCE. hydroChannel bakes the real
+    // Kauaʻi river centrelines into a fixed world-space map so the water
+    // no longer re-derives its channels per window move (the morphing
+    // bug). Fire-and-forget, like the HD tiles: the window runs on an
+    // empty channel map until this lands, then initHydro resamples so
+    // the rivers appear without waiting on the fetch at boot.
+    loadHydro()
+      .then((hydro) => {
+        useHydro(hydro);
+        this.water?.initHydro(hydro);
+      })
+      .catch((err) => console.warn('hydro load failed', err));
   }
 
 
