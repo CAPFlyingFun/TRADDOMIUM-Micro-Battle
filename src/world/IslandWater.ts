@@ -3,6 +3,7 @@ import { groundHeight, terrainHeight, reliefScale } from './heightfield';
 import { toLocal } from './origin';
 import { world } from './coords';
 import { WaterSim, DEFAULTS } from './waterSim';
+import { channels } from './drainage';
 
 /**
  * THE ISLAND'S WATER — one simulated window that walks with her.
@@ -77,30 +78,30 @@ const DRAWN = 1.5;
 /**
  * BASEFLOW — what keeps a river running when it is not raining.
  *
- * Real hydrology's own split: a channel carries baseflow from the
- * groundwater of its whole catchment, plus stormflow when it rains.
- * This is the first half, and it is a MODELLING CONSTANT rather than a
- * measurement, which is worth being straight about.
+ * Groundwater seeping into the CHANNEL, which is what baseflow is in
+ * real hydrology, and it is fed only to the watercourse cells D8 finds
+ * (see drainage.ts). A MODELLING CONSTANT, and worth being straight
+ * about that: real rain cannot feed this window. Kauaʻi's rivers drain
+ * catchments kilometres across and the window is 256 m, so at a real
+ * 5 mm/hr a cell gains 0.00014 units a second — four orders under what
+ * a channel needs. This stands in for the upstream catchment the
+ * window cannot see.
  *
- * It has to be, because real rain cannot feed this window. Kauaʻi's
- * rivers are fed by catchments kilometres across; the simulated window
- * is 256 m. At a real 5 mm/hr, a cell gains 0.00014 units a second —
- * four orders of magnitude under what a channel needs. So this stands
- * in for the upstream catchment the window cannot see, and the honest
- * name for it is baseflow rather than rain.
+ * Swept against the surveyed network, in DRY weather, measured as "is
+ * there water within 5 m of where the survey says a river is":
  *
- * SWEPT, not chosen. Against the surveyed network, measured as "does
- * any water land within 5 m of where the survey says a river is":
+ *    3 ->  0/8 on course,  5.9% of cells wet
+ *    8 ->  6/8,           15.7%     <- shipped
+ *   16 ->  6/8,           25.8%
+ *   30 ->  7/8,           35.7%
  *
- *   0.4 -> 4/8 on course, 14% of cells wet
- *   0.8 -> 6/8,           24%
- *   1.5 -> 8/8,           38%     <- the knee
- *   3.0 -> 8/8,           62%
- *
- * 1.5 is the whole network wet for sixty per cent of the flooding.
- * Past it the extra water goes onto hillsides, not into channels.
+ * 8 buys most of the network for the least standing water, and past it
+ * the extra goes onto ground rather than into channels. The two runs
+ * that stay dry are reaches where this island's own drainage does not
+ * agree with the survey — which is a fact about the elevation model,
+ * reported rather than carved away.
  */
-const BASEFLOW = 1.5;
+const BASEFLOW = 8;
 /**
  * Stormflow, per millimetre-per-hour of real precipitation.
  *
@@ -127,8 +128,14 @@ const MAX_FEED = 3.5;
  *   soak 0.8  -> 6/8,           15.1%     (starts drying the network)
  */
 const SOAK = 0.3;
-/** Rain falls on cells above this quantile of the window's own bed. */
-const FEED_ABOVE = 0.5;
+/**
+ * How much of the window must drain through a cell for it to count as
+ * a watercourse and carry baseflow. 0.4% of a 256 m window is about
+ * 260 cells upstream — a stream, not a rill.
+ */
+const CHANNEL_SHARE = 0.004;
+/** Storm rain falls on cells above this quantile of the window's bed. */
+const FEED_ABOVE = 0.35;
 
 export class IslandWater {
   private readonly sim = new WaterSim({ n: N, cell: CELL, dt: DEFAULTS.dt, soak: SOAK });
@@ -137,8 +144,10 @@ export class IslandWater {
   private readonly depthAttr: Float32Array;
   /** Drawn ground under each cell — static until the window moves. */
   private readonly base = new Float32Array(N * N);
-  /** Feed rate per cell, from the survey. Static until the window moves. */
-  private readonly feed = new Float32Array(N * N);
+  /** Watercourse cells — baseflow goes here, always. */
+  private readonly course = new Uint8Array(N * N);
+  /** Catchment cells — storm rain goes here, only while it rains. */
+  private readonly catchment = new Uint8Array(N * N);
   private centreX = 0;
   private centreZ = 0;
   private carry = 0;
@@ -267,21 +276,33 @@ export class IslandWater {
         this.base[cy * N + cx] = groundHeight(ox + cx * CELL, oz + cy * CELL);
       }
     }
-    // RAIN ON THE UPPER CATCHMENT of this window, and nothing else.
+    // TWO FEEDS, AND SEPARATING THEM IS THE POINT.
     //
-    // Not every cell: a window fed evenly fills like a bathtub and the
-    // terrain never gets to decide anything (Beyond Extinction's
-    // WaterLab spent four releases learning that). The high ground
-    // sheds, the low ground collects, and where it collects is the
-    // answer we are asking the solver for.
+    // Joshua asked whether the water would drain off the mountainside
+    // once it got going. With one feed it never could: baseflow was
+    // rain on the upper half of the window, permanently, so every
+    // slope stayed wet forever. That is not an island, it is a
+    // sprinkler.
+    //
+    // Real hydrology already separates them. Between storms a river
+    // runs on BASEFLOW — groundwater seeping into the channel itself,
+    // while the hillsides above it are dry. During a storm the whole
+    // catchment sheds STORMFLOW, and afterwards the slopes drain and
+    // soak away while the channel keeps running.
+    //
+    // So the course carries baseflow always, and the catchment carries
+    // rain only while it is actually raining. The channels come from
+    // D8 on this window's own bed — read-only analysis of the ground,
+    // no survey and nothing moved.
+    this.course.set(channels(this.sim.bed, N, CHANNEL_SHARE));
     const sorted = Float32Array.from(this.sim.bed).sort();
     const mark = sorted[Math.floor(sorted.length * FEED_ABOVE)];
-    for (let i = 0; i < this.feed.length; i++) {
+    for (let i = 0; i < this.catchment.length; i++) {
       // The sea is not a catchment. Below the waterline the ocean
       // already owns the surface and rain on it is just noise.
-      // Stored as a MASK; the rate is applied per step so the weather
-      // can move it without re-walking 65,536 cells every frame.
-      this.feed[i] = this.sim.bed[i] >= mark && this.sim.bed[i] > 0 ? 1 : 0;
+      const land = this.sim.bed[i] > 0;
+      this.catchment[i] = land && this.sim.bed[i] >= mark ? 1 : 0;
+      if (!land) this.course[i] = 0;
     }
   }
 
@@ -298,10 +319,14 @@ export class IslandWater {
     const owed = dt / step + this.carry;
     const steps = Math.min(Math.floor(owed), 120);
     this.carry = owed - Math.floor(owed);
-    const rate = Math.min(MAX_FEED, BASEFLOW + STORM_PER_MM * this.precipitation);
+    const storm = Math.min(MAX_FEED, STORM_PER_MM * this.precipitation);
     for (let s = 0; s < steps; s++) {
-      for (let i = 0; i < this.feed.length; i++) {
-        if (this.feed[i] > 0) this.sim.depth[i] += rate * step;
+      for (let i = 0; i < this.course.length; i++) {
+        // Baseflow into the watercourse, always.
+        if (this.course[i]) this.sim.depth[i] += BASEFLOW * step;
+        // Stormflow over the catchment, only while it rains — so the
+        // slopes wet up in a shower and soak dry after it.
+        if (storm > 0 && this.catchment[i]) this.sim.depth[i] += storm * step;
       }
       this.sim.step(true);
     }

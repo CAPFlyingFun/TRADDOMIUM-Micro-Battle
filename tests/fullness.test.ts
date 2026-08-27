@@ -4,28 +4,33 @@ import { loadIsland } from './support/island';
 import { terrainHeight } from '../src/world/heightfield';
 import { UNITS_PER_METRE } from '../src/world/kauai';
 import { WaterSim } from '../src/world/waterSim';
+import { channels } from '../src/world/drainage';
 
 let hydro: Hydro;
 beforeAll(() => { hydro = loadIsland(); });
 
-const CELL = 100, N = 128, DRAWN = 1.5, RAIN = 1.5, ABOVE = 0.5, SOAK = 0;
+const CELL = 100, N = 128, DRAWN = 1.5;
 
 /**
  * A window fed EXACTLY as the island feeds it — rain on the upper
  * catchment, terrain does the routing, nothing told about rivers.
  */
-function rained(px: number, pz: number, steps: number, rate = RAIN, soak = SOAK): WaterSim {
+function rained(px: number, pz: number, steps: number, base = 1.5, storm = 0, soak = 0.3): WaterSim {
   const span = N * CELL, ox = px - span / 2, oz = pz - span / 2;
   const sim = new WaterSim({ n: N, cell: CELL, dt: 0.02, soak });
   sim.fillBed((ix, iy) => terrainHeight(ox + ix * CELL, oz + iy * CELL));
+  // EXACTLY WHAT THE ISLAND DOES: baseflow into the watercourses D8
+  // finds in this window's own bed, stormflow over the catchment only
+  // while it is raining.
+  const course = channels(sim.bed, N, 0.004);
   const sorted = Float32Array.from(sim.bed).sort();
-  const mark = sorted[Math.floor(sorted.length * ABOVE)];
-  const feed = new Float32Array(N * N);
-  for (let i = 0; i < feed.length; i++) {
-    feed[i] = sim.bed[i] >= mark && sim.bed[i] > 0 ? rate : 0;
-  }
+  const mark = sorted[Math.floor(sorted.length * 0.35)];
   for (let s = 0; s < steps; s++) {
-    for (let i = 0; i < feed.length; i++) if (feed[i] > 0) sim.depth[i] += feed[i] * 0.02;
+    for (let i = 0; i < sim.depth.length; i++) {
+      const land = sim.bed[i] > 0;
+      if (land && course[i]) sim.depth[i] += base * 0.02;
+      if (storm > 0 && land && sim.bed[i] >= mark) sim.depth[i] += storm * 0.02;
+    }
     sim.step(true);
   }
   return sim;
@@ -46,14 +51,14 @@ describe('does the water land where Kauaʻi keeps its rivers', () => {
    */
   it('sweeps the baseflow rate for coverage and flooding', () => {
     const NEAR = 5;
-    for (const [rate, soak] of [[1.5, 0], [1.5, 0.3], [1.5, 0.8], [2.5, 0.8], [3, 1.5]]) {
+    for (const [base, storm] of [[3, 0], [8, 0], [16, 0], [16, 1.5], [30, 0]]) {
       let on = 0, looked = 0, wet = 0, vol = 0;
       for (let r = 0; r < hydro.rivers.length; r += 149) {
         const river = hydro.rivers[r];
         if (river.count < 6) continue;
         const p = river.first + Math.floor(river.count / 2);
         const px = hydro.x[p], pz = hydro.z[p];
-        const sim = rained(px, pz, 1200, rate, soak);
+        const sim = rained(px, pz, 1200, base, storm);
         const span = N * CELL, ox = px - span / 2, oz = pz - span / 2;
         const cx = Math.round((px - ox) / CELL), cy = Math.round((pz - oz) / CELL);
         let found = false;
@@ -68,7 +73,7 @@ describe('does the water land where Kauaʻi keeps its rivers', () => {
         if (found) on++;
         looked++;
       }
-      console.log(`rate ${String(rate).padStart(4)} soak ${String(soak).padStart(4)}: ${on}/${looked} on course, ${(100 * wet / (looked * N * N)).toFixed(1)}% cells wet`);
+      console.log(`base ${String(base).padStart(3)} storm ${String(storm).padStart(4)}: ${on}/${looked} on course, ${(100 * wet / (looked * N * N)).toFixed(1)}% cells wet`);
     }
     expect(true).toBe(true);
   }, 1800000);
@@ -81,7 +86,7 @@ describe('does the water land where Kauaʻi keeps its rivers', () => {
       if (river.count < 6) continue;
       const p = river.first + Math.floor(river.count / 2);
       const px = hydro.x[p], pz = hydro.z[p];
-      const sim = rained(px, pz, 1200);
+      const sim = rained(px, pz, 1200, 16);
       const span = N * CELL, ox = px - span / 2, oz = pz - span / 2;
       const cx = Math.round((px - ox) / CELL), cy = Math.round((pz - oz) / CELL);
       let found = false;
@@ -111,7 +116,7 @@ describe('does the water land where Kauaʻi keeps its rivers', () => {
     // puts most of it there.
     const river = hydro.rivers.find((r) => r.order >= 4 && r.count > 20)!;
     const p = river.first + Math.floor(river.count / 2);
-    const sim = rained(hydro.x[p], hydro.z[p], 2000);
+    const sim = rained(hydro.x[p], hydro.z[p], 2000, 16);
     const d = Array.from(sim.depth).sort((a, b) => b - a);
     const total = d.reduce((a, b) => a + b, 0);
     const top = d.slice(0, Math.floor(d.length * 0.05)).reduce((a, b) => a + b, 0);
