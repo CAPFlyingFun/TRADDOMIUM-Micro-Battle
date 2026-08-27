@@ -21,7 +21,7 @@ import { IslandWater } from '../world/IslandWater';
 import { Underwater } from '../world/Underwater';
 import { Ocean } from '../world/Ocean';
 import { swimEffort, wadeAt } from '../ant/wading';
-import { Breath } from '../ant/breath';
+import { Breath, DROWN_HP_PER_SECOND, blackout } from '../ant/breath';
 import { SaltExposure, SALT_DAMAGE_FRACTION } from '../ant/brine';
 import { waterSpotAt } from '../world/waterQuery';
 import { bakeIslandChannels } from '../world/islandChannels';
@@ -268,6 +268,15 @@ export class IslandScene {
   private wet = 0;
   /** Whether the water stands over her head — with hysteresis. */
   private headUnder = false;
+  /** The hypoxia veil — see the constructor. */
+  private dim!: HTMLDivElement;
+  private shownDim = '';
+  /** What the water was doing to her this frame, for the swim HUD. */
+  private swimCarry: { x: number; z: number } | null = null;
+  private swimAbove = 0;
+  /** Vertical speed in the water, measured and eased for the eye. */
+  private swimVs = 0;
+  private lastSwimAlt: number | null = null;
   /** Her air, held while the head is under (breath.ts). */
   private readonly breath = new Breath();
   /** The sea's clock on her (brine.ts). */
@@ -343,6 +352,19 @@ export class IslandScene {
     });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     host.appendChild(this.renderer.domElement);
+
+    // THE DARKNESS WHEN THE AIR RUNS SHORT. A veil over the WORLD and
+    // not the instruments: z-index 1 sits over the canvas and under
+    // every HUD element (they start at 2), so a fainting queen can
+    // still read the ring that says why and the lever that fixes it.
+    // Driven from breath in update(); the transition smooths the steps.
+    this.dim = document.createElement('div');
+    Object.assign(this.dim.style, {
+      position: 'fixed', inset: '0', background: '#000',
+      opacity: '0', pointerEvents: 'none', zIndex: '1',
+      transition: 'opacity 400ms linear',
+    } as Partial<CSSStyleDeclaration>);
+    host.appendChild(this.dim);
 
     this.scene.background = new THREE.Color(SKY_COLOR);
     // At true scale an ant's world ends a few dozen metres out. The
@@ -609,6 +631,10 @@ export class IslandScene {
         hp: this.hp, air: this.breath.fraction,
         salt: this.brine.exposureSeconds, burning: this.brine.burning,
       }),
+      // Probe-only: set her air, so a 45-second drain does not cost a
+      // headless run ten slow-motion minutes to reach the interesting
+      // part.
+      gasp: (fraction: number) => this.breath.restore(fraction),
       waterDrawn: () => this.water?.drawnCells() ?? -1,
       groundUnderfoot: () => groundHeight(this.ant.where.wx, this.ant.where.wz),
       /**
@@ -858,6 +884,7 @@ export class IslandScene {
     forgetHd();
     this.renderer.dispose();
     this.renderer.domElement.remove();
+    this.dim.remove();
   }
 
   /**
@@ -1086,6 +1113,8 @@ export class IslandScene {
       const wade = wadeAt(this.ant.where.wx, this.ant.where.wz, this.dive, this.afloat);
       this.afloat = wade.afloat;
       this.wet = wade.depth;
+      this.swimCarry = wade.carry;
+      this.swimAbove = wade.above;
       inSalt = wade.depth > 0 && wade.salt;
       // HER HEAD IS EITHER UNDER OR IT IS NOT — measured as the water
       // standing over where she rides, with a little hysteresis so
@@ -1125,7 +1154,22 @@ export class IslandScene {
       this.reask = true;
     }
 
-    const telemetry = this.readFlight(dt);
+    // THE SAME INSTRUMENTS FLY AND SWIM. readFlight still runs every
+    // frame (its easings and touchdown bookkeeping belong to flight);
+    // afloat, the panel is fed water telemetry instead — her speed
+    // THROUGH the water where airspeed goes, the current where the
+    // wind goes, height over the BED on the tape — and the whole HUD
+    // lights up exactly as it does in the air. Joshua: "show water
+    // speed + underwater speed and movement like in the air with same
+    // hud."
+    const swimming = !this.flight.aloft && this.afloat;
+    const flightTelemetry = this.readFlight(dt);
+    if (!swimming) {
+      this.lastSwimAlt = null;
+      this.swimVs = 0;
+    }
+    const telemetry = swimming ? this.readSwim(dt) : flightTelemetry;
+    const hudUp = this.flight.aloft || swimming;
     this.lastFlight = telemetry;
     this.paceUI.show(
       this.pace, wants, this.stamina.spent,
@@ -1136,7 +1180,7 @@ export class IslandScene {
       this.auto.active, this.auto.way,
       this.flight.aloft ? telemetry.airspeed : null,
     );
-    this.flightHud.show(telemetry, this.flight.aloft, this.seeFlight(telemetry));
+    this.flightHud.show(telemetry, hudUp, this.seeFlight(telemetry));
     // The RATE goes with the reserve, so the readout can say how long
     // what she is doing right now can go on rather than how much
     // sprinting the bar would be worth.
@@ -1162,10 +1206,13 @@ export class IslandScene {
         // HER NOSE, not the camera's. In flight they part company the
         // moment she looks around, and the pairing with the flight
         // panel's ground line only means anything if this one is hers.
-        air: this.flight.aloft
+        // Swimming keeps the rows: speed through the water where AIR
+        // goes, drift over the island where GND goes, the current
+        // where the wind goes.
+        air: hudUp
           ? { heading: telemetry.heading, speed: telemetry.airspeed }
           : null,
-        ground: this.flight.aloft
+        ground: hudUp
           ? {
             track: telemetry.track,
             speed: telemetry.groundSpeed,
@@ -1175,7 +1222,7 @@ export class IslandScene {
         // Only when there is a wind to speak of. The readout resolves
         // to a tenth of a centimetre a second; below that there is
         // nothing to say and a permanent "0.0" is a row nobody reads.
-        wind: this.flight.aloft && telemetry.wind.speed >= 0.05
+        wind: hudUp && telemetry.wind.speed >= 0.05
           ? {
             speed: telemetry.wind.speed,
             relative: telemetry.wind.bearing - telemetry.heading,
@@ -1210,8 +1257,28 @@ export class IslandScene {
     if (stings > 0) {
       this.hurt(stings * liveStat('maxHealth') * SALT_DAMAGE_FRACTION, 'saltwater');
     }
-    if (!inSalt && !this.dying && this.hp > 0) {
+    // DROWNING, at last — but only while something genuinely keeps her
+    // under with nothing left, because an empty film has already taken
+    // the lever away and buoyancy is already carrying her up. A steady
+    // rate rather than ticks: suffocation is continuous. ON TOP of any
+    // salt, as asked.
+    if (this.breath.spent && this.headUnder) {
+      this.hurt(DROWN_HP_PER_SECOND * dt, 'drowning');
+    }
+    // She cannot knit while the sea has her or while she is drowning —
+    // the queen's recovery rate happens to match the drowning rate
+    // exactly, and healing through suffocation would cancel it to a
+    // polite stalemate.
+    if (!inSalt && !this.breath.spent && !this.dying && this.hp > 0) {
       this.hp = Math.min(liveStat('maxHealth'), this.hp + liveStat('healthRecovery') * dt);
+    }
+    // The hypoxia veil follows the air, not the water: it starts at
+    // FADE_FROM and never quite reaches black — she can always still
+    // barely see the way up.
+    const veil = blackout(this.breath.fraction).toFixed(3);
+    if (veil !== this.shownDim) {
+      this.shownDim = veil;
+      this.dim.style.opacity = veil;
     }
     this.vitals.aloft(this.flight.aloft);
     this.vitals.show(this.stamina.fraction, this.stamina.spent, this.effort);
@@ -1733,6 +1800,53 @@ export class IslandScene {
     this.look.face(-heading);
     this.follow.snapTo(this.ant.root, -heading, look);
     return true;
+  }
+
+  /**
+   * The flight panel's numbers, measured from the WATER instead of the
+   * air. The mapping is exact rather than analogous: airspeed is speed
+   * through the medium, and her medium is the water, so the AIR line
+   * carries her swim speed; the wind rows carry the current, which is
+   * the thing carrying HER; the tape reads her height over the BED the
+   * way it reads height over the ground aloft; MSL is simply true. VS
+   * is measured from her actual height and eased for the eye, the same
+   * way AGL is. No touchdown: a swimmer is not on approach to anywhere.
+   */
+  private readSwim(dt: number): FlightTelemetry {
+    const here = this.ant.where;
+    const terrain = groundHeight(here.wx, here.wz);
+    const agl = this.swimAbove;
+    const altitude = terrain + agl;
+    const ground = this.ant.overGround;
+    this.heldTrack = trackOf(ground, this.heldTrack);
+    const current = this.swimCarry;
+    const thru = current
+      ? Math.hypot(ground.x - current.x, ground.z - current.z)
+      : Math.hypot(ground.x, ground.z);
+    if (this.lastSwimAlt !== null && dt > 0) {
+      const vs = (altitude - this.lastSwimAlt) / dt;
+      this.swimVs += (vs - this.swimVs) * (1 - Math.exp(-6 * dt));
+    }
+    this.lastSwimAlt = altitude;
+    return {
+      airspeed: thru,
+      groundSpeed: Math.hypot(ground.x, ground.z),
+      heading: bearingFromHeading(this.ant.bearing),
+      track: this.heldTrack,
+      drift: driftOf(this.heldTrack, this.ant.bearing),
+      climbing: this.swimVs,
+      agl,
+      altitude,
+      ground,
+      wind: current
+        ? { speed: Math.hypot(current.x, current.z), bearing: bearingOf(current.x, current.z) }
+        : { speed: 0, bearing: 0 },
+      touchdown: null,
+      shownAgl: this.easedAgl.push(agl, dt),
+      shownAtLanding: null,
+      shownRange: null,
+      shownWhen: null,
+    };
   }
 
   private readFlight(dt: number): FlightTelemetry {

@@ -68,6 +68,39 @@ export const REFILL = 12;
  */
 export const SHORT = 0.25;
 
+/**
+ * WHERE THE WORLD STARTS GOING DARK — thirty percent of a breath.
+ *
+ * Joshua: "if your O2 gets below 30%, the screen starts fading black
+ * like a lot of games do." Hypoxia as a picture rather than a number:
+ * the gauge warns the head, the darkness warns the gut.
+ */
+export const FADE_FROM = 0.3;
+/**
+ * How much of the world is gone at zero air. NOT all of it — "at 0%
+ * you can still barely see" — because a screen gone fully black is a
+ * screen the player cannot steer up out of, and up is the whole answer.
+ */
+export const FADE_TO = 0.86;
+/**
+ * What running dry costs, in health a second, ON TOP of anything the
+ * salt is doing. She still cannot simply drown at the surface — an
+ * empty film takes the dive lever away and buoyancy carries her up —
+ * so this only bites while something keeps her genuinely under.
+ */
+export const DROWN_HP_PER_SECOND = 1;
+
+/**
+ * How dark the world should be for this much air, 0 (clear) to
+ * FADE_TO (nearly gone). Quadratic in the shortfall so the first few
+ * percent under FADE_FROM are a hint rather than a curtain, and the
+ * last few are most of the effect — the shape of actually fainting.
+ */
+export function blackout(fraction: number): number {
+  const short = 1 - Math.min(1, Math.max(0, fraction) / FADE_FROM);
+  return short * short * FADE_TO;
+}
+
 export class Breath {
   private held = 1;
 

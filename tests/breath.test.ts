@@ -7,7 +7,10 @@
  * see, spend and get back, and it is the reason the gauge exists.
  */
 import { describe, expect, it } from 'vitest';
-import { Breath, HOLD, REFILL, SHORT } from '../src/ant/breath';
+import {
+  Breath, HOLD, REFILL, SHORT,
+  FADE_FROM, FADE_TO, DROWN_HP_PER_SECOND, blackout,
+} from '../src/ant/breath';
 
 const TICK = 1 / 60;
 
@@ -43,5 +46,34 @@ describe('the meter', () => {
     // anywhere one breath could have taken her.
     expect(hold(HOLD * (1 - SHORT) + 0.2).short).toBe(true);
     expect(HOLD * SHORT).toBeGreaterThan(8);
+  });
+});
+
+describe('the darkness when the air runs short', () => {
+  it('leaves the world alone above thirty percent', () => {
+    expect(blackout(1)).toBe(0);
+    expect(blackout(FADE_FROM)).toBe(0);
+    expect(blackout(FADE_FROM + 0.01)).toBe(0);
+  });
+
+  it('darkens on the way down and never reaches full black', () => {
+    let last = -1;
+    for (let f = FADE_FROM; f >= 0; f -= 0.01) {
+      const veil = blackout(f);
+      expect(veil).toBeGreaterThanOrEqual(last);
+      last = veil;
+    }
+    expect(blackout(0)).toBe(FADE_TO);
+    expect(FADE_TO).toBeLessThan(1);        // she can still barely see
+  });
+
+  it('starts as a hint, not a curtain', () => {
+    // Quadratic: just under the line the veil is a few percent, so
+    // crossing 30% is an onset rather than a step.
+    expect(blackout(FADE_FROM * 0.9)).toBeLessThan(0.02);
+  });
+
+  it('drowning is a steady rate on top of the salt, only ever down there', () => {
+    expect(DROWN_HP_PER_SECOND).toBe(1);
   });
 });
