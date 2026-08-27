@@ -19,6 +19,7 @@ import { TerrainStream, TIER_CUTS } from '../world/TerrainStream';
 import { followHd, forgetHd, hdResident, onHdTile } from '../world/kauaiHd';
 import { IslandWater } from '../world/IslandWater';
 import { Underwater } from '../world/Underwater';
+import { Ocean } from '../world/Ocean';
 import { wadeAt } from '../ant/wading';
 import { waterSpotAt } from '../world/waterQuery';
 import { bakeIslandChannels } from '../world/islandChannels';
@@ -108,6 +109,14 @@ const GAP_TOLERANCE = 100;
  * second puts a full-depth dive at about a second and a half.
  */
 const DIVE_EASE = 1.8;
+/**
+ * And 20% faster on the way UP than the way down (Joshua: "a little
+ * more buoyancy"). Asymmetric on purpose: going down she is working
+ * against her own float, coming up the water is doing the work — the
+ * ease is standing in for buoyancy, so buoyancy gets the bigger
+ * number.
+ */
+const RISE_EASE = DIVE_EASE * 1.2;
 
 export class IslandScene {
   private readonly scene = new THREE.Scene();
@@ -243,6 +252,7 @@ export class IslandScene {
   private readonly clock = new THREE.Clock();
   private terrain!: TerrainStream;
   private water: IslandWater | null = null;
+  private ocean: Ocean | null = null;
   /**
    * HOW FAR DOWN SHE IS SWIMMING, nought at the surface and one on the
    * bottom. Eased rather than set: the lever can snap, a swimming
@@ -789,6 +799,7 @@ export class IslandScene {
 
   dispose(): void {
     this.underwater.dispose();
+    this.ocean?.dispose();
     this.disposed = true;
     this.renderer.setAnimationLoop(null);
     this.watchSize.disconnect();
@@ -1030,7 +1041,8 @@ export class IslandScene {
       // surface, one on the bottom — and the eased `dive` is what
       // wadeAt scales her float height by.
       const wantDive = Math.max(0, -this.liftSlider.lift);
-      this.dive += (wantDive - this.dive) * (1 - Math.exp(-DIVE_EASE * dt));
+      const ease = wantDive < this.dive ? RISE_EASE : DIVE_EASE;
+      this.dive += (wantDive - this.dive) * (1 - Math.exp(-ease * dt));
       const wade = wadeAt(this.ant.where.wx, this.ant.where.wz, this.dive);
       this.afloat = wade.afloat;
       this.wet = wade.depth;
@@ -1173,6 +1185,7 @@ export class IslandScene {
       setTextureOrigin(now.x, now.z);
       this.terrain.place();
       this.water?.place();
+      this.ocean?.place();
     }
     // THE FINE GROUND FOLLOWS HER TOO. Fire-and-forget: a tile that has
     // not landed is answered by the coarse grid, which holds the same
@@ -1185,6 +1198,8 @@ export class IslandScene {
     // the river a rebase-width away from its own valley.
     this.water?.follow(at);
     this.water?.update(dt);
+    this.ocean?.follow(at);
+    this.ocean?.update(dt);
     // The sky feeds the streams. Set after the weather is read below?
     // No — read from the LAST frame's reading deliberately: asking for
     // it here would reorder the weather update around the water for one
@@ -1840,6 +1855,8 @@ export class IslandScene {
     // tests check the result AGAINST — see IslandWater's header.
     this.water = new IslandWater(this.scene);
     this.water.follow(this.ant.where);
+    this.ocean = new Ocean(this.scene);
+    this.ocean.follow(this.ant.where);
   }
 
 

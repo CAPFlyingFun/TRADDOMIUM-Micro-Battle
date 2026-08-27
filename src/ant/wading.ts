@@ -105,7 +105,8 @@ export function wadeAt(wx: number, wz: number, dive = 0): Wade {
     pace: afloat ? PADDLE_PACE : 1 - (1 - WADE_PACE) * sunk,
     carry: carrying ? { x: spot.flowX * pull, z: spot.flowZ * pull } : null,
     afloat,
-    drinkable: true,
+    // The window is fresh by construction; the sea announces itself.
+    drinkable: !spot.salt,
   };
 }
 
@@ -123,11 +124,11 @@ const PROBES = 8;
 /** Is there water here she could drink, or any within reach? */
 export function canDrink(wx: number, wz: number): boolean {
   const here = waterSpotAt(wx, wz);
-  if (here && here.depth > 0) return true;
+  if (here && !here.salt && here.depth > 0) return true;
   for (let i = 0; i < PROBES; i++) {
     const a = (i / PROBES) * Math.PI * 2;
     const spot = waterSpotAt(wx + Math.cos(a) * DRINK_REACH, wz + Math.sin(a) * DRINK_REACH);
-    if (spot && spot.depth > 0) return true;
+    if (spot && !spot.salt && spot.depth > 0) return true;
   }
   return false;
 }

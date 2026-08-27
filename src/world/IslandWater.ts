@@ -5,6 +5,7 @@ import { world } from './coords';
 import { WaterSim, DEFAULTS } from './waterSim';
 import { isWatercourse } from './islandChannels';
 import { useWaterQuery, type WaterSpot } from './waterQuery';
+import { makeWaterLook } from './waterLook';
 
 /**
  * THE ISLAND'S WATER — one simulated window that walks with her.
@@ -135,6 +136,8 @@ export class IslandWater {
   private readonly mesh: THREE.Mesh;
   private readonly pos: Float32Array;
   private readonly depthAttr: Float32Array;
+  /** Per-vertex current, world units a second — drives the skin's drift. */
+  private readonly flowAttr: Float32Array;
   /** Drawn ground under each cell — static until the window moves. */
   private readonly base = new Float32Array(N * N);
   /** Watercourse cells — baseflow goes here, always. */
@@ -148,15 +151,9 @@ export class IslandWater {
   private precipitation = 0;
   /** Whether the window has been placed at all. */
   private placed = false;
-  /** Shader clock — seconds, for the ripple scroll. */
-  private readonly clock = { value: 0 };
-  /** World position of the window centre, so the skin is world-locked. */
-  private readonly centreUniform = { value: new THREE.Vector2() };
-  private readonly ripple: { value: THREE.Texture } = (() => {
-    const flat = new THREE.DataTexture(new Uint8Array([128, 128, 255, 255]), 1, 1);
-    flat.needsUpdate = true;
-    return { value: flat };
-  })();
+  /** The shared look's uniforms — assigned when material() builds it. */
+  private clockRef!: { value: number };
+  private centreRef!: { value: THREE.Vector2 };
 
   constructor(private readonly scene: THREE.Scene) {
     const span = N * CELL;
@@ -181,97 +178,38 @@ export class IslandWater {
     }
     this.pos = pos;
     this.depthAttr = new Float32Array(N * N);
+    this.flowAttr = new Float32Array(N * N * 2);
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
     geometry.setAttribute('depth', new THREE.BufferAttribute(this.depthAttr, 1));
+    geometry.setAttribute('flow', new THREE.BufferAttribute(this.flowAttr, 2));
     geometry.setIndex(new THREE.BufferAttribute(faces, 1));
     this.mesh = new THREE.Mesh(geometry, this.material());
     this.mesh.renderOrder = 1;
     this.mesh.frustumCulled = false;
     scene.add(this.mesh);
-    // The window is THE answer to "what water is here" while it lives.
-    useWaterQuery((wx, wz) => this.spotAt(wx, wz));
+    // The window answers for FRESH water; where it has none, the sea
+    // answers for itself — the ground below zero IS the column, salt
+    // flagged so wading floats on it and drinking refuses it.
+    useWaterQuery((wx, wz) => {
+      const fresh = this.spotAt(wx, wz);
+      if (fresh) return fresh;
+      const g = groundHeight(wx, wz);
+      return g < 0 ? { depth: -g, flowX: 0, flowZ: 0, salt: true } : null;
+    });
   }
 
   /**
-   * WHY IT STOPPED LOOKING LIKE ICE. The old material was a flat tint
-   * with a per-vertex normal pointing straight up — nothing on the
-   * surface MOVED, and a motionless translucent sheet reads as ice or
-   * cloud, which is what Joshua called it. Water is recognised by its
-   * skin: normals that wander, light that glints and slides. So the
-   * ripple normal map from the pre-v0.0.57 build (recovered from git —
-   * it was deleted with the old water, not because it was wrong) scrolls
-   * across the surface in two directions at two scales, and a fresnel
-   * sheen mixes the sky in at grazing angles the way every BE water
-   * material does.
-   *
-   * WORLD-LOCKED UVs, learned from PR #2's version of this: it derived
-   * them from mesh-local position, so the whole skin slid with the
-   * window on every re-centre. uCentre pins the pattern to the island.
+   * The skin is Beyond Extinction's ocean, shared with our own ocean
+   * sheet and green-shifted for fresh water — see waterLook.ts, which
+   * is the single owner of every colour and constant.
    */
   private material(): THREE.MeshStandardMaterial {
-    const material = new THREE.MeshStandardMaterial({
-      color: 0xffffff, roughness: 0.14, metalness: 0.1,
-      transparent: true, side: THREE.DoubleSide,
-      normalScale: new THREE.Vector2(0.65, 0.65),
-      // LIFTED toward the camera. The surface is drawn on the same
-      // triangle the ground is, so where the water is a film the two
-      // are coplanar and the tie has to be broken somewhere.
-      polygonOffset: true, polygonOffsetFactor: 0, polygonOffsetUnits: -6,
-    });
-    new THREE.TextureLoader().load(
-      `${import.meta.env.BASE_URL}water-normal.png`,
-      (texture) => {
-        texture.wrapS = THREE.RepeatWrapping;
-        texture.wrapT = THREE.RepeatWrapping;
-        this.ripple.value = texture;
-      },
-      undefined,
-      () => { /* flat water is a look, not a failure */ },
-    );
-    material.onBeforeCompile = (shader) => {
-      shader.uniforms.uTime = this.clock;
-      shader.uniforms.uCentre = this.centreUniform;
-      shader.uniforms.uRipple = this.ripple;
-      shader.vertexShader = shader.vertexShader
-        .replace('#include <common>',
-          '#include <common>\n attribute float depth;\n varying float vDepth;\n varying vec2 vWorld;\n uniform vec2 uCentre;')
-        .replace('#include <begin_vertex>',
-          '#include <begin_vertex>\n vDepth = depth;\n vWorld = vec2(position.x, position.z) + uCentre;');
-      shader.fragmentShader = ('uniform float uTime;\nuniform sampler2D uRipple;\n' + shader.fragmentShader)
-        .replace('#include <common>', '#include <common>\n varying float vDepth;\n varying vec2 vWorld;')
-        .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
-          {
-            // Two octaves of the same map, different scales, drifting
-            // different ways — the repeat never lines up, so the skin
-            // shimmers instead of marching. 800 units = one 8 m tile.
-            vec2 uv = vWorld / 800.0;
-            vec3 rippleA = texture2D(uRipple, uv + vec2(uTime * 0.010, uTime * 0.007)).xyz - 0.5;
-            vec3 rippleB = texture2D(uRipple, uv * 2.7 - vec2(uTime * 0.016, -uTime * 0.011)).xyz - 0.5;
-            // Films barely ripple; pools carry the full skin.
-            float body = smoothstep(0.0, 30.0, vDepth);
-            normal = normalize(normal + vec3(rippleA.x + rippleB.x * 0.6, 0.0, rippleA.y + rippleB.y * 0.6) * 0.55 * body);
-          }`)
-        .replace('#include <map_fragment>', `#include <map_fragment>
-          {
-            if (vDepth < ${DRAWN.toFixed(4)}) discard;
-            // Ramped over centimetres: a stream here is tens of units
-            // deep, and a ramp built for an ocean paints every one of
-            // them the same flat nothing.
-            float t = clamp(vDepth / 60.0, 0.0, 1.0);
-            diffuseColor.rgb = mix(vec3(0.55, 0.80, 0.84), vec3(0.04, 0.22, 0.52), t * t);
-            diffuseColor.a = mix(0.60, 0.96, t);
-          }`)
-        .replace('#include <dithering_fragment>', `#include <dithering_fragment>
-          {
-            // The sky in the skin at a glancing look — the single
-            // strongest "this is water" cue there is.
-            float face = clamp(dot(normalize(normal), normalize(vViewPosition)), 0.0, 1.0);
-            gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.66, 0.80, 0.90), pow(1.0 - face, 4.0) * 0.5);
-          }`);
-    };
-    return material;
+    const look = makeWaterLook({ green: 1, surf: 0.15, sink: false });
+    this.clockRef = look.clock;
+    this.centreRef = look.centre;
+    return look.material;
   }
 
   /** What the sky is doing, in mm/hr. Drives stormflow. */
@@ -378,13 +316,13 @@ export class IslandWater {
   place(): void {
     const seat = toLocal(world(this.centreX, this.centreZ));
     this.mesh.position.set(seat.lx, 0, seat.lz);
-    this.centreUniform.value.set(this.centreX, this.centreZ);
+    this.centreRef.value.set(this.centreX, this.centreZ);
   }
 
   /** Advance the water and lift the surface onto the drawn ground. */
   update(dt: number): void {
     if (!this.placed) return;
-    this.clock.value += dt;
+    this.clockRef.value += dt;
     const step = this.sim.opts.dt;
     const owed = dt / step + this.carry;
     const steps = Math.min(Math.floor(owed), 120);
@@ -405,10 +343,19 @@ export class IslandWater {
       const d = this.sim.depth[i];
       this.depthAttr[i] = d;
       this.pos[i * 3 + 1] = this.base[i] + d * relief;
+      // The CURRENT under every vertex, so the skin drifts at the
+      // water's own speed — Joshua: "water speed as the water moves".
+      // Dry cells keep their last flow; their pixels are discarded.
+      if (d > 0) {
+        const v = this.sim.velocity(i % N, (i / N) | 0);
+        this.flowAttr[i * 2] = v.vx;
+        this.flowAttr[i * 2 + 1] = v.vz;
+      }
     }
     const g = this.mesh.geometry;
     g.getAttribute('position').needsUpdate = true;
     g.getAttribute('depth').needsUpdate = true;
+    g.getAttribute('flow').needsUpdate = true;
   }
 
   /**
