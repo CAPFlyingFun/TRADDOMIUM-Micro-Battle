@@ -20,7 +20,9 @@ import { followHd, forgetHd, hdResident, onHdTile } from '../world/kauaiHd';
 import { IslandWater } from '../world/IslandWater';
 import { Underwater } from '../world/Underwater';
 import { Ocean } from '../world/Ocean';
-import { wadeAt } from '../ant/wading';
+import { swimEffort, wadeAt } from '../ant/wading';
+import { Breath } from '../ant/breath';
+import { SaltExposure, SALT_DAMAGE_FRACTION } from '../ant/brine';
 import { waterSpotAt } from '../world/waterQuery';
 import { bakeIslandChannels } from '../world/islandChannels';
 
@@ -264,6 +266,19 @@ export class IslandScene {
   private afloat = false;
   /** Water over the ground under her, drawn units. */
   private wet = 0;
+  /** Whether the water stands over her head — with hysteresis. */
+  private headUnder = false;
+  /** Her air, held while the head is under (breath.ts). */
+  private readonly breath = new Breath();
+  /** The sea's clock on her (brine.ts). */
+  private readonly brine = new SaltExposure();
+  /**
+   * Her health, live at last. The caste table's maximum is the truth
+   * it moves under; the sea is the first thing that can spend it and
+   * healthRecovery — a stat that sat unread since it was written — is
+   * the way back CLAUDE.md's bar rule demands.
+   */
+  private hp = liveStat('maxHealth');
   /** The look below the waterline. A LOOK, not a mechanic. */
   private underwater!: Underwater;
   /**
@@ -589,7 +604,11 @@ export class IslandScene {
       waterDepth: (wx: number, wz: number) => this.water?.depthAt(wx, wz) ?? 0,
       // What the water is doing to HER, for the probes: the same
       // numbers the movement just used, not a re-derivation.
-      wading: () => ({ depth: this.wet, afloat: this.afloat, dive: this.dive }),
+      wading: () => ({ depth: this.wet, afloat: this.afloat, dive: this.dive, under: this.headUnder }),
+      sea: () => ({
+        hp: this.hp, air: this.breath.fraction,
+        salt: this.brine.exposureSeconds, burning: this.brine.burning,
+      }),
       waterDrawn: () => this.water?.drawnCells() ?? -1,
       groundUnderfoot: () => groundHeight(this.ant.where.wx, this.ant.where.wz),
       /**
@@ -797,6 +816,21 @@ export class IslandScene {
     this.onDeath?.();
   }
 
+  /**
+   * The one door damage comes through, so every cause of death lands
+   * as a cause rather than as its own system — exactly what kill()'s
+   * note promised. Saltwater is the first caller.
+   *
+   * @param why a short cause, carried so the death screen can one day
+   *   say what got her. Unused until it can.
+   */
+  hurt(amount: number, why: string): void {
+    if (this.dying || amount <= 0) return;
+    void why;
+    this.hp = Math.max(0, this.hp - amount);
+    if (this.hp <= 0) this.kill();
+  }
+
   dispose(): void {
     this.underwater.dispose();
     this.ocean?.dispose();
@@ -978,7 +1012,11 @@ export class IslandScene {
     }
 
     let winded = false;
+    // Whether her BODY is in the sea this frame. False while she
+    // flies, whatever is below her — spray does not reach a wing.
+    let inSalt = false;
     if (this.flight.aloft) {
+      this.headUnder = false;
       const step = this.flight.update(
         {
           push: stick.y,
@@ -1029,23 +1067,43 @@ export class IslandScene {
       // Landing needs no button: descend until the ground arrives.
       if (this.flight.height <= 0) this.flight.land();
     } else {
-      // Only charge her for a sprint she is actually getting: calling
-      // for one while stopped or reversing costs nothing.
-      const sprinting = wants && travel.speed > PACE_SPEED[this.pace] + 1e-3;
-      const resting = this.ant.pace < 0.05;
-      this.effort = sprinting ? SPRINT_DRAIN
-        : resting ? RESTING_RECOVERY : MOVING_RECOVERY;
-      winded = this.stamina.update(this.effort, dt);
       // WHAT THE WATER IS DOING TO HER. The lever is the climb lever
       // in the air and the dive lever in the water — nought at the
       // surface, one on the bottom — and the eased `dive` is what
       // wadeAt scales her float height by.
-      const wantDive = Math.max(0, -this.liftSlider.lift);
-      const ease = wantDive < this.dive ? RISE_EASE : DIVE_EASE;
+      //
+      // OUT OF AIR THE LEVER STOPS COUNTING: spiracles shut on an
+      // empty film, her own buoyancy owns the vertical, and she goes
+      // up whatever the player is holding — the old build's rule,
+      // kept ("she floats her out when she has none, lever or no
+      // lever"). And UP on the lever surfaces her FASTER than the
+      // film alone: buoyancy plus swimming for the light.
+      const wantDive = this.breath.spent ? 0 : Math.max(0, -this.liftSlider.lift);
+      const ease = wantDive < this.dive
+        ? RISE_EASE * (1 + Math.max(0, this.liftSlider.lift))
+        : DIVE_EASE;
       this.dive += (wantDive - this.dive) * (1 - Math.exp(-ease * dt));
-      const wade = wadeAt(this.ant.where.wx, this.ant.where.wz, this.dive);
+      const wade = wadeAt(this.ant.where.wx, this.ant.where.wz, this.dive, this.afloat);
       this.afloat = wade.afloat;
       this.wet = wade.depth;
+      inSalt = wade.depth > 0 && wade.salt;
+      // HER HEAD IS EITHER UNDER OR IT IS NOT — measured as the water
+      // standing over where she rides, with a little hysteresis so
+      // bobbing at one body length cannot flick her breath on and off.
+      const overHer = wade.depth - wade.above;
+      this.headUnder = overHer > (this.headUnder ? 0.6 : 1.0);
+      // Only charge her for a sprint she is actually getting: calling
+      // for one while stopped or reversing costs nothing. Afloat the
+      // water prices the frame instead (swimEffort): paddling costs,
+      // the sea costs half again more, and pushing down costs like a
+      // sprint — wading stays on the ground ladder, because wading is
+      // walking.
+      const sprinting = wants && travel.speed > PACE_SPEED[this.pace] + 1e-3;
+      const resting = this.ant.pace < 0.05;
+      this.effort = swimEffort(wade.afloat, wade.salt, travel.speed > 0.05, wantDive)
+        ?? (sprinting ? SPRINT_DRAIN
+          : resting ? RESTING_RECOVERY : MOVING_RECOVERY);
+      winded = this.stamina.update(this.effort, dt);
       // Depth gates her drive — wading drags, paddling crawls — and
       // the current is a push she does not control. Both reach
       // PlayerAnt through the hooks that survived v0.0.57 exactly so
@@ -1139,8 +1197,26 @@ export class IslandScene {
     // from. So it is shown full and still rather than counting down to
     // a state she cannot leave. `Thirst` keeps its drain law intact for
     // when water returns; nothing here advances it.
+    // HER AIR, HER BLOOD AND THE SEA'S CLOCK, all on simulation time.
+    // The breath reads the head-under signal the wade computed; the
+    // brine reads "body in the sea" and answers in damage ticks, each
+    // worth one percent of her MAXIMUM — the toll is fixed, so it can
+    // actually kill — and every tick goes through hurt(), the same
+    // door every future predator will use. Out of the sea she knits,
+    // on the caste table's own healthRecovery: the way back that lets
+    // the bar move at all.
+    this.breath.update(this.headUnder, dt);
+    const stings = this.brine.update(inSalt, dt);
+    if (stings > 0) {
+      this.hurt(stings * liveStat('maxHealth') * SALT_DAMAGE_FRACTION, 'saltwater');
+    }
+    if (!inSalt && !this.dying && this.hp > 0) {
+      this.hp = Math.min(liveStat('maxHealth'), this.hp + liveStat('healthRecovery') * dt);
+    }
     this.vitals.aloft(this.flight.aloft);
     this.vitals.show(this.stamina.fraction, this.stamina.spent, this.effort);
+    this.vitals.air(this.breath.fraction);
+    this.vitals.showHealth(this.hp / liveStat('maxHealth'), this.hp, this.brine.burning);
     this.vitals.thirst(this.thirst.fraction, this.thirst.parched, false, 0);
 
     // NOTHING TO TICK. The grace is a deadline, so the only question

@@ -66,11 +66,20 @@ const SAFE_FILL = 'rgba(120, 190, 255, .16)';
 const SAFE_EDGE = 'rgba(150, 205, 255, .5)';
 const SAFE_TEXT = 'rgba(190, 225, 255, .95)';
 
+const SVG = 'http://www.w3.org/2000/svg';
 /** Radius of the air ring, inside the 46-pixel box its portrait uses. */
+const AIR_R = 19.5;
+const AIR_ROUND = 2 * Math.PI * AIR_R;
+const AIR_FULL = 'rgba(150, 214, 255, .92)';
+const AIR_LOW = '#ffb03a';
+const AIR_OUT = '#ff7a5c';
 
 export class Vitals {
   private readonly panel: HTMLDivElement;
   private readonly stamina: Meter;
+  private readonly airRing: SVGCircleElement;
+  private readonly airText: SVGTextElement;
+  private shownAir = -1;
 
   private readonly grace: HTMLDivElement;
   private shown = '';
@@ -95,19 +104,55 @@ export class Vitals {
       font: '22px/1 system-ui, sans-serif',
     } as Partial<CSSStyleDeclaration>);
 
-    // HER AIR SAT UNDER THE PORTRAIT, a ring rather than a fourth bar,
-    // because it was the only meter about WHERE SHE WAS rather than
-    // what she had been doing — and because three bars plus a fourth
-    // reads as a longer list. Full and dry it sat back at a third
-    // opacity; underwater it was the only thing on the card worth
-    // reading. It went out with the water there was to drown in.
+    // HER AIR, back under the portrait where it lived before — a ring
+    // rather than a fourth bar, because it is the only meter about
+    // WHERE SHE IS rather than what she has been doing, and because
+    // three bars plus a fourth reads as a longer list. Full and dry it
+    // sits back at a third opacity; underwater it is the only thing on
+    // the card worth reading. It went out with the water there was to
+    // drown in, and the water is back.
+    this.airRing = document.createElementNS(SVG, 'circle');
+    const gauge = document.createElementNS(SVG, 'svg');
+    gauge.setAttribute('width', '46');
+    gauge.setAttribute('height', '46');
+    gauge.setAttribute('viewBox', '0 0 46 46');
+    gauge.style.display = 'block';
+    gauge.style.marginTop = '4px';
+    const track = document.createElementNS(SVG, 'circle');
+    for (const ring of [track, this.airRing]) {
+      ring.setAttribute('cx', '23');
+      ring.setAttribute('cy', '23');
+      ring.setAttribute('r', String(AIR_R));
+      ring.setAttribute('fill', 'none');
+      ring.setAttribute('stroke-width', '3.5');
+      ring.setAttribute('stroke-linecap', 'round');
+      // Twelve o'clock, filling clockwise, which is where a gauge
+      // reads from whatever it is measuring.
+      ring.setAttribute('transform', 'rotate(-90 23 23)');
+    }
+    track.setAttribute('stroke', 'rgba(255, 216, 130, .18)');
+    this.airRing.setAttribute('stroke', AIR_FULL);
+    this.airRing.setAttribute('stroke-dasharray', String(AIR_ROUND));
+    this.airRing.setAttribute('stroke-dashoffset', '0');
+    this.airText = document.createElementNS(SVG, 'text');
+    this.airText.setAttribute('x', '23');
+    this.airText.setAttribute('y', '23');
+    this.airText.setAttribute('text-anchor', 'middle');
+    this.airText.setAttribute('dominant-baseline', 'central');
+    this.airText.setAttribute('fill', AIR_FULL);
+    this.airText.setAttribute(
+      'style',
+      'font: 700 11px/1 "JetBrains Mono", ui-monospace, monospace',
+    );
+    this.airText.textContent = '100%';
+    gauge.append(track, this.airRing, this.airText);
 
     const left = document.createElement('div');
     Object.assign(left.style, {
       display: 'flex', flexDirection: 'column', alignItems: 'center',
       flex: '0 0 auto',
     } as Partial<CSSStyleDeclaration>);
-    left.append(portrait);
+    left.append(portrait, gauge);
 
     const stack = document.createElement('div');
     Object.assign(stack.style, {
@@ -137,10 +182,15 @@ export class Vitals {
     // build apart. Health and food are still held: nothing heals her
     // and nothing feeds her yet.
     this.water = this.meter('💧', 'water', null);
+    // AND HEALTH IS LIVE NOW TOO. It sat resting for the same reason
+    // thirst did — nothing in the world could touch it — and the sea
+    // is the first thing that can (brine.ts). The reference is kept so
+    // health() can move the bar the salt is draining.
+    this.health = this.meter('♥', 'health', reserves.health);
     stack.append(
       who,
       this.stamina.icon.parentElement!,
-      this.meter('♥', 'health', reserves.health).icon.parentElement!,
+      this.health.icon.parentElement!,
       this.meter('🌾', 'food', reserves.food).icon.parentElement!,
       this.water.icon.parentElement!,
     );
@@ -219,6 +269,8 @@ export class Vitals {
   private flying = false;
   private readonly water: Meter;
   private shownWater = '';
+  private readonly health: Meter;
+  private shownHealth = '';
 
   show(fraction: number, spent: boolean, rate: number): void {
     const left = Math.max(0, Math.min(1, fraction));
@@ -235,6 +287,48 @@ export class Vitals {
     this.stamina.read.textContent = label;
   }
 
+
+  /** How much air she has, 0 to 1 — the ring under the portrait. */
+  air(fraction: number): void {
+    const shown = Math.round(Math.min(1, Math.max(0, fraction)) * 100);
+    if (shown === this.shownAir) return;
+    this.shownAir = shown;
+    this.airText.textContent = `${shown}%`;
+    this.airRing.setAttribute(
+      'stroke-dashoffset', String(AIR_ROUND * (1 - shown / 100)),
+    );
+    const tone = shown <= 0 ? AIR_OUT : shown < 25 ? AIR_LOW : AIR_FULL;
+    this.airRing.setAttribute('stroke', tone);
+    this.airText.setAttribute('fill', tone);
+    // FULL AND DRY IT SITS BACK. A gauge that reads 100% for an hour
+    // is a number nobody looks at; the same gauge at 40% should be the
+    // only thing on this card worth reading.
+    this.airRing.parentElement?.style.setProperty(
+      'opacity', shown >= 100 ? '0.34' : '1',
+    );
+  }
+
+  /**
+   * WHAT SHE HAS LEFT TO LIVE ON, and whether something is taking it.
+   *
+   * @param stinging true while damage is actively landing — the row
+   *   wears the spent red so the sea saying SALTWATER EXPOSURE and
+   *   the card saying it are the same statement. Calm and merely
+   *   below full it reads in the fuel tone: something happened, and
+   *   it is over.
+   */
+  showHealth(fraction: number, points: number, stinging: boolean): void {
+    const left = Math.max(0, Math.min(1, fraction));
+    const state = `${Math.round(points)}|${stinging}|${Math.round(left * 200)}`;
+    if (state === this.shownHealth) return;
+    this.shownHealth = state;
+    const tone = stinging ? SPENT : left < 1 ? FUEL : RESTING;
+    this.health.fill.style.width = `${left * 100}%`;
+    this.health.fill.style.background = tone;
+    this.health.icon.style.color = tone;
+    this.health.read.style.color = stinging ? SPENT : left < 1 ? GOLD : RESTING;
+    this.health.read.textContent = `${Math.round(points)}`;
+  }
 
   /**
    * WHAT SHE HAS LEFT TO DRINK, and whether she is drinking it.

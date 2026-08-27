@@ -28,6 +28,8 @@
  * puts her down, and the film holds her up.
  */
 import { waterSpotAt } from '../world/waterQuery';
+import { MOVING_RECOVERY, SPRINT_DRAIN } from './stamina';
+import { OCEAN_STAMINA_MULTIPLIER } from './brine';
 
 /**
  * HOW DEEP SHE CAN STILL PUSH THROUGH — four millimetres, roughly the
@@ -54,6 +56,30 @@ const PADDLE_PACE = 0.22;
  */
 const WADE_CARRY = 0.4;
 const AFLOAT_CARRY = 0.85;
+/**
+ * Once she IS floating she stays floating until the water is this
+ * fraction of FOOTING — a little hysteresis, so the shoreline's
+ * millimetre-scale depth noise cannot flick her between walking and
+ * swimming every frame at the exact threshold.
+ */
+const FOOTING_STICKY = 0.85;
+/**
+ * WHAT SWIMMING COSTS — priced here, charged by the scene, through
+ * the same one-reserve Stamina whose rule is that the caller knows
+ * what its activity costs. Two minutes of continuous fresh-water
+ * paddling on a full bar: real work, but the film carries her weight,
+ * so it is nothing like a sprint. The sea multiplies this by
+ * OCEAN_STAMINA_MULTIPLIER (brine.ts).
+ */
+export const SWIM_DRAIN = 1 / 120;
+/**
+ * And what DIVING costs on top, at full push. Sprint-grade — thirty
+ * seconds of hard downward swimming on a full bar — because holding
+ * herself under is a fight against her own buoyancy the whole way
+ * (she is a cork with legs; see the header). Scaled by how hard the
+ * lever is actually pushing down.
+ */
+export const DIVE_DRAIN = SPRINT_DRAIN;
 
 export interface Wade {
   /** Water over the ground under her, drawn units. Zero on dry land. */
@@ -70,10 +96,18 @@ export interface Wade {
    *  by construction — the sea has no cells in it — so any water at
    *  all answers yes. */
   readonly drinkable: boolean;
+  /**
+   * Whether this is the SEA. An explicit classification rather than
+   * !drinkable, so fresh water can never inherit salt consequences by
+   * accident — the two flags happen to mirror each other today and
+   * are still two different questions.
+   */
+  readonly salt: boolean;
 }
 
 const DRY: Wade = {
-  depth: 0, above: 0, pace: 1, carry: null, afloat: false, drinkable: false,
+  depth: 0, above: 0, pace: 1, carry: null, afloat: false,
+  drinkable: false, salt: false,
 };
 
 /**
@@ -84,12 +118,14 @@ const DRY: Wade = {
  *   she is swimming. Scaling the float height is what makes the bed
  *   the limit for free: at dive 1 she stands on it however deep the
  *   pool is, and there is no separate clamp to keep in step.
+ * @param wasAfloat whether she was floating LAST frame — feeds the
+ *   sticky threshold so the shoreline cannot flicker her state.
  */
-export function wadeAt(wx: number, wz: number, dive = 0): Wade {
+export function wadeAt(wx: number, wz: number, dive = 0, wasAfloat = false): Wade {
   const spot = waterSpotAt(wx, wz);
   if (!spot || spot.depth <= 0) return DRY;
   const depth = spot.depth;
-  const afloat = depth >= FOOTING;
+  const afloat = depth >= FOOTING * (wasAfloat ? FOOTING_STICKY : 1);
   const sunk = Math.min(1, depth / FOOTING);
   const pull = afloat ? AFLOAT_CARRY : WADE_CARRY * sunk;
   const carrying = spot.flowX !== 0 || spot.flowZ !== 0;
@@ -107,7 +143,34 @@ export function wadeAt(wx: number, wz: number, dive = 0): Wade {
     afloat,
     // The window is fresh by construction; the sea announces itself.
     drinkable: !spot.salt,
+    salt: spot.salt === true,
   };
+}
+
+/**
+ * What being IN the water costs the one reserve, in fractions of a
+ * full bar per second — or null when she is not floating, because
+ * wading is walking and the ground ladder already prices walking.
+ *
+ * The ladder, shallow to deep:
+ *   floating still            recovers, slowly — the film holds her
+ *   paddling, fresh water     SWIM_DRAIN
+ *   paddling, the sea         SWIM_DRAIN × OCEAN_STAMINA_MULTIPLIER
+ *   pushing down (either)     + DIVE_DRAIN × how hard
+ *
+ * The sea multiplier touches only the POSITIVE swim cost. Resting
+ * afloat recovers at the moving rate in both waters — a multiplier on
+ * a recovery would make the ocean restful, which is the opposite of
+ * the point of it.
+ */
+export function swimEffort(
+  afloat: boolean, salt: boolean, paddling: boolean, wantDive: number,
+): number | null {
+  if (!afloat) return null;
+  const base = paddling
+    ? SWIM_DRAIN * (salt ? OCEAN_STAMINA_MULTIPLIER : 1)
+    : MOVING_RECOVERY;
+  return base + DIVE_DRAIN * Math.min(1, Math.max(0, wantDive));
 }
 
 /**
