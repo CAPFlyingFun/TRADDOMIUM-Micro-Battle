@@ -36,8 +36,6 @@ import { join } from 'node:path';
 const COUNTED = [
   ...readdirSync('public/kauai-tex').sort().map((f) => `kauai-tex/${f}`),
   'models/queen-winged.glb',
-  'water-normal.png',
-  'kauai-hydro.bin',
 ];
 
 // THE HD TILES ARE NOT COUNTED, deliberately. All 64 are 33.7 MB and

@@ -1,7 +1,7 @@
 {
   "name": "traddomium-micro-battle",
   "private": true,
-  "version": "0.0.64",
+  "version": "0.0.65",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -30,7 +30,6 @@
     "bake:hydro": "python3 scripts/bakeHydro.py",
     "shots:hud": "node scripts/hudshot.mjs",
     "shots:smooth": "node scripts/smoothShots.mjs",
-    "shots:water": "node scripts/waterShots.mjs",
     "probe:update": "node scripts/probe-update.mjs",
     "probe:save": "node scripts/probe-save.mjs",
     "probe:revisit": "node scripts/probe-revisit.mjs",

@@ -17,10 +17,6 @@ import { findLandfall, UNITS_PER_METRE, type HeightGrid } from '../world/kauai';
 import { local, world, type WorldPoint } from '../world/coords';
 import { TerrainStream, TIER_CUTS } from '../world/TerrainStream';
 import { followHd, forgetHd, hdResident, onHdTile } from '../world/kauaiHd';
-import { forgetHydro, hydro, loadHydro, useHydro } from '../world/hydro';
-import { forgetRiverBeds, indexRiverBeds } from '../world/riverBed';
-import { WaterSurface } from '../world/WaterSurface';
-import { HYDRO_JOB, loadRipple, RIPPLE_JOB } from '../world/waterLook';
 
 import { originAt, rebaseFor, setOrigin, toLocal, toWorld,
 } from '../world/origin';
@@ -234,8 +230,6 @@ export class IslandScene {
   private readonly ant = new PlayerAnt();
   private readonly clock = new THREE.Clock();
   private terrain!: TerrainStream;
-  /** The surveyed rivers and lakes of Kauaʻi. See hydro.ts. */
-  private water!: WaterSurface;
   /**
    * The CEILING on a full push of the stick — not propulsion. She does
    * not move because this is set; she moves because a thumb asks.
@@ -477,26 +471,6 @@ export class IslandScene {
     onHdTile(() => { if (!this.disposed) this.terrain.rebuild(); });
     followHd(this.ant.where.wx, this.ant.where.wz);
 
-    // THE WATER ARRIVES ON ITS OWN and needs nothing waited on: it is
-    // drawn at the level the survey states, and the terrain — which is
-    // already standing — clips it. A late arrival adds rivers to a
-    // frame rather than moving anything already in one.
-    void loadRipple().catch(() => {}).finally(() => this.report?.finish(RIPPLE_JOB));
-    void loadHydro((done) => this.report?.advance(HYDRO_JOB, done))
-      .then((data) => {
-        if (this.disposed) return;
-        useHydro(data);
-        // THE BED BEFORE THE WATER, and the terrain re-cut after both.
-        // The cells standing right now were built from an island with
-        // no rivers in it; leaving them would put a flat surface over
-        // unbroken ground and call it a river.
-        indexRiverBeds();
-        this.terrain.rebuild();
-        this.ant.reground();
-        this.water.follow(this.ant.where);
-      })
-      .catch(() => {})
-      .finally(() => this.report?.finish(HYDRO_JOB));
 
     this.report?.finish(TERRAIN_JOB);
 
@@ -526,8 +500,6 @@ export class IslandScene {
       cells: () => this.terrain.cellCount,
       /** How many fine tiles are resident — 0 until the first lands. */
       hdTiles: () => hdResident(),
-      /** Water tiles with geometry built. */
-      waterTiles: () => this.water.shown,
       /**
        * Move the smoothing dial and re-cut, for the comparison rig.
        * The same path the slider takes on release; a blur mixes
@@ -585,7 +557,6 @@ export class IslandScene {
         this.flight.land();
         this.terrain.follow(this.ant.where);
         this.terrain.place();
-      this.water.place();
         this.follow.snapTo(this.ant.root, -heading);
       },
       pace: () => this.pace,
@@ -792,9 +763,6 @@ export class IslandScene {
     this.detachKill();
     onHdTile(null);
     forgetHd();
-    this.water.dispose();
-    forgetHydro();
-    forgetRiverBeds();
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }
@@ -1141,8 +1109,6 @@ export class IslandScene {
     // rather than moves when one arrives.
     followHd(at.wx, at.wz);
     this.terrain.follow(at);
-    if (hydro()) this.water.follow(at);
-    this.water.update(dt);
 
     // WEATHER IS ASKED IN GLOBAL COORDINATES and drawn in local ones.
     // Her position decides what the sky is doing; the CAMERA's rendered
@@ -1783,7 +1749,6 @@ export class IslandScene {
       terrainMaterial(maps, grain, TIER_CUTS.middle),
       terrainMaterial(maps, grain, TIER_CUTS.backdrop),
     );
-    this.water = new WaterSurface(this.scene);
   }
 
 

@@ -9,7 +9,7 @@
  * the first frame instead of a guess that lurches as files land. See
  * the script's header for what that looked like.
  *
- * Total: 5.93 MB.
+ * Total: 4.94 MB.
  */
 export const ASSET_BYTES: Readonly<Record<string, number>> = {
   'kauai-tex/cliff.jpg': 461843,
@@ -20,8 +20,6 @@ export const ASSET_BYTES: Readonly<Record<string, number>> = {
   'kauai-tex/sand.jpg': 477379,
   'kauai-tex/snow.jpg': 302340,
   'models/queen-winged.glb': 2066824,
-  'water-normal.png': 205703,
-  'kauai-hydro.bin': 839071,
 };
 
 /** What a file weighs, or null if it was not baked. */
