@@ -33,6 +33,15 @@ export interface WaterLookOpts {
   /** Scales the surf/foam depth band. Ocean 1; inland much tighter. */
   readonly surf: number;
   /**
+   * How far (in depth units) the water's edge FEATHERS in from
+   * nothing, the way the ground textures blend band into band instead
+   * of cutting. The ocean fades over most of a metre of column —
+   * tens of metres of beach at shelf gradients — a stream over a few
+   * centimetres, so films still read while their rims stop being
+   * scissor-cut polygons.
+   */
+  readonly edgeFade: number;
+  /**
    * Polygon-offset direction. The OCEAN sinks (+) so near-coplanar
    * shore terrain wins the depth test — BE's flyover-shimmer lesson.
    * INLAND lifts (−): a film lies ON the ground it is coplanar with,
@@ -125,10 +134,14 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
         }`)
       .replace('#include <map_fragment>', `#include <map_fragment>
         {
-          if (vDepth < 1.5) discard;
-          // BE's depth-tinted tropics, metres -> cm: turquoise over the
-          // sand, navy in the body. ${''}
+          // THE EDGE BLENDS LIKE THE GROUND DOES. A hard discard at a
+          // threshold cut the waterline like scissors against the
+          // beach; the terrain never does that — its bands feather.
+          // So the water's alpha rises from nothing over edgeFade of
+          // column, and the sand shows through the first film of it
+          // exactly as it shows through the shallows.
           float depth = vDepth;
+          float edge = smoothstep(0.0, ${opts.edgeFade.toFixed(1)}, depth);
           float shallow = 1.0 - smoothstep(30.0, 450.0, depth);
           vec3 shallowCol = vec3(0.020, 0.34, 0.42);   // BE deep teal
           vec3 deepCol    = vec3(0.008, 0.10, 0.26);   // BE navy
@@ -154,6 +167,8 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
           diffuseColor.a *= mix(1.0, 1.55, smoothstep(40.0, 550.0, depth));
           diffuseColor.a = min(diffuseColor.a, 0.82);
           diffuseColor.a = mix(diffuseColor.a, 0.95, foam);
+          diffuseColor.a *= edge;
+          if (diffuseColor.a < 0.01) discard;
         }`)
       .replace('#include <lights_fragment_end>', `#include <lights_fragment_end>
         {

@@ -80,7 +80,7 @@ export class Ocean {
     // attribute to exist, and zero is the honest value for it.
     geometry.setAttribute('flow', new THREE.BufferAttribute(new Float32Array(N * N * 2), 2));
     geometry.setIndex(new THREE.BufferAttribute(faces, 1));
-    const look = makeWaterLook({ green: 0, surf: 1, sink: true });
+    const look = makeWaterLook({ green: 0, surf: 1, sink: true, edgeFade: 80 });
     this.clock = look.clock;
     this.centre = look.centre;
     this.mesh = new THREE.Mesh(geometry, look.material);
