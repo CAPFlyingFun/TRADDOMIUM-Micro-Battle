@@ -100,7 +100,7 @@ export class FollowCamera {
     this.place(target, rest, this.desired);
     this.offset.copy(this.desired).sub(target.position);
     this.camera.position.copy(this.desired);
-    this.keepAboveGround(this.camera.position);
+    this.keepAboveGround(this.camera.position, target.position.y);
     this.aim(target);
   }
 
@@ -114,7 +114,7 @@ export class FollowCamera {
     this.wantOffset.copy(this.desired).sub(target.position);
     this.offset.lerp(this.wantOffset, 1 - Math.exp(-rate * dt));
     this.camera.position.copy(target.position).add(this.offset);
-    this.keepAboveGround(this.camera.position);
+    this.keepAboveGround(this.camera.position, target.position.y);
     this.aim(target);
   }
 
@@ -151,24 +151,31 @@ export class FollowCamera {
   }
 
   /**
-   * Never let the camera sink into a hillside — or under the sea.
+   * Never let the camera sink into a hillside — and only under the sea
+   * when SHE is under the sea.
    *
    * Applied to the FINAL position, after the offset smoothing, because
    * a clamp folded into the desired position gets averaged away by the
    * lerp on its way through. The floor is the higher of the ground and
-   * the waterline: over the sea the ground is the seabed, far down,
-   * and clamping to it alone let the camera slip under the waves near
-   * the shore.
+   * a waterline that FOLLOWS HER DOWN: pinned at sea level while she is
+   * on or above the surface (the camera must not slip under the waves
+   * while she floats), and riding two units over her head once she
+   * dives, so the lens goes under with her instead of being left
+   * staring at the sheet from above — which is exactly what Joshua
+   * watched it do. The tracking floor is continuous in her height, so
+   * surfacing lifts the camera smoothly rather than teleporting it.
    *
    * ASKED IN WORLD COORDINATES, through the named conversion. The
    * camera lives in render space, measured from the floating origin,
    * and the heightfield only answers about the world — a rendered
    * position once put the camera two kilometres up a summit while she
-   * stood on a beach.
+   * stood on a beach. Her height needs no conversion: the origin
+   * shifts x and z only.
    */
-  private keepAboveGround(out: THREE.Vector3): void {
+  private keepAboveGround(out: THREE.Vector3, herY: number): void {
     const above = toWorld(local(out.x, out.z));
-    const floor = Math.max(groundHeight(above.wx, above.wz), 0) + 1.6;
+    const waterline = Math.min(0, herY - 2);
+    const floor = Math.max(groundHeight(above.wx, above.wz), waterline) + 1.6;
     if (out.y < floor) out.y = floor;
   }
 

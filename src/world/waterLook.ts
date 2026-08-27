@@ -229,9 +229,10 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
           diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.90, 0.95, 0.97), foam);
 
           // BE's clear-water alpha: see the sand at the waterline, a
-          // real body offshore, foam near-opaque. The grade rides the
-          // same wearer bands as the colour so they thicken together.
-          diffuseColor.a *= mix(1.0, 1.55, smoothstep(${opts.edgeHi.toFixed(1)}, ${(opts.midAt * 1.4).toFixed(1)}, depth));
+          // real body offshore, foam near-opaque. BE's own band — tying
+          // it to the colour bands washed the beach out ("you faded
+          // sand and the ocean foam and water too much").
+          diffuseColor.a *= mix(1.0, 1.55, smoothstep(40.0, 550.0, depth));
           diffuseColor.a = min(diffuseColor.a, 0.82);
           diffuseColor.a = mix(diffuseColor.a, 0.95, foam);
           diffuseColor.a *= edge;

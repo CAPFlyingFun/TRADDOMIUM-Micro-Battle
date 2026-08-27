@@ -80,7 +80,10 @@ export class Ocean {
     // attribute to exist, and zero is the honest value for it.
     geometry.setAttribute('flow', new THREE.BufferAttribute(new Float32Array(N * N * 2), 2));
     geometry.setIndex(new THREE.BufferAttribute(faces, 1));
-    const look = makeWaterLook({ green: 0, surf: 1, sink: true, edgeLo: 35, edgeHi: 300, midAt: 700, deepAt: 2600, texAmp: 0.40, anisotropy });
+    // edgeLo/edgeHi back to the waterline Joshua approved — widening
+    // them washed the beach out. The GRADUAL part he asked for lives
+    // further out, in midAt/deepAt and the distance smear.
+    const look = makeWaterLook({ green: 0, surf: 1, sink: true, edgeLo: 35, edgeHi: 130, midAt: 700, deepAt: 2600, texAmp: 0.40, anisotropy });
     this.clock = look.clock;
     this.centre = look.centre;
     this.mesh = new THREE.Mesh(geometry, look.material);
