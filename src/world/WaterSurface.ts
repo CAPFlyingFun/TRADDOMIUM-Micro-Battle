@@ -3,6 +3,7 @@ import { toLocal } from './origin';
 import { baseLand, reliefScale } from './heightfield';
 import { hydro, hydroTile, type Hydro, type Lake, type River } from './hydro';
 import { hdTilesNear, hdTileIndex, HD_TILE, HD_STEP } from './kauaiHd';
+import { TRANSITION_REACH } from './TerrainStream';
 import { SPAN } from './kauai';
 import { clockUniform, waterMaterial } from './waterLook';
 import { world, type WorldPoint } from './coords';
@@ -38,19 +39,84 @@ import { world, type WorldPoint } from './coords';
  * first comes near and kept for the scene's life.
  */
 
-/** How far out the water is worth having geometry for. */
-const REACH = 200_000;
+/**
+ * HOW FAR OUT THE WATER IS WORTH HAVING GEOMETRY FOR.
+ *
+ * The TRANSITION tier's reach, and not a metre more. This was 2 km —
+ * the MIDDLE tier's — and that is a mistake with a paper trail: the
+ * water this replaced tried the same number and its own header records
+ * what happened. "It went to 2 km, the middle tier's reach — and the
+ * middle tier's 31-metre triangles cannot clip a flat sheet, so from
+ * two hundred metres up the island wore turquoise shards."
+ *
+ * The reason is arithmetic. Terrain clips water by standing through it,
+ * and a mesh can only stand through what its vertices can hold. The
+ * transition tier's are 3.13 m apart and a surveyed stream is 5.5 m
+ * across, so it holds the valley. The middle tier's are 31.25 m apart
+ * and hold nothing of the sort: measured, only 56% of the network is
+ * even wet on that surface and the water floats up to 66.7 m above it.
+ *
+ * Past here the answer is not geometry at any width — it is to stop
+ * drawing a sheet the ground cannot cut, and eventually to let the
+ * terrain wear its rivers as paint instead.
+ */
+const REACH = TRANSITION_REACH;
 
 /**
- * Surveyed channel width is the WATER, not the valley, and drawing
- * exactly that leaves the terrain nothing to clip: the ribbon ends in
- * its own straight edge instead of on the bank. Drawn half again as
- * wide, so the depth test decides the shoreline everywhere.
+ * HOW FAR THE WATER IS DRAWN TO EITHER SIDE — MEASURED, NOT GUESSED.
  *
- * It cannot put water on dry land — past the real edge the ground has
- * risen through the surface and the fragments are already behind it.
+ * The surveyed width is the CHANNEL, and a ribbon drawn to a fixed
+ * multiple of it has no idea what the ground beside it is doing. Two
+ * ways that goes wrong, and both were visible: where the ground falls
+ * away at the ribbon's edge the sheet hangs over the drop with nothing
+ * to cut it — measured floating 3.66 m at a tenth of the network and
+ * 22.9 m at worst — and where a hollow sits just outside it, water that
+ * should be there simply is not drawn.
+ *
+ * So each side is walked on the real ground until it stands through the
+ * water, which is the definition of a bank. Floored at the channel
+ * itself so the narrowest run still reads as water, and capped, because
+ * a march with no bound finds the sea.
  */
 const OVER = 1.5;
+/**
+ * Steps of the march, in units, and they GROW.
+ *
+ * A quarter of a metre close in, where the step decides how cleanly the
+ * shoreline lands, and geometrically wider after that — the far end of
+ * a march only has to find dry ground, and the depth test draws the
+ * edge either way. A flat stride fine enough for the bank would cost
+ * 2.5 million ground samples on the worst tile.
+ */
+const STRIDE = 25;
+const SPREAD = 0.12;
+/**
+ * No side reaches further than this. Three hundred metres, the same cap
+ * the measured widths used before, and it binds rarely: Kauaʻi has
+ * broad valley floors and a level field on one genuinely does reach
+ * that far.
+ */
+const MAX_HALF = 30_000;
+
+/**
+ * How far the water reaches from (x, z) along (nx, nz) before the
+ * ground rises through `level`.
+ *
+ * Returns one stride PAST the last wet sample, so the drawn edge lands
+ * on dry ground and the depth test — not the edge of the mesh — decides
+ * the shoreline. An edge that stops exactly at the waterline shows as a
+ * straight cut, which is the fault this replaces.
+ */
+function bankAt(
+  x: number, z: number, nx: number, nz: number, level: number, floor: number,
+): number {
+  for (let d = STRIDE; d <= MAX_HALF; d += Math.max(STRIDE, d * SPREAD)) {
+    if (baseLand(x + nx * d, z + nz * d) >= level) {
+      return Math.max(floor, d);
+    }
+  }
+  return Math.max(floor, MAX_HALF);
+}
 
 /** Nothing narrower than this reads as water at all. */
 const MIN_HALF = 60;
@@ -96,10 +162,17 @@ function build(
       let tx = data.x[b] - data.x[a], tz = data.z[b] - data.z[a];
       const len = Math.hypot(tx, tz);
       if (len < 1e-6) { tx = 1; tz = 0; } else { tx /= len; tz /= len; }
-      const half = Math.max(MIN_HALF, (data.width[p] / 2) * OVER);
       const y = data.level[p];
+      const floor = Math.max(MIN_HALF, (data.width[p] / 2) * OVER);
+      // ASYMMETRIC ON PURPOSE. A stream against a valley wall reaches a
+      // couple of metres on the wall side and much further across the
+      // floor, and drawing it that way is most of what makes it read as
+      // a valley rather than a ribbon laid over one.
+      const left = bankAt(x, z, tz, -tx, y, floor);
+      const right = bankAt(x, z, -tz, tx, y, floor);
       for (let k = 0; k < ACROSS; k++) {
         const u = (k / (ACROSS - 1)) * 2 - 1;
+        const half = u < 0 ? left : right;
         const wx = x + -tz * half * u;
         const wz = z + tx * half * u;
         pos.push(wx - cx, y, wz - cz);

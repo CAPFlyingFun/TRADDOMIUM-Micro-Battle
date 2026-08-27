@@ -21,6 +21,10 @@ const SHOTS = [
   ['wide-third', '21.99876073 -159.37879953 90.91m 23° -14.0° ×1.00'],
   // And from above, where a whole valley's drainage is in one frame.
   ['hanalei-air', '22.14440383 -159.47945709 260m 11° -22.0° ×1.00'],
+  // JOSHUA'S OWN FRAME, the one where the water hung several hundred
+  // metres over the ground: 67 m up, looking out past the transition
+  // tier at a river the middle tier's 31 m triangles could not cut.
+  ['floating-report', '21.97550568 -159.71791288 251.04m 248° -7.9° ×1.00'],
 ];
 
 const browser = await chromium.launch({

@@ -17,8 +17,9 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  EDGE_FADE, RIPPLE_SCALES, SURFACE_ALPHA, waterShader,
+  EDGE_FADE, FADE_FROM, FADE_TO, RIPPLE_SCALES, SURFACE_ALPHA, waterShader,
 } from '../src/world/waterLook';
+import { TRANSITION_REACH } from '../src/world/TerrainStream';
 
 async function built() {
   const THREE = await import('three');
@@ -161,5 +162,34 @@ describe('the shoreline fade', () => {
     // not appear to reach the land.
     expect(EDGE_FADE).toBeLessThan(15);
     expect(alphaAt(EDGE_FADE / 2)).toBeGreaterThan(0.3);
+  });
+});
+
+describe('where the water stops being drawn', () => {
+  it('finishes fading INSIDE the tier that can still clip it', () => {
+    // THE ONE THAT PUT PLATES IN THE SKY. Terrain clips water by
+    // standing through it, and a mesh only stands through what its
+    // vertices can hold. The transition tier's are 3.13 m apart and a
+    // surveyed stream is 5.5 m across, so it holds the valley; the
+    // middle tier's are 31.25 m apart and hold nothing of the sort —
+    // measured, 56% of the network wet on that surface and the water
+    // floating up to 66.7 m above it.
+    //
+    // So the fade must COMPLETE before the transition reach ends. A
+    // fade that finishes later is a fade drawn on ground that cannot
+    // cut it, which is the failure with extra steps.
+    expect(FADE_FROM).toBeLessThan(FADE_TO);
+    expect(FADE_TO).toBeLessThan(TRANSITION_REACH);
+    // And it must not start so early that she cannot see her own river.
+    expect(FADE_FROM).toBeGreaterThan(5_000);
+  });
+
+  it('is in the shader, not just in a constant', () => {
+    // A constant nothing reads is a comment. This is the third time a
+    // number in this project has been correct and unused.
+    return built().then(({ fragmentShader }) => {
+      expect(fragmentShader).toContain(`smoothstep(${FADE_FROM}.0, ${FADE_TO}.0, length(v_eye))`);
+      expect(fragmentShader).toContain('if (far <= 0.0) discard;');
+    });
   });
 });

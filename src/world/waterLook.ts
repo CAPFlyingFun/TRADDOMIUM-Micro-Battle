@@ -18,6 +18,32 @@ import type { LoadReport } from '../ui/loadPlan';
 
 /** Depth at which the water reaches full opacity, in units. */
 export const EDGE_FADE = 6;
+
+/**
+ * WHERE THE WATER STOPS BEING DRAWN AT ALL, and why it is a distance
+ * rather than a width.
+ *
+ * Terrain clips water by standing through it, and a mesh can only stand
+ * through what its vertices can hold. Inside the transition tier the
+ * vertices are 3.13 m apart and a surveyed stream is 5.5 m across, so
+ * the valley is there and the water sits in it. Past that reach the
+ * middle tier draws, its vertices are 31.25 m apart, and it holds
+ * nothing of the sort — measured, only 56% of the network is even wet
+ * on that surface and the water floats up to 66.7 m above it.
+ *
+ * A tile is 7 km, so choosing which TILES to build cannot bound this:
+ * one tile carries rivers far past anything that can cut them. The
+ * bound has to be per fragment, and it has to complete INSIDE the
+ * transition reach (20,000) or the fade itself lands on ground that
+ * cannot clip it.
+ *
+ * The honest cost is that from altitude the island loses its rivers
+ * rather than wearing them as flat plates hanging over the ground.
+ * Joshua saw the plates and they are worse. What belongs out there is
+ * paint on the terrain, not geometry at any width.
+ */
+export const FADE_FROM = 12_000;
+export const FADE_TO = 19_000;
 /** How opaque it gets there. */
 export const SURFACE_ALPHA = 0.86;
 
@@ -127,7 +153,10 @@ ${SPIN_GLSL}`)
   float fres = pow(1.0 - clamp(dot(normalize(-v_eye), normal), 0.0, 1.0), 4.0);
   diffuseColor.rgb += vec3(0.16, 0.20, 0.22) * fres;
   float t = clamp(v_rise / ${EDGE_FADE}.0, 0.0, 1.0);
-  diffuseColor.a = ${SURFACE_ALPHA} * (t * t * (3.0 - 2.0 * t));
+  // AND OUT WITH DISTANCE, before the tier that cannot clip it.
+  float far = 1.0 - smoothstep(${FADE_FROM}.0, ${FADE_TO}.0, length(v_eye));
+  diffuseColor.a = ${SURFACE_ALPHA} * (t * t * (3.0 - 2.0 * t)) * far;
+  if (far <= 0.0) discard;
   // Water with no depth is not water. Discarding rather than drawing at
   // zero alpha matters: an invisible fragment still writes depth and
   // would fight the bank for the same pixels.
