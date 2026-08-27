@@ -1853,9 +1853,10 @@ export class IslandScene {
     // ground routes it, so the only input is the terrain that is
     // already here. The hydrography stays on disk as the thing the
     // tests check the result AGAINST — see IslandWater's header.
-    this.water = new IslandWater(this.scene);
+    const aniso = this.renderer.capabilities.getMaxAnisotropy();
+    this.water = new IslandWater(this.scene, aniso);
     this.water.follow(this.ant.where);
-    this.ocean = new Ocean(this.scene);
+    this.ocean = new Ocean(this.scene, aniso);
     this.ocean.follow(this.ant.where);
   }
 

@@ -26,6 +26,19 @@ import * as THREE from 'three';
  * rates; our rivers genuinely move, so the texture does too. The ocean
  * sheet passes zero flow and gets BE's calm drift from the fixed
  * per-octave rates alone.
+ *
+ * COLOUR IS A JOURNEY, NOT A SWITCH. The palette has three stops —
+ * shallow teal, a mid blue, deep navy — and each wearer says where the
+ * handovers happen (midAt / deepAt, in depth). The bathymetry under
+ * the ocean sheet is 32 m samples, so any ramp narrower than a few
+ * cells collapses into a painted stripe at the shelf break ("almost
+ * like a second horizon" — Joshua, with a circle around it). Wide
+ * bands soften it up close, and a VIEW-DISTANCE smear finishes the
+ * job: far water slides toward the deep colour regardless of depth,
+ * because from a distance you see sky and scatter, not bottom. The
+ * ripple is also woven into the COLOUR (texAmp), not just the
+ * lighting normal — flat-lit open ocean showed "only color at the
+ * moment" when the sun stopped catching the relief.
  */
 export interface WaterLookOpts {
   /** 0 = BE's ocean palette exactly; 1 = the inland green shift. */
@@ -48,6 +61,23 @@ export interface WaterLookOpts {
    */
   readonly edgeLo: number;
   readonly edgeHi: number;
+  /** Depth where shallow teal has fully handed over to the mid blue. */
+  readonly midAt: number;
+  /** Depth where the mid blue has fully handed over to deep navy. */
+  readonly deepAt: number;
+  /**
+   * How much the ripple pattern shows in the COLOUR itself (fraction
+   * of brightness). Keeps texture readable when the lighting angle
+   * flattens the normal relief to nothing.
+   */
+  readonly texAmp: number;
+  /**
+   * Max anisotropic filtering for the ripple map — the terrain
+   * learned this one (terrainMaterial.ts): at the oblique angles this
+   * game is actually played at, isotropic mips average the pattern to
+   * a flat wash. Pass renderer.capabilities.getMaxAnisotropy().
+   */
+  readonly anisotropy: number;
   /**
    * Polygon-offset direction. The OCEAN sinks (+) so near-coplanar
    * shore terrain wins the depth test — BE's flyover-shimmer lesson.
@@ -76,6 +106,7 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
     (texture) => {
       texture.wrapS = THREE.RepeatWrapping;
       texture.wrapT = THREE.RepeatWrapping;
+      texture.anisotropy = opts.anisotropy;
       ripple.value = texture;
     },
     undefined,
@@ -109,10 +140,22 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
         '#include <common>\n attribute float depth;\n attribute vec2 flow;\n varying float vDepth;\n varying vec2 vWorld;\n varying vec2 vFlow;\n uniform vec2 uCentre;')
       .replace('#include <begin_vertex>',
         '#include <begin_vertex>\n vDepth = depth;\n vFlow = flow;\n vWorld = vec2(position.x, position.z) + uCentre;');
+    // The ripple field is computed ONCE, in map_fragment (which three
+    // runs before the normal and lighting stages), and handed to the
+    // later stages through gRn/gBody — the colour weave, the normal
+    // tilt and the surf caps all read the same water.
     shader.fragmentShader = ('uniform float uTime;\nuniform sampler2D uRipple;\nuniform vec3 uSky;\n' + shader.fragmentShader)
-      .replace('#include <common>', '#include <common>\n varying float vDepth;\n varying vec2 vWorld;\n varying vec2 vFlow;\n mat2 rrot(float a){ float c = cos(a); float s = sin(a); return mat2(c, -s, s, c); }')
-      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+      .replace('#include <common>', '#include <common>\n varying float vDepth;\n varying vec2 vWorld;\n varying vec2 vFlow;\n mat2 rrot(float a){ float c = cos(a); float s = sin(a); return mat2(c, -s, s, c); }\n vec3 gRn = vec3(0.0);\n float gBody = 0.0;')
+      .replace('#include <map_fragment>', `#include <map_fragment>
         {
+          // THE EDGE BLENDS LIKE THE GROUND DOES. A hard discard at a
+          // threshold cut the waterline like scissors against the
+          // beach; the terrain never does that — its bands feather.
+          float depth = vDepth;
+          float edge = smoothstep(${opts.edgeLo.toFixed(1)}, ${opts.edgeHi.toFixed(1)}, depth);
+          // Films barely ripple; a body of water carries the full skin.
+          gBody = smoothstep(0.0, 25.0, depth);
+
           // BE's four ripple octaves, world-planar, converted m -> cm —
           // advected by the LOCAL CURRENT with the two-phase flow trick
           // so a moving reach visibly moves and still water sits calm.
@@ -126,56 +169,77 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
           vec2 a1 = adv * t1;
           vec3 rn0 = vec3(0.0);
           vec3 rn1 = vec3(0.0);
-          rn0 += (texture2D(uRipple, rrot(0.0) * (wp - a0) / 1730.0 + uTime * vec2( 0.021, 0.013)).xyz - 0.5);
-          rn1 += (texture2D(uRipple, rrot(0.0) * (wp - a1) / 1730.0 + uTime * vec2( 0.021, 0.013) + 0.37).xyz - 0.5);
-          rn0 += (texture2D(uRipple, rrot(2.1) * (wp - a0) /  870.0 - uTime * vec2( 0.017, 0.024)).xyz - 0.5) * 0.8;
-          rn1 += (texture2D(uRipple, rrot(2.1) * (wp - a1) /  870.0 - uTime * vec2( 0.017, 0.024) + 0.61).xyz - 0.5) * 0.8;
-          rn0 += (texture2D(uRipple, rrot(4.3) * (wp - a0) /  390.0 + uTime * vec2( 0.032,-0.019)).xyz - 0.5) * 0.65;
-          rn1 += (texture2D(uRipple, rrot(4.3) * (wp - a1) /  390.0 + uTime * vec2( 0.032,-0.019) + 0.19).xyz - 0.5) * 0.65;
-          rn0 += (texture2D(uRipple, rrot(1.2) * (wp - a0) /  150.0 + uTime * vec2(-0.045, 0.05 )).xyz - 0.5) * 0.7;
-          rn1 += (texture2D(uRipple, rrot(1.2) * (wp - a1) /  150.0 + uTime * vec2(-0.045, 0.05 ) + 0.83).xyz - 0.5) * 0.7;
-          vec3 rn = mix(rn0, rn1, xf);
-          // Films barely ripple; a body of water carries the full skin.
-          float bodyAmp = smoothstep(0.0, 25.0, vDepth);
-          normal = normalize(normal + vec3(rn.x, 0.0, rn.y) * 0.55 * bodyAmp);
-        }`)
-      .replace('#include <map_fragment>', `#include <map_fragment>
-        {
-          // THE EDGE BLENDS LIKE THE GROUND DOES. A hard discard at a
-          // threshold cut the waterline like scissors against the
-          // beach; the terrain never does that — its bands feather.
-          // So the water's alpha rises from nothing over edgeFade of
-          // column, and the sand shows through the first film of it
-          // exactly as it shows through the shallows.
-          float depth = vDepth;
-          float edge = smoothstep(${opts.edgeLo.toFixed(1)}, ${opts.edgeHi.toFixed(1)}, depth);
-          float shallow = 1.0 - smoothstep(30.0, 450.0, depth);
+          // NOTE the two phases sample the SAME point apart from their
+          // own advection — no extra UV offsets. At zero flow (the
+          // ocean, a still lake) rn0 == rn1 and the crossfade is a
+          // no-op at FULL contrast; offsets here would blur exactly
+          // the water that holds still enough to look at.
+          rn0 += (texture2D(uRipple, rrot(0.0) * (wp - a0) / 865.0 + uTime * vec2( 0.021, 0.013)).xyz - 0.5);
+          rn1 += (texture2D(uRipple, rrot(0.0) * (wp - a1) / 865.0 + uTime * vec2( 0.021, 0.013)).xyz - 0.5);
+          rn0 += (texture2D(uRipple, rrot(2.1) * (wp - a0) /  435.0 - uTime * vec2( 0.017, 0.024)).xyz - 0.5) * 0.8;
+          rn1 += (texture2D(uRipple, rrot(2.1) * (wp - a1) /  435.0 - uTime * vec2( 0.017, 0.024)).xyz - 0.5) * 0.8;
+          rn0 += (texture2D(uRipple, rrot(4.3) * (wp - a0) /  195.0 + uTime * vec2( 0.032,-0.019)).xyz - 0.5) * 0.65;
+          rn1 += (texture2D(uRipple, rrot(4.3) * (wp - a1) /  195.0 + uTime * vec2( 0.032,-0.019)).xyz - 0.5) * 0.65;
+          rn0 += (texture2D(uRipple, rrot(1.2) * (wp - a0) /   75.0 + uTime * vec2(-0.045, 0.05 )).xyz - 0.5) * 0.7;
+          rn1 += (texture2D(uRipple, rrot(1.2) * (wp - a1) /   75.0 + uTime * vec2(-0.045, 0.05 )).xyz - 0.5) * 0.7;
+          gRn = mix(rn0, rn1, xf);
+
+          // COLOUR. Three stops, wide handovers — the wearer picks
+          // where (midAt/deepAt), so the ramp spans several bathymetry
+          // cells instead of collapsing inside one at the shelf break.
+          float toMid  = smoothstep(${opts.edgeLo.toFixed(1)}, ${opts.midAt.toFixed(1)}, depth);
+          float toDeep = smoothstep(${opts.midAt.toFixed(1)}, ${opts.deepAt.toFixed(1)}, depth);
           vec3 shallowCol = vec3(0.020, 0.34, 0.42);   // BE deep teal
+          vec3 midCol     = vec3(0.012, 0.21, 0.36);   // the bridge
           vec3 deepCol    = vec3(0.008, 0.10, 0.26);   // BE navy
           // "Just inland a slight bit of a greenish tint" — a nudge of
           // the same water toward green, not a different water.
           shallowCol = mix(shallowCol, vec3(0.035, 0.36, 0.33), ${opts.green.toFixed(2)});
+          midCol     = mix(midCol,     vec3(0.022, 0.25, 0.28), ${opts.green.toFixed(2)});
           deepCol    = mix(deepCol,    vec3(0.014, 0.15, 0.20), ${opts.green.toFixed(2)});
-          diffuseColor.rgb = mix(deepCol, shallowCol, shallow * shallow);
+          vec3 col = mix(shallowCol, midCol, toMid);
+          col = mix(col, deepCol, toDeep);
+          // FAR WATER IS SKY AND SCATTER, NOT BOTTOM. Beyond ~150 m of
+          // view distance every depth slides toward the deep colour,
+          // so no bathymetry contour can draw a second horizon.
+          float away = smoothstep(15000.0, 130000.0, length(vViewPosition));
+          col = mix(col, deepCol, away * 0.85);
+          diffuseColor.rgb = col;
+          // The ripple woven into the colour itself, so the surface
+          // reads as textured even when the light angle flattens the
+          // normal relief. Fades with distance with everything else.
+          diffuseColor.rgb *= 1.0 + (gRn.x + gRn.y) * ${opts.texAmp.toFixed(3)} * gBody * (1.0 - away);
 
           // BE's surf: broad foam right at the waterline, sparse caps
           // in open water where the ripple tilts hard. The band scales
           // per wearer — a beach break for the ocean, a whisper of
           // bank-line for a stream.
           float surf = smoothstep(160.0 * ${opts.surf.toFixed(3)}, 15.0 * ${opts.surf.toFixed(3)}, depth);
-          float surfN = texture2D(uRipple, vWorld / 600.0 + uTime * vec2(0.05, 0.03)).r;
+          float surfN = texture2D(uRipple, vWorld / 300.0 + uTime * vec2(0.05, 0.03)).r;
           float foam = surf * smoothstep(0.60, 0.86, surfN);
-          vec3 cn = texture2D(uRipple, vWorld / 1400.0 - uTime * vec2(0.02, 0.028)).xyz * 2.0 - 1.0;
-          foam = clamp(foam + smoothstep(0.55, 0.95, length(cn.xy)) * 0.45, 0.0, 1.0);
+          // Open-water caps. The wave map's slope energy runs in thin
+          // ridge LINES (Joshua's PBR water normal, sd ~24/255), and a
+          // bare threshold paints those lines as white scratches. Gating
+          // against the second, independently scrolling sample keeps
+          // only the spots where the two patterns cross — beads of
+          // foam that wink in and out, not dashes.
+          vec3 cn = texture2D(uRipple, vWorld / 700.0 - uTime * vec2(0.02, 0.028)).xyz * 2.0 - 1.0;
+          float caps = smoothstep(0.75, 1.10, length(cn.xy)) * smoothstep(0.55, 0.80, surfN);
+          foam = clamp(foam + caps * 0.4, 0.0, 1.0);
           diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.90, 0.95, 0.97), foam);
 
           // BE's clear-water alpha: see the sand at the waterline, a
-          // real body offshore, foam near-opaque.
-          diffuseColor.a *= mix(1.0, 1.55, smoothstep(40.0, 550.0, depth));
+          // real body offshore, foam near-opaque. The grade rides the
+          // same wearer bands as the colour so they thicken together.
+          diffuseColor.a *= mix(1.0, 1.55, smoothstep(${opts.edgeHi.toFixed(1)}, ${(opts.midAt * 1.4).toFixed(1)}, depth));
           diffuseColor.a = min(diffuseColor.a, 0.82);
           diffuseColor.a = mix(diffuseColor.a, 0.95, foam);
           diffuseColor.a *= edge;
           if (diffuseColor.a < 0.01) discard;
+        }`)
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+        {
+          normal = normalize(normal + vec3(gRn.x, 0.0, gRn.y) * 0.75 * gBody);
         }`)
       .replace('#include <lights_fragment_end>', `#include <lights_fragment_end>
         {

@@ -49,7 +49,7 @@ export class Ocean {
   private centreZ = 0;
   private placed = false;
 
-  constructor(private readonly scene: THREE.Scene) {
+  constructor(private readonly scene: THREE.Scene, anisotropy: number) {
     const span = N * CELL;
     const pos = new Float32Array(N * N * 3);
     const normals = new Float32Array(N * N * 3);
@@ -80,7 +80,7 @@ export class Ocean {
     // attribute to exist, and zero is the honest value for it.
     geometry.setAttribute('flow', new THREE.BufferAttribute(new Float32Array(N * N * 2), 2));
     geometry.setIndex(new THREE.BufferAttribute(faces, 1));
-    const look = makeWaterLook({ green: 0, surf: 1, sink: true, edgeLo: 35, edgeHi: 130 });
+    const look = makeWaterLook({ green: 0, surf: 1, sink: true, edgeLo: 35, edgeHi: 300, midAt: 700, deepAt: 2600, texAmp: 0.40, anisotropy });
     this.clock = look.clock;
     this.centre = look.centre;
     this.mesh = new THREE.Mesh(geometry, look.material);

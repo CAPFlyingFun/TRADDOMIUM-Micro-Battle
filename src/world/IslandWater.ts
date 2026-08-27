@@ -155,7 +155,7 @@ export class IslandWater {
   private clockRef!: { value: number };
   private centreRef!: { value: THREE.Vector2 };
 
-  constructor(private readonly scene: THREE.Scene) {
+  constructor(private readonly scene: THREE.Scene, private readonly anisotropy: number) {
     const span = N * CELL;
     const pos = new Float32Array(N * N * 3);
     const normals = new Float32Array(N * N * 3);
@@ -206,7 +206,7 @@ export class IslandWater {
    * is the single owner of every colour and constant.
    */
   private material(): THREE.MeshStandardMaterial {
-    const look = makeWaterLook({ green: 1, surf: 0.15, sink: false, edgeLo: 1.5, edgeHi: 8 });
+    const look = makeWaterLook({ green: 1, surf: 0.15, sink: false, edgeLo: 1.5, edgeHi: 25, midAt: 70, deepAt: 260, texAmp: 0.20, anisotropy: this.anisotropy });
     this.clockRef = look.clock;
     this.centreRef = look.centre;
     return look.material;
