@@ -33,14 +33,21 @@ export interface WaterLookOpts {
   /** Scales the surf/foam depth band. Ocean 1; inland much tighter. */
   readonly surf: number;
   /**
-   * How far (in depth units) the water's edge FEATHERS in from
-   * nothing, the way the ground textures blend band into band instead
-   * of cutting. The ocean fades over most of a metre of column —
-   * tens of metres of beach at shelf gradients — a stream over a few
-   * centimetres, so films still read while their rims stop being
-   * scissor-cut polygons.
+   * The feather band, in depth units: fully invisible at edgeLo of
+   * column, fully itself at edgeHi — the way the ground textures
+   * blend band into band instead of cutting.
+   *
+   * edgeLo is ABOVE ZERO for the ocean, and that is the entire trick
+   * (it is BE's hiddenG, rediscovered the hard way): the flat sheet
+   * geometrically intersects the rising beach at exactly zero depth,
+   * and along that intersection the terrain occludes the water in a
+   * razor line no alpha on the visible side can soften. Fading out
+   * while the ground is still edgeLo UNDERWATER means the cut happens
+   * where the water is already invisible — the line still exists; it
+   * just happens in water you cannot see.
    */
-  readonly edgeFade: number;
+  readonly edgeLo: number;
+  readonly edgeHi: number;
   /**
    * Polygon-offset direction. The OCEAN sinks (+) so near-coplanar
    * shore terrain wins the depth test — BE's flyover-shimmer lesson.
@@ -141,7 +148,7 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
           // column, and the sand shows through the first film of it
           // exactly as it shows through the shallows.
           float depth = vDepth;
-          float edge = smoothstep(0.0, ${opts.edgeFade.toFixed(1)}, depth);
+          float edge = smoothstep(${opts.edgeLo.toFixed(1)}, ${opts.edgeHi.toFixed(1)}, depth);
           float shallow = 1.0 - smoothstep(30.0, 450.0, depth);
           vec3 shallowCol = vec3(0.020, 0.34, 0.42);   // BE deep teal
           vec3 deepCol    = vec3(0.008, 0.10, 0.26);   // BE navy

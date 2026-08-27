@@ -12,6 +12,10 @@ await page.waitForTimeout(3000);
 await page.evaluate((f) => window.__island.goTo(f), process.env.PROBE_FIX ?? '22.01501048 -159.37777455 26.00m 200.0° -28.0° ×1.00');
 await page.waitForTimeout(30000);
 await page.screenshot({ path: '/tmp/skin-a.png' });
+  if (process.env.ZOOM === '1') {
+    await page.screenshot({ path: '/tmp/skin-zoom.png',
+      clip: { x: 300, y: 120, width: 400, height: 260 } });
+  }
 await page.waitForTimeout(1500);
 await page.screenshot({ path: '/tmp/skin-b.png' });
 await browser.close();

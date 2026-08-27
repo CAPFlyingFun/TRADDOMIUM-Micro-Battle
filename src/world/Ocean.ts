@@ -80,7 +80,7 @@ export class Ocean {
     // attribute to exist, and zero is the honest value for it.
     geometry.setAttribute('flow', new THREE.BufferAttribute(new Float32Array(N * N * 2), 2));
     geometry.setIndex(new THREE.BufferAttribute(faces, 1));
-    const look = makeWaterLook({ green: 0, surf: 1, sink: true, edgeFade: 80 });
+    const look = makeWaterLook({ green: 0, surf: 1, sink: true, edgeLo: 35, edgeHi: 130 });
     this.clock = look.clock;
     this.centre = look.centre;
     this.mesh = new THREE.Mesh(geometry, look.material);
@@ -103,12 +103,16 @@ export class Ocean {
     const span = N * CELL;
     const ox = this.centreX - span / 2;
     const oz = this.centreZ - span / 2;
-    // The column under each vertex, once per re-anchor — the sea's
-    // depth field only changes when the sheet moves over new ground.
+    // The column under each vertex, once per re-anchor — SIGNED, and
+    // the sign is the shoreline. Clamping land vertices to zero moved
+    // the interpolated zero-crossing a whole 32 m cell inland of the
+    // true waterline, so the fade band sat in the wrong place and the
+    // geometric cut showed through it as a hard line. Negative depth
+    // over land interpolates through zero exactly where the ground
+    // crosses sea level, sub-cell, which is where the fade must live.
     for (let cy = 0; cy < N; cy++) {
       for (let cx = 0; cx < N; cx++) {
-        const g = groundHeight(ox + cx * CELL, oz + cy * CELL);
-        this.depthAttr[cy * N + cx] = g < 0 ? -g : 0;
+        this.depthAttr[cy * N + cx] = -groundHeight(ox + cx * CELL, oz + cy * CELL);
       }
     }
     this.mesh.geometry.getAttribute('depth').needsUpdate = true;

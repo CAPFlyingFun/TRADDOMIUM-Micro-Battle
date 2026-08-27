@@ -206,7 +206,7 @@ export class IslandWater {
    * is the single owner of every colour and constant.
    */
   private material(): THREE.MeshStandardMaterial {
-    const look = makeWaterLook({ green: 1, surf: 0.15, sink: false, edgeFade: 6 });
+    const look = makeWaterLook({ green: 1, surf: 0.15, sink: false, edgeLo: 1.5, edgeHi: 8 });
     this.clockRef = look.clock;
     this.centreRef = look.centre;
     return look.material;
