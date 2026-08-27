@@ -1,4 +1,5 @@
 import { IslandScene } from './scenes/IslandScene';
+import { WaterLabScene } from './scenes/WaterLabScene';
 import { GameFlow } from './ui/GameFlow';
 import { RotateGate } from './ui/rotateGate';
 import { fitViewport } from './ui/viewportFit';
@@ -52,6 +53,9 @@ function clearBoot(): void {
 const scenes: Record<string, (h: HTMLElement, grid: HeightGrid) => unknown> = {
   island: (h, grid) => new IslandScene(h, grid),
   game: (h, grid) => new GameFlow(h, grid),
+  // The water lab needs the grid loaded but not handed to it — it
+  // reads the shared heightfield like everything else does.
+  water: (h) => new WaterLabScene(h),
 };
 
 try {
