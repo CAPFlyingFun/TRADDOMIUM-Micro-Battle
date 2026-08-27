@@ -3,6 +3,7 @@ import { decodeHydro, type Hydro } from '../../src/world/hydro';
 import { useGrid, setSmoothing } from '../../src/world/heightfield';
 import { decodeGrid } from '../../src/world/kauai';
 import { HD_TILES, hdTileIndex, hdTileName, useHdTile } from '../../src/world/kauaiHd';
+import { bakeIslandChannels } from '../../src/world/islandChannels';
 
 /**
  * THE ISLAND THE GAME ACTUALLY WALKS ON.
@@ -32,6 +33,7 @@ export function loadIsland(): Hydro {
         tile.buffer.slice(tile.byteOffset, tile.byteOffset + tile.byteLength)));
     }
   }
+  bakeIslandChannels(decodeGrid(buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer));
   const h = read('public/kauai-hydro.bin');
   return decodeHydro(h.buffer.slice(h.byteOffset, h.byteOffset + h.byteLength) as ArrayBuffer);
 }

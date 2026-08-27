@@ -3,7 +3,7 @@ import { groundHeight, terrainHeight, reliefScale } from './heightfield';
 import { toLocal } from './origin';
 import { world } from './coords';
 import { WaterSim, DEFAULTS } from './waterSim';
-import { channels } from './drainage';
+import { isWatercourse } from './islandChannels';
 
 /**
  * THE ISLAND'S WATER — one simulated window that walks with her.
@@ -78,30 +78,28 @@ const DRAWN = 1.5;
 /**
  * BASEFLOW — what keeps a river running when it is not raining.
  *
- * Groundwater seeping into the CHANNEL, which is what baseflow is in
- * real hydrology, and it is fed only to the watercourse cells D8 finds
- * (see drainage.ts). A MODELLING CONSTANT, and worth being straight
- * about that: real rain cannot feed this window. Kauaʻi's rivers drain
- * catchments kilometres across and the window is 256 m, so at a real
- * 5 mm/hr a cell gains 0.00014 units a second — four orders under what
- * a channel needs. This stands in for the upstream catchment the
- * window cannot see.
+ * Groundwater seeping into the CHANNEL, fed only to the watercourse
+ * cells of the island-wide drainage (islandChannels.ts). A MODELLING
+ * CONSTANT standing in for the catchment a 256 m window cannot see —
+ * real rain at 5 mm/hr feeds a cell 0.00014 units a second, four
+ * orders under what a channel needs.
  *
- * Swept against the surveyed network, in DRY weather, measured as "is
- * there water within 5 m of where the survey says a river is":
+ * RE-SWEPT for the world-fixed mask, whose watercourse bands are a
+ * coarse node (~55 m) wide where the old per-window lines were 1 m —
+ * many more fed cells, so much less per cell. Dry weather, against
+ * the surveyed network ("water within 5 m of a surveyed point"):
  *
- *    3 ->  0/8 on course,  5.9% of cells wet
- *    8 ->  6/8,           15.7%     <- shipped
- *   16 ->  6/8,           25.8%
- *   30 ->  7/8,           35.7%
+ *   0.3 -> 0/8 on course,  1.8% of cells wet
+ *   0.8 -> 2/8,            7.5%
+ *   2   -> 5/8,           15.4%     <- shipped (the knee)
+ *   4   -> 5/8,           24.6%     (wetter, no more coverage)
+ *   2 + storm 1.5 -> 8/8, 44.3%     (a shower reaches the rest)
  *
- * 8 buys most of the network for the least standing water, and past it
- * the extra goes onto ground rather than into channels. The two runs
- * that stay dry are reaches where this island's own drainage does not
- * agree with the survey — which is a fact about the elevation model,
- * reported rather than carved away.
+ * The reaches that stay dry in fair weather are ones where the
+ * island's own drainage disagrees with the survey — a fact about the
+ * elevation model, reported rather than carved away.
  */
-const BASEFLOW = 8;
+const BASEFLOW = 2;
 /**
  * Stormflow, per millimetre-per-hour of real precipitation.
  *
@@ -128,12 +126,6 @@ const MAX_FEED = 3.5;
  *   soak 0.8  -> 6/8,           15.1%     (starts drying the network)
  */
 const SOAK = 0.3;
-/**
- * How much of the window must drain through a cell for it to count as
- * a watercourse and carry baseflow. 0.4% of a 256 m window is about
- * 260 cells upstream — a stream, not a rill.
- */
-const CHANNEL_SHARE = 0.004;
 /** Storm rain falls on cells above this quantile of the window's bed. */
 const FEED_ABOVE = 0.35;
 
@@ -291,10 +283,23 @@ export class IslandWater {
     // soak away while the channel keeps running.
     //
     // So the course carries baseflow always, and the catchment carries
-    // rain only while it is actually raining. The channels come from
-    // D8 on this window's own bed — read-only analysis of the ground,
-    // no survey and nothing moved.
-    this.course.set(channels(this.sim.bed, N, CHANNEL_SHARE));
+    // rain only while it is actually raining.
+    //
+    // THE CHANNELS ARE WORLD-FIXED NOW — looked up in the island-wide
+    // accumulation (islandChannels.ts), which is D8 over the whole
+    // coarse grid, baked once. They used to be D8 over THIS window's
+    // own bed, recomputed per re-centre, and accumulation on a finite
+    // moving window depends on where the rim falls: two windows one
+    // re-centre apart disagreed on 16% of their shared channel cells,
+    // and the rivers morphed as she flew at them (found by PR #2's
+    // review — its diagnosis was right even though its fix carved).
+    // Same terrain-decides rule, same D8; the only change is that it
+    // is now the ISLAND's answer instead of the window's.
+    for (let cy = 0; cy < N; cy++) {
+      for (let cx = 0; cx < N; cx++) {
+        this.course[cy * N + cx] = isWatercourse(ox + cx * CELL, oz + cy * CELL) ? 1 : 0;
+      }
+    }
     const sorted = Float32Array.from(this.sim.bed).sort();
     const mark = sorted[Math.floor(sorted.length * FEED_ABOVE)];
     for (let i = 0; i < this.catchment.length; i++) {

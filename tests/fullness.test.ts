@@ -4,7 +4,7 @@ import { loadIsland } from './support/island';
 import { terrainHeight } from '../src/world/heightfield';
 import { UNITS_PER_METRE } from '../src/world/kauai';
 import { WaterSim } from '../src/world/waterSim';
-import { channels } from '../src/world/drainage';
+import { isWatercourse } from '../src/world/islandChannels';
 
 let hydro: Hydro;
 beforeAll(() => { hydro = loadIsland(); });
@@ -19,10 +19,15 @@ function rained(px: number, pz: number, steps: number, base = 1.5, storm = 0, so
   const span = N * CELL, ox = px - span / 2, oz = pz - span / 2;
   const sim = new WaterSim({ n: N, cell: CELL, dt: 0.02, soak });
   sim.fillBed((ix, iy) => terrainHeight(ox + ix * CELL, oz + iy * CELL));
-  // EXACTLY WHAT THE ISLAND DOES: baseflow into the watercourses D8
-  // finds in this window's own bed, stormflow over the catchment only
-  // while it is raining.
-  const course = channels(sim.bed, N, 0.004);
+  // EXACTLY WHAT THE ISLAND DOES: baseflow into the WORLD-FIXED
+  // watercourses (islandChannels.ts — island-wide D8, baked once),
+  // stormflow over the catchment only while it is raining.
+  const course = new Uint8Array(N * N);
+  for (let iy = 0; iy < N; iy++) {
+    for (let ix = 0; ix < N; ix++) {
+      course[iy * N + ix] = isWatercourse(ox + ix * CELL, oz + iy * CELL) ? 1 : 0;
+    }
+  }
   const sorted = Float32Array.from(sim.bed).sort();
   const mark = sorted[Math.floor(sorted.length * 0.35)];
   for (let s = 0; s < steps; s++) {
@@ -51,7 +56,7 @@ describe('does the water land where Kauaʻi keeps its rivers', () => {
    */
   it('sweeps the baseflow rate for coverage and flooding', () => {
     const NEAR = 5;
-    for (const [base, storm] of [[3, 0], [8, 0], [16, 0], [16, 1.5], [30, 0]]) {
+    for (const [base, storm] of [[0.3, 0], [0.8, 0], [2, 0], [4, 0], [2, 1.5]]) {
       let on = 0, looked = 0, wet = 0, vol = 0;
       for (let r = 0; r < hydro.rivers.length; r += 149) {
         const river = hydro.rivers[r];
@@ -86,7 +91,7 @@ describe('does the water land where Kauaʻi keeps its rivers', () => {
       if (river.count < 6) continue;
       const p = river.first + Math.floor(river.count / 2);
       const px = hydro.x[p], pz = hydro.z[p];
-      const sim = rained(px, pz, 1200, 16);
+      const sim = rained(px, pz, 1200, 2);
       const span = N * CELL, ox = px - span / 2, oz = pz - span / 2;
       const cx = Math.round((px - ox) / CELL), cy = Math.round((pz - oz) / CELL);
       let found = false;
@@ -116,7 +121,8 @@ describe('does the water land where Kauaʻi keeps its rivers', () => {
     // puts most of it there.
     const river = hydro.rivers.find((r) => r.order >= 4 && r.count > 20)!;
     const p = river.first + Math.floor(river.count / 2);
-    const sim = rained(hydro.x[p], hydro.z[p], 2000, 16);
+    // The SHIPPED baseflow, not a leftover from an older sweep.
+    const sim = rained(hydro.x[p], hydro.z[p], 2000, 2);
     const d = Array.from(sim.depth).sort((a, b) => b - a);
     const total = d.reduce((a, b) => a + b, 0);
     const top = d.slice(0, Math.floor(d.length * 0.05)).reduce((a, b) => a + b, 0);

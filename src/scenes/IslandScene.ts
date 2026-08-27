@@ -18,6 +18,7 @@ import { local, world, type WorldPoint } from '../world/coords';
 import { TerrainStream, TIER_CUTS } from '../world/TerrainStream';
 import { followHd, forgetHd, hdResident, onHdTile } from '../world/kauaiHd';
 import { IslandWater } from '../world/IslandWater';
+import { bakeIslandChannels } from '../world/islandChannels';
 
 import { originAt, rebaseFor, setOrigin, toLocal, toWorld,
 } from '../world/origin';
@@ -340,6 +341,10 @@ export class IslandScene {
     // renders small numbers rather than five-million-unit ones — and
     // so the terrain that gets cut below is cut around HER, not around
     // wherever the origin happened to be left.
+    // The island-wide channel bake — before the water's first
+    // resample, so even the first window reads the world-fixed answer.
+    // About a second, once, on the immutable coarse grid.
+    bakeIslandChannels(grid);
     setOrigin(found.at.wx, found.at.wz);
     const seated = originAt();
     setTextureOrigin(seated.x, seated.z);
