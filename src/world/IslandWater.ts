@@ -4,6 +4,7 @@ import { toLocal } from './origin';
 import { world } from './coords';
 import { WaterSim, DEFAULTS } from './waterSim';
 import { isWatercourse } from './islandChannels';
+import { useWaterQuery, type WaterSpot } from './waterQuery';
 
 /**
  * THE ISLAND'S WATER — one simulated window that walks with her.
@@ -147,6 +148,15 @@ export class IslandWater {
   private precipitation = 0;
   /** Whether the window has been placed at all. */
   private placed = false;
+  /** Shader clock — seconds, for the ripple scroll. */
+  private readonly clock = { value: 0 };
+  /** World position of the window centre, so the skin is world-locked. */
+  private readonly centreUniform = { value: new THREE.Vector2() };
+  private readonly ripple: { value: THREE.Texture } = (() => {
+    const flat = new THREE.DataTexture(new Uint8Array([128, 128, 255, 255]), 1, 1);
+    flat.needsUpdate = true;
+    return { value: flat };
+  })();
 
   constructor(private readonly scene: THREE.Scene) {
     const span = N * CELL;
@@ -180,23 +190,69 @@ export class IslandWater {
     this.mesh.renderOrder = 1;
     this.mesh.frustumCulled = false;
     scene.add(this.mesh);
+    // The window is THE answer to "what water is here" while it lives.
+    useWaterQuery((wx, wz) => this.spotAt(wx, wz));
   }
 
+  /**
+   * WHY IT STOPPED LOOKING LIKE ICE. The old material was a flat tint
+   * with a per-vertex normal pointing straight up — nothing on the
+   * surface MOVED, and a motionless translucent sheet reads as ice or
+   * cloud, which is what Joshua called it. Water is recognised by its
+   * skin: normals that wander, light that glints and slides. So the
+   * ripple normal map from the pre-v0.0.57 build (recovered from git —
+   * it was deleted with the old water, not because it was wrong) scrolls
+   * across the surface in two directions at two scales, and a fresnel
+   * sheen mixes the sky in at grazing angles the way every BE water
+   * material does.
+   *
+   * WORLD-LOCKED UVs, learned from PR #2's version of this: it derived
+   * them from mesh-local position, so the whole skin slid with the
+   * window on every re-centre. uCentre pins the pattern to the island.
+   */
   private material(): THREE.MeshStandardMaterial {
     const material = new THREE.MeshStandardMaterial({
       color: 0xffffff, roughness: 0.14, metalness: 0.1,
       transparent: true, side: THREE.DoubleSide,
+      normalScale: new THREE.Vector2(0.65, 0.65),
       // LIFTED toward the camera. The surface is drawn on the same
       // triangle the ground is, so where the water is a film the two
       // are coplanar and the tie has to be broken somewhere.
       polygonOffset: true, polygonOffsetFactor: 0, polygonOffsetUnits: -6,
     });
+    new THREE.TextureLoader().load(
+      `${import.meta.env.BASE_URL}water-normal.png`,
+      (texture) => {
+        texture.wrapS = THREE.RepeatWrapping;
+        texture.wrapT = THREE.RepeatWrapping;
+        this.ripple.value = texture;
+      },
+      undefined,
+      () => { /* flat water is a look, not a failure */ },
+    );
     material.onBeforeCompile = (shader) => {
+      shader.uniforms.uTime = this.clock;
+      shader.uniforms.uCentre = this.centreUniform;
+      shader.uniforms.uRipple = this.ripple;
       shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', '#include <common>\n attribute float depth;\n varying float vDepth;')
-        .replace('#include <begin_vertex>', '#include <begin_vertex>\n vDepth = depth;');
-      shader.fragmentShader = shader.fragmentShader
-        .replace('#include <common>', '#include <common>\n varying float vDepth;')
+        .replace('#include <common>',
+          '#include <common>\n attribute float depth;\n varying float vDepth;\n varying vec2 vWorld;\n uniform vec2 uCentre;')
+        .replace('#include <begin_vertex>',
+          '#include <begin_vertex>\n vDepth = depth;\n vWorld = vec2(position.x, position.z) + uCentre;');
+      shader.fragmentShader = ('uniform float uTime;\nuniform sampler2D uRipple;\n' + shader.fragmentShader)
+        .replace('#include <common>', '#include <common>\n varying float vDepth;\n varying vec2 vWorld;')
+        .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+          {
+            // Two octaves of the same map, different scales, drifting
+            // different ways — the repeat never lines up, so the skin
+            // shimmers instead of marching. 800 units = one 8 m tile.
+            vec2 uv = vWorld / 800.0;
+            vec3 rippleA = texture2D(uRipple, uv + vec2(uTime * 0.010, uTime * 0.007)).xyz - 0.5;
+            vec3 rippleB = texture2D(uRipple, uv * 2.7 - vec2(uTime * 0.016, -uTime * 0.011)).xyz - 0.5;
+            // Films barely ripple; pools carry the full skin.
+            float body = smoothstep(0.0, 30.0, vDepth);
+            normal = normalize(normal + vec3(rippleA.x + rippleB.x * 0.6, 0.0, rippleA.y + rippleB.y * 0.6) * 0.55 * body);
+          }`)
         .replace('#include <map_fragment>', `#include <map_fragment>
           {
             if (vDepth < ${DRAWN.toFixed(4)}) discard;
@@ -204,8 +260,15 @@ export class IslandWater {
             // deep, and a ramp built for an ocean paints every one of
             // them the same flat nothing.
             float t = clamp(vDepth / 60.0, 0.0, 1.0);
-            diffuseColor.rgb = mix(vec3(0.60, 0.84, 0.86), vec3(0.05, 0.24, 0.55), t * t);
-            diffuseColor.a = mix(0.62, 0.97, t);
+            diffuseColor.rgb = mix(vec3(0.55, 0.80, 0.84), vec3(0.04, 0.22, 0.52), t * t);
+            diffuseColor.a = mix(0.60, 0.96, t);
+          }`)
+        .replace('#include <dithering_fragment>', `#include <dithering_fragment>
+          {
+            // The sky in the skin at a glancing look — the single
+            // strongest "this is water" cue there is.
+            float face = clamp(dot(normalize(normal), normalize(vViewPosition)), 0.0, 1.0);
+            gl_FragColor.rgb = mix(gl_FragColor.rgb, vec3(0.66, 0.80, 0.90), pow(1.0 - face, 4.0) * 0.5);
           }`);
     };
     return material;
@@ -315,11 +378,13 @@ export class IslandWater {
   place(): void {
     const seat = toLocal(world(this.centreX, this.centreZ));
     this.mesh.position.set(seat.lx, 0, seat.lz);
+    this.centreUniform.value.set(this.centreX, this.centreZ);
   }
 
   /** Advance the water and lift the surface onto the drawn ground. */
   update(dt: number): void {
     if (!this.placed) return;
+    this.clock.value += dt;
     const step = this.sim.opts.dt;
     const owed = dt / step + this.carry;
     const steps = Math.min(Math.floor(owed), 120);
@@ -346,6 +411,38 @@ export class IslandWater {
     g.getAttribute('depth').needsUpdate = true;
   }
 
+  /**
+   * The full reading at a world point: drawn depth and current.
+   *
+   * BILINEAR on the depth, and that is not polish. The sim is 1 m
+   * cells and she is one CENTIMETRE long; nearest-cell depth steps
+   * half a metre at every cell border, and an ant floating across one
+   * would pop like a piston. Interpolated, the surface she rides is
+   * as continuous as the drawn sheet above her. Flow is nearest-cell —
+   * a current does not need to be smooth to be believable.
+   */
+  spotAt(wx: number, wz: number): WaterSpot | null {
+    if (!this.placed) return null;
+    const span = N * CELL;
+    const fx = (wx - (this.centreX - span / 2)) / CELL;
+    const fy = (wz - (this.centreZ - span / 2)) / CELL;
+    const cx = Math.floor(fx);
+    const cy = Math.floor(fy);
+    if (cx < 0 || cy < 0 || cx >= N - 1 || cy >= N - 1) return null;
+    const tx = fx - cx;
+    const ty = fy - cy;
+    const d = this.sim.depth;
+    const d00 = d[cy * N + cx];
+    const d10 = d[cy * N + cx + 1];
+    const d01 = d[(cy + 1) * N + cx];
+    const d11 = d[(cy + 1) * N + cx + 1];
+    const raw = (d00 * (1 - tx) + d10 * tx) * (1 - ty)
+      + (d01 * (1 - tx) + d11 * tx) * ty;
+    if (raw <= 0) return null;
+    const v = this.sim.velocity(Math.round(fx), Math.round(fy));
+    return { depth: raw * reliefScale(), flowX: v.vx, flowZ: v.vz };
+  }
+
   /** Depth of water at a world point, or 0. For wading and drinking. */
   depthAt(wx: number, wz: number): number {
     if (!this.placed) return 0;
@@ -364,6 +461,7 @@ export class IslandWater {
   }
 
   dispose(): void {
+    useWaterQuery(null);
     this.scene.remove(this.mesh);
     this.mesh.geometry.dispose();
     (this.mesh.material as THREE.Material).dispose();

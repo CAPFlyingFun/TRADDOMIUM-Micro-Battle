@@ -1,11 +1,12 @@
 {
   "name": "traddomium-micro-battle",
   "private": true,
-  "version": "0.0.71",
+  "version": "0.0.72",
   "type": "module",
   "scripts": {
     "probe:waterlab": "node scripts/probe-waterlab.mjs",
     "probe:islandwater": "node scripts/probe-islandwater.mjs",
+    "probe:swim": "node scripts/probe-swim.mjs",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",

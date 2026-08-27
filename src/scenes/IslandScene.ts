@@ -18,6 +18,9 @@ import { local, world, type WorldPoint } from '../world/coords';
 import { TerrainStream, TIER_CUTS } from '../world/TerrainStream';
 import { followHd, forgetHd, hdResident, onHdTile } from '../world/kauaiHd';
 import { IslandWater } from '../world/IslandWater';
+import { Underwater } from '../world/Underwater';
+import { wadeAt } from '../ant/wading';
+import { waterSpotAt } from '../world/waterQuery';
 import { bakeIslandChannels } from '../world/islandChannels';
 
 import { originAt, rebaseFor, setOrigin, toLocal, toWorld,
@@ -98,6 +101,13 @@ const GAP_TOLERANCE = 100;
 
 /** Section meshes per side. */
 /** Vertices per side within a section, up close and far away. */
+
+/**
+ * How fast the eased dive chases the lever, per second. Slow enough to
+ * read as swimming rather than as a lift — two and a bit e-folds a
+ * second puts a full-depth dive at about a second and a half.
+ */
+const DIVE_EASE = 1.8;
 
 export class IslandScene {
   private readonly scene = new THREE.Scene();
@@ -233,6 +243,19 @@ export class IslandScene {
   private readonly clock = new THREE.Clock();
   private terrain!: TerrainStream;
   private water: IslandWater | null = null;
+  /**
+   * HOW FAR DOWN SHE IS SWIMMING, nought at the surface and one on the
+   * bottom. Eased rather than set: the lever can snap, a swimming
+   * animal cannot, and snapping her to the bed the instant the lever
+   * hits the stop read as a teleport in the build this came from.
+   */
+  private dive = 0;
+  /** Whether her feet are off the bottom, updated every on-foot frame. */
+  private afloat = false;
+  /** Water over the ground under her, drawn units. */
+  private wet = 0;
+  /** The look below the waterline. A LOOK, not a mechanic. */
+  private underwater!: Underwater;
   /**
    * The CEILING on a full push of the stick — not propulsion. She does
    * not move because this is set; she moves because a thumb asks.
@@ -414,6 +437,10 @@ export class IslandScene {
     this.look.setYaw(-facing);
     this.follow = new FollowCamera(this.aspect());
     this.follow.snapTo(this.ant.root, -facing);
+    // The look below the waterline. Reads the camera and the water
+    // query; safe from the first frame because both exist by here and
+    // a dry eye is a no-op.
+    this.underwater = new Underwater(this.scene, this.follow.camera);
 
     // ARRIVE IN THE WEATHER, do not fade into it. Everything the sky
     // does eases over minutes, which is right while she is walking and
@@ -550,6 +577,9 @@ export class IslandScene {
        * is currently drawn.
        */
       waterDepth: (wx: number, wz: number) => this.water?.depthAt(wx, wz) ?? 0,
+      // What the water is doing to HER, for the probes: the same
+      // numbers the movement just used, not a re-derivation.
+      wading: () => ({ depth: this.wet, afloat: this.afloat, dive: this.dive }),
       waterDrawn: () => this.water?.drawnCells() ?? -1,
       groundUnderfoot: () => groundHeight(this.ant.where.wx, this.ant.where.wz),
       /**
@@ -758,6 +788,7 @@ export class IslandScene {
   }
 
   dispose(): void {
+    this.underwater.dispose();
     this.disposed = true;
     this.renderer.setAnimationLoop(null);
     this.watchSize.disconnect();
@@ -957,10 +988,14 @@ export class IslandScene {
         this.stamina.fraction,
         this.stamina.spent,
         dt,
-        // The DRAWN ground under her, the same surface she would land
-        // on — so holding an altitude means holding it against the
-        // island the player can actually see.
-        groundHeight(this.ant.where.wx, this.ant.where.wz),
+        // The DRAWN surface under her, the one she would land on — and
+        // that is the WATER's surface where there is water. This is
+        // what makes a lake solid to land on: descend until the floor
+        // arrives, and over water the floor is the film. The biology
+        // agrees (docs/FIRE_ANT_BIOLOGY.md — she rides the surface
+        // film), and wadeAt takes over the moment she is down.
+        groundHeight(this.ant.where.wx, this.ant.where.wz)
+          + (waterSpotAt(this.ant.where.wx, this.ant.where.wz)?.depth ?? 0),
       );
       this.effort = step.effort;
       winded = this.stamina.update(step.effort, dt);
@@ -990,9 +1025,26 @@ export class IslandScene {
       this.effort = sprinting ? SPRINT_DRAIN
         : resting ? RESTING_RECOVERY : MOVING_RECOVERY;
       winded = this.stamina.update(this.effort, dt);
+      // WHAT THE WATER IS DOING TO HER. The lever is the climb lever
+      // in the air and the dive lever in the water — nought at the
+      // surface, one on the bottom — and the eased `dive` is what
+      // wadeAt scales her float height by.
+      const wantDive = Math.max(0, -this.liftSlider.lift);
+      this.dive += (wantDive - this.dive) * (1 - Math.exp(-DIVE_EASE * dt));
+      const wade = wadeAt(this.ant.where.wx, this.ant.where.wz, this.dive);
+      this.afloat = wade.afloat;
+      this.wet = wade.depth;
+      // Depth gates her drive — wading drags, paddling crawls — and
+      // the current is a push she does not control. Both reach
+      // PlayerAnt through the hooks that survived v0.0.57 exactly so
+      // this could come back.
       this.ant.update(
-        { ahead: travel.ahead, across: travel.across, speed: travel.speed },
-        -look.yaw, dt,
+        {
+          ahead: travel.ahead * wade.pace,
+          across: travel.across * wade.pace,
+          speed: travel.speed * wade.pace,
+        },
+        -look.yaw, dt, wade.above, wade.carry,
       );
     }
 
@@ -1096,6 +1148,7 @@ export class IslandScene {
     // third case had to be added.
     this.liftSlider.enable(leverFor(
       this.flight.aloft,
+      this.afloat,
       this.flight.canTakeOff(this.ant.pace, this.stamina.fraction),
     ));
     // ── The world moves under her ─────────────────────────────────
@@ -1148,6 +1201,9 @@ export class IslandScene {
     this.nowWeather = sky;
     this.water?.setWeather(sky.precipitation);
     this.applyWeather(sky);
+    // AFTER applyWeather, every frame — the weather rewrites the fog,
+    // background and lights, and the water takes its fraction of THAT.
+    this.underwater.update(this.sun, this.skyLight);
     this.rain.update(this.follow.camera.position, sky, dt);
     // The sea takes the camera's RENDERED position, which is the one
     // thing about it that is allowed to be local: the grid is recentred

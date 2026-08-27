@@ -128,10 +128,12 @@ describe('the power readout', () => {
 describe('the lift lever', () => {
   it('still flies, still takes off, and still greys out on dry land', () => {
     // Flying beats everything, and coming down is always hers.
-    expect(leverFor(true, false)).toBe('full');
+    expect(leverFor(true, false, false)).toBe('full');
     // On the ground it is a takeoff when she can, and dead when she
     // cannot — an exhausted queen may not ask to climb.
-    expect(leverFor(false, true)).toBe('takeoff');
-    expect(leverFor(false, false)).toBe('off');
+    expect(leverFor(false, false, true)).toBe('takeoff');
+    expect(leverFor(false, false, false)).toBe('off');
+    expect(leverFor(false, true, true)).toBe('dive');
+    expect(leverFor(true, true, false)).toBe('full');
   });
 });
