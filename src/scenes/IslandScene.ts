@@ -2342,7 +2342,7 @@ export class IslandScene {
     // because nothing bakes them a second time — and that goes for the
     // scanned maps too, so wait on both.
     this.bandsReady = Promise.all([bands.ready, authored.ready]).then(() => {
-      bakeGroundRelief(this.renderer, bands.textures, authored.textures);
+      bakeGroundRelief(this.renderer, bands.textures, authored.textures, BAND_TILE);
     });
     const maps = bands.textures;
     this.terrain = new TerrainStream(

@@ -58,7 +58,10 @@ export const RELIEF_DIALS = {
   imageDetail: 0.35,
   heightLow: 0.0,
   heightHigh: 1.0,
-  normalStrength: 1.35,
+  // ONE, because the depth is now a measurement and not a taste. The
+  // dial multiplies RELIEF_AMPLITUDE, so 1.0 is exactly the 2 cm asked
+  // for and anything else is a deliberate exaggeration of it.
+  normalStrength: 1.0,
   /**
    * HOW WIDE A SLOPE COUNTS AS A SLOPE.
    *
@@ -81,6 +84,29 @@ export const RELIEF_DIALS = {
  * How hard the derived micro-relief bends the sun, as a live uniform so
  * it can be turned down — or off — from the phone without a rebuild.
  */
+/**
+ * HOW DEEP THE RELIEF ACTUALLY IS, peak to peak, in world units — and
+ * a world unit is a centimetre.
+ *
+ * Two: the highest point of a band's height field stands 1 cm proud of
+ * the mid and the lowest sits 1 cm below it (Joshua: "the highest
+ * mapping +1 cm and the lowest -1 cm for a total of a 2 cm difference
+ * ... the mean average in the middle would be zero"). For a queen a
+ * centimetre long that is real ground: a pebble she has to walk around
+ * the shoulder of rather than a pattern printed under her feet.
+ *
+ * The mid sitting at zero costs nothing and matters for nothing — a
+ * normal map is made of SLOPES, and adding a constant to every height
+ * changes no slope anywhere. It is written down because it is what
+ * makes the number meaningful: without a datum, "2 cm of relief" does
+ * not say which 2 cm.
+ *
+ * What it buys is that the dial below is now a MULTIPLIER ON A
+ * MEASUREMENT rather than a unitless fudge. At 1.0 the ground has
+ * exactly the 2 cm asked for.
+ */
+export const RELIEF_AMPLITUDE = 2;
+
 export const RELIEF_BUMP_UNIFORM = { value: 1.0 };
 
 /** How much the micro-slope darkens its own crevices. Subtle by remit. */
@@ -171,7 +197,7 @@ const BAKE_FRAGMENT = /* glsl */`
   uniform float hasB, broadBias;
   uniform float hasAuthoredA, hasAuthoredB, writeSurface;
   uniform float contrast, largeForm, imageDetail, lowCut, highCut, strength;
-  uniform float fineSpan, midSpan, coarseSpan;
+  uniform float fineSpan, midSpan, coarseSpan, slopeScale;
   uniform float fineWeight, midWeight, coarseWeight;
 
   /**
@@ -201,12 +227,22 @@ const BAKE_FRAGMENT = /* glsl */`
     return clamp((v - lowCut) / max(0.001, highCut - lowCut), 0.0, 1.0);
   }
 
-  /** Central differences over a given span, in texels. */
+  /**
+   * A TRUE derivative over the given span: height units per texel.
+   *
+   * Divided by the span it was measured over, which the first version
+   * of this was not. Summing raw differences across three spans made a
+   * wider span count for more simply because it reached further, so the
+   * result was a shape emphasis in no units at all — fine while the
+   * strength was a fudge factor, useless now that the depth is a
+   * measurement someone can check.
+   */
   vec2 slope(sampler2D map, vec2 uv, float span) {
     vec2 e = texel * span;
     return vec2(
       heightAt(map, uv + vec2(e.x, 0.0)) - heightAt(map, uv - vec2(e.x, 0.0)),
-      heightAt(map, uv + vec2(0.0, e.y)) - heightAt(map, uv - vec2(0.0, e.y)));
+      heightAt(map, uv + vec2(0.0, e.y)) - heightAt(map, uv - vec2(0.0, e.y))
+    ) / (2.0 * span);
   }
 
   /**
@@ -216,10 +252,15 @@ const BAKE_FRAGMENT = /* glsl */`
    * together instead of showing a lit outline round a flat middle.
    */
   vec2 normalXY(sampler2D map, vec2 uv) {
-    vec2 g = slope(map, uv, fineSpan) * fineWeight
-           + slope(map, uv, midSpan) * midWeight
-           + slope(map, uv, coarseSpan) * coarseWeight;
-    g *= strength * 2.2;
+    // A WEIGHTED MEAN of the three, not a sum: each span is already a
+    // derivative, so averaging them keeps the answer one.
+    vec2 g = (slope(map, uv, fineSpan) * fineWeight
+            + slope(map, uv, midSpan) * midWeight
+            + slope(map, uv, coarseSpan) * coarseWeight)
+           / max(0.0001, fineWeight + midWeight + coarseWeight);
+    // Height units per texel become world units per world unit here,
+    // and this is the only place the relief acquires a physical size.
+    g *= slopeScale * strength;
     return normalize(vec3(-g, 1.0)).xy * 0.5 + 0.5;
   }
 
@@ -259,6 +300,7 @@ export function bakeGroundRelief(
   renderer: THREE.WebGLRenderer,
   textures: Record<string, THREE.Texture>,
   authored: Record<string, THREE.Texture> = {},
+  bandTile = 128,
 ): void {
   const source = textures[RELIEF_PAIRS[0].a];
   const size = (source?.image as { width?: number } | undefined)?.width ?? 1024;
@@ -284,6 +326,11 @@ export function bakeGroundRelief(
       lowCut: { value: RELIEF_DIALS.heightLow },
       highCut: { value: RELIEF_DIALS.heightHigh },
       strength: { value: RELIEF_DIALS.normalStrength },
+      // Rise over run, both in world units: RELIEF_AMPLITUDE of height
+      // across one texel of ground. At a 128-unit tile over 1024 texels
+      // a texel is 1.25 mm, so 2 cm of relief is a slope of 16 — which
+      // is exactly why sand at this scale is all shoulders and pits.
+      slopeScale: { value: RELIEF_AMPLITUDE / (bandTile / size) },
       fineSpan: { value: RELIEF_DIALS.fineSpan },
       midSpan: { value: RELIEF_DIALS.midSpan },
       coarseSpan: { value: RELIEF_DIALS.coarseSpan },

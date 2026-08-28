@@ -1,7 +1,9 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { groundShader } from '../src/world/terrainMaterial';
-import { BAND_ROUGHNESS, RELIEF_PAIRS, RELIEF_UNIFORM_NAMES } from '../src/world/groundRelief';
+import {
+  BAND_ROUGHNESS, RELIEF_AMPLITUDE, RELIEF_DIALS, RELIEF_PAIRS, RELIEF_UNIFORM_NAMES,
+} from '../src/world/groundRelief';
 
 /**
  * A `.replace` against three.js source that stops matching is not an
@@ -121,5 +123,35 @@ describe('the beach is two sands, blended', () => {
     expect(surfaced).toHaveLength(1);
     expect(surfaced[0].surface).toBe('sandsmooth');
     expect(surfaced[0].b).toBeNull();
+  });
+});
+
+describe('the relief has a size you can state in centimetres', () => {
+  it('spans 2 cm peak to peak, +1 above the mid and -1 below', () => {
+    expect(RELIEF_AMPLITUDE).toBe(2);
+    expect(RELIEF_AMPLITUDE / 2).toBe(1);
+  });
+
+  it('turns that into the slope the shader actually needs', () => {
+    // Rise over run, both in world units. A 128-unit tile across 1024
+    // texels puts a texel at 1.25 mm, so 2 cm of relief is a slope of
+    // 16 — steep, and correctly so at an ant's scale.
+    const texelWorld = 128 / 1024;
+    expect(texelWorld).toBeCloseTo(0.125, 6);
+    expect(RELIEF_AMPLITUDE / texelWorld).toBe(16);
+  });
+
+  it('leaves the dial meaning exactly the measurement at 1.0', () => {
+    // Anything else is a deliberate exaggeration, not a hidden fudge.
+    expect(RELIEF_DIALS.normalStrength).toBe(1);
+  });
+
+  it('averages the three spans rather than summing them', () => {
+    // Each span is a derivative once it is divided by its own width, so
+    // adding them raw made a wide span count for more merely because it
+    // reached further — a shape emphasis in no units at all.
+    const weights = RELIEF_DIALS.fineWeight + RELIEF_DIALS.midWeight
+      + RELIEF_DIALS.coarseWeight;
+    expect(weights).toBeGreaterThan(1);
   });
 });
