@@ -197,6 +197,12 @@ export class FlightHud {
   private shownMsl = '';
   private shownLand = '';
   private wasWater = false;
+  private awlRead!: HTMLSpanElement;
+  private awlRow!: HTMLDivElement;
+  private shownAwl = '';
+  private holdPill!: HTMLDivElement;
+  private holdTaps = 0;
+  private shownHold = '';
   private shownVs = Number.NaN;
   private shownTgt = '';
   private readonly path: HTMLDivElement;
@@ -281,6 +287,14 @@ export class FlightHud {
     this.mslRead = document.createElement('span');
     this.landRead = document.createElement('span');
     right.appendChild(this.railRow('MSL', this.mslRead, true));
+    // AWL — Joshua's third altitude: her clearance over the WATER
+    // SURFACE, shown only when water actually stands beneath her. MSL
+    // and AGL keep their meanings untouched; this is the one a splash
+    // landing is flown against.
+    this.awlRead = document.createElement('span');
+    this.awlRow = this.railRow('AWL', this.awlRead);
+    this.awlRow.style.display = 'none';
+    right.appendChild(this.awlRow);
     this.landRow = this.railRow('LND', this.landRead);
     this.landRow.style.transition = 'opacity 260ms ease';
     right.appendChild(this.landRow);
@@ -310,6 +324,34 @@ export class FlightHud {
       letterSpacing: '0.14em', color: DIM,
     } as Partial<CSSStyleDeclaration>);
     right.appendChild(this.tgt);
+
+    // THE HOLD PILL — the one thing on this HUD a thumb can press.
+    // Level flight holds either an ALTITUDE (MSL — the floor slides
+    // beneath her) or a CLEARANCE above what she would land on, and
+    // the pill names the second by what that floor IS right now: AGL
+    // over land, AWL over water. Tap to switch; the flight model
+    // never jumps on a switch.
+    this.holdPill = document.createElement('div');
+    Object.assign(this.holdPill.style, {
+      marginTop: '6px',
+      marginLeft: 'auto',
+      padding: '4px 9px',
+      borderRadius: '7px',
+      border: `1px solid ${DIM}`,
+      color: INK,
+      background: 'rgba(10, 20, 16, .35)',
+      font: '700 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace',
+      letterSpacing: '0.14em',
+      pointerEvents: 'none',
+      cursor: 'pointer',
+      width: 'fit-content',
+    } as Partial<CSSStyleDeclaration>);
+    this.holdPill.textContent = 'HOLD MSL';
+    this.holdPill.addEventListener('pointerdown', (event) => {
+      event.stopPropagation();
+      this.holdTaps += 1;
+    });
+    right.appendChild(this.holdPill);
 
     // GROUND AND WIND USED TO LIVE HERE, bottom centre, while airspeed
     // sat under the compass. Three readings of one story, told across
@@ -553,10 +595,32 @@ export class FlightHud {
 
 
   /** Put the instruments where the telemetry says. */
-  show(now: FlightTelemetry, aloft: boolean, view: FlightView): void {
+  /** Taps on the hold pill since last asked — the scene toggles. */
+  takeHoldTaps(): number {
+    const taps = this.holdTaps;
+    this.holdTaps = 0;
+    return taps;
+  }
+
+  show(
+    now: FlightTelemetry, aloft: boolean, view: FlightView,
+    hold: 'msl' | 'floor' | null = null,
+  ): void {
     if (aloft !== this.up) {
       this.up = aloft;
       this.root.style.opacity = aloft ? '1' : '0';
+    }
+    // The pill must never be an invisible button: pointer events come
+    // off with the panel, and off again whenever there is no hold to
+    // show (swimming borrows this panel; a swimmer holds nothing).
+    const label = !aloft || hold === null ? ''
+      : hold === 'msl' ? 'HOLD MSL'
+        : now.awl != null ? 'HOLD AWL' : 'HOLD AGL';
+    if (label !== this.shownHold) {
+      this.shownHold = label;
+      this.holdPill.style.display = label ? '' : 'none';
+      this.holdPill.style.pointerEvents = label ? 'auto' : 'none';
+      if (label) this.holdPill.textContent = label;
     }
     if (!aloft) return;
 
@@ -626,6 +690,15 @@ export class FlightHud {
     if (land !== this.shownLand) {
       this.shownLand = land;
       this.landRead.textContent = land;
+    }
+
+    // AWL, only while water stands beneath her — over dry land the
+    // row excuses itself rather than repeating AGL.
+    const awl = now.awl == null ? '' : readHeight(Math.max(0, now.awl));
+    if (awl !== this.shownAwl) {
+      this.shownAwl = awl;
+      this.awlRow.style.display = awl ? '' : 'none';
+      if (awl) this.awlRead.textContent = awl;
     }
 
     const climb = Math.round(now.climbing * 10) / 10;

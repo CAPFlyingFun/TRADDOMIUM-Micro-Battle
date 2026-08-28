@@ -190,19 +190,27 @@ export class IslandWater {
     this.mesh.renderOrder = 1;
     this.mesh.frustumCulled = false;
     scene.add(this.mesh);
-    // The window answers for FRESH water; where it has none, the sea
-    // answers for itself — the ground below zero IS the column, salt
-    // flagged so wading floats on it and drinking refuses it. The
-    // column includes the SWELL (seaSwell.ts, the one shared surface):
-    // a crest deepens it, a trough shallows it, and because floating
-    // rides depth, she rises and falls with the very waves the near
-    // ocean sheet is drawing from the same table.
+    // BELOW SEA LEVEL, THE SEA ANSWERS FIRST. It used to be asked only
+    // where the fresh window had nothing, and that ordering hid a real
+    // bug: the sim window follows HER everywhere, sea included, and in
+    // rain its cells over the shelf carry a millimetre of rain film —
+    // which then answered for "the water here" and quietly replaced a
+    // twenty-metre ocean with a puddle. The flight floor, the landing,
+    // and the AGL rail all inherited the seabed. Ground below zero IS
+    // the sea, whatever else has pooled there; the window speaks for
+    // fresh water on LAND.
+    //
+    // The sea's column includes the SWELL (seaSwell.ts, the one shared
+    // surface): a crest deepens it, a trough shallows it, and because
+    // floating rides depth, she rises and falls with the very waves
+    // the near ocean sheet is drawing from the same table. Salt is
+    // flagged so wading floats and drinking refuses.
     useWaterQuery((wx, wz) => {
-      const fresh = this.spotAt(wx, wz);
-      if (fresh) return fresh;
       const g = groundHeight(wx, wz);
-      if (g >= 0) return null;
-      return { depth: -g + seaSwellAt(wx, wz, -g), flowX: 0, flowZ: 0, salt: true };
+      if (g < 0) {
+        return { depth: -g + seaSwellAt(wx, wz, -g), flowX: 0, flowZ: 0, salt: true };
+      }
+      return this.spotAt(wx, wz);
     });
   }
 

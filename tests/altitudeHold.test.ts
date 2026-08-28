@@ -23,8 +23,12 @@ const TICK = 1 / 60;
  * Fly her level for `seconds` over a floor given by `under(t)`, and
  * report the MSL and AGL she ends with.
  */
-function over(under: (t: number) => number, seconds: number, from = 2_000) {
+function over(
+  under: (t: number) => number, seconds: number, from = 2_000,
+  mode: 'msl' | 'floor' = 'msl',
+) {
   const flight = new Flight();
+  flight.holdMode = mode;
   flight.takeOff(60, 1, 0);
   // Seed the remembered floor, then climb to the altitude under test.
   flight.update(STILL, 1, false, TICK, under(0));
@@ -89,5 +93,32 @@ describe('flying over ground that moves', () => {
     // `height` is still the clearance.
     const low = over((t) => (t / 4) * 400, 4);
     expect(low.agl).toBeLessThan(low.msl);
+  });
+});
+
+describe('the floor hold, chosen on purpose (the HUD pill)', () => {
+  it('lets the floor steer her — clearance constant, altitude riding it', () => {
+    // The canyon "bug", now a mode: the same rising floor that slid
+    // under an MSL hold carries a floor hold up with it. Over water
+    // the caller's floor is the SURFACE, so this is the wave-riding
+    // AWL hold; over land it is terrain-following AGL.
+    const flat = over(() => 0, 4, 2_000, 'floor');
+    const rising = over((t) => (t / 4) * 400, 4, 2_000, 'floor');
+    expect(rising.agl).toBeCloseTo(flat.agl, 0);
+    expect(rising.msl - flat.msl).toBeCloseTo(400, 0);
+  });
+
+  it('switching modes mid-flight never jumps her', () => {
+    const flight = new Flight();
+    flight.takeOff(60, 1, 0);
+    flight.update({ push: 0, side: 0, lift: 0 }, 1, false, 1 / 60, 0);
+    flight.hold(500, 0);
+    flight.update({ push: 0, side: 0, lift: 0 }, 1, false, 1 / 60, 0);
+    const before = flight.height;
+    flight.holdMode = 'floor';
+    flight.update({ push: 0, side: 0, lift: 0 }, 1, false, 1 / 60, 0);
+    // One frame of level flight over level ground: the switch itself
+    // moved nothing — only how future floor CHANGES integrate.
+    expect(flight.height).toBeCloseTo(before, 1);
   });
 });

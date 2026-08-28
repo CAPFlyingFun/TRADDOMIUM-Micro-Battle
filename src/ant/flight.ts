@@ -513,6 +513,17 @@ export class Flight {
     return this.above;
   }
 
+  /**
+   * What the vertical integration holds when she is not climbing or
+   * diving: 'msl' pins her altitude and lets the floor slide beneath
+   * her; 'floor' pins her CLEARANCE above whatever she would land on,
+   * so the floor steers her — terrain-following over land, riding the
+   * swell over the sea. Toggled from the HUD's hold pill. Switching
+   * never jumps her: the stored clearance is untouched, only how the
+   * next frame integrates it.
+   */
+  holdMode: 'msl' | 'floor' = 'msl';
+
   get airspeed(): number {
     return this.speed;
   }
@@ -677,28 +688,34 @@ export class Flight {
         : Math.min(ceiling, MAX_POWERED_SPEED)) * scale;
     this.speed = Math.max(0, Math.min(cap, this.speed));
 
-    // SHE HOLDS AN ALTITUDE, NOT A CLEARANCE.
+    // WHAT SHE HOLDS IS A CHOICE NOW — see `holdMode`.
     //
+    // 'msl' (the default): SHE HOLDS AN ALTITUDE, NOT A CLEARANCE.
     // This used to be `above + climbing * dt` and nothing else, which
-    // is an AGL hold: the terrain moving under her moved HER. Flying
-    // down a canyon she rode the floor up and out of it and could not
-    // simply fly on past the far wall, because she was never at an
-    // altitude in the first place — she was at a distance from the
-    // ground, and the ground was steering.
+    // is a clearance hold: the terrain moving under her moved HER.
+    // Flying down a canyon she rode the floor up and out of it and
+    // could not simply fly on past the far wall, because she was never
+    // at an altitude in the first place. So a change in the floor
+    // under her is subtracted out: floor up by ten means clearance
+    // down by ten, and her height above the sea is the same number.
     //
-    // Her state is still stored as a clearance, because that is what
-    // every reader downstream wants (the wind profile, the AGL rail,
-    // where to draw her). The difference is that a change in the
-    // ground under her is subtracted out: ground up by ten means
-    // clearance down by ten, and her height above the sea is the same
-    // number it was. That IS an MSL hold, expressed in the variable
-    // that was already here.
+    // 'floor': the old behaviour ON PURPOSE, as a mode — she holds her
+    // clearance above whatever she would land on (the terrain, or the
+    // water surface where there is water — the caller's floor already
+    // says which), and the floor steers her: terrain-following over
+    // land, wave-riding over the sea. The canyon "bug" is the feature
+    // this mode exists for.
     //
-    // The floor stays. Clamping at zero is what stops her flying
-    // through a wall that rises into her — she rides up it instead,
-    // which is forgiving rather than correct, and much better than
-    // the inside of a hill.
-    const shift = this.ground === null ? 0 : this.ground - ground;
+    // Her state is stored as a clearance either way, because that is
+    // what every reader downstream wants (the wind profile, the rail,
+    // where to draw her).
+    //
+    // The floor clamp stays in BOTH modes. Clamping at zero is what
+    // stops her flying through a wall that rises into her — she rides
+    // up it instead, which is forgiving rather than correct, and much
+    // better than the inside of a hill.
+    const shift = this.holdMode !== 'msl' || this.ground === null
+      ? 0 : this.ground - ground;
     this.ground = ground;
     this.above = Math.max(0, this.above + shift + this.climbing * dt);
 

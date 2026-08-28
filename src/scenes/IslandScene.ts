@@ -1014,6 +1014,12 @@ export class IslandScene {
     if (this.paceUI.takeAutoFlips() % 2 === 1) this.auto.flip();
 
     if (this.paceUI.takeSprintTaps() % 2 === 1) this.sprintOn = !this.sprintOn;
+    // The hold pill on the flight rail: MSL pins an altitude, the
+    // other mode pins her clearance over whatever she would land on
+    // (AGL over land, AWL over water — the pill names which).
+    if (this.flightHud.takeHoldTaps() % 2 === 1) {
+      this.flight.holdMode = this.flight.holdMode === 'msl' ? 'floor' : 'msl';
+    }
     const asking = this.sprintOn || this.paceUI.sprintHeld;
     if (!asking) this.reask = false;
     const wants = asking && !this.reask && !this.stamina.spent;
@@ -1190,7 +1196,10 @@ export class IslandScene {
       this.auto.active, this.auto.way,
       this.flight.aloft ? telemetry.airspeed : null,
     );
-    this.flightHud.show(telemetry, hudUp, this.seeFlight(telemetry));
+    this.flightHud.show(
+      telemetry, hudUp, this.seeFlight(telemetry),
+      this.flight.aloft ? this.flight.holdMode : null,
+    );
     // The RATE goes with the reserve, so the readout can say how long
     // what she is doing right now can go on rather than how much
     // sprinting the bar would be worth.
@@ -1804,9 +1813,13 @@ export class IslandScene {
       setSetting('terrainRelief', fix.relief);
     }
     const msl = fix.msl;
-    const agl = msl - groundHeight(at.wx, at.wz);
+    // Clearance over the surface she flies against — the WATER where
+    // water stands. Against bare terrain, a fix a metre over the sea
+    // reproduced as a metre over the SEABED, tens of metres up.
+    const above = msl - groundHeight(at.wx, at.wz)
+      - (waterSpotAt(at.wx, at.wz)?.depth ?? 0);
     const look = (fix.pitch * Math.PI) / 180;
-    if (agl > 1) this.flight.hold(agl, heading);
+    if (above > 1) this.flight.hold(above, heading);
     // BOTH, and they are not the same act. The snap places the camera
     // for this frame; the aim is what stops the next frame's look
     // input putting it straight back at its resting elevation, which
@@ -1853,6 +1866,7 @@ export class IslandScene {
       drift: driftOf(this.heldTrack, this.ant.bearing),
       climbing: this.swimVs,
       agl,
+      awl: null,
       altitude,
       ground,
       wind: current
@@ -1869,8 +1883,18 @@ export class IslandScene {
   private readFlight(dt: number): FlightTelemetry {
     const here = this.ant.where;
     const terrain = groundHeight(here.wx, here.wz);
-    const agl = this.flight.height;
-    const altitude = terrain + agl;
+    // THREE ALTITUDES, one truth each (Joshua's naming). The flight's
+    // stored clearance is measured against the floor it flies on —
+    // the terrain, or the WATER SURFACE where water stands. So over
+    // water that clearance IS her AWL; AGL keeps its own meaning (the
+    // ground, seabed included) by adding the column back; and MSL is
+    // the surface plus the clearance, which over dry land collapses
+    // to the old terrain-plus-height exactly.
+    const column = waterSpotAt(here.wx, here.wz)?.depth ?? 0;
+    const clearance = this.flight.height;
+    const altitude = terrain + column + clearance;
+    const agl = clearance + column;
+    const awl = column > 0 ? clearance : null;
     // MEASURED, not reconstructed: her actual displacement over the
     // island, which already contains her airspeed, the wind, and
     // anything the movement pipeline grows later.
@@ -1879,7 +1903,13 @@ export class IslandScene {
 
     const from = { wx: here.wx, wz: here.wz, altitude };
     const climbing = this.flight.climbing;
-    const sample = (wx: number, wz: number): number => groundHeight(wx, wz);
+    // The surface she would actually MEET — water counts. A descent
+    // over the sea ends at the sea, and LND/TGT should say so instead
+    // of measuring to a seabed she can never reach.
+    const sample = (wx: number, wz: number): number => {
+      const g = groundHeight(wx, wz);
+      return g + (waterSpotAt(wx, wz)?.depth ?? 0);
+    };
 
     // THE WIND SHE IS IN, not the one the station reported: the same
     // vector the flight model is adding to her, height profile and
@@ -1909,6 +1939,7 @@ export class IslandScene {
       drift: driftOf(this.heldTrack, this.flight.heading),
       climbing,
       agl,
+      awl,
       altitude,
       ground,
       wind: {

@@ -66,6 +66,14 @@ export interface FlightTelemetry {
    * to know how far under she is.
    */
   readonly water?: { readonly over: number } | null;
+  /**
+   * ABOVE WATER LEVEL — her clearance over the water SURFACE, present
+   * only when water stands beneath her. Joshua's third altitude: MSL
+   * is above the sea's zero, AGL is above the GROUND (the seabed
+   * counts), AWL is above the water she would actually land on. Null
+   * over dry land, where AGL already says everything.
+   */
+  readonly awl?: number | null;
   readonly airspeed: number;
   readonly groundSpeed: number;
   /** Compass degrees. Where her nose points. */
