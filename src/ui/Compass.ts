@@ -187,6 +187,8 @@ export interface WindLine {
  * world.
  */
 export interface UnderTape {
+  /** Average frames a second, and the worst of the recent ones. */
+  readonly fps?: { readonly mean: number; readonly low: number } | null;
   readonly fix?: FixSource | null;
   readonly air?: AirLine | null;
   readonly ground?: GroundLine | null;
@@ -212,6 +214,8 @@ export class Compass {
   private readonly window: HTMLDivElement;
   private readonly tape: HTMLDivElement;
   private readonly readout: HTMLDivElement;
+  private readonly fpsLine: HTMLDivElement;
+  private lastFps = '';
   private readonly fixLine: HTMLDivElement;
   private lastFix = '';
   private readonly airLine: HTMLDivElement;
@@ -394,6 +398,27 @@ export class Compass {
     // it. A development instrument (see fix.ts): the heading above it
     // is the fifth number of the same fix, which is why this line does
     // not have to fight the readout for attention to be useful.
+    // THE FRAME RATE, above the fix and in the same register: an
+    // instrument for the person building the thing, not furniture for
+    // the person playing it. AVERAGE rather than instantaneous, because
+    // a number that flickers between 47 and 61 tells you nothing you
+    // can act on — and the worst recent frame beside it, because a
+    // steady 60 that drops one frame in thirty is a stutter you can
+    // feel and a mean that will never show it.
+    this.fpsLine = document.createElement('div');
+    this.fpsLine.dataset.ui = 'compass-fps';
+    Object.assign(this.fpsLine.style, {
+      marginTop: '2px',
+      textAlign: 'center',
+      font: '500 9px/1 "JetBrains Mono", ui-monospace, monospace',
+      fontVariantNumeric: 'tabular-nums',
+      whiteSpace: 'nowrap',
+      color: 'rgba(214, 190, 140, .78)',
+      textShadow: SHADOW,
+      display: 'none',
+    } as Partial<CSSStyleDeclaration>);
+    this.root.appendChild(this.fpsLine);
+
     this.fixLine = document.createElement('div');
     this.fixLine.dataset.ui = 'compass-fix';
     Object.assign(this.fixLine.style, {
@@ -568,6 +593,19 @@ export class Compass {
     } else if (this.windLine.style.display !== 'none') {
       this.windLine.style.display = 'none';
       this.lastWind = '';
+    }
+
+    const fps = under?.fps ?? null;
+    if (fps) {
+      const line = `${Math.round(fps.mean)} FPS  \u00b7  low ${Math.round(fps.low)}`;
+      if (line !== this.lastFps) {
+        this.lastFps = line;
+        this.fpsLine.textContent = line;
+      }
+      if (this.fpsLine.style.display === 'none') this.fpsLine.style.display = '';
+    } else if (this.fpsLine.style.display !== 'none') {
+      this.fpsLine.style.display = 'none';
+      this.lastFps = '';
     }
 
     const fix = under?.fix ?? null;

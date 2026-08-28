@@ -103,6 +103,17 @@ export interface Settings {
    * that should be nothing but the game's own furniture.
    */
   showFix: boolean;
+
+  /**
+   * The frame-rate readout, on its own switch.
+   *
+   * Separate from the developer overlay because it answers a different
+   * question: the fix says WHERE she is, this says whether the device
+   * can afford what is being drawn. Judging a texture or a relief dial
+   * without it is guessing, and the only machine whose numbers matter
+   * is the one in Joshua's hand.
+   */
+  showFps: boolean;
 }
 
 export const DEFAULTS: Readonly<Settings> = {
@@ -164,6 +175,7 @@ export const DEFAULTS: Readonly<Settings> = {
   liveWeather: true,
   detailRange: 2,
   showFix: true,
+  showFps: true,
 };
 
 /** What a slider may ask for. Anything outside is clamped, not refused. */
@@ -182,7 +194,7 @@ export const LIMITS = {
 
 export type Dial = keyof typeof LIMITS;
 export type Toggle = 'invertLookX' | 'invertLookY' | 'invertStickY'
-  | 'liveWeather' | 'showFix';
+  | 'liveWeather' | 'showFix' | 'showFps';
 
 const STORE = 'traddomium.settings';
 

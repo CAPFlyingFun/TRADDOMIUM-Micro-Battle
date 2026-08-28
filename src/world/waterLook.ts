@@ -415,6 +415,26 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
           diffuseColor.a *= mix(1.0, 1.55, smoothstep(15.0, 320.0, depth));
           diffuseColor.a = min(diffuseColor.a, 0.82);
           diffuseColor.a = mix(diffuseColor.a, 0.95, foam);
+
+          // NEARER MEANS MORE VISIBLE, and only nearer.
+          //
+          // Shin-deep water over bright sand is nearly invisible from
+          // inside it: the column you are looking through is a couple
+          // of centimetres of very clear water, so almost no colour
+          // accumulates and the sand reads straight through. From a few
+          // metres up the same water looks superb, because the slant
+          // path through it is long. (Joshua: "several meters up look
+          // amazing for the ocean, but right along the shore is still
+          // too transparent... by 2.5m away, make it exactly like now
+          // to get the best of both worlds.")
+          //
+          // So this is a VIEWING-DISTANCE term and nothing else. It is
+          // exactly 1.0 by 250 units, which makes every frame he
+          // approved bit-identical, and it multiplies BEFORE the
+          // waterline feather so the edge stays precisely where it was
+          // — the fade he asked me to revert once already is untouched.
+          float closeUp = 1.0 - smoothstep(60.0, 250.0, length(vViewPosition));
+          diffuseColor.a = min(0.95, diffuseColor.a * mix(1.0, 1.9, closeUp));
           diffuseColor.a *= edge;${opts.swell ? `
           // The near sheet hands over to the far one across its rim —
           // the far sheet's hole is the mirror of this fade.

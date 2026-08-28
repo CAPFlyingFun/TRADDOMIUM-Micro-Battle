@@ -248,6 +248,16 @@ export class IslandScene {
   /** Resolves when every ground map has pixels in it. */
   private bandsReady!: Promise<void>;
   /**
+   * A ring of recent frame times, for the readout.
+   *
+   * Two seconds of them at sixty: long enough that the mean is steady
+   * enough to read on a moving phone, short enough that it answers a
+   * change in the scene rather than averaging the whole session.
+   */
+  private readonly frames = new Float32Array(120);
+  private frameAt = 0;
+  private framesSeen = 0;
+  /**
    * Resolves when the world is worth looking at.
    *
    * NOT when the constructor returns. The scene is alive long before it
@@ -1073,6 +1083,9 @@ export class IslandScene {
     if (this.disposed) return;
     // Clamp dt so a backgrounded tab does not teleport the ant on return.
     const dt = Math.min(this.clock.getDelta(), 0.1);
+    this.frames[this.frameAt] = dt;
+    this.frameAt = (this.frameAt + 1) % this.frames.length;
+    this.framesSeen = Math.min(this.framesSeen + 1, this.frames.length);
 
     // PAUSED: draw the frame, advance nothing.
     //
@@ -1398,6 +1411,7 @@ export class IslandScene {
     this.compass.update(
       bearingOf(view.x, view.z), this.ant.where, this.markers, dt,
       {
+        fps: settings().showFps ? this.frameRate() : null,
         fix: settings().showFix
           ? { msl: this.mslNow(), pitch: pitchOf(view.y), relief: reliefScale() }
           : null,
@@ -1946,6 +1960,30 @@ export class IslandScene {
    * a fix printed two pixels under a readout that disagreed with it
    * would be read as a bug every time it was read at all.
    */
+  /**
+   * The average frame rate, and the worst of the recent frames.
+   *
+   * THE MEAN IS OF THE FRAME TIMES, not of the rates. Averaging rates
+   * flatters a stutter: one 200 ms frame among sixty 16 ms ones is 5
+   * fps against 60, and the mean of the RATES says 59 while the mean of
+   * the TIMES says 35 — and 35 is what the two seconds actually felt
+   * like. The low is the 95th-percentile frame time for the same
+   * reason: the number a stutter shows up in.
+   */
+  private frameRate(): { mean: number; low: number } {
+    const seen = this.framesSeen;
+    if (seen === 0) return { mean: 0, low: 0 };
+    const recent = Array.from(this.frames.subarray(0, seen));
+    let total = 0;
+    for (const t of recent) total += t;
+    recent.sort((a, b) => a - b);
+    const worst = recent[Math.min(seen - 1, Math.floor(seen * 0.95))];
+    return {
+      mean: total > 0 ? seen / total : 0,
+      low: worst > 0 ? 1 / worst : 0,
+    };
+  }
+
   private mslNow(): number {
     const here = this.ant.where;
     // PLUS WHATEVER IS HOLDING HER UP — wings OR water.

@@ -89,6 +89,7 @@ const TOGGLES: Array<{ key: Toggle; label: string; on: string; off: string }> = 
   { key: 'invertLookX', label: 'Look left/right', on: 'Inverted', off: 'Normal' },
   { key: 'invertLookY', label: 'Look up/down', on: 'Drag down lowers', off: 'Drag down lifts' },
   { key: 'showFix', label: 'Developer overlay', on: 'Fix + DIE', off: 'Hidden' },
+  { key: 'showFps', label: 'Frame rate', on: 'Shown', off: 'Hidden' },
   { key: 'invertStickY', label: 'Stick forward', on: 'Inverted', off: 'Normal' },
   { key: 'liveWeather', label: 'World weather', on: 'Live Kauaʻi', off: 'Simulated' },
 ];
