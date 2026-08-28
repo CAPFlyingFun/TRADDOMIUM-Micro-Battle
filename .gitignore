@@ -8,6 +8,7 @@ tsconfig.tsbuildinfo
 # Scratch renders from headless checks
 *.png
 !public/*.png
+!public/buttons/*.png
 # The art masters. bakeArt.mjs reads these to produce everything in
 # public/ AND to measure the loading bar's cutout, so a clone without
 # them cannot rebuild the splash.
