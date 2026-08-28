@@ -3,139 +3,216 @@ import { groundHeight } from './heightfield';
 import { toLocal } from './origin';
 import { world } from './coords';
 import { makeWaterLook } from './waterLook';
+import { resetSwell, tickSwell } from './seaSwell';
 
 /**
- * THE SEA'S SURFACE — the first this build has ever drawn.
+ * THE SEA'S SURFACE — two sheets wearing one look.
  *
- * Until now the ocean was PAINT: terrain below zero wears the seabed
- * and reef bands and there was no water over it at all, which is why
- * the coast read as a tide gone out forever. This is the missing
- * sheet, and it deliberately owns nothing else: no swell, no tide, no
- * simulation. Sea level on this island is exactly 0 and stays there —
- * the relief dial scales the LAND, and zero times anything is the one
- * height the dial cannot move.
+ * The FAR sheet is the horizon's: 257 vertices at 32 m, flat at
+ * y = 0, reaching 8 km out. At those distances the swell subtends
+ * nothing, and the distance smear already owns the look out there.
  *
- * IT WEARS THE SAME LOOK AS EVERY OTHER WATER (waterLook.ts — Beyond
- * Extinction's ocean, ported constant for constant), straight, where
- * the inland water wears it green-shifted. Joshua: "make sure our
- * ocean and waters look the same... just inland a slight bit of a
- * greenish tint." One shader; they cannot drift apart.
+ * The NEAR sheet is hers: 129 vertices at 1.5 m, a 190 m window that
+ * re-anchors as she moves, displaced every frame by the SWELL
+ * (seaSwell.ts — the same table the gameplay query sums, baked into
+ * the vertex shader as literals). Its swell flattens toward its own
+ * rim and its alpha hands over to the far sheet across the same band
+ * the far sheet's HOLE opens under it, so the seam is flat-meets-flat
+ * and nobody double-draws the water.
  *
- * A LATTICE, NOT A PLANE, because the look is driven by DEPTH and a
- * flat plane knows none. Each vertex carries the water column under it
- * (zero minus the drawn ground), which is what shapes the turquoise
- * shelf, the surf at the waterline, and the alpha that lets the reef
- * show through the shallows — the exact mechanics BE's coast mask fed
- * its shader, sourced here from the heightfield instead of a bake.
+ * Sea LEVEL is still exactly 0 and the relief dial still cannot move
+ * it; the swell is an excursion ABOUT zero that the shore fades away
+ * (seaSwell's depth fade), so the feathered waterline keeps the beach
+ * it fought for.
  *
- * The sheet SINKS in the depth buffer (positive polygon offset) so
+ * BOTH wear waterLook (Beyond Extinction's ocean, ported constant for
+ * constant) exactly as before — same colours, same foam, same alpha.
+ * The lattice carries DEPTH per vertex (zero minus the drawn ground,
+ * SIGNED — the v0.0.75 shoreline lesson) because everything the look
+ * does is driven by the column under it.
+ *
+ * The sheets SINK in the depth buffer (positive polygon offset) so
  * near-coplanar shore terrain wins the tie — BE's flyover-shimmer
- * lesson, and this repo's own v0.0.78 one before that.
+ * lesson.
  */
 
-/** Vertices a side. */
+/** Far sheet: vertices a side, and 32 m between them. */
 const N = 257;
-/** World units between them — 32 m. The shoreline resolves no finer. */
 const CELL = 3_200;
-/** Re-anchor once the player is this far from the sheet's centre. */
 const RECENTRE = (N * CELL) / 8;
 
+/** Near sheet: fine enough that a 12 m wave is geometry, not noise. */
+const N2 = 129;
+const CELL2 = 150;
+const RECENTRE2 = (N2 * CELL2) / 8;
+
+/** Where the near sheet's swell flattens, sheet-local radius. */
+const RIM_LO = 6_500;
+const RIM_HI = 9_000;
+/** Where near hands to far — near alpha out, far hole in. Inside the
+ *  sheet's 9 675 half-span, so the fade finishes before the edge. */
+const HAND_LO = 7_500;
+const HAND_HI = 9_300;
+
+interface Sheet {
+  readonly mesh: THREE.Mesh;
+  readonly depthAttr: Float32Array;
+  readonly clock: { value: number };
+  readonly centre: { value: THREE.Vector2 };
+  readonly hole: { value: THREE.Vector2 };
+  centreX: number;
+  centreZ: number;
+  placed: boolean;
+}
+
+function lattice(n: number, cell: number): THREE.BufferGeometry {
+  const span = n * cell;
+  const pos = new Float32Array(n * n * 3);
+  const normals = new Float32Array(n * n * 3);
+  for (let cy = 0; cy < n; cy++) {
+    for (let cx = 0; cx < n; cx++) {
+      const i = cy * n + cx;
+      pos[i * 3] = cx * cell - span / 2;
+      pos[i * 3 + 1] = 0;                       // sea level, forever
+      pos[i * 3 + 2] = cy * cell - span / 2;
+      normals[i * 3 + 1] = 1;
+    }
+  }
+  const faces = new Uint32Array((n - 1) * (n - 1) * 6);
+  let f = 0;
+  for (let cy = 0; cy < n - 1; cy++) {
+    for (let cx = 0; cx < n - 1; cx++) {
+      const a = cy * n + cx;
+      faces[f++] = a; faces[f++] = a + n; faces[f++] = a + 1;
+      faces[f++] = a + 1; faces[f++] = a + n; faces[f++] = a + n + 1;
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+  geometry.setAttribute('depth', new THREE.BufferAttribute(new Float32Array(n * n), 1));
+  // The sea does not flow anywhere — the look's advection needs the
+  // attribute to exist, and zero is the honest value for it.
+  geometry.setAttribute('flow', new THREE.BufferAttribute(new Float32Array(n * n * 2), 2));
+  geometry.setIndex(new THREE.BufferAttribute(faces, 1));
+  return geometry;
+}
+
 export class Ocean {
-  private readonly mesh: THREE.Mesh;
-  private readonly depthAttr: Float32Array;
-  private readonly clock: { value: number };
-  private readonly centre: { value: THREE.Vector2 };
-  private centreX = 0;
-  private centreZ = 0;
-  private placed = false;
+  private readonly far: Sheet;
+  private readonly near: Sheet;
 
   constructor(private readonly scene: THREE.Scene, anisotropy: number) {
-    const span = N * CELL;
-    const pos = new Float32Array(N * N * 3);
-    const normals = new Float32Array(N * N * 3);
-    for (let cy = 0; cy < N; cy++) {
-      for (let cx = 0; cx < N; cx++) {
-        const i = cy * N + cx;
-        pos[i * 3] = cx * CELL - span / 2;
-        pos[i * 3 + 1] = 0;                       // sea level, forever
-        pos[i * 3 + 2] = cy * CELL - span / 2;
-        normals[i * 3 + 1] = 1;
-      }
-    }
-    const faces = new Uint32Array((N - 1) * (N - 1) * 6);
-    let f = 0;
-    for (let cy = 0; cy < N - 1; cy++) {
-      for (let cx = 0; cx < N - 1; cx++) {
-        const a = cy * N + cx;
-        faces[f++] = a; faces[f++] = a + N; faces[f++] = a + 1;
-        faces[f++] = a + 1; faces[f++] = a + N; faces[f++] = a + N + 1;
-      }
-    }
-    this.depthAttr = new Float32Array(N * N);
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
-    geometry.setAttribute('depth', new THREE.BufferAttribute(this.depthAttr, 1));
-    // The sea does not flow anywhere — the look's advection needs the
-    // attribute to exist, and zero is the honest value for it.
-    geometry.setAttribute('flow', new THREE.BufferAttribute(new Float32Array(N * N * 2), 2));
-    geometry.setIndex(new THREE.BufferAttribute(faces, 1));
-    // edgeLo/edgeHi back to the waterline Joshua approved — widening
-    // them washed the beach out. The GRADUAL part he asked for lives
+    // A fresh scene starts a fresh sea; the clock the shader and the
+    // gameplay queries share lives in seaSwell.
+    resetSwell();
+    // edgeLo/edgeHi are the waterline Joshua approved — widening them
+    // washed the beach out. The GRADUAL part he asked for lives
     // further out, in midAt/deepAt and the distance smear.
-    const look = makeWaterLook({ green: 0, surf: 1, sink: true, edgeLo: 35, edgeHi: 130, midAt: 700, deepAt: 2600, texAmp: 0.40, anisotropy });
-    this.clock = look.clock;
-    this.centre = look.centre;
-    this.mesh = new THREE.Mesh(geometry, look.material);
-    this.mesh.renderOrder = 1;
-    this.mesh.frustumCulled = false;
-    scene.add(this.mesh);
+    const skin = {
+      green: 0, surf: 1, sink: true,
+      edgeLo: 35, edgeHi: 130, midAt: 700, deepAt: 2600,
+      texAmp: 0.40, anisotropy,
+    } as const;
+    this.far = this.sheet(N, CELL, makeWaterLook({
+      ...skin, hole: { lo: HAND_LO, hi: HAND_HI },
+    }), 1);
+    this.near = this.sheet(N2, CELL2, makeWaterLook({
+      ...skin,
+      swell: { rimLo: RIM_LO, rimHi: RIM_HI, alphaLo: HAND_LO, alphaHi: HAND_HI },
+    }), 2);
   }
 
-  /** Re-anchor the sheet when she has walked far enough. */
+  private sheet(
+    n: number, cell: number,
+    look: ReturnType<typeof makeWaterLook>, order: number,
+  ): Sheet {
+    const geometry = lattice(n, cell);
+    const mesh = new THREE.Mesh(geometry, look.material);
+    mesh.renderOrder = order;
+    mesh.frustumCulled = false;
+    this.scene.add(mesh);
+    return {
+      mesh,
+      depthAttr: (geometry.getAttribute('depth') as THREE.BufferAttribute)
+        .array as Float32Array,
+      clock: look.clock,
+      centre: look.centre,
+      hole: look.hole,
+      centreX: 0,
+      centreZ: 0,
+      placed: false,
+    };
+  }
+
+  /** Re-anchor the sheets when she has moved far enough. */
   follow(at: { wx: number; wz: number }): void {
-    if (this.placed
-      && Math.abs(at.wx - this.centreX) < RECENTRE
-      && Math.abs(at.wz - this.centreZ) < RECENTRE) {
-      this.place();
-      return;
+    this.anchor(this.far, N, CELL, RECENTRE, at);
+    if (this.anchor(this.near, N2, CELL2, RECENTRE2, at)) {
+      // The far sheet's hole follows the near sheet, not her — they
+      // must share a centre or the crossfade bands part company.
+      this.far.hole.value.set(this.near.centreX, this.near.centreZ);
     }
-    this.centreX = Math.round(at.wx / CELL) * CELL;
-    this.centreZ = Math.round(at.wz / CELL) * CELL;
-    this.placed = true;
-    const span = N * CELL;
-    const ox = this.centreX - span / 2;
-    const oz = this.centreZ - span / 2;
+  }
+
+  /** @returns whether the sheet moved (and refilled its depths). */
+  private anchor(
+    sheet: Sheet, n: number, cell: number, recentre: number,
+    at: { wx: number; wz: number },
+  ): boolean {
+    if (sheet.placed
+      && Math.abs(at.wx - sheet.centreX) < recentre
+      && Math.abs(at.wz - sheet.centreZ) < recentre) {
+      this.seat(sheet);
+      return false;
+    }
+    sheet.centreX = Math.round(at.wx / cell) * cell;
+    sheet.centreZ = Math.round(at.wz / cell) * cell;
+    sheet.placed = true;
+    const span = n * cell;
+    const ox = sheet.centreX - span / 2;
+    const oz = sheet.centreZ - span / 2;
     // The column under each vertex, once per re-anchor — SIGNED, and
     // the sign is the shoreline. Clamping land vertices to zero moved
-    // the interpolated zero-crossing a whole 32 m cell inland of the
-    // true waterline, so the fade band sat in the wrong place and the
-    // geometric cut showed through it as a hard line. Negative depth
-    // over land interpolates through zero exactly where the ground
-    // crosses sea level, sub-cell, which is where the fade must live.
-    for (let cy = 0; cy < N; cy++) {
-      for (let cx = 0; cx < N; cx++) {
-        this.depthAttr[cy * N + cx] = -groundHeight(ox + cx * CELL, oz + cy * CELL);
+    // the interpolated zero-crossing a whole cell inland of the true
+    // waterline (v0.0.75); negative depth over land interpolates
+    // through zero exactly where the ground crosses sea level.
+    for (let cy = 0; cy < n; cy++) {
+      for (let cx = 0; cx < n; cx++) {
+        sheet.depthAttr[cy * n + cx] = -groundHeight(ox + cx * cell, oz + cy * cell);
       }
     }
-    this.mesh.geometry.getAttribute('depth').needsUpdate = true;
-    this.place();
+    sheet.mesh.geometry.getAttribute('depth').needsUpdate = true;
+    this.seat(sheet);
+    return true;
+  }
+
+  /** Re-seat both sheets after an origin rebase. */
+  place(): void {
+    this.seat(this.far);
+    this.seat(this.near);
   }
 
   /** Seat against the floating origin; keep the skin world-locked. */
-  place(): void {
-    const seat = toLocal(world(this.centreX, this.centreZ));
-    this.mesh.position.set(seat.lx, 0, seat.lz);
-    this.centre.value.set(this.centreX, this.centreZ);
+  private seat(sheet: Sheet): void {
+    const seat = toLocal(world(sheet.centreX, sheet.centreZ));
+    sheet.mesh.position.set(seat.lx, 0, seat.lz);
+    sheet.centre.value.set(sheet.centreX, sheet.centreZ);
   }
 
   update(dt: number): void {
-    this.clock.value += dt;
+    // ONE clock: the swell advances here and everyone — both sheets'
+    // uniforms, the gameplay queries — reads the same now.
+    const t = tickSwell(dt);
+    this.far.clock.value = t;
+    this.near.clock.value = t;
   }
 
   dispose(): void {
-    this.scene.remove(this.mesh);
-    this.mesh.geometry.dispose();
-    (this.mesh.material as THREE.Material).dispose();
+    for (const sheet of [this.far, this.near]) {
+      this.scene.remove(sheet.mesh);
+      sheet.mesh.geometry.dispose();
+      (sheet.mesh.material as THREE.Material).dispose();
+    }
   }
 }

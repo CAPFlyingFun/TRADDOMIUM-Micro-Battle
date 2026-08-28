@@ -45,26 +45,16 @@ import { waterSpotAt } from './waterQuery';
 const M = 100;
 
 /**
- * The ocean's surface. Land is above it by definition, which is what
- * lets the sea be answered from a height alone rather than looked up.
- */
-const SEA_LEVEL = 0;
-
-/**
- * Water surface over this point in DRAWN units, or null where the flow
- * index has nothing.
+ * Water surface over this point in DRAWN units, or null where the
+ * water query has nothing.
  *
- * THE SEA IS DELIBERATELY NOT IN HERE, and the pinned name promises it,
- * so the divergence is worth a sentence. waterLevelAt() returns null
- * over the ocean — the bake indexes streams and ponds, not the sea —
- * and the only thing that makes the sea answerable at all is the rule
- * that land stands above y = 0. That is a fact about the HEIGHT being
- * asked about, not about (wx, wz), so folding it in here would mean
- * either returning SEA_LEVEL over every dry hilltop on the island or
- * asking the terrain grid a question it cannot answer before the island
- * has loaded. submersion() below is where the two surfaces meet, and it
- * has the height it needs to do it. Anything that only knows (wx, wz)
- * and wants the sea as well should floor this at SEA_LEVEL itself.
+ * BOTH WATERS COME THROUGH HERE NOW. An earlier note on this function
+ * promised the sea was deliberately absent — true when the answer
+ * came from a baked flow index of streams and ponds. The query's sea
+ * fallback (IslandWater) answers the ocean today, swell included, so
+ * "ground plus column" is the real surface wherever there is water at
+ * all, flat 0 nowhere: over the sea the column already carries the
+ * wave passing overhead.
  */
 export function surfaceAt(wx: number, wz: number): number | null {
   // RESURRECTION NOTE (v0.0.72): the level used to come from the baked
@@ -81,18 +71,16 @@ export function surfaceAt(wx: number, wz: number): number | null {
  * How far below the surface a camera at (wx, y, wz) is, drawn units.
  * Zero when it is not under.
  *
- * BOTH WATERS, AND THE HIGHER ONE WINS. The sea answers from y alone,
- * because its surface is SEA_LEVEL everywhere and land is above it; the
- * flow answers from the index. Taking the larger of the two DEPTHS is
- * the same thing as taking the higher of the two SURFACES, since both
- * are that surface minus the same y — which matters where a stream
- * mouth runs out over the shelf and the two overlap.
+ * ONE WATER NOW. This used to keep its own flat-sea branch
+ * (y < SEA_LEVEL) because the old flow index had no ocean in it; the
+ * water query's sea fallback answers the ocean today — WITH the swell
+ * (seaSwell.ts) — so the branch would actively lie in a trough,
+ * claiming water where the real surface has dipped away. surfaceAt
+ * carries both waters and the swell through one door.
  */
 export function submersion(wx: number, y: number, wz: number): number {
-  const sea = y < SEA_LEVEL ? SEA_LEVEL - y : 0;
   const surface = surfaceAt(wx, wz);
-  const fresh = surface === null ? 0 : Math.max(0, surface - y);
-  return Math.max(sea, fresh);
+  return surface === null ? 0 : Math.max(0, surface - y);
 }
 
 /**

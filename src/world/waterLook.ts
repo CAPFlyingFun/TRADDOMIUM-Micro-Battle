@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { DEPTH_HI, DEPTH_LO, swellChunk } from './seaSwell';
 
 /**
  * BEYOND EXTINCTION'S WATER, WORN BY THIS ISLAND — one shader for every
@@ -85,6 +86,25 @@ export interface WaterLookOpts {
    * and sinking it hands the whole sheet to the sand.
    */
   readonly sink: boolean;
+  /**
+   * THE NEAR OCEAN SHEET RIDES THE SWELL (seaSwell.ts — the one
+   * shared surface). Vertices displace by the wave table, faded by
+   * the DEPTH attribute near shore and by rimLo..rimHi of sheet-local
+   * radius so the sheet arrives flat at its own edge; alphaLo..alphaHi
+   * fades the sheet out entirely, crossfading into the far sheet's
+   * `hole`. The swell's slope also tilts the lighting normal.
+   */
+  readonly swell?: {
+    readonly rimLo: number; readonly rimHi: number;
+    readonly alphaLo: number; readonly alphaHi: number;
+  };
+  /**
+   * The FAR sheet opens a hole under the near sheet — alpha rises
+   * from nothing at `lo` of world distance from the hole's centre
+   * (the WaterLook's `hole` uniform) to full by `hi`, the exact
+   * complement of the near sheet's alpha rim.
+   */
+  readonly hole?: { readonly lo: number; readonly hi: number };
 }
 
 export interface WaterLook {
@@ -93,11 +113,15 @@ export interface WaterLook {
   readonly clock: { value: number };
   /** World position the mesh's local frame is centred on. */
   readonly centre: { value: THREE.Vector2 };
+  /** World position of the far sheet's hole (see opts.hole). */
+  readonly hole: { value: THREE.Vector2 };
 }
 
 export function makeWaterLook(opts: WaterLookOpts): WaterLook {
   const clock = { value: 0 };
   const centre = { value: new THREE.Vector2() };
+  // Far enough away that a hole nobody has placed swallows nothing.
+  const hole = { value: new THREE.Vector2(1e9, 1e9) };
   const flat = new THREE.DataTexture(new Uint8Array([128, 128, 255, 255]), 1, 1);
   flat.needsUpdate = true;
   const ripple = { value: flat as THREE.Texture };
@@ -135,17 +159,38 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
     shader.uniforms.uCentre = centre;
     shader.uniforms.uRipple = ripple;
     shader.uniforms.uSky = { value: sky };
+    shader.uniforms.uHole = hole;
+    const swell = opts.swell;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>',
-        '#include <common>\n attribute float depth;\n attribute vec2 flow;\n varying float vDepth;\n varying vec2 vWorld;\n varying vec2 vFlow;\n uniform vec2 uCentre;')
+        '#include <common>\n attribute float depth;\n attribute vec2 flow;\n varying float vDepth;\n varying vec2 vWorld;\n varying vec2 vFlow;\n uniform vec2 uCentre;'
+        + (swell ? '\n varying vec2 vSwell;\n varying float vSheet;\n uniform float uTime;' : ''))
       .replace('#include <begin_vertex>',
-        '#include <begin_vertex>\n vDepth = depth;\n vFlow = flow;\n vWorld = vec2(position.x, position.z) + uCentre;');
+        '#include <begin_vertex>\n vDepth = depth;\n vFlow = flow;\n vWorld = vec2(position.x, position.z) + uCentre;'
+        + (swell ? `
+        {
+          // THE SWELL, from the one shared table (seaSwell.ts). Faded
+          // by the water column near shore — the same DEPTH_LO..HI the
+          // CPU query uses — and flattened toward the sheet's own rim
+          // so it meets the flat far sheet without a step.
+          float sw = 0.0;
+          vec2 swSlope = vec2(0.0);
+          vec2 worldXZ = vWorld;
+          ${swellChunk()}
+          float swFade = smoothstep(${DEPTH_LO.toFixed(1)}, ${DEPTH_HI.toFixed(1)}, depth)
+            * (1.0 - smoothstep(${swell.rimLo.toFixed(1)}, ${swell.rimHi.toFixed(1)}, length(position.xz)));
+          transformed.y += sw * swFade;
+          vSwell = swSlope * swFade;
+          vSheet = length(position.xz);
+        }` : ''));
     // The ripple field is computed ONCE, in map_fragment (which three
     // runs before the normal and lighting stages), and handed to the
     // later stages through gRn/gBody — the colour weave, the normal
     // tilt and the surf caps all read the same water.
     shader.fragmentShader = ('uniform float uTime;\nuniform sampler2D uRipple;\nuniform vec3 uSky;\n' + shader.fragmentShader)
-      .replace('#include <common>', '#include <common>\n varying float vDepth;\n varying vec2 vWorld;\n varying vec2 vFlow;\n mat2 rrot(float a){ float c = cos(a); float s = sin(a); return mat2(c, -s, s, c); }\n vec3 gRn = vec3(0.0);\n float gBody = 0.0;')
+      .replace('#include <common>', '#include <common>\n varying float vDepth;\n varying vec2 vWorld;\n varying vec2 vFlow;\n mat2 rrot(float a){ float c = cos(a); float s = sin(a); return mat2(c, -s, s, c); }\n vec3 gRn = vec3(0.0);\n float gBody = 0.0;'
+        + (swell ? '\n varying vec2 vSwell;\n varying float vSheet;' : '')
+        + (opts.hole ? '\n uniform vec2 uHole;' : ''))
       .replace('#include <map_fragment>', `#include <map_fragment>
         {
           // THE EDGE BLENDS LIKE THE GROUND DOES. A hard discard at a
@@ -242,12 +287,18 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
           diffuseColor.a *= mix(1.0, 1.55, smoothstep(40.0, 550.0, depth));
           diffuseColor.a = min(diffuseColor.a, 0.82);
           diffuseColor.a = mix(diffuseColor.a, 0.95, foam);
-          diffuseColor.a *= edge;
+          diffuseColor.a *= edge;${opts.swell ? `
+          // The near sheet hands over to the far one across its rim —
+          // the far sheet's hole is the mirror of this fade.
+          diffuseColor.a *= 1.0 - smoothstep(${opts.swell.alphaLo.toFixed(1)}, ${opts.swell.alphaHi.toFixed(1)}, vSheet);` : ''}${opts.hole ? `
+          // And the far sheet stands aside where the near one rides.
+          diffuseColor.a *= smoothstep(${opts.hole.lo.toFixed(1)}, ${opts.hole.hi.toFixed(1)}, distance(vWorld, uHole));` : ''}
           if (diffuseColor.a < 0.01) discard;
         }`)
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
         {
-          normal = normalize(normal + vec3(gRn.x, 0.0, gRn.y) * 0.75 * gBody);
+          normal = normalize(normal + vec3(gRn.x, 0.0, gRn.y) * 0.75 * gBody${opts.swell
+    ? ' + vec3(-vSwell.x, 0.0, -vSwell.y) * 1.5' : ''});
         }`)
       .replace('#include <lights_fragment_end>', `#include <lights_fragment_end>
         {
@@ -257,5 +308,5 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
           totalEmissiveRadiance += uSky * min(fres, 0.85) * 0.5;
         }`);
   };
-  return { material, clock, centre };
+  return { material, clock, centre, hole };
 }

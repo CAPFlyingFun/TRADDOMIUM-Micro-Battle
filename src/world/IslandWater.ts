@@ -6,6 +6,7 @@ import { WaterSim, DEFAULTS } from './waterSim';
 import { isWatercourse } from './islandChannels';
 import { useWaterQuery, type WaterSpot } from './waterQuery';
 import { makeWaterLook } from './waterLook';
+import { seaSwellAt } from './seaSwell';
 
 /**
  * THE ISLAND'S WATER — one simulated window that walks with her.
@@ -191,12 +192,17 @@ export class IslandWater {
     scene.add(this.mesh);
     // The window answers for FRESH water; where it has none, the sea
     // answers for itself — the ground below zero IS the column, salt
-    // flagged so wading floats on it and drinking refuses it.
+    // flagged so wading floats on it and drinking refuses it. The
+    // column includes the SWELL (seaSwell.ts, the one shared surface):
+    // a crest deepens it, a trough shallows it, and because floating
+    // rides depth, she rises and falls with the very waves the near
+    // ocean sheet is drawing from the same table.
     useWaterQuery((wx, wz) => {
       const fresh = this.spotAt(wx, wz);
       if (fresh) return fresh;
       const g = groundHeight(wx, wz);
-      return g < 0 ? { depth: -g, flowX: 0, flowZ: 0, salt: true } : null;
+      if (g >= 0) return null;
+      return { depth: -g + seaSwellAt(wx, wz, -g), flowX: 0, flowZ: 0, salt: true };
     });
   }
 
