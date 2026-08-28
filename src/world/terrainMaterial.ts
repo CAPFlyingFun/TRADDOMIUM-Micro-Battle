@@ -18,6 +18,10 @@
  * lookup is swapped out.
  */
 import * as THREE from 'three';
+import {
+  BAND_ROUGHNESS, RELIEF_AO_UNIFORM, RELIEF_BUMP_UNIFORM, RELIEF_MAPS,
+  RELIEF_UNIFORM_NAMES,
+} from './groundRelief';
 import { pullBytes } from './fetchBytes';
 import type { LoadReport } from '../ui/loadPlan';
 import { assetBytes } from '../ui/assetSizes';
@@ -386,6 +390,19 @@ const M = UNITS_PER_METRE;
  */
 const m = (metres: number) => (metres * M).toFixed(1);
 
+/**
+ * The per-band roughness mix, built from the one table that holds it so
+ * a material's reflectivity is edited in a named constant and not in a
+ * string of GLSL literals.
+ */
+const ROUGH_WEIGHT: Record<string, string> = {
+  reef: 'wReef', sand: 'wSand', grass: 'wGrass', jungle: 'wJung',
+  cliff: 'wCliff', mountain: 'wMount', snow: 'wSnow',
+};
+const ROUGH_MIX = BAND_FILES
+  .map((name) => `${BAND_ROUGHNESS[name].toFixed(2)} * ${ROUGH_WEIGHT[name]}`)
+  .join(' + ');
+
 const EDGES = `
   float wReef  = 1.0 - smoothstep(${m(-3.5)}, ${m(0.5)}, h);
   float wSand  = span(h, ${m(-0.5)}, ${m(12)}, ${m(3.5)});
@@ -431,6 +448,20 @@ export function groundShader(
       );
 
     fragmentShader = fragmentShader
+      .replace('#include <roughnessmap_fragment>', `
+        #include <roughnessmap_fragment>
+        // WHAT THE SURFACE IS MADE OF, not just what it looks like.
+        // Wet reef, dry sand, bare rock and snow do not reflect alike,
+        // and one flat roughness for the whole island meant the sun
+        // answered every material with the same dull note.
+        roughnessFactor = clamp(
+          (${ROUGH_MIX}) / max(total, 0.001)
+          // Pits between grains scatter more than the faces do.
+          + reliefCavity * 0.22, 0.04, 1.0);
+        // Wet sand is the glossiest ground on the island, and the
+        // shine is most of why a waterline reads at all.
+        roughnessFactor = mix(roughnessFactor, 0.34, wet * 0.75);
+      `)
       .replace('#include <common>', `#include <common>
         varying vec3 vGround;
         uniform sampler2D t_reef, t_sand, t_grass, t_jungle;
@@ -447,6 +478,8 @@ export function groundShader(
         uniform vec3 avg_cliff, avg_mountain, avg_snow;
         uniform vec2 bandOffset, grainOffset;
         uniform float nearCut;
+        uniform sampler2D t_relief0, t_relief1, t_relief2, t_relief3;
+        uniform float reliefBump, reliefAo;
 
         float span(float x, float lo, float hi, float feather) {
           return smoothstep(lo - feather, lo + feather, x)
@@ -600,7 +633,58 @@ export function groundShader(
         float g = texture2D(t_grain, (vGround.xz + grainOffset) / grainTile, mipBias).g;
         ground *= mix(0.80 + g * 0.42, 1.0, grainFar);
 
+
+        // ---- MICRO-RELIEF -------------------------------------------
+        //
+        // The height derived from each band map, arriving as a normal:
+        // two bands to a texture, x and y only, z recovered below. Same
+        // uv and same bias as the colour, so the lighting describes the
+        // grains the photograph shows rather than a shape of its own.
+        vec4 r0 = texture2D(t_relief0, bandUv, mipBias);
+        vec4 r1 = texture2D(t_relief1, bandUv, mipBias);
+        vec4 r2 = texture2D(t_relief2, bandUv, mipBias);
+        vec4 r3 = texture2D(t_relief3, bandUv, mipBias);
+        vec2 reliefXY = (
+            (r0.rg * 2.0 - 1.0) * wReef  + (r0.ba * 2.0 - 1.0) * wSand
+          + (r1.rg * 2.0 - 1.0) * wGrass + (r1.ba * 2.0 - 1.0) * wJung
+          + (r2.rg * 2.0 - 1.0) * wCliff + (r2.ba * 2.0 - 1.0) * wMount
+          + (r3.rg * 2.0 - 1.0) * wSnow
+        ) / total;
+        // ON THE SAME SCHEDULE AS THE DETAIL IT DESCRIBES. Past the
+        // point where a pixel can no longer resolve the grains, lighting
+        // them is not detail, it is noise that crawls as the camera
+        // turns — the one way a normal map makes a distant hillside look
+        // WORSE than no normal map at all.
+        reliefXY *= 1.0 - far;
+        float reliefZ = sqrt(max(0.0001, 1.0 - dot(reliefXY, reliefXY)));
+        // Height gradient, recovered from the normal it was baked into.
+        vec2 reliefGrad = -reliefXY / reliefZ;
+        // How far off flat the micro-surface is here: 0 on a face the
+        // sun sees squarely, rising into the pits between grains.
+        float reliefCavity = 1.0 - reliefZ;
+
+        // AMBIENT OCCLUSION, kept deliberately faint. It is here so a
+        // crack reads as a crack; turned up it just smudges the ground
+        // toward charcoal and takes the colour work with it.
+        ground *= 1.0 - reliefAo * reliefCavity;
+
         diffuseColor.rgb *= ground;
+      `)
+      .replace('#include <normal_fragment_maps>', `
+        #include <normal_fragment_maps>
+        // BEND THE SUN. Mikkelsen's surface gradient rather than a
+        // tangent-space rotation, because the band uv is world xz — the
+        // u axis IS world +X and v IS world +Z — so no tangent
+        // attribute is needed and the same expression stays correct on
+        // a vertical cliff, where a naive heightfield normal degenerates.
+        if (reliefBump > 0.0001) {
+          vec3 wn = normalize((vec4(normal, 0.0) * viewMatrix).xyz);
+          vec3 surfaceGrad =
+              reliefGrad.x * (vec3(1.0, 0.0, 0.0) - wn * wn.x)
+            + reliefGrad.y * (vec3(0.0, 0.0, 1.0) - wn * wn.z);
+          wn = normalize(wn - reliefBump * surfaceGrad);
+          normal = normalize((viewMatrix * vec4(wn, 0.0)).xyz);
+        }
       `);
   return { vertexShader, fragmentShader };
 }
@@ -655,6 +739,11 @@ export function terrainMaterial(
     shader.uniforms.bandOffset = BAND_OFFSET_UNIFORM;
     shader.uniforms.grainOffset = GRAIN_OFFSET_UNIFORM;
     shader.uniforms.nearCut = { value: nearCut };
+    RELIEF_UNIFORM_NAMES.forEach((name, index) => {
+      shader.uniforms[name] = RELIEF_MAPS[index];
+    });
+    shader.uniforms.reliefBump = RELIEF_BUMP_UNIFORM;
+    shader.uniforms.reliefAo = RELIEF_AO_UNIFORM;
     const ground = groundShader(shader.vertexShader, shader.fragmentShader);
     shader.vertexShader = ground.vertexShader;
     shader.fragmentShader = ground.fragmentShader;

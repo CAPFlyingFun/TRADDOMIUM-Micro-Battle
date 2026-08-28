@@ -34,6 +34,9 @@ import {
   QUEEN_UNIFORM, loadBands, reliefUniform, setDetailRadius, setDetailRange, setTileScale,
   setTextureOrigin, terrainMaterial,
 } from '../world/terrainMaterial';
+import {
+  RELIEF_AO_UNIFORM, RELIEF_BUMP_UNIFORM, bakeGroundRelief, setReliefAo, setReliefBump,
+} from '../world/groundRelief';
 import { SettingsPanel } from '../ui/SettingsPanel';
 import { PauseMenu } from '../ui/PauseMenu';
 import {
@@ -728,6 +731,14 @@ export class IslandScene {
       },
       /** Probe-only: sweep the authored texture scale, world units. */
       setTileScale: (units: number) => setTileScale(units),
+      // The micro-relief, judged where it ships: on a phone, in sun.
+      // bump 0 is the honest A/B — it turns the third dimension off
+      // without touching the colour work underneath it.
+      relief: (bump: number, ao?: number) => {
+        setReliefBump(bump);
+        if (ao !== undefined) setReliefAo(ao);
+        return { bump: RELIEF_BUMP_UNIFORM.value, ao: RELIEF_AO_UNIFORM.value };
+      },
       /** Probe-only: drive a settings dial from a headless run. */
       setSetting: (key: string, value: number) => {
         setSetting(key as 'detailRange', value as never);
@@ -2286,7 +2297,12 @@ export class IslandScene {
     // tier inside it already covers. They share the textures; only the
     // cut differs.
     const bands = loadBands(this.renderer, this.report);
-    this.bandsReady = bands.ready;
+    // THE HEIGHT DERIVED FROM THE COLOUR, once the colour is actually
+    // here. Bands still holding their placeholder would bake a flat
+    // normal and stay flat, because nothing bakes them a second time.
+    this.bandsReady = bands.ready.then(() => {
+      bakeGroundRelief(this.renderer, bands.textures);
+    });
     const maps = bands.textures;
     this.terrain = new TerrainStream(
       this.scene,
