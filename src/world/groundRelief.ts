@@ -91,9 +91,14 @@ export const RELIEF_DIALS = {
  * Two: the highest point of a band's height field stands 1 cm proud of
  * the mid and the lowest sits 1 cm below it (Joshua: "the highest
  * mapping +1 cm and the lowest -1 cm for a total of a 2 cm difference
- * ... the mean average in the middle would be zero"). For a queen a
- * centimetre long that is real ground: a pebble she has to walk around
- * the shoulder of rather than a pattern printed under her feet.
+ * ... the mean average in the middle would be zero").
+ *
+ * IT IS A LIGHTING DEPTH, NOT A SURFACE. Nothing here moves a vertex
+ * and nothing here reaches the walker, so a pebble standing 1 cm proud
+ * of the mid is 1 cm proud TO THE SUN and to nothing else: the queen
+ * walks straight through it, not over it. An earlier version of this
+ * comment called it "a pebble she has to walk around the shoulder of",
+ * which is a promise the code does not keep.
  *
  * The mid sitting at zero costs nothing and matters for nothing — a
  * normal map is made of SLOPES, and adding a constant to every height
@@ -147,6 +152,34 @@ export const BAND_ROUGHNESS: Record<string, number> = {
  * substitute for someone who has.
  */
 export const AUTHORED_BANDS = ['sandsmooth'] as const;
+
+/**
+ * WHAT THE SCANNED SAND IS ACTUALLY WORTH, measured rather than assumed.
+ *
+ * RELIEF_AMPLITUDE calibrates the DERIVED bands: their height fields go
+ * through slopeScale and come out at a stated 2 cm. An authored normal
+ * does not — the bake reads its xy straight out of the file, so it
+ * arrives carrying whatever depth the scanner and the vendor agreed on,
+ * and tuning RELIEF_AMPLITUDE does not touch it.
+ *
+ * Measured: the shipped Ground054 normal has an RMS slope of 0.324
+ * against 0.883 for coarse sand derived at the calibrated 2 cm. On the
+ * derived bands' own scale it therefore behaves like about 0.73 cm —
+ * roughly 2.7 times shallower than the number written beside it.
+ *
+ * (Fitting its own displacement map against it cannot recover this: the
+ * angular error falls monotonically as the amplitude goes to zero,
+ * because the two disagree about SHAPE, not scale. RMS slope is the
+ * statistic that survives that.)
+ *
+ * So the beach does not currently share one depth, and relief(1) means
+ * 2 cm on the coarse sand and about three quarters of a centimetre on
+ * the fine. Left alone DELIBERATELY: correcting it changes how the
+ * ground looks, and the ground must not move between a frame-rate
+ * measurement and its control. Multiplying the authored xy by about 2.7
+ * in the bake is the one-line fix when that is wanted.
+ */
+export const AUTHORED_IMPLIED_AMPLITUDE = 0.73;
 
 /**
  * Whose roughness and occlusion ride in the last map's spare channels.

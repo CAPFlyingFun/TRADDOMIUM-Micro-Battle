@@ -467,12 +467,17 @@ export function groundShader(
         // answered every material with the same dull note.
         roughnessFactor = clamp(
           (${ROUGH_MIX}) / max(total, 0.001)
+        #ifdef GROUND_RELIEF
           // Pits between grains scatter more than the faces do.
-          + reliefCavity * 0.22, 0.04, 1.0);
+          + reliefCavity * 0.22
+        #endif
+          , 0.04, 1.0);
         // Where sand has been SCANNED, its own roughness beats a
         // constant: dry grains, packed patches and shell fragments do
         // not share one specular answer.
+        #ifdef GROUND_RELIEF
         roughnessFactor = mix(roughnessFactor, r4.b, sandShare * smoothShare);
+        #endif
         // Wet sand is the glossiest ground on the island, and the
         // shine is most of why a waterline reads at all.
         roughnessFactor = mix(roughnessFactor, 0.34, wet * 0.75);
@@ -493,9 +498,11 @@ export function groundShader(
         uniform vec3 avg_cliff, avg_mountain, avg_snow;
         uniform vec2 bandOffset, grainOffset;
         uniform float nearCut;
-        uniform sampler2D t_relief0, t_relief1, t_relief2, t_relief3, t_relief4;
         uniform sampler2D t_sandsmooth;
+        #ifdef GROUND_RELIEF
+        uniform sampler2D t_relief0, t_relief1, t_relief2, t_relief3, t_relief4;
         uniform float reliefBump, reliefAo;
+        #endif
 
         float span(float x, float lo, float hi, float feather) {
           return smoothstep(lo - feather, lo + feather, x)
@@ -667,6 +674,7 @@ export function groundShader(
         ground *= mix(0.80 + g * 0.42, 1.0, grainFar);
 
 
+        #ifdef GROUND_RELIEF
         // ---- MICRO-RELIEF -------------------------------------------
         //
         // The height derived from each band map, arriving as a normal:
@@ -713,6 +721,7 @@ export function groundShader(
         // map 3 was already sampled for snow.
         float sandShare = wSand / max(total, 0.001);
         ground *= mix(1.0, mix(1.0, r4.a, reliefAo), sandShare * smoothShare);
+        #endif
 
         diffuseColor.rgb *= ground;
       `)
@@ -723,6 +732,7 @@ export function groundShader(
         // u axis IS world +X and v IS world +Z — so no tangent
         // attribute is needed and the same expression stays correct on
         // a vertical cliff, where a naive heightfield normal degenerates.
+        #ifdef GROUND_RELIEF
         if (reliefBump > 0.0001) {
           vec3 wn = normalize((vec4(normal, 0.0) * viewMatrix).xyz);
           vec3 surfaceGrad =
@@ -731,8 +741,40 @@ export function groundShader(
           wn = normalize(wn - reliefBump * surfaceGrad);
           normal = normalize((viewMatrix * vec4(wn, 0.0)).xyz);
         }
+        #endif
       `);
   return { vertexShader, fragmentShader };
+}
+
+/**
+ * Every terrain material built, so the profiling switch can reach all
+ * four distance tiers at once. A tier left on the other variant would
+ * make the comparison meaningless in the part of the frame it draws.
+ */
+/**
+ * three.js reads `defines` off ANY material when it builds the shader
+ * prefix, but only declares the field on ShaderMaterial, so the type
+ * has to say what the renderer already does.
+ */
+type Definable = THREE.MeshStandardMaterial & { defines?: Record<string, string> };
+
+const TERRAIN_MATERIALS: Definable[] = [];
+let reliefEnabled = true;
+
+/**
+ * PROFILING ONLY: rebuild the terrain shaders with or without the
+ * relief path. Returns what the ground is now running.
+ */
+export function setGroundRelief(on: boolean): boolean {
+  reliefEnabled = on;
+  for (const material of TERRAIN_MATERIALS) {
+    material.defines = { ...(material.defines ?? {}) };
+    if (on) material.defines.GROUND_RELIEF = '';
+    else delete material.defines.GROUND_RELIEF;
+    // Forces a recompile, which is the entire point.
+    material.needsUpdate = true;
+  }
+  return reliefEnabled;
 }
 
 export function terrainMaterial(
@@ -747,6 +789,26 @@ export function terrainMaterial(
     vertexColors: true,
     roughness: 0.95,
   });
+  // A REAL SWITCH, not a multiply by zero.
+  //
+  // The relief costs five texture fetches per fragment before it costs
+  // a single instruction of maths, and reliefBump = 0 skipped only the
+  // last block — the fetches, the blend, the cavity and the scanned
+  // roughness all still ran. Measuring 0 against 1 would therefore have
+  // compared two shaders that do nearly the same work and concluded the
+  // relief was free. Behind a #define the compiler removes the whole
+  // path, samplers included, so BASE and RELIEF are genuinely different
+  // programs and the difference between them is the real cost.
+  const definable = material as Definable;
+  definable.defines = { ...(definable.defines ?? {}) };
+  if (reliefEnabled) definable.defines.GROUND_RELIEF = '';
+  // WITHOUT THIS THEY SHARE A PROGRAM. three.js keys its cache on the
+  // material's parameters, and onBeforeCompile output is not among
+  // them — the near ocean sheet once ran the far sheet's shader for
+  // exactly this reason, and a profiling switch that silently profiles
+  // the same program twice would be that bug again, wearing a lab coat.
+  material.customProgramCacheKey = () => `terrain:${reliefEnabled ? 'relief' : 'base'}`;
+  TERRAIN_MATERIALS.push(definable);
 
   material.onBeforeCompile = (shader) => {
     for (const name of [...BAND_FILES, ...EXTRA_COLOURS]) {

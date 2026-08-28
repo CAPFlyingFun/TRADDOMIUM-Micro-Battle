@@ -30,7 +30,7 @@ import { originAt, rebaseFor, setOrigin, toLocal, toWorld,
 } from '../world/origin';
 import { bakeGrain, GRAIN_SIZE } from '../world/groundTexture';
 import {
-  BAND_TILE, FADE_FROM_UNIFORM, FADE_TO_UNIFORM,
+  BAND_TILE, FADE_FROM_UNIFORM, FADE_TO_UNIFORM, setGroundRelief,
   QUEEN_UNIFORM, loadAuthored, loadBands, reliefUniform, setDetailRadius,
   setDetailRange, setTileScale,
   setTextureOrigin, terrainMaterial,
@@ -742,6 +742,18 @@ export class IslandScene {
       },
       /** Probe-only: sweep the authored texture scale, world units. */
       setTileScale: (units: number) => setTileScale(units),
+      /**
+       * PROFILING: rebuild the ground with or without the relief path.
+       *
+       * `relief(0)` is NOT this. It skips the final normal bend and
+       * leaves all five relief fetches, the blend, the cavity and the
+       * scanned roughness running, so 0 against 1 compares two shaders
+       * that do nearly the same work. This recompiles.
+       *
+       *   __island.groundRelief(false)  -> BASE
+       *   __island.groundRelief(true)   -> RELIEF
+       */
+      groundRelief: (on: boolean) => ({ relief: setGroundRelief(on) }),
       // The micro-relief, judged where it ships: on a phone, in sun.
       // bump 0 is the honest A/B — it turns the third dimension off
       // without touching the colour work underneath it.

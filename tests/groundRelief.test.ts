@@ -155,3 +155,56 @@ describe('the relief has a size you can state in centimetres', () => {
     expect(weights).toBeGreaterThan(1);
   });
 });
+
+describe('the profiling switch is a real switch', () => {
+  /**
+   * `relief(0)` skips only the final normal bend. The five texture
+   * fetches, the blend, the cavity and the scanned roughness all still
+   * run, so measuring 0 against 1 compares two shaders doing nearly the
+   * same work — and would have reported the relief as free. The switch
+   * under test removes the path at COMPILE time instead.
+   */
+  const guarded = (needle: string) => {
+    const at = frag.indexOf(needle);
+    expect(at).toBeGreaterThan(0);
+    const open = frag.lastIndexOf('#ifdef GROUND_RELIEF', at);
+    const close = frag.lastIndexOf('#endif', at);
+    // The nearest preceding guard must be an opening one.
+    return open > close;
+  };
+
+  it('puts every relief texture fetch behind the define', () => {
+    for (let i = 0; i < RELIEF_PAIRS.length; i++) {
+      expect(guarded(`texture2D(t_relief${i}, bandUv, mipBias)`)).toBe(true);
+    }
+  });
+
+  it('puts the samplers themselves behind it, not just their uses', () => {
+    // A declared-but-unused sampler still costs a texture unit, and a
+    // fetch left outside the guard would not compile without them.
+    expect(guarded('uniform sampler2D t_relief0')).toBe(true);
+    expect(guarded('uniform float reliefBump, reliefAo')).toBe(true);
+  });
+
+  it('puts the derived maths and the normal bend behind it', () => {
+    expect(guarded('float reliefCavity')).toBe(true);
+    expect(guarded('reliefBump * surfaceGrad')).toBe(true);
+    expect(guarded('reliefCavity * 0.22')).toBe(true);
+    expect(guarded('roughnessFactor = mix(roughnessFactor, r4.b')).toBe(true);
+  });
+
+  it('leaves the COLOUR work alone — it is not part of the relief', () => {
+    // The two-sand blend is a colour feature and must survive in BASE,
+    // or the A/B would be measuring two different-looking grounds.
+    expect(guarded('vec3 sandColour = mix(')).toBe(false);
+    expect(guarded('uniform sampler2D t_sandsmooth')).toBe(false);
+    expect(guarded('float smoothShare')).toBe(false);
+  });
+
+  it('balances every guard it opens', () => {
+    const opens = frag.match(/#ifdef GROUND_RELIEF/g)?.length ?? 0;
+    const closes = frag.match(/#endif/g)?.length ?? 0;
+    expect(opens).toBeGreaterThan(0);
+    expect(closes).toBeGreaterThanOrEqual(opens);
+  });
+});
