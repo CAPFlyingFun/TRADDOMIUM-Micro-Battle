@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { DEPTH_HI, DEPTH_LO, swellChunk } from './seaSwell';
+import { DEPTH_HI, DEPTH_LO, SWELL_BEAT, swellChunk } from './seaSwell';
 
 /**
  * BEYOND EXTINCTION'S WATER, WORN BY THIS ISLAND — one shader for every
@@ -136,6 +136,25 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
     undefined,
     () => { /* flat water is a look, not a failure */ },
   );
+  // THE FOAM'S LACE — Beyond Extinction's Shallow Reef Water (the
+  // Godot set), whose bright caustic web thresholds into exactly the
+  // bubble lattice real surf wash is made of. The fallback is DARK on
+  // purpose: every foam threshold sits above its luminance, so a
+  // missing file means no surf rather than a solid white shore.
+  const dark = new THREE.DataTexture(new Uint8Array([40, 40, 40, 255]), 1, 1);
+  dark.needsUpdate = true;
+  const foamTex = { value: dark as THREE.Texture };
+  new THREE.TextureLoader().load(
+    `${import.meta.env.BASE_URL}surf-foam.jpg`,
+    (texture) => {
+      texture.wrapS = THREE.RepeatWrapping;
+      texture.wrapT = THREE.RepeatWrapping;
+      texture.anisotropy = opts.anisotropy;
+      foamTex.value = texture;
+    },
+    undefined,
+    () => { /* a calm shore is a look, not a failure */ },
+  );
 
   const material = new THREE.MeshStandardMaterial({
     // BE: color 0x1a6389, roughness .18, metalness LOW so steep views
@@ -164,6 +183,7 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
     shader.uniforms.uRipple = ripple;
     shader.uniforms.uSky = { value: sky };
     shader.uniforms.uHole = hole;
+    shader.uniforms.uFoam = foamTex;
     const swell = opts.swell;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>',
@@ -191,7 +211,7 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
     // runs before the normal and lighting stages), and handed to the
     // later stages through gRn/gBody — the colour weave, the normal
     // tilt and the surf caps all read the same water.
-    shader.fragmentShader = ('uniform float uTime;\nuniform sampler2D uRipple;\nuniform vec3 uSky;\n' + shader.fragmentShader)
+    shader.fragmentShader = ('uniform float uTime;\nuniform sampler2D uRipple;\nuniform sampler2D uFoam;\nuniform vec3 uSky;\n' + shader.fragmentShader)
       .replace('#include <common>', '#include <common>\n varying float vDepth;\n varying vec2 vWorld;\n varying vec2 vFlow;\n mat2 rrot(float a){ float c = cos(a); float s = sin(a); return mat2(c, -s, s, c); }\n vec3 gRn = vec3(0.0);\n float gBody = 0.0;'
         + (swell ? '\n varying vec2 vSwell;\n varying float vSheet;' : '')
         + (opts.hole ? '\n uniform vec2 uHole;' : ''))
@@ -266,13 +286,40 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
           // normal relief. Fades with distance with everything else.
           diffuseColor.rgb *= 1.0 + (gRn.x + gRn.y) * ${opts.texAmp.toFixed(3)} * gBody * (1.0 - away);
 
-          // BE's surf: broad foam right at the waterline, sparse caps
-          // in open water where the ripple tilts hard. The band scales
-          // per wearer — a beach break for the ocean, a whisper of
-          // bank-line for a stream.
-          float surf = smoothstep(160.0 * ${opts.surf.toFixed(3)}, 15.0 * ${opts.surf.toFixed(3)}, depth);
+          // THE BREAK. The swell dies at the shore fade (seaSwell.ts)
+          // and this is where its energy goes: foam fronts that MARCH
+          // SHOREWARD on the swell's own beat. Phase runs on DEPTH, so
+          // each front follows the bathymetry contour the way a real
+          // set wraps a beach, and sin(k*d + w*t) walks the crests
+          // toward shallower water. The lace is Beyond Extinction's
+          // reef-water caustic web, thresholded into bubbles — one
+          // broad sheet of wash, one fine fizz — so a front is ragged
+          // foam, never a painted stripe. Everything scales with the
+          // wearer's surf band: a beach break for the ocean, a whisper
+          // of bank-line for a stream.
+          float surf = smoothstep(320.0 * ${opts.surf.toFixed(3)}, 30.0 * ${opts.surf.toFixed(3)}, depth);
           float surfN = texture2D(uRipple, vWorld / 300.0 + uTime * vec2(0.05, 0.03)).r;
           float foam = surf * smoothstep(0.60, 0.86, surfN);
+          {
+            float march = pow(0.5 + 0.5 * sin(depth * 0.05 + uTime * ${SWELL_BEAT.toFixed(5)}), 3.0);
+            float lace = smoothstep(0.52, 0.86,
+              dot(texture2D(uFoam, vWorld / 260.0 - uTime * vec2(0.012, 0.007)).rgb, vec3(0.3333)));
+            float fizz = smoothstep(0.40, 0.80,
+              dot(texture2D(uFoam, vWorld / 95.0 + uTime * vec2(0.016, -0.009)).rgb, vec3(0.3333)));
+            // The breaker rides the band; a standing wash clings to
+            // the waterline itself, densest in the last stretch of
+            // depth, so the beach edge is always dressed even between
+            // sets.
+            float breaker = surf * march * (lace * 2.2 + fizz * 1.1);
+            // The wash sits just OUTSIDE the waterline's alpha
+            // feather (edgeLo..edgeHi) — foam painted inside it is
+            // foam the fade erases, which is exactly how the first
+            // cut of this block vanished. Its inner tail dissolving
+            // into the feather is the wash dying on the sand.
+            float wash = smoothstep(180.0 * ${opts.surf.toFixed(3)}, 40.0 * ${opts.surf.toFixed(3)}, depth)
+              * (lace * 1.6 + fizz * 0.7);
+            foam = clamp(foam + breaker + wash, 0.0, 1.0);
+          }
           // Open-water caps. The wave map's slope energy runs in thin
           // crest LINES (Joshua's 1x1 m chop map, sd 19-34/255), and a
           // bare threshold paints those lines as white scratches. Gating

@@ -90,6 +90,14 @@ const WAVES: readonly Wave[] = [
 export const SWELL_REACH = WAVES.reduce((sum, w) => sum + w.amp, 0);
 
 /**
+ * The primary swell's angular frequency — the BEAT of the sea. The
+ * breaking surf (waterLook.ts) marches its foam fronts shoreward on
+ * this clock, so the rhythm at the beach is the rhythm of the very
+ * waves that died at the fade band to become that surf.
+ */
+export const SWELL_BEAT = WAVES[0].omega;
+
+/**
  * ONE CLOCK. The scene advances it once a frame; the renderer's
  * uniform is set FROM it; every query reads it. Two copies of "now"
  * would be the old two-answers disease wearing a watch.
