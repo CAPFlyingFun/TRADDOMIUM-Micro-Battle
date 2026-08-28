@@ -461,6 +461,7 @@ export function groundShader(
     fragmentShader = fragmentShader
       .replace('#include <roughnessmap_fragment>', `
         #include <roughnessmap_fragment>
+        #ifndef GROUND_LITE
         // WHAT THE SURFACE IS MADE OF, not just what it looks like.
         // Wet reef, dry sand, bare rock and snow do not reflect alike,
         // and one flat roughness for the whole island meant the sun
@@ -481,6 +482,7 @@ export function groundShader(
         // Wet sand is the glossiest ground on the island, and the
         // shine is most of why a waterline reads at all.
         roughnessFactor = mix(roughnessFactor, 0.34, wet * 0.75);
+        #endif
       `)
       .replace('#include <common>', `#include <common>
         varying vec3 vGround;
@@ -529,6 +531,27 @@ export function groundShader(
           wSnow = h < 0.0 ? 0.0 : 1.0;
           total = 1.0;
         }
+        #ifdef GROUND_LITE
+        // ---- LITE: A DIAGNOSTIC, NOT A SETTING ----------------------
+        //
+        // The same geometry, the same band weights, the same sun and
+        // the same fog — and not one photographic sample. No colour
+        // maps, no grain, no macro, no relief, no ambient occlusion,
+        // no per-band roughness. Just the average colour of whatever
+        // biome this pixel is, which the far fade already computes and
+        // which costs an add and a multiply.
+        //
+        // It exists to answer ONE question that shaving individual
+        // operations cannot: is terrain FRAGMENT work the thing holding
+        // the phone at twelve frames, or is it geometry, draw calls,
+        // the ocean, or resolution? FULL against LITE separates those
+        // in a single reading. If they come back close together, every
+        // hour spent optimising this shader would have been wasted.
+        vec3 ground = (
+            avg_reef * wReef + avg_sand * wSand + avg_grass * wGrass
+          + avg_jungle * wJung + avg_cliff * wCliff
+          + avg_mountain * wMount + avg_snow * wSnow) / total;
+        #else
         // WHICH SAND. The swash works the grains fine and even where it
         // reaches and the berm inland keeps the coarse stuff, so the
         // beach is two materials and the boundary between them belongs
@@ -723,6 +746,7 @@ export function groundShader(
         ground *= mix(1.0, mix(1.0, r4.a, reliefAo), sandShare * smoothShare);
         #endif
 
+        #endif
         diffuseColor.rgb *= ground;
       `)
       .replace('#include <normal_fragment_maps>', `
@@ -759,22 +783,39 @@ export function groundShader(
 type Definable = THREE.MeshStandardMaterial & { defines?: Record<string, string> };
 
 const TERRAIN_MATERIALS: Definable[] = [];
-let reliefEnabled = true;
 
 /**
- * PROFILING ONLY: rebuild the terrain shaders with or without the
- * relief path. Returns what the ground is now running.
+ * Which ground the terrain is compiled as. PROFILING ONLY — none of
+ * these is a quality setting, and nothing outside a measurement should
+ * ever move it off `full`.
+ *
+ *   full   what ships: colour maps, grain, macro, relief, AO, roughness
+ *   base   the same ground with the whole relief path COMPILED OUT
+ *   lite   biome colour only — no photographic sample of any kind
+ *
+ * full vs base prices the relief. full vs lite prices terrain fragment
+ * work as a whole, and answers the question that matters first: whether
+ * this shader is the thing holding the phone at twelve frames at all.
  */
-export function setGroundRelief(on: boolean): boolean {
-  reliefEnabled = on;
+export type GroundMode = 'full' | 'base' | 'lite';
+let groundMode: GroundMode = 'full';
+
+export function setGroundMode(mode: GroundMode): GroundMode {
+  groundMode = mode;
   for (const material of TERRAIN_MATERIALS) {
-    material.defines = { ...(material.defines ?? {}) };
-    if (on) material.defines.GROUND_RELIEF = '';
-    else delete material.defines.GROUND_RELIEF;
+    material.defines = applyGroundMode({ ...(material.defines ?? {}) });
     // Forces a recompile, which is the entire point.
     material.needsUpdate = true;
   }
-  return reliefEnabled;
+  return groundMode;
+}
+
+function applyGroundMode(defines: Record<string, string>): Record<string, string> {
+  delete defines.GROUND_RELIEF;
+  delete defines.GROUND_LITE;
+  if (groundMode === 'full') defines.GROUND_RELIEF = '';
+  if (groundMode === 'lite') defines.GROUND_LITE = '';
+  return defines;
 }
 
 export function terrainMaterial(
@@ -800,14 +841,13 @@ export function terrainMaterial(
   // path, samplers included, so BASE and RELIEF are genuinely different
   // programs and the difference between them is the real cost.
   const definable = material as Definable;
-  definable.defines = { ...(definable.defines ?? {}) };
-  if (reliefEnabled) definable.defines.GROUND_RELIEF = '';
+  definable.defines = applyGroundMode({ ...(definable.defines ?? {}) });
   // WITHOUT THIS THEY SHARE A PROGRAM. three.js keys its cache on the
   // material's parameters, and onBeforeCompile output is not among
   // them — the near ocean sheet once ran the far sheet's shader for
   // exactly this reason, and a profiling switch that silently profiles
   // the same program twice would be that bug again, wearing a lab coat.
-  material.customProgramCacheKey = () => `terrain:${reliefEnabled ? 'relief' : 'base'}`;
+  material.customProgramCacheKey = () => `terrain:${groundMode}`;
   TERRAIN_MATERIALS.push(definable);
 
   material.onBeforeCompile = (shader) => {

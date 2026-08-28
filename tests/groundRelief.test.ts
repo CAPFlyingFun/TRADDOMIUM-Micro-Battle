@@ -208,3 +208,46 @@ describe('the profiling switch is a real switch', () => {
     expect(closes).toBeGreaterThanOrEqual(opens);
   });
 });
+
+describe('the LITE diagnostic samples nothing', () => {
+  /** The source between `#ifdef GROUND_LITE` and its `#else`. */
+  const liteBranch = (() => {
+    const open = frag.indexOf('#ifdef GROUND_LITE');
+    expect(open).toBeGreaterThan(0);
+    return frag.slice(open, frag.indexOf('#else', open));
+  })();
+
+  it('takes not one texture sample of any kind', () => {
+    // The whole point: if LITE still sampled, FULL vs LITE would price
+    // nothing and the reading would send us optimising the wrong thing.
+    expect(liteBranch).not.toContain('texture2D');
+    expect(liteBranch).not.toContain('texture(');
+  });
+
+  it('builds its colour from the band averages already computed', () => {
+    for (const avg of ['avg_reef', 'avg_sand', 'avg_grass', 'avg_jungle',
+      'avg_cliff', 'avg_mountain', 'avg_snow']) {
+      expect(liteBranch).toContain(avg);
+    }
+  });
+
+  it('keeps the same weights, so it is the same island', () => {
+    for (const w of ['wReef', 'wSand', 'wGrass', 'wJung', 'wCliff', 'wMount', 'wSnow']) {
+      expect(liteBranch).toContain(w);
+    }
+    expect(liteBranch).toContain('/ total');
+  });
+
+  it('drops the custom roughness too — that is texture work as well', () => {
+    const rough = frag.slice(frag.indexOf('#include <roughnessmap_fragment>'));
+    expect(rough.slice(0, 200)).toContain('#ifndef GROUND_LITE');
+  });
+
+  it('leaves the tier cut alone, which is geometry and not shading', () => {
+    // Discarding where a finer tier covers the same ground must happen
+    // in every mode, or the modes draw different amounts of world.
+    const cut = frag.indexOf('if (nearCut > 0.0');
+    expect(cut).toBeGreaterThan(0);
+    expect(cut).toBeLessThan(frag.indexOf('#ifdef GROUND_LITE'));
+  });
+});

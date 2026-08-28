@@ -30,7 +30,7 @@ import { originAt, rebaseFor, setOrigin, toLocal, toWorld,
 } from '../world/origin';
 import { bakeGrain, GRAIN_SIZE } from '../world/groundTexture';
 import {
-  BAND_TILE, FADE_FROM_UNIFORM, FADE_TO_UNIFORM, setGroundRelief,
+  BAND_TILE, FADE_FROM_UNIFORM, FADE_TO_UNIFORM, setGroundMode,
   QUEEN_UNIFORM, loadAuthored, loadBands, reliefUniform, setDetailRadius,
   setDetailRange, setTileScale,
   setTextureOrigin, terrainMaterial,
@@ -750,10 +750,11 @@ export class IslandScene {
        * scanned roughness running, so 0 against 1 compares two shaders
        * that do nearly the same work. This recompiles.
        *
-       *   __island.groundRelief(false)  -> BASE
-       *   __island.groundRelief(true)   -> RELIEF
+       *   __island.ground('full')   what ships
+       *   __island.ground('base')   relief path compiled out
+       *   __island.ground('lite')   biome colour only, no samples
        */
-      groundRelief: (on: boolean) => ({ relief: setGroundRelief(on) }),
+      ground: (mode: 'full' | 'base' | 'lite') => ({ mode: setGroundMode(mode) }),
       // The micro-relief, judged where it ships: on a phone, in sun.
       // bump 0 is the honest A/B — it turns the third dimension off
       // without touching the colour work underneath it.
