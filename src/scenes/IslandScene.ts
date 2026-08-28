@@ -280,6 +280,10 @@ export class IslandScene {
   private lastSwimAlt: number | null = null;
   /** Water standing over where she rides — the DEPTH readout. */
   private swimOver = 0;
+  /** How far the CAMERA is under a surface — the green-screen test. */
+  private camUnder = 0;
+  /** Latched 'there is water beneath her' — see readFlight. */
+  private overWater = false;
   /** Her air, held while the head is under (breath.ts). */
   private readonly breath = new Breath();
   /** The sea's clock on her (brine.ts). */
@@ -640,6 +644,28 @@ export class IslandScene {
         hp: this.hp, air: this.breath.fraction,
         salt: this.brine.exposureSeconds, burning: this.brine.burning,
       }),
+      // THE VERTICAL TRUTH, all of it, from the frame that just ran —
+      // what the flight is flooring on, what the water query says, and
+      // the three altitudes. A disagreement between these is exactly
+      // the class of bug that put her under the sea while the HUD said
+      // she was a metre over it.
+      column: () => {
+        const g = groundHeight(this.ant.where.wx, this.ant.where.wz);
+        const spot = waterSpotAt(this.ant.where.wx, this.ant.where.wz);
+        const depth = spot?.depth ?? 0;
+        return {
+          ground: g,
+          depth,
+          salt: spot?.salt === true,
+          floor: g + depth,
+          clearance: this.flight.height,
+          msl: g + depth + this.flight.height,
+          mode: this.flight.holdMode,
+          aloft: this.flight.aloft,
+          camUnder: this.camUnder,
+          herY: this.ant.root.position.y,
+        };
+      },
       // Probe-only: set her air, so a 45-second drain does not cost a
       // headless run ten slow-motion minutes to reach the interesting
       // part.
@@ -1059,6 +1085,9 @@ export class IslandScene {
     let inSalt = false;
     if (this.flight.aloft) {
       this.headUnder = false;
+      // The water standing under her RIGHT NOW — the whole reason the
+      // floor is not the terrain. Sampled once for the frame.
+      const column = waterSpotAt(this.ant.where.wx, this.ant.where.wz)?.depth ?? 0;
       const step = this.flight.update(
         {
           push: stick.y,
@@ -1085,8 +1114,14 @@ export class IslandScene {
         // arrives, and over water the floor is the film. The biology
         // agrees (docs/FIRE_ANT_BIOLOGY.md — she rides the surface
         // film), and wadeAt takes over the moment she is down.
-        groundHeight(this.ant.where.wx, this.ant.where.wz)
-          + (waterSpotAt(this.ant.where.wx, this.ant.where.wz)?.depth ?? 0),
+        //
+        // ONE FLOOR, MEASURED ONCE, and handed to BOTH the model and
+        // her placement below. They used to disagree: the model flew
+        // a clearance over the water while `fly` seated her that
+        // clearance over the SEABED, so "one metre up" over nine
+        // metres of sea put her nine metres under it, tinted the
+        // screen, and made the shore transition anything but seamless.
+        groundHeight(this.ant.where.wx, this.ant.where.wz) + column,
       );
       this.effort = step.effort;
       winded = this.stamina.update(step.effort, dt);
@@ -1099,6 +1134,8 @@ export class IslandScene {
         dt, this.flight.height,
         // The wind reaches her ONLY here. Walking gets nothing.
         this.windOnHer(),
+        // …and the SAME floor the model just flew against.
+        column,
       );
       // The camera CHASES in flight rather than steering. Her heading
       // is her own up here, so a view left where the player put it
@@ -1386,7 +1423,7 @@ export class IslandScene {
     this.applyWeather(sky);
     // AFTER applyWeather, every frame — the weather rewrites the fog,
     // background and lights, and the water takes its fraction of THAT.
-    this.underwater.update(this.sun, this.skyLight);
+    this.camUnder = this.underwater.update(this.sun, this.skyLight);
     this.rain.update(this.follow.camera.position, sky, dt);
     // The sea takes the camera's RENDERED position, which is the one
     // thing about it that is allowed to be local: the grid is recentred
@@ -1894,7 +1931,13 @@ export class IslandScene {
     const clearance = this.flight.height;
     const altitude = terrain + column + clearance;
     const agl = clearance + column;
-    const awl = column > 0 ? clearance : null;
+    // WHETHER THERE IS WATER UNDER HER TO SPEAK OF, with hysteresis.
+    // A bare `column > 0` chattered as the swash washed back and forth
+    // across her: the AWL row appeared and vanished, the rail reflowed
+    // under it, and the hold pill flipped AGL/AWL every few frames.
+    // Joshua: "doesn't need to randomly switch."
+    this.overWater = column > (this.overWater ? 12 : 30);
+    const awl = this.overWater ? clearance : null;
     // MEASURED, not reconstructed: her actual displacement over the
     // island, which already contains her airspeed, the wind, and
     // anything the movement pipeline grows later.

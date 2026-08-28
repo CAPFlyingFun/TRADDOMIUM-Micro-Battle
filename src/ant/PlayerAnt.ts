@@ -310,6 +310,9 @@ export class PlayerAnt {
     dt: number, above: number,
     /** World units per second the AIR is moving. Flight only. */
     wind?: { readonly x: number; readonly z: number } | null,
+    /** The floor's height above the terrain — the water column when
+     *  she is flying over water. See settle(). */
+    base = 0,
   ): void {
     const wasFacing = this.heading;
     this.wish = { x: drive.across, y: drive.ahead };
@@ -348,7 +351,7 @@ export class PlayerAnt {
     }
 
     this.attitude = { bank, pitch };
-    this.settle(above, dt);
+    this.settle(above, dt, true, base);
   }
 
   /**
@@ -406,7 +409,17 @@ export class PlayerAnt {
   get riding(): number { return this.above; }
 
   /** Put her on the ground — or `above` it — facing her heading. */
-  private settle(above: number, dt: number, moved = true): void {
+  /**
+   * @param base how far the FLOOR she is measured from stands above
+   *   the terrain — the water column where she is flying over water,
+   *   zero everywhere else. Her clearance is measured against the
+   *   surface she would land on (IslandScene hands the flight model
+   *   the same floor), so placing her at terrain + clearance flew her
+   *   a whole water column UNDER the sea: "I ended up going
+   *   underwater which I shouldn't have". Walking passes zero because
+   *   wadeAt's `above` already rides from the bed.
+   */
+  private settle(above: number, dt: number, moved = true, base = 0): void {
     const { x, z } = this.at;
     this.above = above;
     if (moved && this.wasAt && dt > 1e-6) {
@@ -420,7 +433,7 @@ export class PlayerAnt {
     // it happens: everything the GPU sees is measured from the floating
     // origin rather than from the island's corner.
     const seat = toLocal(world(x, z));
-    this.root.position.set(seat.lx, groundHeight(x, z) + above, seat.lz);
+    this.root.position.set(seat.lx, groundHeight(x, z) + base + above, seat.lz);
     this.root.rotation.y = this.heading;
     if (this.attitude) {
       // Airborne: her own attitude, not the hill she is over.

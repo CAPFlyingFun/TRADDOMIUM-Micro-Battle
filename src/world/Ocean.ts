@@ -111,7 +111,12 @@ export class Ocean {
     // further out, in midAt/deepAt and the distance smear.
     const skin = {
       green: 0, surf: 1, sink: true,
-      edgeLo: 35, edgeHi: 130, midAt: 700, deepAt: 2600,
+      // edgeHi 130 -> 95: the sheet reaches its full body sooner, so
+      // the water's edge READS as an edge (Joshua: "make the line a
+      // little more defined") while edgeLo keeps the geometric cut
+      // hidden 35 units under, which is what stopped it being a hard
+      // line in the first place.
+      edgeLo: 35, edgeHi: 95, midAt: 700, deepAt: 2600,
       texAmp: 0.40, anisotropy,
     } as const;
     this.far = this.sheet(N, CELL, makeWaterLook({

@@ -316,8 +316,14 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
             // foam the fade erases, which is exactly how the first
             // cut of this block vanished. Its inner tail dissolving
             // into the feather is the wash dying on the sand.
-            float wash = smoothstep(180.0 * ${opts.surf.toFixed(3)}, 40.0 * ${opts.surf.toFixed(3)}, depth)
-              * (lace * 1.6 + fizz * 0.7);
+            // THE SWASH LINE, and where it sits is the whole point.
+            // Peaked at 40 it lived inside the alpha feather, where
+            // the sheet is barely 1% there — dense foam nobody could
+            // see. It now crowds the band just OUTSIDE the feather,
+            // where the water is solid, so the edge of the sea is
+            // drawn as a bright rim of wash rather than a fade.
+            float wash = smoothstep(170.0 * ${opts.surf.toFixed(3)}, 95.0 * ${opts.surf.toFixed(3)}, depth)
+              * (lace * 0.85 + fizz * 0.35);
             foam = clamp(foam + breaker + wash, 0.0, 1.0);
           }
           // Open-water caps. The wave map's slope energy runs in thin
