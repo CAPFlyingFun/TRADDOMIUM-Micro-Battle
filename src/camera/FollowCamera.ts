@@ -18,6 +18,15 @@ import { settings } from '../ui/settings';
  * of S means an elevation of 90° - S. Rest is ~26° up, which is ~64°
  * in that setting's terms.
  */
+/**
+ * How fast the camera's height chases hers, per second. Afloat, a
+ * 1.5 s swell is attenuated to about a seventh of its amplitude;
+ * flying, the camera answers a climb almost at once, because a climb
+ * is her decision and lag there reads as broken controls.
+ */
+const CALM_RISE = 0.6;
+const BRISK_RISE = 8;
+
 export class FollowCamera {
   readonly camera: THREE.PerspectiveCamera;
 
@@ -46,6 +55,8 @@ export class FollowCamera {
   private readonly wantOffset = new THREE.Vector3();
 
   private distance: number;
+  /** The camera's own, damped height. Null until the first frame. */
+  private easedY: number | null = null;
 
   constructor(aspect: number) {
     const dial = settings();
@@ -101,10 +112,17 @@ export class FollowCamera {
     this.offset.copy(this.desired).sub(target.position);
     this.camera.position.copy(this.desired);
     this.keepAboveGround(this.camera.position, target.position.y);
+    // A snap is a teleport: the filter starts fresh, or it would
+    // glide in from wherever the camera used to be.
+    this.easedY = this.camera.position.y;
     this.aim(target);
   }
 
-  update(target: THREE.Object3D, look: LookInput, dt: number): void {
+  /**
+   * @param calm true when her vertical motion is the SEA moving her
+   *   rather than her flying — see the vertical ease below.
+   */
+  update(target: THREE.Object3D, look: LookInput, dt: number, calm = false): void {
     this.place(target, look, this.desired);
     // Snappier while the player is steering the view, softer when it is
     // just following, so a drag feels connected but walking feels calm.
@@ -114,7 +132,28 @@ export class FollowCamera {
     this.wantOffset.copy(this.desired).sub(target.position);
     this.offset.lerp(this.wantOffset, 1 - Math.exp(-rate * dt));
     this.camera.position.copy(target.position).add(this.offset);
+    // HER BOB IS NOT THE CAMERA'S BOB.
+    //
+    // Measured while she floated: her height swung 34.5 units over a
+    // few wave cycles and the camera swung 35.4 — it was copying 103%
+    // of it, so the whole world pumped up and down with the swell and
+    // the horizon never sat still. The waves are supposed to move
+    // under her, not under the player.
+    //
+    // A first-order filter on the camera's height only. Horizontal
+    // follow is untouched, because lag THERE reads as the camera
+    // trailing her, which is the one thing the offset smoothing was
+    // built to avoid. Afloat it is slow enough to pass barely a fifth
+    // of a 1.5 s swell; flying it is quick, because a climb is her
+    // decision and must feel connected.
+    const rise = calm ? CALM_RISE : BRISK_RISE;
+    this.easedY = this.easedY === null ? this.camera.position.y
+      : this.easedY + (this.camera.position.y - this.easedY) * (1 - Math.exp(-rise * dt));
+    this.camera.position.y = this.easedY;
+    // The floor still has the last word: a smoothed camera may lag,
+    // it may not lag INTO the ground.
     this.keepAboveGround(this.camera.position, target.position.y);
+    this.easedY = this.camera.position.y;
     this.aim(target);
   }
 

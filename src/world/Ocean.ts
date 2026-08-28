@@ -3,7 +3,7 @@ import { groundHeight } from './heightfield';
 import { toLocal } from './origin';
 import { world } from './coords';
 import { makeWaterLook } from './waterLook';
-import { resetSwell, tickSwell } from './seaSwell';
+import { resetSwell, setSwellLattice, tickSwell } from './seaSwell';
 
 /**
  * THE SEA'S SURFACE — two sheets wearing one look.
@@ -214,6 +214,10 @@ export class Ocean {
       }
     }
     sheet.mesh.geometry.getAttribute('depth').needsUpdate = true;
+    // THE SEA IS DRAWN ON THIS LATTICE, so gameplay must be sampled on
+    // it too — see seaSwell.setSwellLattice. Only the near sheet
+    // carries the swell, so only the near sheet's grid counts.
+    if (cell === CELL2) setSwellLattice(ox, oz, cell);
     this.seat(sheet);
     return true;
   }

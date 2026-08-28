@@ -30,12 +30,37 @@ import { UNITS_PER_METRE } from './kauai';
  * large enough not to alias into noise at a distance.
  */
 /**
- * World units per repeat of a band texture. At true scale a unit is a
- * centimetre, so this is a 4 cm patch of sand or grass — about right
- * for an animal one centimetre long, where ten was a whole hand-span
- * stretched across the view and read as blocks.
+ * World units per repeat of a band texture — 1.28 m of authored sand.
+ *
+ * IT WAS FOUR CENTIMETRES, and that is why the ground turned to beige
+ * the moment she left the deck. The maps are 1024 texels across, so a
+ * 4 cm tile is 256 texels per centimetre of world. Work out what a
+ * pixel covers: at height h the ground footprint of one pixel is
+ * about h * 0.00122 units (a 70-degree lens over a thousand pixels),
+ * so texels per pixel is 1.25 * h / TILE. At three and a half metres
+ * on a 4 cm tile that is a HUNDRED AND TEN texels averaged into every
+ * pixel — the mip chain doing its job perfectly and handing back the
+ * mean colour of sand, which is beige. No detail radius, mip bias or
+ * anisotropy setting can recover a pattern that has been averaged
+ * away; the tile itself was the problem.
+ *
+ * Turn the arithmetic round instead. For comfortable filtering (four
+ * texels a pixel or fewer) at three and a half metres the tile must
+ * be at least 110 units, and at five metres at least 156. 128 sits in
+ * that window AND divides the origin's 1024-unit rebase step exactly,
+ * so the pattern cannot jump when the floating origin moves — the one
+ * property the old 4 also had and the reason not to simply pick 100.
+ *
+ * The price is magnification underfoot: at her eye height a pixel
+ * covers a twentieth of a texel, so the sand is soft when she stands
+ * on it. Joshua accepted that trade explicitly — "a little softness
+ * extremely close is acceptable because eventually grass, rocks,
+ * debris and insects will provide additional detail" — and those are
+ * the right things to answer close-up detail with, not a texture
+ * stretched so fine it cannot survive being looked at.
  */
-export const BAND_TILE = 4;
+export const BAND_TILE = 128;
+
 
 /**
  * Shared with every section's shader, so one write re-tints the island.
@@ -90,9 +115,28 @@ export function setTextureOrigin(x: number, z: number): void {
 /**
  * The fine grain is tiled much tighter and at a size that shares no
  * common factor with the band tile, so the two patterns never line up
- * and the repeat stops reading as a grid.
+ * and the repeat stops reading as a grid. Scaled with the band tile
+ * (1.1 x 32) so that ratio — 3.64, comfortably irrational-looking —
+ * survives the move to a metre-scale authored surface.
  */
-export const GRAIN_TILE = 1.1;
+export const GRAIN_TILE = 35.2;
+
+/**
+ * The tile sizes as LIVE uniforms, so the authored scale can be SWEPT
+ * on a running build rather than guessed at through rebuilds — which
+ * is how the 4 cm tile survived this long unexamined. The pair must
+ * stay non-commensurate (see above), so setTileScale moves both by
+ * one ratio.
+ */
+export const BAND_TILE_UNIFORM = { value: BAND_TILE };
+export const GRAIN_TILE_UNIFORM = { value: GRAIN_TILE };
+
+/** Set the band tile in world units; the grain follows in proportion. */
+export function setTileScale(bandUnits: number): void {
+  const scale = Math.max(0.5, bandUnits) / BAND_TILE;
+  BAND_TILE_UNIFORM.value = BAND_TILE * scale;
+  GRAIN_TILE_UNIFORM.value = GRAIN_TILE * scale;
+}
 
 /**
  * WHERE THE FINE DETAIL STOPS BEING DETAIL AND STARTS BEING NOISE.
@@ -396,6 +440,7 @@ export function groundShader(
         uniform float grainTile;
         uniform float fadeFrom, fadeTo, bandTexels, grainTexelScale;
         uniform float mipBias;
+        #define WET_REACH 26.0
         uniform float detailRadius;
         uniform vec3 queenAt;
         uniform vec3 avg_reef, avg_sand, avg_grass, avg_jungle;
@@ -500,6 +545,20 @@ export function groundShader(
           ground *= mix(vec3(1.0), vec3(0.60, 0.78, 0.80), dip);
           ground *= mix(1.0, 0.45, deep);
         }
+        // WET SAND, so the waterline can be READ.
+        //
+        // Joshua: "it is difficult to see a clear visual boundary
+        // between dry sand, wet sand, shallow water and breaking
+        // water." Real beaches are legible because the swash leaves a
+        // dark, saturated band above the water that dries out inland —
+        // the eye reads DRY, WET, WATER without being told. That band
+        // is free here: it is a function of height above sea level,
+        // and it costs no geometry and no second texture. Darkest right
+        // at the water and gone by the swash's reach, so it reads as a
+        // wet margin rather than as a painted stripe.
+        float wet = 1.0 - smoothstep(0.0, WET_REACH, max(h, 0.0));
+        wet *= smoothstep(-40.0, 4.0, h);   // under water the tint above owns it
+        ground *= mix(vec3(1.0), vec3(0.62, 0.66, 0.68), wet * 0.9);
 
         // MACRO VARIATION — the detail that survives altitude.
         //
@@ -564,14 +623,14 @@ export function terrainMaterial(
       shader.uniforms[`t_${name}`] = { value: textures[name] };
     }
     shader.uniforms.t_grain = { value: grain };
-    shader.uniforms.bandTile = { value: BAND_TILE };
+    shader.uniforms.bandTile = BAND_TILE_UNIFORM;
     // The relief slider flattens the island by scaling the meshes on Y,
     // which moves every world height and would drag the bands down with
     // it — a flattened Kauai would go green to the summit. Dividing it
     // back out keeps sand at the shore and snow on the peaks whatever
     // the slider is doing, so the knob changes the SHAPE and not the map.
     shader.uniforms.relief = reliefUniform;
-    shader.uniforms.grainTile = { value: GRAIN_TILE };
+    shader.uniforms.grainTile = GRAIN_TILE_UNIFORM;
     for (const name of BAND_FILES) {
       shader.uniforms[`avg_${name}`] = BAND_AVERAGE[name]
         ?? { value: new THREE.Color(0.5, 0.5, 0.5) };

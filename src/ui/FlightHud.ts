@@ -328,7 +328,7 @@ export class FlightHud {
     // landing is flown against.
     this.awlRead = document.createElement('span');
     this.awlRow = this.railRow('AWL', this.awlRead);
-    this.awlRow.style.display = 'none';
+    this.awlRow.style.visibility = 'hidden';
     right.appendChild(this.awlRow);
     this.landRow = this.railRow('LND', this.landRead);
     this.landRow.style.transition = 'opacity 260ms ease';
@@ -337,15 +337,21 @@ export class FlightHud {
     const under = document.createElement('div');
     Object.assign(under.style, {
       display: 'flex', alignItems: 'baseline', justifyContent: 'flex-end',
-      gap: '6px', marginTop: '5px',
+      gap: '6px', marginTop: '5px', height: '15px',
       font: '600 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace',
       letterSpacing: '0.16em', color: DIM,
+      fontVariantNumeric: 'tabular-nums',
     } as Partial<CSSStyleDeclaration>);
     this.vs = document.createElement('span');
     this.vs.style.color = INK;
     this.vs.style.fontSize = '13px';
     this.vs.style.fontWeight = '700';
+    this.vs.style.minWidth = '52px';
+    this.vs.style.textAlign = 'right';
     this.vsArrow = document.createElement('span');
+    // Reserved, so the arrow arriving cannot shift the number.
+    this.vsArrow.style.minWidth = '10px';
+    this.vsArrow.style.display = 'inline-block';
     under.append(span('VS'), this.vs, span('cm/s'), this.vsArrow);
     right.appendChild(under);
 
@@ -354,9 +360,10 @@ export class FlightHud {
     // when it is going to.
     this.tgt = document.createElement('div');
     Object.assign(this.tgt.style, {
-      textAlign: 'right', marginTop: '3px',
+      textAlign: 'right', marginTop: '3px', height: '12px',
       font: '600 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace',
       letterSpacing: '0.14em', color: DIM,
+      fontVariantNumeric: 'tabular-nums',
     } as Partial<CSSStyleDeclaration>);
     right.appendChild(this.tgt);
 
@@ -525,6 +532,20 @@ export class FlightHud {
    *   holds — see the flight model. Before that change the rail was
    *   three numbers of equal weight and no answer to "how high am I".
    */
+  /**
+   * ONE ROW OF THE RAIL, AND ITS SPACE IS PERMANENT.
+   *
+   * Optional rows used to leave the layout when they had nothing to
+   * say, so every appearance of LND, TGT or AWL shoved the rest of the
+   * rail up or down and the whole panel read as two alternating
+   * designs — Joshua: "I want the HUD to behave more like fixed
+   * avionics instrumentation: every piece has a permanent location."
+   * So a row keeps its height whatever it contains, hides with
+   * VISIBILITY rather than display, and its value sits in a
+   * fixed-width, right-aligned box in TABULAR figures — otherwise a
+   * 9 becoming a 10 nudges the label sideways, which is the same
+   * complaint one digit smaller.
+   */
   private railRow(
     label: string, value: HTMLSpanElement, lead = false,
   ): HTMLDivElement {
@@ -532,13 +553,26 @@ export class FlightHud {
     Object.assign(row.style, {
       display: 'flex', alignItems: 'baseline', justifyContent: 'flex-end',
       gap: '6px', marginTop: '4px',
+      height: lead ? '19px' : '14px',
+      // FIXED WIDTH, not just fixed height. Right-anchored rows kept
+      // their right edge but grew leftwards as a digit arrived, so the
+      // LABELS walked eight pixels sideways every time the altitude
+      // crossed ten metres. A fixed box gives the label a permanent
+      // left edge and the value a permanent right one.
+      width: '158px',
       font: '600 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace',
       letterSpacing: '0.16em', color: DIM,
     } as Partial<CSSStyleDeclaration>);
-    value.style.color = INK;
-    value.style.fontSize = lead ? '17px' : '12px';
-    value.style.fontWeight = '700';
-    value.style.letterSpacing = '0.04em';
+    Object.assign(value.style, {
+      color: INK,
+      fontSize: lead ? '17px' : '12px',
+      fontWeight: '700',
+      letterSpacing: '0.04em',
+      width: lead ? '96px' : '78px',
+      textAlign: 'right',
+      overflow: 'hidden',
+      fontVariantNumeric: 'tabular-nums',
+    } as Partial<CSSStyleDeclaration>);
     row.append(span(label), value);
     return row;
   }
@@ -667,7 +701,7 @@ export class FlightHud {
         : now.awl != null ? 'HOLD AWL' : 'HOLD AGL';
     if (label !== this.shownHold) {
       this.shownHold = label;
-      this.holdPill.style.display = label ? '' : 'none';
+      this.holdPill.style.visibility = label ? 'visible' : 'hidden';
       this.holdPill.style.pointerEvents = label ? 'auto' : 'none';
       if (label) this.holdPill.textContent = label;
     }
@@ -746,7 +780,7 @@ export class FlightHud {
     const awl = now.awl == null ? '' : readHeight(Math.max(0, now.awl));
     if (awl !== this.shownAwl) {
       this.shownAwl = awl;
-      this.awlRow.style.display = awl ? '' : 'none';
+      this.awlRow.style.visibility = awl ? 'visible' : 'hidden';
       if (awl) this.awlRead.textContent = awl;
     }
 

@@ -31,7 +31,7 @@ import { originAt, rebaseFor, setOrigin, toLocal, toWorld,
 import { bakeGrain, GRAIN_SIZE } from '../world/groundTexture';
 import {
   BAND_TILE, FADE_FROM_UNIFORM, FADE_TO_UNIFORM,
-  QUEEN_UNIFORM, loadBands, reliefUniform, setDetailRadius, setDetailRange,
+  QUEEN_UNIFORM, loadBands, reliefUniform, setDetailRadius, setDetailRange, setTileScale,
   setTextureOrigin, terrainMaterial,
 } from '../world/terrainMaterial';
 import { SettingsPanel } from '../ui/SettingsPanel';
@@ -687,6 +687,9 @@ export class IslandScene {
           aloft: this.flight.aloft,
           camUnder: this.camUnder,
           herY: this.ant.root.position.y,
+          camY: this.follow.camera.position.y,
+          afloat: this.afloat,
+          dive: this.dive,
         };
       },
       sheets: () => this.scene.children
@@ -723,6 +726,8 @@ export class IslandScene {
           if (m.isMesh && m.geometry?.getAttribute('depth')) m.visible = false;
         }
       },
+      /** Probe-only: sweep the authored texture scale, world units. */
+      setTileScale: (units: number) => setTileScale(units),
       /** Probe-only: drive a settings dial from a headless run. */
       setSetting: (key: string, value: number) => {
         setSetting(key as 'detailRange', value as never);
@@ -1595,7 +1600,9 @@ export class IslandScene {
     // Read AFTER she has moved: this is what she is actually doing,
     // which the easing makes different from what was asked for.
     this.speed = this.ant.pace;
-    this.follow.update(this.ant.root, look, dt);
+    // CALM while the SEA is moving her: the camera damps her bob so the
+    // horizon stays put. Flying, it answers at once.
+    this.follow.update(this.ant.root, look, dt, this.afloat && !this.flight.aloft);
     // AFTER THE WEATHER AND AFTER THE CAMERA, and it needs both.
     //
     // After the weather because applyWeather stamps the fog colour and

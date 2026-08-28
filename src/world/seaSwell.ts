@@ -33,6 +33,8 @@
  * off the bed by KEEL.
  */
 
+import { groundHeight } from './heightfield';
+
 /** Gravity, in the world's own units — centimetres per second squared. */
 const G = 981;
 
@@ -166,13 +168,11 @@ export function swellTime(): number {
 /** Reset with the scene, so a fresh run starts a fresh sea. */
 export function resetSwell(): void {
   clock = 0;
+  lattice = null;
 }
 
-/**
- * How far the sea surface stands from y = 0 at this spot, NOW (the
- * module clock), over a column `depth` deep. Positive is a crest.
- */
-export function seaSwellAt(wx: number, wz: number, depth: number): number {
+/** The analytic surface at a point — the maths, before any mesh. */
+function rawSwell(wx: number, wz: number, depth: number): number {
   const shoal = shoalAt(depth);
   if (shoal <= 0) return 0;
   let y = 0;
@@ -181,6 +181,72 @@ export function seaSwellAt(wx: number, wz: number, depth: number): number {
   }
   // A trough cannot cut below the bed it is running over.
   return Math.max(y * shoal, -Math.max(0, depth - KEEL));
+}
+
+/**
+ * THE MESH THE RENDERER ACTUALLY DRAWS, not the curve behind it.
+ *
+ * The near ocean sheet is a LATTICE. Its vertices sit on the analytic
+ * curve, and every pixel between them is a straight line across the
+ * cell — so the drawn surface is a piecewise-bilinear approximation
+ * that misses each crest and fills in each trough. With a 3.6 m wave
+ * on a 70 cm lattice that is five samples a wavelength, and the gap
+ * between the chord and the arc reaches nine centimetres in shoaled
+ * water. Nine centimetres is nothing to a person and NINE BODY
+ * LENGTHS to her: floating on the analytic curve while the sheet is
+ * drawn on the chords is exactly why she "seems too low in the wave",
+ * sunk into a trough the mesh never dug.
+ *
+ * So gameplay samples the CHORDS too. The lattice is registered by
+ * Ocean as it anchors, the four surrounding vertices are evaluated
+ * exactly as the vertex shader evaluates them — including each
+ * corner's own water column, which is what the `depth` attribute
+ * carries — and the result is bilinear between them. Renderer and
+ * gameplay now agree to the millimetre rather than to the model.
+ *
+ * With no lattice registered (the unit tests, any headless caller)
+ * this is the analytic curve, which is the honest answer when nothing
+ * is being drawn.
+ */
+let lattice: { ox: number; oz: number; cell: number } | null = null;
+
+/** Ocean tells the sea which mesh is drawing it. */
+export function setSwellLattice(ox: number, oz: number, cell: number): void {
+  lattice = { ox, oz, cell };
+}
+
+/** Forget it — scene teardown, and the tests' clean slate. */
+export function clearSwellLattice(): void {
+  lattice = null;
+}
+
+/**
+ * How far the sea surface stands from y = 0 at this spot, NOW (the
+ * module clock), over a column `depth` deep. Positive is a crest.
+ *
+ * @param depth the column here. Used directly when no mesh is
+ *   registered; with one, each lattice corner uses its OWN column,
+ *   because that is what the shader does.
+ */
+export function seaSwellAt(wx: number, wz: number, depth: number): number {
+  if (!lattice) return rawSwell(wx, wz, depth);
+  const { ox, oz, cell } = lattice;
+  const fx = (wx - ox) / cell;
+  const fz = (wz - oz) / cell;
+  const ix = Math.floor(fx);
+  const iz = Math.floor(fz);
+  const tx = fx - ix;
+  const tz = fz - iz;
+  const corner = (cx: number, cz: number): number => {
+    const x = ox + cx * cell;
+    const z = oz + cz * cell;
+    return rawSwell(x, z, -groundHeight(x, z));
+  };
+  const a = corner(ix, iz);
+  const b = corner(ix + 1, iz);
+  const c = corner(ix, iz + 1);
+  const d = corner(ix + 1, iz + 1);
+  return (a * (1 - tx) + b * tx) * (1 - tz) + (c * (1 - tx) + d * tx) * tz;
 }
 
 /**

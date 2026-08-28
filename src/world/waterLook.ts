@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { KEEL, SWELL_BEAT, shoalChunk, swellChunk } from './seaSwell';
+import { KEEL, SWELL_REACH, shoalChunk, swellChunk } from './seaSwell';
 
 /**
  * BEYOND EXTINCTION'S WATER, WORN BY THIS ISLAND — one shader for every
@@ -337,7 +337,41 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
           float surfN = texture2D(uRipple, vWorld / 300.0 + uTime * vec2(0.05, 0.03)).r;
           float foam = surf * smoothstep(0.60, 0.86, surfN);
           {
-            float march = pow(0.5 + 0.5 * sin(depth * 0.05 + uTime * ${SWELL_BEAT.toFixed(5)}), 3.0);
+            // THE FOAM RIDES THE WAVE THAT MADE IT.
+            //
+            // This used to run its phase on DEPTH against the swell's
+            // frequency — foam fronts marching along bathymetry
+            // contours at a speed set by the seabed's slope, which has
+            // nothing to do with how fast the water is actually
+            // moving. Joshua: "foam appears to travel faster than the
+            // geometric waves... it feels like a separate animated
+            // texture sliding across the water." It was.
+            //
+            // So the phase is now the SWELL ITSELF, summed here from
+            // the same table the vertices are displaced by. Foam
+            // appears on the crest and its front face, where a wave
+            // steepens and breaks, and it therefore travels at exactly
+            // the wave's own speed because it IS the wave.
+            float sw = 0.0;
+            vec2 swSlope = vec2(0.0);
+            vec2 worldXZ = vWorld;
+            ${swellChunk()}
+            // Where this water sits in its own wave, -1 trough to +1
+            // crest, and how steep the face is.
+            float crest = clamp(sw / ${(SWELL_REACH / 2).toFixed(2)}, -1.0, 1.0);
+            // BREAKING happens in shallow water on a steep face, not
+            // out at sea: gate hard on the column so open water stays
+            // clean and the surf zone owns the foam.
+            float shallow = 1.0 - smoothstep(60.0, 420.0, depth);
+            // The crest, and a TAIL behind it — the wash that lingers
+            // for a moment after the crest has gone by rather than
+            // vanishing with it. The tail is the back face (a falling
+            // surface), so it follows the crest shorewards and thins
+            // as the wave passes.
+            float face = smoothstep(0.15, 0.8, crest);
+            float tail = smoothstep(0.0, 0.55, -dot(swSlope, vec2(${(0.9063).toFixed(4)}, ${(-0.4226).toFixed(4)})) * 40.0)
+              * smoothstep(-0.6, 0.1, crest) * 0.55;
+            float march = clamp((face + tail) * shallow, 0.0, 1.0);
             float lace = smoothstep(0.52, 0.86,
               dot(texture2D(uFoam, vWorld / 260.0 - uTime * vec2(0.012, 0.007)).rgb, vec3(0.3333)));
             float fizz = smoothstep(0.40, 0.80,
