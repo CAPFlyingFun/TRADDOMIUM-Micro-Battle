@@ -175,6 +175,33 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
     polygonOffsetFactor: opts.sink ? 2 : 0,
     polygonOffsetUnits: opts.sink ? 12 : -6,
   });
+  // EVERY WEARER NEEDS ITS OWN PROGRAM, and this one line is why the
+  // waves were invisible for three versions.
+  //
+  // three.js caches compiled programs against the MATERIAL's own
+  // parameters. It does not — cannot — know what onBeforeCompile
+  // injected. Our two ocean sheets are both MeshStandardMaterial with
+  // identical constructor parameters (same colour, roughness, opacity,
+  // transparency, side); only the injected source differs. So the
+  // second material to compile was handed the FIRST one's program.
+  //
+  // The far sheet compiles first, so the NEAR sheet has been running
+  // the far sheet's shader all along: no swell displacement — which is
+  // why the sea stayed glass while the queen rode a swell she could
+  // feel — and, worse, the far sheet's HOLE, which cuts alpha to zero
+  // within seventy metres of the hole's centre. The hole follows the
+  // near sheet, so the near sheet was erasing itself precisely where
+  // she was standing, and what Joshua could see offshore was the
+  // TINTED SEABED with no water drawn over it at all.
+  //
+  // Proved by elimination: hiding every water sheet changed the ocean
+  // not at all.
+  material.customProgramCacheKey = () => [
+    'water', opts.swell ? 'swell' : '-', opts.hole ? 'hole' : '-',
+    opts.green, opts.surf, opts.edgeLo, opts.edgeHi,
+    opts.midAt, opts.deepAt, opts.texAmp, opts.sink,
+  ].join(':');
+
   const sky = new THREE.Color(0x9fc6df).convertSRGBToLinear();
 
   material.onBeforeCompile = (shader) => {

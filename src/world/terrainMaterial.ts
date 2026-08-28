@@ -209,14 +209,45 @@ export const MIP_BIAS_UNIFORM = { value: 0 };
 export const MAX_MIP_BIAS = 2;
 
 /**
- * How far above the floor she is, 0 (on it) to 1 (ten metres up and
- * beyond). Drives the bias only — the ground is untouched at rest.
+ * THE DETAIL RADIUS: how far from the QUEEN, in world units, terrain
+ * still carries its detail. This is what the settings slider means,
+ * and it means it in METRES OUTWARD IN EVERY DIRECTION — Joshua:
+ * "25% = 2.5 m ... 200% = 20 m", i.e. radius = setting x 10 m.
+ *
+ * Why this exists beside the texel fade rather than instead of it.
+ * The texel fade answers "is this pattern physically resolvable in
+ * this pixel", which is a real question and the only defence against
+ * smearing a grazing footprint — it stays, as a SAFEGUARD. But it is
+ * a footprint threshold, not a distance, so the reach it produces
+ * moves with the camera's height and angle, and the slider inherited
+ * that: a dial that was supposed to say "detail out to twenty
+ * metres" instead said "detail until the maths says stop", which is
+ * why altitude quietly redefined it. Now the dial owns a radius, the
+ * footprint owns a safeguard, and whichever wants LESS detail wins.
  */
-export function setDetailLift(climb: number): void {
-  const t = Math.min(1, Math.max(0, climb));
-  MIP_BIAS_UNIFORM.value = -MAX_MIP_BIAS * (t * t * (3 - 2 * t));
+export const DETAIL_RADIUS_UNIFORM = { value: 1_000 };
+/**
+ * Where the queen is, in RENDERED coordinates — the same frame
+ * `vGround` is in, which is the only reason this can be a subtraction
+ * in the shader. World coordinates would be the floating-origin trap
+ * all over again (see setTextureOrigin).
+ */
+export const QUEEN_UNIFORM = { value: new THREE.Vector2() };
+
+/** Metres of radius per unit of the settings dial. */
+export const METRES_PER_DIAL = 10;
+
+/** The dial, in world units of radius. */
+export function setDetailRadius(dial: number): void {
+  DETAIL_RADIUS_UNIFORM.value = Math.max(1, dial) * METRES_PER_DIAL * UNITS_PER_METRE;
 }
 
+/**
+ * The bias is RETIRED as an altitude trick — height must not redefine
+ * what the detail dial promised — but the uniform stays wired at zero
+ * so the sampling path is one code path rather than two, and so a
+ * future per-material sharpen has somewhere to live.
+ */
 export function setDetailRange(times: number): void {
   const factor = Math.max(0.1, times);
   FADE_FROM_UNIFORM.value = FADE_FROM_TEXELS * factor;
@@ -340,6 +371,8 @@ export function groundShader(
         uniform float grainTile;
         uniform float fadeFrom, fadeTo, bandTexels, grainTexelScale;
         uniform float mipBias;
+        uniform float detailRadius;
+        uniform vec2 queenAt;
         uniform vec3 avg_reef, avg_sand, avg_grass, avg_jungle;
         uniform vec3 avg_cliff, avg_mountain, avg_snow;
         uniform vec2 bandOffset, grainOffset;
@@ -393,7 +426,21 @@ export function groundShader(
         vec2 duvdx = dFdx(bandUv);
         vec2 duvdy = dFdy(bandUv);
         float texels = max(length(duvdx), length(duvdy)) * bandTexels;
+        // TWO REASONS TO STOP DRAWING DETAIL, and the stronger wins.
+        //
+        // The FOOTPRINT says whether the pattern can be resolved in
+        // this pixel at all — the safeguard against smearing a grazing
+        // view, and it must stay whatever the dial says.
+        //
+        // The RADIUS is what the player asked for: detail out to so
+        // many metres from the queen, in every direction, at any
+        // altitude. Measured from her rendered position to this
+        // fragment, feathered over the last third so the edge of the
+        // region is never a ring.
         float far = smoothstep(fadeFrom, fadeTo, texels);
+        float fromQueen = distance(vGround.xz, queenAt);
+        // Feathered over the last third, so the edge is never a ring.
+        far = max(far, smoothstep(detailRadius * 0.7, detailRadius, fromQueen));
 
         // Past that, there is nothing left to resolve. Fade to the
         // colour the band actually is, so the far hillside stays the
@@ -502,6 +549,8 @@ export function terrainMaterial(
     shader.uniforms.fadeFrom = FADE_FROM_UNIFORM;
     shader.uniforms.fadeTo = FADE_TO_UNIFORM;
     shader.uniforms.mipBias = MIP_BIAS_UNIFORM;
+    shader.uniforms.detailRadius = DETAIL_RADIUS_UNIFORM;
+    shader.uniforms.queenAt = QUEEN_UNIFORM;
     shader.uniforms.bandTexels = { value: BAND_TEXELS };
     // The grain is also 512 texels but tiled 3.6 times tighter, so its
     // texel footprint is that much larger at the same distance and it

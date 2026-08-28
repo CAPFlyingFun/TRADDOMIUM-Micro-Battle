@@ -69,6 +69,21 @@ const AHEAD_HOLD_MS = 2500;
  */
 const SHADOW = 'drop-shadow(0 1px 2px rgba(0, 0, 0, .95)) '
   + 'drop-shadow(0 0 6px rgba(0, 0, 0, .7))';
+/**
+ * The same two shadows for TEXT, where they cost nothing: text-shadow
+ * is painted with the glyphs rather than by rasterising a layer, and
+ * it INHERITS, so one declaration on the root dresses every readout.
+ */
+const TEXT_SHADOW = '0 1px 2px rgba(0, 0, 0, .95), 0 0 6px rgba(0, 0, 0, .7)';
+/**
+ * How long the HUD stays up after flight state says it should go.
+ *
+ * A touch-and-go over a bumpy floor — which is exactly what a
+ * clearance hold invites — used to blink the entire instrument layer
+ * off and back. The instruments are for a queen who is flying, and
+ * she has not stopped flying because one frame said so.
+ */
+const UP_HOLD_MS = 1500;
 
 /**
  * THE LADDER IS DRAWN ON THE WORLD, NOT ON HER.
@@ -202,6 +217,7 @@ export class FlightHud {
   private shownLand = '';
   private wasWater = false;
   private aheadUntil = 0;
+  private upUntil = 0;
   private awlRead!: HTMLSpanElement;
   private awlRow!: HTMLDivElement;
   private shownAwl = '';
@@ -230,7 +246,20 @@ export class FlightHud {
       zIndex: '11',
       opacity: '0',
       transition: 'opacity 220ms ease',
-      filter: SHADOW,
+      // NO FILTER HERE. This used to be `filter: SHADOW` on this very
+      // element — position:fixed, inset:0, i.e. the whole viewport —
+      // which forces the browser to rasterise a screen-sized layer and
+      // run two drop-shadow passes over it every frame, on a layer
+      // that is ALSO animating its opacity. On the phone that layer
+      // gets dropped and rebuilt under memory or compositor pressure,
+      // and each rebuild is a visible flash of the HUD losing and
+      // regaining its shadow — Joshua, twice: "the whole floating
+      // flight HUD repeatedly switches between its normal shadowed
+      // appearance and an appearance with the shadow seemingly
+      // absent." Text inherits `text-shadow`, which costs the
+      // compositor nothing, and the handful of SVG clusters carry
+      // their own small filters over their own small areas.
+      textShadow: TEXT_SHADOW,
     } as Partial<CSSStyleDeclaration>);
 
     this.ladder = this.buildLadder();
@@ -258,6 +287,7 @@ export class FlightHud {
 
     // The path between the two, drawn under both.
     this.trail = svg('svg') as SVGSVGElement;
+    this.dressSvg(this.trail);
     Object.assign(this.trail.style, {
       position: 'absolute', inset: '0', width: '100%', height: '100%',
       opacity: '0', transition: 'opacity 200ms ease',
@@ -390,6 +420,11 @@ export class FlightHud {
 
   private scale = 1;
 
+  /** Each SVG cluster wears the shadow over its own small area. */
+  private dressSvg(el: SVGElement): void {
+    el.style.filter = SHADOW;
+  }
+
   private cluster(
     left: string | null, top: string | null, move: string, origin: string,
   ): HTMLDivElement {
@@ -408,6 +443,7 @@ export class FlightHud {
   /** Horizon and one rung either side of it. */
   private buildLadder(): SVGElement {
     const root = svg('svg');
+    this.dressSvg(root as SVGElement);
     set(root, {
       width: LADDER_W, height: LADDER_H,
       viewBox: `0 0 ${LADDER_W} ${LADDER_H}`, fill: 'none', overflow: 'visible',
@@ -515,6 +551,7 @@ export class FlightHud {
     const w = 124;
     const spine = 62;
     const root = svg('svg');
+    this.dressSvg(root as SVGElement);
     set(root, { width: w, height: TAPE_TALL, viewBox: `0 0 ${w} ${TAPE_TALL}`, fill: 'none' });
     const rail = svg('line');
     set(rail, {
@@ -571,6 +608,7 @@ export class FlightHud {
    */
   private buildPathMark(): SVGElement {
     const root = svg('svg');
+    this.dressSvg(root as SVGElement);
     set(root, {
       width: 46, height: 22, viewBox: '0 0 46 22', fill: 'none',
       stroke: INK, 'stroke-width': 1.8, 'stroke-linecap': 'round',
@@ -586,6 +624,7 @@ export class FlightHud {
   /** Where the ground is going to be, if she carries on like this. */
   private buildTargetMark(): SVGElement {
     const root = svg('svg');
+    this.dressSvg(root as SVGElement);
     set(root, {
       width: 30, height: 30, viewBox: '0 0 30 30', fill: 'none',
       stroke: INK, 'stroke-width': 1.7, 'stroke-linecap': 'round',
@@ -611,9 +650,14 @@ export class FlightHud {
     now: FlightTelemetry, aloft: boolean, view: FlightView,
     hold: 'msl' | 'floor' | null = null,
   ): void {
-    if (aloft !== this.up) {
-      this.up = aloft;
-      this.root.style.opacity = aloft ? '1' : '0';
+    // HELD, not switched. See UP_HOLD_MS: a momentary landing must not
+    // strobe the whole instrument layer.
+    const nowMs = Date.now();
+    if (aloft) this.upUntil = nowMs + UP_HOLD_MS;
+    const up = aloft || nowMs < this.upUntil;
+    if (up !== this.up) {
+      this.up = up;
+      this.root.style.opacity = up ? '1' : '0';
     }
     // The pill must never be an invisible button: pointer events come
     // off with the panel, and off again whenever there is no hold to

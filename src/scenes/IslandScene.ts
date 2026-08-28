@@ -31,7 +31,8 @@ import { originAt, rebaseFor, setOrigin, toLocal, toWorld,
 import { bakeGrain, GRAIN_SIZE } from '../world/groundTexture';
 import {
   BAND_TILE, FADE_FROM_UNIFORM, FADE_TO_UNIFORM,
-  loadBands, reliefUniform, setDetailLift, setDetailRange, setTextureOrigin, terrainMaterial,
+  QUEEN_UNIFORM, loadBands, reliefUniform, setDetailRadius, setDetailRange,
+  setTextureOrigin, terrainMaterial,
 } from '../world/terrainMaterial';
 import { SettingsPanel } from '../ui/SettingsPanel';
 import { PauseMenu } from '../ui/PauseMenu';
@@ -111,19 +112,19 @@ const GAP_TOLERANCE = 100;
  * could be split in half") — a full-depth dive is a deliberate three
  * seconds of work now, swimming down rather than sinking.
  */
+/**
+ * How fast the flight's hold reference chases the real surface, per
+ * second. The open sea's swell runs at about 1.5 s a period, so half
+ * an e-fold a second lets a whole wave pass through the reference
+ * almost unnoticed; inland, a water level that changes is real news
+ * and the ripples are millimetres, so it follows much more closely.
+ */
+const HOLD_EASE_SEA = 0.5;
+const HOLD_EASE_FRESH = 3;
+/** A crest may come no closer than this to her before she climbs. */
+const WAVE_MARGIN = 12;
+
 const DIVE_EASE = 0.9;
-/**
- * How far above the floor the ground texture's reach stops growing —
- * ten metres, which is what Joshua asked for by name.
- */
-const DETAIL_FULL_AT = 1_000;
-/**
- * And how much further it reaches by then. Texel thresholds scale
- * with the SQUARE of distance, so sixteen times the texels is four
- * times the radius: the patch of sharp ground under her at ten metres
- * is about as wide as the patch she had at one.
- */
-const DETAIL_LIFT = 16;
 /**
  * The way UP keeps its old pace — the halving was asked of the DIVE,
  * and buoyancy is not hers to slow: going down she is working against
@@ -296,6 +297,8 @@ export class IslandScene {
   private camUnder = 0;
   /** Latched 'there is water beneath her' — see readFlight. */
   private overWater = false;
+  /** The DAMPED water column the autopilot flies against. */
+  private holdColumn = 0;
   /** Her air, held while the head is under (breath.ts). */
   private readonly breath = new Breath();
   /** The sea's clock on her (brine.ts). */
@@ -417,6 +420,7 @@ export class IslandScene {
     setFlightScale(settings().flightSpeed);
     weather().setMode(settings().liveWeather ? 'live' : 'simulated');
     setDetailRange(settings().detailRange);
+    setDetailRadius(settings().detailRange);
     setSmoothing(settings().terrainSmoothing);
     this.buildTerrain();
 
@@ -501,6 +505,7 @@ export class IslandScene {
       setFlightScale(settings().flightSpeed);
       weather().setMode(settings().liveWeather ? 'live' : 'simulated');
       setDetailRange(settings().detailRange);
+    setDetailRadius(settings().detailRange);
       this.debugDie.show(settings().showFix);
     });
     this.debugDie.show(settings().showFix);
@@ -691,6 +696,46 @@ export class IslandScene {
             colour: (m.material as THREE.MeshStandardMaterial).color.getHexString(),
           };
         }),
+      /**
+       * Probe-only: leave ONLY the near ocean sheet drawing, so its
+       * geometry can be judged with nothing in front of or behind it.
+       * Identified by vertex count — 241^2 near, 257^2 far horizon,
+       * 256^2 the freshwater window.
+       */
+      solo: (on: boolean) => {
+        for (const o of this.scene.children) {
+          const m = o as THREE.Mesh;
+          if (!m.isMesh || !m.geometry?.getAttribute('depth')) continue;
+          const n = m.geometry.getAttribute('position').count;
+          m.visible = on ? n === 241 * 241 : true;
+        }
+      },
+      /** Probe-only: hide every water sheet at once. */
+      hideAllWater: () => {
+        for (const o of this.scene.children) {
+          const m = o as THREE.Mesh;
+          if (m.isMesh && m.geometry?.getAttribute('depth')) m.visible = false;
+        }
+      },
+      /** Probe-only: drive a settings dial from a headless run. */
+      setSetting: (key: string, value: number) => {
+        setSetting(key as 'detailRange', value as never);
+      },
+      /**
+       * Probe-only: where a GROUND point this far from her lands on
+       * screen, so a detail radius can be measured against the world
+       * rather than guessed from a screenshot.
+       */
+      project: (dx: number, dz: number) => {
+        const at = this.ant.where;
+        const seat = toLocal(world(at.wx + dx, at.wz + dz));
+        const p = new THREE.Vector3(seat.lx, groundHeight(at.wx + dx, at.wz + dz), seat.lz);
+        p.project(this.follow.camera);
+        const wide = this.renderer.domElement.clientWidth;
+        const tall = this.renderer.domElement.clientHeight;
+        return p.z > 1 ? null
+          : { x: ((p.x + 1) / 2) * wide, y: ((1 - p.y) / 2) * tall };
+      },
       // Probe-only: set her air, so a 45-second drain does not cost a
       // headless run ten slow-motion minutes to reach the interesting
       // part.
@@ -1110,9 +1155,34 @@ export class IslandScene {
     let inSalt = false;
     if (this.flight.aloft) {
       this.headUnder = false;
-      // The water standing under her RIGHT NOW — the whole reason the
-      // floor is not the terrain. Sampled once for the frame.
+      // TWO SURFACES, AND THEY ARE NOT THE SAME QUESTION.
+      //
+      // The PHYSICAL one — this — is the real water standing under her
+      // this instant, swell and all. Collision, landing, swimming,
+      // the underwater look and the AWL/AGL readouts all use it, and
+      // must: they are statements about the world.
+      //
+      // The HOLD REFERENCE is what the autopilot flies against, and
+      // flying against the physical one made her chase every 1.5 s
+      // crest — Joshua: "like turbulence or drunken bobbing". So the
+      // reference is a damped version of it, slow over the open sea
+      // (a swell period must pass through it unnoticed) and quicker
+      // inland, where a changing water level is real information and
+      // the ripples are small. Her PLACEMENT rides the reference too,
+      // or the two would disagree and we would be back to flying
+      // underwater (v0.0.83).
       const column = waterSpotAt(this.ant.where.wx, this.ant.where.wz)?.depth ?? 0;
+      const salty = waterSpotAt(this.ant.where.wx, this.ant.where.wz)?.salt === true;
+      const ease = salty ? HOLD_EASE_SEA : HOLD_EASE_FRESH;
+      this.holdColumn += (column - this.holdColumn) * (1 - Math.exp(-ease * dt));
+      // SAFETY IS NOT SMOOTHED. A real crest may never pass through
+      // her: if the true surface comes within WAVE_MARGIN of where the
+      // reference would put her, the reference rises to clear it —
+      // the controller climbing over a wave, which is what a flyer
+      // would do.
+      this.holdColumn = Math.max(
+        this.holdColumn, column + WAVE_MARGIN - this.flight.height,
+      );
       const step = this.flight.update(
         {
           push: stick.y,
@@ -1146,7 +1216,7 @@ export class IslandScene {
         // clearance over the SEABED, so "one metre up" over nine
         // metres of sea put her nine metres under it, tinted the
         // screen, and made the shore transition anything but seamless.
-        groundHeight(this.ant.where.wx, this.ant.where.wz) + column,
+        groundHeight(this.ant.where.wx, this.ant.where.wz) + this.holdColumn,
       );
       this.effort = step.effort;
       winded = this.stamina.update(step.effort, dt);
@@ -1160,7 +1230,7 @@ export class IslandScene {
         // The wind reaches her ONLY here. Walking gets nothing.
         this.windOnHer(),
         // …and the SAME floor the model just flew against.
-        column,
+        this.holdColumn,
       );
       // The camera CHASES in flight rather than steering. Her heading
       // is her own up here, so a view left where the player put it
@@ -1436,15 +1506,14 @@ export class IslandScene {
     // is pushed too far at ground level — is exactly what altitude
     // takes away, so the range that smears underfoot is safe from up
     // here. On the ground the dial behaves precisely as before.
-    const climb = Math.min(1, Math.max(0, this.flight.height / DETAIL_FULL_AT));
-    const eased = climb * climb * (3 - 2 * climb);
-    setDetailRange(settings().detailRange * (1 + (DETAIL_LIFT - 1) * eased));
-    // …and the MIP BIAS, which is the half that actually bites. At
-    // three and a half metres a pixel averages about seventy texels,
-    // well short of the fade's own threshold, so the fade never fires
-    // and the wash is the mip chain doing its job. Asking for a
-    // sharper level is the only thing that answers it.
-    setDetailLift(climb);
+    // THE DETAIL REGION IS A RADIUS AROUND HER, in metres, and it is
+    // the slider's whole meaning: 100% is ten metres of detailed
+    // ground in every direction, at one metre up or at five. An
+    // earlier cut let ALTITUDE scale the reach, which quietly
+    // redefined what the player had asked for; height has no vote
+    // here now. Her RENDERED position, because the shader compares it
+    // against rendered fragment positions.
+    QUEEN_UNIFORM.value.set(this.ant.root.position.x, this.ant.root.position.z);
 
     // THE FINE GROUND FOLLOWS HER TOO. Fire-and-forget: a tile that has
     // not landed is answered by the coarse grid, which holds the same
@@ -1983,15 +2052,21 @@ export class IslandScene {
     // to the old terrain-plus-height exactly.
     const column = waterSpotAt(here.wx, here.wz)?.depth ?? 0;
     const clearance = this.flight.height;
-    const altitude = terrain + column + clearance;
-    const agl = clearance + column;
+    // WHERE SHE IS is the reference plus her clearance — that is what
+    // the placement did. WHAT SHE IS OVER is the real water. So the
+    // readouts stay truthful even while the autopilot flies smoothed:
+    // AWL is her true instantaneous clearance above the real wave
+    // surface, and it breathes with the swell exactly as it should.
+    const ridden = this.flight.aloft ? this.holdColumn : column;
+    const altitude = terrain + ridden + clearance;
+    const agl = ridden + clearance;
     // WHETHER THERE IS WATER UNDER HER TO SPEAK OF, with hysteresis.
     // A bare `column > 0` chattered as the swash washed back and forth
     // across her: the AWL row appeared and vanished, the rail reflowed
     // under it, and the hold pill flipped AGL/AWL every few frames.
     // Joshua: "doesn't need to randomly switch."
     this.overWater = column > (this.overWater ? 12 : 30);
-    const awl = this.overWater ? clearance : null;
+    const awl = this.overWater ? ridden + clearance - column : null;
     // MEASURED, not reconstructed: her actual displacement over the
     // island, which already contains her airspeed, the wind, and
     // anything the movement pipeline grows later.
