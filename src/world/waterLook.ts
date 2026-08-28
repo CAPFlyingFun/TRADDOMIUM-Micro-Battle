@@ -117,6 +117,21 @@ export interface WaterLook {
   readonly hole: { value: THREE.Vector2 };
 }
 
+/**
+ * How hard the foam's distance simplification is applied, shared by
+ * every sheet. One is the shipped behaviour; zero holds full detail at
+ * every distance, which is the control for judging it — on a phone as
+ * well as in a probe, because the whole complaint was about what a
+ * particular altitude looks like.
+ */
+export const FOAM_LOD_UNIFORM = { value: 1 };
+
+/** PROFILING AND JUDGEMENT: 1 simplifies with distance, 0 never does. */
+export function setFoamLod(amount: number): number {
+  FOAM_LOD_UNIFORM.value = Math.max(0, Math.min(1, amount));
+  return FOAM_LOD_UNIFORM.value;
+}
+
 export function makeWaterLook(opts: WaterLookOpts): WaterLook {
   const clock = { value: 0 };
   const centre = { value: new THREE.Vector2() };
@@ -207,6 +222,7 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uTime = clock;
     shader.uniforms.uCentre = centre;
+    shader.uniforms.uFoamLod = FOAM_LOD_UNIFORM;
     shader.uniforms.uRipple = ripple;
     shader.uniforms.uSky = { value: sky };
     shader.uniforms.uHole = hole;
@@ -214,10 +230,10 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
     const swell = opts.swell;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>',
-        '#include <common>\n attribute float depth;\n attribute vec2 flow;\n varying float vDepth;\n varying vec2 vWorld;\n varying vec2 vFlow;\n uniform vec2 uCentre;'
+        '#include <common>\n attribute float depth;\n attribute vec2 flow;\n varying float vDepth;\n varying vec2 vWorld;\n varying vec2 vLocal;\n varying vec2 vFlow;\n uniform vec2 uCentre;'
         + (swell ? '\n varying vec2 vSwell;\n varying float vSheet;\n uniform float uTime;' : ''))
       .replace('#include <begin_vertex>',
-        '#include <begin_vertex>\n vDepth = depth;\n vFlow = flow;\n vWorld = vec2(position.x, position.z) + uCentre;'
+        '#include <begin_vertex>\n vDepth = depth;\n vFlow = flow;\n vLocal = vec2(position.x, position.z);\n vWorld = vLocal + uCentre;'
         + (swell ? `
         {
           // THE SWELL, from the one shared table (seaSwell.ts). Faded
@@ -248,7 +264,7 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
     // later stages through gRn/gBody — the colour weave, the normal
     // tilt and the surf caps all read the same water.
     shader.fragmentShader = ('uniform float uTime;\nuniform sampler2D uRipple;\nuniform sampler2D uFoam;\nuniform vec3 uSky;\n' + shader.fragmentShader)
-      .replace('#include <common>', '#include <common>\n varying float vDepth;\n varying vec2 vWorld;\n varying vec2 vFlow;\n mat2 rrot(float a){ float c = cos(a); float s = sin(a); return mat2(c, -s, s, c); }\n vec3 gRn = vec3(0.0);\n float gBody = 0.0;'
+      .replace('#include <common>', '#include <common>\n varying float vDepth;\n varying vec2 vWorld;\n varying vec2 vLocal;\n varying vec2 vFlow;\n uniform vec2 uCentre;\n uniform float uFoamLod;\n vec2 tiled(float T) { return (vLocal + mod(uCentre, vec2(T))) / T; }\n mat2 rrot(float a){ float c = cos(a); float s = sin(a); return mat2(c, -s, s, c); }\n vec3 gRn = vec3(0.0);\n float gBody = 0.0;'
         + (swell ? '\n varying vec2 vSwell;\n varying float vSheet;' : '')
         + (opts.hole ? '\n uniform vec2 uHole;' : ''))
       .replace('#include <map_fragment>', `#include <map_fragment>
@@ -333,9 +349,53 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
           // foam, never a painted stripe. Everything scales with the
           // wearer's surf band: a beach break for the ocean, a whisper
           // of bank-line for a stream.
-          float surf = smoothstep(320.0 * ${opts.surf.toFixed(3)}, 30.0 * ${opts.surf.toFixed(3)}, depth);
-          float surfN = texture2D(uRipple, vWorld / 300.0 + uTime * vec2(0.05, 0.03)).r;
-          float foam = surf * smoothstep(0.60, 0.86, surfN);
+          float surfLo = 320.0 * ${opts.surf.toFixed(3)};
+          float surfHi = 30.0 * ${opts.surf.toFixed(3)};
+          float surfN = texture2D(uRipple, tiled(300.0) + uTime * vec2(0.05, 0.03)).r;
+
+          // ---- HOW MUCH FOAM THIS PIXEL CAN ACTUALLY HOLD -----------
+          //
+          // From 166 m the shoreline still drew individual lace, which
+          // is detail nobody can resolve and which therefore arrives as
+          // a dense crawling speckle rather than as surf. (Joshua: "at
+          // that altitude the surf should still be visible, but I
+          // should not be able to resolve tiny repeating foam detail".)
+          //
+          // THREE KNEES, NOT ONE SWITCH. Each foam ingredient has its
+          // own tile size and so its own vanishing distance, and giving
+          // them separate thresholds is what makes the shoreline
+          // SIMPLIFY on the way out instead of popping between looks:
+          // the fizz goes first, the broad lace holds on much longer,
+          // and what is left at the far end is the shape of the
+          // breaker, which is a function of the swell and the depth and
+          // has no texture in it at all.
+          //
+          // Everything fades to the texture's MEAN COVERAGE, measured
+          // off the shipped maps at these very thresholds — 0.333 for
+          // the fizz, 0.158 for the lace, 0.0098 for the open-water
+          // speckle. Fading to zero would delete the surf line; fading
+          // to the mean keeps exactly as much white as was there and
+          // simply stops resolving where it sits.
+          vec2 fizzUv = tiled(95.0);
+          float fizzTexels = max(length(dFdx(fizzUv)), length(dFdy(fizzUv))) * 1024.0;
+          vec2 speckUv = tiled(300.0);
+          float speckTexels = max(length(dFdx(speckUv)), length(dFdy(speckUv))) * 1536.0;
+          float fineGone = uFoamLod * smoothstep(1.5, 12.0, fizzTexels);
+          float laceGone = uFoamLod * smoothstep(6.0, 48.0, fizzTexels);
+          float speckGone = uFoamLod * smoothstep(1.5, 14.0, speckTexels);
+
+          // THE BAND IS NOT WIDENED WITH DISTANCE, though it was tried.
+          //
+          // Measured, after two metrics disagreed with my eyes: the
+          // high-frequency content on distant water is NOT mostly the
+          // foam lace. depth is the sampled seabed and the sampled
+          // seabed is quantised, so a smoothstep over it terraces into
+          // contour rings, and smoothing the foam above them uncovers
+          // them. Widening this window to turn those terraces into
+          // gradients spread the foam over far more water instead, and
+          // measured 40% WORSE at 166 m rather than better. Left alone.
+          float surf = smoothstep(surfLo, surfHi, depth);
+          float foam = surf * mix(smoothstep(0.60, 0.86, surfN), 0.0098, speckGone);
           {
             // THE FOAM RIDES THE WAVE THAT MADE IT.
             //
@@ -373,14 +433,35 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
               * smoothstep(-0.6, 0.1, crest) * 0.55;
             float march = clamp((face + tail) * shallow, 0.0, 1.0);
             float lace = smoothstep(0.52, 0.86,
-              dot(texture2D(uFoam, vWorld / 260.0 - uTime * vec2(0.012, 0.007)).rgb, vec3(0.3333)));
+              dot(texture2D(uFoam, tiled(260.0) - uTime * vec2(0.012, 0.007)).rgb, vec3(0.3333)));
             float fizz = smoothstep(0.40, 0.80,
-              dot(texture2D(uFoam, vWorld / 95.0 + uTime * vec2(0.016, -0.009)).rgb, vec3(0.3333)));
+              dot(texture2D(uFoam, tiled(95.0) + uTime * vec2(0.016, -0.009)).rgb, vec3(0.3333)));
+            // The fine fizz is the first thing to go, the broad lace
+            // the last. Between them the breaker keeps its shape while
+            // its grain dissolves, which is the gradient the eye reads
+            // as distance rather than as a change of setting.
+            fizz = mix(fizz, 0.333, fineGone);
+            lace = mix(lace, 0.158, laceGone);
             // The breaker rides the band; a standing wash clings to
             // the waterline itself, densest in the last stretch of
             // depth, so the beach edge is always dressed even between
             // sets.
-            float breaker = surf * march * (lace * 2.2 + fizz * 1.1);
+            // PALE, not merely smooth, at the far end.
+            //
+            // Fading the lace to its mean removes the grain but keeps
+            // the brightness, and that turned out to UNMASK something:
+            // surf is a smoothstep over depth, depth is the sampled
+            // seabed, and the sampled seabed is quantised — so the far
+            // water carries faint bathymetric terracing that the foam's
+            // own texture had been hiding. Smoothing the texture without
+            // softening the amplitude made those rings the most visible
+            // thing on the water, and measured 57% MORE fine structure
+            // rather than less.
+            //
+            // So the far tier is a soft pale band, which is what was
+            // asked for: same shape, same shoreline, less of it.
+            float pale = mix(1.0, 0.5, laceGone);
+            float breaker = surf * march * (lace * 2.2 + fizz * 1.1) * pale;
             // The wash sits just OUTSIDE the waterline's alpha
             // feather (edgeLo..edgeHi) — foam painted inside it is
             // foam the fade erases, which is exactly how the first
@@ -393,7 +474,7 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
             // where the water is solid, so the edge of the sea is
             // drawn as a bright rim of wash rather than a fade.
             float wash = smoothstep(170.0 * ${opts.surf.toFixed(3)}, 95.0 * ${opts.surf.toFixed(3)}, depth)
-              * (lace * 0.85 + fizz * 0.35);
+              * (lace * 0.85 + fizz * 0.35) * pale;
             foam = clamp(foam + breaker + wash, 0.0, 1.0);
           }
           // Open-water caps. The wave map's slope energy runs in thin
@@ -402,8 +483,14 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
           // against the second, independently scrolling sample keeps
           // only the spots where the two patterns cross — beads of
           // foam that wink in and out, not dashes.
-          vec3 cn = texture2D(uRipple, vWorld / 700.0 - uTime * vec2(0.02, 0.028)).xyz * 2.0 - 1.0;
-          float caps = smoothstep(0.75, 1.10, length(cn.xy)) * smoothstep(0.55, 0.80, surfN);
+          vec3 cn = texture2D(uRipple, tiled(700.0) - uTime * vec2(0.02, 0.028)).xyz * 2.0 - 1.0;
+          // Caps fade to NOTHING rather than to a mean: a whitecap is
+          // a metre of broken water in open sea, so far enough out
+          // there is genuinely none of it in the pixel. The shoreline
+          // is the opposite — there is always surf on it — which is why
+          // that one keeps its mean and this one does not.
+          float caps = smoothstep(0.75, 1.10, length(cn.xy))
+            * smoothstep(0.55, 0.80, surfN) * (1.0 - fineGone);
           foam = clamp(foam + caps * 0.4, 0.0, 1.0);
           diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.90, 0.95, 0.97), foam);
 

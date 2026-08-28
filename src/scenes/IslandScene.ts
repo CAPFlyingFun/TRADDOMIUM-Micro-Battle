@@ -38,6 +38,7 @@ import {
 import {
   RELIEF_AO_UNIFORM, RELIEF_BUMP_UNIFORM, bakeGroundRelief, setReliefAo, setReliefBump,
 } from '../world/groundRelief';
+import { setFoamLod } from '../world/waterLook';
 import { SettingsPanel } from '../ui/SettingsPanel';
 import { PauseMenu } from '../ui/PauseMenu';
 import {
@@ -757,6 +758,12 @@ export class IslandScene {
        *   __island.ground('lite')   biome colour only, no samples
        */
       ground: (mode: 'full' | 'base' | 'lite') => ({ mode: setGroundMode(mode) }),
+      /**
+       * The foam's distance simplification. 1 ships, 0 is the control:
+       * full lace at every range, which is what 166 m looked like
+       * before.
+       */
+      foamLod: (amount: number) => ({ foamLod: setFoamLod(amount) }),
       // The micro-relief, judged where it ships: on a phone, in sun.
       // bump 0 is the honest A/B — it turns the third dimension off
       // without touching the colour work underneath it.
