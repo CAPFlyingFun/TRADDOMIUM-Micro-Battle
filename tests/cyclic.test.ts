@@ -26,6 +26,16 @@ function attitude(demand: Partial<FlightDemand>, seconds = 2): number {
   return flight.pitch;
 }
 
+/** The same flight, reporting the cyclic alone. */
+function cyclicOf(demand: Partial<FlightDemand>, seconds = 2): number {
+  const flight = new Flight();
+  flight.takeOff(60, 1, 0);
+  for (let t = 0; t < seconds; t += 1 / 60) {
+    flight.update({ ...STILL, ...demand }, 1, false, 1 / 60, 0);
+  }
+  return flight.cyclic;
+}
+
 describe('the cyclic', () => {
   it('drops her nose when she is asked for speed', () => {
     expect(attitude({ push: 1 })).toBeLessThan(0);
@@ -47,8 +57,12 @@ describe('the cyclic', () => {
     // held attitude showing the whole underside to a camera sitting
     // behind her, while speeding up points the nose away and
     // foreshortening eats it. Half as much again to look the same.
-    const down = Math.abs(attitude({ push: 1 }));
-    const up = Math.abs(attitude({ push: -1 }));
+    // THE CYCLIC, not the pitch. Pitch is tilt plus a climb term, so
+    // reading the ratio off it also measured how fast she was rising —
+    // and the takeoff ramp, a change about leaving the ground, moved
+    // a number about the stick. The stick is what this is testing.
+    const down = Math.abs(cyclicOf({ push: 1 }));
+    const up = Math.abs(cyclicOf({ push: -1 }));
     expect(down / up).toBeCloseTo(TILT_DOWN, 1);
   });
 

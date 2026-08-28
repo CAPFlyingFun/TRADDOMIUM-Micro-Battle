@@ -58,7 +58,9 @@ import {
 import { bearingFromHeading, bearingOf, headingFromBearing, pitchOf } from '../ui/compassMath';
 import { Compass } from '../ui/Compass';
 import { type CompassMarker } from '../ui/compassMath';
-import { AUTO_AIRSPEED, Flight, setFlightScale } from '../ant/flight';
+import {
+  AUTO_AIRSPEED, Flight, SPRINT_AIRSPEED, setFlightScale,
+} from '../ant/flight';
 import { Grace } from '../ant/grace';
 import {
   MOVING_RECOVERY, RESTING_RECOVERY, SPRINT_DRAIN,
@@ -1259,13 +1261,19 @@ export class IslandScene {
           // as on the ground. Auto already flew at it; the stick did
           // not, so the lowest row and the highest were the same
           // flight and the readout sat at 100% either way.
-          ceiling: AUTO_AIRSPEED[this.pace],
+          // FOUR ROWS, FOUR QUARTERS. Sprint is a toggle beside the
+          // pace rather than a fourth pace, so the air never read the
+          // top cell and a queen at maximum flew at whatever row sat
+          // under it. `wants` is sprint asked for AND affordable, which
+          // is the same test the ground uses.
+          ceiling: wants ? SPRINT_AIRSPEED : AUTO_AIRSPEED[this.pace],
           // AUTO IN THE AIR holds an airspeed for the selected pace, so
           // the thumb is free to steer, look and climb. Lateral input,
           // the camera and both buttons leave it engaged; only a
           // deliberate fore/aft push takes manual control back, which
           // is the same rule it follows on the ground.
-          hold: this.auto.active ? AUTO_AIRSPEED[this.pace] : null,
+          hold: this.auto.active
+            ? (wants ? SPRINT_AIRSPEED : AUTO_AIRSPEED[this.pace]) : null,
         },
         this.stamina.fraction,
         this.stamina.spent,

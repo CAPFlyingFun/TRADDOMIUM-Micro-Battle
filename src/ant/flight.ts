@@ -142,7 +142,33 @@ export const MAX_DIVE_SPEED = 110;
  * it, anchored to the numbers the model already uses: cruise is what
  * powered flight settles at, run is flat out.
  */
-export const AUTO_AIRSPEED = { crawl: 20, walk: CRUISE_SPEED, run: MAX_POWERED_SPEED };
+/**
+ * THE PACE LADDER IN THE AIR: four rows, four quarters of the maximum.
+ *
+ * The lever has always had four cells and the air only ever had three
+ * speeds, because sprint is a toggle beside the pace rather than a
+ * fourth pace. So the top row lit while the ceiling stayed on whatever
+ * pace was underneath it — walk, in Joshua's screenshot, which is why a
+ * queen at maximum was flying at exactly CRUISE_SPEED and the power
+ * readout rounded 40/70 to its 60% notch.
+ *
+ * Four quarters of MAX_POWERED_SPEED now, sprint included, so the lit
+ * row means the same thing in the air as it does on the ground:
+ *
+ *   sprint  70.0     run  52.5     walk  35.0     crawl  17.5
+ *
+ * The bottom rung is deliberate rather than arithmetic: 17.5 is above
+ * STALL_SPEED and below BEST_GLIDE_SPEED, so a queen who selects it is
+ * still flying but is no longer holding her height. It descends because
+ * of what it is, not because anything says so.
+ */
+export const AUTO_AIRSPEED = {
+  crawl: MAX_POWERED_SPEED * 0.25,
+  walk: MAX_POWERED_SPEED * 0.5,
+  run: MAX_POWERED_SPEED * 0.75,
+};
+/** The top row, and the only thing that reaches the model's maximum. */
+export const SPRINT_AIRSPEED = MAX_POWERED_SPEED;
 
 /**
  * UNPOWERED TERMINAL FALL, world units per second — 1.78 m/s.
@@ -190,6 +216,22 @@ export const TAKEOFF_COST = 0.03;
 export const TAKEOFF_BOOST = 1.35;
 /** Height above the ground at which takeoff becomes real flight. */
 export const AIRBORNE_HEIGHT = 2.5;
+
+/**
+ * HOW LONG THE WINGS TAKE TO TAKE HER WEIGHT.
+ *
+ * takeOff used to hand her half the climb rate on its very first frame
+ * — eight centimetres a second, from nothing, in nothing — so leaving
+ * the ground read as a launch rather than a lift. (Joshua: "as soon as
+ * I lift off from the ground I shoot up to +10cm in less than 0.1s".)
+ *
+ * A second, eased, to twenty centimetres a second. The mean of a
+ * smoothstep is exactly a half, so the height at one second is
+ * 20 x 0.5 x 1 = 10 cm — the curve he asked for, and it arrives there
+ * having accelerated into it rather than starting at speed.
+ */
+export const LAUNCH_SECONDS = 1;
+export const LAUNCH_RATE = 20;
 
 /**
  * How briskly airspeed answers the stick. Units per second squared.
@@ -478,6 +520,18 @@ export class Flight {
   private bank = 0;
   /** Nose attitude asked for by the stick, radians. Positive is up. */
   private tilt = 0;
+
+  /**
+   * THE CYCLIC ALONE, without the climb term `pitch` adds to it.
+   *
+   * `pitch` is tilt plus climbing x PITCH_PER_RISE, so a test that
+   * measures the cyclic through it is also measuring how fast she
+   * happens to be going up — which is how the launch ramp, a change
+   * about takeoff, moved a number about the stick.
+   */
+  get cyclic(): number {
+    return this.tilt;
+  }
   /**
    * How long the lever has been held, SIGNED — the sign is how the
    * ramp knows a reversal from a continuation.
@@ -532,6 +586,18 @@ export class Flight {
    * WHAT SHE IS ACTUALLY DOING VERTICALLY: the model's rate plus the
    * air's. The one number everything downstream should ask for.
    */
+  /**
+   * How far into the launch ramp she is, 0 to 1. One means the wings
+   * are carrying her and the lever has full authority.
+   */
+  private launching = 1;
+
+  /** The most she may climb right now, easing open across the ramp. */
+  private launchGate(): number {
+    const t = this.launching;
+    return LAUNCH_RATE * scale * (t * t * (3 - 2 * t));
+  }
+
   get climbing(): number {
     return this.rise + this.drift;
   }
@@ -596,7 +662,8 @@ export class Flight {
     this.facing = facing;
     this.bank = 0;
     this.tilt = 0;
-    this.rise = CLIMB_RATE * scale * 0.5;
+    this.rise = 0;
+    this.launching = 0;
     this.above = 0.01;
     this.air.reset();
     this.drift = 0;
@@ -672,6 +739,19 @@ export class Flight {
     this.thrust(demand, asked, empty, dt);
 
     const effort = this.rising(demand, reserve, empty, dt);
+    // THE GATE OUTLIVES THE TAKEOFF STATE, which ends at 2.5 cm — about
+    // half a second into the ramp. Left inside that branch the lever
+    // could snatch her upward the moment she cleared it, which is the
+    // same jolt moved half a second later.
+    if (this.launching < 1) {
+      this.launching = Math.min(1, this.launching + dt / LAUNCH_SECONDS);
+      // DRIVEN, not merely capped. The takeoff state ends at 2.5 cm —
+      // about half a second in — and past it the lever's own target
+      // pulled her straight back down, so a clamp alone left her at
+      // five centimetres when the second was up. For this one second
+      // the wings ARE the climb; after it the lever has her back.
+      this.rise = this.launchGate();
+    }
     // The air, once a frame, after the model has had its say. A takeoff
     // is a scripted climb off the soil and does not get jostled.
     this.drift = this.state === 'takeoff' ? 0 : this.air.advance(dt);
@@ -850,7 +930,7 @@ export class Flight {
     // Still leaving the ground. Held here rather than in the branches
     // below, which would each overwrite it before it could be read.
     if (this.state === 'takeoff') {
-      this.rise = CLIMB_RATE * scale * 0.5;
+      this.rise = this.launchGate();
       if (this.above + this.rise * dt >= AIRBORNE_HEIGHT) this.state = 'powered';
       return CRUISE_DRAIN;
     }

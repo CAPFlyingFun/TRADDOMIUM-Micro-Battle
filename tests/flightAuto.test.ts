@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  AUTO_AIRSPEED, CRUISE_SPEED, Flight, MAX_POWERED_SPEED, STALL_SPEED,
+  AUTO_AIRSPEED, Flight, MAX_POWERED_SPEED, STALL_SPEED,
   TERMINAL_FALL, setFlightScale,
 } from '../src/ant/flight';
 import { WANDER_RATE } from '../src/ant/wander';
@@ -36,9 +36,15 @@ describe('Auto in the air', () => {
   it('has flight targets of its own, not the ground pace speeds', () => {
     // A crawl on the ground is 2.2 units/s. An ant moving that slowly
     // is not flying, and Auto must never ask her to.
+    // The ladder is FOUR QUARTERS of full power now, one per lever
+    // row, sprint included — it used to be crawl/cruise/max across
+    // three rows while the lever showed four, which is why the top row
+    // lit and she flew at CRUISE_SPEED. Only sprint reaches the model
+    // maximum; see flightLaunch.test.ts.
     expect(AUTO_AIRSPEED.crawl).toBeGreaterThan(STALL_SPEED);
-    expect(AUTO_AIRSPEED.walk).toBe(CRUISE_SPEED);
-    expect(AUTO_AIRSPEED.run).toBe(MAX_POWERED_SPEED);
+    expect(AUTO_AIRSPEED.walk).toBeCloseTo(MAX_POWERED_SPEED * 0.5, 6);
+    expect(AUTO_AIRSPEED.run).toBeCloseTo(MAX_POWERED_SPEED * 0.75, 6);
+    expect(AUTO_AIRSPEED.run).toBeLessThan(MAX_POWERED_SPEED);
   });
 
   it('keeps her flying with the stick released', () => {
