@@ -41,18 +41,34 @@ const N = 257;
 const CELL = 3_200;
 const RECENTRE = (N * CELL) / 8;
 
-/** Near sheet: fine enough that a 12 m wave is geometry, not noise. */
-const N2 = 129;
-const CELL2 = 150;
+/**
+ * Near sheet: 70 units between vertices, so the 4.2 m swell gets six
+ * of them to a wavelength and arrives as a WAVE rather than as the
+ * aliased suggestion of one. 241 a side covers 168 m around her —
+ * enough that the moving water reaches the middle distance, which is
+ * where the eye decides whether a sea is alive.
+ */
+const N2 = 241;
+const CELL2 = 70;
 const RECENTRE2 = (N2 * CELL2) / 8;
 
-/** Where the near sheet's swell flattens, sheet-local radius. */
-const RIM_LO = 6_500;
-const RIM_HI = 9_000;
+/**
+ * Where the near sheet's swell flattens, sheet-local radius.
+ *
+ * THIS IS HOW FAR THE SEA MOVES. The first cut flattened everything
+ * past 34 m, so the water she was actually looking AT — the middle
+ * distance, out toward the horizon — was the flat far sheet, and the
+ * whole ocean read as glass no matter how tall the waves near her
+ * were. The wave zone now runs to sixty metres and hands over at
+ * seventy-eight, which is about as far as centimetre-scale eyes have
+ * any business resolving a wave anyway.
+ */
+const RIM_LO = 6_000;
+const RIM_HI = 7_800;
 /** Where near hands to far — near alpha out, far hole in. Inside the
- *  sheet's 9 675 half-span, so the fade finishes before the edge. */
-const HAND_LO = 7_500;
-const HAND_HI = 9_300;
+ *  sheet's 8 435 half-span, so the fade finishes before the edge. */
+const HAND_LO = 6_800;
+const HAND_HI = 8_200;
 
 interface Sheet {
   readonly mesh: THREE.Mesh;
@@ -119,13 +135,23 @@ export class Ocean {
       edgeLo: 35, edgeHi: 95, midAt: 700, deepAt: 2600,
       texAmp: 0.40, anisotropy,
     } as const;
-    this.far = this.sheet(N, CELL, makeWaterLook({
-      ...skin, hole: { lo: HAND_LO, hi: HAND_HI },
-    }), 1);
-    this.near = this.sheet(N2, CELL2, makeWaterLook({
+    // THE FAR SHEET SINKS FURTHER. Two transparent sheets sharing one
+    // polygon offset fought for the depth buffer across the whole
+    // crossfade band — Joshua: "I did see some Z-Fighting as well."
+    // Pushing the horizon sheet deeper means the near sheet wins that
+    // tie everywhere they overlap, and nothing flickers.
+    const far = makeWaterLook({ ...skin, hole: { lo: HAND_LO, hi: HAND_HI } });
+    far.material.polygonOffsetFactor = 6;
+    far.material.polygonOffsetUnits = 40;
+    // It never writes depth either: it is the sheet UNDERNEATH, and a
+    // transparent surface that writes depth rejects the one in front.
+    far.material.depthWrite = false;
+    this.far = this.sheet(N, CELL, far, 1);
+    const nearLook = makeWaterLook({
       ...skin,
       swell: { rimLo: RIM_LO, rimHi: RIM_HI, alphaLo: HAND_LO, alphaHi: HAND_HI },
-    }), 2);
+    });
+    this.near = this.sheet(N2, CELL2, nearLook, 2);
   }
 
   private sheet(

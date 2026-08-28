@@ -7,8 +7,8 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-  DEPTH_HI, DEPTH_LO, SWELL_REACH,
-  resetSwell, seaSwellAt, swellChunk, swellTime, tickSwell,
+  KEEL, SHOAL_CAP, SWASH_LO, SWELL_REACH,
+  resetSwell, seaSwellAt, shoalAt, swellChunk, swellTime, tickSwell,
 } from '../src/world/seaSwell';
 
 afterEach(() => resetSwell());
@@ -19,10 +19,13 @@ describe('the surface', () => {
   it('never leaves sea level further than its own reach', () => {
     tickSwell(3.7);
     for (let i = 0; i < 500; i++) {
-      const y = seaSwellAt(i * 137.3, i * -91.7, DEEP);
-      expect(Math.abs(y)).toBeLessThanOrEqual(SWELL_REACH + 1e-9);
+      for (const d of [60, 200, DEEP]) {
+        const y = seaSwellAt(i * 137.3, i * -91.7, d);
+        expect(Math.abs(y)).toBeLessThanOrEqual(SWELL_REACH + 1e-9);
+      }
     }
-    expect(SWELL_REACH).toBe(10); // 7 + 3 — modest on purpose
+    // (16 + 6) shoaled at the cap — the tallest the sea can ever stand.
+    expect(SWELL_REACH).toBeCloseTo(22 * SHOAL_CAP, 6);
   });
 
   it('actually undulates — different places, different heights', () => {
@@ -49,27 +52,44 @@ describe('the surface', () => {
   });
 });
 
-describe('the shore exemption', () => {
-  it('is dead flat in water shallower than DEPTH_LO', () => {
+describe('shoaling — waves grow toward the shore', () => {
+  it('is dead flat only in the last few centimetres of swash', () => {
     tickSwell(5);
-    expect(seaSwellAt(0, 0, DEPTH_LO)).toBe(0);
-    expect(seaSwellAt(0, 0, DEPTH_LO / 2)).toBe(0);
+    expect(seaSwellAt(0, 0, SWASH_LO)).toBe(0);
     expect(seaSwellAt(0, 0, 0)).toBe(0);
   });
 
-  it('reaches full height only past DEPTH_HI', () => {
-    tickSwell(5);
-    const full = seaSwellAt(777, -777, DEEP);
-    expect(seaSwellAt(777, -777, DEPTH_HI)).toBeCloseTo(full, 9);
-    const mid = seaSwellAt(777, -777, (DEPTH_LO + DEPTH_HI) / 2);
-    expect(Math.abs(mid)).toBeLessThan(Math.abs(full) + 1e-9);
-    expect(Math.abs(mid)).toBeCloseTo(Math.abs(full) * 0.5, 1);
+  it('is TALLER in shallow water than in deep — the whole point', () => {
+    // Joshua: "offshore is smaller waves... as the waves get closer to
+    // shore they visually get taller and more obvious." Sampled at one
+    // spot and one instant, so only the depth differs.
+    tickSwell(1.3);
+    const deep = Math.abs(seaSwellAt(500, -300, DEEP));
+    const shelf = Math.abs(seaSwellAt(500, -300, 300));
+    const shallow = Math.abs(seaSwellAt(500, -300, 80));
+    expect(shelf).toBeGreaterThan(deep);
+    expect(shallow).toBeGreaterThan(shelf);
   });
 
-  it('can never trough below a shelf it fades over', () => {
-    // In the fade band the amplitude is a fraction of a column that
-    // is already deeper than the full reach at the band's top.
-    expect(DEPTH_HI).toBeGreaterThan(SWELL_REACH * 2);
+  it('follows Green\'s law, capped so a reef cannot blow it up', () => {
+    expect(shoalAt(DEEP)).toBeCloseTo(1, 2);          // deep water: as written
+    expect(shoalAt(120)).toBeGreaterThan(1.3);        // shoaling
+    expect(shoalAt(40)).toBeLessThanOrEqual(SHOAL_CAP);
+    expect(shoalAt(1)).toBe(0);                       // swash: flat again
+  });
+
+  it('never troughs below the bed it runs over', () => {
+    // The keel clamp, swept across every depth the shore offers and a
+    // full wave period of phase — the guarantee that stops the sheet
+    // driving through the sand (and z-fighting with it).
+    for (let d = 0; d <= 400; d += 7) {
+      for (let t = 0; t < 3; t += 0.05) {
+        resetSwell();
+        tickSwell(t);
+        const y = seaSwellAt(d * 13.7, -d * 9.1, d);
+        expect(y).toBeGreaterThanOrEqual(-Math.max(0, d - KEEL) - 1e-9);
+      }
+    }
   });
 });
 
@@ -86,8 +106,8 @@ describe('the shader chunk', () => {
     const glsl = swellChunk();
     // Both amplitudes, both as literals; the uniform and the two
     // accumulators the vertex shader contract names.
-    expect(glsl).toContain('7.00');
-    expect(glsl).toContain('3.00');
+    expect(glsl).toContain('16.00');
+    expect(glsl).toContain('6.00');
     expect(glsl).toContain('uTime');
     expect(glsl).toContain('sw +=');
     expect(glsl).toContain('swSlope +=');

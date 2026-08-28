@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { DEPTH_HI, DEPTH_LO, SWELL_BEAT, swellChunk } from './seaSwell';
+import { KEEL, SWELL_BEAT, shoalChunk, swellChunk } from './seaSwell';
 
 /**
  * BEYOND EXTINCTION'S WATER, WORN BY THIS ISLAND — one shader for every
@@ -201,9 +201,18 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
           vec2 swSlope = vec2(0.0);
           vec2 worldXZ = vWorld;
           ${swellChunk()}
-          float swFade = smoothstep(${DEPTH_LO.toFixed(1)}, ${DEPTH_HI.toFixed(1)}, depth)
+          // SHOALED, exactly as the CPU query shoals it (seaSwell.ts),
+          // then flattened toward this sheet's own rim so it meets the
+          // flat far sheet without a step.
+          ${shoalChunk()}
+          float swFade = shoal
             * (1.0 - smoothstep(${swell.rimLo.toFixed(1)}, ${swell.rimHi.toFixed(1)}, length(position.xz)));
-          transformed.y += sw * swFade;
+          // …and a trough never cuts below the bed. Without this the
+          // sheet drives through the sand in the shallows, which reads
+          // as z-fighting because it IS the sheet and the seabed
+          // trading places.
+          float lift = max(sw * swFade, -max(0.0, depth - ${KEEL.toFixed(1)}));
+          transformed.y += lift;
           vSwell = swSlope * swFade;
           vSheet = length(position.xz);
         }` : ''));
@@ -351,6 +360,7 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
           diffuseColor.a *= 1.0 - smoothstep(${opts.swell.alphaLo.toFixed(1)}, ${opts.swell.alphaHi.toFixed(1)}, vSheet);` : ''}${opts.hole ? `
           // And the far sheet stands aside where the near one rides.
           diffuseColor.a *= smoothstep(${opts.hole.lo.toFixed(1)}, ${opts.hole.hi.toFixed(1)}, distance(vWorld, uHole));` : ''}
+
           if (diffuseColor.a < 0.01) discard;
         }`)
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>

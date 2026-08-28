@@ -666,6 +666,19 @@ export class IslandScene {
           herY: this.ant.root.position.y,
         };
       },
+      sheets: () => this.scene.children
+        .filter((o) => (o as THREE.Mesh).isMesh
+          && ((o as THREE.Mesh).geometry?.getAttribute('depth')))
+        .map((o) => {
+          const m = o as THREE.Mesh;
+          return {
+            verts: m.geometry.getAttribute('position').count,
+            order: m.renderOrder,
+            visible: m.visible,
+            pos: [Math.round(m.position.x), Math.round(m.position.y), Math.round(m.position.z)],
+            colour: (m.material as THREE.MeshStandardMaterial).color.getHexString(),
+          };
+        }),
       // Probe-only: set her air, so a 45-second drain does not cost a
       // headless run ten slow-motion minutes to reach the interesting
       // part.

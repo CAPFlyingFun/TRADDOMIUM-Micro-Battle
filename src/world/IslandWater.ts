@@ -355,7 +355,17 @@ export class IslandWater {
     const relief = reliefScale();
     for (let i = 0; i < this.depthAttr.length; i++) {
       const d = this.sim.depth[i];
-      this.depthAttr[i] = d;
+      // THE FRESH SHEET STANDS DOWN OVER THE SEA, and this is not
+      // cosmetic. The window follows her everywhere, sea included, and
+      // in rain its cells out there hold a millimetre of film: three
+      // percent alpha — invisible — but it still WROTE DEPTH, and
+      // being a film it is lifted toward the camera, so it silently
+      // occluded the entire near ocean sheet. Every wave drawn for two
+      // versions was hidden behind rain nobody could see, which is why
+      // the sea looked like glass while the queen bobbed on swell she
+      // could feel. Below sea level the ocean owns the water — the
+      // same rule the query already follows (see the constructor).
+      this.depthAttr[i] = this.base[i] < 0 ? 0 : d;
       this.pos[i * 3 + 1] = this.base[i] + d * relief;
       // The CURRENT under every vertex, so the skin drifts at the
       // water's own speed — Joshua: "water speed as the water moves".

@@ -22,33 +22,74 @@
  *
  * REAL DISPERSION AT ANT SCALE. Each wave runs at the deep-water
  * speed physics gives its wavelength (omega = sqrt(g * k), g in
- * cm/s^2 like everything else here), so the twelve-metre swell
- * genuinely outruns the six-metre wind sea. At her scale a
- * seven-centimetre amplitude is a rolling hill seven body lengths
- * high — moderate real water is already dramatic, which is why the
- * numbers are modest.
+ * cm/s^2 like everything else here), so the nine-metre swell
+ * genuinely outruns the shorter wind sea. At her scale a nine-
+ * centimetre amplitude is a rolling hill nine body lengths high, and
+ * shoaled at the shore it is nearer twenty-five.
  *
- * THE SHORE IS EXEMPT. Amplitude fades with the water column
- * (DEPTH_LO..DEPTH_HI): waves die before the beach so the feathered
- * waterline the shoreline fought for is untouched, and no trough can
- * ground on a shelf shallower than the swell is tall. Breaking surf,
- * when it comes, is a different mechanism and a later pass.
+ * THE SHORE IS WHERE THEY GROW, not where they die — see the
+ * shoaling block below. Only the last few centimetres of swash flatten
+ * out, so the feathered waterline is untouched, and a trough is kept
+ * off the bed by KEEL.
  */
 
 /** Gravity, in the world's own units — centimetres per second squared. */
 const G = 981;
 
 /**
- * Where the swell starts feeling the bottom and gives up, in depth.
- * Pulled IN at v0.0.80: the first band (50..250) kept the whole of a
- * knee-deep reef flat glassy — exactly where Joshua went swimming —
- * and "the ocean goes up and down but visually it's still flat" was
- * this fade doing its job too widely. Waves now live from shin-deep
- * water out, and the reach still fits the column with room to spare
- * (see the trough test).
+ * SHOALING — waves GROW toward the shore, they do not fade away.
+ *
+ * The first two cuts of this file faded amplitude to nothing in
+ * shallow water, to protect the beach. That is backwards, and Joshua
+ * caught it twice: "the ocean goes up and down but visually it's
+ * still flat", then "offshore is smaller waves... as the waves get
+ * closer to shore they visually get taller and more obvious." He is
+ * describing shoaling, which is what real water does — a wave slows
+ * over a rising bottom, its energy packs into a shorter, taller form,
+ * and it steepens until it breaks.
+ *
+ * Green's law gives the height as depth^(-1/4). REFERENCE_DEPTH is
+ * where the table's amplitudes are the honest ones; shallower water
+ * multiplies them, capped at SHOAL_CAP so the arithmetic cannot run
+ * away over a reef. Only in the last few centimetres — the swash,
+ * where the foam takes over — does a taper bring the surface back to
+ * flat, so the feathered waterline stays exactly where it was.
+ *
+ * WHY IT MATTERS VISUALLY: a wave reads by its SLOPE, not its height.
+ * Amplitude times wavenumber is that slope, and offshore this table
+ * is about 4 degrees — invisible at the grazing angle an ant sees.
+ * Shoaled at the shore it is nearer fifteen, which is a wave you can
+ * watch coming.
  */
-export const DEPTH_LO = 20;
-export const DEPTH_HI = 120;
+export const REFERENCE_DEPTH = 700;
+export const SHOAL_CAP = 2.2;
+/** Below this the swash flattens the surface; above it, full shoaling. */
+export const SWASH_LO = 6;
+export const SWASH_HI = 34;
+/**
+ * A trough may not cut below the bed — it stops this far above it.
+ * Without this a shoaled wave in shallow water drives the sheet
+ * through the sand, which is both wrong and a z-fight.
+ */
+export const KEEL = 4;
+
+/**
+ * How much this depth multiplies the table's amplitudes. The GLSL in
+ * shoalChunk() computes exactly this; if one changes the other must.
+ */
+export function shoalAt(depth: number): number {
+  const grown = Math.pow(REFERENCE_DEPTH / Math.max(depth, 30), 0.25);
+  const capped = Math.min(SHOAL_CAP, Math.max(1, grown));
+  const t = Math.min(1, Math.max(0, (depth - SWASH_LO) / (SWASH_HI - SWASH_LO)));
+  return capped * (t * t * (3 - 2 * t));
+}
+
+/** The same, as GLSL, from a `depth` in scope into `shoal`. */
+export function shoalChunk(): string {
+  return `
+          float shoal = clamp(pow(${REFERENCE_DEPTH.toFixed(1)} / max(depth, 30.0), 0.25), 1.0, ${SHOAL_CAP.toFixed(2)})
+            * smoothstep(${SWASH_LO.toFixed(1)}, ${SWASH_HI.toFixed(1)}, depth);`;
+}
 
 interface Wave {
   /** Unit propagation direction. */
@@ -82,12 +123,19 @@ function wave(lambda: number, amp: number, towardDeg: number): Wave {
  * the weather chip keeps reporting, running toward the west-southwest.
  */
 const WAVES: readonly Wave[] = [
-  wave(1200, 7, 245), // the swell: 12 m, 14 cm trough-to-crest, T 2.8 s
-  wave(640, 3, 222),  // wind sea: 6.4 m, 6 cm, T 2.0 s
+  // STEEPNESS IS WHAT YOU SEE, and the first three cuts of this table
+  // had none: 13 cm of amplitude spread over nine metres is a slope of
+  // three degrees, which at an ant's grazing view is a flat sheet that
+  // nonetheless carries her up and down — "I am above and below the
+  // surface, haha." These are short and tall enough to READ: about
+  // twelve degrees of face offshore, and half again as steep once
+  // shoaling has hold of them at the shore.
+  wave(360, 16, 245), // the swell: 3.6 m, 32 cm crest-to-trough, T 1.5 s
+  wave(210, 6, 222),  // wind sea: 2.1 m, 12 cm, T 1.1 s
 ];
 
 /** The most the surface can ever leave sea level, either way. */
-export const SWELL_REACH = WAVES.reduce((sum, w) => sum + w.amp, 0);
+export const SWELL_REACH = WAVES.reduce((sum, w) => sum + w.amp, 0) * SHOAL_CAP;
 
 /**
  * The primary swell's angular frequency — the BEAT of the sea. The
@@ -120,24 +168,19 @@ export function resetSwell(): void {
   clock = 0;
 }
 
-/** Smoothstep, the shader's, so both sides fade identically. */
-function smooth(lo: number, hi: number, x: number): number {
-  const t = Math.min(1, Math.max(0, (x - lo) / (hi - lo)));
-  return t * t * (3 - 2 * t);
-}
-
 /**
  * How far the sea surface stands from y = 0 at this spot, NOW (the
  * module clock), over a column `depth` deep. Positive is a crest.
  */
 export function seaSwellAt(wx: number, wz: number, depth: number): number {
-  const fade = smooth(DEPTH_LO, DEPTH_HI, depth);
-  if (fade <= 0) return 0;
+  const shoal = shoalAt(depth);
+  if (shoal <= 0) return 0;
   let y = 0;
   for (const w of WAVES) {
     y += w.amp * Math.cos((wx * w.dx + wz * w.dz) * w.k - w.omega * clock);
   }
-  return y * fade;
+  // A trough cannot cut below the bed it is running over.
+  return Math.max(y * shoal, -Math.max(0, depth - KEEL));
 }
 
 /**
