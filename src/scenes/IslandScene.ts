@@ -277,6 +277,8 @@ export class IslandScene {
   /** Vertical speed in the water, measured and eased for the eye. */
   private swimVs = 0;
   private lastSwimAlt: number | null = null;
+  /** Water standing over where she rides — the DEPTH readout. */
+  private swimOver = 0;
   /** Her air, held while the head is under (breath.ts). */
   private readonly breath = new Breath();
   /** The sea's clock on her (brine.ts). */
@@ -360,7 +362,13 @@ export class IslandScene {
     // Driven from breath in update(); the transition smooths the steps.
     this.dim = document.createElement('div');
     Object.assign(this.dim.style, {
-      position: 'fixed', inset: '0', background: '#000',
+      position: 'fixed', inset: '0',
+      // TUNNEL VISION, not a uniform dim: the rim goes first and the
+      // centre lags well behind, so the world narrows the way sight
+      // does. At full opacity the centre still passes ~45% of the
+      // frame — the "barely" in barely see.
+      background:
+        'radial-gradient(ellipse at center, rgba(0,0,0,0.55) 0%, rgba(0,0,0,0.82) 45%, rgba(0,0,0,0.97) 75%, #000 100%)',
       opacity: '0', pointerEvents: 'none', zIndex: '1',
       transition: 'opacity 400ms linear',
     } as Partial<CSSStyleDeclaration>);
@@ -1120,6 +1128,7 @@ export class IslandScene {
       // standing over where she rides, with a little hysteresis so
       // bobbing at one body length cannot flick her breath on and off.
       const overHer = wade.depth - wade.above;
+      this.swimOver = Math.max(0, overHer);
       this.headUnder = overHer > (this.headUnder ? 0.6 : 1.0);
       // Only charge her for a sprint she is actually getting: calling
       // for one while stopped or reversing costs nothing. Afloat the
@@ -1210,7 +1219,11 @@ export class IslandScene {
         // goes, drift over the island where GND goes, the current
         // where the wind goes.
         air: hudUp
-          ? { heading: telemetry.heading, speed: telemetry.airspeed }
+          ? {
+            heading: telemetry.heading,
+            speed: telemetry.airspeed,
+            label: swimming ? 'SWIM' : undefined,
+          }
           : null,
         ground: hudUp
           ? {
@@ -1226,6 +1239,7 @@ export class IslandScene {
           ? {
             speed: telemetry.wind.speed,
             relative: telemetry.wind.bearing - telemetry.heading,
+            label: swimming ? 'CUR' : undefined,
             call: windCall(
               telemetry.wind.speed,
               Math.cos(
@@ -1282,8 +1296,9 @@ export class IslandScene {
     }
     this.vitals.aloft(this.flight.aloft);
     this.vitals.show(this.stamina.fraction, this.stamina.spent, this.effort);
-    this.vitals.air(this.breath.fraction);
+    this.vitals.air(this.breath.fraction, this.headUnder);
     this.vitals.showHealth(this.hp / liveStat('maxHealth'), this.hp, this.brine.burning);
+    this.vitals.saltStatus(this.brine.burning ? 'burning' : inSalt ? 'in' : 'none');
     this.vitals.thirst(this.thirst.fraction, this.thirst.parched, false, 0);
 
     // NOTHING TO TICK. The grace is a deadline, so the only question
@@ -1829,6 +1844,7 @@ export class IslandScene {
     }
     this.lastSwimAlt = altitude;
     return {
+      water: { over: this.swimOver },
       airspeed: thru,
       groundSpeed: Math.hypot(ground.x, ground.z),
       heading: bearingFromHeading(this.ant.bearing),

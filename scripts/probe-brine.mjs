@@ -32,6 +32,7 @@ await page.mouse.up();
 await page.evaluate(() => { const w = window.__island.where(); window.__island.putAt(w[0], w[2], 0); });
 await page.waitForFunction(() => window.__island.wading().afloat, null, { timeout: 60000, polling: 500 });
 console.log('afloat:', JSON.stringify(await read()));
+await page.screenshot({ path: '/tmp/brine-afloat.png' });
 await page.waitForTimeout(10000);
 console.log('10 s later (salt should grow, air full):', JSON.stringify(await read()));
 // Dive and hold.

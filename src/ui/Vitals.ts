@@ -72,7 +72,13 @@ const AIR_R = 19.5;
 const AIR_ROUND = 2 * Math.PI * AIR_R;
 const AIR_FULL = 'rgba(150, 214, 255, .92)';
 const AIR_LOW = '#ffb03a';
-const AIR_OUT = '#ff7a5c';
+const AIR_BAD = '#ff8c42';
+const AIR_OUT = '#ff5a4a';
+/** The ring's colour stages, matching the veil's onset at 30%. */
+const AIR_WARN_AT = 0.30;
+const AIR_BAD_AT = 0.15;
+/** How long a refilled ring lingers before it excuses itself, ms. */
+const AIR_LINGER_MS = 1600;
 
 export class Vitals {
   private readonly panel: HTMLDivElement;
@@ -80,6 +86,10 @@ export class Vitals {
   private readonly airRing: SVGCircleElement;
   private readonly airText: SVGTextElement;
   private shownAir = -1;
+  private airShown = false;
+  private airHideAt = 0;
+  private readonly salt: HTMLDivElement;
+  private shownSalt = '';
 
   private readonly grace: HTMLDivElement;
   private shown = '';
@@ -146,6 +156,16 @@ export class Vitals {
     );
     this.airText.textContent = '100%';
     gauge.append(track, this.airRing, this.airText);
+    // CONTEXTUAL: born invisible; air() fades it in when breathing
+    // becomes a thing worth watching, and out again after.
+    gauge.style.opacity = '0';
+    if (!document.getElementById('tmb-air-pulse')) {
+      const pulse = document.createElement('style');
+      pulse.id = 'tmb-air-pulse';
+      pulse.textContent =
+        '@keyframes tmb-air-pulse { 50% { opacity: .35; } }';
+      document.head.appendChild(pulse);
+    }
 
     const left = document.createElement('div');
     Object.assign(left.style, {
@@ -213,6 +233,25 @@ export class Vitals {
       whiteSpace: 'nowrap',
     } as Partial<CSSStyleDeclaration>);
     stack.appendChild(this.grace);
+
+    // THE SEA AS A STATUS, NOT A METER. Salt exposure is the first of
+    // a family (venom, cold, wet…) that would each have demanded a
+    // bar; a transient chip and the health row tell the whole story
+    // between them. 🌊 while she is in the sea and the grace holds;
+    // ⚠ when the exposure starts costing blood.
+    this.salt = document.createElement('div');
+    this.salt.dataset.ui = 'salt';
+    Object.assign(this.salt.style, {
+      display: 'none',
+      marginTop: '2px',
+      padding: '3px 7px',
+      borderRadius: '6px',
+      alignSelf: 'flex-start',
+      font: '600 10px/1.3 "JetBrains Mono", ui-monospace, monospace',
+      whiteSpace: 'nowrap',
+      transition: 'opacity 300ms ease',
+    } as Partial<CSSStyleDeclaration>);
+    stack.appendChild(this.salt);
 
     this.panel.append(left, stack);
     host.appendChild(this.panel);
@@ -288,24 +327,50 @@ export class Vitals {
   }
 
 
-  /** How much air she has, 0 to 1 — the ring under the portrait. */
-  air(fraction: number): void {
+  /**
+   * How much air she has, 0 to 1 — the ring under the portrait — and
+   * whether her head is under.
+   *
+   * CONTEXTUAL NOW: on dry land the ring is simply not there. It
+   * fades in when her head goes under or the reserve is anything
+   * short of full, and when she surfaces and refills it lingers a
+   * moment — long enough to read "that was close" — and excuses
+   * itself. Its mere appearance means something is happening with
+   * her breathing, which is a stronger signal than a number that
+   * says 100% for an hour.
+   */
+  air(fraction: number, under: boolean): void {
     const shown = Math.round(Math.min(1, Math.max(0, fraction)) * 100);
+    const wants = under || shown < 100;
+    if (wants) this.airHideAt = 0;
+    else if (this.airShown && this.airHideAt === 0) {
+      this.airHideAt = Date.now() + AIR_LINGER_MS;
+    }
+    const visible = wants || (this.airShown && Date.now() < this.airHideAt);
+    if (visible !== this.airShown) {
+      this.airShown = visible;
+      const gauge = this.airRing.parentElement;
+      if (gauge) {
+        gauge.style.transition = 'opacity 400ms ease';
+        gauge.style.opacity = visible ? '1' : '0';
+      }
+    }
     if (shown === this.shownAir) return;
     this.shownAir = shown;
     this.airText.textContent = `${shown}%`;
     this.airRing.setAttribute(
       'stroke-dashoffset', String(AIR_ROUND * (1 - shown / 100)),
     );
-    const tone = shown <= 0 ? AIR_OUT : shown < 25 ? AIR_LOW : AIR_FULL;
+    // Blue while fine, gold from the veil's own 30%, orange from 15%,
+    // out-red at zero — with a slow pulse, because a zero that sits
+    // still reads as a broken gauge rather than an emergency.
+    const tone = shown <= 0 ? AIR_OUT
+      : shown < AIR_BAD_AT * 100 ? AIR_BAD
+        : shown < AIR_WARN_AT * 100 ? AIR_LOW : AIR_FULL;
     this.airRing.setAttribute('stroke', tone);
     this.airText.setAttribute('fill', tone);
-    // FULL AND DRY IT SITS BACK. A gauge that reads 100% for an hour
-    // is a number nobody looks at; the same gauge at 40% should be the
-    // only thing on this card worth reading.
-    this.airRing.parentElement?.style.setProperty(
-      'opacity', shown >= 100 ? '0.34' : '1',
-    );
+    this.airRing.style.animation = shown <= 0
+      ? 'tmb-air-pulse 1.1s ease-in-out infinite' : '';
   }
 
   /**
@@ -328,6 +393,32 @@ export class Vitals {
     this.health.icon.style.color = tone;
     this.health.read.style.color = stinging ? SPENT : left < 1 ? GOLD : RESTING;
     this.health.read.textContent = `${Math.round(points)}`;
+  }
+
+  /**
+   * The sea's status chip. 'in' while her body is in salt water and
+   * the grace holds; 'burning' once exposure is costing blood; 'none'
+   * hides it. See its construction for why a chip and not a meter.
+   */
+  saltStatus(state: 'none' | 'in' | 'burning'): void {
+    if (state === this.shownSalt) return;
+    this.shownSalt = state;
+    if (state === 'none') {
+      this.salt.style.display = 'none';
+      return;
+    }
+    this.salt.style.display = '';
+    if (state === 'in') {
+      this.salt.textContent = '🌊 SALTWATER';
+      this.salt.style.background = SAFE_FILL;
+      this.salt.style.border = `1px solid ${SAFE_EDGE}`;
+      this.salt.style.color = SAFE_TEXT;
+    } else {
+      this.salt.textContent = '⚠ SALT EXPOSURE';
+      this.salt.style.background = 'rgba(255, 110, 90, .14)';
+      this.salt.style.border = '1px solid rgba(255, 110, 90, .55)';
+      this.salt.style.color = SPENT;
+    }
   }
 
   /**

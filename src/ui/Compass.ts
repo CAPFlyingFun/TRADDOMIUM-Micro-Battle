@@ -137,6 +137,9 @@ export interface AirLine {
   readonly heading: number;
   /** Through the air, world units per second. */
   readonly speed: number;
+  /** Row label. "AIR" unless the medium says otherwise — "SWIM" in
+   *  the water, where the same number is speed through THAT medium. */
+  readonly label?: string;
 }
 
 /** Where she is actually going, and how fast over the island. */
@@ -167,6 +170,8 @@ export interface WindLine {
   readonly relative: number;
   /** A warning, or empty. */
   readonly call: string;
+  /** Prefix — nothing for the wind, "CUR" when it is the current. */
+  readonly label?: string;
 }
 
 /**
@@ -517,7 +522,7 @@ export class Compass {
     if (air) {
       // Her heading, not the tape's: they are different questions and
       // showing the tape's twice would answer neither.
-      const line = `AIR ${
+      const line = `${air.label ?? 'AIR'} ${
         String(Math.round(wrap360(air.heading)) % 360).padStart(3, '0')}° @ ${
         air.speed.toFixed(1)} cm/s`;
       if (line !== this.lastAir) {
@@ -550,7 +555,7 @@ export class Compass {
 
     const wind = under?.wind ?? null;
     if (wind) {
-      const line = `${wind.speed.toFixed(1)} cm/s${wind.call ? `  ⚠ ${wind.call}` : ''}`;
+      const line = `${wind.label ? `${wind.label} ` : ''}${wind.speed.toFixed(1)} cm/s${wind.call ? `  ⚠ ${wind.call}` : ''}`;
       if (line !== this.lastWind) {
         this.lastWind = line;
         this.windText.textContent = line;

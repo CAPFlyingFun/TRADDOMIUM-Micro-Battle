@@ -174,14 +174,21 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
           // ocean, a still lake) rn0 == rn1 and the crossfade is a
           // no-op at FULL contrast; offsets here would blur exactly
           // the water that holds still enough to look at.
-          rn0 += (texture2D(uRipple, rrot(0.0) * (wp - a0) / 865.0 + uTime * vec2( 0.021, 0.013)).xyz - 0.5);
-          rn1 += (texture2D(uRipple, rrot(0.0) * (wp - a1) / 865.0 + uTime * vec2( 0.021, 0.013)).xyz - 0.5);
-          rn0 += (texture2D(uRipple, rrot(2.1) * (wp - a0) /  435.0 - uTime * vec2( 0.017, 0.024)).xyz - 0.5) * 0.8;
-          rn1 += (texture2D(uRipple, rrot(2.1) * (wp - a1) /  435.0 - uTime * vec2( 0.017, 0.024)).xyz - 0.5) * 0.8;
-          rn0 += (texture2D(uRipple, rrot(4.3) * (wp - a0) /  195.0 + uTime * vec2( 0.032,-0.019)).xyz - 0.5) * 0.65;
-          rn1 += (texture2D(uRipple, rrot(4.3) * (wp - a1) /  195.0 + uTime * vec2( 0.032,-0.019)).xyz - 0.5) * 0.65;
-          rn0 += (texture2D(uRipple, rrot(1.2) * (wp - a0) /   75.0 + uTime * vec2(-0.045, 0.05 )).xyz - 0.5) * 0.7;
-          rn1 += (texture2D(uRipple, rrot(1.2) * (wp - a1) /   75.0 + uTime * vec2(-0.045, 0.05 )).xyz - 0.5) * 0.7;
+          //
+          // THE LADDER IS ANCHORED AT ONE METRE. Joshua's water map is
+          // authored as a 1 x 1 m patch at full resolution, so the
+          // dominant octave tiles at exactly 100 units — its chop
+          // appears at the size it was painted. The larger octaves
+          // exist to break the tiling and shade broad swell; the small
+          // one is near-field sparkle.
+          rn0 += (texture2D(uRipple, rrot(0.0) * (wp - a0) / 865.0 + uTime * vec2( 0.021, 0.013)).xyz - 0.5) * 0.6;
+          rn1 += (texture2D(uRipple, rrot(0.0) * (wp - a1) / 865.0 + uTime * vec2( 0.021, 0.013)).xyz - 0.5) * 0.6;
+          rn0 += (texture2D(uRipple, rrot(2.1) * (wp - a0) / 230.0 - uTime * vec2( 0.017, 0.024)).xyz - 0.5) * 0.7;
+          rn1 += (texture2D(uRipple, rrot(2.1) * (wp - a1) / 230.0 - uTime * vec2( 0.017, 0.024)).xyz - 0.5) * 0.7;
+          rn0 += (texture2D(uRipple, rrot(4.3) * (wp - a0) / 100.0 + uTime * vec2( 0.032,-0.019)).xyz - 0.5);
+          rn1 += (texture2D(uRipple, rrot(4.3) * (wp - a1) / 100.0 + uTime * vec2( 0.032,-0.019)).xyz - 0.5);
+          rn0 += (texture2D(uRipple, rrot(1.2) * (wp - a0) /  45.0 + uTime * vec2(-0.045, 0.05 )).xyz - 0.5) * 0.5;
+          rn1 += (texture2D(uRipple, rrot(1.2) * (wp - a1) /  45.0 + uTime * vec2(-0.045, 0.05 )).xyz - 0.5) * 0.5;
           gRn = mix(rn0, rn1, xf);
 
           // COLOUR. Three stops, wide handovers — the wearer picks
@@ -218,7 +225,7 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
           float surfN = texture2D(uRipple, vWorld / 300.0 + uTime * vec2(0.05, 0.03)).r;
           float foam = surf * smoothstep(0.60, 0.86, surfN);
           // Open-water caps. The wave map's slope energy runs in thin
-          // ridge LINES (Joshua's PBR water normal, sd ~24/255), and a
+          // crest LINES (Joshua's 1x1 m chop map, sd 19-34/255), and a
           // bare threshold paints those lines as white scratches. Gating
           // against the second, independently scrolling sample keeps
           // only the spots where the two patterns cross — beads of

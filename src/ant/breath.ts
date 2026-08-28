@@ -77,11 +77,15 @@ export const SHORT = 0.25;
  */
 export const FADE_FROM = 0.3;
 /**
- * How much of the world is gone at zero air. NOT all of it — "at 0%
- * you can still barely see" — because a screen gone fully black is a
- * screen the player cannot steer up out of, and up is the whole answer.
+ * How much of the world is gone at zero air. The veil is a TUNNEL —
+ * a radial gradient whose rim runs ahead of its centre — so even at
+ * this near-total opacity the middle of the screen stays barely
+ * readable: "at 0% you can still barely see", because a screen gone
+ * fully black is a screen the player cannot steer up out of, and up
+ * is the whole answer. Vision narrows before it fails, which is also
+ * simply what hypoxia does.
  */
-export const FADE_TO = 0.86;
+export const FADE_TO = 0.97;
 /**
  * What running dry costs, in health a second, ON TOP of anything the
  * salt is doing. She still cannot simply drown at the surface — an

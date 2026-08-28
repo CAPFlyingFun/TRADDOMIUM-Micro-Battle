@@ -196,6 +196,7 @@ export class FlightHud {
   private shownAlt = Number.NaN;
   private shownMsl = '';
   private shownLand = '';
+  private wasWater = false;
   private shownVs = Number.NaN;
   private shownTgt = '';
   private readonly path: HTMLDivElement;
@@ -609,8 +610,19 @@ export class FlightHud {
       this.shownMsl = msl;
       this.mslRead.textContent = msl;
     }
-    const land = now.shownAtLanding === null
-      ? '——' : readHeight(now.shownAtLanding);
+    // IN THE WATER THE ROW CHANGES QUESTION: not "how far down to the
+    // landing" but "how far under am I" — same slot, same voice,
+    // relabelled DEPTH and fed how much water stands over her.
+    const swimming = Boolean(now.water);
+    if (swimming !== this.wasWater) {
+      this.wasWater = swimming;
+      const tag = this.landRow.firstChild as HTMLElement | null;
+      if (tag) tag.textContent = swimming ? 'DEPTH' : 'LND';
+    }
+    const land = swimming
+      ? readHeight(Math.max(0, now.water?.over ?? 0))
+      : now.shownAtLanding === null
+        ? '——' : readHeight(now.shownAtLanding);
     if (land !== this.shownLand) {
       this.shownLand = land;
       this.landRead.textContent = land;
@@ -649,7 +661,8 @@ export class FlightHud {
     // stand down when she is holding her altitude with nothing ahead.
     //
     // MSL and VS never go, because those two ARE the flight.
-    const approaching = now.shownWhen !== null
+    const approaching = Boolean(now.water)
+      || now.shownWhen !== null
       || now.shownAtLanding !== null
       || now.climbing < -SETTLED_SINK;
     const want = approaching ? '1' : '0';

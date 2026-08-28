@@ -58,6 +58,14 @@ export interface Predicted {
 }
 
 export interface FlightTelemetry {
+  /**
+   * Set when this telemetry is measured from the WATER instead of the
+   * air: `over` is how much water stands over where she rides. The
+   * panel swaps its LND row for DEPTH while this is present — a
+   * swimmer is not on approach to anywhere, but she very much wants
+   * to know how far under she is.
+   */
+  readonly water?: { readonly over: number } | null;
   readonly airspeed: number;
   readonly groundSpeed: number;
   /** Compass degrees. Where her nose points. */
