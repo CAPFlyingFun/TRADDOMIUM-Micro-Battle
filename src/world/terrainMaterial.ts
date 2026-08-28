@@ -372,6 +372,21 @@ export function groundShader(
           + avg_mountain * wMount + avg_snow * wSnow;
         ground = mix(ground, mean / total, far);
 
+        // UNDERWATER GROUND. Below sea level the bed is wet and lit
+        // through a column of sea: it cools toward blue-green over the
+        // first arm's-reach of depth and darkens as the light dies
+        // further down. This is what makes shin-deep water over bright
+        // sand READ as water even where the sheet above it is nearly
+        // clear (Joshua: "too transparent and hard to see... it's all
+        // sand") — and it survives the far fade above because it is
+        // applied after it. Colour only; the heightfield is untouched.
+        if (h < 0.0) {
+          float dip = smoothstep(0.0, 90.0, -h);
+          float deep = smoothstep(90.0, 700.0, -h);
+          ground *= mix(vec3(1.0), vec3(0.60, 0.78, 0.80), dip);
+          ground *= mix(1.0, 0.45, deep);
+        }
+
         // The fine grain rides on top at a tile size that shares no
         // factor with the band tile, so close up there is always
         // something moving past even mid-way through one band tile.

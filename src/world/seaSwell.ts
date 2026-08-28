@@ -38,9 +38,17 @@
 /** Gravity, in the world's own units — centimetres per second squared. */
 const G = 981;
 
-/** Where the swell starts feeling the bottom and gives up, in depth. */
-export const DEPTH_LO = 50;
-export const DEPTH_HI = 250;
+/**
+ * Where the swell starts feeling the bottom and gives up, in depth.
+ * Pulled IN at v0.0.80: the first band (50..250) kept the whole of a
+ * knee-deep reef flat glassy — exactly where Joshua went swimming —
+ * and "the ocean goes up and down but visually it's still flat" was
+ * this fade doing its job too widely. Waves now live from shin-deep
+ * water out, and the reach still fits the column with room to spare
+ * (see the trough test).
+ */
+export const DEPTH_LO = 20;
+export const DEPTH_HI = 120;
 
 interface Wave {
   /** Unit propagation direction. */

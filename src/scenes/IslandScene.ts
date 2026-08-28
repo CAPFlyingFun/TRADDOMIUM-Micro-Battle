@@ -106,19 +106,20 @@ const GAP_TOLERANCE = 100;
 /** Vertices per side within a section, up close and far away. */
 
 /**
- * How fast the eased dive chases the lever, per second. Slow enough to
- * read as swimming rather than as a lift — two and a bit e-folds a
- * second puts a full-depth dive at about a second and a half.
+ * How fast the eased dive chases the lever, per second. Halved at
+ * v0.0.80 (Joshua: "the dive is too fast underwater and the speed
+ * could be split in half") — a full-depth dive is a deliberate three
+ * seconds of work now, swimming down rather than sinking.
  */
-const DIVE_EASE = 1.8;
+const DIVE_EASE = 0.9;
 /**
- * And 20% faster on the way UP than the way down (Joshua: "a little
- * more buoyancy"). Asymmetric on purpose: going down she is working
- * against her own float, coming up the water is doing the work — the
- * ease is standing in for buoyancy, so buoyancy gets the bigger
- * number.
+ * The way UP keeps its old pace — the halving was asked of the DIVE,
+ * and buoyancy is not hers to slow: going down she is working against
+ * her own float, coming up the water is doing the work (Joshua: "a
+ * little more buoyancy", v0.0.72). Numerically this is the previous
+ * 1.2 x the previous dive ease.
  */
-const RISE_EASE = DIVE_EASE * 1.2;
+const RISE_EASE = 2.16;
 
 export class IslandScene {
   private readonly scene = new THREE.Scene();

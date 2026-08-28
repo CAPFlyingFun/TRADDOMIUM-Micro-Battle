@@ -144,7 +144,11 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
     roughness: 0.18,
     metalness: 0.1,
     transparent: true,
-    opacity: 0.58, // BE v0.0.139: the SHALLOW value; the shader grades up
+    // BE's shallow value was 0.58; nudged up because a film of sea
+    // over bright sand was disappearing entirely (Joshua: "the water
+    // right at the sand side is too transparent and hard to see").
+    // The shader still grades up from here with depth.
+    opacity: 0.63,
     envMapIntensity: 0.9,
     normalScale: new THREE.Vector2(0.55, 0.55),
     side: THREE.DoubleSide, // she swims; the sheet must exist from below
@@ -281,10 +285,11 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
           diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.90, 0.95, 0.97), foam);
 
           // BE's clear-water alpha: see the sand at the waterline, a
-          // real body offshore, foam near-opaque. BE's own band — tying
-          // it to the colour bands washed the beach out ("you faded
-          // sand and the ocean foam and water too much").
-          diffuseColor.a *= mix(1.0, 1.55, smoothstep(40.0, 550.0, depth));
+          // real body offshore, foam near-opaque. BE's band started at
+          // 40..550; it starts sooner now so shin-deep water over sand
+          // is visibly WATER — the waterline feather itself is edge's
+          // job and unchanged.
+          diffuseColor.a *= mix(1.0, 1.55, smoothstep(15.0, 320.0, depth));
           diffuseColor.a = min(diffuseColor.a, 0.82);
           diffuseColor.a = mix(diffuseColor.a, 0.95, foam);
           diffuseColor.a *= edge;${opts.swell ? `
