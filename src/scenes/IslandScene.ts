@@ -31,7 +31,7 @@ import { originAt, rebaseFor, setOrigin, toLocal, toWorld,
 import { bakeGrain, GRAIN_SIZE } from '../world/groundTexture';
 import {
   BAND_TILE, FADE_FROM_UNIFORM, FADE_TO_UNIFORM,
-  loadBands, reliefUniform, setDetailRange, setTextureOrigin, terrainMaterial,
+  loadBands, reliefUniform, setDetailLift, setDetailRange, setTextureOrigin, terrainMaterial,
 } from '../world/terrainMaterial';
 import { SettingsPanel } from '../ui/SettingsPanel';
 import { PauseMenu } from '../ui/PauseMenu';
@@ -112,6 +112,18 @@ const GAP_TOLERANCE = 100;
  * seconds of work now, swimming down rather than sinking.
  */
 const DIVE_EASE = 0.9;
+/**
+ * How far above the floor the ground texture's reach stops growing —
+ * ten metres, which is what Joshua asked for by name.
+ */
+const DETAIL_FULL_AT = 1_000;
+/**
+ * And how much further it reaches by then. Texel thresholds scale
+ * with the SQUARE of distance, so sixteen times the texels is four
+ * times the radius: the patch of sharp ground under her at ten metres
+ * is about as wide as the patch she had at one.
+ */
+const DETAIL_LIFT = 16;
 /**
  * The way UP keeps its old pace — the halving was asked of the DIVE,
  * and buoyancy is not hers to slow: going down she is working against
@@ -1405,6 +1417,35 @@ export class IslandScene {
       this.water?.place();
       this.ocean?.place();
     }
+    // THE GROUND'S DETAIL FOLLOWS HER UP.
+    //
+    // The fade is measured in TEXELS PER PIXEL, which is the honest
+    // unit for "is there any pattern left to see" — but it means the
+    // reach is fixed in metres while her eye is not. Standing on the
+    // sand a pixel covers a few texels and the grain is crisp; a metre
+    // up the same pixel covers a hundred and the ground is a wash, and
+    // at three and a half metres it is the same wash, which is Joshua's
+    // "1 m vs 3.5 m off the ground looked the same even with details at
+    // 200%". The dial could not fix it because the dial is a multiple
+    // of a ground-level baseline.
+    //
+    // So the reach RISES WITH HER, over the ten metres of AGL/AWL she
+    // asked for, and stops there: past ten metres the ground genuinely
+    // is far away and a fade is the truth rather than a compromise.
+    // The camera's grazing angle — the thing that streaks when the fade
+    // is pushed too far at ground level — is exactly what altitude
+    // takes away, so the range that smears underfoot is safe from up
+    // here. On the ground the dial behaves precisely as before.
+    const climb = Math.min(1, Math.max(0, this.flight.height / DETAIL_FULL_AT));
+    const eased = climb * climb * (3 - 2 * climb);
+    setDetailRange(settings().detailRange * (1 + (DETAIL_LIFT - 1) * eased));
+    // …and the MIP BIAS, which is the half that actually bites. At
+    // three and a half metres a pixel averages about seventy texels,
+    // well short of the fade's own threshold, so the fade never fires
+    // and the wash is the mip chain doing its job. Asking for a
+    // sharper level is the only thing that answers it.
+    setDetailLift(climb);
+
     // THE FINE GROUND FOLLOWS HER TOO. Fire-and-forget: a tile that has
     // not landed is answered by the coarse grid, which holds the same
     // number at every sample the two share, so the ground sharpens

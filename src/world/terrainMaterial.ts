@@ -183,6 +183,40 @@ const FADE_TO_TEXELS = 768.0;
 export const FADE_FROM_UNIFORM = { value: FADE_FROM_TEXELS };
 export const FADE_TO_UNIFORM = { value: FADE_TO_TEXELS };
 
+/**
+ * HOW MUCH SHARPER A MIP TO ASK FOR — negative is sharper, in mip
+ * levels, and each level is a HALVING of the blur.
+ *
+ * The fade above is not what washes the ground out when she flies.
+ * Measured at three and a half metres: one pixel covers about seventy
+ * texels, which is far below the fade's own threshold — the fade
+ * never fires. What blurs it is the mip chain doing exactly its job,
+ * averaging those seventy texels into one. So the honest lever is to
+ * ask the sampler for a sharper level than it would choose, which is
+ * a LOD bias, and pay for it in a little shimmer.
+ *
+ * Joshua: "1 m vs 3.5 m off the ground looked the same even with
+ * details in settings at 200%... I want to raise the details before
+ * it fades around 10 meters AGL/AWL." The dial could never have
+ * fixed this; it scales the wrong thing.
+ *
+ * ZERO ON THE GROUND, always: underfoot the mip chain is already
+ * picking a sharp level and biasing it would only alias.
+ */
+export const MIP_BIAS_UNIFORM = { value: 0 };
+
+/** The sharpest we ask for — two levels, i.e. four times the detail. */
+export const MAX_MIP_BIAS = 2;
+
+/**
+ * How far above the floor she is, 0 (on it) to 1 (ten metres up and
+ * beyond). Drives the bias only — the ground is untouched at rest.
+ */
+export function setDetailLift(climb: number): void {
+  const t = Math.min(1, Math.max(0, climb));
+  MIP_BIAS_UNIFORM.value = -MAX_MIP_BIAS * (t * t * (3 - 2 * t));
+}
+
 export function setDetailRange(times: number): void {
   const factor = Math.max(0.1, times);
   FADE_FROM_UNIFORM.value = FADE_FROM_TEXELS * factor;
@@ -305,6 +339,7 @@ export function groundShader(
         uniform float relief;
         uniform float grainTile;
         uniform float fadeFrom, fadeTo, bandTexels, grainTexelScale;
+        uniform float mipBias;
         uniform vec3 avg_reef, avg_sand, avg_grass, avg_jungle;
         uniform vec3 avg_cliff, avg_mountain, avg_snow;
         uniform vec2 bandOffset, grainOffset;
@@ -335,14 +370,16 @@ export function groundShader(
           wSnow = h < 0.0 ? 0.0 : 1.0;
           total = 1.0;
         }
+        // SAMPLED WITH A BIAS, so a flying queen gets a sharper mip
+        // than the footprint would choose for her. Zero on the ground.
         vec3 ground =
-            texture2D(t_reef, bandUv).rgb * wReef
-          + texture2D(t_sand, bandUv).rgb * wSand
-          + texture2D(t_grass, bandUv).rgb * wGrass
-          + texture2D(t_jungle, bandUv).rgb * wJung
-          + texture2D(t_cliff, bandUv).rgb * wCliff
-          + texture2D(t_mountain, bandUv).rgb * wMount
-          + texture2D(t_snow, bandUv).rgb * wSnow;
+            texture2D(t_reef, bandUv, mipBias).rgb * wReef
+          + texture2D(t_sand, bandUv, mipBias).rgb * wSand
+          + texture2D(t_grass, bandUv, mipBias).rgb * wGrass
+          + texture2D(t_jungle, bandUv, mipBias).rgb * wJung
+          + texture2D(t_cliff, bandUv, mipBias).rgb * wCliff
+          + texture2D(t_mountain, bandUv, mipBias).rgb * wMount
+          + texture2D(t_snow, bandUv, mipBias).rgb * wSnow;
         ground /= total;
 
         // HOW MANY SOURCE TEXELS THIS PIXEL IS AVERAGING, along the
@@ -387,6 +424,31 @@ export function groundShader(
           ground *= mix(1.0, 0.45, deep);
         }
 
+        // MACRO VARIATION — the detail that survives altitude.
+        //
+        // The bands tile at four centimetres and the grain at one, and
+        // both are the right size for an animal standing on them. From
+        // three and a half metres up a pixel covers about a hundred and
+        // ten texels: not a fade, just the mip chain averaging honestly,
+        // and NO bias can recover a pattern that small. What the eye
+        // can still resolve up there is something half a metre wide —
+        // and the ground had nothing at that scale, which is why one
+        // metre and three and a half looked identical however high the
+        // detail dial went.
+        //
+        // So a single extra sample of the grain map, tiled forty times
+        // coarser, modulates the ground's brightness into patches and
+        // drifts about half a metre across. It fades IN exactly as the
+        // fine detail fades out, so it costs nothing underfoot (where
+        // there is real texture) and is the whole reason the ground
+        // still reads as ground from the air.
+        float macroMix = smoothstep(30.0, 200.0, texels);
+        if (macroMix > 0.001) {
+          float macro = texture2D(
+            t_grain, (vGround.xz + grainOffset) / (grainTile * 40.0)).g;
+          ground *= mix(1.0, 0.72 + 0.62 * macro, macroMix);
+        }
+
         // The fine grain rides on top at a tile size that shares no
         // factor with the band tile, so close up there is always
         // something moving past even mid-way through one band tile.
@@ -399,7 +461,7 @@ export function groundShader(
         // already streaking. (No backticks in here: this is inside a
         // template literal, and one of those ends the shader.)
         float grainFar = smoothstep(fadeFrom, fadeTo, texels * grainTexelScale);
-        float g = texture2D(t_grain, (vGround.xz + grainOffset) / grainTile).g;
+        float g = texture2D(t_grain, (vGround.xz + grainOffset) / grainTile, mipBias).g;
         ground *= mix(0.80 + g * 0.42, 1.0, grainFar);
 
         diffuseColor.rgb *= ground;
@@ -439,6 +501,7 @@ export function terrainMaterial(
     }
     shader.uniforms.fadeFrom = FADE_FROM_UNIFORM;
     shader.uniforms.fadeTo = FADE_TO_UNIFORM;
+    shader.uniforms.mipBias = MIP_BIAS_UNIFORM;
     shader.uniforms.bandTexels = { value: BAND_TEXELS };
     // The grain is also 512 texels but tiled 3.6 times tighter, so its
     // texel footprint is that much larger at the same distance and it

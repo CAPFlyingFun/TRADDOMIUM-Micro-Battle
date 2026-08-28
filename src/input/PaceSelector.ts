@@ -281,21 +281,23 @@ export class PaceSelector {
   /**
    * How a row reads.
    *
-   * LIVE is the speed she is actually doing — green, because a brighter
-   * gold was not enough: every row is gold, so at a glance the whole
-   * ladder read as one speed. CHOSEN is the pace still selected
-   * underneath a sprint that is overriding it: marked in gold so it is
-   * clearly picked without claiming to be what is happening.
+   * ONE ROW IS LIT AND THE REST ARE DARK. Live is green — the speed
+   * she is actually doing. There used to be a third state, CHOSEN, in
+   * gold: the pace still selected underneath a sprint overriding it.
+   * It was meant to say "this is what you picked", and on the device
+   * it said nothing legible — Joshua: "it should always have 3 dark
+   * colors and the highlighted color in green, not 2 dark brown, 1
+   * light brown and green. That's confusing as which is currently
+   * selected." A ladder answers ONE question; the answer is the green
+   * row. The state survives in the signature because callers still
+   * distinguish it, and a future readout may want it — it just does
+   * not get a colour of its own.
    */
   private mark(cell: HTMLButtonElement, as: 'live' | 'chosen' | 'off'): void {
     const live = as === 'live';
-    const chosen = as === 'chosen';
-    cell.style.color = live ? LIVE_TEXT
-      : chosen ? 'rgba(255, 236, 190, .95)' : 'rgba(255, 226, 160, .55)';
-    cell.style.background = live ? 'rgba(90, 255, 130, .17)'
-      : chosen ? 'rgba(255, 210, 110, .12)' : 'transparent';
-    cell.style.borderLeft = live ? `3px solid ${LIVE}`
-      : chosen ? '3px solid rgba(255, 210, 110, .75)' : '3px solid transparent';
+    cell.style.color = live ? LIVE_TEXT : 'rgba(255, 226, 160, .55)';
+    cell.style.background = live ? 'rgba(90, 255, 130, .17)' : 'transparent';
+    cell.style.borderLeft = live ? `3px solid ${LIVE}` : '3px solid transparent';
     cell.style.boxShadow = live ? 'inset 0 0 12px rgba(90, 255, 130, .28)' : 'none';
     cell.style.textShadow = live ? '0 0 8px rgba(90, 255, 130, .8)' : 'none';
   }

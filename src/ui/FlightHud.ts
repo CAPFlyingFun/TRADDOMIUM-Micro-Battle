@@ -49,6 +49,10 @@ const WARN = '#ffb03a';
  * approach rail on and off every few seconds.
  */
 const SETTLED_SINK = 0.2;
+/** A touchdown further out than this is not an approach, it is trivia. */
+const APPROACH_HORIZON = 30;
+/** Once the rows are up they stay up this long — no blinking. */
+const AHEAD_HOLD_MS = 2500;
 /**
  * TWO SHADOWS, NOT ONE — a tight dark edge and a soft halo behind it.
  *
@@ -197,6 +201,7 @@ export class FlightHud {
   private shownMsl = '';
   private shownLand = '';
   private wasWater = false;
+  private aheadUntil = 0;
   private awlRead!: HTMLSpanElement;
   private awlRow!: HTMLDivElement;
   private shownAwl = '';
@@ -734,11 +739,25 @@ export class FlightHud {
     // stand down when she is holding her altitude with nothing ahead.
     //
     // MSL and VS never go, because those two ARE the flight.
-    const approaching = Boolean(now.water)
-      || now.shownWhen !== null
-      || now.shownAtLanding !== null
-      || now.climbing < -SETTLED_SINK;
-    const want = approaching ? '1' : '0';
+    // AND IT MUST NOT BLINK. This gate used to read the raw sink rate
+    // against one threshold and accept ANY touchdown the solver
+    // returned. Holding level over the sea at VS -0.1 to -0.2 — which
+    // is where a cruising queen actually sits — that put her right on
+    // the 0.2 knife edge, while the solver alternately found and lost
+    // a landing 1.9 km and eighty seconds away. The two rows blinked
+    // out and back every few seconds for no reason the player could
+    // see. Now: a touchdown only counts if it is inside a horizon
+    // worth flying (a spot 80 s out is not an approach), the sink
+    // needs a real rate to switch ON and a smaller one to stay on, and
+    // whatever the answer it is HELD for a moment so a lost frame
+    // cannot flash the rail.
+    const soon = now.shownWhen !== null && now.shownWhen < APPROACH_HORIZON;
+    const sinking = now.climbing < (this.shownAhead === '1'
+      ? -SETTLED_SINK : -SETTLED_SINK * 3);
+    const approaching = Boolean(now.water) || soon || sinking;
+    const at = Date.now();
+    if (approaching) this.aheadUntil = at + AHEAD_HOLD_MS;
+    const want = at < this.aheadUntil ? '1' : '0';
     if (want !== this.shownAhead) {
       this.shownAhead = want;
       this.landRow.style.opacity = want;
