@@ -184,6 +184,19 @@ export const FADE_FROM_UNIFORM = { value: FADE_FROM_TEXELS };
 export const FADE_TO_UNIFORM = { value: FADE_TO_TEXELS };
 
 /**
+ * WHERE THE SAFEGUARD SITS, and it is a CONSTANT on purpose.
+ *
+ * This threshold answers a physical question — can this pattern be
+ * resolved in this pixel, or will a grazing footprint smear it — and
+ * the answer does not depend on what the player asked for. While the
+ * detail slider also scaled it, the slider had two meanings at once
+ * and neither could be tested alone. The slider owns the RADIUS; this
+ * owns the smear. Set to the value the shipped default (a dial of 2)
+ * used to produce, so the tuned look is unchanged.
+ */
+const SAFEGUARD_TEXELS = 2;
+
+/**
  * HOW MUCH SHARPER A MIP TO ASK FOR — negative is sharper, in mip
  * levels, and each level is a HALVING of the blur.
  *
@@ -227,19 +240,31 @@ export const MAX_MIP_BIAS = 2;
  */
 export const DETAIL_RADIUS_UNIFORM = { value: 1_000 };
 /**
- * Where the queen is, in RENDERED coordinates — the same frame
- * `vGround` is in, which is the only reason this can be a subtraction
- * in the shader. World coordinates would be the floating-origin trap
- * all over again (see setTextureOrigin).
+ * Where the queen is, in RENDERED coordinates and in all three of
+ * them — the same frame `vGround` is in, which is the only reason
+ * this can be a subtraction in the shader. World coordinates would be
+ * the floating-origin trap all over again (see setTextureOrigin).
  */
-export const QUEEN_UNIFORM = { value: new THREE.Vector2() };
+export const QUEEN_UNIFORM = { value: new THREE.Vector3() };
 
 /** Metres of radius per unit of the settings dial. */
 export const METRES_PER_DIAL = 10;
 
-/** The dial, in world units of radius. */
+/**
+ * The dial, in world units of radius. 0.25 -> 2.5 m, 2 -> 20 m.
+ *
+ * The floor is a hair above zero, NOT one: `Math.max(1, dial)` shipped
+ * in v0.0.86 and silently pinned the bottom three settings — 25, 50
+ * and 75 per cent all resolved to ten metres. It survived its own
+ * visual check because the dial ALSO scaled the texel safeguard back
+ * then, so the ground did visibly change at 25% — just not for the
+ * reason being tested. Two knobs on one slider is how a test lies to
+ * you; the safeguard is a fixed physical guard now (see
+ * SAFEGUARD_TEXELS) and this is the only thing the dial moves.
+ */
 export function setDetailRadius(dial: number): void {
-  DETAIL_RADIUS_UNIFORM.value = Math.max(1, dial) * METRES_PER_DIAL * UNITS_PER_METRE;
+  DETAIL_RADIUS_UNIFORM.value
+    = Math.max(0.01, dial) * METRES_PER_DIAL * UNITS_PER_METRE;
 }
 
 /**
@@ -248,7 +273,7 @@ export function setDetailRadius(dial: number): void {
  * so the sampling path is one code path rather than two, and so a
  * future per-material sharpen has somewhere to live.
  */
-export function setDetailRange(times: number): void {
+export function setDetailRange(times = SAFEGUARD_TEXELS): void {
   const factor = Math.max(0.1, times);
   FADE_FROM_UNIFORM.value = FADE_FROM_TEXELS * factor;
   FADE_TO_UNIFORM.value = FADE_TO_TEXELS * factor;
@@ -372,7 +397,7 @@ export function groundShader(
         uniform float fadeFrom, fadeTo, bandTexels, grainTexelScale;
         uniform float mipBias;
         uniform float detailRadius;
-        uniform vec2 queenAt;
+        uniform vec3 queenAt;
         uniform vec3 avg_reef, avg_sand, avg_grass, avg_jungle;
         uniform vec3 avg_cliff, avg_mountain, avg_snow;
         uniform vec2 bandOffset, grainOffset;
@@ -438,7 +463,12 @@ export function groundShader(
         // fragment, feathered over the last third so the edge of the
         // region is never a ring.
         float far = smoothstep(fadeFrom, fadeTo, texels);
-        float fromQueen = distance(vGround.xz, queenAt);
+        // THREE dimensions, not two. A horizontal distance says the
+        // ground directly beneath a queen ten metres up is zero metres
+        // away, which is not what "ten metres in every direction"
+        // means — at altitude it quietly handed her a bigger region
+        // than she asked for.
+        float fromQueen = distance(vGround, queenAt);
         // Feathered over the last third, so the edge is never a ring.
         far = max(far, smoothstep(detailRadius * 0.7, detailRadius, fromQueen));
 

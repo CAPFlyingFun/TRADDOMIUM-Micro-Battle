@@ -121,8 +121,10 @@ const GAP_TOLERANCE = 100;
  */
 const HOLD_EASE_SEA = 0.5;
 const HOLD_EASE_FRESH = 3;
-/** A crest may come no closer than this to her before she climbs. */
-const WAVE_MARGIN = 12;
+/** Land: a hillside is news, a pebble is not. */
+const HOLD_EASE_LAND = 2.5;
+/** Nothing real may come closer than this before she climbs. */
+const SURFACE_MARGIN = 12;
 
 const DIVE_EASE = 0.9;
 /**
@@ -297,8 +299,8 @@ export class IslandScene {
   private camUnder = 0;
   /** Latched 'there is water beneath her' — see readFlight. */
   private overWater = false;
-  /** The DAMPED water column the autopilot flies against. */
-  private holdColumn = 0;
+  /** The DAMPED surface the autopilot flies against — see update(). */
+  private holdFloor = 0;
   /** Her air, held while the head is under (breath.ts). */
   private readonly breath = new Breath();
   /** The sea's clock on her (brine.ts). */
@@ -419,7 +421,9 @@ export class IslandScene {
     // the bug that put her inside an invisible hill last release.
     setFlightScale(settings().flightSpeed);
     weather().setMode(settings().liveWeather ? 'live' : 'simulated');
-    setDetailRange(settings().detailRange);
+    // The safeguard takes its own constant; the dial moves the RADIUS
+    // and nothing else.
+    setDetailRange();
     setDetailRadius(settings().detailRange);
     setSmoothing(settings().terrainSmoothing);
     this.buildTerrain();
@@ -504,7 +508,9 @@ export class IslandScene {
       this.resmoothIsland();
       setFlightScale(settings().flightSpeed);
       weather().setMode(settings().liveWeather ? 'live' : 'simulated');
-      setDetailRange(settings().detailRange);
+      // The safeguard takes its own constant; the dial moves the RADIUS
+    // and nothing else.
+    setDetailRange();
     setDetailRadius(settings().detailRange);
       this.debugDie.show(settings().showFix);
     });
@@ -1171,18 +1177,36 @@ export class IslandScene {
       // the ripples are small. Her PLACEMENT rides the reference too,
       // or the two would disagree and we would be back to flying
       // underwater (v0.0.83).
-      const column = waterSpotAt(this.ant.where.wx, this.ant.where.wz)?.depth ?? 0;
-      const salty = waterSpotAt(this.ant.where.wx, this.ant.where.wz)?.salt === true;
-      const ease = salty ? HOLD_EASE_SEA : HOLD_EASE_FRESH;
-      this.holdColumn += (column - this.holdColumn) * (1 - Math.exp(-ease * dt));
-      // SAFETY IS NOT SMOOTHED. A real crest may never pass through
-      // her: if the true surface comes within WAVE_MARGIN of where the
-      // reference would put her, the reference rises to clear it —
-      // the controller climbing over a wave, which is what a flyer
-      // would do.
-      this.holdColumn = Math.max(
-        this.holdColumn, column + WAVE_MARGIN - this.flight.height,
+      const here = waterSpotAt(this.ant.where.wx, this.ant.where.wz);
+      const column = here?.depth ?? 0;
+      const ground = groundHeight(this.ant.where.wx, this.ant.where.wz);
+      const trueFloor = ground + column;
+      // THE WHOLE FLOOR IS DAMPED, not just the water on top of it.
+      // An earlier cut smoothed only the column, which left the
+      // TERRAIN instantaneous — so "AGL does not chase tiny terrain
+      // bumps" was never actually delivered, and over land she still
+      // twitched at every pebble. The reference is now the floor
+      // itself: sea, stream or sand, one damped surface.
+      //
+      // Three speeds, because they are three different questions. The
+      // open sea's swell must pass through the reference unnoticed;
+      // an inland water level that changes is real news; and terrain
+      // is news too, but a rock is not, so land sits between them.
+      const ease = column <= 0 ? HOLD_EASE_LAND
+        : here?.salt === true ? HOLD_EASE_SEA : HOLD_EASE_FRESH;
+      this.holdFloor += (trueFloor - this.holdFloor) * (1 - Math.exp(-ease * dt));
+      // SAFETY IS NOT SMOOTHED. Nothing real may pass through her: if
+      // the true surface — a crest, a rock — comes within
+      // SURFACE_MARGIN of where the reference would put her, the
+      // reference rises to clear it. That is the controller climbing
+      // over a wave, which is what a flyer would do.
+      this.holdFloor = Math.max(
+        this.holdFloor, trueFloor + SURFACE_MARGIN - this.flight.height,
       );
+      // What the placement adds on top of the INSTANTANEOUS terrain to
+      // land her on the damped floor. settle() works from groundHeight
+      // and this closes the gap.
+      const holdBase = this.holdFloor - ground;
       const step = this.flight.update(
         {
           push: stick.y,
@@ -1216,7 +1240,7 @@ export class IslandScene {
         // clearance over the SEABED, so "one metre up" over nine
         // metres of sea put her nine metres under it, tinted the
         // screen, and made the shore transition anything but seamless.
-        groundHeight(this.ant.where.wx, this.ant.where.wz) + this.holdColumn,
+        this.holdFloor,
       );
       this.effort = step.effort;
       winded = this.stamina.update(step.effort, dt);
@@ -1230,7 +1254,7 @@ export class IslandScene {
         // The wind reaches her ONLY here. Walking gets nothing.
         this.windOnHer(),
         // …and the SAME floor the model just flew against.
-        this.holdColumn,
+        holdBase,
       );
       // The camera CHASES in flight rather than steering. Her heading
       // is her own up here, so a view left where the player put it
@@ -1260,6 +1284,12 @@ export class IslandScene {
       const wade = wadeAt(this.ant.where.wx, this.ant.where.wz, this.dive, this.afloat);
       this.afloat = wade.afloat;
       this.wet = wade.depth;
+      // ON FOOT THE REFERENCE IS SIMPLY WHERE SHE IS. Left to drift
+      // while she walked, it would be stale by the time she took off
+      // and the first airborne frame would snap her — the damping is
+      // for flight, and flight is the only thing that reads it.
+      this.holdFloor = groundHeight(this.ant.where.wx, this.ant.where.wz)
+        + wade.depth;
       this.swimCarry = wade.carry;
       this.swimAbove = wade.above;
       inSalt = wade.depth > 0 && wade.salt;
@@ -1513,7 +1543,7 @@ export class IslandScene {
     // redefined what the player had asked for; height has no vote
     // here now. Her RENDERED position, because the shader compares it
     // against rendered fragment positions.
-    QUEEN_UNIFORM.value.set(this.ant.root.position.x, this.ant.root.position.z);
+    QUEEN_UNIFORM.value.copy(this.ant.root.position);
 
     // THE FINE GROUND FOLLOWS HER TOO. Fire-and-forget: a tile that has
     // not landed is answered by the coarse grid, which holds the same
@@ -2057,7 +2087,7 @@ export class IslandScene {
     // readouts stay truthful even while the autopilot flies smoothed:
     // AWL is her true instantaneous clearance above the real wave
     // surface, and it breathes with the swell exactly as it should.
-    const ridden = this.flight.aloft ? this.holdColumn : column;
+    const ridden = this.flight.aloft ? this.holdFloor - terrain : column;
     const altitude = terrain + ridden + clearance;
     const agl = ridden + clearance;
     // WHETHER THERE IS WATER UNDER HER TO SPEAK OF, with hysteresis.
