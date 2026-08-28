@@ -77,18 +77,40 @@ const still = async () => {
   // several seconds after a teleport, so a queen who has landed can
   // still be filmed from a moving lens — which is precisely how the
   // previous run compared two different views and called them equal.
+  // TWICE in a row, not once. The follow camera eases asymptotically,
+  // so a single repeat of a rounded reading can still be mid-drift —
+  // which is how a two-centimetre creep got into the first frame and
+  // cost the comparison.
   let last = '';
-  for (let tries = 0; tries < 60; tries++) {
-    await page.waitForTimeout(500);
+  let repeats = 0;
+  for (let tries = 0; tries < 80; tries++) {
+    await page.waitForTimeout(800);
     const now = await page.evaluate(() => {
+      // POSITION IS NOT POSE. cameraAt gives where the lens is and
+      // nothing about where it points, so a slow yaw or pitch drift
+      // sailed straight through this check and produced two frames of
+      // different framing that the probe then called identical. The
+      // fix string carries bearing and pitch, so compare that too.
       const c = window.__island.cameraAt().map((v) => Math.round(v));
-      return `${c.join(',')}|${Math.round(window.__island.column().clearance)}`;
+      return `${c.join(',')}|${window.__island.fix()}`;
     });
-    if (now === last) return now;
+    // THREE in a row, at a longer interval. The camera's vertical and
+    // pitch filters are first-order and asymptotic, so a rounded
+    // reading PLATEAUS well before the pose has arrived — two matches
+    // half a second apart let a frame through at -25.1 degrees while
+    // the other two were shot at -28.
+    repeats = now === last ? repeats + 1 : 0;
+    if (repeats >= 3) return now;
     last = now;
   }
   return last;
 };
+// A FLAT WAIT FIRST, because "unchanged three times" is not the same as
+// "arrived". These filters are first-order, so the rounded reading
+// PLATEAUS on the way in: the pitch sat at -25.1 for three checks and
+// then carried on to -28.1 while the frames were being taken. Give it
+// enough seconds to actually get there, then confirm.
+await page.waitForTimeout(20000);
 const rest = await still();
 console.log(`still at camera/agl ${rest}\n`);
 
@@ -96,7 +118,10 @@ const shots = {};
 const seen = {};
 for (const bump of [0, 1, 2]) {
   await page.evaluate((b) => window.__island.relief(b), bump);
-  await page.waitForTimeout(900);
+  // Settle, then record the pose THIS FRAME IS SHOT FROM. Reading it
+  // afterwards recorded where the camera had drifted to during the
+  // settle that followed, which is not where the picture was taken.
+  const pose = await still();
   const path = `/tmp/relief-bump${bump}-agl${AGL}.png`;
   await page.screenshot({ path, timeout: 120000, animations: 'disabled' });
   shots[bump] = readPng(path);
@@ -107,7 +132,7 @@ for (const bump of [0, 1, 2]) {
       tris: window.__island.triangles(), calls: window.__island.drawCalls(),
     };
   });
-  seen[bump] = await still();
+  seen[bump] = pose;
   console.log(`bump ${bump}  lit detail ${detail(shots[bump]).toFixed(3)}`
     + `  (agl ${state.agl} msl ${state.msl} tris ${state.tris} calls ${state.calls})`);
 }

@@ -9,7 +9,7 @@
  * the first frame instead of a guess that lurches as files land. See
  * the script's header for what that looked like.
  *
- * Total: 4.94 MB.
+ * Total: 6.12 MB.
  */
 export const ASSET_BYTES: Readonly<Record<string, number>> = {
   'kauai-tex/cliff.jpg': 461843,
@@ -18,6 +18,10 @@ export const ASSET_BYTES: Readonly<Record<string, number>> = {
   'kauai-tex/mountain.jpg': 420459,
   'kauai-tex/reef.jpg': 445982,
   'kauai-tex/sand.jpg': 477379,
+  'kauai-tex/sandsmooth-ao.webp': 128296,
+  'kauai-tex/sandsmooth-normal.webp': 490532,
+  'kauai-tex/sandsmooth-rough.webp': 279552,
+  'kauai-tex/sandsmooth.jpg': 342021,
   'kauai-tex/snow.jpg': 302340,
   'models/queen-winged.glb': 2066824,
 };

@@ -118,3 +118,57 @@ describe('holding station on a moving queen', () => {
     expect(settled.distanceTo(after)).toBeGreaterThan(0.5);
   });
 });
+
+/**
+ * THE CAMERA MUST NOT FALL BEHIND A CLIMB.
+ *
+ * A first-order filter lags a RAMP by its speed over its rate, and a
+ * climb is a ramp. The vertical damping added in v0.0.88 to stop the
+ * swell pumping the horizon was also applied while flying at a rate of
+ * 8 a second: at the top of the lift lever, 300 units a second, that is
+ * 37 units of lag against a follow distance of 7.8. The camera sat five
+ * times its own distance below her and aimed almost straight up.
+ */
+describe('following her up', () => {
+  /** Fly her upward at `rate` units a second for a second, return the gap. */
+  function climbGap(rate: number, calm: boolean): number {
+    const ant = antFacingNorth();
+    const follow = new FollowCamera(2);
+    follow.snapTo(ant);
+    for (let i = 0; i < 60; i++) {
+      ant.position.y += rate / 60;
+      follow.update(ant, look({ active: false }), 1 / 60, calm);
+    }
+    // Where the camera sits relative to her, vertically.
+    return follow.camera.position.y - ant.position.y;
+  }
+
+  it('holds its height above her through the fastest climb', () => {
+    // Settled, the camera rests ABOVE her. Any lag eats into that, and
+    // enough of it puts the camera below her looking up.
+    const rest = climbGap(0, false);
+    for (const rate of [20, 100, 300]) {
+      const gap = climbGap(rate, false);
+      expect(gap).toBeGreaterThan(rest - 0.5);
+    }
+  });
+
+  it('never ends up below her, which is what aimed the view upward', () => {
+    expect(climbGap(300, false)).toBeGreaterThan(0);
+  });
+
+  it('still damps her bob when the SEA is the thing moving her', () => {
+    // The one case the filter was built for must survive the fix.
+    const ant = antFacingNorth();
+    const follow = new FollowCamera(2);
+    follow.snapTo(ant);
+    let swing = 0;
+    for (let i = 0; i < 240; i++) {
+      ant.position.y = Math.sin((i / 60) * 2 * Math.PI / 1.5) * 30;
+      follow.update(ant, look({ active: false }), 1 / 60, true);
+      if (i > 120) swing = Math.max(swing, Math.abs(follow.camera.position.y - 0));
+    }
+    // Her own swing is 30 units; the camera must pass far less of it.
+    expect(swing).toBeLessThan(30 * 0.35);
+  });
+});

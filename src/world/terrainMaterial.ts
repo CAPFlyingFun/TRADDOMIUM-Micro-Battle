@@ -19,8 +19,8 @@
  */
 import * as THREE from 'three';
 import {
-  BAND_ROUGHNESS, RELIEF_AO_UNIFORM, RELIEF_BUMP_UNIFORM, RELIEF_MAPS,
-  RELIEF_UNIFORM_NAMES,
+  AUTHORED_BANDS, BAND_ROUGHNESS, RELIEF_AO_UNIFORM, RELIEF_BUMP_UNIFORM,
+  RELIEF_MAPS, RELIEF_UNIFORM_NAMES,
 } from './groundRelief';
 import { pullBytes } from './fetchBytes';
 import type { LoadReport } from '../ui/loadPlan';
@@ -365,6 +365,17 @@ const GRAIN_RATIO = BAND_TILE / GRAIN_TILE;
  */
 export const BAND_AVERAGE: Record<string, { value: THREE.Color }> = {};
 
+/**
+ * A SECOND SAND, blended into the first rather than banded beside it.
+ *
+ * Not a band: it has no elevation span of its own. The swash works the
+ * grains fine and even where it reaches, and the berm inland keeps the
+ * coarse stuff and the shell fragments, so which sand you are standing
+ * on is a question about the water, not the altitude. (Joshua: "the
+ * rocky away from the ocean and smoother closer to the ocean".)
+ */
+export const EXTRA_COLOURS = ['sandsmooth'] as const;
+
 /** Which file carries which band, ordered as they stack up the island. */
 export const BAND_FILES = [
   'reef', 'sand', 'grass', 'jungle', 'cliff', 'mountain', 'snow',
@@ -458,6 +469,10 @@ export function groundShader(
           (${ROUGH_MIX}) / max(total, 0.001)
           // Pits between grains scatter more than the faces do.
           + reliefCavity * 0.22, 0.04, 1.0);
+        // Where sand has been SCANNED, its own roughness beats a
+        // constant: dry grains, packed patches and shell fragments do
+        // not share one specular answer.
+        roughnessFactor = mix(roughnessFactor, r4.b, sandShare * smoothShare);
         // Wet sand is the glossiest ground on the island, and the
         // shine is most of why a waterline reads at all.
         roughnessFactor = mix(roughnessFactor, 0.34, wet * 0.75);
@@ -478,7 +493,8 @@ export function groundShader(
         uniform vec3 avg_cliff, avg_mountain, avg_snow;
         uniform vec2 bandOffset, grainOffset;
         uniform float nearCut;
-        uniform sampler2D t_relief0, t_relief1, t_relief2, t_relief3;
+        uniform sampler2D t_relief0, t_relief1, t_relief2, t_relief3, t_relief4;
+        uniform sampler2D t_sandsmooth;
         uniform float reliefBump, reliefAo;
 
         float span(float x, float lo, float hi, float feather) {
@@ -506,11 +522,28 @@ export function groundShader(
           wSnow = h < 0.0 ? 0.0 : 1.0;
           total = 1.0;
         }
+        // WHICH SAND. The swash works the grains fine and even where it
+        // reaches and the berm inland keeps the coarse stuff, so the
+        // beach is two materials and the boundary between them belongs
+        // to the water, not the contour lines. Height above the sea
+        // gives the trend; a slow noise scatters it so the change is a
+        // mottle across the whole beach rather than a line drawn round
+        // it. (Joshua: "randomly blend both together around the whole
+        // sand maybe the rocky away from the ocean and smoother closer
+        // to the ocean".)
+        float sandTrend = 1.0 - smoothstep(${m(0.4)}, ${m(7)}, max(h, 0.0));
+        float sandPatch = texture2D(
+          t_grain, (vGround.xz + grainOffset) / (grainTile * 110.0)).g;
+        float smoothShare = clamp(sandTrend + (sandPatch - 0.5) * 1.35, 0.0, 1.0);
+        vec3 sandColour = mix(
+          texture2D(t_sand, bandUv, mipBias).rgb,
+          texture2D(t_sandsmooth, bandUv, mipBias).rgb, smoothShare);
+
         // SAMPLED WITH A BIAS, so a flying queen gets a sharper mip
         // than the footprint would choose for her. Zero on the ground.
         vec3 ground =
             texture2D(t_reef, bandUv, mipBias).rgb * wReef
-          + texture2D(t_sand, bandUv, mipBias).rgb * wSand
+          + sandColour * wSand
           + texture2D(t_grass, bandUv, mipBias).rgb * wGrass
           + texture2D(t_jungle, bandUv, mipBias).rgb * wJung
           + texture2D(t_cliff, bandUv, mipBias).rgb * wCliff
@@ -644,8 +677,14 @@ export function groundShader(
         vec4 r1 = texture2D(t_relief1, bandUv, mipBias);
         vec4 r2 = texture2D(t_relief2, bandUv, mipBias);
         vec4 r3 = texture2D(t_relief3, bandUv, mipBias);
+        vec4 r4 = texture2D(t_relief4, bandUv, mipBias);
+        // The coarse sand's relief is derived from its own photograph;
+        // the fine sand's was SCANNED and is simply read. They blend on
+        // the same share the colours do, so the light and the picture
+        // never disagree about which beach this is.
+        vec2 sandXY = mix(r0.ba * 2.0 - 1.0, r4.rg * 2.0 - 1.0, smoothShare);
         vec2 reliefXY = (
-            (r0.rg * 2.0 - 1.0) * wReef  + (r0.ba * 2.0 - 1.0) * wSand
+            (r0.rg * 2.0 - 1.0) * wReef  + sandXY * wSand
           + (r1.rg * 2.0 - 1.0) * wGrass + (r1.ba * 2.0 - 1.0) * wJung
           + (r2.rg * 2.0 - 1.0) * wCliff + (r2.ba * 2.0 - 1.0) * wMount
           + (r3.rg * 2.0 - 1.0) * wSnow
@@ -667,6 +706,13 @@ export function groundShader(
         // crack reads as a crack; turned up it just smudges the ground
         // toward charcoal and takes the colour work with it.
         ground *= 1.0 - reliefAo * reliefCavity;
+
+        // THE SCANNED SURFACE, riding in map 3's spare two channels:
+        // sand's own measured roughness and occlusion, weighted in by
+        // how much of this fragment is sand. Costs no extra fetch —
+        // map 3 was already sampled for snow.
+        float sandShare = wSand / max(total, 0.001);
+        ground *= mix(1.0, mix(1.0, r4.a, reliefAo), sandShare * smoothShare);
 
         diffuseColor.rgb *= ground;
       `)
@@ -703,7 +749,7 @@ export function terrainMaterial(
   });
 
   material.onBeforeCompile = (shader) => {
-    for (const name of BAND_FILES) {
+    for (const name of [...BAND_FILES, ...EXTRA_COLOURS]) {
       shader.uniforms[`t_${name}`] = { value: textures[name] };
     }
     shader.uniforms.t_grain = { value: grain };
@@ -831,7 +877,7 @@ export function loadBands(
   const textures: Record<string, THREE.Texture> = {};
   const waiting: Promise<unknown>[] = [];
 
-  for (const name of BAND_FILES) {
+  for (const name of [...BAND_FILES, ...EXTRA_COLOURS]) {
     BAND_AVERAGE[name] ??= { value: new THREE.Color(0.5, 0.5, 0.5) };
     const texture = new THREE.Texture();
     texture.wrapS = THREE.RepeatWrapping;
@@ -883,9 +929,81 @@ export function loadBands(
   return { textures, ready: Promise.all(waiting).then(() => undefined) };
 }
 
+/** The authored maps a scanned band ships, by file suffix. */
+const AUTHORED_MAPS = ['normal', 'rough', 'ao'] as const;
+
+/**
+ * Load the real scanned maps for the bands that have them.
+ *
+ * NONE OF THESE ARE COLOUR. A normal is a vector and a roughness is a
+ * material constant; letting the sampler apply an sRGB decode to either
+ * would bend every one of them, so they are tagged NoColorSpace.
+ */
+export function loadAuthored(
+  renderer: THREE.WebGLRenderer,
+  report?: LoadReport,
+): { textures: Record<string, THREE.Texture>; ready: Promise<void> } {
+  const loader = new THREE.TextureLoader();
+  const textures: Record<string, THREE.Texture> = {};
+  const waiting: Promise<unknown>[] = [];
+
+  for (const band of AUTHORED_BANDS) {
+    for (const map of AUTHORED_MAPS) {
+      const key = `${band}-${map}`;
+      const texture = new THREE.Texture();
+      texture.wrapS = THREE.RepeatWrapping;
+      texture.wrapT = THREE.RepeatWrapping;
+      texture.colorSpace = THREE.NoColorSpace;
+      texture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+      textures[key] = texture;
+
+      const id = `authored:${key}`;
+      const url = `${import.meta.env.BASE_URL}kauai-tex/${key}.webp`;
+      waiting.push(
+        pullBytes(
+          url,
+          (size) => report?.resize(id, size),
+          (got) => report?.advance(id, got),
+        )
+          .then((pull) => new Promise<void>((settled) => {
+            loader.load(
+              pull.url,
+              (loaded) => {
+                texture.image = loaded.image;
+                texture.needsUpdate = true;
+                URL.revokeObjectURL(pull.url);
+                report?.finish(id);
+                settled();
+              },
+              undefined,
+              () => { URL.revokeObjectURL(pull.url); report?.finish(id); settled(); },
+            );
+          }))
+          // A missing scanned map is not fatal: the band falls back to
+          // the normal derived from its own colour, which is what every
+          // unscanned band uses anyway.
+          .catch((why) => {
+            console.warn(`the ${key} map did not load`, why);
+            delete textures[key];
+            report?.finish(id);
+          }),
+      );
+    }
+  }
+  return { textures, ready: Promise.all(waiting).then(() => undefined) };
+}
+
 /** Declare the band downloads on a plan, before any of them start. */
 export function planBands(report: LoadReport): void {
-  for (const name of BAND_FILES) {
+  for (const band of AUTHORED_BANDS) {
+    for (const map of AUTHORED_MAPS) {
+      const baked = assetBytes(`kauai-tex/${band}-${map}.webp`);
+      if (baked !== null) {
+        report.add(`authored:${band}-${map}`, 'Ground textures', baked, true, true);
+      }
+    }
+  }
+  for (const name of [...BAND_FILES, ...EXTRA_COLOURS]) {
     const baked = assetBytes(`kauai-tex/${name}.jpg`);
     // FIRM when the bake knows the file: the wire's numbers are
     // transport trivia then, not corrections. See LoadPlan.resize.

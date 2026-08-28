@@ -39,12 +39,42 @@ import * as THREE from 'three';
  * is a judgement to make on a phone in sunlight, not in a build script.
  */
 export const RELIEF_DIALS = {
-  heightContrast: 1.25,
+  // THE LAB'S CONTRAST AND LEVELS ARE NOT USED AT THEIR OWN DEFAULTS,
+  // and the reason is worth keeping written down. At contrast 1.25 with
+  // the 0.04..0.96 cut, 10.4% of the sand height came out clipped at
+  // pure white and 41.3% of the jungle at pure black. Clipping is not a
+  // cosmetic loss here: a saturated region has NO GRADIENT, and the
+  // gradient is the entire product. The pale pebbles are the brightest
+  // thing in the sand map, so they saturated together with the bright
+  // sand around them and came out with no edge and no shape — visible
+  // in the photograph, perfectly flat under the sun. (Joshua: "some of
+  // those small rocks are a few millimetres wide and it's not obvious
+  // a rock... still looks too flat.")
+  //
+  // So the height is left as measured and the punch comes from
+  // strength, which multiplies the slope and cannot clip anything.
+  heightContrast: 1.0,
   largeForm: 0.62,
   imageDetail: 0.35,
-  heightLow: 0.04,
-  heightHigh: 0.96,
-  normalStrength: 1.25,
+  heightLow: 0.0,
+  heightHigh: 1.0,
+  normalStrength: 1.35,
+  /**
+   * HOW WIDE A SLOPE COUNTS AS A SLOPE.
+   *
+   * A one-texel difference only ever sees the finest octave, which on
+   * sand is grain. A pebble twenty texels across has a gentle slope per
+   * texel and barely registers against that grain, so the old normal
+   * gave every rock a thin rim and no body. Reading the slope over
+   * several spans at once and adding them lets a rock tilt as a whole
+   * object while the grain still sparkles on top of it.
+   */
+  fineSpan: 1.0,
+  midSpan: 4.0,
+  coarseSpan: 12.0,
+  fineWeight: 1.0,
+  midWeight: 0.55,
+  coarseWeight: 0.35,
 };
 
 /**
@@ -81,11 +111,39 @@ export const BAND_ROUGHNESS: Record<string, number> = {
  * at 1024² times seven. Pairs follow BAND_FILES, so the last map
  * carries snow in rg and nothing in ba.
  */
-export const RELIEF_PAIRS: readonly (readonly [string, string | null])[] = [
-  ['reef', 'sand'],
-  ['grass', 'jungle'],
-  ['cliff', 'mountain'],
-  ['snow', null],
+/**
+ * BANDS THAT SHIP REAL SCANNED MAPS, which beat anything derived.
+ *
+ * Measured against Ground054's own normal, a normal derived from its
+ * displacement could not get below 16.7 degrees of error on a map
+ * carrying 15.5 degrees of tilt — no better than guessing flat. The
+ * derivation is what a band gets when nobody has scanned it, not a
+ * substitute for someone who has.
+ */
+export const AUTHORED_BANDS = ['sandsmooth'] as const;
+
+/**
+ * Whose roughness and occlusion ride in the last map's spare channels.
+ *
+ * The snow pair has no partner, so map 3's blue and alpha were carrying
+ * nothing. A real roughness map is most of what makes sand stop
+ * answering the sun like painted card, and putting it there costs no
+ * download beyond the file itself and NOT ONE extra texture fetch —
+ * map 3 is already sampled for snow.
+ */
+export const SURFACE_BAND = 'sandsmooth';
+
+export const RELIEF_PAIRS: readonly {
+  a: string; b: string | null; surface?: string;
+}[] = [
+  { a: 'reef', b: 'sand' },
+  { a: 'grass', b: 'jungle' },
+  { a: 'cliff', b: 'mountain' },
+  { a: 'snow', b: null },
+  // THE SECOND SAND. Scanned, so its normal is read rather than
+  // derived, and its roughness and occlusion ride in the spare two
+  // channels beside it — the same free lodging snow's slot offered.
+  { a: 'sandsmooth', b: null, surface: 'sandsmooth' },
 ];
 
 /** A flat normal, stood in until the bake runs. */
@@ -108,9 +166,13 @@ const BAKE_FRAGMENT = /* glsl */`
   precision highp float;
   varying vec2 vUv;
   uniform sampler2D mapA, mapB;
+  uniform sampler2D authoredA, authoredB, surfaceRough, surfaceAo;
   uniform vec2 texel;
   uniform float hasB, broadBias;
+  uniform float hasAuthoredA, hasAuthoredB, writeSurface;
   uniform float contrast, largeForm, imageDetail, lowCut, highCut, strength;
+  uniform float fineSpan, midSpan, coarseSpan;
+  uniform float fineWeight, midWeight, coarseWeight;
 
   /**
    * BACK TO sRGB BEFORE MEASURING. The band maps are tagged sRGB, so the
@@ -139,18 +201,41 @@ const BAKE_FRAGMENT = /* glsl */`
     return clamp((v - lowCut) / max(0.001, highCut - lowCut), 0.0, 1.0);
   }
 
-  /** Central differences, as the lab takes them. */
+  /** Central differences over a given span, in texels. */
+  vec2 slope(sampler2D map, vec2 uv, float span) {
+    vec2 e = texel * span;
+    return vec2(
+      heightAt(map, uv + vec2(e.x, 0.0)) - heightAt(map, uv - vec2(e.x, 0.0)),
+      heightAt(map, uv + vec2(0.0, e.y)) - heightAt(map, uv - vec2(0.0, e.y)));
+  }
+
+  /**
+   * Three spans, added rather than averaged. The wide one carries the
+   * shape of a stone, the narrow one the grain sitting on it — and a
+   * rock only reads as a rock when its whole face turns to the sun
+   * together instead of showing a lit outline round a flat middle.
+   */
   vec2 normalXY(sampler2D map, vec2 uv) {
-    float dx = (heightAt(map, uv + vec2(texel.x, 0.0))
-              - heightAt(map, uv - vec2(texel.x, 0.0))) * strength * 2.2;
-    float dy = (heightAt(map, uv + vec2(0.0, texel.y))
-              - heightAt(map, uv - vec2(0.0, texel.y))) * strength * 2.2;
-    return normalize(vec3(-dx, -dy, 1.0)).xy * 0.5 + 0.5;
+    vec2 g = slope(map, uv, fineSpan) * fineWeight
+           + slope(map, uv, midSpan) * midWeight
+           + slope(map, uv, coarseSpan) * coarseWeight;
+    g *= strength * 2.2;
+    return normalize(vec3(-g, 1.0)).xy * 0.5 + 0.5;
   }
 
   void main() {
-    vec2 a = normalXY(mapA, vUv);
-    vec2 b = hasB > 0.5 ? normalXY(mapB, vUv) : vec2(0.5);
+    // A scanned normal is already the answer; only derive where there
+    // is nothing to read. Its xy are stored the same way ours are, so
+    // it drops straight into the same two channels.
+    vec2 a = hasAuthoredA > 0.5 ? texture2D(authoredA, vUv).xy : normalXY(mapA, vUv);
+    vec2 b;
+    if (writeSurface > 0.5) {
+      b = vec2(texture2D(surfaceRough, vUv).r, texture2D(surfaceAo, vUv).r);
+    } else if (hasAuthoredB > 0.5) {
+      b = texture2D(authoredB, vUv).xy;
+    } else {
+      b = hasB > 0.5 ? normalXY(mapB, vUv) : vec2(0.5);
+    }
     gl_FragColor = vec4(a, b);
   }
 `;
@@ -173,8 +258,9 @@ const BAKE_VERTEX = /* glsl */`
 export function bakeGroundRelief(
   renderer: THREE.WebGLRenderer,
   textures: Record<string, THREE.Texture>,
+  authored: Record<string, THREE.Texture> = {},
 ): void {
-  const source = textures[RELIEF_PAIRS[0][0]];
+  const source = textures[RELIEF_PAIRS[0].a];
   const size = (source?.image as { width?: number } | undefined)?.width ?? 1024;
 
   const scene = new THREE.Scene();
@@ -184,6 +270,10 @@ export function bakeGroundRelief(
     fragmentShader: BAKE_FRAGMENT,
     uniforms: {
       mapA: { value: null }, mapB: { value: null },
+      authoredA: { value: null }, authoredB: { value: null },
+      surfaceRough: { value: null }, surfaceAo: { value: null },
+      hasAuthoredA: { value: 0 }, hasAuthoredB: { value: 0 },
+      writeSurface: { value: 0 },
       texel: { value: new THREE.Vector2(1 / size, 1 / size) },
       hasB: { value: 1 },
       // Radius size/128 is three mip levels of box averaging.
@@ -194,12 +284,18 @@ export function bakeGroundRelief(
       lowCut: { value: RELIEF_DIALS.heightLow },
       highCut: { value: RELIEF_DIALS.heightHigh },
       strength: { value: RELIEF_DIALS.normalStrength },
+      fineSpan: { value: RELIEF_DIALS.fineSpan },
+      midSpan: { value: RELIEF_DIALS.midSpan },
+      coarseSpan: { value: RELIEF_DIALS.coarseSpan },
+      fineWeight: { value: RELIEF_DIALS.fineWeight },
+      midWeight: { value: RELIEF_DIALS.midWeight },
+      coarseWeight: { value: RELIEF_DIALS.coarseWeight },
     },
   });
   scene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material));
 
   const previous = renderer.getRenderTarget();
-  RELIEF_PAIRS.forEach(([a, b], index) => {
+  RELIEF_PAIRS.forEach(({ a, b, surface }, index) => {
     const target = new THREE.WebGLRenderTarget(size, size, {
       wrapS: THREE.RepeatWrapping,
       wrapT: THREE.RepeatWrapping,
@@ -216,9 +312,20 @@ export function bakeGroundRelief(
     // "decode" them would bend every normal on the island.
     target.texture.colorSpace = THREE.NoColorSpace;
 
-    material.uniforms.mapA.value = textures[a] ?? null;
-    material.uniforms.mapB.value = b ? textures[b] ?? null : textures[a] ?? null;
+    const fallback = textures[a] ?? null;
+    material.uniforms.mapA.value = fallback;
+    material.uniforms.mapB.value = b ? textures[b] ?? null : fallback;
     material.uniforms.hasB.value = b ? 1 : 0;
+    // Every sampler needs something bound whether or not it is read.
+    material.uniforms.authoredA.value = authored[`${a}-normal`] ?? fallback;
+    material.uniforms.authoredB.value = (b && authored[`${b}-normal`]) || fallback;
+    material.uniforms.hasAuthoredA.value = authored[`${a}-normal`] ? 1 : 0;
+    material.uniforms.hasAuthoredB.value = b && authored[`${b}-normal`] ? 1 : 0;
+    const rough = surface ? authored[`${surface}-rough`] : undefined;
+    const occlusion = surface ? authored[`${surface}-ao`] : undefined;
+    material.uniforms.surfaceRough.value = rough ?? fallback;
+    material.uniforms.surfaceAo.value = occlusion ?? fallback;
+    material.uniforms.writeSurface.value = rough && occlusion ? 1 : 0;
 
     renderer.setRenderTarget(target);
     renderer.render(scene, camera);

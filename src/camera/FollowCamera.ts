@@ -19,13 +19,24 @@ import { settings } from '../ui/settings';
  * in that setting's terms.
  */
 /**
- * How fast the camera's height chases hers, per second. Afloat, a
- * 1.5 s swell is attenuated to about a seventh of its amplitude;
- * flying, the camera answers a climb almost at once, because a climb
- * is her decision and lag there reads as broken controls.
+ * How fast the camera's height chases hers while THE SEA is moving her.
+ * A 1.5 s swell is attenuated to about a seventh of its amplitude.
+ *
+ * There is no longer a second rate for flying. There was — BRISK_RISE,
+ * 8 a second, on the reasoning that a climb "must feel connected" — and
+ * it was quietly catastrophic, because a first-order filter lags a RAMP
+ * by its speed over its rate and a climb is a ramp. At the top of the
+ * lift lever, 300 units a second through a rate of 8 is 37 units of lag
+ * against a follow distance of 7.8: the camera sat five times its own
+ * distance below her and aimed almost vertically up at a queen who then
+ * looked like she was leaving on a rocket.
+ *
+ * Joshua: "why the camera is pitching up so much... never did it like
+ * on version 0.80" — and v0.0.80 is exactly the right place to point
+ * at, because this filter did not exist before v0.0.88. Her flight
+ * model is untouched since then; only the camera changed.
  */
 const CALM_RISE = 0.6;
-const BRISK_RISE = 8;
 
 export class FollowCamera {
   readonly camera: THREE.PerspectiveCamera;
@@ -146,10 +157,18 @@ export class FollowCamera {
     // built to avoid. Afloat it is slow enough to pass barely a fifth
     // of a 1.5 s swell; flying it is quick, because a climb is her
     // decision and must feel connected.
-    const rise = calm ? CALM_RISE : BRISK_RISE;
-    this.easedY = this.easedY === null ? this.camera.position.y
-      : this.easedY + (this.camera.position.y - this.easedY) * (1 - Math.exp(-rise * dt));
-    this.camera.position.y = this.easedY;
+    // ONLY FOR THE ONE CASE IT WAS BUILT FOR. Damping her bob is right
+    // when the SWELL is doing the moving and she is a passenger; it is
+    // wrong when the height is her own decision, where any lag at all
+    // is the camera failing to follow. Flying and walking now track her
+    // exactly, as they did before this filter existed.
+    if (calm) {
+      this.easedY = this.easedY === null ? this.camera.position.y
+        : this.easedY + (this.camera.position.y - this.easedY) * (1 - Math.exp(-CALM_RISE * dt));
+      this.camera.position.y = this.easedY;
+    } else {
+      this.easedY = this.camera.position.y;
+    }
     // The floor still has the last word: a smoothed camera may lag,
     // it may not lag INTO the ground.
     this.keepAboveGround(this.camera.position, target.position.y);

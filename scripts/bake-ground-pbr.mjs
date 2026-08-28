@@ -46,12 +46,18 @@ const bands = want.length ? want : BANDS;
 
 /** The lab's controls, as numbers. Env overrides each. */
 const dial = {
-  heightContrast: +(process.env.HEIGHT_CONTRAST ?? 125),
+  // Defaults track RELIEF_DIALS, NOT the lab's own, because the lab's
+  // contrast and level cuts clipped 10.4% of sand to white and 41.3% of
+  // jungle to black — and a clipped region has no gradient at all.
+  heightContrast: +(process.env.HEIGHT_CONTRAST ?? 100),
   largeForm: +(process.env.LARGE_FORM ?? 62),
   imageDetail: +(process.env.IMAGE_DETAIL ?? 35),
-  heightLow: +(process.env.HEIGHT_LOW ?? 4),
-  heightHigh: +(process.env.HEIGHT_HIGH ?? 96),
-  normalStrength: +(process.env.NORMAL_STRENGTH ?? 125),
+  heightLow: +(process.env.HEIGHT_LOW ?? 0),
+  heightHigh: +(process.env.HEIGHT_HIGH ?? 100),
+  normalStrength: +(process.env.NORMAL_STRENGTH ?? 135),
+  fineWeight: +(process.env.FINE_WEIGHT ?? 100),
+  midWeight: +(process.env.MID_WEIGHT ?? 55),
+  coarseWeight: +(process.env.COARSE_WEIGHT ?? 35),
   openGL: (process.env.NORMAL_Y ?? '1') !== '0',
   roughness: +(process.env.ROUGHNESS ?? 78),
   roughVariation: +(process.env.ROUGH_VARIATION ?? 22),
@@ -158,10 +164,23 @@ for (const band of bands) {
       const ctx = nrm.getContext('2d');
       const id = ctx.createImageData(size, size);
       const strength = dial.normalStrength / 100;
+      // Three spans added, so a stone tilts as a whole object instead of
+      // showing a lit rim around a flat middle. See RELIEF_DIALS.
+      const spans = [
+        [1, dial.fineWeight / 100],
+        [4, dial.midWeight / 100],
+        [12, dial.coarseWeight / 100],
+      ];
       for (let y = 0; y < size; y++) {
         for (let x = 0; x < size; x++) {
-          const dx = (at(x + 1, y) - at(x - 1, y)) * strength * 2.2;
-          const dy = (at(x, y + 1) - at(x, y - 1)) * strength * 2.2;
+          let gx = 0;
+          let gy = 0;
+          for (const [span, weight] of spans) {
+            gx += (at(x + span, y) - at(x - span, y)) * weight;
+            gy += (at(x, y + span) - at(x, y - span)) * weight;
+          }
+          const dx = gx * strength * 2.2;
+          const dy = gy * strength * 2.2;
           let nx = -dx;
           let ny = dial.openGL ? -dy : dy;
           let nz = 1;

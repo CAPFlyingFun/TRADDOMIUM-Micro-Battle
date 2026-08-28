@@ -81,3 +81,45 @@ describe('detail that cannot be resolved is not lit', () => {
     expect(at('reliefXY *= 1.0 - far;')).toBeGreaterThan(at('float far ='));
   });
 });
+
+describe('the beach is two sands, blended', () => {
+  it('mixes the coarse and fine colours rather than banding them', () => {
+    expect(frag).toContain('float smoothShare');
+    expect(frag).toContain('t_sandsmooth');
+    expect(at('vec3 sandColour = mix(')).toBeGreaterThan(at('float smoothShare'));
+  });
+
+  it('carries the same share into relief, roughness and occlusion', () => {
+    // If the light and the picture disagree about which beach this is,
+    // the relief describes grains that are not in the photograph.
+    expect(at('vec2 sandXY = mix(')).toBeGreaterThan(at('float smoothShare'));
+    expect(frag).toContain('sandShare * smoothShare');
+    expect(frag.match(/sandShare \* smoothShare/g)?.length).toBe(2);
+  });
+
+  it('declares the share before every one of its uses', () => {
+    const declared = at('float smoothShare');
+    expect(declared).toBeGreaterThan(0);
+    let from = declared + 1;
+    for (;;) {
+      const use = frag.indexOf('smoothShare', from);
+      if (use < 0) break;
+      expect(use).toBeGreaterThan(declared);
+      from = use + 1;
+    }
+    // and nothing reads it earlier
+    expect(frag.indexOf('smoothShare')).toBe(declared + 'float '.length);
+  });
+
+  it('scatters the boundary instead of drawing a contour round the beach', () => {
+    expect(frag).toContain('sandPatch');
+    expect(at('float smoothShare')).toBeGreaterThan(at('float sandPatch'));
+  });
+
+  it('gives the scanned sand a slot that carries its surface maps', () => {
+    const surfaced = RELIEF_PAIRS.filter((p) => p.surface);
+    expect(surfaced).toHaveLength(1);
+    expect(surfaced[0].surface).toBe('sandsmooth');
+    expect(surfaced[0].b).toBeNull();
+  });
+});

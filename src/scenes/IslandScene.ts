@@ -31,7 +31,8 @@ import { originAt, rebaseFor, setOrigin, toLocal, toWorld,
 import { bakeGrain, GRAIN_SIZE } from '../world/groundTexture';
 import {
   BAND_TILE, FADE_FROM_UNIFORM, FADE_TO_UNIFORM,
-  QUEEN_UNIFORM, loadBands, reliefUniform, setDetailRadius, setDetailRange, setTileScale,
+  QUEEN_UNIFORM, loadAuthored, loadBands, reliefUniform, setDetailRadius,
+  setDetailRange, setTileScale,
   setTextureOrigin, terrainMaterial,
 } from '../world/terrainMaterial';
 import {
@@ -2297,11 +2298,13 @@ export class IslandScene {
     // tier inside it already covers. They share the textures; only the
     // cut differs.
     const bands = loadBands(this.renderer, this.report);
-    // THE HEIGHT DERIVED FROM THE COLOUR, once the colour is actually
-    // here. Bands still holding their placeholder would bake a flat
-    // normal and stay flat, because nothing bakes them a second time.
-    this.bandsReady = bands.ready.then(() => {
-      bakeGroundRelief(this.renderer, bands.textures);
+    const authored = loadAuthored(this.renderer, this.report);
+    // THE RELIEF, once the maps it reads are actually here. Bands still
+    // holding their placeholder would bake a flat normal and stay flat,
+    // because nothing bakes them a second time — and that goes for the
+    // scanned maps too, so wait on both.
+    this.bandsReady = Promise.all([bands.ready, authored.ready]).then(() => {
+      bakeGroundRelief(this.renderer, bands.textures, authored.textures);
     });
     const maps = bands.textures;
     this.terrain = new TerrainStream(
