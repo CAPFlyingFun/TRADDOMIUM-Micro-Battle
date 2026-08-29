@@ -73,48 +73,46 @@ const RECENTRE = 6_400;
 const DRAWN = 1.5;
 
 /**
- * WHERE FRESH WATER STARTS BEING DRAWN — and it cannot be thinner
- * than the bed underneath it is accurate.
+ * WHERE FRESH WATER STARTS BEING DRAWN — and it has to meet the depth
+ * she starts FLOATING at, or the two shorelines are different places.
  *
- * These went to 0.02 and FOOTING in v0.0.113, reasoning that the drawn
- * shoreline ought to meet the depth she starts floating at. The
- * reasoning was right and the conclusion was wrong, because it assumed
- * the drawn surface stands where the query says the surface is. It
- * does not, and it cannot:
+ * Traced on a real order-5 trunk: she leaves the bed at FOOTING, four
+ * millimetres, while the surface used to fade in from fifteen and only
+ * reach full body at eighty. Between those lies a band — wide, because
+ * the ground there is nearly flat — in which she was lifted off the bed
+ * and dropped to paddling pace on water drawn at ZERO alpha. From the
+ * player's side she stops walking and starts swimming at an invisible
+ * line, short of the water they can see. Nothing was blocking her;
+ * there is no collision here and no step limit.
  *
- *   the QUERY  adds the water column to `groundHeight` at her exact
- *              position — the 8-unit triangle she is standing on;
- *   the MESH   adds the same column to `base`, that same ground
- *              sampled every CELL (a hundred units) and then linearly
- *              interpolated across the quad by the rasteriser.
+ * So the film is drawn from the moment it is a film — a fifth of a
+ * millimetre — and it is FULLY water at exactly the depth that takes
+ * her feet off the bed.
  *
- * Between two bed samples the terrain has twelve of its own vertices,
- * and the chord across them is not the ground. Measured over a real
+ * FRESH_EDGE_HI is FOOTING from `ant/wading`, deliberately written out
+ * rather than imported: nothing in `world` reaches into `ant`, and the
+ * pairing is pinned by test instead (freshwater.test.ts). If FOOTING
+ * moves, that test fails and this must move with it.
+ *
+ * KNOWN AND OPEN, and the reason v0.0.115 briefly put these back to
+ * 1.5 and 8: the drawn surface and the QUERIED surface are not the
+ * same number. The query adds the water column to `groundHeight` at
+ * her exact position — the 8-unit triangle she stands on; the mesh
+ * adds it to `base`, that same ground sampled every CELL (a hundred
+ * units) and interpolated across the quad. Measured over a real
  * order-5 valley, 20,736 points: the chord stands more than FOOTING
  * above the true ground at 32% of them, 2.03 units at p95 and 6.19 at
- * worst. That is fifteen float thresholds of disagreement with no
- * water involved at all, and it is not a bug — it is the resolution
- * the water mesh has.
+ * worst. Drawing a millimetre film on a bed known to two centimetres
+ * cannot be truthful everywhere.
  *
- * So a film thinner than that error CANNOT be drawn truthfully. At
- * 0.02..0.4 every one of those 32% became fully opaque water standing
- * over a queen the query correctly had on top of it: she floats for a
- * few seconds and then is under it, which is exactly what Joshua saw.
- *
- * 1.5 and 8 are v0.0.90's numbers, the last build he called good, and
- * the measurement says why they are the right ones: nothing is painted
- * until the column is deeper than the bed's own error, so the surface
- * is only ever drawn where it can be drawn honestly. The consequence
- * is that the millimetre of film she wades through is not visible.
- * That is a real cost and it is the cheaper one — the alternative is
- * painting water in the wrong place.
- *
- * Drawing the film properly means a bed that agrees with the ground at
- * her own scale, which is a water-mesh resolution problem and its own
- * piece of work, not a constant.
+ * Raising the feather to hide that made the build worse rather than
+ * better on the device, so it stays down and the real fault stays
+ * named: a bed that agrees with the ground at her own scale is a
+ * water-mesh resolution problem, and that is the piece of work.
+ * `drawnSurfaceAt` is the instrument for it.
  */
-export const FRESH_EDGE_LO = 1.5;
-export const FRESH_EDGE_HI = 8;
+export const FRESH_EDGE_LO = 0.02;
+export const FRESH_EDGE_HI = 0.4;
 /**
  * Water put into a surveyed river cell, per second, per Strahler order.
  *

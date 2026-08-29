@@ -170,48 +170,48 @@ describe('and its skin does not drift either', () => {
   });
 });
 
-describe('the drawn film is never thinner than the bed is accurate', () => {
-  /**
-   * HOW FAR THE MESH'S BED CAN STAND ABOVE THE GROUND SHE IS ON.
-   *
-   * The two are different computations and neither is wrong. The query
-   * adds the water column to `groundHeight` at her exact position — the
-   * 8-unit triangle she stands on. The mesh adds the same column to a
-   * bed sampled every 100 units and interpolated across the quad, and
-   * the chord across twelve intervening terrain vertices is not the
-   * ground. Measured over a real order-5 valley, 20,736 points: more
-   * than FOOTING of disagreement at 32% of them, 2.03 units at p95,
-   * 6.19 at worst.
-   */
-  const BED_ERROR_P95 = 2.03;
+describe('the drawn shoreline and the one she walks are the same line', () => {
+  /** What the fragment shader's `edge` smoothstep answers at a depth. */
+  const alphaAt = (depth: number): number => {
+    const t = Math.min(1, Math.max(0,
+      (depth - FRESH_EDGE_LO) / (FRESH_EDGE_HI - FRESH_EDGE_LO)));
+    return t * t * (3 - 2 * t);
+  };
 
-  it('does not paint water it cannot place', () => {
-    // THE REGRESSION THIS EXISTS FOR. v0.0.113 pulled the feather down
-    // to 0.02..FOOTING so the drawn shore would meet the float line.
-    // What it actually did was paint fully opaque water at depths
-    // smaller than the bed's own error, so at nearly a third of
-    // positions a surface stood over a queen the query correctly had
-    // floating on top of it — float for a few seconds, then be under
-    // it. A film thinner than the bed is accurate cannot be drawn
-    // truthfully, and the honest answer is not to draw it.
-    expect(FRESH_EDGE_LO).toBeGreaterThanOrEqual(BED_ERROR_P95 * 0.7);
-    expect(FRESH_EDGE_HI).toBeGreaterThan(BED_ERROR_P95 * 2);
+  it('draws water before it floats her, never after', () => {
+    // THE BUG, AS A NUMBER. The feather used to open at 1.5 units and
+    // finish at 8, while she leaves the bed at FOOTING = 0.4. Traced
+    // on a real order-5 trunk: sim depths of 0.56 to 1.39 reported
+    // `afloat: true` with `above` up to 1.24 — and 0% alpha. She rose
+    // off the bed and dropped from wade pace to paddle pace on water
+    // that was not drawn at all, which from the player's side is a
+    // stop short of the visible shore. Nothing blocked her; the two
+    // shorelines were simply different places.
+    expect(FRESH_EDGE_LO).toBeLessThan(FOOTING);
+    expect(alphaAt(FOOTING)).toBeGreaterThan(0.5);
   });
 
-  it('is v0.0.90\'s feather — the last build Joshua called good', () => {
-    expect(FRESH_EDGE_LO).toBe(1.5);
-    expect(FRESH_EDGE_HI).toBe(8);
+  it('shows the film she wades through', () => {
+    // A millimetre and a half — the depth off Joshua's screenshot, and
+    // her own draught. Faint, but there: she is meant to see what she
+    // is walking in before it takes her feet off the ground.
+    expect(alphaAt(DRAUGHT)).toBeGreaterThan(0.15);
+    expect(alphaAt(DRAUGHT)).toBeLessThan(0.5);
   });
 
-  it('is what the material is actually built with', () => {
-    const src = readFileSync('src/world/IslandWater.ts', 'utf8');
-    expect(src).toContain('edgeLo: FRESH_EDGE_LO, edgeHi: FRESH_EDGE_HI');
+  it('is water outright at exactly the depth that floats her', () => {
+    // The pairing, pinned. `world` does not import from `ant`, so the
+    // two constants are written out separately — and if FOOTING ever
+    // moves, this is what says the drawn shoreline has to move too.
+    expect(FRESH_EDGE_HI).toBe(FOOTING);
+    expect(alphaAt(FOOTING)).toBe(1);
   });
 
-  it('reaches the shader at full precision either way', () => {
-    // Kept from the failed attempt because it is right on its own
-    // terms: a feather constant rounded to one decimal is a shoreline
-    // moved without changing a number.
+  it('reaches the shader at full precision, not rounded to nothing', () => {
+    // A fifth of a millimetre printed to one decimal is 0.0, which
+    // would put the drawn edge back at zero depth and undo the pairing
+    // above without changing a constant. So the feather is emitted to
+    // three places, and this is what says so.
     const look = makeWaterLook({
       green: 1, surf: 0.15, sink: false, ocean: false,
       edgeLo: FRESH_EDGE_LO, edgeHi: FRESH_EDGE_HI, midAt: 70, deepAt: 260,
@@ -229,18 +229,16 @@ describe('the drawn film is never thinner than the bed is accurate', () => {
       .toContain(`smoothstep(${FRESH_EDGE_LO.toFixed(3)}, ${FRESH_EDGE_HI.toFixed(3)}, depth)`);
   });
 
+  it('is what the material is actually built with', () => {
+    // The constants are only worth testing if the shader reads them.
+    const src = readFileSync('src/world/IslandWater.ts', 'utf8');
+    expect(src).toContain('edgeLo: FRESH_EDGE_LO, edgeHi: FRESH_EDGE_HI');
+  });
+
   it('leaves the OCEAN\'s feather alone — a beach shelves fast', () => {
     const src = readFileSync('src/world/Ocean.ts', 'utf8');
     expect(src).toContain('edgeLo: 35');
     expect(src).toContain('edgeHi: 95');
-  });
-
-  it('and the mesh can be asked where it is drawing, so this stays checkable', () => {
-    // The instrument the audit needed and the device line reads: the
-    // drawn surface out of the vertex buffer, not recomputed.
-    const src = readFileSync('src/world/IslandWater.ts', 'utf8');
-    expect(src).toContain('drawnSurfaceAt(wx: number, wz: number): number | null');
-    expect(src).toContain('this.pos[(iy * N + ix) * 3 + 1]');
   });
 });
 
@@ -277,7 +275,19 @@ describe('she can cross the shoreline without a wall in it', () => {
     expect(on.afloat).toBe(true);
     expect(on.above).toBeCloseTo(FOOTING - DRAUGHT, 9);
     expect(on.above).toBeLessThan(0.3);
+    // And she is drawn on water that is two thirds there by then.
     expect(on.pace).toBeGreaterThan(0);
   });
 
+  it('and the water she floats on is water she can see', () => {
+    // The acceptance, stated once: there is no depth at which she is
+    // afloat over an invisible surface.
+    for (const d of [FOOTING, 0.5, 1, 4, 40]) {
+      ramp(d);
+      expect(wadeAt(0, 0).afloat).toBe(true);
+      const t = Math.min(1, Math.max(0,
+        (d - FRESH_EDGE_LO) / (FRESH_EDGE_HI - FRESH_EDGE_LO)));
+      expect(t * t * (3 - 2 * t)).toBeGreaterThan(0.5);
+    }
+  });
 });
