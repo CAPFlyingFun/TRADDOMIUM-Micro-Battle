@@ -7,7 +7,8 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-  KEEL, SHOAL_CAP, SWASH_LO, SWELL_REACH,
+  KEEL, SHOAL_CAP, SWASH_LO, SWELL_AMP_UNIFORM, swellReach,
+  swellUniformChunk,
   resetSwell, seaSwellAt, shoalAt, swellChunk, swellTime, tickSwell,
 } from '../src/world/seaSwell';
 
@@ -21,11 +22,11 @@ describe('the surface', () => {
     for (let i = 0; i < 500; i++) {
       for (const d of [60, 200, DEEP]) {
         const y = seaSwellAt(i * 137.3, i * -91.7, d);
-        expect(Math.abs(y)).toBeLessThanOrEqual(SWELL_REACH + 1e-9);
+        expect(Math.abs(y)).toBeLessThanOrEqual(swellReach() + 1e-9);
       }
     }
     // (16 + 6) shoaled at the cap — the tallest the sea can ever stand.
-    expect(SWELL_REACH).toBeCloseTo(22 * SHOAL_CAP, 6);
+    expect(swellReach()).toBeCloseTo(22 * SHOAL_CAP, 6);
   });
 
   it('actually undulates — different places, different heights', () => {
@@ -104,12 +105,37 @@ describe('the clock', () => {
 describe('the shader chunk', () => {
   it('is baked from the very table the CPU sums', () => {
     const glsl = swellChunk();
-    // Both amplitudes, both as literals; the uniform and the two
-    // accumulators the vertex shader contract names.
-    expect(glsl).toContain('16.00');
-    expect(glsl).toContain('6.00');
+    // Wavenumber, frequency and heading are still literals — they do
+    // not change within a generation. Both of the default table's
+    // wavenumbers appear, and the two accumulators the vertex shader
+    // contract names.
+    expect(glsl).toContain('0.01745329');
+    expect(glsl).toContain('0.02991993');
     expect(glsl).toContain('uTime');
     expect(glsl).toContain('sw +=');
     expect(glsl).toContain('swSlope +=');
+  });
+
+  it('reads AMPLITUDE from the shared uniform, not from a literal', () => {
+    // Amplitude is the one thing that moves within a generation —
+    // wave groups are a slow modulation of it — so it is a uniform
+    // the CPU fills from the very numbers it sums itself. Baked as a
+    // literal it could not group, and a second copy of it could
+    // disagree with the queen's flotation inside a single frame.
+    const glsl = swellChunk();
+    expect(glsl).toContain('uWaveAmp[0]');
+    expect(glsl).toContain('uWaveAmp[1]');
+    expect(glsl).not.toContain('16.00');
+    expect(swellUniformChunk()).toBe('uniform float uWaveAmp[2];');
+  });
+
+  it('hands the shader exactly the amplitudes the CPU is using', () => {
+    resetSwell();
+    tickSwell(0);
+    expect(SWELL_AMP_UNIFORM.value).toEqual([16, 6]);
+    // And the default sea does not modulate: no envelopes, so the
+    // amplitudes stand still however long it runs.
+    tickSwell(37.5);
+    expect(SWELL_AMP_UNIFORM.value).toEqual([16, 6]);
   });
 });

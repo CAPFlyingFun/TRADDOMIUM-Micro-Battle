@@ -1,5 +1,8 @@
 import * as THREE from 'three';
-import { KEEL, SWELL_REACH, shoalChunk, swellChunk } from './seaSwell';
+import {
+  KEEL, bindSwellUniforms, shoalChunk, swellChunk, swellReach,
+  swellUniformChunk,
+} from './seaSwell';
 import { bindLodUniforms, lodUniformsChunk, microChunk } from './lodShader';
 
 /**
@@ -232,11 +235,14 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
     // terrain, so the two can never disagree about where she is or
     // how far her detail reaches.
     bindLodUniforms(shader.uniforms as Record<string, { value: unknown }>);
+    // The sea's live amplitudes — where wave groups live. Shared by
+    // both sheets and by the CPU queries, so one table moves them all.
+    bindSwellUniforms(shader.uniforms as Record<string, { value: unknown }>);
     const swell = opts.swell;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>',
         '#include <common>\n attribute float depth;\n attribute vec2 flow;\n varying float vDepth;\n varying vec2 vWorld;\n varying vec2 vLocal;\n varying vec2 vFlow;\n varying vec3 vRender;\n uniform vec2 uCentre;'
-        + (swell ? '\n varying vec2 vSwell;\n varying float vSheet;\n uniform float uTime;' : ''))
+        + (swell ? `\n varying vec2 vSwell;\n varying float vSheet;\n uniform float uTime;\n ${swellUniformChunk()}` : ''))
       .replace('#include <begin_vertex>',
         '#include <begin_vertex>\n vDepth = depth;\n vFlow = flow;\n vLocal = vec2(position.x, position.z);\n vWorld = vLocal + uCentre;'
         + (swell ? `
@@ -276,7 +282,7 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
     // runs before the normal and lighting stages), and handed to the
     // later stages through gRn/gBody — the colour weave, the normal
     // tilt and the surf caps all read the same water.
-    shader.fragmentShader = ('uniform float uTime;\nuniform sampler2D uRipple;\nuniform sampler2D uFoam;\nuniform vec3 uSky;\n' + lodUniformsChunk() + '\n' + shader.fragmentShader)
+    shader.fragmentShader = ('uniform float uTime;\nuniform sampler2D uRipple;\nuniform sampler2D uFoam;\nuniform vec3 uSky;\n' + swellUniformChunk() + '\n' + lodUniformsChunk() + '\n' + shader.fragmentShader)
       .replace('#include <common>', '#include <common>\n varying float vDepth;\n varying vec2 vWorld;\n varying vec2 vLocal;\n varying vec2 vFlow;\n varying vec3 vRender;\n uniform vec2 uCentre;\n uniform float uFoamLod;\n vec2 tiled(float T) { return (vLocal + mod(uCentre, vec2(T))) / T; }\n mat2 rrot(float a){ float c = cos(a); float s = sin(a); return mat2(c, -s, s, c); }\n vec3 gRn = vec3(0.0);\n float gBody = 0.0;'
         + (swell ? '\n varying vec2 vSwell;\n varying float vSheet;' : '')
         + (opts.hole ? '\n uniform vec2 uHole;' : ''))
@@ -458,7 +464,7 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
             ${swellChunk()}
             // Where this water sits in its own wave, -1 trough to +1
             // crest, and how steep the face is.
-            float crest = clamp(sw / ${(SWELL_REACH / 2).toFixed(2)}, -1.0, 1.0);
+            float crest = clamp(sw / ${(swellReach() / 2).toFixed(2)}, -1.0, 1.0);
             // BREAKING happens in shallow water on a steep face, not
             // out at sea: gate hard on the column so open water stays
             // clean and the surf zone owns the foam.

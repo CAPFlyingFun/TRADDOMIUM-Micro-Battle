@@ -3,7 +3,7 @@ import { groundHeight } from './heightfield';
 import { toLocal } from './origin';
 import { world } from './coords';
 import { makeWaterLook } from './waterLook';
-import { resetSwell, setSwellLattice, tickSwell } from './seaSwell';
+import { restartSwellClock, setSwellLattice, tickSwell } from './seaSwell';
 
 /**
  * THE SEA'S SURFACE — two sheets wearing one look.
@@ -119,9 +119,10 @@ export class Ocean {
   private readonly near: Sheet;
 
   constructor(private readonly scene: THREE.Scene, anisotropy: number) {
-    // A fresh scene starts a fresh sea; the clock the shader and the
-    // gameplay queries share lives in seaSwell.
-    resetSwell();
+    // A fresh mesh starts the shared clock over and forgets the old
+    // lattice. NOT the wave table: which sea is running is the
+    // scene's decision, and this mesh is only what draws it.
+    restartSwellClock();
     // edgeLo/edgeHi are the waterline Joshua approved — widening them
     // washed the beach out. The GRADUAL part he asked for lives
     // further out, in midAt/deepAt and the distance smear.

@@ -93,7 +93,7 @@ export function shoalChunk(): string {
             * smoothstep(${SWASH_LO.toFixed(1)}, ${SWASH_HI.toFixed(1)}, depth);`;
 }
 
-interface Wave {
+export interface Wave {
   /** Unit propagation direction. */
   readonly dx: number;
   readonly dz: number;
@@ -101,8 +101,20 @@ interface Wave {
   readonly k: number;
   /** Angular frequency — sqrt(G k), deep-water dispersion. */
   readonly omega: number;
-  /** Amplitude (half the wave height), world units. */
+  /** Amplitude (half the wave height), world units. The BASE — see
+   *  `envelope`, which is what actually reaches the water. */
   readonly amp: number;
+  /**
+   * The slow swell and lull of this component's energy, around 1.
+   *
+   * A procedural sea arrives in SETS, and that is a modulation of
+   * amplitude over tens of seconds rather than a different wave. The
+   * built-in table has none; a generated field brings one per
+   * component. Read once a frame by tickSwell, never per sample, so
+   * every consumer of the sea sees the same amplitude in the same
+   * frame.
+   */
+  readonly envelope?: (seconds: number) => number;
 }
 
 function wave(lambda: number, amp: number, towardDeg: number): Wave {
@@ -124,7 +136,7 @@ function wave(lambda: number, amp: number, towardDeg: number): Wave {
  * by the ripple texture. Headings put the swell out of the ENE trades
  * the weather chip keeps reporting, running toward the west-southwest.
  */
-const WAVES: readonly Wave[] = [
+const DEFAULT_WAVES: readonly Wave[] = [
   // STEEPNESS IS WHAT YOU SEE, and the first three cuts of this table
   // had none: 13 cm of amplitude spread over nine metres is a slope of
   // three degrees, which at an ant's grazing view is a flat sheet that
@@ -140,10 +152,93 @@ const WAVES: readonly Wave[] = [
  * The table's own amplitude sum, BEFORE any shoaling — half the wave
  * height out where the amplitudes are honest (REFERENCE_DEPTH).
  */
-export const SWELL_AMPLITUDE = WAVES.reduce((sum, w) => sum + w.amp, 0);
+export function swellAmplitude(): number {
+  return waves.reduce((sum, w) => sum + w.amp * peakEnvelope(w), 0);
+}
 
 /** The most the surface can ever leave sea level, either way. */
-export const SWELL_REACH = SWELL_AMPLITUDE * SHOAL_CAP;
+export function swellReach(): number {
+  return swellAmplitude() * SHOAL_CAP;
+}
+
+/**
+ * THE TABLE IN FORCE, and the fact that it can be replaced.
+ *
+ * The built-in two waves are the sea TMB has always drawn and remain
+ * the default; a procedural field (weather/waveField.ts, by way of
+ * world/liveSea.ts) can stand in behind a dev flag. EVERYTHING that
+ * asks the sea a question comes through this module — the vertex
+ * shader's baked chunk, the CPU height query the queen floats on, the
+ * orbital current, the surf's breaker depth, the camera's water query
+ * and the underwater test — so swapping the table here swaps the
+ * whole ocean at once, and there is no way to end up with a rendered
+ * sea and a gameplay sea that disagree.
+ */
+let waves: readonly Wave[] = DEFAULT_WAVES;
+
+/**
+ * The live amplitude of each component, this frame — base times its
+ * envelope. Recomputed once per tick rather than per sample, because a
+ * height query that re-evaluated the envelope would be answering about
+ * a slightly different sea every time it was asked.
+ */
+let liveAmp: number[] = DEFAULT_WAVES.map((w) => w.amp);
+
+/**
+ * What the shader reads instead of a baked amplitude literal.
+ *
+ * The wavenumber, frequency and heading of a component do not change
+ * within a generation and stay baked; the AMPLITUDE does, because that
+ * is where wave groups live. One array, shared by both ocean sheets,
+ * filled from the very numbers `liveAmp` hands the CPU.
+ */
+export const SWELL_AMP_UNIFORM: { value: number[] } = {
+  value: DEFAULT_WAVES.map((w) => w.amp),
+};
+
+/** The largest an envelope can make a component, for reach maths. */
+function peakEnvelope(w: Wave): number {
+  if (!w.envelope) return 1;
+  let peak = 1;
+  // Sampled rather than assumed: the envelope is somebody else's
+  // function and its bound is not this module's to know.
+  for (let i = 0; i < 240; i++) peak = Math.max(peak, w.envelope(i * 7.3));
+  return peak;
+}
+
+/**
+ * Swap the sea. Null restores the built-in table.
+ *
+ * The SHADER does not follow on its own — its chunk is baked at
+ * compile time — so whoever calls this must rebuild the water for the
+ * geometry to agree with the physics. Ocean is disposed and recreated
+ * for exactly that reason (see IslandScene.rebuildOcean).
+ */
+export function setWaveTable(table: readonly Wave[] | null): void {
+  waves = table && table.length > 0 ? table : DEFAULT_WAVES;
+  liveAmp = waves.map((w) => w.amp);
+  SWELL_AMP_UNIFORM.value = liveAmp.slice();
+  refreshAmplitudes();
+}
+
+/** The table in force, for probes and reports. */
+export function activeWaves(): readonly Wave[] {
+  return waves;
+}
+
+/** Whether the sea is the built-in one. */
+export function isDefaultSea(): boolean {
+  return waves === DEFAULT_WAVES;
+}
+
+/** Recompute every component's live amplitude for the current clock. */
+function refreshAmplitudes(): void {
+  for (let i = 0; i < waves.length; i++) {
+    const w = waves[i];
+    liveAmp[i] = w.envelope ? w.amp * w.envelope(clock) : w.amp;
+    SWELL_AMP_UNIFORM.value[i] = liveAmp[i];
+  }
+}
 
 /**
  * The primary swell's angular frequency — the BEAT of the sea. The
@@ -151,7 +246,9 @@ export const SWELL_REACH = SWELL_AMPLITUDE * SHOAL_CAP;
  * this clock, so the rhythm at the beach is the rhythm of the very
  * waves that died at the fade band to become that surf.
  */
-export const SWELL_BEAT = WAVES[0].omega;
+export function swellBeat(): number {
+  return waves[0].omega;
+}
 
 /**
  * ONE CLOCK. The scene advances it once a frame; the renderer's
@@ -163,6 +260,11 @@ let clock = 0;
 /** Advance the sea by a frame. Returns the new time for the uniform. */
 export function tickSwell(dt: number): number {
   clock += dt;
+  // ONCE A FRAME, for everybody. A height query that re-evaluated the
+  // envelope per sample would answer about a slightly different sea
+  // each time it was asked, and the renderer, the queen and the surf
+  // would quietly disagree within a single frame.
+  refreshAmplitudes();
   return clock;
 }
 
@@ -171,10 +273,34 @@ export function swellTime(): number {
   return clock;
 }
 
-/** Reset with the scene, so a fresh run starts a fresh sea. */
+/**
+ * Reset with the scene, so a fresh run starts a fresh sea — clock,
+ * mesh AND table. This is the full clean slate: the shipped two-wave
+ * ocean is back afterwards, which is what stops one test (or one
+ * scene) leaking a generated sea into the next.
+ */
 export function resetSwell(): void {
   clock = 0;
   lattice = null;
+  setWaveTable(null);
+}
+
+/**
+ * THE CLOCK AND THE MESH ONLY — the table stands.
+ *
+ * A rebuilt ocean mesh needs the shared clock at zero and the old
+ * lattice forgotten; it has NO opinion about which waves are running,
+ * because WHICH SEA is a scene decision and the mesh is only what
+ * draws it. Ocean used to call the full reset here, and the result
+ * was that installing a generated table and then rebuilding the water
+ * so the shader could follow it put the shipped table straight back —
+ * `?sea=procedural` reported itself as on while the ocean underneath
+ * was still the old two waves.
+ */
+export function restartSwellClock(): void {
+  clock = 0;
+  lattice = null;
+  refreshAmplitudes();
 }
 
 /** The analytic surface at a point — the maths, before any mesh. */
@@ -182,8 +308,9 @@ function rawSwell(wx: number, wz: number, depth: number): number {
   const shoal = shoalAt(depth);
   if (shoal <= 0) return 0;
   let y = 0;
-  for (const w of WAVES) {
-    y += w.amp * Math.cos((wx * w.dx + wz * w.dz) * w.k - w.omega * clock);
+  for (let i = 0; i < waves.length; i++) {
+    const w = waves[i];
+    y += liveAmp[i] * Math.cos((wx * w.dx + wz * w.dz) * w.k - w.omega * clock);
   }
   // A trough cannot cut below the bed it is running over.
   return Math.max(y * shoal, -Math.max(0, depth - KEEL));
@@ -220,8 +347,9 @@ export function seaOrbitalAt(
   if (shoal <= 0) return { x: 0, z: 0 };
   let x = 0;
   let z = 0;
-  for (const w of WAVES) {
-    const eta = w.amp * Math.cos((wx * w.dx + wz * w.dz) * w.k - w.omega * clock);
+  for (let i = 0; i < waves.length; i++) {
+    const w = waves[i];
+    const eta = liveAmp[i] * Math.cos((wx * w.dx + wz * w.dz) * w.k - w.omega * clock);
     const u = w.omega * eta * shoal;
     x += u * w.dx;
     z += u * w.dz;
@@ -303,8 +431,24 @@ export function seaSwellAt(wx: number, wz: number, depth: number): number {
  * baked from the very table the CPU sums, which is the whole point.
  */
 export function swellChunk(): string {
-  return WAVES.map((w, i) => `
+  return waves.map((w, i) => `
           float ph${i} = (worldXZ.x * ${w.dx.toFixed(6)} + worldXZ.y * ${w.dz.toFixed(6)}) * ${w.k.toFixed(8)} - ${w.omega.toFixed(6)} * uTime;
-          sw += ${w.amp.toFixed(2)} * cos(ph${i});
-          swSlope += vec2(${w.dx.toFixed(6)}, ${w.dz.toFixed(6)}) * (-${(w.amp * w.k).toFixed(6)} * sin(ph${i}));`).join('');
+          sw += uWaveAmp[${i}] * cos(ph${i});
+          swSlope += vec2(${w.dx.toFixed(6)}, ${w.dz.toFixed(6)}) * (-uWaveAmp[${i}] * ${w.k.toFixed(8)} * sin(ph${i}));`).join('');
+}
+
+/**
+ * The declaration `swellChunk`'s code needs, for whichever shader
+ * stage is about to use it. Sized to the table in force, which is why
+ * swapping the table means recompiling.
+ */
+export function swellUniformChunk(): string {
+  return `uniform float uWaveAmp[${waves.length}];`;
+}
+
+/** Bind the shared amplitude array onto a compiled shader. */
+export function bindSwellUniforms(
+  uniforms: Record<string, { value: unknown }>,
+): void {
+  uniforms.uWaveAmp = SWELL_AMP_UNIFORM as { value: unknown };
 }

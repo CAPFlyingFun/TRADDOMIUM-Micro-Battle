@@ -40,7 +40,7 @@
  * wave cycles.
  */
 import {
-  SWELL_AMPLITUDE, SWELL_REACH, seaOrbitalAt, shoalAt,
+  seaOrbitalAt, shoalAt, swellAmplitude, swellReach,
 } from './seaSwell';
 import { groundHeight } from './heightfield';
 
@@ -73,7 +73,7 @@ export const BREAKER_INDEX = 0.78;
  * already grown the wave here. Crest-to-trough height over the index.
  */
 export function breaksAt(depth: number): number {
-  return (2 * SWELL_AMPLITUDE * shoalAt(depth)) / BREAKER_INDEX;
+  return (2 * swellAmplitude() * shoalAt(depth)) / BREAKER_INDEX;
 }
 
 const STILL = { x: 0, z: 0 } as const;
@@ -129,7 +129,7 @@ export function surfFlowAt(
   // is no instant at which the water changes its mind — and scaled
   // against the swell's reach rather than the depth, so it SATURATES
   // instead of behaving as a second attenuation on top of `broken`.
-  const swing = Math.tanh(surface / (SWELL_REACH * 0.3));
+  const swing = Math.tanh(surface / (swellReach() * 0.3));
   let run = Math.sqrt(GRAVITY * depth) * swing;
   if (run < 0) run *= BACKWASH;
   // `broken` blends the two REGIMES. It does not slow the bore down: a

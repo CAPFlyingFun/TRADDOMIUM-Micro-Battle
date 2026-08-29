@@ -48,6 +48,27 @@ Every approved system gets a permanent lab reachable via `?scene=`:
 | -------- | ---------------- | --------------------------------------- |
 | `island` | `/?scene=island` | 01 movement + 02 input/camera (default) |
 
+### The procedural sea (dev flag, off by default)
+
+The shipped ocean is the built-in two-wave table and stays that way
+unless asked. `?sea=` swaps in the generated field described in
+`src/weather/waveField.ts`, so the two can be compared on the device:
+
+| Query                      | Sea                                    |
+| -------------------------- | -------------------------------------- |
+| *(none)*                   | the shipped two waves                  |
+| `?sea=procedural`          | macro + meso at the default chop scale |
+| `?sea=macro`               | the long swell only, no chop           |
+| `?sea=meso`                | the chop only                          |
+| `?sea=procedural&meso=0.6` | chop at a chosen scale                 |
+
+Live from a probe: `__island.waves('procedural', 0.6)` rebuilds the
+water and returns the report `__island.waveState()` also gives.
+
+`npm run measure:sea` is the 60 Hz analysis (ride, reach, current,
+steepness, shoaling); `npm run probe:seastage` is the on-device half
+(frame cost and screenshots, needs a preview server).
+
 ## Commands
 
 ```

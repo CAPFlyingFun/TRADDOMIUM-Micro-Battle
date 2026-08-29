@@ -17,6 +17,11 @@ import { findLandfall, UNITS_PER_METRE, type HeightGrid } from '../world/kauai';
 import { forceMicro, forceTier, setAnchor, setDetailDial } from '../world/lod';
 import { describeKnownSystems, lodAt, lodLine, lodReport } from '../world/lodProbe';
 import { syncLodUniforms } from '../world/lodShader';
+import {
+  DEFAULT_MESO_SCALE, SEA_SOURCE_NOTE, liveField, liveRegime, seaFromQuery,
+  seaMode, useFixedSea, useProceduralSea, type LiveSeaOptions,
+} from '../world/liveSea';
+import { activeWaves, swellAmplitude, swellReach } from '../world/seaSwell';
 import { local, world, type WorldPoint } from '../world/coords';
 import { TerrainStream, TIER_CUTS } from '../world/TerrainStream';
 import { followHd, forgetHd, hdResident, onHdTile } from '../world/kauaiHd';
@@ -788,6 +793,32 @@ export class IslandScene {
        *     to a tier index; null releases. Both report FORCED on the
        *     overlay line while pinned, and neither survives a reload.
        */
+      /**
+       * THE SEA EXPERIMENT (Stage C, dev only). Four comparisons, and
+       * each rebuilds the water so the picture and the physics agree:
+       *
+       *   __island.waves('fixed')            the shipped 2-wave sea
+       *   __island.waves('procedural')       macro + meso, default scale
+       *   __island.waves('macro')            macro only, no chop
+       *   __island.waves('procedural', 0.6)  meso at a chosen scale
+       *
+       * Returns what the sea now IS — every generated component, so a
+       * report never has to guess what it measured.
+       */
+      waves: (which: 'fixed' | 'procedural' | 'macro' | 'meso' = 'procedural',
+        mesoScale?: number) => {
+        if (which === 'fixed') this.useSea(null);
+        else {
+          this.useSea({
+            ...(which === 'macro' ? { meso: false } : {}),
+            ...(which === 'meso' ? { macro: false } : {}),
+            ...(mesoScale === undefined ? {} : { mesoScale }),
+          });
+        }
+        return this.seaReport();
+      },
+      /** What the sea is right now, without changing it. */
+      waveState: () => this.seaReport(),
       lod: () => lodReport(),
       lodAt: (wx: number, wy: number, wz: number) => lodAt(wx, wy, wz),
       lodForce: (fraction: number | null) => {
@@ -2457,8 +2488,102 @@ export class IslandScene {
     const aniso = this.renderer.capabilities.getMaxAnisotropy();
     this.water = new IslandWater(this.scene, aniso);
     this.water.follow(this.ant.where);
+    // THE DEV FLAG, read once and answered BEFORE the ocean is built,
+    // because seaSwell's chunk is baked into the water's shader at
+    // compile time: choosing the sea first means the very first frame
+    // already draws it, with no rebuild. Without the flag the shipped
+    // table is installed explicitly, so a scene cannot inherit a
+    // generated sea from the one before it.
+    const asked = seaFromQuery(window.location.search);
+    if (asked) useProceduralSea(asked); else useFixedSea();
     this.ocean = new Ocean(this.scene, aniso);
     this.ocean.follow(this.ant.where);
+  }
+
+  /**
+   * SWAP THE SEA, and rebuild the water so the picture agrees.
+   *
+   * seaSwell's chunk is baked into the shader at compile time, so
+   * changing the table is only half the job: the ocean's materials
+   * have to be made again for the geometry to follow the physics.
+   * Disposing and recreating is the honest way to do that, and it is
+   * a dev action rather than a per-frame one.
+   *
+   * @param options null for the built-in sea.
+   */
+  private useSea(options: LiveSeaOptions | null): void {
+    if (options) useProceduralSea(options); else useFixedSea();
+    this.rebuildOcean();
+  }
+
+  /**
+   * WHAT THE SEA IS, in the units a person argues in.
+   *
+   * Everything a Stage C measurement needs to name its own conditions:
+   * which table is in force, what the regime asked for, and every
+   * component's period, wavelength, amplitude and heading. Peak
+   * vertical acceleration is included because it is the number the
+   * "washing machine" complaint was actually about — A * omega^2, per
+   * scale, which is what separates a big slow swell from fast chop.
+   */
+  private seaReport(): Record<string, unknown> {
+    const waves = activeWaves();
+    const field = liveField();
+    const regime = liveRegime();
+    const per = (from: readonly typeof waves[number][]) => ({
+      count: from.length,
+      // Peak vertical speed and acceleration this scale can impose.
+      peakRiseCmS: Number(from.reduce((s2, w) => s2 + w.amp * w.omega, 0).toFixed(2)),
+      peakAccelMs2: Number((from.reduce(
+        (s2, w) => s2 + w.amp * w.omega * w.omega, 0) / 100).toFixed(3)),
+      reachCm: Number(from.reduce((s2, w) => s2 + w.amp, 0).toFixed(2)),
+    });
+    const macro = field
+      ? waves.filter((_, i) => field.components[i]?.scale === 'macro') : waves;
+    const meso = field
+      ? waves.filter((_, i) => field.components[i]?.scale === 'meso') : [];
+    return {
+      mode: seaMode(),
+      source: seaMode() === 'procedural' ? SEA_SOURCE_NOTE : 'built-in table',
+      mesoScaleDefault: DEFAULT_MESO_SCALE,
+      regime: regime && {
+        significantHeightM: Number(regime.significantHeightM.toFixed(3)),
+        dominantPeriodS: regime.dominantPeriodS,
+        towardDeg: Number(regime.towardDeg.toFixed(1)),
+        periodSpread: Number(regime.periodSpread.toFixed(3)),
+        directionSpreadDeg: Number(regime.directionSpreadDeg.toFixed(1)),
+        grouping: Number(regime.grouping.toFixed(3)),
+        seed: regime.seed,
+      },
+      // The whole sea, and each scale on its own.
+      all: per(waves),
+      macro: per(macro),
+      meso: per(meso),
+      swellAmplitudeCm: Number(swellAmplitude().toFixed(2)),
+      swellReachCm: Number(swellReach().toFixed(2)),
+      components: waves.map((w, i) => ({
+        scale: field?.components[i]?.scale ?? 'fixed',
+        periodS: Number(((2 * Math.PI) / w.omega).toFixed(3)),
+        wavelengthCm: Number(((2 * Math.PI) / w.k).toFixed(1)),
+        amplitudeCm: Number(w.amp.toFixed(3)),
+        towardDeg: Number(
+          ((Math.atan2(w.dx, -w.dz) * 180) / Math.PI + 360).toFixed(1),
+        ) % 360,
+        faceDeg: Number(
+          ((Math.atan(w.amp * w.k) * 180) / Math.PI).toFixed(2),
+        ),
+      })),
+    };
+  }
+
+  private rebuildOcean(): void {
+    if (!this.ocean) return;
+    this.ocean.dispose();
+    this.ocean = new Ocean(
+      this.scene, this.renderer.capabilities.getMaxAnisotropy(),
+    );
+    this.ocean.follow(this.ant.where);
+    this.ocean.place();
   }
 
 

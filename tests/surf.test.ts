@@ -19,7 +19,7 @@ import {
   BACKWASH, BREAKER_INDEX, breaksAt, shoreward, surfFlowAt,
 } from '../src/world/surf';
 import {
-  SWELL_AMPLITUDE, resetSwell, seaOrbitalAt, seaSwellAt, tickSwell,
+  resetSwell, seaOrbitalAt, seaSwellAt, swellAmplitude, tickSwell,
 } from '../src/world/seaSwell';
 
 /**
@@ -127,7 +127,7 @@ describe('the surf', () => {
     expect(breaksAt(1000)).toBeLessThan(1000);
     expect(breaksAt(40)).toBeGreaterThan(40);
     // And the depth it breaks in grows with the shoaled wave.
-    expect(breaksAt(40)).toBeGreaterThan(2 * SWELL_AMPLITUDE);
+    expect(breaksAt(40)).toBeGreaterThan(2 * swellAmplitude());
   });
 
   it('runs up harder than it drains back', () => {
