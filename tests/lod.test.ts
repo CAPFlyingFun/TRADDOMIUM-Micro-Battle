@@ -14,7 +14,8 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   anchorSpeed, DETAIL_FEATHER, detailFraction, detailRadius,
-  distanceSqTo, distanceTo, HYSTERESIS_FLOOR, leadDistance,
+  distanceSqTo, distanceTo, forcedState, forceMicro, forceTier,
+  HYSTERESIS_FLOOR, leadDistance,
   type LodProfile, profileFor, profilesSnapshot, registerProfile,
   resetLod, setAnchor, setDetailDial, tierAt,
 } from '../src/world/lod';
@@ -138,6 +139,40 @@ describe('the registry', () => {
     registerProfile({ ...LADDER, hysteresis: 0.2 });
     expect(profilesSnapshot().filter((p) => p.name === 'test-tree')).toHaveLength(1);
     expect(profileFor('test-tree')?.hysteresis).toBe(0.2);
+  });
+});
+
+describe('the dev forces', () => {
+  it('pins the micro fraction anywhere, and releases clean', () => {
+    setDetailDial(2);
+    forceMicro(0.5);
+    expect(detailFraction(0)).toBe(0.5);
+    expect(detailFraction(166 * M)).toBe(0.5);
+    expect(forcedState().micro).toBe(0.5);
+    forceMicro(null);
+    expect(detailFraction(0)).toBe(1);
+    expect(forcedState().micro).toBeNull();
+  });
+
+  it('pins a profile to a tier whatever the distance', () => {
+    forceTier('test-tree', 2);
+    const read = tierAt(LADDER, 1 * M);
+    expect(read.tier.name).toBe('billboard');
+    expect(read.fade).toBe(0);
+    // An index past the ladder clamps to the last rung.
+    forceTier('test-tree', 99);
+    expect(tierAt(LADDER, 1 * M).tier.name).toBe('hidden');
+    forceTier('test-tree', null);
+    expect(tierAt(LADDER, 1 * M).tier.name).toBe('full');
+  });
+
+  it('a reset lifts every hand from the scale', () => {
+    forceMicro(0.2);
+    forceTier('test-tree', 1);
+    resetLod();
+    expect(forcedState().micro).toBeNull();
+    expect(Object.keys(forcedState().tiers)).toHaveLength(0);
+    expect(tierAt(LADDER, 1 * M).tier.name).toBe('full');
   });
 });
 

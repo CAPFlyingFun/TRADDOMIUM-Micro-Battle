@@ -14,7 +14,8 @@ import {
   groundHeight, ISLAND_SPAN, reliefScale, setRelief, setSmoothing, smoothingAmount,
 } from '../world/heightfield';
 import { findLandfall, UNITS_PER_METRE, type HeightGrid } from '../world/kauai';
-import { setAnchor, setDetailDial } from '../world/lod';
+import { forceMicro, forceTier, setAnchor, setDetailDial } from '../world/lod';
+import { describeKnownSystems, lodAt, lodLine, lodReport } from '../world/lodProbe';
 import { local, world, type WorldPoint } from '../world/coords';
 import { TerrainStream, TIER_CUTS } from '../world/TerrainStream';
 import { followHd, forgetHd, hdResident, onHdTile } from '../world/kauaiHd';
@@ -444,6 +445,10 @@ export class IslandScene {
     setDetailRange();
     setDetailDial(settings().detailRange);
     syncDetailRadius();
+    // The debug registry's picture of the coverage systems — replaced
+    // by the same names when owners register themselves in later
+    // stages, so calling it on every build stacks nothing.
+    describeKnownSystems();
     setSmoothing(settings().terrainSmoothing);
     this.buildTerrain();
 
@@ -767,6 +772,31 @@ export class IslandScene {
        * before.
        */
       foamLod: (amount: number) => ({ foamLod: setFoamLod(amount) }),
+      /**
+       * THE MASTER LOD, inspected (see docs/LOD_ARCHITECTURE.md).
+       *
+       *   __island.lod()                     the whole state: dial %,
+       *     radius, 3D anchor, speed, the point straight BELOW her
+       *     (true 3D distance + micro fraction — the flying case),
+       *     any forces, every registered profile.
+       *   __island.lodAt(wx, wy, wz)         one world point: its 3D
+       *     distance, micro fraction, and tier on every ladder.
+       *   __island.lodForce(0.5)             pin the MICRO fraction
+       *     everywhere; null releases it.
+       *   __island.lodForceTier('terrain-tiers', 2)   pin a profile
+       *     to a tier index; null releases. Both report FORCED on the
+       *     overlay line while pinned, and neither survives a reload.
+       */
+      lod: () => lodReport(),
+      lodAt: (wx: number, wy: number, wz: number) => lodAt(wx, wy, wz),
+      lodForce: (fraction: number | null) => {
+        forceMicro(fraction);
+        return lodReport().forced;
+      },
+      lodForceTier: (profile: string, index: number | null) => {
+        forceTier(profile, index);
+        return lodReport().forced;
+      },
       // The micro-relief, judged where it ships: on a phone, in sun.
       // bump 0 is the honest A/B — it turns the third dimension off
       // without touching the colour work underneath it.
@@ -1446,6 +1476,9 @@ export class IslandScene {
         fix: settings().showFix
           ? { msl: this.mslNow(), pitch: pitchOf(view.y), relief: reliefScale() }
           : null,
+        // The master LOD's state rides the same developer toggle as
+        // the fix — one switch, one register, one screenshot.
+        lod: settings().showFix ? lodLine() : null,
         // HER NOSE, not the camera's. In flight they part company the
         // moment she looks around, and the pairing with the flight
         // panel's ground line only means anything if this one is hers.

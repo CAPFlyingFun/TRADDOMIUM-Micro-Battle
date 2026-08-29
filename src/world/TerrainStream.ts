@@ -102,8 +102,9 @@ export const TRANSITION_REACH = 20_000;
 const TRANSITION_VERTS = 129;
 const TRANSITION_STEP = (TRANSITION_REACH * 2) / (TRANSITION_VERTS - 1);
 
-/** Half-width of the middle tier — two kilometres of ground. */
-const MIDDLE_REACH = 200_000;
+/** Half-width of the middle tier — two kilometres of ground.
+ *  Exported for the LOD debug surface's coverage ladder. */
+export const MIDDLE_REACH = 200_000;
 const MIDDLE_VERTS = 129;
 /** It follows her, snapped, so its vertices never crawl as she moves. */
 const MIDDLE_STEP = (MIDDLE_REACH * 2) / (MIDDLE_VERTS - 1);

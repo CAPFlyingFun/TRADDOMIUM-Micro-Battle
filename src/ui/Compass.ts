@@ -190,6 +190,9 @@ export interface UnderTape {
   /** Average frames a second, and the worst of the recent ones. */
   readonly fps?: { readonly mean: number; readonly low: number } | null;
   readonly fix?: FixSource | null;
+  /** The master LOD's one-line state (lodProbe.lodLine) — the same
+   *  developer register as the fix, and shown under its toggle. */
+  readonly lod?: string | null;
   readonly air?: AirLine | null;
   readonly ground?: GroundLine | null;
   readonly wind?: WindLine | null;
@@ -218,6 +221,8 @@ export class Compass {
   private lastFps = '';
   private readonly fixLine: HTMLDivElement;
   private lastFix = '';
+  private readonly lodLine: HTMLDivElement;
+  private lastLod = '';
   private readonly airLine: HTMLDivElement;
   private lastAir = '';
   private readonly groundLine: HTMLDivElement;
@@ -433,6 +438,25 @@ export class Compass {
     } as Partial<CSSStyleDeclaration>);
     this.root.appendChild(this.fixLine);
 
+    // THE MASTER LOD'S LINE, under the fix and in the same developer
+    // register: what the Detail dial means right now, how far the
+    // ground under her truly is in 3D, and the micro fraction that
+    // distance earns. The string is composed by lodProbe.lodLine —
+    // this element only wears it.
+    this.lodLine = document.createElement('div');
+    this.lodLine.dataset.ui = 'compass-lod';
+    Object.assign(this.lodLine.style, {
+      marginTop: '2px',
+      textAlign: 'center',
+      font: '500 8px/1 "JetBrains Mono", ui-monospace, monospace',
+      fontVariantNumeric: 'tabular-nums',
+      whiteSpace: 'nowrap',
+      color: 'rgba(169, 242, 201, .62)',
+      textShadow: SHADOW,
+      display: 'none',
+    } as Partial<CSSStyleDeclaration>);
+    this.root.appendChild(this.lodLine);
+
     host.appendChild(this.root);
 
     // Re-fit whenever anything around it changes shape: a rotation, a
@@ -619,6 +643,18 @@ export class Compass {
     } else if (this.fixLine.style.display !== 'none') {
       this.fixLine.style.display = 'none';
       this.lastFix = '';
+    }
+
+    const lod = under?.lod ?? null;
+    if (lod) {
+      if (lod !== this.lastLod) {
+        this.lastLod = lod;
+        this.lodLine.textContent = lod;
+      }
+      if (this.lodLine.style.display === 'none') this.lodLine.style.display = '';
+    } else if (this.lodLine.style.display !== 'none') {
+      this.lodLine.style.display = 'none';
+      this.lastLod = '';
     }
 
     this.drawMarkers(from, markers, half);

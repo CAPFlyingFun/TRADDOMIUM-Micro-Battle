@@ -222,7 +222,38 @@ export function detailRadius(): number {
  * smooth between — a hard budget wearing a soft edge.
  */
 export function detailFraction(dist: number): number {
+  if (forcedMicro !== null) return forcedMicro;
   return 1 - smoothstep(radius * DETAIL_FEATHER, radius, dist);
+}
+
+/**
+ * DEBUG FORCES — a hand on the scale, for testing only.
+ *
+ * Production code never calls these. They exist so a person judging a
+ * consumer can pin the answer — "show me the shore as if it were
+ * inside the sphere", "as if it were far" — without touching the dial
+ * or moving the queen. Nothing is stored in settings, nothing
+ * survives a reload, and resetLod clears both.
+ */
+let forcedMicro: number | null = null;
+const forcedTiers = new Map<string, number>();
+
+/** Pin detailFraction to a value (clamped 0..1), or null to release. */
+export function forceMicro(fraction: number | null): void {
+  forcedMicro = fraction === null ? null : clamp01(fraction);
+}
+
+/** Pin a profile's tier by index, or null to release it. */
+export function forceTier(profileName: string, index: number | null): void {
+  if (index === null) forcedTiers.delete(profileName);
+  else forcedTiers.set(profileName, Math.max(0, Math.floor(index)));
+}
+
+/** What is currently pinned, for the debug surface. */
+export function forcedState(): {
+  micro: number | null; tiers: Record<string, number>;
+} {
+  return { micro: forcedMicro, tiers: Object.fromEntries(forcedTiers) };
 }
 
 /**
@@ -259,6 +290,11 @@ export function tierAt(
 ): TierRead {
   const tiers = profile.tiers;
   const last = tiers.length - 1;
+  const pinned = forcedTiers.get(profile.name);
+  if (pinned !== undefined) {
+    const index = Math.min(pinned, last);
+    return { index, tier: tiers[index], fade: 0 };
+  }
   const h = profile.hysteresis ?? HYSTERESIS;
   const margin = (i: number) =>
     Math.max(HYSTERESIS_FLOOR, tiers[i].upTo * h);
@@ -299,4 +335,6 @@ export function resetLod(): void {
   dial = 1;
   radius = METRES_PER_DIAL * UNITS_PER_METRE;
   profiles.clear();
+  forcedMicro = null;
+  forcedTiers.clear();
 }

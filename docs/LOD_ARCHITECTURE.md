@@ -100,8 +100,10 @@ Auto-Ant ×10 travel (~7 m/s) cannot outrun a load.
 
 - **Stage 0** ✅ — core module + tests, dial ownership moved, zero
   intended visual change (this stage; frames must be bit-identical).
-- **Stage 1** — debug/inspection: dev overlay (Detail %, radius,
-  per-category tier/distance), probe hooks, force-tier override.
+- **Stage 1** ✅ — debug/inspection: the compass's LOD line (under the
+  fix toggle), `__island.lod()` / `lodAt` / `lodForce` / `lodForceTier`
+  probe hooks (`lodProbe.ts`), dev force pins in the core, coverage
+  systems described in the registry.
 - **Stage 2** — foam as first MICRO consumer. Acceptance includes
   PERFORMANCE: outside the sphere the expensive foam texture work is
   actually skipped where safely possible, not computed and multiplied
