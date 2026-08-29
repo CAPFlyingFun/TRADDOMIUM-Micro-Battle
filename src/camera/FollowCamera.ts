@@ -4,7 +4,7 @@ import { groundHeight } from '../world/heightfield';
 import { local } from '../world/coords';
 import { toWorld } from '../world/origin';
 import { waterSpotAt } from '../world/waterQuery';
-import { crestHeight, swellPeriod, swellReach } from '../world/seaSwell';
+import { swellPeriod, swellReach } from '../world/seaSwell';
 import { settings } from '../ui/settings';
 
 /**
@@ -187,52 +187,51 @@ const DIVE_RELEASE_LO = 0.15;
 const DIVE_RELEASE_HI = 0.55;
 
 /**
- * WHERE THE LENS FLOATS, measured down from the sea's advertised crest.
+ * HOW SOFTLY THE CAMERA TAKES ITS STATION WHILE SHE IS AFLOAT — one
+ * number, x y and z together.
  *
- * Afloat, the camera does not ride the water at all: it holds a fixed
- * height over the STILL-WATER DATUM and lets the wave — and the queen
- * on it — pass through that height. So there is one number to choose,
- * which is how much clearance it keeps, and it is a trade. Sit it at
- * the crest and nothing ever washes the lens and the sea never reaches
- * the player at all; sit it at mean level and every wave buries it.
- * A few centimetres UNDER the advertised crest means only the tallest
- * crests in a group reach it, which is the "occasionally, not every
- * wave" Joshua asked for.
+ * Afloat is now the ordinary chase camera: her position reaches it the
+ * same frame, exactly as walking, flying and diving, so no wind and no
+ * current can leave it trailing. What is different is only that the
+ * OFFSET she is chased at settles a little more slowly, which takes
+ * the edge off every transient without putting a filter between the
+ * camera and her.
  *
- * AGAINST swellAmplitude() RATHER THAN swellReach(), because since
- * v0.0.105 the reach is not a height the sea can actually reach: it is
- * the deep-water crest times the shoaling cap, and shoaling only bites
- * in shallow water where the breaking envelope has already capped the
- * crest at 0.39 of the depth. The honest advertised crest is the
- * table's own peak sum.
+ * IT IS THE OFFSET, NEVER THE WORLD POSITION. Smoothing where the
+ * camera IS makes it lag her translation: at a 4 mph wind that was
+ * thirty units upwind of her, aimed at her, and therefore pointed
+ * downwind whichever way she flew. Smoothing where it sits RELATIVE to
+ * her keeps every soft quality and none of that.
+ *
+ * AND IT REPLACES FOUR ATTEMPTS AT HOLDING STILL — a damped height, a
+ * spectral share of the heave, a still-water datum, a dead-zone
+ * corrector. Each was choosing between a lens that stays dry and a
+ * queen you can see, and the measurements said those are the same
+ * number: the picture accepts about eleven units of height at this
+ * boom and she rides a hundred and ninety. A camera that travels with
+ * her frames her, and because it TRANSLATES rather than turns, the
+ * horizon — which is kilometres away — does not move with it.
  */
-const CREST_QUANTILE = 0.85;
+const AFLOAT_FOLLOW = 3.5;
 
 /**
- * WHY THERE IS NO FRAMING CORRECTOR HERE — measured, v0.0.110.
+ * And how softly the view's own aim settles — the pitch lerp.
  *
- * The ask was a dead zone around the centre of the frame: hold the
- * datum while she is inside it, give ground slowly when a swell takes
- * her out. It was built and swept, and it does not work at this scale,
- * for a reason arithmetic settles rather than taste.
+ * Also an offset from her, so in steady water the aim sits a fixed
+ * height above her and the pitch does not move at all. What it eases
+ * is the TRANSIENT: the frames after a drag, a boom change or the
+ * water envelope nudging the lens, where an aim welded to her would
+ * turn a few units of camera displacement into a swing of the horizon
+ * at a seven-unit lever arm. That lever is what made every earlier
+ * version feel like a washing machine.
  *
- * The frame accepts about eleven units of height at a 7.8 unit boom
- * and sixty degrees; she rides a hundred and ninety. So the dead zone
- * is a window she is essentially never inside, the correction is
- * therefore always saturated, and a saturated rate limit is a chaser
- * that is always behind — which made framing WORSE (on screen 19% ->
- * 16% on the shipped sea) while dragging the lens under on every wave
- * (21% -> 101%). Following the slow heave instead, with no lag at all,
- * fails the same way from the other side: it lifts the lens with the
- * macro and she leaves the picture underneath it (2% -> 0%).
- *
- * The deadlock is real and it is not a camera-tuning problem: a lens
- * high enough to stay dry is a lens she cannot be framed against, and
- * they are the same number. The variable that breaks it is the BOOM,
- * which is not this pass's to change — see the report on Trello.
+ * ROLL IS NEVER TOUCHED. `lookAt` is given the world's up and nothing
+ * in this file writes `camera.up`, so the horizon can tilt in pitch
+ * and in nothing else.
  */
+const AIM_FOLLOW = 2.2;
 
-/** Where the lens floats, in the sea's own crest distribution. */function smoothstep(lo: number, hi: number, v: number): number {
+function smoothstep(lo: number, hi: number, v: number): number {
   const t = Math.min(1, Math.max(0, (v - lo) / (hi - lo)));
   return t * t * (3 - 2 * t);
 }
@@ -268,15 +267,11 @@ export class FollowCamera {
   /** Seconds the lens has been continuously under the water. */
   private sunkFor = 0;
   /**
-   * How far the datum lock moved the whole view this frame — camera
-   * AND aim point together, which is why the pitch never changes.
-   * Reported for probes.
+   * How high above her the view is currently aiming — an OFFSET, so
+   * still water leaves it constant and the pitch with it. Null until
+   * the first frame. @see AIM_FOLLOW
    */
-  private seaShift = 0;
-  /** Whether the datum lock is in force — a sea, afloat, not diving. */
-  private locked = false;
-  /** @deprecated the same number, under its older name. */
-  private hold = 0;
+  private aimAbove: number | null = null;
   /**
    * How far the water envelope is currently holding the lens ABOVE
    * where the rig alone would put it.
@@ -349,14 +344,12 @@ export class FollowCamera {
     this.camera.position.copy(this.desired);
     this.sunkFor = 0;
     this.keepAboveGround(this.camera.position);
-    // NOTHING TO RE-SEED. A snap used to have to restart the height
-    // filter or the camera would glide in from wherever it had been;
-    // the spectral filter has no memory to carry across a teleport.
-    this.hold = 0;
-    this.seaShift = 0;
+    // A snap is a teleport: every easing starts fresh, or the camera
+    // and the view would both glide in from wherever they had been.
+    this.aimAbove = null;
     this.lift = 0;
     this.liftVel = 0;
-    this.aim(target);
+    this.aim(target, false, 0);
   }
 
   /**
@@ -372,52 +365,17 @@ export class FollowCamera {
     // just following, so a drag feels connected but walking feels calm.
     // The smoothing applies to the OFFSET only — see its declaration —
     // so her translation reaches the camera the same frame it happens.
-    const rate = look.active ? 14 : 6;
+    // A drag is snappier than a follow, and afloat is softer than
+    // either — one rate for all three axes, which is the number to
+    // tune if the sea feels stiff or floaty.
+    const rate = look.active ? 14 : (calm ? AFLOAT_FOLLOW : 6);
     this.wantOffset.copy(this.desired).sub(target.position);
     this.offset.lerp(this.wantOffset, 1 - Math.exp(-rate * dt));
     this.camera.position.copy(target.position).add(this.offset);
-    // HER BOB IS NOT THE CAMERA'S BOB.
-    //
-    // Measured while she floated: her height swung 34.5 units over a
-    // few wave cycles and the camera swung 35.4 — it was copying 103%
-    // of it, so the whole world pumped up and down with the swell and
-    // the horizon never sat still. The waves are supposed to move
-    // under her, not under the player.
-    //
-    // THE SEA DATUM IS THE REFERENCE AFLOAT — not her, and not the
-    // wave she is on.
-    //
-    // Three cuts of this got it wrong in the same way. The camera was
-    // attached to her height, so whatever fraction of the swell it
-    // passed, the WORLD went up and down with the player. Filtering
-    // that fraction to a seventh did not help, and the reason is one
-    // line further down: `aim` looked AT her. At a 7.8 unit boom a
-    // queen 22 units down in a trough is sixty degrees below the view
-    // axis, so a lens that held perfectly still still swung the whole
-    // horizon through sixty degrees every wave. That is the washing
-    // machine, and no height gain can fix it.
-    //
-    // So afloat the camera holds a fixed height over the STILL-WATER
-    // datum, and the aim point is shifted by exactly the same amount
-    // (see `aim`), which leaves the view direction as whatever the
-    // player's drag asked for and nothing else. The pitch stops
-    // moving, the horizon stops moving, and the queen rises and falls
-    // through the frame — which is what a wave passing under her looks
-    // like from a boat.
-    //
-    // DIVING LETS IT GO. The lock fades out over the same band the
-    // water envelope uses, so committing to a dive hands her height
-    // back to the camera continuously rather than at an instant.
-    const released = smoothstep(DIVE_RELEASE_LO, DIVE_RELEASE_HI, dive);
-    this.locked = false;
-    this.seaShift = calm && released < 1
-      ? this.datumShift(target, 1 - released) : 0;
-    this.hold = this.seaShift;
-    this.camera.position.y += this.seaShift;
     // The floor still has the last word: a smoothed camera may lag,
     // it may not lag INTO the ground — nor under a wave.
     this.keepAboveGround(this.camera.position, dive, dt);
-    this.aim(target);
+    this.aim(target, calm, dt);
   }
 
   resize(aspect: number): void {
@@ -580,96 +538,32 @@ export class FollowCamera {
   }
 
   /**
-   * How far to move the whole view to put the lens on the sea datum at
-   * its floating height, drawn units.
+   * WHERE THE VIEW POINTS — an offset above her, eased.
    *
-   * TWO TERMS. The first takes the wave off her: the water reports how
-   * much of its surface the view must not go along with (`hold`, which
-   * afloat is the whole swell — seaSwell.seaHoldAt), and she sits
-   * exactly on that surface, so subtracting it leaves the still-water
-   * datum. The second is the lens's own height over that datum, which
-   * is fixed and comes from the sea's advertised crest rather than
-   * from any instantaneous sample of it: a wave group must not be able
-   * to move the reference, or the reference is just the wave again.
+   * AN OFFSET, NOT A HEIGHT, and that distinction is the whole of the
+   * pitch behaviour. Aiming at a world height that she rides up and
+   * down past would swing the view once a wave; aiming a fixed
+   * distance ABOVE HER leaves the pitch exactly where the boom and the
+   * player's drag put it, however far the sea carries them both. The
+   * ease then only ever works on the transient — a drag settling, the
+   * water envelope nudging the lens — which at a seven-unit lever arm
+   * is precisely where a rigid aim used to turn a couple of units of
+   * camera displacement into a swing of the horizon.
    *
-   * Asked at HER position, deliberately: it is her motion the first
-   * term is cancelling, and a wave is a moving surface, so the water
-   * seven units away is a different number and would leave a residue.
-   *
-   * Zero wherever the water has no swell to speak of — every pond on
-   * the island — because a lake has no datum to hold and a camera
-   * suddenly hoisted fourteen units over one would be absurd.
-   *
-   * @param lock nought once she has committed to a dive, one at the
-   *   surface — the same band the water envelope releases over.
+   * Roll is untouched: `lookAt` gets the world's up, so the horizon
+   * can move in pitch and in nothing else.
    */
-  private datumShift(target: THREE.Object3D, lock: number): number {
-    const at = toWorld(local(target.position.x, target.position.z));
-    const spot = waterSpotAt(at.wx, at.wz);
-    this.locked = Boolean(spot && spot.depth > 0 && spot.hold !== undefined);
-    if (!spot || spot.depth <= 0 || spot.hold === undefined) return 0;
-    // Where the camera would sit over the datum once the wave is taken
-    // off both of them: she rides the surface, the camera rides her,
-    // so what is left between them is the boom's own rise — whatever
-    // the player has dragged it to. (Her draught, a sixth of a unit,
-    // is not worth carrying.)
-    const overDatum = this.camera.position.y - target.position.y;
-    const datum = (-spot.hold + Math.max(0, this.lensHeight() - overDatum)) * lock;
-    return datum;
-  }
-
-  /**
-   * How high the lens floats over still water. @see CREST_MARGIN.
-   *
-   * A property of the SEA, not of the moment: swellAmplitude is the
-   * table's peak sum and cannot move within a generation, so a passing
-   * group cannot drag the reference around with it.
-   */
-  private lensHeight(): number {
-    return Math.max(0, crestHeight(CREST_QUANTILE));
-  }
-
-  /** How far the datum lock moved the view, for probes and tests. */
-  holdTaken(): number {
-    return this.hold;
-  }
-
-  /** The lens's floating height over still water, for probes. */
-  seaLensHeight(): number {
-    return this.lensHeight();
-  }
-
-  /**
-   * WHERE THE VIEW POINTS — and the half of the pumping that hid here
-   * for three versions.
-   *
-   * This aimed at her, and only at her. So every unit of vertical
-   * difference between the camera and the queen became PITCH, at a
-   * lever arm of seven units: a queen 22 units down in a trough put
-   * the view sixty degrees below level, and one on a crest put it
-   * back. The camera's own height could be held perfectly still and
-   * the horizon would still sweep the screen once a wave — which is
-   * exactly what it did, at every follow gain from 96% down to 15%.
-   *
-   * So the aim point takes the SAME vertical shift the datum lock gave
-   * the camera. Both ends of the look vector move together, the
-   * direction is left as whatever the boom and the player's drag ask
-   * for, and the queen rides up and down THROUGH the frame instead of
-   * dragging the frame with her.
-   *
-   * Out of the water the shift is nought and this is the aim it always
-   * was, so walking and flying are untouched.
-   */
-  private aim(target: THREE.Object3D): void {
+  private aim(target: THREE.Object3D, calm: boolean, dt: number): void {
+    // The envelope lifts the LENS and not her, so the aim has to know
+    // about it or the view tilts by exactly as much as the lens rose.
+    const want = 0.6 + this.lift;
+    if (this.aimAbove === null || !calm || dt <= 0) {
+      this.aimAbove = want;
+    } else {
+      this.aimAbove += (want - this.aimAbove) * (1 - Math.exp(-AIM_FOLLOW * dt));
+    }
     this.lookTarget.copy(target.position);
-    // THE ENVELOPE'S LIFT COUNTS TOO. It moves the camera and not her,
-    // so left out of the shift it would tilt the view by exactly as
-    // much as it raised the lens — measured, twelve degrees of the
-    // horizon on the shipped sea, which is the same fault in
-    // miniature. The ground clamp is deliberately NOT included: on
-    // land the view tilting down to keep her in shot is the behaviour
-    // walking has always had.
-    this.lookTarget.y += 0.6 + this.seaShift + (this.locked ? this.lift : 0);
+    this.lookTarget.y += this.aimAbove;
     this.camera.lookAt(this.lookTarget);
   }
 }

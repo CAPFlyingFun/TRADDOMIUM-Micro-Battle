@@ -18,20 +18,6 @@ export interface WaterSpot {
   readonly flowZ: number;
   /** The sea. Floats her like any water; drinks like none. */
   readonly salt?: boolean;
-  /**
-   * How much of this column's surface the CAMERA HOLDS STILL AGAINST,
-   * drawn units — signed, and already included in `depth`.
-   *
-   * FOR FRAMING ONLY. The camera subtracts it, so the view goes along
-   * with only a small share of the slow heave and none of the chop
-   * (seaSwell.seaHoldAt, and FollowCamera). It is built from the same
-   * surface `depth` carries, not a second opinion about where the
-   * water is: nothing that decides flotation, submersion, current or
-   * what is drawn may read it. Absent — inland water, any query that
-   * does not model a swell — means "nothing here to hold still
-   * against", which is the honest answer for a pond.
-   */
-  readonly hold?: number;
 }
 
 type Query = (wx: number, wz: number) => WaterSpot | null;

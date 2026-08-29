@@ -81,6 +81,20 @@ The shore's depth-limited breaking envelope applies to both seas and is
 measured by `npm run measure:breaker`; `npm run probe:breaker <tag>`
 photographs the surf zone so two builds can be put side by side.
 
+Afloat the camera is the ordinary chase camera — locked behind her as
+it is walking, flying and diving, so her translation reaches it the
+same frame and no current can leave it trailing. The softness is one
+shared rate on the OFFSET (`FollowCamera.AFLOAT_FOLLOW`, all three
+axes) plus an eased aim, and the aim is an offset ABOVE HER rather than
+a world height, so the pitch does not move: measured, zero degrees of
+pitch swing and zero roll while she rides two metres of swell. The
+camera travels with the sea; the horizon, being kilometres away, does
+not care.
+
+The shore's depth-limited breaking envelope applies to both seas and is
+measured by `npm run measure:breaker`; `npm run probe:breaker <tag>`
+photographs the surf zone so two builds can be put side by side.
+
 Afloat, the camera holds a fixed height over the STILL-WATER DATUM and
 the aim point takes the same shift, so the view direction is whatever
 the player's drag asks for and nothing else — measured, zero degrees of

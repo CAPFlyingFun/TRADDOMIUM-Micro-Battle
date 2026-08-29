@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { FollowCamera } from '../src/camera/FollowCamera';
 import { useWaterQuery } from '../src/world/waterQuery';
-import { CAMERA_FOLLOW, heaveGain } from '../src/world/seaSwell';
 import type { LookInput } from '../src/input/LookDrag';
 
 afterEach(() => useWaterQuery(null));
@@ -161,42 +160,30 @@ describe('following her up', () => {
     expect(climbGap(300, false)).toBeGreaterThan(0);
   });
 
-  it('still damps her bob when the SEA is the thing moving her', () => {
-    // The one case the filter was built for must survive the fix —
-    // and since v0.0.106 the damping is no longer a property of the
-    // camera alone. The WATER reports how much of its surface is fast
-    // chop and the camera subtracts that, so a bob has to arrive as a
-    // bob in real water for there to be anything to reject. `calm` on
-    // dry land is not a state the game can be in: it means the sea is
-    // moving her.
-    const ant = antFacingNorth();
-    const follow = new FollowCamera(2);
-    const PERIOD = 1.5;
-    const AMP = 30;
-    const MEAN = 40;
-    const held = 1 - CAMERA_FOLLOW * heaveGain((2 * Math.PI) / PERIOD);
-    let bob = 0;
-    // A bed at zero with the swell standing over it, so the surface IS
-    // her height and the lens rides its usual few units clear of it —
-    // the envelope has no reason to intervene and what is left is the
-    // rejection alone.
-    useWaterQuery(() => ({
-      depth: MEAN + bob, flowX: 0, flowZ: 0, salt: true, hold: bob * held,
-    }));
-    follow.snapTo(ant);
-    let lo = Infinity;
-    let hi = -Infinity;
-    for (let i = 0; i < 240; i++) {
-      bob = Math.sin((i / 60) * 2 * Math.PI / PERIOD) * AMP;
-      ant.position.y = MEAN + bob - 0.15;    // riding the film
-      follow.update(ant, look({ active: false }), 1 / 60, true);
-      if (i > 120) {
-        lo = Math.min(lo, follow.camera.position.y);
-        hi = Math.max(hi, follow.camera.position.y);
+  it('settles its offset more softly afloat than on land', () => {
+    // WHAT REPLACED THE BOB DAMPING (v0.0.111). The camera no longer
+    // holds still against the sea — every version that did lost her
+    // from a picture nine centimetres tall while she rode two metres
+    // of swell. It travels with her, and the softness is one shared
+    // rate on the OFFSET, which takes the edge off transients without
+    // putting a filter between the camera and her translation.
+    const settle = (calm: boolean): number => {
+      const ant = antFacingNorth();
+      const follow = new FollowCamera(2);
+      useWaterQuery(() => (calm ? { depth: 2, flowX: 0, flowZ: 0, salt: true } : null));
+      follow.snapTo(ant);
+      const rest = follow.camera.position.clone().sub(ant.position);
+      // One drag, then let go and watch how fast it comes home.
+      for (let i = 0; i < 40; i++) follow.update(ant, look({ yaw: 1.2 }), 1 / 60, calm);
+      const swung = follow.camera.position.clone().sub(ant.position);
+      for (let i = 0; i < 20; i++) {
+        follow.update(ant, look({ yaw: 0, active: false }), 1 / 60, calm);
       }
-    }
-    // Her own swing is 60 units peak to peak; the camera must pass far
-    // less of it.
-    expect(hi - lo).toBeLessThan(2 * AMP * 0.35);
+      const back = follow.camera.position.clone().sub(ant.position);
+      return back.distanceTo(rest) / Math.max(1e-6, swung.distanceTo(rest));
+    };
+    // Afloat it is still further from home after the same third of a
+    // second — softer, by construction and by measurement.
+    expect(settle(true)).toBeGreaterThan(settle(false));
   });
 });

@@ -265,69 +265,6 @@ export function swellAmplitude(): number {
 }
 
 /**
- * HOW TALL A CREST HAS TO BE TO BE IN THE TOP `1 - p` OF THEM.
- *
- * "A few centimetres under the biggest wave" is not a portable idea:
- * measured, the shipped table's crests fill the range up to their peak
- * almost evenly, while the generated field's cluster well below theirs
- * and hardly ever reach it. The same margin therefore soaks the lens
- * on one sea and never touches it on the other.
- *
- * So the question is asked of the DISTRIBUTION instead. Sample the
- * deep-water surface over several minutes of its own time, collect
- * every crest, and report the one at the given quantile: a baseline at
- * the 85th is reached by about one crest in seven whatever the sea is
- * made of, which is the "occasionally, not every wave" the camera
- * wants. Rayleigh would give this in closed form and would also be
- * wrong here — it assumes many components, and the shipped table has
- * two, with a hard ceiling at their sum.
- *
- * Computed once per table, like the peak: it is a property of the
- * generation, not of the moment.
- */
-export function crestHeight(p = 0.85): number {
-  if (crests.length === 0) return 0;
-  const at = Math.min(crests.length - 1,
-    Math.max(0, Math.round(p * (crests.length - 1))));
-  return crests[at];
-}
-
-/** Sorted crest heights of the installed table. @see crestHeight. */
-let crests: number[] = [];
-
-/**
- * Walk several minutes of the sea at one place and keep every local
- * maximum. Deep water and no shoaling, because this is about the
- * TABLE's own crests; what the shore does to them is the shoaling
- * function's business and depends on where you stand.
- */
-function measureCrests(): void {
-  const STEP = 0.1;
-  const SPAN = 600;
-  const found: number[] = [];
-  let back = 0;
-  let here = surfaceAtTime(0);
-  for (let t = STEP; t <= SPAN; t += STEP) {
-    const ahead = surfaceAtTime(t);
-    if (here > back && here >= ahead && here > 0) found.push(here);
-    back = here;
-    here = ahead;
-  }
-  crests = found.sort((a, b) => a - b);
-}
-
-/** The bare sum at one spot, `seconds` from now — no shoal, no keel. */
-function surfaceAtTime(seconds: number): number {
-  let y = 0;
-  for (let i = 0; i < waves.length; i++) {
-    const w = waves[i];
-    const amp = w.envelope ? w.amp * w.envelope(clock + seconds) : w.amp;
-    y += amp * Math.cos(-w.omega * (clock + seconds));
-  }
-  return y;
-}
-
-/**
  * WHO DECIDES HOW TALL THIS SEA CAN STAND — and why it is a seam.
  *
  * The table's own peak sum is the honest answer for one generation and
@@ -529,7 +466,6 @@ export function setWaveTable(table: readonly Wave[] | null): void {
     : 1;
   tableVersion += 1;
   refreshAmplitudes();
-  measureCrests();
 }
 
 /** @see waveTableVersion. */
@@ -794,21 +730,7 @@ export function seaChopAt(wx: number, wz: number, depth: number): number {
   return sampled(wx, wz, depth, null) - sampled(wx, wz, depth, heaveGains);
 }
 
-/**
- * WHAT THE CAMERA HOLDS STILL AGAINST — everything of the sea except
- * the sliver of slow heave it is allowed to ride.
- *
- * The one number the camera subtracts, and the only one the water
- * query carries for it. Written as the full surface minus a share of
- * the heave rather than as "chop plus most of the macro", because that
- * is what it is: the sea, less the part the view goes along with.
- */
-export function seaHoldAt(wx: number, wz: number, depth: number): number {
-  return sampled(wx, wz, depth, null)
-    - CAMERA_FOLLOW * sampled(wx, wz, depth, heaveGains);
-}
-
-/** The lattice-aware sampler behind all three. */
+/** The lattice-aware sampler behind the surface and its two halves. */
 function sampled(
   wx: number, wz: number, depth: number, gains: number[] | null,
 ): number {

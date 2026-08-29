@@ -26,9 +26,8 @@ import * as THREE from 'three';
 import { FollowCamera } from '../src/camera/FollowCamera';
 import { useWaterQuery, waterSpotAt } from '../src/world/waterQuery';
 import {
-  CAMERA_FOLLOW, HEAVE_CORNER_S, HEAVE_ORDER, activeWaves, heaveGain,
-  crestHeight, resetSwell, seaChopAt, seaHeaveAt, seaHoldAt, seaSwellAt,
-  swellAmplitude, swellPeriod, tickSwell,
+  HEAVE_CORNER_S, HEAVE_ORDER, activeWaves, heaveGain,
+  resetSwell, seaChopAt, seaHeaveAt, seaSwellAt, swellPeriod, tickSwell,
 } from '../src/world/seaSwell';
 import { SETTLE_BEATS, SPLASH_BEATS, settleSeconds, splashSeconds }
   from '../src/world/Underwater';
@@ -57,16 +56,17 @@ function float(seconds: number, dive = 0) {
   const follow = new FollowCamera(2);
   useWaterQuery((wx, wz) => ({
     depth: BED + seaSwellAt(wx, wz, BED), flowX: 0, flowZ: 0, salt: true,
-    hold: seaHoldAt(wx, wz, BED),
   }));
   ant.position.set(0, BED, 0);
   follow.snapTo(ant);
   const her: number[] = []; const lens: number[] = []; const pitch: number[] = [];
-  const reference = follow.seaLensHeight();
   const wouldHave: number[] = []; const over: number[] = []; const gap: number[] = [];
   let washes = 0; let wet = false; let ups = 0; let last = 0;
   let deepest = 0; let streak = 0; let longestWash = 0;
   const dir = new THREE.Vector3();
+  const right = new THREE.Vector3();
+  const screen: number[] = [];
+  let roll = 0;
   for (let t = -14; t < seconds; t += DT) {
     tickSwell(DT);
     const swell = seaSwellAt(0, 0, BED);
@@ -75,6 +75,10 @@ function float(seconds: number, dive = 0) {
     if (t < 0) { last = swell; continue; }
     follow.camera.getWorldDirection(dir);
     pitch.push((Math.asin(dir.y) * 180) / Math.PI);
+    // Roll: how far the camera's own right vector has left level.
+    right.set(1, 0, 0).applyQuaternion(follow.camera.quaternion);
+    roll = Math.max(roll, Math.abs((Math.asin(
+      Math.max(-1, Math.min(1, right.y))) * 180) / Math.PI));
     // What the same float would have looked like if the view still
     // aimed at her: the pitch of the line from this lens to her.
     wouldHave.push((Math.atan2(
@@ -86,6 +90,13 @@ function float(seconds: number, dive = 0) {
     lens.push(follow.camera.position.y);
     over.push(follow.camera.position.y - BED);
     gap.push(ant.position.y - (follow.camera.position.y - 3.42));
+    // Where she sits in the picture: -1 is the bottom edge, +1 the top.
+    const flat = Math.hypot(follow.camera.position.x - ant.position.x,
+      follow.camera.position.z - ant.position.z);
+    const axis = Math.atan2(dir.y, Math.hypot(dir.x, dir.z));
+    const off = Math.atan2(ant.position.y - follow.camera.position.y, flat) - axis;
+    const half = Math.tan((follow.camera.fov * Math.PI) / 360);
+    screen.push(Math.abs(off) >= Math.PI / 2 - 1e-3 ? 99 : Math.tan(off) / half);
     const under = BED + swell - follow.camera.position.y;
     if (under > 0 && !wet) { washes++; wet = true; } else if (under <= 0) wet = false;
     if (under > 0) { deepest = Math.max(deepest, under); streak += DT; } else streak = 0;
@@ -99,8 +110,10 @@ function float(seconds: number, dive = 0) {
     herSwing: span(her), lensSwing: span(lens),
     pitchSwingDeg: span(pitch), aimedAtHerSwingDeg: span(wouldHave),
     lensOverDatum: over.reduce((s2, v) => s2 + v, 0) / over.length,
-    reference,
     herAgainstAim: span(gap), washes, waves: ups, deepest, longestWash,
+    worstRollDeg: roll,
+    onScreen: screen.filter((v) => Math.abs(v) <= 1).length / screen.length,
+    inBand: screen.filter((v) => Math.abs(v) <= 0.35).length / screen.length,
   };
 }
 
@@ -137,7 +150,6 @@ describe('LOSSLESS — the split is the sea, not a second one', () => {
     // And the query still hands out the FULL column, chop included.
     useWaterQuery((wx, wz) => ({
       depth: BED + seaSwellAt(wx, wz, BED), flowX: 0, flowZ: 0, salt: true,
-      hold: seaHoldAt(wx, wz, BED),
     }));
     const spot = waterSpotAt(0, 0)!;
     expect(spot.depth - BED).toBeCloseTo(seaSwellAt(0, 0, BED), 9);
@@ -224,84 +236,62 @@ describe('IN STEP — a spectral filter has no lag, which is the point', () => {
     expect(worst).toBeLessThan(0.02);
   });
 
-  it('and the camera does not go along with it at all', () => {
-    // v0.0.108: the height gain is zero. What holds the horizon is not
-    // a small follow, it is that the AIM stopped chasing her.
+  it('travels WITH her now, which is what frames her', () => {
+    // v0.0.111, at Joshua's direction. Four versions tried to hold the
+    // camera still against the sea and every one of them lost her: the
+    // picture accepts about eleven units of height at this boom and
+    // she rides a hundred and ninety, so a camera that does not travel
+    // with her cannot show her. It travels with her.
     resetSwell(); useProceduralSea(GENERATION);
-    expect(CAMERA_FOLLOW).toBe(0);
     const r = float(120);
-    // She swings a metre and a third; the lens barely moves, and what
-    // little it does is the water envelope, not the wave.
     expect(r.herSwing).toBeGreaterThan(100);
-    expect(r.lensSwing).toBeLessThan(r.herSwing * 0.1);
+    // Her translation reaches the camera; the offset only softens the
+    // transients, so in steady swell the two move as one object.
+    expect(r.lensSwing).toBeGreaterThan(r.herSwing * 0.9);
   });
 
-  it('holds the VIEW DIRECTION still, which is the actual fault', () => {
-    // THE ONE THAT MATTERS. Three versions held the camera's HEIGHT
-    // steadier and steadier and the phone still called it a washing
-    // machine, because `aim` looked at her: at a 7 unit lever arm a
-    // queen 22 units down in a trough puts the view sixty degrees
-    // below level and a crest puts it back. Pitch is what sweeps the
-    // horizon across the screen, not height.
+  it('and the horizon still does not move, because it TRANSLATES', () => {
+    // THE POINT THE WHOLE SAGA TURNED ON. A camera rising and falling
+    // with her moves the world past the lens; it does not ROTATE the
+    // view, and a horizon kilometres away only answers to rotation.
+    // What made every earlier version a washing machine was pitch —
+    // an aim welded to a world height she rode past.
     for (const [name, install] of SEAS) {
       resetSwell(); install();
       const r = float(120);
-      // The view direction must be what the boom asks for and nothing
-      // else — a fraction of a degree of drift, not tens of them.
       expect(r.pitchSwingDeg, name).toBeLessThan(2);
-      // And this is what aiming at her would have done instead, on the
-      // very same float: the fault, measured rather than asserted.
-      expect(r.aimedAtHerSwingDeg, name).toBeGreaterThan(20);
     }
   });
 
-  it('floats the lens in the sea\'s own crest DISTRIBUTION', () => {
-    // Not a fixed margin under the tallest crest, because that does
-    // not mean the same thing twice: the shipped table's crests fill
-    // the range up to their peak almost evenly, while the generated
-    // field's cluster far below theirs. Eight units under the peak
-    // soaked the lens on every wave of one sea and never touched the
-    // other. The 85th percentile of actual crests is reached by about
-    // one wave in seven whatever the sea is made of.
+  it('keeps her near the middle of the picture', () => {
+    // The acceptance in one number: she is where the boom puts her,
+    // not wherever the last wave left her.
     for (const [name, install] of SEAS) {
       resetSwell(); install();
-      const r = float(60);
-      expect(r.reference, name).toBeCloseTo(crestHeight(0.85), 6);
-      // Under the tallest crest, so the sea can still reach it…
-      expect(r.reference, name).toBeLessThan(swellAmplitude());
-      // …and well above the middling one, so it mostly does not.
-      expect(r.reference, name).toBeGreaterThan(crestHeight(0.5));
-      // A REFERENCE, NOT A SAMPLE: no wave and no group moves it.
-      expect(r.lensOverDatum, name).toBeGreaterThan(r.reference - 6);
-      expect(r.lensOverDatum, name).toBeLessThan(r.reference + 6);
+      const r = float(120);
+      expect(r.onScreen, name).toBeGreaterThan(0.98);
+      expect(r.inBand, name).toBeGreaterThan(0.9);
     }
   });
 
-  it('is washed by the big crests only — not by every wave', () => {
-    // THE COMPLAINT THIS ANSWERS: "repeated crest washes are
-    // dizzying". At a fixed eight-unit margin the shipped sea reached
-    // the lens on every single wave and the generated sea on nine in
-    // ten. Reading the baseline off the crest distribution instead
-    // puts both at about one wave in five, which is the occasional
-    // big one rather than a rhythm.
+  it('is washed only occasionally, and never for long', () => {
+    // The lens rides a few units over her, so what reaches it is the
+    // water standing higher than she does — the transients the offset
+    // ease leaves behind, not a rhythm.
     for (const [name, install] of SEAS) {
       resetSwell(); install();
       const r = float(240);
       expect(r.waves, name).toBeGreaterThan(20);
       expect(r.washes / r.waves, name).toBeLessThan(0.35);
-      expect(r.washes / r.waves, name).toBeGreaterThan(0.02);
-      // And a wash is still a wash rather than a change of medium: it
-      // ends well inside the splash the tint ignores.
+      // And a wash ends well inside the splash the tint ignores.
       expect(r.longestWash, name).toBeLessThan(splashSeconds());
     }
   });
 
-  it('and she rides right through the frame while it does', () => {
-    // The acceptance in one line: she moves, the view does not.
+  it('never rolls — the horizon may pitch and nothing else', () => {
     resetSwell(); useProceduralSea(GENERATION);
-    const r = float(120);
-    expect(r.herAgainstAim).toBeGreaterThan(100);
-    expect(r.lensSwing).toBeLessThan(15);
+    const r = float(60);
+    expect(r.worstRollDeg).toBeLessThan(1e-6);
   });
 });
 
@@ -343,7 +333,6 @@ describe('BEATS — every patience follows the sea it is in', () => {
     const follow = new FollowCamera(2);
     useWaterQuery((wx, wz) => ({
       depth: BED + seaSwellAt(wx, wz, BED), flowX: 0, flowZ: 0, salt: true,
-      hold: seaHoldAt(wx, wz, BED),
     }));
     ant.position.set(0, BED, 0);
     follow.snapTo(ant);
@@ -388,44 +377,33 @@ describe('BEATS — every patience follows the sea it is in', () => {
   });
 });
 
-describe('PHYSICS — the split is the camera\'s and nobody else\'s', () => {
-  it('is read by the camera alone', () => {
+describe('PHYSICS — the camera reads the water, it does not answer for it', () => {
+  it('leaves the authoritative surface to everybody else', () => {
     // A source guard, because the damage this prevents is invisible
     // until two systems disagree about where the water is. Flotation,
     // the surf, the orbital current, the renderer and the submersion
-    // test all read the FULL surface; only framing may read a slice.
+    // test all read the FULL surface, and since v0.0.111 the camera
+    // asks the water nothing but how deep it is.
     const strip = (f: string) => readFileSync(f, 'utf8')
       .replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
     for (const f of [
       'src/world/surf.ts', 'src/world/waterLook.ts', 'src/world/Ocean.ts',
       'src/ant/wading.ts', 'src/world/Underwater.ts',
+      'src/camera/FollowCamera.ts',
     ]) {
       const src = strip(f);
       expect(src, f).not.toContain('seaHeaveAt');
-      expect(src, f).not.toContain('seaHoldAt');
-      expect(src, f).not.toContain('.hold');
+      expect(src, f).not.toContain('seaChopAt');
     }
-    // …and the stripper did not simply eat the files.
     expect(strip('src/world/surf.ts')).toContain('surfFlowAt');
-    // The camera does read it, or none of this is wired up at all.
-    expect(strip('src/camera/FollowCamera.ts')).toContain('.hold');
-    // IslandWater is the one place allowed to PRODUCE it.
-    expect(strip('src/world/IslandWater.ts')).toContain('seaHoldAt');
+    // The one thing the camera does ask the water.
+    expect(strip('src/camera/FollowCamera.ts')).toContain('waterSpotAt');
   });
 
-  it('is zero in water that has no swell — every pond on the island', () => {
-    const ant = new THREE.Object3D();
-    const follow = new FollowCamera(2);
-    useWaterQuery(() => ({ depth: 40, flowX: 0, flowZ: 0 }));
-    ant.position.set(0, 20, 0);
-    follow.snapTo(ant);
-    follow.update(ant, REST, DT, true, 0);
-    expect(follow.holdTaken()).toBe(0);
-  });
-
-  it('is zero out of the water, so a climb is never filtered', () => {
-    // The v0.0.88 fault: any lag on her own decisions puts the camera
-    // below her aiming up. Flying, there is nothing to subtract.
+  it('follows a climb the same frame — no filter on her own decisions', () => {
+    // The v0.0.88 fault: any lag on her intent puts the camera below
+    // her aiming up. The ease is on the OFFSET, so her translation
+    // arrives immediately however fast she is moving.
     const ant = new THREE.Object3D();
     const follow = new FollowCamera(2);
     useWaterQuery(() => null);
@@ -434,7 +412,25 @@ describe('PHYSICS — the split is the camera\'s and nobody else\'s', () => {
       ant.position.y += 300 / 60;
       follow.update(ant, REST, DT, false, 0);
     }
-    expect(follow.holdTaken()).toBe(0);
     expect(follow.camera.position.y).toBeGreaterThan(ant.position.y);
+  });
+
+  it('and holds station on a queen carried by a current', () => {
+    // Smoothing the OFFSET rather than the world position is what
+    // makes this true afloat as well as flying: at any drift speed the
+    // camera keeps the same station instead of trailing downwind.
+    const ant = new THREE.Object3D();
+    const follow = new FollowCamera(2);
+    // Shallow enough that the lens is clear of it — this is about
+    // station keeping, not about the water envelope.
+    useWaterQuery(() => ({ depth: 2, flowX: 0, flowZ: 0, salt: true }));
+    follow.snapTo(ant);
+    const rest = follow.camera.position.clone().sub(ant.position);
+    for (let i = 0; i < 400; i++) {
+      ant.position.x += 179 / 60;
+      follow.update(ant, REST, DT, true, 0);
+    }
+    const now = follow.camera.position.clone().sub(ant.position);
+    expect(now.distanceTo(rest)).toBeLessThan(0.05);
   });
 });

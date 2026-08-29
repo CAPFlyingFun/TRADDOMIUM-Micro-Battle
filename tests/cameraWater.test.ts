@@ -120,22 +120,22 @@ describe('the camera on a swell', () => {
     const r = ride(9);
     // She swings the full swell.
     expect(r.hers).toBeGreaterThan(REACH);
-    // The lens must not. v0.0.100 tracked it rigidly; the design note
-    // in FollowCamera calls 103% the fault it was built to prevent,
-    // and v0.0.106's first cut passed 96% of it, which Joshua's phone
-    // called a washing machine. What is left is the small sympathetic
-    // motion the split allows plus the envelope's nudge.
-    expect(r.lens / r.hers).toBeLessThan(0.25);
+    // AND THE CAMERA NOW TRAVELS WITH HER — v0.0.111. Four versions
+    // held it still against the sea and every one lost her from the
+    // picture; the fault was never the translation, it was the aim
+    // turning. So the lens copies her swing, and what must not move is
+    // the VIEW, which tests/cameraSea.test.ts holds to two degrees.
+    expect(r.lens / r.hers).toBeGreaterThan(0.9);
   });
 
-  it('lets a crest wash over the lens rather than kicking it away', () => {
+  it('is not washed by an ordinary wave any more', () => {
     const r = ride(9);
-    // Being washed over is allowed and expected at this scale…
-    expect(r.wetShare).toBeGreaterThan(0);
-    // …and it is a wash, not a submarine ride: never past the one hard
-    // line, and not the whole time either.
+    // Riding with her keeps the lens out of the water that she is
+    // floating on: what reaches it now is water standing higher than
+    // she is, not every crest she goes over.
+    // Never past the one hard line, and not most of the time.
     expect(r.wettest).toBeLessThanOrEqual(70.001);
-    expect(r.wetShare).toBeLessThan(0.6);
+    expect(r.wetShare).toBeLessThan(0.35);
     // AND NO WASH MAY RAISE A VISIBLE TINT. This is the other half of
     // what Joshua filmed: the screen flipping green every wave. The
     // honest test is not "a crest is shorter than SPLASH" — it is how
