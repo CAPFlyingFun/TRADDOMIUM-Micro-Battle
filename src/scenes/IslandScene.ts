@@ -14,6 +14,7 @@ import {
   groundHeight, ISLAND_SPAN, reliefScale, setRelief, setSmoothing, smoothingAmount,
 } from '../world/heightfield';
 import { findLandfall, UNITS_PER_METRE, type HeightGrid } from '../world/kauai';
+import { setAnchor, setDetailDial } from '../world/lod';
 import { local, world, type WorldPoint } from '../world/coords';
 import { TerrainStream, TIER_CUTS } from '../world/TerrainStream';
 import { followHd, forgetHd, hdResident, onHdTile } from '../world/kauaiHd';
@@ -31,7 +32,7 @@ import { originAt, rebaseFor, setOrigin, toLocal, toWorld,
 import { bakeGrain, GRAIN_SIZE } from '../world/groundTexture';
 import {
   BAND_TILE, FADE_FROM_UNIFORM, FADE_TO_UNIFORM, setGroundMode,
-  QUEEN_UNIFORM, loadAuthored, loadBands, reliefUniform, setDetailRadius,
+  QUEEN_UNIFORM, loadAuthored, loadBands, reliefUniform, syncDetailRadius,
   setDetailRange, setTileScale,
   setTextureOrigin, terrainMaterial,
 } from '../world/terrainMaterial';
@@ -441,7 +442,8 @@ export class IslandScene {
     // The safeguard takes its own constant; the dial moves the RADIUS
     // and nothing else.
     setDetailRange();
-    setDetailRadius(settings().detailRange);
+    setDetailDial(settings().detailRange);
+    syncDetailRadius();
     setSmoothing(settings().terrainSmoothing);
     this.buildTerrain();
 
@@ -528,7 +530,8 @@ export class IslandScene {
       // The safeguard takes its own constant; the dial moves the RADIUS
     // and nothing else.
     setDetailRange();
-    setDetailRadius(settings().detailRange);
+    setDetailDial(settings().detailRange);
+    syncDetailRadius();
       this.debugDie.show(settings().showFix);
     });
     this.debugDie.show(settings().showFix);
@@ -1603,6 +1606,13 @@ export class IslandScene {
     // here now. Her RENDERED position, because the shader compares it
     // against rendered fragment positions.
     QUEEN_UNIFORM.value.copy(this.ant.root.position);
+    // THE MASTER ANCHOR, in world coordinates and all three axes —
+    // wy is her rendered y unchanged, because the origin rebases in
+    // x and z only. lod.ts is where every distance-graded system asks
+    // "how far is this from her" from now on; the uniform above is
+    // that answer's shader-side copy, synced in the same breath.
+    setAnchor(at.wx, this.ant.root.position.y, at.wz, dt);
+    syncDetailRadius();
 
     // THE FINE GROUND FOLLOWS HER TOO. Fire-and-forget: a tile that has
     // not landed is answered by the coarse grid, which holds the same

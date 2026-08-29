@@ -27,6 +27,7 @@ import type { LoadReport } from '../ui/loadPlan';
 import { assetBytes } from '../ui/assetSizes';
 import { GRAIN_SIZE } from './groundTexture';
 import { UNITS_PER_METRE } from './kauai';
+import { detailRadius } from './lod';
 
 /**
  * World units per repeat of a band texture. About 10 cm — small enough
@@ -295,24 +296,15 @@ export const DETAIL_RADIUS_UNIFORM = { value: 1_000 };
  */
 export const QUEEN_UNIFORM = { value: new THREE.Vector3() };
 
-/** Metres of radius per unit of the settings dial. */
-export const METRES_PER_DIAL = 10;
-
 /**
- * The dial, in world units of radius. 0.25 -> 2.5 m, 2 -> 20 m.
- *
- * The floor is a hair above zero, NOT one: `Math.max(1, dial)` shipped
- * in v0.0.86 and silently pinned the bottom three settings — 25, 50
- * and 75 per cent all resolved to ten metres. It survived its own
- * visual check because the dial ALSO scaled the texel safeguard back
- * then, so the ground did visibly change at 25% — just not for the
- * reason being tested. Two knobs on one slider is how a test lies to
- * you; the safeguard is a fixed physical guard now (see
- * SAFEGUARD_TEXELS) and this is the only thing the dial moves.
+ * THE SHADER'S COPY of the master radius (lod.ts owns the dial and
+ * the arithmetic now — the radius stopped being terrain's private
+ * number the day the foam wanted it too). The scene calls this once
+ * a frame beside the QUEEN_UNIFORM copy; one assignment, and the
+ * uniform can never drift from what the master answers.
  */
-export function setDetailRadius(dial: number): void {
-  DETAIL_RADIUS_UNIFORM.value
-    = Math.max(0.01, dial) * METRES_PER_DIAL * UNITS_PER_METRE;
+export function syncDetailRadius(): void {
+  DETAIL_RADIUS_UNIFORM.value = detailRadius();
 }
 
 /**
