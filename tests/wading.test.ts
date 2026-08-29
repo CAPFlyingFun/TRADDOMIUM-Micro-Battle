@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import {
-  wadeAt, canDrink, swimEffort, FOOTING, DRAUGHT, FLOAT_EXIT, SWIM_DRAIN,
-  DIVE_DRAIN,
+  wadeAt, canDrink, swimEffort, FOOTING, DRAUGHT, SWIM_DRAIN, DIVE_DRAIN,
 } from '../src/ant/wading';
 import { OCEAN_STAMINA_MULTIPLIER } from '../src/ant/brine';
 import { MOVING_RECOVERY } from '../src/ant/stamina';
@@ -64,76 +63,16 @@ describe('what the water does to her', () => {
     expect(canDrink(0, 0)).toBe(false);
   });
 
-  it('enters the water at FOOTING and leaves it at her DRAUGHT', () => {
-    // Two different questions. She starts floating when her legs stop
-    // reaching the bed; she stops when there is no longer enough water
-    // to hold her up, and that is her draught.
+  it('keeps floating through shoreline noise — the threshold is sticky', () => {
+    // A hair under FOOTING: entering on foot she still walks…
     flood(FOOTING * 0.95);
     expect(wadeAt(0, 0, 0, false).afloat).toBe(false);
+    // …but already afloat she STAYS afloat through the same depth,
+    // so millimetre noise at the line cannot flick her state.
     expect(wadeAt(0, 0, 0, true).afloat).toBe(true);
-    // Halfway down the band — a millimetre and a half is not deep
-    // enough to WALK into as a swim, and is still enough to ride.
+    // Well below the sticky band she is properly aground either way.
     flood(FOOTING * 0.5);
-    expect(wadeAt(0, 0, 0, false).afloat).toBe(false);
-    expect(wadeAt(0, 0, 0, true).afloat).toBe(true);
-    // And under the draught the film is gone; she is aground either way.
-    flood(FLOAT_EXIT * 0.9);
     expect(wadeAt(0, 0, 0, true).afloat).toBe(false);
-  });
-
-  it('rides a draining pool down instead of being dropped in it', () => {
-    // THE BUG, WITH ITS CLOCK. The exit used to be 0.85 × FOOTING =
-    // 3.4 mm, and the inland hydrology is live: soak takes 0.3 units a
-    // second off a cell nothing is feeding, so a pool sheds about
-    // three millimetres a second once a shower stops. Traced on a real
-    // order-5 trunk, cells she was floating on crossed 3.4 mm within
-    // 0.06 – 0.8 s of the rain ending and put her on the bed with 3.3
-    // mm still standing over her — and one settled at 1.7 mm and
-    // stayed, leaving her seated under water that was not going away.
-    let afloat = true;
-    for (const depth of [1.09, 0.8, 0.5, 0.35, 0.25, 0.171]) {
-      flood(depth);
-      afloat = wadeAt(0, 0, 0, afloat).afloat;
-      expect(afloat).toBe(true);
-    }
-    // Still floating on the 1.7 mm the pool actually settled at.
-    expect(wadeAt(0, 0, 0, true).above).toBeCloseTo(0.171 - DRAUGHT, 9);
-  });
-
-  it('and settles onto the bed continuously — no drop', () => {
-    // The smoothness is not a filter, it is the threshold: `above` is
-    // `depth - DRAUGHT`, so exiting AT the draught means her float
-    // height has already reached zero when the state changes. The
-    // water leaves her on the bed rather than dropping her onto it.
-    const above = (d: number) => { flood(d); return wadeAt(0, 0, 0, true).above; };
-    expect(above(FLOAT_EXIT)).toBe(0);
-    // Walk the whole descent and watch for a step. Nothing may fall
-    // faster than the water itself does.
-    let last = above(FOOTING);
-    for (let d = FOOTING; d >= FLOAT_EXIT; d -= 0.001) {
-      const now = above(d);
-      expect(last - now).toBeLessThanOrEqual(0.001 + 1e-9);
-      last = now;
-    }
-    // The loop lands a step short of the exit; what matters is that it
-    // arrives there with a step's worth of height left, not a leap.
-    expect(last).toBeLessThanOrEqual(0.001 + 1e-9);
-    // …and the last frame afloat and the first frame aground agree.
-    flood(FLOAT_EXIT * 0.999);
-    const aground = wadeAt(0, 0, 0, true);
-    expect(aground.afloat).toBe(false);
-    expect(aground.above).toBe(0);
-  });
-
-  it('keeps the water over her continuous across the same line', () => {
-    // Breath reads `depth - above`. Afloat that is her draught; aground
-    // it is the whole depth — and at the exit they are the same number,
-    // so nothing about her head being under can flick there either.
-    flood(FLOAT_EXIT);
-    const on = wadeAt(0, 0, 0, true);
-    flood(FLOAT_EXIT * 0.999);
-    const off = wadeAt(0, 0, 0, true);
-    expect(on.depth - on.above).toBeCloseTo(off.depth - off.above, 3);
   });
 
   it('can drink from the bank — the reach ring finds nearby water', () => {

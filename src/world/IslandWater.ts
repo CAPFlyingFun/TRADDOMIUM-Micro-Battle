@@ -71,48 +71,6 @@ const CELL = 100;
 const RECENTRE = 6_400;
 /** Depth below which water is not drawn. The sim keeps its film. */
 const DRAWN = 1.5;
-
-/**
- * WHERE FRESH WATER STARTS BEING DRAWN — and it has to meet the depth
- * she starts FLOATING at, or the two shorelines are different places.
- *
- * Traced on a real order-5 trunk: she leaves the bed at FOOTING, four
- * millimetres, while the surface used to fade in from fifteen and only
- * reach full body at eighty. Between those lies a band — wide, because
- * the ground there is nearly flat — in which she was lifted off the bed
- * and dropped to paddling pace on water drawn at ZERO alpha. From the
- * player's side she stops walking and starts swimming at an invisible
- * line, short of the water they can see. Nothing was blocking her;
- * there is no collision here and no step limit.
- *
- * So the film is drawn from the moment it is a film — a fifth of a
- * millimetre — and it is FULLY water at exactly the depth that takes
- * her feet off the bed.
- *
- * FRESH_EDGE_HI is FOOTING from `ant/wading`, deliberately written out
- * rather than imported: nothing in `world` reaches into `ant`, and the
- * pairing is pinned by test instead (freshwater.test.ts). If FOOTING
- * moves, that test fails and this must move with it.
- *
- * KNOWN AND OPEN, and the reason v0.0.115 briefly put these back to
- * 1.5 and 8: the drawn surface and the QUERIED surface are not the
- * same number. The query adds the water column to `groundHeight` at
- * her exact position — the 8-unit triangle she stands on; the mesh
- * adds it to `base`, that same ground sampled every CELL (a hundred
- * units) and interpolated across the quad. Measured over a real
- * order-5 valley, 20,736 points: the chord stands more than FOOTING
- * above the true ground at 32% of them, 2.03 units at p95 and 6.19 at
- * worst. Drawing a millimetre film on a bed known to two centimetres
- * cannot be truthful everywhere.
- *
- * Raising the feather to hide that made the build worse rather than
- * better on the device, so it stays down and the real fault stays
- * named: a bed that agrees with the ground at her own scale is a
- * water-mesh resolution problem, and that is the piece of work.
- * `drawnSurfaceAt` is the instrument for it.
- */
-export const FRESH_EDGE_LO = 0.02;
-export const FRESH_EDGE_HI = 0.4;
 /**
  * Water put into a surveyed river cell, per second, per Strahler order.
  *
@@ -273,11 +231,7 @@ export class IslandWater {
    * is the single owner of every colour and constant.
    */
   private material(): THREE.MeshStandardMaterial {
-    // NOT the ocean, said out loud: no swell-driven breakers on a
-    // pond. `surf` keeps the ordinary waterline foam a lake bank has;
-    // what it must not have is the Pacific's wave table deciding where
-    // its crests are. See waterLook's `ocean`.
-    const look = makeWaterLook({ green: 1, surf: 0.15, sink: false, ocean: false, edgeLo: FRESH_EDGE_LO, edgeHi: FRESH_EDGE_HI, midAt: 70, deepAt: 260, texAmp: 0.20, anisotropy: this.anisotropy });
+    const look = makeWaterLook({ green: 1, surf: 0.15, sink: false, edgeLo: 1.5, edgeHi: 8, midAt: 70, deepAt: 260, texAmp: 0.20, anisotropy: this.anisotropy });
     this.clockRef = look.clock;
     this.centreRef = look.centre;
     return look.material;
@@ -424,21 +378,14 @@ export class IslandWater {
       // same rule the query already follows (see the constructor).
       this.depthAttr[i] = this.base[i] < 0 ? 0 : d;
       this.pos[i * 3 + 1] = this.base[i] + d * relief;
-      // THE SKIN DOES NOT DRIFT EITHER — the other half of the same
-      // fault. Gameplay flow was zeroed in `spotAt` and this was left
-      // writing the raw solver velocity into the vertex attribute, so
-      // the freshwater surface went on advecting at the very numbers
-      // that had been rejected as a current: flux over depth, which
-      // divides out to metres a second on a millimetre of film. Water
-      // that does not move her must not look like it is moving.
-      //
-      // The hydrology still runs — it is what decides where water IS,
-      // and that has never been in question. What it does not do,
-      // until there is a stream-flow model worth the name, is move
-      // anything. NOT tied to wind: a pond's skin drifting on a breeze
-      // would be a second invented current wearing a better hat.
-      this.flowAttr[i * 2] = 0;
-      this.flowAttr[i * 2 + 1] = 0;
+      // The CURRENT under every vertex, so the skin drifts at the
+      // water's own speed — Joshua: "water speed as the water moves".
+      // Dry cells keep their last flow; their pixels are discarded.
+      if (d > 0) {
+        const v = this.sim.velocity(i % N, (i / N) | 0);
+        this.flowAttr[i * 2] = v.vx;
+        this.flowAttr[i * 2 + 1] = v.vz;
+      }
     }
     const g = this.mesh.geometry;
     g.getAttribute('position').needsUpdate = true;
@@ -474,66 +421,11 @@ export class IslandWater {
     const raw = (d00 * (1 - tx) + d10 * tx) * (1 - ty)
       + (d01 * (1 - tx) + d11 * tx) * ty;
     if (raw <= 0) return null;
-    // FRESH WATER DOES NOT CARRY HER — for now, and deliberately.
-    //
-    // The sim's velocity is flux over depth, and depth goes to zero at
-    // the edge of every pool: a millimetre of film with any flux at
-    // all divides out to metres a second. Measured on Joshua's device,
-    // 368 cm/s over 1.5 mm of water, and worse elsewhere — an ant
-    // standing in a puddle being swept at four metres a second. That
-    // is a singularity in the shallow-water solver, not a current, and
-    // capping it would only hide the same nonsense at a smaller
-    // number.
-    //
-    // So inland water is still until it has a flow system of its own.
-    // A real stream wants its own model — channel slope, a sane
-    // velocity floor, and a depth below which water does not move a
-    // body at all — and that is a piece of work, not a clamp. The
-    // OCEAN's current is untouched: it comes from the wave table
-    // (seaSwell.seaOrbitalAt) and the surf, on the other branch of the
-    // query, and none of this reaches it.
-    return { depth: raw * reliefScale(), flowX: 0, flowZ: 0 };
+    const v = this.sim.velocity(Math.round(fx), Math.round(fy));
+    return { depth: raw * reliefScale(), flowX: v.vx, flowZ: v.vz };
   }
 
   /** Depth of water at a world point, or 0. For wading and drinking. */
-  /**
-   * THE SURFACE ACTUALLY BEING DRAWN over (wx, wz), or null off the
-   * window — read out of the vertex buffer itself rather than
-   * recomputed, so it cannot drift from what the GPU is given.
-   *
-   * This exists because the drawn surface and the QUERIED surface are
-   * not the same number and cannot be. `spotAt` adds the water column
-   * to `groundHeight` at her exact position, which is the 8-unit
-   * triangle she is standing on; the mesh adds it to `base`, which is
-   * that same ground sampled every CELL — a hundred units — and then
-   * linearly interpolated by the rasteriser. Between two bed samples
-   * the terrain has twelve of its own vertices, and the chord across
-   * them is not the ground. Measured over a real order-5 valley the
-   * chord stands more than FOOTING above the true ground at 32% of
-   * points, 2 units at p95 and 6 at worst: fifteen float thresholds
-   * of disagreement, with no water involved at all.
-   *
-   * Nothing here is a bug to be fixed by moving a number — it is the
-   * resolution the water mesh has. What it means is that a film
-   * thinner than the bed's own error CANNOT be drawn truthfully, and
-   * anything that decides how visible thin water is has to respect
-   * that. See FRESH_EDGE_LO.
-   */
-  drawnSurfaceAt(wx: number, wz: number): number | null {
-    if (!this.placed) return null;
-    const span = N * CELL;
-    const fx = (wx - (this.centreX - span / 2)) / CELL;
-    const fy = (wz - (this.centreZ - span / 2)) / CELL;
-    const cx = Math.floor(fx), cy = Math.floor(fy);
-    if (cx < 0 || cy < 0 || cx >= N - 1 || cy >= N - 1) return null;
-    const tx = fx - cx, ty = fy - cy;
-    const y = (ix: number, iy: number) => this.pos[(iy * N + ix) * 3 + 1];
-    const y00 = y(cx, cy), y10 = y(cx + 1, cy);
-    const y01 = y(cx, cy + 1), y11 = y(cx + 1, cy + 1);
-    return (y00 * (1 - tx) + y10 * tx) * (1 - ty)
-      + (y01 * (1 - tx) + y11 * tx) * ty;
-  }
-
   depthAt(wx: number, wz: number): number {
     if (!this.placed) return 0;
     const span = N * CELL;

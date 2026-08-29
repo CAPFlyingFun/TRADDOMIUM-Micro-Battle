@@ -186,54 +186,6 @@ describe('the camera on a swell', () => {
     expect(lifted).toBeLessThan(20);
   });
 
-  it('starts down with her the moment the lever clears its deadband', () => {
-    // THE REGRESSION (v0.0.112). Releasing the envelope only ever
-    // stopped it PUSHING; whatever it was already holding then drained
-    // at the sea's own beat, second order, so for a second or two
-    // after the slider went down the camera hung above where it
-    // belonged while she sank away from it. Joshua: "the Queen starts
-    // descending but the camera has a noticeable delay before it
-    // follows."
-    const ant = queen(0);
-    const follow = new FollowCamera(2);
-    seaAt(60);
-    follow.snapTo(ant);
-    // Let the envelope take hold first — this is the lift that used to
-    // be stuck.
-    for (let i = 0; i < 300; i++) follow.update(ant, REST, 1 / 60, true, 0);
-    const held = follow.liftHeld();
-    expect(held).toBeGreaterThan(5);
-    // Now she asks to go down. THE LEVER IS THE SIGNAL — the scene
-    // hands the camera the slider as pressed, not the eased dive her
-    // body follows, because a view that waits four tenths of a second
-    // for the ease to develop starts after her rather than with her.
-    // Nothing here waits for her to be submerged either: the water is
-    // left exactly as deep as it was.
-    for (let i = 0; i < 15; i++) {          // a quarter of a second
-      ant.position.y -= 0.5;
-      follow.update(ant, REST, 1 / 60, true, 1);
-    }
-    // Half the correction handed back inside a quarter of a second,
-    // where the old drain would still have been holding all of it.
-    expect(follow.liftHeld()).toBeLessThan(held * 0.5);
-  });
-
-  it('and follows her down rather than hanging at the surface', () => {
-    const ant = queen(0);
-    const follow = new FollowCamera(2);
-    seaAt(60);
-    follow.snapTo(ant);
-    for (let i = 0; i < 300; i++) follow.update(ant, REST, 1 / 60, true, 0);
-    const start = follow.camera.position.y;
-    for (let i = 0; i < 60; i++) {
-      ant.position.y -= 1;                  // she sinks 60 units a second
-      follow.update(ant, REST, 1 / 60, true, 1);
-    }
-    // She went down 60; the camera must have gone most of the way with
-    // her rather than being left at the waterline.
-    expect(start - follow.camera.position.y).toBeGreaterThan(45);
-  });
-
   it('hands the water back entirely when she means to dive', () => {
     const deep = (dive: number) => {
       const ant = queen(0);

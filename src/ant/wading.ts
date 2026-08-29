@@ -57,41 +57,12 @@ const PADDLE_PACE = 0.22;
 const WADE_CARRY = 0.4;
 const AFLOAT_CARRY = 0.85;
 /**
- * WHERE SHE STOPS FLOATING — and it is not a fraction of FOOTING.
- *
- * Entering the water and leaving it are different questions. She
- * starts floating when the water is too deep for her legs to reach
- * the bed (FOOTING). She stops floating when the film can no longer
- * hold her, and that is her DRAUGHT: at exactly this depth a floating
- * queen's underside is already touching the bottom, because floating
- * puts her at `depth - DRAUGHT` above it. Below it there is nothing
- * left to ride.
- *
- * It used to be 0.85 × FOOTING — 3.4 mm — and that was a bug with a
- * clock on it. The inland hydrology is LIVE: soak takes 0.3 units a
- * second off any cell that is not being fed, so when a shower ends a
- * pool drains about three millimetres a second. Traced on a real
- * order-5 trunk, a shower stopping: cells she was floating on crossed
- * 3.4 mm between 0.06 s and 0.8 s later and dropped her onto the bed
- * with 3.3 mm of water still standing over her — and one of them then
- * settled at 1.7 mm and stayed there, so she was left seated
- * underneath water that was never going away. Float for a few
- * seconds, then end up under it: exactly what Joshua saw.
- *
- * Exiting at the draught also makes the transition smooth for free,
- * which is the part worth keeping. `above` is `depth - DRAUGHT`, so
- * it reaches ZERO precisely at this threshold: she settles onto the
- * bed as the water leaves her rather than being dropped onto it. No
- * slew limit, no second smoother — the discontinuity was the wrong
- * number, not a missing filter.
- *
- * The band between the two (1.5 mm to 4 mm) is deep hysteresis rather
- * than the millimetre of anti-flicker it replaces, and it is the
- * point: within it she keeps whichever state she arrived in, so
- * draining water lowers her onto the bed and rising water lifts her
- * off it, and neither flickers.
+ * Once she IS floating she stays floating until the water is this
+ * fraction of FOOTING — a little hysteresis, so the shoreline's
+ * millimetre-scale depth noise cannot flick her between walking and
+ * swimming every frame at the exact threshold.
  */
-export const FLOAT_EXIT = DRAUGHT;
+const FOOTING_STICKY = 0.85;
 /**
  * WHAT SWIMMING COSTS — priced here, charged by the scene, through
  * the same one-reserve Stamina whose rule is that the caller knows
@@ -147,16 +118,14 @@ const DRY: Wade = {
  *   she is swimming. Scaling the float height is what makes the bed
  *   the limit for free: at dive 1 she stands on it however deep the
  *   pool is, and there is no separate clamp to keep in step.
- * @param wasAfloat whether she was floating LAST frame — which is
- *   what picks the threshold: she enters the water at FOOTING and
- *   leaves it at FLOAT_EXIT, and inside that band she keeps the state
- *   she arrived in.
+ * @param wasAfloat whether she was floating LAST frame — feeds the
+ *   sticky threshold so the shoreline cannot flicker her state.
  */
 export function wadeAt(wx: number, wz: number, dive = 0, wasAfloat = false): Wade {
   const spot = waterSpotAt(wx, wz);
   if (!spot || spot.depth <= 0) return DRY;
   const depth = spot.depth;
-  const afloat = depth >= (wasAfloat ? FLOAT_EXIT : FOOTING);
+  const afloat = depth >= FOOTING * (wasAfloat ? FOOTING_STICKY : 1);
   const sunk = Math.min(1, depth / FOOTING);
   const pull = afloat ? AFLOAT_CARRY : WADE_CARRY * sunk;
   const carrying = spot.flowX !== 0 || spot.flowZ !== 0;

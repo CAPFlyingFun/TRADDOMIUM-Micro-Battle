@@ -193,11 +193,6 @@ export interface UnderTape {
   /** The master LOD's one-line state (lodProbe.lodLine) — the same
    *  developer register as the fix, and shown under its toggle. */
   readonly lod?: string | null;
-  /**
-   * TEMPORARY, for one device hunt: what the water under her is doing
-   * and where it is being DRAWN, on one line. Remove with the hunt.
-   */
-  readonly wet?: string | null;
   readonly air?: AirLine | null;
   readonly ground?: GroundLine | null;
   readonly wind?: WindLine | null;
@@ -227,11 +222,7 @@ export class Compass {
   private readonly fixLine: HTMLDivElement;
   private lastFix = '';
   private readonly lodLine: HTMLDivElement;
-  /** TEMPORARY: the freshwater hunt's readout. */
-  private readonly wetLine: HTMLDivElement;
   private lastLod = '';
-  /** TEMPORARY: the freshwater hunt's last line. */
-  private lastWet = '';
   private readonly airLine: HTMLDivElement;
   private lastAir = '';
   private readonly groundLine: HTMLDivElement;
@@ -466,22 +457,6 @@ export class Compass {
     } as Partial<CSSStyleDeclaration>);
     this.root.appendChild(this.lodLine);
 
-    // TEMPORARY DEVICE LINE — the freshwater hunt. Same register as
-    // the fix and the LOD, and it goes when the hunt does.
-    this.wetLine = document.createElement('div');
-    this.wetLine.dataset.ui = 'compass-wet';
-    Object.assign(this.wetLine.style, {
-      marginTop: '2px',
-      textAlign: 'center',
-      font: '500 8px/1 "JetBrains Mono", ui-monospace, monospace',
-      fontVariantNumeric: 'tabular-nums',
-      whiteSpace: 'nowrap',
-      color: 'rgba(140, 214, 255, .72)',
-      textShadow: SHADOW,
-      display: 'none',
-    } as Partial<CSSStyleDeclaration>);
-    this.root.appendChild(this.wetLine);
-
     host.appendChild(this.root);
 
     // Re-fit whenever anything around it changes shape: a rotation, a
@@ -680,18 +655,6 @@ export class Compass {
     } else if (this.lodLine.style.display !== 'none') {
       this.lodLine.style.display = 'none';
       this.lastLod = '';
-    }
-
-    const wet = under?.wet ?? null;
-    if (wet) {
-      if (wet !== this.lastWet) {
-        this.lastWet = wet;
-        this.wetLine.textContent = wet;
-      }
-      if (this.wetLine.style.display === 'none') this.wetLine.style.display = '';
-    } else if (this.wetLine.style.display !== 'none') {
-      this.wetLine.style.display = 'none';
-      this.lastWet = '';
     }
 
     this.drawMarkers(from, markers, half);

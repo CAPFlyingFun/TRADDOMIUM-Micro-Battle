@@ -8,9 +8,7 @@ THREE.TextureLoader.prototype.load = function stub() {
 
 function compiled(): string {
   const look = makeWaterLook({
-    // THE SEA'S foam is what this measures: the swell-driven breaker
-    // block belongs to the ocean and is gated on saying so.
-    green: 0.5, surf: 0.5, ocean: true, edgeLo: 30, edgeHi: 90,
+    green: 0.5, surf: 0.5, edgeLo: 30, edgeHi: 90,
     midAt: 200, deepAt: 700, texAmp: 1, sink: false, anisotropy: 1,
   });
   const shader = {

@@ -309,8 +309,6 @@ export class IslandScene {
   private dive = 0;
   /** Whether her feet are off the bottom, updated every on-foot frame. */
   private afloat = false;
-  /** The dive lever as pressed, un-eased — the camera's signal. */
-  private diveIntent = 0;
   /**
    * THE BUOY. Built here rather than reached for globally so the scene
    * owns its lifetime, and constructed even when the flag is off —
@@ -1418,15 +1416,6 @@ export class IslandScene {
       // lever"). And UP on the lever surfaces her FASTER than the
       // film alone: buoyancy plus swimming for the light.
       const wantDive = this.breath.spent ? 0 : Math.max(0, -this.liftSlider.lift);
-      // THE SLIDER ITSELF, kept for the camera. `this.dive` below is
-      // this eased at 0.9 a second, which is right for her body — she
-      // does not change her mind about going down in a frame — and
-      // wrong for the view: the camera was reading a signal that took
-      // four tenths of a second to develop and only then began to
-      // release, so she was already several body lengths down before
-      // it started after her. What the camera wants is INTENT, and
-      // intent is the lever.
-      this.diveIntent = wantDive;
       const ease = wantDive < this.dive
         ? RISE_EASE * (1 + Math.max(0, this.liftSlider.lift))
         : DIVE_EASE;
@@ -1538,12 +1527,6 @@ export class IslandScene {
         // The master LOD's state rides the same developer toggle as
         // the fix — one switch, one register, one screenshot.
         lod: settings().showFix ? lodLine() : null,
-        // TEMPORARY, for the freshwater hunt: what the query says the
-        // water under her is, against where the mesh is actually
-        // DRAWING its surface. Those are two different computations of
-        // the same thing and the gap between them is the whole
-        // question. Goes when the hunt does.
-        wet: settings().showFix ? this.wetLine() : null,
         // HER NOSE, not the camera's. In flight they part company the
         // moment she looks around, and the pairing with the flight
         // panel's ground line only means anything if this one is hers.
@@ -1772,9 +1755,7 @@ export class IslandScene {
     this.follow.update(
       this.ant.root, look, dt,
       this.afloat && !this.flight.aloft,
-      // The LEVER, not the eased dive: the camera should start down
-      // with her, not a beat behind her.
-      this.flight.aloft ? 0 : Math.max(this.diveIntent, this.dive),
+      this.flight.aloft ? 0 : this.dive,
     );
     // AFTER THE WEATHER, because it takes its fraction of the fog and
     // lights applyWeather has just written — and AFTER THE CAMERA, for
@@ -2149,34 +2130,6 @@ export class IslandScene {
       mean: total > 0 ? seen / total : 0,
       low: worst > 0 ? 1 / worst : 0,
     };
-  }
-
-  /**
-   * TEMPORARY DEVICE READOUT — the freshwater hunt.
-   *
-   * FRESH d<queried depth> a<afloat> ab<above> | gY<ground> qY<queen>
-   * wY<drawn water surface> Δ<drawn minus queen>
-   *
-   * The number that matters is the last one. `d` is the water column
-   * the QUERY reports over the 8-unit triangle she is standing on;
-   * `wY` is read straight out of the water mesh's vertex buffer, which
-   * carries the same column added to a bed sampled every hundred units
-   * and interpolated across the quad. When Δ is positive she is drawn
-   * underneath a surface that gameplay says she is on top of, and no
-   * amount of wading arithmetic can close that.
-   */
-  private wetLine(): string | null {
-    if (!this.water) return null;
-    const { wx, wz } = this.ant.where;
-    const spot = waterSpotAt(wx, wz);
-    const gY = groundHeight(wx, wz);
-    const qY = this.ant.root.position.y;
-    const wY = this.water.drawnSurfaceAt(wx, wz);
-    const n = (v: number) => (Math.abs(v) < 100 ? v.toFixed(2) : v.toFixed(0));
-    const head = `FRESH d${spot ? n(spot.depth) : '--'}`
-      + ` a${this.afloat ? '1' : '0'} ab${n(this.swimAbove)}`;
-    if (wY === null) return `${head} | gY${n(gY)} qY${n(qY)} wY--`;
-    return `${head} | gY${n(gY)} qY${n(qY)} wY${n(wY)} d${n(wY - qY)}`;
   }
 
   private mslNow(): number {
