@@ -19,9 +19,13 @@ import { describeKnownSystems, lodAt, lodLine, lodReport } from '../world/lodPro
 import { syncLodUniforms } from '../world/lodShader';
 import {
   DEFAULT_MESO_SCALE, SEA_SOURCE_NOTE, liveField, liveRegime, seaFromQuery,
-  seaMode, useFixedSea, useProceduralSea, type LiveSeaOptions,
+  blendToObservation, seaLine, seaBlend, seaMode, settleSea, useFixedSea,
+  useProceduralSea, type LiveSeaOptions,
 } from '../world/liveSea';
-import { activeWaves, swellAmplitude, swellReach } from '../world/seaSwell';
+import {
+  activeWaves, restartSwellClock, swellAmplitude, swellReach, waveTableVersion,
+} from '../world/seaSwell';
+import { seaFeed } from '../weather/SeaService';
 import { local, world, type WorldPoint } from '../world/coords';
 import { TerrainStream, TIER_CUTS } from '../world/TerrainStream';
 import { followHd, forgetHd, hdResident, onHdTile } from '../world/kauaiHd';
@@ -305,6 +309,18 @@ export class IslandScene {
   private dive = 0;
   /** Whether her feet are off the bottom, updated every on-foot frame. */
   private afloat = false;
+  /**
+   * THE BUOY. Built here rather than reached for globally so the scene
+   * owns its lifetime, and constructed even when the flag is off —
+   * construction only reads the cache, it does not touch the network.
+   */
+  private readonly sea = seaFeed();
+  /** The `?sea=` dials in force, or null on the shipped ocean. */
+  private wantsSea: LiveSeaOptions | null = null;
+  /** The feed reading the running generation was grown from. */
+  private seaStamp = -1;
+  /** The wave table's shape, so the water is rebuilt only when it moves. */
+  private seaTable = -1;
   /** Water over the ground under her, drawn units. */
   private wet = 0;
   /** Whether the water stands over her head — with hysteresis. */
@@ -1694,6 +1710,10 @@ export class IslandScene {
     this.water?.update(dt);
     this.ocean?.follow(at);
     this.ocean?.update(dt);
+    // AFTER the ocean's own tick, because a rebuild here replaces the
+    // very object that was just updated — and before anything reads
+    // the water, so a frame never spans two different tables.
+    this.stepSea();
     // The sky feeds the streams. Set after the weather is read below?
     // No — read from the LAST frame's reading deliberately: asking for
     // it here would reorder the weather update around the water for one
@@ -2494,8 +2514,24 @@ export class IslandScene {
     // already draws it, with no rebuild. Without the flag the shipped
     // table is installed explicitly, so a scene cannot inherit a
     // generated sea from the one before it.
+    //
+    // A FRESH SCENE STARTS A FRESH SEA. Ocean used to do this and no
+    // longer may: it is rebuilt mid-transition when a new buoy reading
+    // blends in, and restarting the clock there would jump the phase
+    // of every wave at once.
+    restartSwellClock();
     const asked = seaFromQuery(window.location.search);
-    if (asked) useProceduralSea(asked); else useFixedSea();
+    this.wantsSea = asked;
+    if (asked) {
+      // THE CACHE SPEAKS FIRST. A stored reading is on hand before the
+      // first frame, so the ocean opens on the real sea rather than on
+      // a fallback that gets swapped out a second later. Only if there
+      // is nothing stored does TYPICAL_SEA stand in — and that is a
+      // genuine 51208 reading too, so either way the water is right.
+      useProceduralSea({ ...asked, observation: this.sea.observation });
+      this.seaStamp = this.sea.version;
+    } else useFixedSea();
+    this.seaTable = waveTableVersion();
     this.ocean = new Ocean(this.scene, aniso);
     this.ocean.follow(this.ant.where);
   }
@@ -2542,8 +2578,20 @@ export class IslandScene {
       ? waves.filter((_, i) => field.components[i]?.scale === 'macro') : waves;
     const meso = field
       ? waves.filter((_, i) => field.components[i]?.scale === 'meso') : [];
+    const feed = this.sea.state;
     return {
       mode: seaMode(),
+      line: seaLine(feed),
+      feed: {
+        source: feed.source,
+        station: feed.station,
+        ageMinutes: feed.ageMs === null ? null : Math.round(feed.ageMs / 60_000),
+        fetchedAt: feed.fetchedAt,
+        failure: feed.failure,
+        asking: feed.asking,
+        observation: feed.observation,
+      },
+      blend: seaBlend(),
       source: seaMode() === 'procedural' ? SEA_SOURCE_NOTE : 'built-in table',
       mesoScaleDefault: DEFAULT_MESO_SCALE,
       regime: regime && {
@@ -2574,6 +2622,44 @@ export class IslandScene {
         ),
       })),
     };
+  }
+
+  /**
+   * ONE FRAME OF THE BUOY — poll, blend, retire, rebuild.
+   *
+   * Nothing here can block and nothing here can fail loudly. The poll
+   * returns at once and lands whenever it lands; a refusal, a partial
+   * record or a malformed document leaves the sea exactly as it was
+   * (SeaService). What this does when a genuinely NEW reading takes
+   * hold is start a four-minute crossfade, not a swap.
+   *
+   * THE WATER IS REBUILT ONLY WHEN THE TABLE CHANGES SHAPE — twice per
+   * observation, once as the second generation joins and once as the
+   * first is retired — because the shader bakes each component's
+   * wavenumber, frequency and heading. Both moments are chosen so the
+   * SURFACE does not move across them: the joining generation's
+   * amplitude is nought at the start of the fade and the retiring
+   * one's is nought at the end. Amplitude itself is a uniform and
+   * needs no rebuild, which is what lets the crossfade run smoothly in
+   * between.
+   *
+   * OFF UNLESS THE FLAG IS ON. A player on the shipped ocean does not
+   * make requests to NOAA for an experiment they are not running.
+   */
+  private stepSea(): void {
+    if (!this.wantsSea) return;
+    this.sea.poll();
+    if (this.sea.version !== this.seaStamp) {
+      const seen = this.sea.observation;
+      this.seaStamp = this.sea.version;
+      if (seen) blendToObservation(seen, { ...this.wantsSea, observation: seen });
+    }
+    settleSea();
+    const shape = waveTableVersion();
+    if (shape !== this.seaTable) {
+      this.seaTable = shape;
+      this.rebuildOcean();
+    }
   }
 
   private rebuildOcean(): void {

@@ -69,6 +69,14 @@ water and returns the report `__island.waveState()` also gives.
 steepness, shoaling); `npm run probe:seastage` is the on-device half
 (frame cost and screenshots, needs a preview server).
 
+The generated sea can be grown from the LIVE buoy: NDBC station 51208
+(Hanalei) through the Stage A parser, cached in local storage against
+the feed's own 30-minute TTL, and falling back to the last good reading
+and then to a real fixture reading — never to a flat sea. A new reading
+does not replace the old one, it crossfades with it over four minutes
+(`liveSea.BLEND_SECONDS`), both generations summing into the one
+authoritative surface. `npm run probe:ndbc` asks from a real browser.
+
 The shore's depth-limited breaking envelope applies to both seas and is
 measured by `npm run measure:breaker`; `npm run probe:breaker <tag>`
 photographs the surf zone so two builds can be put side by side.

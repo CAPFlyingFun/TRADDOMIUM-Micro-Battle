@@ -264,6 +264,31 @@ export function swellAmplitude(): number {
   return peakSum;
 }
 
+/**
+ * WHO DECIDES HOW TALL THIS SEA CAN STAND — and why it is a seam.
+ *
+ * The table's own peak sum is the honest answer for one generation and
+ * the wrong one for two. During a crossfade (liveSea) the table holds
+ * an outgoing sea and an incoming one, and neither is ever at full
+ * amplitude while the other is: summing both peaks would advertise a
+ * crest half again taller than the water can reach, and — worse — it
+ * would JUMP at the instant the second generation joined. That number
+ * is the denominator of the depth-limited breaking envelope, so a jump
+ * in it is a step in the wave height everywhere the shore is shallow:
+ * measured, eighteen per cent in three metres of water.
+ *
+ * So whoever owns the generations may answer instead. The contract is
+ * that the answer is a SLOW property of the sea — it may drift across
+ * a transition, it may not move at wave rate, or the envelope starts
+ * breathing and Stage D's whole point is lost.
+ */
+export function setSwellPeak(source: (() => number) | null): void {
+  peakOf = source;
+  if (peakOf) peakSum = peakOf();
+}
+
+let peakOf: (() => number) | null = null;
+
 /** The most the surface can ever leave sea level, either way. */
 export function swellReach(): number {
   return swellAmplitude() * SHOAL_CAP;
@@ -396,14 +421,24 @@ export const SWELL_AMP_UNIFORM: { value: number[] } = {
   value: DEFAULT_WAVES.map((w) => w.amp),
 };
 
-/** The largest an envelope can make a component, for reach maths. */
+/**
+ * The largest an envelope can make a component, for reach maths.
+ *
+ * SAMPLED FORWARD FROM NOW, which matters as of Stage F. It used to
+ * sample from time zero, which was harmless while every envelope was a
+ * stationary wave-group noise — and wrong the moment a generation
+ * CROSSFADE went into one, because the incoming generation's fade is
+ * nought until the transition starts and a window at t=0 would have
+ * measured its peak as nothing. Half an hour of lookahead covers any
+ * transition, and the answer stays a constant of the generation.
+ */
 function peakEnvelope(w: Wave): number {
   if (!w.envelope) return 1;
-  let peak = 1;
+  let peak = 0;
   // Sampled rather than assumed: the envelope is somebody else's
   // function and its bound is not this module's to know.
-  for (let i = 0; i < 240; i++) peak = Math.max(peak, w.envelope(i * 7.3));
-  return peak;
+  for (let i = 0; i < 240; i++) peak = Math.max(peak, w.envelope(clock + i * 7.3));
+  return Math.max(peak, 0);
 }
 
 /**
@@ -422,23 +457,43 @@ export function setWaveTable(table: readonly Wave[] | null): void {
   // is written against, so it must not wander within a generation —
   // an envelope that moved the cap would move the whole shoreline
   // with it, at group rate.
-  peakSum = waves.reduce((sum, w) => sum + w.amp * peakEnvelope(w), 0);
+  staticPeak = waves.reduce((sum, w) => sum + w.amp * peakEnvelope(w), 0);
+  peakSum = peakOf ? peakOf() : staticPeak;
   heaveGains = waves.map((w) => heaveGain(w.omega));
   const energy = waves.reduce((sum, w) => sum + w.amp * w.amp, 0);
   meanPeriod = energy > 0
     ? waves.reduce((sum, w) => sum + w.amp * w.amp * ((2 * Math.PI) / w.omega), 0) / energy
     : 1;
+  tableVersion += 1;
   refreshAmplitudes();
 }
 
+/** @see waveTableVersion. */
+let tableVersion = 0;
+
 /** @see swellAmplitude. Set only by setWaveTable. */
 let peakSum = DEFAULT_WAVES.reduce((sum, w) => sum + w.amp, 0);
+/** The table's own answer, kept for when nobody else is offering one. */
+let staticPeak = peakSum;
 /** @see heaveGain — one per component, recomputed with the table. */
 let heaveGains: number[] = DEFAULT_WAVES.map((w) => heaveGain(w.omega));
 /** @see swellPeriod. */
 let meanPeriod = DEFAULT_WAVES.reduce((s2, w) => s2 + w.amp * w.amp
   * ((2 * Math.PI) / w.omega), 0)
   / DEFAULT_WAVES.reduce((s2, w) => s2 + w.amp * w.amp, 0);
+
+/**
+ * HOW MANY TIMES THE TABLE HAS CHANGED.
+ *
+ * The shader's chunk bakes each component's wavenumber, frequency and
+ * heading, and sizes its amplitude uniform to the table — so a table
+ * with a different SHAPE needs the material built again, and whoever
+ * owns the water has to notice. Amplitudes alone do not: those are the
+ * uniform, and they move every frame.
+ */
+export function waveTableVersion(): number {
+  return tableVersion;
+}
 
 /** The table in force, for probes and reports. */
 export function activeWaves(): readonly Wave[] {
@@ -452,6 +507,9 @@ export function isDefaultSea(): boolean {
 
 /** Recompute every component's live amplitude for the current clock. */
 function refreshAmplitudes(): void {
+  // Once a frame, with the amplitudes, because a crossfade moves it —
+  // slowly, and never at wave rate. @see setSwellPeak.
+  if (peakOf) peakSum = peakOf();
   for (let i = 0; i < waves.length; i++) {
     const w = waves[i];
     liveAmp[i] = w.envelope ? w.amp * w.envelope(clock) : w.amp;
@@ -501,6 +559,7 @@ export function swellTime(): number {
 export function resetSwell(): void {
   clock = 0;
   lattice = null;
+  peakOf = null;
   setWaveTable(null);
 }
 

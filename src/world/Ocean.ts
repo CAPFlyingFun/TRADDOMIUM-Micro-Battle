@@ -3,7 +3,7 @@ import { groundHeight } from './heightfield';
 import { toLocal } from './origin';
 import { world } from './coords';
 import { makeWaterLook } from './waterLook';
-import { restartSwellClock, setSwellLattice, tickSwell } from './seaSwell';
+import { clearSwellLattice, setSwellLattice, tickSwell } from './seaSwell';
 
 /**
  * THE SEA'S SURFACE — two sheets wearing one look.
@@ -119,10 +119,14 @@ export class Ocean {
   private readonly near: Sheet;
 
   constructor(private readonly scene: THREE.Scene, anisotropy: number) {
-    // A fresh mesh starts the shared clock over and forgets the old
-    // lattice. NOT the wave table: which sea is running is the
-    // scene's decision, and this mesh is only what draws it.
-    restartSwellClock();
+    // A fresh mesh forgets the old lattice and NOTHING ELSE. Not the
+    // wave table — which sea is running is the scene's decision and
+    // this mesh only draws it — and, as of Stage F, not the clock
+    // either: the water is rebuilt mid-transition when a new buoy
+    // reading blends in, and restarting the clock there would jump the
+    // phase of every wave in the ocean at once. Starting the sea over
+    // belongs to whoever starts the SCENE over (IslandScene).
+    clearSwellLattice();
     // edgeLo/edgeHi are the waterline Joshua approved — widening them
     // washed the beach out. The GRADUAL part he asked for lives
     // further out, in midAt/deepAt and the distance smear.

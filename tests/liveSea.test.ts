@@ -150,16 +150,26 @@ describe('rebuilding the water must not put the old sea back', () => {
     }
   });
 
-  it('is what Ocean actually calls', () => {
+  it('is not something Ocean does at all any more', () => {
     // Ocean cannot be constructed here (it wants a GL context), so the
-    // contract is pinned at the source: the mesh restarts the clock,
-    // it does not reset the sea.
-    const src = readFileSync('src/world/Ocean.ts', 'utf8')
+    // contract is pinned at the source. It used to restart the clock,
+    // which was right while the water was only ever built once a
+    // scene — and became wrong at Stage F, where the water is rebuilt
+    // MID-TRANSITION as a new buoy reading fades in. Restarting the
+    // clock there would jump the phase of every wave in the ocean at
+    // the exact moment a crossfade exists to hide a change. So the
+    // mesh forgets its lattice and nothing else; starting the sea over
+    // belongs to whoever starts the scene over.
+    const strip = (f: string) => readFileSync(f, 'utf8')
       .replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
-    expect(src).toContain('restartSwellClock()');
-    expect(src).not.toContain('resetSwell');
+    const ocean = strip('src/world/Ocean.ts');
+    expect(ocean).toContain('clearSwellLattice()');
+    expect(ocean).not.toContain('restartSwellClock');
+    expect(ocean).not.toContain('resetSwell');
     // ...and the stripper did not simply eat the file.
-    expect(src).toContain('class Ocean');
+    expect(ocean).toContain('class Ocean');
+    // The scene is where a fresh sea now starts.
+    expect(strip('src/scenes/IslandScene.ts')).toContain('restartSwellClock()');
   });
 });
 
