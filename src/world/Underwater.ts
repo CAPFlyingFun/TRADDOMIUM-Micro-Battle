@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { groundHeight } from './heightfield';
 import { originAt } from './origin';
 import { waterSpotAt } from './waterQuery';
+import { swellPeriod } from './seaSwell';
 
 /**
  * WHAT BEING UNDER THE WATER LOOKS LIKE.
@@ -219,8 +220,28 @@ const PANE_ORDER = 10_000;
  * dive lever never feels late — the patience here is for water she
  * did not ask for.
  */
-export const SPLASH = 0.55;
-export const SETTLE = 1.7;
+/**
+ * BEATS OF THE SEA, not seconds. The values above were swept against
+ * the shipped 1.47 s table; held as seconds they would have declared
+ * every crest of the generated sea's 5.9 s swell a change of medium
+ * and flipped the screen green on each one — the strobing this exists
+ * to prevent, arriving by the back door when the sea got slower. As
+ * fractions of whatever sea is running they reproduce 0.55 s and
+ * 1.70 s on the shipped table to within a percent, and stretch with
+ * the wave everywhere else.
+ */
+export const SPLASH_BEATS = 0.37;
+export const SETTLE_BEATS = 1.15;
+
+/** How long a wash may last before the tint starts to come in. */
+export function splashSeconds(): number {
+  return SPLASH_BEATS * swellPeriod();
+}
+
+/** And how long before it is fully a change of medium. */
+export function settleSeconds(): number {
+  return SETTLE_BEATS * swellPeriod();
+}
 
 /** Nothing at the waterline, everything a couple of units below it. */
 function rampIn(under: number): number {
@@ -363,8 +384,10 @@ export class Underwater {
     // Engagement: instant when she MEANT it, otherwise eased in over
     // SETTLE seconds so a passing crest reads as a splash across the
     // lens rather than as a change of medium.
+    const splash = splashSeconds();
+    const settle = settleSeconds();
     const settled = deliberate ? 1
-      : Math.min(1, Math.max(0, (this.wetFor - SPLASH) / (SETTLE - SPLASH)));
+      : Math.min(1, Math.max(0, (this.wetFor - splash) / (settle - splash)));
     const engaged = settled * settled * (3 - 2 * settled);
     if (engaged <= 0) {
       this.pane.visible = false;

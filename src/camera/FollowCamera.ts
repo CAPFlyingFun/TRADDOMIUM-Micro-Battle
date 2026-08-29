@@ -4,6 +4,7 @@ import { groundHeight } from '../world/heightfield';
 import { local } from '../world/coords';
 import { toWorld } from '../world/origin';
 import { waterSpotAt } from '../world/waterQuery';
+import { swellPeriod, swellReach } from '../world/seaSwell';
 import { settings } from '../ui/settings';
 
 /**
@@ -20,24 +21,36 @@ import { settings } from '../ui/settings';
  * in that setting's terms.
  */
 /**
- * How fast the camera's height chases hers while THE SEA is moving her.
- * A 1.5 s swell is attenuated to about a seventh of its amplitude.
+ * THE SEA IS FILTERED IN FREQUENCY NOW, NOT IN TIME — v0.0.106.
  *
- * There is no longer a second rate for flying. There was — BRISK_RISE,
- * 8 a second, on the reasoning that a climb "must feel connected" — and
- * it was quietly catastrophic, because a first-order filter lags a RAMP
- * by its speed over its rate and a climb is a ramp. At the top of the
- * lift lever, 300 units a second through a rate of 8 is 37 units of lag
- * against a follow distance of 7.8: the camera sat five times its own
- * distance below her and aimed almost vertically up at a queen who then
- * looked like she was leaving on a rocket.
+ * There used to be a first-order filter on the camera's height here
+ * (CALM_RISE, 0.6 a second) which passed about a seventh of a 1.5 s
+ * swell. It worked on the sea it was written for and could not survive
+ * a slower one: a first-order filter lags by up to a quarter period,
+ * and against the generated sea's 6 s macro swell that is a second and
+ * a half of camera still sitting in the last trough while the next
+ * crest arrives — the same "damped camera is late" mechanism that put
+ * the lens under the water in v0.0.99, one scale up.
  *
- * Joshua: "why the camera is pitching up so much... never did it like
- * on version 0.80" — and v0.0.80 is exactly the right place to point
- * at, because this filter did not exist before v0.0.88. Her flight
- * model is untouched since then; only the camera changed.
+ * It is also the mechanism behind the older BRISK_RISE disaster: a
+ * first-order filter lags a RAMP by speed over rate, so at the top of
+ * the lift lever the camera sat five times its own boom below her,
+ * aimed almost vertically up. Joshua: "why the camera is pitching up
+ * so much... never did it like on version 0.80."
+ *
+ * So the filtering moved to where the sea is actually made. seaSwell
+ * splits its own table into a SLOW half and a FAST half by component
+ * (seaSwell.heaveGain), the water query carries the fast half along
+ * with the column it belongs to, and the camera simply subtracts it.
+ * Same shape of low pass, no memory, and — because every component is
+ * evaluated at one instant off one clock — no phase lag at all. The
+ * camera is exactly in step with the slow sea rather than trailing it,
+ * and nothing has to be re-swept when the sea changes.
+ *
+ * Flying and walking are untouched: there is no chop out of the water,
+ * so the term is zero and her height reaches the camera the same frame,
+ * which is what v0.0.88 broke and this must not.
  */
-const CALM_RISE = 0.6;
 
 /** How far the lens is held off the ground it may not sink into. */
 const CLEARANCE = 1.6;
@@ -53,8 +66,8 @@ const CLEARANCE = 1.6;
  * clamp demanded. The clamp was therefore active on every frame of
  * every float, not on crests: it pinned the lens rigidly to the
  * surface, so the camera copied 100% of a swell that swings 48 units,
- * and because the clamp re-seeds the damping filter (easedY, below)
- * the smoothing could never touch it. Joshua: "like a washing
+ * and because the clamp re-seeded the height filter of the day, the
+ * smoothing could never touch it. Joshua: "like a washing
  * machine".
  *
  * So the lens is allowed under the water now. A crest passing over it
@@ -64,10 +77,43 @@ const CLEARANCE = 1.6;
  * and a shallow one both pass in well under a second while genuinely
  * sinking does not.
  */
-/** Barely a nudge, applied the whole time the lens is under. */
-const SEA_NUDGE = 10;
-/** And what a sustained submersion gets: enough to clear a crest fast. */
-const SEA_LIFT = 200;
+/**
+ * How fast the envelope lifts, as a fraction of the sea's own reach
+ * per beat of it — barely a nudge while a wash might still be a
+ * passing crest, and enough to clear a crest fast once it is plainly a
+ * submersion.
+ *
+ * RATES, NOT A PULL TOWARD THE SURFACE, and the distinction is the
+ * design note above BRIEF: "URGENCY IS A CLOCK, NOT A DEPTH. A crest
+ * forty units deep and one four units deep both pass in a fraction of
+ * a second, and kicking the camera for either is the pumping this
+ * replaced." A correction proportional to depth kicks hardest at
+ * exactly the moment a crest is deepest, which is the fault.
+ *
+ * MEASURED IN THE SEA'S OWN TERMS so they follow it. The shipped
+ * table's reach over its beat is 48.4 / 1.474 = 32.8 units a second,
+ * and these fractions of it come to 9.9 and 200 — the v0.0.101 numbers
+ * they replace, to within a percent. The generated sea works out at
+ * 10.7 and 218, because a sea four times slower is also four times
+ * taller and the two very nearly cancel.
+ */
+const WASH_RATE = 0.30;
+const SUNK_RATE = 6.1;
+/**
+ * How quickly the lift's own SPEED may change, per beat.
+ *
+ * The reason there is a speed at all. A rate that switches on at the
+ * waterline steps the camera's vertical velocity by the whole of it,
+ * and a step in velocity is unbounded acceleration: measured on the
+ * shipped sea, the lens peaked at 1.06 g of vertical acceleration
+ * against her 0.46, essentially all of it in that one switch. Fading
+ * the rate in with DEPTH cannot fix it, because at wave rate the
+ * surface crosses the lens in a frame. Limiting how fast the
+ * correction's speed may change does, and it costs a little of the
+ * envelope's promptness on very short washes — which are the ones it
+ * is supposed to ignore anyway.
+ */
+const LIFT_SLEW = 5;
 /**
  * How long the lens may sit under before anything but the nudge
  * happens, and how long before the full lift does.
@@ -89,13 +135,30 @@ const SEA_LIFT = 200;
  * if the swell's period ever changes (the live-buoy experiment) they
  * have to be re-swept against it rather than inherited.
  */
-const BRIEF = 0.35;
-const PATIENCE = 1.6;
 /**
- * The one hard line left. Past this the lens is not being washed over,
- * it is underwater, and no amount of patience should leave it there.
+ * BEATS OF THE SEA, not seconds — and this is the same note the old
+ * constants carried, now acted on. They said: "A SLOWER SEA WOULD WANT
+ * THESE LONGER. They are seconds of wave, so if the swell's period ever
+ * changes they have to be re-swept against it rather than inherited."
+ * The generated sea's period is 5.9 s against the shipped 1.47 s, so
+ * inherited seconds would have declared every macro crest a genuine
+ * submersion and fired the full lift at it — the pumping, restored.
+ *
+ * The ratios are the swept values divided by the sea they were swept
+ * in: 0.35 s and 1.6 s over a 1.47 s table. On the shipped sea they
+ * reproduce 0.35 and 1.60 to within a percent; on the generated one
+ * they become 1.4 s and 6.4 s, which is the same wave shape measured
+ * against a wave six times as long.
  */
-const DROWNED = 70;
+const BRIEF_BEATS = 0.24;
+const PATIENCE_BEATS = 1.09;
+/**
+ * The one hard line left, as a multiple of how tall the sea can stand.
+ * Past this the lens is not being washed over, it is underwater, and
+ * no amount of patience should leave it there. Seventy units over the
+ * shipped sea's 48.4 of reach, which is what it has always been.
+ */
+const DROWNED_REACH = 1.45;
 
 /**
  * The dive lever, from where the surface clamp starts letting go to
@@ -146,10 +209,26 @@ export class FollowCamera {
   private readonly wantOffset = new THREE.Vector3();
 
   private distance: number;
-  /** The camera's own, damped height. Null until the first frame. */
-  private easedY: number | null = null;
   /** Seconds the lens has been continuously under the water. */
   private sunkFor = 0;
+  /** The chop taken off the view last frame — reported, for probes. */
+  private chop = 0;
+  /**
+   * How far the water envelope is currently holding the lens ABOVE
+   * where the rig alone would put it.
+   *
+   * ITS OWN STATE NOW, and it has to be. The nudge is a rate, so it
+   * only ever adds up across frames if something remembers the total;
+   * until v0.0.106 the height filter happened to be that memory, and
+   * removing the filter without this left the envelope re-applying a
+   * few units to the same fresh position every frame and never lifting
+   * the lens out of a sea it was genuinely under. Held explicitly, it
+   * is also readable: this IS the correction, in units, and it decays
+   * over a beat of the sea once the water lets go.
+   */
+  private lift = 0;
+  /** …and how fast that correction is currently moving. @see LIFT_SLEW */
+  private liftVel = 0;
 
   constructor(aspect: number) {
     const dial = settings();
@@ -206,9 +285,12 @@ export class FollowCamera {
     this.camera.position.copy(this.desired);
     this.sunkFor = 0;
     this.keepAboveGround(this.camera.position);
-    // A snap is a teleport: the filter starts fresh, or it would
-    // glide in from wherever the camera used to be.
-    this.easedY = this.camera.position.y;
+    // NOTHING TO RE-SEED. A snap used to have to restart the height
+    // filter or the camera would glide in from wherever it had been;
+    // the spectral filter has no memory to carry across a teleport.
+    this.chop = 0;
+    this.lift = 0;
+    this.liftVel = 0;
     this.aim(target);
   }
 
@@ -237,28 +319,24 @@ export class FollowCamera {
     // the horizon never sat still. The waves are supposed to move
     // under her, not under the player.
     //
-    // A first-order filter on the camera's height only. Horizontal
-    // follow is untouched, because lag THERE reads as the camera
-    // trailing her, which is the one thing the offset smoothing was
-    // built to avoid. Afloat it is slow enough to pass barely a fifth
-    // of a 1.5 s swell; flying it is quick, because a climb is her
-    // decision and must feel connected.
-    // ONLY FOR THE ONE CASE IT WAS BUILT FOR. Damping her bob is right
-    // when the SWELL is doing the moving and she is a passenger; it is
-    // wrong when the height is her own decision, where any lag at all
-    // is the camera failing to follow. Flying and walking now track her
-    // exactly, as they did before this filter existed.
-    if (calm) {
-      this.easedY = this.easedY === null ? this.camera.position.y
-        : this.easedY + (this.camera.position.y - this.easedY) * (1 - Math.exp(-CALM_RISE * dt));
-      this.camera.position.y = this.easedY;
-    } else {
-      this.easedY = this.camera.position.y;
-    }
+    // TAKE THE CHOP OFF HER, rather than damping the camera over time.
+    // The water she is floating in reports how much of its surface is
+    // fast chop (waterQuery.chop, from seaSwell's own table), she sits
+    // exactly on that surface, so subtracting it leaves the slow heave
+    // she is riding — and leaves everything she does DELIBERATELY
+    // untouched, because a decision is not a wave and has no chop in
+    // it. Vertical only: lag in the horizontal reads as the camera
+    // trailing her, which the offset smoothing exists to avoid.
+    //
+    // ONLY WHILE THE SEA IS MOVING HER. Out of the water there is no
+    // chop and the term is zero anyway; the flag makes that explicit
+    // and keeps a diving queen — whose height is her own decision —
+    // from having a wave subtracted from her intent.
+    this.chop = calm ? this.chopUnder(target) : 0;
+    this.camera.position.y -= this.chop;
     // The floor still has the last word: a smoothed camera may lag,
     // it may not lag INTO the ground — nor under a wave.
     this.keepAboveGround(this.camera.position, dive, dt);
-    this.easedY = this.camera.position.y;
     this.aim(target);
   }
 
@@ -309,9 +387,11 @@ export class FollowCamera {
    * at nought while the actual surface stood up to half a metre above
    * it, and a crest simply rose THROUGH the camera: the lens crossed
    * above and below the water again and again as she floated, which
-   * the camera's deliberate vertical damping (CALM_RISE) makes worse,
-   * because a damped camera is still down in the last trough when the
-   * next crest arrives.
+   * the vertical damping of the day made worse, because a filter with
+   * memory is still down in the last trough when the next crest
+   * arrives. (That filter is gone as of v0.0.106 — see the header —
+   * but this floor is still the live surface and still asked at the
+   * camera's own x/z.)
    *
    * So the floor asks the same authoritative water everything else
    * asks — `waterSpotAt`, the registered query, whose sea depth is the
@@ -345,37 +425,104 @@ export class FollowCamera {
     const above = toWorld(local(out.x, out.z));
     const ground = groundHeight(above.wx, above.wz);
     // THE GROUND IS STILL A HARD FLOOR. A hillside is not negotiable
-    // and does not move; only the water gets an envelope.
+    // and does not move; only the water gets an envelope — and only
+    // the water's correction is remembered between frames, because the
+    // floor is recomputed from the camera's own position every time
+    // and carrying it forward would double it.
     const floor = ground + CLEARANCE;
     const spot = waterSpotAt(above.wx, above.wz);
     const released = smoothstep(DIVE_RELEASE_LO, DIVE_RELEASE_HI, dive);
-    if (spot && spot.depth > 0 && released < 1) {
-      // The surface standing over the bed right here, right now.
-      const surface = ground + spot.depth;
-      const under = surface - out.y;
-      if (under <= 0) {
-        this.sunkFor = 0;
-      } else {
-        this.sunkFor += dt;
-        // URGENCY IS A CLOCK, NOT A DEPTH. A crest forty units deep
-        // and one four units deep both pass in a fraction of a second,
-        // and kicking the camera for either is the pumping this
-        // replaced. What a passing wave cannot do is LAST.
-        const urgency = smoothstep(BRIEF, PATIENCE, this.sunkFor);
-        const rise = (SEA_NUDGE + (SEA_LIFT - SEA_NUDGE) * urgency)
-          * (1 - released);
-        // Never overshoot into the air: the most this may do is put
-        // the lens exactly on the surface.
-        out.y += Math.min(rise * dt, under);
-        // …and the one hard line. Past DROWNED the lens is not being
-        // washed over, it is under, whatever the clock says.
-        const deepest = surface - DROWNED * (1 - released);
-        if (out.y < deepest) out.y = deepest;
-      }
+    const beat = Math.max(swellPeriod(), 1e-3);
+    const scale = swellReach() / beat;      // units a second, this sea
+    const base = out.y;
+    // What the envelope was holding last frame, before this frame's
+    // water has had its say.
+    const under = (spot && spot.depth > 0 && released < 1)
+      ? (ground + spot.depth) - (base + this.lift) : -1;
+    // How fast the correction may turn over, this sea. Both ends of it
+    // are TAPERED by this rather than stopped: a lift that runs into
+    // zero, or into the surface, and has its speed snapped to nought
+    // is a velocity step in the camera's own height — the same
+    // unbounded acceleration the switch at the waterline was, arriving
+    // at the other end of the same journey. Measured, the floor alone
+    // was worth 0.6 g of it.
+    const turn = LIFT_SLEW / beat;
+    let wantVel = -this.lift * turn;        // let go, when nothing is wet
+    let drowned = -Infinity;
+    if (under > 0) {
+      this.sunkFor += dt;
+      // URGENCY IS A CLOCK, NOT A DEPTH. A crest forty units deep and
+      // one four units deep both pass in a fraction of a second, and
+      // kicking the camera for either is the pumping this replaced.
+      // What a passing wave cannot do is LAST.
+      const urgency = smoothstep(
+        BRIEF_BEATS * beat, PATIENCE_BEATS * beat, this.sunkFor,
+      );
+      // Never overshoot into the air: the rise is also capped by what
+      // would put the lens exactly ON the surface over one turn, so it
+      // eases onto the waterline instead of arriving at it. A limit on
+      // the CORRECTION, never a clamp on the position — clamping the
+      // position against the surface is the v0.0.100 washing machine,
+      // which pinned the lens to the water and copied the whole swell.
+      // It binds only in the last centimetres; anything deeper than
+      // that is still a flat rate, which is the point.
+      wantVel = Math.min(
+        (WASH_RATE + (SUNK_RATE - WASH_RATE) * urgency) * scale,
+        under * turn,
+      ) * (1 - released);
+      const surface = ground + spot!.depth;
+      drowned = surface - DROWNED_REACH * swellReach() * (1 - released);
     } else {
       this.sunkFor = 0;
     }
+    // THE LIFT HAS A SPEED, and that is what makes it smooth. See
+    // LIFT_SLEW: switching a rate on at the waterline steps the
+    // camera's vertical velocity and a step in velocity is unbounded
+    // acceleration.
+    this.liftVel += (wantVel - this.liftVel) * (1 - Math.exp(-turn * dt));
+    // The max is a guard, not a mechanism: the taper above brings the
+    // correction to a stop before it gets here.
+    this.lift = Math.max(0, this.lift + this.liftVel * dt);
+    out.y = base + this.lift;
+    // …and the one hard line, which is not negotiable and so is still
+    // a clamp. Past DROWNED the lens is not being washed over, it is
+    // under, whatever the clock says.
+    if (out.y < drowned) {
+      out.y = drowned;
+      this.lift = out.y - base;
+    }
     if (out.y < floor) out.y = floor;
+  }
+
+  /** What the water envelope is holding the lens up by, for probes. */
+  liftHeld(): number {
+    return this.lift;
+  }
+
+  /**
+   * The fast chop standing over HER, drawn units — the thing the view
+   * should not copy.
+   *
+   * Asked at her position rather than the camera's, deliberately: it
+   * is HER motion the term is cancelling, and a wave is a moving
+   * surface, so the chop seven units away is a different number and
+   * would leave a residue instead of cancelling.
+   *
+   * Read from the same authoritative query as everything else, so
+   * there is no path by which the camera can be filtering one sea
+   * while she floats on another — and zero wherever the water has no
+   * swell to speak of, which is every pond on the island.
+   */
+  private chopUnder(target: THREE.Object3D): number {
+    const at = toWorld(local(target.position.x, target.position.z));
+    const spot = waterSpotAt(at.wx, at.wz);
+    if (!spot || spot.depth <= 0 || !spot.chop) return 0;
+    return spot.chop;
+  }
+
+  /** What the last frame took off the view, for probes and tests. */
+  chopTaken(): number {
+    return this.chop;
   }
 
   private aim(target: THREE.Object3D): void {

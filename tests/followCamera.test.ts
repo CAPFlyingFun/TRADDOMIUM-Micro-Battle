@@ -1,7 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { FollowCamera } from '../src/camera/FollowCamera';
+import { useWaterQuery } from '../src/world/waterQuery';
+import { heaveGain } from '../src/world/seaSwell';
 import type { LookInput } from '../src/input/LookDrag';
+
+afterEach(() => useWaterQuery(null));
 
 /**
  * She faces +Z, so the camera rests at -Z looking along +Z.
@@ -158,17 +162,41 @@ describe('following her up', () => {
   });
 
   it('still damps her bob when the SEA is the thing moving her', () => {
-    // The one case the filter was built for must survive the fix.
+    // The one case the filter was built for must survive the fix —
+    // and since v0.0.106 the damping is no longer a property of the
+    // camera alone. The WATER reports how much of its surface is fast
+    // chop and the camera subtracts that, so a bob has to arrive as a
+    // bob in real water for there to be anything to reject. `calm` on
+    // dry land is not a state the game can be in: it means the sea is
+    // moving her.
     const ant = antFacingNorth();
     const follow = new FollowCamera(2);
+    const PERIOD = 1.5;
+    const AMP = 30;
+    const MEAN = 40;
+    const fast = 1 - heaveGain((2 * Math.PI) / PERIOD);
+    let bob = 0;
+    // A bed at zero with the swell standing over it, so the surface IS
+    // her height and the lens rides its usual few units clear of it —
+    // the envelope has no reason to intervene and what is left is the
+    // rejection alone.
+    useWaterQuery(() => ({
+      depth: MEAN + bob, flowX: 0, flowZ: 0, salt: true, chop: bob * fast,
+    }));
     follow.snapTo(ant);
-    let swing = 0;
+    let lo = Infinity;
+    let hi = -Infinity;
     for (let i = 0; i < 240; i++) {
-      ant.position.y = Math.sin((i / 60) * 2 * Math.PI / 1.5) * 30;
+      bob = Math.sin((i / 60) * 2 * Math.PI / PERIOD) * AMP;
+      ant.position.y = MEAN + bob - 0.15;    // riding the film
       follow.update(ant, look({ active: false }), 1 / 60, true);
-      if (i > 120) swing = Math.max(swing, Math.abs(follow.camera.position.y - 0));
+      if (i > 120) {
+        lo = Math.min(lo, follow.camera.position.y);
+        hi = Math.max(hi, follow.camera.position.y);
+      }
     }
-    // Her own swing is 30 units; the camera must pass far less of it.
-    expect(swing).toBeLessThan(30 * 0.35);
+    // Her own swing is 60 units peak to peak; the camera must pass far
+    // less of it.
+    expect(hi - lo).toBeLessThan(2 * AMP * 0.35);
   });
 });

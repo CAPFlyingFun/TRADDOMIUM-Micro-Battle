@@ -24,7 +24,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { FollowCamera } from '../src/camera/FollowCamera';
 import { useWaterQuery } from '../src/world/waterQuery';
-import { SETTLE, SPLASH } from '../src/world/Underwater';
+import { settleSeconds, splashSeconds } from '../src/world/Underwater';
+import { heaveGain } from '../src/world/seaSwell';
 import type { LookInput } from '../src/input/LookDrag';
 
 const REST: LookInput = { yaw: 0, pitch: 0, active: false };
@@ -32,11 +33,21 @@ const REST: LookInput = { yaw: 0, pitch: 0, active: false };
 const REACH = 48;
 const PERIOD = 1.5;
 
-/** A flat bed at zero with `depth` of water standing over it, so the
- *  surface the camera sees is exactly `depth`. */
-function seaAt(depth: number): void {
-  useWaterQuery(() => ({ depth, flowX: 0, flowZ: 0, salt: true }));
+/**
+ * A flat bed at zero with `depth` of water standing over it, so the
+ * surface the camera sees is exactly `depth`.
+ *
+ * `chop` is the fast part of that surface, which the real query
+ * carries from seaSwell's own table (IslandWater) and the camera
+ * subtracts. Supplied here so the harness drives the camera through
+ * the same mechanism the game does rather than a stand-in.
+ */
+function seaAt(depth: number, chop = 0): void {
+  useWaterQuery(() => ({ depth, flowX: 0, flowZ: 0, salt: true, chop }));
 }
+
+/** What seaSwell's spectral split keeps of a wave this fast. */
+const FOLLOWED = heaveGain((2 * Math.PI) / PERIOD);
 
 afterEach(() => useWaterQuery(null));
 
@@ -77,9 +88,11 @@ function ride(seconds: number, dive = 0): {
   for (let t = -WARM; t < seconds; t += dt) {
     const crest = REACH * Math.sin((t / PERIOD) * 2 * Math.PI);
     // Sea level rides the swell; the bed stays put, so the column is
-    // the surface height above a bed at zero.
+    // the surface height above a bed at zero. At 1.5 s this swell is
+    // almost entirely CHOP by the spectral split, which is what the
+    // camera is given and what it takes off the view.
     const surface = REACH + crest;
-    seaAt(surface);
+    seaAt(surface, crest * (1 - FOLLOWED));
     ant.position.y = surface - 0.15; // riding the film, less draught
     follow.update(ant, REST, dt, true, dive);
     if (t < 0) continue;
@@ -108,9 +121,12 @@ describe('the camera on a swell', () => {
     expect(r.hers).toBeGreaterThan(REACH);
     // The lens must not. v0.0.100 tracked it rigidly; the design note
     // in FollowCamera calls 103% the fault it was built to prevent.
-    // Measured 0.19 at these constants, against a floor of 0.144 that
-    // the damping alone would give with no envelope at all.
+    // The spectral split keeps only what a 1.5 s wave has earned —
+    // 12.4% — and the envelope's nudge adds a little on top of it.
     expect(r.lens / r.hers).toBeLessThan(0.25);
+    // AND IT IS THE SPLIT DOING IT, not a filter's lag: the follow
+    // cannot fall below what the split alone would pass.
+    expect(r.lens / r.hers).toBeGreaterThan(FOLLOWED * 0.5);
   });
 
   it('lets a crest wash over the lens rather than kicking it away', () => {
@@ -126,7 +142,9 @@ describe('the camera on a swell', () => {
     // honest test is not "a crest is shorter than SPLASH" — it is how
     // much of the underwater look a crest can actually switch on, run
     // through Underwater's own constants so the two cannot drift.
-    const t = Math.min(1, Math.max(0, (r.longestWet - SPLASH) / (SETTLE - SPLASH)));
+    const splash = splashSeconds();
+    const t = Math.min(1, Math.max(0,
+      (r.longestWet - splash) / (settleSeconds() - splash)));
     const engaged = t * t * (3 - 2 * t);
     expect(engaged).toBeLessThan(0.05);
   });

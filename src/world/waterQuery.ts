@@ -18,6 +18,20 @@ export interface WaterSpot {
   readonly flowZ: number;
   /** The sea. Floats her like any water; drinks like none. */
   readonly salt?: boolean;
+  /**
+   * How much of this column's surface is FAST CHOP, drawn units —
+   * signed, and already included in `depth`.
+   *
+   * FOR FRAMING ONLY. The camera subtracts it so the view rides the
+   * slow heave instead of every ripple (seaSwell.seaChopAt, and
+   * FollowCamera). It is a spectral slice of the same surface `depth`
+   * carries, not a second opinion about where the water is: nothing
+   * that decides flotation, submersion, current or what is drawn may
+   * read it. Absent — inland water, any query that does not model a
+   * swell — means "no chop to speak of", which is the honest answer
+   * for a pond.
+   */
+  readonly chop?: number;
 }
 
 type Query = (wx: number, wz: number) => WaterSpot | null;

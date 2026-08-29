@@ -7,7 +7,7 @@ import { isWatercourse } from './islandChannels';
 import { useWaterQuery, type WaterSpot } from './waterQuery';
 import { surfFlowAt } from './surf';
 import { makeWaterLook } from './waterLook';
-import { seaSwellAt } from './seaSwell';
+import { seaChopAt, seaSwellAt } from './seaSwell';
 
 /**
  * THE ISLAND'S WATER — one simulated window that walks with her.
@@ -219,7 +219,13 @@ export class IslandWater {
         const surface = seaSwellAt(wx, wz, -g);
         const depth = -g + surface;
         const flow = surfFlowAt(wx, wz, depth, surface);
-        return { depth, flowX: flow.x, flowZ: flow.z, salt: true };
+        // The camera's framing term rides along with the column it
+        // belongs to, so the lens cannot end up filtering one sea
+        // while she floats on another. Everything else here ignores it.
+        return {
+          depth, flowX: flow.x, flowZ: flow.z, salt: true,
+          chop: seaChopAt(wx, wz, -g),
+        };
       }
       return this.spotAt(wx, wz);
     });

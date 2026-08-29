@@ -270,6 +270,62 @@ export function swellReach(): number {
 }
 
 /**
+ * THE SEA'S OWN PERIOD, energy-weighted — seconds.
+ *
+ * Anything sized in "how long can a wave hold something under" is a
+ * fraction of THIS, not a constant. The camera's patience and the
+ * underwater tint's hysteresis were both swept against a 1.5 s sea and
+ * would fire on every crest of a 6 s one; expressed as beats of the
+ * sea actually running, they follow it instead.
+ *
+ * Weighted by A^2 because that is energy, which is what makes a wave
+ * the one you notice. The shipped table comes out at 1.47 s, which is
+ * the number those constants were swept against.
+ */
+export function swellPeriod(): number {
+  return meanPeriod;
+}
+
+/**
+ * WHERE HEAVE ENDS AND CHOP BEGINS — the corner of the camera's
+ * spectral filter, in seconds of period.
+ *
+ * THREE SECONDS, and it is not picked. It is the geometric mean of the
+ * two periods this game's sea is designed around: the 6 s dominant
+ * swell the buoy reports, and the 1.518 s chop TMB has always drawn
+ * (MESO_PERIOD_S). sqrt(6 * 1.518) = 3.02. The generated field leaves
+ * an empty gap between those populations — nothing lands between
+ * 1.84 s and 5.43 s — and the corner sits in the middle of it, so the
+ * split does not need the generator's macro/meso LABEL to reproduce
+ * the generator's macro/meso SPLIT.
+ *
+ * THIRD ORDER, and that is not picked either: it is the least order
+ * that passes every macro component above 95% while holding every
+ * meso component below 25%. Second order leaves the 1.84 s chop at
+ * 35%, which is still bobbing.
+ */
+export const HEAVE_CORNER_S = 3;
+export const HEAVE_ORDER = 3;
+
+/**
+ * How much of a component of this frequency the camera should follow.
+ *
+ * A Butterworth-shaped low pass — but evaluated PER COMPONENT against
+ * the table, not run over the signal in time. That distinction is the
+ * whole of Stage E: a temporal filter of the same shape lags by up to
+ * a quarter period, which on a 6 s swell is a second and a half of
+ * camera sitting in the last trough while the next crest arrives. A
+ * spectral one has NO phase at all — every component is evaluated at
+ * the same instant, from the same clock, off the same table — so the
+ * reference is exactly in step with the sea it came from.
+ */
+export function heaveGain(omega: number): number {
+  const period = (2 * Math.PI) / Math.max(omega, 1e-9);
+  const ratio = HEAVE_CORNER_S / period;
+  return 1 / Math.sqrt(1 + Math.pow(ratio, 2 * HEAVE_ORDER));
+}
+
+/**
  * THE TABLE IN FORCE, and the fact that it can be replaced.
  *
  * The built-in two waves are the sea TMB has always drawn and remain
@@ -331,11 +387,22 @@ export function setWaveTable(table: readonly Wave[] | null): void {
   // an envelope that moved the cap would move the whole shoreline
   // with it, at group rate.
   peakSum = waves.reduce((sum, w) => sum + w.amp * peakEnvelope(w), 0);
+  heaveGains = waves.map((w) => heaveGain(w.omega));
+  const energy = waves.reduce((sum, w) => sum + w.amp * w.amp, 0);
+  meanPeriod = energy > 0
+    ? waves.reduce((sum, w) => sum + w.amp * w.amp * ((2 * Math.PI) / w.omega), 0) / energy
+    : 1;
   refreshAmplitudes();
 }
 
 /** @see swellAmplitude. Set only by setWaveTable. */
 let peakSum = DEFAULT_WAVES.reduce((sum, w) => sum + w.amp, 0);
+/** @see heaveGain — one per component, recomputed with the table. */
+let heaveGains: number[] = DEFAULT_WAVES.map((w) => heaveGain(w.omega));
+/** @see swellPeriod. */
+let meanPeriod = DEFAULT_WAVES.reduce((s2, w) => s2 + w.amp * w.amp
+  * ((2 * Math.PI) / w.omega), 0)
+  / DEFAULT_WAVES.reduce((s2, w) => s2 + w.amp * w.amp, 0);
 
 /** The table in force, for probes and reports. */
 export function activeWaves(): readonly Wave[] {
@@ -419,15 +486,31 @@ export function restartSwellClock(): void {
   refreshAmplitudes();
 }
 
-/** The analytic surface at a point — the maths, before any mesh. */
-function rawSwell(wx: number, wz: number, depth: number): number {
+/**
+ * The analytic surface at a point — the maths, before any mesh.
+ *
+ * @param gains an optional per-component weight. Null is THE SEA: every
+ *   component at full weight, keel clamp and all, and the only answer
+ *   any physics may use. A weight array asks for a SPECTRAL SLICE of
+ *   that same sum — same table, same clock, same shoaling, same
+ *   instant — which is what the camera's heave reference is made of.
+ *   A slice is not a surface and does not get the keel clamp: the keel
+ *   is a floor on where the water may be, and a slice is not where the
+ *   water is. (Stage D's depth envelope made the clamp inert in any
+ *   case; it has not fired since v0.0.105.)
+ */
+function rawSwell(
+  wx: number, wz: number, depth: number, gains: number[] | null = null,
+): number {
   const shoal = shoalAt(depth);
   if (shoal <= 0) return 0;
   let y = 0;
   for (let i = 0; i < waves.length; i++) {
     const w = waves[i];
-    y += liveAmp[i] * Math.cos((wx * w.dx + wz * w.dz) * w.k - w.omega * clock);
+    const a = gains ? liveAmp[i] * gains[i] : liveAmp[i];
+    y += a * Math.cos((wx * w.dx + wz * w.dz) * w.k - w.omega * clock);
   }
+  if (gains) return y * shoal;
   // A trough cannot cut below the bed it is running over.
   return Math.max(y * shoal, -Math.max(0, depth - KEEL));
 }
@@ -519,7 +602,44 @@ export function clearSwellLattice(): void {
  *   because that is what the shader does.
  */
 export function seaSwellAt(wx: number, wz: number, depth: number): number {
-  if (!lattice) return rawSwell(wx, wz, depth);
+  return sampled(wx, wz, depth, null);
+}
+
+/**
+ * THE SLOW HALF OF THE VERY SAME SEA — the camera's reference, and
+ * nothing else's.
+ *
+ * NOT A SECOND SURFACE. It is `seaSwellAt` with each component scaled
+ * by `heaveGain`, evaluated from the same table at the same instant
+ * through the same mesh, so it cannot drift from the water it is a
+ * slice of: sum the heave and the chop and you have the sea back
+ * exactly. Where the water physically IS remains `seaSwellAt`, which
+ * is what the renderer draws, what she floats on, what the surf and
+ * the orbital current read, and what the submersion test asks.
+ */
+export function seaHeaveAt(wx: number, wz: number, depth: number): number {
+  return sampled(wx, wz, depth, heaveGains);
+}
+
+/**
+ * The FAST half — what the camera should not copy.
+ *
+ * The camera subtracts this from her height instead of filtering its
+ * own over time. Subtraction is exact and instant: she floats exactly
+ * on the surface (wading.ts seats her at depth minus draught with no
+ * dynamics of its own), so taking the chop off her leaves the heave
+ * she is riding plus whatever she is doing deliberately, with no lag
+ * to be caught out by and nothing to re-seed.
+ */
+export function seaChopAt(wx: number, wz: number, depth: number): number {
+  return sampled(wx, wz, depth, null) - sampled(wx, wz, depth, heaveGains);
+}
+
+/** The lattice-aware sampler behind all three. */
+function sampled(
+  wx: number, wz: number, depth: number, gains: number[] | null,
+): number {
+  if (!lattice) return rawSwell(wx, wz, depth, gains);
   const { ox, oz, cell } = lattice;
   const fx = (wx - ox) / cell;
   const fz = (wz - oz) / cell;
@@ -530,7 +650,7 @@ export function seaSwellAt(wx: number, wz: number, depth: number): number {
   const corner = (cx: number, cz: number): number => {
     const x = ox + cx * cell;
     const z = oz + cz * cell;
-    return rawSwell(x, z, -groundHeight(x, z));
+    return rawSwell(x, z, -groundHeight(x, z), gains);
   };
   const a = corner(ix, iz);
   const b = corner(ix + 1, iz);

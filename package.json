@@ -1,7 +1,7 @@
 {
   "name": "traddomium-micro-battle",
   "private": true,
-  "version": "0.0.105",
+  "version": "0.0.106",
   "type": "module",
   "scripts": {
     "probe:waterlab": "node scripts/probe-waterlab.mjs",
@@ -42,7 +42,8 @@
     "probe:seastage": "node scripts/probe-seastage.mjs",
     "measure:sea": "vite-node scripts/measure-stagec.ts",
     "measure:breaker": "vite-node scripts/measure-staged.ts",
-    "probe:breaker": "node scripts/probe-breaker.mjs"
+    "probe:breaker": "node scripts/probe-breaker.mjs",
+    "measure:camera": "vite-node scripts/measure-stagee.ts"
   },
   "dependencies": {
     "three": "^0.180.0"
