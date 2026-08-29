@@ -1,0 +1,38 @@
+<?xml version="1.0"?>
+<?xml-stylesheet type="text/xsl" href="/rss/ndbcrss.xsl"?>
+<rss version="2.0" xmlns:georss="http://www.georss.org/georss" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>NDBC - Station NWWH1 - 1611400 - Nawiliwili, HI Observations</title>
+    <description><![CDATA[This feed shows recent marine weather observations from Station NWWH1.]]></description>
+    <link>https://www.ndbc.noaa.gov/</link>
+    <pubDate>Sat, 29 Aug 2026 04:35:54 +0000</pubDate>
+    <lastBuildDate>Sat, 29 Aug 2026 04:35:54 +0000</lastBuildDate>
+    <ttl>30</ttl>
+    <language>en-us</language>
+    <managingEditor>webmaster.ndbc@noaa.gov (NDBC Webmaster)</managingEditor>
+    <webMaster>webmaster.ndbc@noaa.gov (NDBC Webmaster)</webMaster>
+    <image>
+      <url>https://www.ndbc.noaa.gov/images/noaa_nws_xml_logo.gif</url>
+      <title>NDBC - Station NWWH1 - 1611400 - Nawiliwili, HI Observations</title>
+      <link>https://www.ndbc.noaa.gov/</link>
+    </image>
+    <atom:link href="https://www.ndbc.noaa.gov/data/latest_obs/nwwh1.rss" rel="self" type="application/rss+xml" />
+    <item>
+      <pubDate>Sat, 29 Aug 2026 04:35:54 +0000</pubDate>
+      <title>Station NWWH1 - 1611400 - Nawiliwili, HI</title>
+      <description><![CDATA[
+        <strong>August 28, 2026 6:00 pm HAST</strong><br />
+        <strong>Location:</strong> 21.954N 159.353W<br />
+        <strong>Wind Direction:</strong> NE (50&#176;)<br />
+        <strong>Wind Speed:</strong> 13.0 knots<br />
+        <strong>Wind Gust:</strong> 18.1 knots<br />
+        <strong>Atmospheric Pressure:</strong> 29.94 in (1013.8 mb)<br />
+        <strong>Pressure Tendency:</strong> -0.01 in (-0.3 mb)<br />
+        <strong>Water Temperature:</strong> 82.6&#176;F (28.1&#176;C)<br />
+      ]]></description>
+      <link>https://www.ndbc.noaa.gov/station_page.php?station=nwwh1</link>
+      <guid isPermaLink="false">NDBC-NWWH1-20260829040000</guid>
+      <georss:point>21.954 -159.353</georss:point>
+    </item>
+  </channel>
+</rss>
