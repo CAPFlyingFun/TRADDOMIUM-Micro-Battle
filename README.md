@@ -69,6 +69,10 @@ water and returns the report `__island.waveState()` also gives.
 steepness, shoaling); `npm run probe:seastage` is the on-device half
 (frame cost and screenshots, needs a preview server).
 
+The shore's depth-limited breaking envelope applies to both seas and is
+measured by `npm run measure:breaker`; `npm run probe:breaker <tag>`
+photographs the surf zone so two builds can be put side by side.
+
 ## Commands
 
 ```

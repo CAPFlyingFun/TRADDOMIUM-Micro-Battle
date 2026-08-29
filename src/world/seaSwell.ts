@@ -76,21 +76,124 @@ export const SWASH_HI = 34;
 export const KEEL = 4;
 
 /**
- * How much this depth multiplies the table's amplitudes. The GLSL in
- * shoalChunk() computes exactly this; if one changes the other must.
+ * WATER CANNOT HOLD A WAVE TALLER THAN ITSELF.
+ *
+ * Green's law above is only half the shore. It grows a wave as the
+ * bottom rises and has no opinion about whether the water it is
+ * growing in could physically carry the result — so left alone it
+ * produced, measured at Stage C, a crest standing 1.85 m over half a
+ * metre of water. That is not a big wave, it is an impossible one.
+ *
+ * The classic breaker index closes it: a wave breaks when its HEIGHT
+ * approaches about 0.78 of the depth (McCowan's solitary-wave limit,
+ * near enough for a beach and the number every surf-zone model starts
+ * from). Height is twice amplitude, so the surface may stand at most
+ * 0.39 of the depth from mean — and in the saturated inner surf zone
+ * real waves sit ON that line rather than under it, which is why the
+ * envelope asymptotes to it instead of stopping short.
+ *
+ * WHY IT IS SMOOTH. A hard `min` of the two is a crease: the whole
+ * shoreline would carry a ring at the depth where the branch flips,
+ * and a queen crossing it would see the sea change slope in a step.
+ * This is a soft minimum instead —
+ *
+ *     shoal = green * limit / (green^n + limit^n)^(1/n)
+ *
+ * — which is smooth everywhere, never exceeds either input, and at
+ * n = 4 is within 1.5% of Green's law until the limit is close.
+ * Offshore, where the limit is forty times the wave, the departure is
+ * one part in ten million: the deep sea is not touched.
+ *
+ * A FUNCTION OF STILL-WATER DEPTH, deliberately. If the limit read the
+ * live column — the bed plus the wave standing on it — it would
+ * modulate itself at wave rate and the sea would breathe. The bed does
+ * not move within a frame, so neither does the envelope.
  */
-export function shoalAt(depth: number): number {
+export const BREAKER_INDEX = 0.78;
+/** The same limit as an AMPLITUDE — half the height. */
+export const BREAKER_AMPLITUDE = BREAKER_INDEX / 2;
+/** How sharply the envelope turns onto the limit. Higher is tighter. */
+export const BREAK_SOFTNESS = 4;
+
+/**
+ * Green's law alone — what the shoaling WANTS, before the water gets
+ * a say. Kept public because "how much of the wave the depth took
+ * away" is the surf zone's own definition (see `brokenAt`), and it
+ * cannot be read off the capped answer by itself.
+ */
+export function greenShoalAt(depth: number): number {
   const grown = Math.pow(REFERENCE_DEPTH / Math.max(depth, 30), 0.25);
   const capped = Math.min(SHOAL_CAP, Math.max(1, grown));
   const t = Math.min(1, Math.max(0, (depth - SWASH_LO) / (SWASH_HI - SWASH_LO)));
   return capped * (t * t * (3 - 2 * t));
 }
 
-/** The same, as GLSL, from a `depth` in scope into `shoal`. */
+/** The tallest the surface may stand here, world units from mean. */
+export function breakerAmplitudeAt(depth: number): number {
+  return BREAKER_AMPLITUDE * Math.max(0, depth);
+}
+
+/** Soft minimum — see the comment above BREAKER_INDEX. */
+function softMin(a: number, b: number): number {
+  const n = BREAK_SOFTNESS;
+  const sum = Math.pow(a, n) + Math.pow(b, n);
+  if (sum <= 0) return 0;
+  return (a * b) / Math.pow(sum, 1 / n);
+}
+
+/**
+ * How much this depth multiplies the table's amplitudes — Green's law
+ * grown into the depth limit. The GLSL in shoalChunk() computes
+ * exactly this; if one changes the other must, and
+ * tests/breaker.test.ts holds them together across the whole shore.
+ */
+export function shoalAt(depth: number): number {
+  const green = greenShoalAt(depth);
+  if (green <= 0) return 0;
+  const peak = swellAmplitude();
+  if (peak <= 0) return green;
+  // The limit expressed in the same units as `green`: the multiplier
+  // that would put the table exactly on the breaking line.
+  return softMin(green, breakerAmplitudeAt(depth) / peak);
+}
+
+/**
+ * HOW MUCH OF THE WAVE THE DEPTH TOOK, 0 to 1 — the surf zone's own
+ * measure of itself.
+ *
+ * Nought where the water is deep enough to carry the whole wave, one
+ * where the depth is holding nearly all of it down. The energy the
+ * envelope removes has not vanished; it is what surf.ts spends as a
+ * shoreward bore, so the same number that flattens the geometry is the
+ * number that drives the surge.
+ */
+export function brokenAt(depth: number): number {
+  const green = greenShoalAt(depth);
+  if (green <= 0) return 0;
+  return Math.min(1, Math.max(0, 1 - shoalAt(depth) / green));
+}
+
+/**
+ * The same, as GLSL, from a `depth` in scope into `shoal`.
+ *
+ * The peak amplitude is BAKED rather than sent as a uniform because it
+ * cannot change within a generation: wave groups move each component's
+ * live amplitude (that is `uWaveAmp`), but the envelope this cap is
+ * built from is the generation's own peak, and a new generation
+ * rebuilds the material anyway.
+ */
 export function shoalChunk(): string {
+  const peak = Math.max(swellAmplitude(), 1e-6);
+  const n = BREAK_SOFTNESS.toFixed(1);
   return `
-          float shoal = clamp(pow(${REFERENCE_DEPTH.toFixed(1)} / max(depth, 30.0), 0.25), 1.0, ${SHOAL_CAP.toFixed(2)})
-            * smoothstep(${SWASH_LO.toFixed(1)}, ${SWASH_HI.toFixed(1)}, depth);`;
+          float green = clamp(pow(${REFERENCE_DEPTH.toFixed(1)} / max(depth, 30.0), 0.25), 1.0, ${SHOAL_CAP.toFixed(2)})
+            * smoothstep(${SWASH_LO.toFixed(1)}, ${SWASH_HI.toFixed(1)}, depth);
+          // Water cannot hold a wave taller than itself — see seaSwell.ts.
+          float breakLimit = ${BREAKER_AMPLITUDE.toFixed(4)} * max(depth, 0.0) / ${peak.toFixed(4)};
+          float softSum = pow(green, ${n}) + pow(breakLimit, ${n});
+          float shoal = softSum > 0.0
+            ? green * breakLimit * pow(softSum, ${(-1 / BREAK_SOFTNESS).toFixed(4)})
+            : 0.0;`;
 }
 
 export interface Wave {
@@ -151,9 +254,14 @@ const DEFAULT_WAVES: readonly Wave[] = [
 /**
  * The table's own amplitude sum, BEFORE any shoaling — half the wave
  * height out where the amplitudes are honest (REFERENCE_DEPTH).
+ *
+ * CACHED, because `shoalAt` asks for it and `shoalAt` is asked per
+ * lattice corner per query. Computing it means sampling every
+ * component's envelope for its peak, which is fine once a generation
+ * and ruinous several thousand times a frame.
  */
 export function swellAmplitude(): number {
-  return waves.reduce((sum, w) => sum + w.amp * peakEnvelope(w), 0);
+  return peakSum;
 }
 
 /** The most the surface can ever leave sea level, either way. */
@@ -218,8 +326,16 @@ export function setWaveTable(table: readonly Wave[] | null): void {
   waves = table && table.length > 0 ? table : DEFAULT_WAVES;
   liveAmp = waves.map((w) => w.amp);
   SWELL_AMP_UNIFORM.value = liveAmp.slice();
+  // The generation's peak, measured once. It is what the depth limit
+  // is written against, so it must not wander within a generation —
+  // an envelope that moved the cap would move the whole shoreline
+  // with it, at group rate.
+  peakSum = waves.reduce((sum, w) => sum + w.amp * peakEnvelope(w), 0);
   refreshAmplitudes();
 }
+
+/** @see swellAmplitude. Set only by setWaveTable. */
+let peakSum = DEFAULT_WAVES.reduce((sum, w) => sum + w.amp, 0);
 
 /** The table in force, for probes and reports. */
 export function activeWaves(): readonly Wave[] {

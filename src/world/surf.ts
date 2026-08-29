@@ -40,7 +40,8 @@
  * wave cycles.
  */
 import {
-  seaOrbitalAt, shoalAt, swellAmplitude, swellReach,
+  BREAKER_INDEX, brokenAt, greenShoalAt, seaOrbitalAt, swellAmplitude,
+  swellReach,
 } from './seaSwell';
 import { groundHeight } from './heightfield';
 
@@ -61,19 +62,25 @@ export const BACKWASH = 0.4;
  * Where the orbital flow gives way to a breaking surge, DERIVED.
  *
  * A wave breaks when its height approaches the depth it is in, and the
- * classic breaker index is about 0.78 of it. So this is not a number to
- * pick: the swell already decided it, and reading it off the live
- * shoaled height means changing the sea changes where it breaks rather
- * than leaving a stale constant behind claiming otherwise.
+ * classic breaker index is about 0.78 of it. So this is not a number
+ * to pick: the swell already decided it. The constant now LIVES in
+ * seaSwell, because the same index that says where the water breaks is
+ * the one that says how tall the water will let the wave stand — two
+ * copies of it would be the two-answers disease with a physical name.
  */
-export const BREAKER_INDEX = 0.78;
+export { BREAKER_INDEX };
 
 /**
- * The depth this water breaks in, given how much the shoaling has
- * already grown the wave here. Crest-to-trough height over the index.
+ * The depth this water breaks in — crest-to-trough height over the
+ * index, read from what Green's law WANTS here rather than from what
+ * the depth allowed. That is the point of it: it answers "how much
+ * water would this wave need", so comparing it against the water
+ * actually present is what tells you the wave is breaking. Reading it
+ * off the capped height instead would answer "exactly the depth it is
+ * in" everywhere in the surf and say nothing at all.
  */
 export function breaksAt(depth: number): number {
-  return (2 * swellAmplitude() * shoalAt(depth)) / BREAKER_INDEX;
+  return (2 * swellAmplitude() * greenShoalAt(depth)) / BREAKER_INDEX;
 }
 
 const STILL = { x: 0, z: 0 } as const;
@@ -116,7 +123,17 @@ export function surfFlowAt(
   const orbit = seaOrbitalAt(wx, wz, depth);
   // How far past breaking this water is: nought out where the wave is
   // still a wave, one where it has entirely become a bore.
-  const broken = 1 - Math.min(1, depth / breaksAt(depth));
+  //
+  // READ OFF THE DEPTH LIMIT ITSELF. This used to be
+  // `1 - depth / breaksAt(depth)`, which asked whether the wave was
+  // taller than the water would allow. Now that seaSwell does not let
+  // it BE taller, that comparison sits at the line for the whole surf
+  // zone and answers nothing. The height the envelope took away is the
+  // same quantity and survives the fix — energy the wave no longer
+  // carries as a wave is exactly the energy running up the beach as a
+  // bore — and it engages over the same band and smoothly, which the
+  // subtraction did not.
+  const broken = brokenAt(depth);
   // THE COMMON CASE COSTS NOTHING EXTRA. Open water is not breaking,
   // and returning here is what keeps the four extra ground samples
   // below inside the surf zone where they are actually needed — this

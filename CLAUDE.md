@@ -146,6 +146,17 @@ he likes most about the build.
 frame against a no-foam control at altitude and in the surf. Run it after
 touching anything the water reads.
 
+ONE SANCTIONED DEPARTURE, v0.0.105 (Stage D, at Joshua's instruction).
+Water cannot hold a wave taller than itself, so the shore now carries a
+depth-limited breaking envelope: the surface may stand at most 0.39 of
+the depth. That is physics, it applies to BOTH seas, and it does change
+the shipped ocean — but only in water shallower than about 1.5 m, where
+it was drawing a 0.9 m wave over 30 cm of sand. Everything from 1.5 m
+out — the whole of what the accepted frames show — is untouched, and
+the foam probe measures the same surf to within its noise. The envelope
+is a soft minimum, so it can only ever LOWER the water: nothing that
+keys off surface height can be made to happen more often by it.
+
 Known and deliberately NOT optimised yet: the water fragment shader runs
 four ripple octaves in two flow phases, about eight ordinary ripple
 samples per water fragment, before any distance fade. It is the likely
