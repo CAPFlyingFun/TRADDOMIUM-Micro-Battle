@@ -187,6 +187,35 @@ a unit test behind it — push without asking, as before.
 
 (Joshua's standing instruction, 2026-08-24.)
 
+## Probes cost time — use the smallest thing that answers the question
+
+**Standing rule (Joshua, 2026-08-29).** Do NOT run every available
+probe for every fix. The headless renderer manages about a frame and a
+half a second, so a full probe sweep costs many minutes and most of it
+answers nothing about the change in hand.
+
+For an obvious or local regression: read the code and its history
+first, name the invariant that was actually violated, make the smallest
+correction, then run the TARGETED tests plus typecheck and build. Add
+one focused measurement only if it materially helps.
+
+Reserve the long render probes for:
+
+- renderer / physics synchronisation changes
+- water, terrain or LOD changes where a visual regression could hide
+- an uncertain root cause
+- final verification of a stage
+- anything a targeted test genuinely cannot establish
+
+A probe is not justified by existing. `probe:foamsphere` after a change
+to a camera constant is a several-minute measurement of something the
+change cannot reach — that happened in v0.0.107 and is the example this
+rule is written from.
+
+And when the only question left is how it FEELS or LOOKS on the device,
+stop after the technical verification and ask Joshua to test it. Do not
+spend time trying to prove visual acceptance numerically.
+
 ## Git and collaboration
 
 - Inspect current main and Trello before writing; don't duplicate work
