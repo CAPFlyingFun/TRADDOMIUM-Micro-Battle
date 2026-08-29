@@ -16,6 +16,9 @@ import { readFileSync } from 'node:fs';
 import { makeWaterLook } from '../src/world/waterLook';
 import { resetSwell } from '../src/world/seaSwell';
 import { useFixedSea, useProceduralSea } from '../src/world/liveSea';
+import { FRESH_EDGE_HI, FRESH_EDGE_LO } from '../src/world/IslandWater';
+import { DRAUGHT, FOOTING, wadeAt } from '../src/ant/wading';
+import { useWaterQuery } from '../src/world/waterQuery';
 
 /**
  * The look loads a foam texture, which wants a DOM. The suite runs
@@ -130,5 +133,161 @@ describe('fresh water does not carry her', () => {
       .replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
     expect(src).toContain('const g = groundHeight(wx, wz);');
     expect(src).toContain('if (g < 0)');
+  });
+});
+
+describe('and its skin does not drift either', () => {
+  it('writes a still flow into every vertex', () => {
+    // THE OTHER HALF OF THE SAME FAULT. Gameplay flow was zeroed in
+    // `spotAt` while `update` went on feeding the vertex attribute the
+    // raw solver velocity, so the pond still LOOKED like it was
+    // running at the very numbers that had been rejected as a current.
+    // Water that does not move her must not look like it is moving.
+    const src = readFileSync('src/world/IslandWater.ts', 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+    const up = src.slice(src.indexOf('update('));
+    const body = up.slice(0, up.indexOf('\n  }'));
+    expect(body).toContain('this.flowAttr[i * 2] = 0;');
+    expect(body).toContain('this.flowAttr[i * 2 + 1] = 0;');
+    expect(body).not.toContain('this.sim.velocity(');
+  });
+
+  it('and is not quietly given the wind instead', () => {
+    // No current means NO current. A pond's skin drifting on a breeze
+    // would be a second invented current wearing a better hat, and the
+    // instruction was explicit that it must not be tied to wind.
+    const src = readFileSync('src/world/IslandWater.ts', 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+    expect(src).not.toMatch(/\bwind\b/i);
+  });
+
+  it('while the sim still runs, because it says where water IS', () => {
+    // Not a deletion of the hydrology — a refusal to let its velocity
+    // move anything until there is a stream model worth the name.
+    const src = readFileSync('src/world/IslandWater.ts', 'utf8');
+    expect(src).toContain('this.sim.step(');
+    expect(src).toContain('this.sim.depth');
+  });
+});
+
+describe('the drawn shoreline and the one she walks are the same line', () => {
+  /** What the fragment shader's `edge` smoothstep answers at a depth. */
+  const alphaAt = (depth: number): number => {
+    const t = Math.min(1, Math.max(0,
+      (depth - FRESH_EDGE_LO) / (FRESH_EDGE_HI - FRESH_EDGE_LO)));
+    return t * t * (3 - 2 * t);
+  };
+
+  it('draws water before it floats her, never after', () => {
+    // THE BUG, AS A NUMBER. The feather used to open at 1.5 units and
+    // finish at 8, while she leaves the bed at FOOTING = 0.4. Traced
+    // on a real order-5 trunk: sim depths of 0.56 to 1.39 reported
+    // `afloat: true` with `above` up to 1.24 — and 0% alpha. She rose
+    // off the bed and dropped from wade pace to paddle pace on water
+    // that was not drawn at all, which from the player's side is a
+    // stop short of the visible shore. Nothing blocked her; the two
+    // shorelines were simply different places.
+    expect(FRESH_EDGE_LO).toBeLessThan(FOOTING);
+    expect(alphaAt(FOOTING)).toBeGreaterThan(0.5);
+  });
+
+  it('shows the film she wades through', () => {
+    // A millimetre and a half — the depth off Joshua's screenshot, and
+    // her own draught. Faint, but there: she is meant to see what she
+    // is walking in before it takes her feet off the ground.
+    expect(alphaAt(DRAUGHT)).toBeGreaterThan(0.15);
+    expect(alphaAt(DRAUGHT)).toBeLessThan(0.5);
+  });
+
+  it('is water outright at exactly the depth that floats her', () => {
+    // The pairing, pinned. `world` does not import from `ant`, so the
+    // two constants are written out separately — and if FOOTING ever
+    // moves, this is what says the drawn shoreline has to move too.
+    expect(FRESH_EDGE_HI).toBe(FOOTING);
+    expect(alphaAt(FOOTING)).toBe(1);
+  });
+
+  it('reaches the shader at full precision, not rounded to nothing', () => {
+    // A fifth of a millimetre printed to one decimal is 0.0, which
+    // would put the drawn edge back at zero depth and undo the pairing
+    // above without changing a constant. So the feather is emitted to
+    // three places, and this is what says so.
+    const look = makeWaterLook({
+      green: 1, surf: 0.15, sink: false, ocean: false,
+      edgeLo: FRESH_EDGE_LO, edgeHi: FRESH_EDGE_HI, midAt: 70, deepAt: 260,
+      texAmp: 0.2, anisotropy: 1,
+    });
+    const shader = {
+      uniforms: {} as Record<string, { value: unknown }>,
+      vertexShader: '#include <common>\nvoid main(){\n#include <begin_vertex>\n}',
+      fragmentShader: '#include <common>\n#include <map_fragment>\n'
+        + '#include <normal_fragment_maps>\n#include <lights_fragment_end>',
+      defines: {},
+    };
+    (look.material.onBeforeCompile as unknown as (s: typeof shader) => void)(shader);
+    expect(shader.fragmentShader)
+      .toContain(`smoothstep(${FRESH_EDGE_LO.toFixed(3)}, ${FRESH_EDGE_HI.toFixed(3)}, depth)`);
+  });
+
+  it('is what the material is actually built with', () => {
+    // The constants are only worth testing if the shader reads them.
+    const src = readFileSync('src/world/IslandWater.ts', 'utf8');
+    expect(src).toContain('edgeLo: FRESH_EDGE_LO, edgeHi: FRESH_EDGE_HI');
+  });
+
+  it('leaves the OCEAN\'s feather alone — a beach shelves fast', () => {
+    const src = readFileSync('src/world/Ocean.ts', 'utf8');
+    expect(src).toContain('edgeLo: 35');
+    expect(src).toContain('edgeHi: 95');
+  });
+});
+
+describe('she can cross the shoreline without a wall in it', () => {
+  const ramp = (depth: number) =>
+    useWaterQuery(() => ({ depth, flowX: 0, flowZ: 0 }));
+  afterEach(() => useWaterQuery(null));
+
+  it('keeps her walking, slower, through the whole film', () => {
+    // The rule Joshua set: a shallow visible film is fine to WADE
+    // rather than float, but she must still be able to MOVE through
+    // it. Pace is a ceiling, never zero, and she stays on the bed.
+    let last = 1;
+    for (const d of [0.02, 0.05, 0.1, 0.2, 0.3, 0.39]) {
+      ramp(d);
+      const w = wadeAt(0, 0);
+      expect(w.afloat).toBe(false);
+      expect(w.above).toBe(0);
+      expect(w.pace).toBeGreaterThan(0.4);
+      expect(w.pace).toBeLessThanOrEqual(last);
+      last = w.pace;
+    }
+  });
+
+  it('lifts her onto the surface without a jump', () => {
+    // Continuity at the float line is what makes it a transition
+    // rather than a step: at FOOTING she is a millimetre and a half
+    // under the surface, so `above` opens from a quarter of a
+    // millimetre, not from a leap.
+    ramp(FOOTING - 1e-6);
+    expect(wadeAt(0, 0).afloat).toBe(false);
+    ramp(FOOTING);
+    const on = wadeAt(0, 0);
+    expect(on.afloat).toBe(true);
+    expect(on.above).toBeCloseTo(FOOTING - DRAUGHT, 9);
+    expect(on.above).toBeLessThan(0.3);
+    // And she is drawn on water that is two thirds there by then.
+    expect(on.pace).toBeGreaterThan(0);
+  });
+
+  it('and the water she floats on is water she can see', () => {
+    // The acceptance, stated once: there is no depth at which she is
+    // afloat over an invisible surface.
+    for (const d of [FOOTING, 0.5, 1, 4, 40]) {
+      ramp(d);
+      expect(wadeAt(0, 0).afloat).toBe(true);
+      const t = Math.min(1, Math.max(0,
+        (d - FRESH_EDGE_LO) / (FRESH_EDGE_HI - FRESH_EDGE_LO)));
+      expect(t * t * (3 - 2 * t)).toBeGreaterThan(0.5);
+    }
   });
 });

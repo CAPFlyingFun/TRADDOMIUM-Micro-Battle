@@ -71,6 +71,41 @@ const CELL = 100;
 const RECENTRE = 6_400;
 /** Depth below which water is not drawn. The sim keeps its film. */
 const DRAWN = 1.5;
+
+/**
+ * WHERE FRESH WATER STARTS BEING DRAWN — and it has to meet the depth
+ * she starts FLOATING at, or the two shorelines are different places.
+ *
+ * Traced on a real order-5 trunk, and the numbers were plain: she
+ * floats at FOOTING, four millimetres, while the surface used to fade
+ * in from fifteen and only reach full body at eighty. Between those
+ * lies a band — wide, because the ground there is nearly flat — in
+ * which she was lifted off the bed and dropped to paddling pace on
+ * water that was drawn at ZERO alpha. From the player's side she stops
+ * walking and starts swimming at an invisible line, short of the water
+ * they can actually see. Nothing was blocking her; there is no
+ * collision here and no step limit. The shorelines simply disagreed.
+ *
+ * So the film is drawn from the moment it is a film — a fifth of a
+ * millimetre — and it is FULLY water at exactly the depth that takes
+ * her feet off the bed. At the millimetre and a half off Joshua's
+ * screenshot it is a quarter-strength sheen she wades through; at
+ * four millimetres it is water and she is floating on it. The rule he
+ * set (dry land, then a shallow visible film she can walk through,
+ * then a continuous transition onto the surface) is a statement about
+ * those two numbers agreeing, and this is them agreeing.
+ *
+ * FRESH_EDGE_HI is FOOTING from `ant/wading`, deliberately written
+ * out rather than imported: nothing in `world` reaches into `ant`,
+ * and the pairing is pinned by test instead (freshwater.test.ts). If
+ * FOOTING moves, that test fails and this must move with it.
+ *
+ * The OCEAN's feather is its own (Ocean.ts, 35..95) and is untouched:
+ * a beach shelves away fast enough that its band is a narrow strip,
+ * which is exactly what an inland flat is not.
+ */
+export const FRESH_EDGE_LO = 0.02;
+export const FRESH_EDGE_HI = 0.4;
 /**
  * Water put into a surveyed river cell, per second, per Strahler order.
  *
@@ -235,7 +270,7 @@ export class IslandWater {
     // pond. `surf` keeps the ordinary waterline foam a lake bank has;
     // what it must not have is the Pacific's wave table deciding where
     // its crests are. See waterLook's `ocean`.
-    const look = makeWaterLook({ green: 1, surf: 0.15, sink: false, ocean: false, edgeLo: 1.5, edgeHi: 8, midAt: 70, deepAt: 260, texAmp: 0.20, anisotropy: this.anisotropy });
+    const look = makeWaterLook({ green: 1, surf: 0.15, sink: false, ocean: false, edgeLo: FRESH_EDGE_LO, edgeHi: FRESH_EDGE_HI, midAt: 70, deepAt: 260, texAmp: 0.20, anisotropy: this.anisotropy });
     this.clockRef = look.clock;
     this.centreRef = look.centre;
     return look.material;
@@ -382,14 +417,21 @@ export class IslandWater {
       // same rule the query already follows (see the constructor).
       this.depthAttr[i] = this.base[i] < 0 ? 0 : d;
       this.pos[i * 3 + 1] = this.base[i] + d * relief;
-      // The CURRENT under every vertex, so the skin drifts at the
-      // water's own speed — Joshua: "water speed as the water moves".
-      // Dry cells keep their last flow; their pixels are discarded.
-      if (d > 0) {
-        const v = this.sim.velocity(i % N, (i / N) | 0);
-        this.flowAttr[i * 2] = v.vx;
-        this.flowAttr[i * 2 + 1] = v.vz;
-      }
+      // THE SKIN DOES NOT DRIFT EITHER — the other half of the same
+      // fault. Gameplay flow was zeroed in `spotAt` and this was left
+      // writing the raw solver velocity into the vertex attribute, so
+      // the freshwater surface went on advecting at the very numbers
+      // that had been rejected as a current: flux over depth, which
+      // divides out to metres a second on a millimetre of film. Water
+      // that does not move her must not look like it is moving.
+      //
+      // The hydrology still runs — it is what decides where water IS,
+      // and that has never been in question. What it does not do,
+      // until there is a stream-flow model worth the name, is move
+      // anything. NOT tied to wind: a pond's skin drifting on a breeze
+      // would be a second invented current wearing a better hat.
+      this.flowAttr[i * 2] = 0;
+      this.flowAttr[i * 2 + 1] = 0;
     }
     const g = this.mesh.geometry;
     g.getAttribute('position').needsUpdate = true;

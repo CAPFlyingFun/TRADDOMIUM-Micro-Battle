@@ -314,7 +314,10 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
           // threshold cut the waterline like scissors against the
           // beach; the terrain never does that — its bands feather.
           float depth = vDepth;
-          float edge = smoothstep(${opts.edgeLo.toFixed(1)}, ${opts.edgeHi.toFixed(1)}, depth);
+          // Three decimals, not one: the fresh feather opens at a fifth
+          // of a millimetre, and rounding that to 0.0 would quietly
+          // move the drawn shoreline off the one locomotion uses.
+          float edge = smoothstep(${opts.edgeLo.toFixed(3)}, ${opts.edgeHi.toFixed(3)}, depth);
           // Films barely ripple; a body of water carries the full skin.
           gBody = smoothstep(0.0, 25.0, depth);
 
@@ -356,7 +359,7 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
           // COLOUR. Three stops, wide handovers — the wearer picks
           // where (midAt/deepAt), so the ramp spans several bathymetry
           // cells instead of collapsing inside one at the shelf break.
-          float toMid  = smoothstep(${opts.edgeLo.toFixed(1)}, ${opts.midAt.toFixed(1)}, depth);
+          float toMid  = smoothstep(${opts.edgeLo.toFixed(3)}, ${opts.midAt.toFixed(1)}, depth);
           float toDeep = smoothstep(${opts.midAt.toFixed(1)}, ${opts.deepAt.toFixed(1)}, depth);
           vec3 shallowCol = vec3(0.020, 0.34, 0.42);   // BE deep teal
           vec3 midCol     = vec3(0.012, 0.21, 0.36);   // the bridge
