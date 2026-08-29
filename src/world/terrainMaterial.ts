@@ -27,7 +27,7 @@ import type { LoadReport } from '../ui/loadPlan';
 import { assetBytes } from '../ui/assetSizes';
 import { GRAIN_SIZE } from './groundTexture';
 import { UNITS_PER_METRE } from './kauai';
-import { detailRadius } from './lod';
+import { LOD_QUEEN_UNIFORM, LOD_RADIUS_UNIFORM } from './lodShader';
 
 /**
  * World units per repeat of a band texture. About 10 cm — small enough
@@ -287,25 +287,19 @@ export const MAX_MIP_BIAS = 2;
  * why altitude quietly redefined it. Now the dial owns a radius, the
  * footprint owns a safeguard, and whichever wants LESS detail wins.
  */
-export const DETAIL_RADIUS_UNIFORM = { value: 1_000 };
 /**
- * Where the queen is, in RENDERED coordinates and in all three of
- * them — the same frame `vGround` is in, which is the only reason
- * this can be a subtraction in the shader. World coordinates would be
- * the floating-origin trap all over again (see setTextureOrigin).
+ * THE RADIUS AND THE QUEEN COME FROM THE BRIDGE NOW (lodShader.ts).
+ *
+ * They were terrain's own uniforms, and terrain was the only wearer
+ * of the sphere, so that was honest. The day the foam wanted the same
+ * sphere the obvious move was a second pair of uniforms holding "the
+ * same" number — which is precisely how two systems stop agreeing. So
+ * the objects live in one place and every wearer binds those; these
+ * aliases exist because this file's shader reads better with the
+ * names its GLSL uses.
  */
-export const QUEEN_UNIFORM = { value: new THREE.Vector3() };
-
-/**
- * THE SHADER'S COPY of the master radius (lod.ts owns the dial and
- * the arithmetic now — the radius stopped being terrain's private
- * number the day the foam wanted it too). The scene calls this once
- * a frame beside the QUEEN_UNIFORM copy; one assignment, and the
- * uniform can never drift from what the master answers.
- */
-export function syncDetailRadius(): void {
-  DETAIL_RADIUS_UNIFORM.value = detailRadius();
-}
+const DETAIL_RADIUS_UNIFORM = LOD_RADIUS_UNIFORM;
+const QUEEN_UNIFORM = LOD_QUEEN_UNIFORM;
 
 /**
  * The bias is RETIRED as an altitude trick — height must not redefine

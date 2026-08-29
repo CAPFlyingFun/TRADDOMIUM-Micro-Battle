@@ -14,9 +14,7 @@
  * that the bridge hands the shader the very same number.
  */
 import { beforeEach, describe, expect, it } from 'vitest';
-import {
-  DETAIL_RADIUS_UNIFORM, syncDetailRadius,
-} from '../src/world/terrainMaterial';
+import { LOD_RADIUS_UNIFORM, syncLodUniforms } from '../src/world/lodShader';
 import {
   detailRadius, METRES_PER_DIAL, resetLod, setDetailDial,
 } from '../src/world/lod';
@@ -25,8 +23,8 @@ import { UNITS_PER_METRE } from '../src/world/kauai';
 /** The radius the shader is using, in metres — through the bridge. */
 function metres(dial: number): number {
   setDetailDial(dial);
-  syncDetailRadius();
-  return DETAIL_RADIUS_UNIFORM.value / UNITS_PER_METRE;
+  syncLodUniforms();
+  return LOD_RADIUS_UNIFORM.value / UNITS_PER_METRE;
 }
 
 beforeEach(resetLod);
@@ -61,7 +59,7 @@ describe('the detail dial', () => {
 
   it('hands the shader exactly what the master answers', () => {
     setDetailDial(1.5);
-    syncDetailRadius();
-    expect(DETAIL_RADIUS_UNIFORM.value).toBe(detailRadius());
+    syncLodUniforms();
+    expect(LOD_RADIUS_UNIFORM.value).toBe(detailRadius());
   });
 });

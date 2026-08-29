@@ -16,6 +16,7 @@ import {
 import { findLandfall, UNITS_PER_METRE, type HeightGrid } from '../world/kauai';
 import { forceMicro, forceTier, setAnchor, setDetailDial } from '../world/lod';
 import { describeKnownSystems, lodAt, lodLine, lodReport } from '../world/lodProbe';
+import { syncLodUniforms } from '../world/lodShader';
 import { local, world, type WorldPoint } from '../world/coords';
 import { TerrainStream, TIER_CUTS } from '../world/TerrainStream';
 import { followHd, forgetHd, hdResident, onHdTile } from '../world/kauaiHd';
@@ -33,7 +34,7 @@ import { originAt, rebaseFor, setOrigin, toLocal, toWorld,
 import { bakeGrain, GRAIN_SIZE } from '../world/groundTexture';
 import {
   BAND_TILE, FADE_FROM_UNIFORM, FADE_TO_UNIFORM, setGroundMode,
-  QUEEN_UNIFORM, loadAuthored, loadBands, reliefUniform, syncDetailRadius,
+  loadAuthored, loadBands, reliefUniform,
   setDetailRange, setTileScale,
   setTextureOrigin, terrainMaterial,
 } from '../world/terrainMaterial';
@@ -444,7 +445,7 @@ export class IslandScene {
     // and nothing else.
     setDetailRange();
     setDetailDial(settings().detailRange);
-    syncDetailRadius();
+    syncLodUniforms();
     // The debug registry's picture of the coverage systems — replaced
     // by the same names when owners register themselves in later
     // stages, so calling it on every build stacks nothing.
@@ -536,7 +537,7 @@ export class IslandScene {
     // and nothing else.
     setDetailRange();
     setDetailDial(settings().detailRange);
-    syncDetailRadius();
+    syncLodUniforms();
       this.debugDie.show(settings().showFix);
     });
     this.debugDie.show(settings().showFix);
@@ -1638,14 +1639,16 @@ export class IslandScene {
     // redefined what the player had asked for; height has no vote
     // here now. Her RENDERED position, because the shader compares it
     // against rendered fragment positions.
-    QUEEN_UNIFORM.value.copy(this.ant.root.position);
     // THE MASTER ANCHOR, in world coordinates and all three axes —
     // wy is her rendered y unchanged, because the origin rebases in
     // x and z only. lod.ts is where every distance-graded system asks
-    // "how far is this from her" from now on; the uniform above is
-    // that answer's shader-side copy, synced in the same breath.
+    // "how far is this from her" from now on.
     setAnchor(at.wx, this.ant.root.position.y, at.wz, dt);
-    syncDetailRadius();
+    // …and its shader-side copy, in RENDERED coordinates, in the same
+    // breath: her position, the radius, and any debug force. Every
+    // wearer of the sphere — the ground, the sea's foam — binds these
+    // very objects (lodShader.ts), so one assignment moves them all.
+    syncLodUniforms(this.ant.root.position);
 
     // THE FINE GROUND FOLLOWS HER TOO. Fire-and-forget: a tile that has
     // not landed is answered by the coarse grid, which holds the same

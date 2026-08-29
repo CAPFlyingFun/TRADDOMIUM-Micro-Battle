@@ -104,13 +104,21 @@ Auto-Ant ×10 travel (~7 m/s) cannot outrun a load.
   fix toggle), `__island.lod()` / `lodAt` / `lodForce` / `lodForceTier`
   probe hooks (`lodProbe.ts`), dev force pins in the core, coverage
   systems described in the registry.
-- **Stage 2** — foam as first MICRO consumer. Acceptance includes
-  PERFORMANCE: outside the sphere the expensive foam texture work is
-  actually skipped where safely possible, not computed and multiplied
-  by zero. At ~166 m AGL: no lace, no fizz, no tiny whitecaps, no
-  detailed swash grain — a large simple surf indication may remain as
-  macro water look. **STOP for Joshua's visual verification after
-  Stage 2, before any bathymetry/ring work.**
+- **Stage 2** ✅ — foam is the first MICRO consumer. `lodShader.ts`
+  carries the sphere to the GPU (one shared pair of uniforms, bound by
+  both the ground and the sea); the water shader measures the queen to
+  the **rendered water surface** — swell displacement included — in
+  all three axes, and every foam ingredient rides that fraction. Past
+  the radius foam is zero of every kind, mean-coverage floors
+  included: no averaged pale far band. A cheap far-distance surf
+  indicator, if ever wanted, is a separate MACRO shoreline feature,
+  not something hidden inside the foam. The foam-specific samples sit
+  inside the branch, so the work is skipped rather than scaled to
+  nothing. Measured (`npm run probe:foamsphere`): at 159 m the shipped
+  frame is indistinguishable from a no-foam control and 9% cheaper per
+  frame; in the surf it is 17 luminance above that control and within
+  noise of the sphere-off control. **Awaiting Joshua's device visual
+  verification before any bathymetry/ring work.**
 - **Stage 3** — ground cover fade goes 3D.
 - **Later** — entity tracker with the first real population; coverage
   systems register constants; multiplayer relevance profiles.

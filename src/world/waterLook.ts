@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { KEEL, SWELL_REACH, shoalChunk, swellChunk } from './seaSwell';
+import { bindLodUniforms, lodUniformsChunk, microChunk } from './lodShader';
 
 /**
  * BEYOND EXTINCTION'S WATER, WORN BY THIS ISLAND — one shader for every
@@ -227,10 +228,14 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
     shader.uniforms.uSky = { value: sky };
     shader.uniforms.uHole = hole;
     shader.uniforms.uFoam = foamTex;
+    // The master LOD's sphere — one set of objects, shared with the
+    // terrain, so the two can never disagree about where she is or
+    // how far her detail reaches.
+    bindLodUniforms(shader.uniforms as Record<string, { value: unknown }>);
     const swell = opts.swell;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>',
-        '#include <common>\n attribute float depth;\n attribute vec2 flow;\n varying float vDepth;\n varying vec2 vWorld;\n varying vec2 vLocal;\n varying vec2 vFlow;\n uniform vec2 uCentre;'
+        '#include <common>\n attribute float depth;\n attribute vec2 flow;\n varying float vDepth;\n varying vec2 vWorld;\n varying vec2 vLocal;\n varying vec2 vFlow;\n varying vec3 vRender;\n uniform vec2 uCentre;'
         + (swell ? '\n varying vec2 vSwell;\n varying float vSheet;\n uniform float uTime;' : ''))
       .replace('#include <begin_vertex>',
         '#include <begin_vertex>\n vDepth = depth;\n vFlow = flow;\n vLocal = vec2(position.x, position.z);\n vWorld = vLocal + uCentre;'
@@ -258,13 +263,21 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
           transformed.y += lift;
           vSwell = swSlope * swFade;
           vSheet = length(position.xz);
-        }` : ''));
+        }` : '')
+        // THE SURFACE'S OWN RENDERED POSITION, all three axes and
+        // AFTER the swell has moved it — the master LOD sphere is
+        // measured to the water the player can actually see, not to
+        // the flat sheet it started as. Rendered rather than world
+        // coordinates because the queen's uniform is rendered too and
+        // float32 cannot hold five million; their difference is what
+        // the sphere reads, and a rebase moves both ends alike.
+        + '\n vRender = (modelMatrix * vec4(transformed, 1.0)).xyz;');
     // The ripple field is computed ONCE, in map_fragment (which three
     // runs before the normal and lighting stages), and handed to the
     // later stages through gRn/gBody — the colour weave, the normal
     // tilt and the surf caps all read the same water.
-    shader.fragmentShader = ('uniform float uTime;\nuniform sampler2D uRipple;\nuniform sampler2D uFoam;\nuniform vec3 uSky;\n' + shader.fragmentShader)
-      .replace('#include <common>', '#include <common>\n varying float vDepth;\n varying vec2 vWorld;\n varying vec2 vLocal;\n varying vec2 vFlow;\n uniform vec2 uCentre;\n uniform float uFoamLod;\n vec2 tiled(float T) { return (vLocal + mod(uCentre, vec2(T))) / T; }\n mat2 rrot(float a){ float c = cos(a); float s = sin(a); return mat2(c, -s, s, c); }\n vec3 gRn = vec3(0.0);\n float gBody = 0.0;'
+    shader.fragmentShader = ('uniform float uTime;\nuniform sampler2D uRipple;\nuniform sampler2D uFoam;\nuniform vec3 uSky;\n' + lodUniformsChunk() + '\n' + shader.fragmentShader)
+      .replace('#include <common>', '#include <common>\n varying float vDepth;\n varying vec2 vWorld;\n varying vec2 vLocal;\n varying vec2 vFlow;\n varying vec3 vRender;\n uniform vec2 uCentre;\n uniform float uFoamLod;\n vec2 tiled(float T) { return (vLocal + mod(uCentre, vec2(T))) / T; }\n mat2 rrot(float a){ float c = cos(a); float s = sin(a); return mat2(c, -s, s, c); }\n vec3 gRn = vec3(0.0);\n float gBody = 0.0;'
         + (swell ? '\n varying vec2 vSwell;\n varying float vSheet;' : '')
         + (opts.hole ? '\n uniform vec2 uHole;' : ''))
       .replace('#include <map_fragment>', `#include <map_fragment>
@@ -338,6 +351,33 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
           // normal relief. Fades with distance with everything else.
           diffuseColor.rgb *= 1.0 + (gRn.x + gRn.y) * ${opts.texAmp.toFixed(3)} * gBody * (1.0 - away);
 
+          // ── THE MASTER LOD SPHERE OWNS ALL OF THE FOAM ───────────
+          //
+          // Foam is the first MICRO consumer (docs/LOD_ARCHITECTURE).
+          // Distance is measured from the queen to THIS WATER SURFACE
+          // in all three axes — vRender carries the vertex the swell
+          // actually displaced — so a queen 166 m above a wave is 166 m
+          // from it and it earns nothing. Not planar, not the camera's
+          // distance, not the sheet's own radius: those were the three
+          // wrong rulers this architecture exists to retire.
+          //
+          // THE BRANCH IS THE POINT, not the multiply. Everything
+          // inside it is foam-specific: four texture samples, their
+          // derivatives, and the swell sum the breaker phase needs.
+          // Outside the sphere a fragment now SKIPS that work rather
+          // than computing it and scaling it to nothing, which is what
+          // makes this an LOD system rather than a fade. The ordinary
+          // water above — ripple octaves, colour, alpha, the normal —
+          // is untouched at every distance: this stage is about foam.
+          //
+          // Derivatives inside varying control flow are formally
+          // undefined, and harmless here by construction: the branch
+          // closes exactly where the feather reaches zero, so any
+          // fragment that could be affected is one whose foam is
+          // already being multiplied by ~0.
+          ${microChunk('vRender', 'micro')}
+          float foam = 0.0;
+          if (micro > 0.0) {
           // THE BREAK. The swell dies at the shore fade (seaSwell.ts)
           // and this is where its energy goes: foam fronts that MARCH
           // SHOREWARD on the swell's own beat. Phase runs on DEPTH, so
@@ -395,7 +435,7 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
           // gradients spread the foam over far more water instead, and
           // measured 40% WORSE at 166 m rather than better. Left alone.
           float surf = smoothstep(surfLo, surfHi, depth);
-          float foam = surf * mix(smoothstep(0.60, 0.86, surfN), 0.0098, speckGone);
+          foam = surf * mix(smoothstep(0.60, 0.86, surfN), 0.0098, speckGone);
           {
             // THE FOAM RIDES THE WAVE THAT MADE IT.
             //
@@ -492,6 +532,21 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
           float caps = smoothstep(0.75, 1.10, length(cn.xy))
             * smoothstep(0.55, 0.80, surfN) * (1.0 - fineGone);
           foam = clamp(foam + caps * 0.4, 0.0, 1.0);
+          // AND THE WHOLE OF IT RIDES THE SPHERE. Every ingredient at
+          // once — lace, fizz, speckle, breaker, swash, caps and the
+          // mean-coverage floors they fade to — so beyond the radius
+          // there is no foam of any kind left on the water, not even a
+          // pale averaged band. If the coastline later wants a cheap
+          // far-distance surf line it will be designed as a MACRO
+          // shoreline feature, not smuggled in here.
+          //
+          // TWO GATES, LESSER WINS: the three fineGone/laceGone/
+          // speckGone knees above are
+          // the screen-space safeguard and still simplify what a pixel
+          // cannot resolve INSIDE the sphere; this is the master's
+          // gate, and it is the one that reaches zero.
+          foam *= micro;
+          }
           diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.90, 0.95, 0.97), foam);
 
           // BE's clear-water alpha: see the sand at the waterline, a
