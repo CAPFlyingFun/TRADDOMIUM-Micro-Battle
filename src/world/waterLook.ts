@@ -51,6 +51,23 @@ export interface WaterLookOpts {
   /** Scales the surf/foam depth band. Ocean 1; inland much tighter. */
   readonly surf: number;
   /**
+   * THE SEA, AS OPPOSED TO A LAKE — an explicit flag, not a guess.
+   *
+   * The breaker foam is driven by the SWELL: it reads seaSwell's table
+   * so the foam appears on a crest's face and travels at the wave's own
+   * speed because it IS the wave. That is right for the ocean and
+   * nonsense inland, where there is no swell — and it was running
+   * everywhere, because the block was never gated. A pond on a
+   * hillside was being given breakers off the Pacific's wave table,
+   * and when Stage C's generated sea raised the swell's reach from 48
+   * units to 210 the inland water started reading like open ocean.
+   *
+   * Told rather than inferred: guessing from depth would call a deep
+   * lake the sea, and guessing from the wave table would make fresh
+   * water change character every time the buoy reported.
+   */
+  readonly ocean?: boolean;
+  /**
    * The feather band, in depth units: fully invisible at edgeLo of
    * column, fully itself at edgeHi — the way the ground textures
    * blend band into band instead of cutting.
@@ -217,7 +234,7 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
   // not at all.
   material.customProgramCacheKey = () => [
     'water', opts.swell ? 'swell' : '-', opts.hole ? 'hole' : '-',
-    opts.green, opts.surf, opts.edgeLo, opts.edgeHi,
+    opts.green, opts.surf, opts.ocean ? 'sea' : 'fresh', opts.edgeLo, opts.edgeHi,
     opts.midAt, opts.deepAt, opts.texAmp, opts.sink,
   ].join(':');
 
@@ -237,7 +254,12 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
     bindLodUniforms(shader.uniforms as Record<string, { value: unknown }>);
     // The sea's live amplitudes — where wave groups live. Shared by
     // both sheets and by the CPU queries, so one table moves them all.
-    bindSwellUniforms(shader.uniforms as Record<string, { value: unknown }>);
+    // The swell's amplitudes are the OCEAN's. Fresh water neither
+    // declares them nor binds them, so a pond's shader is the same
+    // shader whatever the buoy last reported.
+    if (opts.ocean) {
+      bindSwellUniforms(shader.uniforms as Record<string, { value: unknown }>);
+    }
     const swell = opts.swell;
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>',
@@ -282,7 +304,7 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
     // runs before the normal and lighting stages), and handed to the
     // later stages through gRn/gBody — the colour weave, the normal
     // tilt and the surf caps all read the same water.
-    shader.fragmentShader = ('uniform float uTime;\nuniform sampler2D uRipple;\nuniform sampler2D uFoam;\nuniform vec3 uSky;\n' + swellUniformChunk() + '\n' + lodUniformsChunk() + '\n' + shader.fragmentShader)
+    shader.fragmentShader = ('uniform float uTime;\nuniform sampler2D uRipple;\nuniform sampler2D uFoam;\nuniform vec3 uSky;\n' + (opts.ocean ? swellUniformChunk() : '') + '\n' + lodUniformsChunk() + '\n' + shader.fragmentShader)
       .replace('#include <common>', '#include <common>\n varying float vDepth;\n varying vec2 vWorld;\n varying vec2 vLocal;\n varying vec2 vFlow;\n varying vec3 vRender;\n uniform vec2 uCentre;\n uniform float uFoamLod;\n vec2 tiled(float T) { return (vLocal + mod(uCentre, vec2(T))) / T; }\n mat2 rrot(float a){ float c = cos(a); float s = sin(a); return mat2(c, -s, s, c); }\n vec3 gRn = vec3(0.0);\n float gBody = 0.0;'
         + (swell ? '\n varying vec2 vSwell;\n varying float vSheet;' : '')
         + (opts.hole ? '\n uniform vec2 uHole;' : ''))
@@ -442,7 +464,7 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
           // measured 40% WORSE at 166 m rather than better. Left alone.
           float surf = smoothstep(surfLo, surfHi, depth);
           foam = surf * mix(smoothstep(0.60, 0.86, surfN), 0.0098, speckGone);
-          {
+          ${opts.ocean ? `{
             // THE FOAM RIDES THE WAVE THAT MADE IT.
             //
             // This used to run its phase on DEPTH against the swell's
@@ -522,7 +544,7 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
             float wash = smoothstep(170.0 * ${opts.surf.toFixed(3)}, 95.0 * ${opts.surf.toFixed(3)}, depth)
               * (lace * 0.85 + fizz * 0.35) * pale;
             foam = clamp(foam + breaker + wash, 0.0, 1.0);
-          }
+          }` : ''}
           // Open-water caps. The wave map's slope energy runs in thin
           // crest LINES (Joshua's 1x1 m chop map, sd 19-34/255), and a
           // bare threshold paints those lines as white scratches. Gating

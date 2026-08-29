@@ -131,7 +131,10 @@ export class Ocean {
     // washed the beach out. The GRADUAL part he asked for lives
     // further out, in midAt/deepAt and the distance smear.
     const skin = {
-      green: 0, surf: 1, sink: true,
+      // THE SEA, said out loud. The breaker foam reads seaSwell's wave
+      // table, which is the ocean's and nobody else's — see
+      // waterLook's `ocean`.
+      green: 0, surf: 1, sink: true, ocean: true,
       // edgeHi 130 -> 95: the sheet reaches its full body sooner, so
       // the water's edge READS as an edge (Joshua: "make the line a
       // little more defined") while edgeLo keeps the geometric cut

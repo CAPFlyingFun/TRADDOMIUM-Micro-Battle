@@ -46,7 +46,7 @@ if (typeof (globalThis as { document?: unknown }).document === 'undefined') {
 /** Compile a wearer and hand back the source three.js would see. */
 function shaderFor(swell: boolean): { vertex: string; fragment: string } {
   const look = makeWaterLook({
-    green: 0, surf: 1, sink: true,
+    green: 0, surf: 1, sink: true, ocean: true,
     edgeLo: 35, edgeHi: 95, midAt: 700, deepAt: 2600,
     texAmp: 0.4, anisotropy: 1,
     ...(swell
@@ -168,7 +168,7 @@ describe('the emitted gate', () => {
 
   it('binds the shared uniform objects rather than copies', () => {
     const look = makeWaterLook({
-      green: 0, surf: 1, sink: true, edgeLo: 35, edgeHi: 95,
+      green: 0, surf: 1, sink: true, ocean: true, edgeLo: 35, edgeHi: 95,
       midAt: 700, deepAt: 2600, texAmp: 0.4, anisotropy: 1,
     });
     const shader = {

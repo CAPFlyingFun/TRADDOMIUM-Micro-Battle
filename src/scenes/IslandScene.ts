@@ -309,6 +309,8 @@ export class IslandScene {
   private dive = 0;
   /** Whether her feet are off the bottom, updated every on-foot frame. */
   private afloat = false;
+  /** The dive lever as pressed, un-eased — the camera's signal. */
+  private diveIntent = 0;
   /**
    * THE BUOY. Built here rather than reached for globally so the scene
    * owns its lifetime, and constructed even when the flag is off —
@@ -1416,6 +1418,15 @@ export class IslandScene {
       // lever"). And UP on the lever surfaces her FASTER than the
       // film alone: buoyancy plus swimming for the light.
       const wantDive = this.breath.spent ? 0 : Math.max(0, -this.liftSlider.lift);
+      // THE SLIDER ITSELF, kept for the camera. `this.dive` below is
+      // this eased at 0.9 a second, which is right for her body — she
+      // does not change her mind about going down in a frame — and
+      // wrong for the view: the camera was reading a signal that took
+      // four tenths of a second to develop and only then began to
+      // release, so she was already several body lengths down before
+      // it started after her. What the camera wants is INTENT, and
+      // intent is the lever.
+      this.diveIntent = wantDive;
       const ease = wantDive < this.dive
         ? RISE_EASE * (1 + Math.max(0, this.liftSlider.lift))
         : DIVE_EASE;
@@ -1755,7 +1766,9 @@ export class IslandScene {
     this.follow.update(
       this.ant.root, look, dt,
       this.afloat && !this.flight.aloft,
-      this.flight.aloft ? 0 : this.dive,
+      // The LEVER, not the eased dive: the camera should start down
+      // with her, not a beat behind her.
+      this.flight.aloft ? 0 : Math.max(this.diveIntent, this.dive),
     );
     // AFTER THE WEATHER, because it takes its fraction of the fog and
     // lights applyWeather has just written — and AFTER THE CAMERA, for

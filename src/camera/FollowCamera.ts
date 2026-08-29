@@ -184,7 +184,27 @@ const DROWNED_REACH = 1.45;
  * are both continuous and neither is a teleport.
  */
 const DIVE_RELEASE_LO = 0.15;
-const DIVE_RELEASE_HI = 0.55;
+const DIVE_RELEASE_HI = 0.30;
+
+/**
+ * HOW FAST THE ENVELOPE HANDS THE LIFT BACK WHEN SHE MEANS TO DIVE,
+ * per second — and why the camera used to be late.
+ *
+ * Releasing the envelope only ever stopped it PUSHING. Whatever it was
+ * already holding then drained at the sea's own beat, second order, so
+ * a couple of seconds after the slider went down the camera was still
+ * held several units above where it belonged and she was sinking away
+ * from it. Joshua: "the Queen starts descending but the camera has a
+ * noticeable delay before it follows."
+ *
+ * Intent now takes it back briskly and proportionally: the drain
+ * starts the moment the lever clears its deadband rather than waiting
+ * for the release to complete, and it is a fifth-of-a-second ease
+ * rather than a snap. Nothing waits for her to be physically under —
+ * the slider is the signal, which is the whole point of using INTENT
+ * here rather than measurement.
+ */
+const DIVE_RECOVER = 6;
 
 /**
  * HOW SOFTLY THE CAMERA TAKES ITS STATION WHILE SHE IS AFLOAT — one
@@ -485,10 +505,19 @@ export class FollowCamera {
     // at the other end of the same journey. Measured, the floor alone
     // was worth 0.6 g of it.
     const turn = LIFT_SLEW / beat;
-    let wantVel = -this.lift * turn;        // let go, when nothing is wet
+    // Let go — at the sea's own pace normally, and briskly when she has
+    // asked to go down.
+    let wantVel = -this.lift * Math.max(turn, DIVE_RECOVER * released);
     let drowned = -Infinity;
     if (under > 0) {
-      this.sunkFor += dt;
+      // INTENT INVALIDATES THE CLOCK. `sunkFor` measures how long the
+      // lens has been wet WITHOUT ASKING TO BE — it is what separates
+      // a crest washing over her from genuinely sinking. A queen on
+      // the dive lever is not being washed, so the patience she had
+      // built up before she asked is not evidence about anything, and
+      // leaving it running had the envelope shoving upward at full
+      // urgency while she was deliberately going down.
+      this.sunkFor = released > 0 ? 0 : this.sunkFor + dt;
       // URGENCY IS A CLOCK, NOT A DEPTH. A crest forty units deep and
       // one four units deep both pass in a fraction of a second, and
       // kicking the camera for either is the pumping this replaced.
@@ -507,7 +536,11 @@ export class FollowCamera {
       wantVel = Math.min(
         (WASH_RATE + (SUNK_RATE - WASH_RATE) * urgency) * scale,
         under * turn,
-      ) * (1 - released);
+      ) * (1 - released)
+        // …less what her intent is taking back. Both terms at once, so
+        // a lever halfway through its band is already bringing the
+        // camera down rather than merely pushing it up less.
+        - this.lift * DIVE_RECOVER * released;
       const surface = ground + spot!.depth;
       drowned = surface - DROWNED_REACH * swellReach() * (1 - released);
     } else {
@@ -517,7 +550,11 @@ export class FollowCamera {
     // LIFT_SLEW: switching a rate on at the waterline steps the
     // camera's vertical velocity and a step in velocity is unbounded
     // acceleration.
-    this.liftVel += (wantVel - this.liftVel) * (1 - Math.exp(-turn * dt));
+    // The speed limit follows the same urgency: a correction that is
+    // being handed back cannot be slew-limited at wave rate or the
+    // giving back is what feels late.
+    this.liftVel += (wantVel - this.liftVel)
+      * (1 - Math.exp(-Math.max(turn, DIVE_RECOVER * released) * dt));
     // The max is a guard, not a mechanism: the taper above brings the
     // correction to a stop before it gets here.
     this.lift = Math.max(0, this.lift + this.liftVel * dt);

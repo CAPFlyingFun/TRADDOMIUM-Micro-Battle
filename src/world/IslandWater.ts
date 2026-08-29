@@ -231,7 +231,11 @@ export class IslandWater {
    * is the single owner of every colour and constant.
    */
   private material(): THREE.MeshStandardMaterial {
-    const look = makeWaterLook({ green: 1, surf: 0.15, sink: false, edgeLo: 1.5, edgeHi: 8, midAt: 70, deepAt: 260, texAmp: 0.20, anisotropy: this.anisotropy });
+    // NOT the ocean, said out loud: no swell-driven breakers on a
+    // pond. `surf` keeps the ordinary waterline foam a lake bank has;
+    // what it must not have is the Pacific's wave table deciding where
+    // its crests are. See waterLook's `ocean`.
+    const look = makeWaterLook({ green: 1, surf: 0.15, sink: false, ocean: false, edgeLo: 1.5, edgeHi: 8, midAt: 70, deepAt: 260, texAmp: 0.20, anisotropy: this.anisotropy });
     this.clockRef = look.clock;
     this.centreRef = look.centre;
     return look.material;
@@ -421,8 +425,25 @@ export class IslandWater {
     const raw = (d00 * (1 - tx) + d10 * tx) * (1 - ty)
       + (d01 * (1 - tx) + d11 * tx) * ty;
     if (raw <= 0) return null;
-    const v = this.sim.velocity(Math.round(fx), Math.round(fy));
-    return { depth: raw * reliefScale(), flowX: v.vx, flowZ: v.vz };
+    // FRESH WATER DOES NOT CARRY HER — for now, and deliberately.
+    //
+    // The sim's velocity is flux over depth, and depth goes to zero at
+    // the edge of every pool: a millimetre of film with any flux at
+    // all divides out to metres a second. Measured on Joshua's device,
+    // 368 cm/s over 1.5 mm of water, and worse elsewhere — an ant
+    // standing in a puddle being swept at four metres a second. That
+    // is a singularity in the shallow-water solver, not a current, and
+    // capping it would only hide the same nonsense at a smaller
+    // number.
+    //
+    // So inland water is still until it has a flow system of its own.
+    // A real stream wants its own model — channel slope, a sane
+    // velocity floor, and a depth below which water does not move a
+    // body at all — and that is a piece of work, not a clamp. The
+    // OCEAN's current is untouched: it comes from the wave table
+    // (seaSwell.seaOrbitalAt) and the surf, on the other branch of the
+    // query, and none of this reaches it.
+    return { depth: raw * reliefScale(), flowX: 0, flowZ: 0 };
   }
 
   /** Depth of water at a world point, or 0. For wading and drinking. */
