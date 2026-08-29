@@ -73,39 +73,48 @@ const RECENTRE = 6_400;
 const DRAWN = 1.5;
 
 /**
- * WHERE FRESH WATER STARTS BEING DRAWN — and it has to meet the depth
- * she starts FLOATING at, or the two shorelines are different places.
+ * WHERE FRESH WATER STARTS BEING DRAWN — and it cannot be thinner
+ * than the bed underneath it is accurate.
  *
- * Traced on a real order-5 trunk, and the numbers were plain: she
- * floats at FOOTING, four millimetres, while the surface used to fade
- * in from fifteen and only reach full body at eighty. Between those
- * lies a band — wide, because the ground there is nearly flat — in
- * which she was lifted off the bed and dropped to paddling pace on
- * water that was drawn at ZERO alpha. From the player's side she stops
- * walking and starts swimming at an invisible line, short of the water
- * they can actually see. Nothing was blocking her; there is no
- * collision here and no step limit. The shorelines simply disagreed.
+ * These went to 0.02 and FOOTING in v0.0.113, reasoning that the drawn
+ * shoreline ought to meet the depth she starts floating at. The
+ * reasoning was right and the conclusion was wrong, because it assumed
+ * the drawn surface stands where the query says the surface is. It
+ * does not, and it cannot:
  *
- * So the film is drawn from the moment it is a film — a fifth of a
- * millimetre — and it is FULLY water at exactly the depth that takes
- * her feet off the bed. At the millimetre and a half off Joshua's
- * screenshot it is a quarter-strength sheen she wades through; at
- * four millimetres it is water and she is floating on it. The rule he
- * set (dry land, then a shallow visible film she can walk through,
- * then a continuous transition onto the surface) is a statement about
- * those two numbers agreeing, and this is them agreeing.
+ *   the QUERY  adds the water column to `groundHeight` at her exact
+ *              position — the 8-unit triangle she is standing on;
+ *   the MESH   adds the same column to `base`, that same ground
+ *              sampled every CELL (a hundred units) and then linearly
+ *              interpolated across the quad by the rasteriser.
  *
- * FRESH_EDGE_HI is FOOTING from `ant/wading`, deliberately written
- * out rather than imported: nothing in `world` reaches into `ant`,
- * and the pairing is pinned by test instead (freshwater.test.ts). If
- * FOOTING moves, that test fails and this must move with it.
+ * Between two bed samples the terrain has twelve of its own vertices,
+ * and the chord across them is not the ground. Measured over a real
+ * order-5 valley, 20,736 points: the chord stands more than FOOTING
+ * above the true ground at 32% of them, 2.03 units at p95 and 6.19 at
+ * worst. That is fifteen float thresholds of disagreement with no
+ * water involved at all, and it is not a bug — it is the resolution
+ * the water mesh has.
  *
- * The OCEAN's feather is its own (Ocean.ts, 35..95) and is untouched:
- * a beach shelves away fast enough that its band is a narrow strip,
- * which is exactly what an inland flat is not.
+ * So a film thinner than that error CANNOT be drawn truthfully. At
+ * 0.02..0.4 every one of those 32% became fully opaque water standing
+ * over a queen the query correctly had on top of it: she floats for a
+ * few seconds and then is under it, which is exactly what Joshua saw.
+ *
+ * 1.5 and 8 are v0.0.90's numbers, the last build he called good, and
+ * the measurement says why they are the right ones: nothing is painted
+ * until the column is deeper than the bed's own error, so the surface
+ * is only ever drawn where it can be drawn honestly. The consequence
+ * is that the millimetre of film she wades through is not visible.
+ * That is a real cost and it is the cheaper one — the alternative is
+ * painting water in the wrong place.
+ *
+ * Drawing the film properly means a bed that agrees with the ground at
+ * her own scale, which is a water-mesh resolution problem and its own
+ * piece of work, not a constant.
  */
-export const FRESH_EDGE_LO = 0.02;
-export const FRESH_EDGE_HI = 0.4;
+export const FRESH_EDGE_LO = 1.5;
+export const FRESH_EDGE_HI = 8;
 /**
  * Water put into a surveyed river cell, per second, per Strahler order.
  *
@@ -489,6 +498,44 @@ export class IslandWater {
   }
 
   /** Depth of water at a world point, or 0. For wading and drinking. */
+  /**
+   * THE SURFACE ACTUALLY BEING DRAWN over (wx, wz), or null off the
+   * window — read out of the vertex buffer itself rather than
+   * recomputed, so it cannot drift from what the GPU is given.
+   *
+   * This exists because the drawn surface and the QUERIED surface are
+   * not the same number and cannot be. `spotAt` adds the water column
+   * to `groundHeight` at her exact position, which is the 8-unit
+   * triangle she is standing on; the mesh adds it to `base`, which is
+   * that same ground sampled every CELL — a hundred units — and then
+   * linearly interpolated by the rasteriser. Between two bed samples
+   * the terrain has twelve of its own vertices, and the chord across
+   * them is not the ground. Measured over a real order-5 valley the
+   * chord stands more than FOOTING above the true ground at 32% of
+   * points, 2 units at p95 and 6 at worst: fifteen float thresholds
+   * of disagreement, with no water involved at all.
+   *
+   * Nothing here is a bug to be fixed by moving a number — it is the
+   * resolution the water mesh has. What it means is that a film
+   * thinner than the bed's own error CANNOT be drawn truthfully, and
+   * anything that decides how visible thin water is has to respect
+   * that. See FRESH_EDGE_LO.
+   */
+  drawnSurfaceAt(wx: number, wz: number): number | null {
+    if (!this.placed) return null;
+    const span = N * CELL;
+    const fx = (wx - (this.centreX - span / 2)) / CELL;
+    const fy = (wz - (this.centreZ - span / 2)) / CELL;
+    const cx = Math.floor(fx), cy = Math.floor(fy);
+    if (cx < 0 || cy < 0 || cx >= N - 1 || cy >= N - 1) return null;
+    const tx = fx - cx, ty = fy - cy;
+    const y = (ix: number, iy: number) => this.pos[(iy * N + ix) * 3 + 1];
+    const y00 = y(cx, cy), y10 = y(cx + 1, cy);
+    const y01 = y(cx, cy + 1), y11 = y(cx + 1, cy + 1);
+    return (y00 * (1 - tx) + y10 * tx) * (1 - ty)
+      + (y01 * (1 - tx) + y11 * tx) * ty;
+  }
+
   depthAt(wx: number, wz: number): number {
     if (!this.placed) return 0;
     const span = N * CELL;

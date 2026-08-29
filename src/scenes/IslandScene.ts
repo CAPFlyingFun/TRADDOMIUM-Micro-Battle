@@ -1538,6 +1538,12 @@ export class IslandScene {
         // The master LOD's state rides the same developer toggle as
         // the fix — one switch, one register, one screenshot.
         lod: settings().showFix ? lodLine() : null,
+        // TEMPORARY, for the freshwater hunt: what the query says the
+        // water under her is, against where the mesh is actually
+        // DRAWING its surface. Those are two different computations of
+        // the same thing and the gap between them is the whole
+        // question. Goes when the hunt does.
+        wet: settings().showFix ? this.wetLine() : null,
         // HER NOSE, not the camera's. In flight they part company the
         // moment she looks around, and the pairing with the flight
         // panel's ground line only means anything if this one is hers.
@@ -2143,6 +2149,34 @@ export class IslandScene {
       mean: total > 0 ? seen / total : 0,
       low: worst > 0 ? 1 / worst : 0,
     };
+  }
+
+  /**
+   * TEMPORARY DEVICE READOUT — the freshwater hunt.
+   *
+   * FRESH d<queried depth> a<afloat> ab<above> | gY<ground> qY<queen>
+   * wY<drawn water surface> Δ<drawn minus queen>
+   *
+   * The number that matters is the last one. `d` is the water column
+   * the QUERY reports over the 8-unit triangle she is standing on;
+   * `wY` is read straight out of the water mesh's vertex buffer, which
+   * carries the same column added to a bed sampled every hundred units
+   * and interpolated across the quad. When Δ is positive she is drawn
+   * underneath a surface that gameplay says she is on top of, and no
+   * amount of wading arithmetic can close that.
+   */
+  private wetLine(): string | null {
+    if (!this.water) return null;
+    const { wx, wz } = this.ant.where;
+    const spot = waterSpotAt(wx, wz);
+    const gY = groundHeight(wx, wz);
+    const qY = this.ant.root.position.y;
+    const wY = this.water.drawnSurfaceAt(wx, wz);
+    const n = (v: number) => (Math.abs(v) < 100 ? v.toFixed(2) : v.toFixed(0));
+    const head = `FRESH d${spot ? n(spot.depth) : '--'}`
+      + ` a${this.afloat ? '1' : '0'} ab${n(this.swimAbove)}`;
+    if (wY === null) return `${head} | gY${n(gY)} qY${n(qY)} wY--`;
+    return `${head} | gY${n(gY)} qY${n(qY)} wY${n(wY)} d${n(wY - qY)}`;
   }
 
   private mslNow(): number {
