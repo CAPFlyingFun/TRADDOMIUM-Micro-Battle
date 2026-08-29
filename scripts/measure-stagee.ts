@@ -12,8 +12,8 @@ import * as THREE from 'three';
 import { FollowCamera } from '../src/camera/FollowCamera';
 import { useWaterQuery } from '../src/world/waterQuery';
 import {
-  heaveGain, resetSwell, seaChopAt, seaHeaveAt, seaSwellAt, swellPeriod,
-  swellReach, activeWaves, tickSwell,
+  CAMERA_FOLLOW, heaveGain, resetSwell, seaChopAt, seaHeaveAt, seaHoldAt,
+  seaSwellAt, swellPeriod, swellReach, activeWaves, tickSwell,
 } from '../src/world/seaSwell';
 import { SETTLE_BEATS, SPLASH_BEATS, settleSeconds, splashSeconds }
   from '../src/world/Underwater';
@@ -49,7 +49,7 @@ function ride(seconds: number, dive = 0, warm = 12): Run {
   useWaterQuery((wx, wz) => ({
     depth: BED + seaSwellAt(wx, wz, BED),
     flowX: 0, flowZ: 0, salt: true,
-    chop: seaChopAt(wx, wz, BED),
+    hold: seaHoldAt(wx, wz, BED),
   }));
   ant.position.set(0, BED, 0);
   follow.snapTo(ant);
@@ -124,8 +124,10 @@ for (const [label, install] of SEAS) {
     const scale = field?.components[i]?.scale ?? 'fixed';
     console.log(`     ${scale.padEnd(6)} T ${f2(T).padStart(5)}s`
       + ` A ${f2(w.amp, 1).padStart(5)} cm ->`
-      + ` follows ${(heaveGain(w.omega) * 100).toFixed(1).padStart(5)}%`
-      + `   rejects ${((1 - heaveGain(w.omega)) * 100).toFixed(1).padStart(5)}%`);
+      + ` camera rides ${(CAMERA_FOLLOW * heaveGain(w.omega) * 100)
+        .toFixed(1).padStart(5)}%`
+      + `   holds ${((1 - CAMERA_FOLLOW * heaveGain(w.omega)) * 100)
+        .toFixed(1).padStart(5)}%`);
   }
 
   resetSwell(); install();

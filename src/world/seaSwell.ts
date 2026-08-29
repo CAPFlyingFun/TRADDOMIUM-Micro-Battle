@@ -319,6 +319,33 @@ export const HEAVE_ORDER = 3;
  * the same instant, from the same clock, off the same table — so the
  * reference is exactly in step with the sea it came from.
  */
+/**
+ * HOW MUCH OF THE SLOW HEAVE THE CAMERA MAY RIDE — and this is the
+ * number Stage E got wrong.
+ *
+ * The split above says WHICH motion is slow enough to be worth
+ * following. It does not say how much of it to follow, and the first
+ * cut of Stage E quietly assumed "all of it": macro passed at 99.8%,
+ * the lens tracked 95.9% of her swing, and the whole view rose and
+ * fell 1.4 m with every wave. Technically the sea moved and the camera
+ * kept station on it perfectly. On a phone it is a washing machine,
+ * because THE RULE IS ABOUT THE HORIZON, not about the water:
+ *
+ *   "HER BOB IS NOT THE CAMERA'S BOB. The waves are supposed to move
+ *    under her, not under the player."
+ *
+ * v0.0.101 passed about 19% of her swing and that was accepted. A
+ * fraction of the slow heave gets the same result without the lag that
+ * produced it: at 0.15 the lens passes 15.9% of her swing on the
+ * generated sea and 8.8% on the shipped one, and the chop lands at
+ * 1.7% and 3.4% — near enough to none.
+ *
+ * NOT ZERO, deliberately. A camera pinned to a perfectly level plane
+ * while she rides a metre of swell reads as detached from her; a small
+ * sympathetic motion keeps them one object without the horizon moving.
+ */
+export const CAMERA_FOLLOW = 0.15;
+
 export function heaveGain(omega: number): number {
   const period = (2 * Math.PI) / Math.max(omega, 1e-9);
   const ratio = HEAVE_CORNER_S / period;
@@ -633,6 +660,20 @@ export function seaHeaveAt(wx: number, wz: number, depth: number): number {
  */
 export function seaChopAt(wx: number, wz: number, depth: number): number {
   return sampled(wx, wz, depth, null) - sampled(wx, wz, depth, heaveGains);
+}
+
+/**
+ * WHAT THE CAMERA HOLDS STILL AGAINST — everything of the sea except
+ * the sliver of slow heave it is allowed to ride.
+ *
+ * The one number the camera subtracts, and the only one the water
+ * query carries for it. Written as the full surface minus a share of
+ * the heave rather than as "chop plus most of the macro", because that
+ * is what it is: the sea, less the part the view goes along with.
+ */
+export function seaHoldAt(wx: number, wz: number, depth: number): number {
+  return sampled(wx, wz, depth, null)
+    - CAMERA_FOLLOW * sampled(wx, wz, depth, heaveGains);
 }
 
 /** The lattice-aware sampler behind all three. */

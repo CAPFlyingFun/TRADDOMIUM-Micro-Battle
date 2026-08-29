@@ -40,12 +40,22 @@ import { settings } from '../ui/settings';
  *
  * So the filtering moved to where the sea is actually made. seaSwell
  * splits its own table into a SLOW half and a FAST half by component
- * (seaSwell.heaveGain), the water query carries the fast half along
- * with the column it belongs to, and the camera simply subtracts it.
- * Same shape of low pass, no memory, and — because every component is
- * evaluated at one instant off one clock — no phase lag at all. The
- * camera is exactly in step with the slow sea rather than trailing it,
- * and nothing has to be re-swept when the sea changes.
+ * (seaSwell.heaveGain), keeps a small share of the slow half for the
+ * camera to go along with (seaSwell.CAMERA_FOLLOW) and calls the whole
+ * of the rest what the view must HOLD STILL AGAINST; the water query
+ * carries that along with the column it belongs to, and the camera
+ * simply subtracts it. Same shape of low pass, no memory, and —
+ * because every component is evaluated at one instant off one clock —
+ * no phase lag at all.
+ *
+ * THE SHARE IS THE POINT, and v0.0.106 shipped it wrong. That first
+ * cut kept ALL of the slow half, which is a camera that keeps perfect
+ * station on the water: the lens tracked 96% of her swing and the
+ * whole view rose and fell a metre and a half with every wave. Joshua
+ * on the phone: still a washing machine. The rule was never about the
+ * water — "the waves are supposed to move under her, not under the
+ * player" — so the camera now goes along with about a seventh of the
+ * heave and none of the chop, and the horizon holds.
  *
  * Flying and walking are untouched: there is no chop out of the water,
  * so the term is zero and her height reaches the camera the same frame,
@@ -211,8 +221,8 @@ export class FollowCamera {
   private distance: number;
   /** Seconds the lens has been continuously under the water. */
   private sunkFor = 0;
-  /** The chop taken off the view last frame — reported, for probes. */
-  private chop = 0;
+  /** What was held off the view last frame — reported, for probes. */
+  private hold = 0;
   /**
    * How far the water envelope is currently holding the lens ABOVE
    * where the rig alone would put it.
@@ -288,7 +298,7 @@ export class FollowCamera {
     // NOTHING TO RE-SEED. A snap used to have to restart the height
     // filter or the camera would glide in from wherever it had been;
     // the spectral filter has no memory to carry across a teleport.
-    this.chop = 0;
+    this.hold = 0;
     this.lift = 0;
     this.liftVel = 0;
     this.aim(target);
@@ -319,21 +329,23 @@ export class FollowCamera {
     // the horizon never sat still. The waves are supposed to move
     // under her, not under the player.
     //
-    // TAKE THE CHOP OFF HER, rather than damping the camera over time.
-    // The water she is floating in reports how much of its surface is
-    // fast chop (waterQuery.chop, from seaSwell's own table), she sits
-    // exactly on that surface, so subtracting it leaves the slow heave
-    // she is riding — and leaves everything she does DELIBERATELY
-    // untouched, because a decision is not a wave and has no chop in
-    // it. Vertical only: lag in the horizontal reads as the camera
-    // trailing her, which the offset smoothing exists to avoid.
+    // HOLD STILL AGAINST THE SEA, rather than damping the camera over
+    // time. The water she is floating in reports how much of its
+    // surface the view should not go along with (waterQuery.hold, from
+    // seaSwell's own table: all of the chop and all but a small share
+    // of the slow heave). She sits exactly on that surface, so
+    // subtracting it leaves the horizon where it was — and leaves
+    // everything she does DELIBERATELY untouched, because a decision
+    // is not a wave and has none of the sea in it. Vertical only: lag
+    // in the horizontal reads as the camera trailing her, which the
+    // offset smoothing exists to avoid.
     //
     // ONLY WHILE THE SEA IS MOVING HER. Out of the water there is no
     // chop and the term is zero anyway; the flag makes that explicit
     // and keeps a diving queen — whose height is her own decision —
     // from having a wave subtracted from her intent.
-    this.chop = calm ? this.chopUnder(target) : 0;
-    this.camera.position.y -= this.chop;
+    this.hold = calm ? this.holdUnder(target) : 0;
+    this.camera.position.y -= this.hold;
     // The floor still has the last word: a smoothed camera may lag,
     // it may not lag INTO the ground — nor under a wave.
     this.keepAboveGround(this.camera.position, dive, dt);
@@ -500,29 +512,29 @@ export class FollowCamera {
   }
 
   /**
-   * The fast chop standing over HER, drawn units — the thing the view
-   * should not copy.
+   * The part of the sea standing over HER that the view should not go
+   * along with, drawn units.
    *
    * Asked at her position rather than the camera's, deliberately: it
    * is HER motion the term is cancelling, and a wave is a moving
-   * surface, so the chop seven units away is a different number and
+   * surface, so the water seven units away is a different number and
    * would leave a residue instead of cancelling.
    *
    * Read from the same authoritative query as everything else, so
-   * there is no path by which the camera can be filtering one sea
-   * while she floats on another — and zero wherever the water has no
-   * swell to speak of, which is every pond on the island.
+   * there is no path by which the camera can be framing against one
+   * sea while she floats on another — and zero wherever the water has
+   * no swell to speak of, which is every pond on the island.
    */
-  private chopUnder(target: THREE.Object3D): number {
+  private holdUnder(target: THREE.Object3D): number {
     const at = toWorld(local(target.position.x, target.position.z));
     const spot = waterSpotAt(at.wx, at.wz);
-    if (!spot || spot.depth <= 0 || !spot.chop) return 0;
-    return spot.chop;
+    if (!spot || spot.depth <= 0 || !spot.hold) return 0;
+    return spot.hold;
   }
 
-  /** What the last frame took off the view, for probes and tests. */
-  chopTaken(): number {
-    return this.chop;
+  /** What the last frame held off the view, for probes and tests. */
+  holdTaken(): number {
+    return this.hold;
   }
 
   private aim(target: THREE.Object3D): void {

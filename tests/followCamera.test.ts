@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { FollowCamera } from '../src/camera/FollowCamera';
 import { useWaterQuery } from '../src/world/waterQuery';
-import { heaveGain } from '../src/world/seaSwell';
+import { CAMERA_FOLLOW, heaveGain } from '../src/world/seaSwell';
 import type { LookInput } from '../src/input/LookDrag';
 
 afterEach(() => useWaterQuery(null));
@@ -174,14 +174,14 @@ describe('following her up', () => {
     const PERIOD = 1.5;
     const AMP = 30;
     const MEAN = 40;
-    const fast = 1 - heaveGain((2 * Math.PI) / PERIOD);
+    const held = 1 - CAMERA_FOLLOW * heaveGain((2 * Math.PI) / PERIOD);
     let bob = 0;
     // A bed at zero with the swell standing over it, so the surface IS
     // her height and the lens rides its usual few units clear of it —
     // the envelope has no reason to intervene and what is left is the
     // rejection alone.
     useWaterQuery(() => ({
-      depth: MEAN + bob, flowX: 0, flowZ: 0, salt: true, chop: bob * fast,
+      depth: MEAN + bob, flowX: 0, flowZ: 0, salt: true, hold: bob * held,
     }));
     follow.snapTo(ant);
     let lo = Infinity;

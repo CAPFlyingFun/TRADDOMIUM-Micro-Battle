@@ -73,9 +73,11 @@ The shore's depth-limited breaking envelope applies to both seas and is
 measured by `npm run measure:breaker`; `npm run probe:breaker <tag>`
 photographs the surf zone so two builds can be put side by side.
 
-The camera rides the sea's SLOW half and ignores its fast half, split
-per component in `seaSwell` (`heaveGain`) and carried to the camera on
-the water query's `chop`. It is a spectral filter, not a temporal one,
+The camera goes along with a small SHARE of the sea's slow half
+(`seaSwell.CAMERA_FOLLOW`, 15%) and none of its fast half, split per
+component in `seaSwell` (`heaveGain`) and carried to the camera on the
+water query's `hold` — the part of the column the view must hold still
+against. The horizon is what has to stay put; the waves move under her. It is a spectral filter, not a temporal one,
 so there is no lag to be caught out by — and every patience around it
 (the envelope's, the underwater tint's) is a fraction of the sea's own
 period rather than a fixed number of seconds. `npm run measure:camera`

@@ -7,7 +7,7 @@ import { isWatercourse } from './islandChannels';
 import { useWaterQuery, type WaterSpot } from './waterQuery';
 import { surfFlowAt } from './surf';
 import { makeWaterLook } from './waterLook';
-import { seaChopAt, seaSwellAt } from './seaSwell';
+import { seaHoldAt, seaSwellAt } from './seaSwell';
 
 /**
  * THE ISLAND'S WATER — one simulated window that walks with her.
@@ -224,7 +224,7 @@ export class IslandWater {
         // while she floats on another. Everything else here ignores it.
         return {
           depth, flowX: flow.x, flowZ: flow.z, salt: true,
-          chop: seaChopAt(wx, wz, -g),
+          hold: seaHoldAt(wx, wz, -g),
         };
       }
       return this.spotAt(wx, wz);
