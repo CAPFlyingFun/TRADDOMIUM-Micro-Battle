@@ -3,6 +3,7 @@ import type { LookInput } from '../input/LookDrag';
 import { groundHeight } from '../world/heightfield';
 import { local } from '../world/coords';
 import { toWorld } from '../world/origin';
+import { waterSpotAt } from '../world/waterQuery';
 import { settings } from '../ui/settings';
 
 /**
@@ -37,6 +38,39 @@ import { settings } from '../ui/settings';
  * model is untouched since then; only the camera changed.
  */
 const CALM_RISE = 0.6;
+
+/** How far the lens is held off the ground it may not sink into. */
+const CLEARANCE = 1.6;
+
+/**
+ * And how far it is held off the WATER, which needs more than the
+ * ground does because the water is moving toward it. A crest arrives
+ * at the speed of the swell while the camera's own height is
+ * deliberately damped (CALM_RISE), so a clearance sized for a static
+ * surface is one the next wave closes.
+ */
+const SEA_CLEARANCE = 4;
+
+/**
+ * The dive lever, from where the surface clamp starts letting go to
+ * where it has entirely let go.
+ *
+ * A DEADBAND FIRST, and it is the reason this is a band rather than a
+ * boolean. Floating is not perfectly still — she rides the swell, the
+ * lever gets brushed — and any release that began at the first
+ * non-zero touch would drop the camera through the surface for a
+ * frame, which is the exact fault this is here to fix. Nothing happens
+ * until she has genuinely committed to going down, and then the clamp
+ * lifts smoothly rather than at an instant, so surfacing and diving
+ * are both continuous and neither is a teleport.
+ */
+const DIVE_RELEASE_LO = 0.15;
+const DIVE_RELEASE_HI = 0.55;
+
+function smoothstep(lo: number, hi: number, v: number): number {
+  const t = Math.min(1, Math.max(0, (v - lo) / (hi - lo)));
+  return t * t * (3 - 2 * t);
+}
 
 export class FollowCamera {
   readonly camera: THREE.PerspectiveCamera;
@@ -133,7 +167,10 @@ export class FollowCamera {
    * @param calm true when her vertical motion is the SEA moving her
    *   rather than her flying — see the vertical ease below.
    */
-  update(target: THREE.Object3D, look: LookInput, dt: number, calm = false): void {
+  update(
+    target: THREE.Object3D, look: LookInput, dt: number,
+    calm = false, dive = 0,
+  ): void {
     this.place(target, look, this.desired);
     // Snappier while the player is steering the view, softer when it is
     // just following, so a drag feels connected but walking feels calm.
@@ -170,8 +207,8 @@ export class FollowCamera {
       this.easedY = this.camera.position.y;
     }
     // The floor still has the last word: a smoothed camera may lag,
-    // it may not lag INTO the ground.
-    this.keepAboveGround(this.camera.position, target.position.y);
+    // it may not lag INTO the ground — nor under a wave.
+    this.keepAboveGround(this.camera.position, target.position.y, dive);
     this.easedY = this.camera.position.y;
     this.aim(target);
   }
@@ -214,14 +251,33 @@ export class FollowCamera {
    *
    * Applied to the FINAL position, after the offset smoothing, because
    * a clamp folded into the desired position gets averaged away by the
-   * lerp on its way through. The floor is the higher of the ground and
-   * a waterline that FOLLOWS HER DOWN: pinned at sea level while she is
-   * on or above the surface (the camera must not slip under the waves
-   * while she floats), and riding two units over her head once she
-   * dives, so the lens goes under with her instead of being left
-   * staring at the sheet from above — which is exactly what Joshua
-   * watched it do. The tracking floor is continuous in her height, so
-   * surfacing lifts the camera smoothly rather than teleporting it.
+   * lerp on its way through.
+   *
+   * THE WATERLINE IS THE LIVE SURFACE NOW, and the difference is a bug
+   * Joshua photographed. This clamped against `Math.min(0, herY - 2)`
+   * — sea level, a flat zero — while the queen and the drawn ocean
+   * both ride the animated swell. So the floor believed the water was
+   * at nought while the actual surface stood up to half a metre above
+   * it, and a crest simply rose THROUGH the camera: the lens crossed
+   * above and below the water again and again as she floated, which
+   * the camera's deliberate vertical damping (CALM_RISE) makes worse,
+   * because a damped camera is still down in the last trough when the
+   * next crest arrives.
+   *
+   * So the floor asks the same authoritative water everything else
+   * asks — `waterSpotAt`, the registered query, whose sea depth is the
+   * swell the ocean sheet is drawn from — and it asks at the CAMERA'S
+   * OWN x/z, not hers. A wave is a moving surface: the crest under the
+   * lens is not the crest under the queen seven units away, and
+   * clamping to hers is how the lens dips into a wave she is not in.
+   *
+   * DIVING RELEASES IT. Holding the camera above the water is right
+   * while she swims ON it and wrong the moment she goes under, so the
+   * dive lever lifts the clamp — over a band (DIVE_RELEASE_LO..HI) so
+   * the handover is continuous in both directions rather than a
+   * teleport, and behind a deadband so bobbing at the surface cannot
+   * trip it. Fully released, the floor is the old one that rides two
+   * units over her head and follows her down.
    *
    * ASKED IN WORLD COORDINATES, through the named conversion. The
    * camera lives in render space, measured from the floating origin,
@@ -229,11 +285,24 @@ export class FollowCamera {
    * position once put the camera two kilometres up a summit while she
    * stood on a beach. Her height needs no conversion: the origin
    * shifts x and z only.
+   *
+   * @param dive the eased dive lever, nought at the surface and one on
+   *   the bottom — INTENT rather than measurement, so a crest washing
+   *   over a floating queen does not read as a decision to submerge.
    */
-  private keepAboveGround(out: THREE.Vector3, herY: number): void {
+  private keepAboveGround(out: THREE.Vector3, herY: number, dive = 0): void {
     const above = toWorld(local(out.x, out.z));
-    const waterline = Math.min(0, herY - 2);
-    const floor = Math.max(groundHeight(above.wx, above.wz), waterline) + 1.6;
+    const ground = groundHeight(above.wx, above.wz);
+    let floor = ground + CLEARANCE;
+    const spot = waterSpotAt(above.wx, above.wz);
+    if (spot && spot.depth > 0) {
+      // The surface standing over the bed right here, right now.
+      const surface = ground + spot.depth;
+      const released = smoothstep(DIVE_RELEASE_LO, DIVE_RELEASE_HI, dive);
+      const sea = (surface + SEA_CLEARANCE) * (1 - released)
+        + (herY - 2 + CLEARANCE) * released;
+      floor = Math.max(floor, sea);
+    }
     if (out.y < floor) out.y = floor;
   }
 

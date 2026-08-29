@@ -129,6 +129,29 @@ So: a water system may READ `terrainHeight` and it may never write it.
 A surveyed river is a thing to **check the simulation against**, not a
 thing to reshape the island for.
 
+## The ocean's look is accepted — protect it
+
+**Standing rule (Joshua, 2026-08-29, on the v0.0.99 device pass): "the
+ocean now looks absolutely stunning... treat the current ocean VISUAL
+LOOK as accepted and protect it."**
+
+That covers the water shader, the foam and its LOD sphere, and the
+swell's heights, periods and wavelengths. Gameplay and camera work on
+the sea is fine and expected; changing how it LOOKS is not, unless he
+asks. In particular, do not "fix" a physics or camera problem by making
+the waves smaller, flatter or slower — that trades a bug for the thing
+he likes most about the build.
+
+`npm run probe:foamsphere` is the regression check: it holds the shipped
+frame against a no-foam control at altitude and in the surf. Run it after
+touching anything the water reads.
+
+Known and deliberately NOT optimised yet: the water fragment shader runs
+four ripple octaves in two flow phases, about eight ordinary ripple
+samples per water fragment, before any distance fade. It is the likely
+next GPU bottleneck and is to be profiled on its own, not trimmed as a
+side effect of unrelated work.
+
 ## Engineering invariants
 
 - The heightfield (`src/world/heightfield.ts`) is the single source of

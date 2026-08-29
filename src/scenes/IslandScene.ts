@@ -1679,9 +1679,6 @@ export class IslandScene {
     this.nowWeather = sky;
     this.water?.setWeather(sky.precipitation);
     this.applyWeather(sky);
-    // AFTER applyWeather, every frame — the weather rewrites the fog,
-    // background and lights, and the water takes its fraction of THAT.
-    this.camUnder = this.underwater.update(this.sun, this.skyLight);
     this.rain.update(this.follow.camera.position, sky, dt);
     // The sea takes the camera's RENDERED position, which is the one
     // thing about it that is allowed to be local: the grid is recentred
@@ -1702,7 +1699,28 @@ export class IslandScene {
     this.speed = this.ant.pace;
     // CALM while the SEA is moving her: the camera damps her bob so the
     // horizon stays put. Flying, it answers at once.
-    this.follow.update(this.ant.root, look, dt, this.afloat && !this.flight.aloft);
+    // CALM while the SEA is moving her; the DIVE lever tells the
+    // camera when it may stop holding itself above the water.
+    this.follow.update(
+      this.ant.root, look, dt,
+      this.afloat && !this.flight.aloft,
+      this.flight.aloft ? 0 : this.dive,
+    );
+    // AFTER THE WEATHER, because it takes its fraction of the fog and
+    // lights applyWeather has just written — and AFTER THE CAMERA, for
+    // a reason Joshua photographed.
+    //
+    // This ran before follow.update, so it asked "is the lens under
+    // the water" about LAST frame's lens against THIS frame's sea. The
+    // clamp below the camera guarantees the rendered position is above
+    // the surface; the tint was reading a position the camera had
+    // already left. On a swell that is precisely the frame where the
+    // two disagree — a crest arrives, the stale position is inside it,
+    // and the whole screen goes green for a frame on a queen who never
+    // went under. Same reason the pane is seated here (see below):
+    // anything that reads the camera's pose has to run after the pose
+    // is final.
+    this.camUnder = this.underwater.update(this.sun, this.skyLight);
     // AFTER THE WEATHER AND AFTER THE CAMERA, and it needs both.
     //
     // After the weather because applyWeather stamps the fog colour and

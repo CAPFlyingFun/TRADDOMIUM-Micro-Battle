@@ -1,7 +1,7 @@
 {
   "name": "traddomium-micro-battle",
   "private": true,
-  "version": "0.0.99",
+  "version": "0.0.100",
   "type": "module",
   "scripts": {
     "probe:waterlab": "node scripts/probe-waterlab.mjs",
@@ -37,7 +37,8 @@
     "probe:save": "node scripts/probe-save.mjs",
     "probe:revisit": "node scripts/probe-revisit.mjs",
     "bake:veg": "python3 scripts/bakeVeg.py",
-    "probe:foamsphere": "node scripts/probe-foamsphere.mjs"
+    "probe:foamsphere": "node scripts/probe-foamsphere.mjs",
+    "probe:searide": "node scripts/probe-searide.mjs"
   },
   "dependencies": {
     "three": "^0.180.0"

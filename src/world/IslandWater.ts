@@ -5,6 +5,7 @@ import { world } from './coords';
 import { WaterSim, DEFAULTS } from './waterSim';
 import { isWatercourse } from './islandChannels';
 import { useWaterQuery, type WaterSpot } from './waterQuery';
+import { surfFlowAt } from './surf';
 import { makeWaterLook } from './waterLook';
 import { seaSwellAt } from './seaSwell';
 
@@ -208,7 +209,17 @@ export class IslandWater {
     useWaterQuery((wx, wz) => {
       const g = groundHeight(wx, wz);
       if (g < 0) {
-        return { depth: -g + seaSwellAt(wx, wz, -g), flowX: 0, flowZ: 0, salt: true };
+        // THE SEA MOVES SIDEWAYS TOO, and for a long time it did not:
+        // this returned a flat zero current, and `wadeAt` only carries
+        // her when the flow is non-zero, so a queen floating in the
+        // surf heaved up and down and never went anywhere. surf.ts is
+        // the horizontal half — orbital flow out deep, a breaking
+        // surge in the shallows — read from the very wave table the
+        // swell above comes from.
+        const surface = seaSwellAt(wx, wz, -g);
+        const depth = -g + surface;
+        const flow = surfFlowAt(wx, wz, depth, surface);
+        return { depth, flowX: flow.x, flowZ: flow.z, salt: true };
       }
       return this.spotAt(wx, wz);
     });

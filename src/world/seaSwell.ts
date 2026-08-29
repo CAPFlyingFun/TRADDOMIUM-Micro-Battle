@@ -136,8 +136,14 @@ const WAVES: readonly Wave[] = [
   wave(210, 6, 222),  // wind sea: 2.1 m, 12 cm, T 1.1 s
 ];
 
+/**
+ * The table's own amplitude sum, BEFORE any shoaling — half the wave
+ * height out where the amplitudes are honest (REFERENCE_DEPTH).
+ */
+export const SWELL_AMPLITUDE = WAVES.reduce((sum, w) => sum + w.amp, 0);
+
 /** The most the surface can ever leave sea level, either way. */
-export const SWELL_REACH = WAVES.reduce((sum, w) => sum + w.amp, 0) * SHOAL_CAP;
+export const SWELL_REACH = SWELL_AMPLITUDE * SHOAL_CAP;
 
 /**
  * The primary swell's angular frequency — the BEAT of the sea. The
@@ -181,6 +187,46 @@ function rawSwell(wx: number, wz: number, depth: number): number {
   }
   // A trough cannot cut below the bed it is running over.
   return Math.max(y * shoal, -Math.max(0, depth - KEEL));
+}
+
+/**
+ * THE WATER'S OWN HORIZONTAL MOTION, from the very same waves.
+ *
+ * A wave is not a river: the water in it does not travel with the
+ * crest, it goes round in a circle and comes back. At the SURFACE of a
+ * deep-water wave that circle's horizontal component is `omega * eta` —
+ * the wave's angular speed times how high the surface is standing at
+ * that instant — running along the wave's own direction. So the flow is
+ * forward under a crest, backward under a trough, and nets to nothing
+ * over a cycle, which is exactly what floating in a swell feels like.
+ *
+ * IT IS THE SAME TABLE `seaSwellAt` SUMS, and that is the whole reason
+ * this lives here rather than in surf.ts. A current computed from a
+ * second copy of the waves would push her one way while the surface she
+ * is riding went the other, which is the two-answers disease this
+ * module exists to prevent.
+ *
+ * SHOALED WITH THE HEIGHT. Green's law grows the amplitude toward the
+ * shore and the orbital speed grows with it, which is why the water
+ * starts to really shove in the shallows.
+ *
+ * @param depth the water column here — the same argument the height
+ *   query takes, and used for the same shoaling.
+ */
+export function seaOrbitalAt(
+  wx: number, wz: number, depth: number,
+): { x: number; z: number } {
+  const shoal = shoalAt(depth);
+  if (shoal <= 0) return { x: 0, z: 0 };
+  let x = 0;
+  let z = 0;
+  for (const w of WAVES) {
+    const eta = w.amp * Math.cos((wx * w.dx + wz * w.dz) * w.k - w.omega * clock);
+    const u = w.omega * eta * shoal;
+    x += u * w.dx;
+    z += u * w.dz;
+  }
+  return { x, z };
 }
 
 /**
