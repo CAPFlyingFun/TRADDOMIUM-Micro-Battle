@@ -202,6 +202,26 @@ const PANE_MARGIN = 1.05;
  */
 const PANE_ORDER = 10_000;
 
+/**
+ * How long the lens may be wet before the underwater look starts to
+ * arrive, and how long before it has fully arrived.
+ *
+ * A queen floating in this swell is washed over roughly every wave —
+ * measured, the lens is wet about 41% of the time and never for more
+ * than 0.62 s at a stretch. Keyed on depth alone the look flipped the
+ * whole screen between air and water at that rate; Joshua's contact
+ * sheet is seventeen frames of it. So SPLASH sits just past the
+ * longest wash a crest can give, and the ramp to SETTLE is slow
+ * enough that one leaves about 1% of the tint on screen rather than
+ * 82%. Only water that STAYS is a change of medium.
+ *
+ * INTENT SKIPS THE WAIT ENTIRELY (see `deliberate`), so pushing the
+ * dive lever never feels late — the patience here is for water she
+ * did not ask for.
+ */
+export const SPLASH = 0.55;
+export const SETTLE = 1.7;
+
 /** Nothing at the waterline, everything a couple of units below it. */
 function rampIn(under: number): number {
   const t = Math.min(Math.max(under / RAMP, 0), 1);
@@ -254,6 +274,8 @@ export function underwaterLook(under: number): Look {
 }
 
 export class Underwater {
+  /** Seconds the lens has been continuously wet. */
+  private wetFor = 0;
   private readonly geometry = new THREE.PlaneGeometry(1, 1);
   private readonly material: THREE.MeshBasicMaterial;
   private readonly pane: THREE.Mesh;
@@ -306,10 +328,25 @@ export class Underwater {
    * an island that size nearly always has an answer and the answer
    * looks perfectly plausible.
    */
-  update(sun: THREE.DirectionalLight, sky: THREE.HemisphereLight): number {
+  /**
+   * @param dt seconds this frame — the look engages on a CLOCK now.
+   * @param deliberate whether she is actually diving. Intent bypasses
+   *   the wait entirely: a player pushing the lever down must not feel
+   *   the water arrive late.
+   */
+  update(
+    sun: THREE.DirectionalLight, sky: THREE.HemisphereLight,
+    dt = 0, deliberate = false,
+  ): number {
     const eye = this.camera.position;
     const seat = originAt();
     const under = submersion(eye.x + seat.x, eye.y, eye.z + seat.z);
+    // HOW LONG THE LENS HAS BEEN WET, which is the difference between
+    // a wave washing over an ant and an ant going under. At the
+    // swell's period a crest covers the lens for well under a second
+    // and does it every cycle, so keying the look on depth alone
+    // strobed the whole screen between air and water at wave rate.
+    this.wetFor = under > 0 ? this.wetFor + dt : 0;
     if (under <= 0) {
       // NOTHING IS RESTORED HERE, and the missing branch is deliberate.
       // applyWeather() rewrites the fog colour, the fog density, the
@@ -323,6 +360,16 @@ export class Underwater {
       this.pane.visible = false;
       return 0;
     }
+    // Engagement: instant when she MEANT it, otherwise eased in over
+    // SETTLE seconds so a passing crest reads as a splash across the
+    // lens rather than as a change of medium.
+    const settled = deliberate ? 1
+      : Math.min(1, Math.max(0, (this.wetFor - SPLASH) / (SETTLE - SPLASH)));
+    const engaged = settled * settled * (3 - 2 * settled);
+    if (engaged <= 0) {
+      this.pane.visible = false;
+      return 0;
+    }
     const look = underwaterLook(under);
     this.water.setRGB(look.r, look.g, look.b);
     // THE COLOUR IS CROSSFADED HERE because underwaterLook() cannot do
@@ -330,7 +377,7 @@ export class Underwater {
     // has no way to ask. Fog and background take the SAME ramp from the
     // SAME sky, which is what keeps them equal — they have to match or
     // the horizon draws a line across itself (see weather/sky.ts).
-    const ramp = rampIn(under);
+    const ramp = rampIn(under) * engaged;
     const fog = this.scene.fog;
     if (fog instanceof THREE.FogExp2) {
       fog.color.lerp(this.water, ramp);
@@ -352,13 +399,13 @@ export class Underwater {
     // taking a fraction of its choice is the whole reason they are
     // multipliers: an overcast pond stays darker than a sunlit one,
     // where two absolute numbers would have thrown the sky away.
-    sun.intensity *= look.sun;
-    sky.intensity *= look.ambient;
+    sun.intensity *= mix(1, look.sun, engaged);
+    sky.intensity *= mix(1, look.ambient, engaged);
     this.material.color.copy(this.water);
-    this.material.opacity = look.tint;
+    this.material.opacity = look.tint * engaged;
     this.pane.visible = true;
     this.seat();
-    return under;
+    return under * engaged;
   }
 
   /**

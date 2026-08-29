@@ -1720,7 +1720,12 @@ export class IslandScene {
     // went under. Same reason the pane is seated here (see below):
     // anything that reads the camera's pose has to run after the pose
     // is final.
-    this.camUnder = this.underwater.update(this.sun, this.skyLight);
+    this.camUnder = this.underwater.update(
+      this.sun, this.skyLight, dt,
+      // Intent, not measurement: a crest washing over a floating
+      // queen must not read as a dive, and a real dive must not wait.
+      !this.flight.aloft && this.dive > 0.15,
+    );
     // AFTER THE WEATHER AND AFTER THE CAMERA, and it needs both.
     //
     // After the weather because applyWeather stamps the fog colour and

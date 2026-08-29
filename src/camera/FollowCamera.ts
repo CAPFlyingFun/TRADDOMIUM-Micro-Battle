@@ -43,13 +43,59 @@ const CALM_RISE = 0.6;
 const CLEARANCE = 1.6;
 
 /**
- * And how far it is held off the WATER, which needs more than the
- * ground does because the water is moving toward it. A crest arrives
- * at the speed of the swell while the camera's own height is
- * deliberately damped (CALM_RISE), so a clearance sized for a static
- * surface is one the next wave closes.
+ * THE SURFACE IS AN ENVELOPE, NOT A FLOOR — and the number that used
+ * to be here is why.
+ *
+ * v0.0.100 held the lens a hard 4 units over the live surface. The
+ * camera sits 3.42 units above her at the default boom (7.8 units at
+ * 26 degrees) and she floats a draught under the surface, so the lens
+ * rides about 3.27 units over the water — LESS than the clearance the
+ * clamp demanded. The clamp was therefore active on every frame of
+ * every float, not on crests: it pinned the lens rigidly to the
+ * surface, so the camera copied 100% of a swell that swings 48 units,
+ * and because the clamp re-seeds the damping filter (easedY, below)
+ * the smoothing could never touch it. Joshua: "like a washing
+ * machine".
+ *
+ * So the lens is allowed under the water now. A crest passing over it
+ * is what being an ant in a swell looks like, and correcting it is
+ * what made the horizon pump. What is corrected is submersion that
+ * LASTS — measured in seconds, not centimetres, because a deep crest
+ * and a shallow one both pass in well under a second while genuinely
+ * sinking does not.
  */
-const SEA_CLEARANCE = 4;
+/** Barely a nudge, applied the whole time the lens is under. */
+const SEA_NUDGE = 10;
+/** And what a sustained submersion gets: enough to clear a crest fast. */
+const SEA_LIFT = 200;
+/**
+ * How long the lens may sit under before anything but the nudge
+ * happens, and how long before the full lift does.
+ *
+ * SIZED AGAINST THE SEA IT IS IN, by sweeping them. The swell's
+ * period is about 1.5 s, so the longest a passing crest can hold the
+ * lens under is roughly 0.7 s, and the choice is a trade: a softer
+ * nudge pumps less and leaves the lens wetter.
+ *
+ *   nudge  3   camera follows 15.5% of her swing, wet 47% of the time
+ *   nudge 10   19.0%, wet 41%, never more than 35 units under
+ *   nudge 25   22.7%, wet 37%
+ *
+ * Ten, because it buys a meaningfully drier lens for three points of
+ * follow, and because the damping alone is already 14.4% — the floor
+ * this can approach but not beat.
+ *
+ * A SLOWER SEA WOULD WANT THESE LONGER. They are seconds of wave, so
+ * if the swell's period ever changes (the live-buoy experiment) they
+ * have to be re-swept against it rather than inherited.
+ */
+const BRIEF = 0.35;
+const PATIENCE = 1.6;
+/**
+ * The one hard line left. Past this the lens is not being washed over,
+ * it is underwater, and no amount of patience should leave it there.
+ */
+const DROWNED = 70;
 
 /**
  * The dive lever, from where the surface clamp starts letting go to
@@ -102,6 +148,8 @@ export class FollowCamera {
   private distance: number;
   /** The camera's own, damped height. Null until the first frame. */
   private easedY: number | null = null;
+  /** Seconds the lens has been continuously under the water. */
+  private sunkFor = 0;
 
   constructor(aspect: number) {
     const dial = settings();
@@ -156,7 +204,8 @@ export class FollowCamera {
     this.place(target, rest, this.desired);
     this.offset.copy(this.desired).sub(target.position);
     this.camera.position.copy(this.desired);
-    this.keepAboveGround(this.camera.position, target.position.y);
+    this.sunkFor = 0;
+    this.keepAboveGround(this.camera.position);
     // A snap is a teleport: the filter starts fresh, or it would
     // glide in from wherever the camera used to be.
     this.easedY = this.camera.position.y;
@@ -208,7 +257,7 @@ export class FollowCamera {
     }
     // The floor still has the last word: a smoothed camera may lag,
     // it may not lag INTO the ground — nor under a wave.
-    this.keepAboveGround(this.camera.position, target.position.y, dive);
+    this.keepAboveGround(this.camera.position, dive, dt);
     this.easedY = this.camera.position.y;
     this.aim(target);
   }
@@ -271,13 +320,13 @@ export class FollowCamera {
    * lens is not the crest under the queen seven units away, and
    * clamping to hers is how the lens dips into a wave she is not in.
    *
-   * DIVING RELEASES IT. Holding the camera above the water is right
+   * DIVING RELEASES IT. Holding the lens out of the water is right
    * while she swims ON it and wrong the moment she goes under, so the
-   * dive lever lifts the clamp — over a band (DIVE_RELEASE_LO..HI) so
-   * the handover is continuous in both directions rather than a
-   * teleport, and behind a deadband so bobbing at the surface cannot
-   * trip it. Fully released, the floor is the old one that rides two
-   * units over her head and follows her down.
+   * dive lever fades the whole envelope out — over a band
+   * (DIVE_RELEASE_LO..HI) so the handover is continuous in both
+   * directions rather than a teleport, and behind a deadband so
+   * bobbing at the surface cannot trip it. Fully released there is no
+   * water term at all and only the seabed is a floor.
    *
    * ASKED IN WORLD COORDINATES, through the named conversion. The
    * camera lives in render space, measured from the floating origin,
@@ -289,19 +338,42 @@ export class FollowCamera {
    * @param dive the eased dive lever, nought at the surface and one on
    *   the bottom — INTENT rather than measurement, so a crest washing
    *   over a floating queen does not read as a decision to submerge.
+   * @param dt seconds this frame, because the correction is a RATE and
+   *   the patience it ramps over is a clock.
    */
-  private keepAboveGround(out: THREE.Vector3, herY: number, dive = 0): void {
+  private keepAboveGround(out: THREE.Vector3, dive = 0, dt = 0): void {
     const above = toWorld(local(out.x, out.z));
     const ground = groundHeight(above.wx, above.wz);
-    let floor = ground + CLEARANCE;
+    // THE GROUND IS STILL A HARD FLOOR. A hillside is not negotiable
+    // and does not move; only the water gets an envelope.
+    const floor = ground + CLEARANCE;
     const spot = waterSpotAt(above.wx, above.wz);
-    if (spot && spot.depth > 0) {
+    const released = smoothstep(DIVE_RELEASE_LO, DIVE_RELEASE_HI, dive);
+    if (spot && spot.depth > 0 && released < 1) {
       // The surface standing over the bed right here, right now.
       const surface = ground + spot.depth;
-      const released = smoothstep(DIVE_RELEASE_LO, DIVE_RELEASE_HI, dive);
-      const sea = (surface + SEA_CLEARANCE) * (1 - released)
-        + (herY - 2 + CLEARANCE) * released;
-      floor = Math.max(floor, sea);
+      const under = surface - out.y;
+      if (under <= 0) {
+        this.sunkFor = 0;
+      } else {
+        this.sunkFor += dt;
+        // URGENCY IS A CLOCK, NOT A DEPTH. A crest forty units deep
+        // and one four units deep both pass in a fraction of a second,
+        // and kicking the camera for either is the pumping this
+        // replaced. What a passing wave cannot do is LAST.
+        const urgency = smoothstep(BRIEF, PATIENCE, this.sunkFor);
+        const rise = (SEA_NUDGE + (SEA_LIFT - SEA_NUDGE) * urgency)
+          * (1 - released);
+        // Never overshoot into the air: the most this may do is put
+        // the lens exactly on the surface.
+        out.y += Math.min(rise * dt, under);
+        // …and the one hard line. Past DROWNED the lens is not being
+        // washed over, it is under, whatever the clock says.
+        const deepest = surface - DROWNED * (1 - released);
+        if (out.y < deepest) out.y = deepest;
+      }
+    } else {
+      this.sunkFor = 0;
     }
     if (out.y < floor) out.y = floor;
   }

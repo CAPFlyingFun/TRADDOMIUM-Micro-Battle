@@ -76,12 +76,21 @@ const framesUnder = wet.filter((v) => v > 0).length;
 
 console.log(`\nfloating frames: ${afloat.length} of ${rows.length}`
   + `   (frames with the dive lever down: ${dived})`);
-console.log('\nTASK 1 — the lens against the live surface');
+console.log('\nCAMERA — how wet the lens got (informational)');
 console.log(`  worst camUnder while afloat: ${worstUnder.toFixed(3)} units`);
 console.log(`  frames with the lens under water: ${framesUnder}`);
-console.log(framesUnder === 0
-  ? '  PASS  the camera never crossed the surface while she floated'
-  : `  FAIL  the lens went under on ${framesUnder} frames, worst ${worstUnder.toFixed(2)}`);
+// THE CONTRACT CHANGED AT v0.0.101 AND THIS IS NO LONGER PASS/FAIL.
+// Holding the lens mathematically above the water is what caused the
+// pumping: the clearance was larger than the height the camera
+// naturally rides at, so the clamp fired every frame and the camera
+// copied the whole swell. Being washed over is expected now. What
+// matters is that the camera does not FOLLOW the sea, and that no wash
+// lasts long enough to raise the underwater tint — both wave-rate
+// properties this renderer's 1.5 fps cannot resolve, so they are
+// pinned in tests/cameraWater.test.ts at 60 Hz instead.
+console.log('  (informational — being washed over is expected now; the'
+  + ' no-pumping and no-tint-flash contracts live in'
+  + ' tests/cameraWater.test.ts)');
 
 console.log('\nTASK 2 — the sea carrying her');
 if (afloat.length > 12) {
