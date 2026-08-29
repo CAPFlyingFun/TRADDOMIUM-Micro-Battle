@@ -340,11 +340,20 @@ export const HEAVE_ORDER = 3;
  * generated sea and 8.8% on the shipped one, and the chop lands at
  * 1.7% and 3.4% — near enough to none.
  *
- * NOT ZERO, deliberately. A camera pinned to a perfectly level plane
- * while she rides a metre of swell reads as detached from her; a small
- * sympathetic motion keeps them one object without the horizon moving.
+ * ZERO AS OF v0.0.108, and the reason is the AIM rather than the
+ * height. Fifteen per cent still felt like a washing machine on the
+ * phone, because the camera was never the only thing moving: it looked
+ * AT her, and at a 7.8 unit boom a queen 22 units down in a trough
+ * swings the view through sixty degrees of pitch. Height gain of any
+ * value cannot fix that; only a view that stops chasing her vertical
+ * can. With the aim referenced to the sea datum too (FollowCamera),
+ * the pitch is whatever the player asked for and nothing else, and
+ * there is then no reason for the height to go along with the wave at
+ * all. Kept as a constant rather than deleted because it is the dial
+ * to reach for if the lens ever wants a little sympathetic motion
+ * back.
  */
-export const CAMERA_FOLLOW = 0.15;
+export const CAMERA_FOLLOW = 0;
 
 export function heaveGain(omega: number): number {
   const period = (2 * Math.PI) / Math.max(omega, 1e-9);

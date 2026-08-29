@@ -27,8 +27,8 @@ import { FollowCamera } from '../src/camera/FollowCamera';
 import { useWaterQuery, waterSpotAt } from '../src/world/waterQuery';
 import {
   CAMERA_FOLLOW, HEAVE_CORNER_S, HEAVE_ORDER, activeWaves, heaveGain,
-  resetSwell, seaChopAt, seaHeaveAt, seaHoldAt, seaSwellAt, swellPeriod,
-  tickSwell,
+  resetSwell, seaChopAt, seaHeaveAt, seaHoldAt, seaSwellAt, swellAmplitude,
+  swellPeriod, tickSwell,
 } from '../src/world/seaSwell';
 import { SETTLE_BEATS, SPLASH_BEATS, settleSeconds, splashSeconds }
   from '../src/world/Underwater';
@@ -45,6 +45,64 @@ const SEAS: [string, () => void][] = [
   ['the shipped sea', () => useFixedSea()],
   ['the procedural sea', () => { useProceduralSea(GENERATION); }],
 ];
+
+/**
+ * Float her on the installed sea, hands off, and report what the
+ * PLAYER would have seen — the view's own pitch as well as the
+ * camera's height, because the pitch is the thing that moves a
+ * horizon.
+ */
+function float(seconds: number, dive = 0) {
+  const ant = new THREE.Object3D();
+  const follow = new FollowCamera(2);
+  useWaterQuery((wx, wz) => ({
+    depth: BED + seaSwellAt(wx, wz, BED), flowX: 0, flowZ: 0, salt: true,
+    hold: seaHoldAt(wx, wz, BED),
+  }));
+  ant.position.set(0, BED, 0);
+  follow.snapTo(ant);
+  const her: number[] = []; const lens: number[] = []; const pitch: number[] = [];
+  const reference = follow.seaLensHeight();
+  const wouldHave: number[] = []; const over: number[] = []; const gap: number[] = [];
+  let washes = 0; let wet = false; let ups = 0; let last = 0;
+  let deepest = 0; let streak = 0; let longestWash = 0;
+  const dir = new THREE.Vector3();
+  for (let t = -14; t < seconds; t += DT) {
+    tickSwell(DT);
+    const swell = seaSwellAt(0, 0, BED);
+    ant.position.y = BED + swell - 0.15;
+    follow.update(ant, REST, DT, true, dive);
+    if (t < 0) { last = swell; continue; }
+    follow.camera.getWorldDirection(dir);
+    pitch.push((Math.asin(dir.y) * 180) / Math.PI);
+    // What the same float would have looked like if the view still
+    // aimed at her: the pitch of the line from this lens to her.
+    wouldHave.push((Math.atan2(
+      ant.position.y + 0.6 - follow.camera.position.y,
+      Math.hypot(follow.camera.position.x - ant.position.x,
+        follow.camera.position.z - ant.position.z),
+    ) * 180) / Math.PI);
+    her.push(ant.position.y);
+    lens.push(follow.camera.position.y);
+    over.push(follow.camera.position.y - BED);
+    gap.push(ant.position.y - (follow.camera.position.y - 3.42));
+    const under = BED + swell - follow.camera.position.y;
+    if (under > 0 && !wet) { washes++; wet = true; } else if (under <= 0) wet = false;
+    if (under > 0) { deepest = Math.max(deepest, under); streak += DT; } else streak = 0;
+    longestWash = Math.max(longestWash, streak);
+    if (last <= 0 && swell > 0) ups++;
+    last = swell;
+  }
+  useWaterQuery(null);
+  const span = (a: number[]) => Math.max(...a) - Math.min(...a);
+  return {
+    herSwing: span(her), lensSwing: span(lens),
+    pitchSwingDeg: span(pitch), aimedAtHerSwingDeg: span(wouldHave),
+    lensOverDatum: over.reduce((s2, v) => s2 + v, 0) / over.length,
+    reference,
+    herAgainstAim: span(gap), washes, waves: ups, deepest, longestWash,
+  };
+}
 
 describe('LOSSLESS — the split is the sea, not a second one', () => {
   for (const [name, install] of SEAS) {
@@ -166,50 +224,83 @@ describe('IN STEP — a spectral filter has no lag, which is the point', () => {
     expect(worst).toBeLessThan(0.02);
   });
 
-  it('and the camera goes along with it in step, not behind it', () => {
+  it('and the camera does not go along with it at all', () => {
+    // v0.0.108: the height gain is zero. What holds the horizon is not
+    // a small follow, it is that the AIM stopped chasing her.
     resetSwell(); useProceduralSea(GENERATION);
-    const ant = new THREE.Object3D();
-    const follow = new FollowCamera(2);
-    useWaterQuery((wx, wz) => ({
-      depth: BED + seaSwellAt(wx, wz, BED), flowX: 0, flowZ: 0, salt: true,
-      hold: seaHoldAt(wx, wz, BED),
-    }));
-    ant.position.set(0, BED, 0);
-    follow.snapTo(ant);
-    const cam: number[] = [];
-    const heave: number[] = [];
-    for (let t = -12; t < 60; t += DT) {
-      tickSwell(DT);
-      ant.position.y = BED + seaSwellAt(0, 0, BED) - 0.15;
-      follow.update(ant, REST, DT, true, 0);
-      if (t < 0) continue;
-      // THE ENVELOPE'S LIFT IS NOT PART OF THIS. It responds to
-      // submersion, so it necessarily trails the wave that caused it —
-      // that is what a correction IS. What must not lag is the sea
-      // term, and now that the camera only rides a fifteenth of the
-      // heave, the lift would otherwise be most of what is left to
-      // measure and would swamp the question.
-      cam.push(follow.camera.position.y - follow.liftHeld());
-      heave.push(seaHeaveAt(0, 0, BED));
+    expect(CAMERA_FOLLOW).toBe(0);
+    const r = float(120);
+    // She swings a metre and a third; the lens barely moves, and what
+    // little it does is the water envelope, not the wave.
+    expect(r.herSwing).toBeGreaterThan(100);
+    expect(r.lensSwing).toBeLessThan(r.herSwing * 0.1);
+  });
+
+  it('holds the VIEW DIRECTION still, which is the actual fault', () => {
+    // THE ONE THAT MATTERS. Three versions held the camera's HEIGHT
+    // steadier and steadier and the phone still called it a washing
+    // machine, because `aim` looked at her: at a 7 unit lever arm a
+    // queen 22 units down in a trough puts the view sixty degrees
+    // below level and a crest puts it back. Pitch is what sweeps the
+    // horizon across the screen, not height.
+    for (const [name, install] of SEAS) {
+      resetSwell(); install();
+      const r = float(120);
+      // The view direction must be what the boom asks for and nothing
+      // else — a fraction of a degree of drift, not tens of them.
+      expect(r.pitchSwingDeg, name).toBeLessThan(2);
+      // And this is what aiming at her would have done instead, on the
+      // very same float: the fault, measured rather than asserted.
+      expect(r.aimedAtHerSwingDeg, name).toBeGreaterThan(20);
     }
-    const corr = (shift: number) => {
-      const mc = cam.reduce((s, v) => s + v, 0) / cam.length;
-      const mh = heave.reduce((s, v) => s + v, 0) / heave.length;
-      let num = 0;
-      for (let i = shift; i < cam.length; i++) num += (cam[i] - mc) * (heave[i - shift] - mh);
-      return num / (cam.length - shift);
-    };
-    // Correlate at zero offset against one shifted a fifth and a half
-    // second: a lagging camera would match a SHIFTED sea better.
-    expect(corr(0)).toBeGreaterThan(corr(12));
-    expect(corr(0)).toBeGreaterThan(corr(30));
-    // And what it goes along with is exactly the share it is allowed:
-    // a regression on the number Stage E first got wrong.
-    const gain = (corr(0) / (() => {
-      const mh = heave.reduce((s, v) => s + v, 0) / heave.length;
-      return heave.reduce((s, v) => s + (v - mh) * (v - mh), 0) / heave.length;
-    })());
-    expect(gain).toBeCloseTo(CAMERA_FOLLOW, 2);
+  });
+
+  it('floats the lens just under the sea\'s advertised crest', () => {
+    // Not at the crest (nothing would ever wash it, and the sea would
+    // never reach the player) and not at mean level (every wave would
+    // bury it).
+    for (const [name, install] of SEAS) {
+      resetSwell(); install();
+      const r = float(60);
+      const crest = swellAmplitude();
+      // A REFERENCE, NOT A SAMPLE. Read straight off the sea's own
+      // advertised crest, so no wave and no group can move it.
+      expect(r.reference, name).toBeCloseTo(crest - 8, 6);
+      // And that is where the lens actually sits, give or take
+      // whatever the water envelope is holding it up by.
+      expect(r.lensOverDatum, name).toBeGreaterThan(crest - 12);
+      expect(r.lensOverDatum, name).toBeLessThan(crest + 4);
+    }
+  });
+
+  it('is only ever LAPPED by a crest, never submerged by one', () => {
+    // WHAT THE MARGIN ACTUALLY BUYS, and it is not rarity — the two
+    // seas' crest distributions are too different for one length to
+    // mean the same thing in both (measured: at 8 units of margin the
+    // shipped sea's crests reach the lens on 71% of waves and the
+    // generated sea's on none, because the shipped table's peak sum is
+    // 1.8x its rms and the generated field's is 2.9x). What the margin
+    // guarantees on both is that a crest can only ever LAP the lens:
+    // it cannot reach it by more than the margin itself, and it cannot
+    // stay, so the water washes across the view instead of closing
+    // over it. Which is the fault the whole envelope exists for.
+    for (const [name, install] of SEAS) {
+      resetSwell(); install();
+      const r = float(240);
+      expect(r.waves, name).toBeGreaterThan(20);
+      // Never deeper than the margin — the lens is not going under.
+      expect(r.deepest, name).toBeLessThan(12);
+      // And never for long: well inside the splash the tint ignores.
+      expect(r.longestWash, name).toBeLessThan(splashSeconds());
+    }
+  });
+
+  it('and she rides right through the frame while it does', () => {
+    // The acceptance in one line: she moves, the view does not.
+    resetSwell(); useProceduralSea(GENERATION);
+    const r = float(120);
+    expect(r.herAgainstAim).toBeGreaterThan(100);
+    expect(r.lensSwing).toBeLessThan(15);
   });
 });
 

@@ -73,11 +73,14 @@ The shore's depth-limited breaking envelope applies to both seas and is
 measured by `npm run measure:breaker`; `npm run probe:breaker <tag>`
 photographs the surf zone so two builds can be put side by side.
 
-The camera goes along with a small SHARE of the sea's slow half
-(`seaSwell.CAMERA_FOLLOW`, 15%) and none of its fast half, split per
-component in `seaSwell` (`heaveGain`) and carried to the camera on the
-water query's `hold` — the part of the column the view must hold still
-against. The horizon is what has to stay put; the waves move under her. It is a spectral filter, not a temporal one,
+Afloat, the camera holds a fixed height over the STILL-WATER DATUM and
+the aim point takes the same shift, so the view direction is whatever
+the player's drag asks for and nothing else — measured, zero degrees of
+pitch drift over four minutes, where aiming at her swung it 128. The
+queen rides up and down through the frame; the horizon does not move.
+The water query carries `hold` (`seaSwell.seaHoldAt`) for it, and the
+lens floats `CREST_MARGIN` under the sea's advertised crest so a tall
+crest can lap it without closing over it. Diving releases the lock. It is a spectral filter, not a temporal one,
 so there is no lag to be caught out by — and every patience around it
 (the envelope's, the underwater tint's) is a fraction of the sea's own
 period rather than a fixed number of seconds. `npm run measure:camera`
