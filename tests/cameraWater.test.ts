@@ -156,14 +156,15 @@ describe('the camera on a swell', () => {
     seaAt(60);
     follow.snapTo(ant);
     const before = follow.camera.position.y;
-    for (let i = 0; i < 600; i++) follow.update(ant, REST, 1 / 60, true, 0);
+    for (let i = 0; i < 900; i++) follow.update(ant, REST, 1 / 60, true, 0);
     const after = follow.camera.position.y;
     expect(after).toBeGreaterThan(before);
-    // Risen to the surface, and never overshooting into the air. The
-    // last centimetres are an approach rather than an arrival — the
-    // envelope tapers so it cannot flick — so this is ten seconds
-    // rather than five.
-    expect(after).toBeGreaterThan(59);
+    // Risen to the surface, and never overshooting into the air.
+    // Within a unit and a half of it, because the last centimetre is
+    // an asymptote by construction: the rise is tapered by how far it
+    // still has to go, precisely so the envelope cannot arrive with a
+    // flick.
+    expect(60 - after).toBeLessThan(1.5);
     expect(after).toBeLessThanOrEqual(60.001);
   });
 

@@ -4,7 +4,7 @@ import { groundHeight } from '../world/heightfield';
 import { local } from '../world/coords';
 import { toWorld } from '../world/origin';
 import { waterSpotAt } from '../world/waterQuery';
-import { swellAmplitude, swellPeriod, swellReach } from '../world/seaSwell';
+import { crestHeight, swellPeriod, swellReach } from '../world/seaSwell';
 import { settings } from '../ui/settings';
 
 /**
@@ -206,9 +206,33 @@ const DIVE_RELEASE_HI = 0.55;
  * crest at 0.39 of the depth. The honest advertised crest is the
  * table's own peak sum.
  */
-const CREST_MARGIN = 8;
+const CREST_QUANTILE = 0.85;
 
-function smoothstep(lo: number, hi: number, v: number): number {
+/**
+ * WHY THERE IS NO FRAMING CORRECTOR HERE — measured, v0.0.110.
+ *
+ * The ask was a dead zone around the centre of the frame: hold the
+ * datum while she is inside it, give ground slowly when a swell takes
+ * her out. It was built and swept, and it does not work at this scale,
+ * for a reason arithmetic settles rather than taste.
+ *
+ * The frame accepts about eleven units of height at a 7.8 unit boom
+ * and sixty degrees; she rides a hundred and ninety. So the dead zone
+ * is a window she is essentially never inside, the correction is
+ * therefore always saturated, and a saturated rate limit is a chaser
+ * that is always behind — which made framing WORSE (on screen 19% ->
+ * 16% on the shipped sea) while dragging the lens under on every wave
+ * (21% -> 101%). Following the slow heave instead, with no lag at all,
+ * fails the same way from the other side: it lifts the lens with the
+ * macro and she leaves the picture underneath it (2% -> 0%).
+ *
+ * The deadlock is real and it is not a camera-tuning problem: a lens
+ * high enough to stay dry is a lens she cannot be framed against, and
+ * they are the same number. The variable that breaks it is the BOOM,
+ * which is not this pass's to change — see the report on Trello.
+ */
+
+/** Where the lens floats, in the sea's own crest distribution. */function smoothstep(lo: number, hi: number, v: number): number {
   const t = Math.min(1, Math.max(0, (v - lo) / (hi - lo)));
   return t * t * (3 - 2 * t);
 }
@@ -590,7 +614,8 @@ export class FollowCamera {
     // the player has dragged it to. (Her draught, a sixth of a unit,
     // is not worth carrying.)
     const overDatum = this.camera.position.y - target.position.y;
-    return (-spot.hold + Math.max(0, this.lensHeight() - overDatum)) * lock;
+    const datum = (-spot.hold + Math.max(0, this.lensHeight() - overDatum)) * lock;
+    return datum;
   }
 
   /**
@@ -601,7 +626,7 @@ export class FollowCamera {
    * group cannot drag the reference around with it.
    */
   private lensHeight(): number {
-    return Math.max(0, swellAmplitude() - CREST_MARGIN);
+    return Math.max(0, crestHeight(CREST_QUANTILE));
   }
 
   /** How far the datum lock moved the view, for probes and tests. */

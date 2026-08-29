@@ -88,7 +88,10 @@ pitch drift over four minutes, where aiming at her swung it 128. The
 queen rides up and down through the frame; the horizon does not move.
 The water query carries `hold` (`seaSwell.seaHoldAt`) for it, and the
 lens floats `CREST_MARGIN` under the sea's advertised crest so a tall
-crest can lap it without closing over it. Diving releases the lock. It is a spectral filter, not a temporal one,
+crest can lap it without closing over it. Diving releases the lock. The lens floats at the 85th percentile of the
+sea's own crest distribution (`seaSwell.crestHeight`), so about one
+wave in five reaches it whatever the sea is made of — a fixed margin
+under the tallest crest does not mean the same thing twice. It is a spectral filter, not a temporal one,
 so there is no lag to be caught out by — and every patience around it
 (the envelope's, the underwater tint's) is a fraction of the sea's own
 period rather than a fixed number of seconds. `npm run measure:camera`

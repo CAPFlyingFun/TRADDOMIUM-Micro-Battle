@@ -47,6 +47,7 @@ function float(seconds: number, dive = 0) {
   const dir = new THREE.Vector3();
   const her: number[] = []; const lens: number[] = []; const pitch: number[] = [];
   const chased: number[] = []; const gap: number[] = [];
+  const screen: number[] = []; const held: number[] = [];
   let washes = 0; let wet = false; let ups = 0; let last = 0;
   let deepest = 0; let streak = 0; let longest = 0;
   const reference = follow.seaLensHeight();
@@ -66,6 +67,18 @@ function float(seconds: number, dive = 0) {
     her.push(ant.position.y);
     lens.push(follow.camera.position.y - BED);
     gap.push(ant.position.y - (follow.camera.position.y - 3.42));
+    // Where she sits in the picture: project her against the view.
+    const toHer = new THREE.Vector3().copy(ant.position).sub(follow.camera.position);
+    const flat = Math.hypot(toHer.x, toHer.z);
+    const axis = Math.atan2(dir.y, Math.hypot(dir.x, dir.z));
+    const hers = Math.atan2(toHer.y, flat);
+    const half = Math.tan((follow.camera.fov * Math.PI) / 360);
+    // Past a right angle she is beside or behind the lens and `tan`
+    // stops meaning anything; she is simply off the picture.
+    const off = hers - axis;
+    screen.push(Math.abs(off) >= Math.PI / 2 - 1e-3
+      ? Math.sign(off) * 99 : Math.tan(off) / half);
+    held.push(follow.holdTaken());
     const under = BED + swell - follow.camera.position.y;
     if (under > 0 && !wet) { washes++; wet = true; } else if (under <= 0) wet = false;
     if (under > 0) { deepest = Math.max(deepest, under); streak += DT; } else streak = 0;
@@ -79,6 +92,11 @@ function float(seconds: number, dive = 0) {
     chased: span(chased), reference,
     lensMean: lens.reduce((s2, v) => s2 + v, 0) / lens.length,
     gap: span(gap), washes, waves: ups, deepest, longest,
+    inBand: screen.filter((v) => Math.abs(v) <= 0.15).length / screen.length,
+    onScreen: screen.filter((v) => Math.abs(v) <= 1).length / screen.length,
+    worstScreen: Math.max(...screen.map(Math.abs)),
+    frameSwing: span(held), frameSpeed: Math.max(...held.map((v, i) => (
+      i === 0 ? 0 : Math.abs(v - held[i - 1]) * HZ))),
     endHer: her[her.length - 1] - BED, endLens: lens[lens.length - 1],
   };
 }
@@ -109,11 +127,15 @@ for (const [label, install] of SEAS) {
     + ` (${(r.washes / r.waves * 100).toFixed(0)}%)`);
   console.log(`    deepest ${f2(r.deepest, 1)} units, longest ${f2(r.longest)} s`
     + `   (the tint ignores anything under ${f2(splashSeconds())} s)`);
-  console.log('\n  FRAMING — the consequence to look at on the phone');
-  console.log(`    she moves ${f2(r.gap, 0)} units against the aim point;`
-    + ' the frame accepts 10.9');
-  console.log(`    so she is inside it for about`
-    + ` ${(Math.min(1, 10.9 / r.gap) * 100).toFixed(0)}% of a wave`);
+  console.log('\n  FRAMING — where she actually is in the picture');
+  console.log(`    inside the dead band (middle 30%):`
+    + ` ${(r.inBand * 100).toFixed(0)}% of frames`);
+  console.log(`    inside the frame at all:`
+    + ` ${(r.onScreen * 100).toFixed(0)}% of frames`);
+  console.log(`    worst she got: ${f2(r.worstScreen, 2)} of a half-frame`
+    + '   (1.0 is the edge)');
+  console.log(`    the framing gave ground by ${f2(r.frameSwing, 1)} units,`
+    + ` at up to ${f2(r.frameSpeed, 1)} cm/s`);
 
   resetSwell(); install();
   const d = float(20, 1, );
