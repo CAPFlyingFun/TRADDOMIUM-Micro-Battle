@@ -9,7 +9,7 @@ import {
   BEST_GLIDE_RATIO, BEST_GLIDE_SPEED, CRUISE_SPEED, Flight, FLIGHT_TURN_RATE,
   glideRatio, MAX_BANK, MAX_DIVE_SPEED, MAX_POWERED_SPEED, setFlightScale,
   SIDESTEP_SHARE, STALL_SPEED, TAKEOFF_COST, TAKEOFF_SPEED, THRUST,
-  TURN_SHARE, WATER_LAUNCH_SPEED, type FlightDemand,
+  TURN_SHARE, WATER_LAUNCH_LIFT, WATER_LAUNCH_SPEED, type FlightDemand,
 } from '../src/ant/flight';
 import { PACE_SPEED, SPEED_EASE, SPRINT_SPEED } from '../src/ant/pace';
 import { REARM_AT, Stamina } from '../src/ant/stamina';
@@ -126,15 +126,50 @@ describe('the water launch', () => {
   });
 
   /**
-   * TEN CENTIMETRES, which is Joshua's number — and it comes free from
-   * the scripted second a ground takeoff already uses: LAUNCH_RATE 20
-   * eased over LAUNCH_SECONDS 1 integrates to 20 x 0.5 x 1.
+   * TWENTY CENTIMETRES — twice a ground takeoff, "to help miss the
+   * large waves" (Joshua, on v0.0.123). The table's two components
+   * peak at 22 units of amplitude, so a crest stands about 22 cm over
+   * mean water: this clears an ordinary sea and is still marginal
+   * against a full crest caught from a trough.
    */
-  it('lifts her about ten centimetres in its first second', () => {
+  it('lifts her about twenty centimetres in its first second', () => {
     const f = new Flight();
     f.launch(1, 0);
     for (let i = 0; i < 60; i++) f.update(neutral, 1, false, 1 / 60);
-    expect(f.height).toBeGreaterThan(8);
+    expect(f.height).toBeGreaterThan(16);
+    expect(f.height).toBeLessThan(24);
+  });
+
+  /**
+   * AND THE GROUND TAKEOFF IS UNTOUCHED, which is the whole reason the
+   * doubling is a per-launch multiplier rather than a bigger
+   * LAUNCH_RATE. The one-second ease to ten centimetres is Joshua's
+   * own earlier fix for "I shoot up to +10cm in less than 0.1s".
+   */
+  it('without touching what a takeoff off the ground does', () => {
+    const g = new Flight();
+    g.takeOff(TAKEOFF_SPEED, 1, 0);
+    for (let i = 0; i < 60; i++) g.update(neutral, 1, false, 1 / 60);
+    expect(g.height).toBeGreaterThan(8);
+    expect(g.height).toBeLessThan(12);
+
+    const w = new Flight();
+    w.launch(1, 0);
+    for (let i = 0; i < 60; i++) w.update(neutral, 1, false, 1 / 60);
+    expect(w.height / g.height).toBeCloseTo(WATER_LAUNCH_LIFT, 1);
+  });
+
+  /**
+   * The boost belongs to ONE launch. A queen who launches, is put back
+   * down, then runs up off the beach must get the ground curve.
+   */
+  it('and the doubling does not leak into the next takeoff', () => {
+    const f = new Flight();
+    f.launch(1, 0);
+    for (let i = 0; i < 20; i++) f.update(neutral, 1, false, 1 / 60);
+    f.land();
+    f.takeOff(TAKEOFF_SPEED, 1, 0);
+    for (let i = 0; i < 60; i++) f.update(neutral, 1, false, 1 / 60);
     expect(f.height).toBeLessThan(12);
   });
 

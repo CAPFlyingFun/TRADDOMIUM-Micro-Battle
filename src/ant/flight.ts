@@ -236,6 +236,29 @@ export const AIRBORNE_HEIGHT = 2.5;
 export const WATER_LAUNCH_SPEED = MAX_POWERED_SPEED;
 
 /**
+ * AND HOW MUCH HIGHER SHE GOES LEAVING WATER THAN LEAVING GROUND —
+ * twice, so the launch second lifts her twenty centimetres instead of
+ * ten. Joshua, on v0.0.123: "should double the height of the jump up
+ * to fly to help miss the large waves."
+ *
+ * A MULTIPLIER RATHER THAN A BIGGER LAUNCH_RATE, because that rate is
+ * shared with the ground takeoff and the ground takeoff is already
+ * tuned — the one-second ease to ten centimetres IS his earlier fix
+ * for "as soon as I lift off from the ground I shoot up to +10cm in
+ * less than 0.1s". Raising the shared constant would undo that.
+ *
+ * WHAT THE WAVES ACTUALLY ARE, since that is what the number is for:
+ * the table's two components peak at 16 + 6 = 22 units of amplitude,
+ * so a crest stands about 22 cm over mean water and 44 cm over a
+ * trough — and shoaling grows both toward the beach. Twenty
+ * centimetres in the first second clears an average sea and is still
+ * marginal against a full crest caught from a trough. She keeps
+ * climbing after that second on the lever, so this is the head start
+ * rather than the ceiling.
+ */
+export const WATER_LAUNCH_LIFT = 2;
+
+/**
  * HOW LONG THE WINGS TAKE TO TAKE HER WEIGHT.
  *
  * takeOff used to hand her half the climb rate on its very first frame
@@ -609,11 +632,13 @@ export class Flight {
    * are carrying her and the lever has full authority.
    */
   private launching = 1;
+  /** How much of LAUNCH_RATE this particular launch gets. */
+  private launchBoost = 1;
 
   /** The most she may climb right now, easing open across the ramp. */
   private launchGate(): number {
     const t = this.launching;
-    return LAUNCH_RATE * scale * (t * t * (3 - 2 * t));
+    return LAUNCH_RATE * scale * this.launchBoost * (t * t * (3 - 2 * t));
   }
 
   get climbing(): number {
@@ -682,6 +707,7 @@ export class Flight {
     this.tilt = 0;
     this.rise = 0;
     this.launching = 0;
+    this.launchBoost = 1;
     this.above = 0.01;
     this.air.reset();
     this.drift = 0;
@@ -723,6 +749,7 @@ export class Flight {
     this.tilt = 0;
     this.rise = 0;
     this.launching = 0;
+    this.launchBoost = WATER_LAUNCH_LIFT;
     this.above = 0.01;
     this.air.reset();
     this.drift = 0;
@@ -743,6 +770,10 @@ export class Flight {
   hold(above: number, facing: number): void {
     this.state = 'powered';
     this.ground = null;
+    // The boost belongs to ONE launch. Cleared on every other door
+    // into the model so a launch interrupted part-way can never leave
+    // a doubled climb gate armed for whatever happens next.
+    this.launchBoost = 1;
     this.above = Math.max(0.01, above);
     this.speed = CRUISE_SPEED;
     this.facing = facing;
@@ -757,6 +788,7 @@ export class Flight {
   land(): void {
     this.state = 'grounded';
     this.ground = null;
+    this.launchBoost = 1;
     this.above = 0;
     this.speed = 0;
     this.rise = 0;
