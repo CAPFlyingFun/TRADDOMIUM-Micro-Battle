@@ -48,17 +48,18 @@ describe('the ceilings themselves', () => {
 });
 
 /**
- * THE MISMATCH, WRITTEN DOWN. Joshua asked for crawl 25 / walk 50 /
- * run 75 / sprint 100 across all three. The AIR is exactly that, by
- * construction. LAND is four hand-tuned speeds that do not land on
- * quarters, and SEA inherits land's ratios exactly because PADDLE_PACE
- * scales every rung equally.
+ * THE AGREEMENT, PINNED. Joshua asked for crawl 25 / walk 50 / run 75 /
+ * sprint 100 across all three media, and as of the quarters retune all
+ * three are that: air by construction, land by the retuned PACE_SPEED,
+ * sea because PADDLE_PACE scales every rung equally and the ratios
+ * survive it exactly.
  *
- * This test states the tuning as it stands. If the land table is ever
- * moved onto quarters it will fail, which is the point: that is a feel
- * change to every step she takes and should not pass silently.
+ * These were the tests that FAILED on that retune, which is what they
+ * were written for — moving the land table is a feel change to every
+ * step she takes and must never pass silently. They still hold that
+ * door: drifting any rung off its quarter fails here.
  */
-describe('the tiers are not the same share in every medium', () => {
+describe('the tiers are the same share in every medium', () => {
   it('AIR is quarters, exactly', () => {
     expect(paceShare('air', 'crawl')).toBeCloseTo(0.25, 9);
     expect(paceShare('air', 'walk')).toBeCloseTo(0.5, 9);
@@ -68,12 +69,32 @@ describe('the tiers are not the same share in every medium', () => {
     expect(AUTO_AIRSPEED.walk).toBeCloseTo(MAX_POWERED_SPEED * 0.5, 9);
   });
 
-  it('LAND is not — 12 / 39 / 67 / 100', () => {
-    expect(paceShare('land', 'crawl')).toBeCloseTo(2.2 / 18, 9);
-    expect(paceShare('land', 'walk')).toBeCloseTo(7 / 18, 9);
-    expect(paceShare('land', 'run')).toBeCloseTo(12 / 18, 9);
+  it('LAND is too, since the retune — 25 / 50 / 75 / 100', () => {
+    expect(paceShare('land', 'crawl')).toBeCloseTo(0.25, 9);
+    expect(paceShare('land', 'walk')).toBeCloseTo(0.5, 9);
+    expect(paceShare('land', 'run')).toBeCloseTo(0.75, 9);
     expect(paceShare('land', 'sprint')).toBe(1);
-    expect(paceShare('land', 'crawl')).toBeLessThan(0.25);
+    // The literals too, so moving SPRINT_SPEED alone cannot keep the
+    // shares looking right while changing every speed underneath them.
+    expect(PACE_SPEED.crawl).toBe(4.5);
+    expect(PACE_SPEED.walk).toBe(9);
+    expect(PACE_SPEED.run).toBe(13.5);
+    expect(SPRINT_SPEED).toBe(18);
+  });
+
+  it('but the SPEEDS still differ by medium, and should', () => {
+    // Same rung, three different worlds. Sharing a share is not sharing
+    // a speed: a CRAWL in the air (17.5) all but matches a SPRINT on
+    // foot (18), and comfortably outruns a run.
+    expect(paceCeiling('air', 'crawl')).toBeGreaterThan(paceCeiling('land', 'run'));
+    expect(paceCeiling('air', 'crawl') / paceCeiling('land', 'sprint'))
+      .toBeGreaterThan(0.95);
+
+    // And the retune changed a real ordering rather than only the
+    // labels: paddling flat out is 3.96, which used to BEAT the 2.2
+    // crawl on land and now sits below the 4.5 one. Slowest thing she
+    // can do on her feet is faster than the fastest she can swim.
+    expect(paceCeiling('sea', 'sprint')).toBeLessThan(paceCeiling('land', 'crawl'));
   });
 
   it('and SEA inherits land exactly, because the paddle scales it all', () => {
@@ -98,7 +119,7 @@ describe('what she is on right now', () => {
 
   it('and reads as one short cell', () => {
     expect(gaitWords('air', 'walk')).toBe('walk 50%');
-    expect(gaitWords('land', 'crawl')).toBe('crawl 12%');
+    expect(gaitWords('land', 'crawl')).toBe('crawl 25%');
     expect(gaitWords('sea', 'sprint')).toBe('sprint 100%');
   });
 });

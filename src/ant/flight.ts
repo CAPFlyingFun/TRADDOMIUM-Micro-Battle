@@ -199,15 +199,21 @@ export const EXHAUSTED_GLIDE_RATIO = 0.2;
 /**
  * She has to be doing at least this on the ground to get airborne.
  *
- * JUST UNDER a full walk (7), not equal to it. Her ground speed eases
- * onto the pace ceiling exponentially, so it approaches 7 and never
+ * INSIDE a walk, not at the top of it. Her ground speed eases onto the
+ * pace ceiling exponentially, so it approaches the ceiling and never
  * arrives — setting the threshold at the ceiling itself meant a walk
  * could never take off, only a run, which is the opposite of the
  * design: crawl too slow, a proper walk enough, a run easy.
  *
- * The margin has to clear the ease in a reasonable time rather than
- * merely be smaller. At SPEED_EASE this is about four tenths of a
- * second of walking, and a test holds it there.
+ * It was set at 6.5 against a 7 walk, a margin of half a unit chosen to
+ * clear the ease in about four tenths of a second. The quarters retune
+ * (pace.ts) moved the walk to 9 and the crawl to 4.5, and 6.5 was left
+ * where it was rather than dragged up with them: the ladder it has to
+ * respect still holds — 4.5 crawl below it, 9 walk above — and moving
+ * it would have changed how takeoff FEELS as a side effect of a pace
+ * change nobody asked to reach this far. What it costs is that the walk
+ * now clears it early rather than at the last moment. A test holds the
+ * ladder; the margin is no longer the tuned number it was.
  */
 export const TAKEOFF_SPEED = 6.5;
 /** A one-off price for leaving the ground, as a fraction of the bar. */

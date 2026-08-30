@@ -24,11 +24,24 @@ export type Pace = 'crawl' | 'walk' | 'run';
 /** Slowest first — the order the selector stacks them in. */
 export const PACES: readonly Pace[] = ['crawl', 'walk', 'run'];
 
-/** World units per second at FULL stick, per pace. */
+/**
+ * World units per second at FULL stick, per pace.
+ *
+ * QUARTERS OF THE SPRINT, on purpose (Joshua, 2026-08-30). The air
+ * table has always been literal quarters of `MAX_POWERED_SPEED`, and
+ * land was four hand-tuned speeds — 2.2 / 7 / 12 — that came out at
+ * 12 / 39 / 67 per cent of a sprint. Two ladders with the same four
+ * rung NAMES and different rung HEIGHTS is a readout nobody can trust
+ * and a feel that changes meaning when she leaves the ground, so land
+ * now sits on the same quarters: 25 / 50 / 75 / 100.
+ *
+ * Sea inherits this exactly and needed no change of its own —
+ * `PADDLE_PACE` scales every rung equally, so the ratios survive it.
+ */
 export const PACE_SPEED: Record<Pace, number> = {
-  crawl: 2.2,
-  walk: 7,
-  run: 12,
+  crawl: 4.5,
+  walk: 9,
+  run: 13.5,
 };
 
 /**
@@ -40,8 +53,12 @@ export const SPRINT_SPEED = 18;
 /**
  * Reverse never exceeds a reverse walk however high the pace is set. An
  * ant hauling something backwards is not sprinting.
+ *
+ * Written FROM the walk rather than beside it. It was the literal 7,
+ * which happened to be the walk; the quarters retune moved the walk to
+ * 9 and would have left the comment above stating something untrue.
  */
-export const REVERSE_CAP = 7;
+export const REVERSE_CAP = PACE_SPEED.walk;
 
 /**
  * Sidestepping is slower than travelling forwards — six legs crabbing

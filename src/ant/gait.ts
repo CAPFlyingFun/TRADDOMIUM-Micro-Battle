@@ -12,20 +12,26 @@
  * the three existing tables and reports them in one vocabulary, so the
  * mission brain can sense her pace and the developer line can show it.
  *
- * THE TIERS ARE NOT THE SAME SHARE IN EVERY MEDIUM, and that is a fact
- * about the tuning rather than a bug in this file:
+ * THE TIERS ARE THE SAME SHARE IN EVERY MEDIUM, as of the quarters
+ * retune (Joshua, 2026-08-30):
  *
  *   AIR    crawl 25%  walk 50%  run 75%  sprint 100%   (by construction)
- *   LAND   crawl 12%  walk 39%  run 67%  sprint 100%
+ *   LAND   crawl 25%  walk 50%  run 75%  sprint 100%
  *   SEA    the same shares as land — PADDLE_PACE scales every tier
  *          equally, so the ratios survive it exactly
  *
- * The air table is written as literal quarters of MAX_POWERED_SPEED.
- * The land table is four hand-tuned speeds — 2.2, 7, 12, 18 — chosen
- * against an ant's real foraging speeds and against a 56 km island
- * being crossable, and they do not land on quarters. Whether they
- * SHOULD is a tuning decision and Joshua's; this file's job is to make
- * the disagreement visible rather than to quietly average it away.
+ * They did not agree when this file was written: air was literal
+ * quarters of MAX_POWERED_SPEED and land was four hand-tuned speeds —
+ * 2.2, 7, 12, 18 — that came out at 12 / 39 / 67. Making that
+ * disagreement visible is what this file was for, and having seen it
+ * Joshua moved the land table onto quarters. The shares now match; the
+ * SPEEDS still do not, and never should — a crawl is 4.5 units a second
+ * on foot, 10 in the air and about 1 afloat.
+ *
+ * Nothing here enforces the agreement. This file still only reads the
+ * three tables; if a future tuning pass moves one of them off quarters
+ * these functions will report that honestly, and tests/gait.test.ts
+ * pins the shares so it cannot happen silently.
  */
 import { PACE_SPEED, SPRINT_SPEED, type Pace } from './pace';
 import { AUTO_AIRSPEED, SPRINT_AIRSPEED } from './flight';
@@ -79,7 +85,7 @@ export function tierOf(pace: Pace, sprinting: boolean): Tier {
   return sprinting ? 'sprint' : pace;
 }
 
-/** `crawl 12%` — one short cell for a developer line. */
+/** `crawl 25%` — one short cell for a developer line. */
 export function gaitWords(medium: Medium, tier: Tier): string {
   return `${tier} ${(paceShare(medium, tier) * 100).toFixed(0)}%`;
 }
