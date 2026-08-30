@@ -136,4 +136,24 @@ describe('the lift lever', () => {
     expect(leverFor(false, true, true)).toBe('dive');
     expect(leverFor(true, true, false)).toBe('full');
   });
+
+  /**
+   * THE HALF THAT WAS MISSING, and it is Joshua's device report:
+   * "after the countdown, it's still stuck to the ocean and the fly
+   * button is gone to unstick from the ocean's surface."
+   *
+   * Afloat the lever always did both — down dives, up past the detent
+   * leaves — but it had no way to SAY the up half was available, so a
+   * queen whose wings had dried saw the same 🌊 as one who was still
+   * soaked.
+   */
+  it('offers the launch once she is afloat and able to leave', () => {
+    expect(leverFor(false, true, false, true)).toBe('launch');
+    // Wet wings, or nothing left to spend: the dive is all she has.
+    expect(leverFor(false, true, false, false)).toBe('dive');
+    // Flying still outranks it, and dry land is unaffected.
+    expect(leverFor(true, true, false, true)).toBe('full');
+    expect(leverFor(false, false, true, true)).toBe('takeoff');
+    expect(leverFor(false, false, false, true)).toBe('off');
+  });
 });

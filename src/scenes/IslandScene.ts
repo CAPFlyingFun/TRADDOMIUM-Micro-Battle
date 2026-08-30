@@ -1304,9 +1304,17 @@ export class IslandScene {
     // water she has just landed on.
     if (!this.flight.aloft && wantsUp && !this.wings.wet) {
       // She keeps the way she was running. A takeoff does not turn her.
-      const paid = this.flight.takeOff(
-        this.ant.pace, this.stamina.fraction, this.ant.bearing,
-      );
+      //
+      // TWO DOORS, because there are two situations. On the ground she
+      // has to have run up to TAKEOFF_SPEED. Afloat she never can —
+      // paddling caps her at a fraction of her pace — so leaving the
+      // WATER is its own move: no run-up, and the burst comes from the
+      // wings instead (Flight.launch).
+      const paid = this.afloat
+        ? this.flight.launch(this.stamina.fraction, this.ant.bearing)
+        : this.flight.takeOff(
+          this.ant.pace, this.stamina.fraction, this.ant.bearing,
+        );
       if (paid > 0) {
         this.stamina.spend(paid);
         // AN AIRBORNE QUEEN DOES NOT FLY TAIL-FIRST. Auto astern is for
@@ -1700,6 +1708,7 @@ export class IslandScene {
       this.afloat,
       !this.wings.wet
         && this.flight.canTakeOff(this.ant.pace, this.stamina.fraction),
+      !this.wings.wet && this.flight.canLaunch(this.stamina.fraction),
     ));
     this.liftSlider.drying(this.flight.aloft ? null : this.wings.seconds);
     // ── The world moves under her ─────────────────────────────────

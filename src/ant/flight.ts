@@ -218,6 +218,24 @@ export const TAKEOFF_BOOST = 1.35;
 export const AIRBORNE_HEIGHT = 2.5;
 
 /**
+ * WHAT SHE LEAVES THE WATER AT — seventy units a second, which is
+ * MAX_POWERED_SPEED and therefore the fastest airspeed this model
+ * will hold.
+ *
+ * Joshua asked for 4.0 m/s. That is 400 units a second at this scale,
+ * and it does not fit the model it would be handed to: her cruise is
+ * 40 (0.4 m/s), her hardest powered flight is 70 (0.7 m/s), and she
+ * FALLS at 178. A 400 would have been five and a half times any speed
+ * the game has ever shown, bled off by drag over the following fifteen
+ * metres. He picked the ceiling instead (2026-08-30).
+ *
+ * It is deliberately a BURST rather than a setting: nothing holds her
+ * at seventy, so drag walks her back to whatever the stick is asking
+ * for within a few seconds. That is the shape of a launch.
+ */
+export const WATER_LAUNCH_SPEED = MAX_POWERED_SPEED;
+
+/**
  * HOW LONG THE WINGS TAKE TO TAKE HER WEIGHT.
  *
  * takeOff used to hand her half the climb rate on its very first frame
@@ -659,6 +677,47 @@ export class Flight {
     this.state = 'takeoff';
     this.ground = null;
     this.speed = groundSpeed * TAKEOFF_BOOST;
+    this.facing = facing;
+    this.bank = 0;
+    this.tilt = 0;
+    this.rise = 0;
+    this.launching = 0;
+    this.above = 0.01;
+    this.air.reset();
+    this.drift = 0;
+    return TAKEOFF_COST;
+  }
+
+  /**
+   * Whether she can leave the WATER — no ground-speed test, because
+   * there is no ground to run on.
+   *
+   * She cannot reach TAKEOFF_SPEED afloat and never could: paddling
+   * caps her at 0.22 of her pace, so even a sprint is 3.96 against a
+   * threshold of 6.5. Asking canTakeOff about a floating queen is
+   * asking whether she can run on water, and the answer it gave was
+   * the whole of Joshua's report — "it's still stuck to the ocean and
+   * the fly button is gone".
+   */
+  canLaunch(reserve: number): boolean {
+    return !this.aloft && reserve >= TAKEOFF_COST;
+  }
+
+  /**
+   * OFF THE WATER, straight up and away.
+   *
+   * The same scripted second as a ground takeoff — LAUNCH_RATE eased
+   * over LAUNCH_SECONDS, which integrates to ten centimetres of climb,
+   * the height Joshua asked for — with the run-up replaced by
+   * WATER_LAUNCH_SPEED, since there was no run-up.
+   *
+   * @returns the reserve it cost, or 0 if she was refused
+   */
+  launch(reserve: number, facing: number): number {
+    if (!this.canLaunch(reserve)) return 0;
+    this.state = 'takeoff';
+    this.ground = null;
+    this.speed = WATER_LAUNCH_SPEED;
     this.facing = facing;
     this.bank = 0;
     this.tilt = 0;

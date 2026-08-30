@@ -9,9 +9,9 @@ import {
   BEST_GLIDE_RATIO, BEST_GLIDE_SPEED, CRUISE_SPEED, Flight, FLIGHT_TURN_RATE,
   glideRatio, MAX_BANK, MAX_DIVE_SPEED, MAX_POWERED_SPEED, setFlightScale,
   SIDESTEP_SHARE, STALL_SPEED, TAKEOFF_COST, TAKEOFF_SPEED, THRUST,
-  TURN_SHARE, type FlightDemand,
+  TURN_SHARE, WATER_LAUNCH_SPEED, type FlightDemand,
 } from '../src/ant/flight';
-import { PACE_SPEED, SPEED_EASE } from '../src/ant/pace';
+import { PACE_SPEED, SPEED_EASE, SPRINT_SPEED } from '../src/ant/pace';
 import { REARM_AT, Stamina } from '../src/ant/stamina';
 
 const neutral: FlightDemand = { push: 0, side: 0, lift: 0 };
@@ -83,6 +83,71 @@ describe('takeoff', () => {
     for (let i = 0; i < 120; i++) f.update(forward, 1, false, 1 / 60);
     expect(f.where).not.toBe('takeoff');
     expect(f.aloft).toBe(true);
+  });
+});
+
+/**
+ * OFF THE WATER, which is a different move from off the ground.
+ *
+ * Joshua's device report on v0.0.122: "after the countdown, it's still
+ * stuck to the ocean and the fly button is gone to unstick from the
+ * ocean's surface."
+ */
+describe('the water launch', () => {
+  it('asks for no run-up, because there is nothing to run on', () => {
+    const f = new Flight();
+    // She cannot reach TAKEOFF_SPEED afloat and never could: paddling
+    // caps her at 0.22 of her pace, so even a sprint is under four.
+    expect(f.canTakeOff(SPRINT_SPEED * 0.22, 1)).toBe(false);
+    expect(f.canLaunch(1)).toBe(true);
+  });
+
+  it('is still refused when there is nothing to pay with', () => {
+    const f = new Flight();
+    expect(f.canLaunch(TAKEOFF_COST / 2)).toBe(false);
+    expect(f.launch(TAKEOFF_COST / 2, 0)).toBe(0);
+    expect(f.aloft).toBe(false);
+  });
+
+  it('leaves at the fastest airspeed the model will hold', () => {
+    const f = new Flight();
+    expect(f.launch(1, 0)).toBe(TAKEOFF_COST);
+    expect(f.aloft).toBe(true);
+    expect(f.airspeed).toBeCloseTo(MAX_POWERED_SPEED, 6);
+    expect(WATER_LAUNCH_SPEED).toBe(MAX_POWERED_SPEED);
+  });
+
+  it('and it is a BURST — nothing holds her there', () => {
+    const f = new Flight();
+    f.launch(1, 0);
+    // Hands off the stick: drag walks her back down on its own.
+    for (let i = 0; i < 180; i++) f.update(neutral, 1, false, 1 / 60);
+    expect(f.airspeed).toBeLessThan(MAX_POWERED_SPEED);
+  });
+
+  /**
+   * TEN CENTIMETRES, which is Joshua's number — and it comes free from
+   * the scripted second a ground takeoff already uses: LAUNCH_RATE 20
+   * eased over LAUNCH_SECONDS 1 integrates to 20 x 0.5 x 1.
+   */
+  it('lifts her about ten centimetres in its first second', () => {
+    const f = new Flight();
+    f.launch(1, 0);
+    for (let i = 0; i < 60; i++) f.update(neutral, 1, false, 1 / 60);
+    expect(f.height).toBeGreaterThan(8);
+    expect(f.height).toBeLessThan(12);
+  });
+
+  it('does not turn her', () => {
+    const f = new Flight();
+    f.launch(1, 2.345);
+    expect(f.heading).toBeCloseTo(2.345, 6);
+  });
+
+  it('and cannot be used to launch out of the air', () => {
+    const f = flying();
+    expect(f.canLaunch(1)).toBe(false);
+    expect(f.launch(1, 0)).toBe(0);
   });
 });
 
