@@ -30,7 +30,8 @@
  * detail BETWEEN samples.
  */
 import { pullBuffer } from './fetchBytes';
-import { HEIGHT_SCALE, SPAN } from './kauai';
+import { HEIGHT_SCALE, SAMPLES, SPAN } from './kauai';
+import { islandLink, repairFineTile, type Repair } from './demRepair';
 
 /** Samples on a side of one tile — 512 cells plus the shared edge. */
 export const HD_TILE = 513;
@@ -95,12 +96,32 @@ export function hdTileAt(x: number, z: number): number {
   return hdTileIndex(col, row);
 }
 
-/** Hand a decoded tile over. */
+/**
+ * Hand a decoded tile over — SANITISED as it enters the world.
+ *
+ * Here rather than in `decodeHdTile` because this is the moment the
+ * tile becomes ground the game can stand on, and because the repair
+ * needs the island grid: whether the ocean can reach a hole is a
+ * question about the WORLD, and a tile flooded from its own border
+ * would call a pit straddling that border connected. See demRepair.ts.
+ */
 export function useHdTile(index: number, data: Int16Array): void {
   if (data.length !== HD_TILE * HD_TILE) {
     throw new Error(`tile ${hdTileName(index)} is ${data.length} samples, expected ${HD_TILE * HD_TILE}`);
   }
+  lastRepair = repairFineTile(
+    data, HD_TILE, Math.floor(index / HD_TILES), index % HD_TILES,
+    islandLink((HD_TILE - 1) * HD_TILES / (SAMPLES - 1)),
+  );
   tiles.set(index, data);
+}
+
+/** What the last tile handed over had to repair, for probes and tests. */
+let lastRepair: Repair | null = null;
+
+/** What sanitising the last fine tile corrected, or null before any. */
+export function hdRepair(): Repair | null {
+  return lastRepair;
 }
 
 /** Drop everything — for tests, and for leaving the island. */

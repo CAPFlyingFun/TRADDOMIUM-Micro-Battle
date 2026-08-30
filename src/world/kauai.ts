@@ -18,6 +18,7 @@
  * level; `heightfield.ts` layers coarse detail on top for that, and the
  * eventual streamed fine window is what will carry true ground texture.
  */
+import { repairCoarse, type Repair } from './demRepair';
 
 /** Samples per side of the baked grid. */
 import { pullBuffer } from './fetchBytes';
@@ -134,7 +135,23 @@ export function decodeGrid(buffer: ArrayBuffer): HeightGrid {
       `kauai grid is ${buffer.byteLength} bytes, expected ${expected}`,
     );
   }
-  return new Int16Array(buffer);
+  const grid = new Int16Array(buffer);
+  // SANITISED BEFORE IT IS THE ISLAND, and this is the only place the
+  // whole grid exists at once — which is exactly what the repair needs,
+  // because deciding whether the sea can reach a hole is a question
+  // about the world and not about any piece of it. It also establishes
+  // where the ocean is for the fine tiles, which arrive one at a time
+  // and cannot answer that question alone. See demRepair.ts.
+  lastRepair = repairCoarse(grid, SAMPLES);
+  return grid;
+}
+
+/** What the last grid decode had to repair, for probes and the report. */
+let lastRepair: Repair | null = null;
+
+/** What sanitising the island grid corrected, or null before it loads. */
+export function gridRepair(): Repair | null {
+  return lastRepair;
 }
 
 /**

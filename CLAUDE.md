@@ -129,6 +129,35 @@ So: a water system may READ `terrainHeight` and it may never write it.
 A surveyed river is a thing to **check the simulation against**, not a
 thing to reshape the island for.
 
+### The one exception: sanitising invalid source data at load
+
+**Terrain source data may be sanitized during loading when a sample is
+demonstrably invalid, missing/NODATA, non-finite, or physically
+impossible for the dataset. This correction must happen before the
+heightfield enters the world and must not be driven by gameplay,
+hydrology, water placement, or desired visual outcomes.**
+(Joshua, 2026-08-30.)
+
+That is data repair, not terrain modification, and the rest of the rule
+above is untouched: gameplay, hydrology, water, AI and every other
+world system may NOT modify VALID terrain heights to make their own
+system fit.
+
+Why it exists: the DEM shipped with scattered samples hundreds of
+metres below sea level sitting inside dry land, and since the water
+query calls any ground below zero THE SEA, each became a flooded shaft
+— a 27 m square, 200 m deep, reading SALTWATER in a beach. The test for
+"demonstrably invalid" is a fact about the island rather than a tuning
+number: **Hawaiʻi has no dry land below sea level**, so a below-sea-level
+sample the open ocean cannot reach is not a place on Kauaʻi.
+
+`src/world/demRepair.ts` is the only code allowed to do this, it runs
+once as each grid loads, and it is bound by its own rules: it may only
+ever write samples that are water or void (dry land is never touched),
+it judges connectivity against the WHOLE island rather than any tile,
+and it fills from the surrounding ground rather than clamping to zero.
+tests/demRepair.test.ts holds all of that.
+
 ## The ocean's look is accepted — protect it
 
 **Standing rule (Joshua, 2026-08-29, on the v0.0.99 device pass): "the
