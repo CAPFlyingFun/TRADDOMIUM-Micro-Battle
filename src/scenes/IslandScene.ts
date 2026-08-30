@@ -34,7 +34,10 @@ import { Underwater } from '../world/Underwater';
 import { Ocean } from '../world/Ocean';
 import { canDrink, swimEffort, wadeAt } from '../ant/wading';
 import { Wings } from '../ant/wings';
-import { nearestSea } from '../world/nearestWater';
+import { nearestSea, nearestWatercourse } from '../world/nearestWater';
+import { MissionBrain } from '../ant/autonomy/missionBrain';
+import { straightLineTrip } from '../ant/autonomy/mission';
+import { AUTONOMY_DEFAULTS } from '../ant/autonomy/autonomyConfig';
 import { seaSwellAt } from '../world/seaSwell';
 import {
   afloatIn, instrumented, motionOf, type Act, type Motion,
@@ -156,6 +159,8 @@ const SURFACE_MARGIN = 12;
  * tenth of a second — she cannot outwalk it.
  */
 const WATER_CADENCE = 0.1;
+/** How long an autonomy notice stays up, seconds — the grace chip's. */
+const AUTONOMY_NOTICE = 6;
 
 const DIVE_EASE = 0.9;
 /**
@@ -340,6 +345,27 @@ export class IslandScene {
    */
   private waterLine: string | null = null;
   private waterDue = 0;
+  /**
+   * STAGE H — the Queen's mission brain. It decides WHERE and WHY and
+   * publishes an intent; nothing consumes that intent yet, because the
+   * executor that turns it into a FlightDemand is Phase 2. Wired now so
+   * it runs against the real world rather than only against tests.
+   */
+  private readonly brain = new MissionBrain(
+    straightLineTrip(AUTONOMY_DEFAULTS.assumedSpeed),
+  );
+  private brainSaid: string | null = null;
+  private brainSaidLeft = 0;
+  /**
+   * The island-wide watercourse candidate, cached.
+   *
+   * A ring search over the drainage is not frame work, and unlike the
+   * WTR readout the brain needs it whether or not the developer
+   * register is on — so it has its own clock rather than riding the
+   * debug line's.
+   */
+  private channelNear: { range: number; bearing: number } | null = null;
+  private channelDue = 0;
   /** And what she is doing with it. Acts interrupt; motions do not. */
   private act: Act = 'none';
   private dive = 0;
@@ -755,6 +781,30 @@ export class IslandScene {
       // WHERE THE SHEET ACTUALLY IS, versus the ground drawn under it.
       // Depth alone cannot tell you the water is buried in the hill.
       waterSkin: (wx: number, wz: number) => this.water?.skinAt(wx, wz) ?? null,
+      // STAGE H, probe only. Phase 1 has no player-facing way to order a
+      // mission — the executor that would fly one is Phase 2 — so these
+      // are how the decision brain is driven and read from outside.
+      orderTo: (wx: number, wz: number, satisfiesHydration = false) => {
+        this.brain.order({
+          id: `probe:${Math.round(wx)},${Math.round(wz)}`,
+          label: 'probe',
+          at: world(wx, wz),
+          satisfies: satisfiesHydration ? ['hydration'] : [],
+          arriveWithin: 500,
+        });
+      },
+      cancelOrder: () => this.brain.cancel(),
+      /** Probe only: the same door the save system restores through. */
+      setThirst: (fraction: number) => this.thirst.restore(fraction),
+      autonomy: () => ({
+        goal: this.brain.goal,
+        primary: this.brain.primaryMission?.label ?? null,
+        detour: this.brain.detourMission?.label ?? null,
+        intent: this.brain.intent,
+        channel: this.channelNear,
+        thirst: this.thirst.fraction,
+        drain: this.thirst.drain,
+      }),
       // What the water is doing to HER, for the probes: the same
       // numbers the movement just used, not a re-derivation.
       wading: () => ({ depth: this.wet, afloat: this.afloat, dive: this.dive, under: this.headUnder }),
@@ -1652,6 +1702,11 @@ export class IslandScene {
     // of the look controller, so there is no second convention to keep
     // in step: whatever is actually being rendered from is what the
     // compass reports.
+    // BEFORE THE COMPASS COMPOSES ITS LINES, or both instruments show
+    // the previous frame's answer — confusing on a 5 Hz brain, where a
+    // frame of lag reads as the decision itself being late.
+    this.readWater(dt);
+    this.thinkAutonomy(dt);
     const view = new THREE.Vector3();
     this.follow.camera.getWorldDirection(view);
     this.compass.update(
@@ -1665,6 +1720,7 @@ export class IslandScene {
         // the fix — one switch, one register, one screenshot.
         lod: settings().showFix ? lodLine() : null,
         water: settings().showFix ? this.waterLine : null,
+        ai: settings().showFix ? this.aiLine() : null,
         // HER NOSE, not the camera's. In flight they part company the
         // moment she looks around, and the pairing with the flight
         // panel's ground line only means anything if this one is hers.
@@ -1761,6 +1817,13 @@ export class IslandScene {
     // each frame is what time it is — which is why backgrounding the
     // tab or losing the page can no longer buy extra protection.
     if (this.grace.takeExpiry()) this.noticeLeft = PROTECTION_NOTICE;
+    // THE AUTONOMY'S ONE LINE, on the same countdown as the grace chip.
+    // The brain hands each message over exactly once, so nothing here
+    // has to guard against it repeating.
+    if (this.brainSaidLeft > 0) {
+      this.brainSaidLeft = Math.max(0, this.brainSaidLeft - dt);
+      this.vitals.showNotice(this.brainSaidLeft > 0 ? this.brainSaid : null);
+    }
     if (this.noticeLeft > 0) {
       this.noticeLeft = Math.max(0, this.noticeLeft - dt);
       this.vitals.showGraceEnded();
@@ -1796,7 +1859,7 @@ export class IslandScene {
     this.liftSlider.drying(
       this.motion === 'flying' ? null : this.wings.seconds,
     );
-    this.readWater(dt);
+
     // ── The world moves under her ─────────────────────────────────
     // She has just travelled, so this is the moment to decide whether
     // the scene needs shifting and which ground should exist.
@@ -2453,6 +2516,85 @@ export class IslandScene {
       : 'none';
 
     this.waterLine = `WTR fresh ${fresh} ${freshWay} · salt ${salt} ${seaWay}`;
+  }
+
+  /**
+   * STAGE H — feed the brain, take what it says.
+   *
+   * EVERY FRAME, because the brain throttles ITSELF: think five times a
+   * second, plan once. Doing the throttling here instead would put the
+   * rate in the caller, where a second caller could disagree with it.
+   *
+   * The sense is READ-ONLY. Motion and Act are derived (ant/motion.ts)
+   * and the brain is handed them rather than allowed to set them — the
+   * disagreement Stage G removed does not get to come back through the
+   * autonomy.
+   *
+   * PHASE 1 CONSUMES NOTHING. `brain.intent` is published and no code
+   * acts on it: the executor that turns an intent into a FlightDemand
+   * is Phase 2. She will decide correctly and stand still doing it.
+   */
+  private thinkAutonomy(dt: number): void {
+    const here = this.ant.where;
+    this.channelDue -= dt;
+    if (this.channelDue <= 0) {
+      this.channelDue = AUTONOMY_DEFAULTS.planEvery;
+      this.channelNear = nearestWatercourse(here.wx, here.wz);
+    }
+    this.brain.update(dt, {
+      at: here,
+      thirst: this.thirst.fraction,
+      thirstDrain: this.thirst.drain,
+      stamina: this.stamina.fraction,
+      staminaSpent: this.stamina.spent,
+      motion: this.motion,
+      act: this.act,
+      wingsWet: this.wings.wet,
+      drinkable: canDrink(here.wx, here.wz),
+      nearestFresh: this.water?.nearestFresh(here.wx, here.wz) ?? null,
+      // STRATEGIC, and only worth asking on the brain's slow cadence —
+      // it is a ring search over the island. Handed the cached answer
+      // the water readout already computed where one exists.
+      nearestWatercourse: this.channelNear,
+    });
+    const said = this.brain.takeNotice();
+    if (said) {
+      this.brainSaid = said;
+      this.brainSaidLeft = AUTONOMY_NOTICE;
+    }
+  }
+
+  /**
+   * STAGE H's developer line — what the brain is thinking, in one row.
+   *
+   * The same register as the fix, LOD and water lines and under the
+   * same single toggle. Compact on purpose: this is an instrument for
+   * whoever is building the autonomy, not furniture for the player.
+   */
+  private aiLine(): string {
+    const d = this.brain.debug({
+      at: this.ant.where,
+      thirst: this.thirst.fraction,
+      thirstDrain: this.thirst.drain,
+      stamina: this.stamina.fraction,
+      staminaSpent: this.stamina.spent,
+      motion: this.motion,
+      act: this.act,
+      wingsWet: this.wings.wet,
+      drinkable: false,
+      nearestFresh: null,
+      nearestWatercourse: this.channelNear,
+    });
+    const secs = (v: number): string => (Number.isFinite(v)
+      ? (v >= 600 ? `${(v / 60).toFixed(0)}m` : `${v.toFixed(0)}s`)
+      : '——');
+    const chan = this.channelNear === null ? 'none'
+      : this.channelNear.range < 1 ? 'here'
+        : `${(this.channelNear.range / 100_000).toFixed(2)}km`;
+    return `AI ${d.goal} · pri ${d.primary ?? '—'} · det ${d.detour ?? '—'}`
+      + ` · h2o ${(d.thirst * 100).toFixed(0)}% dry ${secs(d.dry)}`
+      + ` · eta ${secs(d.eta)} · chan ${chan}`
+      + ` · stam ${(d.stamina * 100).toFixed(0)}% · ${d.motion}/${d.act}`;
   }
 
   private readSwim(dt: number): FlightTelemetry {

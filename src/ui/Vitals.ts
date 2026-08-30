@@ -92,6 +92,8 @@ export class Vitals {
   private shownSalt = '';
 
   private readonly grace: HTMLDivElement;
+  private readonly notice: HTMLDivElement;
+  private shownNotice = '';
   private shown = '';
   private shownGrace = '';
 
@@ -233,6 +235,27 @@ export class Vitals {
       whiteSpace: 'nowrap',
     } as Partial<CSSStyleDeclaration>);
     stack.appendChild(this.grace);
+
+    // AND A SIBLING FOR THE AUTONOMY. Same chip, same place, same voice
+    // — Stage H says one thing at a time ("Very Thirsty! Stopping for
+    // water first.") and the eye finds it where it already looks. A
+    // second visual language for a second kind of message would be a
+    // system nobody asked for.
+    this.notice = document.createElement('div');
+    this.notice.dataset.ui = 'notice';
+    Object.assign(this.notice.style, {
+      display: 'none',
+      marginTop: '2px',
+      padding: '3px 7px',
+      borderRadius: '6px',
+      alignSelf: 'flex-start',
+      background: 'rgba(120, 190, 255, .16)',
+      border: '1px solid rgba(150, 205, 255, .55)',
+      color: 'rgba(205, 232, 255, .96)',
+      font: '600 10px/1.3 "JetBrains Mono", ui-monospace, monospace',
+      whiteSpace: 'nowrap',
+    } as Partial<CSSStyleDeclaration>);
+    stack.appendChild(this.notice);
 
     // THE SEA AS A STATUS, NOT A METER. Salt exposure is the first of
     // a family (venom, cold, wet…) that would each have demanded a
@@ -484,6 +507,22 @@ export class Vitals {
    * warning wears the same chip in a different colour so the eye finds
    * it in the place it was already looking.
    */
+  /**
+   * WHAT THE AUTONOMY IS DOING, in one line, or nothing.
+   *
+   * Driven by a countdown in the scene exactly as the grace notice is,
+   * so it fades on its own rather than sitting there for ever. The
+   * brain hands each message over ONCE (takeNotice), so nothing here
+   * has to guard against repetition.
+   */
+  showNotice(text: string | null): void {
+    const want = text ?? '';
+    if (want === this.shownNotice) return;
+    this.shownNotice = want;
+    this.notice.style.display = want ? 'block' : 'none';
+    if (want) this.notice.textContent = want;
+  }
+
   showGraceEnded(): void {
     if (this.shownGrace === 'ended') return;
     this.shownGrace = 'ended';

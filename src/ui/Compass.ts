@@ -201,6 +201,11 @@ export interface UnderTape {
    * fix and LOD lines it sits under are read the same way.
    */
   readonly water?: string | null;
+  /**
+   * WHAT THE MISSION BRAIN IS THINKING — Stage H, same register again.
+   * An instrument for whoever is building the autonomy.
+   */
+  readonly ai?: string | null;
   readonly air?: AirLine | null;
   readonly ground?: GroundLine | null;
   readonly wind?: WindLine | null;
@@ -231,8 +236,10 @@ export class Compass {
   private lastFix = '';
   private readonly lodLine: HTMLDivElement;
   private readonly waterLine: HTMLDivElement;
+  private readonly aiLine: HTMLDivElement;
   private lastLod = '';
   private lastWater = '';
+  private lastAi = '';
   private readonly airLine: HTMLDivElement;
   private lastAir = '';
   private readonly groundLine: HTMLDivElement;
@@ -484,6 +491,22 @@ export class Compass {
     } as Partial<CSSStyleDeclaration>);
     this.root.appendChild(this.waterLine);
 
+    // And the brain, under the water. Fourth and last of the developer
+    // register — one toggle turns the whole stack on and off.
+    this.aiLine = document.createElement('div');
+    this.aiLine.dataset.ui = 'compass-ai';
+    Object.assign(this.aiLine.style, {
+      marginTop: '2px',
+      textAlign: 'center',
+      font: '500 8px/1 "JetBrains Mono", ui-monospace, monospace',
+      fontVariantNumeric: 'tabular-nums',
+      whiteSpace: 'nowrap',
+      color: 'rgba(169, 242, 201, .62)',
+      textShadow: SHADOW,
+      display: 'none',
+    } as Partial<CSSStyleDeclaration>);
+    this.root.appendChild(this.aiLine);
+
     host.appendChild(this.root);
 
     // Re-fit whenever anything around it changes shape: a rotation, a
@@ -694,6 +717,18 @@ export class Compass {
     } else if (this.waterLine.style.display !== 'none') {
       this.waterLine.style.display = 'none';
       this.lastWater = '';
+    }
+
+    const ai = under?.ai ?? null;
+    if (ai) {
+      if (ai !== this.lastAi) {
+        this.lastAi = ai;
+        this.aiLine.textContent = ai;
+      }
+      if (this.aiLine.style.display === 'none') this.aiLine.style.display = '';
+    } else if (this.aiLine.style.display !== 'none') {
+      this.aiLine.style.display = 'none';
+      this.lastAi = '';
     }
 
     this.drawMarkers(from, markers, half);
