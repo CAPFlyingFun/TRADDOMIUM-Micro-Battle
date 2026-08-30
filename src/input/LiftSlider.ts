@@ -71,6 +71,7 @@ export class LiftSlider {
   private readonly root: HTMLDivElement;
   private readonly track: HTMLDivElement;
   private readonly knob: HTMLDivElement;
+  private readonly badge: HTMLDivElement;
   private readonly detach: Array<() => void> = [];
   /** −1 down, +1 up, 0 centred. */
   private at = 0;
@@ -137,6 +138,26 @@ export class LiftSlider {
     this.knob.textContent = '⇕';
     this.root.appendChild(this.knob);
 
+    // The wet-wings countdown. Above the track and out of the way of
+    // the grip, hidden until there is something to count.
+    this.badge = document.createElement('div');
+    this.badge.setAttribute('data-ui', 'wing-dry');
+    Object.assign(this.badge.style, {
+      position: 'absolute',
+      left: '50%', bottom: `${TRACK_H + 8}px`,
+      transform: 'translateX(-50%)',
+      padding: '3px 8px',
+      borderRadius: '10px',
+      border: '1px solid rgba(214, 178, 96, .75)',
+      background: 'rgba(26, 20, 12, .78)',
+      font: '700 13px/1 system-ui, sans-serif',
+      color: 'rgba(255, 236, 190, .95)',
+      whiteSpace: 'nowrap',
+      pointerEvents: 'none',
+      display: 'none',
+    } as Partial<CSSStyleDeclaration>);
+    this.root.appendChild(this.badge);
+
     host.appendChild(this.root);
     this.listen();
   }
@@ -172,6 +193,31 @@ export class LiftSlider {
       this.at = 0;
       this.draw();
     }
+  }
+
+  /**
+   * HOW LONG UNTIL SHE CAN FLY, on the control that is refusing her.
+   *
+   * CLAUDE.md's contextual-HUD rule is that an unavailable action must
+   * never look functional — but a greyed lever with no explanation is
+   * the other failure, a dead button the player has to guess at. The
+   * count goes HERE, on the lever itself, rather than on the vitals
+   * card, because the lever is the thing saying no and the card is at
+   * the far corner of the screen. It costs no space near the thumbs:
+   * the badge sits above the track, clear of the grip.
+   *
+   * @param seconds what is left, or null when there is nothing to say
+   *   — dry, or underwater where the clock is stopped and hidden.
+   */
+  drying(seconds: number | null): void {
+    if (seconds === null) {
+      this.badge.style.display = 'none';
+      return;
+    }
+    this.badge.style.display = 'block';
+    // Rounded UP, so the last second is a "1" she can read rather than
+    // a "0" sitting there while she still cannot go.
+    this.badge.textContent = `🪽 ${Math.ceil(seconds)}s`;
   }
 
   /**

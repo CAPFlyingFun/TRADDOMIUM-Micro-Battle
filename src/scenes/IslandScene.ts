@@ -33,6 +33,7 @@ import { IslandWater } from '../world/IslandWater';
 import { Underwater } from '../world/Underwater';
 import { Ocean } from '../world/Ocean';
 import { canDrink, swimEffort, wadeAt } from '../ant/wading';
+import { Wings } from '../ant/wings';
 import { Breath, DROWN_HP_PER_SECOND, blackout } from '../ant/breath';
 import { SaltExposure, SALT_DAMAGE_FRACTION } from '../ant/brine';
 import { waterSpotAt } from '../world/waterQuery';
@@ -310,6 +311,13 @@ export class IslandScene {
    * animal cannot, and snapping her to the bed the instant the lever
    * hits the stop read as a teleport in the build this came from.
    */
+  /**
+   * WET WINGS. Landing on water grounds her until they dry, and a
+   * dive spends the drying she has done — wings.ts carries the rules.
+   */
+  private readonly wings = new Wings();
+  /** Whether the water has her — what arms the wings' clock. */
+  private inWater = false;
   private dive = 0;
   /** Whether her feet are off the bottom, updated every on-foot frame. */
   private afloat = false;
@@ -723,6 +731,11 @@ export class IslandScene {
       // What the water is doing to HER, for the probes: the same
       // numbers the movement just used, not a re-derivation.
       wading: () => ({ depth: this.wet, afloat: this.afloat, dive: this.dive, under: this.headUnder }),
+      // The wings' clock, for the probes and for a device readout —
+      // wet says whether she may fly, seconds is what the lever shows.
+      wingDry: () => ({
+        wet: this.wings.wet, seconds: this.wings.seconds, held: this.wings.held,
+      }),
       sea: () => ({
         hp: this.hp, air: this.breath.fraction,
         salt: this.brine.exposureSeconds, burning: this.brine.burning,
@@ -1284,7 +1297,12 @@ export class IslandScene {
     // The lever comes home on its own when nobody is holding it.
     this.liftSlider.update(dt);
     const wantsUp = this.liftSlider.takeTakeoff();
-    if (!this.flight.aloft && wantsUp) {
+    // WET WINGS REFUSE, and the refusal has to live HERE as well as on
+    // the lever's enabled state: afloat the lever is the DIVE control
+    // and therefore live, so a shove past the takeoff detent still
+    // arrives as a takeoff request and would otherwise fly her off the
+    // water she has just landed on.
+    if (!this.flight.aloft && wantsUp && !this.wings.wet) {
       // She keeps the way she was running. A takeoff does not turn her.
       const paid = this.flight.takeOff(
         this.ant.pace, this.stamina.fraction, this.ant.bearing,
@@ -1311,6 +1329,9 @@ export class IslandScene {
     if (this.flight.aloft) {
       this.drinkButton.show(false);
       this.headUnder = false;
+      // Nothing wets a wing up here, and clearing it is what makes the
+      // NEXT touchdown on water an edge rather than more of the same.
+      this.inWater = false;
       // TWO SURFACES, AND THEY ARE NOT THE SAME QUESTION.
       //
       // The PHYSICAL one — this — is the real water standing under her
@@ -1455,6 +1476,10 @@ export class IslandScene {
       const overHer = wade.depth - wade.above;
       this.swimOver = Math.max(0, overHer);
       this.headUnder = overHer > (this.headUnder ? 0.6 : 1.0);
+      // WATER ON THE WINGS. Afloat is the test rather than any depth:
+      // wading is a film round her feet and her wings are a body up,
+      // but the moment the bottom lets go she is lying on the water.
+      this.inWater = wade.afloat || this.headUnder;
       // Only charge her for a sprint she is actually getting: calling
       // for one while stopped or reversing costs nothing. Afloat the
       // water prices the frame instead (swimEffort): paddling costs,
@@ -1662,11 +1687,21 @@ export class IslandScene {
     // climb and descent in the air, and how deep she swims on the
     // water. leverFor() owns that choice and carries the reason the
     // third case had to be added.
+    // The wings dry wherever she is NOT under the surface — on land,
+    // and afloat, where she rides the film with her wings out of the
+    // water (wings.ts). Rain stretches the clock rather than stopping
+    // it. The weather is last frame's, which is what every other
+    // consumer of nowWeather reads and is well inside a 30 s count.
+    this.wings.update(
+      dt, this.inWater, this.headUnder, this.nowWeather?.rainfall ?? 0,
+    );
     this.liftSlider.enable(leverFor(
       this.flight.aloft,
       this.afloat,
-      this.flight.canTakeOff(this.ant.pace, this.stamina.fraction),
+      !this.wings.wet
+        && this.flight.canTakeOff(this.ant.pace, this.stamina.fraction),
     ));
+    this.liftSlider.drying(this.flight.aloft ? null : this.wings.seconds);
     // ── The world moves under her ─────────────────────────────────
     // She has just travelled, so this is the moment to decide whether
     // the scene needs shifting and which ground should exist.
