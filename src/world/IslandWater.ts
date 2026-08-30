@@ -433,6 +433,49 @@ export class IslandWater {
     const raw = (d00 * (1 - tx) + d10 * tx) * (1 - ty)
       + (d01 * (1 - tx) + d11 * tx) * ty;
     if (raw <= 0) return null;
+    // SHE FLOATS ON THE WATER SHE CAN SEE, and until v0.0.126 she did
+    // not. Joshua: "we need to figure out how to make the ant walk /
+    // stand on the water".
+    //
+    // The sheet draws its surface at `base[i] + d * relief`, where
+    // base is groundHeight at the 100-unit CELL CORNERS. Her float
+    // seat was `groundHeight(exact) + depth`, sampled on the 8-unit
+    // terrain triangle. Two different grounds, so two different
+    // surfaces — and a 100-unit chord across 8-unit terrain misses by
+    // whatever the ground does in between.
+    //
+    // MEASURED over 5,329 inland points: the drawn bed stands above
+    // the true ground by +1.80 at p95, +2.60 at p99, +5.43 at worst.
+    // She would sit UNDER the drawn skin at 43.3% of them, and deeper
+    // than her own body length (0.99) at 17.3%. At Joshua's reported
+    // spot the drawn skin stood 0.94 above her — 95% of her length —
+    // while every internal check correctly said she was floating on
+    // top of it. That is the whole of the "I fall below the water
+    // inland" report, and it is audit finding A5/F1, parked as
+    // technical debt on the condition that it be fixed if the symptom
+    // returned. It has.
+    //
+    // THE FIX IS TO ASK THE QUESTION OF THE DRAWN SURFACE. The bed
+    // corners are already here, on the same lattice as the depth, so
+    // the skin costs four array reads and the same bilinear the depth
+    // just had. The column she is standing in is then the drawn skin
+    // measured down to the ground she is actually standing on — one
+    // surface, and the picture and the physics cannot disagree again.
+    const b = this.base;
+    const b00 = b[cy * N + cx];
+    const b10 = b[cy * N + cx + 1];
+    const b01 = b[(cy + 1) * N + cx];
+    const b11 = b[(cy + 1) * N + cx + 1];
+    const bed = (b00 * (1 - tx) + b10 * tx) * (1 - ty)
+      + (b01 * (1 - tx) + b11 * tx) * ty;
+    const skin = bed + raw * reliefScale();
+    const over = skin - groundHeight(wx, wz);
+    // AND WHERE THE SKIN IS UNDER THE GROUND THERE IS NO WATER HERE.
+    // Half the disagreement runs the other way — the drawn bed dips
+    // BELOW the true ground — and there the sheet is buried inside the
+    // hill. Floating her on water the terrain is drawn over is the
+    // same fault wearing the other sign, so it answers dry.
+    if (over <= 0) return null;
     // FRESH WATER DOES NOT CARRY HER — for now, and deliberately.
     //
     // The solver's velocity is flux over depth, and depth goes to zero
@@ -454,7 +497,7 @@ export class IslandWater {
     // OCEAN's current is untouched: it comes from the wave table
     // (seaSwell.seaOrbitalAt) and the surf, on the other branch of
     // this very query, and none of this reaches it.
-    return { depth: raw * reliefScale(), flowX: 0, flowZ: 0 };
+    return { depth: over, flowX: 0, flowZ: 0 };
   }
 
   /** Depth of water at a world point, or 0. For wading and drinking. */
