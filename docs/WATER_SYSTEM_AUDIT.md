@@ -21,7 +21,61 @@ The rendered fresh surface and every gameplay/physics answer are built on **two 
 
 **Is inland water currently known-good?** **No.** It is v0.0.111's inland water, restored deliberately, with F1/F3/F4/F5 live.
 
-**Still requires device verification:** (a) the actual relief dial on Joshua's device (`×{relief}` in the fix line — several findings are dormant only at relief = 1, and `?fix=` links silently rewrite the setting); (b) whether symptomatic sessions ran the bare URL or `?sea=` (the breaker blowout and stale-table mechanisms need `?sea=`); (c) live weather at test time (rain feeds every film); (d) whether the perceived ocean damage was visual, camera-feel, or how the Queen rode the swash.
+**Still requires device verification:** (a) live weather at test time (rain feeds every film); (b) the one-minute discriminating camera test in §1a, which decides whether the perceived ocean regression was F9 or v0.0.111's own low-angle behaviour. *(The relief dial, the sea mode, and the nature of the ocean report were answered from the device on 2026-08-30 — see §1a, which re-scopes several findings below.)*
+
+---
+
+## 1a. Device Answers (2026-08-30) — and what they re-scope
+
+Joshua answered §13 Step 0 from the device. All three narrow the audit; the third **overturns the scope of the leading ocean hypothesis**.
+
+**1. Relief = ×1.00 during the affected freshwater test.**
+Every "dormant at the default dial" caveat is confirmed dormant for that session: F13's relief-dial trigger, F15's relief-factor probe divergence and F3's raw-vs-scaled shader-band divergence were **not firing**. Still live in those findings: F13's HD-tile-arrival and re-smoothing triggers, and F15's nearest-cell-vs-bilinear and missing-ocean-branch divergences. **Critique gap 2 is CLOSED.**
+
+**2. Bare URL — no `?sea=` — in the symptomatic ocean session.**
+Every `?sea=`-only mechanism is **out** for that session: F4's swell-reach 48 → 210 blowout and its phantom-table/no-rebuild half, and F14's two-tables-in-one-frame clause. F12's magnitudes fall from the generated sea's to the shipped table's: splash **0.545 s**, settle **1.70 s**, fresh drowned line **70.2 units** below the surface — still sea clocks on swell-less ponds, still deeper than any pool, but an order less lurid.
+**Still live on the bare URL:** F4's ungated breaker block itself. With the shipped table `crest = ±22/24.2 = ±0.91` and `face = smoothstep(0.15, 0.8, crest)` saturates every beat — foam fronts marching across inland pools at ~237 cm/s toward 245°, exactly as at v0.0.90. A1 is still worth doing; its urgency is lower than the generated-sea case implied.
+
+**3. The ocean regression was CAMERA/LENS, not water** — the lens dipped farther under than before, at a near-horizontal camera angle; no wave-direction, current, timing, geometry or NOAA anomaly observed.
+This confirms F6's elimination twice over — by code identity **and** by observation. F16 (beach film) and F10 (salt swash retune) drop from candidates to unlikely for this report. But F9's scope is narrower than the audit stated, and that is the new result:
+
+### F9 re-examined — every v0.0.112 camera change is gated on `released`
+
+Read at `231d6e5` against `54e0961`, the v0.0.112 `keepAboveGround` diff is exactly five edits, and **each is multiplied by or switched on `released`**:
+
+| line (v112) | change | value at `released == 0` |
+|---|---|---|
+| :510 | `wantVel = -lift * Math.max(turn, DIVE_RECOVER*released)` | `-lift*turn` — v111 |
+| :520 | `sunkFor = released > 0 ? 0 : sunkFor + dt` | `sunkFor + dt` — v111 |
+| :539/:543 | `… * (1-released) - lift*DIVE_RECOVER*released` | unchanged — v111 |
+| :545 | `drowned = surface - 1.45*reach*(1-released)` | identical (v111 carries the same term) |
+| :557 | slew `Math.max(turn, DIVE_RECOVER*released)` | `turn` — v111 |
+
+**Therefore: with the dive lever below 15% deflection, v0.0.112–116's ocean camera is mathematically identical to v0.0.111's.** The only behavioural difference is what `released` *evaluates to* for a given lever position, because v112 feeds the camera `Math.max(diveIntent, dive)` — the RAW lever — instead of `this.dive`, eased at 0.9/s. A 35% throw gives `released = 0.5` after ~0.9 s on v111 versus **1.0 in one frame** on v112.
+
+So **F9 fires only if the dive lever was past 15%** — and when she is afloat the lift slider *is* the dive control (`LiftSlider.ts:63`), so a light nudge suffices. It remains a live candidate; it is no longer an automatic one.
+
+### The alternative: what v0.0.111's camera does at a low angle, unprovoked
+
+At the shipped table (`swellReach()` 48.4, `swellPeriod()` 1.474 s) and the default 7.8-unit boom (`settings.ts:124`):
+
+- Elevation clamps to **10°–80°**, resting at 26° (`FollowCamera.ts:243-246`). At the 10° minimum the lens sits **7.8·sin10° = 1.35 units** above her and **7.68 units** behind.
+- The wave under the lens is not the wave under her. Across that 7.68-unit offset the surface differs by up to `Σ A·k·Δx` = 16(0.01746)(7.68) + 6(0.02992)(7.68) ≈ **3.5 units**.
+- **A crest at the lens can therefore stand ~2 units above a lens flown at minimum elevation** — with no dive input and no regression.
+- The envelope deliberately ignores it: `sunkFor` must reach **0.354 s** before the urgency ramp starts and **1.607 s** for full urgency, while a crest crosses in a fraction of the 1.47 s period. The opening lift is only `WASH_RATE × scale` = 0.30 × 32.8 = **9.8 units/s**, slew-limited by `turn` = 3.39/s. This is v0.0.101's stated design: *"URGENCY IS A CLOCK, NOT A DEPTH… what a passing wave cannot do is LAST."*
+- The hard `drowned` floor sits **70.2 units** under the surface — it never binds for a passing crest.
+- The tint stays off: `splashSeconds` = **0.545 s**, longer than the crossing — so the lens goes under *without* the underwater look, which reads exactly as "the camera dipped under the water" rather than as a proper underwater view.
+
+**This behaviour is identical on v0.0.111 and the shipped v0.0.117.**
+
+### The discriminating test (one minute, on the current build)
+
+On **v0.0.117**, float on the ocean, drag the camera down to the same near-horizontal angle, and watch the lens through several waves **without touching the lift/dive slider**.
+
+- **Still dips under crests the same way** → it was never a 112–116 regression. It is v0.0.111's envelope design at low camera elevation, live right now, and any fix is a *new* camera change against the current baseline rather than a re-application concern. F9 is then exonerated as the cause of what was seen.
+- **Noticeably better than 112–116 felt** → the lever was being touched, F9 is confirmed as reported, and A8's guidance (no one-frame cliff at 30% throw; don't zero `sunkFor` on partial intent) is the fix.
+
+Either way the ocean's *water* — surface, current, foam, timing, NOAA — stays exonerated (§14).
 
 ---
 
@@ -332,7 +386,7 @@ Direction summary: **ocean→fresh coupling is live data flow** (wave table + un
 
 Smallest safe sequence. Each step is independently verifiable and none reopens the accepted ocean.
 
-**Step 0 — Device facts first (no code).** Confirm on the phone: the fix line's `×{relief}` (is the dial 1?), whether symptomatic sessions used `?sea=`, and what the "ocean damage" actually was (visual / camera-feel / how she rode the swash). These choose between otherwise-identical fixes.
+**Step 0 — Device facts. ANSWERED 2026-08-30 (§1a):** relief **×1.00**, **bare URL** (no `?sea=`), and the ocean report is **camera/lens behaviour**. One question remains open and it gates A8 only: the low-angle camera test in §1a, which decides whether F9 or v0.0.111's own envelope design produced what was seen. A1–A7 are unblocked.
 
 ### A. Actual bug fixes (in order)
 
@@ -452,7 +506,7 @@ Good/bad anchors: v90 `69da284` · v111 `54e0961` · v117 `39337fd` (HEAD). Reve
 
 ### Audit gaps — open follow-ups from the completeness critique
 1. `groundHeight` is HD-tile-residency-dependent (arrival **and** eviction) — the ocean's anchored depth snapshot and F13's trigger list both need the correction; measure coarse-vs-HD deltas at shoreline vertices.
-2. **The device's actual dial settings were never established** — settings persist to localStorage, the default was once relief 1.5, and `?fix=` links rewrite the dial. One screenshot of the fix line settles it.
+2. **CLOSED 2026-08-30 — relief is ×1.00 (§1a).** *(Original gap: the device's actual dial settings were never established* — settings persist to localStorage, the default was once relief 1.5, and `?fix=` links rewrite the dial. One screenshot of the fix line settles it — done.)*
 3. Probes drive `?scene=island`, but the player runs bare-URL GameFlow (spawn selection, save/restore, fresh-profile settings) — unaudited delta.
 4. Boot-time coarse water bed: IslandWater is built before HD tiles land and nothing refreshes base until a 6,400-unit recentre — the **spawn window** carries lattice error PLUS coarse-vs-HD delta. Also untraced: the depth of cells *entering* the window at a recentre (empty, refilling at baseflow — a candidate clock for "floats a few seconds, then…").
 5. Beyond ±2,048 units the drawn ground is the 312.5-unit transition tier while groundHeight reproduces the near lattice — the visible-at-distance fresh sheet is judged against a ~3× coarser chord that *changes on approach*. Prime unmeasured candidate for the v115 "looked correct at a distance" clue.
