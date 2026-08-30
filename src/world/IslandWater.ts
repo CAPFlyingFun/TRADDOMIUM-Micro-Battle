@@ -500,6 +500,44 @@ export class IslandWater {
     return { depth: over, flowX: 0, flowZ: 0 };
   }
 
+  /**
+   * PROBE ONLY — what the SHEET is doing at a world point.
+   *
+   * `bed` is the lattice the sheet stands on, `skin` where it draws
+   * its surface, `ground` the terrain triangle actually rendered
+   * there. A skin at or below the ground is water drawn INSIDE the
+   * hill, which is invisible however opaque the shader makes it, and
+   * no measurement of depth alone can tell you that is happening.
+   */
+  skinAt(wx: number, wz: number): {
+    bed: number; depth: number; skin: number; ground: number;
+  } | null {
+    if (!this.placed) return null;
+    const span = N * CELL;
+    const fx = (wx - (this.centreX - span / 2)) / CELL;
+    const fy = (wz - (this.centreZ - span / 2)) / CELL;
+    const cx = Math.floor(fx);
+    const cy = Math.floor(fy);
+    if (cx < 0 || cy < 0 || cx >= N - 1 || cy >= N - 1) return null;
+    const tx = fx - cx;
+    const ty = fy - cy;
+    const at = (a: Float32Array): number => {
+      const v00 = a[cy * N + cx];
+      const v10 = a[cy * N + cx + 1];
+      const v01 = a[(cy + 1) * N + cx];
+      const v11 = a[(cy + 1) * N + cx + 1];
+      return (v00 * (1 - tx) + v10 * tx) * (1 - ty)
+        + (v01 * (1 - tx) + v11 * tx) * ty;
+    };
+    const bed = at(this.base);
+    const depth = at(this.sim.depth);
+    return {
+      bed, depth,
+      skin: bed + depth * reliefScale(),
+      ground: groundHeight(wx, wz),
+    };
+  }
+
   /** Depth of water at a world point, or 0. For wading and drinking. */
   depthAt(wx: number, wz: number): number {
     if (!this.placed) return 0;

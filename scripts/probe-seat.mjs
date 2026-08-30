@@ -56,7 +56,30 @@ console.log(`[${TAG}] ground ${s.col.ground.toFixed(2)} depth ${s.col.depth.toFi
   + ` herY ${s.col.herY.toFixed(2)} floor ${s.col.floor.toFixed(2)}`);
 console.log(`[${TAG}] wade ${JSON.stringify(s.wade)}`);
 console.log(`[${TAG}] she rides ${(s.col.herY - s.col.ground).toFixed(2)} above the ground`);
-console.log(`[${TAG}] sheets`, JSON.stringify(s.sheets));
+// WHERE IS THE SHEET, across the pond she is floating in?
+const map = await page.evaluate(() => {
+  const w = window.__island.where();
+  const rows = [];
+  let buried = 0, shown = 0, dry = 0;
+  for (let dz = -1200; dz <= 1200; dz += 100) {
+    let line = '';
+    for (let dx = -1200; dx <= 1200; dx += 100) {
+      const s = window.__island.waterSkin(w[0] + dx, w[2] + dz);
+      if (!s || s.depth <= 0.01) { line += '.'; dry++; continue; }
+      const over = s.skin - s.ground;
+      if (over <= 0) { line += '#'; buried++; }        // drawn inside the hill
+      else if (over < 1.5) { line += '-'; shown++; }   // under the alpha feather
+      else { line += 'W'; shown++; }                   // should be plain water
+    }
+    rows.push(line);
+  }
+  const here = window.__island.waterSkin(w[0], w[2]);
+  return { rows, buried, shown, dry, here };
+});
+console.log(`[${TAG}] under her:`, JSON.stringify(map.here));
+console.log(`[${TAG}] . dry   # drawn INSIDE the hill   - under the feather   W water`);
+for (const r of map.rows) console.log('   ' + r);
+console.log(`[${TAG}] buried ${map.buried}  shown ${map.shown}  dry ${map.dry}`);
 await page.screenshot({ path: `/tmp/seat-${TAG}.png` });
 console.log(`[${TAG}] page errors:`, errors.length ? errors : 'none');
 await browser.close();

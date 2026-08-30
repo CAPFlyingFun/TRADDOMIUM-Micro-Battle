@@ -735,6 +735,9 @@ export class IslandScene {
        * is currently drawn.
        */
       waterDepth: (wx: number, wz: number) => this.water?.depthAt(wx, wz) ?? 0,
+      // WHERE THE SHEET ACTUALLY IS, versus the ground drawn under it.
+      // Depth alone cannot tell you the water is buried in the hill.
+      waterSkin: (wx: number, wz: number) => this.water?.skinAt(wx, wz) ?? null,
       // What the water is doing to HER, for the probes: the same
       // numbers the movement just used, not a re-derivation.
       wading: () => ({ depth: this.wet, afloat: this.afloat, dive: this.dive, under: this.headUnder }),
