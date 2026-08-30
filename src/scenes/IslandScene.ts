@@ -34,6 +34,9 @@ import { Underwater } from '../world/Underwater';
 import { Ocean } from '../world/Ocean';
 import { canDrink, swimEffort, wadeAt } from '../ant/wading';
 import { Wings } from '../ant/wings';
+import {
+  afloatIn, instrumented, motionOf, type Act, type Motion,
+} from '../ant/motion';
 import { Breath, DROWN_HP_PER_SECOND, blackout } from '../ant/breath';
 import { SaltExposure, SALT_DAMAGE_FRACTION } from '../ant/brine';
 import { waterSpotAt } from '../world/waterQuery';
@@ -169,8 +172,6 @@ export class IslandScene {
   private readonly thirst = new Thirst();
   /** The drink button. On the pad only where there is water to drink. */
   private drinkButton!: Action;
-  /** Whether she is drinking THIS frame — the act, not the button. */
-  private drinking = false;
   private readonly debugDie: DebugDie;
   private readonly weatherChip: WeatherChip;
   /** Altitude, vertical speed and the wind — flight only. */
@@ -316,8 +317,14 @@ export class IslandScene {
    * dive spends the drying she has done — wings.ts carries the rules.
    */
   private readonly wings = new Wings();
-  /** Whether the water has her — what arms the wings' clock. */
-  private inWater = false;
+  /**
+   * WHAT SHE IS DOING, derived once a frame from everything below and
+   * read by everything downstream. Never assigned by hand — motion.ts
+   * carries the reason, and it is v0.0.123's bug.
+   */
+  private motion: Motion = 'idle';
+  /** And what she is doing with it. Acts interrupt; motions do not. */
+  private act: Act = 'none';
   private dive = 0;
   /** Whether her feet are off the bottom, updated every on-foot frame. */
   private afloat = false;
@@ -1040,7 +1047,11 @@ export class IslandScene {
       sunlight: () => this.sun.intensity,
       raindrops: () => this.rain.drawing,
       weatherAt: (wx: number, wz: number) => weather().peek(world(wx, wz)),
-      airborne: () => this.flight.aloft,
+      airborne: () => this.motion === 'flying',
+      // STAGE G. The one name for what she is doing, so a probe can
+      // assert on the state instead of re-deriving it from six flags.
+      motion: () => this.motion,
+      act: () => this.act,
       height: () => this.flight.height,
       flightState: () => this.flight.where,
       airspeed: () => this.flight.airspeed,
@@ -1333,13 +1344,10 @@ export class IslandScene {
     // NOTHING TO DRINK FROM UP HERE. Cleared before either branch so
     // the act cannot survive a takeoff — she would otherwise drink her
     // way across the island at flying speed.
-    this.drinking = false;
+    this.act = 'none';
     if (this.flight.aloft) {
       this.drinkButton.show(false);
       this.headUnder = false;
-      // Nothing wets a wing up here, and clearing it is what makes the
-      // NEXT touchdown on water an edge rather than more of the same.
-      this.inWater = false;
       // TWO SURFACES, AND THEY ARE NOT THE SAME QUESTION.
       //
       // The PHYSICAL one — this — is the real water standing under her
@@ -1484,10 +1492,7 @@ export class IslandScene {
       const overHer = wade.depth - wade.above;
       this.swimOver = Math.max(0, overHer);
       this.headUnder = overHer > (this.headUnder ? 0.6 : 1.0);
-      // WATER ON THE WINGS. Afloat is the test rather than any depth:
-      // wading is a film round her feet and her wings are a body up,
-      // but the moment the bottom lets go she is lying on the water.
-      this.inWater = wade.afloat || this.headUnder;
+
       // Only charge her for a sprint she is actually getting: calling
       // for one while stopped or reversing costs nothing. Afloat the
       // water prices the frame instead (swimEffort): paddling costs,
@@ -1500,7 +1505,7 @@ export class IslandScene {
       // or take off, and it ends.
       const reachable = canDrink(this.ant.where.wx, this.ant.where.wz);
       this.drinkButton.show(reachable);
-      this.drinking = reachable && this.drinkButton.held;
+      this.act = reachable && this.drinkButton.held ? 'drinking' : 'none';
       const sprinting = wants && travel.speed > PACE_SPEED[this.pace] + 1e-3;
       const resting = this.ant.pace < 0.05;
       this.effort = swimEffort(wade.afloat, wade.salt, travel.speed > 0.05, wantDive)
@@ -1515,16 +1520,40 @@ export class IslandScene {
       // rather than something she does in passing — and the current is
       // let go of with her drive, or the stream would carry a drinking
       // queen downhill while she stood there.
-      const hold = this.drinking ? 0 : wade.pace;
+      const hold = this.act === 'drinking' ? 0 : wade.pace;
       this.ant.update(
         {
           ahead: travel.ahead * hold,
           across: travel.across * hold,
           speed: travel.speed * hold,
         },
-        -look.yaw, dt, wade.above, this.drinking ? null : wade.carry,
+        -look.yaw, dt, wade.above,
+        this.act === 'drinking' ? null : wade.carry,
       );
     }
+
+    // ── WHAT SHE IS DOING ────────────────────────────────────────
+    // HERE, and not earlier: both branches above have run, so every
+    // number this reads is THIS frame's rather than last frame's. It
+    // is derived rather than assigned (motion.ts), so it cannot
+    // disagree with the physics it is read from — which is the whole
+    // point of it, and the bug it exists because of.
+    //
+    // THE ORDERING RULE, and it cost a bug to find during Stage G's
+    // own sweep: NOTHING ABOVE THIS LINE MAY READ `this.motion`. The
+    // takeoff a hundred lines up can set `aloft` mid-frame, so the
+    // branch that follows it has to ask the LIVE flight model which
+    // world she is in; a state derived at the end of the previous
+    // frame would still have said 'swimming' and run the water branch
+    // on the frame she left the water. Producers read physics,
+    // consumers read the state, and this is the line between them.
+    this.motion = motionOf({
+      aloft: this.flight.aloft,
+      afloat: this.afloat,
+      under: this.headUnder,
+      depth: this.wet,
+      speed: this.ant.pace,
+    });
 
     // Exhaustion drops her to the sustainable pace, never to a halt —
     // and the next sprint has to be asked for deliberately.
@@ -1541,27 +1570,28 @@ export class IslandScene {
     // lights up exactly as it does in the air. Joshua: "show water
     // speed + underwater speed and movement like in the air with same
     // hud."
-    const swimming = !this.flight.aloft && this.afloat;
+    const swimming = afloatIn(this.motion);
     const flightTelemetry = this.readFlight(dt);
     if (!swimming) {
       this.lastSwimAlt = null;
       this.swimVs = 0;
     }
     const telemetry = swimming ? this.readSwim(dt) : flightTelemetry;
-    const hudUp = this.flight.aloft || swimming;
+    const hudUp = instrumented(this.motion);
     this.lastFlight = telemetry;
     this.paceUI.show(
       this.pace, wants, this.stamina.spent,
       // Over the GROUND. On foot that is her pace; in the air it is the
       // vector sum with the wind, which is a different number and the
       // one the second line exists to contrast with.
-      this.flight.aloft ? Math.hypot(telemetry.ground.x, telemetry.ground.z) : this.ant.pace,
+      this.motion === 'flying'
+        ? Math.hypot(telemetry.ground.x, telemetry.ground.z) : this.ant.pace,
       this.auto.active, this.auto.way,
-      this.flight.aloft ? telemetry.airspeed : null,
+      this.motion === 'flying' ? telemetry.airspeed : null,
     );
     this.flightHud.show(
       telemetry, hudUp, this.seeFlight(telemetry),
-      this.flight.aloft ? this.flight.holdMode : null,
+      this.motion === 'flying' ? this.flight.holdMode : null,
     );
     // The RATE goes with the reserve, so the readout can say how long
     // what she is doing right now can go on rather than how much
@@ -1571,7 +1601,7 @@ export class IslandScene {
     // on the ground with them folded.
     this.queen?.beat(
       dt,
-      this.flight.aloft && this.flight.where !== 'glide',
+      this.motion === 'flying' && this.flight.where !== 'glide',
     );
     // THE CAMERA, not her body. Asked of the camera itself rather than
     // of the look controller, so there is no second convention to keep
@@ -1642,8 +1672,8 @@ export class IslandScene {
     // door every future predator will use. Out of the sea she knits,
     // on the caste table's own healthRecovery: the way back that lets
     // the bar move at all.
-    this.thirst.update(dt, this.drinking);
-    this.breath.update(this.headUnder, dt);
+    this.thirst.update(dt, this.act === 'drinking');
+    this.breath.update(this.motion === 'diving', dt);
     const stings = this.brine.update(inSalt, dt);
     if (stings > 0) {
       this.hurt(stings * liveStat('maxHealth') * SALT_DAMAGE_FRACTION, 'saltwater');
@@ -1653,7 +1683,7 @@ export class IslandScene {
     // the lever away and buoyancy is already carrying her up. A steady
     // rate rather than ticks: suffocation is continuous. ON TOP of any
     // salt, as asked.
-    if (this.breath.spent && this.headUnder) {
+    if (this.breath.spent && this.motion === 'diving') {
       this.hurt(DROWN_HP_PER_SECOND * dt, 'drowning');
     }
     // She cannot knit while the sea has her or while she is drowning —
@@ -1671,13 +1701,14 @@ export class IslandScene {
       this.shownDim = veil;
       this.dim.style.opacity = veil;
     }
-    this.vitals.aloft(this.flight.aloft);
+    this.vitals.aloft(this.motion === 'flying');
     this.vitals.show(this.stamina.fraction, this.stamina.spent, this.effort);
-    this.vitals.air(this.breath.fraction, this.headUnder);
+    this.vitals.air(this.breath.fraction, this.motion === 'diving');
     this.vitals.showHealth(this.hp / liveStat('maxHealth'), this.hp, this.brine.burning);
     this.vitals.saltStatus(this.brine.burning ? 'burning' : inSalt ? 'in' : 'none');
     this.vitals.thirst(
-      this.thirst.fraction, this.thirst.parched, this.drinking, this.thirst.drain,
+      this.thirst.fraction, this.thirst.parched, this.act === 'drinking',
+      this.thirst.drain,
     );
 
     // NOTHING TO TICK. The grace is a deadline, so the only question
@@ -1700,17 +1731,25 @@ export class IslandScene {
     // water (wings.ts). Rain stretches the clock rather than stopping
     // it. The weather is last frame's, which is what every other
     // consumer of nowWeather reads and is well inside a 30 s count.
+    // WATER ON THE WINGS is now just a reading of the state. Afloat is
+    // the test rather than any depth — wading is a film round her feet
+    // and her wings are a body up — and `flying` answers false, which
+    // is what makes the NEXT touchdown an edge rather than more of the
+    // same. That used to be a tenth flag kept in step by hand.
     this.wings.update(
-      dt, this.inWater, this.headUnder, this.nowWeather?.rainfall ?? 0,
+      dt, afloatIn(this.motion), this.motion === 'diving',
+      this.nowWeather?.rainfall ?? 0,
     );
     this.liftSlider.enable(leverFor(
-      this.flight.aloft,
-      this.afloat,
+      this.motion === 'flying',
+      afloatIn(this.motion),
       !this.wings.wet
         && this.flight.canTakeOff(this.ant.pace, this.stamina.fraction),
       !this.wings.wet && this.flight.canLaunch(this.stamina.fraction),
     ));
-    this.liftSlider.drying(this.flight.aloft ? null : this.wings.seconds);
+    this.liftSlider.drying(
+      this.motion === 'flying' ? null : this.wings.seconds,
+    );
     // ── The world moves under her ─────────────────────────────────
     // She has just travelled, so this is the moment to decide whether
     // the scene needs shifting and which ground should exist.
@@ -1816,7 +1855,7 @@ export class IslandScene {
         reading, service.source, service.field.ageSeconds(Date.now()),
         // Her heading only matters aloft: the headwind warning is about
         // whether she can make progress the way she is pointed.
-        this.flight.aloft ? this.flight.heading : null,
+        this.motion === 'flying' ? this.flight.heading : null,
       );
     }
 
@@ -1829,8 +1868,8 @@ export class IslandScene {
     // camera when it may stop holding itself above the water.
     this.follow.update(
       this.ant.root, look, dt,
-      this.afloat && !this.flight.aloft,
-      this.flight.aloft ? 0 : this.dive,
+      afloatIn(this.motion),
+      this.motion === 'flying' ? 0 : this.dive,
     );
     // AFTER THE WEATHER, because it takes its fraction of the fog and
     // lights applyWeather has just written — and AFTER THE CAMERA, for
@@ -1848,9 +1887,13 @@ export class IslandScene {
     // is final.
     this.camUnder = this.underwater.update(
       this.sun, this.skyLight, dt,
-      // Intent, not measurement: a crest washing over a floating
+      // INTENT, NOT MEASUREMENT: a crest washing over a floating
       // queen must not read as a dive, and a real dive must not wait.
-      !this.flight.aloft && this.dive > 0.15,
+      // So this stays the LEVER rather than becoming motion 'diving',
+      // which is the measured signal breath.ts is fed. Two different
+      // questions that agree most of the time — collapsing them here
+      // would undo the fix this comment was written for.
+      this.motion !== 'flying' && this.dive > 0.15,
     );
     // AFTER THE WEATHER AND AFTER THE CAMERA, and it needs both.
     //
@@ -2367,7 +2410,7 @@ export class IslandScene {
     // readouts stay truthful even while the autopilot flies smoothed:
     // AWL is her true instantaneous clearance above the real wave
     // surface, and it breathes with the swell exactly as it should.
-    const ridden = this.flight.aloft ? this.holdFloor - terrain : column;
+    const ridden = this.motion === 'flying' ? this.holdFloor - terrain : column;
     const altitude = terrain + ridden + clearance;
     const agl = ridden + clearance;
     // WHETHER THERE IS WATER UNDER HER TO SPEAK OF, with hysteresis.
@@ -2404,7 +2447,7 @@ export class IslandScene {
     // one — see easedRise. Only worth walking the path while she is
     // actually flying it.
     const settled = this.easedRise.push(climbing, dt);
-    const spot = this.flight.aloft
+    const spot = this.motion === 'flying'
       ? touchdown(from, ground, settled, sample)
       : null;
     if (!spot) {

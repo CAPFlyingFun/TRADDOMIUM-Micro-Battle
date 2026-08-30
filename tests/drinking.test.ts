@@ -39,7 +39,11 @@ describe('the drink button is on the pad again', () => {
   });
 
   it('is HELD, not tapped, because drinking is an act', () => {
-    expect(code()).toContain('this.drinking = reachable && this.drinkButton.held;');
+    // Stage G: the act IS the state now — there is no separate
+    // `drinking` flag shadowing it, which is the point of motion.ts.
+    expect(code()).toContain(
+      "this.act = reachable && this.drinkButton.held ? 'drinking' : 'none';",
+    );
     // takeTaps is the tap reader; drinking must not use it.
     expect(code()).not.toContain('this.drinkButton.takeTaps()');
   });
@@ -48,17 +52,18 @@ describe('the drink button is on the pad again', () => {
     // An act she can do while walking is not a decision. The current
     // goes with her drive, or a stream would carry a drinking queen
     // downhill while she stood there.
-    expect(code()).toContain('const hold = this.drinking ? 0 : wade.pace;');
-    expect(code()).toContain('this.drinking ? null : wade.carry,');
+    expect(code()).toContain("const hold = this.act === 'drinking' ? 0 : wade.pace;");
+    expect(code()).toContain("this.act === 'drinking' ? null : wade.carry,");
   });
 
   it('goes away in the air, and the act with it', () => {
     // Cleared before either branch: an act that survived a takeoff
     // would drink its way across the island at flying speed.
     const body = code();
-    const cleared = body.indexOf('this.drinking = false;');
+    const cleared = body.indexOf("this.act = 'none';");
     const branch = body.indexOf('if (this.flight.aloft) {');
     expect(cleared).toBeGreaterThan(-1);
+    expect(branch).toBeGreaterThan(-1);
     expect(cleared).toBeLessThan(branch);
     expect(body).toContain('this.drinkButton.show(false);');
   });
@@ -66,7 +71,7 @@ describe('the drink button is on the pad again', () => {
 
 describe('the reserve moves, and can be moved back', () => {
   it('is advanced every frame by the act', () => {
-    expect(code()).toContain('this.thirst.update(dt, this.drinking);');
+    expect(code()).toContain("this.thirst.update(dt, this.act === 'drinking');");
   });
 
   it('and the card is told the truth about it', () => {
@@ -74,7 +79,10 @@ describe('the reserve moves, and can be moved back', () => {
     // move, reporting that it was not moving.
     const body = code();
     expect(body).not.toContain('this.thirst.parched, false, 0');
-    expect(body).toContain('this.thirst.fraction, this.thirst.parched, this.drinking, this.thirst.drain,');
+    expect(body).toContain(
+      "this.thirst.fraction, this.thirst.parched, this.act === 'drinking',",
+    );
+    expect(body).toContain('this.thirst.drain,');
   });
 
   it('survives a save and comes back where it was', () => {
