@@ -54,6 +54,33 @@ export const CATCHMENT_M2 = 120_000;
 let acc: Float32Array | null = null;
 
 /**
+ * WHICH COARSE NODES ARE DRY LAND — baked beside the accumulation, from
+ * the same immutable grid, and the reason it exists is measured.
+ *
+ * The drainage bake covers the WHOLE coarse grid, and the coarse grid
+ * includes bathymetry: 51.4% of its nodes are seabed. D8 does not know
+ * the difference. Every drop the island sheds keeps accumulating once
+ * it is offshore, and the sink fill (above) turns the sea floor into
+ * one enormous conveyor, so the seabed carries the biggest catchments
+ * on the map. Counted on the shipped grid: 311,685 nodes clear
+ * CATCHMENT_M2 and 262,894 of them — 84.3% — are below sea level. The
+ * deepest sits 3,015 m down with a 121 km² catchment.
+ *
+ * That is not a bug in the accumulation. Water really does run that
+ * way; it is simply the SEA once it gets there, and calling it a
+ * freshwater candidate is what would have been wrong. See
+ * `isLandWatercourse`.
+ *
+ * COARSE, AND DELIBERATELY SO. This is derived from the same 54.7 m
+ * grid as `acc`, never from the HD terrain or the moving window: the
+ * two answers have to be about the same node or the mask means nothing.
+ * So it is a 55 m-wide claim like everything else here, and a node
+ * straddling the surf line may fall either way. The consumer treats a
+ * hit as a candidate to fly to, not as ground to stand on.
+ */
+let land: Uint8Array | null = null;
+
+/**
  * PRIORITY-FLOOD SINK FILLING (Barnes et al.), and why island-scale D8
  * cannot skip it. drainage.ts deliberately lets a pit keep its water —
  * right inside the window, where pooling and spilling are the
@@ -138,33 +165,87 @@ function fillSinks(bed: Float32Array, n: number): Float32Array {
   return filled;
 }
 
-/** Bake the island-wide accumulation. Call once; idempotent. */
+/** Bake the island-wide accumulation and its land mask. Idempotent. */
 export function bakeIslandChannels(grid: HeightGrid): void {
   if (acc) return;
   const bed = new Float32Array(SAMPLES * SAMPLES);
-  for (let i = 0; i < bed.length; i++) bed[i] = grid[i] * HEIGHT_SCALE;
+  const dry = new Uint8Array(SAMPLES * SAMPLES);
+  for (let i = 0; i < bed.length; i++) {
+    bed[i] = grid[i] * HEIGHT_SCALE;
+    // The RAW bed, before the sink fill — filling raises cells to their
+    // spill level, and a mask read off the filled surface would promote
+    // shallow seabed to land. Sea level is zero and the test matches the
+    // water query's own (`groundHeight < 0` is the sea), so the two
+    // cannot disagree about where the coast is. NODATA decodes far below
+    // this, which puts it on the correct side without a special case.
+    dry[i] = bed[i] >= 0 ? 1 : 0;
+  }
   acc = flowAccumulation(fillSinks(bed, SAMPLES), SAMPLES);
+  land = dry;
 }
 
 export function islandChannelsReady(): boolean {
   return acc !== null;
 }
 
-/** Upstream catchment area (m²) draining through the node nearest wx,wz. */
-export function catchmentAt(wx: number, wz: number): number {
-  if (!acc) return 0;
+/** The baked node a world position falls on, or -1 off the grid. */
+function nodeAt(wx: number, wz: number): number {
   const c = Math.round((wx + SPAN / 2) / NODE);
   const r = Math.round((wz + SPAN / 2) / NODE);
-  if (c < 0 || r < 0 || c >= SAMPLES || r >= SAMPLES) return 0;
-  return acc[r * SAMPLES + c] * NODE_M2;
+  if (c < 0 || r < 0 || c >= SAMPLES || r >= SAMPLES) return -1;
+  return r * SAMPLES + c;
 }
 
-/** Whether the island's own drainage says a watercourse runs here. */
+/** Upstream catchment area (m²) draining through the node nearest wx,wz. */
+export function catchmentAt(wx: number, wz: number): number {
+  const i = acc ? nodeAt(wx, wz) : -1;
+  return i < 0 ? 0 : acc![i] * NODE_M2;
+}
+
+/** Whether the coarse grid says this node is dry land rather than seabed. */
+export function isLandNode(wx: number, wz: number): boolean {
+  const i = land ? nodeAt(wx, wz) : -1;
+  return i >= 0 && land![i] === 1;
+}
+
+/**
+ * Whether the island's own drainage says a watercourse runs here.
+ *
+ * SAY WHAT IT MEANS: this is "enough water passes through this node",
+ * and it is true of most of the sea floor — see the `land` mask above.
+ * It is the right question for BASEFLOW SEEDING, which is its one
+ * caller (IslandWater): the sim window only ever asks about cells it is
+ * already simulating, and a seeded cell out past the surf is water
+ * entering water. It is the WRONG question for navigation, and
+ * `isLandWatercourse` is the one to ask there.
+ *
+ * Left deliberately unchanged when the land mask arrived (Joshua,
+ * 2026-08-30: "Do NOT change the meaning of isWatercourse globally if
+ * existing water simulation relies on its current behavior"). It does.
+ */
 export function isWatercourse(wx: number, wz: number): boolean {
   return catchmentAt(wx, wz) >= CATCHMENT_M2;
+}
+
+/**
+ * A watercourse ON LAND — the only kind worth navigating to.
+ *
+ * The freshwater half of the strategic finder rides on this rather than
+ * on `isWatercourse`, because an accumulated node offshore is drainage
+ * that has already reached the sea. Flying a thirsty queen to a 3 km
+ * deep node with a 121 km² catchment would have been the autopilot
+ * confidently steering her out over the Pacific to drink salt.
+ *
+ * Both halves are baked, so the answer at a world position never
+ * depends on where she is standing — the property the island-wide bake
+ * exists for in the first place.
+ */
+export function isLandWatercourse(wx: number, wz: number): boolean {
+  return isWatercourse(wx, wz) && isLandNode(wx, wz);
 }
 
 /** For tests and scene teardown. */
 export function forgetIslandChannels(): void {
   acc = null;
+  land = null;
 }

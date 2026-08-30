@@ -28,7 +28,7 @@
  * steers by it.
  */
 import { groundHeight } from './heightfield';
-import { islandChannelsReady, isWatercourse } from './islandChannels';
+import { islandChannelsReady, isLandWatercourse } from './islandChannels';
 import { SAMPLES, SPAN } from './kauai';
 
 /** Where some water is, relative to her. */
@@ -115,6 +115,15 @@ export function nearestSea(wx: number, wz: number): WaterBearing | null {
  * standing in it when she arrives is the simulation's call, and a
  * caller that treats this as a guarantee will fly a thirsty queen to a
  * dry gully. Hand off to `nearestFresh` on arrival.
+ *
+ * AND IT HAS TO BE ON LAND. The drainage is baked over the whole coarse
+ * grid, bathymetry included, and D8 keeps accumulating once the water
+ * is offshore — 84.3% of the nodes clearing CATCHMENT_M2 are below sea
+ * level, the deepest 3 km down carrying a 121 km² catchment. Every one
+ * of those was a freshwater candidate until this asked
+ * `isLandWatercourse` instead of `isWatercourse`. Found by Joshua's
+ * review before Phase 2 gave the autopilot anything to trust
+ * (2026-08-30).
  */
 
 /** One coarse node — 54.7 m, the resolution the drainage is known at. */
@@ -138,7 +147,7 @@ const RINGS = SAMPLES;
  */
 export function nearestWatercourse(wx: number, wz: number): WaterBearing | null {
   if (!islandChannelsReady()) return null;
-  if (isWatercourse(wx, wz)) return { range: 0, bearing: 0 };
+  if (isLandWatercourse(wx, wz)) return { range: 0, bearing: 0 };
   const hit = (x: number, z: number): WaterBearing => ({
     range: Math.hypot(x - wx, z - wz),
     bearing: Math.atan2(x - wx, z - wz),
@@ -154,7 +163,7 @@ export function nearestWatercourse(wx: number, wz: number): WaterBearing | null 
         [wx - span, wz + off], [wx + span, wz + off],
       ];
       for (const [x, z] of edge) {
-        if (!isWatercourse(x, z)) continue;
+        if (!isLandWatercourse(x, z)) continue;
         const found = hit(x, z);
         if (!best || found.range < best.range) best = found;
       }
@@ -172,7 +181,7 @@ export function nearestWatercourse(wx: number, wz: number): WaterBearing | null 
           [wx - wide, wz + off], [wx + wide, wz + off],
         ];
         for (const [x, z] of edge) {
-          if (!isWatercourse(x, z)) continue;
+          if (!isLandWatercourse(x, z)) continue;
           const found = hit(x, z);
           if (found.range < best.range) best = found;
         }
