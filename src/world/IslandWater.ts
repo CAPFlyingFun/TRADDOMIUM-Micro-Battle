@@ -538,6 +538,75 @@ export class IslandWater {
     };
   }
 
+  /**
+   * THE NEAREST FRESH WATER SHE COULD SEE, and which way.
+   *
+   * Rings outward from her own cell and stops at the first hit, so the
+   * common case — standing in it, or beside it — costs almost nothing
+   * and only an empty window walks the whole grid. Bounded by the
+   * window itself: past 128 m this simply answers null, because the
+   * sim does not know and guessing would be worse than saying so.
+   *
+   * WATER SHE COULD SEE, not water the solver holds: the test is that
+   * the drawn skin stands above the drawn ground. A film the sheet
+   * buries inside the hill is not somewhere to walk to.
+   */
+  nearestFresh(wx: number, wz: number): { range: number; bearing: number } | null {
+    if (!this.placed) return null;
+    const span = N * CELL;
+    const ox = this.centreX - span / 2;
+    const oz = this.centreZ - span / 2;
+    const hx = Math.round((wx - ox) / CELL);
+    const hz = Math.round((wz - oz) / CELL);
+    const wet = (cx: number, cz: number): boolean => {
+      if (cx < 0 || cz < 0 || cx >= N || cz >= N) return false;
+      const i = cz * N + cx;
+      if (this.sim.depth[i] <= 0) return false;
+      if (this.base[i] < 0) return false;              // the sea's, not ours
+      const x = ox + cx * CELL;
+      const z = oz + cz * CELL;
+      return this.base[i] + this.sim.depth[i] * reliefScale() > groundHeight(x, z);
+    };
+    const hit = (cx: number, cz: number): { range: number; bearing: number } => {
+      const dx = (ox + cx * CELL) - wx;
+      const dz = (oz + cz * CELL) - wz;
+      return { range: Math.hypot(dx, dz), bearing: Math.atan2(dx, dz) };
+    };
+    if (wet(hx, hz)) return { range: 0, bearing: 0 };
+    for (let r = 1; r < N; r++) {
+      let best: { range: number; bearing: number } | null = null;
+      // The ring, not the square: only the cells this radius adds.
+      for (let d = -r; d <= r; d++) {
+        const edge: Array<[number, number]> = [
+          [hx + d, hz - r], [hx + d, hz + r], [hx - r, hz + d], [hx + r, hz + d],
+        ];
+        for (const [cx, cz] of edge) {
+          if (!wet(cx, cz)) continue;
+          const found = hit(cx, cz);
+          if (!best || found.range < best.range) best = found;
+        }
+      }
+      // A square ring is not a circle, so the first ring to contain
+      // water can hold a corner cell further off than a nearer cell on
+      // the next ring out. One more ring settles it.
+      if (best) {
+        for (let d = -(r + 1); d <= r + 1; d++) {
+          const edge: Array<[number, number]> = [
+            [hx + d, hz - r - 1], [hx + d, hz + r + 1],
+            [hx - r - 1, hz + d], [hx + r + 1, hz + d],
+          ];
+          for (const [cx, cz] of edge) {
+            if (!wet(cx, cz)) continue;
+            const found = hit(cx, cz);
+            if (found.range < best.range) best = found;
+          }
+        }
+        return best;
+      }
+    }
+    return null;
+  }
+
   /** Depth of water at a world point, or 0. For wading and drinking. */
   depthAt(wx: number, wz: number): number {
     if (!this.placed) return 0;

@@ -34,6 +34,8 @@ import { Underwater } from '../world/Underwater';
 import { Ocean } from '../world/Ocean';
 import { canDrink, swimEffort, wadeAt } from '../ant/wading';
 import { Wings } from '../ant/wings';
+import { nearestSea } from '../world/nearestWater';
+import { seaSwellAt } from '../world/seaSwell';
 import {
   afloatIn, instrumented, motionOf, type Act, type Motion,
 } from '../ant/motion';
@@ -148,6 +150,12 @@ const HOLD_EASE_FRESH = 3;
 const HOLD_EASE_LAND = 2.5;
 /** Nothing real may come closer than this before she climbs. */
 const SURFACE_MARGIN = 12;
+/**
+ * How often the water instrument re-answers, seconds. A ray march and
+ * a ring search are not frame work, and neither answer moves far in a
+ * tenth of a second — she cannot outwalk it.
+ */
+const WATER_CADENCE = 0.1;
 
 const DIVE_EASE = 0.9;
 /**
@@ -323,6 +331,15 @@ export class IslandScene {
    * carries the reason, and it is v0.0.123's bug.
    */
   private motion: Motion = 'idle';
+  /**
+   * THE WATER INSTRUMENT, recomputed on a cadence rather than a frame.
+   *
+   * Finding the coast is a ray march and finding a pond is a ring
+   * search; neither answer changes meaningfully in a tenth of a
+   * second, and she cannot walk far enough in one to make it lie.
+   */
+  private waterLine: string | null = null;
+  private waterDue = 0;
   /** And what she is doing with it. Acts interrupt; motions do not. */
   private act: Act = 'none';
   private dive = 0;
@@ -1622,6 +1639,7 @@ export class IslandScene {
         // The master LOD's state rides the same developer toggle as
         // the fix — one switch, one register, one screenshot.
         lod: settings().showFix ? lodLine() : null,
+        water: settings().showFix ? this.waterLine : null,
         // HER NOSE, not the camera's. In flight they part company the
         // moment she looks around, and the pairing with the flight
         // panel's ground line only means anything if this one is hers.
@@ -1753,6 +1771,7 @@ export class IslandScene {
     this.liftSlider.drying(
       this.motion === 'flying' ? null : this.wings.seconds,
     );
+    this.readWater(dt);
     // ── The world moves under her ─────────────────────────────────
     // She has just travelled, so this is the moment to decide whether
     // the scene needs shifting and which ground should exist.
@@ -2357,6 +2376,59 @@ export class IslandScene {
    * is measured from her actual height and eased for the eye, the same
    * way AGL is. No touchdown: a swimmer is not on approach to anywhere.
    */
+  /**
+   * HOW FAR TO THE WATER, SIGNED — the instrument Joshua asked for
+   * after "I landed on it, settled below the water".
+   *
+   * The vertical half is the one that matters and the one that did not
+   * exist: her height above the DRAWN surface, negative when she is
+   * under it. AWL could not say this — it clamps at zero, only appears
+   * over 30+ units of water, and measures against the queried surface
+   * rather than the drawn one. A number that cannot go negative cannot
+   * report being underneath something.
+   *
+   * The horizontal half is range and bearing to the nearest of each
+   * kind, so "where is water" is answerable from the readout instead
+   * of by flying around looking for it.
+   */
+  private readWater(dt: number): void {
+    if (!settings().showFix) { this.waterLine = null; return; }
+    this.waterDue -= dt;
+    if (this.waterDue > 0) return;
+    this.waterDue = WATER_CADENCE;
+    const here = this.ant.where;
+    const herY = this.ant.root.position.y;
+    const say = (v: number): string =>
+      `${v >= 0 ? '+' : '-'}${Math.abs(v).toFixed(1)}`;
+    const far = (r: number): string => (r < 1
+      ? 'here'
+      : r < 100_000 ? `${(r / 100).toFixed(1)}m` : `${(r / 100_000).toFixed(2)}km`);
+    const way = (b: number): string =>
+      `${Math.round(((b * 180) / Math.PI + 360) % 360).toString().padStart(3, '0')}°`;
+
+    // FRESH. The skin is what she can see, so it is what the sign is
+    // measured against — the whole point of the exercise.
+    const skin = this.water?.skinAt(here.wx, here.wz) ?? null;
+    const nearFresh = this.water?.nearestFresh(here.wx, here.wz) ?? null;
+    const fresh = skin && skin.depth > 0 && skin.skin > skin.ground
+      ? `${say(herY - skin.skin)}`
+      : '——';
+    const freshWay = nearFresh
+      ? `${far(nearFresh.range)}${nearFresh.range < 1 ? '' : ` ${way(nearFresh.bearing)}`}`
+      : 'none';
+
+    // SALT. Ground below zero IS the sea, and its surface is the swell
+    // — the same one shared surface the ocean sheet draws from.
+    const g = groundHeight(here.wx, here.wz);
+    const nearSea = nearestSea(here.wx, here.wz);
+    const salt = g < 0 ? `${say(herY - seaSwellAt(here.wx, here.wz, -g))}` : '——';
+    const seaWay = nearSea
+      ? `${far(nearSea.range)}${nearSea.range < 1 ? '' : ` ${way(nearSea.bearing)}`}`
+      : 'none';
+
+    this.waterLine = `WTR fresh ${fresh} ${freshWay} · salt ${salt} ${seaWay}`;
+  }
+
   private readSwim(dt: number): FlightTelemetry {
     const here = this.ant.where;
     const terrain = groundHeight(here.wx, here.wz);

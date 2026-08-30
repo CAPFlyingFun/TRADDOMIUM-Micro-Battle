@@ -777,7 +777,15 @@ export class FlightHud {
 
     // AWL, only while water stands beneath her — over dry land the
     // row excuses itself rather than repeating AGL.
-    const awl = now.awl == null ? '' : readHeight(Math.max(0, now.awl));
+    //
+    // AND IT IS SIGNED, which it was not. `Math.max(0, awl)` made the
+    // one readout that could have said "you are UNDER the water"
+    // structurally incapable of saying it: a queen forty centimetres
+    // beneath a pond read a tidy 0. That clamp cost three wrong
+    // theories on 2026-08-30 before Joshua asked for the instrument
+    // that would have shown it in a glance. A number that cannot go
+    // negative cannot report being underneath something.
+    const awl = now.awl == null ? '' : readHeight(now.awl);
     if (awl !== this.shownAwl) {
       this.shownAwl = awl;
       this.awlRow.style.visibility = awl ? 'visible' : 'hidden';

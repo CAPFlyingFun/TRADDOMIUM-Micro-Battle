@@ -193,6 +193,14 @@ export interface UnderTape {
   /** The master LOD's one-line state (lodProbe.lodLine) — the same
    *  developer register as the fix, and shown under its toggle. */
   readonly lod?: string | null;
+  /**
+   * HOW FAR TO THE WATER, signed — the same developer register again.
+   *
+   * Here rather than on the vitals card because it is an instrument
+   * for finding a fault, not something the player steers by, and the
+   * fix and LOD lines it sits under are read the same way.
+   */
+  readonly water?: string | null;
   readonly air?: AirLine | null;
   readonly ground?: GroundLine | null;
   readonly wind?: WindLine | null;
@@ -222,7 +230,9 @@ export class Compass {
   private readonly fixLine: HTMLDivElement;
   private lastFix = '';
   private readonly lodLine: HTMLDivElement;
+  private readonly waterLine: HTMLDivElement;
   private lastLod = '';
+  private lastWater = '';
   private readonly airLine: HTMLDivElement;
   private lastAir = '';
   private readonly groundLine: HTMLDivElement;
@@ -457,6 +467,23 @@ export class Compass {
     } as Partial<CSSStyleDeclaration>);
     this.root.appendChild(this.lodLine);
 
+    // AND THE WATER, under the LOD: how far above or below the surface
+    // she is, and how far to the nearest of each kind. Same register,
+    // same toggle, same voice.
+    this.waterLine = document.createElement('div');
+    this.waterLine.dataset.ui = 'compass-water';
+    Object.assign(this.waterLine.style, {
+      marginTop: '2px',
+      textAlign: 'center',
+      font: '500 8px/1 "JetBrains Mono", ui-monospace, monospace',
+      fontVariantNumeric: 'tabular-nums',
+      whiteSpace: 'nowrap',
+      color: 'rgba(169, 242, 201, .62)',
+      textShadow: SHADOW,
+      display: 'none',
+    } as Partial<CSSStyleDeclaration>);
+    this.root.appendChild(this.waterLine);
+
     host.appendChild(this.root);
 
     // Re-fit whenever anything around it changes shape: a rotation, a
@@ -655,6 +682,18 @@ export class Compass {
     } else if (this.lodLine.style.display !== 'none') {
       this.lodLine.style.display = 'none';
       this.lastLod = '';
+    }
+
+    const water = under?.water ?? null;
+    if (water) {
+      if (water !== this.lastWater) {
+        this.lastWater = water;
+        this.waterLine.textContent = water;
+      }
+      if (this.waterLine.style.display === 'none') this.waterLine.style.display = '';
+    } else if (this.waterLine.style.display !== 'none') {
+      this.waterLine.style.display = 'none';
+      this.lastWater = '';
     }
 
     this.drawMarkers(from, markers, half);
