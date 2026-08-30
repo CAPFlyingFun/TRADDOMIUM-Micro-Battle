@@ -36,6 +36,7 @@ import { canDrink, swimEffort, wadeAt } from '../ant/wading';
 import { Wings } from '../ant/wings';
 import { nearestSea, nearestWatercourse } from '../world/nearestWater';
 import { MissionBrain } from '../ant/autonomy/missionBrain';
+import { gaitWords, mediumOf, paceShare, tierOf } from '../ant/gait';
 import { straightLineTrip } from '../ant/autonomy/mission';
 import { AUTONOMY_DEFAULTS } from '../ant/autonomy/autonomyConfig';
 import { seaSwellAt } from '../world/seaSwell';
@@ -804,6 +805,12 @@ export class IslandScene {
         channel: this.channelNear,
         thirst: this.thirst.fraction,
         drain: this.thirst.drain,
+        ...(() => {
+          const g = this.gaitNow();
+          return {
+            medium: g.medium, tier: g.tier, paceShare: paceShare(g.medium, g.tier),
+          };
+        })(),
       }),
       // What the water is doing to HER, for the probes: the same
       // numbers the movement just used, not a re-derivation.
@@ -2534,6 +2541,20 @@ export class IslandScene {
    * acts on it: the executor that turns an intent into a FlightDemand
    * is Phase 2. She will decide correctly and stand still doing it.
    */
+  /**
+   * HER PACE, ONCE — the tier she is on and the ceilings it is measured
+   * against. Both the brain and the developer line read this, so the
+   * two cannot disagree about what she is doing.
+   */
+  private gaitNow(): { medium: ReturnType<typeof mediumOf>; tier: ReturnType<typeof tierOf> } {
+    const medium = mediumOf(this.motion);
+    // The SELECTED pace plus whether the sprint override is actually in
+    // force — asking for a sprint with an empty bar is not a sprint.
+    const sprinting = (this.sprintOn || this.paceUI.sprintHeld)
+      && !this.reask && !this.stamina.spent;
+    return { medium, tier: tierOf(this.pace, sprinting) };
+  }
+
   private thinkAutonomy(dt: number): void {
     const here = this.ant.where;
     this.channelDue -= dt;
@@ -2549,6 +2570,10 @@ export class IslandScene {
       staminaSpent: this.stamina.spent,
       motion: this.motion,
       act: this.act,
+      ...(() => {
+        const g = this.gaitNow();
+        return { medium: g.medium, tier: g.tier, paceShare: paceShare(g.medium, g.tier) };
+      })(),
       wingsWet: this.wings.wet,
       drinkable: canDrink(here.wx, here.wz),
       nearestFresh: this.water?.nearestFresh(here.wx, here.wz) ?? null,
@@ -2581,6 +2606,10 @@ export class IslandScene {
       motion: this.motion,
       act: this.act,
       wingsWet: this.wings.wet,
+      ...(() => {
+        const g = this.gaitNow();
+        return { medium: g.medium, tier: g.tier, paceShare: paceShare(g.medium, g.tier) };
+      })(),
       drinkable: false,
       nearestFresh: null,
       nearestWatercourse: this.channelNear,
@@ -2594,7 +2623,9 @@ export class IslandScene {
     return `AI ${d.goal} · pri ${d.primary ?? '—'} · det ${d.detour ?? '—'}`
       + ` · h2o ${(d.thirst * 100).toFixed(0)}% dry ${secs(d.dry)}`
       + ` · eta ${secs(d.eta)} · chan ${chan}`
-      + ` · stam ${(d.stamina * 100).toFixed(0)}% · ${d.motion}/${d.act}`;
+      + ` · stam ${(d.stamina * 100).toFixed(0)}%`
+      + ` · ${d.medium} ${gaitWords(d.medium, d.tier)}`
+      + ` · ${d.motion}/${d.act}`;
   }
 
   private readSwim(dt: number): FlightTelemetry {

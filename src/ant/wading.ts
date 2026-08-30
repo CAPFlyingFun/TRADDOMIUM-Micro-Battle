@@ -48,7 +48,7 @@ export const DRAUGHT = 0.15;
 /** What is left of her pace at the deepest she can still walk. */
 const WADE_PACE = 0.45;
 /** And what is left of it once she is swimming rather than walking. */
-const PADDLE_PACE = 0.22;
+export const PADDLE_PACE = 0.22;
 /**
  * How much of the current reaches her, wading and afloat. Afloat is
  * nearly all of it: she is ON the water with nothing to push against.

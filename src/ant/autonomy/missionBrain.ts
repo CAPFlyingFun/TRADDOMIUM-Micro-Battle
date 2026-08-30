@@ -33,6 +33,7 @@
  */
 import type { WorldPoint } from '../../world/coords';
 import type { Act, Motion } from '../motion';
+import type { Medium, Tier } from '../gait';
 import { AUTONOMY_DEFAULTS, type AutonomyConfig } from './autonomyConfig';
 import {
   satisfies, timeUntilDry,
@@ -78,6 +79,19 @@ export interface Sense {
   /** 0–1, the ONE reserve. Read for Phase 2; nothing decides on it yet. */
   readonly stamina: number;
   readonly staminaSpent: boolean;
+  /**
+   * HOW HARD SHE IS GOING, and in which set of ceilings — gait.ts.
+   *
+   * Sensed for Phase 2, which is where it earns its keep: the route
+   * planner's first move on an unsafe trip is to CHANGE PACE before it
+   * inserts a stop, and a brain that cannot see the pace cannot make
+   * that trade. Phase 1 reads it and decides nothing on it, exactly as
+   * it does with stamina.
+   */
+  readonly medium: Medium;
+  readonly tier: Tier;
+  /** That tier as a share of the medium's own maximum, 0–1. */
+  readonly paceShare: number;
   readonly motion: Motion;
   readonly act: Act;
   /** She cannot fly until they dry (ant/wings.ts). */
@@ -122,6 +136,9 @@ export interface AutonomyDebug {
   readonly stamina: number;
   readonly motion: Motion;
   readonly act: Act;
+  readonly medium: Medium;
+  readonly tier: Tier;
+  readonly paceShare: number;
 }
 
 const NOWHERE: Intent = {
@@ -240,6 +257,9 @@ export class MissionBrain {
       stamina: sense.stamina,
       motion: sense.motion,
       act: sense.act,
+      medium: sense.medium,
+      tier: sense.tier,
+      paceShare: sense.paceShare,
     };
   }
 

@@ -33,6 +33,9 @@ const sense = (over: Partial<Sense> = {}): Sense => ({
   staminaSpent: false,
   motion: 'flying',
   act: 'none',
+  medium: 'air',
+  tier: 'run',
+  paceShare: 0.75,
   wingsWet: false,
   drinkable: false,
   nearestFresh: null,
@@ -487,5 +490,40 @@ describe('the brain reads the lower layers and never writes them', () => {
     // Phase 1 does not route around exhaustion — it is exposed, not used.
     expect(brain.goal).toBe('navigate');
     expect(brain.debug(sense({ stamina: 0.01 })).stamina).toBe(0.01);
+  });
+});
+
+/**
+ * PACE, SENSED FOR PHASE 2 — the same footing stamina is on.
+ *
+ * The route planner's first move on an unsafe trip is to change pace
+ * before it inserts a stop, so the brain has to be able to SEE the
+ * pace. Phase 1 reads it and decides nothing on it; these tests hold
+ * that it arrives intact and that nothing has quietly started routing
+ * on it.
+ */
+describe('pace is sensed, not yet decided on', () => {
+  it('reaches the debug intact', () => {
+    const brain = new MissionBrain(fixedEta(60), CFG);
+    brain.order(waypoint());
+    const s = sense({ medium: 'land', tier: 'crawl', paceShare: 0.122 });
+    run(brain, s);
+    const d = brain.debug(s);
+    expect(d.medium).toBe('land');
+    expect(d.tier).toBe('crawl');
+    expect(d.paceShare).toBeCloseTo(0.122, 6);
+  });
+
+  it('and changing it alone changes no decision', () => {
+    const goals: string[] = [];
+    for (const tier of ['crawl', 'walk', 'run', 'sprint'] as const) {
+      const brain = new MissionBrain(fixedEta(5000), CFG);
+      brain.order(waypoint());
+      run(brain, sense({ thirst: 0.2, tier }));
+      goals.push(brain.goal);
+    }
+    // The ETA comes from the estimator, and the estimator is what a
+    // pace change must go through — not a shortcut inside the brain.
+    expect(new Set(goals).size).toBe(1);
   });
 });
