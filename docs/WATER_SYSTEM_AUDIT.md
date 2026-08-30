@@ -8,6 +8,24 @@
 
 ---
 
+## 0. STATUS — WATER IS FROZEN AT AN ACCEPTABLE BASELINE (2026-08-30)
+
+**v0.0.118 passed device acceptance.** Joshua confirmed: inland water substantially better, no absurd freshwater current, no Pacific-style breaker motion inland, Queen/water relationship acceptable, ocean acceptable.
+
+**The fix ladder in §13 is CLOSED.** A1 and A2 shipped (v0.0.118). **A3–A8 are not to be implemented** unless a finding here becomes relevant to an *observed* gameplay problem. Do not reopen the water system to work down this list; the goal is to return to gameplay and features.
+
+**Accepted technical debt, deliberately unfixed:**
+
+- **A5 — the drawn-fresh-bed vs queried-ground disagreement (F1).** The confirmed root cause of the old "underneath the water" symptoms, and still present: the fresh sheet's bed is sampled every 100 units while every query uses the exact 8-unit triangle (+2.03 p95, +6.19 worst, above FOOTING at 32% of valley points). It is not currently producing an observed symptom. **Implement only if the underwater symptom returns, or if another feature needs the drawn and queried surfaces to agree.** Before designing it, take the §17 gap-5 measurement (the 312.5-unit transition tier beyond ±2,048 units).
+- **F3 — the invisible-but-afloat band.** Fresh water is not drawn until ~1.9 units deep while she floats at 0.4. Consequence worth knowing: "stand in the water you can see" is not reliably possible inland, which is why drinking uses `canDrink`'s reach ring rather than requiring her to stand in it.
+- **F9's A8 guidance** — preserved for whenever the dive camera is next touched: no one-frame release cliff at 30% throw, and do not zero `sunkFor` on partial intent.
+
+**Visual polish backlog (not a bug, do not reopen the water system for it):**
+
+- **Shoreline naturalness.** The ocean/beach waterline can read too straight and squared in places — a noticeably linear edge, seen on device (v0.0.118 acceptance screenshots, a long dead-straight sand/water boundary running diagonally across frame). This is a *look* item for whenever beach/shoreline art is next worked, not a correctness fault: the audit found the ocean's waterline geometry sound (§14), and the straightness is the coastline the 13.67 m elevation model actually produces, sampled on the ocean sheet's own lattice. Worth revisiting with the terrain/beach pass rather than the water stack.
+
+---
+
 ## 1. Executive Summary
 
 **Confirmed root cause of the inland "underneath the water" symptoms (F1, CRITICAL):**
@@ -384,14 +402,16 @@ Direction summary: **ocean→fresh coupling is live data flow** (wave table + un
 
 ## 13. Recommended Fix Order
 
+> **CLOSED — see §0.** A1 and A2 shipped in v0.0.118 and passed device acceptance. A3–A8 are **not** to be implemented unless a finding becomes relevant to an observed gameplay problem. The sequence below is kept as the record of what was decided and why, and as the plan to resume from if the water is ever reopened.
+
 Smallest safe sequence. Each step is independently verifiable and none reopens the accepted ocean.
 
 **Step 0 — Device facts. ANSWERED 2026-08-30 (§1a):** relief **×1.00**, **bare URL** (no `?sea=`), and the ocean report is **camera/lens behaviour**. One question remains open and it gates A8 only: the low-angle camera test in §1a, which decides whether F9 or v0.0.111's own envelope design produced what was seen. A1–A7 are unblocked.
 
 ### A. Actual bug fixes (in order)
 
-1. **A1 — Re-land the `ocean` material gate as a single-purpose commit** (kills F4: pond breakers + phantom-table; the v112 idea, exonerated by F6). Prove it with an emitted-GLSL byte-diff for `ocean:true` before/after, and a fresh-shader byte-stability test across table swaps. Include `toFixed(3)` only with its reason documented. **Touch nothing else in the commit.**
-2. **A2 — Still fresh water, both halves at once** (kills F5): zero the fresh *gameplay* flow (v112's `spotAt` change) and the fresh *visual* flow attribute (v113's `update()` change) in one commit, gated to the fresh branch only. The solver keeps running (it decides where water is).
+1. **A1 — DONE (v0.0.118).** Re-land the `ocean` material gate as a single-purpose commit (kills F4: pond breakers + phantom-table; the v112 idea, exonerated by F6). Prove it with an emitted-GLSL byte-diff for `ocean:true` before/after, and a fresh-shader byte-stability test across table swaps. Include `toFixed(3)` only with its reason documented. **Touch nothing else in the commit.**
+2. **A2 — DONE (v0.0.118).** Still fresh water, both halves at once (kills F5): zero the fresh *gameplay* flow (v112's `spotAt` change) and the fresh *visual* flow attribute (v113's `update()` change) in one commit, gated to the fresh branch only. The solver keeps running (it decides where water is).
 3. **A3 — Re-land the float-exit drain fix gated on `!salt`** (keeps v114's genuinely correct inland fix, removes F10's sea side-effect). The v114 trace stands: soak drains 3 mm/s and the old exit seats her under standing water.
 4. **A4 — Fix the two one-frame vertical snaps:** `reground()` passes the stored `base` (F11 — one argument), and the touchdown hand-off eases the ~10-unit seat change over a few frames or lands her at the drawn-consistent height (F2); re-check F8's post-update clamp while there (clamp against post-integration height, or clamp `above` itself).
 5. **A5 — The root: make the drawn fresh surface and the queried surface agree** (F1). This is the water-mesh resolution problem — a bed that agrees with `groundHeight` at her scale near her (finer local tessellation, or drawing the near skin on query-consistent ground) — **it is its own piece of work, not a constant.** Only *after* it lands may the feather come down (A6). Measure first: the critique's gap-5 transition-tier chord and gap-4 boot-time coarse-bed additions to the error budget.

@@ -32,7 +32,7 @@ import { followHd, forgetHd, hdResident, onHdTile } from '../world/kauaiHd';
 import { IslandWater } from '../world/IslandWater';
 import { Underwater } from '../world/Underwater';
 import { Ocean } from '../world/Ocean';
-import { swimEffort, wadeAt } from '../ant/wading';
+import { canDrink, swimEffort, wadeAt } from '../ant/wading';
 import { Breath, DROWN_HP_PER_SECOND, blackout } from '../ant/breath';
 import { SaltExposure, SALT_DAMAGE_FRACTION } from '../ant/brine';
 import { waterSpotAt } from '../world/waterQuery';
@@ -58,7 +58,7 @@ import {
 } from '../game/save';
 import { Vitals } from '../ui/Vitals';
 import { LIVE_GROWTH, liveStat } from '../ant/castes';
-import { ActionPad } from '../input/ActionPad';
+import { ActionPad, type Action } from '../input/ActionPad';
 import { Thirst } from '../ant/thirst';
 import { LiftSlider, leverFor } from '../input/LiftSlider';
 import { DebugDie } from '../ui/DebugDie';
@@ -166,6 +166,10 @@ export class IslandScene {
   private readonly vitals: Vitals;
   private readonly actions: ActionPad;
   private readonly thirst = new Thirst();
+  /** The drink button. On the pad only where there is water to drink. */
+  private drinkButton!: Action;
+  /** Whether she is drinking THIS frame — the act, not the button. */
+  private drinking = false;
   private readonly debugDie: DebugDie;
   private readonly weatherChip: WeatherChip;
   /** Altitude, vertical speed and the wind — flight only. */
@@ -538,11 +542,20 @@ export class IslandScene {
     // CONTEXTUAL, per the HUD rule: it exists because water now exists,
     // and it only lights when she is actually standing at some. Held,
     // not tapped — drinking is an act, and an act can be interrupted.
-    // THE DRINK BUTTON WENT WITH THE WATER. It stayed on the pad for
-    // one build after the water came out, permanently disabled, which
-    // is the state the contextual-HUD rule exists to forbid: a control
-    // for a mechanic the game does not have is clutter even when it is
-    // greyed. It comes back when there is something to drink.
+    // THE DRINK BUTTON IS BACK, because there is something to drink
+    // again. It went out when the water did — it had spent a build on
+    // the pad permanently disabled, which is the state the contextual
+    // HUD rule exists to forbid: a control for a mechanic the game
+    // does not have is clutter even when it is greyed.
+    //
+    // So it returns CONTEXTUAL, off the pad entirely unless there is
+    // fresh water within reach (`canDrink`, which probes a ring around
+    // her so she can drink from the bank rather than having to stand
+    // in it — and which refuses salt at every probe, so the sea can
+    // never satisfy it). And HELD, not tapped: drinking is an act, it
+    // holds her still, and an act can be interrupted.
+    this.drinkButton = this.actions.add('💧', 'drink', 'e');
+    this.drinkButton.show(false);
     this.vitals = new Vitals(host, {
       health: liveStat('maxHealth'),
       food: liveStat('maxHunger'),
@@ -1143,9 +1156,7 @@ export class IslandScene {
         agl: this.flight.height,
       },
       body: { stage: LIVE_GROWTH, winged: this.winged },
-      // `thirst` stays in the schema so saves written while the water
-      // existed still load; nothing feeds it now.
-      meters: { stamina: this.stamina.fraction, thirst: 1 },
+      meters: { stamina: this.stamina.fraction, thirst: this.thirst.fraction },
       elapsed: this.elapsed,
       playedSeconds: this.lived,
     };
@@ -1179,6 +1190,7 @@ export class IslandScene {
     this.lived = save.playedSeconds;
     this.elapsed = save.elapsed;
     this.stamina.restore(save.meters.stamina);
+    this.thirst.restore(save.meters.thirst);
     this.setWings(save.body.winged);
   }
 
@@ -1292,7 +1304,12 @@ export class IslandScene {
     // Whether her BODY is in the sea this frame. False while she
     // flies, whatever is below her — spray does not reach a wing.
     let inSalt = false;
+    // NOTHING TO DRINK FROM UP HERE. Cleared before either branch so
+    // the act cannot survive a takeoff — she would otherwise drink her
+    // way across the island at flying speed.
+    this.drinking = false;
     if (this.flight.aloft) {
+      this.drinkButton.show(false);
       this.headUnder = false;
       // TWO SURFACES, AND THEY ARE NOT THE SAME QUESTION.
       //
@@ -1444,6 +1461,13 @@ export class IslandScene {
       // the sea costs half again more, and pushing down costs like a
       // sprint — wading stays on the ground ladder, because wading is
       // walking.
+      // DRINKING IS AN ACT, and an act can be interrupted. The button
+      // is on the pad only where there is fresh water within reach,
+      // and she is drinking only while it is HELD — let go, walk off,
+      // or take off, and it ends.
+      const reachable = canDrink(this.ant.where.wx, this.ant.where.wz);
+      this.drinkButton.show(reachable);
+      this.drinking = reachable && this.drinkButton.held;
       const sprinting = wants && travel.speed > PACE_SPEED[this.pace] + 1e-3;
       const resting = this.ant.pace < 0.05;
       this.effort = swimEffort(wade.afloat, wade.salt, travel.speed > 0.05, wantDive)
@@ -1454,13 +1478,18 @@ export class IslandScene {
       // the current is a push she does not control. Both reach
       // PlayerAnt through the hooks that survived v0.0.57 exactly so
       // this could come back.
+      // Drinking holds her still, which is what makes it a decision
+      // rather than something she does in passing — and the current is
+      // let go of with her drive, or the stream would carry a drinking
+      // queen downhill while she stood there.
+      const hold = this.drinking ? 0 : wade.pace;
       this.ant.update(
         {
-          ahead: travel.ahead * wade.pace,
-          across: travel.across * wade.pace,
-          speed: travel.speed * wade.pace,
+          ahead: travel.ahead * hold,
+          across: travel.across * hold,
+          speed: travel.speed * hold,
         },
-        -look.yaw, dt, wade.above, wade.carry,
+        -look.yaw, dt, wade.above, this.drinking ? null : wade.carry,
       );
     }
 
@@ -1567,12 +1596,11 @@ export class IslandScene {
     );
     // HER HEAD IS EITHER UNDER OR IT IS NOT, and that is the only
     // question this meter asks. Ticked here rather than inside the
-    // THE RESERVE IS HELD, NOT DRAINING. CLAUDE.md's survival rule is
-    // that a bar may only move if there is a way to move it back, and
-    // with the water gone there is nothing on the island to drink
-    // from. So it is shown full and still rather than counting down to
-    // a state she cannot leave. `Thirst` keeps its drain law intact for
-    // when water returns; nothing here advances it.
+    // THE RESERVE MOVES AGAIN, both ways. CLAUDE.md's survival rule is
+    // that a bar may only move if there is a way to move it back; it
+    // was held full and still for the versions when there was nothing
+    // on the island to drink from. There is now, and the refill lands
+    // in the same change as the drain rather than a build later.
     // HER AIR, HER BLOOD AND THE SEA'S CLOCK, all on simulation time.
     // The breath reads the head-under signal the wade computed; the
     // brine reads "body in the sea" and answers in damage ticks, each
@@ -1581,6 +1609,7 @@ export class IslandScene {
     // door every future predator will use. Out of the sea she knits,
     // on the caste table's own healthRecovery: the way back that lets
     // the bar move at all.
+    this.thirst.update(dt, this.drinking);
     this.breath.update(this.headUnder, dt);
     const stings = this.brine.update(inSalt, dt);
     if (stings > 0) {
@@ -1614,7 +1643,9 @@ export class IslandScene {
     this.vitals.air(this.breath.fraction, this.headUnder);
     this.vitals.showHealth(this.hp / liveStat('maxHealth'), this.hp, this.brine.burning);
     this.vitals.saltStatus(this.brine.burning ? 'burning' : inSalt ? 'in' : 'none');
-    this.vitals.thirst(this.thirst.fraction, this.thirst.parched, false, 0);
+    this.vitals.thirst(
+      this.thirst.fraction, this.thirst.parched, this.drinking, this.thirst.drain,
+    );
 
     // NOTHING TO TICK. The grace is a deadline, so the only question
     // each frame is what time it is — which is why backgrounding the
