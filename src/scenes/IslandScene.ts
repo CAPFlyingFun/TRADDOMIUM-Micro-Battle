@@ -1292,6 +1292,19 @@ export class IslandScene {
       this.reask = true;
     }
 
+    // ── THE WATER, FIRST ──────────────────────────────────────────
+    // BEFORE ANYTHING READS IT, so one frame is one state of the pond.
+    // This used to run 350 lines below the seat that reads it, which
+    // meant her float height was computed against the water as it
+    // stood and the sheet was then drawn from the water after its
+    // step — she rode one step under the surface she could see. Still
+    // water hides it; rain does not.
+    //
+    // The same rule the sea already follows a few lines from where
+    // this used to live: "before anything reads the water, so a frame
+    // never spans two different tables." Fresh water was not given it.
+    this.water?.update(dt);
+
     // Auto: armed by dragging past the rim, engaged on release, given
     // up the moment a clear fore/aft push asks for manual control back.
     this.auto.update(stick.lane, stick.released, stick);
@@ -1494,6 +1507,18 @@ export class IslandScene {
         ? RISE_EASE * (1 + Math.max(0, this.liftSlider.lift))
         : DIVE_EASE;
       this.dive += (wantDive - this.dive) * (1 - Math.exp(-ease * dt));
+      // THE WATER IS ALREADY THIS FRAME'S. It used to be stepped 350
+      // lines below this, so the seat was computed against the pond as
+      // it stood BEFORE the step and the sheet was then drawn from the
+      // pond after it: she rode one water-step under the surface she
+      // could see, every frame, for ever. On a still pond that is
+      // nothing; in the heavy rain Joshua was flying in, the pond
+      // climbs about two units a step and she sits two units under.
+      // MEASURED before the move: `wade` was always exactly the
+      // PREVIOUS frame's query — 14.04 against 14.43, then 14.43
+      // against 16.37, while her seat was correct to the millimetre
+      // for the depth she had been given. The seat was never wrong.
+      // The two answers were one step apart.
       const wade = wadeAt(this.ant.where.wx, this.ant.where.wz, this.dive, this.afloat);
       this.afloat = wade.afloat;
       this.wet = wade.depth;
@@ -1842,8 +1867,9 @@ export class IslandScene {
     // THE WATER FOLLOWS HER TOO, and is seated in the same breath as
     // the terrain — a window left against the old origin would draw
     // the river a rebase-width away from its own valley.
+    // The window still FOLLOWS here, where the terrain is seated: this
+    // is about where the sheet lives, not what it holds.
     this.water?.follow(at);
-    this.water?.update(dt);
     this.ocean?.follow(at);
     this.ocean?.update(dt);
     // AFTER the ocean's own tick, because a rebuild here replaces the

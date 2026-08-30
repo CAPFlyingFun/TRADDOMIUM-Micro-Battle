@@ -156,6 +156,56 @@ describe('the seat and the skin', () => {
   });
 });
 
+/**
+ * THE ROOT CAUSE, and it was not the seat at all.
+ *
+ * The seat was correct to the millimetre the whole time — measured:
+ * `riding` equalled `depth - DRAUGHT` on every sample. What was wrong
+ * was that the seat and the SHEET were reading the pond one step
+ * apart: `wadeAt` ran at IslandScene:1497 and the sim stepped 350
+ * lines later at :1846, so she was placed against the water as it
+ * stood and the sheet was then drawn from the water after its step.
+ *
+ * She rode one water-step under the surface she could see, every
+ * frame, for ever. On a still pond that is nothing, which is why it
+ * hid for so long. In the heavy rain Joshua was flying in the pond
+ * climbs about two units a step, and she sat two units under.
+ *
+ * Measured before: wade 14.04 against query 14.43, then wade 14.43
+ * against query 16.37 — `wade` was always exactly the PREVIOUS query.
+ * After: wade == query on every sample, and her seat -0.15 from the
+ * drawn skin including on the frames where the pond rose 1.95.
+ */
+describe('one frame is one state of the pond', () => {
+  const scene = () => readFileSync('src/scenes/IslandScene.ts', 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
+
+  it('steps the water BEFORE anything reads it', () => {
+    const body = scene();
+    const stepped = body.indexOf('this.water?.update(dt);');
+    const read = body.indexOf('const wade = wadeAt(');
+    expect(stepped).toBeGreaterThan(-1);
+    expect(read).toBeGreaterThan(-1);
+    expect(stepped).toBeLessThan(read);
+  });
+
+  it('and steps it exactly once a frame', () => {
+    const body = scene();
+    const steps = body.match(/this\.water\?\.update\(dt\);/g) ?? [];
+    expect(steps).toHaveLength(1);
+  });
+
+  /**
+   * The rule the SEA already had, a few lines from where the fresh
+   * step used to live: "before anything reads the water, so a frame
+   * never spans two different tables." Fresh water was simply never
+   * given it.
+   */
+  it('the same rule the sea already followed', () => {
+    expect(scene()).toContain('this.stepSea();');
+  });
+});
+
 describe('the query is wired to the drawn bed', () => {
   const source = () => readFileSync('src/world/IslandWater.ts', 'utf8')
     .replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
