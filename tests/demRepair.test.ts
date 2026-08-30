@@ -55,6 +55,32 @@ function tileColRow(name: string): [number, number] {
   return [Math.floor(index / HD_TILES), index % HD_TILES];
 }
 
+/**
+ * COUNT, THEN ASSERT ONCE.
+ *
+ * These sweeps compare hundreds of thousands of samples, and an
+ * `expect` per sample is an assertion per sample — a million of them
+ * took 4.8 s locally against vitest's 5 s default, passed, and then
+ * timed out on the CI runner, which failed the deploy and left the
+ * holes on Joshua's phone for a version. So the loops count and report
+ * the first offender, and the assertion happens once.
+ */
+function sameEverywhere(
+  a: Int16Array, b: Int16Array, keep: (i: number) => boolean,
+): { checked: number; first: string | null; wrong: number } {
+  let checked = 0;
+  let wrong = 0;
+  let first: string | null = null;
+  for (let i = 0; i < a.length; i++) {
+    if (!keep(i)) continue;
+    checked++;
+    if (a[i] === b[i]) continue;
+    wrong++;
+    first ??= `sample ${i}: ${a[i]} became ${b[i]}`;
+  }
+  return { checked, first, wrong };
+}
+
 afterEach(() => forgetOceanMask());
 
 describe('the shape of the defect, on a hand-made island', () => {
@@ -354,14 +380,11 @@ describe('what must not change', () => {
   it('leaves genuine bathymetry alone, however deep', () => {
     const [col, row] = tileColRow('B3');
     const sea = bothSaySea(before, col, row);
-    let held = 0;
     let deep = 0;
-    for (let i = 0; i < before.length; i++) {
-      if (!sea[i]) continue;
-      expect(after[i]).toBe(before[i]);
-      held++;
-      if (before[i] < deep) deep = before[i];
-    }
+    for (let i = 0; i < before.length; i++) if (sea[i] && before[i] < deep) deep = before[i];
+    const { checked: held, first, wrong } = sameEverywhere(before, after, (i) => sea[i] === 1);
+    expect(first).toBe(null);
+    expect(wrong).toBe(0);
     expect(held).toBeGreaterThan(10_000);
     console.log(`B3 sea samples held: ${held}, deepest ${(deep / 10).toFixed(0)} m`);
   });
@@ -377,13 +400,14 @@ describe('what must not change', () => {
     const [col, row] = tileColRow('H8');
     repairFineTile(fixed, T, col, row, islandLink(STEP));
     let deepest = 0;
-    let held = 0;
     for (let i = 0; i < raw.length; i++) {
-      if (raw[i] === NODATA || raw[i] >= 0) continue;
-      expect(fixed[i]).toBe(raw[i]);
-      held++;
-      if (raw[i] < deepest) deepest = raw[i];
+      if (raw[i] !== NODATA && raw[i] < deepest) deepest = raw[i];
     }
+    const { checked: held, first, wrong } = sameEverywhere(
+      raw, fixed, (i) => raw[i] !== NODATA && raw[i] < 0,
+    );
+    expect(first).toBe(null);
+    expect(wrong).toBe(0);
     expect(held).toBeGreaterThan(250_000);
     expect(deepest).toBeLessThan(-30_000);        // −3,000 m and deeper
     console.log(`H8 sea samples held: ${held}, deepest ${(deepest / 10).toFixed(0)} m`);
@@ -395,6 +419,7 @@ describe('what must not change', () => {
     // by a sample would square off the coast.
     const [col, row] = tileColRow('B3');
     const sea = bothSaySea(before, col, row);
+    const moved: string[] = [];
     let shore = 0;
     for (let r = 1; r < T - 1; r++) {
       for (let c = 1; c < T - 1; c++) {
@@ -402,9 +427,10 @@ describe('what must not change', () => {
         if (before[i] === NODATA || before[i] < 0) continue;
         if (!(sea[i - 1] || sea[i + 1] || sea[i - T] || sea[i + T])) continue;
         shore++;
-        expect(after[i]).toBe(before[i]);
+        if (before[i] !== after[i]) moved.push(`sample ${i}: ${before[i]} -> ${after[i]}`);
       }
     }
+    expect(moved).toEqual([]);
     expect(shore).toBeGreaterThan(300);
     console.log(`coastline samples held: ${shore}`);
   });
@@ -412,19 +438,23 @@ describe('what must not change', () => {
   it('leaves every sample above sea level bit for bit unchanged', () => {
     // The repair may only ever touch water or a void. Dry land is the
     // surveyed island and is not ours to move — the standing rule.
-    for (let i = 0; i < before.length; i++) {
-      if (before[i] === NODATA || before[i] < 0) continue;
-      expect(after[i]).toBe(before[i]);
-    }
-  });
+    const { checked, first, wrong } = sameEverywhere(
+      before, after, (i) => before[i] !== NODATA && before[i] >= 0,
+    );
+    expect(first).toBe(null);
+    expect(wrong).toBe(0);
+    expect(checked).toBeGreaterThan(10_000);
+  }, 60000);
 
   it('and the island grid keeps its dry land too', () => {
     const fresh = rawIsland();
-    for (let i = 0; i < fresh.length; i++) {
-      if (fresh[i] === NODATA || fresh[i] < 0) continue;
-      expect(island[i]).toBe(fresh[i]);
-    }
-  });
+    const { checked, first, wrong } = sameEverywhere(
+      fresh, island, (i) => fresh[i] !== NODATA && fresh[i] >= 0,
+    );
+    expect(first).toBe(null);
+    expect(wrong).toBe(0);
+    expect(checked).toBeGreaterThan(100_000);
+  }, 60000);
 });
 
 describe('the two grids still agree where they share a sample', () => {
@@ -435,16 +465,20 @@ describe('the two grids still agree where they share a sample', () => {
       const tile = rawTile(name);
       const [col, row] = tileColRow(name);
       repairFineTile(tile, T, col, row, islandLink(STEP));
+      const apart: string[] = [];
       let checked = 0;
       for (let r = 0; r < T; r += STEP) {
         for (let c = 0; c < T; c += STEP) {
           const cx = (col * (T - 1) + c) / STEP;
           const cz = (row * (T - 1) + r) / STEP;
           if (cx > SAMPLES - 1 || cz > SAMPLES - 1) continue;
-          expect(tile[r * T + c]).toBe(world[cz * SAMPLES + cx]);
+          if (tile[r * T + c] !== world[cz * SAMPLES + cx]) {
+            apart.push(`${name} ${c},${r}: ${tile[r * T + c]} vs ${world[cz * SAMPLES + cx]}`);
+          }
           checked++;
         }
       }
+      expect(apart).toEqual([]);
       expect(checked).toBeGreaterThan(10_000);
     }
   }, 300000);
