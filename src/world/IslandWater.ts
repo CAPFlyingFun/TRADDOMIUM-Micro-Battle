@@ -231,7 +231,11 @@ export class IslandWater {
    * is the single owner of every colour and constant.
    */
   private material(): THREE.MeshStandardMaterial {
-    const look = makeWaterLook({ green: 1, surf: 0.15, sink: false, edgeLo: 1.5, edgeHi: 8, midAt: 70, deepAt: 260, texAmp: 0.20, anisotropy: this.anisotropy });
+    // `ocean: false` is the whole of this window's claim on the shared
+    // look: a pond keeps the ordinary waterline foam a lake bank has,
+    // and gives up the SWELL-driven breakers, which read seaSwell's
+    // table and belong to the Pacific. See waterLook's `ocean`.
+    const look = makeWaterLook({ green: 1, surf: 0.15, sink: false, ocean: false, edgeLo: 1.5, edgeHi: 8, midAt: 70, deepAt: 260, texAmp: 0.20, anisotropy: this.anisotropy });
     this.clockRef = look.clock;
     this.centreRef = look.centre;
     return look.material;
@@ -378,14 +382,22 @@ export class IslandWater {
       // same rule the query already follows (see the constructor).
       this.depthAttr[i] = this.base[i] < 0 ? 0 : d;
       this.pos[i * 3 + 1] = this.base[i] + d * relief;
-      // The CURRENT under every vertex, so the skin drifts at the
-      // water's own speed — Joshua: "water speed as the water moves".
-      // Dry cells keep their last flow; their pixels are discarded.
-      if (d > 0) {
-        const v = this.sim.velocity(i % N, (i / N) | 0);
-        this.flowAttr[i * 2] = v.vx;
-        this.flowAttr[i * 2 + 1] = v.vz;
-      }
+      // AND THE SKIN DOES NOT DRIFT EITHER — the other half of the
+      // same fault. Zeroing the gameplay current in `spotAt` while
+      // this went on writing the raw solver velocity into the vertex
+      // attribute would leave the surface advecting at exactly the
+      // numbers that had just been rejected as a current: the ripple
+      // octaves are scrolled along this vector, so the pond would
+      // still LOOK like it was running at four metres a second. Water
+      // that does not move her must not look like it is moving.
+      //
+      // The hydrology itself still runs — it is what decides where
+      // water IS, and that was never in question. What it does not do,
+      // until there is a stream model worth the name, is move
+      // anything. NOT tied to wind either: a pond's skin drifting on a
+      // breeze would be a second invented current in a better hat.
+      this.flowAttr[i * 2] = 0;
+      this.flowAttr[i * 2 + 1] = 0;
     }
     const g = this.mesh.geometry;
     g.getAttribute('position').needsUpdate = true;
@@ -421,8 +433,28 @@ export class IslandWater {
     const raw = (d00 * (1 - tx) + d10 * tx) * (1 - ty)
       + (d01 * (1 - tx) + d11 * tx) * ty;
     if (raw <= 0) return null;
-    const v = this.sim.velocity(Math.round(fx), Math.round(fy));
-    return { depth: raw * reliefScale(), flowX: v.vx, flowZ: v.vz };
+    // FRESH WATER DOES NOT CARRY HER — for now, and deliberately.
+    //
+    // The solver's velocity is flux over depth, and depth goes to zero
+    // at the edge of every pool: a millimetre of film with any flux at
+    // all divides out to metres a second. Measured on Joshua's device,
+    // 368 cm/s over 1.5 mm of water, and worse elsewhere — an ant
+    // standing in a puddle swept at four metres a second. Reproduced
+    // from the solver's own arithmetic: one step on a median 11.5°
+    // Kauaʻi slope over a 1.5 mm film reports ~1,300 units/s, and a
+    // film left to settle reports a steady ~4,000. That is a
+    // singularity in the shallow-water scheme, not a current, and
+    // capping it would only hide the same nonsense at a smaller
+    // number.
+    //
+    // So inland water is still until it has a flow system of its own.
+    // A real stream wants its own model — channel slope, a sane
+    // velocity floor, and a depth below which water does not move a
+    // body at all — and that is a piece of work, not a clamp. The
+    // OCEAN's current is untouched: it comes from the wave table
+    // (seaSwell.seaOrbitalAt) and the surf, on the other branch of
+    // this very query, and none of this reaches it.
+    return { depth: raw * reliefScale(), flowX: 0, flowZ: 0 };
   }
 
   /** Depth of water at a world point, or 0. For wading and drinking. */
