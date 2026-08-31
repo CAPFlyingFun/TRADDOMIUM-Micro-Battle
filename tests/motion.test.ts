@@ -184,7 +184,10 @@ describe('the flags it replaced are gone', () => {
   });
 
   it('and the wings read the state instead', () => {
-    expect(scene()).toContain('dt, afloatIn(this.motion),');
+    // `plan.budget` rather than `dt` since v0.0.137: her wings dry over
+    // HER flight, not over the player's wait. What this test is about
+    // is the second argument — the motion, not a flag.
+    expect(scene()).toContain('afloatIn(this.motion), this.motion === \'diving\',');
   });
 });
 

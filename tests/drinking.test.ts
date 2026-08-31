@@ -71,7 +71,14 @@ describe('the drink button is on the pad again', () => {
 
 describe('the reserve moves, and can be moved back', () => {
   it('is advanced every frame by the act', () => {
-    expect(code()).toContain("this.thirst.update(dt, this.act === 'drinking');");
+    // ON HER CLOCK, NOT THE WORLD'S — `plan.budget` rather than `dt`.
+    // Under boosted autopilot travel her simulation runs up to ten
+    // seconds for every one the world spends, and thirst has to run
+    // with it: a journey that would have cost twenty minutes of water
+    // still costs twenty minutes of water even though the player
+    // watched two. Charging it the world's dt would hand her ten times
+    // the range for free and make every survival detour meaningless.
+    expect(code()).toContain("this.thirst.update(plan.budget, this.act === 'drinking');");
   });
 
   it('and the card is told the truth about it', () => {

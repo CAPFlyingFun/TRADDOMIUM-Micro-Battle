@@ -131,6 +131,26 @@ export function forgetHd(): void {
   arrived = null;
 }
 
+/**
+ * IS THE FINE GROUND UNDER THIS POINT ACTUALLY HERE?
+ *
+ * Not "does a tile cover it" — every point on the island is covered by
+ * some tile — but "has that tile arrived". The boosted autopilot asks
+ * this about ground it is about to reach, because at ten times speed
+ * terrain that used to have minutes to stream now has seconds, and an
+ * autopilot flying on a heightfield that is still downloading is
+ * navigating by a guess.
+ *
+ * Off the island is TRUE, deliberately: there is no fine tile out at
+ * sea and there never will be, so the honest answer to "is the data I
+ * need here" is yes. Otherwise a queen over open water would brake for
+ * ever waiting on a tile nobody is fetching.
+ */
+export function hdReady(x: number, z: number): boolean {
+  const index = hdTileAt(x, z);
+  return index < 0 || tiles.has(index);
+}
+
 /** How many tiles are resident right now. */
 export function hdResident(): number {
   return tiles.size;

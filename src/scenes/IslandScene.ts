@@ -28,7 +28,7 @@ import {
 import { seaFeed } from '../weather/SeaService';
 import { local, world, type WorldPoint } from '../world/coords';
 import { TerrainStream, TIER_CUTS } from '../world/TerrainStream';
-import { followHd, forgetHd, hdResident, onHdTile } from '../world/kauaiHd';
+import { followHd, forgetHd, hdReady, hdResident, onHdTile } from '../world/kauaiHd';
 import { IslandWater } from '../world/IslandWater';
 import { Underwater } from '../world/Underwater';
 import { Ocean } from '../world/Ocean';
@@ -49,6 +49,7 @@ import { waterSpotAt } from '../world/waterQuery';
 import { bakeIslandChannels } from '../world/islandChannels';
 import { DEFAULT_MODE, type SessionMode } from '../game/session';
 import { Autopilot, tookOver, type NavCommand } from '../ant/autopilot';
+import { MAX_TRAVEL, TravelScale } from '../ant/travelScale';
 import { AUTOPILOT_DEFAULTS } from '../ant/autopilotConfig';
 import {
   DISCOVERY_CELLS, decodeDiscovery, emptyDiscovery, encodeDiscovery,
@@ -297,6 +298,8 @@ export class IslandScene {
   private flownTo: WorldPoint | null = null;
   /** The player took the stick, and has not asked to be flown since. */
   private surrendered = false;
+  /** Her own clock — see travelScale.ts. Real time unless flown. */
+  private readonly travel = new TravelScale();
   /**
    * The stick as the THUMB left it, before the hands-off gate.
    *
@@ -938,6 +941,7 @@ export class IslandScene {
         aloft: this.flight.aloft,
         pinned: this.brain.primaryMission !== null,
         stick: [this.rawStick.x, this.rawStick.y],
+        travel: this.travel.scale,
         lever: this.liftSlider.lift,
         nav: this.nav === null ? null : {
           state: this.nav.state,
@@ -1543,6 +1547,39 @@ export class IslandScene {
   }
 
   /**
+   * HOW FAST HER CLOCK MAY RUN BEFORE SHE OUTRUNS THE ISLAND.
+   *
+   * At full boost she crosses seven metres a second, so ground that
+   * used to have minutes to stream now has seconds — and an autopilot
+   * that accelerated into terrain the game cannot answer questions
+   * about would be flying on a heightfield that is still arriving.
+   *
+   * So the boost gives way rather than the streamer being asked to win
+   * the race: if the tile she is heading into is not resident, the cap
+   * comes down and the ramp follows it smoothly, climbing back as
+   * coverage catches up. A player should see the speed ease off, never
+   * a stutter or a hole in the island.
+   */
+  private streamingCap(): number {
+    if (!this.flight.aloft) return MAX_TRAVEL;
+    const drift = groundVelocity(
+      this.flight.airspeed, this.flight.heading, this.windOnHer(),
+    );
+    const speed = Math.hypot(drift.x, drift.z);
+    if (speed < 1) return MAX_TRAVEL;
+    // Where full boost would put her in a couple of seconds. Asking
+    // about the ground she is ON would always say yes and measure
+    // nothing; the question is about where she is GOING.
+    const ahead = 2 * MAX_TRAVEL;
+    const at = this.ant.where;
+    return hdReady(at.wx + drift.x * ahead, at.wz + drift.z * ahead)
+      ? MAX_TRAVEL
+      // Not a stop. Half speed is still five times a walk, and it buys
+      // the streamer twice as long to land the tile.
+      : MAX_TRAVEL / 2;
+  }
+
+  /**
    * ONE FRAME OF THE AUTOPILOT, or null when the player is flying.
    *
    * Returns the demand a thumb would have produced, or nothing at all —
@@ -1817,6 +1854,18 @@ export class IslandScene {
       auto: this.auto.active ? this.auto.way : 0,
     });
 
+    // WHOSE CLOCK SHE IS ON. Boost only while the autopilot is actually
+    // flying her: a player at the controls gets real time, because a
+    // world that moved ten times faster under a thumb would be
+    // unplayable rather than convenient.
+    //
+    // AND MANUAL CONTROL DOES NOT WAIT FOR THE RAMP. Asking for the
+    // boost to stop begins an ease down; it gates nothing the player
+    // does. Their input is authoritative the instant they make it.
+    this.travel.capAt(this.streamingCap());
+    this.travel.ask(this.autopilot.engaged && !this.surrendered && this.flight.aloft);
+    const plan = this.travel.update(dt);
+
     // ── Air or ground ────────────────────────────────────────────
     // Takeoff is offered on ACTUAL speed, never the selected pace:
     // picking Run and then barely moving must not get her airborne.
@@ -1860,234 +1909,257 @@ export class IslandScene {
     // the act cannot survive a takeoff — she would otherwise drink her
     // way across the island at flying speed.
     this.act = 'none';
-    if (this.flight.aloft) {
-      this.drinkButton.show(false);
-      this.headUnder = false;
-      // TWO SURFACES, AND THEY ARE NOT THE SAME QUESTION.
-      //
-      // The PHYSICAL one — this — is the real water standing under her
-      // this instant, swell and all. Collision, landing, swimming,
-      // the underwater look and the AWL/AGL readouts all use it, and
-      // must: they are statements about the world.
-      //
-      // The HOLD REFERENCE is what the autopilot flies against, and
-      // flying against the physical one made her chase every 1.5 s
-      // crest — Joshua: "like turbulence or drunken bobbing". So the
-      // reference is a damped version of it, slow over the open sea
-      // (a swell period must pass through it unnoticed) and quicker
-      // inland, where a changing water level is real information and
-      // the ripples are small. Her PLACEMENT rides the reference too,
-      // or the two would disagree and we would be back to flying
-      // underwater (v0.0.83).
-      const here = waterSpotAt(this.ant.where.wx, this.ant.where.wz);
-      const column = here?.depth ?? 0;
-      const ground = groundHeight(this.ant.where.wx, this.ant.where.wz);
-      const trueFloor = ground + column;
-      // THE WHOLE FLOOR IS DAMPED, not just the water on top of it.
-      // An earlier cut smoothed only the column, which left the
-      // TERRAIN instantaneous — so "AGL does not chase tiny terrain
-      // bumps" was never actually delivered, and over land she still
-      // twitched at every pebble. The reference is now the floor
-      // itself: sea, stream or sand, one damped surface.
-      //
-      // Three speeds, because they are three different questions. The
-      // open sea's swell must pass through the reference unnoticed;
-      // an inland water level that changes is real news; and terrain
-      // is news too, but a rock is not, so land sits between them.
-      const ease = column <= 0 ? HOLD_EASE_LAND
-        : here?.salt === true ? HOLD_EASE_SEA : HOLD_EASE_FRESH;
-      this.holdFloor += (trueFloor - this.holdFloor) * (1 - Math.exp(-ease * dt));
-      // SAFETY IS NOT SMOOTHED. Nothing real may pass through her: if
-      // the true surface — a crest, a rock — comes within
-      // SURFACE_MARGIN of where the reference would put her, the
-      // reference rises to clear it. That is the controller climbing
-      // over a wave, which is what a flyer would do.
-      this.holdFloor = Math.max(
-        this.holdFloor, trueFloor + SURFACE_MARGIN - this.flight.height,
-      );
-      // What the placement adds on top of the INSTANTANEOUS terrain to
-      // land her on the damped floor. settle() works from groundHeight
-      // and this closes the gap.
-      const holdBase = this.holdFloor - ground;
-
-      // ── THE OTHER PILOT ──────────────────────────────────────
-      // Phase 2. She flies herself to the pin the MissionBrain holds,
-      // by holding the same stick a thumb would — the command below is
-      // a FlightDemand and nothing else, so `Flight.update` is still
-      // the only thing in the game that moves her.
-      //
-      // ANY REAL INPUT WINS, immediately. The player is never a
-      // passenger: a push, a turn or a touch of the lever past the
-      // deadzone hands the controls straight back and leaves the
-      // destination standing, because taking the stick is not changing
-      // your mind about where you were going.
-      const nav = this.flyMyself(dt, trueFloor);
-
-      const step = this.flight.update(
-        nav ? {
-          ...nav.demand,
-          // THE PACE ROW IS STILL THE POWER SETTING. An autopilot may
-          // ask for an airspeed; it does not get to raise the ceiling
-          // the player chose, any more than Auto does.
-          ceiling: wants ? SPRINT_AIRSPEED : AUTO_AIRSPEED[this.pace],
-        } : {
-          push: stick.y,
-          side: stick.x,
-          lift: lever,
-          // THE LIT PACE ROW IS THE POWER SETTING, in the air as well
-          // as on the ground. Auto already flew at it; the stick did
-          // not, so the lowest row and the highest were the same
-          // flight and the readout sat at 100% either way.
-          // FOUR ROWS, FOUR QUARTERS. Sprint is a toggle beside the
-          // pace rather than a fourth pace, so the air never read the
-          // top cell and a queen at maximum flew at whatever row sat
-          // under it. `wants` is sprint asked for AND affordable, which
-          // is the same test the ground uses.
-          ceiling: wants ? SPRINT_AIRSPEED : AUTO_AIRSPEED[this.pace],
-          // AUTO IN THE AIR holds an airspeed for the selected pace, so
-          // the thumb is free to steer, look and climb. Lateral input,
-          // the camera and both buttons leave it engaged; only a
-          // deliberate fore/aft push takes manual control back, which
-          // is the same rule it follows on the ground.
-          // HANDS OFF IN THE AIR IS A HOVER, and it has to be a hold
-          // rather than a neutral. Neutral is a glide that becomes a
-          // fall (flight.ts) — leave the phone on a menu and she
-          // lands herself somewhere she did not choose, which in
-          // multiplayer is a death nobody was at the controls for.
-          // HOVER_HOLD is the smallest airspeed that still counts as
-          // powered flight, so the level-flight path holds her height
-          // while her speed decays to about a centimetre a second.
-          // She still drifts on the wind and still pays for the
-          // wingbeats, because she is still flying.
-          hold: this.handsOff ? HOVER_HOLD
-            : this.auto.active
-              ? (wants ? SPRINT_AIRSPEED : AUTO_AIRSPEED[this.pace]) : null,
-        },
-        this.stamina.fraction,
-        this.stamina.spent,
-        dt,
-        // The DRAWN surface under her, the one she would land on — and
-        // that is the WATER's surface where there is water. This is
-        // what makes a lake solid to land on: descend until the floor
-        // arrives, and over water the floor is the film. The biology
-        // agrees (docs/FIRE_ANT_BIOLOGY.md — she rides the surface
-        // film), and wadeAt takes over the moment she is down.
+    // ── HER OWN CLOCK ────────────────────────────────────────────
+    // Under autopilot her simulation runs up to ten seconds for every
+    // one the world spends, so a twenty-minute crossing is two minutes
+    // of sitting there. ONE time scale rather than eight multipliers:
+    // scale her time and the turn rate, the climb, the acceleration,
+    // the braking and the wind's displacement all follow for nothing,
+    // because every one of them is integrated against this dt. The path
+    // through space is identical — the same flight, played faster.
+    //
+    // AND IT IS SPENT IN BOUNDED STEPS. One dt ten times as long is the
+    // same arithmetic and a completely different flight: she would turn
+    // in chunky increments, overshoot a band, cross a waterline between
+    // samples, blow through a capture. The frame clamp is a tenth of a
+    // second, so a bad phone frame times ten would be a ONE SECOND
+    // physics leap. `planSteps` refuses that.
+    //
+    // `dt` IS SHADOWED INSIDE THE LOOP, deliberately and visibly: every
+    // line below already integrates against it, so her clock replacing
+    // the world's is the whole change. The world outside this loop —
+    // the weather, the sea, the water, the day — never sees it.
+    for (let leg = 0; leg < plan.steps; leg++) {
+      const dt = plan.each;
+      if (this.flight.aloft) {
+        this.drinkButton.show(false);
+        this.headUnder = false;
+        // TWO SURFACES, AND THEY ARE NOT THE SAME QUESTION.
         //
-        // ONE FLOOR, MEASURED ONCE, and handed to BOTH the model and
-        // her placement below. They used to disagree: the model flew
-        // a clearance over the water while `fly` seated her that
-        // clearance over the SEABED, so "one metre up" over nine
-        // metres of sea put her nine metres under it, tinted the
-        // screen, and made the shore transition anything but seamless.
-        this.holdFloor,
-      );
-      this.effort = step.effort;
-      winded = this.stamina.update(step.effort, dt);
-      // Flight owns her velocity outright — it already carries her
-      // momentum, so handing it through the walk's easing would smear
-      // one model over the other.
-      this.ant.fly(
-        { ahead: step.ahead, across: step.across, speed: Math.hypot(step.ahead, step.across) },
-        this.flight.heading, this.flight.roll, this.flight.pitch,
-        dt, this.flight.height,
-        // The wind reaches her ONLY here. Walking gets nothing.
-        this.windOnHer(),
-        // …and the SAME floor the model just flew against.
-        holdBase,
-      );
-      // The camera CHASES in flight rather than steering. Her heading
-      // is her own up here, so a view left where the player put it
-      // would watch her fly out of frame — but snapping it to her nose
-      // would take the free look away, which the design is explicit
-      // about keeping. So it eases, and only while nobody is dragging.
-      if (!look.active) this.look.chase(-this.flight.heading, dt);
-      // Landing needs no button: descend until the ground arrives.
-      if (this.flight.height <= 0) this.flight.land();
-    } else {
-      // WHAT THE WATER IS DOING TO HER. The lever is the climb lever
-      // in the air and the dive lever in the water — nought at the
-      // surface, one on the bottom — and the eased `dive` is what
-      // wadeAt scales her float height by.
-      //
-      // OUT OF AIR THE LEVER STOPS COUNTING: spiracles shut on an
-      // empty film, her own buoyancy owns the vertical, and she goes
-      // up whatever the player is holding — the old build's rule,
-      // kept ("she floats her out when she has none, lever or no
-      // lever"). And UP on the lever surfaces her FASTER than the
-      // film alone: buoyancy plus swimming for the light.
-      const wantDive = this.breath.spent ? 0 : Math.max(0, -lever);
-      const ease = wantDive < this.dive
-        ? RISE_EASE * (1 + Math.max(0, lever))
-        : DIVE_EASE;
-      this.dive += (wantDive - this.dive) * (1 - Math.exp(-ease * dt));
-      // THE WATER IS ALREADY THIS FRAME'S. It used to be stepped 350
-      // lines below this, so the seat was computed against the pond as
-      // it stood BEFORE the step and the sheet was then drawn from the
-      // pond after it: she rode one water-step under the surface she
-      // could see, every frame, for ever. On a still pond that is
-      // nothing; in the heavy rain Joshua was flying in, the pond
-      // climbs about two units a step and she sits two units under.
-      // MEASURED before the move: `wade` was always exactly the
-      // PREVIOUS frame's query — 14.04 against 14.43, then 14.43
-      // against 16.37, while her seat was correct to the millimetre
-      // for the depth she had been given. The seat was never wrong.
-      // The two answers were one step apart.
-      const wade = wadeAt(this.ant.where.wx, this.ant.where.wz, this.dive, this.afloat);
-      this.afloat = wade.afloat;
-      this.wet = wade.depth;
-      // ON FOOT THE REFERENCE IS SIMPLY WHERE SHE IS. Left to drift
-      // while she walked, it would be stale by the time she took off
-      // and the first airborne frame would snap her — the damping is
-      // for flight, and flight is the only thing that reads it.
-      this.holdFloor = groundHeight(this.ant.where.wx, this.ant.where.wz)
-        + wade.depth;
-      this.swimCarry = wade.carry;
-      this.swimAbove = wade.above;
-      inSalt = wade.depth > 0 && wade.salt;
-      // HER HEAD IS EITHER UNDER OR IT IS NOT — measured as the water
-      // standing over where she rides, with a little hysteresis so
-      // bobbing at one body length cannot flick her breath on and off.
-      const overHer = wade.depth - wade.above;
-      this.swimOver = Math.max(0, overHer);
-      this.headUnder = overHer > (this.headUnder ? 0.6 : 1.0);
+        // The PHYSICAL one — this — is the real water standing under her
+        // this instant, swell and all. Collision, landing, swimming,
+        // the underwater look and the AWL/AGL readouts all use it, and
+        // must: they are statements about the world.
+        //
+        // The HOLD REFERENCE is what the autopilot flies against, and
+        // flying against the physical one made her chase every 1.5 s
+        // crest — Joshua: "like turbulence or drunken bobbing". So the
+        // reference is a damped version of it, slow over the open sea
+        // (a swell period must pass through it unnoticed) and quicker
+        // inland, where a changing water level is real information and
+        // the ripples are small. Her PLACEMENT rides the reference too,
+        // or the two would disagree and we would be back to flying
+        // underwater (v0.0.83).
+        const here = waterSpotAt(this.ant.where.wx, this.ant.where.wz);
+        const column = here?.depth ?? 0;
+        const ground = groundHeight(this.ant.where.wx, this.ant.where.wz);
+        const trueFloor = ground + column;
+        // THE WHOLE FLOOR IS DAMPED, not just the water on top of it.
+        // An earlier cut smoothed only the column, which left the
+        // TERRAIN instantaneous — so "AGL does not chase tiny terrain
+        // bumps" was never actually delivered, and over land she still
+        // twitched at every pebble. The reference is now the floor
+        // itself: sea, stream or sand, one damped surface.
+        //
+        // Three speeds, because they are three different questions. The
+        // open sea's swell must pass through the reference unnoticed;
+        // an inland water level that changes is real news; and terrain
+        // is news too, but a rock is not, so land sits between them.
+        const ease = column <= 0 ? HOLD_EASE_LAND
+          : here?.salt === true ? HOLD_EASE_SEA : HOLD_EASE_FRESH;
+        this.holdFloor += (trueFloor - this.holdFloor) * (1 - Math.exp(-ease * dt));
+        // SAFETY IS NOT SMOOTHED. Nothing real may pass through her: if
+        // the true surface — a crest, a rock — comes within
+        // SURFACE_MARGIN of where the reference would put her, the
+        // reference rises to clear it. That is the controller climbing
+        // over a wave, which is what a flyer would do.
+        this.holdFloor = Math.max(
+          this.holdFloor, trueFloor + SURFACE_MARGIN - this.flight.height,
+        );
+        // What the placement adds on top of the INSTANTANEOUS terrain to
+        // land her on the damped floor. settle() works from groundHeight
+        // and this closes the gap.
+        const holdBase = this.holdFloor - ground;
 
-      // Only charge her for a sprint she is actually getting: calling
-      // for one while stopped or reversing costs nothing. Afloat the
-      // water prices the frame instead (swimEffort): paddling costs,
-      // the sea costs half again more, and pushing down costs like a
-      // sprint — wading stays on the ground ladder, because wading is
-      // walking.
-      // DRINKING IS AN ACT, and an act can be interrupted. The button
-      // is on the pad only where there is fresh water within reach,
-      // and she is drinking only while it is HELD — let go, walk off,
-      // or take off, and it ends.
-      const reachable = canDrink(this.ant.where.wx, this.ant.where.wz);
-      this.drinkButton.show(reachable);
-      this.act = reachable && this.drinkButton.held ? 'drinking' : 'none';
-      const sprinting = wants && travel.speed > PACE_SPEED[this.pace] + 1e-3;
-      const resting = this.ant.pace < 0.05;
-      this.effort = swimEffort(wade.afloat, wade.salt, travel.speed > 0.05, wantDive)
-        ?? (sprinting ? SPRINT_DRAIN
-          : resting ? RESTING_RECOVERY : MOVING_RECOVERY);
-      winded = this.stamina.update(this.effort, dt);
-      // Depth gates her drive — wading drags, paddling crawls — and
-      // the current is a push she does not control. Both reach
-      // PlayerAnt through the hooks that survived v0.0.57 exactly so
-      // this could come back.
-      // Drinking holds her still, which is what makes it a decision
-      // rather than something she does in passing — and the current is
-      // let go of with her drive, or the stream would carry a drinking
-      // queen downhill while she stood there.
-      const hold = this.act === 'drinking' ? 0 : wade.pace;
-      this.ant.update(
-        {
-          ahead: travel.ahead * hold,
-          across: travel.across * hold,
-          speed: travel.speed * hold,
-        },
-        bodyView, dt, wade.above,
-        this.act === 'drinking' ? null : wade.carry,
-      );
+        // ── THE OTHER PILOT ──────────────────────────────────────
+        // Phase 2. She flies herself to the pin the MissionBrain holds,
+        // by holding the same stick a thumb would — the command below is
+        // a FlightDemand and nothing else, so `Flight.update` is still
+        // the only thing in the game that moves her.
+        //
+        // ANY REAL INPUT WINS, immediately. The player is never a
+        // passenger: a push, a turn or a touch of the lever past the
+        // deadzone hands the controls straight back and leaves the
+        // destination standing, because taking the stick is not changing
+        // your mind about where you were going.
+        const nav = this.flyMyself(dt, trueFloor);
+
+        const step = this.flight.update(
+          nav ? {
+            ...nav.demand,
+            // THE PACE ROW IS STILL THE POWER SETTING. An autopilot may
+            // ask for an airspeed; it does not get to raise the ceiling
+            // the player chose, any more than Auto does.
+            ceiling: wants ? SPRINT_AIRSPEED : AUTO_AIRSPEED[this.pace],
+          } : {
+            push: stick.y,
+            side: stick.x,
+            lift: lever,
+            // THE LIT PACE ROW IS THE POWER SETTING, in the air as well
+            // as on the ground. Auto already flew at it; the stick did
+            // not, so the lowest row and the highest were the same
+            // flight and the readout sat at 100% either way.
+            // FOUR ROWS, FOUR QUARTERS. Sprint is a toggle beside the
+            // pace rather than a fourth pace, so the air never read the
+            // top cell and a queen at maximum flew at whatever row sat
+            // under it. `wants` is sprint asked for AND affordable, which
+            // is the same test the ground uses.
+            ceiling: wants ? SPRINT_AIRSPEED : AUTO_AIRSPEED[this.pace],
+            // AUTO IN THE AIR holds an airspeed for the selected pace, so
+            // the thumb is free to steer, look and climb. Lateral input,
+            // the camera and both buttons leave it engaged; only a
+            // deliberate fore/aft push takes manual control back, which
+            // is the same rule it follows on the ground.
+            // HANDS OFF IN THE AIR IS A HOVER, and it has to be a hold
+            // rather than a neutral. Neutral is a glide that becomes a
+            // fall (flight.ts) — leave the phone on a menu and she
+            // lands herself somewhere she did not choose, which in
+            // multiplayer is a death nobody was at the controls for.
+            // HOVER_HOLD is the smallest airspeed that still counts as
+            // powered flight, so the level-flight path holds her height
+            // while her speed decays to about a centimetre a second.
+            // She still drifts on the wind and still pays for the
+            // wingbeats, because she is still flying.
+            hold: this.handsOff ? HOVER_HOLD
+              : this.auto.active
+                ? (wants ? SPRINT_AIRSPEED : AUTO_AIRSPEED[this.pace]) : null,
+          },
+          this.stamina.fraction,
+          this.stamina.spent,
+          dt,
+          // The DRAWN surface under her, the one she would land on — and
+          // that is the WATER's surface where there is water. This is
+          // what makes a lake solid to land on: descend until the floor
+          // arrives, and over water the floor is the film. The biology
+          // agrees (docs/FIRE_ANT_BIOLOGY.md — she rides the surface
+          // film), and wadeAt takes over the moment she is down.
+          //
+          // ONE FLOOR, MEASURED ONCE, and handed to BOTH the model and
+          // her placement below. They used to disagree: the model flew
+          // a clearance over the water while `fly` seated her that
+          // clearance over the SEABED, so "one metre up" over nine
+          // metres of sea put her nine metres under it, tinted the
+          // screen, and made the shore transition anything but seamless.
+          this.holdFloor,
+        );
+        this.effort = step.effort;
+        winded = this.stamina.update(step.effort, dt);
+        // Flight owns her velocity outright — it already carries her
+        // momentum, so handing it through the walk's easing would smear
+        // one model over the other.
+        this.ant.fly(
+          { ahead: step.ahead, across: step.across, speed: Math.hypot(step.ahead, step.across) },
+          this.flight.heading, this.flight.roll, this.flight.pitch,
+          dt, this.flight.height,
+          // The wind reaches her ONLY here. Walking gets nothing.
+          this.windOnHer(),
+          // …and the SAME floor the model just flew against.
+          holdBase,
+        );
+        // The camera CHASES in flight rather than steering. Her heading
+        // is her own up here, so a view left where the player put it
+        // would watch her fly out of frame — but snapping it to her nose
+        // would take the free look away, which the design is explicit
+        // about keeping. So it eases, and only while nobody is dragging.
+        if (!look.active) this.look.chase(-this.flight.heading, dt);
+        // Landing needs no button: descend until the ground arrives.
+        if (this.flight.height <= 0) this.flight.land();
+      } else {
+        // WHAT THE WATER IS DOING TO HER. The lever is the climb lever
+        // in the air and the dive lever in the water — nought at the
+        // surface, one on the bottom — and the eased `dive` is what
+        // wadeAt scales her float height by.
+        //
+        // OUT OF AIR THE LEVER STOPS COUNTING: spiracles shut on an
+        // empty film, her own buoyancy owns the vertical, and she goes
+        // up whatever the player is holding — the old build's rule,
+        // kept ("she floats her out when she has none, lever or no
+        // lever"). And UP on the lever surfaces her FASTER than the
+        // film alone: buoyancy plus swimming for the light.
+        const wantDive = this.breath.spent ? 0 : Math.max(0, -lever);
+        const ease = wantDive < this.dive
+          ? RISE_EASE * (1 + Math.max(0, lever))
+          : DIVE_EASE;
+        this.dive += (wantDive - this.dive) * (1 - Math.exp(-ease * dt));
+        // THE WATER IS ALREADY THIS FRAME'S. It used to be stepped 350
+        // lines below this, so the seat was computed against the pond as
+        // it stood BEFORE the step and the sheet was then drawn from the
+        // pond after it: she rode one water-step under the surface she
+        // could see, every frame, for ever. On a still pond that is
+        // nothing; in the heavy rain Joshua was flying in, the pond
+        // climbs about two units a step and she sits two units under.
+        // MEASURED before the move: `wade` was always exactly the
+        // PREVIOUS frame's query — 14.04 against 14.43, then 14.43
+        // against 16.37, while her seat was correct to the millimetre
+        // for the depth she had been given. The seat was never wrong.
+        // The two answers were one step apart.
+        const wade = wadeAt(this.ant.where.wx, this.ant.where.wz, this.dive, this.afloat);
+        this.afloat = wade.afloat;
+        this.wet = wade.depth;
+        // ON FOOT THE REFERENCE IS SIMPLY WHERE SHE IS. Left to drift
+        // while she walked, it would be stale by the time she took off
+        // and the first airborne frame would snap her — the damping is
+        // for flight, and flight is the only thing that reads it.
+        this.holdFloor = groundHeight(this.ant.where.wx, this.ant.where.wz)
+          + wade.depth;
+        this.swimCarry = wade.carry;
+        this.swimAbove = wade.above;
+        inSalt = wade.depth > 0 && wade.salt;
+        // HER HEAD IS EITHER UNDER OR IT IS NOT — measured as the water
+        // standing over where she rides, with a little hysteresis so
+        // bobbing at one body length cannot flick her breath on and off.
+        const overHer = wade.depth - wade.above;
+        this.swimOver = Math.max(0, overHer);
+        this.headUnder = overHer > (this.headUnder ? 0.6 : 1.0);
+
+        // Only charge her for a sprint she is actually getting: calling
+        // for one while stopped or reversing costs nothing. Afloat the
+        // water prices the frame instead (swimEffort): paddling costs,
+        // the sea costs half again more, and pushing down costs like a
+        // sprint — wading stays on the ground ladder, because wading is
+        // walking.
+        // DRINKING IS AN ACT, and an act can be interrupted. The button
+        // is on the pad only where there is fresh water within reach,
+        // and she is drinking only while it is HELD — let go, walk off,
+        // or take off, and it ends.
+        const reachable = canDrink(this.ant.where.wx, this.ant.where.wz);
+        this.drinkButton.show(reachable);
+        this.act = reachable && this.drinkButton.held ? 'drinking' : 'none';
+        const sprinting = wants && travel.speed > PACE_SPEED[this.pace] + 1e-3;
+        const resting = this.ant.pace < 0.05;
+        this.effort = swimEffort(wade.afloat, wade.salt, travel.speed > 0.05, wantDive)
+          ?? (sprinting ? SPRINT_DRAIN
+            : resting ? RESTING_RECOVERY : MOVING_RECOVERY);
+        winded = this.stamina.update(this.effort, dt);
+        // Depth gates her drive — wading drags, paddling crawls — and
+        // the current is a push she does not control. Both reach
+        // PlayerAnt through the hooks that survived v0.0.57 exactly so
+        // this could come back.
+        // Drinking holds her still, which is what makes it a decision
+        // rather than something she does in passing — and the current is
+        // let go of with her drive, or the stream would carry a drinking
+        // queen downhill while she stood there.
+        const hold = this.act === 'drinking' ? 0 : wade.pace;
+        this.ant.update(
+          {
+            ahead: travel.ahead * hold,
+            across: travel.across * hold,
+            speed: travel.speed * hold,
+          },
+          bodyView, dt, wade.above,
+          this.act === 'drinking' ? null : wade.carry,
+        );
+      }
     }
 
     // ── WHAT SHE HAS SEEN ────────────────────────────────────────
@@ -2271,8 +2343,17 @@ export class IslandScene {
     // door every future predator will use. Out of the sea she knits,
     // on the caste table's own healthRecovery: the way back that lets
     // the bar move at all.
-    this.thirst.update(dt, this.act === 'drinking');
-    this.breath.update(this.motion === 'diving', dt);
+    // HER PHYSIOLOGY IS ON HER CLOCK TOO, and this is what stops the
+    // boost being a cheat. A journey that would have cost twenty
+    // minutes of water still costs twenty minutes of water even though
+    // the player watched two. Without it, autopilot would quietly hand
+    // her ten times the biological range and every survival detour
+    // built in Phase 1 would stop meaning anything.
+    //
+    // Stamina needs no line here: it is spent inside the loop above,
+    // against the same shadowed dt, so it was already on her clock.
+    this.thirst.update(plan.budget, this.act === 'drinking');
+    this.breath.update(this.motion === 'diving', plan.budget);
     const stings = this.brine.update(inSalt, dt);
     if (stings > 0) {
       this.hurt(stings * liveStat('maxHealth') * SALT_DAMAGE_FRACTION, 'saltwater');
@@ -2342,8 +2423,10 @@ export class IslandScene {
     // and her wings are a body up — and `flying` answers false, which
     // is what makes the NEXT touchdown an edge rather than more of the
     // same. That used to be a tenth flag kept in step by hand.
+    // Her clock again: wings dry over her flight, not over the
+    // player's wait.
     this.wings.update(
-      dt, afloatIn(this.motion), this.motion === 'diving',
+      plan.budget, afloatIn(this.motion), this.motion === 'diving',
       this.nowWeather?.rainfall ?? 0,
     );
     this.liftSlider.enable(leverFor(
@@ -3155,7 +3238,11 @@ export class IslandScene {
       // shows the wind being flown around rather than through.
       + ` · band ${km(nav.band)}/${km(this.flight.height)}`
       + ` crab ${nav.crab >= 0 ? '+' : ''}${nav.crab.toFixed(0)}°`
-      + ` · clr ${clear}`;
+      + ` · clr ${clear}`
+      // HER CLOCK, when it is not the world's. Silent at 1x, because a
+      // multiplier that always says "x1.0" is a character of noise on a
+      // line that has already been off the side of the screen once.
+      + (this.travel.boosted ? ` · x${this.travel.scale.toFixed(1)}` : '');
   }
 
   private readSwim(dt: number): FlightTelemetry {

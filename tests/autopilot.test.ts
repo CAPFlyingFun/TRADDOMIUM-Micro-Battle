@@ -481,7 +481,9 @@ describe('how the scene lets it fly', () => {
   it('feeds the autopilot into Flight.update and nowhere else', () => {
     // The demand is spread into the same call a thumb's demand goes to.
     expect(scene).toContain('const nav = this.flyMyself(dt, trueFloor);');
-    expect(scene).toContain('nav ? {\n          ...nav.demand,');
+    // Indentation moved when the branch was wrapped in the substep
+    // loop, so this matches the shape rather than the whitespace.
+    expect(scene).toMatch(/nav \? \{\s*\n\s*\.\.\.nav\.demand,/);
   });
 
   it('and never lets it raise the ceiling the player chose', () => {
