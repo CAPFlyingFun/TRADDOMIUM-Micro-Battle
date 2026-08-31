@@ -504,24 +504,15 @@ describe('the scene flies the plan', () => {
     expect(block).toContain('this.autopilot.engage(leg.to, leg.floorAgl)');
   });
 
-  it('and plans through the CHAIN only when the pin is its end', () => {
+  it('and plans through the CHAIN only when the pin is its next stop', () => {
     // The other case is a survival detour: the brain has decided she
     // needs a drink first, and a route to the puddle by way of three
     // waypoints chosen for the trip afterwards would be an autopilot
     // arguing with a thirsty queen.
     const fly = scene.slice(scene.indexOf('private flyMyself'));
-    expect(fly).toContain('this.route = pin === last');
+    expect(fly).toContain('this.route = pin === next');
     expect(fly).toContain('? planChain(');
     expect(fly).toContain(': planRoute(');
-  });
-
-  it('and drops a stop from the chain once she has made it', () => {
-    // `detour` false means the leg ended on one of the player's own
-    // taps rather than on a corner the planner inserted. Without this,
-    // a re-plan after a detour would fly the whole trip again.
-    const fly = scene.slice(scene.indexOf('private flyMyself'));
-    expect(fly).toContain('if (!done.detour && this.chain.length > 1');
-    expect(fly).toContain('this.chain.shift();');
   });
 
   it('and plans ONCE, at the order, not every frame', () => {
@@ -633,5 +624,52 @@ describe('planning a chain', () => {
     const only = [world(70_000, 20_000)];
     expect(planChain(HER, only, [], BASE, CFG))
       .toEqual(planRoute(HER, only[0], [], BASE, CFG));
+  });
+});
+
+/**
+ * AND THE BRAIN MUST BE GIVEN A PLACE SHE IS NOT STANDING.
+ *
+ * Joshua, 2026-08-31: "I first set 3 points with the last basically my
+ * starting position and instead of flying the full route, just took off
+ * and landed at my last point a few meters away."
+ *
+ * The scene handed `MissionBrain` the END of the chain, its arrival
+ * test is "am I within `arriveWithin` of it", and she was — so the
+ * mission completed on the first tick and the two stops before it were
+ * never ordered at all. The brain answers "where does she need to be",
+ * and while a chain is running that is the NEXT place, not the last.
+ */
+describe('which stop the brain is given', () => {
+  const scene = readFileSync('src/scenes/IslandScene.ts', 'utf8');
+
+  it('is the next one, never the end of the chain', () => {
+    const wire = scene.slice(scene.indexOf('confirm: (chain) => {'));
+    expect(wire.slice(0, 1400)).toContain("this.orderTo(this.chain[0], 'waypoint')");
+    expect(wire.slice(0, 1400)).not.toContain('chain[chain.length - 1]');
+  });
+
+  it('and the next one is ordered when the last completes', () => {
+    expect(scene).toContain('this.chain.length > 0 && this.brain.primaryMission === null');
+    const on = scene.slice(scene.indexOf('this.brain.primaryMission === null'));
+    expect(on.slice(0, 300)).toContain('this.chain.shift();');
+    expect(on.slice(0, 300)).toContain("this.orderTo(this.chain[0], 'waypoint')");
+  });
+
+  it('and ONE system decides she has arrived, not two', () => {
+    // The leg-advance used to shift the chain as well. Two arrival
+    // tests are two things that can disagree about the same moment.
+    const from = scene.indexOf('private flyMyself');
+    const fly = scene.slice(from, scene.indexOf('private marks()', from));
+    expect(fly).not.toContain('this.chain.shift();');
+  });
+
+  it('and the route still covers the whole remaining trip', () => {
+    // So the map shows the journey rather than the hop: the brain holds
+    // the next stop, the planner plans through all of them.
+    const fly = scene.slice(scene.indexOf('private flyMyself'));
+    expect(fly).toContain('const next = this.chain.length > 0 ? this.chain[0] : null;');
+    expect(fly).toContain('this.route = pin === next');
+    expect(fly).toContain('this.ant.where, this.chain, this.hazards');
   });
 });

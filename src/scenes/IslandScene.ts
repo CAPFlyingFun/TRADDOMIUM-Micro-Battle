@@ -756,8 +756,22 @@ export class IslandScene {
       // answer to a five-tap route is still its last point. The stops
       // on the way are a routing decision, so they live with the route.
       confirm: (chain) => {
+        // THE NEXT STOP, NOT THE LAST ONE, and that was a real bug on
+        // the device. Joshua set three waypoints with the last one
+        // roughly where he was standing: she took off, flew nowhere,
+        // and landed a few metres away. The brain had been handed the
+        // END of the chain as its mission, its arrival test is "am I
+        // within five metres of it", and she was — so the mission
+        // completed on the first tick and the two stops before it were
+        // never ordered at all.
+        //
+        // The brain answers "where does she need to be", and the honest
+        // answer while a chain is running is the NEXT place, not the
+        // final one. `advance` hands it the following stop each time
+        // one completes; the route still covers the whole remaining
+        // chain, so the map shows the trip rather than the hop.
         this.chain = [...chain];
-        this.orderTo(chain[chain.length - 1], 'waypoint');
+        this.orderTo(this.chain[0], 'waypoint');
       },
       clearMission: () => this.brain.cancel(),
       // Solo halts, multiplayer takes her hands. One decision, made in
@@ -1284,6 +1298,8 @@ export class IslandScene {
       pace: () => this.pace,
       setPace: (to: Pace) => { this.pace = to; },
       stamina: () => this.stamina.fraction,
+      /** Probe only: the same door the save system restores through. */
+      setStamina: (fraction: number) => this.stamina.restore(fraction),
       speed: () => this.speed,
       // Wall clock is not game time here: a frame under a software
       // renderer is worth hundreds of milliseconds, so every check that
@@ -1661,6 +1677,10 @@ export class IslandScene {
     // — and a chip that stayed dark through the one part of the journey
     // the player has never seen it do would read as nothing having
     // happened at all.
+    // RESTING IS ITS OWN WORD, and it has to be: a queen sitting on the
+    // ground with a destination and a chip that says FLYING is a chip
+    // arguing with the screen.
+    if (this.nav?.state === 'resting') return 'resting';
     return this.autopilot.engaged ? 'flying' : 'off';
   }
 
@@ -1754,16 +1774,15 @@ export class IslandScene {
         // mean a route that changed under her as she flew it, and a
         // plan that cannot be shown to the player is not a plan.
         //
-        // THROUGH THE CHAIN when this pin is the chain's own end, and
-        // straight there when it is not. The second case is a survival
+        // THROUGH THE WHOLE REMAINING CHAIN when this pin is its next
+        // stop, and straight there when it is not. The second case is a survival
         // detour: the brain has decided she needs a drink first, and a
         // route to the puddle by way of three waypoints she chose for
         // the trip afterwards would be an autopilot arguing with a
         // thirsty queen. The chain survives it and comes back when the
         // primary does.
-        const last = this.chain.length > 0
-          ? this.chain[this.chain.length - 1] : null;
-        this.route = pin === last
+        const next = this.chain.length > 0 ? this.chain[0] : null;
+        this.route = pin === next
           ? planChain(
             this.ant.where, this.chain, this.hazards, AUTOPILOT_DEFAULTS.floorAgl,
           )
@@ -1854,6 +1873,9 @@ export class IslandScene {
       // and the reserve a takeoff costs belongs to `Flight`.
       wingsWet: this.wings.wet,
       launchable: this.flight.canLaunch(this.stamina.fraction),
+      // WHAT IS LEFT IN HER, which is a different question from whether
+      // the model would let her off the ground. See NavSense.reserve.
+      reserve: this.stamina.fraction,
       // The DRAWN floor, the one she would land on — water included,
       // the same surface the flight model is given below.
       terrainAt: (wx, wz) => groundHeight(wx, wz) + (waterSpotAt(wx, wz)?.depth ?? 0),
@@ -1873,16 +1895,10 @@ export class IslandScene {
     // the player was never shown.
     if (this.nav.state === 'hold' && this.route !== null
       && this.legAt < this.route.legs.length - 1) {
-      // A LEG THE PLAYER PUT IN IS A STOP MADE. `detour` false means
-      // this leg ended on one of their own taps rather than on a corner
-      // the planner inserted, so the chain has one fewer place to go —
-      // and a re-plan after a survival detour starts from what is left
-      // rather than from the whole trip again.
-      const done = this.route.legs[this.legAt];
-      if (!done.detour && this.chain.length > 1
-        && this.chain[0] === done.to) {
-        this.chain.shift();
-      }
+      // The CHAIN is not advanced here. The brain owns that: it holds
+      // the next stop as its mission and completes it on its own
+      // arrival test, and two systems deciding she has arrived is two
+      // systems that can disagree about it.
       this.legAt++;
       const leg = this.route.legs[this.legAt];
       this.autopilot.engage(leg.to, leg.floorAgl);
@@ -2085,15 +2101,20 @@ export class IslandScene {
     // autopilot actually issued a demand, so a hand on the controls
     // hands her back real time without waiting to be a surrender.
     //
-    // AND ONLY ONCE SHE IS OFF THE SURFACE. The boost is for
-    // TRAVELLING, and a queen waiting for her wings to dry is not
-    // travelling — she is paying a price. Thirty seconds out of the
-    // rain is Joshua's number and the whole of what makes water a cost
-    // rather than a trap; spending it at ten times the rate because
-    // there happened to be a waypoint set would quietly refund it to
-    // anyone using the map, and leave the same wait full price for
-    // anyone flying by hand.
-    this.travel.ask(this.nav !== null && !this.surrendered && this.flight.aloft);
+    // AND IT RUNS ON THE GROUND TOO, which is a correction. I gated
+    // this on `aloft` on the grounds that a queen waiting for her wings
+    // to dry is paying a price rather than travelling — and then the
+    // device produced a queen resting for thirty seconds of stamina in
+    // real time while her chip said x10, which is the same argument
+    // eating itself.
+    //
+    // THE BOOST SHRINKS THE WAIT, NEVER THE COST. She spends exactly
+    // the same water, the same reserve and the same drying time
+    // measured in her own seconds; all that changes is how long the
+    // player sits there watching it. That is the whole contract, it is
+    // the same one the flight itself is under, and carving out
+    // exceptions per wait was a rule nobody could hold in their head.
+    this.travel.ask(this.nav !== null && !this.surrendered);
     const plan = this.travel.update(dt);
 
     // ── Air or ground ────────────────────────────────────────────
@@ -3458,6 +3479,15 @@ export class IslandScene {
       // the water readout already computed where one exists.
       nearestWatercourse: this.channelNear,
     });
+    // ── ON TO THE NEXT STOP ──────────────────────────────────────
+    // The brain has finished the one it was given. If the player laid
+    // out more, hand it the next; if that was the last, the trip is
+    // over and the chain goes with it.
+    if (this.chain.length > 0 && this.brain.primaryMission === null) {
+      this.chain.shift();
+      if (this.chain.length > 0) this.orderTo(this.chain[0], 'waypoint');
+    }
+
     const said = this.brain.takeNotice();
     if (said) {
       this.brainSaid = said;

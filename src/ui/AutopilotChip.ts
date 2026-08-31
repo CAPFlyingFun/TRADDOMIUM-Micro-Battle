@@ -25,7 +25,7 @@
  */
 
 /** What the autopilot is doing, as far as the player is concerned. */
-export type ChipState = 'off' | 'flying' | 'standby';
+export type ChipState = 'off' | 'flying' | 'standby' | 'resting';
 
 /** Card gold and the affirmative green, from the shared palette. */
 const GOLD = 'rgba(255, 216, 130, .85)';
@@ -43,6 +43,14 @@ const INK = 'rgba(18, 14, 6, .72)';
 export function chipWords(state: ChipState, travel = 1): string {
   if (state === 'off') return '';
   if (state === 'standby') return 'AP · STANDBY';
+  // RESTING SAYS SO. Without it, a queen sitting on the ground with a
+  // destination reads as an autopilot that has given up — which is
+  // exactly what the flicker looked like before there was a word for
+  // it. The multiplier stays on, because her clock is still running
+  // fast and the wait really is passing quicker than it looks.
+  if (state === 'resting') {
+    return travel > 1.05 ? `AP · RESTING ×${travel.toFixed(1)}` : 'AP · RESTING';
+  }
   return travel > 1.05 ? `AP · FLYING ×${travel.toFixed(1)}` : 'AP · FLYING';
 }
 

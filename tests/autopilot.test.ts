@@ -52,6 +52,8 @@ function sense(over: Partial<NavSense> = {}): NavSense {
     // Airborne, dry and fed unless a test is about the takeoff.
     wingsWet: false,
     launchable: true,
+    // Fed and rested unless a test is about being neither.
+    reserve: 1,
     terrainAt: SEA,
     // Still air unless a test says otherwise, at every height.
     windAt: () => null,
@@ -824,13 +826,13 @@ describe('the scene wires CONTINUE to the one thing it should', () => {
     // only on frames the autopilot actually commanded something. The
     // player at the controls gets real time.
     //
-    // AND ONLY ONCE SHE IS OFF THE SURFACE: the boost is for
-    // travelling, and a queen waiting thirty seconds for her wings to
-    // dry is paying a price rather than travelling. Boosting that would
-    // refund it to anyone who had set a waypoint and leave it full
-    // price for anyone flying by hand.
+    // AND ON THE GROUND TOO. The boost shrinks the WAIT and never the
+    // COST — she spends the same reserve, the same water and the same
+    // drying time measured in her own seconds. An `aloft` gate here
+    // meant a queen resting thirty seconds of stamina in real time
+    // under a chip reading x10.
     expect(scene).toContain(
-      'this.travel.ask(this.nav !== null && !this.surrendered && this.flight.aloft);',
+      'this.travel.ask(this.nav !== null && !this.surrendered);',
     );
   });
 });
@@ -1055,5 +1057,110 @@ describe('and it flies at the top of the model, not the pace row', () => {
     const ceiling = wired.slice(0, 1800);
     expect(ceiling.indexOf('this.stamina.spent'))
       .toBeLessThan(ceiling.indexOf('SPRINT_AIRSPEED'));
+  });
+});
+
+/**
+ * THE STROBE ON THE BEACH.
+ *
+ * Joshua, 2026-08-31, with a photograph of a queen a hand's width off
+ * the ground and 1% stamina: "low stamina should mean temporarily land
+ * until stamina is at max and then resume... it go to 0 stamina and was
+ * stuck and just off the ground but think it was alternating between 0
+ * stamina and the minimum to fly and why it was flashing."
+ *
+ * Every part was working as written. `Flight.canLaunch` asks for
+ * TAKEOFF_COST — three per cent — so an exhausted queen recovers past
+ * three per cent in about a second, the autopilot asks for a launch,
+ * she spends it climbing, falls back, and does it again. One threshold
+ * used in both directions is a guaranteed oscillator.
+ */
+describe('resting, rather than flickering', () => {
+  const spent = (over: Partial<NavSense> = {}): NavSense => sense({
+    reserve: 0.01, launchable: false, aloft: false, altitude: 0, ground: 0,
+    airspeed: 0, drift: { x: 0, z: 0 }, ...over,
+  });
+
+  it('puts her down rather than asking to launch', () => {
+    const ap = new Autopilot(CFG);
+    ap.engage(world(200_000, 0));
+    const out = ap.update(1 / 60, spent());
+    expect(out.state).toBe('resting');
+    expect(out.launch).toBe(false);
+    expect(out.blocked).toBe('reserve');
+  });
+
+  it('and comes DOWN when it happens in the air', () => {
+    const ap = new Autopilot(CFG);
+    ap.engage(world(200_000, 0));
+    const out = ap.update(1 / 60, spent({ aloft: true, altitude: 400, reserve: 0.05 }));
+    expect(out.state).toBe('resting');
+    expect(out.demand.lift).toBeLessThan(0);
+    expect(out.demand.push).toBe(0);
+  });
+
+  it('and rests EARLY enough to fly the descent', () => {
+    // Ten per cent, not nothing: she sets down while she still has the
+    // reserve to do it gently rather than at the moment she cannot.
+    expect(CFG.restBelow).toBeGreaterThan(0.05);
+    const ap = new Autopilot(CFG);
+    ap.engage(world(200_000, 0));
+    expect(ap.update(1 / 60, spent({ reserve: CFG.restBelow })).state).toBe('resting');
+    expect(ap.update(1 / 60, spent({ reserve: CFG.restBelow + 0.01 })).state)
+      .toBe('resting');
+  });
+
+  it('and does NOT set off again at the threshold it landed at', () => {
+    // THE WHOLE FIX. One number in both directions is the oscillator.
+    const ap = new Autopilot(CFG);
+    ap.engage(world(200_000, 0));
+    ap.update(1 / 60, spent());
+    for (const back of [0.04, 0.11, 0.5, CFG.flyAbove - 0.01]) {
+      const out = ap.update(1 / 60, spent({ reserve: back, launchable: true }));
+      expect(out.state, `${back}`).toBe('resting');
+      expect(out.launch, `${back}`).toBe(false);
+    }
+  });
+
+  it('and picks the leg up once she is full, without being re-ordered', () => {
+    // "until stamina is at max and then resume". The destination never
+    // went anywhere; only she did.
+    const ap = new Autopilot(CFG);
+    const pin = world(200_000, 0);
+    ap.engage(pin);
+    ap.update(1 / 60, spent());
+    const out = ap.update(1 / 60, spent({ reserve: 1, launchable: true }));
+    expect(out.state).toBe('takeoff');
+    expect(out.launch).toBe(true);
+    expect(ap.pin).toEqual(pin);
+  });
+
+  it('and will not resume in mid-air, where a launch means nothing', () => {
+    // The reserve can cross the line while she is still coming down.
+    // Resuming there would be a takeoff request from something already
+    // flying, and the descent would never finish.
+    const ap = new Autopilot(CFG);
+    ap.engage(world(200_000, 0));
+    ap.update(1 / 60, spent({ aloft: true, altitude: 400 }));
+    const out = ap.update(1 / 60, sense({
+      aloft: true, altitude: 400, reserve: 1, launchable: false,
+    }));
+    expect(out.state).toBe('resting');
+  });
+
+  it('and never reports NO PROGRESS for sitting still on purpose', () => {
+    const ap = new Autopilot(CFG);
+    ap.engage(world(200_000, 0));
+    let out = ap.update(1 / 60, spent());
+    for (let i = 0; i < Math.ceil((CFG.patience + 2) * 60); i++) {
+      out = ap.update(1 / 60, spent());
+    }
+    expect(out.blocked).toBe('reserve');
+    expect(out.state).toBe('resting');
+  });
+
+  it('and says so on the chip, because a stopped queen needs a word', () => {
+    expect(chipWords('resting')).toBe('AP · RESTING');
+    expect(chipWords('resting', 10)).toBe('AP · RESTING ×10.0');
   });
 });

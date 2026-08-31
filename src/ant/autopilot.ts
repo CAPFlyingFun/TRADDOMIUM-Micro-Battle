@@ -61,6 +61,14 @@ export type NavState =
    * position right up until the player asked for a drone.
    */
   | 'takeoff'
+  /**
+   * DOWN, AND WAITING TO BE ABLE TO FLY AGAIN.
+   *
+   * Not a failure and not a stop: the leg survives, and she picks it up
+   * where she left it once her reserve is back. See `restBelow` and
+   * `flyAbove` — the hysteresis between them is the whole of it.
+   */
+  | 'resting'
   | 'acquire'
   | 'cruise'
   | 'arrival'
@@ -108,6 +116,15 @@ export interface NavSense {
    * thing to get out of step.
    */
   readonly launchable: boolean;
+  /**
+   * What is left in her, 0 to 1.
+   *
+   * `launchable` answers "would the model let her off the ground right
+   * now", which is a much lower bar than "should she be flying" — three
+   * per cent against the ten she needs to get anywhere. Both are here
+   * because they are different questions.
+   */
+  readonly reserve: number;
   /** The terrain query, so this file needs no heightfield of its own. */
   readonly terrainAt: (wx: number, wz: number) => number;
   /**
@@ -318,6 +335,11 @@ export class Autopilot {
   /** The band she has chosen, AGL in world units, and the crab it costs. */
   private band = 0;
   private crab = 0;
+  /**
+   * Down and waiting for her reserve. Latched, so the threshold she
+   * rests at and the one she leaves at can be different numbers.
+   */
+  private resting = false;
   /** The closest she has been, and how long since it improved. */
   private closest = Number.POSITIVE_INFINITY;
   private stale = 0;
@@ -377,6 +399,7 @@ export class Autopilot {
   /** Forget the destination entirely. */
   clear(): void {
     this.leg = this.cfg;
+    this.resting = false;
     this.target = null;
     this.state = 'idle';
     this.why = null;
@@ -398,6 +421,41 @@ export class Autopilot {
     // AGAINST HER TRACK, NOT HER HEADING. The difference is the whole
     // point of the file — see the header.
     const error = wrap180(wanted - sense.track);
+
+    // ── IS THERE ANYTHING LEFT IN HER? ───────────────────────────
+    // Before the destination, before the track, before the air: a queen
+    // with nothing left is not going anywhere and the only useful thing
+    // an autopilot can do about it is put her down and wait.
+    //
+    // TWO THRESHOLDS, NOT ONE, and that is the fix rather than a
+    // refinement. `Flight.canLaunch` asks for three per cent, so at one
+    // threshold she recovers past it in a second, launches, spends it
+    // climbing and falls back — the strobe Joshua photographed. She
+    // rests at ten per cent and does not fly again until ninety-eight,
+    // which is thirty seconds of resting recovery apart.
+    if (this.resting) {
+      if (!sense.aloft && sense.reserve >= this.cfg.flyAbove) this.resting = false;
+    } else if (sense.reserve <= this.cfg.restBelow) {
+      this.resting = true;
+    }
+    if (this.resting) {
+      this.state = 'resting';
+      this.why = 'reserve';
+      this.held = false;
+      // The watchdog cannot run on a queen who is deliberately not
+      // moving — see the takeoff branch for the same reason.
+      this.closest = Number.POSITIVE_INFINITY;
+      this.stale = 0;
+      this.band = 0;
+      this.crab = 0;
+      // ALOFT: down, deliberately, and while she still has the reserve
+      // to do it gently. On the ground: nothing at all, and above all
+      // no `launch` — that request is what she was strobing on.
+      return this.report(
+        sense.aloft ? { push: 0, side: 0, lift: -1, hold: null } : IDLE,
+        range, wanted, error, 0, null,
+      );
+    }
 
     // ── OFF THE SURFACE FIRST ────────────────────────────────────
     // Nothing else in this file means anything to a queen standing on a

@@ -112,6 +112,35 @@ export interface AutopilotConfig {
    */
   readonly launchAgl: number;
   /**
+   * THE RESERVE BELOW WHICH SHE STOPS AND RESTS, 0 to 1.
+   *
+   * Joshua, 2026-08-31, watching her flicker a hand's width off the
+   * ground: "low stamina should mean temporarily land until stamina is
+   * at max and then resume... it go to 0 stamina and was stuck and just
+   * off the ground but think it was alternating between 0 stamina and
+   * the minimum to fly and why it was flashing."
+   *
+   * Exactly that. `Flight.canLaunch` asks only for TAKEOFF_COST — three
+   * per cent — so an exhausted queen recovers past three per cent in
+   * about a second, launches, spends it climbing, falls back, and does
+   * it again. Every part of that is working as written and the sum is a
+   * queen strobing on a beach.
+   *
+   * Ten per cent, so she sets down while she can still fly the descent
+   * rather than at the moment she cannot.
+   */
+  readonly restBelow: number;
+  /**
+   * AND THE RESERVE SHE WAITS FOR BEFORE GOING ON.
+   *
+   * THE HYSTERESIS IS THE WHOLE FIX. One threshold in both directions
+   * is what produced the flicker; taking off at the same number she
+   * landed at guarantees she lands again immediately. "until stamina is
+   * at max and then resume" — so it is very nearly full, and the gap
+   * between the two is thirty seconds of resting recovery.
+   */
+  readonly flyAbove: number;
+  /**
    * The highest band the search will consider, world units.
    *
    * Not a limit on where she may BE — a player can fly as high as the
@@ -197,6 +226,8 @@ export const AUTOPILOT_DEFAULTS: AutopilotConfig = {
   // 55 cm — a floor, not a target. See the field.
   floorAgl: 55,
   launchAgl: 100,
+  restBelow: 0.1,
+  flyAbove: 0.98,
   ceilingAgl: 3_000,
   bandUrgency: 0.45,
   bandMargin: 4,
