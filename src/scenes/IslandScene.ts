@@ -52,6 +52,8 @@ import { Autopilot, tookOver, type NavCommand } from '../ant/autopilot';
 import { MAX_TRAVEL, TravelScale } from '../ant/travelScale';
 import { AutopilotChip, type ChipState } from '../ui/AutopilotChip';
 import { AUTOPILOT_DEFAULTS } from '../ant/autopilotConfig';
+import type { Hazard } from '../ant/hazards';
+import { planRoute, routeWords, type RoutePlan } from '../ant/routePlanner';
 import {
   DISCOVERY_CELLS, decodeDiscovery, emptyDiscovery, encodeDiscovery,
   fractionSeen, reveal,
@@ -297,6 +299,21 @@ export class IslandScene {
   private nav: NavCommand | null = null;
   /** The pin the autopilot was last handed, by identity. */
   private flownTo: WorldPoint | null = null;
+  /**
+   * EVERYTHING KNOWN TO BE IN HER WAY.
+   *
+   * Empty today, and honestly so: TMB has no trees with tops, no
+   * predators and no forbidden ground yet, and filling this with
+   * invented content to give the planner something to do would be a
+   * feature that exists only in the code that avoids it. The
+   * MECHANISM ships now; the content arrives with the systems that
+   * produce it, and `__island.addHazard` is how a probe proves the
+   * chain end to end in the meantime.
+   */
+  private readonly hazards: Hazard[] = [];
+  /** The plan the pin turned into, and which leg of it she is flying. */
+  private route: RoutePlan | null = null;
+  private legAt = 0;
   /** The player took the stick, and has not asked to be flown since. */
   private surrendered = false;
 
@@ -977,6 +994,40 @@ export class IslandScene {
           airspeed: this.flight.airspeed,
           clearance: this.nav.ahead,
         },
+      }),
+      /**
+       * PHASE 3, probe only: put something in her way.
+       *
+       * The hazard list is empty in the shipped game because TMB has
+       * nothing to put in it yet — no trees with tops, no predators, no
+       * forbidden ground. That is honest, and it also means the router
+       * has nothing to route around, so this is the door that lets a
+       * probe prove the whole chain: pin, plan, detour, fly it.
+       *
+       * `top: null` is a thing she may never fly over — go around it.
+       * A number is how much air she needs to pass above it.
+       */
+      addHazard: (
+        wx: number, wz: number, radius: number, top: number | null = null,
+      ) => {
+        this.hazards.push({
+          id: `probe-${this.hazards.length}`,
+          at: world(wx, wz),
+          radius,
+          top,
+          kind: top === null ? 'zone' : 'obstacle',
+        });
+        return this.hazards.length;
+      },
+      clearHazards: () => { this.hazards.length = 0; },
+      /** Probe only: the plan the last order turned into. */
+      routePlan: () => (this.route === null ? null : {
+        legs: this.route.legs.map((leg) => ({
+          wx: leg.to.wx, wz: leg.to.wz, floorAgl: leg.floorAgl, detour: leg.detour,
+        })),
+        at: this.legAt,
+        words: routeWords(this.route.report),
+        ...this.route.report,
       }),
       /** Probe only: what the textured overview cost, and whether it landed. */
       mapRelief: () => ({ ms: Math.round(reliefCost()), ready: reliefIsland() !== null }),
@@ -1668,8 +1719,28 @@ export class IslandScene {
       // Same reason as CONTINUE: a destination confirmed with a thumb
       // still down must not be undone by that same thumb.
       this.handsClear = false;
-      if (pin === null) this.autopilot.clear();
-      else this.autopilot.engage(pin);
+      if (pin === null) {
+        this.autopilot.clear();
+        this.route = null;
+      } else {
+        // ── THE ROUTE ────────────────────────────────────────────
+        // A destination is not a leg. The planner turns the one into
+        // the other — round what has no top, over what has one — and
+        // the autopilot flies them one at a time, which is all it has
+        // ever done. With nothing in the way this is a single leg
+        // straight there and behaves exactly as it did before the
+        // planner existed.
+        //
+        // PLANNED ONCE, at the order. Re-planning every frame would
+        // mean a route that changed under her as she flew it, and a
+        // plan that cannot be shown to the player is not a plan.
+        this.route = planRoute(
+          this.ant.where, pin, this.hazards, AUTOPILOT_DEFAULTS.floorAgl,
+        );
+        this.legAt = 0;
+        const leg = this.route.legs[0];
+        this.autopilot.engage(leg.to, leg.floorAgl);
+      }
     }
 
     // SHE IS NOT AIRBORNE YET, and until v0.0.139 that was the end of
@@ -1757,6 +1828,22 @@ export class IslandScene {
       // profile and the sheltering; the autopilot only asks.
       windAt: (agl) => this.windAtAgl(agl),
     });
+
+    // ── ON TO THE NEXT LEG ───────────────────────────────────────
+    // `hold` is the autopilot's own word for "arrived and staying
+    // put", and on the last leg that is exactly right — she hovers
+    // over the pin. On any earlier one it means a corner has been
+    // turned, so hand it the next.
+    //
+    // `engage` RATHER THAN A NEW ROUTE: the plan is still the plan,
+    // and re-planning at every corner would let her arrive somewhere
+    // the player was never shown.
+    if (this.nav.state === 'hold' && this.route !== null
+      && this.legAt < this.route.legs.length - 1) {
+      this.legAt++;
+      const leg = this.route.legs[this.legAt];
+      this.autopilot.engage(leg.to, leg.floorAgl);
+    }
     return this.nav;
   }
 
@@ -1778,6 +1865,10 @@ export class IslandScene {
       at: this.ant.where,
       heading: this.ant.bearing,
       primary: this.brain.primaryMission?.at ?? null,
+      // Only when it bends. A "route" that is the straight line the
+      // dashed reference already draws is two lines saying one thing.
+      route: this.route !== null && this.route.legs.length > 1
+        ? this.route.legs.map((leg) => leg.to) : null,
     };
   }
 
@@ -3411,7 +3502,14 @@ export class IslandScene {
       // HER CLOCK, when it is not the world's. Silent at 1x, because a
       // multiplier that always says "x1.0" is a character of noise on a
       // line that has already been off the side of the screen once.
-      + (this.travel.boosted ? ` · x${this.travel.scale.toFixed(1)}` : '');
+      + (this.travel.boosted ? ` · x${this.travel.scale.toFixed(1)}` : '')
+      // WHAT THE PLANNER DID TO THE PLAN, and which leg of it she is
+      // on. Silent when it did nothing, which with an empty hazard list
+      // is every flight — a line that says "changed nothing" every time
+      // is a line that gets read once.
+      + (this.route === null || !this.route.report.changed ? ''
+        : ` · leg ${this.legAt + 1}/${this.route.legs.length}`
+          + ` ${routeWords(this.route.report)}`);
   }
 
   private readSwim(dt: number): FlightTelemetry {

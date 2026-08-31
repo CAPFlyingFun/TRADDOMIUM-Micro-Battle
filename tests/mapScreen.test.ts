@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   NOWHERE, canFly, clearTarget, clearWords, degreeWords, readout,
@@ -147,5 +148,32 @@ describe('the destination readout', () => {
     const said = readout(HER, world(Number.NaN, 0), null);
     expect(said.range).toBe('—');
     expect(said.bearing).toBe('—');
+  });
+});
+
+/**
+ * AND THE CAPTION HAS TO KEEP UP WITH THE TRUTH.
+ *
+ * "Direct line — not a planned route" was written because a line drawn
+ * between two points looks like a route unless it is called something
+ * else, and until v0.0.140 it never was one. Now it sometimes is, and
+ * leaving the words alone would be the same lie in the other direction.
+ */
+describe('what the map calls the line', () => {
+  const src = readFileSync('src/ui/MapScreen.ts', 'utf8');
+
+  it('has two captions, and picks one per frame', () => {
+    expect(src).toContain("const DIRECT = 'Direct line — not a planned route.'");
+    expect(src).toContain('const ROUTED =');
+    expect(src).toContain('this.say(ROUTED);');
+    expect(src).toContain('this.say(DIRECT);');
+  });
+
+  it('and the routed one is chosen by the same test that draws the track', () => {
+    // One condition, not two that can drift apart into a solid route
+    // captioned as a direct line.
+    const paint = src.slice(src.indexOf('marks?.route && marks.route.length > 1'));
+    expect(paint.slice(0, 260)).toContain('this.planned(');
+    expect(paint.slice(0, 260)).toContain('this.say(ROUTED);');
   });
 });

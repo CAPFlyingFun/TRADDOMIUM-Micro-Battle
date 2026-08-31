@@ -15,7 +15,7 @@ what is not, and what TMB already has that these do not.
 | --- | --- | --- | --- |
 | [CanaryGC](https://github.com/judahpaul16/canarygc) | MIT | `17a4c88` (2026-08-20) | `path-planning.ts` (354 lines, the whole optimizer), `landing-approach.ts`, `safety.ts` validation, `dem.ts` / `terrarium.ts`, `hazards.ts`, `takeoff-land.ts` |
 | [DroneRoute](https://github.com/fcsonline/droneroute) | MIT | `2b27ac2` (2026-07-13) | `packages/shared/src/types.ts` — the mission and waypoint model |
-| Horus | — | — | **Not audited.** No repository matching the description (MIT, global planner + local planner + voxel map + trajectory follower) could be found by search. Auditing a same-named project would have been worse than saying so. |
+| [Horus](https://github.com/Horus-Technologies/horus) | MIT | `4f1547d` (2025-06-19) | `GlobalPlanner.cpp`, `LocalPlanner.cpp`, `TrajectoryController.cpp`, `Search.cpp`. Found only because Joshua sent the link — it does not surface by search. |
 
 CanaryGC is SvelteKit, not React — worth knowing before anyone plans a
 component transplant. ADOS Mission Control was deliberately not read: it
@@ -117,6 +117,54 @@ zone only applies within its own vertical band, so a low waypoint is not
 flagged for airspace whose floor is above it. TMB's equivalent is a
 waypoint under a canopy versus over it.
 
+## From Horus: three clocks, and a search that only ever looks nearby
+
+Horus is real, MIT, ROS 2 and C++, and it is earlier-stage than its
+description suggests. The honest reading:
+
+**`GlobalPlanner` does not plan.** It publishes a *goal* on a 20 ms
+timer from a hardcoded list, and the constructor actually wires up
+`run_random`, which picks random reachable points. There is no global
+route in this repository yet. The name is an intention.
+
+**`LocalPlanner` is where the work is**, and it does something worth
+copying: every **300 ms** it re-runs A* *from her current position* to
+the goal, inside a **32-voxel cube centred on the drone**. The search is
+bounded to a moving window rather than the map, which is the same
+instinct as CanaryGC's 160-vertex cap and a better-shaped one — cost is
+tied to how far she can see, not to how big the world is.
+
+**`TrajectoryController` follows at 10 ms** with pure pursuit: the
+furthest intersection of a lookahead sphere with the path.
+
+So the architecture is three rates rather than two layers:
+
+| Horus | rate | TMB |
+| --- | --- | --- |
+| GlobalPlanner (goal) | 20 ms | `MissionBrain` — already exists |
+| LocalPlanner (replan) | 300 ms | **missing** |
+| TrajectoryController (follow) | 10 ms | `Autopilot` per frame — already exists |
+
+TMB has the ends and not the middle. The middle is exactly the thing
+that stops one spider walking into a leg from re-deriving a route across
+the island: keep the plan, re-run the short search.
+
+Two smaller things worth taking. `clean_path` is string-pulling —
+walk the path, keep the furthest node still in clear line of sight, drop
+everything between — run twice "for certain edge cases". A visibility
+graph already produces taut paths, but a *replanned* one will not, so
+TMB will want this the moment the middle rate exists. And `run_search`
+returns nothing at all when the start voxel is occupied, with the
+comment "this means drone is in a wall and something is very wrong":
+failing loudly rather than planning out of an impossible state.
+
+What does not transfer is the voxel grid itself. TMB's world is
+5,600,000 units across, its hazards are metres wide and mostly convex,
+and the biggest one — the ocean — is not voxel-shaped at all. Corner
+graphs over footprints are the right representation here; voxels are the
+right one when the obstacles arrive as a point cloud, which is a problem
+TMB does not have because it authored the island.
+
 ## From DroneRoute: the waypoint editor's data model
 
 Its `Waypoint` carries per-item **overrides of mission globals**:
@@ -148,7 +196,7 @@ damping distance) and `HeadingMode` (`followWayline` / `fixed` /
 
 This matters, because it decides how much is worth adopting.
 
-- **Wind.** Neither optimizer models it *at all* — the word does not
+- **Wind.** None of the three model it *at all* — the word does not
   appear in CanaryGC's planning code. `progressIn` (the crab-and-along
   arithmetic) and the altitude band search that prices candidate bands by
   the ground progress they buy have no counterpart in either repository.
@@ -204,7 +252,7 @@ audit is the design, and the design is free.
 ADOS Mission Control is GPL-3.0-only. It should not be read by anyone
 writing TMB's planner.
 
-## Proposed shape for the next phase
+## What was built from this (v0.0.140)
 
 Named in TMB's own terms, with the existing separation kept:
 
@@ -218,20 +266,58 @@ Autopilot             fly ONE leg: track, band, arrival     (exists)
 FlightDemand → Flight the only thing that moves her         (exists)
 ```
 
-- `src/ant/hazards.ts` — `Hazard = { at: WorldPoint, radius: number, top:
-  number | null }`. `top === null` is CanaryGC's restricted airspace: the
-  ocean, a predator zone, a hostile colony. No top means no climbing over
-  it.
-- `src/ant/routePlanner.ts` — `planRoute(from, to, hazards, ceiling)`
+- `src/ant/hazards.ts` — `Hazard = { at, radius, top: number | null }`.
+  `top === null` is CanaryGC's restricted airspace: a predator zone, a
+  hostile colony, ground she must not be over. No top means no climbing
+  over it, and `clearable()` also demotes anything taller than the
+  ceiling into that class, which is what makes the split a rule rather
+  than a label.
+- `src/ant/routePlanner.ts` — `planRoute(from, to, hazards, baseFloor)`
   returning legs plus the diff report. Visibility graph over buffered
-  corners, bounded, flat-plane distances.
-- The map draws the plan and prints the report.
+  corners, Dijkstra, bounded at 160 vertices, flat-plane distances.
+- `Autopilot.engage(at, floorAgl?)` — a leg's raise arrives as a
+  MINIMUM the band search may not look below, never as a commanded
+  altitude. Two systems entitled to name her height would fight.
+- The map draws the plan as a solid track with a mark at every inserted
+  corner, and replaces the dashed reference line when it bends.
 
-The autopilot's existing per-frame lookahead already plays the "local
-planner" role in the global/local split, which is the one idea worth
-keeping from the Horus description even though the repository could not
-be found: the global plan should not be recomputed because one spider
-walked into the leg.
+Two things were learned building it that the audit could not have
+predicted, both geometry and both found by tests that were right when I
+assumed they were wrong:
+
+- **Adjacent ring corners must be able to see each other.** The router's
+  own nodes are footprint corners, so the segment between two of them IS
+  an edge, and a midpoint-inside test at a point exactly on a boundary
+  answers whichever way the arithmetic falls. Where it fell "inside",
+  she could only ever go the long way round — a zone 30 m off her line
+  drew an 83 m dog-leg when a 23 m one was open.
+- **A segment can pass corner-to-corner straight through a polygon**
+  crossing no edge *properly*, with its midpoint nowhere near — so an
+  edges-and-midpoint test calls it clear. Rings placed on a circle line
+  their corners up constantly, and a pen of sixteen overlapping hazards
+  was strolled out of. Both are fixed by clipping the segment against
+  the convex half-planes and asking whether any interval is *strictly*
+  inside, which also drops the epsilon fudge the first fix needed.
+
+CanaryGC has the same shape of test and, as far as reading it goes, the
+same exposure — its `segmentEntersRing` is edges plus a midpoint. That
+is not a criticism of it; it is what a careful audit is worth. The
+design transferred, the implementation had to be earned.
+
+### Still to come
+
+- The hazard list ships EMPTY, and honestly: TMB has no trees with tops,
+  no predators and no forbidden ground yet. The mechanism is live and
+  `__island.addHazard` proves the chain end to end.
+- Terrain is deliberately not in it. A ridge she cannot outclimb is a
+  real gap and a real route problem, but it needs ground represented as
+  a region rather than as a circle.
+- The middle rate (Horus's 300 ms replan) is not built. The route is
+  planned once, at the order.
+
+The autopilot's existing per-frame lookahead already plays Horus's
+`TrajectoryController` role. What TMB does not have is the middle rate —
+see below — and that is the piece worth adding after the planner itself.
 
 ## Bottom line
 

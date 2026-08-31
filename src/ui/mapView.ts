@@ -296,4 +296,13 @@ export interface MapMarks {
    * queen would watch her destination jump to a puddle.
    */
   readonly primary: WorldPoint | null;
+  /**
+   * THE ROUTE SHE IS ACTUALLY FLYING, corner by corner, or null.
+   *
+   * The planner's legs rather than the straight line to the pin, and
+   * the two differ exactly when something is in the way. A player who
+   * cannot see why she is flying north-east to reach a pin due east
+   * would be right to think the autopilot had lost its mind.
+   */
+  readonly route: readonly WorldPoint[] | null;
 }

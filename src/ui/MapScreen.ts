@@ -98,6 +98,16 @@ const CARD = 'rgba(18, 14, 6, .72)';
 const SHADOW = '0 0 0 2px rgba(0,0,0,.32), 0 3px 14px rgba(0,0,0,.42)';
 const LIVE = 'rgb(110, 255, 150)';
 const WARM = 'rgba(255, 236, 200, .92)';
+
+/**
+ * WHAT THE LINE UNDER THE READOUT IS, and the two are not the same
+ * claim. A straight line between two points is a bearing and a
+ * distance; a route is somewhere she has been planned to fly. Calling
+ * the first one a route was the reason the caption was written; calling
+ * the second one a direct line would be the same mistake reversed.
+ */
+const DIRECT = 'Direct line — not a planned route.';
+const ROUTED = 'Planned route — around what she cannot fly over.';
 /** The dark liner every marker carries, so gold survives gold sand. */
 const LINER = '#0b1018';
 
@@ -233,6 +243,7 @@ export class MapScreen {
   private readonly destination: HTMLDivElement;
   private readonly figures: HTMLDivElement;
   private readonly caption: HTMLDivElement;
+  private said = DIRECT;
   private readonly clear: HTMLButtonElement;
   private readonly fly: HTMLButtonElement;
   private readonly closer: HTMLButtonElement;
@@ -398,10 +409,13 @@ export class MapScreen {
 
     this.caption = document.createElement('div');
     // SAYS WHAT THE LINE IS. A line drawn between two points on a map
-    // looks like a route unless it is called something else, and this
-    // one is not a route: no altitude, no wind, no terrain, nothing
-    // planned. Naming it is the price of being allowed to draw it.
-    this.caption.textContent = 'Direct line — not a planned route.';
+    // looks like a route unless it is called something else, and until
+    // v0.0.140 this one never was: no altitude, no wind, no terrain,
+    // nothing planned. Naming it was the price of being allowed to draw
+    // it — and now that a planner exists, keeping the same words over a
+    // line that IS a route would be the same lie in the other
+    // direction. `caption` is written per frame, in `settle`.
+    this.caption.textContent = DIRECT;
     Object.assign(this.caption.style, {
       marginTop: '2px',
       font: '10px/1.2 system-ui, sans-serif',
@@ -711,7 +725,17 @@ export class MapScreen {
     const primary = marks?.primary ?? null;
     const focus = this.preview ?? primary;
 
-    if (marks && focus) this.reference(ink, port, marks.at, focus);
+    // A PLANNED ROUTE REPLACES THE REFERENCE LINE, because they are
+    // different claims: the dashed line is "that way", and a route is
+    // "this is the way I am going". Drawing both would be the map
+    // arguing with itself.
+    if (marks?.route && marks.route.length > 1) {
+      this.planned(ink, port, marks.at, marks.route);
+      this.say(ROUTED);
+    } else if (marks && focus) {
+      this.reference(ink, port, marks.at, focus);
+      this.say(DIRECT);
+    }
     if (primary) this.active(ink, port, primary);
     if (this.preview) this.proposal(ink, port, this.preview);
     if (marks) this.queen(ink, port, marks);
@@ -787,6 +811,46 @@ export class MapScreen {
     ink.moveTo(a.x, a.y);
     ink.lineTo(b.x, b.y);
     ink.stroke();
+    ink.restore();
+  }
+
+  /** Write the caption only when it changes. */
+  private say(words: string): void {
+    if (this.said === words) return;
+    this.said = words;
+    this.caption.textContent = words;
+  }
+
+  /**
+   * THE ROUTE, corner by corner.
+   *
+   * Solid, and the `reference` line above says why: dashes are for a
+   * direction nobody planned. Somebody planned this one, so it is drawn
+   * as a track, with a small mark at every corner the planner put in —
+   * a bend with nothing at it looks like a mistake, and a player who
+   * cannot see the corner cannot tell the detour from a wander.
+   */
+  private planned(
+    ink: CanvasRenderingContext2D, port: Viewport,
+    from: WorldPoint, legs: readonly WorldPoint[],
+  ): void {
+    const points = [from, ...legs].map((at) => worldToScreen(this.view, port, at));
+    ink.save();
+    ink.lineWidth = 2;
+    ink.lineJoin = 'round';
+    ink.strokeStyle = 'rgba(255, 216, 130, .62)';
+    ink.beginPath();
+    ink.moveTo(points[0].x, points[0].y);
+    for (const p of points.slice(1)) ink.lineTo(p.x, p.y);
+    ink.stroke();
+    // The corners, but not the ends: she is one and the pin is the
+    // other, and both already have their own mark.
+    for (const p of points.slice(1, -1)) {
+      ink.beginPath();
+      ink.arc(p.x, p.y, 3, 0, Math.PI * 2);
+      ink.fillStyle = 'rgba(255, 216, 130, .62)';
+      ink.fill();
+    }
     ink.restore();
   }
 

@@ -322,8 +322,15 @@ export class Autopilot {
   private closest = Number.POSITIVE_INFINITY;
   private stale = 0;
 
+  /**
+   * The config for the leg being flown — the base, or the base with
+   * this leg's own floor raised. See `engage`.
+   */
+  private leg: AutopilotConfig;
+
   constructor(cfg: AutopilotConfig = AUTOPILOT_DEFAULTS) {
     this.cfg = cfg;
+    this.leg = cfg;
   }
 
   get flying(): NavState { return this.state; }
@@ -337,8 +344,17 @@ export class Autopilot {
    * Takes a bare point rather than a Mission: the autopilot has no
    * business knowing WHY she is going, and a signature that named a
    * Mission would be the first crack in that.
+   *
+   * `floorAgl` IS THE LEG'S, not a new setting. The route planner may
+   * raise a leg to clear something with a top, and this is how that
+   * arrives: a MINIMUM the band search may not look below, for this leg
+   * only. It never picks her altitude — the search still does that,
+   * above the floor. Two systems both entitled to name her height would
+   * fight; one naming a floor and the other choosing over it does not.
    */
-  engage(at: WorldPoint): void {
+  engage(at: WorldPoint, floorAgl?: number): void {
+    this.leg = floorAgl === undefined || floorAgl <= this.cfg.floorAgl
+      ? this.cfg : { ...this.cfg, floorAgl };
     this.target = at;
     this.state = 'acquire';
     this.why = null;
@@ -360,6 +376,7 @@ export class Autopilot {
 
   /** Forget the destination entirely. */
   clear(): void {
+    this.leg = this.cfg;
     this.target = null;
     this.state = 'idle';
     this.why = null;
@@ -457,7 +474,7 @@ export class Autopilot {
     // a headwind, UP in a tailwind — the same arithmetic decides both,
     // which is why this is a search and not "descend when the crab gets
     // big". See `bestBand`.
-    const band = bestBand(sense, wanted, this.cfg);
+    const band = bestBand(sense, wanted, this.leg);
     this.band = band.agl;
     this.crab = band.crab;
 
@@ -482,14 +499,14 @@ export class Autopilot {
 
     // AND THE FLOOR IS NOT NEGOTIABLE. Nothing below 55 cm except a
     // landing, which this phase does not do.
-    if (agl < this.cfg.floorAgl) lift = Math.max(lift, this.cfg.bandUrgency);
+    if (agl < this.leg.floorAgl) lift = Math.max(lift, this.cfg.bandUrgency);
 
     // TERRAIN OUTRANKS THE BAND. A tailwind two metres up is no use if
     // the ground two seconds ahead is three metres up: the lookahead
     // can only ever push the command UP, never hold her down.
-    if (soon !== null && soon.agl < this.cfg.floorAgl) {
+    if (soon !== null && soon.agl < this.leg.floorAgl) {
       lift = Math.max(lift, Math.min(1,
-        (this.cfg.floorAgl - soon.agl) / this.cfg.floorAgl));
+        (this.leg.floorAgl - soon.agl) / this.leg.floorAgl));
     }
 
     const target = speedFor(range, this.cfg);
