@@ -52,6 +52,7 @@ import {
   Autopilot, tookOver, travelling, type NavCommand,
 } from '../ant/autopilot';
 import { MAX_TRAVEL, TravelScale } from '../ant/travelScale';
+import { WaveWatch } from '../ant/waveClearance';
 import { AutopilotChip, type ChipState } from '../ui/AutopilotChip';
 import { AUTOPILOT_DEFAULTS } from '../ant/autopilotConfig';
 import type { Hazard } from '../ant/hazards';
@@ -413,6 +414,14 @@ export class IslandScene {
    * still replaceable by a server's — just measured in her seconds like
    * the rest of her.
    */
+  /**
+   * HOW BIG THE WAVES UNDER HER HAVE BEEN LATELY.
+   *
+   * Sampled on the WORLD's clock, because the sea is not on hers — see
+   * `waveClearance.ts`. Fed the gap between the true water surface and
+   * the damped one she flies against, which IS the crest height.
+   */
+  private readonly waves = new WaveWatch();
   private herMs = 0;
   private readonly grace = new Grace(() => this.herMs);
   /** Seconds the "protection ended" warning still has to run. */
@@ -1341,6 +1350,30 @@ export class IslandScene {
       disarmed: () => this.grace.disarmed,
       ignoredByHostiles: () => this.grace.ignoredByHostiles,
       wings: () => this.winged,
+      /**
+       * Probe only: the SHARED water query — the one the scene itself
+       * flies against, which reports the sea as well as the inland
+       * simulation. `waterDepth` above is the inland sim alone, and a
+       * probe hunting for the ocean with it finds streams.
+       */
+      seaAt: (wx: number, wz: number) => {
+        const spot = waterSpotAt(wx, wz);
+        return spot === null ? null
+          : { depth: spot.depth, salt: spot.salt === true };
+      },
+      /**
+       * Probe only: the crest lately, and the AWL it demands.
+       *
+       * NOT `waves` — that name is already the sea's own visual mode
+       * switch, and two of them in one object literal is a silent
+       * overwrite in JavaScript and a compile error here. Named for
+       * what it is about: the clearance she needs.
+       */
+      seaClear: () => ({
+        crest: this.waves.crest,
+        clearance: this.waves.clearance,
+        floor: this.holdFloor,
+      }),
       /** Probe only: seconds until she can fly again, or null if dry. */
       wingsLeft: () => this.wings.seconds,
       compass: () => {
@@ -1898,6 +1931,11 @@ export class IslandScene {
       // WHAT IS LEFT IN HER, which is a different question from whether
       // the model would let her off the ground. See NavSense.reserve.
       reserve: this.stamina.fraction,
+      // AND WHAT THE WATER IS DOING RIGHT NOW. Zero over dry land; over
+      // the sea, the tallest crest of the last three seconds plus a
+      // metre. The leg's own floor and this one are combined by taking
+      // the larger — see NavSense.minimumAgl.
+      minimumAgl: this.waves.clearance,
       // The DRAWN floor, the one she would land on — water included,
       // the same surface the flight model is given below.
       terrainAt: (wx, wz) => groundHeight(wx, wz) + (waterSpotAt(wx, wz)?.depth ?? 0),
@@ -2143,6 +2181,27 @@ export class IslandScene {
     // simulation rather than after, so anything reading a deadline this
     // frame reads the same instant her physiology is being stepped to.
     this.herMs += plan.budget * 1000;
+
+    // ── HOW HIGH THE SEA IS STANDING ─────────────────────────────
+    // ONCE A FRAME AND ON THE WORLD'S dt, outside the substep loop:
+    // the swell is not on her clock, so three seconds means three of
+    // the world's — about two full periods. Inside the loop it would
+    // sample her boosted time and the window would shrink to a third of
+    // a period, which is the one thing that would make it miss the
+    // crest it exists to find.
+    //
+    // THE MEASUREMENT IS THE GAP, and it needs no wave model: the true
+    // surface under her against the damped one she flies against. That
+    // difference IS the crest, it already carries the shoaling that
+    // grows waves toward the beach, and it cannot fall out of step with
+    // the ocean because it is read from it.
+    const seaHere = waterSpotAt(this.ant.where.wx, this.ant.where.wz);
+    this.waves.see(
+      seaHere === null ? 0
+        : groundHeight(this.ant.where.wx, this.ant.where.wz)
+          + seaHere.depth - this.holdFloor,
+      dt,
+    );
 
     // ── Air or ground ────────────────────────────────────────────
     // Takeoff is offered on ACTUAL speed, never the selected pace:
@@ -3464,7 +3523,16 @@ export class IslandScene {
       ? `${far(nearSea.range)}${nearSea.range < 1 ? '' : ` ${way(nearSea.bearing)}`}`
       : 'none';
 
-    this.waterLine = `WTR fresh ${fresh} ${freshWay} · salt ${salt} ${seaWay}`;
+    // AND WHAT THE SEA IS DEMANDING, in BOTH modes. Joshua asked for
+    // the sampling "(both auto and manual)", and this is the half that
+    // is honest in manual: the autopilot is made to respect the number,
+    // and a player flying by hand is TOLD it. Forcing a hand-flown
+    // queen up would fight the one manoeuvre that has to be allowed to
+    // go down — landing on the water.
+    const crest = this.waves.crest;
+    this.waterLine = `WTR fresh ${fresh} ${freshWay} · salt ${salt} ${seaWay}`
+      + (crest > 0
+        ? ` · crest ${far(crest)} → fly ${far(this.waves.clearance)} AWL` : '');
   }
 
   /**
@@ -3617,6 +3685,11 @@ export class IslandScene {
       + ` · band ${km(nav.band)}/${km(this.flight.height)}`
       + ` crab ${nav.crab >= 0 ? '+' : ''}${nav.crab.toFixed(0)}°`
       + ` · clr ${clear}`
+      // WHAT THE SEA IS ASKING FOR, when it is asking for anything.
+      // Silent over dry land, where the crest is zero and there is
+      // nothing to clear.
+      + (this.waves.clearance > 0
+        ? ` · sea ${km(this.waves.crest)}+1m` : '')
       // HER CLOCK, when it is not the world's. Silent at 1x, because a
       // multiplier that always says "x1.0" is a character of noise on a
       // line that has already been off the side of the screen once.

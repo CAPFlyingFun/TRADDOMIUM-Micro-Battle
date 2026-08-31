@@ -101,6 +101,7 @@ function fly(scale: number, worldDt = 1 / 60): Leg {
         wingsWet: false,
         launchable: true,
         reserve: stamina.fraction,
+        minimumAgl: 0,
         terrainAt: () => GROUND,
         windAt: (h) => ({ x: ALOFT.x * windProfile(h), z: ALOFT.z * windProfile(h) }),
       };

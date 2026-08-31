@@ -146,6 +146,21 @@ export interface NavSense {
    * because they are different questions.
    */
   readonly reserve: number;
+  /**
+   * THE LEAST AGL THE WORLD IS ASKING FOR RIGHT NOW, world units.
+   *
+   * Separate from the leg's own floor, and combined with it by taking
+   * the larger. The leg's floor is a ROUTE decision — how high she must
+   * be to clear the tree the planner found — and it is fixed when the
+   * route is planned. This one is what is under her at this instant:
+   * over the sea it is the tallest crest of the last three seconds plus
+   * a metre, because the surface she flies against is a damped one and
+   * a real wave stands well above it.
+   *
+   * Zero over dry land. The scene owns it because the scene owns the
+   * water; the autopilot only has to respect it.
+   */
+  readonly minimumAgl: number;
   /** The terrain query, so this file needs no heightfield of its own. */
   readonly terrainAt: (wx: number, wz: number) => number;
   /**
@@ -564,13 +579,21 @@ export class Autopilot {
       this.stale = 0;
     }
 
+    // THE FLOOR IS THE HIGHER OF THE TWO, and they are two different
+    // claims. The leg's is the route's — how high to clear what the
+    // planner found. `minimumAgl` is the world's, right now: over the
+    // sea, the crest the water is actually making plus a metre. Neither
+    // one is allowed to talk the other down.
+    const leg = sense.minimumAgl > this.leg.floorAgl
+      ? { ...this.leg, floorAgl: sense.minimumAgl } : this.leg;
+
     // ── WHICH BAND TO FLY ────────────────────────────────────────
     // Priced rather than ruled: every candidate altitude is asked what
     // ground progress it would actually buy, and the best wins. Down in
     // a headwind, UP in a tailwind — the same arithmetic decides both,
     // which is why this is a search and not "descend when the crab gets
     // big". See `bestBand`.
-    const band = bestBand(sense, wanted, this.leg);
+    const band = bestBand(sense, wanted, leg);
     this.band = band.agl;
     this.crab = band.crab;
 
@@ -605,7 +628,7 @@ export class Autopilot {
     // term above already holds her at the floor smoothly; this is the
     // safety net under it, and it should tighten as she sinks rather
     // than slam when she touches.
-    const under = (this.leg.floorAgl - agl) / Math.max(1, this.leg.floorAgl);
+    const under = (leg.floorAgl - agl) / Math.max(1, leg.floorAgl);
     if (under > 0) {
       lift = Math.max(lift, Math.min(1, under) * this.cfg.bandUrgency);
     }
@@ -613,9 +636,9 @@ export class Autopilot {
     // TERRAIN OUTRANKS THE BAND. A tailwind two metres up is no use if
     // the ground two seconds ahead is three metres up: the lookahead
     // can only ever push the command UP, never hold her down.
-    if (soon !== null && soon.agl < this.leg.floorAgl) {
+    if (soon !== null && soon.agl < leg.floorAgl) {
       lift = Math.max(lift, Math.min(1,
-        (this.leg.floorAgl - soon.agl) / this.leg.floorAgl));
+        (leg.floorAgl - soon.agl) / leg.floorAgl));
     }
 
     const target = speedFor(range, this.cfg);

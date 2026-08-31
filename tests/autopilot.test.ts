@@ -54,6 +54,8 @@ function sense(over: Partial<NavSense> = {}): NavSense {
     launchable: true,
     // Fed and rested unless a test is about being neither.
     reserve: 1,
+    // Dry land, so nothing extra to clear.
+    minimumAgl: 0,
     terrainAt: SEA,
     // Still air unless a test says otherwise, at every height.
     windAt: () => null,
