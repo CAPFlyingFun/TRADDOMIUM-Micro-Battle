@@ -281,8 +281,20 @@ export class IslandScene {
   private known: Discovery = emptyDiscovery();
   /** Where the last reveal was centred, so it is not redone every frame. */
   private revealedAt: WorldPoint | null = null;
-  /** Which slot this run writes to. One run, one slot, all sitting. */
-  private readonly slot = newSaveId();
+  /**
+   * Which slot this run writes to. One run, one slot, all sitting.
+   *
+   * IT WAS `readonly` AND THAT MADE THE COMMENT FALSE. A fresh id is
+   * right for a new colony and wrong for a resumed one: `resume()` did
+   * not adopt the id it had just loaded, so every CONTINUE wrote a
+   * SECOND slot for the same colony. `writeSave` keeps the five newest
+   * by `updatedAt` (save.ts), so five sittings with one colony fill
+   * every slot with that colony and evict the others — and CONTINUE
+   * always offers the newest, so nothing on screen would ever have
+   * said so. Latent today because there is one colony and no slot
+   * picker; a data-loss bug the moment either arrives.
+   */
+  private slot = newSaveId();
   /** Simulated seconds lived, carried across sittings by the save. */
   private lived = 0;
   /** Sim seconds since the last autosave. */
@@ -1517,6 +1529,9 @@ export class IslandScene {
    * release that adds growth is not the run that loses it.
    */
   resume(save: SoloSave): void {
+    // THE SLOT COMES WITH IT. Continuing a colony is the same run in a
+    // later sitting, not a new one beside it.
+    this.slot = save.saveId;
     this.savedRegion = save.region;
     this.lived = save.playedSeconds;
     this.elapsed = save.elapsed;

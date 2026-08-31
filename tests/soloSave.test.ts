@@ -16,6 +16,7 @@
  * with it". A blob big enough to fill a phone's localStorage must cost
  * the player a dark map and nothing else.
  */
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   SAVE_VERSION, SLOTS, STORE, dropSave, exportSave, importSave, latestSave,
@@ -277,3 +278,51 @@ function good() {
     elapsed: 100,
   };
 }
+
+/**
+ * ONE COLONY, ONE SLOT, HOWEVER MANY SITTINGS.
+ *
+ * `IslandScene.slot` was `readonly` and minted fresh per scene, and
+ * `resume()` never adopted the id it had just loaded — so every
+ * CONTINUE wrote a SECOND slot for the same colony. Since only the five
+ * newest survive (pinned above), five sittings with one colony filled
+ * every slot with it and evicted the others; and because CONTINUE
+ * always offers the newest, nothing on screen would ever have said so.
+ */
+describe('resuming a colony does not eat the other slots', () => {
+  it('writes back to the id it loaded, so a second colony survives', () => {
+    const s = store();
+    writeSave(s, SNAP, 'lihue', '2026-08-31T00:00:00.000Z');
+    writeSave(s, SNAP, 'napali', '2026-08-31T00:01:00.000Z');
+    // Four more sittings with the newest colony — one over the limit,
+    // which is where the old behaviour lost Nāpali.
+    for (let i = 0; i < 4; i++) {
+      const found = latestSave(s);
+      expect(found).not.toBeNull();
+      writeSave(s, SNAP, found!.saveId, `2026-08-31T01:0${i}:00.000Z`);
+    }
+    expect(listSaves(s).map((save) => save.saveId).sort()).toEqual(['lihue', 'napali']);
+  });
+
+  it('and minting a new id every sitting is what would have lost it', () => {
+    // The old behaviour, written out, so the test above is visibly
+    // about something rather than passing by construction.
+    const s = store();
+    writeSave(s, SNAP, 'lihue', '2026-08-31T00:00:00.000Z');
+    writeSave(s, SNAP, 'napali', '2026-08-31T00:01:00.000Z');
+    for (let i = 0; i < 4; i++) {
+      writeSave(s, SNAP, `fresh-${i}`, `2026-08-31T01:0${i}:00.000Z`);
+    }
+    expect(listSaves(s).map((save) => save.saveId)).not.toContain('lihue');
+  });
+
+  it('and the scene adopts that id when it resumes', () => {
+    // The rule lives in a class that needs a WebGL context, so it is
+    // read off the source, the same way the map's architecture is held.
+    const scene = readFileSync('src/scenes/IslandScene.ts', 'utf8');
+    expect(scene).toContain('this.slot = save.saveId;');
+    // And the field must not go back to being readonly, or the line
+    // above cannot compile and someone will "fix" it by deleting it.
+    expect(scene).not.toContain('private readonly slot');
+  });
+});
