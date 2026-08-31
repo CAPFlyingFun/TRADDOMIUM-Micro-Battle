@@ -53,7 +53,9 @@ import { MAX_TRAVEL, TravelScale } from '../ant/travelScale';
 import { AutopilotChip, type ChipState } from '../ui/AutopilotChip';
 import { AUTOPILOT_DEFAULTS } from '../ant/autopilotConfig';
 import type { Hazard } from '../ant/hazards';
-import { planRoute, routeWords, type RoutePlan } from '../ant/routePlanner';
+import {
+  planChain, planRoute, routeWords, type RoutePlan,
+} from '../ant/routePlanner';
 import {
   DISCOVERY_CELLS, decodeDiscovery, emptyDiscovery, encodeDiscovery,
   fractionSeen, reveal,
@@ -88,7 +90,6 @@ import { LIVE_GROWTH, liveStat } from '../ant/castes';
 import { ActionPad, type Action } from '../input/ActionPad';
 import { Thirst } from '../ant/thirst';
 import { LiftSlider, leverFor } from '../input/LiftSlider';
-import { DebugDie } from '../ui/DebugDie';
 import { WeatherChip } from '../ui/WeatherChip';
 import { FlightHud, windCall, type FlightView } from '../ui/FlightHud';
 import {
@@ -213,7 +214,6 @@ export class IslandScene {
   private readonly thirst = new Thirst();
   /** The drink button. On the pad only where there is water to drink. */
   private drinkButton!: Action;
-  private readonly debugDie: DebugDie;
   private readonly weatherChip: WeatherChip;
   /** Altitude, vertical speed and the wind — flight only. */
   private readonly flightHud: FlightHud;
@@ -314,6 +314,18 @@ export class IslandScene {
   /** The plan the pin turned into, and which leg of it she is flying. */
   private route: RoutePlan | null = null;
   private legAt = 0;
+  /**
+   * THE PLAYER'S OWN WAYPOINTS, still to be visited, last one last.
+   *
+   * Not the same list as the route's legs: these are the taps, and the
+   * legs are what the planner made of them — several per tap where
+   * something had to be gone around. Kept because a survival detour
+   * replaces the destination for a while, and when the primary comes
+   * back the rest of the chain has to come back with it. Without this
+   * a thirsty queen would drink and then fly straight to the end,
+   * skipping every stop the player put in.
+   */
+  private chain: WorldPoint[] = [];
   /** The player took the stick, and has not asked to be flown since. */
   private surrendered = false;
 
@@ -693,7 +705,7 @@ export class IslandScene {
     this.stick = new MoveStick(host);
     this.paceUI = new PaceSelector(host);
     this.look = new LookDrag(host);
-    this.panel = new SettingsPanel(host, true);
+    this.panel = new SettingsPanel(host, true, () => this.kill());
     this.pauseMenu = new PauseMenu(host, {
       resume: () => { this.shroud(false); },
       save: () => this.save(),
@@ -708,7 +720,7 @@ export class IslandScene {
     // rather than being typed here — this is the only place the data
     // file and the HUD meet, and it is a read, not a copy.
     this.actions = new ActionPad(host);
-    this.debugDie = new DebugDie(host, () => this.kill());
+
     this.weatherChip = new WeatherChip(host);
     this.flightHud = new FlightHud(host);
     this.compass = new Compass(host);
@@ -737,7 +749,16 @@ export class IslandScene {
     // for the whole of this constructor. It gets paid here.
     bakeIsland();
     this.mapScreen = new MapScreen(host, {
-      confirm: (at) => this.orderTo(at, 'waypoint'),
+      // THE CHAIN IS THE PLAYER'S; the BRAIN gets only its end.
+      //
+      // `MissionBrain` holds one primary mission and that is the right
+      // shape for it: it answers "where does she need to be", and the
+      // answer to a five-tap route is still its last point. The stops
+      // on the way are a routing decision, so they live with the route.
+      confirm: (chain) => {
+        this.chain = [...chain];
+        this.orderTo(chain[chain.length - 1], 'waypoint');
+      },
       clearMission: () => this.brain.cancel(),
       // Solo halts, multiplayer takes her hands. One decision, made in
       // `shroud`, so the map and the pause menu cannot disagree.
@@ -808,9 +829,7 @@ export class IslandScene {
     setDetailRange();
     setDetailDial(settings().detailRange);
     syncLodUniforms();
-      this.debugDie.show(settings().showFix);
     });
-    this.debugDie.show(settings().showFix);
     // The view is a world bearing, so it has to be told where behind
     // her IS. Without this she opens side-on to her own camera.
     this.look.setYaw(-facing);
@@ -1485,7 +1504,6 @@ export class IslandScene {
     this.actions.dispose();
     this.liftSlider.dispose();
     this.pauseMenu.dispose();
-    this.debugDie.dispose();
     this.weatherChip.dispose();
     this.compass.dispose();
     this.apChip.dispose();
@@ -1722,6 +1740,7 @@ export class IslandScene {
       if (pin === null) {
         this.autopilot.clear();
         this.route = null;
+        this.chain = [];
       } else {
         // ── THE ROUTE ────────────────────────────────────────────
         // A destination is not a leg. The planner turns the one into
@@ -1734,9 +1753,23 @@ export class IslandScene {
         // PLANNED ONCE, at the order. Re-planning every frame would
         // mean a route that changed under her as she flew it, and a
         // plan that cannot be shown to the player is not a plan.
-        this.route = planRoute(
-          this.ant.where, pin, this.hazards, AUTOPILOT_DEFAULTS.floorAgl,
-        );
+        //
+        // THROUGH THE CHAIN when this pin is the chain's own end, and
+        // straight there when it is not. The second case is a survival
+        // detour: the brain has decided she needs a drink first, and a
+        // route to the puddle by way of three waypoints she chose for
+        // the trip afterwards would be an autopilot arguing with a
+        // thirsty queen. The chain survives it and comes back when the
+        // primary does.
+        const last = this.chain.length > 0
+          ? this.chain[this.chain.length - 1] : null;
+        this.route = pin === last
+          ? planChain(
+            this.ant.where, this.chain, this.hazards, AUTOPILOT_DEFAULTS.floorAgl,
+          )
+          : planRoute(
+            this.ant.where, pin, this.hazards, AUTOPILOT_DEFAULTS.floorAgl,
+          );
         this.legAt = 0;
         const leg = this.route.legs[0];
         this.autopilot.engage(leg.to, leg.floorAgl);
@@ -1840,6 +1873,16 @@ export class IslandScene {
     // the player was never shown.
     if (this.nav.state === 'hold' && this.route !== null
       && this.legAt < this.route.legs.length - 1) {
+      // A LEG THE PLAYER PUT IN IS A STOP MADE. `detour` false means
+      // this leg ended on one of their own taps rather than on a corner
+      // the planner inserted, so the chain has one fewer place to go —
+      // and a re-plan after a survival detour starts from what is left
+      // rather than from the whole trip again.
+      const done = this.route.legs[this.legAt];
+      if (!done.detour && this.chain.length > 1
+        && this.chain[0] === done.to) {
+        this.chain.shift();
+      }
       this.legAt++;
       const leg = this.route.legs[this.legAt];
       this.autopilot.engage(leg.to, leg.floorAgl);

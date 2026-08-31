@@ -212,6 +212,10 @@ try {
   // where the last queen died.
   let lastSpawnedAt = grace.record.spawnedAt;
   for (let round = 1; round <= 3; round++) {
+    // BEHIND THE GEAR NOW. Ending the run moved into the settings panel
+    // in v0.0.141 — it is scaffolding, and the playing surface is not
+    // where a control that cannot be undone belongs.
+    await page.click('[data-ui="settings"]');
     await page.click('[data-ui="debug-die"]');
     await page.waitForSelector('[data-ui="death"]', { timeout: 20000 });
     await page.click('[data-ui="choose-new-start"]');

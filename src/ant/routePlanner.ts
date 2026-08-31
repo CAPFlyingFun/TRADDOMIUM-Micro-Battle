@@ -453,6 +453,66 @@ export function planRoute(
 }
 
 /**
+ * PLAN A CHAIN, not a single destination.
+ *
+ * Joshua, 2026-08-31: "add more than 1 waypoint as a tap/spline with
+ * the last point always the destination." So the player's route is a
+ * list, and this plans each leg of it in turn and joins the results
+ * into one list the autopilot can fly without knowing any of it
+ * happened.
+ *
+ * SEGMENT BY SEGMENT rather than as one search, and that is a real
+ * decision. A single search over the whole chain could find a shorter
+ * total path by cutting a corner the player put in — and the corner is
+ * the point. They tapped it. `planRoute` never reorders a destination
+ * and this never skips one.
+ *
+ * EACH SEGMENT STARTS WHERE THE LAST ONE ENDED, including when the last
+ * one ended somewhere it was moved to: a waypoint dropped inside a
+ * no-go is nudged out, and the following leg has to depart from where
+ * she will actually be rather than from where the thumb landed.
+ */
+export function planChain(
+  from: WorldPoint,
+  chain: readonly WorldPoint[],
+  hazards: readonly Hazard[],
+  baseFloor: number,
+  cfg: RouteConfig = ROUTE_DEFAULTS,
+): RoutePlan {
+  if (chain.length === 0) {
+    return { legs: [], report: NOTHING };
+  }
+  const legs: RouteLeg[] = [];
+  let at = from;
+  let avoided = 0;
+  let detours = 0;
+  let raised = 0;
+  let moved = false;
+  let blocked = false;
+  for (const stop of chain) {
+    const part = planRoute(at, stop, hazards, baseFloor, cfg);
+    legs.push(...part.legs);
+    avoided += part.report.avoided;
+    detours += part.report.detours;
+    raised += part.report.raised;
+    moved = moved || part.report.moved;
+    blocked = blocked || part.report.blocked;
+    at = part.legs[part.legs.length - 1].to;
+  }
+  return {
+    legs,
+    report: {
+      avoided,
+      detours,
+      raised,
+      moved,
+      blocked,
+      changed: detours > 0 || raised > 0 || moved || blocked,
+    },
+  };
+}
+
+/**
  * The plan in one line, for the map and the developer register.
  *
  * Empty when the planner did nothing, because a line that says "changed

@@ -41,8 +41,40 @@ import { mapToWorld, worldToMap } from './islandMap';
 import { world, type WorldPoint } from '../world/coords';
 import { ISLAND_SPAN } from '../world/heightfield';
 
-/** Zoom steps. 1 fits the whole island in the viewport. */
-export const ZOOM_STEPS: readonly number[] = [1, 2, 4];
+/**
+ * Zoom steps. 1 fits the whole island in the viewport.
+ *
+ * IT USED TO STOP AT 4, and that was a map for looking at Kauaʻi rather
+ * than at a queen. The island is 56 km across and she is 1.4 cm long:
+ * at 4x the short side of a phone holds 14 km, so a 200-metre route —
+ * a long flight, several minutes of hers — is six pixels, and a route
+ * that BENDS around something is sub-pixel. Joshua, on the first frame
+ * of the planner drawn on the map: "I was going to suggest we make zoom
+ * in more."
+ *
+ * Doubling all the way to 128 puts about 440 m across the glass, which
+ * is the scale her own decisions happen at. Every step is a doubling so
+ * the button always means the same thing.
+ *
+ * PAST 16 THE PICTURE IS MAGNIFIED BEYOND ITS SOURCE. The baked relief
+ * is 1024 px for 56 km — 54.7 m a pixel — so from there on the ground
+ * is enlarged rather than resolved, and `MapScreen` stops smoothing it
+ * so it reads as the coarse data it is instead of as mush.
+ */
+export const ZOOM_STEPS: readonly number[] = [1, 2, 4, 8, 16, 32, 64, 128];
+
+/**
+ * The zoom at which the island picture runs out of detail.
+ *
+ * `RELIEF_SIZE` is 1024 and the map draws the island at
+ * `min(port) * zoom` pixels, so on a 430-px short side the picture is
+ * being enlarged from about 2.4x upward — but it holds up until the
+ * step where one source pixel covers several screen ones. Sixteen is
+ * that step on a phone, and it is a display decision rather than a
+ * transform one, which is why it is a threshold here and a
+ * `imageSmoothingEnabled` somewhere else.
+ */
+export const HONEST_ZOOM = 16;
 
 /**
  * How far a thumb must travel before it is panning rather than tapping.

@@ -52,8 +52,8 @@ describe('a preview is not a mission', () => {
   it('and FLY HERE is the only thing that can be pressed to commit one', () => {
     // canFly gates the button on a preview EXISTING. No preview, no
     // confirm, so there is no path from an empty map to a mission.
-    expect(canFly(null)).toBe(false);
-    expect(canFly(THERE)).toBe(true);
+    expect(canFly([])).toBe(false);
+    expect(canFly([THERE])).toBe(true);
   });
 });
 
@@ -119,16 +119,16 @@ describe('the player pin and a survival detour stay separate', () => {
 
 describe('CLEAR takes the one thing it says it will', () => {
   it('prefers the preview while there is one', () => {
-    expect(clearTarget(THERE, null)).toBe('preview');
-    expect(clearTarget(THERE, ELSEWHERE)).toBe('preview');
+    expect(clearTarget([THERE], null)).toBe('preview');
+    expect(clearTarget([THERE], ELSEWHERE)).toBe('preview');
   });
 
   it('falls to the mission only when no preview is held', () => {
-    expect(clearTarget(null, ELSEWHERE)).toBe('mission');
+    expect(clearTarget([], ELSEWHERE)).toBe('mission');
   });
 
   it('and does nothing at all when there is neither', () => {
-    expect(clearTarget(null, null)).toBe('none');
+    expect(clearTarget([], null)).toBe('none');
   });
 
   it('cancelling the mission leaves the meters alone', () => {

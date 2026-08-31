@@ -115,7 +115,26 @@ export class SettingsPanel {
     this.taken = run;
   }
 
-  constructor(host: HTMLElement, private readonly inGame = false) {
+  constructor(
+    host: HTMLElement,
+    private readonly inGame = false,
+    /**
+     * END THE RUN — in here rather than on the HUD.
+     *
+     * It was a floating ☠ DIE button under the settings gear, riding
+     * with the developer overlay. Joshua, 2026-08-31: "move the DIE in
+     * settings since it's not needed on the main game."
+     *
+     * He is right, and the button's own comment already argued for it:
+     * it is scaffolding, the top-right corner should be the game's own
+     * furniture, and a control that ends the run has no business one
+     * tap deep on the playing surface. Behind the gear it is two
+     * deliberate taps, which is the right price for it.
+     *
+     * Omitted outside a run, where there is nothing to end.
+     */
+    private readonly onDie?: () => void,
+  ) {
     this.gear = document.createElement('button');
     this.panel = document.createElement('div');
     this.build();
@@ -220,6 +239,7 @@ export class SettingsPanel {
     for (const toggle of TOGGLES) this.panel.appendChild(this.buildToggle(toggle));
     this.panel.appendChild(this.buildUpdate());
     this.panel.appendChild(this.buildReset());
+    if (this.onDie) this.panel.appendChild(this.buildDie());
     this.panel.appendChild(this.buildStampLine());
   }
 
@@ -478,6 +498,40 @@ export class SettingsPanel {
     this.claim(button, () => {
       reset();
       for (const paint of this.redraw) paint();
+    });
+    return button;
+  }
+
+  /**
+   * END THE RUN, at the bottom and dressed as scaffolding.
+   *
+   * A dashed border and a muted red, the same clothes it wore on the
+   * HUD: it should read as a test tool rather than as a mechanic, so
+   * nobody mistakes it for one when the real ways to die arrive. It is
+   * last in the panel because it is the only control in here that
+   * cannot be undone.
+   */
+  private buildDie(): HTMLElement {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.dataset.ui = 'debug-die';
+    button.textContent = '☠ End this run';
+    button.setAttribute('aria-label', 'debug: die');
+    Object.assign(button.style, {
+      appearance: 'none',
+      marginTop: '2px',
+      border: '1px dashed rgba(255, 140, 120, .65)',
+      borderRadius: '7px',
+      padding: '6px',
+      background: 'rgba(60, 18, 14, .5)',
+      color: 'rgba(255, 170, 150, .9)',
+      font: 'inherit',
+      cursor: 'pointer',
+      touchAction: 'none',
+    } as Partial<CSSStyleDeclaration>);
+    this.claim(button, () => {
+      this.show(false);
+      this.onDie?.();
     });
     return button;
   }

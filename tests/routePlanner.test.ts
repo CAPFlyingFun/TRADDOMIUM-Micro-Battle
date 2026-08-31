@@ -15,8 +15,8 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { clearable, ringAround, topFor, type Hazard } from '../src/ant/hazards';
 import {
-  ROUTE_DEFAULTS, entersRing, inside, planRoute, pushOut, routeAround,
-  routeWords, type RouteLeg,
+  ROUTE_DEFAULTS, entersRing, inside, planChain, planRoute, pushOut,
+  routeAround, routeWords, type RouteLeg,
 } from '../src/ant/routePlanner';
 import { world, type WorldPoint } from '../src/world/coords';
 
@@ -498,8 +498,30 @@ describe('the scene flies the plan', () => {
   it('turns the destination into a route when the order arrives', () => {
     const fly = scene.slice(scene.indexOf('private flyMyself'));
     const order = fly.indexOf('if (pin !== this.flownTo) {');
-    expect(fly.slice(order, order + 1800)).toContain('this.route = planRoute(');
-    expect(fly.slice(order, order + 1800)).toContain('this.autopilot.engage(leg.to, leg.floorAgl)');
+    const block = fly.slice(order, order + 2600);
+    expect(block).toContain('planChain(');
+    expect(block).toContain('planRoute(');
+    expect(block).toContain('this.autopilot.engage(leg.to, leg.floorAgl)');
+  });
+
+  it('and plans through the CHAIN only when the pin is its end', () => {
+    // The other case is a survival detour: the brain has decided she
+    // needs a drink first, and a route to the puddle by way of three
+    // waypoints chosen for the trip afterwards would be an autopilot
+    // arguing with a thirsty queen.
+    const fly = scene.slice(scene.indexOf('private flyMyself'));
+    expect(fly).toContain('this.route = pin === last');
+    expect(fly).toContain('? planChain(');
+    expect(fly).toContain(': planRoute(');
+  });
+
+  it('and drops a stop from the chain once she has made it', () => {
+    // `detour` false means the leg ended on one of the player's own
+    // taps rather than on a corner the planner inserted. Without this,
+    // a re-plan after a detour would fly the whole trip again.
+    const fly = scene.slice(scene.indexOf('private flyMyself'));
+    expect(fly).toContain('if (!done.detour && this.chain.length > 1');
+    expect(fly).toContain('this.chain.shift();');
   });
 
   it('and plans ONCE, at the order, not every frame', () => {
@@ -560,5 +582,56 @@ describe('the autopilot takes the leg\'s floor with the leg', () => {
     expect(src).toContain('floorAgl <= this.cfg.floorAgl');
     const clear = src.slice(src.indexOf('clear(): void {'));
     expect(clear.slice(0, 200)).toContain('this.leg = this.cfg;');
+  });
+});
+
+describe('planning a chain', () => {
+  it('visits every tap, in the order they were tapped', () => {
+    const stops = [world(30_000, 0), world(30_000, 30_000), world(60_000, 30_000)];
+    const plan = planChain(HER, stops, [], BASE, CFG);
+    const mine = plan.legs.filter((l) => !l.detour).map((l) => l.to);
+    expect(mine).toEqual(stops);
+  });
+
+  it('and does NOT reorder them, however much shorter that would be', () => {
+    // THE CORNER IS THE POINT. They tapped it. A single search over the
+    // whole chain could find a shorter total path by cutting one out,
+    // and it would be answering a question nobody asked.
+    const doubled = [world(80_000, 0), world(10_000, 0), world(80_000, 0)];
+    const plan = planChain(HER, doubled, [], BASE, CFG);
+    expect(plan.legs.map((l) => l.to)).toEqual(doubled);
+  });
+
+  it('and each leg starts where the last one actually ENDED', () => {
+    // Including when that is not where the thumb landed: a waypoint
+    // dropped inside a no-go is nudged out, and the leg after it has to
+    // depart from where she will really be.
+    const zone = hazard({ at: world(30_000, 0), radius: 5_000, top: null });
+    const stops = [world(30_000, 0), world(90_000, 0)];
+    const plan = planChain(HER, stops, [zone], BASE, CFG);
+    expect(plan.report.moved).toBe(true);
+    const first = plan.legs.filter((l) => !l.detour)[0].to;
+    expect(first).not.toEqual(stops[0]);
+    expect(touches(plan.legs, zone)).toBe(false);
+  });
+
+  it('and sums what it did to the whole thing', () => {
+    const zone = hazard({ at: world(45_000, 0), radius: 5_000, top: null });
+    const stops = [world(30_000, 0), world(60_000, 0)];
+    const plan = planChain(HER, stops, [zone], BASE, CFG);
+    expect(plan.report.avoided).toBeGreaterThan(0);
+    expect(plan.report.changed).toBe(true);
+  });
+
+  it('and an empty chain is no legs at all, rather than a leg to nowhere', () => {
+    const plan = planChain(HER, [], [], BASE, CFG);
+    expect(plan.legs).toEqual([]);
+    expect(plan.report.changed).toBe(false);
+  });
+
+  it('and one stop is exactly the single destination it always was', () => {
+    const only = [world(70_000, 20_000)];
+    expect(planChain(HER, only, [], BASE, CFG))
+      .toEqual(planRoute(HER, only[0], [], BASE, CFG));
   });
 });

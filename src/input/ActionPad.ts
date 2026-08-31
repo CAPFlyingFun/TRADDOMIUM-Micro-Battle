@@ -100,16 +100,34 @@ export class ActionPad {
     this.pad.dataset.ui = 'actions';
     Object.assign(this.pad.style, {
       position: 'fixed',
-      right: 'calc(14px + min(env(safe-area-inset-right), 14px))',
-      // ABOVE THE LIFT LEVER, which owns the bottom of this column
-      // now that climb and descend are no longer buttons. Left where
-      // it was, the remaining actions drew straight through it.
-      bottom: 'calc(198px + min(env(safe-area-inset-bottom), 12px))',
+      // BESIDE THE LIFT LEVER, NOT ABOVE IT.
+      //
+      // It used to stack UPWARD from just over the lever, which put the
+      // top of the column straight under the minimap — and the minimap
+      // is drawn later and wins. Joshua, 2026-08-31: "water is
+      // underneath the mini map, so need to move it not hidden like
+      // bottom to the left or right of the up/down slider depending on
+      // room." There is no room to its right: the lever is already 14
+      // px off the edge. So the column moves LEFT of it and shares its
+      // baseline, where it grows into 168 px of clear glass instead of
+      // into the map.
+      //
+      // 84 = the lever's own 14 px inset, its 58 px width, and 12 px
+      // between the two. Written out rather than left as a number
+      // because the moment the lever changes width this is wrong.
+      right: 'calc(84px + min(env(safe-area-inset-right), 14px))',
+      bottom: 'calc(18px + min(env(safe-area-inset-bottom), 12px))',
       display: 'flex',
       flexDirection: 'column-reverse',
       gap: '10px',
       alignItems: 'center',
-      zIndex: '12',
+      // ABOVE THE MINIMAP (14), and that is the belt to the braces. The
+      // column no longer reaches it — three actions stacked from this
+      // baseline stop well short — but a fourth one would, and the rule
+      // when a control and a panel want the same pixels is that the
+      // control wins. A button you cannot see is a button that does not
+      // exist, which is exactly what Joshua reported.
+      zIndex: '15',
     } as Partial<CSSStyleDeclaration>);
     host.appendChild(this.pad);
   }

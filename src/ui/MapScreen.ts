@@ -79,8 +79,8 @@ function islandPicture(): HTMLCanvasElement {
 }
 import type { Discovery } from '../game/discovery';
 import {
-  ZOOM_STEPS, initialView, isDrag, islandOrigin, islandPixels, panBy,
-  recentre, screenToWorld, worldToScreen, zoomBy,
+  HONEST_ZOOM, ZOOM_STEPS, initialView, isDrag, islandOrigin, islandPixels,
+  panBy, recentre, screenToWorld, worldToScreen, zoomBy, zoomFactor,
   type MapMarks, type MapView, type Viewport,
 } from './mapView';
 import {
@@ -108,6 +108,7 @@ const WARM = 'rgba(255, 236, 200, .92)';
  */
 const DIRECT = 'Direct line — not a planned route.';
 const ROUTED = 'Planned route — around what she cannot fly over.';
+const CHAINED = 'Tap to add a stop. The last one is the destination.';
 /** The dark liner every marker carries, so gold survives gold sand. */
 const LINER = '#0b1018';
 
@@ -122,8 +123,15 @@ const LINER = '#0b1018';
 const TAP = 44;
 
 export interface MapScreenHooks {
-  /** FLY HERE. The scene turns this into a MissionBrain order. */
-  readonly confirm: (at: WorldPoint) => void;
+  /**
+   * FLY HERE. The scene turns this into a MissionBrain order.
+   *
+   * A CHAIN, in tap order, with the LAST point the destination.
+   * Everything before it is somewhere she goes on the way. It was a
+   * single point until v0.0.141; a one-element array is exactly the
+   * same order it always was.
+   */
+  readonly confirm: (chain: readonly WorldPoint[]) => void;
   /** CLEAR, when an active mission is being cancelled rather than a preview. */
   readonly clearMission: () => void;
   /** Opened / closed, so the scene can neutralise the player in multiplayer. */
@@ -144,9 +152,9 @@ export type ClearTarget = 'preview' | 'mission' | 'none';
  * destructive action hiding behind a harmless one.
  */
 export function clearTarget(
-  preview: WorldPoint | null, primary: WorldPoint | null,
+  draft: readonly WorldPoint[], primary: WorldPoint | null,
 ): ClearTarget {
-  if (preview) return 'preview';
+  if (draft.length > 0) return 'preview';
   if (primary) return 'mission';
   return 'none';
 }
@@ -157,8 +165,11 @@ export function clearTarget(
  * A button labelled only "CLEAR" beside two pins is a coin toss, and
  * the losing side of that toss cancels a mission the player wanted.
  */
-export function clearWords(target: ClearTarget): string {
-  if (target === 'preview') return 'CLEAR PIN';
+export function clearWords(target: ClearTarget, drafted = 1): string {
+  // ONE TAP UNDONE AT A TIME once there is a chain, because a route
+  // built by five taps that four of them cannot undo is a route the
+  // player has to start again to fix.
+  if (target === 'preview') return drafted > 1 ? 'UNDO PIN' : 'CLEAR PIN';
   if (target === 'mission') return 'CANCEL MISSION';
   return 'CLEAR';
 }
@@ -173,9 +184,9 @@ export function clearWords(target: ClearTarget): string {
  * back a NaN which would sail into `MissionBrain.order` and sit there
  * as a destination that can never be arrived at.
  */
-export function canFly(preview: WorldPoint | null): preview is WorldPoint {
-  return preview !== null
-    && Number.isFinite(preview.wx) && Number.isFinite(preview.wz);
+export function canFly(draft: readonly WorldPoint[]): boolean {
+  return draft.length > 0
+    && draft.every((at) => Number.isFinite(at.wx) && Number.isFinite(at.wz));
 }
 
 /** A compass bearing as the readout prints it: `NE 041°`. */
@@ -195,11 +206,13 @@ export interface Readout {
   readonly range: string;
   /** Compass bearing from her to it. */
   readonly bearing: string;
+  /** How many waypoints the draft holds, when it holds more than one. */
+  readonly stops: number;
 }
 
 /** What the sheet says when there is nowhere to say anything about. */
 export const NOWHERE: Readout = {
-  label: 'NO DESTINATION', range: '—', bearing: '—',
+  label: 'NO DESTINATION', range: '—', bearing: '—', stops: 0,
 };
 
 /**
@@ -219,19 +232,26 @@ export const NOWHERE: Readout = {
  */
 export function readout(
   from: WorldPoint | null,
-  preview: WorldPoint | null,
+  draft: readonly WorldPoint[],
   primary: WorldPoint | null,
 ): Readout {
-  const to = preview ?? primary;
+  // THE LAST TAP IS THE DESTINATION. Joshua, 2026-08-31: "add more than
+  // 1 waypoint as a tap/spline with the last point always the
+  // destination." Everything before it is somewhere she goes on the
+  // way, so the numbers beside FLY describe the END of the chain — that
+  // is what the press commits her to arriving at.
+  const stops = draft.length;
+  const to = stops > 0 ? draft[stops - 1] : primary;
   if (!to) return NOWHERE;
-  const label = preview ? 'PREVIEW' : 'MISSION';
-  if (!from) return { label, range: '—', bearing: '—' };
+  const label = stops > 0 ? 'PREVIEW' : 'MISSION';
+  if (!from) return { label, range: '—', bearing: '—', stops };
   const gap = apart(from, to);
-  if (!Number.isFinite(gap)) return { label, range: '—', bearing: '—' };
+  if (!Number.isFinite(gap)) return { label, range: '—', bearing: '—', stops };
   return {
     label,
     range: rangeWords(gap),
     bearing: degreeWords(bearingTo(from, to)),
+    stops,
   };
 }
 
@@ -256,7 +276,18 @@ export class MapScreen {
   private view: MapView = initialView(world(0, 0));
   private marks: MapMarks | null = null;
   private known: Discovery | null = null;
-  private preview: WorldPoint | null = null;
+  /**
+   * THE CHAIN BEING BUILT, in the order it was tapped.
+   *
+   * It was a single `preview` point: one tap, one destination. Joshua,
+   * 2026-08-31: "Ability to add more than 1 waypoint as a tap/spline
+   * with the last point always the destination."
+   *
+   * So a tap APPENDS rather than replaces, and the last one is where
+   * she is going; everything before it is somewhere she goes on the
+   * way. Uncommitted until FLY — a chain of rings is still a thought.
+   */
+  private draft: WorldPoint[] = [];
 
   /** The single pointer this screen is following, if any. */
   private pointerId: number | null = null;
@@ -509,7 +540,7 @@ export class MapScreen {
     // the scene to neutralise a player it already neutralised.
     if (!this.shown) {
       this.shown = true;
-      this.preview = null;
+      this.draft = [];
       this.view = initialView(marks.at);
       this.root.style.display = 'flex';
       this.hooks.onToggle(true);
@@ -520,7 +551,7 @@ export class MapScreen {
   close(): void {
     if (!this.shown) return;
     this.shown = false;
-    this.preview = null;
+    this.draft = [];
     this.pointerId = null;
     this.panned = false;
     this.root.style.display = 'none';
@@ -576,19 +607,23 @@ export class MapScreen {
    * truth and overwrites it either way.
    */
   private commit(): void {
-    const at = this.preview;
-    if (!canFly(at)) return;
-    this.hooks.confirm(at);
-    if (this.marks) this.marks = { ...this.marks, primary: at };
-    this.preview = null;
+    if (!canFly(this.draft)) return;
+    const chain = [...this.draft];
+    this.hooks.confirm(chain);
+    if (this.marks) {
+      this.marks = { ...this.marks, primary: chain[chain.length - 1] };
+    }
+    this.draft = [];
     this.refresh();
   }
 
   /** CLEAR, acting on whichever pin its own label named. */
   private wipe(): void {
-    const target = clearTarget(this.preview, this.marks?.primary ?? null);
+    const target = clearTarget(this.draft, this.marks?.primary ?? null);
     if (target === 'preview') {
-      this.preview = null;
+      // The LAST tap, not all of them. A five-tap route that only
+      // starting again can correct is a route nobody edits.
+      this.draft.pop();
     } else if (target === 'mission') {
       this.hooks.clearMission();
       if (this.marks) this.marks = { ...this.marks, primary: null };
@@ -646,9 +681,11 @@ export class MapScreen {
     // Fog is not a wall. Undiscovered ground is tappable, because
     // flying somewhere she has never been is the whole point of having
     // a discovery map at all.
-    this.preview = screenToWorld(
+    // APPEND. Each tap is another waypoint and the last is where she is
+    // going — see `draft`.
+    this.draft.push(screenToWorld(
       this.view, this.port(), e.clientX - box.left, e.clientY - box.top,
-    );
+    ));
     this.refresh();
   }
 
@@ -672,16 +709,19 @@ export class MapScreen {
   private refresh(): void {
     const from = this.marks?.at ?? null;
     const primary = this.marks?.primary ?? null;
-    const said = readout(from, this.preview, primary);
-    this.destination.textContent = said.label;
+    const said = readout(from, this.draft, primary);
+    this.destination.textContent = said.stops > 1
+      // A chain is not one pin, and the label is the only place on the
+      // sheet that can say so before it is flown.
+      ? `PREVIEW · ${said.stops} STOPS` : said.label;
     this.figures.textContent = `${said.range}   ${said.bearing}`;
     this.caption.style.visibility =
-      this.preview || primary ? 'visible' : 'hidden';
+      this.draft.length > 0 || primary ? 'visible' : 'hidden';
 
-    const target = clearTarget(this.preview, primary);
-    this.clear.textContent = clearWords(target);
+    const target = clearTarget(this.draft, primary);
+    this.clear.textContent = clearWords(target, this.draft.length);
     this.able(this.clear, target !== 'none');
-    this.able(this.fly, canFly(this.preview));
+    this.able(this.fly, canFly(this.draft));
     this.able(this.tighter, this.view.zoom > 0);
     this.able(this.wider, this.view.zoom < ZOOM_STEPS.length - 1);
     this.able(this.centring, this.marks !== null);
@@ -717,19 +757,33 @@ export class MapScreen {
     // its corner lands, and this draws it there.
     const size = islandPixels(this.view, port);
     const at = islandOrigin(this.view, port);
+    // PAST THE PICTURE'S OWN RESOLUTION, STOP PRETENDING. The relief is
+    // baked at 1024 px for 56 km, so deep in, a screen pixel is a
+    // fraction of a source one and smoothing turns the island into
+    // coloured fog that looks like detail. Nearest-neighbour reads as
+    // the coarse survey it is — and the reason to be down there is the
+    // route and the pin, not the ground.
+    ink.imageSmoothingEnabled = zoomFactor(this.view) < HONEST_ZOOM;
     ink.drawImage(islandPicture(), at.x, at.y, size, size);
     const fog = this.fog();
     if (fog) ink.drawImage(fog, at.x, at.y, size, size);
 
     const marks = this.marks;
     const primary = marks?.primary ?? null;
-    const focus = this.preview ?? primary;
+    const focus = this.draft.length > 0
+      ? this.draft[this.draft.length - 1] : primary;
 
     // A PLANNED ROUTE REPLACES THE REFERENCE LINE, because they are
     // different claims: the dashed line is "that way", and a route is
     // "this is the way I am going". Drawing both would be the map
     // arguing with itself.
-    if (marks?.route && marks.route.length > 1) {
+    // A DRAFT CHAIN OUTRANKS BOTH. It is what FLY would commit her to,
+    // so it is what the map has to be about — the same rule the readout
+    // and CLEAR already follow.
+    if (marks && this.draft.length > 0) {
+      this.proposal(ink, port, marks.at, this.draft);
+      this.say(this.draft.length > 1 ? CHAINED : DIRECT);
+    } else if (marks?.route && marks.route.length > 1) {
       this.planned(ink, port, marks.at, marks.route);
       this.say(ROUTED);
     } else if (marks && focus) {
@@ -737,7 +791,6 @@ export class MapScreen {
       this.say(DIRECT);
     }
     if (primary) this.active(ink, port, primary);
-    if (this.preview) this.proposal(ink, port, this.preview);
     if (marks) this.queen(ink, port, marks);
   }
 
@@ -877,19 +930,53 @@ export class MapScreen {
    * in sunlight.
    */
   private proposal(
-    ink: CanvasRenderingContext2D, port: Viewport, at: WorldPoint,
+    ink: CanvasRenderingContext2D, port: Viewport, from: WorldPoint,
+    draft: readonly WorldPoint[],
   ): void {
-    const p = worldToScreen(this.view, port, at);
+    const points = draft.map((at) => worldToScreen(this.view, port, at));
+    const her = worldToScreen(this.view, port, from);
+
+    // THE ORDER SHE WOULD FLY THEM IN, dashed because none of it is
+    // committed yet — the same language the reference line uses, for
+    // the same reason. It becomes a solid track when the planner has
+    // been through it.
+    ink.save();
+    ink.setLineDash([7, 7]);
+    ink.lineWidth = 2;
+    ink.lineJoin = 'round';
+    ink.strokeStyle = 'rgba(255, 216, 130, .42)';
     ink.beginPath();
-    ink.arc(p.x, p.y, 12, 0, Math.PI * 2);
-    ink.lineWidth = 1.5;
-    ink.strokeStyle = 'rgba(11, 16, 24, .75)';
+    ink.moveTo(her.x, her.y);
+    for (const p of points) ink.lineTo(p.x, p.y);
     ink.stroke();
-    ink.beginPath();
-    ink.arc(p.x, p.y, 10, 0, Math.PI * 2);
-    ink.lineWidth = 3;
-    ink.strokeStyle = GOLD;
-    ink.stroke();
+    ink.restore();
+
+    points.forEach((p, i) => {
+      // THE LAST ONE IS THE DESTINATION and the rest are stops on the
+      // way, so the last one is drawn heavier. A chain whose end looks
+      // like its middle is a chain nobody can read the direction of.
+      const last = i === points.length - 1;
+      const r = last ? 10 : 7;
+      ink.beginPath();
+      ink.arc(p.x, p.y, r + 2, 0, Math.PI * 2);
+      ink.lineWidth = 1.5;
+      ink.strokeStyle = 'rgba(11, 16, 24, .75)';
+      ink.stroke();
+      ink.beginPath();
+      ink.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ink.lineWidth = last ? 3 : 2;
+      ink.strokeStyle = GOLD;
+      ink.stroke();
+      // Numbered only when there is an order to read. One ring needs no
+      // "1" on it.
+      if (points.length > 1) {
+        ink.font = '700 9px ui-monospace, monospace';
+        ink.textAlign = 'center';
+        ink.textBaseline = 'middle';
+        ink.fillStyle = GOLD;
+        ink.fillText(`${i + 1}`, p.x, p.y);
+      }
+    });
   }
 
   /** Her, pointing the way she is going. */

@@ -1,7 +1,7 @@
 {
   "name": "traddomium-micro-battle",
   "private": true,
-  "version": "0.0.140",
+  "version": "0.0.141",
   "type": "module",
   "scripts": {
     "probe:waterlab": "node scripts/probe-waterlab.mjs",
@@ -50,7 +50,8 @@
     "probe:map": "node scripts/probe-map.mjs",
     "probe:autopilot": "node scripts/probe-autopilot.mjs",
     "probe:travel": "node scripts/probe-travel.mjs",
-    "probe:route": "node scripts/probe-route.mjs"
+    "probe:route": "node scripts/probe-route.mjs",
+    "probe:chain": "node scripts/probe-chain.mjs"
   },
   "dependencies": {
     "three": "^0.180.0"
