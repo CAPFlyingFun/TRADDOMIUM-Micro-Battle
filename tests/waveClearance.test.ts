@@ -169,3 +169,17 @@ describe('and a hand-flown queen is told, not pushed', () => {
     expect(scene).toContain('crest > 0');
   });
 });
+
+describe('and the takeoff aims at the safe height too', () => {
+  it('climbs to the wave clearance when it is higher than a metre', () => {
+    // THE TIGHTEST MOMENT OF A SEA CROSSING IS THE LIFT, and it has to
+    // be: she starts on the surface. Measured at 16 cm over a crest
+    // before this. She reached the safe height either way — the band
+    // search takes over the moment the climb ends — but the takeoff is
+    // the part actually inside the wave zone, so it should be aiming
+    // there rather than arriving afterwards.
+    const src = readFileSync('src/ant/autopilot.ts', 'utf8');
+    expect(src).toContain('const upTo = Math.max(this.cfg.launchAgl, sense.minimumAgl);');
+    expect(src).toContain('if (climbed < upTo)');
+  });
+});

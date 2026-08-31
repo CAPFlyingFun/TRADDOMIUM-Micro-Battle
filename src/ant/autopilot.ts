@@ -558,8 +558,16 @@ export class Autopilot {
     // while still inside the surf she is leaving.
     if (this.state === 'takeoff') {
       const climbed = Math.max(0, sense.altitude - sense.ground);
-      if (climbed < this.cfg.launchAgl) {
-        this.band = this.cfg.launchAgl;
+      // AND OVER WATER IT CLIMBS TO WHAT THE WAVES DEMAND, not to a
+      // flat metre. She would have got there anyway — the band search
+      // takes over the moment the climb ends — but the takeoff is the
+      // part of the flight that is genuinely inside the wave zone, so
+      // it should be aiming at the safe height rather than arriving at
+      // it afterwards. Measured before this: the tightest moment of a
+      // whole sea crossing was 16 cm over a crest, during the lift.
+      const upTo = Math.max(this.cfg.launchAgl, sense.minimumAgl);
+      if (climbed < upTo) {
+        this.band = upTo;
         this.crab = 0;
         this.why = null;
         // Full lever, no push. The hover hold is what keeps this a
