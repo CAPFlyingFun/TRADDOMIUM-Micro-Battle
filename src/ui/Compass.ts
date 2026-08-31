@@ -202,6 +202,13 @@ export interface UnderTape {
    */
   readonly water?: string | null;
   /**
+   * THE AUTOPILOT, when it is flying — its own line, and empty when it
+   * is not. A permanent readout for something usually idle is a readout
+   * nobody reads, and this register is already the busiest thing on the
+   * screen.
+   */
+  readonly nav?: string | null;
+  /**
    * WHAT THE MISSION BRAIN IS THINKING — Stage H, same register again.
    * An instrument for whoever is building the autonomy.
    */
@@ -237,9 +244,11 @@ export class Compass {
   private readonly lodLine: HTMLDivElement;
   private readonly waterLine: HTMLDivElement;
   private readonly aiLine: HTMLDivElement;
+  private readonly navLine: HTMLDivElement;
   private lastLod = '';
   private lastWater = '';
   private lastAi = '';
+  private lastNav = '';
   private readonly airLine: HTMLDivElement;
   private lastAir = '';
   private readonly groundLine: HTMLDivElement;
@@ -483,8 +492,20 @@ export class Compass {
       marginTop: '2px',
       textAlign: 'center',
       font: '500 8px/1 "JetBrains Mono", ui-monospace, monospace',
+      // WRAPS, and it did not. These are the developer register and
+      // they can be a hundred and fifty characters long, while the
+      // compass root is a measured ~320 px — so `nowrap` sent them off
+      // BOTH edges of the phone. Joshua's screenshots caught it: the
+      // last line ran past the right of the screen and most of it could
+      // not be read at all, which for an instrument is the same as not
+      // having it.
+      //
+      // Wrapping inside the root's own measured width means they can
+      // never leave the glass, whatever the line grows to say.
+      whiteSpace: 'normal',
+      lineHeight: '1.35',
+      overflowWrap: 'anywhere',
       fontVariantNumeric: 'tabular-nums',
-      whiteSpace: 'nowrap',
       color: 'rgba(169, 242, 201, .62)',
       textShadow: SHADOW,
       display: 'none',
@@ -499,13 +520,45 @@ export class Compass {
       marginTop: '2px',
       textAlign: 'center',
       font: '500 8px/1 "JetBrains Mono", ui-monospace, monospace',
+      // WRAPS, and it did not. These are the developer register and
+      // they can be a hundred and fifty characters long, while the
+      // compass root is a measured ~320 px — so `nowrap` sent them off
+      // BOTH edges of the phone. Joshua's screenshots caught it: the
+      // last line ran past the right of the screen and most of it could
+      // not be read at all, which for an instrument is the same as not
+      // having it.
+      //
+      // Wrapping inside the root's own measured width means they can
+      // never leave the glass, whatever the line grows to say.
+      whiteSpace: 'normal',
+      lineHeight: '1.35',
+      overflowWrap: 'anywhere',
       fontVariantNumeric: 'tabular-nums',
-      whiteSpace: 'nowrap',
       color: 'rgba(169, 242, 201, .62)',
       textShadow: SHADOW,
       display: 'none',
     } as Partial<CSSStyleDeclaration>);
     this.root.appendChild(this.aiLine);
+
+    // AND THE AUTOPILOT, on its own line rather than tacked onto the
+    // brain's. Phase 2's telemetry pushed the AI line past a hundred
+    // and fifty characters, which is how it ended up off the side of
+    // Joshua's phone — one long line is not more compact than two, it
+    // is just harder to read and easier to lose.
+    this.navLine = document.createElement('div');
+    this.navLine.dataset.ui = 'compass-nav';
+    Object.assign(this.navLine.style, {
+      marginTop: '2px',
+      textAlign: 'center',
+      font: '500 8px/1 "JetBrains Mono", ui-monospace, monospace',
+      whiteSpace: 'normal',
+      lineHeight: '1.35',
+      overflowWrap: 'anywhere',
+      letterSpacing: '.04em',
+      color: 'rgba(150, 235, 190, .78)',
+      display: 'none',
+    } as Partial<CSSStyleDeclaration>);
+    this.root.appendChild(this.navLine);
 
     host.appendChild(this.root);
 
@@ -729,6 +782,18 @@ export class Compass {
     } else if (this.aiLine.style.display !== 'none') {
       this.aiLine.style.display = 'none';
       this.lastAi = '';
+    }
+
+    const nav = under?.nav ?? null;
+    if (nav) {
+      if (nav !== this.lastNav) {
+        this.lastNav = nav;
+        this.navLine.textContent = nav;
+      }
+      if (this.navLine.style.display === 'none') this.navLine.style.display = '';
+    } else if (this.navLine.style.display !== 'none') {
+      this.navLine.style.display = 'none';
+      this.lastNav = '';
     }
 
     this.drawMarkers(from, markers, half);

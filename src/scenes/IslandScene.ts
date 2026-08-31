@@ -1557,7 +1557,20 @@ export class IslandScene {
    * holding the controls.
    */
   private flyMyself(dt: number, floor: number): NavCommand | null {
-    const pin = this.brain.primaryMission?.at ?? null;
+    // WHAT THE BRAIN SAYS TO SERVE, not what the player pinned.
+    //
+    // THE BUG JOSHUA'S SCREENSHOT CAUGHT. It read `primaryMission`, and
+    // the frame showed `AI approach_water · pri waypoint · det water`:
+    // the brain had decided she needed a drink and started a detour,
+    // and the autopilot flew straight past it toward the waypoint. The
+    // brain's whole job is deciding WHERE SHE NEEDS TO GO, and a
+    // survival detour is that decision — an executor that ignores it is
+    // an executor that flies a thirsty queen across the island.
+    //
+    // The MAP still draws `primaryMission`, and must: the gold pin is
+    // the player's destination and should not jump to a puddle and back.
+    // Two different questions, and this is the one about flying.
+    const pin = this.brain.active?.at ?? null;
 
     // A NEW ORDER IS A NEW CONSENT. Confirming a destination is the
     // player asking to be flown there, so it clears any earlier
@@ -1619,6 +1632,9 @@ export class IslandScene {
       // The DRAWN floor, the one she would land on — water included,
       // the same surface the flight model is given below.
       terrainAt: (wx, wz) => groundHeight(wx, wz) + (waterSpotAt(wx, wz)?.depth ?? 0),
+      // WHAT A BAND SHE IS NOT IN WOULD FEEL LIKE. The scene owns the
+      // profile and the sheltering; the autopilot only asks.
+      windAt: (agl) => this.windAtAgl(agl),
     });
     return this.nav;
   }
@@ -2201,6 +2217,7 @@ export class IslandScene {
         lod: settings().showFix ? lodLine() : null,
         water: settings().showFix ? this.waterLine : null,
         ai: settings().showFix ? this.aiLine() : null,
+        nav: settings().showFix ? this.navWords() : null,
         // HER NOSE, not the camera's. In flight they part company the
         // moment she looks around, and the pairing with the flight
         // panel's ground line only means anything if this one is hers.
@@ -3098,8 +3115,7 @@ export class IslandScene {
       + ` · eta ${secs(d.eta)} · chan ${chan}`
       + ` · stam ${(d.stamina * 100).toFixed(0)}%`
       + ` · ${d.medium} ${gaitWords(d.medium, d.tier)}`
-      + ` · ${d.motion}/${d.act}`
-      + this.navWords();
+      + ` · ${d.motion}/${d.act}`;
   }
 
   /**
@@ -3114,13 +3130,13 @@ export class IslandScene {
    * Deliberately small. The Phase 2 brief asked for compact developer
    * telemetry and explicitly not a giant permanent UI.
    */
-  private navWords(): string {
+  private navWords(): string | null {
     const nav = this.nav;
-    if (nav === null || !this.autopilot.engaged) return '';
+    if (nav === null || !this.autopilot.engaged) return null;
     const km = (v: number): string => (v >= 100_000
       ? `${(v / 100_000).toFixed(2)}km` : `${(v / 100).toFixed(0)}m`);
     const clear = nav.ahead === null ? '——' : km(nav.ahead);
-    return ` · AP ${nav.state}${nav.blocked ? `(${nav.blocked})` : ''}`
+    return `AP ${nav.state}${nav.blocked ? `(${nav.blocked})` : ''}`
       + ` ${km(nav.range)}`
       // WANTED against ACTUAL, because the gap between them IS the
       // crab, and a heading readout beside a track readout is the one
@@ -3134,6 +3150,11 @@ export class IslandScene {
         );
         return [g.x, g.z] as [number, number];
       })()).toFixed(0)}`
+      // THE BAND AND WHAT IT COSTS. The altitude it has chosen against
+      // the one it is at, and the crab that choice buys — the pair that
+      // shows the wind being flown around rather than through.
+      + ` · band ${km(nav.band)}/${km(this.flight.height)}`
+      + ` crab ${nav.crab >= 0 ? '+' : ''}${nav.crab.toFixed(0)}°`
       + ` · clr ${clear}`;
   }
 
@@ -3282,6 +3303,25 @@ export class IslandScene {
   // wave arrives those two look completely different.
 
   private windOnHer(): { x: number; z: number } | null {
+    return this.windAtAgl(this.flight.height);
+  }
+
+  /**
+   * THE WIND AT A HEIGHT SHE IS NOT AT — the autopilot's whole altitude
+   * argument, and the reason this was split out of `windOnHer`.
+   *
+   * The profile is `t²(3−2t)` to full strength at ten metres, so it
+   * collapses fast down low: measured against the frame Joshua sent,
+   * the same air that is 132 cm/s at 4.9 m is 28 cm/s at 2 m and
+   * 2.4 cm/s at 55 cm. With a 40 cm/s airspeed that is the difference
+   * between hopeless and still air. An autopilot that cannot ask "what
+   * would the wind be if I dropped a metre" cannot use any of that.
+   *
+   * SHELTER IS PART OF THE ANSWER and is deliberately left keyed to her
+   * REAL position: a ridge upwind of her shelters the band she is
+   * considering just as it shelters the one she is in.
+   */
+  private windAtAgl(agl: number): { x: number; z: number } | null {
     const sky = this.nowWeather;
     if (!sky) return null;
     // Nothing at her feet, all of it at ten metres. Cheapest possible
@@ -3290,7 +3330,7 @@ export class IslandScene {
     // AGL for the profile, and that stays AGL on purpose: how much
     // wind there is depends on how far off the deck she is, which is a
     // different question from what altitude she is holding.
-    const reach = windProfile(this.flight.height) * settings().windInfluence;
+    const reach = windProfile(agl) * settings().windInfluence;
     if (reach <= 0) return null;
 
     const live = this.liveWind.sample;
@@ -3306,7 +3346,7 @@ export class IslandScene {
     // happens to be off the floor at the time is beside the point.
     const here = this.ant.where;
     const kept = shelter(
-      here.wx, here.wz, groundHeight(here.wx, here.wz) + this.flight.height,
+      here.wx, here.wz, groundHeight(here.wx, here.wz) + agl,
       -Math.sin(heading), -Math.cos(heading), groundHeight,
     );
     const speed = live.speedMps * UNITS_PER_METRE * reach * kept;

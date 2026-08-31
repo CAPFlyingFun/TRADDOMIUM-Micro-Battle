@@ -11,7 +11,7 @@
  * Everything here is GAME TUNING. None of it is measured biology, and
  * the few numbers that come from the flight model say so.
  */
-import { CRUISE_SPEED, MAX_POWERED_SPEED, STALL_SPEED } from './flight';
+import { MAX_POWERED_SPEED, STALL_SPEED } from './flight';
 
 export interface AutopilotConfig {
   /**
@@ -42,7 +42,16 @@ export interface AutopilotConfig {
    * range the flight model was tuned to look right in.
    */
   readonly maxTurn: number;
-  /** Airspeed held when the waypoint is far away, world units a second. */
+  /**
+   * Airspeed held when the waypoint is far away, world units a second.
+   *
+   * THE FASTEST THE MODEL WILL GIVE, not CRUISE_SPEED. The first cut
+   * used cruise — 40 of a possible 70 — and Joshua flew it: "traveling
+   * way too slow and should set for the fastest speed". He is right,
+   * and en-route automation has no reason to loiter. Everything that
+   * SHOULD slow her down still does: the arrival profile, the turns,
+   * and the wind.
+   */
   readonly cruise: number;
   /**
    * How gently she is asked to shed speed on the way in, units per
@@ -73,8 +82,46 @@ export interface AutopilotConfig {
    * forever. Letting go needs more than taking hold did.
    */
   readonly release: number;
-  /** Metres of clearance she keeps over the terrain while en route. */
-  readonly clearance: number;
+  /**
+   * THE FLOOR, and it is a floor rather than a cruising height.
+   *
+   * 55 cm above whatever is underneath her — ground, or the water's own
+   * surface. Joshua and ChatGPT, 2026-08-31: "55 cm AGL/AWL is the
+   * MINIMUM en-route clearance candidate, not the automatic target...
+   * never below 55 cm except during an actual landing."
+   *
+   * The first cut had this at 4 m and treated it as the altitude she
+   * flew, which is why the screenshots show her at 4.2 and 4.9 m in a
+   * gale she could not beat. It was doing what it was told; it was told
+   * the wrong thing.
+   */
+  readonly floorAgl: number;
+  /**
+   * The highest band the search will consider, world units.
+   *
+   * Not a limit on where she may BE — a player can fly as high as the
+   * model allows — only on how far up the autopilot will look for a
+   * better wind. Thirty metres is well past the ten at which the
+   * profile saturates, so nothing above it would read differently.
+   */
+  readonly ceilingAgl: number;
+  /**
+   * How briskly she moves between bands, as a share of full lever.
+   *
+   * Gentle: a queen porpoising between altitudes every time a gust
+   * changes which band scores best would be worse than one that simply
+   * picked wrong and stayed there.
+   */
+  readonly bandUrgency: number;
+  /**
+   * Ground progress a band must beat the current one by before she
+   * moves, world units a second.
+   *
+   * Hysteresis, and the same argument as the capture radius: without it
+   * two bands a hair apart trade places on the noise and she spends the
+   * flight climbing and descending instead of arriving.
+   */
+  readonly bandMargin: number;
   /**
    * Seconds ahead the terrain is checked, scaled by groundspeed.
    *
@@ -111,7 +158,7 @@ export const AUTOPILOT_DEFAULTS: AutopilotConfig = {
   trackDeadband: 3,
   trackFullScale: 45,
   maxTurn: 0.75,
-  cruise: CRUISE_SPEED,
+  cruise: MAX_POWERED_SPEED,
   // CHOSEN FROM WHERE THE APPROACH SHOULD START, not from a fraction
   // of cruise — the first attempt used a tenth of cruise a second and
   // its own comment claimed that began the slow-down eighty metres out.
@@ -121,20 +168,22 @@ export const AUTOPILOT_DEFAULTS: AutopilotConfig = {
   // never have engaged at all and she would have arrived at full
   // cruise every time.
   //
-  // 1.2 puts it at 667 units — about six and a half metres, some
-  // seventeen seconds of flight at her speed. Far enough to read as an
-  // approach, near enough that a cross-island trip is not spent
-  // decelerating.
-  brake: 1.2,
+  // 1.2 put the approach at 667 units against a 40-unit cruise. With
+  // the cruise now the model's full 70 the same brake would start it
+  // over two thousand — twenty metres of decelerating — so it rises
+  // with the speed it has to shed: 3.6 puts it back around 680.
+  brake: 3.6,
   // Half again over the stall.
   slowest: STALL_SPEED * 1.5,
   // A hundred and eighty world units is 1.8 m — a body length or two,
   // and inside the 5.5 m a watercourse node is known to.
   capture: 180,
   release: 420,
-  // Four metres. High enough to clear the scatter and the microterrain
-  // she is not flying around, low enough to still feel like an ant.
-  clearance: 400,
+  // 55 cm — a floor, not a target. See the field.
+  floorAgl: 55,
+  ceilingAgl: 3_000,
+  bandUrgency: 0.45,
+  bandMargin: 4,
   lookAhead: 2.5,
   patience: 6,
   crawling: 2,

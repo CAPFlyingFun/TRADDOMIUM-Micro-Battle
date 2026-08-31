@@ -81,6 +81,12 @@ export interface NavSense {
   readonly aloft: boolean;
   /** The terrain query, so this file needs no heightfield of its own. */
   readonly terrainAt: (wx: number, wz: number) => number;
+  /**
+   * THE WIND AT A HEIGHT SHE IS NOT AT, which is the whole altitude
+   * argument. The scene owns the profile and the sheltering; this only
+   * asks what a candidate band would feel like.
+   */
+  readonly windAt: (agl: number) => Drift | null;
 }
 
 /** What the autopilot decided, and what it is telling the world. */
@@ -98,6 +104,10 @@ export interface NavCommand {
   readonly target: number;
   /** Metres of ground clearance the lookahead found, or null. */
   readonly ahead: number | null;
+  /** The AGL band she is flying toward, world units. */
+  readonly band: number;
+  /** The crab that band costs her, degrees. */
+  readonly crab: number;
 }
 
 /** Nothing asked for, nothing commanded. */
@@ -156,6 +166,89 @@ export function speedFor(range: number, cfg: AutopilotConfig): number {
 }
 
 /**
+ * The bands the autopilot will consider, as AGL in world units.
+ *
+ * Bunched down low on purpose, because that is where the answer
+ * changes. The wind profile is `t²(3−2t)` to full strength at ten
+ * metres, so between 55 cm and 4 m it goes from about one per cent of
+ * the reported wind to about a third — while everything above ten
+ * metres is the same wind and there is nothing to choose between.
+ */
+export function bandsFor(cfg: AutopilotConfig): number[] {
+  const out = [cfg.floorAgl];
+  for (const agl of [100, 200, 400, 800, 1_500, 3_000]) {
+    if (agl > cfg.floorAgl && agl <= cfg.ceilingAgl) out.push(agl);
+  }
+  return out;
+}
+
+/**
+ * HOW FAST SHE WOULD CLOSE ON THE PIN FROM THIS BAND, and this is the
+ * whole navigation computer in one function.
+ *
+ * She can point her nose anywhere; what she cannot do is beat the air.
+ * To hold a track she must crab until the wind's ACROSS-track component
+ * is exactly cancelled: `sin(crab) = -across / airspeed`. If the across
+ * component is bigger than her airspeed there is no such crab, the
+ * track cannot be held at that altitude at all, and this says so with
+ * a negative infinity rather than a small number — an unflyable band is
+ * not a slow band.
+ *
+ * Otherwise what is left over is `airspeed·cos(crab) + along`, and the
+ * `along` term is why she is allowed to CLIMB: a tailwind up high adds
+ * to it, and riding it is simply the same arithmetic coming out the
+ * other way.
+ *
+ * Pure, and it takes the wind as a value rather than a height, so a
+ * test can hand it a gale without a weather system.
+ */
+export function progressIn(
+  wind: Drift | null, airspeed: number, wantedDegrees: number,
+): { speed: number; crab: number } {
+  const want = (wantedDegrees * Math.PI) / 180;
+  // The track direction, and the axis across it. Compass degrees: north
+  // is -Z, east is +X, so the unit vector is (sin, -cos).
+  const dx = Math.sin(want);
+  const dz = -Math.cos(want);
+  const along = wind ? wind.x * dx + wind.z * dz : 0;
+  const across = wind ? wind.x * -dz + wind.z * dx : 0;
+  if (airspeed <= 0) return { speed: -Infinity, crab: 0 };
+  const sin = -across / airspeed;
+  if (Math.abs(sin) >= 1) return { speed: -Infinity, crab: 90 };
+  const crab = Math.asin(sin);
+  return {
+    speed: airspeed * Math.cos(crab) + along,
+    crab: (crab * 180) / Math.PI,
+  };
+}
+
+/**
+ * WHICH BAND TO FLY, and it is a search rather than a rule.
+ *
+ * The instruction this replaces was "descend to 55 cm whenever the crab
+ * passes 30 degrees", and ChatGPT was right to stop it: a crab is a
+ * symptom, and diving on a symptom throws away every case where the
+ * wind is HELPING. So every band is priced by what it would actually
+ * buy — see `progressIn` — and the best one wins. Down in a headwind,
+ * up in a tailwind, and the same arithmetic decides both.
+ *
+ * The margin is hysteresis: a band has to be meaningfully better than
+ * the one she is in, or a gust flipping two near-equal bands would have
+ * her porpoising the whole way instead of arriving.
+ */
+export function bestBand(
+  sense: NavSense, wantedDegrees: number, cfg: AutopilotConfig,
+): { agl: number; speed: number; crab: number } {
+  const agl = Math.max(0, sense.altitude - sense.ground);
+  let best = { agl, ...progressIn(sense.windAt(agl), sense.airspeed, wantedDegrees) };
+  for (const band of bandsFor(cfg)) {
+    const here = progressIn(sense.windAt(band), sense.airspeed, wantedDegrees);
+    if (here.speed > best.speed + cfg.bandMargin) best = { agl: band, ...here };
+  }
+  return best;
+}
+
+/**
  * Captured, with hysteresis.
  *
  * A single radius is what makes an autopilot orbit: the wind nudges her
@@ -181,6 +274,9 @@ export class Autopilot {
   private state: NavState = 'idle';
   private why: Blocked | null = null;
   private held = false;
+  /** The band she has chosen, AGL in world units, and the crab it costs. */
+  private band = 0;
+  private crab = 0;
   /** The closest she has been, and how long since it improved. */
   private closest = Number.POSITIVE_INFINITY;
   private stale = 0;
@@ -260,6 +356,16 @@ export class Autopilot {
       );
     }
 
+    // ── WHICH BAND TO FLY ────────────────────────────────────────
+    // Priced rather than ruled: every candidate altitude is asked what
+    // ground progress it would actually buy, and the best wins. Down in
+    // a headwind, UP in a tailwind — the same arithmetic decides both,
+    // which is why this is a search and not "descend when the crab gets
+    // big". See `bestBand`.
+    const band = bestBand(sense, wanted, this.cfg);
+    this.band = band.agl;
+    this.crab = band.crab;
+
     // ── TERRAIN, REACTIVELY ──────────────────────────────────────
     // Local and cheap: where the ground velocity puts her in a couple
     // of seconds, and how much air is under her there. This is NOT a
@@ -268,11 +374,27 @@ export class Autopilot {
     // capability the brief forbids.
     const soon = this.lookAhead(sense);
     const clearance = soon ? soon.agl : null;
-    let lift = 0;
-    if (soon !== null && soon.agl < this.cfg.clearance) {
-      // Proportional, so a hill answers with a nudge and a wall
-      // answers with everything she has.
-      lift = Math.min(1, (this.cfg.clearance - soon.agl) / this.cfg.clearance);
+
+    // FLY THE BAND, in AGL and never in MSL. `sense.ground` is the
+    // DRAWN floor the scene hands over — terrain, or the water's own
+    // surface where there is water — so this is AGL over land and AWL
+    // over a lake without knowing which it is looking at. An altitude
+    // above sea level would put her fifty metres up a hillside and
+    // three hundred over a valley for the same number.
+    const agl = Math.max(0, sense.altitude - sense.ground);
+    let lift = Math.max(-1, Math.min(1,
+      (band.agl - agl) / Math.max(1, band.agl) * this.cfg.bandUrgency));
+
+    // AND THE FLOOR IS NOT NEGOTIABLE. Nothing below 55 cm except a
+    // landing, which this phase does not do.
+    if (agl < this.cfg.floorAgl) lift = Math.max(lift, this.cfg.bandUrgency);
+
+    // TERRAIN OUTRANKS THE BAND. A tailwind two metres up is no use if
+    // the ground two seconds ahead is three metres up: the lookahead
+    // can only ever push the command UP, never hold her down.
+    if (soon !== null && soon.agl < this.cfg.floorAgl) {
+      lift = Math.max(lift, Math.min(1,
+        (this.cfg.floorAgl - soon.agl) / this.cfg.floorAgl));
     }
 
     const target = speedFor(range, this.cfg);
@@ -343,6 +465,8 @@ export class Autopilot {
       error,
       target,
       ahead,
+      band: this.band,
+      crab: this.crab,
     };
   }
 }

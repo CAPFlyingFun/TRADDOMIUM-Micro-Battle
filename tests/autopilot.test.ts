@@ -15,12 +15,12 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
-  Autopilot, bearingTo, captured, rangeTo, speedFor, tookOver, turnFor,
-  type NavSense,
+  Autopilot, bandsFor, bearingTo, captured, progressIn, rangeTo, speedFor,
+  tookOver, turnFor, type NavSense,
 } from '../src/ant/autopilot';
 import { AUTOPILOT_DEFAULTS, autopilotConfig } from '../src/ant/autopilotConfig';
-import { groundVelocity, trackOf } from '../src/ant/telemetry';
-import { CRUISE_SPEED, STALL_SPEED } from '../src/ant/flight';
+import { groundVelocity, trackOf, type Drift } from '../src/ant/telemetry';
+import { CRUISE_SPEED, MAX_POWERED_SPEED, STALL_SPEED } from '../src/ant/flight';
 import { bearingFromHeading } from '../src/ui/compassMath';
 import { world } from '../src/world/coords';
 
@@ -49,6 +49,8 @@ function sense(over: Partial<NavSense> = {}): NavSense {
     climbing: 0,
     aloft: true,
     terrainAt: SEA,
+    // Still air unless a test says otherwise, at every height.
+    windAt: () => null,
     ...over,
   };
 }
@@ -159,8 +161,8 @@ describe('wind, which is the whole reason it flies a track', () => {
     const heading = headingFor(0);
     const drift = groundVelocity(CRUISE_SPEED, heading, { x: 0, z: 140 });
     const now = ap.update(1 / 30, sense({ heading, drift, track: trackOf(drift, 0) }));
-    expect(now.demand.hold ?? 0).toBeLessThanOrEqual(CRUISE_SPEED);
-    expect(now.target).toBeLessThanOrEqual(CRUISE_SPEED);
+    expect(now.demand.hold ?? 0).toBeLessThanOrEqual(MAX_POWERED_SPEED);
+    expect(now.target).toBeLessThanOrEqual(MAX_POWERED_SPEED);
   });
 
   it('and calls it BLOCKED when the range stops closing', () => {
@@ -282,11 +284,30 @@ describe('terrain, reactively', () => {
     ap.engage(world(0, -2_000_000));
     const heading = headingFor(0);
     const drift = groundVelocity(CRUISE_SPEED, heading, null);
+    // Twenty centimetres of air over the ridge — inside the 55 cm
+    // floor, so the lookahead has to push her up.
     const now = ap.update(1 / 30, sense({
-      heading, drift, track: 0, altitude: 90_100, terrainAt: ridge,
+      heading, drift, track: 0, altitude: 90_020, terrainAt: ridge,
     }));
     expect(now.ahead).not.toBeNull();
+    expect(now.ahead!).toBeLessThan(CFG.floorAgl);
     expect(now.demand.lift).toBeGreaterThan(0);
+  });
+
+  it('and holds the floor rather than an altitude above the sea', () => {
+    // AGL, never MSL. Fifty metres up a hillside and three hundred over
+    // a valley is the same number in MSL and a completely different
+    // flight. `sense.ground` is the DRAWN floor the scene hands over —
+    // terrain, or the water's own surface — so this is AWL over a lake
+    // without knowing it is looking at one.
+    const src = readFileSync('src/ant/autopilot.ts', 'utf8');
+    expect(src).toContain('sense.altitude - sense.ground');
+    // Comments stripped: the header SAYS "never in MSL", which is the
+    // opposite of using it.
+    const body = src
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/(^|[^:])\/\/.*$/gm, '$1');
+    expect(body).not.toMatch(/\bmsl\b/i);
   });
 
   it('and does not climb over ground that is going away', () => {
@@ -428,7 +449,7 @@ describe('the config is data, and the brain is not', () => {
     expect(src).toContain('cfg.maxTurn');
     expect(src).toContain('cfg.brake');
     expect(src).toContain('cfg.capture');
-    expect(src).toContain('cfg.clearance');
+    expect(src).toContain('cfg.floorAgl');
     expect(src).toContain('cfg.patience');
   });
 });
@@ -479,13 +500,20 @@ describe('how the scene lets it fly', () => {
     expect(scene).toContain('this.rawStick = held;');
   });
 
-  it('takes the pin from the primary mission, never the active one', () => {
-    // Same rule the map draws by: `active` follows `detour ?? primary`,
-    // so a thirsty queen would have her autopilot silently retargeted
-    // to a puddle.
+  it('flies what the brain says to serve, detour included', () => {
+    // THE BUG A DEVICE SCREENSHOT CAUGHT. This read `primaryMission`,
+    // and the frame showed `AI approach_water · pri waypoint · det
+    // water` — the brain had started a survival detour and the
+    // autopilot flew straight past it. Deciding where she needs to go
+    // is the brain's entire job, and a detour IS that decision.
     const fly = scene.slice(scene.indexOf('private flyMyself'));
-    expect(fly.slice(0, 400)).toContain('this.brain.primaryMission?.at ?? null');
-    expect(fly.slice(0, 400)).not.toContain('this.brain.active');
+    expect(fly.slice(0, 1400)).toContain('this.brain.active?.at ?? null');
+  });
+
+  it('but the MAP still draws the player\'s own pin', () => {
+    // Two different questions. The gold pin is where the PLAYER said to
+    // go and must not jump to a puddle and back while she drinks.
+    expect(scene).toContain('primary: this.brain.primaryMission?.at ?? null');
   });
 
   it('and the autopilot keeps flying while a menu is open', () => {
@@ -493,7 +521,7 @@ describe('how the scene lets it fly', () => {
     // because someone opened the map is not an autopilot; the hover
     // stands in only when nothing else is holding the controls.
     const fly = scene.slice(scene.indexOf('private flyMyself'));
-    expect(fly.slice(0, 2000)).toContain('!this.handsOff');
+    expect(fly.slice(0, 3200)).toContain('!this.handsOff');
   });
 
   it('and once the player takes over, it STAYS taken', () => {
@@ -540,5 +568,137 @@ describe('how the scene lets it fly', () => {
     // the seabed under nine metres of sea is not a clearance.
     const fly = scene.slice(scene.indexOf('private flyMyself'));
     expect(fly).toContain('groundHeight(wx, wz) + (waterSpotAt(wx, wz)?.depth ?? 0)');
+  });
+});
+
+/**
+ * CHOOSING AN ALTITUDE, which is the navigation computer's real work.
+ *
+ * Joshua flew Phase 2 into a 132 cm/s gale at 4.9 m with a 40 cm/s
+ * airspeed and watched Kauaʻi not get any closer. The autopilot was
+ * doing exactly what it was told — hold four metres — and four metres
+ * was the wrong instruction.
+ *
+ * ChatGPT's correction is the rule these test: 55 cm is the MINIMUM
+ * CANDIDATE, not the automatic target. Price every band by the ground
+ * progress it would actually buy and take the best. Down in a headwind,
+ * UP in a tailwind, and never a rule that fires on the crab alone.
+ */
+describe('the altitude band search', () => {
+  const AIRSPEED = 70;
+  /** Wind blowing due SOUTH (+z), i.e. a headwind for a northbound leg. */
+  const southerly = (speed: number) => ({ x: 0, z: speed });
+  /** The real profile: t^2(3-2t) to full strength at ten metres. */
+  const profile = (agl: number): number => {
+    const t = Math.min(1, Math.max(0, agl) / 1000);
+    return t * t * (3 - 2 * t);
+  };
+  const graded = (full: Drift) => (agl: number): Drift => ({
+    x: full.x * profile(agl), z: full.z * profile(agl),
+  });
+
+  it('prices a headwind band by what it actually buys', () => {
+    // Due north (bearing 0) into a southerly: the wind is pure headwind,
+    // so progress is airspeed minus wind and there is no crab at all.
+    const calm = progressIn(null, AIRSPEED, 0);
+    expect(calm.speed).toBeCloseTo(AIRSPEED, 6);
+    expect(calm.crab).toBeCloseTo(0, 6);
+    const into = progressIn(southerly(30), AIRSPEED, 0);
+    expect(into.speed).toBeCloseTo(AIRSPEED - 30, 6);
+  });
+
+  it('and a tailwind adds to it', () => {
+    const with_ = progressIn({ x: 0, z: -30 }, AIRSPEED, 0);
+    expect(with_.speed).toBeCloseTo(AIRSPEED + 30, 6);
+  });
+
+  it('and calls a crosswind bigger than her airspeed unflyable', () => {
+    // No crab cancels it, so the track cannot be held at all. Minus
+    // infinity rather than a small number: an unflyable band is not a
+    // slow band, and averaging the two would pick it.
+    const across = progressIn({ x: 200, z: 0 }, AIRSPEED, 0);
+    expect(across.speed).toBe(-Infinity);
+  });
+
+  it('and reports the crab a crosswind costs', () => {
+    // Half her airspeed across gives asin(0.5) = 30 degrees of crab.
+    const half = progressIn({ x: AIRSPEED / 2, z: 0 }, AIRSPEED, 0);
+    expect(Math.abs(half.crab)).toBeCloseTo(30, 4);
+    expect(half.speed).toBeCloseTo(AIRSPEED * Math.cos(Math.PI / 6), 4);
+  });
+
+  it('DESCENDS out of a headwind it cannot beat', () => {
+    // Joshua's frame, near enough: a wind far over her airspeed up high.
+    const ap = new Autopilot();
+    ap.engage(world(0, -3_000_000));
+    const now = ap.update(1 / 30, sense({
+      altitude: 490, ground: 0, airspeed: AIRSPEED, track: 0,
+      drift: { x: 0, z: -10 },
+      windAt: graded(southerly(273)),
+    }));
+    expect(now.band).toBe(CFG.floorAgl);
+    expect(now.demand.lift).toBeLessThan(0);
+  });
+
+  it('CLIMBS to ride a tailwind, which a crab rule never would', () => {
+    // The same geometry with the wind behind her. A rule that only ever
+    // descended would throw this away.
+    const ap = new Autopilot();
+    ap.engage(world(0, -3_000_000));
+    const now = ap.update(1 / 30, sense({
+      altitude: 60, ground: 0, airspeed: AIRSPEED, track: 0,
+      drift: { x: 0, z: -10 },
+      windAt: graded({ x: 0, z: -120 }),
+    }));
+    expect(now.band).toBeGreaterThan(CFG.floorAgl);
+    expect(now.demand.lift).toBeGreaterThan(0);
+  });
+
+  it('never chooses a band below the floor', () => {
+    for (const wind of [southerly(300), { x: 300, z: 0 }, { x: 0, z: -300 }]) {
+      const ap = new Autopilot();
+      ap.engage(world(0, -3_000_000));
+      const now = ap.update(1 / 30, sense({
+        altitude: 400, ground: 0, airspeed: AIRSPEED, track: 0,
+        drift: { x: 0, z: -10 }, windAt: graded(wind),
+      }));
+      expect(now.band).toBeGreaterThanOrEqual(CFG.floorAgl);
+    }
+    for (const band of bandsFor(CFG)) {
+      expect(band).toBeGreaterThanOrEqual(CFG.floorAgl);
+    }
+  });
+
+  it('and pushes her up when she is under it', () => {
+    const ap = new Autopilot();
+    ap.engage(world(0, -3_000_000));
+    const now = ap.update(1 / 30, sense({
+      altitude: 20, ground: 0, airspeed: AIRSPEED, track: 0,
+      drift: { x: 0, z: -10 },
+    }));
+    expect(now.demand.lift).toBeGreaterThan(0);
+  });
+
+  it('does NOT descend merely because the crab is large', () => {
+    // THE RULE CHATGPT STOPPED. A pure crosswind that is the same at
+    // every height gives a big crab and nothing to gain by moving, so
+    // she should stay where she is rather than diving on a symptom.
+    const ap = new Autopilot();
+    ap.engage(world(0, -3_000_000));
+    const flat = { x: AIRSPEED * 0.6, z: 0 };
+    const now = ap.update(1 / 30, sense({
+      altitude: 800, ground: 0, airspeed: AIRSPEED, track: 0,
+      drift: { x: 0, z: -10 }, windAt: () => flat,
+    }));
+    expect(Math.abs(now.crab)).toBeGreaterThan(30);
+    expect(now.band).toBe(800);
+    expect(now.demand.lift).toBeCloseTo(0, 6);
+  });
+
+  it('and flies the fastest the model gives, not a cruise setting', () => {
+    // "traveling way too slow and should set for the fastest speed."
+    expect(CFG.cruise).toBe(MAX_POWERED_SPEED);
+    expect(CFG.cruise).toBeGreaterThan(CRUISE_SPEED);
+    expect(speedFor(5_000_000, CFG)).toBe(MAX_POWERED_SPEED);
   });
 });
