@@ -62,6 +62,21 @@
  * camera; blocking lifts trades it for a dead one.
  */
 import { bakeIsland } from './islandMap';
+import { reliefIsland } from './islandRelief';
+
+/**
+ * The island to draw: the textured relief once it exists, the flat
+ * chart until then.
+ *
+ * `warmRelief` is kicked off by the scene behind the loading screen and
+ * resolves to null if the ground textures cannot be read, so this is
+ * the one place that difference is dealt with. Both are the same size
+ * in WORLD terms — a square of the whole 56 km map — so nothing else
+ * has to know which one came back.
+ */
+function islandPicture(): HTMLCanvasElement {
+  return reliefIsland() ?? bakeIsland();
+}
 import type { Discovery } from '../game/discovery';
 import {
   ZOOM_STEPS, initialView, isDrag, islandOrigin, islandPixels, panBy,
@@ -688,7 +703,7 @@ export class MapScreen {
     // its corner lands, and this draws it there.
     const size = islandPixels(this.view, port);
     const at = islandOrigin(this.view, port);
-    ink.drawImage(bakeIsland(), at.x, at.y, size, size);
+    ink.drawImage(islandPicture(), at.x, at.y, size, size);
     const fog = this.fog();
     if (fog) ink.drawImage(fog, at.x, at.y, size, size);
 

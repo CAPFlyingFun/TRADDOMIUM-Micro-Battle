@@ -47,6 +47,21 @@
  * you can no longer read.
  */
 import { bakeIsland } from './islandMap';
+import { reliefIsland } from './islandRelief';
+
+/**
+ * The island to draw: the textured relief once it exists, the flat
+ * chart until then.
+ *
+ * `warmRelief` is kicked off by the scene behind the loading screen and
+ * resolves to null if the ground textures cannot be read, so this is
+ * the one place that difference is dealt with. Both are the same size
+ * in WORLD terms — a square of the whole 56 km map — so nothing else
+ * has to know which one came back.
+ */
+function islandPicture(): HTMLCanvasElement {
+  return reliefIsland() ?? bakeIsland();
+}
 import {
   enclosing, fitTo, islandOrigin, islandPixels, worldPerPixel, worldToScreen,
   type MapMarks, type MapView, type Viewport,
@@ -260,6 +275,16 @@ export class Minimap {
   private boundsAt = -1;
   /** The frame the composite was cut at, so a moved frame recuts it. */
   private builtView: MapView | null = null;
+  /**
+   * Which island the composite was cut FROM.
+   *
+   * The textured relief lands some seconds after the run starts, and
+   * the composite is cached on the fog's revision — which does not
+   * move when the picture underneath it is replaced. Without this the
+   * widget keeps showing the flat chart until she walks far enough to
+   * dirty the mask, which on a still queen is never.
+   */
+  private builtPicture: HTMLCanvasElement | null = null;
 
   constructor(host: HTMLElement, onOpen: () => void) {
     this.root = document.createElement('button');
@@ -373,17 +398,22 @@ export class Minimap {
       revision: known.revision,
     };
     const grain = worldPerPixel(view, port);
-    if (!worthRedrawing(this.shown, next, grain)) return;
+    // The picture swap is a reason to repaint even when she has not
+    // moved a pixel and the fog has not changed.
+    if (this.builtPicture !== null && this.builtPicture === islandPicture()
+      && !worthRedrawing(this.shown, next, grain)) return;
     this.shown = next;
 
+    const picture = islandPicture();
     if (this.composite === null || this.builtFrom !== known
-      || this.builtAt !== known.revision) {
+      || this.builtAt !== known.revision || this.builtPicture !== picture) {
       // The identity as well as the number: two masks can both be at
       // revision 1 — a fresh one and a loaded save — and they are not
       // the same island.
       this.composite = this.compose(known, port, view);
       this.builtFrom = known;
       this.builtAt = known.revision;
+      this.builtPicture = picture;
     }
 
     const ink = this.ink;
@@ -437,7 +467,7 @@ export class Minimap {
     ink.imageSmoothingEnabled = true;
     const size = islandPixels(view, port);
     const corner = islandOrigin(view, port);
-    ink.drawImage(bakeIsland(), corner.x, corner.y, size, size);
+    ink.drawImage(islandPicture(), corner.x, corner.y, size, size);
     ink.globalCompositeOperation = 'destination-in';
     ink.drawImage(this.maskOf(known), corner.x, corner.y, size, size);
     ink.globalCompositeOperation = 'source-over';

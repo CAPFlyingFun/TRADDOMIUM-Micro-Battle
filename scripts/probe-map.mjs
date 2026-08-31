@@ -63,6 +63,22 @@ await page.waitForSelector('[data-ui="minimap"]', { timeout: 60000 });
 // new player's first frame actually looks like.
 await page.screenshot({ path: 'map-fresh.png' });
 
+// The textured relief is baked off the loading screen and swapped in
+// when it lands. Wait for it rather than photographing whichever of
+// the two happened to be up.
+const reliefMs = await page.evaluate(async () => {
+  const t0 = performance.now();
+  const mod = await import('/assets/index.js').catch(() => null);
+  void mod;
+  return performance.now() - t0;
+});
+void reliefMs;
+// The relief is baked in strips across frames now, so it lands some
+// seconds in. Wait for it rather than photographing the flat stand-in.
+await page.waitForFunction(() => window.__island.mapRelief().ready,
+  null, { timeout: 240000 }).catch(() => console.log('  (relief never landed)'));
+await page.waitForTimeout(800);
+
 // A fresh run knows one disc. Walk her reveal a long way so the fog has
 // a shape worth photographing, then let a frame paint it.
 const seen = await page.evaluate(() => {
@@ -94,6 +110,8 @@ await page.waitForTimeout(600);
 const afterFly = await page.evaluate(() => window.__island.autonomy().primary);
 await page.screenshot({ path: 'map-active.png' });
 
+const relief = await page.evaluate(() => window.__island.mapRelief());
+console.log(`textured relief: ${relief.ready ? 'ready' : 'NOT READY'}, baked in ${relief.ms} ms`);
 console.log(`explored ${(seen * 100).toFixed(1)}% of the mask`);
 console.log(`primary mission: before=${before} afterTap=${afterTap} afterFly=${afterFly}`);
 console.log('map-menu.png · map-fresh.png · map-hud.png · map-screen.png'

@@ -56,6 +56,7 @@ import {
 import { Minimap } from '../ui/Minimap';
 import { MapScreen } from '../ui/MapScreen';
 import { bakeIsland } from '../ui/islandMap';
+import { reliefCost, reliefIsland, warmRelief } from '../ui/islandRelief';
 import type { MapMarks } from '../ui/mapView';
 
 import { originAt, rebaseFor, setOrigin, toLocal, toWorld,
@@ -299,6 +300,15 @@ export class IslandScene {
    * flurry of saves the moment she resumes.
    */
   private static readonly AUTOSAVE_EVERY = 60;
+  /**
+   * How long new ground may go unsaved, simulated seconds.
+   *
+   * Not a second autosave clock — it pulls the ordinary one forward, so
+   * a run that is discovering writes every few seconds and a run that
+   * is sitting still still writes once a minute. Five seconds of flight
+   * is about 350 m, well under one mask cell.
+   */
+  private static readonly DISCOVERY_SAVE = 5;
   private readonly flight = new Flight();
   /** Five minutes of being left alone, and of leaving everything alone. */
   private readonly grace = new Grace();
@@ -619,7 +629,7 @@ export class IslandScene {
       resume: () => { this.shroud(false); },
       save: () => this.save(),
       settings: () => this.panel.reveal(),
-      quit: () => this.leaving?.(),
+      quit: () => { this.partingSave(); this.leaving?.(); },
     });
     this.panel.intercept(() => {
       this.shroud(true);
@@ -633,6 +643,14 @@ export class IslandScene {
     this.weatherChip = new WeatherChip(host);
     this.flightHud = new FlightHud(host);
     this.compass = new Compass(host);
+    // THE TEXTURED ISLAND, started here and finished whenever it is
+    // finished. It reads the same seven ground maps the terrain is
+    // built from, so it waits on nothing but their decode — they are
+    // already in cache by the time anything asks. Deliberately NOT
+    // awaited: a map is never worth holding a run up for, and both
+    // surfaces draw the flat chart until this lands and then swap.
+    void warmRelief(import.meta.env.BASE_URL);
+
     // THE MAP, AND THE ISLAND IT DRAWS, BOTH BUILT HERE — behind the
     // loading screen, on purpose.
     //
@@ -868,6 +886,8 @@ export class IslandScene {
         this.orderTo(world(wx, wz), 'probe', satisfiesHydration);
       },
       cancelOrder: () => this.brain.cancel(),
+      /** Probe only: what the textured overview cost, and whether it landed. */
+      mapRelief: () => ({ ms: Math.round(reliefCost()), ready: reliefIsland() !== null }),
       // PHASE 1.5, probe only. Discovery is meant to take hours of
       // flying to open up, which is exactly right for a player and
       // useless for a screenshot — so a probe can walk the reveal
@@ -1281,6 +1301,10 @@ export class IslandScene {
   kill(): void {
     if (this.dying) return;
     this.dying = true;
+    // WHAT SHE LEARNED OUTLIVES HER. The run is over, but the slot is
+    // what CONTINUE COLONY reads, and a death that threw away the last
+    // minute of exploring would make dying cost map as well as life.
+    this.partingSave();
     this.onDeath?.();
   }
 
@@ -1367,6 +1391,24 @@ export class IslandScene {
   }
 
   /**
+   * START THIS RUN KNOWING WHAT THE LAST ONE LEARNED.
+   *
+   * `resume()` restores a saved run's own map. This is the other case:
+   * a NEW queen, after the last one died, on an island the player has
+   * already flown over. CLAUDE.md's premise is that individual ants die
+   * and the colony continues, and card 10 is explicit that discovery is
+   * what THIS PLAYER knows rather than what this body saw — so a death
+   * costs a life and not a chart.
+   *
+   * Bad or absent text starts her unexplored, the same as any other
+   * unreadable blob. Losing a map is a smaller thing than refusing a
+   * run.
+   */
+  inheritDiscovery(blob: string | undefined): void {
+    this.known = decodeDiscovery(blob) ?? emptyDiscovery();
+  }
+
+  /**
    * A MENU WENT UP OR CAME DOWN, and exactly one place decides what
    * that costs.
    *
@@ -1395,6 +1437,18 @@ export class IslandScene {
   /** Where QUIT TO MENU goes. */
   onLeave(run: () => void): void {
     this.leaving = run;
+  }
+
+  /**
+   * The last write before this run stops being the live one.
+   *
+   * QUIT and DEATH both used to walk away from up to a minute of
+   * simulated time — her position, her meters, and now the map she had
+   * opened up. Autosave is a floor, not a goodbye.
+   */
+  private partingSave(): void {
+    this.sinceSaved = 0;
+    this.save();
   }
 
   /**
@@ -1861,7 +1915,18 @@ export class IslandScene {
     if (this.revealedAt === null
       || Math.hypot(her.wx - this.revealedAt.wx, her.wz - this.revealedAt.wz) >= REVEAL_STEP) {
       this.revealedAt = her;
-      reveal(this.known, her.wx, her.wz);
+      // GROUND SHE HAS NEVER SEEN IS WORTH SAVING FOR. The autosave is
+      // a minute of SIMULATED time apart, and a minute of flying is
+      // four kilometres of new coast — losing that to a closed tab
+      // would be the map forgetting the one thing it is for. So new
+      // cells bring the next save forward rather than waiting out the
+      // clock, throttled by DISCOVERY_SAVE so a long flight is not a
+      // write per second.
+      if (reveal(this.known, her.wx, her.wz) > 0) {
+        this.sinceSaved = Math.max(
+          this.sinceSaved, IslandScene.AUTOSAVE_EVERY - IslandScene.DISCOVERY_SAVE,
+        );
+      }
     }
 
     // ── WHAT SHE IS DOING ────────────────────────────────────────

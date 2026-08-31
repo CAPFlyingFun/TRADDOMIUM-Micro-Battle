@@ -237,3 +237,60 @@ describe('the scene keeps its side of the split', () => {
     expect(scene).toContain('hold: this.handsOff ? HOVER_HOLD');
   });
 });
+
+/**
+ * A MAP THAT FORGETS IS NOT A MAP.
+ *
+ * Joshua, 2026-08-31: "does the map retain the unlocked areas or does
+ * it reset each time or if you die? It should automatically save during
+ * exploration/save/resume."
+ *
+ * It did retain across save and resume, and it had three holes:
+ * exploring never triggered a save of its own, quitting walked away
+ * from up to a minute of simulated time, and dying did too. These read
+ * the wiring off the source, because the scene needs a WebGL context
+ * and this suite has no DOM.
+ */
+describe('the map she has opened up outlives the moment', () => {
+  const scene = readFileSync('src/scenes/IslandScene.ts', 'utf8');
+  const flow = readFileSync('src/ui/GameFlow.ts', 'utf8');
+
+  it('rides in the save, and comes back out of it', () => {
+    expect(scene).toContain('discovery: encodeDiscovery(this.known)');
+    expect(scene).toContain('decodeDiscovery(save.discovery) ?? emptyDiscovery()');
+  });
+
+  it('brings the next save forward when she finds new ground', () => {
+    // The autosave is 60 SIMULATED seconds apart and a minute of flying
+    // is about four kilometres of new coast. New cells pull the
+    // ordinary clock forward rather than starting a second one.
+    expect(scene).toContain('DISCOVERY_SAVE');
+    expect(scene).toContain('if (reveal(this.known, her.wx, her.wz) > 0)');
+  });
+
+  it('writes once more on the way out of a run', () => {
+    // QUIT and DEATH both used to walk away from up to a minute.
+    expect(scene).toContain('private partingSave()');
+    expect(scene).toContain('quit: () => { this.partingSave(); this.leaving?.(); }');
+    const kill = scene.slice(scene.indexOf('  kill(): void {'));
+    expect(kill.slice(0, 400)).toContain('this.partingSave();');
+  });
+
+  it('and a dead queen hands her chart to the next one', () => {
+    // CLAUDE.md's premise: individual ants die, the colony continues.
+    // Card 10: discovery is what this PLAYER knows. So a death costs a
+    // life and not a map.
+    expect(scene).toContain('inheritDiscovery(blob: string | undefined)');
+    expect(flow).toContain('this.carried = latestSave(localStorage)?.discovery');
+    expect(flow).toContain('else if (this.carried) scene.inheritDiscovery(this.carried)');
+  });
+
+  it('but NEW COLONY from the front door starts blank', () => {
+    // A deliberate fresh start is a fresh start. The carry is cleared
+    // when the menu opens and spent the moment it is used, so it can
+    // only ever cross the death door.
+    const menu = flow.slice(flow.indexOf('  toMenu(): void {'));
+    expect(menu.slice(0, 200)).toContain('this.carried = undefined;');
+    expect(flow).toContain('this.carried = undefined;');
+  });
+});

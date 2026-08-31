@@ -47,6 +47,8 @@ export class GameFlow {
    * the first thing that killed her.
    */
   private lastMode: SessionMode = 'solo';
+  /** A dead queen's map, waiting for the next one. See died(). */
+  private carried: string | undefined;
 
   constructor(
     private readonly host: HTMLElement,
@@ -102,6 +104,7 @@ export class GameFlow {
 
   toMenu(): void {
     this.clear();
+    this.carried = undefined;
     // CONTINUE IS OFFERED ONLY IF THERE IS SOMETHING TO CONTINUE, and
     // the label says what it is rather than just that it exists — a
     // button that reads "CONTINUE" and drops you somewhere unexpected
@@ -215,6 +218,10 @@ export class GameFlow {
     // The rest of the run — her meters, her wings, the world clock —
     // is state a constructor argument cannot carry.
     if (resuming) scene.resume(resuming);
+    // A NEW BODY ON A KNOWN ISLAND. Only ever set by died(), and spent
+    // the moment it is used so a later NEW COLONY starts blank.
+    else if (this.carried) scene.inheritDiscovery(this.carried);
+    this.carried = undefined;
     // AND WHICH CLOCK SHE RUNS UNDER. Solo stops the world behind a
     // menu or the map; Multiplayer stops only the player's hands. The
     // scene owns that because the scene owns the step — the flow just
@@ -242,6 +249,12 @@ export class GameFlow {
    * it happens reads as a crash rather than as a death.
    */
   private died(): void {
+    // WHAT SHE KNEW OUTLIVES HER. The scene wrote a parting save on the
+    // way through kill(), so the freshest map of this run is in the
+    // slot; hold it so the next queen starts with it. Only across a
+    // DEATH — NEW COLONY from the front door is a deliberate fresh
+    // start and gets a blank chart.
+    this.carried = latestSave(localStorage)?.discovery;
     this.death?.dispose();
     this.death = new DeathScreen(this.host, () => this.toMap(this.lastMode));
   }
