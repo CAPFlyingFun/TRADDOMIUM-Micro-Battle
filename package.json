@@ -1,7 +1,7 @@
 {
   "name": "traddomium-micro-battle",
   "private": true,
-  "version": "0.0.137",
+  "version": "0.0.138",
   "type": "module",
   "scripts": {
     "probe:waterlab": "node scripts/probe-waterlab.mjs",
@@ -48,7 +48,8 @@
     "measure:camera": "vite-node scripts/measure-stagee.ts",
     "probe:ndbc": "vite-node scripts/probe-ndbc.ts",
     "probe:map": "node scripts/probe-map.mjs",
-    "probe:autopilot": "node scripts/probe-autopilot.mjs"
+    "probe:autopilot": "node scripts/probe-autopilot.mjs",
+    "probe:travel": "node scripts/probe-travel.mjs"
   },
   "dependencies": {
     "three": "^0.180.0"

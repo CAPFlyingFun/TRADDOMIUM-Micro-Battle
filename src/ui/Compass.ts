@@ -27,7 +27,7 @@
  * is deciding what deserves a marker.
  */
 import {
-  cardinalOf, easeBearing, place, rangeWords, wrap180, wrap360,
+  cardinalOf, easeBearing, place, rangeWords, speedWords, wrap180, wrap360,
   type CompassMarker, type PlacedMarker,
 } from './compassMath';
 import type { WorldPoint } from '../world/coords';
@@ -140,12 +140,23 @@ export interface AirLine {
   /** Row label. "AIR" unless the medium says otherwise — "SWIM" in
    *  the water, where the same number is speed through THAT medium. */
   readonly label?: string;
+  /**
+   * How much faster her clock is running than the world's, or 1.
+   *
+   * Under boosted autopilot travel her airspeed is unchanged and the
+   * ground goes past ten times faster, so the number on this row cannot
+   * move — which is exactly why the boost was invisible. See
+   * `speedWords`.
+   */
+  readonly travel?: number;
 }
 
 /** Where she is actually going, and how fast over the island. */
 export interface GroundLine {
   readonly track: number;
   readonly speed: number;
+  /** Her clock against the world's — see AirLine.travel. */
+  readonly travel?: number;
   /** Track minus heading, signed degrees. Drawn only when it matters. */
   readonly drift: number;
 }
@@ -172,6 +183,16 @@ export interface WindLine {
   readonly call: string;
   /** Prefix — nothing for the wind, "CUR" when it is the current. */
   readonly label?: string;
+  /**
+   * Her clock against the world's — see AirLine.travel.
+   *
+   * The wind gets the same treatment as her ground speed and for the
+   * same reason: under boost she crosses ten metres for every one the
+   * world spends, so the air she is standing in goes past her ten
+   * times as fast. A wind reading in real cm/s beside a ground speed
+   * in boosted m/s is two different clocks stacked one above the other.
+   */
+  readonly travel?: number;
 }
 
 /**
@@ -237,6 +258,24 @@ export class Compass {
   private readonly window: HTMLDivElement;
   private readonly tape: HTMLDivElement;
   private readonly readout: HTMLDivElement;
+  /**
+   * THE DEVELOPER BLOCK — one panel, not six lines in the sky.
+   *
+   * Every register under the Developer overlay toggle lives inside it:
+   * frame rate, fix, LOD, water, the brain and the autopilot. They used
+   * to be six centred rows stacked straight onto the compass root,
+   * directly under the three speeds, in the same mint and the same
+   * place — so the busiest instrument in the game was also the least
+   * separable from the flight display. Joshua's screenshots show
+   * exactly that: a wall of text over the horizon with the rows a
+   * player actually steers by buried at the top of it.
+   *
+   * Boxing them changes nothing about what they say. It says who they
+   * are for: left-aligned, dimmer, and behind their own faint edge, so
+   * the eye can skip the whole thing in one movement instead of reading
+   * six lines to find out that none of them were for it.
+   */
+  private readonly dev: HTMLDivElement;
   private readonly fpsLine: HTMLDivElement;
   private lastFps = '';
   private readonly fixLine: HTMLDivElement;
@@ -436,11 +475,29 @@ export class Compass {
     // can act on — and the worst recent frame beside it, because a
     // steady 60 that drops one frame in thirty is a stutter you can
     // feel and a mean that will never show it.
+    this.dev = document.createElement('div');
+    this.dev.dataset.ui = 'compass-dev';
+    Object.assign(this.dev.style, {
+      marginTop: '5px',
+      // Left, not centre. Six centred rows of different lengths have no
+      // shared edge to run the eye down, which is most of why the stack
+      // read as noise rather than as a table.
+      textAlign: 'left',
+      padding: '4px 6px 5px',
+      borderRadius: '7px',
+      // Dark enough to sit the numbers on, faint enough that the sky
+      // still shows through.
+      background: 'rgba(14, 11, 5, .38)',
+      border: '1px solid rgba(169, 242, 201, .16)',
+      display: 'none',
+    } as Partial<CSSStyleDeclaration>);
+    this.root.appendChild(this.dev);
+
     this.fpsLine = document.createElement('div');
     this.fpsLine.dataset.ui = 'compass-fps';
     Object.assign(this.fpsLine.style, {
-      marginTop: '2px',
-      textAlign: 'center',
+      marginTop: '0',
+      textAlign: 'left',
       font: '500 9px/1 "JetBrains Mono", ui-monospace, monospace',
       fontVariantNumeric: 'tabular-nums',
       whiteSpace: 'nowrap',
@@ -448,13 +505,13 @@ export class Compass {
       textShadow: SHADOW,
       display: 'none',
     } as Partial<CSSStyleDeclaration>);
-    this.root.appendChild(this.fpsLine);
+    this.dev.appendChild(this.fpsLine);
 
     this.fixLine = document.createElement('div');
     this.fixLine.dataset.ui = 'compass-fix';
     Object.assign(this.fixLine.style, {
-      marginTop: '2px',
-      textAlign: 'center',
+      marginTop: '3px',
+      textAlign: 'left',
       font: '500 8px/1 "JetBrains Mono", ui-monospace, monospace',
       fontVariantNumeric: 'tabular-nums',
       whiteSpace: 'nowrap',
@@ -462,7 +519,7 @@ export class Compass {
       textShadow: SHADOW,
       display: 'none',
     } as Partial<CSSStyleDeclaration>);
-    this.root.appendChild(this.fixLine);
+    this.dev.appendChild(this.fixLine);
 
     // THE MASTER LOD'S LINE, under the fix and in the same developer
     // register: what the Detail dial means right now, how far the
@@ -472,8 +529,8 @@ export class Compass {
     this.lodLine = document.createElement('div');
     this.lodLine.dataset.ui = 'compass-lod';
     Object.assign(this.lodLine.style, {
-      marginTop: '2px',
-      textAlign: 'center',
+      marginTop: '3px',
+      textAlign: 'left',
       font: '500 8px/1 "JetBrains Mono", ui-monospace, monospace',
       fontVariantNumeric: 'tabular-nums',
       whiteSpace: 'nowrap',
@@ -481,7 +538,7 @@ export class Compass {
       textShadow: SHADOW,
       display: 'none',
     } as Partial<CSSStyleDeclaration>);
-    this.root.appendChild(this.lodLine);
+    this.dev.appendChild(this.lodLine);
 
     // AND THE WATER, under the LOD: how far above or below the surface
     // she is, and how far to the nearest of each kind. Same register,
@@ -489,8 +546,8 @@ export class Compass {
     this.waterLine = document.createElement('div');
     this.waterLine.dataset.ui = 'compass-water';
     Object.assign(this.waterLine.style, {
-      marginTop: '2px',
-      textAlign: 'center',
+      marginTop: '3px',
+      textAlign: 'left',
       font: '500 8px/1 "JetBrains Mono", ui-monospace, monospace',
       // WRAPS, and it did not. These are the developer register and
       // they can be a hundred and fifty characters long, while the
@@ -510,15 +567,15 @@ export class Compass {
       textShadow: SHADOW,
       display: 'none',
     } as Partial<CSSStyleDeclaration>);
-    this.root.appendChild(this.waterLine);
+    this.dev.appendChild(this.waterLine);
 
     // And the brain, under the water. Fourth and last of the developer
     // register — one toggle turns the whole stack on and off.
     this.aiLine = document.createElement('div');
     this.aiLine.dataset.ui = 'compass-ai';
     Object.assign(this.aiLine.style, {
-      marginTop: '2px',
-      textAlign: 'center',
+      marginTop: '3px',
+      textAlign: 'left',
       font: '500 8px/1 "JetBrains Mono", ui-monospace, monospace',
       // WRAPS, and it did not. These are the developer register and
       // they can be a hundred and fifty characters long, while the
@@ -538,7 +595,7 @@ export class Compass {
       textShadow: SHADOW,
       display: 'none',
     } as Partial<CSSStyleDeclaration>);
-    this.root.appendChild(this.aiLine);
+    this.dev.appendChild(this.aiLine);
 
     // AND THE AUTOPILOT, on its own line rather than tacked onto the
     // brain's. Phase 2's telemetry pushed the AI line past a hundred
@@ -548,8 +605,8 @@ export class Compass {
     this.navLine = document.createElement('div');
     this.navLine.dataset.ui = 'compass-nav';
     Object.assign(this.navLine.style, {
-      marginTop: '2px',
-      textAlign: 'center',
+      marginTop: '3px',
+      textAlign: 'left',
       font: '500 8px/1 "JetBrains Mono", ui-monospace, monospace',
       whiteSpace: 'normal',
       lineHeight: '1.35',
@@ -558,7 +615,7 @@ export class Compass {
       color: 'rgba(150, 235, 190, .78)',
       display: 'none',
     } as Partial<CSSStyleDeclaration>);
-    this.root.appendChild(this.navLine);
+    this.dev.appendChild(this.navLine);
 
     host.appendChild(this.root);
 
@@ -676,7 +733,7 @@ export class Compass {
       // showing the tape's twice would answer neither.
       const line = `${air.label ?? 'AIR'} ${
         String(Math.round(wrap360(air.heading)) % 360).padStart(3, '0')}° @ ${
-        air.speed.toFixed(1)} cm/s`;
+        speedWords(air.speed, air.travel)}`;
       if (line !== this.lastAir) {
         this.lastAir = line;
         this.airLine.textContent = line;
@@ -691,7 +748,7 @@ export class Compass {
     if (ground) {
       const line = `GND ${
         String(Math.round(wrap360(ground.track)) % 360).padStart(3, '0')}° @ ${
-        ground.speed.toFixed(1)}${
+        speedWords(ground.speed, ground.travel)}${
         Math.abs(ground.drift) >= 3
           ? `  ${ground.drift < 0 ? '←' : '→'}${Math.abs(Math.round(ground.drift))}°`
           : ''}`;
@@ -707,7 +764,8 @@ export class Compass {
 
     const wind = under?.wind ?? null;
     if (wind) {
-      const line = `${wind.label ? `${wind.label} ` : ''}${wind.speed.toFixed(1)} cm/s${wind.call ? `  ⚠ ${wind.call}` : ''}`;
+      const line = `${wind.label ? `${wind.label} ` : ''}${
+        speedWords(wind.speed, wind.travel)}${wind.call ? `  ⚠ ${wind.call}` : ''}`;
       if (line !== this.lastWind) {
         this.lastWind = line;
         this.windText.textContent = line;
@@ -795,6 +853,14 @@ export class Compass {
       this.navLine.style.display = 'none';
       this.lastNav = '';
     }
+
+    // THE BOX IS ONLY THERE WHEN SOMETHING IS IN IT. An empty bordered
+    // rectangle under the speeds would be worse than the loose rows it
+    // replaced, and with the overlay off that is exactly what it would
+    // be — every row inside is hidden and the panel would remain.
+    const anyDev = Boolean(fps ?? fix ?? lod ?? water ?? ai ?? nav);
+    const wantDev = anyDev ? '' : 'none';
+    if (this.dev.style.display !== wantDev) this.dev.style.display = wantDev;
 
     this.drawMarkers(from, markers, half);
     // MEASURED OFF THE TAPE ITSELF. The trend has to predict the strip

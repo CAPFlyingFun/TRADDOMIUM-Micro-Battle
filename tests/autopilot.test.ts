@@ -22,6 +22,7 @@ import { AUTOPILOT_DEFAULTS, autopilotConfig } from '../src/ant/autopilotConfig'
 import { groundVelocity, trackOf, type Drift } from '../src/ant/telemetry';
 import { CRUISE_SPEED, MAX_POWERED_SPEED, STALL_SPEED } from '../src/ant/flight';
 import { bearingFromHeading } from '../src/ui/compassMath';
+import { chipWords } from '../src/ui/AutopilotChip';
 import { world } from '../src/world/coords';
 
 const CFG = AUTOPILOT_DEFAULTS;
@@ -523,7 +524,7 @@ describe('how the scene lets it fly', () => {
     // because someone opened the map is not an autopilot; the hover
     // stands in only when nothing else is holding the controls.
     const fly = scene.slice(scene.indexOf('private flyMyself'));
-    expect(fly.slice(0, 3200)).toContain('!this.handsOff');
+    expect(fly.slice(0, 6000)).toContain('!this.handsOff');
   });
 
   it('and once the player takes over, it STAYS taken', () => {
@@ -538,11 +539,19 @@ describe('how the scene lets it fly', () => {
     // again, which is what a new pin identity means.
     const fly = scene.slice(scene.indexOf('private flyMyself'));
     expect(fly).toContain('this.surrendered = true;');
-    expect(fly).toContain('if (this.surrendered || pin === null');
-    // And the ONLY thing that clears it is a new order.
+    expect(fly).toContain('if (hands || this.surrendered || pin === null');
+    // AND EXACTLY TWO THINGS CLEAR IT, both of them deliberate acts by
+    // the player. Counted rather than described, so a third cannot be
+    // added quietly:
+    //   1. confirming a destination (a new pin is a new consent)
+    //   2. pressing CONTINUE
+    // Leaving the ground is NOT one of them — see the takeoff test
+    // below, which fixes the same bug from the other end.
     expect(fly).toContain('if (pin !== this.flownTo)');
     expect(fly).toContain('this.surrendered = false;');
-    expect(scene.match(/this\.surrendered = false;/g) ?? []).toHaveLength(1);
+    expect(scene.match(/this\.surrendered = false;/g) ?? []).toHaveLength(2);
+    expect(scene.slice(scene.indexOf('new AutopilotChip(host'), scene.indexOf('new AutopilotChip(host') + 300))
+      .toContain('this.surrendered = false;');
   });
 
   it('and a lever coming home on its own is not the player flying', () => {
@@ -702,5 +711,114 @@ describe('the altitude band search', () => {
     expect(CFG.cruise).toBe(MAX_POWERED_SPEED);
     expect(CFG.cruise).toBeGreaterThan(CRUISE_SPEED);
     expect(speedFor(5_000_000, CFG)).toBe(MAX_POWERED_SPEED);
+  });
+});
+
+/**
+ * STANDBY, AND THE WAY BACK FROM IT.
+ *
+ * Taking the stick stops the automatic steering and keeps the
+ * destination — a queen being hand-flown for a moment has not changed
+ * her mind. But before CONTINUE there was no way back except
+ * re-confirming the pin on the map, and nothing on screen said so.
+ */
+describe('what the player is told, and what they can press', () => {
+  it('says nothing at all without a destination', () => {
+    expect(chipWords('off')).toBe('');
+  });
+
+  it('says FLYING while it has the controls', () => {
+    expect(chipWords('flying')).toBe('AP · FLYING');
+  });
+
+  it('and shows her clock once it is worth showing', () => {
+    expect(chipWords('flying', 10)).toBe('AP · FLYING ×10.0');
+    // The ramp passes through 1.0 every time; a multiplier sitting
+    // there is a character of noise.
+    expect(chipWords('flying', 1.0)).toBe('AP · FLYING');
+    expect(chipWords('flying', 1.02)).toBe('AP · FLYING');
+  });
+
+  it('and STANDBY when the player has them', () => {
+    expect(chipWords('standby')).toBe('AP · STANDBY');
+    // No multiplier: her clock is on its way back to real time and the
+    // number would be a countdown nobody asked for.
+    expect(chipWords('standby', 8)).toBe('AP · STANDBY');
+  });
+});
+
+describe('the scene wires CONTINUE to the one thing it should', () => {
+  const scene = readFileSync('src/scenes/IslandScene.ts', 'utf8');
+
+  it('clears the surrender and nothing else', () => {
+    // Not re-ordering the mission, not touching the brain, not
+    // re-engaging by hand. The pin is still there and the autopilot
+    // still holds it; the only thing in the way was the surrender.
+    const wire = scene.slice(scene.indexOf('new AutopilotChip(host'));
+    expect(wire.slice(0, 300)).toContain('this.surrendered = false;');
+    expect(wire.slice(0, 300)).not.toContain('this.brain.');
+    expect(wire.slice(0, 300)).not.toContain('.engage(');
+  });
+
+  it('and shows STANDBY only when there is somewhere to go', () => {
+    const state = scene.slice(scene.indexOf('private apState()'));
+    expect(state.slice(0, 400)).toContain("if (this.brain.active === null) return 'off';");
+    expect(state.slice(0, 400)).toContain("if (this.surrendered) return 'standby';");
+  });
+
+  it('and the takeoff she flew herself is not a takeover', () => {
+    // THE BUG JOSHUA HIT, and it took three goes because the first two
+    // were fixing the wrong end. He set the waypoint from the map and
+    // THEN took off — and the run-up is the stick while the shove is
+    // the lift lever, so the autopilot was told the player was flying
+    // before she ever left the ground. It sat in STANDBY waiting for a
+    // destination it already had, the boost never spooled, and his
+    // report was "I couldn't tell if it was x10 times as fast yet".
+    //
+    // Two halves, and neither works alone. On the ground the autopilot
+    // is flying nothing, so nothing done with the controls there can be
+    // taken from it. And after that, the controls must come to REST
+    // before a hand on them counts: the run-up, the shove and the climb
+    // out are one continuous input that began on the ground.
+    const fly = scene.slice(scene.indexOf('private flyMyself'));
+    const ground = fly.indexOf('if (!this.flight.aloft) {');
+    const clear = fly.indexOf('this.handsClear = true;');
+    const latch = fly.indexOf('this.surrendered = true;');
+    expect(ground).toBeGreaterThan(-1);
+    // The ground refusal comes FIRST, before the controls are read at
+    // all, and it forgets any earlier rest.
+    expect(fly.slice(ground, ground + 200)).toContain('this.handsClear = false;');
+    expect(fly.slice(ground, ground + 200)).toContain('return null;');
+    expect(ground).toBeLessThan(clear);
+    expect(clear).toBeLessThan(latch);
+    // And the latch is guarded on that memory rather than on the input
+    // alone.
+    expect(fly).toContain('} else if (this.handsClear) {');
+  });
+
+  it('and CONTINUE is not undone by the thumb that pressed it', () => {
+    // Both doors back from STANDBY forget any earlier rest, so a
+    // control still held when the player asks to be flown again does
+    // not immediately take her back. Otherwise CONTINUE is a button
+    // that undoes itself.
+    const wire = scene.slice(scene.indexOf('new AutopilotChip(host'));
+    expect(wire.slice(0, 500)).toContain('this.handsClear = false;');
+    const fly = scene.slice(scene.indexOf('private flyMyself'));
+    const order = fly.indexOf('if (pin !== this.flownTo) {');
+    expect(fly.slice(order, order + 400)).toContain('this.handsClear = false;');
+  });
+
+  it('and a hand on the controls wins the frame even when it is not a surrender', () => {
+    // The climb-out grip is not a takeover, but the autopilot must not
+    // fight it either — it waits for the controls to come to rest.
+    const fly = scene.slice(scene.indexOf('private flyMyself'));
+    expect(fly).toContain('if (hands || this.surrendered || pin === null');
+  });
+
+  it('and the boost follows the demand actually issued, not the arming', () => {
+    // `engaged` is true through a manual interlude; `nav` is non-null
+    // only on frames the autopilot actually commanded something. The
+    // player at the controls gets real time.
+    expect(scene).toContain('this.travel.ask(this.nav !== null && !this.surrendered);');
   });
 });

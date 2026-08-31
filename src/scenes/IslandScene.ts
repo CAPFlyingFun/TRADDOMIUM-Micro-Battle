@@ -50,6 +50,7 @@ import { bakeIslandChannels } from '../world/islandChannels';
 import { DEFAULT_MODE, type SessionMode } from '../game/session';
 import { Autopilot, tookOver, type NavCommand } from '../ant/autopilot';
 import { MAX_TRAVEL, TravelScale } from '../ant/travelScale';
+import { AutopilotChip, type ChipState } from '../ui/AutopilotChip';
 import { AUTOPILOT_DEFAULTS } from '../ant/autopilotConfig';
 import {
   DISCOVERY_CELLS, decodeDiscovery, emptyDiscovery, encodeDiscovery,
@@ -298,8 +299,19 @@ export class IslandScene {
   private flownTo: WorldPoint | null = null;
   /** The player took the stick, and has not asked to be flown since. */
   private surrendered = false;
+
+  /**
+   * Have the flight controls come to REST since she left the ground?
+   *
+   * The run-up, the takeoff shove and the climb-out are one continuous
+   * input that began on the ground, and treating any of it as "the
+   * player is taking over" is what stopped the autopilot ever flying a
+   * destination set before takeoff. See `flyMyself`.
+   */
+  private handsClear = false;
   /** Her own clock — see travelScale.ts. Real time unless flown. */
   private readonly travel = new TravelScale();
+  private apChip!: AutopilotChip;
   /**
    * The stick as the THUMB left it, before the hands-off gate.
    *
@@ -721,6 +733,17 @@ export class IslandScene {
         // that started BEFORE it existed is already claimed.
         if (open) this.look.release();
       },
+    });
+    // CONTINUE. The one way back from STANDBY that does not mean
+    // re-confirming a destination she already has.
+    this.apChip = new AutopilotChip(host, () => {
+      this.surrendered = false;
+      // AND THE CONTROLS MUST COME TO REST FIRST. A thumb still on the
+      // stick when CONTINUE is tapped would otherwise take her straight
+      // back — a button that undoes itself.
+      this.handsClear = false;
+      // Nothing else: the pin is still on the brain, the autopilot
+      // still holds it, and the travel ramp eases back in on its own.
     });
     this.minimap = new Minimap(host, () => {
       this.mapScreen.open(this.marks(), this.known);
@@ -1412,6 +1435,9 @@ export class IslandScene {
     this.debugDie.dispose();
     this.weatherChip.dispose();
     this.compass.dispose();
+    this.apChip.dispose();
+    this.minimap.dispose();
+    this.mapScreen.dispose();
     this.rain.dispose();
     this.detachSettings();
     this.detachKill();
@@ -1547,6 +1573,21 @@ export class IslandScene {
   }
 
   /**
+   * WHAT THE AUTOPILOT IS DOING, as far as the player is concerned.
+   *
+   * Off unless there is somewhere to go — a chip about a destination
+   * she does not have is a chip nobody can act on. STANDBY is the
+   * interesting one: the pin is still there and the automatic steering
+   * is not, which before the chip existed was a state with no way out
+   * and nothing on screen to say so.
+   */
+  private apState(): ChipState {
+    if (this.brain.active === null) return 'off';
+    if (this.surrendered) return 'standby';
+    return this.autopilot.engaged && this.flight.aloft ? 'flying' : 'off';
+  }
+
+  /**
    * HOW FAST HER CLOCK MAY RUN BEFORE SHE OUTRUNS THE ISLAND.
    *
    * At full boost she crosses seven metres a second, so ground that
@@ -1611,12 +1652,40 @@ export class IslandScene {
 
     // A NEW ORDER IS A NEW CONSENT. Confirming a destination is the
     // player asking to be flown there, so it clears any earlier
-    // surrender — and it is the ONLY thing that does.
+    // surrender — and it is one of only two things that do; the other
+    // is CONTINUE.
     if (pin !== this.flownTo) {
       this.flownTo = pin;
       this.surrendered = false;
+      // Same reason as CONTINUE: a destination confirmed with a thumb
+      // still down must not be undone by that same thumb.
+      this.handsClear = false;
       if (pin === null) this.autopilot.clear();
       else this.autopilot.engage(pin);
+    }
+
+    // ON THE GROUND THE AUTOPILOT IS FLYING NOTHING, so nothing done
+    // with the controls there can be taking it away from it.
+    //
+    // THIS IS THE BUG JOSHUA HIT, and it took three attempts because
+    // every one of them was fixing the wrong end. He set the waypoint
+    // from the map, THEN took off — and the run-up is the stick and the
+    // shove is the lift lever, so by the time she left the ground the
+    // autopilot had already been told the player was flying. It sat in
+    // STANDBY waiting for a destination it already had, the boost never
+    // spooled, and his report was "I couldn't tell if it was x10 times
+    // as fast yet". My own probe ordered the pin AFTER takeoff and
+    // never saw any of it.
+    //
+    // `handsClear` is the memory that makes the difference: the
+    // controls must have come to REST since she left the ground before
+    // a hand on them means anything. The run-up, the shove and the
+    // climb-out are one continuous input that began on the ground, so
+    // they are how she gets airborne and not a takeover.
+    if (!this.flight.aloft) {
+      this.handsClear = false;
+      this.nav = null;
+      return null;
     }
 
     // THE PLAYER'S OWN HANDS, read from the RAW controls rather than
@@ -1632,19 +1701,30 @@ export class IslandScene {
     // The stick is not the same case: it reads its keys and its thumb
     // live, so its value IS a command.
     const lever = this.liftSlider.held ? this.liftSlider.lift : 0;
-    if (!this.handsOff
-      && tookOver(this.rawStick.y, this.rawStick.x, lever, AUTOPILOT_DEFAULTS)) {
-      // AND IT STAYS TAKEN. Re-engaging the instant the thumb lifted
-      // would mean the player could never fly manually while a pin
-      // existed without holding the stick for ever — every nudge would
-      // be undone the moment they let go, which is the autopilot
-      // fighting them rather than obeying them. Getting it back is a
-      // deliberate act: confirm the destination again.
+    const hands = !this.handsOff
+      && tookOver(this.rawStick.y, this.rawStick.x, lever, AUTOPILOT_DEFAULTS);
+
+    if (!hands) {
+      // At rest. Whatever she is doing now, the NEXT hand on the
+      // controls is a fresh one and means what it says.
+      this.handsClear = true;
+    } else if (this.handsClear) {
+      // A FRESH GRAB, and only a fresh grab, takes the aircraft.
+      //
+      // AND IT STAYS TAKEN once it is taken. Re-engaging the instant the
+      // thumb lifted would mean the player could never fly manually
+      // while a pin existed without holding the stick for ever. Two
+      // things give it back and only two: confirming a destination, and
+      // CONTINUE.
       this.surrendered = true;
       this.autopilot.disengage();
     }
 
-    if (this.surrendered || pin === null || !this.autopilot.engaged) {
+    // A HAND ON THE CONTROLS ALWAYS WINS THE FRAME, fresh or not. The
+    // climb-out grip is not a surrender, but the autopilot must not
+    // fight it either — it simply waits for the controls to come to
+    // rest and then flies her.
+    if (hands || this.surrendered || pin === null || !this.autopilot.engaged) {
       this.nav = null;
       return null;
     }
@@ -1863,7 +1943,10 @@ export class IslandScene {
     // boost to stop begins an ease down; it gates nothing the player
     // does. Their input is authoritative the instant they make it.
     this.travel.capAt(this.streamingCap());
-    this.travel.ask(this.autopilot.engaged && !this.surrendered && this.flight.aloft);
+    // `nav` rather than `engaged`: it is non-null only on frames the
+    // autopilot actually issued a demand, so a hand on the controls
+    // hands her back real time without waiting to be a surrender.
+    this.travel.ask(this.nav !== null && !this.surrendered);
     const plan = this.travel.update(dt);
 
     // ── Air or ground ────────────────────────────────────────────
@@ -2272,6 +2355,7 @@ export class IslandScene {
     // the minimap on `worthRedrawing`, the map screen on being open at
     // all — so this is a cheap call on a still frame and it is the
     // only place either of them is driven from.
+    this.apChip.show(this.apState(), this.travel.scale);
     const marks = this.marks();
     this.minimap.update(marks, this.known);
     if (this.mapScreen.isOpen) this.mapScreen.update(marks, this.known);
@@ -2301,6 +2385,10 @@ export class IslandScene {
             heading: telemetry.heading,
             speed: telemetry.airspeed,
             label: swimming ? 'SWIM' : undefined,
+            // HER CLOCK, so the row can say what the world sees her do.
+            // Her airspeed does not move under boost — that is the
+            // whole reason it was invisible.
+            travel: this.travel.scale,
           }
           : null,
         ground: hudUp
@@ -2308,6 +2396,7 @@ export class IslandScene {
             track: telemetry.track,
             speed: telemetry.groundSpeed,
             drift: telemetry.drift,
+            travel: this.travel.scale,
           }
           : null,
         // Only when there is a wind to speak of. The readout resolves
@@ -2318,6 +2407,11 @@ export class IslandScene {
             speed: telemetry.wind.speed,
             relative: telemetry.wind.bearing - telemetry.heading,
             label: swimming ? 'CUR' : undefined,
+            // The same clock as the two speeds above it. The WARNING
+            // below is deliberately NOT scaled: a headwind she cannot
+            // out-fly is a fact about the air and her wings, and it is
+            // true at any playback speed.
+            travel: this.travel.scale,
             call: windCall(
               telemetry.wind.speed,
               Math.cos(

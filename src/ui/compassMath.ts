@@ -173,3 +173,30 @@ export function rangeWords(units: number): string {
   if (metres >= 10) return `${Math.round(metres)}m`;
   return `${metres.toFixed(1)}m`;
 }
+
+/**
+ * HOW FAST SHE IS ACTUALLY CROSSING THE ISLAND, and what she is flying.
+ *
+ * Joshua, 2026-08-31, having tried boosted travel: "I couldn't tell if
+ * it was x10 times as fast yet." He could not, and the readout was the
+ * reason rather than the boost. Her AIRSPEED does not change under it —
+ * she still flies at 70 cm/s through the air — and what changes is that
+ * her simulation runs ten times for every second the player waits. So
+ * the number on the panel sat at 70 cm/s while she covered seven metres
+ * of Kauaʻi a second, and there was nothing on screen that said so.
+ *
+ * Both numbers matter and neither replaces the other, so both are
+ * shown: what the world sees her do, and what she is actually flying.
+ * `RAL` is Joshua's label — real air speed.
+ *
+ * At real time it collapses to the old single number, because a
+ * parenthesis that always says the same thing as the number in front of
+ * it is noise on a line that has already been off the side of a phone
+ * once.
+ */
+export function speedWords(unitsPerSecond: number, travel = 1): string {
+  const real = `${unitsPerSecond.toFixed(1)} cm/s`;
+  if (!(travel > 1.001)) return real;
+  const over = (unitsPerSecond * travel) / 100;
+  return `${over.toFixed(1)} m/s (RAL ${unitsPerSecond.toFixed(0)} cm/s)`;
+}

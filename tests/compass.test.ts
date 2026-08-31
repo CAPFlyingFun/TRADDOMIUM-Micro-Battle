@@ -1,7 +1,9 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   apart, bearingFromHeading, bearingOf, bearingTo, cardinalOf, easeBearing,
   place, rangeWords, wrap180, wrap360, type CompassMarker,
+  speedWords,
 } from '../src/ui/compassMath';
 import { world } from '../src/world/coords';
 
@@ -154,5 +156,116 @@ describe('reading a range', () => {
     expect(rangeWords(50)).toBe('0.5m');
     expect(rangeWords(1500)).toBe('15m');
     expect(rangeWords(250_000)).toBe('2.5km');
+  });
+});
+
+/**
+ * WHAT THE WORLD SEES HER DO, against what she is flying.
+ *
+ * Joshua tried boosted travel and could not tell it was on. The boost
+ * was working; the READOUT could not show it. Her airspeed is unchanged
+ * under it — she still flies 70 cm/s through the air — and what changes
+ * is that her simulation runs ten times for every second the player
+ * waits, so she crosses seven metres of Kauaʻi a second while the panel
+ * sits at 70 cm/s.
+ */
+describe('speed, when her clock is not the world\'s', () => {
+  it('is the plain number at real time', () => {
+    expect(speedWords(70)).toBe('70.0 cm/s');
+    expect(speedWords(70, 1)).toBe('70.0 cm/s');
+  });
+
+  it('and both numbers under boost, the way Joshua asked for it', () => {
+    expect(speedWords(70, 10)).toBe('7.0 m/s (RAL 70 cm/s)');
+  });
+
+  it('scales what the world sees, never what she is flying', () => {
+    // The parenthesis is the invariant: it is her real airspeed and it
+    // does not move, whatever her clock is doing.
+    for (const travel of [2, 5, 10]) {
+      expect(speedWords(70, travel)).toContain('RAL 70 cm/s');
+    }
+    expect(speedWords(70, 5)).toBe('3.5 m/s (RAL 70 cm/s)');
+  });
+
+  it('and says nothing extra while the ramp is still near real time', () => {
+    // A parenthesis that repeats the number in front of it is noise on
+    // a line that has already run off the side of a phone once.
+    expect(speedWords(70, 1.0005)).toBe('70.0 cm/s');
+    expect(speedWords(70, 1.02)).toContain('RAL');
+  });
+
+  it('and all three speeds under the tape are on the same clock', () => {
+    // AIR, GND and WND stack one above the other and tell one story
+    // together — this is where she points, this is where she goes, this
+    // is the difference and it is the wind. A wind in real cm/s beside
+    // a ground speed in boosted m/s is two clocks in one paragraph, and
+    // the difference between the rows stops being the wind.
+    const src = readFileSync('src/ui/Compass.ts', 'utf8');
+    expect(src.match(/speedWords\(/g) ?? []).toHaveLength(3);
+    const wind = src.slice(src.indexOf('const wind = under?.wind ?? null;'));
+    expect(wind.slice(0, 400)).toContain('speedWords(wind.speed, wind.travel)');
+    // The WARNING is not scaled: a headwind she cannot out-fly is a
+    // fact about the air and her wings, true at any playback speed.
+    expect(wind.slice(0, 400)).toContain('wind.call');
+    const scene = readFileSync('src/scenes/IslandScene.ts', 'utf8');
+    const wired = scene.slice(scene.indexOf('wind: hudUp &&'));
+    expect(wired.slice(0, 600)).toContain('travel: this.travel.scale');
+    expect(wired.slice(0, 600)).toContain('windCall(');
+    expect(wired.slice(0, 600).indexOf('windCall('))
+      .toBeGreaterThan(wired.slice(0, 600).indexOf('travel: this.travel.scale'));
+  });
+});
+
+/**
+ * THE DEVELOPER REGISTER IS AN INSTRUMENT, NOT PART OF THE COCKPIT.
+ *
+ * Joshua, on the Phase 2 screenshots: "all the UI text getting
+ * cluttered and that last line from the screenshots go outside of
+ * view." The overflow was one half of that and is fixed by wrapping;
+ * this is the other half. Six centred rows in the same mint as the
+ * speeds, stacked directly under them, made the busiest thing on the
+ * screen indistinguishable from the three rows a player actually flies
+ * by.
+ */
+describe('the developer block', () => {
+  const src = readFileSync('src/ui/Compass.ts', 'utf8');
+
+  it('holds every developer register and nothing else', () => {
+    // The three speeds stay on the compass root: they are the flight
+    // display and they are for the player.
+    for (const row of ['fpsLine', 'fixLine', 'lodLine', 'waterLine', 'aiLine', 'navLine']) {
+      expect(src, row).toContain(`this.dev.appendChild(this.${row});`);
+      expect(src, row).not.toContain(`this.root.appendChild(this.${row});`);
+    }
+    for (const row of ['airLine', 'groundLine', 'windLine']) {
+      expect(src, row).toContain(`this.root.appendChild(this.${row});`);
+    }
+  });
+
+  it('and is not there at all when there is nothing in it', () => {
+    // An empty bordered rectangle under the speeds would be worse than
+    // the loose rows it replaces, and with the overlay off that is
+    // exactly what it would be.
+    expect(src).toContain('const anyDev = Boolean(fps ?? fix ?? lod ?? water ?? ai ?? nav);');
+    expect(src).toContain("const wantDev = anyDev ? '' : 'none';");
+  });
+
+  it('and reads down a shared left edge', () => {
+    // Centred rows of different lengths have no edge to run the eye
+    // down, which is most of why the stack read as noise.
+    const block = src.slice(src.indexOf("this.dev.dataset.ui = 'compass-dev'"));
+    expect(block.slice(0, 700)).toContain("textAlign: 'left'");
+    const rows = src.slice(src.indexOf("this.fpsLine = document.createElement"),
+      src.indexOf('host.appendChild(this.root);'));
+    expect(rows).not.toContain("textAlign: 'center'");
+  });
+
+  it('and every long one still wraps inside the glass', () => {
+    // The overflow Joshua photographed: these lines run to a hundred
+    // and fifty characters and the compass root is a measured ~320 px.
+    const rows = src.slice(src.indexOf("this.waterLine = document.createElement"),
+      src.indexOf('host.appendChild(this.root);'));
+    expect(rows.match(/overflowWrap: 'anywhere'/g) ?? []).toHaveLength(3);
   });
 });
