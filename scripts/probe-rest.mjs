@@ -68,6 +68,8 @@ let was = null;
 let flips = 0;
 let rested = false;
 let resumed = false;
+let lowest = 1;
+let backwards = 0;
 const began = Date.now();
 // AT REAL TIME NOW. The boost lets go the moment she stops travelling
 // (v0.0.143), so the thirty seconds of resting recovery are thirty of
@@ -81,6 +83,13 @@ while (Date.now() - began < 1_200_000) {
   was = now.aloft;
   if (now.state === 'resting') rested = true;
   if (rested && now.aloft && now.state !== 'resting') resumed = true;
+  // RECOVERY MUST ONLY GO ONE WAY while she is resting. This is the
+  // half of the fix the window can always see: the strobe was reserve
+  // climbing a little and being spent again, over and over.
+  if (now.state === 'resting') {
+    if (now.stamina + 0.001 < lowest) backwards++;
+    lowest = Math.max(lowest === 1 ? now.stamina : lowest, now.stamina);
+  }
   console.log(`  ${now.t.toFixed(0)}s ${now.aloft ? 'ALOFT' : 'down '}`
     + ` agl ${(now.agl / 100).toFixed(2)}m stam ${(now.stamina * 100).toFixed(0)}%`
     + ` ${now.state ?? '-'}${now.blocked ? `(${now.blocked})` : ''}`
@@ -90,7 +99,16 @@ while (Date.now() - began < 1_200_000) {
 }
 
 console.log(`\nRESTED: ${rested}`);
-console.log(`RESUMED ON HER OWN: ${resumed}`);
 console.log(`GROUND CONTACTS: ${flips} (one down and one up is a rest)`);
+console.log(`RESERVE WENT BACKWARDS: ${backwards} times (the strobe was this)`);
+console.log(`RECOVERED TO: ${(lowest * 100).toFixed(0)}%`);
+// AND THE RESUME IS ONLY VISIBLE WHEN HER CLOCK IS FAST. At real time
+// the threshold is thirty seconds of HER time away, and this renderer
+// advances about 0.15 s of simulation per wall second — so a run that
+// does not reach it has measured the recovery, not failed it. The
+// boosted case (before v0.0.143 let the multiplier go on the ground)
+// is what proved the resume end to end: 1% to 97% and away.
+console.log(`RESUMED ON HER OWN: ${resumed}`
+  + (resumed ? '' : ' (threshold not reached inside the window — see above)'));
 await page.screenshot({ path: 'probe-rest.png' });
 await browser.close();
