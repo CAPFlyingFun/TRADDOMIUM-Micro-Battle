@@ -785,6 +785,52 @@ export class Flight {
   }
 
   /**
+   * STRAIGHT UP OFF WHATEVER SHE IS STANDING ON — the drone lift.
+   *
+   * The third door out of `grounded`, and the autopilot's. Joshua,
+   * 2026-08-31, on watching a queen sit on a beach and then on the sea
+   * with a waypoint set: "It should act like a drone that automatically
+   * lifts straight up to 1.0m, and once it reaches that altitude
+   * AWL/AGL, will then start flying."
+   *
+   * The other two doors both carry her FORWARD as they open — a ground
+   * takeoff keeps the speed she ran up, a water launch replaces it with
+   * a burst at the model's ceiling — because both are things a player
+   * does at the end of a run or a paddle. A drone lift has no run to
+   * keep: she leaves at a standstill and the autopilot holds her there
+   * on the hover while the climb does the work. Handing her the water
+   * launch's 70 cm/s instead would throw her a couple of metres
+   * downwind of the pin before she was a body length up.
+   *
+   * Everything else is the water launch: the same scripted second of
+   * eased LAUNCH_RATE, and the same doubled ramp when she is leaving
+   * WATER, because the waves have not got any smaller for being left
+   * by an autopilot.
+   *
+   * @returns the reserve it cost, or 0 if she was refused
+   */
+  liftOff(reserve: number, facing: number, fromWater: boolean): number {
+    if (!this.canLaunch(reserve)) return 0;
+    this.state = 'takeoff';
+    this.ground = null;
+    // NOT ZERO. Zero is a glide with no airspeed, which the model reads
+    // as a fall; HOVER_HOLD is the smallest speed that still counts as
+    // powered flight, and it is what the hover asks for two lines later
+    // in the autopilot anyway.
+    this.speed = HOVER_HOLD;
+    this.facing = facing;
+    this.bank = 0;
+    this.tilt = 0;
+    this.rise = 0;
+    this.launching = 0;
+    this.launchBoost = fromWater ? WATER_LAUNCH_LIFT : 1;
+    this.above = 0.01;
+    this.air.reset();
+    this.drift = 0;
+    return TAKEOFF_COST;
+  }
+
+  /**
    * PUT HER IN THE AIR, level, at a height and a heading — the only
    * way to restore an airborne position fix (see ui/fix.ts).
    *

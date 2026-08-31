@@ -97,6 +97,21 @@ export interface AutopilotConfig {
    */
   readonly floorAgl: number;
   /**
+   * HOW HIGH THE DRONE LIFT GOES BEFORE SHE STARTS TRAVELLING.
+   *
+   * Joshua's number, 2026-08-31: "lifts straight up to 1.0m, and once
+   * it reaches that altitude AWL/AGL, will then start flying and adjust
+   * altitude accordingly for flight."
+   *
+   * Above `floorAgl` on purpose, and not by accident of taste: the band
+   * search will pick her cruising altitude the instant she starts
+   * travelling, and starting that search from below the floor would
+   * have her leave the ground already breaking the one altitude rule
+   * the autopilot has. A metre is also clear of the surf she may have
+   * just left — a crest stands about 22 cm over mean water.
+   */
+  readonly launchAgl: number;
+  /**
    * The highest band the search will consider, world units.
    *
    * Not a limit on where she may BE — a player can fly as high as the
@@ -181,6 +196,7 @@ export const AUTOPILOT_DEFAULTS: AutopilotConfig = {
   release: 420,
   // 55 cm — a floor, not a target. See the field.
   floorAgl: 55,
+  launchAgl: 100,
   ceilingAgl: 3_000,
   bandUrgency: 0.45,
   bandMargin: 4,

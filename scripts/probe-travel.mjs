@@ -46,6 +46,27 @@ await page.waitForFunction(
   () => !document.querySelector('[data-ui="loading"]'), null, { timeout: 240000 });
 await page.waitForFunction(() => window.__island.simTime() > 0.4, null, { timeout: 240000 });
 
+// SEA=1 PUTS HER IN THE WATER FIRST — Joshua's second screenshot, a
+// queen floating on the open sea with a waypoint set, `AI wait_wings`,
+// and nothing happening. Leaving the water is its own door in the
+// flight model and its own wait, so it is its own run of this probe.
+if (process.env.SEA === '1') {
+  await page.evaluate(() => {
+    const w = window.__island.where();
+    let best = { d: 0, x: w[0], z: w[2] };
+    for (let dz = -4000; dz <= 4000; dz += 250) {
+      for (let dx = -4000; dx <= 4000; dx += 250) {
+        const d = window.__island.waterDepth(w[0] + dx, w[2] + dz);
+        if (d > best.d) best = { d, x: w[0] + dx, z: w[2] + dz };
+      }
+    }
+    window.__island.putAt(best.x, best.z, 0);
+  });
+  await page.waitForFunction(
+    () => window.__island.wading().afloat, null, { timeout: 120000, polling: 500 });
+  console.log('afloat on the open water, wings wet');
+}
+
 // THE PIN FIRST, standing on the ground, exactly as the map's FLY HERE
 // leaves her.
 await page.evaluate((range) => {
@@ -60,6 +81,7 @@ const read = () => page.evaluate(() => {
   return {
     t: window.__island.simTime(),
     travel: ap.travel,
+    agl: window.__island.height(),
     engaged: ap.engaged,
     surrendered: ap.surrendered,
     aloft: ap.aloft,
@@ -68,6 +90,8 @@ const read = () => page.evaluate(() => {
     // The LABEL, not the root: textContent would include the
     // CONTINUE button's own text even while it is display:none.
     chip: text('[data-ui="autopilot-chip"] span'),
+    blocked: ap.nav?.blocked ?? null,
+    dry: window.__island.wingsLeft(),
     air: text('[data-ui="compass-air"]'),
     ground: text('[data-ui="compass-ground"]'),
   };
@@ -75,28 +99,28 @@ const read = () => page.evaluate(() => {
 
 console.log('before takeoff:', JSON.stringify(await read()));
 
-// Airborne the way a player does it: run up, then the lever.
-await page.evaluate(() => {
-  window.__island.setPace('run');
-  window.__island.setSprint(true);
-});
-await page.keyboard.down('KeyW');
-await page.waitForFunction(() => window.__island.canTakeOff(), null, { timeout: 300000 });
-await page.keyboard.down('Space');
-await page.waitForFunction(() => window.__island.height() > 500, null, { timeout: 300000 });
-await page.keyboard.up('Space');
-await page.keyboard.up('KeyW');
+// AND NOW NOTHING. No run-up, no lever, no key at all — the whole
+// point of v0.0.139 is that confirming a destination is the last thing
+// the player has to do. If she is still on the sand in a minute, the
+// takeoff action is missing again.
 
 let best = 1;
 const began = Date.now();
-while (Date.now() - began < 240_000) {
+// The sea run has thirty seconds of her time to pay before anything
+// happens, and this renderer manages about a frame and a half a second.
+while (Date.now() - began < (process.env.SEA === '1' ? 900_000 : 240_000)) {
   const now = await read();
   best = Math.max(best, now.travel);
   console.log(`  ${now.t.toFixed(0)}s x${now.travel.toFixed(2)}`
+    + ` ${now.aloft ? 'ALOFT' : 'down '} agl ${(now.agl / 100).toFixed(2)}m`
     + ` ${now.engaged ? 'engaged' : 'idle'}${now.surrendered ? ' SURRENDERED' : ''}`
-    + ` ${now.state ?? '-'}`
+    + ` ${now.state ?? '-'}${now.blocked ? `(${now.blocked})` : ''}`
+    + `${now.dry === null ? '' : ` dry-in ${now.dry.toFixed(0)}s`}`
     + `  chip "${now.chip}"  air "${now.air}"`);
-  if (now.travel > 9.9) break;
+  // Off the surface AND spooled. On the water she has thirty seconds of
+  // drying to pay first, at real time, so the run is bounded by the
+  // wall clock rather than by the ramp.
+  if (now.travel > 9.9 && now.aloft) break;
   await page.waitForTimeout(2500);
 }
 
@@ -105,7 +129,8 @@ const end = await read();
 console.log(`chip   "${end.chip}"`);
 console.log(`air    "${end.air}"`);
 console.log(`ground "${end.ground}"`);
-console.log(`surrendered after a player-order takeoff: ${end.surrendered}`);
+console.log(`surrendered without the player ever touching a control: ${end.surrendered}`);
+console.log(`SHE LEFT THE SURFACE ON HER OWN: ${end.aloft}`);
 
 await page.screenshot({ path: 'probe-travel.png' });
 await browser.close();

@@ -186,6 +186,77 @@ describe('the water launch', () => {
   });
 });
 
+/**
+ * THE THIRD DOOR — straight up, from whatever she is standing on.
+ *
+ * The autopilot's. Joshua, 2026-08-31: "It should act like a drone that
+ * automatically lifts straight up to 1.0m." The other two doors both
+ * carry her forward as they open, because both are things a player does
+ * at the end of a run or a paddle; this one has no run to keep.
+ */
+describe('the drone lift', () => {
+  it('leaves at a standstill rather than at the model\'s ceiling', () => {
+    const f = new Flight();
+    expect(f.liftOff(1, 0, false)).toBe(TAKEOFF_COST);
+    expect(f.aloft).toBe(true);
+    // The water launch would be seventy here — most of a metre downwind
+    // before she is a body length up.
+    expect(f.airspeed).toBeLessThan(1);
+    expect(f.airspeed).toBeGreaterThan(0);
+  });
+
+  it('and still goes UP, which is the whole of it', () => {
+    const f = new Flight();
+    f.liftOff(1, 0, false);
+    let height = 0;
+    for (let i = 0; i < 120; i++) {
+      const step = f.update(
+        { push: 0, side: 0, lift: 1, hold: 0.01 }, 1, false, 1 / 60, 0,
+      );
+      height += step.rise / 60;
+    }
+    // Two seconds of climb: past the launch ramp and climbing on the
+    // lever. A metre is six seconds away, which is the point — it is a
+    // lift, not a jump.
+    expect(height).toBeGreaterThan(10);
+  });
+
+  it('and does not turn her', () => {
+    const f = new Flight();
+    f.liftOff(1, 2.345, false);
+    expect(f.heading).toBeCloseTo(2.345, 6);
+  });
+
+  it('and clears the surf when the surface she left was water', () => {
+    // The waves have not got any smaller for being left by an
+    // autopilot — a crest stands about 22 cm over mean water.
+    const climb = (fromWater: boolean): number => {
+      const f = new Flight();
+      f.liftOff(1, 0, fromWater);
+      let height = 0;
+      for (let i = 0; i < 60; i++) {
+        const step = f.update(
+          { push: 0, side: 0, lift: 1, hold: 0.01 }, 1, false, 1 / 60, 0,
+        );
+        height += step.rise / 60;
+      }
+      return height;
+    };
+    expect(climb(true)).toBeGreaterThan(climb(false) * 1.4);
+  });
+
+  it('and is refused on an empty reserve, like both other doors', () => {
+    const f = new Flight();
+    expect(f.liftOff(TAKEOFF_COST / 2, 0, false)).toBe(0);
+    expect(f.aloft).toBe(false);
+  });
+
+  it('and cannot be used to lift out of the air', () => {
+    const f = flying();
+    expect(f.liftOff(1, 0, false)).toBe(0);
+  });
+});
+
 describe('the glide curve', () => {
   it('is flattest at the best-glide speed', () => {
     expect(glideRatio(BEST_GLIDE_SPEED)).toBeCloseTo(BEST_GLIDE_RATIO, 6);

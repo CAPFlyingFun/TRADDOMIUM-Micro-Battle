@@ -49,6 +49,9 @@ function sense(over: Partial<NavSense> = {}): NavSense {
     track: over.track ?? trackOf(drift, 0),
     climbing: 0,
     aloft: true,
+    // Airborne, dry and fed unless a test is about the takeoff.
+    wingsWet: false,
+    launchable: true,
     terrainAt: SEA,
     // Still air unless a test says otherwise, at every height.
     windAt: () => null,
@@ -487,11 +490,21 @@ describe('how the scene lets it fly', () => {
     expect(scene).toMatch(/nav \? \{\s*\n\s*\.\.\.nav\.demand,/);
   });
 
-  it('and never lets it raise the ceiling the player chose', () => {
-    // An autopilot may ask for an airspeed. It does not get to overrule
-    // the pace row, any more than Auto does.
+  it('and sets its own ceiling, which it did NOT used to', () => {
+    // This test used to assert the opposite — that the pace row was the
+    // power setting and the autopilot could not raise it, the same rule
+    // Auto follows. Joshua overruled it on the first device pass ("I
+    // noticed it was traveling way too slow and should set for the
+    // fastest speed"), and it is kept here as a note rather than
+    // deleted, because the old rule is still right for Auto and reading
+    // this file should not make it look like an oversight.
     const call = scene.slice(scene.indexOf('nav ? {'));
-    expect(call.slice(0, 600)).toContain('ceiling: wants ? SPRINT_AIRSPEED');
+    expect(call.slice(0, 1800)).toContain('SPRINT_AIRSPEED');
+    expect(call.slice(0, 1800)).not.toContain('ceiling: wants ? SPRINT_AIRSPEED');
+    // The MANUAL branch below it is untouched: a thumb still flies at
+    // the row the player lit.
+    const manual = scene.slice(scene.indexOf('push: stick.y,'));
+    expect(manual.slice(0, 1200)).toContain('ceiling: wants ? SPRINT_AIRSPEED');
   });
 
   it('reads the RAW stick for the override, not the gated one', () => {
@@ -767,32 +780,23 @@ describe('the scene wires CONTINUE to the one thing it should', () => {
   });
 
   it('and the takeoff she flew herself is not a takeover', () => {
-    // THE BUG JOSHUA HIT, and it took three goes because the first two
-    // were fixing the wrong end. He set the waypoint from the map and
-    // THEN took off — and the run-up is the stick while the shove is
-    // the lift lever, so the autopilot was told the player was flying
-    // before she ever left the ground. It sat in STANDBY waiting for a
-    // destination it already had, the boost never spooled, and his
-    // report was "I couldn't tell if it was x10 times as fast yet".
+    // THE BUG JOSHUA HIT ON v0.0.137, and it took three goes because
+    // the first two were fixing the wrong end. He set the waypoint from
+    // the map and THEN took off — and the run-up is the stick while the
+    // shove is the lift lever, so the autopilot was told the player was
+    // flying before she ever left the ground.
     //
-    // Two halves, and neither works alone. On the ground the autopilot
-    // is flying nothing, so nothing done with the controls there can be
-    // taken from it. And after that, the controls must come to REST
-    // before a hand on them counts: the run-up, the shove and the climb
-    // out are one continuous input that began on the ground.
+    // The autopilot owns the takeoff now, so ordinarily she never gets
+    // to that run-up. A player who takes off by hand anyway still must
+    // not be read as taking the controls away from something that had
+    // not touched them: the controls must come to REST before a hand on
+    // them counts, because the run-up, the shove and the climb-out are
+    // one continuous input that begins on a surface.
     const fly = scene.slice(scene.indexOf('private flyMyself'));
-    const ground = fly.indexOf('if (!this.flight.aloft) {');
     const clear = fly.indexOf('this.handsClear = true;');
     const latch = fly.indexOf('this.surrendered = true;');
-    expect(ground).toBeGreaterThan(-1);
-    // The ground refusal comes FIRST, before the controls are read at
-    // all, and it forgets any earlier rest.
-    expect(fly.slice(ground, ground + 200)).toContain('this.handsClear = false;');
-    expect(fly.slice(ground, ground + 200)).toContain('return null;');
-    expect(ground).toBeLessThan(clear);
+    expect(clear).toBeGreaterThan(-1);
     expect(clear).toBeLessThan(latch);
-    // And the latch is guarded on that memory rather than on the input
-    // alone.
     expect(fly).toContain('} else if (this.handsClear) {');
   });
 
@@ -819,6 +823,237 @@ describe('the scene wires CONTINUE to the one thing it should', () => {
     // `engaged` is true through a manual interlude; `nav` is non-null
     // only on frames the autopilot actually commanded something. The
     // player at the controls gets real time.
-    expect(scene).toContain('this.travel.ask(this.nav !== null && !this.surrendered);');
+    //
+    // AND ONLY ONCE SHE IS OFF THE SURFACE: the boost is for
+    // travelling, and a queen waiting thirty seconds for her wings to
+    // dry is paying a price rather than travelling. Boosting that would
+    // refund it to anyone who had set a waypoint and leave it full
+    // price for anyone flying by hand.
+    expect(scene).toContain(
+      'this.travel.ask(this.nav !== null && !this.surrendered && this.flight.aloft);',
+    );
+  });
+});
+
+/**
+ * THE MISSING LINK — she has to get off the ground on her own.
+ *
+ * Joshua, 2026-08-31, with a photograph of a queen sitting on a beach
+ * and another of one sitting on the open sea, both with a waypoint set
+ * and neither moving: "It never automatically lift and fly from land or
+ * water. It should act like a drone that automatically lifts straight
+ * up to 1.0m, and once it reaches that altitude AWL/AGL, will then
+ * start flying and adjust altitude accordingly for flight. It's missing
+ * a takeoff action to link it together."
+ *
+ * Everything Phase 2 built assumed she was already airborne, and said
+ * so in a comment that read as principle: taking off is a decision with
+ * a stamina price and the player's to make. It is now the autopilot's,
+ * and this is the shape of it.
+ */
+describe('the drone lift', () => {
+  const ON_LAND = (over: Partial<NavSense> = {}): NavSense => sense({
+    aloft: false,
+    altitude: 0,
+    ground: 0,
+    airspeed: 0,
+    drift: { x: 0, z: 0 },
+    ...over,
+  });
+
+  it('asks to leave the surface the moment it has somewhere to go', () => {
+    const ap = new Autopilot(CFG);
+    ap.engage(world(200_000, 0));
+    const out = ap.update(1 / 60, ON_LAND());
+    expect(out.launch).toBe(true);
+    expect(ap.flying).toBe('takeoff');
+  });
+
+  it('and asks for nothing at all until it has', () => {
+    // No pin, no launch. An autopilot that lifted a queen off a beach
+    // because it was idle would be a very expensive way to lose one.
+    const ap = new Autopilot(CFG);
+    expect(ap.update(1 / 60, ON_LAND()).launch).toBe(false);
+    expect(ap.flying).toBe('idle');
+  });
+
+  it('and it is a REQUEST, never a move', () => {
+    // The header's one rule: nothing in this file moves her. A takeoff
+    // is not on the stick — it is a door in the flight model with a
+    // reserve price — so it comes back as something the scene may
+    // refuse, and the demand that goes with it is empty.
+    const ap = new Autopilot(CFG);
+    ap.engage(world(200_000, 0));
+    const out = ap.update(1 / 60, ON_LAND());
+    expect(out.demand.push).toBe(0);
+    expect(out.demand.side).toBe(0);
+    expect(out.demand.lift).toBe(0);
+  });
+
+  it('waits for wet wings rather than pretending they are dry', () => {
+    // The second of Joshua's screenshots: a queen on the open sea,
+    // `AI wait_wings`, seven seconds on the clock. The scene refuses
+    // the launch whatever this file thinks; the point of knowing is
+    // that the readout can say so.
+    const ap = new Autopilot(CFG);
+    ap.engage(world(200_000, 0));
+    const out = ap.update(1 / 60, ON_LAND({ wingsWet: true }));
+    expect(out.launch).toBe(false);
+    expect(out.blocked).toBe('wings');
+    expect(ap.flying).toBe('takeoff');
+  });
+
+  it('and for a reserve she has not got', () => {
+    const ap = new Autopilot(CFG);
+    ap.engage(world(200_000, 0));
+    const out = ap.update(1 / 60, ON_LAND({ launchable: false }));
+    expect(out.launch).toBe(false);
+    expect(out.blocked).toBe('reserve');
+  });
+
+  it('and never reports NO PROGRESS for standing still waiting', () => {
+    // `stale` measures a range that has stopped improving, and a range
+    // cannot improve while she is waiting for her wings. Left running,
+    // the watchdog would fire after `patience` seconds and call the one
+    // rule keeping her out of the sea a blockage.
+    const ap = new Autopilot(CFG);
+    ap.engage(world(200_000, 0));
+    let out = ap.update(1 / 60, ON_LAND({ wingsWet: true }));
+    for (let i = 0; i < Math.ceil((CFG.patience + 2) * 60); i++) {
+      out = ap.update(1 / 60, ON_LAND({ wingsWet: true }));
+    }
+    expect(out.blocked).toBe('wings');
+    expect(ap.flying).toBe('takeoff');
+  });
+
+  it('climbs straight up, and only up, until it is a metre off', () => {
+    const ap = new Autopilot(CFG);
+    ap.engage(world(200_000, 0));
+    ap.update(1 / 60, ON_LAND());
+    for (const agl of [1, 20, 55, CFG.launchAgl - 1]) {
+      const out = ap.update(1 / 60, sense({
+        aloft: true, altitude: agl, ground: 0, airspeed: 0.01,
+        drift: { x: 0, z: 0 },
+      }));
+      expect(out.state, `${agl}`).toBe('takeoff');
+      expect(out.demand.lift, `${agl}`).toBe(1);
+      // THE PART THAT MAKES IT A LIFT AND NOT A LAUNCH ACROSS THE
+      // BEACH: no forward, no turn, whatever the pin is doing.
+      expect(out.demand.push, `${agl}`).toBe(0);
+      expect(out.demand.side, `${agl}`).toBe(0);
+      expect(out.launch, `${agl}`).toBe(false);
+    }
+  });
+
+  it('and holds the hover while it does, because a glide from 10 cm is a landing', () => {
+    const ap = new Autopilot(CFG);
+    ap.engage(world(200_000, 0));
+    ap.update(1 / 60, ON_LAND());
+    const out = ap.update(1 / 60, sense({
+      aloft: true, altitude: 10, ground: 0, airspeed: 0.01,
+      drift: { x: 0, z: 0 },
+    }));
+    expect(out.demand.hold).toBeGreaterThan(0);
+  });
+
+  it('then starts flying, at the altitude the wind says and not the one it lifted to', () => {
+    const ap = new Autopilot(CFG);
+    ap.engage(world(200_000, 0));
+    ap.update(1 / 60, ON_LAND());
+    ap.update(1 / 60, sense({ aloft: true, altitude: 10, ground: 0 }));
+    const out = ap.update(1 / 60, sense({
+      aloft: true, altitude: CFG.launchAgl, ground: 0,
+    }));
+    expect(out.state).not.toBe('takeoff');
+    expect(['acquire', 'cruise']).toContain(out.state);
+  });
+
+  it('and the metre it lifts to clears the floor it must never go below', () => {
+    // Not taste. The band search picks her cruising altitude the
+    // instant she starts travelling, and a search beginning below
+    // `floorAgl` would have her leave the ground already breaking the
+    // one altitude rule the autopilot has.
+    expect(CFG.launchAgl).toBeGreaterThan(CFG.floorAgl);
+  });
+
+  it('and going back down to the surface starts the whole thing again', () => {
+    // She lands, or is put down. The next frame is a takeoff, not a
+    // cruise at zero altitude.
+    const ap = new Autopilot(CFG);
+    ap.engage(world(200_000, 0));
+    ap.update(1 / 60, sense({ aloft: true, altitude: 400, ground: 0 }));
+    expect(ap.flying).not.toBe('takeoff');
+    const out = ap.update(1 / 60, ON_LAND());
+    expect(ap.flying).toBe('takeoff');
+    expect(out.launch).toBe(true);
+  });
+});
+
+describe('the scene owns the door, and only the scene', () => {
+  const scene = readFileSync('src/scenes/IslandScene.ts', 'utf8');
+
+  it('lifts her straight up rather than launching her across the beach', () => {
+    // `launch` is the WATER door and it replaces her speed with a burst
+    // at the model's ceiling — 70 cm/s of uncommanded forward, which at
+    // ten centimetres up is most of a metre downwind before she can be
+    // asked where she is going.
+    expect(scene).toContain('this.flight.liftOff(');
+    const lift = scene.slice(scene.indexOf("lift?.launch === true"));
+    expect(lift.slice(0, 600)).not.toContain('this.flight.launch(');
+  });
+
+  it('and still refuses on wet wings, in the scene where that rule lives', () => {
+    expect(scene).toContain("lift?.launch === true && !this.wings.wet");
+  });
+
+  it('and pays the reserve exactly once, on a launch that was accepted', () => {
+    const lift = scene.slice(scene.indexOf("lift?.launch === true"));
+    const paid = lift.indexOf('if (paid > 0) {');
+    const spend = lift.indexOf('this.stamina.spend(paid);');
+    expect(paid).toBeGreaterThan(-1);
+    expect(spend).toBeGreaterThan(paid);
+  });
+
+  it('and stops walking her the instant she is flying', () => {
+    // The rest of that substep is the ground's arithmetic — paddling,
+    // wading, footfall — and none of it is true of her any more.
+    const lift = scene.slice(scene.indexOf("lift?.launch === true"));
+    expect(lift.slice(0, 1400)).toContain('continue;');
+  });
+
+  it('and tells the autopilot why she is still down there', () => {
+    expect(scene).toContain('wingsWet: this.wings.wet,');
+    expect(scene).toContain('launchable: this.flight.canLaunch(this.stamina.fraction),');
+  });
+
+  it('and the chip is lit through the takeoff, not only once she is up', () => {
+    // The seconds between confirming a destination and leaving the
+    // ground are seconds the autopilot is flying her, and they are the
+    // one part of the journey the player has never watched it do.
+    const state = scene.slice(scene.indexOf('private apState()'));
+    expect(state.slice(0, 900)).toContain("return this.autopilot.engaged ? 'flying' : 'off';");
+  });
+});
+
+describe('and it flies at the top of the model, not the pace row', () => {
+  const scene = readFileSync('src/scenes/IslandScene.ts', 'utf8');
+
+  it('because Joshua asked for the fastest speed and got walk', () => {
+    // The pace row is a decision about how hard SHE is working when the
+    // player is flying her. Handing a machine the controls and asking
+    // it to cross an island is a different decision, already made — and
+    // walk, the default, is half the model's maximum.
+    expect(scene).toContain("? AUTO_AIRSPEED[this.pace] : SPRINT_AIRSPEED,");
+    const wired = scene.slice(scene.indexOf('nav ? {'));
+    expect(wired.slice(0, 1800)).toContain('this.stamina.spent');
+  });
+
+  it('and gives the row back to a queen who has nothing left', () => {
+    // A spent queen is not sprinting anywhere, and the survival systems
+    // have to keep meaning what they say.
+    const wired = scene.slice(scene.indexOf('nav ? {'));
+    const ceiling = wired.slice(0, 1800);
+    expect(ceiling.indexOf('this.stamina.spent'))
+      .toBeLessThan(ceiling.indexOf('SPRINT_AIRSPEED'));
   });
 });

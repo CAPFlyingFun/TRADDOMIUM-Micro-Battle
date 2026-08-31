@@ -1233,6 +1233,8 @@ export class IslandScene {
       disarmed: () => this.grace.disarmed,
       ignoredByHostiles: () => this.grace.ignoredByHostiles,
       wings: () => this.winged,
+      /** Probe only: seconds until she can fly again, or null if dry. */
+      wingsLeft: () => this.wings.seconds,
       compass: () => {
         const view = new THREE.Vector3();
         this.follow.camera.getWorldDirection(view);
@@ -1584,7 +1586,13 @@ export class IslandScene {
   private apState(): ChipState {
     if (this.brain.active === null) return 'off';
     if (this.surrendered) return 'standby';
-    return this.autopilot.engaged && this.flight.aloft ? 'flying' : 'off';
+    // NOT `&& aloft` any more, and that was not a cosmetic clause: the
+    // autopilot owns the takeoff now, so the seconds between confirming
+    // a destination and leaving the ground are seconds it is flying her
+    // — and a chip that stayed dark through the one part of the journey
+    // the player has never seen it do would read as nothing having
+    // happened at all.
+    return this.autopilot.engaged ? 'flying' : 'off';
   }
 
   /**
@@ -1664,29 +1672,19 @@ export class IslandScene {
       else this.autopilot.engage(pin);
     }
 
-    // ON THE GROUND THE AUTOPILOT IS FLYING NOTHING, so nothing done
-    // with the controls there can be taking it away from it.
+    // SHE IS NOT AIRBORNE YET, and until v0.0.139 that was the end of
+    // it: the autopilot commanded nothing on a surface and the player
+    // had to fly her off it by hand. Joshua, watching a queen sit on a
+    // beach and then on the open sea with a waypoint set: "It never
+    // automatically lift and fly from land or water... It's missing a
+    // takeoff action to link it together."
     //
-    // THIS IS THE BUG JOSHUA HIT, and it took three attempts because
-    // every one of them was fixing the wrong end. He set the waypoint
-    // from the map, THEN took off — and the run-up is the stick and the
-    // shove is the lift lever, so by the time she left the ground the
-    // autopilot had already been told the player was flying. It sat in
-    // STANDBY waiting for a destination it already had, the boost never
-    // spooled, and his report was "I couldn't tell if it was x10 times
-    // as fast yet". My own probe ordered the pin AFTER takeoff and
-    // never saw any of it.
-    //
-    // `handsClear` is the memory that makes the difference: the
-    // controls must have come to REST since she left the ground before
-    // a hand on them means anything. The run-up, the shove and the
-    // climb-out are one continuous input that began on the ground, so
-    // they are how she gets airborne and not a takeover.
-    if (!this.flight.aloft) {
-      this.handsClear = false;
-      this.nav = null;
-      return null;
-    }
+    // So the takeoff is the autopilot's now, and what remains here is
+    // the one thing that did not change: the run-up, the shove and the
+    // climb-out are one continuous input that begins on a surface, and
+    // `handsClear` is the memory that keeps a player who takes off by
+    // hand from being read as taking the controls away from an
+    // autopilot that had not touched them yet.
 
     // THE PLAYER'S OWN HANDS, read from the RAW controls rather than
     // the gated ones — `handsOff` zeroes those, and reading them would
@@ -1746,6 +1744,12 @@ export class IslandScene {
       track: trackOf(drift, this.heldTrack),
       climbing: this.flight.climbing,
       aloft: this.flight.aloft,
+      // WHY SHE IS STILL ON THE WATER, when she is. Both are the
+      // scene's facts and neither is the autopilot's to overrule: the
+      // launch below refuses on wet wings whatever this file thinks,
+      // and the reserve a takeoff costs belongs to `Flight`.
+      wingsWet: this.wings.wet,
+      launchable: this.flight.canLaunch(this.stamina.fraction),
       // The DRAWN floor, the one she would land on — water included,
       // the same surface the flight model is given below.
       terrainAt: (wx, wz) => groundHeight(wx, wz) + (waterSpotAt(wx, wz)?.depth ?? 0),
@@ -1946,7 +1950,16 @@ export class IslandScene {
     // `nav` rather than `engaged`: it is non-null only on frames the
     // autopilot actually issued a demand, so a hand on the controls
     // hands her back real time without waiting to be a surrender.
-    this.travel.ask(this.nav !== null && !this.surrendered);
+    //
+    // AND ONLY ONCE SHE IS OFF THE SURFACE. The boost is for
+    // TRAVELLING, and a queen waiting for her wings to dry is not
+    // travelling — she is paying a price. Thirty seconds out of the
+    // rain is Joshua's number and the whole of what makes water a cost
+    // rather than a trap; spending it at ten times the rate because
+    // there happened to be a waypoint set would quietly refund it to
+    // anyone using the map, and leave the same wait full price for
+    // anyone flying by hand.
+    this.travel.ask(this.nav !== null && !this.surrendered && this.flight.aloft);
     const plan = this.travel.update(dt);
 
     // ── Air or ground ────────────────────────────────────────────
@@ -2080,10 +2093,32 @@ export class IslandScene {
         const step = this.flight.update(
           nav ? {
             ...nav.demand,
-            // THE PACE ROW IS STILL THE POWER SETTING. An autopilot may
-            // ask for an airspeed; it does not get to raise the ceiling
+            // THE AUTOPILOT FLIES AT THE TOP OF THE MODEL, and this
+            // used to say the opposite: the pace row was the power
+            // setting and an autopilot did not get to raise the ceiling
             // the player chose, any more than Auto does.
-            ceiling: wants ? SPRINT_AIRSPEED : AUTO_AIRSPEED[this.pace],
+            //
+            // Joshua overruled that on the first device pass — "I
+            // noticed it was traveling way too slow and should set for
+            // the fastest speed" — and it took a second bug to notice
+            // the rule was still standing, because my own probe forced
+            // Run and sprint before every flight and so never once flew
+            // at the ceiling a player would actually have left selected.
+            // Walk is the default. Walk is half the model's maximum. A
+            // queen crossing Kauai at 35 cm/s under a x10 boost is a
+            // twelve-minute leg that should have been six.
+            //
+            // A pace row is a decision about how hard SHE is working
+            // when the player is flying her. Handing a machine the
+            // controls and asking it to cross an island is a different
+            // decision, already made, and it is made in the same breath
+            // as choosing the destination.
+            //
+            // EXCEPT ON AN EMPTY RESERVE, where the pace row comes back
+            // — a spent queen is not sprinting anywhere and the survival
+            // systems must keep meaning what they say.
+            ceiling: this.stamina.spent
+              ? AUTO_AIRSPEED[this.pace] : SPRINT_AIRSPEED,
           } : {
             push: stick.y,
             side: stick.x,
@@ -2204,6 +2239,46 @@ export class IslandScene {
         const overHer = wade.depth - wade.above;
         this.swimOver = Math.max(0, overHer);
         this.headUnder = overHer > (this.headUnder ? 0.6 : 1.0);
+
+        // ── THE DRONE LIFT ───────────────────────────────────────
+        // The other pilot, on the surface. It runs here as well as in
+        // the air because it now owns the whole journey: Joshua's
+        // report on v0.0.138 was that she never left the ground or the
+        // water at all — "It's missing a takeoff action to link it
+        // together" — and everything Phase 2 built began one metre up.
+        //
+        // The floor is where she is standing, water and all. `holdFloor`
+        // was set from `wade` three lines ago precisely so it is this
+        // frame's and not a stale one carried over from the last time
+        // she flew.
+        const lift = this.flyMyself(dt, this.holdFloor);
+        // WET WINGS STILL REFUSE, and the refusal lives here rather than
+        // in the autopilot for the same reason it always did: it is a
+        // fact about her body, it applies to the player's lever too, and
+        // a second copy of it in the other file would be a second thing
+        // to get out of step. The autopilot is TOLD (`wingsWet`) so it
+        // can say WAITING ON WINGS rather than sit there mute.
+        if (lift?.launch === true && !this.wings.wet) {
+          // STRAIGHT UP, at a standstill. Not the water launch's burst
+          // at the model's ceiling: she is being lifted to a metre and
+          // then asked where she is going, and 70 cm/s of uncommanded
+          // forward would throw her downwind of the pin before she was
+          // a body length up. See Flight.liftOff.
+          const paid = this.flight.liftOff(
+            this.stamina.fraction, this.ant.bearing, this.afloat,
+          );
+          if (paid > 0) {
+            this.stamina.spend(paid);
+            // An airborne queen does not fly tail-first — the same
+            // reason the manual takeoff turns Auto astern round.
+            if (this.auto.active && this.auto.way === -1) this.auto.flip();
+            // She is flying NOW. The rest of this leg is the ground's
+            // arithmetic — paddling, wading, footfall — and none of it
+            // is true of her any more; the next substep takes the air
+            // branch and picks her up a centimetre off the sand.
+            continue;
+          }
+        }
 
         // Only charge her for a sprint she is actually getting: calling
         // for one while stopped or reversing costs nothing. Afloat the

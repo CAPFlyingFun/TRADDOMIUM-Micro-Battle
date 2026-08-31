@@ -98,6 +98,8 @@ function fly(scale: number, worldDt = 1 / 60): Leg {
         track: held,
         climbing: flight.climbing,
         aloft: flight.aloft,
+        wingsWet: false,
+        launchable: true,
         terrainAt: () => GROUND,
         windAt: (h) => ({ x: ALOFT.x * windProfile(h), z: ALOFT.z * windProfile(h) }),
       };

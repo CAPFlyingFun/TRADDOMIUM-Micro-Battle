@@ -34,7 +34,7 @@
  * papered over.
  */
 import { bearingOf, wrap180 } from '../ui/compassMath';
-import { CLIMB_RATE, type FlightDemand } from './flight';
+import { CLIMB_RATE, HOVER_HOLD, type FlightDemand } from './flight';
 import { predict, type Drift, type Predicted } from './telemetry';
 import { AUTOPILOT_DEFAULTS, CEILING, type AutopilotConfig } from './autopilotConfig';
 import type { WorldPoint } from '../world/coords';
@@ -50,6 +50,17 @@ import type { WorldPoint } from '../world/coords';
  */
 export type NavState =
   | 'idle'
+  /**
+   * OFF THE SURFACE AND STRAIGHT UP, before any of the rest of it.
+   *
+   * Phase 2 shipped without this and it was the missing link Joshua
+   * named: "It never automatically lift and fly from land or water...
+   * It's missing a takeoff action to link it together." The file used
+   * to say, in as many words, that taking off is a decision with a
+   * stamina price and the player's to make — which was a defensible
+   * position right up until the player asked for a drone.
+   */
+  | 'takeoff'
   | 'acquire'
   | 'cruise'
   | 'arrival'
@@ -57,7 +68,7 @@ export type NavState =
   | 'blocked';
 
 /** Why she stopped. Null unless the state is `blocked`. */
-export type Blocked = 'no_progress' | 'terrain';
+export type Blocked = 'no_progress' | 'terrain' | 'wings' | 'reserve';
 
 /** Everything the autopilot is allowed to know about the world. */
 export interface NavSense {
@@ -77,8 +88,26 @@ export interface NavSense {
   readonly track: number;
   /** Vertical speed, world units a second. */
   readonly climbing: number;
-  /** Is she airborne at all? On the ground the autopilot does nothing. */
+  /** Is she airborne at all? On the surface it lifts her off it. */
   readonly aloft: boolean;
+  /**
+   * Are her wings too wet to fly?
+   *
+   * A queen who has been swimming cannot take off until they dry, and
+   * that is not the autopilot's rule to bend — the scene refuses the
+   * launch regardless. Knowing about it is what lets the readout say
+   * WAITING ON WINGS instead of sitting there saying nothing, which is
+   * exactly what Joshua photographed on the water.
+   */
+  readonly wingsWet: boolean;
+  /**
+   * Would the flight model accept a launch right now?
+   *
+   * Asked rather than derived: the reserve a takeoff costs belongs to
+   * `Flight`, and a second copy of that threshold here is a second
+   * thing to get out of step.
+   */
+  readonly launchable: boolean;
   /** The terrain query, so this file needs no heightfield of its own. */
   readonly terrainAt: (wx: number, wz: number) => number;
   /**
@@ -108,6 +137,18 @@ export interface NavCommand {
   readonly band: number;
   /** The crab that band costs her, degrees. */
   readonly crab: number;
+  /**
+   * LEAVE THE SURFACE, NOW — the one thing the autopilot cannot do
+   * with a `FlightDemand`.
+   *
+   * Every other command in this file is the demand a thumb produces,
+   * and that is the invariant the header opens with: nothing here moves
+   * her. A takeoff is not on the stick, though — it is a door in the
+   * flight model with a stamina price — so it comes back as a request
+   * the scene may refuse, and the scene is still the only thing that
+   * spends the reserve or opens the door.
+   */
+  readonly launch: boolean;
 }
 
 /** Nothing asked for, nothing commanded. */
@@ -326,16 +367,12 @@ export class Autopilot {
   }
 
   /**
-   * One frame. Returns the demand a thumb would have produced.
-   *
-   * On the ground it commands nothing at all: taking off is a decision
-   * with a stamina price and a player's, not something an autopilot
-   * does because a pin exists somewhere.
+   * One frame. Returns the demand a thumb would have produced — plus,
+   * on the surface, a request to leave it.
    */
   update(dt: number, sense: NavSense): NavCommand {
     const to = this.target;
-    if (to === null || this.state === 'idle' || !sense.aloft) {
-      if (!sense.aloft && this.state !== 'idle') this.state = 'acquire';
+    if (to === null || this.state === 'idle') {
       return this.report(IDLE, 0, 0, 0, 0, null);
     }
 
@@ -344,6 +381,64 @@ export class Autopilot {
     // AGAINST HER TRACK, NOT HER HEADING. The difference is the whole
     // point of the file — see the header.
     const error = wrap180(wanted - sense.track);
+
+    // ── OFF THE SURFACE FIRST ────────────────────────────────────
+    // Nothing else in this file means anything to a queen standing on a
+    // beach. She is asked to leave, and until she has, she is asked for
+    // nothing else at all: no track, no band, no speed.
+    if (!sense.aloft) {
+      this.state = 'takeoff';
+      this.held = false;
+      // THE WATCHDOG DOES NOT RUN ON THE GROUND. `stale` measures a
+      // range that has stopped improving, and a range cannot improve
+      // while she is standing still waiting for her wings — she would
+      // report BLOCKED for the crime of obeying the rule that keeps
+      // her out of the sea.
+      this.closest = Number.POSITIVE_INFINITY;
+      this.stale = 0;
+      this.band = this.cfg.launchAgl;
+      this.crab = 0;
+      // WET WINGS ARE NOT A FAILURE, they are a wait, and the second
+      // of Joshua's two screenshots is exactly this: a queen on the
+      // open sea with `AI wait_wings` and seven seconds on the clock.
+      // The scene refuses the launch either way; saying so is what
+      // makes the wait legible instead of looking like a dead
+      // autopilot.
+      this.why = sense.wingsWet ? 'wings'
+        : sense.launchable ? null : 'reserve';
+      return this.report(
+        IDLE, range, wanted, error, 0, null, this.why === null,
+      );
+    }
+
+    // ── AND STRAIGHT UP BEFORE ANYWHERE ELSE ─────────────────────
+    // A metre of clear air under her before she is asked to travel.
+    // Not fussiness: she has just left a surface, the band search is
+    // about to pick a cruising altitude from the wind, and a search
+    // that begins at ten centimetres would have her choose a band
+    // while still inside the surf she is leaving.
+    if (this.state === 'takeoff') {
+      const climbed = Math.max(0, sense.altitude - sense.ground);
+      if (climbed < this.cfg.launchAgl) {
+        this.band = this.cfg.launchAgl;
+        this.crab = 0;
+        this.why = null;
+        // Full lever, no push. The hover hold is what keeps this a
+        // CLIMB rather than a launch across the beach: the model reads
+        // an unpowered demand as a glide, and a glide from ten
+        // centimetres is a landing.
+        return this.report(
+          { push: 0, side: 0, lift: 1, hold: HOVER_HOLD },
+          range, wanted, error, 0, null,
+        );
+      }
+      // A metre up and flying. From here it is an ordinary acquire, and
+      // the no-progress watchdog starts counting from this moment
+      // rather than from the beach.
+      this.state = 'acquire';
+      this.closest = Number.POSITIVE_INFINITY;
+      this.stale = 0;
+    }
 
     this.held = captured(range, this.held, this.cfg);
     if (this.held) {
@@ -455,6 +550,7 @@ export class Autopilot {
   private report(
     demand: FlightDemand, range: number, wanted: number,
     error: number, target: number, ahead: number | null,
+    launch = false,
   ): NavCommand {
     return {
       demand,
@@ -467,6 +563,7 @@ export class Autopilot {
       ahead,
       band: this.band,
       crab: this.crab,
+      launch,
     };
   }
 }
