@@ -48,6 +48,8 @@ import { SaltExposure, SALT_DAMAGE_FRACTION } from '../ant/brine';
 import { waterSpotAt } from '../world/waterQuery';
 import { bakeIslandChannels } from '../world/islandChannels';
 import { DEFAULT_MODE, type SessionMode } from '../game/session';
+import { Autopilot, tookOver, type NavCommand } from '../ant/autopilot';
+import { AUTOPILOT_DEFAULTS } from '../ant/autopilotConfig';
 import {
   DISCOVERY_CELLS, decodeDiscovery, emptyDiscovery, encodeDiscovery,
   fractionSeen, reveal,
@@ -86,7 +88,7 @@ import { DebugDie } from '../ui/DebugDie';
 import { WeatherChip } from '../ui/WeatherChip';
 import { FlightHud, windCall, type FlightView } from '../ui/FlightHud';
 import {
-  Eased, SOON, driftOf, touchdown, trackOf,
+  Eased, SOON, driftOf, groundVelocity, touchdown, trackOf,
   type FlightTelemetry,
 } from '../ant/telemetry';
 import { bearingFromHeading, bearingOf, headingFromBearing, pitchOf } from '../ui/compassMath';
@@ -281,6 +283,29 @@ export class IslandScene {
   private known: Discovery = emptyDiscovery();
   /** Where the last reveal was centred, so it is not redone every frame. */
   private revealedAt: WorldPoint | null = null;
+  /**
+   * PHASE 2. The other pilot — it holds the same stick and nothing else.
+   *
+   * The MissionBrain decides where she is going; this decides what the
+   * controls should do about it; Flight decides what happens. Three
+   * questions, three files, and this one never learns why.
+   */
+  private readonly autopilot = new Autopilot(AUTOPILOT_DEFAULTS);
+  /** Last frame's command, for the developer line. */
+  private nav: NavCommand | null = null;
+  /** The pin the autopilot was last handed, by identity. */
+  private flownTo: WorldPoint | null = null;
+  /** The player took the stick, and has not asked to be flown since. */
+  private surrendered = false;
+  /**
+   * The stick as the THUMB left it, before the hands-off gate.
+   *
+   * The gated reading is zeroed while a menu is up, so testing that one
+   * for a manual override would mean opening the map counted as taking
+   * the controls — and the autopilot would disengage every time
+   * somebody looked at the map it is flying to.
+   */
+  private rawStick: StickReading = { x: 0, y: 0, deflection: 0, lane: 'none', released: false };
   /**
    * Which slot this run writes to. One run, one slot, all sitting.
    *
@@ -898,6 +923,34 @@ export class IslandScene {
         this.orderTo(world(wx, wz), 'probe', satisfiesHydration);
       },
       cancelOrder: () => this.brain.cancel(),
+      /**
+       * PHASE 2, probe only: what the autopilot is doing, and WHY NOT.
+       *
+       * It returned null whenever it was not flying, which cost an
+       * afternoon: the first end-to-end probe watched a queen who was
+       * airborne with a pin set and was told only `null` — which cannot
+       * tell "not engaged" from "surrendered" from "on the ground". The
+       * reasons are the useful half.
+       */
+      autopilot: () => ({
+        engaged: this.autopilot.engaged,
+        surrendered: this.surrendered,
+        aloft: this.flight.aloft,
+        pinned: this.brain.primaryMission !== null,
+        stick: [this.rawStick.x, this.rawStick.y],
+        lever: this.liftSlider.lift,
+        nav: this.nav === null ? null : {
+          state: this.nav.state,
+          blocked: this.nav.blocked,
+          range: this.nav.range,
+          wanted: this.nav.wanted,
+          track: this.heldTrack,
+          error: this.nav.error,
+          target: this.nav.target,
+          airspeed: this.flight.airspeed,
+          clearance: this.nav.ahead,
+        },
+      }),
       /** Probe only: what the textured overview cost, and whether it landed. */
       mapRelief: () => ({ ms: Math.round(reliefCost()), ready: reliefIsland() !== null }),
       // PHASE 1.5, probe only. Discovery is meant to take hours of
@@ -1490,6 +1543,87 @@ export class IslandScene {
   }
 
   /**
+   * ONE FRAME OF THE AUTOPILOT, or null when the player is flying.
+   *
+   * Returns the demand a thumb would have produced, or nothing at all —
+   * and "nothing at all" is the ordinary case, so the manual path below
+   * is untouched by this existing.
+   *
+   * THE ORDER OF THE THREE REFUSALS MATTERS. A real stick input beats
+   * everything, because the player is never a passenger. A pin she has
+   * not got is next. And a menu is NOT a refusal in multiplayer: an
+   * autopilot that stopped flying because someone opened the map is not
+   * an autopilot, and the hover only stands in when nothing else is
+   * holding the controls.
+   */
+  private flyMyself(dt: number, floor: number): NavCommand | null {
+    const pin = this.brain.primaryMission?.at ?? null;
+
+    // A NEW ORDER IS A NEW CONSENT. Confirming a destination is the
+    // player asking to be flown there, so it clears any earlier
+    // surrender — and it is the ONLY thing that does.
+    if (pin !== this.flownTo) {
+      this.flownTo = pin;
+      this.surrendered = false;
+      if (pin === null) this.autopilot.clear();
+      else this.autopilot.engage(pin);
+    }
+
+    // THE PLAYER'S OWN HANDS, read from the RAW controls rather than
+    // the gated ones — `handsOff` zeroes those, and reading them would
+    // mean opening the map counted as taking over.
+    // THE LEVER ONLY COUNTS WHILE IT IS HELD, and this is the bug the
+    // first end-to-end flight found. It comes home over a second when
+    // released, and a takeoff leaves it at full deflection — so reading
+    // its VALUE meant every frame of that second re-declared "the
+    // player is flying", and the autopilot could never engage after a
+    // takeoff. Which is the only way she gets airborne.
+    //
+    // The stick is not the same case: it reads its keys and its thumb
+    // live, so its value IS a command.
+    const lever = this.liftSlider.held ? this.liftSlider.lift : 0;
+    if (!this.handsOff
+      && tookOver(this.rawStick.y, this.rawStick.x, lever, AUTOPILOT_DEFAULTS)) {
+      // AND IT STAYS TAKEN. Re-engaging the instant the thumb lifted
+      // would mean the player could never fly manually while a pin
+      // existed without holding the stick for ever — every nudge would
+      // be undone the moment they let go, which is the autopilot
+      // fighting them rather than obeying them. Getting it back is a
+      // deliberate act: confirm the destination again.
+      this.surrendered = true;
+      this.autopilot.disengage();
+    }
+
+    if (this.surrendered || pin === null || !this.autopilot.engaged) {
+      this.nav = null;
+      return null;
+    }
+
+    // HER TRACK, FRESH. `heldTrack` is written by the telemetry pass
+    // that feeds the HUD, which runs AFTER this — so the held value is
+    // last frame's and is used only as the steady fallback `trackOf`
+    // wants when she is barely moving.
+    const drift = groundVelocity(
+      this.flight.airspeed, this.flight.heading, this.windOnHer(),
+    );
+    this.nav = this.autopilot.update(dt, {
+      at: this.ant.where,
+      altitude: floor + this.flight.height,
+      ground: floor,
+      heading: this.flight.heading,
+      airspeed: this.flight.airspeed,
+      drift,
+      track: trackOf(drift, this.heldTrack),
+      climbing: this.flight.climbing,
+      aloft: this.flight.aloft,
+      // The DRAWN floor, the one she would land on — water included,
+      // the same surface the flight model is given below.
+      terrainAt: (wx, wz) => groundHeight(wx, wz) + (waterSpotAt(wx, wz)?.depth ?? 0),
+    });
+    return this.nav;
+  }
+
+  /**
    * WHAT THE TWO MAP SURFACES ARE TOLD, once a frame.
    *
    * `brain.primaryMission` and NOT `intent().target` or
@@ -1598,6 +1732,7 @@ export class IslandScene {
     // `released` STAYS FALSE. It is a single-frame edge and AutoRun
     // engages on it, so a real lift banked behind an open map would
     // have set her running by herself the moment it closed.
+    this.rawStick = held;
     const stick: StickReading = this.handsOff
       ? { x: 0, y: 0, deflection: 0, lane: 'none', released: false }
       : held;
@@ -1758,8 +1893,28 @@ export class IslandScene {
       // land her on the damped floor. settle() works from groundHeight
       // and this closes the gap.
       const holdBase = this.holdFloor - ground;
+
+      // ── THE OTHER PILOT ──────────────────────────────────────
+      // Phase 2. She flies herself to the pin the MissionBrain holds,
+      // by holding the same stick a thumb would — the command below is
+      // a FlightDemand and nothing else, so `Flight.update` is still
+      // the only thing in the game that moves her.
+      //
+      // ANY REAL INPUT WINS, immediately. The player is never a
+      // passenger: a push, a turn or a touch of the lever past the
+      // deadzone hands the controls straight back and leaves the
+      // destination standing, because taking the stick is not changing
+      // your mind about where you were going.
+      const nav = this.flyMyself(dt, trueFloor);
+
       const step = this.flight.update(
-        {
+        nav ? {
+          ...nav.demand,
+          // THE PACE ROW IS STILL THE POWER SETTING. An autopilot may
+          // ask for an airspeed; it does not get to raise the ceiling
+          // the player chose, any more than Auto does.
+          ceiling: wants ? SPRINT_AIRSPEED : AUTO_AIRSPEED[this.pace],
+        } : {
           push: stick.y,
           side: stick.x,
           lift: lever,
@@ -2943,7 +3098,43 @@ export class IslandScene {
       + ` · eta ${secs(d.eta)} · chan ${chan}`
       + ` · stam ${(d.stamina * 100).toFixed(0)}%`
       + ` · ${d.medium} ${gaitWords(d.medium, d.tier)}`
-      + ` · ${d.motion}/${d.act}`;
+      + ` · ${d.motion}/${d.act}`
+      + this.navWords();
+  }
+
+  /**
+   * THE AUTOPILOT, in one cell of the developer line.
+   *
+   * Empty while it is not flying, which is most of the time — a
+   * permanent readout for something that is usually idle is a readout
+   * nobody reads. Everything in it is a number the controller actually
+   * used, so a disagreement between what she does and what this says
+   * is a bug rather than a rounding difference.
+   *
+   * Deliberately small. The Phase 2 brief asked for compact developer
+   * telemetry and explicitly not a giant permanent UI.
+   */
+  private navWords(): string {
+    const nav = this.nav;
+    if (nav === null || !this.autopilot.engaged) return '';
+    const km = (v: number): string => (v >= 100_000
+      ? `${(v / 100_000).toFixed(2)}km` : `${(v / 100).toFixed(0)}m`);
+    const clear = nav.ahead === null ? '——' : km(nav.ahead);
+    return ` · AP ${nav.state}${nav.blocked ? `(${nav.blocked})` : ''}`
+      + ` ${km(nav.range)}`
+      // WANTED against ACTUAL, because the gap between them IS the
+      // crab, and a heading readout beside a track readout is the one
+      // pair that shows the wind being flown through.
+      + ` · trk ${nav.wanted.toFixed(0)}/${this.heldTrack.toFixed(0)}`
+      + ` err ${nav.error >= 0 ? '+' : ''}${nav.error.toFixed(0)}°`
+      + ` · spd ${nav.target.toFixed(0)}/${this.flight.airspeed.toFixed(0)}`
+      + ` gnd ${Math.hypot(...(() => {
+        const g = groundVelocity(
+          this.flight.airspeed, this.flight.heading, this.windOnHer(),
+        );
+        return [g.x, g.z] as [number, number];
+      })()).toFixed(0)}`
+      + ` · clr ${clear}`;
   }
 
   private readSwim(dt: number): FlightTelemetry {

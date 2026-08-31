@@ -171,6 +171,21 @@ export class LiftSlider {
   }
 
   /** How far she is being asked to climb, −1 to 1. */
+  /**
+   * IS A THUMB ACTUALLY ON IT?
+   *
+   * Not the same question as `lift !== 0`, and the difference cost a
+   * bug. Let go and this lever comes HOME over a second (see update
+   * below), so for that whole second it reads non-zero with nobody
+   * touching it — and a takeoff leaves it at full deflection. Anything
+   * asking "is the player flying?" has to ask this rather than reading
+   * the value, or a queen who has just taken off looks like a queen
+   * being hand-flown until the spring finishes.
+   */
+  get held(): boolean {
+    return this.gripped !== null;
+  }
+
   get lift(): number {
     return this.on ? this.at : 0;
   }

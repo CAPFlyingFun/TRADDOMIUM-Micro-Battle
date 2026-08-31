@@ -46,6 +46,15 @@ const CORE = [
   'src/ant/pace.ts',
   'src/ant/stamina.ts',
   'src/ant/telemetry.ts',
+  // PHASE 2. The autopilot DECIDES what the controls should do, so it
+  // belongs on this side of the line as surely as the flight model it
+  // commands — a server that flew a queen would run this, not a copy
+  // of it. It pulls in compassMath, which is trigonometry living under
+  // `ui/` for historical reasons and is listed here for the same
+  // reason autopilot.ts is.
+  'src/ant/autopilot.ts',
+  'src/ant/autopilotConfig.ts',
+  'src/ui/compassMath.ts',
   'src/ant/wander.ts',
   'src/ant/wingbeat.ts',
   'src/ant/grace.ts',
