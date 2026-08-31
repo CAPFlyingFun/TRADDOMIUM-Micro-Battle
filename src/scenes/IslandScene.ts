@@ -48,7 +48,9 @@ import { SaltExposure, SALT_DAMAGE_FRACTION } from '../ant/brine';
 import { waterSpotAt } from '../world/waterQuery';
 import { bakeIslandChannels } from '../world/islandChannels';
 import { DEFAULT_MODE, type SessionMode } from '../game/session';
-import { Autopilot, tookOver, type NavCommand } from '../ant/autopilot';
+import {
+  Autopilot, tookOver, travelling, type NavCommand,
+} from '../ant/autopilot';
 import { MAX_TRAVEL, TravelScale } from '../ant/travelScale';
 import { AutopilotChip, type ChipState } from '../ui/AutopilotChip';
 import { AUTOPILOT_DEFAULTS } from '../ant/autopilotConfig';
@@ -392,7 +394,27 @@ export class IslandScene {
   private static readonly DISCOVERY_SAVE = 5;
   private readonly flight = new Flight();
   /** Five minutes of being left alone, and of leaving everything alone. */
-  private readonly grace = new Grace();
+  /**
+   * HER OWN MILLISECONDS, monotonic, for anything that runs on a
+   * DEADLINE rather than on a per-frame tick.
+   *
+   * Everything of hers that ticks — thirst, stamina, breath, drying —
+   * is handed her time each frame and so follows the travel scale for
+   * free. `Grace` does not tick: it is a deadline compared against a
+   * clock, deliberately, so that it survives a reload and could one day
+   * be issued by a server. That design is right and it had exactly one
+   * consequence nobody had thought about — the clock it was compared
+   * against was the WALL, so under a x10 flight her five minutes of
+   * protection ran ten times slower than every other number on her
+   * card. Joshua, 2026-08-31: "only the water clock matched the x speed
+   * correctly... protection didn't sync."
+   *
+   * So it gets a clock of her own. Still a deadline, still injected,
+   * still replaceable by a server's — just measured in her seconds like
+   * the rest of her.
+   */
+  private herMs = 0;
+  private readonly grace = new Grace(() => this.herMs);
   /** Seconds the "protection ended" warning still has to run. */
   private noticeLeft = 0;
   /** Her body, once it has loaded. Null while the placeholder is up. */
@@ -2101,21 +2123,26 @@ export class IslandScene {
     // autopilot actually issued a demand, so a hand on the controls
     // hands her back real time without waiting to be a surrender.
     //
-    // AND IT RUNS ON THE GROUND TOO, which is a correction. I gated
-    // this on `aloft` on the grounds that a queen waiting for her wings
-    // to dry is paying a price rather than travelling — and then the
-    // device produced a queen resting for thirty seconds of stamina in
-    // real time while her chip said x10, which is the same argument
-    // eating itself.
+    // ONLY WHILE IT IS TAKING HER SOMEWHERE, and that is the right axis
+    // — which took two wrong ones to find. I gated this on `aloft`,
+    // then removed the gate on the grounds that her clock should be her
+    // clock everywhere, and the device answered both: "upon landing or
+    // arriving at a waypoint or gaining stamina, it shouldn't keep x10
+    // the default."
     //
-    // THE BOOST SHRINKS THE WAIT, NEVER THE COST. She spends exactly
-    // the same water, the same reserve and the same drying time
-    // measured in her own seconds; all that changes is how long the
-    // player sits there watching it. That is the whole contract, it is
-    // the same one the flight itself is under, and carving out
-    // exceptions per wait was a rule nobody could hold in their head.
-    this.travel.ask(this.nav !== null && !this.surrendered);
+    // The boost is for the CROSSING. Arrived, resting, drinking, idle —
+    // real time, because none of those are a journey and all of them
+    // are things the player might want to watch at the speed they
+    // actually happen. `travelling` is the one place that decision
+    // lives.
+    this.travel.ask(
+      this.nav !== null && !this.surrendered && travelling(this.nav.state),
+    );
     const plan = this.travel.update(dt);
+    // HER CLOCK ADVANCES BY WHAT SHE IS ABOUT TO SPEND. Before the
+    // simulation rather than after, so anything reading a deadline this
+    // frame reads the same instant her physiology is being stepped to.
+    this.herMs += plan.budget * 1000;
 
     // ── Air or ground ────────────────────────────────────────────
     // Takeoff is offered on ACTUAL speed, never the selected pace:
@@ -2447,7 +2474,25 @@ export class IslandScene {
         // or take off, and it ends.
         const reachable = canDrink(this.ant.where.wx, this.ant.where.wz);
         this.drinkButton.show(reachable);
-        this.act = reachable && this.drinkButton.held ? 'drinking' : 'none';
+        // SHE DRINKS FOR HERSELF WHEN SHE FLEW HERE TO DRINK.
+        //
+        // The brain decides she is thirsty, plans a detour to water and
+        // the autopilot flies her to it — and then, until now, the whole
+        // errand stopped one tap short of the point of it. Joshua, with
+        // a queen standing in a stream at 0% water: "it also needs to
+        // self drink or prompt the user to press and hold to drink."
+        //
+        // Self-drink, and the reason to choose that over a prompt is
+        // that a prompt is a fifth thing to do while she is already
+        // being flown by a machine. The conditions are narrow: it has to
+        // be the BRAIN's own errand (`goal === 'drink'`), she has to be
+        // standing at water she can reach, and the autopilot has to
+        // still have the controls. A player flying by hand still holds
+        // the button — nothing about their queen changed.
+        const errand = this.brain.goal === 'drink'
+          && this.autopilot.engaged && !this.surrendered;
+        this.act = reachable && (this.drinkButton.held || errand)
+          ? 'drinking' : 'none';
         const sprinting = wants && travel.speed > PACE_SPEED[this.pace] + 1e-3;
         const resting = this.ant.pace < 0.05;
         this.effort = swimEffort(wade.afloat, wade.salt, travel.speed > 0.05, wantDive)

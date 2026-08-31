@@ -42,7 +42,7 @@ describe('the drink button is on the pad again', () => {
     // Stage G: the act IS the state now — there is no separate
     // `drinking` flag shadowing it, which is the point of motion.ts.
     expect(code()).toContain(
-      "this.act = reachable && this.drinkButton.held ? 'drinking' : 'none';",
+      "this.act = reachable && (this.drinkButton.held || errand)",
     );
     // takeTaps is the tap reader; drinking must not use it.
     expect(code()).not.toContain('this.drinkButton.takeTaps()');

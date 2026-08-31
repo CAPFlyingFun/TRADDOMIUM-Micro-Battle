@@ -164,7 +164,11 @@ describe('it is DERIVED, and that is the safety of it', () => {
     // Drinking while standing in the shallows is both at once, which
     // one enum could not have said.
     const body = scene();
-    expect(body).toContain("this.act = reachable && this.drinkButton.held ? 'drinking' : 'none';");
+    // `errand` is the autopilot finishing a water detour it flew her
+    // on — a queen being flown by a machine should not need a thumb
+    // to complete the one thing the flight was for. The BUTTON is
+    // unchanged, which is what this test is really about.
+    expect(body).toContain("this.act = reachable && (this.drinkButton.held || errand)");
     expect(body).toContain("this.act = 'none';");
   });
 });

@@ -16,7 +16,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   Autopilot, bandsFor, bearingTo, captured, progressIn, rangeTo, speedFor,
-  tookOver, turnFor, type NavSense,
+  tookOver, travelling, turnFor, type NavSense,
 } from '../src/ant/autopilot';
 import { AUTOPILOT_DEFAULTS, autopilotConfig } from '../src/ant/autopilotConfig';
 import { groundVelocity, trackOf, type Drift } from '../src/ant/telemetry';
@@ -826,14 +826,13 @@ describe('the scene wires CONTINUE to the one thing it should', () => {
     // only on frames the autopilot actually commanded something. The
     // player at the controls gets real time.
     //
-    // AND ON THE GROUND TOO. The boost shrinks the WAIT and never the
-    // COST — she spends the same reserve, the same water and the same
-    // drying time measured in her own seconds. An `aloft` gate here
-    // meant a queen resting thirty seconds of stamina in real time
-    // under a chip reading x10.
-    expect(scene).toContain(
-      'this.travel.ask(this.nav !== null && !this.surrendered);',
-    );
+    // AND ONLY WHILE IT IS TAKING HER SOMEWHERE. Not `aloft`, which was
+    // the first guess, and not "always", which was the second: arrived,
+    // resting and idle are not journeys, and the device said so —
+    // "upon landing or arriving at a waypoint or gaining stamina, it
+    // shouldn't keep x10 the default".
+    expect(scene).toContain('travelling(this.nav.state)');
+    expect(scene).toContain('this.nav !== null && !this.surrendered');
   });
 });
 
@@ -1162,5 +1161,48 @@ describe('resting, rather than flickering', () => {
   it('and says so on the chip, because a stopped queen needs a word', () => {
     expect(chipWords('resting')).toBe('AP · RESTING');
     expect(chipWords('resting', 10)).toBe('AP · RESTING ×10.0');
+  });
+});
+
+describe('what counts as travelling', () => {
+  it('is the states that are taking her somewhere', () => {
+    for (const state of ['takeoff', 'acquire', 'cruise', 'arrival', 'blocked'] as const) {
+      expect(travelling(state), state).toBe(true);
+    }
+  });
+
+  it('and arrived, resting and idle are not', () => {
+    // The three the boost must let go of. A queen hovering over her pin
+    // at ten times is a queen nobody can watch arrive.
+    for (const state of ['idle', 'hold', 'resting'] as const) {
+      expect(travelling(state), state).toBe(false);
+    }
+  });
+});
+
+/**
+ * AND SHE FINISHES THE ERRAND SHE WAS FLOWN ON.
+ *
+ * The brain decides she is thirsty, plans a detour to water, and the
+ * autopilot flies her to it — and then the whole thing used to stop one
+ * tap short of the point of it. Joshua, with a queen standing in a
+ * stream at 0% water: "it also needs to self drink or prompt the user
+ * to press and hold to drink."
+ */
+describe('drinking at the end of a water detour', () => {
+  const scene = readFileSync('src/scenes/IslandScene.ts', 'utf8');
+
+  it('is the brain\'s errand, not a standing permission', () => {
+    // Narrow on purpose: the brain's own goal, water she can reach, and
+    // the autopilot still holding the controls.
+    expect(scene).toContain("this.brain.goal === 'drink'");
+    const errand = scene.slice(scene.indexOf("const errand = this.brain.goal === 'drink'"));
+    expect(errand.slice(0, 200)).toContain('this.autopilot.engaged');
+    expect(errand.slice(0, 200)).toContain('!this.surrendered');
+  });
+
+  it('and the button still works, for a queen being flown by hand', () => {
+    expect(scene).toContain('this.drinkButton.held || errand');
+    expect(scene).toContain('reachable &&');
   });
 });

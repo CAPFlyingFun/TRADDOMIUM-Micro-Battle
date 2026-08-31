@@ -75,6 +75,27 @@ export type NavState =
   | 'hold'
   | 'blocked';
 
+/**
+ * IS SHE ACTUALLY GOING SOMEWHERE?
+ *
+ * The travel boost exists so a twenty-minute crossing is two minutes of
+ * sitting there. It is for the CROSSING. Joshua, 2026-08-31, watching
+ * the multiplier sit at ten while she stood on a beach getting her
+ * breath back: "upon landing or arriving at a waypoint or gaining
+ * stamina, it shouldn't keep x10 the default."
+ *
+ * Quite right, and it corrects me twice over — I gated the boost on
+ * `aloft`, then removed the gate a day later on the grounds that her
+ * clock should be her clock everywhere. Both were the wrong axis. The
+ * question is not whether she is airborne, it is whether the autopilot
+ * is TAKING HER SOMEWHERE. Arrived, resting and idle are not that;
+ * everything else is, including the climb out and including a blocked
+ * leg she is still trying to fly.
+ */
+export function travelling(state: NavState): boolean {
+  return state !== 'idle' && state !== 'hold' && state !== 'resting';
+}
+
 /** Why she stopped. Null unless the state is `blocked`. */
 export type Blocked = 'no_progress' | 'terrain' | 'wings' | 'reserve';
 
@@ -457,13 +478,41 @@ export class Autopilot {
       );
     }
 
+    // ── HAS SHE ALREADY ARRIVED? ─────────────────────────────────
+    // BEFORE THE TAKEOFF, and that ordering is the whole of a bug that
+    // broke drinking. This test used to sit below the takeoff branch,
+    // so a queen standing exactly ON her destination was never asked
+    // whether she had arrived — she was asked whether she was airborne,
+    // and lifted off.
+    //
+    // What Joshua saw: 0% water, the brain running a water detour, and
+    // a queen at the stream taking off again and again. She cannot
+    // drink in the air, so the one thing she had flown there to do was
+    // the one thing the autopilot would not let her finish. It also
+    // explains the stamina "all over the place" — every one of those
+    // lifts cost a takeoff.
+    //
+    // ARRIVED IS ARRIVED, on the ground or in the air.
+    this.held = captured(range, this.held, this.cfg);
+    if (this.held) {
+      this.state = 'hold';
+      this.why = null;
+      this.band = 0;
+      this.crab = 0;
+      // Aloft this is the hover it always was. On the ground it is the
+      // more important half: no demand, and NO LAUNCH.
+      return this.report(
+        sense.aloft ? { push: 0, side: 0, lift: 0, hold: null } : IDLE,
+        range, wanted, error, 0, null,
+      );
+    }
+
     // ── OFF THE SURFACE FIRST ────────────────────────────────────
     // Nothing else in this file means anything to a queen standing on a
     // beach. She is asked to leave, and until she has, she is asked for
     // nothing else at all: no track, no band, no speed.
     if (!sense.aloft) {
       this.state = 'takeoff';
-      this.held = false;
       // THE WATCHDOG DOES NOT RUN ON THE GROUND. `stale` measures a
       // range that has stopped improving, and a range cannot improve
       // while she is standing still waiting for her wings — she would
@@ -515,17 +564,6 @@ export class Autopilot {
       this.stale = 0;
     }
 
-    this.held = captured(range, this.held, this.cfg);
-    if (this.held) {
-      this.state = 'hold';
-      this.why = null;
-      // Held over the pin: wings level, no thrust asked for, and the
-      // scene's own hover hold keeps her up. Nothing to steer toward.
-      return this.report(
-        { push: 0, side: 0, lift: 0, hold: null }, range, wanted, error, 0, null,
-      );
-    }
-
     // ── WHICH BAND TO FLY ────────────────────────────────────────
     // Priced rather than ruled: every candidate altitude is asked what
     // ground progress it would actually buy, and the best wins. Down in
@@ -557,7 +595,20 @@ export class Autopilot {
 
     // AND THE FLOOR IS NOT NEGOTIABLE. Nothing below 55 cm except a
     // landing, which this phase does not do.
-    if (agl < this.leg.floorAgl) lift = Math.max(lift, this.cfg.bandUrgency);
+    //
+    // PROPORTIONAL, NOT A SWITCH, and the golden test is why again. As
+    // a step — full urgency the instant she crossed the line — this was
+    // a bang-bang controller, and a queen flying ON the floor sat
+    // exactly on its threshold flicking it on and off. Two runs of the
+    // same flight sampling that switch at different step sizes flicked
+    // it at different moments and drifted 198 units apart. The band
+    // term above already holds her at the floor smoothly; this is the
+    // safety net under it, and it should tighten as she sinks rather
+    // than slam when she touches.
+    const under = (this.leg.floorAgl - agl) / Math.max(1, this.leg.floorAgl);
+    if (under > 0) {
+      lift = Math.max(lift, Math.min(1, under) * this.cfg.bandUrgency);
+    }
 
     // TERRAIN OUTRANKS THE BAND. A tailwind two metres up is no use if
     // the ground two seconds ahead is three metres up: the lookahead

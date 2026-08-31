@@ -560,7 +560,10 @@ describe('the autopilot takes the leg\'s floor with the leg', () => {
   it('as a minimum the band search may not look below', () => {
     expect(src).toContain('engage(at: WorldPoint, floorAgl?: number): void');
     expect(src).toContain('const band = bestBand(sense, wanted, this.leg);');
-    expect(src).toContain('if (agl < this.leg.floorAgl)');
+    // Proportional rather than a switch — see the comment in the file;
+    // a bang-bang floor guard made two runs of the same flight at
+    // different time scales drift apart.
+    expect(src).toContain('const under = (this.leg.floorAgl - agl)');
   });
 
   it('and never as her altitude', () => {

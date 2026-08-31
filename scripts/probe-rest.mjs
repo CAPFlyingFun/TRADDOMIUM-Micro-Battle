@@ -69,7 +69,11 @@ let flips = 0;
 let rested = false;
 let resumed = false;
 const began = Date.now();
-while (Date.now() - began < 420_000) {
+// AT REAL TIME NOW. The boost lets go the moment she stops travelling
+// (v0.0.143), so the thirty seconds of resting recovery are thirty of
+// HER seconds at 1x — and this renderer advances about 0.15 s of
+// simulation per wall second. That is the window this needs.
+while (Date.now() - began < 1_200_000) {
   const now = await read();
   // A FLIP is her leaving or meeting the ground. One of each is a rest;
   // a dozen is the strobe.
