@@ -15,6 +15,7 @@
  */
 import { IslandScene } from '../scenes/IslandScene';
 import { MainMenu } from './MainMenu';
+import type { SessionMode } from '../game/session';
 import { SpawnMap, type Chosen } from './SpawnMap';
 import { LoadingScreen } from './LoadingScreen';
 import { FIRST_LIGHT_JOB, LoadPlan, TERRAIN_JOB, WORK_WEIGHT } from './loadPlan';
@@ -37,6 +38,15 @@ export class GameFlow {
   private death: DeathScreen | null = null;
   /** Where she started, so a restart can offer the same island again. */
   private lastStart: Chosen | null = null;
+  /**
+   * And which clock she started under.
+   *
+   * Death does not go back to the front door, it goes back to the map,
+   * and the map has no mode control on it. Without this the player who
+   * chose MULTIPLAYER would be quietly demoted to a frozen world by
+   * the first thing that killed her.
+   */
+  private lastMode: SessionMode = 'solo';
 
   constructor(
     private readonly host: HTMLElement,
@@ -69,18 +79,25 @@ export class GameFlow {
      * a run" without also encoding the map's layout.
      */
     (window as unknown as Record<string, unknown>).__flow = {
-      play: () => { void this.toFirstRegion(); },
+      play: (mode?: SessionMode) => { void this.toFirstRegion(mode); },
       toMenu: () => this.toMenu(),
     };
   }
 
-  /** Straight into the world at the first region's first candidate. */
-  private async toFirstRegion(): Promise<void> {
+  /**
+   * Straight into the world at the first region's first candidate.
+   *
+   * The mode is a parameter and not a constant because this is the
+   * only way a headless probe can reach a running-world session at
+   * all; it still defaults to the frozen one, so a probe written
+   * before the split measures exactly what it measured yesterday.
+   */
+  private async toFirstRegion(mode: SessionMode = 'solo'): Promise<void> {
     const region = readyRegions().find((r) => r.candidates.length > 0);
     if (!region) return;
     const candidate = chooseCandidate(region, 0);
     if (!candidate) return;
-    await this.spawn({ region, candidate });
+    await this.spawn({ region, candidate }, null, mode);
   }
 
   toMenu(): void {
@@ -90,12 +107,17 @@ export class GameFlow {
     // button that reads "CONTINUE" and drops you somewhere unexpected
     // is worse than one that reads "CONTINUE · LIHUE · 2h 14m".
     const found = latestSave(localStorage);
+    // THE MODE ARRIVES WITH THE PRESS. Solo or Multiplayer applies to
+    // both play buttons, so it is an argument to whichever one was
+    // pushed rather than something the flow goes and asks the menu for
+    // afterwards — there is no copy of it here to fall out of step
+    // with the control the player is looking at.
     this.menu = new MainMenu(this.host, {
       resume: found
         ? { label: `${found.region.toUpperCase()} · ${livedFor(found.playedSeconds)}`,
-          run: () => { void this.spawn(null, found); } }
+          run: (mode) => { void this.spawn(null, found, mode); } }
         : null,
-      newColony: () => this.toMap(),
+      newColony: (mode) => this.toMap(mode),
       settings: () => this.menuSettings?.reveal(),
     });
     // The same panel the game uses. A second copy would be a second
@@ -112,9 +134,16 @@ export class GameFlow {
    */
   private static readonly REVEAL_LIMIT = 4000;
 
-  toMap(): void {
+  /**
+   * @param mode carried from whatever offered the map. Solo by default
+   * so the dev routes and the pre-split callers keep freezing the
+   * world exactly as they always have.
+   */
+  toMap(mode: SessionMode = 'solo'): void {
     this.clear();
-    this.map = new SpawnMap(this.host, (chosen) => { void this.spawn(chosen); });
+    this.map = new SpawnMap(this.host, (chosen) => {
+      void this.spawn(chosen, null, mode);
+    });
   }
 
   /**
@@ -124,9 +153,14 @@ export class GameFlow {
    * candidate, hand it to the scene, and let the scene seat the origin
    * and cut terrain around it. Nothing local survives this call.
    */
-  async spawn(chosen: Chosen | null, resuming: SoloSave | null = null): Promise<void> {
+  async spawn(
+    chosen: Chosen | null,
+    resuming: SoloSave | null = null,
+    mode: SessionMode = 'solo',
+  ): Promise<void> {
     if (!chosen && !resuming) return;
     if (chosen) this.lastStart = chosen;
+    this.lastMode = mode;
     this.clear();
 
     // THE VEIL GOES UP FIRST, before the scene exists. The scene starts
@@ -181,6 +215,11 @@ export class GameFlow {
     // The rest of the run — her meters, her wings, the world clock —
     // is state a constructor argument cannot carry.
     if (resuming) scene.resume(resuming);
+    // AND WHICH CLOCK SHE RUNS UNDER. Solo stops the world behind a
+    // menu or the map; Multiplayer stops only the player's hands. The
+    // scene owns that because the scene owns the step — the flow just
+    // carries the answer from the button that was pressed.
+    scene.setMode(mode);
     scene.onLeave(() => this.toMenu());
 
     void scene.ready
@@ -204,12 +243,12 @@ export class GameFlow {
    */
   private died(): void {
     this.death?.dispose();
-    this.death = new DeathScreen(this.host, () => this.toMap());
+    this.death = new DeathScreen(this.host, () => this.toMap(this.lastMode));
   }
 
   /** Start again somewhere new — the pre-colony death path. */
   restart(): void {
-    this.toMap();
+    this.toMap(this.lastMode);
   }
 
   get startedAt(): Chosen | null {

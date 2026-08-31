@@ -15,6 +15,15 @@
  * where she stands, what she is, and how far the things that run down
  * have run.
  *
+ * ONE FIELD IS NOT A NUMBER, and it is the exception that proves the
+ * paragraph above. The discovery mask is a few hundred characters of
+ * encoded fog, and it belongs in a save for precisely the reason the
+ * island does not: the island is the same function for everybody, and
+ * what she has SEEN of it is hers alone. This file never reads that
+ * string — `discovery.ts` owns the codec — it only checks that the
+ * field is bounded and plausible, the way a document reader checks a
+ * field it is carrying rather than interpreting.
+ *
  * A DOCUMENT RATHER THAN A BROWSER RECORD. It carries its own version,
  * its own id and its own map, and it survives a round trip through
  * text — so the day a save moves from a phone to a desktop, that is a
@@ -33,6 +42,13 @@
  * Bumped when a field changes meaning. A save from another version is
  * refused rather than guessed at — a half-understood save is worse
  * than a fresh start, because it looks like it worked.
+ *
+ * ADDING AN OPTIONAL FIELD IS NOT THAT. An older document without it is
+ * still fully understood; it simply says nothing on the subject, and
+ * the reader has a defined answer for that case. Bumping here would end
+ * every colony currently sitting in a phone, so it is a decision to
+ * argue for out loud rather than a routine step — `tests/soloSave.test`
+ * pins the number so the argument has to happen.
  */
 export const SAVE_VERSION = 1;
 
@@ -85,6 +101,24 @@ export interface SoloSave {
    * was rather than snapping to a different wave.
    */
   readonly elapsed: number;
+
+  /**
+   * WHAT SHE HAS SEEN, as `discovery.ts` encoded it.
+   *
+   * KNOWLEDGE, not world truth. Every other field here says something
+   * about the world or about her; this one says only what the player
+   * has been told, so it is the one field that could be thrown away
+   * without the run becoming a different run — she would simply be
+   * standing where she stands with the map dark again.
+   *
+   * OPTIONAL, AND ABSENT IS A REAL ANSWER. A save written before the
+   * map existed has no mask, and neither does a save whose mask was
+   * refused; both mean an unexplored island rather than a broken
+   * document. That is why `SAVE_VERSION` did not move for this: an
+   * older save is not half-understood, it is a queen who has not been
+   * anywhere yet, and the one already on Joshua's phone must still open.
+   */
+  readonly discovery?: string;
 }
 
 /** Everything a scene has to hand over to be saved. */
@@ -95,6 +129,8 @@ export interface Snapshot {
   readonly meters: SoloSave['meters'];
   readonly elapsed: number;
   readonly playedSeconds: number;
+  /** Her mask, encoded — absent when the scene is not keeping one. */
+  readonly discovery?: string;
 }
 
 /** Somewhere to put saves. localStorage in the game; a Map in a test. */
@@ -115,6 +151,59 @@ function clamp(value: unknown, low: number, high: number, fallback: number): num
 function text(value: unknown, fallback: string): string {
   return typeof value === 'string' && value.length > 0 && value.length < 200
     ? value : fallback;
+}
+
+/**
+ * The longest discovery blob this document will carry.
+ *
+ * Derived from the mask rather than chosen: `discovery.ts` falls back
+ * to a raw grid when run-length coding would lose, and that grid is one
+ * byte for each of 384 x 384 cells, base64url'd at four characters per
+ * three bytes. 196,608 characters, plus a comfortable allowance for the
+ * `d1r:384:` header. Anything longer than that is not a mask this build
+ * can have produced.
+ *
+ * Written as arithmetic, and kept here rather than imported, because a
+ * document reader that imported the codec would drag the heightfield in
+ * behind it — see `blob()`. `tests/soloSave.test.ts` pins the ceiling.
+ */
+const BLOB_MAX = 32 + Math.ceil((384 * 384 * 4) / 3);
+
+/**
+ * `<tag>:<grid>:<base64url>`, which is all of the shape save.ts knows.
+ *
+ * Deliberately looser than the two tags that exist today: naming `d1`
+ * and `d1r` here would mean a new encoding in `discovery.ts` silently
+ * became a save-format change. Tight enough, though, that a JSON
+ * fragment, a script, a path or anything carrying whitespace or a
+ * control character is not a candidate.
+ */
+const BLOB_SHAPE = /^[a-z][a-z0-9]{0,7}:[0-9]{1,6}:[A-Za-z0-9_-]+$/;
+
+/**
+ * A discovery blob, bounded and shaped — but never decoded here.
+ *
+ * `text()` is the wrong instrument twice over. It caps at 200
+ * characters, which the mask passes within her first minutes of flying,
+ * and it SUBSTITUTES a fallback rather than refusing, which for a mask
+ * would mean quietly handing her somebody else's fog. So this one
+ * returns nothing instead, and returning nothing costs nothing: an
+ * absent mask is a legal save, so a bad blob may never take the rest of
+ * the document down with it. Losing the fog is a re-explored island;
+ * losing the save is a lost colony.
+ *
+ * The length is checked BEFORE the shape, so a hostile megabyte is
+ * refused without being scanned.
+ *
+ * Whether the characters MEAN anything is `discovery.ts`'s business.
+ * This file is a document reader and does not own the codec — if it
+ * decoded the mask it would have to know the format, and then the next
+ * encoding change would be a save-version change.
+ */
+function blob(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  if (value.length === 0 || value.length > BLOB_MAX) return undefined;
+  return BLOB_SHAPE.test(value) ? value : undefined;
 }
 
 /**
@@ -167,6 +256,7 @@ export function readSave(raw: unknown): SoloSave | null {
       thirst: clamp(meters.thirst, 0, 1, 1),
     },
     elapsed: clamp(it.elapsed, 0, 1e9, 0),
+    discovery: blob(it.discovery),
   };
 }
 
@@ -214,6 +304,12 @@ export function writeSave(
     body: snapshot.body,
     meters: snapshot.meters,
     elapsed: snapshot.elapsed,
+    // Checked on the way OUT as well as on the way in, alone among the
+    // snapshot's fields. The rest are small however wrong they are; an
+    // oversized blob would be written into a list of five slots and
+    // could take the whole store past quota, which loses the other four
+    // colonies rather than one field.
+    discovery: blob(snapshot.discovery),
   };
   const kept = [save, ...before.filter((s) => s.saveId !== saveId)].slice(0, SLOTS);
   try {

@@ -218,6 +218,28 @@ export const EXHAUSTED_GLIDE_RATIO = 0.2;
 export const TAKEOFF_SPEED = 6.5;
 /** A one-off price for leaving the ground, as a fraction of the bar. */
 export const TAKEOFF_COST = 0.03;
+
+/**
+ * THE SMALLEST AIRSPEED THAT COUNTS AS FLYING — how a queen holds station.
+ *
+ * Multiplayer cannot pause the world, so opening a menu takes the
+ * controls out of her hands instead of stopping the clock. On the
+ * ground that is easy: a zero stick and she coasts to a halt. In the
+ * air a zero demand is NEUTRAL, and neutral is a glide that becomes a
+ * fall — walk away from the phone and she lands herself, or worse.
+ *
+ * `powered` is gated on `asked > 0.05 || (demand.hold ?? 0) > 0`, and
+ * powered flight eases her vertical speed to zero. So the whole of a
+ * hover is a `hold` that is greater than nothing and small enough to be
+ * nothing: the thrust branch closes on it, her airspeed decays toward a
+ * hundredth of a unit a second, and the height holds. A centimetre a
+ * second is under a tenth of her body length in a minute.
+ *
+ * It is not free and must not pretend to be. She is flying, so she pays
+ * CRUISE_DRAIN, and the wind still carries her — `windOnHer` does not
+ * care why she is up there. A hover is a hold, not a hook in the sky.
+ */
+export const HOVER_HOLD = 0.01;
 /** Airspeed she is given at the moment the wings catch. */
 export const TAKEOFF_BOOST = 1.35;
 /** Height above the ground at which takeoff becomes real flight. */
@@ -1092,7 +1114,17 @@ export class Flight {
     }
 
     // Neutral is a GLIDE while there is airspeed to glide on, and a
-    // fall once there is not. Never a hover.
+    // fall once there is not. Never a hover — NEUTRAL never is.
+    //
+    // ONE SANCTIONED DEPARTURE, v0.0.131 (Joshua, 2026-08-30). A queen
+    // holding station is now reachable, but not through this branch and
+    // not by softening it: `HOVER_HOLD` at the top of this file asks
+    // for a hair of airspeed, which makes `powered` true a dozen lines
+    // up and takes the level-flight path that already exists. So the
+    // rule this comment states is untouched — neutral still glides and
+    // still falls — and a hover is simply a different demand rather
+    // than a special case bolted onto this one. She still drifts on
+    // the wind and still pays CRUISE_DRAIN, because she is flying.
     this.state = 'glide';
     this.sinkToward(-Math.min(TERMINAL_FALL * scale, this.passiveSink()), dt);
     return GLIDE_RECOVERY;

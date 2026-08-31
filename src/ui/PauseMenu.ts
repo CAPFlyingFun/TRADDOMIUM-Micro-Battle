@@ -3,10 +3,16 @@
  *
  * SESSION_ARCHITECTURE.md draws the line this file exists to hold:
  * opening the menu in Solo stops the world, and opening it in
- * Multiplayer stops nothing but the player's hands. There is no
- * Multiplayer yet, so this is the Solo half — but it takes the halt as
- * a parameter rather than assuming it, so the day a server owns the
- * clock this panel does not have to be rewritten to stop lying.
+ * Multiplayer stops nothing but the player's hands. It took the halt
+ * as a parameter rather than assuming it, so that the day a server
+ * owned the clock this panel would not have to be rewritten to stop
+ * lying — and then said "The world is stopped." on every show()
+ * regardless, which is the lie it was built to avoid.
+ *
+ * v0.0.131 closed that: the mode reaches show(), and both the title and
+ * the line under it come from `pausedWords`. In Multiplayer the world
+ * behind this veil really is still turning — the wind, the sea, the
+ * water, the autonomy — and the only thing that stopped is her.
  *
  * IT REPLACES THE SETTINGS COG rather than joining it. A separate
  * pause button would be one more thing on a HUD that was already
@@ -14,6 +20,22 @@
  * a moment" gesture — it just used to be a gesture that left the world
  * running while you read it.
  */
+import type { SessionMode } from '../game/session';
+
+/**
+ * WHAT IS ACTUALLY TRUE BEHIND THE VEIL, in two words and a sentence.
+ *
+ * Pure and exported because it is the honest half of this file and
+ * there is no DOM in the test run. "PAUSED" over a running world is a
+ * smaller lie than the old note but it is still one, so the title
+ * moves too.
+ */
+export function pausedWords(mode: SessionMode): { title: string; note: string } {
+  return mode === 'solo'
+    ? { title: 'PAUSED', note: 'The world is stopped.' }
+    : { title: 'MENU', note: 'The world is still running. She is holding.' };
+}
+
 const GOLD = 'rgba(255, 210, 110, .92)';
 const GOLD_FAINT = 'rgba(214, 178, 96, .5)';
 
@@ -28,6 +50,7 @@ export class PauseMenu {
   private readonly veil: HTMLDivElement;
   private readonly card: HTMLDivElement;
   private readonly note: HTMLDivElement;
+  private readonly title: HTMLDivElement;
   private open = false;
 
   constructor(host: HTMLElement, private readonly choose: PauseChoice) {
@@ -62,7 +85,8 @@ export class PauseMenu {
     } as Partial<CSSStyleDeclaration>);
 
     const title = document.createElement('div');
-    title.textContent = 'PAUSED';
+    title.textContent = pausedWords('solo').title;
+    this.title = title;
     Object.assign(title.style, {
       textAlign: 'center',
       font: '700 13px/1 "Chakra Petch", system-ui, sans-serif',
@@ -114,11 +138,13 @@ export class PauseMenu {
     return this.open;
   }
 
-  show(): void {
+  show(mode: SessionMode = 'solo'): void {
     if (this.open) return;
     this.open = true;
     this.veil.style.display = 'flex';
-    this.say('The world is stopped.');
+    const words = pausedWords(mode);
+    this.title.textContent = words.title;
+    this.say(words.note);
   }
 
   hide(): void {

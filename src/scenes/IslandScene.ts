@@ -3,7 +3,7 @@ import { PlayerAnt } from '../ant/PlayerAnt';
 import { FollowCamera } from '../camera/FollowCamera';
 import { PaceSelector } from '../input/PaceSelector';
 import { LookDrag } from '../input/LookDrag';
-import { MoveStick } from '../input/MoveStick';
+import { MoveStick, type StickReading } from '../input/MoveStick';
 import { AutoRun } from '../input/autoRun';
 import { resolve } from '../ant/locomotion';
 import {
@@ -47,6 +47,16 @@ import { Breath, DROWN_HP_PER_SECOND, blackout } from '../ant/breath';
 import { SaltExposure, SALT_DAMAGE_FRACTION } from '../ant/brine';
 import { waterSpotAt } from '../world/waterQuery';
 import { bakeIslandChannels } from '../world/islandChannels';
+import { DEFAULT_MODE, type SessionMode } from '../game/session';
+import {
+  DISCOVERY_CELLS, decodeDiscovery, emptyDiscovery, encodeDiscovery,
+  fractionSeen, reveal,
+  type Discovery,
+} from '../game/discovery';
+import { Minimap } from '../ui/Minimap';
+import { MapScreen } from '../ui/MapScreen';
+import { bakeIsland } from '../ui/islandMap';
+import type { MapMarks } from '../ui/mapView';
 
 import { originAt, rebaseFor, setOrigin, toLocal, toWorld,
 } from '../world/origin';
@@ -83,6 +93,7 @@ import { Compass } from '../ui/Compass';
 import { type CompassMarker } from '../ui/compassMath';
 import {
   AUTO_AIRSPEED, Flight, SPRINT_AIRSPEED, setFlightScale,
+  HOVER_HOLD,
 } from '../ant/flight';
 import { Grace } from '../ant/grace';
 import {
@@ -173,6 +184,15 @@ const DIVE_EASE = 0.9;
  */
 const RISE_EASE = 2.16;
 
+/**
+ * How far she walks before the fog is recomputed — half a mask cell.
+ *
+ * Half rather than a whole, so the reveal can never skip a cell by
+ * stepping cleanly over it, and derived from the mask rather than typed
+ * so the two cannot come apart if the grid ever changes.
+ */
+const REVEAL_STEP = ISLAND_SPAN / DISCOVERY_CELLS / 2;
+
 export class IslandScene {
   private readonly scene = new THREE.Scene();
   private readonly renderer: THREE.WebGLRenderer;
@@ -235,6 +255,31 @@ export class IslandScene {
    * black screen is what "crashed" looks like.
    */
   private halted = false;
+  /**
+   * SOLO PAUSES THE WORLD; MULTIPLAYER ONLY STOPS HER HANDS.
+   *
+   * Defaults to solo rather than to the front door's choice, because
+   * `?scene=island` builds this scene straight from main.ts with no
+   * GameFlow in between, and so does every probe in scripts/. See
+   * game/session.ts.
+   */
+  private mode: SessionMode = DEFAULT_MODE;
+  /** A menu or the map is up. In multiplayer this is all a pause is. */
+  private menuOpen = false;
+  private minimap!: Minimap;
+  private mapScreen!: MapScreen;
+  /**
+   * WHAT SHE HAS SEEN, which is not what is there.
+   *
+   * The island is 56 km of surveyed Kauaʻi and all of it exists from
+   * the first frame; this is the separate question of how much of it
+   * she has been near enough to know about. Trello card 10's rule —
+   * world truth and player knowledge are two different things — and
+   * the reason it is saved beside her position rather than derived.
+   */
+  private known: Discovery = emptyDiscovery();
+  /** Where the last reveal was centred, so it is not redone every frame. */
+  private revealedAt: WorldPoint | null = null;
   /** Which slot this run writes to. One run, one slot, all sitting. */
   private readonly slot = newSaveId();
   /** Simulated seconds lived, carried across sittings by the save. */
@@ -571,14 +616,14 @@ export class IslandScene {
     this.look = new LookDrag(host);
     this.panel = new SettingsPanel(host, true);
     this.pauseMenu = new PauseMenu(host, {
-      resume: () => { this.halted = false; },
+      resume: () => { this.shroud(false); },
       save: () => this.save(),
       settings: () => this.panel.reveal(),
       quit: () => this.leaving?.(),
     });
     this.panel.intercept(() => {
-      this.halted = true;
-      this.pauseMenu.show();
+      this.shroud(true);
+      this.pauseMenu.show(this.mode);
     });
     // Her health, food and water come off the queen's stat table
     // rather than being typed here — this is the only place the data
@@ -588,6 +633,40 @@ export class IslandScene {
     this.weatherChip = new WeatherChip(host);
     this.flightHud = new FlightHud(host);
     this.compass = new Compass(host);
+    // THE MAP, AND THE ISLAND IT DRAWS, BOTH BUILT HERE — behind the
+    // loading screen, on purpose.
+    //
+    // MEASURED rather than guessed, because the cost is the whole
+    // argument: 1,163,976 `terrainHeight` calls (one per pixel of 768²
+    // plus two more for the hillshade on each of the 48.7% that are
+    // land), 428 ms on a desktop core with no HD tiles resident. Call
+    // it a second or two on a phone. It memoises, so it is paid
+    // exactly once; the only question is when.
+    //
+    // NEW COLONY already pays it at the spawn picker. CONTINUE COLONY
+    // never constructs SpawnMap — GameFlow wires resume straight to
+    // spawn — so a resumed run would have paid it COLD on the first
+    // tap of the minimap, which is to say mid-flight. The veil is up
+    // for the whole of this constructor. It gets paid here.
+    bakeIsland();
+    this.mapScreen = new MapScreen(host, {
+      confirm: (at) => this.orderTo(at, 'waypoint'),
+      clearMission: () => this.brain.cancel(),
+      // Solo halts, multiplayer takes her hands. One decision, made in
+      // `shroud`, so the map and the pause menu cannot disagree.
+      onToggle: (open) => {
+        this.shroud(open);
+        // A CAMERA DRAG CAN BE LIVE WHEN THIS OPENS. LookDrag binds to
+        // #app and never looks at the event's target, so a thumb still
+        // down when the map appears would keep swinging the world
+        // behind it — the map's own root swallows moves, but the drag
+        // that started BEFORE it existed is already claimed.
+        if (open) this.look.release();
+      },
+    });
+    this.minimap = new Minimap(host, () => {
+      this.mapScreen.open(this.marks(), this.known);
+    });
     // Both buttons are ALWAYS there. A control that appears and
     // disappears under a thumb already resting on it is worse than one
     // that greys out, and the design says so explicitly.
@@ -782,19 +861,27 @@ export class IslandScene {
       // WHERE THE SHEET ACTUALLY IS, versus the ground drawn under it.
       // Depth alone cannot tell you the water is buried in the hill.
       waterSkin: (wx: number, wz: number) => this.water?.skinAt(wx, wz) ?? null,
-      // STAGE H, probe only. Phase 1 has no player-facing way to order a
-      // mission — the executor that would fly one is Phase 2 — so these
-      // are how the decision brain is driven and read from outside.
+      // STAGE H. Phase 1.5 gave the player a real door to this (the
+      // map's FLY HERE), and the probe keeps its own so a test can
+      // order a hydration mission, which the map deliberately cannot.
       orderTo: (wx: number, wz: number, satisfiesHydration = false) => {
-        this.brain.order({
-          id: `probe:${Math.round(wx)},${Math.round(wz)}`,
-          label: 'probe',
-          at: world(wx, wz),
-          satisfies: satisfiesHydration ? ['hydration'] : [],
-          arriveWithin: 500,
-        });
+        this.orderTo(world(wx, wz), 'probe', satisfiesHydration);
       },
       cancelOrder: () => this.brain.cancel(),
+      // PHASE 1.5, probe only. Discovery is meant to take hours of
+      // flying to open up, which is exactly right for a player and
+      // useless for a screenshot — so a probe can walk the reveal
+      // along a line and photograph a map with something on it.
+      explore: (fromX: number, fromZ: number, toX: number, toZ: number, steps = 40) => {
+        for (let i = 0; i <= steps; i++) {
+          const t = i / steps;
+          reveal(this.known, fromX + (toX - fromX) * t, fromZ + (toZ - fromZ) * t);
+        }
+        return fractionSeen(this.known);
+      },
+      explored: () => fractionSeen(this.known),
+      openMap: () => this.mapScreen.open(this.marks(), this.known),
+      closeMap: () => this.mapScreen.close(),
       /** Probe only: the same door the save system restores through. */
       setThirst: (fraction: number) => this.thirst.restore(fraction),
       autonomy: () => ({
@@ -1260,12 +1347,101 @@ export class IslandScene {
       meters: { stamina: this.stamina.fraction, thirst: this.thirst.fraction },
       elapsed: this.elapsed,
       playedSeconds: this.lived,
+      // WHAT SHE KNOWS, which is not what is there. The island is a
+      // function and is never saved; the fog over it is the one thing
+      // about the map that is hers and cannot be recomputed.
+      discovery: encodeDiscovery(this.known),
     };
+  }
+
+  /**
+   * Which kind of run this is. Called by GameFlow before first light.
+   *
+   * A setter rather than a constructor argument for the same reason
+   * `resume` is one: the constructor already carries five parameters
+   * and two of its callers pass two, so a sixth positional would need
+   * a default that quietly disagrees with the front door.
+   */
+  setMode(mode: SessionMode): void {
+    this.mode = mode;
+  }
+
+  /**
+   * A MENU WENT UP OR CAME DOWN, and exactly one place decides what
+   * that costs.
+   *
+   * Solo halts the tick, which is the behaviour this game has always
+   * had and is legitimate for one player alone. Multiplayer cannot:
+   * the other queen does not stop existing while this one reads a map,
+   * so the world keeps turning and she simply loses the controls —
+   * `handsOff` below. Both doors (the pause menu and the map) come
+   * through here so they cannot drift apart about what a pause means.
+   */
+  private shroud(open: boolean): void {
+    this.menuOpen = open;
+    this.halted = open && this.mode === 'solo';
+  }
+
+  /**
+   * Her hands are off the controls but the world is still running.
+   *
+   * Only ever true in multiplayer — in solo the tick has already
+   * returned by the time anything asks.
+   */
+  private get handsOff(): boolean {
+    return this.menuOpen && this.mode === 'multiplayer';
   }
 
   /** Where QUIT TO MENU goes. */
   onLeave(run: () => void): void {
     this.leaving = run;
+  }
+
+  /**
+   * SEND HER SOMEWHERE — the one path a destination is set through.
+   *
+   * `order()` on the brain already IS "replace the primary mission": it
+   * swaps the primary, wakes the state machine if it was off or
+   * finished, and leaves a live survival detour running. There is no
+   * `setPrimaryMission` to add and adding one would be two names for a
+   * decision.
+   *
+   * `satisfies` IS ALMOST ALWAYS EMPTY, and the exception is the probe.
+   * A mission that advertises hydration is one the brain reads as
+   * already solving thirst — `thirstUnsafe` returns false on it — so
+   * tagging a player's waypoint would quietly disable the whole
+   * survival-detour system for as long as the pin existed. The map
+   * never passes true.
+   */
+  private orderTo(at: WorldPoint, label: string, hydration = false): void {
+    this.brain.order({
+      id: `${label}:${Math.round(at.wx)},${Math.round(at.wz)}`,
+      label,
+      at,
+      satisfies: hydration ? ['hydration'] : [],
+      arriveWithin: 500,
+    });
+  }
+
+  /**
+   * WHAT THE TWO MAP SURFACES ARE TOLD, once a frame.
+   *
+   * `brain.primaryMission` and NOT `intent().target` or
+   * `debug().target`: those two follow `detour ?? primary`, so a
+   * thirsty queen would watch her destination jump to whatever puddle
+   * the autonomy picked and jump back when she had drunk. The pin is
+   * the player's, and the player's alone.
+   *
+   * Her heading goes across RAW. The radians-to-compass conversion
+   * belongs to whoever draws, through `bearingFromHeading` — this repo
+   * has open-coded it once and it cost 142 degrees.
+   */
+  private marks(): MapMarks {
+    return {
+      at: this.ant.where,
+      heading: this.ant.bearing,
+      primary: this.brain.primaryMission?.at ?? null,
+    };
   }
 
   /** Write this run to its slot. Cheap enough to call on a whim. */
@@ -1293,6 +1469,13 @@ export class IslandScene {
     this.stamina.restore(save.meters.stamina);
     this.thirst.restore(save.meters.thirst);
     this.setWings(save.body.winged);
+    // A SAVE FROM BEFORE THE MAP EXISTED HAS NO FOG, and neither does
+    // one whose blob did not survive the trip. Both mean the same
+    // thing and it is not an error: she starts unexplored and the
+    // first reveal of the tick puts the ground she is standing on back
+    // on the chart. Losing a map is a smaller thing than refusing a
+    // run, which is why this falls back rather than failing.
+    this.known = decodeDiscovery(save.discovery) ?? emptyDiscovery();
   }
 
   private readonly tick = (): void => {
@@ -1329,8 +1512,30 @@ export class IslandScene {
     this.liveWind.update(
       this.nowWeather?.windMps ?? 0, this.nowWeather?.gustMps ?? 0, dt,
     );
+    // BOTH OF THESE ARE READ EVEN WHEN THEY ARE ABOUT TO BE THROWN
+    // AWAY. `LookDrag.read` decays its own swing and `MoveStick.read`
+    // clears the lift edge and repaints the ring — skipping them
+    // banks a frame of input to be applied later, which is exactly
+    // the lurch the pause was meant to prevent.
     const look = this.look.read(dt);
-    const stick = this.stick.read();
+    const held = this.stick.read();
+
+    // ── HANDS OFF ────────────────────────────────────────────────
+    // Multiplayer with a menu up: the world keeps running and she
+    // stops. Not a frozen tick — a neutral pilot. Three substitutions
+    // and nothing else, because these are the only three lines player
+    // input enters the simulation through.
+    //
+    // `released` STAYS FALSE. It is a single-frame edge and AutoRun
+    // engages on it, so a real lift banked behind an open map would
+    // have set her running by herself the moment it closed.
+    const stick: StickReading = this.handsOff
+      ? { x: 0, y: 0, deflection: 0, lane: 'none', released: false }
+      : held;
+    const lever = this.handsOff ? 0 : this.liftSlider.lift;
+    // Her body must not come round to follow a camera drag she is not
+    // making. Facing her own bearing is a request to stay put.
+    const bodyView = this.handsOff ? this.ant.bearing : -look.yaw;
 
     // The pace is a ceiling, so changing it moves nothing on its own.
     const asked = this.paceUI.takeRequest();
@@ -1488,7 +1693,7 @@ export class IslandScene {
         {
           push: stick.y,
           side: stick.x,
-          lift: this.liftSlider.lift,
+          lift: lever,
           // THE LIT PACE ROW IS THE POWER SETTING, in the air as well
           // as on the ground. Auto already flew at it; the stick did
           // not, so the lowest row and the highest were the same
@@ -1504,8 +1709,19 @@ export class IslandScene {
           // the camera and both buttons leave it engaged; only a
           // deliberate fore/aft push takes manual control back, which
           // is the same rule it follows on the ground.
-          hold: this.auto.active
-            ? (wants ? SPRINT_AIRSPEED : AUTO_AIRSPEED[this.pace]) : null,
+          // HANDS OFF IN THE AIR IS A HOVER, and it has to be a hold
+          // rather than a neutral. Neutral is a glide that becomes a
+          // fall (flight.ts) — leave the phone on a menu and she
+          // lands herself somewhere she did not choose, which in
+          // multiplayer is a death nobody was at the controls for.
+          // HOVER_HOLD is the smallest airspeed that still counts as
+          // powered flight, so the level-flight path holds her height
+          // while her speed decays to about a centimetre a second.
+          // She still drifts on the wind and still pays for the
+          // wingbeats, because she is still flying.
+          hold: this.handsOff ? HOVER_HOLD
+            : this.auto.active
+              ? (wants ? SPRINT_AIRSPEED : AUTO_AIRSPEED[this.pace]) : null,
         },
         this.stamina.fraction,
         this.stamina.spent,
@@ -1559,9 +1775,9 @@ export class IslandScene {
       // kept ("she floats her out when she has none, lever or no
       // lever"). And UP on the lever surfaces her FASTER than the
       // film alone: buoyancy plus swimming for the light.
-      const wantDive = this.breath.spent ? 0 : Math.max(0, -this.liftSlider.lift);
+      const wantDive = this.breath.spent ? 0 : Math.max(0, -lever);
       const ease = wantDive < this.dive
-        ? RISE_EASE * (1 + Math.max(0, this.liftSlider.lift))
+        ? RISE_EASE * (1 + Math.max(0, lever))
         : DIVE_EASE;
       this.dive += (wantDive - this.dive) * (1 - Math.exp(-ease * dt));
       // THE WATER IS ALREADY THIS FRAME'S. It used to be stepped 350
@@ -1629,9 +1845,23 @@ export class IslandScene {
           across: travel.across * hold,
           speed: travel.speed * hold,
         },
-        -look.yaw, dt, wade.above,
+        bodyView, dt, wade.above,
         this.act === 'drinking' ? null : wade.carry,
       );
+    }
+
+    // ── WHAT SHE HAS SEEN ────────────────────────────────────────
+    // Two kilometres around her, and it stays revealed. Recomputed on
+    // DISTANCE rather than on frames: the disc is 2 km across and half
+    // a mask cell is 73 m, so re-stamping it every frame would be the
+    // same 700-odd cells re-tested sixty times a second to discover
+    // nothing. At a sprint she covers half a cell about every four
+    // seconds.
+    const her = this.ant.where;
+    if (this.revealedAt === null
+      || Math.hypot(her.wx - this.revealedAt.wx, her.wz - this.revealedAt.wz) >= REVEAL_STEP) {
+      this.revealedAt = her;
+      reveal(this.known, her.wx, her.wz);
     }
 
     // ── WHAT SHE IS DOING ────────────────────────────────────────
@@ -1714,6 +1944,14 @@ export class IslandScene {
     // frame of lag reads as the decision itself being late.
     this.readWater(dt);
     this.thinkAutonomy(dt);
+    // WHERE SHE IS AND WHERE SHE SAID SHE WAS GOING. Both surfaces
+    // decide for themselves whether anything is worth repainting —
+    // the minimap on `worthRedrawing`, the map screen on being open at
+    // all — so this is a cheap call on a still frame and it is the
+    // only place either of them is driven from.
+    const marks = this.marks();
+    this.minimap.update(marks, this.known);
+    if (this.mapScreen.isOpen) this.mapScreen.update(marks, this.known);
     const view = new THREE.Vector3();
     this.follow.camera.getWorldDirection(view);
     this.compass.update(

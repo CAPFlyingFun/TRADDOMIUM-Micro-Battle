@@ -11,7 +11,7 @@
  * hundreds of thousands of samples and nothing about it changes.
  */
 import { bandFor, terrainHeight } from '../world/heightfield';
-import { world } from '../world/coords';
+import { world, type WorldPoint } from '../world/coords';
 import { ISLAND_SPAN } from '../world/heightfield';
 
 /** Pixels a side. Enough to read the coastline, cheap enough to bake. */
@@ -64,8 +64,15 @@ export function worldToMap(wx: number, wz: number, size = MAP_SIZE): { x: number
   };
 }
 
-/** And back, for a tap on the map. */
-export function mapToWorld(x: number, y: number, size = MAP_SIZE) {
+/**
+ * And back, for a tap on the map.
+ *
+ * The return type is written down rather than inferred because what
+ * comes out of here is about to be kept: a tap becomes a waypoint,
+ * and a waypoint outlives the frame. Saying WorldPoint out loud is
+ * what stops the day someone returns a pixel pair from here.
+ */
+export function mapToWorld(x: number, y: number, size = MAP_SIZE): WorldPoint {
   return world(
     (x / size) * ISLAND_SPAN - ISLAND_SPAN / 2,
     (y / size) * ISLAND_SPAN - ISLAND_SPAN / 2,

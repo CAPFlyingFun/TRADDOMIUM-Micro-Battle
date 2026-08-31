@@ -140,6 +140,29 @@ export class LookDrag {
     this.yaw += shortest * (1 - Math.exp(-CHASE_EASE * dt));
   }
 
+  /**
+   * LET GO OF THE POINTER. LEAVE THE VIEW WHERE IT IS.
+   *
+   * This is the only global pointer surface in the game: it listens on
+   * `#app` and never asks what was under the finger, which is what
+   * makes a drag anywhere the controls are not turn the camera. The
+   * cost is that a screen opening OVER a live drag inherits it —
+   * everything the player does on a full-screen map still bubbles down
+   * here, so the camera swings behind the map, `read()` keeps
+   * reporting `active`, and because `pointerId` is still claimed the
+   * pointer that eventually lifts somewhere else never clears it. The
+   * next tap on the world then does nothing at all.
+   *
+   * So whoever covers the screen says so. Deliberately NOT a reset:
+   * the bearing is world-absolute and the player chose it, and
+   * snapping it back on the way into a menu would be a second bug
+   * wearing the first one's clothes. Harmless when no drag is running.
+   */
+  release(): void {
+    this.pointerId = null;
+    this.dragging = false;
+  }
+
   dispose(): void {
     for (const off of this.detach) off();
   }

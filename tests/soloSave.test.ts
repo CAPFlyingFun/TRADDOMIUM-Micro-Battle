@@ -8,6 +8,13 @@
  *
  * So the tests are mostly about refusing things, and the round trip is
  * stated in the terms that matter: the same place, to the centimetre.
+ *
+ * THE DISCOVERY MASK IS TESTED FROM THE OTHER END. It is the one field
+ * whose loss is survivable — fog is knowledge, and knowledge can be
+ * walked back into — so the question asked of it is never "is it
+ * refused" on its own but "is it refused WITHOUT taking her position
+ * with it". A blob big enough to fill a phone's localStorage must cost
+ * the player a dark map and nothing else.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -33,6 +40,18 @@ const SNAP: Snapshot = {
   playedSeconds: 4_210,
 };
 
+/** A mask in `discovery.ts`'s shape: tag, grid size, base64url runs. */
+const MASK = 'd1:384:gLAB_-xyz09';
+
+/**
+ * The longest blob the encoder can honestly make, spelled out here so
+ * the ceiling in `save.ts` is pinned by something independent of it.
+ *
+ * 384 x 384 cells, one byte each in the raw fallback, base64url'd at
+ * four characters per three bytes, behind a `d1r:384:` header.
+ */
+const BIGGEST = `d1r:384:${'A'.repeat(Math.ceil((384 * 384 * 4) / 3))}`;
+
 describe('the round trip', () => {
   it('puts her back where she was, to the centimetre', () => {
     const s = store();
@@ -53,6 +72,22 @@ describe('the round trip', () => {
     const save = writeSave(s, SNAP, 's_one', '2026-08-23T10:00:00.000Z');
     const carried = importSave(exportSave(save))!;
     expect(carried).toEqual(save);
+  });
+
+  it('carries the fog she has lifted out as text and back', () => {
+    // THE SAME GUARD AS ABOVE, and it is the one that matters for a new
+    // field: `toEqual` catches a field that `writeSave` emits and
+    // `readSave` never names, which is silent — the save looks written,
+    // reloads clean, and the island is black again.
+    const s = store();
+    const save = writeSave(
+      s, { ...SNAP, discovery: MASK }, 's_one', '2026-08-23T10:00:00.000Z',
+    );
+    expect(save.discovery).toBe(MASK);
+    const carried = importSave(exportSave(save))!;
+    expect(carried).toEqual(save);
+    expect(carried.discovery).toBe(MASK);
+    expect(latestSave(s)!.discovery).toBe(MASK);
   });
 
   it('keeps the creation date when a slot is written again', () => {
@@ -118,6 +153,73 @@ describe('what it repairs instead', () => {
     const back = readSave({ ...good(), mapId: undefined, region: undefined })!;
     expect(back.mapId).toBe('kauai');
     expect(back.region).toBe('Kauaʻi');
+  });
+});
+
+describe('the fog', () => {
+  it('is simply absent in a save written before the map existed', () => {
+    // `good()` is the pre-map document, unchanged. It must still open,
+    // and it must open as an unexplored island rather than as an error:
+    // this is the save on Joshua's phone.
+    const back = readSave(good())!;
+    expect(back).not.toBeNull();
+    expect(back.discovery).toBeUndefined();
+    expect(back.at.wx).toBe(1_000);
+  });
+
+  it('survives at the largest size the encoder can produce', () => {
+    // The raw fallback for a fully-alternating mask. Bigger than any
+    // real one and still a legitimate document, so the bound has to sit
+    // above it rather than at some round number that felt safe.
+    const back = readSave({ ...good(), discovery: BIGGEST })!;
+    expect(back.discovery).toBe(BIGGEST);
+  });
+
+  it('is dropped when it is longer than any mask could be', () => {
+    // AND THE RUN IS UNHARMED. A blob that would not fit the store is
+    // exactly the case where refusing the whole save would be worst:
+    // she would lose her position to protect her map.
+    const over = BIGGEST + 'A'.repeat(64);
+    const back = readSave({ ...good(), discovery: over })!;
+    expect(back).not.toBeNull();
+    expect(back.discovery).toBeUndefined();
+    expect(back.at.wx).toBe(1_000);
+    expect(back.at.wz).toBe(2_000);
+    expect(back.meters.thirst).toBe(0.5);
+    expect(back.elapsed).toBe(100);
+  });
+
+  it('is dropped when it is not a string at all, at the same cost', () => {
+    for (const junk of [42, true, null, {}, ['d1:384:AA'], { cells: [1, 0] }]) {
+      const back = readSave({ ...good(), discovery: junk })!;
+      expect(back).not.toBeNull();
+      expect(back.discovery).toBeUndefined();
+      expect(back.at.wx).toBe(1_000);
+    }
+  });
+
+  it('is dropped when it is a string of the wrong shape', () => {
+    // save.ts does not decode the mask, so shape is all the suspicion
+    // it can afford — enough to keep a JSON fragment, a path or
+    // anything with whitespace in it out of the field.
+    for (const junk of ['', 'hello', '{"cells":[1,0]}', 'd1:384:', 'd1 384 AA',
+      '../../etc/passwd', 'd1:384:AA==']) {
+      const back = readSave({ ...good(), discovery: junk })!;
+      expect(back).not.toBeNull();
+      expect(back.discovery).toBeUndefined();
+    }
+  });
+});
+
+describe('the version number', () => {
+  it('is still 1, and moving it would throw away every save there is', () => {
+    // PINNED ON PURPOSE. `readSave` refuses a version it does not know,
+    // by design, so a bump is not a migration — it is a decision that
+    // every colony currently on a phone stops existing. Adding an
+    // OPTIONAL field is not that decision: an old document is still
+    // fully understood, it just says nothing about the fog. If this
+    // line has to change, the reason belongs beside it.
+    expect(SAVE_VERSION).toBe(1);
   });
 });
 
