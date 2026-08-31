@@ -48,24 +48,81 @@
  */
 import { bakeIsland } from './islandMap';
 import {
-  islandOrigin, islandPixels, worldPerPixel, worldToScreen,
+  enclosing, fitTo, islandOrigin, islandPixels, worldPerPixel, worldToScreen,
   type MapMarks, type MapView, type Viewport,
 } from './mapView';
 import { bearingFromHeading, wrap180 } from './compassMath';
-import type { Discovery } from '../game/discovery';
+import { ISLAND_SPAN } from '../world/heightfield';
+import { knownBounds, type Discovery } from '../game/discovery';
 import { world, type WorldPoint } from '../world/coords';
 
 /** The face of the widget, CSS pixels a side. */
 export const MINIMAP_PX = 104;
 
 /**
- * The view it is always drawn at: the whole island, dead centre.
+ * The frame a run ends on: the whole island, dead centre.
  *
- * A module constant rather than state, because the minimap has no pan
- * and no zoom — those belong to the full map, which is the thing this
- * opens. See the header for why a following window was rejected.
+ * Also the frame it uses before anything is known, though nothing is
+ * drawn then anyway — see `frameFor`.
  */
 const WHOLE_ISLAND: MapView = { centre: world(0, 0), zoom: 0 };
+
+/**
+ * THE FRAME FOLLOWS WHAT SHE KNOWS, and the first device frame is why.
+ *
+ * This drew the whole island always, on the argument in the header:
+ * the fog receding IS the progress readout of the game, and a window
+ * that keeps refilling itself with her own 2 km disc can never show
+ * it. That argument is still right and the frame still ends there.
+ *
+ * What it missed is the FIRST few hours. A 2 km reveal on a 56 km
+ * island is 3.6% of its width, so a new run's minimap was a black
+ * square with a single lit cell in it — correct, and indistinguishable
+ * from a broken widget. Joshua saw exactly that in the first probe
+ * frame and called it: fit what she has seen, and open out as she
+ * explores.
+ *
+ * So the frame is the box she has discovered, grown to hold her and
+ * her destination, clamped between MAX_FIT and the whole island. Early
+ * on that is a close view of her own patch; by the time she has
+ * crossed Kauaʻi it has opened to the island and stays there. The fog
+ * still tells the story — it is simply never the ONLY thing on screen.
+ *
+ * Pure, exported and tested, because it is a rule rather than a
+ * drawing and there is no DOM in this repo's test run.
+ */
+/**
+ * Are two frames the same picture?
+ *
+ * The fitted zoom is a continuous number, so it moves by a hair every
+ * time a cell flips. Comparing it exactly would recut the island on
+ * frames where nothing visibly changed; comparing it loosely would
+ * leave the cut behind a frame that has genuinely moved. A part in a
+ * thousand is well under one pixel of a 104-pixel face.
+ */
+export function sameView(a: MapView, b: MapView): boolean {
+  const fa = a.fit ?? 0;
+  const fb = b.fit ?? 0;
+  if (Math.abs(fa - fb) > Math.max(fa, fb) / 1000) return false;
+  const grain = ISLAND_SPAN / Math.max(1, fa) / 1000;
+  return Math.abs(a.centre.wx - b.centre.wx) <= grain
+    && Math.abs(a.centre.wz - b.centre.wz) <= grain;
+}
+
+export function frameFor(
+  known: { min: WorldPoint; max: WorldPoint } | null,
+  at: WorldPoint,
+  pin: WorldPoint | null,
+): MapView {
+  if (!known) return WHOLE_ISLAND;
+  // Her own position and the pin belong in frame whatever the fog has
+  // done: a map that can lose the player is not a map, and a
+  // destination off the edge is a bearing the compass already gives
+  // better.
+  let box = enclosing(known, at);
+  if (pin) box = enclosing(box, pin);
+  return fitTo(box.min, box.max);
+}
 
 /** Card gold and the ink of the unknown — palette, not invention. */
 const GOLD = 'rgba(255, 216, 130, .85)';
@@ -197,6 +254,12 @@ export class Minimap {
   private scale = 0;
   /** The last frame actually painted, or null when nothing has been. */
   private shown: MinimapFrame | null = null;
+  /** The discovered box, and the mask it was scanned from. */
+  private bounds: { min: WorldPoint; max: WorldPoint } | null = null;
+  private boundsFrom: Discovery | null = null;
+  private boundsAt = -1;
+  /** The frame the composite was cut at, so a moved frame recuts it. */
+  private builtView: MapView | null = null;
 
   constructor(host: HTMLElement, onOpen: () => void) {
     this.root = document.createElement('button');
@@ -281,6 +344,24 @@ export class Minimap {
 
     const face = this.canvas.width;
     const port: Viewport = { width: face, height: face };
+
+    // WHAT SHE KNOWS DECIDES THE FRAME. The bounds scan is a pass over
+    // the whole mask, so it is keyed to the revision exactly like the
+    // composite — once every hundred metres of walking, not per frame.
+    if (this.boundsFrom !== known || this.boundsAt !== known.revision) {
+      this.bounds = knownBounds(known);
+      this.boundsFrom = known;
+      this.boundsAt = known.revision;
+    }
+    const view = frameFor(this.bounds, marks.at, marks.primary);
+    // A CHANGED FRAME IS A STALE COMPOSITE. The island is cut to the
+    // fog at a particular scale and offset; drawing yesterday's cut at
+    // today's zoom would slide the coastline out from under the fog.
+    if (this.builtView === null || !sameView(this.builtView, view)) {
+      this.composite = null;
+      this.builtView = view;
+    }
+
     const next: MinimapFrame = {
       at: marks.at,
       // THE REPO'S OWN CONVERSION, once, here. Her heading is radians
@@ -291,7 +372,7 @@ export class Minimap {
       pin: marks.primary,
       revision: known.revision,
     };
-    const grain = worldPerPixel(WHOLE_ISLAND, port);
+    const grain = worldPerPixel(view, port);
     if (!worthRedrawing(this.shown, next, grain)) return;
     this.shown = next;
 
@@ -300,7 +381,7 @@ export class Minimap {
       // The identity as well as the number: two masks can both be at
       // revision 1 — a fresh one and a loaded save — and they are not
       // the same island.
-      this.composite = this.compose(known, port);
+      this.composite = this.compose(known, port, view);
       this.builtFrom = known;
       this.builtAt = known.revision;
     }
@@ -314,8 +395,8 @@ export class Minimap {
     ink.fillRect(0, 0, face, face);
     ink.drawImage(this.composite, 0, 0);
 
-    if (next.pin !== null) this.drawPin(next.pin, port, scale);
-    this.drawQueen(next, port, scale);
+    if (next.pin !== null) this.drawPin(next.pin, port, scale, view);
+    this.drawQueen(next, port, scale, view);
   }
 
   dispose(): void {
@@ -342,7 +423,9 @@ export class Minimap {
    * staircase, and it costs nothing because the scaler was going to
    * run regardless.
    */
-  private compose(known: Discovery, port: Viewport): HTMLCanvasElement {
+  private compose(
+    known: Discovery, port: Viewport, view: MapView,
+  ): HTMLCanvasElement {
     const face = port.width;
     const out = this.composite ?? document.createElement('canvas');
     // Assigning the size also clears it, which is the cheap way to
@@ -352,8 +435,8 @@ export class Minimap {
 
     const ink = out.getContext('2d')!;
     ink.imageSmoothingEnabled = true;
-    const size = islandPixels(WHOLE_ISLAND, port);
-    const corner = islandOrigin(WHOLE_ISLAND, port);
+    const size = islandPixels(view, port);
+    const corner = islandOrigin(view, port);
     ink.drawImage(bakeIsland(), corner.x, corner.y, size, size);
     ink.globalCompositeOperation = 'destination-in';
     ink.drawImage(this.maskOf(known), corner.x, corner.y, size, size);
@@ -406,9 +489,9 @@ export class Minimap {
    * correct on the ground and mirrored in the air.
    */
   private drawQueen(
-    frame: MinimapFrame, port: Viewport, scale: number,
+    frame: MinimapFrame, port: Viewport, scale: number, view: MapView,
   ): void {
-    const here = worldToScreen(WHOLE_ISLAND, port, frame.at);
+    const here = worldToScreen(view, port, frame.at);
     const ink = this.ink;
     ink.save();
     ink.translate(here.x, here.y);
@@ -438,8 +521,10 @@ export class Minimap {
    * is the only one it can honestly draw, and the ring keeps meaning
    * "not ordered" everywhere it appears.
    */
-  private drawPin(at: WorldPoint, port: Viewport, scale: number): void {
-    const here = worldToScreen(WHOLE_ISLAND, port, at);
+  private drawPin(
+    at: WorldPoint, port: Viewport, scale: number, view: MapView,
+  ): void {
+    const here = worldToScreen(view, port, at);
     const ink = this.ink;
     ink.beginPath();
     ink.arc(here.x, here.y, PIN_RADIUS * scale, 0, Math.PI * 2);

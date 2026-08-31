@@ -59,6 +59,21 @@ export interface MapView {
   readonly centre: WorldPoint;
   /** Index into ZOOM_STEPS. */
   readonly zoom: number;
+  /**
+   * A CONTINUOUS multiplier that overrides the step, when a view is
+   * FITTED to something rather than stepped by a thumb.
+   *
+   * The full-screen map is stepped: a player presses + and − and the
+   * three rungs are what they get, because a stepped zoom is what a
+   * thumb can aim. The minimap is not stepped at all — it frames
+   * whatever she has discovered, and that box grows continuously, so
+   * rounding it onto three rungs would make the widget jump between
+   * scales as she walked.
+   *
+   * Additive on purpose: a view without this behaves exactly as it did
+   * before it existed, and nothing on the stepped path has to know.
+   */
+  readonly fit?: number;
 }
 
 export interface Viewport { readonly width: number; readonly height: number; }
@@ -88,7 +103,58 @@ function heldCentre(at: WorldPoint): WorldPoint {
 
 /** The multiplier this view is drawn at. */
 export function zoomFactor(view: MapView): number {
-  return ZOOM_STEPS[heldZoom(view.zoom)];
+  return view.fit ?? ZOOM_STEPS[heldZoom(view.zoom)];
+}
+
+/**
+ * The tightest a fitted view is allowed to close in.
+ *
+ * A frame that fits ONLY what is known would open at the width of one
+ * reveal disc and then barely move for a long time, which reads as a
+ * map that is stuck. More to the point, a 2 km window on a 56 km
+ * island drawn into 104 pixels is 19 metres a pixel — far finer than
+ * the 72.9 m the baked relief actually holds, so the extra
+ * magnification would be inventing detail the picture does not have.
+ */
+export const MAX_FIT = ISLAND_SPAN / 600_000;
+
+/**
+ * A view framed on a world box rather than on a zoom step.
+ *
+ * Fits the LONGER side of the box into the smaller side of the
+ * viewport, with a margin, and never closes tighter than MAX_FIT or
+ * opens wider than the whole island. The centre is clamped like every
+ * other centre, so a box near a coast cannot slide the island away.
+ *
+ * `margin` is a fraction of the fitted span left as breathing room —
+ * 0.15 keeps the newest fog off the widget's own border, where a gold
+ * frame would otherwise cut through it.
+ */
+export function fitTo(
+  min: WorldPoint, max: WorldPoint, margin = 0.15,
+): MapView {
+  const spanX = Math.abs(max.wx - min.wx);
+  const spanZ = Math.abs(max.wz - min.wz);
+  const span = Math.max(spanX, spanZ) * (1 + margin * 2);
+  // A degenerate box (one cell, or none) would divide by zero; the
+  // clamp below catches it, but saying so here is cheaper to read.
+  const want = span > 0 ? ISLAND_SPAN / span : MAX_FIT;
+  return {
+    centre: heldCentre(world((min.wx + max.wx) / 2, (min.wz + max.wz) / 2)),
+    zoom: 0,
+    fit: Math.max(1, Math.min(MAX_FIT, want)),
+  };
+}
+
+/** Grow a box to enclose a point. Both corners move as needed. */
+export function enclosing(
+  box: { min: WorldPoint; max: WorldPoint } | null, at: WorldPoint,
+): { min: WorldPoint; max: WorldPoint } {
+  if (!box) return { min: at, max: at };
+  return {
+    min: world(Math.min(box.min.wx, at.wx), Math.min(box.min.wz, at.wz)),
+    max: world(Math.max(box.max.wx, at.wx), Math.max(box.max.wz, at.wz)),
+  };
 }
 
 /**

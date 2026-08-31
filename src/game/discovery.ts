@@ -47,6 +47,7 @@
  * worse direction to be wrong in on a discovery map.
  */
 import { mapToWorld, worldToMap } from '../ui/islandMap';
+import type { WorldPoint } from '../world/coords';
 
 /** Cells per side of the discovery mask. 768 / 384 = exactly 2 map px. */
 export const DISCOVERY_CELLS = 384;
@@ -163,6 +164,53 @@ export function fractionSeen(of: Discovery): number {
     if (of.cells[i] !== 0) known++;
   }
   return known / of.cells.length;
+}
+
+/**
+ * THE BOX SHE HAS SEEN, in world units — or null while she has seen
+ * nothing.
+ *
+ * For framing a map, and for nothing else. A minimap showing the whole
+ * 56 km island is a black square for the first hours of a run, because
+ * a 2 km disc is under four per cent of the island's width and there is
+ * simply nothing else to draw yet. Knowing the extent of what IS known
+ * lets the frame start tight and open out as she explores, so the
+ * widget is full from the first frame and the fog still reads as
+ * progress rather than as a fault.
+ *
+ * Scanned rather than tracked. `reveal` could keep a running box for
+ * free, but then `decodeDiscovery` would have to reconstruct one and
+ * there would be two places that believe they know the answer. A whole
+ * pass over 147,456 bytes is well under a millisecond and it runs only
+ * when the revision moves, which is once every hundred metres or so of
+ * walking.
+ *
+ * The box is returned in CELL-EDGE world coordinates — the outer edges
+ * of the outermost seen cells — so it encloses everything known rather
+ * than the centres of the cells at the rim.
+ */
+export function knownBounds(
+  of: Discovery,
+): { min: WorldPoint; max: WorldPoint } | null {
+  let loC = of.size;
+  let hiC = -1;
+  let loR = of.size;
+  let hiR = -1;
+  for (let r = 0; r < of.size; r++) {
+    const row = r * of.size;
+    for (let c = 0; c < of.size; c++) {
+      if (of.cells[row + c] === 0) continue;
+      if (c < loC) loC = c;
+      if (c > hiC) hiC = c;
+      if (r < loR) loR = r;
+      if (r > hiR) hiR = r;
+    }
+  }
+  if (hiC < 0) return null;
+  // Cell EDGES, not centres: cell c spans map coordinates c..c+1.
+  const min = mapToWorld(loC, loR, of.size);
+  const max = mapToWorld(hiC + 1, hiR + 1, of.size);
+  return { min, max };
 }
 
 /** `d1:384:<base64url>` — RLE varint runs, unseen first. */

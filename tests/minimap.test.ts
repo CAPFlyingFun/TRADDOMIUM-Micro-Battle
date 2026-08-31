@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
-  MINIMAP_PX, worthRedrawing, type MinimapFrame,
+  MINIMAP_PX, frameFor, sameView, worthRedrawing, type MinimapFrame,
 } from '../src/ui/Minimap';
-import { world } from '../src/world/coords';
+import { MAX_FIT, worldPerPixel, worldToScreen, zoomFactor } from '../src/ui/mapView';
+import { REVEAL_RADIUS } from '../src/game/discovery';
+import { world, type WorldPoint } from '../src/world/coords';
 import { ISLAND_SPAN } from '../src/world/heightfield';
 
 // The face at the scale a phone actually draws it: 104 CSS px at the
@@ -108,5 +110,97 @@ describe('the minimap refusing to draw a queen who is nowhere', () => {
     const stepped = frame({ at: world(HER.wx + 1, HER.wz) });
     expect(worthRedrawing(frame(), stepped, NaN)).toBe(true);
     expect(worthRedrawing(frame(), stepped, 0)).toBe(true);
+  });
+});
+
+/**
+ * THE FRAME FOLLOWS WHAT SHE KNOWS.
+ *
+ * The widget drew the whole island always, which is right at the end
+ * of a run and wrong at the start of one: a 2 km reveal is 3.6% of a
+ * 56 km island, so a new player's minimap was a black square with one
+ * lit cell — correct, and indistinguishable from a broken widget.
+ * Joshua saw it in the first probe frame and called it.
+ */
+describe('how the minimap frames itself', () => {
+  const box = (
+    minX: number, minZ: number, maxX: number, maxZ: number,
+  ): { min: WorldPoint; max: WorldPoint } => ({
+    min: world(minX, minZ), max: world(maxX, maxZ),
+  });
+  const HER = world(0, 0);
+
+  it('shows the whole island before anything is known', () => {
+    // Nothing to fit, and nothing to draw either — but the frame has
+    // to be a real one rather than a divide by zero.
+    expect(zoomFactor(frameFor(null, HER, null))).toBe(1);
+  });
+
+  it('closes in on a first reveal instead of leaving a black square', () => {
+    // One 2 km disc, the state of every brand-new run.
+    const first = frameFor(box(-REVEAL_RADIUS, -REVEAL_RADIUS,
+      REVEAL_RADIUS, REVEAL_RADIUS), HER, null);
+    expect(zoomFactor(first)).toBeGreaterThan(1);
+    // And it fills the widget: the known box covers a real share of
+    // the face rather than a pixel of it.
+    const port = { width: 208, height: 208 };
+    const across = (REVEAL_RADIUS * 2) / worldPerPixel(first, port);
+    expect(across).toBeGreaterThan(port.width * 0.5);
+  });
+
+  it('opens out as she explores, and never past the whole island', () => {
+    const small = zoomFactor(frameFor(box(-200_000, -200_000, 200_000, 200_000), HER, null));
+    const bigger = zoomFactor(frameFor(box(-900_000, -900_000, 900_000, 900_000), HER, null));
+    const huge = zoomFactor(frameFor(box(-2_700_000, -2_700_000, 2_700_000, 2_700_000), HER, null));
+    expect(small).toBeGreaterThan(bigger);
+    expect(bigger).toBeGreaterThan(huge);
+    // The end state is the frame it always used to have.
+    expect(huge).toBe(1);
+  });
+
+  it('never closes tighter than the relief it is drawn from', () => {
+    // A single cell would otherwise fit to an enormous magnification
+    // of a 72.9 m-per-pixel bake — inventing detail the picture does
+    // not hold.
+    const oneCell = frameFor(box(0, 0, 14_583, 14_583), HER, null);
+    expect(zoomFactor(oneCell)).toBeLessThanOrEqual(MAX_FIT);
+  });
+
+  it('keeps her in frame even when the fog is somewhere else', () => {
+    // She can fly out of what she has discovered — the reveal follows
+    // her, but a loaded save drops her wherever she logged out. A map
+    // that can lose the player is not a map.
+    const far = world(1_500_000, 1_500_000);
+    const view = frameFor(box(-200_000, -200_000, 200_000, 200_000), far, null);
+    const port = { width: 208, height: 208 };
+    const on = worldToScreen(view, port, far);
+    expect(on.x).toBeGreaterThanOrEqual(0);
+    expect(on.x).toBeLessThanOrEqual(port.width);
+    expect(on.y).toBeGreaterThanOrEqual(0);
+    expect(on.y).toBeLessThanOrEqual(port.height);
+  });
+
+  it('and keeps the destination in frame too', () => {
+    // A pin off the edge is a bearing, and the compass strip already
+    // draws bearings better than 104 pixels ever will.
+    const pin = world(-1_800_000, 900_000);
+    const view = frameFor(box(-200_000, -200_000, 200_000, 200_000), HER, pin);
+    const port = { width: 208, height: 208 };
+    const on = worldToScreen(view, port, pin);
+    expect(on.x).toBeGreaterThanOrEqual(0);
+    expect(on.x).toBeLessThanOrEqual(port.width);
+    expect(on.y).toBeGreaterThanOrEqual(0);
+    expect(on.y).toBeLessThanOrEqual(port.height);
+  });
+
+  it('does not recut the island for a frame that has not moved', () => {
+    const a = frameFor(box(-200_000, -200_000, 200_000, 200_000), HER, null);
+    expect(sameView(a, a)).toBe(true);
+    // One more cell revealed at the rim is not a new picture.
+    const b = frameFor(box(-200_000, -200_000, 200_010, 200_000), HER, null);
+    expect(sameView(a, b)).toBe(true);
+    // A real change is.
+    const c = frameFor(box(-900_000, -900_000, 900_000, 900_000), HER, null);
+    expect(sameView(a, c)).toBe(false);
   });
 });
