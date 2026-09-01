@@ -527,3 +527,104 @@ describe('pace is sensed, not yet decided on', () => {
     expect(new Set(goals).size).toBe(1);
   });
 });
+
+/**
+ * THE DEADLOCK: A WATER ERRAND NOBODY IS RUNNING.
+ *
+ * Joshua's session, 2026-08-31. The first trip was flawless — took off,
+ * landed, drank, took off again, made a stamina stop, arrived. Then he
+ * plotted a second course while she was sitting on water, and nothing
+ * ever happened again: "Autopilot did start but waited until the dry
+ * timer was up…. Nothing… I manually drank… nothing, I reset a new
+ * path… nothing."
+ *
+ * His screenshot names it. `AI navigate · pri waypoint · det water` over
+ * `AP hold 1m`: the brain says it is navigating, a water detour is still
+ * set, and the executor is holding over that detour a metre away.
+ *
+ * `wait_wings` came out into `navigate` whatever it had been doing, so
+ * an errand interrupted by wet wings was forgotten by the state machine
+ * while its `detour` object survived. Nothing serves a detour from
+ * `navigate`, so it was never advanced, never satisfied and never
+ * cleared — and `active` prefers the detour, so every later order went
+ * behind a mission that could not finish.
+ */
+describe('an errand interrupted by wet wings', () => {
+  const thirsty = (over: Partial<Sense> = {}): Sense => sense({
+    thirst: 0.05,
+    nearestFresh: { range: 2_000, bearing: 0 },
+    nearestWatercourse: { range: 2_000, bearing: 0 },
+    ...over,
+  });
+
+  /**
+   * Thirsty enough to start the errand, then soaked, then WATERED —
+   * by hand, which is what Joshua did — and only then dry.
+   *
+   * The order is the whole reproduction. While she is still thirsty the
+   * broken machine healed itself: it fell out into `navigate`, found
+   * her thirsty on the next think, and started a fresh errand. It is
+   * the queen who has ALREADY drunk who gets stranded, because nothing
+   * sends her back to a state that would clear the detour.
+   */
+  const stranded = (brain: MissionBrain): void => {
+    run(brain, thirsty());
+    run(brain, thirsty({ motion: 'swimming', wingsWet: true }));
+    // She drank while she waited. Thirst is fine now.
+    run(brain, sense({ thirst: 1, motion: 'swimming', wingsWet: true }));
+    // And the wings dry.
+    run(brain, sense({ thirst: 1, motion: 'swimming', wingsWet: false }));
+  };
+
+  it('starts the errand and remembers it through the wait', () => {
+    const brain = new MissionBrain(fixedEta(600), CFG);
+    brain.order(waypoint());
+    run(brain, thirsty());
+    expect(brain.goal).toBe('seek_water');
+    expect(brain.detourMission).not.toBe(null);
+    run(brain, thirsty({ motion: 'swimming', wingsWet: true }));
+    expect(brain.goal).toBe('wait_wings');
+    expect(brain.detourMission).not.toBe(null);
+  });
+
+  it('and does not strand it when she comes out no longer thirsty', () => {
+    // THE DEADLOCK. `active` prefers the detour, so a detour the brain
+    // has stopped thinking about is a destination the executor flies to
+    // for ever — Joshua's `AI navigate · det water` over `AP hold 1m`.
+    const brain = new MissionBrain(fixedEta(600), CFG);
+    brain.order(waypoint());
+    stranded(brain);
+    expect(brain.detourMission).toBe(null);
+    expect(brain.active?.label).toBe('A');
+  });
+
+  it('and a new order is not stuck behind a dead one', () => {
+    // What Joshua actually did next: plotted a fresh course and watched
+    // it be ignored, because the stale detour outranked it for ever.
+    const brain = new MissionBrain(fixedEta(600), CFG);
+    brain.order(waypoint());
+    stranded(brain);
+    brain.order(waypoint({ id: 'B', label: 'B', at: at(-200_000, 0) }));
+    run(brain, sense({ thirst: 1 }));
+    expect(brain.active?.label).toBe('B');
+    expect(brain.detourMission).toBe(null);
+  });
+
+  it('and a queen who is STILL thirsty keeps the SAME errand', () => {
+    // The other half, and the identity is the point. `serveWater` says
+    // COMMITTED: the target is not reselected, only handed off or
+    // abandoned. Coming out of the wait into `navigate` and letting the
+    // thirst check start a fresh errand looks the same from outside and
+    // is not — it throws away a target already chosen and walked
+    // toward, and does it again every time she gets her wings wet.
+    const brain = new MissionBrain(fixedEta(600), CFG);
+    brain.order(waypoint());
+    run(brain, thirsty());
+    const chosen = brain.detourMission;
+    expect(chosen).not.toBe(null);
+    run(brain, thirsty({ motion: 'swimming', wingsWet: true }));
+    run(brain, thirsty({ motion: 'swimming', wingsWet: false }));
+    expect(brain.goal).not.toBe('navigate');
+    expect(brain.detourMission).toBe(chosen);
+  });
+});

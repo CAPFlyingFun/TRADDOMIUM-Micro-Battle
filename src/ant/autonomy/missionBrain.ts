@@ -52,6 +52,17 @@ import {
  * same call made for `digging` and `fighting` in ant/motion.ts:
  * avoid, seek_rest, rest, approach, land.
  */
+/**
+ * The states that are ALLOWED to be holding a water detour.
+ *
+ * `replan` is in it because `plan()` owns the way out of that one and
+ * may hand the same errand back; the rest are the errand itself. Any
+ * state not in here having a detour is a bug — see `update`.
+ */
+const SERVES_WATER: ReadonlySet<string> = new Set([
+  'seek_water', 'approach_water', 'drink', 'wait_wings', 'replan',
+]);
+
 export type Goal =
   | 'off'
   | 'navigate'
@@ -284,6 +295,32 @@ export class MissionBrain {
       this.thinkDue = this.cfg.thinkEvery;
       this.think(sense);
     }
+
+    // AN ERRAND NOBODY IS RUNNING IS NOT AN ERRAND.
+    //
+    // The invariant rather than the bug: `detour` may only exist while
+    // some state is actually serving it. `wait_wings` used to fall out
+    // into `navigate` and strand one, and the damage was out of all
+    // proportion to the slip — `active` prefers the detour, so the
+    // executor spent the rest of the session flying to a place the
+    // brain had stopped thinking about, and every later order was
+    // ignored because it went behind that detour in the queue.
+    //
+    // Fixing the one path is not enough. A detour is invisible to this
+    // machine from the wrong state and lethal to the executor, so any
+    // future path out of the water states has to lose it too, whether
+    // or not whoever writes it remembers.
+    //
+    // NO TEST REACHES THIS, and that is the honest state of it: with
+    // both real fixes in place there is no way to arrive here. It is
+    // kept as the backstop for the class rather than the case, because
+    // the failure it prevents cost a whole session and the failure it
+    // could cause — dropping a live errand, and continuing to the
+    // player's own destination — is a fraction as bad.
+    if (this.detour !== null && !SERVES_WATER.has(this.state)) {
+      this.detour = null;
+      this.trip = null;
+    }
   }
 
   /**
@@ -391,7 +428,25 @@ export class MissionBrain {
       return;
     }
     if (this.state === 'wait_wings') {
-      this.state = this.active ? 'navigate' : 'off';
+      // BACK TO THE ERRAND, NOT PAST IT — and this one line deadlocked
+      // a whole session.
+      //
+      // It went straight to `navigate` whatever it had been doing, so a
+      // queen who was waiting for her wings in the middle of a WATER
+      // errand came out of the wait having forgotten the errand — while
+      // `detour` was still set. Nothing in this machine serves a detour
+      // from `navigate`, so it was never advanced, never satisfied and
+      // never cleared. And `active` prefers the detour, so the executor
+      // kept flying to it: Joshua's third screenshot is exactly that,
+      // `AI navigate · det water` over `AP hold 1m`, sitting on the
+      // water it had already reached.
+      //
+      // Everything downstream then looks broken. A new waypoint does
+      // nothing, because `active` is still the stale detour. Drinking
+      // by hand does nothing, because `drink` — the only state that
+      // clears a detour — is unreachable from `navigate`.
+      this.state = this.detour ? 'seek_water'
+        : this.primary ? 'navigate' : 'off';
     }
 
     // SURVIVAL FIRST, before the normal goal is even considered — the
@@ -463,6 +518,25 @@ export class MissionBrain {
    */
   private serveWater(sense: Sense): void {
     if (sense.drinkable) { this.state = 'drink'; return; }
+    // AND THE ERRAND ENDS WHEN THE REASON FOR IT DOES.
+    //
+    // This asked every question about the water except the first one:
+    // does she still need it. So a queen who got a drink some OTHER way
+    // — the player holding the button, which is exactly what Joshua
+    // did — kept the errand for ever, because the only exit was
+    // arriving at a target she no longer had any reason to visit.
+    //
+    // It is the deeper half of the deadlock his session found. Sending
+    // her back to `seek_water` after her wings dried was right, and on
+    // its own it only moved the stall: from a detour nobody was serving
+    // to a detour being served for nothing.
+    if (!this.thirstUnsafe(sense)) {
+      this.detour = null;
+      this.trip = null;
+      this.announced = false;
+      this.state = this.primary ? 'navigate' : 'off';
+      return;
+    }
     const target = this.detour;
     if (!target) { this.state = 'replan'; return; }
     // ARRIVED AT THE STRATEGIC CANDIDATE. The drainage got her to the
