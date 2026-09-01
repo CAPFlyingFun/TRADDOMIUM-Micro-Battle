@@ -509,6 +509,12 @@ export class MissionBrain {
     if (!this.trip) return false;
     const dry = timeUntilDry(sense.thirst, sense.thirstDrain);
     if (!Number.isFinite(dry)) return false;
+    // AND SHE HAS TO BE ACTUALLY LOW. The trip test below is a
+    // SUFFICIENCY test; this is the necessity one, and without it the
+    // pair is unliveable — see `thirstFloor`. A queen with three
+    // quarters of a tank has no business looking for a stream, whatever
+    // the arithmetic says about a journey she has barely started.
+    if (dry > this.cfg.thirstFloor) return false;
     return this.trip.etaSeconds + this.cfg.hydrationReserve > dry;
   }
 

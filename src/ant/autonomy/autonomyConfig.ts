@@ -31,6 +31,32 @@ export interface AutonomyConfig {
    */
   readonly hydrationReserve: number;
   /**
+   * SHE DOES NOT STOP FOR WATER UNTIL SHE IS THIS CLOSE TO DRY,
+   * seconds. Fifteen minutes, and it is Joshua's number.
+   *
+   * The rule above — "will I still be wet when I arrive" — is right and
+   * on its own it is unliveable. A cross-island trip is ninety minutes
+   * and she carries about fifty-five, so the answer is NO from the
+   * moment she sets off and stays NO however much she drinks: she
+   * tops up to full, resumes, notices the trip is still too long,
+   * detours to the water she is standing beside, and does it again.
+   * Joshua watched her do exactly that, "alternating between water,
+   * path, water, path" at 81% and 45 minutes in hand — "annoying every
+   * 3 minutes from 55m to 52m (Water break)".
+   *
+   * `drinkTo` already stopped the INSTANT loop; it just set the period
+   * to however long she takes to fall from full to 95%, which is about
+   * a minute and a half.
+   *
+   * So the trip test is now a sufficiency test behind a necessity one:
+   * a queen with three quarters of a tank has no business looking for
+   * a stream, whatever the arithmetic says about a journey she has
+   * barely started. What the arithmetic was really detecting is a trip
+   * longer than her endurance, and that is a ROUTE problem — staged
+   * stops — rather than a thirst one.
+   */
+  readonly thirstFloor: number;
+  /**
    * She drinks up to this fraction before she will leave the water.
    *
    * Not 1.0 on purpose. A committed action has to END, and a target of
@@ -60,6 +86,7 @@ export const AUTONOMY_DEFAULTS: AutonomyConfig = {
   thinkEvery: 0.2,
   planEvery: 1,
   hydrationReserve: 90,
+  thirstFloor: 15 * 60,
   drinkTo: 0.95,
   waterArriveWithin: 5_500,
   // CRUISE_SPEED. Imported as a literal rather than from flight.ts so a

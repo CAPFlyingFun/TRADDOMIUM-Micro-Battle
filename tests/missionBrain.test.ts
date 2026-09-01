@@ -321,13 +321,100 @@ describe('the trip estimate is an input, not a calculation', () => {
   });
 
   it('and an unreachable route reads as unsafe rather than as fine', () => {
+    // AND SHE HAS TO BE LOW FOR IT TO MATTER. This used to run at 0.9,
+    // where the answer was the same for a reason that turned out to be
+    // the bug: any long trip read as unsafe at ANY thirst, so she
+    // bounced between water and path for ever. The point of the test is
+    // that an infinite estimate must not read as FINE, and that is now
+    // asked of a queen who is genuinely short.
     const brain = new MissionBrain(
       () => ({ etaSeconds: Number.POSITIVE_INFINITY, distance: Number.POSITIVE_INFINITY }),
       CFG,
     );
     brain.order(waypoint());
-    run(brain, sense({ thirst: 0.9 }));
+    run(brain, sense({ thirst: 0.2 }));
     expect(brain.goal).toBe('seek_water');
+  });
+});
+
+/**
+ * SHE DOES NOT STOP FOR WATER WITH THREE QUARTERS OF A TANK.
+ *
+ * Joshua, 2026-08-31, watching her at 81% and 45 minutes in hand: "it
+ * was alternating between water, path, water, path... annoying every 3
+ * minutes from 55m to 52m (Water break). Need to make sure it only
+ * triggers below 15m remaining."
+ *
+ * The rule was "will I still be wet when I arrive", which is right and
+ * on its own unliveable: a cross-island trip is ninety minutes and she
+ * carries about fifty-five, so the answer is NO from the moment she
+ * sets off and stays NO however much she drinks. `drinkTo` stopped the
+ * instant loop and only set its period — a minute and a half, the time
+ * to fall from full to 95%.
+ */
+describe('the floor under the water errand', () => {
+  /** Thirst that leaves her this many seconds from dry, at the real drain. */
+  const dryIn = (seconds: number): number => seconds / 2000;
+
+  it('leaves a queen with plenty alone, however long the trip', () => {
+    const brain = new MissionBrain(fixedEta(90 * 60), CFG);
+    brain.order(waypoint());
+    run(brain, sense({ thirst: dryIn(45 * 60) }));
+    expect(brain.goal).toBe('navigate');
+    expect(brain.detourMission).toBe(null);
+  });
+
+  it('and still stops her when she is actually short', () => {
+    const brain = new MissionBrain(fixedEta(90 * 60), CFG);
+    brain.order(waypoint());
+    run(brain, sense({
+      thirst: dryIn(10 * 60),
+      nearestFresh: { range: 2_000, bearing: 0 },
+      nearestWatercourse: { range: 2_000, bearing: 0 },
+    }));
+    expect(brain.goal).toBe('seek_water');
+  });
+
+  it('and the floor is fifteen minutes, which is the whole of the fix', () => {
+    expect(CFG.thirstFloor).toBe(15 * 60);
+    const brain = new MissionBrain(fixedEta(90 * 60), CFG);
+    brain.order(waypoint());
+    // A minute the safe side of it.
+    run(brain, sense({ thirst: dryIn(16 * 60) }));
+    expect(brain.goal).toBe('navigate');
+  });
+
+  it('and a SHORT hop is still not worth stopping for, even when low', () => {
+    // The trip test survives as the sufficiency half: fourteen minutes
+    // of water and a one-minute hop is a hop she makes first.
+    const brain = new MissionBrain(fixedEta(60), CFG);
+    brain.order(waypoint());
+    run(brain, sense({
+      thirst: dryIn(14 * 60),
+      nearestFresh: { range: 2_000, bearing: 0 },
+    }));
+    expect(brain.goal).toBe('navigate');
+  });
+
+  it('and cannot alternate water and path at a comfortable level', () => {
+    // THE SYMPTOM, as a test. Drink to full, resume, and the errand
+    // must not come straight back.
+    const brain = new MissionBrain(fixedEta(90 * 60), CFG);
+    brain.order(waypoint());
+    run(brain, sense({
+      thirst: dryIn(10 * 60),
+      nearestFresh: { range: 2_000, bearing: 0 },
+      nearestWatercourse: { range: 2_000, bearing: 0 },
+    }));
+    expect(brain.goal).toBe('seek_water');
+    // She drinks her fill and sets off again.
+    run(brain, sense({ thirst: 1, drinkable: true, act: 'drinking' }), 4);
+    expect(brain.goal).toBe('navigate');
+    // And a minute and a half later — the old loop's whole period —
+    // she is still going.
+    run(brain, sense({ thirst: dryIn(52 * 60) }), 4);
+    expect(brain.goal).toBe('navigate');
+    expect(brain.detourMission).toBe(null);
   });
 });
 
