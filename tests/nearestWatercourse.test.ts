@@ -17,7 +17,7 @@ import {
   isLandWatercourse, isWatercourse,
 } from '../src/world/islandChannels';
 import { SAMPLES, SPAN } from '../src/world/kauai';
-import { nearestWatercourse } from '../src/world/nearestWater';
+import { nearestSea, nearestWatercourse } from '../src/world/nearestWater';
 
 /** Joshua's beach. */
 const BEACH = { lat: 22.10664908, lon: -159.30305567 };
@@ -97,6 +97,68 @@ describe('finding a channel', () => {
     expect(nearestWatercourse(0, 0)).toBeNull();
     loadIsland();
   }, 120000);
+
+  /**
+   * THE SEARCH CAN BE TOLD WHERE TO GIVE UP.
+   *
+   * The rings grow as 8r nodes each and nothing stops them before the
+   * far coast, so a search started over open water — which is where the
+   * autonomy's corridor sampling starts several of them — reads
+   * millions of nodes inside one frame to find a channel its own
+   * reachability test then throws away. A caller that already knows the
+   * radius it will accept should pay for that radius only.
+   */
+  describe('and it can be asked to stop looking', () => {
+    /**
+     * FIVE KILOMETRES OUT TO SEA, which is the shape of the case the cap
+     * exists for: no land under her, so no land watercourse for a long
+     * way, so a ring walk with nothing to stop it.
+     */
+    const offshore = (): { wx: number; wz: number } => {
+      const beach = geoToWorld(BEACH);
+      const sea = nearestSea(beach.wx, beach.wz)!;
+      const out = sea.range + 500_000;
+      return {
+        wx: beach.wx + Math.sin(sea.bearing) * out,
+        wz: beach.wz + Math.cos(sea.bearing) * out,
+      };
+    };
+
+    it('gives the same answer when the cap is generous', () => {
+      const at = offshore();
+      expect(groundHeight(at.wx, at.wz)).toBeLessThan(0);
+      const open = nearestWatercourse(at.wx, at.wz);
+      expect(open).not.toBeNull();
+      const capped = nearestWatercourse(at.wx, at.wz, open!.range * 4);
+      expect(capped?.range).toBeCloseTo(open!.range, 6);
+      expect(capped?.bearing).toBeCloseTo(open!.bearing, 6);
+    }, 120000);
+
+    it('and nothing at all when the cap falls short of the water', () => {
+      const at = offshore();
+      const open = nearestWatercourse(at.wx, at.wz)!;
+      // Well clear of one node, or the cap has nothing to exclude.
+      expect(open.range).toBeGreaterThan(4 * (SPAN / (SAMPLES - 1)));
+      expect(nearestWatercourse(at.wx, at.wz, open.range / 4)).toBeNull();
+    }, 120000);
+
+    it('and never skips a channel that is INSIDE the cap', () => {
+      // The rings are squares, so a ring's corners stand further out
+      // than its edges. The guard stops on the ring's NEAREST point,
+      // which is the conservative read — a channel exactly at the cap
+      // is still found.
+      const at = offshore();
+      const open = nearestWatercourse(at.wx, at.wz)!;
+      expect(nearestWatercourse(at.wx, at.wz, open.range)?.range)
+        .toBeCloseTo(open.range, 6);
+    }, 120000);
+
+    it('and is unbounded when nobody asks, which every old caller is', () => {
+      const at = geoToWorld(INLAND);
+      expect(nearestWatercourse(at.wx, at.wz))
+        .toEqual(nearestWatercourse(at.wx, at.wz, Number.POSITIVE_INFINITY));
+    }, 120000);
+  });
 });
 
 describe('the two fresh-water answers are different questions', () => {

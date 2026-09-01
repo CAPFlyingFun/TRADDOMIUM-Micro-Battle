@@ -32,14 +32,35 @@ describe('a reserve that empties', () => {
     expect(thirst.fraction).toBeCloseTo(1 - rate * 10, 9);
   });
 
-  it('takes something like half an hour, not half a minute', () => {
-    // Game tuning, asserted loosely and on purpose: this is a bound on
-    // the FEEL rather than on the number, and it fails if somebody
-    // moves a caste rate by an order of magnitude.
+  /**
+   * TEST A — A FULL TANK IS TWO HOURS.
+   *
+   * Joshua, 2026-09-01: "Change the Queen's full hydration duration to
+   * 120 minutes. Do this through the existing thirst configuration."
+   *
+   * Asserted EXACTLY rather than loosely, which the earlier version of
+   * this test was not — it allowed anything between ten and ninety
+   * minutes, so it held 55.6 for three builds without anyone knowing
+   * what the number was. The duration is now a decision, and a decision
+   * belongs under a test that names it.
+   *
+   * There is one place it lives (castes.ts, `thirstRate` over
+   * `maxThirst`) and this is the assertion that it is the number
+   * Joshua asked for.
+   */
+  it('takes exactly two hours to empty, which is the number chosen', () => {
     const thirst = new Thirst();
-    const seconds = 1 / thirst.drain;
-    expect(seconds).toBeGreaterThan(10 * 60);
-    expect(seconds).toBeLessThan(90 * 60);
+    expect(1 / thirst.drain).toBeCloseTo(120 * 60, 6);
+  });
+
+  it('and no second hydration value exists to disagree with it', () => {
+    // The autonomy is handed `thirstDrain` and reasons in seconds; the
+    // HUD divides the same two numbers. Nothing keeps its own copy, so
+    // moving the table moves everything — which is what "do this
+    // through the existing thirst configuration" asked for.
+    const thirst = new Thirst();
+    thirst.restore(0.5);
+    expect(0.5 / thirst.drain).toBeCloseTo(60 * 60, 6);
   });
 
   it('never falls below empty however long it is left', () => {

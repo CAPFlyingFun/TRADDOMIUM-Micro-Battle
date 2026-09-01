@@ -144,15 +144,30 @@ const RINGS = SAMPLES;
  * It stops at the first ring that holds one, so on an island as wet as
  * Kaua'i this reads a handful of nodes in the common case; only genuinely
  * dry country walks far.
+ *
+ * AND `within` IS WHERE TO GIVE UP, world units — the guard for the
+ * uncommon case. Offshore, or over the driest ground on the island, the
+ * ring walk has nothing to stop it before the far coast: the rings grow
+ * as 8r nodes each, so a search that reaches the thousandth ring has
+ * read millions of them inside one frame. A caller that already knows
+ * it will reject anything past a radius — the autonomy does, because a
+ * candidate it cannot reach before drying is no candidate — should say
+ * so and pay for that radius only. Unbounded by default, which is the
+ * behaviour every existing caller has.
  */
-export function nearestWatercourse(wx: number, wz: number): WaterBearing | null {
+export function nearestWatercourse(
+  wx: number, wz: number, within = Number.POSITIVE_INFINITY,
+): WaterBearing | null {
   if (!islandChannelsReady()) return null;
   if (isLandWatercourse(wx, wz)) return { range: 0, bearing: 0 };
   const hit = (x: number, z: number): WaterBearing => ({
     range: Math.hypot(x - wx, z - wz),
     bearing: Math.atan2(x - wx, z - wz),
   });
-  for (let r = 1; r < RINGS; r++) {
+  // The ring is a SQUARE, so its nearest point is `r * NODE` away and
+  // its corners are further. Stopping on the nearest point is the
+  // conservative read: nothing inside the promised radius is skipped.
+  for (let r = 1; r < RINGS && (r - 1) * NODE <= within; r++) {
     let best: WaterBearing | null = null;
     const span = r * NODE;
     for (let i = -r; i <= r; i++) {

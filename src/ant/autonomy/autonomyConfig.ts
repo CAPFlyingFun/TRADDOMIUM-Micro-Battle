@@ -21,39 +21,51 @@ export interface AutonomyConfig {
    */
   readonly planEvery: number;
   /**
-   * HOW MUCH THIRST SHE KEEPS IN HAND, seconds.
+   * HOW MUCH THIRST SHE KEEPS IN HAND AT THE WATER, seconds.
    *
-   * The rule is "will I still be wet when I arrive", and arriving at
-   * exactly zero is not arriving wet: the estimate is a straight line
-   * over a real island, she may have to circle, land, walk the last
-   * stretch and find the channel dry. Ninety seconds is the margin,
-   * and it is game tuning rather than anything measured.
+   * The margin on the REACHABILITY test — a candidate is only worth
+   * flying to if `waterETA + this < timeUntilDry`. Arriving at exactly
+   * zero is not arriving wet: the estimate is a straight line over a
+   * real island, she may have to circle, land, walk the last stretch
+   * and find the channel dry. Ninety seconds, and it is game tuning
+   * rather than anything measured.
+   *
+   * IT USED TO GUARD THE WHOLE MISSION and that is what broke: the
+   * trigger was `missionETA + this > timeUntilDry`, which asks whether
+   * the DESTINATION is reachable on the water she has. On an island
+   * whose crossing is longer than her tank the answer was permanently
+   * no, so she stopped for water at every level and however recently
+   * she had drunk. Endurance against the mission is a ROUTE question
+   * — staged stops, which she now makes naturally — and this number
+   * belongs to the much smaller question it can actually answer: can
+   * she reach THAT PUDDLE before she runs out.
    */
   readonly hydrationReserve: number;
   /**
    * SHE DOES NOT STOP FOR WATER UNTIL SHE IS THIS CLOSE TO DRY,
-   * seconds. Fifteen minutes, and it is Joshua's number.
+   * seconds. Fifteen minutes, Joshua's number, and now the ONLY thing
+   * that starts a water errand.
    *
-   * The rule above — "will I still be wet when I arrive" — is right and
-   * on its own it is unliveable. A cross-island trip is ninety minutes
-   * and she carries about fifty-five, so the answer is NO from the
-   * moment she sets off and stays NO however much she drinks: she
-   * tops up to full, resumes, notices the trip is still too long,
-   * detours to the water she is standing beside, and does it again.
-   * Joshua watched her do exactly that, "alternating between water,
-   * path, water, path" at 81% and 45 minutes in hand — "annoying every
-   * 3 minutes from 55m to 52m (Water break)".
+   * IT USED TO BE HALF A RULE. The other half was "will I still be wet
+   * when I arrive", and that half is gone: `missionETA` no longer
+   * appears in the trigger at all. It could not, because on an island
+   * whose crossing is longer than a tank the answer is permanently no
+   * — she topped up to full, resumed, noticed the trip was still too
+   * long, detoured to the water she was standing beside, and did it
+   * again. Joshua watched exactly that at 81% and 45 minutes in hand:
+   * "alternating between water, path, water, path... annoying every 3
+   * minutes from 55m to 52m (Water break)".
    *
-   * `drinkTo` already stopped the INSTANT loop; it just set the period
-   * to however long she takes to fall from full to 95%, which is about
-   * a minute and a half.
+   * So the rule is now one clause and reads as a sentence: BELOW
+   * FIFTEEN MINUTES OF WATER, GO AND DRINK. Above it she flies,
+   * whatever the arithmetic says about a journey she has barely
+   * started; below it she stops, however short the hop in front of her
+   * is — fourteen minutes of water is a problem she should not be
+   * carrying into anything.
    *
-   * So the trip test is now a sufficiency test behind a necessity one:
-   * a queen with three quarters of a tank has no business looking for
-   * a stream, whatever the arithmetic says about a journey she has
-   * barely started. What the arithmetic was really detecting is a trip
-   * longer than her endurance, and that is a ROUTE problem — staged
-   * stops — rather than a thirst one.
+   * A trip longer than her endurance is served by REPEATING this: she
+   * flies, falls to fifteen minutes, drinks to full, flies again. That
+   * is what staged stops are, and they need no plan.
    */
   readonly thirstFloor: number;
   /**

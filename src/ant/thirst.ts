@@ -14,10 +14,16 @@
  * as water to drink."
  *
  * The drain is the caste table's `thirstRate` over its `maxThirst`,
- * both of which have sat in castes.ts unread since they were written.
- * At her live growth stage that is a little over half an hour from full
- * to empty, walking or not — she is a small animal in the tropics and
- * the number is game tuning rather than measured biology.
+ * and THAT TABLE IS THE ONLY PLACE THE DURATION LIVES. At her live
+ * growth stage a full tank is two hours, walking, flying or standing
+ * still — game tuning rather than measured biology, and the reasoning
+ * is written where the number is (castes.ts, `thirstRate`).
+ *
+ * Nothing else may keep its own idea of how long she lasts. The
+ * autonomy asks `timeUntilDry(fraction, drain)` and reasons in seconds;
+ * the HUD divides the same two numbers. Change the table and everything
+ * downstream moves with it, which is the whole reason the rate is not
+ * repeated anywhere.
  */
 import { liveStat } from './castes';
 

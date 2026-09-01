@@ -35,7 +35,7 @@ import { Ocean } from '../world/Ocean';
 import { canDrink, swimEffort, wadeAt } from '../ant/wading';
 import { Wings } from '../ant/wings';
 import { nearestSea, nearestWatercourse } from '../world/nearestWater';
-import { MissionBrain } from '../ant/autonomy/missionBrain';
+import { MissionBrain, type WaterSighting } from '../ant/autonomy/missionBrain';
 import { gaitWords, mediumOf, paceShare, tierOf } from '../ant/gait';
 import { straightLineTrip } from '../ant/autonomy/mission';
 import { AUTONOMY_DEFAULTS } from '../ant/autonomy/autonomyConfig';
@@ -184,6 +184,27 @@ const SURFACE_MARGIN = 12;
 const WATER_CADENCE = 0.1;
 /** How long an autonomy notice stays up, seconds — the grace chip's. */
 const AUTONOMY_NOTICE = 6;
+
+/**
+ * WHERE ALONG THE LEG THE DRAINAGE IS ASKED, as fractions of what she
+ * could actually cover before drying.
+ *
+ * Three points, quarter, half and three quarters. Not the destination
+ * itself: water at the far end of the leg is water she reaches anyway,
+ * and a fourth ring search buys nothing the reachability filter would
+ * not throw away.
+ */
+const CORRIDOR_AT: readonly number[] = [0.25, 0.5, 0.75];
+/**
+ * She starts looking down the corridor with this many low-water floors
+ * left — thirty minutes, at the shipped fifteen.
+ *
+ * Early enough that the candidates are already in hand when the trigger
+ * fires, late enough that a queen with an hour of water in her is not
+ * paying for three ring searches a second to answer a question she does
+ * not have.
+ */
+const CORRIDOR_AHEAD = 2;
 
 const DIVE_EASE = 0.9;
 /**
@@ -532,8 +553,25 @@ export class IslandScene {
    * register is on — so it has its own clock rather than riding the
    * debug line's.
    */
-  private channelNear: { range: number; bearing: number } | null = null;
+  private channelNear: WaterSighting | null = null;
   private channelDue = 0;
+  /**
+   * WATER DOWN THE CORRIDOR, not merely water near her.
+   *
+   * `channelNear` answers "what is closest", and closest is the wrong
+   * question when she is going somewhere: a channel 300 m behind costs
+   * 600 m of backtracking, one 700 m ahead and slightly off the line
+   * costs almost nothing. The brain can only compare candidates it has
+   * been given, so this samples the drainage at a few points along the
+   * line she is actually flying and hands the sightings over with the
+   * nearest one.
+   *
+   * Sampled on the brain's own cadence and ONLY WHEN SHE IS SHORT —
+   * three ring searches a second is not free, and a queen with an hour
+   * of water in hand has no use for the answer. Empty the rest of the
+   * time, which reads as "nobody looked", which is true.
+   */
+  private waterAhead: WaterSighting[] = [];
   /** And what she is doing with it. Acts interrupt; motions do not. */
   private act: Act = 'none';
   private dive = 0;
@@ -1117,6 +1155,27 @@ export class IslandScene {
         detour: this.brain.detourMission?.label ?? null,
         intent: this.brain.intent,
         channel: this.channelNear,
+        // The corridor candidates handed over this second, and what the
+        // last water decision actually weighed — a probe that can only
+        // see the goal cannot tell a good choice from a lucky one.
+        ahead: this.waterAhead.length,
+        candidate: this.brain.debug({
+          at: this.ant.where,
+          thirst: this.thirst.fraction,
+          thirstDrain: this.thirst.drain,
+          stamina: this.stamina.fraction,
+          staminaSpent: this.stamina.spent,
+          motion: this.motion,
+          act: this.act,
+          medium: 'air',
+          tier: 'run',
+          paceShare: 1,
+          wingsWet: this.wings.wet,
+          drinkable: false,
+          nearestFresh: null,
+          nearestWatercourse: this.channelNear,
+          waterAhead: this.waterAhead,
+        }).candidate,
         thirst: this.thirst.fraction,
         drain: this.thirst.drain,
         ...(() => {
@@ -3571,6 +3630,7 @@ export class IslandScene {
     if (this.channelDue <= 0) {
       this.channelDue = AUTONOMY_DEFAULTS.planEvery;
       this.channelNear = nearestWatercourse(here.wx, here.wz);
+      this.waterAhead = this.lookAhead(here);
     }
     this.brain.update(dt, {
       at: here,
@@ -3591,6 +3651,7 @@ export class IslandScene {
       // it is a ring search over the island. Handed the cached answer
       // the water readout already computed where one exists.
       nearestWatercourse: this.channelNear,
+      waterAhead: this.waterAhead,
     });
     // ── ON TO THE NEXT STOP ──────────────────────────────────────
     // The brain has finished the one it was given. If the player laid
@@ -3606,6 +3667,61 @@ export class IslandScene {
       this.brainSaid = said;
       this.brainSaidLeft = AUTONOMY_NOTICE;
     }
+  }
+
+  /**
+   * WATER ALONG THE LINE SHE IS FLYING, as sightings from where she is.
+   *
+   * `nearestWatercourse` around HER answers one question and the brain
+   * needs a second: what is near the ROUTE. So the drainage is asked at
+   * three points down the leg and the answers re-expressed from her
+   * position, which is the only form the brain accepts — a sighting is
+   * true from the place it was taken, and one carried over from a
+   * kilometre back would be believed and wrong.
+   *
+   * BOUNDED BY WHAT SHE COULD REACH, not by the leg. A quarter of the
+   * way along a fifty-kilometre crossing is twelve kilometres out, and
+   * a candidate the reachability filter is certain to throw away is a
+   * ring search spent for nothing. The sampling walks the corridor only
+   * as far as her remaining water could carry her.
+   *
+   * Empty when she is not short, when there is nowhere she is going, or
+   * when the drainage has nothing — all of which read the same way to
+   * the brain, which is correct: it means it has no extra candidates,
+   * not that the island has no water.
+   */
+  private lookAhead(here: WorldPoint): WaterSighting[] {
+    const goal = this.brain.primaryMission?.at ?? null;
+    if (goal === null) return [];
+    const dry = this.thirst.drain > 0
+      ? this.thirst.fraction / this.thirst.drain
+      : Number.POSITIVE_INFINITY;
+    if (dry > AUTONOMY_DEFAULTS.thirstFloor * CORRIDOR_AHEAD) return [];
+    const span = Math.hypot(goal.wx - here.wx, goal.wz - here.wz);
+    if (!(span > 0)) return [];
+    const reach = Math.min(span, dry * AUTONOMY_DEFAULTS.assumedSpeed);
+    // AND EACH SEARCH IS CAPPED at the radius the brain would accept
+    // anyway. Without it a sample point out over the water walks the
+    // drainage ring by ring to the far coast — millions of nodes inside
+    // one frame — to find a channel the reachability test then throws
+    // away. This is that same test, applied before the work.
+    const useful = Math.max(
+      0,
+      (dry - AUTONOMY_DEFAULTS.hydrationReserve) * AUTONOMY_DEFAULTS.assumedSpeed,
+    );
+    const seen: WaterSighting[] = [];
+    for (const along of CORRIDOR_AT) {
+      const share = (reach * along) / span;
+      const px = here.wx + (goal.wx - here.wx) * share;
+      const pz = here.wz + (goal.wz - here.wz) * share;
+      const found = nearestWatercourse(px, pz, useful);
+      if (!found) continue;
+      // The node it found, in world, then said again FROM HER.
+      const dx = px + Math.sin(found.bearing) * found.range - here.wx;
+      const dz = pz + Math.cos(found.bearing) * found.range - here.wz;
+      seen.push({ range: Math.hypot(dx, dz), bearing: Math.atan2(dx, dz) });
+    }
+    return seen;
   }
 
   /**
@@ -3632,15 +3748,27 @@ export class IslandScene {
       drinkable: false,
       nearestFresh: null,
       nearestWatercourse: this.channelNear,
+      waterAhead: this.waterAhead,
     });
     const secs = (v: number): string => (Number.isFinite(v)
       ? (v >= 600 ? `${(v / 60).toFixed(0)}m` : `${v.toFixed(0)}s`)
       : '——');
+    const km = (v: number): string => `${(v / 100_000).toFixed(2)}km`;
     const chan = this.channelNear === null ? 'none'
       : this.channelNear.range < 1 ? 'here'
-        : `${(this.channelNear.range / 100_000).toFixed(2)}km`;
+        : km(this.channelNear.range);
+    // THE WATER DECISION, SHOWN AS IT WAS MADE. Range is how far the
+    // candidate is, `c` is what stopping there costs the trip, then the
+    // time to reach it and whether that fits inside her water. A queen
+    // who flew past a stream and one who never saw it look identical
+    // from outside without these four.
+    const cand = d.candidate === null ? 'none'
+      : `${d.candidate.label} ${km(d.candidate.range)} c${km(d.candidate.cost)}`
+        + ` ${secs(d.candidate.eta)} ${d.candidate.reachable ? 'ok' : 'FAR'}`;
     return `AI ${d.goal} · pri ${d.primary ?? '—'} · det ${d.detour ?? '—'}`
-      + ` · h2o ${(d.thirst * 100).toFixed(0)}% dry ${secs(d.dry)}`
+      + ` · h2o ${(d.thirst * 100).toFixed(0)}%`
+      + ` dry ${secs(d.dry)}/${secs(d.threshold)}`
+      + ` · cand ${cand} · ahead ${this.waterAhead.length}`
       + ` · eta ${secs(d.eta)} · chan ${chan}`
       + ` · stam ${(d.stamina * 100).toFixed(0)}%`
       + ` · ${d.medium} ${gaitWords(d.medium, d.tier)}`

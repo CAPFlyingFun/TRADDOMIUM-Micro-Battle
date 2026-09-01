@@ -44,7 +44,7 @@ import {
  * WHY she is doing something. The top of the three layers.
  *
  * REACHABLE IN PHASE 1: off, navigate, seek_water, approach_water,
- * drink, wait_wings, replan, mission_complete.
+ * drink, wait_wings, replan, water_critical, mission_complete.
  *
  * NAMED BUT UNREACHABLE — the mechanics do not exist, and no fake
  * behaviour has been invented to light them up. They are here so the
@@ -58,6 +58,10 @@ import {
  * `replan` is in it because `plan()` owns the way out of that one and
  * may hand the same errand back; the rest are the errand itself. Any
  * state not in here having a detour is a bug — see `update`.
+ *
+ * `water_critical` is deliberately NOT in it. It is the state for
+ * having no errand to run: it is entered by clearing the detour, and
+ * if one ever survived into it the backstop below should take it away.
  */
 const SERVES_WATER: ReadonlySet<string> = new Set([
   'seek_water', 'approach_water', 'drink', 'wait_wings', 'replan',
@@ -71,6 +75,19 @@ export type Goal =
   | 'drink'
   | 'wait_wings'
   | 'replan'
+  /**
+   * NO REACHABLE WATER — she is under the floor and nothing she can
+   * see can be reached before she dries.
+   *
+   * A CONDITION, NOT AN ERRAND. She keeps flying the player's
+   * destination while it lasts (`intent` still targets the primary),
+   * because the alternative is stopping in open country to think
+   * about a stream she cannot make. It is stable on purpose: the
+   * brain re-asks once a second and stays here until an answer
+   * changes, rather than flicking back to `navigate` and finding the
+   * same nothing a fifth of a second later.
+   */
+  | 'water_critical'
   | 'mission_complete'
   // Phase 2+, unreachable today:
   | 'avoid'
@@ -78,6 +95,22 @@ export type Goal =
   | 'rest'
   | 'approach'
   | 'land';
+
+/**
+ * WATER SEEN FROM WHERE SHE IS — range and bearing, never a position.
+ *
+ * The brain is handed relative sightings and derives world points from
+ * them itself (`pointAt`). That is not ceremony: a sighting is only
+ * true from the place it was taken, and a type that carried `wx, wz`
+ * would invite a caller to hand over a stale one from a hundred metres
+ * back and have it silently believed.
+ */
+export interface WaterSighting {
+  /** World units to it, along the ground. */
+  readonly range: number;
+  /** World radians — she travels along `(sin b, cos b)`. */
+  readonly bearing: number;
+}
 
 /** Everything the brain is allowed to know. It reads; it never reaches. */
 export interface Sense {
@@ -112,12 +145,33 @@ export interface Sense {
   /**
    * LIVE simulated fresh water, from the 256 m window. Real, and local.
    */
-  readonly nearestFresh: { readonly range: number; readonly bearing: number } | null;
+  readonly nearestFresh: WaterSighting | null;
   /**
    * STRATEGIC candidate from the island's drainage. Whole island, and a
    * channel rather than a promise — see nearestWater.nearestWatercourse.
    */
-  readonly nearestWatercourse: { readonly range: number; readonly bearing: number } | null;
+  readonly nearestWatercourse: WaterSighting | null;
+  /**
+   * MORE STRATEGIC CANDIDATES, sampled ALONG THE CORRIDOR she is flying.
+   *
+   * `nearestWatercourse` answers one question — what is closest to her
+   * — and closest is often the wrong stop: a channel 300 m behind her
+   * costs 600 m of backtracking, while one 700 m ahead and 40 m off the
+   * line costs almost nothing. She cannot tell those apart from a
+   * single sighting, so the scene looks a few places down the corridor
+   * as well and hands the answers over here.
+   *
+   * Sightings, like the two above: range and bearing FROM HER, so the
+   * brain still never holds a world position it did not derive itself.
+   * Optional because a caller that has not looked should say so rather
+   * than claim an empty island — absent means "nobody looked", and the
+   * nearest sighting carries the decision on its own.
+   *
+   * They are CANDIDATES, exactly as `nearestWatercourse` is: drainage,
+   * not a promise of standing water. The live handoff on arrival is
+   * unchanged.
+   */
+  readonly waterAhead?: readonly WaterSighting[];
 }
 
 /**
@@ -135,6 +189,33 @@ export interface Intent {
   readonly desiredAction: 'idle' | 'navigate' | 'drink' | 'wait';
 }
 
+/**
+ * WHAT THE WATER CHOICE ACTUALLY DECIDED, kept for the developer line.
+ *
+ * The scoring is three numbers and a verdict, and all four have to be
+ * visible or the choice cannot be argued with: a queen who flew past a
+ * stream looks identical from outside to one that never saw it.
+ */
+export interface WaterChoice {
+  /** `water` for the live sim, `channel` for the drainage. */
+  readonly label: string;
+  /** World units from her to it, at the moment of choosing. */
+  readonly range: number;
+  /**
+   * WHAT THE STOP COSTS THE TRIP, world units.
+   *
+   * `d(her→water) + d(water→destination) − d(her→destination)`. Zero
+   * for water exactly on the line she was already flying, and up to
+   * twice the range for water directly behind her. With no destination
+   * it degenerates to the range, which is the right answer then.
+   */
+  readonly cost: number;
+  /** Seconds to reach it, from the estimator. */
+  readonly eta: number;
+  /** `eta + hydrationReserve < timeUntilDry` — can she get there wet. */
+  readonly reachable: boolean;
+}
+
 /** One line for the developer register. */
 export interface AutonomyDebug {
   readonly goal: Goal;
@@ -142,6 +223,10 @@ export interface AutonomyDebug {
   readonly detour: string | null;
   readonly thirst: number;
   readonly dry: number;
+  /** The floor `dry` has to fall under before she stops, seconds. */
+  readonly threshold: number;
+  /** The last water candidate weighed, with its score. Null if none. */
+  readonly candidate: WaterChoice | null;
   readonly eta: number;
   readonly target: WorldPoint | null;
   readonly stamina: number;
@@ -169,6 +254,10 @@ function pointAt(
 const near = (a: WorldPoint, b: WorldPoint, within: number): boolean =>
   Math.hypot(a.wx - b.wx, a.wz - b.wz) <= within;
 
+/** Straight-line world units between two places. */
+const span = (a: WorldPoint, b: WorldPoint): number =>
+  Math.hypot(a.wx - b.wx, a.wz - b.wz);
+
 export class MissionBrain {
   private readonly cfg: AutonomyConfig;
   private readonly estimate: TripEstimator;
@@ -186,6 +275,10 @@ export class MissionBrain {
   private pending: string | null = null;
   /** Set while a detour is live, so it is announced once and not again. */
   private announced = false;
+  /** The same, for the harder message: nothing she can reach. */
+  private criticalSaid = false;
+  /** The last candidate weighed, kept for the developer line. */
+  private choice: WaterChoice | null = null;
 
   constructor(estimate: TripEstimator, cfg: AutonomyConfig = AUTONOMY_DEFAULTS) {
     this.estimate = estimate;
@@ -215,6 +308,8 @@ export class MissionBrain {
     this.state = 'off';
     this.trip = null;
     this.announced = false;
+    this.criticalSaid = false;
+    this.choice = null;
   }
 
   /**
@@ -244,6 +339,11 @@ export class MissionBrain {
       case 'navigate':
       case 'seek_water':
       case 'approach_water':
+      // SHE KEEPS GOING WHILE SHE IS IN TROUBLE. `water_critical` holds
+      // no detour, so `active` is the player's own destination — and
+      // stopping in open country to think about a stream she cannot
+      // reach would spend the little water she has left on nothing.
+      case 'water_critical':
         if (!mission) return NOWHERE;
         return {
           goal: this.state,
@@ -263,6 +363,8 @@ export class MissionBrain {
       detour: this.detour?.label ?? null,
       thirst: sense.thirst,
       dry: timeUntilDry(sense.thirst, sense.thirstDrain),
+      threshold: this.cfg.thirstFloor,
+      candidate: this.choice,
       eta: this.trip?.etaSeconds ?? Number.NaN,
       target: this.active?.at ?? null,
       stamina: sense.stamina,
@@ -347,51 +449,167 @@ export class MissionBrain {
   private plan(sense: Sense): void {
     const mission = this.active;
     this.trip = mission ? this.estimate(sense.at, mission.at) : null;
-    if (this.state !== 'replan') return;
-    // REPLAN is the ONLY door to a new water target. Everywhere else a
-    // committed detour is left alone, which is what stops the
+    if (this.state !== 'replan' && this.state !== 'water_critical') return;
+    // THESE TWO ARE THE ONLY DOORS to a new water target. Everywhere
+    // else a committed detour is left alone, which is what stops the
     // seek/navigate/seek flicker.
+    //
+    // `water_critical` is in here because the condition has to be able
+    // to END: she is flying while it lasts, so the country under her is
+    // changing, and a stream that was out of range a kilometre back may
+    // not be now. Asked once a second, which is this pass — never at
+    // think rate, which is what would make it flicker.
     const found = this.chooseWater(sense);
     if (found) {
       this.detour = found;
       this.state = 'seek_water';
+      this.sayThirsty();
       return;
     }
-    // Nothing to go to. Carry on with the primary rather than stall —
-    // she may fly into range of something, and a brain that stops
-    // because it cannot solve a problem is worse than one that keeps
-    // going while it looks.
+    // NOTHING SHE CAN REACH. Carry on with the primary rather than
+    // stall — a brain that stops because it cannot solve a problem is
+    // worse than one that keeps going while it looks — but say so, and
+    // hold the condition instead of pretending it is an ordinary
+    // flight. See `water_critical`.
     this.detour = null;
-    this.state = this.primary ? 'navigate' : 'off';
+    this.trip = null;
+    if (!this.primary) { this.state = 'off'; return; }
+    this.state = 'water_critical';
+    this.sayCritical();
+  }
+
+  /** The thirst message, at most once per episode. */
+  private sayThirsty(): void {
+    if (this.announced) return;
+    this.announced = true;
+    this.pending = 'Very Thirsty! Stopping for water first.';
+  }
+
+  /** The harder one, also at most once per episode. */
+  private sayCritical(): void {
+    if (this.criticalSaid) return;
+    this.criticalSaid = true;
+    this.pending = 'No water in reach — continuing to destination.';
+  }
+
+  /** The live sighting as an errand — real water, inside the window. */
+  private freshMission(from: WorldPoint, seen: WaterSighting): Mission {
+    return {
+      id: 'water:sim',
+      label: 'water',
+      at: pointAt(from, seen),
+      satisfies: ['hydration'],
+      arriveWithin: Math.max(1, this.cfg.waterArriveWithin / 10),
+    };
+  }
+
+  /** A drainage sighting as an errand — a channel, not a promise. */
+  private channelMission(from: WorldPoint, seen: WaterSighting): Mission {
+    const at = pointAt(from, seen);
+    return {
+      id: `channel:${Math.round(at.wx)},${Math.round(at.wz)}`,
+      label: 'channel',
+      at,
+      satisfies: ['hydration'],
+      arriveWithin: this.cfg.waterArriveWithin,
+    };
   }
 
   /**
+   * WHAT A STOP WOULD COST HER, and whether she can make it.
+   *
+   * Two different judgements and they must not be run together. COST is
+   * geometry — how much further the trip gets — and decides which water
+   * is worth going to. REACHABILITY is time, from the estimator, and
+   * decides whether any of them is worth going to at all. A cheap stop
+   * she cannot reach is not a cheap stop.
+   */
+  private weigh(
+    sense: Sense, mission: Mission, range: number,
+    goal: WorldPoint | null, dry: number,
+  ): WaterChoice {
+    const eta = this.estimate(sense.at, mission.at).etaSeconds;
+    // d(her→water) + d(water→destination) − d(her→destination). Zero on
+    // the line she was already flying, twice the range straight behind
+    // her. Clamped at zero only against floating-point noise — the
+    // triangle inequality says it cannot really go negative.
+    const cost = goal === null ? range
+      : Math.max(0, range + span(mission.at, goal) - span(sense.at, goal));
+    return {
+      label: mission.label,
+      range,
+      cost,
+      eta,
+      reachable: Number.isFinite(eta) && eta + this.cfg.hydrationReserve < dry,
+    };
+  }
+
+  /**
+   * WHICH WATER, AND WHETHER ANY OF IT IS ANY USE.
+   *
    * PREFER WATER THAT EXISTS. `nearestFresh` is the live simulation and
-   * is TRUE; `nearestWatercourse` is the island's drainage and is a
-   * CANDIDATE. Take the real one when the window has any, and only fall
-   * back to the strategic one to leave the window at all.
+   * is TRUE; everything else is the island's drainage and is a
+   * CANDIDATE. The live one is taken whenever the window has any, and
+   * that is not a shortcut past the scoring — the window is 256 m, so
+   * water inside it is a stop that costs half a kilometre at the very
+   * worst and no drainage node can beat it.
+   *
+   * PAST THAT, THE NEAREST CHANNEL IS NOT THE RIGHT CHANNEL. Closest to
+   * HER is the wrong question when she is going somewhere: 300 m behind
+   * costs 600 m of backtracking, and 700 m ahead and slightly off the
+   * line costs almost nothing. So the strategic candidates — the
+   * nearest, plus whatever the scene saw down the corridor — are scored
+   * by DETOUR COST and the cheapest reachable one wins.
+   *
+   * AND REACHABILITY IS A FILTER, not a tiebreak. A queen with eight
+   * minutes of water and nothing inside twenty is not helped by being
+   * sent at the nearest of them; she is helped by being told, and by
+   * continuing to the destination she at least has a reason to be
+   * flying toward. That is `water_critical`, and it is what null here
+   * means.
    */
   private chooseWater(sense: Sense): Mission | null {
+    const dry = timeUntilDry(sense.thirst, sense.thirstDrain);
+    const goal = this.primary?.at ?? null;
+    const weighed: {
+      readonly mission: Mission;
+      readonly score: WaterChoice;
+      readonly live: boolean;
+    }[] = [];
+
     if (sense.nearestFresh) {
-      return {
-        id: 'water:sim',
-        label: 'water',
-        at: pointAt(sense.at, sense.nearestFresh),
-        satisfies: ['hydration'],
-        arriveWithin: Math.max(1, this.cfg.waterArriveWithin / 10),
-      };
+      const mission = this.freshMission(sense.at, sense.nearestFresh);
+      weighed.push({
+        mission, live: true,
+        score: this.weigh(sense, mission, sense.nearestFresh.range, goal, dry),
+      });
     }
-    if (sense.nearestWatercourse) {
-      const at = pointAt(sense.at, sense.nearestWatercourse);
-      return {
-        id: `channel:${Math.round(at.wx)},${Math.round(at.wz)}`,
-        label: 'channel',
-        at,
-        satisfies: ['hydration'],
-        arriveWithin: this.cfg.waterArriveWithin,
-      };
+    const strategic: WaterSighting[] = [];
+    if (sense.nearestWatercourse) strategic.push(sense.nearestWatercourse);
+    for (const seen of sense.waterAhead ?? []) strategic.push(seen);
+    for (const seen of strategic) {
+      const mission = this.channelMission(sense.at, seen);
+      // Two corridor samples very often find the same node, and the id
+      // is that node's rounded position, so this is an exact match
+      // rather than a distance heuristic.
+      if (weighed.some((had) => had.mission.id === mission.id)) continue;
+      weighed.push({
+        mission, live: false,
+        score: this.weigh(sense, mission, seen.range, goal, dry),
+      });
     }
-    return null;
+    if (weighed.length === 0) { this.choice = null; return null; }
+
+    // Live first, then least detour. A stable order, so two candidates
+    // that score alike do not swap places between passes.
+    weighed.sort((a, b) => (
+      a.live === b.live ? a.score.cost - b.score.cost : a.live ? -1 : 1
+    ));
+    const best = weighed.find((one) => one.score.reachable) ?? null;
+    // Remember what was weighed even when nothing was reachable — the
+    // developer line's whole job in that case is showing WHY.
+    this.choice = (best ?? weighed[0]).score;
+    return best?.mission ?? null;
   }
 
   /** The decision pass. Five a second, and cheap. */
@@ -413,6 +631,7 @@ export class MissionBrain {
     if (this.state === 'drink') {
       this.detour = null;
       this.announced = false;
+      this.criticalSaid = false;
       this.pending = 'Hydrated. Resuming destination.';
       this.state = this.primary ? 'navigate' : 'off';
       this.trip = null;
@@ -458,19 +677,49 @@ export class MissionBrain {
     }
     if (this.state === 'replan') return;       // plan() owns the way out
 
+    // NOTHING SHE CAN REACH — a condition she stays in, deliberately.
+    //
+    // The temptation is to drop back to `navigate` and let the next
+    // think pass discover the same nothing, which is a state machine
+    // flickering five times a second over a fact that changes on the
+    // scale of kilometres. She holds this instead; `plan()` re-asks
+    // once a second, and the two ways out are water she can reach and
+    // water she has drunk.
+    if (this.state === 'water_critical') {
+      if (!this.thirstUnsafe(sense)) {
+        this.announced = false;
+        this.criticalSaid = false;
+        this.state = this.primary ? 'navigate' : 'off';
+        return;
+      }
+      // STILL ARRIVING, THOUGH. She is flying the primary while this
+      // lasts, so she can reach it while this lasts — and a queen who
+      // silently failed to notice would strand the waypoint chain
+      // behind her.
+      if (!this.primary) { this.state = 'off'; return; }
+      if (near(sense.at, this.primary.at, this.primary.arriveWithin)) {
+        this.state = 'mission_complete';
+        this.primary = null;
+      }
+      return;
+    }
+
     if (this.thirstUnsafe(sense)) {
       const found = this.chooseWater(sense);
       if (found) {
         this.detour = found;
         this.state = 'seek_water';
-        if (!this.announced) {
-          this.announced = true;
-          this.pending = 'Very Thirsty! Stopping for water first.';
-        }
+        this.sayThirsty();
         return;
       }
-      // No candidate anywhere. Keep going and look again next plan.
-      this.state = 'replan';
+      // NOTHING REACHABLE. Not a replan — `chooseWater` has just looked
+      // at everything there is, and asking again a fifth of a second
+      // later would get the same answer. Say so once and keep flying.
+      this.detour = null;
+      this.trip = null;
+      if (!this.primary) { this.state = 'off'; return; }
+      this.state = 'water_critical';
+      this.sayCritical();
       return;
     }
 
@@ -483,12 +732,24 @@ export class MissionBrain {
   }
 
   /**
-   * WILL SHE STILL BE WET WHEN SHE GETS THERE?
+   * IS SHE LOW ON WATER? One clause, and that is the fix.
    *
-   * The ETA arrives from the estimator — the brain does not compute
-   * distance or speed, so replacing the estimator with a wind- and
-   * terrain-aware planner changes this answer without changing this
-   * rule. That separation is the point; a test drives it from a stub.
+   * IT USED TO ASK TWO THINGS and the second one ruined it: "will I
+   * still be wet when I ARRIVE", against the mission's own ETA. That
+   * question has no liveable answer on an island whose crossing is
+   * longer than a full tank — it says no from the first second of every
+   * long flight and keeps saying no however recently she drank, so she
+   * bounced between the water and the path for ever. Joshua watched it
+   * happen every three minutes with three quarters of a tank in hand.
+   *
+   * The trip's length is a ROUTE question, and it is answered by
+   * repeating this rule rather than by complicating it: fly, fall to
+   * the floor, drink to full, fly again. Staged stops, with no plan.
+   *
+   * WHAT SURVIVES OF THE ESTIMATOR is the question it can actually
+   * answer — can she reach a PARTICULAR PUDDLE before she dries — and
+   * that lives in `weigh`, where the answer changes what she does about
+   * being thirsty rather than whether she is.
    *
    * And a destination that ALREADY answers thirst is never interrupted
    * to look for thirst: flying to a river and stopping halfway to find
@@ -498,24 +759,12 @@ export class MissionBrain {
     if (satisfies(this.primary, 'hydration')) return false;
     // ALREADY AS FULL AS DRINKING CAN MAKE HER. A water stop is only
     // worth making if it would gain her something, and at the drink
-    // target it would gain her nothing — so a trip she cannot survive
-    // even on a full tank is a ROUTE problem (staged stops), not a
-    // thirst one, and belongs to the Phase 2 planner.
-    //
-    // Without this the brain loops: drink to full, resume, notice the
-    // trip is still too long, detour to the water she is standing in,
-    // drink, resume — for ever. Found by its own test.
+    // target it would gain her nothing. This is what stops the errand
+    // restarting the instant she steps out of the stream.
     if (sense.thirst >= this.cfg.drinkTo) return false;
-    if (!this.trip) return false;
     const dry = timeUntilDry(sense.thirst, sense.thirstDrain);
     if (!Number.isFinite(dry)) return false;
-    // AND SHE HAS TO BE ACTUALLY LOW. The trip test below is a
-    // SUFFICIENCY test; this is the necessity one, and without it the
-    // pair is unliveable — see `thirstFloor`. A queen with three
-    // quarters of a tank has no business looking for a stream, whatever
-    // the arithmetic says about a journey she has barely started.
-    if (dry > this.cfg.thirstFloor) return false;
-    return this.trip.etaSeconds + this.cfg.hydrationReserve > dry;
+    return dry <= this.cfg.thirstFloor;
   }
 
   /**
@@ -540,6 +789,7 @@ export class MissionBrain {
       this.detour = null;
       this.trip = null;
       this.announced = false;
+      this.criticalSaid = false;
       this.state = this.primary ? 'navigate' : 'off';
       return;
     }

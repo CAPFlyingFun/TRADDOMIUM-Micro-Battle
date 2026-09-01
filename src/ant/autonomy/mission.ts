@@ -56,12 +56,18 @@ export function satisfies(mission: Mission | null, need: Need): boolean {
 /**
  * WHAT A TRIP COSTS — and this interface is the whole point of the file.
  *
- * The hydration decision is "will I still be wet enough when I get
- * there", which needs an arrival time. The obvious way to get one is
+ * The water decision is "can I reach THAT PUDDLE before I run dry",
+ * which needs an arrival time. The obvious way to get one is
  * `distance / cruise`, and the obvious way is wrong: a queen flying
  * into a 20-knot trade wind at 0.4 m/s of airspeed has a groundspeed
  * near zero, and a straight line takes no account of a ridge in the
  * way, the climb to clear it, or the stamina that climb costs.
+ *
+ * IT USED TO BE ASKED OF THE MISSION — "will I still be wet when I
+ * arrive at the destination" — and that question has no liveable
+ * answer on an island whose crossing is longer than a full tank. The
+ * estimate now prices the DETOUR, where a wrong answer costs her a
+ * stop rather than making every long flight a water emergency.
  *
  * So the brain does NOT own the arithmetic. It asks for a TripEstimate
  * and reasons about the answer. Phase 1 ships the naive estimator

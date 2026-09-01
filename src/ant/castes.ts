@@ -220,7 +220,35 @@ export const QUEEN: CasteStats = {
     maxThirst: [30, 45, 60, 80, 100],
     /** Per second, at full size. Founding zeroes both — see states. */
     hungerRate: [0.018, 0.022, 0.026, 0.028, 0.03],
-    thirstRate: [0.018, 0.022, 0.026, 0.028, 0.03],
+    /**
+     * TWO HOURS ON A FULL TANK at full size — Joshua's number.
+     *
+     * Written as CAPACITY OVER ENDURANCE rather than as a bare rate,
+     * because the endurance is the thing being chosen and the rate is
+     * only how it is stored: `Thirst.drain` is `thirstRate / maxThirst`,
+     * so every entry below reads straight off as the minutes it buys.
+     *
+     * IT WAS 0.03 AT FULL SIZE — 100 units over 55.6 minutes — and that
+     * one number is what made the autonomy unliveable rather than
+     * merely careful. A cross-island flight is about ninety minutes, so
+     * a queen carrying fifty-five was in a water emergency from the
+     * moment she set off and stayed in one however much she drank; the
+     * low-water rule had nothing to do but fire. Two hours makes the
+     * fifteen-minute stop a STOP rather than a permanent condition, and
+     * leaves room for the several she needs on a long crossing.
+     *
+     * Game tuning, plainly. Nothing measured says a fire-ant queen
+     * carries two hours of water; the SHAPE is the biology worth
+     * keeping — a bigger animal holds out longer — and only the scale
+     * moved. Founding still zeroes it, at the state.
+     */
+    thirstRate: [
+      30 / (60 * 60),     //  60 minutes
+      45 / (75 * 60),     //  75 minutes
+      60 / (90 * 60),     //  90 minutes
+      80 / (105 * 60),    // 105 minutes
+      100 / (120 * 60),   // 120 minutes — the live queen, LIVE_GROWTH = 1
+    ],
 
     /** Times her own mass. Game tuning; she is a poor hauler. */
     carry: [3.0, 2.6, 2.2, 1.8, 1.5],
