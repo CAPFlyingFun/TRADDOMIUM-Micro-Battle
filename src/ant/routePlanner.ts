@@ -64,6 +64,32 @@ import {
 } from './hazards';
 import type { WorldPoint } from '../world/coords';
 
+/**
+ * WHERE THE HAZARDS COME FROM — a list, or a question asked PER LEG.
+ *
+ * A list is what the probes hand in and what the scene held until the
+ * trees arrived. A function is what the trees need: the island carries
+ * thousands of them and the graph is bounded at `maxVertices`, so the
+ * planner may only be shown the ones near the leg it is planning. A
+ * chain of five stops asked with one list would be five corridors'
+ * worth of rings on every stop, and `routeAround` would quietly drop
+ * corners past the bound while every ring still blocked — a chain
+ * that reads as unroutable through open country.
+ *
+ * Asked with `(from, to)` for each leg, the list stays the size of one
+ * corridor whatever the chain is. The planner never keeps the answer.
+ */
+export type HazardSource =
+  | readonly Hazard[]
+  | ((from: WorldPoint, to: WorldPoint) => readonly Hazard[]);
+
+/** The hazards this leg is planned against. */
+export function hazardsFor(
+  source: HazardSource, from: WorldPoint, to: WorldPoint,
+): readonly Hazard[] {
+  return typeof source === 'function' ? source(from, to) : source;
+}
+
 export interface RouteConfig {
   /** Extra room left outside a hazard she must go around, world units. */
   readonly margin: number;
@@ -364,16 +390,18 @@ export function floorFor(
  *
  * @param from where she is
  * @param to where she has been asked to go
- * @param hazards everything known to be in the way
+ * @param source everything known to be in the way — a list, or a
+ *   question asked per leg (see HazardSource)
  * @param baseFloor the AGL the autopilot would fly at anyway
  */
 export function planRoute(
   from: WorldPoint,
   to: WorldPoint,
-  hazards: readonly Hazard[],
+  source: HazardSource,
   baseFloor: number,
   cfg: RouteConfig = ROUTE_DEFAULTS,
 ): RoutePlan {
+  const hazards = hazardsFor(source, from, to);
   if (hazards.length === 0) {
     return {
       legs: [{ to, floorAgl: baseFloor, detour: false }],
@@ -475,7 +503,7 @@ export function planRoute(
 export function planChain(
   from: WorldPoint,
   chain: readonly WorldPoint[],
-  hazards: readonly Hazard[],
+  hazards: HazardSource,
   baseFloor: number,
   cfg: RouteConfig = ROUTE_DEFAULTS,
 ): RoutePlan {

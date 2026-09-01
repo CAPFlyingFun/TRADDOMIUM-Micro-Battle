@@ -676,3 +676,92 @@ describe('which stop the brain is given', () => {
     expect(fly).toContain('this.ant.where, this.chain, this.hazards');
   });
 });
+
+/**
+ * THE HAZARDS CAN BE A QUESTION, ASKED PER LEG.
+ *
+ * The island carries thousands of trees and the graph is bounded, so
+ * the planner may only ever be shown the ones near the leg it is
+ * planning. A list cannot do that for a chain — every stop would see
+ * every corridor — so the source may be a function of the leg.
+ */
+describe('a hazard source asked per leg', () => {
+  it('is asked once for a single destination, with her and the pin', () => {
+    const asked: [WorldPoint, WorldPoint][] = [];
+    const to = world(100_000, 0);
+    const plan = planRoute(HER, to, (a, b) => { asked.push([a, b]); return []; }, BASE, CFG);
+    expect(asked).toEqual([[HER, to]]);
+    expect(plan.legs).toHaveLength(1);
+  });
+
+  it('and once per stop of a chain, each from where the last ended', () => {
+    const asked: [WorldPoint, WorldPoint][] = [];
+    const stops = [world(50_000, 0), world(50_000, 50_000), world(0, 50_000)];
+    planChain(HER, stops, (a, b) => { asked.push([a, b]); return []; }, BASE, CFG);
+    expect(asked).toEqual([
+      [HER, stops[0]], [stops[0], stops[1]], [stops[1], stops[2]],
+    ]);
+  });
+
+  it('and what it answers for a leg is what that leg is routed round', () => {
+    // A zone astride the second leg only. The first leg must not bend
+    // for it and the second must.
+    const zone = hazard({ at: world(50_000, 25_000), radius: 5_000, top: null });
+    const stops = [world(50_000, 0), world(50_000, 50_000)];
+    const source = (_from: WorldPoint, to: WorldPoint) => (to === stops[1] ? [zone] : []);
+    const plan = planChain(HER, stops, source, BASE, CFG);
+    expect(plan.report.avoided).toBe(1);
+    expect(plan.legs.length).toBeGreaterThan(2);
+    // The first stop is still reached straight.
+    expect(plan.legs[0].to).toEqual(stops[0]);
+    expect(plan.legs[0].detour).toBe(false);
+  });
+
+  it('and a plain list still works exactly as before', () => {
+    const zone = hazard({ at: world(50_000, 0), radius: 5_000, top: null });
+    const asList = planRoute(HER, world(100_000, 0), [zone], BASE, CFG);
+    const asFn = planRoute(HER, world(100_000, 0), () => [zone], BASE, CFG);
+    expect(asFn.legs).toEqual(asList.legs);
+    expect(asFn.report).toEqual(asList.report);
+  });
+});
+
+/**
+ * AND THE TREES REACH THE PLANNER THROUGH THAT SEAM, per leg.
+ */
+describe('the scene plans against the trees near each leg', () => {
+  const scene = readFileSync('src/scenes/IslandScene.ts', 'utf8');
+
+  it('hands the planner a question, not the list', () => {
+    const fly = scene.slice(scene.indexOf('private flyMyself'));
+    const order = fly.indexOf('if (pin !== this.flownTo) {');
+    const block = fly.slice(order, order + 3200);
+    expect(block).toContain('this.chain, this.hazardsAlong,');
+    expect(block).toContain('pin, this.hazardsAlong,');
+    expect(block).not.toContain('this.chain, this.hazards,');
+  });
+
+  it('and the question is the probe hazards plus the trees along the leg', () => {
+    const source = scene.slice(scene.indexOf('private readonly hazardsAlong'));
+    expect(source.slice(0, 400)).toContain('treeHazardsAlong(from, to)');
+    expect(source.slice(0, 400)).toContain('[...this.hazards, ...trees.hazards]');
+  });
+
+  it('and the shipped list is still honestly empty', () => {
+    expect(scene).toContain('private readonly hazards: Hazard[] = [];');
+  });
+
+  it('and the stand exists before the first turn of the relief dial', () => {
+    // The constructor reshapes the island before it is done building,
+    // and the relief dial re-seats the trees. Built after that call,
+    // the first probe boot died in the constructor with the loading
+    // screen up for ever — "Cannot read properties of undefined
+    // (reading 'reseat')".
+    const built = scene.indexOf('this.landmarks = new LandmarkStand(this.scene);');
+    const reshaped = scene.indexOf('this.reshapeIsland();');
+    expect(built).toBeGreaterThan(0);
+    expect(built).toBeLessThan(reshaped);
+    const relief = scene.slice(scene.indexOf('setRelief(times);'));
+    expect(relief.slice(0, 80)).toContain('this.landmarks.reseat();');
+  });
+});

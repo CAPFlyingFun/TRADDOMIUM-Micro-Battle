@@ -5,6 +5,7 @@ import { CHUNK_SPAN, chunkAt, chunkKey, chunkOrigin, sameChunk,
 import { toLocal } from './origin';
 import { groundHeight } from './heightfield';
 import { BARE, BUILT, GRASS, SHRUB, TREE, WATER, coverAt, haveVeg } from './landcover';
+import { stableHash } from './stableHash';
 
 /**
  * WHAT SHE ACTUALLY WALKS THROUGH.
@@ -77,17 +78,10 @@ const SPRIGS: readonly Sprig[] = [
 ];
 
 /**
- * A hash that is stable forever, on any device.
- *
- * The same integer mixing the terrain's own noise uses. Not
- * `Math.random`: two players standing in the same clearing must see the
- * same clearing, and she must find the same twig where she left it.
+ * A hash that is stable forever, on any device — see stableHash.ts,
+ * which the landmark trees share so the two layers cannot drift apart.
  */
-function hash(x: number, z: number, salt: number): number {
-  let h = (x | 0) * 374_761_393 + (z | 0) * 668_265_263 + salt * 1_442_695_041;
-  h = (h ^ (h >>> 13)) * 1_274_126_177;
-  return ((h ^ (h >>> 16)) >>> 0) / 4_294_967_296;
-}
+const hash = stableHash;
 
 /**
  * A blade of grass, as three crossed quads.

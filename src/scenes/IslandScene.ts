@@ -47,6 +47,9 @@ import { Breath, DROWN_HP_PER_SECOND, blackout } from '../ant/breath';
 import { SaltExposure, SALT_DAMAGE_FRACTION } from '../ant/brine';
 import { waterSpotAt } from '../world/waterQuery';
 import { bakeIslandChannels } from '../world/islandChannels';
+import { forgetVeg, loadVeg } from '../world/landcover';
+import { LandmarkStand } from '../world/LandmarkStand';
+import { landmarksNear, treeHazardsAlong, type TreesAlong } from '../world/landmarks';
 import { DEFAULT_MODE, type SessionMode } from '../game/session';
 import {
   Autopilot, tookOver, travelling, type NavCommand,
@@ -572,6 +575,19 @@ export class IslandScene {
    * time, which reads as "nobody looked", which is true.
    */
   private waterAhead: WaterSighting[] = [];
+  /** Whether the vegetation rasters have arrived — see `vegArrived`. */
+  private vegReady = false;
+  /**
+   * THE LANDMARK TREES — the first things on the island with a
+   * footprint she cannot fly through. Drawn by this, placed by
+   * landmarks.ts, and handed to the planner leg by leg through
+   * `hazardsAlong`. See LandmarkStand.
+   */
+  private readonly landmarks: LandmarkStand;
+  /** What the last leg was planned against, for the readout and the probes. */
+  private treesShown: TreesAlong = { hazards: [], considered: 0, dropped: 0 };
+  /** How long the last plan took, milliseconds of wall clock. */
+  private planMs = 0;
   /** And what she is doing with it. Acts interrupt; motions do not. */
   private act: Act = 'none';
   private dive = 0;
@@ -767,6 +783,10 @@ export class IslandScene {
     setTextureOrigin(seated.x, seated.z);
     const facing = found.heading;
     this.ant.placeAt(found.at.wx, found.at.wz, facing);
+    // BEFORE the island is reshaped: the relief dial re-seats the stand,
+    // and `reshapeIsland` below is the first turn of that dial. Empty
+    // until the vegetation raster lands — see `vegArrived`.
+    this.landmarks = new LandmarkStand(this.scene);
     this.terrain.follow(this.ant.where);
     this.reshapeIsland();
     this.scene.add(this.ant.root);
@@ -983,8 +1003,24 @@ export class IslandScene {
     // first frames is the coarse grid; a tile arriving afterwards moves
     // the answer without moving the mesh, and she would stand on
     // 54.7 m triangles over 13.67 m ground.
-    onHdTile(() => { if (!this.disposed) this.terrain.rebuild(); });
+    // ONE callback — `onHdTile` is a single slot, so the trees reseat
+    // inside the terrain's re-cut rather than registering a second
+    // listener that would silently replace it.
+    onHdTile(() => {
+      if (this.disposed) return;
+      this.terrain.rebuild();
+      this.landmarks.reseat();
+    });
     followHd(this.ant.where.wx, this.ant.where.wz);
+    // WHAT GROWS WHERE — the vegetation rasters, off the loading plan
+    // like the HD tiles: 442 KB that decide where the landmark trees
+    // stand, and a forest that appears a second after the ground is
+    // not worth holding the veil up for. Nothing draws until it lands,
+    // and nothing breaks if it never does — the island is simply bare,
+    // which is what it was until v0.0.149.
+    void loadVeg()
+      .then(() => { if (!this.disposed) this.vegArrived(); })
+      .catch((why) => console.warn('the vegetation raster did not load', why));
 
 
     this.report?.finish(TERRAIN_JOB);
@@ -1130,6 +1166,24 @@ export class IslandScene {
         at: this.legAt,
         words: routeWords(this.route.report),
         ...this.route.report,
+        // The trees the LAST leg planned was shown, and what it cost.
+        trees: this.treesShown.hazards.map((h) => ({
+          id: h.id, wx: h.at.wx, wz: h.at.wz, radius: h.radius,
+        })),
+        considered: this.treesShown.considered,
+        dropped: this.treesShown.dropped,
+        planMs: this.planMs,
+      }),
+      /** Probe only: the landmark trees within a radius of her. */
+      trees: (radius: number) => landmarksNear(this.ant.where, radius).map((t) => ({
+        id: t.id, wx: t.at.wx, wz: t.at.wz, height: t.height, trunk: t.trunk,
+        ground: t.ground,
+      })),
+      /** Probe only: what the stand is drawing. */
+      landmarks: () => ({
+        standing: this.landmarks.trees.length,
+        near: this.landmarks.nearby,
+        triangles: this.landmarks.triangles,
       }),
       /** Probe only: what the textured overview cost, and whether it landed. */
       mapRelief: () => ({ ms: Math.round(reliefCost()), ready: reliefIsland() !== null }),
@@ -1149,6 +1203,8 @@ export class IslandScene {
       closeMap: () => this.mapScreen.close(),
       /** Probe only: the same door the save system restores through. */
       setThirst: (fraction: number) => this.thirst.restore(fraction),
+      /** Probe only: whether the vegetation rasters have landed. */
+      vegReady: () => this.vegReady,
       autonomy: () => ({
         goal: this.brain.goal,
         primary: this.brain.primaryMission?.label ?? null,
@@ -1562,6 +1618,7 @@ export class IslandScene {
     const times = settings().terrainRelief;
     this.terrain.setRelief(times);
     setRelief(times);
+    this.landmarks.reseat();
     // The band shader picks its texture by world height, so an
     // exaggerated island would wear the wrong biomes without this.
     reliefUniform.value = times;
@@ -1644,6 +1701,8 @@ export class IslandScene {
     this.detachKill();
     onHdTile(null);
     forgetHd();
+    forgetVeg();
+    this.landmarks.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
     this.dim.remove();
@@ -1774,6 +1833,23 @@ export class IslandScene {
   }
 
   /**
+   * EVERYTHING IN THE WAY OF ONE LEG: whatever the probes put in the
+   * list, plus the landmark trees near the line. A method on the
+   * instance rather than a closure per order, so the planner is handed
+   * the same function every time.
+   *
+   * Remembers what it showed. A route that bends round nothing visible
+   * on the map — the map draws no trees yet — needs the readout to say
+   * what it bent for, and a leg reported `dropped > 0` is a leg she may
+   * fly through a tree on.
+   */
+  private readonly hazardsAlong = (from: WorldPoint, to: WorldPoint): readonly Hazard[] => {
+    const trees = treeHazardsAlong(from, to);
+    this.treesShown = trees;
+    return trees.hazards.length === 0 ? this.hazards : [...this.hazards, ...trees.hazards];
+  };
+
+  /**
    * WHAT THE AUTOPILOT IS DOING, as far as the player is concerned.
    *
    * Off unless there is somewhere to go — a chip about a destination
@@ -1895,14 +1971,21 @@ export class IslandScene {
         // the trip afterwards would be an autopilot arguing with a
         // thirsty queen. The chain survives it and comes back when the
         // primary does.
+        //
+        // AND AGAINST THE TREES NEAR EACH LEG, asked per leg rather
+        // than handed as a list — see `hazardsAlong` and HazardSource.
+        // Timed, because the graph is bounded by a number that was
+        // chosen on paper and has to be read on a phone.
         const next = this.chain.length > 0 ? this.chain[0] : null;
+        const began = performance.now();
         this.route = pin === next
           ? planChain(
-            this.ant.where, this.chain, this.hazards, AUTOPILOT_DEFAULTS.floorAgl,
+            this.ant.where, this.chain, this.hazardsAlong, AUTOPILOT_DEFAULTS.floorAgl,
           )
           : planRoute(
-            this.ant.where, pin, this.hazards, AUTOPILOT_DEFAULTS.floorAgl,
+            this.ant.where, pin, this.hazardsAlong, AUTOPILOT_DEFAULTS.floorAgl,
           );
+        this.planMs = performance.now() - began;
         this.legAt = 0;
         const leg = this.route.legs[0];
         this.autopilot.engage(leg.to, leg.floorAgl);
@@ -2950,7 +3033,11 @@ export class IslandScene {
       this.terrain.place();
       this.water?.place();
       this.ocean?.place();
+      this.landmarks.place();
     }
+    // The stand follows her by lattice cell, so this is free until she
+    // crosses one — see LandmarkStand.follow.
+    this.landmarks.follow(at);
     // THE GROUND'S DETAIL FOLLOWS HER UP.
     //
     // The fade is measured in TEXELS PER PIXEL, which is the honest
@@ -3725,6 +3812,16 @@ export class IslandScene {
   }
 
   /**
+   * THE RASTER HAS LANDED. Whatever grows from it may now be grown;
+   * until this fires the island is bare and every placement query
+   * answers "nothing", which is honest rather than wrong.
+   */
+  private vegArrived(): void {
+    this.vegReady = true;
+    this.landmarks.wake();
+  }
+
+  /**
    * STAGE H's developer line — what the brain is thinking, in one row.
    *
    * The same register as the fix, LOD and water lines and under the
@@ -3828,7 +3925,15 @@ export class IslandScene {
       // is a line that gets read once.
       + (this.route === null || !this.route.report.changed ? ''
         : ` · leg ${this.legAt + 1}/${this.route.legs.length}`
-          + ` ${routeWords(this.route.report)}`);
+          + ` ${routeWords(this.route.report)}`)
+      // THE TREES THE LAST LEG WAS PLANNED AGAINST — shown/considered,
+      // a mark when some were dropped past the cap, and what the plan
+      // cost — beside how many are standing. Silent with no route.
+      + (this.route === null ? ''
+        : ` · trees ${this.treesShown.hazards.length}/${this.treesShown.considered}`
+          + `${this.treesShown.dropped > 0 ? '!' : ''}`
+          + ` stand ${this.landmarks.trees.length}`
+          + ` plan ${this.planMs.toFixed(1)}ms`);
   }
 
   private readSwim(dt: number): FlightTelemetry {

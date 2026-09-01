@@ -22,8 +22,23 @@
 import { SPAN } from './kauai';
 import { pullBuffer } from './fetchBytes';
 
-/** `TMBV`, little-endian, as the bake writes it. */
-const MAGIC = 0x564d4254;
+/**
+ * `TMBV`, read the way the file is read — as the bytes T, M, B, V in
+ * that order, through a little-endian uint32.
+ *
+ * DERIVED FROM THE LETTERS, NOT TYPED AS A NUMBER, because the number
+ * was typed wrong: `0x564d4254` is those four bytes in the order they
+ * appear in the file, which is exactly the order a little-endian read
+ * does NOT return. `decodeVeg` threw on the real file from the day it
+ * was written, and nothing noticed for four days because nothing was
+ * calling `loadVeg` — the ground cover this feeds was never wired into
+ * the shipped scene. Found by the landmark-tree work (v0.0.149) on the
+ * first attempt to read the raster for real; the regression guard is a
+ * test that decodes `public/kauai-veg.bin` itself.
+ */
+const MAGIC = new DataView(
+  new Uint8Array([0x54, 0x4d, 0x42, 0x56]).buffer, // 'T','M','B','V'
+).getUint32(0, true);
 const VERSION = 1;
 const HEADER = 12;
 
