@@ -471,6 +471,28 @@ export class TerrainStream {
   private transitionAt: WorldPoint | null = null;
   /** The chunk she was in last time, so the window only moves when she does. */
   private at: ChunkId | null = null;
+
+  /**
+   * WHERE THE DISTANT TIERS STILL OWE A CUT, or null when they are up
+   * to date.
+   *
+   * The two tiers are 129 x 129 vertices each and the near ring is nine
+   * cells, so a chunk crossing that did all of it at once was the
+   * heaviest frame in the game. This holds the position they should be
+   * cut for until a frame comes along that can afford one. See `follow`.
+   */
+  private owed: WorldPoint | null = null;
+
+  /** Distant-tier cuts done, for the tests and the developer register. */
+  private cuts = 0;
+
+  /** How many heavy tier cuts this stream has made. */
+  get tierCuts(): number { return this.cuts; }
+
+  /** Which chunk the window is built around, for the cadence tests. */
+  get chunkAtNow(): string {
+    return this.at === null ? '' : `${this.at.cx},${this.at.cz}`;
+  }
   private relief = 1;
 
   constructor(
@@ -568,13 +590,48 @@ export class TerrainStream {
    */
   follow(at: WorldPoint): void {
     const here = chunkAt(at);
-    if (this.at && sameChunk(here, this.at)) {
-      this.place();
-      return;
+    const first = this.at === null;
+    const moved = first || !sameChunk(here, this.at as ChunkId);
+    if (moved) {
+      this.at = here;
+      // WHERE THE DISTANT TIERS SHOULD BE CUT FOR, remembered rather
+      // than acted on — see `owed`.
+      this.owed = at;
     }
-    this.at = here;
-    this.recutTransition(at);
-    this.recutMiddle(at);
+    if (first) {
+      // THE OPENING FRAME OWES GROUND IN EVERY DIRECTION and pays for
+      // all of it at once. Nothing is on screen yet, so there is
+      // nothing for the cost to stutter.
+      this.recutTransition(at);
+      this.recutMiddle(at);
+      this.owed = null;
+    } else if (!moved && this.owed !== null) {
+      // ONE HEAVY CUT A FRAME, and never on a frame already paying for
+      // near cells. Each of the two distant tiers is 129 x 129
+      // vertices — measured at 13 ms and 11 ms on a desktop, several
+      // times that on a phone — and the nine near cells are another
+      // 11 ms. Doing all three in the frame she crosses a chunk was a
+      // 35 ms lump on top of an already full frame.
+      //
+      // IT ONLY BECAME VISIBLE AT TEN TIMES SPEED. Walking, she crosses
+      // a 512-unit chunk every eight seconds and the middle tier's
+      // 3,125-unit step every fifty; under the boosted autopilot those
+      // become 0.8 s and 5 s, so a cadence nobody could feel started
+      // landing every few seconds. Joshua, flying over the ocean:
+      // "the camera randomly jumps (every 7-10s) up or down for about
+      // 0.25-1s... it has to re-render the ocean and its surroundings."
+      // The camera never moved — a trace of the camera-to-queen offset
+      // holds it at zero through every frame, rebases included. What
+      // moved was the whole world, stalling.
+      //
+      // A TIER MAY BE A FRAME LATE WITHOUT ANYONE SEEING IT. The
+      // transition's own lattice is 312.5 units and she covers 63 in a
+      // frame at ten times speed, so the worst a deferral costs is a
+      // fifth of one step of the coarsest ground on screen.
+      if (!this.recutTransition(this.owed) && !this.recutMiddle(this.owed)) {
+        this.owed = null;
+      }
+    }
 
     const reach = (CELLS - 1) / 2;
     const fine = (FINE_CELLS - 1) / 2;
@@ -650,34 +707,44 @@ export class TerrainStream {
    * which is the whole distant landscape crawling as she walks. It only
    * needs re-cutting when she has left the step it was built for.
    */
-  /** The same snapping as the middle tier, at its own step. */
-  private recutTransition(at: WorldPoint): void {
+  /**
+   * The same snapping as the middle tier, at its own step.
+   *
+   * @returns whether it actually cut anything, so `follow` can spend
+   *   its one heavy cut a frame on the tier that needs one.
+   */
+  private recutTransition(at: WorldPoint): boolean {
     const corner = world(
       Math.round((at.wx - TRANSITION_REACH) / TRANSITION_STEP) * TRANSITION_STEP,
       Math.round((at.wz - TRANSITION_REACH) / TRANSITION_STEP) * TRANSITION_STEP,
     );
     if (this.transitionAt
       && this.transitionAt.wx === corner.wx && this.transitionAt.wz === corner.wz) {
-      return;
+      return false;
     }
     this.transitionAt = corner;
     this.transition.geometry.dispose();
     this.transition.geometry = buildCell(
       corner, TRANSITION_REACH * 2, TRANSITION_VERTS, true,
     );
+    this.cuts++;
+    return true;
   }
 
-  private recutMiddle(at: WorldPoint): void {
+  /** As `recutTransition`, at the middle tier's much coarser step. */
+  private recutMiddle(at: WorldPoint): boolean {
     const corner = world(
       Math.round((at.wx - MIDDLE_REACH) / MIDDLE_STEP) * MIDDLE_STEP,
       Math.round((at.wz - MIDDLE_REACH) / MIDDLE_STEP) * MIDDLE_STEP,
     );
     if (this.middleAt && this.middleAt.wx === corner.wx && this.middleAt.wz === corner.wz) {
-      return;
+      return false;
     }
     this.middleAt = corner;
     this.middle.geometry.dispose();
     this.middle.geometry = buildCell(corner, MIDDLE_REACH * 2, MIDDLE_VERTS, true);
+    this.cuts++;
+    return true;
   }
 
   /** Vertical exaggeration, as a transform — see the terrain dials. */
