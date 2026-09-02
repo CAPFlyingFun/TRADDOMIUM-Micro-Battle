@@ -254,14 +254,31 @@ function skin(limbs: readonly Limb[], d: Detail, tint: THREE.Color): THREE.Buffe
         p++;
       }
     }
+    /*
+     * WOUND SO THE OUTSIDE FACES OUT.
+     *
+     * The ring runs from `u` toward `v` and `v = tangent x u`, so
+     * (u, v, tangent) is right-handed and increasing `k` turns
+     * anticlockwise seen from ahead. With that basis the quad's
+     * outward face is a -> b -> c, and the first cut of this had
+     * a -> c -> b: every triangle wound backwards, so backface
+     * culling threw the near wall away and drew the FAR INSIDE of the
+     * trunk instead. Joshua on the device: "the tree facings are
+     * swapped inwards vs outwards."
+     *
+     * The normals were right all along — they are the radial vector,
+     * which points out — which is exactly why it lit plausibly and
+     * still read wrong. tests/treeMesh.test.ts now checks the two
+     * against each other rather than either alone.
+     */
     for (let i = 0; i < last; i++) {
       for (let k = 0; k < d.sides; k++) {
         const a = firstRing + i * stride + k;
         const b = a + 1;
         const c = a + stride;
         const e = c + 1;
-        idx[f++] = a; idx[f++] = c; idx[f++] = b;
-        idx[f++] = b; idx[f++] = c; idx[f++] = e;
+        idx[f++] = a; idx[f++] = b; idx[f++] = c;
+        idx[f++] = b; idx[f++] = e; idx[f++] = c;
       }
     }
   }
