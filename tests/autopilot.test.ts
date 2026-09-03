@@ -23,7 +23,7 @@ import { groundVelocity, trackOf, type Drift } from '../src/ant/telemetry';
 import { CRUISE_SPEED, MAX_POWERED_SPEED, STALL_SPEED } from '../src/ant/flight';
 import { bearingFromHeading } from '../src/ui/compassMath';
 import { chipWords } from '../src/ui/AutopilotChip';
-import { world } from '../src/world/coords';
+import { world, type WorldPoint } from '../src/world/coords';
 
 const CFG = AUTOPILOT_DEFAULTS;
 const HER = world(0, 0);
@@ -59,6 +59,8 @@ function sense(over: Partial<NavSense> = {}): NavSense {
     terrainAt: SEA,
     // Still air unless a test says otherwise, at every height.
     windAt: () => null,
+    // Open country unless a test plants something.
+    trunksNear: () => [],
     ...over,
   };
 }
@@ -1279,5 +1281,92 @@ describe('the scene lets her actually rest', () => {
     // stops it setting off half-charged.
     expect(AUTOPILOT_DEFAULTS.flyAbove).toBeGreaterThan(0.9);
     expect(AUTOPILOT_DEFAULTS.restBelow).toBeLessThan(0.2);
+  });
+});
+
+/**
+ * AND THE DODGE REACHES THE CONTROLS.
+ *
+ * lookout.ts decides WHAT is in the way and which way round; these are
+ * about the controller acting on it — that the swerve is added to
+ * whatever she was already correcting, that it is capped so a dodge
+ * cannot quietly abandon the leg, and that no room means slowing down
+ * and stopping the climb rather than trusting the steering.
+ */
+describe('dodging what is in front of her', () => {
+  /** A trunk `range` ahead on her track and `off` to the right. */
+  const ahead = (range: number, off: number, radius = 60) => ({
+    id: 't', at: world(off, -range), radius,
+  });
+  /** Flying due north at a pin far to the north. */
+  function flying(trunks: readonly { id: string; at: WorldPoint; radius: number }[]) {
+    const ap = new Autopilot();
+    ap.engage(world(0, -2_000_000));
+    return ap.update(1 / 30, sense({ track: 0, trunksNear: () => trunks }));
+  }
+
+  it('steers away from a trunk in the lane, and not at all without one', () => {
+    // Six metres ahead: inside the look, which at the test cruise of 40
+    // units a second is its 800-unit floor.
+    expect(flying([]).demand.side).toBe(0);
+    // On her right, so she goes left: negative side is a left turn.
+    expect(flying([ahead(600, 30)]).demand.side).toBeLessThan(0);
+    expect(flying([ahead(600, -30)]).demand.side).toBeGreaterThan(0);
+  });
+
+  it('and leaves a trunk beside the lane alone', () => {
+    // Three metres off the line is a pass, not a problem — a controller
+    // that swerved for it would never fly straight in a wood.
+    expect(flying([ahead(600, 300)]).demand.side).toBe(0);
+  });
+
+  it('and one past the look is a problem for later, not for now', () => {
+    // The reach is a warning TIME, so at this speed it is 800 units.
+    expect(flying([ahead(1_400, 0)]).demand.side).toBe(0);
+    expect(flying([ahead(600, 0)]).demand.side).not.toBe(0);
+  });
+
+  it('and reports what it saw, so the readout can say why she turned', () => {
+    const ap = new Autopilot();
+    ap.engage(world(0, -2_000_000));
+    ap.update(1 / 30, sense({ track: 0, trunksNear: () => [ahead(600, 0)] }));
+    const way = ap.inTheWay;
+    expect(way).not.toBeNull();
+    expect(way!.range).toBeCloseTo(600, 6);
+    expect(way!.squeeze).toBeCloseTo(1, 6);
+    ap.update(1 / 30, sense({ track: 0, trunksNear: () => [] }));
+    expect(ap.inTheWay).toBeNull();
+  });
+
+  it('and never bends further off the leg than the cap allows', () => {
+    // Past the cap she is not flying the leg any more, and where the
+    // leg goes is the route's business rather than the dodge's.
+    const hard = flying([ahead(30, 0)]);
+    expect(Math.abs(hard.demand.side)).toBeLessThanOrEqual(CFG.maxTurn);
+    expect(CFG.mostSwerve).toBeLessThan(90);
+  });
+
+  it('slows down and stops climbing when there is no room', () => {
+    // Joshua: "if not, will slow down, descend and make an effort to
+    // avoid it." Slower is more warning per metre and a tighter turn;
+    // not climbing keeps her out of the wind that would wash the turn
+    // out.
+    const open = flying([]);
+    const gate = flying([
+      ahead(600, 0), ahead(600, 150), ahead(600, -150),
+    ]);
+    expect(gate.target).toBeLessThan(open.target);
+    expect(gate.demand.lift).toBeLessThanOrEqual(0);
+    expect(open.target).toBeGreaterThan(0);
+  });
+
+  it('and a clear lane climbs and cruises exactly as it did', () => {
+    // The dodge may not become a tax on ordinary flight.
+    const bare = new Autopilot();
+    bare.engage(world(0, -2_000_000));
+    const now = bare.update(1 / 30, sense({ track: 0, ground: -500 }));
+    expect(now.state).toBe('cruise');
+    expect(now.demand.side).toBe(0);
+    expect(now.target).toBeGreaterThan(0);
   });
 });

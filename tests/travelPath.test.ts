@@ -103,6 +103,7 @@ function fly(scale: number, worldDt = 1 / 60): Leg {
         reserve: stamina.fraction,
         minimumAgl: 0,
         terrainAt: () => GROUND,
+        trunksNear: () => [],
         windAt: (h) => ({ x: ALOFT.x * windProfile(h), z: ALOFT.z * windProfile(h) }),
       };
       const nav = ap.update(dt, sense);

@@ -741,10 +741,23 @@ describe('the scene plans against the trees near each leg', () => {
     expect(block).not.toContain('this.chain, this.hazards,');
   });
 
-  it('and the question is the probe hazards plus the trees along the leg', () => {
+  it('and TREES ARE NOT IN IT — they are dodged, not routed', () => {
+    // The readout is what settled this: `trees 8/338`. The graph is
+    // bounded at 160 vertices, which affords eight octagons, and a real
+    // jungle leg has three hundred trunks across it — so she flew
+    // through the other ninety-eight per cent having never been told.
+    // Joshua: "can you not have it scan ahead 10-20 meters and will
+    // alter the trajectory left or right basically having its own first
+    // person camera view."
+    //
+    // So they went where TERRAIN has always been: not in the hazard
+    // list, dodged reactively every frame instead. See lookout.ts, and
+    // the note at the top of routePlanner.ts that this now matches.
+    expect(scene).not.toContain('treeHazardsAlong');
     const source = scene.slice(scene.indexOf('private readonly hazardsAlong'));
-    expect(source.slice(0, 400)).toContain('treeHazardsAlong(from, to)');
-    expect(source.slice(0, 400)).toContain('[...this.hazards, ...trees.hazards]');
+    expect(source.slice(0, 1400)).toContain('return this.hazards;');
+    // And the autopilot is the one that asks about them now.
+    expect(scene).toContain('trunksNear: (at, reach) => landmarksNear(at, reach)');
   });
 
   it('and the shipped list is still honestly empty', () => {

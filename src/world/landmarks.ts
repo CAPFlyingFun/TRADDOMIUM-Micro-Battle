@@ -35,7 +35,6 @@
  * and never touches the terrain. The renderer (Landmarks.ts) and the
  * planner ask it questions.
  */
-import type { Hazard } from '../ant/hazards';
 import { CHUNK_SPAN, type WorldPoint } from './coords';
 import { groundHeight } from './heightfield';
 import { islandChannelsReady, isLandWatercourse } from './islandChannels';
@@ -88,30 +87,12 @@ export const STEEPEST = 0.75;
 const SLOPE_REACH = 400;
 
 /**
- * How far either side of a leg the planner is shown trees, world units.
+ * Salts for the placement hash, disjoint from the ground cover's 1-5.
  *
- * DERIVED, not chosen: a detour corner sits one ring reach off the
- * line, and the leg out of that corner can graze a tree one reach
- * further out — so the corridor has to be at least twice the largest
- * ring reach. The largest ring is a 30 m tree's trunk (90) plus the
- * planner's margin (300), pushed out to the octagon's corner by
- * 1/cos(22.5°): 422 units. Twice that is 844; half a pitch is 1,024
- * and is the number that makes the cell walk below exact.
+ * Every decision about a tree comes out of these and nothing else — no
+ * running state, no order dependence — which is what lets any window of
+ * the island be grown on its own and come back identical.
  */
-export const CORRIDOR = PITCH / 2;
-/**
- * The most trees one leg is planned against.
- *
- * `routeAround` tests every node pair against every ring, so the cost
- * grows as the square of the corners. Eight octagons are 66 nodes and
- * a few hundred thousand segment tests; nineteen would be 154 nodes
- * and millions. Eight is the number that fits a phone's frame with
- * room to spare, and the count past it is reported so it can be raised
- * once `planMs` has been read on a device.
- */
-export const MOST_PER_LEG = 8;
-
-/** Disjoint from the ground cover's, which is 1 to 5. */
 const SALT = { presence: 11, jx: 12, jz: 13, height: 14, spin: 15 } as const;
 
 /** One tree, placed. World units throughout. */
@@ -235,84 +216,4 @@ export function offLeg(p: WorldPoint, a: WorldPoint, b: WorldPoint): number {
   let t = len2 > 0 ? ((p.wx - a.wx) * dx + (p.wz - a.wz) * dz) / len2 : 0;
   t = Math.max(0, Math.min(1, t));
   return Math.hypot(p.wx - (a.wx + dx * t), p.wz - (a.wz + dz * t));
-}
-
-/** What a leg was planned against, and what it was not shown. */
-export interface TreesAlong {
-  readonly hazards: Hazard[];
-  /** Trees inside the corridor. */
-  readonly considered: number;
-  /** Of those, the ones past the cap — she may be routed through them. */
-  readonly dropped: number;
-}
-
-const NONE: TreesAlong = { hazards: [], considered: 0, dropped: 0 };
-
-/**
- * THE TREES ONE LEG IS PLANNED AGAINST.
- *
- * Walks the leg half a pitch at a time and looks at the ring of cells
- * round each step, so the cost is the leg's LENGTH and not the area of
- * its bounding box — a diagonal crossing of the island is a few
- * thousand cells this way and six million the other. Every tree inside
- * `CORRIDOR` of the line is found: a tree within the corridor is within
- * corridor + a quarter pitch of some step, and that is inside the ring.
- *
- * Nearest to the line first, capped at `most`, and the ones past the
- * cap are COUNTED rather than pretended away: a leg that reports
- * `dropped > 0` is a leg she may fly through a tree on, and that has
- * to be visible in the readout before anyone trusts the number.
- *
- * `top: null` — go round, never over. Not because she could not climb
- * it: the planner raises the WHOLE leg to clear anything with a top,
- * and a 400 m leg flown at twenty-six metres to pass one trunk is the
- * wrong trade; and `top` is measured above the ground under HER, so a
- * tree upslope of her would be under-cleared. Numeric tops belong to
- * the bush tier, where flying over is the right answer.
- */
-export function treeHazardsAlong(
-  from: WorldPoint, to: WorldPoint, most = MOST_PER_LEG, corridor = CORRIDOR,
-): TreesAlong {
-  if (!haveVeg()) return NONE;
-  const length = Math.hypot(to.wx - from.wx, to.wz - from.wz);
-  const steps = Math.max(1, Math.ceil(length / (PITCH / 2)));
-  const seen = new Set<string>();
-  const found: { tree: Landmark; off: number }[] = [];
-  for (let i = 0; i <= steps; i++) {
-    const s = i / steps;
-    const px = from.wx + (to.wx - from.wx) * s;
-    const pz = from.wz + (to.wz - from.wz) * s;
-    const here = cellOf({ wx: px, wz: pz });
-    for (let dz = -1; dz <= 1; dz++) {
-      for (let dx = -1; dx <= 1; dx++) {
-        const cx = here.cx + dx;
-        const cz = here.cz + dz;
-        const key = `${cx},${cz}`;
-        if (seen.has(key)) continue;
-        seen.add(key);
-        // Where it WOULD stand, before the dearer question of whether
-        // it does — most cells are nowhere near the line.
-        const seat = seatOf(cx, cz);
-        const off = offLeg(seat, from, to);
-        if (off > corridor) continue;
-        const tree = landmarkAt(cx, cz);
-        if (tree) found.push({ tree, off });
-      }
-    }
-  }
-  if (found.length === 0) return NONE;
-  found.sort((a, b) => a.off - b.off);
-  const kept = found.slice(0, most);
-  return {
-    hazards: kept.map(({ tree }) => ({
-      id: tree.id,
-      at: tree.at,
-      radius: tree.trunk,
-      top: null,
-      kind: 'obstacle',
-      label: 'tree',
-    })),
-    considered: found.length,
-    dropped: found.length - kept.length,
-  };
 }

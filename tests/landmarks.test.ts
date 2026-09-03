@@ -14,16 +14,12 @@ import { geoToWorld } from '../src/world/geo';
 import { groundHeight } from '../src/world/heightfield';
 import { isLandWatercourse } from '../src/world/islandChannels';
 import {
-  GRASS, SHRUB, TREE, VEG_BYTES, coverAt, decodeVeg, forgetVeg,
+  GRASS, SHRUB, TREE, coverAt, decodeVeg, forgetVeg,
 } from '../src/world/landcover';
 import {
-  CORRIDOR, GIRTH_OF_HEIGHT, HEIGHT_RANGE, LEAST_HEIGHT, MOST_PER_LEG, PITCH, SHORE,
-  STEEPEST, TRUNK_OF_HEIGHT, cellOf, landmarksIn, landmarksNear, offLeg,
-  slopeAt, treeHazardsAlong,
+  GIRTH_OF_HEIGHT, HEIGHT_RANGE, LEAST_HEIGHT, PITCH, SHORE,
+  STEEPEST, TRUNK_OF_HEIGHT, cellOf, landmarksIn, landmarksNear, slopeAt,
 } from '../src/world/landmarks';
-import { ROUTE_DEFAULTS, planRoute } from '../src/ant/routePlanner';
-import { ringAround as ring } from '../src/ant/hazards';
-import type { WorldPoint } from '../src/world/coords';
 
 const WAILUA = geoToWorld({ lat: 22.043, lon: -159.395 });
 const KOLOA = geoToWorld({ lat: 21.907, lon: -159.470 });
@@ -32,18 +28,6 @@ const HANALEI = geoToWorld({ lat: 22.185, lon: -159.470 });
 function vegBytes(): ArrayBuffer {
   const buf = readFileSync('public/kauai-veg.bin');
   return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer;
-}
-
-/** The real header over invented planes: forest everywhere, full canopy. */
-function everywhereForest(): ArrayBuffer {
-  const real = vegBytes();
-  const fake = real.slice(0);
-  const planes = new Uint8Array(fake, 12);
-  const plane = (VEG_BYTES - 12) / 3;
-  planes.fill(TREE, 0, plane);
-  planes.fill(255, plane, plane * 2);
-  planes.fill(0, plane * 2);
-  return fake;
 }
 
 describe('where the giants stand', () => {
@@ -123,120 +107,6 @@ describe('where the giants stand', () => {
       expect(fx).toBeLessThan(0.9);
       expect(fz).toBeGreaterThan(0.1);
       expect(fz).toBeLessThan(0.9);
-    }
-  });
-});
-
-describe('the trees one leg is planned against', () => {
-  beforeAll(() => { loadIsland(); decodeVeg(vegBytes()); }, 120000);
-  afterAll(() => { forgetVeg(); });
-
-  /** A leg through the forest that certainly passes trees. */
-  function forestLeg(): { from: WorldPoint; to: WorldPoint } {
-    const trees = landmarksNear(WAILUA, 40_000);
-    expect(trees.length).toBeGreaterThan(1);
-    const first = trees[0].at;
-    const last = trees[trees.length - 1].at;
-    return {
-      from: { wx: first.wx - 3_000, wz: first.wz - 3_000 },
-      to: { wx: last.wx + 3_000, wz: last.wz + 3_000 },
-    };
-  }
-
-  it('finds every tree inside the corridor and none outside it', () => {
-    const { from, to } = forestLeg();
-    const along = treeHazardsAlong(from, to, 1_000);
-    const byHand = landmarksIn(
-      Math.min(from.wx, to.wx) - CORRIDOR, Math.min(from.wz, to.wz) - CORRIDOR,
-      Math.max(from.wx, to.wx) + CORRIDOR, Math.max(from.wz, to.wz) + CORRIDOR,
-    ).filter((t) => offLeg(t.at, from, to) <= CORRIDOR);
-    expect(along.considered).toBe(byHand.length);
-    expect(along.hazards.map((h) => h.id).sort()).toEqual(byHand.map((t) => t.id).sort());
-  });
-
-  it('shows the planner the trunk, top null, nearest the line first', () => {
-    const { from, to } = forestLeg();
-    const along = treeHazardsAlong(from, to);
-    expect(along.hazards.length).toBeGreaterThan(0);
-    let last = -1;
-    for (const h of along.hazards) {
-      expect(h.top).toBeNull();
-      expect(h.kind).toBe('obstacle');
-      expect(h.label).toBe('tree');
-      const tree = landmarksNear(h.at, 1)[0];
-      expect(tree).toBeDefined();
-      expect(h.radius).toBeCloseTo(tree.trunk, 6);
-      const off = offLeg(h.at, from, to);
-      expect(off).toBeGreaterThanOrEqual(last);
-      last = off;
-    }
-  });
-
-  it('caps what one leg is shown, and counts what it dropped', () => {
-    const { from, to } = forestLeg();
-    const all = treeHazardsAlong(from, to, 1_000);
-    const capped = treeHazardsAlong(from, to, 2);
-    expect(capped.hazards).toHaveLength(Math.min(2, all.considered));
-    expect(capped.dropped).toBe(all.considered - capped.hazards.length);
-    expect(capped.considered).toBe(all.considered);
-    expect(MOST_PER_LEG).toBe(8);
-  });
-
-  it('and the corridor is wide enough for a detour corner to swing', () => {
-    // A corner sits one ring reach off the line; the leg out of it can
-    // graze a tree one reach further. The widest ring: a 30 m trunk plus
-    // the margin, pushed to the octagon's corner.
-    const tallest = { id: 't', at: { wx: 0, wz: 0 }, radius: 3_000 * TRUNK_OF_HEIGHT, top: null, kind: 'obstacle' as const };
-    const corners = ring(tallest, ROUTE_DEFAULTS.margin, ROUTE_DEFAULTS.sides);
-    const reach = Math.max(...corners.map((c) => Math.hypot(c.wx, c.wz)));
-    expect(reach).toBeLessThan(430);
-    expect(CORRIDOR).toBeGreaterThanOrEqual(2 * reach);
-  });
-
-  it('reads nothing at all before the raster lands', () => {
-    forgetVeg();
-    expect(landmarksNear(WAILUA, 30_000)).toHaveLength(0);
-    expect(treeHazardsAlong(WAILUA, { wx: WAILUA.wx + 10_000, wz: WAILUA.wz }).considered).toBe(0);
-    decodeVeg(vegBytes());
-  });
-});
-
-describe('a dense stand does not stall the planner', () => {
-  beforeAll(() => { loadIsland(); decodeVeg(everywhereForest()); }, 120000);
-  afterAll(() => { forgetVeg(); });
-
-  it('plans a 600 m leg through full forest, routed and never blocked', () => {
-    const from = { wx: WAILUA.wx, wz: WAILUA.wz };
-    const to = { wx: WAILUA.wx + 60_000, wz: WAILUA.wz };
-    const along = treeHazardsAlong(from, to);
-    expect(along.considered).toBeGreaterThan(MOST_PER_LEG);
-    expect(along.hazards).toHaveLength(MOST_PER_LEG);
-    const began = performance.now();
-    const plan = planRoute(from, to, along.hazards, 55);
-    const ms = performance.now() - began;
-    expect(plan.report.blocked).toBe(false);
-    expect(plan.legs.length).toBeGreaterThanOrEqual(1);
-    // No leg passes through a trunk it was shown.
-    let at: WorldPoint = from;
-    for (const leg of plan.legs) {
-      for (const h of along.hazards) {
-        expect(offLeg(h.at, at, leg.to)).toBeGreaterThan(h.radius);
-      }
-      at = leg.to;
-    }
-    console.log(`600 m through full forest: ${along.considered} trees in the corridor,`
-      + ` ${plan.legs.length} legs, planned in ${ms.toFixed(1)} ms`);
-  });
-
-  it('and asks per leg, so a chain is one corridor at a time', () => {
-    const stops: WorldPoint[] = [1, 2, 3, 4, 5].map((i) => ({
-      wx: WAILUA.wx + i * 20_000, wz: WAILUA.wz + (i % 2) * 8_000,
-    }));
-    let at: WorldPoint = WAILUA;
-    for (const stop of stops) {
-      const along = treeHazardsAlong(at, stop);
-      expect(along.hazards.length).toBeLessThanOrEqual(MOST_PER_LEG);
-      at = stop;
     }
   });
 });

@@ -38,6 +38,7 @@ import { CLIMB_RATE, HOVER_HOLD, type FlightDemand } from './flight';
 import { predict, type Drift, type Predicted } from './telemetry';
 import { AUTOPILOT_DEFAULTS, CEILING, type AutopilotConfig } from './autopilotConfig';
 import type { WorldPoint } from '../world/coords';
+import { lookout, reachFor, type Threat, type Trunk } from './lookout';
 
 /**
  * What the autopilot is trying to do.
@@ -137,6 +138,15 @@ export interface NavSense {
    * thing to get out of step.
    */
   readonly launchable: boolean;
+  /**
+   * WHAT IS STANDING NEARBY — trunks, reactively, like the terrain.
+   *
+   * A function rather than a list for the reason `terrainAt` is one:
+   * this asks about the ground it is about to reach, and a list would
+   * have to be gathered for a radius nobody had chosen yet. See
+   * lookout.ts for why trees are dodged rather than routed.
+   */
+  readonly trunksNear: (at: WorldPoint, reach: number) => readonly Trunk[];
   /**
    * What is left in her, 0 to 1.
    *
@@ -416,6 +426,12 @@ export class Autopilot {
   /** The band she has chosen, AGL in world units, and the crab it costs. */
   private band = 0;
   private crab = 0;
+
+  /** The nearest thing in her lane, for the readout and the probes. */
+  private seen: Threat | null = null;
+
+  /** What the forward march last saw, or null for a clear lane. */
+  get inTheWay(): Threat | null { return this.seen; }
   /**
    * Down and waiting for her reserve. Latched, so the threshold she
    * rests at and the one she leaves at can be different numbers.
@@ -664,6 +680,27 @@ export class Autopilot {
       ? error
       : wrap180(wanted + band.crab - sense.heading);
 
+    // ── AND WHAT IS STANDING IN IT ───────────────────────────────
+    // A short march down the lane she is actually making good, and the
+    // first trunk in it. Reactive and local exactly as the terrain
+    // below is, and for the same reason: a forest cannot be routed
+    // around — three hundred trunks straddle one leg and the graph
+    // affords eight. See lookout.ts.
+    const reach = reachFor(Math.hypot(sense.drift.x, sense.drift.z));
+    const seen = lookout(
+      sense.at, sense.track, reach, this.cfg.lane,
+      sense.trunksNear(sense.at, reach + this.cfg.lane * 4),
+    );
+    this.seen = seen;
+    const crowded = seen !== null
+      && (seen.pinched || seen.squeeze > this.cfg.crowded);
+    // SWERVE OFF THE TRACK, capped. Past the cap she would no longer be
+    // flying the leg at all, and a leg she is not flying is the
+    // planner's problem rather than the dodge's.
+    const dodge = seen === null ? 0 : Math.max(
+      -this.cfg.mostSwerve, Math.min(this.cfg.mostSwerve, seen.swerve),
+    );
+
     // ── TERRAIN, REACTIVELY ──────────────────────────────────────
     // Local and cheap: where the ground velocity puts her in a couple
     // of seconds, and how much air is under her there. This is NOT a
@@ -708,8 +745,18 @@ export class Autopilot {
         (leg.floorAgl - soon.agl) / leg.floorAgl));
     }
 
-    const target = speedFor(range, this.cfg);
-    const side = turnFor(aim, this.cfg);
+    // NO ROOM: slow down and get low. Joshua — "if not, will slow down,
+    // descend and make an effort to avoid it". Slower is more warning
+    // per metre and a tighter turn; lower is out of the wind, which is
+    // what makes the turn hold.
+    if (crowded) lift = Math.min(lift, 0);
+    const target = crowded
+      ? Math.max(this.cfg.slowest, speedFor(range, this.cfg) * this.cfg.crowdedSpeed)
+      : speedFor(range, this.cfg);
+    // THE DODGE IS ADDED to whatever she was already correcting, so a
+    // swerve round a trunk on a leg she is already off is the sum of
+    // the two rather than a choice between them.
+    const side = turnFor(wrap180(aim + dodge), this.cfg);
 
     // ── IS SHE GETTING ANYWHERE? ─────────────────────────────────
     // Measured on the RANGE rather than on the airspeed, because the

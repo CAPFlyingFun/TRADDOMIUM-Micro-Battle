@@ -49,7 +49,7 @@ import { waterSpotAt } from '../world/waterQuery';
 import { bakeIslandChannels } from '../world/islandChannels';
 import { forgetVeg, loadVeg } from '../world/landcover';
 import { LandmarkStand } from '../world/LandmarkStand';
-import { landmarksNear, treeHazardsAlong, type TreesAlong } from '../world/landmarks';
+import { landmarksNear } from '../world/landmarks';
 import { DEFAULT_MODE, type SessionMode } from '../game/session';
 import {
   Autopilot, tookOver, travelling, type NavCommand,
@@ -584,8 +584,6 @@ export class IslandScene {
    * `hazardsAlong`. See LandmarkStand.
    */
   private readonly landmarks: LandmarkStand;
-  /** What the last leg was planned against, for the readout and the probes. */
-  private treesShown: TreesAlong = { hazards: [], considered: 0, dropped: 0 };
   /** How long the last plan took, milliseconds of wall clock. */
   private planMs = 0;
   /** And what she is doing with it. Acts interrupt; motions do not. */
@@ -1166,12 +1164,6 @@ export class IslandScene {
         at: this.legAt,
         words: routeWords(this.route.report),
         ...this.route.report,
-        // The trees the LAST leg planned was shown, and what it cost.
-        trees: this.treesShown.hazards.map((h) => ({
-          id: h.id, wx: h.at.wx, wz: h.at.wz, radius: h.radius,
-        })),
-        considered: this.treesShown.considered,
-        dropped: this.treesShown.dropped,
         planMs: this.planMs,
       }),
       /** Probe only: the landmark trees within a radius of her. */
@@ -1179,6 +1171,14 @@ export class IslandScene {
         id: t.id, wx: t.at.wx, wz: t.at.wz, height: t.height, trunk: t.trunk,
         ground: t.ground,
       })),
+      /** Probe only: the nearest trunk the forward march can see. */
+      inTheWay: () => {
+        const way = this.autopilot.inTheWay;
+        return way === null ? null : {
+          id: way.id, range: way.range, off: way.off, squeeze: way.squeeze,
+          way: way.way, swerve: way.swerve, pinched: way.pinched,
+        };
+      },
       /** Probe only: what the stand is drawing. */
       landmarks: () => ({
         standing: this.landmarks.trees.length,
@@ -1857,9 +1857,22 @@ export class IslandScene {
    * fly through a tree on.
    */
   private readonly hazardsAlong = (from: WorldPoint, to: WorldPoint): readonly Hazard[] => {
-    const trees = treeHazardsAlong(from, to);
-    this.treesShown = trees;
-    return trees.hazards.length === 0 ? this.hazards : [...this.hazards, ...trees.hazards];
+    // TREES ARE NOT ROUTED ANY MORE, and the readout is what settled
+    // it: `trees 8/338`. The visibility graph is bounded at 160
+    // vertices, which affords eight octagons, and a real jungle leg has
+    // three hundred trunks across it — so she flew through the other
+    // ninety-eight per cent, having never been told. Joshua: "can you
+    // not have it scan ahead 10-20 meters and will alter the trajectory
+    // left or right basically having its own first person camera view."
+    //
+    // So they went where TERRAIN has always been in this project: not
+    // in the hazard list, dodged reactively every frame instead, which
+    // is finer than anything a route could carry. See lookout.ts. This
+    // list is back to what it honestly holds — nothing, until TMB has
+    // predators or forbidden ground.
+    void from;
+    void to;
+    return this.hazards;
   };
 
   /**
@@ -2097,6 +2110,13 @@ export class IslandScene {
       // WHAT A BAND SHE IS NOT IN WOULD FEEL LIKE. The scene owns the
       // profile and the sheltering; the autopilot only asks.
       windAt: (agl) => this.windAtAgl(agl),
+      // AND WHAT IS STANDING IN FRONT OF HER. The landmark trees, as
+      // circles, for the forward march — see lookout.ts. Cheap at this
+      // radius: the lattice is 20 m, so a fifteen-metre look is nine
+      // cells of pure placement arithmetic.
+      trunksNear: (at, reach) => landmarksNear(at, reach).map((t) => ({
+        id: t.id, at: t.at, radius: t.trunk,
+      })),
     });
 
     // ── ON TO THE NEXT LEG ───────────────────────────────────────
@@ -3951,14 +3971,23 @@ export class IslandScene {
       + (this.route === null || !this.route.report.changed ? ''
         : ` · leg ${this.legAt + 1}/${this.route.legs.length}`
           + ` ${routeWords(this.route.report)}`)
-      // THE TREES THE LAST LEG WAS PLANNED AGAINST — shown/considered,
-      // a mark when some were dropped past the cap, and what the plan
-      // cost — beside how many are standing. Silent with no route.
-      + (this.route === null ? ''
-        : ` · trees ${this.treesShown.hazards.length}/${this.treesShown.considered}`
-          + `${this.treesShown.dropped > 0 ? '!' : ''}`
-          + ` stand ${this.landmarks.trees.length}`
-          + ` plan ${this.planMs.toFixed(1)}ms`);
+      // WHAT THE FORWARD MARCH CAN SEE — the nearest trunk in her lane,
+      // how far into the middle of it, which way she is going round and
+      // whether there is room. `PINCH` is the case that also slows her
+      // and stops the climb. Silent with a clear lane, beside how many
+      // trees are standing and what the last plan cost.
+      + (() => {
+        const way = this.autopilot.inTheWay;
+        if (way === null) {
+          return ` · look clear · stand ${this.landmarks.trees.length}`;
+        }
+        return ` · look ${(way.range / 100).toFixed(1)}m`
+          + ` mid ${(way.squeeze * 100).toFixed(0)}%`
+          + ` ${way.way > 0 ? 'R' : 'L'}${Math.abs(way.swerve).toFixed(0)}°`
+          + `${way.pinched ? ' PINCH' : ''}`
+          + ` · stand ${this.landmarks.trees.length}`;
+      })()
+      + (this.route === null ? '' : ` · plan ${this.planMs.toFixed(1)}ms`);
   }
 
   private readSwim(dt: number): FlightTelemetry {

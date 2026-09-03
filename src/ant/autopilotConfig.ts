@@ -141,6 +141,36 @@ export interface AutopilotConfig {
    */
   readonly flyAbove: number;
   /**
+   * HALF THE WIDTH SHE WANTS THROUGH A GAP, world units.
+   *
+   * Joshua's "center one third grid camera rule" in the only units the
+   * game has. She is 140 units long and a good deal narrower; half a
+   * metre of air each side of a trunk is a gap she is plainly through
+   * rather than one she has squeezed, and it is loose enough that the
+   * dodge starts early and gently instead of as a swerve.
+   */
+  readonly lane: number;
+  /**
+   * The most the dodge may bend her off the leg, degrees.
+   *
+   * Past this she is not flying the leg any more, and where the leg
+   * goes is the route's business rather than the dodge's — the two
+   * would be arguing. Forty-five leaves any single trunk clearable at
+   * the lane above from about two metres out.
+   */
+  readonly mostSwerve: number;
+  /**
+   * How much of the lane a trunk must take before she treats it as no
+   * room at all, 0 to 1.
+   *
+   * Below this she simply steers round it. At or above it she also
+   * slows and stops climbing, which is what buys the steering time to
+   * work.
+   */
+  readonly crowded: number;
+  /** What she slows to when it is that tight, as a share of the profile. */
+  readonly crowdedSpeed: number;
+  /**
    * The highest band the search will consider, world units.
    *
    * Not a limit on where she may BE — a player can fly as high as the
@@ -228,6 +258,12 @@ export const AUTOPILOT_DEFAULTS: AutopilotConfig = {
   launchAgl: 100,
   restBelow: 0.1,
   flyAbove: 0.98,
+  // Half a metre of air each side of a trunk.
+  lane: 50,
+  mostSwerve: 45,
+  // Two thirds of the lane gone is Joshua's centre third.
+  crowded: 0.66,
+  crowdedSpeed: 0.45,
   ceilingAgl: 3_000,
   bandUrgency: 0.45,
   bandMargin: 4,

@@ -91,28 +91,15 @@ const plan = await page.evaluate(() => window.__island.routePlan());
 console.log('PLAN');
 console.log(JSON.stringify(plan, null, 1));
 
-// Does any leg pass through the trunk ring of a tree it was shown?
-const offLeg = (p, a, b) => {
-  const dx = b.wx - a.wx; const dz = b.wz - a.wz;
-  const l2 = dx * dx + dz * dz;
-  let t = l2 > 0 ? ((p.wx - a.wx) * dx + (p.wz - a.wz) * dz) / l2 : 0;
-  t = Math.max(0, Math.min(1, t));
-  return Math.hypot(p.wx - (a.wx + dx * t), p.wz - (a.wz + dz * t));
-};
-let at = placed.from;
-let clearest = Infinity;
-for (const leg of plan.legs) {
-  for (const tree of plan.trees) {
-    clearest = Math.min(clearest, offLeg(tree, at, leg) - tree.radius);
-  }
-  at = leg;
-}
-console.log(`\nlegs ${plan.legs.length} · avoided ${plan.avoided} · detours ${plan.detours}`
-  + ` · blocked ${plan.blocked} · shown ${plan.trees.length}/${plan.considered}`
-  + ` dropped ${plan.dropped} · planned in ${plan.planMs.toFixed(1)} ms`);
-console.log(`closest a leg comes to a shown trunk's edge: ${(clearest / 100).toFixed(2)} m`);
-console.log(`BENT ROUND A TREE: ${plan.legs.length >= 2 && plan.avoided >= 1 && !plan.blocked}`);
-console.log(`CLEARS THE TRUNKS: ${clearest > 150}`);
+// TREES ARE NOT ROUTED — they are dodged. So what this probe checks is
+// that the route is a straight line THROUGH the wood (nothing to route
+// round, because the hazard list is honestly empty) and that the
+// forward march can see the trunk she is about to reach.
+const way = await page.evaluate(() => window.__island.inTheWay());
+console.log(`\nlegs ${plan.legs.length} · avoided ${plan.avoided}`
+  + ` · blocked ${plan.blocked} · planned in ${plan.planMs.toFixed(1)} ms`);
+console.log(`LOOKOUT ${JSON.stringify(way)}`);
+console.log(`ROUTE IS STRAIGHT (trees are not routed): ${plan.avoided === 0}`);
 
 // THE MAP, with the bent route on it.
 await page.evaluate(() => {
