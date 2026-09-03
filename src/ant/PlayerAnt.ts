@@ -441,7 +441,12 @@ export class PlayerAnt {
         Math.sin(view - this.wasView), Math.cos(view - this.wasView),
       );
       if (Math.abs(swing) > 1e-9) {
-        this.facing = spinAbout(this.facing, this.upward, -swing);
+        // PLUS, not minus. Her heading follows the view on the ground —
+        // heading + swing — and a right-handed turn about her up by
+        // the same swing is the identical motion. Negated, a drag left
+        // swung her right: "both joystick and camera left and right
+        // are inverted".
+        this.facing = spinAbout(this.facing, this.upward, swing);
       }
     } else {
       this.facing = { x: Math.sin(this.heading), y: 0, z: Math.cos(this.heading) };
@@ -474,10 +479,17 @@ export class PlayerAnt {
       // bark there is no camera-relative answer that survives walking
       // round the trunk — see `facing` — so the step is built on her
       // own carried axes instead.
+      // FACING x UP, and that order is the shipped convention rather
+      // than a choice. On the ground a view of 0 with `across` at +1
+      // moves her -x — and facing x up is (0,0,1) x (0,1,0) = -x,
+      // while up x facing is +x. Crossed the other way round, the
+      // stick pushed her the wrong way the moment she left the
+      // ground. (The basis in `standOn` crosses the OTHER way on
+      // purpose: a right-handed matrix wants X = Y x Z.)
       const side = {
-        x: this.upward.y * this.facing.z - this.upward.z * this.facing.y,
-        y: this.upward.z * this.facing.x - this.upward.x * this.facing.z,
-        z: this.upward.x * this.facing.y - this.upward.y * this.facing.x,
+        x: this.facing.y * this.upward.z - this.facing.z * this.upward.y,
+        y: this.facing.z * this.upward.x - this.facing.x * this.upward.z,
+        z: this.facing.x * this.upward.y - this.facing.y * this.upward.x,
       };
       const move = this.held
         ? {

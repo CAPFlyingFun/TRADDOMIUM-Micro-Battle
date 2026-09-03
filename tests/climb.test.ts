@@ -12,11 +12,11 @@ import { loadIsland } from './support/island';
 import { geoToWorld } from '../src/world/geo';
 import { groundHeight } from '../src/world/heightfield';
 import { world } from '../src/world/coords';
-import { TrunkField, trunkProfile } from '../src/world/trunkSolid';
+import { TrunkField, ringFactor, trunkProfile } from '../src/world/trunkSolid';
 import {
   FOOTING, GRIP_REACH, WORLD_UP, aimFor, alongSurface, isClimbing, perchOn,
 } from '../src/ant/climb';
-import { gripUp } from '../src/ant/surfaceGrip';
+import { gripUp, spinAbout } from '../src/ant/surfaceGrip';
 
 const WAILUA = geoToWorld({ lat: 22.043, lon: -159.395 });
 const BODY = 18;
@@ -169,5 +169,86 @@ describe('she is never seated inside the earth', () => {
     expect(perchOn(
       { x: WAILUA.wx + bark + BODY, y: deep, z: WAILUA.wz }, trunks,
     )).toBeNull();
+  });
+});
+
+
+describe('the two signs, and the surface she sits on', () => {
+  beforeAll(() => { loadIsland(); }, 120000);
+
+  it('crosses facing x up for the step, the way the ground does', () => {
+    // THE SHIPPED CONVENTION, not a choice. On the ground a view of 0
+    // with `across` at +1 moves her -x:
+    //     sin(view - PI/2) * 1 === -1
+    // and facing x up reproduces it, while up x facing is its
+    // negation. Crossed the wrong way the stick pushed her the wrong
+    // way the moment she left the ground — "both joystick and camera
+    // left and right are inverted".
+    const view = 0;
+    const groundAcross = Math.sin(view - Math.PI / 2);
+    expect(groundAcross).toBeCloseTo(-1, 9);
+
+    const facing = { x: Math.sin(view), y: 0, z: Math.cos(view) };
+    const up = WORLD_UP;
+    const side = {
+      x: facing.y * up.z - facing.z * up.y,
+      y: facing.z * up.x - facing.x * up.z,
+      z: facing.x * up.y - facing.y * up.x,
+    };
+    expect(side.x).toBeCloseTo(groundAcross, 9);
+  });
+
+  it('turns her the way her heading turns, about her own up', () => {
+    // On the ground her heading FOLLOWS the view: heading + swing. A
+    // right-handed turn about world up by the same swing has to be the
+    // identical motion, or a drag left swings her right.
+    const swing = 0.3;
+    const before = { x: Math.sin(0), y: 0, z: Math.cos(0) };
+    const after = { x: Math.sin(swing), y: 0, z: Math.cos(swing) };
+    const spun = spinAbout(before, WORLD_UP, swing);
+    expect(spun.x).toBeCloseTo(after.x, 9);
+    expect(spun.z).toBeCloseTo(after.z, 9);
+  });
+
+  it('seats her on the FLATS of the trunk, not the ring through its corners', () => {
+    // Joshua: "ant is floating just about the tree trunk." The drawn
+    // trunk is a polygon whose flats are tangent to the limb's circle,
+    // so a profile taken through the CORNERS sits ringFactor above the
+    // flat she is actually over — 3.5% of the radius at twelve sides,
+    // about a third of her own height on a real trunk. She collides
+    // with the corners and stands on the flats.
+    const spec = { height: 2400, girth: 96, seed: 0x7ee5 };
+    const corners = trunkProfile(spec, 12, true);
+    const flats = trunkProfile(spec, 12, false);
+    expect(ringFactor(12)).toBeCloseTo(1.0353, 4);
+    for (let i = 0; i < flats.r.length; i++) {
+      expect(corners.r[i]).toBeCloseTo(flats.r[i] * ringFactor(12), 9);
+      expect(flats.r[i]).toBeLessThan(corners.r[i]);
+    }
+    // And the gap is the float he saw: about a centimetre on a trunk
+    // whose radius is 40 cm.
+    const float = 40 - 40 / ringFactor(12);
+    expect(float).toBeGreaterThan(1);
+    expect(float).toBeLessThan(2);
+  });
+
+  it('uses the seat profile for depth, so a perch lands on the flats', () => {
+    const spec = { height: 2400, girth: 96, seed: 0x7ee5 };
+    const at = WAILUA;
+    const foot = groundHeight(at.wx, at.wz) - 30;
+    const one = {
+      id: 't', at: world(at.wx, at.wz), foot, scale: 2222,
+      cos: 1, sin: 0,
+      profile: trunkProfile(spec, 12, true),
+      seat: trunkProfile(spec, 12, false),
+      reach: 400, top: foot + 2222,
+    };
+    const ringed = new TrunkField([{ ...one, seat: undefined }]);
+    const seated = new TrunkField([one]);
+    const y = groundHeight(at.wx, at.wz) + 100;
+    // The seat profile is the thinner tree, so the same point is LESS
+    // deep in it — which is what stops her riding above the bark.
+    expect(seated.depthAt(at.wx + 30, y, at.wz))
+      .toBeLessThan(ringed.depthAt(at.wx + 30, y, at.wz));
   });
 });

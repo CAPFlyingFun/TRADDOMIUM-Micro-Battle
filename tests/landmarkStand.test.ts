@@ -30,6 +30,7 @@ import {
   LandmarkStand, SOLID_REACH, SOLID_STEP,
 } from '../src/world/LandmarkStand';
 import { world } from '../src/world/coords';
+import { groundHeight } from '../src/world/heightfield';
 
 const WAILUA = geoToWorld({ lat: 22.043, lon: -159.395 });
 
@@ -152,6 +153,45 @@ describe('the stand follows her at two speeds', () => {
     }
     // The walk has to have MET something, or it proved nothing.
     expect(checked).toBeGreaterThan(2);
+    stand.dispose();
+  });
+});
+
+
+describe('what she stands on is the flats, not the ring', () => {
+  beforeAll(() => { loadIsland(); decodeVeg(vegBytes()); }, 120000);
+
+  it('the stand hands the solid a SEAT profile thinner than its collision', () => {
+    // Joshua: "ant is floating just about the tree trunk." The drawn
+    // trunk is a polygon whose flats are tangent to the limb circle,
+    // so a round profile through its CORNERS sits ringFactor proud of
+    // the flat she is over — about a third of her own height on a real
+    // trunk. She meets the corners and stands on the flats, and this
+    // checks the STAND actually builds both rather than that the maths
+    // could.
+    const tree = landmarksNear(WAILUA, 30_000)[0];
+    const stand = new LandmarkStand(new THREE.Scene());
+    stand.follow(world(tree.at.wx + 300, tree.at.wz));
+    const one = stand.trunks.all.find((t) => t.id === tree.id);
+    expect(one).toBeDefined();
+    expect(one!.seat).toBeDefined();
+    for (let i = 0; i < one!.seat!.r.length; i++) {
+      expect(one!.seat!.r[i]).toBeLessThan(one!.profile.r[i]);
+    }
+    stand.dispose();
+  });
+
+  it('so the depth she is seated by is shallower than the depth she collides by', () => {
+    const tree = landmarksNear(WAILUA, 30_000)[0];
+    const stand = new LandmarkStand(new THREE.Scene());
+    stand.follow(world(tree.at.wx + 300, tree.at.wz));
+    const y = groundHeight(tree.at.wx, tree.at.wz) + 100;
+    // `depthAt` is the seat; `bump` is the collision. On the axis the
+    // collision has to reach further out than the seat does.
+    const seated = stand.trunks.depthAt(tree.at.wx, y, tree.at.wz);
+    const hit = stand.trunks.bump(tree.at.wx, y, tree.at.wz, 0);
+    expect(hit).not.toBeNull();
+    expect(seated).toBeLessThan(hit!.depth);
     stand.dispose();
   });
 });

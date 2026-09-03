@@ -95,15 +95,16 @@ function burial(height: number): number {
  * one per detail level. Building one walks the tree's whole skeleton,
  * and the solid re-centres every few metres over a few hundred trees.
  */
-const SHAPES = new Map<number, TrunkProfile>();
-function shapeOf(level: number): TrunkProfile {
-  const had = SHAPES.get(level);
+const SHAPES = new Map<string, TrunkProfile>();
+function shapeOf(level: number, ring = true): TrunkProfile {
+  const key = `${level}:${ring}`;
+  const had = SHAPES.get(key);
   if (had) return had;
   const made = profileFor(
     { height: BAKE_HEIGHT, girth: BAKE_HEIGHT * GIRTH_OF_HEIGHT, seed: BAKE_SEED },
-    level,
+    level, ring,
   );
-  SHAPES.set(level, made);
+  SHAPES.set(key, made);
   return made;
 }
 
@@ -246,7 +247,12 @@ export class LandmarkStand {
     const near = Math.hypot(
       tree.at.wx - at.wx, tree.at.wz - at.wz,
     ) <= NEAR_REACH;
-    const profile = shapeOf(near ? 0 : 1);
+    const level = near ? 0 : 1;
+    // The corners for what she cannot pass through, the flats for what
+    // she stands on — see profileFor. Seated on the corners she floats
+    // a third of her own height off the bark.
+    const profile = shapeOf(level, true);
+    const seat = shapeOf(level, false);
     const foot = groundHeight(tree.at.wx, tree.at.wz) - burial(tree.height);
     return {
       id: tree.id,
@@ -264,6 +270,7 @@ export class LandmarkStand {
       cos: Math.cos(tree.spin),
       sin: Math.sin(tree.spin),
       profile,
+      seat,
       reach: (profile.widest + 0.02) * tree.height,
       top: foot + tree.height,
     };

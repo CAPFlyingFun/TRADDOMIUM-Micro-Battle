@@ -56,10 +56,12 @@ export function ringFactor(sides: number): number {
  *   far trunk stands 15% proud of the circle it was grown from, and
  *   she meets the corners.
  */
-export function trunkProfile(spec: TreeSpec, sides: number): TrunkProfile {
+export function trunkProfile(
+  spec: TreeSpec, sides: number, ring = true,
+): TrunkProfile {
   const trunk = growTree(spec).limbs.filter((l) => l.order === 0);
   const k = 1 / spec.height;
-  const f = ringFactor(sides) * k;
+  const f = (ring ? ringFactor(sides) : 1) * k;
   const pts = [{ x: trunk[0].a.x * k, y: trunk[0].a.y * k, z: trunk[0].a.z * k }];
   const r = [trunk[0].ra * f];
   for (const limb of trunk) {
@@ -69,10 +71,32 @@ export function trunkProfile(spec: TreeSpec, sides: number): TrunkProfile {
   return { pts, r, widest: Math.max(...r) };
 }
 
-/** The profile for a detail level, at that level's own tessellation. */
-export function profileFor(spec: TreeSpec, level: number): TrunkProfile {
+/**
+ * The profile for a detail level, at that level's own tessellation.
+ *
+ * TWO OF THEM, AND THE DIFFERENCE IS WHY SHE FLOATED. The drawn trunk
+ * is a POLYGON: `skin` pushes its vertices out by `ringFactor` so the
+ * FLATS are tangent to the limb's circle. So the mesh's surface runs
+ * from the limb radius at the middle of a flat to `r * ringFactor` at
+ * a corner — and a single round profile cannot be both.
+ *
+ * `ring = true` takes the corners, which is what a queen who must not
+ * pass THROUGH the wood has to meet: the widest the drawn tree ever
+ * is. That is the collision, and it was right.
+ *
+ * `ring = false` takes the flats, which is what a queen STANDING on
+ * the wood has to sit on. Seated on the ringed one she rides the
+ * circle through the corners — 3.5% of the radius above the flat she
+ * is over, about 1.3 cm on a 40 cm trunk, a third of her own height.
+ * Joshua: "ant is floating just about the tree trunk." On the flat
+ * profile the worst case is the opposite and invisible: a centimetre
+ * INSIDE the bark at a corner, which reads as gripping it.
+ */
+export function profileFor(
+  spec: TreeSpec, level: number, ring = true,
+): TrunkProfile {
   const d = DETAILS[Math.min(DETAILS.length - 1, Math.max(0, level))];
-  return trunkProfile(spec, d.sides);
+  return trunkProfile(spec, d.sides, ring);
 }
 
 /**
@@ -126,6 +150,12 @@ export interface Standing {
   readonly cos: number;
   readonly sin: number;
   readonly profile: TrunkProfile;
+  /**
+   * The same trunk at its FLATS rather than its corners, for standing
+   * on. Optional so a caller that only needs collision can skip it;
+   * `depthAt` falls back on the ringed one. See `profileFor`.
+   */
+  readonly seat?: TrunkProfile;
   /** World radius of the whole thing, for the bucket and the reject. */
   readonly reach: number;
   /** World height of its top. */
@@ -215,7 +245,7 @@ export class TrunkField {
       const lx = (dx * one.cos - dz * one.sin) / one.scale;
       const lz = (dx * one.sin + dz * one.cos) / one.scale;
       const ly = (y - one.foot) / one.scale;
-      const deep = insideProfile(one.profile, lx, ly, lz) * one.scale;
+      const deep = insideProfile(one.seat ?? one.profile, lx, ly, lz) * one.scale;
       if (deep > best) best = deep;
     }
     return best;

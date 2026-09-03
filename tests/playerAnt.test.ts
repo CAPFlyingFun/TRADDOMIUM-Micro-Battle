@@ -402,3 +402,64 @@ describe('FLYING IS NEVER ON A SURFACE', () => {
     expect(ant.climbing).toBe(false);
   });
 });
+
+/**
+ * THE CALL SITES, NOT THE ARITHMETIC.
+ *
+ * A cross product and a rotation are easy to assert about in the
+ * abstract, and an abstract assertion passes happily while the code
+ * that uses it has the operands the wrong way round — which is exactly
+ * how "both joystick and camera left and right are inverted" reached
+ * the device. These drive HER and read what moved.
+ */
+describe('on bark, the stick still means what it means on the ground', () => {
+  function cross(a: {x:number;y:number;z:number}, b: {x:number;y:number;z:number}) {
+    return {
+      x: a.y * b.z - a.z * b.y,
+      y: a.z * b.x - a.x * b.z,
+      z: a.x * b.y - a.y * b.x,
+    };
+  }
+  function unit(v: {x:number;y:number;z:number}) {
+    const n = Math.hypot(v.x, v.y, v.z) || 1;
+    return { x: v.x / n, y: v.y / n, z: v.z / n };
+  }
+  function dot(a: {x:number;y:number;z:number}, b: {x:number;y:number;z:number}) {
+    return a.x * b.x + a.y * b.y + a.z * b.z;
+  }
+  /** Walk her into a wall solid for x > 10 until she is holding it. */
+  function onBark(view = Math.PI / 2): PlayerAnt {
+    const ant = new PlayerAnt();
+    ant.placeAt(0, 0, 0);
+    ant.grip = { depthAt: (x: number) => x - 10 };
+    for (let i = 0; i < 400; i++) ant.update(drive({ ahead: 1 }), view, DT);
+    return ant;
+  }
+
+  it('sends a sideways push along FACING x UP', () => {
+    const ant = onBark();
+    expect(ant.climbing).toBe(true);
+    const want = unit(cross(ant.pointing, ant.up));
+    const from = { x: ant.where.wx, y: ant.height, z: ant.where.wz };
+    for (let i = 0; i < 30; i++) ant.update(drive({ across: 1 }), Math.PI / 2, DT);
+    const went = unit({
+      x: ant.where.wx - from.x, y: ant.height - from.y, z: ant.where.wz - from.z,
+    });
+    // Not ~1, and it should not be: the perch re-seats her onto the
+    // bark every frame, so what she actually travels is the push plus
+    // that correction. The SIGN is the whole point — crossed the other
+    // way this is about -0.67 and she walks the opposite way.
+    expect(dot(went, want)).toBeGreaterThan(0.4);
+  });
+
+  it('turns her the same way round her up that the view turned', () => {
+    const ant = onBark();
+    const before = { ...ant.pointing };
+    const up = { ...ant.up };
+    // Swing the view a quarter turn, the way a drag does.
+    for (let i = 0; i < 60; i++) ant.update(drive(), Math.PI / 2 + 0.6 * (i / 60), DT);
+    const after = ant.pointing;
+    // Positive about her own up. Negated, this is the inversion he saw.
+    expect(dot(cross(before, after), up)).toBeGreaterThan(0);
+  });
+});
