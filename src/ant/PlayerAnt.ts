@@ -9,6 +9,24 @@ import { DIRECTION_EASE, SPEED_EASE } from './pace';
  * only has to outrun the eye, not the terrain.
  */
 const SLOPE_EASE = 9;
+
+/**
+ * HOW WIDE SHE IS, for the one question anything solid asks of her.
+ *
+ * She is 140 units long and a good deal narrower; eighteen is about her
+ * thorax. A body is not a point and using one would let her nose sit
+ * inside a trunk while her centre was clear.
+ */
+export const BODY_RADIUS = 18;
+
+/** What something solid answers when she is inside it. */
+export interface Blocked {
+  /** How far in, world units. */
+  readonly depth: number;
+  /** The horizontal unit vector out. */
+  readonly outX: number;
+  readonly outZ: number;
+}
 import { settings } from '../ui/settings';
 
 /** Everything the controls ask of her in one frame, in the CAMERA's frame. */
@@ -108,6 +126,16 @@ export class PlayerAnt {
   /** How high the body rides above her feet. Zero once she is real. */
   private lift = 0.34;
   private readonly slopeAhead = new THREE.Vector3();
+
+  /**
+   * WHAT SHE CANNOT BE INSIDE OF, or null while nothing is solid.
+   *
+   * A question the scene answers, not a world this file reaches into —
+   * the same shape `terrainAt` has in the autopilot, and for the same
+   * reason: her body knows it has a width and knows nothing at all
+   * about trees.
+   */
+  blocked: ((x: number, y: number, z: number, radius: number) => Blocked | null) | null = null;
 
   constructor() {
     this.buildBody();
@@ -420,6 +448,31 @@ export class PlayerAnt {
    *   wadeAt's `above` already rides from the bed.
    */
   private settle(above: number, dt: number, moved = true, base = 0): void {
+    // ── THE WOOD IS SOLID ────────────────────────────────────────
+    // BEFORE the travel is measured, so `overGround` reports what
+    // actually happened rather than what she asked for: pressed against
+    // a trunk she is going nowhere and the readout should say so.
+    //
+    // One push a frame, out along the trunk's own radius at her height.
+    // Two overlapping trunks answer with the deeper of them and the
+    // other is resolved on the next frame, which at her speed is a
+    // fraction of a body length.
+    //
+    // It runs for the flight too, and that is the point: this is the
+    // first thing in the game she cannot pass through, on foot or on
+    // the wing. It is not a STUN and not a bounce — those need a
+    // surface to hit and are parked in the roadmap until there is one
+    // — she is simply not allowed to be inside the wood.
+    if (this.blocked) {
+      const under = groundHeight(this.at.x, this.at.z);
+      const bump = this.blocked(
+        this.at.x, under + base + above, this.at.z, BODY_RADIUS,
+      );
+      if (bump) {
+        this.at.x += bump.outX * bump.depth;
+        this.at.z += bump.outZ * bump.depth;
+      }
+    }
     const { x, z } = this.at;
     this.above = above;
     if (moved && this.wasAt && dt > 1e-6) {

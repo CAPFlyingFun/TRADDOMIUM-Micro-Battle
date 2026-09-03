@@ -770,11 +770,25 @@ describe('the scene plans against the trees near each leg', () => {
     // the first probe boot died in the constructor with the loading
     // screen up for ever — "Cannot read properties of undefined
     // (reading 'reseat')".
-    const built = scene.indexOf('this.landmarks = new LandmarkStand(this.scene);');
+    const built = scene.indexOf('this.landmarks = new LandmarkStand(');
     const reshaped = scene.indexOf('this.reshapeIsland();');
     expect(built).toBeGreaterThan(0);
     expect(built).toBeLessThan(reshaped);
     const relief = scene.slice(scene.indexOf('setRelief(times);'));
     expect(relief.slice(0, 80)).toContain('this.landmarks.reseat();');
+  });
+
+  it('a teleport aims the LOOK DRAG, not only the camera boom', () => {
+    // `bodyView` is `-look.yaw`, and she turns to face it. putAt
+    // snapped the follow camera and left the look drag on her OLD
+    // heading, so a teleport landed her pointing the right way and
+    // then curved her back over the next few seconds. The bark probe
+    // stood her in front of a trunk and watched her arc politely
+    // around it, and read that as the collision failing to fire.
+    const put = scene.slice(scene.indexOf('putAt: (wx: number, wz: number'));
+    const body = put.slice(0, put.indexOf('pace: ()'));
+    expect(body).toContain('this.look.face(-heading);');
+    expect(body.indexOf('this.look.face(-heading);'))
+      .toBeLessThan(body.indexOf('this.follow.snapTo('));
   });
 });

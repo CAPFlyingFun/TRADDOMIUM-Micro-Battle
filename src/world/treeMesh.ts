@@ -45,6 +45,12 @@ export interface Limb {
   readonly b: THREE.Vector3;
   readonly ra: number;
   readonly rb: number;
+  /**
+   * How far along the wood this limb STARTS, world units — the bark's
+   * v coordinate. Measured along the limbs rather than as height, so
+   * the grain does not stretch where a bough leans out.
+   */
+  readonly run: number;
   /** 0 for the trunk, 1 for a bough. */
   readonly order: number;
 }
@@ -119,8 +125,12 @@ export function growTree(spec: TreeSpec): TreeParts {
       leanZ * bend + Math.cos(t * 2.6 + phase) * baseR * 0.35,
     ));
   }
+  let run = 0;
   for (let i = 0; i < RINGS; i++) {
-    limbs.push({ a: axis[i], b: axis[i + 1], ra: radii[i], rb: radii[i + 1], order: 0 });
+    limbs.push({
+      a: axis[i], b: axis[i + 1], ra: radii[i], rb: radii[i + 1], run, order: 0,
+    });
+    run += axis[i].distanceTo(axis[i + 1]);
   }
 
   // BOUGHS climb in a golden spiral, each shorter and steeper than the
@@ -140,12 +150,14 @@ export function growTree(spec: TreeSpec): TreeParts {
     let here = root.clone().addScaledVector(dir, trunkR * 0.8);
     let r = trunkR * (0.42 - 0.12 * t);
     const SEGS = 3;
+    let ran = t * spec.height;
     for (let s = 0; s < SEGS; s++) {
       const u = (s + 1) / SEGS;
       const along = dir.clone().addScaledVector(up, 0.55 * u * u).normalize();
       const next = here.clone().addScaledVector(along, len / SEGS);
       const rNext = r * (1 - u) ** 0.9 + r * 0.06;
-      limbs.push({ a: here, b: next, ra: r, rb: rNext, order: 1 });
+      limbs.push({ a: here, b: next, ra: r, rb: rNext, run: ran, order: 1 });
+      ran += len / SEGS;
       here = next;
       r = rNext;
     }
@@ -176,11 +188,24 @@ export const DETAILS: readonly Detail[] = [
   { sides: 6, order: 0, leaf: 0 },
 ];
 
-const BARK = new THREE.Color(0x4a3622);
 const LEAF = new THREE.Color(0x3d7a2c);
 
+/**
+ * HOW MUCH TRUNK ONE TILE OF BARK COVERS, world units — the same
+ * number in both directions, so the grain is never stretched.
+ *
+ * Thronemound's lesson, and its arithmetic holds here unchanged: wrap
+ * one tile once around the whole trunk and a metre of girth spreads
+ * 3.1 m of bark across a 1024-pixel image, which is three millimetres a
+ * texel viewed by something a centimetre and a half long. Mush. Tiling
+ * it several times round costs nothing — the texture is already loaded
+ * — and buys the resolution back in proportion. Thirty centimetres to a
+ * tile puts a third of a millimetre on a texel.
+ */
+export const BARK_TILE = 30;
+
 /** Skin the limbs at one detail level into one indexed geometry. */
-function skin(limbs: readonly Limb[], d: Detail, tint: THREE.Color): THREE.BufferGeometry {
+function skin(limbs: readonly Limb[], d: Detail, around: number): THREE.BufferGeometry {
   const used = limbs.filter((l) => l.order <= d.order);
   // CHAINS, NOT LIMBS: a run where each one's far end IS the next one's
   // near end is one tube with one ring at each joint.
@@ -201,7 +226,6 @@ function skin(limbs: readonly Limb[], d: Detail, tint: THREE.Color): THREE.Buffe
   const pos = new Float32Array(ringCount * stride * 3);
   const nrm = new Float32Array(ringCount * stride * 3);
   const uv = new Float32Array(ringCount * stride * 2);
-  const col = new Float32Array(ringCount * stride * 3);
   const idx = new Uint32Array(spanCount * d.sides * 6);
 
   const tangent = new THREE.Vector3();
@@ -215,7 +239,15 @@ function skin(limbs: readonly Limb[], d: Detail, tint: THREE.Color): THREE.Buffe
   for (const chain of chains) {
     const pts: THREE.Vector3[] = [chain[0].a.clone()];
     const rad: number[] = [chain[0].ra];
-    for (const limb of chain) { pts.push(limb.b.clone()); rad.push(limb.rb); }
+    // How far up the wood each ring sits, for the bark's v.
+    const along: number[] = [chain[0].run];
+    let walked = chain[0].run;
+    for (const limb of chain) {
+      walked += limb.a.distanceTo(limb.b);
+      pts.push(limb.b.clone());
+      rad.push(limb.rb);
+      along.push(walked);
+    }
     // The foot overruns into the ground and a bough's foot into the
     // trunk, so no join shows. Radius carried along the same slope.
     const footSpan = pts[0].distanceTo(pts[1]);
@@ -248,9 +280,11 @@ function skin(limbs: readonly Limb[], d: Detail, tint: THREE.Color): THREE.Buffe
         pos[at + 1] = pts[i].y + radial.y * r;
         pos[at + 2] = pts[i].z + radial.z * r;
         nrm[at] = radial.x; nrm[at + 1] = radial.y; nrm[at + 2] = radial.z;
-        uv[p * 2] = k / d.sides;
-        uv[p * 2 + 1] = i;
-        col[at] = tint.r; col[at + 1] = tint.g; col[at + 2] = tint.b;
+        // THE BARK, IN WORLD UNITS. `around` tiles are wrapped round the
+        // trunk and the v runs up the wood at the same rate, so a texel
+        // is the same size in both directions on every part of the tree.
+        uv[p * 2] = (k / d.sides) * around;
+        uv[p * 2 + 1] = along[i] / BARK_TILE;
         p++;
       }
     }
@@ -286,20 +320,26 @@ function skin(limbs: readonly Limb[], d: Detail, tint: THREE.Color): THREE.Buffe
   out.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   out.setAttribute('normal', new THREE.BufferAttribute(nrm, 3));
   out.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
-  out.setAttribute('color', new THREE.BufferAttribute(col, 3));
   out.setIndex(new THREE.BufferAttribute(idx, 1));
   return out;
 }
 
-/** The leaves as blobs, tinted, in one geometry. */
-function leaves(tufts: readonly Tuft[], detail: number, tint: THREE.Color): THREE.BufferGeometry | null {
+/** The leaves as blobs, tinted per tuft, in one geometry. */
+function leaves(
+  tufts: readonly Tuft[], detail: number, tint: THREE.Color, rand: () => number,
+): THREE.BufferGeometry | null {
   if (tufts.length === 0) return null;
   const blobs = tufts.map((tuft) => {
     const blob = new THREE.IcosahedronGeometry(tuft.r, detail);
     blob.translate(tuft.at.x, tuft.at.y, tuft.at.z);
+    // A shade per tuft, so a crown reads as several masses of foliage
+    // rather than one flat green lump.
+    const shade = tint.clone().offsetHSL(0, 0, (rand() - 0.5) * 0.12);
     const n = blob.getAttribute('position').count;
     const col = new Float32Array(n * 3);
-    for (let i = 0; i < n; i++) { col[i * 3] = tint.r; col[i * 3 + 1] = tint.g; col[i * 3 + 2] = tint.b; }
+    for (let i = 0; i < n; i++) {
+      col[i * 3] = shade.r; col[i * 3 + 1] = shade.g; col[i * 3 + 2] = shade.b;
+    }
     blob.setAttribute('color', new THREE.BufferAttribute(col, 3));
     return blob;
   });
@@ -308,24 +348,39 @@ function leaves(tufts: readonly Tuft[], detail: number, tint: THREE.Color): THRE
   return merged;
 }
 
+/** A baked tree: the wood, and the foliage, as two shapes. */
+export interface BakedTree {
+  /** Bark-textured, UV'd in world units. */
+  readonly wood: THREE.BufferGeometry;
+  /** Vertex-coloured blobs, or null at a level that draws none. */
+  readonly leaves: THREE.BufferGeometry | null;
+}
+
 /**
- * Bake a whole tree — wood and leaves — into ONE geometry at one detail
- * level, coloured by vertex so a stand is one material and one draw.
+ * Bake a tree at one detail level, WOOD AND LEAVES APART.
+ *
+ * They were one merged geometry with the leaves marked by vertex
+ * colour, which is what Thronemound does — and it has to, because its
+ * stand shares a single material. Splitting them here costs two draw
+ * calls for the whole island and buys the thing Joshua asked for: the
+ * wood can carry a bark photograph and its normal map, and the leaves
+ * can be flat green, instead of the leaves being tinted by whatever
+ * texel happened to sit at the one UV they were all given.
  */
-export function bakeTree(spec: TreeSpec, level: number): THREE.BufferGeometry {
+export function bakeTree(spec: TreeSpec, level: number): BakedTree {
   const parts = growTree(spec);
   const d = DETAILS[Math.min(DETAILS.length - 1, Math.max(0, level))];
   const rand = rng(spec.seed ^ 0x51ee);
-  // A little variation per bake, so two stands are not one colour.
-  const bark = BARK.clone().offsetHSL(0, 0, (rand() - 0.5) * 0.08);
+  // How many tiles of bark go round the foot. Derived from the trunk's
+  // own girth, so the image never has to know how big the tree is.
+  const around = Math.max(1, Math.round((Math.PI * spec.girth) / BARK_TILE));
   const leaf = LEAF.clone().offsetHSL((rand() - 0.5) * 0.04, 0, (rand() - 0.5) * 0.1);
-  const wood = skin(parts.limbs, d, bark).toNonIndexed();
-  const green = leaves(parts.tufts, d.leaf, leaf);
-  const out = green ? mergeGeometries([wood, green], false) : wood;
-  if (green) { wood.dispose(); green.dispose(); }
-  out.computeBoundingSphere();
-  out.computeBoundingBox();
-  return out;
+  const wood = skin(parts.limbs, d, around);
+  wood.computeBoundingSphere();
+  wood.computeBoundingBox();
+  const green = leaves(parts.tufts, d.leaf, leaf, rand);
+  green?.computeBoundingSphere();
+  return { wood, leaves: green };
 }
 
 /** Triangles in a geometry, indexed or not. */
@@ -342,20 +397,79 @@ export function triangles(geometry: THREE.BufferGeometry): number {
  */
 export function bakeUnitTree(
   height: number, girthOfHeight: number, seed: number, level: number,
-): THREE.BufferGeometry {
-  const geo = bakeTree({ height, girth: height * girthOfHeight, seed }, level);
-  geo.scale(1 / height, 1 / height, 1 / height);
-  geo.computeBoundingSphere();
-  geo.computeBoundingBox();
-  return geo;
+): BakedTree {
+  const baked = bakeTree({ height, girth: height * girthOfHeight, seed }, level);
+  for (const part of [baked.wood, baked.leaves]) {
+    if (!part) continue;
+    part.scale(1 / height, 1 / height, 1 / height);
+    part.computeBoundingSphere();
+    part.computeBoundingBox();
+  }
+  return baked;
 }
 
-/** The material a stand is drawn with: matte, lit, coloured by vertex. */
-export function treeMaterial(): THREE.MeshStandardMaterial {
+/**
+ * THE WOOD'S MATERIAL — bark, and its depth.
+ *
+ * ROUGHNESS 1 AND NO ROUGHNESS MAP, and that is measured rather than
+ * lazy. Thronemound shipped six barks with `_rough.jpg` beside them,
+ * measured all six as near-uniform, and found three.js MULTIPLIES:
+ * the shader's roughness is `material.roughness` times the map's green
+ * channel, so a flat map at 0.6 is a 40% gloss applied to every tree on
+ * the island. "Trees shouldn't be glossy" was looking at exactly that.
+ *
+ * The colour starts flat and the maps are hung on it later (`wearBark`)
+ * — 644 KB is not worth holding the world up for, and a tree with no
+ * bark yet is a brown tree rather than an absent one.
+ */
+export function woodMaterial(): THREE.MeshStandardMaterial {
+  return new THREE.MeshStandardMaterial({
+    color: 0x6b5744,
+    roughness: 1,
+    metalness: 0,
+    fog: true,
+  });
+}
+
+/** And the foliage's: flat, matte, coloured by vertex. */
+export function leafMaterial(): THREE.MeshStandardMaterial {
   return new THREE.MeshStandardMaterial({
     vertexColors: true,
     roughness: 1,
     metalness: 0,
     fog: true,
   });
+}
+
+/**
+ * Hang the bark on the wood once it has landed.
+ *
+ * MIRRORED, AND THE NORMAL MAP SURVIVES IT. The photograph does not
+ * tile on its own edges, so both wraps are mirrored and every join is
+ * continuous whatever the edges do. A mirrored tile runs its U
+ * backwards and a tangent-space normal read backwards has its X
+ * inverted — but the trunk carries no tangent attribute, so three.js
+ * derives the frame from the UV's own screen-space derivatives, and on
+ * a mirrored tile that derivative is negated too. The frame flips with
+ * the image and the ridges light as ridges in both parities.
+ *
+ * AND THE COLOUR GOES TO WHITE when the map arrives, because three.js
+ * multiplies the two: leaving the brown on would darken the bark by its
+ * own colour twice over.
+ */
+export function wearBark(
+  material: THREE.MeshStandardMaterial,
+  colour: THREE.Texture,
+  depth: THREE.Texture | null,
+): void {
+  for (const map of [colour, depth]) {
+    if (!map) continue;
+    map.wrapS = THREE.MirroredRepeatWrapping;
+    map.wrapT = THREE.MirroredRepeatWrapping;
+  }
+  colour.colorSpace = THREE.SRGBColorSpace;
+  material.map = colour;
+  material.color.setHex(0xffffff);
+  if (depth) material.normalMap = depth;
+  material.needsUpdate = true;
 }

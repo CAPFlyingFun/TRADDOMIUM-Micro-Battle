@@ -4,7 +4,7 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import {
-  DETAILS, LOWEST_BOUGH, bakeTree, bakeUnitTree, growTree, triangles,
+  BARK_TILE, DETAILS, LOWEST_BOUGH, bakeTree, bakeUnitTree, growTree, triangles,
 } from '../src/world/treeMesh';
 
 const SPEC = { height: 2_600, girth: 104, seed: 0x7ee } as const;
@@ -43,7 +43,7 @@ describe('the bake', () => {
   });
 
   it('stands on the ground and reaches the crown', () => {
-    const geo = bakeTree(SPEC, 0);
+    const geo = bakeTree(SPEC, 0).wood;
     const box = geo.boundingBox!;
     // The foot overruns a little below zero on purpose, so no join shows.
     expect(box.min.y).toBeLessThanOrEqual(0);
@@ -53,26 +53,51 @@ describe('the bake', () => {
   });
 
   it('and is cheap enough for a stand — measured, not hoped', () => {
-    const near = triangles(bakeTree(SPEC, 0));
-    const far = triangles(bakeTree(SPEC, 1));
+    const whole = (level: number): number => {
+      const baked = bakeTree(SPEC, level);
+      return triangles(baked.wood) + (baked.leaves ? triangles(baked.leaves) : 0);
+    };
+    const near = whole(0);
+    const far = whole(1);
     expect(near).toBeLessThan(4_000);
     expect(far).toBeLessThan(700);
     expect(far).toBeLessThan(near);
     console.log(`landmark bake: near ${near} tris, far ${far} tris`);
   });
 
-  it('carries its colour in the vertices, so a stand is one material', () => {
-    const geo = bakeTree(SPEC, 0);
-    const col = geo.getAttribute('color');
-    expect(col.count).toBe(geo.getAttribute('position').count);
-    let greens = 0;
-    for (let i = 0; i < col.count; i++) if (col.getY(i) > col.getX(i)) greens++;
-    expect(greens).toBeGreaterThan(0);
-    expect(greens).toBeLessThan(col.count);
+  it('comes apart into wood and leaves, so each can be its own material', () => {
+    // They were one merged geometry with the leaves marked by vertex
+    // colour, which is what Thronemound has to do — its stand shares a
+    // single material. Splitting them costs two draw calls for the
+    // whole island and lets the wood carry a bark photograph while the
+    // leaves stay flat green.
+    const baked = bakeTree(SPEC, 0);
+    expect(baked.wood.getAttribute('color')).toBeUndefined();
+    expect(baked.leaves).not.toBeNull();
+    const col = baked.leaves!.getAttribute('color');
+    for (let i = 0; i < col.count; i++) expect(col.getY(i)).toBeGreaterThan(col.getX(i));
+  });
+
+  it('and the wood is UV\'d in world units, so the bark grain is a size', () => {
+    // Thronemound's arithmetic: one tile wrapped once round a metre of
+    // girth is three millimetres a texel, viewed by something a
+    // centimetre and a half long. Mush. This tiles it by BARK_TILE.
+    const baked = bakeTree(SPEC, 0);
+    const uv = baked.wood.getAttribute('uv');
+    let mostU = 0;
+    let mostV = 0;
+    for (let i = 0; i < uv.count; i++) {
+      mostU = Math.max(mostU, uv.getX(i));
+      mostV = Math.max(mostV, uv.getY(i));
+    }
+    // Round the foot: pi x girth over the tile.
+    expect(mostU).toBeCloseTo(Math.round((Math.PI * SPEC.girth) / BARK_TILE), 6);
+    // And up the trunk at the same rate, so a texel is square.
+    expect(mostV).toBeGreaterThan(SPEC.height / BARK_TILE * 0.9);
   });
 
   it('as a unit tree is one unit tall, for the instance matrix to scale', () => {
-    const geo = bakeUnitTree(2_400, 0.04, 0x7ee, 1);
+    const geo = bakeUnitTree(2_400, 0.04, 0x7ee, 1).wood;
     expect(geo.boundingBox!.max.y).toBeGreaterThan(0.98);
     expect(geo.boundingBox!.max.y).toBeLessThan(1.12);
   });
@@ -97,7 +122,7 @@ describe('which way the wood faces', () => {
   function faces(level: number): {
     wound: THREE.Vector3; normal: THREE.Vector3; centre: THREE.Vector3;
   }[] {
-    const geo = bakeTree(SPEC, level);
+    const geo = bakeTree(SPEC, level).wood.toNonIndexed();
     const pos = geo.getAttribute('position');
     const nrm = geo.getAttribute('normal');
     const index = geo.getIndex();
@@ -194,7 +219,7 @@ describe('which way the wood faces', () => {
     // non-indexed by the time it leaves: an edge in the middle of the
     // wall is shared by two triangles, and only the tube's open ends
     // are held by one.
-    const geo = bakeTree(SPEC, 1);
+    const geo = bakeTree(SPEC, 1).wood.toNonIndexed();
     const pos = geo.getAttribute('position');
     const key = (i: number): string => `${pos.getX(i).toFixed(2)},`
       + `${pos.getY(i).toFixed(2)},${pos.getZ(i).toFixed(2)}`;

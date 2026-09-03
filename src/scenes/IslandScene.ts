@@ -784,7 +784,10 @@ export class IslandScene {
     // BEFORE the island is reshaped: the relief dial re-seats the stand,
     // and `reshapeIsland` below is the first turn of that dial. Empty
     // until the vegetation raster lands — see `vegArrived`.
-    this.landmarks = new LandmarkStand(this.scene);
+    this.landmarks = new LandmarkStand(this.scene, import.meta.env.BASE_URL);
+    // AND THE WOOD IS SOLID. The first thing in the game she cannot
+    // pass through, walking or flying. Her body asks; the stand knows.
+    this.ant.blocked = (x, y, z, radius) => this.landmarks.trunks.bump(x, y, z, radius);
     this.terrain.follow(this.ant.where);
     this.reshapeIsland();
     this.scene.add(this.ant.root);
@@ -1171,6 +1174,13 @@ export class IslandScene {
         id: t.id, wx: t.at.wx, wz: t.at.wz, height: t.height, trunk: t.trunk,
         ground: t.ground,
       })),
+      /**
+       * Probe only: is this world point inside a trunk, and which way
+       * is out? The same call `PlayerAnt.settle` makes, so a probe can
+       * check the wall from outside rather than trusting that it fired.
+       */
+      trunkAt: (wx: number, y: number, wz: number, radius = 0) =>
+        this.landmarks.trunks.bump(wx, y, wz, radius),
       /** Probe only: the nearest trunk the forward march can see. */
       inTheWay: () => {
         const way = this.autopilot.inTheWay;
@@ -1439,6 +1449,14 @@ export class IslandScene {
         this.flight.land();
         this.terrain.follow(this.ant.where);
         this.terrain.place();
+        // AND THE LOOK DRAG, which is the other half of the camera.
+        // `bodyView` is -look.yaw, so leaving it behind aims her at
+        // whatever she was facing before the teleport: she lands
+        // pointing the right way and then curves back onto the old
+        // heading over the next few seconds. A probe that stood her
+        // in front of a tree watched her arc politely around it and
+        // read that as the collision failing to fire.
+        this.look.face(-heading);
         this.follow.snapTo(this.ant.root, -heading);
       },
       pace: () => this.pace,
@@ -3080,8 +3098,10 @@ export class IslandScene {
       this.ocean?.place();
       this.landmarks.place();
     }
-    // The stand follows her by lattice cell, so this is free until she
-    // crosses one — see LandmarkStand.follow.
+    // What is DRAWN follows her by lattice cell, so that half is free
+    // until she crosses one; what is SOLID re-centres every few metres
+    // because it reaches less far than the cell is wide. See
+    // LandmarkStand.follow.
     this.landmarks.follow(at);
     // THE GROUND'S DETAIL FOLLOWS HER UP.
     //
