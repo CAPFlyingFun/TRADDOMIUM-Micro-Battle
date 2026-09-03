@@ -788,6 +788,13 @@ export class IslandScene {
     // AND THE WOOD IS SOLID. The first thing in the game she cannot
     // pass through, walking or flying. Her body asks; the stand knows.
     this.ant.blocked = (x, y, z, radius) => this.landmarks.trunks.bump(x, y, z, radius);
+    // AND THE WOOD IS CLIMBABLE, which is the same wood. Joshua: "let's
+    // make the trees able to climb/walk, and in turn, collision." The
+    // stand answers both questions because they are one fact about a
+    // trunk seen from two sides — see ant/climb.ts.
+    this.ant.grip = {
+      depthAt: (x, y, z) => this.landmarks.trunks.depthAt(x, y, z),
+    };
     this.terrain.follow(this.ant.where);
     this.reshapeIsland();
     this.scene.add(this.ant.root);
@@ -1181,6 +1188,13 @@ export class IslandScene {
        */
       trunkAt: (wx: number, y: number, wz: number, radius = 0) =>
         this.landmarks.trunks.bump(wx, y, wz, radius),
+      /** Probe only: is she holding wood, and which way is her up? */
+      climbing: () => ({
+        on: this.ant.climbing,
+        up: [this.ant.up.x, this.ant.up.y, this.ant.up.z],
+        height: this.ant.height,
+        ground: groundHeight(this.ant.where.wx, this.ant.where.wz),
+      }),
       /** Probe only: the nearest trunk the forward march can see. */
       inTheWay: () => {
         const way = this.autopilot.inTheWay;
@@ -3196,6 +3210,11 @@ export class IslandScene {
     // horizon stays put. Flying, it answers at once.
     // CALM while the SEA is moving her; the DIVE lever tells the
     // camera when it may stop holding itself above the water.
+    // WHICH WAY IS UP FOR HER, before the boom is placed. On the ground
+    // this is the world's up and the camera is unchanged; on a trunk it
+    // is the bark's, and the boom lifts off the surface she is on
+    // rather than into the sky. See camera/FollowCamera.standOn.
+    this.follow.standOn(this.ant.up);
     this.follow.update(
       this.ant.root, look, dt,
       afloatIn(this.motion),

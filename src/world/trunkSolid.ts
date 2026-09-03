@@ -194,6 +194,33 @@ export class TrunkField {
     return this.trees;
   }
 
+  /**
+   * HOW FAR INSIDE THE WOOD this world point is. Negative outside.
+   *
+   * The three-dimensional answer, in world units — `bump` is the
+   * horizontal one, and the two exist for genuinely different jobs.
+   * `bump` pushes a FLYING queen out sideways, which is what meeting a
+   * trunk in the air is. This one is a FIELD: it is sampled around a
+   * point to find which way the surface faces, and that is what lets
+   * her walk onto bark instead of being shoved off it. See
+   * world/solidField.ts.
+   */
+  depthAt(wx: number, y: number, wz: number): number {
+    let best = -Infinity;
+    for (const one of this.at(wx, wz)) {
+      const dx = wx - one.at.wx;
+      const dz = wz - one.at.wz;
+      // Into the tree's own space: off its foot, un-spun, unscaled.
+      // The inverse of the turn `bump` applies going the other way.
+      const lx = (dx * one.cos - dz * one.sin) / one.scale;
+      const lz = (dx * one.sin + dz * one.cos) / one.scale;
+      const ly = (y - one.foot) / one.scale;
+      const deep = insideProfile(one.profile, lx, ly, lz) * one.scale;
+      if (deep > best) best = deep;
+    }
+    return best;
+  }
+
   /** The trunks whose footprint could hold this point. */
   private at(wx: number, wz: number): readonly Standing[] {
     const gx = Math.floor(wx / this.cell);

@@ -6,6 +6,8 @@ import { toWorld } from '../world/origin';
 import { waterSpotAt } from '../world/waterQuery';
 import { swellPeriod, swellReach } from '../world/seaSwell';
 import { settings } from '../ui/settings';
+import { transport } from '../ant/surfaceGrip';
+import { WORLD_UP } from '../ant/climb';
 
 /**
  * Third-person chase camera.
@@ -488,11 +490,52 @@ export class FollowCamera {
     );
 
     const flat = Math.cos(tilted) * this.distance;
-    out.set(
-      target.position.x + Math.sin(yaw) * flat,
-      target.position.y + Math.sin(tilted) * this.distance,
-      target.position.z + Math.cos(yaw) * flat,
+    // ── AND IN HER FRAME, NOT THE WORLD'S ────────────────────────
+    //
+    // Up a trunk her up is horizontal, and a boom built on the world's
+    // axes puts the lens somewhere useless: "above her" is along the
+    // bark she is climbing, and "behind her" drives it into the wood.
+    // So the same two components — one along the ground, one up off it
+    // — are laid on HER axes instead. The horizontal bearing keeps
+    // coming from the drag, so free look still orbits her; it is just
+    // tipped into the surface she is on, which turns a drag into an
+    // orbit AROUND the trunk once she is on one.
+    //
+    // ON THE GROUND THIS IS THE IDENTITY. Her up is the world's, the
+    // projection removes nothing, and the arithmetic below is the
+    // arithmetic above it has always been.
+    // CARRIED onto her surface by the same rotation her own step is —
+    // see ant/surfaceGrip.transport. Projecting the bearing instead
+    // would keep it horizontal on a vertical trunk, which puts the
+    // lens orbiting the tree at her height while she climbs out of
+    // frame above it. Transport tips the whole frame, so the camera
+    // follows her UP the trunk and the drag still orbits her.
+    const up = this.upward;
+    const along = transport(
+      { x: Math.sin(yaw), y: 0, z: Math.cos(yaw) }, WORLD_UP, up,
     );
+    const lift = Math.sin(tilted) * this.distance;
+    out.set(
+      target.position.x + along.x * flat + up.x * lift,
+      target.position.y + along.y * flat + up.y * lift,
+      target.position.z + along.z * flat + up.z * lift,
+    );
+  }
+
+  /**
+   * The up the boom is built on — hers, so it can leave the world's.
+   *
+   * Defaulted to the world's and set by the scene each frame, rather
+   * than threaded through `place`: `place` is called from the follow,
+   * the snap and the collision retry, and three call sites growing an
+   * argument that is the same every time is how one of them ends up
+   * passing the wrong one.
+   */
+  private upward: { x: number; y: number; z: number } = { x: 0, y: 1, z: 0 };
+
+  /** Tell the boom which way is up for her. */
+  standOn(up: { x: number; y: number; z: number }): void {
+    this.upward = up;
   }
 
   /**
