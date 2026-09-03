@@ -476,8 +476,41 @@ export const CRUISE_SECONDS = 30 * 60;
 export const CRUISE_DRAIN = 1 / CRUISE_SECONDS;
 export const CLIMB_DRAIN = 6 / CRUISE_SECONDS;
 export const FAST_DRAIN = 2 / CRUISE_SECONDS;
-export const GLIDE_RECOVERY = -0.005;
-export const RECOVERY_DESCENT_RECOVERY = -0.018;
+
+/**
+ * HOW MUCH CHEAPER COMING DOWN GOT, v0.0.155.
+ *
+ * Joshua, on the v0.0.154 device pass: "I think we need to lower the
+ * stamina regeneration while flying as I was able to fly over 6km
+ * without stopping... it was generating which was nice, but too much
+ * stamina time."
+ *
+ * THE ARITHMETIC HE WAS REACTING TO. At autopilot cruise she is above
+ * CRUISE_SPEED, so she pays FAST_DRAIN and a full reserve is 900 s —
+ * fifteen minutes, which is the 14:07 on his HUD. A descent paid
+ * -0.008 a second, so ONE SECOND OF COMING DOWN BOUGHT SEVEN AND A
+ * QUARTER SECONDS OF FLIGHT and the whole bar came back in two minutes
+ * of gliding. Worse under autopilot, where her clock runs ten times
+ * the world's and recovery rides that clock with everything else: the
+ * fifteen-minute bar refilled in about twelve seconds of watching.
+ *
+ * ONE DIAL, AND THE RATIOS ARE KEPT. Every recovery in the air is a
+ * DESCENT — the neutral branch at the bottom of `workload` is a glide,
+ * not level flight, and real level flight is the powered branch, which
+ * has always COST stamina. So they all divide by the same number and
+ * their relationships to each other are untouched: a deliberate dive
+ * still recovers 1.6x a passive glide, an emergency descent still
+ * 2.25x a deliberate one.
+ *
+ * At 4 a second of descending buys 1.8 seconds of flight. That will
+ * not refill a bar — she cannot stay in a descent for eight minutes —
+ * and that is the point: coming down is a TOP-UP now, and the ground
+ * is where a reserve actually comes back.
+ */
+export const DESCENT_THRIFT = 4;
+
+export const GLIDE_RECOVERY = -0.005 / DESCENT_THRIFT;
+export const RECOVERY_DESCENT_RECOVERY = -0.018 / DESCENT_THRIFT;
 
 /**
  * A whole-model speed dial, so the feel can be found on the device

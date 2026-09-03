@@ -575,11 +575,51 @@ export class Autopilot {
       this.why = null;
       this.band = 0;
       this.crab = 0;
-      // Aloft this is the hover it always was. On the ground it is the
-      // more important half: no demand, and NO LAUNCH.
+      // ARRIVED ALOFT IS A LANDING, NOT A LIMP.
+      //
+      // Joshua, v0.0.155 device pass: "when it went to the water, it
+      // spun around like 3-4 times and climbed before descending and
+      // getting control."
+      //
+      // This branch used to command `{ push: 0, lift: 0, hold: null }`
+      // and call itself a hover. It is not one, and `thrust()` is
+      // where that shows: with no push and no hold it takes the decay
+      // branch, so her airspeed bleeds to nothing and she becomes a
+      // leaf. Her top speed is 70 and the wind on that pass was 80 —
+      // so the moment she captured, she stopped flying and blew
+      // straight back out through the 420-unit release. Re-acquired,
+      // she turned round, could not out-fly the wind, `bestBand`
+      // hunted upward for a better one — the climb he saw — and she
+      // captured again and went limp again. Three or four times. The
+      // spin was not a controller oscillating; it was a queen being
+      // blown downwind with the engine off.
+      //
+      // So arriving keeps FLYING. Her nose stays on the target, she
+      // holds enough airspeed to answer the wind rather than ride it,
+      // and the lever goes hard down — because every arrival in this
+      // game ends on a surface. She cannot drink in the air, and
+      // hovering over a stream forever is how the drinking bug came
+      // back the first time.
+      //
+      // THE WIND SETS THE FLOOR ON THE AIRSPEED. Arriving slowly is
+      // right in still air and is exactly what strands her in moving
+      // air, so the approach speed is raised to match the wind when
+      // there is one, capped at what she can actually do. When the
+      // wind beats her outright the cap is the honest answer and the
+      // descent is what saves her: lower is calmer, which is the same
+      // reasoning as the crab clamp in v0.0.152.
+      // THE WIND, NOT HER DRIFT. Drift is her velocity over the ground,
+      // which in still air is simply her own airspeed — a floor built
+      // from it would never let her slow down at all. What decides
+      // whether she can stay over a spot is the air moving past it.
+      const air = sense.windAt(Math.max(0, sense.altitude - sense.ground));
+      const blow = air === null ? 0 : Math.hypot(air.x, air.z);
+      const keep = Math.min(this.cfg.cruise, Math.max(this.cfg.slowest, blow));
       return this.report(
-        sense.aloft ? { push: 0, side: 0, lift: 0, hold: null } : IDLE,
-        range, wanted, error, 0, null,
+        sense.aloft
+          ? { push: 0, side: turnFor(error, this.cfg), lift: -1, hold: keep }
+          : IDLE,
+        range, wanted, error, keep, null,
       );
     }
 

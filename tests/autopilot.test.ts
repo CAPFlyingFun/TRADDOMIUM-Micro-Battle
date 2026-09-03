@@ -261,13 +261,54 @@ describe('capture, and the orbit it prevents', () => {
     expect(CFG.release).toBeGreaterThan(CFG.capture);
   });
 
-  it('enters HOLD on arrival and stops steering', () => {
+  it('enters HOLD on arrival and comes DOWN, still flying', () => {
+    // WAS: "stops steering", asserting side === 0 and hold === null.
+    // That was the bug, written down as a requirement. With no push and
+    // no hold the flight model's `thrust()` takes its decay branch, so
+    // an arrived queen had no airspeed at all — and on Joshua's device
+    // pass the wind was 80 against a top speed of 70, so capturing
+    // meant being blown straight back out of the release radius,
+    // re-acquired, and captured again: "it spun around like 3-4 times
+    // and climbed before descending". Arriving now keeps flying and
+    // puts her down.
     const ap = new Autopilot();
     ap.engage(world(0, -100));
     const now = ap.update(1 / 30, sense({ track: 0 }));
     expect(now.state).toBe('hold');
-    expect(now.demand.side).toBe(0);
-    expect(now.demand.push).toBe(0);
+    expect(now.demand.lift).toBe(-1);
+    expect(now.demand.hold).toBeGreaterThan(0);
+  });
+
+  it('holds enough airspeed to answer the wind it arrived in', () => {
+    // Arriving slowly is right in still air and is what strands her in
+    // moving air. The floor on the approach speed is what she is
+    // actually being moved at, capped at what she can do.
+    const ap = new Autopilot();
+    ap.engage(world(0, -100));
+    const still = ap.update(1 / 30, sense({ track: 0 }));
+    expect(still.demand.hold).toBeCloseTo(CFG.slowest, 5);
+
+    const blown = new Autopilot();
+    blown.engage(world(0, -100));
+    const gale = blown.update(1 / 30, sense({
+      track: 0, windAt: () => ({ x: 0, z: 90 }),
+    }));
+    // 90 is past her cruise, so the cap is the honest answer — and the
+    // full-down lever beside it is what actually saves her, because
+    // lower is calmer.
+    expect(gale.demand.hold).toBe(CFG.cruise);
+    expect(gale.demand.lift).toBe(-1);
+  });
+
+  it('keeps her nose on the target instead of going limp', () => {
+    // The steering is what stops the drift becoming a departure.
+    const ap = new Autopilot();
+    ap.engage(world(0, -100));
+    const off = ap.update(1 / 30, sense({
+      track: 90, heading: headingFor(90),
+    }));
+    expect(off.state).toBe('hold');
+    expect(Math.abs(off.demand.side)).toBeGreaterThan(0);
   });
 
   it('and does not immediately uncapture on a small drift', () => {
