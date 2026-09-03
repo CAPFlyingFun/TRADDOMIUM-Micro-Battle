@@ -203,74 +203,15 @@ console.log(`distance from the AXIS AT HER HEIGHT:`
   + ` ${trail[0].gap} cm → ${gap.toFixed(2)} cm`);
 console.log(`surface at her height ${skin === null ? 'not reached' : skin.surface.toFixed(1) + ' cm'}`
   + ` + body ${BODY} = ${wall === null ? '?' : wall.toFixed(1)} cm, where she should stand`);
-// TWO CONVENTIONS, AND THE DIFFERENCE IS HER OWN BODY.
-//
-// The collision keeps a FLYING queen's centre BODY_RADIUS clear of the
-// wood. A WALKER stands ON a surface, origin and all, exactly as she
-// stands on the ground — so once she takes hold her centre is at the
-// bark and this reads about -18, her own radius. That is her standing
-// on the tree, not her inside it, and the same number would have been
-// a real fault before climbing existed. Reported as the gap to the
-// BARK rather than as an overshoot, so it cannot be misread.
-const standing = wall === null ? null : gap - (wall - BODY);
-console.log(`her centre is ${standing === null ? '?' : standing.toFixed(2)} cm`
-  + ` from the bark — 0 is standing on it, ${BODY} is held off it by her body`);
-console.log(`deepest push the collision still wanted: ${deepest.toFixed(3)} cm`
-  + ` (expected to equal her body radius once she is holding on)`);
-// SHE NO LONGER STOPS DEAD, AND THAT IS THE POINT.
-//
-// Before climbing existed this leg ended at a wall: she closed to the
-// surface radius plus her body and went no further. She now TAKES HOLD
-// at that same distance instead — the collision and the grip are one
-// fact about a trunk, and on foot the grip wins. So the walk passes if
-// she got to the bark and is holding it; the wall is still what a
-// FLYING queen meets, which is where it was always doing the work.
-const grabbed = await page.evaluate(() => window.__island.climbing());
-const reached = wall !== null && gap < wall + 6;
-console.log(`reached the bark: ${reached} · holding it: ${grabbed.on}`);
-console.log(`SOLID: ${reached && grabbed.on ? 'yes — she reached the bark and took hold' : 'NO'}`);
-const solid = reached && grabbed.on;
+console.log(`overshoot: ${wall === null ? 'n/a' : (gap - wall).toFixed(2)} cm`
+  + ` (negative means she is IN the wood)`);
+console.log(`DEEPEST UNRESOLVED PUSH after settle: ${deepest.toFixed(3)} cm`);
+const solid = wall !== null && gap >= wall - 0.5 && gap < wall + 5 && deepest < 1;
+console.log(`SOLID: ${solid ? 'yes — she stopped at the bark' : 'NO'}`);
 console.log(`TRAIL ${JSON.stringify(trail)}`);
 
 await page.screenshot({ path: 'probe-bark-contact.png' });
 console.log('WROTE probe-bark-contact.png');
-
-// ── AND NOW SHE CLIMBS IT ────────────────────────────────────────
-// She is against the bark with the stick still available. Keep
-// pushing: the surface under her rolls her up onto the trunk, and the
-// SAME forward push that walked her into it now walks her up it.
-await page.keyboard.down('KeyW');
-const climbStart = await page.evaluate(() => window.__island.simTime());
-const climbClock = Date.now();
-let best = null;
-const rise = [];
-for (let i = 0; i < 400; i++) {
-  await page.waitForTimeout(1000);
-  const now = await page.evaluate(() => ({
-    t: window.__island.simTime(), ...window.__island.climbing(),
-  }));
-  const stamp = +now.t.toFixed(3);
-  if (rise.length === 0 || stamp !== rise[rise.length - 1].t) {
-    rise.push({
-      t: stamp, up: +now.up[1].toFixed(3),
-      agl: +(now.height - now.ground).toFixed(1), on: now.on,
-    });
-  }
-  best = now;
-  if (now.t - climbStart > 25 || Date.now() - climbClock > PATIENCE) break;
-}
-await page.keyboard.up('KeyW');
-
-const climbed = best.height - best.ground;
-console.log(`\nCLIMB: ${(best.t - climbStart).toFixed(1)} s of game time`);
-console.log(`holding wood: ${best.on}`);
-console.log(`her up: [${best.up.map((v) => v.toFixed(3)).join(', ')}]`
-  + ` — y of 1 is flat ground, 0 is a vertical trunk`);
-console.log(`height above the ground under her: ${climbed.toFixed(1)} cm`);
-console.log(`CLIMBED: ${best.on && climbed > 20 ? 'yes' : 'NO'}`);
-console.log(`RISE ${JSON.stringify(rise)}`);
-await page.screenshot({ path: 'probe-bark-climb.png' });
-console.log('WROTE probe-bark-climb.png');
 
 // AND A PORTRAIT. Pressed against the bark she is inside the tree's
 // own silhouette and the frame is one texel of it; the bark can only

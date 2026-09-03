@@ -3,28 +3,12 @@ import { groundHeight } from '../world/heightfield';
 import { world, type WorldPoint } from '../world/coords';
 import { toLocal } from '../world/origin';
 import { DIRECTION_EASE, SPEED_EASE } from './pace';
-import { WORLD_UP, aimFor, isClimbing, perchOn } from './climb';
-import {
-  gripUp, spinAbout, squareTo, transport, type Way,
-} from './surfaceGrip';
-import type { Solid } from '../world/solidField';
 
 /**
  * How briskly her body takes up a new slope. Higher is quicker; this
  * only has to outrun the eye, not the terrain.
  */
 const SLOPE_EASE = 9;
-
-/**
- * How fast she settles onto a surface she has taken hold of, per second.
- *
- * Only ever seen at the moment of taking hold: once she is on the bark
- * the perch is already where she is, and this closes a gap of nothing.
- */
-const GRAB_EASE = 14;
-
-/** Scratch for the surface basis — one matrix, not one a frame. */
-const FRAME = new THREE.Matrix4();
 
 /**
  * HOW WIDE SHE IS, for the one question anything solid asks of her.
@@ -153,90 +137,6 @@ export class PlayerAnt {
    */
   blocked: ((x: number, y: number, z: number, radius: number) => Blocked | null) | null = null;
 
-  /**
-   * WHAT SHE CAN HOLD ON TO, or null while nothing is climbable.
-   *
-   * The same shape as `blocked` and handed over by the same scene, but
-   * a different question: `blocked` asks what she cannot be inside of,
-   * this asks what she can stand on. Trunks answer both, which is the
-   * point — the wood she cannot walk through is the wood she walks UP.
-   */
-  grip: Solid | null = null;
-
-  /**
-   * HER OWN UP.
-   *
-   * World up while she is on the ground, the bark's outward normal
-   * while she is on a trunk, and rate-limited between the two so a
-   * right-angled join reads as a roll rather than a snap. Everything
-   * that used to assume +Y — her seat, her heading, the camera — asks
-   * her instead.
-   */
-  private upward: Way = WORLD_UP;
-
-  /**
-   * HER HEIGHT, world units, and the reason this was the hard part.
-   *
-   * `at` is {x, z} and always has been: she is a walker on a
-   * heightfield, so her y was never a fact about her, it was
-   * `groundHeight(x, z)` looked up whenever anyone needed it. A queen
-   * three metres up a trunk breaks that — the ground under her is
-   * still down there, and it is no longer where she is. So she carries
-   * one now. On the ground it tracks the terrain exactly and nothing
-   * downstream can tell the difference.
-   */
-  private high = 0;
-
-  /** True while the surface she is holding is not the ground. */
-  private held = false;
-
-  /**
-   * HER NOSE, IN THREE DIMENSIONS, and why a heading was not enough.
-   *
-   * `heading` is a world compass bearing, and a compass has nothing to
-   * say about the side of a tree. Rebuilding her facing from one every
-   * frame and carrying it onto the bark works on the near side of a
-   * trunk and sends her UNDERGROUND on the far side: the direction that
-   * was "forward" in the world maps to "down" once her up has rolled
-   * to face the other way, so pushing the stick walked her round the
-   * trunk and then down it. The probe measured exactly that — 80 cm
-   * below the ground she started on, up pointing at the sky's opposite.
-   *
-   * So while she is holding a surface her facing is CARRIED rather
-   * than recomputed: rolled with her up when the surface turns, and
-   * steered as a rotation about her own up. It is only ever a copy of
-   * `heading` while she is on the ground, where the two agree.
-   */
-  private facing: Way = { x: 0, y: 0, z: 1 };
-
-  /** The camera bearing last frame, so steering can be a CHANGE. */
-  private wasView = 0;
-
-  /** Is she on something other than level ground? For the camera. */
-  get climbing(): boolean {
-    return this.held || isClimbing(this.upward);
-  }
-
-  /** Her up, for anything that can no longer assume the world's. */
-  get up(): Way {
-    return this.upward;
-  }
-
-  /**
-   * Which way she is pointing, in three dimensions. See `facing`.
-   *
-   * Not `nose` — that name is taken by the method that pitches her
-   * body, and has been since long before she could climb anything.
-   */
-  get pointing(): Way {
-    return this.facing;
-  }
-
-  /** How high she is standing, world units. */
-  get height(): number {
-    return this.high;
-  }
-
   constructor() {
     this.buildBody();
     this.root.add(this.body);
@@ -276,17 +176,8 @@ export class PlayerAnt {
     this.wasAt = null;
     this.travelled = { x: 0, z: 0 };
     this.above = 0;
-    // A SPAWN LETS GO OF WHATEVER SHE WAS HOLDING. Carrying a trunk's
-    // attitude across a teleport would stand her sideways in a field
-    // half an island away, and the rate limit would take most of a
-    // second to admit it.
-    this.upward = WORLD_UP;
-    this.held = false;
-    this.facing = { x: Math.sin(heading), y: 0, z: Math.cos(heading) };
-    this.high = groundHeight(x, z);
     const seat = toLocal(world(x, z));
-    this.root.position.set(seat.lx, this.high, seat.lz);
-    this.root.quaternion.identity();
+    this.root.position.set(seat.lx, groundHeight(x, z), seat.lz);
     this.root.rotation.set(0, heading, 0);
     this.body.rotation.x = 0;
     this.lean = 0;
@@ -392,69 +283,15 @@ export class PlayerAnt {
       Math.cos(this.heading - wasFacing),
     ) / Math.max(dt, 1e-6);
 
-    // ── WHICH WAY SHE IS POINTING, IN THREE DIMENSIONS ───────────
-    // On the ground her nose is her heading and nothing is carried.
-    // On a surface the camera's bearing is only useful as a CHANGE —
-    // an absolute one means nothing once she is round the side of a
-    // trunk — so a drag turns her about her own up, by however far it
-    // moved, and her facing otherwise stays where the surface left it.
-    if (this.held) {
-      const swing = Math.atan2(
-        Math.sin(view - this.wasView), Math.cos(view - this.wasView),
-      );
-      if (Math.abs(swing) > 1e-9) {
-        this.facing = spinAbout(this.facing, this.upward, -swing);
-      }
-    } else {
-      this.facing = { x: Math.sin(this.heading), y: 0, z: Math.cos(this.heading) };
-    }
-    this.wasView = view;
-
     // Travel is in the CAMERA's frame, not hers: the stick means what
     // the player sees, and her body follows it rather than steering it.
     const step = dt;
     if (this.velocity.x !== 0 || this.velocity.y !== 0) {
       const right = view - Math.PI / 2;
-      // ON THE SURFACE SHE IS ON, not on the world's horizontal plane.
-      //
-      // The stick still means what the camera sees and this still
-      // reads it the same way — but the direction it produces is then
-      // CARRIED onto her surface, by the same rotation that took world
-      // up to her up. On the ground that rotation is nothing and every
-      // step is exactly the one she took before this existed. On a
-      // trunk the SAME forward push walks her up the bark, because
-      // "forward" went there when she rolled onto it.
-      //
-      // Transported rather than projected, and that is not a detail:
-      // flattening the step onto the bark leaves it pointing AROUND
-      // the trunk, and the probe measured her rising 4.8 cm in eight
-      // seconds of trying. See surfaceGrip.transport.
-      //
-      // ON A SURFACE THE FRAME IS HERS, NOT THE CAMERA'S. On the
-      // ground the stick is camera-relative and her body turns to
-      // follow it, which is settled and stays exactly as it is. On
-      // bark there is no camera-relative answer that survives walking
-      // round the trunk — see `facing` — so the step is built on her
-      // own carried axes instead.
-      const side = {
-        x: this.upward.y * this.facing.z - this.upward.z * this.facing.y,
-        y: this.upward.z * this.facing.x - this.upward.x * this.facing.z,
-        z: this.upward.x * this.facing.y - this.upward.y * this.facing.x,
-      };
-      const move = this.held
-        ? {
-          x: this.facing.x * this.velocity.y + side.x * this.velocity.x,
-          y: this.facing.y * this.velocity.y + side.y * this.velocity.x,
-          z: this.facing.z * this.velocity.y + side.z * this.velocity.x,
-        }
-        : transport({
-          x: Math.sin(view) * this.velocity.y + Math.sin(right) * this.velocity.x,
-          y: 0,
-          z: Math.cos(view) * this.velocity.y + Math.cos(right) * this.velocity.x,
-        }, WORLD_UP, this.upward);
-      this.at.x += move.x * step;
-      this.high += move.y * step;
-      this.at.z += move.z * step;
+      this.at.x
+        += (Math.sin(view) * this.velocity.y + Math.sin(right) * this.velocity.x) * step;
+      this.at.z
+        += (Math.cos(view) * this.velocity.y + Math.cos(right) * this.velocity.x) * step;
     }
     // CARRIED. Separate from her drive because the two are different
     // things and the difference is the point: a queen sprinting up a
@@ -626,18 +463,7 @@ export class PlayerAnt {
     // the wing. It is not a STUN and not a bounce — those need a
     // surface to hit and are parked in the roadmap until there is one
     // — she is simply not allowed to be inside the wood.
-    //
-    // …UNLESS SHE IS HOLDING ON TO IT, which is the whole of climbing.
-    // The push and the grip are the same fact seen twice: wood she
-    // cannot pass through is wood she can stand on. So the surface is
-    // asked FIRST, and only a queen who is not on it gets shoved off
-    // it. Pushing a climbing queen out along her own radius would peel
-    // her off the trunk once a frame, which is what "collision" and
-    // "climbing" fighting each other looks like.
-    const perch = above > 0 ? null
-      : perchOn({ x: this.at.x, y: this.high, z: this.at.z }, this.grip);
-    this.held = perch !== null;
-    if (this.blocked && perch === null) {
+    if (this.blocked) {
       const under = groundHeight(this.at.x, this.at.z);
       const bump = this.blocked(
         this.at.x, under + base + above, this.at.z, BODY_RADIUS,
@@ -646,47 +472,6 @@ export class PlayerAnt {
         this.at.x += bump.outX * bump.depth;
         this.at.z += bump.outZ * bump.depth;
       }
-    }
-    // HER ATTITUDE, RATE-LIMITED. The goal switches outright between
-    // the ground and the bark; `gripUp` is what makes that switch a
-    // three-quarter-second roll instead of a frame.
-    const wasUp = this.upward;
-    this.upward = gripUp(this.upward, aimFor(perch), dt);
-    // AND HER NOSE COMES WITH IT. The surface turned under her; her
-    // facing turns by the same rotation, which is what carries a queen
-    // walking at a trunk into a queen walking UP one without anything
-    // having to decide that is what she meant.
-    this.facing = squareTo(transport(this.facing, wasUp, this.upward), this.upward);
-    if (perch) {
-      // Seated ON the surface — the same convention the ground uses,
-      // where her origin sits at terrain height and the body rides
-      // above it. Her x and z come off the perch too: coming round a
-      // trunk moves her horizontally as much as vertically.
-      //
-      // EASED ONTO IT, because taking hold is a step of her own body
-      // radius. The collision keeps her centre BODY_RADIUS off the
-      // wood — that is what stops a FLYING queen going through a trunk
-      // — while a walker stands ON a surface, origin and all, the way
-      // she stands on the ground. Those two conventions are eighteen
-      // centimetres apart, which is more than her own length, so
-      // snapping between them read as a hop into the tree. Over about
-      // a fifth of a second it reads as leaning onto it instead, and
-      // the attitude roll is happening across the same moment.
-      const share = 1 - Math.exp(-GRAB_EASE * dt);
-      this.at.x += (perch.at.x - this.at.x) * share;
-      this.at.z += (perch.at.z - this.at.z) * share;
-      this.high += (perch.at.y - this.high) * share;
-      // AND NEVER INSIDE THE EARTH. A trunk is seated with its foot
-      // sunk below the surface, and `FOOTING` deliberately allows a
-      // perch a few centimetres under the ground so the very bottom of
-      // a tree can still be gripped — but a queen SEATED there is
-      // standing in the dirt, and easing on and off one at the foot
-      // dipped her under it both ways: "when I was going from the
-      // ground to the tree or tree to ground, I dipped under the
-      // ground". The grip may reach below the surface; she may not go
-      // there.
-      const floor = groundHeight(this.at.x, this.at.z);
-      if (this.high < floor) this.high = floor;
     }
     const { x, z } = this.at;
     this.above = above;
@@ -701,26 +486,8 @@ export class PlayerAnt {
     // it happens: everything the GPU sees is measured from the floating
     // origin rather than from the island's corner.
     const seat = toLocal(world(x, z));
-    // HER HEIGHT IS HERS NOW. On the ground it is the terrain under
-    // her and this is the same number it always was; on a trunk it is
-    // whatever the perch seated her at, which the terrain knows
-    // nothing about.
-    if (!this.held) this.high = groundHeight(x, z) + base + above;
-    this.root.position.set(seat.lx, this.high, seat.lz);
-    // ALL THREE AXES, NOT JUST THE YAW.
-    //
-    // `standOn` writes `root.quaternion`, and three.js syncs that back
-    // into `root.rotation` as a full Euler — so after a climb the
-    // rotation carries the bark's pitch and roll. Setting only `.y`
-    // here then left those in place FOR EVER: Joshua flew off a trunk
-    // and "my ant was stuck facing world up and down versus level with
-    // the world again". Letting go has to put the other two back.
-    if (this.held) {
-      this.root.rotation.y = this.heading;
-      this.standOn();
-    } else {
-      this.root.rotation.set(0, this.heading, 0);
-    }
+    this.root.position.set(seat.lx, groundHeight(x, z) + base + above, seat.lz);
+    this.root.rotation.y = this.heading;
     if (this.attitude) {
       // Airborne: her own attitude, not the hill she is over.
       this.nose(this.attitude.pitch);
@@ -732,49 +499,11 @@ export class PlayerAnt {
     this.body.rotation.z = 0;
     // Still lean with the ground she is over: an ant tips with the
     // hill she launched off, and losing that mid-jump reads as a snap.
-    // NOT ON BARK: the slope lean reads `groundHeight` fore and aft,
-    // which up a trunk is the forest floor several metres below and
-    // has nothing to say about the surface she is on. Her attitude is
-    // the perch's there, and adding a hillside's pitch to it would
-    // tip her off her own footing.
-    if (this.held) this.lean = 0; else this.alignToSlope(x, z, dt);
+    this.alignToSlope(x, z, dt);
 
     // Gait bob: subtle, and only while striding.
     this.body.position.y = this.lift + Math.abs(Math.sin(this.gaitPhase)) * 0.05;
     if (above > 0) this.tuck(); else this.stride();
-  }
-
-  /**
-   * ORIENT HER TO THE SURFACE, not to the world.
-   *
-   * Only while she is holding wood. On the ground `rotation.y` and the
-   * eased body lean do the job they have always done, and nothing here
-   * runs — deliberately, because reading her attitude off the terrain
-   * normal as well would ROLL her on every hillside in the game, which
-   * is a change to something that works and was not asked for.
-   *
-   * Her nose is carried round rather than recomputed: `squareTo` keeps
-   * the heading she had and takes out the part that has gone into her
-   * up. Walk at a trunk and she ends up pointing UP it.
-   */
-  private standOn(): void {
-    const up = this.upward;
-    // THE CARRIED NOSE, the same one the step is built on, so the way
-    // she faces and the way she moves cannot disagree.
-    const nose = this.facing;
-    // A right-handed basis from her up and her nose. Three.js reads a
-    // matrix's columns as its axes, so this is the whole rotation.
-    const side = {
-      x: up.y * nose.z - up.z * nose.y,
-      y: up.z * nose.x - up.x * nose.z,
-      z: up.x * nose.y - up.y * nose.x,
-    };
-    FRAME.makeBasis(
-      new THREE.Vector3(side.x, side.y, side.z),
-      new THREE.Vector3(up.x, up.y, up.z),
-      new THREE.Vector3(nose.x, nose.y, nose.z),
-    );
-    this.root.quaternion.setFromRotationMatrix(FRAME);
   }
 
   /**
