@@ -6,7 +6,7 @@ import { toWorld } from '../world/origin';
 import { waterSpotAt } from '../world/waterQuery';
 import { swellPeriod, swellReach } from '../world/seaSwell';
 import { settings } from '../ui/settings';
-import { transport } from '../ant/surfaceGrip';
+import { angleBetween, transport, turnToward } from '../ant/surfaceGrip';
 import { WORLD_UP } from '../ant/climb';
 
 /**
@@ -511,9 +511,40 @@ export class FollowCamera {
     // frame above it. Transport tips the whole frame, so the camera
     // follows her UP the trunk and the drag still orbits her.
     const up = this.upward;
-    const along = transport(
+    // ON THE FLAT, A WORLD BEARING. ON BARK, BEHIND HER NOSE.
+    //
+    // Joshua, v0.0.156: "I did not get behind the player because the
+    // camera was still stuck on world versus relative XYZ." Transporting
+    // the bearing tipped the boom onto her surface, which was half the
+    // job — but `look.yaw` is still a compass, and a compass cannot say
+    // "behind her" once she is round the side of a trunk. The drag and
+    // her nose drift apart and there is no yaw that gets the shot.
+    //
+    // Her carried nose can say it, and while she is on a surface the
+    // drag already TURNS her (PlayerAnt steers about her own up), so
+    // sitting behind her nose means dragging swings the camera round
+    // the trunk exactly as it swings her.
+    //
+    // NOT ON THE GROUND, THOUGH. Bolting the boom to her facing is the
+    // one thing this file is most explicit about not doing: she comes
+    // to the camera, the camera holds still, or the two chase each
+    // other forever. So the two answers are mixed by how far off
+    // vertical she is — nothing on the flat, where her up IS the
+    // world's and this is exactly the arithmetic it always was.
+    const worldWay = transport(
       { x: Math.sin(yaw), y: 0, z: Math.cos(yaw) }, WORLD_UP, up,
     );
+    const share = Math.min(1, Math.max(0, 1 - up.y));
+    const along = share < 1e-4 ? worldWay : turnToward(
+      worldWay, { x: -this.nose.x, y: -this.nose.y, z: -this.nose.z },
+      angleBetween(worldWay, { x: -this.nose.x, y: -this.nose.y, z: -this.nose.z }) * share,
+    );
+    // AND THE HORIZON ROLLS WITH HER. `lookAt` reads `camera.up`, which
+    // this file has never written because the world's up was always
+    // hers. Up a trunk it is not, and leaving it world-level framed a
+    // climbing ant sideways in a level shot.
+    const roll = turnToward(WORLD_UP, up, angleBetween(WORLD_UP, up) * share);
+    this.camera.up.set(roll.x, roll.y, roll.z);
     const lift = Math.sin(tilted) * this.distance;
     out.set(
       target.position.x + along.x * flat + up.x * lift,
@@ -533,9 +564,16 @@ export class FollowCamera {
    */
   private upward: { x: number; y: number; z: number } = { x: 0, y: 1, z: 0 };
 
-  /** Tell the boom which way is up for her. */
-  standOn(up: { x: number; y: number; z: number }): void {
+  /** Her carried nose, for the half of the shot a compass cannot frame. */
+  private nose: { x: number; y: number; z: number } = { x: 0, y: 0, z: 1 };
+
+  /** Tell the boom which way is up for her, and which way she faces. */
+  standOn(
+    up: { x: number; y: number; z: number },
+    nose: { x: number; y: number; z: number },
+  ): void {
     this.upward = up;
+    this.nose = nose;
   }
 
   /**

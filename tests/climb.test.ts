@@ -14,7 +14,7 @@ import { groundHeight } from '../src/world/heightfield';
 import { world } from '../src/world/coords';
 import { TrunkField, trunkProfile } from '../src/world/trunkSolid';
 import {
-  GRIP_REACH, WORLD_UP, aimFor, alongSurface, isClimbing, perchOn,
+  FOOTING, GRIP_REACH, WORLD_UP, aimFor, alongSurface, isClimbing, perchOn,
 } from '../src/ant/climb';
 import { gripUp } from '../src/ant/surfaceGrip';
 
@@ -128,5 +128,46 @@ describe('and the bark is a floor', () => {
       expect(seen[i]).toBeLessThan(seen[i - 1]);
     }
     expect(isClimbing(seen.map((y) => ({ x: 0, y, z: 0 }))[3])).toBe(true);
+  });
+});
+
+
+describe('she is never seated inside the earth', () => {
+  beforeAll(() => { loadIsland(); }, 120000);
+
+  it('a perch may reach below the ground, but she may not go there', () => {
+    // Joshua, v0.0.156: "when I was going from the ground to the tree
+    // or tree to ground, I dipped under the ground."
+    //
+    // A trunk is sunk below the surface so it never stands on air where
+    // the drawn mesh dips, and FOOTING deliberately lets the grip reach
+    // a few centimetres under so the very bottom of a tree can still be
+    // held. That reach is the RIGHT behaviour and the dip was the seat
+    // following it down. The grip may go below the ground; she may not.
+    expect(FOOTING).toBeGreaterThan(0);
+
+    const trunks = oneTree();
+    const floor = groundHeight(WAILUA.wx, WAILUA.wz);
+    // At the very foot, where the buried stub is still grippable.
+    const bark = barkAt(trunks, floor);
+    const perch = perchOn(
+      { x: WAILUA.wx + bark + BODY, y: floor, z: WAILUA.wz }, trunks,
+    );
+    expect(perch).not.toBeNull();
+    // The perch itself is allowed to sit a little under…
+    expect(perch!.at.y).toBeGreaterThan(floor - FOOTING - 1);
+  });
+
+  it('refuses a perch on the buried stub well below the ground', () => {
+    // Walking DOWN a trunk used to carry on into the dirt and round the
+    // bottom cap onto the underside — the probe found her 80 cm under
+    // the forest floor with her up pointing at the ground.
+    const trunks = oneTree();
+    const floor = groundHeight(WAILUA.wx, WAILUA.wz);
+    const deep = floor - 60;
+    const bark = barkAt(trunks, deep);
+    expect(perchOn(
+      { x: WAILUA.wx + bark + BODY, y: deep, z: WAILUA.wz }, trunks,
+    )).toBeNull();
   });
 });

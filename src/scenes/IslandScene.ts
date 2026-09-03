@@ -3214,7 +3214,7 @@ export class IslandScene {
     // this is the world's up and the camera is unchanged; on a trunk it
     // is the bark's, and the boom lifts off the surface she is on
     // rather than into the sky. See camera/FollowCamera.standOn.
-    this.follow.standOn(this.ant.up);
+    this.follow.standOn(this.ant.up, this.ant.pointing);
     this.follow.update(
       this.ant.root, look, dt,
       afloatIn(this.motion),

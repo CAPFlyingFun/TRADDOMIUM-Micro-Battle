@@ -222,6 +222,16 @@ export class PlayerAnt {
     return this.upward;
   }
 
+  /**
+   * Which way she is pointing, in three dimensions. See `facing`.
+   *
+   * Not `nose` — that name is taken by the method that pitches her
+   * body, and has been since long before she could climb anything.
+   */
+  get pointing(): Way {
+    return this.facing;
+  }
+
   /** How high she is standing, world units. */
   get height(): number {
     return this.high;
@@ -666,6 +676,17 @@ export class PlayerAnt {
       this.at.x += (perch.at.x - this.at.x) * share;
       this.at.z += (perch.at.z - this.at.z) * share;
       this.high += (perch.at.y - this.high) * share;
+      // AND NEVER INSIDE THE EARTH. A trunk is seated with its foot
+      // sunk below the surface, and `FOOTING` deliberately allows a
+      // perch a few centimetres under the ground so the very bottom of
+      // a tree can still be gripped — but a queen SEATED there is
+      // standing in the dirt, and easing on and off one at the foot
+      // dipped her under it both ways: "when I was going from the
+      // ground to the tree or tree to ground, I dipped under the
+      // ground". The grip may reach below the surface; she may not go
+      // there.
+      const floor = groundHeight(this.at.x, this.at.z);
+      if (this.high < floor) this.high = floor;
     }
     const { x, z } = this.at;
     this.above = above;
@@ -686,8 +707,20 @@ export class PlayerAnt {
     // nothing about.
     if (!this.held) this.high = groundHeight(x, z) + base + above;
     this.root.position.set(seat.lx, this.high, seat.lz);
-    this.root.rotation.y = this.heading;
-    if (this.held) this.standOn();
+    // ALL THREE AXES, NOT JUST THE YAW.
+    //
+    // `standOn` writes `root.quaternion`, and three.js syncs that back
+    // into `root.rotation` as a full Euler — so after a climb the
+    // rotation carries the bark's pitch and roll. Setting only `.y`
+    // here then left those in place FOR EVER: Joshua flew off a trunk
+    // and "my ant was stuck facing world up and down versus level with
+    // the world again". Letting go has to put the other two back.
+    if (this.held) {
+      this.root.rotation.y = this.heading;
+      this.standOn();
+    } else {
+      this.root.rotation.set(0, this.heading, 0);
+    }
     if (this.attitude) {
       // Airborne: her own attitude, not the hill she is over.
       this.nose(this.attitude.pitch);
