@@ -203,15 +203,120 @@ console.log(`distance from the AXIS AT HER HEIGHT:`
   + ` ${trail[0].gap} cm → ${gap.toFixed(2)} cm`);
 console.log(`surface at her height ${skin === null ? 'not reached' : skin.surface.toFixed(1) + ' cm'}`
   + ` + body ${BODY} = ${wall === null ? '?' : wall.toFixed(1)} cm, where she should stand`);
-console.log(`overshoot: ${wall === null ? 'n/a' : (gap - wall).toFixed(2)} cm`
-  + ` (negative means she is IN the wood)`);
-console.log(`DEEPEST UNRESOLVED PUSH after settle: ${deepest.toFixed(3)} cm`);
-const solid = wall !== null && gap >= wall - 0.5 && gap < wall + 5 && deepest < 1;
-console.log(`SOLID: ${solid ? 'yes — she stopped at the bark' : 'NO'}`);
+// TWO CONVENTIONS, AND THE DIFFERENCE IS HER OWN BODY.
+//
+// The collision keeps a FLYING queen's centre BODY_RADIUS clear of the
+// wood. A WALKER stands ON a surface, origin and all, exactly as she
+// stands on the ground — so once she takes hold her centre is at the
+// bark and this reads about -18, her own radius. That is her standing
+// on the tree, not her inside it, and the same number would have been
+// a real fault before climbing existed. Reported as the gap to the
+// BARK rather than as an overshoot, so it cannot be misread.
+const standing = wall === null ? null : gap - (wall - BODY);
+console.log(`her centre is ${standing === null ? '?' : standing.toFixed(2)} cm`
+  + ` from the bark — 0 is standing on it, ${BODY} is held off it by her body`);
+console.log(`deepest push the collision still wanted: ${deepest.toFixed(3)} cm`
+  + ` (expected to equal her body radius once she is holding on)`);
+// SHE NO LONGER STOPS DEAD, AND THAT IS THE POINT.
+//
+// Before climbing existed this leg ended at a wall: she closed to the
+// surface radius plus her body and went no further. She now TAKES HOLD
+// at that same distance instead — the collision and the grip are one
+// fact about a trunk, and on foot the grip wins. So the walk passes if
+// she got to the bark and is holding it; the wall is still what a
+// FLYING queen meets, which is where it was always doing the work.
+const grabbed = await page.evaluate(() => window.__island.climbing());
+const reached = wall !== null && gap < wall + 6;
+console.log(`reached the bark: ${reached} · holding it: ${grabbed.on}`);
+console.log(`SOLID: ${reached && grabbed.on ? 'yes — she reached the bark and took hold' : 'NO'}`);
+const solid = reached && grabbed.on;
 console.log(`TRAIL ${JSON.stringify(trail)}`);
 
 await page.screenshot({ path: 'probe-bark-contact.png' });
 console.log('WROTE probe-bark-contact.png');
+
+// ── AND NOW SHE CLIMBS IT ────────────────────────────────────────
+// She is against the bark with the stick still available. Keep
+// pushing: the surface under her rolls her up onto the trunk, and the
+// SAME forward push that walked her into it now walks her up it.
+await page.keyboard.down('KeyW');
+const climbStart = await page.evaluate(() => window.__island.simTime());
+const climbClock = Date.now();
+let best = null;
+const rise = [];
+for (let i = 0; i < 400; i++) {
+  await page.waitForTimeout(1000);
+  const now = await page.evaluate(() => ({
+    t: window.__island.simTime(), ...window.__island.climbing(),
+  }));
+  const stamp = +now.t.toFixed(3);
+  if (rise.length === 0 || stamp !== rise[rise.length - 1].t) {
+    rise.push({
+      t: stamp, up: +now.up[1].toFixed(3),
+      agl: +(now.height - now.ground).toFixed(1), on: now.on,
+    });
+  }
+  best = now;
+  if (now.t - climbStart > 25 || Date.now() - climbClock > PATIENCE) break;
+}
+await page.keyboard.up('KeyW');
+
+const climbed = best.height - best.ground;
+console.log(`\nCLIMB: ${(best.t - climbStart).toFixed(1)} s of game time`);
+console.log(`holding wood: ${best.on}`);
+console.log(`her up: [${best.up.map((v) => v.toFixed(3)).join(', ')}]`
+  + ` — y of 1 is flat ground, 0 is a vertical trunk`);
+console.log(`height above the ground under her: ${climbed.toFixed(1)} cm`);
+console.log(`CLIMBED: ${best.on && climbed > 20 ? 'yes' : 'NO'}`);
+console.log(`RISE ${JSON.stringify(rise)}`);
+await page.screenshot({ path: 'probe-bark-climb.png' });
+console.log('WROTE probe-bark-climb.png');
+
+// ── AND THEN SHE FLIES OFF IT ────────────────────────────────────
+// THE CASE THAT REACHED THE DEVICE TWICE. Everything above passed on
+// both broken versions, because none of it ever left the trunk. A
+// takeoff from bark is the one moment her attitude has to stop being
+// the surface's and become the wings'.
+await page.keyboard.up('KeyW');
+await page.evaluate(() => window.__island.setPace('run'));
+const lever = await page.$('[data-ui="lift-slider"]');
+if (lever) {
+  const lb = await lever.boundingBox();
+  await page.mouse.move(lb.x + lb.width / 2, lb.y + lb.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(lb.x + lb.width / 2, lb.y + lb.height * 0.02, { steps: 8 });
+}
+const flewAt = await page.evaluate(() => window.__island.simTime());
+let air = null;
+for (let i = 0; i < 200; i++) {
+  await page.waitForTimeout(1000);
+  air = await page.evaluate(() => ({
+    t: window.__island.simTime(),
+    aloft: window.__island.autopilot().aloft,
+    ...window.__island.climbing(),
+  }));
+  if ((air.aloft && air.t - flewAt > 3) || air.t - flewAt > 25) break;
+}
+if (lever) await page.mouse.up();
+console.log(`\nTAKEOFF FROM BARK: aloft ${air.aloft}`
+  + ` after ${(air.t - flewAt).toFixed(1)} s of asking`);
+console.log(`still holding wood: ${air.on}`);
+console.log(`her up: [${air.up.map((v) => v.toFixed(3)).join(', ')}]`);
+if (!air.aloft) {
+  // NOT A FAILURE OF THE ATTITUDE — a failure to leave the ground at
+  // all. A takeoff wants a run-up to TAKEOFF_SPEED and she climbs at
+  // about 11 cm/s, so the lever is refused on bark. Worth knowing in
+  // its own right, and it means this leg cannot check what it was
+  // written to check: the levelling-out is proved in
+  // tests/playerAnt.test.ts ("FLYING IS NEVER ON A SURFACE"), which
+  // calls `fly` straight off the trunk and fails if reverted.
+  console.log('NO TAKEOFF — she cannot reach takeoff speed climbing, so this'
+    + ' leg proves nothing about her attitude in the air.');
+} else {
+  console.log(`LEVEL AGAIN: ${!air.on && air.up[1] > 0.999 ? 'yes' : 'NO'}`);
+}
+await page.screenshot({ path: 'probe-bark-flyoff.png' });
+console.log('WROTE probe-bark-flyoff.png');
 
 // AND A PORTRAIT. Pressed against the bark she is inside the tree's
 // own silhouette and the frame is one texel of it; the bark can only

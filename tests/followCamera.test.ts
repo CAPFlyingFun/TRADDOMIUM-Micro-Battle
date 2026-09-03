@@ -39,6 +39,119 @@ function orbit(input: LookInput): THREE.Vector3 {
   return follow.camera.position.clone();
 }
 
+describe('the boom is built on HER up', () => {
+  /** Settle the camera with her standing on a given surface. */
+  function boomOn(
+    up: { x: number; y: number; z: number }, height = 0,
+  ): THREE.Vector3 {
+    const ant = antFacingNorth();
+    ant.position.y = height;
+    const follow = new FollowCamera(2);
+    follow.standOn(up, { x: 0, y: 0, z: 1 });
+    follow.snapTo(ant);
+    for (let i = 0; i < 400; i++) follow.update(ant, look({ active: false }), 1 / 60);
+    return follow.camera.position.clone();
+  }
+
+  it('is bit-for-bit unchanged on level ground', () => {
+    // THE PROMISE THE WHOLE DESIGN RESTS ON. Her up on the ground IS
+    // the world's, so the projection removes nothing and every number
+    // is the one the camera produced before climbing existed. A default
+    // that merely LOOKED right would not do: this compares the new path
+    // against the untouched one.
+    const was = orbit(look({ active: false }));
+    const now = boomOn({ x: 0, y: 1, z: 0 });
+    expect(now.x).toBeCloseTo(was.x, 10);
+    expect(now.y).toBeCloseTo(was.y, 10);
+    expect(now.z).toBeCloseTo(was.z, 10);
+  });
+
+  it('lifts off the BARK when she is on a trunk, not into the sky', () => {
+    // Bark facing +x: the boom's lift has to come out along +x, or the
+    // lens climbs the tree with her and frames the trunk instead of her.
+    const high = 200;
+    const at = boomOn({ x: 1, y: 0, z: 0 }, high);
+    expect(at.x).toBeGreaterThan(1);
+    // And it is no longer riding above her in world terms.
+    expect(Math.abs(at.y - high)).toBeLessThan(Math.abs(at.x));
+  });
+
+  it('keeps its distance whatever she is standing on', () => {
+    // The boom is a length. Tipping the frame must not stretch it.
+    //
+    // MEASURED UP A TRUNK, and it has to be: on bark the lift comes out
+    // sideways, so a queen standing at ground level would put the lens
+    // exactly ON the ground and the don't-sink-into-a-hillside clamp
+    // would — rightly — push it clear, which is a longer boom for a
+    // good reason. Two metres up is where climbing actually happens.
+    const high = 200;
+    const flat = boomOn({ x: 0, y: 1, z: 0 }, high).sub(
+      new THREE.Vector3(0, high, 0),
+    ).length();
+    const bark = boomOn({ x: 1, y: 0, z: 0 }, high).sub(
+      new THREE.Vector3(0, high, 0),
+    ).length();
+    expect(bark).toBeCloseTo(flat, 6);
+  });
+
+  it('sits BEHIND HER NOSE once she is on bark, not on a compass', () => {
+    // Joshua, v0.0.156: "I did not get behind the player because the
+    // camera was still stuck on world versus relative XYZ." A compass
+    // bearing cannot say "behind her" on the side of a trunk; her
+    // carried nose can.
+    const high = 200;
+    const ant = antFacingNorth();
+    ant.position.y = high;
+    const follow = new FollowCamera(2);
+    // Up a trunk whose bark faces +x, with her nose pointing +y — she
+    // is climbing. Behind her is therefore BELOW her.
+    follow.standOn({ x: 1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 });
+    follow.snapTo(ant);
+    for (let i = 0; i < 400; i++) follow.update(ant, look({ active: false }), 1 / 60);
+    const at = follow.camera.position;
+    expect(at.y).toBeLessThan(high);
+    // …and still off the bark, so the lens is not inside the trunk.
+    expect(at.x).toBeGreaterThan(0);
+  });
+
+  it('rolls the horizon with her instead of framing her sideways', () => {
+    // `camera.up` was never written by this file, because the world's
+    // up was always hers. Up a trunk it is not.
+    const ant = antFacingNorth();
+    ant.position.y = 200;
+    const follow = new FollowCamera(2);
+    follow.standOn({ x: 1, y: 0, z: 0 }, { x: 0, y: 1, z: 0 });
+    follow.snapTo(ant);
+    for (let i = 0; i < 400; i++) follow.update(ant, look({ active: false }), 1 / 60);
+    expect(follow.camera.up.x).toBeGreaterThan(0.9);
+  });
+
+  it('leaves camera.up alone on the ground', () => {
+    const was = orbit(look({ active: false }));
+    expect(was).toBeDefined();
+    const ant = antFacingNorth();
+    const follow = new FollowCamera(2);
+    follow.standOn({ x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: 1 });
+    follow.snapTo(ant);
+    for (let i = 0; i < 60; i++) follow.update(ant, look({ active: false }), 1 / 60);
+    expect(follow.camera.up.y).toBeCloseTo(1, 9);
+  });
+
+  it('survives a drag pointing straight at the surface', () => {
+    // Her up and the drag bearing parallel: "along the surface" has no
+    // answer, and the fallback has to produce a finite camera rather
+    // than a NaN one.
+    const ant = antFacingNorth();
+    const follow = new FollowCamera(2);
+    follow.standOn({ x: 0, y: 0, z: 1 }, { x: 0, y: 1, z: 0 });
+    follow.snapTo(ant);
+    for (let i = 0; i < 60; i++) follow.update(ant, look({ yaw: Math.PI }), 1 / 60);
+    const at = follow.camera.position;
+    expect(Number.isFinite(at.x) && Number.isFinite(at.y) && Number.isFinite(at.z))
+      .toBe(true);
+  });
+});
+
 describe('the chase camera', () => {
   it('sits on the bearing the view holds, not on her nose', () => {
     const at = orbit(look({ active: false }));

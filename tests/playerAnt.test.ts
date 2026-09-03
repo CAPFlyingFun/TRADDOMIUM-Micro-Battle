@@ -285,3 +285,120 @@ describe('re-seating her is not a landing', () => {
     expect(ant.root.position.y).toBeLessThan(HIGH / 2);
   });
 });
+
+/**
+ * A trunk she can hold, standing where she does, as a bare Solid — no
+ * island, no landmark stand, no renderer. The field is all `perchOn`
+ * ever asks for.
+ */
+function wallAt(x: number): { depthAt: (x: number, y: number, z: number) => number } {
+  // A vertical plane at `x`, solid on the far side. Its outward normal
+  // is -x, so a queen who walks into it from -x rolls onto a surface
+  // whose up is -x — the simplest possible trunk.
+  return { depthAt: (px: number) => px - x };
+}
+
+describe('letting go puts her back level', () => {
+  it('clears the pitch and roll a climb left in her rotation', () => {
+    // Joshua, v0.0.156: "once I flew off of the tree using fly, my ant
+    // was stuck facing world up and down versus level with the world
+    // again."
+    //
+    // `standOn` writes root.quaternion, and three.js syncs that into
+    // root.rotation as a full Euler. The not-held path used to set only
+    // `.y`, so the bark's pitch and roll survived for ever.
+    const ant = new PlayerAnt();
+    ant.placeAt(0, 0, 0);
+    ant.grip = wallAt(10);
+    // Walk her into the wall until she is holding it and tipped over.
+    for (let i = 0; i < 400; i++) ant.update(drive({ ahead: 1 }), Math.PI / 2, DT);
+    expect(ant.climbing).toBe(true);
+    const tipped = Math.abs(ant.root.rotation.x) + Math.abs(ant.root.rotation.z);
+    expect(tipped).toBeGreaterThan(0.2);
+
+    // Now let go — which is what taking off does.
+    ant.grip = null;
+    for (let i = 0; i < 400; i++) ant.update(drive(), Math.PI / 2, DT);
+    expect(ant.climbing).toBe(false);
+    expect(ant.root.rotation.x).toBeCloseTo(0, 9);
+    expect(ant.root.rotation.z).toBeCloseTo(0, 9);
+  });
+
+  it('and her up comes back to world up', () => {
+    const ant = new PlayerAnt();
+    ant.placeAt(0, 0, 0);
+    ant.grip = wallAt(10);
+    for (let i = 0; i < 400; i++) ant.update(drive({ ahead: 1 }), Math.PI / 2, DT);
+    expect(ant.up.y).toBeLessThan(0.5);
+    ant.grip = null;
+    for (let i = 0; i < 400; i++) ant.update(drive(), Math.PI / 2, DT);
+    expect(ant.up.y).toBeCloseTo(1, 6);
+  });
+});
+
+describe('FLYING IS NEVER ON A SURFACE', () => {
+  /**
+   * The regression this whole file's climbing section exists under.
+   *
+   * Joshua, twice: "once I flew off of the tree using fly, my ant was
+   * stuck facing world up and down", then "whatever you did broke
+   * flying and still not fixed". Both versions of the fix chased the
+   * SYMPTOM — a stale rotation, a stale up — and both left the cause
+   * alone: a climb was allowed to still be true while she was on the
+   * wing. Thronemound's walker never faces this because it has no
+   * flight; "off the surface" there means falling.
+   *
+   * So these test the RULE rather than the rendering: airborne is not
+   * a surface, and nothing about bark may survive a takeoff.
+   */
+  function onBark(): PlayerAnt {
+    const ant = new PlayerAnt();
+    ant.placeAt(0, 0, 0);
+    ant.grip = { depthAt: (x: number) => x - 10 };
+    for (let i = 0; i < 400; i++) ant.update(drive({ ahead: 1 }), Math.PI / 2, DT);
+    return ant;
+  }
+
+  it('is climbing on the trunk, so the rest of these mean something', () => {
+    const ant = onBark();
+    expect(ant.climbing).toBe(true);
+    expect(ant.up.y).toBeLessThan(0.5);
+  });
+
+  it('reports WORLD up the instant she is flying, whatever she was on', () => {
+    const ant = onBark();
+    // One frame of flight, straight off the bark — the exact moment
+    // that broke. `fly` sets her attitude, and an ant with an attitude
+    // is on her wings, not on a tree.
+    ant.fly(drive({ ahead: 1 }), 0, 0, 0, DT, 500);
+    expect(ant.up).toEqual({ x: 0, y: 1, z: 0 });
+    expect(ant.climbing).toBe(false);
+  });
+
+  it('leaves no bark in her rotation once she is on the wing', () => {
+    const ant = onBark();
+    ant.fly(drive({ ahead: 1 }), 0, 0, 0, DT, 500);
+    expect(ant.root.rotation.x).toBeCloseTo(0, 9);
+    expect(ant.root.rotation.z).toBeCloseTo(0, 9);
+  });
+
+  it('cannot re-take a surface while airborne, however close the wood', () => {
+    // She flies straight past a trunk. The grip is still wired up and
+    // the wood is right there; being on the wing is what refuses it.
+    const ant = new PlayerAnt();
+    ant.placeAt(0, 0, 0);
+    ant.grip = { depthAt: () => 5 }; // solid everywhere
+    for (let i = 0; i < 120; i++) ant.fly(drive({ ahead: 1 }), 0, 0, 0, DT, 500);
+    expect(ant.climbing).toBe(false);
+    expect(ant.up).toEqual({ x: 0, y: 1, z: 0 });
+  });
+
+  it('letGo is idempotent and safe on a queen who never climbed', () => {
+    const ant = new PlayerAnt();
+    ant.placeAt(0, 0, 0);
+    ant.letGo();
+    ant.letGo();
+    expect(ant.up).toEqual({ x: 0, y: 1, z: 0 });
+    expect(ant.climbing).toBe(false);
+  });
+});

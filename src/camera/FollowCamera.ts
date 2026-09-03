@@ -6,6 +6,8 @@ import { toWorld } from '../world/origin';
 import { waterSpotAt } from '../world/waterQuery';
 import { swellPeriod, swellReach } from '../world/seaSwell';
 import { settings } from '../ui/settings';
+import { angleBetween, transport, turnToward } from '../ant/surfaceGrip';
+import { WORLD_UP } from '../ant/climb';
 
 /**
  * Third-person chase camera.
@@ -488,11 +490,90 @@ export class FollowCamera {
     );
 
     const flat = Math.cos(tilted) * this.distance;
-    out.set(
-      target.position.x + Math.sin(yaw) * flat,
-      target.position.y + Math.sin(tilted) * this.distance,
-      target.position.z + Math.cos(yaw) * flat,
+    // ── AND IN HER FRAME, NOT THE WORLD'S ────────────────────────
+    //
+    // Up a trunk her up is horizontal, and a boom built on the world's
+    // axes puts the lens somewhere useless: "above her" is along the
+    // bark she is climbing, and "behind her" drives it into the wood.
+    // So the same two components — one along the ground, one up off it
+    // — are laid on HER axes instead. The horizontal bearing keeps
+    // coming from the drag, so free look still orbits her; it is just
+    // tipped into the surface she is on, which turns a drag into an
+    // orbit AROUND the trunk once she is on one.
+    //
+    // ON THE GROUND THIS IS THE IDENTITY. Her up is the world's, the
+    // projection removes nothing, and the arithmetic below is the
+    // arithmetic above it has always been.
+    // CARRIED onto her surface by the same rotation her own step is —
+    // see ant/surfaceGrip.transport. Projecting the bearing instead
+    // would keep it horizontal on a vertical trunk, which puts the
+    // lens orbiting the tree at her height while she climbs out of
+    // frame above it. Transport tips the whole frame, so the camera
+    // follows her UP the trunk and the drag still orbits her.
+    const up = this.upward;
+    // ON THE FLAT, A WORLD BEARING. ON BARK, BEHIND HER NOSE.
+    //
+    // Joshua, v0.0.156: "I did not get behind the player because the
+    // camera was still stuck on world versus relative XYZ." Transporting
+    // the bearing tipped the boom onto her surface, which was half the
+    // job — but `look.yaw` is still a compass, and a compass cannot say
+    // "behind her" once she is round the side of a trunk. The drag and
+    // her nose drift apart and there is no yaw that gets the shot.
+    //
+    // Her carried nose can say it, and while she is on a surface the
+    // drag already TURNS her (PlayerAnt steers about her own up), so
+    // sitting behind her nose means dragging swings the camera round
+    // the trunk exactly as it swings her.
+    //
+    // NOT ON THE GROUND, THOUGH. Bolting the boom to her facing is the
+    // one thing this file is most explicit about not doing: she comes
+    // to the camera, the camera holds still, or the two chase each
+    // other forever. So the two answers are mixed by how far off
+    // vertical she is — nothing on the flat, where her up IS the
+    // world's and this is exactly the arithmetic it always was.
+    const worldWay = transport(
+      { x: Math.sin(yaw), y: 0, z: Math.cos(yaw) }, WORLD_UP, up,
     );
+    const share = Math.min(1, Math.max(0, 1 - up.y));
+    const along = share < 1e-4 ? worldWay : turnToward(
+      worldWay, { x: -this.nose.x, y: -this.nose.y, z: -this.nose.z },
+      angleBetween(worldWay, { x: -this.nose.x, y: -this.nose.y, z: -this.nose.z }) * share,
+    );
+    // AND THE HORIZON ROLLS WITH HER. `lookAt` reads `camera.up`, which
+    // this file has never written because the world's up was always
+    // hers. Up a trunk it is not, and leaving it world-level framed a
+    // climbing ant sideways in a level shot.
+    const roll = turnToward(WORLD_UP, up, angleBetween(WORLD_UP, up) * share);
+    this.camera.up.set(roll.x, roll.y, roll.z);
+    const lift = Math.sin(tilted) * this.distance;
+    out.set(
+      target.position.x + along.x * flat + up.x * lift,
+      target.position.y + along.y * flat + up.y * lift,
+      target.position.z + along.z * flat + up.z * lift,
+    );
+  }
+
+  /**
+   * The up the boom is built on — hers, so it can leave the world's.
+   *
+   * Defaulted to the world's and set by the scene each frame, rather
+   * than threaded through `place`: `place` is called from the follow,
+   * the snap and the collision retry, and three call sites growing an
+   * argument that is the same every time is how one of them ends up
+   * passing the wrong one.
+   */
+  private upward: { x: number; y: number; z: number } = { x: 0, y: 1, z: 0 };
+
+  /** Her carried nose, for the half of the shot a compass cannot frame. */
+  private nose: { x: number; y: number; z: number } = { x: 0, y: 0, z: 1 };
+
+  /** Tell the boom which way is up for her, and which way she faces. */
+  standOn(
+    up: { x: number; y: number; z: number },
+    nose: { x: number; y: number; z: number },
+  ): void {
+    this.upward = up;
+    this.nose = nose;
   }
 
   /**
