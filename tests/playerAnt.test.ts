@@ -463,3 +463,58 @@ describe('on bark, the stick still means what it means on the ground', () => {
     expect(dot(cross(before, after), up)).toBeGreaterThan(0);
   });
 });
+
+describe('getting on and off a trunk', () => {
+  /** A wall solid for x > 10, and ground far below so it is climbable. */
+  const wall = { depthAt: (x: number) => x - 10 };
+
+  it('does not re-take the trunk the instant she leaves it', () => {
+    // Joshua: "when flying off the tree it snaps right back to the
+    // tree (needs like a 1s protection so it can get off without
+    // snapping back)." A takeoff begins with her still against the
+    // bark, so without a lockout she is released and re-grips on the
+    // very next frame.
+    const ant = new PlayerAnt();
+    ant.placeAt(0, 0, 0);
+    ant.grip = wall;
+    for (let i = 0; i < 400; i++) ant.update(drive({ ahead: 1 }), Math.PI / 2, DT);
+    expect(ant.climbing).toBe(true);
+
+    ant.letGo();
+    // Walking again, still right against the wood: she must stay off it.
+    for (let i = 0; i < 10; i++) ant.update(drive(), Math.PI / 2, DT);
+    expect(ant.climbing).toBe(false);
+  });
+
+  it('and may take hold again once the moment has passed', () => {
+    const ant = new PlayerAnt();
+    ant.placeAt(0, 0, 0);
+    ant.grip = wall;
+    for (let i = 0; i < 400; i++) ant.update(drive({ ahead: 1 }), Math.PI / 2, DT);
+    ant.letGo();
+    // A second of her clock, then she is free to grip what she is on.
+    for (let i = 0; i < 200; i++) ant.update(drive({ ahead: 1 }), Math.PI / 2, DT);
+    expect(ant.climbing).toBe(true);
+  });
+
+  it('lets go when a descent reaches the ground', () => {
+    // Joshua: "going ground to tree works great, going tree to ground
+    // never snaps to the ground." The release is the ground CLAMP
+    // firing — climbing up it never does, and walking down past the
+    // foot it is exactly the moment the ground is what holds her.
+    const ant = new PlayerAnt();
+    ant.placeAt(0, 0, 0);
+    ant.grip = wall;
+    for (let i = 0; i < 400; i++) ant.update(drive({ ahead: 1 }), Math.PI / 2, DT);
+    expect(ant.climbing).toBe(true);
+    const up = ant.height;
+    // Now walk DOWN it — the reverse push, which on bark is downward.
+    for (let i = 0; i < 2000 && ant.climbing; i++) {
+      ant.update(drive({ ahead: -1 }), Math.PI / 2, DT);
+    }
+    expect(ant.height).toBeLessThan(up);
+    expect(ant.climbing).toBe(false);
+    // …and she is standing on the ground, not sunk into it.
+    expect(ant.up.y).toBeCloseTo(1, 6);
+  });
+});

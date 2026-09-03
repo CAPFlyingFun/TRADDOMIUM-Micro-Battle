@@ -111,6 +111,33 @@ export interface QueenBody {
 }
 
 /**
+ * THE LOWEST PART OF HER THAT IS NOT A WING.
+ *
+ * `Box3.setFromObject` includes every descendant whether or not it is
+ * visible, so hiding the wings first would not help. This walks the
+ * model and skips that subtree instead.
+ *
+ * Falls back on the whole model when there is no wings mesh to skip —
+ * a wingless caste stands on its feet either way.
+ */
+export function standingFloor(model: THREE.Object3D, wings: THREE.Object3D | null): number {
+  if (!wings) return new THREE.Box3().setFromObject(model).min.y;
+  const box = new THREE.Box3();
+  const part = new THREE.Box3();
+  model.traverse((node) => {
+    const mesh = node as THREE.Mesh;
+    if (!mesh.isMesh || !mesh.geometry) return;
+    // Anything under the wings, however deep, is not a foot.
+    for (let up: THREE.Object3D | null = node; up; up = up.parent) {
+      if (up === wings) return;
+    }
+    part.setFromObject(node);
+    box.union(part);
+  });
+  return box.isEmpty() ? new THREE.Box3().setFromObject(model).min.y : box.min.y;
+}
+
+/**
  * Load her, scale her to the stat table, and stand her on y = 0.
  *
  * Rejects rather than falling back: the caller keeps the placeholder up
@@ -146,9 +173,18 @@ export async function loadQueen(report?: LoadReport): Promise<QueenBody> {
 
   // Stand her ON the ground rather than through it. Measured again
   // after scaling, because the first box was in the file's units.
+  //
+  // AND WITHOUT HER WINGS, which is the same trap as the scale above,
+  // one step later. A box over the WHOLE model is bounded below by
+  // whatever hangs lowest, and in her rest pose that is a wingtip
+  // rather than a foot — so standing that box on zero stands her on
+  // her WINGS and leaves her feet in the air. On the ground the cover
+  // grass hides it; on bark there is nothing to hide it, and Joshua
+  // measured it at "maybe 10-12mm too tall".
+  //
+  // Her feet are what she stands on, so her feet are what is measured.
   model.updateMatrixWorld(true);
-  const stood = new THREE.Box3().setFromObject(model);
-  model.position.y -= stood.min.y;
+  model.position.y -= standingFloor(model, wings);
 
   for (const part of model.children) part.frustumCulled = false;
   // She is drawn at a few centimetres with the camera right behind her;

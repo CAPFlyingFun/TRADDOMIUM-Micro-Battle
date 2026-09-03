@@ -69,27 +69,40 @@ describe('and the bark is a floor', () => {
   beforeAll(() => { loadIsland(); }, 120000);
 
   it('takes hold when she is pressed against a trunk', () => {
-    // Exactly where the collision leaves her: her body radius off the
-    // bark, which is the only place she can ever be when she meets one
-    // on foot. If the grip reach did not clear that she could never
-    // take hold of anything she had just walked into.
+    // Exactly where the collision leaves a WALKER: at the bark. On
+    // foot she is stopped by the surface itself rather than held a
+    // body-radius off it — see PlayerAnt.settle — because she is
+    // walking up to a thing she is about to stand on.
     const trunks = oneTree();
     const y = groundHeight(WAILUA.wx, WAILUA.wz) + 100;
     const bark = barkAt(trunks, y);
-    const perch = perchOn(
-      { x: WAILUA.wx + bark + BODY, y, z: WAILUA.wz }, trunks,
-    );
+    const perch = perchOn({ x: WAILUA.wx + bark, y, z: WAILUA.wz }, trunks);
     expect(perch).not.toBeNull();
-    expect(GRIP_REACH).toBeGreaterThan(BODY);
+  });
+
+  it('does NOT take hold of a trunk she is merely standing beside', () => {
+    // Joshua, v0.0.160: "something when on the ground and trying to
+    // fly, it starts to and fails. Takes a few tries. (Make sure the
+    // ground is recognized as the ground)".
+    //
+    // The reach used to be 22 — past her own body radius — so a queen
+    // on flat ground NEXT TO a tree was holding it, with her attitude
+    // and her seat coming off bark she was not on. A skin, not a
+    // magnet: she has to be against the trunk.
+    const trunks = oneTree();
+    const y = groundHeight(WAILUA.wx, WAILUA.wz) + 100;
+    const bark = barkAt(trunks, y);
+    expect(GRIP_REACH).toBeLessThan(BODY);
+    expect(perchOn(
+      { x: WAILUA.wx + bark + BODY, y, z: WAILUA.wz }, trunks,
+    )).toBeNull();
   });
 
   it('seats her on the surface, facing out of it', () => {
     const trunks = oneTree();
     const y = groundHeight(WAILUA.wx, WAILUA.wz) + 100;
     const bark = barkAt(trunks, y);
-    const perch = perchOn(
-      { x: WAILUA.wx + bark + BODY, y, z: WAILUA.wz }, trunks,
-    )!;
+    const perch = perchOn({ x: WAILUA.wx + bark, y, z: WAILUA.wz }, trunks)!;
     // Her attitude goal points out along the trunk's radius…
     expect(perch.up.x).toBeGreaterThan(0.9);
     expect(Math.abs(perch.up.y)).toBeLessThan(0.2);
@@ -150,9 +163,7 @@ describe('she is never seated inside the earth', () => {
     const floor = groundHeight(WAILUA.wx, WAILUA.wz);
     // At the very foot, where the buried stub is still grippable.
     const bark = barkAt(trunks, floor);
-    const perch = perchOn(
-      { x: WAILUA.wx + bark + BODY, y: floor, z: WAILUA.wz }, trunks,
-    );
+    const perch = perchOn({ x: WAILUA.wx + bark, y: floor, z: WAILUA.wz }, trunks);
     expect(perch).not.toBeNull();
     // The perch itself is allowed to sit a little under…
     expect(perch!.at.y).toBeGreaterThan(floor - FOOTING - 1);
@@ -166,9 +177,7 @@ describe('she is never seated inside the earth', () => {
     const floor = groundHeight(WAILUA.wx, WAILUA.wz);
     const deep = floor - 60;
     const bark = barkAt(trunks, deep);
-    expect(perchOn(
-      { x: WAILUA.wx + bark + BODY, y: deep, z: WAILUA.wz }, trunks,
-    )).toBeNull();
+    expect(perchOn({ x: WAILUA.wx + bark, y: deep, z: WAILUA.wz }, trunks)).toBeNull();
   });
 });
 

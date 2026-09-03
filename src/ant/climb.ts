@@ -39,13 +39,32 @@ export const WORLD_UP: Way = { x: 0, y: 1, z: 0 };
 /**
  * How far off the bark she can be and still be holding on, world units.
  *
- * Her body keeps her BODY_RADIUS (18) clear of the wood, so a queen
- * pressed against a trunk reads about -18 from the field. This has to
- * clear that or she could never take hold of anything she had just
- * walked into. Four centimetres past her own width is a reach, not a
- * magnet: she has to be against the trunk, not near it.
+ * A SKIN, NOT A REACH, and it used to be the other thing. It was 22 —
+ * past her own body radius — because the collision held her 18 clear
+ * of the bark and a grip that could not span that gap could never take
+ * hold of a trunk she had just walked into. But a 22-unit reach also
+ * grabs a trunk she is merely STANDING BESIDE, on flat ground, which
+ * is what "something when on the ground and trying to fly, it starts
+ * to and fails" was: she was holding a tree she was not on.
+ *
+ * The collision now stops a WALKER at the bark itself rather than a
+ * body-radius off it (see PlayerAnt.settle), so touching is touching
+ * and this only has to cover the float in the arithmetic.
  */
-export const GRIP_REACH = 22;
+export const GRIP_REACH = 4;
+
+/**
+ * HOW LONG SHE STAYS OFF A SURFACE AFTER LETTING GO, seconds.
+ *
+ * Joshua: "when flying off the tree it snaps right back to the tree
+ * (needs like a 1s protection so it can get off without snapping
+ * back)." Exactly right, and the reason is that a takeoff begins with
+ * her still against the bark: `letGo` releases her, the next frame
+ * finds the same trunk a centimetre away, and she is back on it before
+ * the wings have done anything. A second of her own clock is enough to
+ * be gone.
+ */
+export const LET_GO_SECONDS = 1;
 
 /**
  * How far the seating cast looks, world units.

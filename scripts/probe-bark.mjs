@@ -267,6 +267,8 @@ console.log(`holding wood: ${best.on}`);
 console.log(`her up: [${best.up.map((v) => v.toFixed(3)).join(', ')}]`
   + ` — y of 1 is flat ground, 0 is a vertical trunk`);
 console.log(`height above the ground under her: ${climbed.toFixed(1)} cm`);
+console.log(`SEATED: ${best.seat.toFixed(2)} cm into the bark`
+  + ` — 0 is standing on it, negative is floating off it`);
 console.log(`CLIMBED: ${best.on && climbed > 20 ? 'yes' : 'NO'}`);
 console.log(`RISE ${JSON.stringify(rise)}`);
 await page.screenshot({ path: 'probe-bark-climb.png' });

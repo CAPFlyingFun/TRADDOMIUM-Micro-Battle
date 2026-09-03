@@ -1194,6 +1194,14 @@ export class IslandScene {
         up: [this.ant.up.x, this.ant.up.y, this.ant.up.z],
         height: this.ant.height,
         ground: groundHeight(this.ant.where.wx, this.ant.where.wz),
+        // HOW FAR OFF THE BARK SHE IS SEATED, world units. Zero is
+        // standing on it; positive is inside; negative is the float
+        // Joshua keeps seeing. Measured rather than reasoned about —
+        // the profile was checked against the mesh and is not the
+        // cause, so this is what says what is.
+        seat: this.landmarks.trunks.depthAt(
+          this.ant.where.wx, this.ant.height, this.ant.where.wz,
+        ),
       }),
       /** Probe only: the nearest trunk the forward march can see. */
       inTheWay: () => {

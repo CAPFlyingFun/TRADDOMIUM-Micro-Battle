@@ -3,7 +3,9 @@ import { groundHeight } from '../world/heightfield';
 import { world, type WorldPoint } from '../world/coords';
 import { toLocal } from '../world/origin';
 import { DIRECTION_EASE, SPEED_EASE } from './pace';
-import { WORLD_UP, aimFor, isClimbing, perchOn } from './climb';
+import {
+  LET_GO_SECONDS, WORLD_UP, aimFor, isClimbing, perchOn,
+} from './climb';
 import {
   gripUp, spinAbout, squareTo, transport, type Way,
 } from './surfaceGrip';
@@ -221,6 +223,9 @@ export class PlayerAnt {
   /** The camera bearing last frame, so steering can be a CHANGE. */
   private wasView = 0;
 
+  /** Seconds left before she may take hold of anything again. */
+  private loose = 0;
+
   /** Is she on something other than level ground? For the camera. */
   get climbing(): boolean {
     return this.held || isClimbing(this.upward);
@@ -254,6 +259,7 @@ export class PlayerAnt {
    * this whole version exists to remove.
    */
   letGo(): void {
+    if (this.held) this.loose = LET_GO_SECONDS;
     this.held = false;
     this.upward = WORLD_UP;
     this.facing = { x: Math.sin(this.heading), y: 0, z: Math.cos(this.heading) };
@@ -690,14 +696,30 @@ export class PlayerAnt {
     // the wings own her body while she is on them, so being off a
     // surface has to be a FACT rather than a gradient. Thronemound
     // never had to draw this line because its walker cannot fly.
-    if (above > 0 || this.attitude !== null) this.letGo();
-    const perch = above > 0 || this.attitude !== null ? null
+    const airborne = above > 0 || this.attitude !== null;
+    if (airborne) this.letGo();
+    // AND A MOMENT OFF ANY SURFACE AFTER LETTING GO. A takeoff starts
+    // with her still against the bark, so without this she is released
+    // and re-grips the same trunk on the next frame, before the wings
+    // have done anything: "when flying off the tree it snaps right
+    // back to the tree".
+    if (this.loose > 0) this.loose = Math.max(0, this.loose - dt);
+    const perch = airborne || this.loose > 0 ? null
       : perchOn({ x: this.at.x, y: this.high, z: this.at.z }, this.grip);
     this.held = perch !== null;
     if (this.blocked && perch === null) {
       const under = groundHeight(this.at.x, this.at.z);
+      // A WALKER IS STOPPED AT THE BARK; A FLIER IS HELD A BODY OFF IT.
+      //
+      // Two different facts about the same wood. In the air she must
+      // not INTERSECT a trunk, so her whole body is kept clear. On
+      // foot she is walking up to a surface she is about to stand on,
+      // and holding her a body-radius short of it means she can never
+      // touch the thing she is trying to hold — which is why the grip
+      // used to need a reach longer than her own body, and why it then
+      // grabbed trunks she was only standing beside.
       const bump = this.blocked(
-        this.at.x, under + base + above, this.at.z, BODY_RADIUS,
+        this.at.x, under + base + above, this.at.z, airborne ? BODY_RADIUS : 0,
       );
       if (bump) {
         this.at.x += bump.outX * bump.depth;
@@ -749,7 +771,26 @@ export class PlayerAnt {
       // ground". The grip may reach below the surface; she may not go
       // there.
       const floor = groundHeight(this.at.x, this.at.z);
-      if (this.high < floor) this.high = floor;
+      if (this.high < floor) {
+        // AND THE CLAMP IS HOW A DESCENT ENDS.
+        //
+        // Joshua: "going ground to tree works great, going tree to
+        // ground never snaps to the ground." She walked down and kept
+        // holding, because bark at ground level is still perfectly
+        // good bark — nothing ever told her to stop — so she finished
+        // standing sideways on a trunk with her feet in the grass.
+        //
+        // The obvious rule, "refuse a perch at ground level", also
+        // stops her ever STARTING a climb: her origin is at her feet,
+        // so the bark she first takes hold of is at ground level too.
+        // The asymmetry is here instead, and it is exact. Climbing UP,
+        // this clamp never fires. Walking DOWN past the foot, the
+        // perch tries to seat her below the grass and the clamp
+        // catches it — which is precisely the moment the ground, not
+        // the tree, is what she is standing on.
+        this.high = floor;
+        this.letGo();
+      }
     }
     const { x, z } = this.at;
     this.above = above;
