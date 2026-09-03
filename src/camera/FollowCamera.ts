@@ -66,6 +66,67 @@ import { settings } from '../ui/settings';
 const CLEARANCE = 1.6;
 
 /**
+ * HOW MUCH OF THE GROUND'S OWN LEAN THE CAMERA TAKES ON, and why it
+ * takes any.
+ *
+ * The elevation is measured from the HORIZON, which is the right
+ * reference on flat ground and the wrong one on a hillside. Climbing a
+ * steep slope the boom still sits 26° above her, so the hill she is
+ * walking up fills the frame from her nose to the top of the screen and
+ * the only thing with any motion in it is the ground going past
+ * underneath. Joshua, on the grass slope: "that one with the grass is
+ * the lowest I can get behind the ant, so the camera angle needs to
+ * compensate for terrain so it can be able to look more upwards to see
+ * where you're going vs seeing the ground flash by beneath you."
+ *
+ * So the rest angle is measured from the SLOPE instead: the lens drops
+ * toward the hill's own surface as it steepens, which points the view
+ * along the climb rather than down at it. One takes it all — a full
+ * share means the shot she gets on a hillside is the shot she gets on
+ * the flat, which is the least surprising thing it could do.
+ */
+const LEAN_SHARE = 1;
+/**
+ * The most of it that is taken, radians. A cliff is not a hill: past
+ * about this the compensation would swing the lens under her and aim
+ * it at the sky, and `keepAboveGround` would then spend the whole climb
+ * shoving it back out of the rock.
+ */
+const MOST_LEAN = THREE.MathUtils.degToRad(40);
+/**
+ * HOW FAR BEHIND HER THE SLOPE IS MEASURED, world units.
+ *
+ * ITS OWN NUMBER, and it has to be. The boom is 7.8 units long — eight
+ * centimetres, five body lengths — and `groundHeight` carries the fine
+ * relief, so a baseline that short measures the PEBBLE under the lens
+ * rather than the hill she is on. Measured over the boom on ground flat
+ * to within a centimetre and a half across seven metres, it read nearly
+ * nine degrees of lean and tilted the camera for it.
+ *
+ * Three metres is about twenty of her body lengths: long enough that a
+ * grain of the relief cannot turn the camera, short enough to still be
+ * the slope she is walking up rather than the mountain behind it.
+ */
+const LEAN_REACH = 300;
+/**
+ * And it fades out as she leaves the ground, over the same reach.
+ *
+ * The lean is about what FRAMES the shot. Standing on a slope, the hill
+ * is the shot; three metres above the same slope it is scenery, and
+ * tilting the camera for it would roll the horizon for no reason.
+ */
+const LEAN_FADES_BY = LEAN_REACH;
+/**
+ * The camera may go BELOW her once the ground is doing the framing.
+ *
+ * The dial's own floor is 10° and it stays the dial's floor — this is
+ * the terrain's allowance, not the player's, and it is what lets the
+ * lens get behind her nose on a steep climb instead of hanging over
+ * her back.
+ */
+const LOWEST_ELEVATION = THREE.MathUtils.degToRad(-12);
+
+/**
  * THE SURFACE IS AN ENVELOPE, NOT A FLOOR — and the number that used
  * to be here is why.
  *
@@ -402,10 +463,34 @@ export class FollowCamera {
       this.minElevation,
       this.maxElevation,
     );
-    const flat = Math.cos(elevation) * this.distance;
+    // ── THE GROUND'S OWN LEAN ────────────────────────────────────
+    // Measured between the ground under HER and the ground under where
+    // the boom wants to sit — which is exactly the slope the shot is
+    // framed against. Positive when she is above it: she is climbing,
+    // and the lens comes down toward the hill. See LEAN_SHARE.
+    const behindX = target.position.x + Math.sin(yaw) * LEAN_REACH;
+    const behindZ = target.position.z + Math.cos(yaw) * LEAN_REACH;
+    const hers = toWorld(local(target.position.x, target.position.z));
+    const behind = toWorld(local(behindX, behindZ));
+    const under = groundHeight(hers.wx, hers.wz);
+    const rise = under - groundHeight(behind.wx, behind.wz);
+    const lean = Number.isFinite(rise)
+      ? THREE.MathUtils.clamp(
+        Math.atan2(rise, LEAN_REACH), -MOST_LEAN, MOST_LEAN,
+      )
+      : 0;
+    // Faded out by how far off the ground she is.
+    const aloft = Number.isFinite(under)
+      ? Math.max(0, target.position.y - under) : LEAN_FADES_BY;
+    const near = 1 - THREE.MathUtils.clamp(aloft / LEAN_FADES_BY, 0, 1);
+    const tilted = Math.max(
+      LOWEST_ELEVATION, elevation - lean * LEAN_SHARE * near,
+    );
+
+    const flat = Math.cos(tilted) * this.distance;
     out.set(
       target.position.x + Math.sin(yaw) * flat,
-      target.position.y + Math.sin(elevation) * this.distance,
+      target.position.y + Math.sin(tilted) * this.distance,
       target.position.z + Math.cos(yaw) * flat,
     );
   }

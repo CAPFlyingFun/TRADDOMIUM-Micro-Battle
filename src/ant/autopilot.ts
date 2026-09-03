@@ -268,6 +268,17 @@ export function speedFor(range: number, cfg: AutopilotConfig): number {
  * the reported wind to about a third — while everything above ten
  * metres is the same wind and there is nothing to choose between.
  */
+/**
+ * THE MOST CRAB SHE WILL HOLD, degrees — Joshua's number.
+ *
+ * Past this the track is not worth holding: she is pointing so far off
+ * the line that she is flying sideways, and the controller trying to
+ * close the last of it is what spun her in circles. Seventy degrees is
+ * already an extreme attitude and it leaves cos(70°) = 34% of her
+ * airspeed going the right way, which is little but not nothing.
+ */
+export const MOST_CRAB = 70;
+
 export function bandsFor(cfg: AutopilotConfig): number[] {
   const out = [cfg.floorAgl];
   for (const agl of [100, 200, 400, 800, 1_500, 3_000]) {
@@ -293,12 +304,33 @@ export function bandsFor(cfg: AutopilotConfig): number[] {
  * to it, and riding it is simply the same arithmetic coming out the
  * other way.
  *
+ * AND THE CRAB IS CAPPED, which is Joshua's fix for the swing ride.
+ *
+ * The answer used to be `-Infinity` for a band whose across-wind beats
+ * her airspeed — "an unflyable band is not a slow band" — and as a
+ * price that is right. As the ONLY answer it was a trap: when EVERY
+ * band is unflyable, `bestBand` keeps whichever one she is in and the
+ * controller goes on chasing a track that no heading can hold. The
+ * track error never closes, so she turns, the wind swings her track
+ * round, she turns further. Joshua, watching it: "if the crab angle got
+ * too much, it would spin around in circles making it a little dizzy
+ * watching... act like those swing rides."
+ *
+ * Past the cap she stops trying to hold the track and holds the CAP
+ * instead — nose at seventy degrees off the line, accepting the drift
+ * — and the speed reported is the honest along-track closure that
+ * buys, which may be negative. Honest is the point: `bestBand` can
+ * then price a gale properly, and the band that prices best in one is
+ * the LOWEST, because the wind profile falls to nothing at the ground.
+ * That is Joshua's second ask, and it needs no rule of its own.
+ *
  * Pure, and it takes the wind as a value rather than a height, so a
  * test can hand it a gale without a weather system.
  */
 export function progressIn(
   wind: Drift | null, airspeed: number, wantedDegrees: number,
-): { speed: number; crab: number } {
+  mostCrab = MOST_CRAB,
+): { speed: number; crab: number; holding: boolean } {
   const want = (wantedDegrees * Math.PI) / 180;
   // The track direction, and the axis across it. Compass degrees: north
   // is -Z, east is +X, so the unit vector is (sin, -cos).
@@ -306,13 +338,26 @@ export function progressIn(
   const dz = -Math.cos(want);
   const along = wind ? wind.x * dx + wind.z * dz : 0;
   const across = wind ? wind.x * -dz + wind.z * dx : 0;
-  if (airspeed <= 0) return { speed: -Infinity, crab: 0 };
+  // NO AIRSPEED IS STILL NOTHING AT ALL. A stopped queen has no crab
+  // to hold and no band to prefer.
+  if (airspeed <= 0) return { speed: -Infinity, crab: 0, holding: false };
   const sin = -across / airspeed;
-  if (Math.abs(sin) >= 1) return { speed: -Infinity, crab: 90 };
+  const cap = Math.sin((mostCrab * Math.PI) / 180);
+  if (Math.abs(sin) >= cap) {
+    // AT THE CAP, NOT BEYOND IT. Nose held `mostCrab` off the track,
+    // drifting; the along-track closure is what that actually buys.
+    const crab = Math.sign(sin || 1) * mostCrab;
+    return {
+      speed: airspeed * Math.cos((crab * Math.PI) / 180) + along,
+      crab,
+      holding: false,
+    };
+  }
   const crab = Math.asin(sin);
   return {
     speed: airspeed * Math.cos(crab) + along,
     crab: (crab * 180) / Math.PI,
+    holding: true,
   };
 }
 
@@ -332,7 +377,7 @@ export function progressIn(
  */
 export function bestBand(
   sense: NavSense, wantedDegrees: number, cfg: AutopilotConfig,
-): { agl: number; speed: number; crab: number } {
+): { agl: number; speed: number; crab: number; holding: boolean } {
   const agl = Math.max(0, sense.altitude - sense.ground);
   let best = { agl, ...progressIn(sense.windAt(agl), sense.airspeed, wantedDegrees) };
   for (const band of bandsFor(cfg)) {
@@ -605,6 +650,20 @@ export class Autopilot {
     this.band = band.agl;
     this.crab = band.crab;
 
+    // ── WHEN THE TRACK CANNOT BE HELD ────────────────────────────
+    // Steer by her NOSE rather than by her track, and point it at the
+    // capped crab. This is the other half of the swing-ride fix: the
+    // track error is unclosable by construction in this case, and a
+    // controller fed an error it cannot null keeps turning the same way
+    // until it has gone all the way round. A heading target it CAN
+    // reach is stable — she holds an attitude, drifts, and the band
+    // search below takes her lower into weaker wind until the ordinary
+    // crab comes back inside the cap and track-holding resumes on its
+    // own.
+    const aim = band.holding
+      ? error
+      : wrap180(wanted + band.crab - sense.heading);
+
     // ── TERRAIN, REACTIVELY ──────────────────────────────────────
     // Local and cheap: where the ground velocity puts her in a couple
     // of seconds, and how much air is under her there. This is NOT a
@@ -650,7 +709,7 @@ export class Autopilot {
     }
 
     const target = speedFor(range, this.cfg);
-    const side = turnFor(error, this.cfg);
+    const side = turnFor(aim, this.cfg);
 
     // ── IS SHE GETTING ANYWHERE? ─────────────────────────────────
     // Measured on the RANGE rather than on the airspeed, because the

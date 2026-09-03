@@ -3,6 +3,11 @@ import * as THREE from 'three';
 import { FollowCamera } from '../src/camera/FollowCamera';
 import { useWaterQuery } from '../src/world/waterQuery';
 import type { LookInput } from '../src/input/LookDrag';
+import { loadIsland } from './support/island';
+import { groundHeight } from '../src/world/heightfield';
+import { geoToWorld } from '../src/world/geo';
+import { world, type WorldPoint } from '../src/world/coords';
+import { setOrigin, toLocal } from '../src/world/origin';
 
 afterEach(() => useWaterQuery(null));
 
@@ -186,4 +191,87 @@ describe('following her up', () => {
     // second — softer, by construction and by measurement.
     expect(settle(true)).toBeGreaterThan(settle(false));
   });
+});
+
+/**
+ * THE ELEVATION IS MEASURED FROM THE SLOPE, NOT FROM THE HORIZON.
+ *
+ * Twenty-six degrees above the horizon is the right rest angle on flat
+ * ground and the wrong one on a hillside: climbing a steep slope the
+ * boom still hangs 26° over her, so the hill fills the frame from her
+ * nose to the top of the screen and the only thing moving in the shot
+ * is the ground going past underneath. Joshua, on the grass slope:
+ * "that one with the grass is the lowest I can get behind the ant, so
+ * the camera angle needs to compensate for terrain so it can be able to
+ * look more upwards to see where you're going vs seeing the ground
+ * flash by beneath you."
+ */
+describe('the camera on a hillside', () => {
+  /** The angle of the lens above her, degrees. */
+  function elevationOn(spot: WorldPoint, aloft = 0): number {
+    setOrigin(spot.wx, spot.wz);
+    const seat = toLocal(spot);
+    const ant = new THREE.Object3D();
+    ant.position.set(seat.lx, groundHeight(spot.wx, spot.wz) + aloft, seat.lz);
+    const follow = new FollowCamera(2);
+    // Yaw PI puts the boom behind her along -Z, which is the direction
+    // the fixture below measures the drop in.
+    const input = look({ yaw: 0, active: false });
+    follow.snapTo(ant);
+    for (let i = 0; i < 400; i++) follow.update(ant, input, 1 / 60);
+    const lens = follow.camera.position;
+    const flat = Math.hypot(lens.x - ant.position.x, lens.z - ant.position.z);
+    return (Math.atan2(lens.y - ant.position.y, Math.max(1e-6, flat)) * 180) / Math.PI;
+  }
+
+  /** Somewhere the ground falls away behind the boom, and somewhere level. */
+  function spots(): { steep: WorldPoint; level: WorldPoint } {
+    loadIsland();
+    let steep: WorldPoint | null = null;
+    let level: WorldPoint | null = null;
+    const middle = geoToWorld({ lat: 22.08, lon: -159.50 });
+    for (let r = 0; r < 240 && (!steep || !level); r++) {
+      const at = world(middle.wx + (r % 16) * 4_000, middle.wz + Math.floor(r / 16) * 4_000);
+      const hers = groundHeight(at.wx, at.wz);
+      if (hers <= 100) continue;
+      // The slope is measured 300 units behind her — LEAN_REACH.
+      const drop = hers - groundHeight(at.wx, at.wz - 300);
+      if (!steep && drop > 170) steep = at;          // ~30 degrees
+      if (!level && Math.abs(drop) < 4) level = at;  // under a degree
+    }
+    expect(steep, 'a slope').not.toBeNull();
+    expect(level, 'level ground').not.toBeNull();
+    return { steep: steep!, level: level! };
+  }
+
+  it('looks further along the climb than it does on the flat', () => {
+    const { steep, level } = spots();
+    const onFlat = elevationOn(level);
+    const onHill = elevationOn(steep);
+    // Lower means more of what is ahead and less of what is underfoot.
+    expect(onHill).toBeLessThan(onFlat - 5);
+    console.log(`camera elevation: ${onFlat.toFixed(1)}° level,`
+      + ` ${onHill.toFixed(1)}° on the slope`);
+  }, 120000);
+
+  it('and leaves the flat exactly as it was', () => {
+    const { level } = spots();
+    // The rest angle is 26° and level ground must still get it — this
+    // compensation may not become a tax on ordinary play. The fixture's
+    // "level" is level to within a degree of slope, so the lens is
+    // within about a degree of rest, and that residual is the thing
+    // working rather than noise.
+    expect(Math.abs(elevationOn(level) - 26)).toBeLessThan(1.5);
+  }, 120000);
+
+  it('and lets go of the slope once she is well above it', () => {
+    // The lean is about what FRAMES the shot. A boom's worth of air
+    // under her and the hill is scenery, not the thing she is moving
+    // against — tilting for it would roll the horizon for nothing.
+    const { steep } = spots();
+    const low = elevationOn(steep, 10);
+    const high = elevationOn(steep, 600);
+    expect(high).toBeGreaterThan(low);
+    expect(high).toBeCloseTo(26, 0);
+  }, 120000);
 });

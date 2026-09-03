@@ -1833,6 +1833,19 @@ export class IslandScene {
   }
 
   /**
+   * IS THE AUTOPILOT DELIBERATELY STANDING STILL?
+   *
+   * Only while it is actually flying her — a surrendered autopilot has
+   * no say in what her thumbs do, and neither has one that is not
+   * engaged.
+   */
+  private restingHush(): boolean {
+    return this.nav?.state === 'resting'
+      && this.autopilot.engaged
+      && !this.surrendered;
+  }
+
+  /**
    * EVERYTHING IN THE WAY OF ONE LEG: whatever the probes put in the
    * list, plus the landmark trees near the line. A method on the
    * instance rather than a closure per order, so the planner is handed
@@ -2287,7 +2300,19 @@ export class IslandScene {
       stick,
       pace: this.pace,
       sprinting: wants,
-      auto: this.auto.active ? this.auto.way : 0,
+      // AND A REST IS A REST. The autopilot's reserve branch asks for
+      // nothing at all on the ground, and a latched Auto used to walk
+      // straight through that: she spent the whole recovery walking, at
+      // the walking rate rather than the resting one — which is half —
+      // and set off again barely topped up. Joshua: "at first it said
+      // resting to gain stamina but kept walking and never got it to
+      // max before taking back off."
+      //
+      // HUSHED, NOT CANCELLED. The latch is the player's and it is
+      // still theirs; it simply does not drive her while the autopilot
+      // she asked for is standing still on purpose. One frame's lag on
+      // a thirty-second rest, which is nothing.
+      auto: this.auto.active && !this.restingHush() ? this.auto.way : 0,
     });
 
     // WHOSE CLOCK SHE IS ON. Boost only while the autopilot is actually

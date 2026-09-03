@@ -15,8 +15,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
-  Autopilot, bandsFor, bearingTo, captured, progressIn, rangeTo, speedFor,
-  tookOver, travelling, turnFor, type NavSense,
+  Autopilot, MOST_CRAB, bandsFor, bearingTo, bestBand, captured, progressIn,
+  rangeTo, speedFor, tookOver, travelling, turnFor, type NavSense,
 } from '../src/ant/autopilot';
 import { AUTOPILOT_DEFAULTS, autopilotConfig } from '../src/ant/autopilotConfig';
 import { groundVelocity, trackOf, type Drift } from '../src/ant/telemetry';
@@ -640,12 +640,45 @@ describe('the altitude band search', () => {
     expect(with_.speed).toBeCloseTo(AIRSPEED + 30, 6);
   });
 
-  it('and calls a crosswind bigger than her airspeed unflyable', () => {
-    // No crab cancels it, so the track cannot be held at all. Minus
-    // infinity rather than a small number: an unflyable band is not a
-    // slow band, and averaging the two would pick it.
+  it('and a crosswind bigger than her airspeed CAPS the crab rather than giving up', () => {
+    // THIS USED TO ANSWER MINUS INFINITY, on the reasoning that an
+    // unflyable band is not a slow band. As a price that is right and
+    // as the ONLY answer it was the swing ride: when every band is
+    // unflyable `bestBand` keeps whichever one she is in, and the
+    // controller goes on chasing a track no heading can hold, turning
+    // the same way until it has gone round. Joshua: "if the crab angle
+    // got too much, it would spin around in circles."
+    //
+    // So past the cap she holds the cap and drifts, and the speed is
+    // the honest along-track closure that buys.
     const across = progressIn({ x: 200, z: 0 }, AIRSPEED, 0);
-    expect(across.speed).toBe(-Infinity);
+    expect(Math.abs(across.crab)).toBe(MOST_CRAB);
+    expect(across.holding).toBe(false);
+    expect(across.speed).toBeCloseTo(
+      AIRSPEED * Math.cos((MOST_CRAB * Math.PI) / 180), 4,
+    );
+    // And a wind she CAN hold still says so.
+    expect(progressIn({ x: AIRSPEED / 2, z: 0 }, AIRSPEED, 0).holding).toBe(true);
+  });
+
+  it('and no airspeed at all is still nothing at all', () => {
+    // A stopped queen has no crab to hold and no band to prefer, and
+    // that has to stay distinguishable from a hard band — otherwise the
+    // search would rank altitudes for a queen who is not flying.
+    expect(progressIn({ x: 200, z: 0 }, 0, 0).speed).toBe(-Infinity);
+  });
+
+  it('and past the cap the LOWEST band prices best, which is the descent', () => {
+    // Joshua's second ask — "it should lower altitude" — and it needs
+    // no rule of its own. The wind profile falls to nothing at the
+    // ground, so once every band is honestly priced the floor wins.
+    const gale = (agl: number) => ({ x: 40 + agl * 0.4, z: 0 });
+    const cfg = autopilotConfig();
+    const best = bestBand(
+      sense({ airspeed: AIRSPEED, windAt: gale }), 0, cfg,
+    );
+    expect(best.agl).toBe(cfg.floorAgl);
+    expect(Math.abs(best.crab)).toBeLessThanOrEqual(MOST_CRAB);
   });
 
   it('and reports the crab a crosswind costs', () => {
@@ -1206,5 +1239,45 @@ describe('drinking at the end of a water detour', () => {
   it('and the button still works, for a queen being flown by hand', () => {
     expect(scene).toContain('this.drinkButton.held || errand');
     expect(scene).toContain('reachable &&');
+  });
+});
+
+/**
+ * A REST IS A REST — the wiring, pinned by reading it back.
+ *
+ * The reserve branch above asks for nothing at all on the ground, and
+ * that was quietly overridden: a latched Auto walked her through the
+ * whole recovery at the WALKING rate rather than the resting one, which
+ * is half of it, and she set off again barely topped up. Joshua: "at
+ * first it said resting to gain stamina but kept walking and never got
+ * it to max before taking back off."
+ *
+ * `IslandScene` needs WebGL and there is no DOM in this test run, so
+ * the alternative to reading the source is not testing it — and every
+ * autopilot bug this project has shipped has been in the wiring.
+ */
+describe('the scene lets her actually rest', () => {
+  const scene = readFileSync('src/scenes/IslandScene.ts', 'utf8');
+
+  it('hushes a latched Auto while the autopilot is resting', () => {
+    expect(scene).toContain('auto: this.auto.active && !this.restingHush() ? this.auto.way : 0,');
+    const hush = scene.slice(scene.indexOf('private restingHush()'));
+    expect(hush.slice(0, 220)).toContain("this.nav?.state === 'resting'");
+  });
+
+  it('and only while the autopilot is the one flying her', () => {
+    // A surrendered autopilot has no say in what her thumbs do, and
+    // neither has one that was never engaged.
+    const hush = scene.slice(scene.indexOf('private restingHush()'), scene.indexOf('private restingHush()') + 220);
+    expect(hush).toContain('this.autopilot.engaged');
+    expect(hush).toContain('!this.surrendered');
+  });
+
+  it('and the rest still waits for a nearly full reserve', () => {
+    // Joshua's original: "land until stamina is at max and then
+    // resume". The hysteresis is what stops the strobe; this is what
+    // stops it setting off half-charged.
+    expect(AUTOPILOT_DEFAULTS.flyAbove).toBeGreaterThan(0.9);
+    expect(AUTOPILOT_DEFAULTS.restBelow).toBeLessThan(0.2);
   });
 });
