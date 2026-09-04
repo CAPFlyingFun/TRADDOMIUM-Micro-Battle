@@ -136,8 +136,11 @@ running, so a client can check it is speaking the same protocol before it
 opens a socket.
 
 THE DEPLOYED RELAY IS COMPILED INTO THE BUILD. `vite.config.ts` bakes it
-in as `__RELAY_URL__` and `src/net/relayConfig.ts` resolves it, so an
-ordinary `npm run build` ships a game with rooms in it. Two overrides:
+in as `__RELAY_URL__`, `src/ui/buildInfo.ts` reads it and
+`src/net/relayConfig.ts` resolves it against `?relay=` — core is HANDED
+the address rather than naming the constant, because the relay compiles
+`src/net/` too and no define reaches it there. An ordinary
+`npm run build` ships a game with rooms in it. Two overrides:
 `TRADDOMIUM_RELAY_URL=` at BUILD time makes a build with no online play
 at all (the honest mock, caption and all), and `?relay=` at RUN time
 points a built page somewhere else —

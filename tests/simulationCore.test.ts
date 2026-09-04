@@ -83,6 +83,23 @@ const FORBIDDEN_GLOBALS: readonly string[] = [
  */
 const GLOBAL = new RegExp(`(?<![\\w$.])(?:${FORBIDDEN_GLOBALS.join('|')})(?![\\w$])`, 'g');
 
+/**
+ * Build-time constants Vite substitutes textually (`src/env.d.ts`).
+ * Neither an import nor a browser global, so the lists above miss them —
+ * and core still may not name one. `worker/` imports `src/net/` whole and
+ * is type-checked on its own (`npm run relay:typecheck`) against the
+ * workers runtime, where no define is substituted and no ambient
+ * declaration is loaded: a core file naming `__RELAY_URL__` broke that
+ * build and only that build, with typecheck, 505 tests, the app build and
+ * four probes all green. A build constant is READ at an edge
+ * (`ui/buildInfo.ts`) and handed to core as a parameter.
+ */
+const FORBIDDEN_DEFINES: readonly string[] = [
+  '__RELAY_URL__', '__APP_VERSION__', '__BUILD_COMMIT__', '__BUILD_DATE__',
+];
+
+const DEFINE = new RegExp(`(?<![\\w$.])(?:${FORBIDDEN_DEFINES.join('|')})(?![\\w$])`, 'g');
+
 /** `from 'x'`, `import 'x'`, `import('x')`, `require('x')`. */
 const SPECIFIER = /(?:\bfrom\s*|\bimport\s*\(?\s*|\brequire\s*\(\s*)(['"])([^'"\n]+)\1/g;
 
@@ -263,6 +280,9 @@ function violationsIn(file: string, source: string): Violation[] {
   for (const m of codeOnly.matchAll(GLOBAL)) {
     found.push({ file, line: lineOf(codeOnly, m.index ?? 0), what: `references ${m[0]}` });
   }
+  for (const m of codeOnly.matchAll(DEFINE)) {
+    found.push({ file, line: lineOf(codeOnly, m.index ?? 0), what: `names ${m[0]}` });
+  }
   return found;
 }
 
@@ -356,6 +376,14 @@ describe('simulation core stays free of three and the browser', () => {
       bad.push(...violationsIn(file, readFileSync(path.join(ROOT, file), 'utf8')).filter((v) => v.what.startsWith('references')));
     }
     expect(bad.length, `core modules reaching for the browser:\n${describeViolations(bad)}`).toBe(0);
+  });
+
+  it('no core module names a build-time constant — the relay compiles core too', () => {
+    const bad: Violation[] = [];
+    for (const file of scan.files) {
+      bad.push(...violationsIn(file, readFileSync(path.join(ROOT, file), 'utf8')).filter((v) => v.what.startsWith('names')));
+    }
+    expect(bad.length, `core modules naming a vite define:\n${describeViolations(bad)}`).toBe(0);
   });
 });
 

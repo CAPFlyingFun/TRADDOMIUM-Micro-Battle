@@ -28,6 +28,7 @@ import {
 } from '../session/PlayerProfile';
 import { RemoteMultiplayerSession } from '../session/RemoteMultiplayerSession';
 import {
+  BUILD_INFO,
   SCREEN_ID,
   createAboutScene,
   createLoadingScene,
@@ -106,6 +107,7 @@ const RELAY_URL = resolveRelayUrl(
   typeof globalThis.location === 'undefined'
     ? null
     : new URLSearchParams(globalThis.location.search).get(RELAY_QUERY_PARAM),
+  BUILD_INFO.relayUrl,
 );
 
 /**

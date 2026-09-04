@@ -22,7 +22,8 @@
  *      and passes the value in. That also makes the order testable
  *      without a browser.
  *   2. `__RELAY_URL__`, the build-time constant (`vite.config.ts`), whose
- *      default is the deployed relay.
+ *      default is the deployed relay, read by `ui/buildInfo.ts` and
+ *      passed in — never named here.
  *   3. Empty — the honest no-relay case. Not an error, not a fallback to
  *      a guess: a build with nowhere to connect says exactly "Online play
  *      is not built yet." and offers no room screen at all.
@@ -36,16 +37,14 @@
 export const RELAY_QUERY_PARAM = 'relay';
 
 /**
- * The relay this build was compiled with, or '' when it was built without
- * one. `typeof` rather than a bare read so importing this module outside a
- * Vite build (a bare node script) is harmless rather than a ReferenceError.
- */
-export const BUILT_IN_RELAY_URL: string = typeof __RELAY_URL__ === 'string' ? __RELAY_URL__ : '';
-
-/**
  * The relay address this run should use. `override` is the `?relay=`
- * value the caller read (null when absent); `builtIn` defaults to the
- * compiled-in constant and is a parameter so a test can state both halves.
+ * value the caller read (null when absent); `builtIn` is the address the
+ * build was compiled with. BOTH are parameters and neither is read here:
+ * this module is compiled by the RELAY as well as by the browser (the
+ * worker imports `src/net/` whole), and `__RELAY_URL__` exists in neither
+ * a worker nor a bare node script. `ui/buildInfo.ts` reads the constant,
+ * `app/registerScenes.ts` reads the address bar, and both hand the value
+ * in.
  *
  * Whitespace is trimmed and an empty override is no override — a bare
  * `?relay=` in a URL means "I typed nothing", not "there is no relay".
@@ -54,7 +53,7 @@ export const BUILT_IN_RELAY_URL: string = typeof __RELAY_URL__ === 'string' ? __
  * bad value in the message, rather than silently becoming the no-relay
  * build and telling the player online play was never built.
  */
-export function resolveRelayUrl(override?: string | null, builtIn: string = BUILT_IN_RELAY_URL): string {
+export function resolveRelayUrl(override: string | null | undefined, builtIn: string): string {
   const typed = (override ?? '').trim();
   return typed.length > 0 ? typed : builtIn.trim();
 }

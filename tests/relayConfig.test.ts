@@ -14,10 +14,11 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
-  BUILT_IN_RELAY_URL, ROOM_CODE_CHARS, ROOM_CODE_EDGES, ROOM_CODE_MAX_LENGTH, ROOM_CODE_MISSING,
+  ROOM_CODE_CHARS, ROOM_CODE_EDGES, ROOM_CODE_MAX_LENGTH, ROOM_CODE_MISSING,
   ROOM_CODE_MIN_LENGTH, ROOM_CODE_RULE, ROOM_PATH_PREFIX, generateRoomCode, isRoomCode, normaliseRoomCode,
   relayHost, resolveRelayUrl, roomCodeProblem, toRoomSocketUrl,
 } from '../src/net/relayConfig';
+import { BUILD_INFO } from '../src/ui/buildInfo';
 import {
   ROOM_CODE_MAX_LENGTH as RELAY_MAX, ROOM_CODE_MIN_LENGTH as RELAY_MIN,
   normaliseRoomCode as relayNormalise,
@@ -49,8 +50,8 @@ describe('where the relay address comes from', () => {
   it('carries the build constant into the running code, defaulting to the deployed relay', () => {
     // The define must actually reach the module — a constant that never
     // arrives would silently make every build the no-relay build.
-    expect(typeof BUILT_IN_RELAY_URL).toBe('string');
-    expect(BUILT_IN_RELAY_URL).toBe(process.env.TRADDOMIUM_RELAY_URL ?? LIVE_RELAY);
+    expect(typeof BUILD_INFO.relayUrl).toBe('string');
+    expect(BUILD_INFO.relayUrl).toBe(process.env.TRADDOMIUM_RELAY_URL ?? LIVE_RELAY);
   });
 
   it('keeps that default, and its override, in vite.config.ts where a build can see them', () => {

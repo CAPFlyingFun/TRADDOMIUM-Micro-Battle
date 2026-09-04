@@ -24,7 +24,7 @@ export {
 } from './NetworkedWorld';
 export { INTERPOLATION_MS, Replica, type ReplicaOptions } from './Replica';
 export {
-  BUILT_IN_RELAY_URL, RELAY_QUERY_PARAM, ROOM_CODE_CHARS, ROOM_CODE_EDGES, ROOM_CODE_MAX_LENGTH,
+  RELAY_QUERY_PARAM, ROOM_CODE_CHARS, ROOM_CODE_EDGES, ROOM_CODE_MAX_LENGTH,
   ROOM_CODE_MIN_LENGTH, ROOM_CODE_MISSING, ROOM_CODE_RULE, ROOM_PATH_PREFIX,
   generateRoomCode, isRoomCode, normaliseRoomCode, relayHost, resolveRelayUrl, roomCodeProblem, toRoomSocketUrl,
 } from './relayConfig';
