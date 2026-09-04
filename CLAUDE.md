@@ -161,6 +161,11 @@ integration pass, which also runs the full verification. A module is
 done when it typechecks, its tests pass, and its public surface matches
 `docs/ARCHITECTURE.md`.
 
+Learned on the Phase 0 build: an agent's isolated worktree can start at
+`main`'s tip, not at the core commit. Give every leaf agent the core
+commit hash and have it `git checkout -b phase<N>/<module> <hash>` before
+writing a line, and merge only branches whose parent is that hash.
+
 ## Keep this file useful
 
 Stable guidance only. Sprint priorities, the active card, branch names
