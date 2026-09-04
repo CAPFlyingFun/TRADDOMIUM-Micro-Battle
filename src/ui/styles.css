@@ -171,6 +171,28 @@
   min-width: 0;
 }
 
+/* The menu's RESUME and every slot row carry a second line — when the game
+   was last played, or that the slot is empty — inside the button, so the
+   column does not grow a row for it: six rows already overflow a 430 px
+   panel, which scrolls. Two lines still fit one touch target: 16 px +
+   12 px + the gap sits under the 48 px minimum. */
+.ui-button--stacked {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.ui-button__sub {
+  font: 400 12px/1 var(--ui-font);
+  letter-spacing: 0.02em;
+  text-transform: none;
+  opacity: 0.8;
+}
+
 /* Disabled means "not in this build"; the label says so and the button
    must not read as pressable (an unavailable action never looks functional). */
 .ui-button:disabled {
@@ -254,6 +276,19 @@
 .ui-switch[aria-checked='true'] {
   color: #0b0f07;
   background: var(--ui-gold);
+}
+
+/* Three save slots, side by side in landscape and stacked when the panel
+   is narrow. Each row is one two-line button, so three slots cost three
+   touch targets rather than six rows on a 430 px screen. */
+.ui-slots {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.ui-slots .ui-button {
+  min-width: 0;
 }
 
 .ui-cards {
@@ -347,12 +382,32 @@
   font: 16px/1.35 var(--ui-font);
 }
 
-@media (max-height: 380px) {
+/* SHORT LANDSCAPE, WHICH IS THE DESIGN CANVAS, NOT AN EDGE CASE.
+   932 x 430 is the phone this game is tested on, and the menu's tallest
+   state is six rows (RESUME, NEW GAME, PROFILE, SETTINGS, EDITORS, ABOUT)
+   plus the title, the tagline and the build stamp. At the panel's roomy
+   spacing that column is about 467 px and the last row is cut off: a
+   control the player cannot see is worse than a tight one. Only the
+   SPACING gives way here — --ui-touch stays 48 px, so every row is still
+   a full thumb target. The breakpoint is 480 px rather than 380 px
+   because 430 px is the height that actually matters; probe:boot measures
+   the panel at that size and fails if it overflows again. */
+@media (max-height: 480px) {
   .ui-panel {
-    padding: 10px 14px;
-    gap: 6px;
+    padding: 8px 14px;
+    gap: 4px;
   }
   .ui-title--hero {
-    font-size: 22px;
+    font-size: 20px;
+  }
+  .ui-subtitle {
+    font-size: 12px;
+  }
+  /* The two-line rows (RESUME, and every slot row) keep both lines and the
+     48 px target; only the breathing room inside them gives way. */
+  .ui-button--stacked {
+    padding-top: 4px;
+    padding-bottom: 4px;
+    gap: 2px;
   }
 }

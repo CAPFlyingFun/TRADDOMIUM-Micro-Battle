@@ -13,11 +13,18 @@
  * settings document — is built here from the `SceneContext`, and only
  * here, so there is one place to look when the wiring is wrong.
  */
-import { DEVTOOLS_SCENE_ID, createDevToolsHubScene, registerTool } from '../devtools';
+import {
+  DEVTOOLS_SCENE_ID, NET_LAB_SCENE_ID, createDevToolsHubScene, createNetworkLabScene, netLabTool, registerTool,
+} from '../devtools';
 import { createPerformanceWorldScene } from '../perf/PerformanceWorldScene';
 import { PERF_WORLD_MAP_ID, PERF_WORLD_SCENE_ID, perfWorldTool } from '../perf/perfTool';
-import { LocalSoloSession, SOLO_SAVE_SPEC } from '../session/LocalSoloSession';
-import { MAX_DISPLAY_NAME, PLAYER_PROFILE_SPEC, loadProfile, setDisplayName } from '../session/PlayerProfile';
+import {
+  LocalSoloSession, isSoloSlot, newSoloGame, readSoloSlots, resumeSoloSlot, restorableStateOf, savedSoloGame,
+  soloSlotSpec, toolSoloSlot, type KnownMap, type SoloSlot,
+} from '../session/LocalSoloSession';
+import {
+  MAX_DISPLAY_NAME, PLAYER_PROFILE_SPEC, loadProfile, playerIdOf, setDisplayName,
+} from '../session/PlayerProfile';
 import { RemoteMultiplayerSession } from '../session/RemoteMultiplayerSession';
 import {
   SCREEN_ID,
@@ -33,11 +40,12 @@ import {
   type LoadingHooks,
   type ProfileSource,
   type SessionOffers,
+  type SoloPlay,
 } from '../ui';
 import { LoadProgress } from '../world/LoadProgress';
-import { WORLD_SCENE_PREFIX, resolveWorld } from '../world/WorldLoader';
+import { WORLD_SCENE_PREFIX, resolveWorld, worldSceneId } from '../world/WorldLoader';
 import type { SceneContext } from './Scene';
-import { registerScene, sceneFactory } from './registry';
+import { listScenes, registerScene, sceneFactory } from './registry';
 import { withPauseMenu } from './worldShell';
 
 /**
@@ -69,10 +77,61 @@ function worldTitle(mapId: string): string {
 const worldLoad = new LoadProgress();
 const WORLD_MILESTONE = 'world';
 
-/** The sessions the menu and the picker offer. Both carry the only world that exists. */
+/**
+ * Does this build carry a world for the map a save names? Read from the
+ * registry AT CALL TIME — after every `registerScene` below has run — so
+ * the save store can refuse a save on a world that is not here, and the
+ * menu never offers a CONTINUE into nothing. session/ may not read the
+ * registry itself (§3); this is the one predicate it is handed.
+ */
+const hasWorld: KnownMap = (mapId) => listScenes().includes(worldSceneId(mapId));
+
+/** One slot's save store, opened with the world predicate so every reader agrees on what counts. */
+const soloSlotStore = (ctx: SceneContext, slot: SoloSlot) => ctx.storage.open(soloSlotSpec(slot, hasWorld));
+
+/**
+ * The sessions and slots the menu and the picker offer. Both carry the
+ * only world that exists; `slots` is the three save documents as the
+ * player sees them, and `saved` is the newest game among them — what
+ * RESUME names and, when it is the only one, opens.
+ *
+ * `solo()` is read for its CAPTION, never started: which slot a solo game
+ * writes to is decided one screen later, and the session that carries it
+ * is built then, by `play` below.
+ */
 const offers = (ctx: SceneContext): SessionOffers => ({
-  solo: () => new LocalSoloSession(ctx.storage.open(SOLO_SAVE_SPEC), PERF_WORLD_MAP_ID),
+  solo: () => new LocalSoloSession(soloSlotStore(ctx, 1), PERF_WORLD_MAP_ID),
   multiplayer: () => new RemoteMultiplayerSession(PERF_WORLD_MAP_ID),
+  slots: () => readSoloSlots(ctx.storage.kv, hasWorld),
+  saved: () => {
+    const newest = savedSoloGame(ctx.storage.kv, hasWorld);
+    return newest === null ? null : { slot: newest.slot, savedAt: newest.savedAt };
+  },
+});
+
+/**
+ * The two ways into a solo game, once a slot has been chosen on screen.
+ *
+ * A slot number arrives from a DOM control, so it is checked against the
+ * slots this build has before it names a save document — the ui is trusted
+ * to ask the question, never to be the only thing that got the answer
+ * right. A slot that is not one of ours does nothing at all rather than
+ * writing somewhere unexpected.
+ *
+ * NEW GAME opens the map this build ships. RESUME opens the map the save
+ * itself names, which is why it goes through the save rather than through
+ * a default: a resume onto the wrong world is a camera in the sea.
+ */
+const play = (ctx: SceneContext): SoloPlay => ({
+  newGame: (slot) => {
+    if (!isSoloSlot(slot)) return;
+    startSession(ctx, newSoloGame(ctx.storage.kv, hasWorld, slot, PERF_WORLD_MAP_ID));
+  },
+  resume: (slot) => {
+    if (!isSoloSlot(slot)) return;
+    const saved = resumeSoloSlot(ctx.storage.kv, hasWorld, slot);
+    if (saved) startSession(ctx, saved.session);
+  },
 });
 
 const loading = (ctx: SceneContext): LoadingHooks => {
@@ -103,8 +162,8 @@ const profile = (ctx: SceneContext): ProfileSource => {
 
 export function registerScenes(): void {
   // Front door. Every screen here lives in the `menu` app state.
-  registerScene(SCREEN_ID.menu, createMainMenuScene(offers));
-  registerScene(SCREEN_ID.session, createSessionPickerScene(offers));
+  registerScene(SCREEN_ID.menu, createMainMenuScene(offers, play));
+  registerScene(SCREEN_ID.session, createSessionPickerScene(offers, play));
   registerScene(SCREEN_ID.settings, createSettingsScene);
   registerScene(SCREEN_ID.about, createAboutScene);
   registerScene(SCREEN_ID.profile, createProfileScene(profile));
@@ -113,13 +172,18 @@ export function registerScenes(): void {
   // The Performance World: the benchmark scene, and in Phase 0 the only
   // world. It reaches the settings it can honour through a hook, because
   // perf/ may not import ui/ (§3).
+  // The camera resumes from whatever the session can restore (the solo
+  // save on this device; nothing for the multiplayer mock), and the shell
+  // takes the world's save point so QUIT writes the pose the player last saw.
   registerScene(
     PERF_WORLD_SCENE_ID,
-    withPauseMenu((ctx, onPause) =>
+    withPauseMenu((ctx, shell) =>
       createPerformanceWorldScene({
-        onPause,
+        onPause: shell.onPause,
+        onSavePoint: shell.onSavePoint,
         onLoadProgress: (fraction) => worldLoad.report(WORLD_MILESTONE, fraction),
         settings: () => openSettings(ctx.storage).read(),
+        resume: () => restorableStateOf(ctx.app.session),
       })(ctx),
     ),
   );
@@ -138,17 +202,37 @@ export function registerScenes(): void {
       openScene: (id) => {
         if (id.startsWith(WORLD_SCENE_PREFIX)) {
           // A world needs a session (its pause menu reads one) and enters
-          // through the loading screen, exactly as PLAY → SOLO does. A tool
-          // opened this way IS a solo game in that world, and quitting from
-          // its pause menu lands on the main menu like any other game.
+          // through the loading screen, exactly as NEW GAME → SOLO does. A
+          // tool opened this way IS a solo game in that world, and quitting
+          // from its pause menu lands on the main menu like any other game.
+          // `toolSoloSlot` decides which slot without ever silently
+          // replacing a game the player can still reach (LocalSoloSession).
           const mapId = id.slice(WORLD_SCENE_PREFIX.length);
-          startSession(ctx, new LocalSoloSession(ctx.storage.open(SOLO_SAVE_SPEC), mapId));
+          const slot = toolSoloSlot(ctx.storage.kv, hasWorld, mapId);
+          startSession(ctx, new LocalSoloSession(soloSlotStore(ctx, slot), mapId));
           return;
         }
         // A tool scene of its own stays in the `menu` state, like any front-door screen.
         void ctx.scenes.goTo(sceneFactory(id));
       },
       onBack: () => goToScreen(ctx, SCREEN_ID.menu),
+    })),
+  );
+
+  // The Network Lab (Phase 1): one host and two loopback clients in this
+  // tab, no server. A plain tool scene in the `menu` state — it holds no
+  // session, so it is not a `world:` id and needs no loading screen. Its
+  // "A" player is this device's profile, the same identity a real session
+  // would present.
+  registerTool(netLabTool);
+  registerScene(
+    NET_LAB_SCENE_ID,
+    createNetworkLabScene((ctx) => ({
+      identity: () => {
+        const p = loadProfile(ctx.storage.open(PLAYER_PROFILE_SPEC));
+        return { playerId: playerIdOf(p), name: p.displayName };
+      },
+      onBack: () => goToScreen(ctx, SCREEN_ID.editors),
     })),
   );
 }

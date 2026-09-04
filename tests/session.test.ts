@@ -8,7 +8,10 @@ import { describe, expect, it } from 'vitest';
 import { defineStore, memoryKeyValueStore } from '../src/persistence/store';
 import type { GameSession } from '../src/session/GameSession';
 import { LocalSoloSession, SOLO_SAVE_SPEC, SOLO_SAVE_VERSION } from '../src/session/LocalSoloSession';
+import { PLAYER_PROFILE_SPEC, loadProfile, playerIdOf } from '../src/session/PlayerProfile';
 import { MULTIPLAYER_CAPTION, RemoteMultiplayerSession } from '../src/session/RemoteMultiplayerSession';
+import { DEFAULT_CAMERA_POSE } from '../src/session/SoloSave';
+import { world } from '../src/world/coords';
 
 describe('session contract', () => {
   it('pins the multiplayer caption exactly', () => {
@@ -46,7 +49,9 @@ describe('session contract', () => {
     const session = new LocalSoloSession(store, 'perf-empty', () => '2026-09-04T12:00:00.000Z');
     expect(store.read().savedAt).toBeNull();
     await session.save();
-    expect(store.read()).toEqual({ version: SOLO_SAVE_VERSION, savedAt: '2026-09-04T12:00:00.000Z', mapId: 'perf-empty' });
+    expect(store.read()).toEqual({
+      version: SOLO_SAVE_VERSION, savedAt: '2026-09-04T12:00:00.000Z', mapId: 'perf-empty', camera: DEFAULT_CAMERA_POSE,
+    });
     expect(JSON.parse(kv.get(SOLO_SAVE_SPEC.key) ?? '{}')).toMatchObject({ version: SOLO_SAVE_VERSION });
 
     const later = new LocalSoloSession(store, 'perf-empty', () => '2026-09-04T12:05:00.000Z');
@@ -57,7 +62,17 @@ describe('session contract', () => {
   it('multiplayer save() and leave() write nothing anywhere', async () => {
     const remote = new RemoteMultiplayerSession('kauai');
     await remote.save();
+    await remote.save({ camera: { at: world(1, 2), height: 3, yaw: 0, pitch: 0 } });
     await remote.leave();
     expect(remote.mapId).toBe('kauai');
+  });
+
+  it('derives the player id from the profile device id', () => {
+    const store = defineStore(PLAYER_PROFILE_SPEC, memoryKeyValueStore());
+    const profile = loadProfile(store, () => 'device-7');
+    expect(playerIdOf(profile)).toBe('device-7');
+    // The same profile always yields the same id: that is what "stable identity" means.
+    expect(playerIdOf(loadProfile(store, () => 'never-used'))).toBe('device-7');
+    expect(() => playerIdOf({ ...profile, deviceId: '' })).toThrow();
   });
 });

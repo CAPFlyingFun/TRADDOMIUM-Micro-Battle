@@ -48,7 +48,7 @@ describe('ui import boundary', () => {
     expect(uiFiles).toEqual(
       expect.arrayContaining([
         'screen.ts', 'MainMenuScene.ts', 'SessionPickerScene.ts', 'SettingsScene.ts', 'AboutScene.ts',
-        'LoadingScene.ts', 'PauseOverlay.ts', 'ProfileScene.ts',
+        'LoadingScene.ts', 'PauseOverlay.ts', 'ProfileScene.ts', 'SessionPicker.ts', 'SlotPicker.ts', 'PlayFlow.ts',
       ]),
     );
     expect(sites.length).toBeGreaterThan(uiFiles.length);

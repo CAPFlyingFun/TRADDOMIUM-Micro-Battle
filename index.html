@@ -8,13 +8,25 @@
     />
     <!-- Added to the home screen, this runs with no browser chrome, which
          is the only way to get a whole landscape HUD on an iPhone. iOS
-         reads its own apple- prefixed tags, so both sets are here. The
-         manifest, icons and splash arrive in a later phase. -->
+         reads its own apple- prefixed tags rather than the manifest, so
+         both sets are here. -->
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <!-- The home-screen label. It is the GAME'S name, not an initialism:
+         "TMB v1" told nobody what they had installed, and ten characters
+         is what an iOS label shows before it truncates. Which build this
+         is belongs where there is room to say it — the manifest's full
+         name, the About screen and the build stamp — not in the two words
+         under the icon. -->
     <meta name="apple-mobile-web-app-title" content="TRADDOMIUM" />
     <meta name="theme-color" content="#0b0f07" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <!-- The splash is the first paint, so it is asked for first — and
+         only the one this screen will actually show. -->
+    <link rel="preload" as="image" href="./splash.webp" type="image/webp" media="(orientation: landscape)" />
+    <link rel="preload" as="image" href="./splash-portrait.webp" type="image/webp" media="(orientation: portrait)" />
+    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
     <title>TRADDOMIUM: Micro Battle!</title>
     <!-- Inline so there is no favicon request to 404: the boot probe counts
          console errors, and a missing icon would fail it for nothing. -->
@@ -67,11 +79,95 @@
       #ui > * {
         pointer-events: auto;
       }
+
+      /* ---------- The way in ----------
+         IN THE STATIC MARKUP ON PURPOSE. "As soon as you open the game"
+         means before the module is parsed and before three is loaded.
+         Anything built in JavaScript arrives after all of that, which on
+         a phone is a second or more of nothing. This paints with the
+         document.
+
+         The picture has the loading bar's interior CUT OUT of it, so it
+         is the front layer of a sandwich: src/ui/splash/BootSplash.ts
+         slides the fill in behind it once the module is alive. The
+         window's rectangle is generated from the art's alpha channel,
+         and generated numbers do not belong in hand-written markup.
+
+         Above #ui, so the menu's fade-in happens behind it; main.ts
+         dismisses it once the menu is up, and it is removed rather than
+         left invisible because a fixed full-screen element eats taps. */
+      #boot {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 100dvh;
+        overflow: hidden;
+        background: #080c06;
+        z-index: 80;
+        opacity: 1;
+        transition: opacity 700ms ease;
+      }
+      #boot.gone {
+        opacity: 0;
+        pointer-events: none;
+      }
+      /* COVERING the screen, sized and centred from viewport units so the
+         picture is right on the FIRST paint — #boot is fixed to the
+         viewport, so these describe its box exactly. Landscape by
+         default; portrait gets the other artwork's shape below. The
+         shapes are the art's nominal 16:9 and 9:16; fitCover re-measures
+         with the baked ratio once the module runs, which is also what
+         slides the crop up far enough to keep the caption on an extreme
+         phone and what notices a turn. Placed with MARGINS, the same
+         way fitCover places it, so nothing jumps when the script takes
+         over. Behind the cut-out window is this element's own dark
+         background: the empty bar. */
+      #boot .stage {
+        --stage-w: max(100vw, calc(100dvh * 16 / 9));
+        --stage-h: max(100dvh, calc(100vw * 9 / 16));
+        position: relative;
+        width: var(--stage-w);
+        height: var(--stage-h);
+        margin-left: calc((100vw - var(--stage-w)) / 2);
+        margin-top: calc((100dvh - var(--stage-h)) / 2);
+        background: rgba(6, 8, 5, 0.92);
+        container-type: size;
+        line-height: 0;
+      }
+      @media (orientation: portrait) {
+        #boot .stage {
+          --stage-w: max(100vw, calc(100dvh * 9 / 16));
+          --stage-h: max(100dvh, calc(100vw * 16 / 9));
+        }
+      }
+      #boot .stage picture {
+        display: contents;
+      }
+      #boot .stage img {
+        position: absolute;
+        inset: 0;
+        display: block;
+        width: 100%;
+        height: 100%;
+        object-fit: fill;
+      }
     </style>
   </head>
   <body>
     <div id="app"></div>
     <div id="ui"></div>
+    <!-- Dismissed by main.ts once the menu is up. -->
+    <div id="boot">
+      <div class="stage">
+        <!-- The browser picks one before any script runs, and having
+             chosen, keeps it up to date as the phone turns. -->
+        <picture>
+          <source media="(orientation: portrait)" srcset="./splash-portrait.webp" />
+          <img src="./splash.webp" alt="TRADDOMIUM: Micro Battle!" />
+        </picture>
+      </div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

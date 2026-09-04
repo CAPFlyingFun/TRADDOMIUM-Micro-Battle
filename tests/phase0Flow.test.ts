@@ -4,9 +4,14 @@
  * registrations, the real SceneManager, the real AppState machine and a
  * memory store — everything but the renderer and the animation frame:
  *
- *   menu → PLAY → picker → SOLO → session → loading → playing
+ *   menu → NEW GAME → picker → SOLO → slot → session → loading → playing
  *        → PAUSE → paused (world may freeze) → RESUME → playing
  *        → PAUSE → QUIT → menu, session ended and saved
+ *        → RESUME → the same world, the camera where it was left
+ *
+ * plus the three save slots as the player meets them: a new game in an
+ * empty slot starts fresh, an occupied one asks before it is replaced,
+ * and the games in the other slots are untouched by either.
  *
  * plus the multiplayer mock's honest pause heading, the hub's OPEN of the
  * Performance World, and the world refusing to enter without a session.
@@ -27,6 +32,7 @@ import { memoryKeyValueStore } from '../src/persistence/store';
 import { PERF_WORLD_SCENE_ID } from '../src/perf/perfTool';
 import type { GameSession } from '../src/session/GameSession';
 import { SOLO_SAVE_SPEC } from '../src/session/LocalSoloSession';
+import { soloSlotKey } from '../src/session/SoloSlots';
 import { MULTIPLAYER_CAPTION } from '../src/session/RemoteMultiplayerSession';
 import { pauseWords } from '../src/ui';
 
@@ -117,9 +123,12 @@ describe('Phase 0 flow', () => {
     await boot(r);
     expect(r.scenes.current?.name).toBe('menu');
 
-    r.press('play');
+    r.press('new-game');
     expect(r.app.state).toBe('session');
     r.press('solo');
+    // Choosing how to play is not choosing a game: the slot list comes next.
+    expect(r.app.state).toBe('session');
+    r.press('slot:1');
     expect(r.app.state).toBe('loading');
     await r.settle();
 
@@ -135,8 +144,9 @@ describe('Phase 0 flow', () => {
   it('PAUSE freezes a solo world honestly; RESUME runs it; QUIT saves, ends the session and lands on the menu', async () => {
     const r = rig();
     await boot(r);
-    r.press('play');
+    r.press('new-game');
     r.press('solo');
+    r.press('slot:1');
     await r.settle();
 
     r.frame();
@@ -166,11 +176,52 @@ describe('Phase 0 flow', () => {
     expect(r.fallbacks()).toBe(0);
   });
 
+  it('after QUIT the menu offers RESUME, which reopens the saved game at the saved pose', async () => {
+    const r = rig();
+    await boot(r);
+    // A fresh device: nothing to resume, and the slots say so.
+    expect(r.uiLayer.querySelector('[data-action="resume"]')).toBeNull();
+    r.press('new-game');
+    r.press('solo');
+    expect([...r.uiLayer.querySelectorAll('.ui-slots .ui-button__sub')].map((e) => e.textContent))
+      .toEqual(['Empty', 'Empty', 'Empty']);
+    r.press('slot:1');
+    await r.settle();
+    r.frame();
+    // Fly somewhere the START pose is not, then save through PAUSE and QUIT.
+    const cam = r.scenes.current?.camera;
+    if (!cam) throw new Error('the world has no camera');
+    cam.position.set(123, 45, -678);
+    r.press('pause');
+    r.press('quit');
+    await r.settle();
+
+    expect(r.scenes.current?.name).toBe('menu');
+    const resume = r.uiLayer.querySelector<HTMLButtonElement>('[data-action="resume"]');
+    expect(resume).not.toBeNull();
+    expect(resume?.disabled).toBe(false);
+    expect(resume?.textContent).toContain('Last played just now');
+    const save = JSON.parse(r.kv.get(SOLO_SAVE_SPEC.key) ?? 'null') as { camera: { at: { wx: number; wz: number } } };
+    expect(save.camera.at).toEqual({ wx: 123, wz: -678 });
+    // One game, so RESUME opens it rather than asking which.
+    r.press('resume');
+    expect(r.app.state).toBe('loading');
+    await r.settle();
+    expect(r.scenes.current?.name).toBe(PERF_WORLD_SCENE_ID);
+    expect(r.app.state).toBe('playing');
+    expect(r.app.session?.mode).toBe('solo');
+    const resumed = r.scenes.current?.camera;
+    expect(resumed?.position.x).toBeCloseTo(123);
+    expect(resumed?.position.y).toBeCloseTo(45);
+    expect(resumed?.position.z).toBeCloseTo(-678);
+  });
+
   it('Escape toggles the pause menu from the keyboard', async () => {
     const r = rig();
     await boot(r);
-    r.press('play');
+    r.press('new-game');
     r.press('solo');
+    r.press('slot:1');
     await r.settle();
     // Through Input's own key path, so the handler the world registered is what fires.
     r.input.attach(document.body);
@@ -187,8 +238,9 @@ describe('Phase 0 flow', () => {
   it('the multiplayer mock is enterable and its pause menu says the world keeps running', async () => {
     const r = rig();
     await boot(r);
-    r.press('play');
+    r.press('new-game');
     expect(r.uiLayer.textContent).toContain(MULTIPLAYER_CAPTION);
+    // No slot is asked for and none is written: a multiplayer game keeps nothing here.
     r.press('multiplayer');
     await r.settle();
     expect(r.scenes.current?.name).toBe(PERF_WORLD_SCENE_ID);
@@ -216,6 +268,84 @@ describe('Phase 0 flow', () => {
     // And PAUSE is legal from there, which is why the hub goes through a session.
     r.press('pause');
     expect(r.app.state).toBe('paused');
+  });
+
+  it('three slots: a second game goes in its own slot, and RESUME then asks which', async () => {
+    const r = rig();
+    await boot(r);
+    // First game, slot 1, flown somewhere recognisable.
+    r.press('new-game');
+    r.press('solo');
+    r.press('slot:1');
+    await r.settle();
+    r.frame();
+    r.scenes.current?.camera.position.set(111, 20, -111);
+    r.press('pause');
+    r.press('quit');
+    await r.settle();
+
+    // Second game, slot 2. Slot 1 is offered as a game, slot 2 as empty.
+    r.press('new-game');
+    r.press('solo');
+    expect([...r.uiLayer.querySelectorAll('.ui-slots .ui-button__sub')].map((e) => e.textContent))
+      .toEqual(['Last played just now', 'Empty', 'Empty']);
+    r.press('slot:2');
+    await r.settle();
+    r.frame();
+    // A NEW game: it did not inherit slot 1's camera.
+    expect(r.scenes.current?.camera.position.x).not.toBeCloseTo(111);
+    r.scenes.current?.camera.position.set(222, 20, -222);
+    r.press('pause');
+    r.press('quit');
+    await r.settle();
+
+    // Two games on the device, in two documents, neither overwritten.
+    const slot1 = JSON.parse(r.kv.get(soloSlotKey(1)) ?? 'null') as { camera: { at: { wx: number } } };
+    const slot2 = JSON.parse(r.kv.get(soloSlotKey(2)) ?? 'null') as { camera: { at: { wx: number } } };
+    expect(slot1.camera.at.wx).toBe(111);
+    expect(slot2.camera.at.wx).toBe(222);
+    expect(r.kv.get(soloSlotKey(3))).toBeNull();
+
+    // With two, RESUME opens the list instead of choosing for the player.
+    r.press('resume');
+    expect(r.uiLayer.querySelector<HTMLElement>('[data-role="slot-picker"]')?.dataset.purpose).toBe('resume');
+    r.press('slot:1');
+    await r.settle();
+    r.frame();
+    expect(r.scenes.current?.camera.position.x).toBeCloseTo(111);
+  });
+
+  it('a new game on an occupied slot asks first, and KEEP IT leaves the save exactly where it was', async () => {
+    const r = rig();
+    await boot(r);
+    r.press('new-game');
+    r.press('solo');
+    r.press('slot:1');
+    await r.settle();
+    r.frame();
+    r.scenes.current?.camera.position.set(333, 20, -333);
+    r.press('pause');
+    r.press('quit');
+    await r.settle();
+    const before = r.kv.get(soloSlotKey(1));
+
+    r.press('new-game');
+    r.press('solo');
+    r.press('slot:1');
+    // Nothing has started, and nothing has been written.
+    expect(r.app.state).toBe('session');
+    expect(r.uiLayer.querySelector('[data-role="slot-overwrite"]')?.textContent)
+      .toContain('Slot 1 holds a game last played just now.');
+    r.press('slot-keep');
+    expect(r.kv.get(soloSlotKey(1))).toBe(before);
+    expect(r.app.state).toBe('session');
+
+    // Saying yes is what replaces it: the new game starts at the world's own pose.
+    r.press('slot:1');
+    r.press('slot-overwrite');
+    await r.settle();
+    r.frame();
+    expect(r.scenes.current?.camera.position.x).not.toBeCloseTo(333);
   });
 
   it('a world entered without a session falls back to the menu with nothing half-built', async () => {

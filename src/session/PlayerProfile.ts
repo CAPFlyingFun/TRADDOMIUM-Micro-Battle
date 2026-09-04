@@ -8,6 +8,7 @@
  * Pure over a Store: no DOM. The UUID source is injected so tests are
  * deterministic; the default is the platform's `crypto.randomUUID`.
  */
+import { playerId, type PlayerId } from '../actor/PlayerId';
 import { boundedString, type Store, type StoreSpec, type Versioned } from '../persistence/store';
 
 export interface PlayerProfile extends Versioned {
@@ -52,4 +53,15 @@ export function setDisplayName(store: Store<PlayerProfile>, displayName: string)
   const next = PLAYER_PROFILE_SPEC.sanitize({ ...current, displayName }, PLAYER_PROFILE_SPEC.defaults);
   store.write(next);
   return next;
+}
+
+/**
+ * Who this player is to the rest of the game. The device id IS the
+ * player id for now (one device, one player); when accounts arrive the
+ * derivation changes here and nothing that holds a PlayerId does.
+ * Throws on an unminted profile because `loadProfile` never returns
+ * one — reaching this with an empty id is a wiring bug, not a state.
+ */
+export function playerIdOf(profile: PlayerProfile): PlayerId {
+  return playerId(profile.deviceId);
 }

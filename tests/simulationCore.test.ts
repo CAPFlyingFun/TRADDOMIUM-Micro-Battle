@@ -53,7 +53,9 @@ const CORE: readonly CoreEntry[] = [
   { path: 'src/app/registry.ts', required: true },
   { path: 'src/data', required: true },
   { path: 'src/perf/FrameStats.ts', required: true },
-  { path: 'src/actor', required: false },
+  { path: 'src/actor', required: true },
+  // The one pure file in input/: the Intent shape actor/ and autonomy/ share.
+  { path: 'src/input/Intent.ts', required: true },
   { path: 'src/autonomy', required: false },
 ];
 

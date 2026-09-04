@@ -9,3 +9,10 @@ probe-*.png
 
 # Agent worktrees created during parallel builds
 .claude/worktrees/
+
+# The art masters under art/ are COMMITTED. scripts/bakeArt.mjs reads them
+# to produce everything in public/ AND to measure the loading bar's cutout,
+# so a clone without them cannot rebuild the splash. The exceptions are
+# here so a future scratch-render rule (v0 had `*.png`) cannot drop them.
+!art/*.png
+!art/*.jpg
