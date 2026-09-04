@@ -22,12 +22,24 @@ export interface BuildInfo {
   readonly commit: string;
   /** YYYY-MM-DD, the day the bundle was built. */
   readonly date: string;
+  /**
+   * The relay this build talks to, '' when it was built without one.
+   *
+   * It lives here and not in `net/relayConfig.ts` for the same reason the
+   * `?relay=` override lives in `app/registerScenes.ts`: the relay
+   * COMPILES `src/net/` (worker/ imports it whole), and a build-time
+   * constant of the browser bundle does not exist there. Core is handed
+   * the address; it never names it.
+   */
+  readonly relayUrl: string;
 }
 
 export const BUILD_INFO: BuildInfo = {
   version: stamp(() => __APP_VERSION__, 'unversioned'),
   commit: stamp(() => __BUILD_COMMIT__, 'local'),
   date: stamp(() => __BUILD_DATE__, 'unknown date'),
+  // '' is the honest no-relay build, so it is both the value and the fallback.
+  relayUrl: stamp(() => __RELAY_URL__, ''),
 };
 
 /** The one-line stamp footers show: `v1.0.0-alpha.1 · e799284`. */

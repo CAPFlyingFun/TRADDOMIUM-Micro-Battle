@@ -9,7 +9,7 @@ import { LayerToggles } from '../src/perf/layerToggles';
 import { WORLD_LAYERS, type WorldLayerId } from '../src/world/WorldLoader';
 
 function readout(meanFps: number, lowFps: number, simDt: number, frames = 120): PerfReadout {
-  return { frame: { meanFps, lowFps, simDt, frames }, camera: { x: 1.25, y: 2.5, z: -3.75, speed: 40 } };
+  return { frame: { meanFps, lowFps, simDt, frames }, camera: { x: 1.25, y: 2.5, z: -3.75, facing: Math.PI / 2, speed: 40 } };
 }
 
 function must<T>(value: T | null | undefined, what: string): T {

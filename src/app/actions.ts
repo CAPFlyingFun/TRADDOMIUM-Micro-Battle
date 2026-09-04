@@ -16,12 +16,25 @@ export const ACTION = {
   continue: 'continue',
   solo: 'solo',
   multiplayer: 'multiplayer',
+  /**
+   * The room step (ui/RoomCodeScene.ts), which exists only in a build
+   * that has a relay: JOIN takes the code in the field into the world,
+   * and NEW CODE offers a different one to share.
+   */
+  joinRoom: 'join-room',
+  newRoomCode: 'new-room-code',
   profile: 'profile',
   settings: 'settings',
   editors: 'editors',
   about: 'about',
   back: 'back',
   pause: 'pause',
+  /**
+   * The practice bot's panel (`perf/BotHud.ts`): send it back in for
+   * another five minutes once its time is up. It appears only while a bot
+   * has been asked for, and only once that bot has gone.
+   */
+  restartBot: 'restart-bot',
   /**
    * Back into the game I was in: the pause menu's RESUME, and the main
    * menu's. They are never on screen together — one is an overlay the

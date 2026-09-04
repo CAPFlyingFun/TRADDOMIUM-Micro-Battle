@@ -10,7 +10,7 @@ import { DEBUG_CAPSULE_TUNING, type CapsuleTuning } from '../src/actor/CapsuleTu
 import { playerId } from '../src/actor/PlayerId';
 import { ScriptedMover, pauseLeg, type Leg } from '../src/actor/ScriptedMover';
 import { step } from '../src/actor/Transform';
-import { circleRoute, figureEightRoute } from '../src/actor/routes';
+import { circleRoute, figureEightRoute, patrolRoute } from '../src/actor/routes';
 import { NEUTRAL_INTENT, clampIntent, type Intent } from '../src/input/Intent';
 import { world } from '../src/world/coords';
 
@@ -157,6 +157,51 @@ describe('routes through the real transform', () => {
     );
     const reach = (path: readonly ActorState[]): number => Math.max(...path.map((s) => s.at.wx));
     expect(reach(sprint)).toBeCloseTo(DEBUG_CAPSULE_TUNING.sprintFactor * reach(walk), 6);
+  });
+
+  it('the practice patrol closes on its start, in position and in heading', () => {
+    // THE PROPERTY THE WHOLE FEATURE RESTS ON. An open route walks the bot
+    // out of the player's view in about a minute, and the "somebody else
+    // in the room" it was built to be becomes somebody else to chase.
+    // Four equal sides at four right-hand quarter turns close; the back
+    // leg, the strafe pair, the extra corner pair and the sprint pair each
+    // cancel themselves.
+    const route = patrolRoute(DEBUG_CAPSULE_TUNING);
+    const period = route.reduce((total, leg) => total + leg.seconds, 0);
+    expect(period).toBeCloseTo(60, 9);
+
+    const path = drive(new ScriptedMover(route), period, DEBUG_CAPSULE_TUNING);
+    const end = last(path);
+    expect(Math.hypot(end.at.wx, end.at.wz)).toBeLessThan(1e-6);
+    expect(Math.abs(end.heading)).toBeLessThan(1e-9);
+  });
+
+  it('the practice patrol stays in a box a player can see, at a fraction of the grid', () => {
+    // The performance world's grid is 2000 units across and its fog opens
+    // at 300 (perf/PerformanceWorldScene.ts). A patrol that left that near
+    // field would be a capsule in the haze.
+    const path = drive(new ScriptedMover(patrolRoute(DEBUG_CAPSULE_TUNING)), 60, DEBUG_CAPSULE_TUNING);
+    const reach = Math.max(...path.map((s) => Math.hypot(s.at.wx, s.at.wz)));
+    expect(reach).toBeGreaterThan(100);
+    expect(reach).toBeLessThan(300);
+  });
+
+  it('the practice patrol walks its long legs at half pace, so five seconds is a metre and a half', () => {
+    // `intent.forward` is a request, not a speed (pace is a CEILING), and
+    // the route leans on that: at full ahead a five-second leg would be
+    // three metres and the box would swallow the near field.
+    const route = patrolRoute(DEBUG_CAPSULE_TUNING);
+    const firstLeg = route[0];
+    expect(firstLeg.seconds).toBe(5);
+    expect(firstLeg.intent.forward).toBeCloseTo(0.5, 12);
+    expect(DEBUG_CAPSULE_TUNING.walkSpeed * firstLeg.intent.forward * firstLeg.seconds).toBeCloseTo(150, 9);
+  });
+
+  it('the practice patrol refuses a leg that lasts no time and a pace outside (0, 1]', () => {
+    expect(() => patrolRoute(DEBUG_CAPSULE_TUNING, { legSeconds: 0 })).toThrow(/legSeconds/);
+    expect(() => patrolRoute(DEBUG_CAPSULE_TUNING, { legSeconds: Number.NaN })).toThrow(/legSeconds/);
+    expect(() => patrolRoute(DEBUG_CAPSULE_TUNING, { pace: 0 })).toThrow(/pace/);
+    expect(() => patrolRoute(DEBUG_CAPSULE_TUNING, { pace: 1.5 })).toThrow(/pace/);
   });
 
   it('refuses a turn outside (0, 1], a negative pause, or a tuning that cannot turn', () => {

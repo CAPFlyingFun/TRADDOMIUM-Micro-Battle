@@ -34,7 +34,7 @@ import type { GameSession } from '../src/session/GameSession';
 import { SOLO_SAVE_SPEC } from '../src/session/LocalSoloSession';
 import { soloSlotKey } from '../src/session/SoloSlots';
 import { MULTIPLAYER_CAPTION } from '../src/session/RemoteMultiplayerSession';
-import { pauseWords } from '../src/ui';
+import { ROOMS_CAPTION, ROOMS_SCOPE_NOTE, pauseWords } from '../src/ui';
 
 registerScenes();
 
@@ -235,21 +235,52 @@ describe('Phase 0 flow', () => {
     }
   });
 
-  it('the multiplayer mock is enterable and its pause menu says the world keeps running', async () => {
+  it('multiplayer asks for a room, enters the world, and its pause menu says the world keeps running', async () => {
     const r = rig();
-    await boot(r);
-    r.press('new-game');
-    expect(r.uiLayer.textContent).toContain(MULTIPLAYER_CAPTION);
-    // No slot is asked for and none is written: a multiplayer game keeps nothing here.
-    r.press('multiplayer');
-    await r.settle();
-    expect(r.scenes.current?.name).toBe(PERF_WORLD_SCENE_ID);
-    expect(r.app.session?.canPauseWorld).toBe(false);
-    r.press('pause');
-    expect(r.app.state).toBe('paused');
-    expect(r.veil()?.textContent).toContain(pauseWords(false));
-    for (let i = 0; i < 20; i += 1) r.frame();
-    expect(r.uiLayer.querySelector('[data-field="sim-dt"]')?.textContent).not.toBe('paused');
+    // A UNIT TEST MAY NOT OPEN A SOCKET. This build has the deployed relay
+    // baked in (vite.config.ts), so joining a room builds a real
+    // WebSocketTransport; a fake constructor here keeps the test to the
+    // SCREENS it is about and Joshua's relay out of `npm test`. It never
+    // opens, so the world's link sits at "connecting" — which is exactly
+    // what a phone out of signal would show, and changes nothing on the
+    // path under test.
+    const realSocket = Reflect.get(globalThis, 'WebSocket') as unknown;
+    Reflect.set(globalThis, 'WebSocket', class FakeSocket {
+      onopen: unknown = null;
+      onmessage: unknown = null;
+      onerror: unknown = null;
+      onclose: unknown = null;
+      send(): void {}
+      close(): void {}
+    });
+    try {
+      await boot(r);
+      r.press('new-game');
+      // This build HAS a relay, so the card describes the rooms it can
+      // open. The no-relay line would be a lie on this screen.
+      expect(r.uiLayer.textContent).toContain(ROOMS_CAPTION);
+      expect(r.uiLayer.textContent).toContain(ROOMS_SCOPE_NOTE);
+      expect(r.uiLayer.textContent).not.toContain(MULTIPLAYER_CAPTION);
+      // MULTIPLAYER asks which room first; the code offered is ready to
+      // join, so JOIN needs no typing. No slot is asked for and none is
+      // written: a multiplayer game keeps nothing here.
+      r.press('multiplayer');
+      r.press('join-room');
+      await r.settle();
+      expect(r.scenes.current?.name).toBe(PERF_WORLD_SCENE_ID);
+      expect(r.app.session?.canPauseWorld).toBe(false);
+      r.press('pause');
+      expect(r.app.state).toBe('paused');
+      expect(r.veil()?.textContent).toContain(pauseWords(false));
+      for (let i = 0; i < 20; i += 1) r.frame();
+      expect(r.uiLayer.querySelector('[data-field="sim-dt"]')?.textContent).not.toBe('paused');
+      // The wire is the world's, not the menu's: a session that holds one
+      // gets the SESSION column, and it says what the link is doing rather
+      // than what multiplayer will be one day.
+      expect(r.uiLayer.querySelector('[data-field="session"]')?.textContent).toBe('Connecting…');
+    } finally {
+      Reflect.set(globalThis, 'WebSocket', realSocket);
+    }
   });
 
   it('EDITORS opens the hub; OPEN on the Performance World starts a solo game there', async () => {

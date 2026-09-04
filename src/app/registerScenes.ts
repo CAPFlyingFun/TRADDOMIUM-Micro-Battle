@@ -16,6 +16,8 @@
 import {
   DEVTOOLS_SCENE_ID, NET_LAB_SCENE_ID, createDevToolsHubScene, createNetworkLabScene, netLabTool, registerTool,
 } from '../devtools';
+import { playerId } from '../actor/PlayerId';
+import { PRACTICE_BOT_NAME, RELAY_QUERY_PARAM, resolveRelayUrl, toRoomSocketUrl } from '../net';
 import { createPerformanceWorldScene } from '../perf/PerformanceWorldScene';
 import { PERF_WORLD_MAP_ID, PERF_WORLD_SCENE_ID, perfWorldTool } from '../perf/perfTool';
 import {
@@ -27,6 +29,7 @@ import {
 } from '../session/PlayerProfile';
 import { RemoteMultiplayerSession } from '../session/RemoteMultiplayerSession';
 import {
+  BUILD_INFO,
   SCREEN_ID,
   createAboutScene,
   createLoadingScene,
@@ -90,6 +93,25 @@ const hasWorld: KnownMap = (mapId) => listScenes().includes(worldSceneId(mapId))
 const soloSlotStore = (ctx: SceneContext, slot: SoloSlot) => ctx.storage.open(soloSlotSpec(slot, hasWorld));
 
 /**
+ * THE RELAY THIS RUN USES, resolved once, in the one place allowed to
+ * read the address bar: `net/relayConfig.ts` is core and may not name a
+ * browser global, so the `?relay=` override is read here and passed in
+ * (that is also what lets a probe point the running build at
+ * `npm run relay:dev` on 127.0.0.1). Empty is the honest no-relay case
+ * and is what a build made with `TRADDOMIUM_RELAY_URL=` gets.
+ *
+ * Read at module scope because it cannot change without a reload, and
+ * guarded because this module is also imported by node tests, where
+ * there is no address bar at all.
+ */
+const RELAY_URL = resolveRelayUrl(
+  typeof globalThis.location === 'undefined'
+    ? null
+    : new URLSearchParams(globalThis.location.search).get(RELAY_QUERY_PARAM),
+  BUILD_INFO.relayUrl,
+);
+
+/**
  * The sessions and slots the menu and the picker offer. Both carry the
  * only world that exists; `slots` is the three save documents as the
  * player sees them, and `saved` is the newest game among them — what
@@ -98,10 +120,37 @@ const soloSlotStore = (ctx: SceneContext, slot: SoloSlot) => ctx.storage.open(so
  * `solo()` is read for its CAPTION, never started: which slot a solo game
  * writes to is decided one screen later, and the session that carries it
  * is built then, by `play` below.
+ *
+ * `multiplayer()` is the same shape twice over. WITHOUT a room it carries
+ * no relay URL and is the pinned no-relay mock — which is what a build
+ * made with `TRADDOMIUM_RELAY_URL=` shows on its card. WITH one it is the
+ * session for THAT room, built from the relay address and the code the
+ * player typed, and it holds the wire the world then drives:
+ * `toRoomSocketUrl` throws on an address that is not one, so a mistyped
+ * `?relay=` is a message under the field rather than a socket opened
+ * somewhere unintended.
+ *
+ * In a build that HAS a relay the picker never shows the room-less
+ * session's caption: the card describes the build's multiplayer, whose
+ * facts arrive through `rooms()` and whose words are the ui's own
+ * (`SessionPicker.ROOMS_CAPTION`). A session with no room describes no
+ * room, and printing its "no relay configured" line beside a working
+ * JOIN button would be the one thing the honesty rule forbids — a
+ * caption that is not true of the build the player is holding.
+ *
+ * `rooms` is present only when there IS a relay, and its presence is the
+ * whole of how the ui learns that the room step exists.
  */
 const offers = (ctx: SceneContext): SessionOffers => ({
   solo: () => new LocalSoloSession(soloSlotStore(ctx, 1), PERF_WORLD_MAP_ID),
-  multiplayer: () => new RemoteMultiplayerSession(PERF_WORLD_MAP_ID),
+  multiplayer: (room, options) =>
+    new RemoteMultiplayerSession(PERF_WORLD_MAP_ID, {
+      relayUrl: room === undefined || room === '' ? '' : toRoomSocketUrl(RELAY_URL, room),
+      // Only the room screen can ask for one, so a session with no room
+      // never carries a bot: there would be no room to put it in.
+      practiceBot: options?.practiceBot === true,
+    }),
+  ...(RELAY_URL === '' ? {} : { rooms: () => ({ relayUrl: RELAY_URL }) }),
   slots: () => readSoloSlots(ctx.storage.kv, hasWorld),
   saved: () => {
     const newest = savedSoloGame(ctx.storage.kv, hasWorld);
@@ -184,6 +233,29 @@ export function registerScenes(): void {
         onLoadProgress: (fraction) => worldLoad.report(WORLD_MILESTONE, fraction),
         settings: () => openSettings(ctx.storage).read(),
         resume: () => restorableStateOf(ctx.app.session),
+        // WHO THIS PLAYER IS ON THE WIRE, read only when the world asks —
+        // which it does only for a session that holds a transport. The
+        // same two facts the Network Lab presents for its "A" player, from
+        // the same device profile, so the capsule a room shows other
+        // players is this device's own identity and not a per-session
+        // invention. Without this hook a multiplayer world opens no link
+        // at all and the HUD reads "Not connected": honest, but not a game.
+        identity: () => {
+          const p = loadProfile(ctx.storage.open(PLAYER_PROFILE_SPEC));
+          return { playerId: playerIdOf(p), name: p.displayName };
+        },
+        // THE PRACTICE BOT'S OWN IDENTITY, minted here because a world may
+        // not mint one: it is a second player in the room and the
+        // authority keys players by this id (`net/Host.ts`). Fresh every
+        // time the world enters, so a bot from a previous visit can never
+        // be re-attached to by mistake — and never this device's own id,
+        // which would make the authority hand the player's own actor to
+        // the bot. Whether a bot is wanted at all is the SESSION's answer;
+        // this hook only says who it would be.
+        practiceBot: () => ({
+          playerId: playerId(`practice-bot-${crypto.randomUUID()}`),
+          name: PRACTICE_BOT_NAME,
+        }),
       })(ctx),
     ),
   );

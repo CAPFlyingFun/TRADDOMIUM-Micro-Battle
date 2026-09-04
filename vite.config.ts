@@ -20,6 +20,24 @@ function commit(): string {
 }
 
 const HEAD = commit();
+
+/**
+ * THE RELAY THE BUILD SHIPS WITH.
+ *
+ * Baked in as `__RELAY_URL__` (see `src/env.d.ts` for why a constant and
+ * not a fetched config), defaulting to the deployed relay so the ordinary
+ * `npm run build` that reaches GitHub Pages is the build with online
+ * rooms in it. `TRADDOMIUM_RELAY_URL` overrides it, and an EMPTY value is
+ * a deliberate no-relay build — the honest mock, exactly as it shipped in
+ * Phase 1.5 — so `TRADDOMIUM_RELAY_URL= npm run build` is how a fork
+ * builds a game with no online play rather than one pointed at somebody
+ * else's server.
+ *
+ * `??` and not `||`, because '' is an answer.
+ */
+const LIVE_RELAY = 'https://traddomium-relay.joshua-622.workers.dev';
+const RELAY_URL = process.env.TRADDOMIUM_RELAY_URL ?? LIVE_RELAY;
+
 const stampJson = (): string =>
   `${JSON.stringify({ version, commit: HEAD, built: new Date().toISOString() }, null, 2)}\n`;
 
@@ -59,6 +77,7 @@ export default defineConfig({
     __APP_VERSION__: JSON.stringify(version),
     __BUILD_COMMIT__: JSON.stringify(HEAD),
     __BUILD_DATE__: JSON.stringify(new Date().toISOString().slice(0, 10)),
+    __RELAY_URL__: JSON.stringify(RELAY_URL),
   },
   build: {
     // three alone is ~600 kB minified; the default 500 kB warning would

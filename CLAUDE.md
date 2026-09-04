@@ -115,6 +115,12 @@ imply more than exists; the honest caption is pinned by a test.
   it owns a socket, a clock and a call to `tick()` and nothing else. A
   game rule written in `worker/` is a bug: the loopback would stop
   predicting the room a phone connects to.
+- **The relay's address is baked into the build** (`__RELAY_URL__`, from
+  `vite.config.ts`, default the deployed relay, `TRADDOMIUM_RELAY_URL=`
+  for a build with no online play) and `?relay=ws://127.0.0.1:<port>`
+  points a running build at a local one — which is how a developer on
+  `npm run relay:dev`, and `npm run probe:multiplayer`, reach a relay
+  that is not the deployed one.
 - A client-side PIN is a convenience, not security.
 - Every file in `scripts/` is wired to a `package.json` script or listed
   in `scripts/MANUAL.md`.
@@ -123,7 +129,15 @@ imply more than exists; the honest caption is pinned by a test.
 
 Measure rather than assume. `npm run typecheck`, `npm test`,
 `npm run build`, `npm run probe:boot`; read `package.json` for the current
-list. CI runs typecheck + test + build on every push.
+list. CI runs typecheck + test + build + `relay:typecheck` on every push.
+
+`npm run typecheck` is NOT the whole typecheck. `worker/` compiles
+`src/net/` against the workers runtime — no DOM lib, no vite defines, no
+ambient declarations from `src/env.d.ts` — so a core file can be clean
+under the app's tsconfig and break the relay's. Run `relay:typecheck`
+whenever `src/net/` changes; a build-time constant named in core is the
+way that has actually happened, and `tests/simulationCore.test.ts` now
+fails on it locally too.
 
 **Probes cost time — use the smallest thing that answers the question.**
 The headless renderer runs at about a frame and a half a second. For a

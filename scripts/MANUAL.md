@@ -42,5 +42,11 @@ as listed, prose included, so a path is written there only to list it.
 
 # Manual-only
 
-Nothing is run by hand in Phase 0. The boot probe is wired as
-`npm run probe:boot`.
+Nothing here is run by hand. The one entry is a helper module, which
+cannot be wired because it is never run on its own:
+
+- `scripts/relayHarness.mjs` — starts `wrangler dev --local` on a free
+  port, waits for `/health`, and stops it again, cleaning up its Durable
+  Object state. Imported by `npm run probe:relay`,
+  `npm run probe:multiplayer` and `npm run probe:bot`, which all need a relay running on this
+  machine and neither of which is testing that plumbing.
