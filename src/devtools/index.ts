@@ -20,3 +20,19 @@ export {
   createDevToolsHubScene, type DevToolsHubHooks, type DevToolsHubWire,
 } from './DevToolsHubScene';
 export { createKeyedContentStore, type KeyedContentSpec, type KeyedContentStore } from './KeyedContentStore';
+
+// The Network Lab (Phase 1): a plain tool scene, opened from the hub in
+// the `menu` state. Integration registers it AFTER the Performance World:
+//
+//   registerTool(netLabTool);
+//   registerScene(NET_LAB_SCENE_ID, createNetworkLabScene((ctx) => ({
+//     identity: () => { const p = loadProfile(ctx.storage.open(PLAYER_PROFILE_SPEC)); return { playerId: playerIdOf(p), name: p.displayName }; },
+//     onBack: () => goToScreen(ctx, SCREEN_ID.editors),
+//   })));
+export {
+  NET_LAB_ACTION, NET_LAB_DIALS, NET_LAB_HUD_ROLE, NET_LAB_SCENE_ID, netLabTool, type NetLabAction,
+} from './netLabTool';
+export {
+  NetworkLab, TELEPORT_UNITS, buildNetworkLabScene, createNetworkLabScene, type LabIdentity, type LabReadout,
+  type NetworkLabHooks, type NetworkLabScene, type NetworkLabWire, type PeerReadout,
+} from './NetworkLabScene';
