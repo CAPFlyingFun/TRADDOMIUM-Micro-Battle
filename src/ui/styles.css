@@ -1,0 +1,358 @@
+/*
+ * The one stylesheet for every screen, imported once from screen.ts.
+ *
+ * Designed at 932 x 430 logical pixels (the phone in landscape) and read
+ * from there outward: a panel is never taller than the viewport and
+ * scrolls inside itself instead, because the page itself cannot scroll
+ * (index.html sets touch-action: none so the game can own gestures).
+ * Nothing here depends on hover — a thumb has no hover state — and every
+ * control is at least 48 px tall, the smallest target a thumb hits
+ * reliably.
+ *
+ * Palette: TRADDOMIUM's black and gold. The gold is reserved for edges,
+ * headings and the one primary action on a screen, so it keeps meaning
+ * "this is what you press".
+ */
+:root {
+  --ui-ink: #e8e2c8;
+  --ui-ink-dim: rgba(232, 226, 200, 0.62);
+  --ui-gold: #c9a94a;
+  --ui-gold-soft: rgba(201, 169, 74, 0.45);
+  --ui-black: #06090c;
+  --ui-panel: rgba(14, 18, 12, 0.94);
+  --ui-panel-edge: rgba(26, 32, 20, 0.98);
+  --ui-button: #1a2014;
+  --ui-button-down: #2a3420;
+  --ui-touch: 48px;
+  --ui-radius: 10px;
+  --ui-font: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --ui-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+
+/* Overrides a display:flex class on the same element; the menu hides its
+   button column this way while the session picker is up. */
+[hidden] {
+  display: none !important;
+}
+
+/* A screen covers the canvas. It is the ui layer's direct child, so it
+   receives pointer events (index.html: #ui > * { pointer-events: auto }). */
+.ui-screen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 12px max(12px, env(safe-area-inset-right)) 12px max(12px, env(safe-area-inset-left));
+  color: var(--ui-ink);
+  font: 16px/1.35 var(--ui-font);
+}
+
+/* The menu's backdrop until there is a world to look at: a dark gradient
+   with a warm centre, so the front door is not plain black. */
+.ui-screen--menu {
+  background: radial-gradient(ellipse at 50% 40%, #1d2413 0%, #0b0f07 55%, var(--ui-black) 100%);
+}
+
+/* Front-door screens other than the menu sit on near-black; the canvas
+   behind them is an empty scene and there is nothing to see through to. */
+.ui-screen--plain {
+  background: linear-gradient(180deg, #0b0f07 0%, var(--ui-black) 100%);
+}
+
+.ui-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-sizing: border-box;
+  width: min(100%, 640px);
+  max-height: 100%;
+  overflow-y: auto;
+  /* The body forbids all touch gestures; a panel that can overflow must
+     hand vertical panning back or its lower rows are unreachable. */
+  touch-action: pan-y;
+  overscroll-behavior: contain;
+  padding: 16px 20px;
+  border: 1px solid var(--ui-gold-soft);
+  border-radius: 14px;
+  background: linear-gradient(180deg, var(--ui-panel-edge), var(--ui-panel));
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+}
+
+.ui-panel--wide {
+  width: min(100%, 760px);
+}
+
+.ui-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ui-gold);
+}
+
+/* The game's name keeps its own case: it is a brand, not a heading. */
+.ui-title--hero {
+  font-size: 26px;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  text-align: center;
+}
+
+.ui-subtitle {
+  margin: 0;
+  font-size: 14px;
+  color: var(--ui-ink-dim);
+}
+
+.ui-subtitle--center {
+  text-align: center;
+}
+
+.ui-note {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+.ui-column {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ui-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.ui-button {
+  min-height: var(--ui-touch);
+  min-width: 180px;
+  padding: 0 18px;
+  box-sizing: border-box;
+  font: 600 16px/1 var(--ui-font);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ui-ink);
+  background: var(--ui-button);
+  border: 1px solid var(--ui-gold);
+  border-radius: var(--ui-radius);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+/* Feedback on press, never on hover. */
+.ui-button:active:not(:disabled) {
+  background: var(--ui-button-down);
+  transform: translateY(1px);
+}
+
+.ui-button:focus-visible {
+  outline: 2px solid var(--ui-ink);
+  outline-offset: 2px;
+}
+
+.ui-button--primary {
+  color: #0b0f07;
+  background: var(--ui-gold);
+}
+
+.ui-button--primary:active:not(:disabled) {
+  background: #dcbd5e;
+}
+
+.ui-button--compact {
+  min-width: 0;
+}
+
+/* Disabled means "not in this build"; the label says so and the button
+   must not read as pressable (an unavailable action never looks functional). */
+.ui-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+  border-style: dashed;
+}
+
+/* A labelled control: label left, the control right, one touch target tall. */
+.ui-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: var(--ui-touch);
+}
+
+.ui-row__label {
+  flex: 0 0 auto;
+  min-width: 150px;
+  font-size: 15px;
+}
+
+.ui-row__control {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  min-width: 0;
+}
+
+.ui-readout {
+  min-width: 56px;
+  text-align: right;
+  font: 15px var(--ui-mono);
+  color: var(--ui-gold);
+}
+
+.ui-range {
+  flex: 1 1 auto;
+  height: var(--ui-touch);
+  min-width: 120px;
+  margin: 0;
+  accent-color: var(--ui-gold);
+  touch-action: pan-x;
+}
+
+.ui-select {
+  min-height: var(--ui-touch);
+  min-width: 140px;
+  padding: 0 12px;
+  font: 16px var(--ui-font);
+  color: var(--ui-ink);
+  background: var(--ui-button);
+  border: 1px solid var(--ui-gold);
+  border-radius: var(--ui-radius);
+}
+
+.ui-input {
+  min-height: var(--ui-touch);
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0 12px;
+  box-sizing: border-box;
+  font: 16px var(--ui-font);
+  color: var(--ui-ink);
+  background: var(--ui-black);
+  border: 1px solid var(--ui-gold);
+  border-radius: var(--ui-radius);
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* Two-way switch rendered as a button so it is thumb-sized and reads as
+   text ("On" / "Off") rather than a 13 px native checkbox. */
+.ui-switch {
+  min-width: 96px;
+}
+
+.ui-switch[aria-checked='true'] {
+  color: #0b0f07;
+  background: var(--ui-gold);
+}
+
+.ui-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.ui-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--ui-gold-soft);
+  border-radius: var(--ui-radius);
+  background: rgba(0, 0, 0, 0.25);
+}
+
+.ui-card__title {
+  margin: 0;
+  font-size: 18px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ui-gold);
+}
+
+.ui-card__caption {
+  margin: 0;
+  flex: 1 1 auto;
+  font-size: 14px;
+  color: var(--ui-ink-dim);
+}
+
+.ui-footer {
+  margin: 0;
+  font: 12px var(--ui-mono);
+  color: var(--ui-ink-dim);
+  text-align: center;
+}
+
+.ui-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 14px;
+  margin: 0;
+  font-size: 15px;
+}
+
+.ui-facts dt {
+  color: var(--ui-ink-dim);
+}
+
+.ui-facts dd {
+  margin: 0;
+  font-family: var(--ui-mono);
+  overflow-wrap: anywhere;
+}
+
+/* Loading bar. The fill only ever widens (LoadingScene holds the maximum). */
+.ui-bar {
+  height: 14px;
+  overflow: hidden;
+  border: 1px solid var(--ui-gold);
+  border-radius: 7px;
+  background: rgba(0, 0, 0, 0.4);
+}
+
+.ui-bar__fill {
+  height: 100%;
+  width: 0;
+  background: var(--ui-gold);
+  transition: width 120ms linear;
+}
+
+/* The pause overlay: dark enough to read "stopped", clear enough that the
+   world is still visible behind it — a pause that hides the world reads as
+   a scene change rather than a held breath. */
+.ui-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 12px;
+  background: rgba(6, 9, 12, 0.62);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  color: var(--ui-ink);
+  font: 16px/1.35 var(--ui-font);
+}
+
+@media (max-height: 380px) {
+  .ui-panel {
+    padding: 10px 14px;
+    gap: 6px;
+  }
+  .ui-title--hero {
+    font-size: 22px;
+  }
+}
