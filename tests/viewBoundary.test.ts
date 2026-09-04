@@ -50,9 +50,11 @@ function dir(rel: string): Map<string, string> {
 
 const actor = dir('src/actor');
 const view = dir('src/view');
+const terrain = dir('src/terrain');
 
 const actorSites = [...actor].flatMap(([f, src]) => importsOf(f, src));
 const viewSites = [...view].flatMap(([f, src]) => importsOf(f, src));
+const terrainSites = [...terrain].flatMap(([f, src]) => importsOf(f, src));
 
 const VIEW_DIR = /(^|\/)view(\/|$)/;
 const ORIGIN = /(^|\/)world\/origin$/;
@@ -92,5 +94,45 @@ describe('the actor/view seam', () => {
     for (const [file, src] of view) {
       expect(code(src), `${file} reads a world coordinate`).not.toMatch(/\.w[xz]\b/);
     }
+  });
+});
+
+/**
+ * THE SAME SEAM, ON THE OTHER RENDERER (ARCHITECTURE §3, amended
+ * 2026-09-04 with `terrain/`).
+ *
+ * `view/` draws actors; `terrain/` draws the ground. Both stand at the
+ * render boundary and both must cross it the same way — through
+ * `origin.toLocal`, never by subtracting an origin by hand. The `.wx`
+ * ban is the test that catches the hand-rolled version, and it is why
+ * `coords.snapTo` and `coords.translate` exist: a clipmap has to snap a
+ * ring and offset a vertex, and it must be able to do both without ever
+ * taking a world coordinate apart.
+ */
+describe('the world/terrain seam', () => {
+  it('has a terrain renderer to check', () => {
+    expect([...terrain.keys()]).toEqual(expect.arrayContaining(['TerrainView.ts']));
+    expect(terrainSites.length).toBeGreaterThan(0);
+  });
+
+  it('reads the heightfield as types only — it draws state, it does not run it', () => {
+    const fromField = terrainSites.filter((s) => /world\/heightfield$/.test(s.specifier));
+    expect(fromField.length).toBeGreaterThan(0);
+    expect(fromField.filter((s) => !s.typeOnly).map((s) => `${s.file}: ${s.statement}`)).toEqual([]);
+  });
+
+  it('converts through the floating origin, and reads no world coordinate by hand', () => {
+    const originImporters = terrainSites.filter((s) => ORIGIN.test(s.specifier));
+    expect(originImporters.map((s) => s.file)).toEqual(['TerrainView.ts']);
+    expect(originImporters[0].typeOnly).toBe(false);
+    expect(code(terrain.get('TerrainView.ts') ?? '')).toMatch(/\btoLocal\(/);
+    for (const [file, src] of terrain) {
+      expect(code(src), `${file} reads a world coordinate`).not.toMatch(/\.w[xz]\b/);
+    }
+  });
+
+  it('never imports actor/ or view/: the ground does not know who is standing on it', () => {
+    const offenders = terrainSites.filter((s) => ACTOR_DIR.test(s.specifier) || VIEW_DIR.test(s.specifier));
+    expect(offenders.map((s) => `${s.file}: ${s.statement}`)).toEqual([]);
   });
 });

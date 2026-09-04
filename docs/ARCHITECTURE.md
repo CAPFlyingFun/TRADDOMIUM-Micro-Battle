@@ -90,6 +90,10 @@ src/
   view/         three.js visual adapters for actors (CapsuleView) — the
                 only place actor state meets a mesh; actor/ stays
                 three-free.
+  terrain/      the ground's renderer: TerrainView, a geometry clipmap of
+                concentric rings over world/heightfield. What view/ is to
+                actor/, this is to world/ — the only place a height meets
+                a mesh; world/ stays three-free. Added in Phase 2.
   camera/       FollowCamera + CameraOwnership. Phase 0 has FreeFlyCamera
                 only (under perf/).
   input/        keyboard / pointer / touch (Input.ts, DOM) → one shared
@@ -145,12 +149,25 @@ devtools(Network Lab) → net, actor, view, perf(grid/camera helpers), three / D
 world, actor, autonomy, data, net, perf(FrameStats), persistence, input(Intent.ts) → NOTHING in three/DOM (core)
 perf(scenes/hud), camera, view, ui, devtools, assets → three / DOM allowed
 view → three allowed; it reads ActorState and writes a mesh
+terrain → three, world(heightfield as types, coords, origin, dem) — nothing else
+terrain → NEVER actor, view, session, ui (the ground does not know who stands on it)
 actor → NEVER view (a state module does not know what it looks like)
 ui → NEVER world, actor, autonomy, session internals (typed hooks only)
 camera → NEVER actor mode enums (continuous signals only)
 worker → net (Host, protocol, Transport) and NOTHING else of src/
 worker → NEVER three, the DOM or node: workerd is its own runtime
 ```
+
+`terrain/` was added on 2026-09-04, in Phase 2. Terrain rendering had no
+home in this map: `world/` is core and may not touch three, and `view/` is
+defined here as the actor adapter. A terrain mesh is neither, and putting
+it in `view/` broke that directory's own boundary test on the first
+commit — the honest fix was a directory rather than a wider rule. It
+crosses the render boundary exactly as `view/` does, through
+`origin.toLocal`, and `tests/viewBoundary.test.ts` now holds both to the
+same `.wx` ban. `coords.snapTo` was added at the same time for the same
+reason: a clipmap must snap a ring to a lattice, and it must be able to
+do that without taking a world coordinate apart by hand.
 
 `net → input(Intent.ts)` was added on 2026-09-04, with the practice bot
 (`net/PracticeBot.ts`): a scripted player's thumbs must speak the ONE

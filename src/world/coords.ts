@@ -109,6 +109,21 @@ export function samePoint(a: WorldPoint, b: WorldPoint): boolean {
   return a.wx === b.wx && a.wz === b.wz;
 }
 
+/**
+ * The nearest point on a lattice of `step` world units, on both axes.
+ *
+ * The operation behind every window that has to move in jumps rather
+ * than follow something continuously — the floating origin does it to
+ * itself, and the terrain clipmap does it per ring. Here rather than in
+ * either of them so that a renderer can snap without reading `.wx` and
+ * doing the arithmetic by hand, which is the mistake the two point types
+ * exist to prevent.
+ */
+export function snapTo(at: WorldPoint, step: number): WorldPoint {
+  if (!(step > 0)) return at;
+  return world(Math.round(at.wx / step) * step, Math.round(at.wz / step) * step);
+}
+
 /** How wide a chunk is, in world units. */
 export const CHUNK_SPAN = 512;
 
