@@ -171,6 +171,27 @@
   min-width: 0;
 }
 
+/* The menu's CONTINUE carries a second line — when the game was last
+   played — inside the button, so the column does not grow a row for it:
+   six rows already fill a 430 px phone. Two lines still fit one touch
+   target: 16 px + 12 px + the gap sits under the 48 px minimum. */
+.ui-button--stacked {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.ui-button__sub {
+  font: 400 12px/1 var(--ui-font);
+  letter-spacing: 0.02em;
+  text-transform: none;
+  opacity: 0.8;
+}
+
 /* Disabled means "not in this build"; the label says so and the button
    must not read as pressable (an unavailable action never looks functional). */
 .ui-button:disabled {

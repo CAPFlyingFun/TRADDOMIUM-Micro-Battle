@@ -20,7 +20,9 @@ export { BUILD_INFO, buildStamp, type BuildInfo } from './buildInfo';
 export {
   LoadingScene, createLoadingScene, formatEta, CONTINUE_ACTION, type LoadingHooks, type ProgressReader,
 } from './LoadingScene';
-export { MainMenuScene, createMainMenuScene, GAME_TITLE, type MainMenuHooks } from './MainMenuScene';
+export {
+  MainMenuScene, createMainMenuScene, timeAgo, GAME_TITLE, MENU_CONTINUE_ACTION, type MainMenuHooks,
+} from './MainMenuScene';
 export {
   SCREEN_ID, destination, goToScreen, quitToMenu, startSession, type Destination, type ScreenId,
 } from './navigation';
@@ -30,7 +32,7 @@ export {
   type ProfileHooks, type ProfileSource, type ProfileView,
 } from './ProfileScene';
 export { Screen, type Wire, type ScreenTone } from './screen';
-export { SessionPicker, type SessionOffers, type SessionPickerHooks } from './SessionPicker';
+export { SessionPicker, type SavedGame, type SessionOffers, type SessionPickerHooks } from './SessionPicker';
 export { SessionPickerScene, createSessionPickerScene } from './SessionPickerScene';
 export { SettingsPanel, settingAction, SETTING_RESET_ACTION, type SettingsPanelHooks } from './SettingsPanel';
 export { SettingsScene, createSettingsScene, type SettingsHooks } from './SettingsScene';

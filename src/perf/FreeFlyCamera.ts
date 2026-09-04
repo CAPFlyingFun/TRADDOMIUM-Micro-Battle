@@ -20,6 +20,9 @@
  */
 import * as THREE from 'three';
 import type { InputSnapshot } from '../input/Input';
+import type { CameraPose } from '../session/GameSession';
+import { local } from '../world/coords';
+import { toLocal, toWorld } from '../world/origin';
 
 /** World units per second. A Phase 0 number for a grid 2000 units across; true-scale terrain will want more. */
 export const DEFAULT_SPEED = 40;
@@ -118,6 +121,31 @@ export class FreeFlyCamera {
     this.yaw = yaw;
     this.pitch = Math.min(MAX_PITCH, Math.max(-MAX_PITCH, pitch));
     this.applyRotation();
+  }
+
+  /**
+   * Where the camera is, as a save wants it: a WorldPoint and a height,
+   * because a saved pose outlives the frame (coords.ts, THE RULE). The
+   * rendered position is measured from the floating origin, so the
+   * conversion back to world happens here, at the render boundary, and
+   * nowhere else — a save written from `camera.position` would be a
+   * LocalPoint in disguise and mean somewhere else after the next rebase.
+   */
+  pose(): CameraPose {
+    const p = this.camera.position;
+    return { at: toWorld(local(p.x, p.z)), height: p.y, yaw: this.yaw, pitch: this.pitch };
+  }
+
+  /**
+   * Put the camera back at a saved pose. A pose with a non-finite number
+   * in it is ignored outright: the store sanitizes on the way in, and
+   * this is the last line before a NaN reaches the projection matrix.
+   */
+  restore(pose: CameraPose): void {
+    const numbers = [pose.at.wx, pose.at.wz, pose.height, pose.yaw, pose.pitch];
+    if (!numbers.every((n) => Number.isFinite(n))) return;
+    const at = toLocal(pose.at);
+    this.place(at.lx, pose.height, at.lz, pose.yaw, pose.pitch);
   }
 
   resize(width: number, height: number): void {
