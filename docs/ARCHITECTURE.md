@@ -140,7 +140,7 @@ main → app, ui(splash/BootSplash only: the document splash is boot's)
 app → session, ui, devtools, world(WorldLoader), perf, input, assets, persistence
 session → persistence, net, data, world(coords), actor(PlayerId)
 actor → world(coords), input(Intent.ts) only
-net → actor, world(coords)
+net → actor, world(coords), input(Intent.ts)
 devtools(Network Lab) → net, actor, view, perf(grid/camera helpers), three / DOM
 world, actor, autonomy, data, net, perf(FrameStats), persistence, input(Intent.ts) → NOTHING in three/DOM (core)
 perf(scenes/hud), camera, view, ui, devtools, assets → three / DOM allowed
@@ -151,6 +151,14 @@ camera → NEVER actor mode enums (continuous signals only)
 worker → net (Host, protocol, Transport) and NOTHING else of src/
 worker → NEVER three, the DOM or node: workerd is its own runtime
 ```
+
+`net → input(Intent.ts)` was added on 2026-09-04, with the practice bot
+(`net/PracticeBot.ts`): a scripted player's thumbs must speak the ONE
+movement shape — the same one `actor →` already reaches for — or a bot
+would be moved by something the player's own body is not. `Intent` is
+pure and core, so the core rule above is untouched. Flagged here as a
+spec amendment rather than made quietly, because Joshua approved this
+document.
 
 ## 4. App flow and AppState
 

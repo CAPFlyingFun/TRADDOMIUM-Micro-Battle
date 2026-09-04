@@ -30,6 +30,12 @@ export const ACTION = {
   back: 'back',
   pause: 'pause',
   /**
+   * The practice bot's panel (`perf/BotHud.ts`): send it back in for
+   * another five minutes once its time is up. It appears only while a bot
+   * has been asked for, and only once that bot has gone.
+   */
+  restartBot: 'restart-bot',
+  /**
    * Back into the game I was in: the pause menu's RESUME, and the main
    * menu's. They are never on screen together — one is an overlay the
    * world owns, the other a scene — so a probe names the screen when it

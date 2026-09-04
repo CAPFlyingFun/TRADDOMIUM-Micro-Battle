@@ -87,7 +87,7 @@ export class PlayFlow {
     this.clear();
     this.roomPicker = new RoomCodePicker(this.host, {
       relayUrl: offer.relayUrl,
-      onJoin: (code) => this.hooks.onStart(this.hooks.sessions.multiplayer(code)),
+      onJoin: (code, options) => this.hooks.onStart(this.hooks.sessions.multiplayer(code, options)),
       onBack: () => this.openSessions(),
     });
     this.place(this.roomPicker.element);

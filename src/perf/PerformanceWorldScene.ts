@@ -65,14 +65,15 @@ import { ACTION, actionButton } from '../app/actions';
 import type { AppState } from '../app/AppState';
 import type { AppScene, FrameInfo, SceneContext, SceneFactory } from '../app/Scene';
 import {
-  NetworkedWorld, type MovePose, type NetworkIdentity, type NetworkedWorldState, type Transport,
+  NetworkedWorld, PracticeBot, type MovePose, type NetworkIdentity, type NetworkedWorldState, type Transport,
 } from '../net';
 import type { GameSession, SessionSaveState } from '../session/GameSession';
 import { ActorViews } from '../view/ActorViews';
 import { LoadProgress } from '../world/LoadProgress';
 import { toLocal } from '../world/origin';
+import { BotHud, type BotReadout } from './BotHud';
 import { FrameStats } from './FrameStats';
-import { FreeFlyCamera } from './FreeFlyCamera';
+import { FreeFlyCamera, headingOfYaw, yawForHeading } from './FreeFlyCamera';
 import { HUD_HZ, PerfHud, type SessionLink, type SessionReadout } from './PerfHud';
 import { BUILT_LAYERS, LayerToggles } from './layerToggles';
 import { PERF_WORLD_SCENE_ID } from './perfTool';
@@ -130,6 +131,19 @@ export interface PerformanceWorldHooks {
    * so rather than pretending to be solo.
    */
   identity?(): NetworkIdentity;
+  /**
+   * Who the PRACTICE BOT is on the wire, when the player asked for one on
+   * the room screen. A separate hook from `identity` because it is a
+   * separate player with its own id, and minting one is the wiring's job,
+   * not a world's. Returning null — or not being here — means no bot, and
+   * the panel is not built at all.
+   *
+   * Whether a bot was ASKED for is the session's answer, not this hook's:
+   * the session is what knows which room it is (`openPracticeBot`). Both
+   * have to say yes, exactly as the local player's own link needs both a
+   * transport and an identity.
+   */
+  practiceBot?(): NetworkIdentity | null;
 }
 
 /**
@@ -144,6 +158,44 @@ function multiplayerTransport(session: GameSession | null): Transport | null {
   if (session === null || session.mode !== 'multiplayer') return null;
   const held: unknown = (session as { readonly transport?: unknown }).transport;
   return isTransport(held) ? held : null;
+}
+
+/**
+ * A session that will open a SECOND link to the same room, for the
+ * practice bot — or null when it will not. Read structurally for the same
+ * reason as the transport above: `perf/` is handed a session, never its
+ * type (§5).
+ *
+ * IT ASKS, RATHER THAN ASSUMING. Every multiplayer session has this
+ * method; only one the player asked a bot from answers with a link. An
+ * earlier version returned a factory whenever the METHOD existed, so a
+ * plain two-player room built a bot whose first call threw — which is
+ * what `probe:multiplayer` reported as an uncaught page error on both
+ * browsers.
+ *
+ * Asking costs nothing: the session CONSTRUCTS a transport and dials
+ * nothing (`RemoteMultiplayerSession.openPracticeBot`), so the answer and
+ * the first link are the same object, and it is handed straight back on
+ * the first call rather than thrown away.
+ */
+function practiceBotOpener(session: GameSession | null): (() => Transport) | null {
+  if (session === null || session.mode !== 'multiplayer') return null;
+  const open: unknown = (session as { readonly openPracticeBot?: unknown }).openPracticeBot;
+  if (typeof open !== 'function') return null;
+  const ask = (): Transport | null => {
+    const link: unknown = (open as () => unknown).call(session);
+    return isTransport(link) ? link : null;
+  };
+  let first = ask();
+  if (first === null) return null;
+  return () => {
+    const link = first ?? ask();
+    first = null;
+    // A session that offered one link and then refused: nothing in this
+    // repository does that, and a bot with no wire must not pretend.
+    if (link === null) throw new Error('practice bot: the session would not open another link');
+    return link;
+  };
 }
 
 function isTransport(value: unknown): value is Transport {
@@ -233,10 +285,20 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
     let seenState: AppState | null = null;
 
     let net: NetworkedWorld | null = null;
+    /** The scripted test player, when one was asked for on the room screen. */
+    let bot: PracticeBot | null = null;
+    let botHud: BotHud | null = null;
     let remotes: ActorViews | null = null;
     let remoteGroup: THREE.Group | null = null;
     /** The authority has named this player's actor and the camera has been placed on it. Once, on join. */
     let spawnAdopted = false;
+    /**
+     * The player has taken the camera: they flew, or they looked. From
+     * that moment nothing here turns it again — see `watchBot` below.
+     */
+    let cameraTaken = false;
+    /** The exact pose the world last PLACED the camera at, so "has the player flown?" is a measured fact. */
+    let placedPose: { readonly wx: number; readonly wz: number; readonly yaw: number } | null = null;
     /** The scene graph's own count and positions, in the DOM: see REMOTE_CAPSULES_ROLE. */
     let capsuleList: HTMLElement | null = null;
     /** Seconds of RAW time since that list was last written; Infinity so the first networked frame writes it. */
@@ -260,7 +322,12 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
      */
     const claimPose = (): MovePose => {
       const pose = fly.pose();
-      return { at: pose.at, height: Math.max(0, pose.height), heading: pose.yaw };
+      // The camera's yaw is not an actor's heading: they are half a turn
+      // apart (`FreeFlyCamera.headingOfYaw`). Claiming the yaw raw pointed
+      // every player's capsule backwards on everybody else's screen —
+      // invisible while a capsule was a featureless pill, and a bug the
+      // moment one has a front.
+      return { at: pose.at, height: Math.max(0, pose.height), heading: headingOfYaw(pose.yaw) };
     };
 
     /**
@@ -298,6 +365,83 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         others: status.actorCount,
         refusedClaims: status.refusedClaims,
         ...(status.roundTripMs === undefined ? {} : { roundTripMs: status.roundTripMs }),
+      };
+    };
+
+    /** Remember where the world put the camera, so it can tell later whether the player has moved it. */
+    const placeCamera = (lx: number, height: number, lz: number, yaw: number, pitch: number): void => {
+      fly.place(lx, height, lz, yaw, pitch);
+      const pose = fly.pose();
+      placedPose = { wx: pose.at.wx, wz: pose.at.wz, yaw: pose.yaw };
+    };
+
+    /** True while the camera is still exactly where the world put it: the player has not flown. */
+    const cameraUntouched = (): boolean => {
+      if (placedPose === null) return false;
+      const pose = fly.pose();
+      return pose.at.wx === placedPose.wx && pose.at.wz === placedPose.wz && pose.yaw === placedPose.yaw;
+    };
+
+    /**
+     * WATCH THE BOT YOU ASKED FOR — until you take the camera yourself.
+     *
+     * The player asked for somebody to watch; a camera pointing the other
+     * way is the feature not working as far as they are concerned. The
+     * authority spawns players a hundred units apart along +wx while this
+     * camera looks along +wz, so the bot starts a third of a turn off to
+     * the side, and its patrol then carries it a hundred and fifty units
+     * further — enough to swing it out of frame again. One aim on join
+     * was tried first and `probe:bot` caught it leaving: present,
+     * correct, and off the edge of the screen.
+     *
+     * So the heading follows the bot, and ONLY while the camera is still
+     * exactly where the world last put it. The moment the player flies or
+     * looks, the pose stops matching and this hands the camera over for
+     * good — no mode, no toggle, no fighting the thumbs; the measured
+     * fact that the camera has moved IS the handover (§2.3).
+     *
+     * Position and pitch are never touched. Where you are was the
+     * authority's word (see the header) and this is only which way you
+     * were left looking.
+     */
+    const watchBot = (): void => {
+      if (cameraTaken || bot === null) return;
+      if (!cameraUntouched()) {
+        cameraTaken = true;
+        return;
+      }
+      const at = bot.readout.at;
+      if (at === null) return;
+      const pose = fly.pose();
+      const dx = at.wx - pose.at.wx;
+      const dz = at.wz - pose.at.wz;
+      // Standing on top of it there is no direction to face, and atan2 of
+      // two zeroes would snap the view to +wz for a frame.
+      if (Math.hypot(dx, dz) < 1) return;
+      const here = toLocal(pose.at);
+      // Ahead is (sin yaw, cos yaw) in (wx, wz) — the actor convention this
+      // world shares with `actor/Transform.ts`.
+      placeCamera(here.lx, pose.height, here.lz, yawForHeading(Math.atan2(dx, dz)), pose.pitch);
+    };
+
+    /**
+     * The bot's own state, in the words the panel prints. `net/`'s link
+     * states are translated through the SAME table the SESSION line uses,
+     * so the two overlays can never disagree about one relay.
+     */
+    const botReadout = (): BotReadout | null => {
+      if (bot === null) return null;
+      const r = bot.readout;
+      return {
+        name: r.name,
+        link: LINK_OF[r.link],
+        intent: r.intent,
+        at: r.at === null ? null : { wx: r.at.wx, wz: r.at.wz },
+        heading: r.heading,
+        secondsLeft: r.secondsLeft,
+        ...(r.roundTripMs === undefined ? {} : { roundTripMs: r.roundTripMs }),
+        refusedClaims: r.refusedClaims,
+        gone: r.phase === 'gone',
       };
     };
 
@@ -390,6 +534,20 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
           // screen open. `connect()` does not reject; the status carries
           // whatever it finds.
           void net.connect();
+
+          // THE PRACTICE BOT, if the player asked for one. It needs both
+          // halves — a session willing to open a second link, and an
+          // identity for it to be — exactly as the player's own link does.
+          // Built after the player's, and not awaited either: a bot that
+          // cannot reach the relay must cost the world nothing but an
+          // honest line in its own panel.
+          const openBot = practiceBotOpener(session);
+          const botIdentity = openBot === null ? null : (hooks.practiceBot?.() ?? null);
+          if (openBot !== null && botIdentity !== null) {
+            bot = new PracticeBot({ openTransport: openBot, identity: botIdentity, now: () => netClockMs });
+            botHud = new BotHud(ctx.uiLayer, { onRestart: () => void bot?.restart() });
+            void bot.start();
+          }
         }
 
         // loading → playing is requested here because only the world knows
@@ -419,7 +577,7 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
             if (mine !== null) {
               const at = toLocal(mine.at);
               const look = fly.pose();
-              fly.place(at.lx, look.height, at.lz, look.yaw, look.pitch);
+              placeCamera(at.lx, look.height, at.lz, look.yaw, look.pitch);
               spawnAdopted = true;
             }
           }
@@ -427,6 +585,12 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
           // the replica holds a moment behind the wire, and the claim just
           // sent cannot be in it yet either way.
           net.update(claimPose());
+          // The bot walks on SIM dt and spends its five minutes on RAW dt
+          // (`net/PracticeBot.ts`); it is stepped BEFORE the replica is
+          // read so a pose it claims this frame is on the wire before the
+          // next snapshot rather than one frame behind it.
+          bot?.update(frame.simDt, frame.rawDt);
+          if (spawnAdopted) watchBot();
           remotes?.sync(net.remoteActors(netClockMs));
           sinceCapsulePublish += frame.rawDt;
           if (sinceCapsulePublish >= 1 / HUD_HZ) {
@@ -435,6 +599,8 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
           }
         }
         hud?.update({ frame: stats.summary(), camera: fly.readout() }, frame.rawDt);
+        const botLine = botReadout();
+        if (botHud !== null && botLine !== null) botHud.update(botLine, frame.rawDt);
       },
 
       resize(width, height) {
@@ -445,6 +611,13 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         // The link goes first, with a `bye`, so the authority drops this
         // player now rather than waiting out its disconnect grace while a
         // ghost stands in everyone else's world.
+        // The bot leaves before the player does: its own `bye` on its own
+        // link, so the authority drops it now rather than leaving a
+        // scripted stranger standing in the room for its grace window.
+        bot?.close();
+        bot = null;
+        botHud?.dispose();
+        botHud = null;
         net?.close();
         net = null;
         remotes?.dispose();

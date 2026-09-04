@@ -19,7 +19,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { ROOM_CODE_EDGES, ROOM_CODE_MISSING, ROOM_CODE_RULE, isRoomCode } from '../src/net/relayConfig';
 import type { GameSession } from '../src/session/GameSession';
 import { PlayFlow } from '../src/ui/PlayFlow';
-import { ROOM_CODE_FIELD, ROOM_SCOPE_NOTE, RoomCodePicker, type RoomCodeHooks } from '../src/ui/RoomCodeScene';
+import {
+  PRACTICE_BOT_FIELD, PRACTICE_BOT_LABEL, PRACTICE_BOT_ROW_LABEL, ROOM_CODE_FIELD, ROOM_SCOPE_NOTE,
+  RoomCodePicker, type RoomCodeHooks,
+} from '../src/ui/RoomCodeScene';
 import { ROOMS_CAPTION, ROOMS_SCOPE_NOTE, type SessionOffers } from '../src/ui/SessionPicker';
 
 const byAction = (root: ParentNode, action: string): HTMLElement | null =>
@@ -32,6 +35,12 @@ const field = (root: ParentNode): HTMLInputElement => {
 };
 
 const join = (root: ParentNode): HTMLButtonElement => byAction(root, 'join-room') as HTMLButtonElement;
+
+const botSwitch = (root: ParentNode): HTMLButtonElement => {
+  const button = byAction(root, PRACTICE_BOT_FIELD);
+  if (!button) throw new Error('the room screen has no practice-bot switch');
+  return button as HTMLButtonElement;
+};
 
 const reason = (root: ParentNode): string =>
   root.querySelector<HTMLElement>('[data-role="room-code-reason"]')?.textContent ?? '';
@@ -120,7 +129,56 @@ describe('the room screen', () => {
     type(host, '  RED-Ant-7 ');
     expect(join(host).disabled).toBe(false);
     join(host).click();
-    expect(onJoin).toHaveBeenCalledWith('red-ant-7');
+    expect(onJoin).toHaveBeenCalledWith('red-ant-7', { practiceBot: false });
+  });
+
+  it('brings no practice bot unless the switch was turned on', () => {
+    // The default matters: a room that quietly added a scripted player
+    // would be a stranger in it that nobody asked for.
+    const { host, onJoin } = rig();
+    const toggle = botSwitch(host);
+    expect(toggle.textContent).toBe('Off');
+    expect(toggle.getAttribute('aria-checked')).toBe('false');
+    join(host).click();
+    expect(onJoin).toHaveBeenCalledWith(expect.any(String), { practiceBot: false });
+  });
+
+  it('asks for a practice bot once the switch says On, and stops asking when it says Off again', () => {
+    const { host, onJoin } = rig();
+    const toggle = botSwitch(host);
+
+    toggle.click();
+    expect(toggle.textContent).toBe('On');
+    expect(toggle.getAttribute('aria-checked')).toBe('true');
+    join(host).click();
+    expect(onJoin).toHaveBeenLastCalledWith(expect.any(String), { practiceBot: true });
+
+    toggle.click();
+    expect(toggle.textContent).toBe('Off');
+    join(host).click();
+    expect(onJoin).toHaveBeenLastCalledWith(expect.any(String), { practiceBot: false });
+  });
+
+  it('says what the practice bot is, in words a player can read', () => {
+    // The switch is two letters wide; the sentence that says a scripted
+    // test player is not a person has to be somewhere, and this is it.
+    const { host } = rig();
+    expect(botSwitch(host).getAttribute('aria-label')).toBe(PRACTICE_BOT_LABEL);
+    expect(PRACTICE_BOT_LABEL).toMatch(/practice bot/i);
+    expect(PRACTICE_BOT_LABEL).toMatch(/scripted/i);
+    expect(host.textContent).toContain(PRACTICE_BOT_ROW_LABEL);
+  });
+
+  it('gives the practice-bot switch a thumb-sized control, not a native checkbox', () => {
+    // CLAUDE.md: controls belong to the thumbs. `SettingsPanel` made this
+    // call first and this screen follows it rather than inventing a second
+    // kind of toggle.
+    const { host } = rig();
+    const toggle = botSwitch(host);
+    expect(toggle.tagName).toBe('BUTTON');
+    expect(toggle.classList.contains('ui-switch')).toBe(true);
+    expect(toggle.getAttribute('role')).toBe('switch');
+    expect(host.querySelector('input[type="checkbox"]')).toBeNull();
   });
 
   it('shows the wiring’s own reason when a room cannot be opened', () => {

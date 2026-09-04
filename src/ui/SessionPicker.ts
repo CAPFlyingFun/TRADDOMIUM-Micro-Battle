@@ -44,7 +44,7 @@
  */
 import { ACTION } from '../app/actions';
 import type { GameSession } from '../session/GameSession';
-import type { RoomOffer } from './RoomCodeScene';
+import type { RoomJoinOptions, RoomOffer } from './RoomCodeScene';
 import { actionRow, actionsRow, note } from './screen';
 import type { SlotView } from './SlotPicker';
 
@@ -68,8 +68,10 @@ export interface SessionOffers {
    * The multiplayer session. With a room code it is the session that
    * joins THAT room on the relay; without one it is the session this
    * build offers with no room, which is what the card is described by.
+   * `options` carries whatever else the room screen asked — today, only
+   * whether to bring a practice bot into the room.
    */
-  multiplayer(room?: string): GameSession;
+  multiplayer(room?: string, options?: RoomJoinOptions): GameSession;
   /**
    * The room step's facts, or absent/null when this build has no relay.
    * Its presence is the whole of how the ui learns there is online play

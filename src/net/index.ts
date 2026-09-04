@@ -22,6 +22,10 @@ export {
   CLAIM_HZ, NetworkedWorld, REJOIN_MS,
   type NetworkIdentity, type NetworkedWorldOptions, type NetworkedWorldState, type NetworkedWorldStatus,
 } from './NetworkedWorld';
+export {
+  PRACTICE_BOT_NAME, PRACTICE_BOT_SECONDS, PracticeBot,
+  type PracticeBotOptions, type PracticeBotPhase, type PracticeBotReadout,
+} from './PracticeBot';
 export { INTERPOLATION_MS, Replica, type ReplicaOptions } from './Replica';
 export {
   RELAY_QUERY_PARAM, ROOM_CODE_CHARS, ROOM_CODE_EDGES, ROOM_CODE_MAX_LENGTH,

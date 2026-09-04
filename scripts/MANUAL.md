@@ -47,6 +47,6 @@ cannot be wired because it is never run on its own:
 
 - `scripts/relayHarness.mjs` — starts `wrangler dev --local` on a free
   port, waits for `/health`, and stops it again, cleaning up its Durable
-  Object state. Imported by `npm run probe:relay` and
-  `npm run probe:multiplayer`, which both need a relay running on this
+  Object state. Imported by `npm run probe:relay`,
+  `npm run probe:multiplayer` and `npm run probe:bot`, which all need a relay running on this
   machine and neither of which is testing that plumbing.

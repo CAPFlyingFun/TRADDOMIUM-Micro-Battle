@@ -19,6 +19,7 @@
  * to keep working while the simulation is frozen.
  */
 import * as THREE from 'three';
+import { wrapHeading } from '../actor/Transform';
 import type { InputSnapshot } from '../input/Input';
 import type { CameraPose } from '../session/GameSession';
 import { local } from '../world/coords';
@@ -41,10 +42,46 @@ const MAX_PITCH = Math.PI / 2 - 0.01;
 
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
 
+/**
+ * THE CAMERA'S YAW IS NOT AN ACTOR'S HEADING, and the difference is half
+ * a turn.
+ *
+ * `applyRotation` sets `camera.rotation.set(pitch, yaw, 0)`, and a three
+ * camera looks down its own −Z, so the direction this one faces is
+ * (−sin yaw, −cos yaw) in (x, z). An actor's heading means the opposite
+ * convention — ahead is (sin h, cos h) (`actor/Transform.ts`) — so a yaw
+ * used as a heading points a capsule exactly backwards.
+ *
+ * One conversion, here, so nothing else has to remember which of the two
+ * it is holding. It is used twice: the pose this camera CLAIMS as a
+ * capsule, and the facing the perf HUD prints.
+ */
+export function headingOfYaw(yaw: number): number {
+  return wrapHeading(yaw + Math.PI);
+}
+
+/**
+ * The yaw that makes this camera LOOK along an actor heading. The same
+ * half turn, which makes it its own inverse — two names because the two
+ * call sites mean opposite things and a reader should not have to work
+ * out which.
+ */
+export function yawForHeading(heading: number): number {
+  return wrapHeading(heading + Math.PI);
+}
+
 export interface CameraReadout {
   readonly x: number;
   readonly y: number;
   readonly z: number;
+  /**
+   * Which way it is LOOKING, as an actor heading in radians — not the
+   * yaw. A benchmark camera that says where it is but not which way it
+   * points cannot be checked against anything in the world it is looking
+   * at, which is how a bot that was correctly placed and off the edge of
+   * the screen got as far as a screenshot (`scripts/probe-bot.mjs`).
+   */
+  readonly facing: number;
   /** World units per second, before any boost. */
   readonly speed: number;
 }
@@ -98,7 +135,7 @@ export class FreeFlyCamera {
 
   readout(): CameraReadout {
     const p = this.camera.position;
-    return { x: p.x, y: p.y, z: p.z, speed: this.speedValue };
+    return { x: p.x, y: p.y, z: p.z, facing: headingOfYaw(this.yaw), speed: this.speedValue };
   }
 
   /** A non-finite or non-positive sensitivity is ignored; the flag is always taken. */

@@ -5,7 +5,7 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import type { InputSnapshot, PointerState, TouchPoint } from '../src/input/Input';
-import { DEFAULT_SPEED, FreeFlyCamera } from '../src/perf/FreeFlyCamera';
+import { DEFAULT_SPEED, FreeFlyCamera, headingOfYaw, yawForHeading } from '../src/perf/FreeFlyCamera';
 
 const IDLE_POINTER: PointerState = { down: false, buttons: 0, x: 0, y: 0, dx: 0, dy: 0 };
 
@@ -114,7 +114,31 @@ describe('FreeFlyCamera', () => {
     expect(cam.speed).toBe(0.5);
     cam.speed = 1e9;
     expect(cam.speed).toBe(20000);
-    expect(cam.readout()).toEqual({ x: 0, y: 0, z: 0, speed: 20000 });
+    // `facing` is the direction it LOOKS, as an actor heading: a camera at
+    // yaw 0 looks down its own −Z, which is heading π in the world's terms.
+    expect(cam.readout()).toEqual({ x: 0, y: 0, z: 0, facing: Math.PI, speed: 20000 });
+  });
+
+  it('reports the direction it LOOKS, not its yaw — the two are half a turn apart', () => {
+    // A three camera looks down its own −Z; an actor's heading faces +wz.
+    // Claiming the yaw raw pointed a player's capsule backwards on every
+    // other screen, and left the practice bot off the edge of the frame
+    // when the world tried to look at it.
+    expect(headingOfYaw(0)).toBeCloseTo(Math.PI, 12);
+    expect(headingOfYaw(Math.PI)).toBeCloseTo(0, 12);
+    expect(headingOfYaw(Math.PI / 2)).toBeCloseTo(-Math.PI / 2, 12);
+    // Its own inverse: converting twice is where you started.
+    for (const angle of [0, 0.3, -1.2, Math.PI / 2, 3]) {
+      expect(headingOfYaw(yawForHeading(angle))).toBeCloseTo(angle, 12);
+    }
+
+    // And it agrees with the camera three actually renders: at this yaw
+    // the camera's own forward vector points along the heading reported.
+    const cam = rig();
+    cam.place(0, 0, 0, 0.7, 0);
+    const facing = cam.readout().facing;
+    const forward = new THREE.Vector3(0, 0, -1).applyEuler(cam.camera.rotation);
+    expect(Math.atan2(forward.x, forward.z)).toBeCloseTo(facing, 9);
   });
 
   it('twin-zone touch: a drag that starts on the left half moves, one on the right half looks', () => {

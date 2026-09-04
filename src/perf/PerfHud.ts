@@ -80,10 +80,18 @@ export interface PerfHudHooks {
   session?(): SessionReadout;
 }
 
-type Field = 'meanFps' | 'lowFps' | 'simDt' | 'cameraPosition' | 'cameraSpeed';
+type Field = 'meanFps' | 'lowFps' | 'simDt' | 'cameraPosition' | 'cameraSpeed' | 'cameraFacing';
 
 const GOLD = '#c9a94a';
 const PARCHMENT = '#e8e2c8';
+
+/**
+ * How wide the SESSION column may get before its line wraps, in pixels.
+ * Chosen so the whole HUD clears the PAUSE button at the 932 px design
+ * canvas with the longest line the wire produces — see the comment where
+ * it is used.
+ */
+const SESSION_MAX_WIDTH = 210;
 
 /** One word per link state, and not a word more than is true. */
 const LINK_WORDS: Readonly<Record<SessionLink, string>> = {
@@ -95,6 +103,21 @@ const LINK_WORDS: Readonly<Record<SessionLink, string>> = {
   unreachable: 'Relay unreachable',
   left: 'Left the session',
 };
+
+/**
+ * The one word for a link state, shared with the bot's panel
+ * (`BotHud.ts`) so the two overlays in the same world can never describe
+ * the same link with different words.
+ */
+export function linkWords(link: SessionLink): string {
+  return LINK_WORDS[link];
+}
+
+/** Radians to a whole degree in 0..359, the same reading the bot's panel gives. */
+function degrees(radians: number): number {
+  const deg = Math.round((radians * 180) / Math.PI);
+  return ((deg % 360) + 360) % 360;
+}
 
 function plural(count: number, one: string): string {
   return count === 1 ? `1 ${one}` : `${count} ${one}s`;
@@ -168,10 +191,27 @@ export class PerfHud {
       simDt: line(sim, 'sim-dt'),
       cameraPosition: line(camera, 'camera-position'),
       cameraSpeed: line(camera, 'camera-speed'),
+      cameraFacing: line(camera, 'camera-facing'),
     };
     // Before LAYERS, which is a column of rows rather than a readout and
     // reads best last.
-    this.sessionLine = hooks.session === undefined ? null : line(column('SESSION'), 'session');
+    if (hooks.session === undefined) {
+      this.sessionLine = null;
+    } else {
+      const col = column('SESSION');
+      // THE ONE COLUMN THAT WRAPS. Every other readout is a fixed handful
+      // of characters; this one grows with what the wire is doing —
+      // `Connected · 1 other player · claim→ack 17 ms` is three times the
+      // width of `Solo`. Left on one line it pushed the HUD 47 px under
+      // the PAUSE button, which is pinned to the right edge, and the
+      // LAYERS column's last word disappeared behind it. Wrapping costs
+      // one line of a HUD that is already seven rows tall; clipping costs
+      // a readout. `scripts/probe-bot.mjs` measures both, with another
+      // player in the room, because that is when the line is longest.
+      col.style.maxWidth = `${SESSION_MAX_WIDTH}px`;
+      this.sessionLine = line(col, 'session');
+      this.sessionLine.style.whiteSpace = 'normal';
+    }
     this.buildLayerRows(column('LAYERS'));
     uiLayer.appendChild(this.root);
   }
@@ -244,6 +284,9 @@ export class PerfHud {
     this.fields.simDt.textContent = f.simDt === 0 ? 'paused' : `${(f.simDt * 1000).toFixed(1)} ms`;
     this.fields.cameraPosition.textContent = `x ${c.x.toFixed(1)}  y ${c.y.toFixed(1)}  z ${c.z.toFixed(1)}`;
     this.fields.cameraSpeed.textContent = `speed ${c.speed.toFixed(0)} units/s`;
+    // Degrees in the ACTOR's convention, so this line and a capsule's own
+    // facing describe the same compass — see `FreeFlyCamera.headingOfYaw`.
+    this.fields.cameraFacing.textContent = `facing ${degrees(c.facing)}°`;
     const session = this.hooks.session?.();
     if (this.sessionLine !== null && session !== undefined) this.sessionLine.textContent = sessionWords(session);
     // The model is the truth; a click the owner rejected snaps back here.

@@ -41,7 +41,7 @@ import { ACTION } from '../app/actions';
 import {
   ROOM_CODE_MAX_LENGTH, ROOM_CODE_RULE, generateRoomCode, normaliseRoomCode, relayHost, roomCodeProblem,
 } from '../net/relayConfig';
-import { actionRow, actionsRow, footer, labelledRow, note } from './screen';
+import { actionRow, actionsRow, footer, labelledRow, namedButton, note } from './screen';
 
 /**
  * What the wiring hands the ui about rooms. Its PRESENCE is the answer to
@@ -56,16 +56,37 @@ export interface RoomOffer {
 /** The field a probe types into; a field is not a verb, so it is not in `ACTION`. */
 export const ROOM_CODE_FIELD = 'room:code';
 
+/** The practice-bot checkbox. A toggle is not a verb either, so it is not in `ACTION`. */
+export const PRACTICE_BOT_FIELD = 'room:practice-bot';
+
+/**
+ * What the checkbox says. Short because the panel is 430 px tall on the
+ * phone this game is played on, and honest because a scripted player is
+ * not a person: the capsule it puts in the room is called "Practice Bot"
+ * over its head and its panel repeats it (`perf/BotHud.ts`).
+ */
+export const PRACTICE_BOT_LABEL = 'Add a practice bot: a scripted test player that walks about for five minutes';
+
+/** The row's visible label. Short, and it carries the one fact the switch itself cannot: how long. */
+export const PRACTICE_BOT_ROW_LABEL = 'Practice bot (5 min)';
+
+/** What the player chose on this screen, beyond which room. */
+export interface RoomJoinOptions {
+  /** A scripted test player joins the same room and walks about for five minutes. */
+  readonly practiceBot: boolean;
+}
+
 export interface RoomCodeHooks extends RoomOffer {
   /** A fresh code to offer. Defaults to `generateRoomCode`; a test owns the draw by passing its own. */
   suggest?(): string;
   /**
    * JOIN, with the NORMALISED code (trimmed, lower case) — the exact
-   * string that will name the room on the relay, never the raw typing.
-   * Throwing from here is how a broken relay address reaches the player:
-   * the message is shown under the field.
+   * string that will name the room on the relay, never the raw typing —
+   * and whatever else this screen asked. Throwing from here is how a
+   * broken relay address reaches the player: the message is shown under
+   * the field.
    */
-  onJoin(code: string): void;
+  onJoin(code: string, options: RoomJoinOptions): void;
   onBack(): void;
 }
 
@@ -87,6 +108,9 @@ export const ROOM_SCOPE_NOTE =
 export class RoomCodePicker {
   readonly element: HTMLElement;
   private readonly field: HTMLInputElement;
+  private readonly practiceBot: HTMLButtonElement;
+  /** Whether the switch is on. The button's words follow this, never the other way about. */
+  private botWanted = false;
   private readonly reason: HTMLParagraphElement;
   private readonly join: HTMLButtonElement;
 
@@ -120,6 +144,20 @@ export class RoomCodePicker {
       actionRow(ACTION.newRoomCode, 'New code', () => this.regenerate(), { compact: true }),
     ]);
 
+    // A switch, not a native checkbox: the settings panel already made
+    // this decision (`SettingsPanel.buildSwitch`) because a 13 px box is
+    // not a thumb target, and controls belong to the thumbs (CLAUDE.md).
+    // One row and no paragraph beside it: at 430 px the panel has no
+    // spare height, and the full sentence is the control's aria-label,
+    // the capsule's own name over its head and the first line of its
+    // panel (`perf/BotHud.ts`).
+    this.practiceBot = namedButton(PRACTICE_BOT_FIELD, 'Off', () => this.toggleBot(), { compact: true });
+    this.practiceBot.classList.add('ui-switch');
+    this.practiceBot.setAttribute('role', 'switch');
+    this.practiceBot.setAttribute('aria-checked', 'false');
+    this.practiceBot.setAttribute('aria-label', PRACTICE_BOT_LABEL);
+    labelledRow(this.element, PRACTICE_BOT_ROW_LABEL, [this.practiceBot]);
+
     this.reason = note(this.element, '');
     this.reason.dataset.role = 'room-code-reason';
     note(this.element, ROOM_SCOPE_NOTE);
@@ -137,6 +175,13 @@ export class RoomCodePicker {
 
   dispose(): void {
     this.element.remove();
+  }
+
+  /** The switch. The model is the truth and the button is redrawn from it. */
+  private toggleBot(): void {
+    this.botWanted = !this.botWanted;
+    this.practiceBot.textContent = this.botWanted ? 'On' : 'Off';
+    this.practiceBot.setAttribute('aria-checked', String(this.botWanted));
   }
 
   /** Offer a different code to share. What was typed is replaced, because the button says so. */
@@ -175,7 +220,7 @@ export class RoomCodePicker {
   private submit(): void {
     if (this.check() !== null) return;
     try {
-      this.hooks.onJoin(normaliseRoomCode(this.field.value));
+      this.hooks.onJoin(normaliseRoomCode(this.field.value), { practiceBot: this.botWanted });
     } catch (error) {
       this.say(`Could not open that room: ${messageOf(error)}`);
       this.join.disabled = true;

@@ -16,7 +16,8 @@
 import {
   DEVTOOLS_SCENE_ID, NET_LAB_SCENE_ID, createDevToolsHubScene, createNetworkLabScene, netLabTool, registerTool,
 } from '../devtools';
-import { RELAY_QUERY_PARAM, resolveRelayUrl, toRoomSocketUrl } from '../net';
+import { playerId } from '../actor/PlayerId';
+import { PRACTICE_BOT_NAME, RELAY_QUERY_PARAM, resolveRelayUrl, toRoomSocketUrl } from '../net';
 import { createPerformanceWorldScene } from '../perf/PerformanceWorldScene';
 import { PERF_WORLD_MAP_ID, PERF_WORLD_SCENE_ID, perfWorldTool } from '../perf/perfTool';
 import {
@@ -142,9 +143,12 @@ const RELAY_URL = resolveRelayUrl(
  */
 const offers = (ctx: SceneContext): SessionOffers => ({
   solo: () => new LocalSoloSession(soloSlotStore(ctx, 1), PERF_WORLD_MAP_ID),
-  multiplayer: (room) =>
+  multiplayer: (room, options) =>
     new RemoteMultiplayerSession(PERF_WORLD_MAP_ID, {
       relayUrl: room === undefined || room === '' ? '' : toRoomSocketUrl(RELAY_URL, room),
+      // Only the room screen can ask for one, so a session with no room
+      // never carries a bot: there would be no room to put it in.
+      practiceBot: options?.practiceBot === true,
     }),
   ...(RELAY_URL === '' ? {} : { rooms: () => ({ relayUrl: RELAY_URL }) }),
   slots: () => readSoloSlots(ctx.storage.kv, hasWorld),
@@ -240,6 +244,18 @@ export function registerScenes(): void {
           const p = loadProfile(ctx.storage.open(PLAYER_PROFILE_SPEC));
           return { playerId: playerIdOf(p), name: p.displayName };
         },
+        // THE PRACTICE BOT'S OWN IDENTITY, minted here because a world may
+        // not mint one: it is a second player in the room and the
+        // authority keys players by this id (`net/Host.ts`). Fresh every
+        // time the world enters, so a bot from a previous visit can never
+        // be re-attached to by mistake — and never this device's own id,
+        // which would make the authority hand the player's own actor to
+        // the bot. Whether a bot is wanted at all is the SESSION's answer;
+        // this hook only says who it would be.
+        practiceBot: () => ({
+          playerId: playerId(`practice-bot-${crypto.randomUUID()}`),
+          name: PRACTICE_BOT_NAME,
+        }),
       })(ctx),
     ),
   );

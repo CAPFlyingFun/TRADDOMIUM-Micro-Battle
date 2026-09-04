@@ -50,6 +50,13 @@ export interface RemoteMultiplayerOptions {
    * socket and so the app can hand in a transport it already holds.
    */
   readonly createTransport?: (url: string) => Transport;
+  /**
+   * The player asked for a practice bot in this room (`ui/RoomCodeScene`).
+   * It is carried on the session because the session is the object that
+   * knows WHICH ROOM this is and travels from the room screen to the
+   * world; the world asks for the link when it enters.
+   */
+  readonly practiceBot?: boolean;
 }
 
 export class RemoteMultiplayerSession implements GameSession {
@@ -59,23 +66,48 @@ export class RemoteMultiplayerSession implements GameSession {
 
   /** The link, or null when no relay is configured. Read-only to everyone above. */
   private readonly link: Transport | null;
+  /** The room's address and how to reach it, kept so a SECOND link can be opened for a bot. */
+  private readonly url: string;
+  private readonly create: (url: string) => Transport;
+  private readonly wantsPracticeBot: boolean;
 
   constructor(
     readonly mapId: string,
     options: RemoteMultiplayerOptions = {},
   ) {
-    const url = options.relayUrl ?? '';
-    const create = options.createTransport ?? ((at: string): Transport => new WebSocketTransport({ url: at }));
+    this.url = options.relayUrl ?? '';
+    this.create = options.createTransport ?? ((at: string): Transport => new WebSocketTransport({ url: at }));
+    this.wantsPracticeBot = options.practiceBot === true;
     // A blank URL is "no relay" and is the pinned-caption case. A
     // malformed one is a typo, and the transport throws on it here at
     // construction rather than letting it hide behind a caption that
     // reads like a build with online play simply switched off.
-    this.link = url.length === 0 ? null : create(url);
+    this.link = this.url.length === 0 ? null : this.create(this.url);
   }
 
   /** Null when this build has no relay; the transport otherwise, for whoever drives the client. */
   get transport(): Transport | null {
     return this.link;
+  }
+
+  /**
+   * A SECOND, FRESH link to the same room, for the practice bot
+   * (`net/PracticeBot.ts`) — null when no bot was asked for, or when
+   * this build has no relay to ask it into.
+   *
+   * A separate socket and not a share of the player's own, because the
+   * bot is a separate PLAYER: it says its own hello under its own
+   * PlayerId, and the authority keys players by that (`net/Host.ts`,
+   * `onHello`). Two players down one socket would be one connection
+   * speaking for two, which the host refuses by design.
+   *
+   * A function and not a property, because the bot leaves after five
+   * minutes and can be sent back in: a link that has said `bye` cannot
+   * be reopened, so each run gets its own.
+   */
+  openPracticeBot(): Transport | null {
+    if (!this.wantsPracticeBot || this.url.length === 0) return null;
+    return this.create(this.url);
   }
 
   get caption(): string {

@@ -21,7 +21,7 @@ import { Input } from '../src/input/Input';
 import { HOST_DEFAULTS } from '../src/net/Host';
 import type { MessageHandler, Transport, TransportState } from '../src/net/Transport';
 import type { Message, MoveMessage, Snapshot } from '../src/net/protocol';
-import { DEFAULT_SPEED } from '../src/perf/FreeFlyCamera';
+import { DEFAULT_SPEED, headingOfYaw } from '../src/perf/FreeFlyCamera';
 import {
   REMOTE_CAPSULES_ROLE, createPerformanceWorldScene, type PerformanceWorldHooks,
 } from '../src/perf/PerformanceWorldScene';
@@ -54,6 +54,7 @@ interface RigOptions {
   readonly session?: GameSession | null;
   readonly resume?: () => SessionSaveState | null;
   readonly identity?: () => { readonly playerId: ReturnType<typeof playerId>; readonly name: string };
+  readonly practiceBot?: () => { readonly playerId: ReturnType<typeof playerId>; readonly name: string } | null;
 }
 
 function rig(initial: AppState, options: RigOptions = {}) {
@@ -95,6 +96,7 @@ function rig(initial: AppState, options: RigOptions = {}) {
       savePoint = save;
     },
     identity: options.identity,
+    practiceBot: options.practiceBot,
   };
   const scene = createPerformanceWorldScene(hooks)(ctx);
   const field = (name: string): string =>
@@ -291,6 +293,9 @@ describe('PerformanceWorldScene on a networked session', () => {
   const them = playerId('other-device');
   const mine = spawnCapsule(me, 'Keeper', colorFor(me), world(0, 0), actorId('capsule-1'));
   const theirs = spawnCapsule(them, 'Other', colorFor(them), world(400, 0), actorId('capsule-2'));
+  /** The practice bot, as the authority would spawn it: its own player, its own actor. */
+  const botId = playerId('practice-bot-1');
+  const botCapsule = spawnCapsule(botId, 'Practice Bot', colorFor(botId), world(100, 0), actorId('capsule-3'));
 
   /** The smallest wire that satisfies the contract; `deliver` is the relay speaking. */
   class FakeTransport implements Transport {
@@ -376,6 +381,79 @@ describe('PerformanceWorldScene on a networked session', () => {
     return { ...r, transport, session, second, capsules, drawn };
   }
 
+  /**
+   * The same rig, but the session opens a SECOND link because the player
+   * asked for a practice bot on the room screen. Two transports, because
+   * the bot is a second PLAYER: one connection speaks for one player
+   * (`net/Host.onHello`).
+   */
+  function botRig() {
+    const mine_ = new FakeTransport();
+    const bots = new FakeTransport();
+    const links = [mine_, bots];
+    let handed = 0;
+    const session = new RemoteMultiplayerSession('perf-empty', {
+      relayUrl: 'ws://127.0.0.1:8787/room/abcde',
+      practiceBot: true,
+      createTransport: () => links[Math.min(handed++, links.length - 1)],
+    });
+    const r = rig('loading', {
+      session,
+      identity: () => ({ playerId: me, name: 'Keeper' }),
+      practiceBot: () => ({ playerId: botId, name: 'Practice Bot' }),
+    });
+    const second = (): void => r.scene.update({ rawDt: 1, simDt: SIXTY, elapsed: 1 });
+    return { ...r, mine: mine_, bots, session, second };
+  }
+
+  it('builds no practice bot, and throws nothing, when the room was not asked for one', async () => {
+    // Every multiplayer session HAS the method; only one the player asked
+    // a bot from answers with a link. Reading the method's existence as
+    // "yes" built a bot with no wire, and `probe:multiplayer` reported it
+    // as an uncaught page error on BOTH browsers of an ordinary room.
+    const { scene, uiLayer, transport, second } = netRig();
+    await scene.enter();
+    transport.deliver({ kind: 'welcome', yourId: me, snapshot: snapshot(1, [mine]) });
+    await flush();
+    second();
+    expect(uiLayer.querySelector('[data-role="bot-hud"]')).toBeNull();
+    // And exactly one hello went out: the player's own.
+    expect(transport.kind('hello')).toHaveLength(1);
+  });
+
+  it('opens a SECOND link for the practice bot, and shows its panel', async () => {
+    const { scene, uiLayer, mine: playerLink, bots, second } = botRig();
+    await scene.enter();
+    await flush();
+
+    // Two players, two connections, two hellos — each on its own wire.
+    expect(playerLink.kind('hello')).toHaveLength(1);
+    expect(bots.kind('hello')).toEqual([
+      { kind: 'hello', playerId: botId, name: 'Practice Bot', color: colorFor(botId) },
+    ]);
+
+    const panel = uiLayer.querySelector('[data-role="bot-hud"]');
+    expect(panel).not.toBeNull();
+    second();
+    // It says what it is, before it has been anywhere.
+    expect(panel?.textContent).toContain('not a person');
+  });
+
+  it('takes the practice bot down with the world, on its own link', async () => {
+    const { scene, uiLayer, bots } = botRig();
+    await scene.enter();
+    // The authority welcomes the bot, so there is a session to say goodbye
+    // to: a handshake that never completed has nothing to hang up.
+    bots.deliver({ kind: 'welcome', yourId: botId, snapshot: snapshot(1, [botCapsule]) });
+    await flush();
+
+    scene.dispose?.();
+    expect(uiLayer.querySelector('[data-role="bot-hud"]')).toBeNull();
+    // A scripted stranger left standing in the room for the grace window
+    // is somebody else's confusion.
+    expect(bots.kind('bye')).toEqual([{ kind: 'bye', playerId: botId }]);
+  });
+
   it('says hello on the session’s own wire, then claims the camera pose as a capsule', async () => {
     const { scene, transport, second, field } = netRig();
     await scene.enter();
@@ -395,9 +473,15 @@ describe('PerformanceWorldScene on a networked session', () => {
     // units from that actor in one step — more than the travel budget
     // allows — and would be refused, and so would every one after it,
     // because the gap would never close.
+    // The heading claimed is the direction the camera LOOKS, not its yaw:
+    // a three camera looks down its own −Z and an actor's heading faces
+    // +wz, so the two are half a turn apart and claiming the yaw raw
+    // pointed the capsule backwards on every other screen
+    // (`FreeFlyCamera.headingOfYaw`).
     expect(transport.moves()).toEqual([
-      { kind: 'move', actorId: mine.id, at: mine.at, height: START.y, heading: START.yaw, seq: 0 },
+      { kind: 'move', actorId: mine.id, at: mine.at, height: START.y, heading: headingOfYaw(START.yaw), seq: 0 },
     ]);
+    expect(headingOfYaw(START.yaw)).toBeCloseTo(Math.PI, 12);
     // The look and the height are the player's; only the ground position came from the wire.
     expect(scene.camera.position.x).toBeCloseTo(mine.at.wx);
     expect(scene.camera.position.y).toBeCloseTo(START.y);
