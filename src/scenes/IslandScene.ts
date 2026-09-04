@@ -1188,6 +1188,26 @@ export class IslandScene {
        */
       trunkAt: (wx: number, y: number, wz: number, radius = 0) =>
         this.landmarks.trunks.bump(wx, y, wz, radius),
+      /**
+       * Probe only: WHERE HER DRAWN BODY SITS relative to her origin.
+       *
+       * Her seat has been measured at 0.01 cm off the bark — she is
+       * exactly on it — so a float that is still visible is her model
+       * standing above its own zero. This reports that gap directly
+       * instead of another theory about it.
+       */
+      seating: () => {
+        const box = new THREE.Box3().setFromObject(this.ant.root);
+        const parts: Record<string, number> = {};
+        this.ant.root.traverse((node) => {
+          const mesh = node as THREE.Mesh;
+          if (!mesh.isMesh || !mesh.geometry) return;
+          parts[node.name || '(unnamed)'] = +(
+            new THREE.Box3().setFromObject(node).min.y - this.ant.root.position.y
+          ).toFixed(3);
+        });
+        return { whole: +(box.min.y - this.ant.root.position.y).toFixed(3), parts };
+      },
       /** Probe only: is she holding wood, and which way is her up? */
       climbing: () => ({
         on: this.ant.climbing,

@@ -46,7 +46,9 @@ const look = () => page.evaluate(() => {
     aloft: ap.aloft,
     pace: +window.__island.speed().toFixed(2),
     y: +y.toFixed(2),
-    ground: +window.__island.climbing().ground.toFixed(2),
+    // `climbing()` does not exist before v0.0.159, and this probe has
+    // to run against the build Joshua says was fine. MSL height is in
+    // every version and is all the climb profile needs.
     stam: +window.__island.stamina().toFixed(2),
   };
 });
@@ -88,9 +90,10 @@ const everUp = after.some((s) => s.aloft);
 const endedUp = after.length > 0 && after[after.length - 1].aloft;
 console.log(`\nEVER LEFT THE GROUND: ${everUp}`);
 console.log(`STILL AIRBORNE AT THE END: ${endedUp}`);
-const rises = after.map((s) => +(s.y - s.ground).toFixed(2));
-console.log(`clearance over the ground, per frame: ${JSON.stringify(rises.slice(0, 40))}`);
-console.log(`highest she got: ${Math.max(0, ...rises).toFixed(2)} cm`);
+const base = after.length ? after[0].y : 0;
+const rises = after.map((s) => +(s.y - base).toFixed(2));
+console.log(`climb from the first lever frame, per frame: ${JSON.stringify(rises.slice(0, 40))}`);
+console.log(`highest she got: ${Math.max(0, ...rises).toFixed(2)} cm above where she started`);
 console.log(`aloft flags: ${JSON.stringify(after.map((s) => (s.aloft ? 1 : 0)).slice(0, 40))}`);
 if (errors.length) console.log(`PAGE ERRORS ${JSON.stringify(errors)}`);
 await page.screenshot({ path: 'probe-liftoff.png' });
