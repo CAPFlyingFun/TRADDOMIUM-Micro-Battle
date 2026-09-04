@@ -32,6 +32,8 @@ export {
   type ProfileHooks, type ProfileSource, type ProfileView,
 } from './ProfileScene';
 export { Screen, type Wire, type ScreenTone } from './screen';
+// The document-painted boot splash: main.ts reports measured boot facts into it and takes it down.
+export { BOOT_ID, dismissBootSplash, reportBoot } from './splash/BootSplash';
 export { SessionPicker, type SavedGame, type SessionOffers, type SessionPickerHooks } from './SessionPicker';
 export { SessionPickerScene, createSessionPickerScene } from './SessionPickerScene';
 export { SettingsPanel, settingAction, SETTING_RESET_ACTION, type SettingsPanelHooks } from './SettingsPanel';

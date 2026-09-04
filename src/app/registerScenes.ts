@@ -13,11 +13,17 @@
  * settings document — is built here from the `SceneContext`, and only
  * here, so there is one place to look when the wiring is wrong.
  */
-import { DEVTOOLS_SCENE_ID, createDevToolsHubScene, registerTool } from '../devtools';
+import {
+  DEVTOOLS_SCENE_ID, NET_LAB_SCENE_ID, createDevToolsHubScene, createNetworkLabScene, netLabTool, registerTool,
+} from '../devtools';
 import { createPerformanceWorldScene } from '../perf/PerformanceWorldScene';
 import { PERF_WORLD_MAP_ID, PERF_WORLD_SCENE_ID, perfWorldTool } from '../perf/perfTool';
-import { LocalSoloSession, SOLO_SAVE_SPEC } from '../session/LocalSoloSession';
-import { MAX_DISPLAY_NAME, PLAYER_PROFILE_SPEC, loadProfile, setDisplayName } from '../session/PlayerProfile';
+import {
+  LocalSoloSession, restorableStateOf, savedSoloGame, soloSaveSpec, type KnownMap,
+} from '../session/LocalSoloSession';
+import {
+  MAX_DISPLAY_NAME, PLAYER_PROFILE_SPEC, loadProfile, playerIdOf, setDisplayName,
+} from '../session/PlayerProfile';
 import { RemoteMultiplayerSession } from '../session/RemoteMultiplayerSession';
 import {
   SCREEN_ID,
@@ -35,9 +41,9 @@ import {
   type SessionOffers,
 } from '../ui';
 import { LoadProgress } from '../world/LoadProgress';
-import { WORLD_SCENE_PREFIX, resolveWorld } from '../world/WorldLoader';
+import { WORLD_SCENE_PREFIX, resolveWorld, worldSceneId } from '../world/WorldLoader';
 import type { SceneContext } from './Scene';
-import { registerScene, sceneFactory } from './registry';
+import { listScenes, registerScene, sceneFactory } from './registry';
 import { withPauseMenu } from './worldShell';
 
 /**
@@ -69,10 +75,27 @@ function worldTitle(mapId: string): string {
 const worldLoad = new LoadProgress();
 const WORLD_MILESTONE = 'world';
 
-/** The sessions the menu and the picker offer. Both carry the only world that exists. */
+/**
+ * Does this build carry a world for the map a save names? Read from the
+ * registry AT CALL TIME — after every `registerScene` below has run — so
+ * the save store can refuse a save on a world that is not here, and the
+ * menu never offers a CONTINUE into nothing. session/ may not read the
+ * registry itself (§3); this is the one predicate it is handed.
+ */
+const hasWorld: KnownMap = (mapId) => listScenes().includes(worldSceneId(mapId));
+
+/** The one solo save store, opened with the world predicate so every reader agrees on what counts. */
+const soloSaves = (ctx: SceneContext) => ctx.storage.open(soloSaveSpec(hasWorld));
+
+/**
+ * The sessions the menu and the picker offer. Both carry the only world
+ * that exists; `saved` is the game on this device that CONTINUE resumes,
+ * on the save's own map, or null when there is nothing this build can load.
+ */
 const offers = (ctx: SceneContext): SessionOffers => ({
-  solo: () => new LocalSoloSession(ctx.storage.open(SOLO_SAVE_SPEC), PERF_WORLD_MAP_ID),
+  solo: () => new LocalSoloSession(soloSaves(ctx), PERF_WORLD_MAP_ID),
   multiplayer: () => new RemoteMultiplayerSession(PERF_WORLD_MAP_ID),
+  saved: () => savedSoloGame(ctx.storage.kv, hasWorld),
 });
 
 const loading = (ctx: SceneContext): LoadingHooks => {
@@ -113,13 +136,18 @@ export function registerScenes(): void {
   // The Performance World: the benchmark scene, and in Phase 0 the only
   // world. It reaches the settings it can honour through a hook, because
   // perf/ may not import ui/ (§3).
+  // The camera resumes from whatever the session can restore (the solo
+  // save on this device; nothing for the multiplayer mock), and the shell
+  // takes the world's save point so QUIT writes the pose the player last saw.
   registerScene(
     PERF_WORLD_SCENE_ID,
-    withPauseMenu((ctx, onPause) =>
+    withPauseMenu((ctx, shell) =>
       createPerformanceWorldScene({
-        onPause,
+        onPause: shell.onPause,
+        onSavePoint: shell.onSavePoint,
         onLoadProgress: (fraction) => worldLoad.report(WORLD_MILESTONE, fraction),
         settings: () => openSettings(ctx.storage).read(),
+        resume: () => restorableStateOf(ctx.app.session),
       })(ctx),
     ),
   );
@@ -142,13 +170,30 @@ export function registerScenes(): void {
           // opened this way IS a solo game in that world, and quitting from
           // its pause menu lands on the main menu like any other game.
           const mapId = id.slice(WORLD_SCENE_PREFIX.length);
-          startSession(ctx, new LocalSoloSession(ctx.storage.open(SOLO_SAVE_SPEC), mapId));
+          startSession(ctx, new LocalSoloSession(soloSaves(ctx), mapId));
           return;
         }
         // A tool scene of its own stays in the `menu` state, like any front-door screen.
         void ctx.scenes.goTo(sceneFactory(id));
       },
       onBack: () => goToScreen(ctx, SCREEN_ID.menu),
+    })),
+  );
+
+  // The Network Lab (Phase 1): one host and two loopback clients in this
+  // tab, no server. A plain tool scene in the `menu` state — it holds no
+  // session, so it is not a `world:` id and needs no loading screen. Its
+  // "A" player is this device's profile, the same identity a real session
+  // would present.
+  registerTool(netLabTool);
+  registerScene(
+    NET_LAB_SCENE_ID,
+    createNetworkLabScene((ctx) => ({
+      identity: () => {
+        const p = loadProfile(ctx.storage.open(PLAYER_PROFILE_SPEC));
+        return { playerId: playerIdOf(p), name: p.displayName };
+      },
+      onBack: () => goToScreen(ctx, SCREEN_ID.editors),
     })),
   );
 }

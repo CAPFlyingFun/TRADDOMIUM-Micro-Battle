@@ -11,6 +11,8 @@
  */
 export const ACTION = {
   play: 'play',
+  /** The menu's CONTINUE (a saved solo game) and the loader's press-to-continue share the one word. */
+  continue: 'continue',
   solo: 'solo',
   multiplayer: 'multiplayer',
   profile: 'profile',

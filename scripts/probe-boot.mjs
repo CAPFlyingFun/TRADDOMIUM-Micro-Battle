@@ -29,10 +29,16 @@
  *   3. the world's HUD appears (`[data-action="pause"]`);
  *   4. sixty animation frames run;
  *   5. the HUD text carries an FPS number;
- *   6. the console logged no errors and the page threw none.
+ *   6. PAUSE → QUIT lands on a menu that offers `[data-action="continue"]`
+ *      saying "Last played just now" (Phase 1: the solo save exists and
+ *      this build has the world it names), and CONTINUE reaches the
+ *      world's HUD again;
+ *   7. the console logged no errors and the page threw none.
  *
- * Exit code 0 only when every check passes. The screenshot is written
- * either way (`shots/boot.png`, gitignored) so a failure leaves evidence.
+ * Exit code 0 only when every check passes. The screenshots are written
+ * either way (`shots/boot.png` from the first world entry, and
+ * `shots/menu-continue.png` from the menu after QUIT, both gitignored)
+ * so a failure leaves evidence.
  * The frame rate it prints is SwiftShader's, not a phone's: it is
  * evidence the loop runs, never a number to tune against.
  */
@@ -45,6 +51,7 @@ import { preview } from 'vite';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DIST_INDEX = path.join(ROOT, 'dist', 'index.html');
 const SHOT = path.join(ROOT, 'shots', 'boot.png');
+const SHOT_CONTINUE = path.join(ROOT, 'shots', 'menu-continue.png');
 
 /** The design canvas: a phone in landscape at logical size. */
 const VIEWPORT = { width: 932, height: 430 };
@@ -79,6 +86,8 @@ const CHROMIUM_ARGS = ['--use-gl=angle', '--use-angle=swiftshader', '--disable-d
 const FPS_PATTERNS = [/(\d+(?:\.\d+)?)\s*fps\b/i, /\bfps\b[^\d\n]{0,12}(\d+(?:\.\d+)?)/i];
 
 const failures = [];
+/** Set once drive() has taken the first world shot, so the finally below only adds evidence on a failure before it. */
+let worldShotTaken = false;
 const consoleErrors = [];
 const pageErrors = [];
 
@@ -238,13 +247,43 @@ async function drive(page, url) {
   } else {
     log(`HUD FPS readout: "${fps.matched}" (parsed ${fps.value}). Full HUD text: "${fps.text}"`);
   }
+
+  // The world as the player first sees it, before the round trip below.
+  await screenshot(page, SHOT);
+  worldShotTaken = true;
+
+  log('pressing PAUSE, then QUIT');
+  await page.click('[data-action="pause"]', { timeout: TIMEOUT.menu });
+  await page.click('[data-action="quit"]', { timeout: TIMEOUT.menu });
+  try {
+    await page.waitForSelector('[data-action="continue"]', { timeout: TIMEOUT.menu });
+  } catch {
+    fail(`after QUIT the menu shows no [data-action="continue"] within ${TIMEOUT.menu / 1000} s. UI reads: "${await uiText(page)}"`);
+    return;
+  }
+  const continueText = (await page.locator('[data-action="continue"]').innerText()).replace(/\s+/g, ' ').trim();
+  if (!/Last played just now/i.test(continueText)) {
+    fail(`CONTINUE reads "${continueText}"; expected it to say "Last played just now" right after QUIT`);
+  } else {
+    log(`menu offers CONTINUE: "${continueText}"`);
+  }
+  await screenshot(page, SHOT_CONTINUE);
+
+  log('pressing CONTINUE');
+  await page.click('[data-action="continue"]', { timeout: TIMEOUT.menu });
+  try {
+    await page.waitForSelector('[data-action="pause"]', { state: 'attached', timeout: TIMEOUT.world });
+    log('CONTINUE reached the world HUD again');
+  } catch {
+    fail(`[data-action="pause"] did not appear within ${TIMEOUT.world / 1000} s after CONTINUE. UI reads: "${await uiText(page)}"`);
+  }
 }
 
-async function screenshot(page) {
+async function screenshot(page, file) {
   try {
-    mkdirSync(path.dirname(SHOT), { recursive: true });
-    await page.screenshot({ path: SHOT });
-    log(`screenshot saved to ${path.relative(ROOT, SHOT)}`);
+    mkdirSync(path.dirname(file), { recursive: true });
+    await page.screenshot({ path: file });
+    log(`screenshot saved to ${path.relative(ROOT, file)}`);
   } catch (error) {
     fail(`screenshot could not be saved: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -282,7 +321,9 @@ async function main() {
     try {
       await drive(page, url);
     } finally {
-      await screenshot(page);
+      // Wherever the drive stopped: the first world shot is taken inside
+      // drive() when it gets there, so this is the evidence of a failure.
+      if (!worldShotTaken) await screenshot(page, SHOT);
     }
   } catch (error) {
     fail(`unexpected: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`);
@@ -305,5 +346,5 @@ if (failures.length > 0) {
   console.error(`[probe:boot] ${failures.length} check(s) failed.`);
   process.exitCode = 1;
 } else {
-  log('PASS: menu → PLAY → world, FPS readout live, zero console errors, zero page errors.');
+  log('PASS: menu → PLAY → world, FPS readout live, PAUSE → QUIT → CONTINUE → world, zero console errors, zero page errors.');
 }

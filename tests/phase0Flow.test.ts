@@ -7,6 +7,7 @@
  *   menu → PLAY → picker → SOLO → session → loading → playing
  *        → PAUSE → paused (world may freeze) → RESUME → playing
  *        → PAUSE → QUIT → menu, session ended and saved
+ *        → CONTINUE (Phase 1) → the same world, the camera where it was left
  *
  * plus the multiplayer mock's honest pause heading, the hub's OPEN of the
  * Performance World, and the world refusing to enter without a session.
@@ -164,6 +165,43 @@ describe('Phase 0 flow', () => {
     expect(r.kv.get(SOLO_SAVE_SPEC.key)).toContain('"mapId":"perf-empty"');
     expect(r.uiLayer.querySelector('[data-role="perf-hud"]')).toBeNull();
     expect(r.fallbacks()).toBe(0);
+  });
+
+  it('after QUIT the menu offers CONTINUE, which resumes the saved game at the saved pose (Phase 1)', async () => {
+    const r = rig();
+    await boot(r);
+    // A fresh device: nothing to continue.
+    expect(r.uiLayer.querySelector('[data-action="continue"]')).toBeNull();
+    r.press('play');
+    r.press('solo');
+    await r.settle();
+    r.frame();
+    // Fly somewhere the START pose is not, then save through PAUSE and QUIT.
+    const cam = r.scenes.current?.camera;
+    if (!cam) throw new Error('the world has no camera');
+    cam.position.set(123, 45, -678);
+    r.press('pause');
+    r.press('quit');
+    await r.settle();
+
+    expect(r.scenes.current?.name).toBe('menu');
+    const cont = r.uiLayer.querySelector<HTMLButtonElement>('[data-action="continue"]');
+    expect(cont).not.toBeNull();
+    expect(cont?.disabled).toBe(false);
+    expect(cont?.textContent).toContain('Last played just now');
+    const save = JSON.parse(r.kv.get(SOLO_SAVE_SPEC.key) ?? 'null') as { camera: { at: { wx: number; wz: number } } };
+    expect(save.camera.at).toEqual({ wx: 123, wz: -678 });
+
+    r.press('continue');
+    expect(r.app.state).toBe('loading');
+    await r.settle();
+    expect(r.scenes.current?.name).toBe(PERF_WORLD_SCENE_ID);
+    expect(r.app.state).toBe('playing');
+    expect(r.app.session?.mode).toBe('solo');
+    const resumed = r.scenes.current?.camera;
+    expect(resumed?.position.x).toBeCloseTo(123);
+    expect(resumed?.position.y).toBeCloseTo(45);
+    expect(resumed?.position.z).toBeCloseTo(-678);
   });
 
   it('Escape toggles the pause menu from the keyboard', async () => {

@@ -97,14 +97,20 @@ src/
   autonomy/     mission brain, autopilot, route planner — an Intent
                 PRODUCER, sibling to input/. Empty until its phase.
   ui/           screens (menu, settings, about, loading, pause) and HUD
-                widgets. Typed hooks only.
+                widgets. Typed hooks only. ui/splash/ is the key-art
+                stage: the three-layer meter sandwich, the boot splash
+                that index.html paints with the document, and the
+                generated cutout numbers scripts/bakeArt.mjs measures.
   devtools/     the Editors / Dev Tools hub and the DevTool contract.
-                Every tool is an ordinary scene.
+                Every tool is an ordinary scene. Phase 1 adds the
+                Network Lab: one in-process host, two loopback clients.
   data/         schema.ts (registry + curve × life-state multiplier
                 pattern) and the typed registries (empty shells).
-  net/          Transport contract + LoopbackTransport stub, and
-                protocol.ts: the message shapes, their guards and the
-                Authority interface (§5).
+  net/          Transport contract, LoopbackTransport (a modelled wire:
+                latency, jitter, drop, seeded), protocol.ts (the message
+                shapes, their guards and the Authority interface, §5),
+                HostAuthority (Host.ts), Client, Replica (interpolated
+                remote actors) and NetworkConditions. All pure.
   perf/         PerformanceWorldScene, FreeFlyCamera, PerfHud,
                 FrameStats (pure).
   persistence/  versioned storage wrapper with defensive reads.
@@ -118,11 +124,12 @@ docs/research/  reference material carried from v0, read-only.
 **Allowed dependency direction** (an arrow means "may import"):
 
 ```
-main → app
+main → app, ui(splash/BootSplash only: the document splash is boot's)
 app → session, ui, devtools, world(WorldLoader), perf, input, assets, persistence
 session → persistence, net, data, world(coords), actor(PlayerId)
 actor → world(coords), input(Intent.ts) only
-net(protocol) → actor, world(coords)
+net → actor, world(coords)
+devtools(Network Lab) → net, actor, view, perf(grid/camera helpers), three / DOM
 world, actor, autonomy, data, net, perf(FrameStats), persistence, input(Intent.ts) → NOTHING in three/DOM (core)
 perf(scenes/hud), camera, view, ui, devtools, assets → three / DOM allowed
 view → three allowed; it reads ActorState and writes a mesh

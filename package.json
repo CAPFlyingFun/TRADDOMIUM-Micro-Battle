@@ -1,7 +1,7 @@
 {
   "name": "traddomium-micro-battle",
   "private": true,
-  "version": "1.0.0-alpha.2",
+  "version": "1.0.0-alpha.3",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,6 +11,7 @@
     "test:watch": "vitest",
     "typecheck": "tsc -b",
     "probe:boot": "node scripts/probe-boot.mjs",
+    "probe:netlab": "node scripts/probe-netlab.mjs",
     "bake:art": "node scripts/bakeArt.mjs"
   },
   "dependencies": {
