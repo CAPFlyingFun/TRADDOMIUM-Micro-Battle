@@ -142,6 +142,11 @@ docs and fixes with a unit test behind them land without asking.
 - `main` is the deployed branch. Develop on feature branches; land via
   PR once Joshua has seen the result and said go. Never force-push
   `main`.
+- While v1 is rebuilt, the Pages site carries BOTH builds (Joshua,
+  2026-09-04): v0 from `legacy/v0-main` at the site root, which is what
+  the installed PWA opens, and v1 from `main` under `/v1/`. The deploy
+  workflow builds both; when v1 is ready to become the game, it moves to
+  the root and v0 retires.
 - `legacy/v0-main` is a read-only archive. Do not commit to it.
 - Ownership on Trello is by label (Claude, ChatGPT, Joshua, helpers by
   name). Cards Claude moves from Coding to Testing get Joshua's label

@@ -1,13 +1,16 @@
 name: Build & Deploy
 
-# Every push to main is gated on typecheck + tests + build, then published
-# to GitHub Pages so the current build is playable on a device. Pull
-# requests run the same gate but never deploy.
+# Every push to main is gated on typecheck + tests, then published to
+# GitHub Pages so the current build is playable on a device.
+#
+# TWO BUILDS, ONE SITE (Joshua, 2026-09-04). While v1 is rebuilt from the
+# foundation outward, the playable v0 game stays at the site root — it is
+# what the installed PWA opens — and v1 deploys beside it under /v1/.
+# v0 is built from the read-only archive branch legacy/v0-main exactly as
+# it is; this workflow edits nothing on that branch.
 #
 # ONE-TIME SETUP (repo owner, once per repo):
 #   Settings → Pages → Build and deployment → Source: "GitHub Actions"
-# The workflow token is not allowed to enable Pages itself, so the deploy
-# job fails until that switch is flipped.
 on:
   push:
     branches: [main]
@@ -28,7 +31,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     env:
-      # Probes use Playwright locally; CI only needs the build.
+      # Probes use Playwright locally; CI only needs the builds.
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
     steps:
       - uses: actions/checkout@v4
@@ -38,18 +41,38 @@ jobs:
           node-version: '22'
           cache: npm
 
+      # v1 — this branch. Gated on typecheck and tests.
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
 
-      # No configure-pages step: the Vite base is relative ('./'), so the
-      # build already works from the Pages project subpath.
+      # v0 — the archive branch, built as-is. Its tests are frozen with
+      # it; its build (tsc + vite) is the only gate that matters here.
+      - uses: actions/checkout@v4
+        with:
+          ref: legacy/v0-main
+          path: v0
+      - run: npm ci
+        working-directory: v0
+      - run: npm run build
+        working-directory: v0
+
+      # v0 at the root, v1 under /v1/. Both builds use a relative Vite
+      # base ('./'), so each works from wherever it is served.
+      - name: Assemble the site
+        run: |
+          rm -rf site
+          mkdir -p site/v1
+          cp -R v0/dist/. site/
+          cp -R dist/. site/v1/
+          echo "root:" && ls site && echo "v1:" && ls site/v1
+
       - name: Upload site artifact
         if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@v3
         with:
-          path: dist
+          path: site
 
   deploy:
     needs: build

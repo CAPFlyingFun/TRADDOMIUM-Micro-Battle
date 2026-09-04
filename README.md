@@ -22,7 +22,9 @@ npm run probe:boot   # Playwright boot probe (scripts/probe-boot.mjs)
 ```
 
 Pushes to `main` run typecheck, tests and build in GitHub Actions and
-deploy `dist/` to GitHub Pages (`.github/workflows/deploy.yml`).
+deploy to GitHub Pages (`.github/workflows/deploy.yml`). While v1 is
+rebuilt the site carries both builds: v0 (from `legacy/v0-main`) at the
+root, which is what the installed PWA opens, and v1 under `/v1/`.
 
 ## Where the spec is
 
