@@ -2450,9 +2450,15 @@ export class IslandScene {
       // WATER is its own move: no run-up, and the burst comes from the
       // wings instead (Flight.launch).
       const paid = this.afloat
-        ? this.flight.launch(this.stamina.fraction, this.ant.bearing)
+        // HER HEIGHT COMES WITH HER. All three doors out of `grounded`
+        // used to start her a centimetre over the FLOOR, which is
+        // right for a queen on the ground and drops one off a trunk
+        // the whole length of it. See Flight.takeOff.
+        ? this.flight.launch(
+          this.stamina.fraction, this.ant.bearing, this.clearance(),
+        )
         : this.flight.takeOff(
-          this.ant.pace, this.stamina.fraction, this.ant.bearing,
+          this.ant.pace, this.stamina.fraction, this.ant.bearing, this.clearance(),
         );
       if (paid > 0) {
         this.stamina.spend(paid);
@@ -2739,7 +2745,7 @@ export class IslandScene {
           // forward would throw her downwind of the pin before she was
           // a body length up. See Flight.liftOff.
           const paid = this.flight.liftOff(
-            this.stamina.fraction, this.ant.bearing, this.afloat,
+            this.stamina.fraction, this.ant.bearing, this.afloat, this.clearance(),
           );
           if (paid > 0) {
             this.stamina.spend(paid);
@@ -3641,6 +3647,18 @@ export class IslandScene {
    *
    * @returns whether the text was a fix at all.
    */
+  /**
+   * HOW FAR SHE IS ABOVE THE SURFACE SHE WOULD LAND ON, world units.
+   *
+   * Zero standing on the ground or the water, and three metres when
+   * she is three metres up a trunk. Handed to every door out of
+   * `grounded` so a takeoff keeps the height she already had — before
+   * this, leaving a tree put her on the grass in one frame.
+   */
+  private clearance(): number {
+    return Math.max(0, this.ant.height - this.holdFloor);
+  }
+
   private goTo(text: string): boolean {
     const fix = parseFix(text);
     if (!fix) return false;

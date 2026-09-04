@@ -758,7 +758,20 @@ export class Flight {
    * @param facing which way she is pointed as she leaves the ground,
    *   world radians. She keeps it: a takeoff does not turn her.
    */
-  takeOff(groundSpeed: number, reserve: number, facing: number): number {
+  /**
+   * @param from her clearance above the FLOOR right now, world units.
+   *   Zero on the ground, and three metres when she is three metres up
+   *   a trunk — which is the whole reason it is a parameter. All three
+   *   doors out of `grounded` used to set `above` to a flat 0.01, on
+   *   the unexamined assumption that leaving the ground means being ON
+   *   the ground. Once she could climb, taking off from a tree dropped
+   *   her the length of the trunk in one frame: Joshua, "I was able to
+   *   fly off the tree the last update not this one". A takeoff keeps
+   *   the height she already has.
+   */
+  takeOff(
+    groundSpeed: number, reserve: number, facing: number, from = 0,
+  ): number {
     if (!this.canTakeOff(groundSpeed, reserve)) return 0;
     this.state = 'takeoff';
     this.ground = null;
@@ -769,7 +782,7 @@ export class Flight {
     this.rise = 0;
     this.launching = 0;
     this.launchBoost = 1;
-    this.above = 0.01;
+    this.above = Math.max(0.01, from);
     this.air.reset();
     this.drift = 0;
     return TAKEOFF_COST;
@@ -800,7 +813,8 @@ export class Flight {
    *
    * @returns the reserve it cost, or 0 if she was refused
    */
-  launch(reserve: number, facing: number): number {
+  /** @param from her clearance above the floor now — see `takeOff`. */
+  launch(reserve: number, facing: number, from = 0): number {
     if (!this.canLaunch(reserve)) return 0;
     this.state = 'takeoff';
     this.ground = null;
@@ -811,7 +825,7 @@ export class Flight {
     this.rise = 0;
     this.launching = 0;
     this.launchBoost = WATER_LAUNCH_LIFT;
-    this.above = 0.01;
+    this.above = Math.max(0.01, from);
     this.air.reset();
     this.drift = 0;
     return TAKEOFF_COST;
@@ -842,7 +856,10 @@ export class Flight {
    *
    * @returns the reserve it cost, or 0 if she was refused
    */
-  liftOff(reserve: number, facing: number, fromWater: boolean): number {
+  /** @param from her clearance above the floor now — see `takeOff`. */
+  liftOff(
+    reserve: number, facing: number, fromWater: boolean, from = 0,
+  ): number {
     if (!this.canLaunch(reserve)) return 0;
     this.state = 'takeoff';
     this.ground = null;
@@ -857,7 +874,7 @@ export class Flight {
     this.rise = 0;
     this.launching = 0;
     this.launchBoost = fromWater ? WATER_LAUNCH_LIFT : 1;
-    this.above = 0.01;
+    this.above = Math.max(0.01, from);
     this.air.reset();
     this.drift = 0;
     return TAKEOFF_COST;

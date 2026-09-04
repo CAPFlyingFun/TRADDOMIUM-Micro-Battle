@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, afterEach } from 'vitest';
 import {
   AUTO_AIRSPEED, BEST_GLIDE_SPEED, Flight, LAUNCH_RATE, LAUNCH_SECONDS,
@@ -99,5 +100,66 @@ describe('leaving the ground', () => {
   it('is still climbing once the ramp has opened', () => {
     const done = launch(LAUNCH_SECONDS + 0.5);
     expect(done.above).toBeGreaterThan(launch(LAUNCH_SECONDS).above);
+  });
+});
+
+describe('a takeoff keeps the height she already had', () => {
+  /**
+   * Joshua, v0.0.161: "I was able to fly off the tree the last update
+   * not this one."
+   *
+   * All three doors out of `grounded` — takeOff, launch and the drone
+   * liftOff — set her clearance to a flat 0.01, on the unexamined
+   * assumption that leaving the ground means being ON the ground. It
+   * held for as long as the ground was the only thing she could stand
+   * on. A queen three metres up a trunk taking off was put on the
+   * grass in one frame, which is not a flight bug so much as the
+   * flight model being told a lie about where she was.
+   */
+  it('a ground takeoff still starts a centimetre up', () => {
+    const flight = new Flight();
+    expect(flight.takeOff(TAKEOFF_SPEED, 1, 0, 0)).toBeGreaterThan(0);
+    expect(flight.height).toBeCloseTo(0.01, 6);
+  });
+
+  it('a takeoff from three metres up a trunk starts three metres up', () => {
+    const flight = new Flight();
+    expect(flight.takeOff(TAKEOFF_SPEED, 1, 0, 300)).toBeGreaterThan(0);
+    expect(flight.height).toBeCloseTo(300, 6);
+  });
+
+  it('and so does a water launch and a drone lift', () => {
+    const wet = new Flight();
+    expect(wet.launch(1, 0, 250)).toBeGreaterThan(0);
+    expect(wet.height).toBeCloseTo(250, 6);
+
+    const drone = new Flight();
+    expect(drone.liftOff(1, 0, false, 250)).toBeGreaterThan(0);
+    expect(drone.height).toBeCloseTo(250, 6);
+  });
+
+  it('never starts her BELOW the floor, whatever it is handed', () => {
+    const flight = new Flight();
+    flight.takeOff(TAKEOFF_SPEED, 1, 0, -50);
+    expect(flight.height).toBeCloseTo(0.01, 6);
+  });
+});
+
+describe('and the scene actually hands her clearance over', () => {
+  /**
+   * A SOURCE PIN. The tests above prove the flight model honours the
+   * height it is given; they say nothing about whether anything gives
+   * it one, and a default of 0 would sail through every one of them.
+   * That gap — a true statement about a helper beside a call site that
+   * does not use it — is the shape of three broken builds this week.
+   */
+  it('passes her clearance to every door out of grounded', () => {
+    const scene = readFileSync('src/scenes/IslandScene.ts', 'utf8');
+    expect(scene).toContain('private clearance(): number {');
+    expect(scene).toContain('this.ant.height - this.holdFloor');
+    // All three doors, each with the clearance on the end.
+    expect(scene).toMatch(/flight\.launch\([^)]*this\.clearance\(\)/s);
+    expect(scene).toMatch(/flight\.takeOff\([^)]*this\.clearance\(\)/s);
+    expect(scene).toMatch(/flight\.liftOff\([^)]*this\.clearance\(\)/s);
   });
 });
