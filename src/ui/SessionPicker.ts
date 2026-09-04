@@ -16,10 +16,25 @@ import { ACTION } from '../app/actions';
 import type { GameSession } from '../session/GameSession';
 import { actionRow, actionsRow } from './screen';
 
+/** The solo game saved on this device, as the menu's CONTINUE shows it. */
+export interface SavedGame {
+  /** The session that resumes it — on the save's own map, not the menu's default. */
+  readonly session: GameSession;
+  /** ISO 8601, when it was written; the menu turns it into "Last played …". */
+  readonly savedAt: string;
+}
+
 /** Builds the session a card would start — supplied by integration, since the ui may not import session internals. */
 export interface SessionOffers {
   solo(): GameSession;
   multiplayer(): GameSession;
+  /**
+   * The solo game saved on this device, or null when there is none this
+   * build can load — integration decides that against the world registry,
+   * so a CONTINUE can never open a world that is not there. Optional: a
+   * wiring without saves has no CONTINUE, rather than one that cannot.
+   */
+  saved?(): SavedGame | null;
 }
 
 export interface SessionPickerHooks extends SessionOffers {

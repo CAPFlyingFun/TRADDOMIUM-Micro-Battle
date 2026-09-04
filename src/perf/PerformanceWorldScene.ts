@@ -9,11 +9,22 @@
  * loading screen via `WorldLoader.resolveWorld` or from the dev-tools hub.
  * It asks its owner for anything beyond its own state through the typed
  * hooks (§2.7): what PAUSE means is the owner's decision, not the scene's.
+ *
+ * SAVE POINTS. The world saves through the app's session — whichever
+ * session that is (§5) — when the pause overlay opens, and hands its save
+ * point to its owner for QUIT. Pause-open is read off the app state
+ * inside `update()` rather than off the PAUSE button, because Escape
+ * opens the same overlay without passing through this scene; the state
+ * is the measured fact, the button is one of two ways to change it
+ * (§2.3). v0 learned the second half the hard way: QUIT walked away from
+ * up to a minute of play until a parting save was added, so here QUIT
+ * gets the world's own save function and not just the session's flush.
  */
 import * as THREE from 'three';
 import { ACTION, actionButton } from '../app/actions';
 import type { AppState } from '../app/AppState';
 import type { AppScene, FrameInfo, SceneContext, SceneFactory } from '../app/Scene';
+import type { SessionSaveState } from '../session/GameSession';
 import { LoadProgress } from '../world/LoadProgress';
 import { FrameStats } from './FrameStats';
 import { FreeFlyCamera } from './FreeFlyCamera';
@@ -48,6 +59,23 @@ export interface PerformanceWorldHooks {
    * the document is not parsed every frame. Absent: the scene's defaults.
    */
   settings?(): PerfWorldSettings;
+  /**
+   * Where to resume from: the state the session loaded, or null for a
+   * fresh start at the scene's own START. Read once in `enter()`. A hook
+   * because the session seam has no `load` — what a session can restore
+   * (a solo save on this device today, a server snapshot one day) is the
+   * owner's knowledge, not the world's. Absent: always a fresh start.
+   */
+  resume?(): SessionSaveState | null;
+  /**
+   * Hands the owner the world's save point once `enter()` has a camera
+   * worth saving; calling it writes the current pose through the app's
+   * session. The owner calls it before the session leaves on QUIT, so the
+   * pose on disk is the last one the player saw and not the pause-open
+   * one — the free-fly camera keeps flying while the world is paused.
+   * Absent: the session's own flush on leave keeps the pause-open save.
+   */
+  onSavePoint?(save: () => Promise<void>): void;
 }
 
 /** The sky the grid vanishes into, and the fog that makes it vanish. */
@@ -89,16 +117,27 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
     let light: THREE.DirectionalLight | null = null;
     let hud: PerfHud | null = null;
     let pauseButton: HTMLButtonElement | null = null;
-    /** The app state at the last settings read; a change is the cue to read again. */
-    let settingsReadAt: AppState | null = null;
+    /** The app state at the last look; a change is the cue to re-read settings and to notice a pause opening. */
+    let seenState: AppState | null = null;
 
     const applySettings = (): void => {
-      settingsReadAt = ctx.app.state;
       const s = hooks.settings?.();
       if (!s) return;
       fly.setFov(s.fov);
       fly.setLook({ sensitivity: s.lookSensitivity, invertY: s.invertY });
       if (hud) hud.hidden = !s.showFps;
+    };
+
+    /** The save point: the camera, in world coordinates, through whichever session the app holds. */
+    const save = async (): Promise<void> => {
+      await ctx.app.session?.save({ camera: fly.pose() });
+    };
+
+    const stateChanged = (state: AppState): void => {
+      seenState = state;
+      applySettings();
+      // The overlay just opened (PAUSE, or Escape): the first save point.
+      if (state === 'paused') void save();
     };
 
     return {
@@ -138,16 +177,23 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         ctx.uiLayer.appendChild(pauseButton);
         reached('hud');
 
+        // The saved pose replaces START only once the world exists to stand
+        // in; and the save point is handed over only now, so the owner can
+        // never save a camera the world has not placed.
+        const from = hooks.resume?.();
+        if (from) fly.restore(from.camera);
+        hooks.onSavePoint?.(save);
+
         // loading → playing is requested here because only the world knows
         // when it is ready. Guarded: the state machine allows `playing` only
         // after `loading`, and opened as a dev tool from the hub the app is in
         // `menu`, where the hub owns what happens next.
         if (ctx.app.state === 'loading') ctx.app.requestState('playing');
-        applySettings();
+        stateChanged(ctx.app.state);
       },
 
       update(frame: FrameInfo) {
-        if (ctx.app.state !== settingsReadAt) applySettings();
+        if (ctx.app.state !== seenState) stateChanged(ctx.app.state);
         stats.record(frame.rawDt, frame.simDt);
         // The camera moves by RAW dt: it is not simulation, it is the
         // instrument the player measures the simulation with. Fed sim dt it
