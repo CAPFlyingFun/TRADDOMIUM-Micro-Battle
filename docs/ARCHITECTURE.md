@@ -239,6 +239,32 @@ to the snapshot. `LocalAuthority` (solo) applies claims directly;
 `HostAuthority` (multiplayer) validates and rebroadcasts. Both hide
 behind the one interface, so a session never asks which it holds.
 
+**WHERE THE RELAY IS, AND WHO GETS TO SAY.** One file answers it:
+`net/relayConfig.ts`, which resolves the address in one order — `?relay=`
+in the address bar, then `__RELAY_URL__` (baked in at build time by
+`vite.config.ts`, defaulting to the deployed relay and overridable with
+`TRADDOMIUM_RELAY_URL`), then `''`. An empty answer is the honest
+no-relay build: no room step is offered at all and the multiplayer
+caption is the pinned "Online play is not built yet." A constant rather
+than a fetched config because the screen must answer "is there online
+play here?" synchronously, before it offers a room; `?relay=` is what
+covers the one thing a constant cannot do, and it is how
+`npm run probe:multiplayer` points the BUILT game at a relay running on
+127.0.0.1. `relayConfig` is core, so it never reads the address bar
+itself: `app/registerScenes.ts` reads the parameter and passes it in,
+which is also what makes the order testable without a browser. The same
+file holds what a room CODE is, pinned by test against the worker's own
+`roomCode.ts`, so the client can never offer a code the relay refuses.
+
+The room a player types becomes `wss://<relay>/room/<code>`, which is
+what `RemoteMultiplayerSession` holds as its wire; the world scene finds
+that wire on the session it was handed and drives it through
+`net/NetworkedWorld` (hello, claims at the authority's own snapshot rate,
+remote actors out of the `Replica`). WHERE YOU JOIN IS THE AUTHORITY'S
+TO SAY: the camera stands over the actor the welcome names before it
+claims anything, or its first claim would be a jump the travel budget
+refuses — and then every claim after it, since the gap never closes.
+
 **ONE HOST, TWO PLACES IT RUNS.** The relay in `worker/` does not
 reimplement the authority: its Durable Object imports `src/net/Host.ts`
 and runs that file unchanged. The travel budget that refuses a teleport,
@@ -348,7 +374,8 @@ permanently excluded.
 |---|---|---|
 | **0 App shell** | app/, session/ (solo + mock multiplayer), ui/ (menu, settings, about, loading, pause), devtools/ hub, data/ schema, perf/ empty world + FreeFly + PerfHud, net/ stub, persistence/, assets/, tests, CI, boot probe | nothing — blank slate |
 | 1 Session + profile | PlayerProfile + PlayerId, SoloSave v2 (camera pose in world coordinates) through `LocalSoloSession`, honest multiplayer mock, actor/ contracts + Intent + `net/protocol`, two-capsule loopback test. Also carries the loading artwork port (splash sandwich, bake script, icons, manifest), and `coords.ts` / `origin.ts` pulled forward from Phase 2 because actors need a `WorldPoint` from day one. **Shipped THREE solo save slots** (`session/SoloSlots.ts`): three independent SoloSave documents, RESUME and NEW GAME on the menu in place of one CONTINUE, and a confirmation in front of the only path that replaces a save. Slot 1 keeps the original single-save key, so a device that already held a game finds it as slot 1 | `save.ts` shape, `coords.ts`, `origin.ts` + their tests, `sessionMode`/`soloSave` tests, the splash assets |
-| **1.5 The relay** | The server side of multiplayer: `src/net/WebSocketTransport.ts` (the client's real wire) and `worker/` — a Cloudflare Worker router plus one SQLite-backed Durable Object per room, each running one unchanged `Host`. Proved locally against real workerd by `npm run probe:relay`: two sockets, one room, a walk, a refused teleport, a drop that lingers through the grace, a re-attach that returns the same actor. What is NOT built: the browser screen that joins a room, so no relay URL is compiled in and the multiplayer caption is still the honest mock | nothing — v0 had no server |
+| **1.5 The relay** | The server side of multiplayer: `src/net/WebSocketTransport.ts` (the client's real wire) and `worker/` — a Cloudflare Worker router plus one SQLite-backed Durable Object per room, each running one unchanged `Host`. Proved locally against real workerd by `npm run probe:relay`: two sockets, one room, a walk, a refused teleport, a drop that lingers through the grace, a re-attach that returns the same actor | nothing — v0 had no server |
+| **1.6 The room, end to end** | The browser half: `net/relayConfig.ts` (where the relay is, what a room code is), the room screen (`ui/RoomCodeScene.ts`) between MULTIPLAYER and the world, the relay baked into the build (`__RELAY_URL__`, `?relay=` to override), and `net/NetworkedWorld.ts` driving the protocol from the world scene — claims from the free-fly camera, other players drawn through `view/ActorViews`, one honest SESSION line in the perf HUD. Proved by `npm run probe:multiplayer`: two browser contexts at 932 × 430, one locally running relay, the same room code, each connected and drawing the other's capsule, A's flight followed on B's screen, A's exit leaving B up and honest, zero console errors. What is NOT built: the game — no ant, no terrain, nothing saved — which is what the room screen and the multiplayer card say on screen | nothing |
 | 2 Kauaʻi terrain | heightfield with a `WorldPoint`-typed API, chunk streaming keyed by global chunk id, terrain layer in the perf world. The `discovery.ts` codec moves here from Phase 1: there is nothing to discover before terrain | `heightfield.ts`, `kauai*.ts`, `demRepair.ts`, `lod.ts`, `stableHash.ts`, `discovery.ts`, the DEM binaries, their tests |
 | 3 Ocean | the accepted look, two-owner water router from day one | `seaSwell.ts`, `surf.ts`, `Ocean.ts`, `waterLook.ts`, `liveSea.ts`, foam probe + `oceanShader` fixture test |
 | 4 Inland water | hydrology bake feeding the local solver; per-reach bed materials; cascade FX; NHDPlus/DLNR names | `drainage.ts`, `islandChannels.ts`, `hydro.ts`, `waterSim.ts`, `nearestWater.ts` |

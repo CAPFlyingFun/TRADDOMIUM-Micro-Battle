@@ -25,6 +25,9 @@ export {
 } from './MainMenuScene';
 export { PlayFlow, type PlayFlowHooks } from './PlayFlow';
 export {
+  ROOM_CODE_FIELD, ROOM_CODE_INTRO, ROOM_SCOPE_NOTE, RoomCodePicker, type RoomCodeHooks, type RoomOffer,
+} from './RoomCodeScene';
+export {
   SlotPicker, slotAction, SLOT_KEEP_ACTION, SLOT_OVERWRITE_ACTION,
   type SlotPickerHooks, type SlotPurpose, type SlotView,
 } from './SlotPicker';
@@ -40,7 +43,9 @@ export {
 export { Screen, type Wire, type ScreenTone } from './screen';
 // The document-painted boot splash: main.ts reports measured boot facts into it and takes it down.
 export { BOOT_ID, dismissBootSplash, reportBoot } from './splash/BootSplash';
-export { SessionPicker, type SavedGame, type SessionOffers, type SessionPickerHooks } from './SessionPicker';
+export {
+  ROOMS_CAPTION, ROOMS_SCOPE_NOTE, SessionPicker, type SavedGame, type SessionOffers, type SessionPickerHooks,
+} from './SessionPicker';
 export { SessionPickerScene, createSessionPickerScene } from './SessionPickerScene';
 export { SettingsPanel, settingAction, SETTING_RESET_ACTION, type SettingsPanelHooks } from './SettingsPanel';
 export { SettingsScene, createSettingsScene, type SettingsHooks } from './SettingsScene';

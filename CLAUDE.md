@@ -115,6 +115,12 @@ imply more than exists; the honest caption is pinned by a test.
   it owns a socket, a clock and a call to `tick()` and nothing else. A
   game rule written in `worker/` is a bug: the loopback would stop
   predicting the room a phone connects to.
+- **The relay's address is baked into the build** (`__RELAY_URL__`, from
+  `vite.config.ts`, default the deployed relay, `TRADDOMIUM_RELAY_URL=`
+  for a build with no online play) and `?relay=ws://127.0.0.1:<port>`
+  points a running build at a local one — which is how a developer on
+  `npm run relay:dev`, and `npm run probe:multiplayer`, reach a relay
+  that is not the deployed one.
 - A client-side PIN is a convenience, not security.
 - Every file in `scripts/` is wired to a `package.json` script or listed
   in `scripts/MANUAL.md`.

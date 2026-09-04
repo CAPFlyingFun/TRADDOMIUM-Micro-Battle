@@ -6,6 +6,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { MessageHandler, Transport, TransportState } from '../src/net';
+import { resolveRelayUrl, toRoomSocketUrl } from '../src/net/relayConfig';
 import { defineStore, memoryKeyValueStore } from '../src/persistence/store';
 import type { GameSession } from '../src/session/GameSession';
 import { LocalSoloSession, SOLO_SAVE_SPEC, SOLO_SAVE_VERSION } from '../src/session/LocalSoloSession';
@@ -139,6 +140,29 @@ describe('session contract', () => {
 
   it('refuses a relay address that is not a socket URL rather than hiding the typo behind the mock', () => {
     expect(() => new RemoteMultiplayerSession('kauai', { relayUrl: 'https://relay.example' })).toThrow(/relay URL/);
+  });
+
+  /**
+   * The two halves of the room flow meeting: what `relayConfig` builds is
+   * what a session accepts, and a build with no relay resolves to '' and
+   * is still the pinned mock. If these ever disagree the game either
+   * cannot join a room it offered, or claims online play in a build that
+   * has none.
+   */
+  it('accepts the room URL relayConfig builds, over the real transport', () => {
+    const url = toRoomSocketUrl('https://traddomium-relay.joshua-622.workers.dev', 'red-ant-7');
+    const remote = new RemoteMultiplayerSession('perf-empty', { relayUrl: url });
+    expect(remote.transport).not.toBeNull();
+    expect(remote.caption).toBe(RELAY_CLOSED_CAPTION);
+    expect(remote.caption).not.toBe(MULTIPLAYER_CAPTION);
+  });
+
+  it('is the pinned mock when no relay resolves, whatever a room code would have been', () => {
+    const relayUrl = resolveRelayUrl(null, '');
+    expect(relayUrl).toBe('');
+    const remote = new RemoteMultiplayerSession('perf-empty', { relayUrl });
+    expect(remote.transport).toBeNull();
+    expect(remote.caption).toBe('Online play is not built yet.');
   });
 
   it('derives the player id from the profile device id', () => {

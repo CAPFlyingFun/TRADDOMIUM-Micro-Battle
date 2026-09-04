@@ -16,6 +16,13 @@ export const ACTION = {
   continue: 'continue',
   solo: 'solo',
   multiplayer: 'multiplayer',
+  /**
+   * The room step (ui/RoomCodeScene.ts), which exists only in a build
+   * that has a relay: JOIN takes the code in the field into the world,
+   * and NEW CODE offers a different one to share.
+   */
+  joinRoom: 'join-room',
+  newRoomCode: 'new-room-code',
   profile: 'profile',
   settings: 'settings',
   editors: 'editors',

@@ -37,10 +37,11 @@
  *
  *     npm run probe:relay
  *
- * The probe starts and stops the Worker itself, on a free port it picks,
- * with its Durable Object state in a temporary directory that it deletes
- * afterwards — so it never collides with a `npm run relay:dev` you have
- * open, and never leaves a room's state in the repo.
+ * The probe starts and stops the Worker itself through
+ * `scripts/relayHarness.mjs`, on a free port it picks, with its Durable
+ * Object state in a temporary directory that it deletes afterwards — so
+ * it never collides with a `npm run relay:dev` you have open, and never
+ * leaves a room's state in the repo.
  *
  * IT MUST NOT HANG AND IT MUST NOT LIE. Every wait has a timeout, there
  * is a watchdog over the whole run, and the Worker is stopped on the way
@@ -49,24 +50,10 @@
  * does not fall back to something easier and call that a pass.
  */
 import { randomBytes } from 'node:crypto';
-import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
-import { get as httpGet } from 'node:http';
-import { createServer } from 'node:net';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { startRelay } from './relayHarness.mjs';
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const WRANGLER_CONFIG = 'worker/wrangler.toml';
-/** Wrangler writes its scratch state beside the config it was given. */
-const WRANGLER_SCRATCH = path.join(ROOT, 'worker', '.wrangler');
-
-/** workerd is compiled and booted on the first run; a cold start is slow, a warm one is a second. */
-const BOOT_TIMEOUT_MS = 60_000;
 /** At 20 Hz a snapshot is due every 50 ms, so anything this probe waits for is late by 5 s. */
 const MESSAGE_TIMEOUT_MS = 5_000;
-const SHUTDOWN_TIMEOUT_MS = 5_000;
 /** The whole run, boot included. Past this something is wedged and a stuck probe helps nobody. */
 const WATCHDOG_MS = 150_000;
 
@@ -104,7 +91,7 @@ const passed = [];
  * `finally`. A wedged probe that leaves workerd running behind it would
  * hold a port and a few hundred megabytes until someone noticed.
  */
-const live = { worker: null, persistTo: null, scratchToClear: null };
+const live = { relay: null };
 
 function pass(line) {
   passed.push(line);
@@ -115,142 +102,8 @@ function assert(condition, message) {
   if (!condition) throw new Error(message);
 }
 
-// ---------------------------------------------------------------------------
-// The Worker
-// ---------------------------------------------------------------------------
-
-/** A port the OS says is free right now. Racy in principle; wrangler's own bind is the real test. */
-function freePort() {
-  return new Promise((resolve, reject) => {
-    const server = createServer();
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', () => {
-      const { port } = server.address();
-      server.close(() => resolve(port));
-    });
-  });
-}
-
-/**
- * `wrangler dev --local`, watched. Its output is kept so a failure to
- * boot can be reported with the reason wrangler gave rather than with a
- * timeout and a shrug.
- */
-function startWorker({ port, persistTo }) {
-  const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-  const child = spawn(
-    npx,
-    [
-      'wrangler', 'dev',
-      '--config', WRANGLER_CONFIG,
-      '--local',
-      '--ip', '127.0.0.1',
-      '--port', String(port),
-      '--persist-to', persistTo,
-    ],
-    {
-      cwd: ROOT,
-      // No telemetry from a probe: it needs no network and should ask for none.
-      env: { ...process.env, WRANGLER_SEND_METRICS: 'false' },
-      stdio: ['ignore', 'pipe', 'pipe'],
-      // Its own process group, so stopping it stops workerd too and not
-      // just the npx wrapper that launched it.
-      detached: process.platform !== 'win32',
-    },
-  );
-
-  const output = [];
-  const keep = (chunk) => {
-    for (const line of String(chunk).split('\n')) {
-      if (line.trim().length > 0) output.push(line);
-    }
-    while (output.length > 200) output.shift();
-  };
-  child.stdout.on('data', keep);
-  child.stderr.on('data', keep);
-
-  const worker = { child, output, exit: null };
-  child.on('exit', (code, signal) => {
-    worker.exit = { code, signal };
-  });
-  child.on('error', (error) => {
-    worker.exit = { code: null, signal: null, error };
-  });
-  return worker;
-}
-
-/** GET /health over plain http, deliberately not `fetch`: no proxy env var may reach 127.0.0.1. */
-function getHealth(port, timeoutMs) {
-  return new Promise((resolve, reject) => {
-    const request = httpGet({ host: '127.0.0.1', port, path: '/health', timeout: timeoutMs }, (response) => {
-      let body = '';
-      response.setEncoding('utf8');
-      response.on('data', (chunk) => {
-        body += chunk;
-      });
-      response.on('end', () => resolve({ status: response.statusCode, body }));
-    });
-    request.on('timeout', () => request.destroy(new Error(`no answer from /health within ${timeoutMs} ms`)));
-    request.on('error', reject);
-  });
-}
-
-/** Poll until the relay answers, or say plainly that it never did and why. */
-async function waitForHealth(worker, port) {
-  const deadline = Date.now() + BOOT_TIMEOUT_MS;
-  let lastError = 'nothing answered yet';
-  while (Date.now() < deadline) {
-    if (worker.exit !== null) {
-      // Two different failures, and they are fixed differently: wrangler
-      // that could not be LAUNCHED (not installed, no npx on PATH) versus
-      // wrangler that ran and gave up (a port in use, a config it refused).
-      const why =
-        worker.exit.error !== undefined
-          ? `wrangler could not be launched: ${worker.exit.error.message}`
-          : `wrangler exited (code ${worker.exit.code}, signal ${worker.exit.signal})`;
-      throw new Error(`the relay would not start: ${why}.\n${byHand()}\n${workerOutput(worker)}`);
-    }
-    try {
-      const { status, body } = await getHealth(port, 2_000);
-      if (status === 200) return body;
-      lastError = `/health answered ${status}`;
-    } catch (error) {
-      lastError = error instanceof Error ? error.message : String(error);
-    }
-    await sleep(250);
-  }
-  throw new Error(
-    `the relay did not answer /health on 127.0.0.1:${port} within ${BOOT_TIMEOUT_MS} ms (${lastError}).\n` +
-      `${byHand()}\n${workerOutput(worker)}`,
-  );
-}
-
-/** The one command that shows a person what the probe could only report second-hand. */
-const byHand = () => `  Run the relay by hand to see why:  npx wrangler dev --config ${WRANGLER_CONFIG} --local`;
-
-function workerOutput(worker) {
-  const tail = worker.output.slice(-40);
-  return tail.length === 0 ? '  (wrangler printed nothing)' : tail.map((line) => `  | ${line}`).join('\n');
-}
-
-/** SIGTERM the whole group, then SIGKILL if it will not go. Always resolves. */
-async function stopWorker(worker) {
-  if (worker === null || worker.exit !== null) return;
-  const ended = new Promise((resolve) => worker.child.once('exit', resolve));
-  signal(worker, 'SIGTERM');
-  const timer = setTimeout(() => signal(worker, 'SIGKILL'), SHUTDOWN_TIMEOUT_MS);
-  await ended;
-  clearTimeout(timer);
-}
-
-function signal(worker, name) {
-  try {
-    if (process.platform !== 'win32' && worker.child.pid !== undefined) process.kill(-worker.child.pid, name);
-    else worker.child.kill(name);
-  } catch {
-    // Already gone: nothing to stop, and nothing worth reporting.
-  }
-}
+// The Worker itself is `scripts/relayHarness.mjs`: a free port, wrangler
+// dev --local on it, and /health answering before anything else runs.
 
 // ---------------------------------------------------------------------------
 // A player
@@ -398,11 +251,6 @@ async function run() {
     typeof WebSocket === 'function',
     `this probe needs Node's built-in WebSocket (Node 22 or newer); this is ${process.version}`,
   );
-  assert(
-    existsSync(path.join(ROOT, 'node_modules', 'wrangler')),
-    'wrangler is not installed. Run `npm install` first: the probe runs the relay locally with it.',
-  );
-
   // A fresh code per run, so nothing left over from an earlier run or an
   // open `npm run relay:dev` can be mistaken for this one's room.
   const room = `probe-${randomBytes(3).toString('hex')}`;
@@ -411,23 +259,14 @@ async function run() {
   const colorA = '#ff3b30';
   const colorB = '#0a84ff';
 
-  // Wrangler writes worker/.wrangler as a side effect of running. Leave
-  // it alone if it was already there (someone's dev session owns it);
-  // clear it if this probe is what created it, so a probe run never
-  // leaves a directory for someone to wonder about or commit.
-  const scratchExisted = existsSync(WRANGLER_SCRATCH);
-  live.scratchToClear = scratchExisted ? null : WRANGLER_SCRATCH;
-  const persistTo = mkdtempSync(path.join(tmpdir(), 'traddomium-relay-probe-'));
-  const port = await freePort();
-  let worker = null;
+  let relay = null;
   const clients = [];
 
   try {
-    console.log(`relay probe: starting the Worker on 127.0.0.1:${port}, room "${room}"`);
-    worker = startWorker({ port, persistTo });
-    live.worker = worker;
-    live.persistTo = persistTo;
-    const health = JSON.parse(await waitForHealth(worker, port));
+    console.log(`relay probe: starting the Worker, room "${room}"`);
+    relay = await startRelay();
+    live.relay = relay;
+    const { health, port } = relay;
 
     // ---- 1. the relay is up and says what it is ---------------------------
     assert(health.service === 'traddomium-relay', `/health says service "${health.service}"`);
@@ -567,9 +406,7 @@ async function run() {
     await sleep(100);
   } finally {
     for (const client of clients) client.close();
-    await stopWorker(worker);
-    rmSync(persistTo, { recursive: true, force: true });
-    if (!scratchExisted) rmSync(WRANGLER_SCRATCH, { recursive: true, force: true });
+    await relay?.stop();
   }
 }
 
@@ -577,9 +414,7 @@ const watchdog = setTimeout(() => {
   console.error(`\nrelay probe FAILED: nothing finished within ${WATCHDOG_MS} ms. Something is wedged.`);
   // No waiting and no promises here: whatever is wedged must not get a
   // say in whether the Worker is stopped and the probe exits.
-  if (live.worker !== null) signal(live.worker, 'SIGKILL');
-  if (live.persistTo !== null) rmSync(live.persistTo, { recursive: true, force: true });
-  if (live.scratchToClear !== null) rmSync(live.scratchToClear, { recursive: true, force: true });
+  live.relay?.kill();
   process.exit(1);
 }, WATCHDOG_MS);
 

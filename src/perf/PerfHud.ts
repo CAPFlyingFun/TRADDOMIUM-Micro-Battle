@@ -15,9 +15,19 @@
  * RAW dt, because while the world is paused sim dt is 0 and a HUD timed by
  * it would freeze before it could say "paused".
  *
+ * SESSION is the fifth column and it appears only when the owner offers a
+ * `session()` hook. It is the HUD's one honest line about multiplayer, and
+ * every word in it is measured rather than promised: `Connected` is a
+ * welcomed client on an open socket and NOTHING more — not that online play
+ * is finished, not that the other player can see you. It counts the other
+ * players this world is actually drawing, and it names refused claims when
+ * there are any, because a movement the authority would not allow is
+ * otherwise invisible. In a solo session the line reads `Solo`.
+ *
  * Talks to its owner through a typed hook object and reads plain summary
- * structs; it does not import FrameStats or the camera (§2.7). Imports the
- * DOM only — testable under jsdom without three.
+ * structs; it does not import FrameStats, the camera or anything of `net/`
+ * (§2.7) — the link's state reaches it as six plain words it can print.
+ * Imports the DOM only — testable under jsdom without three.
  */
 import type { WorldLayerId } from '../world/WorldLoader';
 import type { CameraReadout } from './FreeFlyCamera';
@@ -32,11 +42,42 @@ export interface PerfReadout {
   readonly camera: CameraReadout;
 }
 
+/**
+ * What kind of session this world is running in, and — when it is a
+ * networked one — how its link stands. Six plain words, not `net/`'s own
+ * states: the HUD prints what it is told and never learns the protocol.
+ *
+ *   solo         no network at all; nothing was opened.
+ *   idle         networked, but nothing has been opened yet.
+ *   connecting   a handshake is in flight.
+ *   connected    welcomed by the authority on an open socket.
+ *   lost         it was up and the link went away.
+ *   unreachable  the handshake did not complete.
+ *   left         this end hung up deliberately.
+ */
+export type SessionLink = 'solo' | 'idle' | 'connecting' | 'connected' | 'lost' | 'unreachable' | 'left';
+
+export interface SessionReadout {
+  readonly link: SessionLink;
+  /** OTHER players currently drawn. Zero in solo. */
+  readonly others: number;
+  /** Claims the authority answered with a different truth. Zero in solo. */
+  readonly refusedClaims: number;
+  /** Claim-to-acknowledgement, milliseconds; absent until one has been measured. */
+  readonly roundTripMs?: number;
+}
+
 export interface PerfHudHooks {
   /** The rows to show. Re-read at every refresh so the checkboxes follow the model, not the clicks. */
   layers(): readonly LayerToggle[];
   /** The player toggled a checkbox. The owner decides what it means; the HUD re-reads `layers()`. */
   onLayerToggle(id: WorldLayerId, enabled: boolean): void;
+  /**
+   * How this world's session stands. Absent means the owner has nothing to
+   * say about a session, and the column is not built at all — an empty
+   * heading would be a claim of its own.
+   */
+  session?(): SessionReadout;
 }
 
 type Field = 'meanFps' | 'lowFps' | 'simDt' | 'cameraPosition' | 'cameraSpeed';
@@ -44,9 +85,47 @@ type Field = 'meanFps' | 'lowFps' | 'simDt' | 'cameraPosition' | 'cameraSpeed';
 const GOLD = '#c9a94a';
 const PARCHMENT = '#e8e2c8';
 
+/** One word per link state, and not a word more than is true. */
+const LINK_WORDS: Readonly<Record<SessionLink, string>> = {
+  solo: 'Solo',
+  idle: 'Not connected',
+  connecting: 'Connecting…',
+  connected: 'Connected',
+  lost: 'Connection lost',
+  unreachable: 'Relay unreachable',
+  left: 'Left the session',
+};
+
+function plural(count: number, one: string): string {
+  return count === 1 ? `1 ${one}` : `${count} ${one}s`;
+}
+
+/**
+ * The one line. In solo it is the one word. Networked, it says how the
+ * link stands, how many other players this world is DRAWING — "last
+ * seen" when the link is down, because what is on screen is then a
+ * stale picture and saying otherwise would be the HUD promising
+ * something the wire is not delivering — and what the authority has
+ * refused, when it has refused anything.
+ */
+function sessionWords(readout: SessionReadout): string {
+  const parts: string[] = [LINK_WORDS[readout.link]];
+  if (readout.link === 'solo') return parts[0];
+  if (readout.link === 'connected') {
+    parts.push(readout.others === 0 ? 'no other players' : `${plural(readout.others, 'other player')}`);
+    if (readout.roundTripMs !== undefined) parts.push(`claim→ack ${Math.round(readout.roundTripMs)} ms`);
+  } else if (readout.others > 0) {
+    parts.push(`${plural(readout.others, 'other player')} last seen`);
+  }
+  if (readout.refusedClaims > 0) parts.push(`${plural(readout.refusedClaims, 'claim')} refused`);
+  return parts.join(' · ');
+}
+
 export class PerfHud {
   private readonly root: HTMLElement;
   private readonly fields: Readonly<Record<Field, HTMLElement>>;
+  /** Built only when the owner offers a `session()` hook; null otherwise. */
+  private readonly sessionLine: HTMLElement | null;
   private readonly boxes = new Map<WorldLayerId, HTMLInputElement>();
   /** Infinity so the very first update() paints without waiting a refresh period. */
   private sinceRefresh = Infinity;
@@ -83,7 +162,6 @@ export class PerfHud {
     const frame = column('FRAME (raw)');
     const sim = column('SIM dt');
     const camera = column('CAMERA');
-    const layers = column('LAYERS');
     this.fields = {
       meanFps: line(frame, 'mean-fps'),
       lowFps: line(frame, 'low-fps'),
@@ -91,7 +169,10 @@ export class PerfHud {
       cameraPosition: line(camera, 'camera-position'),
       cameraSpeed: line(camera, 'camera-speed'),
     };
-    this.buildLayerRows(layers);
+    // Before LAYERS, which is a column of rows rather than a readout and
+    // reads best last.
+    this.sessionLine = hooks.session === undefined ? null : line(column('SESSION'), 'session');
+    this.buildLayerRows(column('LAYERS'));
     uiLayer.appendChild(this.root);
   }
 
@@ -163,6 +244,8 @@ export class PerfHud {
     this.fields.simDt.textContent = f.simDt === 0 ? 'paused' : `${(f.simDt * 1000).toFixed(1)} ms`;
     this.fields.cameraPosition.textContent = `x ${c.x.toFixed(1)}  y ${c.y.toFixed(1)}  z ${c.z.toFixed(1)}`;
     this.fields.cameraSpeed.textContent = `speed ${c.speed.toFixed(0)} units/s`;
+    const session = this.hooks.session?.();
+    if (this.sessionLine !== null && session !== undefined) this.sessionLine.textContent = sessionWords(session);
     // The model is the truth; a click the owner rejected snaps back here.
     for (const layer of this.hooks.layers()) {
       const box = this.boxes.get(layer.id);
