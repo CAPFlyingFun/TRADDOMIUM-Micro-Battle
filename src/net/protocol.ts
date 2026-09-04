@@ -92,10 +92,23 @@ export interface MoveMessage {
   readonly seq: number;
 }
 
-/** The truth, on the authority's clock. Replaces, never patches, what a client holds. */
+/**
+ * The truth, on the authority's clock. Replaces, never patches, what a
+ * client holds for each actor it lists; an actor it does not list is
+ * simply not mentioned (only `leave` removes one), so a correction can
+ * carry a single actor.
+ */
 export interface SnapshotMessage {
   readonly kind: 'snapshot';
   readonly snapshot: Snapshot;
+  /**
+   * The newest claim `seq` from the RECIPIENT that this snapshot
+   * reflects — applied or refused — so the client can set what it
+   * claimed beside what the authority says and reconcile. Per recipient,
+   * so a snapshot carrying it is addressed to one client; absent when the
+   * recipient has not claimed yet.
+   */
+  readonly ackSeq?: number;
 }
 
 /** A clean goodbye, so the authority need not wait for a timeout to say `leave`. */
@@ -185,7 +198,12 @@ export function isMove(value: unknown): value is MoveMessage {
 }
 
 export function isSnapshotMessage(value: unknown): value is SnapshotMessage {
-  return isRecord(value) && value.kind === 'snapshot' && isSnapshot(value.snapshot);
+  return (
+    isRecord(value) &&
+    value.kind === 'snapshot' &&
+    isSnapshot(value.snapshot) &&
+    (value.ackSeq === undefined || isCount(value.ackSeq))
+  );
 }
 
 export function isBye(value: unknown): value is ByeMessage {
