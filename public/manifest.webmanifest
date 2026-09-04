@@ -1,7 +1,7 @@
 {
-  "name": "TRADDOMIUM: Micro Battle! (v1)",
-  "short_name": "TMB v1",
-  "description": "The v1 rebuild of TRADDOMIUM: Micro Battle!, a direct-control ant survival RPG in a huge tiny world.",
+  "name": "TRADDOMIUM: Micro Battle!",
+  "short_name": "TRADDOMIUM",
+  "description": "The v1 rebuild of TRADDOMIUM: Micro Battle!, a direct-control ant survival RPG in a huge tiny world. Installed from /v1/; the v0 build is still at the site root.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

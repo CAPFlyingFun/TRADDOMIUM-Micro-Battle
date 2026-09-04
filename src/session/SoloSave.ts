@@ -41,6 +41,12 @@ export interface SoloSave extends Versioned {
  */
 export const SOLO_SAVE_VERSION = 2;
 
+/**
+ * The key slot 1 lives under. It is Phase 1's ONE-SLOT key, unchanged on
+ * purpose: when three slots arrived, the game already on a device became
+ * slot 1 rather than a document nothing reads. Slots 2 and 3 suffix it
+ * (`SoloSlots.ts`).
+ */
 export const SOLO_SAVE_KEY = 'traddomium.v1.solo-save';
 
 /** Where a camera goes when the document says nothing: the island's centre, on the ground, level. */
@@ -75,10 +81,14 @@ export function sanitizeCameraPose(raw: unknown, defaults: CameraPose): CameraPo
  * The spec for a given build's map list. A document naming a map the
  * predicate refuses reads as the defaults — no save — because loading a
  * camera pose into the wrong world is a camera in the sea.
+ *
+ * `key` is a parameter because the same document shape lives once per
+ * save slot; `SoloSlots.ts` names the keys. Sanitising is identical for
+ * every slot, so it is written once here rather than per slot.
  */
-export function soloSaveSpec(knownMap: KnownMap): StoreSpec<SoloSave> {
+export function soloSaveSpec(knownMap: KnownMap, key: string = SOLO_SAVE_KEY): StoreSpec<SoloSave> {
   return {
-    key: SOLO_SAVE_KEY,
+    key,
     version: SOLO_SAVE_VERSION,
     defaults: SOLO_SAVE_DEFAULTS,
     sanitize(raw, defaults) {

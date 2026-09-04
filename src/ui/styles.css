@@ -171,10 +171,11 @@
   min-width: 0;
 }
 
-/* The menu's CONTINUE carries a second line — when the game was last
-   played — inside the button, so the column does not grow a row for it:
-   six rows already fill a 430 px phone. Two lines still fit one touch
-   target: 16 px + 12 px + the gap sits under the 48 px minimum. */
+/* The menu's RESUME and every slot row carry a second line — when the game
+   was last played, or that the slot is empty — inside the button, so the
+   column does not grow a row for it: six rows already overflow a 430 px
+   panel, which scrolls. Two lines still fit one touch target: 16 px +
+   12 px + the gap sits under the 48 px minimum. */
 .ui-button--stacked {
   display: flex;
   flex-direction: column;
@@ -275,6 +276,19 @@
 .ui-switch[aria-checked='true'] {
   color: #0b0f07;
   background: var(--ui-gold);
+}
+
+/* Three save slots, side by side in landscape and stacked when the panel
+   is narrow. Each row is one two-line button, so three slots cost three
+   touch targets rather than six rows on a 430 px screen. */
+.ui-slots {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+
+.ui-slots .ui-button {
+  min-width: 0;
 }
 
 .ui-cards {

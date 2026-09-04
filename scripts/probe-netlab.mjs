@@ -19,7 +19,7 @@
  * answer: the dist on disk, the same files GitHub Pages serves.
  *
  * Checks, in order:
- *   1. the bare URL shows `[data-action="play"]`; EDITORS opens the hub;
+ *   1. the bare URL shows `[data-action="new-game"]`; EDITORS opens the hub;
  *      the hub has an OPEN button for `net-lab`;
  *   2. the lab's HUD appears and both clients report `connected` with
  *      2 actors known to each;
@@ -182,9 +182,9 @@ async function drive(page, url) {
   await page.goto(url, { waitUntil: 'load' });
 
   try {
-    await page.waitForSelector('[data-action="play"]', { timeout: TIMEOUT.menu });
+    await page.waitForSelector('[data-action="new-game"]', { timeout: TIMEOUT.menu });
   } catch {
-    fail(`[data-action="play"] did not appear within ${TIMEOUT.menu / 1000} s. UI reads: "${await uiText(page)}"`);
+    fail(`[data-action="new-game"] did not appear within ${TIMEOUT.menu / 1000} s. UI reads: "${await uiText(page)}"`);
     return;
   }
   log('main menu is up; opening EDITORS');

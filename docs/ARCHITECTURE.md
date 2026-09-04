@@ -142,12 +142,31 @@ camera → NEVER actor mode enums (continuous signals only)
 
 ```
 BOOT → MAIN MENU
-        ├─ PLAY → Session picker (SOLO | MULTIPLAYER) → SESSION → WORLD LOADER → WORLD
+        ├─ RESUME (shown only when a save exists; names the newest game)
+        │    ├─ one saved game  → that slot        → PLAY
+        │    └─ two or three    → slot list → slot → PLAY
+        ├─ NEW GAME → Session picker
+        │    ├─ SOLO        → slot list → slot     → PLAY
+        │    │                 (an occupied slot asks before it is replaced)
+        │    └─ MULTIPLAYER → no slot              → PLAY
         ├─ PROFILE
         ├─ SETTINGS
         ├─ EDITORS / DEV TOOLS → (hub) → any tool scene
         └─ ABOUT
+
+PLAY = SESSION → WORLD LOADER → WORLD
 ```
+
+RESUME exists exactly when a save this build can open exists, and it says
+when that game was last played. With one saved game it opens it; with two
+or three it opens the slot list, because choosing the newest for the
+player would be the menu deciding which game they meant. NEW GAME on an
+OCCUPIED slot asks before it replaces the game there — the only path that
+destroys a save, and the reason the slots exist at all.
+
+**Multiplayer takes no slot.** Nothing about a multiplayer game is kept on
+this device — a server would own that state — so offering a save slot for
+one would promise a game is being kept somewhere it is not.
 
 `AppState` is a small explicit union — `boot | menu | session | loading |
 playing | paused` — owned by `App`, one layer ABOVE scenes, so that a
@@ -301,7 +320,7 @@ permanently excluded.
 | Phase | Builds | Re-added from v0 (after review against §2) |
 |---|---|---|
 | **0 App shell** | app/, session/ (solo + mock multiplayer), ui/ (menu, settings, about, loading, pause), devtools/ hub, data/ schema, perf/ empty world + FreeFly + PerfHud, net/ stub, persistence/, assets/, tests, CI, boot probe | nothing — blank slate |
-| 1 Session + profile | PlayerProfile + PlayerId, SoloSave v2 (camera pose in world coordinates) through `LocalSoloSession`, honest multiplayer mock, actor/ contracts + Intent + `net/protocol`, two-capsule loopback test. Also carries the loading artwork port (splash sandwich, bake script, icons, manifest), and `coords.ts` / `origin.ts` pulled forward from Phase 2 because actors need a `WorldPoint` from day one | `save.ts` shape, `coords.ts`, `origin.ts` + their tests, `sessionMode`/`soloSave` tests, the splash assets |
+| 1 Session + profile | PlayerProfile + PlayerId, SoloSave v2 (camera pose in world coordinates) through `LocalSoloSession`, honest multiplayer mock, actor/ contracts + Intent + `net/protocol`, two-capsule loopback test. Also carries the loading artwork port (splash sandwich, bake script, icons, manifest), and `coords.ts` / `origin.ts` pulled forward from Phase 2 because actors need a `WorldPoint` from day one. **Shipped THREE solo save slots** (`session/SoloSlots.ts`): three independent SoloSave documents, RESUME and NEW GAME on the menu in place of one CONTINUE, and a confirmation in front of the only path that replaces a save. Slot 1 keeps the original single-save key, so a device that already held a game finds it as slot 1 | `save.ts` shape, `coords.ts`, `origin.ts` + their tests, `sessionMode`/`soloSave` tests, the splash assets |
 | 2 Kauaʻi terrain | heightfield with a `WorldPoint`-typed API, chunk streaming keyed by global chunk id, terrain layer in the perf world. The `discovery.ts` codec moves here from Phase 1: there is nothing to discover before terrain | `heightfield.ts`, `kauai*.ts`, `demRepair.ts`, `lod.ts`, `stableHash.ts`, `discovery.ts`, the DEM binaries, their tests |
 | 3 Ocean | the accepted look, two-owner water router from day one | `seaSwell.ts`, `surf.ts`, `Ocean.ts`, `waterLook.ts`, `liveSea.ts`, foam probe + `oceanShader` fixture test |
 | 4 Inland water | hydrology bake feeding the local solver; per-reach bed materials; cascade FX; NHDPlus/DLNR names | `drainage.ts`, `islandChannels.ts`, `hydro.ts`, `waterSim.ts`, `nearestWater.ts` |

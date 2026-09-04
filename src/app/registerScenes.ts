@@ -19,7 +19,8 @@ import {
 import { createPerformanceWorldScene } from '../perf/PerformanceWorldScene';
 import { PERF_WORLD_MAP_ID, PERF_WORLD_SCENE_ID, perfWorldTool } from '../perf/perfTool';
 import {
-  LocalSoloSession, restorableStateOf, savedSoloGame, soloSaveSpec, type KnownMap,
+  LocalSoloSession, isSoloSlot, newSoloGame, readSoloSlots, resumeSoloSlot, restorableStateOf, savedSoloGame,
+  soloSlotSpec, toolSoloSlot, type KnownMap, type SoloSlot,
 } from '../session/LocalSoloSession';
 import {
   MAX_DISPLAY_NAME, PLAYER_PROFILE_SPEC, loadProfile, playerIdOf, setDisplayName,
@@ -39,6 +40,7 @@ import {
   type LoadingHooks,
   type ProfileSource,
   type SessionOffers,
+  type SoloPlay,
 } from '../ui';
 import { LoadProgress } from '../world/LoadProgress';
 import { WORLD_SCENE_PREFIX, resolveWorld, worldSceneId } from '../world/WorldLoader';
@@ -84,18 +86,52 @@ const WORLD_MILESTONE = 'world';
  */
 const hasWorld: KnownMap = (mapId) => listScenes().includes(worldSceneId(mapId));
 
-/** The one solo save store, opened with the world predicate so every reader agrees on what counts. */
-const soloSaves = (ctx: SceneContext) => ctx.storage.open(soloSaveSpec(hasWorld));
+/** One slot's save store, opened with the world predicate so every reader agrees on what counts. */
+const soloSlotStore = (ctx: SceneContext, slot: SoloSlot) => ctx.storage.open(soloSlotSpec(slot, hasWorld));
 
 /**
- * The sessions the menu and the picker offer. Both carry the only world
- * that exists; `saved` is the game on this device that CONTINUE resumes,
- * on the save's own map, or null when there is nothing this build can load.
+ * The sessions and slots the menu and the picker offer. Both carry the
+ * only world that exists; `slots` is the three save documents as the
+ * player sees them, and `saved` is the newest game among them — what
+ * RESUME names and, when it is the only one, opens.
+ *
+ * `solo()` is read for its CAPTION, never started: which slot a solo game
+ * writes to is decided one screen later, and the session that carries it
+ * is built then, by `play` below.
  */
 const offers = (ctx: SceneContext): SessionOffers => ({
-  solo: () => new LocalSoloSession(soloSaves(ctx), PERF_WORLD_MAP_ID),
+  solo: () => new LocalSoloSession(soloSlotStore(ctx, 1), PERF_WORLD_MAP_ID),
   multiplayer: () => new RemoteMultiplayerSession(PERF_WORLD_MAP_ID),
-  saved: () => savedSoloGame(ctx.storage.kv, hasWorld),
+  slots: () => readSoloSlots(ctx.storage.kv, hasWorld),
+  saved: () => {
+    const newest = savedSoloGame(ctx.storage.kv, hasWorld);
+    return newest === null ? null : { slot: newest.slot, savedAt: newest.savedAt };
+  },
+});
+
+/**
+ * The two ways into a solo game, once a slot has been chosen on screen.
+ *
+ * A slot number arrives from a DOM control, so it is checked against the
+ * slots this build has before it names a save document — the ui is trusted
+ * to ask the question, never to be the only thing that got the answer
+ * right. A slot that is not one of ours does nothing at all rather than
+ * writing somewhere unexpected.
+ *
+ * NEW GAME opens the map this build ships. RESUME opens the map the save
+ * itself names, which is why it goes through the save rather than through
+ * a default: a resume onto the wrong world is a camera in the sea.
+ */
+const play = (ctx: SceneContext): SoloPlay => ({
+  newGame: (slot) => {
+    if (!isSoloSlot(slot)) return;
+    startSession(ctx, newSoloGame(ctx.storage.kv, hasWorld, slot, PERF_WORLD_MAP_ID));
+  },
+  resume: (slot) => {
+    if (!isSoloSlot(slot)) return;
+    const saved = resumeSoloSlot(ctx.storage.kv, hasWorld, slot);
+    if (saved) startSession(ctx, saved.session);
+  },
 });
 
 const loading = (ctx: SceneContext): LoadingHooks => {
@@ -126,8 +162,8 @@ const profile = (ctx: SceneContext): ProfileSource => {
 
 export function registerScenes(): void {
   // Front door. Every screen here lives in the `menu` app state.
-  registerScene(SCREEN_ID.menu, createMainMenuScene(offers));
-  registerScene(SCREEN_ID.session, createSessionPickerScene(offers));
+  registerScene(SCREEN_ID.menu, createMainMenuScene(offers, play));
+  registerScene(SCREEN_ID.session, createSessionPickerScene(offers, play));
   registerScene(SCREEN_ID.settings, createSettingsScene);
   registerScene(SCREEN_ID.about, createAboutScene);
   registerScene(SCREEN_ID.profile, createProfileScene(profile));
@@ -166,11 +202,14 @@ export function registerScenes(): void {
       openScene: (id) => {
         if (id.startsWith(WORLD_SCENE_PREFIX)) {
           // A world needs a session (its pause menu reads one) and enters
-          // through the loading screen, exactly as PLAY → SOLO does. A tool
-          // opened this way IS a solo game in that world, and quitting from
-          // its pause menu lands on the main menu like any other game.
+          // through the loading screen, exactly as NEW GAME → SOLO does. A
+          // tool opened this way IS a solo game in that world, and quitting
+          // from its pause menu lands on the main menu like any other game.
+          // `toolSoloSlot` decides which slot without ever silently
+          // replacing a game the player can still reach (LocalSoloSession).
           const mapId = id.slice(WORLD_SCENE_PREFIX.length);
-          startSession(ctx, new LocalSoloSession(soloSaves(ctx), mapId));
+          const slot = toolSoloSlot(ctx.storage.kv, hasWorld, mapId);
+          startSession(ctx, new LocalSoloSession(soloSlotStore(ctx, slot), mapId));
           return;
         }
         // A tool scene of its own stays in the `menu` state, like any front-door screen.
