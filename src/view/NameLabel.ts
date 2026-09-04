@@ -13,6 +13,19 @@
  * of the capsule's colour at the left edge, so a player who cannot see
  * the capsule behind another one still knows whose label it is.
  *
+ * THE PANEL IS SIZED TO THE NAME, NOT TO THE CANVAS. Painting the whole
+ * 512x96 canvas dark made "Ant" arrive as a black bar four times wider
+ * than the word, which read as a rendering fault rather than a label —
+ * `shots/multiplayer-a.png` caught it lying across the HUD. The canvas
+ * stays a fixed size (a texture wants stable dimensions), and the panel
+ * is a plain bar centred in it, just wide enough for the swatch, the
+ * name and its padding; everything outside stays transparent.
+ *
+ * A bar and not a rounded pill on purpose: `roundRect` is a young canvas
+ * method (Safari only got it in 16.4) and this game is played on phones,
+ * so a label is not the place to spend a compatibility risk. The defect
+ * this fixed was the panel's WIDTH, not its corners.
+ *
  * Under jsdom `getContext('2d')` is null; the sprite still exists,
  * unpainted, so the scene graph is the same in a test as on a phone.
  */
@@ -27,6 +40,8 @@ const SWATCH_WIDTH = 18;
 const PADDING = 22;
 const FONT_PX = 44;
 const MIN_FONT_PX = 18;
+/** Transparent margin above and below the bar, in canvas texels. */
+const PANEL_INSET_Y = 12;
 
 const font = (px: number): string => `bold ${px}px system-ui, -apple-system, "Segoe UI", sans-serif`;
 
@@ -56,10 +71,6 @@ export class NameLabel {
     if (ctx === null) return true;
 
     ctx.clearRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-    ctx.fillStyle = PANEL;
-    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
-    ctx.fillStyle = color;
-    ctx.fillRect(0, 0, SWATCH_WIDTH, CANVAS_HEIGHT);
 
     // Shrink the type until a long name fits rather than clipping it: a
     // player's name cut in half reads as somebody else's.
@@ -72,10 +83,27 @@ export class NameLabel {
       ctx.font = font(px);
       width = ctx.measureText(name).width;
     }
+
+    // The bar wraps the name; the canvas around it stays transparent.
+    const panelWidth = Math.min(CANVAS_WIDTH, SWATCH_WIDTH + PADDING * 2 + Math.ceil(width));
+    const left = Math.round((CANVAS_WIDTH - panelWidth) / 2);
+    const top = PANEL_INSET_Y;
+    const panelHeight = CANVAS_HEIGHT - PANEL_INSET_Y * 2;
+
+    ctx.fillStyle = PANEL;
+    ctx.fillRect(left, top, panelWidth, panelHeight);
+    ctx.fillStyle = color;
+    ctx.fillRect(left, top, SWATCH_WIDTH, panelHeight);
+
     ctx.fillStyle = PARCHMENT;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(name, SWATCH_WIDTH + (CANVAS_WIDTH - SWATCH_WIDTH) / 2, CANVAS_HEIGHT / 2, maxWidth);
+    ctx.fillText(
+      name,
+      left + SWATCH_WIDTH + (panelWidth - SWATCH_WIDTH) / 2,
+      CANVAS_HEIGHT / 2,
+      maxWidth,
+    );
     this.texture.needsUpdate = true;
     return true;
   }

@@ -184,7 +184,18 @@ export class Client {
     this.current = 'connecting';
     this.claims.clear();
     this.nextSeq = 0;
-    await transport.connect();
+    try {
+      await transport.connect();
+    } catch (error) {
+      // A HANDSHAKE THAT NEVER OPENED IS NOT A CONNECTING CLIENT.
+      // Leaving `connecting` set here stranded the client for good: every
+      // later connect() and reconnect() refuses with "while connecting",
+      // so a player who opened the game while the relay was unreachable
+      // could never try again without reloading. A failed open settles to
+      // `disconnected`, which is the state reconnect() accepts.
+      this.current = 'disconnected';
+      throw error;
+    }
     if (this.current !== 'connecting') throw new Error(`Client: link closed while connecting`);
     const welcome = new Promise<WelcomeMessage>((resolve, reject) => {
       this.pending = { resolve, reject };

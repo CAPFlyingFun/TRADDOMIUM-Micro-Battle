@@ -14,6 +14,7 @@ import { playerId } from '../src/actor/PlayerId';
 import { Client } from '../src/net/Client';
 import { HOST_DEFAULTS, Host, SPAWN_SPACING, type HostOptions } from '../src/net/Host';
 import { LoopbackTransport, loopbackLink, type LoopbackLink } from '../src/net/LoopbackTransport';
+import type { Transport } from '../src/net/Transport';
 import { networkConditions, type NetworkConditions } from '../src/net/NetworkConditions';
 import { isMessage, type HelloMessage, type MessageKind, type WelcomeMessage } from '../src/net/protocol';
 import { seededRandom } from '../src/net/seededRandom';
@@ -159,6 +160,33 @@ describe('joining', () => {
       /connect while connecting/,
     );
     await lab.until(welcome);
+    expect(client.state).toBe('connected');
+  });
+
+  it('a first handshake that never opens leaves the client able to try again', async () => {
+    // The relay was unreachable when the player pressed JOIN. Before this
+    // was fixed the client stayed 'connecting' for good, so every retry
+    // threw 'connect while connecting' and only a page reload helped.
+    const lab = new Lab();
+    const client = new Client(() => lab.clock);
+    const refused: Transport = {
+      get state() {
+        return 'closed' as const;
+      },
+      connect: () => Promise.reject(new Error('relay unreachable')),
+      disconnect: () => {},
+      send: () => {},
+      onMessage: () => () => {},
+      onClose: () => () => {},
+    };
+    const hello: HelloMessage = { kind: 'hello', playerId: playerId('device-a'), name: 'Ada', color: '#ff8800' };
+    await expect(client.connect(refused, hello)).rejects.toThrow(/relay unreachable/);
+    expect(client.state).toBe('disconnected');
+
+    // And the retry actually works, against a relay that is up this time.
+    const [hostEnd, transport] = lab.pair();
+    await lab.host.attach(hostEnd);
+    await lab.until(client.connect(transport, hello));
     expect(client.state).toBe('connected');
   });
 
