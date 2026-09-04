@@ -12,7 +12,7 @@
  */
 import { ACTION } from '../app/actions';
 import type { Store } from '../persistence/store';
-import { actionRow, actionsRow, labelledRow, namedButton, titledPanel } from './screen';
+import { actionRow, actionsRow, labelledRow, namedButton, note, titledPanel } from './screen';
 import {
   QUALITY_LEVELS, SETTINGS_LIMITS, sanitizeSettings, type Quality, type Settings,
 } from './settingsStore';
@@ -126,6 +126,12 @@ export class SettingsPanel {
     this.syncs.push((s) => {
       select.value = s.quality;
     });
+    // Nothing reads `quality` yet (the renderer / LOD will, once there is
+    // terrain to draw), and a control that saves a choice nothing acts on
+    // would look functional without being so. Disabled, with the reason
+    // beside it; the document keeps the field so the choice is ready.
+    select.disabled = true;
     labelledRow(this.element, 'Quality', [select]);
+    note(this.element, 'Quality has no effect yet: nothing in this build draws at more than one level of detail.');
   }
 }

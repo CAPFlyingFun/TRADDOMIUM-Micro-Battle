@@ -100,7 +100,21 @@ export class PerfHud {
     this.sinceRefresh += rawDt;
     if (this.sinceRefresh < 1 / HUD_HZ) return;
     this.sinceRefresh = 0;
+    // A hidden HUD is not written to either: the point of hiding it is to take its cost out of the frame.
+    if (this.root.hidden) return;
     this.render(readout);
+  }
+
+  /** The player's "Show frame rate" setting. Hidden, the HUD costs no DOM writes. */
+  get hidden(): boolean {
+    return this.root.hidden;
+  }
+
+  set hidden(value: boolean) {
+    if (this.root.hidden === value) return;
+    this.root.hidden = value;
+    // Paint on the first frame it comes back rather than up to a refresh period later.
+    if (!value) this.sinceRefresh = Infinity;
   }
 
   dispose(): void {

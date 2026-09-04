@@ -22,8 +22,8 @@ import { FrameClock } from './FrameClock';
 import { Renderer } from './Renderer';
 import type { AppHandle, SceneContext } from './Scene';
 import { SceneManager } from './SceneManager';
+import { registerScenes } from './registerScenes';
 import { sceneFactory } from './registry';
-import { registerPhase0Placeholders } from './placeholders/register';
 
 export class App {
   readonly handle: AppHandle;
@@ -87,9 +87,8 @@ export class App {
   }
 
   async start(): Promise<void> {
-    // Phase 0 placeholders. The integration pass replaces this one line
-    // with the real menu / loading / world registrations.
-    registerPhase0Placeholders();
+    // Every scene and dev tool this build contains, in one list.
+    registerScenes();
 
     await this.scenes.goTo(sceneFactory('menu'));
     this.state.set('menu');

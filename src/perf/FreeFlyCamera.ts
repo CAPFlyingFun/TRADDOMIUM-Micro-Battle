@@ -51,11 +51,24 @@ interface TouchStart {
   readonly y: number;
 }
 
+/**
+ * How a drag turns the view. `sensitivity` scales the turn rate (1 is the
+ * tuned feel); `invertY` flips the vertical axis relative to THIS camera's
+ * own default, which is first-person: dragging down looks down. Which
+ * direction counts as "normal" is a property of a camera, not of the
+ * setting, so a follow camera may read the same flag the other way round.
+ */
+export interface LookTuning {
+  readonly sensitivity: number;
+  readonly invertY: boolean;
+}
+
 export class FreeFlyCamera {
   readonly camera: THREE.PerspectiveCamera;
   private yaw = 0;
   private pitch = 0;
   private speedValue = DEFAULT_SPEED;
+  private look: LookTuning = { sensitivity: 1, invertY: false };
   private viewportWidth = 1;
   /** Where each live touch began: decides its zone and anchors the move stick. */
   private readonly touchStarts = new Map<number, TouchStart>();
@@ -83,6 +96,20 @@ export class FreeFlyCamera {
   readout(): CameraReadout {
     const p = this.camera.position;
     return { x: p.x, y: p.y, z: p.z, speed: this.speedValue };
+  }
+
+  /** A non-finite or non-positive sensitivity is ignored; the flag is always taken. */
+  setLook(tuning: LookTuning): void {
+    const sane = Number.isFinite(tuning.sensitivity) && tuning.sensitivity > 0;
+    this.look = { sensitivity: sane ? tuning.sensitivity : this.look.sensitivity, invertY: tuning.invertY };
+  }
+
+  /** Vertical field of view in degrees. Out-of-range values are ignored; an unchanged value costs nothing. */
+  setFov(degrees: number): void {
+    if (!Number.isFinite(degrees) || degrees <= 0 || degrees >= 180) return;
+    if (this.camera.fov === degrees) return;
+    this.camera.fov = degrees;
+    this.camera.updateProjectionMatrix();
   }
 
   /** Put the camera somewhere, looking along a yaw (radians about +Y) and pitch (radians, up positive). */
@@ -138,8 +165,10 @@ export class FreeFlyCamera {
       if (!live.has(id)) this.touchStarts.delete(id);
     }
 
-    this.yaw -= lookDx * LOOK_RADIANS_PER_PIXEL;
-    this.pitch = Math.min(MAX_PITCH, Math.max(-MAX_PITCH, this.pitch - lookDy * LOOK_RADIANS_PER_PIXEL));
+    const turn = LOOK_RADIANS_PER_PIXEL * this.look.sensitivity;
+    const pitchSign = this.look.invertY ? -1 : 1;
+    this.yaw -= lookDx * turn;
+    this.pitch = Math.min(MAX_PITCH, Math.max(-MAX_PITCH, this.pitch - lookDy * turn * pitchSign));
     this.applyRotation();
 
     if (input.wheel !== 0) {

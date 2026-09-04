@@ -12,6 +12,7 @@
  */
 import * as THREE from 'three';
 import { ACTION, actionButton } from '../app/actions';
+import type { AppState } from '../app/AppState';
 import type { AppScene, FrameInfo, SceneContext, SceneFactory } from '../app/Scene';
 import { LoadProgress } from '../world/LoadProgress';
 import { FrameStats } from './FrameStats';
@@ -20,11 +21,33 @@ import { PerfHud } from './PerfHud';
 import { BUILT_LAYERS, LayerToggles } from './layerToggles';
 import { PERF_WORLD_SCENE_ID } from './perfTool';
 
+/**
+ * The settings this scene honours. Structural on purpose: the settings
+ * document is the ui's, and perf/ may not import ui/ (§3), so whoever owns
+ * the document builds this from it.
+ */
+export interface PerfWorldSettings {
+  /** Vertical field of view, degrees. */
+  readonly fov: number;
+  /** Multiplier on the look-drag turn rate. */
+  readonly lookSensitivity: number;
+  readonly invertY: boolean;
+  /** Whether the perf HUD is shown at all. */
+  readonly showFps: boolean;
+}
+
 export interface PerformanceWorldHooks {
   /** PAUSE was pressed. What a pause means — state, overlay, whether the world may freeze — is the owner's. */
   onPause(): void;
   /** Progress of `enter()`: a 0..1 fraction and an ETA in ms (null before there is a rate), for the loading screen. */
   onLoadProgress?(fraction: number, etaMs: number | null): void;
+  /**
+   * The current settings. Read once in `enter()` and again whenever the
+   * app state changes — the pause menu is where a player changes them, and
+   * returning from it is a state change — so no event bus is needed and
+   * the document is not parsed every frame. Absent: the scene's defaults.
+   */
+  settings?(): PerfWorldSettings;
 }
 
 /** The sky the grid vanishes into, and the fog that makes it vanish. */
@@ -66,6 +89,17 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
     let light: THREE.DirectionalLight | null = null;
     let hud: PerfHud | null = null;
     let pauseButton: HTMLButtonElement | null = null;
+    /** The app state at the last settings read; a change is the cue to read again. */
+    let settingsReadAt: AppState | null = null;
+
+    const applySettings = (): void => {
+      settingsReadAt = ctx.app.state;
+      const s = hooks.settings?.();
+      if (!s) return;
+      fly.setFov(s.fov);
+      fly.setLook({ sensitivity: s.lookSensitivity, invertY: s.invertY });
+      if (hud) hud.hidden = !s.showFps;
+    };
 
     return {
       name: PERF_WORLD_SCENE_ID,
@@ -109,9 +143,11 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         // after `loading`, and opened as a dev tool from the hub the app is in
         // `menu`, where the hub owns what happens next.
         if (ctx.app.state === 'loading') ctx.app.requestState('playing');
+        applySettings();
       },
 
       update(frame: FrameInfo) {
+        if (ctx.app.state !== settingsReadAt) applySettings();
         stats.record(frame.rawDt, frame.simDt);
         // The camera moves by RAW dt: it is not simulation, it is the
         // instrument the player measures the simulation with. Fed sim dt it

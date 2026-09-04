@@ -5,7 +5,7 @@
  * a module that registers on import is only present when something
  * happens to import it, and the composition root should be able to read
  * the list of what exists. The integration pass registers everything in
- * one place (`App.ts`, via the placeholders module in Phase 0).
+ * one place: `registerScenes.ts`, called once from `App.start()`.
  *
  * Pure: a Map and three functions. `world/WorldLoader` resolves worlds
  * through it, so it must never import three or the DOM itself.

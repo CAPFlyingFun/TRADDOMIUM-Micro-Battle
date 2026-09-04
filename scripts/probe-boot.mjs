@@ -20,6 +20,8 @@
  *
  * Checks, in order:
  *   1. the bare URL shows `[data-action="play"]`;
+ *   1a. EDITORS opens the dev-tools hub, whose first `li[data-tool]` is the
+ *      Performance World with an OPEN button, and BACK returns to the menu;
  *   2. PLAY leads to a session picker with `[data-action="solo"]` (a build
  *      that goes straight to the world is reported, not failed — the
  *      picker is the ui agent's, the world is the perf agent's, and the
@@ -49,6 +51,10 @@ const VIEWPORT = { width: 932, height: 430 };
 
 /** Enough frames for a HUD's ring buffer to hold something worth reading. */
 const FRAMES = 60;
+
+/** The tool §12 says the hub lists first, and how devtools/DevTool names its OPEN button. */
+const FIRST_TOOL = 'perf-world';
+const toolAction = (id) => `tool:${id}`;
 
 /**
  * Timeouts in milliseconds. SwiftShader is slow: the first WebGL context
@@ -165,9 +171,29 @@ async function drive(page, url) {
     fail(`[data-action="play"] did not appear within ${TIMEOUT.menu / 1000} s. UI reads: "${await uiText(page)}"`);
     return;
   }
-  log('main menu is up; pressing PLAY');
+  log('main menu is up; opening EDITORS');
   // Playwright waits for the button to actually receive pointer events,
   // which is what makes this robust to the SceneManager's fade layer.
+  await page.click('[data-action="editors"]', { timeout: TIMEOUT.menu });
+  try {
+    await page.waitForSelector('li[data-tool]', { state: 'attached', timeout: TIMEOUT.menu });
+    const first = await page.locator('li[data-tool]').first().getAttribute('data-tool');
+    const opener = await page.locator(`[data-action="${toolAction(FIRST_TOOL)}"]`).count();
+    if (first !== FIRST_TOOL) {
+      fail(`the dev-tools hub lists "${first}" first; ARCHITECTURE §12 wants "${FIRST_TOOL}" first`);
+    } else if (opener === 0) {
+      fail(`the hub lists "${FIRST_TOOL}" but has no [data-action="${toolAction(FIRST_TOOL)}"] button to open it`);
+    } else {
+      log(`dev-tools hub is up and lists "${FIRST_TOOL}" first; going back`);
+    }
+    await page.click('[data-action="back"]', { timeout: TIMEOUT.menu });
+    await page.waitForSelector('[data-action="play"]', { timeout: TIMEOUT.menu });
+  } catch {
+    fail(`EDITORS did not open a hub with a tool list and a way back. UI reads: "${await uiText(page)}"`);
+    return;
+  }
+
+  log('pressing PLAY');
   await page.click('[data-action="play"]', { timeout: TIMEOUT.menu });
 
   const solo = page.locator('[data-action="solo"]');

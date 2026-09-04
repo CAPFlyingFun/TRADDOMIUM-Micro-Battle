@@ -26,8 +26,12 @@ export const SCREEN_ID = {
   about: 'about',
   loading: 'loading',
   profile: 'profile',
-  /** Owned by devtools/; the menu only needs to know its door. */
-  editors: 'editors',
+  /**
+   * Owned by devtools/; the menu only needs to know its door. The value
+   * must equal `devtools/DEVTOOLS_SCENE_ID`, which the ui may not import
+   * (§3), so `tests/registerScenes.test.ts` pins the two equal instead.
+   */
+  editors: 'devtools',
 } as const;
 
 export type ScreenId = (typeof SCREEN_ID)[keyof typeof SCREEN_ID];

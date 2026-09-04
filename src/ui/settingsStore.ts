@@ -3,10 +3,10 @@
  * about, persisted through `persistence/store` so a meddled-with file costs
  * a bad camera angle, not a boot failure.
  *
- * Pure (no DOM): the panel renders it, other modules READ it. Nothing in
- * Phase 0 consumes these fields yet; the intended readers are listed on
- * each field so the module that grows the feature knows which knob is
- * already there for it.
+ * Pure (no DOM): the panel renders it, other modules READ it. The readers
+ * are listed on each field. In Phase 0 the Performance World honours fov,
+ * lookSensitivity, invertY and showFps (through a hook built in
+ * app/registerScenes.ts); nothing reads quality yet, and the panel says so.
  *
  * Every number is GAME TUNING, not measured biology.
  */

@@ -48,10 +48,13 @@ const CORE: readonly CoreEntry[] = [
   { path: 'src/persistence', required: true },
   { path: 'src/app/FrameClock.ts', required: true },
   { path: 'src/app/AppState.ts', required: true },
+  // The pure Map that core world/WorldLoader imports: if it ever pulled in a
+  // screen, every core module downstream would too.
+  { path: 'src/app/registry.ts', required: true },
+  { path: 'src/data', required: true },
+  { path: 'src/perf/FrameStats.ts', required: true },
   { path: 'src/actor', required: false },
   { path: 'src/autonomy', required: false },
-  { path: 'src/data', required: false },
-  { path: 'src/perf/FrameStats.ts', required: false },
 ];
 
 /**
