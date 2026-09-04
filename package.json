@@ -14,6 +14,7 @@
     "probe:netlab": "node scripts/probe-netlab.mjs",
     "probe:bot": "node scripts/probe-bot.mjs",
     "probe:relay": "node scripts/probe-relay.mjs",
+    "probe:terrain": "node scripts/probe-terrain.mjs",
     "probe:multiplayer": "node scripts/probe-multiplayer.mjs",
     "bake:art": "node scripts/bakeArt.mjs",
     "relay:dev": "wrangler dev --config worker/wrangler.toml --local",

@@ -36,7 +36,10 @@ import { soloSlotKey } from '../src/session/SoloSlots';
 import { MULTIPLAYER_CAPTION } from '../src/session/RemoteMultiplayerSession';
 import { ROOMS_CAPTION, ROOMS_SCOPE_NOTE, pauseWords } from '../src/ui';
 
-registerScenes();
+// No terrain: this file is about menus, saves and the pause state, and
+// a 2 MB download's retry backoff would be waited out on every scene
+// transition to prove something about a button.
+registerScenes({ survey: null });
 
 function rig() {
   const uiLayer = document.createElement('div');

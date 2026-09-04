@@ -24,12 +24,42 @@
  * only for rings that actually moved. A ring that has not moved is not
  * touched at all.
  *
- * SKIRTS, BECAUSE THE SEAMS ARE REAL. Where a fine ring meets a coarse
- * one, two fine edge segments meet one coarse segment, and the middle
- * fine vertex is not on the coarse line — the difference is a hairline
- * gap you can see sky through. Each ring hangs a skirt down from its
- * outer boundary, deep enough to cover the worst step at that level.
- * This is the standard fix and it costs one quad strip a ring.
+ * THE HOLES MUST LINE UP WITH WHERE THE FINER RING ACTUALLY IS, and this
+ * is the part that is easy to get wrong — the first build did. Each ring
+ * snaps to its OWN lattice, so ring N and ring N+1 do not share a centre:
+ * ring N sits at a multiple of its own two-quad step, which is exactly
+ * ONE quad of ring N+1, so the finer ring lands offset from the middle of
+ * the coarser ring's hole by 0 or ±1 coarse quad in each axis. Left
+ * unhandled that is a gap you can see sky through on one side and an
+ * overlap that z-fights on the other, which is precisely what the first
+ * screenshot showed. So the hole is cut where the finer ring IS: the
+ * offset is recomputed when a ring moves and the index buffer is rewritten
+ * for it — nine possible positions, and the geometry is otherwise
+ * untouched.
+ *
+ * THE SEAM IS STITCHED, NOT HIDDEN. Where a fine ring meets a coarse one,
+ * two fine edge segments meet one coarse segment and the fine vertex in
+ * between is not on the coarse line. That is a T-junction, and it is a
+ * hairline you can see the sky through — the second screenshot had 83 such
+ * pixels, every one of them exactly the horizon colour.
+ *
+ * A skirt hanging down from the fine edge covers only HALF of it: the half
+ * where the coarse line is lower. Where the coarse line is higher the gap
+ * is above the fine edge and a downward skirt points away from it. So
+ * instead of hiding the seam, the boundary is made not to have one — each
+ * ring's outer edge has its in-between vertices pinned to the mean of
+ * their neighbours, which IS the coarse ring's straight line. The two
+ * polylines then coincide exactly and no gap exists to cover.
+ *
+ * The cost is named rather than hidden: those boundary vertices are the
+ * only ones in the mesh that are not `heightAt`'s own answer, they are off
+ * by at most what the coarse ring is off by anyway, and the test says so.
+ * The OUTERMOST ring keeps its true heights, because nothing coarser is
+ * out there to agree with.
+ *
+ * SKIRTS STAY, for the world's outer edge and as insurance: a strip
+ * hanging from each ring's boundary costs one quad row and covers
+ * anything the stitch does not.
  *
  * IT DRAWS THE HEIGHTFIELD, NOT THE DEM. Every vertex is a `heightAt`,
  * so a high-detail tile arriving sharpens the ground under the camera
@@ -60,18 +90,33 @@ export const FINEST_QUAD = HD_STEP;
 /** How deep a ring's skirt hangs, as a multiple of its own quad size. */
 const SKIRT_QUADS = 1.5;
 
-/** Height in world units at which the colour ramp changes hands. Tuned to Kauaʻi, not measured from it. */
+/**
+ * Height in world units at which the colour ramp changes hands. Tuned to
+ * Kauaʻi, not measured from it.
+ *
+ * IT STAYS GREEN ALL THE WAY UP, which is the thing a generic height ramp
+ * gets wrong here. Kauaʻi has no treeline: Waiʻaleʻale's 1,548 m summit is
+ * a rainforest bog, the wettest place on Earth, and painting it grey
+ * because it is high would be a mountain from somewhere else. The island's
+ * bare rock is its CLIFFS — Waimea's walls, the Napali face — and that is
+ * a matter of slope, which is what `ROCK` is for.
+ */
 const BANDS: readonly { readonly at: number; readonly colour: number }[] = [
   { at: -300_000, colour: 0x0a1a2e },
   { at: -40_000, colour: 0x14415f },
   { at: -2_000, colour: 0x2d7f96 },
   { at: 0, colour: 0xcfc09a },
   { at: 1_500, colour: 0x7d9b4e },
-  { at: 25_000, colour: 0x3f6b32 },
-  { at: 70_000, colour: 0x2f5a34 },
-  { at: 110_000, colour: 0x6b6350 },
-  { at: 150_000, colour: 0x8d8577 },
+  { at: 25_000, colour: 0x4a7a3a },
+  { at: 90_000, colour: 0x3f6b32 },
+  { at: 160_000, colour: 0x35583a },
 ];
+
+/** The red-brown of Waimea's walls: what steep ground is, at any height. */
+const ROCK = 0x8a6a52;
+/** Below this slope nothing is bare; above the second, everything is. Degrees. */
+const ROCK_FROM = 32;
+const ROCK_FULL = 58;
 
 export interface TerrainViewOptions {
   readonly field: Heightfield;
@@ -87,6 +132,9 @@ interface Ring {
   readonly geometry: THREE.BufferGeometry;
   /** Where its centre is now, in world units, snapped to twice its quad. Null until the first fill. */
   centre: WorldPoint | null;
+  /** Where the hole is cut, in this ring's own quads, relative to the middle. Each is -1, 0 or 1. */
+  holeX: number;
+  holeZ: number;
 }
 
 export class TerrainView {
@@ -95,6 +143,7 @@ export class TerrainView {
   private readonly field: Heightfield;
   private readonly material: THREE.MeshLambertMaterial;
   private readonly quads: number;
+  private readonly levels: number;
   /** How many rings had their heights rewritten by the last `update`. The cost, measurable. */
   lastRebuilt = 0;
 
@@ -103,6 +152,7 @@ export class TerrainView {
     const levels = options.levels ?? RING_LEVELS;
     const quads = options.ringQuads ?? RING_QUADS;
     this.quads = quads;
+    this.levels = levels;
     this.group.name = 'terrain';
     // Double-sided so the skirts need only one winding and so a camera
     // that dips below the surface sees ground rather than through it.
@@ -120,7 +170,7 @@ export class TerrainView {
       // rewritten with its heights, and three must not cull it on stale ones.
       mesh.frustumCulled = false;
       this.group.add(mesh);
-      this.rings.push({ level, quad, mesh, geometry, centre: null });
+      this.rings.push({ level, quad, mesh, geometry, centre: null, holeX: 0, holeZ: 0 });
     }
   }
 
@@ -136,14 +186,30 @@ export class TerrainView {
    */
   update(at: WorldPoint): void {
     let rebuilt = 0;
-    for (const ring of this.rings) {
-      // Snapped to TWICE the quad: snapping to one quad would flip the
-      // grid's parity every step and make the surface crawl.
-      const centre = snapTo(at, ring.quad * 2);
+    // Snapped to TWICE the quad: snapping to one quad would flip the
+    // grid's parity every step and make the surface crawl.
+    const centres = this.rings.map((ring) => snapTo(at, ring.quad * 2));
+
+    for (let i = 0; i < this.rings.length; i += 1) {
+      const ring = this.rings[i];
+      const centre = centres[i];
       if (ring.centre === null || !samePoint(ring.centre, centre)) {
         ring.centre = centre;
         this.fill(ring);
         rebuilt += 1;
+      }
+      // Cut the hole where the finer ring landed, not where the middle
+      // of this one happens to be — see the header.
+      if (i > 0) {
+        const inner = toLocal(centres[i - 1]);
+        const here = toLocal(centre);
+        const holeX = Math.round((inner.lx - here.lx) / ring.quad);
+        const holeZ = Math.round((inner.lz - here.lz) / ring.quad);
+        if (holeX !== ring.holeX || holeZ !== ring.holeZ || !ring.geometry.getIndex()) {
+          ring.holeX = holeX;
+          ring.holeZ = holeZ;
+          cutHole(ring.geometry, holeX, holeZ);
+        }
       }
       // THE RENDER BOUNDARY: the only world → local conversion here, and
       // it goes through the floating origin rather than by hand.
@@ -151,6 +217,11 @@ export class TerrainView {
       ring.mesh.position.set(drawAt.lx, 0, drawAt.lz);
     }
     this.lastRebuilt = rebuilt;
+  }
+
+  /** Where each ring cuts its hole, in its own quads. Exposed so a test can see the alignment. */
+  holeOffsets(): { x: number; z: number }[] {
+    return this.rings.map((r) => ({ x: r.holeX, z: r.holeZ }));
   }
 
   /** Total vertices across every ring — the number that has to stay small. */
@@ -182,21 +253,47 @@ export class TerrainView {
     const position = ring.geometry.getAttribute('position') as THREE.BufferAttribute;
     const colour = ring.geometry.getAttribute('color') as THREE.BufferAttribute;
     const normal = ring.geometry.getAttribute('normal') as THREE.BufferAttribute;
-    const skirtDrop = ring.quad * SKIRT_QUADS;
-    const isSkirt = ring.geometry.userData.skirtFrom as number;
+    const skirtFrom = ring.geometry.userData.skirtFrom as number;
 
-    for (let i = 0; i < position.count; i += 1) {
+    // 1. The surface, straight from the heightfield.
+    for (let i = 0; i < skirtFrom; i += 1) {
       const at = translate(centre, position.getX(i), position.getZ(i));
       const height = this.field.heightAt(at);
-      // A skirt vertex sits under its own edge, not on the surface: it is
-      // there to be hidden, and shares the edge's colour so it never
-      // catches the light as a band of its own.
-      position.setY(i, i >= isSkirt ? height - skirtDrop : height);
+      position.setY(i, height);
       const n = this.field.normalAt(at);
       normal.setXYZ(i, n.nx, n.ny, n.nz);
-      const c = colourAt(height);
+      // The slope comes straight out of the normal that was just read —
+      // acos of its up component — rather than costing a second query.
+      const slope = Math.acos(Math.min(1, Math.max(-1, n.ny))) * (180 / Math.PI);
+      const c = colourAt(height, slope);
       colour.setXYZ(i, c.r, c.g, c.b);
     }
+
+    // 2. The seam. Every other vertex along the outer boundary is pinned
+    // to the mean of its neighbours, which is exactly the line the coarse
+    // ring outside draws between the same two points — see the header.
+    // The outermost ring is skipped: nothing is out there to agree with.
+    if (ring.level < this.levels - 1) {
+      const runs = ring.geometry.userData.edgeRuns as number[][];
+      for (const edgeRun of runs) {
+        for (let i = 1; i < edgeRun.length - 1; i += 2) {
+          position.setY(edgeRun[i], (position.getY(edgeRun[i - 1]) + position.getY(edgeRun[i + 1])) / 2);
+        }
+      }
+    }
+
+    // 3. The skirts, hung from whatever height their edge vertex ended up
+    // at, wearing its colour so they never catch the light as a band.
+    const drop = ring.quad * SKIRT_QUADS;
+    const edge = ring.geometry.userData.edge as number[];
+    for (let i = 0; i < edge.length; i += 1) {
+      const from = edge[i];
+      const to = skirtFrom + i;
+      position.setY(to, position.getY(from) - drop);
+      normal.setXYZ(to, normal.getX(from), normal.getY(from), normal.getZ(from));
+      colour.setXYZ(to, colour.getX(from), colour.getY(from), colour.getZ(from));
+    }
+
     position.needsUpdate = true;
     colour.needsUpdate = true;
     normal.needsUpdate = true;
@@ -204,8 +301,20 @@ export class TerrainView {
   }
 }
 
-/** The colour ramp, as a three colour. Exported so a test can read the bands rather than guess them. */
-export function colourAt(height: number): THREE.Color {
+/**
+ * The stand-in surface colour: the height ramp, then as much bare rock as
+ * the slope earns. Exported so a test can read it rather than guess it.
+ */
+export function colourAt(height: number, slopeDegrees = 0): THREE.Color {
+  const base = bandColour(height);
+  // Underwater the sea floor is sea floor however steep it is; a rock face
+  // painted onto the bathymetry would be visible through nothing.
+  if (height < 0 || slopeDegrees <= ROCK_FROM) return base;
+  const t = Math.min(1, (slopeDegrees - ROCK_FROM) / (ROCK_FULL - ROCK_FROM));
+  return base.lerp(new THREE.Color(ROCK), t);
+}
+
+function bandColour(height: number): THREE.Color {
   const first = BANDS[0];
   if (height <= first.at) return new THREE.Color(first.colour);
   for (let i = 1; i < BANDS.length; i += 1) {
@@ -232,7 +341,6 @@ function ringGeometry(quads: number, quad: number, hollow: boolean): THREE.Buffe
   const side = quads + 1;
   const half = (quads * quad) / 2;
   const positions: number[] = [];
-  const indices: number[] = [];
 
   for (let row = 0; row < side; row += 1) {
     for (let col = 0; col < side; col += 1) {
@@ -240,40 +348,27 @@ function ringGeometry(quads: number, quad: number, hollow: boolean): THREE.Buffe
     }
   }
 
-  // The hole: the central quarter in each axis, which is exactly the span
-  // of the next ring in. Quads whose four corners are all inside it are
-  // dropped; the ones straddling the boundary stay, so there is no gap.
-  const holeLow = quads / 4;
-  const holeHigh = quads - quads / 4;
-  const inHole = (col: number, row: number): boolean =>
-    hollow && col >= holeLow && col < holeHigh && row >= holeLow && row < holeHigh;
-
-  for (let row = 0; row < quads; row += 1) {
-    for (let col = 0; col < quads; col += 1) {
-      if (inHole(col, row)) continue;
-      const a = row * side + col;
-      const b = a + 1;
-      const c = a + side;
-      const d = c + 1;
-      indices.push(a, c, b, b, c, d);
-    }
-  }
-
   const skirtFrom = positions.length / 3;
-  // The outer boundary, walked once: north edge, south edge, west, east.
+  // The outer boundary, walked once: north edge, south edge, then the two
+  // sides. Every one of these gets a twin hanging below it.
   const edge: number[] = [];
   for (let col = 0; col < side; col += 1) edge.push(col, side * quads + col);
   for (let row = 1; row < quads; row += 1) edge.push(row * side, row * side + quads);
-  for (const index of edge) {
+  const skirtOf = new Map<number, number>();
+  edge.forEach((index, i) => {
+    skirtOf.set(index, skirtFrom + i);
     positions.push(positions[index * 3], 0, positions[index * 3 + 2]);
-  }
-  // Two triangles a segment, joining each boundary vertex to its dropped twin.
-  const skirtOf = (i: number): number => skirtFrom + edge.indexOf(i);
+  });
+
+  // Two triangles a boundary segment, joining each edge vertex to its
+  // dropped twin. Fixed for the life of the ring: only the SURFACE indices
+  // change when the hole moves.
+  const skirt: number[] = [];
   const addSkirt = (a: number, b: number): void => {
-    const a2 = skirtOf(a);
-    const b2 = skirtOf(b);
-    if (a2 < skirtFrom || b2 < skirtFrom) return;
-    indices.push(a, a2, b, b, a2, b2);
+    const a2 = skirtOf.get(a);
+    const b2 = skirtOf.get(b);
+    if (a2 === undefined || b2 === undefined) return;
+    skirt.push(a, a2, b, b, a2, b2);
   };
   for (let col = 0; col < quads; col += 1) {
     addSkirt(col, col + 1);
@@ -289,8 +384,58 @@ function ringGeometry(quads: number, quad: number, hollow: boolean): THREE.Buffe
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
   geometry.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(count * 3), 3));
   geometry.setAttribute('normal', new THREE.Float32BufferAttribute(new Float32Array(count * 3), 3));
-  geometry.setIndex(indices);
   geometry.userData.quads = quads;
   geometry.userData.skirtFrom = skirtFrom;
+  geometry.userData.hollow = hollow;
+  geometry.userData.skirt = skirt;
+  // The boundary walk, in the order the skirt twins were appended, so the
+  // fill can stitch an edge and hang its skirt from the stitched height.
+  geometry.userData.edge = edge;
+  // The four edges as ordered runs, for the stitch: north, south, west, east.
+  const run = (from: number, step: number): number[] => {
+    const out: number[] = [];
+    for (let i = 0; i <= quads; i += 1) out.push(from + i * step);
+    return out;
+  };
+  geometry.userData.edgeRuns = [
+    run(0, 1),
+    run(side * quads, 1),
+    run(0, side),
+    run(quads, side),
+  ];
+  cutHole(geometry, 0, 0);
   return geometry;
+}
+
+/**
+ * Rewrite a ring's SURFACE indices with its hole shifted by `offsetX` and
+ * `offsetZ` of its own quads, then append the skirt unchanged.
+ *
+ * The hole is exactly the span of the next ring in — a quarter of this
+ * ring's width on each side, so half of it — and it is cut where that
+ * ring actually IS rather than in the middle of this one. A solid ring
+ * (level 0) cuts no hole and this simply lays down every quad.
+ */
+export function cutHole(geometry: THREE.BufferGeometry, offsetX: number, offsetZ: number): void {
+  const quads = geometry.userData.quads as number;
+  const hollow = geometry.userData.hollow as boolean;
+  const skirt = geometry.userData.skirt as number[];
+  const side = quads + 1;
+  const lowX = quads / 4 + offsetX;
+  const lowZ = quads / 4 + offsetZ;
+  const highX = lowX + quads / 2;
+  const highZ = lowZ + quads / 2;
+
+  const indices: number[] = [];
+  for (let row = 0; row < quads; row += 1) {
+    for (let col = 0; col < quads; col += 1) {
+      if (hollow && col >= lowX && col < highX && row >= lowZ && row < highZ) continue;
+      const a = row * side + col;
+      const b = a + 1;
+      const c = a + side;
+      const d = c + 1;
+      indices.push(a, c, b, b, c, d);
+    }
+  }
+  geometry.setIndex([...indices, ...skirt]);
 }

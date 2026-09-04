@@ -69,7 +69,12 @@ import {
 } from '../net';
 import type { GameSession, SessionSaveState } from '../session/GameSession';
 import { ActorViews } from '../view/ActorViews';
+import { TerrainStreamer } from '../terrain/TerrainStreamer';
+import { TerrainView } from '../terrain/TerrainView';
 import { LoadProgress } from '../world/LoadProgress';
+import { COARSE_BYTES, decodeCoarse } from '../world/dem';
+import { repairGrid } from '../world/demRepair';
+import { Heightfield } from '../world/heightfield';
 import { toLocal } from '../world/origin';
 import { BotHud, type BotReadout } from './BotHud';
 import { FrameStats } from './FrameStats';
@@ -98,6 +103,18 @@ export interface PerformanceWorldHooks {
   onPause(): void;
   /** Progress of `enter()`: a 0..1 fraction and an ETA in ms (null before there is a rate), for the loading screen. */
   onLoadProgress?(fraction: number, etaMs: number | null): void;
+  /**
+   * Where the elevation survey comes from.
+   *
+   * ABSENT MEANS NO TERRAIN — and that is the point. A scene must not
+   * reach the network merely because it was constructed: every test of
+   * the menu, the pause menu or the save slots would then wait out a
+   * download's retry backoff to prove something about a button. The
+   * integration pass (`app/registerScenes.ts`) wires the deployed files;
+   * a test that is about terrain hands over bytes of its own; everything
+   * else gets the empty world, which is what this scene already was.
+   */
+  survey?(onBytes: (received: number, total: number | null) => void): Promise<ArrayBuffer>;
   /**
    * The current settings. Read once in `enter()` and again whenever the
    * app state changes — the pause menu is where a player changes them, and
@@ -244,6 +261,8 @@ export const REMOTE_CAPSULES_ROLE = 'remote-capsules';
 
 /** The sky the grid vanishes into, and the fog that makes it vanish. */
 const HORIZON = '#9db6c6';
+/** What the ground bounces back up into the shaded side of a hill. */
+const GROUND_BOUNCE = '#4a4335';
 /** 2000 units across in 10-unit cells: big enough that a 40 unit/s camera takes time to reach the edge. */
 const GRID_SIZE = 2000;
 const GRID_DIVISIONS = 200;
@@ -256,6 +275,72 @@ const FOG_FAR = 1500;
 const START = { x: 0, y: 25, z: 80, yaw: 0, pitch: -0.22 } as const;
 
 /**
+ * THE ISLAND IS NOT AN ANT-SIZED ROOM, and the empty world's numbers do
+ * not survive contact with it. The grid is 2,000 units across and the fog
+ * closes at 1,500; Kauaʻi is 5,600,000 across. So when the terrain layer
+ * is on, the scene swaps to this second set and swaps back when it is off
+ * — one place, both sets named, rather than numbers that are wrong for
+ * whichever layer is not being looked at.
+ */
+const TERRAIN_FOG_NEAR = 400_000;
+const TERRAIN_FOG_FAR = 4_200_000;
+
+/**
+ * How far above the ground the camera starts when there is ground.
+ *
+ * World (0,0) is Waiʻaleʻale's summit plateau at 1,302 m, so a camera left
+ * at START's 25 units begins 1.3 km INSIDE the mountain. 400 m above it
+ * was not enough either: standing on the highest ground on the island, the
+ * plateau itself fills the view. 1.5 km clears it and puts real distance
+ * in frame.
+ */
+const START_CLEARANCE = 150_000;
+
+/** Looking down about 25 degrees, rather than the empty room's 12. */
+const START_PITCH = -0.45;
+
+/**
+ * Facing WEST from the summit, which is the long way across Kauaʻi and the
+ * direction Waimea Canyon and the Napali ridges lie in. The empty world's
+ * yaw of 0 looks north, at the shortest and flattest view there is from
+ * here. (Camera yaw is not heading: `headingOfYaw` adds half a turn.)
+ */
+const START_YAW = Math.PI / 2;
+
+/**
+ * The starting fly speed, as a fraction of the height above ground.
+ *
+ * The empty world's 40 units a second is 0.4 m/s, which is an ant's pace
+ * and correct for a room 20 m across. Kauaʻi is 56 km across: at that
+ * speed crossing it takes four hours. A twelfth of the altitude puts the
+ * camera at about 125 m/s when it starts high, and the wheel takes over
+ * from there.
+ */
+const SPEED_PER_ALTITUDE = 1 / 12;
+
+/**
+ * THE DEPTH BUFFER, AND WHY THE NEAR PLANE MOVES.
+ *
+ * Depth precision depends on far/near, not on far. The empty world's
+ * 0.1 → 5,000 is a ratio of 50,000 and is fine; keeping near at 0.1 while
+ * pushing far to 8,000,000 would be 80 million, and the island would
+ * z-fight into confetti. A logarithmic depth buffer would fix it and cost
+ * a per-fragment depth write on every phone, forever.
+ *
+ * Instead the near plane rides the camera's height above the ground and
+ * the far plane keeps a FIXED RATIO to it. Close to the ground you get
+ * millimetres of near plane and a short view; high above it you get a
+ * coarse near plane and the whole island — which is exactly what you can
+ * actually see from each. No extra fragment cost, and the ratio never
+ * leaves what a 24-bit buffer holds comfortably.
+ */
+const DEPTH_RATIO = 60_000;
+const MIN_NEAR = 0.1;
+const MAX_NEAR = 120;
+/** Refresh the projection only when the near plane has really moved: it is a matrix rebuild. */
+const NEAR_HYSTERESIS = 1.3;
+
+/**
  * Real milestones, weighted by roughly what they cost; not a timer. Small
  * today, but the loading screen shows THIS, and when terrain arrives the
  * DEM download joins the list with a weight that dwarfs these.
@@ -264,6 +349,9 @@ const MILESTONES = [
   { id: 'ground', weight: 2 },
   { id: 'light', weight: 1 },
   { id: 'hud', weight: 1 },
+  // The 2 MB survey, which dwarfs the rest — the loading bar is mostly
+  // this, and it is reported from bytes that actually landed.
+  { id: 'terrain', weight: 24 },
 ] as const;
 
 export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): SceneFactory {
@@ -279,6 +367,15 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
 
     let grid: THREE.GridHelper | null = null;
     let light: THREE.DirectionalLight | null = null;
+    let sky: THREE.HemisphereLight | null = null;
+    /** The ground, once the survey has landed. Null until then, and null forever if it does not. */
+    let field: Heightfield | null = null;
+    let terrain: TerrainView | null = null;
+    let streamer: TerrainStreamer | null = null;
+    /** What the terrain toggle was at the last look, so a change is acted on once. */
+    let terrainOn = false;
+    /** The near plane the projection was last built with. */
+    let builtNear = 0;
     let hud: PerfHud | null = null;
     let pauseButton: HTMLButtonElement | null = null;
     /** The app state at the last look; a change is the cue to re-read settings and to notice a pause opening. */
@@ -373,6 +470,75 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
       fly.place(lx, height, lz, yaw, pitch);
       const pose = fly.pose();
       placedPose = { wx: pose.at.wx, wz: pose.at.wz, yaw: pose.yaw };
+    };
+
+    /**
+     * Put the camera above the ground rather than inside it.
+     *
+     * World (0,0) is Waiʻaleʻale's summit plateau at 1,302 m, so START's
+     * 25 units is 1.3 km underground the moment terrain exists. This is
+     * only for a FRESH start: a resumed camera is where the player left
+     * it, and moving it would be taking their world away.
+     */
+    const standOnGround = (): void => {
+      if (field === null) return;
+      const pose = fly.pose();
+      const ground = field.heightAt(pose.at);
+      placeCamera(START.x, ground + START_CLEARANCE, START.z, START_YAW, START_PITCH);
+      // And a pace that suits a 56 km island rather than a 20 m room.
+      fly.speed = START_CLEARANCE * SPEED_PER_ALTITUDE;
+    };
+
+    /**
+     * Show or hide the ground, and move the fog to the scale of whatever
+     * is being looked at. Called when the toggle changes, not every frame.
+     */
+    const syncTerrainLayer = (): void => {
+      terrainOn = toggles.isEnabled('terrain');
+      if (terrain !== null) terrain.group.visible = terrainOn;
+      if (grid !== null) grid.visible = !terrainOn;
+      const fog = three.fog as THREE.Fog | null;
+      if (fog) {
+        fog.near = terrainOn ? TERRAIN_FOG_NEAR : FOG_NEAR;
+        fog.far = terrainOn ? TERRAIN_FOG_FAR : FOG_FAR;
+      }
+    };
+
+    /**
+     * Ride the near plane on the camera's height above the ground, and
+     * keep the far plane a fixed ratio beyond it — see DEPTH_RATIO. Only
+     * rebuilds the projection when the near plane has really moved,
+     * because that is a matrix, not a number.
+     */
+    const adaptDepth = (): void => {
+      const camera = fly.camera;
+      if (!terrainOn || field === null) {
+        if (builtNear === 0) return;
+        builtNear = 0;
+        camera.near = MIN_NEAR;
+        camera.far = 5000;
+        camera.updateProjectionMatrix();
+        return;
+      }
+      const pose = fly.pose();
+      const altitude = Math.abs(pose.height - field.heightAt(pose.at));
+      const near = Math.min(MAX_NEAR, Math.max(MIN_NEAR, altitude / 1000));
+      if (builtNear !== 0 && near < builtNear * NEAR_HYSTERESIS && near > builtNear / NEAR_HYSTERESIS) return;
+      builtNear = near;
+      camera.near = near;
+      camera.far = near * DEPTH_RATIO;
+      camera.updateProjectionMatrix();
+    };
+
+    /** Point the clipmap at the camera and ask for the tiles under it. One call a frame. */
+    const updateTerrain = (): void => {
+      if (terrain === null) return;
+      if (toggles.isEnabled('terrain') !== terrainOn) syncTerrainLayer();
+      if (!terrainOn) return;
+      const at = fly.pose().at;
+      terrain.update(at);
+      streamer?.update(at);
+      adaptDepth();
     };
 
     /** True while the camera is still exactly where the world put it: the player has not flown. */
@@ -482,12 +648,38 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         three.add(grid);
         reached('ground');
 
-        // Nothing here is lit yet; the light is in place so the first lit
-        // layer (terrain) is measured under the same sun as everything after it.
-        light = new THREE.DirectionalLight(0xfff4e0, 1.2);
+        // The sun, and the sky it hangs in.
+        //
+        // A lone directional light leaves every slope facing away from it
+        // BLACK, because nothing else reaches them — which is what the
+        // first terrain screenshots showed: half an island the colour of
+        // nothing. Outdoors the shaded side of a hill is lit by the sky,
+        // and a hemisphere light is that, cheaply: sky colour from above,
+        // bounced ground from below, no shadow map and no second pass.
+        light = new THREE.DirectionalLight(0xfff4e0, 1.15);
         light.position.set(200, 400, 100);
         three.add(light);
+        sky = new THREE.HemisphereLight(HORIZON, GROUND_BOUNCE, 1.0);
+        three.add(sky);
         reached('light');
+
+        // THE SURVEY. Everything after this can fail without taking the
+        // world with it: a world with no terrain is the empty world,
+        // which is a thing this scene already is.
+        if (hooks.survey) {
+          try {
+            const bytes = await hooks.survey((received, total) => {
+              progress.report('terrain', Math.min(1, received / (total ?? COARSE_BYTES)));
+              hooks.onLoadProgress?.(progress.fraction(), progress.etaMs());
+            });
+            field = new Heightfield(repairGrid(decodeCoarse(bytes)).grid);
+            terrain = new TerrainView({ field });
+            streamer = new TerrainStreamer({ field });
+          } catch (error) {
+            console.error('[terrain] the survey did not load; the world is the empty one', error);
+          }
+        }
+        reached('terrain');
 
         hud = new PerfHud(ctx.uiLayer, {
           layers: () => toggles.list(),
@@ -508,7 +700,17 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         // never save a camera the world has not placed.
         const from = hooks.resume?.();
         if (from) fly.restore(from.camera);
+        else standOnGround();
         hooks.onSavePoint?.(save);
+
+        // Terrain is the world now, so it comes up ON. The toggle is
+        // still the way to measure what it costs — turning it off is what
+        // the empty world was.
+        if (terrain !== null) {
+          toggles.setEnabled('terrain', true);
+          three.add(terrain.group);
+          syncTerrainLayer();
+        }
 
         // The wire, last: the world is already whole and measurable
         // without it, which is the point — a relay that never answers
@@ -567,6 +769,9 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         // look — and would lag the hand during a stall, because the sim cap
         // would swallow most of the stall's time.
         fly.update(ctx.input.snapshot(), frame.rawDt);
+        // After the camera, before anything is drawn: the ground is
+        // placed against where the camera IS this frame, not where it was.
+        updateTerrain();
         if (net !== null) {
           netClockMs += Math.max(0, frame.rawDt) * 1000;
           // Stand over the spawn the authority named, the first time it
@@ -628,6 +833,14 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         }
         capsuleList?.remove();
         capsuleList = null;
+        streamer?.dispose();
+        streamer = null;
+        if (terrain) {
+          three.remove(terrain.group);
+          terrain.dispose();
+          terrain = null;
+        }
+        field = null;
         if (grid) {
           three.remove(grid);
           grid.dispose();
@@ -637,6 +850,11 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
           three.remove(light);
           light.dispose();
           light = null;
+        }
+        if (sky) {
+          three.remove(sky);
+          sky.dispose();
+          sky = null;
         }
         hud?.dispose();
         hud = null;

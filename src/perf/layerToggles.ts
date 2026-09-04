@@ -15,10 +15,13 @@ import { WORLD_LAYERS, type WorldLayerId } from '../world/WorldLoader';
 /**
  * The layers this build can actually render in the performance world.
  * Grows with the world plan: the phase that adds a layer to the perf world
- * adds its id here, and the HUD row comes alive on its own. Phase 0 has
- * only the empty world, so nothing.
+ * adds its id here, and the HUD row comes alive on its own.
+ *
+ * `terrain` was added in Phase 2, in the same commit that made the toggle
+ * real — a layer listed here before it draws anything is a control that
+ * looks functional and is not (§2.9).
  */
-export const BUILT_LAYERS: readonly WorldLayerId[] = [];
+export const BUILT_LAYERS: readonly WorldLayerId[] = ['terrain'];
 
 export interface LayerToggle {
   readonly id: WorldLayerId;

@@ -19,6 +19,7 @@ import {
 import { playerId } from '../actor/PlayerId';
 import { PRACTICE_BOT_NAME, RELAY_QUERY_PARAM, resolveRelayUrl, toRoomSocketUrl } from '../net';
 import { createPerformanceWorldScene } from '../perf/PerformanceWorldScene';
+import { fetchCoarseDem } from '../assets/demSource';
 import { PERF_WORLD_MAP_ID, PERF_WORLD_SCENE_ID, perfWorldTool } from '../perf/perfTool';
 import {
   LocalSoloSession, isSoloSlot, newSoloGame, readSoloSlots, resumeSoloSlot, restorableStateOf, savedSoloGame,
@@ -209,7 +210,26 @@ const profile = (ctx: SceneContext): ProfileSource => {
   };
 };
 
-export function registerScenes(): void {
+/** How the survey reaches the world. The shape of `PerformanceWorldHooks.survey`. */
+export type SurveySource = (onBytes: (received: number, total: number | null) => void) => Promise<ArrayBuffer>;
+
+export interface RegisterScenesOptions {
+  /**
+   * Where the elevation survey comes from.
+   *
+   * Omit for the deployed files, which is what the app does. Pass `null`
+   * for a world with NO terrain — what a test of the menus, the pause
+   * menu or the save slots wants, since none of them is about downloading
+   * two megabytes and all of them would otherwise wait out its retry
+   * backoff. Pass a function to serve it from somewhere else.
+   */
+  readonly survey?: SurveySource | null;
+}
+
+export function registerScenes(options: RegisterScenesOptions = {}): void {
+  const survey: SurveySource | undefined = options.survey === null
+    ? undefined
+    : options.survey ?? ((onBytes) => fetchCoarseDem({ onBytes }));
   // Front door. Every screen here lives in the `menu` app state.
   registerScene(SCREEN_ID.menu, createMainMenuScene(offers, play));
   registerScene(SCREEN_ID.session, createSessionPickerScene(offers, play));
@@ -231,6 +251,10 @@ export function registerScenes(): void {
         onPause: shell.onPause,
         onSavePoint: shell.onSavePoint,
         onLoadProgress: (fraction) => worldLoad.report(WORLD_MILESTONE, fraction),
+        // THE SURVEY, wired here and nowhere else. The scene takes it as
+        // a hook so that constructing it does not reach the network; this
+        // is the one place that says the terrain is the deployed files.
+        survey,
         settings: () => openSettings(ctx.storage).read(),
         resume: () => restorableStateOf(ctx.app.session),
         // WHO THIS PLAYER IS ON THE WIRE, read only when the world asks —

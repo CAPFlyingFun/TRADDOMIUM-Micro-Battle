@@ -90,10 +90,13 @@ src/
   view/         three.js visual adapters for actors (CapsuleView) — the
                 only place actor state meets a mesh; actor/ stays
                 three-free.
-  terrain/      the ground's renderer: TerrainView, a geometry clipmap of
-                concentric rings over world/heightfield. What view/ is to
-                actor/, this is to world/ — the only place a height meets
-                a mesh; world/ stays three-free. Added in Phase 2.
+  terrain/      the ground's renderer and its residency: TerrainView, a
+                geometry clipmap of concentric rings over
+                world/heightfield, and TerrainStreamer, which keeps the
+                high-detail tiles near the camera loaded and lets the rest
+                go. What view/ is to actor/, this is to world/ — the only
+                place a height meets a mesh; world/ stays three-free.
+                Added in Phase 2.
   camera/       FollowCamera + CameraOwnership. Phase 0 has FreeFlyCamera
                 only (under perf/).
   input/        keyboard / pointer / touch (Input.ts, DOM) → one shared
@@ -149,7 +152,8 @@ devtools(Network Lab) → net, actor, view, perf(grid/camera helpers), three / D
 world, actor, autonomy, data, net, perf(FrameStats), persistence, input(Intent.ts) → NOTHING in three/DOM (core)
 perf(scenes/hud), camera, view, ui, devtools, assets → three / DOM allowed
 view → three allowed; it reads ActorState and writes a mesh
-terrain → three, world(heightfield as types, coords, origin, dem) — nothing else
+terrain → three, world(heightfield as types, coords, origin, dem, demRepair),
+          assets(demSource, for the tiles it streams) — nothing else
 terrain → NEVER actor, view, session, ui (the ground does not know who stands on it)
 actor → NEVER view (a state module does not know what it looks like)
 ui → NEVER world, actor, autonomy, session internals (typed hooks only)

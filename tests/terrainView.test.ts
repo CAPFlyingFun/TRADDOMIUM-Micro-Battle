@@ -117,6 +117,53 @@ describe('what it rebuilds', () => {
   });
 });
 
+describe('the rings line up with each other', () => {
+  it('cuts each hole exactly where the finer ring landed, at every camera position', () => {
+    // THE BUG THIS PINS, seen in the first screenshot: every ring snaps to
+    // its OWN lattice, so ring N sits at a multiple of its two-quad step —
+    // which is one quad of ring N+1 — and lands offset from the middle of
+    // ring N+1's hole. Cut the hole in the middle anyway and you get sky
+    // through a gap on one side and z-fighting on the other.
+    setOrigin(world(0, 0));
+    const view = viewOf(flatGrid(0));
+    const all = meshes(view);
+
+    // A spread of positions including exact lattice points, half-steps and
+    // ugly ones, because the offset only appears at some of them.
+    const positions = [0, 1, FINEST_QUAD / 2, FINEST_QUAD, FINEST_QUAD * 1.5,
+      FINEST_QUAD * 3, 12_345, -98_765, 1_000_000, -2_400_000];
+    for (const px of positions) {
+      for (const pz of [0, FINEST_QUAD * 2.5, -654_321]) {
+        view.update(world(px, pz));
+        const offsets = view.holeOffsets();
+        for (let i = 1; i < all.length; i += 1) {
+          const quad = FINEST_QUAD * 2 ** i;
+          // The offset can only ever be one quad either way. More than
+          // that means the snapping changed and the hole is now a guess.
+          expect(Math.abs(offsets[i].x)).toBeLessThanOrEqual(1);
+          expect(Math.abs(offsets[i].z)).toBeLessThanOrEqual(1);
+          // And the hole is where the finer ring IS: its centre must be
+          // this ring's centre plus exactly that offset.
+          expect(all[i - 1].position.x).toBeCloseTo(all[i].position.x + offsets[i].x * quad, 3);
+          expect(all[i - 1].position.z).toBeCloseTo(all[i].position.z + offsets[i].z * quad, 3);
+        }
+      }
+    }
+    view.dispose();
+  });
+
+  it('never leaves the innermost ring with a hole', () => {
+    const view = viewOf(flatGrid(0));
+    view.update(world(123_456, -78_910));
+    expect(view.holeOffsets()[0]).toEqual({ x: 0, z: 0 });
+    const solid = meshes(view)[0].geometry.getIndex();
+    const hollow = meshes(view)[1].geometry.getIndex();
+    if (!solid || !hollow) throw new Error('rings must be indexed');
+    expect(hollow.count).toBeLessThan(solid.count);
+    view.dispose();
+  });
+});
+
 describe('what it draws', () => {
   it('puts every surface vertex at the heightfield’s own answer', () => {
     setOrigin(world(0, 0));
@@ -131,12 +178,64 @@ describe('what it draws', () => {
       // The origin is at 0,0 here, so drawn position IS world position.
       const centreX = mesh.position.x;
       const centreZ = mesh.position.z;
-      // A spread of surface vertices, not all of them: the property is per vertex.
+      // A spread of surface vertices, not all of them: the property is per
+      // vertex. The outer boundary is EXCLUDED — those are pinned to the
+      // coarse ring's line so the seam has no T-junction, which is the one
+      // deliberate exception and is checked on its own below.
+      const runs = mesh.geometry.userData.edgeRuns as number[][];
+      const onEdge = new Set(runs.flat());
+      let checked = 0;
       for (let i = 0; i < skirtFrom; i += 97) {
+        if (onEdge.has(i)) continue;
         const here = world(centreX + position.getX(i), centreZ + position.getZ(i));
         expect(position.getY(i)).toBeCloseTo(field.heightAt(here), 3);
+        checked += 1;
+      }
+      expect(checked).toBeGreaterThan(0);
+    }
+    view.dispose();
+  });
+
+  it('pins each ring’s boundary to the line the coarse ring draws, so the seam has no gap', () => {
+    // THE 83 SKY-COLOURED PIXELS, as a test. Two fine edge segments meet
+    // one coarse segment; the fine vertex in between is off the coarse
+    // line, and that hairline is the sky. Averaging it onto the line makes
+    // the two polylines identical, so there is nothing left to leak.
+    setOrigin(world(0, 0));
+    const grid = rampGrid(20);
+    const field = new Heightfield(grid);
+    const view = new TerrainView({ field });
+    view.update(world(0, 0));
+    const all = meshes(view);
+
+    for (let m = 0; m < all.length - 1; m += 1) {
+      const position = all[m].geometry.getAttribute('position') as THREE.BufferAttribute;
+      const runs = all[m].geometry.userData.edgeRuns as number[][];
+      let stitched = 0;
+      for (const run of runs) {
+        for (let i = 1; i < run.length - 1; i += 2) {
+          const mean = (position.getY(run[i - 1]) + position.getY(run[i + 1])) / 2;
+          expect(position.getY(run[i])).toBeCloseTo(mean, 6);
+          stitched += 1;
+        }
+      }
+      expect(stitched).toBeGreaterThan(0);
+    }
+
+    // The OUTERMOST ring keeps its real heights: there is nothing coarser
+    // outside it to agree with, and flattening its edge would be inventing.
+    const outer = all[all.length - 1];
+    const outerPos = outer.geometry.getAttribute('position') as THREE.BufferAttribute;
+    const outerRuns = outer.geometry.userData.edgeRuns as number[][];
+    let trueHeights = 0;
+    for (const run of outerRuns) {
+      for (let i = 1; i < run.length - 1; i += 2) {
+        const here = world(outer.position.x + outerPos.getX(run[i]), outer.position.z + outerPos.getZ(run[i]));
+        expect(outerPos.getY(run[i])).toBeCloseTo(field.heightAt(here), 3);
+        trueHeights += 1;
       }
     }
+    expect(trueHeights).toBeGreaterThan(0);
     view.dispose();
   });
 
@@ -190,6 +289,33 @@ describe('the colour stands in for a texture, and says which way is up', () => {
 
   it('holds its ends rather than running off the ramp', () => {
     expect(colourAt(-9_000_000).getHex()).toBe(colourAt(-300_000).getHex());
-    expect(colourAt(9_000_000).getHex()).toBe(colourAt(150_000).getHex());
+    expect(colourAt(9_000_000).getHex()).toBe(colourAt(160_000).getHex());
+  });
+
+  it('stays green all the way to the summit, because Kauaʻi has no treeline', () => {
+    // Waiʻaleʻale's 1,548 m top is a rainforest bog, the wettest place on
+    // Earth. A generic height ramp paints it grey, which is a mountain
+    // from somewhere else.
+    const summit = colourAt(155_000);
+    expect(summit.g).toBeGreaterThan(summit.r);
+    expect(summit.g).toBeGreaterThan(summit.b);
+  });
+
+  it('makes bare rock a matter of slope, not height', () => {
+    // The island's rock is its cliffs — Waimea's walls, the Napali face.
+    const meadow = colourAt(60_000, 5);
+    const cliff = colourAt(60_000, 70);
+    expect(meadow.g).toBeGreaterThan(meadow.r);
+    expect(cliff.r).toBeGreaterThan(cliff.g);
+    // Gradual, so a hillside is not a hard line where the rule trips.
+    const slope = colourAt(60_000, 45);
+    expect(slope.r).toBeGreaterThan(meadow.r);
+    expect(slope.r).toBeLessThan(cliff.r);
+  });
+
+  it('never paints rock onto the sea floor, however steep the seamount is', () => {
+    // The flanks below the island are 20 degrees and more, and a rock face
+    // painted down there would be visible through nothing at all.
+    expect(colourAt(-100_000, 80).getHex()).toBe(colourAt(-100_000, 0).getHex());
   });
 });
