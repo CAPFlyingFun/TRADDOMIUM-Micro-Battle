@@ -107,10 +107,15 @@ src/
   data/         schema.ts (registry + curve × life-state multiplier
                 pattern) and the typed registries (empty shells).
   net/          Transport contract, LoopbackTransport (a modelled wire:
-                latency, jitter, drop, seeded), protocol.ts (the message
-                shapes, their guards and the Authority interface, §5),
-                HostAuthority (Host.ts), Client, Replica (interpolated
-                remote actors) and NetworkConditions. All pure.
+                latency, jitter, drop, seeded), WebSocketTransport (the
+                same contract over a real socket: backoff, and the
+                remembered hello that re-attaches an identity), protocol.ts
+                (the message shapes, their guards and the Authority
+                interface, §5), HostAuthority (Host.ts), Client, Replica
+                (interpolated remote actors) and NetworkConditions. All
+                pure — WebSocketTransport reaches the platform's socket
+                constructor through an injected factory, never by naming
+                a global.
   perf/         PerformanceWorldScene, FreeFlyCamera, PerfHud,
                 FrameStats (pure).
   persistence/  versioned storage wrapper with defensive reads.
@@ -119,6 +124,13 @@ src/
 tests/          vitest. simulationCore.test.ts is the import-boundary test.
 scripts/        Playwright probes and bakes, every one wired or allow-listed.
 docs/research/  reference material carried from v0, read-only.
+
+worker/         THE RELAY, deployed to Cloudflare, not to Pages. index.ts
+                routes (/health, /room/<code>); RoomDurableObject holds
+                ONE room = one Durable Object = one `src/net/Host.ts`;
+                WebSocketTransport wears the core `Transport` over a
+                workerd socket; roomCode.ts says what a code is. It owns
+                a socket, a clock and a call to tick() — and no game rule.
 ```
 
 **Allowed dependency direction** (an arrow means "may import"):
@@ -136,6 +148,8 @@ view → three allowed; it reads ActorState and writes a mesh
 actor → NEVER view (a state module does not know what it looks like)
 ui → NEVER world, actor, autonomy, session internals (typed hooks only)
 camera → NEVER actor mode enums (continuous signals only)
+worker → net (Host, protocol, Transport) and NOTHING else of src/
+worker → NEVER three, the DOM or node: workerd is its own runtime
 ```
 
 ## 4. App flow and AppState
@@ -224,6 +238,19 @@ position is refused without a rejection message: the client reconciles
 to the snapshot. `LocalAuthority` (solo) applies claims directly;
 `HostAuthority` (multiplayer) validates and rebroadcasts. Both hide
 behind the one interface, so a session never asks which it holds.
+
+**ONE HOST, TWO PLACES IT RUNS.** The relay in `worker/` does not
+reimplement the authority: its Durable Object imports `src/net/Host.ts`
+and runs that file unchanged. The travel budget that refuses a teleport,
+the spawn, the 20 Hz snapshot round, the disconnect grace and the
+identity re-attach are therefore the SAME code in three places — the
+loopback the Network Lab drives, the vitest replication test, and the
+room a phone connects to. That is what `net/` being free of `three`, the
+DOM and node buys, and why the boundary is worth a test
+(`tests/simulationCore.test.ts`): the moment a rule can only run in one
+of those places, the loopback stops predicting the relay and the tests
+stop being evidence. `worker/` supplies only what `Host` deliberately
+lacks — a socket, a clock and something to call `tick()`.
 
 ## 6. State architecture
 
@@ -321,6 +348,7 @@ permanently excluded.
 |---|---|---|
 | **0 App shell** | app/, session/ (solo + mock multiplayer), ui/ (menu, settings, about, loading, pause), devtools/ hub, data/ schema, perf/ empty world + FreeFly + PerfHud, net/ stub, persistence/, assets/, tests, CI, boot probe | nothing — blank slate |
 | 1 Session + profile | PlayerProfile + PlayerId, SoloSave v2 (camera pose in world coordinates) through `LocalSoloSession`, honest multiplayer mock, actor/ contracts + Intent + `net/protocol`, two-capsule loopback test. Also carries the loading artwork port (splash sandwich, bake script, icons, manifest), and `coords.ts` / `origin.ts` pulled forward from Phase 2 because actors need a `WorldPoint` from day one. **Shipped THREE solo save slots** (`session/SoloSlots.ts`): three independent SoloSave documents, RESUME and NEW GAME on the menu in place of one CONTINUE, and a confirmation in front of the only path that replaces a save. Slot 1 keeps the original single-save key, so a device that already held a game finds it as slot 1 | `save.ts` shape, `coords.ts`, `origin.ts` + their tests, `sessionMode`/`soloSave` tests, the splash assets |
+| **1.5 The relay** | The server side of multiplayer: `src/net/WebSocketTransport.ts` (the client's real wire) and `worker/` — a Cloudflare Worker router plus one SQLite-backed Durable Object per room, each running one unchanged `Host`. Proved locally against real workerd by `npm run probe:relay`: two sockets, one room, a walk, a refused teleport, a drop that lingers through the grace, a re-attach that returns the same actor. What is NOT built: the browser screen that joins a room, so no relay URL is compiled in and the multiplayer caption is still the honest mock | nothing — v0 had no server |
 | 2 Kauaʻi terrain | heightfield with a `WorldPoint`-typed API, chunk streaming keyed by global chunk id, terrain layer in the perf world. The `discovery.ts` codec moves here from Phase 1: there is nothing to discover before terrain | `heightfield.ts`, `kauai*.ts`, `demRepair.ts`, `lod.ts`, `stableHash.ts`, `discovery.ts`, the DEM binaries, their tests |
 | 3 Ocean | the accepted look, two-owner water router from day one | `seaSwell.ts`, `surf.ts`, `Ocean.ts`, `waterLook.ts`, `liveSea.ts`, foam probe + `oceanShader` fixture test |
 | 4 Inland water | hydrology bake feeding the local solver; per-reach bed materials; cascade FX; NHDPlus/DLNR names | `drainage.ts`, `islandChannels.ts`, `hydro.ts`, `waterSim.ts`, `nearestWater.ts` |

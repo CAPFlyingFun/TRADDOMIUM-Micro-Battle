@@ -5,13 +5,51 @@
  * gameplay never learns which one it holds.
  */
 import { describe, expect, it } from 'vitest';
+import type { MessageHandler, Transport, TransportState } from '../src/net';
 import { defineStore, memoryKeyValueStore } from '../src/persistence/store';
 import type { GameSession } from '../src/session/GameSession';
 import { LocalSoloSession, SOLO_SAVE_SPEC, SOLO_SAVE_VERSION } from '../src/session/LocalSoloSession';
 import { PLAYER_PROFILE_SPEC, loadProfile, playerIdOf } from '../src/session/PlayerProfile';
-import { MULTIPLAYER_CAPTION, RemoteMultiplayerSession } from '../src/session/RemoteMultiplayerSession';
+import {
+  MULTIPLAYER_CAPTION, RELAY_CLOSED_CAPTION, RELAY_CONNECTED_CAPTION, RELAY_CONNECTING_CAPTION,
+  RemoteMultiplayerSession,
+} from '../src/session/RemoteMultiplayerSession';
 import { DEFAULT_CAMERA_POSE } from '../src/session/SoloSave';
 import { world } from '../src/world/coords';
+
+/**
+ * A transport whose state the test sets by hand: the session's caption
+ * must follow what the LINK reports and nothing else, so the test says
+ * what the link reports.
+ */
+class StubTransport implements Transport {
+  state: TransportState = 'closed';
+  connects = 0;
+  disconnects = 0;
+  sent: unknown[] = [];
+
+  async connect(): Promise<void> {
+    this.connects += 1;
+    this.state = 'open';
+  }
+
+  disconnect(): void {
+    this.disconnects += 1;
+    this.state = 'closed';
+  }
+
+  send(msg: unknown): void {
+    this.sent.push(msg);
+  }
+
+  onMessage(_cb: MessageHandler): () => void {
+    return () => {};
+  }
+
+  onClose(_cb: () => void): () => void {
+    return () => {};
+  }
+}
 
 describe('session contract', () => {
   it('pins the multiplayer caption exactly', () => {
@@ -65,6 +103,42 @@ describe('session contract', () => {
     await remote.save({ camera: { at: world(1, 2), height: 3, yaw: 0, pitch: 0 } });
     await remote.leave();
     expect(remote.mapId).toBe('kauai');
+  });
+
+  it('keeps the pinned caption while no relay is configured, whatever the transport could say', async () => {
+    const remote = new RemoteMultiplayerSession('kauai');
+    expect(remote.transport).toBeNull();
+    expect(remote.caption).toBe('Online play is not built yet.');
+    // Connecting a session with nowhere to connect to changes nothing and says nothing new.
+    await expect(remote.connect()).resolves.toBeUndefined();
+    expect(remote.caption).toBe('Online play is not built yet.');
+  });
+
+  it('speaks of the relay only when there is one, and only as the transport reports it', async () => {
+    const link = new StubTransport();
+    const remote = new RemoteMultiplayerSession('kauai', {
+      relayUrl: 'wss://relay.example/room', createTransport: () => link,
+    });
+    expect(remote.caption).toBe(RELAY_CLOSED_CAPTION);
+    link.state = 'connecting';
+    expect(remote.caption).toBe(RELAY_CONNECTING_CAPTION);
+    await remote.connect();
+    expect(link.connects).toBe(1);
+    expect(remote.caption).toBe(RELAY_CONNECTED_CAPTION);
+    // None of the relay captions may be the pinned one: that line means
+    // "there is no online play here", and here there is a link.
+    for (const caption of [RELAY_CLOSED_CAPTION, RELAY_CONNECTING_CAPTION, RELAY_CONNECTED_CAPTION]) {
+      expect(caption).not.toBe(MULTIPLAYER_CAPTION);
+    }
+    // A relay changes nothing about who owns the world.
+    expect(remote).toMatchObject({ mode: 'multiplayer', canPauseWorld: false, authority: 'server' });
+    await remote.leave();
+    expect(link.disconnects).toBe(1);
+    expect(remote.caption).toBe(RELAY_CLOSED_CAPTION);
+  });
+
+  it('refuses a relay address that is not a socket URL rather than hiding the typo behind the mock', () => {
+    expect(() => new RemoteMultiplayerSession('kauai', { relayUrl: 'https://relay.example' })).toThrow(/relay URL/);
   });
 
   it('derives the player id from the profile device id', () => {

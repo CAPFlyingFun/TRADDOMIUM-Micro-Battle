@@ -47,6 +47,12 @@ jobs:
       - run: npm test
       - run: npm run build
 
+      # The relay's own typecheck. It cannot ride on `npm run typecheck`:
+      # the root tsconfig targets the browser and the worker one targets
+      # workerd, and each fails on the other's sources. Cheap, has no
+      # runtime, and without it worker/ would drift uncompiled.
+      - run: npm run relay:typecheck
+
       # v0 — the archive branch, built as-is. Its tests are frozen with
       # it; its build (tsc + vite) is the only gate that matters here.
       - uses: actions/checkout@v4
@@ -73,6 +79,25 @@ jobs:
         uses: actions/upload-pages-artifact@v3
         with:
           path: site
+
+  # The relay, proved against the REAL Workers runtime: this job starts
+  # workerd locally (wrangler dev --local, no Cloudflare account) and
+  # drives two WebSockets through join, move, a refused teleport, a drop
+  # and a re-attach. It is deliberately NOT a gate on `deploy`: the relay
+  # is a separate deployment, and a wedged workerd must not be able to
+  # keep a game build off Joshua's phone. It still fails the run, loudly.
+  relay:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+      - run: npm run probe:relay
 
   deploy:
     needs: build

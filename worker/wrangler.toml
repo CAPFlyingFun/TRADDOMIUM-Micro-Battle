@@ -1,0 +1,41 @@
+# TRADDOMIUM multiplayer relay — Cloudflare Worker + one Durable Object per room.
+#
+# Deploy, from the repository root, with ONE command:
+#
+#     npm run relay:deploy
+#
+# There are NO credentials in this file and none anywhere in the repo:
+# no account_id, no API token, no secrets. Wrangler picks the account up
+# from `wrangler login` on a laptop, or from CLOUDFLARE_API_TOKEN in the
+# environment on CI. See worker/README.md for the permissions that token
+# needs.
+
+name = "traddomium-relay"
+main = "src/index.ts"
+
+# The runtime behaviour this Worker was written and tested against.
+# Raising it opts into newer runtime semantics, so it is changed
+# deliberately and re-tested, never bumped for tidiness.
+compatibility_date = "2026-06-01"
+
+# One room, one Durable Object, one Host instance holding that room's
+# truth. `idFromName(roomCode)` in src/index.ts is what makes the same
+# code always reach the same object.
+[[durable_objects.bindings]]
+name = "ROOM"
+class_name = "RoomDurableObject"
+
+# SQLite-backed Durable Objects are the ones available on the Workers
+# FREE plan, so `new_sqlite_classes` is what lets this relay run without
+# a paid subscription. The paid-plan form of the same line is
+# `new_classes` (key-value backed); the class and the code are identical
+# either way. The room keeps nothing in storage — see the "why accept()"
+# note in RoomDurableObject.ts — so the backend choice costs it nothing.
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RoomDurableObject"]
+
+# Log lines and exceptions from a deployed relay, readable with
+# `npm run relay:tail`.
+[observability]
+enabled = true

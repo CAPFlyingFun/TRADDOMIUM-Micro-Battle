@@ -110,6 +110,11 @@ imply more than exists; the honest caption is pinned by a test.
 - State is derived from measured facts each frame where possible; a
   latch that is genuinely needed is one named object, not loose fields.
 - Numbers live in `data/` registries with a `WIRED` list and a test.
+- **The relay's authority is `src/net/Host.ts` itself, never a second
+  copy of the rules.** `worker/` imports that file and runs it unchanged;
+  it owns a socket, a clock and a call to `tick()` and nothing else. A
+  game rule written in `worker/` is a bug: the loopback would stop
+  predicting the room a phone connects to.
 - A client-side PIN is a convenience, not security.
 - Every file in `scripts/` is wired to a `package.json` script or listed
   in `scripts/MANUAL.md`.

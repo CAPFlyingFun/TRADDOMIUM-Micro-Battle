@@ -12,6 +12,11 @@ export { INTERPOLATION_MS, Replica, type ReplicaOptions } from './Replica';
 export { seededRandom } from './seededRandom';
 export type { MessageHandler, Transport, TransportState } from './Transport';
 export {
+  RELAY_BACKOFF, RELAY_SCHEMES, WebSocketTransport, backoffDelay, globalSocketFactory, isRelayUrl, wallClockScheduler,
+  type Scheduler, type SocketCloseEvent, type SocketFactory, type SocketLike, type SocketMessageEvent,
+  type TransportStats, type WebSocketTransportOptions,
+} from './WebSocketTransport';
+export {
   MESSAGE_KINDS, isBye, isHello, isJoin, isLeave, isMessage, isMove, isSnapshot, isSnapshotMessage, isWelcome, moveFrom,
   snapshotFrom, type Authority, type AuthorityMessage, type ByeMessage, type ClientMessage, type HelloMessage,
   type JoinMessage, type LeaveMessage, type Message, type MessageKind, type MoveMessage, type Snapshot,
