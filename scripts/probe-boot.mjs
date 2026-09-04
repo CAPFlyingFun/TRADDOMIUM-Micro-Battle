@@ -214,6 +214,7 @@ async function drive(page, url) {
   // The menu is BEHIND the boot splash until main.ts takes it down, so the
   // picture waits for the splash to be gone rather than photographing it.
   await menuVisible(page);
+  await checkPanelFits(page, 'fresh menu');
   await screenshot(page, SHOT_NEW_GAME);
   log('main menu is up; opening EDITORS');
   // Playwright waits for the button to actually receive pointer events,
@@ -317,6 +318,8 @@ async function drive(page, url) {
   } else {
     log(`menu offers RESUME: "${resumeText}"`);
   }
+  // The tallest the menu ever gets: RESUME, NEW GAME and four more rows.
+  await checkPanelFits(page, 'menu with RESUME');
   await screenshot(page, SHOT_RESUME);
 
   log('pressing RESUME');
@@ -379,6 +382,37 @@ async function checkOverwriteIsAsked(page) {
     log('KEEP IT kept the game: the menu still offers RESUME');
   } catch {
     fail(`after KEEP IT the menu no longer offers ${MENU_RESUME}: the save was lost. UI reads: "${await uiText(page)}"`);
+  }
+}
+
+/**
+ * THE MENU MUST FIT THE PHONE IT IS DESIGNED FOR.
+ *
+ * A row the player cannot see is not a design decision, it is a missing
+ * control: the six-row menu (RESUME + NEW GAME + four) overflowed the
+ * 430 px panel and cut ABOUT and the build stamp off below the fold.
+ * jsdom cannot catch this — it does no layout — so the check lives here,
+ * against the real built page at the real design canvas. One pixel of
+ * slack for sub-pixel rounding; anything more is a row going missing.
+ */
+async function checkPanelFits(page, where) {
+  const panel = page.locator('.ui-panel').first();
+  if ((await panel.count()) === 0) {
+    fail(`no .ui-panel to measure on the ${where}`);
+    return;
+  }
+  const size = await panel.evaluate((el) => ({
+    scroll: el.scrollHeight,
+    client: el.clientHeight,
+  }));
+  const over = size.scroll - size.client;
+  if (over > 1) {
+    fail(
+      `the ${where} panel overflows by ${over} px at ${VIEWPORT.width}×${VIEWPORT.height} ` +
+        `(content ${size.scroll} px in ${size.client} px): its lowest rows are below the fold`,
+    );
+  } else {
+    log(`the ${where} fits the ${VIEWPORT.width}×${VIEWPORT.height} canvas (${size.scroll} px of ${size.client} px)`);
   }
 }
 

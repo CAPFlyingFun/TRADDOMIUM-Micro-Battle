@@ -382,12 +382,32 @@
   font: 16px/1.35 var(--ui-font);
 }
 
-@media (max-height: 380px) {
+/* SHORT LANDSCAPE, WHICH IS THE DESIGN CANVAS, NOT AN EDGE CASE.
+   932 x 430 is the phone this game is tested on, and the menu's tallest
+   state is six rows (RESUME, NEW GAME, PROFILE, SETTINGS, EDITORS, ABOUT)
+   plus the title, the tagline and the build stamp. At the panel's roomy
+   spacing that column is about 467 px and the last row is cut off: a
+   control the player cannot see is worse than a tight one. Only the
+   SPACING gives way here — --ui-touch stays 48 px, so every row is still
+   a full thumb target. The breakpoint is 480 px rather than 380 px
+   because 430 px is the height that actually matters; probe:boot measures
+   the panel at that size and fails if it overflows again. */
+@media (max-height: 480px) {
   .ui-panel {
-    padding: 10px 14px;
-    gap: 6px;
+    padding: 8px 14px;
+    gap: 4px;
   }
   .ui-title--hero {
-    font-size: 22px;
+    font-size: 20px;
+  }
+  .ui-subtitle {
+    font-size: 12px;
+  }
+  /* The two-line rows (RESUME, and every slot row) keep both lines and the
+     48 px target; only the breathing room inside them gives way. */
+  .ui-button--stacked {
+    padding-top: 4px;
+    padding-bottom: 4px;
+    gap: 2px;
   }
 }
