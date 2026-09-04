@@ -64,14 +64,30 @@ land below sea level — Hawaiʻi has none), done before the heightfield
 enters the world and never driven by gameplay, hydrology or a desired
 look. Water READS terrain; it never writes it. Waterways are not drawn
 over the terrain; the terrain is flooded and water finds its own fills
-and drainage. Two carving implementations (Beyond Extinction's and v0's
-own) both ended up gouging terrain to fit a dataset that disagreed with
-it, and both were removed. *Open decision, Phase 2:* Joshua has asked
-whether a deterministic, bounded, discharge-scaled channel carve derived
-from the terrain's OWN flow (not from an external dataset, not random,
-applied once at load) should join the DEM transform chain. Decide it
-then, with him. Live erosion during play is permanently excluded: the
-Mei/Decaudin/Hu erosion steps write the bed every tick by definition.
+and drainage.
+
+*Carving has been tried FOUR times and is not in v1.* Beyond Extinction
+carved once; v0 carved three times, and says so itself in `9ee00a7`
+("THIS IS THE THIRD CARVE THIS PROJECT HAS HAD"). The first pressed
+ground toward a water level with no bound and cut benches out of the
+Napali walls. The second was gated by a claim radius, so the cut fell
+from full depth to nothing between one lattice vertex and the next and
+grew a row of 73 cm fins down every bank. The third was bounded at three
+metres, ungated, and dug to a USGS-SURVEYED centreline instead of to a
+centreline derived from a blurred island — the only one whose bed, water
+and ground were the same survey — and it still could not reach the 1% of
+the network buried deeper than three metres, because those are gorges
+the grid cannot see. That is the standing lesson: at 13.67 m a sample,
+the best data there is, a 5-20 m channel is 0.4-1.5 samples wide, so
+every carve is inventing sub-survey detail and then defending it.
+
+*Decided by Joshua, 2026-09-04, opening Phase 2:* "add the best HD
+terrain, no terrain editing." This closes the question the file used to
+leave open (whether a bounded, discharge-scaled carve derived from the
+terrain's OWN flow could join the DEM transform chain). It is a decision,
+not a default — reopen it only with him. Live erosion during play stays
+permanently excluded: the Mei/Decaudin/Hu erosion steps write the bed
+every tick by definition.
 
 **The ocean's look is accepted — protect it.** When the ocean is re-added
 (Phase 3) its shader, foam, swell heights, periods and wavelengths come
