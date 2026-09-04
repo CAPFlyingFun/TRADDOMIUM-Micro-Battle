@@ -1,556 +1,137 @@
 /**
- * THE SETTINGS PANEL — a gear, and the numbers behind it.
+ * The settings controls as a DOM panel, so the same rows serve two hosts:
+ * the Settings SCREEN from the menu, and the pause overlay in the world —
+ * where opening settings must not swap scenes, because the scene is the
+ * world and swapping it would dispose the game.
  *
- * Deliberately small and deliberately early. It exists so a feel
- * argument can be settled on the phone with a slider instead of a
- * build, and it is scoped to movement and camera only: the real HUD is
- * its own milestone and this must not pre-empt it.
- *
- * It carries `data-ui` rather than `data-control`, so the layout checks
- * that keep the right side clear for bite/grab/dig do not count it —
- * it is chrome, not a control she is driven with.
+ * Every control carries `data-action="setting:<field>"` (one per persisted
+ * field) and Reset carries `setting:reset`, so a probe can drive exactly
+ * the control a player touches. Writes go to the store on every change:
+ * the document is five fields, and "the slider moved but nothing was saved"
+ * is the failure that costs a device round-trip to notice.
  */
+import { ACTION } from '../app/actions';
+import type { Store } from '../persistence/store';
+import { actionRow, actionsRow, labelledRow, namedButton, note, titledPanel } from './screen';
 import {
-  DEFAULTS, LIMITS, reset, set, settings, type Dial, type Toggle,
-} from './settings';
-import { buildStamp, VERSION } from '../build';
-import {
-  isNewer, liveBuild, takeUpdate, updateLabel, type Live,
-} from './updates';
+  QUALITY_LEVELS, SETTINGS_LIMITS, sanitizeSettings, type Quality, type Settings,
+} from './settingsStore';
 
-const GOLD = 'rgba(255, 226, 160, .9)';
-const LIVE = 'rgba(110, 255, 150, .95)';
-
-interface Dialer {
-  key: Dial;
-  label: string;
-  /**
-   * True for a dial whose change is EXPENSIVE — it lands on release
-   * rather than mid-drag. Terrain smoothing rebuilds every section's
-   * geometry, and doing that sixty times a second while a thumb moves
-   * would lock the phone solid.
-   */
-  onRelease?: boolean;
-  /** Turns the stored value into what the player should read. */
-  show: (value: number) => string;
-  /** Turns a slider position back into the stored value. */
-  from?: (raw: number) => number;
-  to?: (value: number) => number;
+export interface SettingsPanelHooks {
+  /** The settings document. The panel is its only writer. */
+  readonly store: Store<Settings>;
+  onBack(): void;
 }
 
-const DIALS: Dialer[] = [
-  { key: 'turnRate', label: 'Turn speed', show: (v) => v.toFixed(0) },
-  {
-    key: 'turnStart',
-    label: 'Turn starts at',
-    show: (v) => `${Math.round((v * 180) / Math.PI)}°`,
-  },
-  { key: 'turnEase', label: 'Turn ease', show: (v) => v.toFixed(1) },
-  { key: 'fov', label: 'Field of view', show: (v) => `${v.toFixed(0)}°` },
-  { key: 'cameraDistance', label: 'Camera distance', show: (v) => v.toFixed(1) },
-  {
-    key: 'flightSpeed',
-    label: 'Flight speed',
-    show: (v) => `${(v * 100).toFixed(0)}%`,
-  },
-  // TERRAIN SMOOTHING AND TERRAIN HEIGHT ARE NOT DIALS ANY MORE, and
-  // taking them out is the point rather than a tidy-up.
-  //
-  // The water is baked against a particular island. `bake:ground`
-  // samples the terrain at smoothing 1 and height 1, `bakeFlow.py`
-  // routes every stream over that surface, and `bakeWidth.ts` walks
-  // outward on it to find where each shoreline falls. Move either dial
-  // afterwards and the ground moves while the water does not: the
-  // streams sit inside hillsides or hang above valley floors, and the
-  // widths were measured for a cross-section that no longer exists.
-  // Height is not the harmless one of the two — the marched width is
-  // the distance at which the GROUND rises through the water surface,
-  // so scaling the island vertically changes every width horizontally.
-  //
-  // They were exploratory dials from before there was any water, they
-  // did their job, and the numbers they settled on are now baked into
-  // three artifacts. Joshua's call, and the right one: "settings
-  // shouldn't be allowed to custom now that you have the numbers."
-  // DEFAULTS still carries both, so the setting exists, the save
-  // format is unchanged, and a future re-bake can move them together.
-  {
-    key: 'windInfluence',
-    label: 'Wind on flight',
-    show: (v) => (v === 0 ? 'off' : `${(v * 100).toFixed(0)}%`),
-  },
-  {
-    key: 'detailRange',
-    label: 'Ground detail range',
-    show: (v) => `${(v * 100).toFixed(0)}%`,
-  },
-];
+export function settingAction(field: keyof Omit<Settings, 'version'>): string {
+  return `setting:${field}`;
+}
 
-const TOGGLES: Array<{ key: Toggle; label: string; on: string; off: string }> = [
-  { key: 'invertLookX', label: 'Look left/right', on: 'Inverted', off: 'Normal' },
-  { key: 'invertLookY', label: 'Look up/down', on: 'Drag down lowers', off: 'Drag down lifts' },
-  { key: 'showFix', label: 'Developer overlay', on: 'Fix + DIE', off: 'Hidden' },
-  { key: 'showFps', label: 'Frame rate', on: 'Shown', off: 'Hidden' },
-  { key: 'invertStickY', label: 'Stick forward', on: 'Inverted', off: 'Normal' },
-  { key: 'liveWeather', label: 'World weather', on: 'Live Kauaʻi', off: 'Simulated' },
-];
+export const SETTING_RESET_ACTION = 'setting:reset';
+
+const QUALITY_LABEL: Readonly<Record<Quality, string>> = {
+  low: 'Low',
+  medium: 'Medium',
+  high: 'High',
+};
 
 export class SettingsPanel {
-  private readonly gear: HTMLButtonElement;
-  private readonly panel: HTMLDivElement;
-  private readonly detach: Array<() => void> = [];
-  private readonly redraw: Array<() => void> = [];
-  private open = false;
+  readonly element: HTMLElement;
+  private current: Settings;
+  /** One per control: pushes the current document back into the DOM. */
+  private readonly syncs: Array<(s: Settings) => void> = [];
 
-  /**
-   * @param inGame whether a reload would cost her a run. The update
-   *   button is the same button either way; what changes is whether it
-   *   asks twice. There is no save yet, so from inside a founding an
-   *   update throws the founding away, and a control that does that on
-   *   one tap is a control that will do it by accident.
-   */
-  private taken: (() => void) | null = null;
-
-  /** Let something else answer the cog. Null gives it back. */
-  intercept(run: (() => void) | null): void {
-    this.taken = run;
-  }
-
-  constructor(
-    host: HTMLElement,
-    private readonly inGame = false,
-    /**
-     * END THE RUN — in here rather than on the HUD.
-     *
-     * It was a floating ☠ DIE button under the settings gear, riding
-     * with the developer overlay. Joshua, 2026-08-31: "move the DIE in
-     * settings since it's not needed on the main game."
-     *
-     * He is right, and the button's own comment already argued for it:
-     * it is scaffolding, the top-right corner should be the game's own
-     * furniture, and a control that ends the run has no business one
-     * tap deep on the playing surface. Behind the gear it is two
-     * deliberate taps, which is the right price for it.
-     *
-     * Omitted outside a run, where there is nothing to end.
-     */
-    private readonly onDie?: () => void,
-  ) {
-    this.gear = document.createElement('button');
-    this.panel = document.createElement('div');
-    this.build();
-    host.append(this.gear, this.panel);
+  constructor(host: HTMLElement, private readonly hooks: SettingsPanelHooks) {
+    this.current = hooks.store.read();
+    this.element = titledPanel(host, 'Settings');
+    this.buildRange('fov', 'Field of view', (v) => `${v.toFixed(0)}°`);
+    this.buildRange('lookSensitivity', 'Look sensitivity', (v) => `${v.toFixed(2)}×`);
+    this.buildSwitch('invertY', 'Invert look up/down');
+    this.buildQuality();
+    this.buildSwitch('showFps', 'Show frame rate');
+    actionsRow(this.element, [
+      namedButton(SETTING_RESET_ACTION, 'Reset to defaults', () => this.write(sanitizeSettings(undefined)), { compact: true }),
+      actionRow(ACTION.back, 'Back', () => this.hooks.onBack(), { compact: true }),
+    ]);
+    this.sync();
   }
 
   dispose(): void {
-    for (const off of this.detach) off();
-    this.gear.remove();
-    this.panel.remove();
+    this.element.remove();
   }
 
-  /** Open it from outside — the main menu's SETTINGS button. */
-  reveal(): void {
-    this.show(true);
+  private write(next: Settings): void {
+    // Through sanitize, so a control cannot store what the store would refuse.
+    this.current = sanitizeSettings(next);
+    this.hooks.store.write(this.current);
+    this.sync();
   }
 
-  private show(open: boolean): void {
-    this.open = open;
-    this.panel.style.display = open ? 'flex' : 'none';
-    this.gear.setAttribute('aria-expanded', String(open));
-    if (open) for (const paint of this.redraw) paint();
+  private sync(): void {
+    for (const push of this.syncs) push(this.current);
   }
 
-  private build(): void {
-    this.gear.type = 'button';
-    this.gear.textContent = '⚙';
-    this.gear.setAttribute('aria-label', 'settings');
-    this.gear.dataset.ui = 'settings';
-    Object.assign(this.gear.style, {
-      position: 'fixed',
-      top: 'calc(8px + min(env(safe-area-inset-top), 12px))',
-      right: 'calc(10px + min(env(safe-area-inset-right), 14px))',
-      width: '34px',
-      height: '34px',
-      borderRadius: '9px',
-      border: '2px solid rgba(255, 216, 130, .7)',
-      background: 'rgba(18, 14, 6, .6)',
-      boxShadow: '0 0 0 2px rgba(0, 0, 0, .3)',
-      color: GOLD,
-      font: '600 17px/1 system-ui, sans-serif',
-      cursor: 'pointer',
-      touchAction: 'none',
-      // ABOVE THE PAUSE VEIL (40). The cog is how the settings page is
-      // closed again, and the veil is drawn over the whole screen —
-      // left at 14 it was underneath, and the way out was covered by
-      // the thing it leads out of.
-      zIndex: '45',
-    } as Partial<CSSStyleDeclaration>);
-    this.claim(this.gear, () => {
-      // THE COG IS THE WAY OUT OF THE GAME, and in Solo the way out of
-      // the game stops the game. When something has claimed it — the
-      // pause menu does — the panel becomes a page of that rather than
-      // the whole of it. Unclaimed, it behaves exactly as it did.
-      // Claimed only while the panel is SHUT. Open, the cog is still
-      // the way to close it — otherwise the pause menu would swallow
-      // the one gesture that gets you out of the page it opened.
-      if (this.taken && !this.open) this.taken();
-      else this.show(!this.open);
+  private buildRange(field: 'fov' | 'lookSensitivity', label: string, show: (v: number) => string): void {
+    const doc = this.element.ownerDocument;
+    const limits = SETTINGS_LIMITS[field];
+    const input = doc.createElement('input');
+    input.type = 'range';
+    input.className = 'ui-range';
+    input.dataset.action = settingAction(field);
+    input.min = String(limits.min);
+    input.max = String(limits.max);
+    input.step = String(limits.step);
+    input.setAttribute('aria-label', label);
+    const readout = doc.createElement('span');
+    readout.className = 'ui-readout';
+    input.addEventListener('input', () => {
+      this.write({ ...this.current, [field]: Number(input.value) });
     });
-
-    this.panel.dataset.ui = 'settings-panel';
-    Object.assign(this.panel.style, {
-      position: 'fixed',
-      top: 'calc(48px + min(env(safe-area-inset-top), 12px))',
-      right: 'calc(10px + min(env(safe-area-inset-right), 14px))',
-      width: '250px',
-      maxHeight: 'calc(100% - 64px)',
-      overflowY: 'auto',
-      display: 'none',
-      flexDirection: 'column',
-      gap: '9px',
-      padding: '12px',
-      borderRadius: '12px',
-      border: '2px solid rgba(255, 216, 130, .7)',
-      background: 'rgba(14, 11, 5, .93)',
-      boxShadow: '0 6px 24px rgba(0, 0, 0, .5)',
-      color: GOLD,
-      font: '600 12px/1.3 "Chakra Petch", system-ui, sans-serif',
-      touchAction: 'pan-y',
-      /**
-       * ABOVE EVERYTHING, INCLUDING THE MAIN MENU.
-       *
-       * It was 14, and the main menu is a full-screen opaque panel at
-       * 50 — so tapping SETTINGS on the menu opened a panel behind it
-       * that could be neither seen nor touched. It went unnoticed
-       * because the gear in game is the way anyone actually reaches
-       * settings, and in game there is nothing above 14 to hide it.
-       *
-       * An open settings panel is modal by nature: whatever else is on
-       * screen, this is the thing being used. The GEAR stays at 14 on
-       * purpose, so the menu keeps hiding it and its own SETTINGS
-       * button remains the single way in from there.
-       */
-      zIndex: '60',
-    } as Partial<CSSStyleDeclaration>);
-    // A drag inside the panel is a drag on the panel, never on the view.
-    this.claim(this.panel, () => {});
-
-    this.panel.appendChild(this.buildTitle());
-    for (const dial of DIALS) this.panel.appendChild(this.buildDial(dial));
-    for (const toggle of TOGGLES) this.panel.appendChild(this.buildToggle(toggle));
-    this.panel.appendChild(this.buildUpdate());
-    this.panel.appendChild(this.buildReset());
-    if (this.onDie) this.panel.appendChild(this.buildDie());
-    this.panel.appendChild(this.buildStampLine());
+    this.syncs.push((s) => {
+      input.value = String(s[field]);
+      readout.textContent = show(s[field]);
+    });
+    labelledRow(this.element, label, [input, readout]);
   }
 
-  /**
-   * The version, at the top where it is read as identity.
-   *
-   * It lives in here rather than on the HUD because it is not part of
-   * playing — but it has to live SOMEWHERE, because testing from a
-   * deployed build with nothing on screen to identify it means the
-   * honest answer to "is this the new one?" is always "probably".
-   */
-  private buildTitle(): HTMLElement {
-    const row = document.createElement('div');
-    row.dataset.ui = 'version';
-    Object.assign(row.style, {
-      display: 'flex',
-      alignItems: 'baseline',
-      justifyContent: 'space-between',
-      gap: '8px',
-      paddingBottom: '7px',
-      marginBottom: '2px',
-      borderBottom: '1px solid rgba(255, 216, 130, .28)',
-    } as Partial<CSSStyleDeclaration>);
-
-    const name = document.createElement('span');
-    name.textContent = 'TRADDOMIUM';
-    name.style.letterSpacing = '1.2px';
-
-    const version = document.createElement('span');
-    version.textContent = `v${VERSION}`;
-    version.style.color = LIVE;
-    version.style.font = '600 12px/1 "JetBrains Mono", ui-monospace, monospace';
-
-    row.append(name, version);
-    return row;
+  private buildSwitch(field: 'invertY' | 'showFps', label: string): void {
+    const button = namedButton(settingAction(field), '', () => {
+      this.write({ ...this.current, [field]: !this.current[field] });
+    }, { compact: true });
+    button.classList.add('ui-switch');
+    button.setAttribute('role', 'switch');
+    button.setAttribute('aria-label', label);
+    this.syncs.push((s) => {
+      button.setAttribute('aria-checked', String(s[field]));
+      button.textContent = s[field] ? 'On' : 'Off';
+    });
+    labelledRow(this.element, label, [button]);
   }
 
-  /** And the build itself at the bottom, where a footer belongs. */
-  private buildStampLine(): HTMLElement {
-    const line = document.createElement('div');
-    line.dataset.ui = 'build';
-    line.textContent = buildStamp();
-    Object.assign(line.style, {
-      textAlign: 'center',
-      paddingTop: '6px',
-      borderTop: '1px solid rgba(255, 216, 130, .22)',
-      font: '600 10px/1.4 "JetBrains Mono", ui-monospace, monospace',
-      color: 'rgba(255, 226, 160, .5)',
-      userSelect: 'text',
-    } as Partial<CSSStyleDeclaration>);
-    return line;
-  }
-
-  private buildDial(dial: Dialer): HTMLElement {
-    const row = document.createElement('label');
-    Object.assign(row.style, { display: 'block' } as Partial<CSSStyleDeclaration>);
-
-    const head = document.createElement('div');
-    Object.assign(head.style, {
-      display: 'flex',
-      justifyContent: 'space-between',
-      marginBottom: '3px',
-    } as Partial<CSSStyleDeclaration>);
-    const name = document.createElement('span');
-    name.textContent = dial.label;
-    const value = document.createElement('span');
-    value.style.color = LIVE;
-    head.append(name, value);
-
-    const slider = document.createElement('input');
-    slider.type = 'range';
-    const limit = LIMITS[dial.key];
-    slider.min = String(limit.min);
-    slider.max = String(limit.max);
-    slider.step = String(limit.step);
-    slider.setAttribute('aria-label', dial.label);
-    slider.dataset.dial = dial.key;
-    Object.assign(slider.style, {
-      width: '100%',
-      accentColor: LIVE,
-      touchAction: 'none',
-    } as Partial<CSSStyleDeclaration>);
-
-    const paint = () => {
-      const held = settings()[dial.key];
-      slider.value = String(held);
-      value.textContent = dial.show(held);
-    };
-    paint();
-    this.redraw.push(paint);
-
-    // An expensive dial still MOVES and still reads out while dragged;
-    // only the commit waits. Showing nothing until release would feel
-    // like a dead control.
-    const onInput = () => {
-      if (dial.onRelease) {
-        value.textContent = dial.show(Number(slider.value));
-        return;
-      }
-      set(dial.key, Number(slider.value));
-      value.textContent = dial.show(settings()[dial.key]);
-    };
-    const onCommit = () => {
-      set(dial.key, Number(slider.value));
-      value.textContent = dial.show(settings()[dial.key]);
-    };
-    slider.addEventListener('input', onInput);
-    this.detach.push(() => slider.removeEventListener('input', onInput));
-    if (dial.onRelease) {
-      slider.addEventListener('change', onCommit);
-      this.detach.push(() => slider.removeEventListener('change', onCommit));
+  private buildQuality(): void {
+    const doc = this.element.ownerDocument;
+    const select = doc.createElement('select');
+    select.className = 'ui-select';
+    select.dataset.action = settingAction('quality');
+    select.setAttribute('aria-label', 'Quality');
+    for (const level of QUALITY_LEVELS) {
+      const option = doc.createElement('option');
+      option.value = level;
+      option.textContent = QUALITY_LABEL[level];
+      select.appendChild(option);
     }
-
-    row.append(head, slider);
-    return row;
-  }
-
-  private buildToggle(toggle: { key: Toggle; label: string; on: string; off: string }): HTMLElement {
-    const row = document.createElement('div');
-    Object.assign(row.style, {
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      gap: '8px',
-    } as Partial<CSSStyleDeclaration>);
-
-    const name = document.createElement('span');
-    name.textContent = toggle.label;
-
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.setAttribute('aria-label', toggle.label);
-    button.dataset.toggle = toggle.key;
-    Object.assign(button.style, {
-      appearance: 'none',
-      border: '1px solid rgba(255, 216, 130, .5)',
-      borderRadius: '7px',
-      padding: '4px 8px',
-      background: 'rgba(255, 210, 110, .08)',
-      color: GOLD,
-      font: 'inherit',
-      cursor: 'pointer',
-      touchAction: 'none',
-      whiteSpace: 'nowrap',
-    } as Partial<CSSStyleDeclaration>);
-
-    // The label says what it DOES, not what it is set to — "Inverted"
-    // against a checkbox leaves you working out which way round it is.
-    const paint = () => {
-      const on = settings()[toggle.key];
-      button.textContent = on ? toggle.on : toggle.off;
-      button.style.color = on ? LIVE : GOLD;
-      button.style.borderColor = on ? LIVE : 'rgba(255, 216, 130, .5)';
-    };
-    paint();
-    this.redraw.push(paint);
-
-    this.claim(button, () => {
-      set(toggle.key, !settings()[toggle.key]);
-      paint();
+    select.addEventListener('change', () => {
+      this.write({ ...this.current, quality: select.value as Quality });
     });
-
-    row.append(name, button);
-    return row;
-  }
-
-  /**
-   * CHECK FOR UPDATES — the button that answers "am I actually looking
-   * at the build we just pushed?"
-   *
-   * It exists because the honest answer was no, repeatedly, and for a
-   * reason nothing on screen could show: the deploy had landed and the
-   * device was serving a cached document. See updates.ts.
-   *
-   * One button, four states, and it never lies about which one it is
-   * in. "Checking" is a real state rather than a spinner over a stale
-   * label, and a failed check says it could not tell rather than
-   * quietly claiming everything is fine — those are different answers.
-   */
-  private buildUpdate(): HTMLElement {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.dataset.ui = 'check-updates';
-    button.textContent = 'Check for updates';
-    Object.assign(button.style, {
-      appearance: 'none',
-      marginTop: '2px',
-      border: '1px solid rgba(255, 216, 130, .4)',
-      borderRadius: '7px',
-      padding: '6px',
-      background: 'transparent',
-      color: 'rgba(255, 226, 160, .7)',
-      font: 'inherit',
-      cursor: 'pointer',
-      touchAction: 'none',
-    } as Partial<CSSStyleDeclaration>);
-
-    let waiting: Live | null = null;
-    let armed = false;
-    let busy = false;
-
-    const say = (text: string, lit = false) => {
-      button.textContent = text;
-      button.style.color = lit ? LIVE : 'rgba(255, 226, 160, .7)';
-      button.style.borderColor = lit
-        ? 'rgba(150, 255, 190, .55)' : 'rgba(255, 216, 130, .4)';
-    };
-
-    this.claim(button, () => {
-      if (busy) return;
-
-      // Second tap on a found update: take it.
-      if (waiting) {
-        if (this.inGame && !armed) {
-          armed = true;
-          say('Tap again — this restarts the game', true);
-          return;
-        }
-        say('Updating…');
-        busy = true;
-        void takeUpdate(waiting);
-        return;
-      }
-
-      busy = true;
-      say('Checking…');
-      void liveBuild().then((live) => {
-        busy = false;
-        if (!live) { say('Could not check — no connection?'); return; }
-        if (!isNewer(live)) { say(`Up to date · v${VERSION}`); return; }
-        waiting = live;
-        armed = false;
-        say(`${updateLabel(live)} — tap to update`, true);
-      });
+    this.syncs.push((s) => {
+      select.value = s.quality;
     });
-    return button;
-  }
-
-  private buildReset(): HTMLElement {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.textContent = 'Reset to defaults';
-    button.setAttribute('aria-label', 'reset settings');
-    Object.assign(button.style, {
-      appearance: 'none',
-      marginTop: '2px',
-      border: '1px solid rgba(255, 216, 130, .4)',
-      borderRadius: '7px',
-      padding: '6px',
-      background: 'transparent',
-      color: 'rgba(255, 226, 160, .7)',
-      font: 'inherit',
-      cursor: 'pointer',
-      touchAction: 'none',
-    } as Partial<CSSStyleDeclaration>);
-    this.claim(button, () => {
-      reset();
-      for (const paint of this.redraw) paint();
-    });
-    return button;
-  }
-
-  /**
-   * END THE RUN, at the bottom and dressed as scaffolding.
-   *
-   * A dashed border and a muted red, the same clothes it wore on the
-   * HUD: it should read as a test tool rather than as a mechanic, so
-   * nobody mistakes it for one when the real ways to die arrive. It is
-   * last in the panel because it is the only control in here that
-   * cannot be undone.
-   */
-  private buildDie(): HTMLElement {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.dataset.ui = 'debug-die';
-    button.textContent = '☠ End this run';
-    button.setAttribute('aria-label', 'debug: die');
-    Object.assign(button.style, {
-      appearance: 'none',
-      marginTop: '2px',
-      border: '1px dashed rgba(255, 140, 120, .65)',
-      borderRadius: '7px',
-      padding: '6px',
-      background: 'rgba(60, 18, 14, .5)',
-      color: 'rgba(255, 170, 150, .9)',
-      font: 'inherit',
-      cursor: 'pointer',
-      touchAction: 'none',
-    } as Partial<CSSStyleDeclaration>);
-    this.claim(button, () => {
-      this.show(false);
-      this.onDie?.();
-    });
-    return button;
-  }
-
-  /**
-   * Take the pointer for this element.
-   *
-   * The camera is driven by a drag anywhere the controls are not, so
-   * anything that does not claim its own pointer becomes a place where
-   * fiddling with a slider swings the view underneath it.
-   */
-  private claim(el: HTMLElement, run: () => void): void {
-    const onDown = (e: PointerEvent) => {
-      run();
-      e.stopPropagation();
-    };
-    el.addEventListener('pointerdown', onDown as EventListener);
-    this.detach.push(() => el.removeEventListener('pointerdown', onDown as EventListener));
+    // Nothing reads `quality` yet (the renderer / LOD will, once there is
+    // terrain to draw), and a control that saves a choice nothing acts on
+    // would look functional without being so. Disabled, with the reason
+    // beside it; the document keeps the field so the choice is ready.
+    select.disabled = true;
+    labelledRow(this.element, 'Quality', [select]);
+    note(this.element, 'Quality has no effect yet: nothing in this build draws at more than one level of detail.');
   }
 }
-
-export { DEFAULTS };

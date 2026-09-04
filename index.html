@@ -6,25 +6,18 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
     />
-    <!-- Added to the home screen, this runs with no browser chrome at
-         all, which is the only way to get the whole HUD on an iPhone.
-         iOS reads its own apple- prefixed tags rather than the
-         manifest, so both sets are here. -->
+    <!-- Added to the home screen, this runs with no browser chrome, which
+         is the only way to get a whole landscape HUD on an iPhone. iOS
+         reads its own apple- prefixed tags, so both sets are here. The
+         manifest, icons and splash arrive in a later phase. -->
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="TRADDOMIUM" />
-    <meta name="theme-color" content="#0B0F07" />
-    <link rel="manifest" href="./manifest.webmanifest" />
-    <!-- The splash is the first paint, so it is asked for first. -->
-    <!-- The splash is the first paint, so it is asked for first — and
-         only the one this screen will actually show. -->
-    <link rel="preload" as="image" href="./splash.webp" type="image/webp"
-          media="(orientation: landscape)" />
-    <link rel="preload" as="image" href="./splash-portrait.webp" type="image/webp"
-          media="(orientation: portrait)" />
-    <link rel="apple-touch-icon" href="./apple-touch-icon.png" />
+    <meta name="theme-color" content="#0b0f07" />
     <title>TRADDOMIUM: Micro Battle!</title>
+    <!-- Inline so there is no favicon request to 404: the boot probe counts
+         console errors, and a missing icon would fail it for nothing. -->
     <link
       rel="icon"
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ctext y='26' font-size='26'%3E%F0%9F%90%9C%3C/text%3E%3C/svg%3E"
@@ -38,112 +31,47 @@
         height: 100%;
         overflow: hidden;
         background: #06090c;
+        color: #e8e2c8;
+        font-family: system-ui, sans-serif;
+        /* A game, not a page: no scrolling, no pinch zoom, no text
+           selection or long-press callout on held controls. */
         touch-action: none;
         overscroll-behavior: none;
-        font-family: system-ui, sans-serif;
-        /* Hold the stick down on iOS and Safari otherwise decides you
-           are trying to select and copy the controls. Nothing on this
-           page is text you would ever want to lift, so none of it is
-           selectable and none of it raises the callout. */
         -webkit-touch-callout: none;
         -webkit-user-select: none;
         user-select: none;
         -webkit-tap-highlight-color: transparent;
       }
-      #app {
+      /* Not `inset: 0`: a mobile browser toolbar can overlay the layout
+         viewport instead of shrinking it, so height follows the dynamic
+         viewport unit rather than the layout box. */
+      #app,
+      #ui {
         position: fixed;
         top: 0;
         left: 0;
         right: 0;
-        /* Not `inset: 0`. A browser toolbar can overlay the layout
-           viewport instead of shrinking it, and the HUD then runs on
-           underneath it. --app-height is the visualViewport height, set
-           from viewportFit.ts; dvh covers anything without it. */
         height: 100dvh;
-        height: var(--app-height, 100dvh);
       }
       #app canvas {
         display: block;
         width: 100%;
         height: 100%;
       }
-
-      /* ---------- The way in ----------
-         IN THE STATIC MARKUP ON PURPOSE. "As soon as you open the game"
-         means before the module is parsed, before three is loaded, and
-         a long way before the two megabytes of elevation the island
-         needs. Anything built in JavaScript arrives after all of that,
-         which on a phone is a second or more of nothing. This paints
-         with the document.
-
-         The picture has the loading bar's interior CUT OUT of it, so it
-         is the front layer of a sandwich: bootBar.ts slides the fill in
-         behind it once the module is alive. The window's rectangle is
-         generated from the art's alpha channel, and generated numbers
-         do not belong in hand-written markup. */
-      #boot {
-        position: fixed;
-        inset: 0;
-        display: grid;
-        place-items: center;
-        overflow: hidden;
-        background: #080c06;
-        z-index: 80;
-        opacity: 1;
-        transition: opacity 700ms ease;
-      }
-      #boot.gone {
-        opacity: 0;
+      /* The overlay layer sits above the canvas and passes touches
+         through except where a screen puts something to touch. */
+      #ui {
+        z-index: 10;
         pointer-events: none;
       }
-      /* COVERING the screen, sized from viewport units so the picture
-         is right on the FIRST paint — #boot is fixed to the viewport,
-         so these describe its box exactly. Landscape by default;
-         portrait gets the other artwork's shape below. fitCover
-         re-measures once the module runs, which is what slides the crop
-         up far enough to keep the caption on an extreme phone and what
-         notices a turn. Behind the cut-out window is this element's own
-         dark background: the empty bar. */
-      #boot .stage {
-        position: relative;
-        width: max(100vw, calc(100dvh * 16 / 9));
-        height: max(100dvh, calc(100vw * 9 / 16));
-        background: rgba(6, 8, 5, 0.92);
-        container-type: size;
-        line-height: 0;
-      }
-      @media (orientation: portrait) {
-        #boot .stage {
-          width: max(100vw, calc(100dvh * 9 / 16));
-          height: max(100dvh, calc(100vw * 16 / 9));
-        }
-      }
-      #boot .stage picture {
-        display: contents;
-      }
-      #boot .stage img {
-        position: relative;
-        display: block;
-        width: 100%;
-        height: 100%;
-        object-fit: fill;
+      #ui > * {
+        pointer-events: auto;
       }
     </style>
   </head>
   <body>
     <div id="app"></div>
-    <!-- Removed by main.ts once the island's elevation has landed. -->
-    <div id="boot">
-      <div class="stage">
-        <!-- The browser picks one before any script runs, and having
-             chosen, keeps it: bootBar reads `currentSrc` rather than
-             asking the window its shape a second time. -->
-        <picture>
-          <source media="(orientation: portrait)" srcset="./splash-portrait.webp" />
-          <img src="./splash.webp" alt="TRADDOMIUM — Micro Battle!" />
-        </picture>
-      </div>
-    </div>
+    <div id="ui"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
