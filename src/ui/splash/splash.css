@@ -1,0 +1,140 @@
+/*
+ * The key-art stage: what the boot splash and the loading screen share.
+ *
+ * Imported once, from SplashStage.ts. ui/styles.css dresses panels and
+ * buttons; this dresses the one screen that is a picture. The bar's
+ * geometry is NOT here — it comes from the generated splashFrame.ts and
+ * is written as inline percentages by Meter and SplashStage, because
+ * generated numbers do not belong in a hand-written stylesheet where
+ * they would go stale the next time the art is re-cut.
+ */
+:root {
+  --splash-gold: rgba(255, 226, 160, 0.94);
+  --splash-gold-dim: rgba(255, 226, 160, 0.62);
+  --splash-trouble: rgba(255, 150, 130, 0.95);
+  /* The dark the picture is let out to when it cannot cover. */
+  --splash-ground: #080c06;
+  --splash-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* Covers its parent; the stage inside it is sized by fitCover. A plain
+   block on purpose: fitCover places the stage with margins, and a grid
+   or flex parent would centre it a second time. */
+.splash-root {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--splash-ground);
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* The meter's box: the picture and the layers behind it. A size
+   container so the captions can be sized against the PICTURE and keep
+   their place on the artwork at any window size. */
+.splash-stage {
+  container-type: size;
+  transition: opacity 220ms ease;
+}
+
+/* EVERYTHING ARRIVES TOGETHER. The picture needs a decode and the bar
+   and captions do not, so left to themselves they turn up seconds apart
+   and the screen looks half-built. Held at nothing until the picture is
+   ready, then the whole thing fades up as one. */
+.splash-stage--held {
+  opacity: 0;
+}
+
+/* A line of text on the artwork. CAPPED TO THE SCREEN, not the picture:
+   a tall phone crops the picture's sides, so a caption laid out at 100%
+   of it hangs off both edges — which is exactly how v0's "SURVEYING THE
+   ISLAND" lost its S. Centred the same way the bar is, so both share a
+   centre with the screen. */
+.splash-caption {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(100%, 92vw);
+  text-align: center;
+  line-height: 1.2;
+  color: var(--splash-gold-dim);
+  text-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.95),
+    0 2px 10px rgba(0, 0, 0, 0.9),
+    0 0 22px rgba(0, 0, 0, 0.85);
+  font-family: var(--splash-mono);
+  font-weight: 600;
+  /* The fallback for a browser without container queries; the cqmin
+     rule below overrides it where they exist. `cqmin` rather than
+     `cqw`: the portrait picture is the narrow one, and sizing off its
+     width would print the caption twice as large. */
+  font-size: clamp(9px, 1.5vmin, 15px);
+  pointer-events: none;
+}
+
+@supports (font-size: 1cqmin) {
+  .splash-caption {
+    font-size: 2.6cqmin;
+  }
+}
+
+/* The heading above the bar, clear of the wordmark. */
+.splash-caption--above {
+  white-space: nowrap;
+  letter-spacing: 0.26em;
+  text-indent: 0.26em;
+  text-transform: uppercase;
+}
+
+/* THE LOWER LINE WRAPS. "42% · About 7 s left." fits anywhere, but the
+   pieces are separate spans so a longer readout breaks at the one
+   sensible place on a narrow phone rather than running off both edges. */
+.splash-caption--below {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  column-gap: 0.7em;
+  row-gap: 0.25em;
+  letter-spacing: 0.14em;
+  text-indent: 0.14em;
+}
+
+.splash-caption--lit {
+  color: var(--splash-gold);
+}
+
+.splash-caption--trouble {
+  color: var(--splash-trouble);
+}
+
+/* Something to look at while the picture decodes. It is usually a
+   fraction of a second; on a cold cache over a phone connection it is
+   not, and a black rectangle with nothing on it reads as a crash. */
+.splash-standby {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font: 600 clamp(10px, 1.6vmin, 15px) / 1 var(--splash-mono);
+  letter-spacing: 0.28em;
+  text-indent: 0.28em;
+  text-transform: uppercase;
+  color: var(--splash-gold-dim);
+  transition: opacity 220ms ease;
+  pointer-events: none;
+}
+
+.splash-standby--gone {
+  opacity: 0;
+}
+
+/* The loading screen's one control, when the wiring allows one: at the
+   bottom of the screen, where a thumb is, clear of the bar. */
+.splash-actions {
+  position: absolute;
+  left: 50%;
+  bottom: max(16px, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  justify-content: center;
+}
