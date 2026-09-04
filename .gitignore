@@ -6,3 +6,6 @@ tsconfig.tsbuildinfo
 shots/
 probe-*.png
 .scratch/
+
+# Agent worktrees created during parallel builds
+.claude/worktrees/

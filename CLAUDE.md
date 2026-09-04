@@ -130,15 +130,18 @@ system from probe wall-clock.
 
 **Screenshots and probes mean STOP before landing on main.** `main`
 deploys to GitHub Pages, which is what Joshua's phone runs. Anything
-checked with a screenshot or probe is shown to him and waits for his
-device pass before it reaches `main`. Pushing to a feature branch is not
-landing. Refactors, tests, docs and fixes with a unit test behind them
-land without asking.
+checked with a screenshot or probe is shown to him first and waits for
+his go-ahead before it reaches `main`; his device pass then happens on
+the deployed build. It is far cheaper for him to say "the water is too
+wide" once from a screenshot than for three corrective pushes to land on
+his phone. Pushing to a feature branch is not landing. Refactors, tests,
+docs and fixes with a unit test behind them land without asking.
 
 ## Git and collaboration
 
 - `main` is the deployed branch. Develop on feature branches; land via
-  PR after Joshua's device pass. Never force-push `main`.
+  PR once Joshua has seen the result and said go. Never force-push
+  `main`.
 - `legacy/v0-main` is a read-only archive. Do not commit to it.
 - Ownership on Trello is by label (Claude, ChatGPT, Joshua, helpers by
   name). Cards Claude moves from Coding to Testing get Joshua's label

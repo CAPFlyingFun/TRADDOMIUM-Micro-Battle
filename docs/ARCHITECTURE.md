@@ -249,6 +249,12 @@ through a milestone-weighted, monotonic fraction built from real
 completion signals (bytes, tiles-ready ratio, subsystem-ready flags) with
 a rate-smoothed ETA — not a timer.
 
+*Known limit (Phase 0):* `SceneManager.goTo` disposes the loading scene
+before the world's `enter()` runs, so the bar is drawn at 0 % behind the
+fade today. Before a world with real load time exists (Phase 2), the
+transition gains a hold-until-ready shape that keeps the loader current
+while the world enters; the progress wiring is already in place.
+
 When terrain arrives (Phase 2): the surveyed DEM enters the world through
 a deterministic load-time transform chain — `demRepair` (invalid samples
 only) → the hydrology bake → the heightfield — and nothing downstream
