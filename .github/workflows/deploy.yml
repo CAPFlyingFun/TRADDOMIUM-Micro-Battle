@@ -1,0 +1,63 @@
+name: Build & Deploy
+
+# Every push to main is gated on typecheck + tests + build, then published
+# to GitHub Pages so the current build is playable on a device. Pull
+# requests run the same gate but never deploy.
+#
+# ONE-TIME SETUP (repo owner, once per repo):
+#   Settings → Pages → Build and deployment → Source: "GitHub Actions"
+# The workflow token is not allowed to enable Pages itself, so the deploy
+# job fails until that switch is flipped.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      # Probes use Playwright locally; CI only needs the build.
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+      # No configure-pages step: the Vite base is relative ('./'), so the
+      # build already works from the Pages project subpath.
+      - name: Upload site artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
