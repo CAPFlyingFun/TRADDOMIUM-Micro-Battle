@@ -7,8 +7,32 @@
  * player is local or remote — it asks the session to save, to leave, or
  * whether the world may pause, and the session answers.
  */
+import type { WorldPoint } from '../world/coords';
+
 export type SessionMode = 'solo' | 'multiplayer';
 export type SessionAuthority = 'local' | 'server';
+
+/**
+ * Where the player is looking from. In WORLD coordinates (coords.ts,
+ * THE RULE): a camera pose outlives the frame the moment it is saved.
+ * `height` is above the ground plane; `yaw`/`pitch` are radians.
+ */
+export interface CameraPose {
+  readonly at: WorldPoint;
+  readonly height: number;
+  readonly yaw: number;
+  readonly pitch: number;
+}
+
+/**
+ * Everything a world hands over to be saved. Small on purpose: the
+ * island is a function (baked Kauaʻi, identical in every session), so
+ * only what the player changed is remembered. Grows with the phases —
+ * the actor joins it with the player shell.
+ */
+export interface SessionSaveState {
+  readonly camera: CameraPose;
+}
 
 export interface GameSession {
   readonly mode: SessionMode;
@@ -21,6 +45,11 @@ export interface GameSession {
    * more than exists (ARCHITECTURE §2.10); a test pins the mock's text.
    */
   readonly caption: string;
-  save(): Promise<void>;
+  /**
+   * Persist. With `state`, that is what is written; without it, the
+   * session flushes what it already holds (a pause-menu quit still saves
+   * even when the world has nothing new to say).
+   */
+  save(state?: SessionSaveState): Promise<void>;
   leave(): Promise<void>;
 }

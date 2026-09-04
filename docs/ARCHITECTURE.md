@@ -76,18 +76,24 @@ src/
   app/          App (composition root, single rAF loop), AppState,
                 Scene contract + SceneContext, SceneManager, Renderer,
                 FrameClock, registry of navigable scenes.
-  session/      GameSession contract, LocalSoloSession,
-                RemoteMultiplayerSession (mock until transport exists),
-                PlayerProfile (device-local layer first).
+  session/      GameSession contract, LocalSoloSession + the SoloSave
+                document, RemoteMultiplayerSession (mock until transport
+                exists), PlayerProfile (device-local layer first) and
+                playerIdOf().
   world/        terrain / water / weather / vegetation, and WorldLoader.
                 Phase 0 holds only WorldLoader and the empty world.
   actor/        Player{Transform, Vitals, GroundLocomotion, Flight,
                 SurfaceGrip, Rig} composed from small pure modules.
-                Empty until the player-shell phase.
+                Phase 1 holds the contracts: ActorId, PlayerId,
+                ActorState (position is a WorldPoint), CapsuleTuning and
+                the pure flat-plane Transform.step.
+  view/         three.js visual adapters for actors (CapsuleView) — the
+                only place actor state meets a mesh; actor/ stays
+                three-free.
   camera/       FollowCamera + CameraOwnership. Phase 0 has FreeFlyCamera
                 only (under perf/).
-  input/        keyboard / pointer / touch → one shared Intent shape,
-                also produced by autonomy/.
+  input/        keyboard / pointer / touch (Input.ts, DOM) → one shared
+                Intent shape (Intent.ts, pure), also produced by autonomy/.
   autonomy/     mission brain, autopilot, route planner — an Intent
                 PRODUCER, sibling to input/. Empty until its phase.
   ui/           screens (menu, settings, about, loading, pause) and HUD
@@ -96,7 +102,9 @@ src/
                 Every tool is an ordinary scene.
   data/         schema.ts (registry + curve × life-state multiplier
                 pattern) and the typed registries (empty shells).
-  net/          Transport contract + LoopbackTransport stub.
+  net/          Transport contract + LoopbackTransport stub, and
+                protocol.ts: the message shapes, their guards and the
+                Authority interface (§5).
   perf/         PerformanceWorldScene, FreeFlyCamera, PerfHud,
                 FrameStats (pure).
   persistence/  versioned storage wrapper with defensive reads.
@@ -112,9 +120,13 @@ docs/research/  reference material carried from v0, read-only.
 ```
 main → app
 app → session, ui, devtools, world(WorldLoader), perf, input, assets, persistence
-session → persistence, net, data
-world, actor, autonomy, data, net, perf(FrameStats), persistence → NOTHING in three/DOM (core)
-perf(scenes/hud), camera, ui, devtools, assets → three / DOM allowed
+session → persistence, net, data, world(coords), actor(PlayerId)
+actor → world(coords), input(Intent.ts) only
+net(protocol) → actor, world(coords)
+world, actor, autonomy, data, net, perf(FrameStats), persistence, input(Intent.ts) → NOTHING in three/DOM (core)
+perf(scenes/hud), camera, view, ui, devtools, assets → three / DOM allowed
+view → three allowed; it reads ActorState and writes a mesh
+actor → NEVER view (a state module does not know what it looks like)
 ui → NEVER world, actor, autonomy, session internals (typed hooks only)
 camera → NEVER actor mode enums (continuous signals only)
 ```
@@ -157,7 +169,7 @@ interface GameSession {
   readonly mapId: string
   readonly canPauseWorld: boolean          // solo true, multiplayer false
   readonly authority: 'local' | 'server'
-  save(): Promise<void>
+  save(state?: SessionSaveState): Promise<void>   // Phase 1: the camera pose, in WorldPoints
   leave(): Promise<void>
 }
 ```
@@ -171,7 +183,21 @@ owner: the session object. It is passed, not the enum (v0 duplicated
 
 The first multiplayer milestone is two browsers, two coloured capsules,
 one tiny session, each seeing the other move, with disconnect/reconnect —
-before any ant exists. `net/Transport` is the seam it plugs into.
+before any ant exists. `net/Transport` is the seam it plugs into, and
+`net/protocol.ts` fixes what crosses it: `hello` → `welcome`, then
+`join` / `leave` as players come and go, `move` from a client, `snapshot`
+from the authority, `bye` on the way out — plain data, every position a
+`WorldPoint`, each guarded by `isMessage()` before it touches state.
+
+**A move is a claim.** One party — the `Authority` — owns the truth of
+where every actor is. A client's `move` says "I am here now, claim
+number `seq`"; the authority applies it if it is plausible and answers
+with the truth in the next `snapshot`, which may put the actor somewhere
+else. That is how a teleport, a fast-forwarded clock or a malformed
+position is refused without a rejection message: the client reconciles
+to the snapshot. `LocalAuthority` (solo) applies claims directly;
+`HostAuthority` (multiplayer) validates and rebroadcasts. Both hide
+behind the one interface, so a session never asks which it holds.
 
 ## 6. State architecture
 
@@ -268,8 +294,8 @@ permanently excluded.
 | Phase | Builds | Re-added from v0 (after review against §2) |
 |---|---|---|
 | **0 App shell** | app/, session/ (solo + mock multiplayer), ui/ (menu, settings, about, loading, pause), devtools/ hub, data/ schema, perf/ empty world + FreeFly + PerfHud, net/ stub, persistence/, assets/, tests, CI, boot probe | nothing — blank slate |
-| 1 Session + profile | PlayerProfile, save/load through `LocalSoloSession`, honest multiplayer mock, two-capsule loopback test | `save.ts` shape, `discovery.ts` codec, `sessionMode`/`soloSave` tests |
-| 2 Kauaʻi terrain | heightfield with a `WorldPoint`-typed API, chunk streaming keyed by global chunk id, terrain layer in the perf world | `coords.ts`, `origin.ts`, `heightfield.ts`, `kauai*.ts`, `demRepair.ts`, `lod.ts`, `stableHash.ts`, the DEM binaries, their tests |
+| 1 Session + profile | PlayerProfile + PlayerId, SoloSave v2 (camera pose in world coordinates) through `LocalSoloSession`, honest multiplayer mock, actor/ contracts + Intent + `net/protocol`, two-capsule loopback test. Also carries the loading artwork port (splash sandwich, bake script, icons, manifest), and `coords.ts` / `origin.ts` pulled forward from Phase 2 because actors need a `WorldPoint` from day one | `save.ts` shape, `coords.ts`, `origin.ts` + their tests, `sessionMode`/`soloSave` tests, the splash assets |
+| 2 Kauaʻi terrain | heightfield with a `WorldPoint`-typed API, chunk streaming keyed by global chunk id, terrain layer in the perf world. The `discovery.ts` codec moves here from Phase 1: there is nothing to discover before terrain | `heightfield.ts`, `kauai*.ts`, `demRepair.ts`, `lod.ts`, `stableHash.ts`, `discovery.ts`, the DEM binaries, their tests |
 | 3 Ocean | the accepted look, two-owner water router from day one | `seaSwell.ts`, `surf.ts`, `Ocean.ts`, `waterLook.ts`, `liveSea.ts`, foam probe + `oceanShader` fixture test |
 | 4 Inland water | hydrology bake feeding the local solver; per-reach bed materials; cascade FX; NHDPlus/DLNR names | `drainage.ts`, `islandChannels.ts`, `hydro.ts`, `waterSim.ts`, `nearestWater.ts` |
 | 5 Sky / weather | weather field + live feeds | `weather/*` |

@@ -8,7 +8,7 @@
  * caption is pinned by a test so "Multiplayer" can never quietly imply
  * more than exists.
  */
-import type { GameSession } from './GameSession';
+import type { GameSession, SessionSaveState } from './GameSession';
 
 export const MULTIPLAYER_CAPTION = 'Online play is not built yet.';
 
@@ -21,7 +21,7 @@ export class RemoteMultiplayerSession implements GameSession {
   constructor(readonly mapId: string) {}
 
   /** The server would own state; there is nothing local to write. */
-  async save(): Promise<void> {}
+  async save(_state?: SessionSaveState): Promise<void> {}
 
   async leave(): Promise<void> {}
 }
