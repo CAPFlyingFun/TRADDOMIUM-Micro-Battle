@@ -1,7 +1,7 @@
 {
   "name": "traddomium-micro-battle",
   "private": true,
-  "version": "1.0.0-alpha.4",
+  "version": "1.0.0-alpha.5",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -12,18 +12,25 @@
     "typecheck": "tsc -b",
     "probe:boot": "node scripts/probe-boot.mjs",
     "probe:netlab": "node scripts/probe-netlab.mjs",
-    "bake:art": "node scripts/bakeArt.mjs"
+    "probe:relay": "node scripts/probe-relay.mjs",
+    "bake:art": "node scripts/bakeArt.mjs",
+    "relay:dev": "wrangler dev --config worker/wrangler.toml --local",
+    "relay:deploy": "wrangler deploy --config worker/wrangler.toml",
+    "relay:tail": "wrangler tail --config worker/wrangler.toml",
+    "relay:typecheck": "tsc -p worker/tsconfig.json"
   },
   "dependencies": {
     "three": "^0.185.0"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^5.20260904.1",
     "@types/node": "^24.0.0",
     "@types/three": "^0.185.0",
     "jsdom": "^26.1.0",
     "playwright": "^1.62.1",
     "typescript": "~5.8.3",
     "vite": "^7.0.0",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "wrangler": "^4.129.0"
   }
 }

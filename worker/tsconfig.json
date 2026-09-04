@@ -1,0 +1,28 @@
+{
+  // The relay compiles against the WORKERS runtime, not the browser and
+  // not node: no DOM lib (workerd's WebSocket, Request and Response come
+  // from @cloudflare/workers-types), no node types. It shares src/net/
+  // with the game, which is why that code may not reference either — see
+  // tests/simulationCore.test.ts.
+  //
+  // Type-checked on its own, because the root tsconfig deliberately
+  // covers src, tests and scripts with the browser lib:
+  //
+  //     npx tsc -p worker/tsconfig.json
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"],
+    "types": ["@cloudflare/workers-types"],
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "isolatedModules": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": ["src"]
+}

@@ -7,6 +7,12 @@ shots/
 probe-*.png
 .scratch/
 
+# Wrangler's local Workers state. `npm run relay:dev` and `npm run
+# probe:relay` run the real workerd runtime on this machine and write the
+# room's local Durable Object SQLite beside worker/wrangler.toml. It is
+# one developer's scratch state, never the relay's truth.
+.wrangler/
+
 # Agent worktrees created during parallel builds
 .claude/worktrees/
 
