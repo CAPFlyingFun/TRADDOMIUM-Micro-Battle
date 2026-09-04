@@ -4,6 +4,12 @@
  * browsers, two capsules) plugs a real transport in here, and the
  * two-capsule test plugs `LoopbackTransport` in instead.
  *
+ * LIVENESS IS THE TRANSPORT'S JOB. A transport says when its connection
+ * is gone (`onClose`) — a socket's close event, a relay's ping timeout —
+ * and the authority reacts. The authority keeps no heartbeat of its own,
+ * so the protocol needs no keepalive message and an idle player is not
+ * mistaken for a dead one.
+ *
  * Pure: no DOM, no WebSocket import.
  */
 export type TransportState = 'closed' | 'connecting' | 'open';
@@ -16,56 +22,14 @@ export interface Transport {
   send(msg: unknown): void;
   /** Returns the unsubscribe function. */
   onMessage(cb: MessageHandler): () => void;
+  /**
+   * The connection is gone: this end was disconnected, or the far end
+   * hung up. Nothing more will arrive and anything sent is lost. Returns
+   * the unsubscribe function.
+   */
+  onClose(cb: () => void): () => void;
 }
 
-/**
- * Two ends joined in memory. Delivery is deferred to a microtask so that
- * code written against it cannot accidentally depend on a synchronous
- * reply, which no real network would give it.
- */
-export class LoopbackTransport implements Transport {
-  private peer: LoopbackTransport | null = null;
-  private current: TransportState = 'closed';
-  private readonly handlers = new Set<MessageHandler>();
-
-  static pair(): [LoopbackTransport, LoopbackTransport] {
-    const a = new LoopbackTransport();
-    const b = new LoopbackTransport();
-    a.peer = b;
-    b.peer = a;
-    return [a, b];
-  }
-
-  get state(): TransportState {
-    return this.current;
-  }
-
-  async connect(): Promise<void> {
-    if (this.current === 'open') return;
-    this.current = 'connecting';
-    await Promise.resolve();
-    this.current = 'open';
-  }
-
-  disconnect(): void {
-    this.current = 'closed';
-  }
-
-  /** Throws when not open: sending into a closed socket is a bug, not a no-op. */
-  send(msg: unknown): void {
-    if (this.current !== 'open') throw new Error(`LoopbackTransport: send while ${this.current}`);
-    const peer = this.peer;
-    if (!peer || peer.current !== 'open') return; // dropped, as on the wire
-    queueMicrotask(() => {
-      if (peer.current !== 'open') return;
-      for (const cb of peer.handlers) cb(msg);
-    });
-  }
-
-  onMessage(cb: MessageHandler): () => void {
-    this.handlers.add(cb);
-    return () => {
-      this.handlers.delete(cb);
-    };
-  }
-}
+// The in-memory implementation lives in its own file; it is re-exported
+// here so the import path the Phase 0 tests use stays valid.
+export { LoopbackTransport, loopbackLink, type LoopbackLink } from './LoopbackTransport';
