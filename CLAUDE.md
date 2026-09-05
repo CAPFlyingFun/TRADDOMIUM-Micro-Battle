@@ -169,6 +169,13 @@ whenever `src/net/` changes; a build-time constant named in core is the
 way that has actually happened, and `tests/simulationCore.test.ts` now
 fails on it locally too.
 
+**Agents: the minimum for research, more allowed for coding, used
+wisely** (Joshua, 2026-09-05). Reading this codebase to answer a question
+is usually faster and more reliable done directly — the files say what
+they mean, and a fanned-out search of them mostly returns what a grep
+would. Parallel agents earn their cost when there is real work to do in
+parallel, not merely a lot to read.
+
 **Probes cost time — use the smallest thing that answers the question.**
 The headless renderer runs at about a frame and a half a second. For a
 local regression: read the code, name the invariant violated, make the
@@ -177,20 +184,30 @@ probes for renderer/physics sync, water/terrain/LOD visuals, uncertain
 root causes, and final stage verification. Never retune a per-second
 system from probe wall-clock.
 
-**Screenshots and probes mean STOP before landing on main.** `main`
-deploys to GitHub Pages, which is what Joshua's phone runs. Anything
-checked with a screenshot or probe is shown to him first and waits for
-his go-ahead before it reaches `main`; his device pass then happens on
-the deployed build. It is far cheaper for him to say "the water is too
-wide" once from a screenshot than for three corrective pushes to land on
-his phone. Pushing to a feature branch is not landing. Refactors, tests,
-docs and fixes with a unit test behind them land without asking.
+**Work goes STRAIGHT TO `main`, and `main` deploys to the phone.**
+Joshua, 2026-09-05: "Don't do any more PR's, push and edit directly from
+now on", and, asked whether that meant `main` itself or a branch he would
+merge: straight to `main`.
+
+This SUPERSEDES the rule that used to stand here — that anything checked
+with a screenshot or probe waited for his go-ahead before it reached
+`main`. It is his call and it is recorded rather than argued with, but
+the consequence is worth stating plainly, because the old rule existed
+for a reason: there is no longer a gate between a push and his phone.
+What used to be caught by "show him a screenshot first" now has to be
+caught BEFORE the push. So verify harder, not less — run the probes and
+look at the shots yourself, and prefer one validated push to three
+corrective ones. A change you would have wanted a second opinion on is
+now a change to say so about in the same breath as pushing it.
 
 ## Git and collaboration
 
-- `main` is the deployed branch. Develop on feature branches; land via
-  PR once Joshua has seen the result and said go. Never force-push
-  `main`.
+- `main` is the deployed branch and is where work goes DIRECTLY: commit
+  and push to it. NO PULL REQUESTS (Joshua, 2026-09-05) — not as a
+  formality, not "just for CI". Never force-push `main`.
+- CI runs on push to `main`, so a push is also what gets the branch
+  through typecheck + test + build + `relay:typecheck`. There is no
+  second chance to notice a break before it deploys.
 - While v1 is rebuilt, the Pages site carries BOTH builds (Joshua,
   2026-09-04): v0 from `legacy/v0-main` at the site root, which is what
   the installed PWA opens, and v1 from `main` under `/v1/`. The deploy
