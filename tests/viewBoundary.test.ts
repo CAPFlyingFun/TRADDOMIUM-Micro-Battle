@@ -51,10 +51,12 @@ function dir(rel: string): Map<string, string> {
 const actor = dir('src/actor');
 const view = dir('src/view');
 const terrain = dir('src/terrain');
+const sea = dir('src/sea');
 
 const actorSites = [...actor].flatMap(([f, src]) => importsOf(f, src));
 const viewSites = [...view].flatMap(([f, src]) => importsOf(f, src));
 const terrainSites = [...terrain].flatMap(([f, src]) => importsOf(f, src));
+const seaSites = [...sea].flatMap(([f, src]) => importsOf(f, src));
 
 const VIEW_DIR = /(^|\/)view(\/|$)/;
 const ORIGIN = /(^|\/)world\/origin$/;
@@ -154,6 +156,86 @@ describe('the world/terrain seam', () => {
 
   it('never imports actor/ or view/: the ground does not know who is standing on it', () => {
     const offenders = terrainSites.filter((s) => ACTOR_DIR.test(s.specifier) || VIEW_DIR.test(s.specifier));
+    expect(offenders.map((s) => `${s.file}: ${s.statement}`)).toEqual([]);
+  });
+});
+
+
+/**
+ * THE THIRD RENDERER, AND THE ONE PLACE THE `.wx` BAN DOES NOT FIT
+ * (ARCHITECTURE §3, amended 2026-09-05 with `sea/`).
+ *
+ * `view/` draws actors, `terrain/` draws the ground, `sea/` draws the
+ * water. The first two may never read a world coordinate, because a
+ * renderer that does is doing the origin subtraction by hand somewhere.
+ * The sea genuinely must, and the reason is in the water audit's own
+ * list of things that were CORRECT in v0: "floating-origin handling
+ * across the water boundary (world-coordinate uniforms, per-frame
+ * place(), y never rebased)".
+ *
+ * The water's SKIN is world-locked. The ripple tiles against world
+ * position, the swell is evaluated at world position, and the far
+ * sheet's hole is a world distance — so `uCentre` and `uHole` are world
+ * coordinates by design, and float32 can hold them because the shader
+ * only ever uses them modulo a tile or as a difference. What must NOT
+ * happen is the mesh's own placement being computed by hand.
+ *
+ * So the rule here is sharper than a ban, and it is the rule the ban was
+ * a proxy for: every world coordinate this directory reads goes STRAIGHT
+ * TO THE GPU or straight back into another world coordinate, and the
+ * mesh crosses the boundary through `toLocal` like everything else.
+ */
+describe('the world/sea seam', () => {
+  it('has a sea renderer to check', () => {
+    expect([...sea.keys()]).toEqual(expect.arrayContaining(['OceanView.ts', 'waterLook.ts', 'SeaTextures.ts']));
+    expect(seaSites.length).toBeGreaterThan(0);
+  });
+
+  it('never owns a Heightfield or a SeaSwell — it is handed both', () => {
+    for (const [file, src] of sea) {
+      const body = code(src);
+      expect(body, `${file} constructs a Heightfield`).not.toMatch(/new\s+Heightfield\b/);
+      expect(body, `${file} constructs a SeaSwell`).not.toMatch(/new\s+SeaSwell\b/);
+    }
+    const fromField = seaSites.filter((s) => /world\/heightfield$/.test(s.specifier));
+    for (const site of fromField) {
+      expect(site.typeOnly || /SEA_LEVEL/.test(site.statement), `${site.file} imports the heightfield as a value`).toBe(true);
+    }
+  });
+
+  it('seats the mesh through toLocal and never subtracts an origin by hand', () => {
+    const originImporters = seaSites.filter((s) => ORIGIN.test(s.specifier));
+    expect(originImporters.map((s) => s.file)).toEqual(['OceanView.ts']);
+    expect(code(sea.get('OceanView.ts') ?? '')).toMatch(/\btoLocal\(/);
+    // `originAt` is the tool you would reach for to do it by hand. The
+    // sea has no use for it and importing it is the smell.
+    for (const site of originImporters) {
+      expect(site.statement, `${site.file} imports originAt`).not.toMatch(/\boriginAt\b/);
+    }
+  });
+
+  it('reads a world coordinate ONLY to hand it to the GPU or to another world coordinate', () => {
+    // The sharpened ban. Every `.wx`/`.wz` must be on a line that is
+    // either filling a uniform (`.value.set`), naming a world-space
+    // lattice origin (`ox:`/`oz:`), or building another WorldPoint
+    // (`world(`). Anything else is a local position being computed by
+    // hand, which is the bug the other two directories are banned from.
+    const allowed = /\.value\.set\(|\bworld\(|\box:|\boz:/;
+    let examined = 0;
+    for (const [file, src] of sea) {
+      for (const [i, line] of code(src).split('\n').entries()) {
+        if (!/\.w[xz]\b/.test(line)) continue;
+        examined += 1;
+        expect(allowed.test(line), `${file}:${i + 1} takes a world coordinate apart: ${line.trim()}`).toBe(true);
+      }
+    }
+    // A renderer that stopped reading world coordinates entirely would
+    // pass this vacuously, and so would a scan that lost the directory.
+    expect(examined).toBeGreaterThan(0);
+  });
+
+  it('never imports actor/ or view/: the water does not know who is swimming in it', () => {
+    const offenders = seaSites.filter((s) => ACTOR_DIR.test(s.specifier) || VIEW_DIR.test(s.specifier));
     expect(offenders.map((s) => `${s.file}: ${s.statement}`)).toEqual([]);
   });
 });
