@@ -57,6 +57,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { chooseSpawn } from './probeSpawn.mjs';
 import { preview } from 'vite';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -262,6 +263,10 @@ async function drive(page, url) {
         log(`slot list is up with ${SLOT_COUNT} empty slots; choosing slot 1`);
       }
       await page.click(SLOT_ONE, { timeout: TIMEOUT.menu });
+      // And then the spawn map, which is now part of the front door.
+      // ʻAnini: a coast region, 50 m from the water, so this probe's
+      // screenshots show somewhere a player would actually recognise.
+      await chooseSpawn(page, 'anini', log, TIMEOUT.world);
     } catch {
       fail(`SOLO did not lead to a slot list with ${SLOT_ONE} within ${TIMEOUT.slots / 1000} s. UI reads: "${await uiText(page)}"`);
       return;

@@ -19,6 +19,10 @@ import {
 import { playerId } from '../actor/PlayerId';
 import { PRACTICE_BOT_NAME, RELAY_QUERY_PARAM, resolveRelayUrl, toRoomSocketUrl } from '../net';
 import { createPerformanceWorldScene } from '../perf/PerformanceWorldScene';
+import { yawForHeading } from '../perf/FreeFlyCamera';
+import { SPAWN_MAP_SCENE_ID, createSpawnMapScene } from '../map/SpawnMapScene';
+import type { SpawnCandidate } from '../world/spawn';
+import type { CameraPose } from '../session/GameSession';
 import { fetchCoarseDem } from '../assets/demSource';
 import { TIER_QUERY_PARAM, isTextureTier, type TextureTier } from '../assets/textureQuality';
 import { PERF_WORLD_MAP_ID, PERF_WORLD_SCENE_ID, perfWorldTool } from '../perf/perfTool';
@@ -133,6 +137,46 @@ const TIER_NAMED = typeof globalThis.location === 'undefined'
 const TIER_OVERRIDE: TextureTier | null = isTextureTier(TIER_NAMED) ? TIER_NAMED : null;
 
 /**
+ * WHICH SLOT THE SPAWN MAP IS CHOOSING FOR.
+ *
+ * NEW GAME now asks WHERE before it opens a world, so the slot the player
+ * picked has to survive one screen. It is a single value on the way from
+ * the slot picker to the map and back, cleared the moment it is used — a
+ * latch that is genuinely needed is one named thing rather than loose
+ * fields (CLAUDE.md), and this is the whole of it.
+ *
+ * Null means nobody is mid-flow: a map opened any other way starts
+ * nothing, which is what should happen to a reload on that screen.
+ */
+let spawningInto: SoloSlot | null = null;
+
+/**
+ * How far above the ground a chosen start stands, in world units. 30 m —
+ * the same clearance a resumed camera is lifted to, and enough to be over
+ * the drawn surface rather than in it, since core validated the candidate
+ * against the smooth survey and the clipmap draws chords of it.
+ */
+const SPAWN_CLEARANCE = 3_000;
+
+/**
+ * A chosen place as a camera pose.
+ *
+ * HERE AND NOT IN THE MAP. The map hands back a region and a candidate,
+ * which are world facts; what a camera does with them — the half turn
+ * between an actor heading and a camera yaw, how high it floats, how far
+ * it looks down — belongs to the layer that owns the camera. A map that
+ * knew about yaw would have to change every time the camera did.
+ */
+const poseFor = (candidate: SpawnCandidate): CameraPose => ({
+  at: candidate.at,
+  height: candidate.ground + SPAWN_CLEARANCE,
+  yaw: yawForHeading(candidate.heading),
+  // Looking slightly down, so the ground you chose is in frame on arrival
+  // rather than the sky above it.
+  pitch: -0.25,
+});
+
+/**
  * The sessions and slots the menu and the picker offer. Both carry the
  * only world that exists; `slots` is the three save documents as the
  * player sees them, and `saved` is the newest game among them — what
@@ -195,7 +239,13 @@ const offers = (ctx: SceneContext): SessionOffers => ({
 const play = (ctx: SceneContext): SoloPlay => ({
   newGame: (slot) => {
     if (!isSoloSlot(slot)) return;
-    startSession(ctx, newSoloGame(ctx.storage.kv, hasWorld, slot, PERF_WORLD_MAP_ID));
+    // ASK WHERE FIRST. The save is not written and the slot is not
+    // cleared until a place is chosen, so backing out of the map leaves
+    // whatever was in the slot untouched — a new game that had already
+    // thrown the old one away before the player committed would be the
+    // one destructive path with no confirmation in front of it.
+    spawningInto = slot;
+    goToScreen(ctx, SCREEN_ID.spawn);
   },
   resume: (slot) => {
     if (!isSoloSlot(slot)) return;
@@ -257,6 +307,45 @@ export function registerScenes(options: RegisterScenesOptions = {}): void {
   registerScene(SCREEN_ID.about, createAboutScene);
   registerScene(SCREEN_ID.profile, createProfileScene(profile));
   registerScene(SCREEN_ID.loading, createLoadingScene(loading));
+  // WHERE THE COLONY BEGINS, between the slot picker and the world.
+  // It takes the same survey the world does, because it paints the island
+  // out of the same heightfield rather than out of a shipped picture.
+  registerScene(SPAWN_MAP_SCENE_ID, createSpawnMapScene((ctx) => ({
+    survey,
+    onBack: () => {
+      spawningInto = null;
+      goToScreen(ctx, SCREEN_ID.menu);
+    },
+    // No survey, no island, no choice to make — so this is what NEW GAME
+    // did before the map existed, unchanged.
+    onDefault: () => {
+      const slot = spawningInto;
+      if (slot === null) return;
+      spawningInto = null;
+      startSession(ctx, newSoloGame(ctx.storage.kv, hasWorld, slot, PERF_WORLD_MAP_ID));
+    },
+    onStart: (_region, candidate) => {
+      const slot = spawningInto;
+      if (slot === null) return;
+      spawningInto = null;
+      // THE CHOSEN PLACE IS WRITTEN AS THE SAVE'S CAMERA POSE, and the
+      // world then resumes from it. No new seam: the path that puts a
+      // returning player back where they were is the same path that puts
+      // a new one where they asked to start, which is one behaviour to
+      // keep working rather than two.
+      const session = newSoloGame(ctx.storage.kv, hasWorld, slot, PERF_WORLD_MAP_ID);
+      void (async () => {
+        try {
+          await session.save({ camera: poseFor(candidate) });
+        } catch (error) {
+          // A storage failure loses the chosen spot, not the game: the
+          // world opens at its own default rather than not at all.
+          console.error('[spawn] could not record where the game begins', error);
+        }
+        startSession(ctx, session);
+      })();
+    },
+  })));
 
   // The Performance World: the benchmark scene, and in Phase 0 the only
   // world. It reaches the settings it can honour through a hook, because

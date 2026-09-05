@@ -36,6 +36,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { chooseSpawn } from './probeSpawn.mjs';
 import { readPng } from './probePng.mjs';
 import { preview } from 'vite';
 
@@ -213,6 +214,11 @@ async function drive(page, url) {
   await page.click('[data-action="solo"]', { timeout: TIMEOUT.menu });
   await page.waitForSelector(SLOT_ONE, { state: 'attached', timeout: TIMEOUT.slots });
   await page.click(SLOT_ONE, { timeout: TIMEOUT.menu });
+  // NEW GAME asks where now. Waiʻaleʻale's slopes, because this probe is
+  // about the terrain and that is the high interior — the closest a
+  // chosen region gets to the summit start these checks were written
+  // against.
+  await chooseSpawn(page, 'waialeale', log, TIMEOUT.world);
 
   log('waiting for the world (this includes the 2 MB survey)');
   await page.waitForSelector('[data-action="pause"]', { timeout: TIMEOUT.world });

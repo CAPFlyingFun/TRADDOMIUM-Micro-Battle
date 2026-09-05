@@ -50,6 +50,16 @@ cannot be wired because it is never run on its own:
   because two probes reading their own screenshots is two decoders, and
   the second one was written handling only RGBA and threw on the first
   RGB frame Playwright handed it.
+- `scripts/probeSpawn.mjs` — the walk across the spawn map, shared by
+  every probe that reaches the world through the front door
+  (`probe-boot`, `probe-terrain`, `probe-ocean`). A module, not a
+  command. It exists because NEW GAME now asks WHERE before it opens a
+  world, so three probes gained the same step on the same day, and
+  because it handles BOTH endings of that screen: an island to pick a
+  region from, and the "Begin anyway" a build with no survey offers
+  instead. There is deliberately no query parameter that skips the
+  screen — a probe that can skip a step a player cannot is measuring a
+  different program.
 - `scripts/relayHarness.mjs` — starts `wrangler dev --local` on a free
   port, waits for `/health`, and stops it again, cleaning up its Durable
   Object state. Imported by `npm run probe:relay`,

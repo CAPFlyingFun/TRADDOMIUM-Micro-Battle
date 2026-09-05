@@ -32,6 +32,14 @@ export const SCREEN_ID = {
    * (§3), so `tests/registerScenes.test.ts` pins the two equal instead.
    */
   editors: 'devtools',
+  /**
+   * Owned by map/; the slot picker only needs to know its door. The value
+   * must equal `map/SpawnMapScene.SPAWN_MAP_SCENE_ID`, which the ui may
+   * not import (§3 — that module holds a Heightfield), so
+   * `tests/registerScenes.test.ts` pins the two equal instead, exactly as
+   * it does for devtools.
+   */
+  spawn: 'spawn-map',
 } as const;
 
 export type ScreenId = (typeof SCREEN_ID)[keyof typeof SCREEN_ID];

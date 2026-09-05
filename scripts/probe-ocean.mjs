@@ -41,6 +41,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 import { readPng } from './probePng.mjs';
+import { chooseSpawn } from './probeSpawn.mjs';
 import { preview } from 'vite';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -82,7 +83,11 @@ const FRAMES = 40;
 const DRIFT_FRAMES = 40;
 
 /**
- * THE TRIP TO THE COAST, and why the probe takes it.
+ * IT STARTS AT THE COAST, because it can now choose where to begin: the
+ * spawn map picks a region and this one asks for a coastal one, so the
+ * sea is in frame on the first drawn frame. Before that it opened on the
+ * summit and flew seventeen kilometres west, which took four attempts to
+ * get right and most of the probe's wall clock.
  *
  * The camera starts 1.5 km above the middle of Kauaʻi, twenty kilometres
  * from the nearest water. From there the sea is real and visible and
@@ -97,53 +102,15 @@ const DRIFT_FRAMES = 40;
  * speed: at 30 km up the camera covers the twenty-four kilometres to the
  * west coast in a couple of hundred frames.
  */
-const COAST = {
-  /**
-   * Fly west until the camera is this far out along -x.
-   *
-   * The west coast on this line is near -2,470,000, so this is a little
-   * beyond it: over water, with the shore behind.
-   */
-  reachX: -2_620_000,
-  /** Frames per steering chunk, between position reads. */
-  chunk: 40,
-  /** …and a ceiling on the whole flight, so a stuck probe still reports. */
-  flyBudget: 1_800,
-  /**
-   * The cruise band, world units above sea level.
-   *
-   * FLOWN AS A BAND rather than a heading, because neither extreme
-   * works and both were tried. Forward alone sinks — the view is pitched
-   * a little down and the camera arrived 821 m UNDER the sea. Forward
-   * plus a held climb arrives at 26 km, and coming down from there costs
-   * more frames than the crossing did. So the flight holds a height:
-   * high enough that the height-derived speed covers the twenty-six
-   * kilometres in about eight hundred frames, low enough that the
-   * descent afterwards is a few hundred more.
-   */
-  cruiseLo: 500_000,
-  cruiseHi: 900_000,
-  /**
-   * Come down to inside this band, in world units above sea level.
-   *
-   * SIXTY METRES, and it has to be that low. At five hundred metres the
-   * sea is drawn and is perfectly SMOOTH — the near sheet is 168 m across
-   * and falls outside a forward-pitched frame, and the far sheet's cell
-   * is over a kilometre wide, so its ripple map tiles a hundred and fifty
-   * times inside one cell and the mip chain averages it to a flat wash.
-   * Nothing there moves, correctly. The moving water is the near sheet,
-   * and it fills the view only from close above it.
-   *
-   * A CEILING AND A FLOOR, because the descent is fast and unbounded: the
-   * rate is the height above the SEABED, which off Kauaʻi is four
-   * kilometres down, so the camera falls at about 1,900 units a frame all
-   * the way to the surface and a forty-frame chunk would go straight
-   * through it. The chunk shrinks as the surface approaches.
-   */
-  dropTo: 6_000,
-  dropFloor: 1_500,
-  dropBudget: 900,
-};
+/**
+ * WHERE THIS PROBE STARTS, now that it can choose.
+ *
+ * A coast region, so the sea is in front of the camera on the probe's
+ * first drawn frame. ʻAnini's candidates sit about 50 m from the water —
+ * the closest the island offers — which is why the flight this file used
+ * to make is gone.
+ */
+const COAST_REGION = 'anini';
 
 /**
  * WHY THIS PROBE IS THE SLOW ONE — about ten minutes, most of it flying.
@@ -217,13 +184,6 @@ const uiText = (page) => page.evaluate(
   () => ((document.getElementById('ui') ?? document.body).innerText ?? '').replace(/\s+/g, ' '),
 );
 
-/** Where the camera says it is, from the HUD's own readout. */
-async function cameraAt(page) {
-  const hit = /x (-?[\d.]+) y (-?[\d.]+) z (-?[\d.]+)/.exec(await uiText(page));
-  if (!hit) return null;
-  return { x: Number(hit[1]), y: Number(hit[2]), z: Number(hit[3]) };
-}
-
 /** Hold a key for a run of frames. */
 async function hold(page, key, frames) {
   await page.keyboard.down(key);
@@ -253,6 +213,7 @@ async function openWorld(page, url) {
   await page.click('[data-action="solo"]', { timeout: TIMEOUT.menu });
   await page.waitForSelector(SLOT_ONE, { state: 'attached', timeout: TIMEOUT.slots });
   await page.click(SLOT_ONE, { timeout: TIMEOUT.menu });
+  await chooseSpawn(page, COAST_REGION, log, TIMEOUT.world);
 
   log('waiting for the world (this includes the 2 MB survey and the sea textures)');
   await page.waitForSelector('[data-action="pause"]', { timeout: TIMEOUT.world });
@@ -268,9 +229,9 @@ async function drive(page, url) {
   else if (/ocean[^a-z]{0,4}not built/i.test(text)) fail('the HUD still reads "not built" for ocean');
   else log('the HUD lists ocean as a built layer');
 
-  // Point at the horizon. The camera starts 1.5 km above the island's
-  // middle looking slightly down, which is all island; the sea is the
-  // ring around it and needs the view lifted to be in frame at all.
+  // Point at the horizon. The camera starts low over the north shore now,
+  // looking slightly down, so lifting the view puts open sea and the
+  // horizon in frame rather than the beach immediately below.
   log('pitching up to put the horizon in frame');
   await look(page, 0, -90);
   const withSea = await runFrames(page, FRAMES);
@@ -278,49 +239,18 @@ async function drive(page, url) {
   log(`${FRAMES} frames in ${Math.round(withSea)} ms — ${seaFps.toFixed(1)} fps with the sea (SwiftShader, NOT a phone)`);
   const sea = await shoot(page, SHOT_SEA);
 
-  // ── THE TRIP TO THE COAST ────────────────────────────────────────
+  // ── ALREADY AT THE COAST ─────────────────────────────────────────
   //
-  // Everything above was measured from the middle of the island, where
-  // the sea is a distant band. The motion check needs to be near it.
-  log('flying west to the coast — the long part, see COAST above');
-  // Forward, holding the cruise band: see COAST.cruiseLo above for the
-  // two ways of not doing this and what each of them cost.
-  let flown = 0;
-  let at = await cameraAt(page);
-  while (at !== null && at.x > COAST.reachX && flown < COAST.flyBudget) {
-    const climb = at.y < COAST.cruiseLo;
-    const drop = at.y > COAST.cruiseHi;
-    await page.keyboard.down('KeyW');
-    if (climb) await page.keyboard.down('Space');
-    if (drop) await page.keyboard.down('KeyQ');
-    await runFrames(page, COAST.chunk);
-    if (drop) await page.keyboard.up('KeyQ');
-    if (climb) await page.keyboard.up('Space');
-    await page.keyboard.up('KeyW');
-    flown += COAST.chunk;
-    at = await cameraAt(page);
-  }
-  log(`flew ${flown} frames; the camera is at x ${at?.x.toFixed(0)} y ${at?.y.toFixed(0)}`);
-  if (at !== null && at.x > COAST.reachX) {
-    fail(`the flight ran out of budget at x ${at.x.toFixed(0)}, short of the water at ${COAST.reachX}`);
-    return;
-  }
-
-  let dropped = 0;
-  while (at !== null && at.y > COAST.dropTo && dropped < COAST.dropBudget) {
-    // The chunk shrinks as the surface approaches, because the descent
-    // RATE does not: it is set by the height above the seabed, four
-    // kilometres below, so it hardly slows at all on the way down. A
-    // fixed chunk goes through the surface and photographs the sea floor
-    // from underneath.
-    const chunk = at.y > 200_000 ? COAST.chunk : at.y > 60_000 ? 8 : 2;
-    await hold(page, 'KeyQ', chunk);
-    dropped += chunk;
-    at = await cameraAt(page);
-    if (at !== null && at.y < COAST.dropFloor) break;
-  }
-  log(`descended ${dropped} frames; the camera is at y ${at?.y.toFixed(0)}`);
-  if (at !== null && at.y <= 0) fail(`the camera ended at y ${at.y.toFixed(0)} — under the sea, not over it`);
+  // This used to be a ten-minute flight. The probe opened on
+  // Waiʻaleʻale's summit, 17 km from water, and had to fly west across
+  // the island and then descend four kilometres to find the sea — four
+  // attempts to get right, and the slowest thing in the suite.
+  //
+  // The spawn map deleted all of it. The run above chose a COAST region,
+  // so the camera is already low over the north shore and the checks
+  // below can simply be taken. The flight budget, the cruise band and
+  // the descent chunking that made it work are gone with it; git history
+  // has them if a probe ever needs to cross the island again.
   // Tip the view down so the water fills the frame rather than the sky.
   await look(page, 0, 55);
   await runFrames(page, 12);

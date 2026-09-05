@@ -30,6 +30,7 @@ import { Input } from '../src/input/Input';
 import { createStorageRoot } from '../src/persistence/StorageRoot';
 import { memoryKeyValueStore } from '../src/persistence/store';
 import { PERF_WORLD_SCENE_ID } from '../src/perf/perfTool';
+import { SPAWN_MAP_SCENE_ID } from '../src/map/SpawnMapScene';
 import type { GameSession } from '../src/session/GameSession';
 import { SOLO_SAVE_SPEC } from '../src/session/LocalSoloSession';
 import { soloSlotKey } from '../src/session/SoloSlots';
@@ -120,6 +121,27 @@ async function boot(r: ReturnType<typeof rig>): Promise<void> {
   r.app.requestState('menu');
 }
 
+/**
+ * NEW GAME ASKS WHERE FIRST, since the spawn map went in between the slot
+ * picker and the world.
+ *
+ * This rig ships no survey — nothing here reaches the network — so the map
+ * has no island to offer and shows its honest way through instead: "Begin
+ * anyway", which starts where the world normally does, exactly as NEW GAME
+ * did before the screen existed. That fallback is the reason the map is
+ * not a dead end on a phone whose download failed, and driving the flow
+ * through it here is what keeps it working.
+ *
+ * Choosing an actual REGION is the map's own business and is tested in
+ * tests/mapSpawnScene.test.ts, against the real survey.
+ */
+async function throughTheMap(r: ReturnType<typeof rig>): Promise<void> {
+  expect(r.app.state).toBe('menu');
+  await r.settle();
+  expect(r.scenes.current?.name).toBe(SPAWN_MAP_SCENE_ID);
+  r.press('spawn-start');
+}
+
 describe('Phase 0 flow', () => {
   it('menu → PLAY → SOLO reaches the Performance World in the playing state', async () => {
     const r = rig();
@@ -132,6 +154,7 @@ describe('Phase 0 flow', () => {
     // Choosing how to play is not choosing a game: the slot list comes next.
     expect(r.app.state).toBe('session');
     r.press('slot:1');
+    await throughTheMap(r);
     expect(r.app.state).toBe('loading');
     await r.settle();
 
@@ -150,6 +173,7 @@ describe('Phase 0 flow', () => {
     r.press('new-game');
     r.press('solo');
     r.press('slot:1');
+    await throughTheMap(r);
     await r.settle();
 
     r.frame();
@@ -189,6 +213,7 @@ describe('Phase 0 flow', () => {
     expect([...r.uiLayer.querySelectorAll('.ui-slots .ui-button__sub')].map((e) => e.textContent))
       .toEqual(['Empty', 'Empty', 'Empty']);
     r.press('slot:1');
+    await throughTheMap(r);
     await r.settle();
     r.frame();
     // Fly somewhere the START pose is not, then save through PAUSE and QUIT.
@@ -225,6 +250,7 @@ describe('Phase 0 flow', () => {
     r.press('new-game');
     r.press('solo');
     r.press('slot:1');
+    await throughTheMap(r);
     await r.settle();
     // Through Input's own key path, so the handler the world registered is what fires.
     r.input.attach(document.body);
@@ -311,6 +337,7 @@ describe('Phase 0 flow', () => {
     r.press('new-game');
     r.press('solo');
     r.press('slot:1');
+    await throughTheMap(r);
     await r.settle();
     r.frame();
     r.scenes.current?.camera.position.set(111, 20, -111);
@@ -324,6 +351,7 @@ describe('Phase 0 flow', () => {
     expect([...r.uiLayer.querySelectorAll('.ui-slots .ui-button__sub')].map((e) => e.textContent))
       .toEqual(['Last played just now', 'Empty', 'Empty']);
     r.press('slot:2');
+    await throughTheMap(r);
     await r.settle();
     r.frame();
     // A NEW game: it did not inherit slot 1's camera.
@@ -343,6 +371,8 @@ describe('Phase 0 flow', () => {
     // With two, RESUME opens the list instead of choosing for the player.
     r.press('resume');
     expect(r.uiLayer.querySelector<HTMLElement>('[data-role="slot-picker"]')?.dataset.purpose).toBe('resume');
+    // RESUME does NOT ask where: the saved game already knows, and being
+    // asked again would be the game forgetting where you left it.
     r.press('slot:1');
     await r.settle();
     r.frame();
@@ -355,6 +385,7 @@ describe('Phase 0 flow', () => {
     r.press('new-game');
     r.press('solo');
     r.press('slot:1');
+    await throughTheMap(r);
     await r.settle();
     r.frame();
     r.scenes.current?.camera.position.set(333, 20, -333);
@@ -377,6 +408,7 @@ describe('Phase 0 flow', () => {
     // Saying yes is what replaces it: the new game starts at the world's own pose.
     r.press('slot:1');
     r.press('slot-overwrite');
+    await throughTheMap(r);
     await r.settle();
     r.frame();
     expect(r.scenes.current?.camera.position.x).not.toBeCloseTo(333);
