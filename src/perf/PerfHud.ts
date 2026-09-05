@@ -360,7 +360,13 @@ export class PerfHud {
     this.fields.cameraSpeed.textContent = `speed ${c.speed.toFixed(0)} units/s`;
     // Degrees in the ACTOR's convention, so this line and a capsule's own
     // facing describe the same compass — see `FreeFlyCamera.headingOfYaw`.
-    this.fields.cameraFacing.textContent = `facing ${compassBearing(c.facing)}°`;
+    //
+    // PITCH RIDES THE SAME LINE, in degrees, up positive. Both halves of
+    // where the camera is looking, so a photograph of this HUD is a
+    // reproducible pose and `npm run probe:shot` can take its arguments
+    // straight off it without anyone guessing the tilt.
+    this.fields.cameraFacing.textContent = `facing ${compassBearing(c.facing)}°  `
+      + `pitch ${((c.pitch * 180) / Math.PI).toFixed(0)}°`;
     const session = this.hooks.session?.();
     if (this.sessionLine !== null && session !== undefined) this.sessionLine.textContent = sessionWords(session);
     if (this.seaLines !== null) {

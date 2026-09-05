@@ -90,6 +90,20 @@ describe('FreeFlyCamera', () => {
     expect(cam.camera.position.x).toBeGreaterThan(5);
   });
 
+  it('reports the pitch it is actually looking at, clamped like the camera itself', () => {
+    // The HUD prints this and `npm run probe:shot` reads it back, so a
+    // pitch that always answered zero would recreate every shot level
+    // and look like the camera had moved rather than the readout lying.
+    const cam = rig();
+    cam.place(0, 0, 0, 0, -0.31);
+    expect(cam.readout().pitch).toBeCloseTo(-0.31, 9);
+    // Clamped by the same limit that keeps yaw from degenerating, so the
+    // readout can never name a pose `place` would refuse to restore.
+    cam.place(0, 0, 0, 0, 99);
+    expect(cam.readout().pitch).toBeLessThan(Math.PI / 2);
+    expect(cam.readout().pitch).toBeGreaterThan(1.4);
+  });
+
   it('pitch stops short of vertical so yaw never degenerates', () => {
     const cam = rig();
     cam.update(snap({ pointer: { down: true, dx: 0, dy: -100000 } }), 0.016);
@@ -116,7 +130,10 @@ describe('FreeFlyCamera', () => {
     expect(cam.speed).toBe(20000);
     // `facing` is the direction it LOOKS, as an actor heading: a camera at
     // yaw 0 looks down its own −Z, which is heading π in the world's terms.
-    expect(cam.readout()).toEqual({ x: 0, y: 0, z: 0, facing: Math.PI, speed: 20000 });
+    // DEEP-EQUAL ON PURPOSE: the readout is what `probe:shot` and the HUD
+    // both read a pose out of, so a field appearing or quietly going away
+    // is the thing worth failing on.
+    expect(cam.readout()).toEqual({ x: 0, y: 0, z: 0, facing: Math.PI, pitch: 0, speed: 20000 });
   });
 
   it('reports the direction it LOOKS, not its yaw — the two are half a turn apart', () => {

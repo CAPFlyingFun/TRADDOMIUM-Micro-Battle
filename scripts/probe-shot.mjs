@@ -24,7 +24,12 @@
  * Usage:
  *
  *   npm run build
- *   npm run probe:shot -- --x=-2182444.3 --y=3442.3 --z=-477632.6 --facing=12 --pitch=-0.2 --name=washboard
+ *   npm run probe:shot -- --x=-2182444.3 --y=3442.3 --z=-477632.6 --facing=12 --pitch=-11 --name=washboard
+ *
+ * EVERY ARGUMENT IS A NUMBER THE HUD PRINTS, in the units it prints it
+ * in — `--facing` and `--pitch` are both DEGREES, off the CAMERA column.
+ * Nothing here has to be converted by hand, because a probe whose inputs
+ * need arithmetic is a probe that gets pointed at the wrong place.
  *
  * Shots land in `shots/<name>.png` (gitignored). Run it before a change
  * and after it, and compare the two.
@@ -59,6 +64,8 @@ const MAP_ID = 'perf-empty';
 
 /** How close the camera must land to the pose asked for, in world units. */
 const ARRIVED_WITHIN = 50;
+/** And how close in tilt, in degrees — the HUD rounds to whole ones. */
+const TILTED_WITHIN = 1.5;
 
 let failures = 0;
 const log = (message) => console.log(`[probe:shot] ${message}`);
@@ -121,9 +128,16 @@ const uiText = (page) => page.evaluate(
 );
 
 async function cameraAt(page) {
-  const hit = /x (-?[\d.]+) y (-?[\d.]+) z (-?[\d.]+)/.exec(await uiText(page));
+  const text = await uiText(page);
+  const hit = /x (-?[\d.]+) y (-?[\d.]+) z (-?[\d.]+)/.exec(text);
   if (!hit) return null;
-  return { x: Number(hit[1]), y: Number(hit[2]), z: Number(hit[3]) };
+  const tilt = /pitch (-?[\d.]+)°/.exec(text);
+  return {
+    x: Number(hit[1]),
+    y: Number(hit[2]),
+    z: Number(hit[3]),
+    pitch: tilt === null ? null : Number(tilt[1]),
+  };
 }
 
 async function main() {
@@ -137,7 +151,7 @@ async function main() {
     y: Number(arg('y', '3442.3')),
     z: Number(arg('z', '-477632.6')),
     bearing: Number(arg('facing', '12')),
-    pitch: Number(arg('pitch', '-0.2')),
+    pitch: Number(arg('pitch', '-11')),
   };
   const name = arg('name', 'shot');
   const frames = Number(arg('frames', '30'));
@@ -174,13 +188,15 @@ async function main() {
           at: { wx: want.x, wz: want.z },
           height: want.y,
           yaw: yawForBearing(want.bearing),
-          pitch: want.pitch,
+          // The save holds radians; the HUD prints degrees, and the HUD
+          // is what the arguments are copied from.
+          pitch: (want.pitch * Math.PI) / 180,
         },
       },
     });
     await page.reload({ waitUntil: 'load' });
 
-    log(`resuming at x ${want.x} y ${want.y} z ${want.z}, facing ${want.bearing}°, pitch ${want.pitch}`);
+    log(`resuming at x ${want.x} y ${want.y} z ${want.z}, facing ${want.bearing}°, pitch ${want.pitch}°`);
     await page.waitForSelector('[data-action="resume"]', { timeout: TIMEOUT.menu });
     await page.click('[data-action="resume"]', { timeout: TIMEOUT.menu });
     await page.waitForSelector('[data-action="pause"]', { timeout: TIMEOUT.world });
@@ -201,6 +217,14 @@ async function main() {
           + 'Render position is no longer world position here; this probe cannot place a camera by HUD numbers any more.');
       } else {
         log(`arrived within ${off.toFixed(1)} units of the pose asked for`);
+      }
+      // THE TILT IS HALF THE POSE and it is the half that used to be
+      // guessed, so it is checked rather than assumed. A HUD that stops
+      // printing it fails here instead of silently going back to guessing.
+      if (at.pitch === null) {
+        fail('the HUD printed no pitch, so the recreated shot is only aimed to within a guess');
+      } else if (Math.abs(at.pitch - want.pitch) > TILTED_WITHIN) {
+        fail(`asked for pitch ${want.pitch}° and arrived at ${at.pitch}°`);
       }
     }
 

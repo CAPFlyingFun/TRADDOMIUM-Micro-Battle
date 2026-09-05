@@ -82,6 +82,17 @@ export interface CameraReadout {
    * the screen got as far as a screenshot (`scripts/probe-bot.mjs`).
    */
   readonly facing: number;
+  /**
+   * How far it is tilted, in radians, up positive.
+   *
+   * Here for the same reason `facing` is, and learned the same way: a
+   * shot Joshua sends can only be recreated from the HUD if the HUD
+   * prints the whole pose. `npm run probe:shot` had to be given a
+   * GUESSED pitch, so the recreated frame looked at roughly what his did
+   * — which is fine for a washboard covering the screen and useless for
+   * anything at the edge of one.
+   */
+  readonly pitch: number;
   /** World units per second, before any boost. */
   readonly speed: number;
 }
@@ -135,7 +146,7 @@ export class FreeFlyCamera {
 
   readout(): CameraReadout {
     const p = this.camera.position;
-    return { x: p.x, y: p.y, z: p.z, facing: headingOfYaw(this.yaw), speed: this.speedValue };
+    return { x: p.x, y: p.y, z: p.z, facing: headingOfYaw(this.yaw), pitch: this.pitch, speed: this.speedValue };
   }
 
   /** A non-finite or non-positive sensitivity is ignored; the flag is always taken. */
