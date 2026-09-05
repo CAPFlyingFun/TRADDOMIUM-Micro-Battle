@@ -485,6 +485,26 @@ export class SeaSwell {
     this.lattice = null;
   }
 
+  // -- the bed ---------------------------------------------------------------
+
+  /**
+   * How high the SEA BED stands here — the injected ground source, read
+   * back out.
+   *
+   * Public so that `SeaSurf`, which needs four ground samples to find
+   * which way a beach rises, can read the bed THROUGH the sea rather
+   * than being handed a height source of its own. Two injections would
+   * be two chances to pass two different heightfields, and a surf zone
+   * running up a beach the swell cannot see is the two-answers disease
+   * with a shoreline. One sea, one bed.
+   *
+   * A read-only query out, which is what the ownership rule allows: the
+   * caller cannot move the ground through this, only ask about it.
+   */
+  bedAt(at: WorldPoint): number {
+    return this.groundAt(at);
+  }
+
   // -- the surface -----------------------------------------------------------
 
   /**
