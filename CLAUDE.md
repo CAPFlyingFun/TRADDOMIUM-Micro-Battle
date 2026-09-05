@@ -89,11 +89,25 @@ not a default — reopen it only with him. Live erosion during play stays
 permanently excluded: the Mei/Decaudin/Hu erosion steps write the bed
 every tick by definition.
 
-**The ocean's look is accepted — protect it.** When the ocean is re-added
-(Phase 3) its shader, foam, swell heights, periods and wavelengths come
-across as accepted tuning, with the foam-sphere probe and the shader
-fixture test as the regression checks. Do not fix a camera or physics
-problem by making waves smaller.
+**The ocean's look is accepted — protect it. Its COST is a known problem,
+and quality tiers are the answer, not smaller waves.** When the ocean is
+re-added (Phase 3) its shader, foam, swell heights, periods and
+wavelengths come across as accepted tuning, with the foam-sphere probe and
+the shader fixture test as the regression checks. Do not fix a camera or
+physics problem by making waves smaller.
+
+*Joshua, 2026-09-05, from the device:* he likes the v0 ocean — real waves
+and swells derived from NOAA data, "really amazing" — AND names it a
+likely cause of v0's choppiness. His own screenshots of it read 10 to 30
+fps. Two reasons he gives, both actionable rather than aesthetic: v0 had
+no texture size options, everything was about 1024, and the work was
+probably not balanced well between the CPU and the GPU. So the ocean
+arrives WITH `assets/textureQuality.ts` wired to it, testable at medium,
+low and ultra-low on his phone, and profiled for which side of the machine
+it is spending on. His standing preference, in his words: sacrificing
+graphics on mobile is better than amazing graphics with horrible
+performance. Terrain landed at 60 fps on his device; the ocean must not
+be what takes that back.
 
 **Controls belong to the thumbs, not the screen.** Screen space near the
 thumbs is the scarcest resource; action controls have first claim.

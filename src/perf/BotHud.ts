@@ -140,11 +140,29 @@ export class BotHud {
     this.root = doc.createElement('div');
     this.root.dataset.role = 'bot-hud';
     this.root.style.cssText =
-      // The safe area, the way the rest of the project does it
-      // (`ui/styles.css`, `splash.css`): this panel sits in the two
-      // corners a phone is most likely to cover — the home indicator
-      // below, the notch to the left in landscape.
-      'position:absolute;left:max(10px,env(safe-area-inset-left));bottom:max(10px,env(safe-area-inset-bottom));' +
+      // CENTRED ALONG THE BOTTOM, NOT IN THE CORNER (Joshua, 2026-09-05:
+      // "move that AI bot info in the middle center not blocking the
+      // bottom left to be able to move around").
+      //
+      // The bottom-left corner is where the thumb lives: the free-fly
+      // camera's touch control is twin-zone and a drag that STARTS on the
+      // left half is what moves you, so a panel sitting there eats the
+      // movement gesture on a phone. "Controls belong to the thumbs"
+      // (CLAUDE.md) — a readout has no claim on that space.
+      //
+      // Still the safe area below, the way the rest of the project does
+      // it (`ui/styles.css`, `splash.css`), for the home indicator.
+      'position:absolute;left:50%;transform:translateX(-50%);' +
+      'bottom:max(10px,env(safe-area-inset-bottom));' +
+      // AND IT LETS TOUCHES THROUGH. Moving the panel out of the corner
+      // is only half of it: `index.html` gives every direct child of #ui
+      // `pointer-events:auto`, so this panel was SWALLOWING the drag that
+      // starts a move, not merely sitting in front of it. A readout is
+      // something to look at, never something to touch — so the panel is
+      // transparent to the finger and only the restart button below opts
+      // back in. It could sit anywhere now; centred is where Joshua asked
+      // for it.
+      'pointer-events:none;' +
       'display:flex;align-items:flex-start;gap:14px;' +
       `padding:8px 10px;background:rgba(6,9,12,0.72);color:${PARCHMENT};` +
       `font:12px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace;border:1px solid ${GOLD};border-radius:6px;`;
@@ -179,7 +197,9 @@ export class BotHud {
       const onRestart = hooks.onRestart;
       this.restart = actionButton(ACTION.restartBot, 'Send it back in', () => onRestart());
       this.restart.style.cssText =
-        `margin-top:6px;padding:6px 10px;font:12px ui-monospace,SFMono-Regular,Menlo,monospace;` +
+        // The one thing here that IS to be touched, so the one thing that
+        // opts back into receiving a touch.
+        `pointer-events:auto;margin-top:6px;padding:6px 10px;font:12px ui-monospace,SFMono-Regular,Menlo,monospace;` +
         `color:${PARCHMENT};background:#1a2014;border:1px solid ${GOLD};border-radius:4px;`;
       this.restart.hidden = true;
       readouts.appendChild(this.restart);

@@ -179,6 +179,41 @@ describe('the panel', () => {
     expect(field(layer, 'bot-title')).toContain('2:00');
   });
 
+  it('sits centred along the bottom, clear of the thumb that moves the camera', () => {
+    // Joshua, 2026-09-05: "move that AI bot info in the middle center not
+    // blocking the bottom left to be able to move around."
+    //
+    // The free-fly camera's touch control is twin-zone — a drag that
+    // STARTS on the left half is what moves you — so a panel anchored in
+    // the bottom-left corner eats the movement gesture on a phone.
+    // "Controls belong to the thumbs" (CLAUDE.md); a readout does not get
+    // to sit on one. jsdom does no layout, so this pins the ANCHORING;
+    // `scripts/probe-bot.mjs` measures the real box at 932 x 430.
+    const { layer } = mount();
+    const panel = layer.querySelector<HTMLElement>('[data-role="bot-hud"]');
+    if (!panel) throw new Error('no bot panel');
+    expect(panel.style.left).toBe('50%');
+    expect(panel.style.transform).toContain('translateX(-50%)');
+    // Not pinned to either corner.
+    expect(panel.style.right).toBe('');
+    expect(panel.style.bottom).toContain('safe-area-inset-bottom');
+  });
+
+  it('lets a finger through: it is something to look at, not something to touch', () => {
+    // THE HALF THAT MOVING IT DOES NOT FIX. index.html gives every direct
+    // child of #ui `pointer-events:auto`, so this panel was SWALLOWING the
+    // drag that starts a move rather than merely sitting in front of it —
+    // which is what Joshua actually hit. Only the restart button opts back
+    // in, because it is the only thing here meant to be pressed.
+    const onRestart = vi.fn();
+    const { layer } = mount({ onRestart });
+    const panel = layer.querySelector<HTMLElement>('[data-role="bot-hud"]');
+    const send = layer.querySelector<HTMLElement>('[data-action="restart-bot"]');
+    if (!panel || !send) throw new Error('no bot panel');
+    expect(panel.style.pointerEvents).toBe('none');
+    expect(send.style.pointerEvents).toBe('auto');
+  });
+
   it('leaves nothing behind when it is disposed', () => {
     const { layer, hud } = mount();
     expect(layer.querySelector('[data-role="bot-hud"]')).not.toBeNull();

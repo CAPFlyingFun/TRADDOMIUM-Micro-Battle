@@ -235,7 +235,7 @@ async function checkOnScreen(page, role, what) {
   }, role);
   if (box === null) {
     fail(`no [data-role="${role}"] to measure`);
-    return;
+    return null;
   }
   const over = [];
   if (box.right > VIEWPORT.width + 1) over.push(`${Math.round(box.right - VIEWPORT.width)} px past the right edge`);
@@ -247,6 +247,7 @@ async function checkOnScreen(page, role, what) {
   } else {
     log(`the ${what} fits on screen (${Math.round(box.right - box.left)} x ${Math.round(box.bottom - box.top)} px)`);
   }
+  return box;
 }
 
 /**
@@ -284,6 +285,45 @@ const litCells = (page) =>
   page.evaluate(() =>
     [...document.querySelectorAll('[data-cell]')].filter((c) => c.dataset.lit === 'true').map((c) => c.dataset.cell),
   );
+
+
+/**
+ * THE BOTTOM-LEFT BELONGS TO THE THUMB — and the test is whether a finger
+ * REACHES THE CAMERA, not where a box sits.
+ *
+ * `FreeFlyCamera`'s touch control is twin-zone: a drag that STARTS on the
+ * left half of the screen is the virtual stick that moves you. `index.html`
+ * gives every direct child of #ui `pointer-events:auto`, so an overlay
+ * there does not merely sit in front of that gesture — it swallows it,
+ * which is what Joshua hit on the device (2026-09-05).
+ *
+ * So this asks the DOM the same question the browser asks when a finger
+ * lands: at points across the move zone, what would receive the touch? If
+ * anything inside the bot panel would, the panel is in the way — however
+ * it is positioned, and however it is later moved.
+ */
+async function checkThumbReachesCamera(page, what) {
+  const blocked = await page.evaluate(
+    ({ w, h }) => {
+      const points = [];
+      for (const fx of [0.08, 0.25, 0.42]) {
+        for (const fy of [0.55, 0.72, 0.9]) points.push([Math.round(w * fx), Math.round(h * fy)]);
+      }
+      return points
+        .filter(([x, y]) => {
+          const hit = document.elementFromPoint(x, y);
+          return hit !== null && hit.closest('[data-role="bot-hud"]') !== null;
+        })
+        .map(([x, y]) => `${x},${y}`);
+    },
+    { w: VIEWPORT.width, h: VIEWPORT.height },
+  );
+  if (blocked.length > 0) {
+    fail(`${what} would receive the touch at ${blocked.join(' and ')} — those are in the move zone, so the camera never gets the drag`);
+  } else {
+    log(`${what} lets the moving thumb through at every point tested in the bottom-left move zone`);
+  }
+}
 
 async function run(browser, url, room) {
   const context = await browser.newContext({ viewport: VIEWPORT });
@@ -411,6 +451,8 @@ async function run(browser, url, room) {
     // length only another player in the room gives it.
     await checkOnScreen(page, 'perf-hud', 'perf HUD');
     await checkOnScreen(page, 'bot-hud', 'bot panel');
+    // And a finger in the move zone must reach the camera, not the panel.
+    await checkThumbReachesCamera(page, 'the bot panel');
     await checkNoOverlap(page, '[data-role="perf-hud"]', '[data-action="pause"]', 'the perf HUD and PAUSE');
 
     // CHECK 6: the panel is there and its cells light. Two different ones,
