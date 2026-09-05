@@ -67,7 +67,17 @@ function ocean(tier: TextureTier = 'medium'): { view: OceanView; swell: SeaSwell
   return { view: new OceanView({ field, swell, textures: tex, tier }), swell, tex };
 }
 
-/** Somewhere with real water under it: due west of the island, well offshore. */
+/**
+ * The sheet centre these tests anchor on: the western shore.
+ *
+ * NOT "well offshore", which is what this comment said until the
+ * heightfield was asked. The point itself is Polihale at +2.5 m — the
+ * western coast reaches much further out than 24 km west of the island
+ * centre suggests. It is still the right centre for these tests, because
+ * a sheet spans hundreds of metres to kilometres from here and most of
+ * it is water; but a reader who believed the old comment would think a
+ * depth of −2.5 m at the centre was a bug rather than a beach.
+ */
 const OFFSHORE: WorldPoint = world(-2_400_000, 0);
 
 describe('what a tier actually costs', () => {
