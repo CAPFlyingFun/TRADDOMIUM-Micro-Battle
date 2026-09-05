@@ -24,12 +24,19 @@
  * Usage:
  *
  *   npm run build
- *   npm run probe:shot -- --x=-2182444.3 --y=3442.3 --z=-477632.6 --facing=12 --pitch=-11 --name=washboard
+ *   npm run probe:shot -- --x=-2182444.3 --y=3442.3 --z=-477632.6 --facing=12 --pitch=-11 --tier=high --name=washboard
  *
  * EVERY ARGUMENT IS A NUMBER THE HUD PRINTS, in the units it prints it
- * in — `--facing` and `--pitch` are both DEGREES, off the CAMERA column.
- * Nothing here has to be converted by hand, because a probe whose inputs
- * need arithmetic is a probe that gets pointed at the wrong place.
+ * in — `--facing` and `--pitch` are both DEGREES, off the CAMERA column,
+ * and `--tier` is the word after "sea rung". Nothing here has to be
+ * converted by hand, because a probe whose inputs need arithmetic is a
+ * probe that gets pointed at the wrong place.
+ *
+ * THE RUNG MATTERS TO WHAT IS DRAWN, not only to what it costs: it sets
+ * both sheets' vertex counts, and therefore how far the near sheet
+ * reaches and where it hands over to the far one. A shot taken at the
+ * headless default while the phone says `sea rung high` is a picture of
+ * a different sea.
  *
  * Shots land in `shots/<name>.png` (gitignored). Run it before a change
  * and after it, and compare the two.
@@ -154,6 +161,10 @@ async function main() {
     pitch: Number(arg('pitch', '-11')),
   };
   const name = arg('name', 'shot');
+  // The rung the phone was on. `?tier=` is the app's own override — see
+  // `app/registerScenes.ts` — so the probe reaches it the same way a
+  // developer does, rather than through a door only it has.
+  const tier = arg('tier', '');
   const frames = Number(arg('frames', '30'));
   if (!Number.isFinite(want.x) || !Number.isFinite(want.y) || !Number.isFinite(want.z)) {
     fail('--x, --y and --z must be numbers, as printed by the HUD');
@@ -177,7 +188,8 @@ async function main() {
 
     // The save has to exist before the app reads it, so the page is
     // opened once for its origin, seeded, and reloaded.
-    await page.goto(url, { waitUntil: 'load' });
+    const opened = tier === '' ? url : `${url}${url.includes('?') ? '&' : '?'}tier=${encodeURIComponent(tier)}`;
+    await page.goto(opened, { waitUntil: 'load' });
     await page.evaluate(({ key, save }) => window.localStorage.setItem(key, JSON.stringify(save)), {
       key: SAVE_KEY,
       save: {
@@ -194,9 +206,10 @@ async function main() {
         },
       },
     });
-    await page.reload({ waitUntil: 'load' });
+    await page.goto(opened, { waitUntil: 'load' });
 
-    log(`resuming at x ${want.x} y ${want.y} z ${want.z}, facing ${want.bearing}°, pitch ${want.pitch}°`);
+    log(`resuming at x ${want.x} y ${want.y} z ${want.z}, facing ${want.bearing}°, pitch ${want.pitch}°`
+      + (tier === '' ? '' : `, tier ${tier}`));
     await page.waitForSelector('[data-action="resume"]', { timeout: TIMEOUT.menu });
     await page.click('[data-action="resume"]', { timeout: TIMEOUT.menu });
     await page.waitForSelector('[data-action="pause"]', { timeout: TIMEOUT.world });
@@ -226,6 +239,16 @@ async function main() {
       } else if (Math.abs(at.pitch - want.pitch) > TILTED_WITHIN) {
         fail(`asked for pitch ${want.pitch}° and arrived at ${at.pitch}°`);
       }
+    }
+
+    // THE RUNG IS CHECKED TOO, for the same reason the pose is: a
+    // mistyped tier is silently ignored by the app (`isTextureTier`
+    // rejects it and the player's own setting decides), so a typo would
+    // otherwise photograph the wrong sea while reporting success.
+    if (tier !== '') {
+      const rung = /sea rung ([a-z-]+)/.exec(await uiText(page));
+      if (rung === null) fail(`asked for tier ${tier} but the HUD names no rung`);
+      else if (rung[1] !== tier) fail(`asked for tier ${tier} and the HUD reads "sea rung ${rung[1]}"`);
     }
 
     const file = path.join(SHOTS, `${name}.png`);

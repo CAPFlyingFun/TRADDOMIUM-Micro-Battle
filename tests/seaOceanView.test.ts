@@ -626,3 +626,187 @@ describe('what the ocean costs the CPU', () => {
     view.dispose();
   });
 });
+
+/**
+ * THE SEA MUST DRAW SOMETHING AT EVERY DISTANCE.
+ *
+ * Written after a gap that reached the phone. The near sheet's swell rim
+ * and the sheets' crossfade were four fractions documented as being of
+ * the near sheet's HALF-span and multiplied by its FULL span, so all
+ * four sat at twice the radius they meant, outside the sheet they were
+ * measured across. Neither fade ever ran: the near sheet carried full
+ * swell to its square edge and stopped dead, and the far sheet's hole —
+ * the same doubled number — kept the far sheet from drawing anything
+ * within 136 m of the camera. In between was a ring 52 m wide, at high
+ * tier, where the sea drew NOTHING, edged by the straight side of a
+ * square. Joshua photographed it from 60 m up.
+ *
+ * Every check in the ocean suite passed while that shipped, and they
+ * passed because they all asked the code what it intended. So this file
+ * asks the two things that cannot lie:
+ *
+ *   the BANDS are parsed back out of the compiled GLSL, because the
+ *   numbers in the shader are the ones the GPU uses;
+ *
+ *   the sheet's REACH is measured from its own vertex buffer, because
+ *   that is the water that exists.
+ *
+ * Neither is re-derived from the constants under test, so a wrong
+ * constant cannot satisfy both halves at once.
+ */
+describe('there is no distance at which the sea draws nothing', () => {
+  /** The three.js include lines the water's onBeforeCompile rewrites. */
+  const STUB = {
+    vertex: ['#include <common>', 'void main() {', '#include <begin_vertex>', '}'].join('\n'),
+    fragment: [
+      '#include <common>', 'void main() {', '#include <map_fragment>',
+      '#include <normal_fragment_maps>', '#include <lights_fragment_end>', '}',
+    ].join('\n'),
+  };
+
+  interface Measured {
+    readonly fragment: string;
+    readonly vertex: string;
+    /**
+     * The nearest point of the sheet's boundary — half its width, less a
+     * cell on the two sides the lattice is short.
+     *
+     * THIS, NOT THE CORNER, is what a fade has to finish inside. The
+     * sheet is a SQUARE and the fades are circles, so along an axis the
+     * water runs out at the half-span while a corner is 1.41 times
+     * further. A band that finished between the two would still be a
+     * hard cut on all four sides — and the corner is exactly the number
+     * that makes a wrong band look survivable.
+     */
+    readonly edge: number;
+    /** The furthest corner, for context in failure messages. */
+    readonly corner: number;
+  }
+
+  interface Sheets { near: Measured; far: Measured }
+
+  /** Compile both sheets by hand and measure each one's own extent. */
+  function sheetsOf(tier: TextureTier): { sheets: Sheets; view: OceanView } {
+    const { view } = ocean(tier);
+    const [far, near] = view.group.children.map((c) => c as THREE.Mesh);
+    const read = (mesh: THREE.Mesh): Measured => {
+      const shader = { uniforms: {}, vertexShader: STUB.vertex, fragmentShader: STUB.fragment };
+      const material = mesh.material as THREE.MeshStandardMaterial;
+      (material.onBeforeCompile as unknown as (s: typeof shader) => void)(shader);
+      // MEASURED FROM THE VERTEX BUFFER, never recomputed from the
+      // constants under test: this is the water that exists.
+      const pos = mesh.geometry.getAttribute('position') as THREE.BufferAttribute;
+      let corner = 0;
+      let loX = Infinity; let hiX = -Infinity; let loZ = Infinity; let hiZ = -Infinity;
+      for (let i = 0; i < pos.count; i += 1) {
+        const x = pos.getX(i);
+        const z = pos.getZ(i);
+        corner = Math.max(corner, Math.hypot(x, z));
+        loX = Math.min(loX, x); hiX = Math.max(hiX, x);
+        loZ = Math.min(loZ, z); hiZ = Math.max(hiZ, z);
+      }
+      const edge = Math.min(-loX, hiX, -loZ, hiZ);
+      return { fragment: shader.fragmentShader, vertex: shader.vertexShader, edge, corner };
+    };
+    return { sheets: { near: read(near), far: read(far) }, view };
+  }
+
+  /**
+   * The `smoothstep(a, b, X)` whose third argument is `X`, as the shader
+   * was actually printed.
+   *
+   * SEARCHED BACKWARDS from the argument, because that is where the call
+   * is. Reading forwards found the NEXT smoothstep in the file instead —
+   * a different band entirely, which is how a parser silently starts
+   * measuring the wrong thing.
+   */
+  const bandIn = (glsl: string, arg: string): { lo: number; hi: number } | null => {
+    const at = glsl.indexOf(arg);
+    if (at < 0) return null;
+    const opens = glsl.lastIndexOf('smoothstep(', at);
+    if (opens < 0) return null;
+    const hit = /^smoothstep\((-?[\d.]+), (-?[\d.]+), /.exec(glsl.slice(opens, at + arg.length));
+    return hit === null ? null : { lo: Number(hit[1]), hi: Number(hit[2]) };
+  };
+
+  it('fades the near sheet out INSIDE its own edge, at every tier', () => {
+    for (const tier of TEXTURE_TIERS) {
+      const { sheets, view } = sheetsOf(tier);
+      const alpha = bandIn(sheets.near.fragment, 'vSheet)');
+      expect(alpha, `${tier}: the near sheet has no alpha fade at all`).not.toBeNull();
+      if (alpha === null) { view.dispose(); continue; }
+      // Zero alpha strictly before the last vertex, or the sheet ends as
+      // a visible cut. This is the assertion the shipped build failed:
+      // at high tier it wanted 16,400 from a sheet reaching 11,929.
+      expect(alpha.hi, `${tier}: alpha reaches zero at ${alpha.hi}, past an edge of ${sheets.near.edge}`)
+        .toBeLessThan(sheets.near.edge);
+      // And it must actually START inside the sheet, or the fade is a
+      // step at the edge rather than a fade.
+      expect(alpha.lo, `${tier}: the fade begins at ${alpha.lo}, outside the sheet`)
+        .toBeLessThan(sheets.near.edge);
+      expect(alpha.lo).toBeLessThan(alpha.hi);
+      view.dispose();
+    }
+  });
+
+  it('flattens the swell inside the sheet too, so no wave is cut off mid-crest', () => {
+    for (const tier of TEXTURE_TIERS) {
+      const { sheets, view } = sheetsOf(tier);
+      const rim = bandIn(sheets.near.vertex, 'length(position.xz)');
+      expect(rim, `${tier}: the near sheet's swell is never faded`).not.toBeNull();
+      if (rim !== null) {
+        expect(rim.hi, `${tier}: the swell flattens at ${rim.hi}, past an edge of ${sheets.near.edge}`)
+          .toBeLessThanOrEqual(sheets.near.edge);
+      }
+      view.dispose();
+    }
+  });
+
+  it('OPENS THE FAR SHEET BEFORE THE NEAR ONE HAS GONE — the gap itself', () => {
+    // THE INVARIANT, and the only one that would have caught the bug on
+    // its own. Walk outwards. At every radius, at least one sheet must be
+    // drawing opaque water: the near sheet while its alpha is above zero
+    // AND it still has vertices out there, or the far sheet once its hole
+    // has closed. A radius where both are transparent is a hole in the
+    // ocean, and that is what Joshua saw.
+    for (const tier of TEXTURE_TIERS) {
+      const { sheets, view } = sheetsOf(tier);
+      const nearOut = bandIn(sheets.near.fragment, 'vSheet)');
+      const holeIn = bandIn(sheets.far.fragment, 'distance(vLocal, uHoleLocal)');
+      expect(nearOut).not.toBeNull();
+      expect(holeIn).not.toBeNull();
+      if (nearOut === null || holeIn === null) { view.dispose(); continue; }
+
+      const smoothstep = (lo: number, hi: number, x: number): number => {
+        const t = Math.min(1, Math.max(0, (x - lo) / (hi - lo)));
+        return t * t * (3 - 2 * t);
+      };
+      const holes: string[] = [];
+      const step = Math.max(1, Math.round(sheets.near.edge / 400));
+      for (let r = 0; r <= sheets.far.edge; r += step) {
+        // The near sheet only covers r while it HAS geometry there.
+        // The near sheet is only guaranteed to cover a full circle out to
+        // its nearest side; past that it exists in the corners only, and
+        // corners are not something to rely on for coverage.
+        const near = r <= sheets.near.edge ? 1 - smoothstep(nearOut.lo, nearOut.hi, r) : 0;
+        const far = smoothstep(holeIn.lo, holeIn.hi, r);
+        if (near + far < 0.5) holes.push(`${r} (near ${near.toFixed(2)}, far ${far.toFixed(2)})`);
+      }
+      expect(holes.slice(0, 4), `${tier}: the sea is see-through at these radii`).toEqual([]);
+      view.dispose();
+    }
+  });
+
+  it('gives the swell most of the sheet, which is why the ocean is not glass', () => {
+    // The band may not creep inward to buy itself margin: v0's first cut
+    // flattened everything past 34 m and the sea read as glass, because
+    // the water actually being LOOKED at is the middle distance. Waves
+    // must still reach at least two thirds of the way out.
+    for (const tier of TEXTURE_TIERS) {
+      const { sheets, view } = sheetsOf(tier);
+      const rim = bandIn(sheets.near.vertex, 'length(position.xz)');
+      if (rim !== null) expect(rim.lo / sheets.near.edge, tier).toBeGreaterThan(0.66);
+      view.dispose();
+    }
+  });
+});

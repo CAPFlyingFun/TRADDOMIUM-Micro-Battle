@@ -121,21 +121,45 @@ const NEAR_CELL = 70;
 
 /**
  * Where the rim flattening and the crossfade sit, as fractions of the
- * near sheet's half-span.
+ * near sheet's HALF-span — its centre to its edge, which is the distance
+ * `vSheet` measures and the only one these can mean.
  *
  * v0's absolute numbers over v0's half-span of 8,435: rim 6,000..7,800
- * and handover 6,800..8,200. Expressed this way they scale with the
- * sheet instead of falling outside it when it shrinks.
+ * and handover 6,800..8,200, and v0's own comment on them reads "inside
+ * the sheet's 8 435 half-span, so the fade finishes before the edge."
+ * They are fractions here because v0's near sheet was one fixed size and
+ * v1's changes with the tier, so an absolute 8,200 would fall outside the
+ * sheet at ultra-low. At the tiers that share v0's geometry these
+ * multiply back to v0's four numbers exactly.
+ *
+ * THEY WERE MULTIPLIED BY THE FULL SPAN, and that is the bug this
+ * comment now exists to prevent. `counts.near * NEAR_CELL` is the
+ * sheet's WIDTH; half of it is the reach. Doubling every band put all
+ * four outside the sheet at every tier, so neither fade ever ran:
+ *
+ *   near sheet, high tier: reaches 8,435 to a side, 11,929 to a corner
+ *   swell rim:      12,000 .. 15,600   — never applied
+ *   sheet handover: 13,600 .. 16,400   — never applied
+ *
+ * The near sheet therefore carried full swell to its square edge and
+ * stopped dead, and the far sheet's hole — the same doubled 13,600 —
+ * kept the far sheet from drawing anything within 136 m of the camera.
+ * Between them lay a ring 52 m wide where NEITHER SHEET DREW WATER,
+ * bounded by the straight side of a square. Joshua photographed it from
+ * 60 m up on 2026-09-05 and named it before anyone measured it: "there
+ * is a gap that shouldn't be there like v0", and v0 is right — v0 had no
+ * such gap, because v0 wrote the distances down instead of deriving
+ * them. The regression is entirely v1's port of them.
  *
  * THE WAVE ZONE IS MOST OF THE SHEET, deliberately. v0's first cut
  * flattened everything past 34 m, so the water actually being looked at
  * — the middle distance — was the flat far sheet, and the whole ocean
  * read as glass no matter how tall the waves near her were.
  */
-const RIM_LO_OF_SPAN = 6_000 / 8_435;
-const RIM_HI_OF_SPAN = 7_800 / 8_435;
-const HAND_LO_OF_SPAN = 6_800 / 8_435;
-const HAND_HI_OF_SPAN = 8_200 / 8_435;
+const RIM_LO_OF_REACH = 6_000 / 8_435;
+const RIM_HI_OF_REACH = 7_800 / 8_435;
+const HAND_LO_OF_REACH = 6_800 / 8_435;
+const HAND_HI_OF_REACH = 8_200 / 8_435;
 
 /**
  * How far the camera may travel before a sheet re-anchors: about an
@@ -276,9 +300,13 @@ export class OceanView {
 
     const counts = SHEET_VERTICES[options.tier];
     const octaves = TIER_OCTAVES[options.tier];
-    const nearSpan = counts.near * NEAR_CELL;
-    const handLo = nearSpan * HAND_LO_OF_SPAN;
-    const handHi = nearSpan * HAND_HI_OF_SPAN;
+    // THE REACH IS HALF THE SPAN. `lattice` centres the sheet on zero, so
+    // `counts.near * NEAR_CELL` is its full width and the furthest a
+    // fragment sits from the middle is half of that. Reading this as the
+    // span is what put every band outside the sheet.
+    const nearReach = (counts.near * NEAR_CELL) / 2;
+    const handLo = nearReach * HAND_LO_OF_REACH;
+    const handHi = nearReach * HAND_HI_OF_REACH;
 
     // edgeLo/edgeHi are the waterline Joshua approved — widening them
     // washed the beach out. edgeLo keeps the geometric cut hidden 35
@@ -315,8 +343,8 @@ export class OceanView {
     const nearLook = makeWaterLook({
       ...skin,
       swellRim: {
-        rimLo: nearSpan * RIM_LO_OF_SPAN,
-        rimHi: nearSpan * RIM_HI_OF_SPAN,
+        rimLo: nearReach * RIM_LO_OF_REACH,
+        rimHi: nearReach * RIM_HI_OF_REACH,
         alphaLo: handLo,
         alphaHi: handHi,
       },
