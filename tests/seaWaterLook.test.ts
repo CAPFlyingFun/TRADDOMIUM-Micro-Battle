@@ -318,3 +318,150 @@ describe('the accepted look is still the accepted look', () => {
     expect(a.shader.uniforms.uFoam).toBe(foam as unknown);
   });
 });
+
+/**
+ * NOTHING AT TRUE-SCALE RANGE GOES TO THE GPU RAW (CLAUDE.md), and this
+ * file is where the sea keeps that promise.
+ *
+ * Kauaʻi is 5,600,000 units across with the origin in its middle, so on
+ * a real coast a world coordinate is a couple of MILLION. A float32
+ * there resolves in quarter-units, and the shader was being handed three
+ * such numbers: the wave phase, every ripple texture coordinate, and the
+ * distance to the far sheet's hole — the last two through a varying, so
+ * a number that size was INTERPOLATED across triangles kilometres wide.
+ * Quantised phase is a faceted surface, a quantised texture coordinate
+ * is a stepped one, and quantised alpha is banding; together they are
+ * the washboard Joshua photographed at Polihale on 2026-09-05, and
+ * `npm run probe:shot` recreates it from the numbers in his HUD.
+ *
+ * The fix in all three places is the same and is EXACT rather than an
+ * approximation: the sheet's centre is known on the CPU, so subtract it
+ * there in float64 and hand the shader the remainder. What these tests
+ * check is that the two halves still add back up to the whole — because
+ * a centre reduced with the wrong arithmetic does not look broken. It
+ * looks like water somewhere else.
+ */
+describe('no world coordinate reaches the shader raw', () => {
+  /** Polihale, where the washboard was photographed. */
+  const COAST = { wx: -2_182_400, wz: -477_600 };
+  const HOLE_BAND = { lo: 6800, hi: 8200 };
+
+  /** GLSL's `mat2(c, -s, s, c)` is COLUMN-major, so this is its action. */
+  const rrot = (a: number, x: number, y: number): { x: number; y: number } => {
+    const c = Math.cos(a);
+    const s = Math.sin(a);
+    return { x: c * x + s * y, y: -s * x + c * y };
+  };
+
+  it('carries no varying holding a world position', () => {
+    // `vWorld = vLocal + uCentre` was the single worst line: a float32
+    // sum in the millions, computed per vertex and then INTERPOLATED.
+    const { shader } = compile({ hole: HOLE_BAND });
+    expect(shader.vertexShader).not.toMatch(/\bvWorld\b/);
+    expect(shader.fragmentShader).not.toMatch(/\bvWorld\b/);
+  });
+
+  it('spells `rrot` the way the CPU-side reduction assumes it is spelled', () => {
+    // If this convention changes, `fillOct` rotates one way and the
+    // shader the other, and every ripple lands on a different texel —
+    // which reads as "the water looks a bit different" and nothing else.
+    const { shader } = compile();
+    expect(shader.fragmentShader).toContain('mat2 rrot(float a){ float c = cos(a); float s = sin(a); return mat2(c, -s, s, c); }');
+  });
+
+  it('reduces each ripple octave against the sheet and lands on the SAME TEXEL as the world sample did', () => {
+    // The identity: a wrapping texture does not notice a whole number of
+    // tiles, so `mod` may be applied to the centre alone — provided it
+    // comes AFTER the rotation, because rotating a reduced position is
+    // not the same as reducing a rotated one. That ordering is the whole
+    // correctness of the change and it is what this measures.
+    const { look, shader } = compile();
+    look.setCentre(COAST.wx, COAST.wz);
+    const offsets = shader.uniforms.uOct.value as THREE.Vector2[];
+    const taps = rippleTaps(rippleChunk(MAX_OCTAVES, false));
+    expect(taps).toHaveLength(MAX_OCTAVES);
+    expect(offsets).toHaveLength(MAX_OCTAVES);
+
+    taps.forEach((tap, i) => {
+      const rot = Number(/rrot\(([-\d.]+)\)/.exec(tap)?.[1]);
+      const tile = Number(/\)\s*\/\s*([\d.]+)/.exec(tap)?.[1]);
+      expect(Number.isFinite(rot) && Number.isFinite(tile)).toBe(true);
+      expect(tap).toContain(`uOct[${i}]`);
+      // Two points in the sheet, one of them off-centre in both axes.
+      for (const [lx, lz] of [[0, 0], [-6_140, 3_970]]) {
+        const was = rrot(rot, COAST.wx + lx, COAST.wz + lz); // what v0 sampled
+        const now = rrot(rot, lx, lz); // what the shader sees now
+        const withOffset = { x: now.x + offsets[i].x, y: now.y + offsets[i].y };
+        // The two differ by a whole number of tiles in each axis, so the
+        // wrapping lookup is the same texel. Whole to a part in 10^9.
+        for (const axis of ['x', 'y'] as const) {
+          const tiles = (was[axis] - withOffset[axis]) / tile;
+          expect(Math.abs(tiles - Math.round(tiles))).toBeLessThan(1e-9);
+        }
+      }
+      // And the reduction actually happened: the offset is inside one
+      // tile. Two million units divided down to under a thousand is the
+      // entire point, and a `mod` that quietly did nothing would still
+      // satisfy the identity above.
+      expect(offsets[i].x).toBeGreaterThanOrEqual(0);
+      expect(offsets[i].x).toBeLessThan(tile);
+      expect(offsets[i].y).toBeGreaterThanOrEqual(0);
+      expect(offsets[i].y).toBeLessThan(tile);
+    });
+  });
+
+  it('re-derives the wave phases from the sheet’s centre, in float64, every time it moves', () => {
+    // A centre moved without its phases draws the sea of a different
+    // coast — which is why `setCentre` is the only door and the uniform
+    // is read-only from outside. This is that promise, checked.
+    const swell = new SeaSwell({ groundAt: () => -4000 });
+    const { look, shader } = compile({ swell });
+    const phases = shader.uniforms.uWavePhase.value as number[];
+    look.setCentre(COAST.wx, COAST.wz);
+    expect(shader.uniforms.uWavePhase.value).toEqual(swell.centrePhases(COAST.wx, COAST.wz));
+    // Reduced to one turn — the reduction is what keeps float32 out of
+    // the tens of thousands of radians a real coast would otherwise be.
+    for (const p of shader.uniforms.uWavePhase.value as number[]) {
+      expect(p).toBeGreaterThanOrEqual(0);
+      expect(p).toBeLessThan(Math.PI * 2);
+    }
+    // A DIFFERENT COAST IS A DIFFERENT PHASE. Without this, a
+    // `centrePhases` that returned zeros would pass everything above.
+    look.setCentre(COAST.wx + 137_000, COAST.wz);
+    expect(shader.uniforms.uWavePhase.value).not.toEqual(phases);
+  });
+
+  it('hands the far sheet its hole as an offset, so the GPU never subtracts two millions', () => {
+    const { look, shader } = compile({ hole: HOLE_BAND });
+    look.setCentre(COAST.wx, COAST.wz);
+    look.setHole(COAST.wx + 4_000, COAST.wz - 1_250);
+    const local = shader.uniforms.uHoleLocal.value as THREE.Vector2;
+    expect(local.x).toBeCloseTo(4_000, 9);
+    expect(local.y).toBeCloseTo(-1_250, 9);
+    // Set in either order, and the answer is the same: both setters
+    // refresh it, which is the only reason they can be called separately.
+    const { look: other, shader: otherShader } = compile({ hole: HOLE_BAND });
+    other.setHole(COAST.wx + 4_000, COAST.wz - 1_250);
+    other.setCentre(COAST.wx, COAST.wz);
+    expect((otherShader.uniforms.uHoleLocal.value as THREE.Vector2).x).toBeCloseTo(local.x, 9);
+    expect((otherShader.uniforms.uHoleLocal.value as THREE.Vector2).y).toBeCloseTo(local.y, 9);
+    // And the shader measures the band in that frame, not the island's.
+    expect(shader.fragmentShader).toContain('distance(vLocal, uHoleLocal)');
+  });
+
+  it('still hands `uCentre` over whole, and that is deliberate', () => {
+    // THE ONE WORLD POSITION LEFT, and it is honest to say why it stays.
+    // `tiled()` reduces it with a `mod` on the GPU, so a float32 near
+    // 2.2e6 does cost precision there — but `uCentre` is a UNIFORM, one
+    // value for the whole mesh, so the loss is a constant sub-texel
+    // shift of a tiling texture rather than something that varies across
+    // it. Nothing steps, nothing bands, nobody can see it. The failures
+    // above were all PER-VERTEX or per-fragment, which is the difference
+    // that matters. Pinned so a future reader does not "fix" it, and so
+    // that if `tiled()` ever starts feeding something that varies, this
+    // test is the note explaining what changed.
+    const { shader } = compile();
+    expect(shader.fragmentShader).toContain('vec2 tiled(float T) { return (vLocal + mod(uCentre, vec2(T))) / T; }');
+    expect(shader.uniforms.uCentre).toBeDefined();
+  });
+});

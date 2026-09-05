@@ -167,8 +167,14 @@ export interface WaterLookOpts {
   };
   /**
    * The FAR sheet opens a hole under the near sheet — alpha rises from
-   * nothing at `lo` of world distance from the hole's centre to full by
-   * `hi`, the exact complement of the near sheet's alpha rim.
+   * nothing at `lo` of distance from the hole's centre to full by `hi`,
+   * the exact complement of the near sheet's alpha rim.
+   *
+   * MEASURED IN THE SHEET'S OWN FRAME, not the island's: the shader is
+   * given the hole as an offset from this sheet (`setHole` keeps the two
+   * in step), because subtracting two world positions on the GPU is
+   * subtracting two numbers in the millions. Distances are the same
+   * either way; the precision is not.
    */
   readonly hole?: { readonly lo: number; readonly hi: number };
   /**
@@ -193,10 +199,22 @@ export interface WaterLook {
   readonly material: THREE.MeshStandardMaterial;
   /** Advance the ripple scroll. Seconds. Written by the ONE clock. */
   readonly clock: { value: number };
-  /** World position the mesh's local frame is centred on. */
+  /** World position the mesh's local frame is centred on. READ IT; set it with `setCentre`. */
   readonly centre: { value: THREE.Vector2 };
-  /** World position of the far sheet's hole. */
+  /**
+   * Move the centre and everything derived from it. The only way to move
+   * it: the wave phases are computed from it on the CPU, and a centre
+   * moved without them is the sea of a different coast.
+   */
+  setCentre(wx: number, wz: number): void;
+  /** World position of the far sheet's hole. READ IT; set it with `setHole`. */
   readonly hole: { value: THREE.Vector2 };
+  /**
+   * Move the hole. The only way: the shader is given the offset from this
+   * sheet rather than the world position, and the two are kept in step
+   * here — a world hole set alone would fade the wrong band.
+   */
+  setHole(wx: number, wz: number): void;
   /** How far foam keeps its detail, and where it is gone. */
   readonly foamNear: { value: number };
   readonly foamFar: { value: number };
@@ -214,16 +232,34 @@ export interface WaterLook {
  */
 export function rippleChunk(octaves: number, advected: boolean): string {
   const used = OCTAVES.slice(0, Math.max(1, Math.min(MAX_OCTAVES, Math.round(octaves))));
-  const tap = (phase: string, o: typeof OCTAVES[number]): string =>
-    `  ${phase} += (texture2D(uRipple, rrot(${o.rot.toFixed(1)}) * (wp - ${advected ? (phase === 'rn0' ? 'a0' : 'a1') : 'vec2(0.0)'}) / ${o.tile.toFixed(1)} + uTime * vec2(${o.sx.toFixed(3)}, ${o.sy.toFixed(3)})).xyz - 0.5)${o.weight === 1 ? '' : ` * ${o.weight.toFixed(1)}`};`;
+  /**
+   * ONE OCTAVE'S TAP, IN LOCAL SPACE.
+   *
+   * v0 sampled at `rrot(rot) * (world - a) / tile`. On a real coast
+   * `world` is a couple of MILLION units, and a float32 there resolves to
+   * a quarter of a unit — so the texture coordinate came in steps and the
+   * sea was drawn as a washboard, which is what Joshua photographed at
+   * Polihale. `probe:shot` recreates it.
+   *
+   * The fix is the identity the unrotated lookups already use through
+   * `tiled()`: a wrapping texture is unchanged by a whole number of
+   * tiles, so the centre may be reduced modulo the tile before it ever
+   * reaches the GPU. THE REDUCTION HAPPENS IN THE ROTATED FRAME, which is
+   * the part `tiled()` cannot do and the reason this is a uniform instead
+   * — rotating a reduced position is not the same as reducing a rotated
+   * one, so `mod` must come last. `uOct[i]` is `mod(rrot(rot) * centre,
+   * tile)`, worked out on the CPU in float64, and what is left here is
+   * `rrot(rot) * local`, which never leaves a few thousand.
+   */
+  const tap = (phase: string, o: typeof OCTAVES[number], i: number): string =>
+    `  ${phase} += (texture2D(uRipple, (rrot(${o.rot.toFixed(1)}) * (vLocal - ${advected ? (phase === 'rn0' ? 'a0' : 'a1') : 'vec2(0.0)'}) + uOct[${i}]) / ${o.tile.toFixed(1)} + uTime * vec2(${o.sx.toFixed(3)}, ${o.sy.toFixed(3)})).xyz - 0.5)${o.weight === 1 ? '' : ` * ${o.weight.toFixed(1)}`};`;
 
   if (!advected) {
     // ONE PHASE. With no current there is nothing to advect along and
     // nothing to crossfade: `mix(x, x, t)` is `x`.
     return `
-        vec2 wp = vWorld;
         vec3 rn0 = vec3(0.0);
-${used.map((o) => tap('rn0', o)).join('\n')}
+${used.map((o, i) => tap('rn0', o, i)).join('\n')}
         gRn = rn0;`;
   }
   return `
@@ -231,25 +267,91 @@ ${used.map((o) => tap('rn0', o)).join('\n')}
         float t0 = fract(cyc);
         float t1 = fract(cyc + 0.5);
         float xf = abs(2.0 * t0 - 1.0);
-        vec2 wp = vWorld;
         vec2 adv = vFlow * (11.1); // units/s -> units per 11.1 s cycle
         vec2 a0 = adv * t0;
         vec2 a1 = adv * t1;
         vec3 rn0 = vec3(0.0);
         vec3 rn1 = vec3(0.0);
-${used.map((o) => `${tap('rn0', o)}\n${tap('rn1', o)}`).join('\n')}
+${used.map((o, i) => `${tap('rn0', o, i)}\n${tap('rn1', o, i)}`).join('\n')}
         gRn = mix(rn0, rn1, xf);`;
 }
 
 export function makeWaterLook(opts: WaterLookOpts): WaterLook {
   const clock = { value: 0 };
   const centre = { value: new THREE.Vector2() };
+  /**
+   * THE CENTRE'S OWN CONTRIBUTION TO EACH WAVE'S PHASE, worked out on the
+   * CPU in float64 (`SeaSwell.centrePhases`) and reduced to one turn.
+   *
+   * The shader adds this to `dot(dir, local) * k` and gets the same phase
+   * a world coordinate would have given it — without ever holding a
+   * number in the millions. See `centrePhases` for why that matters and
+   * what it looked like when it did not happen.
+   *
+   * SET FROM `setCentre` AND NOWHERE ELSE, so the two can never disagree:
+   * a centre moved without its phases would draw the sea of somewhere
+   * else, which looks like a working ocean and is not.
+   */
+  const wavePhase = { value: opts.swell.centrePhases(0, 0) };
   // Far enough away that a hole nobody has placed swallows nothing.
   const hole = { value: new THREE.Vector2(1e9, 1e9) };
+  /**
+   * THE HOLE, MEASURED FROM THIS SHEET RATHER THAN FROM THE ISLAND.
+   *
+   * The far sheet fades out where the near one takes over, and it used to
+   * find that band by taking the distance between two WORLD positions on
+   * the GPU — a couple of million units from the origin each. Worse, one
+   * of them arrived as a varying, so a number that size was INTERPOLATED
+   * across far-sheet triangles kilometres wide. Float32 steps in
+   * quarter-units there, the smoothstep turned those steps into bands of
+   * alpha, and the sea was drawn as a washboard wherever the far sheet
+   * lay over the near one. That is what Joshua photographed at Polihale
+   * on 2026-09-05; `npm run probe:shot` recreates it from his HUD.
+   *
+   * Both ends are known on the CPU, so the subtraction happens THERE in
+   * float64 and the shader is handed a small offset. `setCentre` and
+   * `setHole` are the only things that move either end, and both refresh
+   * it, so the two cannot fall out of step.
+   */
+  const holeLocal = { value: new THREE.Vector2(1e9, 1e9) };
+  let holeWorld = { x: 1e9, z: 1e9 };
+  let centreWorld = { x: 0, z: 0 };
+  const refreshHole = (): void => {
+    holeLocal.value.set(holeWorld.x - centreWorld.x, holeWorld.z - centreWorld.z);
+  };
   const foamNear = { value: FOAM_NEAR };
   const foamFar = { value: FOAM_FAR };
   const octaves = Math.max(1, Math.min(MAX_OCTAVES, Math.round(opts.octaves ?? MAX_OCTAVES)));
   const advected = opts.advected ?? false;
+
+  /**
+   * Each ripple octave's share of the centre, ROTATED THEN REDUCED.
+   *
+   * The shader samples `rrot(rot) * position / tile`, and a wrapping
+   * texture does not notice a whole number of tiles — so the centre can
+   * be folded away before the GPU sees it. The order matters: the
+   * rotation mixes the axes, so reducing first and rotating after lands
+   * on a different texel. Hence rotate, then `mod`.
+   *
+   * `mat2(c, -s, s, c)` is COLUMN-major in GLSL, so it maps
+   * (x, y) to (c*x + s*y, -s*x + c*y). Written out here rather than
+   * borrowed from a matrix library, because the only thing that matters
+   * is that it is the same arithmetic as the string above, and
+   * tests/seaWaterLook.test.ts checks the two agree on real coordinates.
+   */
+  const octCentres = OCTAVES.slice(0, octaves).map(() => new THREE.Vector2());
+  const oct = { value: octCentres };
+  const fillOct = (wx: number, wz: number): void => {
+    OCTAVES.slice(0, octaves).forEach((o, i) => {
+      const c = Math.cos(o.rot);
+      const sn = Math.sin(o.rot);
+      const rx = c * wx + sn * wz;
+      const ry = -sn * wx + c * wz;
+      const mx = rx % o.tile;
+      const my = ry % o.tile;
+      octCentres[i].set(mx < 0 ? mx + o.tile : mx, my < 0 ? my + o.tile : my);
+    });
+  };
   const isSea = opts.ocean !== false;
   const swell = opts.swellRim;
 
@@ -303,10 +405,13 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uTime = clock;
     shader.uniforms.uCentre = centre;
+    shader.uniforms.uWavePhase = wavePhase;
+    shader.uniforms.uOct = oct;
     shader.uniforms.uRipple = opts.ripple as { value: THREE.Texture };
     shader.uniforms.uFoam = opts.foam as { value: THREE.Texture };
     shader.uniforms.uSky = { value: sky };
     shader.uniforms.uHole = hole;
+    shader.uniforms.uHoleLocal = holeLocal;
     shader.uniforms.uFoamNear = foamNear;
     shader.uniforms.uFoamFar = foamFar;
     // The sea's live amplitudes — where wave groups live. Shared by both
@@ -320,10 +425,10 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
 
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>',
-        '#include <common>\n attribute float depth;\n attribute vec2 flow;\n varying float vDepth;\n varying vec2 vWorld;\n varying vec2 vLocal;\n varying vec2 vFlow;\n uniform vec2 uCentre;'
+        '#include <common>\n attribute float depth;\n attribute vec2 flow;\n varying float vDepth;\n varying vec2 vLocal;\n varying vec2 vFlow;\n uniform vec2 uCentre;'
         + (swell ? `\n varying vec2 vSwell;\n varying float vSheet;\n uniform float uTime;\n ${opts.swell.swellUniformChunk()}` : ''))
       .replace('#include <begin_vertex>',
-        '#include <begin_vertex>\n vDepth = depth;\n vFlow = flow;\n vLocal = vec2(position.x, position.z);\n vWorld = vLocal + uCentre;'
+        '#include <begin_vertex>\n vDepth = depth;\n vFlow = flow;\n vLocal = vec2(position.x, position.z);'
         + (swell ? `
         {
           // THE SWELL, from the one shared table. Faded by the water
@@ -332,7 +437,7 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
           // far sheet without a step.
           float sw = 0.0;
           vec2 swSlope = vec2(0.0);
-          vec2 worldXZ = vWorld;
+          vec2 localXZ = vLocal;
           ${opts.swell.swellChunk()}
           ${opts.swell.shoalChunk()}
           float swFade = shoal
@@ -356,7 +461,7 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
       + 'uniform float uFoamNear;\nuniform float uFoamFar;\n'
       + (isSea ? opts.swell.swellUniformChunk() : '') + '\n' + shader.fragmentShader
     )
-      .replace('#include <common>', '#include <common>\n varying float vDepth;\n varying vec2 vWorld;\n varying vec2 vLocal;\n varying vec2 vFlow;\n uniform vec2 uCentre;\n vec2 tiled(float T) { return (vLocal + mod(uCentre, vec2(T))) / T; }\n mat2 rrot(float a){ float c = cos(a); float s = sin(a); return mat2(c, -s, s, c); }\n vec3 gRn = vec3(0.0);\n float gBody = 0.0;'
+      .replace('#include <common>', '#include <common>\n varying float vDepth;\n varying vec2 vLocal;\n varying vec2 vFlow;\n uniform vec2 uCentre;\n uniform vec2 uHoleLocal;\n uniform vec2 uOct[' + octaves + '];\n vec2 tiled(float T) { return (vLocal + mod(uCentre, vec2(T))) / T; }\n mat2 rrot(float a){ float c = cos(a); float s = sin(a); return mat2(c, -s, s, c); }\n vec3 gRn = vec3(0.0);\n float gBody = 0.0;'
         + (swell ? '\n varying vec2 vSwell;\n varying float vSheet;' : '')
         + (opts.hole ? '\n uniform vec2 uHole;' : ''))
       .replace('#include <map_fragment>', `#include <map_fragment>
@@ -466,7 +571,7 @@ ${rippleChunk(octaves, advected)}
             // vertices are displaced by.
             float sw = 0.0;
             vec2 swSlope = vec2(0.0);
-            vec2 worldXZ = vWorld;
+            vec2 localXZ = vLocal;
             ${opts.swell.swellChunk()}
             // Where this water sits in its own wave, -1 trough to +1
             // crest, and how steep the face is.
@@ -557,7 +662,7 @@ ${rippleChunk(octaves, advected)}
           // far sheet's hole is the mirror of this fade.
           diffuseColor.a *= 1.0 - smoothstep(${swell.alphaLo.toFixed(1)}, ${swell.alphaHi.toFixed(1)}, vSheet);` : ''}${opts.hole ? `
           // And the far sheet stands aside where the near one rides.
-          diffuseColor.a *= smoothstep(${opts.hole.lo.toFixed(1)}, ${opts.hole.hi.toFixed(1)}, distance(vWorld, uHole));` : ''}
+          diffuseColor.a *= smoothstep(${opts.hole.lo.toFixed(1)}, ${opts.hole.hi.toFixed(1)}, distance(vLocal, uHoleLocal));` : ''}
 
           if (diffuseColor.a < 0.01) discard;
         }`)
@@ -575,5 +680,32 @@ ${rippleChunk(octaves, advected)}
         }`);
   };
 
-  return { material, clock, centre, hole, foamNear, foamFar, octaves, advected };
+  /**
+   * Move the sheet's world centre — and everything derived from it, in
+   * the same call.
+   *
+   * THE ONE DOOR, because the derived values are not optional extras: the
+   * wave phases ARE half of every wave's argument, and a centre set
+   * without them draws the sea of a different coast. Two setters would be
+   * two things a caller could do one of.
+   */
+  const setCentre = (wx: number, wz: number): void => {
+    centre.value.set(wx, wz);
+    centreWorld = { x: wx, z: wz };
+    wavePhase.value = opts.swell.centrePhases(wx, wz);
+    fillOct(wx, wz);
+    refreshHole();
+  };
+
+  /**
+   * Move the hole the far sheet fades around. World coordinates in; the
+   * shader is handed the offset from this sheet, never the position.
+   */
+  const setHole = (wx: number, wz: number): void => {
+    hole.value.set(wx, wz);
+    holeWorld = { x: wx, z: wz };
+    refreshHole();
+  };
+
+  return { material, clock, centre, setCentre, hole, setHole, foamNear, foamFar, octaves, advected };
 }

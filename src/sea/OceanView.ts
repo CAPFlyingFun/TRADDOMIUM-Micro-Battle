@@ -372,7 +372,7 @@ export class OceanView {
       const centre = this.near.centre as WorldPoint;
       // The far sheet's hole follows the NEAR SHEET, not the camera:
       // they must share a centre or the crossfade bands part company.
-      this.far.look.hole.value.set(centre.wx, centre.wz);
+      this.far.look.setHole(centre.wx, centre.wz);
       // THE SEA IS DRAWN ON THIS LATTICE, so gameplay is sampled on it
       // too: the drawn surface is piecewise-bilinear between vertices
       // and the analytic curve is not, and floating on the curve while
@@ -461,7 +461,7 @@ export class OceanView {
     if (centre === null) return;
     const seat = toLocal(centre);
     sheet.mesh.position.set(seat.lx, 0, seat.lz);
-    sheet.look.centre.value.set(centre.wx, centre.wz);
+    sheet.look.setCentre(centre.wx, centre.wz);
   }
 
   /**

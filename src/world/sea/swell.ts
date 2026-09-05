@@ -580,13 +580,49 @@ export class SeaSwell {
    */
   swellChunk(): string {
     return this.waves.map((w, i) => `
-          float ph${i} = (worldXZ.x * ${w.dx.toFixed(6)} + worldXZ.y * ${w.dz.toFixed(6)}) * ${w.k.toFixed(8)} - ${w.omega.toFixed(6)} * uTime;
+          float ph${i} = (localXZ.x * ${w.dx.toFixed(6)} + localXZ.y * ${w.dz.toFixed(6)}) * ${w.k.toFixed(8)} + uWavePhase[${i}] - ${w.omega.toFixed(6)} * uTime;
           sw += uWaveAmp[${i}] * cos(ph${i});
           swSlope += vec2(${w.dx.toFixed(6)}, ${w.dz.toFixed(6)}) * (-uWaveAmp[${i}] * ${w.k.toFixed(8)} * sin(ph${i}));`).join('');
   }
 
   swellUniformChunk(): string {
-    return `uniform float uWaveAmp[${this.waves.length}];`;
+    return `uniform float uWaveAmp[${this.waves.length}];\nuniform float uWavePhase[${this.waves.length}];`;
+  }
+
+  /**
+   * WHAT THE SHEET'S CENTRE CONTRIBUTES TO EACH WAVE'S PHASE, reduced to
+   * one turn — the half of the phase the GPU must never work out itself.
+   *
+   * A Gerstner phase is `dot(dir, worldXZ) * k`. Kauaʻi is 5,600,000
+   * units across with the origin at its middle, so on a real coast
+   * worldXZ is a couple of million and that product is tens of thousands
+   * of RADIANS. A float32 near 2.2e6 resolves to a quarter of a unit, so
+   * the phase arrives quantised and the sea is drawn as a washboard of
+   * quarter-unit steps; on a phone, where a varying may be mediump,
+   * 2.2e6 does not fit in the type at all. Joshua photographed exactly
+   * that at Polihale on 2026-09-05, and `npm run probe:shot` recreates
+   * it from the numbers in his HUD.
+   *
+   * SPLITTING IT IS EXACT, not an approximation. Phase is linear in
+   * position, so
+   *
+   *     dot(dir, world) * k  =  dot(dir, local) * k  +  dot(dir, centre) * k
+   *
+   * and cosine is periodic, so the second term may be taken modulo one
+   * turn. That term is computed HERE in float64, where 38,000 radians
+   * still resolves to a part in 10^11, leaving the shader
+   * `dot(dir, local) * k` — and local never exceeds half a sheet, a few
+   * hundred radians, which float32 holds to a part in a million.
+   *
+   * The same rule the floating origin already states (CLAUDE.md):
+   * nothing at true-scale range goes to the GPU raw.
+   */
+  centrePhases(wx: number, wz: number): number[] {
+    const turn = Math.PI * 2;
+    return this.waves.map((w) => {
+      const wrapped = ((wx * w.dx + wz * w.dz) * w.k) % turn;
+      return wrapped < 0 ? wrapped + turn : wrapped;
+    });
   }
 
   /**

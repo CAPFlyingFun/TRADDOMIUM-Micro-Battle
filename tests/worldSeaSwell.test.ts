@@ -153,13 +153,39 @@ describe('THE FORMULA IDENTITY: the GPU sums exactly what the CPU sums', () => {
    * table and the evaluation below stops matching the CPU.
    */
   function componentsFromGlsl(glsl: string): { dx: number; dz: number; k: number; omega: number }[] {
-    const re = /worldXZ\.x \* (-?[\d.]+) \+ worldXZ\.y \* (-?[\d.]+)\) \* ([\d.]+) - ([\d.]+) \* uTime/g;
+    const re = /localXZ\.x \* (-?[\d.]+) \+ localXZ\.y \* (-?[\d.]+)\) \* ([\d.]+) \+ uWavePhase\[\d+\] - ([\d.]+) \* uTime/g;
     const out: { dx: number; dz: number; k: number; omega: number }[] = [];
     for (const m of glsl.matchAll(re)) {
       out.push({ dx: Number(m[1]), dz: Number(m[2]), k: Number(m[3]), omega: Number(m[4]) });
     }
     return out;
   }
+
+  /**
+   * What the vertex shader computes for `sw`, given a sheet centre.
+   *
+   * THE SHADER NEVER SEES A WORLD COORDINATE. It is handed the position
+   * within the sheet and, per wave, the phase the sheet's centre
+   * contributes — worked out on the CPU in float64 and reduced to one
+   * turn. Reproducing that split here is the point of these tests: if it
+   * is not exact, the drawn sea is the sea of somewhere else.
+   */
+  const gpuSum = (
+    parsed: { dx: number; dz: number; k: number; omega: number }[],
+    amps: readonly number[],
+    phases: readonly number[],
+    centre: { wx: number; wz: number },
+    wx: number,
+    wz: number,
+    uTime: number,
+  ): number => {
+    const lx = wx - centre.wx;
+    const lz = wz - centre.wz;
+    return parsed.reduce(
+      (sum, c, i) => sum + amps[i] * Math.cos((lx * c.dx + lz * c.dz) * c.k + phases[i] - c.omega * uTime),
+      0,
+    );
+  };
 
   it('evaluates the emitted GLSL and matches the CPU to the millimetre', () => {
     const sea = seaOverFlatBed();
@@ -170,12 +196,13 @@ describe('THE FORMULA IDENTITY: the GPU sums exactly what the CPU sums', () => {
       sea.tick(0.037);
       const uTime = sea.now();
       const amps = sea.ampUniform.value;
-      for (const [wx, wz] of [[0, 0], [137, -412], [-2503, 991]]) {
-        // What the vertex shader would compute for `sw`.
-        let sw = 0;
-        parsed.forEach((c, i) => {
-          sw += amps[i] * Math.cos((wx * c.dx + wz * c.dz) * c.k - c.omega * uTime);
-        });
+      // A sheet anchored on a REAL COAST, not at world zero: Polihale,
+      // where the washboard was photographed. The whole point of the
+      // split is that it holds out here.
+      const centre = { wx: -2_182_400, wz: -477_600 };
+      const phases = sea.centrePhases(centre.wx, centre.wz);
+      for (const [wx, wz] of [[centre.wx, centre.wz], [centre.wx + 137, centre.wz - 412], [centre.wx - 2503, centre.wz + 991]]) {
+        const sw = gpuSum(parsed, amps, phases, centre, wx, wz, uTime);
         // The CPU's own answer is that sum times the shoaling envelope.
         //
         // TO THE PRECISION THE SHADER CARRIES, and no further: the
@@ -188,45 +215,77 @@ describe('THE FORMULA IDENTITY: the GPU sums exactly what the CPU sums', () => {
     }
   });
 
-  it('holds that identity across the whole island, to a bound the design already accepts', () => {
-    // THE ERROR GROWS WITH DISTANCE FROM THE ORIGIN, and it is worth
-    // knowing by how much. The phase is position x wavenumber, and the
-    // wavenumber is a printed literal carrying about seven significant
-    // digits — which is what a float32 holds, so printing more would not
-    // help. Measured: 8.8e-5 units at the origin, 1.1e-2 at 1 km,
-    // 2.4e-1 — 2.4 mm — at the island's edge, growing linearly.
+  it('is phased against the SHEET, not against world zero, so the error stops growing with distance', () => {
+    // WHAT THE SPLIT BUYS, MEASURED — and the note this replaces.
     //
-    // That is acceptable, and the reason is a number the design already
-    // lives with: the CPU bilerps four lattice corners while the GPU
-    // rasterises two planar triangles, and those disagree mid-quad by up
-    // to 4.9 units by construction. The literal rounding is twenty times
-    // smaller than a disagreement the sea already accepts.
+    // The phase is position x wavenumber, and the wavenumber reaches the
+    // shader as a printed literal carrying about seven significant
+    // digits, because that is what a float32 holds and printing more
+    // would not help. Multiplied by a WORLD coordinate, that rounding
+    // grows with distance from the origin: this test used to measure
+    // 8.8e-5 units at the origin and 2.4e-1 at the island's edge, and
+    // said so, and left a note that the fix was not more decimals but to
+    // phase the waves against the sheet rather than against world zero.
     //
-    // If it ever needs to be smaller, the fix is not more decimals — it
-    // is to phase the waves against the floating origin rather than
-    // against world zero, so the coordinate handed to the shader stays
-    // small. Noted here rather than done, because nothing yet needs it.
+    // That is now done, so the test is the other way round: it measures
+    // BOTH forms and requires the split one to be FLAT. `worstAt(d,
+    // false)` is the old form kept alive here as the control — without
+    // it a bug that made both forms perfect would pass unnoticed.
+    //
+    // This runs in float64, so it cannot see the failure that actually
+    // matters. The GPU holds these in float32, where a coordinate near
+    // 2.2e6 resolves in QUARTER-UNIT steps and a phase quantised like
+    // that is drawn as a washboard — which is what Joshua photographed at
+    // Polihale on 2026-09-05 and what `npm run probe:shot` recreates. But
+    // a form whose float64 error grows with distance is the same form
+    // whose float32 error does, and after the split this one has neither.
     const sea = seaOverFlatBed();
     sea.tick(1.7);
     const parsed = componentsFromGlsl(sea.swellChunk());
     const amps = sea.ampUniform.value;
     const uTime = sea.now();
     const shoal = sea.shoalAt(DEEP);
-    let worst = 0;
-    for (const d of [0, 1e3, 1e4, 1e5, 1e6, 2.8e6]) {
+
+    /** Worst disagreement over a sheet seated at `d`, in world units. */
+    const worstAt = (d: number, split: boolean): number => {
+      // Seated where the camera is, which is what `OceanView` does.
+      const centre = { wx: d, wz: -d * 0.5 };
+      const phases = sea.centrePhases(centre.wx, centre.wz);
+      let worst = 0;
       for (let i = 0; i < 40; i += 1) {
-        const wx = d + i * 37;
-        const wz = -d * 0.5 + i * 11;
-        let sw = 0;
-        parsed.forEach((c, j) => {
-          sw += amps[j] * Math.cos((wx * c.dx + wz * c.dz) * c.k - c.omega * uTime);
-        });
+        const wx = centre.wx + i * 211;
+        const wz = centre.wz + i * 97;
+        const sw = split
+          ? gpuSum(parsed, amps, phases, centre, wx, wz, uTime)
+          // The form it replaced: the shader handed the world position.
+          : parsed.reduce(
+            (sum, c, j) => sum + amps[j] * Math.cos((wx * c.dx + wz * c.dz) * c.k - c.omega * uTime),
+            0,
+          );
         worst = Math.max(worst, Math.abs(sea.heightAt(world(wx, wz), DEEP) - sw * shoal));
       }
-    }
-    // Well inside the lattice disagreement the design accepts, and far
-    // inside anything an ant could feel.
-    expect(worst).toBeLessThan(0.5);
+      return worst;
+    };
+
+    // MEASURED, across the island's whole half-width. Split, in units:
+    // 7.7e-4 at the origin, 7.7e-4 at 100 km, 6.8e-4 at 2,800 km. World:
+    // 7.7e-4, 1.1e-2, 2.9e-1 — the same 2.4 mm the old note recorded,
+    // reached by the same route.
+    const splitNear = worstAt(0, true);
+    const splitFar = worstAt(2.8e6, true);
+    // FLAT is the claim, so flat is the assertion: the far coast is no
+    // worse than the origin. It is the residual of the printed literals
+    // acting on a LOCAL offset of a few thousand units, and a local
+    // offset does not care where the sheet is.
+    expect(splitFar).toBeLessThan(splitNear * 2);
+    // And small in absolute terms — a twentieth of a millimetre, against
+    // the 4.9 units by which the CPU's bilerp and the GPU's two planar
+    // triangles disagree mid-quad by construction.
+    expect(splitFar).toBeLessThan(5e-3);
+    // THE CONTROL. Without it, a change that broke both forms equally —
+    // or a `centrePhases` that silently returned zeros — would pass the
+    // two assertions above and this test would be measuring nothing.
+    expect(worstAt(2.8e6, false)).toBeGreaterThan(worstAt(0, false) * 100);
   });
 
   it('emits a gradient that matches the surface it is the gradient of', () => {
@@ -265,7 +324,13 @@ describe('THE FORMULA IDENTITY: the GPU sums exactly what the CPU sums', () => {
     const bound: Record<string, { value: unknown }> = {};
     sea.bindUniforms(bound);
     expect(bound.uWaveAmp).toBe(sea.ampUniform);
-    expect(sea.swellUniformChunk()).toBe(`uniform float uWaveAmp[${DEFAULT_WAVES.length}];`);
+    // The phase array is the OTHER thing that moves, and for the same
+    // reason: it is the sheet's own centre folded into the wave, so it
+    // changes every time the sheet is re-seated. Both are uniforms, and
+    // the chunk declares exactly the two.
+    expect(sea.swellUniformChunk()).toBe(
+      `uniform float uWaveAmp[${DEFAULT_WAVES.length}];\nuniform float uWavePhase[${DEFAULT_WAVES.length}];`,
+    );
   });
 
   it('bakes the shoaling envelope with the same constants the CPU uses', () => {

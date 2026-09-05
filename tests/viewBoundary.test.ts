@@ -216,11 +216,21 @@ describe('the world/sea seam', () => {
 
   it('reads a world coordinate ONLY to hand it to the GPU or to another world coordinate', () => {
     // The sharpened ban. Every `.wx`/`.wz` must be on a line that is
-    // either filling a uniform (`.value.set`), naming a world-space
-    // lattice origin (`ox:`/`oz:`), or building another WorldPoint
-    // (`world(`). Anything else is a local position being computed by
-    // hand, which is the bug the other two directories are banned from.
-    const allowed = /\.value\.set\(|\bworld\(|\box:|\boz:/;
+    // either filling a uniform (`.value.set`), handing the pair to the
+    // one door that owns a shader's world anchor (`setCentre`/`setHole`
+    // on a `WaterLook`), naming a world-space lattice origin
+    // (`ox:`/`oz:`), or building another WorldPoint (`world(`). Anything
+    // else is a local position being computed by hand, which is the bug
+    // the other two directories are banned from.
+    //
+    // THE SETTERS ARE STRICTER THAN THE UNIFORM WRITE THEY REPLACED, not
+    // a loophole cut for them: a world centre now has a wave phase and a
+    // set of ripple offsets derived from it in float64, and `setCentre`
+    // is what keeps those in step. Writing `centre.value` alone would
+    // leave the shader drawing the sea of a different coast, so the
+    // uniform is read-only from out here and this list says which door
+    // is open.
+    const allowed = /\.value\.set\(|\bset(?:Centre|Hole)\(|\bworld\(|\box:|\boz:/;
     let examined = 0;
     for (const [file, src] of sea) {
       for (const [i, line] of code(src).split('\n').entries()) {

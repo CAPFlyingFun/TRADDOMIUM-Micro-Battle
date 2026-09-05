@@ -1,7 +1,7 @@
 {
   "name": "traddomium-micro-battle",
   "private": true,
-  "version": "1.0.0-alpha.10",
+  "version": "1.0.0-alpha.11",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -22,7 +22,8 @@
     "relay:dev": "wrangler dev --config worker/wrangler.toml --local",
     "relay:deploy": "wrangler deploy --config worker/wrangler.toml",
     "relay:tail": "wrangler tail --config worker/wrangler.toml",
-    "relay:typecheck": "tsc -p worker/tsconfig.json"
+    "relay:typecheck": "tsc -p worker/tsconfig.json",
+    "probe:shot": "node scripts/probe-shot.mjs"
   },
   "dependencies": {
     "three": "^0.185.0"
