@@ -1,4 +1,15 @@
 /**
+ * WHY THIS IS IN map/ AND NOT ui/. It reads the world: a Heightfield, a
+ * WorldPoint, SEA_LEVEL. `src/ui/` may import nothing from `world/`,
+ * `actor/` or `autonomy/` — screens take typed hooks and never reach
+ * past them (ARCHITECTURE §2.7), and `tests/uiBoundary.test.ts` enforces
+ * it by reading the source. This module was written into ui/ first and
+ * that test caught it, which is what it is for.
+ *
+ * So it sits beside the world it draws, the way `sea/` does: a module
+ * that paints something out of world data, in its own directory, with
+ * the SCREEN that shows it taking the painted result.
+ *
  * THE ISLAND, DRAWN FROM THE ISLAND.
  *
  * A top-down Kauaʻi painted straight out of the same `Heightfield` the
