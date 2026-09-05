@@ -17,6 +17,7 @@
     "probe:terrain": "node scripts/probe-terrain.mjs",
     "probe:multiplayer": "node scripts/probe-multiplayer.mjs",
     "bake:art": "node scripts/bakeArt.mjs",
+    "bake:textures": "node scripts/bakeTextures.mjs",
     "relay:dev": "wrangler dev --config worker/wrangler.toml --local",
     "relay:deploy": "wrangler deploy --config worker/wrangler.toml",
     "relay:tail": "wrangler tail --config worker/wrangler.toml",
