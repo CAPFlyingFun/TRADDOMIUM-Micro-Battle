@@ -97,6 +97,11 @@ src/
                 go. What view/ is to actor/, this is to world/ — the only
                 place a height meets a mesh; world/ stays three-free.
                 Added in Phase 2.
+  sea/          the water's renderer: OceanView (two sheets, near and
+                far), waterLook (the one shader every sheet wears) and
+                SeaTextures (the ripple and foam maps, loaded once and
+                shared). What terrain/ is to the ground, this is to
+                world/sea/. Added in Phase 3.
   camera/       FollowCamera + CameraOwnership. Phase 0 has FreeFlyCamera
                 only (under perf/).
   input/        keyboard / pointer / touch (Input.ts, DOM) → one shared
@@ -172,6 +177,20 @@ crosses the render boundary exactly as `view/` does, through
 same `.wx` ban. `coords.snapTo` was added at the same time for the same
 reason: a clipmap must snap a ring to a lattice, and it must be able to
 do that without taking a world coordinate apart by hand.
+
+`sea/` was added on 2026-09-05, in Phase 3, for the reason `terrain/`
+was: the water's renderer is neither an actor adapter nor core, and it
+crosses the render boundary the same way. It is the one renderer the
+`.wx` ban does not fit, and that is a real exception rather than a
+loophole — the water's SKIN is world-locked. The ripple tiles against
+world position, the swell is evaluated at world position, and the far
+sheet's hole is a world distance, so `uCentre` and `uHole` are world
+coordinates by design; the water audit lists exactly this as correct in
+v0 ("world-coordinate uniforms, per-frame place(), y never rebased").
+`tests/viewBoundary.test.ts` therefore holds `sea/` to the sharper rule
+the ban was a proxy for: every world coordinate it reads goes straight
+to the GPU or straight back into another world coordinate, and the mesh
+still crosses through `origin.toLocal`.
 
 `net → input(Intent.ts)` was added on 2026-09-04, with the practice bot
 (`net/PracticeBot.ts`): a scripted player's thumbs must speak the ONE

@@ -1,10 +1,11 @@
 /**
  * THE RELAY'S FRONT DOOR — a router, and nothing more.
  *
- * Two routes:
+ * Three routes:
  *
  *   GET /health        what this relay is and what it speaks, as JSON.
  *   GET /room/<code>   with `Upgrade: websocket`, the way into a room.
+ *   GET /sea/<station> NDBC's buoy feed, forwarded with a CORS header.
  *
  * A room code is turned into a Durable Object id with `idFromName`, so
  * the same code always reaches the same object no matter which of
@@ -18,15 +19,25 @@
  * cannot use with a plain-text 400 saying what a code looks like, so a
  * typo reads as a typo rather than as the relay falling over.
  *
- * CORS: a WebSocket upgrade is not subject to CORS, so only the health
- * check carries the header — it exists to be read from a page, a phone
- * or a terminal on any origin.
+ * CORS: a WebSocket upgrade is not subject to CORS, so the header is
+ * carried by the two routes a page actually reads — the health check and
+ * the sea feed. Both exist to be read from a page, a phone or a terminal
+ * on any origin.
+ *
+ * THE SEA ROUTE LIVES IN `seaRoute.ts`, and the reason is worth reading
+ * before moving it back here: it is the one part of `worker/` that names
+ * no Durable Object and no `WebSocketPair`, so it can be imported and
+ * exercised by a vitest under the APP's tsconfig. This file cannot be —
+ * `DurableObjectNamespace` below is a Workers global — and giving the
+ * app project the Workers lib to fix that would dissolve the separation
+ * `relay:typecheck` exists to keep.
  */
 import { MESSAGE_KINDS, HOST_DEFAULTS } from '../../src/net/index';
 import pkg from '../../package.json';
 import {
   ROOM_CODE_ALPHABET, ROOM_CODE_MAX_LENGTH, ROOM_CODE_MIN_LENGTH, normaliseRoomCode,
 } from './roomCode';
+import { isSeaRequest, seaManifest, serveSea } from './seaRoute';
 
 export { RoomDurableObject } from './RoomDurableObject';
 
@@ -69,6 +80,7 @@ function healthBody(): string {
       minLength: ROOM_CODE_MIN_LENGTH,
       maxLength: ROOM_CODE_MAX_LENGTH,
     },
+    sea: seaManifest(),
   });
 }
 
@@ -89,6 +101,8 @@ export default {
       return new Response(request.method === 'HEAD' ? null : healthBody(), { status: 200, headers: JSON_OPEN });
     }
 
+    if (isSeaRequest(url.pathname)) return serveSea(request, url.pathname);
+
     if (url.pathname.startsWith(ROOM_PREFIX)) {
       const code = normaliseRoomCode(url.pathname.slice(ROOM_PREFIX.length));
       if (code === null) return badRoomCode();
@@ -104,6 +118,9 @@ export default {
       return room.fetch(request);
     }
 
-    return new Response('no such route: this relay serves /health and /room/<code>\n', { status: 404, headers: TEXT });
+    return new Response(
+      'no such route: this relay serves /health, /room/<code> and /sea/<station>\n',
+      { status: 404, headers: TEXT },
+    );
   },
 };

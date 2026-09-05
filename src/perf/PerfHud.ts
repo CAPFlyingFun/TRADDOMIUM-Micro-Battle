@@ -33,6 +33,7 @@ import type { WorldLayerId } from '../world/WorldLoader';
 import type { CameraReadout } from './FreeFlyCamera';
 import type { FrameSummary } from './FrameStats';
 import type { LayerToggle } from './layerToggles';
+import { compassBearing } from '../world/coords';
 
 /** DOM refreshes per second. */
 export const HUD_HZ = 5;
@@ -114,11 +115,6 @@ export function linkWords(link: SessionLink): string {
 }
 
 /** Radians to a whole degree in 0..359, the same reading the bot's panel gives. */
-function degrees(radians: number): number {
-  const deg = Math.round((radians * 180) / Math.PI);
-  return ((deg % 360) + 360) % 360;
-}
-
 function plural(count: number, one: string): string {
   return count === 1 ? `1 ${one}` : `${count} ${one}s`;
 }
@@ -291,7 +287,7 @@ export class PerfHud {
     this.fields.cameraSpeed.textContent = `speed ${c.speed.toFixed(0)} units/s`;
     // Degrees in the ACTOR's convention, so this line and a capsule's own
     // facing describe the same compass — see `FreeFlyCamera.headingOfYaw`.
-    this.fields.cameraFacing.textContent = `facing ${degrees(c.facing)}°`;
+    this.fields.cameraFacing.textContent = `facing ${compassBearing(c.facing)}°`;
     const session = this.hooks.session?.();
     if (this.sessionLine !== null && session !== undefined) this.sessionLine.textContent = sessionWords(session);
     // THE MODEL IS THE TRUTH, and that includes the WORDS. A click the

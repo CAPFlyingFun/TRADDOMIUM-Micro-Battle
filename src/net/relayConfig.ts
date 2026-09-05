@@ -113,6 +113,82 @@ export function toRoomSocketUrl(relayUrl: string, roomCode: string): string {
   return parsed.toString();
 }
 
+/** The path the Worker serves the buoy feed on (`worker/src/index.ts`). */
+export const SEA_PATH_PREFIX = '/sea/';
+
+/**
+ * The Waverider off Hanalei, and the only wave source.
+ *
+ * NWWH1 at Nawiliwili is a WATER-LEVEL station: it reports wind,
+ * pressure and water temperature and NO WAVES, so asking it for a sea
+ * state returns nothing by design. It may be useful later for local
+ * wind; it is not the wave source and must not be substituted for one.
+ */
+export const NDBC_WAVE_STATION = '51208';
+
+/**
+ * Where to ask this relay for the buoy, as an ordinary https URL.
+ *
+ * WHY THROUGH THE RELAY AND NOT NDBC DIRECTLY. NDBC serves the feed
+ * without an `Access-Control-Allow-Origin` header, so a browser is
+ * refused — and a refusal and a dead network are the same TypeError from
+ * inside a page, which is why v0 never established which it had. The
+ * relay is already deployed and needs no credentials for this, so the
+ * page asks the relay and the relay asks NOAA.
+ *
+ * Like `toRoomSocketUrl` this THROWS on an address that is not an
+ * address, rather than returning something that would fetch from the
+ * wrong place — but unlike a room, a sea feed is not something a player
+ * types, so the station is checked here as a programming error would be.
+ */
+export function toSeaFeedUrl(relayUrl: string, station: string = NDBC_WAVE_STATION): string {
+  const id = station.trim().toLowerCase();
+  if (!isSeaStation(id)) {
+    throw new Error(`${JSON.stringify(station)} is not an NDBC station id. ${SEA_STATION_RULE}`);
+  }
+  const address = relayUrl.trim();
+  let parsed: URL;
+  try {
+    parsed = new URL(address);
+  } catch {
+    throw new Error(`relay address ${JSON.stringify(relayUrl)} is not a URL`);
+  }
+  // A relay written as a socket address still serves this over http(s):
+  // the feed is a document, not a socket.
+  const scheme = PAGE_SCHEME.get(parsed.protocol);
+  if (scheme === undefined) {
+    throw new Error(`relay address ${JSON.stringify(relayUrl)} must start with https://, http://, wss:// or ws://`);
+  }
+  parsed.protocol = scheme;
+  parsed.search = '';
+  parsed.hash = '';
+  parsed.pathname = `${parsed.pathname.replace(/\/+$/, '')}${SEA_PATH_PREFIX}${id}`;
+  return parsed.toString();
+}
+
+/** The reverse of SOCKET_SCHEME: a relay address as something to GET. */
+const PAGE_SCHEME: ReadonlyMap<string, string> = new Map([
+  ['https:', 'https:'],
+  ['wss:', 'https:'],
+  ['http:', 'http:'],
+  ['ws:', 'http:'],
+]);
+
+/** Both bounds are the relay's (`worker/src/seaStation.ts`), pinned equal by test. */
+export const SEA_STATION_MIN_LENGTH = 4;
+export const SEA_STATION_MAX_LENGTH = 8;
+
+export const SEA_STATION_RULE = 'An NDBC station id is 4–8 letters and digits, such as 51208.';
+
+const STATION_SHAPE = /^[a-z0-9]+$/;
+
+/** True for a station id the relay will accept. Expects the lower-cased form. */
+export function isSeaStation(station: string): boolean {
+  return station.length >= SEA_STATION_MIN_LENGTH
+    && station.length <= SEA_STATION_MAX_LENGTH
+    && STATION_SHAPE.test(station);
+}
+
 /**
  * The relay as a person reads it — the host alone, which is the part that
  * tells a developer whether they are pointed at their laptop or at the

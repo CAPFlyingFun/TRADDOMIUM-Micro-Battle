@@ -42,6 +42,7 @@
 import { ACTION, actionButton } from '../app/actions';
 import type { Intent } from '../input/Intent';
 import { HUD_HZ, linkWords, type SessionLink } from './PerfHud';
+import { compassBearing } from '../world/coords';
 
 /** Below this a request is not a press: the diagram must not flicker on float dust. */
 const DEADZONE = 1e-3;
@@ -119,10 +120,16 @@ export function countdown(seconds: number): string {
   return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`;
 }
 
-/** Degrees, 0..359, from the actor's heading convention. */
+/**
+ * The bot's facing as a COMPASS BEARING, 0..359.
+ *
+ * Delegates rather than converting: this panel and the perf HUD print the
+ * same kind of number about the same world, and two copies of the
+ * arithmetic is how one of them ends up mirrored while the other is not.
+ * `world/coords.compassBearing` explains why it is `180 - h`.
+ */
 export function facingDegrees(heading: number): number {
-  const deg = Math.round((heading * 180) / Math.PI);
-  return ((deg % 360) + 360) % 360;
+  return compassBearing(heading);
 }
 
 export class BotHud {

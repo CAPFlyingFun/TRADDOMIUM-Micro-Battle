@@ -15,10 +15,12 @@ over a loopback wire. That is the whole point of `Host` being pure (no
 `tick()`.
 
 ```
-worker/src/index.ts               the router: /health and /room/<code>
+worker/src/index.ts               the router: /health, /room/<code>, /sea/<station>
 worker/src/RoomDurableObject.ts   one room = one Durable Object = one Host
 worker/src/WebSocketTransport.ts  a workerd WebSocket wearing net/Transport
 worker/src/roomCode.ts            what a room code is, and what it is not
+worker/src/seaRoute.ts            the buoy, forwarded: /sea/<station>
+worker/src/seaStation.ts          what an NDBC station id is, and what it is not
 ```
 
 ## Routes
@@ -28,8 +30,29 @@ worker/src/roomCode.ts            what a room code is, and what it is not
 | `GET /health` | JSON: the service name, the version, the protocol message kinds, the snapshot rate, the disconnect grace and the room-code rule. Readable from any origin. |
 | `GET /room/<code>` with `Upgrade: websocket` | The room. `101`, then the protocol: the client sends `hello`, the room answers `welcome`. |
 | `GET /room/<code>` without the upgrade header | `426` — a room is joined over a WebSocket. |
-| A code that is not a code | `400`, in plain words. Never a `500`. |
+| `GET /sea/<station>` | NDBC's buoy feed for that station, forwarded unparsed with `Access-Control-Allow-Origin: *` and a ten-minute edge cache. |
+| A code that is not a code, or a station that is not a station | `400`, in plain words. Never a `500`. |
 | Anything else | `404`. |
+
+### Why the relay serves the sea
+
+NDBC publishes the Hanalei waverider (`51208`) with no key and no CORS
+header, so a browser is refused — and from inside a page a CORS refusal
+and a dead network are the same `TypeError`, which is why v0 could never
+establish which one it had. It left the seam open instead
+(`NdbcFeedOptions.base`) and this route is what plugs into it. The relay
+is already deployed and NDBC needs no credentials, so the route costs one
+handler and no secrets.
+
+It forwards the document **unparsed**, on the same rule that keeps every
+game rule in `src/net/Host.ts`: turning a feed into wave heights is a
+rule, and rules live in `src/` where the browser shares them and a node
+test can run them without a network. The relay owns the fetch, the
+timeout and the cache; nothing else.
+
+```
+curl https://traddomium-relay.<subdomain>.workers.dev/sea/51208
+```
 
 A room code is 3–24 characters of `a-z`, `0-9` and `-`, starting and
 ending with a letter or digit. It is matched case-insensitively, because

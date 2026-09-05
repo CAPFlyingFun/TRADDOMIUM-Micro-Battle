@@ -140,6 +140,45 @@ export function textureSize(tier: TextureTier): number {
 }
 
 /**
+ * ANISOTROPIC FILTERING PER RUNG — the dial v0 did not have.
+ *
+ * At the grazing angles this game is played at, isotropic mips average a
+ * repeating pattern into a flat wash, so the water and the ground both
+ * want anisotropy. v0 asked the renderer for
+ * `capabilities.getMaxAnisotropy()` and used it, everywhere, on every
+ * texture: on a phone that is typically 16, and 16 taps of filtering
+ * under a shader that already samples the ripple map eight times a
+ * fragment is a large bill nobody chose to pay.
+ *
+ * So it is a rung, like the size. Doubling with the ladder, because it
+ * is the same trade: a coarser texture read more cheaply. The values are
+ * a CEILING — `anisotropyFor` takes the device's own maximum and never
+ * exceeds it, since asking for more than the GPU has is silently
+ * clamped anyway and the honest thing is to know which you got.
+ */
+export const TIER_ANISOTROPY: Readonly<Record<TextureTier, number>> = Object.freeze({
+  'ultra-low': 1,
+  low: 2,
+  medium: 4,
+  high: 8,
+  'ultra-high': 16,
+});
+
+/**
+ * The anisotropy to actually use: this rung's, held down to what the
+ * device has. `deviceMax` is `renderer.capabilities.getMaxAnisotropy()`,
+ * read once by the caller — this module has no renderer and wants none.
+ *
+ * Never below 1: zero or a negative maximum from a renderer stub means
+ * "no anisotropic filtering", which in three.js is expressed as 1, not
+ * as 0.
+ */
+export function anisotropyFor(tier: TextureTier, deviceMax: number): number {
+  const most = Number.isFinite(deviceMax) ? Math.floor(deviceMax) : 1;
+  return Math.max(1, Math.min(TIER_ANISOTROPY[tier], most));
+}
+
+/**
  * The rung the player's three-level quality setting means.
  *
  * Kept as plain string literals rather than importing `Quality` from

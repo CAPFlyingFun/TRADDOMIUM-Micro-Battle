@@ -126,12 +126,16 @@ export class SettingsPanel {
     this.syncs.push((s) => {
       select.value = s.quality;
     });
-    // Nothing reads `quality` yet (the renderer / LOD will, once there is
-    // terrain to draw), and a control that saves a choice nothing acts on
-    // would look functional without being so. Disabled, with the reason
-    // beside it; the document keeps the field so the choice is ready.
-    select.disabled = true;
+    // LIVE SINCE PHASE 3. Until the ocean arrived nothing read this, so
+    // the control was disabled with the reason beside it — a control that
+    // saves a choice nothing acts on looks functional without being so
+    // (§2.9). The sea now reads it for both of the things Joshua named as
+    // the ocean's cost: which baked texture loads, and how much geometry
+    // and how many ripple octaves the water is drawn with.
+    //
+    // It says WHAT it changes rather than just that it does, because the
+    // honest caption for a setting that reaches one layer is not "Quality".
     labelledRow(this.element, 'Quality', [select]);
-    note(this.element, 'Quality has no effect yet: nothing in this build draws at more than one level of detail.');
+    note(this.element, 'Sets the ocean’s texture size, wave detail and how far the moving water reaches. Terrain is not affected yet.');
   }
 }
