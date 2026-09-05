@@ -363,18 +363,26 @@ const START_PITCH = -0.45;
 const START_YAW = Math.PI / 2;
 
 /**
- * The starting fly speed, as a fraction of the height above ground.
+ * THE FLY SPEED: 30 metres a second, flat.
  *
- * The empty world's 40 units a second is 0.4 m/s, which is an ant's pace
- * and correct for a room 20 m across. Kauaʻi is 56 km across: at that
- * speed crossing it takes four hours. A twelfth of the altitude puts the
- * camera at about 125 m/s when it starts high, and the wheel takes over
- * from there.
+ * Joshua, 2026-09-05, from the device: "make the speed of the camera at
+ * 30m/s". 3,000 world units a second, since a unit is a centimetre.
+ *
+ * IT USED TO RIDE THE ALTITUDE — a twenty-fourth of the height above
+ * ground, which put the camera near 125 m/s when it started 1.5 km up
+ * and slowed it as it came down. That was written to make a 56 km island
+ * crossable when the only way to reach anywhere was to fly there from
+ * the summit. It also made the camera uncontrollably fast up high and
+ * sluggish at the surface, which is the opposite of what a person wants
+ * while looking at something.
+ *
+ * The spawn map is what makes a flat, slow speed reasonable: you no
+ * longer fly to a place, you start there, and 30 m/s is a speed you can
+ * actually steer while looking at the ground. The mouse wheel still
+ * scales it on a desktop; on a phone there is no wheel, so this constant
+ * IS the speed and it is the one Joshua asked for.
  */
-const SPEED_PER_ALTITUDE = 1 / 24;
-
-/** Never slower than the empty world's own pace, however low the camera is. */
-const MIN_FLY_SPEED = 40;
+const FLY_SPEED = 3_000;
 
 /**
  * The fastest a camera may fly while a room is watching: the capsule's own
@@ -588,7 +596,7 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
       const ground = field.heightAt(pose.at);
       const clearance = networked ? NETWORKED_CLEARANCE : START_CLEARANCE;
       placeCamera(START.x, ground + clearance, START.z, START_YAW, networked ? START.pitch : START_PITCH);
-      paceFor(clearance);
+      pace();
     };
 
     /**
@@ -617,12 +625,12 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
       const floor = ground + RESUME_CLEARANCE;
       if (pose.height >= floor) {
         // Already in the open. Its pace still has to suit the island.
-        paceFor(Math.max(RESUME_CLEARANCE, pose.height - ground));
+        pace();
         return;
       }
       const local = toLocal(pose.at);
       placeCamera(local.lx, floor, local.lz, pose.yaw, pose.pitch);
-      paceFor(RESUME_CLEARANCE);
+      pace();
     };
 
     /**
@@ -635,14 +643,13 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
      * on a phone to change it: `CameraPose` carries no speed, and
      * FreeFlyCamera only reads the mouse wheel.
      */
-    const paceFor = (altitude: number): void => {
-      const want = Math.max(MIN_FLY_SPEED, altitude * SPEED_PER_ALTITUDE);
+    const pace = (): void => {
       // IN A ROOM, THE AUTHORITY PAYS FOR EVERY STEP. It earns an actor
       // walkSpeed x sprintFactor x tolerance = 150 units a second of
       // travel and banks at most 37.5, so a camera flying faster than
       // that has its claims refused and stands still on everybody else's
-      // screen. Solo, nobody is paying, and the island is 56 km across.
-      fly.speed = networked ? Math.min(want, NETWORKED_MAX_SPEED) : want;
+      // screen. Solo, nobody is paying.
+      fly.speed = networked ? Math.min(FLY_SPEED, NETWORKED_MAX_SPEED) : FLY_SPEED;
     };
 
     /**
