@@ -108,12 +108,37 @@ export class SettingsPanel {
     labelledRow(this.element, label, [button]);
   }
 
+  /**
+   * TWO LADDERS, TWO CONTROLS — Joshua, 2026-09-05: "Probably separate
+   * the two like rendering details vs textures. So could do a random
+   * combination."
+   *
+   * They were one control until then, and one control was wrong because
+   * the two costs fail differently. Texture size is GPU MEMORY and its
+   * failure is a killed tab; wave radius is VERTICES A FRAME and its
+   * failure is a slow one. A player dropping textures to fit a phone's
+   * memory was also giving up their sea, and one who wanted more water
+   * was paying for textures they may have had no room for. Neither
+   * clamps the other now.
+   *
+   * LIVE SINCE PHASE 3, both of them. Until the ocean arrived nothing
+   * read this and the control was disabled with the reason beside it — a
+   * control that saves a choice nothing acts on looks functional without
+   * being so (§2.9). Each caption says WHAT its ladder changes, because
+   * the honest caption for a setting that reaches one layer is not
+   * "Quality".
+   */
   private buildQuality(): void {
+    this.buildLadder('textures', 'Textures', 'Sets the ocean’s texture size and filtering. Terrain is not affected yet.');
+    this.buildLadder('detail', 'Detail', 'Sets how far the moving water reaches — 20 m at low, 100 m at high — and how many ripple layers it is drawn with. The sea itself still reaches the horizon.');
+  }
+
+  private buildLadder(field: 'textures' | 'detail', label: string, caption: string): void {
     const doc = this.element.ownerDocument;
     const select = doc.createElement('select');
     select.className = 'ui-select';
-    select.dataset.action = settingAction('quality');
-    select.setAttribute('aria-label', 'Quality');
+    select.dataset.action = settingAction(field);
+    select.setAttribute('aria-label', label);
     for (const level of QUALITY_LEVELS) {
       const option = doc.createElement('option');
       option.value = level;
@@ -121,21 +146,12 @@ export class SettingsPanel {
       select.appendChild(option);
     }
     select.addEventListener('change', () => {
-      this.write({ ...this.current, quality: select.value as Quality });
+      this.write({ ...this.current, [field]: select.value as Quality });
     });
     this.syncs.push((s) => {
-      select.value = s.quality;
+      select.value = s[field];
     });
-    // LIVE SINCE PHASE 3. Until the ocean arrived nothing read this, so
-    // the control was disabled with the reason beside it — a control that
-    // saves a choice nothing acts on looks functional without being so
-    // (§2.9). The sea now reads it for both of the things Joshua named as
-    // the ocean's cost: which baked texture loads, and how much geometry
-    // and how many ripple octaves the water is drawn with.
-    //
-    // It says WHAT it changes rather than just that it does, because the
-    // honest caption for a setting that reaches one layer is not "Quality".
-    labelledRow(this.element, 'Quality', [select]);
-    note(this.element, 'Sets the ocean’s texture size, wave detail and how far the moving water reaches. Terrain is not affected yet.');
+    labelledRow(this.element, label, [select]);
+    note(this.element, caption);
   }
 }

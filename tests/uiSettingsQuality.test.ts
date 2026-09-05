@@ -11,12 +11,18 @@
  * the caption change in the same commit as the code that honours them.
  * A stale "no effect yet" note is the same lie as a live dead control,
  * pointing the other way.
+ *
+ * THEN IT BECAME TWO CONTROLS (Joshua, 2026-09-05: "Probably separate
+ * the two like rendering details vs textures. So could do a random
+ * combination"), and the honesty question came with them: two dials that
+ * secretly moved together would be one dial drawn twice.
  */
 import { describe, expect, it } from 'vitest';
 import { defineStore, memoryKeyValueStore } from '../src/persistence/store';
 import { SettingsPanel, settingAction } from '../src/ui/SettingsPanel';
 import { QUALITY_LEVELS, SETTINGS_SPEC } from '../src/ui/settingsStore';
 import { TIER_FOR_QUALITY, tierFor } from '../src/assets/textureQuality';
+import { DETAIL_FOR_QUALITY, detailFor, waveRadius } from '../src/assets/detailQuality';
 import { SHEET_VERTICES, TIER_OCTAVES } from '../src/sea/OceanView';
 
 describe('SettingsPanel quality row', () => {
@@ -26,8 +32,11 @@ describe('SettingsPanel quality row', () => {
     const store = defineStore(SETTINGS_SPEC, memoryKeyValueStore());
     const panel = new SettingsPanel(host, { store, onBack: () => {} });
 
-    const quality = panel.element.querySelector<HTMLSelectElement>(`[data-action="${settingAction('quality')}"]`);
-    expect(quality?.disabled).toBe(false);
+    for (const field of ['textures', 'detail'] as const) {
+      const select = panel.element.querySelector<HTMLSelectElement>(`[data-action="${settingAction(field)}"]`);
+      expect(select, field).not.toBeNull();
+      expect(select?.disabled, field).toBe(false);
+    }
     // And the apology is gone, because it is no longer true.
     expect(panel.element.textContent).not.toContain('Quality has no effect yet');
 
@@ -52,22 +61,56 @@ describe('SettingsPanel quality row', () => {
     const text = panel.element.textContent ?? '';
     expect(text).toMatch(/ocean/i);
     expect(text).toMatch(/[Tt]errain is not affected yet/);
+    // EACH CAPTION NAMES ITS OWN LADDER, or two controls under one
+    // explanation are two controls a player has to guess between.
+    expect(text).toMatch(/texture/i);
+    expect(text).toMatch(/how far the moving water reaches/i);
+    // And it says the sea itself does not stop there, because "detail:
+    // low" over an ocean that ends 20 m away would read as a bug.
+    expect(text).toMatch(/still reaches the horizon/i);
     panel.dispose();
   });
 
-  it('every level it offers reaches a rung the ocean can actually build', () => {
-    // The control is only honest if each of its three choices lands
-    // somewhere real: a tier with a baked texture, an octave count and a
-    // sheet size. A level that mapped to nothing would be a live control
-    // that silently did nothing for one of its options.
+  it('moves ONE ladder at a time, which is the whole reason there are two', () => {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const store = defineStore(SETTINGS_SPEC, memoryKeyValueStore());
+    const panel = new SettingsPanel(host, { store, onBack: () => {} });
+    const select = (field: 'textures' | 'detail'): HTMLSelectElement => {
+      const el = panel.element.querySelector<HTMLSelectElement>(`[data-action="${settingAction(field)}"]`);
+      if (el === null) throw new Error(`no ${field} control`);
+      return el;
+    };
+    select('textures').value = 'low';
+    select('textures').dispatchEvent(new Event('change'));
+    expect(store.read().textures).toBe('low');
+    expect(store.read().detail, 'textures dragged detail with it').toBe('medium');
+    select('detail').value = 'high';
+    select('detail').dispatchEvent(new Event('change'));
+    expect(store.read().detail).toBe('high');
+    expect(store.read().textures, 'detail dragged textures with it').toBe('low');
+    panel.dispose();
+  });
+
+  it('every level of BOTH ladders reaches a rung the ocean can actually build', () => {
+    // A control is only honest if each of its three choices lands
+    // somewhere real. A level that mapped to nothing would be a live
+    // control that silently did nothing for one of its options.
     for (const level of QUALITY_LEVELS) {
       const tier = tierFor(level);
       expect(TIER_FOR_QUALITY[level], level).toBe(tier);
-      expect(TIER_OCTAVES[tier], level).toBeGreaterThanOrEqual(1);
-      expect(SHEET_VERTICES[tier], level).toBeDefined();
+      const detail = detailFor(level);
+      expect(DETAIL_FOR_QUALITY[level], level).toBe(detail);
+      expect(TIER_OCTAVES[detail], level).toBeGreaterThanOrEqual(1);
+      expect(SHEET_VERTICES[detail], level).toBeDefined();
+      expect(waveRadius(detail), level).toBeGreaterThan(0);
     }
-    // And the three are genuinely different, or the dial is decoration.
-    const seen = new Set(QUALITY_LEVELS.map((l) => `${TIER_OCTAVES[tierFor(l)]}:${SHEET_VERTICES[tierFor(l)].near}`));
-    expect(seen.size).toBeGreaterThan(1);
+    // And each ladder's three are genuinely different, or the dial is
+    // decoration. Checked SEPARATELY: a detail ladder with three
+    // distinct rungs would otherwise cover for a texture ladder with one.
+    const detailSeen = new Set(QUALITY_LEVELS.map((l) => `${TIER_OCTAVES[detailFor(l)]}:${SHEET_VERTICES[detailFor(l)].near}`));
+    expect(detailSeen.size, 'the detail ladder').toBe(QUALITY_LEVELS.length);
+    const texSeen = new Set(QUALITY_LEVELS.map((l) => tierFor(l)));
+    expect(texSeen.size, 'the texture ladder').toBe(QUALITY_LEVELS.length);
   });
 });

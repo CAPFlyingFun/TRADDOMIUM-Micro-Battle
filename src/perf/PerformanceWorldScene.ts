@@ -76,6 +76,7 @@ import { OceanView } from '../sea/OceanView';
 import { SeaTextures } from '../sea/SeaTextures';
 import { SeaSwell } from '../world/sea/swell';
 import { resolveTier, tierFor, type TextureTier } from '../assets/textureQuality';
+import { detailFor, resolveDetail, type DetailTier } from '../assets/detailQuality';
 import { LoadProgress } from '../world/LoadProgress';
 import { COARSE_BYTES, decodeCoarse } from '../world/dem';
 import { repairGrid } from '../world/demRepair';
@@ -103,19 +104,21 @@ export interface PerfWorldSettings {
   /** Whether the perf HUD is shown at all. */
   readonly showFps: boolean;
   /**
-   * The player's three-level quality choice.
+   * The player's two three-level quality choices, since 2026-09-05.
    *
-   * LIVE SINCE PHASE 3, and the ocean is what reads it: the texture rung
-   * it loads, how many ripple octaves its shader compiles, and how much
-   * geometry its two sheets carry. Changing it rebuilds the sea, which
-   * is why it is read on every state change rather than once — the pause
-   * menu is where it is changed and returning from it is a state change.
+   * TWO, because they cost different parts of the machine and fail
+   * differently: `textures` is GPU memory, whose failure is a killed
+   * tab, and `detail` is vertices a frame, whose failure is a slow one.
+   * Joshua: "Probably separate the two like rendering details vs
+   * textures. So could do a random combination."
    *
-   * Kept as the plain literals rather than importing `Quality` from
-   * ui/settingsStore: perf/ may not import ui/ (§3), and the whole point
-   * of this interface is that the document's owner builds it.
+   * LIVE SINCE PHASE 3, and the ocean is what reads both: `textures`
+   * picks the rung it loads and how it filters, `detail` picks how many
+   * ripple octaves its shader compiles and how far the moving water
+   * reaches before the flat sheet takes over.
    */
-  readonly quality: 'low' | 'medium' | 'high';
+  readonly textures: 'low' | 'medium' | 'high';
+  readonly detail: 'low' | 'medium' | 'high';
 }
 
 export interface PerformanceWorldHooks {
@@ -134,6 +137,11 @@ export interface PerformanceWorldHooks {
    * choices.
    */
   readonly tierOverride?: TextureTier | null;
+  /**
+   * `?detail=` — the same door as `tierOverride`, for the other ladder.
+   * Null is the ordinary case and means the player's setting decides.
+   */
+  readonly detailOverride?: DetailTier | null;
   /** Progress of `enter()`: a 0..1 fraction and an ETA in ms (null before there is a rate), for the loading screen. */
   onLoadProgress?(fraction: number, etaMs: number | null): void;
   /**
@@ -468,6 +476,7 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
     let oceanOn = false;
     /** The tier the sea was BUILT at, so a changed setting is noticed once and rebuilt once. */
     let builtTier: TextureTier | null = null;
+    let builtDetail: DetailTier | null = null;
     /** The near plane the projection was last built with. */
     let builtNear = 0;
     let hud: PerfHud | null = null;
@@ -665,8 +674,10 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
      */
     const buildOcean = (): void => {
       if (field === null || swell === null) return;
-      const tier = resolveTier(hooks.tierOverride ?? null, tierFor(hooks.settings?.().quality ?? 'medium'));
-      if (ocean !== null && builtTier === tier) return;
+      const set = hooks.settings?.();
+      const tier = resolveTier(hooks.tierOverride ?? null, tierFor(set?.textures ?? 'medium'));
+      const detail = resolveDetail(hooks.detailOverride ?? null, detailFor(set?.detail ?? 'medium'));
+      if (ocean !== null && builtTier === tier && builtDetail === detail) return;
       if (ocean) {
         three.remove(ocean.group);
         ocean.dispose();
@@ -680,8 +691,9 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         deviceAnisotropy: ctx.renderer.gl.capabilities.getMaxAnisotropy(),
         base: import.meta.env.BASE_URL,
       });
-      ocean = new OceanView({ field, swell, textures: seaTextures, tier });
+      ocean = new OceanView({ field, swell, textures: seaTextures, detail });
       builtTier = tier;
+      builtDetail = detail;
       three.add(ocean.group);
       ocean.group.visible = oceanOn;
       // The sheets have to be filled before the first drawn frame, or
@@ -977,7 +989,7 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         const seaCost = (): SeaReadout | null => {
           if (ocean === null) return null;
           const cost = ocean.cost;
-          return { meanMs: cost.meanMs, peakMs: cost.peakMs, tier: ocean.tier };
+          return { meanMs: cost.meanMs, peakMs: cost.peakMs, detail: ocean.detail, tier: seaTextures?.tier ?? null };
         };
 
         hud = new PerfHud(ctx.uiLayer, {

@@ -39,7 +39,12 @@ import { Heightfield } from '../src/world/heightfield';
 import { SeaSwell } from '../src/world/sea/swell';
 import { OceanView, SHEET_VERTICES, TIER_OCTAVES, farCellFor, sheetVertexCount } from '../src/sea/OceanView';
 import type { SeaTextures } from '../src/sea/SeaTextures';
-import { TEXTURE_TIERS, type TextureTier } from '../src/assets/textureQuality';
+import {
+  MAX_MOBILE_TIER, MOBILE_TIERS, TEXTURE_QUALITY, TEXTURE_TIERS, tierToUse, type TextureTier,
+} from '../src/assets/textureQuality';
+import {
+  DETAIL_QUALITY, DETAIL_TIERS, MAX_MOBILE_DETAIL, MOBILE_DETAIL, detailToUse, waveRadius,
+} from '../src/assets/detailQuality';
 
 const ROOT = fileURLToPath(new URL('..', import.meta.url));
 
@@ -64,7 +69,7 @@ function textures(): SeaTextures {
 function ocean(tier: TextureTier = 'medium'): { view: OceanView; swell: SeaSwell; tex: SeaTextures } {
   const swell = new SeaSwell({ groundAt: (at) => field.heightAt(at) });
   const tex = textures();
-  return { view: new OceanView({ field, swell, textures: tex, tier }), swell, tex };
+  return { view: new OceanView({ field, swell, textures: tex, detail: tier }), swell, tex };
 }
 
 /**
@@ -81,15 +86,70 @@ function ocean(tier: TextureTier = 'medium'): { view: OceanView; swell: SeaSwell
 const OFFSHORE: WorldPoint = world(-2_400_000, 0);
 
 describe('what a tier actually costs', () => {
-  it('reproduces v0’s geometry exactly at high and above', () => {
-    // The look was accepted at these numbers. A tier is allowed to spend
-    // less; it is not allowed to quietly redefine the top.
-    expect(SHEET_VERTICES.high).toEqual({ far: 257, near: 241 });
-    expect(SHEET_VERTICES['ultra-high']).toEqual({ far: 257, near: 241 });
-    expect(sheetVertexCount('high')).toBe(257 * 257 + 241 * 241);
-    expect(sheetVertexCount('high')).toBe(124_130);
+  it('spends what Joshua’s detail ladder asks for, and no rung invents its own count', () => {
+    // THE DECISION IS A RADIUS, and it is his (2026-09-05), given after
+    // being told that ultra-high, high and medium were all the same 84 m
+    // and that there was therefore no ladder above medium at all:
+    //
+    //   Ultra-High 200 m, High 100 m, Medium 50 m, Low 20 m
+    //
+    // He also proposed 5 m for ultra-low; it ships at 15 m, for the
+    // reason recorded in `assets/detailQuality.ts` and told to him — the
+    // player is an ant a centimetre above the water and the crossfade
+    // would start 3.6 m away.
+    //
+    // THE COUNT IS NOT A SECOND DECISION. It is the radius over the cell,
+    // so this checks the ladder by ASKING FOR THE RADIUS BACK: a count
+    // written down by hand would drift from the distance it is supposed
+    // to mean, which is the same class of mistake as the crossfade bands.
+    for (const tier of DETAIL_TIERS) {
+      const n = SHEET_VERTICES[tier].near;
+      expect(n % 2, `${tier}: an even count puts no vertex at the sheet's own centre`).toBe(1);
+      // Within half a cell of the radius asked for, which is as close as
+      // a whole odd number of vertices can land.
+      expect(Math.abs((n * 70) / 2 - waveRadius(tier)), tier).toBeLessThanOrEqual(70);
+    }
+    expect(SHEET_VERTICES['ultra-high'].near).toBe(571);
+    expect(SHEET_VERTICES.high.near).toBe(287);
+    expect(SHEET_VERTICES.medium.near).toBe(143);
+    expect(SHEET_VERTICES.low.near).toBe(57);
+    expect(SHEET_VERTICES['ultra-low'].near).toBe(43);
+    // What that costs, against v0's 124,130 every frame at every setting.
+    // High is the rung Joshua's phone selects and the only one that costs
+    // more than v0 did.
+    expect(sheetVertexCount('high')).toBe(287 * 287 + 257 * 257);
+    expect(sheetVertexCount('high')).toBe(148_418);
+    expect(sheetVertexCount('ultra-high')).toBe(392_090);
     expect(TIER_OCTAVES.high).toBe(4);
     expect(TIER_OCTAVES.medium).toBe(4);
+  });
+
+  it('offers ultra-high to a desktop and never to a phone, on BOTH ladders', () => {
+    // Joshua: "Ultra-High would be unavailable for mobile for both."
+    // Two ladders, two reasons, one rule: textures fail as a killed tab
+    // (21 MiB a texture), detail fails as an unplayable frame (3.2x the
+    // vertices v0 submitted, and v0 on this phone read 10 to 30 fps).
+    expect(DETAIL_QUALITY['ultra-high'].mobile).toBe(false);
+    expect(TEXTURE_QUALITY['ultra-high'].mobile).toBe(false);
+    expect(MOBILE_DETAIL).not.toContain('ultra-high');
+    expect(MOBILE_TIERS).not.toContain('ultra-high');
+    // And the two ladders agree on where the phone's ceiling is, so a
+    // player is never offered a combination only half of which fits.
+    expect(MAX_MOBILE_DETAIL).toBe(MAX_MOBILE_TIER);
+    expect(detailToUse('ultra-high', true)).toBe('high');
+    expect(tierToUse('ultra-high', true)).toBe('high');
+    expect(detailToUse('ultra-high', false)).toBe('ultra-high');
+    expect(tierToUse('ultra-high', false)).toBe('ultra-high');
+  });
+
+  it('lets the two ladders be set independently, which is what they are for', () => {
+    // "So could do a random combination." A build must therefore accept
+    // any pairing — and the ocean must take its geometry from the DETAIL
+    // rung whatever the texture rung says, or the split is cosmetic.
+    const { view } = ocean('low');
+    expect(view.detail).toBe('low');
+    expect(view.vertexCount).toBe(sheetVertexCount('low'));
+    view.dispose();
   });
 
   it('never spends more as the tier goes down', () => {
@@ -111,18 +171,37 @@ describe('what a tier actually costs', () => {
     for (const tier of TEXTURE_TIERS) {
       const { view } = ocean(tier);
       expect(view.vertexCount, tier).toBe(sheetVertexCount(tier));
-      expect(view.tier).toBe(tier);
+      expect(view.detail).toBe(tier);
       view.dispose();
     }
   });
 
-  it('keeps the near sheet’s cell fixed, so the tier never aliases the waves', () => {
-    // Six samples to a 4.2 m wavelength is what makes a swell a wave
-    // rather than the aliased suggestion of one. What shrinks is the
-    // sheet's REACH, not its resolution.
-    const spans = TEXTURE_TIERS.map((tier) => SHEET_VERTICES[tier].near * 70);
-    for (let i = 1; i < spans.length; i += 1) expect(spans[i]).toBeGreaterThanOrEqual(spans[i - 1]);
-    expect(SHEET_VERTICES.high.near * 70).toBe(16_870); // v0's own span
+  it('keeps the near sheet’s cell fixed, so a rung never aliases the waves', () => {
+    // What a rung moves is the sheet's REACH, never its resolution: the
+    // cell is what resolves the swell, and coarsening it would alias the
+    // waves themselves, which is a change to the accepted look rather
+    // than a quality setting.
+    //
+    // MEASURED FROM THE BUILT GEOMETRY, not from the count: this is the
+    // spacing the GPU actually gets, and it is the number the claim is
+    // about. Reading it back off `SHEET_VERTICES` would only be checking
+    // that a multiplication still multiplies.
+    let cell = 0;
+    for (const tier of DETAIL_TIERS) {
+      const { view } = ocean(tier);
+      const near = view.group.children[1] as THREE.Mesh;
+      const pos = near.geometry.getAttribute('position') as THREE.BufferAttribute;
+      const step = pos.getX(1) - pos.getX(0);
+      if (cell === 0) cell = step;
+      expect(step, `${tier} re-spaced the near sheet`).toBeCloseTo(cell, 6);
+      view.dispose();
+    }
+    expect(cell).toBe(70);
+    // And the reach really does climb with the rung, or the ladder is a
+    // list of the same sheet under five names — which is what it was
+    // until Joshua asked how big the radius actually was.
+    const reaches = DETAIL_TIERS.map((tier) => SHEET_VERTICES[tier].near * 70);
+    for (let i = 1; i < reaches.length; i += 1) expect(reaches[i], DETAIL_TIERS[i]).toBeGreaterThan(reaches[i - 1]);
   });
 });
 

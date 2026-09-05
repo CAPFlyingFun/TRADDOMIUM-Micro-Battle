@@ -35,15 +35,15 @@ describe('settings sanitize', () => {
     expect(sanitizeSettings({ invertY: 'true' }).invertY).toBe(SETTINGS_DEFAULTS.invertY);
     expect(sanitizeSettings({ showFps: false }).showFps).toBe(false);
     expect(sanitizeSettings({ showFps: 1 }).showFps).toBe(SETTINGS_DEFAULTS.showFps);
-    expect(sanitizeSettings({ quality: 'low' }).quality).toBe('low');
-    expect(sanitizeSettings({ quality: 'ultra' }).quality).toBe(SETTINGS_DEFAULTS.quality);
-    expect(sanitizeSettings({ quality: 2 }).quality).toBe(SETTINGS_DEFAULTS.quality);
+    expect(sanitizeSettings({ textures: 'low', detail: 'low' }).textures).toBe('low');
+    expect(sanitizeSettings({ quality: 'ultra' }).textures).toBe(SETTINGS_DEFAULTS.textures);
+    expect(sanitizeSettings({ quality: 2 }).textures).toBe(SETTINGS_DEFAULTS.textures);
   });
 
   it('drops unknown keys and always stamps the current version', () => {
     const s = sanitizeSettings({ version: 7, fov: 70, terrainRelief: 1.5, showFix: true });
     expect(s).toEqual({ ...SETTINGS_DEFAULTS, fov: 70, version: SETTINGS_VERSION });
-    expect(Object.keys(s).sort()).toEqual(['fov', 'invertY', 'lookSensitivity', 'quality', 'showFps', 'version']);
+    expect(Object.keys(s).sort()).toEqual(['detail', 'fov', 'invertY', 'lookSensitivity', 'showFps', 'textures', 'version']);
   });
 });
 
@@ -52,7 +52,7 @@ describe('settings store round trip', () => {
     const kv = memoryKeyValueStore();
     const store = defineStore(SETTINGS_SPEC, kv);
     expect(store.read()).toEqual(SETTINGS_DEFAULTS);
-    const written = { version: SETTINGS_VERSION, fov: 95, lookSensitivity: 1.75, invertY: true, quality: 'high', showFps: false } as const;
+    const written = { version: SETTINGS_VERSION, fov: 95, lookSensitivity: 1.75, invertY: true, textures: 'high', detail: 'high', showFps: false } as const;
     store.write(written);
     expect(store.read()).toEqual(written);
     expect(kv.get(SETTINGS_KEY)).not.toBeNull();

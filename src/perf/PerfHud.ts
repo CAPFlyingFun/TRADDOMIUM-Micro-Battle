@@ -96,8 +96,19 @@ export interface SeaReadout {
   readonly meanMs: number;
   /** The worst single frame in the window. */
   readonly peakMs: number;
-  /** The texture rung it was built at, as a word. */
-  readonly tier: string;
+  /**
+   * The two rungs it was built at, as words — since 2026-09-05 these are
+   * SEPARATE SETTINGS and either may be the one that explains a frame
+   * rate, so printing one of them would be printing the wrong one half
+   * the time.
+   *
+   * `detail` is how far the waves reach and how many ripple octaves run;
+   * `tier` is the texture size and filtering. Null tex means the sea was
+   * built without textures, which is a state to say rather than to guess
+   * a word for.
+   */
+  readonly detail: string;
+  readonly tier: string | null;
 }
 
 export interface PerfHudHooks {
@@ -195,12 +206,19 @@ function sessionWords(readout: SessionReadout): string {
  * These belong here anyway: raw wall-clock milliseconds a frame is what
  * this column is for.
  */
-function seaWords(sea: SeaReadout | null): readonly [string, string, string] {
-  if (sea === null) return ['sea      not built', '', ''];
+function seaWords(sea: SeaReadout | null): readonly [string, string, string, string] {
+  if (sea === null) return ['sea      not built', '', '', ''];
   return [
     `sea mean ${sea.meanMs.toFixed(2)} ms`,
     `sea peak ${sea.peakMs.toFixed(1)} ms`,
-    `sea rung ${sea.tier}`,
+    // TWO SHORT LINES RATHER THAN ONE LONG ONE. Both rungs have to be
+    // readable off a photograph — `probe:shot` takes them as arguments —
+    // and a combined line would be the widest thing in the column at the
+    // 932 px design canvas, which is where the HUD starts pushing PAUSE
+    // off the screen. Neither of these is wider than the frame-rate line
+    // already above them.
+    `sea detail ${sea.detail}`,
+    `sea tex ${sea.tier ?? 'none'}`,
   ];
 }
 
@@ -210,7 +228,7 @@ export class PerfHud {
   /** Built only when the owner offers a `session()` hook; null otherwise. */
   private readonly sessionLine: HTMLElement | null;
   /** Built only when the owner offers a `sea()` hook; null otherwise. */
-  private readonly seaLines: readonly [HTMLElement, HTMLElement, HTMLElement] | null;
+  private readonly seaLines: readonly [HTMLElement, HTMLElement, HTMLElement, HTMLElement] | null;
   private readonly boxes = new Map<WorldLayerId, HTMLInputElement>();
   /** Each layer row's wrapper and its text node, so the label can follow the model. */
   private readonly rows = new Map<string, { wrap: HTMLElement; text: Text }>();
@@ -263,7 +281,7 @@ export class PerfHud {
     // directly under the number they have to be read against.
     this.seaLines = hooks.sea === undefined
       ? null
-      : [line(frame, 'sea-mean'), line(frame, 'sea-peak'), line(frame, 'sea-rung')];
+      : [line(frame, 'sea-mean'), line(frame, 'sea-peak'), line(frame, 'sea-detail'), line(frame, 'sea-tex')];
     // Before LAYERS, which is a column of rows rather than a readout and
     // reads best last.
     if (hooks.session === undefined) {

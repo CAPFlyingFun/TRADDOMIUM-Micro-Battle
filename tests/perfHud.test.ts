@@ -129,7 +129,7 @@ describe('PerfHud', () => {
  * and to say plainly when it has not been told anything yet.
  */
 describe('the sea rows', () => {
-  const seaRig = (sea?: () => { meanMs: number; peakMs: number; tier: string } | null) => {
+  const seaRig = (sea?: () => { meanMs: number; peakMs: number; detail: string; tier: string | null } | null) => {
     const uiLayer = document.createElement('div');
     document.body.appendChild(uiLayer);
     const toggles = new LayerToggles([]);
@@ -149,7 +149,8 @@ describe('the sea rows', () => {
     const { field } = seaRig();
     expect(field('sea-mean')).toBeNull();
     expect(field('sea-peak')).toBeNull();
-    expect(field('sea-rung')).toBeNull();
+    expect(field('sea-detail')).toBeNull();
+    expect(field('sea-tex')).toBeNull();
   });
 
   it('say the ocean is not built YET rather than showing it costing nothing', () => {
@@ -157,17 +158,30 @@ describe('the sea rows', () => {
     hud.update(readout(60, 30, 1 / 60), 1);
     expect(field('sea-mean')).toBe('sea      not built');
     expect(field('sea-peak')).toBe('');
-    expect(field('sea-rung')).toBe('');
+    expect(field('sea-detail')).toBe('');
+    expect(field('sea-tex')).toBe('');
   });
 
-  it('print the mean, the PEAK and the rung', () => {
+  it('print the mean, the PEAK and BOTH rungs', () => {
     // The peak is shown because a mean alone hides the refill frame, and
     // a hitch is exactly what "slightly choppy" describes.
-    const { hud, field } = seaRig(() => ({ meanMs: 0.042, peakMs: 12.34, tier: 'medium' }));
+    //
+    // BOTH rungs, because since 2026-09-05 they are separate settings
+    // and either can be the one explaining a frame rate. A combination
+    // is the ordinary case, not an odd one — Joshua: "could do a random
+    // combination" — so the fixture uses one.
+    const { hud, field } = seaRig(() => ({ meanMs: 0.042, peakMs: 12.34, detail: 'high', tier: 'low' }));
     hud.update(readout(60, 30, 1 / 60), 1);
     expect(field('sea-mean')).toBe('sea mean 0.04 ms');
     expect(field('sea-peak')).toBe('sea peak 12.3 ms');
-    expect(field('sea-rung')).toBe('sea rung medium');
+    expect(field('sea-detail')).toBe('sea detail high');
+    expect(field('sea-tex')).toBe('sea tex low');
+  });
+
+  it('says so rather than guessing a word when the sea has no textures', () => {
+    const { hud, field } = seaRig(() => ({ meanMs: 1, peakMs: 2, detail: 'medium', tier: null }));
+    hud.update(readout(60, 30, 1 / 60), 1);
+    expect(field('sea-tex')).toBe('sea tex none');
   });
 
   it('SIT IN THE FRAME COLUMN, and never widen it past the lines already there', () => {
@@ -178,7 +192,7 @@ describe('the sea rows', () => {
     // "95th low 30.0 fps". probe:bot measures the real thing in a room,
     // where the HUD is widest; this pins the intent so a later edit
     // cannot quietly grow one of them past it.
-    const { uiLayer, hud, field } = seaRig(() => ({ meanMs: 0.042, peakMs: 12.34, tier: 'ultra-low' }));
+    const { uiLayer, hud, field } = seaRig(() => ({ meanMs: 0.042, peakMs: 12.34, detail: 'ultra-low', tier: 'ultra-low' }));
     hud.update(readout(60, 30, 1 / 60), 1);
     const widest = '95th low 30.0 fps'.length;
     for (const name of ['sea-mean', 'sea-peak', 'sea-rung']) {
@@ -192,22 +206,33 @@ describe('the sea rows', () => {
   });
 
   it('re-read the hook every refresh, so a rebuilt sea is not stale on the line', () => {
-    // Quality is changed from the pause menu and rebuilds the ocean at a
-    // different rung. A line written once would keep naming the old one.
+    // Either quality is changed from the pause menu and rebuilds the
+    // ocean at a different rung. A line written once would keep naming
+    // the old one — and since the two axes move INDEPENDENTLY, a line
+    // that followed only one of them would be stale half the time.
+    let detail = 'high';
     let tier = 'high';
-    const { hud, field } = seaRig(() => ({ meanMs: 1, peakMs: 2, tier }));
+    const { hud, field } = seaRig(() => ({ meanMs: 1, peakMs: 2, detail, tier }));
     hud.update(readout(60, 30, 1 / 60), 1);
-    expect(field('sea-rung')).toBe('sea rung high');
-    tier = 'low';
+    expect(field('sea-detail')).toBe('sea detail high');
+    expect(field('sea-tex')).toBe('sea tex high');
+    // ONE AXIS MOVES AND THE OTHER DOES NOT, which is the whole point of
+    // there being two of them.
+    detail = 'low';
     hud.update(readout(60, 30, 1 / 60), 1);
-    expect(field('sea-rung')).toBe('sea rung low');
+    expect(field('sea-detail')).toBe('sea detail low');
+    expect(field('sea-tex')).toBe('sea tex high');
+    tier = 'ultra-low';
+    hud.update(readout(60, 30, 1 / 60), 1);
+    expect(field('sea-detail')).toBe('sea detail low');
+    expect(field('sea-tex')).toBe('sea tex ultra-low');
   });
 
   it('cost no DOM writes while the HUD is hidden', () => {
     let asked = 0;
     const { hud } = seaRig(() => {
       asked += 1;
-      return { meanMs: 0, peakMs: 0, tier: 'medium' };
+      return { meanMs: 0, peakMs: 0, detail: 'medium', tier: 'medium' };
     });
     hud.update(readout(60, 30, 1 / 60), 1);
     const before = asked;

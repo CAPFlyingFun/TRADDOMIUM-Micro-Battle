@@ -61,7 +61,7 @@ import { toLocal } from '../world/origin';
 import type { SeaSwell } from '../world/sea/swell';
 import type { SeaTextures } from './SeaTextures';
 import { makeWaterLook, type WaterLook } from './waterLook';
-import type { TextureTier } from '../assets/textureQuality';
+import { DETAIL_TIERS, waveRadius, type DetailTier } from '../assets/detailQuality';
 
 /**
  * The far sheet's SMALLEST span, world units across — v0's exact 8.2 km,
@@ -121,16 +121,19 @@ const NEAR_CELL = 70;
 
 /**
  * Where the rim flattening and the crossfade sit, as fractions of the
- * near sheet's HALF-span — its centre to its edge, which is the distance
- * `vSheet` measures and the only one these can mean.
+ * near sheet's EDGE — the largest circle that fits inside it, which is
+ * half its span less the one cell the lattice is short on two sides.
+ * That is the distance `vSheet` has to finish within.
  *
- * v0's absolute numbers over v0's half-span of 8,435: rim 6,000..7,800
- * and handover 6,800..8,200, and v0's own comment on them reads "inside
- * the sheet's 8 435 half-span, so the fade finishes before the edge."
- * They are fractions here because v0's near sheet was one fixed size and
- * v1's changes with the tier, so an absolute 8,200 would fall outside the
- * sheet at ultra-low. At the tiers that share v0's geometry these
- * multiply back to v0's four numbers exactly.
+ * v0's absolute numbers over v0's edge of 8,365: rim 6,000..7,800 and
+ * handover 6,800..8,200, and v0's own comment on them reads "inside the
+ * sheet's 8 435 half-span, so the fade finishes before the edge." They
+ * are fractions here because v0's near sheet was one fixed size and
+ * v1's changes with the detail rung, so an absolute 8,200 would fall
+ * outside the sheet at ultra-low. Over v0's own geometry they multiply
+ * back to v0's four numbers exactly, and because the largest of them is
+ * 0.98 they fit inside a sheet of ANY size by construction — there is
+ * nothing to clamp and so nothing that can quietly fail to clamp.
  *
  * THEY WERE MULTIPLIED BY THE FULL SPAN, and that is the bug this
  * comment now exists to prevent. `counts.near * NEAR_CELL` is the
@@ -156,10 +159,10 @@ const NEAR_CELL = 70;
  * — the middle distance — was the flat far sheet, and the whole ocean
  * read as glass no matter how tall the waves near her were.
  */
-const RIM_LO_OF_REACH = 6_000 / 8_435;
-const RIM_HI_OF_REACH = 7_800 / 8_435;
-const HAND_LO_OF_REACH = 6_800 / 8_435;
-const HAND_HI_OF_REACH = 8_200 / 8_435;
+const RIM_LO_OF_EDGE = 6_000 / 8_365;
+const RIM_HI_OF_EDGE = 7_800 / 8_365;
+const HAND_LO_OF_EDGE = 6_800 / 8_365;
+const HAND_HI_OF_EDGE = 8_200 / 8_365;
 
 /**
  * How far the camera may travel before a sheet re-anchors: about an
@@ -186,16 +189,42 @@ const recentreOf = (n: number, cell: number): number => Math.max(1, Math.floor(n
  * for a phone that would otherwise be choosing between the sea and the
  * frame rate.
  */
-export const SHEET_VERTICES: Readonly<Record<TextureTier, { far: number; near: number }>> = Object.freeze({
-  'ultra-low': Object.freeze({ far: 97, near: 121 }),
-  low: Object.freeze({ far: 129, near: 161 }),
-  medium: Object.freeze({ far: 193, near: 241 }),
-  high: Object.freeze({ far: 257, near: 241 }),
-  'ultra-high': Object.freeze({ far: 257, near: 241 }),
+const FAR_VERTICES: Readonly<Record<DetailTier, number>> = Object.freeze({
+  'ultra-low': 97,
+  low: 129,
+  medium: 193,
+  high: 257,
+  'ultra-high': 257,
 });
 
+/**
+ * How many vertices a side the NEAR sheet needs to reach this rung's
+ * wave radius at the cell it is obliged to keep.
+ *
+ * DERIVED, NOT LISTED. The radius is the decision and it lives in
+ * `assets/detailQuality.ts`; the cell belongs to this file and may not
+ * move (see the header — it is what resolves the swell). A count is
+ * simply those two divided, and writing it down as a third number is
+ * inviting exactly the disagreement the crossfade bands already had.
+ *
+ * ODD, so the lattice has a vertex at its own centre. A sheet whose
+ * middle falls in the gap between four vertices puts the camera —
+ * which is what it is centred on — permanently mid-quad.
+ */
+export function nearVerticesFor(tier: DetailTier): number {
+  const n = Math.round((2 * waveRadius(tier)) / NEAR_CELL);
+  return n % 2 === 0 ? n + 1 : n;
+}
+
+export const SHEET_VERTICES: Readonly<Record<DetailTier, { far: number; near: number }>> = Object.freeze(
+  Object.fromEntries(DETAIL_TIERS.map((tier) => [
+    tier,
+    Object.freeze({ far: FAR_VERTICES[tier], near: nearVerticesFor(tier) }),
+  ])) as Record<DetailTier, { far: number; near: number }>,
+);
+
 /** How many vertices this tier submits every frame, both sheets. For a HUD, and for a test. */
-export function sheetVertexCount(tier: TextureTier): number {
+export function sheetVertexCount(tier: DetailTier): number {
   const { far, near } = SHEET_VERTICES[tier];
   return far * far + near * near;
 }
@@ -205,7 +234,7 @@ export function sheetVertexCount(tier: TextureTier): number {
  * what medium and above use; the coarse octaves alone still read as
  * moving water on a screen that cannot resolve the fine ones.
  */
-export const TIER_OCTAVES: Readonly<Record<TextureTier, number>> = Object.freeze({
+export const TIER_OCTAVES: Readonly<Record<DetailTier, number>> = Object.freeze({
   'ultra-low': 2,
   low: 3,
   medium: 4,
@@ -231,7 +260,13 @@ export interface OceanViewOptions {
   readonly field: Heightfield;
   readonly swell: SeaSwell;
   readonly textures: SeaTextures;
-  readonly tier: TextureTier;
+  /**
+   * The RENDERING DETAIL rung — how far the waves reach and how many
+   * ripple octaves run. Not the texture rung: `textures` carries its
+   * own, and since 2026-09-05 the two are settings a player sets
+   * separately (`assets/detailQuality.ts`).
+   */
+  readonly detail: DetailTier;
 }
 
 /**
@@ -278,7 +313,7 @@ const now = (): number => performance.now();
 export class OceanView {
   /** One group, so a layer toggle is one `visible` and never a walk. */
   readonly group = new THREE.Group();
-  readonly tier: TextureTier;
+  readonly detail: DetailTier;
 
   private readonly field: Heightfield;
   private readonly swell: SeaSwell;
@@ -295,18 +330,25 @@ export class OceanView {
   constructor(options: OceanViewOptions) {
     this.field = options.field;
     this.swell = options.swell;
-    this.tier = options.tier;
+    this.detail = options.detail;
     this.group.name = 'ocean';
 
-    const counts = SHEET_VERTICES[options.tier];
-    const octaves = TIER_OCTAVES[options.tier];
-    // THE REACH IS HALF THE SPAN. `lattice` centres the sheet on zero, so
-    // `counts.near * NEAR_CELL` is its full width and the furthest a
-    // fragment sits from the middle is half of that. Reading this as the
-    // span is what put every band outside the sheet.
-    const nearReach = (counts.near * NEAR_CELL) / 2;
-    const handLo = nearReach * HAND_LO_OF_REACH;
-    const handHi = nearReach * HAND_HI_OF_REACH;
+    const counts = SHEET_VERTICES[options.detail];
+    const octaves = TIER_OCTAVES[options.detail];
+    // THE EDGE IS HALF THE SPAN, LESS A CELL. `lattice` centres the sheet
+    // on zero and runs from `-span/2` to `span/2 - cell`, so it is a
+    // whole cell short on two of its four sides — and the largest circle
+    // that fits inside it is therefore `span/2 - cell`. That is the
+    // distance a fade has to finish within, in every direction.
+    //
+    // Reading it as the SPAN is what put every band outside the sheet and
+    // opened the gap. Reading it as the half-span alone is nearly right
+    // and fails on the small rungs: at ultra-low's 43 vertices the last
+    // 2.8% of the radius is that one missing cell, and the handover ends
+    // at 97.2%. The edge is the honest measure at every size.
+    const nearEdge = (counts.near * NEAR_CELL) / 2 - NEAR_CELL;
+    const handLo = nearEdge * HAND_LO_OF_EDGE;
+    const handHi = nearEdge * HAND_HI_OF_EDGE;
 
     // edgeLo/edgeHi are the waterline Joshua approved — widening them
     // washed the beach out. edgeLo keeps the geometric cut hidden 35
@@ -343,8 +385,8 @@ export class OceanView {
     const nearLook = makeWaterLook({
       ...skin,
       swellRim: {
-        rimLo: nearReach * RIM_LO_OF_REACH,
-        rimHi: nearReach * RIM_HI_OF_REACH,
+        rimLo: nearEdge * RIM_LO_OF_EDGE,
+        rimHi: nearEdge * RIM_HI_OF_EDGE,
         alphaLo: handLo,
         alphaHi: handHi,
       },

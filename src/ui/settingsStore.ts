@@ -4,9 +4,8 @@
  * a bad camera angle, not a boot failure.
  *
  * Pure (no DOM): the panel renders it, other modules READ it. The readers
- * are listed on each field. In Phase 0 the Performance World honours fov,
- * lookSensitivity, invertY and showFps (through a hook built in
- * app/registerScenes.ts); nothing reads quality yet, and the panel says so.
+ * are listed on each field. The Performance World honours all of them
+ * through a hook built in app/registerScenes.ts.
  *
  * Every number is GAME TUNING, not measured biology.
  */
@@ -24,8 +23,23 @@ export interface Settings extends Versioned {
   readonly lookSensitivity: number;
   /** False is the shipped feel: dragging DOWN lifts the view. Reader: the camera drag. */
   readonly invertY: boolean;
-  /** Render cost tier. Reader: the renderer / LOD when there is terrain to draw. */
-  readonly quality: Quality;
+  /**
+   * TEXTURE size and filtering. Reader: `assets/textureQuality.tierFor`,
+   * through the Performance World.
+   */
+  readonly textures: Quality;
+  /**
+   * RENDERING DETAIL — how far the waves reach, how many ripple octaves
+   * run. Reader: `assets/detailQuality.detailFor`, same route.
+   *
+   * SEPARATE FROM `textures` SINCE 2026-09-05, on Joshua's instruction:
+   * "Probably separate the two like rendering details vs textures. So
+   * could do a random combination." They cost different parts of the
+   * machine — texture size is GPU memory and fails as a killed tab, wave
+   * radius is vertices a frame and fails as a slow one — so one control
+   * over both could only ever be tuned for whichever bit first.
+   */
+  readonly detail: Quality;
   /** The frame-rate readout. Reader: perf/PerfHud. */
   readonly showFps: boolean;
 }
@@ -46,9 +60,10 @@ export const SETTINGS_DEFAULTS: Settings = {
   fov: 60,
   lookSensitivity: 1,
   invertY: false,
-  // The phone is the target device and nothing is measured yet; start in
-  // the middle so a first device pass can move either way.
-  quality: 'medium',
+  // The phone is the target device; start both in the middle so a device
+  // pass can move either axis on its own.
+  textures: 'medium',
+  detail: 'medium',
   // On while the game is being built: the only machine whose frame rate
   // matters is the one in Joshua's hand, and judging a change without the
   // readout is guessing.
@@ -83,7 +98,13 @@ export function sanitizeSettings(raw: unknown, defaults: Settings = SETTINGS_DEF
       SETTINGS_LIMITS.lookSensitivity.max,
     ),
     invertY: typeof r.invertY === 'boolean' ? r.invertY : defaults.invertY,
-    quality: isQuality(r.quality) ? r.quality : defaults.quality,
+    // MIGRATED, NOT RESET. Until 2026-09-05 one field named `quality`
+    // drove both axes; a document written then still carries it, and a
+    // player who chose "low" to save their phone should not silently be
+    // put back on medium for having updated. Both axes inherit it, which
+    // is exactly what that one setting used to mean.
+    textures: isQuality(r.textures) ? r.textures : (isQuality(r.quality) ? r.quality : defaults.textures),
+    detail: isQuality(r.detail) ? r.detail : (isQuality(r.quality) ? r.quality : defaults.detail),
     showFps: typeof r.showFps === 'boolean' ? r.showFps : defaults.showFps,
   };
 }

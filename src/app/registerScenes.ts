@@ -25,6 +25,7 @@ import type { SpawnCandidate } from '../world/spawn';
 import type { CameraPose } from '../session/GameSession';
 import { fetchCoarseDem } from '../assets/demSource';
 import { TIER_QUERY_PARAM, isTextureTier, type TextureTier } from '../assets/textureQuality';
+import { DETAIL_QUERY_PARAM, isDetailTier, type DetailTier } from '../assets/detailQuality';
 import { PERF_WORLD_MAP_ID, PERF_WORLD_SCENE_ID, perfWorldTool } from '../perf/perfTool';
 import {
   LocalSoloSession, isSoloSlot, newSoloGame, readSoloSlots, resumeSoloSlot, restorableStateOf, savedSoloGame,
@@ -135,6 +136,21 @@ const TIER_NAMED = typeof globalThis.location === 'undefined'
   ? null
   : new URLSearchParams(globalThis.location.search).get(TIER_QUERY_PARAM);
 const TIER_OVERRIDE: TextureTier | null = isTextureTier(TIER_NAMED) ? TIER_NAMED : null;
+
+/**
+ * THE OTHER LADDER'S OVERRIDE: `?detail=`, read here for the same reason
+ * and in the same breath as `?tier=` above.
+ *
+ * Since 2026-09-05 rendering detail and texture size are separate
+ * settings (Joshua: "could do a random combination"), so they need
+ * separate doors — and having both means a tier sweep can hold one axis
+ * still while it moves the other, which is the only way to find out
+ * which of the two a device is actually spending its frame on.
+ */
+const DETAIL_NAMED = typeof globalThis.location === 'undefined'
+  ? null
+  : new URLSearchParams(globalThis.location.search).get(DETAIL_QUERY_PARAM);
+const DETAIL_OVERRIDE: DetailTier | null = isDetailTier(DETAIL_NAMED) ? DETAIL_NAMED : null;
 
 /**
  * WHICH SLOT THE SPAWN MAP IS CHOOSING FOR.
@@ -366,6 +382,7 @@ export function registerScenes(options: RegisterScenesOptions = {}): void {
         survey,
         settings: () => openSettings(ctx.storage).read(),
         tierOverride: TIER_OVERRIDE,
+        detailOverride: DETAIL_OVERRIDE,
         resume: () => restorableStateOf(ctx.app.session),
         // WHO THIS PLAYER IS ON THE WIRE, read only when the world asks —
         // which it does only for a session that holds a transport. The
