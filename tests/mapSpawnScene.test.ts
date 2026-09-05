@@ -18,6 +18,7 @@
  * the markers must still be placed and still work.
  */
 import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import type { SceneContext } from '../src/app/Scene';
 import { SpawnMapScene, type SpawnMapHooks } from '../src/map/SpawnMapScene';
@@ -25,9 +26,19 @@ import { worldToMap, MAP_SIZE } from '../src/map/islandMap';
 import { geoToWorld } from '../src/world/geo';
 import { REGIONS, type ReadyRegion, type SpawnCandidate } from '../src/world/spawn';
 
-// jsdom replaces the global URL, and fileURLToPath then refuses it —
-// see tests/splashBoot.test.ts. A string path is what works here.
-const DEM = '/home/user/TRADDOMIUM-Micro-Battle/public/kauai-1025.bin';
+/**
+ * The survey, found the way a jsdom test has to find it.
+ *
+ * NOT `fileURLToPath(new URL('..', import.meta.url))`: jsdom replaces the
+ * global URL and fileURLToPath then refuses it. And NOT an absolute path
+ * either, which is what this line was first — it worked here and failed
+ * on the CI runner, where the checkout is somewhere else entirely, and
+ * that is what kept the spawn map off the deployed site.
+ *
+ * `process.cwd()` is the repo root under vitest, and is what the other
+ * jsdom test that reads this file already uses (tests/perfWorldScene).
+ */
+const DEM = path.join(process.cwd(), 'public', 'kauai-1025.bin');
 
 let bytes: ArrayBuffer;
 beforeAll(() => {
