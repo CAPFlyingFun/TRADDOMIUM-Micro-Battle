@@ -209,3 +209,54 @@ export function tierToUse(tier: TextureTier, mobile: boolean): TextureTier {
   if (!mobile || TEXTURE_QUALITY[tier].mobile) return tier;
   return MAX_MOBILE_TIER;
 }
+
+/**
+ * THE TESTING OVERRIDE: `?tier=ultra-low`, and why it exists at all.
+ *
+ * The player's setting offers three levels and `tierFor` maps them to
+ * three rungs. ULTRA_LOW is not among them, deliberately — it is the
+ * floor a device falls back to, not a look anyone would choose. But
+ * CLAUDE.md carries a standing requirement from Joshua for Phase 3: the
+ * ocean must be "testable at medium, low and ultra-low on his phone",
+ * and a rung with no way to select it is not testable.
+ *
+ * So the rung is reachable by ADDRESS rather than by menu. The shipped
+ * settings are unchanged and a player still sees three honest choices;
+ * a phone with `?tier=ultra-low` on the end of the URL renders the sea
+ * at 128 px and the HUD says which rung it got. Exactly the shape of
+ * `?relay=` (`net/relayConfig.ts`): the rule lives in the pure module
+ * that owns the vocabulary, and `app/registerScenes.ts` is the one place
+ * allowed to read the address bar.
+ *
+ * IT IS AN OVERRIDE, NOT A SETTING. Nothing is written to storage and
+ * nothing survives the reload that drops the parameter, because a
+ * testing rung that outlived the test would be a device quietly stuck on
+ * the ugliest ladder rung with no menu entry to explain it.
+ *
+ * IT REACHES ULTRA_HIGH TOO, AND IS NOT CLAMPED. `MOBILE_TIERS` still
+ * excludes that rung and the honesty rule still holds — a phone is never
+ * OFFERED it — but a parameter typed deliberately is not an offer, and
+ * clamping it would answer `?tier=ultra-high` with a silently different
+ * rung. On a phone it may well kill the tab, which is what the ladder
+ * says about that rung and is itself the measurement.
+ */
+export const TIER_QUERY_PARAM = 'tier';
+
+/** Whether a string names a rung. Narrow, so the caller gets a `TextureTier` and not a hopeful cast. */
+export function isTextureTier(value: unknown): value is TextureTier {
+  return typeof value === 'string' && (TEXTURE_TIERS as readonly string[]).includes(value);
+}
+
+/**
+ * The rung to build with: the override when it names one, otherwise the
+ * player's choice.
+ *
+ * A parameter that is not a rung is IGNORED rather than an error. It
+ * arrives from an address bar, where a typo is ordinary, and the cost of
+ * being strict is a phone that will not open the game at all — against a
+ * benefit of nothing, since the HUD prints the rung actually in use and
+ * a typo therefore shows up as "medium" where "ultra-low" was expected.
+ */
+export function resolveTier(override: string | null, chosen: TextureTier): TextureTier {
+  return isTextureTier(override) ? override : chosen;
+}

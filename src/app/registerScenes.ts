@@ -20,6 +20,7 @@ import { playerId } from '../actor/PlayerId';
 import { PRACTICE_BOT_NAME, RELAY_QUERY_PARAM, resolveRelayUrl, toRoomSocketUrl } from '../net';
 import { createPerformanceWorldScene } from '../perf/PerformanceWorldScene';
 import { fetchCoarseDem } from '../assets/demSource';
+import { TIER_QUERY_PARAM, isTextureTier, type TextureTier } from '../assets/textureQuality';
 import { PERF_WORLD_MAP_ID, PERF_WORLD_SCENE_ID, perfWorldTool } from '../perf/perfTool';
 import {
   LocalSoloSession, isSoloSlot, newSoloGame, readSoloSlots, resumeSoloSlot, restorableStateOf, savedSoloGame,
@@ -111,6 +112,25 @@ const RELAY_URL = resolveRelayUrl(
     : new URLSearchParams(globalThis.location.search).get(RELAY_QUERY_PARAM),
   BUILD_INFO.relayUrl,
 );
+
+/**
+ * THE TEXTURE RUNG THIS RUN USES when the address bar names one, read in
+ * the same place and for the same reason as `?relay=` above: the rule is
+ * `assets/textureQuality.ts`'s, which is pure and may not name a browser
+ * global, so the parameter is read here and handed in.
+ *
+ * Null is the ordinary case and means the player's quality setting
+ * decides. `?tier=ultra-low` is the one CLAUDE.md asks for by name — the
+ * rung a phone cannot otherwise select — and every other rung works too,
+ * which is what makes a tier sweep possible from one build.
+ *
+ * Module scope, guarded, because it cannot change without a reload and
+ * this module is imported by node tests that have no address bar.
+ */
+const TIER_NAMED = typeof globalThis.location === 'undefined'
+  ? null
+  : new URLSearchParams(globalThis.location.search).get(TIER_QUERY_PARAM);
+const TIER_OVERRIDE: TextureTier | null = isTextureTier(TIER_NAMED) ? TIER_NAMED : null;
 
 /**
  * The sessions and slots the menu and the picker offer. Both carry the
@@ -256,6 +276,7 @@ export function registerScenes(options: RegisterScenesOptions = {}): void {
         // is the one place that says the terrain is the deployed files.
         survey,
         settings: () => openSettings(ctx.storage).read(),
+        tierOverride: TIER_OVERRIDE,
         resume: () => restorableStateOf(ctx.app.session),
         // WHO THIS PLAYER IS ON THE WIRE, read only when the world asks —
         // which it does only for a session that holds a transport. The

@@ -68,6 +68,38 @@ export interface SessionReadout {
   readonly roundTripMs?: number;
 }
 
+/**
+ * WHAT THE SEA IS COSTING, as the HUD is told it.
+ *
+ * Joshua's second named suspect for v0's choppiness was that the work
+ * "probably wasn't optimized the best between CPU, and GPU", and these
+ * are the CPU half of the answer, on the device rather than in a probe.
+ * Read against the frame rate above them: a sea costing a fraction of a
+ * millisecond while the frame rate halves is a sea spending on the GPU,
+ * and the texture rung is the lever.
+ *
+ * THE PEAK IS SHOWN, NOT JUST THE MEAN. The work is not spread evenly —
+ * most frames are two uniform writes, and the frame a sheet re-anchors
+ * is tens of thousands of heightfield reads. A mean of 0.1 ms with a
+ * peak of 12 is not a smooth ocean; it is a smooth ocean with a hitch
+ * in it, and a hitch is what "slightly choppy" describes.
+ *
+ * THE RUNG IS ON SCREEN because `?tier=` can name one the settings
+ * cannot (ULTRA_LOW), and a testing override with no way to confirm it
+ * took effect is a test of nothing.
+ *
+ * Plain numbers and a word: the HUD prints what it is told and never
+ * learns what an OceanView is.
+ */
+export interface SeaReadout {
+  /** Mean milliseconds a frame the ocean spends on the CPU. */
+  readonly meanMs: number;
+  /** The worst single frame in the window. */
+  readonly peakMs: number;
+  /** The texture rung it was built at, as a word. */
+  readonly tier: string;
+}
+
 export interface PerfHudHooks {
   /** The rows to show. Re-read at every refresh so the checkboxes follow the model, not the clicks. */
   layers(): readonly LayerToggle[];
@@ -79,6 +111,12 @@ export interface PerfHudHooks {
    * heading would be a claim of its own.
    */
   session?(): SessionReadout;
+  /**
+   * What the sea costs. Absent means this world has no ocean to ask and
+   * the column is not built; null means it has one that is not built
+   * YET, which is a different thing and reads as such.
+   */
+  sea?(): SeaReadout | null;
 }
 
 type Field = 'meanFps' | 'lowFps' | 'simDt' | 'cameraPosition' | 'cameraSpeed' | 'cameraFacing';
@@ -140,11 +178,39 @@ function sessionWords(readout: SessionReadout): string {
   return parts.join(' · ');
 }
 
+/**
+ * The sea's three lines, or the honest absence of them.
+ *
+ * "not built yet" rather than zeros: an ocean that has not been
+ * constructed has not cost nothing, it has not been asked, and 0.00 ms
+ * would read as the former. Same rule as the layer rows.
+ *
+ * THEY GO IN THE FRAME COLUMN, and are kept to the width of the lines
+ * already there, because a column of their own would not fit. The HUD is
+ * a flex row and every column widens it: at the 932 px design canvas the
+ * existing five already come within about 80 px of the PAUSE button, and
+ * a sixth carrying "0.04 ms peak 12.3 95k verts medium" is 260 px on its
+ * own. `scripts/probe-bot.mjs` fails on exactly that — it measures the
+ * HUD against PAUSE in a room, which is the widest the HUD ever gets.
+ * These belong here anyway: raw wall-clock milliseconds a frame is what
+ * this column is for.
+ */
+function seaWords(sea: SeaReadout | null): readonly [string, string, string] {
+  if (sea === null) return ['sea      not built', '', ''];
+  return [
+    `sea mean ${sea.meanMs.toFixed(2)} ms`,
+    `sea peak ${sea.peakMs.toFixed(1)} ms`,
+    `sea rung ${sea.tier}`,
+  ];
+}
+
 export class PerfHud {
   private readonly root: HTMLElement;
   private readonly fields: Readonly<Record<Field, HTMLElement>>;
   /** Built only when the owner offers a `session()` hook; null otherwise. */
   private readonly sessionLine: HTMLElement | null;
+  /** Built only when the owner offers a `sea()` hook; null otherwise. */
+  private readonly seaLines: readonly [HTMLElement, HTMLElement, HTMLElement] | null;
   private readonly boxes = new Map<WorldLayerId, HTMLInputElement>();
   /** Each layer row's wrapper and its text node, so the label can follow the model. */
   private readonly rows = new Map<string, { wrap: HTMLElement; text: Text }>();
@@ -191,6 +257,13 @@ export class PerfHud {
       cameraSpeed: line(camera, 'camera-speed'),
       cameraFacing: line(camera, 'camera-facing'),
     };
+    // UNDER THE FRAME RATE, in the FRAME column, and only where there is
+    // a sea to ask about — see `seaWords` for why they are not a column
+    // of their own. Built here rather than beside SESSION so they sit
+    // directly under the number they have to be read against.
+    this.seaLines = hooks.sea === undefined
+      ? null
+      : [line(frame, 'sea-mean'), line(frame, 'sea-peak'), line(frame, 'sea-rung')];
     // Before LAYERS, which is a column of rows rather than a readout and
     // reads best last.
     if (hooks.session === undefined) {
@@ -290,6 +363,10 @@ export class PerfHud {
     this.fields.cameraFacing.textContent = `facing ${compassBearing(c.facing)}°`;
     const session = this.hooks.session?.();
     if (this.sessionLine !== null && session !== undefined) this.sessionLine.textContent = sessionWords(session);
+    if (this.seaLines !== null) {
+      const words = seaWords(this.hooks.sea?.() ?? null);
+      for (let i = 0; i < this.seaLines.length; i += 1) this.seaLines[i].textContent = words[i];
+    }
     // THE MODEL IS THE TRUTH, and that includes the WORDS. A click the
     // owner rejected snaps back here — and so does a row whose built-ness
     // was not known when the HUD was constructed. Whether TERRAIN is built

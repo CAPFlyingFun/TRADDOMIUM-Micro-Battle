@@ -210,6 +210,47 @@ export interface OceanViewOptions {
   readonly tier: TextureTier;
 }
 
+/**
+ * WHAT THE OCEAN COSTS THE CPU, in milliseconds of wall clock.
+ *
+ * Joshua's brief for this phase named two suspects for v0's choppiness,
+ * and the second was "probably wasn't optimized the best between CPU,
+ * and GPU". That is answerable only by measuring, so the ocean times
+ * ITSELF: `update` and `tick` are the whole of its per-frame CPU work,
+ * and nothing else in the build has to know how to find them.
+ *
+ * WHY THE PEAK AND THE REFILL COUNT MATTER MORE THAN THE MEAN. The work
+ * is not spread evenly. Most frames are two uniform writes and a
+ * comparison — nothing. But when the camera crosses a sheet's recentre
+ * lattice, `anchor` refills that sheet's depth attribute, which on a
+ * medium near sheet is 241**2 = 58,081 heightfield reads IN ONE FRAME.
+ * A mean hides that: a mean of 0.1 ms with a peak of 12 ms is not a
+ * smooth ocean, it is a smooth ocean with a hitch in it, and a hitch
+ * every few seconds is exactly what "slightly choppy" describes. So the
+ * peak is kept, and so is the number of frames that refilled — between
+ * them they say how often the stall happens and how much it costs.
+ *
+ * MILLISECONDS OF WALL CLOCK, NOT OF SIMULATION. This is instrumentation
+ * and it measures the machine, so it never sees a clamped dt (CLAUDE.md).
+ */
+export interface OceanCost {
+  /** Frames measured since the last reset. Zero means nothing has been drawn yet. */
+  readonly frames: number;
+  /** Milliseconds across all of them. */
+  readonly totalMs: number;
+  /** `totalMs / frames`, or zero before the first frame. */
+  readonly meanMs: number;
+  /** The worst single frame. Where a refill shows up. */
+  readonly peakMs: number;
+  /** How many of those frames refilled a sheet's depths. */
+  readonly refills: number;
+  /** Vertices submitted a frame — the GPU's side of the same question. */
+  readonly vertices: number;
+}
+
+/** Wall clock. One clock for both call sites, named once so it stays that way. */
+const now = (): number => performance.now();
+
 export class OceanView {
   /** One group, so a layer toggle is one `visible` and never a walk. */
   readonly group = new THREE.Group();
@@ -219,6 +260,13 @@ export class OceanView {
   private readonly swell: SeaSwell;
   private readonly far: Sheet;
   private readonly near: Sheet;
+
+  /** Accumulating within the CURRENT frame; `tick` closes it. */
+  private spentMs = 0;
+  private frames = 0;
+  private totalMs = 0;
+  private peakMs = 0;
+  private refills = 0;
 
   constructor(options: OceanViewOptions) {
     this.field = options.field;
@@ -309,10 +357,18 @@ export class OceanView {
    * re-anchor. The clipmap learned this the same way.
    */
   update(at: WorldPoint, reach = 0): void {
+    const began = now();
     const revision = this.field.revision();
     this.resize(this.far, farCellFor(this.far.n, reach));
-    this.anchor(this.far, at, revision);
-    if (this.anchor(this.near, at, revision)) {
+    // BOTH are asked, and the far one's answer is kept rather than
+    // dropped: a resize clears its centre, so the frame a growing far
+    // sheet re-spaces itself is also a frame it refills all n**2 of its
+    // own depths, and a cost record that only watched the near sheet
+    // would call that frame free.
+    const farRefilled = this.anchor(this.far, at, revision);
+    const nearRefilled = this.anchor(this.near, at, revision);
+    if (farRefilled || nearRefilled) this.refills += 1;
+    if (nearRefilled) {
       const centre = this.near.centre as WorldPoint;
       // The far sheet's hole follows the NEAR SHEET, not the camera:
       // they must share a centre or the crossfade bands part company.
@@ -326,6 +382,7 @@ export class OceanView {
       const corner = translate(centre, -(this.near.n * this.near.cell) / 2, -(this.near.n * this.near.cell) / 2);
       this.swell.setLattice({ ox: corner.wx, oz: corner.wz, cell: this.near.cell });
     }
+    this.spentMs += now() - began;
   }
 
   /**
@@ -415,9 +472,57 @@ export class OceanView {
    * exactly one `tick` call site and this is it.
    */
   tick(dt: number): void {
+    const began = now();
     const t = this.swell.tick(dt);
     this.far.look.clock.value = t;
     this.near.look.clock.value = t;
+
+    // THE FRAME ENDS HERE, because this is the one place in the build
+    // that runs once a frame per ocean and is documented as such. A
+    // frame in which the layer is switched off reaches neither `update`
+    // nor `tick` and is counted by neither — right rather than
+    // convenient: an ocean nobody draws costs nothing, and averaging
+    // those frames in would report a cheaper sea than the one on screen.
+    this.frames += 1;
+    this.spentMs += now() - began;
+    this.totalMs += this.spentMs;
+    if (this.spentMs > this.peakMs) this.peakMs = this.spentMs;
+    this.spentMs = 0;
+  }
+
+  /**
+   * What this ocean has cost the CPU since the last `resetCost`.
+   *
+   * A SNAPSHOT, not a live view: a probe that reads it, drives forty
+   * frames and reads it again must be comparing two fixed numbers, and
+   * handing out the accumulator itself would have the first one change
+   * under it.
+   */
+  get cost(): OceanCost {
+    return Object.freeze({
+      frames: this.frames,
+      totalMs: this.totalMs,
+      meanMs: this.frames === 0 ? 0 : this.totalMs / this.frames,
+      peakMs: this.peakMs,
+      refills: this.refills,
+      vertices: this.vertexCount,
+    });
+  }
+
+  /**
+   * Start a fresh measuring window.
+   *
+   * The partial frame is dropped rather than carried: `update` may
+   * already have run when this is called, and adding its half to the
+   * next window's first frame would put a stall in a window that did not
+   * have one.
+   */
+  resetCost(): void {
+    this.spentMs = 0;
+    this.frames = 0;
+    this.totalMs = 0;
+    this.peakMs = 0;
+    this.refills = 0;
   }
 
   /** How many vertices this ocean submits a frame. */

@@ -240,8 +240,13 @@ async function look(page, dx, dy) {
   await runFrames(page, 8);
 }
 
-async function drive(page, url) {
-  log(`opening the bare URL ${url} at ${VIEWPORT.width}×${VIEWPORT.height}`);
+/**
+ * The walk a player takes to the world: NEW GAME, SOLO, slot 1. No query
+ * parameter skips a step of it (CLAUDE.md) — `?tier=` names a texture
+ * rung and nothing else about the route.
+ */
+async function openWorld(page, url) {
+  log(`opening ${url} at ${VIEWPORT.width}×${VIEWPORT.height}`);
   await page.goto(url, { waitUntil: 'load' });
   await page.waitForSelector('[data-action="new-game"]', { timeout: TIMEOUT.menu });
   await page.click('[data-action="new-game"]', { timeout: TIMEOUT.menu });
@@ -252,6 +257,10 @@ async function drive(page, url) {
   log('waiting for the world (this includes the 2 MB survey and the sea textures)');
   await page.waitForSelector('[data-action="pause"]', { timeout: TIMEOUT.world });
   await runFrames(page, 20);
+}
+
+async function drive(page, url) {
+  await openWorld(page, url);
 
   // 1. The layers row.
   const text = await uiText(page);
@@ -355,6 +364,125 @@ async function drive(page, url) {
   log('(SwiftShader is a software rasteriser: this ratio is a smell test, not a phone measurement)');
 }
 
+/**
+ * THE RUNGS JOSHUA NAMED, in his order: "testable at medium, low and
+ * ultra-low on his phone" (CLAUDE.md). Ultra-low is not one of the
+ * player's three quality levels and is reachable only by `?tier=`, which
+ * is the whole reason that parameter exists.
+ */
+const SWEEP_TIERS = ['medium', 'low', 'ultra-low'];
+
+/**
+ * The HUD's own sea rows, parsed. They read
+ *
+ *     sea mean 0.04 ms
+ *     sea peak 12.3 ms
+ *     sea rung medium
+ *
+ * and live in the FRAME column rather than one of their own, because a
+ * sixth column does not fit the 932 px canvas (`PerfHud.seaWords`).
+ */
+async function seaReadout(page) {
+  const text = await uiText(page);
+  const mean = /sea mean ([\d.]+) ms/.exec(text);
+  const peak = /sea peak ([\d.]+) ms/.exec(text);
+  const rung = /sea rung (\S+)/.exec(text);
+  if (!mean || !peak || !rung) return null;
+  return { meanMs: Number(mean[1]), peakMs: Number(peak[1]), tier: rung[1] };
+}
+
+/**
+ * WHICH SIDE OF THE MACHINE THE SEA SPENDS ON, one rung at a time.
+ *
+ * Joshua's second named suspect for v0's choppiness was that the work
+ * "probably wasn't optimized the best between CPU, and GPU", and that is
+ * a measurement rather than an opinion. Two numbers a rung answer it:
+ *
+ *   THE CPU SIDE, in milliseconds, measured by the ocean itself — its
+ *   `update` and `tick` are the whole of its per-frame JS, and that JS
+ *   is the same JS on a phone. Real, and portable.
+ *
+ *   THE GPU SIDE, as the frame rate the layer costs. NOT in
+ *   milliseconds: this is SwiftShader, a software rasteriser, so a
+ *   "GPU" time here is a CPU time wearing a hat. The RATIO between the
+ *   layer on and off is a smell test that transfers; the absolute
+ *   numbers do not.
+ *
+ * If the CPU side is a fraction of a millisecond while switching the
+ * layer off multiplies the frame rate, the cost is on the fragment side
+ * and the texture rung is the lever — which is exactly what the ladder
+ * was built to be. That is the finding, and it is stated by comparing
+ * the two, never by asserting it.
+ *
+ * A FRESH CONTEXT PER RUNG, because slot 1 would otherwise already hold
+ * a save from the previous rung and NEW GAME would stop to ask.
+ */
+async function sweep(browser, url) {
+  log('');
+  log('── the cost of each rung ─────────────────────────────────────');
+  const rows = [];
+  for (const tier of SWEEP_TIERS) {
+    const context = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: 1 });
+    const page = await context.newPage();
+    page.on('pageerror', (error) => fail(`[${tier}] uncaught page error: ${error.message}`));
+    page.on('console', (message) => {
+      if (message.type() === 'error') fail(`[${tier}] console error: ${message.text()}`);
+    });
+    try {
+      await openWorld(page, `${url}?tier=${tier}`);
+
+      // THE OVERRIDE IS REAL, not decorative: the HUD names the rung the
+      // sea was actually built at, so a parameter that did nothing shows
+      // up here as the wrong word rather than as a quietly identical run.
+      const named = await seaReadout(page);
+      if (named === null) fail(`[${tier}] the HUD has no sea rows to read`);
+      else if (named.tier !== tier) fail(`[${tier}] ?tier= was ignored: the HUD says the sea is "${named.tier}"`);
+
+      await look(page, 0, -90); // the horizon into frame, as in check 4
+      const withSea = await runFrames(page, FRAMES);
+      const onFps = FRAMES / (withSea / 1000);
+      const cost = await seaReadout(page);
+
+      const toggle = page.locator('[data-layer="ocean"] input, [data-action="layer:ocean"]').first();
+      if ((await toggle.count()) === 0) fail(`[${tier}] no ocean toggle to measure against`);
+      await toggle.click({ timeout: 10_000 }).catch(() => {});
+      const without = await runFrames(page, FRAMES);
+      const offFps = FRAMES / (without / 1000);
+
+      rows.push({ tier, onFps, offFps, cost });
+      log(`${tier.padEnd(9)} ${onFps.toFixed(2)} fps with the sea, ${offFps.toFixed(2)} without `
+        + `(${(offFps / onFps).toFixed(2)}x) — CPU ${cost?.meanMs.toFixed(3) ?? '?'} ms mean, `
+        + `${cost?.peakMs.toFixed(1) ?? '?'} ms peak`);
+    } finally {
+      await context.close();
+    }
+  }
+
+  // ── the finding, read off the rows rather than assumed ──
+  log('');
+  const cpu = rows.map((r) => r.cost?.meanMs ?? 0);
+  const worstCpu = cpu.length === 0 ? 0 : Math.max(...cpu);
+  const ratios = rows.filter((r) => r.onFps > 0).map((r) => r.offFps / r.onFps);
+  const worstRatio = ratios.length === 0 ? 0 : Math.max(...ratios);
+  // A frame's whole budget at 60 fps, for scale — the number the CPU
+  // side has to be compared against to mean anything.
+  const BUDGET_MS = 1000 / 60;
+  log(`CPU: the sea's own JS costs at most ${worstCpu.toFixed(3)} ms a frame across the rungs `
+    + `— ${((100 * worstCpu) / BUDGET_MS).toFixed(1)}% of a 60 fps frame.`);
+  log(`GPU: switching the layer off is worth up to ${worstRatio.toFixed(2)}x the frame rate.`);
+  if (worstCpu < BUDGET_MS / 10 && worstRatio > 1.2) {
+    log('FINDING: the sea spends on the GPU, not the CPU. The texture rung and the');
+    log('         sheet vertex counts are the levers; there is nothing to win in its JS.');
+  } else if (worstCpu >= BUDGET_MS / 10) {
+    log(`FINDING: the sea's own JS is ${worstCpu.toFixed(2)} ms a frame, which is not free. `
+      + 'Look at the refill before touching the shader.');
+  } else {
+    log('FINDING: the layer costs little either way in this view — measure with more water in frame.');
+  }
+  log('(SwiftShader is a software rasteriser. The CPU milliseconds are real and portable;');
+  log(' the frame-rate ratio is a smell test, and neither is a phone number.)');
+}
+
 async function main() {
   if (!existsSync(DIST_INDEX)) {
     fail('dist/index.html is missing. Run `npm run build` first.');
@@ -375,6 +503,7 @@ async function main() {
       if (message.type() === 'error') fail(`console error: ${message.text()}`);
     });
     await drive(page, url);
+    await sweep(browser, url);
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));
   } finally {

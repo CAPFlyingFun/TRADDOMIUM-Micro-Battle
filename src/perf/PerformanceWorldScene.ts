@@ -75,7 +75,7 @@ import { TerrainView } from '../terrain/TerrainView';
 import { OceanView } from '../sea/OceanView';
 import { SeaTextures } from '../sea/SeaTextures';
 import { SeaSwell } from '../world/sea/swell';
-import { tierFor, type TextureTier } from '../assets/textureQuality';
+import { resolveTier, tierFor, type TextureTier } from '../assets/textureQuality';
 import { LoadProgress } from '../world/LoadProgress';
 import { COARSE_BYTES, decodeCoarse } from '../world/dem';
 import { repairGrid } from '../world/demRepair';
@@ -85,7 +85,7 @@ import type { WorldPoint } from '../world/coords';
 import { BotHud, type BotReadout } from './BotHud';
 import { FrameStats } from './FrameStats';
 import { FreeFlyCamera, headingOfYaw, yawForHeading } from './FreeFlyCamera';
-import { HUD_HZ, PerfHud, type SessionLink, type SessionReadout } from './PerfHud';
+import { HUD_HZ, PerfHud, type SeaReadout, type SessionLink, type SessionReadout } from './PerfHud';
 import { BUILT_LAYERS, LayerToggles } from './layerToggles';
 import { PERF_WORLD_SCENE_ID } from './perfTool';
 
@@ -121,6 +121,19 @@ export interface PerfWorldSettings {
 export interface PerformanceWorldHooks {
   /** PAUSE was pressed. What a pause means — state, overlay, whether the world may freeze — is the owner's. */
   onPause(): void;
+  /**
+   * A texture rung named by the ADDRESS BAR, overriding the one the
+   * player's quality setting maps to. Null or absent is the ordinary
+   * case: the setting decides.
+   *
+   * Here as a hook for the same reason the survey is: perf/ may not read
+   * a browser global, and `app/registerScenes.ts` is the one place that
+   * reads the address bar (`assets/textureQuality.ts` owns the rule).
+   * It exists because CLAUDE.md requires the sea to be testable at
+   * ultra-low on a phone, and ultra-low is not one of the player's three
+   * choices.
+   */
+  readonly tierOverride?: TextureTier | null;
   /** Progress of `enter()`: a 0..1 fraction and an ETA in ms (null before there is a rate), for the loading screen. */
   onLoadProgress?(fraction: number, etaMs: number | null): void;
   /**
@@ -645,7 +658,7 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
      */
     const buildOcean = (): void => {
       if (field === null || swell === null) return;
-      const tier = tierFor(hooks.settings?.().quality ?? 'medium');
+      const tier = resolveTier(hooks.tierOverride ?? null, tierFor(hooks.settings?.().quality ?? 'medium'));
       if (ocean !== null && builtTier === tier) return;
       if (ocean) {
         three.remove(ocean.group);
@@ -667,6 +680,13 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
       // The sheets have to be filled before the first drawn frame, or
       // the sea is a flat plane at the origin for one frame.
       ocean.update(fly.pose().at, fly.camera.far);
+      // AND THAT FILL IS LOAD TIME, NOT FRAME TIME. It happens behind the
+      // loading screen, or behind the pause menu on a quality change, and
+      // no frame was dropped for it. Left in, it would land on the first
+      // frame that ticks and stand as the cost record's peak forever —
+      // reporting a hitch the player never saw and hiding the first real
+      // one behind it.
+      ocean.resetCost();
     };
 
     /** Show or hide the water. */
@@ -932,12 +952,40 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         }
         reached('terrain');
 
+        /**
+         * THE ANSWER TO "CPU OR GPU", on the device rather than in a
+         * probe. The ocean times its own `update` and `tick`; the HUD is
+         * handed four numbers and never learns what an OceanView is.
+         *
+         * Read against the frame rate the lines sit under: a sea costing
+         * a fraction of a millisecond while the frame rate halves is a
+         * sea spending on the GPU, and the texture rung is the lever. The
+         * record is read ONCE — it is a fresh frozen snapshot per call,
+         * and taking three would be three of them.
+         *
+         * The vertex count is NOT passed on: it is fixed per rung
+         * (`sheetVertexCount`), so on screen it would be the rung said
+         * twice, and screen width is the scarcest thing the HUD has.
+         */
+        const seaCost = (): SeaReadout | null => {
+          if (ocean === null) return null;
+          const cost = ocean.cost;
+          return { meanMs: cost.meanMs, peakMs: cost.peakMs, tier: ocean.tier };
+        };
+
         hud = new PerfHud(ctx.uiLayer, {
           layers: () => toggles.list(),
           onLayerToggle: (id, enabled) => {
             toggles.setEnabled(id, enabled);
           },
           session: sessionReadout,
+          // THE COLUMN EXISTS ONLY WHERE A SEA DOES. Whether this world
+          // has one is settled by now — `buildOcean` has already run, and
+          // it can only ever succeed if the survey downloaded — so an
+          // empty world offers no hook at all rather than a SEA line
+          // reading "not built yet" about an ocean that is never coming.
+          // Same rule as SESSION, and the same rule as the layer labels.
+          ...(ocean === null ? {} : { sea: seaCost }),
         });
         pauseButton = actionButton(ACTION.pause, 'Pause', () => hooks.onPause());
         pauseButton.style.cssText =

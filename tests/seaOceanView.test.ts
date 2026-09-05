@@ -487,3 +487,132 @@ describe('the far sheet reaches as far as the camera can see', () => {
     expect(position.getX(0)).toBe(before);
   });
 });
+
+/**
+ * WHAT THE OCEAN COSTS THE CPU — the measurement Joshua asked this phase
+ * for: "probably wasn't optimized the best between CPU, and GPU."
+ *
+ * The claim under test is not a number — a number measured here is this
+ * machine's, not a phone's. It is that the RECORD IS HONEST: that it
+ * counts the frames that happened, that it does not average away the
+ * frame a refill lands in, and that a window a probe opens is a window
+ * that closes on fixed numbers.
+ */
+describe('what the ocean costs the CPU', () => {
+  it('has measured nothing before the first frame, and says so without dividing by zero', () => {
+    const { view } = ocean();
+    expect(view.cost.frames).toBe(0);
+    expect(view.cost.meanMs).toBe(0);
+    expect(view.cost.totalMs).toBe(0);
+    expect(view.cost.refills).toBe(0);
+    view.dispose();
+  });
+
+  it('counts a frame at TICK, not at update — one clock, one frame', () => {
+    // update() can be called for reasons that are not a frame (a rebase,
+    // a first fill behind the loading screen). tick() is documented as
+    // the one-a-frame call, so it is the one that closes a frame.
+    const { view } = ocean();
+    view.update(OFFSHORE, 0);
+    expect(view.cost.frames).toBe(0);
+    view.tick(1 / 60);
+    expect(view.cost.frames).toBe(1);
+    view.dispose();
+  });
+
+  it('counts the frames that refilled, and only those', () => {
+    const { view } = ocean();
+    view.update(OFFSHORE, 0);
+    view.tick(1 / 60);
+    expect(view.cost.refills).toBe(1); // both sheets, first fill
+    for (let i = 0; i < 5; i += 1) {
+      view.update(OFFSHORE, 0);
+      view.tick(1 / 60);
+    }
+    expect(view.cost.frames).toBe(6);
+    expect(view.cost.refills).toBe(1); // it never moved
+    view.dispose();
+  });
+
+  it('keeps the mean and the total agreeing, so neither can be read as the other', () => {
+    const { view } = ocean();
+    for (let i = 0; i < 4; i += 1) {
+      view.update(OFFSHORE, 0);
+      view.tick(1 / 60);
+    }
+    const cost = view.cost;
+    expect(cost.meanMs).toBeCloseTo(cost.totalMs / cost.frames, 12);
+    expect(cost.totalMs).toBeGreaterThan(0);
+    expect(cost.vertices).toBe(view.vertexCount);
+    view.dispose();
+  });
+
+  it('hands out a SNAPSHOT — the number a probe read does not move under it', () => {
+    const { view } = ocean();
+    view.update(OFFSHORE, 0);
+    view.tick(1 / 60);
+    const first = view.cost;
+    for (let i = 0; i < 3; i += 1) {
+      view.update(OFFSHORE, 0);
+      view.tick(1 / 60);
+    }
+    expect(first.frames).toBe(1);
+    expect(view.cost.frames).toBe(4);
+    view.dispose();
+  });
+
+  it('starts a clean window on resetCost, and drops the half-frame in flight', () => {
+    const { view } = ocean();
+    view.update(OFFSHORE, 0);
+    view.tick(1 / 60);
+    view.update(OFFSHORE, 0); // half a frame: update has run, tick has not
+    view.resetCost();
+    const cleared = view.cost;
+    expect(cleared.frames).toBe(0);
+    expect(cleared.totalMs).toBe(0);
+    expect(cleared.peakMs).toBe(0);
+    expect(cleared.refills).toBe(0);
+    view.tick(1 / 60);
+    // The dropped half is not carried into the new window's first frame.
+    expect(view.cost.frames).toBe(1);
+    view.dispose();
+  });
+
+  it('THE COST IS SPIKY, and the peak is what shows it', () => {
+    // This is the substantive claim, and the reason a mean alone would
+    // have been a misleading answer to Joshua's question. A refill frame
+    // reads a whole sheet out of the heightfield — 241**2 on a medium
+    // near sheet — while an ordinary frame is two uniform writes and a
+    // comparison. The margin between them is about three orders of
+    // magnitude, so this is a timing assertion that does not need luck.
+    const { view } = ocean();
+    view.update(OFFSHORE, 0);
+    view.tick(1 / 60);
+    const refill = view.cost.peakMs;
+    expect(refill).toBeGreaterThan(0);
+
+    view.resetCost();
+    for (let i = 0; i < 20; i += 1) {
+      view.update(OFFSHORE, 0);
+      view.tick(1 / 60);
+    }
+    const still = view.cost;
+    expect(still.refills).toBe(0);
+    expect(still.peakMs).toBeLessThan(refill);
+    view.dispose();
+  });
+
+  it('counts a frame the FAR sheet refilled on its own, which growing it does', () => {
+    // A reach change re-spaces the far sheet, which clears its centre and
+    // refills it while the near sheet has not moved at all. Watching only
+    // the near sheet would have called that frame free.
+    const { view } = ocean();
+    view.update(OFFSHORE, 0);
+    view.tick(1 / 60);
+    view.resetCost();
+    view.update(OFFSHORE, 7_200_000);
+    view.tick(1 / 60);
+    expect(view.cost.refills).toBe(1);
+    view.dispose();
+  });
+});

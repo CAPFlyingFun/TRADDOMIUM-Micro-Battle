@@ -19,8 +19,8 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  MAX_MOBILE_TIER, MOBILE_TIERS, TEXTURE_QUALITY, TEXTURE_TIERS, TIER_FOR_QUALITY,
-  textureBytes, textureSize, tierFor, tierToUse, type TextureTier,
+  MAX_MOBILE_TIER, MOBILE_TIERS, TEXTURE_QUALITY, TEXTURE_TIERS, TIER_FOR_QUALITY, TIER_QUERY_PARAM,
+  isTextureTier, resolveTier, textureBytes, textureSize, tierFor, tierToUse, type TextureTier,
 } from '../src/assets/textureQuality';
 import { QUALITY_LEVELS, isQuality } from '../src/ui/settingsStore';
 
@@ -122,5 +122,64 @@ describe('the player’s setting and the ladder agree', () => {
     const chosen = QUALITY_LEVELS.map(tierFor);
     expect(chosen).not.toContain('ultra-low');
     expect(chosen).not.toContain('ultra-high');
+  });
+});
+
+/**
+ * THE ADDRESS-BAR OVERRIDE — how ultra-low becomes testable on a phone.
+ *
+ * CLAUDE.md carries a standing requirement from Joshua for the ocean:
+ * "testable at medium, low and ultra-low on his phone". The player's
+ * setting names three levels and none of them is ultra-low, by the
+ * deliberate design at the top of this module — so without a way in by
+ * address, that requirement is simply unmet, and a rung nobody can select
+ * is a rung nobody can test.
+ */
+describe('the tier override', () => {
+  it('names the parameter once, so the reader and the writer cannot disagree', () => {
+    expect(TIER_QUERY_PARAM).toBe('tier');
+  });
+
+  it('REACHES ULTRA-LOW, which is the whole reason it exists', () => {
+    // The requirement, as a test. `tierFor` cannot return this rung from
+    // any of the player's three levels; the override can.
+    expect(resolveTier('ultra-low', tierFor('medium'))).toBe('ultra-low');
+    expect(Object.values(TIER_FOR_QUALITY)).not.toContain('ultra-low');
+  });
+
+  it('reaches every rung on the ladder, so one build can sweep all five', () => {
+    for (const tier of TEXTURE_TIERS) {
+      expect(resolveTier(tier, 'medium')).toBe(tier);
+    }
+  });
+
+  it('falls back to the player’s choice when the address bar says nothing', () => {
+    expect(resolveTier(null, 'low')).toBe('low');
+    expect(resolveTier(null, tierFor('high'))).toBe('high');
+  });
+
+  it('IGNORES a value that is not a rung rather than refusing to start', () => {
+    // It arrives from an address bar, where a typo is ordinary, and the
+    // HUD prints the rung actually in use — so a typo shows up as the
+    // wrong word on screen rather than as a phone that will not open.
+    for (const junk of ['ULTRA-LOW', 'ultralow', 'potato', '', '512', 'ultra_low']) {
+      expect(resolveTier(junk, 'medium'), junk).toBe('medium');
+    }
+  });
+
+  it('narrows rather than casts, so a caller gets a TextureTier or nothing', () => {
+    expect(isTextureTier('ultra-high')).toBe(true);
+    expect(isTextureTier('medium')).toBe(true);
+    expect(isTextureTier('potato')).toBe(false);
+    expect(isTextureTier(null)).toBe(false);
+    expect(isTextureTier(512)).toBe(false);
+    expect(isTextureTier(undefined)).toBe(false);
+  });
+
+  it('offers a phone every rung the ladder says a phone may have', () => {
+    // The override is a testing door, not a way past the honesty rule:
+    // ULTRA_HIGH is still not something a phone build offers a player.
+    expect(MOBILE_TIERS).not.toContain('ultra-high');
+    expect(MOBILE_TIERS).toContain('ultra-low');
   });
 });

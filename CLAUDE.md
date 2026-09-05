@@ -151,6 +151,15 @@ imply more than exists; the honest caption is pinned by a test.
   points a running build at a local one — which is how a developer on
   `npm run relay:dev`, and `npm run probe:multiplayer`, reach a relay
   that is not the deployed one.
+- **The texture rung is the player's quality setting, and `?tier=` is the
+  way to reach one that is not.** `assets/textureQuality.ts` owns the rule
+  and `app/registerScenes.ts` reads the address bar, exactly as `?relay=`
+  does. It exists because ULTRA_LOW is deliberately not one of the
+  player's three levels and Joshua's Phase 3 brief requires the sea to be
+  testable at it on a phone. An override, never a setting: nothing is
+  stored, and the HUD's SEA line names the rung actually in use, so a
+  typo shows up as the wrong word rather than as a phone that will not
+  open.
 - A client-side PIN is a convenience, not security.
 - Every file in `scripts/` is wired to a `package.json` script or listed
   in `scripts/MANUAL.md`.
