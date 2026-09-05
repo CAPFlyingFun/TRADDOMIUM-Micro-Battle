@@ -37,7 +37,7 @@ import { COARSE_STEP, decodeCoarse } from '../src/world/dem';
 import { repairGrid } from '../src/world/demRepair';
 import { Heightfield } from '../src/world/heightfield';
 import { SeaSwell } from '../src/world/sea/swell';
-import { OceanView, SHEET_VERTICES, TIER_OCTAVES, sheetVertexCount } from '../src/sea/OceanView';
+import { OceanView, SHEET_VERTICES, TIER_OCTAVES, farCellFor, sheetVertexCount } from '../src/sea/OceanView';
 import type { SeaTextures } from '../src/sea/SeaTextures';
 import { TEXTURE_TIERS, type TextureTier } from '../src/assets/textureQuality';
 
@@ -372,5 +372,118 @@ describe('the far sheet still reaches the horizon at every tier', () => {
       expect(widest * 2, tier).toBeGreaterThan(822_400 - 2 * COARSE_STEP);
       view.dispose();
     }
+  });
+});
+
+/**
+ * THE DEFECT THE PROBE FOUND, AND THE FIX, PINNED.
+ *
+ * v0's ocean was 8.2 km across because v0's player was an ant on a beach,
+ * for whom that IS the horizon. This build's camera starts 1.5 km above
+ * the middle of Kauaʻi, twenty-four kilometres from the nearest coast, so
+ * both camera-following sheets were buried inside the island: the probe
+ * measured the ocean costing four times the frame and changing NOT ONE
+ * PIXEL of the world — every difference between the on and off shots was
+ * in the HUD.
+ *
+ * So the far sheet's span rides the camera's view distance, on a
+ * power-of-two ladder. At ant height it lands on v0's number exactly.
+ */
+describe('the far sheet reaches as far as the camera can see', () => {
+  const N = SHEET_VERTICES.medium.far;
+
+  it('is v0’s 8.2 km when the camera cannot see further', () => {
+    // An ant's view distance, and the floor. Nothing about the near-shore
+    // look changes from what was accepted.
+    expect(N * farCellFor(N, 0)).toBe(822_400);
+    expect(N * farCellFor(N, 60_000)).toBe(822_400);
+  });
+
+  it('covers twice the view distance once the camera climbs', () => {
+    // Twice, because the sheet is centred on the camera and has to reach
+    // that far in BOTH directions.
+    for (const reach of [500_000, 2_000_000, 7_200_000]) {
+      const span = N * farCellFor(N, reach);
+      expect(span, `reach ${reach}`).toBeGreaterThanOrEqual(2 * reach);
+    }
+  });
+
+  it('climbs by doublings, so the sheet is rebuilt rarely and never by a whisker', () => {
+    const base = farCellFor(N, 0);
+    for (const reach of [0, 1, 500_000, 2_000_000, 7_200_000, 1e9]) {
+      const ratio = farCellFor(N, reach) / base;
+      expect(Number.isInteger(Math.log2(ratio)), `reach ${reach} gave ${ratio}x`).toBe(true);
+    }
+  });
+
+  it('never grows without bound, whatever nonsense it is handed', () => {
+    const capped = farCellFor(N, 1e9);
+    for (const reach of [1e12, Infinity, NaN, -5]) {
+      expect(farCellFor(N, reach), String(reach)).toBeLessThanOrEqual(capped);
+      expect(farCellFor(N, reach)).toBeGreaterThan(0);
+    }
+    // A NaN or a negative reach is the floor, not the ceiling: a broken
+    // altitude must not silently buy the largest sheet there is.
+    expect(farCellFor(N, NaN)).toBe(farCellFor(N, 0));
+    expect(farCellFor(N, -5)).toBe(farCellFor(N, 0));
+  });
+
+  it('re-spaces the sheet in place rather than rebuilding it', () => {
+    // A new cell must not mean a new geometry, a new material or a
+    // recompiled program: it is a rewrite of the position attribute, and
+    // the depths follow on the same call.
+    const { view } = ocean('ultra-low');
+    view.update(OFFSHORE, 0);
+    const far = view.group.children[0] as THREE.Mesh;
+    const geometry = far.geometry;
+    const material = far.material;
+    const position = geometry.getAttribute('position') as THREE.BufferAttribute;
+    const before = position.getX(0);
+
+    view.update(OFFSHORE, 7_200_000);
+
+    expect(far.geometry).toBe(geometry);
+    expect(far.material).toBe(material);
+    expect(geometry.getAttribute('position')).toBe(position);
+    expect(Math.abs(position.getX(0))).toBeGreaterThan(Math.abs(before));
+    view.dispose();
+  });
+
+  it('refills the depths at the new spacing, not at the old', () => {
+    const { view } = ocean('ultra-low');
+    view.update(OFFSHORE, 0);
+    view.update(OFFSHORE, 7_200_000);
+    const far = view.group.children[0] as THREE.Mesh;
+    const depth = far.geometry.getAttribute('depth') as THREE.BufferAttribute;
+    const position = far.geometry.getAttribute('position') as THREE.BufferAttribute;
+    const centre = far.position;
+    // NOT `fround`-exact here, and the reason is the reach itself. The
+    // grown sheet's vertices run to ±4,000,000, where Float32 resolves a
+    // quarter of a unit — so the position this test reads back is not
+    // quite the double-precision one the fill sampled at, and the seabed
+    // slope turns that quarter unit into a fraction of a unit of depth
+    // (worst measured: 0.024). A centimetre of tolerance against depths
+    // of hundreds of thousands still catches a sheet refilled at the old
+    // spacing, which is what the test is for. The NEAR sheet's positions
+    // stay under ±4,300 and its check above is exact.
+    for (let i = 0; i < depth.count; i += 11) {
+      const at = world(centre.x + position.getX(i), centre.z + position.getZ(i));
+      expect(Math.abs(depth.getX(i) - -field.heightAt(at))).toBeLessThan(1);
+    }
+    view.dispose();
+  });
+
+  it('leaves the NEAR sheet alone, because it carries the swell', () => {
+    // Its 70-unit cell is what gives a 3.6 m wave six samples; growing it
+    // with the camera would alias the waves the moment anyone climbed.
+    // From a kilometre up there is no such wave to see, and that is the
+    // honest picture rather than a missing one.
+    const { view } = ocean('ultra-low');
+    view.update(OFFSHORE, 0);
+    const near = view.group.children[1] as THREE.Mesh;
+    const position = near.geometry.getAttribute('position') as THREE.BufferAttribute;
+    const before = position.getX(0);
+    view.update(OFFSHORE, 7_200_000);
+    expect(position.getX(0)).toBe(before);
   });
 });

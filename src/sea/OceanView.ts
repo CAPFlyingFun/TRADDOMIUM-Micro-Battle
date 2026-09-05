@@ -63,8 +63,54 @@ import type { SeaTextures } from './SeaTextures';
 import { makeWaterLook, type WaterLook } from './waterLook';
 import type { TextureTier } from '../assets/textureQuality';
 
-/** How far the far sheet reaches, world units across. The horizon. */
-const FAR_SPAN = 822_400;
+/**
+ * The far sheet's SMALLEST span, world units across — v0's exact 8.2 km,
+ * and the floor.
+ *
+ * IT IS A FLOOR AND NOT THE SIZE, and that is the one thing v0's ocean
+ * could not have known it needed. v0's player was an ant on a beach, so a
+ * sheet 4.1 km in every direction WAS the horizon. This build's camera
+ * starts 1.5 km above the middle of Kauaʻi, twenty kilometres from the
+ * nearest coast, and both sheets — which follow the camera — were
+ * therefore buried inside the island, drawing nothing while costing three
+ * times the frame. The probe caught it exactly: switching the ocean layer
+ * off changed the HUD and not one pixel of the world, because the water
+ * on screen was the terrain colouring its own seabed.
+ *
+ * So the span rides the camera's view distance, which the scene already
+ * computes for the far plane (`adaptDepth`). Same idea, same input, and
+ * at ant height it lands on v0's number.
+ */
+const FAR_SPAN_MIN = 822_400;
+
+/**
+ * How far the span may be doubled past that floor.
+ *
+ * Six doublings is 64x — 52,633,600 units, nine times the island — which
+ * covers the horizon from any altitude this camera reaches. The cap
+ * exists because a sheet has to end somewhere and a runaway `reach` (a
+ * NaN altitude, a far plane nobody clamped) must not ask for a lattice
+ * the size of the solar system.
+ */
+const FAR_SPAN_DOUBLINGS = 6;
+
+/**
+ * The far sheet's cell for a given view distance: the smallest step on a
+ * power-of-two ladder whose sheet covers twice the reach.
+ *
+ * A LADDER, so the sheet is rebuilt rarely and by whole factors. Riding
+ * the reach continuously would rewrite 37,249 positions and refill as
+ * many depths on any frame the altitude twitched; a doubling ladder
+ * changes only when the camera has genuinely changed scale, and each
+ * change is unambiguous.
+ */
+export function farCellFor(n: number, reach: number): number {
+  const base = FAR_SPAN_MIN / n;
+  const want = Number.isFinite(reach) ? Math.max(0, reach) * 2 : 0;
+  let cell = base;
+  for (let step = 0; step < FAR_SPAN_DOUBLINGS && n * cell < want; step += 1) cell *= 2;
+  return cell;
+}
 
 /**
  * The near sheet's vertex spacing. 70 units, so the 4.2 m swell gets six
@@ -148,8 +194,9 @@ interface Sheet {
   readonly look: WaterLook;
   readonly depthAttr: Float32Array;
   readonly n: number;
-  readonly cell: number;
-  readonly recentre: number;
+  /** Mutable on the far sheet only: its span rides the camera's reach. */
+  cell: number;
+  recentre: number;
   /** Where it is now, snapped to its own recentre lattice. Null until the first fill. */
   centre: WorldPoint | null;
   /** The heightfield revision the depths were read at. */
@@ -215,7 +262,7 @@ export class OceanView {
     farLook.material.polygonOffsetFactor = 6;
     farLook.material.polygonOffsetUnits = 40;
     farLook.material.depthWrite = false;
-    this.far = this.sheet(counts.far, FAR_SPAN / counts.far, farLook, 1);
+    this.far = this.sheet(counts.far, farCellFor(counts.far, 0), farLook, 1);
 
     const nearLook = makeWaterLook({
       ...skin,
@@ -261,8 +308,9 @@ export class OceanView {
    * bathymetry until the player happened to travel far enough to force a
    * re-anchor. The clipmap learned this the same way.
    */
-  update(at: WorldPoint): void {
+  update(at: WorldPoint, reach = 0): void {
     const revision = this.field.revision();
+    this.resize(this.far, farCellFor(this.far.n, reach));
     this.anchor(this.far, at, revision);
     if (this.anchor(this.near, at, revision)) {
       const centre = this.near.centre as WorldPoint;
@@ -278,6 +326,37 @@ export class OceanView {
       const corner = translate(centre, -(this.near.n * this.near.cell) / 2, -(this.near.n * this.near.cell) / 2);
       this.swell.setLattice({ ox: corner.wx, oz: corner.wz, cell: this.near.cell });
     }
+  }
+
+  /**
+   * Re-space a sheet's vertices, keeping their count.
+   *
+   * The lattice is a grid of offsets from the sheet's own centre, so a
+   * new cell is a rewrite of the position attribute and nothing else —
+   * no allocation, no new geometry, no new material and no recompile.
+   * Clearing the centre is what makes `anchor` refill the depths at the
+   * new spacing on the very same call.
+   */
+  private resize(sheet: Sheet, cell: number): void {
+    if (cell === sheet.cell) return;
+    sheet.cell = cell;
+    sheet.recentre = recentreOf(sheet.n, cell);
+    const span = sheet.n * cell;
+    const position = sheet.mesh.geometry.getAttribute('position') as THREE.BufferAttribute;
+    const xyz = position.array as Float32Array;
+    for (let cy = 0; cy < sheet.n; cy += 1) {
+      for (let cx = 0; cx < sheet.n; cx += 1) {
+        const i = (cy * sheet.n + cx) * 3;
+        xyz[i] = cx * cell - span / 2;
+        xyz[i + 2] = cy * cell - span / 2;
+      }
+    }
+    position.needsUpdate = true;
+    // A sphere sized for the old span would cull nothing here (both
+    // sheets are frustum-exempt) but would be a lie to anything that
+    // later asks the geometry how big it is.
+    sheet.mesh.geometry.computeBoundingSphere();
+    sheet.centre = null;
   }
 
   /** @returns whether the sheet moved or refilled. */

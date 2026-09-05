@@ -72,6 +72,10 @@ import type { GameSession, SessionSaveState } from '../session/GameSession';
 import { ActorViews } from '../view/ActorViews';
 import { TerrainStreamer } from '../terrain/TerrainStreamer';
 import { TerrainView } from '../terrain/TerrainView';
+import { OceanView } from '../sea/OceanView';
+import { SeaTextures } from '../sea/SeaTextures';
+import { SeaSwell } from '../world/sea/swell';
+import { tierFor, type TextureTier } from '../assets/textureQuality';
 import { LoadProgress } from '../world/LoadProgress';
 import { COARSE_BYTES, decodeCoarse } from '../world/dem';
 import { repairGrid } from '../world/demRepair';
@@ -98,6 +102,20 @@ export interface PerfWorldSettings {
   readonly invertY: boolean;
   /** Whether the perf HUD is shown at all. */
   readonly showFps: boolean;
+  /**
+   * The player's three-level quality choice.
+   *
+   * LIVE SINCE PHASE 3, and the ocean is what reads it: the texture rung
+   * it loads, how many ripple octaves its shader compiles, and how much
+   * geometry its two sheets carry. Changing it rebuilds the sea, which
+   * is why it is read on every state change rather than once — the pause
+   * menu is where it is changed and returning from it is a state change.
+   *
+   * Kept as the plain literals rather than importing `Quality` from
+   * ui/settingsStore: perf/ may not import ui/ (§3), and the whole point
+   * of this interface is that the document's owner builds it.
+   */
+  readonly quality: 'low' | 'medium' | 'high';
 }
 
 export interface PerformanceWorldHooks {
@@ -421,6 +439,14 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
     let streamer: TerrainStreamer | null = null;
     /** What the terrain toggle was at the last look, so a change is acted on once. */
     let terrainOn = false;
+    /** The sea. One swell for the whole scene — it is the ONE clock. */
+    let swell: SeaSwell | null = null;
+    let seaTextures: SeaTextures | null = null;
+    let ocean: OceanView | null = null;
+    /** What the ocean toggle was at the last look. */
+    let oceanOn = false;
+    /** The tier the sea was BUILT at, so a changed setting is noticed once and rebuilt once. */
+    let builtTier: TextureTier | null = null;
     /** The near plane the projection was last built with. */
     let builtNear = 0;
     let hud: PerfHud | null = null;
@@ -607,6 +633,78 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
     };
 
     /**
+     * Build the sea at the tier the player has chosen — or rebuild it,
+     * when they have chosen a different one.
+     *
+     * A TIER IS A COMPILED PROGRAM AND A LOADED TEXTURE, so it cannot be
+     * a uniform: the octave count is baked into the fragment shader and
+     * the texture rung is a different file. Rebuilding is the honest
+     * mechanism, and it is cheap because it happens on a state change —
+     * the pause menu is where the setting is changed, and returning from
+     * it is that change.
+     */
+    const buildOcean = (): void => {
+      if (field === null || swell === null) return;
+      const tier = tierFor(hooks.settings?.().quality ?? 'medium');
+      if (ocean !== null && builtTier === tier) return;
+      if (ocean) {
+        three.remove(ocean.group);
+        ocean.dispose();
+        ocean = null;
+      }
+      // The textures are the sea's, not a sheet's: one copy, shared by
+      // both sheets, freed here and nowhere else.
+      seaTextures?.dispose();
+      seaTextures = new SeaTextures({
+        tier,
+        deviceAnisotropy: ctx.renderer.gl.capabilities.getMaxAnisotropy(),
+        base: import.meta.env.BASE_URL,
+      });
+      ocean = new OceanView({ field, swell, textures: seaTextures, tier });
+      builtTier = tier;
+      three.add(ocean.group);
+      ocean.group.visible = oceanOn;
+      // The sheets have to be filled before the first drawn frame, or
+      // the sea is a flat plane at the origin for one frame.
+      ocean.update(fly.pose().at, fly.camera.far);
+    };
+
+    /** Show or hide the water. */
+    const syncOceanLayer = (): void => {
+      oceanOn = toggles.isEnabled('ocean');
+      if (ocean !== null) ocean.group.visible = oceanOn;
+      // THE SWELL'S LATTICE FOLLOWS THE DRAWN SHEET, so a hidden ocean
+      // must not leave gameplay sampling the chords of a mesh nobody is
+      // drawing. Registered on the next update when it comes back.
+      if (!oceanOn) swell?.clearLattice();
+    };
+
+    /**
+     * Point the sea at the camera and advance the ONE clock. One call a
+     * frame, and the only `tick` call site in the build.
+     */
+    const updateOcean = (dt: number): void => {
+      if (ocean === null) return;
+      if (toggles.isEnabled('ocean') !== oceanOn) syncOceanLayer();
+      if (!oceanOn) return;
+      // THE SEA REACHES AS FAR AS THE CAMERA CAN SEE. `adaptDepth` has
+      // already run this frame and put the far plane on the camera's
+      // altitude, so this is the same view distance the projection was
+      // just built with — and the far sheet is sized from it. Without
+      // this the sheets are the 8.2 km v0 gave an ant on a beach, which
+      // from 1.5 km above the middle of Kauaʻi is entirely inside the
+      // island: the probe measured the ocean costing three times the
+      // frame and changing not one pixel of the world.
+      //
+      // The NEAR sheet does not grow, and that is right rather than an
+      // oversight: it carries the swell, whose wavelengths are 3.6 m and
+      // 2.1 m, and from a kilometre up there is no such wave to resolve.
+      // It comes into its own as the camera descends.
+      ocean.update(fly.pose().at, fly.camera.far);
+      ocean.tick(dt);
+    };
+
+    /**
      * Show or hide the ground, and move the fog to the scale of whatever
      * is being looked at. Called when the toggle changes, not every frame.
      */
@@ -756,6 +854,10 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
       fly.setFov(s.fov);
       fly.setLook({ sensitivity: s.lookSensitivity, invertY: s.invertY });
       if (hud) hud.hidden = !s.showFps;
+      // The sea is a compiled program and a loaded texture per tier, so
+      // a changed quality setting is a rebuild. No-ops when it has not
+      // changed, which is every state change but the one that did.
+      buildOcean();
     };
 
     /** The save point: the camera, in world coordinates, through whichever session the app holds. */
@@ -819,6 +921,11 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
             field = new Heightfield(repairGrid(decodeCoarse(bytes)).grid);
             terrain = new TerrainView({ field });
             streamer = new TerrainStreamer({ field });
+            // THE SEA READS THE SAME GROUND, through the same object.
+            // Two heightfields would be two answers about where the
+            // shore is, and the sea is drawn against the shore.
+            swell = new SeaSwell({ groundAt: (at) => field!.heightAt(at) });
+            buildOcean();
           } catch (error) {
             console.error('[terrain] the survey did not load; the world is the empty one', error);
           }
@@ -867,6 +974,16 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
           // visible lurch the moment the world appears.
           terrain.update(fly.pose().at);
           adaptDepth();
+        }
+        // AND THE SEA WITH IT. The island is surrounded by water and a
+        // Kauaʻi with none is a mesa; the toggle is still how you measure
+        // what the ocean costs, which is the whole reason Joshua asked
+        // for the tiers. Its first fill has already happened inside
+        // `buildOcean`, behind the loading screen, for the same reason
+        // the terrain's did.
+        if (ocean !== null) {
+          toggles.setEnabled('ocean', true);
+          syncOceanLayer();
         }
 
         // The wire, last: the world is already whole and measurable
@@ -928,6 +1045,11 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         // After the camera, before anything is drawn: the ground is
         // placed against where the camera IS this frame, not where it was.
         updateTerrain();
+        // simDt, not rawDt: the sea is simulation and it must stop when the
+        // world is paused. rawDt here would leave the swell running under
+        // a frozen camera, and the ONE clock would then disagree with the
+        // dt every other system integrated on.
+        updateOcean(frame.simDt);
         if (net !== null) {
           netClockMs += Math.max(0, frame.rawDt) * 1000;
           // Stand over the spawn the authority named, the first time it
@@ -996,6 +1118,15 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         }
         capsuleList?.remove();
         capsuleList = null;
+        if (ocean) {
+          three.remove(ocean.group);
+          ocean.dispose();
+          ocean = null;
+        }
+        seaTextures?.dispose();
+        seaTextures = null;
+        swell = null;
+        builtTier = null;
         streamer?.dispose();
         streamer = null;
         if (terrain) {

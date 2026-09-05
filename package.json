@@ -15,6 +15,7 @@
     "probe:bot": "node scripts/probe-bot.mjs",
     "probe:relay": "node scripts/probe-relay.mjs",
     "probe:terrain": "node scripts/probe-terrain.mjs",
+    "probe:ocean": "node scripts/probe-ocean.mjs",
     "probe:multiplayer": "node scripts/probe-multiplayer.mjs",
     "bake:art": "node scripts/bakeArt.mjs",
     "bake:textures": "node scripts/bakeTextures.mjs",

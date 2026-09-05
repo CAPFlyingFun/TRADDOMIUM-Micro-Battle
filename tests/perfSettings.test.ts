@@ -88,7 +88,7 @@ function rig(initial: AppState, settings: () => PerfWorldSettings) {
 
 describe('PerformanceWorldScene settings hook', () => {
   it('applies fov and HUD visibility at enter() and re-reads only when the app state changes', async () => {
-    let current: PerfWorldSettings = { fov: 90, lookSensitivity: 1, invertY: false, showFps: true };
+    let current: PerfWorldSettings = { fov: 90, lookSensitivity: 1, invertY: false, showFps: true, quality: 'medium' };
     const r = rig('loading', () => current);
     await r.scene.enter();
     expect(r.app.state).toBe('playing');
@@ -102,7 +102,7 @@ describe('PerformanceWorldScene settings hook', () => {
     expect(r.reads()).toBe(1);
 
     // The player opened the pause menu, changed settings, and came back.
-    current = { fov: 75, lookSensitivity: 2, invertY: true, showFps: false };
+    current = { fov: 75, lookSensitivity: 2, invertY: true, showFps: false, quality: 'medium' };
     r.app.requestState('paused');
     r.scene.update({ rawDt: SIXTY, simDt: 0, elapsed: 0 });
     r.app.requestState('playing');
