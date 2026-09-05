@@ -18,11 +18,14 @@
  * not losing ground. The coarse lattice answers underneath, always.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { COARSE_SAMPLES, HD_TILE_BYTES, HD_TILE_SAMPLES, hdTileName, type DemGrid, type HdTileId } from '../src/world/dem';
+import {
+  COARSE_SAMPLES, HD_TILE_BYTES, HD_TILE_SAMPLES, HD_TILE_SPAN, hdTileName, hdTilesNear,
+  type DemGrid, type HdTileId,
+} from '../src/world/dem';
 
 const HD_TILE_SAMPLE_COUNT = HD_TILE_SAMPLES * HD_TILE_SAMPLES;
 import { Heightfield } from '../src/world/heightfield';
-import { TerrainStreamer } from '../src/terrain/TerrainStreamer';
+import { KEEP_REACH, MAX_RESIDENT, TerrainStreamer, WANT_REACH } from '../src/terrain/TerrainStreamer';
 import { ISLAND_SPAN, world } from '../src/world/coords';
 
 const flat = (side: number, decimetres: number): DemGrid => {
@@ -146,20 +149,40 @@ describe('what it lets go', () => {
     expect(Number.isFinite(field.heightAt(home))).toBe(true);
   });
 
-  it('holds a tile that is merely nearby, so drifting over a boundary is not a re-download', async () => {
-    // THE HYSTERESIS. Without the gap between want and keep, a camera
-    // sitting on a tile edge drops and re-fetches 526 KB as it drifts.
-    const { streamer, fetchTile, settle } = lab({ maxInFlight: 9 });
+  it('holds a tile the camera has merely left, so drifting over a boundary is not a re-download', async () => {
+    // THE HYSTERESIS, and the step it takes to actually test it.
+    //
+    // An earlier version of this stepped 50,000 units and asserted no
+    // extra fetch — but a tile span is 700,000, so 50,000 is a fourteenth
+    // of one and `hdTilesNear` returns the SAME nine tiles at both ends.
+    // Nothing was ever eviction-eligible, the keep radius was never
+    // consulted, and setting KEEP_REACH equal to WANT_REACH — precisely
+    // the breakage this test is named for — left the whole file green.
+    //
+    // A whole tile span is the smallest step that changes the wanted set
+    // while the keep set still holds what was dropped from it. That
+    // difference IS the hysteresis.
+    const { streamer, fetchTile, asked, settle } = lab({ maxInFlight: 16 });
     streamer.update(world(0, 0));
     await settle();
-    const afterFirst = fetchTile.mock.calls.length;
-    // A step far smaller than the keep radius: nothing may be dropped and
-    // so nothing already held may be asked for again.
-    streamer.update(world(50_000, 50_000));
+    const home = [...asked];
+    expect(home.length).toBeGreaterThan(0);
+
+    // One tile span east: the wanted set genuinely moves off some of them.
+    const away = world(HD_TILE_SPAN, 0);
+    expect(hdTilesNear(away, WANT_REACH).map(hdTileName).sort())
+      .not.toEqual(hdTilesNear(world(0, 0), WANT_REACH).map(hdTileName).sort());
+    streamer.update(away);
     await settle();
+
+    // Come back. Nothing that was held may have been asked for twice.
     streamer.update(world(0, 0));
     await settle();
-    expect(fetchTile.mock.calls.length).toBe(afterFirst);
+    const counts = new Map();
+    for (const name of asked) counts.set(name, (counts.get(name) ?? 0) + 1);
+    const twice = [...counts].filter(([, n]) => n > 1).map(([name]) => name);
+    expect(twice).toEqual([]);
+    expect(fetchTile.mock.calls.length).toBe(asked.length);
   });
 
   it('lets bytes still in the air go when it is disposed, without touching the field', async () => {
@@ -210,5 +233,22 @@ describe('what it hands the heightfield', () => {
     expect(streamer.status().resident).toBe(9);
     expect(field.sample(world(0, 0)).detail).toBe('hd');
     expect(field.heightAt(world(0, 0))).toBeCloseTo(-40_000, 6);
+  });
+});
+
+describe('what it costs to hold', () => {
+  it('states a resident ceiling that matches the radii it actually keeps', () => {
+    // The module's first comment said nine tiles and 4.7 MB, which is the
+    // WANTED set. Residency is bounded by KEEP_REACH, not WANT_REACH, and
+    // that square can touch four tiles on each axis. On a phone the number
+    // that matters is the one actually held.
+    const worst = Math.max(
+      ...[0, HD_TILE_SPAN / 2, HD_TILE_SPAN / 3].map((offset) =>
+        hdTilesNear(world(offset, offset), KEEP_REACH).length),
+    );
+    expect(worst).toBe(MAX_RESIDENT);
+    expect(MAX_RESIDENT * HD_TILE_BYTES).toBeLessThan(9 * 1024 * 1024);
+    // And the gap the hysteresis depends on is real.
+    expect(KEEP_REACH).toBeGreaterThan(WANT_REACH);
   });
 });

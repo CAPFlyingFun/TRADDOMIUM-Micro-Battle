@@ -37,9 +37,9 @@
  * Pure: no three, no DOM, no fetch. `src/world/` is core, so the
  * authority can stand an actor on the ground without a renderer.
  */
-import { ISLAND_HALF_SPAN, COARSE_STEP, HD_STEP, HD_TILE_SAMPLES, hdTileKey, hdTileName, heightOf, type DemGrid, type HdTileId } from './dem';
+import { ISLAND_HALF_SPAN, COARSE_STEP, HD_STEP, HD_TILES_ACROSS, HD_TILE_SAMPLES, hdTileName, heightOf, type DemGrid, type HdTileId } from './dem';
 import { countHoles } from './demRepair';
-import { world, type WorldPoint } from './coords';
+import type { WorldPoint } from './coords';
 
 /** Mean sea level, in world units. The datum every stored sample is measured from. */
 export const SEA_LEVEL = 0;
@@ -62,12 +62,40 @@ export interface Normal {
 
 export class Heightfield {
   private readonly coarse: DemGrid;
-  private readonly tiles = new Map<string, DemGrid>();
+  /**
+   * The 64 tile slots, flat and indexed by `row * 8 + col`.
+   *
+   * A Map keyed by name was the obvious thing and it cost a two-character
+   * STRING BUILD on every height read — and a ring refill is 21,000 of
+   * them. The grid is 8 x 8 and fixed by the survey, so an array indexed
+   * by arithmetic answers the same question with no allocation at all.
+   */
+  private readonly tiles: (DemGrid | null)[] = new Array(HD_TILES_ACROSS * HD_TILES_ACROSS).fill(null);
+
+  /**
+   * Bumped whenever the ground itself changes — a tile arriving or being
+   * evicted.
+   *
+   * WHY IT EXISTS: a renderer caches what it read. `TerrainView` fills a
+   * ring once and then only refills it when the ring MOVES, which is
+   * correct while the field is immutable and silently wrong the moment a
+   * streamed tile lands: the mesh keeps drawing coarse heights under a
+   * camera that is standing still, and the streaming does nothing at all
+   * until the player happens to travel far enough. One counter, compared
+   * per frame, is what lets a cache know it is stale without this class
+   * knowing anything about who is caching.
+   */
+  private rev = 0;
 
   /** Throws unless the coarse grid has been through `demRepair`. */
   constructor(coarse: DemGrid) {
     assertRepaired(coarse, 'the coarse grid');
     this.coarse = coarse;
+  }
+
+  /** The ground's revision. Changes only when a tile arrives or leaves. */
+  revision(): number {
+    return this.rev;
   }
 
   /** Make a high-detail tile resident. Throws unless it has been through `demRepair`. */
@@ -76,37 +104,72 @@ export class Heightfield {
       throw new Error(`heightfield: tile ${hdTileName(id)} must be ${HD_TILE_SAMPLES} samples a side, got ${grid.side}`);
     }
     assertRepaired(grid, `tile ${hdTileName(id)}`);
-    this.tiles.set(hdTileKey(id), grid);
+    const slot = slotOf(id.col, id.row);
+    if (slot < 0) throw new Error(`heightfield: ${hdTileName(id)} is not a tile of this survey`);
+    this.tiles[slot] = grid;
+    this.rev += 1;
   }
 
   hasTile(id: HdTileId): boolean {
-    return this.tiles.has(hdTileKey(id));
+    const slot = slotOf(id.col, id.row);
+    return slot >= 0 && this.tiles[slot] !== null;
   }
 
   /** Evict a tile. The ground does not vanish — reads there fall back to the coarse lattice. */
   dropTile(id: HdTileId): boolean {
-    return this.tiles.delete(hdTileKey(id));
+    const slot = slotOf(id.col, id.row);
+    if (slot < 0 || this.tiles[slot] === null) return false;
+    this.tiles[slot] = null;
+    this.rev += 1;
+    return true;
   }
 
   residentTiles(): string[] {
-    return [...this.tiles.keys()].sort();
+    const names: string[] = [];
+    for (let row = 0; row < HD_TILES_ACROSS; row += 1) {
+      for (let col = 0; col < HD_TILES_ACROSS; col += 1) {
+        if (this.tiles[slotOf(col, row)] !== null) names.push(hdTileName({ col, row }));
+      }
+    }
+    return names.sort();
   }
 
-  /** How high the ground is, in world units. The hot path: no allocation. */
+  /** How high the ground is, in world units. THE HOT PATH: no allocation, no string. */
   heightAt(at: WorldPoint): number {
-    const tile = this.tileFor(at);
-    if (tile) return this.readTile(tile.grid, at);
-    return bilinear(this.coarse, gridX(at.wx, COARSE_STEP), gridX(at.wz, COARSE_STEP));
+    return this.read(at.wx, at.wz);
+  }
+
+  /**
+   * The same read from bare numbers.
+   *
+   * Deliberately NOT exported. The public door takes a `WorldPoint` and
+   * that is the seam this project exists to keep — but inside the class,
+   * where both numbers demonstrably came from one, building a fresh
+   * branded object per sample is 21,000 allocations a ring refill for no
+   * safety at all.
+   */
+  private read(wx: number, wz: number): number {
+    const hd = gridX(wx, HD_STEP);
+    const hz = gridX(wz, HD_STEP);
+    const span = HD_TILE_SAMPLES - 1;
+    const col = clamp(Math.floor(hd / span), 0, HD_TILES_ACROSS - 1);
+    const row = clamp(Math.floor(hz / span), 0, HD_TILES_ACROSS - 1);
+    const grid = this.tiles[row * HD_TILES_ACROSS + col];
+    if (grid) return bilinear(grid, clamp(hd - col * span, 0, span), clamp(hz - row * span, 0, span));
+    return bilinear(this.coarse, gridX(wx, COARSE_STEP), gridX(wz, COARSE_STEP));
   }
 
   /** The same read, saying which lattice answered it. */
   sample(at: WorldPoint): HeightSample {
-    const tile = this.tileFor(at);
-    if (tile) return { height: this.readTile(tile.grid, at), detail: 'hd' };
-    return {
-      height: bilinear(this.coarse, gridX(at.wx, COARSE_STEP), gridX(at.wz, COARSE_STEP)),
-      detail: 'coarse',
-    };
+    return { height: this.read(at.wx, at.wz), detail: this.detailAt(at) };
+  }
+
+  /** Which lattice would answer a read here. */
+  detailAt(at: WorldPoint): Detail {
+    const span = HD_TILE_SAMPLES - 1;
+    const col = clamp(Math.floor(gridX(at.wx, HD_STEP) / span), 0, HD_TILES_ACROSS - 1);
+    const row = clamp(Math.floor(gridX(at.wz, HD_STEP) / span), 0, HD_TILES_ACROSS - 1);
+    return this.tiles[row * HD_TILES_ACROSS + col] ? 'hd' : 'coarse';
   }
 
   /**
@@ -115,46 +178,41 @@ export class Heightfield {
    * from, so lighting and footing cannot disagree.
    */
   normalAt(at: WorldPoint): Normal {
-    const step = this.hasTile(hdTileOf(at)) ? HD_STEP : COARSE_STEP;
-    const east = this.heightAt(world(at.wx + step, at.wz));
-    const west = this.heightAt(world(at.wx - step, at.wz));
-    const south = this.heightAt(world(at.wx, at.wz + step));
-    const north = this.heightAt(world(at.wx, at.wz - step));
-    // The gradient over a central difference; the normal is its negation, up.
-    const nx = (west - east) / (2 * step);
-    const nz = (north - south) / (2 * step);
-    const length = Math.hypot(nx, 1, nz);
-    return { nx: nx / length, ny: 1 / length, nz: nz / length };
+    const step = this.detailAt(at) === 'hd' ? HD_STEP : COARSE_STEP;
+    const east = this.read(at.wx + step, at.wz);
+    const west = this.read(at.wx - step, at.wz);
+    const south = this.read(at.wx, at.wz + step);
+    const north = this.read(at.wx, at.wz - step);
+    return normalOfGradient((west - east) / (2 * step), (north - south) / (2 * step));
   }
 
   /** Steepness in degrees from horizontal, 0 flat and 90 a wall. */
   slopeDegrees(at: WorldPoint): number {
-    const { ny } = this.normalAt(at);
-    return Math.acos(Math.min(1, Math.max(-1, ny))) * (180 / Math.PI);
-  }
-
-  private tileFor(at: WorldPoint): { id: HdTileId; grid: DemGrid } | null {
-    const id = hdTileOf(at);
-    const grid = this.tiles.get(hdTileKey(id));
-    return grid ? { id, grid } : null;
-  }
-
-  /** A read inside one tile, in that tile's own sample coordinates. */
-  private readTile(grid: DemGrid, at: WorldPoint): number {
-    const id = hdTileOf(at);
-    const span = HD_TILE_SAMPLES - 1;
-    const col = clamp(gridX(at.wx, HD_STEP) - id.col * span, 0, span);
-    const row = clamp(gridX(at.wz, HD_STEP) - id.row * span, 0, span);
-    return bilinear(grid, col, row);
+    return slopeOfUp(this.normalAt(at).ny);
   }
 }
 
-/** Which tile a point falls in, clamped — the same rule `dem.hdTileAt` uses, on clamped input. */
-function hdTileOf(at: WorldPoint): HdTileId {
-  const span = HD_TILE_SAMPLES - 1;
-  const col = Math.floor(gridX(at.wx, HD_STEP) / span);
-  const row = Math.floor(gridX(at.wz, HD_STEP) / span);
-  return { col: clamp(col, 0, 7), row: clamp(row, 0, 7) };
+/**
+ * A normal from a gradient, and the slope from a normal's up component.
+ *
+ * Shared with the terrain renderer, which derives its vertex normals from
+ * the heights it has ALREADY read rather than paying for four more reads
+ * per vertex — the two must agree, so the arithmetic lives in one place.
+ */
+export function normalOfGradient(gx: number, gz: number): Normal {
+  const length = Math.hypot(gx, 1, gz);
+  return { nx: gx / length, ny: 1 / length, nz: gz / length };
+}
+
+export function slopeOfUp(ny: number): number {
+  return Math.acos(Math.min(1, Math.max(-1, ny))) * (180 / Math.PI);
+}
+
+/** A tile's slot in the flat array, or -1 when it is not a tile of this survey. */
+function slotOf(col: number, row: number): number {
+  if (!Number.isInteger(col) || !Number.isInteger(row)) return -1;
+  if (col < 0 || row < 0 || col >= HD_TILES_ACROSS || row >= HD_TILES_ACROSS) return -1;
+  return row * HD_TILES_ACROSS + col;
 }
 
 /**

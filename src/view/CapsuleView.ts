@@ -76,11 +76,21 @@ export class CapsuleView {
     this.update(state);
   }
 
-  /** Every frame, with the state as the authority holds it. */
-  update(state: ActorState): void {
+  /**
+   * Every frame, with the state as the authority holds it.
+   *
+   * `ground` is how high the terrain is under this actor, in render
+   * units, and `state.height` is measured FROM it. The authority cannot
+   * know about terrain — it is a relay running a pure `Host` with no DEM —
+   * so an actor's height has to mean height above whatever it is standing
+   * on, and the ground is added here, at the render boundary, where the
+   * terrain is known. On flat ground (the empty world, and every build
+   * before terrain existed) it is 0 and this is exactly what it was.
+   */
+  update(state: ActorState, ground = 0): void {
     // THE RENDER BOUNDARY: the only WorldPoint → LocalPoint conversion in the view.
     const at = toLocal(state.at);
-    this.object.position.set(at.lx, state.height, at.lz);
+    this.object.position.set(at.lx, ground + state.height, at.lz);
     this.object.rotation.y = state.heading;
 
     if (state.color !== this.color) {

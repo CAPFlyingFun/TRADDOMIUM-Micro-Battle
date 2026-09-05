@@ -62,6 +62,7 @@
  */
 import * as THREE from 'three';
 import { ACTION, actionButton } from '../app/actions';
+import { DEBUG_CAPSULE_TUNING } from '../actor/CapsuleTuning';
 import type { AppState } from '../app/AppState';
 import type { AppScene, FrameInfo, SceneContext, SceneFactory } from '../app/Scene';
 import {
@@ -76,6 +77,7 @@ import { COARSE_BYTES, decodeCoarse } from '../world/dem';
 import { repairGrid } from '../world/demRepair';
 import { Heightfield } from '../world/heightfield';
 import { toLocal } from '../world/origin';
+import type { WorldPoint } from '../world/coords';
 import { BotHud, type BotReadout } from './BotHud';
 import { FrameStats } from './FrameStats';
 import { FreeFlyCamera, headingOfYaw, yawForHeading } from './FreeFlyCamera';
@@ -277,13 +279,26 @@ const START = { x: 0, y: 25, z: 80, yaw: 0, pitch: -0.22 } as const;
 /**
  * THE ISLAND IS NOT AN ANT-SIZED ROOM, and the empty world's numbers do
  * not survive contact with it. The grid is 2,000 units across and the fog
- * closes at 1,500; Kauaʻi is 5,600,000 across. So when the terrain layer
- * is on, the scene swaps to this second set and swaps back when it is off
- * — one place, both sets named, rather than numbers that are wrong for
- * whichever layer is not being looked at.
+ * closes at 1,500; Kauaʻi is 5,600,000 across.
+ *
+ * With terrain the fog is a FRACTION OF THE FAR PLANE rather than a fixed
+ * distance, because the far plane rides the camera's height above the
+ * ground (see `adaptDepth`). Fixed constants were tried and were wrong
+ * everywhere but at altitude: at 60 m up the far plane is 3.6 km, so a
+ * fog starting at 4 km never applied at all and the clipmap was cut by
+ * the far plane into a hard-edged disc.
+ *
+ * It opens at a QUARTER of the view rather than near the end of it,
+ * because the far half of a view from altitude is mostly deep sea floor,
+ * which is the darkest thing in the palette: unfogged, the horizon reads
+ * as a black band under a pale sky, which is the opposite of what
+ * distance does to a real one.
  */
-const TERRAIN_FOG_NEAR = 400_000;
-const TERRAIN_FOG_FAR = 4_200_000;
+const FOG_NEAR_OF_FAR = 0.25;
+const FOG_FAR_OF_FAR = 0.95;
+
+/** What the far plane returns to when there is no terrain: the empty world's own. */
+const EMPTY_WORLD_FAR = 5000;
 
 /**
  * How far above the ground the camera starts when there is ground.
@@ -295,6 +310,15 @@ const TERRAIN_FOG_FAR = 4_200_000;
  * in frame.
  */
 const START_CLEARANCE = 150_000;
+
+/**
+ * How high the camera starts IN A ROOM. Much lower, because in a room the
+ * camera may only fly at a capsule's own top speed (`paceFor`), and from
+ * 1.5 km up that is twenty minutes of descent before you can see anybody
+ * — while your own capsule stands on the ground the whole time. 30 m puts
+ * you among the other players, which is what a room is for.
+ */
+const NETWORKED_CLEARANCE = 3_000;
 
 /** Looking down about 25 degrees, rather than the empty room's 12. */
 const START_PITCH = -0.45;
@@ -316,7 +340,24 @@ const START_YAW = Math.PI / 2;
  * camera at about 125 m/s when it starts high, and the wheel takes over
  * from there.
  */
-const SPEED_PER_ALTITUDE = 1 / 12;
+const SPEED_PER_ALTITUDE = 1 / 24;
+
+/** Never slower than the empty world's own pace, however low the camera is. */
+const MIN_FLY_SPEED = 40;
+
+/**
+ * The fastest a camera may fly while a room is watching: the capsule's own
+ * top speed, `walkSpeed x sprintFactor`, which is what the authority's
+ * travel budget is sized for. Faster than this and the claims are refused.
+ */
+const NETWORKED_MAX_SPEED = DEBUG_CAPSULE_TUNING.walkSpeed * DEBUG_CAPSULE_TUNING.sprintFactor;
+
+/**
+ * How far above the ground a RESUMED camera is lifted when the save put
+ * it underground. 30 m: clear of the surface at any resolution the
+ * clipmap draws, close enough that the player is still where they were.
+ */
+const RESUME_CLEARANCE = 3_000;
 
 /**
  * THE DEPTH BUFFER, AND WHY THE NEAR PLANE MOVES.
@@ -363,7 +404,13 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
     const fly = new FreeFlyCamera();
     fly.place(START.x, START.y, START.z, START.yaw, START.pitch);
     const stats = new FrameStats();
-    const toggles = new LayerToggles(BUILT_LAYERS);
+    /**
+     * Built lazily in `enter()`, because whether TERRAIN is built is not
+     * a fact about this build — it is a fact about whether the survey
+     * actually downloaded. A row that reads "built" over ground that
+     * never arrived is a control that looks functional and is not (2.9).
+     */
+    let toggles = new LayerToggles([]);
 
     let grid: THREE.GridHelper | null = null;
     let light: THREE.DirectionalLight | null = null;
@@ -424,8 +471,24 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
       // every player's capsule backwards on everybody else's screen —
       // invisible while a capsule was a featureless pill, and a bug the
       // moment one has a front.
-      return { at: pose.at, height: Math.max(0, pose.height), heading: headingOfYaw(pose.yaw) };
+      //
+      // HEIGHT IS MEASURED FROM THE GROUND, and for this camera it is
+      // zero: your capsule is where you ARE ON THE ISLAND, standing on it,
+      // not a pill hanging at whatever altitude the benchmark camera is
+      // flying at. That is what makes multiplayer and terrain able to
+      // coexist at all. The authority spawns actors at height 0 and has
+      // no DEM; with terrain, an ABSOLUTE height meant the camera claimed
+      // 280,255 units against a travel budget of 37.5 and every single
+      // claim was refused — a capsule frozen at its spawn point on every
+      // other screen, for ever, which is the exact trap this file's header
+      // warns about. Height above ground makes the spawn already correct
+      // and the claim small. `view/CapsuleView` adds the terrain back at
+      // the render boundary, where the terrain is known.
+      return { at: pose.at, height: 0, heading: headingOfYaw(pose.yaw) };
     };
+
+    /** How high the island is under a world position, for drawing something standing on it. */
+    const groundUnder = (at: WorldPoint): number => (field === null ? 0 : field.heightAt(at));
 
     /**
      * Make the instrumentation list match the group of capsule meshes,
@@ -484,9 +547,63 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
       if (field === null) return;
       const pose = fly.pose();
       const ground = field.heightAt(pose.at);
-      placeCamera(START.x, ground + START_CLEARANCE, START.z, START_YAW, START_PITCH);
-      // And a pace that suits a 56 km island rather than a 20 m room.
-      fly.speed = START_CLEARANCE * SPEED_PER_ALTITUDE;
+      const clearance = networked ? NETWORKED_CLEARANCE : START_CLEARANCE;
+      placeCamera(START.x, ground + clearance, START.z, START_YAW, networked ? START.pitch : START_PITCH);
+      paceFor(clearance);
+    };
+
+    /**
+     * RESCUE A RESUMED CAMERA THAT IS NOW INSIDE A MOUNTAIN.
+     *
+     * Every save written before terrain existed holds a pose from the
+     * empty world — START is 25 units up, and the whole grid room was
+     * 2,000 units across, so every such pose is a few hundred units above
+     * a floor that was at zero. World (0,0) is now Waiʻaleʻale's summit
+     * plateau at 1,302 m, so restoring one of those poses puts the camera
+     * 1.3 km INSIDE the mountain, looking at the underside of the terrain
+     * (the material is double-sided, so it is not even transparent), with
+     * no lift gesture on a phone and, at the empty world's 40 units a
+     * second, the better part of an hour of holding forward to climb out.
+     *
+     * The save format did not change and should not have to: a pose is
+     * only invalid relative to ground that did not exist when it was
+     * written. So the check is against the ground, not against a version.
+     * A camera already in the open is left exactly where the player left
+     * it — this only ever lifts, never lowers, and never turns.
+     */
+    const standClearOfGround = (): void => {
+      if (field === null) return;
+      const pose = fly.pose();
+      const ground = field.heightAt(pose.at);
+      const floor = ground + RESUME_CLEARANCE;
+      if (pose.height >= floor) {
+        // Already in the open. Its pace still has to suit the island.
+        paceFor(Math.max(RESUME_CLEARANCE, pose.height - ground));
+        return;
+      }
+      const local = toLocal(pose.at);
+      placeCamera(local.lx, floor, local.lz, pose.yaw, pose.pitch);
+      paceFor(RESUME_CLEARANCE);
+    };
+
+    /**
+     * A flying pace that suits the height it is flown at.
+     *
+     * The empty world's 40 units a second is 0.4 m/s, right for a room
+     * 20 m across and four hours' flying across a 56 km island. It lived
+     * inside the fresh-start path, so a RESUMED session — including one
+     * saved from this very build — came back at 0.4 m/s with no gesture
+     * on a phone to change it: `CameraPose` carries no speed, and
+     * FreeFlyCamera only reads the mouse wheel.
+     */
+    const paceFor = (altitude: number): void => {
+      const want = Math.max(MIN_FLY_SPEED, altitude * SPEED_PER_ALTITUDE);
+      // IN A ROOM, THE AUTHORITY PAYS FOR EVERY STEP. It earns an actor
+      // walkSpeed x sprintFactor x tolerance = 150 units a second of
+      // travel and banks at most 37.5, so a camera flying faster than
+      // that has its claims refused and stands still on everybody else's
+      // screen. Solo, nobody is paying, and the island is 56 km across.
+      fly.speed = networked ? Math.min(want, NETWORKED_MAX_SPEED) : want;
     };
 
     /**
@@ -497,11 +614,12 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
       terrainOn = toggles.isEnabled('terrain');
       if (terrain !== null) terrain.group.visible = terrainOn;
       if (grid !== null) grid.visible = !terrainOn;
-      const fog = three.fog as THREE.Fog | null;
-      if (fog) {
-        fog.near = terrainOn ? TERRAIN_FOG_NEAR : FOG_NEAR;
-        fog.far = terrainOn ? TERRAIN_FOG_FAR : FOG_FAR;
-      }
+      // The fog is NOT set here: with terrain it belongs to the far
+      // plane, which rides the camera's height (see `adaptDepth`), and a
+      // second writer at a fixed distance is how it ended up ahead of the
+      // far plane in the first place. Turning terrain off is handled
+      // there too, on the same frame.
+      builtNear = 0;
     };
 
     /**
@@ -512,12 +630,17 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
      */
     const adaptDepth = (): void => {
       const camera = fly.camera;
+      const fog = three.fog as THREE.Fog | null;
       if (!terrainOn || field === null) {
         if (builtNear === 0) return;
         builtNear = 0;
         camera.near = MIN_NEAR;
-        camera.far = 5000;
+        camera.far = EMPTY_WORLD_FAR;
         camera.updateProjectionMatrix();
+        if (fog) {
+          fog.near = FOG_NEAR;
+          fog.far = FOG_FAR;
+        }
         return;
       }
       const pose = fly.pose();
@@ -528,17 +651,33 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
       camera.near = near;
       camera.far = near * DEPTH_RATIO;
       camera.updateProjectionMatrix();
+      // THE FOG HAS TO FOLLOW THE FAR PLANE, not sit at a fixed distance.
+      // The far plane rides the altitude, so at 60 m up it is 3.6 km —
+      // nearer than a fog that starts at 4 km, which means no fog is
+      // applied anywhere in the visible range and the clipmap is sliced
+      // by the far plane straight against the background: a hard disc
+      // with the island's mountains cut off behind it. Fog exists exactly
+      // so that edge is never a hard line, so it is expressed as a
+      // fraction of the distance the camera can actually see.
+      if (fog) {
+        fog.near = camera.far * FOG_NEAR_OF_FAR;
+        fog.far = camera.far * FOG_FAR_OF_FAR;
+      }
     };
 
     /** Point the clipmap at the camera and ask for the tiles under it. One call a frame. */
     const updateTerrain = (): void => {
       if (terrain === null) return;
       if (toggles.isEnabled('terrain') !== terrainOn) syncTerrainLayer();
+      // BEFORE the early return, so that switching the layer OFF actually
+      // restores the near and far planes and the room-sized fog. Behind
+      // it, the restore branch could never run and the empty world was
+      // left being drawn through the island's projection.
+      adaptDepth();
       if (!terrainOn) return;
       const at = fly.pose().at;
       terrain.update(at);
       streamer?.update(at);
-      adaptDepth();
     };
 
     /** True while the camera is still exactly where the world put it: the player has not flown. */
@@ -637,6 +776,11 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
       camera: fly.camera,
 
       async enter() {
+        // WHETHER A ROOM IS WATCHING, decided first: it changes how fast
+        // the camera may fly (`paceFor`), and the camera is placed long
+        // before the wire is built.
+        networked = ctx.app.session !== null && ctx.app.session.mode === 'multiplayer';
+
         const progress = new LoadProgress();
         progress.define(MILESTONES);
         const reached = (id: (typeof MILESTONES)[number]['id']): void => {
@@ -699,24 +843,36 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         // in; and the save point is handed over only now, so the owner can
         // never save a camera the world has not placed.
         const from = hooks.resume?.();
-        if (from) fly.restore(from.camera);
-        else standOnGround();
+        if (from) {
+          fly.restore(from.camera);
+          standClearOfGround();
+        } else {
+          standOnGround();
+        }
         hooks.onSavePoint?.(save);
 
-        // Terrain is the world now, so it comes up ON. The toggle is
-        // still the way to measure what it costs — turning it off is what
-        // the empty world was.
+        // Terrain is the world now, so it comes up ON — but only when
+        // there IS terrain. The toggle is still the way to measure what
+        // it costs; turning it off is what the empty world was.
+        toggles = new LayerToggles(terrain === null ? [] : BUILT_LAYERS);
         if (terrain !== null) {
           toggles.setEnabled('terrain', true);
           three.add(terrain.group);
           syncTerrainLayer();
+          // THE FIRST FILL, HERE, BEHIND THE LOADING SCREEN. All eight
+          // rings at once is the single most expensive frame the terrain
+          // ever has (~34 ms on a desktop, several times that on a
+          // phone). Paying it while the loading bar is still up costs
+          // nobody anything; paying it on the first frame of play is a
+          // visible lurch the moment the world appears.
+          terrain.update(fly.pose().at);
+          adaptDepth();
         }
 
         // The wire, last: the world is already whole and measurable
         // without it, which is the point — a relay that never answers
         // costs this scene nothing but an honest line in the HUD.
         const session = ctx.app.session;
-        networked = session !== null && session.mode === 'multiplayer';
         const transport = multiplayerTransport(session);
         // The identity is asked for only when there is a wire to present
         // it on: a solo game has no business opening the profile store.
@@ -783,6 +939,10 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
               const at = toLocal(mine.at);
               const look = fly.pose();
               placeCamera(at.lx, look.height, at.lz, look.yaw, look.pitch);
+              // The spawn is a world position like any other, and the
+              // ground there is not the ground here: adopting it can put
+              // the camera inside a hill.
+              standClearOfGround();
               spawnAdopted = true;
             }
           }
@@ -796,7 +956,10 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
           // next snapshot rather than one frame behind it.
           bot?.update(frame.simDt, frame.rawDt);
           if (spawnAdopted) watchBot();
-          remotes?.sync(net.remoteActors(netClockMs));
+          // Capsules stand ON the island. The authority holds a height
+          // above whatever an actor is standing on; the terrain it is
+          // standing on is known only here.
+          remotes?.sync(net.remoteActors(netClockMs), groundUnder);
           sinceCapsulePublish += frame.rawDt;
           if (sinceCapsulePublish >= 1 / HUD_HZ) {
             sinceCapsulePublish = 0;

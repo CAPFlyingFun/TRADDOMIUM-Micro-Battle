@@ -13,11 +13,9 @@
  *     if most of the lower screen is still that colour, nothing was
  *     drawn and the check says so instead of saving a pretty picture.
  *  3. IT HAS SHAPE. A flat fill is what a broken heightfield looks like.
- *     The measure is the SPREAD OF BRIGHTNESS across the lower frame, not
- *     a count of distinct colours and not one scan line: a real hillside
- *     lit from one side is a smooth gradient of one hue, so counting
- *     quantised colours calls it flat, and a single column can run the
- *     length of that hillside and report nothing at all.
+ *     The measure is LOCAL STRUCTURE — the mean brightness step between
+ *     neighbouring pixels — see `reliefStructure` for the two measures
+ *     that were tried before it and what was wrong with each.
  *  4. IT MOVES WITH THE CAMERA. Flying and re-photographing must change
  *     the picture, or what is drawn is a skybox rather than a world.
  *
@@ -219,20 +217,38 @@ function groundFraction(png) {
  * deviation in 0..255. A flat fill is near zero however colourful it is;
  * ground with shape in it is not.
  */
-function reliefSpread(png) {
-  // ACROSS THE FRAME, not down one line. A single column can honestly run
-  // the length of one smooth hillside and report almost nothing while the
-  // rest of the picture is full of shape — which it did, and cost a probe
-  // run to work out.
-  const lums = [];
-  for (let y = Math.floor(png.height * 0.45); y < png.height; y += 3) {
-    for (let x = 0; x < png.width; x += 3) {
-      const i = (png.width * y + x) * 4;
-      lums.push(png.data[i] * 0.3 + png.data[i + 1] * 0.59 + png.data[i + 2] * 0.11);
+/**
+ * How much LOCAL STRUCTURE the lower frame has: the mean absolute
+ * brightness step between neighbouring pixels.
+ *
+ * This is the third measure tried, and the first that is about the thing
+ * being asked. A flat fill has no local variation whatever its colour or
+ * brightness; ground with ridges, valleys and one-sided lighting does,
+ * and keeps doing so when the whole picture gets darker, lighter or
+ * hazier. The two that came before both measured the wrong thing:
+ *
+ *  - distinct quantised colours down the middle column: called a real lit
+ *    hillside flat, because a smooth gradient of one hue is exactly what
+ *    a hillside looks like;
+ *  - the standard deviation of brightness across the frame: a number with
+ *    no natural threshold, which moved from 6.0 to 5.3 on a lighting
+ *    change that made the picture strictly better. A check calibrated to
+ *    one screenshot fails for reasons that are not defects.
+ */
+function reliefStructure(png) {
+  let sum = 0;
+  let n = 0;
+  const lum = (x, y) => {
+    const i = (png.width * y + x) * 4;
+    return png.data[i] * 0.3 + png.data[i + 1] * 0.59 + png.data[i + 2] * 0.11;
+  };
+  for (let y = Math.floor(png.height * 0.45); y < png.height - 1; y += 2) {
+    for (let x = 0; x < png.width - 2; x += 2) {
+      sum += Math.abs(lum(x, y) - lum(x + 2, y)) + Math.abs(lum(x, y) - lum(x, y + 1));
+      n += 2;
     }
   }
-  const mean = lums.reduce((a, b) => a + b, 0) / lums.length;
-  return Math.sqrt(lums.reduce((a, b) => a + (b - mean) ** 2, 0) / lums.length);
+  return n === 0 ? 0 : sum / n;
 }
 
 /** Pixels that are EXACTLY the horizon colour below the horizon: seams the sky leaks through. */
@@ -288,9 +304,14 @@ async function drive(page, url) {
   if (ground < 0.5) fail(`only ${(ground * 100).toFixed(1)}% of the lower screen is drawn; the ground is missing`);
 
   // 3. Is it relief, or a flat fill?
-  const spread = reliefSpread(first);
-  log(`brightness varies by ${spread.toFixed(1)} (sd, 0..255) across the lower frame`);
-  if (spread < 6) fail(`brightness varies by only ${spread.toFixed(1)} across the frame; that is a flat fill, not terrain`);
+  const structure = reliefStructure(first);
+  log(`local brightness steps average ${structure.toFixed(2)} across the lower frame`);
+  // CALIBRATED AGAINST BOTH POPULATIONS, not tucked under one reading:
+  // the island measures 0.43-0.46 and the same frame with the layer
+  // switched off — a genuinely flat fill — measures 0.000. The threshold
+  // sits between them with room on each side, so it fails when the ground
+  // stops having shape and not when the light changes.
+  if (structure < 0.15) fail(`local brightness steps average only ${structure.toFixed(2)}; that is a flat fill, not terrain`);
 
   // 3b. THE SEAMS. Where a fine ring meets a coarse one the two edges must
   // coincide exactly; a T-junction left open is a hairline of sky, and the

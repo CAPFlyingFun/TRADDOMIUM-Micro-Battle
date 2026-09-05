@@ -29,6 +29,10 @@ import { PERF_WORLD_SCENE_ID } from '../src/perf/perfTool';
 import type { GameSession, SessionSaveState } from '../src/session/GameSession';
 import { RemoteMultiplayerSession } from '../src/session/RemoteMultiplayerSession';
 import { world } from '../src/world/coords';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { decodeCoarse, heightOf } from '../src/world/dem';
+import { repairGrid } from '../src/world/demRepair';
 
 const SIXTY = 1 / 60;
 
@@ -55,6 +59,8 @@ interface RigOptions {
   readonly resume?: () => SessionSaveState | null;
   readonly identity?: () => { readonly playerId: ReturnType<typeof playerId>; readonly name: string };
   readonly practiceBot?: () => { readonly playerId: ReturnType<typeof playerId>; readonly name: string } | null;
+  /** Where the elevation survey comes from. Omitted means no terrain, which is what most of this file wants. */
+  readonly survey?: PerformanceWorldHooks['survey'];
 }
 
 function rig(initial: AppState, options: RigOptions = {}) {
@@ -97,6 +103,7 @@ function rig(initial: AppState, options: RigOptions = {}) {
     },
     identity: options.identity,
     practiceBot: options.practiceBot,
+    survey: options.survey,
   };
   const scene = createPerformanceWorldScene(hooks)(ctx);
   const field = (name: string): string =>
@@ -352,7 +359,7 @@ describe('PerformanceWorldScene on a networked session', () => {
     for (let i = 0; i < 8; i += 1) await Promise.resolve();
   };
 
-  function netRig() {
+  function netRig(options: { survey?: PerformanceWorldHooks['survey'] } = {}) {
     const transport = new FakeTransport();
     // The REAL multiplayer session, holding a fake wire: this is also the
     // test that the scene can find a transport on the session it is given
@@ -361,7 +368,7 @@ describe('PerformanceWorldScene on a networked session', () => {
       relayUrl: 'ws://127.0.0.1:8787/room/abcde',
       createTransport: () => transport,
     });
-    const r = rig('loading', { session, identity: () => ({ playerId: me, name: 'Keeper' }) });
+    const r = rig('loading', { session, identity: () => ({ playerId: me, name: 'Keeper' }), survey: options.survey });
     /** One frame long enough to trip both the claim cadence and the HUD refresh. */
     const second = (): void => r.scene.update({ rawDt: 1, simDt: SIXTY, elapsed: 1 });
     const capsules = (): string[] => {
@@ -478,8 +485,15 @@ describe('PerformanceWorldScene on a networked session', () => {
     // +wz, so the two are half a turn apart and claiming the yaw raw
     // pointed the capsule backwards on every other screen
     // (`FreeFlyCamera.headingOfYaw`).
+    // HEIGHT IS ZERO because it is measured FROM THE GROUND, and this
+    // camera's capsule stands on it. The authority has no terrain and
+    // spawns at height 0, so a capsule at ground level is already where
+    // the authority put it; `view/CapsuleView` adds the terrain back when
+    // it draws. Claiming the camera's own altitude instead is what made
+    // every claim in a terrain world ask for 280,255 units against a
+    // 37.5-unit budget.
     expect(transport.moves()).toEqual([
-      { kind: 'move', actorId: mine.id, at: mine.at, height: START.y, heading: headingOfYaw(START.yaw), seq: 0 },
+      { kind: 'move', actorId: mine.id, at: mine.at, height: 0, heading: headingOfYaw(START.yaw), seq: 0 },
     ]);
     expect(headingOfYaw(START.yaw)).toBeCloseTo(Math.PI, 12);
     // The look and the height are the player's; only the ground position came from the wire.
@@ -664,5 +678,218 @@ describe('PerformanceWorldScene on a networked session', () => {
     await scene.enter();
     scene.update({ rawDt: 1, simDt: SIXTY, elapsed: 1 });
     expect(field('session')).toBe('Not connected');
+  });
+  /**
+   * THE ROOM, WITH GROUND IN IT.
+   *
+   * Phase 1.6 shipped a working room, and terrain broke every claim in it
+   * without a single test noticing — because the multiplayer rig passes no
+   * survey, so it was still measuring a flat world where the camera stands
+   * 25 units up. These use the real island.
+   */
+  describe('a room over the real island', () => {
+    const demBytes = (): ArrayBuffer => {
+      const bytes = readFileSync(path.join(process.cwd(), 'public', 'kauai-1025.bin'));
+      return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+    };
+    const survey: PerformanceWorldHooks['survey'] = async (onBytes) => {
+      const buffer = demBytes();
+      onBytes(buffer.byteLength, buffer.byteLength);
+      return buffer;
+    };
+
+    /** What the authority will pay for in one claim, from its own numbers. */
+    const BANK =
+      DEBUG_CAPSULE_TUNING.walkSpeed *
+      DEBUG_CAPSULE_TUNING.sprintFactor *
+      HOST_DEFAULTS.tolerance *
+      (HOST_DEFAULTS.burstMs / 1000);
+
+    it('CLAIMS THE AUTHORITY CAN PAY FOR, on every frame of a long flight', async () => {
+      // THE REGRESSION. With terrain, the camera starts 2.8 km up, and
+      // claiming that as a capsule height asked for 280,255 units against a
+      // 37.5-unit bank — refused, and refused again for ever, because the
+      // bank never grows past 37.5 and the gap never closes. Every other
+      // player would have seen a capsule frozen at its spawn point for the
+      // whole session. Height is now measured FROM THE GROUND, so a capsule
+      // standing on the island claims 0 and the spawn is already right.
+      const { scene, transport, input, frame } = netRig({ survey });
+      const host = document.createElement('div');
+      input.attach(host);
+      await scene.enter();
+      await flush();
+      transport.deliver({ kind: 'welcome', yourId: me, snapshot: snapshot(1, [mine]) });
+      await flush();
+
+      // Fly, hard, at a REAL frame rate — sixty a second for ten seconds.
+      // The bank is a cap, not an allowance that grows with time, so what
+      // has to hold is that no two consecutive claims are further apart
+      // than it, which is a statement about speed and frame rate together.
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyW' }));
+      for (let i = 0; i < 600; i += 1) frame();
+      window.dispatchEvent(new KeyboardEvent('keyup', { code: 'KeyW' }));
+      input.detach();
+
+      const moves = transport.moves();
+      expect(moves.length).toBeGreaterThan(10);
+      let previous = { wx: mine.at.wx, wz: mine.at.wz, height: mine.height };
+      let worst = 0;
+      for (const move of moves) {
+        const asked = Math.hypot(move.at.wx - previous.wx, move.at.wz - previous.wz, move.height - previous.height);
+        worst = Math.max(worst, asked);
+        previous = { wx: move.at.wx, wz: move.at.wz, height: move.height };
+      }
+      // Not one claim over the bank — not the first, and not any after it.
+      expect(worst).toBeLessThan(BANK);
+    });
+
+    it('stands its capsule on the island rather than at sea level', async () => {
+      // The authority has no DEM and holds a height above whatever an actor
+      // stands on; the terrain is added at the render boundary. Drawn at the
+      // raw height, every capsule would be 1.3 km under the summit plateau.
+      const { scene, transport, second, drawn } = netRig({ survey });
+      await scene.enter();
+      await flush();
+      const other = spawnCapsule(them, 'Other', colorFor(them), world(0, 0), actorId('capsule-2'));
+      transport.deliver({ kind: 'welcome', yourId: me, snapshot: snapshot(1, [mine, other]) });
+      await flush();
+      second();
+      const rows = drawn();
+      expect(rows.length).toBe(1);
+      const group = scene.three.children.find((o) => o.name === 'remote-actors') as THREE.Group;
+      const capsule = group.children[0];
+      const ground = heightOf(repairGrid(decodeCoarse(demBytes())).grid.samples[512 * 1025 + 512]);
+      expect(ground).toBeGreaterThan(130_000);
+      expect(capsule.position.y).toBeCloseTo(ground + other.height, 0);
+    });
+
+    it('flies no faster than the authority will pay for while a room is watching', async () => {
+      // Solo, the camera crosses a 56 km island. In a room it may not: the
+      // authority earns an actor walkSpeed x sprintFactor of travel a
+      // second, and a camera faster than that has its claims refused.
+      const { scene, field, frame } = netRig({ survey });
+      await scene.enter();
+      frame();
+      const speed = Number(/speed (\d+(?:\.\d+)?) units/.exec(field('camera-speed'))?.[1] ?? 0);
+      expect(speed).toBeLessThanOrEqual(DEBUG_CAPSULE_TUNING.walkSpeed * DEBUG_CAPSULE_TUNING.sprintFactor);
+      expect(speed).toBeGreaterThan(0);
+    });
+  });
+
+});
+
+/**
+ * THE WORLD WITH GROUND IN IT.
+ *
+ * These read the REAL shipped survey, because every defect below was one
+ * that only exists once world (0,0) stops being a flat plane at zero and
+ * becomes Waiʻaleʻale's summit plateau at 1,302 m. A synthetic fixture
+ * would have missed all of them, and the terrainless rig above — which is
+ * what the multiplayer tests were using — is exactly why the travel-budget
+ * regression got through the suite that was written to catch it.
+ */
+describe('PerformanceWorldScene with the real island under it', () => {
+  // `process.cwd()`, not `import.meta.url`: this file runs under jsdom,
+  // where import.meta.url is not a file URL. vitest's cwd is the repo root.
+  const demBytes = (): ArrayBuffer => {
+    const bytes = readFileSync(path.join(process.cwd(), 'public', 'kauai-1025.bin'));
+    return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  };
+  const survey: PerformanceWorldHooks['survey'] = async (onBytes) => {
+    const buffer = demBytes();
+    onBytes(buffer.byteLength, buffer.byteLength);
+    return buffer;
+  };
+  /** The ground at the world origin, straight from the file: 1,302.6 m. */
+  const groundAtOrigin = (): number => {
+    const grid = repairGrid(decodeCoarse(demBytes())).grid;
+    return heightOf(grid.samples[512 * grid.side + 512]);
+  };
+
+  it('starts the camera above the ground, not inside the mountain', async () => {
+    const { scene } = rig('loading', { survey });
+    await scene.enter();
+    const ground = groundAtOrigin();
+    expect(ground).toBeGreaterThan(130_000);
+    expect(scene.camera.position.y).toBeGreaterThan(ground);
+  });
+
+  it('LIFTS A RESUMED CAMERA OUT OF GROUND THAT DID NOT EXIST WHEN IT WAS SAVED', async () => {
+    // THE ONE THAT WOULD HAVE REACHED THE PHONE. Every save written
+    // before terrain landed holds a pose from the empty world — START is
+    // 25 units up over a floor at zero. Restore that now and the camera
+    // is 1.3 km inside Waiʻaleʻale, looking at the underside of the
+    // terrain (the material is double-sided, so not even transparent),
+    // with no lift gesture on a phone to climb out with.
+    const saved: SessionSaveState = { camera: { at: world(0, 80), height: 25, yaw: 0, pitch: -0.22 } };
+    const { scene } = rig('loading', { survey, resume: () => saved });
+    await scene.enter();
+    const ground = groundAtOrigin();
+    expect(scene.camera.position.y).toBeGreaterThan(ground);
+    // Lifted, not moved: it is still where the player left it, and still
+    // looking where they left it looking.
+    expect(scene.camera.position.x).toBeCloseTo(0, 6);
+    expect(scene.camera.position.z).toBeCloseTo(80, 6);
+    expect(scene.camera.rotation.y).toBeCloseTo(0, 6);
+  });
+
+  it('leaves a resumed camera that is already in the open exactly where it was', async () => {
+    const ground = groundAtOrigin();
+    const saved: SessionSaveState = { camera: { at: world(0, 80), height: ground + 90_000, yaw: 0.4, pitch: -0.3 } };
+    const { scene } = rig('loading', { survey, resume: () => saved });
+    await scene.enter();
+    expect(scene.camera.position.y).toBeCloseTo(ground + 90_000, 3);
+    expect(scene.camera.rotation.y).toBeCloseTo(0.4, 6);
+  });
+
+  it('gives a resumed session a pace that can cross a 56 km island', async () => {
+    // The fast pace lived inside the fresh-start branch, so a RESUMED
+    // session came back at the empty room's 40 units/s = 0.4 m/s, with no
+    // gesture on a phone to change it: a saved pose carries no speed and
+    // FreeFlyCamera only reads the mouse wheel.
+    const ground = groundAtOrigin();
+    const saved: SessionSaveState = { camera: { at: world(0, 80), height: ground + 150_000, yaw: 0, pitch: -0.4 } };
+    const { scene, field, frame } = rig('loading', { survey, resume: () => saved });
+    await scene.enter();
+    frame();
+    const readout = field('camera-speed');
+    expect(readout).not.toBe(`speed ${DEFAULT_SPEED} units/s`);
+    const speed = Number(/speed (\d+(?:\.\d+)?) units/.exec(readout)?.[1] ?? 0);
+    // Fast enough to be worth holding the stick: an island-crossing pace,
+    // not the 0.4 m/s of a room 20 m across.
+    expect(speed).toBeGreaterThan(1000);
+  });
+
+  it('keeps the fog inside the far plane at every height, so the horizon is never a hard disc', async () => {
+    // `far` rides the height above ground; a fog at a FIXED distance sat
+    // beyond it as soon as the camera came down — at 60 m up the far
+    // plane is 3.6 km and the fog started at 4 km, so no fog applied at
+    // all and the clipmap was cut against the background colour.
+    const ground = groundAtOrigin();
+    for (const altitude of [150_000, 20_000, 6_000, 1_000, 200]) {
+      const saved: SessionSaveState = { camera: { at: world(0, 80), height: ground + altitude, yaw: 0, pitch: -0.4 } };
+      const { scene, frame } = rig('loading', { survey, resume: () => saved });
+      await scene.enter();
+      frame();
+      const camera = scene.camera as THREE.PerspectiveCamera;
+      const fog = scene.three.fog as THREE.Fog;
+      expect(fog.near).toBeLessThan(camera.far);
+      expect(fog.far).toBeLessThanOrEqual(camera.far);
+      expect(fog.near).toBeLessThan(fog.far);
+      expect(camera.near).toBeLessThan(camera.far);
+    }
+  });
+
+  it('says TERRAIN is not built when the survey never arrived', async () => {
+    // A row that reads "built" over ground that failed to download is a
+    // control that looks functional and is not (§2.9).
+    const { scene, uiLayer } = rig('loading', {
+      survey: async () => {
+        throw new Error('offline');
+      },
+    });
+    await scene.enter();
+    const text = uiLayer.textContent ?? '';
+    expect(text).toMatch(/terrain\s*[—-]\s*not built/i);
   });
 });

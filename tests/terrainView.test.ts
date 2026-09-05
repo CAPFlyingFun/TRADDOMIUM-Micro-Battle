@@ -22,7 +22,7 @@ import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { ISLAND_SPAN, world } from '../src/world/coords';
 import { setOrigin } from '../src/world/origin';
-import { COARSE_SAMPLES, HD_STEP } from '../src/world/dem';
+import { COARSE_SAMPLES, COARSE_STEP, HD_STEP, HD_TILE_SAMPLES, hdTileFromName, type HdTileId } from '../src/world/dem';
 import { Heightfield } from '../src/world/heightfield';
 import { FINEST_QUAD, RING_LEVELS, RING_QUADS, TerrainView, colourAt } from '../src/terrain/TerrainView';
 import type { DemGrid } from '../src/world/dem';
@@ -43,8 +43,38 @@ function rampGrid(perSample: number): DemGrid {
   return { side: COARSE_SAMPLES, samples };
 }
 
+/**
+ * GROUND WITH CURVATURE IN IT, and the reason this exists.
+ *
+ * `rampGrid` is linear, and the heightfield interpolates linearly, so on
+ * a ramp the middle of any three evenly-spaced collinear vertices ALREADY
+ * equals the mean of its neighbours. Every assertion about the boundary
+ * stitch is therefore true whether the stitch ran or not: deleting it
+ * outright left all eighteen tests in this file green. Nothing about a
+ * stitch is observable on a plane — it needs a surface that bends.
+ */
+function hillGrid(): DemGrid {
+  const samples = new Int16Array(COARSE_SAMPLES * COARSE_SAMPLES);
+  for (let row = 0; row < COARSE_SAMPLES; row += 1) {
+    for (let col = 0; col < COARSE_SAMPLES; col += 1) {
+      // Two incommensurable waves, so no lattice this test uses can land
+      // on a period and read as flat by accident.
+      samples[row * COARSE_SAMPLES + col] = Math.round(
+        900 * Math.sin(col / 7.3) * Math.cos(row / 5.1) + 400 * Math.sin((col + row) / 3.7),
+      );
+    }
+  }
+  return { side: COARSE_SAMPLES, samples };
+}
+
 const viewOf = (grid: DemGrid, over: Partial<{ levels: number; ringQuads: number }> = {}): TerrainView =>
   new TerrainView({ field: new Heightfield(grid), ...over });
+
+const idOf = (name: string): HdTileId => {
+  const id = hdTileFromName(name);
+  if (!id) throw new Error(`not a tile name: ${name}`);
+  return id;
+};
 
 const meshes = (view: TerrainView): THREE.Mesh[] =>
   view.group.children.filter((c): c is THREE.Mesh => (c as THREE.Mesh).isMesh === true);
@@ -164,6 +194,82 @@ describe('the rings line up with each other', () => {
   });
 });
 
+describe('when the ground itself changes under it', () => {
+  it('redraws when a streamed tile lands, even though the camera has not moved', () => {
+    // THE BUG THIS PINS: a ring was refilled only when it MOVED. A tile
+    // downloaded under a camera standing still reached nobody — the whole
+    // streaming layer drew nothing until the player happened to travel
+    // far enough — and once they did, the rings caught up at eight
+    // different rates and pulled the stitched seam apart between them.
+    setOrigin(world(0, 0));
+    const field = new Heightfield(flatGrid(-100));
+    const view = new TerrainView({ field });
+    view.update(world(0, 0));
+    expect(view.lastRebuilt).toBe(RING_LEVELS);
+    view.update(world(0, 0));
+    expect(view.lastRebuilt).toBe(0);
+
+    const before = (meshes(view)[0].geometry.getAttribute('position') as THREE.BufferAttribute).array.slice();
+
+    // A tile with different ground in it lands under the parked camera.
+    const bumpy = new Int16Array(HD_TILE_SAMPLES * HD_TILE_SAMPLES);
+    for (let i = 0; i < bumpy.length; i += 1) bumpy[i] = -100 + (i % 37) * 3;
+    field.addTile(idOf('E5'), { side: HD_TILE_SAMPLES, samples: bumpy });
+
+    view.update(world(0, 0));
+    expect(view.lastRebuilt).toBeGreaterThan(0);
+    const after = (meshes(view)[0].geometry.getAttribute('position') as THREE.BufferAttribute).array;
+    expect(after).not.toEqual(before);
+    // And it settles: the next frame has nothing left to do.
+    view.update(world(0, 0));
+    expect(view.lastRebuilt).toBe(0);
+    view.dispose();
+  });
+
+  it('refills only the rings a tile can possibly change, not all eight', () => {
+    // A ring whose quad is the coarse lattice's own step samples ONLY at
+    // coarse sample points, and decimating the high-detail grid by four
+    // reproduces the coarse grid exactly there. So a tile arriving cannot
+    // change one vertex of those rings, and refilling them would be six
+    // rings of wasted work — the most expensive thing this class does —
+    // on every one of the nine downloads at boot.
+    setOrigin(world(0, 0));
+    const field = new Heightfield(flatGrid(-100));
+    const view = new TerrainView({ field });
+    view.update(world(0, 0));
+
+    const bumpy = new Int16Array(HD_TILE_SAMPLES * HD_TILE_SAMPLES);
+    for (let i = 0; i < bumpy.length; i += 1) bumpy[i] = -100 + (i % 37) * 3;
+    field.addTile(idOf('E5'), { side: HD_TILE_SAMPLES, samples: bumpy });
+    view.update(world(0, 0));
+
+    const finerThanCoarse = [];
+    for (let level = 0; level < RING_LEVELS; level += 1) {
+      if (FINEST_QUAD * 2 ** level < COARSE_STEP) finerThanCoarse.push(level);
+    }
+    expect(finerThanCoarse.length).toBeGreaterThan(0);
+    expect(view.lastRebuilt).toBe(finerThanCoarse.length);
+    view.dispose();
+  });
+
+  it('drops back to the coarse lattice when a tile is evicted', () => {
+    setOrigin(world(0, 0));
+    const field = new Heightfield(flatGrid(-100));
+    const view = new TerrainView({ field });
+    const bumpy = new Int16Array(HD_TILE_SAMPLES * HD_TILE_SAMPLES);
+    for (let i = 0; i < bumpy.length; i += 1) bumpy[i] = -100 + (i % 37) * 3;
+    field.addTile(idOf('E5'), { side: HD_TILE_SAMPLES, samples: bumpy });
+    view.update(world(0, 0));
+    const withTile = (meshes(view)[0].geometry.getAttribute('position') as THREE.BufferAttribute).array.slice();
+
+    field.dropTile(idOf('E5'));
+    view.update(world(0, 0));
+    expect(view.lastRebuilt).toBeGreaterThan(0);
+    expect((meshes(view)[0].geometry.getAttribute('position') as THREE.BufferAttribute).array).not.toEqual(withTile);
+    view.dispose();
+  });
+});
+
 describe('what it draws', () => {
   it('puts every surface vertex at the heightfield’s own answer', () => {
     setOrigin(world(0, 0));
@@ -202,11 +308,26 @@ describe('what it draws', () => {
     // line, and that hairline is the sky. Averaging it onto the line makes
     // the two polylines identical, so there is nothing left to leak.
     setOrigin(world(0, 0));
-    const grid = rampGrid(20);
-    const field = new Heightfield(grid);
+    const field = new Heightfield(hillGrid());
     const view = new TerrainView({ field });
     view.update(world(0, 0));
     const all = meshes(view);
+
+    // The fixture must actually bend, or this test is about a plane again.
+    // On a plane the stitch is a no-op and its removal is invisible.
+    let bends = 0;
+    for (let m = 0; m < all.length - 1; m += 1) {
+      const pos = all[m].geometry.getAttribute('position') as THREE.BufferAttribute;
+      const runs = all[m].geometry.userData.edgeRuns as number[][];
+      for (const run of runs) {
+        for (let i = 1; i < run.length - 1; i += 2) {
+          const here = world(all[m].position.x + pos.getX(run[i]), all[m].position.z + pos.getZ(run[i]));
+          const mean = (pos.getY(run[i - 1]) + pos.getY(run[i + 1])) / 2;
+          if (Math.abs(field.heightAt(here) - mean) > 1) bends += 1;
+        }
+      }
+    }
+    expect(bends).toBeGreaterThan(100);
 
     for (let m = 0; m < all.length - 1; m += 1) {
       const position = all[m].geometry.getAttribute('position') as THREE.BufferAttribute;
@@ -231,8 +352,12 @@ describe('what it draws', () => {
     for (const run of outerRuns) {
       for (let i = 1; i < run.length - 1; i += 2) {
         const here = world(outer.position.x + outerPos.getX(run[i]), outer.position.z + outerPos.getZ(run[i]));
+        const mean = (outerPos.getY(run[i - 1]) + outerPos.getY(run[i + 1])) / 2;
         expect(outerPos.getY(run[i])).toBeCloseTo(field.heightAt(here), 3);
-        trueHeights += 1;
+        // And on THIS fixture that is a different number from the mean,
+        // so the assertion above is about the outermost ring keeping its
+        // real heights rather than about arithmetic that holds anywhere.
+        if (Math.abs(field.heightAt(here) - mean) > 1) trueHeights += 1;
       }
     }
     expect(trueHeights).toBeGreaterThan(0);

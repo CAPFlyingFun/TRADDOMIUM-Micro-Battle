@@ -15,6 +15,13 @@
  * not tile counts, because the tile grid is an artefact of how the survey
  * was cut and the camera does not care.
  *
+ * WHAT THAT COSTS, counted rather than asserted: WANT_REACH is one tile
+ * span, so the wanted square spans three tiles each way and at most NINE
+ * tiles are ever asked for. Residency is bounded by KEEP_REACH, not by
+ * WANT_REACH, and 1.5 tile spans can touch FOUR tiles each way — so up to
+ * SIXTEEN tiles, 8.4 MB, can be resident at once. That is the number to
+ * hold in mind for a phone, and it is what `MAX_RESIDENT` says out loud.
+ *
  * NOTHING HERE DECIDES WHAT THE GROUND LOOKS LIKE. A tile that has not
  * arrived is not missing ground — the coarse lattice answers there, at 4x
  * coarser detail, and `Heightfield` says which answered. That is what
@@ -46,6 +53,14 @@ export const WANT_REACH = 700_000;
  */
 export const KEEP_REACH = 1_050_000;
 
+/**
+ * The most tiles that can be resident at once, from KEEP_REACH: a square
+ * of 1.5 tile spans either side touches 4 tiles on each axis. 16 x
+ * 526,338 bytes = 8.4 MB. Pinned by a test so the reaches and this number
+ * cannot drift apart.
+ */
+export const MAX_RESIDENT = 16;
+
 /** Tiles fetched at once. Small: a phone's radio does better with a queue than a stampede. */
 export const MAX_IN_FLIGHT = 2;
 
@@ -76,6 +91,8 @@ export class TerrainStreamer {
 
   private readonly resident = new Set<string>();
   private readonly inFlight = new Set<string>();
+  /** Aborts every download still in the air when the world goes away. */
+  private readonly aborter = new AbortController();
   private readonly failed = new Set<string>();
   private wanted = 0;
   private disposed = false;
@@ -85,7 +102,7 @@ export class TerrainStreamer {
     this.wantReach = options.wantReach ?? WANT_REACH;
     this.keepReach = options.keepReach ?? KEEP_REACH;
     this.maxInFlight = Math.max(1, options.maxInFlight ?? MAX_IN_FLIGHT);
-    this.fetchTile = options.fetchTile ?? ((id) => fetchHdTile(id));
+    this.fetchTile = options.fetchTile ?? ((id) => fetchHdTile(id, { signal: this.aborter.signal }));
     this.onError = options.onError;
   }
 
@@ -126,10 +143,19 @@ export class TerrainStreamer {
     }
   }
 
-  /** Stop caring about anything still in the air. Tiles already resident stay in the field. */
+  /**
+   * Stop, and actually stop.
+   *
+   * Ignoring an in-flight download is not the same as cancelling it: a
+   * scene that is torn down mid-stream would otherwise leave up to
+   * `maxInFlight` half-megabyte transfers running to completion on a
+   * phone's radio, for a world nobody is looking at. The signal is passed
+   * to the fetch, so the socket closes with the scene.
+   */
   dispose(): void {
     this.disposed = true;
     this.inFlight.clear();
+    this.aborter.abort();
   }
 
   private begin(id: HdTileId, key: string): void {

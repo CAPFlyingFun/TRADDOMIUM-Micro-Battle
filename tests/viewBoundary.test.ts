@@ -115,10 +115,31 @@ describe('the world/terrain seam', () => {
     expect(terrainSites.length).toBeGreaterThan(0);
   });
 
-  it('reads the heightfield as types only — it draws state, it does not run it', () => {
+  it('never owns a Heightfield — it is handed one, and it does not construct or run it', () => {
+    // The rule is about OWNERSHIP, not about the import keyword. terrain/
+    // receives a Heightfield and reads it; it must never build one, which
+    // is what importing the class as a value would let it do.
     const fromField = terrainSites.filter((s) => /world\/heightfield$/.test(s.specifier));
     expect(fromField.length).toBeGreaterThan(0);
-    expect(fromField.filter((s) => !s.typeOnly).map((s) => `${s.file}: ${s.statement}`)).toEqual([]);
+    for (const [file, src] of terrain) {
+      const body = code(src);
+      expect(body, `${file} constructs a Heightfield`).not.toMatch(/new\s+Heightfield\b/);
+      // `Heightfield` may only appear as a type: after `type`, or in a
+      // type position (`: Heightfield`, `<Heightfield>`).
+      const asValue = /(^|[^\w.])Heightfield\s*\(/.test(body);
+      expect(asValue, `${file} calls Heightfield as a value`).toBe(false);
+    }
+    // What it MAY take as values are the pure conversions it has to agree
+    // with — a normal from a gradient, a slope from a normal. The renderer
+    // derives its vertex normals from heights it has already read rather
+    // than paying the heightfield for four more samples each; sharing the
+    // arithmetic is exactly what stops the mesh and the ground disagreeing,
+    // and duplicating it here is what would let them.
+    const valueImports = fromField.filter((s) => !s.typeOnly);
+    for (const site of valueImports) {
+      expect(site.statement, `${site.file} imports more than the shared conversions`)
+        .toMatch(/normalOfGradient|slopeOfUp|SEA_LEVEL/);
+    }
   });
 
   it('converts through the floating origin, and reads no world coordinate by hand', () => {

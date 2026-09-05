@@ -62,9 +62,29 @@
  * anything the stitch does not.
  *
  * IT DRAWS THE HEIGHTFIELD, NOT THE DEM. Every vertex is a `heightAt`,
- * so a high-detail tile arriving sharpens the ground under the camera
- * with no change here, and the mesh agrees with what an ant walks on by
- * construction rather than by a second copy of the sampling rules.
+ * so the mesh agrees with what an ant walks on by construction rather
+ * than by a second copy of the sampling rules.
+ *
+ * AND IT HAS TO BE TOLD WHEN THE GROUND CHANGES. An earlier version of
+ * this comment claimed a streamed tile "sharpens the ground under the
+ * camera with no change here", which was false: a ring is refilled only
+ * when it MOVES, so a tile landing under a camera that is standing still
+ * reached nobody, and once the camera did move the rings caught up at
+ * eight different rates — ring 0 every 27 m, ring 4 every 437 m — leaving
+ * adjacent rings drawing two different versions of the ground and pulling
+ * the stitched seam apart. `Heightfield.revision()` closes it: one
+ * counter, bumped when a tile arrives or leaves, compared per frame, and
+ * a change refills every ring at once.
+ *
+ * THE REFILL IS THE FRAME BUDGET, so it is written like it. Measured at
+ * 14 ms and ~89,000 short-lived objects a ring before this was addressed,
+ * landing on about a third of frames at the scene's own flying speed —
+ * on a phone that is the whole frame. Three things were paying for it:
+ * `normalAt` per vertex (four more heightfield reads each, when the
+ * neighbouring vertices this loop has ALREADY computed are the same
+ * samples), a `THREE.Color` allocated three deep per vertex, and a
+ * two-character string built per read inside the heightfield's tile
+ * lookup. All three are gone; what is left is one small point per vertex.
  *
  * THE COLOUR IS HEIGHT, and it is honest about being a stand-in: there
  * are no textures baked yet (the ladder they will be baked to is in
@@ -73,8 +93,8 @@
  * here would be a surface nobody owns.
  */
 import * as THREE from 'three';
-import { HD_STEP } from '../world/dem';
-import type { Heightfield } from '../world/heightfield';
+import { COARSE_STEP, HD_STEP } from '../world/dem';
+import { normalOfGradient, slopeOfUp, type Heightfield } from '../world/heightfield';
 import { samePoint, snapTo, translate, type WorldPoint } from '../world/coords';
 import { toLocal } from '../world/origin';
 
@@ -102,8 +122,8 @@ const SKIRT_QUADS = 1.5;
  * a matter of slope, which is what `ROCK` is for.
  */
 const BANDS: readonly { readonly at: number; readonly colour: number }[] = [
-  { at: -300_000, colour: 0x0a1a2e },
-  { at: -40_000, colour: 0x14415f },
+  { at: -300_000, colour: 0x16324e },
+  { at: -40_000, colour: 0x1b5378 },
   { at: -2_000, colour: 0x2d7f96 },
   { at: 0, colour: 0xcfc09a },
   { at: 1_500, colour: 0x7d9b4e },
@@ -132,6 +152,8 @@ interface Ring {
   readonly geometry: THREE.BufferGeometry;
   /** Where its centre is now, in world units, snapped to twice its quad. Null until the first fill. */
   centre: WorldPoint | null;
+  /** The heightfield revision this ring's heights were read at. -1 until the first fill. */
+  filledAt: number;
   /** Where the hole is cut, in this ring's own quads, relative to the middle. Each is -1, 0 or 1. */
   holeX: number;
   holeZ: number;
@@ -170,7 +192,7 @@ export class TerrainView {
       // rewritten with its heights, and three must not cull it on stale ones.
       mesh.frustumCulled = false;
       this.group.add(mesh);
-      this.rings.push({ level, quad, mesh, geometry, centre: null, holeX: 0, holeZ: 0 });
+      this.rings.push({ level, quad, mesh, geometry, centre: null, holeX: 0, holeZ: 0, filledAt: -1 });
     }
   }
 
@@ -189,14 +211,31 @@ export class TerrainView {
     // Snapped to TWICE the quad: snapping to one quad would flip the
     // grid's parity every step and make the surface crawl.
     const centres = this.rings.map((ring) => snapTo(at, ring.quad * 2));
+    // The ground's own version. A tile arriving or leaving changes it,
+    // and every ring is then stale wherever it looks — including the ones
+    // that have not moved. Refilling all eight on that frame is the same
+    // work the first frame already does, and it happens once per tile
+    // rather than per frame.
+    const revision = this.field.revision();
 
     for (let i = 0; i < this.rings.length; i += 1) {
       const ring = this.rings[i];
       const centre = centres[i];
-      if (ring.centre === null || !samePoint(ring.centre, centre)) {
+      // A ring whose quad is the coarse lattice's own step (or a multiple
+      // of it) samples ONLY at coarse sample points — and decimating the
+      // high-detail grid by four reproduces the coarse one exactly there,
+      // which `tests/worldDem.test.ts` pins. So a tile arriving cannot
+      // change one pixel of what those rings draw, and refilling all eight
+      // on every tile would be six rings of wasted work per download.
+      const stale = ring.filledAt !== revision && ring.quad < COARSE_STEP;
+      if (ring.centre === null || stale || !samePoint(ring.centre, centre)) {
         ring.centre = centre;
         this.fill(ring);
         rebuilt += 1;
+      } else if (ring.filledAt !== revision) {
+        // Up to date by the argument above; say so, or it would be
+        // re-examined against every future revision for ever.
+        ring.filledAt = revision;
       }
       // Cut the hole where the finer ring landed, not where the middle
       // of this one happens to be — see the header.
@@ -246,7 +285,13 @@ export class TerrainView {
     this.rings.length = 0;
   }
 
-  /** Rewrite one ring's heights, colours and normals from the heightfield. */
+  /**
+   * Rewrite one ring's heights, colours and normals from the heightfield.
+   *
+   * Four passes rather than one, because each needs the one before it
+   * finished across the WHOLE ring: normals read neighbouring heights,
+   * and the stitch moves heights that the normals must then reflect.
+   */
   private fill(ring: Ring): void {
     const centre = ring.centre;
     if (!centre) return;
@@ -254,19 +299,12 @@ export class TerrainView {
     const colour = ring.geometry.getAttribute('color') as THREE.BufferAttribute;
     const normal = ring.geometry.getAttribute('normal') as THREE.BufferAttribute;
     const skirtFrom = ring.geometry.userData.skirtFrom as number;
+    const quads = ring.geometry.userData.quads as number;
+    const side = quads + 1;
 
-    // 1. The surface, straight from the heightfield.
+    // 1. The surface, straight from the heightfield. ONE read a vertex.
     for (let i = 0; i < skirtFrom; i += 1) {
-      const at = translate(centre, position.getX(i), position.getZ(i));
-      const height = this.field.heightAt(at);
-      position.setY(i, height);
-      const n = this.field.normalAt(at);
-      normal.setXYZ(i, n.nx, n.ny, n.nz);
-      // The slope comes straight out of the normal that was just read —
-      // acos of its up component — rather than costing a second query.
-      const slope = Math.acos(Math.min(1, Math.max(-1, n.ny))) * (180 / Math.PI);
-      const c = colourAt(height, slope);
-      colour.setXYZ(i, c.r, c.g, c.b);
+      position.setY(i, this.field.heightAt(translate(centre, position.getX(i), position.getZ(i))));
     }
 
     // 2. The seam. Every other vertex along the outer boundary is pinned
@@ -282,7 +320,36 @@ export class TerrainView {
       }
     }
 
-    // 3. The skirts, hung from whatever height their edge vertex ended up
+    // 3. Normals and colour, from the heights now standing in the buffer.
+    //
+    // The normal is a central difference across the ring's OWN
+    // neighbours — the same samples this loop just read, so it costs
+    // nothing instead of four more heightfield reads a vertex, and it
+    // describes the surface actually being drawn rather than a second
+    // opinion about it. Only the ring's outer boundary, which has no
+    // neighbour on one side, falls back to asking the field.
+    const twoQuads = 2 * ring.quad;
+    for (let row = 0; row < side; row += 1) {
+      for (let col = 0; col < side; col += 1) {
+        const i = row * side + col;
+        const height = position.getY(i);
+        let n;
+        if (col > 0 && col < quads && row > 0 && row < quads) {
+          const west = position.getY(i - 1);
+          const east = position.getY(i + 1);
+          const north = position.getY(i - side);
+          const south = position.getY(i + side);
+          n = normalOfGradient((west - east) / twoQuads, (north - south) / twoQuads);
+        } else {
+          n = this.field.normalAt(translate(centre, position.getX(i), position.getZ(i)));
+        }
+        normal.setXYZ(i, n.nx, n.ny, n.nz);
+        const c = colourAt(height, slopeOfUp(n.ny), SCRATCH_COLOUR);
+        colour.setXYZ(i, c.r, c.g, c.b);
+      }
+    }
+
+    // 4. The skirts, hung from whatever height their edge vertex ended up
     // at, wearing its colour so they never catch the light as a band.
     const drop = ring.quad * SKIRT_QUADS;
     const edge = ring.geometry.userData.edge as number[];
@@ -298,35 +365,52 @@ export class TerrainView {
     colour.needsUpdate = true;
     normal.needsUpdate = true;
     ring.geometry.computeBoundingSphere();
+    ring.filledAt = this.field.revision();
   }
 }
+
+/** One colour, reused for every vertex of every ring. See the header on what allocating one cost. */
+const SCRATCH_COLOUR = new THREE.Color();
 
 /**
  * The stand-in surface colour: the height ramp, then as much bare rock as
  * the slope earns. Exported so a test can read it rather than guess it.
  */
-export function colourAt(height: number, slopeDegrees = 0): THREE.Color {
-  const base = bandColour(height);
+export function colourAt(height: number, slopeDegrees = 0, into?: THREE.Color): THREE.Color {
+  const base = bandColour(height, into ?? new THREE.Color());
   // Underwater the sea floor is sea floor however steep it is; a rock face
   // painted onto the bathymetry would be visible through nothing.
   if (height < 0 || slopeDegrees <= ROCK_FROM) return base;
   const t = Math.min(1, (slopeDegrees - ROCK_FROM) / (ROCK_FULL - ROCK_FROM));
-  return base.lerp(new THREE.Color(ROCK), t);
+  return base.lerp(ROCK_COLOUR, t);
 }
 
-function bandColour(height: number): THREE.Color {
+/** The rock, as one colour rather than one per vertex. `lerp` only reads it. */
+const ROCK_COLOUR = new THREE.Color(ROCK);
+
+function bandColour(height: number, into: THREE.Color): THREE.Color {
   const first = BANDS[0];
-  if (height <= first.at) return new THREE.Color(first.colour);
+  if (height <= first.at) return into.copy(BAND_COLOURS[0]);
   for (let i = 1; i < BANDS.length; i += 1) {
     const low = BANDS[i - 1];
     const high = BANDS[i];
     if (height <= high.at) {
       const t = (height - low.at) / (high.at - low.at);
-      return new THREE.Color(low.colour).lerp(new THREE.Color(high.colour), t);
+      return into.copy(BAND_COLOURS[i - 1]).lerp(BAND_COLOURS[i], t);
     }
   }
-  return new THREE.Color(BANDS[BANDS.length - 1].colour);
+  return into.copy(BAND_COLOURS[BAND_COLOURS.length - 1]);
 }
+
+/**
+ * Each band's colour, converted once.
+ *
+ * `setHex` is not a field assignment — three converts sRGB to linear on
+ * the way in, which is a `Math.pow` per channel. Doing that per vertex
+ * cost more than reading the heightfield did. These are built at module
+ * load and only ever copied from.
+ */
+const BAND_COLOURS = BANDS.map((b) => new THREE.Color(b.colour));
 
 /**
  * One ring, centred on its own origin, in the XZ plane with Y left at

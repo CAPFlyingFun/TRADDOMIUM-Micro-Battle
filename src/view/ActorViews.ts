@@ -35,19 +35,29 @@ export class ActorViews {
   ) {}
 
   /** Make the scene match `actors`: new ones appear, known ones move, absent ones leave. */
-  sync(actors: readonly ActorState[]): void {
+  /**
+   * @param groundAt how high the terrain is under a world position, in
+   *   render units. Omitted means flat ground at zero, which is what the
+   *   empty world is and what every build before terrain had.
+   */
+  sync(actors: readonly ActorState[], groundAt?: (at: ActorState['at']) => number): void {
     this.generation += 1;
     for (const state of actors) {
+      // Read ONCE, and applied on the frame a capsule first appears as
+      // well as on every frame after. Placing it only in the `else` left
+      // a new capsule at its raw height for one frame — on flat ground
+      // that was invisible, and over terrain it is a capsule flashing
+      // 1.3 km below the summit before it snaps up.
+      const ground = groundAt ? groundAt(state.at) : 0;
       let entry = this.entries.get(state.id);
       if (entry === undefined) {
         const view = new CapsuleView(state, this.look);
         this.parent.add(view.object);
         entry = { view, seen: this.generation };
         this.entries.set(state.id, entry);
-      } else {
-        entry.view.update(state);
-        entry.seen = this.generation;
       }
+      entry.view.update(state, ground);
+      entry.seen = this.generation;
     }
     for (const [id, entry] of this.entries) {
       if (entry.seen === this.generation) continue;

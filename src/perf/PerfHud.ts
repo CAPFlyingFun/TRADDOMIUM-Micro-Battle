@@ -150,6 +150,8 @@ export class PerfHud {
   /** Built only when the owner offers a `session()` hook; null otherwise. */
   private readonly sessionLine: HTMLElement | null;
   private readonly boxes = new Map<WorldLayerId, HTMLInputElement>();
+  /** Each layer row's wrapper and its text node, so the label can follow the model. */
+  private readonly rows = new Map<string, { wrap: HTMLElement; text: Text }>();
   /** Infinity so the very first update() paints without waiting a refresh period. */
   private sinceRefresh = Infinity;
 
@@ -241,6 +243,7 @@ export class PerfHud {
   dispose(): void {
     this.root.remove();
     this.boxes.clear();
+    this.rows.clear();
   }
 
   private buildLayerRows(parent: HTMLElement): void {
@@ -257,8 +260,10 @@ export class PerfHud {
       box.disabled = locked;
       box.style.cssText = 'margin:0 6px 0 0;vertical-align:middle;';
       wrap.appendChild(box);
-      wrap.appendChild(doc.createTextNode(label));
+      const text = doc.createTextNode(label);
+      wrap.appendChild(text);
       parent.appendChild(wrap);
+      this.rows.set(id, { wrap, text });
       return box;
     };
 
@@ -289,12 +294,24 @@ export class PerfHud {
     this.fields.cameraFacing.textContent = `facing ${degrees(c.facing)}°`;
     const session = this.hooks.session?.();
     if (this.sessionLine !== null && session !== undefined) this.sessionLine.textContent = sessionWords(session);
-    // The model is the truth; a click the owner rejected snaps back here.
+    // THE MODEL IS THE TRUTH, and that includes the WORDS. A click the
+    // owner rejected snaps back here — and so does a row whose built-ness
+    // was not known when the HUD was constructed. Whether TERRAIN is built
+    // is not a fact about this build: it is whether the survey actually
+    // downloaded, which is settled after this panel exists. Writing the
+    // label once left the row reading "not built" over ground that was
+    // plainly on the screen.
     for (const layer of this.hooks.layers()) {
       const box = this.boxes.get(layer.id);
       if (!box) continue;
       box.checked = layer.enabled;
       box.disabled = !layer.built;
+      const row = this.rows.get(layer.id);
+      if (row) {
+        const label = layer.built ? layer.id : `${layer.id} — not built`;
+        if (row.text.nodeValue !== label) row.text.nodeValue = label;
+        row.wrap.style.opacity = !layer.built && !layer.enabled ? '0.5' : '1';
+      }
     }
   }
 }
