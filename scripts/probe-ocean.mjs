@@ -373,6 +373,16 @@ async function drive(page, url) {
 const SWEEP_TIERS = ['medium', 'low', 'ultra-low'];
 
 /**
+ * Frames to fly forward while the cost record is watching.
+ *
+ * The camera starts about 125 m/s (a twelfth of its height above the
+ * ground) and the near sheet re-anchors every 21 m, so even a handful of
+ * frames crosses the lattice several times. Sixty is enough to be sure
+ * of catching one on a rig this slow without adding a minute a rung.
+ */
+const MOVE_FRAMES = 60;
+
+/**
  * The HUD's own sea rows, parsed. They read
  *
  *     sea mean 0.04 ms
@@ -408,11 +418,22 @@ async function seaReadout(page) {
  *   layer on and off is a smell test that transfers; the absolute
  *   numbers do not.
  *
- * If the CPU side is a fraction of a millisecond while switching the
- * layer off multiplies the frame rate, the cost is on the fragment side
- * and the texture rung is the lever — which is exactly what the ladder
- * was built to be. That is the finding, and it is stated by comparing
- * the two, never by asserting it.
+ * AND IT IS MEASURED MOVING, WHICH IS THE WHOLE POINT. The first version
+ * of this sweep held the camera still, pitched at the horizon, and
+ * reported that the sea's JS costs 0.67 ms a frame and there was nothing
+ * to win in it. That was true and useless: a still camera never crosses
+ * a recentre lattice, so it never refills a sheet, so it never pays for
+ * the one CPU cost the ocean actually has. Moving, the near sheet
+ * re-anchors every 21 m — tens of thousands of heightfield reads in a
+ * single frame — and that is a hitch rather than a slow average. Both
+ * windows are measured now, and the moving one is what the finding uses.
+ *
+ * If the still cost is a fraction of a millisecond while switching the
+ * layer off multiplies the frame rate, the steady-state cost is on the
+ * fragment side and the texture rung is the lever — which is exactly what
+ * the ladder was built to be. The peak says separately whether there is
+ * a stall on top of that. Both are stated by comparing measurements,
+ * never by asserting them.
  *
  * A FRESH CONTEXT PER RUNG, because slot 1 would otherwise already hold
  * a save from the previous rung and NEW GAME would stop to ask.
@@ -441,6 +462,13 @@ async function sweep(browser, url) {
       await look(page, 0, -90); // the horizon into frame, as in check 4
       const withSea = await runFrames(page, FRAMES);
       const onFps = FRAMES / (withSea / 1000);
+      const still = await seaReadout(page);
+
+      // NOW MOVE. Forward at the starting fly speed crosses the near
+      // sheet's recentre lattice several times in this many frames, so
+      // the peak below is a refill and not an average of frames that
+      // never did one.
+      await hold(page, 'KeyW', MOVE_FRAMES);
       const cost = await seaReadout(page);
 
       const toggle = page.locator('[data-layer="ocean"] input, [data-action="layer:ocean"]').first();
@@ -449,10 +477,10 @@ async function sweep(browser, url) {
       const without = await runFrames(page, FRAMES);
       const offFps = FRAMES / (without / 1000);
 
-      rows.push({ tier, onFps, offFps, cost });
+      rows.push({ tier, onFps, offFps, still, cost });
       log(`${tier.padEnd(9)} ${onFps.toFixed(2)} fps with the sea, ${offFps.toFixed(2)} without `
-        + `(${(offFps / onFps).toFixed(2)}x) — CPU ${cost?.meanMs.toFixed(3) ?? '?'} ms mean, `
-        + `${cost?.peakMs.toFixed(1) ?? '?'} ms peak`);
+        + `(${(offFps / onFps).toFixed(2)}x) — CPU ${still?.meanMs.toFixed(3) ?? '?'} ms a frame still, `
+        + `${cost?.peakMs.toFixed(1) ?? '?'} ms worst frame moving`);
     } finally {
       await context.close();
     }
@@ -460,24 +488,30 @@ async function sweep(browser, url) {
 
   // ── the finding, read off the rows rather than assumed ──
   log('');
-  const cpu = rows.map((r) => r.cost?.meanMs ?? 0);
-  const worstCpu = cpu.length === 0 ? 0 : Math.max(...cpu);
-  const ratios = rows.filter((r) => r.onFps > 0).map((r) => r.offFps / r.onFps);
-  const worstRatio = ratios.length === 0 ? 0 : Math.max(...ratios);
+  const worstOf = (pick) => {
+    const values = rows.map(pick).filter((v) => Number.isFinite(v));
+    return values.length === 0 ? 0 : Math.max(...values);
+  };
+  const stillCpu = worstOf((r) => r.still?.meanMs ?? NaN);
+  const movingPeak = worstOf((r) => r.cost?.peakMs ?? NaN);
+  const worstRatio = worstOf((r) => (r.onFps > 0 ? r.offFps / r.onFps : NaN));
   // A frame's whole budget at 60 fps, for scale — the number the CPU
   // side has to be compared against to mean anything.
   const BUDGET_MS = 1000 / 60;
-  log(`CPU: the sea's own JS costs at most ${worstCpu.toFixed(3)} ms a frame across the rungs `
-    + `— ${((100 * worstCpu) / BUDGET_MS).toFixed(1)}% of a 60 fps frame.`);
-  log(`GPU: switching the layer off is worth up to ${worstRatio.toFixed(2)}x the frame rate.`);
-  if (worstCpu < BUDGET_MS / 10 && worstRatio > 1.2) {
-    log('FINDING: the sea spends on the GPU, not the CPU. The texture rung and the');
-    log('         sheet vertex counts are the levers; there is nothing to win in its JS.');
-  } else if (worstCpu >= BUDGET_MS / 10) {
-    log(`FINDING: the sea's own JS is ${worstCpu.toFixed(2)} ms a frame, which is not free. `
-      + 'Look at the refill before touching the shader.');
+  log(`CPU, still:  at most ${stillCpu.toFixed(3)} ms a frame — ${((100 * stillCpu) / BUDGET_MS).toFixed(1)}% of a 60 fps frame.`);
+  log(`CPU, moving: worst single frame ${movingPeak.toFixed(1)} ms — ${(movingPeak / BUDGET_MS).toFixed(1)} frames' budget in one frame.`);
+  log(`GPU:         switching the layer off is worth up to ${worstRatio.toFixed(2)}x the frame rate.`);
+  if (stillCpu < BUDGET_MS / 10 && worstRatio > 1.2) {
+    log('FINDING: the STEADY cost is on the GPU. The texture rung and the sheet vertex');
+    log('         counts are the levers, and the sweep above shows them working.');
   } else {
-    log('FINDING: the layer costs little either way in this view — measure with more water in frame.');
+    log(`FINDING: the sea's own JS is ${stillCpu.toFixed(2)} ms a frame even standing still,`);
+    log('         which is not free. Look at the refill before touching the shader.');
+  }
+  if (movingPeak > BUDGET_MS) {
+    log(`         BUT MOVING IT STALLS: one frame in the move cost ${movingPeak.toFixed(1)} ms, which is`);
+    log('         a sheet re-anchor — tens of thousands of heightfield reads at once.');
+    log('         That is a hitch, not a slow average, and no texture rung fixes it.');
   }
   log('(SwiftShader is a software rasteriser. The CPU milliseconds are real and portable;');
   log(' the frame-rate ratio is a smell test, and neither is a phone number.)');
