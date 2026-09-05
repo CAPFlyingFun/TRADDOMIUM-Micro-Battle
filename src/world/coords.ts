@@ -124,6 +124,47 @@ export function snapTo(at: WorldPoint, step: number): WorldPoint {
   return world(Math.round(at.wx / step) * step, Math.round(at.wz / step) * step);
 }
 
+// ---------------------------------------------------------------------------
+// Which way is north
+// ---------------------------------------------------------------------------
+
+/**
+ * A COMPASS BEARING IS NOT A HEADING, and printing one as the other is a
+ * mirrored compass.
+ *
+ * Joshua, from the device, 2026-09-05: "the heading 'degrees °' is
+ * backwards on the display meaning going clockwise should add not
+ * subtract." He is right, and the readout was wrong in a way that hid
+ * itself — it agreed with a real compass at east and west and was a full
+ * half-turn out at north and south, which is exactly what a mirrored
+ * compass looks like.
+ *
+ * TWO FACTS MEET HERE, and neither file owns both, which is why the
+ * conversion lives in this one:
+ *
+ *   1. `+wx is EAST and +wz is SOUTH` (`world/dem.ts`, matching the
+ *      survey's own column and row order). So NORTH is -wz.
+ *   2. An actor's heading `h` means ahead is `(sin h, cos h)`
+ *      (`actor/Transform.ts`). So h = 0 points at +wz, which is SOUTH.
+ *
+ * Put together: h = 0 is a bearing of 180, h = 90° is east (90), h = 180°
+ * is north (0), h = 270° is west (270). That is `180 - h`, and the minus
+ * sign is the whole bug — a heading turns anticlockwise as it grows,
+ * because it is a rotation about +y, while a bearing turns clockwise,
+ * because that is what a compass rose is.
+ *
+ * A HEADING IS STILL THE ONLY THING STORED, SENT OR STEPPED. This is a
+ * presentation conversion and nothing else reads it: no save, no wire
+ * message and no movement changes meaning. Flipping the sign inside
+ * `headingOfYaw` instead would have turned every capsule on the wire
+ * around, which is a bug this project has already had once.
+ */
+export function compassBearing(heading: number): number {
+  const degrees = Math.round((heading * 180) / Math.PI);
+  // Round BEFORE wrapping: rounding after would let 359.6 print as 360.
+  return ((180 - degrees) % 360 + 360) % 360;
+}
+
 /** How wide a chunk is, in world units. */
 export const CHUNK_SPAN = 512;
 

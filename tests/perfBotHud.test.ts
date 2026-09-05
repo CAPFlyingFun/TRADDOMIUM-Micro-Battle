@@ -20,6 +20,7 @@ import { DEBUG_CAPSULE_TUNING } from '../src/actor/CapsuleTuning';
 import { ScriptedMover } from '../src/actor/ScriptedMover';
 import { patrolRoute } from '../src/actor/routes';
 import { NEUTRAL_INTENT, type Intent } from '../src/input/Intent';
+import { compassBearing } from '../src/world/coords';
 import {
   BOT_HUD_NOTE, BotHud, countdown, facingDegrees, pressedControls, type BotReadout, type ControlId,
 } from '../src/perf/BotHud';
@@ -231,10 +232,23 @@ describe('the small conversions', () => {
     expect(countdown(61)).toBe('1:01');
   });
 
-  it('turns a heading into degrees a person reads, always 0..359', () => {
-    expect(facingDegrees(0)).toBe(0);
-    expect(facingDegrees(Math.PI / 2)).toBe(90);
-    expect(facingDegrees(Math.PI)).toBe(180);
-    expect(facingDegrees(-Math.PI / 2)).toBe(270);
+  it('turns a heading into a COMPASS BEARING a person reads, always 0..359', () => {
+    // This test used to assert the identity — heading degrees printed
+    // raw — and that was the bug Joshua reported from the device: a
+    // mirrored compass. It agreed with a real one at east and west and
+    // was a half-turn out at north and south, which is why it survived.
+    //
+    // `+wz is SOUTH` (world/dem.ts) and ahead is (sin h, cos h)
+    // (actor/Transform.ts), so h = 0 points south.
+    expect(facingDegrees(0)).toBe(180); // +wz, south
+    expect(facingDegrees(Math.PI / 2)).toBe(90); // +wx, east
+    expect(facingDegrees(Math.PI)).toBe(0); // -wz, north
+    expect(facingDegrees(-Math.PI / 2)).toBe(270); // -wx, west
+  });
+
+  it('is the world’s one compass, not a second copy of it', () => {
+    // Two panels printing the same kind of number about the same world is
+    // how one of them ends up mirrored while the other is not.
+    expect(facingDegrees(1.234)).toBe(compassBearing(1.234));
   });
 });
