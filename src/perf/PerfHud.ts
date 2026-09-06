@@ -111,6 +111,23 @@ export interface SeaReadout {
   readonly tier: string | null;
 }
 
+/**
+ * What the island's fresh water is costing, and how much of it there is.
+ *
+ * THE WET-CELL COUNT IS THE POINT, not decoration. The solver's cost is
+ * flat — it steps every cell whether or not there is water in it — so a
+ * millisecond figure alone cannot tell "the water is expensive" from
+ * "there is no water and it is expensive anyway". The count is how a
+ * device pass says which, and it is what the baseflow rate has to be
+ * tuned against.
+ */
+export interface FreshReadout {
+  readonly meanMs: number;
+  readonly peakMs: number;
+  readonly wetCells: number;
+  readonly cells: number;
+}
+
 export interface PerfHudHooks {
   /** The rows to show. Re-read at every refresh so the checkboxes follow the model, not the clicks. */
   layers(): readonly LayerToggle[];
@@ -128,6 +145,8 @@ export interface PerfHudHooks {
    * YET, which is a different thing and reads as such.
    */
   sea?(): SeaReadout | null;
+  /** The island's fresh water. Absent where a world has none. */
+  fresh?(): FreshReadout | null;
 }
 
 type Field = 'meanFps' | 'lowFps' | 'simDt' | 'cameraPosition' | 'cameraSpeed' | 'cameraFacing';
@@ -206,6 +225,21 @@ function sessionWords(readout: SessionReadout): string {
  * These belong here anyway: raw wall-clock milliseconds a frame is what
  * this column is for.
  */
+function freshWords(fresh: FreshReadout | null): readonly [string, string] {
+  if (fresh === null) return ['fresh    not built', ''];
+  // The share is what a reader can act on: "2% wet" beside a peak says
+  // the cost is the grid rather than the water.
+  const share = fresh.cells === 0 ? 0 : (100 * fresh.wetCells) / fresh.cells;
+  // SHORT ENOUGH NOT TO WIDEN A COLUMN. The first draft read
+  // "fresh 10.41 ms pk 23.8" and "wet 24.1% of 256²", which pushed the
+  // HUD to 907 px of a 932 px canvas and put it under PAUSE — caught by
+  // `probe:bot`, which measures the overlap rather than trusting the eye.
+  return [
+    `fresh ${fresh.meanMs.toFixed(1)} ms`,
+    `wet ${share.toFixed(1)}% ${Math.round(Math.sqrt(fresh.cells))}²`,
+  ];
+}
+
 function seaWords(sea: SeaReadout | null): readonly [string, string, string, string] {
   if (sea === null) return ['sea      not built', '', '', ''];
   return [
@@ -229,6 +263,8 @@ export class PerfHud {
   private readonly sessionLine: HTMLElement | null;
   /** Built only when the owner offers a `sea()` hook; null otherwise. */
   private readonly seaLines: readonly [HTMLElement, HTMLElement, HTMLElement, HTMLElement] | null;
+  /** Built only when the owner offers a `fresh()` hook; null otherwise. */
+  private readonly freshLines: readonly [HTMLElement, HTMLElement] | null;
   private readonly boxes = new Map<WorldLayerId, HTMLInputElement>();
   /** Each layer row's wrapper and its text node, so the label can follow the model. */
   private readonly rows = new Map<string, { wrap: HTMLElement; text: Text }>();
@@ -282,6 +318,14 @@ export class PerfHud {
     this.seaLines = hooks.sea === undefined
       ? null
       : [line(frame, 'sea-mean'), line(frame, 'sea-peak'), line(frame, 'sea-detail'), line(frame, 'sea-tex')];
+    // IN THE FRAME COLUMN, under the sea's lines, because that column is
+    // already as wide as "95th low 50.0 fps" and these are shorter than
+    // that. Putting them in SIM dt — whose only line is "100.0 ms" —
+    // widened that column by nine characters and slid the HUD under
+    // PAUSE at the design canvas.
+    this.freshLines = hooks.fresh === undefined
+      ? null
+      : [line(frame, 'fresh-cost'), line(frame, 'fresh-wet')];
     // Before LAYERS, which is a column of rows rather than a readout and
     // reads best last.
     if (hooks.session === undefined) {
@@ -390,6 +434,10 @@ export class PerfHud {
     if (this.seaLines !== null) {
       const words = seaWords(this.hooks.sea?.() ?? null);
       for (let i = 0; i < this.seaLines.length; i += 1) this.seaLines[i].textContent = words[i];
+    }
+    if (this.freshLines !== null) {
+      const words = freshWords(this.hooks.fresh?.() ?? null);
+      for (let i = 0; i < this.freshLines.length; i += 1) this.freshLines[i].textContent = words[i];
     }
     // THE MODEL IS THE TRUTH, and that includes the WORDS. A click the
     // owner rejected snaps back here — and so does a row whose built-ness

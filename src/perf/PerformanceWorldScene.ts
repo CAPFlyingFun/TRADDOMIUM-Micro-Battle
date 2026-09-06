@@ -72,8 +72,12 @@ import type { GameSession, SessionSaveState } from '../session/GameSession';
 import { ActorViews } from '../view/ActorViews';
 import { TerrainStreamer } from '../terrain/TerrainStreamer';
 import { TerrainView } from '../terrain/TerrainView';
-import { OceanView } from '../sea/OceanView';
+import { OceanView, TIER_OCTAVES as OCEAN_OCTAVES } from '../sea/OceanView';
 import { blendSight, underwaterLook } from '../sea/underwaterLook';
+import { IslandWater } from '../water/IslandWater';
+import { islandChannels, type IslandChannels } from '../world/water/islandChannels';
+import { SkyModel } from '../world/weather/skyModel';
+import { rainToUnitsPerSecond } from '../world/weather/weather';
 import { SeaTextures } from '../sea/SeaTextures';
 import { SeaSwell } from '../world/sea/swell';
 import { resolveTier, tierFor, type TextureTier } from '../assets/textureQuality';
@@ -87,7 +91,7 @@ import type { WorldPoint } from '../world/coords';
 import { BotHud, type BotReadout } from './BotHud';
 import { FrameStats } from './FrameStats';
 import { FreeFlyCamera, headingOfYaw, yawForHeading } from './FreeFlyCamera';
-import { HUD_HZ, PerfHud, type SeaReadout, type SessionLink, type SessionReadout } from './PerfHud';
+import { HUD_HZ, PerfHud, type FreshReadout, type SeaReadout, type SessionLink, type SessionReadout } from './PerfHud';
 import { BUILT_LAYERS, LayerToggles } from './layerToggles';
 import { PERF_WORLD_SCENE_ID } from './perfTool';
 
@@ -408,6 +412,51 @@ const NETWORKED_MAX_SPEED = DEBUG_CAPSULE_TUNING.walkSpeed * DEBUG_CAPSULE_TUNIN
 const RESUME_CLEARANCE = 3_000;
 
 /**
+ * Water into every CHANNEL cell, world units of depth a second.
+ *
+ * BASEFLOW IS NOT RAIN. A real river runs between storms because
+ * groundwater seeps into its channel while the hillsides above it are
+ * dry — so this goes into the cells `drainage.ts` marked and nowhere
+ * else, and it never stops. Rain is the other feed and falls on
+ * everything, only while it is falling.
+ *
+ * MEASURED at 256 cells, ten simulated seconds, at two real places on
+ * the island — a steep headwater and a flat coastal valley floor — as
+ * the share of the window drawn wet:
+ *
+ *              Wailua headwater      Hanalei mouth
+ *   baseflow      (steep)              (flat)
+ *      1        0.01%  0.05 m        12.15%  0.29 m
+ *      3        0.07%  0.17 m        27.07%  0.52 m
+ *      6        0.43%  0.30 m        34.48%  0.80 m
+ *     12        0.77%  0.56 m        40.69%  1.35 m
+ *
+ * NO SINGLE RATE SUITS BOTH, and the reason is not the rate. THE
+ * SOLVER'S WINDOW HAS A CLOSED RIM — `sim.ts` forces the outflow of
+ * every edge cell to zero — so water that enters can never leave, and
+ * each catchment fills until SOAK alone balances the feed. The
+ * equilibrium is therefore a pond whose AREA is set by the soak rate,
+ * not a stream whose depth is set by its discharge. On steep ground the
+ * balance is reached in a few cells; on a flat valley floor it takes a
+ * third of the window.
+ *
+ * 6 is the compromise, chosen so that real valleys visibly carry water
+ * rather than so that the coast does not flood — an island where you
+ * cannot find a stream reads as broken, and one whose floodplain is too
+ * wet reads as a floodplain. It is not a good number and it is the best
+ * one available while the rim is closed.
+ *
+ * THE FIX IS THE RIM, not this constant. An open boundary — the outside
+ * neighbour taken as the ground's own slope continued, holding no water
+ * — lets a window shed downstream like the cut-out of an island it is.
+ * That was tried here and reverted: it is a change to the solver's
+ * physics that invalidates seven of its tests, all of which encode the
+ * closed tub, and rewriting them under time pressure is how a solver
+ * quietly stops solving. It is the next piece of work, not a patch.
+ */
+const BASEFLOW_PER_SECOND = 6;
+
+/**
  * THE DEPTH BUFFER, AND WHY THE NEAR PLANE MOVES.
  *
  * Depth precision depends on far/near, not on far. The empty world's
@@ -475,6 +524,18 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
     let ocean: OceanView | null = null;
     /** What the ocean toggle was at the last look. */
     let oceanOn = false;
+    /**
+     * THE ISLAND'S FRESH WATER, and the two things it needs: the sky
+     * that rains on it and the drainage that says where a river is.
+     *
+     * The channel analysis is run ONCE over the whole coarse survey and
+     * held for the life of the scene — a property of the island's shape,
+     * which is not ours to move.
+     */
+    let fresh: IslandWater | null = null;
+    let channels: IslandChannels | null = null;
+    let freshOn = false;
+    const weather = new SkyModel();
     /** The tier the sea was BUILT at, so a changed setting is noticed once and rebuilt once. */
     let builtTier: TextureTier | null = null;
     let builtDetail: DetailTier | null = null;
@@ -700,6 +761,30 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
       ocean = new OceanView({ field, swell, textures: seaTextures, detail });
       builtTier = tier;
       builtDetail = detail;
+
+      // THE FRESH WATER SHARES THE SEA'S TEXTURES AND ITS RUNG. Joshua
+      // asked for inland water that looks like the ocean; sharing the
+      // baked textures is most of how that is true, and baking a second
+      // set would be a second answer to what water looks like.
+      fresh?.dispose();
+      fresh = null;
+      if (channels !== null) {
+        fresh = new IslandWater({
+          field,
+          swell,
+          textures: seaTextures,
+          detail,
+          octaves: OCEAN_OCTAVES[detail],
+          isChannel: channels.isChannel,
+        });
+        three.add(fresh.group);
+        fresh.group.visible = freshOn;
+        // FILLED BEHIND THE LOADING SCREEN, exactly as the ocean's
+        // sheets are: `buildOcean` runs before the first drawn frame,
+        // and a ten-second warm-up on the first FRAME is a freeze the
+        // player sees rather than water that is already there.
+        fresh.prime(fly.pose().at, BASEFLOW_PER_SECOND);
+      }
       three.add(ocean.group);
       ocean.group.visible = oceanOn;
       // The sheets have to be filled before the first drawn frame, or
@@ -722,6 +807,35 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
       // must not leave gameplay sampling the chords of a mesh nobody is
       // drawing. Registered on the next update when it comes back.
       if (!oceanOn) swell?.clearLattice();
+    };
+
+    /** Show or hide the fresh water. */
+    const syncFreshLayer = (): void => {
+      freshOn = toggles.isEnabled('freshwater');
+      if (fresh !== null) fresh.group.visible = freshOn;
+    };
+
+    /**
+     * Rain on the island, run the water, and walk the window after her.
+     *
+     * `dt` is SIMULATION seconds, like the sea's: the weather and the
+     * water stop when the world is paused, or a paused world would come
+     * back to a flood.
+     *
+     * THE FEED IS TWO NUMBERS AND THEY ARE NOT THE SAME NUMBER. Rain
+     * falls on EVERY cell and only while it is raining; baseflow goes
+     * into the CHANNEL cells alone and never stops. That is why the
+     * island drains between showers instead of every slope staying
+     * permanently wet — the thing Joshua asked v0 about, and the reason
+     * `drainage.ts` exists at all.
+     */
+    const updateFresh = (dt: number): void => {
+      if (fresh === null) return;
+      if (toggles.isEnabled('freshwater') !== freshOn) syncFreshLayer();
+      if (!freshOn) return;
+      const now = weather.advance(dt);
+      fresh.update(fly.pose().at, dt, rainToUnitsPerSecond(now.rainMmHr), BASEFLOW_PER_SECOND);
+      fresh.tick(dt);
     };
 
     /**
@@ -1039,7 +1153,15 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
               progress.report('terrain', Math.min(1, received / (total ?? COARSE_BYTES)));
               hooks.onLoadProgress?.(progress.fraction(), progress.etaMs());
             });
-            field = new Heightfield(repairGrid(decodeCoarse(bytes)).grid);
+            const repaired = repairGrid(decodeCoarse(bytes)).grid;
+            field = new Heightfield(repaired);
+            // WHERE THE ISLAND'S RIVERS ARE, from the island's own shape,
+            // computed once here and never again. It reads the COARSE
+            // survey rather than the heightfield deliberately: the
+            // heightfield answers with whatever HD tiles have streamed
+            // in, so a mask built through it would depend on how far the
+            // player had walked before it was built.
+            channels = islandChannels(repaired);
             terrain = new TerrainView({ field });
             streamer = new TerrainStreamer({ field });
             // THE SEA READS THE SAME GROUND, through the same object.
@@ -1074,12 +1196,20 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
           return { meanMs: cost.meanMs, peakMs: cost.peakMs, detail: ocean.detail, tier: seaTextures?.tier ?? null };
         };
 
+        /** What the island's water costs, and how much of it there is. */
+        const freshCost = (): FreshReadout | null => {
+          if (fresh === null) return null;
+          const c = fresh.cost;
+          return { meanMs: c.meanMs, peakMs: c.peakMs, wetCells: c.wetCells, cells: c.cells };
+        };
+
         hud = new PerfHud(ctx.uiLayer, {
           layers: () => toggles.list(),
           onLayerToggle: (id, enabled) => {
             toggles.setEnabled(id, enabled);
           },
           session: sessionReadout,
+          fresh: field === null ? undefined : freshCost,
           // THE COLUMN EXISTS ONLY WHERE A SEA DOES. Whether this world
           // has one is settled by now — `buildOcean` has already run, and
           // it can only ever succeed if the survey downloaded — so an
@@ -1133,6 +1263,13 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         if (ocean !== null) {
           toggles.setEnabled('ocean', true);
           syncOceanLayer();
+        }
+        // AND THE ISLAND'S OWN WATER. On for the same reason: Kauaʻi
+        // without its rivers is not Kauaʻi, and the toggle is how its
+        // cost gets measured rather than argued about.
+        if (fresh !== null) {
+          toggles.setEnabled('freshwater', true);
+          syncFreshLayer();
         }
 
         // The wire, last: the world is already whole and measurable
@@ -1199,6 +1336,7 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         // a frozen camera, and the ONE clock would then disagree with the
         // dt every other system integrated on.
         updateOcean(frame.simDt);
+        updateFresh(frame.simDt);
         // AFTER the ocean, so the swell it asks about is this frame's.
         adaptWater();
         if (net !== null) {

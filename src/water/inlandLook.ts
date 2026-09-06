@@ -40,14 +40,26 @@
  * TEXTURE come across. That is the one place this departs from a literal
  * reading of the instruction, and it departs in service of it.
  *
- * ADVECTED, unlike the sea. `advected: true` costs a second set of
- * texture reads and crossfades between them, and the ocean does not pay
- * it because the sea's flow attribute is zero — the two phases would
- * sample the same point. Inland water genuinely moves, and this is the
- * flag that stops a spatially varying current shearing the ripple into
- * taffy as it goes round a bend. A river that does not carry its own
- * surface downstream reads as a painted ribbon, which is the other
- * complaint about v0's.
+ * NOT ADVECTED YET, and that is a decision rather than an oversight.
+ *
+ * `advected: true` samples every ripple octave TWICE, half an advection
+ * cycle apart, and crossfades — which is what stops a spatially varying
+ * current shearing the texture into taffy round a bend. It is the flag a
+ * river wants, and this file set it at first.
+ *
+ * But it advects by the `flow` ATTRIBUTE, and the solver deliberately
+ * reports no current: flux over depth is singular at the edge of every
+ * pool, and v0 measured 368 cm/s coming out of 1.5 mm of film on
+ * Joshua's device. The solver's own comment says the fresh current stays
+ * zero until there is a flow model to give it — channel slope, a
+ * velocity floor, a depth below which water moves nothing.
+ *
+ * Advecting by zero makes both phases sample the same point, so it is
+ * `mix(x, x, t)`: double the texture reads for an identical pixel. That
+ * is precisely the waste the OCEAN was changed to stop paying. So this
+ * waits for the flow model, and turning it on is one line the day that
+ * lands. The ripple still scrolls and the water still moves; what it
+ * does not yet do is carry its surface downstream.
  *
  * ONE MATERIAL, TWO WATERS. `sea/waterLook.ts` is the shared water
  * material rather than the sea's private one — it already carried
@@ -143,7 +155,8 @@ export function makeInlandLook(opts: InlandLookOpts): WaterLook {
     // at the Pacific's speed. v0 ran that block ungated on fresh water
     // for eight versions and the audit's F4 is what it looked like.
     ocean: false,
-    // It genuinely flows. See the header.
-    advected: true,
+    // See the header: there is no current to advect by yet, and
+    // advecting by zero is double the texture reads for the same pixel.
+    advected: false,
   });
 }

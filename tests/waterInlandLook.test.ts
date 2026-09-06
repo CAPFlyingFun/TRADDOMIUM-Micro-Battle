@@ -103,15 +103,16 @@ describe('inland water wears the ocean’s look', () => {
     const mine = taps(compile(inland()).fragmentShader);
     const sea = taps(compile(oceanLook()).fragmentShader);
     expect(mine).toBeGreaterThan(0);
-    // SAME NUMBER OF OCTAVES — that is the claim, and it is the one the
-    // rung controls. Counting taps alone would not say it: inland is
-    // ADVECTED and the ocean is not, so inland samples each octave TWICE
-    // and crossfades, which is why it has strictly more reads than the
-    // sea rather than the same number.
+    // SAME NUMBER OF OCTAVES, and the same number of READS — which is
+    // the stronger claim, because it says inland is not quietly paying
+    // for something it cannot use. `advected` would double the reads to
+    // crossfade two phases half an advection cycle apart, and the solver
+    // reports no current to advect BY, so the two phases would sample
+    // the same point: `mix(x, x, t)`, twice the cost, the same pixel.
+    // It waits for the flow model. See `inlandLook`'s header.
     expect(inland().octaves).toBe(oceanLook().octaves);
-    expect(inland().advected).toBe(true);
-    expect(oceanLook().advected).toBe(false);
-    expect(mine, 'advected water reads more, never fewer').toBeGreaterThan(sea);
+    expect(inland().advected, 'advecting by a zero current is pure waste').toBe(false);
+    expect(mine, 'inland is reading the texture more times than the sea').toBe(sea);
   });
 
   it('HAS NO WAVES — no swell displaces it and no breaker foam runs on it', () => {
