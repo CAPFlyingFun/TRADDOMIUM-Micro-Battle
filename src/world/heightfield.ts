@@ -176,9 +176,15 @@ export class Heightfield {
    * The surface normal, from the slope across one step of whatever
    * lattice answers there. Computed from the SAME data the mesh is built
    * from, so lighting and footing cannot disagree.
+   *
+   * `step` may be given smaller than the lattice's: between two samples
+   * the surface is bilinear, so a quarter-metre difference reads the
+   * slope of the patch an object actually rests on rather than the
+   * lattice's average across 13.67 m — what a twig lying on the ground
+   * or a rock bedded into it needs. The height is continuous, so a
+   * small step is never wrong, only local.
    */
-  normalAt(at: WorldPoint): Normal {
-    const step = this.detailAt(at) === 'hd' ? HD_STEP : COARSE_STEP;
+  normalAt(at: WorldPoint, step: number = this.detailAt(at) === 'hd' ? HD_STEP : COARSE_STEP): Normal {
     const east = this.read(at.wx + step, at.wz);
     const west = this.read(at.wx - step, at.wz);
     const south = this.read(at.wx, at.wz + step);

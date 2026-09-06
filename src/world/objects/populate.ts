@@ -88,7 +88,11 @@ export interface FamilyBatch {
   readonly girth: Float32Array;
   /** Rotation about +y, radians. */
   readonly spin: Float32Array;
-  /** Tilt off vertical, radians, and the direction it tilts toward. */
+  /**
+   * Tilt off the family's rest pose, radians, and the direction it
+   * tilts toward. The rest pose (up, along the slope, on the base) is the
+   * renderer's, from the ground's normal; this is the departure from it.
+   */
   readonly lean: Float32Array;
   readonly leanDir: Float32Array;
   /** 0..1, a palette knob the renderer turns into a colour. */
@@ -446,13 +450,29 @@ function girthOf(family: ObjectFamily, t: number, variant: number): number {
   }
 }
 
-/** How far off vertical, radians. Grass leans; a tree barely; a rock not at all (it is rotated instead). */
+/**
+ * How far off its REST POSE an object sits, radians. The rest pose is the
+ * family's contact with the ground, which the renderer builds from the
+ * ground's own normal (`flora/WorldObjects`): a blade grows up, a tree
+ * grows up, a twig lies along the slope, a stone or a rock sits on its
+ * base. What is rolled here is the small departure from that — a blade
+ * leaning, a twig propped on a pebble, a rock not quite level.
+ *
+ * Joshua, from the phone (2026-09-06): "some objects are underground and
+ * twigs aren't lying flat on the ground." Measured on the survey before
+ * this: twigs took a uniform 0–90° off vertical (half of them steeper
+ * than 45°), and stones and rocks a uniform 0–180° — and a rock turned
+ * past a right angle has its top where its foot was, so seven in ten
+ * rocks had more than half their body under the ground. A rock is not
+ * rotated to lie any way up; it is rolled onto its base, like a dropped
+ * one, and then spun about the normal.
+ */
 function leanOf(family: ObjectFamily, t: number, variant: number): number {
   switch (family) {
     case 'grass': return (t * t) * (18 * Math.PI / 180);
-    case 'twig': return t * (Math.PI / 2); // lying about, mostly flat
-    case 'stone': return t * Math.PI;
-    case 'rock': return t * Math.PI;
+    case 'twig': return t * t * (8 * Math.PI / 180); // one end propped a little, most lying flat
+    case 'stone': return t * (8 * Math.PI / 180);
+    case 'rock': return t * (12 * Math.PI / 180);
     case 'tree': return variant === TREE_PALM ? t * (12 * Math.PI / 180) : t * t * (4 * Math.PI / 180);
   }
 }

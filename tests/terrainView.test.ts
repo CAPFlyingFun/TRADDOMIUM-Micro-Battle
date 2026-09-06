@@ -3,28 +3,38 @@
  *
  *  1. IT IS CHEAP, AND STAYS CHEAP. The whole reason for rings rather
  *     than tiles is that the vertex count does not grow with the world:
- *     eight levels must cover more than the island for about the price of
- *     one character model. A change that quietly makes this 200,000
+ *     eleven levels must cover more than the island for about the price
+ *     of two character models. A change that quietly makes this 200,000
  *     vertices would still look right on a desktop and kill the phone.
- *  2. IT DOES NOT REBUILD WHAT DID NOT MOVE. Refilling all eight rings
- *     every frame is 26,000 heightfield reads a frame — invisible in a
- *     screenshot, fatal in a frame budget. The count is exposed so a test
- *     can watch it.
+ *  2. IT DOES NOT REBUILD WHAT DID NOT MOVE, AND NOT TOO MUCH AT ONCE.
+ *     Refilling all eleven rings every frame is 46,000 heightfield reads
+ *     a frame — invisible in a screenshot, fatal in a frame budget. And
+ *     refilling five in one frame because a tile landed is a hitch. The
+ *     count is exposed so a test can watch it, and the ration is pinned.
  *  3. IT DRAWS THE HEIGHTFIELD IT WAS GIVEN. Every surface vertex sits at
  *     `heightAt` of its own world position, so the mesh cannot drift from
- *     what an ant walks on.
+ *     what an ant walks on — and, since the finest rings went below the
+ *     survey's step, the triangles BETWEEN the vertices converge on it
+ *     too. That last one is measured on the real survey, at the end.
  *
  * Plus the two structural things that are invisible until they are ugly:
  * outer rings are hollow where the finer ring covers them, and every ring
  * hangs a skirt so the seams between levels cannot show sky.
  */
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
-import { ISLAND_SPAN, world } from '../src/world/coords';
-import { setOrigin } from '../src/world/origin';
-import { COARSE_SAMPLES, COARSE_STEP, HD_STEP, HD_TILE_SAMPLES, hdTileFromName, type HdTileId } from '../src/world/dem';
+import { ISLAND_SPAN, samePoint, snapTo, translate, world, type WorldPoint } from '../src/world/coords';
+import { setOrigin, toLocal } from '../src/world/origin';
+import {
+  COARSE_SAMPLES, COARSE_STEP, HD_STEP, HD_TILE_SAMPLES, ISLAND_HALF_SPAN,
+  decodeCoarse, decodeHdTile, hdSamplePoint, hdTileFromName, hdTileName, hdTilesNear, type HdTileId,
+} from '../src/world/dem';
+import { repairGrid } from '../src/world/demRepair';
 import { Heightfield } from '../src/world/heightfield';
-import { FINEST_QUAD, RING_LEVELS, RING_QUADS, TerrainView, colourAt } from '../src/terrain/TerrainView';
+import { FINEST_QUAD, REFILLS_PER_UPDATE, RING_LEVELS, RING_QUADS, SUB_HD_LEVELS, TerrainView, colourAt } from '../src/terrain/TerrainView';
 import type { DemGrid } from '../src/world/dem';
 
 /** A whole-island grid at one height, so every expectation is exact. */
@@ -67,7 +77,7 @@ function hillGrid(): DemGrid {
   return { side: COARSE_SAMPLES, samples };
 }
 
-const viewOf = (grid: DemGrid, over: Partial<{ levels: number; ringQuads: number }> = {}): TerrainView =>
+const viewOf = (grid: DemGrid, over: Partial<{ levels: number; ringQuads: number; refillsPerUpdate: number }> = {}): TerrainView =>
   new TerrainView({ field: new Heightfield(grid), ...over });
 
 const idOf = (name: string): HdTileId => {
@@ -79,20 +89,89 @@ const idOf = (name: string): HdTileId => {
 const meshes = (view: TerrainView): THREE.Mesh[] =>
   view.group.children.filter((c): c is THREE.Mesh => (c as THREE.Mesh).isMesh === true);
 
+/**
+ * Update at `at` until nothing is left to refill, and say how many
+ * updates it took, the final no-op included. Bounded: the ration drains
+ * eleven rings in six updates, and a loop that ran longer is a bug.
+ */
+const settle = (view: TerrainView, at: WorldPoint): number => {
+  for (let n = 1; n <= RING_LEVELS + 1; n += 1) {
+    view.update(at);
+    if (view.lastRebuilt === 0 && view.lastDeferred === 0) return n;
+  }
+  throw new Error('the clipmap never settled');
+};
+
+/** The centre ring `level` wants for a camera at `at`: snapped to twice its quad. */
+const centreOf = (level: number, at: WorldPoint): WorldPoint => snapTo(at, FINEST_QUAD * 2 ** (level + 1));
+
+/** Which rings a move from `from` to `to` stales, from the snapping rule itself rather than from the view. */
+const staledBy = (from: WorldPoint, to: WorldPoint): number[] => {
+  const out: number[] = [];
+  for (let level = 0; level < RING_LEVELS; level += 1) {
+    if (!samePoint(centreOf(level, from), centreOf(level, to))) out.push(level);
+  }
+  return out;
+};
+
+/**
+ * THE HOLE IS WHERE THE FINER RING IS: the finer ring's centre must be
+ * this ring's centre plus the offset it cut its hole at, in its own
+ * quads — whether or not every ring is current. With the origin at 0,0
+ * a mesh's position is its centre in world units. `bounded` also asks
+ * for the offset to be within one quad, which is the guarantee under
+ * normal motion and not during a teleport.
+ */
+const expectHolesAroundFinerRings = (view: TerrainView, bounded: boolean): void => {
+  const all = meshes(view);
+  const offsets = view.holeOffsets();
+  for (let i = 1; i < all.length; i += 1) {
+    const quad = FINEST_QUAD * 2 ** i;
+    expect(all[i - 1].position.x).toBeCloseTo(all[i].position.x + offsets[i].x * quad, 3);
+    expect(all[i - 1].position.z).toBeCloseTo(all[i].position.z + offsets[i].z * quad, 3);
+    if (bounded) {
+      // More than one quad either way means the snapping changed and the
+      // hole is now a guess.
+      expect(Math.abs(offsets[i].x)).toBeLessThanOrEqual(1);
+      expect(Math.abs(offsets[i].z)).toBeLessThanOrEqual(1);
+    }
+  }
+};
+
 describe('what it costs', () => {
-  it('covers more than the island, for about one character model of vertices', () => {
+  it('covers more than the island, for about two character models of vertices', () => {
     const view = viewOf(flatGrid(0));
     expect(view.ringCount()).toBe(RING_LEVELS);
-    // Eight doublings from the survey's own 13.67 m step.
     expect(view.reach()).toBeCloseTo(FINEST_QUAD * 2 ** (RING_LEVELS - 1) * RING_QUADS, 3);
+    // The reach is seven doublings of the survey's own step across 64
+    // quads, and it does NOT depend on how many rings sit below that
+    // step: the sub-survey levels are added inside, not outside.
+    expect(view.reach()).toBeCloseTo(HD_STEP * 2 ** 7 * RING_QUADS, 3);
     expect(view.reach()).toBeGreaterThan(ISLAND_SPAN);
-    // THE NUMBER THAT MUST NOT GROW.
-    expect(view.vertexCount()).toBeLessThan(40_000);
+    // THE NUMBER THAT MUST NOT GROW. Eleven rings of 4,225 surface
+    // vertices and a 256-vertex skirt: 49,291. It grew once, by the three
+    // sub-survey rings, on purpose and with the measurement in the file.
+    expect(view.vertexCount()).toBe(RING_LEVELS * ((RING_QUADS + 1) ** 2 + 4 * RING_QUADS));
+    expect(view.vertexCount()).toBeLessThan(50_000);
     view.dispose();
   });
 
-  it('draws the finest ring at the survey’s own step, so it invents no detail', () => {
-    expect(FINEST_QUAD).toBe(HD_STEP);
+  it('draws the finest ring at an eighth of the survey’s step, and level SUB_HD_LEVELS at the step itself', () => {
+    expect(SUB_HD_LEVELS).toBe(3);
+    expect(FINEST_QUAD).toBe(HD_STEP / 2 ** SUB_HD_LEVELS);
+    // Exact, not close: every quad in the ladder is a binary fraction of
+    // the survey's step, so a snapped centre lands on the lattice with no
+    // rounding at all.
+    expect(FINEST_QUAD * 2 ** SUB_HD_LEVELS).toBe(HD_STEP);
+    const view = viewOf(flatGrid(0));
+    const all = meshes(view);
+    const quadOf = (m: THREE.Mesh): number => {
+      const pos = m.geometry.getAttribute('position') as THREE.BufferAttribute;
+      return pos.getX(1) - pos.getX(0);
+    };
+    expect(quadOf(all[0])).toBeCloseTo(FINEST_QUAD, 6);
+    expect(quadOf(all[SUB_HD_LEVELS])).toBeCloseTo(HD_STEP, 6);
+    view.dispose();
   });
 
   it('is one draw call a ring, and no more', () => {
@@ -106,7 +185,13 @@ describe('what it rebuilds', () => {
   it('fills every ring once, then nothing while the camera holds still', () => {
     const view = viewOf(flatGrid(0));
     view.update(world(0, 0));
+    // THE FIRST FILL IS EXEMPT from the ration: every ring, in one call,
+    // behind the loading screen. Pinned as more than the ration so the
+    // exemption is what this measures rather than a ration that happens
+    // to be large enough.
+    expect(RING_LEVELS).toBeGreaterThan(REFILLS_PER_UPDATE);
     expect(view.lastRebuilt).toBe(RING_LEVELS);
+    expect(view.lastDeferred).toBe(0);
     view.update(world(0, 0));
     expect(view.lastRebuilt).toBe(0);
     // A step far smaller than the finest ring's own grid moves nothing.
@@ -164,21 +249,20 @@ describe('the rings line up with each other', () => {
       FINEST_QUAD * 3, 12_345, -98_765, 1_000_000, -2_400_000];
     for (const px of positions) {
       for (const pz of [0, FINEST_QUAD * 2.5, -654_321]) {
-        view.update(world(px, pz));
-        const offsets = view.holeOffsets();
-        for (let i = 1; i < all.length; i += 1) {
-          const quad = FINEST_QUAD * 2 ** i;
-          // The offset can only ever be one quad either way. More than
-          // that means the snapping changed and the hole is now a guess.
-          expect(Math.abs(offsets[i].x)).toBeLessThanOrEqual(1);
-          expect(Math.abs(offsets[i].z)).toBeLessThanOrEqual(1);
-          // And the hole is where the finer ring IS: its centre must be
-          // this ring's centre plus exactly that offset.
-          expect(all[i - 1].position.x).toBeCloseTo(all[i].position.x + offsets[i].x * quad, 3);
-          expect(all[i - 1].position.z).toBeCloseTo(all[i].position.z + offsets[i].z * quad, 3);
+        const at = world(px, pz);
+        // A jump this size leaves rings lagging for a few updates. The
+        // hole must be around where the finer ring ACTUALLY is on every
+        // one of them, and within one quad once everything has caught up.
+        for (let n = 0; n < RING_LEVELS; n += 1) {
+          view.update(at);
+          expectHolesAroundFinerRings(view, false);
+          if (view.lastDeferred === 0) break;
         }
+        expect(view.lastDeferred).toBe(0);
+        expectHolesAroundFinerRings(view, true);
       }
     }
+    expect(all.length).toBe(RING_LEVELS);
     view.dispose();
   });
 
@@ -190,6 +274,54 @@ describe('the rings line up with each other', () => {
     const hollow = meshes(view)[1].geometry.getIndex();
     if (!solid || !hollow) throw new Error('rings must be indexed');
     expect(hollow.count).toBeLessThan(solid.count);
+    view.dispose();
+  });
+
+  it('keeps every ring from level SUB_HD_LEVELS outward on the survey’s own lattice, wherever the camera is', () => {
+    // WHAT THE SUB-SURVEY RINGS MUST NOT BREAK. Two arguments in the
+    // renderer assume a ring's vertices sit on a sample lattice: the
+    // stale-on-tile rule (a ring at the coarse step or above samples only
+    // coarse sample points, so a tile cannot change it) and the seam
+    // (a fine ring's even vertices coincide with the coarse ring's). Both
+    // hold because a ring snaps to twice its own quad and its vertices
+    // are whole quads from there — which is true at ANY quad, but this
+    // says so with real positions rather than by inspection.
+    setOrigin(world(0, 0));
+    const view = viewOf(flatGrid(0));
+    const all = meshes(view);
+    const onLattice = (w: number, step: number): boolean => {
+      const index = (w + ISLAND_HALF_SPAN) / step;
+      return Math.abs(index - Math.round(index)) < 1e-6;
+    };
+    let checked = 0;
+    for (const px of [0, 1, 12_345, -98_765, FINEST_QUAD * 1.5, 1_000_000.25]) {
+      for (const pz of [0, FINEST_QUAD * 2.5, -654_321.75]) {
+        view.update(world(px, pz));
+        for (let level = 0; level < all.length; level += 1) {
+          const mesh = all[level];
+          const pos = mesh.geometry.getAttribute('position') as THREE.BufferAttribute;
+          const skirtFrom = mesh.geometry.userData.skirtFrom as number;
+          const quad = FINEST_QUAD * 2 ** level;
+          for (let i = 0; i < skirtFrom; i += 131) {
+            // The origin is at 0,0, so drawn position is world position.
+            const wx = mesh.position.x + pos.getX(i);
+            const wz = mesh.position.z + pos.getZ(i);
+            expect(onLattice(wx, quad)).toBe(true);
+            expect(onLattice(wz, quad)).toBe(true);
+            if (level >= SUB_HD_LEVELS) {
+              expect(onLattice(wx, HD_STEP)).toBe(true);
+              expect(onLattice(wz, HD_STEP)).toBe(true);
+            }
+            if (quad >= COARSE_STEP) {
+              expect(onLattice(wx, COARSE_STEP)).toBe(true);
+              expect(onLattice(wz, COARSE_STEP)).toBe(true);
+            }
+            checked += 1;
+          }
+        }
+      }
+    }
+    expect(checked).toBeGreaterThan(1000);
     view.dispose();
   });
 });
@@ -220,13 +352,24 @@ describe('when the ground itself changes under it', () => {
     expect(view.lastRebuilt).toBeGreaterThan(0);
     const after = (meshes(view)[0].geometry.getAttribute('position') as THREE.BufferAttribute).array;
     expect(after).not.toEqual(before);
-    // And it settles: the next frame has nothing left to do.
+    // And it settles — over the ration rather than in one frame: five
+    // rings are stale and two go an update, so two more updates do the
+    // rest and the one after that has nothing left to do.
+    let refilled = view.lastRebuilt;
+    let updates = 0;
+    while (view.lastDeferred > 0 && updates < RING_LEVELS) {
+      view.update(world(0, 0));
+      refilled += view.lastRebuilt;
+      updates += 1;
+    }
+    expect(updates).toBe(2);
+    expect(refilled).toBe(SUB_HD_LEVELS + 2);
     view.update(world(0, 0));
     expect(view.lastRebuilt).toBe(0);
     view.dispose();
   });
 
-  it('refills only the rings a tile can possibly change, not all eight', () => {
+  it('refills only the rings a tile can possibly change, not all of them', () => {
     // A ring whose quad is the coarse lattice's own step samples ONLY at
     // coarse sample points, and decimating the high-detail grid by four
     // reproduces the coarse grid exactly there. So a tile arriving cannot
@@ -241,14 +384,24 @@ describe('when the ground itself changes under it', () => {
     const bumpy = new Int16Array(HD_TILE_SAMPLES * HD_TILE_SAMPLES);
     for (let i = 0; i < bumpy.length; i += 1) bumpy[i] = -100 + (i % 37) * 3;
     field.addTile(idOf('E5'), { side: HD_TILE_SAMPLES, samples: bumpy });
-    view.update(world(0, 0));
+    // Drained over the ration; what is counted is the total.
+    let refilled = 0;
+    let updates = 0;
+    do {
+      view.update(world(0, 0));
+      refilled += view.lastRebuilt;
+      updates += 1;
+    } while (view.lastDeferred > 0 && updates < RING_LEVELS);
 
     const finerThanCoarse = [];
     for (let level = 0; level < RING_LEVELS; level += 1) {
       if (FINEST_QUAD * 2 ** level < COARSE_STEP) finerThanCoarse.push(level);
     }
-    expect(finerThanCoarse.length).toBeGreaterThan(0);
-    expect(view.lastRebuilt).toBe(finerThanCoarse.length);
+    // The three sub-survey rings, the survey-step ring and the one above
+    // it; the six from the coarse step outward are left alone.
+    expect(finerThanCoarse.length).toBe(SUB_HD_LEVELS + 2);
+    expect(refilled).toBe(finerThanCoarse.length);
+    expect(updates).toBe(Math.ceil(finerThanCoarse.length / REFILLS_PER_UPDATE));
     view.dispose();
   });
 
@@ -389,6 +542,258 @@ describe('what it draws', () => {
     expect(next.count).toBeLessThan(innermost.count);
     expect(next.count).toBeGreaterThan(innermost.count / 2);
     view.dispose();
+  });
+});
+
+describe('the refill is rationed', () => {
+  // THE HITCH THIS PINS: a refill is 3.3 ms in node and likely 8 or more
+  // on a phone, and a tile landing stales five rings at once. Two a
+  // frame, finest first, and the rest wait — see the header of the
+  // renderer for why the lag that leaves is bounded.
+  it('pins the ration at two, the most rings a frame can stale by movement alone', () => {
+    expect(REFILLS_PER_UPDATE).toBe(2);
+  });
+
+  /**
+   * A move that stales exactly four rings, chosen from the snapping rule
+   * rather than found by trial: on x, 0 to 800 crosses the snap lines of
+   * rings 0, 1 and 2 (odd multiples of 171, 342 and 684 units); on z,
+   * 1,300 to 1,400 crosses ring 3's line at 1,367 and no other ring's.
+   * `staledBy` says so from the rule itself before the view is asked.
+   */
+  const HOME = world(0, 1300);
+  const THERE = world(800, 1400);
+
+  const expectAt = (mesh: THREE.Mesh, centre: WorldPoint): void => {
+    expect(mesh.position.x).toBeCloseTo(centre.wx, 3);
+    expect(mesh.position.z).toBeCloseTo(centre.wz, 3);
+  };
+
+  it('refills two rings an update, finest first, and catches up on the next', () => {
+    setOrigin(world(0, 0));
+    const view = viewOf(flatGrid(0));
+    settle(view, HOME);
+    expect(staledBy(HOME, THERE)).toEqual([0, 1, 2, 3]);
+    const all = meshes(view);
+
+    view.update(THERE);
+    expect(view.lastRebuilt).toBe(2);
+    expect(view.lastDeferred).toBe(2);
+    // The two finest moved to their new lattice; the two deferred stayed
+    // exactly where they were, heights and all.
+    for (const level of [0, 1]) expectAt(all[level], centreOf(level, THERE));
+    for (const level of [2, 3]) expectAt(all[level], centreOf(level, HOME));
+
+    view.update(THERE);
+    expect(view.lastRebuilt).toBe(2);
+    expect(view.lastDeferred).toBe(0);
+    view.update(THERE);
+    expect(view.lastRebuilt).toBe(0);
+    // Every ring is now at its snapped centre.
+    for (let level = 0; level < RING_LEVELS; level += 1) expectAt(all[level], centreOf(level, THERE));
+    view.dispose();
+  });
+
+  it('keeps every hole around where the finer ring ACTUALLY is while rings lag, within the one-quad bound', () => {
+    setOrigin(world(0, 0));
+    const view = viewOf(flatGrid(0));
+    settle(view, HOME);
+
+    view.update(THERE);
+    expect(view.lastDeferred).toBe(2);
+    // Mid-lag: rings 0 and 1 are on THERE's lattice, rings 2 and 3 still
+    // on HOME's. Ring 1 moved one of ring 2's quads east and ring 2 did
+    // not, so ring 2's hole is recut a quad off its middle — around where
+    // ring 1 is, not where ring 2 will be.
+    expectHolesAroundFinerRings(view, true);
+    expect(view.holeOffsets()[2]).toEqual({ x: 1, z: 0 });
+    expect(view.holeOffsets()[3]).toEqual({ x: 0, z: 1 });
+
+    view.update(THERE);
+    expect(view.lastDeferred).toBe(0);
+    expectHolesAroundFinerRings(view, true);
+    view.update(THERE);
+    expect(view.lastRebuilt).toBe(0);
+    expectHolesAroundFinerRings(view, true);
+    view.dispose();
+  });
+
+  it('drains a tile landing, five stale rings, in three updates, and moves nothing while it does', () => {
+    setOrigin(world(0, 0));
+    const field = new Heightfield(flatGrid(-100));
+    const view = new TerrainView({ field });
+    settle(view, HOME);
+    const all = meshes(view);
+    const bumpy = new Int16Array(HD_TILE_SAMPLES * HD_TILE_SAMPLES);
+    for (let i = 0; i < bumpy.length; i += 1) bumpy[i] = -100 + (i % 37) * 3;
+    field.addTile(idOf('E5'), { side: HD_TILE_SAMPLES, samples: bumpy });
+
+    const drained: number[] = [];
+    for (let n = 0; n < 4; n += 1) {
+      view.update(HOME);
+      drained.push(view.lastRebuilt);
+      // Nothing moved: a revision drain is heights only, so the holes are
+      // trivially where they were and every centre is still HOME's.
+      expectHolesAroundFinerRings(view, true);
+      for (let level = 0; level < RING_LEVELS; level += 1) expectAt(all[level], centreOf(level, HOME));
+    }
+    expect(drained).toEqual([2, 2, 1, 0]);
+    view.dispose();
+  });
+
+  it('exempts the first fill, so the world is whole before the first frame', () => {
+    const view = viewOf(flatGrid(0));
+    view.update(world(123_456, -78_910));
+    expect(view.lastRebuilt).toBe(RING_LEVELS);
+    expect(view.lastDeferred).toBe(0);
+    view.dispose();
+  });
+
+  it('honours an override of the ration, which is how the unrationed clipmap is measured', () => {
+    setOrigin(world(0, 0));
+    const view = viewOf(flatGrid(0), { refillsPerUpdate: Infinity });
+    settle(view, HOME);
+    view.update(THERE);
+    expect(view.lastRebuilt).toBe(4);
+    expect(view.lastDeferred).toBe(0);
+    view.dispose();
+  });
+});
+
+describe('the drawn ground converges on heightAt near the camera, on the real survey', () => {
+  // THE BUG THIS PINS: objects seated on `heightAt` — bilinear between the
+  // survey's samples — stood on, or under, a mesh that drew the same
+  // samples as two triangles a quad. Between the vertices the two differ
+  // by the quad's twist; on Waimea's canyon wall that was median 15 cm,
+  // p90 71 cm, max 4.2 m, and Joshua saw objects underground. The fix is
+  // three ring levels below the survey's step, and the proof is measured
+  // on the shipped bytes rather than on a fixture that could not twist.
+  const ROOT = fileURLToPath(new URL('..', import.meta.url));
+  const readPublic = (rel: string): ArrayBuffer => {
+    const bytes = readFileSync(path.join(ROOT, 'public', rel));
+    return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  };
+  /** A point on the Waimea canyon wall, from the measurement that found the bug. */
+  const CANYON = world(-1_215_200, -143_200);
+
+  /** The coarse survey with every high-detail tile within 200 m of the point resident, as the streamer would have it. */
+  const surveyed = (): Heightfield => {
+    const field = new Heightfield(repairGrid(decodeCoarse(readPublic('kauai-1025.bin'))).grid);
+    for (const id of hdTilesNear(CANYON, 20_000)) {
+      field.addTile(id, repairGrid(decodeHdTile(readPublic(path.join('kauai-hd', `${hdTileName(id)}.bin`)))).grid);
+    }
+    return field;
+  };
+
+  /**
+   * A fixed 15 x 15 lattice within 40 m of the camera: 523 units a step,
+   * a prime, so no probe lands on a ring vertex or a survey sample by
+   * accident and every one is inside a triangle. No Math.random.
+   */
+  const probes = (): WorldPoint[] => {
+    const out: WorldPoint[] = [];
+    for (let i = -7; i <= 7; i += 1) {
+      for (let j = -7; j <= 7; j += 1) out.push(translate(CANYON, i * 523, j * 523));
+    }
+    return out;
+  };
+
+  /**
+   * What a ring DRAWS at a point: the triangle from its own index buffer
+   * that contains the point, interpolated from its own vertex heights.
+   * Walks the buffer rather than assuming the split, so a change to how
+   * quads are cut is caught here rather than assumed away.
+   */
+  const drawnHeight = (mesh: THREE.Mesh, at: WorldPoint): number => {
+    const l = toLocal(at);
+    const px = l.lx - mesh.position.x;
+    const pz = l.lz - mesh.position.z;
+    const pos = mesh.geometry.getAttribute('position') as THREE.BufferAttribute;
+    const index = mesh.geometry.getIndex();
+    if (!index) throw new Error('rings must be indexed');
+    const skirtFrom = mesh.geometry.userData.skirtFrom as number;
+    for (let t = 0; t < index.count; t += 3) {
+      const a = index.getX(t);
+      const b = index.getX(t + 1);
+      const c = index.getX(t + 2);
+      if (a >= skirtFrom || b >= skirtFrom || c >= skirtFrom) continue;
+      const ax = pos.getX(a); const az = pos.getZ(a);
+      const bx = pos.getX(b); const bz = pos.getZ(b);
+      const cx = pos.getX(c); const cz = pos.getZ(c);
+      const det = (bx - ax) * (cz - az) - (cx - ax) * (bz - az);
+      if (det === 0) continue;
+      const u = ((px - ax) * (cz - az) - (cx - ax) * (pz - az)) / det;
+      const v = ((bx - ax) * (pz - az) - (px - ax) * (bz - az)) / det;
+      if (u < -1e-9 || v < -1e-9 || u + v > 1 + 1e-9) continue;
+      return pos.getY(a) + u * (pos.getY(b) - pos.getY(a)) + v * (pos.getY(c) - pos.getY(a));
+    }
+    throw new Error(`no surface triangle of ${mesh.name} contains ${at.wx}, ${at.wz}`);
+  };
+
+  /**
+   * What the OLD finest ring drew, analytically: `heightAt` at the four
+   * corners of the survey cell, split (a,c,b),(b,c,d) as `cutHole` does.
+   * The old ring snapped to twice the survey's step, so its vertices WERE
+   * the survey's samples and this is its triangle exactly.
+   */
+  const surveyTriangleHeight = (field: Heightfield, at: WorldPoint): number => {
+    const col = (at.wx + ISLAND_HALF_SPAN) / HD_STEP;
+    const row = (at.wz + ISLAND_HALF_SPAN) / HD_STEP;
+    const c0 = Math.floor(col);
+    const r0 = Math.floor(row);
+    const fc = col - c0;
+    const fr = row - r0;
+    const ha = field.heightAt(hdSamplePoint(c0, r0));
+    const hb = field.heightAt(hdSamplePoint(c0 + 1, r0));
+    const hc = field.heightAt(hdSamplePoint(c0, r0 + 1));
+    const hd = field.heightAt(hdSamplePoint(c0 + 1, r0 + 1));
+    return fc + fr <= 1 ? ha + fc * (hb - ha) + fr * (hc - ha) : hd + (1 - fc) * (hc - hd) + (1 - fr) * (hb - hd);
+  };
+
+  it('draws the canyon wall within 5 cm of heightAt at every probe within 40 m of the camera', () => {
+    const field = surveyed();
+    expect(field.sample(CANYON).detail).toBe('hd');
+    setOrigin(CANYON);
+    const view = new TerrainView({ field });
+    view.update(CANYON);
+    const finest = meshes(view)[0];
+    let worst = 0;
+    for (const at of probes()) {
+      worst = Math.max(worst, Math.abs(drawnHeight(finest, at) - field.heightAt(at)));
+    }
+    // 5 units is 5 cm. MEASURED on a 41 x 41 lattice at 2 m over the same
+    // 40 m: median 0.32, p90 1.3, p99 3.3, max 4.5 units — the brief's
+    // 1.1 cm is the p90 and holds; the single worst quad here has a
+    // 3.4 m twist and keeps 4.5 cm of it even at an eighth of the step.
+    // One more level would take that to 1.1 cm for another ring's cost.
+    expect(worst).toBeLessThanOrEqual(5);
+    view.dispose();
+    setOrigin(world(0, 0));
+  });
+
+  it('would not have at the survey’s own step: the old finest ring was off by more than 20 cm', () => {
+    // The mutation this guards: set SUB_HD_LEVELS back to 0 and the test
+    // above fails by this much, so the change is proven needed rather
+    // than merely present.
+    const field = surveyed();
+    let worstOld = 0;
+    for (const at of probes()) {
+      worstOld = Math.max(worstOld, Math.abs(surveyTriangleHeight(field, at) - field.heightAt(at)));
+    }
+    expect(worstOld).toBeGreaterThan(20);
+
+    // And the analytic triangle IS what the old clipmap drew: build the
+    // pre-subdivision view through the option that exists for exactly
+    // this, and its finest ring agrees with the arithmetic to float32.
+    setOrigin(CANYON);
+    const old = new TerrainView({ field, finestQuad: HD_STEP, levels: 8 });
+    old.update(CANYON);
+    const finest = meshes(old)[0];
+    for (const at of probes()) {
+      expect(drawnHeight(finest, at)).toBeCloseTo(surveyTriangleHeight(field, at), 1);
+    }
+    old.dispose();
+    setOrigin(world(0, 0));
   });
 });
 

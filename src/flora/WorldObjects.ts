@@ -57,17 +57,45 @@
  * from core and the height does not: the position must be the same on
  * every device, and the streamed ground is not.
  *
+ * ─── ground contact ──────────────────────────────────────────────────
+ *
+ * Joshua, from the phone (2026-09-06): "some objects are underground
+ * and twigs aren't lying flat on the ground… some objects need a basic
+ * collision with ground and simple physics for now that can make it
+ * roll, etc depending on the object." Nothing moves an object yet — no
+ * ant, no wind — so the physics an object has for now is its REST: the
+ * pose it would have come to after falling onto this ground. Each
+ * family has its own, built from the ground's normal under the object:
+ *
+ *   grass   grows up, half persuaded by the slope, then leans its own way;
+ *   tree    grows up; its foot is buried as deep as the slope needs so
+ *           the downhill side of the trunk does not hang in the air;
+ *   twig    lies ALONG the slope, resting on its radius, one end propped
+ *           a few degrees at most;
+ *   stone   sits on its base with the base on the slope, spun about the
+ *   rock    normal, bedded a fraction of its size — rolled onto its
+ *           flattest side, not turned any way up.
+ *
+ * Before this, rocks and stones took any rotation at all and a rock
+ * turned past a right angle had its top where its foot was: seven in
+ * ten rocks had more than half their body under the ground (measured
+ * on the survey at four sites). Twigs took a uniform 0–90°.
+ *
+ * The normal is read from the live heightfield like the foot is, at a
+ * quarter-metre step (the slope of the bilinear patch the object rests
+ * on, not the lattice's 13.67 m average), and it is the SECOND and last
+ * thing here that reads the streamed ground: where an object stands is
+ * core's; how it touches the ground is the renderer's, because the
+ * ground it touches is the drawn one.
+ *
  * ─── what this is not ────────────────────────────────────────────────
  *
- * Not physics, not climbing, not collision: visual instances only, by
- * the brief. The seam for the rest is the object's identity and its
- * batch index, which a later pass can attach a contact proxy to without
- * this file changing shape. Not wind: a per-blade CPU sway is exactly
- * the per-frame cost this file is built to avoid.
- *
- * Renderer directory: may import three. Crosses the render boundary
- * through `origin.toLocal` and reads no world coordinate by hand
- * (tests/viewBoundary.test.ts holds it to the `.wx` ban like the others).
+ * Not climbing, not collision for anything that moves, not a rock that
+ * rolls when kicked: there is nothing to kick it yet. The seam for the
+ * rest is the object's identity and its batch index, which a later pass
+ * can attach a contact proxy to without this file changing shape. Not
+ * wind: a per-blade CPU sway is exactly the per-frame cost this file is
+ * built to avoid.
  */
 import * as THREE from 'three';
 import { local, type WorldPoint } from '../world/coords';
@@ -107,8 +135,17 @@ const TREE_NEAR_OF_REACH = 0.4;
 
 /** How far a rock sinks into the slope, as a fraction of its size, so it does not perch. */
 const ROCK_SINK = 0.15;
-/** A tree's foot is buried this fraction of its height (v0's 2%). */
+/** A stone, half that: a pebble on the ground, not in it. */
+const STONE_SINK = ROCK_SINK * 0.5;
+/** A tree's foot is buried at least this fraction of its height (v0's 2%), and never more than this much. */
 const TREE_BURIAL = 0.02;
+const TREE_BURIAL_MAX = 0.3;
+/** How far either side of an object's foot the ground is read for its normal: a quarter metre. */
+const CONTACT_STEP = 0.25 * M;
+/** A foot that moves more than this (half a centimetre) when a tile lands means the ground under the cell changed. */
+const FOOT_MOVED = 0.5;
+/** How much of the slope a blade of grass follows, the rest being straight up. */
+const GRASS_FOLLOWS_GROUND = 0.5;
 
 /** The blade's own width over its height, from the file; `girth` is scaled against it. */
 const BLADE_WIDTH_OF_HEIGHT = 0.3256 / 4.9716;
@@ -163,7 +200,11 @@ interface Composed {
   readonly colours: Float32Array;
   /** The square of the 3D distance beyond which the object is not drawn, at this rung. */
   readonly vanish2: Float32Array;
-  /** How far below the foot the object's origin sits (a rock sinks, a tree is buried). */
+  /**
+   * How far below the foot the object's origin sits, in y: a rock's
+   * bedding and a twig's lift along the normal, a tree's burial. The
+   * normal's x/z share of that offset is already in the matrix.
+   */
   readonly yOffset: Float32Array;
   /** Which stand draws it — for trees, the SHAPE; the level is chosen by distance. */
   readonly stand: Uint8Array;
@@ -173,6 +214,8 @@ interface Composed {
   /** Foot heights, and the ground revision they were read at. */
   feet: Float32Array;
   feetRevision: number;
+  /** The ground revision the POSES (normals) were composed at. Older than the ground's → recomposed, under budget. */
+  readonly posedAt: number;
 }
 
 /** One resident cell: its population, and what the renderer has made of it so far. */
@@ -212,6 +255,9 @@ export class WorldObjects {
   private readonly resident = new Map<string, Resident>();
   private readonly queue: ObjectCellId[] = [];
   private queued = new Set<string>();
+  /** Resident cells whose poses were composed against an older ground: a tile landed under them. */
+  private readonly stale: string[] = [];
+  private readonly staleSet = new Set<string>();
   private wantedAt: WorldPoint | null = null;
   private refreshedAt: { wx: number; wz: number; wy: number } | null = null;
   private refreshedRevision = -1;
@@ -322,6 +368,7 @@ export class WorldObjects {
     this.want(at);
     while (this.queue.length > 0) this.generateOne();
     this.refresh(at, height);
+    while (this.stale.length > 0) this.recomposeOne();
     this.resetCost();
   }
 
@@ -340,6 +387,10 @@ export class WorldObjects {
       }
       const until = began + GENERATE_BUDGET_MS;
       for (let n = 0; n < GENERATE_PER_FRAME && this.queue.length > 0 && now() < until; n += 1) this.generateOne();
+      // What is left of the budget re-poses cells the ground moved under
+      // — after the new cells, because a missing cell is a hole and a
+      // stale one is a rock a few degrees off.
+      for (let n = 0; n < GENERATE_PER_FRAME && this.stale.length > 0 && now() < until; n += 1) this.recomposeOne();
       const revision = this.field.revision();
       const moved = this.refreshedAt === null
         || Math.abs(at.wx - this.refreshedAt.wx) >= REFRESH_STEP
@@ -413,9 +464,35 @@ export class WorldObjects {
     // a refresh that had to compose a six-thousand-blade cell it had
     // just walked into was the 36 ms frame the first measurement found.
     for (const family of union) {
-      if (population.batches[family].count > 0) resident.composed[family] = this.compose(population.batches[family], family, population.habitat);
+      if (population.batches[family].count > 0) resident.composed[family] = this.compose(population.batches[family], family, population.habitat, id);
     }
     this.resident.set(key, resident);
+    this.dirty = true;
+  }
+
+  /**
+   * Re-pose the oldest stale cell against the ground as it is now —
+   * every family but the grass. A blade follows the cell's normal at
+   * half weight, so a tile that turns that normal ten degrees turns the
+   * blade five, which no eye finds; and six thousand blades a cell is
+   * what a re-pose costs. Measured with the grass included: a tile
+   * landing under a primed bubble at `high` cost 1.4 ms a frame for
+   * fifty frames and a 45 ms peak from the churn; without it, the
+   * twigs, stones, rocks and trees of a cell re-pose in a fraction of
+   * a millisecond and the feet (patched at once, in `composedOf`) were
+   * never waiting on this anyway.
+   */
+  private recomposeOne(): void {
+    const key = this.stale.shift();
+    if (key === undefined) return;
+    this.staleSet.delete(key);
+    const cell = this.resident.get(key);
+    if (cell === undefined) return;
+    for (const family of cell.families) {
+      if (family === 'grass') continue;
+      const batch = cell.population.batches[family];
+      if (batch.count > 0) cell.composed[family] = this.compose(batch, family, cell.population.habitat, cell.id);
+    }
     this.dirty = true;
   }
 
@@ -426,42 +503,74 @@ export class WorldObjects {
   private composedOf(cell: Resident, family: ObjectFamily, revision: number): Composed {
     let c = cell.composed[family];
     if (c === undefined) {
-      c = this.compose(cell.population.batches[family], family, cell.population.habitat);
+      c = this.compose(cell.population.batches[family], family, cell.population.habitat, cell.id);
       cell.composed[family] = c;
     }
     if (c.feetRevision !== revision) {
-      // THE ONE PLACE THE STREAMED GROUND IS READ. A tile landing moves
-      // the feet and nothing else: the translation's y is element 13 of
-      // each matrix, and rotation and scale do not touch it.
+      // A tile landing moves the feet NOW: the translation's y is element
+      // 13 of each matrix, and rotation and scale do not touch it. The
+      // poses follow under budget (`recomposeOne`), because a foot a
+      // metre off is a floating rock and a normal a few degrees off is
+      // not something an eye can find.
       const point = { wx: 0, wz: 0 } as unknown as { wx: number; wz: number };
+      let moved = false;
       for (let i = 0; i < c.count; i += 1) {
         point.wx = c.wx[i];
         point.wz = c.wz[i];
         const foot = this.field.heightAt(point as unknown as WorldPoint);
+        if (Math.abs(foot - c.feet[i]) > FOOT_MOVED) moved = true;
         c.feet[i] = foot;
         c.matrices[i * 16 + 13] = foot - c.yOffset[i];
       }
       c.feetRevision = revision;
+      // Re-pose only where the ground ACTUALLY moved. The revision is
+      // the whole island's — a tile landing across the bay bumps it —
+      // and a cell whose feet all stayed put has the same ground under
+      // it, so its normals are the same too. Measured before this
+      // guard: nine tiles landing after a fresh start re-posed every
+      // resident cell nine times, and the bubble's mean cost while the
+      // world settled tripled.
+      if (moved && c.posedAt !== revision) {
+        const key = cellKey(cell.id);
+        if (!this.staleSet.has(key)) {
+          this.staleSet.add(key);
+          this.stale.push(key);
+        }
+      }
     }
     return c;
   }
 
   /**
    * Compose one family of one cell: matrix, colour, vanish distance and
-   * stand per object. Once per cell per family, at generation. The feet
-   * are filled by `composedOf` and the y patched there.
+   * stand per object. Once per cell per family, at generation, and again
+   * when the ground under the cell changes. The feet are filled by
+   * `composedOf` and the y patched there.
+   *
+   * THE POSE IS THE FAMILY'S REST ON THIS GROUND (see the header). Every
+   * object gets a frame [X, U, Z]: U its up — straight up for a tree,
+   * the ground's normal for a stone, a rock or a twig, a blend for grass
+   * — X the tangent at the object's own spin, Z = X × U. A twig's frame
+   * is the same one turned so its length lies along X. The family's
+   * small departure from rest (`lean` about a tangent axis at `leanDir`)
+   * is then a rotation in the FRAME'S coordinates, applied as a right
+   * multiplication, and the columns are scaled.
    *
    * WRITTEN OUT BY HAND rather than through `Matrix4.compose` and an HSL
    * conversion per object, because six thousand blades a cell is where
-   * a library call per object turns into a frame. The rotation is a spin
-   * about +y followed by a tilt about a horizontal axis (Rodrigues, with
-   * the axis in the ground plane so its middle row is just the cosine);
-   * the trig comes from a table, because a blade's spin to a third of a
-   * degree is not a thing anyone can see. The colour is the cell's
-   * habitat colour scaled per object by its tint — one multiply a
-   * channel, not a hue conversion.
+   * a library call per object turns into a frame. The trig for the spin
+   * and the lean comes from a table, because a blade's spin to a third
+   * of a degree is not a thing anyone can see; the normal's arithmetic
+   * is a handful of multiplies. The colour is the cell's habitat colour
+   * scaled per object by its tint — one multiply a channel.
+   *
+   * THE NORMAL IS READ PER OBJECT for twigs, stones, rocks and trees —
+   * four heights a quarter metre either side of the foot, a few hundred
+   * objects a cell — and ONCE PER CELL for grass: a blade grows up more
+   * than it follows the ground, and six thousand normals a cell would
+   * double what the cell costs for a lean no eye could tell apart.
    */
-  private compose(batch: FamilyBatch, family: ObjectFamily, habitat: Habitat): Composed {
+  private compose(batch: FamilyBatch, family: ObjectFamily, habitat: Habitat, id: ObjectCellId): Composed {
     const n = batch.count;
     const matrices = new Float32Array(n * 16);
     const colours = new Float32Array(n * 3);
@@ -470,6 +579,7 @@ export class WorldObjects {
     const stand = new Uint8Array(n);
     const reach = this.reach[family];
     const draw = this.budget.draw[family];
+    const posedAt = this.field.revision();
     // The family's colour for this cell, and how far a tint swings it.
     let baseR = 1, baseG = 1, baseB = 1, swing = 0.3;
     switch (family) {
@@ -479,11 +589,31 @@ export class WorldObjects {
       case 'tree': this.colour.setRGB(1, 1, 1); swing = 0.24; break;
     }
     baseR = this.colour.r; baseG = this.colour.g; baseB = this.colour.b;
+    // The cell's own normal, for the grass; a blade follows it half way.
+    let cellUx = 0, cellUy = 1, cellUz = 0;
+    if (family === 'grass') {
+      const cn = this.field.normalAt(cellCentre(id));
+      const w = GRASS_FOLLOWS_GROUND;
+      cellUx = w * cn.nx; cellUy = w * cn.ny + (1 - w); cellUz = w * cn.nz;
+      const l = Math.hypot(cellUx, cellUy, cellUz);
+      cellUx /= l; cellUy /= l; cellUz /= l;
+    }
+    const point = { wx: 0, wz: 0 } as unknown as { wx: number; wz: number };
     for (let i = 0; i < n; i += 1) {
       const size = batch.size[i];
       const girth = batch.girth[i];
+      // ── the ground under this object: its normal, unless the family grows up ──
+      let ux = cellUx, uy = cellUy, uz = cellUz;
+      if (family !== 'grass') {
+        point.wx = batch.wx[i];
+        point.wz = batch.wz[i];
+        const gn = this.field.normalAt(point as unknown as WorldPoint, CONTACT_STEP);
+        ux = gn.nx; uy = gn.ny; uz = gn.nz;
+      }
+      // ── scale, bedding and stand, by family ──
       let sx: number, sy: number, sz: number;
-      let offset = 0;
+      // The offset from the foot to the object's origin, world axes.
+      let ox = 0, oy = 0, oz = 0;
       switch (family) {
         case 'grass': {
           const width = Math.min(BLADE_MAX_WIDTH, size * girth) / BLADE_WIDTH_OF_HEIGHT;
@@ -491,61 +621,91 @@ export class WorldObjects {
           stand[i] = batch.variant[i] === 1 ? 1 : 0;
           break;
         }
-        case 'twig':
-          sx = size * girth; sy = size; sz = size * girth;
+        case 'twig': {
+          // Lies along the slope on its radius: lifted by the radius along the normal.
+          const radius = size * girth;
+          sx = radius; sy = size; sz = radius;
+          ox = ux * radius; oy = uy * radius; oz = uz * radius;
           stand[i] = 0;
           break;
-        case 'stone':
+        }
+        case 'stone': {
           sx = size; sy = size; sz = size * girth;
-          offset = size * ROCK_SINK * 0.5;
+          const sink = size * STONE_SINK;
+          ox = -ux * sink; oy = -uy * sink; oz = -uz * sink;
           stand[i] = batch.variant[i] & 1;
           break;
-        case 'rock':
+        }
+        case 'rock': {
           sx = size; sy = size; sz = size * girth;
-          offset = size * ROCK_SINK;
+          const sink = size * ROCK_SINK;
+          ox = -ux * sink; oy = -uy * sink; oz = -uz * sink;
           stand[i] = batch.variant[i] % ROCK_VARIANTS;
           break;
+        }
         default: {
           const wide = batch.variant[i] === TREE_BROAD ? girth / TREE_BAKED_GIRTH : 1;
           sx = size * wide; sy = size; sz = size * wide;
-          offset = size * TREE_BURIAL;
+          // Buried at least v0's 2%, and on a slope as deep as the trunk's
+          // radius times the slope, so the downhill side meets the ground.
+          const trunk = size * girth * 0.5;
+          const slopeRise = uy > 1e-6 ? trunk * Math.hypot(ux, uz) / uy : size * TREE_BURIAL_MAX;
+          oy = -Math.min(size * TREE_BURIAL_MAX, Math.max(size * TREE_BURIAL, slopeRise));
           stand[i] = batch.variant[i] === TREE_PALM ? 2 : batch.variant[i] === TREE_SCRUB ? 1 : 0;
+          // A tree grows up whatever the slope.
+          ux = 0; uy = 1; uz = 0;
           break;
         }
       }
-      yOffset[i] = offset;
-      // THE ONE WORLD → LOCAL CROSSING, through the origin like every renderer.
-      const here = toLocal({ wx: batch.wx[i], wz: batch.wz[i] } as WorldPoint);
-      // R = tilt(axis, lean) · spin(y). Column-major, columns scaled.
+      yOffset[i] = -oy;
+      // ── the frame [X, U, Z]: X the tangent at the spin, Z = X × U ──
       const cs = cosOf(batch.spin[i]);
       const sn = sinOf(batch.spin[i]);
+      const d = cs * ux + sn * uz;
+      let xx = cs - d * ux, xy = -d * uy, xz = sn - d * uz;
+      const xl = Math.hypot(xx, xy, xz);
+      xx /= xl; xy /= xl; xz /= xl;
+      const zx = xy * uz - xz * uy, zy = xz * ux - xx * uz, zz = xx * uy - xy * ux;
+      // A twig's length is along the tangent: its frame is [Z, X, U], the
+      // same triad read in a different order (cyclic, so still right-handed).
+      let ax0 = xx, ay0 = xy, az0 = xz, bx0 = ux, by0 = uy, bz0 = uz, cx0 = zx, cy0 = zy, cz0 = zz;
+      if (family === 'twig') {
+        ax0 = zx; ay0 = zy; az0 = zz;
+        bx0 = xx; by0 = xy; bz0 = xz;
+        cx0 = ux; cy0 = uy; cz0 = uz;
+      }
+      // ── the departure from rest: a tilt by `lean` about a tangent axis at `leanDir`, in the frame ──
+      // Rodrigues for a unit axis (ax, 0, az) in frame coordinates: T's
+      // rows below. For a twig the axis is its own X (leanDir ignored):
+      // propping one end is a turn about the sideways axis.
       const lean = batch.lean[i];
       const cl = cosOf(lean);
       const sl = sinOf(lean);
-      const ax = cosOf(batch.leanDir[i]);
-      const az = -sinOf(batch.leanDir[i]);
+      const ax = family === 'twig' ? 1 : cosOf(batch.leanDir[i]);
+      const az = family === 'twig' ? 0 : -sinOf(batch.leanDir[i]);
       const k = 1 - cl;
-      // Tilt matrix rows (Rodrigues for a unit axis (ax, 0, az)):
       const t00 = cl + ax * ax * k, t01 = -az * sl, t02 = ax * az * k;
       const t10 = az * sl, t11 = cl, t12 = -ax * sl;
       const t20 = ax * az * k, t21 = ax * sl, t22 = cl + az * az * k;
-      // Spin columns: (cs, 0, -sn), (0, 1, 0), (sn, 0, cs).
+      // R = F · T: column j of R is F applied to column j of T.
       const o = i * 16;
-      matrices[o] = (t00 * cs - t02 * sn) * sx;
-      matrices[o + 1] = (t10 * cs - t12 * sn) * sx;
-      matrices[o + 2] = (t20 * cs - t22 * sn) * sx;
+      matrices[o] = (ax0 * t00 + bx0 * t10 + cx0 * t20) * sx;
+      matrices[o + 1] = (ay0 * t00 + by0 * t10 + cy0 * t20) * sx;
+      matrices[o + 2] = (az0 * t00 + bz0 * t10 + cz0 * t20) * sx;
       matrices[o + 3] = 0;
-      matrices[o + 4] = t01 * sy;
-      matrices[o + 5] = t11 * sy;
-      matrices[o + 6] = t21 * sy;
+      matrices[o + 4] = (ax0 * t01 + bx0 * t11 + cx0 * t21) * sy;
+      matrices[o + 5] = (ay0 * t01 + by0 * t11 + cy0 * t21) * sy;
+      matrices[o + 6] = (az0 * t01 + bz0 * t11 + cz0 * t21) * sy;
       matrices[o + 7] = 0;
-      matrices[o + 8] = (t00 * sn + t02 * cs) * sz;
-      matrices[o + 9] = (t10 * sn + t12 * cs) * sz;
-      matrices[o + 10] = (t20 * sn + t22 * cs) * sz;
+      matrices[o + 8] = (ax0 * t02 + bx0 * t12 + cx0 * t22) * sz;
+      matrices[o + 9] = (ay0 * t02 + by0 * t12 + cy0 * t22) * sz;
+      matrices[o + 10] = (az0 * t02 + bz0 * t12 + cz0 * t22) * sz;
       matrices[o + 11] = 0;
-      matrices[o + 12] = here.lx;
+      // THE ONE WORLD → LOCAL CROSSING, through the origin like every renderer.
+      const here = toLocal({ wx: batch.wx[i], wz: batch.wz[i] } as WorldPoint);
+      matrices[o + 12] = here.lx + ox;
       matrices[o + 13] = 0;
-      matrices[o + 14] = here.lz;
+      matrices[o + 14] = here.lz + oz;
       matrices[o + 15] = 1;
       const shade = 1 - swing / 2 + swing * batch.tint[i];
       colours[i * 3] = baseR * shade;
@@ -557,7 +717,7 @@ export class WorldObjects {
     return {
       count: n, matrices, colours, vanish2, yOffset, stand,
       rank: batch.rank, wx: batch.wx, wz: batch.wz,
-      feet: new Float32Array(n), feetRevision: -1,
+      feet: new Float32Array(n), feetRevision: -1, posedAt,
     };
   }
 
@@ -739,6 +899,8 @@ export class WorldObjects {
     this.resident.clear();
     this.queue.length = 0;
     this.queued.clear();
+    this.stale.length = 0;
+    this.staleSet.clear();
   }
 }
 

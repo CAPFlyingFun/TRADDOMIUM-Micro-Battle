@@ -20,7 +20,7 @@ import { DETAIL_QUALITY, objectRadius } from '../src/assets/detailQuality';
 import { WorldObjects, rankCutoff } from '../src/flora/WorldObjects';
 import { world, type WorldPoint } from '../src/world/coords';
 import { toLocal } from '../src/world/origin';
-import { UNITS_PER_METRE, decodeCoarse, decodeHdTile, hdTileAt } from '../src/world/dem';
+import { UNITS_PER_METRE, decodeCoarse, decodeHdTile, hdTileAt, hdTileName } from '../src/world/dem';
 import { repairGrid } from '../src/world/demRepair';
 import { geoToWorld } from '../src/world/geo';
 import { HabitatMap, type Habitat } from '../src/world/habitat';
@@ -160,9 +160,16 @@ describe('the bubble', () => {
     expect(lowTrees.size).toBeGreaterThan(0);
     expect(drawnPositions(high, 'tree').size).toBeGreaterThan(lowTrees.size);
     for (const p of lowTrees) expect(highTrees.has(p), `tree at ${p} moved between rungs`).toBe(true);
-    // The same for rocks — the other family with an identity.
-    const highRocks = generatedAt(high, 'rock');
-    for (const p of drawnPositions(low, 'rock')) expect(highRocks.has(p)).toBe(true);
+    // The same for rocks — the other family with an identity. A rock's
+    // drawn origin is its plane position bedded a little along the
+    // ground's normal (`ROCK_SINK`), the same at both rungs, so it is
+    // matched to the generated plane position within half a metre.
+    const highRocks = Array.from(generatedAt(high, 'rock'), (p) => p.split(',').map(Number));
+    for (const p of drawnPositions(low, 'rock')) {
+      const [x, z] = p.split(',').map(Number);
+      const near = highRocks.some(([hx, hz]) => Math.hypot(hx - x, hz - z) <= 0.5 * M);
+      expect(near, `rock drawn at ${p} is not at a plane position high generated`).toBe(true);
+    }
     // And the populations themselves are identical objects at both rungs.
     const cell = cellAt(WAILUA);
     const a = low.populationOf(cell)!;
@@ -278,6 +285,168 @@ describe('the bubble', () => {
     for (const family of OBJECT_FAMILIES) expect(objects.cost.drawn[family], family).toBe(0);
     // And the cells did not go anywhere: the ground under her still exists.
     expect(objects.cost.cells).toBeGreaterThan(120);
+    objects.dispose();
+  });
+});
+
+/**
+ * REST ON THE GROUND. Joshua, from the phone (2026-09-06): "some objects
+ * are underground and twigs aren't lying flat on the ground". Measured
+ * on the survey before the fix: rocks and stones took any rotation, so
+ * seven in ten rocks had more than half their body under the ground;
+ * twigs took a uniform 0–90°. Each assertion below is read off the
+ * ACTUAL instance matrices and the ACTUAL geometry the phone draws, at
+ * the canyon wall (the steepest ground there is) and in the wood, with
+ * the HD tiles resident — and each fails on the mutation it was written
+ * against: `leanOf` rock/stone → t·π, twig → t·π/2, the tree's slope
+ * burial removed, the stale re-pose removed.
+ */
+describe('rest on the ground', () => {
+  /** The Waimea canyon wall — the probe's rocky site — and the Wailua wood. */
+  const WALL = world(-1215200, -143200);
+  const WOOD = world(1559200, -2400);
+
+  /** A heightfield with the HD tiles under a 100 m bubble at `at` resident. */
+  function groundUnder(at: WorldPoint): Heightfield {
+    const field = new Heightfield(coarse);
+    const seen = new Set<string>();
+    for (const dx of [-1, 0, 1]) {
+      for (const dz of [-1, 0, 1]) {
+        const id = hdTileAt(world(at.wx + dx * 100 * M, at.wz + dz * 100 * M));
+        const name = hdTileName(id);
+        if (seen.has(name)) continue;
+        seen.add(name);
+        field.addTile(id, repairGrid(decodeHdTile(bytes(path.join('kauai-hd', `${name}.bin`)))).grid);
+      }
+    }
+    return field;
+  }
+
+  interface Drawn { readonly family: string; readonly matrix: THREE.Matrix4; readonly geometry: THREE.BufferGeometry }
+
+  /** Every drawn instance with its matrix and the geometry it is drawn with. */
+  function drawn(objects: WorldObjects, family: string): Drawn[] {
+    const out: Drawn[] = [];
+    objects.group.traverse((node) => {
+      if (!(node instanceof THREE.InstancedMesh) || node.name !== family) return;
+      for (let i = 0; i < node.count; i += 1) {
+        const matrix = new THREE.Matrix4();
+        node.getMatrixAt(i, matrix);
+        out.push({ family, matrix, geometry: node.geometry });
+      }
+    });
+    return out;
+  }
+
+  /** The fraction of an instance's vertices under the ground's tangent plane at its origin. The origin is identity here: local is world. */
+  function buriedFraction(d: Drawn, field: Heightfield): number {
+    const p = new THREE.Vector3().setFromMatrixPosition(d.matrix);
+    const at = world(p.x, p.z);
+    const foot = field.heightAt(at);
+    const n = field.normalAt(at, 25);
+    const pos = d.geometry.getAttribute('position') as THREE.BufferAttribute;
+    const v = new THREE.Vector3();
+    let under = 0;
+    for (let k = 0; k < pos.count; k += 1) {
+      v.fromBufferAttribute(pos, k).applyMatrix4(d.matrix);
+      const ground = foot - (n.nx / n.ny) * (v.x - p.x) - (n.nz / n.ny) * (v.z - p.z);
+      if (v.y < ground) under += 1;
+    }
+    return under / pos.count;
+  }
+
+  it('rolls every rock and stone onto its base: none has more than a third of its body under the ground, at the wall or in the wood', () => {
+    for (const site of [WALL, WOOD]) {
+      const field = groundUnder(site);
+      const objects = bubble('high', field);
+      objects.prime(site, eye(site, field));
+      for (const family of ['rock', 'stone'] as const) {
+        const instances = drawn(objects, family);
+        expect(instances.length, `${family} drawn`).toBeGreaterThan(10);
+        const fractions = instances.map((d) => buriedFraction(d, field)).sort((a, b) => a - b);
+        // Bedded, not buried: the sink is 15% of a rock's size (7.5% of a
+        // stone's), which on a bumpy base is about a fifth of its
+        // vertices; a rock turned onto its top would read over a half.
+        expect(fractions[fractions.length - 1], `${family}: the most buried`).toBeLessThanOrEqual(0.35);
+        expect(fractions[Math.floor(fractions.length / 2)], `${family}: the median`).toBeLessThanOrEqual(0.25);
+        // And bedded rather than perched: the median touches the ground.
+        expect(fractions[Math.floor(fractions.length / 2)], `${family}: the median`).toBeGreaterThan(0.05);
+      }
+      objects.dispose();
+    }
+  });
+
+  it('lays every twig along the slope: its length is within nine degrees of the ground plane', () => {
+    const field = groundUnder(WOOD);
+    const objects = bubble('high', field);
+    objects.prime(WOOD, eye(WOOD, field));
+    const twigs = drawn(objects, 'twig');
+    expect(twigs.length).toBeGreaterThan(100);
+    const axis = new THREE.Vector3();
+    const p = new THREE.Vector3();
+    let steepest = 0;
+    for (const d of twigs) {
+      axis.setFromMatrixColumn(d.matrix, 1).normalize();
+      p.setFromMatrixPosition(d.matrix);
+      const n = field.normalAt(world(p.x, p.z), 25);
+      const off = Math.asin(Math.abs(axis.x * n.nx + axis.y * n.ny + axis.z * n.nz)) * (180 / Math.PI);
+      steepest = Math.max(steepest, off);
+    }
+    // `leanOf` props a twig by at most 8°; the table's third of a degree is the rest.
+    expect(steepest).toBeLessThanOrEqual(9);
+    objects.dispose();
+  });
+
+  it('buries a tree on a slope deep enough that the downhill side of its trunk meets the ground', () => {
+    const field = groundUnder(WALL);
+    const objects = bubble('high', field);
+    objects.prime(WALL, eye(WALL, field));
+    const trees = drawn(objects, 'tree');
+    expect(trees.length).toBeGreaterThan(0);
+    const p = new THREE.Vector3();
+    const col = new THREE.Vector3();
+    for (const d of trees) {
+      p.setFromMatrixPosition(d.matrix);
+      const at = world(p.x, p.z);
+      const n = field.normalAt(at, 25);
+      // The trunk's radius: the x scale is the tree's width; the baked
+      // broad tree's girth is 4.5% of its height, its radius half that.
+      const radius = col.setFromMatrixColumn(d.matrix, 0).length() * 0.045 / 2;
+      const slope = Math.acos(Math.min(1, n.ny));
+      const downhillGround = field.heightAt(at) - radius * Math.tan(slope);
+      expect(p.y, `a trunk base ${(p.y - downhillGround).toFixed(0)} units over the downhill ground`).toBeLessThanOrEqual(downhillGround + 1);
+      // And it still grows UP: the trunk's axis is within the lean a tree is allowed.
+      col.setFromMatrixColumn(d.matrix, 1).normalize();
+      expect(Math.acos(Math.min(1, col.y)) * (180 / Math.PI)).toBeLessThanOrEqual(13);
+    }
+    objects.dispose();
+  });
+
+  it('re-poses a cell when a tile lands under it, within the frame budget, so a rock sits on the HD ground, not the coarse one', () => {
+    // Composed over the coarse survey, then the HD tile arrives.
+    const field = new Heightfield(coarse);
+    const objects = bubble('high', field);
+    objects.prime(WALL, eye(WALL, field));
+    const before = drawn(objects, 'rock');
+    expect(before.length).toBeGreaterThan(10);
+    const id = hdTileAt(WALL);
+    field.addTile(id, repairGrid(decodeHdTile(bytes(path.join('kauai-hd', `${hdTileName(id)}.bin`)))).grid);
+    // The feet move on the next refresh; the poses follow under budget.
+    for (let f = 0; f < 200; f += 1) objects.update(WALL, eye(WALL, field));
+    const after = drawn(objects, 'rock');
+    const up = new THREE.Vector3();
+    const p = new THREE.Vector3();
+    let checked = 0;
+    for (const d of after) {
+      p.setFromMatrixPosition(d.matrix);
+      const n = field.normalAt(world(p.x, p.z), 25);
+      up.setFromMatrixColumn(d.matrix, 1).normalize();
+      // A rock's up is the HD ground's normal, give or take its own lean (≤ 12°).
+      const off = Math.acos(Math.min(1, up.x * n.nx + up.y * n.ny + up.z * n.nz)) * (180 / Math.PI);
+      expect(off, `a rock ${off.toFixed(1)}° off the ground it stands on`).toBeLessThanOrEqual(12.5);
+      checked += 1;
+    }
+    expect(checked).toBeGreaterThan(10);
     objects.dispose();
   });
 });

@@ -15,6 +15,8 @@
  * `tests/worldHabitat.test.ts` searches for them the same way. The
  * numbers here are world units the HUD prints as-is (this scene never
  * rebases the origin), so a shot can be recreated with `probe:shot`.
+ * The fifth site is the one exception: Joshua's own spot, copied from
+ * his phone's HUD, shot for comparison and asserted on by nothing.
  *
  * THE FRAME TIMES ARE SWIFTSHADER'S, NOT A PHONE'S. The headless
  * renderer runs at a frame or two a second; what the ladder shows is
@@ -72,6 +74,11 @@ const SITES = [
   { name: 'grassland', x: -1_754_400, z: 738_400, ground: 16_839, facing: 40, want: 'grass' },
   { name: 'forest', x: 1_559_200, z: -2_400, ground: 12_501, facing: 300, want: 'fores' },
   { name: 'rocky', x: -1_215_200, z: -143_200, ground: 79_876, facing: 120, want: 'rocky' },
+  // Joshua's own spot, from his phone's HUD (2026-09-06): the west coast
+  // above Polihale, where he saw rocks under the ground and twigs on
+  // end. Shot only — the assertions on the rest poses are unit tests
+  // over the real instances (tests/floraWorldObjects.test.ts).
+  { name: 'westcoast', x: -2_166_190, z: -476_214, ground: 760, facing: 215, want: 'grass' },
 ];
 const PITCH = -18;
 

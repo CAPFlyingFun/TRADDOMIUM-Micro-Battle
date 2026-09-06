@@ -10,12 +10,12 @@
  *
  * A CLIPMAP: concentric square rings, each one twice the quad size and
  * twice the span of the one inside it, all with the SAME vertex count.
- * The innermost is a full grid at the survey's own step; every ring
- * outside it is an annulus with its middle quarter left out, because the
- * finer ring is already drawn there. Eight levels reach 112 km — twice
- * the island — for about 26,000 vertices, which is roughly what one
- * detailed character model costs. That is the whole reason to build it
- * this way rather than as tiles: the cost does not grow with the world.
+ * The innermost is a full grid; every ring outside it is an annulus with
+ * its middle quarter left out, because the finer ring is already drawn
+ * there. Eleven levels reach 112 km — twice the island — for about
+ * 49,000 vertices, which is roughly what two detailed character models
+ * cost. That is the whole reason to build it this way rather than as
+ * tiles: the cost does not grow with the world.
  *
  * NOTHING IS REBUILT WHEN THE CAMERA MOVES. Each ring is one static
  * geometry whose vertices are offsets from its own centre; a ring moves
@@ -65,16 +65,98 @@
  * so the mesh agrees with what an ant walks on by construction rather
  * than by a second copy of the sampling rules.
  *
+ * THE FINEST RINGS ARE FINER THAN THE SURVEY, and that is not a terrain
+ * edit. Everything that stands on the ground is seated on `heightAt`,
+ * which is BILINEAR between the survey's 13.67 m samples. A ring draws
+ * the same samples as two triangles a quad, and between the vertices the
+ * two surfaces differ by the quad's twist — agreeing at every vertex and
+ * nowhere else. Measured on the shipped survey: at a forest site the gap
+ * is median 1.1 cm, p90 13 cm, p99 44 cm; on Waimea's canyon wall (world
+ * −1215200, −143200) median 15 cm, p90 71 cm, max 4.2 m. That gap is a
+ * stone standing on air or a tuft of grass under the ground, and it is
+ * what Joshua saw on his phone: objects underground.
+ *
+ * The fix is NOT to seat objects on the triangles. `heightAt` is the one
+ * truth for everything that touches the ground — later the ant too — and
+ * a second surface for props to rest on would be the second copy of the
+ * rules this file exists to avoid. The fix is to draw `heightAt` more
+ * faithfully where it can be seen. The triangle-against-bilinear residual
+ * falls with the SQUARE of the subdivision, so three extra levels below
+ * the survey's step — quads of 6.84 m, 3.42 m and 1.71 m — divide the
+ * canyon wall's p90 by 64, to about 1.1 cm. No height is invented: every
+ * vertex of every ring is still `heightAt` of its own position, and a
+ * sub-survey vertex lands on the same bilinear surface an ant's foot
+ * does. `SUB_HD_LEVELS` is that count; the ring count grows by it so the
+ * outermost ring's reach does not move, and the levels from
+ * `SUB_HD_LEVELS` outward still put every vertex on the survey's own
+ * lattice, which the tile-staleness argument below depends on.
+ * `tests/terrainView.test.ts` measures the convergence on the real
+ * survey rather than trusting this paragraph.
+ *
+ * What it costs, measured in node with the tiles resident, walking the
+ * canyon point: three more draw calls, 13,443 more vertices (35,848 to
+ * 49,291), and a finest ring that moves every 3.4 m instead of every
+ * 27 — 0.585 ring refills a metre walked along an axis where it was
+ * 0.070 (0.79 on a diagonal), each refill the same 4,225 reads and the
+ * same 3.3 ms it always was. Per metre that is 1.9 ms where it was 0.25;
+ * at 30 m/s it is 17.5 refills a second, one every three or four frames.
+ *
+ * THE REFILL IS RATIONED: at most `REFILLS_PER_UPDATE` rings an update,
+ * finest first, the rest left for the next call. A refill that is 3.3 ms
+ * in node is likely 8 ms or more on Joshua's phone, and two things stack
+ * them: a tile landing, which stales the five rings below the coarse step
+ * in one go (measured: 9.4 ms in one update unrationed, 4.5 ms rationed
+ * with the rest drained over the next two), and any frame that moves
+ * further than a finest quad and so crosses more than one snap line per
+ * axis. Five refills in one frame is a hitch you feel. The first fill is
+ * exempt — it happens behind the loading screen, and a world with rings
+ * missing is worse than a slow first frame.
+ *
+ * A DEFERRED RING IS NOT MOVED. Its heights are offsets from its centre,
+ * so moving the mesh without rewriting them would slide the ground
+ * sideways by up to two quads. It stays where it was, at the heights it
+ * had, and its neighbours are told about the centre it actually has: the
+ * holes are cut and the meshes placed in a second pass from the rings'
+ * ACTUAL centres, every update, never from where a ring would be if it
+ * were current. Before the ration those were the same thing and the
+ * code used the wanted centres; they are not the same thing any more.
+ *
+ * WHY THE LAG IS BOUNDED. Ring i's hole tolerates the finer ring sitting
+ * −1, 0 or +1 of its own quads off centre, and two rings at their wanted
+ * centres are at most 1.5 of those quads apart (the finer within half a
+ * quad of the camera, the coarser within one). So the hole is still
+ * where the finer ring is as long as the camera has moved less than HALF
+ * a quad of ring i — one quad of ring i−1 — since either ring's centre
+ * was last current. Finest first makes the inner ring of every pair the
+ * fresher one, so the lag that matters is the outer ring's, and every
+ * outer ring has the larger quad and the larger tolerance; the tightest
+ * seam is ring 1 over ring 0, at 1.71 m of travel. And along an axis the
+ * rings' snap lines form a RULER: a ring snaps at odd multiples of its
+ * own quad, so in finest quads ring 0's lines are the odd numbers, ring
+ * 1's twice an odd, ring 2's four times an odd — one line every 1.71 m
+ * and each line one ring's, never two (measured: 2,000 ten-unit steps
+ * along x never snapped two rings at once). A frame that moves less than
+ * 1.71 m therefore crosses at most one line per axis and stales at most
+ * two rings, which is the budget: at 30 m/s, 0.5 m a frame, movement
+ * alone never leaves a ring stale. A burst does — a tile landing stales
+ * five — and drains in three updates, 1.5 m of travel at that speed,
+ * inside the tightest tolerance. The one thing a drain can show is the
+ * seam: a ring drawing the old revision beside one drawing the new is
+ * two versions of the ground for a frame or two, the hairline the
+ * revision counter exists to prevent, now bounded to those frames rather
+ * than to the distance to the next snap.
+ *
  * AND IT HAS TO BE TOLD WHEN THE GROUND CHANGES. An earlier version of
  * this comment claimed a streamed tile "sharpens the ground under the
  * camera with no change here", which was false: a ring is refilled only
  * when it MOVES, so a tile landing under a camera that is standing still
  * reached nobody, and once the camera did move the rings caught up at
- * eight different rates — ring 0 every 27 m, ring 4 every 437 m — leaving
+ * different rates — at the time ring 0 every 27 m, ring 4 every 437 m — leaving
  * adjacent rings drawing two different versions of the ground and pulling
  * the stitched seam apart. `Heightfield.revision()` closes it: one
  * counter, bumped when a tile arrives or leaves, compared per frame, and
- * a change refills every ring at once.
+ * a change marks every ring stale at once — the ration then drains them
+ * over three updates rather than at the next snap.
  *
  * THE REFILL IS THE FRAME BUDGET, so it is written like it. Measured at
  * 14 ms and ~89,000 short-lived objects a ring before this was addressed,
@@ -101,11 +183,34 @@ import { toLocal } from '../world/origin';
 /** Quads across one ring, each way. 64 keeps a ring at 4,225 vertices. */
 export const RING_QUADS = 64;
 
-/** Rings, finest first. Eight doublings from 13.67 m reach 112 km, twice the island. */
-export const RING_LEVELS = 8;
+/** Rings at and above the survey's step. Eight doublings from 13.67 m reach 112 km, twice the island. */
+const HD_LEVELS = 8;
 
-/** The finest quad is the survey's own high-detail step, so level 0 draws every sample it has. */
-export const FINEST_QUAD = HD_STEP;
+/**
+ * Rings BELOW the survey's step — see THE FINEST RINGS ARE FINER THAN THE
+ * SURVEY in the header. Three halvings of 13.67 m: 6.84 m, 3.42 m, 1.71 m.
+ * Zero would be the pre-subdivision clipmap; the convergence test fails
+ * at zero, which is the point of it.
+ */
+export const SUB_HD_LEVELS = 3;
+
+/** Rings, finest first. The sub-survey rings are added INSIDE the eight, so the outermost ring's reach is unchanged. */
+export const RING_LEVELS = HD_LEVELS + SUB_HD_LEVELS;
+
+/**
+ * The finest quad: the survey's high-detail step, halved `SUB_HD_LEVELS`
+ * times. Level `SUB_HD_LEVELS` draws every sample the survey has; the
+ * levels inside it draw the bilinear surface between them.
+ */
+export const FINEST_QUAD = HD_STEP / 2 ** SUB_HD_LEVELS;
+
+/**
+ * The most rings one `update` refills once the world is drawn — see THE
+ * REFILL IS RATIONED in the header. Two is the most a frame can stale by
+ * movement alone at the game's own speeds (one snap line per axis), so
+ * the ration bites only on bursts.
+ */
+export const REFILLS_PER_UPDATE = 2;
 
 /** How deep a ring's skirt hangs, as a multiple of its own quad size. */
 const SKIRT_QUADS = 1.5;
@@ -143,6 +248,17 @@ export interface TerrainViewOptions {
   /** Rings to build. Fewer is a smaller world drawn, not a coarser one. */
   readonly levels?: number;
   readonly ringQuads?: number;
+  /**
+   * The innermost ring's quad. Exists so a measurement can stand the
+   * pre-subdivision clipmap (`HD_STEP`, eight levels) beside the current
+   * one and time them against the same ground; the game never passes it.
+   */
+  readonly finestQuad?: number;
+  /**
+   * The ration, for a measurement that wants to stand the unrationed
+   * clipmap beside the rationed one. The game never passes it.
+   */
+  readonly refillsPerUpdate?: number;
 }
 
 interface Ring {
@@ -166,13 +282,20 @@ export class TerrainView {
   private readonly material: THREE.MeshLambertMaterial;
   private readonly quads: number;
   private readonly levels: number;
+  private readonly refillsPerUpdate: number;
+  /** Whether the first, unrationed fill has happened. */
+  private filledOnce = false;
   /** How many rings had their heights rewritten by the last `update`. The cost, measurable. */
   lastRebuilt = 0;
+  /** How many rings the last `update` left stale for the next one. Zero means the clipmap is current. */
+  lastDeferred = 0;
 
   constructor(options: TerrainViewOptions) {
     this.field = options.field;
     const levels = options.levels ?? RING_LEVELS;
     const quads = options.ringQuads ?? RING_QUADS;
+    const finest = options.finestQuad ?? FINEST_QUAD;
+    this.refillsPerUpdate = options.refillsPerUpdate ?? REFILLS_PER_UPDATE;
     this.quads = quads;
     this.levels = levels;
     this.group.name = 'terrain';
@@ -181,7 +304,7 @@ export class TerrainView {
     this.material = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
 
     for (let level = 0; level < levels; level += 1) {
-      const quad = FINEST_QUAD * 2 ** level;
+      const quad = finest * 2 ** level;
       const geometry = ringGeometry(quads, quad, level > 0);
       const mesh = new THREE.Mesh(geometry, this.material);
       mesh.name = `terrain-ring-${level}`;
@@ -201,47 +324,75 @@ export class TerrainView {
    * current floating origin.
    *
    * Cheap enough for every frame: a ring whose snapped centre has not
-   * moved is repositioned but never refilled, and repositioning eight
-   * rings is eight subtractions. Because the placement is redone every
+   * moved is repositioned but never refilled, and repositioning eleven
+   * rings is eleven subtractions. Because the placement is redone every
    * call, an origin rebase needs no separate notification — the next
    * update draws in the new frame of reference on its own.
+   *
+   * Refills are rationed to `refillsPerUpdate` a call, finest first,
+   * after the first fill — see the header for why the lag that leaves
+   * is bounded. `lastRebuilt` and `lastDeferred` say what this call did
+   * and what it left.
    */
   update(at: WorldPoint): void {
-    let rebuilt = 0;
-    // Snapped to TWICE the quad: snapping to one quad would flip the
-    // grid's parity every step and make the surface crawl.
-    const centres = this.rings.map((ring) => snapTo(at, ring.quad * 2));
     // The ground's own version. A tile arriving or leaving changes it,
     // and every ring is then stale wherever it looks — including the ones
-    // that have not moved. Refilling all eight on that frame is the same
-    // work the first frame already does, and it happens once per tile
-    // rather than per frame.
+    // that have not moved. Marking all of them on that frame is the same
+    // test the first frame already does; the ration decides how many are
+    // refilled per call.
     const revision = this.field.revision();
+    const budget = this.filledOnce ? this.refillsPerUpdate : Infinity;
+    let rebuilt = 0;
+    let deferred = 0;
 
-    for (let i = 0; i < this.rings.length; i += 1) {
-      const ring = this.rings[i];
-      const centre = centres[i];
+    // 1. Refill, finest first, until the ration is spent. A ring that is
+    // deferred keeps its centre and its heights; nothing here touches it.
+    for (const ring of this.rings) {
+      // Snapped to TWICE the quad: snapping to one quad would flip the
+      // grid's parity every step and make the surface crawl.
+      const wanted = snapTo(at, ring.quad * 2);
+      const moved = ring.centre === null || !samePoint(ring.centre, wanted);
       // A ring whose quad is the coarse lattice's own step (or a multiple
       // of it) samples ONLY at coarse sample points — and decimating the
       // high-detail grid by four reproduces the coarse one exactly there,
       // which `tests/worldDem.test.ts` pins. So a tile arriving cannot
-      // change one pixel of what those rings draw, and refilling all eight
-      // on every tile would be six rings of wasted work per download.
+      // change one pixel of what those rings draw, and refilling every
+      // ring on every tile would be six rings of wasted work per download.
+      // The sub-survey rings are the finest of the ones that DO refill:
+      // their vertices sit between the samples, on the bilinear surface a
+      // tile changes everywhere.
       const stale = ring.filledAt !== revision && ring.quad < COARSE_STEP;
-      if (ring.centre === null || stale || !samePoint(ring.centre, centre)) {
-        ring.centre = centre;
-        this.fill(ring);
-        rebuilt += 1;
+      if (moved || stale) {
+        if (rebuilt < budget) {
+          ring.centre = wanted;
+          this.fill(ring);
+          rebuilt += 1;
+        } else {
+          deferred += 1;
+        }
       } else if (ring.filledAt !== revision) {
         // Up to date by the argument above; say so, or it would be
         // re-examined against every future revision for ever.
         ring.filledAt = revision;
       }
-      // Cut the hole where the finer ring landed, not where the middle
-      // of this one happens to be — see the header.
-      if (i > 0) {
-        const inner = toLocal(centres[i - 1]);
-        const here = toLocal(centre);
+    }
+    this.filledOnce = true;
+    this.lastRebuilt = rebuilt;
+    this.lastDeferred = deferred;
+
+    // 2. Place every ring where it ACTUALLY is, and cut every hole around
+    // where the finer ring actually is — from the centres the rings have,
+    // not the ones they would have if they were current, because a
+    // deferred ring has the old one. Every ring, every call: it is a
+    // subtraction and a compare each.
+    for (let i = 0; i < this.rings.length; i += 1) {
+      const ring = this.rings[i];
+      const centre = ring.centre;
+      if (centre === null) continue;
+      const here = toLocal(centre);
+      const innerCentre = i > 0 ? this.rings[i - 1].centre : null;
+      if (innerCentre !== null) {
+        const inner = toLocal(innerCentre);
         const holeX = Math.round((inner.lx - here.lx) / ring.quad);
         const holeZ = Math.round((inner.lz - here.lz) / ring.quad);
         if (holeX !== ring.holeX || holeZ !== ring.holeZ || !ring.geometry.getIndex()) {
@@ -252,10 +403,8 @@ export class TerrainView {
       }
       // THE RENDER BOUNDARY: the only world → local conversion here, and
       // it goes through the floating origin rather than by hand.
-      const drawAt = toLocal(centre);
-      ring.mesh.position.set(drawAt.lx, 0, drawAt.lz);
+      ring.mesh.position.set(here.lx, 0, here.lz);
     }
-    this.lastRebuilt = rebuilt;
   }
 
   /** Where each ring cuts its hole, in its own quads. Exposed so a test can see the alignment. */

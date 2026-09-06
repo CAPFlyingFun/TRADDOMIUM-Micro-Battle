@@ -165,7 +165,10 @@ imply more than exists; the honest caption is pinned by a test.
   fixed world seed, its 16 m cell and the habitat — never from
   `Math.random`, never from a neighbour, never from what streamed in
   (`world/objects/populate.ts` reads the coarse survey through
-  `world/habitat.ts`; only the FOOT height reads the live heightfield).
+  `world/habitat.ts`; only the object's CONTACT with the ground — its
+  foot height and the ground's normal under it, which is how a rock is
+  bedded and a twig lies along the slope — reads the live heightfield,
+  in `flora/WorldObjects.ts`, and re-reads it when a tile lands).
   The detail rung sets the bubble's radius and per-family caps and
   nothing else: a cap is a maximum, not a quota, and a tree stands in
   the same place at every rung. Trees and rocks carry stable ids

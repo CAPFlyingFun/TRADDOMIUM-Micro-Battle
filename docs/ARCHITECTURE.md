@@ -97,11 +97,14 @@ src/
                 three-free.
   terrain/      the ground's renderer and its residency: TerrainView, a
                 geometry clipmap of concentric rings over
-                world/heightfield, and TerrainStreamer, which keeps the
-                high-detail tiles near the camera loaded and lets the rest
-                go. What view/ is to actor/, this is to world/ — the only
-                place a height meets a mesh; world/ stays three-free.
-                Added in Phase 2.
+                world/heightfield (its innermost rings FINER than the
+                survey's step, so the drawn triangles converge on the
+                bilinear surface everything else stands on — added with
+                Phase 6's objects, whose feet showed the gap), and
+                TerrainStreamer, which keeps the high-detail tiles near
+                the camera loaded and lets the rest go. What view/ is to
+                actor/, this is to world/ — the only place a height meets
+                a mesh; world/ stays three-free. Added in Phase 2.
   sea/          the water's renderer: OceanView (two sheets, near and
                 far), waterLook (the one shader every sheet wears) and
                 SeaTextures (the ripple and foam maps, loaded once and
@@ -114,7 +117,11 @@ src/
                 the procedural tree (v0's treeMesh, three shapes), rocks
                 and twigs. What terrain/ is to world/heightfield and sea/
                 to world/sea, this is to world/objects: the only place a
-                populated cell meets a mesh. Added in Phase 6.
+                populated cell meets a mesh, and where each object takes
+                its REST on the ground — foot and normal from the live
+                heightfield: a twig along the slope, a rock on its base,
+                bedded; a tree up, buried as the slope needs. Added in
+                Phase 6.
   camera/       FollowCamera + CameraOwnership. Phase 0 has FreeFlyCamera
                 only (under perf/).
   input/        keyboard / pointer / touch (Input.ts, DOM) → one shared
@@ -460,7 +467,7 @@ permanently excluded.
 | 3 Ocean | the accepted look, two-owner water router from day one | `seaSwell.ts`, `surf.ts`, `Ocean.ts`, `waterLook.ts`, `liveSea.ts`, foam probe + `oceanShader` fixture test |
 | 4 Inland water | hydrology bake feeding the local solver; per-reach bed materials; cascade FX; NHDPlus/DLNR names | `drainage.ts`, `islandChannels.ts`, `hydro.ts`, `waterSim.ts`, `nearestWater.ts` |
 | 5 Sky / weather | weather field + live feeds | `weather/*` |
-| **6 Vegetation** | **The biome-aware world-object streamer (2026-09-06).** Three questions answered apart: HABITAT (`world/habitat.ts` — the ESA landcover raster, distance to the sea, the coarse survey's height and slope, the drainage; rainfall and soil as typed seams), WORLD GENERATION (`world/objects/populate.ts` — one fixed seed + a 16 m cell + the habitat → a jittered-lattice, patch-clumped, deterministic population with stable ids on trees and rocks and a `WorldDelta` seam), DETAIL (`world/objects/budget.ts` — the rung's radius and per-family caps, maximums not quotas). Drawn by `flora/WorldObjects.ts` as a camera bubble of instanced meshes, thinned by rank against true 3D distance, feet re-seated on the heightfield's revision; the `vegetation` layer in the perf world with its own HUD lines and `probe:objects`. NOT built, by the brief: climbing, collision, wind, persistence of deltas (the seam exists; nothing writes it), the far vegetation impostor past the bubble | `stableHash` (as `world/random.ts`), `landcover.ts` (reshaped: a class, bilinear class weights), `kauai-veg.bin` verbatim, `treeMesh` (as `flora/treeGeometry.ts`, plus scrub and palm shapes). `GroundCover` and `trunkSolid` were read and not ported: the first never ran in a shipped scene, the second is Phase 7/8's |
+| **6 Vegetation** | **The biome-aware world-object streamer (2026-09-06).** Three questions answered apart: HABITAT (`world/habitat.ts` — the ESA landcover raster, distance to the sea, the coarse survey's height and slope, the drainage; rainfall and soil as typed seams), WORLD GENERATION (`world/objects/populate.ts` — one fixed seed + a 16 m cell + the habitat → a jittered-lattice, patch-clumped, deterministic population with stable ids on trees and rocks and a `WorldDelta` seam), DETAIL (`world/objects/budget.ts` — the rung's radius and per-family caps, maximums not quotas). Drawn by `flora/WorldObjects.ts` as a camera bubble of instanced meshes, thinned by rank against true 3D distance, each object at its family's REST on the ground (foot and normal from the live heightfield, re-posed on its revision: twigs along the slope, rocks and stones on their base and bedded, trees up and buried as the slope needs — Joshua's "basic collision with ground and simple physics for now", 2026-09-06, from his phone) over a clipmap that draws the heightfield at up to an eighth of the HD step so the drawn ground is where the feet are (`terrain/TerrainView.ts`, `SUB_HD_LEVELS`); the `vegetation` layer in the perf world with its own HUD lines and `probe:objects`. NOT built, by the brief: climbing, collision, wind, persistence of deltas (the seam exists; nothing writes it), the far vegetation impostor past the bubble | `stableHash` (as `world/random.ts`), `landcover.ts` (reshaped: a class, bilinear class weights), `kauai-veg.bin` verbatim, `treeMesh` (as `flora/treeGeometry.ts`, plus scrub and palm shapes). `GroundCover` and `trunkSolid` were read and not ported: the first never ran in a shipped scene, the second is Phase 7/8's |
 | 7 Player shell | `actor/` composition, `Posture` incl. climbing, camera ownership seam | `locomotion`, `gait`, `pace`, `stamina`, `motion`, `castes`, `FollowCamera` + its boundary test |
 | 8 Ground movement → Flight → Surface traversal | one atomic take-off (`launchInto`), integration test for flight↔climb | `flight.ts`, `wings`, `wingbeat`, `climb.ts`, `surfaceGrip.ts`, `waveClearance`, `wading` |
 | 9 Autonomy / navigation | Intent producer sibling to input | `missionBrain`, `mission`, `autopilot`, `routePlanner`, `wander`, `lookout` + `DRONE_GCS_AUDIT` |
