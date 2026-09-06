@@ -12,7 +12,7 @@
  * has no opinion about the ground.
  *
  * MEASURED AGAINST THE SHIPPED BYTES, not trusted from a comment:
- * 1,121 runs, 264 of them carrying one of 171 names people use — Hanalei
+ * 1,121 runs, 264 of them carrying one of 107 names people use — Hanalei
  * River, Anahola Stream, North Fork Wailua River — Strahler order 1 to 5
  * (564 / 289 / 149 / 104 / 15 runs of each), 140 runs flagged as
  * connected to the sea (which is not the same as ending at it — see
@@ -152,7 +152,14 @@ export const NO_TILE = 255;
  * next junction or to the sea.
  */
 export interface Run {
-  /** Its name where it has one — 264 runs share 171 names. Null otherwise. */
+  /**
+   * Its name where it has one — 264 runs share 107 names. Null otherwise.
+   *
+   * NOT 171: that is the size of the whole name table, which is 107 run
+   * names plus 64 lake names, and the two sets are disjoint. Re-measured
+   * from the bytes after the review pass caught it — the same shape of
+   * mistake this file correctly catches v0 making with the median width.
+   */
   readonly name: string | null;
   /** Strahler order: 1 is a headwater trickle, 5 is the Wailua. The far tier's LOD dial. */
   readonly order: number;
@@ -414,8 +421,15 @@ export function runWidths(hydro: Hydro, run: Run): Uint16Array {
  * tile holds on the order of a hundred runs and "what is near me" hands
  * back most of a district. MEASURED at 64 a side: 3,221 (run, cell)
  * entries for 1,121 runs — under three cells per run, seventeen for the
- * longest — spread over roughly 1,900 occupied cells, so a cell holds
- * one or two runs and a query touches what it asked for.
+ * longest — spread over 1,365 occupied cells, so an occupied cell holds
+ * 2.36 runs on average and a query touches close to what it asked for.
+ *
+ * (This said "roughly 1,900 occupied cells, so a cell holds one or two
+ * runs" until the review pass re-derived it from the shipped bytes with
+ * this module's own cell arithmetic. 1,365 and 2.36. The conclusion is
+ * unchanged and the number was wrong, which is the only kind of error
+ * this file's whole argument — that it measured rather than trusted v0's
+ * comments — cannot afford.)
  *
  * 64 rather than 32 or 128 because 5,600,000 / 64 = 87,500 exactly and
  * the cell edges nest inside the DEM's 8 x 8 tile grid (8 cells per tile),

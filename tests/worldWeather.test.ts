@@ -535,3 +535,62 @@ describe('the dial is the Rainfall Atlas', () => {
     expect(delivered).toBeLessThan(meanRainForWetness(SUMMIT) / 10);
   });
 });
+
+/**
+ * WHAT THE REVIEW PASS FOUND. Each of these was written after an
+ * adversarial reader mutated the source and watched all 22 tests stay
+ * green. A test that survives a real mutation is not a test.
+ */
+describe('the holes the review found', () => {
+  /** How much of a simulated year this world spends labelled raining. */
+  const rainingShare = (wetness: number, seed = 7): number => {
+    const sky = new SkyModel({ seed, wetness });
+    let raining = 0;
+    const samples = 60_000; // a minute apart: about 42 days of world time
+    for (let i = 0; i < samples; i += 1) if (sky.advance(60).sky === 'rain') raining += 1;
+    return raining / samples;
+  };
+
+  it('does not call a TRACE of rain "rain" — the visible floor is load-bearing', () => {
+    // `RAIN_VISIBLE_MM_HR` is what stops `sky === 'rain'` reading true
+    // forever at a thousandth of a millimetre an hour behind a departing
+    // shower whose cloud has not yet fallen through the gate. Deleting
+    // it left every other test green while taking the summit from 27% of
+    // the year labelled raining to 74% — a world that says it is raining
+    // three quarters of the time, in weather nobody could see.
+    //
+    // MEASURED at seed 7 with the floor in place: 2.89% at Kekaha, 4.99%
+    // at Līhuʻe, 26.91% at Waiʻaleʻale. The bounds below are wide enough
+    // to survive tuning and nowhere near wide enough to survive losing
+    // the floor.
+    expect(rainingShare(1)).toBeGreaterThan(0.10);
+    expect(rainingShare(1), 'the wettest place on earth is not raining half the time').toBeLessThan(0.45);
+    expect(rainingShare(0)).toBeLessThan(0.10);
+    // And the gradient is the right way round, or the dial does nothing.
+    expect(rainingShare(1)).toBeGreaterThan(rainingShare(0) * 3);
+  });
+
+  it('reports NO rain at all when it says it is not raining', () => {
+    // The floor's other half: the label and the rate must agree in both
+    // directions, or a caller that branches on the sky and a caller that
+    // integrates the rate are two callers seeing different weather.
+    const sky = new SkyModel({ seed: 11, wetness: 1 });
+    let checked = 0;
+    for (let i = 0; i < 20_000; i += 1) {
+      const w = sky.advance(60);
+      if (w.sky === 'rain') { expect(w.rainMmHr).toBeGreaterThan(0); checked += 1; } else expect(w.rainMmHr).toBe(0);
+    }
+    expect(checked, 'it never rained, so this proved nothing').toBeGreaterThan(100);
+  });
+
+  it('CITES A NUMBER THE ATLAS ACTUALLY GIVES for the summit', () => {
+    // 11,500 mm is the old long-period gauge figure; the atlas's
+    // 1978-2007 analysis gives about 9,500, and its statewide maximum is
+    // Big Bog on Maui at roughly 10,300 — so no Kauaʻi cell in it can be
+    // 11,500. v0 cites the same paper for 9,500. A number attributed to
+    // a source that does not give it is worse than an uncited one,
+    // because the citation is what stops the next reader checking.
+    expect(SUMMIT_MM_YEAR).toBe(9_500);
+    expect(SUMMIT_MM_YEAR).toBeLessThan(10_300);
+  });
+});

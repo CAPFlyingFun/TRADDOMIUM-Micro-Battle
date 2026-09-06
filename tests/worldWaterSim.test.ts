@@ -649,3 +649,124 @@ describe('D8 on a real slice of Kauaʻi', () => {
     expect(bytes(beds(sim))).toEqual(bedBefore);
   });
 });
+
+/**
+ * WHAT THE REVIEW PASS FOUND, turned into tests.
+ *
+ * Every one of these was written after an adversarial reader mutated the
+ * source and watched the existing 26 tests stay green. A test that
+ * survives a real mutation is not a test, and these are the mutations
+ * that survived.
+ */
+describe('the holes the review found', () => {
+  const flat = (): WaterSim => {
+    const sim = new WaterSim({ n: 8, cell: 100, dt: 0.02, damping: 0.995, soak: 0 });
+    sim.placeAt(world(0, 0), () => 1000);
+    return sim;
+  };
+
+  it('REFUSES A NON-FINITE QUERY instead of answering NaN', () => {
+    // Every comparison against NaN is false, so a bounds guard written
+    // as `< 0 || >= n` lets one through, and what comes back is a spot
+    // whose surface and depth are NaN. `router.ts` promises depth is
+    // always above zero where a spot exists; `submersion` would hand
+    // that NaN to the camera fog.
+    const sim = flat();
+    sim.advance(1, { rainPerSecond: 10, baseflowPerSecond: 0, channels: null });
+    for (const bad of [Number.NaN, Infinity, -Infinity]) {
+      expect(sim.spotAt(world(bad, 0)), `wx ${bad}`).toBeNull();
+      expect(sim.spotAt(world(0, bad)), `wz ${bad}`).toBeNull();
+    }
+    // And a good point still answers, or this passes by refusing all of them.
+    expect(sim.spotAt(world(0, 0))).not.toBeNull();
+  });
+
+  it('REFUSES A NON-FINITE CENTRE rather than marking itself placed', () => {
+    // The old order wrote the origin and the placed flag before reading
+    // the ground, so a bad centre left a window that believed it was
+    // placed, with a NaN origin poisoning every point it derived.
+    const sim = new WaterSim({ n: 8, cell: 100, dt: 0.02, damping: 0.995, soak: 0 });
+    expect(() => sim.placeAt(world(Number.NaN, 0), () => 1000)).toThrow();
+    expect(sim.isPlaced(), 'it marked itself placed on a centre it refused').toBe(false);
+  });
+
+  it('RE-READS THE GROUND WHEN THE SURVEY CHANGES, even standing still', () => {
+    // v1 streams HD tiles in behind the player, so the ordinary case is
+    // the ground being REPLACED under someone who has not moved. A
+    // window that only re-reads its bed when it MOVES keeps solving
+    // against terrain that is no longer there.
+    const sim = new WaterSim({ n: 8, cell: 100, dt: 0.02, damping: 0.995, soak: 0 });
+    let asked = 0;
+    let height = 1000;
+    const bedAt = (): number => { asked += 1; return height; };
+
+    sim.placeAt(world(0, 0), bedAt, 1);
+    const first = asked;
+    expect(first).toBeGreaterThan(0);
+
+    // Same place, same revision: nothing to do, and it does nothing.
+    sim.placeAt(world(0, 0), bedAt, 1);
+    expect(asked, 'it re-read the ground for no reason').toBe(first);
+
+    // Same place, NEW revision: an HD tile landed. It must read again.
+    height = 2000;
+    sim.placeAt(world(0, 0), bedAt, 2);
+    expect(asked, 'the ground changed and the window did not notice').toBeGreaterThan(first);
+    expect(sim.grid().bed[0]).toBe(2000);
+  });
+
+  it('NEVER MARKS A CHANNEL BELOW SEA LEVEL, whatever the predicate says', () => {
+    // D8 accumulation over the whole island does what it is asked and
+    // routes water downhill past the shoreline: the review measured
+    // 89.2% of the island-wide channel mask landing on the SEABED, the
+    // deepest three kilometres down. Baseflow poured there is fresh
+    // water inside the ocean's territory — two owners in one cell, which
+    // is the failure `router.ts` exists to prevent.
+    //
+    // The predicate is a thing a caller can forget, so the guard is in
+    // the solver where it cannot be. This hands it the most forgetful
+    // predicate there is.
+    const sim = new WaterSim({ n: 8, cell: 100, dt: 0.02, damping: 0.995, soak: 0 });
+    // A bed that crosses the shoreline: west half dry land, east half seabed.
+    sim.placeAt(world(0, 0), (at) => (at.wx < 0 ? 500 : -500));
+    const mask = sim.channelMask(() => true);
+    const g = sim.grid();
+    let wet = 0;
+    let dry = 0;
+    for (let i = 0; i < mask.length; i += 1) {
+      if (g.bed[i] < 0) expect(mask[i], `cell ${i} is ${g.bed[i]} below sea level`).toBe(0);
+      else { expect(mask[i]).toBe(1); dry += 1; }
+      if (mask[i] === 1) wet += 1;
+    }
+    // And it did not simply mark nothing, which would pass the loop above.
+    expect(dry).toBeGreaterThan(0);
+    expect(wet).toBe(dry);
+    expect(wet).toBeLessThan(mask.length);
+  });
+
+  it('CARRIES THE WATER THE RIGHT WAY when the window moves', () => {
+    // The old re-centre test filled the tub uniformly and asserted only
+    // the total, so reversing both shift signs lost the same number of
+    // columns and passed. This asks where a KNOWN BLOB ended up, in
+    // world coordinates, which is the thing a player would notice.
+    const sim = new WaterSim({ n: 16, cell: 100, dt: 0.02, damping: 0.995, soak: 0 });
+    sim.placeAt(world(0, 0), () => 1000);
+    const g = sim.grid();
+    // A KNOWN BLOB, not a uniform tub: put water in a few cells only, on
+    // one side of the window, so that carrying it the wrong way moves it
+    // somewhere a world query can tell the difference.
+    const blob = new Uint8Array(g.n * g.n);
+    for (let cy = 9; cy < 12; cy += 1) for (let cx = 9; cx < 12; cx += 1) blob[cy * g.n + cx] = 1;
+    sim.advance(1, { rainPerSecond: 0, baseflowPerSecond: 40, channels: blob });
+    const at = sim.pointOf(10, 10);
+    const before = sim.spotAt(at);
+    expect(before, 'the blob was not where it was put').not.toBeNull();
+
+    // Move the window three cells EAST and ask about the SAME world
+    // point. The water belongs to the world, not to the lattice.
+    sim.placeAt(world(3 * g.cell, 0), () => 1000);
+    const after = sim.spotAt(at);
+    expect(after, 'the water did not travel with the world').not.toBeNull();
+    expect(after?.depth).toBeCloseTo(before?.depth ?? -1, 4);
+  });
+});

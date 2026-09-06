@@ -74,10 +74,19 @@
  * rainfall gradient is one of the sharpest measured anywhere and it has
  * a simple cause: the northeast trades meet a 1,500 m wall and drop
  * their water on the windward slopes. Waiʻaleʻale averages about
- * 11,500 mm a year; Kekaha, twenty-five kilometres downwind, about 500.
+ * 9,500 mm a year; Kekaha, twenty-five kilometres downwind, about 500.
  *
  *   [Giambelluca et al., "Online Rainfall Atlas of Hawaiʻi",
  *    Bull. Amer. Meteor. Soc. 94 (2013) 313-316.]
+ *
+ * NOT 11,500, which this file said first and which the review caught.
+ * 11,500 mm (452 in) is the old long-period gauge figure people quote;
+ * the atlas's 1978-2007 analysis gives about 9,500, and its statewide
+ * maximum is Big Bog on Maui at roughly 10,300 — so no Kauaʻi cell in it
+ * can be 11,500. v0's own `weather/simulated.ts` cites this same paper,
+ * in these same words, for 9,500. CLAUDE.md's research rule is the point:
+ * a number attributed to a source that does not give it is worse than an
+ * uncited one, because the citation stops the next reader checking.
  *
  * `wetness` is the dial between those two ends, and the model is tuned
  * so that the rain it actually DELIVERS over a simulated year lands on
@@ -152,7 +161,7 @@ function clamp01(value: number): number {
 const HOURS_PER_YEAR = 8766;
 
 /** Waiʻaleʻale's annual mean, millimetres. MEASURED (Rainfall Atlas). */
-export const SUMMIT_MM_YEAR = 11_500;
+export const SUMMIT_MM_YEAR = 9_500;
 /** Kekaha, on the lee coast, annual mean, millimetres. MEASURED. */
 export const LEE_MM_YEAR = 500;
 
@@ -411,9 +420,16 @@ const DEG_TO_RAD = Math.PI / 180;
 
 /**
  * Seconds for each channel to close 63% of a gap. Cloud takes minutes,
- * rain starts over tens of seconds, wind shifts in under a minute —
- * v0's `weather/blend.ts` reached the same ordering from live readings
- * and its numbers are carried here rather than re-guessed.
+ * rain starts over tens of seconds, wind shifts in under a minute.
+ *
+ * THE ORDERING IS v0's; TWO OF THE THREE NUMBERS ARE NOT, and this
+ * comment used to claim otherwise. v0's `weather/blend.ts` has
+ * `{ rain: 35, cloud: 150, windSpeed: 40 }`; only the wind carried
+ * across unchanged. Cloud is 180 here and rain 45, both raised for the
+ * gate behaviour described below, and both GAME TUNING rather than
+ * anything measured. The review caught the mislabelling, which matters
+ * more than the numbers do: a comment that asserts provenance a value
+ * does not have is how the next agent stops re-deriving it.
  *
  * CLOUD IS SLOWER THAN RAIN ON PURPOSE and it is not only cosmetic: it
  * is what leaves the cloud gate open behind a departing shower instead

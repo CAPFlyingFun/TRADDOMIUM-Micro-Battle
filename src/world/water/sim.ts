@@ -84,6 +84,7 @@
  * core, so a headless authority can run the island's water.
  */
 import { snapTo, world, type WorldPoint } from '../coords';
+import { SEA_LEVEL } from '../heightfield';
 import { G } from '../sea/swell';
 import type { WaterSource, WaterSpot } from './router';
 
@@ -342,6 +343,25 @@ export class WaterSim implements WaterSource<'fresh'> {
   private ox = 0;
   private oz = 0;
   private placed = false;
+  /**
+   * The ground REVISION the bed was last read at, or -1 for never.
+   *
+   * v1 streams high-detail terrain in behind the player: `Heightfield`
+   * takes a 13.67 m tile whenever one lands and `heightAt` prefers it
+   * from that moment on. So the ordinary case is somebody standing
+   * still while the ground under them is REPLACED — and a window that
+   * only re-reads the bed when it MOVES keeps solving against the
+   * coarse 54.7 m ground it was built on, for as long as they stand
+   * there. The water would pool in valleys that are no longer where it
+   * thinks they are.
+   *
+   * Found by the review pass, which measured it: a second `placeAt` at
+   * the same centre made zero sampler calls and left the bed unchanged.
+   * `OceanView` already re-anchors its sheets on this same revision;
+   * this is the same idea in the same shape, and it is why the sampler
+   * alone was never enough.
+   */
+  private bedRevision = -1;
   /** Fractional step left over from the last `advance`. */
   private carry = 0;
 
@@ -402,7 +422,15 @@ export class WaterSim implements WaterSource<'fresh'> {
    * else. `bedAt` is a query into the heightfield; this module never
    * hands anything back to it.
    */
-  placeAt(centre: WorldPoint, bedAt: (at: WorldPoint) => number): void {
+  placeAt(centre: WorldPoint, bedAt: (at: WorldPoint) => number, revision = 0): void {
+    if (!Number.isFinite(centre.wx) || !Number.isFinite(centre.wz)) {
+      // BEFORE ANYTHING IS WRITTEN. The old order set the origin and the
+      // placed flag and only then read the ground, so a sampler that
+      // threw left the window marked placed with a half-written bed and
+      // a NaN origin — which then poisons `pointOf` and asks the channel
+      // predicate about NaN points forever after.
+      throw new Error(`water/sim: placeAt was given ${centre.wx},${centre.wz}`);
+    }
     const snapped = snapTo(centre, this.cell);
     const half = (this.n * this.cell) / 2;
     const nx = snapped.wx - half;
@@ -411,8 +439,11 @@ export class WaterSim implements WaterSource<'fresh'> {
     if (this.placed) {
       const shiftX = Math.round((nx - this.ox) / this.cell);
       const shiftZ = Math.round((nz - this.oz) / this.cell);
-      if (shiftX === 0 && shiftZ === 0) return;
-      this.carryWater(shiftX, shiftZ);
+      // STILL, BUT THE GROUND MAY HAVE MOVED. See `bedRevision`: HD
+      // tiles land under a standing player, so an unmoved window still
+      // has to re-read the ground when the survey says it changed.
+      if (shiftX === 0 && shiftZ === 0 && revision === this.bedRevision) return;
+      if (shiftX !== 0 || shiftZ !== 0) this.carryWater(shiftX, shiftZ);
     } else {
       this.water.fill(0);
     }
@@ -420,6 +451,7 @@ export class WaterSim implements WaterSource<'fresh'> {
     this.oz = nz;
     this.placed = true;
     this.fillBed(bedAt);
+    this.bedRevision = revision;
     // The pipes described a grid that has moved out from under them.
     this.fl.fill(0);
     this.fr.fill(0);
@@ -443,7 +475,25 @@ export class WaterSim implements WaterSource<'fresh'> {
     const mask = new Uint8Array(this.n * this.n);
     for (let cy = 0; cy < this.n; cy += 1) {
       for (let cx = 0; cx < this.n; cx += 1) {
-        mask[cy * this.n + cx] = isChannel(this.pointOf(cx, cy)) ? 1 : 0;
+        const i = cy * this.n + cx;
+        // NO BASEFLOW BELOW SEA LEVEL, and this is not a tuning choice —
+        // it is the router's own classification, enforced where it can
+        // be relied on rather than left to whoever writes the predicate.
+        //
+        // D8 accumulation over the whole island does exactly what it is
+        // asked to and routes water downhill past the shoreline: the
+        // review measured the island-wide mask putting 257,932 of its
+        // 289,006 channel cells — 89.2% — on the SEABED, the deepest 3 km
+        // down. v0 hit the same thing (84.3%) and answered it with a
+        // separate `isLandWatercourse` predicate; a predicate is a thing
+        // a caller can forget, and `router.ts` already says that ground
+        // below sea level is the OCEAN'S to answer for. Freshwater
+        // pouring onto the ocean floor is two owners in one cell, which
+        // is the failure the router exists to prevent.
+        //
+        // The bed is this window's own reading of the ground, so this
+        // costs nothing and cannot be got wrong from outside.
+        mask[i] = this.bed[i] >= SEA_LEVEL && isChannel(this.pointOf(cx, cy)) ? 1 : 0;
       }
     }
     return mask;
@@ -633,6 +683,16 @@ export class WaterSim implements WaterSource<'fresh'> {
     const fz = (at.wz - this.oz) / this.cell;
     const cx = Math.floor(fx);
     const cy = Math.floor(fz);
+    // NOT-A-NUMBER IS OUTSIDE, and it takes saying so. Every comparison
+    // against NaN is false, so `NaN < 0 || NaN >= n - 1` lets a NaN
+    // straight through this guard; `bilinear` then reads `field[NaN]`,
+    // gets undefined, and returns NaN — and `depth <= 0` is false for
+    // NaN too, so the whole thing is handed back as a valid spot with a
+    // NaN surface. `router.ts` promises `depth` is always above zero
+    // where a spot exists, and `submersion` would pass that NaN to the
+    // camera fog and the underwater look. Found by the review pass,
+    // which measured exactly that answer coming back.
+    if (!Number.isFinite(fx) || !Number.isFinite(fz)) return null;
     if (cx < 0 || cy < 0 || cx >= n - 1 || cy >= n - 1) return null;
     const tx = fx - cx;
     const tz = fz - cy;

@@ -476,3 +476,101 @@ describe('finding the water near a point', () => {
     expect(runsNear(index, at, 100_000).length).toBeLessThan(60);
   });
 });
+
+/**
+ * WHAT THE REVIEW PASS FOUND, turned into assertions.
+ *
+ * Each of these exists because an adversarial reader moved a byte offset
+ * or a slice bound in the decoder and watched all 32 tests stay green. A
+ * binary format is exactly the place where a field read from the wrong
+ * byte still decodes into plausible-looking numbers, so "it parsed" is
+ * never the assertion; the assertion has to be a fact about the island.
+ */
+describe('the holes the review found', () => {
+  it('reads LAKE LEVEL from the right bytes — the one number a lake surface needs', () => {
+    // Reading `level` four bytes late lands on `tile`+`name`, and reading
+    // it four bytes early lands on `ringCount`, which is 1 or 2 for every
+    // lake in the file. Both survived a bound of "above zero and below
+    // the summit". So this asserts what a real set of Hawaiian lake
+    // waterlines looks like instead: spread out, and not all tiny.
+    const levels = hydro.lakes.map((l) => l.level);
+    expect(levels.length).toBe(111);
+    const distinct = new Set(levels).size;
+    // ringCount would give 2 distinct values; the real waterlines give
+    // dozens. Measured on the shipped bytes: 96 distinct.
+    expect(distinct, 'every lake at the same level is a field read from the wrong offset').toBeGreaterThan(40);
+    // And they are real elevations, not small counts: Kauaʻi's standing
+    // water runs from sea-level coastal ponds to reservoirs high on the
+    // plateau, so the highest must be hundreds of metres up.
+    expect(Math.max(...levels), 'no lake is above the coastal plain').toBeGreaterThan(30_000);
+    expect(Math.max(...levels)).toBeLessThan(159_800);
+    expect(Math.min(...levels)).toBeGreaterThanOrEqual(0);
+  });
+
+  it('reads each run’s TILE from the right byte — a real function of position', () => {
+    // `tile` sits one byte from a padding field that is zero in all 1,121
+    // records, and the only assertion on it was "not 255", which zero
+    // satisfies. Checking it against a tile grid of my own would just be
+    // asserting that I guessed Beyond Extinction's tile origin right — I
+    // did not, first time: Hanalei reads 43 where an island-centred 8x8
+    // gives 35, because BE's split is not the one this repo uses.
+    //
+    // So this checks the property that survives not knowing the origin:
+    // a correctly-read tile is a FUNCTION OF WHERE THE RUN IS. Two runs
+    // in the same place share a tile, and different places give many
+    // different tiles. A padding byte gives one tile for the whole
+    // island and fails the second half; a byte from a neighbouring field
+    // varies with something other than position and fails the first.
+    // Each stored tile's runs must be LOCAL to each other: the bounding
+    // box of every run that claims tile T can be no larger than one tile.
+    // That needs no knowledge of where the grid starts.
+    const box = new Map<number, { x0: number; x1: number; z0: number; z1: number }>();
+    for (const run of hydro.runs) {
+      if (run.tile === NO_TILE) continue;
+      const p = runPolyline(hydro, run)[0];
+      const b = box.get(run.tile);
+      if (b === undefined) box.set(run.tile, { x0: p.wx, x1: p.wx, z0: p.wz, z1: p.wz });
+      else {
+        b.x0 = Math.min(b.x0, p.wx); b.x1 = Math.max(b.x1, p.wx);
+        b.z0 = Math.min(b.z0, p.wz); b.z1 = Math.max(b.z1, p.wz);
+      }
+    }
+    // MANY TILES. A padding byte would give exactly one.
+    expect(box.size, 'every run claims the same tile — the field is not the tile').toBeGreaterThan(20);
+    // AND EACH IS LOCAL. One tile is an eighth of the island across; a
+    // field read from the wrong byte scatters runs from everywhere into
+    // the same value and the box spans the whole island.
+    // A TENTH OVER ONE TILE, and the margin is not slack for its own
+    // sake: the bake assigned each run a tile from the whole run, and
+    // this measures its FIRST point, which can sit just outside the tile
+    // its body is in. Measured worst case on the shipped bytes is 7.014
+    // km against a 7.000 km tile — two parts in a thousand. A field read
+    // from the wrong byte scatters runs from opposite ends of a 56 km
+    // island into one value, so the gap between passing and failing here
+    // is a factor of seven, not a tenth.
+    const tileSpan = (ISLAND_SPAN / 8) * 1.1;
+    for (const [tile, b] of box) {
+      expect(b.x1 - b.x0, `tile ${tile} spans ${((b.x1 - b.x0) / 100_000).toFixed(2)} km east-west`).toBeLessThanOrEqual(tileSpan);
+      expect(b.z1 - b.z0, `tile ${tile} spans ${((b.z1 - b.z0) / 100_000).toFixed(2)} km north-south`).toBeLessThanOrEqual(tileSpan);
+    }
+  });
+
+  it('slices a run’s widths and levels from the right offset', () => {
+    // A window shifted by one has the same LENGTH, which is all the
+    // original test asserted — and puts every point's channel width one
+    // point downstream, so a ribbon is subtly the wrong shape everywhere
+    // with nothing to say why.
+    const run = hydro.runs.find((r) => r.pointCount > 8);
+    expect(run).toBeDefined();
+    if (run === undefined) return;
+    const widths = runWidths(hydro, run);
+    const levels = runLevels(hydro, run);
+    expect(widths.length).toBe(run.pointCount);
+    expect(levels.length).toBe(run.pointCount);
+    // Element for element against the arrays they are windows into.
+    for (let k = 0; k < run.pointCount; k += 1) {
+      expect(widths[k], `width ${k}`).toBe(hydro.width[run.firstPoint + k]);
+      expect(levels[k], `level ${k}`).toBe(hydro.level[run.firstPoint + k]);
+    }
+  });
+});
