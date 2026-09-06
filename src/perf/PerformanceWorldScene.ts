@@ -73,6 +73,7 @@ import { ActorViews } from '../view/ActorViews';
 import { TerrainStreamer } from '../terrain/TerrainStreamer';
 import { TerrainView } from '../terrain/TerrainView';
 import { OceanView } from '../sea/OceanView';
+import { blendSight, underwaterLook } from '../sea/underwaterLook';
 import { SeaTextures } from '../sea/SeaTextures';
 import { SeaSwell } from '../world/sea/swell';
 import { resolveTier, tierFor, type TextureTier } from '../assets/textureQuality';
@@ -80,7 +81,7 @@ import { detailFor, resolveDetail, type DetailTier } from '../assets/detailQuali
 import { LoadProgress } from '../world/LoadProgress';
 import { COARSE_BYTES, decodeCoarse } from '../world/dem';
 import { repairGrid } from '../world/demRepair';
-import { Heightfield } from '../world/heightfield';
+import { Heightfield, SEA_LEVEL } from '../world/heightfield';
 import { toLocal } from '../world/origin';
 import type { WorldPoint } from '../world/coords';
 import { BotHud, type BotReadout } from './BotHud';
@@ -477,6 +478,11 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
     /** The tier the sea was BUILT at, so a changed setting is noticed once and rebuilt once. */
     let builtTier: TextureTier | null = null;
     let builtDetail: DetailTier | null = null;
+    /** The air's colour as a colour, so the blend never restates it. */
+    const SKY = new THREE.Color(HORIZON);
+    /** Whether the eye is under the sea, and the air fog it went under from. */
+    let underwater = false;
+    let airFog = { near: 0, far: 0 };
     /** The near plane the projection was last built with. */
     let builtNear = 0;
     let hud: PerfHud | null = null;
@@ -802,6 +808,82 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
       }
     };
 
+    /**
+     * PUT THE WATER BETWEEN THE EYE AND EVERYTHING, when the eye is
+     * under it.
+     *
+     * Joshua, 2026-09-06: "need to add the underwater fog." Below the
+     * waterline the build drew the seabed through clear air fading to
+     * the pale sky — the same thing v0 was told about, for the same
+     * reason: there is a water SURFACE and nothing else, so from
+     * underneath there is nothing in the way.
+     *
+     * THE SURFACE IS THE SWELL'S, not a flat zero. Sea level is the
+     * mean, and a wave passing over her eye really does put her under
+     * and take her out again — asking the swell is what makes the fog
+     * wash in and out with it instead of switching on a plane she can
+     * see waves crossing.
+     *
+     * AND SHE HAS TO BE IN THE SEA, not merely below zero. The camera
+     * can fly under sea level inside a mountain, and turning the world
+     * green in there would be the fog claiming water that is rock. The
+     * seabed under her has to be below sea level too.
+     *
+     * EVERY FRAME AND WITHOUT HYSTERESIS, unlike `adaptDepth` next door:
+     * this is two colour writes and two numbers, the surface moves under
+     * a wave, and a fog that lagged the eye by a hysteresis step is the
+     * bug it exists to fix wearing a different hat.
+     */
+    const adaptWater = (): void => {
+      const fog = three.fog as THREE.Fog | null;
+      if (fog === null) return;
+      const air = { near: fog.near, far: fog.far };
+      const restore = (): void => {
+        if (!underwater) return;
+        underwater = false;
+        fog.color.set(HORIZON);
+        (three.background as THREE.Color).set(HORIZON);
+        // near/far belong to `adaptDepth`, which is the only thing that
+        // knows what the far plane is doing; ask it rather than
+        // remembering a number that may be a scale out of date.
+        builtNear = 0;
+        adaptDepth();
+      };
+      if (field === null || swell === null || !oceanOn) {
+        restore();
+        return;
+      }
+      const pose = fly.pose();
+      const ground = field.heightAt(pose.at);
+      if (ground >= SEA_LEVEL) {
+        restore();
+        return;
+      }
+      const surface = swell.heightAt(pose.at, SEA_LEVEL - ground);
+      const look = underwaterLook(surface - pose.height);
+      if (look === null) {
+        restore();
+        return;
+      }
+      // The air fog this is blending FROM is whatever adaptDepth last
+      // set, so it is re-read on the frame she goes under and not before.
+      if (!underwater) {
+        underwater = true;
+        airFog = air;
+      }
+      // sRGB IN, because that is what the look authors and what every
+      // other colour in this file is written as; three's working space
+      // is linear and `setRGB` would otherwise take these as linear and
+      // render a washed-out swimming-pool blue. The BLEND is in linear,
+      // which is where a blend belongs — and it is blended FROM the air's
+      // own colour, read from the one constant that owns it rather than
+      // from three numbers copied out of it.
+      fog.color.setRGB(look.r, look.g, look.b, THREE.SRGBColorSpace).lerp(SKY, 1 - look.strength);
+      (three.background as THREE.Color).copy(fog.color);
+      fog.near = blendSight(Math.max(1, airFog.near), 0.02 * look.sight, look.strength);
+      fog.far = blendSight(Math.max(1, airFog.far), look.sight, look.strength);
+    };
+
     /** Point the clipmap at the camera and ask for the tiles under it. One call a frame. */
     const updateTerrain = (): void => {
       if (terrain === null) return;
@@ -1117,6 +1199,8 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         // a frozen camera, and the ONE clock would then disagree with the
         // dt every other system integrated on.
         updateOcean(frame.simDt);
+        // AFTER the ocean, so the swell it asks about is this frame's.
+        adaptWater();
         if (net !== null) {
           netClockMs += Math.max(0, frame.rawDt) * 1000;
           // Stand over the spawn the authority named, the first time it

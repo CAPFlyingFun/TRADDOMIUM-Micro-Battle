@@ -8,9 +8,10 @@
  * The NEAR sheet is hers: a window that re-anchors as she moves,
  * displaced every frame by the SWELL — the same table the gameplay query
  * sums, baked into the vertex shader by the module that owns it. Its
- * swell flattens toward its own rim and its alpha hands over to the far
- * sheet across the same band the far sheet's HOLE opens under it, so the
- * seam is flat-meets-flat and nobody double-draws the water.
+ * swell flattens and its alpha hands over to the far sheet across one
+ * band — the same band the far sheet's HOLE opens across, measured from
+ * the same point — so the seam is flat-meets-flat, there is no ring of
+ * glass between them, and nobody double-draws the water.
  *
  * Sea LEVEL is exactly 0; the swell is an excursion ABOUT zero that the
  * shore fades away, so the feathered waterline keeps the beach it fought
@@ -48,10 +49,11 @@
  *         gives instead is HOW FAR the moving water reaches before it
  *         hands over to the flat sheet.
  *
- * The rim and handover radii are therefore FRACTIONS of the near
- * sheet's own half-span rather than the absolute numbers v0 used, so the
- * crossfade keeps its shape at every size. At high and above the
- * arithmetic reproduces v0's numbers exactly.
+ * The handover radii are therefore FRACTIONS of the near sheet's own
+ * reach rather than the absolute numbers v0 used, so the crossfade keeps
+ * its shape at every size — and they are measured from the CAMERA, not
+ * from the sheet, so the wave zone follows her instead of jumping a
+ * recentre step behind. See FADE_LO_OF_REACH.
  * ─────────────────────────────────────────────────────────────────────
  */
 import * as THREE from 'three';
@@ -120,49 +122,64 @@ export function farCellFor(n: number, reach: number): number {
 const NEAR_CELL = 70;
 
 /**
- * Where the rim flattening and the crossfade sit, as fractions of the
- * near sheet's EDGE — the largest circle that fits inside it, which is
- * half its span less the one cell the lattice is short on two sides.
- * That is the distance `vSheet` has to finish within.
+ * THE HANDOVER, as fractions of the near sheet's REACH — the largest
+ * circle the fade can fill measured FROM THE CAMERA, which `OceanView`
+ * works out below.
  *
- * v0's absolute numbers over v0's edge of 8,365: rim 6,000..7,800 and
- * handover 6,800..8,200, and v0's own comment on them reads "inside the
- * sheet's 8 435 half-span, so the fade finishes before the edge." They
- * are fractions here because v0's near sheet was one fixed size and
- * v1's changes with the detail rung, so an absolute 8,200 would fall
- * outside the sheet at ultra-low. Over v0's own geometry they multiply
- * back to v0's four numbers exactly, and because the largest of them is
- * 0.98 they fit inside a sheet of ANY size by construction — there is
- * nothing to clamp and so nothing that can quietly fail to clamp.
+ * ONE RAMP, RUN FROM THE PLAYER. The swell flattens and the sheet fades
+ * out over the same band, and both are measured from where she is rather
+ * than from the middle of a lattice that only moves in steps.
  *
- * THEY WERE MULTIPLIED BY THE FULL SPAN, and that is the bug this
- * comment now exists to prevent. `counts.near * NEAR_CELL` is the
- * sheet's WIDTH; half of it is the reach. Doubling every band put all
- * four outside the sheet at every tier, so neither fade ever ran:
+ * ─── how this got here ───────────────────────────────────────────────
  *
- *   near sheet, high tier: reaches 8,435 to a side, 11,929 to a corner
- *   swell rim:      12,000 .. 15,600   — never applied
- *   sheet handover: 13,600 .. 16,400   — never applied
+ * v0 wrote four absolute distances — rim 6,000..7,800, handover
+ * 6,800..8,200 — over a near sheet whose half-span was 8,435, and its own
+ * comment read "inside the sheet's 8 435 half-span, so the fade finishes
+ * before the edge."
  *
- * The near sheet therefore carried full swell to its square edge and
- * stopped dead, and the far sheet's hole — the same doubled 13,600 —
- * kept the far sheet from drawing anything within 136 m of the camera.
- * Between them lay a ring 52 m wide where NEITHER SHEET DREW WATER,
- * bounded by the straight side of a square. Joshua photographed it from
- * 60 m up on 2026-09-05 and named it before anyone measured it: "there
- * is a gap that shouldn't be there like v0", and v0 is right — v0 had no
- * such gap, because v0 wrote the distances down instead of deriving
- * them. The regression is entirely v1's port of them.
+ * v1 turned them into fractions, correctly (the sheet's size now rides
+ * the detail rung), and multiplied them by the sheet's FULL SPAN. Every
+ * band came out at twice its radius, all four landed outside the sheet,
+ * and neither fade ever ran: the near sheet carried full swell to its
+ * square edge and stopped dead while the far sheet's hole kept the far
+ * sheet from drawing anything within 136 m. Between them was a ring 52 m
+ * wide where NEITHER SHEET DREW WATER. Joshua photographed it from 60 m
+ * up on 2026-09-05: "there is a gap that shouldn't be there like v0" —
+ * and v0 is right, v0 had no such gap.
  *
- * THE WAVE ZONE IS MOST OF THE SHEET, deliberately. v0's first cut
- * flattened everything past 34 m, so the water actually being looked at
- * — the middle distance — was the flat far sheet, and the whole ocean
- * read as glass no matter how tall the waves near her were.
+ * Fixed, he looked again (2026-09-06) and said the edge was "too small
+ * and hard", and that the water "changes... and makes not stay the same
+ * location" as he moved. Two faults, and both are v0's design rather
+ * than v1's port of it:
+ *
+ *   TOO HARD — v0's ramp is 21% of the reach wide with a band of flat
+ *   glass in the middle of it, where the swell has finished flattening
+ *   but the sheets have not finished swapping. From 90 m up that reads
+ *   as a soft-edged disc of moving water lying on a still sea. The ramp
+ *   now starts at 35% and the swell and the alpha come down TOGETHER
+ *   across all of it, so the waves just get smaller and the sheet
+ *   carrying them is already transparent by the time they are gone.
+ *   There is no flat annulus left to be the edge of anything.
+ *
+ *   DOESN'T FOLLOW HER — the fade was measured from the sheet's centre,
+ *   and the sheet only re-anchors once she has crossed an eighth of its
+ *   span. So the wave zone sat still while she moved and then jumped a
+ *   whole step. It is measured from the CAMERA now (`eyeCentred` in
+ *   waterLook), which is a uniform written every frame and costs
+ *   nothing; the GEOMETRY keeps its hysteresis, because that is what
+ *   refills 82,369 depths.
+ *
+ * IT IS NOT v0's REJECTED FIRST CUT, which flattened everything past
+ * 34 m — a hard stop, on a sheet whose whole reach was 84 m — and made
+ * the ocean read as glass because the middle distance was all far sheet.
+ * This is a RAMP over two thirds of a reach that is 82 m at high: full
+ * waves for the first 29 m, half height around 55, thinning past that.
+ * `tests/seaOceanView.test.ts` pins that the ramp is at least half the
+ * reach wide — the property that stops it being an edge — and that it
+ * starts no later than v0's own 72%.
  */
-const RIM_LO_OF_EDGE = 6_000 / 8_365;
-const RIM_HI_OF_EDGE = 7_800 / 8_365;
-const HAND_LO_OF_EDGE = 6_800 / 8_365;
-const HAND_HI_OF_EDGE = 8_200 / 8_365;
+const FADE_LO_OF_REACH = 0.35;
+const FADE_HI_OF_REACH = 1.0;
 
 /**
  * How far the camera may travel before a sheet re-anchors: about an
@@ -338,17 +355,25 @@ export class OceanView {
     // THE EDGE IS HALF THE SPAN, LESS A CELL. `lattice` centres the sheet
     // on zero and runs from `-span/2` to `span/2 - cell`, so it is a
     // whole cell short on two of its four sides — and the largest circle
-    // that fits inside it is therefore `span/2 - cell`. That is the
-    // distance a fade has to finish within, in every direction.
+    // that fits inside it is therefore `span/2 - cell`.
     //
     // Reading it as the SPAN is what put every band outside the sheet and
     // opened the gap. Reading it as the half-span alone is nearly right
     // and fails on the small rungs: at ultra-low's 43 vertices the last
-    // 2.8% of the radius is that one missing cell, and the handover ends
-    // at 97.2%. The edge is the honest measure at every size.
+    // 2.8% of the radius is that one missing cell.
     const nearEdge = (counts.near * NEAR_CELL) / 2 - NEAR_CELL;
-    const handLo = nearEdge * HAND_LO_OF_EDGE;
-    const handHi = nearEdge * HAND_HI_OF_EDGE;
+    // AND THE FADE IS MEASURED FROM THE CAMERA, which is not the sheet's
+    // middle. `snapTo` ROUNDS, so between anchors the camera sits up to
+    // half a recentre step away on each axis — √2/2 of a step on the
+    // diagonal — and a circle drawn around IT reaches that much further
+    // on one side than a circle drawn around the sheet. Subtract the
+    // drift here and the fade fits from wherever the camera has got to,
+    // which is the price of the wave zone following the player instead
+    // of jumping a step behind her.
+    const drift = recentreOf(counts.near, NEAR_CELL) * Math.SQRT1_2;
+    const nearReach = nearEdge - drift;
+    const handLo = nearReach * FADE_LO_OF_REACH;
+    const handHi = nearReach * FADE_HI_OF_REACH;
 
     // edgeLo/edgeHi are the waterline Joshua approved — widening them
     // washed the beach out. edgeLo keeps the geometric cut hidden 35
@@ -384,12 +409,11 @@ export class OceanView {
 
     const nearLook = makeWaterLook({
       ...skin,
-      swellRim: {
-        rimLo: nearEdge * RIM_LO_OF_EDGE,
-        rimHi: nearEdge * RIM_HI_OF_EDGE,
-        alphaLo: handLo,
-        alphaHi: handHi,
-      },
+      // ONE RAMP. The swell flattens over exactly the band the sheet
+      // fades out across, so a wave never survives its own sheet and the
+      // flat annulus that used to sit between them is gone.
+      swellRim: { rimLo: handLo, rimHi: handHi, alphaLo: handLo, alphaHi: handHi },
+      eyeCentred: true,
     });
     this.near = this.sheet(counts.near, NEAR_CELL, nearLook, 2);
   }
@@ -438,11 +462,18 @@ export class OceanView {
     const farRefilled = this.anchor(this.far, at, revision);
     const nearRefilled = this.anchor(this.near, at, revision);
     if (farRefilled || nearRefilled) this.refills += 1;
+    // EVERY FRAME, not only on a refill: both sheets measure the
+    // crossfade from the CAMERA now, and the camera moves every frame
+    // even when the geometry does not. Two uniform writes.
+    //
+    // They are given the same point for the reason they always shared
+    // one — the near sheet's fade out and the far sheet's hole are exact
+    // complements, and a hole around a different centre is a ring of
+    // doubled water on one side and none on the other.
+    this.near.look.setEye(at.wx, at.wz);
+    this.far.look.setHole(at.wx, at.wz);
     if (nearRefilled) {
       const centre = this.near.centre as WorldPoint;
-      // The far sheet's hole follows the NEAR SHEET, not the camera:
-      // they must share a centre or the crossfade bands part company.
-      this.far.look.setHole(centre.wx, centre.wz);
       // THE SEA IS DRAWN ON THIS LATTICE, so gameplay is sampled on it
       // too: the drawn surface is piecewise-bilinear between vertices
       // and the analytic curve is not, and floating on the curve while

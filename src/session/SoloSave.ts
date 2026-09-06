@@ -65,13 +65,26 @@ export type KnownMap = (mapId: string) => boolean;
 const HALF_SPAN = ISLAND_SPAN / 2;
 const TAU = Math.PI * 2;
 
-/** Every number finite and inside the island; a pose that is not is the default pose. */
+/**
+ * Every number finite and inside the island; a pose that is not is the
+ * default pose.
+ *
+ * HEIGHT MAY BE NEGATIVE, and that is not a loosened check — it is the
+ * clamp being right about what it is for. It exists to reject garbage,
+ * not to forbid a place. Kauaʻi's seabed goes 66 m below sea level
+ * inside the survey and the underwater look (`sea/underwaterLook.ts`)
+ * makes that somewhere to be, so a floor at zero meant saving while
+ * under the water and resuming ON it: the game silently moving the
+ * player rather than putting them back. The bound is the island's own
+ * span in both directions, which is what "inside the island" means for
+ * a vertical coordinate too.
+ */
 export function sanitizeCameraPose(raw: unknown, defaults: CameraPose): CameraPose {
   const r = isRecord(raw) ? raw : {};
   const at = isRecord(r.at) ? r.at : {};
   return {
     at: world(finiteNumber(at.wx, defaults.at.wx, -HALF_SPAN, HALF_SPAN), finiteNumber(at.wz, defaults.at.wz, -HALF_SPAN, HALF_SPAN)),
-    height: finiteNumber(r.height, defaults.height, 0, ISLAND_SPAN),
+    height: finiteNumber(r.height, defaults.height, -ISLAND_SPAN, ISLAND_SPAN),
     yaw: finiteNumber(r.yaw, defaults.yaw, -TAU, TAU),
     pitch: finiteNumber(r.pitch, defaults.pitch, -Math.PI / 2, Math.PI / 2),
   };

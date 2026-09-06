@@ -808,66 +808,108 @@ describe('there is no distance at which the sea draws nothing', () => {
     return hit === null ? null : { lo: Number(hit[1]), hi: Number(hit[2]) };
   };
 
-  it('fades the near sheet out INSIDE its own edge, at every tier', () => {
-    for (const tier of TEXTURE_TIERS) {
+  /**
+   * THE WORST THE CAMERA EVER SITS FROM THE SHEET'S OWN CENTRE.
+   *
+   * MEASURED BY DRIVING IT, not re-derived: the fade is a circle around
+   * the CAMERA now, so what it has to fit inside is the sheet as seen
+   * from wherever the camera has drifted to between anchors. `snapTo`
+   * rounds, so the drift is bounded — but by a formula in the source,
+   * and a test that copied that formula would agree with the source
+   * about a number they had both got wrong.
+   *
+   * So this walks the camera across more than one whole recentre step
+   * and reads the offset out of the seated mesh each time.
+   */
+  function worstDrift(tier: TextureTier, view: OceanView): number {
+    let worst = 0;
+    const near = view.group.children[1] as THREE.Mesh;
+    const span = SHEET_VERTICES[tier].near * 70;
+    for (let i = 0; i <= 240; i += 1) {
+      // A diagonal walk, so both axes drift at once — the corner case.
+      const step = (i * span) / 240;
+      const at = world(OFFSHORE.wx + step, OFFSHORE.wz + step * 0.61);
+      view.update(at);
+      worst = Math.max(worst, Math.hypot(at.wx - near.position.x, at.wz - near.position.z));
+    }
+    return worst;
+  }
+
+  it('fades the near sheet out inside its own edge FROM WHEREVER THE CAMERA IS', () => {
+    // The assertion the shipped build failed, sharpened by the fade
+    // moving onto the camera. It is not enough for the band to fit the
+    // sheet: it has to fit the sheet measured from the camera, and the
+    // camera is off-centre by up to half a recentre step on each axis
+    // between anchors. A band sized against the middle would spill past
+    // the edge on the side the player has drifted towards — a hard cut
+    // that appears and disappears as she moves, which is worse than one
+    // that is always there.
+    for (const tier of DETAIL_TIERS) {
       const { sheets, view } = sheetsOf(tier);
       const alpha = bandIn(sheets.near.fragment, 'vSheet)');
       expect(alpha, `${tier}: the near sheet has no alpha fade at all`).not.toBeNull();
       if (alpha === null) { view.dispose(); continue; }
-      // Zero alpha strictly before the last vertex, or the sheet ends as
-      // a visible cut. This is the assertion the shipped build failed:
-      // at high tier it wanted 16,400 from a sheet reaching 11,929.
-      expect(alpha.hi, `${tier}: alpha reaches zero at ${alpha.hi}, past an edge of ${sheets.near.edge}`)
-        .toBeLessThan(sheets.near.edge);
-      // And it must actually START inside the sheet, or the fade is a
-      // step at the edge rather than a fade.
-      expect(alpha.lo, `${tier}: the fade begins at ${alpha.lo}, outside the sheet`)
-        .toBeLessThan(sheets.near.edge);
+      const drift = worstDrift(tier, view);
+      expect(drift, `${tier}: the camera never drifted, so this proves nothing`).toBeGreaterThan(0);
+      expect(
+        alpha.hi + drift,
+        `${tier}: alpha reaches zero ${alpha.hi} from a camera up to ${drift.toFixed(0)} off centre, past an edge of ${sheets.near.edge}`,
+      ).toBeLessThanOrEqual(sheets.near.edge);
       expect(alpha.lo).toBeLessThan(alpha.hi);
       view.dispose();
     }
   });
 
-  it('flattens the swell inside the sheet too, so no wave is cut off mid-crest', () => {
-    for (const tier of TEXTURE_TIERS) {
+  it('flattens the swell over the same band, so no wave outlives its own sheet', () => {
+    // ONE RAMP. The swell used to finish flattening before the sheets
+    // began swapping, which left a ring of flat glass between the wave
+    // zone and the far sheet — the "edging" Joshua called too small and
+    // hard. Sharing the band is what removes it, so the two being equal
+    // is the fix rather than a tidiness.
+    for (const tier of DETAIL_TIERS) {
       const { sheets, view } = sheetsOf(tier);
-      const rim = bandIn(sheets.near.vertex, 'length(position.xz)');
+      const rim = bandIn(sheets.near.vertex, 'fromEye)');
+      const alpha = bandIn(sheets.near.fragment, 'vSheet)');
       expect(rim, `${tier}: the near sheet's swell is never faded`).not.toBeNull();
-      if (rim !== null) {
-        expect(rim.hi, `${tier}: the swell flattens at ${rim.hi}, past an edge of ${sheets.near.edge}`)
-          .toBeLessThanOrEqual(sheets.near.edge);
+      if (rim !== null && alpha !== null) {
+        expect(rim.lo, tier).toBeCloseTo(alpha.lo, 6);
+        expect(rim.hi, tier).toBeCloseTo(alpha.hi, 6);
       }
       view.dispose();
     }
   });
 
   it('OPENS THE FAR SHEET BEFORE THE NEAR ONE HAS GONE — the gap itself', () => {
-    // THE INVARIANT, and the only one that would have caught the bug on
-    // its own. Walk outwards. At every radius, at least one sheet must be
-    // drawing opaque water: the near sheet while its alpha is above zero
-    // AND it still has vertices out there, or the far sheet once its hole
-    // has closed. A radius where both are transparent is a hole in the
-    // ocean, and that is what Joshua saw.
-    for (const tier of TEXTURE_TIERS) {
+    // THE INVARIANT, and the only one that would have caught the gap on
+    // its own. Walk outwards from the camera. At every radius at least
+    // one sheet must be drawing: the near sheet while its alpha is above
+    // zero AND it still has geometry out there, or the far sheet once its
+    // hole has closed. A radius where both are transparent is a hole in
+    // the ocean, and that is what Joshua saw.
+    for (const tier of DETAIL_TIERS) {
       const { sheets, view } = sheetsOf(tier);
       const nearOut = bandIn(sheets.near.fragment, 'vSheet)');
       const holeIn = bandIn(sheets.far.fragment, 'distance(vLocal, uHoleLocal)');
       expect(nearOut).not.toBeNull();
       expect(holeIn).not.toBeNull();
       if (nearOut === null || holeIn === null) { view.dispose(); continue; }
+      // BOTH ARE MEASURED FROM THE CAMERA, so they are complements only
+      // if they are the same band. They were the same POINT before and
+      // the same band; either half drifting is a ring of doubled water
+      // on one side and none on the other.
+      expect(holeIn.lo, `${tier}: the hole opens somewhere the near sheet does not close`).toBeCloseTo(nearOut.lo, 6);
+      expect(holeIn.hi, tier).toBeCloseTo(nearOut.hi, 6);
 
+      const drift = worstDrift(tier, view);
       const smoothstep = (lo: number, hi: number, x: number): number => {
         const t = Math.min(1, Math.max(0, (x - lo) / (hi - lo)));
         return t * t * (3 - 2 * t);
       };
       const holes: string[] = [];
-      const step = Math.max(1, Math.round(sheets.near.edge / 400));
+      const covered = sheets.near.edge - drift;
+      const step = Math.max(1, Math.round(covered / 400));
       for (let r = 0; r <= sheets.far.edge; r += step) {
-        // The near sheet only covers r while it HAS geometry there.
-        // The near sheet is only guaranteed to cover a full circle out to
-        // its nearest side; past that it exists in the corners only, and
-        // corners are not something to rely on for coverage.
-        const near = r <= sheets.near.edge ? 1 - smoothstep(nearOut.lo, nearOut.hi, r) : 0;
+        const near = r <= covered ? 1 - smoothstep(nearOut.lo, nearOut.hi, r) : 0;
         const far = smoothstep(holeIn.lo, holeIn.hi, r);
         if (near + far < 0.5) holes.push(`${r} (near ${near.toFixed(2)}, far ${far.toFixed(2)})`);
       }
@@ -876,16 +918,72 @@ describe('there is no distance at which the sea draws nothing', () => {
     }
   });
 
-  it('gives the swell most of the sheet, which is why the ocean is not glass', () => {
-    // The band may not creep inward to buy itself margin: v0's first cut
-    // flattened everything past 34 m and the sea read as glass, because
-    // the water actually being LOOKED at is the middle distance. Waves
-    // must still reach at least two thirds of the way out.
-    for (const tier of TEXTURE_TIERS) {
+  it('MEASURES THE FADE FROM THE CAMERA, and follows it between anchors', () => {
+    // Joshua, 2026-09-06: "When moving close and out, it changes the
+    // water for example and makes not stay the same location."
+    //
+    // The cause was that the fade was measured from the SHEET, and the
+    // sheet only re-anchors once the camera has crossed an eighth of its
+    // span. So the wave zone sat still while he moved and then jumped a
+    // whole step. What has to be true now is that the fade's centre moves
+    // EVERY frame even on the frames the geometry deliberately does not —
+    // which is exactly the case a test has to construct, because it is
+    // the case that used to look correct.
+    const { view } = ocean('high');
+    const near = view.group.children[1] as THREE.Mesh;
+    const shader = { uniforms: {} as Record<string, { value: unknown }>, vertexShader: STUB.vertex, fragmentShader: STUB.fragment };
+    const material = near.material as THREE.MeshStandardMaterial;
+    (material.onBeforeCompile as unknown as (sh: typeof shader) => void)(shader);
+    // It has to be spent from the camera in the SOURCE too, or the
+    // uniform is a number the shader never reads.
+    expect(shader.vertexShader).toContain('length(position.xz - uEye)');
+
+    const eye = shader.uniforms.uEye.value as THREE.Vector2;
+    view.update(OFFSHORE);
+    const anchored = { x: near.position.x, z: near.position.z };
+    const first = eye.clone();
+    expect(first.x).toBeCloseTo(OFFSHORE.wx - anchored.x, 6);
+
+    // A step far too small to re-anchor a sheet 20 km across: the
+    // geometry must NOT move, and the fade's centre must.
+    const nudged = world(OFFSHORE.wx + 130, OFFSHORE.wz - 90);
+    view.update(nudged);
+    expect(near.position.x, 'the sheet re-anchored, so this proves nothing').toBe(anchored.x);
+    expect(near.position.z).toBe(anchored.z);
+    expect(eye.x).toBeCloseTo(first.x + 130, 6);
+    expect(eye.y).toBeCloseTo(first.y - 90, 6);
+    view.dispose();
+  });
+
+  it('fades over a RAMP, not an edge — at least half the reach wide', () => {
+    // What Joshua asked for on 2026-09-06, stated as a number: "the
+    // edging is too small and hard". v0's ramp was 21% of the reach and
+    // read as a soft-edged disc from altitude. A ramp that is most of
+    // the radius cannot read as the boundary of anything.
+    for (const tier of DETAIL_TIERS) {
       const { sheets, view } = sheetsOf(tier);
-      const rim = bandIn(sheets.near.vertex, 'length(position.xz)');
-      if (rim !== null) expect(rim.lo / sheets.near.edge, tier).toBeGreaterThan(0.66);
+      const band = bandIn(sheets.near.fragment, 'vSheet)');
+      if (band !== null) {
+        expect((band.hi - band.lo) / band.hi, `${tier}: the ramp is only this much of the reach`).toBeGreaterThanOrEqual(0.5);
+      }
       view.dispose();
     }
   });
-});
+
+  it('still gives the swell the near water, which is why the ocean is not glass', () => {
+    // The other side of the same dial, and the reason it cannot simply
+    // be widened until the disc vanishes. v0's FIRST cut flattened
+    // everything past 34 m and the sea read as glass, because the water
+    // actually being looked at is the middle distance. The ramp may
+    // start no later than v0's own 72% — and no EARLIER than 25%, or
+    // full-height waves would be confined to the few metres around her.
+    for (const tier of DETAIL_TIERS) {
+      const { sheets, view } = sheetsOf(tier);
+      const band = bandIn(sheets.near.fragment, 'vSheet)');
+      if (band !== null) {
+        expect(band.lo / band.hi, `${tier}: the ramp starts here`).toBeGreaterThanOrEqual(0.25);
+        expect(band.lo / band.hi, tier).toBeLessThanOrEqual(0.72);
+      }
+      view.dispose();
+    }
+  });});

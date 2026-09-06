@@ -166,6 +166,27 @@ export interface WaterLookOpts {
     readonly alphaLo: number; readonly alphaHi: number;
   };
   /**
+   * MEASURE THE FADE FROM THE CAMERA, not from the sheet's own middle.
+   *
+   * The sheet re-anchors on a hysteresis — it only moves once the camera
+   * has crossed an eighth of its span — so between anchors the camera
+   * drifts away from the middle and comes back. With the fade centred on
+   * the SHEET, the wave zone therefore sits still while the player moves
+   * and then jumps a whole recentre step. Joshua, 2026-09-06: "When
+   * moving close and out, it changes the water for example and makes not
+   * stay the same location."
+   *
+   * `setEye` is a uniform written every frame, which costs nothing; the
+   * GEOMETRY still re-anchors on the hysteresis, because that is what
+   * refills 82,369 depths. So the expensive thing keeps its steps and the
+   * visible thing stops having any.
+   *
+   * The caller pays for it in reach: the band has to finish inside the
+   * sheet measured from wherever the camera has drifted to, not from the
+   * middle. `OceanView` subtracts that drift before it sizes the band.
+   */
+  readonly eyeCentred?: boolean;
+  /**
    * The FAR sheet opens a hole under the near sheet — alpha rises from
    * nothing at `lo` of distance from the hole's centre to full by `hi`,
    * the exact complement of the near sheet's alpha rim.
@@ -215,6 +236,12 @@ export interface WaterLook {
    * here — a world hole set alone would fade the wrong band.
    */
   setHole(wx: number, wz: number): void;
+  /**
+   * Where the camera is, so the fade can be measured from it. World
+   * coordinates in; the shader is handed the offset from this sheet.
+   * A no-op on a sheet built without `eyeCentred`.
+   */
+  setEye(wx: number, wz: number): void;
   /** How far foam keeps its detail, and where it is gone. */
   readonly foamNear: { value: number };
   readonly foamFar: { value: number };
@@ -319,6 +346,20 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
   const refreshHole = (): void => {
     holeLocal.value.set(holeWorld.x - centreWorld.x, holeWorld.z - centreWorld.z);
   };
+  /**
+   * The camera in this sheet's own frame — the point the fade is measured
+   * from when `eyeCentred` is set, and the origin when it is not.
+   *
+   * Subtracted on the CPU in float64 like everything else that crosses
+   * this seam: both ends are world positions in the millions and the GPU
+   * is handed only what is left. See `centrePhases`.
+   */
+  const eyeLocal = { value: new THREE.Vector2() };
+  let eyeWorld = { x: 0, z: 0 };
+  const refreshEye = (): void => {
+    if (opts.eyeCentred !== true) return;
+    eyeLocal.value.set(eyeWorld.x - centreWorld.x, eyeWorld.z - centreWorld.z);
+  };
   const foamNear = { value: FOAM_NEAR };
   const foamFar = { value: FOAM_FAR };
   const octaves = Math.max(1, Math.min(MAX_OCTAVES, Math.round(opts.octaves ?? MAX_OCTAVES)));
@@ -412,6 +453,7 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
     shader.uniforms.uSky = { value: sky };
     shader.uniforms.uHole = hole;
     shader.uniforms.uHoleLocal = holeLocal;
+    shader.uniforms.uEye = eyeLocal;
     shader.uniforms.uFoamNear = foamNear;
     shader.uniforms.uFoamFar = foamFar;
     // The sea's live amplitudes — where wave groups live. Shared by both
@@ -425,7 +467,7 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
 
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>',
-        '#include <common>\n attribute float depth;\n attribute vec2 flow;\n varying float vDepth;\n varying vec2 vLocal;\n varying vec2 vFlow;\n uniform vec2 uCentre;'
+        '#include <common>\n attribute float depth;\n attribute vec2 flow;\n varying float vDepth;\n varying vec2 vLocal;\n varying vec2 vFlow;\n uniform vec2 uCentre;\n uniform vec2 uEye;'
         + (swell ? `\n varying vec2 vSwell;\n varying float vSheet;\n uniform float uTime;\n ${opts.swell.swellUniformChunk()}` : ''))
       .replace('#include <begin_vertex>',
         '#include <begin_vertex>\n vDepth = depth;\n vFlow = flow;\n vLocal = vec2(position.x, position.z);'
@@ -440,8 +482,12 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
           vec2 localXZ = vLocal;
           ${opts.swell.swellChunk()}
           ${opts.swell.shoalChunk()}
+          // HOW FAR THIS VERTEX IS FROM THE PLAYER, not from the sheet's
+          // middle — one subtraction, and the difference between a wave
+          // zone that follows her and one that sits still and then jumps.
+          float fromEye = length(position.xz - uEye);
           float swFade = shoal
-            * (1.0 - smoothstep(${swell.rimLo.toFixed(1)}, ${swell.rimHi.toFixed(1)}, length(position.xz)));
+            * (1.0 - smoothstep(${swell.rimLo.toFixed(1)}, ${swell.rimHi.toFixed(1)}, fromEye));
           // …and a trough never cuts below the bed. Without this the
           // sheet drives through the sand in the shallows, which reads as
           // z-fighting because it IS the sheet and the seabed trading
@@ -449,7 +495,7 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
           float lift = max(sw * swFade, -max(0.0, depth - ${KEEL.toFixed(1)}));
           transformed.y += lift;
           vSwell = swSlope * swFade;
-          vSheet = length(position.xz);
+          vSheet = fromEye;
         }` : ''));
 
     // The ripple field is computed ONCE, in map_fragment (which three
@@ -695,6 +741,7 @@ ${rippleChunk(octaves, advected)}
     wavePhase.value = opts.swell.centrePhases(wx, wz);
     fillOct(wx, wz);
     refreshHole();
+    refreshEye();
   };
 
   /**
@@ -707,5 +754,10 @@ ${rippleChunk(octaves, advected)}
     refreshHole();
   };
 
-  return { material, clock, centre, setCentre, hole, setHole, foamNear, foamFar, octaves, advected };
+  const setEye = (wx: number, wz: number): void => {
+    eyeWorld = { x: wx, z: wz };
+    refreshEye();
+  };
+
+  return { material, clock, centre, setCentre, hole, setHole, setEye, foamNear, foamFar, octaves, advected };
 }

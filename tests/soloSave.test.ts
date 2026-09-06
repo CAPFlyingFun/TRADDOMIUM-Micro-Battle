@@ -22,10 +22,21 @@ describe('SoloSave document', () => {
 
   it('clamps every camera number to the island and reads garbage as the default pose', () => {
     expect(sanitizeCameraPose(pose, DEFAULT_CAMERA_POSE)).toEqual(pose);
-    expect(sanitizeCameraPose({ at: { wx: 1e9, wz: -1e9 }, height: -5, yaw: 100, pitch: 9 }, DEFAULT_CAMERA_POSE)).toEqual({
-      at: { wx: ISLAND_SPAN / 2, wz: -ISLAND_SPAN / 2 }, height: 0, yaw: Math.PI * 2, pitch: Math.PI / 2,
+    expect(sanitizeCameraPose({ at: { wx: 1e9, wz: -1e9 }, height: -1e12, yaw: 100, pitch: 9 }, DEFAULT_CAMERA_POSE)).toEqual({
+      at: { wx: ISLAND_SPAN / 2, wz: -ISLAND_SPAN / 2 }, height: -ISLAND_SPAN, yaw: Math.PI * 2, pitch: Math.PI / 2,
     });
     expect(sanitizeCameraPose({ at: { wx: 'far', wz: Number.NaN }, height: 'up' }, DEFAULT_CAMERA_POSE)).toEqual(DEFAULT_CAMERA_POSE);
+  });
+
+  it('KEEPS AN UNDERWATER POSE, because under the sea is a place', () => {
+    // The height clamp used to floor at zero, so saving while under the
+    // water and resuming put the player ON it — the game quietly moving
+    // them rather than putting them back. Kauaʻi's seabed reaches 66 m
+    // down inside the shipped survey and `sea/underwaterLook.ts` makes
+    // that somewhere to be, so a negative height is a real pose and not
+    // a corrupt one.
+    const under = { at: world(-2_120_000, -500_000), height: -300, yaw: 0, pitch: -0.2 };
+    expect(sanitizeCameraPose(under, DEFAULT_CAMERA_POSE)).toEqual(under);
     expect(sanitizeCameraPose(null, DEFAULT_CAMERA_POSE)).toEqual(DEFAULT_CAMERA_POSE);
   });
 
