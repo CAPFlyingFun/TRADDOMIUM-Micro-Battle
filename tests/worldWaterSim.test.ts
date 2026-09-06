@@ -648,6 +648,44 @@ describe('D8 on a real slice of Kauaʻi', () => {
     expect(wetOffChannel).toBeGreaterThan(0);
     expect(bytes(beds(sim))).toEqual(bedBefore);
   });
+
+  it('CARRIES TWICE THE WATER ON TWICE THE BASEFLOW — the doubling Joshua asked for', () => {
+    // Joshua, 2026-09-06: "Can you double the water amount/volume on the
+    // island?" The scene answers by doubling BASEFLOW_PER_SECOND, and
+    // that answer is only true if the water in the window is LINEAR in
+    // the feed. It very nearly is, and the two reasons it is not exactly
+    // are both worth the test noticing:
+    //
+    //  - SOAK is a flat subtraction from every wet cell, so it is a
+    //    smaller FRACTION of a bigger feed. That pushes the ratio above
+    //    two.
+    //  - The open rim sheds more when there is more to shed, which pulls
+    //    it back down.
+    //
+    // Measured here at 2.15x, and on the island's own valleys at 2.07x.
+    // The band is wide enough to survive re-tuning soak or the rim and
+    // narrow enough that a CAP on depth — the obvious wrong fix for the
+    // flood a valley floor reaches — would fail it.
+    const channels = channelMask(bed, n, cell);
+    const held = (baseflowPerSecond: number): number => {
+      const sim = new WaterSim({ n, cell, soak: 0.3, drainRim: true });
+      sim.placeAt(WAIMEA, (at) => {
+        const cx = Math.round((at.wx - (WAIMEA.wx - (n * cell) / 2)) / cell);
+        const cy = Math.round((at.wz - (WAIMEA.wz - (n * cell) / 2)) / cell);
+        return bed[Math.min(n - 1, Math.max(0, cy)) * n + Math.min(n - 1, Math.max(0, cx))];
+      });
+      run(sim, 1_000, { rainPerSecond: 0, baseflowPerSecond, channels });
+      let sum = 0;
+      const grid = sim.grid();
+      for (let i = 0; i < n * n; i += 1) sum += grid.depth[i];
+      return sum;
+    };
+    const single = held(6);
+    const doubled = held(12);
+    expect(single).toBeGreaterThan(0);
+    expect(doubled / single).toBeGreaterThan(1.7);
+    expect(doubled / single).toBeLessThan(2.4);
+  });
 });
 
 /**

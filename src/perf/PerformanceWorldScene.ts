@@ -420,41 +420,58 @@ const RESUME_CLEARANCE = 3_000;
  * else, and it never stops. Rain is the other feed and falls on
  * everything, only while it is falling.
  *
- * MEASURED at 256 cells, ten simulated seconds, at two real places on
- * the island — a steep headwater and a flat coastal valley floor — as
- * the share of the window drawn wet:
+ * DOUBLED FROM 6 ON JOSHUA'S ASK (2026-09-06: "Can you double the water
+ * amount/volume on the island? Doesn't appear like a lot of water").
+ * Volume is LINEAR in this number and the doubling is real: measured
+ * 2.07x the water in the window at every moment either site was sampled.
  *
- *              Wailua headwater      Hanalei mouth
- *   baseflow      (steep)              (flat)
- *      1        0.01%  0.05 m        12.15%  0.29 m
- *      3        0.07%  0.17 m        27.07%  0.52 m
- *      6        0.43%  0.30 m        34.48%  0.80 m
- *     12        0.77%  0.56 m        40.69%  1.35 m
+ * MEASURED at the shipped window (256 cells, 1 m, soak 0.3, open rim) at
+ * two channel cells the coarse drainage marks, named by coordinate so
+ * the numbers can be reproduced rather than believed:
  *
- * NO SINGLE RATE SUITS BOTH, and the reason is not the rate. THE
- * SOLVER'S WINDOW HAS A CLOSED RIM — `sim.ts` forces the outflow of
- * every edge cell to zero — so water that enters can never leave, and
- * each catchment fills until SOAK alone balances the feed. The
- * equilibrium is therefore a pond whose AREA is set by the soak rate,
- * not a stream whose depth is set by its discharge. On steep ground the
- * balance is reached in a few cells; on a flat valley floor it takes a
- * third of the window.
+ *   A  world(552344, -1667969)   1 m altitude  — Hanalei valley floor
+ *   B  world(809375,  -196875) 446 m altitude  — Wailua headwater
  *
- * 6 is the compromise, chosen so that real valleys visibly carry water
- * rather than so that the coast does not flood — an island where you
- * cannot find a stream reads as broken, and one whose floodplain is too
- * wet reads as a floodplain. It is not a good number and it is the best
- * one available while the rim is closed.
+ * Share of the window drawn wet (depth >= `DRAWN_DEPTH`), and the water
+ * standing in it, against simulated seconds since the window was placed:
  *
- * THE FIX IS THE RIM, not this constant. An open boundary — the outside
- * neighbour taken as the ground's own slope continued, holding no water
- * — lets a window shed downstream like the cut-out of an island it is.
- * That was tried here and reverted: it is a change to the solver's
- * physics that invalidates seven of its tests, all of which encode the
- * closed tub, and rewriting them under time pressure is how a solver
- * quietly stops solving. It is the next piece of work, not a patch.
+ *            10s      30s      60s     120s     300s     600s
+ *   A  bf 6  22.2%    36.2%    47.7%    63.1%    77.2%    81.7%
+ *   A  bf 12 26.9%    45.7%    59.9%    77.1%    92.3%    93.0%
+ *   B  bf 6   7.2%     8.6%     9.3%     9.7%     9.9%     9.9%
+ *   B  bf 12 10.1%    11.8%    13.1%    14.6%    16.3%    16.7%
+ *
+ * TWO THINGS IN THAT TABLE CORRECT WHAT USED TO BE WRITTEN HERE.
+ *
+ * The rim is OPEN, not closed. `WaterSimOptions.drainRim` defaults true
+ * and this window takes the default, so the ring one cell wide sheds
+ * what it would have sent into ground that is not simulated — measured,
+ * it is half the water: at 60 s site B holds 31,294 m³ with the rim open
+ * against 59,636 m³ with it shut. The comment that stood here said water
+ * that enters can never leave. It leaves.
+ *
+ * And the window does NOT settle in ten seconds. It settles in five
+ * MINUTES, and the equilibrium on a valley floor is a flood: 82% of the
+ * window under water at the old rate, 93% at this one. Ten seconds is
+ * 27% of the way there at site A. So the number this constant was tuned
+ * against was never the equilibrium — it was the transient a player
+ * actually meets, and that is the honest thing to tune against here,
+ * because A PLAYER IN MOTION ONLY EVER SEES THE TRANSIENT: the window
+ * re-anchors every eight metres and the ground ahead of her arrives dry,
+ * so at flying speed no cell has more than about eight seconds of
+ * simulation on it. The flood is what a player standing still for five
+ * minutes in one valley would eventually be standing in, and it is the
+ * cost of a feed sized for a catchment the window cannot see. It is
+ * recorded here rather than capped, because a cap would be a second
+ * answer to how deep water gets, argued from a look.
+ *
+ * WHAT THIS CONSTANT CANNOT FIX, and the reason the island reads dry
+ * from the air whatever it is set to: the near tier is 256 m across and
+ * Kauaʻi is 56 km. Everything past the window is not thin water, it is
+ * NO water. The far tier — the surveyed ribbons of `water/hydro.ts` —
+ * is what puts rivers in the distance, and it is not built yet.
  */
-const BASEFLOW_PER_SECOND = 6;
+const BASEFLOW_PER_SECOND = 12;
 
 /**
  * THE DEPTH BUFFER, AND WHY THE NEAR PLANE MOVES.

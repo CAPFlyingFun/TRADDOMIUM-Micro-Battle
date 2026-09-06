@@ -125,15 +125,27 @@ const DRAWN_DEPTH = 2;
  * Simulated seconds to run the window forward when it is first placed,
  * so a player who walks up to a river finds a river.
  *
- * MEASURED on the North Fork Wailua at the shipped baseflow and window:
- * 0.77% of the window wet and 0.56 m at its deepest by TEN seconds, and
- * the same numbers at 30 and at 60. The water is not still arriving
- * after ten seconds; it has settled.
+ * TEN SECONDS IS NOT THE SETTLED STATE, and the comment that used to
+ * stand here said it was. Measured at the shipped window and rate over
+ * two marked channel cells (the table on the scene's
+ * `BASEFLOW_PER_SECOND`), a valley floor goes on filling for five
+ * MINUTES and equilibrates at 93% of the window under water; ten seconds
+ * is a quarter of the way there. The old claim — same numbers at 10, 30
+ * and 60 — held at one headwater site and was written as though it held
+ * everywhere.
+ *
+ * TEN SECONDS IS RIGHT ANYWAY, for a reason that survives the
+ * correction: IT IS WHAT A MOVING PLAYER SEES. The window re-anchors
+ * every `RECENTRE_CELLS` metres and the strip ahead of her arrives dry,
+ * so at the flying speed this scene allows no ground carries much more
+ * than eight seconds of simulation before it leaves again. Priming to
+ * ten puts the loading screen's water where travel keeps it. Priming to
+ * the equilibrium would show her, once, a valley she can never reach
+ * again by walking into it — and cost half a minute of loading to do it.
  *
  * SIXTY WAS THE FIRST ANSWER AND IT WAS MEASURED AT THE WRONG NUMBERS —
- * a looser channel threshold, a 128 m window. Re-measured at what
- * actually ships, ten seconds does the whole job for a sixth of the
- * cost: 770 ms against 4.6 s at 256².
+ * a looser channel threshold, a 128 m window. At what actually ships,
+ * ten costs a sixth as much: 770 ms against 4.6 s at 256².
  *
  * IT HAPPENS BEHIND THE LOADING SCREEN, once, like the ocean's first
  * sheet fill and for the same reason: `prime` is called by the scene
