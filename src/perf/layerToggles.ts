@@ -17,12 +17,14 @@ import { WORLD_LAYERS, type WorldLayerId } from '../world/WorldLoader';
  * Grows with the world plan: the phase that adds a layer to the perf world
  * adds its id here, and the HUD row comes alive on its own.
  *
- * `terrain` was added in Phase 2, `ocean` in Phase 3 and `freshwater` in
- * Phase 4, each in the same commit that made its toggle real — a layer
- * listed here before it draws anything is a control that looks
+ * `terrain` was added in Phase 2, `ocean` in Phase 3, `freshwater` in
+ * Phase 4 and `vegetation` in Phase 6 (the world objects: grass, twigs,
+ * stones, rocks and trees — the toggle's name is the plan's, and rocks
+ * ride under it), each in the same commit that made its toggle real —
+ * a layer listed here before it draws anything is a control that looks
  * functional and is not (§2.9).
  */
-export const BUILT_LAYERS: readonly WorldLayerId[] = ['terrain', 'ocean', 'freshwater'];
+export const BUILT_LAYERS: readonly WorldLayerId[] = ['terrain', 'ocean', 'freshwater', 'vegetation'];
 
 export interface LayerToggle {
   readonly id: WorldLayerId;

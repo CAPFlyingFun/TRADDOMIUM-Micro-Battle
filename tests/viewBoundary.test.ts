@@ -52,11 +52,13 @@ const actor = dir('src/actor');
 const view = dir('src/view');
 const terrain = dir('src/terrain');
 const sea = dir('src/sea');
+const flora = dir('src/flora');
 
 const actorSites = [...actor].flatMap(([f, src]) => importsOf(f, src));
 const viewSites = [...view].flatMap(([f, src]) => importsOf(f, src));
 const terrainSites = [...terrain].flatMap(([f, src]) => importsOf(f, src));
 const seaSites = [...sea].flatMap(([f, src]) => importsOf(f, src));
+const floraSites = [...flora].flatMap(([f, src]) => importsOf(f, src));
 
 const VIEW_DIR = /(^|\/)view(\/|$)/;
 const ORIGIN = /(^|\/)world\/origin$/;
@@ -246,6 +248,73 @@ describe('the world/sea seam', () => {
 
   it('never imports actor/ or view/: the water does not know who is swimming in it', () => {
     const offenders = seaSites.filter((s) => ACTOR_DIR.test(s.specifier) || VIEW_DIR.test(s.specifier));
+    expect(offenders.map((s) => `${s.file}: ${s.statement}`)).toEqual([]);
+  });
+});
+
+
+/**
+ * THE FOURTH RENDERER (ARCHITECTURE §3, amended 2026-09-06 with `flora/`).
+ *
+ * `flora/` draws the world's objects — the grass, twigs, stones, rocks
+ * and trees `world/objects/` places. Like the sea it has a genuine use
+ * for world coordinates that is not the mesh's placement: an object's
+ * distance from the camera is a WORLD distance (world minus world), and
+ * the populator hands it world positions in float64 because a local
+ * position stored anywhere is the bug the whole coordinate system exists
+ * to prevent. So it is held to the sea's sharpened rule: a world
+ * coordinate it reads goes back into another world coordinate or through
+ * `toLocal`, in ONE file, and the geometry bakes touch none at all.
+ */
+describe('the world/flora seam', () => {
+  it('has a flora renderer to check', () => {
+    expect([...flora.keys()]).toEqual(expect.arrayContaining(['WorldObjects.ts', 'bladeGeometry.ts', 'propGeometry.ts', 'treeGeometry.ts']));
+    expect(floraSites.length).toBeGreaterThan(0);
+  });
+
+  it('never owns a Heightfield or a HabitatMap — it is handed a field and a query', () => {
+    for (const [file, src] of flora) {
+      const body = code(src);
+      expect(body, `${file} constructs a Heightfield`).not.toMatch(/new\s+Heightfield\b/);
+      expect(body, `${file} constructs a HabitatMap`).not.toMatch(/new\s+HabitatMap\b/);
+      expect(body, `${file} decodes the survey`).not.toMatch(/\b(decodeCoarse|decodeVeg|repairGrid)\(/);
+    }
+    const fromField = floraSites.filter((s) => /world\/heightfield$/.test(s.specifier));
+    for (const site of fromField) expect(site.typeOnly, `${site.file} imports the heightfield as a value`).toBe(true);
+  });
+
+  it('seats every instance through toLocal, in WorldObjects alone, and never subtracts an origin by hand', () => {
+    const originImporters = floraSites.filter((s) => ORIGIN.test(s.specifier));
+    expect(originImporters.map((s) => s.file)).toEqual(['WorldObjects.ts']);
+    expect(code(flora.get('WorldObjects.ts') ?? '')).toMatch(/\btoLocal\(/);
+    for (const site of originImporters) expect(site.statement, `${site.file} imports originAt`).not.toMatch(/\boriginAt\b/);
+    // The geometry bakes work in a unit space and read no world coordinate.
+    for (const [file, src] of flora) {
+      if (file === 'WorldObjects.ts') continue;
+      expect(code(src), `${file} reads a world coordinate`).not.toMatch(/\.w[xz]\b/);
+    }
+  });
+
+  it('reads a world coordinate ONLY to measure against another one or to hand it to toLocal', () => {
+    // Every `.wx`/`.wz` line in WorldObjects is a world-minus-world
+    // difference, a world-space comparison for a recentre, a cell
+    // address, the argument of `toLocal`/`world(`/`cellsWithin`, or a
+    // world coordinate being written INTO a scratch WorldPoint that is
+    // handed to the heightfield (`point.wx = c.wx[i]` — building another
+    // WorldPoint without allocating one per blade).
+    const allowed = /\btoLocal\(|\bworld\(|- at\.w[xz]|at\.w[xz] -|\.w[xz] - |wantedAt\.w[xz]|refreshedAt\.w[xz]|wx: at\.wx|wz: at\.wz|Math\.floor\(at\.w[xz]|Number\.isFinite\(at\.w[xz]|wx: batch\.wx|wz: batch\.wz|point\.w[xz] = \w+\.w[xz]\[/;
+    let examined = 0;
+    for (const [i, line] of code(flora.get('WorldObjects.ts') ?? '').split('\n').entries()) {
+      if (!/\.w[xz]\b/.test(line)) continue;
+      examined += 1;
+      expect(allowed.test(line), `WorldObjects.ts:${i + 1} takes a world coordinate apart: ${line.trim()}`).toBe(true);
+    }
+    expect(examined).toBeGreaterThan(0);
+  });
+
+  it('never imports actor/, view/, session/, ui/ or net/: the grass does not know who walks through it', () => {
+    const banned = /(^|\/)(actor|view|session|ui|net)(\/|$)/;
+    const offenders = floraSites.filter((s) => banned.test(s.specifier));
     expect(offenders.map((s) => `${s.file}: ${s.statement}`)).toEqual([]);
   });
 });

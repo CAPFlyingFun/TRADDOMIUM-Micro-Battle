@@ -22,7 +22,7 @@ import { defineStore, memoryKeyValueStore } from '../src/persistence/store';
 import { SettingsPanel, settingAction } from '../src/ui/SettingsPanel';
 import { QUALITY_LEVELS, SETTINGS_SPEC } from '../src/ui/settingsStore';
 import { TIER_FOR_QUALITY, tierFor } from '../src/assets/textureQuality';
-import { DETAIL_FOR_QUALITY, detailFor, waveRadius } from '../src/assets/detailQuality';
+import { DETAIL_FOR_QUALITY, DETAIL_TIERS, detailFor, objectRadius, waveRadius } from '../src/assets/detailQuality';
 import { SHEET_VERTICES, TIER_OCTAVES } from '../src/sea/OceanView';
 
 describe('SettingsPanel quality row', () => {
@@ -112,5 +112,16 @@ describe('SettingsPanel quality row', () => {
     expect(detailSeen.size, 'the detail ladder').toBe(QUALITY_LEVELS.length);
     const texSeen = new Set(QUALITY_LEVELS.map((l) => tierFor(l)));
     expect(texSeen.size, 'the texture ladder').toBe(QUALITY_LEVELS.length);
+  });
+});
+
+describe('the detail ladder\'s two radii', () => {
+  it('puts the world\'s objects exactly as far as the waves at every rung — one radius, two consumers', () => {
+    // Joshua's brief put the object bubble at 100 m on high and asked
+    // that it respect the ladder that already said 100 m. The day a rung
+    // wants them apart, this test is deleted, not loosened.
+    for (const tier of DETAIL_TIERS) expect(objectRadius(tier), tier).toBe(waveRadius(tier));
+    expect(objectRadius('high')).toBe(10_000);
+    expect(objectRadius('ultra-high')).toBe(20_000);
   });
 });

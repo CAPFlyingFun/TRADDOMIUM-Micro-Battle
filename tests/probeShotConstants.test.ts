@@ -19,25 +19,28 @@ import { describe, expect, it } from 'vitest';
 import { PERF_WORLD_MAP_ID } from '../src/perf/perfTool';
 import { SOLO_SAVE_KEY, SOLO_SAVE_VERSION } from '../src/session/SoloSave';
 
-const source = readFileSync(path.join(process.cwd(), 'scripts', 'probe-shot.mjs'), 'utf8');
+/** Every probe that seeds a save the way probe-shot does. `probe-objects` copied the trick and the literals. */
+const PROBES = ['probe-shot.mjs', 'probe-objects.mjs'];
 
 /** The value of a `const NAME = '…';` or `const NAME = 2;` in the script. */
-function literal(name: string): string {
+function literal(source: string, file: string, name: string): string {
   const hit = new RegExp(`const ${name} = '?([^';\\n]+)'?;`).exec(source);
-  if (hit === null) throw new Error(`probe-shot.mjs has no const ${name}`);
+  if (hit === null) throw new Error(`${file} has no const ${name}`);
   return hit[1];
 }
 
-describe('probe:shot agrees with the app about where a save lives', () => {
+describe.each(PROBES)('%s agrees with the app about where a save lives', (file) => {
+  const source = readFileSync(path.join(process.cwd(), 'scripts', file), 'utf8');
+
   it('names the same storage key', () => {
-    expect(literal('SAVE_KEY')).toBe(SOLO_SAVE_KEY);
+    expect(literal(source, file, 'SAVE_KEY')).toBe(SOLO_SAVE_KEY);
   });
 
   it('names the same save version', () => {
-    expect(Number(literal('SAVE_VERSION'))).toBe(SOLO_SAVE_VERSION);
+    expect(Number(literal(source, file, 'SAVE_VERSION'))).toBe(SOLO_SAVE_VERSION);
   });
 
   it('names the same world, which is the one that already caught this', () => {
-    expect(literal('MAP_ID')).toBe(PERF_WORLD_MAP_ID);
+    expect(literal(source, file, 'MAP_ID')).toBe(PERF_WORLD_MAP_ID);
   });
 });

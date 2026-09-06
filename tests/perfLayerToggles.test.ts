@@ -14,13 +14,13 @@ describe('LayerToggles', () => {
     expect(rows.every((r) => !r.enabled)).toBe(true);
   });
 
-  it('this build has terrain, ocean and freshwater, and the unbuilt rows cannot be switched on', () => {
-    // Phase 2 made `terrain` real, Phase 3 `ocean` and Phase 4
-    // `freshwater`; every layer after them is still a row that reads
+  it('this build has terrain, ocean, freshwater and vegetation, and the unbuilt rows cannot be switched on', () => {
+    // Phase 2 made `terrain` real, Phase 3 `ocean`, Phase 4 `freshwater`
+    // and Phase 6 `vegetation`; every other layer is still a row that reads
     // "not built" and refuses to come on, which is §2.9 — an unavailable
     // action must never look functional. Each name arrives in the commit
     // that makes ITS toggle draw something, and not before.
-    expect(BUILT_LAYERS).toEqual(['terrain', 'ocean', 'freshwater']);
+    expect(BUILT_LAYERS).toEqual(['terrain', 'ocean', 'freshwater', 'vegetation']);
     const built = new Set<string>(BUILT_LAYERS);
     const toggles = new LayerToggles(BUILT_LAYERS);
     for (const row of toggles.list()) {

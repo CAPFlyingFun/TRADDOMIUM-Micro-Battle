@@ -24,6 +24,7 @@ import { SPAWN_MAP_SCENE_ID, createSpawnMapScene } from '../map/SpawnMapScene';
 import type { SpawnCandidate } from '../world/spawn';
 import type { CameraPose } from '../session/GameSession';
 import { fetchCoarseDem } from '../assets/demSource';
+import { fetchVeg } from '../assets/vegSource';
 import { TIER_QUERY_PARAM, isTextureTier, type TextureTier } from '../assets/textureQuality';
 import { DETAIL_QUERY_PARAM, isDetailTier, type DetailTier } from '../assets/detailQuality';
 import { PERF_WORLD_MAP_ID, PERF_WORLD_SCENE_ID, perfWorldTool } from '../perf/perfTool';
@@ -310,12 +311,21 @@ export interface RegisterScenesOptions {
    * backoff. Pass a function to serve it from somewhere else.
    */
   readonly survey?: SurveySource | null;
+  /**
+   * Where the landcover raster comes from. Same three answers as the
+   * survey; defaults to the deployed file, and to nothing when the
+   * survey is `null` — there is nothing to grow on without terrain.
+   */
+  readonly landcover?: SurveySource | null;
 }
 
 export function registerScenes(options: RegisterScenesOptions = {}): void {
   const survey: SurveySource | undefined = options.survey === null
     ? undefined
     : options.survey ?? ((onBytes) => fetchCoarseDem({ onBytes }));
+  const landcover: SurveySource | undefined = options.landcover === null || options.survey === null
+    ? undefined
+    : options.landcover ?? ((onBytes) => fetchVeg({ onBytes }));
   // Front door. Every screen here lives in the `menu` app state.
   registerScene(SCREEN_ID.menu, createMainMenuScene(offers, play));
   registerScene(SCREEN_ID.session, createSessionPickerScene(offers, play));
@@ -380,6 +390,8 @@ export function registerScenes(options: RegisterScenesOptions = {}): void {
         // a hook so that constructing it does not reach the network; this
         // is the one place that says the terrain is the deployed files.
         survey,
+        // AND WHAT GROWS ON IT, wired the same way for the same reason.
+        landcover,
         settings: () => openSettings(ctx.storage).read(),
         tierOverride: TIER_OVERRIDE,
         detailOverride: DETAIL_OVERRIDE,

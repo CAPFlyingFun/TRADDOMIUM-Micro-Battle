@@ -81,7 +81,12 @@ src/
                 exists), PlayerProfile (device-local layer first) and
                 playerIdOf().
   world/        terrain / water / weather / vegetation, and WorldLoader.
-                Phase 0 holds only WorldLoader and the empty world.
+                Phase 0 holds only WorldLoader and the empty world. Phase 6
+                adds random.ts (the one stable hash and PRNG), landcover.ts
+                (the ESA WorldCover raster), coast.ts (distance to the
+                sea), habitat.ts (what belongs where) and objects/ (cells,
+                families, the deterministic populator, the per-rung
+                budgets, the world seed and the delta seam).
   actor/        Player{Transform, Vitals, GroundLocomotion, Flight,
                 SurfaceGrip, Rig} composed from small pure modules.
                 Phase 1 holds the contracts: ActorId, PlayerId,
@@ -102,6 +107,14 @@ src/
                 SeaTextures (the ripple and foam maps, loaded once and
                 shared). What terrain/ is to the ground, this is to
                 world/sea/. Added in Phase 3.
+  flora/        the world objects' renderer: WorldObjects (the bubble of
+                grass, twigs, stones, rocks and trees that streams by
+                16 m cell after the camera and draws as a dozen
+                InstancedMeshes), the blade (Joshua's 2022 OBJ, inlined),
+                the procedural tree (v0's treeMesh, three shapes), rocks
+                and twigs. What terrain/ is to world/heightfield and sea/
+                to world/sea, this is to world/objects: the only place a
+                populated cell meets a mesh. Added in Phase 6.
   camera/       FollowCamera + CameraOwnership. Phase 0 has FreeFlyCamera
                 only (under perf/).
   input/        keyboard / pointer / touch (Input.ts, DOM) → one shared
@@ -160,6 +173,8 @@ view → three allowed; it reads ActorState and writes a mesh
 terrain → three, world(heightfield as types, coords, origin, dem, demRepair),
           assets(demSource, for the tiles it streams) — nothing else
 terrain → NEVER actor, view, session, ui (the ground does not know who stands on it)
+flora → three, world(objects, habitat/heightfield as types, coords, origin, random) — nothing else
+flora → NEVER actor, view, session, ui, net (the grass does not know who walks through it)
 actor → NEVER view (a state module does not know what it looks like)
 ui → NEVER world, actor, autonomy, session internals (typed hooks only)
 camera → NEVER actor mode enums (continuous signals only)
@@ -191,6 +206,23 @@ v0 ("world-coordinate uniforms, per-frame place(), y never rebased").
 the ban was a proxy for: every world coordinate it reads goes straight
 to the GPU or straight back into another world coordinate, and the mesh
 still crosses through `origin.toLocal`.
+
+`flora/` was added on 2026-09-06, in Phase 6, for the reason the other
+two renderer directories were. It is held to the sea's sharpened rule
+rather than the `.wx` ban (`tests/viewBoundary.test.ts`): a world
+coordinate it reads goes back into another world coordinate — an
+object's distance from the camera is world minus world — or through
+`origin.toLocal`, in `WorldObjects.ts` alone; the geometry bakes touch
+none. Three decisions Joshua made opening the phase are recorded in the
+code rather than here: ONE fixed world seed for every player and room
+(`world/objects/seed.ts`), the ESA landcover raster as the habitat's
+first input (`world/landcover.ts`), and all-procedural props
+(`flora/propGeometry.ts`). The rule the phase is built on, in his words:
+"Kauaʻi determines what exists. The deterministic world generator
+determines where it exists. Detail Quality determines how much the
+device represents." The detail rung never reaches the populator — it
+sets the bubble's radius and its caps (`world/objects/budget.ts`) and
+nothing else, and a test holds a tree in the same place at every rung.
 
 `net → input(Intent.ts)` was added on 2026-09-04, with the practice bot
 (`net/PracticeBot.ts`): a scripted player's thumbs must speak the ONE
@@ -428,7 +460,7 @@ permanently excluded.
 | 3 Ocean | the accepted look, two-owner water router from day one | `seaSwell.ts`, `surf.ts`, `Ocean.ts`, `waterLook.ts`, `liveSea.ts`, foam probe + `oceanShader` fixture test |
 | 4 Inland water | hydrology bake feeding the local solver; per-reach bed materials; cascade FX; NHDPlus/DLNR names | `drainage.ts`, `islandChannels.ts`, `hydro.ts`, `waterSim.ts`, `nearestWater.ts` |
 | 5 Sky / weather | weather field + live feeds | `weather/*` |
-| 6 Vegetation | deterministic scatter, trunk solids | `GroundCover`, `treeMesh`, `trunkSolid`, `landcover`, `kauai-veg.bin` |
+| **6 Vegetation** | **The biome-aware world-object streamer (2026-09-06).** Three questions answered apart: HABITAT (`world/habitat.ts` — the ESA landcover raster, distance to the sea, the coarse survey's height and slope, the drainage; rainfall and soil as typed seams), WORLD GENERATION (`world/objects/populate.ts` — one fixed seed + a 16 m cell + the habitat → a jittered-lattice, patch-clumped, deterministic population with stable ids on trees and rocks and a `WorldDelta` seam), DETAIL (`world/objects/budget.ts` — the rung's radius and per-family caps, maximums not quotas). Drawn by `flora/WorldObjects.ts` as a camera bubble of instanced meshes, thinned by rank against true 3D distance, feet re-seated on the heightfield's revision; the `vegetation` layer in the perf world with its own HUD lines and `probe:objects`. NOT built, by the brief: climbing, collision, wind, persistence of deltas (the seam exists; nothing writes it), the far vegetation impostor past the bubble | `stableHash` (as `world/random.ts`), `landcover.ts` (reshaped: a class, bilinear class weights), `kauai-veg.bin` verbatim, `treeMesh` (as `flora/treeGeometry.ts`, plus scrub and palm shapes). `GroundCover` and `trunkSolid` were read and not ported: the first never ran in a shipped scene, the second is Phase 7/8's |
 | 7 Player shell | `actor/` composition, `Posture` incl. climbing, camera ownership seam | `locomotion`, `gait`, `pace`, `stamina`, `motion`, `castes`, `FollowCamera` + its boundary test |
 | 8 Ground movement → Flight → Surface traversal | one atomic take-off (`launchInto`), integration test for flight↔climb | `flight.ts`, `wings`, `wingbeat`, `climb.ts`, `surfaceGrip.ts`, `waveClearance`, `wading` |
 | 9 Autonomy / navigation | Intent producer sibling to input | `missionBrain`, `mission`, `autopilot`, `routePlanner`, `wander`, `lookout` + `DRONE_GCS_AUDIT` |

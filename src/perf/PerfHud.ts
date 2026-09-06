@@ -41,6 +41,16 @@ export const HUD_HZ = 5;
 export interface PerfReadout {
   readonly frame: FrameSummary;
   readonly camera: CameraReadout;
+  /**
+   * How far the camera is above the ground under it, world units, when
+   * there is ground to ask. THE FOURTH NUMBER A SHOT NEEDS: x, y and z
+   * put the camera back; this says whether it is standing in the grass
+   * or thirty metres over it, which the y alone cannot — the terrain
+   * streams in at 13.67 m and the survey's coarse guess of the ground is
+   * routinely metres off. `probe:objects` reads it to stand the camera
+   * where a player would.
+   */
+  readonly aboveGround?: number | null;
 }
 
 /**
@@ -128,6 +138,31 @@ export interface FreshReadout {
   readonly cells: number;
 }
 
+/**
+ * What the world's objects cost, and how many of them there are.
+ *
+ * THE COUNTS ARE THE MEASUREMENT (Joshua, 2026-09-06: "see relevant
+ * object counts... object-density/performance probes"). A millisecond
+ * figure alone cannot tell a lawn from a beach; the counts beside the
+ * frame rate are how a device pass says what twenty-five thousand blades
+ * cost, and what the budget should be. `cells` is resident cells with
+ * the cells still queued after a plus, so a stall on arrival can be told
+ * from a stall on the ground.
+ */
+export interface ObjectsReadout {
+  readonly meanMs: number;
+  readonly peakMs: number;
+  readonly cells: number;
+  readonly pending: number;
+  readonly grass: number;
+  readonly twig: number;
+  readonly stone: number;
+  readonly rock: number;
+  readonly tree: number;
+  /** The habitat under the camera, one word. */
+  readonly habitat: string;
+}
+
 export interface PerfHudHooks {
   /** The rows to show. Re-read at every refresh so the checkboxes follow the model, not the clicks. */
   layers(): readonly LayerToggle[];
@@ -147,9 +182,11 @@ export interface PerfHudHooks {
   sea?(): SeaReadout | null;
   /** The island's fresh water. Absent where a world has none. */
   fresh?(): FreshReadout | null;
+  /** The world's objects — grass, twigs, stones, rocks, trees. Absent where a world has none. */
+  objects?(): ObjectsReadout | null;
 }
 
-type Field = 'meanFps' | 'lowFps' | 'simDt' | 'cameraPosition' | 'cameraSpeed' | 'cameraFacing';
+type Field = 'meanFps' | 'lowFps' | 'simDt' | 'cameraPosition' | 'cameraSpeed' | 'cameraFacing' | 'cameraAbove';
 
 const GOLD = '#c9a94a';
 const PARCHMENT = '#e8e2c8';
@@ -240,6 +277,23 @@ function freshWords(fresh: FreshReadout | null): readonly [string, string] {
   ];
 }
 
+/**
+ * The objects' five lines, each no wider than "95th low 30.0 fps": the
+ * cost, the cells, and the counts by family. Two families to a line
+ * where the words are short enough; the HUD's width is the scarcest
+ * thing it has (`probe:bot` measures it against PAUSE).
+ */
+function objectWords(objects: ObjectsReadout | null): readonly [string, string, string, string, string] {
+  if (objects === null) return ['veg      not built', '', '', '', ''];
+  return [
+    `veg ${objects.meanMs.toFixed(1)} pk ${objects.peakMs.toFixed(0)} ms`,
+    `cells ${objects.cells}+${objects.pending} ${objects.habitat.slice(0, 5)}`,
+    `grass ${objects.grass}`,
+    `twig ${objects.twig} st ${objects.stone}`,
+    `rock ${objects.rock} tree ${objects.tree}`,
+  ];
+}
+
 function seaWords(sea: SeaReadout | null): readonly [string, string, string, string] {
   if (sea === null) return ['sea      not built', '', '', ''];
   return [
@@ -265,6 +319,7 @@ export class PerfHud {
   private readonly seaLines: readonly [HTMLElement, HTMLElement, HTMLElement, HTMLElement] | null;
   /** Built only when the owner offers a `fresh()` hook; null otherwise. */
   private readonly freshLines: readonly [HTMLElement, HTMLElement] | null;
+  private readonly objectLines: HTMLElement[] | null;
   private readonly boxes = new Map<WorldLayerId, HTMLInputElement>();
   /** Each layer row's wrapper and its text node, so the label can follow the model. */
   private readonly rows = new Map<string, { wrap: HTMLElement; text: Text }>();
@@ -310,6 +365,7 @@ export class PerfHud {
       cameraPosition: line(camera, 'camera-position'),
       cameraSpeed: line(camera, 'camera-speed'),
       cameraFacing: line(camera, 'camera-facing'),
+      cameraAbove: line(camera, 'camera-above'),
     };
     // UNDER THE FRAME RATE, in the FRAME column, and only where there is
     // a sea to ask about — see `seaWords` for why they are not a column
@@ -326,6 +382,10 @@ export class PerfHud {
     this.freshLines = hooks.fresh === undefined
       ? null
       : [line(frame, 'fresh-cost'), line(frame, 'fresh-wet')];
+    // And the world's objects under those, for the same reason.
+    this.objectLines = hooks.objects === undefined
+      ? null
+      : [line(frame, 'veg-cost'), line(frame, 'veg-cells'), line(frame, 'veg-grass'), line(frame, 'veg-clutter'), line(frame, 'veg-major')];
     // Before LAYERS, which is a column of rows rather than a readout and
     // reads best last.
     if (hooks.session === undefined) {
@@ -429,6 +489,12 @@ export class PerfHud {
     // straight off it without anyone guessing the tilt.
     this.fields.cameraFacing.textContent = `facing ${compassBearing(c.facing)}°  `
       + `pitch ${((c.pitch * 180) / Math.PI).toFixed(0)}°`;
+    // "above —" when there is no ground to ask: an empty world has none,
+    // and printing 0 m there would say the camera was standing on it.
+    const above = readout.aboveGround;
+    this.fields.cameraAbove.textContent = above === undefined || above === null
+      ? 'above —'
+      : `above ${(above / 100).toFixed(1)} m`;
     const session = this.hooks.session?.();
     if (this.sessionLine !== null && session !== undefined) this.sessionLine.textContent = sessionWords(session);
     if (this.seaLines !== null) {
@@ -438,6 +504,10 @@ export class PerfHud {
     if (this.freshLines !== null) {
       const words = freshWords(this.hooks.fresh?.() ?? null);
       for (let i = 0; i < this.freshLines.length; i += 1) this.freshLines[i].textContent = words[i];
+    }
+    if (this.objectLines !== null) {
+      const words = objectWords(this.hooks.objects?.() ?? null);
+      for (let i = 0; i < this.objectLines.length; i += 1) this.objectLines[i].textContent = words[i];
     }
     // THE MODEL IS THE TRUTH, and that includes the WORDS. A click the
     // owner rejected snaps back here — and so does a row whose built-ness

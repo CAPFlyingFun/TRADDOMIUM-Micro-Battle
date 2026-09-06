@@ -160,6 +160,17 @@ imply more than exists; the honest caption is pinned by a test.
   stored, and the HUD's SEA line names the rung actually in use, so a
   typo shows up as the wrong word rather than as a phone that will not
   open.
+- **The world's objects are a function; the rung is a lens** (Joshua,
+  2026-09-06). Where a tree, a rock or a blade stands comes from ONE
+  fixed world seed, its 16 m cell and the habitat — never from
+  `Math.random`, never from a neighbour, never from what streamed in
+  (`world/objects/populate.ts` reads the coarse survey through
+  `world/habitat.ts`; only the FOOT height reads the live heightfield).
+  The detail rung sets the bubble's radius and per-family caps and
+  nothing else: a cap is a maximum, not a quota, and a tree stands in
+  the same place at every rung. Trees and rocks carry stable ids
+  (`tree:cx,cz:site`); a future save stores DELTAS against them, never
+  the generated world.
 - A client-side PIN is a convenience, not security.
 - Every file in `scripts/` is wired to a `package.json` script or listed
   in `scripts/MANUAL.md`.

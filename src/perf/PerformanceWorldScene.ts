@@ -75,15 +75,19 @@ import { TerrainView } from '../terrain/TerrainView';
 import { OceanView, TIER_OCTAVES as OCEAN_OCTAVES } from '../sea/OceanView';
 import { blendSight, underwaterLook } from '../sea/underwaterLook';
 import { IslandWater } from '../water/IslandWater';
+import { WorldObjects } from '../flora/WorldObjects';
+import { HabitatMap } from '../world/habitat';
+import { VEG_BYTES, decodeVeg } from '../world/landcover';
+import { WORLD_SEED } from '../world/objects/seed';
 import { islandChannels, type IslandChannels } from '../world/water/islandChannels';
 import { SkyModel } from '../world/weather/skyModel';
 import { rainToUnitsPerSecond } from '../world/weather/weather';
 import { SeaTextures } from '../sea/SeaTextures';
 import { SeaSwell } from '../world/sea/swell';
 import { resolveTier, tierFor, type TextureTier } from '../assets/textureQuality';
-import { detailFor, resolveDetail, type DetailTier } from '../assets/detailQuality';
+import { detailFor, objectRadius, resolveDetail, type DetailTier } from '../assets/detailQuality';
 import { LoadProgress } from '../world/LoadProgress';
-import { COARSE_BYTES, decodeCoarse } from '../world/dem';
+import { COARSE_BYTES, decodeCoarse, type DemGrid } from '../world/dem';
 import { repairGrid } from '../world/demRepair';
 import { Heightfield, SEA_LEVEL } from '../world/heightfield';
 import { toLocal } from '../world/origin';
@@ -91,7 +95,7 @@ import type { WorldPoint } from '../world/coords';
 import { BotHud, type BotReadout } from './BotHud';
 import { FrameStats } from './FrameStats';
 import { FreeFlyCamera, headingOfYaw, yawForHeading } from './FreeFlyCamera';
-import { HUD_HZ, PerfHud, type FreshReadout, type SeaReadout, type SessionLink, type SessionReadout } from './PerfHud';
+import { HUD_HZ, PerfHud, type FreshReadout, type ObjectsReadout, type SeaReadout, type SessionLink, type SessionReadout } from './PerfHud';
 import { BUILT_LAYERS, LayerToggles } from './layerToggles';
 import { PERF_WORLD_SCENE_ID } from './perfTool';
 
@@ -161,6 +165,14 @@ export interface PerformanceWorldHooks {
    * else gets the empty world, which is what this scene already was.
    */
   survey?(onBytes: (received: number, total: number | null) => void): Promise<ArrayBuffer>;
+  /**
+   * Where the landcover raster comes from — what grows where, from the
+   * real island (`world/landcover.ts`). Same rule as the survey: absent
+   * means no vegetation, and a scene must not reach the network because
+   * it was constructed. Only asked for once the survey has landed; there
+   * is nothing to grow on without it.
+   */
+  landcover?(onBytes: (received: number, total: number | null) => void): Promise<ArrayBuffer>;
   /**
    * The current settings. Read once in `enter()` and again whenever the
    * app state changes — the pause menu is where a player changes them, and
@@ -412,6 +424,20 @@ const NETWORKED_MAX_SPEED = DEBUG_CAPSULE_TUNING.walkSpeed * DEBUG_CAPSULE_TUNIN
 const RESUME_CLEARANCE = 3_000;
 
 /**
+ * How close to the ground a resumed camera may be before it counts as
+ * IN it. Half a metre: the camera's own near plane, plus the coarse
+ * lattice's error against a tile that has not landed yet.
+ *
+ * IT USED TO BE THE CLEARANCE ITSELF. `standClearOfGround` treated
+ * ground + 30 m as a FLOOR, so a player who had landed in the grass to
+ * look at it, quit, and resumed came back thirty metres up — every time,
+ * with no way to save a low pose at all. The comment on the clearance
+ * said "when the save put it underground", and now the code does too.
+ * `probe:objects` found it: its camera could not be stood on the ground.
+ */
+const RESUME_MARGIN = 50;
+
+/**
  * Water into every CHANNEL cell, world units of depth a second.
  *
  * BASEFLOW IS NOT RAIN. A real river runs between storms because
@@ -507,6 +533,8 @@ const MILESTONES = [
   // The 2 MB survey, which dwarfs the rest — the loading bar is mostly
   // this, and it is reported from bytes that actually landed.
   { id: 'terrain', weight: 24 },
+  // The 442 KB landcover raster and the first fill of the object bubble.
+  { id: 'landcover', weight: 5 },
 ] as const;
 
 export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): SceneFactory {
@@ -556,6 +584,18 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
     /** The tier the sea was BUILT at, so a changed setting is noticed once and rebuilt once. */
     let builtTier: TextureTier | null = null;
     let builtDetail: DetailTier | null = null;
+    /**
+     * THE WORLD'S OBJECTS — grass, twigs, stones, rocks, trees — and the
+     * two things they are grown from: the habitat map (what belongs
+     * where, from the landcover raster and the coarse survey, built once
+     * and world-fixed) and the repaired coarse grid it reads.
+     */
+    let coarseGrid: DemGrid | null = null;
+    let habitat: HabitatMap | null = null;
+    let objects: WorldObjects | null = null;
+    let objectsOn = false;
+    /** The rung the bubble was BUILT at: a changed setting is noticed once. */
+    let builtObjectsDetail: DetailTier | null = null;
     /** The air's colour as a colour, so the blend never restates it. */
     const SKY = new THREE.Color(HORIZON);
     /** Whether the eye is under the sea, and the air fog it went under from. */
@@ -715,14 +755,14 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
       if (field === null) return;
       const pose = fly.pose();
       const ground = field.heightAt(pose.at);
-      const floor = ground + RESUME_CLEARANCE;
-      if (pose.height >= floor) {
-        // Already in the open. Its pace still has to suit the island.
+      if (pose.height > ground + RESUME_MARGIN) {
+        // In the open — an ant's eye over the grass included. Its pace
+        // still has to suit the island.
         pace();
         return;
       }
       const local = toLocal(pose.at);
-      placeCamera(local.lx, floor, local.lz, pose.yaw, pose.pitch);
+      placeCamera(local.lx, ground + RESUME_CLEARANCE, local.lz, pose.yaw, pose.pitch);
       pace();
     };
 
@@ -830,6 +870,64 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
     const syncFreshLayer = (): void => {
       freshOn = toggles.isEnabled('freshwater');
       if (fresh !== null) fresh.group.visible = freshOn;
+    };
+
+    /**
+     * Build the object bubble at the detail rung the player has chosen —
+     * or rebuild it when they have chosen a different one.
+     *
+     * THE RUNG NEVER REACHES THE WORLD. It sets the bubble's radius and
+     * its caps (`world/objects/budget.ts`); the habitat and the populator
+     * are handed the same seed and the same island at every rung, so a
+     * tree stands where it stands at low and at high (Joshua, 2026-09-06,
+     * and `tests/floraWorldObjects.test.ts` holds it there).
+     */
+    const buildObjects = (): void => {
+      if (field === null || habitat === null) return;
+      const set = hooks.settings?.();
+      const detail = resolveDetail(hooks.detailOverride ?? null, detailFor(set?.detail ?? 'medium'));
+      if (objects !== null && builtObjectsDetail === detail) return;
+      if (objects) {
+        three.remove(objects.group);
+        objects.dispose();
+        objects = null;
+      }
+      const map = habitat;
+      objects = new WorldObjects({
+        field,
+        habitatAt: (at) => map.at(at),
+        seed: WORLD_SEED,
+        detail,
+        radius: objectRadius(detail),
+      });
+      builtObjectsDetail = detail;
+      three.add(objects.group);
+      objects.group.visible = objectsOn;
+      // FILLED BEHIND THE LOADING SCREEN, like the terrain's rings and
+      // the sea's sheets: every cell within reach generated now, so the
+      // first drawn frame has grass in it and pays nothing for it.
+      const pose = fly.pose();
+      objects.prime(pose.at, pose.height);
+    };
+
+    /** Show or hide the world's objects. */
+    const syncObjectsLayer = (): void => {
+      objectsOn = toggles.isEnabled('vegetation');
+      if (objects !== null) objects.group.visible = objectsOn;
+    };
+
+    /**
+     * Walk the bubble after the camera. Every frame, on no dt at all:
+     * the objects do not animate, so there is nothing to integrate, and
+     * a paused world's camera still flies (raw dt) and still wants the
+     * ground it flies over to be grown.
+     */
+    const updateObjects = (): void => {
+      if (objects === null) return;
+      if (toggles.isEnabled('vegetation') !== objectsOn) syncObjectsLayer();
+      if (!objectsOn) return;
+      const pose = fly.pose();
+      objects.update(pose.at, pose.height);
     };
 
     /**
@@ -1110,6 +1208,7 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
       // a changed quality setting is a rebuild. No-ops when it has not
       // changed, which is every state change but the one that did.
       buildOcean();
+      buildObjects();
     };
 
     /** The save point: the camera, in world coordinates, through whichever session the app holds. */
@@ -1171,6 +1270,7 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
               hooks.onLoadProgress?.(progress.fraction(), progress.etaMs());
             });
             const repaired = repairGrid(decodeCoarse(bytes)).grid;
+            coarseGrid = repaired;
             field = new Heightfield(repaired);
             // WHERE THE ISLAND'S RIVERS ARE, from the island's own shape,
             // computed once here and never again. It reads the COARSE
@@ -1191,6 +1291,25 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
           }
         }
         reached('terrain');
+
+        // WHAT GROWS WHERE. The landcover raster, then the habitat map
+        // (world-fixed: the coarse survey, the drainage and the raster,
+        // never the streamed field), then the object bubble at the
+        // player's rung. Everything after the survey can fail without
+        // taking the world with it: an island with no landcover is bare,
+        // says so on the LAYERS column, and is still Kauaʻi.
+        if (hooks.landcover && field !== null && coarseGrid !== null && channels !== null) {
+          try {
+            const veg = await hooks.landcover((received, total) => {
+              progress.report('landcover', Math.min(1, received / (total ?? VEG_BYTES)));
+              hooks.onLoadProgress?.(progress.fraction(), progress.etaMs());
+            });
+            habitat = new HabitatMap({ landcover: decodeVeg(veg), coarse: coarseGrid, isChannel: channels.isChannel });
+          } catch (error) {
+            console.error('[vegetation] the landcover did not load; the island is bare', error);
+          }
+        }
+        reached('landcover');
 
         /**
          * THE ANSWER TO "CPU OR GPU", on the device rather than in a
@@ -1220,6 +1339,17 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
           return { meanMs: c.meanMs, peakMs: c.peakMs, wetCells: c.wetCells, cells: c.cells };
         };
 
+        /** What the world's objects cost, and how many are drawn. */
+        const objectsCost = (): ObjectsReadout | null => {
+          if (objects === null) return null;
+          const c = objects.cost;
+          return {
+            meanMs: c.meanMs, peakMs: c.peakMs, cells: c.cells, pending: c.pending,
+            grass: c.drawn.grass, twig: c.drawn.twig, stone: c.drawn.stone, rock: c.drawn.rock, tree: c.drawn.tree,
+            habitat: c.habitat,
+          };
+        };
+
         hud = new PerfHud(ctx.uiLayer, {
           layers: () => toggles.list(),
           onLayerToggle: (id, enabled) => {
@@ -1227,6 +1357,8 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
           },
           session: sessionReadout,
           fresh: field === null ? undefined : freshCost,
+          // THE LINES EXIST ONLY WHERE THERE IS LANDCOVER TO GROW FROM.
+          objects: habitat === null ? undefined : objectsCost,
           // THE COLUMN EXISTS ONLY WHERE A SEA DOES. Whether this world
           // has one is settled by now — `buildOcean` has already run, and
           // it can only ever succeed if the survey downloaded — so an
@@ -1254,10 +1386,22 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         }
         hooks.onSavePoint?.(save);
 
+        // THE BUBBLE, ONLY NOW: after the camera is where it will be.
+        // Built in the landcover block above, it was primed around START
+        // — the summit plateau — and a resumed player then arrived at
+        // their beach to a bubble streaming in from twenty kilometres
+        // away, three cells a frame. `probe:objects` measured it: 37
+        // cells still queued forty frames after arrival, and no grass.
+        buildObjects();
+
         // Terrain is the world now, so it comes up ON — but only when
         // there IS terrain. The toggle is still the way to measure what
         // it costs; turning it off is what the empty world was.
-        toggles = new LayerToggles(terrain === null ? [] : BUILT_LAYERS);
+        // `vegetation` is BUILT only when the landcover actually landed:
+        // a row that reads built over a bare island is a control that
+        // looks functional and is not (§2.9), and the raster is a
+        // download that can fail on its own.
+        toggles = new LayerToggles(terrain === null ? [] : BUILT_LAYERS.filter((id) => id !== 'vegetation' || objects !== null));
         if (terrain !== null) {
           toggles.setEnabled('terrain', true);
           three.add(terrain.group);
@@ -1287,6 +1431,13 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         if (fresh !== null) {
           toggles.setEnabled('freshwater', true);
           syncFreshLayer();
+        }
+        // AND THE GROUND'S OWN CLUTTER. On, because an island with no
+        // grass is a model of one; the toggle is how its cost is measured,
+        // which is the point of this milestone.
+        if (objects !== null) {
+          toggles.setEnabled('vegetation', true);
+          syncObjectsLayer();
         }
 
         // The wire, last: the world is already whole and measurable
@@ -1354,6 +1505,7 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         // dt every other system integrated on.
         updateOcean(frame.simDt);
         updateFresh(frame.simDt);
+        updateObjects();
         // AFTER the ocean, so the swell it asks about is this frame's.
         adaptWater();
         if (net !== null) {
@@ -1394,7 +1546,11 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
             publishCapsules();
           }
         }
-        hud?.update({ frame: stats.summary(), camera: fly.readout() }, frame.rawDt);
+        hud?.update({
+          frame: stats.summary(),
+          camera: fly.readout(),
+          aboveGround: field === null ? null : fly.pose().height - field.heightAt(fly.pose().at),
+        }, frame.rawDt);
         const botLine = botReadout();
         if (botHud !== null && botLine !== null) botHud.update(botLine, frame.rawDt);
       },
@@ -1424,6 +1580,22 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         }
         capsuleList?.remove();
         capsuleList = null;
+        if (objects) {
+          three.remove(objects.group);
+          objects.dispose();
+          objects = null;
+        }
+        habitat = null;
+        coarseGrid = null;
+        builtObjectsDetail = null;
+        // The fresh water was built inside `buildOcean` and, until this
+        // line, was let go nowhere but there.
+        if (fresh) {
+          three.remove(fresh.group);
+          fresh.dispose();
+          fresh = null;
+        }
+        channels = null;
         if (ocean) {
           three.remove(ocean.group);
           ocean.dispose();

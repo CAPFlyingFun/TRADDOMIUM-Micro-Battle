@@ -9,7 +9,7 @@ import { LayerToggles } from '../src/perf/layerToggles';
 import { WORLD_LAYERS, type WorldLayerId } from '../src/world/WorldLoader';
 
 function readout(meanFps: number, lowFps: number, simDt: number, frames = 120): PerfReadout {
-  return { frame: { meanFps, lowFps, simDt, frames }, camera: { x: 1.25, y: 2.5, z: -3.75, facing: Math.PI / 2, pitch: -0.2, speed: 40 } };
+  return { frame: { meanFps, lowFps, simDt, frames }, camera: { x: 1.25, y: 2.5, z: -3.75, facing: Math.PI / 2, pitch: -0.2, speed: 40 }, aboveGround: 320 };
 }
 
 function must<T>(value: T | null | undefined, what: string): T {
@@ -240,5 +240,25 @@ describe('the sea rows', () => {
     hud.hidden = true;
     for (let i = 0; i < 10; i += 1) hud.update(readout(60, 30, 1 / 60), 1 / HUD_HZ);
     expect(asked).toBe(before);
+  });
+});
+
+describe('the ABOVE line', () => {
+  it('prints the height over the ground in metres, and a dash where there is no ground to ask', () => {
+    const uiLayer = document.createElement('div');
+    document.body.appendChild(uiLayer);
+    const hud = new PerfHud(uiLayer, { layers: () => [], onLayerToggle: () => {} });
+    const field = (name: string): string => uiLayer.querySelector<HTMLElement>(`[data-field="${name}"]`)?.textContent ?? '';
+    hud.update(readout(60, 55, 1 / 60, 10), 1);
+    expect(field('camera-above')).toBe('above 3.2 m');
+    hud.update({ ...readout(60, 55, 1 / 60, 10), aboveGround: null }, 1);
+    expect(field('camera-above')).toBe('above —');
+    hud.update({ ...readout(60, 55, 1 / 60, 10), aboveGround: undefined }, 1);
+    expect(field('camera-above')).toBe('above —');
+    // In the CAMERA column, under the facing, and no wider than the position line above it.
+    const above = uiLayer.querySelector('[data-field="camera-above"]') as HTMLElement;
+    expect(above.parentElement).toBe(uiLayer.querySelector('[data-field="camera-facing"]')?.parentElement);
+    expect(field('camera-above').length).toBeLessThanOrEqual(field('camera-position').length);
+    hud.dispose();
   });
 });

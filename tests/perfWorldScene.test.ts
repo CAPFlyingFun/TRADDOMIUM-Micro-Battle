@@ -61,6 +61,8 @@ interface RigOptions {
   readonly practiceBot?: () => { readonly playerId: ReturnType<typeof playerId>; readonly name: string } | null;
   /** Where the elevation survey comes from. Omitted means no terrain, which is what most of this file wants. */
   readonly survey?: PerformanceWorldHooks['survey'];
+  /** And the landcover. Omitted means a bare island. */
+  readonly landcover?: PerformanceWorldHooks['landcover'];
 }
 
 function rig(initial: AppState, options: RigOptions = {}) {
@@ -104,6 +106,7 @@ function rig(initial: AppState, options: RigOptions = {}) {
     identity: options.identity,
     practiceBot: options.practiceBot,
     survey: options.survey,
+    landcover: options.landcover,
   };
   const scene = createPerformanceWorldScene(hooks)(ctx);
   const field = (name: string): string =>
@@ -833,6 +836,16 @@ describe('PerformanceWorldScene with the real island under it', () => {
     expect(scene.camera.rotation.y).toBeCloseTo(0, 6);
   });
 
+  it('leaves a resumed camera an ant\'s height over the ground exactly where it was — thirty metres is a lift, not a floor', async () => {
+    // The world-object bubble is built for a camera in the grass. A
+    // resumed pose three metres up used to come back at thirty.
+    const ground = groundAtOrigin();
+    const saved: SessionSaveState = { camera: { at: world(0, 80), height: ground + 300, yaw: 0.4, pitch: -0.3 } };
+    const { scene } = rig('loading', { survey, resume: () => saved });
+    await scene.enter();
+    expect(scene.camera.position.y).toBeCloseTo(ground + 300, 3);
+  });
+
   it('leaves a resumed camera that is already in the open exactly where it was', async () => {
     const ground = groundAtOrigin();
     const saved: SessionSaveState = { camera: { at: world(0, 80), height: ground + 90_000, yaw: 0.4, pitch: -0.3 } };
@@ -878,6 +891,76 @@ describe('PerformanceWorldScene with the real island under it', () => {
       expect(fog.near).toBeLessThan(fog.far);
       expect(camera.near).toBeLessThan(camera.far);
     }
+  });
+
+  /** The landcover raster, from disk, the way the survey is. */
+  const landcover: PerformanceWorldHooks['landcover'] = async (onBytes) => {
+    const bytes = readFileSync(path.join(process.cwd(), 'public', 'kauai-veg.bin'));
+    const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+    onBytes(buffer.byteLength, buffer.byteLength);
+    return buffer;
+  };
+
+  it('grows the island when the landcover lands: VEGETATION built and on, counts on the HUD, the layer toggling', async () => {
+    const { scene, uiLayer, frame } = rig('loading', { survey, landcover });
+    await scene.enter();
+    // The HUD's rows are re-read from the model on its first refresh,
+    // which is the first frame: `enter()` builds it before the layers
+    // are switched on (built-ness is settled by the downloads).
+    frame();
+    const text = uiLayer.textContent ?? '';
+    expect(text).not.toMatch(/vegetation\s*[—-]\s*not built/i);
+    const box = uiLayer.querySelector<HTMLInputElement>('[data-action="layer:vegetation"]');
+    expect(box?.disabled).toBe(false);
+    expect(box?.checked).toBe(true);
+    // The HUD's five lines, fed by the bubble: cells resident at the
+    // start pose (the summit plateau — sparse, but not nothing).
+    frame();
+    frame(SIXTY);
+    const hud = uiLayer.textContent ?? '';
+    expect(hud).toMatch(/veg [\d.]+ pk \d+ ms/);
+    const cells = /cells (\d+)\+(\d+) ([a-z]+)/.exec(hud);
+    expect(cells).not.toBeNull();
+    // The default rung is medium: a 50 m radius is a 7x7 of cells less the corners.
+    expect(Number(cells![1])).toBeGreaterThan(30);
+    expect(hud).toMatch(/grass \d+/);
+    expect(hud).toMatch(/rock \d+ tree \d+/);
+    // Off, the group is hidden; on again, shown.
+    const group = scene.three.getObjectByName('vegetation');
+    expect(group?.visible).toBe(true);
+    box!.checked = false;
+    box!.dispatchEvent(new Event('change'));
+    frame();
+    expect(group?.visible).toBe(false);
+    box!.checked = true;
+    box!.dispatchEvent(new Event('change'));
+    frame();
+    expect(group?.visible).toBe(true);
+    scene.dispose();
+    expect(scene.three.getObjectByName('vegetation')).toBeUndefined();
+  });
+
+  it('says VEGETATION is not built when the landcover never arrived, and still has the island', async () => {
+    const { scene, uiLayer, frame } = rig('loading', {
+      survey,
+      landcover: async () => {
+        throw new Error('offline');
+      },
+    });
+    await scene.enter();
+    frame();
+    const text = uiLayer.textContent ?? '';
+    expect(text).toMatch(/vegetation\s*[—-]\s*not built/i);
+    expect(text).not.toMatch(/terrain\s*[—-]\s*not built/i);
+    expect(text).not.toMatch(/veg /);
+    expect(scene.three.getObjectByName('vegetation')).toBeUndefined();
+  });
+
+  it('says VEGETATION is not built when there is no landcover source at all', async () => {
+    const { scene, uiLayer, frame } = rig('loading', { survey });
+    await scene.enter();
+    frame();
+    expect(uiLayer.textContent ?? '').toMatch(/vegetation\s*[—-]\s*not built/i);
   });
 
   it('says TERRAIN is not built when the survey never arrived', async () => {

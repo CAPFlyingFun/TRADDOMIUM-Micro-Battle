@@ -109,36 +109,16 @@
  * Pure: no three, no DOM, no fetch, no clock. `src/world/` is core.
  */
 import { skyIsBuilt, type Sky, type WeatherNow, type WeatherSource } from './weather';
+// The seeded sequence comes from the island's ONE source of stable numbers
+// (`world/random.ts`). This file used to carry a private copy of mulberry32
+// because `world/` may not import `net/`; the copy `world/` is allowed to
+// have now exists, and the weather draws from it like everything that grows.
+import { mulberry32 } from '../random';
 
 // ---------------------------------------------------------------------------
 // The generator
 // ---------------------------------------------------------------------------
 
-/**
- * mulberry32 (Tommy Ettinger, public domain): 32-bit state, one multiply
- * a draw, period 2^32 — far more than a year of showers consumes, with
- * no pattern visible at the scale of a few thousand episodes. Not
- * cryptographic; nothing here is.
- *
- * COPIED RATHER THAN IMPORTED, deliberately. The identical routine lives
- * in `net/seededRandom.ts`, and `world/` may not depend on `net/`
- * (ARCHITECTURE §2, "allowed dependency direction") — a core module that
- * reaches sideways into the network layer is exactly the wiring Phase 0
- * was called to undo. Duplicating six lines of public-domain arithmetic
- * is the cheaper of the two mistakes, and a PRNG is not a game rule: the
- * thing CLAUDE.md forbids having two copies of is the rules, and this is
- * a source of numbers.
- */
-function mulberry32(seed: number): () => number {
-  let state = seed >>> 0;
-  return () => {
-    state = (state + 0x6d2b79f5) >>> 0;
-    let t = state;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
 
 /**
  * 0..1, and NaN-safe.

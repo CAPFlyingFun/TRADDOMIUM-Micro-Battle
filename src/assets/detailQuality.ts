@@ -78,6 +78,20 @@ export interface DetailTierSpec {
    * which the water MOVES, before it hands over to the flat sheet.
    */
   readonly waveRadius: number;
+  /**
+   * How far the WORLD'S OBJECTS reach from the camera, in world units:
+   * the bubble of grass, twigs, stones, rocks and trees `flora/` keeps
+   * resident and drawn (`world/objects/budget.ts` holds the caps).
+   *
+   * THE SAME NUMBERS AS `waveRadius`, on purpose, and a test says so:
+   * Joshua's brief (2026-09-06) put the object bubble at 100 m on
+   * `high` and asked that it "respect the existing High mobile 100 m
+   * detail architecture" — which this ladder already was. Two fields
+   * rather than one because they may one day part company (a phone
+   * that can afford waves to 100 m but grass only to 50), and the day
+   * they do the test is deleted and nothing else changes.
+   */
+  readonly objectRadius: number;
   /** What a player would read in a menu. */
   readonly label: string;
   /**
@@ -96,6 +110,7 @@ export const DETAIL_QUALITY: Readonly<Record<DetailTier, DetailTierSpec>> = Obje
   'ultra-low': Object.freeze({
     tier: 'ultra-low',
     waveRadius: 15 * M,
+    objectRadius: 15 * M,
     label: 'Ultra low',
     mobile: true,
     note: 'The floor. Waves inside 15 m, flat beyond — the rung for a phone that would otherwise choose between the sea and the frame rate.',
@@ -103,6 +118,7 @@ export const DETAIL_QUALITY: Readonly<Record<DetailTier, DetailTierSpec>> = Obje
   low: Object.freeze({
     tier: 'low',
     waveRadius: 20 * M,
+    objectRadius: 20 * M,
     label: 'Low',
     mobile: true,
     note: 'About a sixth of v0’s vertex count.',
@@ -110,6 +126,7 @@ export const DETAIL_QUALITY: Readonly<Record<DetailTier, DetailTierSpec>> = Obje
   medium: Object.freeze({
     tier: 'medium',
     waveRadius: 50 * M,
+    objectRadius: 50 * M,
     label: 'Medium',
     mobile: true,
     note: 'Under half of v0’s count, on the rung most phones will land on.',
@@ -117,6 +134,7 @@ export const DETAIL_QUALITY: Readonly<Record<DetailTier, DetailTierSpec>> = Obje
   high: Object.freeze({
     tier: 'high',
     waveRadius: 100 * M,
+    objectRadius: 100 * M,
     label: 'High',
     mobile: true,
     note: 'The highest a phone is offered: 1.20x v0’s vertex count, on geometry that already holds 60 fps.',
@@ -124,6 +142,7 @@ export const DETAIL_QUALITY: Readonly<Record<DetailTier, DetailTierSpec>> = Obje
   'ultra-high': Object.freeze({
     tier: 'ultra-high',
     waveRadius: 200 * M,
+    objectRadius: 200 * M,
     label: 'Ultra high',
     mobile: false,
     note: 'DESKTOP ONLY. 3.2x v0’s vertex count, and v0 on this phone read 10 to 30 fps.',
@@ -141,6 +160,11 @@ export const MAX_MOBILE_DETAIL: DetailTier = 'high';
 /** How far the swell reaches at this rung, in world units. */
 export function waveRadius(tier: DetailTier): number {
   return DETAIL_QUALITY[tier].waveRadius;
+}
+
+/** How far the world's objects reach at this rung, in world units. */
+export function objectRadius(tier: DetailTier): number {
+  return DETAIL_QUALITY[tier].objectRadius;
 }
 
 /**
