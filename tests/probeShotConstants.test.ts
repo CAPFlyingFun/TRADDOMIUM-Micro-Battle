@@ -19,8 +19,8 @@ import { describe, expect, it } from 'vitest';
 import { PERF_WORLD_MAP_ID } from '../src/perf/perfTool';
 import { SOLO_SAVE_KEY, SOLO_SAVE_VERSION } from '../src/session/SoloSave';
 
-/** Every probe that seeds a save the way probe-shot does. `probe-objects` copied the trick and the literals; `probe-sky` copied them again. */
-const PROBES = ['probe-shot.mjs', 'probe-objects.mjs', 'probe-sky.mjs'];
+/** Every probe that seeds a save the way probe-shot does. `probe-objects` copied the trick and the literals; `probe-sky` and `probe-ecology` copied them again. */
+const PROBES = ['probe-shot.mjs', 'probe-objects.mjs', 'probe-sky.mjs', 'probe-ecology.mjs'];
 
 /** The value of a `const NAME = '…';` or `const NAME = 2;` in the script. */
 function literal(source: string, file: string, name: string): string {
