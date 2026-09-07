@@ -25,6 +25,17 @@
  * to something a person can read, and they are GAME TUNING until his
  * phone says otherwise — that is what the HUD's counts are for.
  *
+ * THE SEVEN OF THE ECOLOGY PASS (2026-09-07) SHARE ONE MOBILE BUDGET:
+ * together they add at most 6,000 instances at `high` — a quarter of
+ * the grass's cap, for seven kinds of thing — because the brief's
+ * standing condition is the phone's baseline ("~55–60 fps on an iPhone
+ * 15 Plus"), and Joshua's rule is that sacrificing graphics on mobile
+ * beats amazing graphics with horrible performance. Litter gets the
+ * most (it is the forest floor, and the smallest geometry); shrubs the
+ * fewest (they are somebody, and cost forty triangles each). The lower
+ * rungs are those numbers scaled the way the first five are, and
+ * `ultra-high` doubles them, as it doubles everything.
+ *
  * Keyed by the detail rung's NAME as a plain string literal rather than
  * importing `DetailTier` from `assets/`: `world/` is core and reaches
  * nothing outside itself but its own siblings, and a test pins these
@@ -52,24 +63,55 @@ export interface ObjectBudget {
 
 export const OBJECT_BUDGETS: Readonly<Record<ObjectRung, ObjectBudget>> = Object.freeze({
   'ultra-low': Object.freeze({
-    caps: Object.freeze({ grass: 1_500, twig: 150, stone: 60, rock: 8, tree: 15 }),
-    draw: Object.freeze({ grass: 0.35, twig: 0.4, stone: 0.4, rock: 1, tree: 1 }),
+    caps: Object.freeze({
+      grass: 1_500, twig: 150, stone: 60, rock: 8, tree: 15,
+      fern: 50, reed: 60, flower: 100, leaf: 200, shrub: 40, broadleaf: 60, coastal: 40,
+    }),
+    draw: Object.freeze({
+      grass: 0.35, twig: 0.4, stone: 0.4, rock: 1, tree: 1,
+      fern: 0.4, reed: 0.4, flower: 0.4, leaf: 0.4, shrub: 1, broadleaf: 0.4, coastal: 0.4,
+    }),
   }),
   low: Object.freeze({
-    caps: Object.freeze({ grass: 4_000, twig: 400, stone: 150, rock: 15, tree: 30 }),
-    draw: Object.freeze({ grass: 0.5, twig: 0.6, stone: 0.6, rock: 1, tree: 1 }),
+    caps: Object.freeze({
+      grass: 4_000, twig: 400, stone: 150, rock: 15, tree: 30,
+      fern: 120, reed: 160, flower: 250, leaf: 500, shrub: 80, broadleaf: 160, coastal: 100,
+    }),
+    draw: Object.freeze({
+      grass: 0.5, twig: 0.6, stone: 0.6, rock: 1, tree: 1,
+      fern: 0.6, reed: 0.6, flower: 0.6, leaf: 0.6, shrub: 1, broadleaf: 0.6, coastal: 0.6,
+    }),
   }),
   medium: Object.freeze({
-    caps: Object.freeze({ grass: 10_000, twig: 1_000, stone: 300, rock: 30, tree: 60 }),
-    draw: Object.freeze({ grass: 0.75, twig: 0.8, stone: 0.8, rock: 1, tree: 1 }),
+    caps: Object.freeze({
+      grass: 10_000, twig: 1_000, stone: 300, rock: 30, tree: 60,
+      fern: 250, reed: 350, flower: 550, leaf: 1_200, shrub: 150, broadleaf: 350, coastal: 200,
+    }),
+    draw: Object.freeze({
+      grass: 0.75, twig: 0.8, stone: 0.8, rock: 1, tree: 1,
+      fern: 0.8, reed: 0.8, flower: 0.8, leaf: 0.8, shrub: 1, broadleaf: 0.8, coastal: 0.8,
+    }),
   }),
   high: Object.freeze({
-    caps: Object.freeze({ grass: 25_000, twig: 2_000, stone: 500, rock: 50, tree: 100 }),
-    draw: Object.freeze({ grass: 1, twig: 1, stone: 1, rock: 1, tree: 1 }),
+    // The seven sum to 6,000 exactly: the mobile budget of the header.
+    caps: Object.freeze({
+      grass: 25_000, twig: 2_000, stone: 500, rock: 50, tree: 100,
+      fern: 500, reed: 700, flower: 1_100, leaf: 2_300, shrub: 300, broadleaf: 700, coastal: 400,
+    }),
+    draw: Object.freeze({
+      grass: 1, twig: 1, stone: 1, rock: 1, tree: 1,
+      fern: 1, reed: 1, flower: 1, leaf: 1, shrub: 1, broadleaf: 1, coastal: 1,
+    }),
   }),
   'ultra-high': Object.freeze({
-    caps: Object.freeze({ grass: 60_000, twig: 4_000, stone: 1_000, rock: 100, tree: 200 }),
-    draw: Object.freeze({ grass: 1, twig: 1, stone: 1, rock: 1, tree: 1 }),
+    caps: Object.freeze({
+      grass: 60_000, twig: 4_000, stone: 1_000, rock: 100, tree: 200,
+      fern: 1_000, reed: 1_400, flower: 2_200, leaf: 4_600, shrub: 600, broadleaf: 1_400, coastal: 800,
+    }),
+    draw: Object.freeze({
+      grass: 1, twig: 1, stone: 1, rock: 1, tree: 1,
+      fern: 1, reed: 1, flower: 1, leaf: 1, shrub: 1, broadleaf: 1, coastal: 1,
+    }),
   }),
 });
 

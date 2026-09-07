@@ -26,13 +26,44 @@
  * near 10–30, mid 30–60, far 60–100) turned into per-family curves, and
  * they are GAME TUNING to be measured on the phone, not measured facts.
  *
+ * ─── the seven that came with the ecology pass (2026-09-07) ──────────
+ *
+ * Joshua's brief: "Add richer biome-aware vegetation: grass varieties,
+ * ground plants, broad-leaf plants, ferns, small shrubs, reeds near
+ * freshwater, coastal plants, sparse rocky/high plants, leaf litter,
+ * flowers/seeds. Habitat decides WHAT, generation decides WHERE, Detail
+ * Quality decides HOW MUCH. Counts are CAPS, not quotas. Major objects
+ * never vanish by quality." Seven families answer it — fern, reed,
+ * flower, leaf (litter), shrub, broadleaf, coastal — and they run
+ * through the same two lines the first five do. Six are COSMETIC:
+ * density, addressable by cell and site, named by nobody. The SHRUB is
+ * MAJOR, and the reason is the resource layer's, not the picture's: an
+ * aphid colony sits on a shrub (`world/ecology/resources.ts`,
+ * `honeydew-host`), a save will one day store deltas against it, and a
+ * plant something lives on has to be the same plant on every phone.
+ *
+ * Their REACHES are the bands again: litter and flowers are very-near
+ * clutter like stones; ferns, broad leaves and the coastal spreader go
+ * as far as grass does; reeds, standing to nearly two metres, are seen
+ * from further; shrubs, which are somebody, reach most of the way to
+ * the trees. GAME TUNING, to be argued with on the phone.
+ *
  * Pure: no three, no DOM. `src/world/` is core.
  */
 
-export type ObjectFamily = 'grass' | 'twig' | 'stone' | 'rock' | 'tree';
+export type ObjectFamily =
+  | 'grass' | 'twig' | 'stone' | 'rock' | 'tree'
+  | 'fern' | 'reed' | 'flower' | 'leaf' | 'shrub' | 'broadleaf' | 'coastal';
 
-/** In the order the budgets and the HUD list them. */
-export const OBJECT_FAMILIES: readonly ObjectFamily[] = Object.freeze(['grass', 'twig', 'stone', 'rock', 'tree']);
+/**
+ * In the order the budgets and the HUD list them: the first five as
+ * shipped, then the ecology pass's seven. Other modules depend on the
+ * spellings; the order is a display order and a loop order.
+ */
+export const OBJECT_FAMILIES: readonly ObjectFamily[] = Object.freeze([
+  'grass', 'twig', 'stone', 'rock', 'tree',
+  'fern', 'reed', 'flower', 'leaf', 'shrub', 'broadleaf', 'coastal',
+]);
 
 export interface FamilySpec {
   readonly family: ObjectFamily;
@@ -93,6 +124,57 @@ export const FAMILY_SPECS: Readonly<Record<ObjectFamily, FamilySpec>> = Object.f
     major: true,
     reachOfRadius: 1, reachFloor: 15 * M, reachCeiling: 200 * M,
     fullUntil: 0.7, farKeep: 0.7,
+  }),
+  // ── the ecology pass's seven (2026-09-07). GAME TUNING throughout. ──
+  fern: Object.freeze({
+    family: 'fern' as ObjectFamily,
+    major: false,
+    // A knee-high frond reads about as far as a tall blade does.
+    reachOfRadius: 0.25, reachFloor: 10 * M, reachCeiling: 25 * M,
+    fullUntil: 0.4, farKeep: 0.3,
+  }),
+  reed: Object.freeze({
+    family: 'reed' as ObjectFamily,
+    major: false,
+    // Up to 1.8 m tall and standing in beds: the furthest-seen cosmetic
+    // plant, so a stream's line is visible from across a field.
+    reachOfRadius: 0.4, reachFloor: 12 * M, reachCeiling: 40 * M,
+    fullUntil: 0.4, farKeep: 0.35,
+  }),
+  flower: Object.freeze({
+    family: 'flower' as ObjectFamily,
+    major: false,
+    // A head the size of a coin: a very-near thing, like a stone.
+    reachOfRadius: 0.2, reachFloor: 10 * M, reachCeiling: 20 * M,
+    fullUntil: 0.5, farKeep: 0.3,
+  }),
+  leaf: Object.freeze({
+    family: 'leaf' as ObjectFamily,
+    major: false,
+    // Litter is the ant's own floor and nothing at all from twelve metres.
+    reachOfRadius: 0.12, reachFloor: 8 * M, reachCeiling: 12 * M,
+    fullUntil: 0.6, farKeep: 0.4,
+  }),
+  shrub: Object.freeze({
+    family: 'shrub' as ObjectFamily,
+    major: true,
+    // Somebody: kept to most of the trees' reach, and never thinned by
+    // the draw fraction (`budget.ts` holds every major family to 1).
+    reachOfRadius: 0.6, reachFloor: 15 * M, reachCeiling: 80 * M,
+    fullUntil: 0.6, farKeep: 0.6,
+  }),
+  broadleaf: Object.freeze({
+    family: 'broadleaf' as ObjectFamily,
+    major: false,
+    reachOfRadius: 0.2, reachFloor: 10 * M, reachCeiling: 20 * M,
+    fullUntil: 0.5, farKeep: 0.3,
+  }),
+  coastal: Object.freeze({
+    family: 'coastal' as ObjectFamily,
+    major: false,
+    // A low spreader half a metre across: seen about as far as grass.
+    reachOfRadius: 0.3, reachFloor: 12 * M, reachCeiling: 30 * M,
+    fullUntil: 0.5, farKeep: 0.35,
   }),
 });
 

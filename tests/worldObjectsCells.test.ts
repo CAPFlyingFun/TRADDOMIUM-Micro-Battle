@@ -57,13 +57,18 @@ describe('object cells', () => {
 });
 
 describe('object families', () => {
-  it('names five, marks trees and rocks as the ones that carry an identity', () => {
-    expect(OBJECT_FAMILIES).toEqual(['grass', 'twig', 'stone', 'rock', 'tree']);
+  it('names twelve — the first five, then the ecology pass\'s seven — and marks trees, rocks and shrubs as the ones that carry an identity', () => {
+    expect(OBJECT_FAMILIES).toEqual([
+      'grass', 'twig', 'stone', 'rock', 'tree',
+      'fern', 'reed', 'flower', 'leaf', 'shrub', 'broadleaf', 'coastal',
+    ]);
     expect(FAMILY_SPECS.tree.major).toBe(true);
     expect(FAMILY_SPECS.rock.major).toBe(true);
-    expect(FAMILY_SPECS.grass.major).toBe(false);
-    expect(FAMILY_SPECS.twig.major).toBe(false);
-    expect(FAMILY_SPECS.stone.major).toBe(false);
+    // A shrub is somebody: an aphid colony will sit on one, and a save will name it.
+    expect(FAMILY_SPECS.shrub.major).toBe(true);
+    for (const cosmetic of ['grass', 'twig', 'stone', 'fern', 'reed', 'flower', 'leaf', 'broadleaf', 'coastal'] as const) {
+      expect(FAMILY_SPECS[cosmetic].major, cosmetic).toBe(false);
+    }
   });
 
   it('reaches by band: clutter is very near, grass near, trees and rocks to the rung\'s radius', () => {
@@ -111,7 +116,9 @@ describe('object budgets', () => {
   });
 
   it('carry Joshua\'s numbers at high and climb the ladder monotonically', () => {
-    expect(OBJECT_BUDGETS.high.caps).toEqual({ grass: 25_000, twig: 2_000, stone: 500, rock: 50, tree: 100 });
+    expect(OBJECT_BUDGETS.high.caps).toMatchObject({ grass: 25_000, twig: 2_000, stone: 500, rock: 50, tree: 100 });
+    // The ecology pass's seven, summing to the 6,000 mobile budget (tests/worldObjectsPlants.test.ts holds the sum).
+    expect(OBJECT_BUDGETS.high.caps).toMatchObject({ fern: 500, reed: 700, flower: 1_100, leaf: 2_300, shrub: 300, broadleaf: 700, coastal: 400 });
     for (const family of OBJECT_FAMILIES) {
       let prev = 0;
       for (const rung of OBJECT_RUNGS) {
