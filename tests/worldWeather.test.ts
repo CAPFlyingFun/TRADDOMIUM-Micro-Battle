@@ -39,6 +39,7 @@ import {
   skyIsBuilt,
   type Sky,
   type WeatherNow,
+  isBuiltSky, visibilityFor, CLEAR_VISIBILITY_M,
 } from '../src/world/weather/weather';
 import {
   CLOUDY_FLOOR,
@@ -592,5 +593,34 @@ describe('the holes the review found', () => {
     // because the citation is what stops the next reader checking.
     expect(SUMMIT_MM_YEAR).toBe(9_500);
     expect(SUMMIT_MM_YEAR).toBeLessThan(10_300);
+  });
+});
+
+describe('Phase 5 additions to the seam', () => {
+  it('guards the address bar: only a BUILT sky may be held open, and the rest are refused by name', () => {
+    expect(isBuiltSky('clear')).toBe(true);
+    expect(isBuiltSky('rain')).toBe(true);
+    // Named in the union, not driven: holding it open would be an unbuilt action looking functional.
+    expect(isBuiltSky('hurricane')).toBe(false);
+    expect(isBuiltSky('thunderstorm')).toBe(false);
+    expect(isBuiltSky('')).toBe(false);
+    expect(isBuiltSky(null)).toBe(false);
+    expect(isBuiltSky(undefined)).toBe(false);
+  });
+
+  it('closes the simulated visibility with cloud and rain, from the clear-air ceiling down to a floor', () => {
+    expect(visibilityFor(0, 0)).toBe(CLEAR_VISIBILITY_M);
+    expect(visibilityFor(0, 1)).toBeLessThan(CLEAR_VISIBILITY_M * 0.7);
+    expect(visibilityFor(0, 1)).toBeGreaterThan(CLEAR_VISIBILITY_M * 0.6);
+    expect(visibilityFor(10, 0)).toBeLessThan(6_000);
+    expect(visibilityFor(50, 1)).toBeLessThan(2_000);
+    expect(visibilityFor(1_000, 1)).toBe(500);
+    // Monotonic: more rain never sees further.
+    let last = Infinity;
+    for (let mm = 0; mm <= 60; mm += 5) {
+      const v = visibilityFor(mm, 0.5);
+      expect(v).toBeLessThanOrEqual(last);
+      last = v;
+    }
   });
 });

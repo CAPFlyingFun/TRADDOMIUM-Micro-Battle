@@ -57,6 +57,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { stubWeather } from './probeWeather.mjs';
 import { chooseSpawn } from './probeSpawn.mjs';
 import { preview } from 'vite';
 
@@ -469,6 +470,7 @@ async function main() {
     browser = await chromium.launch({ executablePath: chromiumPath(), args: CHROMIUM_ARGS });
     log(`chromium ${browser.version()}`);
     const page = await browser.newPage({ viewport: VIEWPORT });
+    await stubWeather(page);
     page.on('console', (message) => {
       if (message.type() === 'error') consoleErrors.push(message.text());
     });

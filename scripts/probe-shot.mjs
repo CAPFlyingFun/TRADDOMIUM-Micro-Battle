@@ -46,6 +46,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { stubWeather } from './probeWeather.mjs';
 import { preview } from 'vite';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -183,6 +184,7 @@ async function main() {
     browser = await chromium.launch({ executablePath: chromiumPath(), args: CHROMIUM_ARGS });
     const context = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: 1 });
     const page = await context.newPage();
+    await stubWeather(page);
     page.on('pageerror', (error) => fail(`uncaught page error: ${error.message}`));
     page.on('console', (message) => {
       if (message.type() === 'error') fail(`console error: ${message.text()}`);

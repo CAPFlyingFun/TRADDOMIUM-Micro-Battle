@@ -1,7 +1,7 @@
 {
   "name": "traddomium-micro-battle",
   "private": true,
-  "version": "1.0.0-alpha.20",
+  "version": "1.0.0-alpha.21",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -19,11 +19,13 @@
     "probe:multiplayer": "node scripts/probe-multiplayer.mjs",
     "bake:art": "node scripts/bakeArt.mjs",
     "bake:textures": "node scripts/bakeTextures.mjs",
+    "bake:sky": "node scripts/bakeSky.mjs",
     "relay:dev": "wrangler dev --config worker/wrangler.toml --local",
     "relay:deploy": "wrangler deploy --config worker/wrangler.toml",
     "relay:tail": "wrangler tail --config worker/wrangler.toml",
     "relay:typecheck": "tsc -p worker/tsconfig.json",
     "probe:shot": "node scripts/probe-shot.mjs",
+    "probe:sky": "node scripts/probe-sky.mjs",
     "probe:objects": "node scripts/probe-objects.mjs"
   },
   "dependencies": {

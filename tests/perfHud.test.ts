@@ -429,3 +429,133 @@ describe('collapsing', () => {
     expect(field('summary')).toBe('20.0 fps · low 10.0');
   });
 });
+
+/**
+ * THE SKY LINES — Phase 5's device-visible half. The HUD's job is to print
+ * what it is told, and the one word that matters most is where the
+ * reading came from: a simulated sky may not pass for the island's
+ * (CLAUDE.md, "The sky is the island's, or it says so").
+ */
+describe('the sky lines', () => {
+  type Weather = { sky: string; rainMmHr: number; cloud: number; source: 'live' | 'cached' | 'simulated'; clock: string; sunElevationDeg: number };
+  const skyRig = (weather?: () => Weather | null, options: { collapsed?: boolean } = {}) => {
+    const uiLayer = document.createElement('div');
+    document.body.appendChild(uiLayer);
+    const toggles = new LayerToggles([]);
+    const hud = new PerfHud(uiLayer, {
+      layers: () => toggles.list(),
+      onLayerToggle: (id, enabled) => toggles.setEnabled(id, enabled),
+      objects: () => null,
+      ...(weather === undefined ? {} : { weather }),
+    }, options);
+    const field = (name: string): string | null =>
+      uiLayer.querySelector<HTMLElement>(`[data-field="${name}"]`)?.textContent ?? null;
+    return { uiLayer, hud, field };
+  };
+  const noon: Weather = { sky: 'clear', rainMmHr: 0, cloud: 0.12, source: 'live', clock: '14:32', sunElevationDeg: 61.4 };
+
+  it('are not built at all when the world has no weather to ask about', () => {
+    // Same rule as SESSION and the sea: a line about a sky that is never
+    // coming is a claim of its own.
+    const { field } = skyRig();
+    expect(field('weather-sky')).toBeNull();
+    expect(field('weather-rain')).toBeNull();
+    expect(field('weather-clock')).toBeNull();
+  });
+
+  it('say "sky —" rather than inventing a sky while the hook has nothing to report', () => {
+    const { hud, field } = skyRig(() => null);
+    hud.update(readout(60, 30, 1 / 60), 1);
+    expect(field('weather-sky')).toBe('sky —');
+    expect(field('weather-rain')).toBe('');
+    expect(field('weather-clock')).toBe('');
+  });
+
+  it('print the sky, the cloud as a percent and THE SOURCE on one line; the rain, the clock and the sun on the other', () => {
+    const { hud, field } = skyRig(() => noon);
+    hud.update(readout(60, 30, 1 / 60), 1);
+    expect(field('weather-sky')).toBe('sky clear 12%');
+    expect(field('weather-rain')).toBe('rain 0.0 mm/h');
+    expect(field('weather-clock')).toBe('14:32 · sun 61° · live');
+  });
+
+  it('a simulated sky says sim and never live; a cached one says cached', () => {
+    // THE HONESTY RULE, on the line a phone reads. `?sky=` holds the
+    // seeded model open and the word beside the cloud figure is the only
+    // thing that keeps that from being mistaken for Kauaʻi's weather.
+    let source: Weather['source'] = 'simulated';
+    const { hud, field } = skyRig(() => ({ ...noon, source }));
+    hud.update(readout(60, 30, 1 / 60), 1);
+    expect(field('weather-clock')).toMatch(/· sim$/);
+    expect(field('weather-clock')).not.toContain('live');
+    source = 'cached';
+    hud.update(readout(60, 30, 1 / 60), 1);
+    expect(field('weather-clock')).toMatch(/· cached$/);
+    // Re-read every refresh: a feed that comes back is not stale on the line.
+    source = 'live';
+    hud.update(readout(60, 30, 1 / 60), 1);
+    expect(field('weather-sky')).toBe('sky clear 12%');
+    expect(field('weather-clock')).toMatch(/· live$/);
+  });
+
+  it('round the rain to a tenth, the cloud to a whole percent and the sun to a whole degree, with a minus below the horizon', () => {
+    const { hud, field } = skyRig(() => ({ sky: 'rain', rainMmHr: 12.34, cloud: 0.875, source: 'simulated', clock: '18:30', sunElevationDeg: -8.4 }));
+    hud.update(readout(60, 30, 1 / 60), 1);
+    expect(field('weather-sky')).toBe('sky rain 88%');
+    // A PROPER MINUS SIGN (U+2212), so "sun −8°" cannot be read as a dash
+    // between two numbers on a phone screenshot.
+    expect(field('weather-rain')).toBe('rain 12.3 mm/h');
+    expect(field('weather-clock')).toBe('18:30 · sun −8° · sim');
+  });
+
+  it('a sun a hair under the horizon reads 0°, not −0°', () => {
+    const { hud, field } = skyRig(() => ({ ...noon, sunElevationDeg: -0.2 }));
+    hud.update(readout(60, 30, 1 / 60), 1);
+    expect(field('weather-clock')).toBe('14:32 · sun 0° · live');
+  });
+
+  it('sky and rain sit in the FRAME column under the objects\' lines; the clock sits in CAMERA under above, so nothing widens', () => {
+    const { uiLayer, hud } = skyRig(() => noon);
+    hud.update(readout(60, 30, 1 / 60), 1);
+    const mean = must(uiLayer.querySelector('[data-field="mean-fps"]'), 'mean field');
+    const sky = must(uiLayer.querySelector('[data-field="weather-sky"]'), 'sky line');
+    const rain = must(uiLayer.querySelector('[data-field="weather-rain"]'), 'rain line');
+    const clock = must(uiLayer.querySelector('[data-field="weather-clock"]'), 'clock line');
+    const veg = must(uiLayer.querySelector('[data-field="veg-major"]'), 'the last veg line');
+    const above = must(uiLayer.querySelector('[data-field="camera-above"]'), 'the camera above line');
+    expect(sky.parentElement).toBe(mean.parentElement);
+    expect(rain.parentElement).toBe(mean.parentElement);
+    expect(clock.parentElement).toBe(above.parentElement);
+    expect(clock.parentElement).not.toBe(mean.parentElement);
+    // After the veg lines and in order: sky, then rain; the clock after `above`.
+    expect(veg.compareDocumentPosition(sky) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(sky.compareDocumentPosition(rain) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(above.compareDocumentPosition(clock) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // No column of their own.
+    expect(uiLayer.textContent).not.toContain('WEATHER');
+    expect(uiLayer.textContent).not.toContain('SKY');
+  });
+
+  it('folded, the HUD writes only the summary: the sky lines are not touched and the hook is not asked', () => {
+    let asked = 0;
+    const { hud, field } = skyRig(() => {
+      asked += 1;
+      return noon;
+    });
+    hud.update(readout(60, 30, 1 / 60), 1);
+    expect(field('weather-sky')).toBe('sky clear 12%');
+    expect(field('weather-clock')).toMatch(/· live$/);
+    const askedWhileOpen = asked;
+    expect(askedWhileOpen).toBeGreaterThan(0);
+    hud.collapsed = true;
+    for (let i = 0; i < 10; i += 1) hud.update(readout(25, 15, 0), 1 / HUD_HZ);
+    expect(field('summary')).toBe('25.0 fps · low 15.0');
+    expect(field('weather-sky')).toBe('sky clear 12%');
+    expect(field('weather-clock')).toMatch(/· live$/);
+    expect(asked).toBe(askedWhileOpen);
+    // Unfolded, the first update repaints them and asks again.
+    hud.collapsed = false;
+    hud.update(readout(45, 40, 1 / 60), 0.016);
+    expect(asked).toBeGreaterThan(askedWhileOpen);
+  });
+});

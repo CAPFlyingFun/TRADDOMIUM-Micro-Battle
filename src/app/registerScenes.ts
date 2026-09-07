@@ -27,6 +27,10 @@ import { fetchCoarseDem } from '../assets/demSource';
 import { fetchVeg } from '../assets/vegSource';
 import { TIER_QUERY_PARAM, isTextureTier, type TextureTier } from '../assets/textureQuality';
 import { DETAIL_QUERY_PARAM, isDetailTier, type DetailTier } from '../assets/detailQuality';
+import { OpenMeteo } from '../assets/openMeteo';
+import { weatherCacheOver } from '../persistence/weatherCache';
+import { HST_OFFSET_HOURS, hstToUnixMs } from '../world/weather/solar';
+import { isBuiltSky, type Sky } from '../world/weather/weather';
 import { PERF_WORLD_MAP_ID, PERF_WORLD_SCENE_ID, perfWorldTool } from '../perf/perfTool';
 import {
   LocalSoloSession, isSoloSlot, newSoloGame, readSoloSlots, resumeSoloSlot, restorableStateOf, savedSoloGame,
@@ -152,6 +156,43 @@ const DETAIL_NAMED = typeof globalThis.location === 'undefined'
   ? null
   : new URLSearchParams(globalThis.location.search).get(DETAIL_QUERY_PARAM);
 const DETAIL_OVERRIDE: DetailTier | null = isDetailTier(DETAIL_NAMED) ? DETAIL_NAMED : null;
+
+/**
+ * THE SKY'S TWO OVERRIDES: `?sky=clear|cloudy|rain` holds the simulated
+ * weather at a sky, and `?hour=0..24` holds the island's clock at an
+ * HST hour, so `probe:sky` can photograph noon, dusk and night in one
+ * run and a developer can look at a rain that is not falling today.
+ * Read here for the same reason as `?tier=` — this is the one file that
+ * reads the address bar — and, like it, an override and never a
+ * setting: nothing is stored, and the HUD's sky line says `sim` while
+ * one is in force, so a held sky can never be mistaken for the island's.
+ */
+const SKY_QUERY_PARAM = 'sky';
+const HOUR_QUERY_PARAM = 'hour';
+const SKY_NAMED = typeof globalThis.location === 'undefined'
+  ? null
+  : new URLSearchParams(globalThis.location.search).get(SKY_QUERY_PARAM);
+const SKY_OVERRIDE: Sky | null = isBuiltSky(SKY_NAMED) ? SKY_NAMED : null;
+const HOUR_NAMED = typeof globalThis.location === 'undefined'
+  ? null
+  : new URLSearchParams(globalThis.location.search).get(HOUR_QUERY_PARAM);
+const HOUR_OVERRIDE: number | null = HOUR_NAMED !== null && Number.isFinite(Number(HOUR_NAMED)) && Number(HOUR_NAMED) >= 0 && Number(HOUR_NAMED) < 24
+  ? Number(HOUR_NAMED)
+  : null;
+
+/**
+ * The clock the world reads. Real time, or — under `?hour=` — today's
+ * date held at that HST hour, frozen, so the sun stands still for a
+ * screenshot. Today's date and not a fixed one: the sun's height at a
+ * given hour depends on the season, and a probe run in December should
+ * show December's noon.
+ */
+function worldClock(): () => number {
+  if (HOUR_OVERRIDE === null) return () => Date.now();
+  const today = new Date(Date.now() + HST_OFFSET_HOURS * 3_600_000);
+  const held = hstToUnixMs(today.getUTCFullYear(), today.getUTCMonth() + 1, today.getUTCDate(), HOUR_OVERRIDE, Math.round((HOUR_OVERRIDE % 1) * 60));
+  return () => held;
+}
 
 /**
  * WHICH SLOT THE SPAWN MAP IS CHOOSING FOR.
@@ -392,6 +433,15 @@ export function registerScenes(options: RegisterScenesOptions = {}): void {
         survey,
         // AND WHAT GROWS ON IT, wired the same way for the same reason.
         landcover,
+        // THE WEATHER, wired like the survey: Open-Meteo, asked from the
+        // phone directly (it allows it; NDBC did not, hence the relay's sea
+        // route), off when there is no island to rain on. The reading is
+        // kept in this device's storage so the next launch on a plane
+        // still opens on Kauaʻi's sky.
+        weather: survey === undefined ? null : new OpenMeteo(),
+        weatherCache: weatherCacheOver(ctx.storage),
+        clock: worldClock(),
+        skyOverride: SKY_OVERRIDE,
         settings: () => openSettings(ctx.storage).read(),
         // The one setting the world writes: the HUD's fold, from its own
         // corner button, so it survives a reload (Joshua, 2026-09-07).

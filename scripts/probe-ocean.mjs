@@ -40,6 +40,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { stubWeather } from './probeWeather.mjs';
 import { readPng } from './probePng.mjs';
 import { chooseSpawn } from './probeSpawn.mjs';
 import { preview } from 'vite';
@@ -375,6 +376,7 @@ async function sweep(browser, url) {
   for (const tier of SWEEP_TIERS) {
     const context = await browser.newContext({ viewport: VIEWPORT, deviceScaleFactor: 1 });
     const page = await context.newPage();
+    await stubWeather(page);
     page.on('pageerror', (error) => fail(`[${tier}] uncaught page error: ${error.message}`));
     page.on('console', (message) => {
       if (message.type() === 'error') fail(`[${tier}] console error: ${message.text()}`);

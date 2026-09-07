@@ -18,13 +18,20 @@ import { WORLD_LAYERS, type WorldLayerId } from '../world/WorldLoader';
  * adds its id here, and the HUD row comes alive on its own.
  *
  * `terrain` was added in Phase 2, `ocean` in Phase 3, `freshwater` in
- * Phase 4 and `vegetation` in Phase 6 (the world objects: grass, twigs,
+ * Phase 4, `vegetation` in Phase 6 (the world objects: grass, twigs,
  * stones, rocks and trees — the toggle's name is the plan's, and rocks
- * ride under it), each in the same commit that made its toggle real —
- * a layer listed here before it draws anything is a control that looks
- * functional and is not (§2.9).
+ * ride under it) and `weather` in Phase 5 (the HDRI dome, the sun, the
+ * fog and the rain, driven by the island's real weather — the toggle
+ * stops the DRAWING; the model underneath keeps running, because the
+ * rivers still have to be rained on), each in the same commit that made
+ * its toggle real — a layer listed here before it draws anything is a
+ * control that looks functional and is not (§2.9).
+ *
+ * IN THE WORLD PLAN'S ORDER (`WORLD_LAYERS`), not the order the phases
+ * landed in: `weather` sits before `vegetation` because that is where
+ * the plan puts it, and the test pins this list to that order.
  */
-export const BUILT_LAYERS: readonly WorldLayerId[] = ['terrain', 'ocean', 'freshwater', 'vegetation'];
+export const BUILT_LAYERS: readonly WorldLayerId[] = ['terrain', 'ocean', 'freshwater', 'weather', 'vegetation'];
 
 export interface LayerToggle {
   readonly id: WorldLayerId;

@@ -45,8 +45,13 @@ as listed, prose included, so a path is written there only to list it.
 Nothing here is run by hand. The one entry is a helper module, which
 cannot be wired because it is never run on its own:
 
+- `scripts/probeWeather.mjs` — the canned Open-Meteo the world probes
+  share: routes the island's weather request to a reply for the places
+  asked for, so the live path runs with no way out to the internet and
+  no console error. A module, not a command; every world probe calls
+  `stubWeather(page)`.
 - `scripts/probePng.mjs` — the PNG reader the pixel probes share
-  (`probe-terrain`, `probe-ocean`). A module, not a command: it is here
+  (`probe-terrain`, `probe-ocean`, `probe-sky`). A module, not a command: it is here
   because two probes reading their own screenshots is two decoders, and
   the second one was written handling only RGBA and threw on the first
   RGB frame Playwright handed it.

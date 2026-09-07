@@ -63,6 +63,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { stubWeather } from './probeWeather.mjs';
 import { preview } from 'vite';
 import { startRelay } from './relayHarness.mjs';
 
@@ -238,6 +239,7 @@ class Player {
   static async open(browser, label, url) {
     const context = await browser.newContext({ viewport: VIEWPORT });
     const page = await context.newPage();
+    await stubWeather(page);
     const player = new Player(label, context, page);
     await page.goto(url, { waitUntil: 'load' });
     return player;

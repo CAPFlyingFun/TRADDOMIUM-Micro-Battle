@@ -53,12 +53,14 @@ const view = dir('src/view');
 const terrain = dir('src/terrain');
 const sea = dir('src/sea');
 const flora = dir('src/flora');
+const sky = dir('src/sky');
 
 const actorSites = [...actor].flatMap(([f, src]) => importsOf(f, src));
 const viewSites = [...view].flatMap(([f, src]) => importsOf(f, src));
 const terrainSites = [...terrain].flatMap(([f, src]) => importsOf(f, src));
 const seaSites = [...sea].flatMap(([f, src]) => importsOf(f, src));
 const floraSites = [...flora].flatMap(([f, src]) => importsOf(f, src));
+const skySites = [...sky].flatMap(([f, src]) => importsOf(f, src));
 
 const VIEW_DIR = /(^|\/)view(\/|$)/;
 const ORIGIN = /(^|\/)world\/origin$/;
@@ -315,6 +317,67 @@ describe('the world/flora seam', () => {
   it('never imports actor/, view/, session/, ui/ or net/: the grass does not know who walks through it', () => {
     const banned = /(^|\/)(actor|view|session|ui|net)(\/|$)/;
     const offenders = floraSites.filter((s) => banned.test(s.specifier));
+    expect(offenders.map((s) => `${s.file}: ${s.statement}`)).toEqual([]);
+  });
+});
+
+
+/**
+ * THE FIFTH RENDERER (ARCHITECTURE §3, amended 2026-09-07 with `sky/`).
+ *
+ * `sky/` draws the air: the dome the baked skies wear, the sun and
+ * sky-light it drives, and the rain around the camera. It is held to the
+ * `.wx` ban the way `flora/` is held to the sharpened rule — and here
+ * the sharpened rule has NO allowed sites, because nothing in the sky
+ * has a world position. The dome and the rain stand on the camera's
+ * RENDERED position; the sun's place is an angle, not a point. A world
+ * coordinate read anywhere in this directory would be a renderer
+ * inventing a location for something that has none, so there is no
+ * `toLocal` here to hide one behind either.
+ *
+ * It reads the weather and the sun as TYPES ONLY: `skyLook` is handed a
+ * reading and a position and decides nothing about time or weather
+ * itself, which is what keeps it pure enough to test without a canvas.
+ */
+describe('the world/sky seam', () => {
+  it('has a sky renderer to check', () => {
+    expect([...sky.keys()]).toEqual(expect.arrayContaining(['skyLook.ts', 'SkyView.ts', 'RainView.ts']));
+    expect(skySites.length).toBeGreaterThan(0);
+  });
+
+  it('reads no world coordinate anywhere: the sky and the rain stand on the camera, the sun is an angle', () => {
+    for (const [file, src] of sky) {
+      expect(code(src), `${file} reads a world coordinate`).not.toMatch(/\.w[xz]\b/);
+    }
+    // Nothing to convert, so nothing imports the floating origin; and
+    // `originAt` — the tool for doing the subtraction by hand — least of all.
+    const originImporters = skySites.filter((s) => ORIGIN.test(s.specifier));
+    expect(originImporters.map((s) => `${s.file}: ${s.statement}`)).toEqual([]);
+  });
+
+  it('imports world/ as types only — it is handed a weather reading and a sun position, and decides neither', () => {
+    const fromWorld = skySites.filter((s) => /(^|\/)world(\/|$)/.test(s.specifier));
+    expect(fromWorld.length).toBeGreaterThan(0);
+    expect(fromWorld.filter((s) => !s.typeOnly).map((s) => `${s.file}: ${s.statement}`)).toEqual([]);
+    for (const [file, src] of sky) {
+      const body = code(src);
+      expect(body, `${file} constructs a SkyModel`).not.toMatch(/new\s+SkyModel\b/);
+      expect(body, `${file} computes the sun itself`).not.toMatch(/\bsunPosition\(/);
+      expect(body, `${file} reads the clock`).not.toMatch(/\bDate\.now\(/);
+    }
+  });
+
+  it('keeps skyLook pure: no three, no DOM, so the look is testable without a canvas', () => {
+    const look = sky.get('skyLook.ts') ?? '';
+    const sites = importsOf('skyLook.ts', look);
+    expect(sites.filter((s) => s.specifier === 'three' || s.specifier.startsWith('three/')).map((s) => s.statement)).toEqual([]);
+    expect(sites.filter((s) => !s.typeOnly).map((s) => s.statement)).toEqual([]);
+    expect(code(look)).not.toMatch(/\b(document|window|navigator|localStorage)\b/);
+  });
+
+  it('never imports actor/, view/, session/, ui/ or net/: the sky does not know who is under it', () => {
+    const banned = /(^|\/)(actor|view|session|ui|net)(\/|$)/;
+    const offenders = skySites.filter((s) => banned.test(s.specifier));
     expect(offenders.map((s) => `${s.file}: ${s.statement}`)).toEqual([]);
   });
 });

@@ -122,6 +122,16 @@ src/
                 heightfield: a twig along the slope, a rock on its base,
                 bedded; a tree up, buried as the slope needs. Added in
                 Phase 6.
+  sky/          the sky's renderer: SkyView (an HDRI skydome — two images
+                cross-faded and turned so the baked sun stands at the
+                real one's bearing — that drives the sun light, the sky
+                light, the fog and the horizon), skyLook (pure: the light
+                and the air from the weather and the sun's position),
+                RainView (v0's rain, a sheet of drops around the camera).
+                What terrain/ is to the heightfield and flora/ to
+                world/objects, this is to world/weather and its solar
+                clock: the only place a reading meets a light. Added in
+                Phase 5.
   camera/       FollowCamera + CameraOwnership. Phase 0 has FreeFlyCamera
                 only (under perf/).
   input/        keyboard / pointer / touch (Input.ts, DOM) → one shared
@@ -182,6 +192,8 @@ terrain → three, world(heightfield as types, coords, origin, dem, demRepair),
 terrain → NEVER actor, view, session, ui (the ground does not know who stands on it)
 flora → three, world(objects, habitat/heightfield as types, coords, origin, random) — nothing else
 flora → NEVER actor, view, session, ui, net (the grass does not know who walks through it)
+sky → three, world(weather as types, weather/solar, coords, origin), assets(textureQuality, skyManifest, skySource) — nothing else
+sky → NEVER actor, view, session, ui, net, perf (the sky does not know who is under it)
 actor → NEVER view (a state module does not know what it looks like)
 ui → NEVER world, actor, autonomy, session internals (typed hooks only)
 camera → NEVER actor mode enums (continuous signals only)
@@ -466,7 +478,7 @@ permanently excluded.
 | 2 Kauaʻi terrain | heightfield with a `WorldPoint`-typed API, chunk streaming keyed by global chunk id, terrain layer in the perf world. The `discovery.ts` codec moves here from Phase 1: there is nothing to discover before terrain | `heightfield.ts`, `kauai*.ts`, `demRepair.ts`, `lod.ts`, `stableHash.ts`, `discovery.ts`, the DEM binaries, their tests |
 | 3 Ocean | the accepted look, two-owner water router from day one | `seaSwell.ts`, `surf.ts`, `Ocean.ts`, `waterLook.ts`, `liveSea.ts`, foam probe + `oceanShader` fixture test |
 | 4 Inland water | hydrology bake feeding the local solver; per-reach bed materials; cascade FX; NHDPlus/DLNR names | `drainage.ts`, `islandChannels.ts`, `hydro.ts`, `waterSim.ts`, `nearestWater.ts` |
-| 5 Sky / weather | weather field + live feeds | `weather/*` |
+| **5 Sky / weather** | **The island's sky, live (2026-09-07).** Joshua: "real weather synced… with a skybox HDRI." THE FEED: `world/weather/liveWeather.ts` — one `WeatherSource`, live → cached → simulated: v0's Open-Meteo provider re-added as `assets/openMeteo.ts` (the only file that spells the endpoint; a reply is untrusted input), v0's 22-station grid (`stations.ts`), field (`field.ts`, a Shepard taper over 20 km, wind as a velocity vector) and blend (`blend.ts`, per-variable easing in sim time) ported into core, the reading kept three hours in this device's storage (`persistence/weatherCache.ts`), the seeded `SkyModel` under it all, `Conditions` → `WeatherNow` through `toWeatherNow`. THE SUN: `world/weather/solar.ts`, NOAA's equations on the real HST clock, pinned against Līhuʻe's published sunrise and sunset. THE LOOK: `sky/` — `skyLook` (pure: image, light, fog, horizon from the reading and the sun; overcast goes diffuse, not merely dim), `SkyView` (an HDRI skydome of Poly Haven CC0 pure skies from TCS baked to the texture ladder by `scripts/bakeSky.mjs`, two images cross-faded and turned so the baked sun stands at the real one's bearing, driving the scene's sun and sky lights, fog and horizon), `RainView` (v0's rain sheet). The HUD's sky line names the source (`live`/`cached`/`sim`); `?sky=`/`?hour=` are a probe's doors (`probe:sky`); the `weather` layer toggle is real. NOT built: lightning, wind on the grass, wet ground, an environment map (PMREM) — the lights are driven numerically first, to be measured on the phone | `openMeteo.ts`, `stations.ts`, `field.ts`, `blend.ts`, `gameplay.ts`'s bridge (as `toWeatherNow`), `Rain.ts` (as `sky/RainView.ts`), `sky.ts`'s palette and fog rule (as `sky/skyLook.ts`); TCS's `public/sky/*.hdr` as art masters. `WeatherService.ts` was read and reshaped rather than ported: its chain is `LiveWeather`, its cache the persistence store, its clock a hook |
 | **6 Vegetation** | **The biome-aware world-object streamer (2026-09-06).** Three questions answered apart: HABITAT (`world/habitat.ts` — the ESA landcover raster, distance to the sea, the coarse survey's height and slope, the drainage; rainfall and soil as typed seams), WORLD GENERATION (`world/objects/populate.ts` — one fixed seed + a 16 m cell + the habitat → a jittered-lattice, patch-clumped, deterministic population with stable ids on trees and rocks and a `WorldDelta` seam), DETAIL (`world/objects/budget.ts` — the rung's radius and per-family caps, maximums not quotas). Drawn by `flora/WorldObjects.ts` as a camera bubble of instanced meshes, thinned by rank against true 3D distance, each object at its family's REST on the ground (foot and normal from the live heightfield, re-posed on its revision: twigs along the slope, rocks and stones on their base and bedded, trees up and buried as the slope needs — Joshua's "basic collision with ground and simple physics for now", 2026-09-06, from his phone) over a clipmap that draws the heightfield at up to an eighth of the HD step so the drawn ground is where the feet are (`terrain/TerrainView.ts`, `SUB_HD_LEVELS`); the `vegetation` layer in the perf world with its own HUD lines and `probe:objects`. NOT built, by the brief: climbing, collision, wind, persistence of deltas (the seam exists; nothing writes it), the far vegetation impostor past the bubble | `stableHash` (as `world/random.ts`), `landcover.ts` (reshaped: a class, bilinear class weights), `kauai-veg.bin` verbatim, `treeMesh` (as `flora/treeGeometry.ts`, plus scrub and palm shapes). `GroundCover` and `trunkSolid` were read and not ported: the first never ran in a shipped scene, the second is Phase 7/8's |
 | 7 Player shell | `actor/` composition, `Posture` incl. climbing, camera ownership seam | `locomotion`, `gait`, `pace`, `stamina`, `motion`, `castes`, `FollowCamera` + its boundary test |
 | 8 Ground movement → Flight → Surface traversal | one atomic take-off (`launchInto`), integration test for flight↔climb | `flight.ts`, `wings`, `wingbeat`, `climb.ts`, `surfaceGrip.ts`, `waveClearance`, `wading` |

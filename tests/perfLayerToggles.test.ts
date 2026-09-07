@@ -14,13 +14,17 @@ describe('LayerToggles', () => {
     expect(rows.every((r) => !r.enabled)).toBe(true);
   });
 
-  it('this build has terrain, ocean, freshwater and vegetation, and the unbuilt rows cannot be switched on', () => {
-    // Phase 2 made `terrain` real, Phase 3 `ocean`, Phase 4 `freshwater`
-    // and Phase 6 `vegetation`; every other layer is still a row that reads
-    // "not built" and refuses to come on, which is §2.9 — an unavailable
-    // action must never look functional. Each name arrives in the commit
-    // that makes ITS toggle draw something, and not before.
-    expect(BUILT_LAYERS).toEqual(['terrain', 'ocean', 'freshwater', 'vegetation']);
+  it('this build has terrain, ocean, freshwater, weather and vegetation, and the unbuilt rows cannot be switched on', () => {
+    // Phase 2 made `terrain` real, Phase 3 `ocean`, Phase 4 `freshwater`,
+    // Phase 6 `vegetation` and Phase 5 `weather` (the sky: an HDRI dome,
+    // the sun, the fog and the rain, driven by Kauaʻi's real weather);
+    // every other layer is still a row that reads "not built" and refuses
+    // to come on, which is §2.9 — an unavailable action must never look
+    // functional. Each name arrives in the commit that makes ITS toggle
+    // draw something, and not before.
+    expect(BUILT_LAYERS).toEqual(['terrain', 'ocean', 'freshwater', 'weather', 'vegetation']);
+    // In the world plan's order, whatever order the phases landed in.
+    expect(BUILT_LAYERS).toEqual(WORLD_LAYERS.filter((id) => BUILT_LAYERS.includes(id)));
     const built = new Set<string>(BUILT_LAYERS);
     const toggles = new LayerToggles(BUILT_LAYERS);
     for (const row of toggles.list()) {

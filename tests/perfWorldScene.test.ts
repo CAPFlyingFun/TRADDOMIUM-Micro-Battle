@@ -29,6 +29,8 @@ import { PERF_WORLD_SCENE_ID } from '../src/perf/perfTool';
 import type { GameSession, SessionSaveState } from '../src/session/GameSession';
 import { RemoteMultiplayerSession } from '../src/session/RemoteMultiplayerSession';
 import { world } from '../src/world/coords';
+import { TYPICAL } from '../src/world/weather/conditions';
+import { hstToUnixMs } from '../src/world/weather/solar';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { decodeCoarse, heightOf } from '../src/world/dem';
@@ -65,6 +67,10 @@ interface RigOptions {
   readonly landcover?: PerformanceWorldHooks['landcover'];
   readonly settings?: PerformanceWorldHooks['settings'];
   readonly onHudCollapse?: PerformanceWorldHooks['onHudCollapse'];
+  readonly weather?: PerformanceWorldHooks['weather'];
+  readonly weatherCache?: PerformanceWorldHooks['weatherCache'];
+  readonly clock?: PerformanceWorldHooks['clock'];
+  readonly skyOverride?: PerformanceWorldHooks['skyOverride'];
 }
 
 function rig(initial: AppState, options: RigOptions = {}) {
@@ -111,6 +117,10 @@ function rig(initial: AppState, options: RigOptions = {}) {
     landcover: options.landcover,
     settings: options.settings,
     onHudCollapse: options.onHudCollapse,
+    weather: options.weather,
+    weatherCache: options.weatherCache,
+    clock: options.clock,
+    skyOverride: options.skyOverride,
   };
   const scene = createPerformanceWorldScene(hooks)(ctx);
   const field = (name: string): string =>
@@ -180,6 +190,55 @@ describe('PerformanceWorldScene', () => {
     expect(start.distanceTo(scene.camera.position)).toBeCloseTo(DEFAULT_SPEED, 6);
     expect(scene.camera.position.z).toBeLessThan(start.z);
     input.detach();
+  });
+
+  it('prints the sky on the HUD and says SIM when nothing but the model is answering', async () => {
+    // Phase 5's honesty rule: the line names its source. No provider is
+    // wired here, so the seeded model answers and the line must say so.
+    const { scene, uiLayer, field, frame } = rig('loading', { clock: () => hstToUnixMs(2026, 9, 7, 14, 32) });
+    await scene.enter();
+    frame();
+    frame(0.1);
+    expect(field('weather-sky')).toMatch(/^sky (clear|cloudy|rain) \d+%$/);
+    expect(field('weather-clock')).toMatch(/· sim$/);
+    expect(field('weather-rain')).toMatch(/^rain \d+\.\d mm\/h$/);
+    expect(field('weather-clock')).toMatch(/^14:32 · sun [-−]?\d+° · sim$/);
+    // 14:32 HST in September: the sun is well up.
+    expect(Number(/sun ([-−]?\d+)°/.exec(field('weather-clock'))![1].replace('−', '-'))).toBeGreaterThan(30);
+    // The weather row is not a layer in an empty world: no island, no sky to draw.
+    expect(uiLayer.querySelector<HTMLInputElement>('[data-action="layer:weather"]')?.disabled).toBe(true);
+    scene.dispose();
+  });
+
+  it('holds a sky open for the address bar and says SIM while it does', async () => {
+    const { scene, field, frame } = rig('loading', { skyOverride: 'rain', clock: () => hstToUnixMs(2026, 9, 7, 1, 0) });
+    await scene.enter();
+    // From the FIRST frame: a held sky is warmed an hour at start, so a
+    // probe (a tenth of a simulated second a frame) never sees it easing.
+    frame();
+    frame(0.1);
+    expect(field('weather-sky')).toMatch(/^sky rain \d+%$/);
+    expect(field('weather-clock')).toMatch(/· sim$/);
+    // The HUD prints a real minus sign (U+2212) below the horizon.
+    expect(field('weather-clock')).toMatch(/^01:00 · sun −\d+° · sim$/);
+    scene.dispose();
+  });
+
+  it('reads the island live once a provider answers, and says LIVE', async () => {
+    const provider = {
+      id: 'fake',
+      sample: async (points: readonly { lat: number; lon: number }[]) => points.map(() => ({ ...TYPICAL, precipitation: 6, cloud: 95, code: 61 })),
+    };
+    const { scene, field, frame } = rig('loading', { weather: provider, clock: () => hstToUnixMs(2026, 9, 7, 12, 0) });
+    await scene.enter();
+    frame();
+    // The first refresh is asked for on the first frame; let it land.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    for (let i = 0; i < 30; i += 1) frame(10);
+    expect(field('weather-clock')).toMatch(/· live$/);
+    expect(field('weather-sky')).toMatch(/^sky rain/);
+    scene.dispose();
   });
 
   it('folds the HUD by its corner button and hands the fold to the owner to keep', async () => {
@@ -922,6 +981,47 @@ describe('PerformanceWorldScene with the real island under it', () => {
     onBytes(buffer.byteLength, buffer.byteLength);
     return buffer;
   };
+
+  it('draws the sky over the island: a dome that follows the camera, a sun that follows the clock, and a toggle that restores noon', async () => {
+    // Phase 5. Two rigs at two hours of the same day, both over the island.
+    const noon = rig('loading', { survey, clock: () => hstToUnixMs(2026, 9, 7, 12, 0) });
+    await noon.scene.enter();
+    noon.frame();
+    const dome = noon.scene.three.getObjectByName('sky');
+    expect(dome).not.toBeNull();
+    expect(dome?.visible).toBe(true);
+    expect(noon.uiLayer.querySelector<HTMLInputElement>('[data-action="layer:weather"]')?.checked).toBe(true);
+    const sun = noon.scene.three.children.find((c): c is THREE.DirectionalLight => c instanceof THREE.DirectionalLight);
+    expect(sun).toBeDefined();
+    // At noon the sun stands high: its direction from its target is mostly up.
+    const dir = sun!.position.clone().sub(sun!.target.position).normalize();
+    expect(dir.y).toBeGreaterThan(0.8);
+    const noonIntensity = sun!.intensity;
+    expect(noon.field('weather-clock')).toMatch(/^12:00 ·/);
+
+    const night = rig('loading', { survey, clock: () => hstToUnixMs(2026, 9, 7, 1, 0) });
+    await night.scene.enter();
+    night.frame();
+    const moon = night.scene.three.children.find((c): c is THREE.DirectionalLight => c instanceof THREE.DirectionalLight);
+    // Night: the key light is dim, and floored above the horizon rather than shining up from underground.
+    expect(moon!.intensity).toBeLessThan(noonIntensity * 0.5);
+    const nightDir = moon!.position.clone().sub(moon!.target.position).normalize();
+    expect(nightDir.y).toBeGreaterThan(0);
+    expect(night.field('weather-clock')).toMatch(/^01:00 · sun −\d+° · sim$/);
+
+    // The toggle off: the dome hides and the fixed noon comes back — the same numbers, so the toggle measures cost, not look.
+    const box = must(night.uiLayer.querySelector<HTMLInputElement>('[data-action="layer:weather"]'), 'weather box');
+    box.checked = false;
+    box.dispatchEvent(new Event('change'));
+    night.frame();
+    expect(night.scene.three.getObjectByName('sky')?.visible).toBe(false);
+    expect(moon!.intensity).toBeCloseTo(1.15, 6);
+    // And the reading still moves: the HUD line is the island's, whatever is drawn.
+    expect(night.field('weather-sky')).toMatch(/^sky (clear|cloudy|rain) \d+%$/);
+    noon.scene.dispose();
+    night.scene.dispose();
+    expect(noon.scene.three.getObjectByName('sky')).toBeUndefined();
+  });
 
   it('grows the island when the landcover lands: VEGETATION built and on, counts on the HUD, the layer toggling', async () => {
     const { scene, uiLayer, frame } = rig('loading', { survey, landcover });

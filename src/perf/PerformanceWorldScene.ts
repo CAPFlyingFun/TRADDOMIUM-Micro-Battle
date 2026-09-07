@@ -80,8 +80,16 @@ import { HabitatMap } from '../world/habitat';
 import { VEG_BYTES, decodeVeg } from '../world/landcover';
 import { WORLD_SEED } from '../world/objects/seed';
 import { islandChannels, type IslandChannels } from '../world/water/islandChannels';
+import type { WeatherProvider } from '../world/weather/conditions';
+import { LiveWeather, type WeatherCache } from '../world/weather/liveWeather';
 import { SkyModel } from '../world/weather/skyModel';
-import { rainToUnitsPerSecond } from '../world/weather/weather';
+import { kauaiClock, sunPosition, type SunPosition } from '../world/weather/solar';
+import { skyLoaderFor } from '../assets/skySource';
+import { RainView } from '../sky/RainView';
+import { SkyView } from '../sky/SkyView';
+import { skyLook } from '../sky/skyLook';
+import { rainToUnitsPerSecond, type Sky, type WeatherNow } from '../world/weather/weather';
+import { worldToGeo } from '../world/geo';
 import { SeaTextures } from '../sea/SeaTextures';
 import { SeaSwell } from '../world/sea/swell';
 import { resolveTier, tierFor, type TextureTier } from '../assets/textureQuality';
@@ -181,6 +189,34 @@ export interface PerformanceWorldHooks {
    * is nothing to grow on without it.
    */
   landcover?(onBytes: (received: number, total: number | null) => void): Promise<ArrayBuffer>;
+  /**
+   * THE ISLAND'S WEATHER, live (Phase 5, Joshua 2026-09-07: "real weather
+   * synced"): somewhere that answers with conditions for the station
+   * grid. Wired the same way as the survey and the landcover, and for the
+   * same reason: constructing the world reaches no network, and this is
+   * the one place that says the weather is Open-Meteo's. Absent or null:
+   * the seeded simulation alone, and the HUD says `sim`.
+   */
+  weather?: WeatherProvider | null;
+  /**
+   * Where a live reading is kept between sessions, so the second launch
+   * on a plane still looks like Kauaʻi rather than like the model. A
+   * typed seam over storage; absent: nothing is kept.
+   */
+  weatherCache?: WeatherCache | null;
+  /**
+   * The wall clock, Unix milliseconds, for the sun's position and the
+   * feed's cadence. A hook so a probe can hold the island at an hour
+   * (`?hour=`) and a test can run a day in a second. Absent: the scene
+   * uses `Date.now`.
+   */
+  clock?(): number;
+  /**
+   * A sky held open by the address bar (`?sky=clear|cloudy|rain`), the
+   * way `?tier=` holds a rung: an override for a probe, never a setting.
+   * Null or absent: the weather is its own.
+   */
+  skyOverride?: Sky | null;
   /**
    * The current settings. Read once in `enter()` and again whenever the
    * app state changes — the pause menu is where a player changes them, and
@@ -331,6 +367,9 @@ const LINK_OF: Readonly<Record<NetworkedWorldState, SessionLink>> = {
  * a solo benchmark nothing and a multiplayer one no more than the HUD.
  */
 export const REMOTE_CAPSULES_ROLE = 'remote-capsules';
+
+/** How far the weather model is run in one step when a sky is held open at start, seconds — an hour, so the held sky has fully arrived. */
+const HELD_SKY_WARM_UP_S = 3600;
 
 /** The sky the grid vanishes into, and the fog that makes it vanish. */
 const HORIZON = '#9db6c6';
@@ -595,7 +634,46 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
     let fresh: IslandWater | null = null;
     let channels: IslandChannels | null = null;
     let freshOn = false;
-    const weather = new SkyModel();
+    /**
+     * THE WEATHER, live (Phase 5). Open-Meteo over the station grid when
+     * the owner wires a provider, kept on this device for three hours,
+     * and the seeded model under it all — one `WeatherSource` whichever
+     * is answering, and the HUD says which. The clock is the owner's, so
+     * a probe can hold the island at an hour; the sky may be held open
+     * the same way (`?sky=`), and the model is what gets held.
+     */
+    const clock = hooks.clock ?? (() => Date.now());
+    const weather = new LiveWeather({
+      provider: hooks.weather ?? null,
+      clock,
+      cache: hooks.weatherCache ?? null,
+      fallback: new SkyModel(),
+    });
+    if (hooks.skyOverride !== undefined && hooks.skyOverride !== null) {
+      // Held from the first frame: the model eases toward a forced sky
+      // over minutes of simulated time (it does not snap, by design),
+      // and a probe or a look that asked for rain wants rain NOW. An
+      // hour in one step is inside the model's own clamp, and nothing
+      // has read the reading yet, so no water sees an hour of it.
+      weather.force(hooks.skyOverride);
+      weather.tick(HELD_SKY_WARM_UP_S);
+    }
+    /** This frame's reading at the camera, and the sun over it. */
+    let weatherNow: WeatherNow = weather.now();
+    let sunNow: SunPosition | null = null;
+    let sunElevationDeg = 0;
+    /** What the weather toggle was at the last look. */
+    let weatherOn = false;
+    /**
+     * THE SKY DRAWN (Phase 5): the dome, the rain, and the light they
+     * drive. Built only over an island — the empty world keeps its flat
+     * horizon, so the weather row there reads "not built" honestly — and
+     * rebuilt when the texture or detail rung changes, like the sea.
+     */
+    let skyView: SkyView | null = null;
+    let rain: RainView | null = null;
+    let builtSkyTier: TextureTier | null = null;
+    let builtRainDetail: DetailTier | null = null;
     /** The tier the sea was BUILT at, so a changed setting is noticed once and rebuilt once. */
     let builtTier: TextureTier | null = null;
     let builtDetail: DetailTier | null = null;
@@ -961,12 +1039,95 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
      * permanently wet — the thing Joshua asked v0 about, and the reason
      * `drainage.ts` exists at all.
      */
+    /**
+     * The weather's frame: advance it by SIMULATION seconds (paused, the
+     * sky holds still with everything else), read it where the camera
+     * is, ask for fresh readings when they are due, and find the sun.
+     * Runs before the water, which reads the rain this frame took.
+     */
+    const updateWeather = (dt: number): void => {
+      if (toggles.isEnabled('weather') !== weatherOn) syncWeatherLayer();
+      weather.tick(dt);
+      const at = fly.pose().at;
+      weatherNow = weather.sample(at);
+      if (weather.dueForRefresh()) void weather.refresh();
+      sunNow = sunPosition(clock(), worldToGeo(at));
+      sunElevationDeg = sunNow.elevation * (180 / Math.PI);
+      // The dome and the light it drives, BEFORE the water's fog: under
+      // the sea the underwater look overwrites what the sky set, every
+      // frame, which is the order that makes the surface the boundary.
+      if (weatherOn && skyView !== null) skyView.update(skyLook(weatherNow, sunNow), fly.camera);
+      if (weatherOn && rain !== null) rain.update(weatherNow, fly.camera, dt);
+    };
+
+    /**
+     * The dome and the rain, at the rungs the settings name. A no-op when
+     * nothing changed; a rebuild when a rung did, because the dome's
+     * images are baked per rung and the rain's cap is the detail rung's.
+     */
+    const buildSky = (): void => {
+      if (terrain === null || light === null || sky === null) return;
+      const set = hooks.settings?.();
+      const tier = resolveTier(hooks.tierOverride ?? null, tierFor(set?.textures ?? 'medium'));
+      const detail = resolveDetail(hooks.detailOverride ?? null, detailFor(set?.detail ?? 'medium'));
+      if (skyView !== null && builtSkyTier !== tier) {
+        three.remove(skyView.group);
+        skyView.dispose();
+        skyView = null;
+      }
+      if (skyView === null) {
+        skyView = new SkyView({ tier, load: skyLoaderFor({ base: import.meta.env.BASE_URL }) });
+        skyView.bind({ sun: light, hemisphere: sky, fog: three.fog as THREE.Fog | null, background: three.background as THREE.Color });
+        three.add(skyView.group);
+        builtSkyTier = tier;
+      }
+      if (rain !== null && builtRainDetail !== detail) {
+        three.remove(rain.group);
+        rain.dispose();
+        rain = null;
+      }
+      if (rain === null) {
+        rain = new RainView({ detail });
+        three.add(rain.group);
+        builtRainDetail = detail;
+      }
+      skyView.group.visible = weatherOn;
+      rain.group.visible = weatherOn;
+    };
+
+    /**
+     * Show or hide the sky's weather: the dome, the rain and the light it
+     * drives. Off, the world goes back to the fixed noon it shipped with
+     * — the same numbers `skyLook` gives a clear noon, so the toggle
+     * measures the sky's COST and not a different look. The reading
+     * itself never stops: the HUD's line still moves with the island.
+     */
+    const syncWeatherLayer = (): void => {
+      weatherOn = toggles.isEnabled('weather');
+      if (skyView !== null) skyView.group.visible = weatherOn;
+      if (rain !== null) rain.group.visible = weatherOn;
+      if (weatherOn || light === null || sky === null) return;
+      light.color.set(0xfff4e0);
+      light.intensity = 1.15;
+      light.position.set(200, 400, 100);
+      light.target.position.set(0, 0, 0);
+      light.target.updateMatrixWorld();
+      sky.color.set(HORIZON);
+      sky.groundColor.set(GROUND_BOUNCE);
+      sky.intensity = 1.0;
+      const fog = three.fog as THREE.Fog | null;
+      if (fog !== null) fog.color.set(HORIZON);
+      (three.background as THREE.Color).set(HORIZON);
+      // near/far belong to `adaptDepth`, as they do when she surfaces.
+      builtNear = 0;
+      adaptDepth();
+    };
+
     const updateFresh = (dt: number): void => {
       if (fresh === null) return;
       if (toggles.isEnabled('freshwater') !== freshOn) syncFreshLayer();
       if (!freshOn) return;
-      const now = weather.advance(dt);
-      fresh.update(fly.pose().at, dt, rainToUnitsPerSecond(now.rainMmHr), BASEFLOW_PER_SECOND);
+      fresh.update(fly.pose().at, dt, rainToUnitsPerSecond(weatherNow.rainMmHr), BASEFLOW_PER_SECOND);
       fresh.tick(dt);
     };
 
@@ -1229,6 +1390,7 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
       // changed, which is every state change but the one that did.
       buildOcean();
       buildObjects();
+      buildSky();
     };
 
     /** The save point: the camera, in world coordinates, through whichever session the app holds. */
@@ -1380,6 +1542,17 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
           fresh: field === null ? undefined : freshCost,
           // THE LINES EXIST ONLY WHERE THERE IS LANDCOVER TO GROW FROM.
           objects: habitat === null ? undefined : objectsCost,
+          // THE SKY'S LINES, always: the reading exists whether or not
+          // there is an island under it, and its source word is the
+          // honesty rule in print.
+          weather: () => ({
+            sky: weatherNow.sky,
+            rainMmHr: weatherNow.rainMmHr,
+            cloud: weatherNow.cloud,
+            source: weatherNow.source,
+            clock: kauaiClock(clock()),
+            sunElevationDeg,
+          }),
           // THE COLUMN EXISTS ONLY WHERE A SEA DOES. Whether this world
           // has one is settled by now — `buildOcean` has already run, and
           // it can only ever succeed if the survey downloaded — so an
@@ -1468,6 +1641,13 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
           toggles.setEnabled('vegetation', true);
           syncObjectsLayer();
         }
+        // AND THE SKY. On wherever there is an island for it to be over;
+        // the toggle is how what it costs gets measured, like the rest.
+        if (terrain !== null) {
+          toggles.setEnabled('weather', true);
+          buildSky();
+          syncWeatherLayer();
+        }
 
         // The wire, last: the world is already whole and measurable
         // without it, which is the point — a relay that never answers
@@ -1533,6 +1713,7 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         // a frozen camera, and the ONE clock would then disagree with the
         // dt every other system integrated on.
         updateOcean(frame.simDt);
+        updateWeather(frame.simDt);
         updateFresh(frame.simDt);
         updateObjects();
         // AFTER the ocean, so the swell it asks about is this frame's.
@@ -1660,6 +1841,18 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         hud?.dispose();
         stick?.dispose();
         stick = null;
+        if (skyView !== null) {
+          three.remove(skyView.group);
+          skyView.dispose();
+          skyView = null;
+        }
+        if (rain !== null) {
+          three.remove(rain.group);
+          rain.dispose();
+          rain = null;
+        }
+        builtSkyTier = null;
+        builtRainDetail = null;
         hud = null;
         pauseButton?.remove();
         pauseButton = null;

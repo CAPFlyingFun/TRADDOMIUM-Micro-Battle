@@ -184,6 +184,16 @@ its own.
   the same place at every rung. Trees and rocks carry stable ids
   (`tree:cx,cz:site`); a future save stores DELTAS against them, never
   the generated world.
+- **The sky is the island's, or it says so** (Phase 5, 2026-09-07). The
+  weather is read live from Open-Meteo over the 22-station grid, kept
+  for three hours, and only then falls back to the seeded model — and
+  the HUD's sky line names which of the three it is showing (`live`,
+  `cached`, `sim`). `?sky=` and `?hour=` hold a sky or an hour open for
+  a probe or a look, the way `?tier=` holds a rung: overrides, never
+  settings, and the line reads `sim` while one is in force. The sun's
+  place comes from the real HST clock through `world/weather/solar.ts`
+  (NOAA's equations, pinned against Līhuʻe's published sunrise); nothing
+  invents a time of day.
 - A client-side PIN is a convenience, not security.
 - Every file in `scripts/` is wired to a `package.json` script or listed
   in `scripts/MANUAL.md`.

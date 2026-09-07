@@ -177,6 +177,36 @@ export interface ObjectsReadout {
   readonly habitat: string;
 }
 
+/**
+ * WHAT THE SKY IS DOING, as the HUD is told it — Phase 5's device-visible
+ * line. The weather is read live from Open-Meteo, kept for three hours,
+ * and only then falls back to the seeded model (CLAUDE.md, "The sky is
+ * the island's, or it says so"), and THE SOURCE IS THE POINT of this
+ * readout: a sky drawn from a simulation may not say it is the island's
+ * weather, so the word beside the cloud figure is which of the three it
+ * is, and a held `?sky=` reads `sim` however real it looks.
+ *
+ * THE CLOCK AND THE SUN ARE ON THE SAME LINE because `?hour=` holds the
+ * one and the other is astronomy from it (`world/weather/solar.ts`), and
+ * a photograph of noon that reads 14:32 is a photograph of the hold not
+ * holding. Plain words and numbers: the HUD prints what it is told and
+ * never learns what a `WeatherNow` is.
+ */
+export interface WeatherReadout {
+  /** The sky's headline state, one word: clear, cloudy, rain… */
+  readonly sky: string;
+  /** Rainfall rate in millimetres an hour; zero when it is not raining. */
+  readonly rainMmHr: number;
+  /** Cloud cover, 0 clear to 1 overcast. */
+  readonly cloud: number;
+  /** Where the reading came from — printed as `live`, `cached` or `sim`. */
+  readonly source: 'live' | 'cached' | 'simulated';
+  /** The island's wall clock, `HH:MM`, Hawaii Standard Time. */
+  readonly clock: string;
+  /** The sun's geometric elevation in degrees; negative below the horizon. */
+  readonly sunElevationDeg: number;
+}
+
 export interface PerfHudHooks {
   /** The rows to show. Re-read at every refresh so the checkboxes follow the model, not the clicks. */
   layers(): readonly LayerToggle[];
@@ -198,6 +228,12 @@ export interface PerfHudHooks {
   fresh?(): FreshReadout | null;
   /** The world's objects — grass, twigs, stones, rocks, trees. Absent where a world has none. */
   objects?(): ObjectsReadout | null;
+  /**
+   * The sky: what it is doing, where the reading came from, and what
+   * o'clock the sun is standing at. Absent where a world has no weather
+   * to ask; null means it has one that has not answered yet.
+   */
+  weather?(): WeatherReadout | null;
   /**
    * The player folded or unfolded the sheet. Fired by the corner button
    * and the folded row ONLY — never by the `collapsed` setter — so the
@@ -344,6 +380,53 @@ function seaWords(sea: SeaReadout | null): readonly [string, string, string, str
   ];
 }
 
+/**
+ * One word per weather source, and not a longer one than is true: the
+ * seeded model says `sim`, never anything that could pass for the island.
+ */
+const SOURCE_WORDS: Readonly<Record<WeatherReadout['source'], string>> = {
+  live: 'live',
+  cached: 'cached',
+  simulated: 'sim',
+};
+
+/**
+ * The sky's two lines, or the honest absence of them.
+ *
+ * `sky clear 12% · live` — the sky word, the cloud cover as a whole
+ * percent, and WHERE THE READING CAME FROM, which is the one word on
+ * the sheet that keeps a simulated sky from being mistaken for Kauaʻi's.
+ * `rain 0.0 mm/h · 14:32 · sun 61°` — the rate to one decimal, the
+ * island's clock, and the sun's elevation as a whole degree, `sun −8°`
+ * below the horizon (a proper minus sign, so it cannot be read as a
+ * dash between two numbers). "sky —" when the world has a sky that has
+ * not answered yet, for the same reason the sea says "not built".
+ *
+ * THE SKY AND THE RAIN IN THE FRAME COLUMN, under the objects' lines,
+ * for the same reason the sea's are: a sixth column does not fit beside
+ * PAUSE at the 932 px canvas — and NO WIDER than the column already is
+ * (`95th low 52.6 fps`, seventeen characters). THE CLOCK, THE SUN AND
+ * THE SOURCE WORD IN THE CAMERA COLUMN, under `above`, because they are
+ * facts about where, when and from what the eye is looking, and because
+ * that column's position line is the widest thing on the HUD already: a
+ * line there widens nothing. The first cut put all of it on one FRAME
+ * line and slid the whole panel 13 px under PAUSE; the second put the
+ * source word on the sky line, three characters over, and `probe:bot`
+ * — which measures the edge with a room's long SESSION line — found 7 px
+ * of overlap (2026-09-07). The source word is still printed every frame;
+ * it is the honesty rule, and it moved columns, not off the sheet.
+ */
+function weatherWords(weather: WeatherReadout | null): readonly [string, string, string] {
+  if (weather === null) return ['sky —', '', ''];
+  const cloud = Math.round(100 * Math.min(1, Math.max(0, weather.cloud)));
+  const sun = Math.round(weather.sunElevationDeg);
+  return [
+    `sky ${weather.sky} ${cloud}%`,
+    `rain ${weather.rainMmHr.toFixed(1)} mm/h`,
+    `${weather.clock} · sun ${sun < 0 ? `−${-sun}` : `${sun}`}° · ${SOURCE_WORDS[weather.source]}`,
+  ];
+}
+
 export class PerfHud {
   private readonly root: HTMLElement;
   private readonly fields: Readonly<Record<Field, HTMLElement>>;
@@ -354,6 +437,8 @@ export class PerfHud {
   /** Built only when the owner offers a `fresh()` hook; null otherwise. */
   private readonly freshLines: readonly [HTMLElement, HTMLElement] | null;
   private readonly objectLines: HTMLElement[] | null;
+  /** Built only when the owner offers a `weather()` hook; null otherwise. Sky and rain in FRAME, the clock in CAMERA. */
+  private readonly weatherLines: readonly [HTMLElement, HTMLElement, HTMLElement] | null;
   private readonly boxes = new Map<WorldLayerId, HTMLInputElement>();
   /** Each layer row's wrapper and its text node, so the label can follow the model. */
   private readonly rows = new Map<string, { wrap: HTMLElement; text: Text }>();
@@ -435,6 +520,11 @@ export class PerfHud {
     this.objectLines = hooks.objects === undefined
       ? null
       : [line(frame, 'veg-cost'), line(frame, 'veg-cells'), line(frame, 'veg-grass'), line(frame, 'veg-clutter'), line(frame, 'veg-major')];
+    // And the sky under those — see `weatherWords` for the three lines,
+    // why they are not a column, and why the clock is the camera's.
+    this.weatherLines = hooks.weather === undefined
+      ? null
+      : [line(frame, 'weather-sky'), line(frame, 'weather-rain'), line(camera, 'weather-clock')];
     // Before LAYERS, which is a column of rows rather than a readout and
     // reads best last.
     if (hooks.session === undefined) {
@@ -630,6 +720,10 @@ export class PerfHud {
     if (this.objectLines !== null) {
       const words = objectWords(this.hooks.objects?.() ?? null);
       for (let i = 0; i < this.objectLines.length; i += 1) this.objectLines[i].textContent = words[i];
+    }
+    if (this.weatherLines !== null) {
+      const words = weatherWords(this.hooks.weather?.() ?? null);
+      for (let i = 0; i < this.weatherLines.length; i += 1) this.weatherLines[i].textContent = words[i];
     }
     // THE MODEL IS THE TRUTH, and that includes the WORDS. A click the
     // owner rejected snaps back here — and so does a row whose built-ness

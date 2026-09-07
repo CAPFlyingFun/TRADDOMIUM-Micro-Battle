@@ -108,7 +108,7 @@
  *
  * Pure: no three, no DOM, no fetch, no clock. `src/world/` is core.
  */
-import { skyIsBuilt, type Sky, type WeatherNow, type WeatherSource } from './weather';
+import { skyIsBuilt, type Sky, type WeatherNow, type WeatherSource, visibilityFor } from './weather';
 // The seeded sequence comes from the island's ONE source of stable numbers
 // (`world/random.ts`). This file used to carry a private copy of mulberry32
 // because `world/` may not import `net/`; the copy `world/` is allowed to
@@ -848,6 +848,8 @@ export class SkyModel implements WeatherSource {
       cloud,
       windX: Number.isFinite(this.windXNow) ? this.windXNow : 0,
       windZ: Number.isFinite(this.windZNow) ? this.windZNow : 0,
+      visibilityM: visibilityFor(rainMmHr, cloud),
+      source: 'simulated' as const,
     });
   }
 }

@@ -65,6 +65,11 @@ export function skyIsBuilt(sky: Sky): boolean {
   return BUILT_SKIES.includes(sky);
 }
 
+/** Whether a string names a BUILT sky — the guard the address bar's `?sky=` goes through. */
+export function isBuiltSky(name: unknown): name is Sky {
+  return typeof name === 'string' && (BUILT_SKIES as readonly string[]).includes(name);
+}
+
 /**
  * The weather at one moment, everywhere. One value, read by many.
  *
@@ -104,6 +109,43 @@ export interface WeatherNow {
    */
   readonly windX: number;
   readonly windZ: number;
+  /**
+   * How far a dark object can be told from the air, in METRES — what a
+   * forecast reports as visibility. Drives the fog: v0's rule, carried
+   * into Phase 5, is that fog density comes from this number and not
+   * from a hand-tuned constant, so a clear day on Kauaʻi shows the
+   * twenty-four kilometres of coastline it really shows. 24,000 is the
+   * clear-air ceiling the providers report.
+   */
+  readonly visibilityM: number;
+  /**
+   * Where this reading came from — the honesty rule (CLAUDE.md) for the
+   * HUD: a sky drawn from a simulation may not say it is the island's
+   * weather. `live` is a reading fetched this session, `cached` one
+   * kept from an earlier one and still young enough to describe the
+   * sky, `simulated` the seeded model.
+   */
+  readonly source: WeatherSourceKind;
+}
+
+export type WeatherSourceKind = 'live' | 'cached' | 'simulated';
+
+/** Clear air, as the providers report it: 24 km. */
+export const CLEAR_VISIBILITY_M = 24_000;
+
+/**
+ * What the air lets you see through when nobody has reported it — the
+ * simulated model's visibility. GAME TUNING shaped by the weather it
+ * stands in: clear air is the 24 km ceiling, an overcast sky takes it
+ * to about 16 km (haze under cloud), and rain closes it as the rate
+ * climbs — a 10 mm/hr shower to about 5 km, a 50 mm/hr downpour to
+ * under 2 — and never below 500 m, because a game you cannot see is
+ * not a weather effect.
+ */
+export function visibilityFor(rainMmHr: number, cloud: number): number {
+  const haze = 1 - 0.33 * Math.min(1, Math.max(0, cloud));
+  const rain = 1 / (1 + Math.max(0, rainMmHr) / 2.5);
+  return Math.max(500, CLEAR_VISIBILITY_M * haze * rain);
 }
 
 /** Fair weather: the state a world starts in and returns to. */
@@ -113,6 +155,8 @@ export const FAIR: WeatherNow = Object.freeze({
   cloud: 0.1,
   windX: 0,
   windZ: 0,
+  visibilityM: CLEAR_VISIBILITY_M,
+  source: 'simulated' as WeatherSourceKind,
 });
 
 /**

@@ -55,6 +55,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import { stubWeather } from './probeWeather.mjs';
 import { preview } from 'vite';
 import { startRelay } from './relayHarness.mjs';
 
@@ -328,6 +329,7 @@ async function checkThumbReachesCamera(page, what) {
 async function run(browser, url, room) {
   const context = await browser.newContext({ viewport: VIEWPORT });
   const page = await context.newPage();
+  await stubWeather(page);
   const consoleErrors = [];
   const pageErrors = [];
   page.on('console', (message) => {
