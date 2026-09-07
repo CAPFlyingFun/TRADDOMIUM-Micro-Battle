@@ -54,6 +54,7 @@ const terrain = dir('src/terrain');
 const sea = dir('src/sea');
 const flora = dir('src/flora');
 const sky = dir('src/sky');
+const fauna = dir('src/fauna');
 
 const actorSites = [...actor].flatMap(([f, src]) => importsOf(f, src));
 const viewSites = [...view].flatMap(([f, src]) => importsOf(f, src));
@@ -61,6 +62,7 @@ const terrainSites = [...terrain].flatMap(([f, src]) => importsOf(f, src));
 const seaSites = [...sea].flatMap(([f, src]) => importsOf(f, src));
 const floraSites = [...flora].flatMap(([f, src]) => importsOf(f, src));
 const skySites = [...sky].flatMap(([f, src]) => importsOf(f, src));
+const faunaSites = [...fauna].flatMap(([f, src]) => importsOf(f, src));
 
 const VIEW_DIR = /(^|\/)view(\/|$)/;
 const ORIGIN = /(^|\/)world\/origin$/;
@@ -378,6 +380,92 @@ describe('the world/sky seam', () => {
   it('never imports actor/, view/, session/, ui/ or net/: the sky does not know who is under it', () => {
     const banned = /(^|\/)(actor|view|session|ui|net)(\/|$)/;
     const offenders = skySites.filter((s) => banned.test(s.specifier));
+    expect(offenders.map((s) => `${s.file}: ${s.statement}`)).toEqual([]);
+  });
+});
+
+
+/**
+ * THE SIXTH RENDERER (ARCHITECTURE §3, amended 2026-09-07 with `fauna/`).
+ *
+ * `fauna/` draws the island's animals: rigs lent to the nearest
+ * creatures, impostors for the rest. Like `flora/` it has a genuine
+ * need for world distances — which creature is nearest the eye is a
+ * world question — and like `flora/` it seats every body through
+ * `toLocal`. But it is held to the SKY'S rule rather than the flora's
+ * sharpened one, with NO allowed `.wx` sites at all: every distance it
+ * measures goes through `coords.distanceSquared` and `coords.distance`,
+ * the worm's trail is a ring of `WorldPoint`s made by `coords.translate`
+ * and read back only through `toLocal`, so there is nothing left for a
+ * hand-rolled subtraction to hide behind. `rig.ts` and `motion.ts` work
+ * on a rig at the identity and a path already in render space, and
+ * import neither the origin nor the coordinates.
+ *
+ * It reads `creatures/` as TYPES and the table's own arithmetic: the
+ * one scale (`rigScale`), the one unit conversion (`unitsOfMm`), the
+ * id list and the set of airborne behaviours the state module publishes
+ * for renderers. It never imports the simulation, and it never
+ * constructs a loader — `assets.loadModel` is handed in.
+ */
+describe('the creatures/fauna seam', () => {
+  const ORIGIN_VALUE = /\boriginAt\b/;
+  /** The values `fauna/` may take from `creatures/`: the table's arithmetic and its published lists, never the simulation. */
+  const CREATURE_VALUES = new Set(['AIRBORNE', 'CREATURE_IDS', 'rigScale', 'unitsOfMm', 'CREATURE_SPECIES']);
+
+  it('has a fauna renderer to check', () => {
+    expect([...fauna.keys()]).toEqual(expect.arrayContaining(['FaunaView.ts', 'motion.ts', 'rig.ts']));
+    expect(faunaSites.length).toBeGreaterThan(0);
+  });
+
+  it('seats every body through toLocal, in FaunaView alone, and never subtracts an origin by hand', () => {
+    const originImporters = faunaSites.filter((s) => ORIGIN.test(s.specifier));
+    expect(originImporters.map((s) => s.file)).toEqual(['FaunaView.ts']);
+    expect(originImporters[0].typeOnly).toBe(false);
+    expect(code(fauna.get('FaunaView.ts') ?? '')).toMatch(/\btoLocal\(/);
+    for (const site of originImporters) expect(site.statement, `${site.file} imports originAt`).not.toMatch(ORIGIN_VALUE);
+  });
+
+  it('reads no world coordinate anywhere: distances are coords\', the trail is WorldPoints, positions cross through toLocal', () => {
+    for (const [file, src] of fauna) {
+      expect(code(src), `${file} reads a world coordinate`).not.toMatch(/\.w[xz]\b/);
+    }
+    // The distance helpers are the door: a renderer that stopped using
+    // them would have to take a coordinate apart, which the line above
+    // catches — or stop measuring distance, which this catches.
+    expect(code(fauna.get('FaunaView.ts') ?? '')).toMatch(/\bdistanceSquared\(/);
+    // The rig and motion files never see a coordinate of either kind.
+    for (const file of ['rig.ts', 'motion.ts']) {
+      const sites = faunaSites.filter((s) => s.file === file);
+      expect(sites.filter((s) => /world\/(coords|origin)$/.test(s.specifier)).map((s) => s.statement)).toEqual([]);
+    }
+  });
+
+  it('imports creatures/ as types and the table\'s own arithmetic only — never the simulation', () => {
+    const fromCreatures = faunaSites.filter((s) => /(^|\/)creatures(\/|$)/.test(s.specifier));
+    expect(fromCreatures.length).toBeGreaterThan(0);
+    for (const site of fromCreatures) {
+      if (site.typeOnly) continue;
+      const clause = /\{([^}]*)\}/.exec(site.statement)?.[1] ?? '';
+      const names = clause.split(',').map((n) => n.trim()).filter((n) => n.length > 0 && !n.startsWith('type '));
+      expect(names.length, `${site.file}: ${site.statement}`).toBeGreaterThan(0);
+      for (const name of names) expect(CREATURE_VALUES.has(name), `${site.file} imports ${name} from creatures/ as a value`).toBe(true);
+    }
+    for (const [file, src] of fauna) {
+      expect(code(src), `${file} runs the simulation`).not.toMatch(/\bCreatureSim\b|\bnewCreature\(/);
+    }
+  });
+
+  it('never constructs a loader: assets/ is a type, and the loader is handed in', () => {
+    const fromAssets = faunaSites.filter((s) => /(^|\/)assets(\/|$)/.test(s.specifier));
+    expect(fromAssets.filter((s) => !s.typeOnly).map((s) => `${s.file}: ${s.statement}`)).toEqual([]);
+    for (const [file, src] of fauna) {
+      expect(code(src), `${file} constructs a loader`).not.toMatch(/new\s+(GLTFLoader|TextureLoader|FileLoader)\b/);
+    }
+  });
+
+  it('never imports actor/, view/, session/, ui/, net/ or perf/: the animals do not know who is watching', () => {
+    const banned = /(^|\/)(actor|view|session|ui|net|perf)(\/|$)/;
+    const offenders = faunaSites.filter((s) => banned.test(s.specifier));
     expect(offenders.map((s) => `${s.file}: ${s.statement}`)).toEqual([]);
   });
 });
