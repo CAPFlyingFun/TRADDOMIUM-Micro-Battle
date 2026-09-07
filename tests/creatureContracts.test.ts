@@ -32,7 +32,7 @@ describe('the species table', () => {
     for (const id of CREATURE_IDS) expect(CREATURE_SPECIES[id].lengthSource).toMatch(/—/);
     expect(MM_PER_UNIT).toBe(10);
     expect(unitsOfMm(150)).toBe(15);
-    // The rig scale makes the spine measure the cited length: 128.7 GLB units × scale = 15 world units.
+    // The rig scale makes the spine measure the cited length: 25.74 GLB units × scale = 15 world units.
     expect(EARTHWORM.model.spineUnits * rigScale(EARTHWORM)).toBeCloseTo(15, 9);
     expect(APHID.model.spineUnits * rigScale(APHID)).toBeCloseTo(0.25, 9);
     expect(HOUSEFLY.model.spineUnits * rigScale(HOUSEFLY)).toBeCloseTo(0.65, 9);

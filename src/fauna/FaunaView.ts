@@ -82,11 +82,19 @@ import { disposeRig, dressRig, measureRig, placeholderFor, type RigAnatomy } fro
  * skinned geometry when every rig is lent.
  */
 export const POOL_SIZES: Readonly<Record<string, Readonly<Record<CreatureId, number>>>> = Object.freeze({
-  'ultra-low': Object.freeze({ earthworm: 1, aphid: 3, housefly: 2 }),
-  low: Object.freeze({ earthworm: 2, aphid: 6, housefly: 3 }),
-  medium: Object.freeze({ earthworm: 3, aphid: 12, housefly: 6 }),
-  high: Object.freeze({ earthworm: 6, aphid: 24, housefly: 12 }),
-  'ultra-high': Object.freeze({ earthworm: 8, aphid: 32, housefly: 16 }),
+  // THE RIGS ARE THE COST, and the aphid's is the heaviest: 30,947
+  // triangles a rig against the worm's 3,144 and the fly's 25,635, all
+  // skinned. At `high` this table is about 414 k triangles if every rig
+  // is lent (4 worms, 8 aphids, 6 flies) — of the order of the 25,000
+  // grass blades already on screen — and Joshua's rule for the phone is
+  // that graphics give way before frame rate does. Everything past the
+  // pool is a twenty-triangle impostor, which at ant scale a few metres
+  // off is what the eye sees anyway. GAME TUNING until his phone says.
+  'ultra-low': Object.freeze({ earthworm: 1, aphid: 2, housefly: 1 }),
+  low: Object.freeze({ earthworm: 1, aphid: 3, housefly: 2 }),
+  medium: Object.freeze({ earthworm: 2, aphid: 5, housefly: 4 }),
+  high: Object.freeze({ earthworm: 4, aphid: 8, housefly: 6 }),
+  'ultra-high': Object.freeze({ earthworm: 6, aphid: 16, housefly: 10 }),
 });
 
 /** The pool for a rung named by the detail ladder; an unknown name is `medium`. */

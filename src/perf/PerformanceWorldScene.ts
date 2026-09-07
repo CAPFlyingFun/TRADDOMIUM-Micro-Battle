@@ -82,6 +82,8 @@ import { WORLD_SEED } from '../world/objects/seed';
 import { PLANT_FAMILIES, plantSourcesOf } from '../world/objects/plants';
 import { ResourceLayer, waterQueryOf, type WaterQuery } from '../world/ecology';
 import { CREATURE_IDS, CreatureSim, type CreatureId } from '../creatures';
+import { FaunaView } from '../fauna/FaunaView';
+import { assets } from '../assets/assets';
 import type { WorldLayerId } from '../world/WorldLoader';
 import { islandChannels, type IslandChannels } from '../world/water/islandChannels';
 import type { WeatherProvider } from '../world/weather/conditions';
@@ -738,6 +740,13 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
      * its aphids sit on the objects' plants; each species is its own row.
      */
     let creatures: CreatureSim | null = null;
+    /**
+     * And how they look: one loaded rig per species from the GLBs, a
+     * small pool of skeleton clones lent to the nearest, impostors past
+     * it. It draws what the simulation holds and nothing else, so a
+     * species switched off in the simulation is gone from the screen.
+     */
+    let fauna: FaunaView | null = null;
     /** What each species row was at the last look. */
     const speciesOn: Record<CreatureId, boolean> = { earthworm: false, aphid: false, housefly: false };
     /** The rung the bubble was BUILT at: a changed setting is noticed once. */
@@ -1116,6 +1125,23 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
       } else {
         creatures.setRung(detail);
       }
+      if (fauna === null) {
+        const ground = field;
+        fauna = new FaunaView({
+          species: creatures.species,
+          loadModel: assets.loadModel,
+          rung: detail,
+          groundAt: (at) => ground.heightAt(at),
+        });
+        // The rigs load in the background; the impostors carry the
+        // animals until they arrive, and a rig that never arrives is a
+        // box of the species' size — an honest body, not an absence.
+        void fauna.ready();
+        for (const id of CREATURE_IDS) fauna.setEnabled(id, speciesOn[id]);
+        three.add(fauna.group);
+      } else {
+        fauna.setRung(detail);
+      }
       // FILLED BEHIND THE LOADING SCREEN, like the terrain's rings and
       // the sea's sheets: every cell within reach generated now, so the
       // first drawn frame has grass in it and pays nothing for it.
@@ -1152,6 +1178,7 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         if (on === speciesOn[id]) continue;
         speciesOn[id] = on;
         creatures.setEnabled(id, on);
+        fauna?.setEnabled(id, on);
       }
     };
 
@@ -1193,7 +1220,10 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
     const updateCreatures = (dt: number): void => {
       if (creatures === null) return;
       syncCreatureLayers();
-      creatures.update(fly.pose().at, dt);
+      const pose = fly.pose();
+      creatures.update(pose.at, dt);
+      // Drawn AFTER they moved, at where they are this frame.
+      if (fauna !== null) fauna.update(creatures.creatures(), pose.at, dt, pose.height);
     };
 
     /**
@@ -1732,8 +1762,8 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
             flies: species('housefly'),
             thinkMs: cost.thinkMs,
             moveMs: cost.moveMs,
-            drawMs: 0,
-            rigs: 0,
+            drawMs: fauna === null ? 0 : fauna.cost.meanMs,
+            rigs: fauna === null ? 0 : CREATURE_IDS.reduce((sum, id) => sum + (fauna?.cost.rigsLent[id] ?? 0), 0),
             resources: resourcesOn && resources !== null ? { sites, waterEdges } : null,
             ground: { built: sim.burrows.editor.built, attempted: sim.burrows.attempted },
           };
@@ -2025,6 +2055,11 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         }
         resources = null;
         creatures = null;
+        if (fauna) {
+          three.remove(fauna.group);
+          fauna.dispose();
+          fauna = null;
+        }
         objectsRadius = 0;
         habitat = null;
         coarseGrid = null;

@@ -33,11 +33,17 @@
  * allowed; it holds what its habitat generates, which is none.
  *
  * SIZES ARE BY THE SPINE. `model.spineUnits` is the length of the rig's
- * body — head to tail along the bone chain, legs and wings excluded — in
- * the GLB's own units, solved in TCS's `creatureScale.ts` against these
- * same three files. The renderer scales the rig by
- * `unitsOfMm(lengthMm) / spineUnits` and `tests/creatureSpecies.test.ts`
- * holds the arithmetic; the GLBs themselves are never modified.
+ * body — head to tail along the bone chain, legs, wings and antennae
+ * excluded — in the GLB's OWN units, measured on these three files with
+ * three's loader (`tests/faunaRealRigs.test.ts` re-measures them and
+ * fails if the table drifts). TCS's `creatureScale.ts` numbers were NOT
+ * usable as they stood: its probe multiplied the chain length by its own
+ * five-millimetre unit, and for the aphid and the fly it had picked an
+ * antenna and the abdomen chain rather than the body — carried across
+ * unchecked, the worm would have drawn at a fifth of its length. The
+ * renderer scales the rig by `unitsOfMm(lengthMm) / spineUnits`,
+ * `tests/creatureContracts.test.ts` holds the arithmetic, and the GLBs
+ * themselves are never modified.
  *
  * Pure: no three, no DOM. `src/creatures/` is core.
  */
@@ -71,7 +77,13 @@ export interface CreatureModel {
   readonly path: string;
   /** The rig's body length along its bone chain, in the GLB's units. MEASURED against the file (see the header). */
   readonly spineUnits: number;
-  /** The bone chain, root first, for a renderer that aims it along a trail. Null for a rig posed by its legs and wings. */
+  /**
+   * The bone chain's names, for a renderer that aims it along a trail.
+   * Listed in NAME order; the file's own parentage (`Bone_000 → Bone_016
+   * → Bone_015 … → Bone_001` in the worm) is what the renderer walks,
+   * so this list is a roster, not an order. Null for a rig posed by its
+   * legs and wings.
+   */
   readonly chain: readonly string[] | null;
 }
 
@@ -225,8 +237,8 @@ export const EARTHWORM: CreatureSpecies = Object.freeze({
   lengthSource: 'Lumbricus terrestris commonly 120-250 mm — U. Maryland Extension; Dimensions.com',
   model: Object.freeze({
     path: 'models/earthworm.glb',
-    // MEASURED against the file: TCS creatureScale.ts, solved along the 17-bone chain (Bone_000 … Bone_016).
-    spineUnits: 128.6991270673971,
+    // MEASURED against the file: the 17-bone chain's length in GLB units, head to tail (`tests/faunaRealRigs.test.ts`).
+    spineUnits: 25.7398,
     chain: Object.freeze([
       'Bone_000', 'Bone_001', 'Bone_002', 'Bone_003', 'Bone_004', 'Bone_005', 'Bone_006', 'Bone_007', 'Bone_008',
       'Bone_009', 'Bone_010', 'Bone_011', 'Bone_012', 'Bone_013', 'Bone_014', 'Bone_015', 'Bone_016',
@@ -285,8 +297,8 @@ export const APHID: CreatureSpecies = Object.freeze({
   lengthSource: 'garden aphids 1.5-4 mm — UMN Extension; MSU Extension',
   model: Object.freeze({
     path: 'models/aphid.glb',
-    // MEASURED against the file: TCS creatureScale.ts, body along the abdomen-to-head axis, legs and antennae excluded.
-    spineUnits: 6.669954044588677,
+    // MEASURED against the file: the body's bone extent along the head axis, legs and antennae excluded (`tests/faunaRealRigs.test.ts`).
+    spineUnits: 2.3071,
     chain: null,
   }),
   medium: 'plant' as Medium,
@@ -331,8 +343,8 @@ export const HOUSEFLY: CreatureSpecies = Object.freeze({
   lengthSource: 'Musca domestica body 4-8 mm, mean 6.35 — Animal Diversity Web',
   model: Object.freeze({
     path: 'models/housefly.glb',
-    // MEASURED against the file: TCS creatureScale.ts, head to abdomen tip, wings and legs excluded.
-    spineUnits: 9.166137802718907,
+    // MEASURED against the file: head to abdomen tip along the body's bones, wings and legs excluded (`tests/faunaRealRigs.test.ts`).
+    spineUnits: 3.7633,
     chain: null,
   }),
   medium: 'air' as Medium,

@@ -180,7 +180,7 @@ describe('loading and the size', () => {
 
 describe('the pool', () => {
   it('is sized by the rung, and the impostor capped by the species\' own cap', () => {
-    expect(POOL_SIZES.high).toEqual({ earthworm: 6, aphid: 24, housefly: 12 });
+    expect(POOL_SIZES.high).toEqual({ earthworm: 4, aphid: 8, housefly: 6 });
     for (const rung of ['ultra-low', 'low', 'medium', 'high', 'ultra-high']) {
       for (const id of CREATURE_IDS) expect(poolSizeFor(rung, id)).toBeGreaterThan(0);
       for (const s of SPECIES) expect(impostorCapFor(s, rung)).toBe(s.population.caps[rung as 'high']);
@@ -272,7 +272,8 @@ describe('the pool', () => {
     expect(v.impostor('aphid')!.instanceMatrix.count).toBe(impostorCapFor(APHID, 'high'));
     const aphids = Array.from({ length: 10 }, (_, i) => creature('aphid', `a${i}`, 10 + i, 0));
     v.update(aphids, EYE, 1 / 60);
-    expect(v.cost.rigsLent.aphid).toBe(10);
+    // Ten aphids, a pool of eight at high: every rig lent, the other two impostors.
+    expect(v.cost.rigsLent.aphid).toBe(Math.min(10, poolSizeFor('high', 'aphid')));
     v.setEnabled('aphid', false);
     expect(v.isEnabled('aphid')).toBe(false);
     expect(v.group.getObjectByName('fauna:aphid')!.visible).toBe(false);
@@ -284,7 +285,8 @@ describe('the pool', () => {
     v.setEnabled('aphid', true);
     v.update(aphids, EYE, 1 / 60);
     expect(v.group.getObjectByName('fauna:aphid')!.visible).toBe(true);
-    expect(v.cost.rigsLent.aphid).toBe(10);
+    // Ten aphids, a pool of eight at high: every rig lent, the other two impostors.
+    expect(v.cost.rigsLent.aphid).toBe(Math.min(10, poolSizeFor('high', 'aphid')));
   });
 
   it('shrugs off a non-finite eye and a bad dt', async () => {
