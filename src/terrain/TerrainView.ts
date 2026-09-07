@@ -173,12 +173,44 @@
  * `assets/textureQuality.ts`). Below sea level is drawn as sea floor
  * rather than as water — the ocean is Phase 3, and pretending otherwise
  * here would be a surface nobody owns.
+ *
+ * WET GROUND IS A LENS ON THE COLOUR, NOT A SECOND SURFACE (Joshua's
+ * brief, 2026-09-07: terrain the ocean touches reads wet, recently
+ * exposed ground reads slightly darker and slightly more reflective and
+ * fades back; rain does the same; nothing here is erosion). It is done
+ * where it is cheapest and where it cannot touch a height: in the one
+ * Lambert material, patched with `onBeforeCompile`. Three uniforms — the
+ * height the swash reaches, the band over which it fades, and how wet
+ * the rain has left the ground — and each vertex's own world height,
+ * which the rings already carry as their y. The fragment darkens and
+ * cools the vertex colour by `wet` and adds one narrow Blinn-Phong lobe
+ * from the sun, scaled by `wet`, so the highlight is what reveals wet
+ * sand and water-facing rock when the darkening itself is hard to see.
+ * The lobe scales with the sun: at night (0.06) it is a whisper, by day
+ * a glint on the swash. Nothing is made brighter that the light does
+ * not make brighter; the texture is always there and the illumination
+ * decides — which is what Joshua asked for and what Lambert already did.
+ *
+ * `setWetness` writes the three numbers and NOTHING else: no position,
+ * no normal, no colour byte, no refill. The test holds the position
+ * bytes still across a call, the same way it does across an origin
+ * rebase. Below mean sea level the seabed reads wet too, because the
+ * smoothstep says so and it costs nothing to let it.
+ *
+ * THE LOBE HAS TO BE SUMMED BY HAND. three's Lambert fragment adds
+ * `directDiffuse + indirectDiffuse + emissive` and never
+ * `directSpecular` — the field exists in `ReflectedLight` but Lambert
+ * does not read it. So the patch also extends that one line, and the
+ * fixture test runs the patch against three's REAL `ShaderLib.lambert`
+ * source so that a three upgrade that moves an anchor fails a test
+ * rather than quietly losing the glint on a phone.
  */
 import * as THREE from 'three';
 import { COARSE_STEP, HD_STEP } from '../world/dem';
-import { normalOfGradient, slopeOfUp, type Heightfield } from '../world/heightfield';
+import { SEA_LEVEL, normalOfGradient, slopeOfUp, type Heightfield } from '../world/heightfield';
 import { samePoint, snapTo, translate, type WorldPoint } from '../world/coords';
 import { toLocal } from '../world/origin';
+import type { WetnessSignals } from './wetness';
 
 /** Quads across one ring, each way. 64 keeps a ring at 4,225 vertices. */
 export const RING_QUADS = 64;
@@ -243,6 +275,109 @@ const ROCK = 0x8a6a52;
 const ROCK_FROM = 32;
 const ROCK_FULL = 58;
 
+/**
+ * How wet soaking rain can make the ground, 0..1, against the swash's
+ * 1. GAME TUNING: rain-wet soil is darker than dry soil but never the
+ * mirror a beach is where a wave has just drawn back, so a downpour tops
+ * out short of the shore.
+ */
+export const RAIN_WET_MAX = 0.7;
+
+/**
+ * What wet ground does to its own colour: darker, and slightly cooler,
+ * because a film of water lets more of the sky in and less of the soil
+ * out. GAME TUNING, applied as a multiplier so the height ramp and the
+ * rock lerp are unchanged and this can never brighten anything.
+ */
+export const WET_DARKEN = Object.freeze({ r: 0.62, g: 0.66, b: 0.72 });
+
+/**
+ * The wet highlight's Blinn-Phong exponent. GAME TUNING: 48 is a tight
+ * glint, the kind a wet beach throws at a low sun, rather than the broad
+ * sheen that would make every hillside look varnished.
+ */
+export const WET_SHINE = 48;
+
+/**
+ * The wet highlight's strength at `wet == 1`, as a fraction of the sun's
+ * colour. GAME TUNING, gentle on purpose: "even when albedo is hard to
+ * see, small highlights can reveal wet soil ... do not make every
+ * surface glossy". Dry ground gets none of it.
+ */
+export const WET_SPEC = 0.35;
+
+/**
+ * The smallest fade the shader will run, in world units (one
+ * centimetre). `smoothstep(a, b, x)` divides by `b - a`; a fade of zero
+ * — the honest default before the sea has spoken — would be a divide by
+ * zero on the whole shoreline, which some GPUs paint black.
+ */
+export const MIN_WET_FADE = 1;
+
+/**
+ * The GLSL the wetness lens adds, as the four pieces `onBeforeCompile`
+ * splices after three's own include lines. Exported so the fixture test
+ * can pin the source rather than paraphrase it.
+ *
+ * THE VERTEX'S Y IS ITS WORLD HEIGHT. A ring's vertices are offsets from
+ * its centre in x and z and `heightAt` in y; the mesh is placed at
+ * `(lx, 0, lz)` and the group is never moved, and the floating origin
+ * rebases x and z only. So `position.y` is the height above mean sea
+ * level with no matrix at all, and the test pins the rings at y = 0 so
+ * that this stays true.
+ */
+export const WET_VERTEX_PARS = 'varying float vWorldY;';
+export const WET_VERTEX = '\tvWorldY = position.y;';
+export const WET_FRAGMENT_PARS = [
+  'uniform float uWetTop;',
+  'uniform float uWetFade;',
+  'uniform float uRainWet;',
+  'varying float vWorldY;',
+].join('\n');
+
+/**
+ * After `color_fragment`, where the vertex colour has just become
+ * `diffuseColor`. The shore is 1 up to `uWetTop` and fades to 0 over
+ * `uWetFade` above it — below sea level included, so the seabed reads
+ * wet for free. Rain is the other source and the two take the MAX: a
+ * soaked beach is not wetter than a wave-covered one.
+ */
+export const WET_ALBEDO = [
+  '\t// WET GROUND — see terrain/TerrainView.ts. A lens on the colour; no height is read or written.',
+  `\tfloat shore = 1.0 - smoothstep(uWetTop, uWetTop + max(uWetFade, ${MIN_WET_FADE.toFixed(1)}), vWorldY);`,
+  `\tfloat wet = max(shore, uRainWet * ${RAIN_WET_MAX.toFixed(1)});`,
+  `\tdiffuseColor.rgb *= mix(vec3(1.0), vec3(${WET_DARKEN.r.toFixed(2)}, ${WET_DARKEN.g.toFixed(2)}, ${WET_DARKEN.b.toFixed(2)}), wet);`,
+].join('\n');
+
+/**
+ * After `lights_fragment_end`, once three has walked its lights and
+ * `geometryNormal` / `geometryViewDir` stand in view space. One
+ * Blinn-Phong lobe from the first directional light — the scene's one
+ * sun (`sky/SkyView.ts`) — gated by `wet`, and by N·L so a face the sun
+ * does not reach cannot glint. The light's colour carries its intensity,
+ * which is what makes the night version a whisper without a branch.
+ */
+export const WET_HIGHLIGHT = [
+  '\t#if NUM_DIR_LIGHTS > 0',
+  '\t{',
+  '\t\t// THE WET GLINT — see terrain/TerrainView.ts. Only where wet, only where lit.',
+  '\t\tvec3 wetHalf = normalize(directionalLights[0].direction + geometryViewDir);',
+  '\t\tfloat wetNH = saturate(dot(geometryNormal, wetHalf));',
+  '\t\tfloat wetNL = saturate(dot(geometryNormal, directionalLights[0].direction));',
+  `\t\treflectedLight.directSpecular += directionalLights[0].color * (${WET_SPEC.toFixed(2)} * wet * wetNL * pow(wetNH, ${WET_SHINE.toFixed(1)}));`,
+  '\t}',
+  '\t#endif',
+].join('\n');
+
+/**
+ * three's Lambert sums diffuse and emissive and never reads
+ * `directSpecular`; this is the line, and the line with the lobe in it.
+ */
+export const LAMBERT_OUTGOING =
+  'vec3 outgoingLight = reflectedLight.directDiffuse + reflectedLight.indirectDiffuse + totalEmissiveRadiance;';
+export const LAMBERT_OUTGOING_WITH_SPECULAR =
+  'vec3 outgoingLight = reflectedLight.directDiffuse + reflectedLight.indirectDiffuse + reflectedLight.directSpecular + totalEmissiveRadiance;';
+
 export interface TerrainViewOptions {
   readonly field: Heightfield;
   /** Rings to build. Fewer is a smaller world drawn, not a coarser one. */
@@ -289,6 +424,16 @@ export class TerrainView {
   lastRebuilt = 0;
   /** How many rings the last `update` left stale for the next one. Zero means the clipmap is current. */
   lastDeferred = 0;
+  /**
+   * The wetness lens's three uniforms, held here and handed to the
+   * program BY REFERENCE in `onBeforeCompile`, so `setWetness` is three
+   * number writes and never an allocation. Before the sea has spoken the
+   * ground is wet exactly to mean sea level and dry above it, and no
+   * rain has fallen.
+   */
+  private readonly uWetTop = { value: SEA_LEVEL };
+  private readonly uWetFade = { value: 0 };
+  private readonly uRainWet = { value: 0 };
 
   constructor(options: TerrainViewOptions) {
     this.field = options.field;
@@ -302,6 +447,30 @@ export class TerrainView {
     // Double-sided so the skirts need only one winding and so a camera
     // that dips below the surface sees ground rather than through it.
     this.material = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
+    // The wetness lens — see WET GROUND IS A LENS in the header. Still a
+    // Lambert: the patch reads the vertex's height and writes the colour
+    // and one highlight, and three's own lighting does everything else.
+    //
+    // ITS OWN PROGRAM. three caches compiled programs against the
+    // material's parameters and cannot see what `onBeforeCompile`
+    // injected; a plain Lambert elsewhere with the same parameters would
+    // otherwise be handed this shader, or this one handed the plain one
+    // (`sea/waterLook.ts` lost its waves to exactly that). The key names
+    // the patch and its version.
+    this.material.customProgramCacheKey = () => 'terrain:wetness:1';
+    this.material.onBeforeCompile = (shader) => {
+      shader.uniforms.uWetTop = this.uWetTop;
+      shader.uniforms.uWetFade = this.uWetFade;
+      shader.uniforms.uRainWet = this.uRainWet;
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', `#include <common>\n${WET_VERTEX_PARS}`)
+        .replace('#include <begin_vertex>', `#include <begin_vertex>\n${WET_VERTEX}`);
+      shader.fragmentShader = shader.fragmentShader
+        .replace('#include <common>', `#include <common>\n${WET_FRAGMENT_PARS}`)
+        .replace('#include <color_fragment>', `#include <color_fragment>\n${WET_ALBEDO}`)
+        .replace('#include <lights_fragment_end>', `#include <lights_fragment_end>\n${WET_HIGHLIGHT}`)
+        .replace(LAMBERT_OUTGOING, LAMBERT_OUTGOING_WITH_SPECULAR);
+    };
 
     for (let level = 0; level < levels; level += 1) {
       const quad = finest * 2 ** level;
@@ -314,6 +483,11 @@ export class TerrainView {
       // The ring is a moving window on a fixed world; its bounds are
       // rewritten with its heights, and three must not cull it on stale ones.
       mesh.frustumCulled = false;
+      // The ground takes shadows; it casts none (nothing stands under
+      // it). A receiver flag alone draws nothing different until a
+      // light with a shadow map exists, and that light is another
+      // module's to add — this is the half the terrain owns.
+      mesh.receiveShadow = true;
       this.group.add(mesh);
       this.rings.push({ level, quad, mesh, geometry, centre: null, holeX: 0, holeZ: 0, filledAt: -1 });
     }
@@ -425,6 +599,30 @@ export class TerrainView {
   reach(): number {
     const outer = this.rings[this.rings.length - 1];
     return outer ? outer.quad * this.quads : 0;
+  }
+
+  /**
+   * Tell the ground how wet it is. Three uniform writes, no allocation,
+   * no refill: the positions, normals and colour bytes of every ring are
+   * exactly what they were, and the test says so.
+   *
+   * A signal with a non-finite number in it is ignored WHOLE rather than
+   * applied in part — the three describe one frame of one sea, and a
+   * shore top from this frame beside a fade from the last is a line
+   * nobody drew. Rain is clamped to 0..1 on the way in, because a `mix`
+   * past 1 would darken past the colour it was aiming at.
+   */
+  setWetness(signals: WetnessSignals): void {
+    const { shoreTop, shoreFade, rain } = signals;
+    if (!Number.isFinite(shoreTop) || !Number.isFinite(shoreFade) || !Number.isFinite(rain)) return;
+    this.uWetTop.value = shoreTop;
+    this.uWetFade.value = shoreFade;
+    this.uRainWet.value = rain < 0 ? 0 : rain > 1 ? 1 : rain;
+  }
+
+  /** What the shader is being told. For tests and a HUD line; allocates, so not for every frame. */
+  get wetness(): WetnessSignals {
+    return { shoreTop: this.uWetTop.value, shoreFade: this.uWetFade.value, rain: this.uRainWet.value };
   }
 
   dispose(): void {

@@ -33,8 +33,12 @@ import {
   decodeCoarse, decodeHdTile, hdSamplePoint, hdTileFromName, hdTileName, hdTilesNear, type HdTileId,
 } from '../src/world/dem';
 import { repairGrid } from '../src/world/demRepair';
-import { Heightfield } from '../src/world/heightfield';
-import { FINEST_QUAD, REFILLS_PER_UPDATE, RING_LEVELS, RING_QUADS, SUB_HD_LEVELS, TerrainView, colourAt } from '../src/terrain/TerrainView';
+import { Heightfield, SEA_LEVEL } from '../src/world/heightfield';
+import {
+  FINEST_QUAD, LAMBERT_OUTGOING, LAMBERT_OUTGOING_WITH_SPECULAR, MIN_WET_FADE, RAIN_WET_MAX, REFILLS_PER_UPDATE,
+  RING_LEVELS, RING_QUADS, SUB_HD_LEVELS, TerrainView, WET_ALBEDO, WET_DARKEN, WET_HIGHLIGHT, WET_SHINE, WET_SPEC,
+  WET_VERTEX, WET_VERTEX_PARS, colourAt,
+} from '../src/terrain/TerrainView';
 import type { DemGrid } from '../src/world/dem';
 
 /** A whole-island grid at one height, so every expectation is exact. */
@@ -847,5 +851,252 @@ describe('the colour stands in for a texture, and says which way is up', () => {
     // The flanks below the island are 20 degrees and more, and a rock face
     // painted down there would be visible through nothing at all.
     expect(colourAt(-100_000, 80).getHex()).toBe(colourAt(-100_000, 0).getHex());
+  });
+});
+
+/**
+ * THE GROUND READS WET WHERE THE SEA AND THE RAIN LEAVE IT, AND THAT IS
+ * ALL IT DOES (Joshua's brief, 2026-09-07). Wetness is a lens on the
+ * colour in the one Lambert material — three uniforms and a vertex's own
+ * y — and the claims that keep it honest are:
+ *
+ *  1. IT IS STILL THE SAME MATERIAL. No swap, no second material, and a
+ *     program key of its own so a plain Lambert elsewhere is never handed
+ *     this shader or this one the plain one.
+ *  2. THE SHADER SAYS WHAT THE FILE SAYS, against three's REAL Lambert
+ *     source rather than a stub: the uniforms, the darkening, the glint,
+ *     and the one line three had to be taught — Lambert never sums
+ *     `directSpecular`. If a three upgrade moves an anchor this fails
+ *     here rather than on a phone.
+ *  3. TELLING IT THE WETNESS TOUCHES NOTHING BUT THREE NUMBERS. Not a
+ *     position byte, not a normal, not a colour, not a refill, not the
+ *     heightfield — the same bytes-unchanged pattern the origin rebase
+ *     test uses. Water never edits terrain.
+ */
+describe('the ground reads wet where the sea and the rain leave it', () => {
+  interface Compiled {
+    uniforms: Record<string, { value: unknown }>;
+    vertexShader: string;
+    fragmentShader: string;
+  }
+
+  /** Run the material's patch by hand against three's own Lambert source. No GPU, none wanted. */
+  const compile = (view: TerrainView): Compiled => {
+    const material = meshes(view)[0].material as THREE.MeshLambertMaterial;
+    const shader: Compiled = {
+      uniforms: {},
+      vertexShader: THREE.ShaderLib.lambert.vertexShader,
+      fragmentShader: THREE.ShaderLib.lambert.fragmentShader,
+    };
+    (material.onBeforeCompile as (s: Compiled) => void)(shader);
+    return shader;
+  };
+
+  /** Assignments to the vertex shader's position-bearing names: `position`, `transformed` and the normals, any component. */
+  const positionWrites = (glsl: string): number =>
+    (glsl.match(/\b(position|transformed|objectNormal|transformedNormal|vNormal)\b(\.[xyzw]+)?\s*[-+*/]?=(?!=)/g) ?? []).length;
+
+  it('is still one Lambert material with vertex colours, shared by every ring, wearing its own program key', () => {
+    const view = viewOf(flatGrid(0));
+    const first = meshes(view)[0].material as THREE.MeshLambertMaterial;
+    expect(first).toBeInstanceOf(THREE.MeshLambertMaterial);
+    expect(first.vertexColors).toBe(true);
+    expect(first.side).toBe(THREE.DoubleSide);
+    for (const mesh of meshes(view)) expect(mesh.material).toBe(first);
+    // THE KEY: three caches programs against the material's parameters
+    // and cannot see what onBeforeCompile injected. The sea lost its
+    // waves to that for three versions; the ground names its patch.
+    expect((first.customProgramCacheKey as () => string)()).toMatch(/wetness/);
+    expect((first.customProgramCacheKey as () => string)()).not.toBe((new THREE.MeshLambertMaterial().customProgramCacheKey as () => string)());
+    view.dispose();
+  });
+
+  it('compiles against three’s own Lambert source: three uniforms, the darkening, the glint, and the sum three forgot', () => {
+    const view = viewOf(flatGrid(0));
+    // Every anchor the patch relies on exists in THIS three, or the
+    // replacement is a silent no-op and the phone shows dry ground.
+    const vert = THREE.ShaderLib.lambert.vertexShader;
+    const frag = THREE.ShaderLib.lambert.fragmentShader;
+    expect(vert).toContain('#include <common>');
+    expect(vert).toContain('#include <begin_vertex>');
+    expect(frag).toContain('#include <common>');
+    expect(frag).toContain('#include <color_fragment>');
+    expect(frag).toContain('#include <lights_fragment_end>');
+    expect(frag).toContain(LAMBERT_OUTGOING);
+    // And three's Lambert really does not read directSpecular — the
+    // reason the line has to be taught. If a version starts to, this
+    // fails and the patch's last replacement can be retired.
+    expect(frag.split(LAMBERT_OUTGOING)[1]).not.toMatch(/directSpecular/);
+
+    const shader = compile(view);
+    expect(Object.keys(shader.uniforms).sort()).toEqual(['uRainWet', 'uWetFade', 'uWetTop']);
+    // The uniforms are the view's own objects, so setWetness reaches a
+    // compiled program with no re-binding.
+    view.setWetness({ shoreTop: 60, shoreFade: 72, rain: 0.5 });
+    expect(shader.uniforms.uWetTop.value).toBe(60);
+    expect(shader.uniforms.uWetFade.value).toBe(72);
+    expect(shader.uniforms.uRainWet.value).toBe(0.5);
+
+    // The vertex carries its world height and nothing else new.
+    expect(shader.vertexShader).toContain(WET_VERTEX_PARS);
+    expect(shader.vertexShader).toContain('vWorldY = position.y;');
+    expect(shader.vertexShader.indexOf('varying float vWorldY;')).toBeLessThan(shader.vertexShader.indexOf('vWorldY = position.y;'));
+
+    // The fragment: the literals the file names, verbatim.
+    const f = shader.fragmentShader;
+    expect(f).toContain('uniform float uWetTop;');
+    expect(f).toContain('uniform float uWetFade;');
+    expect(f).toContain('uniform float uRainWet;');
+    expect(f).toContain(WET_ALBEDO);
+    expect(f).toContain(`smoothstep(uWetTop, uWetTop + max(uWetFade, ${MIN_WET_FADE.toFixed(1)}), vWorldY)`);
+    expect(f).toContain('float wet = max(shore, uRainWet * 0.7);');
+    expect(f).toContain('diffuseColor.rgb *= mix(vec3(1.0), vec3(0.62, 0.66, 0.72), wet);');
+    expect(f).toContain(WET_HIGHLIGHT);
+    expect(f).toContain('#if NUM_DIR_LIGHTS > 0');
+    expect(f).toContain('directionalLights[0].direction');
+    expect(f).toContain('directionalLights[0].color');
+    expect(f).toContain('pow(wetNH, 48.0)');
+    expect(f).toContain('0.35 * wet * wetNL');
+    expect(f).toContain('reflectedLight.directSpecular +=');
+    expect(f).toContain(LAMBERT_OUTGOING_WITH_SPECULAR);
+    expect(f).not.toContain(LAMBERT_OUTGOING);
+    // In the order the GLSL needs: `wet` is defined before the glint
+    // reads it, and the glint lands before the sum reads it.
+    expect(f.indexOf('float wet =')).toBeLessThan(f.indexOf('reflectedLight.directSpecular +='));
+    expect(f.indexOf('reflectedLight.directSpecular +=')).toBeLessThan(f.indexOf(LAMBERT_OUTGOING_WITH_SPECULAR));
+    // The albedo pass comes AFTER the vertex colour is applied, so it
+    // multiplies the ramp rather than being overwritten by it.
+    expect(f.indexOf('#include <color_fragment>')).toBeLessThan(f.indexOf('float shore ='));
+    view.dispose();
+  });
+
+  it('never writes a position, a normal or a height in the shader', () => {
+    const view = viewOf(flatGrid(0));
+    const shader = compile(view);
+    // The patch adds exactly zero assignments to any position-bearing
+    // name: whatever three's own vertex shader does, the count is the
+    // same before and after.
+    expect(positionWrites(shader.vertexShader)).toBe(positionWrites(THREE.ShaderLib.lambert.vertexShader));
+    expect(positionWrites(WET_VERTEX + WET_VERTEX_PARS)).toBe(0);
+    expect(WET_VERTEX).toMatch(/^\s*vWorldY = position\.y;$/);
+    // And the fragment reads the height; it has no way to write one.
+    expect(shader.fragmentShader).not.toMatch(/gl_FragDepth/);
+    expect(WET_ALBEDO + WET_HIGHLIGHT).not.toMatch(/vWorldY\s*=/);
+    view.dispose();
+  });
+
+  it('changes only the three uniform values when told the wetness: no height, no colour, no normal, no refill', () => {
+    setOrigin(world(0, 0));
+    const field = new Heightfield(hillGrid());
+    const view = new TerrainView({ field });
+    const at = world(1234, -567);
+    settle(view, at);
+    const revision = field.revision();
+    const probes = [world(0, 0), world(900, -300), world(-4_000, 2_500), world(12_345, -6_789)];
+    const heights = probes.map((p) => field.heightAt(p));
+    const before = meshes(view).map((m) => ({
+      position: (m.geometry.getAttribute('position') as THREE.BufferAttribute).array.slice(),
+      colour: (m.geometry.getAttribute('color') as THREE.BufferAttribute).array.slice(),
+      normal: (m.geometry.getAttribute('normal') as THREE.BufferAttribute).array.slice(),
+    }));
+
+    view.setWetness({ shoreTop: 60, shoreFade: 72, rain: 0.5 });
+    expect(view.wetness).toEqual({ shoreTop: 60, shoreFade: 72, rain: 0.5 });
+    view.update(at);
+    expect(view.lastRebuilt).toBe(0);
+    expect(view.lastDeferred).toBe(0);
+    expect(field.revision()).toBe(revision);
+    probes.forEach((p, i) => expect(field.heightAt(p)).toBe(heights[i]));
+    meshes(view).forEach((m, i) => {
+      expect((m.geometry.getAttribute('position') as THREE.BufferAttribute).array).toEqual(before[i].position);
+      expect((m.geometry.getAttribute('color') as THREE.BufferAttribute).array).toEqual(before[i].colour);
+      expect((m.geometry.getAttribute('normal') as THREE.BufferAttribute).array).toEqual(before[i].normal);
+    });
+
+    // Sixty frames of a changing sea, the same: the ground is told and
+    // never touched.
+    for (let frame = 0; frame < 60; frame += 1) {
+      view.setWetness({ shoreTop: 40 + frame, shoreFade: 60 + frame, rain: frame / 60 });
+      view.update(at);
+      expect(view.lastRebuilt).toBe(0);
+    }
+    meshes(view).forEach((m, i) => {
+      expect((m.geometry.getAttribute('position') as THREE.BufferAttribute).array).toEqual(before[i].position);
+    });
+    view.dispose();
+  });
+
+  it('ignores a signal with a non-finite number in it, whole, and clamps rain to 0..1, so the uniforms never hold NaN', () => {
+    const view = viewOf(flatGrid(0));
+    view.setWetness({ shoreTop: 60, shoreFade: 72, rain: 0.5 });
+    const held = { shoreTop: 60, shoreFade: 72, rain: 0.5 };
+    // One bad number rejects all three: a shore top from this frame
+    // beside a fade from the last is a line nobody drew.
+    view.setWetness({ shoreTop: Number.NaN, shoreFade: 10, rain: 0.1 });
+    expect(view.wetness).toEqual(held);
+    view.setWetness({ shoreTop: 10, shoreFade: Number.POSITIVE_INFINITY, rain: 0.1 });
+    expect(view.wetness).toEqual(held);
+    view.setWetness({ shoreTop: 10, shoreFade: 10, rain: Number.NaN });
+    expect(view.wetness).toEqual(held);
+    // Rain past the ends is clamped, not extrapolated through the mix.
+    view.setWetness({ shoreTop: 10, shoreFade: 10, rain: 5 });
+    expect(view.wetness.rain).toBe(1);
+    view.setWetness({ shoreTop: 10, shoreFade: 10, rain: -2 });
+    expect(view.wetness.rain).toBe(0);
+    // A shore below sea level and a zero fade are legal: the shader
+    // guards the fade at one centimetre, and the sea can be calm.
+    view.setWetness({ shoreTop: -500, shoreFade: 0, rain: 0 });
+    expect(view.wetness).toEqual({ shoreTop: -500, shoreFade: 0, rain: 0 });
+    for (const v of Object.values(view.wetness)) expect(Number.isNaN(v)).toBe(false);
+    view.dispose();
+  });
+
+  it('starts wet exactly to mean sea level and dry above it, before the sea has spoken', () => {
+    const view = viewOf(flatGrid(0));
+    expect(view.wetness).toEqual({ shoreTop: SEA_LEVEL, shoreFade: 0, rain: 0 });
+    // That zero fade would be smoothstep's divide by zero on the whole
+    // shoreline; the shader floors it at one centimetre.
+    expect(MIN_WET_FADE).toBe(1);
+    expect(WET_ALBEDO).toContain('max(uWetFade, 1.0)');
+    view.dispose();
+  });
+
+  it('receives shadows on every ring, casts none, and stands at y = 0 so a vertex’s y is its world height', () => {
+    setOrigin(world(0, 0));
+    const view = viewOf(hillGrid());
+    settle(view, world(4_321, -8_765));
+    expect(view.group.position.y).toBe(0);
+    meshes(view).forEach((mesh, level) => {
+      expect(mesh.receiveShadow).toBe(true);
+      expect(mesh.castShadow).toBe(false);
+      // Unchanged by the wetness work: the ring is a moving window and
+      // is never culled on stale bounds; finest first for the depth buffer.
+      expect(mesh.frustumCulled).toBe(false);
+      expect(mesh.renderOrder).toBe(level);
+      // THE ASSUMPTION THE VERTEX SHADER MAKES: the mesh is placed in x
+      // and z only, so `position.y` IS the height above mean sea level.
+      expect(mesh.position.y).toBe(0);
+    });
+    view.dispose();
+  });
+
+  it('pins the tuning: darker and cooler, never brighter, and a glint that is gentle', () => {
+    expect(RAIN_WET_MAX).toBe(0.7);
+    expect(WET_DARKEN).toEqual({ r: 0.62, g: 0.66, b: 0.72 });
+    // A multiplier under 1 on every channel: wetness can only take light
+    // away from the albedo. "Do NOT make night brighter."
+    expect(WET_DARKEN.r).toBeLessThan(1);
+    expect(WET_DARKEN.g).toBeLessThan(1);
+    expect(WET_DARKEN.b).toBeLessThan(1);
+    // Cooler: blue survives more than red, as a film of water lets the sky in.
+    expect(WET_DARKEN.b).toBeGreaterThan(WET_DARKEN.r);
+    expect(WET_SHINE).toBe(48);
+    expect(WET_SPEC).toBe(0.35);
+    // "Do not make every surface glossy": the lobe is under half the
+    // sun's colour at full wet, tight, and multiplied by wet so dry
+    // ground gets none of it.
+    expect(WET_SPEC).toBeLessThan(0.5);
+    expect(WET_SHINE).toBeGreaterThanOrEqual(32);
+    expect(WET_HIGHLIGHT).toMatch(/\* wet \*/);
   });
 });
