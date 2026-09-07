@@ -210,6 +210,16 @@ its own.
   place comes from the real HST clock through `world/weather/solar.ts`
   (NOAA's equations, pinned against Līhuʻe's published sunrise); nothing
   invents a time of day.
+- **Light decides what shows; nothing paints it** (the lighting polish,
+  2026-09-07). The sea's sheen and its foam's opacity read the scene's
+  own lights, the ground's wetness is a lens on its colour, the sun's
+  shadow is the sun light's and follows the Detail rung, and the night
+  dome follows the real sun through astronomical night. Do not fix a
+  night rim, a black slope or a dull sea by adding a constant: find the
+  term that ignores the light and make it read the light. Wetness and
+  shadows are appearance only — no height, no material swap, no
+  island-wide field — and `tests/terrainView.test.ts`, `tests/skyView.test.ts`
+  and `tests/seaWaterLook.test.ts` pin that.
 - A client-side PIN is a convenience, not security.
 - Every file in `scripts/` is wired to a `package.json` script or listed
   in `scripts/MANUAL.md`.

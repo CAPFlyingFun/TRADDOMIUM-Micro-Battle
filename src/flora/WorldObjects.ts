@@ -290,6 +290,11 @@ const DRAWN_ZERO: Readonly<Record<ObjectFamily, number>> = Object.freeze(
   Object.fromEntries(OBJECT_FAMILIES.map((f) => [f, 0])) as Record<ObjectFamily, number>,
 );
 
+/** The families whose instances cast the sun's shadow: bodies, not blades. GAME TUNING; measured on the device. */
+export const SHADOW_CASTERS: ReadonlySet<ObjectFamily> = new Set<ObjectFamily>(['tree', 'rock', 'shrub', 'broadleaf', 'fern', 'coastal']);
+/** The families that take a shadow: the few whose fragments are worth the lookup. Grass takes the ground's, not its own. */
+export const SHADOW_RECEIVERS: ReadonlySet<ObjectFamily> = new Set<ObjectFamily>(['tree', 'rock', 'shrub']);
+
 export class WorldObjects {
   readonly group = new THREE.Group();
   readonly detail: string;
@@ -368,8 +373,13 @@ export class WorldObjects {
       // It rides the camera, so its bounds always contain the camera and
       // a frustum test could never reject it — the ocean's honest answer.
       mesh.frustumCulled = false;
-      mesh.castShadow = false;
-      mesh.receiveShadow = false;
+      // THE SUN'S SHADOW (the lighting polish, 2026-09-07): the families
+      // with a body cast it and take it; the blades never do either. A
+      // grass blade is under any affordable texel and its 25,000
+      // instances would pay the depth pass and the lookup in full for
+      // pure acne; its shadow is the tree's, read on the ground beneath.
+      mesh.castShadow = SHADOW_CASTERS.has(family);
+      mesh.receiveShadow = SHADOW_RECEIVERS.has(family);
       mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
       // A per-instance colour, so a lawn is not one green.
       mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(capacity * 3), 3);

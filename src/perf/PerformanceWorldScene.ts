@@ -94,6 +94,10 @@ import { skyLoaderFor } from '../assets/skySource';
 import { RainView } from '../sky/RainView';
 import { SkyView } from '../sky/SkyView';
 import { skyLook } from '../sky/skyLook';
+import { LensView } from '../sky/LensView';
+import { lensExposure } from '../sky/lensExposure';
+import { shadowFor } from '../sky/shadows';
+import { easeRainWetness, shoreWetnessOf, type WetnessSignals } from '../terrain/wetness';
 import { rainToUnitsPerSecond, type Sky, type WeatherNow } from '../world/weather/weather';
 import { worldToGeo } from '../world/geo';
 import { SeaTextures } from '../sea/SeaTextures';
@@ -158,6 +162,15 @@ export interface PerfWorldSettings {
 export interface PerformanceWorldHooks {
   /** PAUSE was pressed. What a pause means — state, overlay, whether the world may freeze — is the owner's. */
   onPause(): void;
+  /**
+   * The renderer's shadow-map switch (the lighting polish, 2026-09-07).
+   * The scene never reaches the renderer — the test rig withholds it —
+   * so the owner hands over the one flag: on at enter, off at dispose;
+   * whether anything CASTS is the sun light's, by rung and by hour.
+   */
+  shadows?(enabled: boolean): void;
+  /** The drawing buffer's pixels per CSS pixel, for the streaks and the lens, which size themselves in device pixels. */
+  pixelRatio?(): number;
   /**
    * A texture rung named by the ADDRESS BAR, overriding the one the
    * player's quality setting maps to. Null or absent is the ordinary
@@ -753,6 +766,33 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
     let builtObjectsDetail: DetailTier | null = null;
     /** The air's colour as a colour, so the blend never restates it. */
     const SKY = new THREE.Color(HORIZON);
+    /**
+     * THE AIR THE CROSSING BLENDS FROM (the lighting polish): the sky's
+     * LIVE horizon on the frame the eye goes under, not the noon
+     * constant, so a night dive fogs toward the night and surfacing
+     * never flashes noon. With the weather layer off it is the noon
+     * horizon, which is what `SKY` was for.
+     */
+    const airColour = new THREE.Color(HORIZON);
+    /** The air lights' intensities the underwater look scales from; latched the way `airFog` is. */
+    let baseSun = 1.15;
+    let baseSky = 1.0;
+    let underwaterLit = false;
+    /** How many drops the lens keeps when the eye surfaces. GAME TUNING. */
+    const SURFACING_DROPS = 4;
+    /** The shore's wetness band, from the swell's crest envelope once the sea exists; dry until then. */
+    const DRY_SHORE: WetnessSignals = Object.freeze({ shoreTop: -1e9, shoreFade: 1, rain: 0 });
+    let shoreWet: WetnessSignals = DRY_SHORE;
+    /** Rain wetness on the ground, eased up in seconds and dried over minutes (`terrain/wetness.ts`). */
+    let rainWet = 0;
+    /** The lens: rain on the eye, drawn after the world (`renderOverlays`). Built with the rain, at the detail rung. */
+    let lens: LensView | null = null;
+    let builtLensDetail: DetailTier | null = null;
+    /** The rung the sun's shadow was configured at, and the HUD's word for it. */
+    let builtShadowDetail: DetailTier | null = null;
+    let shadowWord = '';
+    let viewWidth = 0;
+    let viewHeight = 0;
     /** Whether the eye is under the sea, and the air fog it went under from. */
     let underwater = false;
     let airFog = { near: 0, far: 0 };
@@ -1257,8 +1297,31 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
       // The dome and the light it drives, BEFORE the water's fog: under
       // the sea the underwater look overwrites what the sky set, every
       // frame, which is the order that makes the surface the boundary.
-      if (weatherOn && skyView !== null) skyView.update(skyLook(weatherNow, sunNow), fly.camera);
-      if (weatherOn && rain !== null) rain.update(weatherNow, fly.camera, dt);
+      const look = skyLook(weatherNow, sunNow);
+      if (weatherOn && skyView !== null) skyView.update(look, fly.camera);
+      // No streaks fall through the sea: under the surface the rain view
+      // holds still and hidden (`adaptWater` hides it), and catches up
+      // when the eye comes back up.
+      if (weatherOn && rain !== null && !underwater) rain.update(weatherNow, fly.camera, dt);
+      // THE LENS (the lighting polish): rain reaches the eye when the eye
+      // looks up into it or the wind drives it in — the same eased
+      // strength the streaks fade by, the same wind, and none of it under
+      // water or with the weather off.
+      const strength = weatherOn && rain !== null ? rain.strength : 0;
+      if (lens !== null) {
+        const pose = fly.pose();
+        const exposure = underwater || strength <= 0
+          ? 0
+          : lensExposure({ pitch: pose.pitch, yaw: pose.yaw, windX: weatherNow.windX, windZ: weatherNow.windZ, strength }).exposure;
+        lens.update(strength, exposure, dt, Math.min(1, look.sunIntensity));
+      }
+      // THE GROUND'S WETNESS: the shore band from the swell's own crest
+      // envelope, rain wetness eased up in seconds and dried over
+      // minutes. Two scalars a frame, appearance only; nothing here can
+      // reach a height.
+      if (shoreWet === DRY_SHORE && swell !== null) shoreWet = { ...shoreWetnessOf(swell.reach()), rain: 0 };
+      rainWet = easeRainWetness(rainWet, strength, dt);
+      if (terrain !== null) terrain.setWetness({ shoreTop: shoreWet.shoreTop, shoreFade: shoreWet.shoreFade, rain: rainWet });
     };
 
     /**
@@ -1275,12 +1338,37 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         three.remove(skyView.group);
         skyView.dispose();
         skyView = null;
+        builtShadowDetail = null;
       }
       if (skyView === null) {
         skyView = new SkyView({ tier, load: skyLoaderFor({ base: import.meta.env.BASE_URL }) });
         skyView.bind({ sun: light, hemisphere: sky, fog: three.fog as THREE.Fog | null, background: three.background as THREE.Color });
         three.add(skyView.group);
         builtSkyTier = tier;
+      }
+      // THE SUN'S SHADOW, BY RUNG (the lighting polish): a camera-following
+      // box the size the Detail rung names, none below medium. The rung
+      // reaches the sky view as a configuration; whether a shadow is cast
+      // this frame is the sun's — by hour and by cloud — inside `update`.
+      if (builtShadowDetail !== detail) {
+        const shadow = shadowFor(detail);
+        skyView.setShadow(shadow.mapSize > 0 ? shadow : null);
+        builtShadowDetail = detail;
+        shadowWord = shadow.mapSize > 0 ? `shadow ${shadow.mapSize} · ${(shadow.reach * 2) / 100} m` : 'shadow off';
+      }
+      // THE LENS, with the rain and at its rung: a pooled overlay, absent
+      // at ultra-low the way the streak cap says so.
+      if (lens !== null && builtLensDetail !== detail) {
+        lens.dispose();
+        lens = null;
+      }
+      if (lens === null) {
+        lens = new LensView({ detail });
+        builtLensDetail = detail;
+        if (viewWidth > 0) {
+          const pr = hooks.pixelRatio?.() ?? 1;
+          lens.resize(viewWidth * pr, viewHeight * pr);
+        }
       }
       if (rain !== null && builtRainDetail !== detail) {
         three.remove(rain.group);
@@ -1306,8 +1394,14 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
     const syncWeatherLayer = (): void => {
       weatherOn = toggles.isEnabled('weather');
       if (skyView !== null) skyView.group.visible = weatherOn;
-      if (rain !== null) rain.group.visible = weatherOn;
+      if (rain !== null) rain.group.visible = weatherOn && !underwater;
       if (weatherOn || light === null || sky === null) return;
+      // Off, the sun stands at a fixed local direction millions of units
+      // from the eye and could shadow nothing near it; it casts nothing.
+      light.castShadow = false;
+      // The noon numbers written below are the base the underwater look
+      // scales from now; re-latch them on the next submerged frame.
+      underwaterLit = false;
       light.color.set(0xfff4e0);
       light.intensity = 1.15;
       light.position.set(200, 400, 100);
@@ -1449,8 +1543,20 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
       const restore = (): void => {
         if (!underwater) return;
         underwater = false;
-        fog.color.set(HORIZON);
-        (three.background as THREE.Color).set(HORIZON);
+        // Back to the air she left: the sky's live horizon when the
+        // weather draws one (it rewrites it every frame anyway; this
+        // stops the one-frame noon flash), the noon constant otherwise.
+        fog.color.copy(weatherOn ? airColour : SKY);
+        (three.background as THREE.Color).copy(weatherOn ? airColour : SKY);
+        if (underwaterLit && light !== null && sky !== null) {
+          light.intensity = baseSun;
+          sky.intensity = baseSky;
+        }
+        underwaterLit = false;
+        if (rain !== null) rain.group.visible = weatherOn;
+        // A few drops stay on the lens as the eye comes up — the seam the
+        // brief asked for, reused rather than a second effect.
+        lens?.splash(SURFACING_DROPS);
         // near/far belong to `adaptDepth`, which is the only thing that
         // knows what the far plane is doing; ask it rather than
         // remembering a number that may be a scale out of date.
@@ -1475,9 +1581,27 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
       }
       // The air fog this is blending FROM is whatever adaptDepth last
       // set, so it is re-read on the frame she goes under and not before.
+      // The air's colour is re-read every frame the sky is writing it
+      // (the sky runs before this, so `fog.color` is this frame's live
+      // horizon), and latched on the going-under frame when it is not.
+      if (weatherOn || !underwater) airColour.copy(fog.color);
       if (!underwater) {
         underwater = true;
         airFog = air;
+        if (rain !== null) rain.group.visible = false;
+      }
+      // The light under the surface is the air's, dimmed with depth on
+      // the look's own curve. The base is re-read each frame while the
+      // sky writes it, latched once when it does not (weather off writes
+      // the noon numbers ONCE, and a per-frame multiply would compound).
+      if (light !== null && sky !== null) {
+        if (weatherOn || !underwaterLit) {
+          baseSun = light.intensity;
+          baseSky = sky.intensity;
+        }
+        light.intensity = baseSun * look.light;
+        sky.intensity = baseSky * look.light;
+        underwaterLit = true;
       }
       // sRGB IN, because that is what the look authors and what every
       // other colour in this file is written as; three's working space
@@ -1486,7 +1610,7 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
       // which is where a blend belongs — and it is blended FROM the air's
       // own colour, read from the one constant that owns it rather than
       // from three numbers copied out of it.
-      fog.color.setRGB(look.r, look.g, look.b, THREE.SRGBColorSpace).lerp(SKY, 1 - look.strength);
+      fog.color.setRGB(look.r, look.g, look.b, THREE.SRGBColorSpace).lerp(airColour, 1 - look.strength);
       (three.background as THREE.Color).copy(fog.color);
       fog.near = blendSight(Math.max(1, airFog.near), 0.02 * look.sight, look.strength);
       fog.far = blendSight(Math.max(1, airFog.far), look.sight, look.strength);
@@ -1641,6 +1765,10 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         three.add(light);
         sky = new THREE.HemisphereLight(HORIZON, GROUND_BOUNCE, 1.0);
         three.add(sky);
+        // The shadow map is switched on with the lights and off at
+        // dispose; with no light casting it compiles nothing extra. What
+        // casts, and when, is decided per rung and per frame in the sky.
+        hooks.shadows?.(true);
         reached('light');
 
         // THE SURVEY. Everything after this can fail without taking the
@@ -1790,6 +1918,7 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
             source: weatherNow.source,
             clock: kauaiClock(clock()),
             sunElevationDeg,
+            ...(shadowWord === '' ? {} : { shadow: shadowWord }),
           }),
           // THE COLUMN EXISTS ONLY WHERE A SEA DOES. Whether this world
           // has one is settled by now — `buildOcean` has already run, and
@@ -2025,6 +2154,27 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
 
       resize(width, height) {
         fly.resize(width, height);
+        viewWidth = width;
+        viewHeight = height;
+        // The streaks and the lens size themselves in DEVICE pixels; the
+        // streaks were never told the phone's, and drew a quarter too long.
+        const pr = hooks.pixelRatio?.() ?? 1;
+        rain?.resize(width * pr, height * pr);
+        lens?.resize(width * pr, height * pr);
+      },
+
+      /**
+       * The lens, after the world and under the HUD: a second scene over
+       * the frame the renderer just drew, with the clear switched off for
+       * exactly that call. Nothing when there is nothing on the glass.
+       */
+      renderOverlays() {
+        if (lens === null || !weatherOn || lens.cost.live === 0) return;
+        const gl = (ctx as { renderer?: { gl?: THREE.WebGLRenderer } }).renderer?.gl;
+        if (gl === undefined) return;
+        gl.autoClear = false;
+        gl.render(lens.scene, lens.camera);
+        gl.autoClear = true;
       },
 
       dispose() {
@@ -2038,6 +2188,9 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         bot = null;
         botHud?.dispose();
         botHud = null;
+        lens?.dispose();
+        lens = null;
+        hooks.shadows?.(false);
         net?.close();
         net = null;
         remotes?.dispose();

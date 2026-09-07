@@ -451,6 +451,12 @@ export function registerScenes(options: RegisterScenesOptions = {}): void {
         },
         tierOverride: TIER_OVERRIDE,
         detailOverride: DETAIL_OVERRIDE,
+        // The renderer's two facts the world may not reach for itself.
+        // Tolerant of a renderer that is a stub: the app-flow test walks
+        // the empty world with `{}` for one, and neither fact matters
+        // there (nothing to shadow, nothing to size).
+        shadows: (enabled) => ctx.renderer.setShadows?.(enabled),
+        pixelRatio: () => ctx.renderer.gl?.getPixelRatio() ?? 1,
         resume: () => restorableStateOf(ctx.app.session),
         // WHO THIS PLAYER IS ON THE WIRE, read only when the world asks —
         // which it does only for a session that holds a transport. The

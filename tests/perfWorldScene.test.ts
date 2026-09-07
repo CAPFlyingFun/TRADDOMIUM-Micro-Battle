@@ -23,8 +23,7 @@ import type { MessageHandler, Transport, TransportState } from '../src/net/Trans
 import type { Message, MoveMessage, Snapshot } from '../src/net/protocol';
 import { DEFAULT_SPEED, headingOfYaw } from '../src/perf/FreeFlyCamera';
 import {
-  REMOTE_CAPSULES_ROLE, createPerformanceWorldScene, type PerformanceWorldHooks,
-} from '../src/perf/PerformanceWorldScene';
+  REMOTE_CAPSULES_ROLE, createPerformanceWorldScene, type PerformanceWorldHooks } from '../src/perf/PerformanceWorldScene';
 import { PERF_WORLD_SCENE_ID } from '../src/perf/perfTool';
 import type { GameSession, SessionSaveState } from '../src/session/GameSession';
 import { RemoteMultiplayerSession } from '../src/session/RemoteMultiplayerSession';
@@ -71,6 +70,7 @@ interface RigOptions {
   readonly weatherCache?: PerformanceWorldHooks['weatherCache'];
   readonly clock?: PerformanceWorldHooks['clock'];
   readonly skyOverride?: PerformanceWorldHooks['skyOverride'];
+  readonly detailOverride?: PerformanceWorldHooks['detailOverride'];
 }
 
 function rig(initial: AppState, options: RigOptions = {}) {
@@ -121,6 +121,7 @@ function rig(initial: AppState, options: RigOptions = {}) {
     weatherCache: options.weatherCache,
     clock: options.clock,
     skyOverride: options.skyOverride,
+    detailOverride: options.detailOverride,
   };
   const scene = createPerformanceWorldScene(hooks)(ctx);
   const field = (name: string): string =>
@@ -1021,6 +1022,101 @@ describe('PerformanceWorldScene with the real island under it', () => {
     noon.scene.dispose();
     night.scene.dispose();
     expect(noon.scene.three.getObjectByName('sky')).toBeUndefined();
+  });
+
+  it('never goes underwater merely because the camera is below zero: inside the mountain is not the sea', async () => {
+    // The lighting polish, invariant 4. In this rig no ocean is built, so
+    // the only thing that could fog the view teal would be a rule that
+    // reads the camera's height alone; this pins that no such rule exists.
+    const saved: SessionSaveState = { camera: { at: world(0, 80), height: -500, yaw: 0, pitch: -0.2 } };
+    const { scene, frame } = rig('loading', { survey, resume: () => saved, clock: () => hstToUnixMs(2026, 9, 7, 12, 0) });
+    await scene.enter();
+    frame();
+    frame();
+    const fog = scene.three.fog as THREE.Fog;
+    const camera = scene.camera as THREE.PerspectiveCamera;
+    // The sky wrote this frame's horizon; the underwater look would have written SHALLOW teal (0.09, 0.35, 0.42).
+    expect(fog.color.b).toBeLessThan(0.6);
+    expect(Math.abs(fog.color.g - 0.35 * 0.35)).toBeGreaterThan(0.001);
+    expect(fog.far).toBeLessThanOrEqual(camera.far);
+    scene.dispose();
+  });
+
+  it('configures the sun\'s shadow by the Detail rung, casts only by day with the weather on, and says so on the sheet', async () => {
+    // The lighting polish, invariants 10 and 8: the rung is a lens on the
+    // shadow the same way it is on the objects — a box the rung names,
+    // none below medium — and the HUD prints the configuration, never a
+    // claim that a shadow is on screen.
+    // The rung arrives as the address-bar override rather than a settings
+    // hook: a settings hook makes every state change rebuild the sea, and
+    // the sea reaches for the renderer this rig withholds on purpose.
+    const noon = rig('loading', { survey, detailOverride: 'high', clock: () => hstToUnixMs(2026, 9, 7, 12, 0) });
+    await noon.scene.enter();
+    noon.frame();
+    const sun = noon.scene.three.children.find((c): c is THREE.DirectionalLight => c instanceof THREE.DirectionalLight)!;
+    expect(sun.castShadow).toBe(true);
+    expect(sun.shadow.mapSize.x).toBe(1024);
+    expect(noon.field('weather-shadow')).toBe('shadow 1024 · 8 m');
+    // The weather off: the sun is a fixed local direction far from the eye and casts nothing.
+    const box = must(noon.uiLayer.querySelector<HTMLInputElement>('[data-action="layer:weather"]'), 'weather box');
+    box.checked = false;
+    box.dispatchEvent(new Event('change'));
+    noon.frame();
+    expect(sun.castShadow).toBe(false);
+    box.checked = true;
+    box.dispatchEvent(new Event('change'));
+    noon.frame();
+    expect(sun.castShadow).toBe(true);
+    noon.scene.dispose();
+
+    // A lower rung: no shadow at all, and the sheet says so. (A second
+    // rig rather than a rung change on the first: a rung change rebuilds
+    // the sea, which reaches the renderer this rig withholds on purpose.)
+    const low = rig('loading', { survey, detailOverride: 'low', clock: () => hstToUnixMs(2026, 9, 7, 12, 0) });
+    await low.scene.enter();
+    low.frame();
+    const lowSun = low.scene.three.children.find((c): c is THREE.DirectionalLight => c instanceof THREE.DirectionalLight)!;
+    expect(lowSun.castShadow).toBe(false);
+    expect(low.field('weather-shadow')).toBe('shadow off');
+    low.scene.dispose();
+
+    // Night at high: the 0.06 sun casts nothing, whatever the rung asks.
+    const night = rig('loading', { survey, detailOverride: 'high', clock: () => hstToUnixMs(2026, 9, 7, 1, 0) });
+    await night.scene.enter();
+    night.frame();
+    const moon = night.scene.three.children.find((c): c is THREE.DirectionalLight => c instanceof THREE.DirectionalLight)!;
+    expect(moon.castShadow).toBe(false);
+    expect(night.field('weather-shadow')).toBe('shadow 1024 · 8 m');
+    night.scene.dispose();
+  });
+
+  it('receives the sun\'s shadow on the ground and casts it from bodies, never from blades', async () => {
+    const { scene, frame } = rig('loading', { survey, landcover, clock: () => hstToUnixMs(2026, 9, 7, 12, 0) });
+    await scene.enter();
+    frame();
+    const rings = scene.three.getObjectByName('terrain');
+    expect(rings).toBeDefined();
+    let ringCount = 0;
+    rings!.traverse((o) => {
+      if (o instanceof THREE.Mesh) {
+        ringCount += 1;
+        expect(o.receiveShadow).toBe(true);
+        expect(o.castShadow).toBe(false);
+      }
+    });
+    expect(ringCount).toBeGreaterThan(0);
+    const stands = scene.three.getObjectByName('vegetation');
+    expect(stands).toBeDefined();
+    const byName = new Map<string, THREE.InstancedMesh>();
+    stands!.traverse((o) => {
+      if (o instanceof THREE.InstancedMesh) byName.set(o.name, o);
+    });
+    expect(byName.get('grass')?.castShadow).toBe(false);
+    expect(byName.get('grass')?.receiveShadow).toBe(false);
+    expect(byName.get('tree')?.castShadow).toBe(true);
+    expect(byName.get('rock')?.castShadow).toBe(true);
+    expect(byName.get('twig')?.castShadow).toBe(false);
+    scene.dispose();
   });
 
   it('grows the island when the landcover lands: VEGETATION built and on, counts on the HUD, the layer toggling', async () => {

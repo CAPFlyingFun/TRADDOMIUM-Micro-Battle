@@ -29,6 +29,18 @@ export class Renderer {
     this.observer?.observe(host);
   }
 
+  /**
+   * The shadow-map switch (the lighting polish, 2026-09-07): ONE place,
+   * so a scene never configures the renderer itself — the scene test rig
+   * withholds the renderer on purpose, and a scene that reached for it
+   * would fail there. Enabled with no light casting costs nothing: three
+   * compiles the lookup only for lights whose `castShadow` is on.
+   */
+  setShadows(enabled: boolean): void {
+    this.gl.shadowMap.enabled = enabled;
+    this.gl.shadowMap.type = THREE.PCFShadowMap;
+  }
+
   size(): { width: number; height: number } {
     return { width: this.width, height: this.height };
   }

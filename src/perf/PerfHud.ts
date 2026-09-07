@@ -227,6 +227,12 @@ export interface WeatherReadout {
   readonly clock: string;
   /** The sun's geometric elevation in degrees; negative below the horizon. */
   readonly sunElevationDeg: number;
+  /**
+   * The shadow the rung asks for, as the configuration and never a claim
+   * that one is on screen: `shadow 1024 · 8 m`, or `shadow off`. Absent
+   * where a world has no shadow seam, and then no line is printed.
+   */
+  readonly shadow?: string;
 }
 
 /**
@@ -603,6 +609,8 @@ export class PerfHud {
   private readonly objectLines: HTMLElement[] | null;
   /** Built only when the owner offers a `weather()` hook; null otherwise. Sky and rain in FRAME, the clock in CAMERA. */
   private readonly weatherLines: readonly [HTMLElement, HTMLElement, HTMLElement] | null;
+  /** The shadow configuration, under the clock in CAMERA; built with the weather lines. */
+  private readonly shadowLine: HTMLElement | null;
   /** The plant families' line: built with the `objects()` hook, in CAMERA with the ecology block. */
   private readonly plantsLine: HTMLElement | null;
   /** Built only when the owner offers a `creatures()` hook; null otherwise. In CAMERA — see the header. */
@@ -693,6 +701,7 @@ export class PerfHud {
     this.weatherLines = hooks.weather === undefined
       ? null
       : [line(frame, 'weather-sky'), line(frame, 'weather-rain'), line(camera, 'weather-clock')];
+    this.shadowLine = hooks.weather === undefined ? null : line(camera, 'weather-shadow');
     // THE ECOLOGY BLOCK, IN CAMERA, under the clock — the plant count
     // first, with the objects' hook it comes from, then the creatures'
     // six. The FRAME column is already tall enough to meet the stick at
@@ -905,8 +914,10 @@ export class PerfHud {
       if (this.plantsLine !== null) this.plantsLine.textContent = plantsWords(objects);
     }
     if (this.weatherLines !== null) {
-      const words = weatherWords(this.hooks.weather?.() ?? null);
+      const weather = this.hooks.weather?.() ?? null;
+      const words = weatherWords(weather);
       for (let i = 0; i < this.weatherLines.length; i += 1) this.weatherLines[i].textContent = words[i];
+      if (this.shadowLine !== null) this.shadowLine.textContent = weather?.shadow ?? '';
     }
     if (this.creatureLines !== null) {
       const words = creatureWords(this.hooks.creatures?.() ?? null);
