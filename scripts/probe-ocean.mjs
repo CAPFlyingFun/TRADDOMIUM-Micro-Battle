@@ -219,6 +219,14 @@ async function openWorld(page, url) {
   log('waiting for the world (this includes the 2 MB survey and the sea textures)');
   await page.waitForSelector('[data-action="pause"]', { timeout: TIMEOUT.world });
   await runFrames(page, 20);
+  // FOLD THE SHEET. Since the ecology pass the stat sheet stands eleven
+  // rows tall and its CAMERA column reaches into the band this probe
+  // samples (40–72 % of the height), so an unfolded sheet is what the
+  // pixel checks were comparing — text that never moves, in front of a
+  // sea that does. The fold is the player's own control; the summary row
+  // it leaves is at the top, outside the band.
+  await page.click('[data-action="hud-collapse"]', { timeout: TIMEOUT.menu });
+  await runFrames(page, 2);
 }
 
 async function drive(page, url) {
@@ -473,6 +481,11 @@ async function main() {
     log(`serving dist/ at ${url}`);
     browser = await chromium.launch({ executablePath: chromiumPath(), args: CHROMIUM_ARGS });
     const page = await browser.newPage({ viewport: VIEWPORT, deviceScaleFactor: 1 });
+    // Can the sky here as the sweep does: the main run never did, so the
+    // world's first live reading went out to Open-Meteo — a fetch the
+    // probe sandbox refuses, printed as the console error the run then
+    // failed on. The stub is the same trade-wind afternoon every probe sees.
+    await stubWeather(page);
     page.on('pageerror', (error) => fail(`uncaught page error: ${error.message}`));
     page.on('console', (message) => {
       if (message.type() === 'error') fail(`console error: ${message.text()}`);
