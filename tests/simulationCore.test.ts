@@ -57,6 +57,8 @@ const CORE: readonly CoreEntry[] = [
   // The one pure file in input/: the Intent shape actor/ and autonomy/ share.
   { path: 'src/input/Intent.ts', required: true },
   { path: 'src/autonomy', required: false },
+  // Phase 7: the island's animals. A server can run the same tick, so no three, no DOM.
+  { path: 'src/creatures', required: true },
 ];
 
 /**

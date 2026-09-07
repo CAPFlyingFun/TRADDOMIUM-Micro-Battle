@@ -16,14 +16,35 @@ import type { SceneFactory } from '../app/Scene';
  * Each is a toggle in the performance world so its cost is measurable
  * alone on a real device.
  */
-export type WorldLayerId = 'terrain' | 'ocean' | 'freshwater' | 'weather' | 'vegetation' | 'player';
+export type WorldLayerId =
+  | 'terrain'
+  | 'ocean'
+  | 'freshwater'
+  | 'weather'
+  | 'vegetation'
+  | 'resources'
+  | 'worms'
+  | 'aphids'
+  | 'flies'
+  | 'player';
 
+/**
+ * The world's layers in the order they are built, which is also the
+ * order the HUD's LAYERS column lists them. Phase 7 (the ecology pass,
+ * 2026-09-07) added the four after vegetation: what the world offers to
+ * eat and drink, and the three animals, each its own row so Joshua can
+ * switch one species off and read what it cost.
+ */
 export const WORLD_LAYERS: readonly WorldLayerId[] = [
   'terrain',
   'ocean',
   'freshwater',
   'weather',
   'vegetation',
+  'resources',
+  'worms',
+  'aphids',
+  'flies',
   'player',
 ];
 

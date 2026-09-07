@@ -80,7 +80,10 @@ src/
                 document, RemoteMultiplayerSession (mock until transport
                 exists), PlayerProfile (device-local layer first) and
                 playerIdOf().
-  world/        terrain / water / weather / vegetation, and WorldLoader.
+  world/        terrain / water / weather / vegetation / ecology (what
+                the island offers to eat and drink — world/ecology, a
+                pure query over the objects and the water), and
+                WorldLoader.
                 Phase 0 holds only WorldLoader and the empty world. Phase 6
                 adds random.ts (the one stable hash and PRNG), landcover.ts
                 (the ESA WorldCover raster), coast.ts (distance to the
@@ -138,6 +141,31 @@ src/
                 Intent shape (Intent.ts, pure), also produced by autonomy/.
   autonomy/     mission brain, autopilot, route planner — an Intent
                 PRODUCER, sibling to input/. Empty until its phase.
+  creatures/    the island's animals, as CORE: species as data
+                (species.ts — sizes cited, senses, paces, needs,
+                populations, what medium each lives in and whether it may
+                edit the ground), CreatureState (a WorldPoint and a
+                height, a heading, a behaviour, needs), the deterministic
+                population per 16 m cell (the same rule the objects
+                follow: seed + cell + habitat, never Math.random), the
+                throttled decision (intent.ts: a behaviour chosen every
+                THINK_S, not every frame), the continuous locomotion
+                (locomotion.ts: walk, burrow, fly — pure integrators),
+                and the simulation over resident creatures in tiers (far:
+                nothing; near: intent + locomotion at a low rate; full:
+                every frame). It reads the world through one read-only
+                query object (CreatureWorld) and mutates only creature
+                state. The terrain-edit seam (terrainEdit.ts) is the ONLY
+                door a burrower has to the ground, and it is no-op until
+                the voxel milestone implements it. Three-free; a server
+                can run the same tick. Added in Phase 7.
+  fauna/        the animals' renderer: one loaded rig per species
+                (SkeletonUtils clones from a pool lent to the nearest
+                creatures), procedural motion on the rigs — legs found by
+                measurement, wings, the worm's chain aimed along its
+                trail — and instanced impostors past the pool's reach.
+                What flora/ is to world/objects, this is to creatures/.
+                Added in Phase 7.
   ui/           screens (menu, settings, about, loading, pause) and HUD
                 widgets. Typed hooks only. ui/splash/ is the key-art
                 stage: the three-layer meter sandwich, the boot splash
@@ -194,6 +222,9 @@ flora → three, world(objects, habitat/heightfield as types, coords, origin, ra
 flora → NEVER actor, view, session, ui, net (the grass does not know who walks through it)
 sky → three, world(weather as types, weather/solar, coords, origin), assets(textureQuality, skyManifest, skySource) — nothing else
 sky → NEVER actor, view, session, ui, net, perf (the sky does not know who is under it)
+creatures → world(coords, random, habitat/heightfield/objects/ecology as TYPES and pure helpers), data — nothing else; NEVER three, DOM, storage, network
+fauna → three, creatures (as types + the species table), world(coords, origin), assets(assets.loadModel) — nothing else
+fauna → NEVER actor, view, session, ui, net, perf
 actor → NEVER view (a state module does not know what it looks like)
 ui → NEVER world, actor, autonomy, session internals (typed hooks only)
 camera → NEVER actor mode enums (continuous signals only)
