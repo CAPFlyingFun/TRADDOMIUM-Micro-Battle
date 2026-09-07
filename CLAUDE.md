@@ -289,7 +289,17 @@ now a change to say so about in the same breath as pushing it.
   go in card DESCRIPTIONS or to Joshua directly.
 - Bump the package version per the project's release practice; the
   build stamps its commit into `version.json` so a phone can tell which
-  build it is running.
+  build it is running — and the running app READS that stamp
+  (`app/updateCheck.ts`, wired in `main.ts`): at boot, whenever it
+  comes back on screen and every few minutes at the menu it compares the
+  live commit with its own and reloads itself when they differ, never
+  mid-game and never twice for the same commit. A home-screen app is
+  otherwise never reloaded by anyone, so this is how a push reaches the
+  phone.
+- Every icon is baked ONTO THE FOREST FLOOR (`bake:art -- icons`): no
+  home screen shows a transparent corner — iOS flattens the icon onto
+  white and rounds it — so the circle sits in a dark tile that is part
+  of the picture.
 
 ## Parallel agent work (Joshua's standing plan for v1)
 

@@ -75,7 +75,10 @@ src/
   main.ts       boot only: construct App, start it. Nothing else.
   app/          App (composition root, single rAF loop), AppState,
                 Scene contract + SceneContext, SceneManager, Renderer,
-                FrameClock, registry of navigable scenes.
+                FrameClock, registry of navigable scenes, and the
+                update watch (version.json against the running commit;
+                reloads at boot / on resume / at the menu, never
+                mid-game — main.ts supplies the browser).
   session/      GameSession contract, LocalSoloSession + the SoloSave
                 document, RemoteMultiplayerSession (mock until transport
                 exists), PlayerProfile (device-local layer first) and

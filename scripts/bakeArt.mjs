@@ -20,11 +20,15 @@
  * it out as a module the screens import. Re-cut the art and the numbers
  * follow it — nobody has to remember to update a percentage.
  *
- *     npm run bake:art
+ *     npm run bake:art             everything
+ *     npm run bake:art -- icons    the icons only
+ *     npm run bake:art -- splash   the splashes and the frame module only
  *
  * Reads art/, writes public/ and src/ui/splash/splashFrame.ts. Paths are
  * resolved from this file, not the working directory, so the command
- * gives the same answer from anywhere.
+ * gives the same answer from anywhere. The selector exists because a
+ * re-encode of the splashes is half a megabyte of diff that says nothing
+ * when only an icon changed.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -63,8 +67,34 @@ const SPLASHES = [
 ];
 const ICON = 'art/icon-source.png';
 
-/** The forest floor at the edge of the icon art, carried out to the corners of the maskable one. */
+/**
+ * The forest floor at the edge of the icon art, carried out to the corners
+ * of EVERY icon. The artwork is a circle with transparent corners, and no
+ * home screen shows a transparent corner: iOS flattens the icon onto a
+ * flat colour of its own choosing — white, on Joshua's phone — and then
+ * rounds the square, so a transparent corner is a white corner. The
+ * floor is what the art's own edge already is, so on the phone the
+ * circle sits in a dark tile that reads as part of the picture.
+ */
 const FOREST = '#0d1408';
+
+/**
+ * How far in from the tile's edge the circle stops, as a fraction of the
+ * width. A hair of floor all round, so the rim of the circle is never
+ * tangent to the tile's edge; the maskable one is padded far more,
+ * because Android crops it to a circle of its own.
+ */
+const ICON_INSET = 0.04;
+
+/** `icons`, `splash`, or nothing for both. Anything else is a typo, said so. */
+const ASKED = new Set(process.argv.slice(2));
+for (const word of ASKED) {
+  if (word !== 'icons' && word !== 'splash') {
+    throw new Error(`bake:art: unknown selector "${word}" — use "icons", "splash" or neither`);
+  }
+}
+const BAKE_SPLASH = ASKED.size === 0 || ASKED.has('splash');
+const BAKE_ICONS = ASKED.size === 0 || ASKED.has('icons');
 
 /**
  * Where this machine keeps a Chromium when Playwright's own pinned
@@ -282,7 +312,7 @@ async function findSmudge(source, win) {
 mkdirSync(PUBLIC, { recursive: true });
 
 const cuts = [];
-for (const splash of SPLASHES) {
+for (const splash of BAKE_SPLASH ? SPLASHES : []) {
   console.log(`${splash.out} — ${splash.kind}`);
   let win;
   let shape;
@@ -334,21 +364,33 @@ for (const splash of SPLASHES) {
   cuts.push({ ...splash, win, ratio: splash.width / height });
 }
 
-console.log('\nicons');
-// 192 stays PNG: it is small either way and every launcher takes it.
-await bake({ source: ICON, out: 'icon-192.png', width: 192, height: 192, type: 'image/png' });
-// iOS reads this one and will not take a WebP.
-await bake({ source: ICON, out: 'apple-touch-icon.png', width: 180, height: 180, type: 'image/png' });
-// At 512 the artwork is a photograph, and PNG charges half a megabyte
-// for one. WebP is a fifth of that for the same picture.
-await bake({ source: ICON, out: 'icon-512.webp', width: 512, height: 512, type: 'image/webp', quality: 0.9 });
-// Android crops a maskable icon to a circle and only guarantees the
-// middle 80%. The wordmark reaches both edges of the square, so it is
-// drawn inset with the forest floor carried out to the corners.
-await bake({
-  source: ICON, out: 'icon-maskable-512.webp',
-  width: 512, height: 512, type: 'image/webp', quality: 0.9, pad: 0.11, ground: FOREST,
-});
+if (BAKE_ICONS) {
+  console.log('\nicons');
+  // Every icon is flattened onto the floor (see FOREST): a transparent
+  // corner is a white corner on the phone.
+  const tile = { pad: ICON_INSET, ground: FOREST };
+  // 192 stays PNG: it is small either way and every launcher takes it.
+  await bake({ source: ICON, out: 'icon-192.png', width: 192, height: 192, type: 'image/png', ...tile });
+  // iOS reads this one and will not take a WebP.
+  await bake({ source: ICON, out: 'apple-touch-icon.png', width: 180, height: 180, type: 'image/png', ...tile });
+  // At 512 the artwork is a photograph, and PNG charges half a megabyte
+  // for one. WebP is a fifth of that for the same picture.
+  await bake({
+    source: ICON, out: 'icon-512.webp', width: 512, height: 512, type: 'image/webp', quality: 0.9, ...tile,
+  });
+  // Android crops a maskable icon to a circle and only guarantees the
+  // middle 80%. The wordmark reaches both edges of the square, so it is
+  // drawn inset with the forest floor carried out to the corners.
+  await bake({
+    source: ICON, out: 'icon-maskable-512.webp',
+    width: 512, height: 512, type: 'image/webp', quality: 0.9, pad: 0.11, ground: FOREST,
+  });
+}
+
+if (!BAKE_SPLASH) {
+  await browser.close();
+  process.exit(0);
+}
 
 const asConst = (cut) => `export const SPLASH_${cut.key}: SplashCut = {
   file: '${cut.out}',
