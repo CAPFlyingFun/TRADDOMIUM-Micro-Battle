@@ -88,6 +88,23 @@
  * core's; how it touches the ground is the renderer's, because the
  * ground it touches is the drawn one.
  *
+ * ─── the ecology pass's seven (2026-09-07) ───────────────────────────
+ *
+ * Fern, reed, flower, leaf litter, shrub, broadleaf and the coastal
+ * spreader arrive as seven more stands — one InstancedMesh each, one
+ * shared vertex-coloured material, every geometry a few dozen
+ * triangles built here (`fernGeometry` and its siblings, at the foot of
+ * the file) — and the grass gains a third stand for its seed head.
+ * Each takes a rest like its nearest cousin above: ferns, reeds,
+ * flowers, broad leaves and the coastal bush GROW UP as grass does,
+ * half persuaded by the cell's slope; a LEAF lies along the slope as a
+ * twig does, lifted a hair so it does not fight the ground for its
+ * pixels; a SHRUB grows up and is buried as a tree is. Their colours
+ * go through the same per-instance path as everything else; a
+ * flower's head is white in the geometry and the instance colour is
+ * the head's — white, yellow, red or violet by its variant — which its
+ * dull green stem is multiplied by and survives.
+ *
  * ─── what this is not ────────────────────────────────────────────────
  *
  * Not climbing, not collision for anything that moves, not a rock that
@@ -105,7 +122,9 @@ import { toLocal } from '../world/origin';
 import { CELL_SPAN, cellCentre, cellKey, cellsWithin, distanceToCell, type ObjectCellId } from '../world/objects/cells';
 import { FAMILY_SPECS, OBJECT_FAMILIES, familyReach, type ObjectFamily } from '../world/objects/families';
 import { objectBudgetFor, type ObjectBudget } from '../world/objects/budget';
-import { populateCell, type CellPopulation, type FamilyBatch, TREE_BROAD, TREE_PALM, TREE_SCRUB } from '../world/objects/populate';
+import {
+  populateCell, type CellPopulation, type FamilyBatch, FLOWER_TINTS, GRASS_BROAD, GRASS_SEED_HEAD, TREE_BROAD, TREE_PALM, TREE_SCRUB,
+} from '../world/objects/populate';
 import { NO_DELTAS, type WorldDelta } from '../world/objects/seed';
 import { bladeGeometry, broadBladeGeometry } from './bladeGeometry';
 import { ROCK_VARIANTS, rockGeometry, stoneGeometry, twigGeometry } from './propGeometry';
@@ -153,6 +172,35 @@ const BLADE_WIDTH_OF_HEIGHT = 0.3256 / 4.9716;
 const BLADE_MAX_WIDTH = 1.0 * M / 100;
 /** The broad-leaf tree's baked girth over height, the ratio an instance's girth is taken against. */
 const TREE_BAKED_GIRTH = 0.045;
+
+/** A leaf is lifted this far off the ground along the normal — three millimetres — so it does not z-fight the terrain. */
+const LEAF_LIFT = 0.3;
+/** A shrub's foot is buried at least this fraction of its height, like a tree's, and never more than `TREE_BURIAL_MAX`. */
+const SHRUB_BURIAL = 0.04;
+/** The unit geometries' own proportions, which an instance's girth is scaled against. */
+const FLOWER_UNIT_HEAD = 0.2;
+const FERN_UNIT_SPREAD = 1;
+const BROADLEAF_UNIT_REACH = 1;
+const SHRUB_UNIT_WIDTH = 1;
+const COASTAL_UNIT_SPREAD = 2;
+/**
+ * The flower heads' colours by variant — white, yellow, red, violet —
+ * PASTEL on purpose: the instance colour multiplies the whole
+ * geometry, stem included, and a stem that is dull green in the
+ * geometry stays a stem under any of these. GAME TUNING.
+ */
+const FLOWER_PALETTE: readonly (readonly [number, number, number])[] = Object.freeze([
+  [1, 1, 0.92], [1, 0.9, 0.35], [1, 0.45, 0.5], [0.75, 0.55, 1],
+]);
+/**
+ * The families that grow up the way grass does — following the CELL's
+ * normal at half weight rather than reading the ground under each of
+ * them — because, like grass, none of them is bedded or laid flat and
+ * a few hundred normals a cell buys a lean no eye could find.
+ */
+const GROWS_LIKE_GRASS: ReadonlySet<ObjectFamily> = new Set<ObjectFamily>(['grass', 'fern', 'reed', 'flower', 'broadleaf', 'coastal']);
+/** The families that lie ALONG the slope, their length on the tangent: the twig's frame. */
+const LIES_FLAT: ReadonlySet<ObjectFamily> = new Set<ObjectFamily>(['twig', 'leaf']);
 
 export interface WorldObjectsOptions {
   /** The live ground, for feet. Never the plane position. */
@@ -238,7 +286,9 @@ interface Stand {
 
 const now = (): number => performance.now();
 
-const DRAWN_ZERO: Record<ObjectFamily, number> = { grass: 0, twig: 0, stone: 0, rock: 0, tree: 0 };
+const DRAWN_ZERO: Readonly<Record<ObjectFamily, number>> = Object.freeze(
+  Object.fromEntries(OBJECT_FAMILIES.map((f) => [f, 0])) as Record<ObjectFamily, number>,
+);
 
 export class WorldObjects {
   readonly group = new THREE.Group();
@@ -331,16 +381,35 @@ export class WorldObjects {
       return s;
     };
     const caps = this.budget.caps;
-    // GRASS: two silhouettes, one material. White so the instance colour is the colour.
+    // GRASS: three silhouettes, one material. White so the instance colour is the colour.
     const grassMaterial = plain(0xffffff);
-    this.grassStands = [stand('grass', bladeGeometry(), grassMaterial, caps.grass), stand('grass', broadBladeGeometry(), grassMaterial, caps.grass)];
+    this.grassStands = [
+      stand('grass', bladeGeometry(), grassMaterial, caps.grass),
+      stand('grass', broadBladeGeometry(), grassMaterial, caps.grass),
+      stand('grass', seedHeadGeometry(), grassMaterial, caps.grass),
+    ];
     this.twigStand = stand('twig', twigGeometry(), plain(0xffffff), caps.twig);
     const stoneMaterial = plain(0xffffff);
     this.stoneStands = [stand('stone', stoneGeometry(0), stoneMaterial, caps.stone), stand('stone', stoneGeometry(1), stoneMaterial, caps.stone)];
     const rockMaterial = plain(0xffffff);
     this.rockStands = [];
     for (let v = 0; v < ROCK_VARIANTS; v += 1) this.rockStands.push(stand('rock', rockGeometry(v), rockMaterial, caps.rock));
-    this.standsOf = { grass: this.grassStands, twig: [this.twigStand], stone: this.stoneStands, rock: this.rockStands };
+    // THE ECOLOGY PASS'S SEVEN: one stand each, one shared material.
+    // Vertex-coloured so a flower's stem and a shrub's stem can be their
+    // own colour under the instance's; double-sided because a frond, a
+    // leaf and a bush are single planes seen from either side.
+    const plantMaterial = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide, fog: true });
+    this.materials.push(plantMaterial);
+    this.standsOf = {
+      grass: this.grassStands, twig: [this.twigStand], stone: this.stoneStands, rock: this.rockStands,
+      fern: [stand('fern', fernGeometry(), plantMaterial, caps.fern)],
+      reed: [stand('reed', reedGeometry(), plantMaterial, caps.reed)],
+      flower: [stand('flower', flowerGeometry(), plantMaterial, caps.flower)],
+      leaf: [stand('leaf', leafGeometry(), plantMaterial, caps.leaf)],
+      shrub: [stand('shrub', shrubGeometry(), plantMaterial, caps.shrub)],
+      broadleaf: [stand('broadleaf', broadleafGeometry(), plantMaterial, caps.broadleaf)],
+      coastal: [stand('coastal', coastalGeometry(), plantMaterial, caps.coastal)],
+    };
     // TREES: three shapes at two levels, wood and leaves in ONE geometry
     // per stand (both are vertex-coloured Lambert; the wood's UVs are
     // dropped because there is no bark map to read them). Six draw calls
@@ -587,11 +656,22 @@ export class WorldObjects {
       case 'twig': this.colour.setHSL(0.09, 0.35, 0.24); swing = 0.5; break;
       case 'stone': case 'rock': this.stoneColour(0.5, habitat); swing = 0.6; break;
       case 'tree': this.colour.setRGB(1, 1, 1); swing = 0.24; break;
+      // The seven: greens varied by habitat like the grass, litter in browns,
+      // a flower's head from its palette per instance below. GAME TUNING.
+      case 'fern': this.colour.setHSL(0.30, 0.48, 0.20 + 0.06 * habitat.wet); swing = 0.35; break;
+      case 'reed': this.colour.setHSL(0.20, 0.45, 0.32); swing = 0.4; break;
+      case 'flower': this.colour.setRGB(1, 1, 1); swing = 0.2; break;
+      case 'leaf': this.colour.setHSL(0.075, 0.45, 0.28); swing = 0.6; break;
+      case 'shrub': this.grassColour(0.5, habitat); this.colour.offsetHSL(0.03, -0.05, -0.06); swing = 0.35; break;
+      case 'broadleaf': this.colour.setHSL(0.31, 0.5, 0.25); swing = 0.35; break;
+      case 'coastal': this.colour.setHSL(0.21, 0.5, 0.40); swing = 0.3; break;
     }
     baseR = this.colour.r; baseG = this.colour.g; baseB = this.colour.b;
-    // The cell's own normal, for the grass; a blade follows it half way.
+    // The cell's own normal, for the grass and what grows like it; a blade follows it half way.
+    const growsLikeGrass = GROWS_LIKE_GRASS.has(family);
+    const liesFlat = LIES_FLAT.has(family);
     let cellUx = 0, cellUy = 1, cellUz = 0;
-    if (family === 'grass') {
+    if (growsLikeGrass) {
       const cn = this.field.normalAt(cellCentre(id));
       const w = GRASS_FOLLOWS_GROUND;
       cellUx = w * cn.nx; cellUy = w * cn.ny + (1 - w); cellUz = w * cn.nz;
@@ -602,9 +682,9 @@ export class WorldObjects {
     for (let i = 0; i < n; i += 1) {
       const size = batch.size[i];
       const girth = batch.girth[i];
-      // ── the ground under this object: its normal, unless the family grows up ──
+      // ── the ground under this object: its normal, unless the family grows up like grass ──
       let ux = cellUx, uy = cellUy, uz = cellUz;
-      if (family !== 'grass') {
+      if (!growsLikeGrass) {
         point.wx = batch.wx[i];
         point.wz = batch.wz[i];
         const gn = this.field.normalAt(point as unknown as WorldPoint, CONTACT_STEP);
@@ -618,7 +698,64 @@ export class WorldObjects {
         case 'grass': {
           const width = Math.min(BLADE_MAX_WIDTH, size * girth) / BLADE_WIDTH_OF_HEIGHT;
           sx = width; sy = size; sz = width * 0.6;
-          stand[i] = batch.variant[i] === 1 ? 1 : 0;
+          stand[i] = batch.variant[i] === GRASS_SEED_HEAD ? 2 : batch.variant[i] === GRASS_BROAD ? 1 : 0;
+          break;
+        }
+        // ── the seven ──
+        case 'fern': {
+          // The crown's spread is `girth` of its height, at the frond tips.
+          const spread = size * girth / FERN_UNIT_SPREAD;
+          sx = spread; sy = size; sz = spread;
+          stand[i] = 0;
+          break;
+        }
+        case 'reed': {
+          // A cluster of blades scaled like grass: the width is the girth of the height.
+          const width = size * girth / BLADE_WIDTH_OF_HEIGHT;
+          sx = width; sy = size; sz = width;
+          stand[i] = 0;
+          break;
+        }
+        case 'flower': {
+          // The head's radius is `girth` of the stem's height.
+          const head = size * girth / FLOWER_UNIT_HEAD;
+          sx = head; sy = size; sz = head;
+          stand[i] = 0;
+          break;
+        }
+        case 'leaf': {
+          // Lies along the slope like a twig: length on the tangent, the
+          // tent of its midrib along the normal, lifted a hair off the ground.
+          const width = size * girth;
+          sx = width; sy = size; sz = width;
+          ox = ux * LEAF_LIFT; oy = uy * LEAF_LIFT; oz = uz * LEAF_LIFT;
+          stand[i] = 0;
+          break;
+        }
+        case 'shrub': {
+          // Grows up whatever the slope, buried like a tree: at least a
+          // little, and on a slope as deep as half the canopy's radius
+          // times the slope, so the downhill side does not hang in the air.
+          const width = size * girth / SHRUB_UNIT_WIDTH;
+          sx = width; sy = size; sz = width;
+          const slopeRise = uy > 1e-6 ? 0.5 * (width * 0.5) * Math.hypot(ux, uz) / uy : size * TREE_BURIAL_MAX;
+          oy = -Math.min(size * TREE_BURIAL_MAX, Math.max(size * SHRUB_BURIAL, slopeRise));
+          stand[i] = 0;
+          ux = 0; uy = 1; uz = 0;
+          break;
+        }
+        case 'broadleaf': {
+          // The leaves reach out `girth`-and-a-bit of the height.
+          const reach = size * girth * 1.6 / BROADLEAF_UNIT_REACH;
+          sx = reach; sy = size; sz = reach;
+          stand[i] = 0;
+          break;
+        }
+        case 'coastal': {
+          // Low and wide: the spread is `girth` of the height.
+          const spread = size * girth / COASTAL_UNIT_SPREAD;
+          sx = spread; sy = size; sz = spread;
+          stand[i] = 0;
           break;
         }
         case 'twig': {
@@ -666,10 +803,11 @@ export class WorldObjects {
       const xl = Math.hypot(xx, xy, xz);
       xx /= xl; xy /= xl; xz /= xl;
       const zx = xy * uz - xz * uy, zy = xz * ux - xx * uz, zz = xx * uy - xy * ux;
-      // A twig's length is along the tangent: its frame is [Z, X, U], the
-      // same triad read in a different order (cyclic, so still right-handed).
+      // A twig's length is along the tangent — and a leaf's: its frame is
+      // [Z, X, U], the same triad read in a different order (cyclic, so
+      // still right-handed).
       let ax0 = xx, ay0 = xy, az0 = xz, bx0 = ux, by0 = uy, bz0 = uz, cx0 = zx, cy0 = zy, cz0 = zz;
-      if (family === 'twig') {
+      if (liesFlat) {
         ax0 = zx; ay0 = zy; az0 = zz;
         bx0 = xx; by0 = xy; bz0 = xz;
         cx0 = ux; cy0 = uy; cz0 = uz;
@@ -681,8 +819,8 @@ export class WorldObjects {
       const lean = batch.lean[i];
       const cl = cosOf(lean);
       const sl = sinOf(lean);
-      const ax = family === 'twig' ? 1 : cosOf(batch.leanDir[i]);
-      const az = family === 'twig' ? 0 : -sinOf(batch.leanDir[i]);
+      const ax = liesFlat ? 1 : cosOf(batch.leanDir[i]);
+      const az = liesFlat ? 0 : -sinOf(batch.leanDir[i]);
       const k = 1 - cl;
       const t00 = cl + ax * ax * k, t01 = -az * sl, t02 = ax * az * k;
       const t10 = az * sl, t11 = cl, t12 = -ax * sl;
@@ -708,9 +846,18 @@ export class WorldObjects {
       matrices[o + 14] = here.lz + oz;
       matrices[o + 15] = 1;
       const shade = 1 - swing / 2 + swing * batch.tint[i];
-      colours[i * 3] = baseR * shade;
-      colours[i * 3 + 1] = baseG * shade;
-      colours[i * 3 + 2] = baseB * shade;
+      if (family === 'flower') {
+        // The instance colour is the HEAD's: the geometry's head is white
+        // and its stem dull green, and both are multiplied by this.
+        const head = FLOWER_PALETTE[batch.variant[i] % FLOWER_TINTS];
+        colours[i * 3] = head[0] * shade;
+        colours[i * 3 + 1] = head[1] * shade;
+        colours[i * 3 + 2] = head[2] * shade;
+      } else {
+        colours[i * 3] = baseR * shade;
+        colours[i * 3 + 1] = baseG * shade;
+        colours[i * 3 + 2] = baseB * shade;
+      }
       const v = vanishDistance(family, batch.rank[i], draw, reach);
       vanish2[i] = v * v;
     }
@@ -1007,6 +1154,312 @@ function mergedTree(shape: TreeShape, level: 0 | 1): THREE.BufferGeometry {
   out.setAttribute('color', new THREE.BufferAttribute(col.subarray(0, offset * 3), 3));
   out.computeBoundingSphere();
   return out;
+}
+
+/**
+ * ─── THE SEVEN'S GEOMETRY, AND THE SEED HEAD ─────────────────────────
+ *
+ * Built here rather than in a bake file of their own because each is a
+ * dozen lines and a few dozen triangles: flat-shaded triangle soup with
+ * a colour per triangle, in a UNIT space the instance scales — the foot
+ * at y = 0, the top at y = 1, the spread about 1 across — so `compose`
+ * above can name what `girth` scales per family and be right. Every
+ * geometry here carries a `color` attribute because they share one
+ * vertex-coloured material; white where the instance colour should be
+ * the colour, and a stem's own green or brown where it should not.
+ * All procedural, like the rocks and twigs (Joshua, 2026-09-06); art
+ * can replace any of them behind the same stand.
+ */
+type P3 = readonly [number, number, number];
+type RGB = readonly [number, number, number];
+const WHITE: RGB = [1, 1, 1];
+const STEM_GREEN: RGB = [0.35, 0.5, 0.25];
+const STEM_BROWN: RGB = [0.35, 0.25, 0.15];
+
+/** A flat-shaded triangle soup: positions, per-face normals, a colour per face. */
+class Soup {
+  private readonly positions: number[] = [];
+  private readonly normals: number[] = [];
+  private readonly colours: number[] = [];
+  private count = 0;
+
+  tri(a: P3, b: P3, c: P3, colour: RGB): void {
+    const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
+    const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+    let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    const l = Math.hypot(nx, ny, nz) || 1;
+    nx /= l; ny /= l; nz /= l;
+    for (const q of [a, b, c]) {
+      this.positions.push(q[0], q[1], q[2]);
+      this.normals.push(nx, ny, nz);
+      this.colours.push(colour[0], colour[1], colour[2]);
+    }
+    this.count += 1;
+  }
+
+  quad(a: P3, b: P3, c: P3, d: P3, colour: RGB): void {
+    this.tri(a, b, c, colour);
+    this.tri(a, c, d, colour);
+  }
+
+  /** A fan about a centre through a closed ring of points. */
+  fan(centre: P3, ring: readonly P3[], colour: RGB): void {
+    for (let i = 0; i < ring.length; i += 1) this.tri(centre, ring[i], ring[(i + 1) % ring.length], colour);
+  }
+
+  /** A strip between two runs of points of equal length: a frond, a leaf, a tube's side. */
+  strip(left: readonly P3[], right: readonly P3[], colour: RGB): void {
+    for (let i = 0; i + 1 < left.length; i += 1) this.quad(left[i], right[i], right[i + 1], left[i + 1], colour);
+  }
+
+  get triangles(): number {
+    return this.count;
+  }
+
+  build(): THREE.BufferGeometry {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(this.positions, 3));
+    geometry.setAttribute('normal', new THREE.Float32BufferAttribute(this.normals, 3));
+    geometry.setAttribute('color', new THREE.Float32BufferAttribute(this.colours, 3));
+    geometry.computeBoundingSphere();
+    return geometry;
+  }
+}
+
+/** A point turned about +y by `angle`. */
+function turned(p: P3, angle: number): P3 {
+  const c = Math.cos(angle), s = Math.sin(angle);
+  return [p[0] * c - p[2] * s, p[1], p[0] * s + p[2] * c];
+}
+
+/**
+ * A frond or a broad leaf: a strip along a curve of (radius, height)
+ * points with a half-width at each, in the vertical plane at `angle`,
+ * its width tangential. Rendered double-sided, so its facing is moot.
+ */
+function frond(soup: Soup, curve: readonly (readonly [number, number])[], halfWidths: readonly number[], angle: number, colour: RGB): void {
+  const left: P3[] = [];
+  const right: P3[] = [];
+  for (let i = 0; i < curve.length; i += 1) {
+    const [r, y] = curve[i];
+    left.push(turned([r, y, -halfWidths[i]], angle));
+    right.push(turned([r, y, halfWidths[i]], angle));
+  }
+  soup.strip(left, right, colour);
+}
+
+/** A closed tube along +y between two heights, `sides` faces, radii at the foot and the top. */
+function tube(soup: Soup, sides: number, y0: number, y1: number, r0: number, r1: number, colour: RGB, x1 = 0): void {
+  const foot: P3[] = [];
+  const top: P3[] = [];
+  for (let i = 0; i < sides; i += 1) {
+    const a = (i / sides) * Math.PI * 2;
+    foot.push([Math.cos(a) * r0, y0, Math.sin(a) * r0]);
+    top.push([Math.cos(a) * r1 + x1, y1, Math.sin(a) * r1]);
+  }
+  for (let i = 0; i < sides; i += 1) {
+    const j = (i + 1) % sides;
+    soup.quad(foot[i], foot[j], top[j], top[i], colour);
+  }
+}
+
+/**
+ * An eight-point blob ring in the plane at `angle`, about (0, cy), with
+ * radii rx across and ry up, wobbled INWARD so it is not an ellipse and
+ * never reaches past the radii: the unit stays the unit.
+ */
+function blob(cy: number, rx: number, ry: number, angle: number, wobble: number): P3[] {
+  const ring: P3[] = [];
+  for (let i = 0; i < 8; i += 1) {
+    const a = (i / 8) * Math.PI * 2;
+    const w = 1 - wobble * (0.5 + 0.5 * Math.sin(a * 3 + angle * 5));
+    ring.push(turned([Math.cos(a) * rx * w, cy + Math.sin(a) * ry * w, 0], angle));
+  }
+  return ring;
+}
+
+/** A horizontal eight-point ring at height `y`, radius `r`, wobbled inward. */
+function cap(y: number, r: number, wobble: number): P3[] {
+  const ring: P3[] = [];
+  for (let i = 0; i < 8; i += 1) {
+    const a = (i / 8) * Math.PI * 2;
+    const w = 1 - wobble * (0.5 + 0.5 * Math.sin(a * 3 + 1));
+    ring.push([Math.cos(a) * r * w, y, Math.sin(a) * r * w]);
+  }
+  return ring;
+}
+
+/**
+ * The grass's seed head: Joshua's blade with a small diamond at the
+ * tip. Shares the grass material (no vertex colours), so it is the
+ * blade's own triangles plus eight more, position and normal only.
+ * Twenty triangles.
+ */
+export function seedHeadGeometry(): THREE.BufferGeometry {
+  const blade = bladeGeometry();
+  const bp = blade.getAttribute('position') as THREE.BufferAttribute;
+  const bn = blade.getAttribute('normal') as THREE.BufferAttribute;
+  const positions = Array.from(bp.array as Float32Array);
+  const normals = Array.from(bn.array as Float32Array);
+  blade.dispose();
+  // The head: an octahedron 0.14 tall and 0.1 across (the blade is 0.065 wide), its foot at 0.86.
+  const w = 0.05;
+  const bottom: P3 = [0, 0.86, 0];
+  const top: P3 = [0, 1.0, 0];
+  const mid: P3[] = [[w, 0.92, 0], [0, 0.92, w], [-w, 0.92, 0], [0, 0.92, -w]];
+  const push = (a: P3, b: P3, c: P3): void => {
+    const ux = b[0] - a[0], uy = b[1] - a[1], uz = b[2] - a[2];
+    const vx = c[0] - a[0], vy = c[1] - a[1], vz = c[2] - a[2];
+    let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    const l = Math.hypot(nx, ny, nz) || 1;
+    nx /= l; ny /= l; nz /= l;
+    for (const q of [a, b, c]) { positions.push(q[0], q[1], q[2]); normals.push(nx, ny, nz); }
+  };
+  for (let i = 0; i < 4; i += 1) {
+    const a = mid[i], b = mid[(i + 1) % 4];
+    push(bottom, b, a);
+    push(top, a, b);
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+/**
+ * A fern: four fronds arching out and drooping from a centre, each a
+ * three-segment strip. Unit: the arch's top at y = 1, the tips a unit
+ * out. Twenty-four triangles.
+ */
+export function fernGeometry(): THREE.BufferGeometry {
+  const soup = new Soup();
+  const curve: (readonly [number, number])[] = [[0.02, 0.05], [0.35, 0.6], [0.7, 1.0], [1.0, 0.8]];
+  const widths = [0.03, 0.12, 0.13, 0.04];
+  for (let i = 0; i < 4; i += 1) frond(soup, curve, widths, i * (Math.PI / 2) + 0.3, WHITE);
+  return soup.build();
+}
+
+/**
+ * A reed: a cluster of three blades — Joshua's blade thrice, at three
+ * heights, spread a blade-width or two apart and turned so they do
+ * not stand in one plane. Thirty-six triangles.
+ */
+export function reedGeometry(): THREE.BufferGeometry {
+  const blade = bladeGeometry();
+  const bp = blade.getAttribute('position') as THREE.BufferAttribute;
+  const bn = blade.getAttribute('normal') as THREE.BufferAttribute;
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const colours: number[] = [];
+  const w = BLADE_WIDTH_OF_HEIGHT;
+  const stems: { readonly dx: number; readonly dz: number; readonly h: number; readonly turn: number }[] = [
+    { dx: 0, dz: 0, h: 1, turn: 0 },
+    { dx: 1.5 * w, dz: 0.5 * w, h: 0.85, turn: 2.1 },
+    { dx: -1.0 * w, dz: 1.3 * w, h: 0.72, turn: 4.2 },
+  ];
+  for (const stem of stems) {
+    const c = Math.cos(stem.turn), s = Math.sin(stem.turn);
+    for (let i = 0; i < bp.count; i += 1) {
+      const x = bp.getX(i), y = bp.getY(i) * stem.h, z = bp.getZ(i);
+      positions.push(x * c - z * s + stem.dx, y, x * s + z * c + stem.dz);
+      const nx = bn.getX(i), ny = bn.getY(i), nz = bn.getZ(i);
+      normals.push(nx * c - nz * s, ny, nx * s + nz * c);
+      colours.push(1, 1, 1);
+    }
+  }
+  blade.dispose();
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('normal', new THREE.Float32BufferAttribute(normals, 3));
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colours, 3));
+  geometry.computeBoundingSphere();
+  return geometry;
+}
+
+/**
+ * A flower: a thin three-sided stem, dull green, and a shallow
+ * six-sided cone of a head, white, so the instance colour is the
+ * head's. Unit: the head at y ≈ 0.9, its radius `FLOWER_UNIT_HEAD`.
+ * Twelve triangles.
+ */
+export function flowerGeometry(): THREE.BufferGeometry {
+  const soup = new Soup();
+  tube(soup, 3, 0, 0.88, 0.02, 0.015, STEM_GREEN, 0.03);
+  const ring: P3[] = [];
+  for (let i = 0; i < 6; i += 1) {
+    const a = (i / 6) * Math.PI * 2;
+    ring.push([0.03 + Math.cos(a) * FLOWER_UNIT_HEAD, 0.9, Math.sin(a) * FLOWER_UNIT_HEAD]);
+  }
+  soup.fan([0.03, 0.96, 0], ring, WHITE);
+  return soup.build();
+}
+
+/**
+ * A fallen leaf: an outline with a raised midrib, so it is a tent and
+ * not a sheet. Built in the x–y plane with its length along +y and the
+ * rib toward +z, which the twig frame lays along the ground with the
+ * rib UP. Unit: length 1, width 1. Ten triangles.
+ */
+export function leafGeometry(): THREE.BufferGeometry {
+  const soup = new Soup();
+  const base: P3 = [0, 0, 0];
+  const tip: P3 = [0, 1, 0];
+  const right: P3[] = [[0.35, 0.2, 0], [0.5, 0.45, 0], [0.32, 0.78, 0]];
+  const left: P3[] = [[-0.35, 0.2, 0], [-0.5, 0.45, 0], [-0.32, 0.78, 0]];
+  const rib: P3[] = [[0, 0.25, 0.15], [0, 0.6, 0.15]];
+  for (const side of [right, left]) {
+    soup.tri(base, side[0], rib[0], WHITE);
+    soup.tri(side[0], side[1], rib[0], WHITE);
+    soup.tri(side[1], rib[1], rib[0], WHITE);
+    soup.tri(side[1], side[2], rib[1], WHITE);
+    soup.tri(side[2], tip, rib[1], WHITE);
+  }
+  return soup.build();
+}
+
+/**
+ * A shrub: a short brown stem under a canopy of three crossed vertical
+ * blobs and a horizontal cap, white. Unit: height 1, width
+ * `SHRUB_UNIT_WIDTH`. Forty triangles.
+ */
+export function shrubGeometry(): THREE.BufferGeometry {
+  const soup = new Soup();
+  tube(soup, 4, 0, 0.4, 0.035, 0.025, STEM_BROWN);
+  for (let i = 0; i < 3; i += 1) {
+    const angle = i * (Math.PI / 3) + 0.2;
+    soup.fan(turned([0, 0.65, 0], angle), blob(0.65, 0.5, 0.35, angle, 0.12), WHITE);
+  }
+  soup.fan([0, 0.78, 0], cap(0.75, 0.42, 0.15), WHITE);
+  return soup.build();
+}
+
+/**
+ * A broad-leaved ground plant: three wide leaves reaching out and up
+ * from the foot, then drooping. Unit: the leaves' top at y = 1, their
+ * tips `BROADLEAF_UNIT_REACH` out. Eighteen triangles.
+ */
+export function broadleafGeometry(): THREE.BufferGeometry {
+  const soup = new Soup();
+  const curve: (readonly [number, number])[] = [[0.0, 0.05], [0.35, 0.5], [0.7, 1.0], [1.0, 0.8]];
+  const widths = [0.04, 0.25, 0.32, 0.12];
+  for (let i = 0; i < 3; i += 1) frond(soup, curve, widths, i * (2 * Math.PI / 3) + 0.5, WHITE);
+  return soup.build();
+}
+
+/**
+ * The coastal spreader: a low mound — two crossed vertical blobs, wide
+ * and low, under a horizontal cap. Unit: height 1, spread
+ * `COASTAL_UNIT_SPREAD` across. Twenty-four triangles.
+ */
+export function coastalGeometry(): THREE.BufferGeometry {
+  const soup = new Soup();
+  for (let i = 0; i < 2; i += 1) {
+    const angle = i * (Math.PI / 2) + 0.4;
+    soup.fan(turned([0, 0.5, 0], angle), blob(0.5, 1.0, 0.5, angle, 0.1), WHITE);
+  }
+  soup.fan([0, 0.7, 0], cap(0.62, 0.8, 0.12), WHITE);
+  return soup.build();
 }
 
 /** Where a cell's centre is, as a local point, for anything that wants to draw a debug marker. */

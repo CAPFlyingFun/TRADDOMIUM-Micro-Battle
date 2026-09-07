@@ -55,7 +55,7 @@ const cellOfKind = (centre: WorldPoint, kind: Habitat['kind'], reach = 4000 * M)
 
 /** Sum a family over every cell under a circle. */
 function countWithin(centre: WorldPoint, radius: number): Record<ObjectFamily, number> {
-  const sums: Record<ObjectFamily, number> = { grass: 0, twig: 0, stone: 0, rock: 0, tree: 0 };
+  const sums = Object.fromEntries(OBJECT_FAMILIES.map((f) => [f, 0])) as Record<ObjectFamily, number>;
   for (const id of cellsWithin(centre, radius)) {
     const p = grow(id);
     for (const f of OBJECT_FAMILIES) sums[f] += p.batches[f].count;
@@ -183,6 +183,14 @@ describe('what grows where', () => {
       stone: [2 * M / 100, 20 * M / 100],
       rock: [25 * M / 100, 250 * M / 100],
       tree: [2.5 * M, 26 * M],
+      // The ecology pass's seven, the brief's ranges.
+      fern: [20 * M / 100, 60 * M / 100],
+      reed: [60 * M / 100, 180 * M / 100],
+      flower: [8 * M / 100, 40 * M / 100],
+      leaf: [3 * M / 100, 12 * M / 100],
+      shrub: [40 * M / 100, 150 * M / 100],
+      broadleaf: [15 * M / 100, 50 * M / 100],
+      coastal: [20 * M / 100, 60 * M / 100],
     };
     const bad: string[] = [];
     let checked = 0;
@@ -309,7 +317,7 @@ describe('addresses and identities', () => {
             ids.add(oid);
           }
         } else {
-          expect(f === 'grass' || f === 'twig' || f === 'stone').toBe(true);
+          expect(['grass', 'twig', 'stone', 'fern', 'reed', 'flower', 'leaf', 'broadleaf', 'coastal']).toContain(f);
         }
       }
     }
@@ -354,7 +362,8 @@ describe('what the populator may not touch', () => {
     const dir = path.join(ROOT, 'src', 'world', 'objects');
     const files = readdirSync(dir).filter((f) => f.endsWith('.ts'));
     expect(files.length).toBeGreaterThanOrEqual(5);
-    const allowed = /^(\.\/[\w]+|\.\.\/(coords|dem|habitat|random|heightfield))$/;
+    // `ecology/resources` is the resource layer's CONTRACT (types only), which `plants.ts` shapes its answer to.
+    const allowed = /^(\.\/[\w]+|\.\.\/(coords|dem|habitat|random|heightfield|ecology\/resources))$/;
     for (const file of files) {
       const source = readFileSync(path.join(dir, file), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
       for (const m of source.matchAll(/\bfrom\s*['"]([^'"]+)['"]/g)) {

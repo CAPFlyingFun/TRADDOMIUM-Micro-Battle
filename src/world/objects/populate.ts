@@ -50,6 +50,41 @@
  * name an id and the populator leaves that object out; nothing writes
  * deltas yet, but the door is the id and the id is here.
  *
+ * ─── the seven of the ecology pass (2026-09-07) ──────────────────────
+ *
+ * Joshua's brief — "Habitat decides WHAT, generation decides WHERE,
+ * Detail Quality decides HOW MUCH" — adds fern, reed, flower, leaf
+ * litter, shrub, broadleaf and coastal, and every one is placed by the
+ * machinery above: its own lattice, its own salt block, its own patch
+ * field, the same corner-blended factors. WHAT each follows:
+ *
+ *   fern       shade and damp — the forest factor, lifted by wet
+ *   reed       fresh water's margins — wet, and the EDGE of a lake
+ *              (where `lake` rises but is not yet open water); none on
+ *              dry grassland, none on the sand
+ *   flower     light and open ground — grass and shrub factors, not the
+ *              forest interior, none on the sand or at sea
+ *   leaf       the forest floor, some under shrubs
+ *   shrub      shrubland and the forest EDGE; the brief's "sparse
+ *              rocky/high plants" as a low density scaled by bare and
+ *              exposure, never nothing
+ *   broadleaf  the forest floor and the wet ground's herbs
+ *   coastal    the beach and the backshore — the coast factor, gone
+ *              by eighty metres inland
+ *
+ * and the grass gained a third variant: a SEED HEAD on about fifteen
+ * percent of an open grassland's blades, which the resource layer reads
+ * as seeds (`GRASS_SEED_HEAD`).
+ *
+ * A FAMILY THAT CANNOT BE HERE COSTS NOTHING. Each of the seven has a
+ * short list of DRIVER factors its density is proportional to; when
+ * every one of the five samples has them all at zero, the lattice is
+ * not rolled at all. That is exact, not a heuristic: a blended factor
+ * is a convex combination of the five samples', so a driver sum that is
+ * zero at all five is zero at every site. It is what keeps a coastal
+ * plant from costing an inland cell four hundred hashes, and a reed
+ * from costing a dry one six hundred.
+ *
  * ─── what is game tuning ─────────────────────────────────────────────
  *
  * Every density and every size range below is GAME TUNING, informed by
@@ -63,7 +98,7 @@
  */
 import { world, type WorldPoint } from '../coords';
 import { UNITS_PER_METRE } from '../dem';
-import type { Habitat } from '../habitat';
+import { BEACH_CEILING, type Habitat } from '../habitat';
 import { clumpNoise, stableHash } from '../random';
 import { CELL_SPAN, cellCentre, cellKey, cellOrigin, type ObjectCellId } from './cells';
 import { FAMILY_SPECS, OBJECT_FAMILIES, type ObjectFamily } from './families';
@@ -99,7 +134,11 @@ export interface FamilyBatch {
   readonly tint: Float32Array;
   /** 0..1, the thinning order: lower is kept longer as distance grows or the cap bites. */
   readonly rank: Float32Array;
-  /** Shape variant: trees 0 broad / 1 scrub / 2 palm; rocks and stones 0..3; grass 0..1 (blade / broad blade). */
+  /**
+   * Shape variant: trees 0 broad / 1 scrub / 2 palm; rocks and stones
+   * 0..3; grass 0 blade / 1 broad blade / 2 seed head; flowers 0..3, the
+   * head's colour; the rest 0.
+   */
   readonly variant: Uint8Array;
   /** The site's index on the family's lattice — the object's slot, whatever is thinned. */
   readonly site: Uint32Array;
@@ -144,6 +183,16 @@ export const SITES_PER_SIDE: Readonly<Record<ObjectFamily, number>> = Object.fre
   stone: 18, // 324: 1.3 a square metre
   rock: 5,   // 25: one per ten square metres at most
   tree: 4,   // 16: one per sixteen square metres at most
+  // The ecology pass's seven: all far sparser than grass, and their
+  // lattices sized so a full habitat fills its sites rather than
+  // rolling past 1 (density × area per site ≤ 1 at the density cap).
+  fern: 20,      // 400: 1.6 a square metre
+  reed: 26,      // 676: 2.6 a square metre, a reed bed
+  flower: 28,    // 784: 3.1 a square metre, a meadow in bloom
+  leaf: 40,      // 1,600: 6.25 a square metre of litter
+  shrub: 8,      // 64: one per four square metres at most — somebody, like a rock
+  broadleaf: 20, // 400: 1.6 a square metre
+  coastal: 20,   // 400: 1.6 a square metre of backshore
 });
 
 /** The patch field's wavelength per family, world units. GAME TUNING. */
@@ -153,11 +202,19 @@ const CLUMP_WAVELENGTH: Readonly<Record<ObjectFamily, number>> = Object.freeze({
   stone: 10 * M,
   rock: 12 * M,
   tree: 30 * M,
+  fern: 8 * M,
+  reed: 5 * M,      // beds
+  flower: 5 * M,    // drifts
+  leaf: 4 * M,      // litter is nearly even; the field only breaks it up
+  shrub: 14 * M,
+  broadleaf: 7 * M,
+  coastal: 9 * M,
 });
 
 /** How much a patch field can suppress a family: 0 means bald patches, 1 means no patches at all. */
 const CLUMP_FLOOR: Readonly<Record<ObjectFamily, number>> = Object.freeze({
   grass: 0.25, twig: 0.3, stone: 0.35, rock: 0.3, tree: 0.2,
+  fern: 0.2, reed: 0.3, flower: 0.15, leaf: 0.5, shrub: 0.3, broadleaf: 0.25, coastal: 0.3,
 });
 
 /**
@@ -167,6 +224,7 @@ const CLUMP_FLOOR: Readonly<Record<ObjectFamily, number>> = Object.freeze({
  */
 const FAMILY_SALT: Readonly<Record<ObjectFamily, number>> = Object.freeze({
   grass: 0x100, twig: 0x200, stone: 0x300, rock: 0x400, tree: 0x500,
+  fern: 0x600, reed: 0x700, flower: 0x800, leaf: 0x900, shrub: 0xa00, broadleaf: 0xb00, coastal: 0xc00,
 });
 const Q = Object.freeze({ occupy: 0, jx: 1, jz: 2, size: 3, girth: 4, spin: 5, lean: 6, leanDir: 7, tint: 8, rank: 9, variant: 10, clump: 11 });
 
@@ -174,6 +232,16 @@ const Q = Object.freeze({ occupy: 0, jx: 1, jz: 2, size: 3, girth: 4, spin: 5, l
 export const TREE_BROAD = 0;
 export const TREE_SCRUB = 1;
 export const TREE_PALM = 2;
+
+/** Grass shapes. The seed head is what the resource layer reads as seeds. */
+export const GRASS_BLADE = 0;
+export const GRASS_BROAD = 1;
+export const GRASS_SEED_HEAD = 2;
+/** The share of an OPEN grassland's blades that carry a seed head. GAME TUNING; the brief's "~15%". */
+export const SEED_HEAD_SHARE = 0.15;
+
+/** How many head colours a flower can have; the renderer names them (white, yellow, red, violet). */
+export const FLOWER_TINTS = 4;
 
 /** The blended factors at a site: what the densities are computed from. */
 interface Factors {
@@ -203,6 +271,12 @@ const CHECK_GROUND_BELOW = 1.5 * M;
 function densityPerM2(family: ObjectFamily, f: Factors): number {
   const dry = f.elevation > DRY_LAND_ABOVE ? 1 : 0;
   const notLake = 1 - Math.min(1, f.lake * 2);
+  // Sand, by the habitat's own rule (`classify`): the coast factor on
+  // ground low enough to be a beach. `noSand` is 0 from the beach kind's
+  // own threshold (sand > 0.5) inward, so the plants that are not the
+  // beach's stop where the beach starts.
+  const sand = f.coast * (1 - smoothstep(0, BEACH_CEILING, f.elevation));
+  const noSand = 1 - Math.min(1, 2 * sand);
   switch (family) {
     case 'grass': {
       // DOUBLED on 2026-09-07 at Joshua's ask from the phone: "double the
@@ -229,7 +303,87 @@ function densityPerM2(family: ObjectFamily, f: Factors): number {
       const trees = 0.022 * f.forest + 0.005 * f.shrub + 0.0015 * f.grass * (1 - f.coast) + 0.005 * f.coast * (1 - f.forest);
       return Math.min(0.0625, trees) * (1 - f.bare) * (1 - f.channel) * (1 - 0.5 * f.exposure) * notLake * dry;
     }
+    // ── the ecology pass's seven. GAME TUNING, every line; the drivers
+    // named here are the ones `driversOf` gates on. ──
+    case 'fern': {
+      // Shade and damp: the forest understory, thickest where it is wet
+      // (Kauaʻi's wet forest floor is uluhe and hāpuʻu), and a few along
+      // any wet ground. A frond a square metre is SPARSE for a real wet
+      // forest, where uluhe is a continuous mat; the budget is a phone's.
+      const ferns = 0.9 * f.forest + 0.7 * f.forest * f.wet + 0.25 * f.wet * (1 - f.coast);
+      return Math.min(1.2, ferns) * (1 - 0.9 * f.bare) * (1 - 0.5 * f.exposure) * (1 - f.channel) * noSand * notLake * dry;
+    }
+    case 'reed': {
+      // Fresh water's margins: the wet factor (surveyed wetland, a
+      // river corridor, a channel's banks — on the bank, not in the
+      // water) and the EDGE of a lake, where `lake` rises from nothing
+      // and has not yet become open water. None on dry grassland, none
+      // on the sand: salt is not a reed's water. Reeds want light, so
+      // the canopy thins them.
+      const margin = Math.min(1, 4 * f.lake) * notLake;
+      const reeds = 2.3 * f.wet + 1.8 * margin;
+      return Math.min(2.5, reeds) * (1 - 0.6 * f.forest) * (1 - f.bare) * (1 - f.channel) * noSand * notLake * dry;
+    }
+    case 'flower': {
+      // Light and open ground: grassland and shrubland bloom, wet grass
+      // a little more; the forest interior does not, nor the sand.
+      const flowers = 2.5 * f.grass + 1.6 * f.shrub + 0.4 * f.wet * f.grass;
+      return Math.min(2.5, flowers) * (1 - 0.85 * f.forest) * (1 - 0.8 * f.bare) * (1 - 0.6 * f.exposure) * (1 - f.channel) * noSand * notLake * dry;
+    }
+    case 'leaf': {
+      // The forest floor: litter under the canopy, some under shrubs, a
+      // little where thin forest meets grass. Six a square metre is the
+      // lattice's whole room.
+      const litter = 6.0 * f.forest + 1.5 * f.shrub + 0.3 * f.grass * f.forest;
+      return Math.min(6.25, litter) * (1 - 0.9 * f.bare) * (1 - 0.5 * sand) * notLake * dry;
+    }
+    case 'shrub': {
+      // Shrubland first; the forest EDGE (a half-open canopy, not the
+      // interior); a few across grassland; and the brief's "sparse
+      // rocky/high plants" — a low density on bare rock and the exposed
+      // plateau, scaled by those factors and never quite nothing.
+      const edge = 4 * f.forest * (1 - f.forest); // 1 where the canopy is half, 0 in the interior and in the open
+      const shrubs = 0.12 * f.shrub + 0.05 * edge + 0.02 * f.grass + 0.015 * f.bare + 0.015 * f.exposure;
+      return Math.min(0.25, shrubs) * (1 - 0.6 * f.forest) * (1 - 0.7 * f.bare) * (1 - f.channel) * (1 - 0.8 * sand) * notLake * dry;
+    }
+    case 'broadleaf': {
+      // Broad-leaved ground plants: the forest floor's, and the wet
+      // ground's (the taro flats' and stream banks' herbs); none on the sand.
+      const broad = 1.1 * f.forest + 0.9 * f.wet * (1 - f.coast) + 0.3 * f.shrub * f.forest;
+      return Math.min(1.5, broad) * (1 - 0.9 * f.bare) * (1 - 0.6 * f.exposure) * (1 - f.channel) * noSand * notLake * dry;
+    }
+    case 'coastal': {
+      // The beach's own plant — a low naupaka-like spreader on the sand
+      // and the backshore, thinning with the coast factor and gone by
+      // eighty metres inland, where `coast` is 0 (`habitat.COAST_REACH`).
+      const spreader = 0.8 * sand + 0.3 * f.coast * (1 - f.forest);
+      return Math.min(1, spreader) * (1 - 0.8 * f.forest) * (1 - 0.7 * f.bare) * (1 - f.channel) * notLake * dry;
+    }
   }
+}
+
+/**
+ * The factors a family's density is PROPORTIONAL to: every term of its
+ * `densityPerM2` carries one of them, so a zero sum is a zero density.
+ * When the sum is zero at all five of a cell's samples it is zero at
+ * every site (the blend is convex), and the lattice is skipped whole.
+ * 1 for a family that can stand anywhere on dry land.
+ */
+function driversOf(family: ObjectFamily, f: Factors): number {
+  switch (family) {
+    case 'fern': case 'broadleaf': return f.forest + f.wet;
+    case 'reed': return f.wet + f.lake;
+    case 'flower': return f.grass + f.shrub;
+    case 'leaf': return f.forest + f.shrub;
+    case 'coastal': return f.coast;
+    default: return 1;
+  }
+}
+
+/** A smoothstep, the habitat's own curve, for the sand rule above. */
+function smoothstep(lo: number, hi: number, x: number): number {
+  const t = Math.min(1, Math.max(0, (x - lo) / (hi - lo)));
+  return t * t * (3 - 2 * t);
 }
 
 /** The size range and shape of one object of a family at a site, from the same factors and its own hashes. */
@@ -243,8 +397,11 @@ function sizeOf(family: ObjectFamily, f: Factors, t: number, variant: number): n
         0.2 + 0.5 * f.grass + 0.6 * f.wet - 0.4 * f.forest - 0.5 * f.exposure - 0.3 * f.bare - 0.2 * f.coast));
       const lo = (5 + 15 * tall) * M / 100;
       const hi = (15 + 85 * tall) * M / 100;
-      // Squared, so most blades are short and a few stand up: a flat
-      // draw gives a lawn mown to one height.
+      // A seed head stands on a culm taller than the leaves around it:
+      // the upper half of the range. The rest squared, so most blades
+      // are short and a few stand up: a flat draw gives a lawn mown to
+      // one height.
+      if (variant === GRASS_SEED_HEAD) return lo + (hi - lo) * (0.5 + 0.5 * t);
       return lo + (hi - lo) * t * t;
     }
     case 'twig':
@@ -258,6 +415,38 @@ function sizeOf(family: ObjectFamily, f: Factors, t: number, variant: number): n
       if (variant === TREE_SCRUB) return (2.5 + 4.5 * t * t) * M;
       // Broad: 8–26 m, the canopy's density lifting the range.
       return (8 + 18 * t * t * (0.6 + 0.4 * f.forest)) * M;
+    // ── the seven: the brief's ranges, GAME TUNING. ──
+    case 'fern': return (20 + 40 * t * (0.6 + 0.4 * f.wet)) * M / 100; // 20–60 cm, the tallest where it is wet
+    case 'reed': return (60 + 120 * t) * M / 100;                        // 60–180 cm
+    case 'flower': return (8 + 32 * t * t) * M / 100;                    // 8–40 cm, most of them short
+    case 'leaf': return (3 + 9 * t) * M / 100;                           // 3–12 cm along the leaf
+    case 'shrub': return (40 + 110 * t * t) * M / 100;                   // 40–150 cm
+    case 'broadleaf': return (15 + 35 * t) * M / 100;                    // 15–50 cm
+    case 'coastal': return (20 + 40 * t) * M / 100;                      // 20–60 cm tall; wider than that
+  }
+}
+
+/**
+ * Which grass shape a blade takes. The broad blade keeps its fifteen
+ * percent from before; the SEED HEAD is carved from the plain blades at
+ * `SEED_HEAD_SHARE` of an open grassland's, fading in with the grass
+ * factor so a habitat boundary is not a fence between headed and
+ * headless lawn. The forest floor's short grass carries none.
+ */
+function grassVariant(f: Factors, roll: number): number {
+  if (roll >= 0.85) return GRASS_BROAD;
+  if (roll < SEED_HEAD_SHARE * smoothstep(0.2, 0.6, f.grass)) return GRASS_SEED_HEAD;
+  return GRASS_BLADE;
+}
+
+/** Which variant an object of any family takes, from its own roll. */
+function variantOf(family: ObjectFamily, f: Factors, roll: number): number {
+  switch (family) {
+    case 'tree': return treeVariant(f, roll);
+    case 'grass': return grassVariant(f, roll);
+    case 'twig': case 'stone': case 'rock': return Math.floor(roll * 4);
+    case 'flower': return Math.floor(roll * FLOWER_TINTS);
+    default: return 0;
   }
 }
 
@@ -319,6 +508,24 @@ function blend(packed: Float64Array, u: number, v: number, into: Factors): Facto
 }
 
 /**
+ * Whether a family can stand anywhere in the cell: its drivers are
+ * nonzero at at least one of the five samples. See `driversOf` for why
+ * this is exact. Reads the packed samples straight, into the scratch
+ * factors the caller lends.
+ */
+function canBeInCell(family: ObjectFamily, packed: Float64Array, into: Factors): boolean {
+  const n = FACTOR_KEYS.length;
+  for (let s = 0; s < 5; s += 1) {
+    const o = s * n;
+    into.forest = packed[o]; into.grass = packed[o + 1]; into.shrub = packed[o + 2]; into.bare = packed[o + 3];
+    into.wet = packed[o + 4]; into.lake = packed[o + 5]; into.coast = packed[o + 6]; into.exposure = packed[o + 7];
+    into.elevation = packed[o + 8]; into.channel = packed[o + 9];
+    if (driversOf(family, into) > 0) return true;
+  }
+  return false;
+}
+
+/**
  * Generate one cell. Deterministic in (`options.seed`, `id`, what
  * `habitatAt` answers at five points); allocates the batches it returns
  * and nothing that outlives the call besides them.
@@ -370,7 +577,7 @@ export function populateCell(id: ObjectCellId, options: PopulateOptions): CellPo
     const ids: string[] | null = major ? [] : null;
     let count = 0;
 
-    if (!allSea && (wanted === null || wanted.has(family))) {
+    if (!allSea && (wanted === null || wanted.has(family)) && canBeInCell(family, packed, f)) {
       const pitch = CELL_SPAN / sites;
       const areaPerSite = CELL_M2 / room;
       const salt = FAMILY_SALT[family] ^ seedSalt;
@@ -411,8 +618,7 @@ export function populateCell(id: ObjectCellId, options: PopulateOptions): CellPo
           // Thrown inside its own square, never on the line.
           const jx = 0.1 + 0.8 * stableHash(gx, gz, salt + Q.jx);
           const jz = 0.1 + 0.8 * stableHash(gx, gz, salt + Q.jz);
-          const varRoll = stableHash(gx, gz, salt + Q.variant);
-          const shape = family === 'tree' ? treeVariant(f, varRoll) : family === 'grass' ? (varRoll < 0.85 ? 0 : 1) : Math.floor(varRoll * 4);
+          const shape = variantOf(family, f, stableHash(gx, gz, salt + Q.variant));
           wx[count] = origin.wx + (sx + jx) * pitch;
           wz[count] = origin.wz + (sz + jz) * pitch;
           size[count] = sizeOf(family, f, stableHash(gx, gz, salt + Q.size), shape);
@@ -452,6 +658,14 @@ function girthOf(family: ObjectFamily, t: number, variant: number): number {
     case 'stone': return 0.6 + 0.4 * t;
     case 'rock': return 0.55 + 0.45 * t;
     case 'tree': return variant === TREE_PALM ? 0.018 + 0.012 * t : 0.035 + 0.02 * t;
+    // ── the seven. What "girth" scales is named per family; the renderer agrees. GAME TUNING. ──
+    case 'fern': return 1.0 + 0.5 * t;        // the crown's spread over its height: wider than tall
+    case 'reed': return 0.015 + 0.015 * t;    // blade width over height: 1–3 cm on a metre
+    case 'flower': return 0.12 + 0.13 * t;    // the head's radius over the stem's height
+    case 'leaf': return 0.4 + 0.25 * t;       // width over length
+    case 'shrub': return 0.9 + 0.5 * t;       // the canopy's width over its height
+    case 'broadleaf': return 0.5 + 0.3 * t;   // a leaf's width over the plant's reach
+    case 'coastal': return 1.8 + 0.8 * t;     // spread over height: low and wide
   }
 }
 
@@ -479,6 +693,14 @@ function leanOf(family: ObjectFamily, t: number, variant: number): number {
     case 'stone': return t * (8 * Math.PI / 180);
     case 'rock': return t * (12 * Math.PI / 180);
     case 'tree': return variant === TREE_PALM ? t * (12 * Math.PI / 180) : t * t * (4 * Math.PI / 180);
+    // ── the seven. Each grows up or lies flat like its nearest cousin above; this is the departure. GAME TUNING. ──
+    case 'fern': return t * t * (10 * Math.PI / 180);
+    case 'reed': return t * t * (15 * Math.PI / 180);     // a reed leans with the last wind
+    case 'flower': return t * t * (12 * Math.PI / 180);
+    case 'leaf': return t * t * (6 * Math.PI / 180);      // propped on a stalk or a pebble, like a twig
+    case 'shrub': return t * t * (5 * Math.PI / 180);
+    case 'broadleaf': return t * t * (8 * Math.PI / 180);
+    case 'coastal': return t * (4 * Math.PI / 180);
   }
 }
 
