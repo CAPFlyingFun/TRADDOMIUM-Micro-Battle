@@ -81,6 +81,8 @@ import { VEG_BYTES, decodeVeg } from '../world/landcover';
 import { WORLD_SEED } from '../world/objects/seed';
 import { PLANT_FAMILIES, plantSourcesOf } from '../world/objects/plants';
 import { ResourceLayer, waterQueryOf, type WaterQuery } from '../world/ecology';
+import { CREATURE_IDS, CreatureSim, type CreatureId } from '../creatures';
+import type { WorldLayerId } from '../world/WorldLoader';
 import { islandChannels, type IslandChannels } from '../world/water/islandChannels';
 import type { WeatherProvider } from '../world/weather/conditions';
 import { LiveWeather, type WeatherCache } from '../world/weather/liveWeather';
@@ -106,7 +108,10 @@ import { BotHud, type BotReadout } from './BotHud';
 import { FrameStats } from './FrameStats';
 import { FreeFlyCamera, headingOfYaw, yawForHeading } from './FreeFlyCamera';
 import { MoveStick } from '../input/MoveStick';
-import { HUD_HZ, PerfHud, type FreshReadout, type ObjectsReadout, type SeaReadout, type SessionLink, type SessionReadout } from './PerfHud';
+import {
+  HUD_HZ, PerfHud, type CreaturesReadout, type FreshReadout, type ObjectsReadout, type SeaReadout, type SessionLink, type SessionReadout,
+  type SpeciesReadout,
+} from './PerfHud';
 import { BUILT_LAYERS, LayerToggles } from './layerToggles';
 import { PERF_WORLD_SCENE_ID } from './perfTool';
 
@@ -380,6 +385,22 @@ const HELD_SKY_WARM_UP_S = 3600;
  * bubble at run time; a cell without plants resident derives nothing.
  */
 const RESOURCE_REACH = 40 * 100;
+
+/**
+ * The camera's presence as the animals feel it, world units: the one
+ * moving thing in the world until the ant arrives. Ten centimetres of
+ * radius on top of each species' own alarm distance, so flying the eye
+ * through a cloud of flies scatters them and hovering over a worm sends
+ * it down. GAME TUNING.
+ */
+const EYE_PRESENCE = 10;
+
+/** Which perf-world row switches which species. */
+const SPECIES_LAYER: Readonly<Record<CreatureId, WorldLayerId>> = Object.freeze({
+  earthworm: 'worms',
+  aphid: 'aphids',
+  housefly: 'flies',
+});
 
 /** The sky the grid vanishes into, and the fog that makes it vanish. */
 const HORIZON = '#9db6c6';
@@ -710,6 +731,15 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
     let objectsRadius = 0;
     /** The fresh water as the resource layer asks it: rebuilt with the water, null without it. */
     let waterQuery: WaterQuery | null = null;
+    /**
+     * THE ISLAND'S ANIMALS (Phase 6.5): the simulation, core, reading the
+     * world through one read-only object, with the camera as the only
+     * disturbance until the ant arrives. Built with the objects, because
+     * its aphids sit on the objects' plants; each species is its own row.
+     */
+    let creatures: CreatureSim | null = null;
+    /** What each species row was at the last look. */
+    const speciesOn: Record<CreatureId, boolean> = { earthworm: false, aphid: false, housefly: false };
     /** The rung the bubble was BUILT at: a changed setting is noticed once. */
     let builtObjectsDetail: DetailTier | null = null;
     /** The air's colour as a colour, so the blend never restates it. */
@@ -1047,6 +1077,45 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
           now: () => performance.now(),
         });
       }
+      // THE ANIMALS, ONCE, AND THEIR RUNG EVERY TIME. The simulation reads
+      // the same live variables the resource layer does; the rung reaches
+      // it as caps that are maximums (`creatures/species.ts`), never as
+      // where an animal is.
+      if (creatures === null) {
+        const ground = field;
+        creatures = new CreatureSim({
+          world: {
+            groundAt: (at) => ground.heightAt(at),
+            normalAt: (at) => ground.normalAt(at),
+            habitatAt: (at) => map.at(at),
+            plantsOf: (cx, cz) => {
+              const population = objects?.populationOf({ cx, cz }) ?? null;
+              return population === null ? null : plantSourcesOf(population, PLANT_FAMILIES);
+            },
+            // Off, the layer answers nothing: the creatures stop finding sites.
+            resourcesOf: (cx, cz) => (resourcesOn && resources !== null ? resources.sitesOf(cx, cz) : null),
+            get water(): WaterQuery | null {
+              return waterQuery;
+            },
+            weather: () => ({
+              rainMmHr: weatherNow.rainMmHr,
+              windX: weatherNow.windX,
+              windZ: weatherNow.windZ,
+              // Night is the real sun's, below the real horizon.
+              night: sunElevationDeg < 0,
+            }),
+            disturbances: () => {
+              const pose = fly.pose();
+              return [{ at: pose.at, height: pose.height, radius: EYE_PRESENCE }];
+            },
+          },
+          seed: WORLD_SEED,
+          rung: detail,
+          now: () => performance.now(),
+        });
+      } else {
+        creatures.setRung(detail);
+      }
       // FILLED BEHIND THE LOADING SCREEN, like the terrain's rings and
       // the sea's sheets: every cell within reach generated now, so the
       // first drawn frame has grass in it and pays nothing for it.
@@ -1068,6 +1137,22 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
      */
     const syncResourcesLayer = (): void => {
       resourcesOn = toggles.isEnabled('resources');
+    };
+
+    /**
+     * Switch a species: off, it is dropped from the simulation (and from
+     * the renderer, which draws what the simulation holds) and nothing of
+     * it is generated; the world forgets nothing, because the population
+     * is a function of the cell.
+     */
+    const syncCreatureLayers = (): void => {
+      if (creatures === null) return;
+      for (const id of CREATURE_IDS) {
+        const on = toggles.isEnabled(SPECIES_LAYER[id]);
+        if (on === speciesOn[id]) continue;
+        speciesOn[id] = on;
+        creatures.setEnabled(id, on);
+      }
     };
 
     /**
@@ -1097,6 +1182,18 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
       if (toggles.isEnabled('resources') !== resourcesOn) syncResourcesLayer();
       if (!resourcesOn) return;
       resources.update(fly.pose().at, Math.min(objectsRadius, RESOURCE_REACH), dt);
+    };
+
+    /**
+     * Think and move the animals on SIMULATION seconds — paused, they
+     * hold still with the water and the sky — and stream their cells
+     * after the camera whatever dt is, so a paused world still fills in
+     * around a flying eye the way the objects do.
+     */
+    const updateCreatures = (dt: number): void => {
+      if (creatures === null) return;
+      syncCreatureLayers();
+      creatures.update(fly.pose().at, dt);
     };
 
     /**
@@ -1608,6 +1705,40 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
           };
         };
 
+        /**
+         * The animals' block: each species as `resident of cap`, the
+         * three costs, the sites the resource layer holds, and the
+         * terrain-edit seam's honest word. Null before the simulation is
+         * built; the hook is absent where there is no landcover at all.
+         */
+        const creaturesReadout = (): CreaturesReadout | null => {
+          if (creatures === null) return null;
+          const sim = creatures;
+          const species = (id: CreatureId): SpeciesReadout => {
+            const c = sim.counts(id);
+            return { resident: c.resident, near: c.byTier.near, full: c.byTier.full, cap: c.cap };
+          };
+          const cost = sim.cost();
+          let sites = 0;
+          let waterEdges = 0;
+          if (resourcesOn && resources !== null) {
+            const counts = resources.counts();
+            for (const kind of Object.keys(counts) as (keyof typeof counts)[]) sites += counts[kind];
+            waterEdges = counts['water-edge'];
+          }
+          return {
+            worms: species('earthworm'),
+            aphids: species('aphid'),
+            flies: species('housefly'),
+            thinkMs: cost.thinkMs,
+            moveMs: cost.moveMs,
+            drawMs: 0,
+            rigs: 0,
+            resources: resourcesOn && resources !== null ? { sites, waterEdges } : null,
+            ground: { built: sim.burrows.editor.built, attempted: sim.burrows.attempted },
+          };
+        };
+
         hud = new PerfHud(ctx.uiLayer, {
           layers: () => toggles.list(),
           onLayerToggle: (id, enabled) => {
@@ -1618,6 +1749,7 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
           fresh: field === null ? undefined : freshCost,
           // THE LINES EXIST ONLY WHERE THERE IS LANDCOVER TO GROW FROM.
           objects: habitat === null ? undefined : objectsCost,
+          creatures: habitat === null ? undefined : creaturesReadout,
           // THE SKY'S LINES, always: the reading exists whether or not
           // there is an island under it, and its source word is the
           // honesty rule in print.
@@ -1684,7 +1816,7 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         // so a row never reads built over something that is not (§2.9).
         toggles = new LayerToggles(terrain === null ? [] : BUILT_LAYERS.filter((id) => {
           if (id === 'vegetation' || id === 'resources') return objects !== null;
-          if (id === 'worms' || id === 'aphids' || id === 'flies') return false;
+          if (id === 'worms' || id === 'aphids' || id === 'flies') return creatures !== null;
           return true;
         }));
         if (terrain !== null) {
@@ -1728,6 +1860,12 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         if (resources !== null) {
           toggles.setEnabled('resources', true);
           syncResourcesLayer();
+        }
+        // AND THE ANIMALS, each species its own row, so one can be
+        // switched off and read for what it cost.
+        if (creatures !== null) {
+          for (const id of CREATURE_IDS) toggles.setEnabled(SPECIES_LAYER[id], true);
+          syncCreatureLayers();
         }
         // AND THE SKY. On wherever there is an island for it to be over;
         // the toggle is how what it costs gets measured, like the rest.
@@ -1805,6 +1943,7 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         updateFresh(frame.simDt);
         updateObjects();
         updateResources(frame.simDt);
+        updateCreatures(frame.simDt);
         // AFTER the ocean, so the swell it asks about is this frame's.
         adaptWater();
         if (net !== null) {
@@ -1885,6 +2024,7 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
           objects = null;
         }
         resources = null;
+        creatures = null;
         objectsRadius = 0;
         habitat = null;
         coarseGrid = null;
