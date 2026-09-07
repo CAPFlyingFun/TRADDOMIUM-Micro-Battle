@@ -18,3 +18,13 @@ export type { BurrowEditor, BurrowGate } from './terrainEdit';
 export type {
   CreatureCost, CreatureCounts, CreatureSimulation, CreatureWeather, CreatureWorld, Disturbance,
 } from './world';
+export { CELL_HECTARES, expectedCount, hostCandidates, populateCreatures, siteCount } from './population';
+export type { PopulateCreaturesOptions } from './population';
+export {
+  ALARM_FLEES_AT, CALM_WEATHER, HOST_WALK_LENGTHS, RAINING_MM_HR, hostPlantOf, isLand, nearestSite, senseAlarm, think,
+  thinkDue, tickNeeds,
+} from './intent';
+export { arrived, burrow, fly, isAirborne, isMoving, move, paceOf, walk } from './locomotion';
+export { wrapHeading } from './heading';
+export { CELLS_PER_UPDATE, CreatureSim, EVICT_BEYOND, NEAR_STEP_S } from './CreatureSim';
+export type { CreatureSimOptions } from './CreatureSim';

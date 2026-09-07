@@ -107,6 +107,8 @@ export interface FlightSpec {
   readonly cruiseMm: readonly [number, number];
   /** How long one hop lasts before it looks for somewhere to land, seconds. */
   readonly hopS: readonly [number, number];
+  /** How far a hop with nothing to aim at goes, mm — the brief's "short flights", never a cruise across the island. */
+  readonly hopMm: readonly [number, number];
   /** How long it hovers over a spot before landing or moving on, seconds. */
   readonly hoverS: readonly [number, number];
   /** How long it sits between hops, seconds. */
@@ -354,6 +356,8 @@ export const HOUSEFLY: CreatureSpecies = Object.freeze({
     cruiseMmS: 1500, climbMmS: 600, ceilingMm: 1500,
     cruiseMm: Object.freeze([120, 600]) as readonly [number, number],
     hopS: Object.freeze([0.8, 3.5]) as readonly [number, number],
+    // GAME TUNING, from the ecology brief: a random hop lands half a metre to three metres away.
+    hopMm: Object.freeze([500, 3000]) as readonly [number, number],
     hoverS: Object.freeze([0.3, 1.5]) as readonly [number, number],
     perchS: Object.freeze([3, 20]) as readonly [number, number],
     drawnTo: Object.freeze(['carrion', 'litter', 'sap', 'nectar', 'water-edge']) as readonly ResourceKind[],
@@ -434,6 +438,8 @@ export function speciesProblems(species: CreatureSpecies): string[] {
     range('flight.cruiseMm', species.flight.cruiseMm);
     if (species.flight.cruiseMm[1] > species.flight.ceilingMm) problems.push(`${where}: cruise band above the ceiling`);
     range('flight.hopS', species.flight.hopS);
+    range('flight.hopMm', species.flight.hopMm);
+    if (species.flight.hopMm[0] <= 0) problems.push(`${where}: a hop of no distance is a perch`);
     range('flight.hoverS', species.flight.hoverS);
     range('flight.perchS', species.flight.perchS);
   }
