@@ -37,14 +37,16 @@
  *     at whatever hour it was would count a different island each time.
  *   - `?detail=high` holds the rung, so the caps are the high ones.
  *
- * THE SITES are the ones `probe-objects` stands at, so the plant and
- * creature counts can be read against the object counts that probe
- * prints for the same ground; the fourth is the one it does not have.
- * `+wz` is SOUTH (`world/dem.ts`), so three hundred metres offshore of
- * the north-shore beach is `z − 30 000`. The eye offshore stands three
- * metres over SEA LEVEL, not over the ground: the ground there is the
- * seabed, and the correction the land sites use would put the camera
- * under water.
+ * THE SITES: the grassland and the forest are the ones `probe-objects`
+ * stands at, so the plant and creature counts can be read against the
+ * object counts that probe prints for the same ground. The beach and
+ * the sea are NOT its beach — that strip has a grassy plain three
+ * hundred metres inland of it, inside a worm's reach, and three hundred
+ * metres "offshore" of it is that plain at 1.8 m (measured on the
+ * habitat map, 2026-09-07). `+wz` is SOUTH (`world/dem.ts`). The eye
+ * offshore stands three metres over SEA LEVEL, not over the ground: the
+ * ground there is the seabed, and the correction the land sites use
+ * would put the camera under water.
  *
  * SWIFTSHADER, NOT A PHONE: a frame or two a second, so the run is
  * minutes long and the `eco` millisecond figures mean nothing here —
@@ -109,9 +111,16 @@ const HELD = { sky: 'clear', hour: 12 };
  */
 const SITES = [
   { name: 'grassland', x: -1_754_400, z: 738_400, ground: 16_839, facing: 40, want: 'grass', land: true },
-  { name: 'beach', x: 413_600, z: -1_783_200, ground: 57, facing: 200, want: 'beach', land: true },
-  // Three hundred metres north of the beach, in Hanalei Bay.
-  { name: 'offshore', x: 413_600, z: -1_813_200, ground: 0, facing: 200, want: 'sea', land: false },
+  // NOT probe-objects' beach: that strip has grassland three hundred
+  // metres inland of it, inside a worm's thirty-metre reach, so worms
+  // counted there were the plain's. This one was found by scanning the
+  // habitat map for a beach with nothing but sand and sea for thirty-two
+  // metres in every direction (north shore, ground 4 cm).
+  { name: 'beach', x: 808_000, z: -1_968_000, ground: 4, facing: 180, want: 'beach', land: true },
+  // Hanalei Bay, 1.1 km beyond the shoreline (which the map puts at
+  // z = -1,903,200; probe-objects' "beach" is a backshore strip 1.2 km
+  // inland of it): sea for more than a kilometre every way, 14 m deep.
+  { name: 'offshore', x: 413_600, z: -2_013_200, ground: 0, facing: 200, want: 'sea', land: false },
   { name: 'forest', x: 1_559_200, z: -2_400, ground: 12_501, facing: 300, want: 'fores', land: true },
 ];
 const PITCH = -18;
