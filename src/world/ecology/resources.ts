@@ -29,19 +29,44 @@
 import type { WorldPoint } from '../coords';
 import type { HabitatKind } from '../habitat';
 
-/** The kinds of thing an ant will one day eat or drink. Named in full now so a switch is exhaustive from the start. */
+/**
+ * The kinds of thing an ant will one day eat or drink. Named in full now
+ * so a switch is exhaustive from the start.
+ *
+ * Each line names the UNIT `amount` is counted in and what `above` means
+ * for the kind, because a number without its unit is the seed of the
+ * next "is this metres or centimetres" bug. The rules that produce them
+ * are in `derive.ts`; the units are pinned here so that a consumer that
+ * reads only this file reads the right ones.
+ */
 export type ResourceKind =
-  | 'nectar'        // a flower: carbohydrate
-  | 'seed'          // a grass or plant head: carbohydrate, carried
-  | 'sap'           // a wound in a stem or trunk: carbohydrate
-  | 'fruit'         // fallen fruit or a fragment, where the habitat has it
-  | 'litter'        // decaying leaf matter: what a worm eats, and cover
-  | 'honeydew-host' // a plant an aphid colony can sit on: honeydew LATER
-  | 'carrion'       // a dead animal: protein, LATER
-  | 'water-edge';   // an accessible edge of real fresh water
+  | 'nectar'        // a flower: carbohydrate. amount µl; above = the flower head's height (the plant's size)
+  | 'seed'          // a grass or plant head: carbohydrate, carried. amount = seeds; above = the head's height
+  | 'sap'           // a wound in a stem or trunk: carbohydrate. amount µl; above = the wound's height on the trunk
+  | 'fruit'         // fallen fruit or a fragment, where the habitat has it. LATER
+  | 'litter'        // decaying leaf matter: what a worm eats, and cover. amount cm² of cover; above 0
+  | 'honeydew-host' // a plant an aphid colony can sit on: honeydew LATER. amount = cm of stem; above = where the colony sits
+  | 'carrion'       // a dead animal: protein. LATER
+  | 'water-edge';   // an accessible edge of real fresh water. amount mm of frontage; above 0
+
+/** Every kind, in the union's order — the shape a per-kind count is built over. */
+export const RESOURCE_KINDS: readonly ResourceKind[] = Object.freeze([
+  'nectar', 'seed', 'sap', 'fruit', 'litter', 'honeydew-host', 'carrion', 'water-edge',
+]);
 
 /** The kinds a site can offer TODAY. The rest are named, not offered (the honesty rule). */
 export const OFFERED_KINDS: readonly ResourceKind[] = Object.freeze(['nectar', 'seed', 'sap', 'litter', 'honeydew-host', 'water-edge']);
+
+/**
+ * The plant families an aphid colony can sit on — the families that get a
+ * `honeydew-host` site. The SAME list as the aphid's `population.hosts`
+ * in `creatures/species.ts`, and a test holds the two together: a host
+ * the creatures place an aphid on that the resource layer does not name
+ * would be an aphid feeding on nothing. Families are strings because the
+ * plant families are a sibling module's and arrive in parallel; the
+ * layer matches names, never imports the table.
+ */
+export const HONEYDEW_HOST_FAMILIES: readonly string[] = Object.freeze(['shrub', 'broadleaf', 'flower', 'fern', 'grass', 'tree']);
 
 export interface ResourceSite {
   /** `kind:cx,cz:site`, or the plant's own id where it has one — stable for the same world. */
