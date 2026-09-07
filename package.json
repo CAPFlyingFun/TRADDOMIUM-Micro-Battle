@@ -27,7 +27,8 @@
     "probe:shot": "node scripts/probe-shot.mjs",
     "probe:sky": "node scripts/probe-sky.mjs",
     "probe:objects": "node scripts/probe-objects.mjs",
-    "probe:ecology": "node scripts/probe-ecology.mjs"
+    "probe:ecology": "node scripts/probe-ecology.mjs",
+    "probe:lighting": "node scripts/probe-lighting.mjs"
   },
   "dependencies": {
     "three": "^0.185.0"

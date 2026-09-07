@@ -39,6 +39,20 @@
  * defaults while the phone reads something else is a picture of a
  * different sea, and with two axes there are two ways for that to happen.
  *
+ * THE SKY AND THE HOUR TOO (2026-09-07), so a night-and-rain pose off the
+ * phone is reproducible in ONE command. `--sky=clear|cloudy|rain` and
+ * `--hour=0..24` (fractional: 4.6667 is 04:40 HST) are forwarded to the
+ * query as `?sky=` and `?hour=`, exactly the overrides `probe:sky` holds
+ * and `app/registerScenes.ts` reads — nothing stored, and the HUD's
+ * clock line says `sim` while one is in force. Left out, the shot is
+ * taken under the canned trade-wind afternoon the weather stub answers
+ * with, as before. Like the rungs, a held sky is CHECKED against the
+ * HUD after arrival: a mistyped word is silently ignored by the app,
+ * and a probe that photographed the wrong weather while reporting
+ * success would be worse than one that stopped.
+ *
+ *   npm run probe:shot -- --x=808000 --y=304 --z=-1968000 --facing=90 --pitch=-10 --sky=rain --hour=4.6667 --name=shore-night
+ *
  * Shots land in `shots/<name>.png` (gitignored). Run it before a change
  * and after it, and compare the two.
  */
@@ -168,6 +182,10 @@ async function main() {
   // developer does, rather than through a door only it has.
   const tier = arg('tier', '');
   const detail = arg('detail', '');
+  // The sky and the clock the phone was under: `?sky=` and `?hour=` are
+  // the app's own overrides too, read in the same file as `?tier=`.
+  const sky = arg('sky', '');
+  const hour = arg('hour', '');
   const frames = Number(arg('frames', '30'));
   if (!Number.isFinite(want.x) || !Number.isFinite(want.y) || !Number.isFinite(want.z)) {
     fail('--x, --y and --z must be numbers, as printed by the HUD');
@@ -195,6 +213,8 @@ async function main() {
     const query = [
       tier === '' ? null : `tier=${encodeURIComponent(tier)}`,
       detail === '' ? null : `detail=${encodeURIComponent(detail)}`,
+      sky === '' ? null : `sky=${encodeURIComponent(sky)}`,
+      hour === '' ? null : `hour=${encodeURIComponent(hour)}`,
     ].filter((p) => p !== null).join('&');
     const opened = query === '' ? url : `${url}${url.includes('?') ? '&' : '?'}${query}`;
     await page.goto(opened, { waitUntil: 'load' });
@@ -217,7 +237,8 @@ async function main() {
     await page.goto(opened, { waitUntil: 'load' });
 
     log(`resuming at x ${want.x} y ${want.y} z ${want.z}, facing ${want.bearing}°, pitch ${want.pitch}°`
-      + (tier === '' ? '' : `, tex ${tier}`) + (detail === '' ? '' : `, detail ${detail}`));
+      + (tier === '' ? '' : `, tex ${tier}`) + (detail === '' ? '' : `, detail ${detail}`)
+      + (sky === '' ? '' : `, sky ${sky}`) + (hour === '' ? '' : `, hour ${hour}`));
     await page.waitForSelector('[data-action="resume"]', { timeout: TIMEOUT.menu });
     await page.click('[data-action="resume"]', { timeout: TIMEOUT.menu });
     await page.waitForSelector('[data-action="pause"]', { timeout: TIMEOUT.world });
@@ -259,6 +280,26 @@ async function main() {
       const rung = new RegExp(`sea ${label} ([a-z-]+)`).exec(hud);
       if (rung === null) fail(`asked for --${flag}=${want} but the HUD names no ${label} rung`);
       else if (rung[1] !== want) fail(`asked for --${flag}=${want} and the HUD reads "sea ${label} ${rung[1]}"`);
+    }
+    // AND THE SKY, for the same reason: `isBuiltSky` drops a word it does
+    // not know and the island's weather decides instead. The sky line
+    // reads `sky <word> <n>%`; the clock line, in the CAMERA column,
+    // reads `HH:MM · sun <deg>° · <live|cached|sim>` — `sim` is the
+    // honesty word a held sky must carry, and the clock must be the hour
+    // asked for. A held sky can take a few frames to reach the sheet; a
+    // line still reading `sky —` is noted, not failed.
+    if (sky !== '') {
+      const named = /sky ([a-z]+) \d+%/.exec(hud);
+      if (named === null) log('the HUD has not named a sky yet; the held sky could not be confirmed');
+      else if (named[1] !== sky) fail(`asked for --sky=${sky} and the HUD reads "sky ${named[1]}" — is it one of clear, cloudy, rain?`);
+      if (!/· sim\b/.test(hud)) fail(`asked for --sky=${sky} and the clock line does not say "sim": the held sky is not the one drawn`);
+    }
+    if (hour !== '') {
+      const minutes = Math.floor(Number(hour)) * 60 + Math.round((Number(hour) % 1) * 60);
+      const wantClock = `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+      const clock = /\b(\d\d:\d\d)\b · sun/.exec(hud);
+      if (clock === null) fail(`asked for --hour=${hour} and the HUD prints no clock beside the sun`);
+      else if (clock[1] !== wantClock) fail(`asked for --hour=${hour} (${wantClock}) and the HUD reads ${clock[1]}`);
     }
 
     const file = path.join(SHOTS, `${name}.png`);
