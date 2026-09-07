@@ -364,6 +364,26 @@ const COLLAPSE_BUTTON_INSET = 6;
  */
 const SESSION_MAX_WIDTH = 210;
 
+/**
+ * The sheet's type size at the 932 px design canvas and above, in CSS
+ * pixels — 10 where it was 12, because Joshua asked for the sheet
+ * smaller across the board (2026-09-07: "if the size is 18 now, make it
+ * 12"), and 10 px of monospace at a phone's three device pixels per CSS
+ * pixel is still 30 physical pixels tall. Below the canvas it is
+ * `SHEET_FONT_VW` of the viewport's width instead, so a narrower
+ * viewport gets a proportionally smaller sheet — the same fraction of
+ * the screen Safari shows, not the same number of pixels.
+ */
+export const SHEET_FONT_PX = 10;
+/** `SHEET_FONT_PX` over the design canvas's width, as a vw: the sheet's size below 932 px. */
+export const SHEET_FONT_VW = Number(((SHEET_FONT_PX * 100) / 932).toFixed(3));
+/**
+ * How much of the viewport's width the sheet may never take: PAUSE's box
+ * (about 90 px at its 14 px system font), its 12 px inset, and a thumb's
+ * worth of air. GAME TUNING, held by `probe:hud` at three phone widths.
+ */
+export const PAUSE_CLEARANCE_PX = 150;
+
 /** One word per link state, and not a word more than is true. */
 const LINK_WORDS: Readonly<Record<SessionLink, string>> = {
   solo: 'Solo',
@@ -642,10 +662,23 @@ export class PerfHud {
     // `probe:bot` measures this box against PAUSE, and every pixel of
     // width is a pixel closer to it.
     const padRight = COLLAPSE_BUTTON_INSET + COLLAPSE_BUTTON_PX + 8;
+    // THE SHEET SCALES WITH THE SCREEN IT IS ON (Joshua, from the phone,
+    // 2026-09-07): opened from the home screen, the app's viewport is
+    // narrower in CSS pixels than Safari's 932, and a sheet laid out in
+    // fixed pixels ran under PAUSE and hid its own fold toggle beneath
+    // it — "I can't minimize the large stat screen". So the font is a
+    // fraction of the viewport's width, capped at `SHEET_FONT_PX` on the
+    // design canvas and above, and every gap and pad is in `em` so the
+    // whole sheet follows it; the fold toggle keeps its 28 px because a
+    // fingertip does not scale. The width cap and the wrap are the belt
+    // to those braces: on a screen too narrow for the columns, they wrap
+    // beneath rather than run under PAUSE.
     this.root.style.cssText =
-      'position:absolute;top:8px;left:10px;display:flex;align-items:flex-start;gap:16px;' +
-      `padding:8px ${padRight}px 8px 10px;background:rgba(6,9,12,0.72);color:${PARCHMENT};` +
-      `font:12px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace;border:1px solid ${GOLD};border-radius:6px;`;
+      'position:absolute;top:8px;left:10px;display:flex;flex-wrap:wrap;align-items:flex-start;gap:1.4em;' +
+      `box-sizing:border-box;max-width:calc(100vw - ${PAUSE_CLEARANCE_PX}px);` +
+      `padding:0.7em ${padRight}px 0.7em 0.9em;background:rgba(6,9,12,0.72);color:${PARCHMENT};` +
+      `font:${SHEET_FONT_PX}px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace;` +
+      `font-size:min(${SHEET_FONT_PX}px, ${SHEET_FONT_VW}vw);border:1px solid ${GOLD};border-radius:6px;`;
 
     const column = (heading: string): HTMLElement => {
       const col = doc.createElement('div');
@@ -729,7 +762,7 @@ export class PerfHud {
       // one line of a HUD that is already seven rows tall; clipping costs
       // a readout. `scripts/probe-bot.mjs` measures both, with another
       // player in the room, because that is when the line is longest.
-      col.style.maxWidth = `${SESSION_MAX_WIDTH}px`;
+      col.style.maxWidth = `${(SESSION_MAX_WIDTH / 12).toFixed(2)}em`;
       this.sessionLine = line(col, 'session');
       this.sessionLine.style.whiteSpace = 'normal';
     }

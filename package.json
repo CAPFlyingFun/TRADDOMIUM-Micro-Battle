@@ -11,6 +11,7 @@
     "test:watch": "vitest",
     "typecheck": "tsc -b",
     "probe:boot": "node scripts/probe-boot.mjs",
+    "probe:hud": "node scripts/probe-hud.mjs",
     "probe:netlab": "node scripts/probe-netlab.mjs",
     "probe:bot": "node scripts/probe-bot.mjs",
     "probe:relay": "node scripts/probe-relay.mjs",
