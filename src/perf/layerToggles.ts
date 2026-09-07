@@ -27,11 +27,34 @@ import { WORLD_LAYERS, type WorldLayerId } from '../world/WorldLoader';
  * its toggle real — a layer listed here before it draws anything is a
  * control that looks functional and is not (§2.9).
  *
+ * `resources`, `worms`, `aphids` and `flies` arrived together in Phase 7
+ * (the ecology pass, 2026-09-07 — Joshua: "Performance World toggles per
+ * category"). What each one stops when it is switched off:
+ *
+ *   resources   the sites stop being derived — no nectar, seed, sap,
+ *               litter, honeydew host or water edge is worked out for
+ *               any cell — and the creatures stop finding them, because
+ *               a resource they cannot ask for is one that is not there.
+ *               The HUD's line reads `sites off`, the layer's own word.
+ *   worms       that species is dropped from the simulation and from the
+ *   aphids      renderer: its residents go, nothing of it is generated
+ *   flies       or drawn, and its line reads `0 of <cap>`. The world
+ *               forgets NOTHING by it, because the population is a
+ *               function of the cell (`creatures/world.ts`,
+ *               `setEnabled`): switch it back on and the same worms are
+ *               in the same cells.
+ *
+ * Each species is its own row, not one "creatures" row, so a phone can
+ * switch one off and read what THAT one cost — three rigs, three
+ * brains, three prices.
+ *
  * IN THE WORLD PLAN'S ORDER (`WORLD_LAYERS`), not the order the phases
  * landed in: `weather` sits before `vegetation` because that is where
  * the plan puts it, and the test pins this list to that order.
  */
-export const BUILT_LAYERS: readonly WorldLayerId[] = ['terrain', 'ocean', 'freshwater', 'weather', 'vegetation'];
+export const BUILT_LAYERS: readonly WorldLayerId[] = [
+  'terrain', 'ocean', 'freshwater', 'weather', 'vegetation', 'resources', 'worms', 'aphids', 'flies',
+];
 
 export interface LayerToggle {
   readonly id: WorldLayerId;

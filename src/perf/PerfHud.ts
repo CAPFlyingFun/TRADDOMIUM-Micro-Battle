@@ -38,6 +38,19 @@
  * Unfolded, the sheet is exactly what it was — same lines, same
  * `data-field` names — because the probes read it by those.
  *
+ * THE ECOLOGY BLOCK (Phase 7, 2026-09-07) — the new plant families'
+ * count, the three species, what they cost, the resource sites and the
+ * terrain-edit seam — sits in the CAMERA column under the clock, not in
+ * FRAME with the other counts. Not for width: every one of its lines is
+ * kept to the FRAME column's widest (`95th low 52.6 fps`, seventeen
+ * characters) and a test measures them. For HEIGHT. FRAME is fifteen
+ * lines and a heading, and at the 932 x 430 canvas the sheet's bottom
+ * edge already meets the stick's ring; seven more lines there would put
+ * the ring under the sheet. The CAMERA column is five lines and is the
+ * widest thing on the HUD already, so a line there widens nothing and,
+ * until it outgrows FRAME, lengthens nothing — the same reasoning that
+ * put the clock there. See `creatureWords`.
+ *
  * Talks to its owner through a typed hook object and reads plain summary
  * structs; it does not import FrameStats, the camera or anything of `net/`
  * (§2.7) — the link's state reaches it as six plain words it can print.
@@ -173,6 +186,15 @@ export interface ObjectsReadout {
   readonly stone: number;
   readonly rock: number;
   readonly tree: number;
+  /**
+   * Drawn instances of the seven plant families the ecology pass added
+   * (fern, reed, flower, leaf, shrub, broadleaf, coastal), together.
+   * OPTIONAL, and absent is not zero: a readout with no plant count is
+   * one from a world that has no plant families to count, and the line
+   * is left empty rather than reading `plants 0` — which would say the
+   * ground here is bare, a fact nobody measured.
+   */
+  readonly plants?: number;
   /** The habitat under the camera, one word. */
   readonly habitat: string;
 }
@@ -207,6 +229,65 @@ export interface WeatherReadout {
   readonly sunElevationDeg: number;
 }
 
+/**
+ * One species, as the HUD is told it: how many exist inside its reach,
+ * how many of those are in the near and full tiers, and the rung's cap.
+ * The line prints `resident of cap` — a cap is a MAXIMUM, never a quota
+ * (`creatures/species.ts`), so a beach reading `worms 0 of 40` is a
+ * beach doing what a beach does. The tier counts are carried so the
+ * cost line has its explanation on the same readout (a hundred aphids
+ * at the far tier cost almost nothing; ten at full cost every frame);
+ * they are not printed yet, because the species line is at its width.
+ */
+export interface SpeciesReadout {
+  /** Generated inside the species' reach, every tier. */
+  readonly resident: number;
+  /** Of those, inside the near distance: thinking and moving at the near rate. */
+  readonly near: number;
+  /** Of those, inside the full distance: thinking and moving every frame. */
+  readonly full: number;
+  /** The rung's cap for this species. */
+  readonly cap: number;
+}
+
+/**
+ * THE ISLAND'S ANIMALS, as the HUD is told them (Phase 7, the ecology
+ * pass). Joshua asked for the diagnostics "in dev tools, not the normal
+ * HUD", and this sheet is the dev tool. Three species, three lines, and
+ * beside them what they cost split three ways — deciding, moving,
+ * drawing — because the toggles exist so that a phone can say which of
+ * the three is the expensive one.
+ *
+ * `resources` is null when the resources layer is OFF, and the line
+ * reads `sites off`: the sites are not derived and the creatures are
+ * not finding them, and a count of zero would say the island offers
+ * nothing, which is a different claim.
+ *
+ * `ground` is the terrain-edit seam (`creatures/terrainEdit.ts`). The
+ * worm burrows whether or not the seam is built, and the seam is NOT
+ * built in v1 — the survey stands — so the line reads `ground edits
+ * off` from `built`, a fact and not a hope (§2.9), and only a built
+ * seam prints a count.
+ *
+ * Plain numbers and words: the HUD prints what it is told and never
+ * learns what a `CreatureSimulation` is.
+ */
+export interface CreaturesReadout {
+  readonly worms: SpeciesReadout;
+  readonly aphids: SpeciesReadout;
+  readonly flies: SpeciesReadout;
+  /** Milliseconds a frame spent deciding, moving and drawing, wall-clock, for the HUD — never fed back into the simulation. */
+  readonly thinkMs: number;
+  readonly moveMs: number;
+  readonly drawMs: number;
+  /** Rigs the renderer currently has posed. */
+  readonly rigs: number;
+  /** The resource layer's sites inside the bubble, and how many of them are water edges. Null when the layer is off. */
+  readonly resources: { readonly sites: number; readonly waterEdges: number } | null;
+  /** The terrain-edit seam: whether this build has one, and the bores handed to it. */
+  readonly ground: { readonly built: boolean; readonly attempted: number };
+}
+
 export interface PerfHudHooks {
   /** The rows to show. Re-read at every refresh so the checkboxes follow the model, not the clicks. */
   layers(): readonly LayerToggle[];
@@ -234,6 +315,14 @@ export interface PerfHudHooks {
    * to ask; null means it has one that has not answered yet.
    */
   weather?(): WeatherReadout | null;
+  /**
+   * The island's animals, the resource sites and the terrain-edit seam.
+   * Absent where a world has no creatures to ask — the scene without
+   * them says nothing about them; null means the world has the hook
+   * and nothing has been built yet, and the lines are left empty until
+   * a built simulation produces a readout.
+   */
+  creatures?(): CreaturesReadout | null;
   /**
    * The player folded or unfolded the sheet. Fired by the corner button
    * and the folded row ONLY — never by the `collapsed` setter — so the
@@ -427,6 +516,81 @@ function weatherWords(weather: WeatherReadout | null): readonly [string, string,
   ];
 }
 
+/**
+ * The widest line the FRAME column prints — `95th low 52.6 fps` — and
+ * the width every ecology line is held to, so the block could move to
+ * FRAME without widening it. `tests/perfHudEcology.test.ts` measures
+ * each line at the largest values the caps allow.
+ */
+const ECOLOGY_LINE_MAX = '95th low 52.6 fps'.length;
+
+/**
+ * A count that stays short however long the session runs: whole
+ * numbers under ten thousand, then `12k`, then `1.2M`. The ground line
+ * counts every bore a worm has ever made, and a phone left running
+ * would otherwise grow the line a character an hour.
+ */
+function compact(n: number): string {
+  const whole = Math.max(0, Math.round(n));
+  if (whole < 10_000) return String(whole);
+  const k = Math.round(whole / 1000);
+  if (k < 1000) return `${k}k`;
+  const m = whole / 1_000_000;
+  return m < 10 ? `${m.toFixed(1)}M` : `${Math.round(m)}M`;
+}
+
+/** The plant families' one line, or the honest absence of one — see `ObjectsReadout.plants`. */
+function plantsWords(objects: ObjectsReadout | null): string {
+  if (objects === null || objects.plants === undefined) return '';
+  return `plants ${compact(objects.plants)}`;
+}
+
+/** `worms 12 of 40`: the residents and the rung's cap, and never a word that reads as a target. */
+function speciesWords(name: string, s: SpeciesReadout): string {
+  return `${name} ${Math.max(0, Math.round(s.resident))} of ${Math.max(0, Math.round(s.cap))}`;
+}
+
+/**
+ * `eco 0.4+0.3+0.2ms`: think, move and draw, to a tenth. Whole
+ * milliseconds instead when the tenths would push the line past the
+ * column's width — `eco 100+100+100ms` is the worst case and is
+ * exactly seventeen — because a system costing over ten milliseconds
+ * a frame is not being read to a tenth.
+ */
+function costWords(thinkMs: number, moveMs: number, drawMs: number): string {
+  const parts = [thinkMs, moveMs, drawMs].map((ms) => Math.max(0, ms));
+  const tenths = `eco ${parts.map((ms) => ms.toFixed(1)).join('+')}ms`;
+  if (tenths.length <= ECOLOGY_LINE_MAX) return tenths;
+  return `eco ${parts.map((ms) => ms.toFixed(0)).join('+')}ms`;
+}
+
+/**
+ * The creatures' six lines, or the honest absence of them: all empty
+ * while the hook has nothing built to report, because a species line
+ * reading `worms 0 of 40` about a simulation that does not exist yet
+ * would be a count nobody took. Each line is held to
+ * `ECOLOGY_LINE_MAX`; the widest the caps allow is `aphids 300 of 300`
+ * at ultra-high, and the cost line's worst case is handled in
+ * `costWords`.
+ */
+function creatureWords(c: CreaturesReadout | null): readonly [string, string, string, string, string, string] {
+  if (c === null) return ['', '', '', '', '', ''];
+  return [
+    speciesWords('worms', c.worms),
+    speciesWords('aphids', c.aphids),
+    speciesWords('flies', c.flies),
+    costWords(c.thinkMs, c.moveMs, c.drawMs),
+    // `sites off` is the layer's word, not a count: with the resources
+    // layer switched off nothing is derived, and 0 would say the island
+    // offers nothing.
+    c.resources === null ? 'sites off' : `sites ${compact(c.resources.sites)} wet ${compact(c.resources.waterEdges)}`,
+    // The seam's own `built`, never inferred from the count: v1 has no
+    // terrain editor, the worm's bores go to a no-op, and the sheet
+    // says so rather than printing how many times nothing happened.
+    c.ground.built ? `ground edits ${compact(c.ground.attempted)}` : 'ground edits off',
+  ];
+}
+
 export class PerfHud {
   private readonly root: HTMLElement;
   private readonly fields: Readonly<Record<Field, HTMLElement>>;
@@ -439,6 +603,10 @@ export class PerfHud {
   private readonly objectLines: HTMLElement[] | null;
   /** Built only when the owner offers a `weather()` hook; null otherwise. Sky and rain in FRAME, the clock in CAMERA. */
   private readonly weatherLines: readonly [HTMLElement, HTMLElement, HTMLElement] | null;
+  /** The plant families' line: built with the `objects()` hook, in CAMERA with the ecology block. */
+  private readonly plantsLine: HTMLElement | null;
+  /** Built only when the owner offers a `creatures()` hook; null otherwise. In CAMERA — see the header. */
+  private readonly creatureLines: readonly [HTMLElement, HTMLElement, HTMLElement, HTMLElement, HTMLElement, HTMLElement] | null;
   private readonly boxes = new Map<WorldLayerId, HTMLInputElement>();
   /** Each layer row's wrapper and its text node, so the label can follow the model. */
   private readonly rows = new Map<string, { wrap: HTMLElement; text: Text }>();
@@ -525,6 +693,18 @@ export class PerfHud {
     this.weatherLines = hooks.weather === undefined
       ? null
       : [line(frame, 'weather-sky'), line(frame, 'weather-rain'), line(camera, 'weather-clock')];
+    // THE ECOLOGY BLOCK, IN CAMERA, under the clock — the plant count
+    // first, with the objects' hook it comes from, then the creatures'
+    // six. The FRAME column is already tall enough to meet the stick at
+    // the design canvas (see the header); this column is five lines and
+    // the widest on the sheet, so these cost it neither height nor width.
+    this.plantsLine = hooks.objects === undefined ? null : line(camera, 'veg-plants');
+    this.creatureLines = hooks.creatures === undefined
+      ? null
+      : [
+        line(camera, 'eco-worms'), line(camera, 'eco-aphids'), line(camera, 'eco-flies'),
+        line(camera, 'eco-cost'), line(camera, 'eco-resources'), line(camera, 'eco-ground'),
+      ];
     // Before LAYERS, which is a column of rows rather than a readout and
     // reads best last.
     if (hooks.session === undefined) {
@@ -718,12 +898,19 @@ export class PerfHud {
       for (let i = 0; i < this.freshLines.length; i += 1) this.freshLines[i].textContent = words[i];
     }
     if (this.objectLines !== null) {
-      const words = objectWords(this.hooks.objects?.() ?? null);
+      // One read of the hook for the five FRAME lines and the plants line both.
+      const objects = this.hooks.objects?.() ?? null;
+      const words = objectWords(objects);
       for (let i = 0; i < this.objectLines.length; i += 1) this.objectLines[i].textContent = words[i];
+      if (this.plantsLine !== null) this.plantsLine.textContent = plantsWords(objects);
     }
     if (this.weatherLines !== null) {
       const words = weatherWords(this.hooks.weather?.() ?? null);
       for (let i = 0; i < this.weatherLines.length; i += 1) this.weatherLines[i].textContent = words[i];
+    }
+    if (this.creatureLines !== null) {
+      const words = creatureWords(this.hooks.creatures?.() ?? null);
+      for (let i = 0; i < this.creatureLines.length; i += 1) this.creatureLines[i].textContent = words[i];
     }
     // THE MODEL IS THE TRUTH, and that includes the WORDS. A click the
     // owner rejected snaps back here — and so does a row whose built-ness

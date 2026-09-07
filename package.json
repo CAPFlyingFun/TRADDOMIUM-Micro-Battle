@@ -26,7 +26,8 @@
     "relay:typecheck": "tsc -p worker/tsconfig.json",
     "probe:shot": "node scripts/probe-shot.mjs",
     "probe:sky": "node scripts/probe-sky.mjs",
-    "probe:objects": "node scripts/probe-objects.mjs"
+    "probe:objects": "node scripts/probe-objects.mjs",
+    "probe:ecology": "node scripts/probe-ecology.mjs"
   },
   "dependencies": {
     "three": "^0.185.0"
