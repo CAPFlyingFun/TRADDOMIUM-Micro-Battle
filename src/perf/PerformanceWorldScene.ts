@@ -79,6 +79,8 @@ import { WorldObjects } from '../flora/WorldObjects';
 import { HabitatMap } from '../world/habitat';
 import { VEG_BYTES, decodeVeg } from '../world/landcover';
 import { WORLD_SEED } from '../world/objects/seed';
+import { PLANT_FAMILIES, plantSourcesOf } from '../world/objects/plants';
+import { ResourceLayer, waterQueryOf, type WaterQuery } from '../world/ecology';
 import { islandChannels, type IslandChannels } from '../world/water/islandChannels';
 import type { WeatherProvider } from '../world/weather/conditions';
 import { LiveWeather, type WeatherCache } from '../world/weather/liveWeather';
@@ -370,6 +372,14 @@ export const REMOTE_CAPSULES_ROLE = 'remote-capsules';
 
 /** How far the weather model is run in one step when a sky is held open at start, seconds — an hour, so the held sky has fully arrived. */
 const HELD_SKY_WARM_UP_S = 3600;
+
+/**
+ * How far from the camera the island's resources are derived, world
+ * units: the housefly's reach (`creatures/species.ts`, 40 m), which is
+ * the farthest any species looks for a meal. Held inside the objects'
+ * bubble at run time; a cell without plants resident derives nothing.
+ */
+const RESOURCE_REACH = 40 * 100;
 
 /** The sky the grid vanishes into, and the fog that makes it vanish. */
 const HORIZON = '#9db6c6';
@@ -687,6 +697,19 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
     let habitat: HabitatMap | null = null;
     let objects: WorldObjects | null = null;
     let objectsOn = false;
+    /**
+     * WHAT THE ISLAND OFFERS (Phase 6.5, the ecology pass): nectar, seed,
+     * sap, litter, honeydew hosts and the edges of the real fresh water,
+     * DERIVED per cell from the objects' resident population and the
+     * water solver — never placed. Built with the objects, walked after
+     * them, and its cells wait for the objects' before deriving anything.
+     */
+    let resources: ResourceLayer | null = null;
+    let resourcesOn = false;
+    /** How far the objects' bubble reaches at the rung it was built at, world units. */
+    let objectsRadius = 0;
+    /** The fresh water as the resource layer asks it: rebuilt with the water, null without it. */
+    let waterQuery: WaterQuery | null = null;
     /** The rung the bubble was BUILT at: a changed setting is noticed once. */
     let builtObjectsDetail: DetailTier | null = null;
     /** The air's colour as a colour, so the blend never restates it. */
@@ -920,6 +943,7 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
       // set would be a second answer to what water looks like.
       fresh?.dispose();
       fresh = null;
+      waterQuery = null;
       if (channels !== null) {
         fresh = new IslandWater({
           field,
@@ -931,6 +955,9 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         });
         three.add(fresh.group);
         fresh.group.visible = freshOn;
+        // The one door the resource layer (and through it the creatures)
+        // has to the water: a READ of the solver's spots and the ground.
+        waterQuery = waterQueryOf(fresh, groundUnder);
         // FILLED BEHIND THE LOADING SCREEN, exactly as the ocean's
         // sheets are: `buildOcean` runs before the first drawn frame,
         // and a ten-second warm-up on the first FRAME is a freeze the
@@ -996,8 +1023,30 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         radius: objectRadius(detail),
       });
       builtObjectsDetail = detail;
+      objectsRadius = objectRadius(detail);
       three.add(objects.group);
       objects.group.visible = objectsOn;
+      // THE RESOURCE LAYER, ONCE. It reads the objects through the live
+      // variable, so a rebuilt bubble is read as it stands; the water
+      // through `waterQuery`, which follows the water; and nothing of it
+      // depends on the rung — the sites are the plants', and a rung that
+      // draws fewer plants still derives from the cell's full population.
+      if (resources === null) {
+        resources = new ResourceLayer({
+          world: {
+            habitatAt: (at) => map.at(at),
+            plantsOf: (cx, cz) => {
+              const population = objects?.populationOf({ cx, cz }) ?? null;
+              return population === null ? null : plantSourcesOf(population, PLANT_FAMILIES);
+            },
+            get water(): WaterQuery | null {
+              return waterQuery;
+            },
+          },
+          seed: WORLD_SEED,
+          now: () => performance.now(),
+        });
+      }
       // FILLED BEHIND THE LOADING SCREEN, like the terrain's rings and
       // the sea's sheets: every cell within reach generated now, so the
       // first drawn frame has grass in it and pays nothing for it.
@@ -1012,6 +1061,16 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
     };
 
     /**
+     * Switch the resource layer: off, the sites stop being derived and
+     * the creatures stop finding them (`resourcesOf` answers null), and
+     * the HUD's line reads `sites off`. Nothing is drawn for a resource
+     * yet, so there is no group to hide.
+     */
+    const syncResourcesLayer = (): void => {
+      resourcesOn = toggles.isEnabled('resources');
+    };
+
+    /**
      * Walk the bubble after the camera. Every frame, on no dt at all:
      * the objects do not animate, so there is nothing to integrate, and
      * a paused world's camera still flies (raw dt) and still wants the
@@ -1023,6 +1082,21 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
       if (!objectsOn) return;
       const pose = fly.pose();
       objects.update(pose.at, pose.height);
+    };
+
+    /**
+     * Walk the resource layer after the objects, on SIMULATION seconds:
+     * its water edges are re-read on a sim clock, and a paused world's
+     * rivers do not move. Its reach is the creatures' — the farthest any
+     * species looks for a drink or a meal (`RESOURCE_REACH`) — held
+     * inside the objects' bubble, because a cell with no plants resident
+     * derives nothing and would only wait.
+     */
+    const updateResources = (dt: number): void => {
+      if (resources === null) return;
+      if (toggles.isEnabled('resources') !== resourcesOn) syncResourcesLayer();
+      if (!resourcesOn) return;
+      resources.update(fly.pose().at, Math.min(objectsRadius, RESOURCE_REACH), dt);
     };
 
     /**
@@ -1528,6 +1602,8 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
           return {
             meanMs: c.meanMs, peakMs: c.peakMs, cells: c.cells, pending: c.pending,
             grass: c.drawn.grass, twig: c.drawn.twig, stone: c.drawn.stone, rock: c.drawn.rock, tree: c.drawn.tree,
+            // The seven ground-plant families of the ecology pass, as one count: grass and trees have their own lines.
+            plants: PLANT_FAMILIES.reduce((sum, family) => (family === 'grass' || family === 'tree' ? sum : sum + c.drawn[family]), 0),
             habitat: c.habitat,
           };
         };
@@ -1603,7 +1679,14 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         // a row that reads built over a bare island is a control that
         // looks functional and is not (§2.9), and the raster is a
         // download that can fail on its own.
-        toggles = new LayerToggles(terrain === null ? [] : BUILT_LAYERS.filter((id) => id !== 'vegetation' || objects !== null));
+        // `resources` is gated the same way — its sites are the plants' —
+        // and the three species rows are gated on the simulation below,
+        // so a row never reads built over something that is not (§2.9).
+        toggles = new LayerToggles(terrain === null ? [] : BUILT_LAYERS.filter((id) => {
+          if (id === 'vegetation' || id === 'resources') return objects !== null;
+          if (id === 'worms' || id === 'aphids' || id === 'flies') return false;
+          return true;
+        }));
         if (terrain !== null) {
           toggles.setEnabled('terrain', true);
           three.add(terrain.group);
@@ -1640,6 +1723,11 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         if (objects !== null) {
           toggles.setEnabled('vegetation', true);
           syncObjectsLayer();
+        }
+        // AND WHAT THE ISLAND OFFERS, derived from those objects.
+        if (resources !== null) {
+          toggles.setEnabled('resources', true);
+          syncResourcesLayer();
         }
         // AND THE SKY. On wherever there is an island for it to be over;
         // the toggle is how what it costs gets measured, like the rest.
@@ -1716,6 +1804,7 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         updateWeather(frame.simDt);
         updateFresh(frame.simDt);
         updateObjects();
+        updateResources(frame.simDt);
         // AFTER the ocean, so the swell it asks about is this frame's.
         adaptWater();
         if (net !== null) {
@@ -1795,6 +1884,8 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
           objects.dispose();
           objects = null;
         }
+        resources = null;
+        objectsRadius = 0;
         habitat = null;
         coarseGrid = null;
         builtObjectsDetail = null;
