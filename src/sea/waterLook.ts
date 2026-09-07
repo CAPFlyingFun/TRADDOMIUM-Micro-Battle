@@ -62,9 +62,53 @@
  *
  * Nothing else moved. Same colours, same foam thresholds, same alpha
  * bands, same fresnel, same polygon offsets.
+ *
+ * ─────────────────────────────────────────────────────────────────────
+ * THE LIGHTING POLISH (Joshua, 2026-09-07), AND WHY IT IS NOT A NEW LOOK
+ *
+ * The sea was accepted under one sky: the clear noon the terrain shipped
+ * with, when the scene's lights were constants. Phase 5 gave the island
+ * its real sky, so the lights now run from full sun to a moonlit 0.06 —
+ * and two things in this shader had been written as if noon were
+ * permanent. Both showed up in the same phone shot, as a thin bright
+ * rim along the shoreline at night:
+ *
+ *  1. THE SHEEN FOLLOWS THE SKY. The fresnel sheen added a CONSTANT sky
+ *     colour as emissive at every hour — the sea glowing with a daytime
+ *     sky over a black beach. It now adds the scene's own hemisphere sky
+ *     light, scaled by `SKY_GAIN` so that at a clear noon it is the very
+ *     colour it always was (pinned to 1e-6 in the test), and at night it
+ *     is the night's. A wearer in a scene with no hemisphere light gets
+ *     the constant, bit-identical.
+ *  2. THE FOAM'S OPACITY FOLLOWS ITS LIGHT. Foam lifted the water's
+ *     alpha toward 0.95 with no light term, so at night every pixel with
+ *     any foam in it became a near-opaque patch over the dark seabed —
+ *     the foam's COLOUR is diffuse and three lights it honestly; its
+ *     OPACITY was not. The lift is now gated by `lit`, the luminance of
+ *     the sky light and the sun together through a smoothstep whose
+ *     thresholds sit so that every DAYTIME state the sky model produces
+ *     — clear, cloudy, overcast, a low sun — gives exactly 1.0 and the
+ *     daytime look is untouched, while night gives nothing.
+ *  3. THE WASH BREATHES. This is the ONE change to the accepted daytime
+ *     look, and it is asked for in his words: "allow stronger foam where
+ *     an actual crest/wash is currently reaching; let the foam fade
+ *     behind the passing water; the visible coastline should subtly move
+ *     as swell reaches and retreats." The swash band was a function of
+ *     depth and the scrolling textures only, so it never moved with the
+ *     wave that made it. It now rides the crest the breaker already
+ *     rides, between `WASH_FLOOR` of itself and all of it — the
+ *     shoreline keeps at least 55% of today's wash everywhere and reaches
+ *     today's full wash under a crest.
+ *
+ * None of this touches the palette, the swell, the shoreline feather,
+ * the near/far handoff, the ripple taps or the cache key. The lights are
+ * read where three declares them — file scope, from `lights_pars_begin`
+ * — so the sheet needs no new uniform from the sky; it only needs the
+ * scene to write its lights, which `SkyView` already does every frame.
  * ─────────────────────────────────────────────────────────────────────
  */
 import * as THREE from 'three';
+import { HORIZON_CLEAR } from '../sky/skyLook';
 import { KEEL, type SeaSwell } from '../world/sea/swell';
 import type { TextureSlot } from './SeaTextures';
 
@@ -101,6 +145,75 @@ const OCTAVES: readonly { tile: number; rot: number; sx: number; sy: number; wei
  */
 export const FOAM_NEAR = 700;
 export const FOAM_FAR = 1_000;
+
+/**
+ * THE SKY THE SHEEN WAS TUNED AGAINST — BE's 0x9fc6df, the colour the
+ * fresnel sheen shows at a clear noon and always has.
+ *
+ * WHAT THE SHADER IS ACTUALLY HANDED is `new THREE.Color(hex)
+ * .convertSRGBToLinear()`, and that is two applications of the sRGB
+ * transfer, not one: since r152 a hex colour is converted to the working
+ * space as it is set, so the explicit conversion on top darkens it
+ * again. The line is v0's, the sea was accepted on a phone with it, and
+ * the LOOK is what is protected rather than the arithmetic that reached
+ * it — so the expression is kept exactly, `SKY_GAIN` is derived from
+ * what it produces, and this note is here so nobody "corrects" it into
+ * a sea a third brighter than the one Joshua signed off.
+ */
+export const SHEEN_REFERENCE = 0x9fc6df;
+const SHEEN = new THREE.Color(SHEEN_REFERENCE).convertSRGBToLinear();
+
+/**
+ * THE PER-CHANNEL GAIN THAT TURNS THE SCENE'S SKY LIGHT INTO THAT SHEEN.
+ *
+ * three folds a hemisphere light's intensity into `skyColor`, so at a
+ * clear noon the shader reads the sky's `HORIZON_CLEAR` at intensity 1.0
+ * (`skyLook` pins both). Dividing the sheen by that, channel for channel,
+ * gives the gain that makes `skyColor * uSkyGain` the old constant to
+ * float precision at noon — and a colour that dims and cools with the
+ * sky at every other hour, which is the whole point. Computed here in
+ * float64 from the two constants, never typed in.
+ *
+ * The horizon is converted the way `SkyView` converts it — `setRGB` with
+ * the sRGB space — so the two sides of the ratio are the same transfer.
+ */
+export const SKY_GAIN: Readonly<{ r: number; g: number; b: number }> = (() => {
+  const horizon = new THREE.Color().setRGB(HORIZON_CLEAR.r, HORIZON_CLEAR.g, HORIZON_CLEAR.b, THREE.SRGBColorSpace);
+  return Object.freeze({ r: SHEEN.r / horizon.r, g: SHEEN.g / horizon.g, b: SHEEN.b / horizon.b });
+})();
+
+/**
+ * WHERE THE FOAM'S OPACITY LIFT COMES ON, in luminance of the sky light
+ * and the sun together (Rec. 709 weights, linear, intensities folded in
+ * the way three folds them).
+ *
+ * The thresholds are placed against what the sky model actually
+ * produces, and `tests/seaWaterLook.test.ts` evaluates it at each state
+ * to hold them there: a clear noon reads about 1.50, seventy percent
+ * cloud 1.01, a full overcast noon 0.64, the sun on the horizon 0.51 —
+ * all above LIT_HI, so every daytime look is exactly the accepted one.
+ * Night reads about 0.024, a hair above LIT_LO, so the lift is a tenth
+ * of a percent of itself: nothing, without a hard edge that a moonlit
+ * sea could cross in one frame. Between the two is nautical twilight,
+ * where the foam's opacity eases out over the same degrees the sky's
+ * night image fades in. GAME TUNING.
+ */
+export const LIT_LO = 0.02;
+export const LIT_HI = 0.25;
+
+/**
+ * HOW MUCH OF THE SWASH SURVIVES IN A TROUGH, 0..1.
+ *
+ * The wash now rides the swell's crest like the breaker does, and this
+ * is its floor: in a trough the shoreline keeps this much of the wash it
+ * had before, under a crest it has all of it. The one deliberate change
+ * to the accepted DAYTIME look — see the header — and the number is the
+ * dial for how much the coastline breathes. At 0.55 the band never
+ * empties, so the shore is still drawn as a rim of wash rather than a
+ * fade, and it brightens by nearly double as a wave arrives. GAME
+ * TUNING, Joshua's brief of 2026-09-07.
+ */
+export const WASH_FLOOR = 0.55;
 
 export interface WaterLookOpts {
   /** The sea whose table this shader bakes. The one shared surface. */
@@ -441,7 +554,8 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
     opts.midAt, opts.deepAt, opts.texAmp, opts.sink,
   ].join(':');
 
-  const sky = new THREE.Color(0x9fc6df).convertSRGBToLinear();
+  // A ratio, not a colour: a Vector3 so nobody converts it.
+  const skyGain = new THREE.Vector3(SKY_GAIN.r, SKY_GAIN.g, SKY_GAIN.b);
 
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uTime = clock;
@@ -450,7 +564,10 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
     shader.uniforms.uOct = oct;
     shader.uniforms.uRipple = opts.ripple as { value: THREE.Texture };
     shader.uniforms.uFoam = opts.foam as { value: THREE.Texture };
-    shader.uniforms.uSky = { value: sky };
+    // The constant sheen, kept as the FALLBACK for a scene with no
+    // hemisphere light, where it is what the sheen always was.
+    shader.uniforms.uSky = { value: SHEEN };
+    shader.uniforms.uSkyGain = { value: skyGain };
     shader.uniforms.uHole = hole;
     shader.uniforms.uHoleLocal = holeLocal;
     shader.uniforms.uEye = eyeLocal;
@@ -503,7 +620,7 @@ export function makeWaterLook(opts: WaterLookOpts): WaterLook {
     // later stages through gRn/gBody — the colour weave, the normal tilt
     // and the surf caps all read the same water.
     shader.fragmentShader = (
-      'uniform float uTime;\nuniform sampler2D uRipple;\nuniform sampler2D uFoam;\nuniform vec3 uSky;\n'
+      'uniform float uTime;\nuniform sampler2D uRipple;\nuniform sampler2D uFoam;\nuniform vec3 uSky;\nuniform vec3 uSkyGain;\n'
       + 'uniform float uFoamNear;\nuniform float uFoamFar;\n'
       + (isSea ? opts.swell.swellUniformChunk() : '') + '\n' + shader.fragmentShader
     )
@@ -652,8 +769,19 @@ ${rippleChunk(octaves, advected)}
             // now crowds the band just OUTSIDE the feather, where the
             // water is solid, so the edge of the sea is drawn as a bright
             // rim of wash rather than a fade.
+            //
+            // AND IT BREATHES WITH THE SWELL. Depth and the scrolling
+            // textures alone gave a band that never moved with the wave
+            // that made it; the breaker above already rides the crest,
+            // and the wash now rides the same one — between WASH_FLOOR
+            // of itself in a trough and all of itself under a crest, so
+            // the coastline brightens as a wave reaches and fades behind
+            // it as the water draws back. The ONE change to the accepted
+            // daytime look, asked for in Joshua's 2026-09-07 brief; see
+            // the header and WASH_FLOOR.
             float wash = smoothstep(170.0 * ${opts.surf.toFixed(3)}, 95.0 * ${opts.surf.toFixed(3)}, depth)
-              * (lace * 0.85 + fizz * 0.35) * pale;
+              * (lace * 0.85 + fizz * 0.35) * pale
+              * mix(${WASH_FLOOR.toFixed(2)}, 1.0, smoothstep(-0.6, 0.4, crest));
             foam = clamp(foam + breaker + wash, 0.0, 1.0);
           }` : ''}
           // Open-water caps. The wave map's slope energy runs in thin
@@ -681,13 +809,36 @@ ${rippleChunk(octaves, advected)}
           // is the one that reaches zero.
           foam *= micro;
           }
+          // THE FOAM'S COLOUR IS DIFFUSE, and three lights it: this
+          // literal is the foam under full sun, and at night the lights
+          // take it down like everything else. Do not add a light term
+          // here — the one that was missing is on the OPACITY below.
           diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.90, 0.95, 0.97), foam);
+
+          // HOW LIT THIS WATER IS, from the scene's own lights: the sky
+          // light and the sun together, as luminance. three folds each
+          // light's intensity into its colour before it reaches here,
+          // and declares both at file scope in lights_pars_begin, so
+          // they are readable in map_fragment without a uniform of our
+          // own. A scene with no sky light or no sun is lit in full —
+          // the fallback is the look as it was, not a dark one.
+          #if NUM_HEMI_LIGHTS > 0 && NUM_DIR_LIGHTS > 0
+          float lit = smoothstep(${LIT_LO.toFixed(3)}, ${LIT_HI.toFixed(3)}, dot(hemisphereLights[0].skyColor + directionalLights[0].color, vec3(0.2126, 0.7152, 0.0722)));
+          #else
+          float lit = 1.0;
+          #endif
 
           // BE's clear-water alpha: see the sand at the waterline, a real
           // body offshore, foam near-opaque.
           diffuseColor.a *= mix(1.0, 1.55, smoothstep(15.0, 320.0, depth));
           diffuseColor.a = min(diffuseColor.a, 0.82);
-          diffuseColor.a = mix(diffuseColor.a, 0.95, foam);
+          // FOAM IS ONLY OPAQUE WHERE THERE IS LIGHT TO MAKE IT SO. With
+          // no light term this lift ran at every hour, and at night
+          // every pixel with any foam in it became a 0.95-opaque patch
+          // over a black seabed — the bright rim along the shoreline in
+          // Joshua's phone shot. lit is exactly 1.0 by day, so the
+          // daytime look is the accepted one to the bit.
+          diffuseColor.a = mix(diffuseColor.a, 0.95, foam * lit);
 
           // NEARER MEANS MORE VISIBLE, and only nearer.
           //
@@ -722,7 +873,19 @@ ${rippleChunk(octaves, advected)}
           // BE's fresnel sky sheen, capped so far flat water cannot
           // white-band.
           float fres = pow(1.0 - clamp(dot(normalize(vViewPosition), normal), 0.0, 1.0), 3.0);
-          totalEmissiveRadiance += uSky * min(fres, 0.85) * 0.5;
+          // THE SHEEN IS THE SKY'S, not a constant's. The scene's
+          // hemisphere light is the sky's own colour at the sky's own
+          // brightness, and uSkyGain is the ratio that makes it BE's
+          // sheen at a clear noon — so by day this is the accepted
+          // colour to float precision, and at night it is a night's.
+          // Without a hemisphere light there is no sky to follow and the
+          // constant stands, which is the look those scenes always had.
+          #if NUM_HEMI_LIGHTS > 0
+          vec3 skyLit = hemisphereLights[0].skyColor * uSkyGain;
+          #else
+          vec3 skyLit = uSky;
+          #endif
+          totalEmissiveRadiance += skyLit * min(fres, 0.85) * 0.5;
         }`);
   };
 

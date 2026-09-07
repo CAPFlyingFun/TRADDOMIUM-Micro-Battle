@@ -165,4 +165,29 @@ describe('inland water wears the ocean’s look', () => {
     expect(Math.max(...mine), 'inland runs to metres where the sea runs to tens of them')
       .toBeLessThan(Math.max(...sea) / 5);
   });
+
+  it('is lit by the same sky the ocean is — the sheen’s gain and the foam gate, and no wash to breathe', () => {
+    // The lighting polish (2026-09-07) is in the ONE shader, so a river
+    // at night gets the same fix the sea got: its sheen follows the
+    // scene's hemisphere light and its foam goes opaque only where there
+    // is light to make it so. The lines are compared to the sea's
+    // verbatim, not re-asserted, so the two wearers cannot drift.
+    const mine = compile(inland()).fragmentShader;
+    const sea = compile(oceanLook()).fragmentShader;
+    const sheen = (glsl: string): string | undefined => /vec3 skyLit = hemisphereLights\[0\]\.skyColor \* uSkyGain;/.exec(glsl)?.[0];
+    const gate = (glsl: string): string | undefined => /float lit = smoothstep\([^\n]*\);/.exec(glsl)?.[0];
+    const lift = (glsl: string): string | undefined => /diffuseColor\.a = mix\(diffuseColor\.a, 0\.95, [^\n]*\);/.exec(glsl)?.[0];
+    expect(sheen(mine)).toBeDefined();
+    expect(sheen(mine)).toBe(sheen(sea));
+    expect(gate(mine)).toBeDefined();
+    expect(gate(mine)).toBe(gate(sea));
+    expect(lift(mine)).toBe('diffuseColor.a = mix(diffuseColor.a, 0.95, foam * lit);');
+    expect(lift(mine)).toBe(lift(sea));
+    // The wash rides the SWELL's crest, and a river has no swell: the
+    // breathing shoreline is the sea's alone, behind the same gate that
+    // keeps the breakers off a pond.
+    expect(sea).toMatch(/smoothstep\(-0\.6, 0\.4, crest\)/);
+    expect(mine).not.toMatch(/float crest\b/);
+    expect(mine).not.toMatch(/float wash/);
+  });
 });

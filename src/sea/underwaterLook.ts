@@ -37,9 +37,14 @@
  * day. Using v0's stream numbers on the sea would put her in soup.
  *
  * v0 also dimmed the sun and the ambient and hung a tinted pane in front
- * of the lens. Neither is here: v1 has no weather system to multiply
- * against yet, and a pane belongs with the follow camera that does not
- * exist. The fog is what was asked for and the fog is what this does.
+ * of the lens. The pane is still not here — it belongs with the follow
+ * camera that does not exist. The DIMMING is (2026-09-07, the lighting
+ * polish): once the sky began writing the scene's lights every frame
+ * there was something honest to multiply against, and without it the
+ * seabed was lit as if in air — full sun on the sand under six metres of
+ * water. `light` is that factor, pure like everything else here; the
+ * scene multiplies the sky's sun and sky light by it while the eye is
+ * under, and puts them back the frame it surfaces.
  *
  * LINEAR FOG, NOT EXPONENTIAL, and that is a rendering constraint rather
  * than a preference. three picks `FOG_EXP2` at COMPILE time, so swapping
@@ -96,6 +101,21 @@ export const SIGHT_SHALLOW = 30 * M;
 export const SIGHT_DEEP = 6 * M;
 
 /**
+ * HOW MUCH OF THE AIR'S LIGHT IS LEFT AT DEPTH, as a factor on the
+ * scene's sun and sky light.
+ *
+ * At the surface all of it — the eye a centimetre under sees the same
+ * sun the eye a centimetre above does — and it eases toward this floor
+ * on the same e-fold the sight uses, so the water darkens and closes in
+ * together rather than on two clocks. A floor rather than zero, because
+ * the fog already takes the far end to the deep colour: what the light
+ * has to do is take the shine off the sand and the shadow out of the
+ * rocks, not black the world out twice. GAME TUNING shaped by the same
+ * order the colours follow.
+ */
+export const LIGHT_DEEP = 0.35;
+
+/**
  * THE COLOUR OF THE WATER, shallow to deep, as sRGB.
  *
  * Depth eats the long wavelengths first, so the red goes, then the
@@ -128,6 +148,13 @@ export interface UnderwaterLook {
   readonly b: number;
   /** How far anything is still visible, world units. */
   readonly sight: number;
+  /**
+   * How much of the air's light reaches here, 1 at the surface easing
+   * to `LIGHT_DEEP`. The scene multiplies its sun and sky light by it;
+   * the fog is a colour and this is a brightness, and neither does the
+   * other's job.
+   */
+  readonly light: number;
 }
 
 const mix = (a: number, b: number, t: number): number => a + (b - a) * t;
@@ -149,6 +176,7 @@ export function underwaterLook(submersion: number): UnderwaterLook | null {
     g: mix(SHALLOW.g, DEEP.g, deep),
     b: mix(SHALLOW.b, DEEP.b, deep),
     sight: mix(SIGHT_SHALLOW, SIGHT_DEEP, deep),
+    light: mix(1, LIGHT_DEEP, deep),
   };
 }
 
