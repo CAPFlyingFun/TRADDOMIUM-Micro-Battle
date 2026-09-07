@@ -318,18 +318,27 @@ const MOVE_FRAMES = 60;
  *
  *     sea mean 0.04 ms
  *     sea peak 12.3 ms
- *     sea rung medium
+ *     sea detail medium
+ *     sea tex medium
  *
  * and live in the FRAME column rather than one of their own, because a
  * sixth column does not fit the 932 px canvas (`PerfHud.seaWords`).
+ * TWO RUNG LINES, not one: since 2026-09-05 detail and texture size are
+ * separate settings, and the sheet prints both. This sweep holds
+ * `?tier=`, the TEXTURE rung, so `tier` below is read off `sea tex`;
+ * `detail` is read too so a row can say what geometry it was measured
+ * at. The line used to read `sea rung <word>`, and a regex for that
+ * matched nothing for a build and a half while the sweep reported "no
+ * sea rows to read" against a HUD that had four of them.
  */
 async function seaReadout(page) {
   const text = await uiText(page);
   const mean = /sea mean ([\d.]+) ms/.exec(text);
   const peak = /sea peak ([\d.]+) ms/.exec(text);
-  const rung = /sea rung (\S+)/.exec(text);
-  if (!mean || !peak || !rung) return null;
-  return { meanMs: Number(mean[1]), peakMs: Number(peak[1]), tier: rung[1] };
+  const detail = /sea detail (\S+)/.exec(text);
+  const tex = /sea tex (\S+)/.exec(text);
+  if (!mean || !peak || !detail || !tex) return null;
+  return { meanMs: Number(mean[1]), peakMs: Number(peak[1]), tier: tex[1], detail: detail[1] };
 }
 
 /**
