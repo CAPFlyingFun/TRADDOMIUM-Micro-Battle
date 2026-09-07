@@ -67,6 +67,24 @@
  * from the ground), so a clear noon renders exactly the island Joshua
  * already signed off. Everything else is GAME TUNING relative to that.
  *
+ * ─── the night dome ───────────────────────────────────────────────────
+ *
+ * The `night` image is a photograph, and a photograph of a night sky is
+ * exposed until something shows: its horizon carries a baked glow that
+ * at −27° — the middle of the night — draws at the same strength it
+ * does at −13°, and Joshua saw the dawn arrive an hour before the sun
+ * did (2026-09-07: "the pre-dawn glow arrives too early"). So the
+ * dome's exposure follows the sun through the twilight bands, as the
+ * lights already do: the image is drawn at `NIGHT_DOME_FLOOR` of itself
+ * from the bottom of the night up to `NIGHT_BELOW_DEG`, and comes up to
+ * full by `NIGHT_DOME_FULL_DEG` — nautical dawn, about 5:25 HST — so a
+ * −24° sky is darker than a −12° one and the glow is a dawn thing. It
+ * rides the SUN'S REAL ELEVATION, not the key light's floored one,
+ * because the floor is a rule about where light may come from and this
+ * is a rule about how dark the night is. NOTHING BRIGHTENS: the factor
+ * never passes one, the lights are untouched, and a test holds the new
+ * dimming at or under the old at every elevation and every cloud.
+ *
  * ─── the air ──────────────────────────────────────────────────────────
  *
  * Fog density comes from the reported visibility and from nothing else
@@ -117,8 +135,19 @@ export interface SkyLook {
   readonly fogDensity: number;
   /** Background, fog and the dome's rim. One colour, or the horizon shows a line. */
   readonly horizon: Rgb;
-  /** Multiplier on the dome image: 1 in clear air, less under cover and rain. */
+  /**
+   * Multiplier on the dome image: 1 in clear air, less under cover and
+   * rain, and less again through the night (`NIGHT_DOME_FLOOR`). Never
+   * more than 1.
+   */
   readonly dimming: number;
+  /**
+   * How much overcast and rain together have taken the sun away, 0..1
+   * (`gloomOf`). Published because the shadow reads it: an overcast sky
+   * has no hard shadow, and the shadow must fade at the pace the light
+   * does rather than on a second curve of its own.
+   */
+  readonly gloom: number;
 }
 
 /** √(−ln 0.05) — the 5%-contrast convention, once, here. */
@@ -144,6 +173,14 @@ export const PARTLY_FROM_CLOUD = 0.3;
 export const PARTLY_AT_CLOUD = 0.5;
 /** The key light never comes from below this: after sunset it is the glow above the horizon. */
 export const LIGHT_FLOOR = 6 * DEG;
+/**
+ * How much of itself the night image is drawn at, from the bottom of
+ * the night up to `NIGHT_BELOW_DEG`. GAME TUNING: enough that the
+ * stars still read, little enough that the baked horizon glow does not.
+ */
+export const NIGHT_DOME_FLOOR = 0.45;
+/** The night image is back to full exposure here: nautical dawn, about 5:25 HST over Līhuʻe. GAME TUNING. */
+export const NIGHT_DOME_FULL_DEG = -14;
 
 /* ─── the palettes (sRGB), GAME TUNING ───────────────────────────────── */
 
@@ -232,6 +269,16 @@ export function cloudMixOf(cloud: number): number {
   return ramp(cloud, PARTLY_FROM_CLOUD, PARTLY_AT_CLOUD);
 }
 
+/**
+ * The night dome's exposure for the sun's REAL elevation in degrees:
+ * `NIGHT_DOME_FLOOR` at and below `NIGHT_BELOW_DEG`, 1 at and above
+ * `NIGHT_DOME_FULL_DEG`, straight between. Never more than 1.
+ */
+export function domeExposureFor(elevationDeg: number): number {
+  const up = ramp(elevationDeg, NIGHT_BELOW_DEG, NIGHT_DOME_FULL_DEG);
+  return NIGHT_DOME_FLOOR + (1 - NIGHT_DOME_FLOOR) * up;
+}
+
 export function skyLook(now: WeatherNow, sun: SunPosition): SkyLook {
   const elevationDeg = sun.elevation / DEG;
 
@@ -292,7 +339,11 @@ export function skyLook(now: WeatherNow, sun: SunPosition): SkyLook {
     hemisphereIntensity,
     fogDensity: FOG_TAIL / Math.max(1, now.visibilityM * M),
     horizon,
-    dimming: 1 - DIMMING_UNDER_COVER * gloom,
+    // The weather's dimming, and the night's under it. The night's
+    // reads the real elevation: the floor above is where light may
+    // come from, not how dark it is.
+    dimming: (1 - DIMMING_UNDER_COVER * gloom) * domeExposureFor(elevationDeg),
+    gloom,
   };
 }
 

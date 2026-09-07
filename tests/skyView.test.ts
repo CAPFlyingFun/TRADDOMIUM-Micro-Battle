@@ -17,6 +17,12 @@
  *     once it stops; dispose lets go of everything
  *   the rain counts from the rate, caps by rung, follows the camera and
  *     slants with the wind
+ *   the shadow: bound with a rung's spec the sun casts over a ±reach
+ *     square at that map size; it casts at noon and not at night, under
+ *     cover or at the floor; a rung change lets go of the old map; the
+ *     light and its target sit on the texel lattice so the map's grid
+ *     holds still as the camera moves inside a texel; and without a
+ *     spec nothing about shadows is touched
  */
 import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
@@ -26,11 +32,12 @@ import type { TextureTier } from '../src/assets/textureQuality';
 import {
   BOUNDARY_LAYER, DRIFT_MAX, FALL, HEAVY_RAIN_MM_HR, RAIN_CAPS, RISE, RainView, SPREAD, rainCapFor,
 } from '../src/sky/RainView';
+import { SHADOW_RUNGS, SHADOW_SUN_MIN, shadowNormalBias, shadowTexel, type ShadowSpec } from '../src/sky/shadows';
 import {
-  DOME_OF_FAR, DOME_RENDER_ORDER, FOG_FAR_OF_CLIP, FOG_NEAR_OF_FAR, RELEASE_AFTER_UPDATES, SMOOTHSTEP_AT_95,
-  SUN_DISTANCE, SkyView, domeRotationFor, fogRangeFor, sunVector, type SkyLights,
+  DOME_OF_FAR, DOME_RENDER_ORDER, FOG_FAR_OF_CLIP, FOG_NEAR_OF_FAR, RELEASE_AFTER_UPDATES, SHADOW_NEAR, SMOOTHSTEP_AT_95,
+  SUN_DISTANCE, SkyView, domeRotationFor, fogRangeFor, shadowFarFor, sunVector, type SkyLights,
 } from '../src/sky/SkyView';
-import { sightFor, skyLook } from '../src/sky/skyLook';
+import { LIGHT_FLOOR, sightFor, skyLook } from '../src/sky/skyLook';
 import type { SunPosition } from '../src/world/weather/solar';
 import { FAIR, visibilityFor, type WeatherNow } from '../src/world/weather/weather';
 
@@ -57,13 +64,14 @@ function camera(far = 6000): THREE.PerspectiveCamera {
   return cam;
 }
 
-function lights(fog: THREE.Fog | THREE.FogExp2 | null = new THREE.Fog(0x000000, 1, 2)): SkyLights {
-  return {
+function lights(fog: THREE.Fog | THREE.FogExp2 | null = new THREE.Fog(0x000000, 1, 2), shadow?: ShadowSpec): SkyLights {
+  const bound: SkyLights = {
     sun: new THREE.DirectionalLight(0xffffff, 1),
     hemisphere: new THREE.HemisphereLight(0xffffff, 0x000000, 1),
     fog,
     background: new THREE.Color(0x000000),
   };
+  return shadow === undefined ? bound : { ...bound, shadow };
 }
 
 interface Rig {
@@ -340,6 +348,210 @@ describe('dispose', () => {
     view.dispose();
     view.update(NOON, camera());
     expect(view.group.children).toEqual([]);
+  });
+});
+
+describe('the shadow', () => {
+  const HIGH = SHADOW_RUNGS.high;
+  const MEDIUM = SHADOW_RUNGS.medium;
+  const OVERCAST = skyLook(weather({ sky: 'cloudy', cloud: 0.95, visibilityM: visibilityFor(0, 0.95) }), sun(80, 200));
+  /** The sun at the floor: the key light is held at +6°, where the shadow is gone. */
+  const LOW = skyLook(weather({ cloud: 0.1 }), sun(-3, 260));
+
+  it('binds the sun to cast over a ±reach square at the rung’s map size, with normal bias and no depth bias', () => {
+    const { view } = rig();
+    const bound = lights(undefined, HIGH);
+    view.bind(bound);
+    const { sun } = bound;
+    expect(sun.castShadow).toBe(true);
+    expect(sun.shadow.mapSize.toArray()).toEqual([1024, 1024]);
+    const cam = sun.shadow.camera;
+    expect([cam.left, cam.right, cam.top, cam.bottom]).toEqual([-400, 400, 400, -400]);
+    expect(cam.near).toBe(SHADOW_NEAR);
+    expect(cam.far).toBe(shadowFarFor(400));
+    expect(cam.far).toBeGreaterThan(SUN_DISTANCE + 2 * 400);
+    expect(sun.shadow.bias).toBe(0);
+    expect(sun.shadow.normalBias).toBeCloseTo(shadowNormalBias(HIGH), 12);
+    expect(sun.shadow.normalBias).toBeGreaterThan(0.25);
+    // The projection was rebuilt for the square, not left at three's ±5 default.
+    const corner = new THREE.Vector3(400, 400, -SHADOW_NEAR).applyMatrix4(cam.projectionMatrix);
+    expect(corner.x).toBeCloseTo(1, 9);
+    expect(corner.y).toBeCloseTo(1, 9);
+    expect(view.shadow).toMatchObject({ mapSize: 1024, reach: 400 });
+    view.dispose();
+  });
+
+  it('casts at a clear noon at full strength, and not at night: the 0.06 key light is not a sun', () => {
+    const { view } = rig();
+    const bound = lights(undefined, HIGH);
+    view.bind(bound);
+    view.update(NOON, camera());
+    expect(bound.sun.castShadow).toBe(true);
+    expect(bound.sun.shadow.intensity).toBeCloseTo(1, 9);
+    expect(view.shadow.casting).toBe(true);
+    expect(view.shadow.intensity).toBeCloseTo(1, 9);
+    view.update(NIGHT, camera());
+    expect(NIGHT.sunIntensity).toBeLessThan(SHADOW_SUN_MIN);
+    expect(bound.sun.castShadow).toBe(false);
+    expect(view.shadow.casting).toBe(false);
+    // And the light itself is still driven: the night's own intensity and colour.
+    expect(bound.sun.intensity).toBe(NIGHT.sunIntensity);
+    view.update(NOON, camera());
+    expect(bound.sun.castShadow).toBe(true);
+    view.dispose();
+  });
+
+  it('washes out under cover and is gone at the floor — and skips the depth pass for a shadow no one could see', () => {
+    const { view } = rig();
+    const bound = lights(undefined, HIGH);
+    view.bind(bound);
+    view.update(OVERCAST, camera());
+    expect(bound.sun.shadow.intensity).toBeLessThan(0.01);
+    expect(view.shadow.intensity).toBeLessThan(0.01);
+    expect(bound.sun.castShadow).toBe(false);
+    view.update(LOW, camera());
+    expect(LOW.sunElevation).toBe(LIGHT_FLOOR);
+    expect(bound.sun.shadow.intensity).toBe(0);
+    expect(view.shadow.intensity).toBe(0);
+    expect(bound.sun.castShadow).toBe(false);
+    // Half cover: half a shadow, still cast.
+    view.update(skyLook(weather({ cloud: 0.7 }), sun(80, 200)), camera());
+    expect(bound.sun.shadow.intensity).toBeCloseTo(0.5, 9);
+    expect(bound.sun.castShadow).toBe(true);
+    view.dispose();
+  });
+
+  it('lets go of the old map on a rung change, because three never reallocates one', () => {
+    const { view } = rig();
+    const bound = lights(undefined, HIGH);
+    view.bind(bound);
+    view.update(NOON, camera());
+    // What three would have allocated on the first render.
+    const map = new THREE.WebGLRenderTarget(1024, 1024);
+    map.depthTexture = new THREE.DepthTexture(1024, 1024);
+    const mapGone = vi.spyOn(map, 'dispose');
+    const depthGone = vi.spyOn(map.depthTexture, 'dispose');
+    bound.sun.shadow.map = map;
+    // Off: the map goes and the sun stops casting.
+    view.setShadow(null);
+    expect(bound.sun.castShadow).toBe(false);
+    expect(bound.sun.shadow.map).toBeNull();
+    expect(mapGone).toHaveBeenCalledTimes(1);
+    expect(depthGone).toHaveBeenCalledTimes(1);
+    expect(view.shadow).toEqual({ mapSize: 0, reach: 0, casting: false, intensity: 0 });
+    view.update(NOON, camera());
+    expect(bound.sun.castShadow).toBe(false);
+    // Back on at medium: the new size and square.
+    view.setShadow(MEDIUM);
+    expect(bound.sun.castShadow).toBe(true);
+    expect(bound.sun.shadow.mapSize.toArray()).toEqual([512, 512]);
+    const cam = bound.sun.shadow.camera;
+    expect([cam.left, cam.right, cam.top, cam.bottom]).toEqual([-250, 250, 250, -250]);
+    expect(cam.far).toBe(shadowFarFor(250));
+    expect(bound.sun.shadow.normalBias).toBeCloseTo(shadowNormalBias(MEDIUM), 12);
+    expect(view.shadow).toMatchObject({ mapSize: 512, reach: 250 });
+    // The same spec again is a no-op: a map three allocated at this size stays.
+    const same = new THREE.WebGLRenderTarget(512, 512);
+    bound.sun.shadow.map = same;
+    const sameGone = vi.spyOn(same, 'dispose');
+    view.setShadow(MEDIUM);
+    expect(sameGone).not.toHaveBeenCalled();
+    expect(bound.sun.shadow.map).toBe(same);
+    // A size change lets it go.
+    view.setShadow(HIGH);
+    expect(sameGone).toHaveBeenCalledTimes(1);
+    expect(bound.sun.shadow.map).toBeNull();
+    expect(bound.sun.shadow.mapSize.toArray()).toEqual([1024, 1024]);
+    view.dispose();
+  });
+
+  it('stands the light and its target on the texel lattice, so the map’s grid holds still inside a texel', () => {
+    const { view } = rig();
+    const bound = lights(undefined, HIGH);
+    view.bind(bound);
+    const { sun } = bound;
+    const texel = shadowTexel(HIGH);
+    const cam = camera();
+    const eye = new THREE.Vector3(100.3, 50.2, -20.1);
+    cam.position.copy(eye);
+    cam.updateMatrixWorld();
+    view.update(NOON, cam);
+    // THE MAP'S OWN AXES, from the camera three builds for the light —
+    // not from the view — so the lattice is measured where it is used.
+    sun.updateMatrixWorld();
+    sun.shadow.updateMatrices(sun);
+    const right = new THREE.Vector3();
+    const up = new THREE.Vector3();
+    const toward = new THREE.Vector3();
+    sun.shadow.camera.matrixWorld.extractBasis(right, up, toward);
+    const expected = sunVector(NOON.sunAzimuth, NOON.sunElevation);
+    expect(toward.distanceTo(expected)).toBeLessThan(1e-9);
+    const target = sun.target.position.clone();
+    const light = sun.position.clone();
+    // ON the lattice: a whole number of texels along each of the map's axes.
+    for (const axis of [right, up]) {
+      const k = target.dot(axis) / texel;
+      expect(Math.abs(k - Math.round(k))).toBeLessThan(1e-6);
+    }
+    // The direction is exactly the sun's, from the target, at SUN_DISTANCE.
+    expect(light.clone().sub(target).normalize().distanceTo(expected)).toBeLessThan(1e-9);
+    expect(light.distanceTo(target)).toBeCloseTo(SUN_DISTANCE, 6);
+    // Within a texel of the eye, and off it only across the sun.
+    const off = target.clone().sub(eye);
+    expect(off.length()).toBeLessThanOrEqual(texel * Math.SQRT1_2 + 1e-9);
+    expect(Math.abs(off.dot(expected))).toBeLessThan(1e-9);
+    // Half-way toward the lattice point — inside the same texel — the same point.
+    cam.position.copy(eye).addScaledVector(off, 0.5);
+    cam.updateMatrixWorld();
+    view.update(NOON, cam);
+    expect(sun.target.position.distanceTo(target)).toBeLessThan(1e-9);
+    expect(sun.position.distanceTo(light)).toBeLessThan(1e-9);
+    // Ten texels along the map's own axis: ten texels along, and nothing else.
+    cam.position.copy(eye).addScaledVector(right, 10 * texel);
+    cam.updateMatrixWorld();
+    view.update(NOON, cam);
+    const moved = sun.target.position.clone().sub(target);
+    expect(moved.dot(right) / texel).toBeCloseTo(10, 6);
+    expect(Math.abs(moved.dot(up))).toBeLessThan(1e-6);
+    expect(Math.abs(moved.dot(toward))).toBeLessThan(1e-6);
+    expect(sun.position.clone().sub(light).distanceTo(moved)).toBeLessThan(1e-6);
+    view.dispose();
+  });
+
+  it('touches nothing about shadows when no spec is handed in', () => {
+    const { view } = rig();
+    const bound = lights();
+    const { sun } = bound;
+    sun.shadow.mapSize.set(64, 64);
+    const before = sun.shadow.camera.projectionMatrix.clone();
+    view.bind(bound);
+    const cam = camera();
+    view.update(NOON, cam);
+    expect(sun.castShadow).toBe(false);
+    expect(sun.shadow.mapSize.toArray()).toEqual([64, 64]);
+    expect(sun.shadow.camera.projectionMatrix.equals(before)).toBe(true);
+    expect(sun.shadow.intensity).toBe(1);
+    expect(sun.shadow.normalBias).toBe(0);
+    // And the light stands exactly on the eye, as it always has.
+    expect(sun.target.position.toArray()).toEqual(cam.position.toArray());
+    expect(sun.position.distanceTo(cam.position)).toBeCloseTo(SUN_DISTANCE, 6);
+    expect(view.shadow).toEqual({ mapSize: 0, reach: 0, casting: false, intensity: 0 });
+    // A zero-map spec is the same as none.
+    view.setShadow(SHADOW_RUNGS.low);
+    expect(sun.castShadow).toBe(false);
+    expect(view.shadow.mapSize).toBe(0);
+    view.dispose();
+  });
+
+  it('does nothing before bind, and nothing after dispose', () => {
+    const { view } = rig();
+    expect(() => view.setShadow(HIGH)).not.toThrow();
+    expect(view.shadow.mapSize).toBe(0);
+    const bound = lights(undefined, HIGH);
+    view.bind(bound);
+    view.dispose();
+    view.setShadow(null);
+    expect(bound.sun.castShadow).toBe(true);
   });
 });
 

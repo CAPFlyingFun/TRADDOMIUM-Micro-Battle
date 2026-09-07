@@ -12,12 +12,16 @@
  *     NOTHING SNAPS: no image's weight moves more than 0.05 a degree,
  *     and neither light does, through the whole sweep from night to noon
  *   night is night: both lights dim, a blue-grey bounce, a near-black rim
+ *   the night dome's exposure follows the sun: darker at −24° than at
+ *     −12°, full by nautical dawn, and NOTHING brightens — the new
+ *     dimming is at or under the old at every elevation and every cloud
  *   the key light never comes from under the ground
  */
 import { describe, expect, it } from 'vitest';
 import {
-  CLOUD_FADE_FULL_DEG, DAY_ABOVE_DEG, DUSK_AT_DEG, FOG_TAIL, GROUND_BOUNCE, HORIZON_CLEAR, LIGHT_FLOOR,
-  NIGHT_BELOW_DEG, SUN_WARM, cloudMixOf, gloomOf, sightFor, skyLook, type SkyLook,
+  CLOUD_FADE_FULL_DEG, DAY_ABOVE_DEG, DIMMING_UNDER_COVER, DUSK_AT_DEG, FOG_TAIL, GROUND_BOUNCE, HORIZON_CLEAR,
+  LIGHT_FLOOR, NIGHT_BELOW_DEG, NIGHT_DOME_FLOOR, NIGHT_DOME_FULL_DEG, SUN_WARM, cloudMixOf, domeExposureFor, gloomOf,
+  sightFor, skyLook, type SkyLook,
 } from '../src/sky/skyLook';
 import { SKY_IMAGE_IDS, type SkyImageId } from '../src/assets/skyManifest';
 import type { SunPosition } from '../src/world/weather/solar';
@@ -191,8 +195,8 @@ describe('the fades', () => {
           expect(Math.abs(look.hemisphereIntensity - last.hemisphereIntensity), `sky-light at ${e}°`).toBeLessThan(0.02);
           expect(Math.abs(look.horizon.r - last.horizon.r), `horizon at ${e}°`).toBeLessThan(0.02);
           expect(Math.abs(look.horizon.b - last.horizon.b), `horizon at ${e}°`).toBeLessThan(0.02);
-          // Dimming is the weather's alone: the sun cannot move it.
-          expect(look.dimming).toBe(last.dimming);
+          // The dome's exposure follows the sun through the night: continuously, like everything else.
+          expect(Math.abs(look.dimming - last.dimming), `dimming at ${e}°`).toBeLessThan(0.02);
           last = look;
         }
       }
@@ -235,6 +239,77 @@ describe('night', () => {
     const grey = skyLook(OVERCAST, sun(-30));
     expect(Math.max(grey.horizon.r, grey.horizon.g, grey.horizon.b)).toBeLessThan(0.15);
     expect(grey.sunIntensity + grey.hemisphereIntensity).toBeGreaterThan(0.05);
+  });
+});
+
+describe('the night dome', () => {
+  it('is darker in the middle of the night than at dawn, and full by nautical dawn', () => {
+    expect(NIGHT_DOME_FLOOR).toBe(0.45);
+    expect(NIGHT_DOME_FULL_DEG).toBe(-14);
+    const deep = skyLook(CLEAR, sun(-27)).dimming;
+    const early = skyLook(CLEAR, sun(-18)).dimming;
+    const dawn = skyLook(CLEAR, sun(-12)).dimming;
+    const sunset = skyLook(CLEAR, sun(-2)).dimming;
+    expect(deep).toBeLessThan(early);
+    expect(early).toBeLessThan(dawn);
+    expect(dawn).toBe(sunset);
+    expect(dawn).toBe(1);
+    // The floor holds from the bottom of the night up to where the night → dusk fade begins.
+    expect(deep).toBeCloseTo(NIGHT_DOME_FLOOR, 12);
+    expect(skyLook(CLEAR, sun(-40)).dimming).toBeCloseTo(NIGHT_DOME_FLOOR, 12);
+    expect(skyLook(CLEAR, sun(NIGHT_BELOW_DEG)).dimming).toBeCloseTo(NIGHT_DOME_FLOOR, 12);
+    expect(skyLook(CLEAR, sun(NIGHT_DOME_FULL_DEG)).dimming).toBe(1);
+    expect(domeExposureFor(-100)).toBe(NIGHT_DOME_FLOOR);
+    expect(domeExposureFor(90)).toBe(1);
+  });
+
+  it('rides the sun’s REAL elevation, not the key light’s floored one', () => {
+    // Every elevation under the floor has the same key light; the dome must still tell them apart.
+    expect(skyLook(CLEAR, sun(-27)).sunElevation).toBe(skyLook(CLEAR, sun(-18)).sunElevation);
+    expect(skyLook(CLEAR, sun(-27)).dimming).not.toBe(skyLook(CLEAR, sun(-18)).dimming);
+  });
+
+  it('never brightens anything: the lights are untouched, and the dimming is at or under the weather’s alone', () => {
+    // The NIGHT palette, to the number, on both sides of the change.
+    const deep = skyLook(CLEAR, sun(-27));
+    const deeper = skyLook(CLEAR, sun(-40));
+    expect(deep.sunIntensity).toBe(deeper.sunIntensity);
+    expect(deep.hemisphereIntensity).toBe(deeper.hemisphereIntensity);
+    expect(deep.horizon).toEqual(deeper.horizon);
+    expect(deep.sunColour).toEqual(deeper.sunColour);
+    expect(deep.hemisphereGround).toEqual(deeper.hemisphereGround);
+    // And at every elevation and every cloud, dimming ≤ 1 − DIMMING_UNDER_COVER · gloom.
+    for (const cloud of [0, 0.35, 0.8, 1]) {
+      for (const rainMmHr of [0, 6]) {
+        const now = weather({ cloud, rainMmHr, visibilityM: visibilityFor(rainMmHr, cloud) });
+        const weatherOnly = 1 - DIMMING_UNDER_COVER * gloomOf(now);
+        for (let e = -40; e <= 90; e += 0.5) {
+          const look = skyLook(now, sun(e));
+          expect(look.dimming, `at ${e}° cloud ${cloud} rain ${rainMmHr}`).toBeLessThanOrEqual(weatherOnly + 1e-12);
+          expect(look.dimming, `at ${e}°`).toBeGreaterThan(0);
+          expect(look.gloom).toBeCloseTo(gloomOf(now), 12);
+        }
+      }
+    }
+  });
+
+  it('moves no faster than its own ramp: a quarter of a degree is under 0.014, and it is monotone up to dawn', () => {
+    const STEP = 0.25;
+    const perDeg = (1 - NIGHT_DOME_FLOOR) / (NIGHT_DOME_FULL_DEG - NIGHT_BELOW_DEG);
+    let last = skyLook(CLEAR, sun(-40)).dimming;
+    for (let e = -40 + STEP; e <= 0; e += STEP) {
+      const now = skyLook(CLEAR, sun(e)).dimming;
+      expect(now - last, `at ${e}°`).toBeGreaterThanOrEqual(-1e-12);
+      expect(now - last, `at ${e}°`).toBeLessThanOrEqual(perDeg * STEP + 1e-9);
+      last = now;
+    }
+  });
+
+  it('leaves the day exactly as it was: a clear noon at 1, overcast at the weather’s number', () => {
+    expect(skyLook(CLEAR, NOON).dimming).toBe(1);
+    expect(skyLook(OVERCAST, NOON).dimming).toBeCloseTo(1 - DIMMING_UNDER_COVER * gloomOf(OVERCAST), 12);
+    expect(skyLook(CLEAR, sun(20)).dimming).toBe(1);
+    expect(skyLook(CLEAR, sun(DUSK_AT_DEG)).dimming).toBe(1);
   });
 });
 
