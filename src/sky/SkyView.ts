@@ -59,6 +59,51 @@
  * and its intensity. All colours arrive as sRGB, the convention every
  * colour in the scene is written in, and are converted on the way in.
  *
+ * ─── the shadow ──────────────────────────────────────────────────────
+ *
+ * The sun light may cast ONE shadow map over a square of ground that
+ * follows the camera — the first shadow the game has, and by Joshua's
+ * brief (2026-09-07) the smallest that is useful: no cascades, a map
+ * and a reach per detail rung (`sky/shadows.ts` holds the table and
+ * the fades), and nothing at all on the rungs under `medium`. The
+ * owner hands the rung's spec in with the lights (`SkyLights.shadow`,
+ * optional: absent, the sun casts nothing and this writes nothing
+ * about shadows) and calls `setShadow` when the rung changes.
+ *
+ * THE MAP IS THREE'S TO ALLOCATE AND OURS TO LET GO OF. three builds
+ * the render target the first time it renders the light, at whatever
+ * `mapSize` says then, and never looks at `mapSize` again — so a rung
+ * change must dispose the old map and null it, or a phone that drops
+ * to `medium` keeps rendering into a 1024² map for ever. `setShadow`
+ * does exactly that, and only when the size actually changed.
+ *
+ * THE SQUARE MOVES IN WHOLE TEXELS. The shadow camera three builds
+ * sits at the light and looks at the target; if both simply followed
+ * the eye, the map's texel grid would slide under the world by a
+ * fraction of a texel every frame and every shadow edge would crawl as
+ * she walked. So the eye is SNAPPED, before the light and the target
+ * are placed, to the lattice of texels in the map's own plane — the
+ * basis `Matrix4.lookAt` gives the shadow camera, which is the same
+ * call `Object3D.lookAt` makes for it, zenith nudge and all — and the
+ * grid stays put while the camera moves inside a texel. Snapping in
+ * the light's plane rather than in world x/z is what makes this hold
+ * at a low sun: a world step is a whole texel in the map only when the
+ * sun is overhead. The snap moves the light and the target by the same
+ * offset, perpendicular to the sun, so the light's DIRECTION is exactly
+ * what it was without a shadow; only the anchor differs from the eye,
+ * by under a texel.
+ *
+ * The bias is all NORMAL bias (`shadows.shadowNormalBias`: 1.5 texels
+ * in world units, which is over the float32 spacing at the coast) and
+ * no depth bias, so a shadow does not detach from the foot that casts
+ * it. Per frame: the light casts only while `shadows.shadowCasts` says
+ * a shadow would show — a sun, not the night's 0.06; a height above
+ * the floor; a sky not closed over — and `shadow.intensity` carries the
+ * height and cloud fades, a uniform three mixes per fragment, so no
+ * shader is rebuilt as the sun climbs. The `shadow` readout is for the
+ * HUD and the tests: the map, the reach, whether it is casting, and
+ * how strongly.
+ *
  * ─── the fog ─────────────────────────────────────────────────────────
  *
  * The scene's fog is LINEAR (`THREE.Fog`), and it stays linear; this
@@ -81,6 +126,7 @@ import * as THREE from 'three';
 import { bakedSky, type SkyImageId } from '../assets/skyManifest';
 import { prepareSkyTexture } from '../assets/skySource';
 import type { TextureTier } from '../assets/textureQuality';
+import { shadowCasts, shadowIntensityFor, shadowNormalBias, type ShadowSpec } from './shadows';
 import { sightFor, type Rgb, type SkyLook } from './skyLook';
 
 export interface SkyViewOptions {
@@ -97,6 +143,25 @@ export interface SkyLights {
   readonly fog: THREE.Fog | THREE.FogExp2 | null;
   /** `scene.background`, as the colour it is. */
   readonly background: THREE.Color;
+  /**
+   * The sun's shadow for the detail rung (`shadows.shadowFor`), when the
+   * owner wants one. Absent or a zero map, the sun casts nothing and the
+   * view writes nothing about shadows. Optional so a caller that has no
+   * shadow to hand in need not say so.
+   */
+  readonly shadow?: ShadowSpec;
+}
+
+/** What the shadow is doing right now. For a HUD, and for a test. */
+export interface ShadowReadout {
+  /** Texels a side of the map in use; 0 is no shadow. */
+  readonly mapSize: number;
+  /** Half the square's width, world units. */
+  readonly reach: number;
+  /** Whether the light is casting this frame. */
+  readonly casting: boolean;
+  /** `shadow.intensity`: the height and cloud fades, 0..1. */
+  readonly intensity: number;
 }
 
 /** Drawn before everything: the lowest order anything in the scene uses. */
@@ -105,6 +170,16 @@ export const DOME_RENDER_ORDER = -1000;
 export const DOME_OF_FAR = 0.98;
 /** How far along the sun vector the directional light sits from the camera. Any distance; this one. */
 export const SUN_DISTANCE = 1000;
+/** The shadow camera's near plane, world units: just off the light, which nothing is ever that close to. */
+export const SHADOW_NEAR = 1;
+/**
+ * The shadow camera's far plane for a reach: from the light, past the
+ * eye by the same distance again and the square's whole width, so the
+ * ground under a camera well above it is still inside the depth range.
+ */
+export function shadowFarFor(reach: number): number {
+  return 2 * SUN_DISTANCE + 2 * reach;
+}
 /** The scene's fog near over its far — the 0.25 and 0.95 of the far plane `PerformanceWorldScene` chose. */
 export const FOG_NEAR_OF_FAR = 0.25 / 0.95;
 /** The fog's far end never passes this fraction of the camera's far plane. */
@@ -238,6 +313,15 @@ export class SkyView {
   private readonly dir = new THREE.Vector3();
   private readonly horizon = new THREE.Color();
 
+  /** The shadow as applied: written by `applyShadow` and `update`, read through `shadow`. */
+  private readonly shadowState = { mapSize: 0, reach: 0, casting: false, intensity: 0 };
+  /** The shadow camera's basis and the snapped eye, kept so a frame allocates nothing. */
+  private readonly basis = new THREE.Matrix4();
+  private readonly right = new THREE.Vector3();
+  private readonly up = new THREE.Vector3();
+  private readonly back = new THREE.Vector3();
+  private readonly anchor = new THREE.Vector3();
+
   constructor(options: SkyViewOptions) {
     this.tier = options.tier;
     this.load = options.load;
@@ -281,6 +365,99 @@ export class SkyView {
   /** Hand in the scene's lights, fog and background. The view writes into these and nothing else outside itself. */
   bind(lights: SkyLights): void {
     this.lights = lights;
+    this.applyShadow(lights.shadow ?? null);
+  }
+
+  /**
+   * The rung changed: a new map and reach, or none. Lets go of the old
+   * map when the size changed, because three never will (see the
+   * header). Nothing until `bind`: the spec travels with the lights.
+   */
+  setShadow(spec: ShadowSpec | null): void {
+    if (this.disposed) return;
+    this.applyShadow(spec);
+  }
+
+  /** What the shadow is doing: the map and reach in use, and this frame's casting and strength. */
+  get shadow(): ShadowReadout {
+    return this.shadowState;
+  }
+
+  /** Configure the bound sun's shadow for a spec, or turn it off. */
+  private applyShadow(spec: ShadowSpec | null): void {
+    const lights = this.lights;
+    if (lights === null) return;
+    const { sun } = lights;
+    const shadow = sun.shadow;
+    const state = this.shadowState;
+    const wanted = spec !== null && spec.mapSize > 0 && spec.reach > 0 ? spec : null;
+    const mapSize = wanted === null ? 0 : Math.floor(wanted.mapSize);
+
+    // THE OLD MAP. three allocates on first render and never re-reads
+    // `mapSize`, so a change of size — or no shadow at all — must
+    // release what was allocated, depth texture first as three itself
+    // does, and null it so the next render builds the right one.
+    const map = shadow.map;
+    if (map !== null && (mapSize === 0 || shadow.mapSize.x !== mapSize || shadow.mapSize.y !== mapSize)) {
+      const depth = map.depthTexture;
+      if (depth !== null) {
+        depth.dispose();
+        map.depthTexture = null;
+      }
+      map.dispose();
+      shadow.map = null;
+    }
+
+    if (wanted === null) {
+      sun.castShadow = false;
+      state.mapSize = 0;
+      state.reach = 0;
+      state.casting = false;
+      state.intensity = 0;
+      return;
+    }
+
+    const reach = wanted.reach;
+    shadow.mapSize.set(mapSize, mapSize);
+    // All normal bias, no depth bias: a foot's shadow must start at the foot.
+    shadow.bias = 0;
+    shadow.normalBias = shadowNormalBias({ mapSize, reach });
+    // The square, seen down the sun: ±reach across, deep enough to reach
+    // the ground under a camera high above it. Only when the reach
+    // changed — the projection is a matrix, and the matrix is the cost.
+    if (state.reach !== reach || state.mapSize === 0) {
+      const camera = shadow.camera;
+      camera.left = -reach;
+      camera.right = reach;
+      camera.top = reach;
+      camera.bottom = -reach;
+      camera.near = SHADOW_NEAR;
+      camera.far = shadowFarFor(reach);
+      camera.updateProjectionMatrix();
+    }
+    sun.castShadow = true;
+    state.mapSize = mapSize;
+    state.reach = reach;
+    state.casting = true;
+    state.intensity = shadow.intensity;
+  }
+
+  /**
+   * The eye, moved to the nearest point of the texel lattice in the
+   * shadow map's own plane, so the map's grid holds still under the
+   * world while the camera moves inside a texel. The plane's basis is
+   * the one three will give the shadow camera: `Matrix4.lookAt` from
+   * the light toward the target with the camera's up, which is what
+   * `Object3D.lookAt` calls for a camera.
+   */
+  private snapToTexel(eye: THREE.Vector3, dir: THREE.Vector3, texel: number, cameraUp: THREE.Vector3, out: THREE.Vector3): THREE.Vector3 {
+    this.basis.lookAt(dir, ORIGIN, cameraUp).extractBasis(this.right, this.up, this.back);
+    const x = eye.dot(this.right);
+    const y = eye.dot(this.up);
+    return out
+      .copy(eye)
+      .addScaledVector(this.right, Math.round(x / texel) * texel - x)
+      .addScaledVector(this.up, Math.round(y / texel) * texel - y);
   }
 
   /** The skies whose textures are resident right now. For a HUD, and for a test. */
@@ -321,11 +498,27 @@ export class SkyView {
     if (lights === null) return;
     const { sun, hemisphere, fog, background } = lights;
     sunVector(look.sunAzimuth, look.sunElevation, this.dir);
-    sun.position.copy(this.eye).addScaledVector(this.dir, SUN_DISTANCE);
-    sun.target.position.copy(this.eye);
+    // With a shadow, the light and its target stand on the texel lattice
+    // rather than on the eye itself; without one, on the eye exactly.
+    const state = this.shadowState;
+    const anchor = state.mapSize > 0
+      ? this.snapToTexel(this.eye, this.dir, (2 * state.reach) / state.mapSize, sun.shadow.camera.up, this.anchor)
+      : this.anchor.copy(this.eye);
+    sun.position.copy(anchor).addScaledVector(this.dir, SUN_DISTANCE);
+    sun.target.position.copy(anchor);
     // The target is not in the scene graph, so nothing else updates its matrix.
     sun.target.updateMatrixWorld();
     sun.intensity = look.sunIntensity;
+    // THE SHADOW, while there is a map: cast only when it would show,
+    // at the strength the sun's height and the cloud leave it.
+    if (state.mapSize > 0) {
+      const intensity = shadowIntensityFor(look);
+      const casting = shadowCasts(state, look);
+      sun.castShadow = casting;
+      sun.shadow.intensity = intensity;
+      state.casting = casting;
+      state.intensity = intensity;
+    }
     srgb(sun.color, look.sunColour);
     srgb(hemisphere.color, look.hemisphereSky);
     srgb(hemisphere.groundColor, look.hemisphereGround);
@@ -402,6 +595,9 @@ export class SkyView {
     this.lights = null;
   }
 }
+
+/** The origin, for `Matrix4.lookAt` — a direction is a point looked at from here. Never written. */
+const ORIGIN = new THREE.Vector3();
 
 /** Write an sRGB triple into a colour, converting to three's working space on the way. */
 function srgb(into: THREE.Color, from: Rgb): THREE.Color {
