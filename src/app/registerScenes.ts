@@ -393,6 +393,12 @@ export function registerScenes(options: RegisterScenesOptions = {}): void {
         // AND WHAT GROWS ON IT, wired the same way for the same reason.
         landcover,
         settings: () => openSettings(ctx.storage).read(),
+        // The one setting the world writes: the HUD's fold, from its own
+        // corner button, so it survives a reload (Joshua, 2026-09-07).
+        onHudCollapse: (collapsed) => {
+          const store = openSettings(ctx.storage);
+          store.write({ ...store.read(), hudCollapsed: collapsed });
+        },
         tierOverride: TIER_OVERRIDE,
         detailOverride: DETAIL_OVERRIDE,
         resume: () => restorableStateOf(ctx.app.session),

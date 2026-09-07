@@ -63,6 +63,8 @@ interface RigOptions {
   readonly survey?: PerformanceWorldHooks['survey'];
   /** And the landcover. Omitted means a bare island. */
   readonly landcover?: PerformanceWorldHooks['landcover'];
+  readonly settings?: PerformanceWorldHooks['settings'];
+  readonly onHudCollapse?: PerformanceWorldHooks['onHudCollapse'];
 }
 
 function rig(initial: AppState, options: RigOptions = {}) {
@@ -107,6 +109,8 @@ function rig(initial: AppState, options: RigOptions = {}) {
     practiceBot: options.practiceBot,
     survey: options.survey,
     landcover: options.landcover,
+    settings: options.settings,
+    onHudCollapse: options.onHudCollapse,
   };
   const scene = createPerformanceWorldScene(hooks)(ctx);
   const field = (name: string): string =>
@@ -178,12 +182,30 @@ describe('PerformanceWorldScene', () => {
     input.detach();
   });
 
+  it('folds the HUD by its corner button and hands the fold to the owner to keep', async () => {
+    // Joshua, 2026-09-07: "make the stat sheet collapsible as it takes up
+    // most of the screen". The button is the HUD's; the fold is persisted
+    // by whoever owns the settings document, through the hook, so the
+    // scene never imports ui/ and the fold still survives a reload.
+    const folds: boolean[] = [];
+    const { scene, uiLayer } = rig('loading', { onHudCollapse: (c) => folds.push(c) });
+    await scene.enter();
+    const summary = must(uiLayer.querySelector<HTMLElement>('[data-field="summary"]'), 'summary row');
+    expect(summary.hidden).toBe(true);
+    must(uiLayer.querySelector<HTMLButtonElement>('[data-action="hud-collapse"]'), 'fold button').click();
+    expect(summary.hidden).toBe(false);
+    expect(folds).toEqual([true]);
+    scene.dispose();
+  });
+
   it('resizes its camera and disposes everything it added', async () => {
     const { scene, uiLayer } = rig('loading');
     await scene.enter();
     scene.resize(932, 430);
     expect((scene.camera as THREE.PerspectiveCamera).aspect).toBeCloseTo(932 / 430, 9);
-    expect(uiLayer.children.length).toBe(2);
+    // The HUD, the PAUSE button and the stick.
+    expect(uiLayer.children.length).toBe(3);
+    expect(uiLayer.querySelector('[data-control="stick"]')).not.toBeNull();
     scene.dispose();
     expect(scene.three.children.length).toBe(0);
     expect(uiLayer.children.length).toBe(0);

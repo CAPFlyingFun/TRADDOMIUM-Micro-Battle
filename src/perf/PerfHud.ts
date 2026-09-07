@@ -24,6 +24,20 @@
  * there are any, because a movement the authority would not allow is
  * otherwise invisible. In a solo session the line reads `Solo`.
  *
+ * COLLAPSIBLE since 2026-09-07. Joshua, from the phone: "make the stat
+ * sheet collapsible as it takes up most of the screen and hard to see
+ * through it." Five columns at 932 x 430 are the top-left quarter of the
+ * view, and the view is what he is trying to judge the frame rate
+ * against. Folded, the sheet is ONE short row — `59.9 fps · low 52.6`, the
+ * mean and the 95th-percentile low, the two numbers he reads first — with
+ * a `+` in the corner; every column is hidden and NOT written to, because
+ * the DOM writes were half of what folding it is for. The `–`/`+` flips
+ * it, and so does a tap on the folded row. The choice is the owner's to
+ * keep: `onCollapse` fires on the player's tap and never on the setter,
+ * so setting it from a saved document cannot write the document back.
+ * Unfolded, the sheet is exactly what it was — same lines, same
+ * `data-field` names — because the probes read it by those.
+ *
  * Talks to its owner through a typed hook object and reads plain summary
  * structs; it does not import FrameStats, the camera or anything of `net/`
  * (§2.7) — the link's state reaches it as six plain words it can print.
@@ -184,12 +198,32 @@ export interface PerfHudHooks {
   fresh?(): FreshReadout | null;
   /** The world's objects — grass, twigs, stones, rocks, trees. Absent where a world has none. */
   objects?(): ObjectsReadout | null;
+  /**
+   * The player folded or unfolded the sheet. Fired by the corner button
+   * and the folded row ONLY — never by the `collapsed` setter — so the
+   * owner can persist the choice without persisting its own restore.
+   */
+  onCollapse?(collapsed: boolean): void;
+}
+
+export interface PerfHudOptions {
+  /** Start folded: the saved choice, so the sheet does not open across the view on the way back in. */
+  readonly collapsed?: boolean;
 }
 
 type Field = 'meanFps' | 'lowFps' | 'simDt' | 'cameraPosition' | 'cameraSpeed' | 'cameraFacing' | 'cameraAbove';
 
 const GOLD = '#c9a94a';
 const PARCHMENT = '#e8e2c8';
+
+/**
+ * The collapse toggle's side, in pixels. A THUMB target, not a mouse one:
+ * the sheet is folded on a phone, and 28 px is the least a fingertip
+ * reliably lands on.
+ */
+const COLLAPSE_BUTTON_PX = 28;
+/** The toggle's inset from the panel's corner. */
+const COLLAPSE_BUTTON_INSET = 6;
 
 /**
  * How wide the SESSION column may get before its line wraps, in pixels.
@@ -323,19 +357,33 @@ export class PerfHud {
   private readonly boxes = new Map<WorldLayerId, HTMLInputElement>();
   /** Each layer row's wrapper and its text node, so the label can follow the model. */
   private readonly rows = new Map<string, { wrap: HTMLElement; text: Text }>();
+  /** Every column, in order, so folding hides them together and unfolding shows them together. */
+  private readonly columns: HTMLElement[] = [];
+  /** The folded sheet's one row. Hidden while the columns show. */
+  private readonly summary: HTMLElement;
+  /** The `–`/`+` in the corner. */
+  private readonly collapseButton: HTMLButtonElement;
+  private isCollapsed = false;
   /** Infinity so the very first update() paints without waiting a refresh period. */
   private sinceRefresh = Infinity;
 
   constructor(
     uiLayer: HTMLElement,
     private readonly hooks: PerfHudHooks,
+    options: PerfHudOptions = {},
   ) {
     const doc = uiLayer.ownerDocument;
     this.root = doc.createElement('div');
     this.root.dataset.role = 'perf-hud';
+    // The right padding is the toggle's room: it sits in the corner OVER
+    // the padding, out of the flex row, so it neither pushes a column nor
+    // lands on the end of one. Cheaper than a sixth flex item by a gap —
+    // `probe:bot` measures this box against PAUSE, and every pixel of
+    // width is a pixel closer to it.
+    const padRight = COLLAPSE_BUTTON_INSET + COLLAPSE_BUTTON_PX + 8;
     this.root.style.cssText =
       'position:absolute;top:8px;left:10px;display:flex;align-items:flex-start;gap:16px;' +
-      `padding:8px 10px;background:rgba(6,9,12,0.72);color:${PARCHMENT};` +
+      `padding:8px ${padRight}px 8px 10px;background:rgba(6,9,12,0.72);color:${PARCHMENT};` +
       `font:12px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace;border:1px solid ${GOLD};border-radius:6px;`;
 
     const column = (heading: string): HTMLElement => {
@@ -345,6 +393,7 @@ export class PerfHud {
       head.style.cssText = `color:${GOLD};letter-spacing:0.06em;margin-bottom:2px;white-space:nowrap;`;
       col.appendChild(head);
       this.root.appendChild(col);
+      this.columns.push(col);
       return col;
     };
     const line = (parent: HTMLElement, field: string): HTMLElement => {
@@ -406,6 +455,35 @@ export class PerfHud {
       this.sessionLine.style.whiteSpace = 'normal';
     }
     this.buildLayerRows(column('LAYERS'));
+
+    // THE FOLDED ROW. As tall as the toggle beside it, so the folded sheet
+    // is one 28 px row and a fingertip on the numbers unfolds it as surely
+    // as one on the `+`. Not a column: it is what shows INSTEAD of them.
+    this.summary = doc.createElement('div');
+    this.summary.dataset.field = 'summary';
+    this.summary.style.cssText = `white-space:nowrap;line-height:${COLLAPSE_BUTTON_PX}px;cursor:pointer;user-select:none;`;
+    this.summary.addEventListener('click', () => {
+      if (this.isCollapsed) this.toggle();
+    });
+    this.root.appendChild(this.summary);
+
+    // THE TOGGLE, in the panel's own idiom: gold on the same smoked glass,
+    // in the top-right corner where the thumb that is not on the stick can
+    // reach it without covering a number.
+    this.collapseButton = doc.createElement('button');
+    this.collapseButton.type = 'button';
+    this.collapseButton.dataset.action = 'hud-collapse';
+    this.collapseButton.style.cssText =
+      `position:absolute;top:${COLLAPSE_BUTTON_INSET}px;right:${COLLAPSE_BUTTON_INSET}px;` +
+      `width:${COLLAPSE_BUTTON_PX}px;height:${COLLAPSE_BUTTON_PX}px;` +
+      `min-width:${COLLAPSE_BUTTON_PX}px;min-height:${COLLAPSE_BUTTON_PX}px;padding:0;` +
+      `color:${GOLD};background:rgba(6,9,12,0.72);border:1px solid ${GOLD};border-radius:4px;` +
+      'font:18px/1 ui-monospace,SFMono-Regular,Menlo,monospace;cursor:pointer;touch-action:manipulation;';
+    this.collapseButton.addEventListener('click', () => this.toggle());
+    this.root.appendChild(this.collapseButton);
+
+    this.isCollapsed = options.collapsed ?? false;
+    this.applyCollapsed();
     uiLayer.appendChild(this.root);
   }
 
@@ -416,7 +494,9 @@ export class PerfHud {
     this.sinceRefresh = 0;
     // A hidden HUD is not written to either: the point of hiding it is to take its cost out of the frame.
     if (this.root.hidden) return;
-    this.render(readout);
+    // Folded, the sheet is one line and one DOM write; the columns are not touched.
+    if (this.isCollapsed) this.renderSummary(readout);
+    else this.render(readout);
   }
 
   /** The player's "Show frame rate" setting. Hidden, the HUD costs no DOM writes. */
@@ -431,10 +511,52 @@ export class PerfHud {
     if (!value) this.sinceRefresh = Infinity;
   }
 
+  /**
+   * The sheet folded to its one row. The owner sets it from the saved
+   * choice; the player flips it from the corner, which is the one path
+   * that reports back through `onCollapse`. `hidden` still overrides it:
+   * a hidden sheet is written to in neither state.
+   */
+  get collapsed(): boolean {
+    return this.isCollapsed;
+  }
+
+  set collapsed(value: boolean) {
+    if (this.isCollapsed === value) return;
+    this.isCollapsed = value;
+    this.applyCollapsed();
+    // Either way something just became visible that has not been written
+    // since it was last on screen: paint it on the next update() rather
+    // than up to a refresh period later, as `hidden` does when it lifts.
+    this.sinceRefresh = Infinity;
+  }
+
   dispose(): void {
     this.root.remove();
     this.boxes.clear();
     this.rows.clear();
+  }
+
+  /** A tap on the corner or on the folded row: flip, then tell the owner. The ONLY caller of the hook. */
+  private toggle(): void {
+    this.collapsed = !this.isCollapsed;
+    this.hooks.onCollapse?.(this.isCollapsed);
+  }
+
+  /** The DOM half of `collapsed`: which of the two faces shows, and what the corner offers. */
+  private applyCollapsed(): void {
+    for (const col of this.columns) col.hidden = this.isCollapsed;
+    this.summary.hidden = !this.isCollapsed;
+    this.collapseButton.textContent = this.isCollapsed ? '+' : '–';
+    this.collapseButton.setAttribute('aria-label', this.isCollapsed ? 'Expand stats' : 'Collapse stats');
+  }
+
+  /** The folded row: the mean and the 95th-percentile low, or the honest absence of them. */
+  private renderSummary(readout: PerfReadout): void {
+    const f = readout.frame;
+    this.summary.textContent = f.frames === 0
+      ? 'no frames yet'
+      : `${f.meanFps.toFixed(1)} fps · low ${f.lowFps.toFixed(1)}`;
   }
 
   private buildLayerRows(parent: HTMLElement): void {

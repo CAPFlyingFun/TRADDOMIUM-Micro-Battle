@@ -42,6 +42,12 @@ export interface Settings extends Versioned {
   readonly detail: Quality;
   /** The frame-rate readout. Reader: perf/PerfHud. */
   readonly showFps: boolean;
+  /**
+   * The frame-rate readout folded to its one row. Written when the player
+   * taps the sheet's corner (`PerfHud.onCollapse`), read back when the
+   * world opens. Reader: perf/PerfHud, through the Performance World.
+   */
+  readonly hudCollapsed: boolean;
 }
 
 /** Bumped when a field changes meaning; an older document reads as defaults. */
@@ -68,6 +74,9 @@ export const SETTINGS_DEFAULTS: Settings = {
   // matters is the one in Joshua's hand, and judging a change without the
   // readout is guessing.
   showFps: true,
+  // Open: the sheet is a stat sheet first and a fold second; the fold is
+  // the player's to choose and keep.
+  hudCollapsed: false,
 };
 
 /**
@@ -106,6 +115,8 @@ export function sanitizeSettings(raw: unknown, defaults: Settings = SETTINGS_DEF
     textures: isQuality(r.textures) ? r.textures : (isQuality(r.quality) ? r.quality : defaults.textures),
     detail: isQuality(r.detail) ? r.detail : (isQuality(r.quality) ? r.quality : defaults.detail),
     showFps: typeof r.showFps === 'boolean' ? r.showFps : defaults.showFps,
+    // No SETTINGS_VERSION bump: a new field with a default reads an older document as it was, plus the default.
+    hudCollapsed: typeof r.hudCollapsed === 'boolean' ? r.hudCollapsed : defaults.hudCollapsed,
   };
 }
 

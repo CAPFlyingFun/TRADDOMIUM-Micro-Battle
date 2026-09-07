@@ -18,7 +18,7 @@ import {
 } from './settingsStore';
 
 export interface SettingsPanelHooks {
-  /** The settings document. The panel is its only writer. */
+  /** The settings document. The panel is its only writer but one: the perf world writes `hudCollapsed` from the HUD's own button. */
   readonly store: Store<Settings>;
   onBack(): void;
 }

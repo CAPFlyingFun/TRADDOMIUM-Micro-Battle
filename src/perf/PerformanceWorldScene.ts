@@ -95,6 +95,7 @@ import type { WorldPoint } from '../world/coords';
 import { BotHud, type BotReadout } from './BotHud';
 import { FrameStats } from './FrameStats';
 import { FreeFlyCamera, headingOfYaw, yawForHeading } from './FreeFlyCamera';
+import { MoveStick } from '../input/MoveStick';
 import { HUD_HZ, PerfHud, type FreshReadout, type ObjectsReadout, type SeaReadout, type SessionLink, type SessionReadout } from './PerfHud';
 import { BUILT_LAYERS, LayerToggles } from './layerToggles';
 import { PERF_WORLD_SCENE_ID } from './perfTool';
@@ -112,6 +113,13 @@ export interface PerfWorldSettings {
   readonly invertY: boolean;
   /** Whether the perf HUD is shown at all. */
   readonly showFps: boolean;
+  /**
+   * Whether the perf HUD is folded to its one-line summary. Joshua, from
+   * the phone (2026-09-07): "make the stat sheet collapsible as it takes
+   * up most of the screen". The HUD's own corner button flips it, and
+   * `onHudCollapse` carries the tap back to whoever owns the document.
+   */
+  readonly hudCollapsed: boolean;
   /**
    * The player's two three-level quality choices, since 2026-09-05.
    *
@@ -180,6 +188,13 @@ export interface PerformanceWorldHooks {
    * the document is not parsed every frame. Absent: the scene's defaults.
    */
   settings?(): PerfWorldSettings;
+  /**
+   * The player folded or unfolded the perf HUD by its corner button. The
+   * scene never writes settings itself (perf/ may not import ui/); the
+   * owner of the document persists this one, so the fold survives a
+   * reload. Absent: the fold lasts until the scene is left.
+   */
+  onHudCollapse?(collapsed: boolean): void;
   /**
    * Where to resume from: the state the session loaded, or null for a
    * fresh start at the scene's own START. Read once in `enter()`. A hook
@@ -604,6 +619,7 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
     /** The near plane the projection was last built with. */
     let builtNear = 0;
     let hud: PerfHud | null = null;
+    let stick: MoveStick | null = null;
     let pauseButton: HTMLButtonElement | null = null;
     /** The app state at the last look; a change is the cue to re-read settings and to notice a pause opening. */
     let seenState: AppState | null = null;
@@ -774,7 +790,8 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
      * inside the fresh-start path, so a RESUMED session — including one
      * saved from this very build — came back at 0.4 m/s with no gesture
      * on a phone to change it: `CameraPose` carries no speed, and
-     * FreeFlyCamera only reads the mouse wheel.
+     * FreeFlyCamera's only speed setter was the mouse wheel (the stick,
+     * since 2026-09-07, scales the pace but never raises the ceiling).
      */
     const pace = (): void => {
       // IN A ROOM, THE AUTHORITY PAYS FOR EVERY STEP. It earns an actor
@@ -1203,7 +1220,10 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
       if (!s) return;
       fly.setFov(s.fov);
       fly.setLook({ sensitivity: s.lookSensitivity, invertY: s.invertY });
-      if (hud) hud.hidden = !s.showFps;
+      if (hud) {
+        hud.hidden = !s.showFps;
+        hud.collapsed = s.hudCollapsed;
+      }
       // The sea is a compiled program and a loaded texture per tier, so
       // a changed quality setting is a rebuild. No-ops when it has not
       // changed, which is every state change but the one that did.
@@ -1355,6 +1375,7 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
           onLayerToggle: (id, enabled) => {
             toggles.setEnabled(id, enabled);
           },
+          onCollapse: (collapsed) => hooks.onHudCollapse?.(collapsed),
           session: sessionReadout,
           fresh: field === null ? undefined : freshCost,
           // THE LINES EXIST ONLY WHERE THERE IS LANDCOVER TO GROW FROM.
@@ -1367,6 +1388,14 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
           // Same rule as SESSION, and the same rule as the layer labels.
           ...(ocean === null ? {} : { sea: seaCost }),
         });
+        // Its fold comes with the first `applySettings`, on the first
+        // frame's state change, like `hidden` does — one read of the
+        // document, not two.
+        // THE STICK — v0's, fixed and visible, bottom-left (Joshua,
+        // 2026-09-07). It lives in the UI layer beside the HUD and reads
+        // into the camera every frame; the camera turns its push into a
+        // pace between 1 m/s and the camera's own speed.
+        stick = new MoveStick(ctx.uiLayer);
         pauseButton = actionButton(ACTION.pause, 'Pause', () => hooks.onPause());
         pauseButton.style.cssText =
           'position:absolute;right:12px;top:8px;padding:10px 18px;font:14px system-ui,sans-serif;' +
@@ -1495,7 +1524,7 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         // would freeze on pause — exactly when you want to fly around and
         // look — and would lag the hand during a stall, because the sim cap
         // would swallow most of the stall's time.
-        fly.update(ctx.input.snapshot(), frame.rawDt);
+        fly.update(ctx.input.snapshot(), frame.rawDt, stick === null ? null : stick.read());
         // After the camera, before anything is drawn: the ground is
         // placed against where the camera IS this frame, not where it was.
         updateTerrain();
@@ -1629,6 +1658,8 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
           sky = null;
         }
         hud?.dispose();
+        stick?.dispose();
+        stick = null;
         hud = null;
         pauseButton?.remove();
         pauseButton = null;

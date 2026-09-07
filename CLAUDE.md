@@ -122,6 +122,16 @@ carry, never press → object teleports.
 action must never look functional.** "Multiplayer" in the UI may never
 imply more than exists; the honest caption is pinned by a test.
 
+**Generic UI may be copied; what is ours stays ours** (Joshua,
+2026-09-07). A joystick, a health or water meter, a button cluster, a
+layout — conventions shared by countless games — may be taken from v0 or
+modelled on other games, Path of Titans included; he raised the ant game
+with that studio years ago and was told there was no objection. What is
+NOT copied is a name, a game-specific element unique to another title,
+or anything that would make this read as that game. Do not stop or
+narrow work over a joystick or a meter; do keep the game's own elements
+its own.
+
 ## Engineering invariants specific to v1
 
 - A module mutates only state it owns. Everything else is a typed

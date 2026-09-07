@@ -524,8 +524,11 @@ export class NetworkLab {
 /**
  * A drag that STARTS on the left half of the screen is a stick; one that
  * starts on the right half looks. Decided where the finger lands, so a
- * stick pulled across the middle stays a stick (FreeFlyCamera's rule).
- * v0's MoveStick numbers: full deflection at 64 px, a 12 % dead zone.
+ * stick pulled across the middle stays a stick — the rule FreeFlyCamera
+ * had until 2026-09-07, when the perf world got v0's visible stick
+ * (`input/MoveStick.ts`) and every drag there became a look. The lab
+ * keeps its own thumbs. v0's MoveStick numbers: full deflection at 64 px,
+ * a 12 % dead zone.
  */
 const STICK_RADIUS_PX = 64;
 const STICK_DEAD_ZONE = 0.12;

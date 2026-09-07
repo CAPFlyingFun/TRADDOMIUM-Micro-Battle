@@ -88,7 +88,7 @@ function rig(initial: AppState, settings: () => PerfWorldSettings) {
 
 describe('PerformanceWorldScene settings hook', () => {
   it('applies fov and HUD visibility at enter() and re-reads only when the app state changes', async () => {
-    let current: PerfWorldSettings = { fov: 90, lookSensitivity: 1, invertY: false, showFps: true, textures: 'medium', detail: 'medium' };
+    let current: PerfWorldSettings = { fov: 90, lookSensitivity: 1, invertY: false, showFps: true, hudCollapsed: false, textures: 'medium', detail: 'medium' };
     const r = rig('loading', () => current);
     await r.scene.enter();
     expect(r.app.state).toBe('playing');
@@ -96,13 +96,15 @@ describe('PerformanceWorldScene settings hook', () => {
     const camera = r.scene.camera as THREE.PerspectiveCamera;
     expect(camera.fov).toBe(90);
     expect(r.hud()?.hidden).toBe(false);
+    // Unfolded: the summary row is the hidden one.
+    expect(r.hud()?.querySelector<HTMLElement>('[data-field="summary"]')?.hidden).toBe(true);
 
     // Frames in a steady state do not parse the document again.
     for (let i = 0; i < 10; i += 1) r.scene.update({ rawDt: SIXTY, simDt: SIXTY, elapsed: 0 });
     expect(r.reads()).toBe(1);
 
     // The player opened the pause menu, changed settings, and came back.
-    current = { fov: 75, lookSensitivity: 2, invertY: true, showFps: false, textures: 'medium', detail: 'medium' };
+    current = { fov: 75, lookSensitivity: 2, invertY: true, showFps: false, hudCollapsed: true, textures: 'medium', detail: 'medium' };
     r.app.requestState('paused');
     r.scene.update({ rawDt: SIXTY, simDt: 0, elapsed: 0 });
     r.app.requestState('playing');
@@ -110,6 +112,8 @@ describe('PerformanceWorldScene settings hook', () => {
     expect(r.reads()).toBe(3);
     expect(camera.fov).toBe(75);
     expect(r.hud()?.hidden).toBe(true);
+    // And folded, from the document: the summary row is the one showing.
+    expect(r.hud()?.querySelector<HTMLElement>('[data-field="summary"]')?.hidden).toBe(false);
   });
 
   it('runs on its defaults when no settings hook is wired', async () => {

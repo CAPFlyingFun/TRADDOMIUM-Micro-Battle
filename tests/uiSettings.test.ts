@@ -35,6 +35,9 @@ describe('settings sanitize', () => {
     expect(sanitizeSettings({ invertY: 'true' }).invertY).toBe(SETTINGS_DEFAULTS.invertY);
     expect(sanitizeSettings({ showFps: false }).showFps).toBe(false);
     expect(sanitizeSettings({ showFps: 1 }).showFps).toBe(SETTINGS_DEFAULTS.showFps);
+    expect(sanitizeSettings({ hudCollapsed: true }).hudCollapsed).toBe(true);
+    expect(sanitizeSettings({ hudCollapsed: 'true' }).hudCollapsed).toBe(SETTINGS_DEFAULTS.hudCollapsed);
+    expect(SETTINGS_DEFAULTS.hudCollapsed).toBe(false);
     expect(sanitizeSettings({ textures: 'low', detail: 'low' }).textures).toBe('low');
     expect(sanitizeSettings({ quality: 'ultra' }).textures).toBe(SETTINGS_DEFAULTS.textures);
     expect(sanitizeSettings({ quality: 2 }).textures).toBe(SETTINGS_DEFAULTS.textures);
@@ -43,7 +46,7 @@ describe('settings sanitize', () => {
   it('drops unknown keys and always stamps the current version', () => {
     const s = sanitizeSettings({ version: 7, fov: 70, terrainRelief: 1.5, showFix: true });
     expect(s).toEqual({ ...SETTINGS_DEFAULTS, fov: 70, version: SETTINGS_VERSION });
-    expect(Object.keys(s).sort()).toEqual(['detail', 'fov', 'invertY', 'lookSensitivity', 'showFps', 'textures', 'version']);
+    expect(Object.keys(s).sort()).toEqual(['detail', 'fov', 'hudCollapsed', 'invertY', 'lookSensitivity', 'showFps', 'textures', 'version']);
   });
 });
 
@@ -52,7 +55,9 @@ describe('settings store round trip', () => {
     const kv = memoryKeyValueStore();
     const store = defineStore(SETTINGS_SPEC, kv);
     expect(store.read()).toEqual(SETTINGS_DEFAULTS);
-    const written = { version: SETTINGS_VERSION, fov: 95, lookSensitivity: 1.75, invertY: true, textures: 'high', detail: 'high', showFps: false } as const;
+    const written = {
+      version: SETTINGS_VERSION, fov: 95, lookSensitivity: 1.75, invertY: true, textures: 'high', detail: 'high', showFps: false, hudCollapsed: true,
+    } as const;
     store.write(written);
     expect(store.read()).toEqual(written);
     expect(kv.get(SETTINGS_KEY)).not.toBeNull();
@@ -68,6 +73,16 @@ describe('settings store round trip', () => {
       fov: SETTINGS_LIMITS.fov.max,
       lookSensitivity: SETTINGS_LIMITS.lookSensitivity.min,
     });
+  });
+
+  it('reads a document written before hudCollapsed existed at the SAME version, with the default filled in', () => {
+    // A new field with a default is backward compatible, which is why
+    // SETTINGS_VERSION did not move for it: the player's fov survives the
+    // update, and the sheet opens unfolded until they fold it.
+    const kv = memoryKeyValueStore();
+    const store = defineStore(SETTINGS_SPEC, kv);
+    kv.set(SETTINGS_KEY, JSON.stringify({ version: SETTINGS_VERSION, fov: 70, showFps: false }));
+    expect(store.read()).toEqual({ ...SETTINGS_DEFAULTS, fov: 70, showFps: false, hudCollapsed: false });
   });
 
   it('refuses another version and malformed text, never throwing', () => {

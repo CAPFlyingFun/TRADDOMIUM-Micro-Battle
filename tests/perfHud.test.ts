@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 /**
- * The perf HUD's DOM: two separate readouts, an honest LAYERS column, and a
- * refresh rate that is not the frame rate. No three: the HUD reads structs.
+ * The perf HUD's DOM: two separate readouts, an honest LAYERS column, a
+ * refresh rate that is not the frame rate, and a fold that turns the whole
+ * sheet into one row. No three: the HUD reads structs.
  */
 import { describe, expect, it } from 'vitest';
 import { HUD_HZ, PerfHud, type PerfReadout } from '../src/perf/PerfHud';
@@ -17,7 +18,7 @@ function must<T>(value: T | null | undefined, what: string): T {
   return value;
 }
 
-function rig(built: readonly WorldLayerId[] = []) {
+function rig(built: readonly WorldLayerId[] = [], options: { collapsed?: boolean } = {}) {
   const uiLayer = document.createElement('div');
   document.body.appendChild(uiLayer);
   const toggles = new LayerToggles(built);
@@ -28,7 +29,7 @@ function rig(built: readonly WorldLayerId[] = []) {
       toggled.push([id, enabled]);
       toggles.setEnabled(id, enabled);
     },
-  });
+  }, options);
   const field = (name: string): string =>
     must(uiLayer.querySelector<HTMLElement>(`[data-field="${name}"]`), `field ${name}`).textContent ?? '';
   const box = (id: string): HTMLInputElement =>
@@ -260,5 +261,171 @@ describe('the ABOVE line', () => {
     expect(above.parentElement).toBe(uiLayer.querySelector('[data-field="camera-facing"]')?.parentElement);
     expect(field('camera-above').length).toBeLessThanOrEqual(field('camera-position').length);
     hud.dispose();
+  });
+});
+
+/**
+ * THE FOLD — Joshua, from the phone, 2026-09-07: "make the stat sheet
+ * collapsible as it takes up most of the screen and hard to see through
+ * it." Folded, the sheet is one row with the two numbers he reads first;
+ * unfolded it is exactly the sheet the other tests read.
+ */
+describe('collapsing', () => {
+  /** A session hook too, so the fold has all five columns to hide. */
+  const foldRig = (options: { collapsed?: boolean } = {}) => {
+    const uiLayer = document.createElement('div');
+    document.body.appendChild(uiLayer);
+    const toggles = new LayerToggles(['terrain']);
+    const collapses: boolean[] = [];
+    let layersAsked = 0;
+    const hud = new PerfHud(uiLayer, {
+      layers: () => {
+        layersAsked += 1;
+        return toggles.list();
+      },
+      onLayerToggle: (id, enabled) => toggles.setEnabled(id, enabled),
+      session: () => ({ link: 'solo', others: 0, refusedClaims: 0 }),
+      onCollapse: (collapsed) => collapses.push(collapsed),
+    }, options);
+    const root = must(uiLayer.querySelector<HTMLElement>('[data-role="perf-hud"]'), 'the HUD');
+    const field = (name: string): string =>
+      must(uiLayer.querySelector<HTMLElement>(`[data-field="${name}"]`), `field ${name}`).textContent ?? '';
+    const summary = must(uiLayer.querySelector<HTMLElement>('[data-field="summary"]'), 'the summary row');
+    const button = must(uiLayer.querySelector<HTMLButtonElement>('[data-action="hud-collapse"]'), 'the toggle');
+    // Every direct child of the panel that is neither the toggle nor the folded row is a column.
+    const columns = (): HTMLElement[] =>
+      Array.from(root.children).filter(
+        (el): el is HTMLElement => el instanceof HTMLElement && el !== button && el !== summary,
+      );
+    return { uiLayer, root, hud, field, summary, button, columns, collapses, layersAsked: () => layersAsked };
+  };
+
+  it('folded, hides every column and shows the one row with the mean and the 95th low', () => {
+    const { hud, field, summary, button, columns } = foldRig();
+    // Five columns to hide: FRAME, SIM dt, CAMERA, SESSION, LAYERS.
+    expect(columns().length).toBe(5);
+    expect(columns().every((col) => !col.hidden)).toBe(true);
+    expect(summary.hidden).toBe(true);
+
+    hud.collapsed = true;
+    hud.update(readout(59.9, 52.6, 1 / 60), 1);
+    expect(columns().every((col) => col.hidden)).toBe(true);
+    expect(summary.hidden).toBe(false);
+    expect(field('summary')).toBe('59.9 fps · low 52.6');
+    expect(button.textContent).toBe('+');
+    expect(button.getAttribute('aria-label')).toBe('Expand stats');
+
+    // An empty window is said to be empty here too, not shown as 0.0 fps.
+    hud.update(readout(0, 0, 0, 0), 1);
+    expect(field('summary')).toBe('no frames yet');
+  });
+
+  it('the corner button flips the state and tells the owner; the setter tells nobody', () => {
+    const { hud, button, collapses, columns, summary } = foldRig();
+    expect(hud.collapsed).toBe(false);
+    button.click();
+    expect(hud.collapsed).toBe(true);
+    expect(collapses).toEqual([true]);
+    expect(columns().every((col) => col.hidden)).toBe(true);
+    button.click();
+    expect(hud.collapsed).toBe(false);
+    expect(collapses).toEqual([true, false]);
+    expect(columns().every((col) => !col.hidden)).toBe(true);
+    expect(summary.hidden).toBe(true);
+
+    // The owner restoring a saved choice is not a choice to save again.
+    hud.collapsed = true;
+    hud.collapsed = false;
+    hud.collapsed = true;
+    expect(collapses).toEqual([true, false]);
+  });
+
+  it('honours the initial option, and defaults to unfolded', () => {
+    const folded = foldRig({ collapsed: true });
+    expect(folded.hud.collapsed).toBe(true);
+    expect(folded.columns().every((col) => col.hidden)).toBe(true);
+    expect(folded.summary.hidden).toBe(false);
+    expect(folded.button.textContent).toBe('+');
+    expect(folded.collapses).toEqual([]);
+
+    const open = foldRig();
+    expect(open.hud.collapsed).toBe(false);
+    expect(open.columns().every((col) => !col.hidden)).toBe(true);
+    expect(open.summary.hidden).toBe(true);
+    expect(open.button.textContent).toBe('–');
+    expect(open.button.getAttribute('aria-label')).toBe('Collapse stats');
+  });
+
+  it('update() while folded writes the row and leaves the columns alone; unfolding repaints on the next update', () => {
+    const { hud, field, layersAsked } = foldRig();
+    hud.update(readout(60, 30, 1 / 60), 1);
+    expect(field('mean-fps')).toBe('mean     60.0 fps');
+    expect(field('low-fps')).toBe('95th low 30.0 fps');
+    expect(field('session')).toBe('Solo');
+    const askedWhileOpen = layersAsked();
+    expect(askedWhileOpen).toBeGreaterThan(0);
+
+    // Folding paints the row on the very next update, not a refresh period later.
+    hud.collapsed = true;
+    hud.update(readout(30, 20, 0), 0.016);
+    expect(field('summary')).toBe('30.0 fps · low 20.0');
+    // A refresh period of folded updates: the row follows, the columns do
+    // not — not their text and not the hooks that feed them.
+    for (let i = 0; i < 10; i += 1) hud.update(readout(25, 15, 0), 1 / HUD_HZ);
+    expect(field('summary')).toBe('25.0 fps · low 15.0');
+    expect(field('mean-fps')).toBe('mean     60.0 fps');
+    expect(field('low-fps')).toBe('95th low 30.0 fps');
+    expect(field('sim-dt')).toBe('16.7 ms');
+    expect(field('session')).toBe('Solo');
+    expect(layersAsked()).toBe(askedWhileOpen);
+
+    // Unfolded: the columns are repainted on the FIRST update, however
+    // soon it comes, because what they show is a refresh period stale.
+    hud.collapsed = false;
+    hud.update(readout(45, 40, 1 / 60), 0.016);
+    expect(field('mean-fps')).toBe('mean     45.0 fps');
+    expect(field('low-fps')).toBe('95th low 40.0 fps');
+    expect(layersAsked()).toBeGreaterThan(askedWhileOpen);
+  });
+
+  it('the toggle is a thumb target in the panel\'s top-right corner, in its idiom', () => {
+    const { root, button } = foldRig();
+    expect(button.type).toBe('button');
+    expect(button.parentElement).toBe(root);
+    // jsdom does no layout, so the size is asserted on the styles set.
+    for (const side of [button.style.width, button.style.height, button.style.minWidth, button.style.minHeight]) {
+      expect(Number.parseFloat(side)).toBeGreaterThanOrEqual(28);
+    }
+    expect(button.style.position).toBe('absolute');
+    expect(Number.parseFloat(button.style.top)).toBeGreaterThanOrEqual(0);
+    expect(Number.parseFloat(button.style.right)).toBeGreaterThanOrEqual(0);
+    expect(button.style.color).toBe('rgb(201, 169, 74)'); // GOLD
+    expect(button.style.borderColor).toBe('rgb(201, 169, 74)');
+    // And the panel keeps that much room on its right for it, so it never lands on a column.
+    expect(Number.parseFloat(root.style.paddingRight)).toBeGreaterThanOrEqual(28 + Number.parseFloat(button.style.right));
+  });
+
+  it('a tap on the folded row unfolds it, and tells the owner', () => {
+    const { hud, summary, collapses } = foldRig({ collapsed: true });
+    summary.click();
+    expect(hud.collapsed).toBe(false);
+    expect(collapses).toEqual([false]);
+    // Unfolded the row is hidden; a stray click on it must not fold the sheet again.
+    summary.click();
+    expect(hud.collapsed).toBe(false);
+    expect(collapses).toEqual([false]);
+  });
+
+  it('hidden still overrides: a hidden sheet is not written to, folded or not', () => {
+    const { hud, field, summary } = foldRig({ collapsed: true });
+    hud.update(readout(60, 30, 1 / 60), 1);
+    expect(field('summary')).toBe('60.0 fps · low 30.0');
+    hud.hidden = true;
+    for (let i = 0; i < 10; i += 1) hud.update(readout(20, 10, 0), 1 / HUD_HZ);
+    expect(field('summary')).toBe('60.0 fps · low 30.0');
+    expect(summary.hidden).toBe(false); // the fold's own state is untouched by hiding
+    hud.hidden = false;
+    hud.update(readout(20, 10, 0), 0.016);
+    expect(field('summary')).toBe('20.0 fps · low 10.0');
   });
 });

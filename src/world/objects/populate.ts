@@ -14,7 +14,7 @@
  * ─── how a family is placed ──────────────────────────────────────────
  *
  * A JITTERED LATTICE, NOT NOISE, NOT POISSON. Each family has a
- * sub-lattice over the cell — grass at 78 sites a side, trees at 4 — and
+ * sub-lattice over the cell — grass at 110 sites a side, trees at 4 — and
  * every site rolls its own hash against the density the habitat allows
  * there. A site that passes stands somewhere inside its own square,
  * never on the line. This is v0's landmark trick and TCS's forest trick,
@@ -139,7 +139,7 @@ export interface PopulateOptions {
 
 /** Sites a side per family: the most of each thing a cell can hold, as a lattice. GAME TUNING. */
 export const SITES_PER_SIDE: Readonly<Record<ObjectFamily, number>> = Object.freeze({
-  grass: 78, // 6,084 sites: 24 a square metre, a 20 cm pitch
+  grass: 110, // 12,100 sites: 47 a square metre, a 14.5 cm pitch (doubled 2026-09-07, see densityPerM2)
   twig: 22,  // 484: 1.9 a square metre
   stone: 18, // 324: 1.3 a square metre
   rock: 5,   // 25: one per ten square metres at most
@@ -205,8 +205,13 @@ function densityPerM2(family: ObjectFamily, f: Factors): number {
   const notLake = 1 - Math.min(1, f.lake * 2);
   switch (family) {
     case 'grass': {
-      const blades = 24 * f.grass + 5 * f.forest + 12 * f.shrub + 10 * f.wet;
-      return Math.min(24, blades) * (1 - 0.9 * f.bare) * (1 - 0.5 * f.exposure) * (1 - f.channel) * notLake * dry;
+      // DOUBLED on 2026-09-07 at Joshua's ask from the phone: "double the
+      // grass density to be around 11K. Says it is like 5200 now. If 11K
+      // works, can double again to be around 22K which is close to my
+      // 25K limit." The lattice doubled with it (SITES_PER_SIDE), so a
+      // full lawn still fills its sites rather than rolling past 1.
+      const blades = 48 * f.grass + 10 * f.forest + 24 * f.shrub + 20 * f.wet;
+      return Math.min(48, blades) * (1 - 0.9 * f.bare) * (1 - 0.5 * f.exposure) * (1 - f.channel) * notLake * dry;
     }
     case 'twig': {
       const litter = 1.6 * f.forest + 0.5 * f.shrub + 0.2 * f.grass + 0.6 * f.coast * (1 - f.forest) + 0.4 * f.wet;

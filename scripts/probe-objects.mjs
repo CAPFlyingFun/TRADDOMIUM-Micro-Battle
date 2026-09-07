@@ -245,7 +245,13 @@ async function main() {
     // ── THE RULE: the environment determines what belongs ─────────
     const { beach, grassland, forest, rocky } = read;
     if (beach && grassland && forest && rocky) {
-      if (!(grassland.grass > beach.grass * 3)) fail(`a beach (${beach.grass} blades) is nearly a lawn (${grassland.grass})`);
+      // TWICE, NOT THRICE, since the grass doubled (2026-09-07): the lawn
+      // is pinned at the 25,000 cap while the beach's backshore fringe
+      // doubled with everything else, so the DRAWN ratio fell from 5.3 to
+      // 2.7 with no change to what belongs where. The uncapped ratio is
+      // the populate tests' business; here the bar is that a beach is not
+      // a lawn, and half a capped lawn is still not one.
+      if (!(grassland.grass > beach.grass * 2)) fail(`a beach (${beach.grass} blades) is nearly a lawn (${grassland.grass})`);
       if (!(grassland.grass > rocky.grass * 2)) fail(`the canyon wall (${rocky.grass} blades) is nearly a lawn (${grassland.grass})`);
       if (!(forest.tree > grassland.tree)) fail(`the forest (${forest.tree} trees) has no more trees than the plain (${grassland.tree})`);
       // The bubble is 100 m across and a beach is a 16 m strip: the count
@@ -317,6 +323,28 @@ async function main() {
       const file = path.join(SHOTS, 'objects-off.png');
       await page.screenshot({ path: file });
       log(`saved ${path.relative(ROOT, file)}`);
+    }
+
+    // ── THE SHEET FOLDED, AND THE STICK ON SCREEN ──────────────────
+    // Joshua, 2026-09-07: the stat sheet folds to one line; v0's stick is
+    // back, fixed bottom-left. One shot of both at the design canvas, so
+    // the layout is looked at rather than reasoned about.
+    const folded = await page.evaluate(() => {
+      const button = document.querySelector('[data-action="hud-collapse"]');
+      if (!(button instanceof HTMLButtonElement)) return null;
+      button.click();
+      const summary = document.querySelector('[data-field="summary"]');
+      const stick = document.querySelector('[data-control="stick"]');
+      return { summaryShown: summary instanceof HTMLElement && !summary.hidden, stick: stick !== null };
+    });
+    if (folded === null) fail('the HUD has no fold button');
+    else {
+      if (!folded.summaryShown) fail('the fold button did not fold the HUD');
+      if (!folded.stick) fail('the stick is not on screen');
+      await runFrames(page, 3);
+      const file = path.join(SHOTS, 'objects-folded.png');
+      await page.screenshot({ path: file });
+      log(`saved ${path.relative(ROOT, file)} (HUD folded, stick on screen)`);
     }
   } catch (error) {
     fail(error instanceof Error ? error.message : String(error));

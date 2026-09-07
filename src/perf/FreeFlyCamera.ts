@@ -1,14 +1,30 @@
 /**
  * A free-fly camera for the benchmark world, driven from the raw input
- * snapshot. Imports three and the Input types only.
+ * snapshot and, on a phone, from the move stick's reading. Imports three
+ * and the input TYPES only.
  *
  * Keys: W/S or ↑/↓ forward and back along the view, A/D or ←/→ strafe,
  * E or Space up, Q or C down, Shift doubles the speed. Mouse: drag looks,
- * wheel changes the speed. Touch is twin-zone: a drag that STARTS on the
- * left half of the screen is a virtual stick that moves (up = forward,
- * sideways = strafe); one that starts on the right half looks. The zone is
- * decided where the finger lands, so a stick can be pulled across the
- * middle without turning into a look.
+ * wheel changes the speed.
+ *
+ * Touch: a drag LOOKS, whichever half of the screen it starts on. Moving
+ * by thumb is the fixed, visible stick at the bottom-left
+ * (`input/MoveStick.ts`), whose reading the owner passes to `update` each
+ * frame: the push's direction is taken camera-relative, exactly as W and
+ * D are, and how far it is pushed sets the speed between `STICK_MIN_SPEED`
+ * and this camera's own `speed` (the curve is on `stickSpeed`). The
+ * stick's ring lives in the UI layer, a sibling of the canvas the input
+ * listens on, and swallows its own pointer events besides, so no drag
+ * that reaches this camera through the snapshot is ever a move.
+ *
+ * That replaced the twin-zone scheme (an INVISIBLE stick anchored
+ * wherever a finger landed on the left half, a look on the right) on
+ * 2026-09-07. Joshua, from his phone: "allow the max if moving the
+ * invisible joystick at 30 m/s, but allow it to be able to adjust speed
+ * from 1-30 depending on how much you push the stick forward and it
+ * should draw on the screen while moving, but also would like it fixed
+ * and visible. You can copy the one from v0." Lift (Q/E/C/Space) stays
+ * keyboard-only.
  *
  * The brief listed Shift as both "down" and "boost"; boost won, because Q
  * and C already cover descent and holding a boost while crossing a world
@@ -21,6 +37,7 @@
 import * as THREE from 'three';
 import { wrapHeading } from '../actor/Transform';
 import type { InputSnapshot } from '../input/Input';
+import type { StickReading } from '../input/MoveStick';
 import type { CameraPose } from '../session/GameSession';
 import { local } from '../world/coords';
 import { toLocal, toWorld } from '../world/origin';
@@ -35,8 +52,12 @@ const BOOST = 2;
 const LOOK_RADIANS_PER_PIXEL = 0.0035;
 /** One wheel notch (about 100 px of deltaY) scales the speed by this factor. */
 const WHEEL_SPEED_STEP = 1.25;
-/** Touch offset for full deflection of the move stick. */
-const STICK_RADIUS_PX = 80;
+/**
+ * The slowest a live stick push flies, in world units per second: 1 m/s.
+ * GAME TUNING, from Joshua's "adjust speed from 1-30" — the slow end a
+ * thumb can hold for lining up a shot, not a measured anything.
+ */
+export const STICK_MIN_SPEED = 100;
 /** Straight up is excluded: at exactly ±90° pitch, yaw and roll become the same axis. */
 const MAX_PITCH = Math.PI / 2 - 0.01;
 
@@ -97,9 +118,22 @@ export interface CameraReadout {
   readonly speed: number;
 }
 
-interface TouchStart {
-  readonly x: number;
-  readonly y: number;
+/**
+ * How fast a stick push flies, in world units per second, from how far it
+ * is pushed (0..1) and the camera's own speed — the ceiling a full push
+ * reaches.
+ *
+ * GAME TUNING: `STICK_MIN_SPEED + (top − STICK_MIN_SPEED) · deflection²`,
+ * capped at `top`. The square gives the slow end room: at the perf
+ * world's 30 m/s a half push is about 8 m/s and a quarter push under 3,
+ * where a linear curve would spend the whole bottom half of the stick's
+ * travel above 15. The cap is for a camera slower than the floor (the
+ * empty world's 0.4 m/s, or a wheel spun down), where the floor would
+ * otherwise be a speed-up: there, every push is the camera's own speed.
+ */
+export function stickSpeed(deflection: number, top: number): number {
+  const d = Math.min(1, Math.max(0, deflection));
+  return Math.min(top, STICK_MIN_SPEED + (top - STICK_MIN_SPEED) * d * d);
 }
 
 /**
@@ -120,9 +154,6 @@ export class FreeFlyCamera {
   private pitch = 0;
   private speedValue = DEFAULT_SPEED;
   private look: LookTuning = { sensitivity: 1, invertY: false };
-  private viewportWidth = 1;
-  /** Where each live touch began: decides its zone and anchors the move stick. */
-  private readonly touchStarts = new Map<number, TouchStart>();
   private readonly forward = new THREE.Vector3();
   private readonly right = new THREE.Vector3();
   private readonly move = new THREE.Vector3();
@@ -197,7 +228,6 @@ export class FreeFlyCamera {
   }
 
   resize(width: number, height: number): void {
-    this.viewportWidth = Math.max(1, width);
     this.camera.aspect = width / Math.max(1, height);
     this.camera.updateProjectionMatrix();
   }
@@ -205,9 +235,16 @@ export class FreeFlyCamera {
   /**
    * Read one frame of input and move. `dt` is whatever clock the owner
    * chooses — the perf world passes wall-clock, so the camera still flies
-   * while the world is paused.
+   * while the world is paused. `stick` is the move stick's reading for
+   * the frame, or null where there is no stick (a test, a desktop rig).
+   *
+   * Keys and the stick ADD AS VECTORS, and the planar sum — along the
+   * view and across it — is clamped so it never exceeds `speed × boost`:
+   * a full push with W held is still one top speed, and a push against S
+   * subtracts. The stick alone never boosts; Shift is a key. Lift is
+   * added on top, as it always was.
    */
-  update(input: InputSnapshot, dt: number): void {
+  update(input: InputSnapshot, dt: number, stick: StickReading | null = null): void {
     const step = Number.isFinite(dt) && dt > 0 ? dt : 0;
 
     let lookDx = 0;
@@ -216,29 +253,9 @@ export class FreeFlyCamera {
       lookDx += input.pointer.dx;
       lookDy += input.pointer.dy;
     }
-
-    let stickX = 0;
-    let stickY = 0;
-    const live = new Set<number>();
     for (const t of input.touches) {
-      live.add(t.id);
-      let start = this.touchStarts.get(t.id);
-      if (!start) {
-        // First sight of this touch: it may already carry this frame's
-        // movement, so the landing point is the current point minus it.
-        start = { x: t.x - t.dx, y: t.y - t.dy };
-        this.touchStarts.set(t.id, start);
-      }
-      if (start.x < this.viewportWidth / 2) {
-        stickX += (t.x - start.x) / STICK_RADIUS_PX;
-        stickY += (t.y - start.y) / STICK_RADIUS_PX;
-      } else {
-        lookDx += t.dx;
-        lookDy += t.dy;
-      }
-    }
-    for (const id of this.touchStarts.keys()) {
-      if (!live.has(id)) this.touchStarts.delete(id);
+      lookDx += t.dx;
+      lookDy += t.dy;
     }
 
     const turn = LOOK_RADIANS_PER_PIXEL * this.look.sensitivity;
@@ -255,28 +272,38 @@ export class FreeFlyCamera {
     const keys = input.keys;
     const held = (...codes: string[]): boolean => codes.some((c) => keys.has(c));
     const axis = (negative: boolean, positive: boolean): number => (positive ? 1 : 0) - (negative ? 1 : 0);
-    // Screen y grows downward, so a stick pulled UP is forward.
-    const ahead = clampUnit(axis(held('KeyS', 'ArrowDown'), held('KeyW', 'ArrowUp')) - stickY);
-    const side = clampUnit(axis(held('KeyA', 'ArrowLeft'), held('KeyD', 'ArrowRight')) + stickX);
+    const ahead = axis(held('KeyS', 'ArrowDown'), held('KeyW', 'ArrowUp'));
+    const side = axis(held('KeyA', 'ArrowLeft'), held('KeyD', 'ArrowRight'));
     const lift = axis(held('KeyQ', 'KeyC'), held('KeyE', 'Space'));
-    if (ahead === 0 && side === 0 && lift === 0) return;
+
+    // A push is live when it is pushed at all and points somewhere: a
+    // reading's (x, y) is its direction, its deflection how far.
+    const push = stick !== null && Number.isFinite(stick.deflection) && stick.deflection > 0
+      ? Math.hypot(stick.x, stick.y)
+      : 0;
+    const pushing = Number.isFinite(push) && push > 0;
+    if (ahead === 0 && side === 0 && lift === 0 && !pushing) return;
 
     const boost = held('ShiftLeft', 'ShiftRight') ? BOOST : 1;
+    const full = this.speedValue * boost;
     this.camera.getWorldDirection(this.forward);
     // Pitch never reaches vertical, so forward × up is never degenerate.
     this.right.crossVectors(this.forward, WORLD_UP).normalize();
     this.move.set(0, 0, 0).addScaledVector(this.forward, ahead).addScaledVector(this.right, side);
     // Two keys held diagonally would otherwise fly √2 faster than one.
     if (this.move.lengthSq() > 1) this.move.normalize();
-    this.move.y += lift;
-    this.camera.position.addScaledVector(this.move, this.speedValue * boost * step);
+    this.move.multiplyScalar(full);
+    if (pushing && stick !== null) {
+      const pace = stickSpeed(stick.deflection, this.speedValue) / push;
+      this.move.addScaledVector(this.forward, stick.y * pace).addScaledVector(this.right, stick.x * pace);
+      // Keys and stick together are still one camera at one top speed.
+      if (this.move.lengthSq() > full * full) this.move.setLength(full);
+    }
+    this.move.y += lift * full;
+    this.camera.position.addScaledVector(this.move, step);
   }
 
   private applyRotation(): void {
     this.camera.rotation.set(this.pitch, this.yaw, 0);
   }
-}
-
-function clampUnit(value: number): number {
-  return Math.min(1, Math.max(-1, value));
 }

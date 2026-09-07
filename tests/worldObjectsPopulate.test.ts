@@ -284,6 +284,11 @@ describe('addresses and identities', () => {
   it('never grows the same object in two cells, and never two objects at one site', () => {
     const seen = new Set<string>();
     const ids = new Set<string>();
+    // Counted, not expected per object: a hundred cells of a doubled
+    // lattice is a million blades, and a million `expect` calls is a
+    // timeout, not a test.
+    let repeatedPositions = 0;
+    let repeatedSites = 0;
     for (const id of cellsWithin(WAILUA, 80 * M)) {
       const p = grow(id);
       for (const f of OBJECT_FAMILIES) {
@@ -291,9 +296,9 @@ describe('addresses and identities', () => {
         const sites = new Set<number>();
         for (let i = 0; i < b.count; i += 1) {
           const at = `${f}:${b.wx[i].toFixed(3)},${b.wz[i].toFixed(3)}`;
-          expect(seen.has(at), at).toBe(false);
+          if (seen.has(at)) repeatedPositions += 1;
           seen.add(at);
-          expect(sites.has(b.site[i])).toBe(false);
+          if (sites.has(b.site[i])) repeatedSites += 1;
           sites.add(b.site[i]);
         }
         if (b.ids !== null) {
@@ -308,6 +313,8 @@ describe('addresses and identities', () => {
         }
       }
     }
+    expect(repeatedPositions).toBe(0);
+    expect(repeatedSites).toBe(0);
     expect(ids.size).toBeGreaterThan(50);
   });
 

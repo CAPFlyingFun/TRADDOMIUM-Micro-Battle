@@ -5,7 +5,8 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import type { InputSnapshot, PointerState, TouchPoint } from '../src/input/Input';
-import { DEFAULT_SPEED, FreeFlyCamera, headingOfYaw, yawForHeading } from '../src/perf/FreeFlyCamera';
+import type { StickReading } from '../src/input/MoveStick';
+import { DEFAULT_SPEED, FreeFlyCamera, STICK_MIN_SPEED, headingOfYaw, stickSpeed, yawForHeading } from '../src/perf/FreeFlyCamera';
 
 const IDLE_POINTER: PointerState = { down: false, buttons: 0, x: 0, y: 0, dx: 0, dy: 0 };
 
@@ -34,8 +35,20 @@ function rig(): FreeFlyCamera {
   return cam;
 }
 
+/** The perf world's camera: 30 m/s, so the stick's curve reads in whole numbers. */
+function flyRig(): FreeFlyCamera {
+  const cam = rig();
+  cam.speed = 3000;
+  return cam;
+}
+
 function facing(cam: FreeFlyCamera): THREE.Vector3 {
   return cam.camera.getWorldDirection(new THREE.Vector3());
+}
+
+/** A stick reading as `MoveStick.read()` shapes one: (x, y) in the unit disc, deflection its length. */
+function push(x: number, y: number): StickReading {
+  return { x, y, deflection: Math.hypot(x, y), held: true };
 }
 
 describe('FreeFlyCamera', () => {
@@ -158,50 +171,156 @@ describe('FreeFlyCamera', () => {
     expect(Math.atan2(forward.x, forward.z)).toBeCloseTo(facing, 9);
   });
 
-  it('twin-zone touch: a drag that starts on the left half moves, one on the right half looks', () => {
+  it('a touch drag on EITHER half of the screen looks and does not move', () => {
+    // The twin-zone invisible stick is gone (2026-09-07): moving by thumb
+    // is the visible MoveStick, whose events never reach the snapshot, so
+    // every touch drag that does is a look — including one that starts on
+    // the left, and one first seen already moving.
     const cam = rig();
-    // Land on the left, then pull up a full stick radius: forward.
-    cam.update(snap({ touches: [{ id: 1, x: 100, y: 300, dx: 0, dy: 0 }] }), 0.016);
+    cam.update(snap({ touches: [{ id: 1, x: 100, y: 300, dx: 0, dy: 0 }] }), 1);
     expect(cam.camera.position.length()).toBe(0);
-    cam.update(snap({ touches: [{ id: 1, x: 100, y: 220, dx: 0, dy: -80 }] }), 1);
-    expect(cam.camera.position.z).toBeCloseTo(-10, 6);
     expect(facing(cam).x).toBeCloseTo(0, 9);
-    // Holding still keeps flying: it is a stick, not a wheel.
+    // Held still on the left, pulled up: no stick, so no flight and no turn.
     cam.update(snap({ touches: [{ id: 1, x: 100, y: 220, dx: 0, dy: 0 }] }), 1);
-    expect(cam.camera.position.z).toBeCloseTo(-20, 6);
+    expect(cam.camera.position.length()).toBe(0);
 
-    // A second finger on the right looks and does not move.
-    const before = cam.camera.position.clone();
-    cam.update(snap({ touches: [{ id: 2, x: 800, y: 200, dx: 150, dy: 0 }] }), 0.016);
+    cam.update(snap({ touches: [{ id: 1, x: 250, y: 220, dx: 150, dy: 0 }] }), 1);
     expect(facing(cam).x).toBeGreaterThan(0.3);
-    expect(cam.camera.position.distanceTo(before)).toBeLessThan(1e-9);
+    expect(cam.camera.position.length()).toBe(0);
+
+    const right = rig();
+    right.update(snap({ touches: [{ id: 2, x: 800, y: 200, dx: 150, dy: 0 }] }), 1);
+    expect(facing(right).x).toBeGreaterThan(0.3);
+    expect(right.camera.position.length()).toBe(0);
+
+    // Two fingers both look; neither moves.
+    const both = rig();
+    both.update(snap({ touches: [{ id: 3, x: 180, y: 200, dx: 80, dy: 0 }, { id: 4, x: 700, y: 200, dx: 70, dy: 0 }] }), 1);
+    expect(facing(both).x).toBeGreaterThan(0.3);
+    expect(both.camera.position.length()).toBe(0);
   });
 
-  it('a stick keeps its zone after crossing the middle, and a lifted finger is forgotten', () => {
-    const cam = rig();
-    cam.update(snap({ touches: [{ id: 7, x: 400, y: 200, dx: 0, dy: 0 }] }), 0.016);
-    cam.update(snap({ touches: [{ id: 7, x: 600, y: 200, dx: 200, dy: 0 }] }), 1);
-    expect(cam.camera.position.x).toBeCloseTo(10, 6);
-    expect(facing(cam).x).toBeCloseTo(0, 9);
-
-    cam.update(snap(), 0.016);
-    // The same id landing on the right half is a new touch, and a look.
-    cam.update(snap({ touches: [{ id: 7, x: 700, y: 200, dx: 100, dy: 0 }] }), 0.016);
-    expect(facing(cam).x).toBeGreaterThan(0.2);
-    expect(cam.camera.position.x).toBeCloseTo(10, 6);
+  it('a full stick push flies along the view at the camera\'s own speed × dt, and a lifted stick stops', () => {
+    const cam = flyRig();
+    cam.update(snap(), 1, push(0, 1));
+    expect(cam.camera.position.z).toBeCloseTo(-3000, 6);
+    expect(cam.camera.position.x).toBeCloseTo(0, 9);
+    expect(cam.camera.position.y).toBeCloseTo(0, 9);
+    // Held still keeps flying: it is a stick, not a wheel.
+    cam.update(snap(), 0.5, push(0, 1));
+    expect(cam.camera.position.z).toBeCloseTo(-4500, 6);
+    // A released reading, and no reading at all, both stop it.
+    cam.update(snap(), 1, { x: 0, y: 0, deflection: 0, held: false });
+    cam.update(snap(), 1, null);
+    cam.update(snap(), 1);
+    expect(cam.camera.position.z).toBeCloseTo(-4500, 6);
   });
 
-  it('a touch first seen mid-movement is anchored where it landed', () => {
-    const cam = rig();
-    cam.update(snap({ touches: [{ id: 3, x: 180, y: 200, dx: 80, dy: 0 }] }), 1);
-    expect(cam.camera.position.x).toBeCloseTo(10, 6);
+  it('a half push flies at STICK_MIN_SPEED + (speed − STICK_MIN_SPEED) / 4: the curve is squared', () => {
+    // GAME TUNING pinned: at 30 m/s a half push is 8.25 m/s, not 15.5. The
+    // square is what gives the slow end room under a thumb.
+    const cam = flyRig();
+    cam.update(snap(), 1, push(0, 0.5));
+    expect(cam.camera.position.z).toBeCloseTo(-(STICK_MIN_SPEED + (3000 - STICK_MIN_SPEED) / 4), 6);
+    expect(cam.camera.position.z).toBeCloseTo(-825, 6);
+    expect(stickSpeed(0.5, 3000)).toBeCloseTo(825, 9);
+    expect(stickSpeed(0.25, 3000)).toBeCloseTo(281.25, 9);
+    expect(stickSpeed(1, 3000)).toBe(3000);
+    // Backwards is the same curve the other way.
+    const back = flyRig();
+    back.update(snap(), 1, push(0, -0.5));
+    expect(back.camera.position.z).toBeCloseTo(825, 6);
   });
 
-  it('does not move on a zero or non-finite dt', () => {
+  it('the smallest live push is STICK_MIN_SPEED (1 m/s), and deflection 0 moves nothing', () => {
+    const cam = flyRig();
+    cam.update(snap(), 1, push(0, 0.001));
+    expect(cam.camera.position.z).toBeCloseTo(-STICK_MIN_SPEED, 1);
+    expect(STICK_MIN_SPEED).toBe(100);
+    const still = flyRig();
+    still.update(snap(), 1, { x: 0, y: 0, deflection: 0, held: true });
+    expect(still.camera.position.length()).toBe(0);
+    // A contradictory reading — pushed, but pointing nowhere — cannot move either.
+    still.update(snap(), 1, { x: 0, y: 0, deflection: 1, held: true });
+    expect(still.camera.position.length()).toBe(0);
+  });
+
+  it('a camera slower than the floor is capped at its own speed, never sped up by the floor', () => {
+    const cam = rig(); // 10 units/s, well under STICK_MIN_SPEED
+    cam.update(snap(), 1, push(0, 0.5));
+    expect(cam.camera.position.z).toBeCloseTo(-10, 6);
+    expect(stickSpeed(0.1, 10)).toBe(10);
+  });
+
+  it('a pure x push strafes right, and a diagonal splits the same speed between the two', () => {
+    const cam = flyRig();
+    cam.update(snap(), 1, push(1, 0));
+    expect(cam.camera.position.x).toBeCloseTo(3000, 6);
+    expect(cam.camera.position.z).toBeCloseTo(0, 9);
+    const half = flyRig();
+    half.update(snap(), 1, push(0.5, 0));
+    expect(half.camera.position.x).toBeCloseTo(825, 6);
+    const diagonal = flyRig();
+    diagonal.update(snap(), 1, push(Math.SQRT1_2, Math.SQRT1_2));
+    expect(diagonal.camera.position.length()).toBeCloseTo(3000, 6);
+    expect(diagonal.camera.position.x).toBeCloseTo(diagonal.camera.position.z * -1, 6);
+  });
+
+  it('the stick is camera-relative: after a look, forward is the new view', () => {
+    const cam = flyRig();
+    cam.update(snap({ pointer: { down: true, dx: 200, dy: 0 } }), 0.016);
+    const dir = facing(cam);
+    cam.update(snap(), 1, push(0, 1));
+    expect(cam.camera.position.x).toBeCloseTo(dir.x * 3000, 6);
+    expect(cam.camera.position.z).toBeCloseTo(dir.z * 3000, 6);
+  });
+
+  it('the stick ignores Shift: a full push under boost is still one top speed', () => {
+    const cam = flyRig();
+    cam.update(snap({ keys: ['ShiftLeft'] }), 1, push(0, 1));
+    expect(cam.camera.position.z).toBeCloseTo(-3000, 6);
+    const half = flyRig();
+    half.update(snap({ keys: ['ShiftRight'] }), 1, push(0, 0.5));
+    expect(half.camera.position.z).toBeCloseTo(-825, 6);
+  });
+
+  it('keys and the stick add as vectors, and the planar sum never exceeds speed × boost', () => {
+    // THE RULE, PINNED: W plus a full push is one top speed, not two; a
+    // push against S subtracts; with Shift the ceiling is the boosted one.
+    const cam = flyRig();
+    cam.update(snap({ keys: ['KeyW'] }), 1, push(0, 1));
+    expect(cam.camera.position.z).toBeCloseTo(-3000, 6);
+
+    const against = flyRig();
+    against.update(snap({ keys: ['KeyS'] }), 1, push(0, 1));
+    expect(against.camera.position.length()).toBeCloseTo(0, 6);
+    const partly = flyRig();
+    partly.update(snap({ keys: ['KeyW'] }), 1, push(0, -0.5));
+    expect(partly.camera.position.z).toBeCloseTo(-(3000 - 825), 6);
+
+    const sideways = flyRig();
+    sideways.update(snap({ keys: ['KeyD'] }), 1, push(0, 1));
+    expect(sideways.camera.position.length()).toBeCloseTo(3000, 6);
+    expect(sideways.camera.position.x).toBeCloseTo(-sideways.camera.position.z, 6);
+
+    const boosted = flyRig();
+    boosted.update(snap({ keys: ['KeyW', 'ShiftLeft'] }), 1, push(0, 1));
+    expect(boosted.camera.position.z).toBeCloseTo(-6000, 6);
+
+    // Lift rides on top, keyboard-only, as it always has.
+    const lifted = flyRig();
+    lifted.update(snap({ keys: ['Space'] }), 1, push(0, 1));
+    expect(lifted.camera.position.z).toBeCloseTo(-3000, 6);
+    expect(lifted.camera.position.y).toBeCloseTo(3000, 6);
+  });
+
+  it('does not move on a zero or non-finite dt, by key or by stick', () => {
     const cam = rig();
     cam.update(snap({ keys: ['KeyW'] }), 0);
     cam.update(snap({ keys: ['KeyW'] }), Number.NaN);
     cam.update(snap({ keys: ['KeyW'] }), -1);
+    cam.update(snap(), 0, push(0, 1));
+    cam.update(snap(), Number.NaN, push(0, 1));
     expect(cam.camera.position.length()).toBe(0);
   });
 });
