@@ -27,7 +27,13 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { SeaSwell } from '../src/world/sea/swell';
-import { FOAM_FAR, FOAM_NEAR, MAX_OCTAVES, makeWaterLook, rippleChunk } from '../src/sea/waterLook';
+import {
+  FOAM_FAR, FOAM_NEAR, LIT_HI, LIT_LO, MAX_OCTAVES, SHEEN_REFERENCE, SKY_GAIN, WASH_FLOOR,
+  makeWaterLook, rippleChunk,
+} from '../src/sea/waterLook';
+import { HORIZON_CLEAR, skyLook, type Rgb, type SkyLook } from '../src/sky/skyLook';
+import type { SunPosition } from '../src/world/weather/solar';
+import { FAIR, visibilityFor, type WeatherNow } from '../src/world/weather/weather';
 
 /** The include lines this module replaces. Anything else three emits is irrelevant here. */
 const STUB_VERTEX = ['#include <common>', 'void main() {', '#include <begin_vertex>', '}'].join('\n');
@@ -463,5 +469,270 @@ describe('no world coordinate reaches the shader raw', () => {
     const { shader } = compile();
     expect(shader.fragmentShader).toContain('vec2 tiled(float T) { return (vLocal + mod(uCentre, vec2(T))) / T; }');
     expect(shader.uniforms.uCentre).toBeDefined();
+  });
+});
+
+/**
+ * THE SEA UNDER THE ISLAND'S SKY (the lighting polish, 2026-09-07).
+ *
+ * The look was accepted under one constant noon, and two lines in the
+ * shader had been written as if noon were permanent: a constant sky
+ * colour added as emissive at every hour, and a foam opacity lift with
+ * no light term. Together they drew a bright rim along the shoreline at
+ * night in Joshua's phone shot. The fix reads the scene's own lights —
+ * so what has to be proved here is the other half of the claim: that by
+ * DAY nothing moved. The sheen's gain is pinned to reproduce the old
+ * constant at a clear noon to a millionth, and the foam gate is
+ * evaluated against the sky model at every daytime state it produces
+ * and required to be exactly one.
+ *
+ * The one deliberate change to the daytime look — the wash riding the
+ * crest — is pinned as a floor and a ceiling rather than as a picture.
+ */
+describe('the sea under the island’s sky', () => {
+  const DEG = Math.PI / 180;
+  const sun = (elevationDeg: number): SunPosition => ({
+    elevation: elevationDeg * DEG, azimuth: Math.PI, declination: 0, equationOfTimeMinutes: 0,
+  });
+  const weather = (over: Partial<WeatherNow> = {}): WeatherNow => ({ ...FAIR, ...over });
+  const CLEAR = weather({ cloud: 0.1 });
+  const CLOUDY = weather({ cloud: 0.7, visibilityM: visibilityFor(0, 0.7) });
+  const OVERCAST = weather({ sky: 'cloudy', cloud: 0.95, visibilityM: visibilityFor(0, 0.95) });
+  const SHOWER = weather({ sky: 'rain', rainMmHr: 10, cloud: 0.95, visibilityM: visibilityFor(10, 0.95) });
+  const NOON = sun(80);
+  const NIGHT = sun(-30);
+
+  /** An sRGB triple into three's working space, the way `SkyView.srgb` does it. */
+  const linear = (c: Rgb): THREE.Color => new THREE.Color().setRGB(c.r, c.g, c.b, THREE.SRGBColorSpace);
+  /** Rec. 709 luminance, the weights the shader inlines (three r185 has no GLSL `luminance()`). */
+  const lum = (c: THREE.Color): number => 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+  const smoothstep = (lo: number, hi: number, x: number): number => {
+    const t = Math.min(1, Math.max(0, (x - lo) / (hi - lo)));
+    return t * t * (3 - 2 * t);
+  };
+  /**
+   * The two lights as the shader reads them: three folds a light's
+   * intensity into its colour (`WebGLLights`: `skyColor.copy(color)
+   * .multiplyScalar(intensity)`, and the same for the sun).
+   */
+  const skyColorOf = (look: SkyLook): THREE.Color => linear(look.hemisphereSky).multiplyScalar(look.hemisphereIntensity);
+  const sunColorOf = (look: SkyLook): THREE.Color => linear(look.sunColour).multiplyScalar(look.sunIntensity);
+  /** The shader's `lit`, in TS: the same formula on the same numbers. */
+  const litOf = (look: SkyLook): number => smoothstep(LIT_LO, LIT_HI, lum(skyColorOf(look)) + lum(sunColorOf(look)));
+  const luminanceOf = (look: SkyLook): number => lum(skyColorOf(look)) + lum(sunColorOf(look));
+
+  describe('the sheen follows the sky', () => {
+    it('adds the scene’s hemisphere light, gained — and the constant only where there is no sky to follow', () => {
+      const { shader } = compile();
+      const glsl = shader.fragmentShader;
+      expect(glsl).toContain('#if NUM_HEMI_LIGHTS > 0');
+      expect(glsl).toContain('vec3 skyLit = hemisphereLights[0].skyColor * uSkyGain;');
+      expect(glsl).toContain('vec3 skyLit = uSky;');
+      expect(glsl).toContain('totalEmissiveRadiance += skyLit * min(fres, 0.85) * 0.5;');
+      // The constant is no longer what the emissive reads directly.
+      expect(glsl).not.toMatch(/totalEmissiveRadiance \+= uSky\b/);
+      // The gain reaches the shader as the uniform the line names, and it
+      // is the exported ratio, not a second copy of it.
+      expect(glsl).toContain('uniform vec3 uSkyGain;');
+      const gain = shader.uniforms.uSkyGain.value as THREE.Vector3;
+      expect(gain.x).toBe(SKY_GAIN.r);
+      expect(gain.y).toBe(SKY_GAIN.g);
+      expect(gain.z).toBe(SKY_GAIN.b);
+    });
+
+    it('is BE’s sheen at a clear noon, to a millionth — and within 1/255 on the screen', () => {
+      // The claim that makes this a polish and not a new look. The sky
+      // writes HORIZON_CLEAR at intensity 1.0 at a clear noon (skyLook's
+      // own test pins both); gained, that must be the constant the sheen
+      // was tuned to.
+      const { shader } = compile();
+      const sheen = shader.uniforms.uSky.value as THREE.Color;
+      const horizon = linear(HORIZON_CLEAR);
+      expect(Math.abs(SKY_GAIN.r * horizon.r - sheen.r)).toBeLessThan(1e-6);
+      expect(Math.abs(SKY_GAIN.g * horizon.g - sheen.g)).toBeLessThan(1e-6);
+      expect(Math.abs(SKY_GAIN.b * horizon.b - sheen.b)).toBeLessThan(1e-6);
+      // End to end, through the sky model rather than the constant it
+      // happens to write: the light the scene actually carries at noon.
+      const noon = skyColorOf(skyLook(CLEAR, NOON));
+      const skyLit = new THREE.Color(noon.r * SKY_GAIN.r, noon.g * SKY_GAIN.g, noon.b * SKY_GAIN.b);
+      expect(Math.abs(skyLit.r - sheen.r)).toBeLessThan(1e-6);
+      expect(Math.abs(skyLit.g - sheen.g)).toBeLessThan(1e-6);
+      expect(Math.abs(skyLit.b - sheen.b)).toBeLessThan(1e-6);
+      // And on an 8-bit screen: the sheen's largest possible contribution
+      // is skyLit * 0.85 * 0.5, so convert that to sRGB and count.
+      const was = sheen.clone().multiplyScalar(0.425).convertLinearToSRGB();
+      const now = skyLit.clone().multiplyScalar(0.425).convertLinearToSRGB();
+      for (const axis of ['r', 'g', 'b'] as const) {
+        expect(Math.abs(was[axis] - now[axis]) * 255).toBeLessThan(1);
+      }
+    });
+
+    it('keeps the fallback constant BIT-IDENTICAL to what v0 built, double conversion and all', () => {
+      // `new THREE.Color(hex)` has converted from sRGB since r152, so the
+      // `.convertSRGBToLinear()` v0 put on top is a second application of
+      // the transfer. The sea was accepted with it. The look is what is
+      // protected, so the expression is kept — and this pin exists so a
+      // reader who spots the double conversion finds the reason before
+      // "fixing" the sea a third brighter.
+      const { shader } = compile();
+      const sheen = shader.uniforms.uSky.value as THREE.Color;
+      const asBuilt = new THREE.Color(SHEEN_REFERENCE).convertSRGBToLinear();
+      expect(sheen.r).toBe(asBuilt.r);
+      expect(sheen.g).toBe(asBuilt.g);
+      expect(sheen.b).toBe(asBuilt.b);
+      const once = new THREE.Color(SHEEN_REFERENCE);
+      expect(sheen.b).toBeLessThan(once.b);
+      // And no other scene sees a different constant: two wearers, one
+      // colour, so the fallback is the same sheen everywhere.
+      expect(compile({ ocean: false }).shader.uniforms.uSky.value).toBe(sheen);
+    });
+
+    it('dims with the sky, which is the whole reason', () => {
+      const noon = skyColorOf(skyLook(CLEAR, NOON));
+      const night = skyColorOf(skyLook(CLEAR, NIGHT));
+      // The gain is a fixed ratio, so the sheen's luminance is the sky
+      // light's, scaled: at night a small fraction of noon's.
+      expect(lum(night) / lum(noon)).toBeLessThan(0.02);
+      expect(lum(night)).toBeGreaterThan(0);
+    });
+  });
+
+  describe('the foam’s opacity follows its light', () => {
+    const litLine = (glsl: string): RegExpExecArray | null =>
+      /float lit = smoothstep\(([\d.]+), ([\d.]+), dot\(hemisphereLights\[0\]\.skyColor \+ directionalLights\[0\]\.color, vec3\(0\.2126, 0\.7152, 0\.0722\)\)\);/.exec(glsl);
+
+    it('gates the ALPHA lift on the scene’s lights, and leaves the foam’s colour to three', () => {
+      const { shader } = compile();
+      const glsl = shader.fragmentShader;
+      // The gate, with the thresholds this module exports rather than a
+      // number typed twice.
+      const gate = litLine(glsl);
+      expect(gate, 'the lit gate is not in the shader').not.toBeNull();
+      if (gate === null) return;
+      expect(Number(gate[1])).toBe(LIT_LO);
+      expect(Number(gate[2])).toBe(LIT_HI);
+      // Guarded on BOTH lights existing, and lit in full otherwise: a
+      // scene with no sky light is the look as it was, not a dark one.
+      expect(glsl).toContain('#if NUM_HEMI_LIGHTS > 0 && NUM_DIR_LIGHTS > 0');
+      expect(glsl).toContain('float lit = 1.0;');
+      // three r185 has no GLSL luminance helper; the weights are inlined.
+      expect(glsl).not.toMatch(/\bluminance\(/);
+      // The lift, gated.
+      expect(glsl).toContain('diffuseColor.a = mix(diffuseColor.a, 0.95, foam * lit);');
+      // THE FOAM'S COLOUR IS NOT TOUCHED. It is diffuse, three lights it,
+      // and a light term here would darken it twice. Pinned as the exact
+      // literal so nobody "fixes" it.
+      expect(glsl).toContain('diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.90, 0.95, 0.97), foam);');
+      // Declared before it is read.
+      expect(glsl.indexOf('float lit = smoothstep')).toBeLessThan(glsl.indexOf('foam * lit'));
+    });
+
+    it('is EXACTLY 1.0 at every daytime state the sky model produces, so the daytime look is the accepted one', () => {
+      // Evaluated through the sky model, the same formula in TS: clear,
+      // cloudy, overcast, a shower, and the sun on the horizon all sit
+      // above LIT_HI, so the gate is one and the alpha line is the line
+      // it was. The luminances are pinned too, so a change to a palette
+      // that moved one toward the gate shows up here first.
+      const clearNoon = skyLook(CLEAR, NOON);
+      const cloudyNoon = skyLook(CLOUDY, NOON);
+      const overcastNoon = skyLook(OVERCAST, NOON);
+      const showerNoon = skyLook(SHOWER, NOON);
+      const lowSun = skyLook(CLEAR, sun(-2));
+      for (const look of [clearNoon, cloudyNoon, overcastNoon, showerNoon, lowSun]) {
+        expect(litOf(look)).toBe(1);
+        expect(luminanceOf(look)).toBeGreaterThan(LIT_HI);
+      }
+      expect(luminanceOf(clearNoon)).toBeCloseTo(1.50, 1);
+      expect(luminanceOf(cloudyNoon)).toBeCloseTo(1.01, 1);
+      expect(luminanceOf(overcastNoon)).toBeCloseTo(0.64, 1);
+      expect(luminanceOf(lowSun)).toBeCloseTo(0.51, 1);
+    });
+
+    it('is nothing at night — the rim in the phone shot', () => {
+      // A clear night reads a hair above LIT_LO — a tenth of a percent of
+      // the lift, which is nothing without a hard edge. An overcast
+      // night is under it: exactly zero.
+      const night = skyLook(CLEAR, NIGHT);
+      expect(luminanceOf(night)).toBeCloseTo(0.024, 2);
+      expect(litOf(night)).toBeLessThan(0.002);
+      expect(litOf(skyLook(OVERCAST, NIGHT))).toBe(0);
+      expect(litOf(skyLook(SHOWER, NIGHT))).toBe(0);
+    });
+
+    it('eases through twilight rather than switching', () => {
+      // The sky model is continuous in elevation, and the gate is a
+      // smoothstep on it, so the foam's opacity must ease: no half-degree
+      // of sun moves it more than a tenth, and it never comes back down
+      // as the sun rises.
+      let last = 0;
+      for (let e = -30; e <= 20; e += 0.5) {
+        const lit = litOf(skyLook(CLEAR, sun(e)));
+        expect(lit, `lit at ${e}°`).toBeGreaterThanOrEqual(last - 1e-12);
+        expect(Math.abs(lit - last), `lit step at ${e}°`).toBeLessThan(0.1);
+        last = lit;
+      }
+      expect(last).toBe(1);
+    });
+  });
+
+  describe('the wash breathes', () => {
+    const washTerm = (glsl: string): RegExpExecArray | null =>
+      /\* mix\(([\d.]+), 1\.0, smoothstep\(-0\.6, 0\.4, crest\)\);/.exec(glsl);
+
+    it('rides the crest between WASH_FLOOR and all of itself, in the sea only', () => {
+      const sea = compile({ ocean: true }).shader.fragmentShader;
+      const term = washTerm(sea);
+      expect(term, 'the wash does not ride the crest').not.toBeNull();
+      if (term === null) return;
+      expect(Number(term[1])).toBe(WASH_FLOOR);
+      // On the wash and nothing else: the depth band and the texture
+      // weights it had are the ones it has.
+      expect(sea).toMatch(/float wash = smoothstep\(170\.0 \* 1\.000, 95\.0 \* 1\.000, depth\)\s*\* \(lace \* 0\.85 \+ fizz \* 0\.35\) \* pale\s*\* mix\(/);
+      // `crest` is the breaker's, declared before the wash reads it.
+      expect(sea.indexOf('float crest = ')).toBeLessThan(sea.indexOf('float wash = '));
+      // And a pond has no wash to breathe: the whole block is the sea's.
+      const pond = compile({ ocean: false }).shader.fragmentShader;
+      expect(pond).not.toMatch(/float wash/);
+      expect(washTerm(pond)).toBeNull();
+    });
+
+    it('keeps more than half of today’s wash in a trough and all of it under a crest', () => {
+      // The floor is the dial for how much the coastline breathes. Above
+      // a half so the band never empties — the shore is still drawn as a
+      // rim of wash — and below one, or nothing would move.
+      expect(WASH_FLOOR).toBe(0.55);
+      expect(WASH_FLOOR).toBeGreaterThan(0.5);
+      expect(WASH_FLOOR).toBeLessThan(1);
+      const factor = (crest: number): number => WASH_FLOOR + (1 - WASH_FLOOR) * smoothstep(-0.6, 0.4, crest);
+      expect(factor(-1)).toBe(WASH_FLOOR);
+      expect(factor(1)).toBe(1);
+      let last = 0;
+      for (let c = -1; c <= 1.0001; c += 0.05) {
+        const f = factor(c);
+        expect(f).toBeGreaterThanOrEqual(last);
+        last = f;
+      }
+    });
+  });
+
+  describe('the waterline is still a feather', () => {
+    it('discards ONCE, at the invisible threshold, after the edge fade — never as a hard cut', () => {
+      // A hard discard at a threshold cut the waterline like scissors;
+      // the sea fades out through `edge` and the discard only drops what
+      // is already invisible. Every wearer, both sheets.
+      const wearers = [
+        compile(),
+        compile({ ocean: false }),
+        compile({ swellRim: { rimLo: 6000, rimHi: 7800, alphaLo: 6800, alphaHi: 8200 } }),
+        compile({ hole: { lo: 6800, hi: 8200 } }),
+      ];
+      for (const { shader } of wearers) {
+        const glsl = shader.fragmentShader;
+        expect(glsl.match(/\bdiscard;/g)).toHaveLength(1);
+        expect(glsl).toContain('if (diffuseColor.a < 0.01) discard;');
+        expect(glsl.indexOf('diffuseColor.a *= edge;')).toBeGreaterThan(0);
+        expect(glsl.indexOf('diffuseColor.a *= edge;')).toBeLessThan(glsl.indexOf('discard;'));
+      }
+    });
   });
 });

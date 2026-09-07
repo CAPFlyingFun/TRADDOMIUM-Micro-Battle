@@ -10,7 +10,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  EFOLD, SIGHT_DEEP, SIGHT_SHALLOW, SURFACE_RAMP, blendSight, underwaterLook,
+  EFOLD, LIGHT_DEEP, SIGHT_DEEP, SIGHT_SHALLOW, SURFACE_RAMP, blendSight, underwaterLook,
 } from '../src/sea/underwaterLook';
 
 describe('the underwater look', () => {
@@ -102,5 +102,56 @@ describe('the underwater look', () => {
     expect(blendSight(air, water, 2)).toBeCloseTo(water, 6);
     // A degenerate air distance is not a reason to open the fog back up.
     expect(blendSight(0, water, 0.5)).toBe(water);
+  });
+
+  it('lets less of the air’s light down with depth, on the sight’s own curve, never below the floor', () => {
+    // The seabed was lit as if in air — full sun on the sand under six
+    // metres of water — because the fog is a colour and nothing was a
+    // brightness. `light` is the factor the scene multiplies its sun
+    // and sky light by, and it has four edges to get right.
+    //
+    // ABSENT above the water: the look is null there, so there is no
+    // factor to blend toward and the caller puts the air's lights back.
+    expect(underwaterLook(0)).toBeNull();
+    expect(underwaterLook(-1)).toBeNull();
+    // ALL OF IT at the surface: the eye a hundredth of a millimetre
+    // under sees the sun the eye above it does.
+    const surface = underwaterLook(0.001);
+    expect(surface).not.toBeNull();
+    if (surface === null) return;
+    expect(Math.abs(surface.light - 1)).toBeLessThan(1e-6);
+    expect(surface.light).toBeLessThanOrEqual(1);
+    // MONOTONE down, and never under the floor however deep she goes: a
+    // light that came back up would be the sun switching on at depth.
+    let last = 1;
+    for (let d = 0; d <= EFOLD * 20; d += EFOLD / 8) {
+      const look = underwaterLook(d + 1e-9);
+      expect(look).not.toBeNull();
+      if (look === null) return;
+      expect(look.light, `light at ${d}`).toBeLessThanOrEqual(last + 1e-12);
+      expect(look.light, `light at ${d}`).toBeGreaterThanOrEqual(LIGHT_DEEP);
+      last = look.light;
+    }
+    // THE FLOOR, reached: at twenty e-folds it is the deep value, near
+    // enough, and a floor rather than black because the fog already
+    // takes the far end to the deep colour.
+    expect(last).toBeLessThan(LIGHT_DEEP * 1.001);
+    expect(LIGHT_DEEP).toBeGreaterThan(0);
+    expect(LIGHT_DEEP).toBeLessThan(1);
+    // THE SAME CURVE THE SIGHT USES, so the water darkens and closes in
+    // together rather than on two clocks: the fraction of the way to the
+    // floor equals the fraction of the way to the deep sight, everywhere.
+    for (const d of [1, EFOLD / 3, EFOLD, EFOLD * 2.5, EFOLD * 6]) {
+      const look = underwaterLook(d);
+      if (look === null) return;
+      const lightWay = (1 - look.light) / (1 - LIGHT_DEEP);
+      const sightWay = (SIGHT_SHALLOW - look.sight) / (SIGHT_SHALLOW - SIGHT_DEEP);
+      expect(lightWay, `at ${d}`).toBeCloseTo(sightWay, 9);
+    }
+    // And one e-fold is 63% of the way, which is what the constant's
+    // name promises for the light as much as for the sight.
+    const efold = underwaterLook(EFOLD);
+    if (efold === null) return;
+    expect((1 - efold.light) / (1 - LIGHT_DEEP)).toBeCloseTo(1 - Math.exp(-1), 3);
   });
 });
