@@ -81,7 +81,19 @@ const FRAMES = 40;
  * visibly, nine metres of crest travel, because the swell runs at its own
  * celerity of 2.4 m/s.
  */
-const DRIFT_FRAMES = 40;
+/**
+ * Frames to hold still before the second coast shot. The simulation steps
+ * at most 0.1 s a frame (its cap), so under SwiftShader's two frames a
+ * second these are SIMULATION seconds as much as wall ones: the sea's
+ * long swell is a 16 s period, and from thirty metres up a crest's
+ * sixteen centimetres is under a pixel — what the still camera can see
+ * move is the WATERLINE, which on Anini's flat sand walks tens of metres
+ * between trough and crest. Half a period of simulated time is what it
+ * takes for that to show; a dozen frames showed nothing but the sheet's
+ * own digits, which is what this check was passing on until the sheet
+ * was folded out of the band.
+ */
+const DRIFT_FRAMES = 80;
 
 /**
  * IT STARTS AT THE COAST, because it can now choose where to begin: the
@@ -219,12 +231,18 @@ async function openWorld(page, url) {
   log('waiting for the world (this includes the 2 MB survey and the sea textures)');
   await page.waitForSelector('[data-action="pause"]', { timeout: TIMEOUT.world });
   await runFrames(page, 20);
-  // FOLD THE SHEET. Since the ecology pass the stat sheet stands eleven
-  // rows tall and its CAMERA column reaches into the band this probe
-  // samples (40–72 % of the height), so an unfolded sheet is what the
-  // pixel checks were comparing — text that never moves, in front of a
-  // sea that does. The fold is the player's own control; the summary row
-  // it leaves is at the top, outside the band.
+}
+
+/**
+ * FOLD THE SHEET before a pixel check. Since the ecology pass the stat
+ * sheet stands eleven rows tall and its CAMERA column reaches into the
+ * band this probe samples (40–72 % of the height), so an unfolded sheet
+ * was what the pixel checks compared — text that never moves, in front
+ * of a sea that does. The fold is the player's own control; the summary
+ * row it leaves is at the top, outside the band. Folded, the sheet's
+ * rows are gone from the DOM, so every HUD READ happens before this.
+ */
+async function foldSheet(page) {
   await page.click('[data-action="hud-collapse"]', { timeout: TIMEOUT.menu });
   await runFrames(page, 2);
 }
@@ -242,6 +260,7 @@ async function drive(page, url) {
   // looking slightly down, so lifting the view puts open sea and the
   // horizon in frame rather than the beach immediately below.
   log('pitching up to put the horizon in frame');
+  await foldSheet(page);
   await look(page, 0, -90);
   const withSea = await runFrames(page, FRAMES);
   const seaFps = FRAMES / (withSea / 1000);

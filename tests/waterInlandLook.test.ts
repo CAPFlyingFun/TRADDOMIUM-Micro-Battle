@@ -174,7 +174,8 @@ describe('inland water wears the ocean’s look', () => {
     // verbatim, not re-asserted, so the two wearers cannot drift.
     const mine = compile(inland()).fragmentShader;
     const sea = compile(oceanLook()).fragmentShader;
-    const sheen = (glsl: string): string | undefined => /vec3 skyLit = hemisphereLights\[0\]\.skyColor \* uSkyGain;/.exec(glsl)?.[0];
+    const sheen = (glsl: string): string | undefined =>
+      /vec3 skyLit = max\(hemisphereLights\[0\]\.skyColor \* uSkyGain, uSky \* 0\.\d+\);/.exec(glsl)?.[0];
     const gate = (glsl: string): string | undefined => /float lit = smoothstep\([^\n]*\);/.exec(glsl)?.[0];
     const lift = (glsl: string): string | undefined => /diffuseColor\.a = mix\(diffuseColor\.a, 0\.95, [^\n]*\);/.exec(glsl)?.[0];
     expect(sheen(mine)).toBeDefined();

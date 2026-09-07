@@ -28,7 +28,7 @@ import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { SeaSwell } from '../src/world/sea/swell';
 import {
-  FOAM_FAR, FOAM_NEAR, LIT_HI, LIT_LO, MAX_OCTAVES, SHEEN_REFERENCE, SKY_GAIN, WASH_FLOOR,
+  FOAM_FAR, FOAM_NEAR, LIT_HI, LIT_LO, MAX_OCTAVES, SHEEN_NIGHT_FLOOR, SHEEN_REFERENCE, SKY_GAIN, WASH_FLOOR,
   makeWaterLook, rippleChunk,
 } from '../src/sea/waterLook';
 import { HORIZON_CLEAR, skyLook, type Rgb, type SkyLook } from '../src/sky/skyLook';
@@ -526,7 +526,10 @@ describe('the sea under the island’s sky', () => {
       const { shader } = compile();
       const glsl = shader.fragmentShader;
       expect(glsl).toContain('#if NUM_HEMI_LIGHTS > 0');
-      expect(glsl).toContain('vec3 skyLit = hemisphereLights[0].skyColor * uSkyGain;');
+      expect(glsl).toContain(`vec3 skyLit = max(hemisphereLights[0].skyColor * uSkyGain, uSky * ${SHEEN_NIGHT_FLOOR.toFixed(2)});`);
+      // The floor is a fraction of the noon sheen well under the rim bar, and above nothing.
+      expect(SHEEN_NIGHT_FLOOR).toBeGreaterThan(0);
+      expect(SHEEN_NIGHT_FLOOR).toBeLessThan(0.25);
       expect(glsl).toContain('vec3 skyLit = uSky;');
       expect(glsl).toContain('totalEmissiveRadiance += skyLit * min(fres, 0.85) * 0.5;');
       // The constant is no longer what the emissive reads directly.

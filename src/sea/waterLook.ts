@@ -215,6 +215,24 @@ export const LIT_HI = 0.25;
  */
 export const WASH_FLOOR = 0.55;
 
+/**
+ * The least the sheen may fall to, as a fraction of the noon sheen.
+ *
+ * Joshua's brief for the night sea: "water should become dark; glancing
+ * sky reflection may remain readable; crest silhouettes may remain
+ * visible." Following the hemisphere light alone did the first and
+ * neither of the others — the NIGHT palette's sky is a near-black the
+ * lights need, but the dome that is DRAWN keeps a horizon glow, and a
+ * sea that reflects none of the sky the eye can see reads as land. So
+ * the sheen never falls below this much of the noon sheen: at glancing
+ * angles a dark blue-grey that says water, at 12% roughly the drawn
+ * glow's share of the day's, and about a third of the rim bar the
+ * lighting probe holds the shoreline to. The foam's opacity has no
+ * such floor — the rim was the foam, and the foam stays gated by the
+ * light. GAME TUNING, held by `tests/seaWaterLook.test.ts`.
+ */
+export const SHEEN_NIGHT_FLOOR = 0.12;
+
 export interface WaterLookOpts {
   /** The sea whose table this shader bakes. The one shared surface. */
   readonly swell: SeaSwell;
@@ -880,8 +898,11 @@ ${rippleChunk(octaves, advected)}
           // colour to float precision, and at night it is a night's.
           // Without a hemisphere light there is no sky to follow and the
           // constant stands, which is the look those scenes always had.
+          // Never below SHEEN_NIGHT_FLOOR of the noon sheen: the drawn
+          // dome keeps a glow the lights do not carry, and water that
+          // reflects none of it reads as land (see the constant).
           #if NUM_HEMI_LIGHTS > 0
-          vec3 skyLit = hemisphereLights[0].skyColor * uSkyGain;
+          vec3 skyLit = max(hemisphereLights[0].skyColor * uSkyGain, uSky * ${SHEEN_NIGHT_FLOOR.toFixed(2)});
           #else
           vec3 skyLit = uSky;
           #endif
