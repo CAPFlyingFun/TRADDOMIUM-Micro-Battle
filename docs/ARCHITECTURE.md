@@ -158,14 +158,14 @@ src/
                 state. The terrain-edit seam (terrainEdit.ts) is the ONLY
                 door a burrower has to the ground, and it is no-op until
                 the voxel milestone implements it. Three-free; a server
-                can run the same tick. Added in Phase 7.
+                can run the same tick. Added in Phase 6.5, the pre-player ecology pass.
   fauna/        the animals' renderer: one loaded rig per species
                 (SkeletonUtils clones from a pool lent to the nearest
                 creatures), procedural motion on the rigs — legs found by
                 measurement, wings, the worm's chain aimed along its
                 trail — and instanced impostors past the pool's reach.
                 What flora/ is to world/objects, this is to creatures/.
-                Added in Phase 7.
+                Added in Phase 6.5, the pre-player ecology pass.
   ui/           screens (menu, settings, about, loading, pause) and HUD
                 widgets. Typed hooks only. ui/splash/ is the key-art
                 stage: the three-layer meter sandwich, the boot splash
@@ -273,6 +273,33 @@ determines where it exists. Detail Quality determines how much the
 device represents." The detail rung never reaches the populator — it
 sets the bubble's radius and its caps (`world/objects/budget.ts`) and
 nothing else, and a test holds a tree in the same place at every rung.
+
+`creatures/` and `fauna/` were added on 2026-09-07, in the pre-player
+ecology pass (Phase 6.5), and split the same way the objects are: the
+animals are CORE (`creatures/` — species as data with every number
+labelled, a plain `CreatureState` per animal, a deterministic
+population per 16 m cell from the same seed and habitat the plants
+use, a decision every `thinkS` rather than every frame, and pure
+locomotion integrators), and the way they look is a renderer
+(`fauna/` — one loaded rig per species, a small pool of skeleton clones
+lent to the nearest, procedural legs, wings and the worm's chain,
+instanced impostors past the pool). Joshua's rule for the pass extends
+the vegetation's: "Kauaʻi determines what belongs there. The
+deterministic world determines where it exists. Detail Quality
+determines how richly the device represents it. Creature AI determines
+what living things do. Only explicitly authorized actors may change
+the terrain. Water responds to the world, but does not sculpt it." The
+last two sentences are the seam in `creatures/terrainEdit.ts`: a
+burrower's only door to the ground is `BurrowEditor`, the species table
+says which species may knock, and the editor this build has is the
+no-op — the voxel contract is not built, so the worm burrows and the
+survey stands, and the HUD says so. Water, rain, rivers, the sea, the
+weather, walking, growth, aphids and flies never reach the seam at all.
+The island's resources (`world/ecology/`) are DERIVED from the plants
+and the real water rather than placed: nectar is a flower's, sap a
+tree's, litter the forest floor's, and a water edge is where the
+freshwater solver says the ground is dry beside ground that is wet —
+"Water is a WORLD SYSTEM, not an object quota."
 
 `net → input(Intent.ts)` was added on 2026-09-04, with the practice bot
 (`net/PracticeBot.ts`): a scripted player's thumbs must speak the ONE
@@ -511,6 +538,7 @@ permanently excluded.
 | 4 Inland water | hydrology bake feeding the local solver; per-reach bed materials; cascade FX; NHDPlus/DLNR names | `drainage.ts`, `islandChannels.ts`, `hydro.ts`, `waterSim.ts`, `nearestWater.ts` |
 | **5 Sky / weather** | **The island's sky, live (2026-09-07).** Joshua: "real weather synced… with a skybox HDRI." THE FEED: `world/weather/liveWeather.ts` — one `WeatherSource`, live → cached → simulated: v0's Open-Meteo provider re-added as `assets/openMeteo.ts` (the only file that spells the endpoint; a reply is untrusted input), v0's 22-station grid (`stations.ts`), field (`field.ts`, a Shepard taper over 20 km, wind as a velocity vector) and blend (`blend.ts`, per-variable easing in sim time) ported into core, the reading kept three hours in this device's storage (`persistence/weatherCache.ts`), the seeded `SkyModel` under it all, `Conditions` → `WeatherNow` through `toWeatherNow`. THE SUN: `world/weather/solar.ts`, NOAA's equations on the real HST clock, pinned against Līhuʻe's published sunrise and sunset. THE LOOK: `sky/` — `skyLook` (pure: image, light, fog, horizon from the reading and the sun; overcast goes diffuse, not merely dim), `SkyView` (an HDRI skydome of Poly Haven CC0 pure skies from TCS baked to the texture ladder by `scripts/bakeSky.mjs`, two images cross-faded and turned so the baked sun stands at the real one's bearing, driving the scene's sun and sky lights, fog and horizon), `RainView` (v0's rain sheet). The HUD's sky line names the source (`live`/`cached`/`sim`); `?sky=`/`?hour=` are a probe's doors (`probe:sky`); the `weather` layer toggle is real. NOT built: lightning, wind on the grass, wet ground, an environment map (PMREM) — the lights are driven numerically first, to be measured on the phone | `openMeteo.ts`, `stations.ts`, `field.ts`, `blend.ts`, `gameplay.ts`'s bridge (as `toWeatherNow`), `Rain.ts` (as `sky/RainView.ts`), `sky.ts`'s palette and fog rule (as `sky/skyLook.ts`); TCS's `public/sky/*.hdr` as art masters. `WeatherService.ts` was read and reshaped rather than ported: its chain is `LiveWeather`, its cache the persistence store, its clock a hook |
 | **6 Vegetation** | **The biome-aware world-object streamer (2026-09-06).** Three questions answered apart: HABITAT (`world/habitat.ts` — the ESA landcover raster, distance to the sea, the coarse survey's height and slope, the drainage; rainfall and soil as typed seams), WORLD GENERATION (`world/objects/populate.ts` — one fixed seed + a 16 m cell + the habitat → a jittered-lattice, patch-clumped, deterministic population with stable ids on trees and rocks and a `WorldDelta` seam), DETAIL (`world/objects/budget.ts` — the rung's radius and per-family caps, maximums not quotas). Drawn by `flora/WorldObjects.ts` as a camera bubble of instanced meshes, thinned by rank against true 3D distance, each object at its family's REST on the ground (foot and normal from the live heightfield, re-posed on its revision: twigs along the slope, rocks and stones on their base and bedded, trees up and buried as the slope needs — Joshua's "basic collision with ground and simple physics for now", 2026-09-06, from his phone) over a clipmap that draws the heightfield at up to an eighth of the HD step so the drawn ground is where the feet are (`terrain/TerrainView.ts`, `SUB_HD_LEVELS`); the `vegetation` layer in the perf world with its own HUD lines and `probe:objects`. NOT built, by the brief: climbing, collision, wind, persistence of deltas (the seam exists; nothing writes it), the far vegetation impostor past the bubble | `stableHash` (as `world/random.ts`), `landcover.ts` (reshaped: a class, bilinear class weights), `kauai-veg.bin` verbatim, `treeMesh` (as `flora/treeGeometry.ts`, plus scrub and palm shapes). `GroundCover` and `trunkSolid` were read and not ported: the first never ran in a shipped scene, the second is Phase 7/8's |
+| **6.5 Ecology (pre-player)** | **What lives on the island before the ant does (2026-09-07).** Seven more plant families grown by the same three questions (fern, reed, flower, leaf litter, small shrub, broadleaf, coastal — `world/objects/`), the resource layer derived from them and from the real water (`world/ecology/`: nectar, seed, sap, litter, honeydew hosts, water edges; amounts are capacities, nothing is consumed yet), and three animals — earthworm, aphid, housefly — as data-driven core (`creatures/`: cited sizes by the spine, throttled intent, walk/burrow/fly integrators, deterministic population per cell, far/near/full tiers, caps per rung that are maximums) drawn by `fauna/` from the three rigged-but-unanimated GLBs with procedural motion. Four more layers in the perf world (resources, worms, aphids, flies) with HUD lines and `probe:ecology`. NOT built, by the brief: the Queen, combat, economy, colonies, farming, erosion; the terrain edit itself (the seam is built, the editor is the no-op until the voxel milestone) | the three GLBs verbatim (from TCS, where they were sized against the literature); TCS's `creatureBrain` throttle, `Critter.findLegs`, `WormBody` chain-aiming and `islandWorm` band constants as techniques, re-written; BE's `faunaLogic` shape |
 | 7 Player shell | `actor/` composition, `Posture` incl. climbing, camera ownership seam | `locomotion`, `gait`, `pace`, `stamina`, `motion`, `castes`, `FollowCamera` + its boundary test |
 | 8 Ground movement → Flight → Surface traversal | one atomic take-off (`launchInto`), integration test for flight↔climb | `flight.ts`, `wings`, `wingbeat`, `climb.ts`, `surfaceGrip.ts`, `waveClearance`, `wading` |
 | 9 Autonomy / navigation | Intent producer sibling to input | `missionBrain`, `mission`, `autopilot`, `routePlanner`, `wander`, `lookout` + `DRONE_GCS_AUDIT` |

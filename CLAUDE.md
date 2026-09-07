@@ -184,6 +184,22 @@ its own.
   the same place at every rung. Trees and rocks carry stable ids
   (`tree:cx,cz:site`); a future save stores DELTAS against them, never
   the generated world.
+- **Only an authorised actor edits the ground; the animals are data**
+  (the pre-player ecology pass, 2026-09-07). The list of who may change
+  the terrain is short and explicit — player ants, AI ants, burrowing
+  creatures, a tool granted the right — and everything else NEVER does:
+  water, rain, rivers, the sea, the weather, walking, growth, aphids,
+  flies. A burrower's only door is `creatures/terrainEdit.ts`, the
+  species table says which species may knock, and the editor this
+  build has is the no-op: no voxel contract exists yet, so the worm
+  burrows and the survey stands, and the HUD's ground line says so.
+  Do not build a second, private way to deform the ground for one
+  creature. The creatures themselves follow the objects' rule — one
+  seed, a 16 m cell and the habitat say where an animal is; the rung
+  says how many this phone simulates and draws, as caps that are
+  maximums; every number in `creatures/species.ts` is labelled
+  MEASURED, BIOLOGICAL SHAPE or GAME TUNING; and `creatures/` is core,
+  so a server can run the same tick.
 - **The sky is the island's, or it says so** (Phase 5, 2026-09-07). The
   weather is read live from Open-Meteo over the 22-station grid, kept
   for three hours, and only then falls back to the seeded model — and
