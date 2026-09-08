@@ -1,29 +1,38 @@
 /**
  * The legs: pure integrators that turn at a rate, never overshoot, keep
- * a worm in its band, a fly under its ceiling and over the ground, an
- * aphid on its stem — and never write a NaN.
+ * a worm in its band, a fly under its ceiling and over the FLOOR — the
+ * ground, or the water standing on it — an aphid on its stem, and never
+ * write a NaN.
  */
 import { describe, expect, it } from 'vitest';
 import { APHID, EARTHWORM, HOUSEFLY, newCreature, unitsOfMm, type CreatureState, type CreatureWorld } from '../src/creatures';
 import { wrapHeading } from '../src/creatures/heading';
-import { DROP_MM_S, arrived, burrow, fly, isAirborne, isMoving, move, paceOf, walk } from '../src/creatures/locomotion';
+import { DROP_MM_S, arrived, burrow, floorAt, fly, isAirborne, isMoving, move, paceOf, walk } from '../src/creatures/locomotion';
 import { distance, world, type WorldPoint } from '../src/world/coords';
+import type { WaterQuery } from '../src/world/ecology/resources';
 import { SEA_HABITAT } from '../src/world/habitat';
+import { SEA_LEVEL } from '../src/world/heightfield';
 
 const slope = (at: WorldPoint): number => 100 + at.wx * 0.05 + Math.sin(at.wz / 50) * 3;
 
-function fakeWorld(ground: (at: WorldPoint) => number = slope): CreatureWorld {
+/** A world of one ground function and, when a test stands something on water, one water. Null water: none known. */
+function fakeWorld(ground: (at: WorldPoint) => number = slope, water: WaterQuery | null = null): CreatureWorld {
   return {
     groundAt: ground,
     normalAt: () => ({ nx: 0, ny: 1, nz: 0 }),
     habitatAt: () => SEA_HABITAT,
     plantsOf: () => null,
     resourcesOf: () => null,
-    water: null,
+    water,
     weather: () => null,
     disturbances: () => [],
   };
 }
+
+/** Water that is the same everywhere: the sea, a pond `depth` deep, or dry ground under a water that knows it. */
+const SEA: WaterQuery = { freshDepthAt: () => 0, isSeaAt: () => true, nearestWater: () => null };
+const pond = (depth: number): WaterQuery => ({ freshDepthAt: () => depth, isSeaAt: () => false, nearestWater: () => null });
+const DRY: WaterQuery = { freshDepthAt: () => 0, isSeaAt: () => false, nearestWater: () => null };
 
 function creature(species: typeof EARTHWORM, at: WorldPoint, height: number, heading = 0): CreatureState {
   return newCreature({ id: `${species.id}:0,0:0`, species: species.id, cellKey: '0,0', at, height, heading, phase: 0 });
@@ -197,6 +206,94 @@ describe('flying', () => {
     c.behaviour = 'fly';
     c.target = world(0, 10_000);
     expect(fly(c, HOUSEFLY, w, 0.1)).toBeCloseTo(unitsOfMm(HOUSEFLY.flight!.cruiseMmS) * 0.1, 9);
+  });
+});
+
+describe('the floor under a flier', () => {
+  const ceiling = unitsOfMm(HOUSEFLY.flight!.ceilingMm);
+  const lo = unitsOfMm(HOUSEFLY.flight!.cruiseMm[0]);
+  const hi = unitsOfMm(HOUSEFLY.flight!.cruiseMm[1]);
+
+  it('is mean sea level over the sea, the ground plus the depth over fresh water, and the ground on dry land', () => {
+    const at = world(10, 10);
+    // A two-metre sea: the bed is not the floor, the mean surface is.
+    expect(floorAt(fakeWorld(() => -200, SEA), at)).toBe(SEA_LEVEL);
+    // A beach the query calls sea because the swell reaches it is still a beach: the ground wins where it is higher.
+    expect(floorAt(fakeWorld(() => 5, SEA), at)).toBe(5);
+    // A thirty-centimetre pond on ground a metre up: the floor is the pond's surface.
+    expect(floorAt(fakeWorld(() => 100, pond(30)), at)).toBe(130);
+    expect(floorAt(fakeWorld(() => 100, DRY), at)).toBe(100);
+    // With no water known, a bed below mean sea level is the sea — the water query's own rule — and dry ground is dry.
+    expect(floorAt(fakeWorld(() => -50), at)).toBe(SEA_LEVEL);
+    expect(floorAt(fakeWorld(() => 100), at)).toBe(100);
+    // A ground the world cannot price is handed back as it is, so a caller that guards the ground guards the floor.
+    expect(Number.isNaN(floorAt(fakeWorld(() => NaN, pond(30)), at))).toBe(true);
+    // A depth that is not a depth adds nothing: the answer is never NaN where the ground was not.
+    expect(floorAt(fakeWorld(() => 100, pond(NaN)), at)).toBe(100);
+    expect(floorAt(fakeWorld(() => 100, pond(-5)), at)).toBe(100);
+  });
+
+  it('a fly over a two-metre sea flies in its band over the water, never between the bed and the surface, and lands on the water', () => {
+    const w = fakeWorld(() => -200, SEA);
+    // Starting on the seabed — where alpha.35 held it — it is over the surface from the first frame.
+    const c = creature(HOUSEFLY, world(0, 0), -200);
+    c.behaviour = 'fly';
+    c.target = world(0, 100_000);
+    c.targetHeight = 10_000;
+    for (let i = 0; i < 60 * 5; i += 1) {
+      fly(c, HOUSEFLY, w, 1 / 60);
+      expect(c.height).toBeGreaterThanOrEqual(SEA_LEVEL - 1e-9);
+      expect(c.height).toBeLessThanOrEqual(SEA_LEVEL + ceiling + 1e-9);
+      finite(c);
+    }
+    expect(c.height).toBeGreaterThanOrEqual(SEA_LEVEL + lo - 1e-9);
+    expect(c.height).toBeCloseTo(SEA_LEVEL + hi, 6);
+    // Asked for no height in particular, it settles at the bottom of the band — twelve centimetres over the sea, not the bed.
+    c.targetHeight = NaN;
+    for (let i = 0; i < 60 * 5; i += 1) fly(c, HOUSEFLY, w, 1 / 60);
+    expect(c.height).toBeCloseTo(SEA_LEVEL + lo, 6);
+    // Told to land over the sea, it comes down to the water and no further.
+    c.behaviour = 'land';
+    for (let i = 0; i < 60 * 5; i += 1) fly(c, HOUSEFLY, w, 1 / 60);
+    expect(c.height).toBeCloseTo(SEA_LEVEL, 6);
+  });
+
+  it('the same over a thirty-centimetre pond: the band hangs from the pond\'s surface, not its bed', () => {
+    const depth = 30;
+    const w = fakeWorld(slope, pond(depth));
+    const start = world(0, 0);
+    const surface = (at: WorldPoint): number => slope(at) + depth;
+    // On the bed, as a fly that aimed at the puddle was.
+    const c = creature(HOUSEFLY, start, slope(start));
+    c.behaviour = 'fly';
+    c.target = world(400, 300);
+    c.targetHeight = slope(start) + 10_000;
+    for (let i = 0; i < 60 * 3; i += 1) {
+      fly(c, HOUSEFLY, w, 1 / 60);
+      expect(c.height).toBeGreaterThanOrEqual(surface(c.at) - 1e-9);
+      expect(c.height).toBeLessThanOrEqual(surface(c.at) + ceiling + 1e-9);
+      finite(c);
+    }
+    expect(c.height - surface(c.at)).toBeCloseTo(hi, 3);
+    c.behaviour = 'land';
+    for (let i = 0; i < 60 * 3; i += 1) fly(c, HOUSEFLY, w, 1 / 60);
+    expect(c.height).toBeCloseTo(surface(c.at), 6);
+  });
+
+  it('a walker and a burrower keep the ground: an aphid is not a boat, and a worm\'s band is under the bed', () => {
+    const w = fakeWorld(() => 100, pond(30));
+    const a = creature(APHID, world(0, 0), 100);
+    a.behaviour = 'idle';
+    walk(a, APHID, w, 0.1);
+    expect(a.height).toBe(100);
+    const f = creature(HOUSEFLY, world(0, 0), 100);
+    f.behaviour = 'idle';
+    walk(f, HOUSEFLY, w, 0.1);
+    expect(f.height).toBe(100);
+    const worm = creature(EARTHWORM, world(0, 0), 100 - unitsOfMm(EARTHWORM.burrow!.underMm));
+    worm.behaviour = 'burrow';
+    burrow(worm, EARTHWORM, w, 1);
+    expect(worm.height).toBeLessThanOrEqual(100 - unitsOfMm(EARTHWORM.burrow!.boreMm) / 2 + 1e-9);
   });
 });
 

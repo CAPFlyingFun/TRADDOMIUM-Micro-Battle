@@ -24,7 +24,7 @@ export {
   ALARM_FLEES_AT, CALM_WEATHER, FLOOD_CLOSING, FLOOD_THREAT, HOST_WALK_LENGTHS, RAINING_MM_HR, hostPlantOf, isLand, nearestSite,
   senseAlarm, senseFlood, think, thinkDue, thinkPending, tickNeeds,
 } from './intent';
-export { arrived, burrow, fly, isAirborne, isMoving, move, paceOf, walk } from './locomotion';
+export { arrived, burrow, floorAt, fly, isAirborne, isMoving, move, paceOf, walk } from './locomotion';
 export { wrapHeading } from './heading';
 export {
   GROUND_CLEARANCE, MIN_STANDOFF, UNDER_GROUND, VIEW_LENGTHS, VIEW_RISE,

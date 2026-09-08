@@ -46,6 +46,20 @@
  * stands when the watch is retaken, which is the price of knowing who
  * moved.
  *
+ * THE FLY MEASURES FROM THE WATER, NOT THE BED, AND DRY LAND IS DRY
+ * (Joshua, 2026-09-08, from a beach with the finder on: the flies "look
+ * like they are underwater still and all over the place"). The ground the
+ * brain reads for the worm and the aphid is the heightfield, and under
+ * the sea the heightfield is the seabed. So the air brain reads
+ * `floorAt` — the ground, or the water's surface where water stands on
+ * it — for every height it chooses, and `isLand` refuses standing fresh
+ * water as it refuses the sea, so a hop is never aimed at a puddle's bed
+ * (Joshua's own words for the aphid: "seek dry ground"). The worm and
+ * the aphid keep the ground: an aphid is not a boat. And a hop that runs
+ * out of time short of its dry target, over a pond's corner or a bay's
+ * curve, is not landed where it is: A FLY DOES NOT PERCH ON WATER
+ * (`hopOffWater`, below).
+ *
  * THE FLY'S FLEE IS A TAKEOFF — `state.ts` says so on the word, and the
  * renderer's `AIRBORNE` list does not include `flee`, so an air species
  * never uses the word: it takes off and flies away, which is what a fly
@@ -78,7 +92,7 @@ import { CELL_SPAN } from '../world/objects/cells';
 import { WATER_SIM_DEFAULTS } from '../world/water/sim';
 import { unitsOfMetres } from './finder';
 import { ahead, headingToward, wrapHeading } from './heading';
-import { arrived, isAirborne, isMoving } from './locomotion';
+import { arrived, floorAt, isAirborne, isMoving } from './locomotion';
 import { PERCH_FRACTION } from './population';
 import { sizeRatio, unitsOfMm, type CreatureSpecies, type FlightSpec } from './species';
 import { behaviourAllowed, type Behaviour, type CreatureState } from './state';
@@ -362,12 +376,34 @@ export function senseFlood(state: CreatureState, species: CreatureSpecies, world
 // Looking around
 // ---------------------------------------------------------------------------
 
-/** Dry land the creatures may aim at: ground above the sea, not the sea to the water, not the sea to the habitat. */
+/**
+ * DRY land the creatures may aim at: ground above the sea, not the sea to
+ * the water, not the sea to the habitat — and not under standing fresh
+ * water either. A puddle's bed is ground the heightfield prices above the
+ * sea and the habitat calls shrubland, and a fly that aimed at it landed
+ * on the bed with the pond over it; a flooded bank is the same to a fly
+ * fleeing the flood. "Seek dry ground" (Joshua, 2026-09-08, for the
+ * aphid) is the rule for anything that picks a spot to stand: dry is
+ * dry. With no water known, nothing is wet — a null water is "no water
+ * known", not "dry", but there is no reading to refuse on, and the sea
+ * is still refused by the ground and the habitat.
+ *
+ * A water-edge site passes: it is derived at a DRY lattice sample beside
+ * a wet one (`world/ecology/derive.ts`), so a drink is aimed at the
+ * bank, not the water. One the water has since risen over is refused
+ * until its cell's next refresh — which is right, because the bank it
+ * marked is under the pond now.
+ */
 export function isLand(world: CreatureWorld, at: WorldPoint): boolean {
   if (!Number.isFinite(at.wx) || !Number.isFinite(at.wz)) return false;
   const ground = world.groundAt(at);
   if (!(ground >= SEA_LEVEL)) return false;
-  if (world.water !== null && world.water.isSeaAt(at)) return false;
+  const water = world.water;
+  if (water !== null) {
+    if (water.isSeaAt(at)) return false;
+    // `> 0`, not `!== 0`: a NaN depth is not wet, as the resource layer reads it.
+    if (water.freshDepthAt(at) > 0) return false;
+  }
   return world.habitatAt(at).kind !== 'sea';
 }
 
@@ -420,7 +456,7 @@ export function hostPlantOf(state: CreatureState, world: CreatureWorld): PlantSo
   return null;
 }
 
-/** A hop `hopMm` away in a random direction that lands on dry land, or null when four tries found only sea. */
+/** A hop `hopMm` away in a random direction that lands on dry land, or null when four tries found only sea or standing water. */
 function landwardHop(world: CreatureWorld, at: WorldPoint, flight: FlightSpec, rand: () => number): WorldPoint | null {
   for (let i = 0; i < LANDWARD_TRIES; i += 1) {
     const theta = rand() * Math.PI * 2;
@@ -464,7 +500,7 @@ export function think(
       thinkPlant(state, species, world, rand, host === undefined ? hostPlantOf(state, world) : host, ground);
       break;
     case 'air':
-      thinkAir(state, species, world, rand, sky, ground);
+      thinkAir(state, species, world, rand, sky);
       break;
   }
   if (!Number.isFinite(state.targetHeight)) state.targetHeight = state.height;
@@ -653,15 +689,70 @@ function walkOnHost(
 }
 
 /**
+ * A FLY DOES NOT PERCH ON WATER.
+ *
+ * Every hop is aimed at dry land (`landwardHop`, `isLand`), but a hop is
+ * a CLOCK as well as a place: `hopS` can run out short of the target,
+ * and where it runs out is wherever the path was — a pond's corner, the
+ * curve of a bay along a beach. The old brain hovered there, landed
+ * there and perched there, and `walk` then set the perched body's height
+ * to the GROUND, which under water is the bed: Joshua's flies sitting
+ * on and under the sea along the shore (2026-09-08) were flies that had
+ * run out of hop over the water and perched where they were.
+ *
+ * So a hover or a landing that finds no land under it does not perch.
+ * It takes a hop toward dry ground and flies it, a cruise floor over
+ * whatever is under the target; and when four tries find only water it
+ * hovers a cruise floor over the water — `floorAt` keeps a hover above
+ * the surface — and asks again at the next think. Water is never a
+ * place to stop, only a place to be over. The hop is random, as every
+ * hop with nothing to aim at is: the dry target it was short of is not
+ * kept, because a target a hop failed to reach is, in the same wind and
+ * at the same pace, a target the next hop may fail to reach.
+ *
+ * `floor` is the floor under the fly now and `lo` the cruise floor above
+ * it, both already read by the caller. The site it was flying to, if
+ * any, is let go with the target: it is not there, and a perch elsewhere
+ * that still named it would feed at a flower it never reached.
+ */
+function hopOffWater(
+  state: CreatureState, world: CreatureWorld, flight: FlightSpec, rand: () => number, floor: number, lo: number,
+): void {
+  state.hostId = null;
+  const hop = landwardHop(world, state.at, flight, rand);
+  if (hop !== null) {
+    const under = floorAt(world, hop);
+    state.target = hop;
+    state.targetHeight = (Number.isFinite(under) ? under : floor) + lo;
+    enter(state, 'fly', draw(rand, flight.hopS));
+    return;
+  }
+  state.target = state.at;
+  state.targetHeight = floor + lo;
+  enter(state, 'hover', draw(rand, flight.hoverS));
+}
+
+/**
  * AIR. Perch → takeoff → fly → hover → land → feed, rest or perch again.
  * The flight aims at a resource it is drawn to when one is in sight
  * (always when hungry, half the time otherwise), else a random hop of
- * `hopMm` that is checked to land on dry land — never over the sea. On
- * alarm it takes off (or, already up, flies on) toward the away point
- * and keeps going while the alarm holds. Rain and night ground it.
+ * `hopMm` that is checked to land on dry land — never over the sea,
+ * never on standing water. On alarm it takes off (or, already up, flies
+ * on) toward the away point and keeps going while the alarm holds. Rain
+ * and night ground it — on the ground: a hover or a landing that finds
+ * water under it hops for land instead (`hopOffWater`), and the rain
+ * brings a fly down at the first dry ground under it, not before.
+ *
+ * Every height this brain chooses is measured from the FLOOR (`floorAt`
+ * in `locomotion.ts`) and not from the ground `think` reads for the
+ * other two media: the ground under a fly on a beach is the seabed two
+ * metres down, and a cruise band hung from it is under water. So the
+ * floor is read here, where the fly stands, and again under each target
+ * as it is chosen — a takeoff, a hover and a landing are all so many
+ * centimetres over the surface that is actually there.
  */
 function thinkAir(
-  state: CreatureState, species: CreatureSpecies, world: CreatureWorld, rand: () => number, sky: CreatureWeather, ground: number,
+  state: CreatureState, species: CreatureSpecies, world: CreatureWorld, rand: () => number, sky: CreatureWeather,
 ): void {
   const flight = species.flight;
   if (flight === null) return;
@@ -669,7 +760,8 @@ function thinkAir(
   const body = sizeRatio(state, species) * unitsOfMm(species.lengthMm);
   const lo = unitsOfMm(flight.cruiseMm[0]);
   const climb = unitsOfMm(flight.climbMmS);
-  const g = Number.isFinite(ground) ? ground : state.height;
+  const floor = floorAt(world, state.at);
+  const g = Number.isFinite(floor) ? floor : state.height;
   const above = state.height - g;
   const grounded = sky.rainMmHr >= RAINING_MM_HR || sky.night;
   const done = state.behaviourS >= state.behaviourUntilS;
@@ -703,23 +795,32 @@ function thinkAir(
       enter(state, 'fly', draw(rand, flight.hopS));
       return;
     case 'fly': {
-      if (!done && !arrived(state, species) && !grounded) return;
+      // Grounded means brought down at the first dry ground: over water the hop is flown out.
+      if (!done && !arrived(state, species) && !(grounded && isLand(world, state.at))) return;
       if (state.target === null) state.target = state.at;
-      const under = world.groundAt(state.target);
+      const under = floorAt(world, state.target);
       state.targetHeight = (Number.isFinite(under) ? under : g) + lo;
       enter(state, 'hover', draw(rand, flight.hoverS));
       return;
     }
     case 'hover': {
       if (!done) return;
+      if (!isLand(world, state.at)) {
+        hopOffWater(state, world, flight, rand, g, lo);
+        return;
+      }
       if (state.target === null) state.target = state.at;
-      const under = world.groundAt(state.target);
+      const under = floorAt(world, state.target);
       state.targetHeight = Number.isFinite(under) ? under : g;
       enter(state, 'land', Math.max(0, above) / climb + flight.hoverS[1]);
       return;
     }
     case 'land':
       if (above > body && !done) return;
+      if (!isLand(world, state.at)) {
+        hopOffWater(state, world, flight, rand, g, lo);
+        return;
+      }
       state.target = null;
       state.targetHeight = g;
       if (state.hostId !== null && state.hunger >= needs.feedAt) enter(state, 'feed', draw(rand, needs.feedS));

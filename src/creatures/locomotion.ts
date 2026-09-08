@@ -11,6 +11,18 @@
  * target, the height and the word; this file only obeys them, and it
  * obeys them every frame while the brain speaks every `thinkS`.
  *
+ * THE FLOOR A FLIER MEASURES FROM IS THE SURFACE UNDER IT (Joshua,
+ * 2026-09-08, from the beach with the finder on: "it looks like the
+ * flies are underwater still... do they have a ceiling on the fly that's
+ * not making it fly above the water?"). `groundAt` is the heightfield,
+ * and under the sea the heightfield is the SEABED; under a pond it is the
+ * bed. A fly whose band was the bed plus twelve to sixty centimetres was
+ * therefore held two metres under the sea off every beach, and the
+ * ceiling that was meant to stop it climbing was what pinned it there.
+ * `floorAt` is the one answer: the ground, or the water's surface where
+ * water stands on it. Only the AIR reads it — a walker stands on the
+ * ground, a burrower lives under it, and an aphid is not a boat.
+ *
  * TURNING IS A RATE, NOT AN EASE. The donor worm's first cut eased its
  * heading by half the gap a second, which is fastest when the gap is
  * widest — a turning radius of four millimetres inside a six-millimetre
@@ -36,7 +48,8 @@
  *
  * Pure: no three, no DOM. `src/creatures/` is core.
  */
-import { distance } from '../world/coords';
+import { distance, type WorldPoint } from '../world/coords';
+import { SEA_LEVEL } from '../world/heightfield';
 import { ahead, headingToward, turnToward } from './heading';
 import { sizeRatio, unitsOfMm, type CreatureSpecies } from './species';
 import type { Behaviour, CreatureState } from './state';
@@ -102,6 +115,41 @@ export function paceOf(state: CreatureState, species: CreatureSpecies): number {
     default:
       return 0;
   }
+}
+
+/**
+ * THE FLOOR under a point: what a flier stands on, hovers over and is
+ * kept above — the ground, or the water's surface where water stands on
+ * the ground.
+ *
+ *   - Over the SEA it is mean sea level (`SEA_LEVEL`), or the ground
+ *     where the ground is higher — a beach the query calls sea because a
+ *     swell reaches over it is still a beach. The swell itself is the
+ *     renderer's: core knows the mean surface and not the wave on it, so
+ *     a fly a hand over the mean surface is the honest answer core can
+ *     give, and the cruise band (twelve centimetres and up) is more than
+ *     a hand.
+ *   - Over FRESH water it is the ground plus the water's depth over it,
+ *     which is the pond's surface.
+ *   - On dry ground it is the ground.
+ *
+ * The sea is asked of the water when there is one (its `isSeaAt` knows
+ * the bed AND the sea owner's reach); with no water known, a bed below
+ * mean sea level is the sea — the same rule the water's own query uses,
+ * and on this island there is no dry ground below the line. A ground
+ * the world cannot price (non-finite) is returned as it is, so a caller
+ * that guards the ground guards the floor; and a depth that is not a
+ * depth (NaN, negative) adds nothing, so the answer is never NaN where
+ * the ground was not.
+ */
+export function floorAt(world: CreatureWorld, at: WorldPoint): number {
+  const ground = world.groundAt(at);
+  if (!Number.isFinite(ground)) return ground;
+  const water = world.water;
+  const sea = water !== null ? water.isSeaAt(at) : ground < SEA_LEVEL;
+  if (sea) return Math.max(ground, SEA_LEVEL);
+  const depth = water === null ? 0 : water.freshDepthAt(at);
+  return depth > 0 ? ground + depth : ground;
 }
 
 /** This individual's body length, world units: the cited length at its own size. */
@@ -239,10 +287,18 @@ export function burrow(state: CreatureState, species: CreatureSpecies, world: Cr
 /**
  * FLY: the airborne words. Cruise toward the target on the plane; ease
  * the height toward the chosen one at the climb rate, kept inside the
- * cruise band over the ground under it and never past the ceiling;
- * landing descends onto the ground. Hovering holds. The pitch is the
+ * cruise band over the FLOOR under it and never past the ceiling;
+ * landing descends onto the floor. Hovering holds. The pitch is the
  * climb angle, from the vertical velocity — a renderer reads it, never a
  * mode.
+ *
+ * The floor, not the ground (`floorAt`): the band, the ceiling and the
+ * clamp are all measured from the surface the fly is actually over, so a
+ * hop that crosses a pond or a flee along a beach carries the body over
+ * the water and not through it. The floor is re-read where the fly IS
+ * every frame, as the burrow re-reads its band — a fly crossing a bank
+ * has the floor step up to the water and step down again, and follows
+ * it.
  */
 export function fly(state: CreatureState, species: CreatureSpecies, world: CreatureWorld, dt: number): number {
   if (!(dt > 0) || !Number.isFinite(dt)) return 0;
@@ -252,16 +308,16 @@ export function fly(state: CreatureState, species: CreatureSpecies, world: Creat
   const climb = unitsOfMm(spec.climbMmS);
   const pace = state.behaviour === 'hover' ? 0 : cruise;
   const moved = stepToward(state, species, pace, dt);
-  const ground = world.groundAt(state.at);
-  if (!Number.isFinite(ground)) return moved;
-  const ceiling = ground + unitsOfMm(spec.ceilingMm);
-  const lo = Math.min(ceiling, ground + unitsOfMm(spec.cruiseMm[0]));
-  const hi = Math.min(ceiling, ground + unitsOfMm(spec.cruiseMm[1]));
+  const floor = floorAt(world, state.at);
+  if (!Number.isFinite(floor)) return moved;
+  const ceiling = floor + unitsOfMm(spec.ceilingMm);
+  const lo = Math.min(ceiling, floor + unitsOfMm(spec.cruiseMm[0]));
+  const hi = Math.min(ceiling, floor + unitsOfMm(spec.cruiseMm[1]));
   let wanted: number;
-  if (state.behaviour === 'land') wanted = ground;
+  if (state.behaviour === 'land') wanted = floor;
   else wanted = Number.isFinite(state.targetHeight) ? Math.min(hi, Math.max(lo, state.targetHeight)) : lo;
   const before = state.height;
-  const height = Math.min(ceiling, Math.max(ground, approach(state.height, wanted, climb * dt)));
+  const height = Math.min(ceiling, Math.max(floor, approach(state.height, wanted, climb * dt)));
   state.height = height;
   state.pitch = pitchOf(height - before, moved);
   return moved;

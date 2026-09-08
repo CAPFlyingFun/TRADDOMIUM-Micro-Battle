@@ -5,7 +5,9 @@
  * a resource and takes off from a disturbance; needs climb and come
  * back; an alarm is noticed between thinks; a flood is noticed when its
  * edge is nearer than it was, or already underfoot, and fled the way a
- * disturbance is; and a thousand seconds of any of them is finite.
+ * disturbance is; the fly's heights hang from the water's surface where
+ * water stands, dry land is dry, and a fly does not perch on water; and
+ * a thousand seconds of any of them is finite.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -17,11 +19,12 @@ import {
   senseFlood, think, thinkDue, thinkPending, tickNeeds,
 } from '../src/creatures/intent';
 import { unitsOfMetres } from '../src/creatures/finder';
-import { isAirborne, move } from '../src/creatures/locomotion';
+import { floorAt, isAirborne, move } from '../src/creatures/locomotion';
 import { HOST_FLEE_LENGTHS } from '../src/creatures/intent';
 import { distance, world, type WorldPoint } from '../src/world/coords';
-import type { CellResources, PlantSource, ResourceSite } from '../src/world/ecology/resources';
+import type { CellResources, PlantSource, ResourceSite, WaterQuery } from '../src/world/ecology/resources';
 import { SEA_HABITAT, type Habitat, type HabitatKind } from '../src/world/habitat';
+import { SEA_LEVEL } from '../src/world/heightfield';
 import { CELL_SPAN } from '../src/world/objects/cells';
 import { mulberry32 } from '../src/world/random';
 import { WATER_SIM_DEFAULTS } from '../src/world/water/sim';
@@ -44,7 +47,10 @@ interface Fake extends CreatureWorld {
   plants: PlantSource[];
 }
 
-function fakeWorld(): Fake {
+/** The sea east of the line and nothing fresh anywhere: the water most of these tests stand beside. */
+const SEA_ONLY: WaterQuery = { freshDepthAt: () => 0, isSeaAt: (at) => at.wx >= SEA_EAST_OF, nearestWater: () => null };
+
+function fakeWorld(water: WaterQuery | null = SEA_ONLY): Fake {
   const w: Fake = {
     sky: null,
     list: [],
@@ -58,11 +64,28 @@ function fakeWorld(): Fake {
       const sites = w.sites.filter((s) => Math.floor(s.at.wx / CELL_SPAN) === cx && Math.floor(s.at.wz / CELL_SPAN) === cz);
       return { cx, cz, sites };
     },
-    water: { freshDepthAt: () => 0, isSeaAt: (at) => at.wx >= SEA_EAST_OF, nearestWater: () => null },
+    water,
     weather: () => w.sky,
     disturbances: () => w.list,
   };
   return w;
+}
+
+/**
+ * A square pond on the shrubland, `POND_DEPTH` over the ordinary ground:
+ * fresh water STANDING ON LAND, which is what the heightfield, the
+ * habitat and the old `isLand` all called dry. The sea is still east of
+ * the line.
+ */
+const POND = Object.freeze({ x0: 1000, x1: 1400, z0: 1000, z1: 1400 });
+const POND_DEPTH = 30;
+const inPond = (at: WorldPoint): boolean => at.wx >= POND.x0 && at.wx < POND.x1 && at.wz >= POND.z0 && at.wz < POND.z1;
+function pondWorld(): Fake {
+  return fakeWorld({
+    freshDepthAt: (at) => (inPond(at) ? POND_DEPTH : 0),
+    isSeaAt: (at) => at.wx >= SEA_EAST_OF,
+    nearestWater: () => null,
+  });
 }
 
 function spawn(species: CreatureSpecies, at: WorldPoint, hostId: string | null = null, phase = 0.3): CreatureState {
@@ -877,4 +900,289 @@ describe('the fly', () => {
     expect(c.at.wx).toBeGreaterThan(before.wx + 10);
     expect(isAirborne(c.behaviour)).toBe(true);
   });
+});
+
+describe('the fly and the water', () => {
+  /** A perch that is over: the next think decides afresh. */
+  function perched(at: WorldPoint, hunger = 0.1): CreatureState {
+    const c = spawn(HOUSEFLY, at);
+    c.hunger = hunger;
+    c.behaviour = 'idle';
+    c.behaviourS = 10;
+    c.behaviourUntilS = 1;
+    return c;
+  }
+
+  /**
+   * A fly at the end of a `word` (a landing, or the hover before one) at
+   * `at`: the clock is up and the body is a hand — under a body length —
+   * over whatever floor is there, so the next think decides where it
+   * perches. Its target is where it is, the way a hop that ran out of
+   * time leaves it.
+   */
+  function ending(w: Fake, word: 'land' | 'hover', at: WorldPoint): CreatureState {
+    const c = spawn(HOUSEFLY, at);
+    c.behaviour = word;
+    c.behaviourS = 10;
+    c.behaviourUntilS = 1;
+    c.target = at;
+    c.height = floorAt(w, at) + 0.3;
+    return c;
+  }
+
+  const CRUISE_FLOOR = unitsOfMm(HOUSEFLY.flight!.cruiseMm[0]);
+  const POND_CENTRE = world(1200, 1200);
+  /** 0.75 draws a hop due west of 2.375 m: from the pond's centre, well past its west bank. */
+  const WESTWARD = (): number => 0.75;
+  /** 0.5 draws a hop due south of 1.75 m: from the pond's centre, still in the pond — four times over. */
+  const SOUTHWARD = (): number => 0.5;
+
+  /** Run a fly for `seconds`, counting the frames it is perched with water under it and the frames it is under a surface. */
+  function soak(w: Fake, c: CreatureState, rand: () => number, seconds: number): { wetPerches: number; underSurface: number; perchedDryAt: number } {
+    let wetPerches = 0;
+    let underSurface = 0;
+    let perchedDryAt = -1;
+    for (let i = 0; i < 30 * seconds; i += 1) {
+      step(c, HOUSEFLY, w, rand, 1 / 30);
+      const perched = !isAirborne(c.behaviour);
+      if (perched && !isLand(w, c.at)) wetPerches += 1;
+      if (perched && perchedDryAt < 0 && isLand(w, c.at)) perchedDryAt = i / 30;
+      if (c.height < floorAt(w, c.at) - 1e-9) underSurface += 1;
+      finite(c);
+    }
+    return { wetPerches, underSurface, perchedDryAt };
+  }
+
+  it('dry land is dry: isLand refuses a point under standing fresh water as it refuses the sea, and keeps a dry point', () => {
+    const w = pondWorld();
+    expect(isLand(w, world(1200, 1200))).toBe(false);
+    expect(isLand(w, world(900, 1200))).toBe(true);
+    expect(isLand(w, world(SEA_EAST_OF + 100, 400))).toBe(false);
+    // With no water known there is no reading to refuse on; the sea is still refused by the ground and the habitat.
+    const blind = fakeWorld(null);
+    expect(isLand(blind, world(1200, 1200))).toBe(true);
+    expect(isLand(blind, world(SEA_EAST_OF + 100, 400))).toBe(false);
+  });
+
+  it('over the pond the brain hovers a cruise floor above the surface, never the bed — and does not land there at all', () => {
+    const w = pondWorld();
+    const target = world(1200, 1200);
+    const surface = ground(target) + POND_DEPTH;
+    expect(floorAt(w, target)).toBe(surface);
+    // A hop whose end is over the water (an away point, or a bank the pond has since risen over), the hop's time up:
+    // the hover it chooses is over the water; and when the hover is up, water is not a place to land. Four hops due
+    // south from here are still in the pond, so it hovers on over the surface; a hop due west finds the bank.
+    const c = spawn(HOUSEFLY, world(900, 1200));
+    c.behaviour = 'fly';
+    c.behaviourS = 10;
+    c.behaviourUntilS = 1;
+    c.target = target;
+    c.at = world(1150, 1200);
+    c.height = ground(c.at) + POND_DEPTH + 20;
+    think(c, HOUSEFLY, w, () => 0.5, null);
+    expect(c.behaviour).toBe('hover');
+    expect(c.targetHeight).toBeCloseTo(surface + unitsOfMm(HOUSEFLY.flight!.cruiseMm[0]), 9);
+    c.behaviourS = 10;
+    c.behaviourUntilS = 1;
+    think(c, HOUSEFLY, w, () => 0.5, null);
+    expect(c.behaviour).toBe('hover');
+    // Held over where it IS, not over the target it let go: the pond's surface here, a cruise floor up.
+    expect(c.targetHeight).toBeCloseTo(ground(c.at) + POND_DEPTH + unitsOfMm(HOUSEFLY.flight!.cruiseMm[0]), 9);
+    expect(c.targetHeight).toBeGreaterThan(ground(c.at) + POND_DEPTH);
+    think(c, HOUSEFLY, w, () => 0.75, null);
+    expect(c.behaviour).toBe('fly');
+    expect(inPond(c.target!)).toBe(false);
+    expect(isLand(w, c.target!)).toBe(true);
+    // And a takeoff from the bank measures its band from where it stands: dry there, so the ground.
+    const bank = perched(world(900, 1200));
+    think(bank, HOUSEFLY, w, () => 0.75, null);
+    expect(bank.behaviour).toBe('takeoff');
+    expect(bank.targetHeight).toBeGreaterThanOrEqual(ground(bank.at) + unitsOfMm(HOUSEFLY.flight!.cruiseMm[0]) - 1e-9);
+  });
+
+  it('an away point over the pond is refused: the fleeing fly hops for dry ground instead', () => {
+    const w = pondWorld();
+    const c = perched(world(POND.x0 - 5, 1200));
+    c.behaviourUntilS = 100;
+    c.behaviourS = 1;
+    // The camera lands just west of it: away is east, and the longest hop east is well inside the pond.
+    expect(senseAlarm(c, HOUSEFLY, [{ at: world(c.at.wx - 2, c.at.wz), height: c.height, radius: 0 }])).toBe(true);
+    expect(inPond(c.target!)).toBe(true);
+    // 0.75 draws a hop due west, so the answer is deterministic: land, and not the pond.
+    think(c, HOUSEFLY, w, () => 0.75, null);
+    expect(c.behaviour).toBe('takeoff');
+    expect(inPond(c.target!)).toBe(false);
+    expect(isLand(w, c.target!)).toBe(true);
+    expect(c.targetHeight).toBeCloseTo(ground(c.at) + unitsOfMm(HOUSEFLY.flight!.cruiseMm[1]), 9);
+  });
+
+  it('a water-edge site is on the bank and is still a drink; one the pond has since risen over is refused for a dry hop', () => {
+    const w = pondWorld();
+    // Derived at a DRY lattice sample beside a wet one (`world/ecology/derive.ts`): the bank, a metre from the water.
+    const bank: ResourceSite = { id: 'water-edge:0,0:5', kind: 'water-edge', at: world(POND.x0 - 100, 1200), above: 0, amount: 400, ownerId: null };
+    w.sites = [bank];
+    const thirsty = perched(world(POND.x0 - 120, 1200), 0.9);
+    think(thirsty, HOUSEFLY, w, () => 0.5, null);
+    expect(thirsty.behaviour).toBe('takeoff');
+    expect(thirsty.target).toBe(bank.at);
+    expect(thirsty.hostId).toBe(bank.id);
+    // The pond has come up over the bank since its cell was derived: until the refresh the site is stale, and dry is dry.
+    const drowned: ResourceSite = { ...bank, at: world(POND.x0 + 10, 1200) };
+    w.sites = [drowned];
+    expect(isLand(w, drowned.at)).toBe(false);
+    const other = perched(world(POND.x0 - 10, 1200), 0.9);
+    think(other, HOUSEFLY, w, () => 0.75, null);
+    expect(other.behaviour).toBe('takeoff');
+    expect(other.hostId).toBeNull();
+    expect(other.target).not.toBe(drowned.at);
+    expect(isLand(w, other.target!)).toBe(true);
+  });
+
+  it('a landing that runs out over the pond does not perch: it hops for dry ground, or hovers over the water and asks again', () => {
+    const w = pondWorld();
+    const surface = ground(POND_CENTRE) + POND_DEPTH;
+    // A hop to land is found: it flies it, a cruise floor over the ground it is aimed at, the site let go.
+    const hops = ending(w, 'land', POND_CENTRE);
+    hops.hostId = 'flower:0,0:2';
+    think(hops, HOUSEFLY, w, WESTWARD, null);
+    expect(hops.behaviour).toBe('fly');
+    expect(inPond(hops.target!)).toBe(false);
+    expect(isLand(w, hops.target!)).toBe(true);
+    expect(hops.targetHeight).toBeCloseTo(ground(hops.target!) + CRUISE_FLOOR, 9);
+    expect(hops.hostId).toBeNull();
+    // Nothing to hop to: it hovers a cruise floor over the WATER, and the next think with a hop in reach takes it.
+    const hovers = ending(w, 'land', POND_CENTRE);
+    think(hovers, HOUSEFLY, w, SOUTHWARD, null);
+    expect(hovers.behaviour).toBe('hover');
+    expect(hovers.targetHeight).toBeCloseTo(surface + CRUISE_FLOOR, 9);
+    expect(hovers.targetHeight).toBeGreaterThan(ground(POND_CENTRE));
+    hovers.behaviourS = 10;
+    hovers.behaviourUntilS = 1;
+    think(hovers, HOUSEFLY, w, WESTWARD, null);
+    expect(hovers.behaviour).toBe('fly');
+    expect(isLand(w, hovers.target!)).toBe(true);
+    // Left to itself in the middle of the pond: never a perch on the water, never under a surface, and on dry ground within a minute.
+    const c = ending(w, 'land', POND_CENTRE);
+    const { wetPerches, underSurface, perchedDryAt } = soak(w, c, mulberry32(31), 60);
+    expect(wetPerches).toBe(0);
+    expect(underSurface).toBe(0);
+    expect(perchedDryAt).toBeGreaterThanOrEqual(0);
+  });
+
+  it('the hover before a landing is refused the same way: a hop that ran out over the pond never starts down toward the surface', () => {
+    const w = pondWorld();
+    const c = ending(w, 'hover', POND_CENTRE);
+    think(c, HOUSEFLY, w, WESTWARD, null);
+    expect(c.behaviour).toBe('fly');
+    expect(isLand(w, c.target!)).toBe(true);
+    const held = ending(w, 'hover', POND_CENTRE);
+    think(held, HOUSEFLY, w, SOUTHWARD, null);
+    expect(held.behaviour).toBe('hover');
+    expect(held.targetHeight).toBeCloseTo(ground(POND_CENTRE) + POND_DEPTH + CRUISE_FLOOR, 9);
+    // On the bank a finished hover comes down as it always did: to the ground it is over.
+    const bank = ending(w, 'hover', world(900, 1200));
+    think(bank, HOUSEFLY, w, WESTWARD, null);
+    expect(bank.behaviour).toBe('land');
+    expect(bank.targetHeight).toBe(ground(bank.at));
+  });
+
+  it('the same over the sea: a landing that runs out off a beach hops back to the beach, and it perches there and not on the water', () => {
+    const w = fakeWorld();
+    // A metre and a half out over the sea along the beach: the floor is the sea, two metres over the bed.
+    const at = world(SEA_EAST_OF + 150, 400);
+    expect(floorAt(w, at)).toBe(SEA_LEVEL);
+    expect(ground(at)).toBeLessThan(SEA_LEVEL);
+    const c = ending(w, 'land', at);
+    think(c, HOUSEFLY, w, WESTWARD, null);
+    expect(c.behaviour).toBe('fly');
+    expect(c.target!.wx).toBeLessThan(SEA_EAST_OF);
+    expect(isLand(w, c.target!)).toBe(true);
+    expect(c.targetHeight).toBeCloseTo(ground(c.target!) + CRUISE_FLOOR, 9);
+    // Left to itself out over the sea: never perched at sea, never under the sea (the floor there IS the sea), and on the beach within a minute.
+    const d = ending(w, 'land', at);
+    const { wetPerches, underSurface, perchedDryAt } = soak(w, d, mulberry32(32), 60);
+    expect(wetPerches).toBe(0);
+    expect(underSurface).toBe(0);
+    expect(perchedDryAt).toBeGreaterThanOrEqual(0);
+  });
+
+  it('on dry ground a landing ends where it always did — idle for a perch, feed at its site when hungry, rest when tired — on one draw', () => {
+    const w = pondWorld();
+    const at = world(600, 600);
+    let draws = 0;
+    const counted = (): number => { draws += 1; return 0.5; };
+    const flight = HOUSEFLY.flight!;
+    const perch = ending(w, 'land', at);
+    think(perch, HOUSEFLY, w, counted, null);
+    expect(perch.behaviour).toBe('idle');
+    expect(perch.target).toBeNull();
+    expect(perch.targetHeight).toBe(ground(at));
+    expect(perch.behaviourUntilS).toBeCloseTo(flight.perchS[0] + 0.5 * (flight.perchS[1] - flight.perchS[0]), 9);
+    expect(draws).toBe(1);
+    draws = 0;
+    const hungry = ending(w, 'land', at);
+    hungry.hostId = 'flower:0,0:2';
+    hungry.hunger = 0.9;
+    think(hungry, HOUSEFLY, w, counted, null);
+    expect(hungry.behaviour).toBe('feed');
+    expect(hungry.hostId).toBe('flower:0,0:2');
+    expect(hungry.target).toBeNull();
+    expect(draws).toBe(1);
+    draws = 0;
+    const tired = ending(w, 'land', at);
+    tired.fatigue = 0.9;
+    think(tired, HOUSEFLY, w, counted, null);
+    expect(tired.behaviour).toBe('rest');
+    expect(tired.target).toBeNull();
+    expect(tired.targetHeight).toBe(ground(at));
+    expect(draws).toBe(1);
+  });
+
+  it('rain grounds it at the first dry ground: mid-hop over the pond it flies on to its dry target; mid-hop over the bank it comes down as before', () => {
+    const w = pondWorld();
+    w.sky = { rainMmHr: 2, windX: 0, windZ: 0, night: false };
+    const dry = world(900, 1200);
+    const over = spawn(HOUSEFLY, POND_CENTRE);
+    over.behaviour = 'fly';
+    over.behaviourS = 0.2;
+    over.behaviourUntilS = 3;
+    over.target = dry;
+    over.height = ground(POND_CENTRE) + POND_DEPTH + CRUISE_FLOOR;
+    think(over, HOUSEFLY, w, SOUTHWARD, w.sky);
+    expect(over.behaviour).toBe('fly');
+    expect(over.target).toBe(dry);
+    const bank = spawn(HOUSEFLY, world(950, 1200));
+    bank.behaviour = 'fly';
+    bank.behaviourS = 0.2;
+    bank.behaviourUntilS = 3;
+    bank.target = dry;
+    bank.height = ground(bank.at) + CRUISE_FLOOR;
+    think(bank, HOUSEFLY, w, SOUTHWARD, w.sky);
+    expect(bank.behaviour).toBe('hover');
+    expect(bank.targetHeight).toBeCloseTo(ground(dry) + CRUISE_FLOOR, 9);
+  });
+
+  it('born on the bank, it never aims at the pond, is never under its surface, and never perches with water under it in ten minutes', () => {
+    const w = pondWorld();
+    const rand = mulberry32(23);
+    const c = spawn(HOUSEFLY, world(POND.x0 - 20, 1200));
+    const wetTargets: string[] = [];
+    let underSurface = 0;
+    let overPond = 0;
+    let wetPerches = 0;
+    for (let i = 0; i < 30 * 600; i += 1) {
+      step(c, HOUSEFLY, w, rand, 1 / 30);
+      if (c.target !== null && isAirborne(c.behaviour) && inPond(c.target)) wetTargets.push(`${c.target.wx},${c.target.wz}`);
+      if (inPond(c.at)) {
+        overPond += 1;
+        if (c.height < ground(c.at) + POND_DEPTH - 1e-9) underSurface += 1;
+      }
+      // Perched — idle, feeding, resting, walking — is `walk`, and `walk` sets the height to the GROUND: the bed, under a pond.
+      if (!isAirborne(c.behaviour) && !isLand(w, c.at)) wetPerches += 1;
+      finite(c);
+    }
+    expect(wetTargets).toEqual([]);
+    expect(underSurface, `under the pond's surface on ${underSurface} of ${overPond} frames over it`).toBe(0);
+    expect(wetPerches, `perched with water under it on ${wetPerches} frames`).toBe(0);
+  }, 30_000);
 });
