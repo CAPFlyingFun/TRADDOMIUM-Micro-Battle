@@ -41,6 +41,7 @@ export function meshSoilTile(soil: SparseSoil, tx: number, tz: number, cutDepth 
   const gx0 = tx * CELLS, gz0 = tz * CELLS;
   const heights = new Float64Array(PLANE);
   const ceilings = new Float64Array(PLANE);
+  const sealed = new Uint8Array(PLANE);
   let minCeiling = Infinity, maxCeiling = -Infinity;
   for (let z = 0; z <= CELLS; z++) for (let x = 0; x <= CELLS; x++) {
     const ground = soil.survey.heightAt(world((gx0 + x) * SOIL_CELL, (gz0 + z) * SOIL_CELL));
@@ -48,10 +49,11 @@ export function meshSoilTile(soil: SparseSoil, tx: number, tz: number, cutDepth 
     heights[z * SIDE + x] = ground;
     // Preserve the surveyed outer edge; one lattice cell inward reaches
     // full cut depth. Both neighbors derive this rim from global indexes.
-    const rim = window && (gx0 + x === window.minTx * CELLS || gx0 + x === window.maxTx * CELLS
+    const rim = window !== undefined && (gx0 + x === window.minTx * CELLS || gx0 + x === window.maxTx * CELLS
       || gz0 + z === window.minTz * CELLS || gz0 + z === window.maxTz * CELLS);
     const ceiling = ground - (rim ? 0 : depth);
     ceilings[z * SIDE + x] = ceiling;
+    sealed[z * SIDE + x] = rim ? 1 : 0;
     minCeiling = Math.min(minCeiling, ceiling);
     maxCeiling = Math.max(maxCeiling, ceiling);
   }
@@ -68,7 +70,20 @@ export function meshSoilTile(soil: SparseSoil, tx: number, tz: number, cutDepth 
   const fill = (into: Float64Array, gy: number): void => {
     for (let z = 0; z <= CELLS; z++) for (let x = 0; x <= CELLS; x++) {
       const i = z * SIDE + x, ground = heights[i];
-      into[i] = Math.min(soil.sample(gx0 + x, gy, gz0 + z, ground), ceilings[i] - gy * SOIL_CELL);
+      // THE RIM IS SEALED. A lattice point on the window's rim line takes
+      // the SURVEY's density only — ground minus height, no sparse edits —
+      // so a tunnel that reaches the window's edge meets a wall of soil
+      // there, at most one lattice cell thick, instead of a round mouth
+      // opening onto the void under the coarse sheet (the far end of
+      // shots/cutaway-along-tunnel.png). This is the CUTAWAY ending, not
+      // the tunnel ending: the soil still holds the whole burrow, and
+      // the scene keeps the window sized so the selected worm and its
+      // recent burrow are inside it and the wall stands beyond them.
+      // The rim's ceiling is already the ground, so this and the cut
+      // agree there, and the sealed plane is one the neighbour tile
+      // outside the window never meshes at all.
+      into[i] = sealed[i] ? ceilings[i] - gy * SOIL_CELL
+        : Math.min(soil.sample(gx0 + x, gy, gz0 + z, ground), ceilings[i] - gy * SOIL_CELL);
     }
   };
   const positions: number[] = [], normals: number[] = [], colors: number[] = [];

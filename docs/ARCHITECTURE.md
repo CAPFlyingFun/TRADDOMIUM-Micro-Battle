@@ -312,10 +312,26 @@ edits. Nearby detailed edits run within 1 m of the observer (2 m vertically).
 Remote worlds retain the no-op pending authoritative terrain replication.
 SoloSave v2 adds optional `terrainEdits`, preserving alpha.26 saves. Its
 8,192-stroke bound refuses new work visibly at capacity; it never discards
-old tunnels. `terrain/SoilView` streams complete 3.2 cm columns before
-`SoilClip` masks the base sheet, two builds per update and at most 36 resident
-columns. A 19.2 cm observer section lowers only the rendered ceiling. Its
-outer rim returns to the surveyed surface; an outer render seam joins the
+old tunnels. `terrain/SoilView` streams complete 3.2 cm columns on a
+millisecond budget and publishes them to `SoilClip` only as a WHOLE window:
+the last complete window stays shown and clipped until every column of the
+next one is built (double-buffered, so a depth change or a moved window never
+shows a half-built pit or a hole to the sky). The window is ±1..8 tiles
+(19-51 cm a side, half-tiles a parameter the scene sizes to the selected
+worm; every column is ~9.5k triangles and 18-34 ms, so 6 is the practical
+top on a phone). The observer section lowers only the rendered ceiling. Its
+outer rim returns to the surveyed surface and is SEALED against the sparse
+edits, so a tunnel leaving the window meets a wall of soil rather than the
+void under the coarse sheet. The scene sizes the window to the selected
+worm (`soilHalfTilesFor`: half the body plus a 5 cm margin, 3..8 tiles),
+re-centres it on the worm's tile only when the worm is two tiles from the
+centre, holds the camera 3 mm above the cut floor while the section is open
+(`FreeFlyCamera.holdAbove`), and when the eye is in SOLID soil — below the
+cut floor, or underground with the section shut — fogs to the soil's own
+albedo within centimetres and takes the background with it
+(`terrain/undergroundLook`, the underwater block's latch/restore discipline,
+water winning over soil), leaving the pit's air and the sky over it untouched.
+An outer render seam joins the
 actual coarse triangles through `TerrainView.drawnHeightAt`. That query is
 for this visual join only, never for creature or water authority. The
 renderer uses core tile-address helpers and the floating origin, never

@@ -126,6 +126,58 @@ describe('the cutaway rim meets intact surveyed terrain', () => {
   });
 });
 
+describe('the sealed rim', () => {
+  /** The first triangle a ray meets, in tile-local coordinates, with its normal. */
+  const firstHit = (data: Data, ray: THREE.Ray): { at: THREE.Vector3; normal: THREE.Vector3 } | null => {
+    const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), hit = new THREE.Vector3();
+    let best: { at: THREE.Vector3; normal: THREE.Vector3 } | null = null;
+    for (let i = 0; i < data.positions.length; i += 9) {
+      a.fromArray(data.positions, i); b.fromArray(data.positions, i + 3); c.fromArray(data.positions, i + 6);
+      if (!ray.intersectTriangle(a, b, c, false, hit)) continue;
+      if (best === null || hit.distanceTo(ray.origin) < best.at.distanceTo(ray.origin)) {
+        best = { at: hit.clone(), normal: new THREE.Vector3().fromArray(data.normals, i) };
+      }
+    }
+    return best;
+  };
+  it("walls a tunnel where it reaches the window's rim, one lattice cell thick, and leaves the soil itself open", () => {
+    const soil = flat();
+    // A level burrow running west out of the window at x = 0, well under
+    // a 1.2 cm cut floor, so the only thing that can close it is the rim.
+    const from = { at: world(-1.6, 1.6), height: 8 }, to = { at: world(1.6, 1.6), height: 8 };
+    expect(soil.dig('burrower', from, to, .3)).toBe(true);
+    const before = soil.snapshot();
+    const bounds = { minTx: 0, maxTx: 1, minTz: 0, maxTz: 1 };
+    const open = meshSoilTile(soil, 0, 0, 1.2)!;
+    const sealed = meshSoilTile(soil, 0, 0, 1.2, bounds)!;
+    const along = (data: Data) => new THREE.Ray(new THREE.Vector3(1.2, 8 - data.origin.height, 1.6), new THREE.Vector3(-1, 0, 0));
+    // With no window the tile boundary is just a boundary: the tunnel
+    // runs on into the neighbour, and the ray down its axis meets nothing.
+    expect(firstHit(open, along(open))).toBeNull();
+    const wall = firstHit(sealed, along(sealed));
+    expect(wall).not.toBeNull();
+    expect(wall!.at.x).toBeGreaterThanOrEqual(0);
+    expect(wall!.at.x).toBeLessThanOrEqual(.1);
+    // The wall faces into the tunnel — it is soil seen from the air side.
+    expect(wall!.normal.x).toBeGreaterThan(0);
+    // Two millimetres in, the tunnel is as open as it ever was.
+    const across = (data: Data) => new THREE.Ray(new THREE.Vector3(.2, 8 - data.origin.height, 1.6), new THREE.Vector3(0, 0, 1));
+    expect(firstHit(sealed, across(sealed))!.at.z).toBeCloseTo(firstHit(open, across(open))!.at.z, 5);
+    // A lens, not an edit: the soil still holds the burrow through the rim.
+    expect(soil.snapshot()).toEqual(before);
+    expect(soil.solidAt(world(.05, 1.6), 8)).toBe(false);
+    expect(soil.solidAt(world(-.5, 1.6), 8)).toBe(false);
+  });
+  it('seals nothing but the rim line: an interior column is the same mesh with or without the window', () => {
+    const soil = flat();
+    const from = { at: world(-1.6, 1.6), height: 8 }, to = { at: world(1.6, 1.6), height: 8 };
+    expect(soil.dig('burrower', from, to, .3)).toBe(true);
+    const bounds = { minTx: -3, maxTx: 3, minTz: -3, maxTz: 3 };
+    expect(meshSoilTile(soil, 0, 0, 1.2, bounds)).toEqual(meshSoilTile(soil, 0, 0, 1.2, { minTx: -8, maxTx: 8, minTz: -8, maxTz: 8 }));
+    expect(meshSoilTile(soil, -1, 0, 1.2, bounds)).toEqual(meshSoilTile(soil, -1, 0, 1.2, { minTx: -8, maxTx: 8, minTz: -8, maxTz: 8 }));
+  });
+});
+
 function crosses(data: Data, ray: THREE.Ray): boolean {
   const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), target = new THREE.Vector3();
   for (let i = 0; i < data.positions.length; i += 9) {

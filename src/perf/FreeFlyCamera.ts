@@ -203,6 +203,20 @@ export class FreeFlyCamera {
   /** A temporary microscope pace; the player's normal speed rung stays selected. */
   setSoilInspection(enabled: boolean): void { this.movementScale = enabled ? .01 : 1; }
 
+  /**
+   * Lift the camera to a height if it is below it, and otherwise leave
+   * it exactly where it is — a floor, not a placement. The soil section
+   * holds the eye at its cut floor with this (Joshua, 2026-09-08:
+   * "prevent the camera from dropping below the useful cut floor"); it
+   * is height-only because the floor is a height and nothing about the
+   * look or the position on the plane is the floor's to change. A
+   * non-finite floor is ignored, like a non-finite pose.
+   */
+  holdAbove(height: number): void {
+    if (!Number.isFinite(height)) return;
+    if (this.camera.position.y < height) this.camera.position.y = height;
+  }
+
   /** A non-finite or non-positive sensitivity is ignored; the flag is always taken. */
   setLook(tuning: LookTuning): void {
     const sane = Number.isFinite(tuning.sensitivity) && tuning.sensitivity > 0;

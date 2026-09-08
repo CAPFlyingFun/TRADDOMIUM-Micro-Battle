@@ -22,8 +22,9 @@ import { HOST_DEFAULTS } from '../src/net/Host';
 import type { MessageHandler, Transport, TransportState } from '../src/net/Transport';
 import type { Message, MoveMessage, Snapshot } from '../src/net/protocol';
 import { DEFAULT_SPEED, headingOfYaw } from '../src/perf/FreeFlyCamera';
+import { soilAlbedoAt } from '../src/terrain/undergroundLook';
 import {
-  REMOTE_CAPSULES_ROLE, createPerformanceWorldScene,
+  REMOTE_CAPSULES_ROLE, SOIL_FLOOR_EYE, createPerformanceWorldScene, soilHalfTilesFor,
   type PerformanceWorldHooks, type PerfWorldSettings,
 } from '../src/perf/PerformanceWorldScene';
 import { BUILT_LAYERS } from '../src/perf/layerToggles';
@@ -1303,4 +1304,172 @@ describe('PerformanceWorldScene: the held hour', () => {
     expect(line).not.toContain('held');
     expect(line.startsWith(kauaiClock(Date.now()))).toBe(true);
   });
+});
+
+describe('PerformanceWorldScene: the soil section', () => {
+  // The island from disk, the way the other island tests take it.
+  const demBytes = (): ArrayBuffer => {
+    const bytes = readFileSync(path.join(process.cwd(), 'public', 'kauai-1025.bin'));
+    return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  };
+  const survey: PerformanceWorldHooks['survey'] = async (onBytes) => {
+    const buffer = demBytes();
+    onBytes(buffer.byteLength, buffer.byteLength);
+    return buffer;
+  };
+  /** The ground at the world origin, straight from the file — an exact lattice sample, so the field answers the same. */
+  const groundAtOrigin = (): number => {
+    const grid = repairGrid(decodeCoarse(demBytes())).grid;
+    return heightOf(grid.samples[512 * grid.side + 512]);
+  };
+  const noon = (): number => hstToUnixMs(2026, 9, 7, 12, 0);
+  const key = (type: 'keydown' | 'keyup', code: string): void => {
+    window.dispatchEvent(new KeyboardEvent(type, { code }));
+  };
+
+  it('sizes the window to the worm: half the body plus a margin, never narrower than the old section, capped for the phone', () => {
+    // A 150 mm worm: 7.5 cm + 5 cm over 3.2 cm tiles is 3.9, so 4 tiles a side.
+    expect(soilHalfTilesFor(150)).toBe(4);
+    // An aphid's 2.5 mm would want 2 and gets the section as it always was.
+    expect(soilHalfTilesFor(2.5)).toBe(3);
+    // A metre of worm wants 18 and gets the cap.
+    expect(soilHalfTilesFor(1000)).toBe(8);
+    // Nonsense reads as no body at all: the floor.
+    expect(soilHalfTilesFor(Number.NaN)).toBe(3);
+    expect(soilHalfTilesFor(-5)).toBe(3);
+  });
+
+  it('fogs the eye to the soil\'s own colour inside the ground with no section open, and puts the air back when it climbs out', async () => {
+    const ground = groundAtOrigin();
+    // Sixty units up is above RESUME_MARGIN, so the camera is left exactly there.
+    const saved: SessionSaveState = { camera: { at: world(0, 0), height: ground + 60, yaw: 0, pitch: 0 } };
+    const { scene, input, frame, field } = rig('loading', { survey, resume: () => saved, clock: noon });
+    const host = document.createElement('div');
+    input.attach(host);
+    await scene.enter();
+    frame();
+    const camera = scene.camera as THREE.PerspectiveCamera;
+    const fog = scene.three.fog as THREE.Fog;
+    const background = scene.three.background as THREE.Color;
+    expect(camera.position.y).toBeCloseTo(ground + 60, 3);
+    // The field's ground at the origin is the file's sample: the sheet says so to the decimetre.
+    expect(field('camera-above')).toBe('above 0.6 m');
+    expect(fog.far).toBeGreaterThan(1000);
+    const skyBlue = fog.color.clone();
+
+    // Down through the ground at the island pace: a few frames.
+    key('keydown', 'KeyQ');
+    for (let i = 0; i < 8 && camera.position.y > ground - 5; i += 1) frame();
+    key('keyup', 'KeyQ');
+    expect(camera.position.y).toBeLessThan(ground - 5);
+    // In dirt: the fog and the background are the cut face's colour at
+    // this depth, linear, starting at the eye and closing within centimetres.
+    const albedo = soilAlbedoAt(ground - camera.position.y);
+    expect(fog.color.r).toBeCloseTo(albedo.r, 6);
+    expect(fog.color.g).toBeCloseTo(albedo.g, 6);
+    expect(fog.color.b).toBeCloseTo(albedo.b, 6);
+    expect(background.r).toBeCloseTo(fog.color.r, 6);
+    expect(background.g).toBeCloseTo(fog.color.g, 6);
+    expect(background.b).toBeCloseTo(fog.color.b, 6);
+    expect(fog.near).toBe(0);
+    expect(fog.far).toBeGreaterThan(0);
+    expect(fog.far).toBeLessThanOrEqual(6);
+    // No dimming: the sun is the sky's, untouched. No sky either: the
+    // dome is drawn where the fog ends, and solid soil has no faces to
+    // hide it behind, so under the ground it is not drawn at all.
+    const sun = scene.three.children.find((c): c is THREE.DirectionalLight => c instanceof THREE.DirectionalLight);
+    expect(sun!.intensity).toBeGreaterThan(0.5);
+    expect(scene.three.getObjectByName('sky')?.visible).toBe(false);
+
+    // Back up into the air: the sky's colour and the far plane's fog again, together.
+    key('keydown', 'KeyE');
+    for (let i = 0; i < 12 && camera.position.y < ground + 5; i += 1) frame();
+    key('keyup', 'KeyE');
+    expect(camera.position.y).toBeGreaterThan(ground + 5);
+    expect(fog.far).toBeGreaterThan(1000);
+    expect(fog.color.r).toBeCloseTo(skyBlue.r, 3);
+    expect(fog.color.b).toBeCloseTo(skyBlue.b, 3);
+    expect(background.b).toBeCloseTo(fog.color.b, 6);
+    expect(scene.three.getObjectByName('sky')?.visible).toBe(true);
+    input.detach();
+    scene.dispose();
+  }, 60_000);
+
+  it('HOLDS THE EYE AT THE CUT FLOOR while the section is open, leaves the pit\'s air clear, and fogs the eye the moment the section shuts around it', async () => {
+    const ground = groundAtOrigin();
+    const saved: SessionSaveState = { camera: { at: world(0, 0), height: ground + 60, yaw: 0, pitch: 0 } };
+    const { scene, input, frame, field, uiLayer } = rig('loading', { survey, resume: () => saved, clock: noon });
+    const host = document.createElement('div');
+    input.attach(host);
+    await scene.enter();
+    frame();
+    const camera = scene.camera as THREE.PerspectiveCamera;
+    const fog = scene.three.fog as THREE.Fog;
+    const background = scene.three.background as THREE.Color;
+    // Two units over the ground, by one frame of exactly the right length.
+    const speed = Number(/speed (\d+(?:\.\d+)?) units/.exec(field('camera-speed'))?.[1] ?? 0);
+    expect(speed).toBeGreaterThan(0);
+    key('keydown', 'KeyQ');
+    scene.update({ rawDt: 58 / speed, simDt: 0, elapsed: 0 });
+    key('keyup', 'KeyQ');
+    expect(camera.position.y).toBeCloseTo(ground + 2, 3);
+
+    // Open the section at 12 mm, the way the slider does.
+    must(uiLayer.querySelector<HTMLButtonElement>('[data-action="soil"]'), 'soil button').click();
+    const slider = must(uiLayer.querySelector<HTMLInputElement>('.soil-inspector input[type="range"]'), 'depth slider');
+    slider.value = '12';
+    slider.dispatchEvent(new Event('input'));
+    frame();
+    const status = must(uiLayer.querySelector<HTMLElement>('.soil-inspector [role="status"]'), 'soil status');
+    expect(status.textContent).toBe('Preparing soil view…');
+
+    // Down at the section's microscope pace, far further than 3.2 units
+    // of travel would need: the floor is where it stops — an ant's eye
+    // over the cut, not on it — and it is the floor whether or not the
+    // column under the eye has been built yet.
+    key('keydown', 'KeyQ');
+    for (let i = 0; i < 40; i += 1) frame();
+    const held = camera.position.y;
+    expect(held).toBeCloseTo(ground - 1.2 + SOIL_FLOOR_EYE, 3);
+    expect(SOIL_FLOOR_EYE).toBeGreaterThan(0);
+    expect(SOIL_FLOOR_EYE).toBeLessThan(1.2);
+    for (let i = 0; i < 20; i += 1) frame();
+    key('keyup', 'KeyQ');
+    expect(camera.position.y).toBe(held);
+    expect(field('camera-above')).toBe('above -0.0 m');
+
+    // Once the whole window is published the eye is in the pit's AIR,
+    // and the sky over the pit is exactly as it was: no fog closes.
+    let cleared = false;
+    for (let i = 0; i < 400 && !cleared; i += 1) {
+      frame();
+      cleared = status.textContent !== 'Preparing soil view…';
+    }
+    expect(cleared).toBe(true);
+    frame();
+    expect(fog.far).toBeGreaterThan(1000);
+    expect(fog.near).toBeGreaterThan(0);
+    expect(camera.position.y).toBe(held);
+
+    // Shut the section with the camera still at the floor: inside solid
+    // soil now, an ant's eye short of 12 mm down, and the fog says so in
+    // the cut face's own colour at that depth — which also pins where
+    // the floor was.
+    must(uiLayer.querySelector<HTMLButtonElement>('[data-action="soil-surface"]'), 'surface button').click();
+    frame();
+    const albedo = soilAlbedoAt(1.2 - SOIL_FLOOR_EYE);
+    expect(fog.color.r).toBeCloseTo(albedo.r, 6);
+    expect(fog.color.g).toBeCloseTo(albedo.g, 6);
+    expect(fog.color.b).toBeCloseTo(albedo.b, 6);
+    expect(background.r).toBeCloseTo(fog.color.r, 6);
+    expect(fog.near).toBe(0);
+    expect(fog.far).toBeLessThanOrEqual(6);
+    // And with the section shut there is no floor: the eye may go on down.
+    key('keydown', 'KeyQ');
+    frame();
+    key('keyup', 'KeyQ');
+    expect(camera.position.y).toBeLessThan(held - 1);
+    input.detach();
+    scene.dispose();
+  }, 120_000);
 });

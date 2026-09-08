@@ -73,8 +73,9 @@ import { ActorViews } from '../view/ActorViews';
 import { TerrainStreamer } from '../terrain/TerrainStreamer';
 import { TerrainView } from '../terrain/TerrainView';
 import { SoilView } from '../terrain/SoilView';
+import { soilAlbedoAt, undergroundLook } from '../terrain/undergroundLook';
 import { SparseSoil } from '../world/SparseSoil';
-import { SOIL_TILE } from '../world/soilTypes';
+import { SOIL_TILE, soilTileAt, soilTileCentre } from '../world/soilTypes';
 import { SoilInspector } from '../ui/SoilInspector';
 import { Antennae } from '../ui/Antennae';
 import { OceanView, TIER_OCTAVES as OCEAN_OCTAVES } from '../sea/OceanView';
@@ -615,6 +616,54 @@ const RESUME_CLEARANCE = 3_000;
 const RESUME_MARGIN = 50;
 
 /**
+ * HOW WIDE THE SOIL SECTION IS, in tiles each side of its centre, for
+ * the worm it is following: half the body plus a margin, so the animal
+ * and the burrow it has just dug are inside the window and the sealed
+ * rim (`terrain/soilMesh.ts`) stands beyond them rather than across the
+ * tunnel the player is looking along.
+ *
+ * The floor is the section as it always was, ±3 tiles (36 columns,
+ * 19.2 cm a side). The CAP is 8 (256 columns, 51.2 cm a side): GAME
+ * TUNING for the phone, because every column is meshed on the main
+ * thread and the view holds two of everything while a window is
+ * replaced (`terrain/SoilView.ts`); agent A measures the cost and the
+ * cap may move with it. The margin is 5 cm: room for the worm to turn
+ * before it reaches the wall, and, with the hysteresis in `followWorm`,
+ * room for it to crawl two tiles before the window has to move.
+ */
+const SOIL_HALF_TILES_MIN = 3;
+const SOIL_HALF_TILES_CAP = 8;
+const SOIL_WINDOW_MARGIN = 5;
+/**
+ * How far, in whole tiles, the followed worm may wander from the
+ * window's centre tile before the window moves. Two, not one: a worm
+ * crawling along a tile boundary would otherwise flip the window back
+ * and forth across it, and every move is a row of columns rebuilt.
+ */
+const SOIL_RECENTRE_TILES = 2;
+
+/**
+ * HOW HIGH THE EYE STANDS OVER THE CUT FLOOR when the section holds it
+ * there, world units (cm). Not zero, and the probe is why: an eye ON the
+ * floor plane sees the floor edge-on, and below the horizon it is
+ * looking INTO the solid soil under the floor — which the soil mesh
+ * leaves faceless, being a surface between air and soil and not a
+ * volume — so the whole lower half of the frame was the void under the
+ * island (the first run of probe:soil's inside section, 2026-09-08).
+ * Three millimetres is about the eye height of a worker ant standing on
+ * that floor, so the floor reads as a floor and a worm's groove as a
+ * groove, the way Joshua's own shot had it (shots/cutaway-along-tunnel
+ * .png, the eye about 2 mm up). GAME TUNING shaped by the ant.
+ */
+export const SOIL_FLOOR_EYE = 0.3;
+
+/** The window's half-width for a worm of this length (mm), in tiles. */
+export function soilHalfTilesFor(lengthMm: number): number {
+  const half = Number.isFinite(lengthMm) && lengthMm > 0 ? lengthMm / 10 / 2 : 0;
+  return Math.min(SOIL_HALF_TILES_CAP, Math.max(SOIL_HALF_TILES_MIN, Math.ceil((half + SOIL_WINDOW_MARGIN) / SOIL_TILE)));
+}
+
+/**
  * Water into every CHANNEL cell, world units of depth a second.
  *
  * BASEFLOW IS NOT RAIN. A real river runs between storms because
@@ -742,6 +791,10 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
     let soilInspector: SoilInspector | null = null;
     let soilFocus: WorldPoint | null = null;
     let soilDepth = 0;
+    /** The worm Find worm found, by id, so the section can follow it while it is simulated. */
+    let soilWormId: string | null = null;
+    /** The window's half-width, sized to that worm; the old fixed section until one is found. */
+    let soilHalfTiles = SOIL_HALF_TILES_MIN;
     let terrain: TerrainView | null = null;
     let streamer: TerrainStreamer | null = null;
     /** What the terrain toggle was at the last look, so a change is acted on once. */
@@ -949,6 +1002,9 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
     /** Whether the eye is under the sea, and the air fog it went under from. */
     let underwater = false;
     let airFog = { near: 0, far: 0 };
+    /** Whether the eye is inside solid soil, and the air fog it went in from: the water pair's twin (`adaptSoil`). */
+    let underground = false;
+    let soilAir = { near: 0, far: 0 };
     /** The near plane the projection was last built with. */
     let builtNear = 0;
     let hud: PerfHud | null = null;
@@ -1504,6 +1560,9 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
       });
       if (!near) return false;
       soilFocus = near.at;
+      // The id, not only the place: the section follows this worm from
+      // here on (`followWorm`), and a position would be where it WAS.
+      soilWormId = near.id;
       const at = translate(near.at, Math.sin(pose.yaw) * 22, Math.cos(pose.yaw) * 22);
       const height = Math.max(field.heightAt(near.at) + 18, field.heightAt(at) + 8);
       const local = toLocal(at);
@@ -1512,16 +1571,87 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
       return true;
     };
 
+    /**
+     * THE CUT UNDER A POINT, world units: the section's depth where a
+     * whole column stands and the sheet over it is clipped, and nothing
+     * anywhere else. `readyTiles` is the published truth of what is cut
+     * — the same question `FaunaView`'s ceiling asks — so the fog in
+     * `adaptSoil` reads what is on screen rather than what the slider
+     * says: outside the window, and under a column still being built,
+     * the ground is intact and an eye 12 mm under it is in dirt.
+     */
+    const cutUnder = (at: WorldPoint): number => {
+      if (soilDepth <= 0 || soilView === null) return 0;
+      const tile = soilTileAt(at);
+      return soilView.readyTiles.some(t => t.tx === tile.tx && t.tz === tile.tz) ? soilDepth : 0;
+    };
+
+    /**
+     * THE SECTION FOLLOWS THE FOUND WORM (Joshua, 2026-09-08: the
+     * cutaway should be "wider, follows the selected worm"). Find worm
+     * used to fix the window on the spot the worm was found at, and a
+     * worm is a thing that leaves: after a minute of burrowing the
+     * player was looking at a pit with the animal gone out of one side
+     * of it and the round mouth of its tunnel in the rim.
+     *
+     * So while the section is open and the worm is still simulated, the
+     * focus is where the worm IS, and the window is sized to it
+     * (`soilHalfTilesFor`). The window moves in WHOLE TILES and only
+     * when the worm's tile is `SOIL_RECENTRE_TILES` or more from the
+     * window's centre tile: a crawl of a few millimetres would otherwise
+     * shift the window every frame, and every shift is a row of columns
+     * released and rebuilt on the main thread. When the worm is gone —
+     * culled by distance, or none was ever found — the last focus stands,
+     * and the camera's own position when there is none, as before.
+     */
+    const followWorm = (): void => {
+      if (soilWormId === null || creatures === null) return;
+      const worm = creatures.creatures().find(c => c.id === soilWormId);
+      if (worm === undefined) return;
+      soilHalfTiles = soilHalfTilesFor(worm.lengthMm);
+      const wormTile = soilTileAt(worm.at);
+      const centre = soilFocus === null ? null : soilTileAt(soilFocus);
+      if (centre !== null
+        && Math.max(Math.abs(wormTile.tx - centre.tx), Math.abs(wormTile.tz - centre.tz)) < SOIL_RECENTRE_TILES) return;
+      soilFocus = soilTileCentre(wormTile);
+    };
+
     const updateSoil = (): void => {
       if (!soil || !soilView || !field || !terrain) return;
+      if (soilDepth > 0) followWorm();
       const focus = soilDepth > 0 && soilFocus ? soilFocus : fly.pose().at;
       soilView.group.visible = terrain.group.visible;
       // An observer section removes the overhead vegetation from the
       // view; closing it restores the player's vegetation layer choice.
       if (objects) objects.group.visible = objectsOn && soilDepth === 0;
-      soilView.update(focus, soilDepth, field.revision());
+      soilView.update(focus, soilDepth, field.revision(), soilHalfTiles);
       terrain.setSoilTiles(soilView.readyTiles);
       soilInspector?.update(soil.strokeCount, soil.atLimit, soilView.cost.pending > 0);
+    };
+
+    /**
+     * THE CAMERA IS HELD AT THE CUT FLOOR (Joshua, 2026-09-08: "prevent
+     * the camera from dropping below the useful cut floor"). Under the
+     * floor there was nothing to see but the void under the island and
+     * the black underside of the sheet (shots/cutaway-below-floor.png);
+     * AT the floor, looking along a worm's groove, is the picture he
+     * wants (shots/cutaway-along-tunnel.png), so this is a floor and not
+     * a lift — the eye is never raised further than an ant's eye height
+     * over it (`SOIL_FLOOR_EYE`, and why that is not zero).
+     *
+     * The floor is the survey's ground less the cut, which is exactly
+     * what `terrain/soilMesh.ts` cuts its columns to, and it applies
+     * wherever the section is open rather than only over published
+     * columns: a floor that came and went with a column being rebuilt
+     * would bounce the eye by the cut's depth every time the window
+     * moved. Where the camera leaves the window through its wall the
+     * floor is therefore inside intact ground, and `adaptSoil` says so
+     * in brown. After the camera has moved this frame, before anything
+     * reads its pose; no clamp at all with the section shut.
+     */
+    const holdAtCutFloor = (): void => {
+      if (soilDepth <= 0 || field === null) return;
+      fly.holdAbove(field.heightAt(fly.pose().at) - soilDepth + SOIL_FLOOR_EYE);
     };
 
     const goToNearest = (): void => {
@@ -1850,7 +1980,11 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
     const adaptWater = (): void => {
       const fog = three.fog as THREE.Fog | null;
       if (fog === null) return;
-      const air = { near: fog.near, far: fog.far };
+      // The air this blends from is what `adaptDepth` last set. When the
+      // eye is coming from INSIDE THE SOIL (`adaptSoil`, which ran after
+      // this last frame), the fog's distances are the soil's few
+      // centimetres and the air is what the soil displaced.
+      const air = underground ? soilAir : { near: fog.near, far: fog.far };
       const restore = (): void => {
         if (!underwater) return;
         underwater = false;
@@ -1903,7 +2037,10 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
       // The air's colour is re-read every frame the sky is writing it
       // (the sky runs before this, so `fog.color` is this frame's live
       // horizon), and latched on the going-under frame when it is not.
-      if (weatherOn || !underwater) airColour.copy(fog.color);
+      // Not while the SOIL holds the latch: with the weather off nothing
+      // rewrites the fog's colour but the soil, so on the frame the eye
+      // goes from soil into water the colour standing there is brown.
+      if (weatherOn || (!underwater && !underground)) airColour.copy(fog.color);
       if (!underwater) {
         underwater = true;
         airFog = air;
@@ -1933,6 +2070,105 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
       (three.background as THREE.Color).copy(fog.color);
       fog.near = blendSight(Math.max(1, airFog.near), 0.02 * look.sight, look.strength);
       fog.far = blendSight(Math.max(1, airFog.far), look.sight, look.strength);
+    };
+
+    /**
+     * PUT THE SOIL BETWEEN THE EYE AND EVERYTHING, when the eye is in it.
+     *
+     * Joshua, 2026-09-08, from shots/cutaway-below-floor.png — the eye
+     * three centimetres under the cut floor, two thirds of the frame the
+     * pale horizon and the rest the unlit underside of the sheet: the
+     * white "is empty space, which it shouldn't be… between ground and
+     * infinity. Don't change the default white to brown as it will
+     * change everything else, so maybe add an underground fog that fades
+     * brown or depending on soil like gray for Rocky." The horizon is
+     * untouched; what changes is the fog while the eye is in dirt, and
+     * only then — `terrain/undergroundLook.ts` owns the look.
+     *
+     * KEYED ON SOLID SOIL, NEVER ON GROUND LEVEL. The section's air is
+     * below ground level and it is the one place the section exists to
+     * let the player stand, so the sky over the pit stays exactly as it
+     * is. Burial is the eye's depth below the CUT (`cutUnder`: the
+     * section's depth over a published column, nothing anywhere else),
+     * which with the floor clamp in `holdAtCutFloor` is at most a
+     * rounding error while the player is in the pit — the look is for
+     * the camera that is genuinely in the ground: the section shut with
+     * the eye still at the floor, or a slope flown into with no section
+     * at all. The colour is the soil's own at the eye's depth below the
+     * surveyed ground, the ramp the cut faces are painted with.
+     *
+     * THE WATER WINS. Air ← water ← soil: the water block runs first,
+     * and while the eye is under water this block only drops its latch
+     * — the water wrote this frame's colour and distances, and the
+     * water's own restore is what takes the air back. The water block
+     * reads the air it blends from through this block's latch for the
+     * same reason (`soilAir`, and `airColour`'s guard there).
+     *
+     * THE LIGHTS ARE NOT DIMMED, unlike under the sea. The fog closes
+     * within centimetres to the soil's own albedo, so every face left
+     * visible is a wall of the same soil a hand's breadth away; dimming
+     * the sun on top of that would only blacken those last faces, and
+     * black was the complaint. There is also no honest number to reach
+     * for: the sea's `light` is a depth curve of real optics, and soil
+     * passes none at any depth.
+     *
+     * EVERY FRAME AND WITHOUT HYSTERESIS, for the water's reason: two
+     * colour writes and two numbers, and a fog that lagged the eye by a
+     * step would be the bug wearing a different hat.
+     */
+    const adaptSoil = (): void => {
+      const fog = three.fog as THREE.Fog | null;
+      if (fog === null) return;
+      const restore = (): void => {
+        if (!underground) return;
+        underground = false;
+        // Under water as well: the water has the fog, and its restore is
+        // the one that takes the air back. Nothing to put back but the latch.
+        if (underwater) return;
+        fog.color.copy(weatherOn ? airColour : SKY);
+        (three.background as THREE.Color).copy(fog.color);
+        if (rain !== null) rain.group.visible = weatherOn;
+        if (skyView !== null) skyView.group.visible = weatherOn;
+        // near/far belong to `adaptDepth`, as they do when she surfaces.
+        builtNear = 0;
+        adaptDepth();
+      };
+      if (underwater || field === null) {
+        restore();
+        return;
+      }
+      const pose = fly.pose();
+      const depthBelowGround = field.heightAt(pose.at) - pose.height;
+      const look = undergroundLook(depthBelowGround - cutUnder(pose.at), soilAlbedoAt(depthBelowGround));
+      if (look === null) {
+        restore();
+        return;
+      }
+      // The air's colour: re-read every frame the sky writes it, latched
+      // on the going-in frame when it does not — the water's discipline.
+      if (weatherOn || !underground) airColour.copy(fog.color);
+      if (!underground) {
+        underground = true;
+        soilAir = { near: fog.near, far: fog.far };
+      }
+      // LINEAR IN, because the look's colour is the soil mesh's vertex
+      // albedo, which is linear: three's working space, so no colour-space
+      // flag here, unlike the sea's picked-by-eye sRGB next door.
+      fog.color.setRGB(look.r, look.g, look.b);
+      (three.background as THREE.Color).copy(fog.color);
+      fog.near = look.near;
+      fog.far = look.far;
+      // No streaks fall through soil (the rain's material ignores fog),
+      // AND NO SKY: the dome is where the fog ENDS, not a thing it is
+      // applied to (`sky/SkyView.ts`), and solid soil has no faces, so
+      // looking down through it from inside the ground showed the dome's
+      // painted underside — the pale "empty space" of Joshua's shot —
+      // straight through a brown fog and a brown background
+      // (shots/soil-inside-shut.png, the first run). Under the ground
+      // there is no sky to draw. Every frame, not once: the weather
+      // toggle and `buildSky` show both again whenever they run.
+      if (rain !== null) rain.group.visible = false;
+      if (skyView !== null) skyView.group.visible = false;
     };
 
     /** Point the clipmap at the camera and ask for the tiles under it. One call a frame. */
@@ -2503,6 +2739,9 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         // look — and would lag the hand during a stall, because the sim cap
         // would swallow most of the stall's time.
         fly.update(ctx.input.snapshot(), frame.rawDt, stick === null ? null : stick.read());
+        // The soil section's floor, the moment the camera has moved and
+        // before anything reads where it is.
+        holdAtCutFloor();
         // After the camera, before anything is drawn: the ground is
         // placed against where the camera IS this frame, not where it was.
         updateTerrain();
@@ -2519,6 +2758,8 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         updateSoil();
         // AFTER the ocean, so the swell it asks about is this frame's.
         adaptWater();
+        // And after the water, which wins where both apply.
+        adaptSoil();
         if (net !== null) {
           netClockMs += Math.max(0, frame.rawDt) * 1000;
           // Stand over the spawn the authority named, the first time it
