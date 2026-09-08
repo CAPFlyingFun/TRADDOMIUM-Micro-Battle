@@ -15,8 +15,11 @@
  * without widening the sheet.
  */
 import { describe, expect, it } from 'vitest';
-import { HUD_HZ, PerfHud, type CreaturesReadout, type ObjectsReadout, type PerfReadout } from '../src/perf/PerfHud';
+import {
+  HUD_HZ, PerfHud, finderWords, type CreaturesReadout, type FinderReadout, type ObjectsReadout, type PerfReadout,
+} from '../src/perf/PerfHud';
 import { BUILT_LAYERS, LayerToggles } from '../src/perf/layerToggles';
+import { CREATURE_IDS, CREATURE_SPECIES } from '../src/creatures';
 import type { WorldLayerId } from '../src/world/WorldLoader';
 
 function readout(meanFps = 60, lowFps = 30, simDt = 1 / 60, frames = 120): PerfReadout {
@@ -54,6 +57,7 @@ interface RigOptions {
   readonly creatures?: () => CreaturesReadout | null;
   readonly weather?: boolean;
   readonly collapsed?: boolean;
+  readonly finder?: () => FinderReadout;
 }
 
 function rig(options: RigOptions = {}) {
@@ -61,6 +65,8 @@ function rig(options: RigOptions = {}) {
   document.body.appendChild(uiLayer);
   const toggles = new LayerToggles(options.built ?? []);
   const toggled: Array<[WorldLayerId, boolean]> = [];
+  const finderToggles: boolean[] = [];
+  const goes: number[] = [];
   const hud = new PerfHud(uiLayer, {
     layers: () => toggles.list(),
     onLayerToggle: (id, enabled) => {
@@ -72,12 +78,19 @@ function rig(options: RigOptions = {}) {
     ...(options.weather
       ? { weather: () => ({ sky: 'clear', rainMmHr: 0, cloud: 0.12, source: 'live' as const, clock: '14:32', sunElevationDeg: 61.4 }) }
       : {}),
+    ...(options.finder === undefined ? {} : {
+      finder: options.finder,
+      onFinderToggle: (on: boolean) => { finderToggles.push(on); },
+      onFinderGo: () => { goes.push(1); },
+    }),
   }, { collapsed: options.collapsed });
   const el = (name: string): HTMLElement | null => uiLayer.querySelector<HTMLElement>(`[data-field="${name}"]`);
   const field = (name: string): string | null => el(name)?.textContent ?? null;
   const box = (id: string): HTMLInputElement =>
     must(uiLayer.querySelector<HTMLInputElement>(`[data-action="layer:${id}"]`), `checkbox layer:${id}`);
-  return { uiLayer, hud, toggles, toggled, el, field, box };
+  const finderBox = (): HTMLInputElement | null => uiLayer.querySelector<HTMLInputElement>('[data-action="finder"]');
+  const goButton = (): HTMLButtonElement | null => uiLayer.querySelector<HTMLButtonElement>('[data-action="finder-go"]');
+  return { uiLayer, hud, toggles, toggled, el, field, box, finderToggles, goes, finderBox, goButton };
 }
 
 describe('the ecology block: when it exists at all', () => {
@@ -308,5 +321,125 @@ describe('the four new layer rows', () => {
       expect(b.disabled, id).toBe(true);
       expect(must(b.parentElement, `${id} row`).textContent).toContain('not built');
     }
+  });
+});
+
+/**
+ * THE FINDER (Joshua, 2026-09-08: "I don't see any worms in the game...
+ * can you make a simple 3D finder I can turn on to find them better?").
+ *
+ * The switch is a TOOL, not a world layer, so it is not in the plan's
+ * list; the line says which animal is nearest and which way to fly; and
+ * GO is dead until there is somewhere to go, because an unavailable
+ * action must never look functional.
+ */
+const finderOff: FinderReadout = { on: false, pins: 0, nearest: null };
+const finderOn = (over: Partial<FinderReadout> = {}): FinderReadout => ({
+  on: true,
+  pins: 41,
+  nearest: { species: 'worm', metres: 12.4, bearing: 45, under: false },
+  ...over,
+});
+
+describe('the finder', () => {
+  it('is absent entirely from a world that has no creatures to find', () => {
+    const { field, finderBox, goButton } = rig({ creatures: () => forest });
+    expect(field('eco-find')).toBeNull();
+    expect(finderBox()).toBeNull();
+    expect(goButton()).toBeNull();
+  });
+
+  it('adds ONE switch, and it is not one of the world layers', () => {
+    const { finderBox, box } = rig({ built: BUILT_LAYERS, finder: () => finderOff });
+    expect(finderBox()).not.toBeNull();
+    // Every world layer still has its own row, and `finder` is not among them.
+    for (const id of BUILT_LAYERS) expect(box(id)).not.toBeNull();
+    expect(BUILT_LAYERS).not.toContain('finder' as WorldLayerId);
+  });
+
+  it('says off while it is off, and names the nearest animal when it is on', () => {
+    let state = finderOff;
+    const { hud, field } = rig({ finder: () => state });
+    hud.update(readout(), 1);
+    expect(field('eco-find')).toBe('find off');
+    state = finderOn();
+    hud.update(readout(), HUD_HZ);
+    expect(field('eco-find')).toBe('find worm 12m NE');
+  });
+
+  it('says so when the animal is underground — the reason it cannot be seen', () => {
+    const words = finderWords(finderOn({ nearest: { species: 'worm', metres: 3.2, bearing: 190, under: true } }));
+    expect(words).toBe('under worm 3m S');
+  });
+
+  it('says nothing near rather than pretending a distance', () => {
+    expect(finderWords(finderOn({ nearest: null }))).toBe('find nothing near');
+  });
+
+  it('holds every state the table can actually produce to the column width', () => {
+    // ONLY A BURROWER IS EVER `under`, and the earthworm is the only one
+    // in the table with a burrow — which is what keeps the longest state
+    // inside the column: `under worm 40m NE` is seventeen characters at
+    // the farthest reach the table has (the housefly's 40 m) and a
+    // two-letter bearing. `under aphid ...` would be eighteen, and is
+    // unreachable rather than merely unlikely, so the species table is
+    // asked here rather than trusted.
+    expect(CREATURE_SPECIES.aphid.burrow).toBeNull();
+    expect(CREATURE_SPECIES.housefly.burrow).toBeNull();
+    expect(CREATURE_SPECIES.earthworm.burrow).not.toBeNull();
+    const reach = Math.max(...CREATURE_IDS.map((id) => CREATURE_SPECIES[id].population.reachM));
+
+    const states: FinderReadout[] = [
+      finderOff,
+      finderOn({ nearest: null }),
+      finderOn({ nearest: { species: 'worm', metres: reach, bearing: 45, under: true } }),
+      finderOn({ nearest: { species: 'aphid', metres: reach, bearing: 315, under: false } }),
+      finderOn({ nearest: { species: 'fly', metres: 0.4, bearing: 0, under: false } }),
+    ];
+    for (const state of states) {
+      const words = finderWords(state);
+      expect(words.length, words).toBeLessThanOrEqual(WIDEST);
+    }
+    expect(finderWords(states[2])).toBe('under worm 40m NE');
+  });
+
+  it('carries the tap back to the owner and follows the model, not the click', () => {
+    let state = finderOff;
+    const { hud, finderBox, finderToggles } = rig({ finder: () => state });
+    const box = must(finderBox(), 'the finder switch');
+    box.checked = true;
+    box.dispatchEvent(new Event('change'));
+    expect(finderToggles).toEqual([true]);
+    // The owner has not agreed yet, so the box goes back to what the model says.
+    hud.update(readout(), 1);
+    expect(box.checked).toBe(false);
+    state = finderOn();
+    hud.update(readout(), HUD_HZ);
+    expect(box.checked).toBe(true);
+  });
+
+  it('GO is dead until there is somewhere to go, and never looks otherwise', () => {
+    let state = finderOff;
+    const { hud, goButton, goes } = rig({ finder: () => state });
+    const go = must(goButton(), 'the go button');
+    hud.update(readout(), 1);
+    expect(go.disabled).toBe(true);
+    expect(Number(go.style.opacity)).toBeLessThan(1);
+
+    // On, but the simulation is holding nothing: still nowhere to go.
+    state = finderOn({ nearest: null });
+    hud.update(readout(), HUD_HZ);
+    expect(go.disabled).toBe(true);
+
+    state = finderOn();
+    hud.update(readout(), HUD_HZ);
+    expect(go.disabled).toBe(false);
+    expect(Number(go.style.opacity)).toBe(1);
+    go.dispatchEvent(new Event('click'));
+    expect(goes).toHaveLength(1);
+  });
+
+  it('prints nothing at all when the hook is absent', () => {
+    expect(finderWords(null)).toBe('');
   });
 });

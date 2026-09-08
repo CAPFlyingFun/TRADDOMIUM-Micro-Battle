@@ -443,11 +443,18 @@ export function registerScenes(options: RegisterScenesOptions = {}): void {
         clock: worldClock(),
         skyOverride: SKY_OVERRIDE,
         settings: () => openSettings(ctx.storage).read(),
-        // The one setting the world writes: the HUD's fold, from its own
-        // corner button, so it survives a reload (Joshua, 2026-09-07).
+        // The two settings the world writes, both from controls on the
+        // stat sheet itself, so each survives a reload: the HUD's fold
+        // (Joshua, 2026-09-07) and the creature finder's switch
+        // (2026-09-08). The world cannot write them itself — perf/ may
+        // not import ui/ — so the document's owner does it here.
         onHudCollapse: (collapsed) => {
           const store = openSettings(ctx.storage);
           store.write({ ...store.read(), hudCollapsed: collapsed });
+        },
+        onFinderToggle: (on) => {
+          const store = openSettings(ctx.storage);
+          store.write({ ...store.read(), finderOn: on });
         },
         tierOverride: TIER_OVERRIDE,
         detailOverride: DETAIL_OVERRIDE,

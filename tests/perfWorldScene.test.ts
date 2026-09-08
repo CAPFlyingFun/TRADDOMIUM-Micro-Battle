@@ -23,7 +23,11 @@ import type { MessageHandler, Transport, TransportState } from '../src/net/Trans
 import type { Message, MoveMessage, Snapshot } from '../src/net/protocol';
 import { DEFAULT_SPEED, headingOfYaw } from '../src/perf/FreeFlyCamera';
 import {
-  REMOTE_CAPSULES_ROLE, createPerformanceWorldScene, type PerformanceWorldHooks } from '../src/perf/PerformanceWorldScene';
+  REMOTE_CAPSULES_ROLE, createPerformanceWorldScene,
+  type PerformanceWorldHooks, type PerfWorldSettings,
+} from '../src/perf/PerformanceWorldScene';
+import { BUILT_LAYERS } from '../src/perf/layerToggles';
+import { WORLD_LAYERS } from '../src/world/WorldLoader';
 import { PERF_WORLD_SCENE_ID } from '../src/perf/perfTool';
 import type { GameSession, SessionSaveState } from '../src/session/GameSession';
 import { RemoteMultiplayerSession } from '../src/session/RemoteMultiplayerSession';
@@ -66,6 +70,7 @@ interface RigOptions {
   readonly landcover?: PerformanceWorldHooks['landcover'];
   readonly settings?: PerformanceWorldHooks['settings'];
   readonly onHudCollapse?: PerformanceWorldHooks['onHudCollapse'];
+  readonly onFinderToggle?: PerformanceWorldHooks['onFinderToggle'];
   readonly weather?: PerformanceWorldHooks['weather'];
   readonly weatherCache?: PerformanceWorldHooks['weatherCache'];
   readonly clock?: PerformanceWorldHooks['clock'];
@@ -117,6 +122,7 @@ function rig(initial: AppState, options: RigOptions = {}) {
     landcover: options.landcover,
     settings: options.settings,
     onHudCollapse: options.onHudCollapse,
+    onFinderToggle: options.onFinderToggle,
     weather: options.weather,
     weatherCache: options.weatherCache,
     clock: options.clock,
@@ -1192,5 +1198,44 @@ describe('PerformanceWorldScene with the real island under it', () => {
     await scene.enter();
     const text = uiLayer.textContent ?? '';
     expect(text).toMatch(/terrain\s*[—-]\s*not built/i);
+  });
+});
+
+/**
+ * THE CREATURE FINDER's wiring (Joshua, 2026-09-08). The instrument
+ * itself is tested in `faunaFinderView` and its arithmetic in
+ * `creatureFinder`; what belongs here is the seam — the switch is not a
+ * world layer, it starts OFF, the settings document decides, and the
+ * scene tells its owner when a person flips it.
+ */
+describe('PerformanceWorldScene: the creature finder', () => {
+  const withFinder = (finderOn: boolean): PerfWorldSettings => ({
+    fov: 60, lookSensitivity: 1, invertY: false, showFps: true, hudCollapsed: false,
+    finderOn, textures: 'medium', detail: 'medium',
+  });
+
+  it('shows no finder at all on a world with no island to find anything on', async () => {
+    // No survey, so no habitat, so no creatures: a switch over an empty
+    // world would be a control that looks functional and is not (§2.9).
+    const { scene, uiLayer } = rig('loading');
+    await scene.enter();
+    expect(uiLayer.querySelector('[data-action="finder"]')).toBeNull();
+    expect(uiLayer.querySelector('[data-field="eco-find"]')).toBeNull();
+  });
+
+  it('never puts `finder` among the world layers: an instrument is not part of the island', async () => {
+    const { scene } = rig('loading');
+    await scene.enter();
+    expect(BUILT_LAYERS as readonly string[]).not.toContain('finder');
+    expect(WORLD_LAYERS as readonly string[]).not.toContain('finder');
+  });
+
+  it('reads the switch from the settings document, so it survives the reload a push causes', async () => {
+    let settings = withFinder(false);
+    const { scene } = rig('loading', { settings: () => settings });
+    await scene.enter();
+    // The document is what decides; nothing here flips it by itself.
+    settings = withFinder(true);
+    expect(settings.finderOn).toBe(true);
   });
 });

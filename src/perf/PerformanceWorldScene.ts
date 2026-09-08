@@ -81,8 +81,12 @@ import { VEG_BYTES, decodeVeg } from '../world/landcover';
 import { WORLD_SEED } from '../world/objects/seed';
 import { PLANT_FAMILIES, plantSourcesOf } from '../world/objects/plants';
 import { ResourceLayer, waterQueryOf, type WaterQuery } from '../world/ecology';
-import { CREATURE_IDS, CreatureSim, type CreatureId } from '../creatures';
+import {
+  CREATURE_IDS, CREATURE_SPECIES, CreatureSim, isUnderground, metresOfUnits, nearestSighting, viewpointFor,
+  type CreatureId,
+} from '../creatures';
 import { FaunaView } from '../fauna/FaunaView';
+import { FinderView } from '../fauna/FinderView';
 import { assets } from '../assets/assets';
 import type { WorldLayerId } from '../world/WorldLoader';
 import { islandChannels, type IslandChannels } from '../world/water/islandChannels';
@@ -109,17 +113,34 @@ import { COARSE_BYTES, decodeCoarse, type DemGrid } from '../world/dem';
 import { repairGrid } from '../world/demRepair';
 import { Heightfield, SEA_LEVEL } from '../world/heightfield';
 import { toLocal } from '../world/origin';
-import type { WorldPoint } from '../world/coords';
+import { compassBearing, type WorldPoint } from '../world/coords';
 import { BotHud, type BotReadout } from './BotHud';
 import { FrameStats } from './FrameStats';
 import { FreeFlyCamera, headingOfYaw, yawForHeading } from './FreeFlyCamera';
 import { MoveStick } from '../input/MoveStick';
 import {
-  HUD_HZ, PerfHud, type CreaturesReadout, type FreshReadout, type ObjectsReadout, type SeaReadout, type SessionLink, type SessionReadout,
-  type SpeciesReadout,
+  HUD_HZ, PerfHud, type CreaturesReadout, type FinderReadout, type FreshReadout, type ObjectsReadout, type SeaReadout,
+  type SessionLink, type SessionReadout, type SpeciesReadout,
 } from './PerfHud';
 import { BUILT_LAYERS, LayerToggles } from './layerToggles';
 import { PERF_WORLD_SCENE_ID } from './perfTool';
+
+/**
+ * The finder's word for each species: the SINGULAR, because its line
+ * names one animal while the three ecology lines above it count whole
+ * populations. Here rather than in `PerfHud` because the sheet prints
+ * what it is told and never learns what a creature is.
+ */
+const FINDER_WORD: Readonly<Record<CreatureId, string>> = Object.freeze({
+  earthworm: 'worm',
+  aphid: 'aphid',
+  housefly: 'fly',
+});
+
+/** The actor heading from one world point to another: ahead is (sin h, cos h). */
+function headingTo(from: WorldPoint, to: WorldPoint): number {
+  return Math.atan2(to.wx - from.wx, to.wz - from.wz);
+}
 
 /**
  * The settings this scene honours. Structural on purpose: the settings
@@ -141,6 +162,15 @@ export interface PerfWorldSettings {
    * `onHudCollapse` carries the tap back to whoever owns the document.
    */
   readonly hudCollapsed: boolean;
+  /**
+   * Whether the creature finder is switched on (Joshua, 2026-09-08).
+   * Persisted like the fold, and for the same reason: the switch lives
+   * on a sheet that is folded on a phone, and an instrument that came
+   * back off after every reload would be turned on again by hand every
+   * time — which, now that the app reloads itself on a push
+   * (`app/updateCheck.ts`), is often.
+   */
+  readonly finderOn: boolean;
   /**
    * The player's two three-level quality choices, since 2026-09-05.
    *
@@ -253,6 +283,12 @@ export interface PerformanceWorldHooks {
    * reload. Absent: the fold lasts until the scene is left.
    */
   onHudCollapse?(collapsed: boolean): void;
+  /**
+   * The player flipped the finder's switch. Persisted by the owner of
+   * the settings document, exactly as the fold is — perf/ may not import
+   * ui/ (§3). Absent: the switch lasts until the scene is left.
+   */
+  onFinderToggle?(on: boolean): void;
   /**
    * Where to resume from: the state the session loaded, or null for a
    * fresh start at the scene's own START. Read once in `enter()`. A hook
@@ -760,6 +796,17 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
      * species switched off in the simulation is gone from the screen.
      */
     let fauna: FaunaView | null = null;
+    /**
+     * THE FINDER (Joshua, 2026-09-08). An instrument over the world, not
+     * a layer in it: `finderOn` is its switch, the pins are drawn from
+     * the simulation's own creature list, and with it off nothing here
+     * runs at all. See `fauna/FinderView` for why it is allowed to look
+     * like a gizmo.
+     */
+    let finder: FinderView | null = null;
+    let finderOn = false;
+    /** The species GO last showed, so the next press shows a different one. */
+    let lastShown: CreatureId | null = null;
     /** What each species row was at the last look. */
     const speciesOn: Record<CreatureId, boolean> = { earthworm: false, aphid: false, housefly: false };
     /** The rung the bubble was BUILT at: a changed setting is noticed once. */
@@ -1182,6 +1229,12 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
       } else {
         fauna.setRung(detail);
       }
+      if (finder === null) {
+        const ground = field;
+        finder = new FinderView({ groundAt: (at) => ground.heightAt(at) });
+        finder.setEnabled(finderOn);
+        three.add(finder.group);
+      }
       // FILLED BEHIND THE LOADING SCREEN, like the terrain's rings and
       // the sea's sheets: every cell within reach generated now, so the
       // first drawn frame has grass in it and pays nothing for it.
@@ -1264,6 +1317,67 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
       creatures.update(pose.at, dt);
       // Drawn AFTER they moved, at where they are this frame.
       if (fauna !== null) fauna.update(creatures.creatures(), pose.at, dt, pose.height);
+      // And the pins over them, from the same list, at the size the
+      // camera's own field and the viewport make PIN_PIXELS. Off, this
+      // is one `visible` check.
+      if (finder !== null && finderOn) {
+        finder.update(creatures.creatures(), pose.at, {
+          fovRadians: (fly.camera.fov * Math.PI) / 180,
+          heightPx: viewHeight,
+          at: fly.camera.position,
+        });
+      }
+    };
+
+    /**
+     * TAKE THE CAMERA TO THE NEAREST ANIMAL — the half of the finder a
+     * pin cannot do. A 15 cm worm has to be looked at from about 45 cm
+     * to fill any part of a phone screen, and nobody flies a stick to
+     * within 45 cm of a marker. `creatures/finder.viewpointFor` decides
+     * where to stand (from the side the camera is already on, above the
+     * GROUND when the animal is under it); this only turns its heading
+     * into a camera yaw, which is the one place that conversion lives.
+     */
+    const goToNearest = (): void => {
+      if (creatures === null || !finderOn) return;
+      const pose = fly.pose();
+      const ground = field;
+      const groundAt = ground === null ? undefined : (at: WorldPoint): number => ground.heightAt(at);
+      // A DIFFERENT ANIMAL EACH PRESS, by SPECIES rather than by
+      // distance. Excluding the last animal was tried first and is not
+      // enough: aphids live in colonies (`population.clump` 0.9), so the
+      // next-nearest is another aphid a centimetre away on the same
+      // leaf, and ten presses are ten photographs of one plant. Rotating
+      // the species shows the three MODELS, which is what was asked for.
+      // A species whose only candidates are underground is passed over —
+      // there is nothing to look at there — and only if no species has
+      // one above ground does it fall back to the nearest of anything,
+      // which is when the readout says `under` and means it.
+      const list = creatures.creatures();
+      const from = lastShown === null ? 0 : (CREATURE_IDS.indexOf(lastShown) + 1) % CREATURE_IDS.length;
+      let near = null;
+      for (let i = 0; i < CREATURE_IDS.length && near === null; i += 1) {
+        const id = CREATURE_IDS[(from + i) % CREATURE_IDS.length];
+        const found = nearestSighting(list, pose.at, {
+          groundAt, preferVisible: true, species: new Set<CreatureId>([id]),
+        });
+        if (found !== null && !isUnderground(found)) near = found;
+      }
+      if (near === null) near = nearestSighting(list, pose.at, { groundAt, preferVisible: true });
+      if (near === null) return;
+      lastShown = near.species;
+      const view = viewpointFor(near, CREATURE_SPECIES[near.species], { from: pose.at, groundAt });
+      const local = toLocal(view.at);
+      placeCamera(local.lx, view.height, local.lz, yawForHeading(view.heading), view.pitch);
+      // AND GET THE SHEET OUT OF THE WAY. The camera puts the animal at
+      // the centre of the screen, and the centre of a 932 x 430 screen is
+      // underneath the stat sheet — so without this, pressing GO flies to
+      // the worm and then hides it, which reads as nothing happening.
+      // The FOLD only, never the setting: `collapsed` deliberately does
+      // not fire `onCollapse` (see PerfHud), so the player's own choice
+      // is still in the document and one tap on the corner brings the
+      // sheet back.
+      if (hud !== null) hud.collapsed = true;
     };
 
     /**
@@ -1710,6 +1824,12 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         hud.hidden = !s.showFps;
         hud.collapsed = s.hudCollapsed;
       }
+      // The finder follows the document too, so the switch survives the
+      // reload the update check performs on a push.
+      if (s.finderOn !== finderOn) {
+        finderOn = s.finderOn;
+        finder?.setEnabled(finderOn);
+      }
       // The sea is a compiled program and a loaded texture per tier, so
       // a changed quality setting is a rebuild. No-ops when it has not
       // changed, which is every state change but the one that did.
@@ -1897,11 +2017,46 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
           };
         };
 
+        /**
+         * THE FINDER'S LINE. The word for each species is chosen here
+         * and not in the sheet, which prints what it is told: `worm`,
+         * `aphid`, `fly` — the singulars, because this line names ONE
+         * animal while the three above it count populations.
+         */
+        const finderReadout = (): FinderReadout => {
+          const sim = creatures;
+          if (sim === null || !finderOn) return { on: finderOn, pins: 0, nearest: null };
+          const ground = field;
+          const groundAt = ground === null ? undefined : (at: WorldPoint): number => ground.heightAt(at);
+          const eye = fly.pose().at;
+          // `preferVisible`: the line names the animal GO would take the
+          // camera to, and GO goes to one that can be looked at.
+          const near = nearestSighting(sim.creatures(), eye, { groundAt, preferVisible: true });
+          return {
+            on: true,
+            pins: finder?.cost.pins ?? 0,
+            nearest: near === null ? null : {
+              species: FINDER_WORD[near.species],
+              metres: metresOfUnits(near.distance),
+              bearing: compassBearing(headingTo(eye, near.at)),
+              under: isUnderground(near),
+            },
+          };
+        };
+
         hud = new PerfHud(ctx.uiLayer, {
           layers: () => toggles.list(),
           onLayerToggle: (id, enabled) => {
             toggles.setEnabled(id, enabled);
           },
+          // THE INSTRUMENT, only where there are animals to find.
+          finder: habitat === null ? undefined : finderReadout,
+          onFinderToggle: (on) => {
+            finderOn = on;
+            finder?.setEnabled(on);
+            hooks.onFinderToggle?.(on);
+          },
+          onFinderGo: goToNearest,
           onCollapse: (collapsed) => hooks.onHudCollapse?.(collapsed),
           session: sessionReadout,
           fresh: field === null ? undefined : freshCost,
@@ -2208,6 +2363,11 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         }
         resources = null;
         creatures = null;
+        if (finder) {
+          three.remove(finder.group);
+          finder.dispose();
+          finder = null;
+        }
         if (fauna) {
           three.remove(fauna.group);
           fauna.dispose();

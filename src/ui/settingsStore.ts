@@ -48,6 +48,15 @@ export interface Settings extends Versioned {
    * world opens. Reader: perf/PerfHud, through the Performance World.
    */
   readonly hudCollapsed: boolean;
+  /**
+   * The creature finder: pins over the animals the simulation is holding
+   * (Joshua, 2026-09-08, "make a simple 3D finder I can turn on to find
+   * them better"). An INSTRUMENT, so it is off by default and nothing in
+   * the game reads it — only the Performance World, which draws the pins
+   * and offers the GO button. Written when the player flips the switch on
+   * the stat sheet. Reader: perf/PerformanceWorldScene.
+   */
+  readonly finderOn: boolean;
 }
 
 /** Bumped when a field changes meaning; an older document reads as defaults. */
@@ -77,6 +86,9 @@ export const SETTINGS_DEFAULTS: Settings = {
   // Open: the sheet is a stat sheet first and a fold second; the fold is
   // the player's to choose and keep.
   hudCollapsed: false,
+  // OFF. The pins are an instrument laid over the island, not part of
+  // it: nobody's first launch should open on a field of markers.
+  finderOn: false,
 };
 
 /**
@@ -117,6 +129,7 @@ export function sanitizeSettings(raw: unknown, defaults: Settings = SETTINGS_DEF
     showFps: typeof r.showFps === 'boolean' ? r.showFps : defaults.showFps,
     // No SETTINGS_VERSION bump: a new field with a default reads an older document as it was, plus the default.
     hudCollapsed: typeof r.hudCollapsed === 'boolean' ? r.hudCollapsed : defaults.hudCollapsed,
+    finderOn: typeof r.finderOn === 'boolean' ? r.finderOn : defaults.finderOn,
   };
 }
 

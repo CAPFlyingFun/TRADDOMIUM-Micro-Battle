@@ -165,6 +165,24 @@ export function compassBearing(heading: number): number {
   return ((180 - degrees) % 360 + 360) % 360;
 }
 
+/** The eight points of the rose, from north, clockwise — the order a bearing indexes. */
+export const COMPASS_POINTS: readonly string[] = Object.freeze(['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW']);
+
+/**
+ * A BEARING AS A WORD. Eight points, because a phone screen is being
+ * read at arm's length while flying: "NE" is followed instantly and
+ * "37°" is not.
+ *
+ * It takes a BEARING, not a heading, so it cannot be the mirrored
+ * compass the function above exists to prevent — the conversion happens
+ * once, at `compassBearing`, and this only names the result.
+ */
+export function compassWord(bearing: number): string {
+  if (!Number.isFinite(bearing)) return COMPASS_POINTS[0];
+  const wrapped = ((bearing % 360) + 360) % 360;
+  return COMPASS_POINTS[Math.round(wrapped / 45) % COMPASS_POINTS.length];
+}
+
 /** How wide a chunk is, in world units. */
 export const CHUNK_SPAN = 512;
 

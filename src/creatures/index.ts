@@ -26,5 +26,10 @@ export {
 } from './intent';
 export { arrived, burrow, fly, isAirborne, isMoving, move, paceOf, walk } from './locomotion';
 export { wrapHeading } from './heading';
+export {
+  GROUND_CLEARANCE, MIN_STANDOFF, UNDER_GROUND, VIEW_LENGTHS, VIEW_RISE,
+  isUnderground, metresOfUnits, nearestSighting, sightings, standoffOf, unitsOfMetres, viewpointFor,
+} from './finder';
+export type { FinderSighting, SightingOptions, Viewpoint, ViewpointOptions } from './finder';
 export { CELLS_PER_UPDATE, CreatureSim, EVICT_BEYOND, NEAR_STEP_S } from './CreatureSim';
 export type { CreatureSimOptions } from './CreatureSim';

@@ -410,18 +410,31 @@ describe('the world/sky seam', () => {
 describe('the creatures/fauna seam', () => {
   const ORIGIN_VALUE = /\boriginAt\b/;
   /** The values `fauna/` may take from `creatures/`: the table's arithmetic and its published lists, never the simulation. */
-  const CREATURE_VALUES = new Set(['AIRBORNE', 'CREATURE_IDS', 'rigScale', 'unitsOfMm', 'CREATURE_SPECIES']);
+  const CREATURE_VALUES = new Set([
+    'AIRBORNE', 'CREATURE_IDS', 'rigScale', 'unitsOfMm', 'CREATURE_SPECIES',
+    // The depth at which a body stops being drawn. `FinderView` marks a
+    // buried animal at exactly the line `FaunaView` stops drawing one, so
+    // the two must read the same constant rather than each keep a copy.
+    'UNDER_GROUND',
+  ]);
 
   it('has a fauna renderer to check', () => {
-    expect([...fauna.keys()]).toEqual(expect.arrayContaining(['FaunaView.ts', 'motion.ts', 'rig.ts']));
+    expect([...fauna.keys()]).toEqual(expect.arrayContaining(['FaunaView.ts', 'FinderView.ts', 'motion.ts', 'rig.ts']));
     expect(faunaSites.length).toBeGreaterThan(0);
   });
 
-  it('seats every body through toLocal, in FaunaView alone, and never subtracts an origin by hand', () => {
+  it('seats every body through toLocal, in the two views alone, and never subtracts an origin by hand', () => {
+    // TWO views cross the boundary in this directory, and only two: the
+    // animals themselves (`FaunaView`) and the finder's pins over them
+    // (`FinderView`, 2026-09-08 — an instrument, drawn at the same world
+    // positions). `rig.ts` and `motion.ts` work at the identity and must
+    // never see the origin at all, which is what pins this list.
     const originImporters = faunaSites.filter((s) => ORIGIN.test(s.specifier));
-    expect(originImporters.map((s) => s.file)).toEqual(['FaunaView.ts']);
-    expect(originImporters[0].typeOnly).toBe(false);
-    expect(code(fauna.get('FaunaView.ts') ?? '')).toMatch(/\btoLocal\(/);
+    expect(originImporters.map((s) => s.file).sort()).toEqual(['FaunaView.ts', 'FinderView.ts']);
+    for (const site of originImporters) expect(site.typeOnly).toBe(false);
+    for (const file of ['FaunaView.ts', 'FinderView.ts']) {
+      expect(code(fauna.get(file) ?? ''), `${file} converts through toLocal`).toMatch(/\btoLocal\(/);
+    }
     for (const site of originImporters) expect(site.statement, `${site.file} imports originAt`).not.toMatch(ORIGIN_VALUE);
   });
 
@@ -431,8 +444,11 @@ describe('the creatures/fauna seam', () => {
     }
     // The distance helpers are the door: a renderer that stopped using
     // them would have to take a coordinate apart, which the line above
-    // catches — or stop measuring distance, which this catches.
-    expect(code(fauna.get('FaunaView.ts') ?? '')).toMatch(/\bdistanceSquared\(/);
+    // catches — or stop measuring distance, which this catches. Both
+    // views measure, so both are asked.
+    for (const file of ['FaunaView.ts', 'FinderView.ts']) {
+      expect(code(fauna.get(file) ?? ''), `${file} measures through coords`).toMatch(/\bdistanceSquared\(/);
+    }
     // The rig and motion files never see a coordinate of either kind.
     for (const file of ['rig.ts', 'motion.ts']) {
       const sites = faunaSites.filter((s) => s.file === file);

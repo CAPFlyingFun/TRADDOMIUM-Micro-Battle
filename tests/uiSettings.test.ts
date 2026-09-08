@@ -36,6 +36,10 @@ describe('settings sanitize', () => {
     expect(sanitizeSettings({ showFps: false }).showFps).toBe(false);
     expect(sanitizeSettings({ showFps: 1 }).showFps).toBe(SETTINGS_DEFAULTS.showFps);
     expect(sanitizeSettings({ hudCollapsed: true }).hudCollapsed).toBe(true);
+    // The finder is an instrument: off unless the document says otherwise.
+    expect(sanitizeSettings({ finderOn: true }).finderOn).toBe(true);
+    expect(sanitizeSettings({ finderOn: 'yes' }).finderOn).toBe(SETTINGS_DEFAULTS.finderOn);
+    expect(SETTINGS_DEFAULTS.finderOn).toBe(false);
     expect(sanitizeSettings({ hudCollapsed: 'true' }).hudCollapsed).toBe(SETTINGS_DEFAULTS.hudCollapsed);
     expect(SETTINGS_DEFAULTS.hudCollapsed).toBe(false);
     expect(sanitizeSettings({ textures: 'low', detail: 'low' }).textures).toBe('low');
@@ -46,7 +50,9 @@ describe('settings sanitize', () => {
   it('drops unknown keys and always stamps the current version', () => {
     const s = sanitizeSettings({ version: 7, fov: 70, terrainRelief: 1.5, showFix: true });
     expect(s).toEqual({ ...SETTINGS_DEFAULTS, fov: 70, version: SETTINGS_VERSION });
-    expect(Object.keys(s).sort()).toEqual(['detail', 'fov', 'hudCollapsed', 'invertY', 'lookSensitivity', 'showFps', 'textures', 'version']);
+    expect(Object.keys(s).sort()).toEqual([
+      'detail', 'finderOn', 'fov', 'hudCollapsed', 'invertY', 'lookSensitivity', 'showFps', 'textures', 'version',
+    ]);
   });
 });
 
@@ -56,7 +62,8 @@ describe('settings store round trip', () => {
     const store = defineStore(SETTINGS_SPEC, kv);
     expect(store.read()).toEqual(SETTINGS_DEFAULTS);
     const written = {
-      version: SETTINGS_VERSION, fov: 95, lookSensitivity: 1.75, invertY: true, textures: 'high', detail: 'high', showFps: false, hudCollapsed: true,
+      version: SETTINGS_VERSION, fov: 95, lookSensitivity: 1.75, invertY: true, textures: 'high', detail: 'high', showFps: false,
+      hudCollapsed: true, finderOn: true,
     } as const;
     store.write(written);
     expect(store.read()).toEqual(written);

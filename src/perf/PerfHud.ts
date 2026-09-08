@@ -60,7 +60,7 @@ import type { WorldLayerId } from '../world/WorldLoader';
 import type { CameraReadout } from './FreeFlyCamera';
 import type { FrameSummary } from './FrameStats';
 import type { LayerToggle } from './layerToggles';
-import { compassBearing } from '../world/coords';
+import { compassBearing, compassWord } from '../world/coords';
 
 /** DOM refreshes per second. */
 export const HUD_HZ = 5;
@@ -294,6 +294,35 @@ export interface CreaturesReadout {
   readonly ground: { readonly built: boolean; readonly attempted: number };
 }
 
+/**
+ * THE FINDER, as the HUD is told it (Joshua, 2026-09-08: "I don't see
+ * any worms in the game... can you make a simple 3D finder I can turn on
+ * to find them better?").
+ *
+ * It is an INSTRUMENT and it says so: `on` is the switch's own state,
+ * `pins` is how many markers were drawn last frame, and `nearest` is the
+ * one the GO button would take the camera to — null when the simulation
+ * is holding nothing, which on a beach or at sea is the honest answer
+ * rather than a failure.
+ *
+ * `species` is a WORD, already chosen by the owner, for the same reason
+ * every other line here is: this sheet prints what it is told and never
+ * learns what a creature is.
+ */
+export interface FinderReadout {
+  readonly on: boolean;
+  readonly pins: number;
+  readonly nearest: {
+    /** `worm`, `aphid`, `fly` — the singular the line prints. */
+    readonly species: string;
+    readonly metres: number;
+    /** Compass degrees, 0 = north (`world/coords.compassBearing`). */
+    readonly bearing: number;
+    /** Under the ground, where nothing can be drawn: the line says so. */
+    readonly under: boolean;
+  } | null;
+}
+
 export interface PerfHudHooks {
   /** The rows to show. Re-read at every refresh so the checkboxes follow the model, not the clicks. */
   layers(): readonly LayerToggle[];
@@ -329,6 +358,20 @@ export interface PerfHudHooks {
    * a built simulation produces a readout.
    */
   creatures?(): CreaturesReadout | null;
+  /**
+   * The creature finder. Absent where a world has no creatures to find,
+   * which is what keeps the row and the line off the empty world's sheet
+   * entirely rather than showing a switch that does nothing (§2.9).
+   */
+  finder?(): FinderReadout;
+  /** The player flipped the finder's switch. */
+  onFinderToggle?(on: boolean): void;
+  /**
+   * The player pressed GO. The owner takes the camera to whatever
+   * `finder().nearest` names; the HUD neither knows where that is nor
+   * what a camera is.
+   */
+  onFinderGo?(): void;
   /**
    * The player folded or unfolded the sheet. Fired by the corner button
    * and the folded row ONLY — never by the `collapsed` setter — so the
@@ -591,6 +634,31 @@ function costWords(thinkMs: number, moveMs: number, drawMs: number): string {
 }
 
 /**
+ * The finder's one line, at `ECOLOGY_LINE_MAX` like the rest of the
+ * block. Four states, and each is a fact rather than a hope:
+ *
+ *   find off             the switch is off; nothing is being looked for
+ *   find nothing near    on, and the simulation is holding none — a
+ *                        beach, the sea, or a rung whose caps are spent
+ *   find worm 12m NE     the nearest, and which way to fly
+ *   under worm 12m NE    the same, and the reason you cannot see it:
+ *                        it is in the soil, which is where a worm
+ *                        spends most of its life
+ *
+ * Only a burrower is ever `under`, so the widest this can print is
+ * `under aphid 40m NE` — seventeen characters, the column's width, with
+ * the longest species word and the longest reach in the table.
+ */
+export function finderWords(f: FinderReadout | null): string {
+  if (f === null) return '';
+  if (!f.on) return 'find off';
+  if (f.nearest === null) return 'find nothing near';
+  const n = f.nearest;
+  const metres = `${Math.max(0, Math.round(n.metres))}m`;
+  return `${n.under ? 'under' : 'find'} ${n.species} ${metres} ${compassWord(n.bearing)}`;
+}
+
+/**
  * The creatures' six lines, or the honest absence of them: all empty
  * while the hook has nothing built to report, because a species line
  * reading `worms 0 of 40` about a simulation that does not exist yet
@@ -629,6 +697,12 @@ export class PerfHud {
   private readonly objectLines: HTMLElement[] | null;
   /** Built only when the owner offers a `weather()` hook; null otherwise. Sky and rain in FRAME, the clock in CAMERA. */
   private readonly weatherLines: readonly [HTMLElement, HTMLElement, HTMLElement] | null;
+  /** The finder's line, with the ecology block; built only when the owner offers the hook. */
+  private readonly finderLine: HTMLElement | null;
+  /** The finder's switch and its GO button, at the foot of LAYERS. Null together with the line. */
+  private finderBox: HTMLInputElement | null = null;
+  private finderGo: HTMLButtonElement | null = null;
+
   /** The shadow configuration, under the clock in CAMERA; built with the weather lines. */
   private readonly shadowLine: HTMLElement | null;
   /** The plant families' line: built with the `objects()` hook, in CAMERA with the ecology block. */
@@ -741,6 +815,7 @@ export class PerfHud {
     // the design canvas (see the header); this column is five lines and
     // the widest on the sheet, so these cost it neither height nor width.
     this.plantsLine = hooks.objects === undefined ? null : line(camera, 'veg-plants');
+    this.finderLine = hooks.finder === undefined ? null : line(camera, 'eco-find');
     this.creatureLines = hooks.creatures === undefined
       ? null
       : [
@@ -899,6 +974,47 @@ export class PerfHud {
       box.addEventListener('change', () => this.hooks.onLayerToggle(layer.id, box.checked));
       this.boxes.set(layer.id, box);
     }
+    this.buildFinderRow(parent, row);
+  }
+
+  /**
+   * THE FINDER'S SWITCH, at the foot of LAYERS but NOT a layer.
+   *
+   * A world layer is a piece of the island whose cost is being measured;
+   * the finder is an instrument laid over it, and putting it in
+   * `WORLD_LAYERS` would have made the plan's own list say the island
+   * has a `finder` in it. So it sits under the layers, separated by a
+   * rule, with the GO button beside it — a THUMB target at the same 28
+   * pixels as the fold toggle, because this is used on a phone.
+   */
+  private buildFinderRow(
+    parent: HTMLElement,
+    row: (id: string, label: string, checked: boolean, locked: boolean) => HTMLInputElement,
+  ): void {
+    if (this.hooks.finder === undefined) return;
+    const doc = parent.ownerDocument;
+    const rule = doc.createElement('div');
+    rule.style.cssText = `margin:5px 0 4px;border-top:1px solid ${GOLD};opacity:0.35;`;
+    parent.appendChild(rule);
+
+    const box = row('finder', 'finder', this.hooks.finder().on, false);
+    box.dataset.action = 'finder';
+    box.addEventListener('change', () => this.hooks.onFinderToggle?.(box.checked));
+    this.finderBox = box;
+
+    const go = doc.createElement('button');
+    go.type = 'button';
+    go.dataset.action = 'finder-go';
+    // NOT "go to nearest": every press after the first goes to the next
+    // animal, so the label has to be true of all of them.
+    go.textContent = 'go to animal';
+    go.style.cssText =
+      `display:block;margin:4px 0 0;min-height:${COLLAPSE_BUTTON_PX}px;padding:0 10px;`
+      + `color:${GOLD};background:rgba(6,9,12,0.72);border:1px solid ${GOLD};border-radius:4px;`
+      + 'font:inherit;cursor:pointer;touch-action:manipulation;';
+    go.addEventListener('click', () => this.hooks.onFinderGo?.());
+    parent.appendChild(go);
+    this.finderGo = go;
   }
 
   private render(readout: PerfReadout): void {
@@ -951,6 +1067,18 @@ export class PerfHud {
       const words = weatherWords(weather);
       for (let i = 0; i < this.weatherLines.length; i += 1) this.weatherLines[i].textContent = words[i];
       if (this.shadowLine !== null) this.shadowLine.textContent = weather?.shadow ?? '';
+    }
+    if (this.finderLine !== null) {
+      const finder = this.hooks.finder?.() ?? null;
+      this.finderLine.textContent = finderWords(finder);
+      if (this.finderBox !== null && finder !== null) this.finderBox.checked = finder.on;
+      // GO is DISABLED, visibly, when there is nothing to go to: an
+      // unavailable action must never look functional (CLAUDE.md).
+      if (this.finderGo !== null) {
+        const ready = finder !== null && finder.on && finder.nearest !== null;
+        this.finderGo.disabled = !ready;
+        this.finderGo.style.opacity = ready ? '1' : '0.45';
+      }
     }
     if (this.creatureLines !== null) {
       const words = creatureWords(this.hooks.creatures?.() ?? null);

@@ -48,6 +48,7 @@ import { hostCandidates, populateCreatures } from './population';
 import {
   CREATURE_IDS, CREATURE_SPECIES, assertSpeciesTable, speciesProblems, unitsOfMm, type CreatureId, type CreatureSpecies,
 } from './species';
+import { unitsOfMetres } from './finder';
 import type { CreatureState, Tier } from './state';
 import { burrowGate, NO_BURROW_EDITOR, type BurrowEditor, type BurrowGate } from './terrainEdit';
 import type { CreatureCost, CreatureCounts, CreatureSimulation, CreatureWorld } from './world';
@@ -81,8 +82,6 @@ const SELECT_EVERY_S = 0.5;
 const SELECT_MOVED = 50;
 /** How often a host species' cell with no plants yet is asked for again, seconds. */
 const RETRY_WAITING_S = 1;
-
-const unitsOfMetres = (metres: number): number => unitsOfMm(metres * 1000);
 
 interface Cell {
   readonly id: ObjectCellId;

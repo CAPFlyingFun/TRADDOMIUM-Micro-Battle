@@ -220,6 +220,21 @@ its own.
   shadows are appearance only — no height, no material swap, no
   island-wide field — and `tests/terrainView.test.ts`, `tests/skyView.test.ts`
   and `tests/seaWaterLook.test.ts` pin that.
+- **The finder is an INSTRUMENT, and the only thing in `src/` allowed to
+  look like one** (Joshua, 2026-09-08: "I don't see any worms in the
+  game... can you make a simple 3D finder I can turn on to find them
+  better?"). Nothing was broken — the forest holds forty worms of forty —
+  but a 150 mm animal 12 mm under the soil on a 5,600,000-unit island is
+  a correct ecology and an empty screen. So `fauna/FinderView.ts` is
+  unlit, ignores the depth buffer and holds a constant size on screen:
+  three properties that would be bugs in a renderer and are the whole
+  specification of a gizmo, and it does NOT follow "light decides what
+  shows". The rule that matters: an instrument READS the world and never
+  arranges it. Do not widen a reach, grow a body, hold a worm at the
+  surface or spawn anything to make the animals easier to find — put a
+  pin on them, and let `creatures/finder.ts` say where a camera has to
+  stand to see one. It is off by default and every probe shot but
+  `probe:finder`'s is taken with it off.
 - A client-side PIN is a convenience, not security.
 - Every file in `scripts/` is wired to a `package.json` script or listed
   in `scripts/MANUAL.md`.
