@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import { APHID, EARTHWORM, HOUSEFLY, newCreature, unitsOfMm, type CreatureState, type CreatureWorld } from '../src/creatures';
 import { wrapHeading } from '../src/creatures/heading';
-import { arrived, burrow, fly, isAirborne, isMoving, move, paceOf, walk } from '../src/creatures/locomotion';
+import { DROP_MM_S, arrived, burrow, fly, isAirborne, isMoving, move, paceOf, walk } from '../src/creatures/locomotion';
 import { distance, world, type WorldPoint } from '../src/world/coords';
 import { SEA_HABITAT } from '../src/world/habitat';
 
@@ -27,6 +27,11 @@ function fakeWorld(ground: (at: WorldPoint) => number = slope): CreatureWorld {
 
 function creature(species: typeof EARTHWORM, at: WorldPoint, height: number, heading = 0): CreatureState {
   return newCreature({ id: `${species.id}:0,0:0`, species: species.id, cellKey: '0,0', at, height, heading, phase: 0 });
+}
+
+/** The same creature, at a length it was drawn with rather than the one the table cites. */
+function sized(species: typeof EARTHWORM, at: WorldPoint, height: number, lengthMm: number, heading = 0): CreatureState {
+  return newCreature({ id: `${species.id}:0,0:1`, species: species.id, cellKey: '0,0', at, height, heading, phase: 0, lengthMm });
 }
 
 function finite(c: CreatureState): void {
@@ -119,7 +124,7 @@ describe('burrowing', () => {
       expect(c.height).toBeGreaterThanOrEqual(g - under - 1e-9);
       finite(c);
     }
-    // 3 mm/s for a minute: eighteen units east, no more, no less.
+    // The cited worm travels at 15 mm/s: ninety units east in a minute, no more, no less.
     expect(c.at.wx).toBeCloseTo(unitsOfMm(EARTHWORM.pace.wanderMmS) * 60, 6);
     c.behaviour = 'flee';
     for (let i = 0; i < 60 * 10; i += 1) burrow(c, EARTHWORM, w, 1 / 60);
@@ -237,5 +242,60 @@ describe('the dispatch and the guards', () => {
     move(c, HOUSEFLY, w, 0.1);
     expect(c.at).toBe(here);
     finite(c);
+  });
+});
+
+describe("a pace is the individual's", () => {
+  it('a worm twice the cited length burrows twice as far in a second; one made without a length is the table\'s animal', () => {
+    const w = fakeWorld(() => 0);
+    const cited = sized(EARTHWORM, world(0, 0), -1.2, EARTHWORM.lengthMm);
+    const big = sized(EARTHWORM, world(0, 0), -1.2, EARTHWORM.lengthMm * 2);
+    const plain = creature(EARTHWORM, world(0, 0), -1.2);
+    for (const c of [cited, big, plain]) {
+      c.behaviour = 'burrow';
+      c.target = world(100_000, 0);
+    }
+    expect(paceOf(cited, EARTHWORM)).toBeCloseTo(unitsOfMm(EARTHWORM.pace.wanderMmS), 12);
+    expect(paceOf(big, EARTHWORM)).toBeCloseTo(2 * paceOf(cited, EARTHWORM), 12);
+    const one = burrow(cited, EARTHWORM, w, 1);
+    expect(burrow(big, EARTHWORM, w, 1)).toBeCloseTo(2 * one, 9);
+    expect(burrow(plain, EARTHWORM, w, 1)).toBeCloseTo(one, 12);
+    // The band it travels in is the SPECIES' — a big worm is faster, not deeper.
+    expect(big.height).toBeCloseTo(cited.height, 9);
+  });
+
+  it('a flee scales with the body, and so does the quarter-body an arrival is measured in', () => {
+    const w = fakeWorld(() => 0);
+    const small = sized(APHID, world(0, 0), 0, APHID.lengthRangeMm[0]);
+    const large = sized(APHID, world(0, 0), 0, APHID.lengthRangeMm[1]);
+    for (const c of [small, large]) {
+      c.behaviour = 'flee';
+      c.target = world(0, 1000);
+    }
+    const ratio = APHID.lengthRangeMm[1] / APHID.lengthRangeMm[0];
+    expect(paceOf(large, APHID) / paceOf(small, APHID)).toBeCloseTo(ratio, 12);
+    expect(walk(large, APHID, w, 1) / walk(small, APHID, w, 1)).toBeCloseTo(ratio, 9);
+    // ARRIVE_LENGTHS is a quarter of a body: 3.75 units for a 150 mm worm, 7.5 for a 300 mm one.
+    const nearTarget = (lengthMm: number): CreatureState => {
+      const c = sized(EARTHWORM, world(0, 0), 0, lengthMm);
+      c.target = world(0, 5);
+      return c;
+    };
+    expect(arrived(nearTarget(EARTHWORM.lengthMm), EARTHWORM)).toBe(false);
+    expect(arrived(nearTarget(EARTHWORM.lengthMm * 2), EARTHWORM)).toBe(true);
+  });
+
+  it('a fall is gravity\'s at any size: two aphids of different lengths drop off a stem at the same rate', () => {
+    const w = fakeWorld(() => 0);
+    const small = sized(APHID, world(0, 0), 50, APHID.lengthRangeMm[0]);
+    const large = sized(APHID, world(0, 0), 50, APHID.lengthRangeMm[1]);
+    for (const c of [small, large]) {
+      c.behaviour = 'flee';
+      c.target = null;
+      c.targetHeight = 0;
+      walk(c, APHID, w, 0.01);
+    }
+    expect(large.height).toBeCloseTo(small.height, 12);
+    expect(50 - small.height).toBeCloseTo(unitsOfMm(DROP_MM_S) * 0.01, 9);
   });
 });

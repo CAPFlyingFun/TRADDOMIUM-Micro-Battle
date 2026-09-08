@@ -33,13 +33,46 @@
  *
  * ─── the size is the table's, and the file is checked against it ───
  *
- * The rig root is scaled by `rigScale(species)` — the cited length over
+ * The TEMPLATE is scaled by `rigScale(species)` — the cited length over
  * the table's `spineUnits` — and then the loaded rig's own spine is
  * MEASURED (`rig.measureSpine`). If the two disagree by more than
  * `SPINE_TOLERANCE` a warning names the species, the measurement, and
  * the number the table would need. It is not corrected here: a renderer
  * that quietly resized a creature would hide exactly the drift the
- * table's docblock says the arithmetic exists to expose.
+ * table's docblock says the arithmetic exists to expose. That warning is
+ * about the FILE and stays about the file: it compares the template with
+ * the species' cited length and knows nothing about any one animal.
+ *
+ * ─── but the DRAWN size is the ANIMAL'S ─────────────────────────────
+ *
+ * Joshua, 2026-09-08, having read a source on how far an earthworm
+ * travels: "about the Earthworm it should be based on size and dynamic".
+ * Every worm in a forest was 150 mm and every worm was therefore drawn,
+ * trailed and impostored identically. `CreatureState.lengthMm` now
+ * carries the body a particular animal grew, and `sizeRatio(state,
+ * species)` is the ONE place a length is compared with its species'
+ * cited one (`creatures/species.ts`). Every length this file draws with
+ * goes through it:
+ *
+ *   the lent rig's root scale, so a 300 mm worm is twice the rig;
+ *   the crumb spacing and the break distance on a worm's trail, so a
+ *     long body's polyline is no coarser against its own bones;
+ *   the span the reveal samples over, since what a cutaway shows of a
+ *     body is a fact about how far that body reaches;
+ *   the depth at which a burrower stops being drawn (`BURROW_HIDE`);
+ *   the stations `layChain` lands along the path and the belly lift,
+ *     which must match the skin the root scale just resized;
+ *   the stride the legs and the bobs are measured in;
+ *   and the impostor's own length and girth.
+ *
+ * ─── the pool is the species', the SCALE is the holder's ────────────
+ *
+ * One template and one set of clones per species: a rig is expensive and
+ * the pool exists to be lent around, so it cannot be built at any one
+ * animal's size. It takes its holder's size in `lend`, on the frame it
+ * changes hands, and `pose` writes the same scale again every frame — a
+ * drawn size is derived from the animal in front of it, never latched
+ * from whoever held the rig last.
  *
  * ─── the crossing ───────────────────────────────────────────────────
  *
@@ -69,7 +102,7 @@
 import * as THREE from 'three';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import type { Assets } from '../assets/assets';
-import { AIRBORNE, CREATURE_IDS, rigScale, unitsOfMm } from '../creatures';
+import { AIRBORNE, CREATURE_IDS, rigScale, sizeRatio, unitsOfMm } from '../creatures';
 import type { CreatureId, CreatureSpecies, CreatureState } from '../creatures';
 import { distance, distanceSquared, translate, type LocalPoint, type WorldPoint } from '../world/coords';
 import { toLocal as originToLocal } from '../world/origin';
@@ -125,7 +158,19 @@ export const HYSTERESIS = 1.15;
 /** The spine may be off the cited length by this fraction before the load warns. From the brief. */
 export const SPINE_TOLERANCE = 0.35;
 
-/** A burrower more than this far under the ground it stands on is not drawn, world units. From the brief. */
+/**
+ * A burrower more than this far under the ground it stands on is not
+ * drawn — world units AT THE SPECIES' CITED LENGTH, an individual's line
+ * being this through its own `sizeRatio`. From the brief.
+ *
+ * It scales with the animal because what it measures is when a body has
+ * gone out of sight, and a body goes out of sight at its own GIRTH: the
+ * impostor's is `LOOK.girth` of its length and the rig's skin is drawn
+ * around a spine the root scale has just resized, so a worm twice as
+ * long is twice as thick and still shows above the soil twice as far
+ * down. One absolute for every size would hide a 250 mm worm with a
+ * centimetre of it lying in the open.
+ */
 export const BURROW_HIDE = 0.3;
 
 /**
@@ -151,15 +196,19 @@ export const BURROW_HIDE = 0.3;
  * So the reveal is decided ONCE per creature per frame, from the whole
  * body, with hysteresis in both axes:
  *
- *   `BODY_SAMPLES` points, head to tail along the heading and one body
- *   length end to end — five points 3.75 units apart is a sample every
- *   1.2 soil tiles, so no single tile can carry the answer.
+ *   `BODY_SAMPLES` points, head to tail along the heading and one of
+ *   THAT ANIMAL'S body lengths end to end — five points 3.75 units apart
+ *   on the cited 150 mm worm is a sample every 1.2 soil tiles, so no
+ *   single tile can carry the answer. A longer worm spaces them further
+ *   apart, which is the right direction: it is the body that lies across
+ *   more tiles, so it is the body that must be asked about more widely.
  *
  *   The cutaway is taken as OPEN at `REVEAL_OPEN` of those samples and
  *   SHUT at `REVEAL_SHUT`; between the two nothing changes. Crossing
- *   that band takes two fifths of a body length of crawling — 60 mm,
- *   which is twenty seconds at the worm's 3 mm/s wander and four
- *   seconds at its 15 mm/s flight.
+ *   that band takes two fifths of a body length of crawling — 60 mm on
+ *   the cited worm — and the same number of SECONDS whatever the animal's
+ *   size, because a pace scales with the body it belongs to just as this
+ *   span does.
  *
  *   And a SHUT reading must hold for `REVEAL_HOLD` frames before it is
  *   believed, while an OPEN one is believed at once. Showing what the
@@ -184,10 +233,12 @@ export const REVEAL_HOLD = 12;
  * itself.
  *
  * GAME TUNING — `HYSTERESIS` in the other axis, and for the same reason:
- * the band is 3 to 4.5 mm under the surface, which a worm nosing up at
- * 3 mm/s takes half a second to cross and cannot jitter across between
- * two frames, and it sits well clear of the 12 mm band it travels in
- * (`species.burrow.underMm`), so an animal working near the surface
+ * the band is 3 to 4.5 mm under the surface for the cited 150 mm worm
+ * and scales with the animal, as `BURROW_HIDE` does. A worm nosing up at
+ * its own pace takes the same fraction of a second to cross it at any
+ * size — band and pace scale together — and cannot jitter across it
+ * between two frames, and it sits well clear of the band the animal
+ * travels in (`species.burrow.underMm`), so one working near the surface
  * settles on one side of the line instead of blinking on it.
  */
 export const BURROW_KEEP = 1.5;
@@ -201,6 +252,13 @@ export const BURROW_KEEP = 1.5;
  * bones 0.94, so two bones shared a straight segment and the animal read
  * as a chain of sticks. Sixteen puts a crumb between every pair of
  * bones. The trail still remembers about a body and a half.
+ *
+ * PER LENGTH, and the length is the individual's: sixteen crumbs to
+ * whatever body the animal grew. The cited worm drops one every 0.9375
+ * units and a 300 mm one every 1.875, which keeps the same crumb between
+ * the same pair of bones on both — the ratio the constant is named for,
+ * rather than an absolute spacing that would leave a long body a chain
+ * of sticks and a short one over-sampled.
  */
 export const CRUMBS_PER_LENGTH = 16;
 const TRAIL_MARGIN = 8;
@@ -208,9 +266,12 @@ const TRAIL_CAPACITY = CRUMBS_PER_LENGTH + TRAIL_MARGIN;
 
 /**
  * A head this far from its newest crumb has not crawled there — the
- * creature has been moved. Body lengths. GAME TUNING: a fleeing worm
- * covers 1.5 units a second, so half a body is thirty frames of full
- * flight and nothing a crawl reaches between two frames.
+ * creature has been moved. Body lengths of the animal itself, so it
+ * means the same thing at every size: a pace scales with the body
+ * (`species.pace` through `sizeRatio`), so half a body length is the
+ * same stretch of seconds of full flight for a 30 mm worm as for a
+ * 250 mm one, and nothing a crawl reaches between two frames.
+ * GAME TUNING.
  */
 const TRAIL_BREAK_LENGTHS = 0.5;
 
@@ -273,7 +334,8 @@ interface Trail {
   readonly heights: Float64Array;
   /** Ground minus the body, world units, positive downward. */
   readonly depths: Float64Array;
-  readonly spacing: number;
+  /** The holder's body length over `CRUMBS_PER_LENGTH`. Rewritten when the rig changes hands, since the new animal is a new size. */
+  spacing: number;
   head: number;
   count: number;
   /** The creature whose crawl this is a record of. A record of somebody else's crawl is worthless. */
@@ -329,12 +391,14 @@ interface Rig {
 interface Slot {
   readonly species: CreatureSpecies;
   readonly group: THREE.Group;
+  /** The species' CITED length, world units. One animal's is this through its own `sizeRatio`. */
   readonly bodyLength: number;
   readonly look: SpeciesLook;
   enabled: boolean;
   template: THREE.Object3D | null;
   placeholder: boolean;
   anatomy: RigAnatomy | null;
+  /** The TEMPLATE's uniform scale: `rigScale(species)`, or 1 for a placeholder. A LENT rig wears this through its holder's ratio. */
   scale: number;
   rigs: Rig[];
   impostor: THREE.InstancedMesh | null;
@@ -550,9 +614,18 @@ export class FaunaView {
     return this.slots.get(species)?.impostor ?? null;
   }
 
-  /** The rig root's uniform scale for a species: `rigScale`, or 1 for a placeholder. */
+  /**
+   * The TEMPLATE's uniform scale for a species: `rigScale`, or 1 for a
+   * placeholder. A rig lent to an animal wears this times that animal's
+   * `sizeRatio`, so read `rigs(species)[k].scale` for what is drawn.
+   */
   scaleOf(species: CreatureId): number {
     return this.slots.get(species)?.scale ?? 1;
+  }
+
+  /** The crumb spacing of each rig of a species, world units — its holder's body over `CRUMBS_PER_LENGTH`; 0 for a rig with no trail. */
+  trailSpacings(species: CreatureId): readonly number[] {
+    return (this.slots.get(species)?.rigs ?? []).map((r) => r.trail?.spacing ?? 0);
   }
 
   // ─── loading ───────────────────────────────────────────────────────
@@ -687,6 +760,23 @@ export class FaunaView {
   }
 
   /**
+   * THIS ANIMAL'S LENGTH, world units — not its species'.
+   *
+   * `sizeRatio` is the one place a body is measured against its species'
+   * cited one, and every length this renderer draws with comes through
+   * here, so the whole of "based on size" is one multiplication in two
+   * methods rather than a constant repeated at nine call sites.
+   */
+  private lengthOf(slot: Slot, c: CreatureState): number {
+    return slot.bodyLength * sizeRatio(c, slot.species);
+  }
+
+  /** The uniform scale a rig lent to this animal wears: the template's, through the animal's own ratio. */
+  private rigScaleOf(slot: Slot, c: CreatureState): number {
+    return slot.scale * sizeRatio(c, slot.species);
+  }
+
+  /**
    * Whether a creature in the near tiers is drawn at all: a burrower
    * under the ground is not, unless the cutaway is showing its burrow.
    *
@@ -717,9 +807,11 @@ export class FaunaView {
     const ground = this.groundAt === null ? Number.NaN : this.groundAt(c.at);
     const depth = Number.isFinite(ground) ? ground - c.height : 0;
     const open = this.cutawayOver(slot, c);
+    // The line a body goes out of sight at is that body's — see BURROW_HIDE.
+    const hide = BURROW_HIDE * sizeRatio(c, slot.species);
     let reveal = this.reveals.get(c.id);
     if (reveal === undefined) {
-      reveal = { cut: open >= REVEAL_OPEN, deep: depth > BURROW_HIDE, shutFor: 0, frame: this.frame };
+      reveal = { cut: open >= REVEAL_OPEN, deep: depth > hide, shutFor: 0, frame: this.frame };
       this.reveals.set(c.id, reveal);
       return reveal;
     }
@@ -734,7 +826,7 @@ export class FaunaView {
       reveal.shutFor += 1;
       if (reveal.shutFor >= REVEAL_HOLD) { reveal.cut = false; reveal.shutFor = 0; }
     }
-    reveal.deep = depth > BURROW_HIDE * (reveal.deep ? 1 : BURROW_KEEP);
+    reveal.deep = depth > hide * (reveal.deep ? 1 : BURROW_KEEP);
     return reveal;
   }
 
@@ -754,7 +846,7 @@ export class FaunaView {
     const ceiling = this.ceilingAt;
     const ground = this.groundAt;
     if (ceiling === null || ground === null) return 0;
-    const step = slot.bodyLength / (BODY_SAMPLES - 1);
+    const step = this.lengthOf(slot, c) / (BODY_SAMPLES - 1);
     const ax = Math.sin(c.heading);
     const az = Math.cos(c.heading);
     let open = 0;
@@ -814,13 +906,17 @@ export class FaunaView {
     let count = 0;
     if (mesh !== null) {
       const into = mesh.instanceMatrix.array as Float32Array;
-      const len = slot.bodyLength;
-      const r = (len * slot.look.girth) / 2;
-      const half = len / 2;
       for (let k = 0; k < cand.length && count < slot.cap; k += 1) {
         const idx = cand[k];
         if (this.rigged[idx] === 1) continue;
         const c = creatures[idx];
+        // THE ELLIPSOID IS THIS ANIMAL'S. Past the pool the whole
+        // population is impostors, so it is here that a range of sizes
+        // is mostly seen; a constant here would make the sizes the few
+        // lent rigs show read as an accident rather than as the world.
+        const len = this.lengthOf(slot, c);
+        const r = (len * slot.look.girth) / 2;
+        const half = len / 2;
         const here = this.toLocal(c.at);
         const cs = Math.cos(c.heading);
         const sn = Math.sin(c.heading);
@@ -846,9 +942,20 @@ export class FaunaView {
     rig.root.visible = false;
   }
 
-  /** Hand a rig to a creature: forget the last holder's motion, seed the worm's trail straight behind it. */
+  /**
+   * Hand a rig to a creature: TAKE ITS SIZE, forget the last holder's
+   * motion, seed the worm's trail straight behind it.
+   *
+   * THE SCALE IS WRITTEN HERE AND NOT IN `buildPool`. A rig is built
+   * before it has a holder, so there is no animal to take a size from;
+   * it takes one the moment it changes hands, on that frame. Building
+   * the pool at one size would draw a 250 mm worm at a 100 mm worm's
+   * length for as long as it held a rig the small one had.
+   */
   private lend(slot: Slot, rig: Rig, c: CreatureState): void {
     rig.holder = c.id;
+    const bodyLength = this.lengthOf(slot, c);
+    rig.root.scale.setScalar(this.rigScaleOf(slot, c));
     const m = rig.motion;
     m.gone = 0; m.alive = 0; m.moving = 0; m.air = AIRBORNE.includes(c.behaviour) ? 1 : 0; m.pitch = 0; m.bank = 0;
     rig.lastAt = c.at;
@@ -861,13 +968,18 @@ export class FaunaView {
           points: new Array<WorldPoint>(TRAIL_CAPACITY).fill(c.at),
           heights: new Float64Array(TRAIL_CAPACITY),
           depths: new Float64Array(TRAIL_CAPACITY),
-          spacing: slot.bodyLength / CRUMBS_PER_LENGTH,
+          spacing: bodyLength / CRUMBS_PER_LENGTH,
           head: 0,
           count: 0,
           owner: c.id,
         };
         rig.trail = trail;
       }
+      // A TRAIL IS SPACED BY THE BODY THAT LAYS IT: `CRUMBS_PER_LENGTH`
+      // crumbs to THIS animal's length. The same animal handed its rig
+      // back gets the same number, so the crawl kept below is untouched;
+      // a different one gets its own, and is re-seeded anyway.
+      trail.spacing = bodyLength / CRUMBS_PER_LENGTH;
       // A RIG HANDED BACK TO THE SAME ANIMAL KEEPS THE PATH IT CRAWLED.
       // A trail is a record of a crawl, and this animal's crawl did not
       // stop happening because a rig changed hands for a frame — laying
@@ -876,7 +988,7 @@ export class FaunaView {
       // the head is further from its newest crumb than a crawl reaches
       // (the same test `pose` makes every frame).
       if (trail.owner !== c.id || trail.count === 0
-        || distance(c.at, trail.points[trail.head]) > slot.bodyLength * TRAIL_BREAK_LENGTHS) {
+        || distance(c.at, trail.points[trail.head]) > bodyLength * TRAIL_BREAK_LENGTHS) {
         trail.owner = c.id;
         this.seedTrail(trail, c);
       }
@@ -960,8 +1072,15 @@ export class FaunaView {
     rig.lastHeight = c.height;
     rig.lastHeading = c.heading;
     const m = rig.motion;
+    // EVERY LENGTH IN THIS FRAME IS THIS ANIMAL'S, and the scale is
+    // written again rather than trusted: a drawn size is derived from
+    // the creature in front of the rig each frame (ARCHITECTURE §2.3),
+    // never latched from whoever held it last.
+    const bodyLength = this.lengthOf(slot, c);
+    const scale = this.rigScaleOf(slot, c);
+    rig.root.scale.setScalar(scale);
     stepMotion(m, {
-      dt, moved, climbed, turned, airborne: AIRBORNE.includes(c.behaviour), bodyLength: slot.bodyLength, phase: c.phase,
+      dt, moved, climbed, turned, airborne: AIRBORNE.includes(c.behaviour), bodyLength, phase: c.phase,
     });
     // THE ONE WORLD → LOCAL CROSSING, through the origin like every renderer.
     const here = this.toLocal(c.at);
@@ -976,7 +1095,7 @@ export class FaunaView {
       const exposedBurrow = reveal !== undefined && reveal.cut && reveal.deep;
       const trail = rig.trail;
       const behind = distance(c.at, trail.points[trail.head]);
-      if (behind > slot.bodyLength * TRAIL_BREAK_LENGTHS) {
+      if (behind > bodyLength * TRAIL_BREAK_LENGTHS) {
         // IT DID NOT CRAWL THERE. A creature is streamed out and back at
         // the spot its cell generates it at, and a rig held across that
         // would draw the body reaching from where the animal is to where
@@ -989,7 +1108,7 @@ export class FaunaView {
       // The path: the body right now, then the crumbs, newest first,
       // each at its own depth in the ground under it (see `crumbHeight`)
       // and lifted so the belly rests on it.
-      const lift = exposedBurrow ? 0 : chain.lift * slot.scale;
+      const lift = exposedBurrow ? 0 : chain.lift * scale;
       const path = this.path;
       const headDepth = this.depthAt(c.at, c.height);
       path[0] = here.lx; path[1] = this.crumbHeight(c.at, c.height, headDepth, exposedBurrow) + lift; path[2] = here.lz;
@@ -1002,14 +1121,14 @@ export class FaunaView {
         path[points * 3 + 2] = l.lz;
         points += 1;
       }
-      layChain(rig.root, rig.chain, chain, slot.scale, rig.headOffset, rig.headFrame, path, points, m, slot.bodyLength, c.phase);
+      layChain(rig.root, rig.chain, chain, scale, rig.headOffset, rig.headFrame, path, points, m, bodyLength, c.phase);
       return;
     }
-    const bob = walkBob(m, slot.bodyLength, c.phase) + restBob(m, slot.bodyLength, c.phase, slot.look.restBob, slot.look.restBobRate);
+    const bob = walkBob(m, bodyLength, c.phase) + restBob(m, bodyLength, c.phase, slot.look.restBob, slot.look.restBobRate);
     rig.root.position.set(here.lx, c.height + bob, here.lz);
     // Nose up is a negative turn about +X; heading about +Y; bank about the body's +Z.
     rig.root.rotation.set(-m.pitch, c.heading, m.bank);
-    poseLegs(rig.legs, m, slot.bodyLength, c.phase);
+    poseLegs(rig.legs, m, bodyLength, c.phase);
     poseWings(rig.wings, m, c.phase);
     poseAntennae(rig.antennae, m, c.phase);
   }

@@ -13,7 +13,7 @@
 import { describe, expect, it } from 'vitest';
 import { APHID, CREATURE_IDS, CREATURE_SPECIES, EARTHWORM, HOUSEFLY, unitsOfMm, type CreatureSpecies } from '../src/creatures';
 import {
-  CELL_HECTARES, HOST_SCATTER_LENGTHS, expectedCount, hostCandidates, populateCreatures, siteCount,
+  CELL_HECTARES, HOST_SCATTER_LENGTHS, drawLengthMm, expectedCount, hostCandidates, populateCreatures, siteCount,
 } from '../src/creatures/population';
 import { distance, world, type WorldPoint } from '../src/world/coords';
 import type { PlantSource } from '../src/world/ecology/resources';
@@ -215,6 +215,71 @@ describe('habitat placement', () => {
     }
     const uniform = 0.5 * Math.sqrt((CELL_SPAN * CELL_SPAN) / n);
     expect(sum / n).toBeGreaterThan(uniform / 4);
+  });
+});
+
+describe('how big each one is', () => {
+  it('draws a length per creature, the same lengths for the same cell in any order, and never outside the cited range', () => {
+    for (const id of CREATURE_IDS) {
+      const species = CREATURE_SPECIES[id];
+      const first = populateCreatures(CELL, species, options('shrubland'));
+      populateCreatures({ cx: 40, cz: 40 }, species, options('wetland'));
+      const again = populateCreatures(CELL, species, options('shrubland'));
+      expect(again.map((c) => c.lengthMm), id).toEqual(first.map((c) => c.lengthMm));
+      const lengths = new Set(first.map((c) => c.lengthMm));
+      // Not one number handed to the whole cell: they are individuals.
+      expect(lengths.size, id).toBeGreaterThan(1);
+      for (const c of first) {
+        expect(c.lengthMm, `${id} ${c.id}`).toBeGreaterThanOrEqual(species.lengthRangeMm[0]);
+        expect(c.lengthMm, `${id} ${c.id}`).toBeLessThanOrEqual(species.lengthRangeMm[1]);
+      }
+    }
+    // A different seed is a different set of animals, sizes included.
+    const a = populateCreatures(CELL, EARTHWORM, options('wetland', 1)).map((c) => c.lengthMm);
+    const b = populateCreatures(CELL, EARTHWORM, options('wetland', 2)).map((c) => c.lengthMm);
+    expect(a).not.toEqual(b);
+  });
+
+  it("the draw's mean is the cited length, not the range's midpoint, and the skew shows in the median", () => {
+    // The exponent is chosen so E[length] = lengthMm exactly
+    // (`drawLengthMm`): a uniform draw over the worm's 120-250 mm would
+    // average 185, and the island's worms would quietly be a third
+    // longer and a third faster than the animal the table cites.
+    for (const id of CREATURE_IDS) {
+      const species = CREATURE_SPECIES[id];
+      let sum = 0;
+      const n = 20_000;
+      for (let i = 0; i < n; i += 1) sum += drawLengthMm(species, (i + 0.5) / n);
+      expect(sum / n, id).toBeCloseTo(species.lengthMm, 3);
+    }
+    // And over the real hashed population, not merely over the formula.
+    const lengths: number[] = [];
+    for (let cx = 0; cx < 120; cx += 1) {
+      for (let cz = 0; cz < 3; cz += 1) {
+        for (const c of populateCreatures({ cx, cz }, EARTHWORM, options('wetland'))) lengths.push(c.lengthMm);
+      }
+    }
+    expect(lengths.length).toBeGreaterThan(2000);
+    const mean = lengths.reduce((t, v) => t + v, 0) / lengths.length;
+    expect(mean).toBeGreaterThan(EARTHWORM.lengthMm - 3);
+    expect(mean).toBeLessThan(EARTHWORM.lengthMm + 3);
+    // Right-skewed: many ordinary worms, a few giants, so the median sits below the mean.
+    lengths.sort((x, y) => x - y);
+    expect(lengths[Math.floor(lengths.length / 2)]).toBeLessThan(mean);
+    expect(lengths[lengths.length - 1]).toBeGreaterThan(EARTHWORM.lengthMm * 1.4);
+  });
+
+  it('a range that is not a range answers with a length anyway, never a NaN body', () => {
+    const noRange: CreatureSpecies = { ...EARTHWORM, lengthRangeMm: [200, 100] };
+    expect(drawLengthMm(noRange, 0.5)).toBe(EARTHWORM.lengthMm);
+    const flat: CreatureSpecies = { ...EARTHWORM, lengthRangeMm: [150, 150] };
+    expect(drawLengthMm(flat, 0.5)).toBe(150);
+    for (const u of [NaN, -1, 2, Infinity]) {
+      const drawn = drawLengthMm(EARTHWORM, u);
+      expect(Number.isFinite(drawn), `${u}`).toBe(true);
+      expect(drawn).toBeGreaterThanOrEqual(EARTHWORM.lengthRangeMm[0]);
+      expect(drawn).toBeLessThanOrEqual(EARTHWORM.lengthRangeMm[1]);
+    }
   });
 });
 

@@ -304,9 +304,13 @@ describe('the one door to the ground', () => {
     expect(sim.burrows.applied).toBe(sim.burrows.attempted);
     expect(sim.burrows.refused).toBe(0);
     expect(editor.calls).toBe(sim.burrows.attempted);
-    // Once per half-bore of travel, at most: a worm at 3 mm/s bores at most 1/s.
+    // Once per half-bore of travel, at most — and the bound is set by the
+    // LONGEST worm the draw can produce, because a pace is the
+    // individual's: a 250 mm worm covers 25 mm/s, not the cited 15, and
+    // bores five sixths again as often as the table's own animal.
     const worms = sim.counts('earthworm').resident;
-    expect(sim.burrows.attempted).toBeLessThanOrEqual(worms * 60 * (unitsOfMm(EARTHWORM.pace.wanderMmS) / (unitsOfMm(EARTHWORM.burrow!.boreMm) / 2)) + worms);
+    const fastest = unitsOfMm(EARTHWORM.pace.wanderMmS) * (EARTHWORM.lengthRangeMm[1] / EARTHWORM.lengthMm);
+    expect(sim.burrows.attempted).toBeLessThanOrEqual(worms * 60 * (fastest / (unitsOfMm(EARTHWORM.burrow!.boreMm) / 2)) + worms);
   });
 
   it('with no worms in the world nothing reaches the gate; a non-editor forced through it is refused; the unbuilt editor changes nothing', () => {

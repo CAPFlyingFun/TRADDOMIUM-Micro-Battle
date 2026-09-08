@@ -7,13 +7,18 @@
 import { describe, expect, it } from 'vitest';
 import {
   APHID, BEHAVIOURS, BEHAVIOURS_BY_MEDIUM, CREATURE_IDS, CREATURE_SPECIES, EARTHWORM, HOUSEFLY, MM_PER_UNIT,
-  NO_BURROW_EDITOR, assertSpeciesTable, behaviourAllowed, burrowGate, newCreature, rigScale, speciesProblems,
-  unitsOfMm, type CreatureSpecies,
+  NO_BURROW_EDITOR, assertSpeciesTable, behaviourAllowed, burrowGate, newCreature, rigScale, sizeRatio,
+  speciesProblems, unitsOfMm, type CreatureId, type CreatureSpecies,
 } from '../src/creatures';
 import { OBJECT_RUNGS } from '../src/world/objects/budget';
 import { world } from '../src/world/coords';
 import { OFFERED_KINDS } from '../src/world/ecology/resources';
 import { HABITAT_KINDS } from '../src/world/habitat';
+
+/** One creature of a species with nothing said about its size: the table's own animal. */
+function spawn(species: CreatureId) {
+  return newCreature({ id: `${species}:0,0:0`, species, cellKey: '0,0', at: world(0, 0), height: 0, heading: 0, phase: 0 });
+}
 
 describe('the species table', () => {
   it('holds its three, in the layer order, each carrying its own id', () => {
@@ -39,6 +44,46 @@ describe('the species table', () => {
     // A fly is not a worm: the three scales are the three sizes, not one number copied thrice.
     expect(rigScale(EARTHWORM)).toBeGreaterThan(rigScale(HOUSEFLY));
     expect(rigScale(HOUSEFLY)).toBeGreaterThan(rigScale(APHID));
+  });
+
+  it('a length is an individual\'s: the cited one is the reference, the default, and what sizeRatio measures against', () => {
+    // Joshua, 2026-09-08: the earthworm "should be based on size and
+    // dynamic". The range on each entry is the one its own source gives.
+    expect(EARTHWORM.lengthRangeMm).toEqual([120, 250]);
+    expect(APHID.lengthRangeMm).toEqual([1.5, 4]);
+    expect(HOUSEFLY.lengthRangeMm).toEqual([4, 8]);
+    for (const id of CREATURE_IDS) {
+      const species = CREATURE_SPECIES[id];
+      expect(species.lengthMm, id).toBeGreaterThanOrEqual(species.lengthRangeMm[0]);
+      expect(species.lengthMm, id).toBeLessThanOrEqual(species.lengthRangeMm[1]);
+      // A creature made without a drawn length IS the animal the table
+      // cites — every caller that predates the draw still gets it.
+      const cited = spawn(id);
+      expect(cited.lengthMm, id).toBe(species.lengthMm);
+      expect(sizeRatio(cited, species), id).toBe(1);
+      // Twice the body is twice the ratio, and every pace and body-length
+      // measure in the simulation is that number times the table's.
+      expect(sizeRatio({ ...cited, lengthMm: species.lengthMm * 2 }, species), id).toBeCloseTo(2, 12);
+      expect(sizeRatio({ ...cited, lengthMm: species.lengthRangeMm[0] }, species), id)
+        .toBeCloseTo(species.lengthRangeMm[0] / species.lengthMm, 12);
+      // A length that is not one reads as the species' own animal rather
+      // than freezing it or sending it off the island.
+      for (const bad of [NaN, 0, -5, Infinity]) {
+        expect(sizeRatio({ ...cited, lengthMm: bad }, species), `${id} at ${bad}`).toBe(1);
+      }
+    }
+  });
+
+  it('the worm travels at the measured tenth of its body a second, and every species flees faster than it walks', () => {
+    // Quillin (1999, J. Exp. Biol.) measured L. terrestris crawling at
+    // about a tenth of a body length a second, so the cited 150 mm animal
+    // travels at 15 mm/s — which is also where Joshua's source lands its
+    // medium worm (185 ft/hr = 15.7 mm/s), reached from the other side.
+    expect(EARTHWORM.pace.wanderMmS).toBeCloseTo(EARTHWORM.lengthMm * 0.1, 9);
+    for (const id of CREATURE_IDS) {
+      const species = CREATURE_SPECIES[id];
+      expect(species.pace.fleeMmS, `${id} flees no faster than it walks`).toBeGreaterThan(species.pace.wanderMmS);
+    }
   });
 
   it('each species has exactly the spec its medium needs, and only the burrower may edit the ground', () => {
@@ -108,6 +153,12 @@ describe('the species table', () => {
       population: { ...EARTHWORM.population, perHectare: { ...EARTHWORM.population.perHectare, sea: 5 } },
     };
     expect(speciesProblems(seaWorm).join('\n')).toMatch(/nothing lives at sea/);
+    const backwards: CreatureSpecies = { ...EARTHWORM, lengthRangeMm: [250, 120] };
+    expect(speciesProblems(backwards).join('\n')).toMatch(/lengthRangeMm runs backwards/);
+    const citedOutside: CreatureSpecies = { ...EARTHWORM, lengthRangeMm: [10, 40] };
+    expect(speciesProblems(citedOutside).join('\n')).toMatch(/outside lengthRangeMm/);
+    const lazyFlee: CreatureSpecies = { ...EARTHWORM, pace: { ...EARTHWORM.pace, fleeMmS: EARTHWORM.pace.wanderMmS } };
+    expect(speciesProblems(lazyFlee).join('\n')).toMatch(/fleeing is not faster than walking/);
     const idSwap = { ...CREATURE_SPECIES, aphid: HOUSEFLY };
     expect(() => assertSpeciesTable(idSwap)).toThrow(/carries id "housefly"/);
   });

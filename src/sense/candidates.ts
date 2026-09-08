@@ -170,7 +170,10 @@ export function creatureThings(
       name: CREATURE_WORDS[c.species],
       at: c.at,
       height: c.height,
-      size: unitsOfMm(species.lengthMm),
+      // THIS animal's length, not its kind's. A worm is drawn at the body
+      // it grew (`creatures/sizeRatio`), so a fill scaled to the species
+      // would sit inside a big one and swallow a small one.
+      size: unitsOfMm(c.lengthMm),
     });
   }
   return out;

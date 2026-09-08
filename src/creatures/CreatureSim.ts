@@ -47,7 +47,7 @@ import { CALM_WEATHER, senseAlarm, think, thinkDue, tickNeeds } from './intent';
 import { move } from './locomotion';
 import { hostCandidates, populateCreatures } from './population';
 import {
-  CREATURE_IDS, CREATURE_SPECIES, assertSpeciesTable, speciesProblems, unitsOfMm, type CreatureId, type CreatureSpecies,
+  CREATURE_IDS, CREATURE_SPECIES, assertSpeciesTable, sizeRatio, speciesProblems, unitsOfMm, type CreatureId, type CreatureSpecies,
 } from './species';
 import { unitsOfMetres } from './finder';
 import type { CreatureState, Tier } from './state';
@@ -239,7 +239,9 @@ export class CreatureSim implements CreatureSimulation {
       const species = run.species;
       const kept = run.kept;
       const hosted = species.population.hosts !== null;
-      const bore = species.burrow === null ? 0 : unitsOfMm(species.burrow.boreMm) / 2;
+      // The bore is the SPECIES' here and is scaled per animal below: a
+      // 250 mm worm is thicker than a 120 mm one and cuts a wider tunnel.
+      const speciesBore = species.burrow === null ? 0 : unitsOfMm(species.burrow.boreMm) / 2;
       for (let i = 0; i < kept.length; i += 1) {
         const c = kept[i];
         if (c.tier === 'far') continue;
@@ -268,6 +270,7 @@ export class CreatureSim implements CreatureSimulation {
         // A tunnel includes descent, surfacing and fleeing, not only the
         // behaviour named "burrow". Sweep between submissions so the last
         // frame cannot leave a bead or a wall across the passage.
+        const bore = speciesBore * sizeRatio(c, species);
         if (bore > 0) {
           const travelled = Math.hypot(c.at.wx - beforeAt.wx, c.at.wz - beforeAt.wz, c.height - beforeHeight);
           if (travelled > 0) {

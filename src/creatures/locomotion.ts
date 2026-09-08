@@ -18,6 +18,17 @@
  * `pace.turnRadS` is a hard angular limit and the turn radius is
  * pace over rate, which the species table can reason about.
  *
+ * A PACE IS THE INDIVIDUAL'S, NOT THE SPECIES' (Joshua, 2026-09-08: the
+ * earthworm "should be based on size and dynamic"). Every pace this file
+ * reads out of the table is multiplied by `sizeRatio(state, species)`,
+ * and so is every distance measured in body lengths, because the law
+ * behind the numbers is a fraction of the animal's OWN body a second
+ * (Quillin 1999; see `EARTHWORM.pace`). A 300 mm worm therefore covers
+ * ground twice as fast as a 150 mm one and stops twice as far from its
+ * target, and a creature made without a drawn length is the species'
+ * animal at ratio 1. The one rate here that does NOT scale is the fall
+ * (`DROP_MM_S`): a body let go of a stem is gravity's, not its own.
+ *
  * NEVER NaN. A `dt` that is not a positive finite number moves nothing;
  * a ground the world cannot price (non-finite) leaves the height alone;
  * and every write is clamped before it lands. A creature that cannot be
@@ -27,7 +38,7 @@
  */
 import { distance } from '../world/coords';
 import { ahead, headingToward, turnToward } from './heading';
-import { unitsOfMm, type CreatureSpecies } from './species';
+import { sizeRatio, unitsOfMm, type CreatureSpecies } from './species';
 import type { Behaviour, CreatureState } from './state';
 import type { CreatureWorld } from './world';
 
@@ -72,29 +83,36 @@ export function isMoving(behaviour: Behaviour): boolean {
 }
 
 /**
- * The pace on the plane for a grounded behaviour, world units a second.
- * Feeding moves only to reach the food it was sent to; idling, resting
- * and hovering do not move at all — an animal that drifts while it eats
+ * The pace on the plane for a grounded behaviour, world units a second,
+ * for THIS individual: the table's pace times its size ratio. Feeding
+ * moves only to reach the food it was sent to; idling, resting and
+ * hovering do not move at all — an animal that drifts while it eats
  * looks like it is skating.
  */
 export function paceOf(state: CreatureState, species: CreatureSpecies): number {
+  const ratio = sizeRatio(state, species);
   switch (state.behaviour) {
     case 'flee':
-      return unitsOfMm(species.pace.fleeMmS);
+      return ratio * unitsOfMm(species.pace.fleeMmS);
     case 'wander':
     case 'burrow':
-      return unitsOfMm(species.pace.wanderMmS);
+      return ratio * unitsOfMm(species.pace.wanderMmS);
     case 'feed':
-      return state.target === null ? 0 : unitsOfMm(species.pace.wanderMmS);
+      return state.target === null ? 0 : ratio * unitsOfMm(species.pace.wanderMmS);
     default:
       return 0;
   }
 }
 
-/** Has it reached its target, within a quarter of a body length? True with no target. */
+/** This individual's body length, world units: the cited length at its own size. */
+function bodyLength(state: CreatureState, species: CreatureSpecies): number {
+  return sizeRatio(state, species) * unitsOfMm(species.lengthMm);
+}
+
+/** Has it reached its target, within a quarter of ITS OWN body length? True with no target. */
 export function arrived(state: CreatureState, species: CreatureSpecies): boolean {
   if (state.target === null) return true;
-  return distance(state.at, state.target) <= ARRIVE_LENGTHS * unitsOfMm(species.lengthMm);
+  return distance(state.at, state.target) <= ARRIVE_LENGTHS * bodyLength(state, species);
 }
 
 /**
@@ -104,6 +122,12 @@ export function arrived(state: CreatureState, species: CreatureSpecies): boolean
  */
 function stepToward(state: CreatureState, species: CreatureSpecies, pace: number, dt: number): number {
   const target = state.target;
+  // THE TURN RATE IS THE SPECIES', deliberately. The pace scales with the
+  // body because the measured law is a fraction of the body a second;
+  // there is no such law for turning, and multiplying by the ratio would
+  // say a long worm turns FASTER, which is the wrong way round. Left as
+  // the table's, so what a big worm actually gets is the wider turning
+  // circle its speed implies — pace over rate.
   const maxTurn = species.pace.turnRadS * dt;
   if (target === null) {
     if (!(pace > 0)) return 0;
@@ -116,7 +140,7 @@ function stepToward(state: CreatureState, species: CreatureSpecies, pace: number
   state.heading = turnToward(state.heading, headingToward(state.at, target), maxTurn);
   if (!(pace > 0) || remaining <= 0) return 0;
   const step = pace * dt;
-  const arriveWithin = Math.max(step, ARRIVE_LENGTHS * unitsOfMm(species.lengthMm));
+  const arriveWithin = Math.max(step, ARRIVE_LENGTHS * bodyLength(state, species));
   if (remaining <= arriveWithin) {
     // Close enough to take the last step straight, rather than orbit a
     // target inside its own turning circle.
@@ -157,8 +181,13 @@ export function walk(state: CreatureState, species: CreatureSpecies, world: Crea
   if (species.medium === 'plant') {
     const wanted = Number.isFinite(state.targetHeight) ? Math.max(ground, state.targetHeight) : ground;
     const fleeing = state.behaviour === 'flee';
-    // Down in a flee is a drop; everything else is a climb at its own pace.
-    const mmS = fleeing && wanted < state.height ? DROP_MM_S : fleeing ? species.pace.fleeMmS : species.pace.wanderMmS;
+    // Down in a flee is a DROP — the body let go of the stem, which is
+    // gravity's business and not the animal's, so it is the one rate here
+    // its size does not scale. Everything else is a climb at its own
+    // pace, and an aphid twice the length climbs twice as fast.
+    const mmS = fleeing && wanted < state.height
+      ? DROP_MM_S
+      : sizeRatio(state, species) * (fleeing ? species.pace.fleeMmS : species.pace.wanderMmS);
     state.height = Math.max(ground, approach(state.height, wanted, unitsOfMm(mmS) * dt));
   } else {
     state.height = ground;
@@ -176,6 +205,13 @@ export function walk(state: CreatureState, species: CreatureSpecies, world: Crea
  * so a worm travelling level under a slope has the ground come down to
  * meet it and is held under, following the contour, rather than left
  * standing in the air — the donor's measured bug.
+ *
+ * THE BAND IS THE SPECIES', THE PACE IS THE WORM'S. `underMm` and
+ * `boreMm` say where in the soil this KIND of animal lives and how wide
+ * the tube it is allowed to ask the terrain-edit seam for is — and the
+ * seam is handed the species' bore in `CreatureSim`, so scaling it here
+ * alone would be half a change, which is worse than none. How fast it
+ * gets through the band is its own, and that is `sizeRatio`.
  */
 export function burrow(state: CreatureState, species: CreatureSpecies, world: CreatureWorld, dt: number): number {
   if (!(dt > 0) || !Number.isFinite(dt)) return 0;
@@ -191,7 +227,7 @@ export function burrow(state: CreatureState, species: CreatureSpecies, world: Cr
   if (up) wanted = ground;
   else if (state.behaviour === 'flee') wanted = bottom;
   else wanted = Number.isFinite(state.targetHeight) ? Math.min(top, Math.max(bottom, state.targetHeight)) : (top + bottom) / 2;
-  const rate = unitsOfMm(state.behaviour === 'flee' ? species.pace.fleeMmS : species.pace.wanderMmS) * dt;
+  const rate = sizeRatio(state, species) * unitsOfMm(state.behaviour === 'flee' ? species.pace.fleeMmS : species.pace.wanderMmS) * dt;
   const before = state.height;
   let height = approach(state.height, wanted, rate);
   height = up ? Math.min(ground, height) : Math.min(top, Math.max(bottom, height));

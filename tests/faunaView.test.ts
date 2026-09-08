@@ -18,6 +18,10 @@
  *   a species switched off vanishes and costs nothing
  *   the rig is scaled by the table and measured against it, and a rig
  *     of the wrong size is warned about, not corrected
+ *   the DRAWN size is the animal's own, not its species': two worms of
+ *     different lengths get different scales, spans, trail spacings,
+ *     impostors and hiding depths, and a rig changing hands takes the
+ *     new holder's size on the frame it changes them
  *   the trail is kept in world points: an origin shift moves the drawn
  *     body with the world
  *   a missing file is an honest box
@@ -72,10 +76,15 @@ interface Over {
   readonly tier?: Tier;
   readonly behaviour?: Behaviour;
   readonly phase?: number;
+  /** This individual's body, mm. Left out, it is the species' cited length, which is what every other test here wants. */
+  readonly lengthMm?: number;
 }
 
 function creature(species: CreatureId, id: string, x: number, z: number, over: Over = {}): CreatureState {
-  const c = newCreature({ id, species, cellKey: '0,0', at: world(x, z), height: over.height ?? 0, heading: over.heading ?? 0, phase: over.phase ?? 0.3 });
+  const c = newCreature({
+    id, species, cellKey: '0,0', at: world(x, z), height: over.height ?? 0, heading: over.heading ?? 0,
+    phase: over.phase ?? 0.3, lengthMm: over.lengthMm ?? CREATURE_SPECIES[species].lengthMm,
+  });
   c.tier = over.tier ?? 'near';
   if (over.behaviour) c.behaviour = over.behaviour;
   return c;
@@ -304,6 +313,131 @@ describe('the pool', () => {
     expect(() => v.update([a], EYE, -1)).not.toThrow();
     expect(v.cost.rigsLent.aphid).toBe(1);
     expect(Number.isFinite(v.rigs('aphid')[0].position.x)).toBe(true);
+  });
+});
+
+describe('the size is the animal\'s, not the species\'', () => {
+  // Joshua, 2026-09-08: "about the Earthworm it should be based on size
+  // and dynamic". Every worm was 150 mm and every worm was drawn the
+  // same. These are the two lengths the table itself cites as the ends
+  // of a real night crawler (`EARTHWORM.lengthRangeMm`), so nothing here
+  // is an invented size.
+  const [SMALL_MM, BIG_MM] = EARTHWORM.lengthRangeMm;
+  const SMALL = unitsOfMm(SMALL_MM);
+  const BIG = unitsOfMm(BIG_MM);
+
+  /** The head-to-tail distance of a drawn chain, world units. */
+  function spanOf(v: FaunaView, k: number): number {
+    const root = v.rigs('earthworm')[k];
+    v.group.updateMatrixWorld(true);
+    const names = v.anatomy('earthworm')!.chain!.bones;
+    const head = worldPosition(root.getObjectByName(names[0])!);
+    const tail = worldPosition(root.getObjectByName(names[names.length - 1])!);
+    return head.distanceTo(tail);
+  }
+
+  it('draws two worms of different lengths at their own scales, spans and trail spacings', async () => {
+    const v = await keep(view('medium'));
+    expect(poolSizeFor('medium', 'earthworm')).toBe(2);
+    const small = creature('earthworm', 'small', 5, 0, { behaviour: 'surface', heading: Math.PI / 2, lengthMm: SMALL_MM });
+    const big = creature('earthworm', 'big', 9, 0, { behaviour: 'surface', heading: Math.PI / 2, lengthMm: BIG_MM });
+    v.update([small, big], EYE, 1 / 60);
+    expect(v.holders('earthworm')).toEqual(['small', 'big']);
+
+    // THE ROOT SCALE. The template's is the species'; each lent rig wears
+    // it through its holder's ratio, so the two differ by exactly the
+    // ratio of the two bodies and neither is the species' own number.
+    const template = v.scaleOf('earthworm');
+    expect(template).toBeCloseTo(rigScale(EARTHWORM), 12);
+    const scales = v.rigs('earthworm').map((r) => r.scale.x);
+    expect(scales[0]).toBeCloseTo(template * (SMALL_MM / EARTHWORM.lengthMm), 12);
+    expect(scales[1]).toBeCloseTo(template * (BIG_MM / EARTHWORM.lengthMm), 12);
+    expect(scales[1] / scales[0]).toBeCloseTo(BIG_MM / SMALL_MM, 12);
+    for (const r of v.rigs('earthworm')) {
+      expect(r.scale.y).toBeCloseTo(r.scale.x, 12);
+      expect(r.scale.z).toBeCloseTo(r.scale.x, 12);
+    }
+
+    // THE BONES SPAN THEIR OWN BODY. `layChain` lands each station at its
+    // rest total times the root scale, so the drawn spine is the animal's
+    // length and not the table's — which is the half a root scale alone
+    // would get wrong if the stations were still the species'.
+    expect(spanOf(v, 0)).toBeCloseTo(SMALL, 3);
+    expect(spanOf(v, 1)).toBeCloseTo(BIG, 3);
+
+    // THE TRAIL. Sixteen crumbs to each animal's own body.
+    const spacings = v.trailSpacings('earthworm');
+    expect(spacings[0]).toBeCloseTo(SMALL / CRUMBS_PER_LENGTH, 12);
+    expect(spacings[1]).toBeCloseTo(BIG / CRUMBS_PER_LENGTH, 12);
+  });
+
+  it('TAKES THE NEW HOLDER\'S SIZE ON THE FRAME A RIG CHANGES HANDS', async () => {
+    // The pool is built per species and its clones all wear the
+    // template's scale, so a rig that only took a size when it was BUILT
+    // would draw this big worm at the small one's length for as long as
+    // it held the rig — and the pool is only rebuilt by a rung change,
+    // which need never come.
+    const v = await keep(view('ultra-low'));
+    expect(poolSizeFor('ultra-low', 'earthworm')).toBe(1);
+    const small = creature('earthworm', 'small', 50, 0, { behaviour: 'surface', heading: Math.PI / 2, lengthMm: SMALL_MM });
+    const big = creature('earthworm', 'big', 10, 0, { behaviour: 'surface', heading: Math.PI / 2, lengthMm: BIG_MM });
+    v.update([small], EYE, 1 / 60);
+    expect(v.holders('earthworm')).toEqual(['small']);
+    expect(v.rigs('earthworm')[0].scale.x).toBeCloseTo(rigScale(EARTHWORM) * (SMALL_MM / EARTHWORM.lengthMm), 12);
+    expect(spanOf(v, 0)).toBeCloseTo(SMALL, 3);
+
+    // The big one arrives four times nearer — well past the hysteresis
+    // margin — and the one rig goes to it. ONE frame; nothing after it.
+    v.update([small, big], EYE, 1 / 60);
+    expect(v.holders('earthworm')).toEqual(['big']);
+    expect(v.rigs('earthworm')[0].scale.x).toBeCloseTo(rigScale(EARTHWORM) * (BIG_MM / EARTHWORM.lengthMm), 12);
+    expect(spanOf(v, 0)).toBeCloseTo(BIG, 3);
+    expect(v.trailSpacings('earthworm')[0]).toBeCloseTo(BIG / CRUMBS_PER_LENGTH, 12);
+    // And the small one it dropped is now an impostor at ITS length.
+    const m = v.impostor('earthworm')!.instanceMatrix.array as Float32Array;
+    expect(v.cost.impostors.earthworm).toBe(1);
+    expect(Math.hypot(m[8], m[10]) * 2).toBeCloseTo(SMALL, 4);
+  });
+
+  it('gives every impostor past the pool its own length and girth', async () => {
+    const v = await keep(view('ultra-low'));
+    const held = creature('earthworm', 'held', 4, 0, { behaviour: 'surface', lengthMm: EARTHWORM.lengthMm });
+    const s = creature('earthworm', 's', 20, 0, { behaviour: 'surface', lengthMm: SMALL_MM });
+    const b = creature('earthworm', 'b', 30, 0, { behaviour: 'surface', lengthMm: BIG_MM });
+    v.update([held, s, b], EYE, 1 / 60);
+    expect(v.holders('earthworm')).toEqual(['held']);
+    expect(v.cost.impostors.earthworm).toBe(2);
+    const m = v.impostor('earthworm')!.instanceMatrix.array as Float32Array;
+    // Nearest first: the ellipsoid's long half-axis is its third column,
+    // its girth radius the first, both in the species' colour and neither
+    // in the species' size.
+    for (const [k, mm] of [[0, SMALL_MM], [1, BIG_MM]] as const) {
+      const o = k * 16;
+      const length = unitsOfMm(mm);
+      expect(Math.hypot(m[o + 8], m[o + 10]) * 2).toBeCloseTo(length, 4);
+      expect(Math.hypot(m[o], m[o + 2]) * 2).toBeCloseTo(length * LOOK.earthworm.girth, 5);
+    }
+  });
+
+  it('hides a burrower at ITS OWN depth: the soil that swallows a small worm still shows a big one', async () => {
+    // `BURROW_HIDE` measures when a body has gone out of sight, and a
+    // body goes out of sight at its own girth. At the same depth under
+    // the same ground the small worm is under the soil and the big one
+    // is still showing, so one is drawn and the other is not.
+    const GROUND = 10;
+    const v = await keep(view('medium', loader(), { groundAt: () => GROUND }));
+    // Both are met for the first time, so both are judged at the line
+    // itself rather than at `BURROW_KEEP` past it.
+    const smallLine = BURROW_HIDE * (SMALL_MM / EARTHWORM.lengthMm);
+    const bigLine = BURROW_HIDE * (BIG_MM / EARTHWORM.lengthMm);
+    const depth = (smallLine + bigLine) / 2;
+    expect(depth).toBeGreaterThan(smallLine);
+    expect(depth).toBeLessThan(bigLine);
+    const small = creature('earthworm', 'small', 5, 0, { behaviour: 'burrow', height: GROUND - depth, lengthMm: SMALL_MM });
+    const big = creature('earthworm', 'big', 6, 0, { behaviour: 'burrow', height: GROUND - depth, lengthMm: BIG_MM });
+    v.update([small, big], EYE, 1 / 60, GROUND + 50);
+    expect(v.holders('earthworm')).toEqual(['big', null]);
+    expect(v.cost.impostors.earthworm).toBe(0);
   });
 });
 

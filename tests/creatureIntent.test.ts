@@ -288,6 +288,61 @@ describe('the worm', () => {
   });
 });
 
+describe("a size is a distance, too", () => {
+  it('a worm twice as long flees twice as far and aims its next heading twice as far ahead', () => {
+    const w = fakeWorld();
+    const at = world(400, 400);
+    const cited = spawn(EARTHWORM, at);
+    const big = newCreature({
+      id: 'earthworm:0,0:2', species: 'earthworm', cellKey: '0,0', at, height: cited.height,
+      heading: cited.heading, phase: 0.3, behaviour: 'burrow', lengthMm: EARTHWORM.lengthMm * 2,
+    });
+    // The away point is what its own flee pace covers in the alarm's hold.
+    const disturbance: Disturbance[] = [{ at: world(at.wx + 2, at.wz), height: cited.height, radius: 0 }];
+    expect(senseAlarm(cited, EARTHWORM, disturbance)).toBe(true);
+    expect(senseAlarm(big, EARTHWORM, disturbance)).toBe(true);
+    const near = distance(cited.at, cited.target!);
+    expect(near).toBeCloseTo(unitsOfMm(EARTHWORM.pace.fleeMmS) * EARTHWORM.senses.alarmS, 6);
+    expect(distance(big.at, big.target!)).toBeCloseTo(2 * near, 6);
+
+    // And the fresh heading a burrowing worm picks: the same draws, the
+    // same turn, the same hold — twice the distance, because it will
+    // have got twice as far by the time the hold runs out.
+    const calm = (source: CreatureState): CreatureState => {
+      const c = { ...source, alarm: 0, target: null, behaviour: 'burrow' as const, behaviourS: 0, behaviourUntilS: 0 };
+      return c;
+    };
+    const one = calm(cited);
+    const two = calm(big);
+    for (const c of [one, two]) think(c, EARTHWORM, w, () => 0.5, null);
+    expect(one.behaviour).toBe('burrow');
+    expect(two.behaviour).toBe('burrow');
+    expect(distance(two.at, two.target!)).toBeCloseTo(2 * distance(one.at, one.target!), 6);
+  });
+
+  it('an aphid keeps to five of ITS OWN body lengths of the stem, so a big one has more stem to walk', () => {
+    const w = fakeWorld();
+    w.plants = [SHRUB];
+    const walkLimit = (lengthMm: number): number => {
+      const c = newCreature({
+        id: 'aphid:0,0:5', species: 'aphid', cellKey: '0,0', at: SHRUB.at, height: ground(SHRUB.at) + 10,
+        heading: 0.4, phase: 0.3, hostId: SHRUB.id, lengthMm,
+      });
+      const rand = mulberry32(31);
+      let far = 0;
+      for (let i = 0; i < 30 * 600; i += 1) {
+        step(c, APHID, w, rand, 1 / 30, SHRUB);
+        far = Math.max(far, distance(c.at, SHRUB.at));
+        expect(distance(c.at, SHRUB.at)).toBeLessThanOrEqual(HOST_WALK_LENGTHS * unitsOfMm(lengthMm) + 1e-6);
+      }
+      return far;
+    };
+    const small = walkLimit(APHID.lengthRangeMm[0]);
+    const large = walkLimit(APHID.lengthRangeMm[1]);
+    expect(large).toBeGreaterThan(small);
+  }, 30_000);
+});
+
 describe('the aphid', () => {
   it('feeds most of the time, walks within five body lengths of its host, keeps its hostId, and stays on the plant for ten minutes', () => {
     const w = fakeWorld();

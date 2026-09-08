@@ -45,6 +45,18 @@
  * none of that species, whatever its density says. That is the honest
  * reading of "no aphids offshore": they are where their food is.
  *
+ * ─── how big ─────────────────────────────────────────────────────────
+ *
+ * AND HOW LONG EACH ONE IS. A species' cited length is a typical animal,
+ * not every animal (Joshua, 2026-09-08: the earthworm "should be based on
+ * size and dynamic"), so each creature draws a body length from its
+ * species' `lengthRangeMm` out of the same cell hash as its place, its
+ * heading and its phase — one more question in its block, so the same
+ * cell asked twice answers with the same worms at the same sizes, and
+ * the worms that were already there did not move when the question was
+ * added. `drawLengthMm` says what the distribution is and why it is not
+ * uniform.
+ *
  * NOTHING AT SEA. A creature whose spot the habitat calls sea or whose
  * ground is below sea level is not generated — the id it would have had
  * is skipped, not reused, so the ids of the rest do not shift when the
@@ -92,9 +104,52 @@ const SPECIES_SALT: Readonly<Record<CreatureId, number>> = Object.freeze({
 const SITE = 0x8000;
 const CELL_Q = 0xfff0;
 /** Per-creature questions. */
-const Q = Object.freeze({ site: 0, r: 1, theta: 2, height: 3, heading: 4, phase: 5, hunger: 6, fatigue: 7 });
+const Q = Object.freeze({ site: 0, r: 1, theta: 2, height: 3, heading: 4, phase: 5, hunger: 6, fatigue: 7, length: 8 });
 /** Per-site questions. */
 const SQ = Object.freeze({ x: 0, z: 1, plant: 2 });
+
+/**
+ * HOW LONG THIS ONE IS: a body length in millimetres, drawn from the
+ * species' `lengthRangeMm` by one hashed 0..1 number.
+ *
+ * THE DRAW IS SKEWED SO ITS MEAN IS THE CITED LENGTH, and that is the
+ * whole reason it is not a uniform draw. Uniform over the worm's
+ * 120-250 mm averages 185 mm — a third bigger than the 150 mm the table
+ * cites as the typical animal — and since every pace and every drawn rig
+ * now scales with length, a uniform draw would quietly make the island's
+ * worms a third longer and a third faster than the animal the sources
+ * describe. So: `lo + (hi - lo) * u^k`, with
+ *
+ *     k = (hi - lo) / (L - lo) - 1
+ *
+ * where L is the cited length. E[u^k] is 1/(k+1), so the mean comes out
+ * at lo + (hi - lo)/(k + 1) = L exactly, by construction rather than by
+ * tuning. The worm's k is 130/30 - 1 = 3.33 and its mean 150 mm; the
+ * aphid's is 1.5; the housefly's cited 6.5 mm sits ABOVE the middle of
+ * its 4-8 mm range, so its k is 0.6 and the skew runs the other way.
+ *
+ * BIOLOGICAL SHAPE in the skew — a population holds many small
+ * individuals and few giants, which is the shape a right-skewed draw has
+ * — and MEASURED in what anchors it: the range and the mean are both the
+ * table's cited sources, and the exponent between them is arithmetic,
+ * not a number anybody picked.
+ *
+ * Guarded: a range that is not a range, or a cited length outside it
+ * (`speciesProblems` refuses both), answers with a length inside the
+ * range rather than a NaN body.
+ */
+export function drawLengthMm(species: CreatureSpecies, u01: number): number {
+  const lo = species.lengthRangeMm[0];
+  const hi = species.lengthRangeMm[1];
+  const cited = species.lengthMm;
+  if (!Number.isFinite(lo) || !Number.isFinite(hi) || !(hi > lo)) return Number.isFinite(cited) && cited > 0 ? cited : 1;
+  const head = cited - lo;
+  if (!(head > 0)) return lo;
+  const k = (hi - lo) / head - 1;
+  if (!Number.isFinite(k) || k < 0) return Math.min(hi, Math.max(lo, cited));
+  const u = Number.isFinite(u01) ? Math.min(1, Math.max(0, u01)) : 0.5;
+  return Math.min(hi, Math.max(lo, lo + (hi - lo) * Math.pow(u, k)));
+}
 
 /**
  * How far from its site a ground creature is thrown: the whole half-cell
@@ -212,6 +267,10 @@ export function populateCreatures(
     }
   }
 
+  // THE SCATTER IS THE COLONY'S, NOT THE INDIVIDUAL'S: how tightly a
+  // species gathers on a stem is a property of the species, and a spread
+  // that changed with each aphid's own length would make a colony's shape
+  // a function of who was drawn biggest. Sized by the cited length.
   const bodyLength = unitsOfMm(species.lengthMm);
   const scatter = hosts !== null ? HOST_SCATTER_LENGTHS * bodyLength : scatterRadius(species);
   const under = species.burrow === null ? 0 : unitsOfMm(species.burrow.underMm);
@@ -255,6 +314,7 @@ export function populateCreatures(
       at,
       height,
       heading: wrapHeading(stableHash(cx, cz, base + Q.heading) * Math.PI * 2),
+      lengthMm: drawLengthMm(species, stableHash(cx, cz, base + Q.length)),
       phase: stableHash(cx, cz, base + Q.phase),
       behaviour: species.burrow !== null ? 'burrow' : 'idle',
       hostId,

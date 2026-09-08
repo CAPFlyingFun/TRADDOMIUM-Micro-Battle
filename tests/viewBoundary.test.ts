@@ -402,10 +402,11 @@ describe('the world/sky seam', () => {
  * import neither the origin nor the coordinates.
  *
  * It reads `creatures/` as TYPES and the table's own arithmetic: the
- * one scale (`rigScale`), the one unit conversion (`unitsOfMm`), the
- * id list and the set of airborne behaviours the state module publishes
- * for renderers. It never imports the simulation, and it never
- * constructs a loader — `assets.loadModel` is handed in.
+ * one scale (`rigScale`), the one unit conversion (`unitsOfMm`), the one
+ * ratio between an individual and its species (`sizeRatio`), the id list
+ * and the set of airborne behaviours the state module publishes for
+ * renderers. It never imports the simulation, and it never constructs a
+ * loader — `assets.loadModel` is handed in.
  */
 describe('the creatures/fauna seam', () => {
   const ORIGIN_VALUE = /\boriginAt\b/;
@@ -416,6 +417,13 @@ describe('the creatures/fauna seam', () => {
     // buried animal at exactly the line `FaunaView` stops drawing one, so
     // the two must read the same constant rather than each keep a copy.
     'UNDER_GROUND',
+    // How long THIS animal is against its species' cited length. It is
+    // table arithmetic of the same kind as `rigScale` — a pure function
+    // of a state and a species row, no simulation behind it — and the
+    // renderer must call it rather than divide the two lengths itself,
+    // or a drawn body and the pace it was drawn walking would stop
+    // agreeing about what one animal's size is.
+    'sizeRatio',
   ]);
 
   it('has a fauna renderer to check', () => {

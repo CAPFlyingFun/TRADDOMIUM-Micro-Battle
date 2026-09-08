@@ -45,11 +45,25 @@
  * `tests/creatureContracts.test.ts` holds the arithmetic, and the GLBs
  * themselves are never modified.
  *
+ * A SIZE IS AN INDIVIDUAL'S; THE TABLE'S IS THE REFERENCE (Joshua,
+ * 2026-09-08, on the earthworm: "it should be based on size and
+ * dynamic"). `lengthMm` is the animal the sources describe and
+ * `lengthRangeMm` the range a real one is drawn from; `population.ts`
+ * draws one per creature and every pace and body-length measure is
+ * multiplied by `sizeRatio` — that individual's length over the cited
+ * one. A 300 mm worm travels twice as fast as a 150 mm worm because it
+ * is twice as long, which is the whole of the law Quillin measured: a
+ * tenth of ITS OWN body a second. Nothing else in this table is
+ * per-individual: the senses, the burrow band, the flight and the needs
+ * belong to the species, and where that line falls is argued on the
+ * entries themselves.
+ *
  * Pure: no three, no DOM. `src/creatures/` is core.
  */
 import type { HabitatKind } from '../world/habitat';
 import type { ObjectRung } from '../world/objects/budget';
 import type { ResourceKind } from '../world/ecology/resources';
+import type { CreatureState } from './state';
 
 export type CreatureId = 'earthworm' | 'aphid' | 'housefly';
 
@@ -197,9 +211,19 @@ export interface CreatureSpecies {
   /** What the player reads. */
   readonly name: string;
   readonly scientificName: string;
-  /** Body length, mm. MEASURED — `lengthSource` says where. */
+  /**
+   * The species' body length, mm. MEASURED — `lengthSource` says where.
+   * It is the REFERENCE an individual is measured against (`sizeRatio`),
+   * and by construction the MEAN of the draw over `lengthRangeMm`.
+   */
   readonly lengthMm: number;
   readonly lengthSource: string;
+  /**
+   * The range an individual is drawn from, mm. MEASURED, from the same
+   * source as `lengthMm`: a species' cited size is a typical animal, not
+   * every animal, and `population.drawLengthMm` draws inside this.
+   */
+  readonly lengthRangeMm: readonly [number, number];
   readonly model: CreatureModel;
   readonly medium: Medium;
   readonly temperament: Temperament;
@@ -235,6 +259,10 @@ export const EARTHWORM: CreatureSpecies = Object.freeze({
   // rig is a plain segmented worm that reads as either.
   lengthMm: 150,
   lengthSource: 'Lumbricus terrestris commonly 120-250 mm — U. Maryland Extension; Dimensions.com',
+  // MEASURED: the range the same source gives. The draw over it is
+  // skewed so its mean is the 150 mm above, not the 185 mm midpoint —
+  // `population.drawLengthMm` says how and why.
+  lengthRangeMm: Object.freeze([120, 250]) as readonly [number, number],
   model: Object.freeze({
     path: 'models/earthworm.glb',
     // MEASURED against the file: the 17-bone chain's length in GLB units, head to tail (`tests/faunaRealRigs.test.ts`).
@@ -252,30 +280,55 @@ export const EARTHWORM: CreatureSpecies = Object.freeze({
     sightMm: 60, fovDeg: 360, alarmMm: 40, alarmS: 6,
   }),
   pace: Object.freeze({
-    // BIOLOGICAL SHAPE: Quillin (1999, J. Exp. Biol.) measured L. terrestris
-    // crawling at roughly a tenth of a body length a second; 150 mm × 0.1
-    // is 15 mm/s on the surface, and that is the flee pace.
+    // MEASURED, and the reference every individual scales off. Quillin
+    // (1999, J. Exp. Biol.) measured L. terrestris crawling at roughly a
+    // tenth of a body length a second, so the cited 150 mm animal travels
+    // at 15 mm/s. Joshua's source (Backyardnature, quoted by All About
+    // Worms) reaches the same number the other way round — small 27 ft/hr,
+    // medium 185, large 240, which convert to 0.23, 1.57 and 2.03 cm/s —
+    // and its medium worm is 15.7 mm/s: the same animal at the same speed.
+    // Against the tenth-of-a-body law those three read as a ~30 mm, a
+    // 150 mm and a ~250 mm worm, which is why the law, and not any one of
+    // these figures, is what the individuals are scaled by. Quillin is the
+    // citation; the popular page corroborates it.
     //
-    // THE WANDER PACE WAS NEVER THE BIOLOGY. It was TCS's 3 mm/s, a five-
-    // fold discount off the measured crawl applied for "underground is
-    // slower" with no source for the factor — and five is a lot to invent.
-    // Measured over ten simulated minutes with forty worms, a worm burrows
-    // 61.5% of the time and rests, surfaces or feeds for the other 38.5%,
-    // so 3 mm/s came out as 1.85 mm/s of mean travel: EIGHTY-ONE SECONDS to
-    // move its own body length. That is a correct ecology nobody can see,
-    // which is the same complaint that produced the finder.
+    // TWO INVENTED NUMBERS DIED HERE. TCS used 3 mm/s — a fivefold
+    // discount off the measured crawl for "underground is slower", with no
+    // source for the factor — which came out at 1.85 mm/s of mean travel
+    // over ten simulated minutes: eighty-one seconds to move its own body
+    // length, a correct ecology nobody can see. Earlier today that became
+    // 10 mm/s, which was a number picked rather than derived, and it was
+    // the same mistake in a smaller coat. The burrow uses this pace too
+    // (`locomotion.paceOf`), because there is no measured discount for
+    // pushing through soil and inventing one is what went wrong twice.
     //
-    // GAME TUNING, and honestly labelled as such: two thirds of the measured
-    // crawl. Burrowing IS slower than crawling on the surface — soil has to
-    // be pushed through — but the fraction is chosen for legibility at ant
-    // scale, not measured. It reads as about a body length every 24 seconds.
-    wanderMmS: 10, fleeMmS: 15, turnRadS: 1.2,
+    // fleeMmS is INVENTED and there is no source for it: nobody has
+    // published an escaping earthworm's burst, and a hydrostatic skeleton
+    // has no sprint to publish. GAME TUNING at five thirds of the measured
+    // crawl — fast enough that a withdrawal reads as one, slow enough that
+    // it is still a worm, and over the alarm's six seconds it retreats
+    // about one body length, which is as far as it needs to be to be gone.
+    wanderMmS: 15, fleeMmS: 25, turnRadS: 1.2,
   }),
   flight: null,
   burrow: Object.freeze({
     // GAME TUNING carried from TCS islandWorm.ts (WORM_UNDER_MM, WORM_BORE_MM,
     // WORM_HEADING_MIN/MAX_S, WORM_TURN): the band it wanders in is deep
     // enough to be hidden and shallow enough to be near the ant.
+    //
+    // AND IT IS NOT THIS SPECIES' DEPTH, WHICH IS WORTH SAYING RATHER THAN
+    // LEAVING TO BE FOUND. Wikipedia's Earthworm article puts L. terrestris
+    // — the animal named at the top of this entry — in the ANECIC group:
+    // "worms that construct permanent deep vertical burrows which they use
+    // to visit the surface to obtain plant material for food". The
+    // horizontal wanderers are ENDOGEIC, and even they work the upper
+    // 10-30 cm. This band is 12 MILLIMETRES and it wanders sideways, which
+    // is neither. The reason is the player: an ant is 3-5 mm, and a worm a
+    // metre down a vertical shaft is not in the game at all. So the
+    // BEHAVIOUR below is anecic and correctly cited — it surfaces at night
+    // and in rain — while the DEPTH is a stage, chosen for the ant. A
+    // future nest that goes down properly is where this stops being a
+    // compromise.
     underMm: 12, boreMm: 6, headingS: Object.freeze([30, 60]) as readonly [number, number], turn: 0.12,
     surfaceS: Object.freeze([20, 90]) as readonly [number, number],
     betweenSurfacingsS: Object.freeze([120, 400]) as readonly [number, number],
@@ -307,6 +360,8 @@ export const APHID: CreatureSpecies = Object.freeze({
   // MEASURED. The rig is a generic green aphid; the size is the middle of the garden species.
   lengthMm: 2.5,
   lengthSource: 'garden aphids 1.5-4 mm — UMN Extension; MSU Extension',
+  // MEASURED: the range the same source gives, the cited 2.5 mm its mean.
+  lengthRangeMm: Object.freeze([1.5, 4]) as readonly [number, number],
   model: Object.freeze({
     path: 'models/aphid.glb',
     // MEASURED against the file: the body's bone extent along the head axis, legs and antennae excluded (`tests/faunaRealRigs.test.ts`).
@@ -353,6 +408,10 @@ export const HOUSEFLY: CreatureSpecies = Object.freeze({
   // MEASURED.
   lengthMm: 6.5,
   lengthSource: 'Musca domestica body 4-8 mm, mean 6.35 — Animal Diversity Web',
+  // MEASURED: the range the same source gives. The cited length sits
+  // ABOVE this range's midpoint, so the draw's skew runs the other way
+  // from the worm's — big flies are the common ones.
+  lengthRangeMm: Object.freeze([4, 8]) as readonly [number, number],
   model: Object.freeze({
     path: 'models/housefly.glb',
     // MEASURED against the file: head to abdomen tip along the body's bones, wings and legs excluded (`tests/faunaRealRigs.test.ts`).
@@ -425,6 +484,32 @@ export function rigScale(species: CreatureSpecies): number {
 }
 
 /**
+ * HOW BIG THIS ONE IS, as a multiple of the animal the table cites: the
+ * ONE place the ratio is worked out, so a pace, a body length and a
+ * renderer's scale can never disagree about the same worm.
+ *
+ * Joshua, 2026-09-08: the earthworm "should be based on size and
+ * dynamic". Every pace read and every distance measured in bodies is
+ * multiplied by this — not because big animals are quick, but because
+ * the law that was measured is a tenth of ITS OWN body a second, so the
+ * speed IS the size (Quillin 1999; see `EARTHWORM.pace`).
+ *
+ * Guarded to a positive finite number. A state carrying a length it
+ * should not — a creature built by hand, a save written before
+ * individuals had sizes, a NaN out of arithmetic upstream — reads as the
+ * species' own animal at ratio 1, which is the behaviour this table had
+ * before the draw existed. A creature that stands still or leaves the
+ * island is worse than one that is the size the table says.
+ */
+export function sizeRatio(state: CreatureState, species: CreatureSpecies): number {
+  const length = state.lengthMm;
+  const cited = species.lengthMm;
+  if (!Number.isFinite(length) || length <= 0) return 1;
+  if (!Number.isFinite(cited) || cited <= 0) return 1;
+  return length / cited;
+}
+
+/**
  * Hold the table to its own rules, loudly, once, at the door — the way
  * `data/schema.ts` validates a registry entry. Returns the problems so a
  * test can list them; the simulation throws on any.
@@ -441,6 +526,14 @@ export function speciesProblems(species: CreatureSpecies): string[] {
     if (value[1] < value[0]) problems.push(`${where}: ${name} runs backwards`);
   };
   finite('lengthMm', species.lengthMm, 0.1);
+  finite('lengthRangeMm[0]', species.lengthRangeMm[0], 0.1);
+  finite('lengthRangeMm[1]', species.lengthRangeMm[1], 0.1);
+  if (species.lengthRangeMm[1] < species.lengthRangeMm[0]) problems.push(`${where}: lengthRangeMm runs backwards`);
+  else if (species.lengthMm < species.lengthRangeMm[0] || species.lengthMm > species.lengthRangeMm[1]) {
+    // The cited length is the draw's mean, so a range that does not
+    // contain it would generate a population the table does not describe.
+    problems.push(`${where}: the cited length ${species.lengthMm} mm is outside lengthRangeMm`);
+  }
   finite('model.spineUnits', species.model.spineUnits, 1e-6);
   if (!species.lengthSource) problems.push(`${where}: a measured length needs a source`);
   if (!species.model.path.endsWith('.glb')) problems.push(`${where}: model.path must name a .glb`);
@@ -451,6 +544,10 @@ export function speciesProblems(species: CreatureSpecies): string[] {
   if (species.senses.alarmMm > species.senses.sightMm) problems.push(`${where}: it cannot be alarmed by what it cannot sense`);
   finite('pace.wanderMmS', species.pace.wanderMmS);
   finite('pace.fleeMmS', species.pace.fleeMmS);
+  // A flee that is no faster than a walk is not a flee: the word would
+  // change and nothing on the screen would. The worm's flee is invented
+  // (see EARTHWORM.pace) and this is what keeps the invention honest.
+  if (species.pace.fleeMmS <= species.pace.wanderMmS) problems.push(`${where}: fleeing is not faster than walking`);
   finite('pace.turnRadS', species.pace.turnRadS, 1e-6);
   if ((species.medium === 'air') !== (species.flight !== null)) problems.push(`${where}: an air species has a flight spec and only an air species does`);
   if ((species.medium === 'soil') !== (species.burrow !== null)) problems.push(`${where}: a soil species has a burrow spec and only a soil species does`);

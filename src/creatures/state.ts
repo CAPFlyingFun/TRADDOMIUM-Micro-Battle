@@ -9,6 +9,15 @@
  * closure, a class with methods, or a reference into a renderer; it
  * serialises as it stands).
  *
+ * A CREATURE CARRIES ITS OWN SIZE (Joshua, 2026-09-08, on the earthworm:
+ * "it should be based on size and dynamic"). Before this, every one of
+ * the forty worms in a forest was exactly the 150 mm the table cites and
+ * they all moved at exactly the same millimetres a second, because the
+ * pace was an absolute number and there was nowhere to put an
+ * individual's size. `lengthMm` is that place: the population draws one
+ * per animal from the species' range, and every pace and every
+ * body-length measure is multiplied by `sizeRatio(state, species)`.
+ *
  * THE BEHAVIOUR UNION IS THE WHOLE VOCABULARY. TCS's brain had eight
  * states and its lesson is on the union: "the temptation to add a state
  * per species is how an FSM becomes an if-ladder". Three media need
@@ -21,7 +30,7 @@
  * Pure: no three, no DOM. `src/creatures/` is core.
  */
 import type { WorldPoint } from '../world/coords';
-import type { CreatureId, Medium } from './species';
+import { CREATURE_SPECIES, type CreatureId, type Medium } from './species';
 
 export type Behaviour =
   | 'idle'     // standing, sitting, hanging on a stem
@@ -75,6 +84,14 @@ export interface CreatureState {
   /** `species:cx,cz:n` — stable for the same world, the way a tree's id is. */
   readonly id: string;
   readonly species: CreatureId;
+  /**
+   * This individual's body length, mm. Its species' cited length is the
+   * REFERENCE, not the rule: the pace, the arrive radius and every other
+   * distance measured in bodies are scaled by the ratio of the two
+   * (`sizeRatio`, in `species.ts`). Set once, by the draw that made it;
+   * a body does not change length while it is alive.
+   */
+  readonly lengthMm: number;
   /** The 16 m cell it was generated in (`world/objects/cells.ts` key). It may have walked out of it. */
   readonly cellKey: string;
   /** Where it is, on the plane. Replaced, never mutated in place (`coords.translate`). */
@@ -113,6 +130,8 @@ export interface NewCreatureOptions {
   readonly at: WorldPoint;
   readonly height: number;
   readonly heading: number;
+  /** This individual's body length, mm. Omitted: the species' cited length, which is the animal the table describes. */
+  readonly lengthMm?: number;
   /** Where in the think cycle it starts, 0..1, so a cell's creatures do not all think on the same frame. */
   readonly phase: number;
   readonly behaviour?: Behaviour;
@@ -122,11 +141,22 @@ export interface NewCreatureOptions {
   readonly fatigue?: number;
 }
 
-/** A creature at rest at its spawn: idle, nothing targeted, needs as given, tier far until the simulation places it. */
+/**
+ * A creature at rest at its spawn: idle, nothing targeted, needs as
+ * given, tier far until the simulation places it.
+ *
+ * A length that is not offered is the species' cited one, so a creature
+ * built by hand — a test, a probe, a save written before individuals had
+ * sizes — is the animal the table describes and moves at the table's
+ * pace, which is what every caller that predates the draw expects.
+ */
 export function newCreature(options: NewCreatureOptions): CreatureState {
+  const cited = CREATURE_SPECIES[options.species].lengthMm;
+  const wanted = options.lengthMm ?? cited;
   return {
     id: options.id,
     species: options.species,
+    lengthMm: Number.isFinite(wanted) && wanted > 0 ? wanted : cited,
     cellKey: options.cellKey,
     at: options.at,
     height: options.height,

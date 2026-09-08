@@ -40,6 +40,17 @@
  * SHAPE), so rain or night grounds it: it lands if it is up and does not
  * take off until the sky clears. An aphid on its stem notices neither.
  *
+ * A BIG ONE GOES FURTHER, AND FOR THE SAME REASON IT GOES FASTER. Every
+ * pace this file reads — how far a fresh heading is aimed, how far a
+ * flee carries, how long a walk to a stem should take — is multiplied by
+ * `sizeRatio(state, species)`, and so is every distance measured in body
+ * lengths, because the measured law is a fraction of the animal's own
+ * body a second (Joshua, 2026-09-08: the earthworm "should be based on
+ * size and dynamic"). What is NOT scaled is what belongs to the KIND
+ * rather than the body: how far it can sense a disturbance, the band it
+ * burrows in, and a fly's flight — a hop is the wing's, and the wing is
+ * not in the table's length.
+ *
  * Pure: no three, no DOM. `src/creatures/` is core.
  */
 import { distanceSquared, translate, type WorldPoint } from '../world/coords';
@@ -49,7 +60,7 @@ import { CELL_SPAN } from '../world/objects/cells';
 import { ahead, headingToward, wrapHeading } from './heading';
 import { arrived, isAirborne, isMoving } from './locomotion';
 import { PERCH_FRACTION } from './population';
-import { unitsOfMm, type CreatureSpecies, type FlightSpec } from './species';
+import { sizeRatio, unitsOfMm, type CreatureSpecies, type FlightSpec } from './species';
 import { behaviourAllowed, type Behaviour, type CreatureState } from './state';
 import type { CreatureWeather, CreatureWorld, Disturbance } from './world';
 
@@ -134,10 +145,15 @@ export function thinkDue(state: CreatureState, species: CreatureSpecies): boolea
   return true;
 }
 
-/** How far a flee takes a creature: what its flee pace covers in the alarm's hold; for a flier, its longest hop. */
-function fleeDistance(species: CreatureSpecies): number {
+/**
+ * How far a flee takes a creature: what ITS flee pace covers in the
+ * alarm's hold, so a long worm retreats further than a short one in the
+ * same six seconds. For a flier it is the longest hop, which belongs to
+ * the flight spec and not to the body.
+ */
+function fleeDistance(state: CreatureState, species: CreatureSpecies): number {
   if (species.flight !== null) return unitsOfMm(species.flight.hopMm[1]);
-  return unitsOfMm(species.pace.fleeMmS) * species.senses.alarmS;
+  return sizeRatio(state, species) * unitsOfMm(species.pace.fleeMmS) * species.senses.alarmS;
 }
 
 /**
@@ -172,7 +188,7 @@ export function senseAlarm(state: CreatureState, species: CreatureSpecies, distu
   const away = nearestD2 === 0 || (d.at.wx === state.at.wx && d.at.wz === state.at.wz)
     ? wrapHeading(state.heading + Math.PI)
     : headingToward(d.at, state.at);
-  state.target = ahead(state.at, away, fleeDistance(species));
+  state.target = ahead(state.at, away, fleeDistance(state, species));
   state.sinceThink = species.thinkS;
   return true;
 }
@@ -310,7 +326,7 @@ function thinkSoil(
 
   if (state.alarm >= ALARM_FLEES_AT) {
     if (state.behaviour !== 'flee') {
-      if (state.target === null) state.target = ahead(state.at, wrapHeading(state.heading + Math.PI), fleeDistance(species));
+      if (state.target === null) state.target = ahead(state.at, wrapHeading(state.heading + Math.PI), fleeDistance(state, species));
       state.targetHeight = bottom;
       state.hostId = null;
       enter(state, 'flee', species.senses.alarmS);
@@ -382,7 +398,10 @@ function newHeading(
 ): void {
   const hold = draw(rand, spec.headingS);
   const heading = wrapHeading(state.heading + (rand() * 2 - 1) * spec.turn * Math.PI);
-  state.target = ahead(state.at, heading, unitsOfMm(species.pace.wanderMmS) * hold);
+  // As far as THIS worm gets in the time it holds the heading, so the
+  // target is where it will actually be and not where the cited animal
+  // would have been.
+  state.target = ahead(state.at, heading, sizeRatio(state, species) * unitsOfMm(species.pace.wanderMmS) * hold);
   state.hostId = null;
   if (Number.isFinite(ground)) state.targetHeight = ground - (unitsOfMm(spec.underMm) + unitsOfMm(spec.boreMm) / 2) / 2;
   renew(state, 'burrow', hold);
@@ -400,7 +419,9 @@ function thinkPlant(
   state: CreatureState, species: CreatureSpecies, world: CreatureWorld, rand: () => number, host: PlantSource | null, ground: number,
 ): void {
   const needs = species.needs;
-  const body = unitsOfMm(species.lengthMm);
+  // Its own body, not the table's: a 4 mm aphid keeps to five of ITS
+  // lengths of the stem, which is further than a 1.5 mm one goes.
+  const body = sizeRatio(state, species) * unitsOfMm(species.lengthMm);
   const done = state.behaviourS >= state.behaviourUntilS;
 
   if (state.alarm >= ALARM_FLEES_AT) {
@@ -461,7 +482,7 @@ function walkOnHost(
   const perch = PERCH_FRACTION[0] + (PERCH_FRACTION[1] - PERCH_FRACTION[0]) * rand();
   state.target = target;
   state.targetHeight = (Number.isFinite(ground) ? ground : state.height) + perch * Math.max(0, host.size);
-  const pace = unitsOfMm(species.pace.wanderMmS);
+  const pace = sizeRatio(state, species) * unitsOfMm(species.pace.wanderMmS);
   const far = Math.sqrt(distanceSquared(state.at, target)) + Math.abs(state.targetHeight - state.height);
   enter(state, 'wander', pace > 0 ? far / pace + 1 : 1);
 }
@@ -480,7 +501,7 @@ function thinkAir(
   const flight = species.flight;
   if (flight === null) return;
   const needs = species.needs;
-  const body = unitsOfMm(species.lengthMm);
+  const body = sizeRatio(state, species) * unitsOfMm(species.lengthMm);
   const lo = unitsOfMm(flight.cruiseMm[0]);
   const climb = unitsOfMm(flight.climbMmS);
   const g = Number.isFinite(ground) ? ground : state.height;
@@ -504,7 +525,7 @@ function thinkAir(
       enter(state, 'fly', draw(rand, flight.hopS));
     } else if (done || arrived(state, species)) {
       // Still alarmed at the end of the hop: keep going the same way.
-      state.target = ahead(state.at, state.heading, fleeDistance(species));
+      state.target = ahead(state.at, state.heading, fleeDistance(state, species));
       if (!isLand(world, state.target)) state.target = landwardHop(world, state.at, flight, rand) ?? state.at;
       renew(state, 'fly', draw(rand, flight.hopS));
     }

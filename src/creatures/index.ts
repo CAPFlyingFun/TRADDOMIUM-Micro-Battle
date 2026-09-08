@@ -5,7 +5,7 @@
  */
 export {
   APHID, CREATURE_IDS, CREATURE_SPECIES, EARTHWORM, HOUSEFLY, MM_PER_UNIT, assertSpeciesTable, isCreatureId,
-  rigScale, speciesProblems, unitsOfMm,
+  rigScale, sizeRatio, speciesProblems, unitsOfMm,
 } from './species';
 export type {
   BurrowSpec, CreatureId, CreatureModel, CreatureNeeds, CreaturePace, CreaturePopulation, CreatureSenses,
@@ -18,7 +18,7 @@ export type { BurrowEditor, BurrowGate } from './terrainEdit';
 export type {
   CreatureCost, CreatureCounts, CreatureSimulation, CreatureWeather, CreatureWorld, Disturbance,
 } from './world';
-export { CELL_HECTARES, expectedCount, hostCandidates, populateCreatures, siteCount } from './population';
+export { CELL_HECTARES, drawLengthMm, expectedCount, hostCandidates, populateCreatures, siteCount } from './population';
 export type { PopulateCreaturesOptions } from './population';
 export {
   ALARM_FLEES_AT, CALM_WEATHER, HOST_WALK_LENGTHS, RAINING_MM_HR, hostPlantOf, isLand, nearestSite, senseAlarm, think,

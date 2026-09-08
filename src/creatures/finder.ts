@@ -103,6 +103,8 @@ export interface FinderSighting {
    */
   readonly under: number | null;
   readonly behaviour: Behaviour;
+  /** THIS animal's body length, mm — what a camera has to stand back from. */
+  readonly lengthMm: number;
 }
 
 /** Whether this sighting is hidden in the ground: false when nothing knows the ground. */
@@ -141,6 +143,7 @@ function sightingOf(c: CreatureState, focus: WorldPoint, groundAt?: (at: WorldPo
     distance: Math.sqrt(distanceSquared(c.at, focus)),
     under: groundAt === undefined ? null : groundAt(c.at) - c.height,
     behaviour: c.behaviour,
+    lengthMm: c.lengthMm,
   };
 }
 
@@ -194,9 +197,18 @@ export function sightings(
   return out;
 }
 
-/** How far off a species is viewed from, world units: three body lengths, never under `MIN_STANDOFF`. */
-export function standoffOf(species: CreatureSpecies): number {
-  return Math.max(unitsOfMm(species.lengthMm) * VIEW_LENGTHS, MIN_STANDOFF);
+/**
+ * How far off an animal is viewed from, world units: three of ITS body
+ * lengths, never under `MIN_STANDOFF`.
+ *
+ * The animal's, not its kind's. Every worm used to be 150 mm and one
+ * stand-off served them all; now a 250 mm worm is drawn at 250 mm, and a
+ * camera parked at the cited length's distance would have it overflow
+ * the frame while a 120 mm one sat lost in the middle of it.
+ */
+export function standoffOf(species: CreatureSpecies, lengthMm: number = species.lengthMm): number {
+  const length = Number.isFinite(lengthMm) && lengthMm > 0 ? lengthMm : species.lengthMm;
+  return Math.max(unitsOfMm(length) * VIEW_LENGTHS, MIN_STANDOFF);
 }
 
 /**
@@ -237,7 +249,7 @@ export function viewpointFor(
   species: CreatureSpecies,
   options: ViewpointOptions = {},
 ): Viewpoint {
-  const standoff = options.standoff ?? standoffOf(species);
+  const standoff = options.standoff ?? standoffOf(species, sighting.lengthMm);
   // The direction from the animal back towards the camera. A zero-length
   // or non-finite vector (standing exactly on it) falls back to due
   // south, which is heading 0 in this project's convention.
