@@ -425,3 +425,30 @@
 .soil-inspector input { display: block; width: 100%; height: 44px; margin: 0; accent-color: #c9a94a; touch-action: pan-x; }
 .soil-inspector p { margin: 6px 0 0; }
 .soil-inspector p:last-child { color: #bbc2ae; font-size: 12px; }
+
+/* The antennae sweep, BESIDE SOIL on the same row — not above it.
+
+   THE ARITHMETIC, so the two never overlap. Above it was the obvious
+   place and it is the wrong one: `.soil-inspector` is one absolutely
+   positioned box whose BUTTON is its last child, so the BURROWS panel
+   opens UPWARD out of that button, up to `100dvh - 150px` tall — 280 px
+   on the 932 x 430 design canvas. Anything stacked over the button is
+   inside the open panel. The bottom 48 px band is the only part of that
+   corner the panel never reaches, so this control shares it: same
+   bottom, shifted left by SOIL's 76 px button and an 8 px gap, with the
+   line to the LEFT of the button rather than over it (append order is
+   line then button, so a plain `row` puts the button nearest the thumb).
+
+   Widths at 932 x 430: 12 + 76 + 8 + 108 = 204 px of button from the
+   right edge, and at most 432 with the line — the move stick in the
+   opposite corner reaches about 174 px in, so the two clear each other
+   by 500 px here and by 243 px at the smallest supported landscape. */
+.antennae { position: absolute; right: calc(max(12px, env(safe-area-inset-right)) + 84px); bottom: max(18px, env(safe-area-inset-bottom)); z-index: 4; display: flex; flex-direction: row; align-items: center; gap: 8px; color: #e8e2c8; font: 13px/1.35 system-ui, sans-serif; text-align: right; pointer-events: auto; }
+.antennae button { min-height: 48px; min-width: 108px; padding: 8px 14px; border: 1px solid #c9a94a; border-radius: 6px; color: #e8e2c8; background: #171c14; font: inherit; letter-spacing: .12em; cursor: pointer; touch-action: manipulation; }
+/* Dead means dead: dimmed edge, dimmed ink, no pressable cursor. */
+.antennae button:disabled { border-color: #6b5f33; color: #9a9583; background: #12160f; cursor: default; }
+.antennae button:focus-visible { outline: 2px solid #f6d56a; outline-offset: 3px; }
+/* The reason the button is dead, over whatever the world is doing behind
+   it — hence the shadow rather than a panel: a plate here would cover the
+   forest the sweep just lit. */
+.antennae-line { margin: 0; max-width: min(220px, calc(100vw - 30px)); color: #bbc2ae; font-size: 12px; text-shadow: 0 1px 2px rgba(6, 9, 12, .9); }

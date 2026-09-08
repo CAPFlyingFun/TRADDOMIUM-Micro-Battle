@@ -76,6 +76,7 @@ import { SoilView } from '../terrain/SoilView';
 import { SparseSoil } from '../world/SparseSoil';
 import { SOIL_TILE } from '../world/soilTypes';
 import { SoilInspector } from '../ui/SoilInspector';
+import { Antennae } from '../ui/Antennae';
 import { OceanView, TIER_OCTAVES as OCEAN_OCTAVES } from '../sea/OceanView';
 import { blendSight, underwaterLook } from '../sea/underwaterLook';
 import { IslandWater } from '../water/IslandWater';
@@ -91,6 +92,7 @@ import {
 } from '../creatures';
 import { FaunaView } from '../fauna/FaunaView';
 import { FinderView } from '../fauna/FinderView';
+import { SenseSweep } from '../sense/SenseSweep';
 import { assets } from '../assets/assets';
 import type { WorldLayerId } from '../world/WorldLoader';
 import { islandChannels, type IslandChannels } from '../world/water/islandChannels';
@@ -894,6 +896,14 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
      */
     let finder: FinderView | null = null;
     let finderOn = false;
+    /**
+     * THE ANTENNAE. Not a layer and not a setting: a sweep is a thing the
+     * player DOES, so its only switch is the button, and while nothing is
+     * lit the whole feature is one branch a frame. `sense/SenseSweep`
+     * holds the pulse, the selection and the two renderers.
+     */
+    let sense: SenseSweep | null = null;
+    let antennae: Antennae | null = null;
     /** The species GO last showed, so the next press shows a different one. */
     let lastShown: CreatureId | null = null;
     /**
@@ -1349,6 +1359,22 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         finder.setEnabled(finderOn);
         three.add(finder.group);
       }
+      // THE ANTENNAE READ THE WORLD AND NEVER ARRANGE IT, so both of the
+      // sweep's doors into it are read-only closures — what a cell has
+      // generated, and how high the ground is under a point. It is given
+      // `objects` rather than importing it: the renderer that owns the
+      // flora stays the only thing that knows how a cell is populated.
+      if (sense === null && objects !== null) {
+        const ground = field;
+        const grown = objects;
+        sense = new SenseSweep({
+          objects: {
+            populationAt: (cell) => grown.populationOf(cell),
+            groundAt: (at) => ground.heightAt(at),
+          },
+        });
+        three.add(sense.group);
+      }
       // FILLED BEHIND THE LOADING SCREEN, like the terrain's rings and
       // the sea's sheets: every cell within reach generated now, so the
       // first drawn frame has grass in it and pays nothing for it.
@@ -1439,6 +1465,22 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
           fovRadians: (fly.camera.fov * Math.PI) / 180,
           heightPx: viewHeight,
           at: fly.camera.position,
+        });
+      }
+      // AND THE SWEEP, from the same list, on the same simulation step.
+      // It takes no origin: a sweep stays anchored where it was sent, so
+      // flying off does not drag the light along. The lens is separate
+      // and is passed every frame, because how big a fill is drawn is a
+      // fact about where the camera stands and nothing else.
+      if (sense !== null) {
+        sense.update(creatures.creatures(), dt, {
+          fovRadians: (fly.camera.fov * Math.PI) / 180,
+          heightPx: viewHeight,
+          at: fly.camera.position,
+        });
+        const cost = sense.cost;
+        antennae?.update({
+          ready: cost.ready, lit: sense.lit, readyIn: cost.readyIn, sighted: cost.sighted,
         });
       }
     };
@@ -2280,6 +2322,11 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
           'position:absolute;right:12px;top:8px;padding:10px 18px;font:14px system-ui,sans-serif;' +
           'color:#e8e2c8;background:#1a2014;border:1px solid #c9a94a;border-radius:6px;';
         ctx.uiLayer.appendChild(pauseButton);
+        // THE ONE CONTROL THE SWEEP HAS. It is built whether or not the
+        // world has finished loading: `onPing` asks the sweep, and a
+        // sweep that does not exist yet refuses, which is the same
+        // answer the pulse gives while it is recovering.
+        antennae = new Antennae(ctx.uiLayer, { onPing: () => sense?.ping(fly.pose().at) ?? false });
         if (soil) soilInspector = new SoilInspector(ctx.uiLayer, {
           onWorm: inspectWorm,
           onDepth: mm => {
@@ -2526,6 +2573,8 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
       },
 
       dispose() {
+        antennae?.dispose(); antennae = null;
+        if (sense) { three.remove(sense.group); sense.dispose(); sense = null; }
         soilInspector?.dispose(); soilInspector = null;
         if (soilView) { three.remove(soilView.group); soilView.dispose(); soilView = null; }
         soil = null;

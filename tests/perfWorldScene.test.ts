@@ -270,9 +270,13 @@ describe('PerformanceWorldScene', () => {
     await scene.enter();
     scene.resize(932, 430);
     expect((scene.camera as THREE.PerspectiveCamera).aspect).toBeCloseTo(932 / 430, 9);
-    // The HUD, the PAUSE button and the stick.
-    expect(uiLayer.children.length).toBe(3);
+    // The HUD, the PAUSE button, the stick and the ANTENNAE control.
+    // Named rather than counted, so the next control to arrive fails on
+    // the thing it broke instead of on a number.
     expect(uiLayer.querySelector('[data-control="stick"]')).not.toBeNull();
+    expect(uiLayer.querySelector('[data-action="pause"]')).not.toBeNull();
+    expect(uiLayer.querySelector('[data-action="antennae"]')).not.toBeNull();
+    expect(uiLayer.children.length).toBe(4);
     scene.dispose();
     expect(scene.three.children.length).toBe(0);
     expect(uiLayer.children.length).toBe(0);
