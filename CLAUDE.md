@@ -376,6 +376,33 @@ now a change to say so about in the same breath as pushing it.
 
 ## Parallel agent work (Joshua's standing plan for v1)
 
+**THE DIVISION OF LABOUR IS FIXED (Joshua, 2026-09-08):**
+
+> "1) You do the searches… 2) Other Agents Code… 3) You make sure the
+> Agents did the job correctly. You are the assistant designer under me,
+> and I don't need over 8 agents at a time for something simple since TCS
+> didn't use any agents to build it and it worked."
+
+Three rules, in his order, and they override any habit of fanning out:
+
+1. **Claude does the reading.** Searching this codebase, tracing a bug,
+   measuring a symptom and deciding what is actually wrong is CLAUDE's
+   job, done directly. Do not spawn agents to read — a fanned-out search
+   mostly returns what a grep would, and the answer arrives with someone
+   who has to defend it. (This is the older "minimum for research" line,
+   now a rule rather than a preference.)
+2. **Agents write the code.** Once the design is decided, leaf modules
+   are what agents are for: one agent, one file or one directory, never
+   another's files.
+3. **Claude verifies.** Not a reviewer agent — Claude reads the diff,
+   runs the typecheck, the tests, the build and the probes, and looks at
+   the shots. A review agent is a third opinion nobody asked for and it
+   is Claude who answers for the push.
+
+**Eight agents is the ceiling for ordinary work, and it is a ceiling,
+not a target.** TCS was built with none. If a task wants more than a
+handful, the task is probably not decomposed — decompose it, or do it.
+
 Contracts land first and serially (`app/`, `session/`, the `Scene` and
 `DevTool` contracts, `data/schema`). Leaf modules are then built in
 parallel, each agent owning one directory and never editing another's
