@@ -40,6 +40,13 @@ describe('settings sanitize', () => {
     expect(sanitizeSettings({ finderOn: true }).finderOn).toBe(true);
     expect(sanitizeSettings({ finderOn: 'yes' }).finderOn).toBe(SETTINGS_DEFAULTS.finderOn);
     expect(SETTINGS_DEFAULTS.finderOn).toBe(false);
+    // The camera's speed rung: three words, and anything else is the default.
+    expect(sanitizeSettings({ cameraSpeed: 'slow' }).cameraSpeed).toBe('slow');
+    expect(sanitizeSettings({ cameraSpeed: 'ludicrous' }).cameraSpeed).toBe(SETTINGS_DEFAULTS.cameraSpeed);
+    expect(sanitizeSettings({ cameraSpeed: 30 }).cameraSpeed).toBe(SETTINGS_DEFAULTS.cameraSpeed);
+    // MEDIUM by default: `fast` is a speed for crossing the island, and
+    // the island is no longer what there is to look at (2026-09-08).
+    expect(SETTINGS_DEFAULTS.cameraSpeed).toBe('medium');
     expect(sanitizeSettings({ hudCollapsed: 'true' }).hudCollapsed).toBe(SETTINGS_DEFAULTS.hudCollapsed);
     expect(SETTINGS_DEFAULTS.hudCollapsed).toBe(false);
     expect(sanitizeSettings({ textures: 'low', detail: 'low' }).textures).toBe('low');
@@ -51,7 +58,8 @@ describe('settings sanitize', () => {
     const s = sanitizeSettings({ version: 7, fov: 70, terrainRelief: 1.5, showFix: true });
     expect(s).toEqual({ ...SETTINGS_DEFAULTS, fov: 70, version: SETTINGS_VERSION });
     expect(Object.keys(s).sort()).toEqual([
-      'detail', 'finderOn', 'fov', 'hudCollapsed', 'invertY', 'lookSensitivity', 'showFps', 'textures', 'version',
+      'cameraSpeed', 'detail', 'finderOn', 'fov', 'hudCollapsed', 'invertY', 'lookSensitivity', 'showFps',
+      'textures', 'version',
     ]);
   });
 });
@@ -63,7 +71,7 @@ describe('settings store round trip', () => {
     expect(store.read()).toEqual(SETTINGS_DEFAULTS);
     const written = {
       version: SETTINGS_VERSION, fov: 95, lookSensitivity: 1.75, invertY: true, textures: 'high', detail: 'high', showFps: false,
-      hudCollapsed: true, finderOn: true,
+      hudCollapsed: true, finderOn: true, cameraSpeed: 'slow',
     } as const;
     store.write(written);
     expect(store.read()).toEqual(written);

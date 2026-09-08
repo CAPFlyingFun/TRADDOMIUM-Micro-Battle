@@ -116,7 +116,7 @@ import { toLocal } from '../world/origin';
 import { compassBearing, type WorldPoint } from '../world/coords';
 import { BotHud, type BotReadout } from './BotHud';
 import { FrameStats } from './FrameStats';
-import { FreeFlyCamera, headingOfYaw, yawForHeading } from './FreeFlyCamera';
+import { CAMERA_SPEEDS, FreeFlyCamera, headingOfYaw, yawForHeading } from './FreeFlyCamera';
 import { MoveStick } from '../input/MoveStick';
 import {
   HUD_HZ, PerfHud, type CreaturesReadout, type FinderReadout, type FreshReadout, type ObjectsReadout, type SeaReadout,
@@ -171,6 +171,13 @@ export interface PerfWorldSettings {
    * (`app/updateCheck.ts`), is often.
    */
   readonly finderOn: boolean;
+  /**
+   * The ceiling a full push of the move stick reaches: `slow` 5 m/s,
+   * `medium` 10, `fast` 30 (`FreeFlyCamera.CAMERA_SPEEDS`). Every rung
+   * starts at 1 m/s, so this is the top of the range and not the whole
+   * of it. Joshua, 2026-09-08: "I am moving too fast to see them."
+   */
+  readonly cameraSpeed: 'slow' | 'medium' | 'fast';
   /**
    * The player's two three-level quality choices, since 2026-09-05.
    *
@@ -543,7 +550,13 @@ const START_YAW = Math.PI / 2;
  * scales it on a desktop; on a phone there is no wheel, so this constant
  * IS the speed and it is the one Joshua asked for.
  */
-const FLY_SPEED = 3_000;
+/**
+ * The rung a world without a settings document flies at. `fast` — the
+ * speed this camera had before the setting existed — because a probe or
+ * a test that hands in no settings is measuring the island, not looking
+ * for an animal on it.
+ */
+const DEFAULT_CAMERA_SPEED = 'fast';
 
 /**
  * The fastest a camera may fly while a room is watching: the capsule's own
@@ -807,6 +820,13 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
     let finderOn = false;
     /** The species GO last showed, so the next press shows a different one. */
     let lastShown: CreatureId | null = null;
+    /**
+     * The ceiling a full stick push reaches, from the player's Camera
+     * speed setting. Held here rather than read inside `pace()` because
+     * `applySettings` already has the document open and parsing it twice
+     * a state change is what the settings hook exists to avoid.
+     */
+    let cameraTop: number = CAMERA_SPEEDS[DEFAULT_CAMERA_SPEED];
     /** What each species row was at the last look. */
     const speciesOn: Record<CreatureId, boolean> = { earthworm: false, aphid: false, housefly: false };
     /** The rung the bubble was BUILT at: a changed setting is noticed once. */
@@ -1026,7 +1046,7 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
       // travel and banks at most 37.5, so a camera flying faster than
       // that has its claims refused and stands still on everybody else's
       // screen. Solo, nobody is paying.
-      fly.speed = networked ? Math.min(FLY_SPEED, NETWORKED_MAX_SPEED) : FLY_SPEED;
+      fly.speed = networked ? Math.min(cameraTop, NETWORKED_MAX_SPEED) : cameraTop;
     };
 
     /**
@@ -1824,6 +1844,12 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         hud.hidden = !s.showFps;
         hud.collapsed = s.hudCollapsed;
       }
+      // The stick's ceiling, from the document already in hand — never a
+      // second read of it, which is what `reads()` counts — so a rung
+      // chosen in the pause menu is in force the moment the player
+      // closes it rather than at the next resume (Joshua, 2026-09-08).
+      cameraTop = CAMERA_SPEEDS[s.cameraSpeed];
+      pace();
       // The finder follows the document too, so the switch survives the
       // reload the update check performs on a push.
       if (s.finderOn !== finderOn) {

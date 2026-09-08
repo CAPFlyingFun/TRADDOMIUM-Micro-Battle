@@ -58,6 +58,25 @@ const WHEEL_SPEED_STEP = 1.25;
  * thumb can hold for lining up a shot, not a measured anything.
  */
 export const STICK_MIN_SPEED = 100;
+
+/**
+ * HOW FAST A FULL PUSH FLIES, per the player's Camera speed setting, in
+ * world units a second.
+ *
+ * Joshua, 2026-09-08, hunting 15 cm animals with the finder on: "make the
+ * joystick camera speed adjustable so slow is 1-5m per second, medium is
+ * 1-10m per second, and fast is 1-30m per second... I am moving too fast
+ * to see them."
+ *
+ * The FLOOR is the same at every rung — `STICK_MIN_SPEED`, 1 m/s — so
+ * every setting reads "1 to n": what a rung changes is the ceiling a full
+ * push reaches, and with it how much of the stick's travel is spent
+ * below walking pace. `fast` is what the camera has flown at since
+ * 2026-09-05 and is unchanged; the two below it are new room at the
+ * bottom, which is where an animal four orders of magnitude smaller than
+ * the island has to be looked at from.
+ */
+export const CAMERA_SPEEDS = Object.freeze({ slow: 500, medium: 1_000, fast: 3_000 });
 /** Straight up is excluded: at exactly ±90° pitch, yaw and roll become the same axis. */
 const MAX_PITCH = Math.PI / 2 - 0.01;
 

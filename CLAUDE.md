@@ -109,6 +109,16 @@ graphics on mobile is better than amazing graphics with horrible
 performance. Terrain landed at 60 fps on his device; the ocean must not
 be what takes that back.
 
+**The stick's ceiling is the player's, and its floor never moves**
+(Joshua, 2026-09-08: "make the joystick camera speed adjustable so slow
+is 1-5m per second, medium is 1-10m per second, and fast is 1-30m per
+second... I am moving too fast to see them"). `Camera speed` in Settings
+picks the top a full push reaches (`FreeFlyCamera.CAMERA_SPEEDS`); every
+rung starts at the same 1 m/s, so each reads "1 to n" and what changes is
+how much of the stick's travel is spent below walking pace. The default
+is MEDIUM: `fast` is a speed for crossing the island, and since the
+ecology arrived the island is not what there is to look at.
+
 **Controls belong to the thumbs, not the screen.** Screen space near the
 thumbs is the scarcest resource; action controls have first claim.
 Before adding a control, check whether a gesture can carry it. Movement

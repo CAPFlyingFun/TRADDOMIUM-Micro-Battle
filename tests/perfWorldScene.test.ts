@@ -1211,7 +1211,7 @@ describe('PerformanceWorldScene with the real island under it', () => {
 describe('PerformanceWorldScene: the creature finder', () => {
   const withFinder = (finderOn: boolean): PerfWorldSettings => ({
     fov: 60, lookSensitivity: 1, invertY: false, showFps: true, hudCollapsed: false,
-    finderOn, textures: 'medium', detail: 'medium',
+    finderOn, cameraSpeed: 'fast', textures: 'medium', detail: 'medium',
   });
 
   it('shows no finder at all on a world with no island to find anything on', async () => {

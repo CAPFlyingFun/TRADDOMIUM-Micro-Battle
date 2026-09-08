@@ -20,7 +20,8 @@
 import { describe, expect, it } from 'vitest';
 import { defineStore, memoryKeyValueStore } from '../src/persistence/store';
 import { SettingsPanel, settingAction } from '../src/ui/SettingsPanel';
-import { QUALITY_LEVELS, SETTINGS_SPEC } from '../src/ui/settingsStore';
+import { CAMERA_SPEED_LEVELS, QUALITY_LEVELS, SETTINGS_DEFAULTS, SETTINGS_SPEC } from '../src/ui/settingsStore';
+import { CAMERA_SPEEDS, STICK_MIN_SPEED } from '../src/perf/FreeFlyCamera';
 import { TIER_FOR_QUALITY, tierFor } from '../src/assets/textureQuality';
 import { DETAIL_FOR_QUALITY, DETAIL_TIERS, detailFor, objectRadius, waveRadius } from '../src/assets/detailQuality';
 import { SHEET_VERTICES, TIER_OCTAVES } from '../src/sea/OceanView';
@@ -123,5 +124,57 @@ describe('the detail ladder\'s two radii', () => {
     for (const tier of DETAIL_TIERS) expect(objectRadius(tier), tier).toBe(waveRadius(tier));
     expect(objectRadius('high')).toBe(10_000);
     expect(objectRadius('ultra-high')).toBe(20_000);
+  });
+});
+
+/**
+ * THE CAMERA SPEED ROW (Joshua, 2026-09-08: "make the joystick camera
+ * speed adjustable so slow is 1-5m per second, medium is 1-10m per
+ * second, and fast is 1-30m per second... I am moving too fast to see
+ * them").
+ *
+ * It is not a quality: it costs the machine nothing, so it has its own
+ * union, its own control and its own words. And the words carry the
+ * NUMBERS, because "Slow" on its own tells a player nothing about what
+ * they are choosing between.
+ */
+describe('SettingsPanel camera speed row', () => {
+  const rig = () => {
+    const host = document.createElement('div');
+    const store = defineStore(SETTINGS_SPEC, memoryKeyValueStore());
+    const panel = new SettingsPanel(host, { store, onBack: () => {} });
+    const select = panel.element.querySelector<HTMLSelectElement>(`[data-action="${settingAction('cameraSpeed')}"]`);
+    if (select === null) throw new Error('no camera speed control');
+    return { store, panel, select };
+  };
+
+  it('offers the three rungs, live, with their ranges in the words', () => {
+    const { select } = rig();
+    expect(select.disabled).toBe(false);
+    expect([...select.options].map((o) => o.value)).toEqual([...CAMERA_SPEED_LEVELS]);
+    const words = [...select.options].map((o) => o.textContent ?? '');
+    expect(words[0]).toContain('1 to 5 m/s');
+    expect(words[1]).toContain('1 to 10 m/s');
+    expect(words[2]).toContain('1 to 30 m/s');
+  });
+
+  it('shows the document and writes the player\'s choice straight to it', () => {
+    const { store, select } = rig();
+    expect(select.value).toBe(store.read().cameraSpeed);
+    select.value = 'slow';
+    select.dispatchEvent(new Event('change'));
+    expect(store.read().cameraSpeed).toBe('slow');
+    // And it does not disturb the two quality ladders beside it.
+    expect(store.read().textures).toBe(SETTINGS_DEFAULTS.textures);
+    expect(store.read().detail).toBe(SETTINGS_DEFAULTS.detail);
+  });
+
+  it('names a speed the camera actually flies at: every rung has a number', () => {
+    for (const level of CAMERA_SPEED_LEVELS) {
+      expect(CAMERA_SPEEDS[level], level).toBeGreaterThan(STICK_MIN_SPEED);
+    }
+    // And they are in order, so the words and the speeds agree.
+    expect(CAMERA_SPEEDS.slow).toBeLessThan(CAMERA_SPEEDS.medium);
+    expect(CAMERA_SPEEDS.medium).toBeLessThan(CAMERA_SPEEDS.fast);
   });
 });

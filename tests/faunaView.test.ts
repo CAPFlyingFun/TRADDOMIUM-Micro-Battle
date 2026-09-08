@@ -327,6 +327,49 @@ describe('the worm', () => {
     expect(lift).toBeLessThan(unitsOfMm(EARTHWORM.lengthMm) * 0.1);
   });
 
+  it('LIES ON THE GROUND on a slope, dragging no part of itself through the hill', async () => {
+    // Joshua, 2026-09-08, with the finder on: the worm is "halfway on the
+    // surface and ground like it's swimming".
+    //
+    // THE CAUSE IS THE SEEDED TRAIL. A worm gets a rig the moment it is
+    // near enough and shallow enough to draw, and `lend` seeds its whole
+    // trail as a STRAIGHT LINE of crumbs behind it AT ITS OWN HEIGHT —
+    // there is no history to use, the simulation keeps a point and not a
+    // body. The ground is not a straight line, so on any slope the far
+    // half of the body is inside the hill, and it stays there until the
+    // worm has crawled a whole body length: 150 mm at the 3 mm/s wander
+    // pace is fifty seconds, which is most of a surfacing.
+    const BASE = 100;
+    const SLOPE = 0.3;
+    // Rising towards -X, which is where the crumbs are laid: heading π/2
+    // is ahead = +X, so the body trails uphill behind the head.
+    const groundAt = (at: WorldPoint): number => BASE - at.wx * SLOPE;
+    const v = await keep(view('ultra-low', loader(), { groundAt }));
+    const w = creature('earthworm', 'w', 0, 0, { behaviour: 'surface', heading: Math.PI / 2, height: BASE });
+    v.update([w], EYE, 1 / 60);
+    v.group.updateMatrixWorld(true);
+
+    const root = v.rigs('earthworm')[0];
+    expect(root.visible).toBe(true);
+    const lift = v.anatomy('earthworm')!.chain!.lift * v.scaleOf('earthworm');
+    const body = unitsOfMm(EARTHWORM.lengthMm);
+    // NOT ONE BONE of the drawn body is under the ground beneath it, and
+    // none of it is hovering a body length over it either.
+    const names = EARTHWORM.model.chain ?? [];
+    const bones = names.map((name) => root.getObjectByName(name));
+    expect(bones.filter((b) => b !== undefined).length).toBe(names.length);
+    expect(names.length).toBeGreaterThan(2);
+    let buried = 0;
+    for (const bone of bones) {
+      const p = worldPosition(bone!);
+      const ground = groundAt(world(p.x, p.z));
+      if (p.y < ground - 1e-3) buried += 1;
+      expect(p.y, `${bone!.name} is ${(ground - p.y).toFixed(2)} units under the ground`).toBeGreaterThanOrEqual(ground - 1e-3);
+      expect(p.y).toBeLessThan(ground + lift + body * 0.25);
+    }
+    expect(buried).toBe(0);
+  });
+
   it('is hidden by DEPTH when the ground is known: within the margin of the surface it is drawn, whatever it is doing', async () => {
     const v = await keep(view('ultra-low', loader(), { groundAt: () => 10 }));
     const nosing = creature('earthworm', 'nosing', 5, 0, { behaviour: 'burrow', height: 10 - BURROW_HIDE + 0.01 });

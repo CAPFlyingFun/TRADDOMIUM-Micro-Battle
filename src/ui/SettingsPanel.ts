@@ -14,7 +14,8 @@ import { ACTION } from '../app/actions';
 import type { Store } from '../persistence/store';
 import { actionRow, actionsRow, labelledRow, namedButton, note, titledPanel } from './screen';
 import {
-  QUALITY_LEVELS, SETTINGS_LIMITS, sanitizeSettings, type Quality, type Settings,
+  CAMERA_SPEED_LEVELS, QUALITY_LEVELS, SETTINGS_LIMITS, sanitizeSettings,
+  type CameraSpeed, type Quality, type Settings,
 } from './settingsStore';
 
 export interface SettingsPanelHooks {
@@ -33,6 +34,18 @@ const QUALITY_LABEL: Readonly<Record<Quality, string>> = {
   low: 'Low',
   medium: 'Medium',
   high: 'High',
+};
+
+/**
+ * The camera-speed rungs, named by WHAT THEY DO rather than by a word
+ * that means nothing on its own: a player choosing between "Slow" and
+ * "Fast" is choosing between numbers, so the numbers are on the control.
+ * They are the tops of the ranges — every rung starts at 1 m/s.
+ */
+const CAMERA_SPEED_LABEL: Readonly<Record<CameraSpeed, string>> = {
+  slow: 'Slow — 1 to 5 m/s',
+  medium: 'Medium — 1 to 10 m/s',
+  fast: 'Fast — 1 to 30 m/s',
 };
 
 export class SettingsPanel {
@@ -131,6 +144,38 @@ export class SettingsPanel {
   private buildQuality(): void {
     this.buildLadder('textures', 'Textures', 'Sets the ocean’s texture size and filtering. Terrain is not affected yet.');
     this.buildLadder('detail', 'Detail', 'Sets how far the moving water reaches — 20 m at low, 100 m at high — and how many ripple layers it is drawn with. The sea itself still reaches the horizon.');
+    this.buildCameraSpeed();
+  }
+
+  /**
+   * HOW FAST A FULL PUSH FLIES (Joshua, 2026-09-08: "make the joystick
+   * camera speed adjustable... I am moving too fast to see them").
+   *
+   * Not a quality — it costs the machine nothing — so it is its own
+   * control with its own words, and the caption says the one thing a
+   * player cannot see from the label: that the floor does not move. A
+   * gentle push is 1 m/s at every setting; the rung is the ceiling.
+   */
+  private buildCameraSpeed(): void {
+    const doc = this.element.ownerDocument;
+    const select = doc.createElement('select');
+    select.className = 'ui-select';
+    select.dataset.action = settingAction('cameraSpeed');
+    select.setAttribute('aria-label', 'Camera speed');
+    for (const level of CAMERA_SPEED_LEVELS) {
+      const option = doc.createElement('option');
+      option.value = level;
+      option.textContent = CAMERA_SPEED_LABEL[level];
+      select.appendChild(option);
+    }
+    select.addEventListener('change', () => {
+      this.write({ ...this.current, cameraSpeed: select.value as CameraSpeed });
+    });
+    this.syncs.push((s) => {
+      select.value = s.cameraSpeed;
+    });
+    labelledRow(this.element, 'Camera speed', [select]);
+    note(this.element, 'The fastest a full push of the move stick flies. A gentle push is 1 m/s whichever you choose — this sets the top of the range, not the whole of it.');
   }
 
   private buildLadder(field: 'textures' | 'detail', label: string, caption: string): void {

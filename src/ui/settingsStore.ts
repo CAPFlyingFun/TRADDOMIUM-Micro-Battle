@@ -14,6 +14,16 @@ import type { StorageRoot } from '../persistence/StorageRoot';
 
 export type Quality = 'low' | 'medium' | 'high';
 
+/**
+ * How fast the move stick flies the camera. Its own union rather than
+ * `Quality`, because it is not a quality: nothing about it costs the
+ * machine anything, and a player who wants low textures and a fast
+ * camera is asking for two unrelated things.
+ */
+export type CameraSpeed = 'slow' | 'medium' | 'fast';
+
+export const CAMERA_SPEED_LEVELS: readonly CameraSpeed[] = ['slow', 'medium', 'fast'];
+
 export const QUALITY_LEVELS: readonly Quality[] = ['low', 'medium', 'high'];
 
 export interface Settings extends Versioned {
@@ -57,6 +67,14 @@ export interface Settings extends Versioned {
    * the stat sheet. Reader: perf/PerformanceWorldScene.
    */
   readonly finderOn: boolean;
+  /**
+   * The ceiling a full push of the move stick reaches: 5, 10 or 30 m/s
+   * (`perf/FreeFlyCamera.CAMERA_SPEEDS`). Every rung starts at the same
+   * 1 m/s, so the setting is the top of the range and not the whole of
+   * it. Joshua, 2026-09-08: "I am moving too fast to see them."
+   * Reader: perf/PerformanceWorldScene, through the Performance World.
+   */
+  readonly cameraSpeed: CameraSpeed;
 }
 
 /** Bumped when a field changes meaning; an older document reads as defaults. */
@@ -89,6 +107,12 @@ export const SETTINGS_DEFAULTS: Settings = {
   // OFF. The pins are an instrument laid over the island, not part of
   // it: nobody's first launch should open on a field of markers.
   finderOn: false,
+  // MEDIUM, 1-10 m/s. `fast` is what the camera flew at until now and is
+  // still one tap away, but it is a speed for crossing the island, and
+  // the island is no longer what there is to look at: at 30 m/s a worm
+  // is past before it is seen. This is the answer to "I am moving too
+  // fast to see them" for a player who never opens Settings.
+  cameraSpeed: 'medium',
 };
 
 /**
@@ -130,11 +154,17 @@ export function sanitizeSettings(raw: unknown, defaults: Settings = SETTINGS_DEF
     // No SETTINGS_VERSION bump: a new field with a default reads an older document as it was, plus the default.
     hudCollapsed: typeof r.hudCollapsed === 'boolean' ? r.hudCollapsed : defaults.hudCollapsed,
     finderOn: typeof r.finderOn === 'boolean' ? r.finderOn : defaults.finderOn,
+    cameraSpeed: isCameraSpeed(r.cameraSpeed) ? r.cameraSpeed : defaults.cameraSpeed,
   };
 }
 
 export function isQuality(value: unknown): value is Quality {
   return typeof value === 'string' && (QUALITY_LEVELS as readonly string[]).includes(value);
+}
+
+/** Is this one of the three camera speeds? */
+export function isCameraSpeed(value: unknown): value is CameraSpeed {
+  return typeof value === 'string' && (CAMERA_SPEED_LEVELS as readonly string[]).includes(value);
 }
 
 /** The settings store on the app's storage — what the panel edits and consumers read. */

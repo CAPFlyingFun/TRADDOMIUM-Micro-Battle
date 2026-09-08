@@ -663,6 +663,34 @@ export class FaunaView {
     }
   }
 
+  /**
+   * A DRAWN BODY LIES ON THE GROUND IT IS OVER, never through it.
+   *
+   * Joshua, 2026-09-08, with the finder on: the worm "is not digging any
+   * dirt and halfway on the surface and ground like it's swimming". Two
+   * things put it there, and this answers both. A crumb remembers the
+   * height the worm HAD when it was dropped, so a worm that has just
+   * come up still has a body length of trail at burrow depth behind it
+   * — at the wander pace that is most of a surfacing spent half buried.
+   * And a trail is a straight line of points at one height, so on any
+   * slope the far end of the body is inside the hill whatever the worm
+   * is doing.
+   *
+   * The clamp is at DRAW time, not at push time: the crumb keeps the
+   * honest record of where the body was, and the fix reaches the ones
+   * already laid rather than only the next ones. Thirteen heightfield
+   * samples per drawn worm per frame, on at most a handful of rigs.
+   *
+   * It only ever RAISES. A worm properly underground is not drawn at all
+   * (`BURROW_HIDE`), so nothing here can pull a burrowing body up to the
+   * surface — and with no ground to ask, the height stands as it is.
+   */
+  private onGround(at: WorldPoint, height: number): number {
+    if (this.groundAt === null) return height;
+    const ground = this.groundAt(at);
+    return Number.isFinite(ground) ? Math.max(height, ground) : height;
+  }
+
   private pushCrumb(trail: Trail, at: WorldPoint, height: number): void {
     trail.head = (trail.head + 1) % TRAIL_CAPACITY;
     trail.points[trail.head] = at;
@@ -689,15 +717,19 @@ export class FaunaView {
     if (chain !== null && rig.chain.length >= 2 && rig.trail !== null) {
       const trail = rig.trail;
       if (distance(c.at, trail.points[trail.head]) >= trail.spacing) this.pushCrumb(trail, c.at, c.height);
-      // The path: the body right now, then the crumbs, newest first, lifted so the belly is on the ground.
+      // The path: the body right now, then the crumbs, newest first,
+      // each lying ON the ground under it (see `onGround`) and lifted so
+      // the belly rests on it.
       const lift = chain.lift * slot.scale;
       const path = this.path;
-      path[0] = here.lx; path[1] = c.height + lift; path[2] = here.lz;
+      path[0] = here.lx; path[1] = this.onGround(c.at, c.height) + lift; path[2] = here.lz;
       let points = 1;
       for (let k = 0; k < trail.count; k += 1) {
         const i = (trail.head - k + TRAIL_CAPACITY) % TRAIL_CAPACITY;
         const l = this.toLocal(trail.points[i]);
-        path[points * 3] = l.lx; path[points * 3 + 1] = trail.heights[i] + lift; path[points * 3 + 2] = l.lz;
+        path[points * 3] = l.lx;
+        path[points * 3 + 1] = this.onGround(trail.points[i], trail.heights[i]) + lift;
+        path[points * 3 + 2] = l.lz;
         points += 1;
       }
       layChain(rig.root, rig.chain, chain, slot.scale, rig.headOffset, rig.headFrame, path, points, m, slot.bodyLength, c.phase);

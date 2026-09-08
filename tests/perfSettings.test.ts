@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 import type { AppState } from '../src/app/AppState';
 import type { AppHandle, SceneContext } from '../src/app/Scene';
 import { Input, type InputSnapshot } from '../src/input/Input';
-import { FreeFlyCamera } from '../src/perf/FreeFlyCamera';
+import { CAMERA_SPEEDS, FreeFlyCamera, STICK_MIN_SPEED, stickSpeed } from '../src/perf/FreeFlyCamera';
 import { createPerformanceWorldScene, type PerfWorldSettings } from '../src/perf/PerformanceWorldScene';
 
 const SIXTY = 1 / 60;
@@ -88,7 +88,7 @@ function rig(initial: AppState, settings: () => PerfWorldSettings) {
 
 describe('PerformanceWorldScene settings hook', () => {
   it('applies fov and HUD visibility at enter() and re-reads only when the app state changes', async () => {
-    let current: PerfWorldSettings = { fov: 90, lookSensitivity: 1, invertY: false, showFps: true, hudCollapsed: false, finderOn: false, textures: 'medium', detail: 'medium' };
+    let current: PerfWorldSettings = { fov: 90, lookSensitivity: 1, invertY: false, showFps: true, hudCollapsed: false, finderOn: false, cameraSpeed: 'fast', textures: 'medium', detail: 'medium' };
     const r = rig('loading', () => current);
     await r.scene.enter();
     expect(r.app.state).toBe('playing');
@@ -104,7 +104,7 @@ describe('PerformanceWorldScene settings hook', () => {
     expect(r.reads()).toBe(1);
 
     // The player opened the pause menu, changed settings, and came back.
-    current = { fov: 75, lookSensitivity: 2, invertY: true, showFps: false, hudCollapsed: true, finderOn: false, textures: 'medium', detail: 'medium' };
+    current = { fov: 75, lookSensitivity: 2, invertY: true, showFps: false, hudCollapsed: true, finderOn: false, cameraSpeed: 'fast', textures: 'medium', detail: 'medium' };
     r.app.requestState('paused');
     r.scene.update({ rawDt: SIXTY, simDt: 0, elapsed: 0 });
     r.app.requestState('playing');
@@ -130,5 +130,57 @@ describe('PerformanceWorldScene settings hook', () => {
     await scene.enter();
     expect((scene.camera as THREE.PerspectiveCamera).fov).toBe(60);
     expect(uiLayer.querySelector<HTMLElement>('[data-role="perf-hud"]')?.hidden).toBe(false);
+  });
+});
+
+/**
+ * THE CAMERA'S SPEED RUNG (Joshua, 2026-09-08: "make the joystick camera
+ * speed adjustable so slow is 1-5m per second, medium is 1-10m per
+ * second, and fast is 1-30m per second... I am moving too fast to see
+ * them").
+ *
+ * The rung is the CEILING a full push reaches; the floor is 1 m/s at
+ * every rung, which is `stickSpeed`'s own floor and is tested with it.
+ */
+describe('the camera speed setting', () => {
+  const withSpeed = (cameraSpeed: PerfWorldSettings['cameraSpeed']): PerfWorldSettings => ({
+    fov: 60, lookSensitivity: 1, invertY: false, showFps: true, hudCollapsed: false,
+    finderOn: false, cameraSpeed, textures: 'medium', detail: 'medium',
+  });
+
+  it('is the three speeds Joshua asked for, in world units a second', () => {
+    // The world is centimetres, so a metre a second is 100 units.
+    expect(CAMERA_SPEEDS.slow).toBe(5 * 100);
+    expect(CAMERA_SPEEDS.medium).toBe(10 * 100);
+    expect(CAMERA_SPEEDS.fast).toBe(30 * 100);
+    // The floor never moves: every rung reads "1 to n".
+    expect(STICK_MIN_SPEED).toBe(1 * 100);
+    for (const top of Object.values(CAMERA_SPEEDS)) {
+      expect(stickSpeed(0.0001, top)).toBeCloseTo(STICK_MIN_SPEED, 0);
+      expect(stickSpeed(1, top)).toBe(top);
+    }
+  });
+
+  it('flies at the rung the document names, and follows a change made in the pause menu', async () => {
+    let current = withSpeed('slow');
+    const r = rig('loading', () => current);
+    await r.scene.enter();
+    // The empty world has no terrain, so the camera is paced by `pace()`
+    // through the same path the island uses.
+    const speedOf = (): number => {
+      const text = r.hud()?.querySelector<HTMLElement>('[data-field="camera-speed"]')?.textContent ?? '';
+      return Number(/(-?[\d.]+)/.exec(text)?.[1] ?? Number.NaN);
+    };
+    for (let i = 0; i < 15; i += 1) r.scene.update({ rawDt: SIXTY, simDt: SIXTY, elapsed: 0 });
+    expect(speedOf()).toBe(CAMERA_SPEEDS.slow);
+
+    current = withSpeed('fast');
+    r.app.requestState('paused');
+    r.scene.update({ rawDt: SIXTY, simDt: 0, elapsed: 0 });
+    r.app.requestState('playing');
+    // The sheet repaints five times a second, so one frame is not enough
+    // to read the new number off it.
+    for (let i = 0; i < 15; i += 1) r.scene.update({ rawDt: SIXTY, simDt: SIXTY, elapsed: 0 });
+    expect(speedOf()).toBe(CAMERA_SPEEDS.fast);
   });
 });
