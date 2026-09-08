@@ -277,6 +277,20 @@ its own.
   pin on them, and let `creatures/finder.ts` say where a camera has to
   stand to see one. It is off by default and every probe shot but
   `probe:finder`'s is taken with it off.
+- **The ground MOVES, so anything remembered against it is remembered as
+  a DEPTH** (the worm's L, 2026-09-08). `Heightfield.heightAt` answers
+  from the coarse lattice until an HD tile lands under the camera and
+  from the tile after; the two agree at every coarse sample and differ
+  everywhere between, which is metres in a gorge. A renderer that stored
+  an absolute height once and clamped it to the ground later is
+  therefore holding a number that goes stale, and a one-sided clamp
+  strands it: `FaunaView`'s worm trail kept each crumb's height and
+  raised it to the ground, so a ground that DROPPED left the body hanging
+  where the old lattice had been and drew all 15 cm of worm standing
+  vertically out of the hill. Store the depth and resolve the height from
+  the current ground every frame — then a tile landing moves the body
+  with the world, which is what it is for. The same rule is why the
+  objects re-read their feet when a tile lands (`flora/WorldObjects.ts`).
 - A client-side PIN is a convenience, not security.
 - Every file in `scripts/` is wired to a `package.json` script or listed
   in `scripts/MANUAL.md`.
