@@ -254,10 +254,22 @@ export const EARTHWORM: CreatureSpecies = Object.freeze({
   pace: Object.freeze({
     // BIOLOGICAL SHAPE: Quillin (1999, J. Exp. Biol.) measured L. terrestris
     // crawling at roughly a tenth of a body length a second; 150 mm × 0.1
-    // is 15 mm/s on the surface. Underground is slower and is what the
-    // player mostly meets, so the wander pace is TCS's 3 mm/s (GAME TUNING)
-    // and the flee pace the measured surface crawl.
-    wanderMmS: 3, fleeMmS: 15, turnRadS: 1.2,
+    // is 15 mm/s on the surface, and that is the flee pace.
+    //
+    // THE WANDER PACE WAS NEVER THE BIOLOGY. It was TCS's 3 mm/s, a five-
+    // fold discount off the measured crawl applied for "underground is
+    // slower" with no source for the factor — and five is a lot to invent.
+    // Measured over ten simulated minutes with forty worms, a worm burrows
+    // 61.5% of the time and rests, surfaces or feeds for the other 38.5%,
+    // so 3 mm/s came out as 1.85 mm/s of mean travel: EIGHTY-ONE SECONDS to
+    // move its own body length. That is a correct ecology nobody can see,
+    // which is the same complaint that produced the finder.
+    //
+    // GAME TUNING, and honestly labelled as such: two thirds of the measured
+    // crawl. Burrowing IS slower than crawling on the surface — soil has to
+    // be pushed through — but the fraction is chosen for legibility at ant
+    // scale, not measured. It reads as about a body length every 24 seconds.
+    wanderMmS: 10, fleeMmS: 15, turnRadS: 1.2,
   }),
   flight: null,
   burrow: Object.freeze({
