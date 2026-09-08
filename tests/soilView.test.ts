@@ -1,11 +1,30 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
-import { local, world } from '../src/world/coords';
+import { distanceSquared, local, world } from '../src/world/coords';
 import { SparseSoil } from '../src/world/SparseSoil';
+import { soilTileCentre } from '../src/world/soilTypes';
 import { SoilView } from '../src/terrain/SoilView';
 
 const mesh = (view: SoilView) => view.group.children as THREE.Mesh<THREE.BufferGeometry, THREE.MeshLambertMaterial>[];
-const settle = (view: SoilView, depth = 0, revision = 0) => { for (let i = 0; i < 20; i++) view.update(world(0, 0), depth, revision); };
+/**
+ * A clock that charges a stated cost to every column built, so what the
+ * 4 ms budget affords is the same number on a fast machine and a slow
+ * one. Two milliseconds a column is two columns a frame.
+ */
+const clock = (perColumn: number) => costing(perColumn);
+/**
+ * The same clock with a stated cost for each column in turn, the last
+ * one standing for every column after it.
+ */
+const costing = (...perColumn: number[]) => {
+  let elapsed = 0, column = 0;
+  return (): number => {
+    const at = elapsed;
+    elapsed += perColumn[Math.min(column++, perColumn.length - 1)];
+    return at;
+  };
+};
+const settle = (view: SoilView, depth = 1, revision = 0) => { for (let i = 0; i < 20; i++) view.update(world(0, 0), depth, revision); };
 function dig(soil: SparseSoil, x: number, y = 9) {
   const p = { at: world(x, 1.6), height: y };
   soil.dig('burrower', p, p, .2);
@@ -14,11 +33,12 @@ describe('bounded soil residency', () => {
   it('reuses unchanged buffers, repositions at the render boundary and uses scene-lit brown material', () => {
     const soil = new SparseSoil({ heightAt: () => 10 }); dig(soil, 1.6);
     let offset = 0;
-    const view = new SoilView({ soil, toLocal: at => local(at.wx - offset, at.wz) });
-    view.update(world(0, 0), 0, 0);
-    const first = mesh(view)[0], positions = first.geometry.getAttribute('position');
-    offset = 1024; view.update(world(0, 0), 0, 0);
-    expect(mesh(view)[0]).toBe(first);
+    const view = new SoilView({ soil, toLocal: at => local(at.wx - offset, at.wz), now: clock(2) });
+    settle(view, 1);
+    const first = mesh(view).find(m => m.name === 'soil:0,0')!;
+    const positions = first.geometry.getAttribute('position');
+    offset = 1024; view.update(world(0, 0), 1, 0);
+    expect(mesh(view).find(m => m.name === 'soil:0,0')).toBe(first);
     expect(first.geometry.getAttribute('position')).toBe(positions);
     expect(first.position.x).toBe(-1024);
     expect(first.material).toBeInstanceOf(THREE.MeshLambertMaterial);
@@ -27,9 +47,9 @@ describe('bounded soil residency', () => {
     expect(view.cost.pending).toBe(0);
     view.dispose();
   });
-  it('builds at most two complete columns per update and bounds a cutaway to a stable six-by-six rectangle', () => {
+  it('spends its stated budget on complete columns and bounds a cutaway to a stable six-by-six rectangle', () => {
     const soil = new SparseSoil({ heightAt: () => 10 });
-    const view = new SoilView({ soil });
+    const view = new SoilView({ soil, now: clock(2) });
     view.update(world(0, 0), 1, 0);
     expect(view.readyTiles).toHaveLength(2);
     expect(view.cost.pending).toBe(34);
@@ -45,7 +65,7 @@ describe('bounded soil residency', () => {
   });
   it('immediately retires obsolete depth/survey clipping and disposes replaced and evicted GPU buffers', () => {
     const soil = new SparseSoil({ heightAt: () => 10 });
-    const view = new SoilView({ soil }); settle(view, 1);
+    const view = new SoilView({ soil, now: clock(2) }); settle(view, 1);
     let disposed = 0;
     mesh(view).forEach(m => m.geometry.addEventListener('dispose', () => { disposed++; }));
     view.update(world(0, 0), 2, 0);
@@ -66,15 +86,109 @@ describe('bounded soil residency', () => {
   });
   it('rebuilds dirty columns only and never clips a skipped incomplete column', () => {
     const soil = new SparseSoil({ heightAt: () => 10 }); dig(soil, 1.6); dig(soil, 4.8);
-    const view = new SoilView({ soil }); settle(view);
-    const stable = mesh(view).find(m => m.position.x > 3)!;
-    const dirty = mesh(view).find(m => m.position.x === 0)!;
+    const view = new SoilView({ soil, now: clock(2) }); settle(view, 1);
+    const stable = mesh(view).find(m => m.name === 'soil:1,0')!;
+    const dirty = mesh(view).find(m => m.name === 'soil:0,0')!;
     let disposed = false; dirty.geometry.addEventListener('dispose', () => { disposed = true; });
-    dig(soil, 1.6, 8); view.update(world(0, 0), 0, 0);
+    dig(soil, 1.6, 8); view.update(world(0, 0), 1, 0);
     expect(mesh(view)).toContain(stable); expect(disposed).toBe(true);
-    dig(soil, 1.6, -20); view.update(world(0, 0), 0, 0);
-    expect(view.readyTiles.map(t => t.tx)).toEqual([1]);
+    dig(soil, 1.6, -20); view.update(world(0, 0), 1, 0);
+    expect(view.readyTiles.some(t => t.tx === 0 && t.tz === 0)).toBe(false);
+    expect(view.readyTiles).toHaveLength(35);
     expect(view.cost.pending).toBe(0);
+    view.dispose();
+  });
+});
+
+describe('the shut section', () => {
+  it('meshes nothing, holds nothing and reads no clock while SOIL is closed', () => {
+    const soil = new SparseSoil({ heightAt: () => 10 }); dig(soil, 1.6);
+    let reads = 0;
+    const spend = clock(2);
+    const view = new SoilView({ soil, now: () => { reads++; return spend(); } });
+    for (let frame = 0; frame < 20; frame++) view.update(world(0, 0), 0, 0);
+    // Not one column was even considered: the budget's clock is read
+    // once a frame, and only by a build pass that never ran.
+    expect(reads).toBe(0);
+    expect(view.group.children).toHaveLength(0);
+    expect(view.readyTiles).toHaveLength(0);
+    expect(view.cost).toEqual({ tiles: 0, triangles: 0, pending: 0 });
+    // The same soil under the same observer does mesh once it is opened,
+    // so the silence above is the shut window and not an empty world.
+    settle(view, 1);
+    expect(view.readyTiles).toHaveLength(36);
+    expect(view.cost.triangles).toBeGreaterThan(0);
+    expect(reads).toBeGreaterThan(0);
+    view.dispose();
+  });
+  it('releases every held column on the frame the window closes', () => {
+    const soil = new SparseSoil({ heightAt: () => 10 }); dig(soil, 1.6);
+    const view = new SoilView({ soil, now: clock(2) }); settle(view, 1);
+    let disposed = 0;
+    mesh(view).forEach(m => m.geometry.addEventListener('dispose', () => { disposed++; }));
+    view.update(world(0, 0), 0, 0);
+    expect(disposed).toBe(36);
+    expect(view.group.children).toHaveLength(0);
+    expect(view.readyTiles).toHaveLength(0);
+    expect(view.cost).toEqual({ tiles: 0, triangles: 0, pending: 0 });
+    // Reopening rebuilds from nothing rather than resurrecting a buffer.
+    settle(view, 1);
+    expect(view.readyTiles).toHaveLength(36);
+    expect(view.group.children).toHaveLength(36);
+    view.dispose();
+  });
+});
+
+describe('the frame budget', () => {
+  it('stops when the budget is gone and delivers the rest on later frames, however dear one column is', () => {
+    const soil = new SparseSoil({ heightAt: () => 10 });
+    // Four cheap columns fit inside the 4 ms budget; the fifth does not.
+    const cheap = new SoilView({ soil, now: clock(1) });
+    cheap.update(world(0, 0), 1, 0);
+    expect(cheap.readyTiles).toHaveLength(4);
+    expect(cheap.cost.pending).toBe(32);
+    cheap.dispose();
+    // One column here overruns the whole frame's budget by itself. It
+    // still builds — the alternative is a window that never arrives —
+    // and it is the ONLY one that frame.
+    const dear = new SoilView({ soil, now: clock(9) });
+    dear.update(world(0, 0), 1, 0);
+    expect(dear.readyTiles).toHaveLength(1);
+    expect(dear.cost.pending).toBe(35);
+    dear.update(world(0, 0), 1, 0);
+    expect(dear.readyTiles).toHaveLength(2);
+    for (let frame = 0; frame < 34; frame++) dear.update(world(0, 0), 1, 0);
+    expect(dear.readyTiles).toHaveLength(36);
+    expect(dear.cost.pending).toBe(0);
+    dear.dispose();
+  });
+  it('does not let a cheap column drag a dear one into the same frame', () => {
+    const soil = new SparseSoil({ heightAt: () => 10 });
+    // Three milliseconds leaves a millisecond of the budget unspent, and
+    // the column after it costs a tenth of a second. Starting it because
+    // the budget was not quite gone is the dropped frame this guards.
+    const view = new SoilView({ soil, now: costing(3, 150) });
+    view.update(world(0, 0), 1, 0);
+    expect(view.readyTiles).toHaveLength(1);
+    view.update(world(0, 0), 1, 0);
+    expect(view.readyTiles).toHaveLength(2);
+    view.dispose();
+  });
+  it('builds the columns nearest the observer first', () => {
+    const soil = new SparseSoil({ heightAt: () => 10 });
+    const focus = soilTileCentre({ tx: 0, tz: 0 });
+    const view = new SoilView({ soil, now: clock(2) });
+    const range = (tile: { tx: number; tz: number }): number => distanceSquared(soilTileCentre(tile), focus);
+    for (let frame = 0; frame < 18; frame++) {
+      view.update(focus, 1, 0);
+      const built = new Set(view.readyTiles.map(t => `${t.tx},${t.tz}`));
+      let nearestUnbuilt = Infinity;
+      for (let tz = -3; tz < 3; tz++) for (let tx = -3; tx < 3; tx++) {
+        if (!built.has(`${tx},${tz}`)) nearestUnbuilt = Math.min(nearestUnbuilt, range({ tx, tz }));
+      }
+      for (const tile of view.readyTiles) expect(range(tile)).toBeLessThanOrEqual(nearestUnbuilt);
+    }
+    expect(view.readyTiles).toHaveLength(36);
     view.dispose();
   });
 });
@@ -82,7 +196,7 @@ describe('bounded soil residency', () => {
 describe('moving cutaway rim', () => {
   it('retires overlapping tiles with changed rim roles before clipping and reuses unchanged interior geometry', () => {
     const soil = new SparseSoil({ heightAt: () => 10 });
-    const view = new SoilView({ soil }); settle(view, 1.2);
+    const view = new SoilView({ soil, now: clock(2) }); settle(view, 1.2);
     const byName = (name: string) => mesh(view).find(m => m.name === `soil:${name}`)!;
     const interior = byName('0,0'), oldEast = byName('2,0'), nextWest = byName('-2,0');
     let disposed = 0;
@@ -113,9 +227,9 @@ describe('moving cutaway rim', () => {
 });
 
 describe('the selected patch frontier', () => {
-  it('bridges exposed edges only and rebuilds frontier roles when an adjacent edited tile enters or leaves', () => {
+  it('bridges the exposed window edge only and rebuilds frontier roles when the window moves', () => {
     const soil = new SparseSoil({ heightAt: () => 10 }); dig(soil, 1.6);
-    const view = new SoilView({ soil, drawnHeightAt: () => 10.6 });
+    const view = new SoilView({ soil, drawnHeightAt: () => 10.6, now: clock(2) });
     const atEdge = (m: THREE.Mesh, x: number): number => {
       const positions = m.geometry.getAttribute('position');
       let max = -Infinity;
@@ -124,21 +238,21 @@ describe('the selected patch frontier', () => {
       }
       return max;
     };
-    view.update(world(0, 0), 0, 0);
-    const only = mesh(view)[0];
-    expect(atEdge(only, 3.2)).toBeCloseTo(10.6, 5);
-    let replaced = false; only.geometry.addEventListener('dispose', () => { replaced = true; });
-    dig(soil, 4.8); view.update(world(0, 0), 0, 0);
+    const byName = (name: string) => mesh(view).find(m => m.name === `soil:${name}`)!;
+    settle(view, 1.2);
+    // The window's east column meets coarse terrain and bridges to the
+    // drawn sheet; its neighbour inland shares that edge and must not
+    // grow a fence through the continuous cut surface.
+    const oldEast = byName('2,0');
+    expect(atEdge(oldEast, 3.2)).toBeCloseTo(10.6, 5);
+    expect(atEdge(byName('0,0'), 3.2)).toBeCloseTo(8.8, 5);
+    let replaced = false; oldEast.geometry.addEventListener('dispose', () => { replaced = true; });
+    view.update(world(3.3, 0), 1.2, 0);
     expect(replaced).toBe(true);
-    const west = mesh(view).find(m => m.name === 'soil:0,0')!;
-    const east = mesh(view).find(m => m.name === 'soil:1,0')!;
-    expect(atEdge(west, 3.2)).toBeCloseTo(10, 5);
-    expect(atEdge(east, 0)).toBeCloseTo(10, 5);
-    let frontierChanged = false; east.geometry.addEventListener('dispose', () => { frontierChanged = true; });
-    view.update(world(28.3, 0), 0, 0);
-    expect(frontierChanged).toBe(true);
-    expect(view.readyTiles.map(t => t.tx)).toEqual([1]);
-    expect(atEdge(mesh(view)[0], 0)).toBeCloseTo(10.6, 5);
+    for (let i = 0; i < 20; i++) view.update(world(3.3, 0), 1.2, 0);
+    expect(view.readyTiles).toHaveLength(36);
+    expect(atEdge(byName('2,0'), 3.2)).toBeCloseTo(8.8, 5);
+    expect(atEdge(byName('3,0'), 3.2)).toBeCloseTo(10.6, 5);
     view.dispose();
   });
 });
@@ -146,7 +260,7 @@ describe('the selected patch frontier', () => {
 describe('the retained coarse column inside a voxel window', () => {
   it('bridges to a known skipped neighbor after the queue settles and retires obsolete neighbors before clipping', () => {
     const soil = new SparseSoil({ heightAt: () => 10 });
-    const view = new SoilView({ soil, drawnHeightAt: () => 10 });
+    const view = new SoilView({ soil, drawnHeightAt: () => 10, now: clock(2) });
     settle(view, 1);
     const oldNeighbor = mesh(view).find(m => m.name === 'soil:1,0')!;
     let disposed = false; oldNeighbor.geometry.addEventListener('dispose', () => { disposed = true; });

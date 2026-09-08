@@ -9,6 +9,9 @@
  *   everything else near is an impostor, never past the cap; nothing
  *     far is drawn
  *   a burrowed worm is not drawn; a surfaced one lies on the ground
+ *   the soil cutaway's reveal is the ANIMAL's, not its nose tile's: a
+ *     ceiling that flips every frame moves nothing, hides nothing and
+ *     never lays the crawled trail straight again
  *   an airborne fly is drawn at its height, wings beating; a landed one
  *     folds them and stands still
  *   a walking creature's legs swing; the worm's chain follows its trail
@@ -33,10 +36,12 @@ import {
   type Behaviour, type CreatureId, type CreatureState, type Tier,
 } from '../src/creatures';
 import {
-  BURROW_HIDE, CRUMBS_PER_LENGTH, FaunaView, HYSTERESIS, LOOK, POOL_SIZES, SPINE_TOLERANCE, impostorCapFor, poolSizeFor,
+  BODY_SAMPLES, BURROW_HIDE, BURROW_KEEP, CRUMBS_PER_LENGTH, FaunaView, HYSTERESIS, LOOK, POOL_SIZES, REVEAL_HOLD,
+  SPINE_TOLERANCE, impostorCapFor, poolSizeFor,
 } from '../src/fauna/FaunaView';
 import { WING_FLAP } from '../src/fauna/motion';
 import { local, world, type LocalPoint, type WorldPoint } from '../src/world/coords';
+import { SOIL_TILE } from '../src/world/soilTypes';
 import { setOrigin, toLocal } from '../src/world/origin';
 import { leggedRig, wormRig } from './faunaFixtures';
 
@@ -519,23 +524,18 @@ describe('the worm', () => {
       expect(Math.abs(d.z)).toBeLessThan(1e-3);
       expect(Math.abs(d.y)).toBeLessThan(1e-3);
     }
-    // The tail is one drawn body behind the head: the wave stretches
-    // some segments and shortens others, and a whole number of waves
-    // along the body means the sum is the rest length.
+    // The tail is one drawn body behind the head, and every segment is
+    // its OWN rest length: the stations are the running totals of the
+    // rest pose and nothing else, so along a straight walk no bone is
+    // anywhere but where its bone lengths put it. Nothing stretches —
+    // `tests/faunaMotion.test.ts` pins the rule itself.
     const drawn = v.anatomy('earthworm')!.spine * v.scaleOf('earthworm');
     expect(here.lx - points[points.length - 1].x).toBeCloseTo(drawn, 3);
-    // And the peristalsis stretched some segments and shortened others while it walked.
     const lengths = v.anatomy('earthworm')!.chain!.lengths;
-    let stretched = 0;
-    let shortened = 0;
     for (let i = 1; i < points.length; i += 1) {
       const rest = lengths[i - 1] * v.scaleOf('earthworm');
-      const now = points[i].distanceTo(points[i - 1]);
-      if (now > rest * 1.02) stretched += 1;
-      if (now < rest * 0.98) shortened += 1;
+      expect(points[i].distanceTo(points[i - 1]) / rest, `segment ${i} is its rest length`).toBeCloseTo(1, 6);
     }
-    expect(stretched).toBeGreaterThan(0);
-    expect(shortened).toBeGreaterThan(0);
   });
 
   it('bends along a turn: after a corner the head points the new way and the tail still lies along the old', async () => {
@@ -582,6 +582,193 @@ describe('the worm', () => {
     expect(headAfter.z).toBeCloseTo(headBefore.z, 6);
     expect(tailAfter.x).toBeCloseTo(tailBefore.x - 1024, 3);
     expect(tailAfter.z).toBeCloseTo(tailBefore.z, 6);
+  });
+
+  it('DECIDES THE REVEAL ONCE FOR THE WHOLE BODY: a ceiling that flips every frame moves nothing and hides nothing', async () => {
+    // Joshua, 2026-09-08, from the phone, on the soil cutaway: it "still
+    // randomly throws the worm above and below ground", and "for a
+    // moment saw the worm rotate around like a straight log".
+    //
+    // THE CUTAWAY IS MESHED A TILE AT A TIME, and a soil tile is 3.2
+    // units — a fifth of this animal. The ready set grows two tiles a
+    // frame and shrinks as the section moves, so the point under a
+    // worm's head answers "the roof is off here" one frame and "it is
+    // not" the next. Taken from the HEAD and applied to every crumb of
+    // the body, that one boolean moved the whole animal by the belly
+    // lift and the depth clamp, and hid it on the same flip — and a
+    // hidden animal loses its rig, while a rig lent again lays its trail
+    // STRAIGHT along the current heading, which is the log.
+    //
+    // Here the ceiling flips every single frame, which is the worst the
+    // tiles can do, and the drawn body must not notice.
+    const GROUND = 100;
+    const DEPTH = 1.2;
+    let open = true;
+    const v = await keep(view('ultra-low', loader(), {
+      groundAt: () => GROUND,
+      ceilingAt: () => (open ? GROUND - 20 : GROUND),
+    }));
+    const w = creature('earthworm', 'w', 0, 0, { behaviour: 'burrow', heading: Math.PI / 2, height: GROUND - DEPTH });
+    const names = EARTHWORM.model.chain ?? [];
+    const extent = (): { high: number; low: number } => {
+      v.group.updateMatrixWorld(true);
+      const root = v.rigs('earthworm')[0];
+      let high = -Infinity;
+      let low = Infinity;
+      for (const name of names) {
+        const p = worldPosition(root.getObjectByName(name)!);
+        if (p.y > high) high = p.y;
+        if (p.y < low) low = p.y;
+      }
+      return { high, low };
+    };
+    const seen: { high: number; low: number }[] = [];
+    // Twice the hold, so this pins that an alternating fact never
+    // accumulates a run rather than that it is merely slow to be
+    // believed.
+    for (let f = 0; f < REVEAL_HOLD * 2; f += 1) {
+      v.update([w], EYE, 1 / 60);
+      expect(v.cost.rigsLent.earthworm, `frame ${f}`).toBe(1);
+      expect(v.holders('earthworm'), `frame ${f}`).toEqual(['w']);
+      expect(v.rigs('earthworm')[0].visible, `frame ${f}`).toBe(true);
+      seen.push(extent());
+      open = !open;
+    }
+    const high = seen.map((e) => e.high);
+    const low = seen.map((e) => e.low);
+    expect(Math.max(...high) - Math.min(...high)).toBeLessThan(1e-9);
+    expect(Math.max(...low) - Math.min(...low)).toBeLessThan(1e-9);
+    // And it is drawn IN ITS BURROW throughout — at its own height, not
+    // clamped up onto the surface and lifted by the belly radius, which
+    // is the jump the flip used to make.
+    expect(high[0]).toBeCloseTo(GROUND - DEPTH, 6);
+    expect(w.height).toBe(GROUND - DEPTH);
+  });
+
+  it('ASKS THE WHOLE BODY, NOT THE NOSE: an unmeshed tile under the head does not shut the reveal, nor one open tile open it', async () => {
+    const GROUND = 100;
+    const DEPTH = 1.2;
+    // Heading π/2 is ahead = +X, so the body trails back along −X and
+    // the five samples land at 0, −3.75, −7.5, −11.25 and −15 — a sample
+    // every 1.2 soil tiles.
+    const head = (at: WorldPoint): boolean => at.wx > -SOIL_TILE;
+    const bodyOpen = await keep(view('ultra-low', loader(), {
+      groundAt: () => GROUND,
+      ceilingAt: (at) => (head(at) ? GROUND : GROUND - 20),
+    }));
+    const w = creature('earthworm', 'w', 0, 0, { behaviour: 'burrow', heading: Math.PI / 2, height: GROUND - DEPTH });
+    bodyOpen.update([w], EYE, 1 / 60);
+    expect(bodyOpen.cost.rigsLent.earthworm).toBe(1);
+    bodyOpen.group.updateMatrixWorld(true);
+    const names = EARTHWORM.model.chain ?? [];
+    for (const name of names) {
+      const p = worldPosition(bodyOpen.rigs('earthworm')[0].getObjectByName(name)!);
+      expect(p.y, name).toBeCloseTo(GROUND - DEPTH, 6);
+    }
+    // The mirror: the roof off under the nose alone is one sample in
+    // five, which is not a cutaway over this body.
+    const noseOnly = await keep(view('ultra-low', loader(), {
+      groundAt: () => GROUND,
+      ceilingAt: (at) => (head(at) ? GROUND - 20 : GROUND),
+    }));
+    noseOnly.update([w], EYE, 1 / 60);
+    expect(noseOnly.cost.rigsLent.earthworm).toBe(0);
+    expect(noseOnly.cost.impostors.earthworm).toBe(0);
+    expect(BODY_SAMPLES).toBeGreaterThan(2);
+  });
+
+  it('SHUTS when the cutaway genuinely goes — after the hold, and not before', async () => {
+    const GROUND = 100;
+    let open = true;
+    const v = await keep(view('ultra-low', loader(), {
+      groundAt: () => GROUND,
+      ceilingAt: () => (open ? GROUND - 20 : GROUND),
+    }));
+    const w = creature('earthworm', 'w', 0, 0, { behaviour: 'burrow', heading: Math.PI / 2, height: GROUND - 1.2 });
+    v.update([w], EYE, 1 / 60);
+    expect(v.cost.rigsLent.earthworm).toBe(1);
+    // The section is closed and stays closed. The body is held for the
+    // hold — nothing is urgent about hiding a worm — and then it goes.
+    open = false;
+    for (let f = 1; f < REVEAL_HOLD; f += 1) {
+      v.update([w], EYE, 1 / 60);
+      expect(v.cost.rigsLent.earthworm, `frame ${f}`).toBe(1);
+    }
+    v.update([w], EYE, 1 / 60);
+    expect(v.cost.rigsLent.earthworm).toBe(0);
+    expect(v.cost.impostors.earthworm).toBe(0);
+    // And it comes back the frame the roof comes off, without waiting.
+    open = true;
+    v.update([w], EYE, 1 / 60);
+    expect(v.cost.rigsLent.earthworm).toBe(1);
+  });
+
+  it('KEEPS A DRAWN BURROWER DRAWN across the depth line, and hides one first met below it', async () => {
+    // The rig pool keeps a rig with a margin; a body keeps its reveal
+    // the same way. A worm nosing about at the surface sits on the line
+    // for many seconds, and a line with no band is a line to blink on.
+    const v = await keep(view('ultra-low', loader(), { groundAt: () => 10 }));
+    const w = creature('earthworm', 'w', 5, 0, { behaviour: 'burrow', height: 10 - BURROW_HIDE + 0.01 });
+    v.update([w], EYE, 1 / 60);
+    expect(v.holders('earthworm')).toEqual(['w']);
+    // Past the line, still within the margin: it does not blink out.
+    w.height = 10 - BURROW_HIDE * BURROW_KEEP + 0.01;
+    v.update([w], EYE, 1 / 60);
+    expect(v.holders('earthworm')).toEqual(['w']);
+    // Past the margin it goes, and it does not come back until it is
+    // above the line itself rather than merely above the margin.
+    w.height = 10 - BURROW_HIDE * BURROW_KEEP - 0.01;
+    v.update([w], EYE, 1 / 60);
+    expect(v.cost.rigsLent.earthworm).toBe(0);
+    w.height = 10 - BURROW_HIDE - 0.01;
+    v.update([w], EYE, 1 / 60);
+    expect(v.cost.rigsLent.earthworm).toBe(0);
+    w.height = 10 - BURROW_HIDE + 0.01;
+    v.update([w], EYE, 1 / 60);
+    expect(v.cost.rigsLent.earthworm).toBe(1);
+  });
+
+  it('NEVER LAYS THE TRAIL STRAIGHT AGAIN while the ceiling chatters: the body keeps the corner it crawled', async () => {
+    // The log. A blink costs the animal its rig, and `lend` seeds a
+    // straight trail along the current heading because there is no
+    // history to use — so a body that blinks is a body redrawn as a
+    // stick pointing wherever the head happens to face, over and over.
+    // With the reveal decided for the whole animal the rig is never
+    // released, and the record of the crawl survives.
+    const GROUND = 100;
+    let open = true;
+    const v = await keep(view('ultra-low', loader(), {
+      groundAt: () => GROUND,
+      ceilingAt: () => (open ? GROUND - 20 : GROUND),
+    }));
+    const body = unitsOfMm(EARTHWORM.lengthMm);
+    const w = creature('earthworm', 'w', 0, 0, { behaviour: 'burrow', heading: Math.PI / 2, height: GROUND - 1.2 });
+    // A body length and a half up +X, then the corner, then half a body
+    // up +Z, with the ceiling flipping every frame throughout.
+    for (let f = 0; f < 150; f += 1) {
+      w.at = world(w.at.wx + body / 100, w.at.wz);
+      v.update([w], EYE, 1 / 60);
+      open = !open;
+    }
+    w.heading = 0;
+    for (let f = 0; f < 60; f += 1) {
+      w.at = world(w.at.wx, w.at.wz + body / 100);
+      v.update([w], EYE, 1 / 60);
+      open = !open;
+    }
+    expect(v.holders('earthworm')).toEqual(['w']);
+    v.group.updateMatrixWorld(true);
+    const root = v.rigs('earthworm')[0];
+    const names = EARTHWORM.model.chain ?? [];
+    const nose = worldPosition(root.getObjectByName(names[0])!);
+    const here = toLocal(w.at);
+    expect(nose.x).toBeCloseTo(here.lx, 4);
+    expect(nose.z).toBeCloseTo(here.lz, 4);
+    // A re-seeded trail lies straight behind the head along −Z, so every
+    // bone would share the head's x. The crawled one turns the corner.
+    let spread = 0;
+    for (const name of names) spread = Math.max(spread, Math.abs(worldPosition(root.getObjectByName(name)!).x - nose.x));
+    expect(spread).toBeGreaterThan(body * 0.2);
   });
 });
 

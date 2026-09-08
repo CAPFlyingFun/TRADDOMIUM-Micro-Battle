@@ -10,22 +10,45 @@
  *
  * A worm is a tube laid along where it has been. `layChain` takes the
  * trail the view keeps (newest point first, ALREADY in render space)
- * and seats each bone its own length behind the last, by arc length,
- * the way TCS's `WormBody` does and for the reason it gives: a rigid
- * body along its heading would have most of a 150 mm animal outside
- * the hole it dug. Two things are done differently here. The ROOT bone
- * is given a full frame — forward along the path, belly down — rather
- * than the shortest arc from its rest direction, so the skin does not
- * roll about the body as the animal turns; the bones below it are
- * still shortest-arc in their parent's frame, where the bends are
- * small and roll-free. And PERISTALSIS is a wave of segment LENGTHS:
- * each child's rest offset is scaled along its own axis, so the wave
- * passes tail-ward as the worm advances (retrograde — Quillin 1999,
- * J. Exp. Biol.: the contraction wave travels backward relative to the
- * body while the body goes forward; the amplitude and wavelength are
- * GAME TUNING). Lengths, not bone scales: a non-uniform scale on a
- * rotated hierarchy shears the children, and a chain of sixteen
- * compounding scales drifts.
+ * and seats each bone its own REST length behind the last, by arc
+ * length, the way TCS's `WormBody` does and for the reason it gives: a
+ * rigid body along its heading would have most of a 150 mm animal
+ * outside the hole it dug. Two things are done differently here. The
+ * ROOT bone is given a full frame — forward along the path, belly down
+ * — rather than the shortest arc from its rest direction, so the skin
+ * does not roll about the body as the animal turns; the bones below it
+ * are still shortest-arc in their parent's frame, where the bends are
+ * small and roll-free.
+ *
+ * ─── the stations are the rest lengths, and nothing else ────────────
+ *
+ * Joshua, 2026-09-08, from the device: "It needs to be like TCS and act
+ * like the snake game where the head is the first bone and as it moves,
+ * the next bone follows the same exact path." So bone i is seated
+ * exactly `sum(lengths[0..i−1]) × rootScale` behind the head, measured
+ * along the path, every frame, for ever. The running totals are built
+ * ONCE per chain (`reachOf`, TCS's `WormBody.measureChain` and its
+ * reason verbatim: a skeleton's bone lengths do not change, only its
+ * angles do), so the only thing that can move a bone is the path moving
+ * under it — the head advances, and every bone behind it arrives at the
+ * station the one in front has just left.
+ *
+ * PERISTALSIS IS GONE, and that is worth a paragraph rather than a
+ * hole. It used to scale each segment by a retrograde wave (Quillin
+ * 1999, J. Exp. Biol.) and then seat the bones at the STRETCHED
+ * lengths, which made the wave's amplitude part of the station: every
+ * bone slid a few millimetres back and forth ALONG the path as the wave
+ * passed. A whole number of wavelengths kept the total exact, so the
+ * animal never grew — but no bone held station, and a body whose bones
+ * shuffle along the path is not a body following the head. The wave's
+ * two jobs cannot be separated in a chain: a segment's drawn length IS
+ * the distance from one joint to the next, so a wave in it moves a
+ * joint along the path whether it is applied to the station or to the
+ * child's offset, and the third way — scaling the bone — was rejected
+ * long before this, because a non-uniform scale on a rotated hierarchy
+ * shears the children and sixteen compounding scales drift. Asked for
+ * the snake, the squirm is what the snake costs. Do not put it back in
+ * any of those three forms.
  *
  * ─── legs: a tripod driven by distance ──────────────────────────────
  *
@@ -75,21 +98,6 @@ export const AIR_EASE_S = 0.12;
 export const ANTENNA_SWAY = 0.15;
 export const ANTENNA_RATE = 0.7;
 
-/**
- * Peristalsis: segment stretch amplitude, wavelengths along the body,
- * waves passed per body length travelled. GAME TUNING. A WHOLE number
- * of wavelengths, on purpose: the sixteen segment factors then sum to
- * exactly one, so the body's length is conserved whatever the wave's
- * phase — a fractional count would breathe the whole animal longer and
- * shorter as it crawled.
- */
-export const PERISTALSIS_AMPLITUDE = 0.12;
-export const PERISTALSIS_WAVES = 2;
-export const PERISTALSIS_PER_LENGTH = 2;
-/** A resting worm's faint pulse, as a fraction of the walking amplitude, and its rate. GAME TUNING. */
-export const PERISTALSIS_IDLE = 0.25;
-export const PERISTALSIS_IDLE_RATE = 0.4;
-
 /** Body attitude in flight: pitch per unit of climb-over-speed, bank per radian a second of turn, and the limits. GAME TUNING. */
 export const PITCH_GAIN = 0.8;
 export const PITCH_MAX = 0.6;
@@ -111,7 +119,7 @@ export const MOVING_EASE_S = 0.1;
  * deltas the view measures; never written by the simulation.
  */
 export interface RigMotion {
-  /** World units travelled while lent — what drives the gait and the peristalsis. */
+  /** World units travelled while lent — what drives the gait. */
   gone: number;
   /** Seconds lent — what drives the idle clocks and the wingbeat. */
   alive: number;
@@ -277,13 +285,55 @@ function walkPath(path: Float64Array, points: number, dist: number, cursor: { i:
 const _cursor = { i: 0, left: 0 };
 
 /**
+ * HOW FAR EACH BONE SITS BEHIND THE HEAD, ALONG THE BODY, in rig units:
+ * `reach[i]` is the running total of the rest lengths in front of bone
+ * i, and `reach[0]` is zero because the head is on `path[0]`.
+ *
+ * Built once per chain and kept for as long as the spec is, TCS's
+ * reason unchanged: a skeleton's bone lengths do not change, only its
+ * angles do, so re-summing sixteen of them for every worm on every
+ * frame is arithmetic nobody reads twice. Kept on the side in a
+ * `WeakMap` rather than added to `ChainSpec`: the spec is `rig.ts`'s
+ * description of what a rig IS, and this is this module's own working.
+ * Rig units, not world — `layChain` scales at the point of use, so two
+ * slots sharing a spec at different scales cannot read each other's.
+ */
+const REACH = new WeakMap<ChainSpec, Float64Array>();
+
+function reachOf(spec: ChainSpec): Float64Array {
+  let reach = REACH.get(spec);
+  if (reach === undefined) {
+    reach = new Float64Array(spec.lengths.length + 1);
+    for (let i = 0; i < spec.lengths.length; i += 1) reach[i + 1] = reach[i] + spec.lengths[i];
+    REACH.set(spec, reach);
+  }
+  return reach;
+}
+
+/**
  * Lay a chain along a path (render space, newest point first, `points`
  * triples in `path`). The rig root is placed so the head bone lands on
- * `path[0]`; each bone is aimed at the next station and each child's
- * offset is stretched by the peristaltic wave. `rootScale` is the rig
- * root's uniform scale, `headOffset` the head bone's rest position in
- * the root's frame and `headFrame` the head bone's parent orientation in
- * that frame (both measured once per clone).
+ * `path[0]`; every bone after it is seated at its own REST distance
+ * behind the head — `reachOf`, scaled — and aimed at the station after
+ * it, which is the snake rule in one line. Past the end of the path the
+ * remaining stations fall on its last point, so a worm with a short
+ * memory gathers at the oldest crumb rather than being extrapolated
+ * into ground it never crawled.
+ *
+ * Nothing here writes a bone's OFFSET. The rest pose already is the
+ * length the spec measured, so leaving the offsets alone is what makes
+ * "the stations are the rest lengths" structural rather than a promise:
+ * there is no longer a line in this function that could change how long
+ * a segment is drawn.
+ *
+ * `rootScale` is the rig root's uniform scale, `headOffset` the head
+ * bone's rest position in the root's frame and `headFrame` the head
+ * bone's parent orientation in that frame (both measured once per
+ * clone). The motion state, the body length and the creature's phase
+ * are handed in and deliberately NOT read: they are what every other
+ * poser here runs on, and a chain that consulted a clock could not
+ * follow the path exactly. They stay in the signature so the view poses
+ * every rig through one shape.
  */
 export function layChain(
   root: THREE.Object3D,
@@ -294,21 +344,15 @@ export function layChain(
   headFrame: THREE.Quaternion,
   path: Float64Array,
   points: number,
-  m: RigMotion,
-  bodyLength: number,
-  phase: number,
+  _motion: RigMotion,
+  _bodyLength: number,
+  _phase: number,
 ): void {
   const n = bones.length;
   if (n < 2 || points < 1) return;
-  // THE WAVE: a length factor per segment, travelling tail-ward with
-  // distance while moving and pulsing faintly on a clock while still.
-  const travel = (m.gone / Math.max(1e-6, bodyLength)) * PERISTALSIS_PER_LENGTH;
-  const idle = m.alive * PERISTALSIS_IDLE_RATE;
-  const amplitude = PERISTALSIS_AMPLITUDE * (m.moving + PERISTALSIS_IDLE * (1 - m.moving));
-  // Stations by arc length, stretched segment by segment.
+  const reach = reachOf(spec);
   _cursor.i = 0;
   _cursor.left = 0;
-  let station = 0;
   walkPath(path, points, 0, _cursor, _at);
   // The root carries the head to path[0]: identity rotation, the head's
   // rest offset subtracted (scaled), so the OBJECT sits wherever it must
@@ -318,17 +362,11 @@ export function layChain(
   // The accumulated world rotation of the frame each bone's quaternion is applied in.
   _q.copy(headFrame);
   for (let i = 0; i + 1 < n; i += 1) {
-    const along = (i / Math.max(1, n - 1)) * PERISTALSIS_WAVES;
-    // `along − travel`: the crest sits at a larger index as travel grows,
-    // so the wave runs head-to-tail while the body goes forward.
-    const factor = 1 + amplitude * Math.sin((along - travel - idle + phase) * Math.PI * 2);
-    const length = spec.lengths[i] * factor;
-    station += length * rootScale;
-    walkPath(path, points, station, _cursor, _next);
+    // The station bone i+1 holds: its rest total behind the head, by arc
+    // length. `_cursor` walks forward with it, so the whole chain is one
+    // pass over the path.
+    walkPath(path, points, reach[i + 1] * rootScale, _cursor, _next);
     const bone = bones[i];
-    const child = bones[i + 1];
-    // The child's offset, stretched along its own rest direction.
-    child.position.copy(spec.dirs[i]).multiplyScalar(length);
     _want.copy(_next).sub(_at);
     if (_want.lengthSq() < 1e-12) {
       // A station on top of the last one: keep the parent's direction.

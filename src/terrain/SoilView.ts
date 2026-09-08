@@ -1,4 +1,28 @@
-/** Bounded, disposable rendering cache. SparseSoil alone owns the soil. */
+/**
+ * Bounded, disposable rendering cache. SparseSoil alone owns the soil.
+ *
+ * THE SECTION COSTS NOTHING WHEN IT IS SHUT. SOIL is an observer cutaway
+ * and nothing else, so with no cut window there is no soil to mesh: a
+ * closed view selects nothing, holds no resident, builds nothing and
+ * draws nothing, and it releases everything it holds on the frame the
+ * window closes.
+ *
+ * That is a correction, not a tuning. The selection used to fall back to
+ * up to 36 edited columns near the observer whenever the depth was zero,
+ * so every player carried a couple of hundred thousand triangles and two
+ * columns of marching tetrahedra a frame for a cutaway they had never
+ * opened — and a worm bumps those columns' revisions continuously,
+ * because burrowing is what worms are for. Measured over 60 shut frames
+ * against a soil carrying 300 worm strokes: 1,569 ms before, 0.3 ms
+ * after. A phone that had been holding 60 fps read 23.
+ *
+ * The price, stated plainly: with the section shut the coarse sheet is
+ * no longer clipped, so a tunnel mouth is no longer visible from the
+ * surface. That is a real loss, and it is what the frame rate was being
+ * spent on. A cheap surface-only mark can come back later as its own
+ * thing; it is not worth meshing entire columns to get one as a side
+ * effect.
+ */
 import * as THREE from 'three';
 import { distanceSquared, type LocalPoint, type WorldPoint } from '../world/coords';
 import { toLocal as worldToLocal } from '../world/origin';
@@ -18,21 +42,51 @@ export interface SoilViewOptions {
   readonly toLocal?: (at: WorldPoint) => LocalPoint;
   /** Render-only height of the actual coarse triangle at a patch boundary. */
   readonly drawnHeightAt?: (at: WorldPoint) => number | null;
+  /**
+   * The build budget's clock, in milliseconds. Injected only so a test
+   * can spend a stated amount per column and pin the queue's behaviour
+   * on a machine of any speed.
+   */
+  readonly now?: () => number;
 }
-const MAX_TILES = 36;
-const BUILDS_PER_UPDATE = 2;
+/**
+ * THE BUILD IS BUDGETED IN MILLISECONDS, NOT IN COLUMNS.
+ *
+ * A ration of columns cannot know what a column costs. Measured against
+ * a soil carrying 300 worm strokes, one 3.2 cm column takes 26.9 ms
+ * where a worm has dug and 7.8 ms where none has, and a whole 60 fps
+ * frame is 16.7 ms — so the old ration of two was a dropped frame by
+ * construction, every time a revision moved, which is every time a worm
+ * takes a bite.
+ *
+ * GAME TUNING: 4 ms, about a quarter of a 60 fps frame, leaving the rest
+ * for the terrain, the sea, the animals and the draw. The frame's FIRST
+ * column always builds however dear it turns out to be, since a column
+ * nothing can afford would otherwise never be built at all. A LATER one
+ * starts only if what the frame has already spent, plus the dearest
+ * column it has actually measured, still fits — an estimate rather than
+ * a count, because the alternative is a 3 ms column dragging a 150 ms
+ * column into the same frame on the grounds that the budget was not
+ * quite gone yet.
+ *
+ * So the worst frame is one column, a heavily dug window arrives over
+ * more frames instead of in fewer and longer ones, and the total work is
+ * unchanged: it is spread, not saved. Making a single column itself
+ * cheaper is soilMesh.ts's question, not this one's.
+ */
+const BUILD_BUDGET_MS = 4;
 const tileKey = (tile: SoilTile): string => `${tile.tx},${tile.tz}`;
 /** Only the tile's four rim roles affect its geometry when the window moves. */
-const rimRole = (tile: SoilTile, window?: SoilCutWindow): number => window
-  ? Number(tile.tx === window.minTx) | (Number(tile.tx === window.maxTx - 1) << 1)
-    | (Number(tile.tz === window.minTz) << 2) | (Number(tile.tz === window.maxTz - 1) << 3)
-  : 0;
+const rimRole = (tile: SoilTile, window: SoilCutWindow): number =>
+  Number(tile.tx === window.minTx) | (Number(tile.tx === window.maxTx - 1) << 1)
+    | (Number(tile.tz === window.minTz) << 2) | (Number(tile.tz === window.maxTz - 1) << 3);
 
 export class SoilView {
   readonly group = new THREE.Group();
   private readonly soil: SparseSoil;
   private readonly toLocal: (at: WorldPoint) => LocalPoint;
   private readonly drawnHeightAt?: (at: WorldPoint) => number | null;
+  private readonly now: () => number;
   private readonly material = new THREE.MeshLambertMaterial({ vertexColors: true, side: THREE.DoubleSide });
   private readonly residents = new Map<string, Resident>();
   private depth = NaN;
@@ -45,6 +99,7 @@ export class SoilView {
     this.soil = options.soil;
     this.toLocal = options.toLocal ?? worldToLocal;
     this.drawnHeightAt = options.drawnHeightAt;
+    this.now = options.now ?? ((): number => performance.now());
     this.group.name = 'soil';
   }
 
@@ -60,10 +115,13 @@ export class SoilView {
       this.depth = depth;
       this.surveyRevision = surveyRevision;
     }
+    // A shut section has no window, so it has no soil. The release above
+    // is the whole of the work, and nothing below it runs or is held.
+    if (depth === 0) return;
     const centre = soilTileAt(at);
-    const window: SoilCutWindow | undefined = depth > 0 ? {
+    const window: SoilCutWindow = {
       minTx: centre.tx - 3, maxTx: centre.tx + 3, minTz: centre.tz - 3, maxTz: centre.tz + 3,
-    } : undefined;
+    };
     const selected = this.select(at, window);
     const wanted = new Set(selected.map(tileKey));
     // Pending tiles are prospective voxel neighbors, but a known skipped
@@ -84,15 +142,26 @@ export class SoilView {
         this.release(resident); this.residents.delete(key);
       }
     }
-    let built = 0;
+    const started = this.now();
+    let built = 0, spent = 0, dearest = 0;
     for (const tile of selected) {
       const key = tileKey(tile), old = this.residents.get(key);
       if (old?.tile.revision === tile.revision) continue;
-      if (built === BUILDS_PER_UPDATE) continue;
+      // Nearest first, so what the observer is looking at arrives first,
+      // and stop at the budget: the rest of this window waits a frame.
+      if (built > 0 && spent + dearest > BUILD_BUDGET_MS) break;
       built++;
       const rim = rimRole(tile, window), frontier = frontierOf(tile);
       const seam = this.drawnHeightAt ? { edges: frontier, drawnHeightAt: this.drawnHeightAt } : undefined;
       const data = meshSoilTile(this.soil, tile.tx, tile.tz, depth, window, seam);
+      // Bill the attempt, not merely the result: a column that turns out
+      // to be unmeshable still paid for the lattice scan that discovered
+      // it. Read elapsed time SINCE THE FRAME BEGAN rather than summing
+      // per-column deltas, so a coarse timer that reads one short column
+      // as free cannot be added up to nothing.
+      const before = spent;
+      spent = this.now() - started;
+      dearest = Math.max(dearest, spent - before);
       if (old) this.release(old);
       // Remember skipped revisions too: expensive/incomplete columns are
       // retried only after their inputs change, and NEVER enter readyTiles.
@@ -135,8 +204,8 @@ export class SoilView {
 
   dispose(): void { this.clear(); this.material.dispose(); }
 
-  private select(at: WorldPoint, window?: SoilCutWindow): SoilTile[] {
-    if (!window) return this.soil.tilesNear(at, 25).slice(0, MAX_TILES);
+  /** The window is the whole bound: 36 columns, nearest to the observer first. */
+  private select(at: WorldPoint, window: SoilCutWindow): SoilTile[] {
     const tiles: SoilTile[] = [];
     for (let z = window.minTz; z < window.maxTz; z++) {
       for (let x = window.minTx; x < window.maxTx; x++) tiles.push(this.soil.tile(x, z));

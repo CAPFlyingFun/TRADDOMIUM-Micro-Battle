@@ -59,6 +59,12 @@
  * in `groundAt`, by the burrow behaviour when it does not. Motion comes
  * from deltas each rig keeps for itself (`motion.ts`): the simulation
  * never says "walk"; the body walks because it moved.
+ *
+ * That last answer is a LATCH, one per animal, and `BODY_SAMPLES` below
+ * says why: what the soil cutaway is showing of a 15 cm body is a fact
+ * about the body, not about the 3.2 cm tile under its nose, and it is
+ * measured once a frame over the whole animal so that neither the drawn
+ * body nor its visibility can chatter with the tiles.
  */
 import * as THREE from 'three';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
@@ -121,6 +127,70 @@ export const SPINE_TOLERANCE = 0.35;
 
 /** A burrower more than this far under the ground it stands on is not drawn, world units. From the brief. */
 export const BURROW_HIDE = 0.3;
+
+/**
+ * A BODY'S REVEAL IS A PROPERTY OF THE ANIMAL, NOT OF WHICHEVER 3.2 cm
+ * TILE ITS NOSE IS OVER — and it may not change faster than the animal
+ * does.
+ *
+ * Joshua, 2026-09-08, from the phone, on the soil cutaway: it "still
+ * randomly throws the worm above and below ground", and "for a moment
+ * saw the worm rotate around like a straight log". That is one defect,
+ * and the arithmetic says so. The cutaway is meshed a TILE at a time —
+ * `SOIL_TILE` is 3.2 units, 3.2 cm — and the owner's `ceilingAt` can
+ * only answer "the roof is off here" where a tile has finished. A worm
+ * is 15 cm long, so it lies across about five of those tiles. Asking the
+ * single point under its HEAD and applying that answer to every crumb of
+ * the body ties the whole animal to a fact that changes as tiles finish
+ * (two a frame) and as the head crosses a 3.2 cm boundary. Each flip
+ * moved the drawn body by the belly lift (3.4 mm) and the depth clamp,
+ * and flipped `drawn()` with it — and a rig released and lent again is a
+ * trail laid STRAIGHT along the current heading, which is the log the
+ * eye saw rotating.
+ *
+ * So the reveal is decided ONCE per creature per frame, from the whole
+ * body, with hysteresis in both axes:
+ *
+ *   `BODY_SAMPLES` points, head to tail along the heading and one body
+ *   length end to end — five points 3.75 units apart is a sample every
+ *   1.2 soil tiles, so no single tile can carry the answer.
+ *
+ *   The cutaway is taken as OPEN at `REVEAL_OPEN` of those samples and
+ *   SHUT at `REVEAL_SHUT`; between the two nothing changes. Crossing
+ *   that band takes two fifths of a body length of crawling — 60 mm,
+ *   which is twenty seconds at the worm's 3 mm/s wander and four
+ *   seconds at its 15 mm/s flight.
+ *
+ *   And a SHUT reading must hold for `REVEAL_HOLD` frames before it is
+ *   believed, while an OPEN one is believed at once. Showing what the
+ *   player has just cut open must never wait; hiding is never urgent;
+ *   and holding one direction is enough to make a flip-flop impossible,
+ *   because an alternating fact never accumulates a run.
+ *
+ * GAME TUNING, all four. The hold is counted in FRAMES rather than
+ * seconds deliberately: the chattering fact is per-frame by construction
+ * — tiles mesh at a frame rate, not at a clock rate — so a phone drawing
+ * twenty frames a second, where tiles arrive further apart in time, gets
+ * a proportionally longer hold, which is the direction that helps.
+ */
+export const BODY_SAMPLES = 5;
+export const REVEAL_OPEN = 0.6;
+export const REVEAL_SHUT = 0.2;
+export const REVEAL_HOLD = 12;
+
+/**
+ * A burrower already drawn stays drawn until it is this factor deeper
+ * than `BURROW_HIDE`; one met for the first time is judged at the line
+ * itself.
+ *
+ * GAME TUNING — `HYSTERESIS` in the other axis, and for the same reason:
+ * the band is 3 to 4.5 mm under the surface, which a worm nosing up at
+ * 3 mm/s takes half a second to cross and cannot jitter across between
+ * two frames, and it sits well clear of the 12 mm band it travels in
+ * (`species.burrow.underMm`), so an animal working near the surface
+ * settles on one side of the line instead of blinking on it.
+ */
+export const BURROW_KEEP = 1.5;
 
 /**
  * Crumbs per body length on a worm's trail, and the crumbs kept beyond
@@ -206,6 +276,32 @@ interface Trail {
   readonly spacing: number;
   head: number;
   count: number;
+  /** The creature whose crawl this is a record of. A record of somebody else's crawl is worthless. */
+  owner: string;
+}
+
+/**
+ * WHAT ONE ANIMAL'S BODY IS SHOWING, AND HOW LONG THAT STANDS.
+ *
+ * The latch the constants above describe: one named object per creature
+ * rather than loose fields (ARCHITECTURE §2.3), measured once a frame in
+ * `reveal` and read — never written — by `pose`. Both facts it holds are
+ * about the WHOLE body, and the two derived answers come out of them
+ * together, so the body cannot be drawn on the surface in the same frame
+ * a cutaway is showing its burrow:
+ *
+ *   drawn at all   = it is not deep, or the cutaway is open over it
+ *   burrow on show = it is deep AND the cutaway is open over it
+ */
+interface Reveal {
+  /** The cutaway has the roof off most of this body. */
+  cut: boolean;
+  /** The body is further under the ground than the surface band. */
+  deep: boolean;
+  /** Consecutive frames the samples have read shut while `cut` still stands. */
+  shutFor: number;
+  /** The frame it was last measured on; one not measured this frame is forgotten. */
+  frame: number;
 }
 
 /** One clone of a species' template, and what it remembers. */
@@ -278,6 +374,10 @@ export class FaunaView {
   /** The impostor body, shared by every species: an icosahedron, twenty triangles, scaled to an ellipsoid per instance. */
   private readonly impostorGeometry = new THREE.IcosahedronGeometry(1, 0);
   private readonly materials: THREE.Material[] = [];
+
+  /** One latch per creature in reach, by creature id; an animal not measured this frame is dropped. */
+  private readonly reveals = new Map<string, Reveal>();
+  private frame = 0;
 
   // Scratch, allocated once and grown as the creature list grows.
   private d2 = new Float64Array(512);
@@ -376,6 +476,7 @@ export class FaunaView {
     if (Number.isFinite(eyeLocal.lx) && Number.isFinite(eyeLocal.lz)) {
       const step = Number.isFinite(dt) && dt > 0 ? dt : 0;
       const eyeY = Number.isFinite(eyeHeight) ? eyeHeight : null;
+      this.frame += 1;
       this.room(creatures.length);
       for (const slot of this.order) slot.candidates.length = 0;
       // PASS 1: who is drawn at all, and how far away, bucketed by species.
@@ -388,6 +489,11 @@ export class FaunaView {
         this.rigged[i] = 0;
         slot.candidates.push(i);
       }
+      // Every burrower in reach was measured above, so anything older
+      // than this frame has gone far, been switched off or streamed out.
+      // Its latch is dropped rather than kept for an animal that will
+      // come back somewhere else.
+      for (const [id, reveal] of this.reveals) if (reveal.frame !== this.frame) this.reveals.delete(id);
       // PASS 2: each species lends, poses and fills.
       for (const slot of this.order) {
         if (!slot.enabled) continue;
@@ -580,11 +686,83 @@ export class FaunaView {
     this.rigged = new Uint8Array(size);
   }
 
-  /** Whether a creature in the near tiers is drawn at all: a burrower under the ground is not. */
+  /**
+   * Whether a creature in the near tiers is drawn at all: a burrower
+   * under the ground is not, unless the cutaway is showing its burrow.
+   *
+   * Called exactly once per creature per frame, from pass 1 — it is what
+   * advances that creature's latch, and `pose` reads the answer back
+   * rather than measuring it again.
+   */
   private drawn(slot: Slot, c: CreatureState): boolean {
     if (slot.species.burrow === null) return true;
-    if (this.groundAt !== null) return (this.ceilingAt?.(c.at) ?? this.groundAt(c.at)) - c.height <= BURROW_HIDE;
-    return c.behaviour !== 'burrow';
+    if (this.groundAt === null) return c.behaviour !== 'burrow';
+    const reveal = this.reveal(slot, c);
+    return !reveal.deep || reveal.cut;
+  }
+
+  /**
+   * This creature's latch, advanced by one frame of measurement.
+   *
+   * The two thresholds are asymmetric on purpose and the constants say
+   * why: `cut` opens the moment most of the body is under an open roof
+   * and shuts only after `REVEAL_HOLD` frames of shut readings, and
+   * `deep` is judged at `BURROW_HIDE` for an animal met for the first
+   * time and at `BURROW_HIDE * BURROW_KEEP` once the animal is being
+   * drawn. Nothing here reads the head alone, and nothing here moves a
+   * creature: the simulation owns where the animal is, and this decides
+   * only what is shown of it.
+   */
+  private reveal(slot: Slot, c: CreatureState): Reveal {
+    const ground = this.groundAt === null ? Number.NaN : this.groundAt(c.at);
+    const depth = Number.isFinite(ground) ? ground - c.height : 0;
+    const open = this.cutawayOver(slot, c);
+    let reveal = this.reveals.get(c.id);
+    if (reveal === undefined) {
+      reveal = { cut: open >= REVEAL_OPEN, deep: depth > BURROW_HIDE, shutFor: 0, frame: this.frame };
+      this.reveals.set(c.id, reveal);
+      return reveal;
+    }
+    reveal.frame = this.frame;
+    if (open >= REVEAL_OPEN) {
+      reveal.cut = true;
+      reveal.shutFor = 0;
+    } else if (open > REVEAL_SHUT) {
+      // In the band: whatever it was reading, it goes on reading.
+      reveal.shutFor = 0;
+    } else if (reveal.cut) {
+      reveal.shutFor += 1;
+      if (reveal.shutFor >= REVEAL_HOLD) { reveal.cut = false; reveal.shutFor = 0; }
+    }
+    reveal.deep = depth > BURROW_HIDE * (reveal.deep ? 1 : BURROW_KEEP);
+    return reveal;
+  }
+
+  /**
+   * How much of a body the cutaway has the roof off, 0..1.
+   *
+   * THE WHOLE ANIMAL IS ASKED ABOUT, not its nose: `BODY_SAMPLES` points
+   * from the head backwards along the heading, spanning one body length,
+   * which is how `seedTrail` lays a body it has no history for. The head
+   * is the only point that is certainly on the animal — the rest is
+   * where the body would be if it had crawled in a straight line — and
+   * that is enough, because the question is which SOIL TILES the animal
+   * lies across, and a 15 cm body lies across about five of them
+   * whichever way it is bent.
+   */
+  private cutawayOver(slot: Slot, c: CreatureState): number {
+    const ceiling = this.ceilingAt;
+    const ground = this.groundAt;
+    if (ceiling === null || ground === null) return 0;
+    const step = slot.bodyLength / (BODY_SAMPLES - 1);
+    const ax = Math.sin(c.heading);
+    const az = Math.cos(c.heading);
+    let open = 0;
+    for (let k = 0; k < BODY_SAMPLES; k += 1) {
+      const at = k === 0 ? c.at : translate(c.at, -k * step * ax, -k * step * az);
+      if (ceiling(at) < ground(at) - 1e-6) open += 1;
+    }
+    return open / BODY_SAMPLES;
   }
 
   private drawSpecies(slot: Slot, creatures: readonly CreatureState[], dt: number): void {
@@ -686,10 +864,22 @@ export class FaunaView {
           spacing: slot.bodyLength / CRUMBS_PER_LENGTH,
           head: 0,
           count: 0,
+          owner: c.id,
         };
         rig.trail = trail;
       }
-      this.seedTrail(trail, c);
+      // A RIG HANDED BACK TO THE SAME ANIMAL KEEPS THE PATH IT CRAWLED.
+      // A trail is a record of a crawl, and this animal's crawl did not
+      // stop happening because a rig changed hands for a frame — laying
+      // it straight again is what draws a body as a rotating log. It is
+      // laid again only when the record is not this creature's, or when
+      // the head is further from its newest crumb than a crawl reaches
+      // (the same test `pose` makes every frame).
+      if (trail.owner !== c.id || trail.count === 0
+        || distance(c.at, trail.points[trail.head]) > slot.bodyLength * TRAIL_BREAK_LENGTHS) {
+        trail.owner = c.id;
+        this.seedTrail(trail, c);
+      }
     }
   }
 
@@ -778,9 +968,12 @@ export class FaunaView {
     const anatomy = slot.anatomy;
     const chain = anatomy?.chain ?? null;
     if (chain !== null && rig.chain.length >= 2 && rig.trail !== null) {
-      const exposedBurrow = this.groundAt !== null && this.ceilingAt !== null
-        && this.ceilingAt(c.at) < this.groundAt(c.at) - 1e-6
-        && c.height < this.groundAt(c.at) - BURROW_HIDE;
+      // THE REVEAL IS THE ANIMAL'S, and it was decided for the whole
+      // body in pass 1. Reading it back here rather than asking the
+      // ceiling again under the head is the fix itself: one fact, one
+      // frame, every crumb of the body drawn by the same answer.
+      const reveal = this.reveals.get(c.id);
+      const exposedBurrow = reveal !== undefined && reveal.cut && reveal.deep;
       const trail = rig.trail;
       const behind = distance(c.at, trail.points[trail.head]);
       if (behind > slot.bodyLength * TRAIL_BREAK_LENGTHS) {
@@ -837,6 +1030,7 @@ export class FaunaView {
     this.impostorGeometry.dispose();
     for (const material of this.materials) material.dispose();
     this.materials.length = 0;
+    this.reveals.clear();
     this.slots.clear();
     this.order.length = 0;
   }
