@@ -75,6 +75,26 @@ export interface Settings extends Versioned {
    * Reader: perf/PerformanceWorldScene, through the Performance World.
    */
   readonly cameraSpeed: CameraSpeed;
+  /**
+   * THE HOUR THE PLAYER IS HOLDING THE SKY AT, 0 to 24 HST, or null for
+   * the island's own time (Joshua, 2026-09-08: "add a time slider from
+   * midnight to midnight... for solo play, time can be changed, but live
+   * multiplayer won't be").
+   *
+   * This DEPARTS from the standing rule that an hour is an override and
+   * never a setting (CLAUDE.md, "The sky is the island's, or it says
+   * so"), and it departs deliberately: `?hour=` is unreachable from a
+   * home-screen app with no address bar, and the app now reloads itself
+   * on every push, so an unsaved hour would be lost mid-test. The rule's
+   * INTENT is kept instead by the HUD, which prints `held` beside the
+   * clock the whole time this is not null, so a held sky can never be
+   * mistaken for the island's.
+   *
+   * SOLO ONLY. In a room the clock belongs to everyone in it, and the
+   * world scene ignores this and disables the control.
+   * Reader: perf/PerformanceWorldScene, through the Performance World.
+   */
+  readonly timeOfDay: number | null;
 }
 
 /** Bumped when a field changes meaning; an older document reads as defaults. */
@@ -113,6 +133,9 @@ export const SETTINGS_DEFAULTS: Settings = {
   // is past before it is seen. This is the answer to "I am moving too
   // fast to see them" for a player who never opens Settings.
   cameraSpeed: 'medium',
+  // NULL: the island's own clock. The sky is Kaua'i's until a player
+  // deliberately holds it somewhere else.
+  timeOfDay: null,
 };
 
 /**
@@ -155,11 +178,22 @@ export function sanitizeSettings(raw: unknown, defaults: Settings = SETTINGS_DEF
     hudCollapsed: typeof r.hudCollapsed === 'boolean' ? r.hudCollapsed : defaults.hudCollapsed,
     finderOn: typeof r.finderOn === 'boolean' ? r.finderOn : defaults.finderOn,
     cameraSpeed: isCameraSpeed(r.cameraSpeed) ? r.cameraSpeed : defaults.cameraSpeed,
+    timeOfDay: isHeldHour(r.timeOfDay) ? r.timeOfDay : defaults.timeOfDay,
   };
 }
 
 export function isQuality(value: unknown): value is Quality {
   return typeof value === 'string' && (QUALITY_LEVELS as readonly string[]).includes(value);
+}
+
+/**
+ * A held hour is a finite number in [0, 24). 24 itself is midnight and
+ * belongs at the slider's far end, so it is folded to 0 rather than
+ * refused — the control runs midnight to midnight and both ends mean
+ * the same moment.
+ */
+export function isHeldHour(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value < 24;
 }
 
 /** Is this one of the three camera speeds? */

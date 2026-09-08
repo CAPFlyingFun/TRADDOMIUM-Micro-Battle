@@ -130,3 +130,29 @@ export function kauaiClock(unixMs: number): string {
 export function hstToUnixMs(year: number, month: number, day: number, hour: number, minute = 0): number {
   return Date.UTC(year, month - 1, day, hour - HST_OFFSET_HOURS, minute);
 }
+
+/**
+ * HOLD THE ISLAND'S CLOCK AT AN HOUR OF ITS OWN DAY.
+ *
+ * The one rule for "quarter past two on Kaua'i today", used by the
+ * `?hour=` override, by the player's time slider, and by anything else
+ * that wants a sun somewhere other than where it actually is. It is
+ * written once because there are two ways to get it wrong and both have
+ * been shipped by other projects: adding an offset to `Date.now()`
+ * (which drifts as real time passes, so the sun creeps) and pinning a
+ * FIXED date (which gives December's noon in June — the sun's height at
+ * a given hour is a function of the season).
+ *
+ * `nowMs` decides only WHICH DAY. The hour is HST wall-clock, 0 to 24,
+ * fractional for minutes: 13.5 is half past one. Out of range it wraps,
+ * so 24 is midnight and −1 is 23:00, which is what a slider that runs
+ * from midnight to midnight needs at both of its ends.
+ */
+export function heldHourMs(nowMs: number, hour: number): number {
+  const onIsland = new Date(nowMs + HST_OFFSET_HOURS * 3_600_000);
+  const wrapped = mod(hour, 24);
+  const h = Math.floor(wrapped);
+  // Rounded to the minute, and rolled over by Date.UTC when it makes 60.
+  const m = Math.round((wrapped - h) * 60);
+  return hstToUnixMs(onIsland.getUTCFullYear(), onIsland.getUTCMonth() + 1, onIsland.getUTCDate(), h, m);
+}

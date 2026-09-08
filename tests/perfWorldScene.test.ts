@@ -32,6 +32,7 @@ import { PERF_WORLD_SCENE_ID } from '../src/perf/perfTool';
 import type { GameSession, SessionSaveState } from '../src/session/GameSession';
 import { RemoteMultiplayerSession } from '../src/session/RemoteMultiplayerSession';
 import { world } from '../src/world/coords';
+import { kauaiClock } from '../src/world/weather/solar';
 import { TYPICAL } from '../src/world/weather/conditions';
 import { hstToUnixMs } from '../src/world/weather/solar';
 import { readFileSync } from 'node:fs';
@@ -1227,7 +1228,7 @@ describe('PerformanceWorldScene with the real island under it', () => {
 describe('PerformanceWorldScene: the creature finder', () => {
   const withFinder = (finderOn: boolean): PerfWorldSettings => ({
     fov: 60, lookSensitivity: 1, invertY: false, showFps: true, hudCollapsed: false,
-    finderOn, cameraSpeed: 'fast', textures: 'medium', detail: 'medium',
+    finderOn, cameraSpeed: 'fast', timeOfDay: null, textures: 'medium', detail: 'medium',
   });
 
   it('shows no finder at all on a world with no island to find anything on', async () => {
@@ -1253,5 +1254,49 @@ describe('PerformanceWorldScene: the creature finder', () => {
     // The document is what decides; nothing here flips it by itself.
     settings = withFinder(true);
     expect(settings.finderOn).toBe(true);
+  });
+});
+
+/**
+ * THE TIME SLIDER's seam (Joshua, 2026-09-08). The control and its words
+ * are pinned in `perfHudTime`; what belongs here is the world's half —
+ * the held hour reaches the sun through the ONE clock the world already
+ * had, and a room refuses it however the document is written.
+ */
+describe('PerformanceWorldScene: the held hour', () => {
+  const at = (timeOfDay: number | null): PerfWorldSettings => ({
+    fov: 60, lookSensitivity: 1, invertY: false, showFps: true, hudCollapsed: false,
+    finderOn: false, cameraSpeed: 'fast', timeOfDay, textures: 'medium', detail: 'medium',
+  });
+
+  /** The sheet's clock line, `HH:MM[ held] · sun N° · source`. */
+  const clockLine = (uiLayer: HTMLElement): string =>
+    uiLayer.querySelector<HTMLElement>('[data-field="weather-clock"]')?.textContent ?? '';
+
+  it('holds the sun at the hour the document names, and says HELD while it does', async () => {
+    const { scene, uiLayer, frame } = rig('loading', { settings: () => at(12) });
+    await scene.enter();
+    for (let i = 0; i < 15; i += 1) frame();
+    expect(clockLine(uiLayer)).toContain('12:00 held');
+  });
+
+  it('runs on the island\'s own clock when nothing is held', async () => {
+    const { scene, uiLayer, frame } = rig('loading', { settings: () => at(null) });
+    await scene.enter();
+    for (let i = 0; i < 15; i += 1) frame();
+    expect(clockLine(uiLayer)).not.toContain('held');
+    // And the printed hour is the real one, to the minute.
+    expect(clockLine(uiLayer).startsWith(kauaiClock(Date.now()))).toBe(true);
+  });
+
+  it('A ROOM KEEPS ITS OWN CLOCK, whatever the settings document says', async () => {
+    // The session is a multiplayer one; the document asks for noon.
+    const session: GameSession = { ...spySession(), mode: 'multiplayer', canPauseWorld: false, authority: 'server' };
+    const { scene, uiLayer, frame } = rig('loading', { session, settings: () => at(12) });
+    await scene.enter();
+    for (let i = 0; i < 15; i += 1) frame();
+    const line = clockLine(uiLayer);
+    expect(line).not.toContain('held');
+    expect(line.startsWith(kauaiClock(Date.now()))).toBe(true);
   });
 });

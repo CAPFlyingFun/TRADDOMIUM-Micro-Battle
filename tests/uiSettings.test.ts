@@ -47,6 +47,15 @@ describe('settings sanitize', () => {
     // MEDIUM by default: `fast` is a speed for crossing the island, and
     // the island is no longer what there is to look at (2026-09-08).
     expect(SETTINGS_DEFAULTS.cameraSpeed).toBe('medium');
+    // The held hour: a number in [0, 24), or null for the island's own
+    // clock, which is what a fresh document says.
+    expect(SETTINGS_DEFAULTS.timeOfDay).toBeNull();
+    expect(sanitizeSettings({ timeOfDay: 13.25 }).timeOfDay).toBe(13.25);
+    expect(sanitizeSettings({ timeOfDay: 0 }).timeOfDay).toBe(0);
+    expect(sanitizeSettings({ timeOfDay: 24 }).timeOfDay).toBeNull();
+    expect(sanitizeSettings({ timeOfDay: -1 }).timeOfDay).toBeNull();
+    expect(sanitizeSettings({ timeOfDay: Number.NaN }).timeOfDay).toBeNull();
+    expect(sanitizeSettings({ timeOfDay: '12' }).timeOfDay).toBeNull();
     expect(sanitizeSettings({ hudCollapsed: 'true' }).hudCollapsed).toBe(SETTINGS_DEFAULTS.hudCollapsed);
     expect(SETTINGS_DEFAULTS.hudCollapsed).toBe(false);
     expect(sanitizeSettings({ textures: 'low', detail: 'low' }).textures).toBe('low');
@@ -59,7 +68,7 @@ describe('settings sanitize', () => {
     expect(s).toEqual({ ...SETTINGS_DEFAULTS, fov: 70, version: SETTINGS_VERSION });
     expect(Object.keys(s).sort()).toEqual([
       'cameraSpeed', 'detail', 'finderOn', 'fov', 'hudCollapsed', 'invertY', 'lookSensitivity', 'showFps',
-      'textures', 'version',
+      'textures', 'timeOfDay', 'version',
     ]);
   });
 });
@@ -71,7 +80,7 @@ describe('settings store round trip', () => {
     expect(store.read()).toEqual(SETTINGS_DEFAULTS);
     const written = {
       version: SETTINGS_VERSION, fov: 95, lookSensitivity: 1.75, invertY: true, textures: 'high', detail: 'high', showFps: false,
-      hudCollapsed: true, finderOn: true, cameraSpeed: 'slow',
+      hudCollapsed: true, finderOn: true, cameraSpeed: 'slow', timeOfDay: 13.25,
     } as const;
     store.write(written);
     expect(store.read()).toEqual(written);

@@ -228,6 +228,13 @@ export interface WeatherReadout {
   /** The sun's geometric elevation in degrees; negative below the horizon. */
   readonly sunElevationDeg: number;
   /**
+   * Whether the clock is being HELD by the player rather than running.
+   * Printed beside the time, always, so a held sky can never be mistaken
+   * for the island's own — which is what keeps the time slider honest
+   * now that a held hour is a saved setting and not only a `?hour=`.
+   */
+  readonly heldTime?: boolean;
+  /**
    * The shadow the rung asks for, as the configuration and never a claim
    * that one is on screen: `shadow 1024 · 8 m`, or `shadow off`. Absent
    * where a world has no shadow seam, and then no line is printed.
@@ -321,6 +328,28 @@ export interface FinderReadout {
   } | null;
 }
 
+/**
+ * THE TIME OF DAY, as the HUD is told it (Joshua, 2026-09-08: "add a
+ * time slider from midnight to midnight... for solo play, time can be
+ * changed, but live multiplayer won't be").
+ *
+ * `allowed` is the whole of the multiplayer rule as far as this sheet is
+ * concerned: false disables the slider and says why, because a control
+ * that moves and changes nothing is exactly what §2.9 forbids. The HUD
+ * neither knows what a room is nor what a sun does; it shows an hour and
+ * reports a drag.
+ */
+export interface TimeReadout {
+  /** HST hours, 0 to 24 — the held hour, or the island's own when nothing is held. */
+  readonly hour: number;
+  /** Whether that hour is being HELD by the player rather than passing on its own. */
+  readonly held: boolean;
+  /** False in a room: the clock is everyone's, so this player may not move it. */
+  readonly allowed: boolean;
+  /** The same moment as `HH:MM`, so the control can print it without a second rule. */
+  readonly clock: string;
+}
+
 export interface PerfHudHooks {
   /** The rows to show. Re-read at every refresh so the checkboxes follow the model, not the clicks. */
   layers(): readonly LayerToggle[];
@@ -371,6 +400,13 @@ export interface PerfHudHooks {
    */
   onFinderGo?(): void;
   /**
+   * The time of day. Absent where a world has no sky to hold, and then
+   * no slider is built at all.
+   */
+  time?(): TimeReadout;
+  /** The player dragged the slider, or pressed LIVE (null). */
+  onTimeChange?(hour: number | null): void;
+  /**
    * The player folded or unfolded the sheet. Fired by the corner button
    * and the folded row ONLY — never by the `collapsed` setter — so the
    * owner can persist the choice without persisting its own restore.
@@ -394,6 +430,13 @@ const PARCHMENT = '#e8e2c8';
  * reliably lands on.
  */
 const COLLAPSE_BUTTON_PX = 28;
+
+/**
+ * The time slider's step, in hours: a quarter of an hour, so the whole
+ * day is 96 positions. Fine enough to put the sun where you want it —
+ * dawn moves fast — and coarse enough that a thumb can land on one.
+ */
+export const TIME_STEP_HOURS = 0.25;
 /** The toggle's inset from the panel's corner. */
 const COLLAPSE_BUTTON_INSET = 6;
 
@@ -579,7 +622,7 @@ function weatherWords(weather: WeatherReadout | null): readonly [string, string,
   return [
     `sky ${weather.sky} ${cloud}%`,
     `rain ${weather.rainMmHr.toFixed(1)} mm/h`,
-    `${weather.clock} · sun ${sun < 0 ? `−${-sun}` : `${sun}`}° · ${SOURCE_WORDS[weather.source]}`,
+    `${weather.clock}${weather.heldTime === true ? ' held' : ''} · sun ${sun < 0 ? `−${-sun}` : `${sun}`}° · ${SOURCE_WORDS[weather.source]}`,
   ];
 }
 
@@ -700,6 +743,12 @@ export class PerfHud {
   /** The finder's switch and its GO button, at the foot of LAYERS. Null together with the line. */
   private finderBox: HTMLInputElement | null = null;
   private finderGo: HTMLButtonElement | null = null;
+  /** The time-of-day slider, its LIVE button and the label between them. Null when the world has no sky. */
+  private timeSlider: HTMLInputElement | null = null;
+  private timeLive: HTMLButtonElement | null = null;
+  private timeLabel: HTMLElement | null = null;
+  /** True while a finger is on the slider, so a refresh cannot yank it back mid-drag. */
+  private timeDragging = false;
 
   /** The shadow configuration, under the clock in CAMERA; built with the weather lines. */
   private readonly shadowLine: HTMLElement | null;
@@ -973,6 +1022,102 @@ export class PerfHud {
       this.boxes.set(layer.id, box);
     }
     this.buildFinderRow(parent, row);
+    this.buildTimeRow(parent);
+  }
+
+  /**
+   * THE TIME OF DAY, under the finder at the foot of LAYERS.
+   *
+   * A slider from midnight to midnight in quarter hours, the time beside
+   * it, and a LIVE button that gives the island its own clock back.
+   * Both ends of the slider are midnight, which is why 24 folds to 0
+   * rather than being refused.
+   *
+   * IT IS NOT A LAYER either, for the same reason the finder is not: the
+   * plan's list describes the island, and neither an instrument nor a
+   * clock is part of it.
+   *
+   * In a room it is DISABLED and says so. A room's clock belongs to
+   * everyone in it, and a slider that moved without moving the sun would
+   * be a control that looks functional and is not (§2.9).
+   */
+  private buildTimeRow(parent: HTMLElement): void {
+    if (this.hooks.time === undefined) return;
+    const doc = parent.ownerDocument;
+    const now = this.hooks.time();
+
+    const head = doc.createElement('div');
+    head.style.cssText = 'display:flex;align-items:center;gap:0.6em;margin:5px 0 2px;white-space:nowrap;';
+    const label = doc.createElement('span');
+    label.dataset.field = 'time-of-day';
+    head.appendChild(label);
+    const live = doc.createElement('button');
+    live.type = 'button';
+    live.dataset.action = 'time-live';
+    live.textContent = 'live';
+    live.style.cssText =
+      `min-height:${COLLAPSE_BUTTON_PX}px;padding:0 8px;color:${GOLD};background:rgba(6,9,12,0.72);`
+      + `border:1px solid ${GOLD};border-radius:4px;font:inherit;cursor:pointer;touch-action:manipulation;`;
+    live.addEventListener('click', () => this.hooks.onTimeChange?.(null));
+    head.appendChild(live);
+    parent.appendChild(head);
+
+    const slider = doc.createElement('input');
+    slider.type = 'range';
+    slider.dataset.action = 'time';
+    slider.min = '0';
+    slider.max = '24';
+    slider.step = String(TIME_STEP_HOURS);
+    slider.value = String(now.hour);
+    slider.setAttribute('aria-label', 'Time of day');
+    // Full width of the column and a thumb-sized track: this is dragged
+    // with a thumb on a phone, not clicked with a mouse.
+    slider.style.cssText = `display:block;width:100%;min-width:150px;height:${COLLAPSE_BUTTON_PX}px;margin:0;touch-action:none;`;
+    const send = (): void => {
+      const hour = Number(slider.value);
+      // Midnight is one moment, and the slider has it at both ends.
+      this.hooks.onTimeChange?.(Number.isFinite(hour) ? hour % 24 : null);
+    };
+    slider.addEventListener('input', () => {
+      this.timeDragging = true;
+      send();
+    });
+    slider.addEventListener('change', () => {
+      this.timeDragging = false;
+      send();
+    });
+    // A finger that leaves the track without a change event must not
+    // leave the slider latched out of sync with the world.
+    for (const done of ['pointerup', 'pointercancel', 'blur']) {
+      slider.addEventListener(done, () => { this.timeDragging = false; });
+    }
+    parent.appendChild(slider);
+
+    this.timeSlider = slider;
+    this.timeLive = live;
+    this.timeLabel = label;
+    this.paintTime(now);
+  }
+
+  /** The slider, its label and its LIVE button, following the model rather than the last touch. */
+  private paintTime(t: TimeReadout): void {
+    if (this.timeLabel !== null) {
+      this.timeLabel.textContent = t.allowed
+        ? `time ${t.clock}${t.held ? ' held' : ''}`
+        : `time ${t.clock} · the room's`;
+    }
+    if (this.timeSlider !== null) {
+      this.timeSlider.disabled = !t.allowed;
+      this.timeSlider.style.opacity = t.allowed ? '1' : '0.45';
+      // Never while a finger is on it: the model is a frame behind the
+      // drag, and writing it back mid-drag fights the thumb.
+      if (!this.timeDragging) this.timeSlider.value = String(t.hour);
+    }
+    if (this.timeLive !== null) {
+      const canReturn = t.allowed && t.held;
+      this.timeLive.disabled = !canReturn;
+      this.timeLive.style.opacity = canReturn ? '1' : '0.45';
+    }
   }
 
   /**
@@ -1078,6 +1223,7 @@ export class PerfHud {
         this.finderGo.style.opacity = ready ? '1' : '0.45';
       }
     }
+    if (this.hooks.time !== undefined) this.paintTime(this.hooks.time());
     if (this.creatureLines !== null) {
       const words = creatureWords(this.hooks.creatures?.() ?? null);
       for (let i = 0; i < this.creatureLines.length; i += 1) this.creatureLines[i].textContent = words[i];

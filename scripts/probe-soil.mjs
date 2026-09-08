@@ -22,10 +22,32 @@ const log = message => console.log(`[probe:soil] ${message}`);
 const errors = [];
 let server, browser;
 
+/**
+ * The same order every other probe here uses: an explicit override,
+ * Playwright's own pinned path when it exists, then the browsers this
+ * machine actually has. Playwright's pin moves with the npm dependency
+ * while the installed Chromium does not, so a probe that asks only for
+ * the pinned path refuses to run on a box where the others are fine —
+ * which is what this one did (`chromium-1234` expected, `chromium-1194`
+ * installed).
+ */
 function browserPath() {
-  const candidate = process.env.PLAYWRIGHT_CHROMIUM ?? chromium.executablePath();
-  assert(existsSync(candidate), 'No installed Chromium. Set PLAYWRIGHT_CHROMIUM.');
-  return candidate;
+  const override = process.env.PLAYWRIGHT_CHROMIUM;
+  if (override) {
+    assert(existsSync(override), `PLAYWRIGHT_CHROMIUM=${override} does not exist`);
+    return override;
+  }
+  const pinned = chromium.executablePath();
+  if (existsSync(pinned)) return pinned;
+  const browsers = process.env.PLAYWRIGHT_BROWSERS_PATH;
+  for (const guess of [
+    '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
+    '/opt/pw-browsers/chromium/chrome',
+    browsers ? path.join(browsers, 'chromium') : null,
+  ]) {
+    if (guess !== null && existsSync(guess)) return guess;
+  }
+  assert.fail(`No installed Chromium: Playwright expects ${pinned}. Set PLAYWRIGHT_CHROMIUM.`);
 }
 
 async function shot(page, name) {

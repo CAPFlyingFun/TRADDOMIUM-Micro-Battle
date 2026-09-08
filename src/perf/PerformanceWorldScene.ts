@@ -97,7 +97,7 @@ import { islandChannels, type IslandChannels } from '../world/water/islandChanne
 import type { WeatherProvider } from '../world/weather/conditions';
 import { LiveWeather, type WeatherCache } from '../world/weather/liveWeather';
 import { SkyModel } from '../world/weather/skyModel';
-import { kauaiClock, sunPosition, type SunPosition } from '../world/weather/solar';
+import { heldHourMs, kauaiClock, kauaiLocalHours, sunPosition, type SunPosition } from '../world/weather/solar';
 import { skyLoaderFor } from '../assets/skySource';
 import { RainView } from '../sky/RainView';
 import { SkyView } from '../sky/SkyView';
@@ -182,6 +182,13 @@ export interface PerfWorldSettings {
    * of it. Joshua, 2026-09-08: "I am moving too fast to see them."
    */
   readonly cameraSpeed: 'slow' | 'medium' | 'fast';
+  /**
+   * The HST hour the player is holding the sky at, 0 to 24, or null for
+   * the island's real clock (Joshua, 2026-09-08). SOLO ONLY: in a room
+   * the clock belongs to everyone in it, so this is ignored and the
+   * control is disabled when the session has a remote authority.
+   */
+  readonly timeOfDay: number | null;
   /**
    * The player's two three-level quality choices, since 2026-09-05.
    *
@@ -300,6 +307,21 @@ export interface PerformanceWorldHooks {
    * ui/ (§3). Absent: the switch lasts until the scene is left.
    */
   onFinderToggle?(on: boolean): void;
+  /**
+   * The player moved the time slider, or put it back to LIVE (null).
+   * Persisted by the owner of the settings document, like the fold and
+   * the finder's switch — perf/ may not import ui/ (§3).
+   */
+  onTimeChange?(hour: number | null): void;
+  /**
+   * The hour `?hour=` is holding the clock at, or null. The scene cannot
+   * see this for itself — the override is baked into the `clock` it is
+   * handed, which simply stops moving — and without it the sheet would
+   * print a held time with nothing saying it was held. The word is all
+   * this drives: LIVE stays dead under an address-bar override, because
+   * a button that cannot give the clock back must not look as if it can.
+   */
+  hourOverride?: number | null;
   /**
    * Where to resume from: the state the session loaded, or null for a
    * fresh start at the scene's own START. Read once in `enter()`. A hook
@@ -748,6 +770,50 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
      * the same way (`?sky=`), and the model is what gets held.
      */
     const clock = hooks.clock ?? (() => Date.now());
+    /**
+     * THE HOUR THE PLAYER IS HOLDING THE SKY AT, or null for the
+     * island's own time (Joshua, 2026-09-08: "add a time slider from
+     * midnight to midnight... for solo play, time can be changed, but
+     * live multiplayer won't be").
+     *
+     * It moves the SUN and the clock the HUD prints, and through the
+     * sun's elevation it moves what the animals do — a worm surfaces at
+     * night — which is the point: the island was dark whenever he
+     * happened to be testing, and a correct ecology at 3 a.m. looks
+     * exactly like an empty one.
+     *
+     * It does NOT touch the weather. Rain and cloud are read live from
+     * the island's own stations and stay the island's; holding the hour
+     * moves where the sun is, not what the sky is doing, so the source
+     * word (`live`, `cached`, `sim`) keeps meaning what it says.
+     */
+    let heldHour: number | null = null;
+    /**
+     * THE ONE PLACE THE ROOM'S CLOCK IS PROTECTED, and it is at the
+     * point of USE rather than at the point of setting on purpose:
+     * `applySettings` runs before the session is known to be a remote
+     * one, so a gate written there would let a held hour through on the
+     * frame a room opens. Asked here, no order of events can defeat it.
+     */
+    const holding = (): number | null => (networked ? null : heldHour);
+    /**
+     * Whether the clock is standing still for ANY reason — the player's
+     * slider, or `?hour=` in the address bar. Only the sheet's `held`
+     * word reads this; the slider and LIVE follow `holding()` alone,
+     * since neither can undo a query parameter.
+     */
+    const clockHeld = (): boolean => holding() !== null || (hooks.hourOverride ?? null) !== null;
+    /**
+     * The moment the world is looking at: the real clock, or the same
+     * hour on today's date held still. `heldHourMs` is the same function
+     * `?hour=` uses (`world/weather/solar.ts`), so the address bar and
+     * the slider cannot drift apart, and today's date is kept because
+     * the sun's height at a given hour is a function of the season.
+     */
+    const worldNow = (): number => {
+      const hour = holding();
+      return hour === null ? clock() : heldHourMs(clock(), hour);
+    };
     const weather = new LiveWeather({
       provider: hooks.weather ?? null,
       clock,
@@ -1484,7 +1550,7 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
       const at = fly.pose().at;
       weatherNow = weather.sample(at);
       if (weather.dueForRefresh()) void weather.refresh();
-      sunNow = sunPosition(clock(), worldToGeo(at));
+      sunNow = sunPosition(worldNow(), worldToGeo(at));
       sunElevationDeg = sunNow.elevation * (180 / Math.PI);
       // The dome and the light it drives, BEFORE the water's fog: under
       // the sea the underwater look overwrites what the sky set, every
@@ -1908,6 +1974,11 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
       // closes it rather than at the next resume (Joshua, 2026-09-08).
       cameraTop = CAMERA_SPEEDS[s.cameraSpeed];
       pace();
+      // The held hour as the document has it. A ROOM refuses it in
+      // `holding()`, not here: this runs before the session's mode is
+      // known (see `holding`), and the HUD's control is disabled with
+      // the reason rather than moving and doing nothing (§2.9).
+      heldHour = s.timeOfDay;
       // The finder follows the document too, so the switch survives the
       // reload the update check performs on a push.
       if (s.finderOn !== finderOn) {
@@ -2147,6 +2218,28 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
             hooks.onFinderToggle?.(on);
           },
           onFinderGo: goToNearest,
+          // THE TIME SLIDER. `allowed` is the honest gate: solo only,
+          // because a room's clock is not one player's to move.
+          time: () => {
+            const hour = holding();
+            return {
+              hour: hour ?? kauaiLocalHours(clock()),
+              held: hour !== null,
+              allowed: !networked,
+              clock: kauaiClock(worldNow()),
+            };
+          },
+          onTimeChange: (hour) => {
+            if (networked) return;
+            heldHour = hour;
+            hooks.onTimeChange?.(hour);
+            // Nothing else to do: `updateWeather` runs on EVERY frame,
+            // paused ones included, and reads `worldNow()` for the sun.
+            // So the sky, the shadows and what the animals are doing all
+            // follow the drag on the next frame, through the one path
+            // they already used. A second, private way to move the sun
+            // is how a world ends up with two suns.
+          },
           onCollapse: (collapsed) => hooks.onHudCollapse?.(collapsed),
           session: sessionReadout,
           fresh: field === null ? undefined : freshCost,
@@ -2161,7 +2254,8 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
             rainMmHr: weatherNow.rainMmHr,
             cloud: weatherNow.cloud,
             source: weatherNow.source,
-            clock: kauaiClock(clock()),
+            clock: kauaiClock(worldNow()),
+            heldTime: clockHeld(),
             sunElevationDeg,
             ...(shadowWord === '' ? {} : { shadow: shadowWord }),
           }),

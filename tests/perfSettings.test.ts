@@ -88,7 +88,7 @@ function rig(initial: AppState, settings: () => PerfWorldSettings) {
 
 describe('PerformanceWorldScene settings hook', () => {
   it('applies fov and HUD visibility at enter() and re-reads only when the app state changes', async () => {
-    let current: PerfWorldSettings = { fov: 90, lookSensitivity: 1, invertY: false, showFps: true, hudCollapsed: false, finderOn: false, cameraSpeed: 'fast', textures: 'medium', detail: 'medium' };
+    let current: PerfWorldSettings = { fov: 90, lookSensitivity: 1, invertY: false, showFps: true, hudCollapsed: false, finderOn: false, cameraSpeed: 'fast', timeOfDay: null, textures: 'medium', detail: 'medium' };
     const r = rig('loading', () => current);
     await r.scene.enter();
     expect(r.app.state).toBe('playing');
@@ -104,7 +104,7 @@ describe('PerformanceWorldScene settings hook', () => {
     expect(r.reads()).toBe(1);
 
     // The player opened the pause menu, changed settings, and came back.
-    current = { fov: 75, lookSensitivity: 2, invertY: true, showFps: false, hudCollapsed: true, finderOn: false, cameraSpeed: 'fast', textures: 'medium', detail: 'medium' };
+    current = { fov: 75, lookSensitivity: 2, invertY: true, showFps: false, hudCollapsed: true, finderOn: false, cameraSpeed: 'fast', timeOfDay: null, textures: 'medium', detail: 'medium' };
     r.app.requestState('paused');
     r.scene.update({ rawDt: SIXTY, simDt: 0, elapsed: 0 });
     r.app.requestState('playing');
@@ -145,7 +145,7 @@ describe('PerformanceWorldScene settings hook', () => {
 describe('the camera speed setting', () => {
   const withSpeed = (cameraSpeed: PerfWorldSettings['cameraSpeed']): PerfWorldSettings => ({
     fov: 60, lookSensitivity: 1, invertY: false, showFps: true, hudCollapsed: false,
-    finderOn: false, cameraSpeed, textures: 'medium', detail: 'medium',
+    finderOn: false, cameraSpeed, timeOfDay: null, textures: 'medium', detail: 'medium',
   });
 
   it('is the three speeds Joshua asked for, in world units a second', () => {

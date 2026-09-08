@@ -231,6 +231,27 @@ its own.
   place comes from the real HST clock through `world/weather/solar.ts`
   (NOAA's equations, pinned against Līhuʻe's published sunrise); nothing
   invents a time of day.
+- **The player may HOLD the sky, and the sheet says so** (Joshua,
+  2026-09-08: "add a time slider from midnight to midnight... for solo
+  play, time can be changed, but live multiplayer won't be"). This
+  DEPARTS from the line above — an hour used to be an override and never
+  a setting — and it departs deliberately, for a reason worth keeping:
+  Kaua'i's real sky is dark for half of every day, he tests in the
+  Hawaiian evening, and a correct world at 4 a.m. is a black screen with
+  everything in it. `?hour=` cannot reach a home-screen app with no
+  address bar. So `settings.timeOfDay` holds an hour, `Settings` shows a
+  slider from midnight to midnight in quarter hours, and
+  `solar.heldHourMs` is the ONE rule both it and `?hour=` use — today's
+  date, because the sun's height at an hour is a function of the season,
+  and no drift, because an offset added to `Date.now()` creeps.
+  What keeps the older rule's intent is the HUD: the clock line prints
+  `held` for as long as the clock is standing still, by the slider or by
+  the address bar, so a held sky can never be mistaken for the island's.
+  It moves the SUN and, through the sun, what the animals do; the WEATHER
+  stays the island's live reading, so the source word still means what it
+  says. SOLO ONLY — a room's clock belongs to everyone in it, and the
+  refusal is at the point of USE (`holding()`), not where the setting is
+  read, because settings are applied before the session's mode is known.
 - **Light decides what shows; nothing paints it** (the lighting polish,
   2026-09-07). The sea's sheen and its foam's opacity read the scene's
   own lights, the ground's wetness is a lens on its colour, the sun's

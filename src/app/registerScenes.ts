@@ -29,7 +29,7 @@ import { TIER_QUERY_PARAM, isTextureTier, type TextureTier } from '../assets/tex
 import { DETAIL_QUERY_PARAM, isDetailTier, type DetailTier } from '../assets/detailQuality';
 import { OpenMeteo } from '../assets/openMeteo';
 import { weatherCacheOver } from '../persistence/weatherCache';
-import { HST_OFFSET_HOURS, hstToUnixMs } from '../world/weather/solar';
+import { heldHourMs } from '../world/weather/solar';
 import { isBuiltSky, type Sky } from '../world/weather/weather';
 import { PERF_WORLD_MAP_ID, PERF_WORLD_SCENE_ID, perfWorldTool } from '../perf/perfTool';
 import {
@@ -189,8 +189,11 @@ const HOUR_OVERRIDE: number | null = HOUR_NAMED !== null && Number.isFinite(Numb
  */
 function worldClock(): () => number {
   if (HOUR_OVERRIDE === null) return () => Date.now();
-  const today = new Date(Date.now() + HST_OFFSET_HOURS * 3_600_000);
-  const held = hstToUnixMs(today.getUTCFullYear(), today.getUTCMonth() + 1, today.getUTCDate(), HOUR_OVERRIDE, Math.round((HOUR_OVERRIDE % 1) * 60));
+  // `heldHourMs` is the one rule for "that hour on the island today"
+  // (`world/weather/solar.ts`); the player's time slider holds the sky
+  // with the same function, so the address bar and the control cannot
+  // drift apart.
+  const held = heldHourMs(Date.now(), HOUR_OVERRIDE);
   return () => held;
 }
 
@@ -442,6 +445,9 @@ export function registerScenes(options: RegisterScenesOptions = {}): void {
         weatherCache: weatherCacheOver(ctx.storage),
         clock: worldClock(),
         skyOverride: SKY_OVERRIDE,
+        // So the sheet can say `held` when the address bar is holding
+        // the clock, not only when the player's slider is.
+        hourOverride: HOUR_OVERRIDE,
         settings: () => openSettings(ctx.storage).read(),
         // The two settings the world writes, both from controls on the
         // stat sheet itself, so each survives a reload: the HUD's fold
@@ -455,6 +461,13 @@ export function registerScenes(options: RegisterScenesOptions = {}): void {
         onFinderToggle: (on) => {
           const store = openSettings(ctx.storage);
           store.write({ ...store.read(), finderOn: on });
+        },
+        // The held hour, so a sky set for a look survives the reload the
+        // update check performs on a push. The world refuses it in a
+        // room; this only writes what the world reports.
+        onTimeChange: (hour) => {
+          const store = openSettings(ctx.storage);
+          store.write({ ...store.read(), timeOfDay: hour });
         },
         tierOverride: TIER_OVERRIDE,
         detailOverride: DETAIL_OVERRIDE,
