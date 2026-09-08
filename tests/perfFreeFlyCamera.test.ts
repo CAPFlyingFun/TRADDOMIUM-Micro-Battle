@@ -52,6 +52,21 @@ function push(x: number, y: number): StickReading {
 }
 
 describe('FreeFlyCamera', () => {
+  it('slows both keys and touch for soil inspection, then restores the selected normal pace', () => {
+    const cam = flyRig();
+    cam.setSoilInspection(true);
+    cam.update(snap({ keys: ['KeyW'] }), 1);
+    expect(cam.camera.position.z).toBeCloseTo(-30);
+    cam.place(0, 0, 0, 0, 0);
+    cam.update(snap(), 1, push(0, 1));
+    expect(cam.camera.position.z).toBeCloseTo(-30);
+    expect(cam.speed).toBe(3000);
+    cam.setSoilInspection(false);
+    cam.place(0, 0, 0, 0, 0);
+    cam.update(snap(), 1, push(0, 1));
+    expect(cam.camera.position.z).toBeCloseTo(-3000);
+  });
+
   it('starts at the default speed, with the aspect of its viewport', () => {
     const cam = new FreeFlyCamera();
     expect(cam.speed).toBe(DEFAULT_SPEED);

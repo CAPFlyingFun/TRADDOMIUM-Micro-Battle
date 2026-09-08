@@ -8,6 +8,7 @@
  * whether the world may pause, and the session answers.
  */
 import type { WorldPoint } from '../world/coords';
+import type { SoilEditsSave } from '../world/soilTypes';
 
 export type SessionMode = 'solo' | 'multiplayer';
 export type SessionAuthority = 'local' | 'server';
@@ -32,6 +33,7 @@ export interface CameraPose {
  */
 export interface SessionSaveState {
   readonly camera: CameraPose;
+  readonly terrainEdits?: SoilEditsSave;
 }
 
 export interface GameSession {

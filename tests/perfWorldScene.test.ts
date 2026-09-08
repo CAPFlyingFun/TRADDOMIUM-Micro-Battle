@@ -880,6 +880,22 @@ describe('PerformanceWorldScene on a networked session', () => {
  * regression got through the suite that was written to catch it.
  */
 describe('PerformanceWorldScene with the real island under it', () => {
+  it('restores shared soil before drawing and keeps it at the existing save point', async () => {
+    const bytes = readFileSync(path.resolve('public/kauai-1025.bin'));
+    const session = spySession();
+    const terrainEdits = { version: 1 as const, strokes: [[0, -1, 0, 1, -1, 0, .3] as const] };
+    const saved = { camera: { at: world(0, 0), height: 100_000, yaw: 0, pitch: 0 }, terrainEdits };
+    const { scene, uiLayer, savePoint, frame } = rig('loading', {
+      session, resume: () => saved,
+      survey: async () => bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
+    });
+    await scene.enter?.(); frame(0);
+    expect(uiLayer.querySelector('[data-action="soil"]')).not.toBeNull();
+    await savePoint()!();
+    expect(session.save).toHaveBeenLastCalledWith(expect.objectContaining({ terrainEdits }));
+    scene.dispose?.(); uiLayer.remove();
+  });
+
   // `process.cwd()`, not `import.meta.url`: this file runs under jsdom,
   // where import.meta.url is not a file URL. vitest's cwd is the repo root.
   const demBytes = (): ArrayBuffer => {

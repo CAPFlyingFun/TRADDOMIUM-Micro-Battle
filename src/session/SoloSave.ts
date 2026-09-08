@@ -22,6 +22,7 @@ import {
   boundedString, defineStore, finiteNumber, isRecord, type KeyValueStore, type StoreSpec, type Versioned,
 } from '../persistence/store';
 import { ISLAND_SPAN, world } from '../world/coords';
+import { readSoilEdits, type SoilEditsSave } from '../world/soilTypes';
 import type { CameraPose } from './GameSession';
 
 export interface SoloSave extends Versioned {
@@ -29,6 +30,7 @@ export interface SoloSave extends Versioned {
   readonly savedAt: string | null;
   readonly mapId: string;
   readonly camera: CameraPose;
+  readonly terrainEdits?: SoilEditsSave;
 }
 
 /**
@@ -108,11 +110,13 @@ export function soloSaveSpec(knownMap: KnownMap, key: string = SOLO_SAVE_KEY): S
       const r = isRecord(raw) ? raw : {};
       const mapId = boundedString(r.mapId, defaults.mapId, 64);
       if (mapId.length > 0 && !knownMap(mapId)) return { ...defaults, camera: sanitizeCameraPose(undefined, defaults.camera) };
+      const terrainEdits = readSoilEdits(r.terrainEdits);
       return {
         version: SOLO_SAVE_VERSION,
         savedAt: typeof r.savedAt === 'string' ? r.savedAt : defaults.savedAt,
         mapId,
         camera: sanitizeCameraPose(r.camera, defaults.camera),
+        ...(terrainEdits === undefined ? {} : { terrainEdits }),
       };
     },
   };

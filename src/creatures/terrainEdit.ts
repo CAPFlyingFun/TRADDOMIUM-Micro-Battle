@@ -1,6 +1,5 @@
 /**
- * THE ONE DOOR TO THE GROUND — the terrain-edit seam, no-op until the
- * voxel milestone builds it.
+ * THE ONE DOOR TO THE GROUND — the terrain-edit seam, shared voxel layer, with a no-op fallback.
  *
  * THE RULE (Joshua, 2026-09-07, the ecology pass): only EXPLICITLY
  * AUTHORISED actors may change the terrain —
@@ -13,27 +12,15 @@
  *   water, rain, rivers, ocean, weather, walking, vegetation growth,
  *   aphids, flies. WATER NEVER CARVES OR ERODES THE TERRAIN in v1.
  *
- * And his instruction for this milestone, verbatim in spirit: "If the
- * voxel terrain contract is not yet implemented, do not invent a second
- * private worm-only terrain deformation system. Leave the worm's
- * burrowing edit behind that shared contract." There is no voxel
- * contract in v1 yet — `world/heightfield.ts` is a read-only survey and
- * the standing rule is "the terrain is not ours to move" — so this file
- * is the contract's shape and `NO_BURROW_EDITOR` is its implementation.
- * The worm burrows (moves under the surface, surfaces, casts) and the
- * ground does not change, and the HUD can say so, because
- * `BurrowEditor.built` is a fact and not a hope (§2.9).
- *
- * WHAT THE SEAM IS SHAPED FOR. A burrower reports where it bored and how
- * wide, in world units, and the editor answers whether anything changed.
- * The editor owns the ground; the creature owns nothing of it. When the
- * voxel milestone lands, the integration pass constructs the real editor
- * with the same three arguments and the simulation, the species data
- * and the tests do not change.
+ * Alpha.27 implements this seam with the shared world/SparseSoil field.
+ * NO_BURROW_EDITOR remains the truthful fallback for unbuilt worlds and
+ * remote sessions without authoritative terrain replication. Neither the
+ * creature nor its renderer owns a separate soil system.
  *
  * Pure: no three, no DOM. `src/creatures/` is core.
  */
 import type { WorldPoint } from '../world/coords';
+import type { SoilPoint } from '../world/soilTypes';
 
 export interface BurrowEditor {
   /** Does the build implement terrain editing at all? An unbuilt editor is honest about it. */
@@ -43,10 +30,10 @@ export interface BurrowEditor {
    * centre above mean sea level and `radius` its half-width, world units.
    * Returns true when the ground changed.
    */
-  bore(at: WorldPoint, height: number, radius: number): boolean;
+  bore(at: WorldPoint, height: number, radius: number, from?: SoilPoint): boolean;
 }
 
-/** The editor this build has: none. The worm burrows; the survey stands. */
+/** Unbuilt/remote-world fallback: never silently make private terrain edits. */
 export const NO_BURROW_EDITOR: BurrowEditor = Object.freeze({
   built: false,
   bore: () => false,
@@ -66,7 +53,7 @@ export interface BurrowGate {
   readonly applied: number;
   /** Bores refused because the caller was not an authorised editor. */
   readonly refused: number;
-  bore(canEditTerrain: boolean, at: WorldPoint, height: number, radius: number): boolean;
+  bore(canEditTerrain: boolean, at: WorldPoint, height: number, radius: number, from?: SoilPoint): boolean;
 }
 
 export function burrowGate(editor: BurrowEditor = NO_BURROW_EDITOR): BurrowGate {
@@ -75,13 +62,13 @@ export function burrowGate(editor: BurrowEditor = NO_BURROW_EDITOR): BurrowGate 
     attempted: 0,
     applied: 0,
     refused: 0,
-    bore(canEditTerrain: boolean, at: WorldPoint, height: number, radius: number): boolean {
+    bore(canEditTerrain: boolean, at: WorldPoint, height: number, radius: number, from?: SoilPoint): boolean {
       if (!canEditTerrain) {
         gate.refused += 1;
         return false;
       }
       gate.attempted += 1;
-      const changed = editor.bore(at, height, radius);
+      const changed = editor.bore(at, height, radius, from);
       if (changed) gate.applied += 1;
       return changed;
     },

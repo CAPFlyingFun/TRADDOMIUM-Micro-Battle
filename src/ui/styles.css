@@ -411,3 +411,17 @@
     gap: 2px;
   }
 }
+
+/* Soil observer controls. */
+.soil-inspector { position: absolute; right: max(12px, env(safe-area-inset-right)); bottom: max(18px, env(safe-area-inset-bottom)); z-index: 4; color: #e8e2c8; font: 13px/1.35 system-ui, sans-serif; pointer-events: auto; }
+.soil-inspector > button { float: right; min-width: 76px; }
+.soil-inspector button { min-height: 48px; padding: 8px 14px; border: 1px solid #c9a94a; border-radius: 6px; color: #e8e2c8; background: #171c14; font: inherit; cursor: pointer; touch-action: manipulation; }
+.soil-inspector button:focus-visible, .soil-inspector input:focus-visible { outline: 2px solid #f6d56a; outline-offset: 3px; }
+.soil-inspector section { width: min(272px, calc(100vw - 30px)); max-height: calc(100dvh - 150px); overflow: auto; margin-bottom: 8px; padding: 12px; border: 1px solid #897b42; border-radius: 8px; background: rgba(9, 14, 11, .96); box-sizing: border-box; }
+.soil-inspector section[hidden] { display: none; }
+.soil-inspector-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.soil-inspector strong { letter-spacing: .12em; color: #c9a94a; }
+.soil-inspector label { display: block; margin-top: 10px; }
+.soil-inspector input { display: block; width: 100%; height: 44px; margin: 0; accent-color: #c9a94a; touch-action: pan-x; }
+.soil-inspector p { margin: 6px 0 0; }
+.soil-inspector p:last-child { color: #bbc2ae; font-size: 12px; }

@@ -172,6 +172,7 @@ export class FreeFlyCamera {
   private yaw = 0;
   private pitch = 0;
   private speedValue = DEFAULT_SPEED;
+  private movementScale = 1;
   private look: LookTuning = { sensitivity: 1, invertY: false };
   private readonly forward = new THREE.Vector3();
   private readonly right = new THREE.Vector3();
@@ -196,8 +197,11 @@ export class FreeFlyCamera {
 
   readout(): CameraReadout {
     const p = this.camera.position;
-    return { x: p.x, y: p.y, z: p.z, facing: headingOfYaw(this.yaw), pitch: this.pitch, speed: this.speedValue };
+    return { x: p.x, y: p.y, z: p.z, facing: headingOfYaw(this.yaw), pitch: this.pitch, speed: this.speedValue * this.movementScale };
   }
+
+  /** A temporary microscope pace; the player's normal speed rung stays selected. */
+  setSoilInspection(enabled: boolean): void { this.movementScale = enabled ? .01 : 1; }
 
   /** A non-finite or non-positive sensitivity is ignored; the flag is always taken. */
   setLook(tuning: LookTuning): void {
@@ -319,7 +323,7 @@ export class FreeFlyCamera {
       if (this.move.lengthSq() > full * full) this.move.setLength(full);
     }
     this.move.y += lift * full;
-    this.camera.position.addScaledVector(this.move, step);
+    this.camera.position.addScaledVector(this.move, step * this.movementScale);
   }
 
   private applyRotation(): void {

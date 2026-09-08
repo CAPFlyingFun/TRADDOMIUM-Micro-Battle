@@ -16,6 +16,7 @@ import { distance, world, type WorldPoint } from '../src/world/coords';
 import type { PlantSource } from '../src/world/ecology/resources';
 import { SEA_HABITAT, type Habitat, type HabitatKind } from '../src/world/habitat';
 import { CELL_SPAN, cellAt, cellOrigin, cellsWithin } from '../src/world/objects/cells';
+import type { SoilPoint } from '../src/world/soilTypes';
 
 function habitat(kind: HabitatKind, elevation: number): Habitat {
   return {
@@ -269,6 +270,26 @@ describe('thinking is throttled', () => {
 });
 
 describe('the one door to the ground', () => {
+  it('sweeps the entire travelled path and includes vertical surfacing, not just burrow mode', () => {
+    const calls: { from: SoilPoint | undefined; to: SoilPoint }[] = [];
+    const editor: BurrowEditor = { built: true, bore: (at, height, _radius, from) => {
+      calls.push({ from, to: { at, height } }); return true;
+    } };
+    const sim = new CreatureSim({ world: fakeWorld('wetland'), seed: 3, editor, species: allFull([EARTHWORM]) });
+    settle(sim, FOCUS);
+    const worm = sim.creatures()[0];
+    const start = { at: worm.at, height: ground(worm.at) - 1.2 };
+    worm.height = start.height;
+    worm.behaviour = 'surface'; worm.behaviourUntilS = 999; worm.sinceThink = -999;
+    worm.target = worm.at;
+    for (let i = 0; i < 120; i++) sim.update(FOCUS, 1 / 60);
+    const mine = calls.filter(c => distance(c.to.at, start.at) < 1);
+    expect(mine.length).toBeGreaterThan(0);
+    expect(mine[0].from).toEqual(start);
+    expect(mine.some(c => c.from !== undefined && c.to.height > c.from.height)).toBe(true);
+    for (let i = 1; i < mine.length; i++) expect(mine[i].from).toEqual(mine[i - 1].to);
+  });
+
   function spy(): BurrowEditor & { calls: number } {
     const e = { built: true, calls: 0, bore: (): boolean => { e.calls += 1; return true; } };
     return e;

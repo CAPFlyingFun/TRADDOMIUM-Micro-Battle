@@ -73,6 +73,7 @@ export default defineConfig({
   // Relative base so the build works from a GitHub Pages project path.
   base: './',
   plugins: [versionStamp],
+  server: { allowedHosts: ['terminal.local'] },
   define: {
     __APP_VERSION__: JSON.stringify(version),
     __BUILD_COMMIT__: JSON.stringify(HEAD),

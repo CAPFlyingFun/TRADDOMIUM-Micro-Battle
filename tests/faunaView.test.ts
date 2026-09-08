@@ -327,6 +327,23 @@ describe('the worm', () => {
     expect(lift).toBeLessThan(unitsOfMm(EARTHWORM.lengthMm) * 0.1);
   });
 
+  it('reveals a buried worm at its real height when the soil ceiling is cut away', async () => {
+    let ceiling = 10;
+    const v = await keep(view('ultra-low', loader(), { groundAt: () => 10, ceilingAt: () => ceiling }));
+    const worm = creature('earthworm', 'buried-section', 0, 0, { height: 8.8, behaviour: 'burrow' });
+    v.update([worm], world(0, 0), 0, 12);
+    expect(v.cost.rigsLent.earthworm).toBe(0);
+    ceiling = 8.8;
+    v.update([worm], world(0, 0), 0, 12);
+    expect(v.cost.rigsLent.earthworm).toBe(1);
+    const bones: THREE.Bone[] = [];
+    v.group.traverse(o => { if (o instanceof THREE.Bone) bones.push(o); });
+    v.group.updateMatrixWorld(true);
+    expect(bones.length).toBeGreaterThan(0);
+    expect(bones.some(b => b.getWorldPosition(new THREE.Vector3()).y < 9.5)).toBe(true);
+    expect(worm.height).toBe(8.8);
+  });
+
   it('LIES ON THE GROUND on a slope, dragging no part of itself through the hill', async () => {
     // Joshua, 2026-09-08, with the finder on: the worm is "halfway on the
     // surface and ground like it's swimming".

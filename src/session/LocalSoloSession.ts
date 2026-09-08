@@ -51,8 +51,16 @@ export class LocalSoloSession implements GameSession {
    * never overwrite a real pose with the default one.
    */
   async save(state?: SessionSaveState): Promise<void> {
-    const camera = state?.camera ?? this.saves.read().camera;
-    this.saves.write({ version: SOLO_SAVE_VERSION, savedAt: this.now(), mapId: this.mapId, camera });
+    const existing = this.saves.read();
+    const camera = state?.camera ?? existing.camera;
+    const terrainEdits = state?.terrainEdits ?? existing.terrainEdits;
+    this.saves.write({
+      version: SOLO_SAVE_VERSION,
+      savedAt: this.now(),
+      mapId: this.mapId,
+      camera,
+      ...(terrainEdits === undefined ? {} : { terrainEdits }),
+    });
   }
 
   /** The save for THIS map, or null when there is none — a fresh start, not a default pose. */
@@ -163,5 +171,7 @@ export function toolSoloSlot(kv: KeyValueStore, knownMap: KnownMap, mapId: strin
 export function restorableStateOf(session: GameSession | null): SessionSaveState | null {
   if (!(session instanceof LocalSoloSession)) return null;
   const save = session.load();
-  return save ? { camera: save.camera } : null;
+  return save
+    ? { camera: save.camera, ...(save.terrainEdits === undefined ? {} : { terrainEdits: save.terrainEdits }) }
+    : null;
 }

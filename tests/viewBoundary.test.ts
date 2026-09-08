@@ -152,7 +152,7 @@ describe('the world/terrain seam', () => {
 
   it('converts through the floating origin, and reads no world coordinate by hand', () => {
     const originImporters = terrainSites.filter((s) => ORIGIN.test(s.specifier));
-    expect(originImporters.map((s) => s.file)).toEqual(['TerrainView.ts']);
+    expect(originImporters.map((s) => s.file)).toEqual(['SoilClip.ts', 'SoilView.ts', 'TerrainView.ts']);
     expect(originImporters[0].typeOnly).toBe(false);
     expect(code(terrain.get('TerrainView.ts') ?? '')).toMatch(/\btoLocal\(/);
     for (const [file, src] of terrain) {

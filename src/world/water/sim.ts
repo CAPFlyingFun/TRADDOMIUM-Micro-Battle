@@ -435,6 +435,7 @@ export class WaterSim implements WaterSource<'fresh'> {
     const half = (this.n * this.cell) / 2;
     const nx = snapped.wx - half;
     const nz = snapped.wz - half;
+    let moved = false;
 
     if (this.placed) {
       const shiftX = Math.round((nx - this.ox) / this.cell);
@@ -443,20 +444,25 @@ export class WaterSim implements WaterSource<'fresh'> {
       // tiles land under a standing player, so an unmoved window still
       // has to re-read the ground when the survey says it changed.
       if (shiftX === 0 && shiftZ === 0 && revision === this.bedRevision) return;
-      if (shiftX !== 0 || shiftZ !== 0) this.carryWater(shiftX, shiftZ);
+      moved = shiftX !== 0 || shiftZ !== 0;
+      if (moved) this.carryWater(shiftX, shiftZ);
     } else {
       this.water.fill(0);
     }
     this.ox = nx;
     this.oz = nz;
     this.placed = true;
-    this.fillBed(bedAt);
+    const bedChanged = this.fillBed(bedAt);
     this.bedRevision = revision;
-    // The pipes described a grid that has moved out from under them.
-    this.fl.fill(0);
-    this.fr.fill(0);
-    this.ft.fill(0);
-    this.fb.fill(0);
+    // A same-window revision may be an underground soil edit whose roof
+    // leaves every water-bed sample unchanged. Those pipes still describe
+    // this grid; clearing them would erase the flow already under way.
+    if (moved || bedChanged) {
+      this.fl.fill(0);
+      this.fr.fill(0);
+      this.ft.fill(0);
+      this.fb.fill(0);
+    }
   }
 
   /**
@@ -717,16 +723,21 @@ export class WaterSim implements WaterSource<'fresh'> {
    * heightfield already refuses an unrepaired grid for the same reason;
    * this is the second lock on the same door.
    */
-  private fillBed(bedAt: (at: WorldPoint) => number): void {
+  private fillBed(bedAt: (at: WorldPoint) => number): boolean {
+    let changed = false;
     for (let cy = 0; cy < this.n; cy += 1) {
       for (let cx = 0; cx < this.n; cx += 1) {
         const h = bedAt(this.pointOf(cx, cy));
         if (!Number.isFinite(h)) {
           throw new Error(`water/sim: the ground at cell ${cx},${cy} read ${h}`);
         }
-        this.bed[cy * this.n + cx] = h;
+        const i = cy * this.n + cx;
+        const before = this.bed[i];
+        this.bed[i] = h;
+        if (this.bed[i] !== before) changed = true;
       }
     }
+    return changed;
   }
 
   /** Carry the water still inside the window to its new cell. Whole cells only. */

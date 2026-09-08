@@ -754,6 +754,29 @@ describe('the drawn ground converges on heightAt near the camera, on the real su
     return fc + fr <= 1 ? ha + fc * (hb - ha) + fr * (hc - ha) : hd + (1 - fc) * (hc - hd) + (1 - fr) * (hb - hd);
   };
 
+  it('reports the actual drawn triangle for a soil seam, including after an origin shift', () => {
+    const field = surveyed();
+    const view = new TerrainView({ field });
+    expect(view.drawnHeightAt(CANYON)).toBeNull();
+    setOrigin(CANYON);
+    view.update(CANYON);
+    const finest = meshes(view)[0];
+    const points = probes();
+    let surveyDifference = 0;
+    for (const at of points) {
+      const drawn = view.drawnHeightAt(at)!;
+      expect(drawn).toBeCloseTo(drawnHeight(finest, at), 7);
+      surveyDifference = Math.max(surveyDifference, Math.abs(drawn - field.heightAt(at)));
+    }
+    expect(surveyDifference).toBeGreaterThan(.1); // A second heightAt call cannot satisfy this seam.
+    expect(view.drawnHeightAt(translate(CANYON, 20_000, 0))).toBeNull();
+    setOrigin(translate(CANYON, 100_000, -100_000));
+    view.update(CANYON);
+    for (const at of points) expect(view.drawnHeightAt(at)).toBeCloseTo(drawnHeight(finest, at), 7);
+    view.dispose();
+    setOrigin(world(0, 0));
+  });
+
   it('draws the canyon wall within 5 cm of heightAt at every probe within 40 m of the camera', () => {
     const field = surveyed();
     expect(field.sample(CANYON).detail).toBe('hd');
@@ -929,7 +952,7 @@ describe('the ground reads wet where the sea and the rain leave it', () => {
     expect(frag.split(LAMBERT_OUTGOING)[1]).not.toMatch(/directSpecular/);
 
     const shader = compile(view);
-    expect(Object.keys(shader.uniforms).sort()).toEqual(['uRainWet', 'uWetFade', 'uWetTop']);
+    expect(Object.keys(shader.uniforms).sort()).toEqual(['uRainWet', 'uSoilMask', 'uSoilOrigin', 'uWetFade', 'uWetTop']);
     // The uniforms are the view's own objects, so setWetness reaches a
     // compiled program with no re-binding.
     view.setWetness({ shoreTop: 60, shoreFade: 72, rain: 0.5 });

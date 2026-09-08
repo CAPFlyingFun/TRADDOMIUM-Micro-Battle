@@ -48,7 +48,7 @@ const forest: CreaturesReadout = {
   flies: { resident: 30, near: 12, full: 4, cap: 50 },
   thinkMs: 0.4, moveMs: 0.3, drawMs: 0.2, rigs: 46,
   resources: { sites: 96, waterEdges: 4 },
-  ground: { built: false, attempted: 0 },
+  ground: { built: false, applied: 0 },
 };
 
 interface RigOptions {
@@ -151,13 +151,13 @@ describe('the ecology block: what it prints', () => {
   });
 
   it('prints the bore count only from a seam that says it is built', () => {
-    let ground = { built: false, attempted: 12 };
+    let ground = { built: false, applied: 12 };
     const { hud, field } = rig({ creatures: () => ({ ...forest, ground }) });
     hud.update(readout(), 1);
     // Twelve bores went to a no-op editor: nothing was edited, and the
     // line does not print how many times nothing happened.
     expect(field('eco-ground')).toBe('ground edits off');
-    ground = { built: true, attempted: 12 };
+    ground = { built: true, applied: 12 };
     hud.update(readout(), 1);
     expect(field('eco-ground')).toBe('ground edits 12');
   });
@@ -197,7 +197,7 @@ describe('the ecology block: its width and its place', () => {
       flies: { resident: 80, near: 80, full: 80, cap: 80 },
       thinkMs: 99.9, moveMs: 99.9, drawMs: 99.9, rigs: 440,
       resources: { sites: 9_999, waterEdges: 99 },
-      ground: { built: true, attempted: 999_999 },
+      ground: { built: true, applied: 999_999 },
     };
     const { hud, field } = rig({ objects: () => ({ ...lawn, plants: 60_000 }), creatures: () => worst });
     hud.update(readout(), 1);
@@ -215,7 +215,7 @@ describe('the ecology block: its width and its place', () => {
 
   it('keeps a count short past ten thousand, so a long session cannot grow the line', () => {
     const { hud, field } = rig({
-      creatures: () => ({ ...forest, resources: { sites: 25_000, waterEdges: 999 }, ground: { built: true, attempted: 12_345_678 } }),
+      creatures: () => ({ ...forest, resources: { sites: 25_000, waterEdges: 999 }, ground: { built: true, applied: 12_345_678 } }),
     });
     hud.update(readout(), 1);
     expect(field('eco-resources')).toBe('sites 25k wet 999');

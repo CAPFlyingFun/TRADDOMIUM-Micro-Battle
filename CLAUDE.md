@@ -200,9 +200,12 @@ its own.
   creatures, a tool granted the right — and everything else NEVER does:
   water, rain, rivers, the sea, the weather, walking, growth, aphids,
   flies. A burrower's only door is `creatures/terrainEdit.ts`, the
-  species table says which species may knock, and the editor this
-  build has is the no-op: no voxel contract exists yet, so the worm
-  burrows and the survey stands, and the HUD's ground line says so.
+  species table says which species may knock. Alpha.27 implements that
+  seam with `world/SparseSoil.ts`: saved world-addressed capsule deltas
+  sampled on a 1 mm lattice, separate from the immutable survey. The
+  detailed local editor runs within 1 m horizontally / 2 m vertically
+  of the observer. Remote rooms retain the no-op until authoritative
+  terrain replication exists. The HUD counts APPLIED edits, not attempts.
   Do not build a second, private way to deform the ground for one
   creature. The creatures themselves follow the objects' rule — one
   seed, a 16 m cell and the habitat say where an animal is; the rung
@@ -210,6 +213,14 @@ its own.
   maximums; every number in `creatures/species.ts` is labelled
   MEASURED, BIOLOGICAL SHAPE or GAME TUNING; and `creatures/` is core,
   so a server can run the same tick.
+  Soil meshes stream without deleting edits. SoloSave v2 carries the
+  additive `terrainEdits` document (8,192 bounded strokes per slot); an
+  exhausted journal refuses new cuts visibly rather than erasing old
+  tunnels. `SoilView` publishes completed columns before `TerrainView`
+  clips its coarse sheet. SOIL is an observer cutaway only: it never digs,
+  and its temporary camera pace restores the normal rung when closed.
+  Player DIG/BUILD, ant collision/navigation, full nest planning and cave
+  flooding are still later milestones. Water only reads `surfaceAt`.
 - **The sky is the island's, or it says so** (Phase 5, 2026-09-07). The
   weather is read live from Open-Meteo over the 22-station grid, kept
   for three hours, and only then falls back to the seeded model — and
@@ -253,7 +264,9 @@ its own.
 
 Measure rather than assume. `npm run typecheck`, `npm test`,
 `npm run build`, `npm run probe:boot`; read `package.json` for the current
-list. CI runs typecheck + test + build + `relay:typecheck` on every push.
+list. `npm run probe:soil` checks worm cuts, the soil controls at phone/PC
+viewport sizes, and saved reload against the built game. CI runs typecheck +
+test + build + `relay:typecheck` on every push.
 
 `npm run typecheck` is NOT the whole typecheck. `worker/` compiles
 `src/net/` against the workers runtime — no DOM lib, no vite defines, no

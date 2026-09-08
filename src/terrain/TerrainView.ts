@@ -211,6 +211,8 @@ import { SEA_LEVEL, normalOfGradient, slopeOfUp, type Heightfield } from '../wor
 import { samePoint, snapTo, translate, type WorldPoint } from '../world/coords';
 import { toLocal } from '../world/origin';
 import type { WetnessSignals } from './wetness';
+import type { SoilTile } from '../world/SparseSoil';
+import { SoilClip } from './SoilClip';
 
 /** Quads across one ring, each way. 64 keeps a ring at 4,225 vertices. */
 export const RING_QUADS = 64;
@@ -411,6 +413,7 @@ interface Ring {
 }
 
 export class TerrainView {
+  private readonly soilClip = new SoilClip();
   readonly group = new THREE.Group();
   private readonly rings: Ring[] = [];
   private readonly field: Heightfield;
@@ -457,7 +460,7 @@ export class TerrainView {
     // otherwise be handed this shader, or this one handed the plain one
     // (`sea/waterLook.ts` lost its waves to exactly that). The key names
     // the patch and its version.
-    this.material.customProgramCacheKey = () => 'terrain:wetness:1';
+    this.material.customProgramCacheKey = () => 'terrain:wetness:1:soil:1';
     this.material.onBeforeCompile = (shader) => {
       shader.uniforms.uWetTop = this.uWetTop;
       shader.uniforms.uWetFade = this.uWetFade;
@@ -470,6 +473,7 @@ export class TerrainView {
         .replace('#include <color_fragment>', `#include <color_fragment>\n${WET_ALBEDO}`)
         .replace('#include <lights_fragment_end>', `#include <lights_fragment_end>\n${WET_HIGHLIGHT}`)
         .replace(LAMBERT_OUTGOING, LAMBERT_OUTGOING_WITH_SPECULAR);
+      this.soilClip.patch(shader);
     };
 
     for (let level = 0; level < levels; level += 1) {
@@ -591,6 +595,32 @@ export class TerrainView {
     return this.rings.reduce((total, r) => total + r.geometry.getAttribute('position').count, 0);
   }
 
+  /**
+   * The innermost drawn sheet, for joining a voxel patch to its actual
+   * triangles. This is a render seam only; creatures and water continue
+   * to read the survey/soil. Null outside the ready innermost ring.
+   */
+  drawnHeightAt(at: WorldPoint): number | null {
+    const ring = this.rings[0];
+    if (!ring?.centre) return null;
+    const local = toLocal(at);
+    const half = this.quads * ring.quad / 2;
+    const x = (local.lx - ring.mesh.position.x + half) / ring.quad;
+    const z = (local.lz - ring.mesh.position.z + half) / ring.quad;
+    if (!Number.isFinite(x + z) || x < 0 || z < 0 || x > this.quads || z > this.quads) return null;
+    const col = Math.min(this.quads - 1, Math.floor(x));
+    const row = Math.min(this.quads - 1, Math.floor(z));
+    const u = x - col, v = z - row;
+    const position = ring.geometry.getAttribute('position');
+    const a = row * (this.quads + 1) + col;
+    const ha = position.getY(a), hb = position.getY(a + 1);
+    const hc = position.getY(a + this.quads + 1), hd = position.getY(a + this.quads + 2);
+    // cutHole lays down (a,c,b) and (b,c,d). Reading the stored heights
+    // also includes edge stitching and the revision actually rendered.
+    return u + v <= 1 ? ha + u * (hb - ha) + v * (hc - ha)
+      : hd + (1 - u) * (hc - hd) + (1 - v) * (hb - hd);
+  }
+
   ringCount(): number {
     return this.rings.length;
   }
@@ -620,12 +650,16 @@ export class TerrainView {
     this.uRainWet.value = rain < 0 ? 0 : rain > 1 ? 1 : rain;
   }
 
+  /** Called after the soil view publishes complete column meshes. */
+  setSoilTiles(tiles: readonly SoilTile[]): void { this.soilClip.setTiles(tiles); }
+
   /** What the shader is being told. For tests and a HUD line; allocates, so not for every frame. */
   get wetness(): WetnessSignals {
     return { shoreTop: this.uWetTop.value, shoreFade: this.uWetFade.value, rain: this.uRainWet.value };
   }
 
   dispose(): void {
+    this.soilClip.dispose();
     for (const ring of this.rings) ring.geometry.dispose();
     this.material.dispose();
     this.group.clear();

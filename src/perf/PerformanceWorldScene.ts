@@ -72,6 +72,10 @@ import type { GameSession, SessionSaveState } from '../session/GameSession';
 import { ActorViews } from '../view/ActorViews';
 import { TerrainStreamer } from '../terrain/TerrainStreamer';
 import { TerrainView } from '../terrain/TerrainView';
+import { SoilView } from '../terrain/SoilView';
+import { SparseSoil } from '../world/SparseSoil';
+import { SOIL_TILE } from '../world/soilTypes';
+import { SoilInspector } from '../ui/SoilInspector';
 import { OceanView, TIER_OCTAVES as OCEAN_OCTAVES } from '../sea/OceanView';
 import { blendSight, underwaterLook } from '../sea/underwaterLook';
 import { IslandWater } from '../water/IslandWater';
@@ -113,7 +117,7 @@ import { COARSE_BYTES, decodeCoarse, type DemGrid } from '../world/dem';
 import { repairGrid } from '../world/demRepair';
 import { Heightfield, SEA_LEVEL } from '../world/heightfield';
 import { toLocal } from '../world/origin';
-import { compassBearing, type WorldPoint } from '../world/coords';
+import { compassBearing, distanceSquared, translate, type WorldPoint } from '../world/coords';
 import { BotHud, type BotReadout } from './BotHud';
 import { FrameStats } from './FrameStats';
 import { CAMERA_SPEEDS, FreeFlyCamera, headingOfYaw, yawForHeading } from './FreeFlyCamera';
@@ -708,6 +712,12 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
     let sky: THREE.HemisphereLight | null = null;
     /** The ground, once the survey has landed. Null until then, and null forever if it does not. */
     let field: Heightfield | null = null;
+    let restored: SessionSaveState | null = null;
+    let soil: SparseSoil | null = null;
+    let soilView: SoilView | null = null;
+    let soilInspector: SoilInspector | null = null;
+    let soilFocus: WorldPoint | null = null;
+    let soilDepth = 0;
     let terrain: TerrainView | null = null;
     let streamer: TerrainStreamer | null = null;
     /** What the terrain toggle was at the last look, so a change is acted on once. */
@@ -931,7 +941,7 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
     };
 
     /** How high the island is under a world position, for drawing something standing on it. */
-    const groundUnder = (at: WorldPoint): number => (field === null ? 0 : field.heightAt(at));
+    const groundUnder = (at: WorldPoint): number => soil?.surfaceAt(at) ?? field?.heightAt(at) ?? 0;
 
     /**
      * Make the instrumentation list match the group of capsule meshes,
@@ -1091,8 +1101,12 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
       fresh = null;
       waterQuery = null;
       if (channels !== null) {
+        const survey = field;
         fresh = new IslandWater({
-          field,
+          field: {
+            heightAt: groundUnder,
+            revision: () => survey.revision() + (soil?.revision ?? 0),
+          },
           swell,
           textures: seaTextures,
           detail,
@@ -1200,6 +1214,16 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
       if (creatures === null) {
         const ground = field;
         creatures = new CreatureSim({
+          // Only the detailed local soil runs real edits. Remote rooms wait
+          // for the shared authoritative journal; the gate stays unbuilt.
+          editor: soil === null ? undefined : {
+            built: true,
+            bore: (at, height, radius, from) => {
+              const eye = fly.pose();
+              if (distanceSquared(at, eye.at) > 100 * 100 || Math.abs(height - eye.height) > 200) return false;
+              return soil!.dig('burrower', from ?? { at, height }, { at, height }, radius);
+            },
+          },
           world: {
             groundAt: (at) => ground.heightAt(at),
             normalAt: (at) => ground.normalAt(at),
@@ -1239,6 +1263,10 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
           loadModel: assets.loadModel,
           rung: detail,
           groundAt: (at) => ground.heightAt(at),
+          ceilingAt: at => {
+            const ready = soilDepth > 0 && soilView?.readyTiles.some(t => t.tx === Math.floor(at.wx / SOIL_TILE) && t.tz === Math.floor(at.wz / SOIL_TILE));
+            return ground.heightAt(at) - (ready ? soilDepth : 0);
+          },
         });
         // The rigs load in the background; the impostors carry the
         // animals until they arrive, and a rig that never arrives is a
@@ -1358,6 +1386,36 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
      * GROUND when the animal is under it); this only turns its heading
      * into a camera yaw, which is the one place that conversion lives.
      */
+    const inspectWorm = (): boolean => {
+      if (creatures === null || field === null) return false;
+      const worms = creatures.creatures().filter(c => c.species === 'earthworm');
+      const buried = worms.filter(c => c.height < field!.heightAt(c.at) - .3);
+      const pose = fly.pose();
+      const near = nearestSighting(buried.length ? buried : worms, pose.at, {
+        groundAt: at => field!.heightAt(at), preferVisible: false,
+      });
+      if (!near) return false;
+      soilFocus = near.at;
+      const at = translate(near.at, Math.sin(pose.yaw) * 22, Math.cos(pose.yaw) * 22);
+      const height = Math.max(field.heightAt(near.at) + 18, field.heightAt(at) + 8);
+      const local = toLocal(at);
+      placeCamera(local.lx, height, local.lz, pose.yaw, -Math.atan2(height - near.height, 22));
+      if (hud) hud.collapsed = true;
+      return true;
+    };
+
+    const updateSoil = (): void => {
+      if (!soil || !soilView || !field || !terrain) return;
+      const focus = soilDepth > 0 && soilFocus ? soilFocus : fly.pose().at;
+      soilView.group.visible = terrain.group.visible;
+      // An observer section removes the overhead vegetation from the
+      // view; closing it restores the player's vegetation layer choice.
+      if (objects) objects.group.visible = objectsOn && soilDepth === 0;
+      soilView.update(focus, soilDepth, field.revision());
+      terrain.setSoilTiles(soilView.readyTiles);
+      soilInspector?.update(soil.strokeCount, soil.atLimit, soilView.cost.pending > 0);
+    };
+
     const goToNearest = (): void => {
       if (creatures === null || !finderOn) return;
       const pose = fly.pose();
@@ -1866,7 +1924,7 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
 
     /** The save point: the camera, in world coordinates, through whichever session the app holds. */
     const save = async (): Promise<void> => {
-      await ctx.app.session?.save({ camera: fly.pose() });
+      await ctx.app.session?.save({ camera: fly.pose(), ...(soil ? { terrainEdits: soil.snapshot() } : {}) });
     };
 
     const stateChanged = (state: AppState): void => {
@@ -1886,6 +1944,7 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         // the camera may fly (`paceFor`), and the camera is placed long
         // before the wire is built.
         networked = ctx.app.session !== null && ctx.app.session.mode === 'multiplayer';
+        restored = hooks.resume?.() ?? null;
 
         const progress = new LoadProgress();
         progress.define(MILESTONES);
@@ -1929,6 +1988,11 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
             const repaired = repairGrid(decodeCoarse(bytes)).grid;
             coarseGrid = repaired;
             field = new Heightfield(repaired);
+            if (!networked) {
+              soil = new SparseSoil(field, restored?.terrainEdits);
+              soilView = new SoilView({ soil, drawnHeightAt: at => terrain?.drawnHeightAt(at) ?? null });
+              three.add(soilView.group);
+            }
             // WHERE THE ISLAND'S RIVERS ARE, from the island's own shape,
             // computed once here and never again. It reads the COARSE
             // survey rather than the heightfield deliberately: the
@@ -2039,7 +2103,7 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
             drawMs: fauna === null ? 0 : fauna.cost.meanMs,
             rigs: fauna === null ? 0 : CREATURE_IDS.reduce((sum, id) => sum + (fauna?.cost.rigsLent[id] ?? 0), 0),
             resources: resourcesOn && resources !== null ? { sites, waterEdges } : null,
-            ground: { built: sim.burrows.editor.built, attempted: sim.burrows.attempted },
+            ground: { built: sim.burrows.editor.built, applied: sim.burrows.applied },
           };
         };
 
@@ -2122,12 +2186,20 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
           'position:absolute;right:12px;top:8px;padding:10px 18px;font:14px system-ui,sans-serif;' +
           'color:#e8e2c8;background:#1a2014;border:1px solid #c9a94a;border-radius:6px;';
         ctx.uiLayer.appendChild(pauseButton);
+        if (soil) soilInspector = new SoilInspector(ctx.uiLayer, {
+          onWorm: inspectWorm,
+          onDepth: mm => {
+            soilDepth = mm / 10;
+            if (soilDepth > 0 && soilFocus === null) soilFocus = fly.pose().at;
+            fly.setSoilInspection(soilDepth > 0);
+          },
+        });
         reached('hud');
 
         // The saved pose replaces START only once the world exists to stand
         // in; and the save point is handed over only now, so the owner can
         // never save a camera the world has not placed.
-        const from = hooks.resume?.();
+        const from = restored;
         if (from) {
           fly.restore(from.camera);
           standClearOfGround();
@@ -2284,6 +2356,7 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         updateObjects();
         updateResources(frame.simDt);
         updateCreatures(frame.simDt);
+        updateSoil();
         // AFTER the ocean, so the swell it asks about is this frame's.
         adaptWater();
         if (net !== null) {
@@ -2359,6 +2432,9 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
       },
 
       dispose() {
+        soilInspector?.dispose(); soilInspector = null;
+        if (soilView) { three.remove(soilView.group); soilView.dispose(); soilView = null; }
+        soil = null;
         // The link goes first, with a `bye`, so the authority drops this
         // player now rather than waiting out its disconnect grace while a
         // ghost stands in everyone else's world.

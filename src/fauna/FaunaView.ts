@@ -160,6 +160,8 @@ export interface FaunaViewOptions {
   readonly origin?: FaunaOrigin;
   /** The ground's height at a point, world units — lets a burrower be hidden by DEPTH. Without it, by the burrow behaviour. */
   readonly groundAt?: (at: WorldPoint) => number;
+  /** Visible soil ceiling, including a prepared observer section; does not move the animal. */
+  readonly ceilingAt?: (at: WorldPoint) => number;
 }
 
 /** What the HUD is told. Plain numbers. */
@@ -243,6 +245,7 @@ export class FaunaView {
   private readonly loadModel: Assets['loadModel'];
   private readonly toLocal: (at: WorldPoint) => LocalPoint;
   private readonly groundAt: ((at: WorldPoint) => number) | null;
+  private readonly ceilingAt: ((at: WorldPoint) => number) | null;
   private rung: string;
   private readonly loads: Promise<void>[] = [];
   private disposed = false;
@@ -268,6 +271,7 @@ export class FaunaView {
     this.loadModel = options.loadModel;
     this.toLocal = options.origin ? (at) => options.origin!.toLocal(at) : originToLocal;
     this.groundAt = options.groundAt ?? null;
+    this.ceilingAt = options.ceilingAt ?? null;
     this.rung = options.rung;
     this.group.name = 'fauna';
     for (const species of options.species) {
@@ -554,7 +558,7 @@ export class FaunaView {
   /** Whether a creature in the near tiers is drawn at all: a burrower under the ground is not. */
   private drawn(slot: Slot, c: CreatureState): boolean {
     if (slot.species.burrow === null) return true;
-    if (this.groundAt !== null) return this.groundAt(c.at) - c.height <= BURROW_HIDE;
+    if (this.groundAt !== null) return (this.ceilingAt?.(c.at) ?? this.groundAt(c.at)) - c.height <= BURROW_HIDE;
     return c.behaviour !== 'burrow';
   }
 
@@ -658,7 +662,9 @@ export class FaunaView {
       trail.count = 0;
       const ahead = { x: Math.sin(c.heading), z: Math.cos(c.heading) };
       for (let k = TRAIL_CAPACITY - 1; k >= 0; k -= 1) {
-        this.pushCrumb(trail, translate(c.at, -k * spacing * ahead.x, -k * spacing * ahead.z), c.height);
+        const at = translate(c.at, -k * spacing * ahead.x, -k * spacing * ahead.z);
+        const depth = this.groundAt ? this.groundAt(c.at) - c.height : 0;
+        this.pushCrumb(trail, at, this.groundAt ? this.groundAt(at) - depth : c.height);
       }
     }
   }
@@ -685,7 +691,8 @@ export class FaunaView {
    * (`BURROW_HIDE`), so nothing here can pull a burrowing body up to the
    * surface — and with no ground to ask, the height stands as it is.
    */
-  private onGround(at: WorldPoint, height: number): number {
+  private onGround(at: WorldPoint, height: number, exposedBurrow = false): number {
+    if (exposedBurrow) return height;
     if (this.groundAt === null) return height;
     const ground = this.groundAt(at);
     return Number.isFinite(ground) ? Math.max(height, ground) : height;
@@ -715,20 +722,23 @@ export class FaunaView {
     const anatomy = slot.anatomy;
     const chain = anatomy?.chain ?? null;
     if (chain !== null && rig.chain.length >= 2 && rig.trail !== null) {
+      const exposedBurrow = this.groundAt !== null && this.ceilingAt !== null
+        && this.ceilingAt(c.at) < this.groundAt(c.at) - 1e-6
+        && c.height < this.groundAt(c.at) - BURROW_HIDE;
       const trail = rig.trail;
       if (distance(c.at, trail.points[trail.head]) >= trail.spacing) this.pushCrumb(trail, c.at, c.height);
       // The path: the body right now, then the crumbs, newest first,
       // each lying ON the ground under it (see `onGround`) and lifted so
       // the belly rests on it.
-      const lift = chain.lift * slot.scale;
+      const lift = exposedBurrow ? 0 : chain.lift * slot.scale;
       const path = this.path;
-      path[0] = here.lx; path[1] = this.onGround(c.at, c.height) + lift; path[2] = here.lz;
+      path[0] = here.lx; path[1] = this.onGround(c.at, c.height, exposedBurrow) + lift; path[2] = here.lz;
       let points = 1;
       for (let k = 0; k < trail.count; k += 1) {
         const i = (trail.head - k + TRAIL_CAPACITY) % TRAIL_CAPACITY;
         const l = this.toLocal(trail.points[i]);
         path[points * 3] = l.lx;
-        path[points * 3 + 1] = this.onGround(trail.points[i], trail.heights[i]) + lift;
+        path[points * 3 + 1] = this.onGround(trail.points[i], trail.heights[i], exposedBurrow) + lift;
         path[points * 3 + 2] = l.lz;
         points += 1;
       }

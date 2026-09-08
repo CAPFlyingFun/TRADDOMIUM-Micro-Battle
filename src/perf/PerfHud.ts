@@ -270,10 +270,8 @@ export interface SpeciesReadout {
  * nothing, which is a different claim.
  *
  * `ground` is the terrain-edit seam (`creatures/terrainEdit.ts`). The
- * worm burrows whether or not the seam is built, and the seam is NOT
- * built in v1 — the survey stands — so the line reads `ground edits
- * off` from `built`, a fact and not a hope (§2.9), and only a built
- * seam prints a count.
+ * local shared editor reports bores that changed soil. Unbuilt worlds and
+ * remote rooms without terrain replication still report `ground edits off`.
  *
  * Plain numbers and words: the HUD prints what it is told and never
  * learns what a `CreatureSimulation` is.
@@ -290,8 +288,8 @@ export interface CreaturesReadout {
   readonly rigs: number;
   /** The resource layer's sites inside the bubble, and how many of them are water edges. Null when the layer is off. */
   readonly resources: { readonly sites: number; readonly waterEdges: number } | null;
-  /** The terrain-edit seam: whether this build has one, and the bores handed to it. */
-  readonly ground: { readonly built: boolean; readonly attempted: number };
+  /** The terrain-edit seam: whether this build has one, and bores that actually changed soil. */
+  readonly ground: { readonly built: boolean; readonly applied: number };
 }
 
 /**
@@ -681,7 +679,7 @@ function creatureWords(c: CreaturesReadout | null): readonly [string, string, st
     // The seam's own `built`, never inferred from the count: v1 has no
     // terrain editor, the worm's bores go to a no-op, and the sheet
     // says so rather than printing how many times nothing happened.
-    c.ground.built ? `ground edits ${compact(c.ground.attempted)}` : 'ground edits off',
+    c.ground.built ? `ground edits ${compact(c.ground.applied)}` : 'ground edits off',
   ];
 }
 

@@ -171,7 +171,7 @@ export interface FreshCost {
 }
 
 export interface IslandWaterOptions {
-  readonly field: Heightfield;
+  readonly field: Pick<Heightfield, 'heightAt' | 'revision'>;
   readonly swell: SeaSwell;
   readonly textures: SeaTextures;
   readonly detail: string;
@@ -195,7 +195,7 @@ export class IslandWater {
   readonly group = new THREE.Group();
   readonly sim: WaterSim;
 
-  private readonly field: Heightfield;
+  private readonly field: Pick<Heightfield, 'heightAt' | 'revision'>;
   private readonly look: WaterLook;
   private readonly mesh: THREE.Mesh;
   private readonly n: number;

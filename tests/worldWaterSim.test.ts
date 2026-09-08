@@ -30,6 +30,7 @@ import { decodeCoarse } from '../src/world/dem';
 import { repairGrid } from '../src/world/demRepair';
 import { geoToWorld } from '../src/world/geo';
 import { Heightfield } from '../src/world/heightfield';
+import { SparseSoil } from '../src/world/SparseSoil';
 import { rainToUnitsPerSecond } from '../src/world/weather/weather';
 import { CATCHMENT_M2, catchmentM2, channelMask, flowAccumulation } from '../src/world/water/drainage';
 import {
@@ -751,6 +752,46 @@ describe('the holes the review found', () => {
     sim.placeAt(world(0, 0), bedAt, 2);
     expect(asked, 'the ground changed and the window did not notice').toBeGreaterThan(first);
     expect(sim.grid().bed[0]).toBe(2000);
+  });
+
+  it('PRESERVES FLOW when a sealed soil bore leaves every sampled bed height unchanged', () => {
+    const survey = { heightAt: (at: WorldPoint): number => 100 + at.wx * .05 };
+    const controlSoil = new SparseSoil(survey);
+    const boredSoil = new SparseSoil(survey);
+    const makeSim = (soil: SparseSoil): WaterSim => {
+      const sim = new WaterSim({ n: 16, cell: 1, dt: .02, damping: .995, soak: 0, drainRim: false });
+      sim.placeAt(CENTRE, (at) => soil.surfaceAt(at), soil.revision);
+      return sim;
+    };
+    const control = makeSim(controlSoil);
+    const bored = makeSim(boredSoil);
+    const source = new Uint8Array(16 * 16);
+    for (let cy = 6; cy < 10; cy += 1) for (let cx = 6; cx < 10; cx += 1) source[cy * 16 + cx] = 1;
+    const initial = { rainPerSecond: 0, baseflowPerSecond: 80, channels: source };
+    run(control, 240, initial);
+    run(bored, 240, initial);
+    expect(bytes(depths(bored))).toEqual(bytes(depths(control)));
+
+    expect(boredSoil.dig('burrower', { at: world(-2, 0), height: 99 }, { at: world(2, 0), height: 99 }, .3)).toBe(true);
+    expect(boredSoil.revision).toBe(1);
+    control.placeAt(CENTRE, (at) => controlSoil.surfaceAt(at), controlSoil.revision);
+    bored.placeAt(CENTRE, (at) => boredSoil.surfaceAt(at), boredSoil.revision);
+    expect(bytes(beds(bored)), 'the sealed bore changed the sampled water bed').toEqual(bytes(beds(control)));
+
+    control.step(NO_FEED);
+    bored.step(NO_FEED);
+    expect(bytes(depths(bored)), 'the unchanged bed reset persistent pipe flow').toEqual(bytes(depths(control)));
+  });
+
+  it('UPDATES THE BED when a soil opening changes a sampled surface height', () => {
+    const soil = new SparseSoil({ heightAt: () => 100 });
+    const sim = new WaterSim({ n: 8, cell: 1, dt: .02, damping: .995, soak: 0 });
+    sim.placeAt(CENTRE, (at) => soil.surfaceAt(at), soil.revision);
+    expect(sim.grid().bed[sim.index(4, 4)]).toBe(100);
+
+    expect(soil.dig('burrower', { at: world(0, 0), height: 100.2 }, { at: world(0, 0), height: 98.5 }, .3)).toBe(true);
+    sim.placeAt(CENTRE, (at) => soil.surfaceAt(at), soil.revision);
+    expect(sim.grid().bed[sim.index(4, 4)]).toBeLessThan(99);
   });
 
   it('NEVER MARKS A CHANNEL BELOW SEA LEVEL, whatever the predicate says', () => {

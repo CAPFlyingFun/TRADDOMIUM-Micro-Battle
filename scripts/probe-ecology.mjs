@@ -1,7 +1,7 @@
 /**
  * THE ISLAND'S ANIMALS, COUNTED: does the ecology pass put worms in the
  * forest and none in the sea, keep every species under its cap, say
- * plainly that the ground is not being edited, and stop when told to?
+ * how many ground edits were applied, and stop when told to?
  *
  * Phase 7 (the ecology pass, 2026-09-07) adds four layers — `resources`,
  * `worms`, `aphids`, `flies` — and seven plant families, and Joshua
@@ -366,8 +366,8 @@ async function readSite(page, url, site) {
     const s = eco[word];
     if (s.resident > s.cap) fail(`${site.name}: ${word} ${s.resident} of ${s.cap} — over the cap; a cap is a maximum`);
   }
-  // §2.9: v1 has no terrain editor. The seam is a no-op and the sheet must say so.
-  if (eco.ground !== 'off') fail(`${site.name}: eco-ground reads "${fields['eco-ground']}" — v1 has no terrain-edit seam and the line must read "ground edits off"`);
+  // The solo world owns shared soil now; the sheet counts accepted edits.
+  if (eco.ground === 'off') fail(`${site.name}: the local shared soil editor is unbuilt`);
 
   const file = path.join(SHOTS, `ecology-${site.name}.png`);
   await page.screenshot({ path: file });
@@ -497,7 +497,7 @@ async function main() {
     await browser?.close();
     await server?.close();
   }
-  if (failures === 0) log('PASS: four places counted, nothing over its cap, nothing at sea, the seam says off, the four layers toggle.');
+  if (failures === 0) log('PASS: four places counted, nothing over its cap, nothing at sea, the local soil seam is built, the four layers toggle.');
   process.exitCode = failures === 0 ? 0 : 1;
 }
 

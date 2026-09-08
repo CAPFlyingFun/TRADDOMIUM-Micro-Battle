@@ -38,6 +38,7 @@
  * Pure: no three, no DOM. `src/creatures/` is core.
  */
 import { distanceSquared, type WorldPoint } from '../world/coords';
+import type { SoilPoint } from '../world/soilTypes';
 import type { PlantSource } from '../world/ecology/resources';
 import { isObjectRung } from '../world/objects/budget';
 import { cellAt, cellKey, cellsWithin, distanceToCell, type ObjectCellId } from '../world/objects/cells';
@@ -105,7 +106,7 @@ interface Run {
   readonly keptIds: Set<string>;
   /** The near tier's accumulated step and the burrower's travel since its last bore, by creature id. */
   readonly acc: Map<string, number>;
-  readonly bore: Map<string, number>;
+  readonly bore: Map<string, { from: SoilPoint; distance: number }>;
   /** A plant creature's host, resolved once at generation. */
   readonly hosts: Map<string, PlantSource | null>;
   readonly rand: () => number;
@@ -261,15 +262,28 @@ export class CreatureSim implements CreatureSimulation {
           thinkMs += this.now() - a;
           thoughts += 1;
         }
-        const travelled = move(c, species, world, creatureDt);
-        // THE ONE DOOR TO THE GROUND: a burrower, burrowing, once per half-bore of travel, through the gate.
-        if (bore > 0 && c.behaviour === 'burrow' && travelled > 0) {
-          const since = (run.bore.get(c.id) ?? 0) + travelled;
-          if (since >= bore) {
-            run.bore.set(c.id, 0);
-            this.burrows.bore(species.canEditTerrain, c.at, c.height, bore);
-          } else {
-            run.bore.set(c.id, since);
+        const beforeAt = c.at;
+        const beforeHeight = c.height;
+        move(c, species, world, creatureDt);
+        // A tunnel includes descent, surfacing and fleeing, not only the
+        // behaviour named "burrow". Sweep between submissions so the last
+        // frame cannot leave a bead or a wall across the passage.
+        if (bore > 0) {
+          const travelled = Math.hypot(c.at.wx - beforeAt.wx, c.at.wz - beforeAt.wz, c.height - beforeHeight);
+          if (travelled > 0) {
+            let pending = run.bore.get(c.id);
+            if (!pending) {
+              pending = { from: { at: beforeAt, height: beforeHeight }, distance: 0 };
+              run.bore.set(c.id, pending);
+            }
+            pending.distance += travelled;
+            if (pending.distance >= bore - 1e-9) {
+              this.burrows.bore(species.canEditTerrain, c.at, c.height, bore, pending.from);
+              // A refused/out-of-range edit must not later become a long
+              // teleport cut when the detailed soil window reaches it.
+              pending.from = { at: c.at, height: c.height };
+              pending.distance = 0;
+            }
           }
         }
       }
