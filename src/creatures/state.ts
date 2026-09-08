@@ -116,6 +116,29 @@ export interface CreatureState {
   hunger: number;
   fatigue: number;
   alarm: number;
+  /**
+   * How far the nearest edge of fresh water was when the flood watch was
+   * last set, WORLD UNITS on the plane, or -1 for "none within reach"
+   * (`FLOOD_THREAT` in `intent.ts`). The flood sense re-measures from the
+   * same spot and reads the difference: an edge that is a solver cell
+   * nearer than it was is water coming this way. A plain number and not
+   * a point, so it serialises as it stands and a save from a phone means
+   * the same thing on a server; -1 rather than null for the same reason,
+   * and because -1 can never be a distance.
+   */
+  waterEdge: number;
+  /**
+   * WHERE `waterEdge` was measured from, or null exactly when `waterEdge`
+   * is -1. The sense re-measures from THIS point and not from the
+   * creature's current one, because a distance that shrank cannot say
+   * who moved: a fly flying to a water-edge site to drink would read the
+   * edge as closing at every think and spook itself forever. Measured
+   * from where the watch was set, the edge only reads closer when the
+   * WATER came. A plain world point, the way `at` is — the creature's
+   * own `at` at the time, which is replaced and never mutated, so it can
+   * be held rather than copied — so it serialises as `at` does.
+   */
+  waterEdgeFrom: WorldPoint | null;
   /** The plant or resource site it is on or heading for (`tree:cx,cz:site`, `nectar:cx,cz:site`), else null. */
   hostId: string | null;
   tier: Tier;
@@ -171,6 +194,8 @@ export function newCreature(options: NewCreatureOptions): CreatureState {
     hunger: clamp01(options.hunger ?? 0),
     fatigue: clamp01(options.fatigue ?? 0),
     alarm: 0,
+    waterEdge: -1,
+    waterEdgeFrom: null,
     hostId: options.hostId ?? null,
     tier: 'far',
     phase: options.phase - Math.floor(options.phase),

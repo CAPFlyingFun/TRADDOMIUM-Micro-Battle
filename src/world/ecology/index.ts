@@ -4,7 +4,7 @@
  * (`waterQuery.ts`) and the streaming layer (`ResourceLayer.ts`).
  */
 export type {
-  CellResources, EcologyWorld, PlantSource, ResourceKind, ResourceSite, WaterQuery,
+  CellResources, EcologyWorld, NearestWater, PlantSource, ResourceKind, ResourceSite, WaterQuery,
 } from './resources';
 export { HONEYDEW_HOST_FAMILIES, OFFERED_KINDS, RESOURCE_KINDS } from './resources';
 export {

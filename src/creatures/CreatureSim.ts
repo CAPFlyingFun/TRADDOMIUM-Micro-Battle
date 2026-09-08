@@ -43,7 +43,7 @@ import type { PlantSource } from '../world/ecology/resources';
 import { isObjectRung } from '../world/objects/budget';
 import { cellAt, cellKey, cellsWithin, distanceToCell, type ObjectCellId } from '../world/objects/cells';
 import { mulberry32, stableSeed } from '../world/random';
-import { CALM_WEATHER, senseAlarm, think, thinkDue, tickNeeds } from './intent';
+import { CALM_WEATHER, senseAlarm, senseFlood, think, thinkDue, thinkPending, tickNeeds } from './intent';
 import { move } from './locomotion';
 import { hostCandidates, populateCreatures } from './population';
 import {
@@ -258,8 +258,18 @@ export class CreatureSim implements CreatureSimulation {
         }
         tickNeeds(c, species, creatureDt);
         senseAlarm(c, species, disturbances);
-        if (thinkDue(c, species)) {
+        if (thinkPending(c, species)) {
+          // THE FLOOD SENSE RUNS AT THINK CADENCE, NOT AT `senseAlarm`'S.
+          // A camera can cross a worm between two thinks; a flood cannot,
+          // and the question costs a walk of the water's whole shoreline
+          // per creature. So it is asked once per think, just BEFORE the
+          // think that acts on it, and its time is the think's on the
+          // cost line: it is the part of deciding that reads the water.
+          // Near and full tiers only, as everything in this loop is —
+          // the far tier neither thinks nor drowns.
           const a = this.now();
+          senseFlood(c, species, world);
+          thinkDue(c, species);
           think(c, species, world, run.rand, weather, hosted ? run.hosts.get(c.id) ?? null : null);
           thinkMs += this.now() - a;
           thoughts += 1;

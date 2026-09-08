@@ -92,6 +92,8 @@ function pond(centre: WorldPoint, radius: number, depth: number, seaWestOf = Num
       return dx * dx + dz * dz <= radius * radius ? d : 0;
     },
     isSeaAt: (at) => at.wx < seaWestOf,
+    // A pond drawn as a disc has no shoreline list to walk; the edge sites come from `freshDepthAt`'s lattice.
+    nearestWater: () => null,
     rain: (next) => { d = next; },
   };
 }
@@ -353,13 +355,13 @@ describe('water-edge is asked of the real water', () => {
       expect(water.isSeaAt(s.at)).toBe(false);
     }
     // And a cell wholly at sea beside a pond has none.
-    const allSea: WaterQuery = { freshDepthAt: () => 0, isSeaAt: () => true };
+    const allSea: WaterQuery = { freshDepthAt: () => 0, isSeaAt: () => true, nearestWater: () => null };
     expect(deriveWaterEdgeSites(3, 4, allSea, SEED)).toEqual([]);
   });
 
   it('finds a bank whose water lies across the cell line', () => {
     // Water fills cell (4, 4) entirely; cell (3, 4) is dry. The east column of (3, 4) is an edge.
-    const water: WaterQuery = { freshDepthAt: (at) => (at.wx >= 4 * CELL_SPAN ? 10 : 0), isSeaAt: () => false };
+    const water: WaterQuery = { freshDepthAt: (at) => (at.wx >= 4 * CELL_SPAN ? 10 : 0), isSeaAt: () => false, nearestWater: () => null };
     const sites = deriveWaterEdgeSites(3, 4, water, SEED);
     expect(sites).toHaveLength(WATER_LATTICE_PER_SIDE);
     const pitch = CELL_SPAN / WATER_LATTICE_PER_SIDE;
@@ -443,7 +445,7 @@ describe('nothing is NaN', () => {
         plant('tree', inCell(cx, cz, 0.6, 0.6), -5, 0, 'tree:0,0:1'),
         plant('grass', inCell(cx, cz, 0.7, 0.7), 20, SEED_HEAD_VARIANT),
       ],
-      water: { freshDepthAt: () => Number.NaN, isSeaAt: () => false },
+      water: { freshDepthAt: () => Number.NaN, isSeaAt: () => false, nearestWater: () => null },
     });
     const cell = deriveCellResources(0, 0, w, SEED);
     expectFinite(cell);
@@ -494,6 +496,48 @@ describe('waterQueryOf', () => {
     const unknown = waterQueryOf(spots, () => Number.NaN);
     expect(unknown.isSeaAt(world(1500, 0))).toBe(true);
     expect(unknown.isSeaAt(world(2500, 0))).toBe(false);
+  });
+
+  describe('nearestWater', () => {
+    // A shoreline running north-south at wx = 0, one point a metre, plus one stray point far east.
+    const bank: WorldPoint[] = [];
+    for (let i = -20; i <= 20; i += 1) bank.push(world(0, i * 100));
+    bank.push(world(5000, 0));
+    const shore = { spotAt: spots.spotAt, shoreline: () => bank };
+    const withEdge = waterQueryOf(shore, groundAt);
+
+    it('a source with no shoreline answers null, which is "none in reach" and not an error', () => {
+      expect(q.nearestWater(world(0, 0), 10_000)).toBeNull();
+    });
+
+    it('finds the nearest point inside the radius, with its distance, and nothing outside it', () => {
+      // Standing 3 m east of the bank and 30 cm north of a lattice point: the nearest is that point.
+      const near = withEdge.nearestWater(world(300, 130), 1000);
+      expect(near).not.toBeNull();
+      expect(near!.at).toBe(bank[21]); // (0, 100): the solver's own point, not a copy
+      expect(near!.distance).toBeCloseTo(Math.hypot(300, 30), 9);
+      // The same spot with a reach shorter than the gap: nothing.
+      expect(withEdge.nearestWater(world(300, 130), 250)).toBeNull();
+      // Far from the bank but inside reach of the stray: the stray wins, because it is nearer.
+      const stray = withEdge.nearestWater(world(4800, 10), 10_000);
+      expect(stray!.at).toBe(bank[bank.length - 1]);
+    });
+
+    it('is strictly inside the radius, and a bad radius or a bad point asks nothing', () => {
+      expect(withEdge.nearestWater(world(100, 0), 100)).toBeNull();
+      expect(withEdge.nearestWater(world(100, 0), 100.001)).not.toBeNull();
+      for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) expect(withEdge.nearestWater(world(100, 0), bad), `radius ${bad}`).toBeNull();
+      expect(withEdge.nearestWater(world(Number.NaN, 0), 1000)).toBeNull();
+      expect(withEdge.nearestWater(world(0, Number.POSITIVE_INFINITY), 1000)).toBeNull();
+    });
+
+    it('reads the shoreline afresh each call, so an edge that moves is seen to move', () => {
+      let line = 0;
+      const moving = waterQueryOf({ spotAt: () => null, shoreline: () => [world(line, 0)] }, groundAt);
+      expect(moving.nearestWater(world(1000, 0), 5000)!.distance).toBe(1000);
+      line = 400;
+      expect(moving.nearestWater(world(1000, 0), 5000)!.distance).toBe(600);
+    });
   });
 });
 

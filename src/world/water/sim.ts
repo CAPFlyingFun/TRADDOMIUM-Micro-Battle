@@ -291,6 +291,9 @@ export const NO_FEED: WaterFeed = Object.freeze({
   channels: null,
 });
 
+/** No shoreline at all: what an unplaced window, or a dry one, answers. One frozen array, never a fresh empty one per call. */
+const EMPTY_EDGE: readonly WorldPoint[] = Object.freeze([]);
+
 /**
  * The solver's grid as a renderer needs to see it: where it is, how big
  * a cell is, and the two fields, read-only.
@@ -364,6 +367,14 @@ export class WaterSim implements WaterSource<'fresh'> {
   private bedRevision = -1;
   /** Fractional step left over from the last `advance`. */
   private carry = 0;
+  /**
+   * The shoreline as last computed, and whether the water has changed
+   * since. See `shoreline()`: it is a frozen array replaced whole on a
+   * recompute, so a caller can tell a fresh answer from a cached one by
+   * identity, and nothing can edit the one it was handed.
+   */
+  private edge: readonly WorldPoint[] = EMPTY_EDGE;
+  private edgeDirty = true;
 
   constructor(options: Partial<WaterSimOptions> = {}) {
     this.opts = { ...WATER_SIM_DEFAULTS, ...options };
@@ -452,6 +463,9 @@ export class WaterSim implements WaterSource<'fresh'> {
     this.ox = nx;
     this.oz = nz;
     this.placed = true;
+    // Past the early return, so a same-place, same-revision call that
+    // touched nothing leaves the cached shoreline standing.
+    this.edgeDirty = true;
     const bedChanged = this.fillBed(bedAt);
     this.bedRevision = revision;
     // A same-window revision may be an underground soil edit whose roof
@@ -568,6 +582,9 @@ export class WaterSim implements WaterSource<'fresh'> {
     const accel = dt * G * cell;
     const bed = this.bed;
     const water = this.water;
+    // A flag, not a recompute: fifty steps a second must not each walk
+    // the grid for an edge nobody asked about. See `shoreline()`.
+    this.edgeDirty = true;
 
     this.pour(feed, dt);
 
@@ -707,6 +724,73 @@ export class WaterSim implements WaterSource<'fresh'> {
     if (depth <= 0) return null;
     const bed = bilinear(this.bed, i, n, tx, tz);
     return { kind: 'fresh', surface: bed + depth, depth, flowX: 0, flowZ: 0 };
+  }
+
+  /**
+   * WHERE THE WATER'S EDGE IS: every wet cell that has a dry von Neumann
+   * neighbour, as world points, in row-major order.
+   *
+   * For the animals (Joshua, 2026-09-08: "flies fly away, aphids seek dry
+   * ground, worms burrow deeper/away" when flood water comes — "creatures
+   * could track the nearest water/flood edge and react when it is within
+   * a threat radius and getting closer"). A creature that wants to know
+   * whether the water is coming needs the edge, not the depth under its
+   * own feet: by the time `spotAt` answers at a worm, the worm is in it.
+   *
+   * WET IS ANY POSITIVE DEPTH, the same line `spotAt` draws: a film is
+   * water, and the edge of a film is where the flood will be next. A
+   * renderer's drawing threshold is a look, not a fact, and it stays on
+   * the renderer's side of this door.
+   *
+   * NOT BELOW SEA LEVEL, on the bed this window read — `channelMask`'s
+   * rule, for `channelMask`'s reason. Rain falls on every cell of the
+   * window, seabed included, and a wet seabed cell beside a dry one is
+   * not a fresh shoreline; it is the ocean's ground, which `router.ts`
+   * says is the ocean's to answer for. The bed is the solver's own, so
+   * the test costs nothing and cannot be forgotten by a caller.
+   *
+   * THE RIM'S OUTSIDE IS NOT DRY; IT IS UNKNOWN. A wet cell on the rim of
+   * a shut window is called shoreline only if a neighbour INSIDE the
+   * window is dry. Calling the unsimulated island beyond the rim "dry"
+   * would draw an edge along the window's border and send every animal
+   * near it fleeing from a line that moves with the camera.
+   *
+   * LAZY, AND WHY. This is an n² walk — 65,536 cells at the shipped
+   * window — and the solver takes fifty steps a second. `step` and
+   * `placeAt` only raise a flag; the walk happens on the first call after
+   * a change and not again until the next one, so a hundred creatures
+   * asking in one frame pay for one walk between them and a frame in
+   * which nobody asks pays nothing.
+   *
+   * The array is FROZEN and REPLACED WHOLE on a recompute, never edited in
+   * place: a caller can hold the one it was given and it stays true to
+   * the moment it was made, and a test can tell "cached" from "fresh" by
+   * identity alone. Each point is a lattice point (`pointOf`), so it is
+   * where the cell is sampled, not the corner of an area — the same
+   * convention as `WaterGrid.origin`.
+   */
+  shoreline(): readonly WorldPoint[] {
+    if (!this.placed) return EMPTY_EDGE;
+    if (!this.edgeDirty) return this.edge;
+    this.edgeDirty = false;
+    const { n } = this;
+    const bed = this.bed;
+    const water = this.water;
+    const out: WorldPoint[] = [];
+    for (let cy = 0; cy < n; cy += 1) {
+      for (let cx = 0; cx < n; cx += 1) {
+        const i = cy * n + cx;
+        if (!(water[i] > 0) || bed[i] < SEA_LEVEL) continue;
+        // Depths are never negative (`step` clamps), so "dry" is exactly zero.
+        const dryBeside = (cx > 0 && water[i - 1] === 0)
+          || (cx < n - 1 && water[i + 1] === 0)
+          || (cy > 0 && water[i - n] === 0)
+          || (cy < n - 1 && water[i + n] === 0);
+        if (dryBeside) out.push(this.pointOf(cx, cy));
+      }
+    }
+    this.edge = out.length === 0 ? EMPTY_EDGE : Object.freeze(out);
+    return this.edge;
   }
 
   // -------------------------------------------------------------------

@@ -28,6 +28,24 @@
  * the alarm then decays over `senses.alarmS`, and the brain returns the
  * creature to its life when it has.
  *
+ * A FLOOD IS THE SAME ALARM WITH A SLOWER CAUSE (Joshua, 2026-09-08,
+ * from alpha.34: "flies fly away, aphids seek dry ground, worms burrow
+ * deeper/away" when flood water comes). `senseFlood` asks the water
+ * where its nearest edge is, remembers the distance AND the spot it was
+ * measured from, re-measures from that same spot at the next think, and
+ * treats an edge that has come a solver cell nearer — or water already
+ * underfoot — as a disturbance standing AT the edge. It raises the alarm
+ * through the one helper `senseAlarm` uses, so the flee that follows is
+ * the species' own and this file grows no species branch for it: the fly
+ * takes off, the aphid drops and scrambles, the worm goes to the bottom
+ * of its band and away, exactly as they do from a camera. Water moves in
+ * seconds and not in frames and its edge is thousands of points, so
+ * unlike `senseAlarm` this runs at THINK cadence, just ahead of the
+ * think that acts on it — and it scans that edge at most twice per
+ * think, once from the watch's spot and once from where the creature
+ * stands when the watch is retaken, which is the price of knowing who
+ * moved.
+ *
  * THE FLY'S FLEE IS A TAKEOFF — `state.ts` says so on the word, and the
  * renderer's `AIRBORNE` list does not include `flee`, so an air species
  * never uses the word: it takes off and flies away, which is what a fly
@@ -54,9 +72,11 @@
  * Pure: no three, no DOM. `src/creatures/` is core.
  */
 import { distanceSquared, translate, type WorldPoint } from '../world/coords';
-import type { PlantSource, ResourceKind, ResourceSite } from '../world/ecology/resources';
+import type { NearestWater, PlantSource, ResourceKind, ResourceSite } from '../world/ecology/resources';
 import { SEA_LEVEL } from '../world/heightfield';
 import { CELL_SPAN } from '../world/objects/cells';
+import { WATER_SIM_DEFAULTS } from '../world/water/sim';
+import { unitsOfMetres } from './finder';
 import { ahead, headingToward, wrapHeading } from './heading';
 import { arrived, isAirborne, isMoving } from './locomotion';
 import { PERCH_FRACTION } from './population';
@@ -84,6 +104,33 @@ export const ATTRACTION_CHANCE = 0.5;
 const LANDWARD_TRIES = 4;
 /** A flier takes off into level flight once it has this much of its cruise floor under it. GAME TUNING. */
 const TAKEOFF_FRACTION = 0.8;
+/**
+ * How far away a fresh-water edge is worth watching, world units: 50 m.
+ * GAME TUNING — Joshua's starting test radius (2026-09-08: "~50 m as a
+ * starting test radius"), not a measured sense of any of the three
+ * animals; it is one number for every species on purpose, so the first
+ * device test changes one line. In world units rather than in the
+ * species' millimetres because it is not a property of a body: a flood
+ * is felt by the ground going, not by an antenna.
+ */
+export const FLOOD_THREAT = unitsOfMetres(50);
+/**
+ * How much nearer a fresh-water edge must read, from the same spot,
+ * before it counts as COMING, world units: one solver cell, 1 m. DERIVED
+ * FROM THE SOLVER'S LATTICE, not tuned — the shoreline is the wet cells
+ * of `WaterSim`'s 1 m grid (`WATER_SIM_DEFAULTS.cell`), so the nearest
+ * edge point can only ever be a lattice point, and a change smaller
+ * than a cell is the nearest cell FLIPPING, not water moving: a film
+ * draining from one cell and pooling in the next moves the reading by
+ * a fraction of a metre while the flood stands still, and a sense that
+ * fired on that would flip a creature between alarm and calm at every
+ * think (Joshua, 2026-09-08: "flood edges can wiggle numerically even
+ * when the actual flood is steadily advancing"). Read from the solver's
+ * own table so the two cannot drift apart; a window built with another
+ * cell size is not something the brain can see, and the shipped one is
+ * the one the animals live beside.
+ */
+export const FLOOD_CLOSING = WATER_SIM_DEFAULTS.cell;
 
 /** The sky when the world has none to report: calm, dry, daylight. */
 export const CALM_WEATHER: CreatureWeather = Object.freeze({ rainMmHr: 0, windX: 0, windZ: 0, night: false });
@@ -138,9 +185,19 @@ export function tickNeeds(state: CreatureState, species: CreatureSpecies, dt: nu
   }
 }
 
+/**
+ * Is a decision about to be due? A look and not a consumption: the
+ * simulation asks this to run the senses that belong to a think just
+ * ahead of it (`senseFlood`), and `thinkDue` is the one call that then
+ * takes the accumulator.
+ */
+export function thinkPending(state: CreatureState, species: CreatureSpecies): boolean {
+  return state.sinceThink >= species.thinkS;
+}
+
 /** Is a decision due? Consumes the accumulator when it is; a step longer than `thinkS` earns one thought, not several. */
 export function thinkDue(state: CreatureState, species: CreatureSpecies): boolean {
-  if (state.sinceThink < species.thinkS) return false;
+  if (!thinkPending(state, species)) return false;
   state.sinceThink = Math.min(species.thinkS, state.sinceThink - species.thinkS);
   return true;
 }
@@ -157,13 +214,34 @@ function fleeDistance(state: CreatureState, species: CreatureSpecies): number {
 }
 
 /**
- * Notice a disturbance. One inside `senses.alarmMm` plus the
- * disturbance's own radius (in three dimensions: a camera two metres
- * over a worm is not on top of it) raises the alarm to 1. On the FIRST
+ * Raise the alarm to 1 because of something at `from`. On the FIRST
  * raise — calm to alarmed — the away point is written to `target` and
  * the next think is brought forward, so the flee is decided at once and
- * in a direction that was true when the alarm sounded. Returns whether
- * a new alarm fired.
+ * in a direction that was true when the alarm sounded; an alarm that is
+ * already up is only held up. Standing exactly on the cause, "away" is
+ * the reverse of the heading, since a direction from a point to itself
+ * is no direction. The one place a flee's direction is decided, shared
+ * by the disturbance sense and the flood sense so the two cannot drift.
+ * Returns whether a new alarm fired.
+ */
+function raiseAlarm(state: CreatureState, species: CreatureSpecies, from: WorldPoint): boolean {
+  const wasCalm = state.alarm < ALARM_FLEES_AT;
+  state.alarm = 1;
+  if (!wasCalm) return false;
+  const away = from.wx === state.at.wx && from.wz === state.at.wz
+    ? wrapHeading(state.heading + Math.PI)
+    : headingToward(from, state.at);
+  state.target = ahead(state.at, away, fleeDistance(state, species));
+  state.sinceThink = species.thinkS;
+  return true;
+}
+
+/**
+ * Notice a disturbance. One inside `senses.alarmMm` plus the
+ * disturbance's own radius (in three dimensions: a camera two metres
+ * over a worm is not on top of it) raises the alarm through
+ * `raiseAlarm`, away from the nearest one. Returns whether a new alarm
+ * fired.
  */
 export function senseAlarm(state: CreatureState, species: CreatureSpecies, disturbances: readonly Disturbance[]): boolean {
   if (disturbances.length === 0) return false;
@@ -181,16 +259,103 @@ export function senseAlarm(state: CreatureState, species: CreatureSpecies, distu
     }
   }
   if (nearest < 0) return false;
-  const wasCalm = state.alarm < ALARM_FLEES_AT;
-  state.alarm = 1;
-  if (!wasCalm) return false;
-  const d = disturbances[nearest];
-  const away = nearestD2 === 0 || (d.at.wx === state.at.wx && d.at.wz === state.at.wz)
-    ? wrapHeading(state.heading + Math.PI)
-    : headingToward(d.at, state.at);
-  state.target = ahead(state.at, away, fleeDistance(state, species));
-  state.sinceThink = species.thinkS;
-  return true;
+  return raiseAlarm(state, species, disturbances[nearest].at);
+}
+
+/**
+ * Notice the water coming. Keeps a WATCH — the distance to the nearest
+ * fresh edge within `FLOOD_THREAT` (`waterEdge`, -1 for none) and the
+ * spot it was measured from (`waterEdgeFrom`, null with it) — and raises
+ * the alarm, away from the edge, when either
+ *
+ *   (a) the edge, re-measured FROM THE WATCH'S SPOT, is at least
+ *       `FLOOD_CLOSING` nearer than the watch read (so the first sight of
+ *       an edge is a reading, not a fright: a worm born forty metres from
+ *       a river is not born fleeing it), or
+ *   (b) the water is already UNDER the creature, edge or no edge — a
+ *       flood that arrived between two thinks, or a pool so wide its
+ *       edge is out of reach.
+ *
+ * IT KNOWS WHO MOVED. The re-measure is taken from the spot the watch was
+ * set at, not from where the creature is now, so a creature's own walk
+ * toward the water changes nothing it compares: a fly flying to a
+ * water-edge site to drink finds the edge exactly as far from its old
+ * perch as it was, and is not spooked by its own approach. Only the
+ * WATER can shorten that distance. The creature's position enters once,
+ * when the watch is retaken from where it stands.
+ *
+ * THE WATCH HOLDS THROUGH A WIGGLE (Joshua, 2026-09-08: "react when
+ * significantly closer than before, stay alarmed for a short period").
+ * The edge is lattice points, and the nearest one flipping a cell either
+ * way moves the reading by less than `FLOOD_CLOSING` — see that constant
+ * — so a watch replaced at every think by the latest reading would only
+ * ever see one cell of change, and a flood advancing one cell per think
+ * or slower would never read as coming — and one cell per think is 2 m/s
+ * for the worm and nearly 7 m/s for a fly thinking every 0.15 s, while a
+ * shallow-water front runs at about √(g·h), a metre a second for a sheet
+ * a decimetre deep (BIOLOGICAL SHAPE of the water, not a measurement of
+ * this solver's). So the watch is
+ * HELD while the re-measure is no further and less than a cell nearer,
+ * and a steady advance accumulates against it until it crosses the cell
+ * — however slowly it comes. It is RETAKEN from where the creature
+ * stands when the water recedes (nothing to accumulate), when it has
+ * come (the alarm has fired and a new watch starts from here), when the
+ * old spot no longer has an edge in reach, and when the creature itself
+ * has left the spot by more than a cell — a watch is FROM a spot, and a
+ * spot the body has left by more than the water's own resolution is
+ * somebody else's. That last rule means a creature on the move is
+ * watching from where it is; the one that a flood catches is the one
+ * that stayed put, and its watch is the one that holds.
+ *
+ * "Stay alarmed for a short period" is what `raiseAlarm` already gives:
+ * the alarm goes to 1 and decays over `senses.alarmS`, and a re-measure
+ * that reads closing while it is up only holds it there. There is no
+ * second timer here.
+ *
+ * Away from the EDGE, not from the depth: the edge is where the water is
+ * coming from, and the far side of it is where the water is — the one
+ * nearest the creature now, failing that the one the watch saw come,
+ * and with no edge in reach at all and water underfoot, the reverse of
+ * the heading, which is the best a creature standing in water with no
+ * bank in sight can do.
+ *
+ * COST: one scan of the shoreline per think while the watch holds, two
+ * when it is retaken — the price of measuring from a fixed spot and
+ * then from the creature's own. Returns whether a new alarm fired. No
+ * water known: the watch is cleared and nothing fires.
+ */
+export function senseFlood(state: CreatureState, species: CreatureSpecies, world: CreatureWorld): boolean {
+  const water = world.water;
+  if (water === null) {
+    state.waterEdge = -1;
+    state.waterEdgeFrom = null;
+    return false;
+  }
+  const from = state.waterEdgeFrom;
+  const before = state.waterEdge;
+  // The edge as the watch's spot sees it now: the only reading "closing" is ever judged on.
+  let watched: NearestWater | null = null;
+  let closing = false;
+  let hold = false;
+  if (from !== null && before >= 0) {
+    watched = water.nearestWater(from, FLOOD_THREAT);
+    if (watched !== null) {
+      closing = watched.distance < before - FLOOD_CLOSING;
+      hold = !closing
+        && watched.distance <= before
+        && distanceSquared(from, state.at) <= FLOOD_CLOSING * FLOOD_CLOSING;
+    }
+  }
+  let edge: NearestWater | null = watched;
+  if (!hold) {
+    edge = water.nearestWater(state.at, FLOOD_THREAT);
+    state.waterEdge = edge === null ? -1 : edge.distance;
+    state.waterEdgeFrom = edge === null ? null : state.at;
+  }
+  const underfoot = water.freshDepthAt(state.at) > 0;
+  if (!closing && !underfoot) return false;
+  const cause = edge ?? watched;
+  return raiseAlarm(state, species, cause === null ? state.at : cause.at);
 }
 
 // ---------------------------------------------------------------------------

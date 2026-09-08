@@ -29,19 +29,37 @@
  * answers with a `sea` spot, so that a router whose sea owner reaches
  * above the bed's line (a swell over the swash) is still believed.
  *
+ * THE EDGE IS THE SOLVER'S TOO. `nearestWater` (the flood sense, Joshua
+ * 2026-09-08) walks the shoreline the source reports — the wet cells
+ * with a dry neighbour, computed lazily inside `water/sim.ts` and handed
+ * over as frozen world points — and picks the closest inside a radius.
+ * It samples nothing of its own: a shoreline read here is a shoreline
+ * the solver would draw, so the animals and the water can never
+ * disagree about where the edge is. A source with no shoreline to
+ * report (the router, a test's stub) answers null, which to a creature
+ * reads "none in reach" — the same answer as dry ground, on purpose.
+ *
  * READ-ONLY BY CONSTRUCTION: the object returned is frozen and holds
- * two closures over two readers. There is nothing on it to write.
+ * three closures over two readers. There is nothing on it to write.
  *
  * Pure: no three, no DOM. `src/world/` is core.
  */
-import type { WorldPoint } from '../coords';
+import { distanceSquared, type WorldPoint } from '../coords';
 import { SEA_LEVEL } from '../heightfield';
 import type { WaterSpot } from '../water/router';
-import type { WaterQuery } from './resources';
+import type { NearestWater, WaterQuery } from './resources';
 
 /** Whatever answers `spotAt`: the `WaterRouter`, or a single fresh source such as the inland water. */
 export interface SpotSource {
   spotAt(at: WorldPoint): WaterSpot | null;
+  /**
+   * The fresh water's edge as world points, when the source keeps one
+   * (`WaterSim.shoreline`, forwarded by `water/IslandWater.ts`). Optional
+   * because the router has none to give, and a source that cannot answer
+   * should say so by absence rather than by an empty list that reads as
+   * "no water anywhere".
+   */
+  shoreline?(): readonly WorldPoint[];
 }
 
 /**
@@ -69,6 +87,26 @@ export function waterQueryOf(spots: SpotSource, groundAt: (at: WorldPoint) => nu
       if (groundAt(at) < SEA_LEVEL) return true;
       const spot = spots.spotAt(at);
       return spot !== null && spot.kind === 'sea';
+    },
+    nearestWater(at: WorldPoint, radius: number): NearestWater | null {
+      // The finite checks are written out: `NaN < r²` is false for every
+      // r, so a NaN point would fall through the loop and answer null
+      // anyway — but a non-finite RADIUS of +Infinity would not, and a
+      // creature that asked with a broken reach must be told nothing.
+      if (spots.shoreline === undefined || !Number.isFinite(radius) || !(radius > 0)) return null;
+      if (!Number.isFinite(at.wx) || !Number.isFinite(at.wz)) return null;
+      const edge = spots.shoreline();
+      let best: WorldPoint | null = null;
+      let bestD2 = radius * radius;
+      for (let i = 0; i < edge.length; i += 1) {
+        const d2 = distanceSquared(at, edge[i]);
+        if (d2 < bestD2) {
+          bestD2 = d2;
+          best = edge[i];
+        }
+      }
+      // The solver's own point, not a copy: it is frozen where it was made.
+      return best === null ? null : { at: best, distance: Math.sqrt(bestD2) };
     },
   });
 }

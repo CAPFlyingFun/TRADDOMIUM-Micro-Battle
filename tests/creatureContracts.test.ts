@@ -187,6 +187,8 @@ describe('the behaviour vocabulary', () => {
     expect(c.tier).toBe('far');
     expect(c.target).toBeNull();
     expect(c.alarm).toBe(0);
+    // No water edge read yet: -1, which can never be a distance.
+    expect(c.waterEdge).toBe(-1);
     expect(c.hunger).toBe(1);
     expect(c.phase).toBeCloseTo(0.25, 12);
     expect(c.targetHeight).toBe(5);

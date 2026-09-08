@@ -78,7 +78,7 @@ import { SOIL_TILE } from '../world/soilTypes';
 import { SoilInspector } from '../ui/SoilInspector';
 import { Antennae } from '../ui/Antennae';
 import { OceanView, TIER_OCTAVES as OCEAN_OCTAVES } from '../sea/OceanView';
-import { blendSight, underwaterLook } from '../sea/underwaterLook';
+import { blendSight, submergingSurface, underwaterLook } from '../sea/underwaterLook';
 import { IslandWater } from '../water/IslandWater';
 import { WorldObjects } from '../flora/WorldObjects';
 import { HabitatMap } from '../world/habitat';
@@ -1831,6 +1831,17 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
      * green in there would be the fog claiming water that is rock. The
      * seabed under her has to be below sea level too.
      *
+     * OR IN THE INLAND WATER (Joshua, 2026-09-08, from alpha.34: under
+     * a flood there was no fog; under the sea there was). The gate
+     * above was the whole of what this block used to ask, and it is the
+     * sea's basin and nothing else — every inland bed is above MSL, so
+     * no pond could ever fog. `submergingSurface` asks whichever owner
+     * the bed picks, the router's own rule, and hands back ONE height:
+     * the swell's below MSL, the inland spot's above it. Same look, same
+     * dimming, same drops on the lens; the fog does not know which
+     * water it is. `fresh.spotAt` is one bilinear read a frame and is
+     * not cached — the water moves.
+     *
      * EVERY FRAME AND WITHOUT HYSTERESIS, unlike `adaptDepth` next door:
      * this is two colour writes and two numbers, the surface moves under
      * a wave, and a fog that lagged the eye by a hysteresis step is the
@@ -1863,17 +1874,25 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         builtNear = 0;
         adaptDepth();
       };
-      if (field === null || swell === null || !oceanOn) {
+      if (field === null) {
         restore();
         return;
       }
       const pose = fly.pose();
       const ground = field.heightAt(pose.at);
-      if (ground >= SEA_LEVEL) {
+      // Local names so the narrowing survives into the readers: both
+      // are `let`s the water's build and teardown reassign.
+      const sea = swell;
+      const inland = fresh;
+      const surface = submergingSurface(
+        ground,
+        sea === null ? null : { on: oceanOn, surfaceAt: () => sea.heightAt(pose.at, SEA_LEVEL - ground) },
+        inland === null ? null : { on: freshOn, surfaceAt: () => inland.spotAt(pose.at)?.surface ?? null },
+      );
+      if (surface === null) {
         restore();
         return;
       }
-      const surface = swell.heightAt(pose.at, SEA_LEVEL - ground);
       const look = underwaterLook(surface - pose.height);
       if (look === null) {
         restore();

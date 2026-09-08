@@ -357,6 +357,60 @@ describe('living', () => {
     expect(changed).toBeGreaterThan(quiet.creatures().length / 4);
   });
 
+  it('a bank closing on the focus alarms the near and full worms through the loop, never a far one, at think cadence and no more', () => {
+    // The flood sense runs inside `update`, once per think, before the
+    // think: a far creature neither thinks nor drowns, and a double
+    // think per alarm would show here as a jump in the thought count.
+    let bank: number | null = null;
+    const w = fakeWorld('wetland');
+    const flooded: CreatureWorld = {
+      ...w,
+      water: {
+        freshDepthAt: (at) => (bank !== null && at.wx >= bank ? 10 : 0),
+        isSeaAt: () => false,
+        nearestWater: (at, radius) => {
+          if (bank === null) return null;
+          const distance = Math.abs(at.wx - bank);
+          return distance < radius ? { at: world(bank, at.wz), distance } : null;
+        },
+      },
+    };
+    const sim = new CreatureSim({ world: flooded, seed: 3, species: [EARTHWORM], rung: 'ultra-high' });
+    settle(sim, FOCUS);
+    const kept = sim.creatures();
+    const simulated = kept.filter((c) => c.tier !== 'far');
+    const far = kept.filter((c) => c.tier === 'far');
+    expect(simulated.length).toBeGreaterThan(5);
+    expect(far.length).toBeGreaterThan(0);
+
+    // Two dry seconds: readings of -1 everywhere, and a baseline of thoughts.
+    let dryThoughts = 0;
+    for (let i = 0; i < 120; i += 1) {
+      sim.update(FOCUS, 1 / 60);
+      dryThoughts += sim.cost().thoughts;
+    }
+    for (const c of kept) expect(c.waterEdge).toBe(-1);
+
+    // The water comes from thirty metres east at three metres a second.
+    bank = FOCUS.wx + 3000;
+    let wetThoughts = 0;
+    for (let i = 0; i < 120; i += 1) {
+      bank -= 5;
+      sim.update(FOCUS, 1 / 60);
+      wetThoughts += sim.cost().thoughts;
+    }
+    for (const c of simulated) expect(c.waterEdge, `${c.id} read no edge`).toBeGreaterThanOrEqual(0);
+    const alarmed = simulated.filter((c) => c.alarm > 0);
+    expect(alarmed.length).toBeGreaterThan(simulated.length / 2);
+    for (const c of alarmed) expect(c.behaviour).toBe('flee');
+    for (const c of far) {
+      expect(c.waterEdge, `${c.id} is far and read the water`).toBe(-1);
+      expect(c.alarm).toBe(0);
+    }
+    // The same number of thoughts, give or take the phase each alarm re-seats: a think per alarm on top would be +N.
+    expect(Math.abs(wetThoughts - dryThoughts)).toBeLessThanOrEqual(simulated.length / 4 + 2);
+  });
+
   it('uses dt as given: a full creature\'s clock advances by exactly the dt handed in', () => {
     const sim = new CreatureSim({ world: fakeWorld(), seed: 3, species: allFull([EARTHWORM]) });
     settle(sim, FOCUS);

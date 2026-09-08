@@ -450,6 +450,137 @@ describe('asking the patch where its water is', () => {
 });
 
 // ---------------------------------------------------------------------------
+// The shoreline
+// ---------------------------------------------------------------------------
+
+describe('where the water\'s edge is', () => {
+  /** Cell indices of a shoreline in the window AS IT STANDS, from the world points it answers, so a test can name cells rather than coordinates. */
+  const cellsOf = (sim: WaterSim, edge: readonly WorldPoint[]): string[] => {
+    const o = sim.grid().origin;
+    return edge.map((p) => `${Math.round((p.wx - o.wx) / sim.cell)},${Math.round((p.wz - o.wz) / sim.cell)}`).sort();
+  };
+
+  /**
+   * A 3 x 3 PIT a metre deep in a flat bed, in WORLD coordinates so the
+   * same ground is read wherever the window is placed. Water put in it
+   * stays put — its surface is below every rim cell, so no pipe carries
+   * anything — which is what makes an exact answer possible: on a flat
+   * bed a blob spreads a cell a step, and `fill` is itself a step.
+   */
+  const pit = (at: WorldPoint): number => (Math.abs(at.wx) <= 100 && Math.abs(at.wz) <= 100 ? 900 : 1000);
+  const pitSim = (): WaterSim => {
+    const sim = new WaterSim({ n: 8, cell: 100, soak: 0, drainRim: false });
+    sim.placeAt(CENTRE, pit);
+    fill(sim, 10, (cx, cy) => cx >= 3 && cx <= 5 && cy >= 3 && cy <= 5);
+    return sim;
+  };
+  const PIT_RING = ['3,3', '3,4', '3,5', '4,3', '4,5', '5,3', '5,4', '5,5'];
+
+  it('is the wet cells with a dry four-neighbour: the ring of a pool, never its middle', () => {
+    const sim = pitSim();
+    const edge = sim.shoreline();
+    expect(cellsOf(sim, edge)).toEqual(PIT_RING);
+    // Each point is the cell's lattice point, the same place `pointOf` says the cell is sampled.
+    expect(edge.some((p) => p.wx === sim.pointOf(3, 4).wx && p.wz === sim.pointOf(3, 4).wz)).toBe(true);
+    // The middle is wet and so is a ring cell: the edge is a subset of the water, not a line beside it.
+    expect(sim.spotAt(sim.pointOf(4, 4))).not.toBeNull();
+    expect(sim.spotAt(sim.pointOf(3, 4))).not.toBeNull();
+    // And the water really did stay put, or the exact ring above proves nothing.
+    run(sim, 50);
+    expect(cellsOf(sim, sim.shoreline())).toEqual(PIT_RING);
+  });
+
+  it('is empty before the window is placed, on a dry window, and on a window wet to its rim', () => {
+    // THE RIM'S OUTSIDE IS UNKNOWN, NOT DRY. A shut tub filled to its
+    // walls has no edge inside it, and calling the unsimulated island
+    // beyond the rim "dry" would draw a shoreline along the window's own
+    // border — a line the animals would flee that moves with the camera.
+    const unplaced = new WaterSim({ n: 8, cell: 100 });
+    expect(unplaced.shoreline()).toEqual([]);
+    const dry = tub(() => 1000, 8);
+    expect(dry.shoreline()).toEqual([]);
+    const full = tub(() => 1000, 8);
+    fill(full, 10);
+    expect(full.shoreline()).toEqual([]);
+  });
+
+  it('is LAZY: a flag on every step, one walk on the first ask after it, and the same frozen answer until the next', () => {
+    const sim = pitSim();
+    const first = sim.shoreline();
+    expect(Object.isFrozen(first)).toBe(true);
+    // Asked again with nothing changed: the SAME array, by identity — no walk was made.
+    expect(sim.shoreline()).toBe(first);
+    // A step changes the water (even one that moves nothing, as in a pit): the answer is remade.
+    sim.step(NO_FEED);
+    const second = sim.shoreline();
+    expect(second).not.toBe(first);
+    expect(cellsOf(sim, second)).toEqual(PIT_RING);
+    expect(sim.shoreline()).toBe(second);
+    // A placement that touched nothing — same place, same revision — leaves it standing.
+    sim.placeAt(CENTRE, pit, 0);
+    expect(sim.shoreline()).toBe(second);
+    // A placement that moved the window remakes it: the water is carried, and the edge moves with the WORLD, not the lattice.
+    sim.placeAt(world(100, 0), pit, 0);
+    const moved = sim.shoreline();
+    expect(moved).not.toBe(second);
+    expect(cellsOf(sim, moved)).toEqual(['2,3', '2,4', '2,5', '3,3', '3,5', '4,3', '4,4', '4,5']);
+    expect(moved.map((p) => `${p.wx},${p.wz}`).sort()).toEqual(second.map((p) => `${p.wx},${p.wz}`).sort());
+  });
+
+  it('follows the water as it spreads downhill, and a film counts as water', () => {
+    // A single wet cell on a slope falling toward +x. `fill` already
+    // steps once, so the edge starts as the few cells the first step
+    // reached; twenty more and it is longer and further down the hill
+    // (a cell a step, so a 48-cell tub keeps it clear of the far wall).
+    const sim = tub((cx) => 4000 - cx * 50, 48);
+    fill(sim, 20, (cx, cy) => cx === 2 && cy === 24);
+    const before = sim.shoreline();
+    expect(before.length).toBeGreaterThanOrEqual(1);
+    const furthest = (edge: readonly WorldPoint[]): number => Math.max(...edge.map((p) => p.wx));
+    run(sim, 20);
+    const after = sim.shoreline();
+    expect(after.length).toBeGreaterThan(before.length);
+    expect(furthest(after)).toBeGreaterThan(furthest(before));
+    // Every edge point is wet by the grid's own reading — any positive
+    // depth, however thin the film the front runs on — and the bilinear
+    // query agrees wherever it can answer (it declines the last column).
+    const g = sim.grid();
+    for (const p of after) {
+      const [cx, cy] = cellsOf(sim, [p])[0].split(',').map(Number);
+      expect(g.depth[sim.index(cx, cy)]).toBeGreaterThan(0);
+      if (cx < sim.n - 1 && cy < sim.n - 1) expect(sim.spotAt(p)?.depth ?? 0).toBeGreaterThan(0);
+    }
+  });
+
+  it('never names a cell below sea level, whatever the water does there', () => {
+    // A window that crosses the coast: land at 500 west of x = 0, seabed
+    // at -500 east of it. Two rows are filled right across, so the
+    // seabed is as wet as the land — that is the ocean's ground and not
+    // a fresh shoreline. `channelMask`'s rule, enforced in the solver for
+    // `channelMask`'s reason.
+    const sim = new WaterSim({ n: 8, cell: 100, soak: 0, drainRim: false });
+    sim.placeAt(CENTRE, (at) => (at.wx < 0 ? 500 : -500));
+    fill(sim, 10, (_cx, cy) => cy >= 3 && cy <= 4);
+    const g = sim.grid();
+    const edge = sim.shoreline();
+    const cells = cellsOf(sim, edge);
+    expect(cells.length).toBeGreaterThan(0);
+    // Cells 0..3 are land, 4..7 seabed: nothing east of the line is named.
+    for (const c of cells) expect(Number(c.split(',')[0]), c).toBeLessThanOrEqual(3);
+    for (const p of edge) expect(sim.spotAt(p)).not.toBeNull();
+    // The rule excluded something real: a wet seabed cell with a dry
+    // neighbour exists in the grid and is not in the answer.
+    expect(g.depth[sim.index(4, 2)]).toBeGreaterThan(0);
+    expect(g.depth[sim.index(4, 1)]).toBe(0);
+    expect(cells).not.toContain('4,2');
+    // And the land edge is still there: the fill's first step spread the
+    // two rows into rows 2 and 5, which now border dry rows 1 and 6.
+    expect(cells).toContain('3,2');
+    expect(cells).toContain('3,5');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // D8 drainage
 // ---------------------------------------------------------------------------
 

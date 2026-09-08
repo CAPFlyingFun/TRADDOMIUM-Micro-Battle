@@ -3,8 +3,9 @@
  * for rain, night and litter and flees down; the aphid never leaves its
  * host; the fly never aims at the sea, is grounded by rain, is drawn to
  * a resource and takes off from a disturbance; needs climb and come
- * back; an alarm is noticed between thinks; and a thousand seconds of
- * any of them is finite.
+ * back; an alarm is noticed between thinks; a flood is noticed when its
+ * edge is nearer than it was, or already underfoot, and fled the way a
+ * disturbance is; and a thousand seconds of any of them is finite.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -12,8 +13,10 @@ import {
   type CreatureSpecies, type CreatureState, type CreatureWeather, type CreatureWorld, type Disturbance,
 } from '../src/creatures';
 import {
-  ALARM_FLEES_AT, HOST_WALK_LENGTHS, RAINING_MM_HR, hostPlantOf, isLand, nearestSite, senseAlarm, think, thinkDue, tickNeeds,
+  ALARM_FLEES_AT, FLOOD_CLOSING, FLOOD_THREAT, HOST_WALK_LENGTHS, RAINING_MM_HR, hostPlantOf, isLand, nearestSite, senseAlarm,
+  senseFlood, think, thinkDue, thinkPending, tickNeeds,
 } from '../src/creatures/intent';
+import { unitsOfMetres } from '../src/creatures/finder';
 import { isAirborne, move } from '../src/creatures/locomotion';
 import { HOST_FLEE_LENGTHS } from '../src/creatures/intent';
 import { distance, world, type WorldPoint } from '../src/world/coords';
@@ -21,6 +24,7 @@ import type { CellResources, PlantSource, ResourceSite } from '../src/world/ecol
 import { SEA_HABITAT, type Habitat, type HabitatKind } from '../src/world/habitat';
 import { CELL_SPAN } from '../src/world/objects/cells';
 import { mulberry32 } from '../src/world/random';
+import { WATER_SIM_DEFAULTS } from '../src/world/water/sim';
 
 function habitat(kind: HabitatKind, elevation: number): Habitat {
   return {
@@ -54,7 +58,7 @@ function fakeWorld(): Fake {
       const sites = w.sites.filter((s) => Math.floor(s.at.wx / CELL_SPAN) === cx && Math.floor(s.at.wz / CELL_SPAN) === cz);
       return { cx, cz, sites };
     },
-    water: { freshDepthAt: () => 0, isSeaAt: (at) => at.wx >= SEA_EAST_OF },
+    water: { freshDepthAt: () => 0, isSeaAt: (at) => at.wx >= SEA_EAST_OF, nearestWater: () => null },
     weather: () => w.sky,
     disturbances: () => w.list,
   };
@@ -155,6 +159,16 @@ describe('the clocks and the alarm', () => {
     expect(c.fatigue).toBe(f);
   });
 
+  it('thinkPending looks and thinkDue takes: the peek never consumes the accumulator', () => {
+    const c = spawn(HOUSEFLY, world(100, 100), null, 0.1);
+    expect(thinkPending(c, HOUSEFLY)).toBe(false);
+    tickNeeds(c, HOUSEFLY, HOUSEFLY.thinkS);
+    expect(thinkPending(c, HOUSEFLY)).toBe(true);
+    expect(thinkPending(c, HOUSEFLY)).toBe(true);
+    expect(thinkDue(c, HOUSEFLY)).toBe(true);
+    expect(thinkPending(c, HOUSEFLY)).toBe(false);
+  });
+
   it('thinkDue fires once per thinkS, honours the phase, and a long step earns one thought', () => {
     const c = spawn(HOUSEFLY, world(100, 100), null, 0.5);
     let thoughts = 0;
@@ -195,6 +209,376 @@ describe('the clocks and the alarm', () => {
     expect(c.alarm).toBeCloseTo(0.5, 9);
     tickNeeds(c, EARTHWORM, EARTHWORM.senses.alarmS);
     expect(c.alarm).toBe(0);
+  });
+});
+
+/**
+ * A world whose fresh water is everything EAST of a straight bank at
+ * `wx = bank` — the flood sense's whole question is where the edge is
+ * and whether it moved, so the fake is an edge the test can move. Null
+ * bank: no water at all, anywhere.
+ */
+function floodWorld(): Fake & { bank: number | null } {
+  const w: Fake & { bank: number | null } = {
+    bank: null,
+    sky: null,
+    list: [],
+    sites: [],
+    plants: [],
+    groundAt: ground,
+    normalAt: () => ({ nx: 0, ny: 1, nz: 0 }),
+    habitatAt: (at) => habitat('shrubland', ground(at)),
+    plantsOf: () => w.plants,
+    resourcesOf: () => null,
+    water: {
+      freshDepthAt: (at) => (w.bank !== null && at.wx >= w.bank ? 10 : 0),
+      isSeaAt: () => false,
+      nearestWater: (at, radius) => {
+        if (w.bank === null) return null;
+        const distance = Math.abs(at.wx - w.bank);
+        return distance < radius ? { at: world(w.bank, at.wz), distance } : null;
+      },
+    },
+    weather: () => w.sky,
+    disturbances: () => w.list,
+  };
+  return w;
+}
+
+/** One step the way the simulation takes it, flood sense included: sensed at think cadence, just before the think. */
+function stepFlood(c: CreatureState, species: CreatureSpecies, w: Fake, rand: () => number, dt: number): boolean {
+  tickNeeds(c, species, dt);
+  senseAlarm(c, species, w.list);
+  let thought = false;
+  if (thinkPending(c, species)) {
+    senseFlood(c, species, w);
+    thinkDue(c, species);
+    think(c, species, w, rand, w.sky, null);
+    thought = true;
+  }
+  move(c, species, w, dt);
+  return thought;
+}
+
+describe('the flood', () => {
+  it('the threat radius is fifty metres, in world units', () => {
+    expect(FLOOD_THREAT).toBe(unitsOfMetres(50));
+    expect(FLOOD_THREAT).toBe(5000);
+  });
+
+  it('with no water known, nothing fires and the reading is -1', () => {
+    const w = floodWorld();
+    const dry: Fake = { ...w, water: null };
+    const c = spawn(EARTHWORM, world(400, 400));
+    c.waterEdge = 1234;
+    expect(senseFlood(c, EARTHWORM, dry)).toBe(false);
+    expect(c.waterEdge).toBe(-1);
+    expect(c.alarm).toBe(0);
+    expect(c.target).toBeNull();
+    // Water known but none anywhere: the same.
+    expect(senseFlood(c, EARTHWORM, w)).toBe(false);
+    expect(c.waterEdge).toBe(-1);
+    expect(c.alarm).toBe(0);
+  });
+
+  it('an edge in reach that is not closer is a reading, not a fright — and beyond reach it is no reading at all', () => {
+    const w = floodWorld();
+    const c = spawn(EARTHWORM, world(400, 400));
+    // Beyond fifty metres: unseen.
+    w.bank = 400 + FLOOD_THREAT + 100;
+    expect(senseFlood(c, EARTHWORM, w)).toBe(false);
+    expect(c.waterEdge).toBe(-1);
+    // Twenty metres off, first seen: remembered, not fled.
+    w.bank = 400 + 2000;
+    expect(senseFlood(c, EARTHWORM, w)).toBe(false);
+    expect(c.waterEdge).toBe(2000);
+    expect(c.alarm).toBe(0);
+    expect(c.target).toBeNull();
+    // Still there: still nothing.
+    expect(senseFlood(c, EARTHWORM, w)).toBe(false);
+    expect(c.waterEdge).toBe(2000);
+    // Receding: nothing, and the new distance is kept.
+    w.bank = 400 + 2500;
+    expect(senseFlood(c, EARTHWORM, w)).toBe(false);
+    expect(c.waterEdge).toBe(2500);
+    expect(c.alarm).toBe(0);
+    // Gone out of reach again: back to -1, so its return is a reading and not a fright.
+    w.bank = 400 + FLOOD_THREAT + 1;
+    expect(senseFlood(c, EARTHWORM, w)).toBe(false);
+    expect(c.waterEdge).toBe(-1);
+    w.bank = 400 + 3000;
+    expect(senseFlood(c, EARTHWORM, w)).toBe(false);
+    expect(c.alarm).toBe(0);
+  });
+
+  it('an edge that is nearer than it was raises the alarm once, away from the edge, and brings the think forward', () => {
+    const w = floodWorld();
+    const c = spawn(EARTHWORM, world(400, 400));
+    w.bank = 400 + 2000;
+    senseFlood(c, EARTHWORM, w);
+    w.bank = 400 + 1500;
+    expect(senseFlood(c, EARTHWORM, w)).toBe(true);
+    expect(c.alarm).toBe(1);
+    expect(c.waterEdge).toBe(1500);
+    expect(c.sinceThink).toBe(EARTHWORM.thinkS);
+    // Away: the water is east, so the target is west, and as far as the worm's flee carries it.
+    expect(c.target).not.toBeNull();
+    expect(c.target!.wx).toBeLessThan(400);
+    expect(c.target!.wz).toBeCloseTo(400, 6);
+    expect(distance(c.at, c.target!)).toBeCloseTo(unitsOfMm(EARTHWORM.pace.fleeMmS) * EARTHWORM.senses.alarmS, 6);
+    // Closer still while already alarmed: held up, not fired again, and the target stands.
+    const away = c.target;
+    w.bank = 400 + 1000;
+    expect(senseFlood(c, EARTHWORM, w)).toBe(false);
+    expect(c.alarm).toBe(1);
+    expect(c.target).toBe(away);
+    expect(c.waterEdge).toBe(1000);
+    // The same fright as a disturbance: the away point is the one `senseAlarm` would have chosen for something at the edge.
+    const twin = spawn(EARTHWORM, world(400, 400));
+    senseAlarm(twin, EARTHWORM, [{ at: world(400 + 1500, 400), height: twin.height, radius: 1500 }]);
+    const fresh = spawn(EARTHWORM, world(400, 400));
+    fresh.waterEdge = 2000;
+    fresh.waterEdgeFrom = fresh.at; // a watch is a distance AND the spot it was read from
+    w.bank = 400 + 1500;
+    senseFlood(fresh, EARTHWORM, w);
+    expect(fresh.target!.wx).toBeCloseTo(twin.target!.wx, 9);
+    expect(fresh.target!.wz).toBeCloseTo(twin.target!.wz, 9);
+  });
+
+  it('water already underfoot is a flood whether or not the edge moved, and with no edge in reach "away" is the reverse heading', () => {
+    const w = floodWorld();
+    // The bank is a metre WEST of the worm: it is standing in the water, and the edge has never been read.
+    const c = spawn(EARTHWORM, world(400, 400));
+    w.bank = 400 - 100;
+    expect(senseFlood(c, EARTHWORM, w)).toBe(true);
+    expect(c.alarm).toBe(1);
+    expect(c.waterEdge).toBe(100);
+    // Away from the EDGE, which is west: east, deeper into the water — the far bank is where dry ground is not, but the edge is where the water is coming from.
+    expect(c.target!.wx).toBeGreaterThan(400);
+    // A pool with no edge within fifty metres: still a flood, fled along the reverse of the heading.
+    const lost = spawn(EARTHWORM, world(400, 400));
+    lost.heading = 0; // facing +z
+    w.bank = 400 - FLOOD_THREAT - 1000;
+    expect(senseFlood(lost, EARTHWORM, w)).toBe(true);
+    expect(lost.waterEdge).toBe(-1);
+    expect(lost.target!.wz).toBeLessThan(400);
+    expect(lost.target!.wx).toBeCloseTo(400, 6);
+  });
+
+  it('the closing threshold is one solver cell, read from the solver', () => {
+    expect(FLOOD_CLOSING).toBe(WATER_SIM_DEFAULTS.cell);
+    expect(FLOOD_CLOSING).toBe(unitsOfMetres(1));
+  });
+
+  it('a wiggling edge — 20.00 m, 19.60 m, 20.00 m from a still creature — is the nearest cell flipping, not water coming', () => {
+    const w = floodWorld();
+    const c = spawn(EARTHWORM, world(400, 400));
+    w.bank = 400 + 2000;
+    expect(senseFlood(c, EARTHWORM, w)).toBe(false);
+    expect(c.waterEdge).toBe(2000);
+    // Forty centimetres nearer: less than a cell, so the watch holds at twenty metres and nothing fires.
+    w.bank = 400 + 1960;
+    expect(senseFlood(c, EARTHWORM, w)).toBe(false);
+    expect(c.alarm).toBe(0);
+    expect(c.target).toBeNull();
+    expect(c.waterEdge).toBe(2000);
+    // Back where it was: still nothing, and still the same watch.
+    w.bank = 400 + 2000;
+    expect(senseFlood(c, EARTHWORM, w)).toBe(false);
+    expect(c.alarm).toBe(0);
+    expect(c.waterEdge).toBe(2000);
+    // And again, for as long as it likes: a cell flipping back and forth never adds up to a flood.
+    for (let i = 0; i < 20; i += 1) {
+      w.bank = 400 + (i % 2 === 0 ? 1960 : 2000);
+      expect(senseFlood(c, EARTHWORM, w)).toBe(false);
+    }
+    expect(c.alarm).toBe(0);
+    expect(c.waterEdge).toBe(2000);
+    // Exactly one cell nearer is the line, and the line is not crossed: a one-cell flip is the smallest wiggle the lattice has.
+    w.bank = 400 + 2000 - FLOOD_CLOSING;
+    expect(senseFlood(c, EARTHWORM, w)).toBe(false);
+    expect(c.alarm).toBe(0);
+  });
+
+  it('an edge that has come a cell and a half — 20 m then 18.5 m from the same spot — is a flood, fled away from the edge', () => {
+    const w = floodWorld();
+    const c = spawn(EARTHWORM, world(400, 400));
+    w.bank = 400 + 2000;
+    senseFlood(c, EARTHWORM, w);
+    w.bank = 400 + 1850;
+    expect(senseFlood(c, EARTHWORM, w)).toBe(true);
+    expect(c.alarm).toBe(1);
+    expect(c.sinceThink).toBe(EARTHWORM.thinkS);
+    // The watch is retaken from here, at the new distance.
+    expect(c.waterEdge).toBe(1850);
+    expect(c.waterEdgeFrom).toBe(c.at);
+    // Away: the water is east, so the target is west.
+    expect(c.target).not.toBeNull();
+    expect(c.target!.wx).toBeLessThan(400);
+    expect(c.target!.wz).toBeCloseTo(400, 6);
+  });
+
+  it('a steady advance of one cell per think is a flood by the second think, however the thinks fall against the cells', () => {
+    // The lattice can only ever move the reading a cell at a time, so a
+    // watch replaced at every think would compare each cell against the
+    // last and never see two: the whole reason the watch holds.
+    const w = floodWorld();
+    const c = spawn(EARTHWORM, world(400, 400));
+    w.bank = 400 + 2000;
+    expect(senseFlood(c, EARTHWORM, w)).toBe(false);
+    w.bank -= FLOOD_CLOSING;
+    expect(senseFlood(c, EARTHWORM, w)).toBe(false); // one cell: on the line, held
+    expect(c.waterEdge).toBe(2000);
+    w.bank -= FLOOD_CLOSING;
+    expect(senseFlood(c, EARTHWORM, w)).toBe(true); // two cells against the held watch: coming
+    expect(c.waterEdge).toBe(1800);
+    // And at a tenth of a cell a think — a pond rising by the centimetre — the same, eleven thinks later.
+    const slow = spawn(EARTHWORM, world(400, 400));
+    w.bank = 400 + 2000;
+    senseFlood(slow, EARTHWORM, w);
+    let fired = false;
+    let thinks = 0;
+    while (!fired && thinks < 30) {
+      w.bank -= FLOOD_CLOSING / 10;
+      fired = senseFlood(slow, EARTHWORM, w);
+      thinks += 1;
+    }
+    expect(fired).toBe(true);
+    expect(thinks).toBe(11);
+  });
+
+  it('a creature that walks five metres toward still water is not spooked by its own approach', () => {
+    const w = floodWorld();
+    const c = spawn(EARTHWORM, world(400, 400));
+    w.bank = 400 + 2000;
+    expect(senseFlood(c, EARTHWORM, w)).toBe(false);
+    const perch = c.at;
+    expect(c.waterEdgeFrom).toBe(perch);
+    // Five metres east, toward the bank, between two thinks: the edge is fifteen metres off now — and, from the perch, still twenty.
+    c.at = world(900, 400);
+    expect(senseFlood(c, EARTHWORM, w)).toBe(false);
+    expect(c.alarm).toBe(0);
+    expect(c.target).toBeNull();
+    // It has left the perch by more than a cell, so the watch is retaken from where it stands.
+    expect(c.waterEdge).toBe(1500);
+    expect(c.waterEdgeFrom).toBe(c.at);
+    // Right up to the edge, a metre at a time: never a fright, only ever a new watch.
+    for (let x = 1000; x < 2400; x += 100) {
+      c.at = world(x, 400);
+      expect(senseFlood(c, EARTHWORM, w)).toBe(false);
+      expect(c.alarm).toBe(0);
+    }
+    // The fly, whose drink is the case that found this: perched twenty metres off, then five from the water's edge, calm both times.
+    const fly = spawn(HOUSEFLY, world(600, 600));
+    w.bank = 600 + 2000;
+    expect(senseFlood(fly, HOUSEFLY, w)).toBe(false);
+    fly.at = world(600 + 2000 - 500, 600);
+    expect(senseFlood(fly, HOUSEFLY, w)).toBe(false);
+    expect(fly.alarm).toBe(0);
+    expect(fly.waterEdge).toBe(500);
+    // Now the water comes a cell and a half while it drinks: THAT is a flood, and it is fled — west, away from the edge.
+    w.bank -= FLOOD_CLOSING * 1.5;
+    expect(senseFlood(fly, HOUSEFLY, w)).toBe(true);
+    expect(fly.target!.wx).toBeLessThan(fly.at.wx);
+  });
+
+  it('a step of less than a cell keeps the watch; the water receding retakes it', () => {
+    const w = floodWorld();
+    const c = spawn(EARTHWORM, world(400, 400));
+    w.bank = 400 + 2000;
+    senseFlood(c, EARTHWORM, w);
+    const perch = c.at;
+    // Half a cell east: still watching from the perch, at the perch's distance.
+    c.at = world(450, 400);
+    expect(senseFlood(c, EARTHWORM, w)).toBe(false);
+    expect(c.waterEdgeFrom).toBe(perch);
+    expect(c.waterEdge).toBe(2000);
+    // The water goes: the watch is retaken from where the creature stands, at the new distance.
+    w.bank = 400 + 2600;
+    expect(senseFlood(c, EARTHWORM, w)).toBe(false);
+    expect(c.waterEdgeFrom).toBe(c.at);
+    expect(c.waterEdge).toBe(2550);
+  });
+
+  it('the spot is null exactly when the distance is -1', () => {
+    const w = floodWorld();
+    const c = spawn(EARTHWORM, world(400, 400));
+    expect(c.waterEdge).toBe(-1);
+    expect(c.waterEdgeFrom).toBeNull();
+    const paired = (): void => {
+      expect(c.waterEdgeFrom === null, `edge ${c.waterEdge} from ${JSON.stringify(c.waterEdgeFrom)}`).toBe(c.waterEdge === -1);
+    };
+    // No water anywhere.
+    senseFlood(c, EARTHWORM, w);
+    paired();
+    expect(c.waterEdgeFrom).toBeNull();
+    // Seen.
+    w.bank = 400 + 2000;
+    senseFlood(c, EARTHWORM, w);
+    paired();
+    expect(c.waterEdgeFrom).toBe(c.at);
+    // Out of reach again.
+    w.bank = 400 + FLOOD_THREAT + 1;
+    senseFlood(c, EARTHWORM, w);
+    paired();
+    expect(c.waterEdgeFrom).toBeNull();
+    // Seen, then the whole water gone.
+    w.bank = 400 + 2000;
+    senseFlood(c, EARTHWORM, w);
+    paired();
+    senseFlood(c, EARTHWORM, { ...w, water: null });
+    paired();
+    expect(c.waterEdgeFrom).toBeNull();
+    // Underfoot with no edge in reach: the alarm fires with nothing to watch.
+    w.bank = 400 - FLOOD_THREAT - 1000;
+    expect(senseFlood(c, EARTHWORM, w)).toBe(true);
+    paired();
+    expect(c.waterEdgeFrom).toBeNull();
+    // And the spot round-trips as a plain point, the way `at` does.
+    w.bank = 400 + 2000;
+    senseFlood(c, EARTHWORM, w);
+    expect(JSON.parse(JSON.stringify(c)).waterEdgeFrom).toEqual({ wx: 400, wz: 400 });
+  });
+
+  it('a creeping bank makes a worm go to the bottom of its band and away, and a fly take off away, with no species branch', () => {
+    // The bank starts thirty metres east and comes at ten centimetres a step; the worm flees within a think of its first advance.
+    const w = floodWorld();
+    const rand = mulberry32(41);
+    const worm = spawn(EARTHWORM, world(400, 400));
+    for (let i = 0; i < 30 * 3; i += 1) stepFlood(worm, EARTHWORM, w, rand, 1 / 30);
+    const before = worm.at;
+    w.bank = before.wx + 3000;
+    let fled = false;
+    for (let i = 0; i < 30 * 20 && !fled; i += 1) {
+      w.bank -= 10;
+      stepFlood(worm, EARTHWORM, w, rand, 1 / 30);
+      if (worm.behaviour === 'flee') fled = true;
+    }
+    expect(fled).toBe(true);
+    expect(worm.alarm).toBeGreaterThanOrEqual(ALARM_FLEES_AT);
+    expect(worm.target!.wx).toBeLessThan(before.wx);
+    for (let i = 0; i < 30 * 3; i += 1) stepFlood(worm, EARTHWORM, w, rand, 1 / 30);
+    expect(worm.at.wx).toBeLessThan(before.wx);
+    expect(worm.height).toBeCloseTo(ground(worm.at) - unitsOfMm(EARTHWORM.burrow!.underMm), 3);
+
+    // The fly: perched on a long idle, only the water can lift it.
+    const fly = spawn(HOUSEFLY, world(600, 600));
+    fly.behaviour = 'idle';
+    fly.behaviourUntilS = 100;
+    fly.behaviourS = 1;
+    const rest = fly.at;
+    w.bank = rest.wx + 3000;
+    let up = false;
+    for (let i = 0; i < 30 * 20 && !up; i += 1) {
+      w.bank -= 10;
+      stepFlood(fly, HOUSEFLY, w, rand, 1 / 30);
+      if (isAirborne(fly.behaviour)) up = true;
+    }
+    expect(up).toBe(true);
+    expect(fly.target!.wx).toBeLessThan(rest.wx);
+    for (let i = 0; i < 30 * 2; i += 1) stepFlood(fly, HOUSEFLY, w, rand, 1 / 30);
+    expect(fly.at.wx).toBeLessThan(rest.wx);
+    expect(fly.behaviour).not.toBe('flee'); // an air species never uses the word: it takes off
   });
 });
 

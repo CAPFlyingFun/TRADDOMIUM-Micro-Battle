@@ -21,8 +21,8 @@ export type {
 export { CELL_HECTARES, drawLengthMm, expectedCount, hostCandidates, populateCreatures, siteCount } from './population';
 export type { PopulateCreaturesOptions } from './population';
 export {
-  ALARM_FLEES_AT, CALM_WEATHER, HOST_WALK_LENGTHS, RAINING_MM_HR, hostPlantOf, isLand, nearestSite, senseAlarm, think,
-  thinkDue, tickNeeds,
+  ALARM_FLEES_AT, CALM_WEATHER, FLOOD_CLOSING, FLOOD_THREAT, HOST_WALK_LENGTHS, RAINING_MM_HR, hostPlantOf, isLand, nearestSite,
+  senseAlarm, senseFlood, think, thinkDue, thinkPending, tickNeeds,
 } from './intent';
 export { arrived, burrow, fly, isAirborne, isMoving, move, paceOf, walk } from './locomotion';
 export { wrapHeading } from './heading';

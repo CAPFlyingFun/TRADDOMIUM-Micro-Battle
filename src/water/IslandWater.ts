@@ -411,6 +411,22 @@ export class IslandWater {
     return this.field.heightAt(at) < SEA_LEVEL ? null : spot;
   }
 
+  /**
+   * The edge of this window's water, for the ecology's `nearestWater`
+   * (`world/ecology/waterQuery.ts`) and, through it, the animals that
+   * flee a flood.
+   *
+   * Forwarded as the solver hands it over. The sea rule `spotAt` applies
+   * above — nothing below sea level is fresh — is already applied inside
+   * `WaterSim.shoreline()` on the bed the solver read, which is the
+   * heightfield sampled at the same points; a second pass through
+   * `heightAt` here would cost a survey lookup per edge cell per call and
+   * answer the same thing. Empty before the window is placed.
+   */
+  shoreline(): readonly WorldPoint[] {
+    return this.sim.shoreline();
+  }
+
   dispose(): void {
     this.mesh.geometry.dispose();
     this.look.material.dispose();

@@ -97,12 +97,29 @@ export interface PlantSource {
   readonly variant: number;
 }
 
+/** The nearest edge of fresh water to a point: where it is, and how far, world units on the plane. */
+export interface NearestWater {
+  readonly at: WorldPoint;
+  readonly distance: number;
+}
+
 /** The water, as the resource layer asks it: is there accessible fresh water here, and how far to its edge. */
 export interface WaterQuery {
   /** Depth of standing fresh water at a point, world units; 0 where the ground is dry. Reads the water system, writes nothing. */
   freshDepthAt(at: WorldPoint): number;
   /** Whether the point is at sea. Salt is not a drink. */
   isSeaAt(at: WorldPoint): boolean;
+  /**
+   * The nearest point on a fresh-water shoreline within `radius` world
+   * units of `at`, else null — which is also the answer where the water
+   * system keeps no shoreline, so a creature asking a router that has
+   * none is told "none in reach", not handed a second code path.
+   *
+   * The edge, not the depth underfoot: an animal that wants to know
+   * whether the flood is coming asks this, and asks it again, and reads
+   * the difference (`creatures/intent.ts`, `senseFlood`).
+   */
+  nearestWater(at: WorldPoint, radius: number): NearestWater | null;
 }
 
 /** Everything the resource layer reads. Read-only by construction: nothing here mutates the world. */

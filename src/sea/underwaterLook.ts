@@ -53,8 +53,30 @@
  * linear fog `far` IS the distance at which nothing is left, so a sight
  * distance goes in unchanged and nothing recompiles.
  *
+ * ─── the surface the eye can be under, and why inland water was missed ─
+ *
+ * Joshua, 2026-09-08, from alpha.34: under inland flood water there was
+ * no fog; under the sea there was. The scene block that reads this look
+ * was written FOR the sea. Its surface was the swell's, and its gate was
+ * "the bed under her is below mean sea level" — the sea's basin and
+ * nothing else. That gate is right for what it guards (the camera can
+ * fly under sea level inside a mountain, and the fog must not claim
+ * water that is rock) and it is also exactly why a pond at 300 m could
+ * never fog: every inland bed is above MSL, so the gate refused before
+ * any water was asked.
+ *
+ * `submergingSurface` is the same question put to BOTH owners, choosing
+ * between them by the router's own rule — the bed decides. Below MSL the
+ * sea answers with its swell; above it the inland water answers with its
+ * spot's surface, or with nothing. ONE RULE, ONE FOG: what comes back is
+ * a height, and `underwaterLook` neither knows nor cares which water is
+ * over her. The colour and the sight are the sea's for both, because
+ * reusing the ocean's fog is what he asked for; a siltier inland look,
+ * if it is ever wanted, is a tuning of this one and not a second fog.
+ *
  * Pure: no three, no DOM. A colour and two distances are not a scene.
  */
+import { SEA_LEVEL } from '../world/heightfield';
 
 /** A metre, in world units, so visibilities can be written as distances. */
 const M = 100;
@@ -195,4 +217,60 @@ export function blendSight(air: number, water: number, strength: number): number
   if (!(air > 0) || !(water > 0)) return water;
   const t = Math.min(1, Math.max(0, strength));
   return air * Math.pow(water / air, t);
+}
+
+/**
+ * The sea, as the surface question sees it: whether it is drawn, and
+ * its swell at the eye.
+ */
+export interface SubmergingSea {
+  readonly on: boolean;
+  /**
+   * The swell's surface at the eye, world units from mean sea level.
+   * Asked only where the bed is the sea's, so the swell is never read
+   * on a hillside.
+   */
+  surfaceAt(): number;
+}
+
+/**
+ * The inland water, as the surface question sees it: whether it is
+ * drawn, and its spot's surface at the eye.
+ */
+export interface SubmergingFresh {
+  readonly on: boolean;
+  /**
+   * The inland water's surface at the eye, world units from mean sea
+   * level, or null where the window holds no water — which includes
+   * everywhere outside it.
+   */
+  surfaceAt(): number | null;
+}
+
+/**
+ * The surface the eye can be under here, or null where there is no
+ * water to be under.
+ *
+ * THE BED DECIDES WHICH OWNER IS ASKED, and only that owner is asked —
+ * the same rule, and the same laziness, as `WaterRouter.spotAt`. Below
+ * mean sea level the answer is the sea's swell when the ocean is drawn,
+ * and an inland source that could also answer there is not consulted:
+ * the inland window refuses sub-MSL beds itself, but the refusal
+ * belongs here too rather than being trusted from three files away.
+ * Above it the answer is the inland water's surface when that layer is
+ * drawn and a spot exists. A layer that is switched off has no surface,
+ * because a fog under water nobody can see is the fog claiming water
+ * that is not there.
+ *
+ * A NaN ground compares false and is asked of the inland water, as the
+ * router does; a NaN surface handed on to `underwaterLook` is above,
+ * not below, so the world is not flooded by a reading that failed.
+ */
+export function submergingSurface(
+  ground: number,
+  sea: SubmergingSea | null,
+  fresh: SubmergingFresh | null,
+): number | null {
+  if (ground < SEA_LEVEL) return sea !== null && sea.on ? sea.surfaceAt() : null;
+  return fresh !== null && fresh.on ? fresh.surfaceAt() : null;
 }
