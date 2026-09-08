@@ -153,16 +153,29 @@ describe('chainOf and measureSpine', () => {
 });
 
 describe('dressRig', () => {
-  it('keeps the base map, drops the packed maps, and sets the skin once per material', () => {
+  it('KEEPS THE NORMAL MAP with the base map, drops the packed maps, and sets the skin once per material', () => {
+    // Joshua, 2026-09-08: "the glb worm looks kind of bad so small". It
+    // was not the model — the file ships a baked normal with the segment
+    // rings on it and this function was deleting it on load, leaving a
+    // smooth tube in a flat colour. The rule that dropped it was written
+    // about "a body a few millimetres long": true of a 2.5 mm aphid,
+    // never true of a worm that is 150 mm and grows to 248.
     const rig = leggedRig(3.9, true);
     const mesh = rig.getObjectByName('output_unwrapped') as THREE.SkinnedMesh;
     const material = mesh.material as THREE.MeshStandardMaterial;
     const map = material.map!;
-    const dropped = [material.normalMap!, material.roughnessMap!, material.metalnessMap!];
+    const normal = material.normalMap!;
+    let normalDisposed = 0;
+    normal.addEventListener('dispose', () => { normalDisposed += 1; });
+    const dropped = [material.roughnessMap!, material.metalnessMap!];
     const disposed = dropped.map((t) => { let n = 0; t.addEventListener('dispose', () => { n += 1; }); return () => n; });
     expect(dressRig(rig)).toBe(1);
     expect(material.map).toBe(map);
-    expect(material.normalMap).toBeNull();
+    expect(material.normalMap).toBe(normal);
+    expect(normalDisposed).toBe(0);
+    // The PACKED map still goes, and that half of the lesson still holds:
+    // the exporter baked roughness topping out at 0.46, so every animal
+    // shipped as wet plastic.
     expect(material.roughnessMap).toBeNull();
     expect(material.metalnessMap).toBeNull();
     expect(material.roughness).toBe(CREATURE_ROUGHNESS);
@@ -172,6 +185,18 @@ describe('dressRig', () => {
     expect(mesh.frustumCulled).toBe(false);
     // Dressing again touches the same one material, not zero and not two.
     expect(dressRig(rig)).toBe(1);
+  });
+
+  it('drops the normal map too when a rung cannot afford it, and releases it', () => {
+    const rig = leggedRig(3.9, true);
+    const material = (rig.getObjectByName('output_unwrapped') as THREE.SkinnedMesh).material as THREE.MeshStandardMaterial;
+    const normal = material.normalMap!;
+    let disposed = 0;
+    normal.addEventListener('dispose', () => { disposed += 1; });
+    expect(dressRig(rig, CREATURE_ROUGHNESS, false)).toBe(1);
+    expect(material.normalMap).toBeNull();
+    expect(disposed).toBe(1);
+    expect(material.map).not.toBeNull();
   });
 
   it('disposeRig releases every geometry, material and texture', () => {

@@ -152,14 +152,16 @@ describe('loading and the size', () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
-  it('dresses the skin once on the template: roughness set, packed maps gone, base map kept', async () => {
+  it('dresses the skin once on the template: roughness set, packed maps gone, base AND normal maps kept', async () => {
     const v = await keep(view());
     const mesh = v.template('housefly')!.getObjectByName('output_unwrapped') as THREE.SkinnedMesh;
     const material = mesh.material as THREE.MeshStandardMaterial;
     expect(material.roughness).toBe(0.72);
     expect(material.metalness).toBe(0);
     expect(material.map).not.toBeNull();
-    expect(material.normalMap).toBeNull();
+    // The normal map STAYS: it is the segment detail, and dropping it is
+    // what made the worm read as a smooth tube (`fauna/rig.dressRig`).
+    expect(material.normalMap).not.toBeNull();
     expect(material.roughnessMap).toBeNull();
     expect(material.metalnessMap).toBeNull();
     // Every clone wears the same material.

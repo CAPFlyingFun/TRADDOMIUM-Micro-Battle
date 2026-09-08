@@ -45,10 +45,23 @@
  * metalness into one map, the loader sets both factors to 1 and lets
  * the map multiply them down, and the exporter baked a roughness range
  * that tops out at 0.46 — so every animal shipped as wet plastic. The
- * packed map and the normal map cost texture memory and change nothing
- * on a body a few millimetres long seen by an ant; the base colour is
- * kept and the rest dropped, once, on the template, so every clone
- * shares the dressed material.
+ * packed map goes, and that part of the lesson still stands.
+ *
+ * THE NORMAL MAP STAYS, and the rule that dropped it is worth reading
+ * back: "the packed map and the normal map cost texture memory and
+ * change nothing on a body a few millimetres long seen by an ant". True
+ * of the aphid at 2.5 mm and the fly at 6.5. Never true of the WORM,
+ * which is 150 mm and now grows to 248 (`creatures/species.lengthRangeMm`)
+ * — sixty aphids long — and which the game has since given the player two
+ * ways to put a camera against: the soil cutaway and the finder's GO.
+ * Joshua, 2026-09-08: "the glb worm looks kind of bad so small". It was
+ * not the model. The file ships a baked normal with the segment rings and
+ * the wrinkles on it, 36 KB of them, and this function was deleting them
+ * on load and leaving a smooth tube wearing a flat colour.
+ *
+ * `keepNormal` is the switch rather than a silent always, because the
+ * original reasoning still holds somewhere: a rung that cannot afford
+ * three texture fetches an animal should still be able to say so.
  *
  * Reads no world coordinate: everything here is a rig at the identity.
  */
@@ -450,7 +463,11 @@ export function measureRig(root: THREE.Object3D, chainNames: readonly string[] |
  * material. Returns how many materials it touched, so a pass that
  * matched nothing can be noticed.
  */
-export function dressRig(root: THREE.Object3D, roughness: number = CREATURE_ROUGHNESS): number {
+export function dressRig(
+  root: THREE.Object3D,
+  roughness: number = CREATURE_ROUGHNESS,
+  keepNormal = true,
+): number {
   const done = new Set<THREE.Material>();
   root.traverse((n) => {
     const holder = n as THREE.Mesh;
@@ -460,7 +477,10 @@ export function dressRig(root: THREE.Object3D, roughness: number = CREATURE_ROUG
       const std = material as THREE.MeshStandardMaterial;
       if (std.isMeshStandardMaterial !== true || done.has(std)) continue;
       done.add(std);
-      for (const slot of ['normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap'] as const) {
+      const drop = keepNormal
+        ? (['roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap'] as const)
+        : (['normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap'] as const);
+      for (const slot of drop) {
         const texture = std[slot];
         if (texture !== null && texture !== std.map) texture.dispose();
         std[slot] = null;
