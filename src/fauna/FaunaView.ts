@@ -122,10 +122,27 @@ export const SPINE_TOLERANCE = 0.35;
 /** A burrower more than this far under the ground it stands on is not drawn, world units. From the brief. */
 export const BURROW_HIDE = 0.3;
 
-/** Crumbs per body length on a worm's trail, and the crumbs kept beyond one body. GAME TUNING. */
-export const CRUMBS_PER_LENGTH = 8;
-const TRAIL_MARGIN = 4;
+/**
+ * Crumbs per body length on a worm's trail, and the crumbs kept beyond
+ * one body. GAME TUNING, TCS's lesson: its trail is 56 points 3 mm apart
+ * for a 150 mm worm, and `WormBody` says why — "the body is laid on the
+ * POLYLINE through these points, so a coarse trail cuts the" curve. At
+ * eight a length the crumbs were 1.875 units apart and the seventeen
+ * bones 0.94, so two bones shared a straight segment and the animal read
+ * as a chain of sticks. Sixteen puts a crumb between every pair of
+ * bones. The trail still remembers about a body and a half.
+ */
+export const CRUMBS_PER_LENGTH = 16;
+const TRAIL_MARGIN = 8;
 const TRAIL_CAPACITY = CRUMBS_PER_LENGTH + TRAIL_MARGIN;
+
+/**
+ * A head this far from its newest crumb has not crawled there — the
+ * creature has been moved. Body lengths. GAME TUNING: a fleeing worm
+ * covers 1.5 units a second, so half a body is thirty frames of full
+ * flight and nothing a crawl reaches between two frames.
+ */
+const TRAIL_BREAK_LENGTHS = 0.5;
 
 /** How the impostor and the placeholder look, per species. GAME TUNING, from the rigs' own proportions. */
 export interface SpeciesLook {
@@ -174,10 +191,18 @@ export interface FaunaCost {
   readonly impostors: Readonly<Record<CreatureId, number>>;
 }
 
-/** A worm's recent positions, newest at `head`, as a ring of WORLD points. */
+/**
+ * A worm's recent positions, newest at `head`, as a ring of WORLD points.
+ *
+ * A crumb remembers its DEPTH under the ground, not its height above the
+ * sea — see `crumbHeight`. `heights` is the absolute it was dropped at,
+ * kept only for a view with no ground to ask.
+ */
 interface Trail {
   readonly points: WorldPoint[];
   readonly heights: Float64Array;
+  /** Ground minus the body, world units, positive downward. */
+  readonly depths: Float64Array;
   readonly spacing: number;
   head: number;
   count: number;
@@ -652,56 +677,87 @@ export class FaunaView {
     rig.lastHeight = c.height;
     rig.lastHeading = c.heading;
     if (rig.chain.length >= 2) {
-      const spacing = slot.bodyLength / CRUMBS_PER_LENGTH;
       let trail = rig.trail;
       if (trail === null) {
-        trail = { points: new Array<WorldPoint>(TRAIL_CAPACITY).fill(c.at), heights: new Float64Array(TRAIL_CAPACITY), spacing, head: 0, count: 0 };
+        trail = {
+          points: new Array<WorldPoint>(TRAIL_CAPACITY).fill(c.at),
+          heights: new Float64Array(TRAIL_CAPACITY),
+          depths: new Float64Array(TRAIL_CAPACITY),
+          spacing: slot.bodyLength / CRUMBS_PER_LENGTH,
+          head: 0,
+          count: 0,
+        };
         rig.trail = trail;
       }
-      trail.head = TRAIL_CAPACITY - 1;
-      trail.count = 0;
-      const ahead = { x: Math.sin(c.heading), z: Math.cos(c.heading) };
-      for (let k = TRAIL_CAPACITY - 1; k >= 0; k -= 1) {
-        const at = translate(c.at, -k * spacing * ahead.x, -k * spacing * ahead.z);
-        const depth = this.groundAt ? this.groundAt(c.at) - c.height : 0;
-        this.pushCrumb(trail, at, this.groundAt ? this.groundAt(at) - depth : c.height);
-      }
+      this.seedTrail(trail, c);
     }
   }
 
   /**
-   * A DRAWN BODY LIES ON THE GROUND IT IS OVER, never through it.
-   *
-   * Joshua, 2026-09-08, with the finder on: the worm "is not digging any
-   * dirt and halfway on the surface and ground like it's swimming". Two
-   * things put it there, and this answers both. A crumb remembers the
-   * height the worm HAD when it was dropped, so a worm that has just
-   * come up still has a body length of trail at burrow depth behind it
-   * — at the wander pace that is most of a surfacing spent half buried.
-   * And a trail is a straight line of points at one height, so on any
-   * slope the far end of the body is inside the hill whatever the worm
-   * is doing.
-   *
-   * The clamp is at DRAW time, not at push time: the crumb keeps the
-   * honest record of where the body was, and the fix reaches the ones
-   * already laid rather than only the next ones. Thirteen heightfield
-   * samples per drawn worm per frame, on at most a handful of rigs.
-   *
-   * It only ever RAISES. A worm properly underground is not drawn at all
-   * (`BURROW_HIDE`), so nothing here can pull a burrowing body up to the
-   * surface — and with no ground to ask, the height stands as it is.
+   * Lay a straight trail behind a creature at the depth it is at: what a
+   * body that has just been handed a rig, or has just been moved, is
+   * drawn along until it has crawled far enough to have a real one.
    */
-  private onGround(at: WorldPoint, height: number, exposedBurrow = false): number {
-    if (exposedBurrow) return height;
-    if (this.groundAt === null) return height;
-    const ground = this.groundAt(at);
-    return Number.isFinite(ground) ? Math.max(height, ground) : height;
+  private seedTrail(trail: Trail, c: CreatureState): void {
+    trail.head = TRAIL_CAPACITY - 1;
+    trail.count = 0;
+    const ahead = { x: Math.sin(c.heading), z: Math.cos(c.heading) };
+    for (let k = TRAIL_CAPACITY - 1; k >= 0; k -= 1) {
+      const at = translate(c.at, -k * trail.spacing * ahead.x, -k * trail.spacing * ahead.z);
+      this.pushCrumb(trail, at, c.height, this.depthAt(c.at, c.height));
+    }
   }
 
-  private pushCrumb(trail: Trail, at: WorldPoint, height: number): void {
+  /** How far under the ground a body is at a point. Zero with no ground to ask. */
+  private depthAt(at: WorldPoint, height: number): number {
+    if (this.groundAt === null) return 0;
+    const ground = this.groundAt(at);
+    return Number.isFinite(ground) ? ground - height : 0;
+  }
+
+  /**
+   * A DRAWN BODY LIES IN THE GROUND IT IS OVER — never through it, and
+   * never hanging over it either.
+   *
+   * A CRUMB REMEMBERS A DEPTH, NOT A HEIGHT. That is the whole rule, and
+   * it is what alpha.26 got half right: it kept the absolute height the
+   * worm had when the crumb was dropped and raised it to the ground at
+   * draw time, which fixed a body half buried on a slope and left the
+   * opposite failure standing. The ground here MOVES — an HD tile lands
+   * under the camera and `Heightfield.heightAt` stops answering from the
+   * coarse lattice — and when it moves DOWN, a one-sided raise pins
+   * every crumb at the height the old lattice had. The creature follows
+   * the new ground (`locomotion.burrow` re-clamps it into the band the
+   * same tick), the trail does not, and the seventeen bones are laid up
+   * the gap between them: measured at a two-metre drop, the whole 15 cm
+   * body stood vertical, and at a ten-centimetre drop it drew the L
+   * Joshua photographed — ten of vertical, five of horizontal. A worm
+   * wanders 3 mm a second, so it drops a crumb every six seconds and the
+   * shape stands for over a minute; a `surface` worm's pace is zero and
+   * it never drops another at all.
+   *
+   * A depth is immune to that: whatever the ground does, the body goes
+   * with it. Nothing here is a clamp against the ground, so nothing can
+   * be stranded above it.
+   *
+   * The one clamp left is `Math.max(0, depth)` for a body NOT in a
+   * prepared cutaway: it draws a surfacing worm lying on the ground
+   * rather than half through it, which is what alpha.26 was for. In a
+   * cutaway the true depth is what there is to see, so it is used raw.
+   * With no ground to ask, the absolute the crumb was dropped at stands.
+   */
+  private crumbHeight(at: WorldPoint, height: number, depth: number, exposedBurrow: boolean): number {
+    if (this.groundAt === null) return height;
+    const ground = this.groundAt(at);
+    if (!Number.isFinite(ground)) return height;
+    return ground - (exposedBurrow ? depth : Math.max(0, depth));
+  }
+
+  private pushCrumb(trail: Trail, at: WorldPoint, height: number, depth: number): void {
     trail.head = (trail.head + 1) % TRAIL_CAPACITY;
     trail.points[trail.head] = at;
     trail.heights[trail.head] = height;
+    trail.depths[trail.head] = depth;
     if (trail.count < TRAIL_CAPACITY) trail.count += 1;
   }
 
@@ -726,19 +782,30 @@ export class FaunaView {
         && this.ceilingAt(c.at) < this.groundAt(c.at) - 1e-6
         && c.height < this.groundAt(c.at) - BURROW_HIDE;
       const trail = rig.trail;
-      if (distance(c.at, trail.points[trail.head]) >= trail.spacing) this.pushCrumb(trail, c.at, c.height);
+      const behind = distance(c.at, trail.points[trail.head]);
+      if (behind > slot.bodyLength * TRAIL_BREAK_LENGTHS) {
+        // IT DID NOT CRAWL THERE. A creature is streamed out and back at
+        // the spot its cell generates it at, and a rig held across that
+        // would draw the body reaching from where the animal is to where
+        // it was. A trail is a record of a crawl; when the crawl is
+        // broken the record is worthless, so it is laid again.
+        this.seedTrail(trail, c);
+      } else if (behind >= trail.spacing) {
+        this.pushCrumb(trail, c.at, c.height, this.depthAt(c.at, c.height));
+      }
       // The path: the body right now, then the crumbs, newest first,
-      // each lying ON the ground under it (see `onGround`) and lifted so
-      // the belly rests on it.
+      // each at its own depth in the ground under it (see `crumbHeight`)
+      // and lifted so the belly rests on it.
       const lift = exposedBurrow ? 0 : chain.lift * slot.scale;
       const path = this.path;
-      path[0] = here.lx; path[1] = this.onGround(c.at, c.height, exposedBurrow) + lift; path[2] = here.lz;
+      const headDepth = this.depthAt(c.at, c.height);
+      path[0] = here.lx; path[1] = this.crumbHeight(c.at, c.height, headDepth, exposedBurrow) + lift; path[2] = here.lz;
       let points = 1;
       for (let k = 0; k < trail.count; k += 1) {
         const i = (trail.head - k + TRAIL_CAPACITY) % TRAIL_CAPACITY;
         const l = this.toLocal(trail.points[i]);
         path[points * 3] = l.lx;
-        path[points * 3 + 1] = this.onGround(trail.points[i], trail.heights[i], exposedBurrow) + lift;
+        path[points * 3 + 1] = this.crumbHeight(trail.points[i], trail.heights[i], trail.depths[i], exposedBurrow) + lift;
         path[points * 3 + 2] = l.lz;
         points += 1;
       }

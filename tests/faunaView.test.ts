@@ -387,6 +387,103 @@ describe('the worm', () => {
     expect(buried).toBe(0);
   });
 
+  it('GOES WITH A GROUND THAT MOVES: an HD tile landing under it does not stand the body on end', async () => {
+    // Joshua, 2026-09-08, with a screenshot: "The worm was doing a weird
+    // thing and also teleporting randomly." The weird thing is an L — a
+    // vertical column of worm rising out of the ground with the rest of
+    // the body lying horizontally at the top of it.
+    //
+    // THE GROUND HERE MOVES. `Heightfield.heightAt` answers from the
+    // coarse lattice until an HD tile lands and from the tile after, and
+    // the two differ by whatever detail the tile adds. alpha.26 stored
+    // each crumb's ABSOLUTE height and raised it to the ground at draw
+    // time, which is one-sided: when the ground drops, the creature goes
+    // down with it (`locomotion.burrow` re-clamps it into the band the
+    // same tick) and every crumb stays pinned at the height the old
+    // lattice had. The chain is then laid up the gap. Measured against
+    // the real rig before the fix: a 2 m drop stood all 15 cm of body
+    // vertical, and a 10 cm drop drew 10 of vertical and 5 of
+    // horizontal — the photograph. A worm wanders 3 mm a second, so it
+    // drops a crumb every six seconds and the shape stands for over a
+    // minute; a `surface` worm's pace is zero and it never drops one.
+    //
+    // A crumb remembers a DEPTH now, so the body moves with the ground.
+    let ground = 100;
+    const v = await keep(view('ultra-low', loader(), { groundAt: () => ground }));
+    const w = creature('earthworm', 'w', 0, 0, { behaviour: 'surface', heading: Math.PI / 2, height: ground });
+    const body = unitsOfMm(EARTHWORM.lengthMm);
+    const lift = () => v.anatomy('earthworm')!.chain!.lift * v.scaleOf('earthworm');
+    const names = EARTHWORM.model.chain ?? [];
+    const extent = (): { high: number; low: number } => {
+      v.group.updateMatrixWorld(true);
+      const root = v.rigs('earthworm')[0];
+      expect(root.visible).toBe(true);
+      let high = -Infinity;
+      let low = Infinity;
+      for (const name of names) {
+        const p = worldPosition(root.getObjectByName(name)!);
+        if (p.y > high) high = p.y;
+        if (p.y < low) low = p.y;
+      }
+      return { high, low };
+    };
+    // A real trail first: a whole body length of crawling, so nothing
+    // that follows is answered by the seeded straight line.
+    for (let f = 0; f < 200; f += 1) {
+      w.at = world(w.at.wx + body / 100, w.at.wz);
+      v.update([w], EYE, 1 / 60);
+    }
+    expect(extent().high - extent().low).toBeLessThan(1e-6);
+
+    // THE TILE LANDS and the ground drops two metres. The worm follows it.
+    ground -= 200;
+    w.height = ground;
+    v.update([w], EYE, 1 / 60);
+    const after = extent();
+    expect(after.high - after.low).toBeLessThan(1e-6);
+    expect(after.high).toBeCloseTo(ground + lift(), 6);
+    // And the same for a drop the size of the one in the photograph.
+    ground += 190;
+    w.height = ground;
+    v.update([w], EYE, 1 / 60);
+    expect(extent().high).toBeCloseTo(ground + lift(), 6);
+  });
+
+  it('LAYS A FRESH TRAIL when its creature is moved rather than crawls, instead of reaching back to where it was', async () => {
+    // A creature is streamed out and generated again at the spot its
+    // cell's hash puts it, and a rig held across that would draw the
+    // body between where the animal is and where it was. A trail is a
+    // record of a crawl; a broken crawl is not a record of anything.
+    const v = await keep(view('ultra-low', loader(), { groundAt: () => 10 }));
+    const w = creature('earthworm', 'w', 0, 0, { behaviour: 'surface', heading: Math.PI / 2, height: 10 });
+    const body = unitsOfMm(EARTHWORM.lengthMm);
+    for (let f = 0; f < 200; f += 1) {
+      w.at = world(w.at.wx + body / 100, w.at.wz);
+      v.update([w], EYE, 1 / 60);
+    }
+    w.at = world(w.at.wx, w.at.wz + 500);
+    v.update([w], EYE, 1 / 60);
+    v.group.updateMatrixWorld(true);
+    const root = v.rigs('earthworm')[0];
+    const here = toLocal(w.at);
+    const names = EARTHWORM.model.chain ?? [];
+    const head = worldPosition(root.getObjectByName(names[0])!);
+    expect(head.x).toBeCloseTo(here.lx, 4);
+    expect(head.z).toBeCloseTo(here.lz, 4);
+    let behind = 0;
+    for (const name of names) {
+      const p = worldPosition(root.getObjectByName(name)!);
+      // Every bone is within a body length of where the animal now is,
+      // and on the head's own line: heading π/2 is ahead = +X, so the
+      // body lies BEHIND the head along −X, not stretched back down −Z
+      // toward the place it was moved from.
+      expect(Math.hypot(p.x - here.lx, p.z - here.lz), name).toBeLessThanOrEqual(body + 1e-6);
+      expect(Math.abs(p.z - head.z), name).toBeLessThan(body * 0.05);
+      behind = Math.max(behind, head.x - p.x);
+    }
+    expect(behind).toBeGreaterThan(body * 0.9);
+  });
+
   it('is hidden by DEPTH when the ground is known: within the margin of the surface it is drawn, whatever it is doing', async () => {
     const v = await keep(view('ultra-low', loader(), { groundAt: () => 10 }));
     const nosing = creature('earthworm', 'nosing', 5, 0, { behaviour: 'burrow', height: 10 - BURROW_HIDE + 0.01 });
