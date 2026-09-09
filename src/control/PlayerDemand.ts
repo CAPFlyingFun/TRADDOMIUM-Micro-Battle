@@ -100,10 +100,11 @@
 import { newMutableIntent, type MutableIntent } from '../creatures/demand';
 import { wrapHeading } from '../creatures/heading';
 import type { Medium } from '../creatures/species';
+import type { Vec3 } from '../creatures/surface';
 import type { InputSnapshot } from '../input/Input';
 import { clampAxis, type Intent } from '../input/Intent';
 import type { StickReading } from '../input/MoveStick';
-import { headingOfYaw } from '../perf/FreeFlyCamera';
+import { headingOfYaw, yawForHeading } from '../perf/FreeFlyCamera';
 
 /**
  * The Lab's on-screen controls, as booleans the Lab's UI fills each
@@ -241,17 +242,21 @@ export function demandFrom(
   const moving = magnitude > 0;
 
   // THE ANGLE BETWEEN THE TWO FRAMES. Ahead in a heading h is
-  // (sin h, cos h) and right is (cos h, −sin h) (`demand.ts`,
-  // `planeStep`); resolving the camera-frame vector onto the creature's
-  // two axes is the rotation by the difference of the headings. A yaw
-  // or a heading that is not a number reads as no difference: the push
-  // is taken in the creature's own frame and nothing turns.
+  // (sin h, cos h) and RIGHT is ahead × up = (−cos h, sin h) — the
+  // capsule's and `planeStep`'s rule, and the free-fly camera's own
+  // right, so the stick's x here is the same x the camera walks on.
+  // Resolving the camera-frame vector onto the creature's two axes is
+  // the rotation by the difference of the headings: with the camera
+  // ahead of the body by e, a push right lands part on the body's
+  // forward (x sin e) and part on its right (x cos e). A yaw or a
+  // heading that is not a number reads as no difference: the push is
+  // taken in the creature's own frame and nothing turns.
   const view = headingOfYaw(cameraYaw);
   const error = Number.isFinite(view) && Number.isFinite(creatureHeading) ? wrapHeading(view - creatureHeading) : 0;
   const sin = Math.sin(error);
   const cos = Math.cos(error);
-  const forward = y * cos - x * sin;
-  const strafe = y * sin + x * cos;
+  const forward = y * cos + x * sin;
+  const strafe = x * cos - y * sin;
 
   // Steering is looking, while driving; at rest the body is left alone.
   const turn = moving ? saturate(error / STEER_SATURATION) : 0;
@@ -271,4 +276,42 @@ export function demandFrom(
   out.primary = buttons.primary || anyHeld(keys, KEYS.primary);
   out.secondary = buttons.secondary || anyHeld(keys, KEYS.secondary);
   return out;
+}
+
+/**
+ * ONE FRAME OF THE PLAYER'S WANT, ON WHATEVER THE BODY STANDS ON. The
+ * same sentence as `demandFrom` — camera-relative stick, pace as a
+ * ceiling, steering is looking — said for a body whose feet may be on
+ * a wall or a ceiling (Creature Lab D; Joshua's brief, §14). The
+ * `look` is the direction the player is asking to see along, a unit
+ * vector in world space (`FollowCamera.wantedLook`, or the free
+ * camera's lens direction); the body's frame is its `heading` and its
+ * `up` (`creatures/surface.ts`). The stick's "ahead" is the look
+ * projected onto the body's surface, its "right" is that ahead × up,
+ * and the turn is the signed angle about `up` from the body's ahead to
+ * the look's projection, as a fraction of `STEER_SATURATION`. A look
+ * straight along the normal (the free camera staring at the wall) has
+ * no projection: the push is then taken in the body's own frame and
+ * nothing turns, exactly as a NaN yaw is read by `demandFrom`.
+ *
+ * On the ground, with a horizontal look, this is `demandFrom` to the
+ * bit — the flat case is the general one with `up = +y` — and a test
+ * holds the two together. CREATURE LAB D'S LEAF: until it lands, the
+ * horizontal reading below stands (the look's bearing, `demandFrom`).
+ */
+export function demandFromLook(
+  snapshot: InputSnapshot,
+  stick: StickReading | null,
+  look: Vec3,
+  creatureHeading: number,
+  creatureUp: Vec3,
+  medium: Medium,
+  buttons: LabButtons,
+  winged = false,
+  out: MutableIntent = newMutableIntent(),
+): Intent {
+  void creatureUp;
+  const flat = Math.hypot(look.x, look.z);
+  const yaw = flat > 0 && Number.isFinite(flat) ? yawForHeading(Math.atan2(look.x, look.z)) : NaN;
+  return demandFrom(snapshot, stick, yaw, creatureHeading, medium, buttons, winged, out);
 }

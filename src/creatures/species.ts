@@ -348,6 +348,20 @@ export interface CreatureSpecies {
   readonly massMg?: number;
   readonly model: CreatureModel;
   readonly medium: Medium;
+  /**
+   * WHETHER IT WALKS UP WALLS AND ALONG CEILINGS, sticking to the
+   * surface (Joshua, 2026-09-09: "All the insects besides the worm";
+   * the brief's §14). A climber in a world with solids
+   * (`CreatureWorld.climbables`) is stepped along whatever it stands on
+   * by `surface.ts`; a non-climber, or any body in a world without
+   * solids, walks the ground as before. MEASURED where it is true: ants
+   * by tarsal claws and adhesive arolia (Federle et al. 2000, J. Exp.
+   * Biol.; Federle et al. 2002), the housefly by pulvilli and its
+   * measured inverted landing (Liu et al. 2019), the aphid by the leaf
+   * undersides its colonies sit on (aphid.md); and false for the worm,
+   * which has no feet.
+   */
+  readonly climber: boolean;
   readonly temperament: Temperament;
   readonly diet: Diet;
   /**
@@ -439,6 +453,8 @@ export const EARTHWORM: CreatureSpecies = Object.freeze({
     ]),
   }),
   medium: 'soil' as Medium,
+  // No feet: a worm meets a wall and does not go up it.
+  climber: false,
   temperament: 'skittish' as Temperament,
   diet: 'detritivore' as Diet,
   // Nobody's prey and nobody's predator: an earthworm never attacks (Joshua's brief, §10).
@@ -582,6 +598,8 @@ export const APHID: CreatureSpecies = Object.freeze({
     chain: null,
   }),
   medium: 'plant' as Medium,
+  // MEASURED: colonies on leaf undersides and stems (aphid.md, "Colony position"); it walks whatever it feeds on.
+  climber: true,
   temperament: 'passive' as Temperament,
   diet: 'sap' as Diet,
   // Never prey (Joshua's brief, §11) and never a predator: it kicks, it walks, it drops; it never attacks (§17).
@@ -688,6 +706,8 @@ export const HOUSEFLY: CreatureSpecies = Object.freeze({
     chain: null,
   }),
   medium: 'air' as Medium,
+  // MEASURED: pulvilli on every foot, and it lands on ceilings (Liu et al. 2019, housefly.md "Inverted landing").
+  climber: true,
   temperament: 'skittish' as Temperament,
   diet: 'omnivore' as Diet,
   // Never a predator (Joshua's brief, §10): it shares a food patch and lifts off when something closes on it.
@@ -849,6 +869,8 @@ export const QUEEN: CreatureSpecies = Object.freeze({
     chain: null,
   }),
   medium: 'ground' as Medium,
+  // MEASURED: claws and arolia, the ant's grip on any surface (Federle et al. 2000, 2002); she climbs a blade to launch (queen.md).
+  climber: true,
   // A cornered queen stings and never hunts (queen.md, "flee"): she meets a threat and does not go looking for one.
   temperament: 'defensive' as Temperament,
   // GAME TUNING with a biological shape: an alate does not forage and a
@@ -1003,6 +1025,8 @@ export const WORKER: CreatureSpecies = Object.freeze({
     chain: null,
   }),
   medium: 'ground' as Medium,
+  // MEASURED: the same claws and arolia (Federle et al. 2000, 2002); fire ants carry food up vertical surfaces (worker.md, Sci. Rep. 2019).
+  climber: true,
   // Attack and flee are one decision, sized (worker.md): near the nest a disturbance is met. `defend` is the stand; `attack` is the Lab's option.
   temperament: 'defensive' as Temperament,
   // MEASURED: 70-80 % of loads are liquid (Tennant & Porter 1991), the rest insects, seeds and dead matter.

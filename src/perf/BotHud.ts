@@ -76,9 +76,10 @@ const CELLS: readonly (readonly [ControlId | null, string])[] = [
  */
 export function pressedControls(intent: Intent): readonly ControlId[] {
   const on: ControlId[] = [];
-  if (intent.turn < -DEADZONE) on.push('turn-left');
+  // A positive turn grows the heading, which is a LEFT turn (`input/Intent.ts`).
+  if (intent.turn > DEADZONE) on.push('turn-left');
   if (intent.forward > DEADZONE) on.push('ahead');
-  if (intent.turn > DEADZONE) on.push('turn-right');
+  if (intent.turn < -DEADZONE) on.push('turn-right');
   if (intent.strafe < -DEADZONE) on.push('strafe-left');
   if (intent.sprint) on.push('sprint');
   if (intent.strafe > DEADZONE) on.push('strafe-right');
@@ -94,7 +95,7 @@ export interface BotReadout {
   readonly intent: Intent;
   /** World coordinates, or null before the authority has named a spawn. */
   readonly at: { readonly wx: number; readonly wz: number } | null;
-  /** Radians, actor convention: 0 faces +wz and a positive turn is clockwise from above. */
+  /** Radians, actor convention: 0 faces +wz and a positive turn is anticlockwise from above (a left turn). */
   readonly heading: number;
   readonly secondsLeft: number;
   readonly roundTripMs?: number;

@@ -138,6 +138,7 @@ import { CALM_WEATHER } from './intent';
 import { drawLengthMm } from './population';
 import { APHID, CREATURE_SPECIES, EARTHWORM, HOUSEFLY, QUEEN, WORKER, unitsOfMm, type CreatureId } from './species';
 import type { NewCreatureOptions } from './state';
+import type { Climbable } from './surface';
 import type { CreatureWeather, CreatureWorld, Disturbance } from './world';
 
 // ---------------------------------------------------------------------------
@@ -152,8 +153,43 @@ export const LAB_FLOOR = 100;
 /** The one salt every lab hash uses, so the bumps are the same bumps on every device and every reset. */
 export const LAB_SEED = 0x1ab;
 
-/** The central test block: its footprint and its height. Only the top is a surface today (the header). */
+/** The central test block: its footprint and its overall height — the SLAB's, since the block is a slab on a pedestal (below). */
 export const BLOCK = Object.freeze({ at: world(0, 0), size: 20, height: 20 });
+
+/**
+ * THE BLOCK IS A SLAB ON A PEDESTAL (Creature Lab D, 2026-09-09). The
+ * brief's §14 wants "top → down wall → underneath → around corner →
+ * back upward", and a cube standing on the floor has no underneath. So
+ * the 20 cm block is a 20 × 20 × 8 cm SLAB whose top is where the block's
+ * top always was, carried 12 cm off the floor by an 8 × 8 cm PILLAR on
+ * the origin: a walker climbs the pillar, walks out under the slab
+ * upside down, round the slab's edge, up its side and onto the top. Both
+ * are `Climbable`s (`surface.ts`) in world coordinates, y the height.
+ * The pillar's foot is sunk a centimetre into the floor so no face of it
+ * is coplanar with the ground — the z-fighting Joshua saw on the old
+ * block's top was the floor mesh's plateau under the box's own top face.
+ * GAME TUNING throughout: the brief's 15-25 cm block, given an
+ * underneath.
+ */
+export const PILLAR = Object.freeze({ size: 8, height: 12, sink: 1 });
+export const SLAB = Object.freeze({ size: BLOCK.size, thickness: BLOCK.height - PILLAR.height });
+
+/** The pillar as a solid: 8 cm square on the origin, from a centimetre under the floor to 12 cm above it. */
+export const PILLAR_BOX: Climbable = Object.freeze({
+  id: 'lab:pillar',
+  min: Object.freeze({ x: BLOCK.at.wx - PILLAR.size / 2, y: LAB_FLOOR - PILLAR.sink, z: BLOCK.at.wz - PILLAR.size / 2 }),
+  max: Object.freeze({ x: BLOCK.at.wx + PILLAR.size / 2, y: LAB_FLOOR + PILLAR.height, z: BLOCK.at.wz + PILLAR.size / 2 }),
+});
+
+/** The slab as a solid: the block's footprint, from the pillar's top to the block's top. */
+export const SLAB_BOX: Climbable = Object.freeze({
+  id: 'lab:slab',
+  min: Object.freeze({ x: BLOCK.at.wx - SLAB.size / 2, y: LAB_FLOOR + PILLAR.height, z: BLOCK.at.wz - SLAB.size / 2 }),
+  max: Object.freeze({ x: BLOCK.at.wx + SLAB.size / 2, y: LAB_FLOOR + BLOCK.height, z: BLOCK.at.wz + SLAB.size / 2 }),
+});
+
+/** Everything in the box a climber may walk on besides the floor, in the order a probe lists them. */
+export const LAB_CLIMBABLES: readonly Climbable[] = Object.freeze([PILLAR_BOX, SLAB_BOX]);
 
 /** The uneven patch: a square of value noise, ±`amplitude` at `wavelength`. */
 export const BUMP = Object.freeze({ at: world(-30, 25), size: 20, amplitude: 0.5, wavelength: 2 });
@@ -272,17 +308,30 @@ export function puddleDepthAt(at: WorldPoint): number {
 }
 
 /**
+ * THE FLOOR: the flat floor, the bumps over the patch, the dish under
+ * the puddle — the bench's heightfield with nothing standing on it. What
+ * the floor MESH is sampled from (`lab/labMeshes.ts`), so the block is
+ * never drawn twice (the header's z-fighting), and what a walker under
+ * the slab stands on.
+ */
+export function labFloorAt(at: WorldPoint): number {
+  if (!Number.isFinite(at.wx) || !Number.isFinite(at.wz)) return NaN;
+  let ground = LAB_FLOOR;
+  if (onBump(at)) ground += (valueNoise(at.wx / BUMP.wavelength, at.wz / BUMP.wavelength, LAB_SEED) * 2 - 1) * BUMP.amplitude;
+  return ground - puddleDepthAt(at);
+}
+
+/**
  * THE GROUND: the floor; the block's top over its footprint; the bumps
  * over the patch; the dish under the puddle. The block wins over the
  * patch and the puddle — they do not overlap, but a rule should not
- * depend on it.
+ * depend on it. (Creature Lab D's leaf makes this the FLOOR alone and
+ * hands the block to `climbables`; until it lands the step stands.)
  */
 export function labGroundAt(at: WorldPoint): number {
   if (!Number.isFinite(at.wx) || !Number.isFinite(at.wz)) return NaN;
   if (onBlock(at)) return LAB_FLOOR + BLOCK.height;
-  let ground = LAB_FLOOR;
-  if (onBump(at)) ground += (valueNoise(at.wx / BUMP.wavelength, at.wz / BUMP.wavelength, LAB_SEED) * 2 - 1) * BUMP.amplitude;
-  return ground - puddleDepthAt(at);
+  return labFloorAt(at);
 }
 
 /** The ground's normal, by central differences over a millimetre: up on the floor, tipped on the bumps, a cliff at the block's edge. */

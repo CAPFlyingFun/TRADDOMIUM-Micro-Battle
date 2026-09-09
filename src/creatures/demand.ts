@@ -373,10 +373,15 @@ function planeStep(
     if (remaining <= arriveWithin) return target;
   }
   if (strafe === 0) return ahead(at, heading, forward * step);
-  // v0's convention, the capsule's: ahead is (sin h, cos h); right is a quarter turn clockwise from it.
+  // Ahead is (sin h, cos h); RIGHT is ahead × up = (−cos h, sin h). The
+  // capsule's rule (`actor/Transform.ts`), and the same fix: v0 called
+  // (cos h, −sin h) the right, which is the body's local +X — and on
+  // every rig +X is the animal's LEFT (`fauna/gait.ts`, measured), so a
+  // possessed ant sidestepped the wrong way (Joshua, 2026-09-09: "left
+  // and right on the joystick are backwards").
   const sin = Math.sin(heading);
   const cos = Math.cos(heading);
-  return translate(at, (forward * sin + strafe * cos) * step, (forward * cos - strafe * sin) * step);
+  return translate(at, (forward * sin - strafe * cos) * step, (forward * cos + strafe * sin) * step);
 }
 
 /**

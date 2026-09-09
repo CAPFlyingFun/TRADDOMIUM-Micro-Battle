@@ -78,10 +78,10 @@ import {
   FollowCamera, TAP_PIXELS, demandFrom, lookDeltaOf, pickCreature, type FollowTarget, type MutableLook, type Ndc, type Viewport,
 } from '../control';
 import {
-  CREATURE_SPECIES, ControlLedger, CreatureSim, LAB_CREATURE_IDS, LAB_FLOOR, LAB_SEED, MM_PER_UNIT, createLabWorld, labSpawns,
-  newMutableIntent, unitsOfMm,
+  CREATURE_SPECIES, ControlLedger, CreatureSim, LAB_CREATURE_IDS, LAB_FLOOR, LAB_SEED, MM_PER_UNIT, WORLD_UP, createLabWorld,
+  labSpawns, newMutableIntent, unitsOfMm,
   type CreatureId, type CreatureSpecies, type CreatureState, type CreatureWorld, type Disturbance, type DisturbanceSource,
-  type LabWorld, type MutableIntent, type PredationPolicy,
+  type LabWorld, type MutableIntent, type PredationPolicy, type Vec3,
 } from '../creatures';
 import type { CreaturePolicy } from '../creatures/world';
 import { FaunaView } from '../fauna/FaunaView';
@@ -414,6 +414,7 @@ interface MutableTarget extends FollowTarget {
   at: WorldPoint;
   height: number;
   heading: number;
+  up: Vec3;
   lengthUnits: number;
 }
 
@@ -511,7 +512,7 @@ export function buildCreatureLabScene(ctx: SceneContext, hooks: CreatureLabHooks
 
   // Per-frame scratch, rewritten in place (the header: no allocation on the frame path that is this file's).
   const intent: MutableIntent = newMutableIntent();
-  const target: MutableTarget = { at: CENTRE, height: LAB_FLOOR, heading: 0, lengthUnits: 1 };
+  const target: MutableTarget = { at: CENTRE, height: LAB_FLOOR, heading: 0, up: WORLD_UP, lengthUnits: 1 };
   const look: MutableLook = { dx: 0, dy: 0 };
   const flySnap: MutableSnapshot = {
     keys: EMPTY_KEYS, pointer: { down: false, buttons: 0, x: 0, y: 0, dx: 0, dy: 0 }, touches: [], wheel: 0,
@@ -536,6 +537,7 @@ export function buildCreatureLabScene(ctx: SceneContext, hooks: CreatureLabHooks
     target.at = c.at;
     target.height = c.height;
     target.heading = c.heading;
+    target.up = c.up;
     target.lengthUnits = unitsOfMm(c.lengthMm);
     return target;
   };

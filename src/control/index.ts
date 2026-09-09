@@ -27,5 +27,5 @@ export {
   FollowCamera, lookDeltaOf,
   type FollowTarget, type LookDelta, type MutableLook,
 } from './FollowCamera';
-export { KEYS, NO_BUTTONS, STEER_SATURATION, demandFrom, verticalFor, type LabButtons } from './PlayerDemand';
+export { KEYS, NO_BUTTONS, STEER_SATURATION, demandFrom, demandFromLook, verticalFor, type LabButtons } from './PlayerDemand';
 export { TAP_PIXELS, pickCreature, type Ndc, type Viewport } from './pick';

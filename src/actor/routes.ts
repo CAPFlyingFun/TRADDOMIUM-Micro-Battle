@@ -54,13 +54,13 @@ function withPause(r: Resolved, legs: Leg[]): Leg[] {
   return legs;
 }
 
-/** One clockwise circle (seen from above), then a pause. */
+/** One circle to the left (anticlockwise seen from above: a positive turn grows the heading), then a pause. */
 export function circleRoute(tuning: CapsuleTuning, options: RouteOptions = {}): Leg[] {
   const r = resolve(tuning, options);
   return withPause(r, [lobe(r, 1)]);
 }
 
-/** A clockwise lobe, a pause, an anticlockwise lobe, a pause: the track crosses itself at the start. */
+/** A left lobe, a pause, a right lobe, a pause: the track crosses itself at the start. */
 export function figureEightRoute(tuning: CapsuleTuning, options: RouteOptions = {}): Leg[] {
   const r = resolve(tuning, options);
   return withPause(r, [...withPause(r, [lobe(r, 1)]), lobe(r, -1)]);

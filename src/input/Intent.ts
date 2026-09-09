@@ -45,9 +45,20 @@
 export interface Intent {
   /** −1 (back) .. 1 (ahead), in the actor's own heading frame. */
   readonly forward: number;
-  /** −1 (left) .. 1 (right), in the actor's own heading frame. */
+  /**
+   * −1 (left) .. 1 (right), in the actor's own heading frame — the
+   * body's OWN right, ahead × up, which with +y up and ahead at
+   * (sin h, cos h) is (−cos h, sin h). Not local +X: on every rig +X is
+   * the left side (`fauna/gait.ts`), and the one day the two were
+   * confused a possessed ant sidestepped the wrong way.
+   */
   readonly strafe: number;
-  /** −1 (anticlockwise, seen from above) .. 1 (clockwise). */
+  /**
+   * −1 (a right turn) .. 1 (a left turn). A positive turn GROWS the
+   * heading, and a heading is a rotation about +y, so a positive turn is
+   * anticlockwise seen from above (`world/coords.ts`, the compass's
+   * note on why a bearing runs the other way).
+   */
   readonly turn: number;
   /** A toggle, not a magnitude: the transform's tuning says what it multiplies. */
   readonly sprint: boolean;

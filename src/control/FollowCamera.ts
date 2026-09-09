@@ -74,19 +74,28 @@
  */
 import * as THREE from 'three';
 import { wrapHeading } from '../creatures/heading';
+import type { MutableVec3, Vec3 } from '../creatures/surface';
 import type { InputSnapshot } from '../input/Input';
 import { headingOfYaw, yawForHeading, type LookTuning } from '../perf/FreeFlyCamera';
 import type { CameraPose } from '../session/GameSession';
 import { local, type WorldPoint } from '../world/coords';
 import { toLocal, toWorld } from '../world/origin';
 
-/** What the camera follows: a body's reference point, its heading and its size, read fresh every frame. */
+/** What the camera follows: a body's reference point, its heading, its up and its size, read fresh every frame. */
 export interface FollowTarget {
   readonly at: WorldPoint;
   /** Above mean sea level, world units. */
   readonly height: number;
-  /** Actor convention: ahead is (sin heading, cos heading). */
+  /** Actor convention: ahead is (sin heading, cos heading) on the surface the body stands on (`creatures/surface.ts`, `aheadOn`). */
   readonly heading: number;
+  /**
+   * The unit normal of what the body stands on (`CreatureState.up`):
+   * `WORLD_UP` on the ground and in the air, a wall's or a ceiling's on
+   * one. The orbit is measured off it — behind along the face, up along
+   * its normal — so a camera on a climbing ant is out from the wall
+   * and not inside it (Creature Lab D).
+   */
+  readonly up: Vec3;
   /** THIS individual's body length, world units — what every distance here is measured in. */
   readonly lengthUnits: number;
 }
@@ -240,6 +249,24 @@ export class FollowCamera {
    */
   get yaw(): number {
     return yawForHeading(this.wantHeading);
+  }
+
+  /**
+   * THE WANTED LOOK AS A DIRECTION: the unit vector of the bearing the
+   * player is asking to look along, in the followed body's own surface
+   * frame — what `PlayerDemand.demandFromLook` projects the stick onto.
+   * The wanted bearing and not the lens's measured one, for the header's
+   * reason (`yaw`). On the ground it is `(sin wantHeading, 0, cos
+   * wantHeading)`, the direction `headingOfYaw(yaw)` names; on a wall or
+   * a ceiling it is the same heading carried onto that face
+   * (`creatures/surface.ts`, `aheadOn`) — Creature Lab D's leaf; until
+   * it lands the horizontal reading stands.
+   */
+  wantedLook(into: MutableVec3): Vec3 {
+    into.x = Math.sin(this.wantHeading);
+    into.y = 0;
+    into.z = Math.cos(this.wantHeading);
+    return into;
   }
 
   /** Whether a handoff blend is still running: a HUD may say so, a test does. */

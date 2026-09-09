@@ -116,7 +116,9 @@ describe('routes through the real transform', () => {
     const end = last(path);
     expect(Math.hypot(end.at.wx, end.at.wz)).toBeLessThan(1e-6);
     expect(Math.abs(end.heading)).toBeLessThan(1e-9);
-    // And it went somewhere in between: a clockwise circle from heading 0 bulges to +wx.
+    // And it went somewhere in between: a positive turn grows the heading
+    // from +wz toward +wx (a LEFT turn, anticlockwise from above), so the
+    // circle bulges to +wx.
     const reach = Math.max(...path.map((s) => s.at.wx));
     const radius = DEBUG_CAPSULE_TUNING.walkSpeed / (0.5 * DEBUG_CAPSULE_TUNING.turnRate);
     expect(reach).toBeCloseTo(2 * radius, 0);
@@ -163,7 +165,7 @@ describe('routes through the real transform', () => {
     // THE PROPERTY THE WHOLE FEATURE RESTS ON. An open route walks the bot
     // out of the player's view in about a minute, and the "somebody else
     // in the room" it was built to be becomes somebody else to chase.
-    // Four equal sides at four right-hand quarter turns close; the back
+    // Four equal sides at four quarter turns the same way close; the back
     // leg, the strafe pair, the extra corner pair and the sprint pair each
     // cancel themselves.
     const route = patrolRoute(DEBUG_CAPSULE_TUNING);

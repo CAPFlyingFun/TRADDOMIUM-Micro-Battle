@@ -462,9 +462,9 @@ describe('applyDemand with a hand-made intent', () => {
     const c = spawn(WORKER, world(600, 560), 3);
     c.heading = 0;
     const walk = paceRatio(c, WORKER) * unitsOfMm(WORKER.pace.wanderMmS);
-    // Right is a quarter turn clockwise from ahead: +wx at heading 0.
+    // Right is ahead × up: −wx at heading 0 (the rigs' +X is the LEFT side, `fauna/gait.ts`).
     expect(applyDemand(c, WORKER, w, intent({ strafe: 1 }), 1)).toBeCloseTo(walk, 9);
-    expect(c.at.wx).toBeCloseTo(600 + walk, 9);
+    expect(c.at.wx).toBeCloseTo(600 - walk, 9);
     expect(c.at.wz).toBeCloseTo(560, 9);
     // Full ahead and full strafe is one pace, not 1.41 of them.
     expect(applyDemand(c, WORKER, w, intent({ forward: 1, strafe: 1 }), 1)).toBeCloseTo(walk, 9);

@@ -29,6 +29,7 @@ import type { Normal } from '../world/heightfield';
 import type { CellResources, PlantSource, WaterQuery } from '../world/ecology/resources';
 import type { CreatureId, CreatureSpecies } from './species';
 import type { CreatureState, Tier } from './state';
+import type { Climbable } from './surface';
 import type { BurrowGate } from './terrainEdit';
 
 /** The sky as a creature feels it. Read from the weather source; a creature never reads the source itself. */
@@ -136,6 +137,15 @@ export interface CreatureWorld {
   /** The ground's height at a point, world units above mean sea level. The live heightfield, HD where a tile is resident. */
   groundAt(at: WorldPoint): number;
   normalAt(at: WorldPoint): Normal;
+  /**
+   * THE SOLIDS A CLIMBER MAY WALK ON, besides the ground: axis-aligned
+   * boxes in world coordinates (`surface.ts`). Absent — the island, until
+   * it has a rock worth climbing — is no solids, and every walker is the
+   * walker it was before surfaces existed. The Lab's block is the first
+   * (`labWorld.ts`). Read by the integrator, the brain and the flier's
+   * floor; a box is never entered, only stood on.
+   */
+  readonly climbables?: readonly Climbable[];
   /** What belongs at a point — the same classifier the objects use, so a worm and a fern agree on what a wetland is. */
   habitatAt(at: WorldPoint): Habitat;
   /** The plants of a 16 m cell, by cell address. Null for a cell not generated. */

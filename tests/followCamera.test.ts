@@ -9,6 +9,7 @@ import {
   AHEAD_LENGTHS, BACK_LENGTHS, DEPTH_RATIO, DRIFT_TAU_S, FollowCamera, HANDOFF_S, LOOK_HOLD_S, LOOK_RADIANS_PER_PIXEL,
   MAX_NEAR, MIN_NEAR, NEAR_OF_ORBIT, ORBIT_LENGTHS, UP_LENGTHS, lookDeltaOf, type FollowTarget,
 } from '../src/control/FollowCamera';
+import { WORLD_UP } from '../src/creatures/surface';
 import type { InputSnapshot } from '../src/input/Input';
 import { yawForHeading } from '../src/perf/FreeFlyCamera';
 import { world } from '../src/world/coords';
@@ -21,7 +22,7 @@ const QUEEN = 0.8;
 const APHID = 0.14;
 
 function target(wx: number, wz: number, height: number, heading: number, lengthUnits: number): FollowTarget {
-  return { at: world(wx, wz), height, heading, lengthUnits };
+  return { at: world(wx, wz), height, heading, up: WORLD_UP, lengthUnits };
 }
 
 /** A 932 × 430 phone, snapped onto a target. */
@@ -261,8 +262,8 @@ describe('FollowCamera: the handoff', () => {
     const t = target(0, 0, 100, 0, QUEEN);
     const cam = rig(t);
     const before = cam.camera.position.clone();
-    cam.retarget({ at: world(NaN, 0), height: 100, heading: 0, lengthUnits: QUEEN });
-    cam.update(DT, { at: world(1, 1), height: 100, heading: 0, lengthUnits: 0 });
+    cam.retarget({ at: world(NaN, 0), height: 100, heading: 0, up: WORLD_UP, lengthUnits: QUEEN });
+    cam.update(DT, { at: world(1, 1), height: 100, heading: 0, up: WORLD_UP, lengthUnits: 0 });
     expect(cam.blending).toBe(false);
     expect(cam.camera.position.distanceTo(before)).toBe(0);
   });

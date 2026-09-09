@@ -36,11 +36,18 @@ export type { MutableIntent } from './demand';
 export { ControlLedger } from './control';
 export type { ControlAuthority, Possession } from './control';
 export {
-  APHID_PERCH_FRACTION, BLOCK, BLOCK_CLEARANCE, BUMP, DISTURB_HOLD_S, INWARD_DISTANCE, LAB_FLOOR, LAB_HABITAT, LAB_HALF, LAB_PLANTS,
-  LAB_SEED, LAB_SITES, LAB_SIZE, LAB_WATER, LITTER_CORNER, PROTEIN_SPOT, PUDDLE, PUDDLE_EDGE, createLabWorld, labGroundAt,
-  labInBounds, labInwardTarget, labNormalAt, labSpawns, onBlock, puddleDepthAt,
+  APHID_PERCH_FRACTION, BLOCK, BLOCK_CLEARANCE, BUMP, DISTURB_HOLD_S, INWARD_DISTANCE, LAB_CLIMBABLES, LAB_FLOOR, LAB_HABITAT,
+  LAB_HALF, LAB_PLANTS, LAB_SEED, LAB_SITES, LAB_SIZE, LAB_WATER, LITTER_CORNER, PILLAR, PILLAR_BOX, PROTEIN_SPOT, PUDDLE,
+  PUDDLE_EDGE, SLAB, SLAB_BOX, createLabWorld, labFloorAt, labGroundAt, labInBounds, labInwardTarget, labNormalAt, labSpawns,
+  onBlock, puddleDepthAt,
 } from './labWorld';
 export type { LabWorld, LabWorldOptions } from './labWorld';
+// --- Creature Lab D: surfaces (walls and undersides) ---
+export {
+  FACE_NORMALS, FACE_TOLERANCE, SURFACE_SKIN, WORLD_UP, aheadOn, aimOnSurface, cross, dot, faceUnder, faceWord, floorOverBoxes,
+  headingOn, normalize, rightOn, rotateBetween, routeAround, signedAngleAbout, surfaceStep, tangentBasis, tangentOf, vec3,
+} from './surface';
+export type { Climbable, FaceHit, FaceWord, MutableVec3, SurfaceBody, Vec3 } from './surface';
 export { wrapHeading } from './heading';
 export {
   GROUND_CLEARANCE, MIN_STANDOFF, UNDER_GROUND, VIEW_LENGTHS, VIEW_RISE,

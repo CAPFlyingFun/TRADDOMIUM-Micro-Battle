@@ -69,16 +69,17 @@ describe('which cells an intent presses', () => {
     expect(pressedControls(intent({ forward: -1 }))).toEqual(['back']);
     expect(pressedControls(intent({ strafe: 0.5 }))).toEqual(['strafe-right']);
     expect(pressedControls(intent({ strafe: -0.5 }))).toEqual(['strafe-left']);
-    expect(pressedControls(intent({ turn: 0.5 }))).toEqual(['turn-right']);
-    expect(pressedControls(intent({ turn: -0.5 }))).toEqual(['turn-left']);
+    // A positive turn grows the heading, anticlockwise from above: a LEFT turn (`input/Intent.ts`).
+    expect(pressedControls(intent({ turn: 0.5 }))).toEqual(['turn-left']);
+    expect(pressedControls(intent({ turn: -0.5 }))).toEqual(['turn-right']);
     expect(pressedControls(intent({ sprint: true }))).toEqual(['sprint']);
   });
 
   it('reads several at once, and treats float dust as no press', () => {
     // Reading order across the diagram: top row left to right, then the middle.
-    expect(pressedControls(intent({ forward: 1, turn: 1, sprint: true }))).toEqual(['ahead', 'turn-right', 'sprint']);
+    expect(pressedControls(intent({ forward: 1, turn: 1, sprint: true }))).toEqual(['turn-left', 'ahead', 'sprint']);
     expect(pressedControls(intent({ forward: -1, turn: -1, strafe: -1 })))
-      .toEqual(['turn-left', 'strafe-left', 'back']);
+      .toEqual(['turn-right', 'strafe-left', 'back']);
     // A dead zone, so a diagram does not flicker on the last bit of a float.
     expect(pressedControls(intent({ forward: 1e-9, strafe: -1e-9, turn: 1e-9 }))).toEqual([]);
   });
@@ -108,8 +109,9 @@ describe('the panel', () => {
 
   it('lights exactly the cells the intent is pressing, and puts them out again', () => {
     const { layer, hud } = mount();
+    // A negative turn shrinks the heading: a right turn (`input/Intent.ts`).
     hud.update(readout({ intent: intent({ forward: 1, turn: -1 }) }), PAINT);
-    expect(litCells(layer).sort()).toEqual(['ahead', 'turn-left']);
+    expect(litCells(layer).sort()).toEqual(['ahead', 'turn-right']);
     expect(cell(layer, 'ahead').dataset.lit).toBe('true');
     expect(cell(layer, 'back').dataset.lit).toBe('false');
 

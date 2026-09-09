@@ -33,14 +33,17 @@ const MEDIA: readonly Medium[] = ['ground', 'soil', 'air', 'plant'];
 /**
  * The expected axes by a different route: the push as a WORLD vector
  * (along and across the camera's heading), dotted onto the creature's
- * ahead and right. `ahead(h) = (sin h, cos h)`, `right(h) = (cos h, −sin h)`.
+ * ahead and right. `ahead(h) = (sin h, cos h)`, and right is ahead × up
+ * with +y up: `right(h) = (−cos h, sin h)` — the body's own right hand,
+ * the free-fly camera's right, and NOT local +X, which the rigs measure
+ * as the left side.
  */
 function expected(x: number, y: number, view: number, heading: number): { forward: number; strafe: number } {
-  const wx = y * Math.sin(view) + x * Math.cos(view);
-  const wz = y * Math.cos(view) - x * Math.sin(view);
+  const wx = y * Math.sin(view) - x * Math.cos(view);
+  const wz = y * Math.cos(view) + x * Math.sin(view);
   return {
     forward: wx * Math.sin(heading) + wz * Math.cos(heading),
-    strafe: wx * Math.cos(heading) - wz * Math.sin(heading),
+    strafe: -wx * Math.cos(heading) + wz * Math.sin(heading),
   };
 }
 
@@ -87,10 +90,26 @@ describe('demandFrom: the stick is camera-relative and lands on the creature\'s 
   }
 
   it('a push up with the camera looking across the creature\'s side is a strafe', () => {
-    // Creature ahead is +z (heading 0); the camera looks along +x (heading π/2) — the creature's right.
-    const out = demandFrom(snap(), push(0, 1), yawForHeading(Math.PI / 2), 0, 'ground', NO_BUTTONS);
+    // Creature ahead is +z (heading 0), so its right hand is at −x. The
+    // camera looking along +x (heading π/2) looks across its LEFT: a
+    // push away from that camera is a step to the left, strafe −1.
+    const left = demandFrom(snap(), push(0, 1), yawForHeading(Math.PI / 2), 0, 'ground', NO_BUTTONS);
+    expect(left.forward).toBeCloseTo(0, 9);
+    expect(left.strafe).toBeCloseTo(-1, 9);
+    // And from the camera on its right (−x), a push away is a step to the right.
+    const right = demandFrom(snap(), push(0, 1), yawForHeading(-Math.PI / 2), 0, 'ground', NO_BUTTONS);
+    expect(right.forward).toBeCloseTo(0, 9);
+    expect(right.strafe).toBeCloseTo(1, 9);
+  });
+
+  it('with the camera behind the creature, a push right is a step to the creature\'s right (Joshua, 2026-09-09: "left and right ... are backwards")', () => {
+    // Heading 0: ahead +z, right −x. The camera behind it looks along +z too.
+    const out = demandFrom(snap(), push(1, 0), yawForHeading(0), 0, 'ground', NO_BUTTONS);
     expect(out.forward).toBeCloseTo(0, 9);
     expect(out.strafe).toBeCloseTo(1, 9);
+    // The world step that strafe makes is −x: the same side the camera's own D key walks to.
+    const wx = Math.sin(0) * out.forward - Math.cos(0) * out.strafe;
+    expect(wx).toBeCloseTo(-1, 9);
   });
 
   it('a push up with the camera facing the creature walks it backward', () => {
@@ -150,8 +169,8 @@ describe('demandFrom: the desktop keys', () => {
     expect(demandFrom(snap(['KeyA']), null, yaw, 0, 'ground', NO_BUTTONS).strafe).toBe(-1);
     expect(demandFrom(snap(['KeyD']), null, yaw, 0, 'ground', NO_BUTTONS).strafe).toBe(1);
     expect(demandFrom(snap(['ArrowUp']), null, yaw, 0, 'ground', NO_BUTTONS).forward).toBe(1);
-    // Camera along the creature's right: W is a strafe.
-    const across = demandFrom(snap(['KeyW']), null, yawForHeading(Math.PI / 2), 0, 'ground', NO_BUTTONS);
+    // Camera along the creature's right (−x for a body facing +z): W is a strafe to the right.
+    const across = demandFrom(snap(['KeyW']), null, yawForHeading(-Math.PI / 2), 0, 'ground', NO_BUTTONS);
     expect(across.strafe).toBeCloseTo(1, 9);
     expect(across.forward).toBeCloseTo(0, 9);
   });

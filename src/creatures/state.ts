@@ -38,6 +38,7 @@
  */
 import type { WorldPoint } from '../world/coords';
 import { CREATURE_SPECIES, type CreatureId, type CreatureSpecies, type Medium } from './species';
+import { WORLD_UP, type Vec3 } from './surface';
 
 export type Behaviour =
   | 'idle'     // standing, sitting, hanging on a stem
@@ -124,8 +125,24 @@ export interface CreatureState {
   at: WorldPoint;
   /** The body's reference point above mean sea level, world units: under the ground for a burrowed worm, above it for a fly. */
   height: number;
-  /** Actor convention: ahead is (sin heading, cos heading). Radians, wrapped into (−π, π]. */
+  /**
+   * Actor convention: ahead is (sin heading, cos heading) ON THE SURFACE
+   * THE BODY STANDS ON — on the ground, in the air and under it, the
+   * horizontal plane; on a wall or a ceiling, that face, the heading
+   * carried onto it by the one rule in `surface.ts` (`aheadOn`).
+   * Radians, wrapped into (−π, π].
+   */
   heading: number;
+  /**
+   * WHICH WAY THE FEET POINT: the unit normal of the surface the body
+   * stands on. `WORLD_UP` on the ground, in the air, under the soil and
+   * on a stem — everywhere it used to be implied, so nothing that ran
+   * before surfaces existed reads a different number — and a wall's or
+   * a ceiling's normal while a climber is on one (Joshua's brief, §14;
+   * Creature Lab D). Replaced, never mutated in place, as `at` is; a
+   * plain triple, so it serialises as it stands.
+   */
+  up: Vec3;
   /** Climb angle, radians: up is positive. A worm nosing up to the surface, a fly climbing. */
   pitch: number;
   behaviour: Behaviour;
@@ -210,6 +227,7 @@ export function newCreature(options: NewCreatureOptions): CreatureState {
     at: options.at,
     height: options.height,
     heading: options.heading,
+    up: WORLD_UP,
     pitch: 0,
     behaviour: options.behaviour ?? 'idle',
     behaviourS: 0,

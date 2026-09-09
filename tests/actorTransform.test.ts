@@ -46,10 +46,18 @@ describe('Transform.step', () => {
   });
 
   it('strafes to the right of the heading', () => {
-    // Facing +wz, right is +wx.
+    // Facing +wz with +y up, the body's right hand is at −wx (ahead × up),
+    // the same right the free-fly camera walks on. +wx is its LEFT — the
+    // rigs' +X side (`fauna/gait.ts`) — and the sign v0 had here.
     const right = step(capsule(0), { ...NEUTRAL_INTENT, strafe: 1 }, 1, TUNING);
-    expect(right.at.wx).toBeCloseTo(110, 9);
+    expect(right.at.wx).toBeCloseTo(90, 9);
     expect(right.at.wz).toBeCloseTo(200, 9);
+    const left = step(capsule(0), { ...NEUTRAL_INTENT, strafe: -1 }, 1, TUNING);
+    expect(left.at.wx).toBeCloseTo(110, 9);
+    // Facing +wx, right is +wz.
+    const east = step(capsule(Math.PI / 2), { ...NEUTRAL_INTENT, strafe: 1 }, 1, TUNING);
+    expect(east.at.wx).toBeCloseTo(100, 9);
+    expect(east.at.wz).toBeCloseTo(210, 9);
   });
 
   it('sprint doubles the distance covered', () => {
@@ -66,7 +74,7 @@ describe('Transform.step', () => {
     expect(half.at.wz - 200).toBeCloseTo(5, 9);
   });
 
-  it('turns by turn × turnRate × dt, clockwise for positive turn', () => {
+  it('turns by turn × turnRate × dt, the heading growing (a left turn, anticlockwise from above) for positive turn', () => {
     const turned = step(capsule(0), { ...NEUTRAL_INTENT, turn: 0.5 }, 0.5, TUNING);
     expect(turned.heading).toBeCloseTo(Math.PI / 4, 9);
     // Turning is applied before the move, so a turn-and-walk goes the new way.

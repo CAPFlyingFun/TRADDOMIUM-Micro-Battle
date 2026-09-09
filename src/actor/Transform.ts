@@ -43,11 +43,19 @@ export function step(state: ActorState, intent: Intent, dt: number, tuning: Caps
   }
 
   const speed = tuning.walkSpeed * (want.sprint ? tuning.sprintFactor : 1) * dt;
-  // v0's convention: ahead is (sin h, cos h); right is a quarter turn clockwise from it.
+  // Ahead is (sin h, cos h) — a rotation about +y, so a growing heading
+  // turns ANTICLOCKWISE seen from above (`world/coords.ts`, the compass's
+  // note). RIGHT is ahead × up = (−cos h, sin h): with +y up, a body
+  // facing +z has its right hand at −x, exactly as `FreeFlyCamera`
+  // derives its own right. v0 wrote (cos h, −sin h) here and called it
+  // the right; that is local +X, which the rigs measure as the LEFT side
+  // (`fauna/gait.ts`), and it is why a possessed ant sidestepped the
+  // wrong way (Joshua, 2026-09-09). The creatures' `planeStep` is the
+  // same arithmetic, fixed the same day.
   const sin = Math.sin(heading);
   const cos = Math.cos(heading);
-  const dx = (forward * sin + strafe * cos) * speed;
-  const dz = (forward * cos - strafe * sin) * speed;
+  const dx = (forward * sin - strafe * cos) * speed;
+  const dz = (forward * cos + strafe * sin) * speed;
 
   return { ...state, at: translate(state.at, dx, dz), heading };
 }
