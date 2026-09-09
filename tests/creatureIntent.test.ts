@@ -15,8 +15,8 @@ import {
   type CreatureSpecies, type CreatureState, type CreatureWeather, type CreatureWorld, type Disturbance,
 } from '../src/creatures';
 import {
-  ALARM_FLEES_AT, FLOOD_CLOSING, FLOOD_THREAT, GROUND_WANDER_LENGTHS, HOST_WALK_LENGTHS, RAINING_MM_HR, hostPlantOf, isLand,
-  nearestSite, senseAlarm, senseFlood, think, thinkDue, thinkPending, tickNeeds,
+  ALARM_FLEES_AT, FLOOD_CLOSING, FLOOD_THREAT, GROUND_HOME_RANGE, GROUND_WANDER_LENGTHS, HOST_WALK_LENGTHS, RAINING_MM_HR, hostPlantOf,
+  isLand, nearestSite, senseAlarm, senseFlood, think, thinkDue, thinkPending, tickNeeds,
 } from '../src/creatures/intent';
 import { unitsOfMetres } from '../src/creatures/finder';
 import { floorAt, isAirborne, move } from '../src/creatures/locomotion';
@@ -45,6 +45,8 @@ interface Fake extends CreatureWorld {
   list: Disturbance[];
   sites: ResourceSite[];
   plants: PlantSource[];
+  /** The nest stand-in, when a test names one (`CreatureWorld.home`). */
+  home?: WorldPoint;
 }
 
 /** The sea east of the line and nothing fresh anywhere: the water most of these tests stand beside. */
@@ -72,12 +74,16 @@ function fakeWorld(water: WaterQuery | null = SEA_ONLY): Fake {
 }
 
 /**
- * A square pond on the shrubland, `POND_DEPTH` over the ordinary ground:
- * fresh water STANDING ON LAND, which is what the heightfield, the
- * habitat and the old `isLand` all called dry. The sea is still east of
- * the line.
+ * A pond on the shrubland, `POND_DEPTH` over the ordinary ground: fresh
+ * water STANDING ON LAND, which is what the heightfield, the habitat and
+ * the old `isLand` all called dry. The sea is still east of the line.
+ * Four metres wide and twelve long, so that from its centre a fly's
+ * longest hop (3 m, `hopMm`) reaches the bank due west and is still
+ * over water due north — the two draws the deterministic tests below
+ * lean on, since a hop's distance is now derived from `hopS × cruise`
+ * and clamped to `hopMm` rather than drawn from `hopMm` itself.
  */
-const POND = Object.freeze({ x0: 1000, x1: 1400, z0: 1000, z1: 1400 });
+const POND = Object.freeze({ x0: 1000, x1: 1400, z0: 600, z1: 1800 });
 const POND_DEPTH = 30;
 const inPond = (at: WorldPoint): boolean => at.wx >= POND.x0 && at.wx < POND.x1 && at.wz >= POND.z0 && at.wz < POND.z1;
 function pondWorld(): Fake {
@@ -121,10 +127,18 @@ function finite(c: CreatureState): void {
 
 const SHRUB: PlantSource = { family: 'shrub', at: world(500, 500), size: 40, id: 'shrub:0,0:3', variant: 0 };
 
+/**
+ * THE RESEARCH'S APHID FEEDS FOR HOURS (feedS 15-60 min, Walker 2024;
+ * Garzo 2002), so a ten-minute soak of the table's animal is a still
+ * animal — correct, and useless for a test of walking. This one feeds
+ * for seconds so the walks happen inside the soak; nothing else differs.
+ */
+const BRIEF_APHID: CreatureSpecies = { ...APHID, needs: { ...APHID.needs, feedS: [30, 120] as readonly [number, number] } };
+
 describe('the vocabulary and a thousand seconds', () => {
   it('every species, fuzzed for 1,000 s with a seeded rand, uses only its medium words and changes behaviour without a disturbance', () => {
     for (const id of CREATURE_IDS) {
-      const species = CREATURE_SPECIES[id];
+      const species = id === 'aphid' ? BRIEF_APHID : CREATURE_SPECIES[id];
       const w = fakeWorld();
       w.plants = [SHRUB];
       const rand = mulberry32(id.length * 977 + 3);
@@ -738,7 +752,7 @@ describe("a size is a distance, too", () => {
       const rand = mulberry32(31);
       let far = 0;
       for (let i = 0; i < 30 * 600; i += 1) {
-        step(c, APHID, w, rand, 1 / 30, SHRUB);
+        step(c, BRIEF_APHID, w, rand, 1 / 30, SHRUB);
         far = Math.max(far, distance(c.at, SHRUB.at));
         expect(distance(c.at, SHRUB.at)).toBeLessThanOrEqual(HOST_WALK_LENGTHS * unitsOfMm(lengthMm) + 1e-6);
       }
@@ -755,13 +769,13 @@ describe('the aphid', () => {
     const w = fakeWorld();
     w.plants = [SHRUB];
     const rand = mulberry32(8);
-    const c = spawn(APHID, SHRUB.at, SHRUB.id);
+    const c = spawn(BRIEF_APHID, SHRUB.at, SHRUB.id);
     const body = unitsOfMm(APHID.lengthMm);
     let feeding = 0;
     let walked = 0;
     const total = 30 * 600;
     for (let i = 0; i < total; i += 1) {
-      step(c, APHID, w, rand, 1 / 30, SHRUB);
+      step(c, BRIEF_APHID, w, rand, 1 / 30, SHRUB);
       if (c.behaviour === 'feed') feeding += 1;
       if (c.behaviour === 'wander') walked += 1;
       expect(distance(c.at, SHRUB.at)).toBeLessThanOrEqual(HOST_WALK_LENGTHS * body + 1e-6);
@@ -932,9 +946,9 @@ describe('the fly and the water', () => {
 
   const CRUISE_FLOOR = unitsOfMm(HOUSEFLY.flight!.cruiseMm[0]);
   const POND_CENTRE = world(1200, 1200);
-  /** 0.75 draws a hop due west of 2.375 m: from the pond's centre, well past its west bank. */
+  /** 0.75 draws a hop due west of 3 m (2.825 s at the cruise, clamped to `hopMm`): from the pond's centre, well past its west bank. */
   const WESTWARD = (): number => 0.75;
-  /** 0.5 draws a hop due south of 1.75 m: from the pond's centre, still in the pond — four times over. */
+  /** 0.5 draws a hop due north of 3 m (2.15 s at the cruise, clamped): from the pond's centre, still in the pond — four times over. */
   const SOUTHWARD = (): number => 0.5;
 
   /** Run a fly for `seconds`, counting the frames it is perched with water under it and the frames it is under a surface. */
@@ -1193,6 +1207,8 @@ describe('the ground brain (the Lab\'s ants)', () => {
     // Two units off: inside the worker's measured sight of 50 mm (five units), which is how far a 48-facet eye resolves motion.
     const nectar: ResourceSite = { id: 'flower:0,0:2', kind: 'nectar', at: world(502, 501), above: 5, amount: 3, ownerId: 'flower:0,0:2' };
     w.sites = [nectar];
+    // A home, as the Lab names one: its wander is a forager's, never further than Tschinkel's 26 cm from the hole.
+    w.home = world(500, 500);
     const rand = mulberry32(51);
     const c = spawn(WORKER, world(500, 500));
     // Hungry from the start, while the food is still in sight: a random walk of a minute would carry a five-unit eye past it.
@@ -1217,11 +1233,12 @@ describe('the ground brain (the Lab\'s ants)', () => {
     expect(seen.has('idle')).toBe(true);
     expect(seen.has('attack')).toBe(false);
     expect(seen.has('fly')).toBe(false);
-    // Its walks are short loops: never more than a few body lengths from where its last walk began, all told well inside a metre.
+    // Its walks are loops inside the range of home: never further than 26 cm from it, all told well inside a metre.
+    expect(distance(c.at, world(500, 500))).toBeLessThanOrEqual(GROUND_HOME_RANGE + unitsOfMm(WORKER.lengthMm));
     expect(distance(c.at, world(500, 500))).toBeLessThan(unitsOfMetres(1));
   }, 60_000);
 
-  it('a defensive ant turns to face a disturbance and holds its ground; a skittish one would flee', () => {
+  it('a defensive ant turns to face a disturbance ON it and holds its ground; one further off is fled; a skittish one flees either', () => {
     const w = fakeWorld();
     const rand = mulberry32(52);
     const c = spawn(WORKER, world(500, 500));
@@ -1230,8 +1247,8 @@ describe('the ground brain (the Lab\'s ants)', () => {
     c.behaviourS = 1;
     for (let i = 0; i < 30 * 2; i += 1) step(c, WORKER, w, rand, 1 / 30);
     const before = c.at;
-    // The threat stands east of it.
-    w.list = [{ at: world(before.wx + 1, before.wz), height: c.height, radius: 0 }];
+    // The threat stands east of it, within a body length (a 3 mm ant: 0.3 units): ON it.
+    w.list = [{ at: world(before.wx + 0.2, before.wz), height: c.height, radius: 0 }];
     let thoughts = 0;
     while (thoughts < 1) if (step(c, WORKER, w, rand, 1 / 30)) thoughts += 1;
     expect(c.behaviour).toBe('defend');
@@ -1242,16 +1259,33 @@ describe('the ground brain (the Lab\'s ants)', () => {
     // It turned to face east (heading π/2) and did not move.
     expect(Math.abs(c.heading - Math.PI / 2)).toBeLessThan(0.05);
     expect(distance(c.at, before)).toBeLessThan(1e-9);
+    // The thing it faces steps back a hand: the stand HOLDS while the alarm lasts, it does not bolt.
+    w.list = [{ at: world(before.wx + 2, before.wz), height: c.height, radius: 0 }];
+    for (let i = 0; i < 30 * 1; i += 1) step(c, WORKER, w, rand, 1 / 30);
+    expect(c.behaviour).toBe('defend');
+    expect(distance(c.at, before)).toBeLessThan(1e-9);
     w.list = [];
     for (let i = 0; i < 30 * 30; i += 1) step(c, WORKER, w, rand, 1 / 30);
     expect(c.behaviour).not.toBe('defend');
-    // The same alarm on a skittish ground animal is a flee, away.
+    // The same species alarmed by a threat a hand off — inside its alarm reach, not on it — flees, away, at the flee pace.
+    const far = spawn(WORKER, world(500, 500));
+    far.behaviour = 'idle';
+    far.behaviourUntilS = 100;
+    far.behaviourS = 1;
+    w.list = [{ at: world(502, 500), height: far.height, radius: 0 }];
+    let fth = 0;
+    while (fth < 1) if (step(far, WORKER, w, rand, 1 / 30)) fth += 1;
+    expect(far.behaviour).toBe('flee');
+    expect(far.target!.wx).toBeLessThan(500);
+    for (let i = 0; i < 30 * 1; i += 1) step(far, WORKER, w, rand, 1 / 30);
+    expect(far.at.wx).toBeLessThan(500);
+    // The same alarm on a skittish ground animal is a flee, away, on it or not.
     const timid: CreatureSpecies = { ...WORKER, temperament: 'skittish' };
     const t = spawn(timid, world(500, 500));
     t.behaviour = 'idle';
     t.behaviourUntilS = 100;
     t.behaviourS = 1;
-    w.list = [{ at: world(501, 500), height: t.height, radius: 0 }];
+    w.list = [{ at: world(500.2, 500), height: t.height, radius: 0 }];
     let th = 0;
     while (th < 1) if (step(t, timid, w, rand, 1 / 30)) th += 1;
     expect(t.behaviour).toBe('flee');
@@ -1268,7 +1302,7 @@ describe('the ground brain (the Lab\'s ants)', () => {
     queen.behaviour = 'fly';
     queen.behaviourUntilS = 100;
     expect(() => think(queen, QUEEN, w, () => 0.5, null)).not.toThrow();
-    // The ground brain never puts her up on its own, yet: her flight is the Lab's own leaf.
+    // The ground brain never puts her up on its own: only a SEVERE alarm, or a player's demand, does (tests/creatureGround.test.ts).
     const grounded = spawn(QUEEN, world(500, 500));
     const rand = mulberry32(53);
     for (let i = 0; i < 30 * 300; i += 1) {

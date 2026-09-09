@@ -195,6 +195,24 @@ src/
                 instrument laid over the world, off by default, and it
                 says so in its own header so nobody 'fixes' it into
                 obeying the lighting rule.
+  control/      the PLAYER as a producer of the creatures' Intent, and
+                the camera that follows what the player holds:
+                PlayerDemand (pure: stick + keys in the camera's frame →
+                the possessed body's heading frame, steering is looking,
+                the medium's reading of vertical and the two toggles),
+                FollowCamera (body lengths behind and above, world-up,
+                orbit on a world bearing, a 0.4 s handoff on a switch,
+                near plane by the body's size) and pick (tap-to-possess
+                over projected centres, a thumb's minimum). Sibling of
+                input/ and autonomy/ at the Intent seam. Added in 6.10.
+  lab/          the Creature Lab, a dev tool (ARCHITECTURE §8): the 1 m
+                bench drawn from creatures/labWorld, a CreatureSim over
+                the five with a ControlLedger and the local player's
+                Intent, FaunaView, both cameras, the possess row, the
+                per-creature overlay, DISTURB / PREDATION / RESET /
+                OBSERVE. It uses the SAME production modules Kauaʻi will
+                import; nothing here is a second creature engine. Added
+                in 6.10.
   ui/           screens (menu, settings, about, loading, pause) and HUD
                 widgets. Typed hooks only. ui/splash/ is the key-art
                 stage: the three-layer meter sandwich, the boot splash
@@ -254,6 +272,8 @@ sky → NEVER actor, view, session, ui, net, perf (the sky does not know who is 
 creatures → world(coords, random, habitat/heightfield/objects/ecology as TYPES and pure helpers), data, input(Intent.ts), actor(PlayerId as a TYPE) — nothing else; NEVER three, DOM, storage, network
 fauna → three, creatures (as types + the species table), world(coords, origin), assets(assets.loadModel) — nothing else
 fauna → NEVER actor, view, session, ui, net, perf
+control → three (FollowCamera, pick), input(Input.ts types, Intent.ts, MoveStick types), creatures(demand's MutableIntent, species types), perf(FreeFlyCamera's yaw helpers), session(CameraPose as a TYPE), world(coords, origin) — nothing else
+lab → three, DOM (its own UI), app(Scene contract), creatures, fauna, control, input, assets(loadModel), devtools(DevTool contract), perf(FreeFlyCamera), session(types), world(coords, origin, random) — NEVER net, persistence
 actor → NEVER view (a state module does not know what it looks like)
 ui → NEVER world, actor, autonomy, session internals (typed hooks only)
 camera → NEVER actor mode enums (continuous signals only)

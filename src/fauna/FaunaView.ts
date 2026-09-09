@@ -98,19 +98,55 @@
  * about the body, not about the 3.2 cm tile under its nose, and it is
  * measured once a frame over the whole animal so that neither the drawn
  * body nor its visibility can chatter with the tiles.
+ *
+ * ─── the ants, and the words that become booleans ───────────────────
+ *
+ * The Creature Lab's queen and worker (2026-09-09) load through the
+ * same path as the wild three — dressed, scaled by `rigScale` through
+ * the animal's `sizeRatio`, measured, pooled — and are posed by the
+ * same posers plus three the ants were the reason for: the jaws, the
+ * head and the gaster (`motion.ts`), and the wings in `wings.ts` whose
+ * beat is per species. The jaws have no lever on the state yet, so
+ * this view turns the behaviour word into two BOOLEANS before the
+ * poser sees anything — `BITING` (the attack and the defend stand) and
+ * `FEEDING` — exactly as `AIRBORNE` already turns four air words into
+ * one; the poser reads a boolean and an envelope, never a mode. When
+ * the grab mechanic puts a per-jaw lever on `CreatureState`, these two
+ * lists are what it replaces.
+ *
+ * ─── the pick surface ───────────────────────────────────────────────
+ *
+ * Tap-to-possess needs to know where each animal is DRAWN, in the
+ * frame the camera's ray is cast in. `positionOf(id)` answers with the
+ * drawn body's centre in LOCAL render coordinates — a rig's box centre
+ * placed and turned as the rig is, the middle of a worm's laid chain,
+ * an impostor's ellipsoid centre — and `drawnIds()` lists who has one
+ * this frame. Both are allocation-free per call: the vector and the
+ * list are the view's own scratch, rewritten every `update`, so a
+ * caller that wants to keep an answer copies it.
  */
 import * as THREE from 'three';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import type { Assets } from '../assets/assets';
 import { AIRBORNE, CREATURE_IDS, rigScale, sizeRatio, unitsOfMm } from '../creatures';
-import type { CreatureId, CreatureSpecies, CreatureState } from '../creatures';
+import type { Behaviour, CreatureId, CreatureSpecies, CreatureState } from '../creatures';
 import { distance, distanceSquared, translate, type LocalPoint, type WorldPoint } from '../world/coords';
 import { toLocal as originToLocal } from '../world/origin';
 import {
-  layChain, newMotion, poseAntennae, poseLegs, poseWings, restBob, stepMotion, walkBob,
-  type BoundAntenna, type BoundLeg, type BoundWing, type RigMotion,
+  layChain, newMotion, pointAlongPath, poseAntennae, poseGaster, poseHead, poseJaws, poseLegs, resetMotion, restBob, stepMotion, walkBob,
+  type BoundAntenna, type BoundJaw, type BoundJoint, type BoundLeg, type RigMotion,
 } from './motion';
 import { disposeRig, dressRig, measureRig, placeholderFor, type RigAnatomy } from './rig';
+import { poseWings, wingbeatHzOf, type BoundWing } from './wings';
+
+/**
+ * The words that ask the jaws for a bite and for a feed — booleans for
+ * the poser, the way `AIRBORNE` is for the wings (see the header). The
+ * defend stand opens the jaws too: a fire ant facing a threat gapes
+ * before it closes, and a stand with closed jaws reads as standing.
+ */
+export const BITING: readonly Behaviour[] = Object.freeze(['attack', 'defend']);
+export const FEEDING: readonly Behaviour[] = Object.freeze(['feed']);
 
 /**
  * Rigs per species at each detail rung. GAME TUNING: `high` is the
@@ -380,6 +416,10 @@ interface Rig {
   readonly legs: BoundLeg[];
   readonly wings: BoundWing[];
   readonly antennae: BoundAntenna[];
+  /** The two jaws, −X first, each with its own angle; empty on a rig without a mirrored mouthpart pair. */
+  readonly jaws: BoundJaw[];
+  readonly head: BoundJoint | null;
+  readonly gaster: BoundJoint | null;
   readonly chain: THREE.Bone[];
   /** The head bone's rest position in the root's (unscaled) frame, and its parent's orientation there. */
   readonly headOffset: THREE.Vector3;
@@ -402,6 +442,8 @@ interface Slot {
   /** The species' CITED length, world units. One animal's is this through its own `sizeRatio`. */
   readonly bodyLength: number;
   readonly look: SpeciesLook;
+  /** The species' wingbeat, cycles a second (`wings.ts`); read by every wing the pool finds. */
+  readonly hz: number;
   enabled: boolean;
   template: THREE.Object3D | null;
   placeholder: boolean;
@@ -458,6 +500,16 @@ export class FaunaView {
   private readonly path = new Float64Array((TRAIL_CAPACITY + 1) * 3);
   private readonly byDistance = (a: number, b: number): number => this.d2[a] - this.d2[b];
 
+  // THE PICK SURFACE's scratch: who is drawn this frame and where, in
+  // local render space. The list and the positions are reused across
+  // frames and grown only when a frame draws more than they have held.
+  private readonly drawnList: string[] = [];
+  private drawnPos = new Float64Array(512 * 3);
+  private readonly drawnIndex = new Map<string, number>();
+  /** The vector `positionOf` answers in. Owned here; overwritten by the next call. */
+  private readonly pick = new THREE.Vector3();
+  private readonly centre = new THREE.Vector3();
+
   private rigsLent = zeroCounts();
   private impostors = zeroCounts();
   private frames = 0;
@@ -480,6 +532,7 @@ export class FaunaView {
         group,
         bodyLength: unitsOfMm(species.lengthMm),
         look: LOOK[species.id],
+        hz: wingbeatHzOf(species.id),
         enabled: true,
         template: null,
         placeholder: false,
@@ -550,6 +603,8 @@ export class FaunaView {
       const eyeY = Number.isFinite(eyeHeight) ? eyeHeight : null;
       this.frame += 1;
       this.room(creatures.length);
+      this.drawnList.length = 0;
+      this.drawnIndex.clear();
       for (const slot of this.order) slot.candidates.length = 0;
       // PASS 1: who is drawn at all, and how far away, bucketed by species.
       for (let i = 0; i < creatures.length; i += 1) {
@@ -636,6 +691,42 @@ export class FaunaView {
     return (this.slots.get(species)?.rigs ?? []).map((r) => r.trail?.spacing ?? 0);
   }
 
+  // ─── the pick surface ──────────────────────────────────────────────
+
+  /**
+   * Where a creature's body is drawn, in LOCAL render coordinates — the
+   * centre of its rig's box as placed and turned, the middle of a worm's
+   * laid chain, or its impostor's centre — or null when it is not drawn
+   * this frame (far tier, species off, buried, or not in the list). The
+   * returned vector is OWNED BY THE VIEW and rewritten by the next call:
+   * copy it to keep it. Allocation-free.
+   */
+  positionOf(id: string): THREE.Vector3 | null {
+    const index = this.drawnIndex.get(id);
+    if (index === undefined) return null;
+    const o = index * 3;
+    return this.pick.set(this.drawnPos[o], this.drawnPos[o + 1], this.drawnPos[o + 2]);
+  }
+
+  /** The ids drawn this frame, rigs and impostors alike. The array is the view's own and is rewritten every update. Allocation-free. */
+  drawnIds(): readonly string[] {
+    return this.drawnList;
+  }
+
+  /** Record where an animal's body is drawn this frame. */
+  private drew(id: string, x: number, y: number, z: number): void {
+    const index = this.drawnList.length;
+    if ((index + 1) * 3 > this.drawnPos.length) {
+      const grown = new Float64Array(this.drawnPos.length * 2);
+      grown.set(this.drawnPos);
+      this.drawnPos = grown;
+    }
+    const o = index * 3;
+    this.drawnPos[o] = x; this.drawnPos[o + 1] = y; this.drawnPos[o + 2] = z;
+    this.drawnList.push(id);
+    this.drawnIndex.set(id, index);
+  }
+
   // ─── loading ───────────────────────────────────────────────────────
 
   private load(slot: Slot): Promise<void> {
@@ -703,13 +794,22 @@ export class FaunaView {
       const legs: BoundLeg[] = [];
       const wings: BoundWing[] = [];
       const antennae: BoundAntenna[] = [];
+      const jaws: BoundJaw[] = [];
+      let head: BoundJoint | null = null;
+      let gaster: BoundJoint | null = null;
       const chain: THREE.Bone[] = [];
       const headOffset = new THREE.Vector3();
       const headFrame = new THREE.Quaternion();
       if (anatomy !== null) {
-        for (const spec of anatomy.legs) { const bone = bones.get(spec.coxa); if (bone) legs.push({ bone, spec }); }
+        for (const spec of anatomy.legs) {
+          const bone = bones.get(spec.coxa);
+          if (bone) legs.push({ bone, spec, femur: spec.femur === null ? null : bones.get(spec.femur) ?? null });
+        }
         for (const spec of anatomy.wings) { const bone = bones.get(spec.bone); if (bone) wings.push({ bone, spec }); }
         for (const spec of anatomy.antennae) { const bone = bones.get(spec.bone); if (bone) antennae.push({ bone, spec }); }
+        for (const spec of anatomy.mandibles) { const bone = bones.get(spec.bone); if (bone) jaws.push({ bone, spec, angle: 0 }); }
+        if (anatomy.head !== null) { const bone = bones.get(anatomy.head.bone); if (bone) head = { bone, spec: anatomy.head }; }
+        if (anatomy.gaster !== null) { const bone = bones.get(anatomy.gaster.bone); if (bone) gaster = { bone, spec: anatomy.gaster }; }
         if (anatomy.chain !== null) {
           for (const name of anatomy.chain.bones) { const bone = bones.get(name); if (bone) chain.push(bone); }
           if (chain.length >= 2) {
@@ -727,7 +827,7 @@ export class FaunaView {
         }
       }
       slot.rigs.push({
-        root, legs, wings, antennae, chain, headOffset, headFrame,
+        root, legs, wings, antennae, jaws, head, gaster, chain, headOffset, headFrame,
         motion: newMotion(), trail: null, holder: null, creature: -1, lastAt: null, lastHeight: 0, lastHeading: 0,
       });
       slot.group.add(root);
@@ -935,6 +1035,7 @@ export class FaunaView {
         into[o + 4] = 0; into[o + 5] = r; into[o + 6] = 0; into[o + 7] = 0;
         into[o + 8] = sn * half; into[o + 9] = 0; into[o + 10] = cs * half; into[o + 11] = 0;
         into[o + 12] = here.lx; into[o + 13] = c.height + r; into[o + 14] = here.lz; into[o + 15] = 1;
+        this.drew(c.id, here.lx, c.height + r, here.lz);
         count += 1;
       }
       mesh.count = count;
@@ -964,8 +1065,8 @@ export class FaunaView {
     rig.holder = c.id;
     const bodyLength = this.lengthOf(slot, c);
     rig.root.scale.setScalar(this.rigScaleOf(slot, c));
-    const m = rig.motion;
-    m.gone = 0; m.alive = 0; m.moving = 0; m.air = AIRBORNE.includes(c.behaviour) ? 1 : 0; m.pitch = 0; m.bank = 0;
+    resetMotion(rig.motion, AIRBORNE.includes(c.behaviour));
+    for (const jaw of rig.jaws) jaw.angle = 0;
     rig.lastAt = c.at;
     rig.lastHeight = c.height;
     rig.lastHeading = c.heading;
@@ -1087,8 +1188,10 @@ export class FaunaView {
     const bodyLength = this.lengthOf(slot, c);
     const scale = this.rigScaleOf(slot, c);
     rig.root.scale.setScalar(scale);
+    // The words become booleans HERE, and nothing below reads a word.
     stepMotion(m, {
-      dt, moved, climbed, turned, airborne: AIRBORNE.includes(c.behaviour), bodyLength, phase: c.phase,
+      dt, moved, climbed, turned, airborne: AIRBORNE.includes(c.behaviour),
+      biting: BITING.includes(c.behaviour), feeding: FEEDING.includes(c.behaviour), bodyLength, phase: c.phase,
     });
     // THE ONE WORLD → LOCAL CROSSING, through the origin like every renderer.
     const here = this.toLocal(c.at);
@@ -1130,6 +1233,9 @@ export class FaunaView {
         points += 1;
       }
       layChain(rig.root, rig.chain, chain, scale, rig.headOffset, rig.headFrame, path, points, m, bodyLength, c.phase);
+      // The body's middle: half a length back along the path it was laid on.
+      const mid = pointAlongPath(path, points, bodyLength / 2, this.centre);
+      this.drew(c.id, mid.x, mid.y, mid.z);
       return;
     }
     const bob = walkBob(m, bodyLength, c.phase) + restBob(m, bodyLength, c.phase, slot.look.restBob, slot.look.restBobRate);
@@ -1137,8 +1243,20 @@ export class FaunaView {
     // Nose up is a negative turn about +X; heading about +Y; bank about the body's +Z.
     rig.root.rotation.set(-m.pitch, c.heading, m.bank);
     poseLegs(rig.legs, m, bodyLength, c.phase);
-    poseWings(rig.wings, m, c.phase);
-    poseAntennae(rig.antennae, m, c.phase);
+    poseWings(rig.wings, m, c.phase, slot.hz);
+    poseAntennae(rig.antennae, m, c.phase, bodyLength);
+    poseJaws(rig.jaws, m, c.phase, dt);
+    poseHead(rig.head, m, c.phase);
+    poseGaster(rig.gaster, m, bodyLength, c.phase);
+    // The drawn centre: the rig's box centre, scaled, turned as the root is, on the root; a placeholder's box is its own.
+    const centre = this.centre;
+    if (anatomy !== null) {
+      centre.copy(anatomy.box.min).add(anatomy.box.max).multiplyScalar(0.5 * scale);
+    } else {
+      centre.set(0, (bodyLength * slot.look.girth) / 2, 0);
+    }
+    centre.applyQuaternion(rig.root.quaternion).add(rig.root.position);
+    this.drew(c.id, centre.x, centre.y, centre.z);
   }
 
   // ─── the end ───────────────────────────────────────────────────────
@@ -1158,6 +1276,8 @@ export class FaunaView {
     for (const material of this.materials) material.dispose();
     this.materials.length = 0;
     this.reveals.clear();
+    this.drawnList.length = 0;
+    this.drawnIndex.clear();
     this.slots.clear();
     this.order.length = 0;
   }

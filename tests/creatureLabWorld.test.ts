@@ -1,8 +1,10 @@
 /**
  * The Creature Lab's world: a bounded metre, a block whose top is the
  * ground, a bumpy patch, a real puddle, plants the resource layer knows,
- * resources the brains can find, disturbances that expire, and five
- * deterministic spawns each on a surface its medium allows.
+ * resources the brains can find, disturbances that expire, the ants'
+ * home at the block's foot, a reset that puts the world back, and five
+ * deterministic spawns each on a surface its medium allows, each at a
+ * body length drawn by the Lab's seed.
  */
 import { describe, expect, it } from 'vitest';
 import {
@@ -10,7 +12,8 @@ import {
   LAB_PLANTS, LAB_SITES, LAB_SIZE, LITTER_CORNER, PUDDLE, PUDDLE_EDGE, QUEEN, WORKER, createLabWorld, floorAt, isLand, labSpawns,
   nearestSite, newCreature, onBlock, puddleDepthAt, unitsOfMm,
 } from '../src/creatures';
-import { hostPlantOf } from '../src/creatures/intent';
+import { GROUND_HOME_RANGE, homeOf, hostPlantOf } from '../src/creatures/intent';
+import { LAB_HOME, LAB_SEED } from '../src/creatures/labWorld';
 import { distance, world } from '../src/world/coords';
 import { HONEYDEW_HOST_FAMILIES } from '../src/world/ecology/resources';
 import { SEA_LEVEL } from '../src/world/heightfield';
@@ -216,6 +219,87 @@ describe('disturbances and the sky', () => {
   });
 });
 
+describe('the home', () => {
+  it('is the block\'s foot: on the floor, clear of the block by the inward clearance, on land, inside the box, and what the brain reads', () => {
+    const lab = createLabWorld();
+    expect(lab.home).toBe(LAB_HOME);
+    expect(homeOf(lab)).toBe(LAB_HOME);
+    expect(LAB_HOME).toEqual(world(BLOCK.size / 2 + BLOCK_CLEARANCE, BLOCK.size / 2 + BLOCK_CLEARANCE));
+    expect(onBlock(LAB_HOME)).toBe(false);
+    expect(lab.groundAt(LAB_HOME)).toBe(LAB_FLOOR);
+    expect(isLand(lab, LAB_HOME)).toBe(true);
+    expect(lab.inBounds(LAB_HOME, BLOCK_CLEARANCE)).toBe(true);
+    // A step off the footprint's corner: the clearance along each axis, not on the block's edge.
+    expect(Math.abs(LAB_HOME.wx) - BLOCK.size / 2).toBeCloseTo(BLOCK_CLEARANCE, 12);
+    expect(Math.abs(LAB_HOME.wz) - BLOCK.size / 2).toBeCloseTo(BLOCK_CLEARANCE, 12);
+  });
+
+  it('both ants begin inside their home range of it, at the same distance, so their loops are around the block', () => {
+    const spawns = labSpawns();
+    const queen = spawns.find((s) => s.species === 'queen')!;
+    const worker = spawns.find((s) => s.species === 'worker')!;
+    expect(distance(queen.at, LAB_HOME)).toBeLessThan(GROUND_HOME_RANGE);
+    expect(distance(worker.at, LAB_HOME)).toBeLessThan(GROUND_HOME_RANGE);
+    expect(distance(queen.at, LAB_HOME)).toBeCloseTo(distance(worker.at, LAB_HOME), 9);
+    // The home range (26 cm, Tschinkel 2011) covers most of the box but not all of it: a strayed ant has somewhere to come back from.
+    expect(GROUND_HOME_RANGE).toBeGreaterThan(LAB_HALF / 2);
+    expect(GROUND_HOME_RANGE).toBeLessThan(LAB_HALF * Math.SQRT2);
+  });
+});
+
+describe('reset', () => {
+  it('puts the world back as it was constructed: clock at zero, no disturbance standing, the camera\'s dropped, the weather as built — and nothing else changed', () => {
+    const lab = createLabWorld();
+    const tap = { at: world(10, 10), height: LAB_FLOOR, radius: 2 };
+    const eye = { at: world(0, 0), height: LAB_FLOOR + 30, radius: 20 };
+    lab.disturb(tap, 100);
+    lab.setCameraDisturbance(eye);
+    lab.setWeather({ rainMmHr: 5, windX: 1, windZ: 0, night: true });
+    lab.advance(12.5);
+    expect(lab.clock).toBe(12.5);
+    expect(lab.disturbances()).toHaveLength(2);
+    lab.reset();
+    expect(lab.clock).toBe(0);
+    expect(lab.disturbances()).toEqual([]);
+    expect(lab.weather()).toEqual(createLabWorld().weather());
+    // A fresh lab and a reset one answer alike, and the ground, plants, sites, water and home were never anything else.
+    const fresh = createLabWorld();
+    expect(lab.home).toBe(fresh.home);
+    expect(lab.plants).toBe(fresh.plants);
+    expect(lab.sites).toBe(fresh.sites);
+    expect(lab.water).toBe(fresh.water);
+    for (const at of [world(0, 0), world(-30, 25), PUDDLE.at, world(44, -44)]) expect(lab.groundAt(at)).toBe(fresh.groundAt(at));
+    // A disturbance raised after the reset stands for its hold on the NEW clock: the old one's expiry is gone with it.
+    lab.disturb(tap);
+    lab.advance(DISTURB_HOLD_S / 2);
+    expect(lab.disturbances()).toEqual([tap]);
+    lab.advance(DISTURB_HOLD_S / 2 + 1e-9);
+    expect(lab.disturbances()).toEqual([]);
+  });
+
+  it('a lab built with a sky of its own resets to THAT sky, not to calm', () => {
+    const rain = { rainMmHr: 3, windX: 0, windZ: 0, night: true };
+    const lab = createLabWorld({ weather: rain });
+    lab.setWeather(null);
+    expect(lab.weather()).toBeNull();
+    lab.reset();
+    expect(lab.weather()).toBe(rain);
+    const dark = createLabWorld({ weather: null });
+    dark.setWeather(rain);
+    dark.reset();
+    expect(dark.weather()).toBeNull();
+  });
+
+  it('the whole reset story is deterministic: a reset world plus fresh spawns is a fresh world plus fresh spawns', () => {
+    const lab = createLabWorld();
+    lab.disturb({ at: world(1, 1), height: LAB_FLOOR, radius: 1 }, 50);
+    lab.advance(3);
+    lab.reset();
+    expect(labSpawns()).toEqual(labSpawns({ seed: LAB_SEED }));
+    expect(lab.disturbances()).toEqual(createLabWorld().disturbances());
+  });
+});
+
 describe('soft containment', () => {
   it('an inward target lies toward the middle, inside the box, clear of the block, and never past the origin', () => {
     const lab = createLabWorld();
@@ -300,13 +384,62 @@ describe('the five', () => {
       expect(s.hunger!).toBeLessThan(species.needs.feedAt);
       expect(s.fatigue!).toBeLessThan(species.needs.restAt);
     }
-    // And `newCreature` takes each as it stands.
+    // And `newCreature` takes each as it stands, drawn length included.
     for (const s of spawns) {
       const c = newCreature(s);
       expect(c.species).toBe(s.species);
-      expect(c.lengthMm).toBe(CREATURE_SPECIES[s.species].lengthMm);
+      expect(c.lengthMm).toBe(s.lengthMm);
     }
+    // Every host the aphid was placed on is one its species sits on.
+    const host = LAB_PLANTS.find((p) => p.id === aphid.hostId)!;
+    expect(APHID.population.hosts).toContain(host.family);
     expect(QUEEN.medium).toBe('ground');
     expect(HOUSEFLY.medium).toBe('air');
+  });
+
+  it('each is an individual: a body length drawn from its species\' range by the Lab\'s seed, the same five on every construction, another five under another seed', () => {
+    const a = labSpawns();
+    const b = labSpawns();
+    for (const s of a) {
+      const species = CREATURE_SPECIES[s.species];
+      expect(s.lengthMm, s.id).toBeDefined();
+      expect(Number.isFinite(s.lengthMm!), s.id).toBe(true);
+      expect(s.lengthMm!, s.id).toBeGreaterThanOrEqual(species.lengthRangeMm[0]);
+      expect(s.lengthMm!, s.id).toBeLessThanOrEqual(species.lengthRangeMm[1]);
+    }
+    expect(a.map((s) => s.lengthMm)).toEqual(b.map((s) => s.lengthMm));
+    expect(labSpawns({ seed: LAB_SEED }).map((s) => s.lengthMm)).toEqual(a.map((s) => s.lengthMm));
+    // Not one number handed to all five — they are five draws — and not the cited length by construction.
+    expect(new Set(a.map((s) => s.lengthMm! / CREATURE_SPECIES[s.species].lengthMm)).size).toBeGreaterThan(1);
+    const other = labSpawns({ seed: LAB_SEED + 1 });
+    expect(other.map((s) => s.lengthMm)).not.toEqual(a.map((s) => s.lengthMm));
+    for (const s of other) {
+      const species = CREATURE_SPECIES[s.species];
+      expect(s.lengthMm!, s.id).toBeGreaterThanOrEqual(species.lengthRangeMm[0]);
+      expect(s.lengthMm!, s.id).toBeLessThanOrEqual(species.lengthRangeMm[1]);
+    }
+    // Only the lengths differ under another seed: the places, the words and the needs are the Lab's, not the seed's.
+    const strip = (s: (typeof a)[number]) => ({ ...s, lengthMm: 0 });
+    expect(other.map(strip)).toEqual(a.map(strip));
+    // Never Math.random: the same seed across many calls is the same five.
+    for (let i = 0; i < 20; i += 1) expect(labSpawns().map((s) => s.lengthMm)).toEqual(a.map((s) => s.lengthMm));
+  });
+
+  it('a length named outright wins over the draw — a minim and a major on the one worker rig — and a length that is not one falls back to it', () => {
+    const drawn = labSpawns().find((s) => s.species === 'worker')!.lengthMm!;
+    const minim = labSpawns({ lengthMm: { worker: 1.7 } });
+    const major = labSpawns({ lengthMm: { worker: 5.8 } });
+    expect(minim.find((s) => s.species === 'worker')!.lengthMm).toBe(1.7);
+    expect(major.find((s) => s.species === 'worker')!.lengthMm).toBe(5.8);
+    // The rest are untouched by a worker's override.
+    for (const id of ['queen', 'earthworm', 'aphid', 'housefly'] as const) {
+      expect(minim.find((s) => s.species === id)!.lengthMm).toBe(labSpawns().find((s) => s.species === id)!.lengthMm);
+    }
+    for (const bad of [NaN, 0, -3, Infinity]) {
+      expect(labSpawns({ lengthMm: { worker: bad } }).find((s) => s.species === 'worker')!.lengthMm).toBe(drawn);
+    }
+    // A named length rides through newCreature as the individual's own, and so does its pace law.
+    const big = newCreature(major.find((s) => s.species === 'worker')!);
+    expect(big.lengthMm).toBe(5.8);
   });
 });

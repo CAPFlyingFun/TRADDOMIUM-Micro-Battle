@@ -1,7 +1,7 @@
 {
   "name": "traddomium-micro-battle",
   "private": true,
-  "version": "1.0.0-alpha.38",
+  "version": "1.0.0-alpha.39",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -32,7 +32,8 @@
     "probe:lighting": "node scripts/probe-lighting.mjs",
     "probe:finder": "node scripts/probe-finder.mjs",
     "probe:soil": "node scripts/probe-soil.mjs",
-    "probe:sense": "node scripts/probe-sense.mjs"
+    "probe:sense": "node scripts/probe-sense.mjs",
+    "probe:lab": "node scripts/probe-lab.mjs"
   },
   "dependencies": {
     "three": "^0.185.0"

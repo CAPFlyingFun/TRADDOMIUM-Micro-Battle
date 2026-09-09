@@ -12,6 +12,9 @@ import {
   type Disturbance,
 } from '../src/creatures';
 import { CELLS_PER_UPDATE, CreatureSim, EVICT_BEYOND, KEEP_HYSTERESIS, NEAR_STEP_S } from '../src/creatures/CreatureSim';
+import { ControlLedger } from '../src/creatures/control';
+import { LAB_SEED, createLabWorld, labSpawns } from '../src/creatures/labWorld';
+import { playerId } from '../src/actor/PlayerId';
 import { distance, world, type WorldPoint } from '../src/world/coords';
 import type { PlantSource } from '../src/world/ecology/resources';
 import { SEA_HABITAT, type Habitat, type HabitatKind } from '../src/world/habitat';
@@ -484,5 +487,129 @@ describe('the Lab\'s ants and the wild simulation', () => {
     expect(lab.counts('queen').cap).toBe(1);
     for (let i = 0; i < 60; i += 1) lab.update(FOCUS, 1 / 60);
     expect(lab.cost().thoughts).toBe(0);
+  });
+});
+
+describe('placed creatures and the book', () => {
+  const PLAYER = playerId('player-a');
+
+  it('spawn places a creature the cells did not make: a resident, counted, tiered, kept through a switch-off, never evicted, and never twice', () => {
+    const sim = new CreatureSim({ world: fakeWorld(), seed: 3, species: [QUEEN, EARTHWORM] });
+    const [queenSpawn, , wormSpawn] = labSpawns();
+    // A placed queen a few metres from the focus, and a placed worm among the generated ones.
+    const queen = sim.spawn({ ...queenSpawn, at: world(FOCUS.wx + 300, FOCUS.wz), height: ground(world(FOCUS.wx + 300, FOCUS.wz)) });
+    const worm = sim.spawn({ ...wormSpawn, at: world(FOCUS.wx - 200, FOCUS.wz + 100), height: ground(world(FOCUS.wx - 200, FOCUS.wz + 100)) - 1 });
+    expect(sim.creature(queen.id)).toBe(queen);
+    expect(sim.creature(worm.id)).toBe(worm);
+    expect(sim.placed('queen')).toBe(1);
+    expect(sim.placed('earthworm')).toBe(1);
+    expect(sim.generated('queen')).toBe(0);
+    settle(sim, FOCUS);
+    expect(sim.counts('queen').resident).toBe(1);
+    expect(queen.tier).toBe('full');
+    expect(sim.creatures()).toContain(queen);
+    expect(sim.creatures()).toContain(worm);
+    expect(sim.generated('earthworm')).toBeGreaterThan(0);
+    const hunger = worm.hunger;
+    for (let i = 0; i < 120; i += 1) sim.update(FOCUS, 1 / 60);
+    // The placed worm lives with the generated ones: its needs ticked two seconds' worth.
+    expect(worm.hunger).toBeCloseTo(hunger + 2 * EARTHWORM.needs.hungerPerS, 6);
+    // Twice the same id is the duplication the brief forbids; an unknown species is refused.
+    expect(() => sim.spawn(queenSpawn)).toThrow(/already holds/);
+    expect(() => sim.spawn({ ...labSpawns()[3] })).toThrow(/does not run/);
+    // The focus leaves: every generated cell goes, the placed stay.
+    const reach = unitsOfMm(EARTHWORM.population.reachM * 1000);
+    const far = world(FOCUS.wx + reach * (EVICT_BEYOND + 3), FOCUS.wz);
+    settle(sim, far);
+    expect(sim.creature(queen.id)).toBe(queen);
+    expect(sim.creature(worm.id)).toBe(worm);
+    expect(sim.counts('queen').resident).toBe(1);
+    expect(queen.tier).toBe('far');
+    // A species switched off keeps what was placed and forgets what was generated; on it comes back.
+    sim.setEnabled('earthworm', false);
+    expect(sim.creature(worm.id)).toBe(worm);
+    expect(sim.counts('earthworm').resident).toBe(0);
+    sim.setEnabled('earthworm', true);
+    settle(sim, FOCUS);
+    expect(sim.creatures()).toContain(worm);
+    expect(sim.counts('earthworm').resident).toBeGreaterThan(1);
+  });
+
+  it('populate: false streams nothing over a habitat that would generate, and holds only what was placed', () => {
+    const lab = createLabWorld();
+    const wild = new CreatureSim({ world: lab, seed: LAB_SEED, species: [EARTHWORM, APHID, HOUSEFLY] });
+    settle(wild, world(0, 0));
+    expect(wild.generated('earthworm')).toBeGreaterThan(0);
+    const placedOnly = new CreatureSim({ world: lab, seed: LAB_SEED, populate: false, species: [EARTHWORM, APHID, HOUSEFLY, QUEEN] });
+    for (const spawn of labSpawns()) if (spawn.species !== 'worker') placedOnly.spawn(spawn);
+    settle(placedOnly, world(0, 0));
+    for (let i = 0; i < 120; i += 1) placedOnly.update(world(0, 0), 1 / 60);
+    expect(placedOnly.generated('earthworm')).toBe(0);
+    expect(placedOnly.cellCount('aphid')).toBe(0);
+    expect(placedOnly.pendingCells('housefly')).toBe(0);
+    expect(placedOnly.creatures().map((c) => c.species).sort()).toEqual(['aphid', 'earthworm', 'housefly', 'queen']);
+    for (const c of placedOnly.creatures()) expect(c.tier).toBe('full');
+    expect(placedOnly.cost().thoughts).toBeGreaterThanOrEqual(0);
+  });
+
+  it('a possessed creature is full tier whatever its distance, sorts first under the cap, and its cell is never evicted', () => {
+    const control = new ControlLedger();
+    const w = fakeWorld('wetland');
+    const sim = new CreatureSim({ world: w, seed: 3, species: [EARTHWORM], rung: 'low', control, intentOf: () => ({ forward: 1, strafe: 0, turn: 0, sprint: false }) });
+    settle(sim, FOCUS);
+    const cap = EARTHWORM.population.caps.low;
+    expect(sim.generated('earthworm')).toBeGreaterThan(cap);
+    expect(sim.counts('earthworm').resident).toBe(cap);
+    // Choose a worm the cap did NOT keep: it is far, frozen, and not in the resident list.
+    const kept = new Set(sim.creatures().map((c) => c.id));
+    const reach = unitsOfMm(EARTHWORM.population.reachM * 1000);
+    let unkept: CreatureState | null = null;
+    const probe = new CreatureSim({ world: w, seed: 3, species: [EARTHWORM], rung: 'ultra-high' });
+    settle(probe, FOCUS);
+    let farthest = 0;
+    for (const c of probe.creatures()) {
+      const d = distance(c.at, FOCUS);
+      if (!kept.has(c.id) && d > farthest && d < reach) {
+        farthest = d;
+        unkept = c;
+      }
+    }
+    expect(unkept).not.toBeNull();
+    const id = unkept!.id;
+    expect(sim.creature(id)).not.toBeNull();
+    expect(sim.creature(id)!.tier).toBe('far');
+    expect(farthest).toBeGreaterThan(unitsOfMm(EARTHWORM.population.nearM * 1000));
+
+    control.possess(id, PLAYER);
+    sim.update(FOCUS, 1 / 60);
+    const worm = sim.creature(id)!;
+    expect(worm.tier).toBe('full');
+    expect(sim.creatures()).toContain(worm);
+    expect(sim.counts('earthworm').resident).toBe(cap);
+    expect(sim.counts('earthworm').possessed).toBe(1);
+    expect(sim.counts('earthworm').byTier.full).toBeGreaterThanOrEqual(1);
+    const start = worm.at;
+    for (let i = 0; i < 60; i += 1) sim.update(FOCUS, 1 / 60);
+    expect(distance(worm.at, start)).toBeGreaterThan(0);
+    expect(worm.target).toBeNull();
+    expect(sim.cost().demanded).toBe(1);
+
+    // The focus goes three reaches away: every other cell is evicted; the possessed worm's is not, and it is still driven.
+    const far = world(FOCUS.wx - reach * (EVICT_BEYOND + 3), FOCUS.wz);
+    settle(sim, far);
+    expect(sim.creature(id)).toBe(worm);
+    expect(worm.tier).toBe('full');
+    expect(sim.creatures()).toContain(worm);
+    for (let i = 0; i < 60; i += 1) sim.update(far, 1 / 60);
+    expect(sim.cost().demanded).toBe(1);
+    expect(sim.counts('earthworm').possessed).toBe(1);
+
+    // Released: its cell is now as far as the rest and goes on the next stream; the same object was never replaced while held.
+    control.release(PLAYER);
+    sim.update(far, 1 / 60);
+    expect(sim.counts('earthworm').possessed).toBe(0);
+    const elsewhere = world(far.wx, far.wz + CELL_SPAN * 2);
+    settle(sim, elsewhere);
+    expect(sim.creature(id)).toBeNull();
   });
 });

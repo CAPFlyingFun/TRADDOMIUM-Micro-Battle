@@ -1,25 +1,26 @@
 /**
  * The creature contracts (Phase 7, the ecology pass; the Creature Lab's
- * ants added 2026-09-09): the species table holds to its own rules and
- * to the research it cites, the wild three are what the island
- * generates and the two ants are placed, a species can only use its
- * medium's behaviours (plus the air words when it has wings), a pace
- * scales by the species' own law and a body by its length, the ants'
- * unmeasured rigs are refused until they are measured, and the
- * terrain-edit seam is a no-op that refuses everything but an
- * authorised burrower.
+ * ants added 2026-09-09; the research pass's values the same day): the
+ * species table holds to its own rules and to the research it cites,
+ * the wild three are what the island generates and the two ants are
+ * placed, a species can only use its medium's behaviours (plus the air
+ * words when it has wings), a pace scales by the species' own law and a
+ * body by its length, the ants' rigs are the measured ones, the five
+ * fields the research asked for hold their shapes, nothing in the table
+ * is prey, and the terrain-edit seam is a no-op that refuses everything
+ * but an authorised burrower.
  */
 import { describe, expect, it } from 'vitest';
 import {
   AIR_WORDS, APHID, BEHAVIOURS, BEHAVIOURS_BY_MEDIUM, CREATURE_IDS, CREATURE_SPECIES, EARTHWORM, HOUSEFLY, LAB_CREATURE_IDS,
-  MM_PER_UNIT, NO_BURROW_EDITOR, QUEEN, WORKER, assertSpeciesTable, behaviourAllowed, behaviourAllowedFor,
+  MM_PER_UNIT, NO_BURROW_EDITOR, QUEEN, UNMEASURED_SPINE_UNITS, WORKER, assertSpeciesTable, behaviourAllowed, behaviourAllowedFor,
   burrowGate, isCreatureId, newCreature, paceRatio, rigScale, sizeRatio, speciesProblems, unitsOfMm, type CreatureId,
   type CreatureSpecies,
 } from '../src/creatures';
 import { drawLengthMm } from '../src/creatures/population';
 import { OBJECT_RUNGS } from '../src/world/objects/budget';
 import { world } from '../src/world/coords';
-import { OFFERED_KINDS } from '../src/world/ecology/resources';
+import { HONEYDEW_HOST_FAMILIES, OFFERED_KINDS } from '../src/world/ecology/resources';
 import { HABITAT_KINDS } from '../src/world/habitat';
 
 /** One creature of a species with nothing said about its size: the table's own animal. */
@@ -80,7 +81,8 @@ describe('the species table', () => {
     // The brief: verify sizes against the repo's research, size by the
     // spine, not the bounding box. The sources are on the entries.
     expect(EARTHWORM.lengthMm).toBe(150);
-    expect(APHID.lengthMm).toBe(2.5);
+    // The melon aphid is half the animal the table used to draw (aphid.md D1: 0.9-1.8 mm, typical 1.4).
+    expect(APHID.lengthMm).toBe(1.4);
     expect(HOUSEFLY.lengthMm).toBe(6.5);
     expect(QUEEN.lengthMm).toBe(8);
     expect(QUEEN.lengthRangeMm).toEqual([7, 9.5]);
@@ -91,7 +93,7 @@ describe('the species table', () => {
     expect(unitsOfMm(150)).toBe(15);
     // The rig scale makes the spine measure the cited length: 25.74 GLB units × scale = 15 world units.
     expect(EARTHWORM.model.spineUnits * rigScale(EARTHWORM)).toBeCloseTo(15, 9);
-    expect(APHID.model.spineUnits * rigScale(APHID)).toBeCloseTo(0.25, 9);
+    expect(APHID.model.spineUnits * rigScale(APHID)).toBeCloseTo(0.14, 9);
     expect(HOUSEFLY.model.spineUnits * rigScale(HOUSEFLY)).toBeCloseTo(0.65, 9);
     // A fly is not a worm: the three scales are the three sizes, not one number copied thrice.
     expect(rigScale(EARTHWORM)).toBeGreaterThan(rigScale(HOUSEFLY));
@@ -102,7 +104,7 @@ describe('the species table', () => {
     // Joshua, 2026-09-08: the earthworm "should be based on size and
     // dynamic". The range on each entry is the one its own source gives.
     expect(EARTHWORM.lengthRangeMm).toEqual([120, 250]);
-    expect(APHID.lengthRangeMm).toEqual([1.5, 4]);
+    expect(APHID.lengthRangeMm).toEqual([0.9, 1.8]);
     expect(HOUSEFLY.lengthRangeMm).toEqual([4, 8]);
     for (const id of LAB_CREATURE_IDS) {
       const species = CREATURE_SPECIES[id];
@@ -274,6 +276,159 @@ describe('the species table', () => {
     expect(speciesProblems(grounded)).toEqual([]);
     const diggingWorker: CreatureSpecies = { ...WORKER, model: { ...WORKER.model, spineUnits: 1 }, burrow: EARTHWORM.burrow };
     expect(speciesProblems(diggingWorker).join('\n')).toMatch(/only a soil species does/);
+    // The placeholder for an unmeasured rig is still refused, so the next species cannot boot at a guessed size.
+    const unmeasured: CreatureSpecies = { ...WORKER, model: { ...WORKER.model, spineUnits: UNMEASURED_SPINE_UNITS } };
+    expect(speciesProblems(unmeasured).join('\n')).toMatch(/model\.spineUnits/);
+  });
+
+  it('the research pass\'s fields have teeth too: a contact wider than the alarm, a drop past one, a discount under one, a stalled air turn, a weightless body, prey the table does not know, a species that is its own prey', () => {
+    const feltFirst: CreatureSpecies = { ...APHID, senses: { ...APHID.senses, contactMm: APHID.senses.alarmMm + 1 } };
+    expect(speciesProblems(feltFirst).join('\n')).toMatch(/contact radius wider than the alarm reach/);
+    const negativeContact: CreatureSpecies = { ...APHID, senses: { ...APHID.senses, contactMm: -1 } };
+    expect(speciesProblems(negativeContact).join('\n')).toMatch(/senses\.contactMm/);
+    const alwaysAndMore: CreatureSpecies = { ...APHID, senses: { ...APHID.senses, dropChance: 7 } };
+    expect(speciesProblems(alwaysAndMore).join('\n')).toMatch(/dropChance must be 0\.\.1/);
+    const never: CreatureSpecies = { ...APHID, senses: { ...APHID.senses, dropChance: 0 } };
+    expect(speciesProblems(never)).toEqual([]);
+    const fasterThanItCrawls: CreatureSpecies = { ...EARTHWORM, burrow: { ...EARTHWORM.burrow!, digDiscount: 0.5 } };
+    expect(speciesProblems(fasterThanItCrawls).join('\n')).toMatch(/burrow\.digDiscount must be finite and >= 1/);
+    const noDiscount: CreatureSpecies = { ...EARTHWORM, burrow: { ...EARTHWORM.burrow!, digDiscount: undefined } };
+    expect(speciesProblems(noDiscount)).toEqual([]);
+    const stalled: CreatureSpecies = { ...HOUSEFLY, flight: { ...HOUSEFLY.flight!, turnRadSAir: 0 } };
+    expect(speciesProblems(stalled).join('\n')).toMatch(/flight\.turnRadSAir/);
+    const weightless: CreatureSpecies = { ...QUEEN, massMg: 0 };
+    expect(speciesProblems(weightless).join('\n')).toMatch(/massMg/);
+    const unweighed: CreatureSpecies = { ...QUEEN, massMg: undefined };
+    expect(speciesProblems(unweighed)).toEqual([]);
+    const spiderEater: CreatureSpecies = { ...WORKER, prey: ['spider' as CreatureId] };
+    expect(speciesProblems(spiderEater).join('\n')).toMatch(/prey "spider" is not a species the table knows/);
+    const cannibal: CreatureSpecies = { ...WORKER, prey: ['worker'] };
+    expect(speciesProblems(cannibal).join('\n')).toMatch(/not its own prey/);
+    // Naming legal prey on a hand-made worker is the Lab's FORCE TEST, and the table allows it: the policy decides the rest.
+    const tested: CreatureSpecies = { ...WORKER, prey: ['aphid'] };
+    expect(speciesProblems(tested)).toEqual([]);
+  });
+});
+
+describe('the research pass (SUMMARY.md, Joshua\'s defaults, 2026-09-09)', () => {
+  it('nothing in the table is prey, and every entry says so with the same empty list', () => {
+    for (const id of LAB_CREATURE_IDS) expect(CREATURE_SPECIES[id].prey, id).toEqual([]);
+    expect(Object.isFrozen(WORKER.prey)).toBe(true);
+  });
+
+  it('the masses are on the sheet: the fly and the queen weigh about the same, the worker a milligram, the aphid a fifth, the worm unweighed', () => {
+    expect(HOUSEFLY.massMg).toBe(12);
+    expect(QUEEN.massMg).toBe(15);
+    expect(WORKER.massMg).toBe(1.0);
+    expect(APHID.massMg).toBe(0.2);
+    expect(EARTHWORM.massMg).toBeUndefined();
+    // Do not make the fly lighter to make it quicker (housefly.md): the two are within a quarter of each other.
+    expect(HOUSEFLY.massMg! / QUEEN.massMg!).toBeGreaterThan(0.75);
+    expect(HOUSEFLY.massMg! / QUEEN.massMg!).toBeLessThan(1.25);
+  });
+
+  it('the earthworm is Kauaʻi\'s Amynthas wearing Lumbricus\'s measured locomotion, digs new ground five times slower than it crawls, and flees no faster than a withdrawal', () => {
+    expect(EARTHWORM.scientificName).toBe('Amynthas gracilis');
+    expect(EARTHWORM.name).toBe('Earthworm');
+    expect(EARTHWORM.lengthSource).toMatch(/Lumbricus terrestris/);
+    expect(EARTHWORM.lengthSource).toMatch(/Amynthas gracilis/);
+    expect(EARTHWORM.lengthMm).toBe(150);
+    expect(EARTHWORM.lengthRangeMm).toEqual([120, 250]);
+    expect(EARTHWORM.pace.wanderMmS).toBe(15);
+    expect(EARTHWORM.pace.fleeMmS).toBe(25);
+    // Ruiz 2015/2017 measured 30-75×; the table takes Joshua's labelled 5.
+    expect(EARTHWORM.burrow!.digDiscount).toBe(5);
+    expect(EARTHWORM.burrow!.boreMm).toBe(6);
+    expect(EARTHWORM.paceExponent).toBe(1);
+  });
+
+  it('the aphid is Aphis gossypii: half the size, a host seen at thirteen centimetres, alarmed only by contact, a minority drop, a walk under a body length a second, feeds for a quarter hour to an hour, and sits on dicots', () => {
+    expect(APHID.scientificName).toBe('Aphis gossypii');
+    expect(APHID.senses.sightMm).toBe(130);
+    expect(APHID.senses.alarmMm).toBe(20);
+    expect(APHID.senses.alarmS).toBe(30);
+    expect(APHID.senses.contactMm).toBe(20);
+    expect(APHID.senses.contactMm!).toBeLessThanOrEqual(APHID.senses.alarmMm);
+    expect(APHID.senses.dropChance).toBe(0.25);
+    expect(APHID.pace.wanderMmS).toBe(0.8);
+    // ~0.6 body lengths a second, not "about a body length" as the old comment had it.
+    expect(APHID.pace.wanderMmS / APHID.lengthMm).toBeCloseTo(0.57, 2);
+    expect(APHID.pace.fleeMmS).toBe(2.5);
+    expect(APHID.needs.feedS).toEqual([900, 3600]);
+    expect(APHID.population.hosts).toEqual(['shrub', 'broadleaf', 'flower', 'tree']);
+    expect(APHID.population.hosts).not.toContain('fern');
+    expect(APHID.population.hosts).not.toContain('grass');
+    // Every host this species sits on is a family the resource layer offers a honeydew host at — never the other way round required.
+    for (const family of APHID.population.hosts!) expect(HONEYDEW_HOST_FAMILIES, family).toContain(family);
+    expect(APHID.paceExponent).toBe(1);
+  });
+
+  it('the housefly cruises at the measured two metres a second, bursts at three, saccades at thirty radians a second, brakes for under a second only before landing, and its hop clock is its hop band over its cruise', () => {
+    const flight = HOUSEFLY.flight!;
+    expect(flight.cruiseMmS).toBe(2000);
+    expect(flight.burstMmS).toBe(3000);
+    expect(flight.turnRadSAir).toBe(30);
+    expect(flight.turnRadSAir).toBeGreaterThan(HOUSEFLY.pace.turnRadS);
+    expect(flight.hoverS).toEqual([0.2, 0.8]);
+    expect(flight.ceilingMm).toBe(2000);
+    expect(flight.cruiseMm).toEqual([120, 600]);
+    expect(flight.cruiseMm[1]).toBeLessThanOrEqual(flight.ceilingMm);
+    // DERIVED: hopMm is the source (Joshua's half a metre to three), hopS is hopMm / cruise — so the brain's hold never bites.
+    expect(flight.hopMm).toEqual([500, 3000]);
+    expect(flight.hopS[0] * flight.cruiseMmS).toBeCloseTo(flight.hopMm[0], 9);
+    expect(flight.hopS[1] * flight.cruiseMmS).toBeCloseTo(flight.hopMm[1], 9);
+    expect(HOUSEFLY.pace.wanderMmS).toBe(15);
+    expect(HOUSEFLY.needs.fatiguePerS).toBeCloseTo(1 / 40, 12);
+    expect(HOUSEFLY.paceExponent).toBe(1);
+  });
+
+  it('the ants think at Beyond Extinction\'s cadence, see as an ant does, and the worker naps a measured minute at a low threshold', () => {
+    expect(QUEEN.thinkS).toBe(0.15);
+    expect(WORKER.thinkS).toBe(0.15);
+    expect(WORKER.senses.sightMm).toBe(50);
+    // A reproductive carries more ommatidia than a worker and three ocelli: above the worker's, nowhere near a fly's.
+    expect(QUEEN.senses.sightMm).toBeGreaterThan(WORKER.senses.sightMm);
+    expect(QUEEN.senses.sightMm).toBeLessThan(HOUSEFLY.senses.sightMm);
+    expect(QUEEN.senses.alarmMm).toBe(40);
+    expect(QUEEN.senses.alarmMm / QUEEN.lengthMm).toBe(5);
+    expect(WORKER.senses.alarmMm).toBe(30);
+    expect(WORKER.senses.alarmS).toBe(3);
+    // Cassill 2009: 253 naps a day of 1.1 min, four in five awake. A nap of 40-90 s, taken at half fatigue.
+    expect(WORKER.needs.restS).toEqual([40, 90]);
+    expect(WORKER.needs.restAt).toBe(0.5);
+    // Time on its feet between naps at the table's rate: about 200 s, so a 65 s nap is a quarter of the cycle at most.
+    const walkingBetweenNaps = WORKER.needs.restAt / WORKER.needs.fatiguePerS;
+    const nap = (WORKER.needs.restS[0] + WORKER.needs.restS[1]) / 2;
+    expect(nap / (nap + walkingBetweenNaps)).toBeLessThan(0.26);
+    expect(nap / (nap + walkingBetweenNaps)).toBeGreaterThan(0.15);
+    expect(WORKER.needs.feedS).toEqual([10, 40]);
+    // The queen turns in the air by banking at v0's rate — a twentieth of the fly's saccade.
+    expect(QUEEN.flight!.turnRadSAir).toBe(1.4);
+    expect(QUEEN.flight!.turnRadSAir).toBeLessThan(HOUSEFLY.flight!.turnRadSAir / 10);
+    expect(QUEEN.paceExponent).toBe(0.75);
+    expect(WORKER.paceExponent).toBe(0.75);
+  });
+
+  it('every optional field the brain reads through a fallback is either absent or the shape the fallback expects, on every entry', () => {
+    for (const id of LAB_CREATURE_IDS) {
+      const s = CREATURE_SPECIES[id];
+      if (s.senses.contactMm !== undefined) {
+        expect(Number.isFinite(s.senses.contactMm), id).toBe(true);
+        expect(s.senses.contactMm, id).toBeLessThanOrEqual(s.senses.alarmMm);
+      }
+      if (s.senses.dropChance !== undefined) {
+        expect(s.senses.dropChance, id).toBeGreaterThanOrEqual(0);
+        expect(s.senses.dropChance, id).toBeLessThanOrEqual(1);
+      }
+      if (s.burrow !== null && s.burrow.digDiscount !== undefined) expect(s.burrow.digDiscount, id).toBeGreaterThanOrEqual(1);
+      if (s.flight !== null) expect(s.flight.turnRadSAir, id).toBeGreaterThan(0);
+      if (s.massMg !== undefined) expect(s.massMg, id).toBeGreaterThan(0);
+    }
+    // Only the aphid drops; only the worm digs; only the fliers turn in the air.
+    expect(EARTHWORM.senses.dropChance).toBeUndefined();
+    expect(HOUSEFLY.senses.dropChance).toBeUndefined();
+    expect(QUEEN.senses.contactMm).toBeUndefined();
+    expect(WORKER.senses.contactMm).toBeUndefined();
   });
 });
 

@@ -85,34 +85,101 @@
  * flight — a hop is the wing's, and the wing is not in the table's
  * length.
  *
- * THE GROUND BRAIN IS THE LAB'S FIRST ANT BRAIN AND NO MORE. The two
+ * THE GROUND BRAIN IS THE ANTS' (the Creature Lab, 2026-09-09). The two
  * ants (`species.ts`, QUEEN and WORKER) live in the fourth medium, and
- * `thinkGround` gives them the shared words — idle, wander, feed, rest,
- * flee — and the ground's own `defend`: a defensive species turns to
- * face a disturbance and holds (Haight 2010: a threat near the nest is
- * met), a skittish one runs. It never chooses `attack`: whether an ant
- * hunts is the Lab's predation option (Joshua's brief, §25: OFF / NORMAL
- * / FORCE TEST) and is decided where that option lives, not here. It
- * never takes off either: the queen's flight — wing activation, the
- * weather gate, the one long flight, the landing — is the Lab's own
- * leaf and arrives with it. A species' brain is its medium's, so a
- * fourth medium is a fourth brain, and a sixth animal on the ground is
- * a table entry.
+ * `thinkGround` gives them the shared words and the ground's own two.
+ * Needs drive it as they drive the others: hunger goes to the nearest
+ * site of what the species eats — liquid carbohydrate first and protein
+ * when it is starving (`PROTEIN_AT`; Tennant & Porter 1991: 70-80 % of
+ * loads are liquid), the drink counting as a feed when it is nearest —
+ * and the queen's `eats` has no protein in it, so she takes sugars and
+ * water only (SUMMARY §1, decision 3's default) by data and not by a
+ * branch; rest is NAPS — the species' short `restS` (Cassill 2009: a
+ * minute at a time, 253 a day); a wander is a short loop that never
+ * leaves the range of HOME when the world names one (`GROUND_HOME_RANGE`,
+ * Tschinkel 2011's 26 cm of a tunnel exit), and a hungry ant with
+ * nothing in sight sweeps further (`GROUND_FORAGE_LENGTHS`). On alarm a
+ * DEFENSIVE species turns to face the disturbance and holds — but only
+ * when the disturbance is ON it, within a body length (Haight 2010: a
+ * threat AT the nest is met); anything further is fled at the flee
+ * pace, as a skittish one flees everything. The winged queen, on a
+ * SEVERE alarm — the alarm at 1 with the disturbance inside half her
+ * alarm reach — leaves the ground when the sky allows
+ * (`takeoffWeatherAllows`), and `beginTakeoff` is the one door a
+ * possessing player uses for the same thing.
+ *
+ * THE TWO BRAINS HAND OVER BY THE WORD. A ground species that carries a
+ * flight spec is routed to `thinkAir` for as long as its word is
+ * airborne (`isAirborne`) and to `thinkGround` otherwise, in `think`'s
+ * dispatch. Ground → air is `beginTakeoff` writing `takeoff`; the air
+ * brain then flies her exactly as it flies the fly — hop, hover (zero
+ * seconds, for her), land — and air → ground is the air brain's `land`
+ * case writing a grounded word (`idle`, `feed` or `rest`), after which
+ * the next think finds her on the ground and the ground brain has her
+ * back. No word is ever chosen that `behaviourAllowedFor` refuses, and
+ * `think` throws if one is.
+ *
+ * `attack` IS THE POLICY'S (Joshua's brief, §25): `CreatureWorld.policy`
+ * says OFF, NORMAL or FORCE (absent: normal, the island); what is legal
+ * prey is the species entry's `prey` list, read by `preyOf` and empty
+ * for every species today — the aphid is never prey (§11), the adult
+ * fly is uncatchable (Hu & Frank 1996), the worm is carrion or a
+ * recruitment target (SUMMARY §2) — so nothing is attacked until the
+ * table names something. A species whose medium has no `attack` word
+ * can never choose it under any policy; a test holds every non-ground
+ * species to that across every word and every policy.
+ *
+ * CONTAINMENT IS A TARGET, NEVER A MOVE (§31). A world that has an edge
+ * offers `inBounds` and `inwardTarget`; at the end of every think a
+ * target outside the bounds is replaced by the world's inward point
+ * (`containTarget`), for a walker, a burrower and a flier alike, and
+ * the body is never touched — a creature that reaches the boundary and
+ * stops is a bug to see. The island offers neither and nothing changes.
+ *
+ * THE THREE WILD ONES, FROM THE RESEARCH (SUMMARY.md, Joshua's
+ * defaults). The APHID's flee is a ladder, not a drop: on alarm it
+ * first walks 1-3 cm along its host (`HOST_FLEE_WALK_MM`; Basu et al.
+ * 2021, J. Pest Sci. 2020) and DROPS only on contact — the disturbance
+ * inside `senses.contactMm` — or, when the disturbance outlasts the
+ * walk, by `senses.dropChance` (Nault 1976: walking is the tribe's
+ * majority answer); a species without `contactMm` drops as it always
+ * did. A displaced aphid walks to the nearest host it can SEE
+ * (`sightMm`, host-finding only — Gish & Inbar 2006, 13 cm), which may
+ * not be the one it fell from. An ant is not a disturbance to it at
+ * all: a `creature` source is filtered out of a plant creature's
+ * alarm, because a tended aphid is stood on by its ants (SUMMARY #5).
+ * The FLY's alarm is LOOMING: a disturbance whose radius is large for
+ * its distance (`LOOM`, from the 2.9°-per-facet eye of housefly.md) —
+ * a hand, the camera — and not a small slow thing walking up; the old
+ * range rule stays as the contact floor. It hovers only before a
+ * landing, never station-keeps (except over water, which is never a
+ * place to stop), is perched through the night with no takeoff but
+ * an alarm's, and a hop's DISTANCE is derived from `hopS × cruise`,
+ * held inside `hopMm`, so the clock and the place agree
+ * (`hopDistance`, `flightClock`; housefly.md D7). The EARTHWORM's new
+ * ground is dug at the crawl over `burrow.digDiscount` (`digPaceFactor`;
+ * the measured figure is 30-75× — Ruiz 2015, 2017 — and the reason it is
+ * not used is that a 1 m box would show a worm that never moves): the
+ * worm has no memory of its burrows yet, so `burrow` IS digging and
+ * `surface` is crawling. Its flee stays down and away (Joshua's
+ * decision on retraction is pending) and its flood answer stays v1's
+ * "flee the edge", noted against A. gracilis, which surfaces (SUMMARY
+ * #7). Its alarm is vibration and contact within `alarmMm`, unchanged.
  *
  * Pure: no three, no DOM. `src/creatures/` is core.
  */
-import { distanceSquared, translate, type WorldPoint } from '../world/coords';
+import { distance, distanceSquared, translate, type WorldPoint } from '../world/coords';
 import type { NearestWater, PlantSource, ResourceKind, ResourceSite } from '../world/ecology/resources';
 import { SEA_LEVEL } from '../world/heightfield';
-import { CELL_SPAN } from '../world/objects/cells';
+import { CELL_SPAN, cellsWithin } from '../world/objects/cells';
 import { WATER_SIM_DEFAULTS } from '../world/water/sim';
 import { unitsOfMetres } from './finder';
 import { ahead, headingToward, wrapHeading } from './heading';
 import { arrived, floorAt, isAirborne, isMoving } from './locomotion';
 import { PERCH_FRACTION } from './population';
-import { paceRatio, sizeRatio, unitsOfMm, type CreatureSpecies, type FlightSpec } from './species';
-import { behaviourAllowedFor, type Behaviour, type CreatureState } from './state';
-import type { CreatureWeather, CreatureWorld, Disturbance } from './world';
+import { paceRatio, sizeRatio, unitsOfMm, type CreatureId, type CreatureSpecies, type FlightSpec } from './species';
+import { behaviourAllowed, behaviourAllowedFor, type Behaviour, type CreatureState } from './state';
+import type { CreatureWeather, CreatureWorld, Disturbance, PredationPolicy } from './world';
 
 // ---------------------------------------------------------------------------
 // The few numbers that are the brain's own: dimensionless, and one weather line
@@ -152,6 +219,86 @@ const GROUND_WANDER_TRIES = 4;
  */
 export const GROUND_IDLE_S: readonly [number, number] = Object.freeze([1, 5]) as readonly [number, number];
 /**
+ * How far from HOME a ground creature's wander may take it, world units:
+ * 26 cm. MEASURED SHAPE — Tschinkel 2011: every point of a fire-ant
+ * colony's territory is within 26 cm of a tunnel exit, so a forager on
+ * the surface is never further than that from a hole. In world units
+ * and not body lengths because it is the colony's number, not the
+ * body's: a minim and a major share the same territory. Read only when
+ * the world names a `home` (`CreatureWorld.home`); the island has none
+ * yet and its ants wander around where they stand, as before.
+ */
+export const GROUND_HOME_RANGE = unitsOfMm(260);
+/**
+ * How far a HUNGRY ground creature's walk is aimed when nothing to eat
+ * is in sight, body lengths. GAME TUNING with a biological shape: a
+ * foraging trip is about half a metre of surface walking (Tschinkel
+ * 2011), far more than the idle loop's `GROUND_WANDER_LENGTHS`, and the
+ * home range above is what keeps the sweep inside the territory. Sixty
+ * bodies is 18 cm for the table's worker and 48 for the queen — a
+ * sweep across the Lab's box rather than a shuffle beside the block.
+ */
+export const GROUND_FORAGE_LENGTHS = 60;
+/**
+ * Hunger at or above which PROTEIN is looked for before carbohydrate.
+ * GAME TUNING, one number, with the measured shape behind it: 70-80 %
+ * of a fire-ant forager's loads are liquid (Tennant & Porter 1991), so
+ * sugar is the everyday food and protein the food of real need. The
+ * state carries one hunger, not two; this is where the one number
+ * becomes "whichever need is greater".
+ */
+export const PROTEIN_AT = 0.85;
+/** The resource kinds that are liquid carbohydrate or seed, and the drink that counts as a feed when it is nearest and the animal is hungry. */
+export const CARBOHYDRATE_OR_DRINK: readonly ResourceKind[] = Object.freeze(['nectar', 'seed', 'sap', 'honeydew-host', 'water-edge']);
+/** The resource kinds that are protein — the Lab's carrion test resource, and litter — with the same drink. */
+export const PROTEIN_OR_DRINK: readonly ResourceKind[] = Object.freeze(['carrion', 'litter', 'water-edge']);
+/**
+ * A SEVERE alarm: the alarm at 1 with the disturbance inside this
+ * fraction of the species' alarm reach. GAME TUNING (half): the line
+ * between a threat a queen faces or flees on foot and one she leaves
+ * the ground for.
+ */
+export const SEVERE_ALARM_FRACTION = 0.5;
+/**
+ * The most wind a queen takes off into, world units a second: 2.2 m/s.
+ * BIOLOGICAL SHAPE — "light" wind, ≤ 8 km/h in the extension summaries
+ * of Milio et al. 1988 and Morrill 1974 (queen.md; the primary's
+ * threshold was not reached). The other halves of the measured gate —
+ * 24-32 °C and RH ≥ 80 % — are not on `CreatureWeather` today, so the
+ * gate reads wind, night and rain and says so on `takeoffWeatherAllows`.
+ */
+export const TAKEOFF_WIND_MAX = unitsOfMetres(2.2);
+/**
+ * THE LOOM: a disturbance alarms a looming-eyed species when its RADIUS
+ * over its DISTANCE exceeds this. GAME TUNING, derived from housefly.md
+ * D4: a housefly's eye has 2.9° per facet (Juusola lab 2026), so a
+ * 4 mm ant is resolvable at all only inside ~80 mm — 4 / 80 = 0.05,
+ * one facet across. The escape is triggered by an approaching DARK
+ * object judged by its expansion, not by range (Holmqvist & Srinivasan
+ * 1991), so the alarm's line is set six facets past bare resolution:
+ * 0.3 means a thing subtending about 33° — eleven facets across its
+ * diameter — a hand at 20 cm, the camera at half a metre, and never a
+ * 4 mm ant walking up, which at ten body lengths is 0.05. A radius of
+ * nothing never looms; the contact floor (the species' alarm reach) is
+ * what a point-sized disturbance is felt by.
+ */
+export const LOOM = 0.3;
+/**
+ * The chance a plant creature DROPS when a disturbance outlasts its
+ * walk, when the species does not say (`senses.dropChance`). GAME
+ * TUNING: aphid.md's "20-30 % is a guess and labelled so" — an Aphis
+ * walks or waggles and drops as the minority answer (Nault et al. 1976).
+ */
+export const DROP_CHANCE_DEFAULT = 0.25;
+/**
+ * How far a plant creature walks along its host on the FIRST stage of
+ * its flee, mm. MEASURED SHAPE: the alarm pheromone's reach is 1-3 cm
+ * from a fresh droplet (Basu et al. 2021) and the answer to a stem
+ * vibration or a contact is "kick, then walk 1-3 cm away" (J. Pest Sci.
+ * 2020, pea aphid; aphid.md D3). The drop is the second stage.
+ */
+export const HOST_FLEE_WALK_MM: readonly [number, number] = Object.freeze([10, 30]) as readonly [number, number];
+/**
  * How far away a fresh-water edge is worth watching, world units: 50 m.
  * GAME TUNING — Joshua's starting test radius (2026-09-08: "~50 m as a
  * starting test radius"), not a measured sense of any of the three
@@ -181,6 +328,154 @@ export const FLOOD_CLOSING = WATER_SIM_DEFAULTS.cell;
 
 /** The sky when the world has none to report: calm, dry, daylight. */
 export const CALM_WEATHER: CreatureWeather = Object.freeze({ rainMmHr: 0, windX: 0, windZ: 0, night: false });
+
+// ---------------------------------------------------------------------------
+// What the table may say and does not have to: fields read as optional
+// ---------------------------------------------------------------------------
+
+/**
+ * FOUR FIELDS THE RESEARCH ASKED FOR, READ AS OPTIONAL. The species
+ * table (`species.ts`) is another leaf's file in this pass; these
+ * readers take the field when the entry carries it and answer with
+ * today's behaviour when it does not, so the brain is right on the
+ * table as it stands and right on the table as it will be, and a
+ * species written by hand in a test can set any of them. The
+ * intersection types are the smallest thing that typechecks both ways:
+ * when the fields land on `CreatureSpecies` proper they are the same
+ * fields and nothing here changes.
+ */
+interface OptionalSenses {
+  /** The CONTACT radius, mm: a disturbance inside it is on the animal — an aphid's drop line, a fly's alarm floor. Absent: `alarmMm`. */
+  readonly contactMm?: number;
+  /** The chance a plant creature drops when a disturbance outlasts its walk. Absent: `DROP_CHANCE_DEFAULT`. */
+  readonly dropChance?: number;
+}
+interface OptionalBurrow {
+  /** New ground is dug at the crawl over this. Absent: 1, the crawl — today's pace. */
+  readonly digDiscount?: number;
+}
+interface OptionalPrey {
+  /** The species this one may attack, when the policy allows. Absent: none. */
+  readonly prey?: readonly CreatureId[];
+}
+
+/** The species' contact radius, mm, or null when the entry has none — in which case a species drops, or is alarmed, at its `alarmMm`. */
+export function contactMmOf(species: CreatureSpecies): number | null {
+  const mm = (species.senses as CreatureSpecies['senses'] & OptionalSenses).contactMm;
+  return mm !== undefined && Number.isFinite(mm) && mm >= 0 ? mm : null;
+}
+
+/** The chance a plant creature drops when the disturbance outlasts its walk, 0..1. */
+export function dropChanceOf(species: CreatureSpecies): number {
+  const p = (species.senses as CreatureSpecies['senses'] & OptionalSenses).dropChance;
+  return p !== undefined && Number.isFinite(p) ? Math.min(1, Math.max(0, p)) : DROP_CHANCE_DEFAULT;
+}
+
+/** How many times slower than the crawl new ground is dug, ≥ 1. A species with no burrow, or no discount, digs at the crawl. */
+export function digDiscountOf(species: CreatureSpecies): number {
+  const spec = species.burrow;
+  if (spec === null) return 1;
+  const k = (spec as NonNullable<CreatureSpecies['burrow']> & OptionalBurrow).digDiscount;
+  return k !== undefined && Number.isFinite(k) && k >= 1 ? k : 1;
+}
+
+/**
+ * THE PACE FACTOR FOR THE GROUND A WORM IS IN: 1 / `digDiscount` while
+ * its word is `burrow` — new ground, since the worm has no memory of
+ * its burrows yet — and 1 for everything else: a surfaced crawl, a
+ * flee, a rise to feed. The integrator (`demand.ts`, `planePace` and
+ * `verticalStep` for the `burrow` way) is where the factor has to be
+ * multiplied in for the body to slow; this file only decides what the
+ * factor IS, and until the legs read it the factor is a number on the
+ * HUD. Exported so the legs and the brain cannot hold two versions of
+ * the rule.
+ */
+export function digPaceFactor(state: CreatureState, species: CreatureSpecies): number {
+  if (species.medium !== 'soil' || state.behaviour !== 'burrow') return 1;
+  return 1 / digDiscountOf(species);
+}
+
+/** The species this one may attack. Empty for every entry the table ships; a test names one. */
+export function preyOf(species: CreatureSpecies): readonly CreatureId[] {
+  return (species as CreatureSpecies & OptionalPrey).prey ?? [];
+}
+
+/** May this species ever attack: its medium has the word AND the table names it prey. Neither alone is enough. */
+export function isPredator(species: CreatureSpecies): boolean {
+  return behaviourAllowed(species.medium, 'attack') && preyOf(species).length > 0;
+}
+
+/** The world's predation policy: the Lab's option, or `normal` where none is set — the island. */
+export function predationOf(world: CreatureWorld): PredationPolicy {
+  return world.policy?.predation ?? 'normal';
+}
+
+/** The nest stand-in, or null where the world names none. */
+export function homeOf(world: CreatureWorld): WorldPoint | null {
+  const home = world.home;
+  return home !== undefined && Number.isFinite(home.wx) && Number.isFinite(home.wz) ? home : null;
+}
+
+/** Inside the world's bounds, or the world has none. */
+function inBoundsOf(world: CreatureWorld, at: WorldPoint): boolean {
+  return world.inBounds === undefined || world.inBounds(at);
+}
+
+/**
+ * Does this species notice a disturbance at all? A plant creature does
+ * not notice a CREATURE: a tended aphid is stood on by its ants and
+ * does not flee them (Nault 1976; SUMMARY #5), and a disturbance made
+ * by a predator is a kind the field does not have yet. Everything else
+ * notices everything.
+ */
+function noticed(species: CreatureSpecies, d: Disturbance): boolean {
+  return !(d.source === 'creature' && species.medium === 'plant');
+}
+
+/** The squared three-dimensional distance from the body to a disturbance's point: a camera two metres over a worm is not on top of it. */
+function disturbanceD2(state: CreatureState, d: Disturbance): number {
+  const dh = d.height - state.height;
+  return distanceSquared(state.at, d.at) + dh * dh;
+}
+
+/** Whether a species' alarm is LOOMING — judged by how big a thing is for how far it is — rather than a flat reach. The air's eye, today. */
+function looms(species: CreatureSpecies): boolean {
+  return species.medium === 'air';
+}
+
+/** The reach inside which anything is felt, world units: the contact radius for a looming eye, the alarm reach for the rest. */
+function alarmReachOf(species: CreatureSpecies): number {
+  if (!looms(species)) return unitsOfMm(species.senses.alarmMm);
+  const contact = contactMmOf(species);
+  return unitsOfMm(contact === null ? species.senses.alarmMm : contact);
+}
+
+/**
+ * The nearest disturbance this species notices, by the gap between the
+ * body and the disturbance's edge (its distance less its radius), or
+ * null when there is none. No allocation: the list is the world's.
+ */
+export function nearestDisturbance(state: CreatureState, species: CreatureSpecies, world: CreatureWorld): Disturbance | null {
+  const list = world.disturbances();
+  let best: Disturbance | null = null;
+  let bestGap = Infinity;
+  for (let i = 0; i < list.length; i += 1) {
+    const d = list[i];
+    if (!noticed(species, d)) continue;
+    const gap = Math.sqrt(disturbanceD2(state, d)) - Math.max(0, d.radius);
+    if (gap < bestGap) {
+      bestGap = gap;
+      best = d;
+    }
+  }
+  return best;
+}
+
+/** How far the nearest noticed disturbance's edge is from the body, world units; Infinity with none. Zero or less: it is on the animal. */
+export function nearestDisturbanceGap(state: CreatureState, species: CreatureSpecies, world: CreatureWorld): number {
+  const d = nearestDisturbance(state, species, world);
+  return d === null ? Infinity : Math.sqrt(disturbanceD2(state, d)) - Math.max(0, d.radius);
+}
 
 // ---------------------------------------------------------------------------
 // Clocks and senses — every step
@@ -284,23 +579,38 @@ function raiseAlarm(state: CreatureState, species: CreatureSpecies, from: WorldP
 }
 
 /**
- * Notice a disturbance. One inside `senses.alarmMm` plus the
+ * Notice a disturbance. One inside the species' alarm reach plus the
  * disturbance's own radius (in three dimensions: a camera two metres
  * over a worm is not on top of it) raises the alarm through
  * `raiseAlarm`, away from the nearest one. Returns whether a new alarm
  * fired.
+ *
+ * TWO SPECIES READ IT DIFFERENTLY, by data and by medium, never by
+ * name. A LOOMING eye (the air's — `looms`) is alarmed by a disturbance
+ * whose radius is large for its distance (`LOOM`): the camera, a hand;
+ * a small slow thing walking up does not loom, and the flat reach —
+ * `contactMm` where the entry has one, else the old `alarmMm` — stays
+ * as the floor anything is felt inside, so a point-sized disturbance
+ * on top of it is still felt. A PLANT creature does not notice a
+ * `creature` source at all (`noticed`): its ants stand on it. Every
+ * other species is alarmed by the flat reach it always was, and no
+ * allocation is made on this every-step path.
  */
 export function senseAlarm(state: CreatureState, species: CreatureSpecies, disturbances: readonly Disturbance[]): boolean {
   if (disturbances.length === 0) return false;
-  const reach = unitsOfMm(species.senses.alarmMm);
+  const reach = alarmReachOf(species);
+  const loomingEye = looms(species);
   let nearest = -1;
   let nearestD2 = Infinity;
   for (let i = 0; i < disturbances.length; i += 1) {
     const d = disturbances[i];
-    const r = reach + Math.max(0, d.radius);
-    const dh = d.height - state.height;
-    const d2 = distanceSquared(state.at, d.at) + dh * dh;
-    if (d2 <= r * r && d2 < nearestD2) {
+    if (!noticed(species, d)) continue;
+    const radius = Math.max(0, d.radius);
+    const r = reach + radius;
+    const d2 = disturbanceD2(state, d);
+    // The loom: radius / distance > LOOM, squared so nothing is rooted; a radius of nothing never looms.
+    const felt = d2 <= r * r || (loomingEye && radius > 0 && radius * radius > LOOM * LOOM * d2);
+    if (felt && d2 < nearestD2) {
       nearest = i;
       nearestD2 = d2;
     }
@@ -446,6 +756,18 @@ export function isLand(world: CreatureWorld, at: WorldPoint): boolean {
  * owns, never a copy; null when there is none or the layer is not built.
  */
 export function nearestSite(world: CreatureWorld, at: WorldPoint, kinds: readonly ResourceKind[], radius: number): ResourceSite | null {
+  return nearestSiteOf(world, at, kinds, null, radius);
+}
+
+/**
+ * `nearestSite` with a second list: the nearest site whose kind is in
+ * `kinds` AND in `group` (null: any). Two lists rather than one built
+ * per think, so a hungry ant's "what I eat, of the carbohydrates" is
+ * a scan and not an allocation.
+ */
+function nearestSiteOf(
+  world: CreatureWorld, at: WorldPoint, kinds: readonly ResourceKind[], group: readonly ResourceKind[] | null, radius: number,
+): ResourceSite | null {
   if (kinds.length === 0 || !(radius > 0)) return null;
   const cx0 = Math.floor((at.wx - radius) / CELL_SPAN);
   const cx1 = Math.floor((at.wx + radius) / CELL_SPAN);
@@ -461,12 +783,85 @@ export function nearestSite(world: CreatureWorld, at: WorldPoint, kinds: readonl
       for (let i = 0; i < sites.length; i += 1) {
         const site = sites[i];
         if (!kinds.includes(site.kind)) continue;
+        if (group !== null && !group.includes(site.kind)) continue;
         const d2 = distanceSquared(at, site.at);
         if (d2 < bestD2) {
           bestD2 = d2;
           best = site;
         }
       }
+    }
+  }
+  return best;
+}
+
+/**
+ * The nearest host plant this creature can SEE: a plant of a family
+ * its species sits on (`population.hosts`), within `sightMm` of where
+ * it stands, across the cells that circle touches. Host-finding is by
+ * the sight of a plant's silhouette (Gish & Inbar 2006: a dropped
+ * aphid walks back to a plant it sees from 13 cm), which is why the
+ * sight radius is a HOST's and never a threat's — a threat is felt, by
+ * contact and vibration, in `senseAlarm`. Null with none in sight, or
+ * for a species with no hosts.
+ */
+export function nearestHostInSight(state: CreatureState, species: CreatureSpecies, world: CreatureWorld): PlantSource | null {
+  const hosts = species.population.hosts;
+  if (hosts === null) return null;
+  const sight = unitsOfMm(species.senses.sightMm);
+  if (!(sight > 0)) return null;
+  const cells = cellsWithin(state.at, sight);
+  let best: PlantSource | null = null;
+  let bestD2 = sight * sight;
+  for (let c = 0; c < cells.length; c += 1) {
+    const plants = world.plantsOf(cells[c].cx, cells[c].cz);
+    if (plants === null) continue;
+    for (let i = 0; i < plants.length; i += 1) {
+      const p = plants[i];
+      if (p.id === null || !hosts.includes(p.family)) continue;
+      const d2 = distanceSquared(state.at, p.at);
+      if (d2 < bestD2) {
+        bestD2 = d2;
+        best = p;
+      }
+    }
+  }
+  return best;
+}
+
+/**
+ * The creature with this id, among those the world shows, or null. A
+ * scan, since the world hands out its own array and not a map; the
+ * arrays a brain sees are the Lab's five or a rung's few dozen.
+ */
+export function creatureById(world: CreatureWorld, id: string): CreatureState | null {
+  if (world.creatures === undefined) return null;
+  const all = world.creatures();
+  for (let i = 0; i < all.length; i += 1) if (all[i].id === id) return all[i];
+  return null;
+}
+
+/**
+ * The nearest creature of a species this one may attack (`preyOf`),
+ * within `radius` in three dimensions, never itself; null with none, or
+ * on a world that shows no creatures. What is attacked is the table's
+ * to say and this function's only to find.
+ */
+export function nearestPrey(state: CreatureState, species: CreatureSpecies, world: CreatureWorld, radius: number): CreatureState | null {
+  if (world.creatures === undefined || !(radius > 0)) return null;
+  const prey = preyOf(species);
+  if (prey.length === 0) return null;
+  const all = world.creatures();
+  let best: CreatureState | null = null;
+  let bestD2 = radius * radius;
+  for (let i = 0; i < all.length; i += 1) {
+    const c = all[i];
+    if (c.id === state.id || !prey.includes(c.species)) continue;
+    const dh = c.height - state.height;
+    const d2 = distanceSquared(state.at, c.at) + dh * dh;
+    if (d2 < bestD2) {
+      bestD2 = d2;
+      best = c;
     }
   }
   return best;
@@ -489,13 +884,59 @@ export function hostPlantOf(state: CreatureState, world: CreatureWorld): PlantSo
   return null;
 }
 
-/** A hop `hopMm` away in a random direction that lands on dry land, or null when four tries found only sea or standing water. */
+/**
+ * HOW FAR A HOP GOES, world units: a duration drawn from `hopS` flown
+ * at the cruise, held inside `hopMm`. The table used to carry both as
+ * independent draws and they disagreed (housefly.md D7: 0.8-3.5 s ×
+ * 1.5 m/s is 1.2-5.3 m against a `hopMm` of 0.5-3 m; at 2 m/s the gap
+ * widens), so a hop's clock could run out short of its place and the
+ * fly landed wherever that was — which over water is how flies came to
+ * perch on the sea. Now the PLACE is derived from the TIME — for the
+ * table's fly, 1.2-5.25 m clamped to 1.2-3 m — and the clock a flight
+ * is then given is the time that place takes (`flightClock`). One rand,
+ * as the old draw of `hopMm` was.
+ */
+function hopDistance(flight: FlightSpec, rand: () => number): number {
+  const byTime = draw(rand, flight.hopS) * unitsOfMm(flight.cruiseMmS);
+  return Math.min(unitsOfMm(flight.hopMm[1]), Math.max(unitsOfMm(flight.hopMm[0]), byTime));
+}
+
+/**
+ * How long a flight to `target` is given, seconds: the distance at the
+ * cruise, plus a half-turn at the species' turn rate for the turn onto
+ * the bearing, so the clock and the place agree and `done` means "it
+ * should be there", not "the hop's time is up wherever it is". No
+ * target: the longest hop's worth.
+ */
+function flightClock(state: CreatureState, species: CreatureSpecies, flight: FlightSpec, target: WorldPoint | null): number {
+  const far = target === null ? unitsOfMm(flight.hopMm[1]) : distance(state.at, target);
+  return far / unitsOfMm(flight.cruiseMmS) + Math.PI / Math.max(1e-6, airTurnRadS(species, flight));
+}
+
+/**
+ * The turn rate in the AIR: the flight spec's own (`turnRadSAir` — a
+ * housefly's saccades are ~30 rad/s against ~6 on foot, housefly.md D3)
+ * where the entry carries a number, else the ground rate, which is what
+ * every flier turned at before the field existed. Read defensively
+ * because the field is landing with the species pass and an entry
+ * without it must still fly.
+ */
+function airTurnRadS(species: CreatureSpecies, flight: FlightSpec): number {
+  const air = flight.turnRadSAir;
+  return Number.isFinite(air) && air > 0 ? air : species.pace.turnRadS;
+}
+
+/**
+ * A hop in a random direction that lands on dry land inside the
+ * world's bounds, or null when four tries found only sea, standing
+ * water or the outside of the box. The distance is `hopDistance`'s.
+ */
 function landwardHop(world: CreatureWorld, at: WorldPoint, flight: FlightSpec, rand: () => number): WorldPoint | null {
   for (let i = 0; i < LANDWARD_TRIES; i += 1) {
     const theta = rand() * Math.PI * 2;
-    const r = unitsOfMm(draw(rand, flight.hopMm));
+    const r = hopDistance(flight, rand);
     const t = translate(at, Math.sin(theta) * r, Math.cos(theta) * r);
-    if (isLand(world, t)) return t;
+    if (isLand(world, t) && inBoundsOf(world, t)) return t;
   }
   return null;
 }
@@ -536,14 +977,47 @@ export function think(
       thinkAir(state, species, world, rand, sky);
       break;
     case 'ground':
-      thinkGround(state, species, world, rand, ground);
+      // A winged ground species is the air brain's while its word is
+      // airborne and the ground brain's otherwise: the hand-over is the
+      // word (the header). The air brain's `land` writes a grounded
+      // word; the ground brain's `beginTakeoff` writes `takeoff`.
+      if (species.flight !== null && isAirborne(state.behaviour)) thinkAir(state, species, world, rand, sky);
+      else thinkGround(state, species, world, rand, sky, ground);
       break;
   }
   if (!Number.isFinite(state.targetHeight)) state.targetHeight = state.height;
   if (!Number.isFinite(state.behaviourUntilS) || state.behaviourUntilS < 0) state.behaviourUntilS = 0;
+  containTarget(state, world);
   if (!behaviourAllowedFor(species, state.behaviour)) {
     throw new Error(`creatures/intent: ${species.id} (${species.medium}) chose "${state.behaviour}", which its medium does not allow`);
   }
+}
+
+/**
+ * SOFT CONTAINMENT (Joshua's brief, §31). A target outside a bounded
+ * world's `inBounds` is replaced by its `inwardTarget` from where the
+ * body stands — for a walker, a burrower and a flier alike; a flier's
+ * chosen height, which hangs from the floor under its target, is moved
+ * by the difference between the two floors so the band it was aimed
+ * into is the band it flies. NOTHING MOVES THE BODY: a creature that
+ * reaches the boundary and stops is a bug to diagnose, not to hide. A
+ * world with no bounds (the island) changes nothing. Returns whether
+ * the target was replaced.
+ */
+export function containTarget(state: CreatureState, world: CreatureWorld): boolean {
+  const target = state.target;
+  if (target === null || world.inBounds === undefined || world.inwardTarget === undefined) return false;
+  // A stand's target is a bearing to face, not a place to go: an ant at the edge faces the thing outside it.
+  if (state.behaviour === 'defend') return false;
+  if (world.inBounds(target)) return false;
+  const inward = world.inwardTarget(state.at);
+  if (isAirborne(state.behaviour)) {
+    const was = floorAt(world, target);
+    const now = floorAt(world, inward);
+    if (Number.isFinite(was) && Number.isFinite(now)) state.targetHeight += now - was;
+  }
+  state.target = inward;
+  return true;
 }
 
 /**
@@ -645,12 +1119,74 @@ function newHeading(
 }
 
 /**
+ * The direction AWAY: from the nearest disturbance the species notices
+ * when one stands, else along the away point the alarm wrote into the
+ * target, else the reverse of the heading — a direction from a point to
+ * itself being no direction.
+ */
+function awayFrom(state: CreatureState, species: CreatureSpecies, world: CreatureWorld): number {
+  const threat = nearestDisturbance(state, species, world);
+  if (threat !== null && !(threat.at.wx === state.at.wx && threat.at.wz === state.at.wz)) return headingToward(threat.at, state.at);
+  const t = state.target;
+  if (t === null) return wrapHeading(state.heading + Math.PI);
+  if (t.wx === state.at.wx && t.wz === state.at.wz) return state.heading;
+  return headingToward(state.at, t);
+}
+
+/**
+ * THE APHID'S LADDER (aphid.md D3; SUMMARY §3): a disturbance is a
+ * vibration or a contact, and the answer is "kick, then walk 1-3 cm
+ * away, and only then, for a minority, let go". So the FIRST stage is a
+ * walk of `HOST_FLEE_WALK_MM` along the host, away, staying up on the
+ * plant at the flee pace; the SECOND — the drop to the ground and a
+ * scramble of `HOST_FLEE_LENGTHS`, which is what every alarm used to be
+ * — comes only when the disturbance is in CONTACT (its edge inside
+ * `senses.contactMm`) or has outlasted the walk, and then by
+ * `senses.dropChance`; a disturbance that persists without touching is
+ * walked from again. Which stage it is in is read from the state, not
+ * kept: a fleeing body whose target height is the ground has dropped.
+ * A species whose entry has no `contactMm` drops at once, as it always
+ * did — the table says when the ladder is the animal's.
+ */
+function fleeOnHost(
+  state: CreatureState, species: CreatureSpecies, world: CreatureWorld, rand: () => number, body: number, ground: number,
+): void {
+  const fleeing = state.behaviour === 'flee';
+  // Dropped already: on its way down and away, nothing more to decide while the alarm holds.
+  if (fleeing && state.targetHeight <= ground) return;
+  const done = state.behaviourS >= state.behaviourUntilS;
+  const contact = contactMmOf(species);
+  const inContact = contact === null || nearestDisturbanceGap(state, species, world) <= unitsOfMm(contact);
+  const outlasted = fleeing && done;
+  if (inContact || (outlasted && rand() < dropChanceOf(species))) {
+    state.target = ahead(state.at, awayFrom(state, species, world), HOST_FLEE_LENGTHS * body);
+    state.targetHeight = ground;
+    renew(state, 'flee', species.senses.alarmS);
+    return;
+  }
+  if (!fleeing || outlasted) {
+    const step = unitsOfMm(draw(rand, HOST_FLEE_WALK_MM));
+    const pace = paceRatio(state, species) * unitsOfMm(species.pace.fleeMmS);
+    state.target = ahead(state.at, awayFrom(state, species, world), step);
+    // Up on the plant, where it is: the walk is along the host, not off it.
+    state.targetHeight = Math.max(ground, state.height);
+    renew(state, 'flee', pace > 0 ? step / pace : species.senses.alarmS);
+  }
+}
+
+/**
  * PLANT. It feeds on its host most of the time, broken by short walks
  * within a few body lengths of it and rests when tired. On alarm it
- * drops to the ground and scrambles a few body lengths, then walks back
- * when calm. It never leaves its host: `hostId` is kept through all of
- * it. Without a host (none in the cell, or not found) it feeds where it
- * stands and does not walk.
+ * walks along the host and drops only on contact or persistence
+ * (`fleeOnHost`), then walks back to the nearest host it can SEE when
+ * calm — usually the one it fell from, and `hostId` then names whichever
+ * it chose. Without a host (none in the cell, none in sight) it feeds
+ * where it stands and does not walk.
+ *
+ * `host` is the caller's cached plant for `hostId`, resolved once per
+ * creature by the simulation; when the id no longer matches it — the
+ * creature chose another host — the plant is looked up again here, so
+ * a stale cache can never walk an aphid back to a plant it left.
  */
 function thinkPlant(
   state: CreatureState, species: CreatureSpecies, world: CreatureWorld, rand: () => number, host: PlantSource | null, ground: number,
@@ -660,20 +1196,23 @@ function thinkPlant(
   // lengths of the stem, which is further than a 1.5 mm one goes.
   const body = sizeRatio(state, species) * unitsOfMm(species.lengthMm);
   const done = state.behaviourS >= state.behaviourUntilS;
+  if (state.hostId === null) host = null;
+  else if (host === null || host.id !== state.hostId) host = hostPlantOf(state, world);
 
   if (state.alarm >= ALARM_FLEES_AT) {
-    if (state.behaviour !== 'flee') {
-      const away = state.target === null ? wrapHeading(state.heading + Math.PI) : headingToward(state.at, state.target);
-      state.target = ahead(state.at, away, HOST_FLEE_LENGTHS * body);
-      state.targetHeight = ground;
-      enter(state, 'flee', species.senses.alarmS);
-    }
+    fleeOnHost(state, species, world, rand, body, ground);
     return;
   }
 
   switch (state.behaviour) {
-    case 'flee':
+    case 'flee': {
       if (!done) return;
+      // Displaced: the nearest host in SIGHT, which may not be the one it left.
+      const seen = nearestHostInSight(state, species, world);
+      if (seen !== null && seen.id !== null && seen.id !== state.hostId) {
+        state.hostId = seen.id;
+        host = seen;
+      }
       if (host === null) {
         state.target = null;
         enter(state, 'idle', draw(rand, needs.restS));
@@ -681,6 +1220,7 @@ function thinkPlant(
       }
       walkOnHost(state, species, world, rand, host, 0);
       return;
+    }
     case 'wander':
       if (!done && !arrived(state, species)) return;
       state.target = null;
@@ -725,43 +1265,159 @@ function walkOnHost(
 }
 
 /**
- * GROUND. An ant's life in the shared words, and the ground's own stand.
+ * THE SKY'S GATE ON A TAKEOFF. A fire-ant alate flies at 24-32 °C, RH
+ * ≥ 80 %, in light wind, by day, ideally after rain (Milio et al. 1988;
+ * Morrill 1974; Zeng et al., as cited in queen.md), and outside that
+ * band a real alate does not go — the hard gate is the honest one.
+ * What `CreatureWeather` carries today is wind, rain and night, so the
+ * gate reads those three and NOT temperature or humidity, which are not
+ * on the weather yet; when they arrive this is the one place to add
+ * them. Rain is in the gate although the brief named wind and night,
+ * because the air brain grounds a flier in rain at its next think
+ * (`thinkAir`, `grounded`): a takeoff into rain would be a hop the sky
+ * reverses a fifth of a second later, which is a bug to watch, not a
+ * behaviour. A player's demand is not gated here — `beginTakeoff` is
+ * the door, this is the AI's reason to knock.
+ */
+export function takeoffWeatherAllows(weather: CreatureWeather | null): boolean {
+  const sky = weather ?? CALM_WEATHER;
+  if (sky.night) return false;
+  if (sky.rainMmHr >= RAINING_MM_HR) return false;
+  const wind = Math.hypot(sky.windX, sky.windZ);
+  return !Number.isFinite(wind) || wind <= TAKEOFF_WIND_MAX;
+}
+
+/**
+ * LEAVE THE GROUND: the one hand-over from the ground brain to the air
+ * brain, and the one door a possessing player uses for the same thing
+ * (Joshua's brief, §13: "wing activation, takeoff"). Writes `takeoff`
+ * with the climb the air brain expects — the top of the cruise band
+ * over the floor here, for the time the cruise floor takes at the climb
+ * rate — and touches nothing else: the target, if any, is where the
+ * flight goes, and the air brain gives an empty one a hover and a
+ * landing where it is. Returns false, and changes nothing, for a species
+ * with no wings or a body already in the air.
+ */
+export function beginTakeoff(state: CreatureState, species: CreatureSpecies, world: CreatureWorld): boolean {
+  const flight = species.flight;
+  if (flight === null || isAirborne(state.behaviour)) return false;
+  const floor = floorAt(world, state.at);
+  const g = Number.isFinite(floor) ? floor : state.height;
+  const lo = unitsOfMm(flight.cruiseMm[0]);
+  const climb = unitsOfMm(flight.climbMmS);
+  state.hostId = null;
+  state.targetHeight = g + unitsOfMm(flight.cruiseMm[1]);
+  enter(state, 'takeoff', lo / climb);
+  return true;
+}
+
+/**
+ * WHAT A HUNGRY GROUND CREATURE LOOKS FOR, of what it eats: liquid
+ * carbohydrate by preference (`CARBOHYDRATE_OR_DRINK`) and protein
+ * (`PROTEIN_OR_DRINK`) when it is starving (`PROTEIN_AT`), the other
+ * group when the first has nothing in sight — and the drink counts in
+ * both, so a thirsty ant that is hungry takes the nearer of a flower and
+ * the water's edge. There is no thirst on the state yet; this is what
+ * stands in for it, and it says so. The queen's `eats` names no
+ * protein, so she takes sugars and water only by data (SUMMARY §1,
+ * decision 3's default), not by a branch.
+ */
+function foodInSight(state: CreatureState, species: CreatureSpecies, world: CreatureWorld, sight: number): ResourceSite | null {
+  const eats = species.needs.eats;
+  const starving = state.hunger >= PROTEIN_AT;
+  const first = starving ? PROTEIN_OR_DRINK : CARBOHYDRATE_OR_DRINK;
+  const second = starving ? CARBOHYDRATE_OR_DRINK : PROTEIN_OR_DRINK;
+  return nearestSiteOf(world, state.at, eats, first, sight) ?? nearestSiteOf(world, state.at, eats, second, sight);
+}
+
+/**
+ * THE POLICY'S PREY, or null (`CreaturePolicy` in `world.ts`): nothing
+ * under OFF, nothing for a species that is not a predator; under NORMAL
+ * only a defensive temperament with no food in sight — prey is the last
+ * resort of hunger, never a habit; under FORCE any legal prey in sight.
+ */
+function preyToAttack(
+  state: CreatureState, species: CreatureSpecies, world: CreatureWorld, policy: PredationPolicy, hasFood: boolean,
+): CreatureState | null {
+  if (policy === 'off' || !isPredator(species)) return null;
+  if (policy === 'normal' && (species.temperament !== 'defensive' || hasFood)) return null;
+  return nearestPrey(state, species, world, unitsOfMm(species.senses.sightMm));
+}
+
+/** The prey an attack in progress names (`hostId`), while the policy still allows it, it is still legal, and it is still in sight. */
+function attackable(state: CreatureState, species: CreatureSpecies, world: CreatureWorld, policy: PredationPolicy): CreatureState | null {
+  if (policy === 'off' || !isPredator(species) || state.hostId === null) return null;
+  const prey = creatureById(world, state.hostId);
+  if (prey === null || !preyOf(species).includes(prey.species)) return null;
+  const sight = unitsOfMm(species.senses.sightMm);
+  return distanceSquared(state.at, prey.at) <= sight * sight ? prey : null;
+}
+
+/**
+ * GROUND. An ant's life in the shared words, and the ground's own two.
+ *
  * Idle → a short walk to a spot on dry land within a few body lengths
- * (`GROUND_WANDER_LENGTHS`), or to food when hungry and food is in
- * sight → feed there → a beat of idle → again; rest when tired. On
- * alarm a DEFENSIVE species turns to face the disturbance and holds its
- * ground for the alarm's length — a stand, at no pace — and a skittish
- * one flees as the plant brain does, on the ground. Neither hunts: no
- * `attack` is chosen here (the header). No takeoff: the queen's wings
- * are the Lab's own leaf. Nothing about the sky yet — a fire ant
- * forages by day or night as the soil's temperature says (Porter &
- * Tschinkel 1987), and the temperature is not a thing a creature can
- * read from `CreatureWeather` today.
+ * (`GROUND_WANDER_LENGTHS`) — inside the range of HOME when the world
+ * names one, and further (`GROUND_FORAGE_LENGTHS`) when hungry with
+ * nothing in sight — or to food when hungry and food is in sight
+ * (`foodInSight`) → feed there → a beat of idle → again; a NAP when
+ * tired (the species' short `restS`). On alarm a DEFENSIVE species
+ * whose disturbance is ON it — its edge within a body length — turns to
+ * face it and holds its ground for the alarm's length, re-facing it
+ * every think — a stand, at no pace; one whose disturbance is further
+ * flees it at the flee pace, as a skittish one flees everything. The
+ * winged queen leaves the ground on a SEVERE alarm — the alarm at 1
+ * with the disturbance inside half her reach — when the sky allows
+ * (`takeoffWeatherAllows`, `beginTakeoff`), and is the air brain's from
+ * that word to the landing. `attack` is chosen only as the policy says
+ * (`preyToAttack`), re-aimed at the prey every think while it lasts,
+ * and ends where the prey is reached: the bite is a later milestone.
+ * Nothing about the sky beyond the takeoff gate — a fire ant forages
+ * by day or night as the soil's temperature says (Porter & Tschinkel
+ * 1987), and the temperature is not on `CreatureWeather` today.
  */
 function thinkGround(
-  state: CreatureState, species: CreatureSpecies, world: CreatureWorld, rand: () => number, ground: number,
+  state: CreatureState, species: CreatureSpecies, world: CreatureWorld, rand: () => number, sky: CreatureWeather, ground: number,
 ): void {
   const needs = species.needs;
   const body = sizeRatio(state, species) * unitsOfMm(species.lengthMm);
   const g = Number.isFinite(ground) ? ground : state.height;
   const done = state.behaviourS >= state.behaviourUntilS;
+  const policy = predationOf(world);
 
   if (state.alarm >= ALARM_FLEES_AT) {
-    if (species.temperament === 'defensive') {
-      if (state.behaviour !== 'defend') {
-        // `raiseAlarm` wrote the AWAY point; the threat is the other way.
-        // A point a body length toward it is what the legs turn to face
-        // — and `defend` has no pace, so it is faced and not walked to.
-        const toward = state.target === null ? state.heading : wrapHeading(headingToward(state.at, state.target) + Math.PI);
-        state.target = ahead(state.at, toward, body);
-        state.targetHeight = g;
-        state.hostId = null;
-        enter(state, 'defend', species.senses.alarmS);
-      }
+    const threat = nearestDisturbance(state, species, world);
+    const onIt = threat !== null && threat.at.wx === state.at.wx && threat.at.wz === state.at.wz;
+    const gap = threat === null ? Infinity : Math.sqrt(disturbanceD2(state, threat)) - Math.max(0, threat.radius);
+    // SEVERE, and winged: up, if the sky allows. The away point the alarm wrote is where the flight goes.
+    if (
+      species.flight !== null && state.alarm >= 1 && gap <= unitsOfMm(species.senses.alarmMm) * SEVERE_ALARM_FRACTION
+      && takeoffWeatherAllows(sky) && beginTakeoff(state, species, world)
+    ) return;
+    if (species.temperament === 'defensive' && (gap <= body || state.behaviour === 'defend')) {
+      // ON it: a point a body length toward it is what the legs turn to
+      // face — and `defend` has no pace, so it is faced and not walked to.
+      // Re-faced every think; `enter` keeps the clock of a stand in
+      // progress, and a stand once taken is HELD while the alarm lasts,
+      // whether the disturbance backs off or goes: an ant that bolted the
+      // moment the thing it faced stepped back would have faced nothing.
+      const toward = threat === null || onIt ? state.heading : headingToward(state.at, threat.at);
+      state.target = ahead(state.at, toward, body);
+      state.targetHeight = g;
+      state.hostId = null;
+      enter(state, 'defend', species.senses.alarmS);
       return;
     }
     if (state.behaviour !== 'flee') {
-      if (state.target === null) state.target = ahead(state.at, wrapHeading(state.heading + Math.PI), fleeDistance(state, species));
+      // Away: from the disturbance that stands, else along the away point
+      // the alarm wrote — unless the last word was a stand, whose target
+      // is a point TOWARD the threat, in which case the reverse of the
+      // heading that faced it.
+      let away: number;
+      if (threat !== null && !onIt) away = headingToward(threat.at, state.at);
+      else if (state.behaviour === 'defend' || state.target === null) away = wrapHeading(state.heading + Math.PI);
+      else away = headingToward(state.at, state.target);
+      state.target = ahead(state.at, away, fleeDistance(state, species));
       state.targetHeight = g;
       state.hostId = null;
       enter(state, 'flee', species.senses.alarmS);
@@ -770,9 +1426,22 @@ function thinkGround(
   }
 
   switch (state.behaviour) {
+    case 'attack': {
+      const prey = attackable(state, species, world, policy);
+      if (prey !== null && !done && distance(state.at, prey.at) > body) {
+        // The prey moves: re-aimed at where it is now.
+        state.target = prey.at;
+        state.targetHeight = g;
+        return;
+      }
+      // Reached, gone, out of sight, or no longer allowed: the bite is a later milestone.
+      state.target = null;
+      state.hostId = null;
+      enter(state, 'idle', draw(rand, GROUND_IDLE_S));
+      return;
+    }
     case 'flee':
     case 'defend':
-    case 'attack':
       if (!done) return;
       state.target = null;
       state.hostId = null;
@@ -799,14 +1468,17 @@ function thinkGround(
       // Idle, and any word a save carried.
       if (!done) return;
       if (state.fatigue >= needs.restAt) {
+        // A NAP: the species' own `restS`, which for the ants is a minute's order (Cassill 2009).
         state.target = null;
         state.hostId = null;
         enter(state, 'rest', draw(rand, needs.restS));
         return;
       }
       const pace = paceRatio(state, species) * unitsOfMm(species.pace.wanderMmS);
-      if (state.hunger >= needs.feedAt) {
-        const site = nearestSite(world, state.at, needs.eats, unitsOfMm(species.senses.sightMm));
+      const turn = Math.PI / Math.max(1e-6, species.pace.turnRadS);
+      const hungry = state.hunger >= needs.feedAt;
+      if (hungry) {
+        const site = foodInSight(state, species, world, unitsOfMm(species.senses.sightMm));
         if (site !== null && distanceSquared(state.at, site.at) <= body * body) {
           // Already on it.
           state.target = null;
@@ -814,25 +1486,46 @@ function thinkGround(
           enter(state, 'feed', draw(rand, needs.feedS));
           return;
         }
+        const prey = preyToAttack(state, species, world, policy, site !== null);
+        if (prey !== null) {
+          const burst = paceRatio(state, species) * unitsOfMm(species.pace.fleeMmS);
+          state.target = prey.at;
+          state.hostId = prey.id;
+          state.targetHeight = g;
+          enter(state, 'attack', burst > 0 ? distance(state.at, prey.at) / burst + turn : 1);
+          return;
+        }
         if (site !== null && isLand(world, site.at)) {
           state.target = site.at;
           state.hostId = site.id;
           state.targetHeight = g;
-          const far = Math.sqrt(distanceSquared(state.at, site.at));
-          enter(state, 'wander', pace > 0 ? far / pace + 1 : 1);
+          enter(state, 'wander', pace > 0 ? distance(state.at, site.at) / pace + 1 : 1);
           return;
         }
       }
-      // Nowhere in particular: a few body lengths off, on dry land, or another beat where it stands.
+      // Nowhere in particular: a loop on dry land inside the box and inside
+      // the range of home — a short one, or a forager's sweep when hungry —
+      // or, strayed past that range, the way back; else another beat here.
+      const home = homeOf(world);
+      const reach = (hungry ? GROUND_FORAGE_LENGTHS : GROUND_WANDER_LENGTHS) * body;
       for (let i = 0; i < GROUND_WANDER_TRIES; i += 1) {
         const theta = rand() * Math.PI * 2;
-        const r = GROUND_WANDER_LENGTHS * body * Math.sqrt(rand());
+        const r = reach * Math.sqrt(rand());
         const spot = translate(state.at, Math.sin(theta) * r, Math.cos(theta) * r);
-        if (!isLand(world, spot)) continue;
+        if (!isLand(world, spot) || !inBoundsOf(world, spot)) continue;
+        if (home !== null && distanceSquared(spot, home) > GROUND_HOME_RANGE * GROUND_HOME_RANGE) continue;
         state.target = spot;
         state.hostId = null;
         state.targetHeight = g;
         enter(state, 'wander', pace > 0 ? r / pace + 1 : 1);
+        return;
+      }
+      if (home !== null && distanceSquared(state.at, home) > GROUND_HOME_RANGE * GROUND_HOME_RANGE) {
+        const back = Math.min(reach, distance(state.at, home));
+        state.target = ahead(state.at, headingToward(state.at, home), back);
+        state.hostId = null;
+        state.targetHeight = g;
+        enter(state, 'wander', pace > 0 ? back / pace + 1 : 1);
         return;
       }
       state.target = null;
@@ -869,7 +1562,7 @@ function thinkGround(
  * that still named it would feed at a flower it never reached.
  */
 function hopOffWater(
-  state: CreatureState, world: CreatureWorld, flight: FlightSpec, rand: () => number, floor: number, lo: number,
+  state: CreatureState, species: CreatureSpecies, world: CreatureWorld, flight: FlightSpec, rand: () => number, floor: number, lo: number,
 ): void {
   state.hostId = null;
   const hop = landwardHop(world, state.at, flight, rand);
@@ -877,7 +1570,7 @@ function hopOffWater(
     const under = floorAt(world, hop);
     state.target = hop;
     state.targetHeight = (Number.isFinite(under) ? under : floor) + lo;
-    enter(state, 'fly', draw(rand, flight.hopS));
+    enter(state, 'fly', flightClock(state, species, flight, hop));
     return;
   }
   state.target = state.at;
@@ -929,15 +1622,17 @@ function thinkAir(
       state.targetHeight = g + unitsOfMm(flight.cruiseMm[1]);
       enter(state, 'takeoff', lo / climb);
     } else if (state.behaviour === 'takeoff') {
-      if (above >= TAKEOFF_FRACTION * lo || done) enter(state, 'fly', draw(rand, flight.hopS));
+      if (above >= TAKEOFF_FRACTION * lo || done) enter(state, 'fly', flightClock(state, species, flight, state.target));
     } else if (state.behaviour !== 'fly') {
       state.targetHeight = g + unitsOfMm(flight.cruiseMm[1]);
-      enter(state, 'fly', draw(rand, flight.hopS));
+      enter(state, 'fly', flightClock(state, species, flight, state.target));
     } else if (done || arrived(state, species)) {
       // Still alarmed at the end of the hop: keep going the same way.
       state.target = ahead(state.at, state.heading, fleeDistance(state, species));
-      if (!isLand(world, state.target)) state.target = landwardHop(world, state.at, flight, rand) ?? state.at;
-      renew(state, 'fly', draw(rand, flight.hopS));
+      if (!isLand(world, state.target) || !inBoundsOf(world, state.target)) {
+        state.target = landwardHop(world, state.at, flight, rand) ?? state.at;
+      }
+      renew(state, 'fly', flightClock(state, species, flight, state.target));
     }
     return;
   }
@@ -945,7 +1640,7 @@ function thinkAir(
   switch (state.behaviour) {
     case 'takeoff':
       if (above < TAKEOFF_FRACTION * lo && !done) return;
-      enter(state, 'fly', draw(rand, flight.hopS));
+      enter(state, 'fly', flightClock(state, species, flight, state.target));
       return;
     case 'fly': {
       // Grounded means brought down at the first dry ground: over water the hop is flown out.
@@ -959,7 +1654,7 @@ function thinkAir(
     case 'hover': {
       if (!done) return;
       if (!isLand(world, state.at)) {
-        hopOffWater(state, world, flight, rand, g, lo);
+        hopOffWater(state, species, world, flight, rand, g, lo);
         return;
       }
       if (state.target === null) state.target = state.at;
@@ -971,7 +1666,7 @@ function thinkAir(
     case 'land':
       if (above > body && !done) return;
       if (!isLand(world, state.at)) {
-        hopOffWater(state, world, flight, rand, g, lo);
+        hopOffWater(state, species, world, flight, rand, g, lo);
         return;
       }
       state.target = null;

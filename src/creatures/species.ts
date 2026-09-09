@@ -21,10 +21,28 @@
  * `LAB_CREATURE_IDS` names all five, in the Lab's own order. A ground
  * species is a fourth MEDIUM: it walks on the ground, and a ground
  * species with a `flight` spec may also use the air words (the queen
- * is a winged alate; the worker is not). Their rigs are PLACEHOLDERS
- * until the fauna pass measures them — see each `model` block — and
- * the validator refuses the placeholder on purpose, so the Lab cannot
- * boot a queen nobody has measured and think it is the right size.
+ * is a winged alate; the worker is not). Their rigs are MEASURED
+ * against their files (`docs/research/creature-lab/rigs.md`,
+ * `tests/faunaRealRigs.test.ts`) — the placeholder that used to stand
+ * there is `UNMEASURED_SPINE_UNITS`, kept so the validator's refusal of
+ * an unmeasured rig stays a rule and not a memory.
+ *
+ * THE RESEARCH PASS (2026-09-09, the Creature Lab's values). Five
+ * reports were written before a line of the Lab was built
+ * (`docs/research/creature-lab/SUMMARY.md` and the five beside it),
+ * and Joshua approved building to their "recommend building to" blocks
+ * with his defaults. Every line this pass changed names the report and
+ * the citation it came from AND the value it replaced, so a future
+ * reader can see what moved and why without a diff: the melon aphid is
+ * half the size the table drew and sees a plant from thirteen
+ * centimetres but is alarmed only by contact; the worm is Kauaʻi's
+ * *Amynthas* wearing *Lumbricus*'s measured locomotion; the fly
+ * cruises at two metres a second and never station-hovers; the ants
+ * nap and think at Beyond Extinction's cadence. Five fields arrived
+ * with it — `prey`, `massMg`, `senses.contactMm`, `senses.dropChance`,
+ * `burrow.digDiscount`, `flight.turnRadSAir` — each argued where it is
+ * declared. The brain (`intent.ts`) reads the optional ones through
+ * readers that answer with the old behaviour when an entry lacks them.
  *
  * WHY NOT `data/registries.SPECIES`: that registry is the ANT species —
  * castes, growth curves, life states, the player's own kind — and its
@@ -162,6 +180,23 @@ export interface CreatureSenses {
   readonly alarmMm: number;
   /** How long the alarm holds after the disturbance has gone, seconds. */
   readonly alarmS: number;
+  /**
+   * The CONTACT radius, mm: a disturbance inside it is ON the animal —
+   * the stem vibration or the touch that makes an aphid let go, the
+   * floor under which a fly's looming rule stops mattering. Never
+   * wider than `alarmMm`. Absent: the brain uses `alarmMm` for both
+   * (`intent.contactMmOf`), which is what every species did before the
+   * research pass gave the aphid a two-stage flee (aphid.md D3).
+   */
+  readonly contactMm?: number;
+  /**
+   * The chance, 0..1, that a plant creature DROPS off its host when a
+   * disturbance outlasts its first-stage walk. Absent:
+   * `intent.DROP_CHANCE_DEFAULT`. On the aphid because the drop is the
+   * minority answer of its tribe (Nault et al. 1976); a species that
+   * always drops says 1.
+   */
+  readonly dropChance?: number;
 }
 
 export interface CreaturePace {
@@ -186,6 +221,16 @@ export interface FlightSpec {
   readonly burstMmS: number;
   /** Climb and descent, mm/s. */
   readonly climbMmS: number;
+  /**
+   * Turn rate IN THE AIR, radians/s. A separate number from
+   * `pace.turnRadS` because the two are different machines: a fly on
+   * its feet turns by walking, a fly in the air by a banked saccade of
+   * thirty-odd radians a second (Schilstra & van Hateren 1999), and a
+   * queen in the air by the wind's leave (queen.md). Declared here and
+   * not yet read by the integrator: `demand.ts` still turns a flier by
+   * `pace.turnRadS`, and the switch is the legs' owner's line to add.
+   */
+  readonly turnRadSAir: number;
   /** Ceiling above the ground, mm. Keeps a fly in the world an ant sees. */
   readonly ceilingMm: number;
   /** Preferred height band above the ground while cruising, mm. */
@@ -208,6 +253,14 @@ export interface BurrowSpec {
   readonly underMm: number;
   /** The bore it makes, mm — the ONLY number the terrain-edit seam is handed. */
   readonly boreMm: number;
+  /**
+   * How many times slower than the crawl NEW ground is dug, ≥ 1. Travel
+   * in an existing burrow and on the surface is at the crawl; the
+   * discount is for pushing soil aside. Absent: 1, the crawl — what the
+   * worm did before the research pass found the measured discount
+   * (earthworm.md D3). Read through `intent.digDiscountOf`.
+   */
+  readonly digDiscount?: number;
   /** How often it picks a new heading underground, seconds. */
   readonly headingS: readonly [number, number];
   /** How much of a turn a new heading is, 0..1 of a half-turn. */
@@ -283,10 +336,37 @@ export interface CreatureSpecies {
    * every animal, and `population.drawLengthMm` draws inside this.
    */
   readonly lengthRangeMm: readonly [number, number];
+  /**
+   * The species' body mass, milligrams, where a source gives one. Not
+   * read by the simulation yet — nothing weighs anything — and on the
+   * entries so the comparison the research made is ON THE SHEET: a
+   * housefly and a queen are about equal (12 vs 15 mg) and the fly is
+   * quicker by power and halteres, not by being light (housefly.md,
+   * "Fly vs Queen"), so nobody lightens it to speed it up. Absent for
+   * the worm, whose mass no reachable source gave for *A. gracilis*.
+   */
+  readonly massMg?: number;
   readonly model: CreatureModel;
   readonly medium: Medium;
   readonly temperament: Temperament;
   readonly diet: Diet;
+  /**
+   * THE SPECIES THIS ONE MAY ATTACK, when the world's predation policy
+   * allows (`world.ts`, `PredationPolicy`; `intent.preyOf`). EMPTY ON
+   * EVERY ENTRY, and that is the research's answer, not a gap: the
+   * aphid is never prey (Joshua's brief, §11 — a tended aphid is stood
+   * on and defended, Nault 1976); the adult housefly is uncatchable on
+   * the wing — the worker takes its eggs, larvae, pupae and tenerals at
+   * 63-94 % mortality and no adult (Hu & Frank 1996); the earthworm is
+   * in the fire ant's diet as DEAD matter and no record shows a worker
+   * killing a healthy adult (Wilson & Oliver 1969; UF/IFAS EENY-195) —
+   * three thousand worker-masses is a recruitment target, not a hunt.
+   * So the Lab's FORCE TEST has something to do only when a test names
+   * prey on a hand-made species, which is the whole of what makes it a
+   * test option. A species whose medium lacks the `attack` word never
+   * attacks whatever this says (`intent.isPredator`).
+   */
+  readonly prey: readonly CreatureId[];
   readonly senses: CreatureSenses;
   readonly pace: CreaturePace;
   /**
@@ -319,17 +399,34 @@ export interface CreatureSpecies {
 // The three
 // ---------------------------------------------------------------------------
 
+/** No species in this table is prey (`CreatureSpecies.prey` says why). One frozen empty list, shared. */
+const NO_PREY: readonly CreatureId[] = Object.freeze([]);
+
 export const EARTHWORM: CreatureSpecies = Object.freeze({
   id: 'earthworm' as CreatureId,
   name: 'Earthworm',
-  scientificName: 'Lumbricus terrestris',
-  // MEASURED. The night crawler is the size everyone has met; Kauaʻi's
-  // introduced earthworms include it and the smaller Amynthas, and the
-  // rig is a plain segmented worm that reads as either.
+  // WAS 'Lumbricus terrestris' (the ecology pass). The night crawler has
+  // no Hawaiʻi record in anything the research reached and cannot live
+  // in lowland Kauaʻi's 21-25 °C soil — 25 °C kills it inside six
+  // months (Berry & Jordan 2001). The worm under Kauaʻi's litter is
+  // Amynthas gracilis, epi-endogeic, introduced before 1852, 60-160 mm
+  // with a 3-6 mm bore (Bishop Museum; Zou et al. 2010; earthworm.md,
+  // "The animal"). The rig is a plain segmented worm and reads as it.
+  scientificName: 'Amynthas gracilis',
+  // MEASURED, AND KNOWINGLY NOT THIS SPECIES': the 150 mm and the
+  // 120-250 mm range are Lumbricus terrestris's (CABI: 110-200, some
+  // 120-250), KEPT as the LOCOMOTION REFERENCE because every number the
+  // pace story rests on — Quillin's tenth-of-a-body crawl, Seymour's
+  // wave, Ruiz's penetration rate, Drewes's withdrawal — was measured
+  // on L. terrestris and on nothing else. A. gracilis is 60-160 mm; a
+  // reference length that was A. gracilis's under a pace that was
+  // L. terrestris's would be two animals in one row. When the crawl is
+  // measured on Amynthas the length can follow the name (earthworm.md
+  // D2 and open question 1: Joshua's rename, the numbers labelled).
   lengthMm: 150,
-  lengthSource: 'Lumbricus terrestris commonly 120-250 mm — U. Maryland Extension; Dimensions.com',
-  // MEASURED: the range the same source gives. The draw over it is
-  // skewed so its mean is the 150 mm above, not the 185 mm midpoint —
+  lengthSource: 'Lumbricus terrestris 120-250 mm (CABI Compendium; U. Maryland Extension), carried as the locomotion reference for Amynthas gracilis (60-160 mm, Bishop Museum) — earthworm.md',
+  // MEASURED: L. terrestris's range, as the line above. The draw over it
+  // is skewed so its mean is the 150 mm above, not the 185 mm midpoint —
   // `population.drawLengthMm` says how and why.
   lengthRangeMm: Object.freeze([120, 250]) as readonly [number, number],
   model: Object.freeze({
@@ -344,8 +441,16 @@ export const EARTHWORM: CreatureSpecies = Object.freeze({
   medium: 'soil' as Medium,
   temperament: 'skittish' as Temperament,
   diet: 'detritivore' as Diet,
+  // Nobody's prey and nobody's predator: an earthworm never attacks (Joshua's brief, §10).
+  prey: NO_PREY,
   senses: Object.freeze({
-    // BIOLOGICAL SHAPE: no eyes; light and vibration sensed over the whole body. The distance is GAME TUNING.
+    // BIOLOGICAL SHAPE: no eyes; light and vibration sensed over the whole
+    // body (epidermal photoreceptors, negative phototaxis, foraging drops
+    // at 10 lx — Cai et al. 2025; vibration under 500 Hz — Mitra et al.
+    // 2009). The distances are GAME TUNING: the camera's reach. An ant's
+    // footfalls are not a vibration a worm answers; contact is
+    // (earthworm.md D9), and the contact radius is left at the alarm's
+    // until an ant can touch one.
     sightMm: 60, fovDeg: 360, alarmMm: 40, alarmS: 6,
   }),
   pace: Object.freeze({
@@ -365,18 +470,27 @@ export const EARTHWORM: CreatureSpecies = Object.freeze({
     // discount off the measured crawl for "underground is slower", with no
     // source for the factor — which came out at 1.85 mm/s of mean travel
     // over ten simulated minutes: eighty-one seconds to move its own body
-    // length, a correct ecology nobody can see. Earlier today that became
+    // length, a correct ecology nobody can see. Earlier that became
     // 10 mm/s, which was a number picked rather than derived, and it was
-    // the same mistake in a smaller coat. The burrow uses this pace too
-    // (`locomotion.paceOf`), because there is no measured discount for
-    // pushing through soil and inventing one is what went wrong twice.
+    // the same mistake in a smaller coat. This pace is the CRAWL: the
+    // surface, and travel along a burrow that exists. NEW ground has its
+    // own measured discount now — `burrow.digDiscount` below says what
+    // was measured and what the table takes.
     //
-    // fleeMmS is INVENTED and there is no source for it: nobody has
-    // published an escaping earthworm's burst, and a hydrostatic skeleton
-    // has no sprint to publish. GAME TUNING at five thirds of the measured
-    // crawl — fast enough that a withdrawal reads as one, slow enough that
-    // it is still a worm, and over the alarm's six seconds it retreats
-    // about one body length, which is as far as it needs to be to be gone.
+    // fleeMmS is GAME TUNING and there is no source for it: nobody has
+    // published an escaping earthworm's surface burst, and a hydrostatic
+    // skeleton has no sprint to publish. The FAST escape a worm really
+    // has is the giant-fibre withdrawal (Drewes 1980; earthworm.md D4):
+    // the tail flattens to anchor and the anterior shortens back into the
+    // burrow inside tens of milliseconds — a few centimetres, down and
+    // away, not a run. The surface escape crawl is no quicker than a
+    // crawl (Catania 2008: a 250 mm Diplocardia emerges at ~8 mm/s). So
+    // 25 mm/s, five thirds of the crawl, stands for the withdrawal's
+    // speed over its first body length: fast enough that a retreat reads
+    // as one, slow enough that it is still a worm, and over the alarm's
+    // six seconds it is about one body length gone, which is as far as it
+    // needs to be. A retract-and-dive word is earthworm.md's open
+    // question 4 and Joshua's call.
     wanderMmS: 15, fleeMmS: 25, turnRadS: 1.2,
   }),
   // MEASURED: Quillin (1999) — crawling speed goes as mass to the third, which is length to the first. The law the whole pace story rests on.
@@ -401,6 +515,19 @@ export const EARTHWORM: CreatureSpecies = Object.freeze({
     // future nest that goes down properly is where this stops being a
     // compromise.
     underMm: 12, boreMm: 6, headingS: Object.freeze([30, 60]) as readonly [number, number], turn: 0.12,
+    // GAME TUNING, WITH THE MEASUREMENT BESIDE IT. New burrow is made at
+    // 0.2-0.5 mm/s in soft wet soil — thirty to seventy-five times slower
+    // than the 15 mm/s crawl — and stops past ~200 kPa of soil resistance
+    // (Ruiz, Or & Schymanski 2015; Ruiz et al. 2017; Ruiz & Or 2018).
+    // The table takes FIVE, not fifty: at the honest 0.3 mm/s a worm
+    // making new ground takes eight minutes to move its own length and
+    // is the invisible ecology this file's pace docblock buries twice
+    // over. Joshua's call among earthworm.md's option (b) — "a labelled
+    // 3-5× discount instead of 50×" — the top of that band, so digging
+    // reads as slower than crawling and is still watchable in a Lab.
+    // The bore is unchanged: 6 mm is A. gracilis's own body (3-6 mm,
+    // earthworm.md D7), thin for the L. terrestris the lengths belong to.
+    digDiscount: 5,
     surfaceS: Object.freeze([20, 90]) as readonly [number, number],
     betweenSurfacingsS: Object.freeze([120, 400]) as readonly [number, number],
     // BIOLOGICAL SHAPE: anecic worms feed at the surface at night and come up in rain (Edwards & Bohlen, Biology and Ecology of Earthworms).
@@ -427,12 +554,27 @@ export const EARTHWORM: CreatureSpecies = Object.freeze({
 export const APHID: CreatureSpecies = Object.freeze({
   id: 'aphid' as CreatureId,
   name: 'Aphid',
-  scientificName: 'Aphidoidea',
-  // MEASURED. The rig is a generic green aphid; the size is the middle of the garden species.
-  lengthMm: 2.5,
-  lengthSource: 'garden aphids 1.5-4 mm — UMN Extension; MSU Extension',
-  // MEASURED: the range the same source gives, the cited 2.5 mm its mean.
-  lengthRangeMm: Object.freeze([1.5, 4]) as readonly [number, number],
+  // WAS 'Aphidoidea' (the ecology pass) — a superfamily, not an animal.
+  // The honest species for a Kauaʻi lowland garden or forest edge is the
+  // melon aphid: on every main island, surveyed on Kauaʻi farms for two
+  // years (Messing & Klungness 2001), on native plants (Messing et al.
+  // 2007), tended by the island's ants (AntWiki; CTAHR), and its summer
+  // form is pale yellow-green, so the green rig reads as it (aphid.md,
+  // "The animal"). Whether the one rig must also stand for the grass and
+  // fern aphids of other genera is aphid.md's open question 1.
+  scientificName: 'Aphis gossypii',
+  // MEASURED. WAS 2.5 mm ("garden aphids 1.5-4 mm", UMN/MSU Extension):
+  // the melon aphid's wingless adult is 0.9-1.8 mm, typical 1.4
+  // (Influential Points; UF/IFAS EENY-173 gives 1.5-1.8 long, 0.6 wide).
+  // The rig's spineUnits is unchanged; only its scale halves (aphid.md D1).
+  lengthMm: 1.4,
+  lengthSource: 'Aphis gossypii apterae 0.9-1.8 mm, typical 1.4 — Influential Points; UF/IFAS EENY-173',
+  // MEASURED: the same sources' range (WAS [1.5, 4]); the cited 1.4 mm is its mean by the draw's construction.
+  lengthRangeMm: Object.freeze([0.9, 1.8]) as readonly [number, number],
+  // GAME TUNING, derived: the fresh mass is behind a blocked journal
+  // (Moreno-Delafuente et al. 2021, not read); a 1.5 × 0.6 × 0.5 mm
+  // ellipsoid at ~1 g/cm³ is ~0.24 mg (aphid.md), a shade less at 1.4 mm.
+  massMg: 0.2,
   model: Object.freeze({
     path: 'models/aphid.glb',
     // MEASURED against the file: the body's bone extent along the head axis, legs and antennae excluded (`tests/faunaRealRigs.test.ts`).
@@ -442,30 +584,80 @@ export const APHID: CreatureSpecies = Object.freeze({
   medium: 'plant' as Medium,
   temperament: 'passive' as Temperament,
   diet: 'sap' as Diet,
+  // Never prey (Joshua's brief, §11) and never a predator: it kicks, it walks, it drops; it never attacks (§17).
+  prey: NO_PREY,
   senses: Object.freeze({
-    // BIOLOGICAL SHAPE: aphids see poorly — the sense here is mostly
-    // touch, vibration and alarm pheromone ((E)-β-farnesene), answered by
-    // walking off or dropping. The distances are GAME TUNING.
-    sightMm: 30, fovDeg: 300, alarmMm: 20, alarmS: 8,
+    // TWO DIFFERENT SENSES, AND THE OLD ROW HAD THEM AS ONE. sightMm WAS
+    // 30: an aphid dropped 13 cm from its plant is back on it in ~40 s,
+    // walking toward the plant's SILHOUETTE (Gish & Inbar 2006), so
+    // 130 mm is the sight of a HOST — what the brain finds a plant again
+    // by — and NOT an alarm range: no aphid is alarmed by a sight cue at
+    // any distance; a looming shape only moves the antennae (J. Pest Sci.
+    // 2020; aphid.md D6). MEASURED. The alarm is stem vibration, contact
+    // and (E)-β-farnesene within 1-3 cm of a fresh droplet (Basu et al.
+    // 2021), so alarmMm 20 STAYS, relabelled as the contact/vibration
+    // radius, and contactMm is the same 20: a disturbance inside it is
+    // on the plant. alarmS WAS 8: the measured return after a drop is
+    // ~40 s, most of it walked (Gish & Inbar 2006 — one species, one
+    // paper, medium confidence), and 30 s holds the walk-back inside the
+    // alarm (aphid.md D5). dropChance is GAME TUNING: the drop is the
+    // MINORITY answer of the Aphis tribe, which walks or waggles first
+    // (Nault, Montgomery & Bowers 1976), and ant tending depresses it
+    // further; no fraction was reachable for A. gossypii, so a quarter
+    // is a guess and says so (aphid.md D3, "20-30 %"). The brain's
+    // ladder: kick, walk 1-3 cm along the stem, and only then, for a
+    // quarter of them, let go (`intent.ts`, `HOST_FLEE_WALK_MM`).
+    sightMm: 130, fovDeg: 300, alarmMm: 20, alarmS: 30, contactMm: 20, dropChance: 0.25,
   }),
   pace: Object.freeze({
-    // BIOLOGICAL SHAPE: a walking aphid covers about a body length a second; the flee pace is the drop-and-scramble.
-    wanderMmS: 0.6, fleeMmS: 2.5, turnRadS: 2.5,
+    // BIOLOGICAL SHAPE, transferred: Myzus persicae walks ~1 mm/s at
+    // 25 °C — 5.8 cm/min (Alford, Blackburn & Bale 2012); A. gossypii is
+    // unmeasured and a little smaller, so 0.8 (WAS 0.6). The old comment
+    // said "about a body length a second", which was wrong at 2.5 mm
+    // (0.24 BL/s) and is wrong at 1.4: 0.8 mm/s is ~0.6 body lengths a
+    // second. fleeMmS is GAME TUNING — nothing published; aphid.md
+    // recommends ~2 and calls the table's 2.5 "near enough", so it stays
+    // — and it is the FIRST stage's walk along the stem, not the drop,
+    // which is gravity (`locomotion.DROP_MM_S`; righted in 0.17 s, Ribak
+    // et al. 2013). turnRadS is unmeasured either way (GAME TUNING).
+    wanderMmS: 0.8, fleeMmS: 2.5, turnRadS: 2.5,
   }),
-  // BIOLOGICAL SHAPE: nothing measured for an aphid's size-speed law; a body length a second is the linear rule, carried unchanged.
+  // BIOLOGICAL SHAPE: nothing measured for an aphid's size-speed law; the linear rule, carried unchanged.
   paceExponent: 1,
   flight: null,
   burrow: null,
   needs: Object.freeze({
-    // GAME TUNING. An aphid mostly feeds where it sits; the cycle is long feeds broken by short rests and moves along the stem.
+    // GAME TUNING SECONDS ON A MEASURED SHAPE. feedS WAS [30, 120]:
+    // reaching the phloem takes 3.5-6.3 h of probing and an ingestion
+    // bout then runs for hours (Walker 2024; Garzo et al. 2002), so the
+    // aphid's life is one long feed, and a player who watches for a
+    // minute sees a still animal, which is correct. Fifteen minutes to an
+    // hour is that shape at a scale a Lab can wait for (aphid.md D2).
+    // hungerPerS 1/90 is not a hunger — the animal is never off the food —
+    // it is the SCHEDULER of the short stem walks between feeds (aphid.md
+    // open question 6), and rest is indistinguishable from feeding on
+    // screen; both stay.
     hungerPerS: 1 / 90, fatiguePerS: 1 / 200, feedAt: 0.4, restAt: 0.7,
-    feedS: Object.freeze([30, 120]) as readonly [number, number], restS: Object.freeze([10, 40]) as readonly [number, number],
+    feedS: Object.freeze([900, 3600]) as readonly [number, number], restS: Object.freeze([10, 40]) as readonly [number, number],
     eats: Object.freeze(['honeydew-host']) as readonly ResourceKind[],
   }),
   population: Object.freeze({
-    // GAME TUNING. Clustered: a colony on a stem, not a scatter — see `clump`. Placed AT host plants only.
+    // GAME TUNING densities. Clustered: a colony on a stem, not a scatter — see `clump`. Placed AT host plants only.
     perHectare: Object.freeze({ grassland: 1500, shrubland: 2000, forest: 1200, wetland: 800, beach: 120, rocky: 60, ridge: 100 }),
-    hosts: Object.freeze(['shrub', 'broadleaf', 'flower', 'fern', 'grass', 'tree']),
+    // MEASURED. WAS [shrub, broadleaf, flower, fern, grass, tree]:
+    // A. gossypii is a DICOT feeder — on Kauaʻi cucurbits, hibiscus,
+    // citrus, taro, noni, kava and natives (CTAHR ADAP 2000-10; Messing
+    // et al. 2007) — and Hawaiʻi's grass aphids (Rhopalosiphum, Sitobion,
+    // Hysteroneura) and its fern aphid (Idiopterus nephrelepidis) are
+    // other genera (aphid.md D4). `tree` stays for the broadleaf trees
+    // (citrus). A cell of grass alone therefore holds no melon aphids,
+    // whatever its density says, which is the biology. The resource
+    // layer's HONEYDEW_HOST_FAMILIES may name MORE families than this
+    // list — a honeydew host is a plant SOME aphid colony can sit on, and
+    // the grass aphids are real — but every family here must be one of
+    // them, or an aphid would feed on nothing; the contracts test holds
+    // that direction.
+    hosts: Object.freeze(['shrub', 'broadleaf', 'flower', 'tree']),
     clump: 0.9,
     caps: Object.freeze({ 'ultra-low': 20, low: 40, medium: 80, high: 150, 'ultra-high': 300 }),
     reachM: 20, nearM: 10, fullM: 4,
@@ -485,6 +677,10 @@ export const HOUSEFLY: CreatureSpecies = Object.freeze({
   // ABOVE this range's midpoint, so the draw's skew runs the other way
   // from the worm's — big flies are the common ones.
   lengthRangeMm: Object.freeze([4, 8]) as readonly [number, number],
+  // MEASURED: 12 mg, the adult's average (Animal Diversity Web). On the
+  // sheet so the queen comparison is (housefly.md D12): the two weigh
+  // about the same, and the fly is the quicker by power and halteres.
+  massMg: 12,
   model: Object.freeze({
     path: 'models/housefly.glb',
     // MEASURED against the file: head to abdomen tip along the body's bones, wings and legs excluded (`tests/faunaRealRigs.test.ts`).
@@ -494,41 +690,102 @@ export const HOUSEFLY: CreatureSpecies = Object.freeze({
   medium: 'air' as Medium,
   temperament: 'skittish' as Temperament,
   diet: 'omnivore' as Diet,
+  // Never a predator (Joshua's brief, §10): it shares a food patch and lifts off when something closes on it.
+  prey: NO_PREY,
   senses: Object.freeze({
     // BIOLOGICAL SHAPE: Card & Dickinson (2008, Curr. Biol.) — a fly plans
-    // its escape takeoff within ~200 ms of a looming threat; the distance
-    // at which the camera counts as looming is GAME TUNING.
+    // its escape takeoff within ~200 ms of a looming threat; the distances
+    // are GAME TUNING, and the research says the real rule is not a range
+    // at all (housefly.md D4): the eye's 2.9° a facet resolves a 4 mm ant
+    // only inside ~80 mm and a hand at metres (Juusola lab 2026), and the
+    // escape is triggered by an approaching DARK object, its expansion,
+    // never its distance (Holmqvist & Srinivasan 1991). The brain reads
+    // the second through `LOOM` (`intent.ts`); the flat sight stays a
+    // stage for the Lab. alarmS 3 has no data and stays.
     sightMm: 300, fovDeg: 330, alarmMm: 150, alarmS: 3,
   }),
   pace: Object.freeze({
-    // BIOLOGICAL SHAPE: walking pace is a few body lengths a second; the flee pace is a takeoff, handled by `flight`.
+    // GAME TUNING (WAS labelled BIOLOGICAL SHAPE): no walking speed is
+    // published for Musca in anything reachable (housefly.md D11), and
+    // 15 mm/s is a guess at 2.3 body lengths a second. Walking turns are
+    // saccadic — 5-10 a second, ~17 rad/s at the peak in a congener (Blaj
+    // & van Hateren 2004, Calliphora) — so 6 is a mean, on foot; the air
+    // has its own rate (`flight.turnRadSAir`). The flee pace is a walking
+    // value and moot: a fly's flee is a takeoff.
     wanderMmS: 15, fleeMmS: 40, turnRadS: 6,
   }),
-  // BIOLOGICAL SHAPE: the walking law, carried linear; a fly's FLIGHT does not scale with the body at all (`fly` in demand.ts reads the flight spec unscaled).
+  // BIOLOGICAL SHAPE: the walking law, carried linear; a fly's FLIGHT does
+  // not scale with the body at all — wingbeat and speed scale only weakly
+  // with size in flies (housefly.md open question 7) — and `fly` in
+  // demand.ts reads the flight spec unscaled.
   paceExponent: 1,
   flight: Object.freeze({
-    // BIOLOGICAL SHAPE: Musca domestica is commonly reported at about 2 m/s
-    // (7 km/h) in free flight. Short hops, a hover, a landing: the game
-    // fly never cruises for minutes, because a fly that leaves is a fly
-    // the ant never sees again.
-    //
-    // burstMmS is GAME TUNING from the Lab research (SUMMARY §5: escape
-    // burst 3 m/s over a 2 m/s cruise; the maximum is unpublished, above
-    // the cruise). The wild fly never reaches for it — it has no `flee`
-    // word — so this line changed nothing that was flying; a possessed
-    // fly's sprint is what it is for.
-    cruiseMmS: 1500, burstMmS: 3000, climbMmS: 600, ceilingMm: 1500,
+    // MEASURED: WAS 1500. Musca domestica averages about 2 m/s in free
+    // flight — 7 km/h, ~300 body lengths a second (West 1951; Shepard et
+    // al. 1972; Wagner 1986, compiled by Zahn 2019). Medium confidence: a
+    // reported average, Wagner's full text unreachable (housefly.md D1).
+    // Short hops, a brake, a landing: the game fly never cruises for
+    // minutes, because a fly that leaves is a fly the ant never sees again.
+    cruiseMmS: 2000,
+    // GAME TUNING: the maximum is unpublished, "somewhere above 2 m/s"
+    // (Zahn 2019); 3 is the escape hop's ceiling and a possessed fly's
+    // sprint. The wild fly never reaches for it — an air species has no
+    // `flee` word, it takes off — so the line moves nothing that flies.
+    burstMmS: 3000,
+    // BIOLOGICAL SHAPE: a heavier blowfly climbs at 0.7-0.8 m/s into an inverted landing (Liu et al. 2019); 600 stands.
+    climbMmS: 600,
+    // MEASURED, congener: flight turns are banked saccades of 20-30 ms,
+    // up to 90°, about ten a second, peaking at 2,000 °/s ≈ 35 rad/s
+    // (Schilstra & van Hateren 1999, Calliphora vicina — "similar
+    // saccadic characteristics to Musca", Wagner 1986). 30 rad/s is the
+    // saccade's rate, not a mean over a flight; the straight segments
+    // between saccades are where the mean goes (housefly.md D3).
+    turnRadSAir: 30,
+    // MEASURED: WAS 1500. Field flies are caught evenly from 0.1 to 2 m
+    // up and land readily at 1.8 m (Zahn 2019; Gerry et al. 2011). The
+    // ceiling is the measured top; the cruise band below it is not.
+    ceilingMm: 2000,
+    // GAME TUNING, "a stage for the ant": the measured spread is even over
+    // 0.1-2 m (housefly.md D5) and a fly two metres up is out of the
+    // ant's world, so the band is kept at the lower half. Joshua's open
+    // question 1.
     cruiseMm: Object.freeze([120, 600]) as readonly [number, number],
-    hopS: Object.freeze([0.8, 3.5]) as readonly [number, number],
-    // GAME TUNING, from the ecology brief: a random hop lands half a metre to three metres away.
+    // DERIVED, NOT DRAWN: `hopMm` is the SOURCE of this pair and hopS is
+    // hopMm over the cruise — [500, 3000] / 2000 = [0.25, 1.5] s. WAS
+    // [0.8, 3.5], which at 2 m/s is 1.6-7 m against a band of 0.5-3 m
+    // (housefly.md D7: "one of them should derive from the other"). The
+    // brain derives a hop's PLACE from its TIME (`intent.hopDistance`)
+    // and holds it inside hopMm; with the two agreeing the hold never
+    // bites, and the clock a flight is then given is the time its place
+    // takes (`intent.flightClock`), so a quarter-second hop is a
+    // half-metre one and never a landing wherever the clock ran out.
+    hopS: Object.freeze([0.25, 1.5]) as readonly [number, number],
+    // GAME TUNING, the source, from the ecology brief: a random hop lands
+    // half a metre to three metres away — "a series of short disjointed
+    // circuitous flights" (Schoof & Siverly 1954 via Geden et al. 2021;
+    // after fifteen minutes more released flies were at 10 m than at 20,
+    // Zahn 2019). Never a cruise across the island.
     hopMm: Object.freeze([500, 3000]) as readonly [number, number],
-    hoverS: Object.freeze([0.3, 1.5]) as readonly [number, number],
+    // GAME TUNING: WAS [0.3, 1.5]. Musca does not station-hover — the
+    // lamp-circler is Fannia canicularis (extension pages) — and the only
+    // hover a housefly has is the brake before touchdown, a fraction of a
+    // second as retinal expansion crosses its threshold, ~76 ms to
+    // contact (Wagner 1982). So a short hover, and the brain enters it
+    // only on the way to a landing (housefly.md D6; the ground test holds
+    // every hover over dry land to end in one).
+    hoverS: Object.freeze([0.2, 0.8]) as readonly [number, number],
+    // GAME TUNING: nothing measured; real perches run seconds to many minutes and this could stretch to 60 s without lying.
     perchS: Object.freeze([3, 20]) as readonly [number, number],
     drawnTo: Object.freeze(['carrion', 'litter', 'sap', 'nectar', 'water-edge']) as readonly ResourceKind[],
   }),
   burrow: null,
   needs: Object.freeze({
-    // GAME TUNING.
+    // GAME TUNING. fatiguePerS 1/40 exhausts a fly in forty seconds of
+    // flight; a real fly flies for minutes to hours (Rockstein &
+    // Bhatnagar 1966 — the numbers paywalled), so this is the "short
+    // hops" brief's number and says so (housefly.md D8). Meals are short
+    // and often (ADW): the fly lands ON the food, tastes with its feet,
+    // sponges, and comes back.
     hungerPerS: 1 / 120, fatiguePerS: 1 / 40, feedAt: 0.6, restAt: 0.75,
     feedS: Object.freeze([4, 15]) as readonly [number, number], restS: Object.freeze([3, 20]) as readonly [number, number],
     eats: Object.freeze(['sap', 'nectar', 'litter', 'water-edge']) as readonly ResourceKind[],
@@ -550,18 +807,17 @@ export const HOUSEFLY: CreatureSpecies = Object.freeze({
 // ---------------------------------------------------------------------------
 
 /**
- * THE RIG IS NOT MEASURED YET, and the table says so in a way the
+ * THE PLACEHOLDER FOR A RIG NOBODY HAS MEASURED, and the value the
  * validator refuses. `spineUnits` is the rig's body length in the GLB's
  * own units, measured against the file with three's loader
- * (`tests/faunaRealRigs.test.ts`), and a number typed in here without
- * that measurement would draw the queen at whatever size the guess
- * implied — the mistake the header describes TCS making with the worm.
- * Zero is below the validator's floor (`finite('model.spineUnits', ..,
- * 1e-6)`), so `assertSpeciesTable(CREATURE_SPECIES, LAB_CREATURE_IDS)`
- * throws until the fauna pass replaces it, and the Lab cannot boot a
- * queen of unknown size. The chain is null for the same reason: a rig
- * posed by its legs and wings has none, and whether these two are is
- * the measurement's to say.
+ * (`tests/faunaRealRigs.test.ts`), and a number typed in without that
+ * measurement would draw an animal at whatever size the guess implied —
+ * the mistake the header describes TCS making with the worm. Zero is
+ * below the validator's floor (`finite('model.spineUnits', .., 1e-6)`),
+ * so a table carrying it throws at the door and no Lab boots a creature
+ * of unknown size. The two ants carried it until rigs.md measured them
+ * (2.3718 and 3.7917 below); it stays for the next species that arrives
+ * before its file is read.
  */
 export const UNMEASURED_SPINE_UNITS = 0;
 
@@ -576,6 +832,10 @@ export const QUEEN: CreatureSpecies = Object.freeze({
   lengthSource: 'Solenopsis invicta alate female 7-9.5 mm, typical 8 — UF/IFAS EENY-195; Texas A&M field guide ("3/8 in")',
   // MEASURED: the same sources' range; the draw's mean is the 8 mm above (`population.drawLengthMm`).
   lengthRangeMm: Object.freeze([7, 9.5]) as readonly [number, number],
+  // MEASURED: a newly mated monogyne queen weighs ≥ 14 mg, mean ~15
+  // (Keller & Ross 1993; Porter et al. 1988, as cited — queen.md). The
+  // lighter polygyne alate (≤ 12 mg) is queen.md's open question 6.
+  massMg: 15,
   model: Object.freeze({
     path: 'models/queen-winged.glb',
     // MEASURED against the file (`tests/faunaRealRigs.test.ts`): the
@@ -597,14 +857,25 @@ export const QUEEN: CreatureSpecies = Object.freeze({
   // water, then — the `eats` list below — and the word is `omnivore`
   // because the union has no narrower one that is not `sap`.
   diet: 'omnivore' as Diet,
+  // A cornered queen stings and never hunts (queen.md, "flee"; Joshua's brief, §10): no prey. `defend` is her answer, and it needs none.
+  prey: NO_PREY,
   senses: Object.freeze({
-    // GAME TUNING PLACEHOLDERS, named as such: the same shape as the
-    // housefly's row (queen.md gives 300 / 120 / 300 for sight, alarm and
-    // field of view, all tuning — reproductives have more ommatidia than
-    // workers and three ocelli, BIOLOGICAL SHAPE, but no distance was
-    // measured). alarmS is tuning: "alarm decays over seconds; a real
-    // queen resumes digging quickly".
-    sightMm: 300, fovDeg: 300, alarmMm: 120, alarmS: 4,
+    // GAME TUNING, ON THE WORKER'S BASIS (WAS 300 / 120, the housefly
+    // row's shape, named as placeholders). An ant's eye is a poor one:
+    // a worker's 48-92 ommatidia resolve coarse motion at a few
+    // centimetres (Baker & Ma 2006; worker.md: sight ~50 mm), and a
+    // reproductive carries MORE ommatidia than a worker and three ocelli
+    // (Baker & Ma 2006, as cited; Narendra et al. 2016 for a flying
+    // caste's ~4-6° facets — BIOLOGICAL SHAPE for the ordering, no
+    // distance measured), so hers is set above the worker's and nowhere
+    // near a fly's: she finds food by sweeping her range, not by seeing
+    // it across the box (`intent.ts`, `GROUND_FORAGE_LENGTHS`), which is
+    // how an ant forages. Alarm: "a foreign ant at antenna range,
+    // vibration, a looming shape" (queen.md) — five body lengths, and the
+    // takeoff on a SEVERE alarm is inside half of it
+    // (`SEVERE_ALARM_FRACTION`). alarmS is tuning: "alarm decays over
+    // seconds; a real queen resumes digging quickly".
+    sightMm: 80, fovDeg: 300, alarmMm: 40, alarmS: 4,
   }),
   pace: Object.freeze({
     // GAME TUNING, derived and then discounted (queen.md, "Proposed queen
@@ -632,6 +903,12 @@ export const QUEEN: CreatureSpecies = Object.freeze({
     // (queen.md disagreement 7 — v0's 3 m/s LIFT_MAX was four times her
     // airspeed and is not carried).
     climbMmS: 350,
+    // GAME TUNING: v0's FLIGHT_TURN_RATE, the one v0 number queen.md
+    // agrees with — she turns by banking, and no saccade was ever
+    // measured on an ant; the wind, not she, steers a 0.7 m/s flier in
+    // an ordinary breeze (FIRE_ANT_BIOLOGY §14.2). A twentieth of the
+    // fly's, which is the difference §18 asks the two flights to keep.
+    turnRadSAir: 1.4,
     // GAME TUNING, FOR NOW: real nuptial flights climb to 60-250 m
     // (Markin et al. 1971, as cited) and the Lab is a metre of air. A
     // ceiling of 1.5 m keeps her in the box she is being tested in; the
@@ -679,8 +956,10 @@ export const QUEEN: CreatureSpecies = Object.freeze({
     caps: Object.freeze({ 'ultra-low': 1, low: 1, medium: 1, high: 1, 'ultra-high': 1 }),
     reachM: 30, nearM: 15, fullM: 6,
   }),
-  // GAME TUNING: between the fly's 0.15 s and the aphid's 0.4 s — she decides faster than a worm and is not a fly.
-  thinkS: 0.2,
+  // Beyond Extinction's decision cadence, the SHAPE the brief asks to keep
+  // (Joshua's brief, §2: "approximately a 0.15 second decision cadence").
+  // WAS 0.2; the worker's, so the two ants think alike.
+  thinkS: 0.15,
   // FOR NOW. A founding queen digs (FIRE_ANT_BIOLOGY §16) and ants are
   // authorised editors by CLAUDE.md's rule; the dig itself is a later
   // milestone (Joshua's brief, §22), and until it exists the honest
@@ -705,6 +984,14 @@ export const WORKER: CreatureSpecies = Object.freeze({
   lengthSource: 'Solenopsis invicta workers 1.6-6.0 mm, continuously polymorphic — Texas A&M fire ant project; CDFA RIFA profile; mix from Wood & Tschinkel 1981',
   // MEASURED: the whole worker range (TAMU; CDFA); the draw's mean is the 3 mm above.
   lengthRangeMm: Object.freeze([1.6, 6.0]) as readonly [number, number],
+  // BIOLOGICAL SHAPE, derived from two measurements: live mass runs
+  // 0.65 mg (small) to 3.99 mg (large) (Chen, Rashid & Feng 2014) and
+  // goes as head width cubed (Tschinkel et al. 2003). The cited 3.0 mm
+  // body is head width 0.75 mm (length ≈ 4 × HW), the small/medium line;
+  // a small worker at HW ~0.65 scaled by (0.75 / 0.65)³ ≈ 1.5 is ~1 mg —
+  // worker.md's own "typical worker ~3 mm, ~1 mg". A drawn 6 mm major
+  // would be eight times it; nothing weighs anything yet.
+  massMg: 1.0,
   model: Object.freeze({
     path: 'models/worker.glb',
     // MEASURED against the file (`tests/faunaRealRigs.test.ts`), the
@@ -720,10 +1007,23 @@ export const WORKER: CreatureSpecies = Object.freeze({
   temperament: 'defensive' as Temperament,
   // MEASURED: 70-80 % of loads are liquid (Tennant & Porter 1991), the rest insects, seeds and dead matter.
   diet: 'omnivore' as Diet,
+  // PREDATOR-CAPABLE (Joshua's brief, §10) AND PREY-LESS BY THE
+  // LITERATURE: what a worker takes is fly eggs, larvae, pupae and
+  // tenerals (Hu & Frank 1996) and carrion (Wilson & Oliver 1969) —
+  // never an adult fly on the wing, never a healthy worm alone, never
+  // a tended aphid (§11) — and none of those is a creature in this table.
+  // The Lab's FORCE TEST names prey on a hand-made entry (`world.ts`).
+  prey: NO_PREY,
   senses: Object.freeze({
-    // GAME TUNING (worker.md): 48-92 ommatidia resolve coarse motion at
-    // a few centimetres, so sight is 50 mm; the field is wide; the alarm
-    // pheromone is short-lived (Vander Meer 2010), so the alarm is short.
+    // GAME TUNING (worker.md, "Senses"): 48-92 ommatidia (Baker & Ma
+    // 2006) resolve coarse motion at a few centimetres, so sight is
+    // 50 mm and the field is wide. Antennae first, eyes second: a real
+    // worker's alarm is the pyrazine pheromone, detected at 30 pg/ml and
+    // answered by running TOWARD it (Vander Meer, Preston & Choi 2010),
+    // and vibration through the legs; the alarm here is the camera's
+    // reach, ten body lengths, and it is SHORT because the pyrazine is
+    // short-lived. Reaction 0.2-0.5 s is the think (GAME TUNING; nothing
+    // per-worker was measured).
     sightMm: 50, fovDeg: 300, alarmMm: 30, alarmS: 3,
   }),
   pace: Object.freeze({
@@ -747,13 +1047,21 @@ export const WORKER: CreatureSpecies = Object.freeze({
   flight: null,
   burrow: null,
   needs: Object.freeze({
-    // GAME TUNING with the measured shape: a feed is a crop fill of tens
-    // of seconds that ends in a trip home (Tennant & Porter 1991); rest
-    // is naps, not blocks — 253 a day of about a minute, four in five
-    // workers awake at any moment (Cassill et al. 2009) — so the rest is
-    // short and the threshold low.
-    hungerPerS: 1 / 240, fatiguePerS: 1 / 180, feedAt: 0.6, restAt: 0.6,
-    feedS: Object.freeze([10, 40]) as readonly [number, number], restS: Object.freeze([40, 120]) as readonly [number, number],
+    // GAME TUNING SECONDS ON A MEASURED SHAPE. A feed is a crop fill of
+    // tens of seconds that ends in a trip home (Tennant & Porter 1991;
+    // hungerPerS and feedS are tuning around that). REST IS NAPS, NOT
+    // BLOCKS (worker.md D4): 253 naps a day of 1.1 min, about four and
+    // three-quarter hours in all, so four in five workers are awake at any
+    // moment (Cassill et al. 2009). restS WAS [40, 120]; [40, 90] is the
+    // measured minute with a spread, mean 65 s. restAt WAS 0.6 and
+    // fatiguePerS 1/180; at 0.5 and 1/400 a walking worker naps after
+    // ~200 s on its feet, so a nap of ~65 s in every ~265 s of walking is
+    // a quarter of the time asleep at most, less with idles and feeds
+    // between — the "one in five" the paper measured. The nap is the
+    // brain's word for `rest`; where it naps (indoors, in a tunnel) is a
+    // later milestone.
+    hungerPerS: 1 / 240, fatiguePerS: 1 / 400, feedAt: 0.6, restAt: 0.5,
+    feedS: Object.freeze([10, 40]) as readonly [number, number], restS: Object.freeze([40, 90]) as readonly [number, number],
     // In worker.md's order of preference: liquid carbohydrate first, then
     // protein, seed last (S. invicta takes an eighth of the seeds S.
     // geminata does). `carrion` is named by the resource layer and offered
@@ -878,6 +1186,24 @@ export function speciesProblems(species: CreatureSpecies): string[] {
   finite('senses.alarmS', species.senses.alarmS);
   if (species.senses.fovDeg <= 0 || species.senses.fovDeg > 360) problems.push(`${where}: fovDeg must be in (0, 360]`);
   if (species.senses.alarmMm > species.senses.sightMm) problems.push(`${where}: it cannot be alarmed by what it cannot sense`);
+  // The research pass's optional senses, held to their own shapes when
+  // present: a contact radius is inside the alarm reach (a touch is
+  // noticed before it is felt), and a drop chance is a probability.
+  const contact = species.senses.contactMm;
+  if (contact !== undefined) {
+    finite('senses.contactMm', contact);
+    if (contact > species.senses.alarmMm) problems.push(`${where}: a contact radius wider than the alarm reach would be felt before it is noticed`);
+  }
+  const drop = species.senses.dropChance;
+  if (drop !== undefined && !(drop >= 0 && drop <= 1)) problems.push(`${where}: senses.dropChance must be 0..1, got ${drop}`);
+  if (species.massMg !== undefined) finite('massMg', species.massMg, 1e-6);
+  // Prey is a species the table knows and never the species itself.
+  // Whether it may ever ATTACK is the medium's word and the policy's
+  // (`state.ts`, `intent.isPredator`), not this list's.
+  for (const p of species.prey) {
+    if (!isCreatureId(p)) problems.push(`${where}: prey "${p}" is not a species the table knows`);
+    else if (p === species.id) problems.push(`${where}: a species is not its own prey`);
+  }
   finite('pace.wanderMmS', species.pace.wanderMmS);
   finite('pace.fleeMmS', species.pace.fleeMmS);
   // A flee that is no faster than a walk is not a flee: the word would
@@ -903,6 +1229,7 @@ export function speciesProblems(species: CreatureSpecies): string[] {
     finite('flight.burstMmS', species.flight.burstMmS, 1e-6);
     if (species.flight.burstMmS < species.flight.cruiseMmS) problems.push(`${where}: a burst slower than the cruise is not a burst`);
     finite('flight.climbMmS', species.flight.climbMmS, 1e-6);
+    finite('flight.turnRadSAir', species.flight.turnRadSAir, 1e-6);
     finite('flight.ceilingMm', species.flight.ceilingMm, 1);
     range('flight.cruiseMm', species.flight.cruiseMm);
     if (species.flight.cruiseMm[1] > species.flight.ceilingMm) problems.push(`${where}: cruise band above the ceiling`);
@@ -916,6 +1243,8 @@ export function speciesProblems(species: CreatureSpecies): string[] {
     finite('burrow.underMm', species.burrow.underMm, 1e-6);
     finite('burrow.boreMm', species.burrow.boreMm, 1e-6);
     if (species.burrow.boreMm > species.burrow.underMm) problems.push(`${where}: a bore wider than the band it travels in would break the surface`);
+    // A discount below one would dig new ground FASTER than it crawls, which nothing measured does.
+    if (species.burrow.digDiscount !== undefined) finite('burrow.digDiscount', species.burrow.digDiscount, 1);
     range('burrow.headingS', species.burrow.headingS);
     if (species.burrow.turn < 0 || species.burrow.turn > 1) problems.push(`${where}: burrow.turn must be 0..1`);
     range('burrow.surfaceS', species.burrow.surfaceS);

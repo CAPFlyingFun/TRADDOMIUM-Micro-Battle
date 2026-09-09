@@ -43,7 +43,7 @@ import {
   BODY_SAMPLES, BURROW_HIDE, BURROW_KEEP, CRUMBS_PER_LENGTH, FaunaView, HYSTERESIS, LOOK, POOL_SIZES, REVEAL_HOLD,
   SPINE_TOLERANCE, impostorCapFor, poolSizeFor,
 } from '../src/fauna/FaunaView';
-import { WING_FLAP } from '../src/fauna/motion';
+import { WING_FLAP } from '../src/fauna/wings';
 import { local, world, type LocalPoint, type WorldPoint } from '../src/world/coords';
 import { SOIL_TILE } from '../src/world/soilTypes';
 import { setOrigin, toLocal } from '../src/world/origin';
@@ -995,6 +995,65 @@ describe('the fly and the aphid', () => {
     for (const y of ys) expect(Math.abs(y - 25.5)).toBeLessThanOrEqual(body * LOOK.aphid.restBob + 1e-9);
     expect(Math.max(...ys) - Math.min(...ys)).toBeGreaterThan(0);
     expect(sway).toBeGreaterThan(0.01);
+  });
+});
+
+describe('the pick surface', () => {
+  it('answers positionOf for a drawn rig, a drawn impostor and a chain, in local coordinates, and null for the undrawn', async () => {
+    const v = await keep(view('ultra-low'));
+    const f = creature('housefly', 'f', 20, 0, { behaviour: 'fly', height: 30, heading: 0.4 });
+    const a = creature('aphid', 'a', 8, 0, { behaviour: 'feed', height: 25.5 });
+    const w = creature('earthworm', 'w', -12, 3, { behaviour: 'surface', height: 0, heading: 1 });
+    const far = creature('aphid', 'far', 900, 0, { tier: 'far' });
+    // A third aphid past the pool of two: an impostor.
+    const b = creature('aphid', 'b', 9, 1, { behaviour: 'wander', height: 0 });
+    const c = creature('aphid', 'c', 10, 2, { behaviour: 'wander', height: 0 });
+    for (let k = 0; k < 5; k += 1) v.update([f, a, w, far, b, c], EYE, 1 / 60);
+    expect(v.drawnIds().slice().sort()).toEqual(['a', 'b', 'c', 'f', 'w']);
+    expect(v.positionOf('far')).toBeNull();
+    expect(v.positionOf('nobody')).toBeNull();
+    // The fly: its rig's box centre, placed on the body's height.
+    const p = v.positionOf('f')!;
+    expect(p.x).toBeCloseTo(20, 0);
+    expect(p.z).toBeCloseTo(0, 0);
+    expect(Math.abs(p.y - 30)).toBeLessThan(unitsOfMm(HOUSEFLY.lengthMm));
+    // The vector is the view's: the next call rewrites it.
+    const kept = p.clone();
+    const q = v.positionOf('a')!;
+    expect(q).toBe(p);
+    expect(q.equals(kept)).toBe(false);
+    expect(Math.abs(q.y - 25.5)).toBeLessThan(unitsOfMm(APHID.lengthMm));
+    // The worm: the middle of its laid chain, half a body behind the head along its heading.
+    const wormMid = v.positionOf('w')!;
+    const body = unitsOfMm(EARTHWORM.lengthMm);
+    expect(wormMid.x).toBeCloseTo(-12 - Math.sin(1) * body / 2, 0);
+    expect(wormMid.z).toBeCloseTo(3 - Math.cos(1) * body / 2, 0);
+    // An impostor: whichever of the three aphids has none, its ellipsoid's centre sits a girth-radius up.
+    const impostored = ['a', 'b', 'c'].filter((id) => !v.holders('aphid').includes(id));
+    expect(impostored).toHaveLength(1);
+    const r = (unitsOfMm(APHID.lengthMm) * LOOK.aphid.girth) / 2;
+    const heightOf = { a: 25.5, b: 0, c: 0 }[impostored[0] as 'a' | 'b' | 'c'];
+    expect(v.positionOf(impostored[0])!.y).toBeCloseTo(heightOf + r, 6);
+    // Local, not world: an origin shift (the origin snaps to its 1024 lattice) moves every answer with it.
+    setOrigin(world(1024, 0));
+    v.update([f, a, w, far, b, c], EYE, 1 / 60);
+    expect(v.positionOf('f')!.x).toBeCloseTo(20 - 1024, 0);
+    // Switched off: gone from the list.
+    v.setEnabled('housefly', false);
+    v.update([f, a, w, far, b, c], EYE, 1 / 60);
+    expect(v.positionOf('f')).toBeNull();
+    expect(v.drawnIds()).not.toContain('f');
+  });
+
+  it('allocates nothing per call: the same list and the same vector come back', async () => {
+    const v = await keep(view('ultra-low'));
+    const f = creature('housefly', 'f', 20, 0, { behaviour: 'fly', height: 30 });
+    v.update([f], EYE, 1 / 60);
+    const list = v.drawnIds();
+    const vec = v.positionOf('f');
+    v.update([f], EYE, 1 / 60);
+    expect(v.drawnIds()).toBe(list);
+    expect(v.positionOf('f')).toBe(vec);
   });
 });
 

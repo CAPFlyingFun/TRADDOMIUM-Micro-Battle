@@ -186,6 +186,26 @@ describe('habitat placement', () => {
     expect(populateCreatures(CELL, APHID, options('grassland', 7, grassOnly))).toEqual([]);
   });
 
+  it('a melon aphid is a dicot feeder: a cell of ferns or seed-head grass WITH ids holds none, and the same cell with a shrub holds a colony', () => {
+    // aphid.md D4: Hawaiʻi's grass aphids and its fern aphid are other genera. A plant with an id is a host only if its family is.
+    const of = (family: string) => (cx: number, cz: number): PlantSource[] => {
+      const o = cellOrigin({ cx, cz });
+      const out: PlantSource[] = [];
+      for (let i = 0; i < 6; i += 1) {
+        out.push({ family, at: world(o.wx + 200 + (i % 3) * 500, o.wz + 300 + Math.floor(i / 3) * 700), size: 30, id: `${family}:${cx},${cz}:${i}`, variant: 2 });
+      }
+      return out;
+    };
+    for (const family of ['fern', 'grass']) {
+      expect(hostCandidates(of(family)(CELL.cx, CELL.cz), APHID), family).toEqual([]);
+      expect(populateCreatures(CELL, APHID, options('grassland', 7, of(family))), family).toEqual([]);
+    }
+    for (const family of ['shrub', 'broadleaf', 'flower', 'tree']) {
+      expect(hostCandidates(of(family)(CELL.cx, CELL.cz), APHID), family).toHaveLength(6);
+      expect(populateCreatures(CELL, APHID, options('grassland', 7, of(family))).length, family).toBeGreaterThan(0);
+    }
+  });
+
   it('an aphid colony is a clump: mean nearest-neighbour distance far below a uniform scatter of the same count', () => {
     const aphids = populateCreatures(CELL, APHID, options('shrubland'));
     const n = aphids.length;

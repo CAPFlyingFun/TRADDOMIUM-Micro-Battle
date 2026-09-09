@@ -146,7 +146,9 @@ describe('the contract', () => {
     for (const kind of OFFERED_KINDS) expect(RESOURCE_KINDS).toContain(kind);
     expect(RESOURCE_KINDS).toContain('fruit');
     expect(RESOURCE_KINDS).toContain('carrion');
-    expect([...HONEYDEW_HOST_FAMILIES]).toEqual([...(APHID.population.hosts ?? [])]);
+    // The layer's honeydew hosts are every family an aphid genus tends on this island; the melon aphid's own
+    // hosts (dicots only, CTAHR; Messing 2007) are a SUBSET — grass and fern keep their sites for other genera.
+    for (const family of APHID.population.hosts ?? []) expect(HONEYDEW_HOST_FAMILIES).toContain(family);
     expect(MAX_SITES_PER_CELL).toBe(96);
     expect(PLANT_SITE_BUDGET + WATER_EDGE_BUDGET).toBe(MAX_SITES_PER_CELL);
   });

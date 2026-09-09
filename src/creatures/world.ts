@@ -41,6 +41,19 @@ export interface CreatureWeather {
 }
 
 /**
+ * WHAT MADE A DISTURBANCE. The camera, the Lab's DISTURB tool, or a
+ * creature — the player's ant walking up, one day a predator. It is on
+ * the disturbance and not on the species because the same footfall
+ * means different things to different animals: an aphid is stood on by
+ * its tenders and does not flee an ant at all (SUMMARY §3, Nault 1976;
+ * `intent.ts` filters `creature` sources out of a plant creature's
+ * alarm), while a worm feels any contact. Absent: something the source
+ * did not name, felt by everyone — which is what every disturbance was
+ * before the field existed.
+ */
+export type DisturbanceSource = 'camera' | 'tool' | 'creature';
+
+/**
  * Something a creature reacts to: the camera today (the free-fly eye is
  * the only thing moving through the world), the player's ant when she
  * arrives, another creature one day. A point, a height and how far its
@@ -49,11 +62,77 @@ export interface CreatureWeather {
 export interface Disturbance {
   readonly at: WorldPoint;
   readonly height: number;
-  /** World units. Added to the species' own alarm distance. */
+  /** World units. Added to the species' own alarm distance — and, for a looming-eyed species, what it looms BY (`intent.ts`, `LOOM`). */
   readonly radius: number;
+  readonly source?: DisturbanceSource;
+}
+
+/**
+ * THE LAB'S PREDATION OPTION (Joshua's brief, §25: "PREDATION: OFF /
+ * NORMAL / FORCE TEST"), and the island's default.
+ *
+ *   off     a predator-capable species never chooses `attack`; it may
+ *           still `defend` when a disturbance is on top of it.
+ *   normal  hunger and temperament decide: a defensive species that is
+ *           hungry, has no food in sight and has legal prey in sight
+ *           attacks it — "DO NOT constantly hunt everything" (§10).
+ *   force   a hungry predator attacks any legal prey in reach, food in
+ *           sight or not, whatever its temperament: deliberate combat
+ *           testing.
+ *
+ * What is LEGAL PREY is the species table's (`prey` on the entry, read
+ * by `intent.ts`), and in this Lab nothing is prey by default: the aphid
+ * is never prey (§11), the adult fly is uncatchable (Hu & Frank 1996),
+ * the worm is carrion or a recruitment target and never a lone kill
+ * (SUMMARY §2). So `force` has something to do only against a species
+ * the table names, which is the whole of what makes it a TEST option.
+ */
+export type PredationPolicy = 'off' | 'normal' | 'force';
+
+export interface CreaturePolicy {
+  readonly predation: PredationPolicy;
 }
 
 export interface CreatureWorld {
+  /**
+   * The Lab's options (`CreaturePolicy`). Absent — the island — is the
+   * `normal` policy; the brain reads it through `intent.predationOf`.
+   */
+  readonly policy?: CreaturePolicy;
+  /**
+   * SOFT CONTAINMENT (Joshua's brief, §31: "Use soft behavioral
+   * containment first. If approaching lab boundary: AI chooses a valid
+   * inward target … Do not hide locomotion bugs by teleporting AI back
+   * to center"). A bounded world answers whether a point is inside it
+   * and offers a point back toward its middle; the brain replaces a
+   * target outside the bounds with the inward one and NEVER moves a
+   * body itself — a creature that reaches the boundary and stops is a
+   * bug to see, not hide. Absent on the island, which has no edge an
+   * animal can reach. The Lab's box provides both (`labWorld.ts`).
+   */
+  inBounds?(at: WorldPoint, margin?: number): boolean;
+  inwardTarget?(at: WorldPoint, distance?: number): WorldPoint;
+  /**
+   * THE NEST STAND-IN: where a ground species keeps its life centred. A
+   * fire-ant forager is never far from a tunnel exit — every point of
+   * the territory within 26 cm of one (Tschinkel 2011) — and the Lab
+   * has no tunnel, so the brain reads ONE point and holds its wander
+   * inside that range of it (`intent.ts`, `GROUND_HOME_RANGE`). Absent
+   * — the island, until nests exist — the wander is centred where the
+   * animal stands, which is what it was before the field existed. The
+   * Lab's `labWorld.ts` does not set it yet: the integration pass wires
+   * the block's foot as the home.
+   */
+  readonly home?: WorldPoint;
+  /**
+   * EVERY SIMULATED CREATURE, for a brain that hunts: the only way a
+   * predator can know where its prey is, since a creature is not a
+   * plant and not a resource site. The array is the simulation's own —
+   * read it during the think, never keep it. Absent on a world with no
+   * predator wired, and then nothing is ever attacked: `attack` needs a
+   * body to close on.
+   */
+  creatures?(): readonly CreatureState[];
   /** The ground's height at a point, world units above mean sea level. The live heightfield, HD where a tile is resident. */
   groundAt(at: WorldPoint): number;
   normalAt(at: WorldPoint): Normal;

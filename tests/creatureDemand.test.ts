@@ -36,6 +36,14 @@ import { CELL_SPAN } from '../src/world/objects/cells';
 import { mulberry32 } from '../src/world/random';
 
 // ---------------------------------------------------------------------------
+/**
+ * THE RESEARCH'S APHID FEEDS FOR HOURS (feedS 15-60 min, Walker 2024;
+ * Garzo 2002), so a ten-minute soak of the table's animal is a still
+ * animal — correct, and useless for a test of walking. This one feeds
+ * for seconds so the walks happen inside the soak; nothing else differs.
+ */
+const BRIEF_APHID: CreatureSpecies = { ...APHID, needs: { ...APHID.needs, feedS: [30, 120] as readonly [number, number] } };
+
 // The old legs, verbatim (alpha.37 `src/creatures/locomotion.ts`)
 // ---------------------------------------------------------------------------
 
@@ -70,9 +78,22 @@ function oldBodyLength(state: CreatureState, species: CreatureSpecies): number {
   return sizeRatio(state, species) * unitsOfMm(species.lengthMm);
 }
 
-function oldStepToward(state: CreatureState, species: CreatureSpecies, pace: number, dt: number): number {
+// TWO DELIBERATE DEPARTURES from alpha.37's legs, both asked for by the
+// Lab's brain and carried into the old copy so the identity still proves
+// the integrator: a flier turns at `flight.turnRadSAir` in the air, and a
+// worm DIGGING ('burrow') crawls at its pace over `burrow.digDiscount`.
+function oldTurnRate(species: CreatureSpecies, airborne: boolean): number {
+  return airborne && species.flight !== null ? species.flight.turnRadSAir : species.pace.turnRadS;
+}
+function oldDigFactor(state: CreatureState, species: CreatureSpecies): number {
+  if (species.burrow === null || state.behaviour !== 'burrow') return 1;
+  const d = species.burrow.digDiscount;
+  return d !== undefined && d >= 1 ? 1 / d : 1;
+}
+
+function oldStepToward(state: CreatureState, species: CreatureSpecies, pace: number, dt: number, turnRadS = species.pace.turnRadS): number {
   const target = state.target;
-  const maxTurn = species.pace.turnRadS * dt;
+  const maxTurn = turnRadS * dt;
   if (target === null) {
     if (!(pace > 0)) return 0;
     const step = pace * dt;
@@ -130,7 +151,7 @@ function oldBurrow(state: CreatureState, species: CreatureSpecies, w: CreatureWo
   if (!(dt > 0) || !Number.isFinite(dt)) return 0;
   const spec = species.burrow;
   if (spec === null) return oldWalk(state, species, w, dt);
-  const moved = oldStepToward(state, species, oldPaceOf(state, species), dt);
+  const moved = oldStepToward(state, species, oldDigFactor(state, species) * oldPaceOf(state, species), dt);
   const ground = w.groundAt(state.at);
   if (!Number.isFinite(ground)) return moved;
   const bottom = ground - unitsOfMm(spec.underMm);
@@ -156,7 +177,7 @@ function oldFly(state: CreatureState, species: CreatureSpecies, w: CreatureWorld
   const cruise = unitsOfMm(spec.cruiseMmS);
   const climb = unitsOfMm(spec.climbMmS);
   const pace = state.behaviour === 'hover' ? 0 : cruise;
-  const moved = oldStepToward(state, species, pace, dt);
+  const moved = oldStepToward(state, species, pace, dt, oldTurnRate(species, true));
   const floor = oldFloorAt(w, state.at);
   if (!Number.isFinite(floor)) return moved;
   const ceiling = floor + unitsOfMm(spec.ceilingMm);
@@ -255,7 +276,7 @@ const headingGap = (a: number, b: number): number => Math.abs(wrapHeading(a - b)
 
 describe('the AI did not move differently', () => {
   const cases: { readonly name: string; readonly species: CreatureSpecies; readonly at: WorldPoint; readonly lengthMm: number; readonly host: string | null }[] = [
-    { name: 'a walker on its stem (aphid, drawn small)', species: APHID, at: SHRUB.at, lengthMm: 1.8, host: SHRUB.id },
+    { name: 'a walker on its stem (aphid, drawn small)', species: BRIEF_APHID, at: SHRUB.at, lengthMm: 1.8, host: SHRUB.id },
     { name: 'a burrower under a slope (earthworm, drawn long)', species: EARTHWORM, at: world(700, 400), lengthMm: 220, host: null },
     { name: 'a flier over a pond and a beach (housefly)', species: HOUSEFLY, at: world(SEA_EAST_OF - 40, 500), lengthMm: 7, host: null },
     { name: 'a walker on the ground (the Lab worker, at its cited length)', species: WORKER, at: world(600, 560), lengthMm: WORKER.lengthMm, host: null },

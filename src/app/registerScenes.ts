@@ -32,6 +32,7 @@ import { weatherCacheOver } from '../persistence/weatherCache';
 import { heldHourMs } from '../world/weather/solar';
 import { isBuiltSky, type Sky } from '../world/weather/weather';
 import { PERF_WORLD_MAP_ID, PERF_WORLD_SCENE_ID, perfWorldTool } from '../perf/perfTool';
+import { LAB_SCENE_ID, createCreatureLabScene, creatureLabTool } from '../lab';
 import {
   LocalSoloSession, isSoloSlot, newSoloGame, readSoloSlots, resumeSoloSlot, restorableStateOf, savedSoloGame,
   soloSlotSpec, toolSoloSlot, type KnownMap, type SoloSlot,
@@ -545,6 +546,24 @@ export function registerScenes(options: RegisterScenesOptions = {}): void {
   registerScene(
     NET_LAB_SCENE_ID,
     createNetworkLabScene((ctx) => ({
+      identity: () => {
+        const p = loadProfile(ctx.storage.open(PLAYER_PROFILE_SPEC));
+        return { playerId: playerIdOf(p), name: p.displayName };
+      },
+      onBack: () => goToScreen(ctx, SCREEN_ID.editors),
+    })),
+  );
+
+  // THE CREATURE LAB (ARCHITECTURE §11, 6.10): one 1 m bench where the
+  // five first creatures live together under AI and any one of them can
+  // be possessed by this device's player — the SAME production modules
+  // Kauaʻi will import, wired exactly as the Network Lab is: a plain tool
+  // scene in the menu state, no session, this device's profile as the
+  // player whose Intent the possessed body obeys.
+  registerTool(creatureLabTool);
+  registerScene(
+    LAB_SCENE_ID,
+    createCreatureLabScene((ctx) => ({
       identity: () => {
         const p = loadProfile(ctx.storage.open(PLAYER_PROFILE_SPEC));
         return { playerId: playerIdOf(p), name: p.displayName };

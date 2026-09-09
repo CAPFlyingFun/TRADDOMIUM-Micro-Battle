@@ -65,20 +65,52 @@
  *                   later milestone), and the Lab places one so a
  *                   worker's protein choice can be watched. No kind was
  *                   added to the layer for it.
+ *   the home        `LAB_HOME`: the foot of the block's south-east
+ *                   corner, the ants' nest stand-in (`CreatureWorld.home`).
+ *                   A fire-ant forager is never more than 26 cm from a
+ *                   tunnel exit (Tschinkel 2011) and the Lab has no
+ *                   tunnel, so the brain centres the ants' loops on ONE
+ *                   point (`intent.ts`, `GROUND_HOME_RANGE`); the block's
+ *                   foot is that point because the block is what the
+ *                   ants are here to be watched on (§6, §14). The range
+ *                   reaches over half the block's top, so a wander may
+ *                   climb the step the block paragraph describes — a
+ *                   thing to see, on purpose, not all day.
  *   the spawns      `labSpawns`: the five, deterministic, each on a
  *                   surface its medium allows — queen and worker on the
  *                   floor beside the block, worm in its band under the
  *                   litter corner, aphid on the broadleaf, fly perched
- *                   on the flower.
+ *                   on the flower — and each with a BODY LENGTH DRAWN
+ *                   from its species' range by the Lab's seed (below).
  *
  * THE SIM IS BUILT FROM THE SPAWNS, NOT FROM CELLS. The habitat here is
  * grassland everywhere, and a `CreatureSim` streaming 16 m cells over
  * it would generate the island's wild worms and flies a few metres
  * outside a one-metre box. The Lab's simulation (its own leaf) places
- * `labSpawns()` and generates nothing; RESET LAB (§26) rebuilds it from
- * the same list and clears the control ledger (`control.ts`), which is
- * what makes a reset deterministic: the same five, at the same spots,
- * with the same needs, and nobody possessed.
+ * `labSpawns()` and generates nothing.
+ *
+ * SIZES ARE DRAWN, AND THE DRAW IS THE SEED'S. A creature carries its
+ * own length (`state.ts`) and the island draws one per animal out of
+ * its cell's hash; the Lab has no cells, so `labSpawns` draws each of
+ * the five out of `LAB_SEED` and the spawn's own index through the
+ * same `drawLengthMm` the island uses — the same worm at the same
+ * length on every device and every reset, and never `Math.random`. A
+ * caller may pass another seed to see another five, or name a length
+ * outright (`LabSpawnOptions.lengthMm`), which is how a minim and a
+ * major are tested on the ONE worker rig without a second controller
+ * (Joshua's brief, §12: "data-driven so later we can test
+ * small/minim, medium, large/major-sized").
+ *
+ * RESET LAB (§26) IS THREE LINES, IN THIS ORDER, and this file owns the
+ * first: `lab.reset()` puts the world back as it was constructed — the
+ * clock at zero, no standing disturbance, the camera's dropped, the
+ * weather as constructed; `ledger.clear()` (`control.ts`) lets go of
+ * everyone; and the scene builds a fresh simulation from `labSpawns()`
+ * with the same seed, since a `CreatureSim` keeps what it places for
+ * as long as it lives. That is what makes a reset deterministic: the
+ * same five, at the same spots, at the same sizes, with the same needs,
+ * and nobody possessed — and no page reload ("Do not make death/testing
+ * require reloading the whole browser page").
  *
  * SOFT CONTAINMENT (§31). The box has no walls: `inBounds` says whether
  * a point is inside it and `inwardTarget` gives a point back toward the
@@ -101,9 +133,10 @@ import type { CellResources, NearestWater, PlantSource, ResourceSite, WaterQuery
 import type { Habitat, HabitatKind } from '../world/habitat';
 import { normalOfGradient, type Normal } from '../world/heightfield';
 import { cellAt, cellKey } from '../world/objects/cells';
-import { valueNoise } from '../world/random';
+import { stableHash, valueNoise } from '../world/random';
 import { CALM_WEATHER } from './intent';
-import { APHID, EARTHWORM, HOUSEFLY, QUEEN, WORKER, unitsOfMm, type CreatureId } from './species';
+import { drawLengthMm } from './population';
+import { APHID, CREATURE_SPECIES, EARTHWORM, HOUSEFLY, QUEEN, WORKER, unitsOfMm, type CreatureId } from './species';
 import type { NewCreatureOptions } from './state';
 import type { CreatureWeather, CreatureWorld, Disturbance } from './world';
 
@@ -138,6 +171,17 @@ export const DISTURB_HOLD_S = 1.5;
 export const INWARD_DISTANCE = LAB_HALF / 2;
 /** How far from the block's footprint an inward target is kept, so the AI is not sent up the step all day. */
 export const BLOCK_CLEARANCE = 3;
+
+/**
+ * THE ANTS' HOME: the foot of the block's south-east corner, on the
+ * floor, the same clearance off the footprint the inward target keeps.
+ * The queen spawns beside the block's east face and the worker beside
+ * its south, each thirteen units from here, so both begin inside their
+ * home range and their loops are around the block (the header says why
+ * the block). One point for both, as `CreatureWorld.home` is one point:
+ * the Lab has one nest stand-in, not a nest per ant.
+ */
+export const LAB_HOME: WorldPoint = world(BLOCK.size / 2 + BLOCK_CLEARANCE, BLOCK.size / 2 + BLOCK_CLEARANCE);
 
 /** Grassland, all the way: the habitat the ants' own research names (worker.md, "Habitat"). Elevation is the floor's. */
 export const LAB_HABITAT: Habitat = Object.freeze({
@@ -287,6 +331,10 @@ export interface LabWorld extends CreatureWorld {
   readonly sites: readonly ResourceSite[];
   /** The puddle; never null in the lab. */
   readonly water: WaterQuery;
+  /** The ants' nest stand-in: `LAB_HOME`, the block's foot. Never absent in the lab. */
+  readonly home: WorldPoint;
+  /** The lab's own clock, simulation seconds since construction or the last `reset`. What a standing disturbance expires against. */
+  readonly clock: number;
   /** The DISTURB tool: a synthetic disturbance that stands for `holdS` seconds of the lab's clock. */
   disturb(d: Disturbance, holdS?: number): void;
   /** Drop every standing disturbance. The camera's, if set, stays. */
@@ -296,6 +344,15 @@ export interface LabWorld extends CreatureWorld {
   /** Advance the lab's own clock, simulation seconds: what expires a disturbance. */
   advance(dt: number): void;
   setWeather(weather: CreatureWeather | null): void;
+  /**
+   * The world's share of RESET LAB (the header): the clock to zero, every
+   * standing disturbance dropped, the camera's disturbance dropped, the
+   * weather back to what the lab was constructed with. The ground, the
+   * plants, the sites and the water never changed, so they need no
+   * putting back. The animals and the ledger are not this world's to
+   * reset — the scene rebuilds one and clears the other.
+   */
+  reset(): void;
   /** Inside the box, at least `margin` units from its edge. */
   inBounds(at: WorldPoint, margin?: number): boolean;
   /** A point back toward the middle from `at`, `distance` along, kept clear of the block: what a brain aims at near the edge. */
@@ -341,7 +398,8 @@ export function labInwardTarget(at: WorldPoint, distance = INWARD_DISTANCE): Wor
 }
 
 export function createLabWorld(options: LabWorldOptions = {}): LabWorld {
-  let weather: CreatureWeather | null = options.weather === undefined ? CALM_WEATHER : options.weather;
+  const constructedWeather: CreatureWeather | null = options.weather === undefined ? CALM_WEATHER : options.weather;
+  let weather = constructedWeather;
   let camera: Disturbance | null = null;
   const standing: Standing[] = [];
   let clock = 0;
@@ -375,6 +433,10 @@ export function createLabWorld(options: LabWorldOptions = {}): LabWorld {
     plants: LAB_PLANTS,
     sites: LAB_SITES,
     water: LAB_WATER,
+    home: LAB_HOME,
+    get clock(): number {
+      return clock;
+    },
     groundAt: labGroundAt,
     normalAt: labNormalAt,
     habitatAt: () => LAB_HABITAT,
@@ -408,6 +470,13 @@ export function createLabWorld(options: LabWorldOptions = {}): LabWorld {
     setWeather: (w) => {
       weather = w;
     },
+    reset: () => {
+      clock = 0;
+      standing.length = 0;
+      camera = null;
+      weather = constructedWeather;
+      stale = true;
+    },
     inBounds: labInBounds,
     inwardTarget: labInwardTarget,
   };
@@ -426,15 +495,49 @@ function spawnId(species: CreatureId, at: WorldPoint): string {
 export const APHID_PERCH_FRACTION = 0.5;
 
 /**
+ * The salt the five body lengths are drawn under, disjoint from the
+ * cell populations' species blocks (`population.ts`, 0x1_0000..) and
+ * from the bumps' `LAB_SEED` question, so a lab length and a lab bump
+ * never share a number.
+ */
+const LENGTH_SALT = 0x6_0000;
+
+export interface LabSpawnOptions {
+  /** The seed the five body lengths are drawn under. Default `LAB_SEED`: the same five, every time. */
+  readonly seed?: number;
+  /**
+   * A length named outright for a species, mm, instead of its draw:
+   * `{ worker: 5.8 }` is a major on the one worker rig, `{ worker: 1.7 }`
+   * a minim. Clamped to nothing — the table's range is the population's
+   * rule, and a Lab that asks for a 12 mm worker is asking on purpose.
+   * A length that is not a number falls back to the draw.
+   */
+  readonly lengthMm?: Readonly<Partial<Record<CreatureId, number>>>;
+}
+
+/**
+ * THIS ONE'S LENGTH: the species' draw (`population.drawLengthMm`, the
+ * same skew the island uses, mean at the cited length) out of the seed
+ * and the spawn's index, unless the options name a length for it.
+ */
+function spawnLengthMm(species: CreatureId, index: number, options: LabSpawnOptions): number {
+  const named = options.lengthMm?.[species];
+  if (named !== undefined && Number.isFinite(named) && named > 0) return named;
+  const seed = options.seed === undefined ? LAB_SEED : options.seed;
+  return drawLengthMm(CREATURE_SPECIES[species], stableHash(index, 0, LENGTH_SALT ^ (seed | 0)));
+}
+
+/**
  * THE DETERMINISTIC INITIAL PLACEMENT. Queen and worker on the floor
  * beside the block, facing it; the worm in the middle of its band under
  * the litter corner, burrowing; the aphid on the broadleaf, its host
- * named; the fly perched on the flower's head, idle. Every phase and
- * every starting need is fixed, so two labs, or one lab reset, begin the
- * same. A fresh array of fresh objects each call — a caller may build a
- * simulation from it and hand it nothing back.
+ * named; the fly perched on the flower's head, idle. Every phase, every
+ * starting need and every body length is fixed by `LAB_SEED`, so two
+ * labs, or one lab reset, begin the same (the header, "SIZES ARE
+ * DRAWN"). A fresh array of fresh objects each call — a caller may build
+ * a simulation from it and hand it nothing back.
  */
-export function labSpawns(): readonly NewCreatureOptions[] {
+export function labSpawns(options: LabSpawnOptions = {}): readonly NewCreatureOptions[] {
   const queenAt = world(BLOCK.size / 2 + 4, 0);
   const workerAt = world(0, BLOCK.size / 2 + 4);
   const wormAt = LITTER_CORNER;
@@ -442,29 +545,33 @@ export function labSpawns(): readonly NewCreatureOptions[] {
   const flyAt = FLOWER.at;
   const under = unitsOfMm(EARTHWORM.burrow === null ? 0 : EARTHWORM.burrow.underMm);
   const bore = unitsOfMm(EARTHWORM.burrow === null ? 0 : EARTHWORM.burrow.boreMm);
+  const length = (species: CreatureId, index: number): number => spawnLengthMm(species, index, options);
   return [
     {
       id: spawnId(QUEEN.id, queenAt), species: QUEEN.id, cellKey: cellKey(cellAt(queenAt)),
-      at: queenAt, height: labGroundAt(queenAt), heading: -Math.PI / 2, phase: 0.1, behaviour: 'idle', hunger: 0.2, fatigue: 0.1,
+      at: queenAt, height: labGroundAt(queenAt), heading: -Math.PI / 2, lengthMm: length(QUEEN.id, 0), phase: 0.1,
+      behaviour: 'idle', hunger: 0.2, fatigue: 0.1,
     },
     {
       id: spawnId(WORKER.id, workerAt), species: WORKER.id, cellKey: cellKey(cellAt(workerAt)),
-      at: workerAt, height: labGroundAt(workerAt), heading: Math.PI, phase: 0.3, behaviour: 'idle', hunger: 0.4, fatigue: 0.1,
+      at: workerAt, height: labGroundAt(workerAt), heading: Math.PI, lengthMm: length(WORKER.id, 1), phase: 0.3,
+      behaviour: 'idle', hunger: 0.4, fatigue: 0.1,
     },
     {
       id: spawnId(EARTHWORM.id, wormAt), species: EARTHWORM.id, cellKey: cellKey(cellAt(wormAt)),
       // The middle of the band: between `underMm` down and half a bore down, as the population places one.
-      at: wormAt, height: labGroundAt(wormAt) - (under + bore / 2) / 2, heading: Math.PI / 2, phase: 0.5, behaviour: 'burrow',
-      hunger: 0.3, fatigue: 0.2,
+      at: wormAt, height: labGroundAt(wormAt) - (under + bore / 2) / 2, heading: Math.PI / 2, lengthMm: length(EARTHWORM.id, 2),
+      phase: 0.5, behaviour: 'burrow', hunger: 0.3, fatigue: 0.2,
     },
     {
       id: spawnId(APHID.id, aphidAt), species: APHID.id, cellKey: cellKey(cellAt(aphidAt)),
-      at: aphidAt, height: labGroundAt(aphidAt) + APHID_PERCH_FRACTION * BROADLEAF.size, heading: 0, phase: 0.7,
-      behaviour: 'idle', hostId: BROADLEAF.id, hunger: 0.3, fatigue: 0.1,
+      at: aphidAt, height: labGroundAt(aphidAt) + APHID_PERCH_FRACTION * BROADLEAF.size, heading: 0, lengthMm: length(APHID.id, 3),
+      phase: 0.7, behaviour: 'idle', hostId: BROADLEAF.id, hunger: 0.3, fatigue: 0.1,
     },
     {
       id: spawnId(HOUSEFLY.id, flyAt), species: HOUSEFLY.id, cellKey: cellKey(cellAt(flyAt)),
-      at: flyAt, height: labGroundAt(flyAt) + FLOWER.size, heading: Math.PI / 4, phase: 0.9, behaviour: 'idle', hunger: 0.3, fatigue: 0.1,
+      at: flyAt, height: labGroundAt(flyAt) + FLOWER.size, heading: Math.PI / 4, lengthMm: length(HOUSEFLY.id, 4), phase: 0.9,
+      behaviour: 'idle', hunger: 0.3, fatigue: 0.1,
     },
   ];
 }

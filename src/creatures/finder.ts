@@ -5,7 +5,7 @@
  * Joshua, 2026-09-08, from the phone: "I don't see any worms in the game
  * or any of the glb models you added." They are there. The trouble is
  * the scale the project chose. A worm is 150 mm of a 5,600,000-unit
- * island, an aphid 2.5 mm; a worm spends most of its life 12 mm UNDER
+ * island, an aphid 1.4 mm; a worm spends most of its life 12 mm UNDER
  * the ground, where the renderer correctly declines to draw it; and
  * nothing is simulated past its species' reach (30 m for a worm, 40 for
  * a fly). At any altitude a free camera actually flies at, a correct
@@ -67,13 +67,13 @@ export const VIEW_LENGTHS = 3;
  * finder ever asks for is still comfortably in front of the glass.
  *
  * It is deliberately SMALL. A floor of 20 cm was tried first and it is
- * the wrong instrument for this world: three lengths of a 2.5 mm aphid
- * is 7.5 mm, and holding the camera 20 cm off instead drew the animal
+ * the wrong instrument for this world: three lengths of a 1.4 mm aphid
+ * is 4.2 mm, and holding the camera 20 cm off instead drew the animal
  * four pixels tall on a 430-pixel screen — the very complaint the finder
  * exists to answer. The test measures that span rather than trusting
  * the number.
  */
-export const MIN_STANDOFF = 1;
+export const MIN_STANDOFF = 0.8;
 
 /** How far above the animal the viewpoint sits, as a fraction of the standoff: a gentle look down, not a plan view. */
 export const VIEW_RISE = 0.35;

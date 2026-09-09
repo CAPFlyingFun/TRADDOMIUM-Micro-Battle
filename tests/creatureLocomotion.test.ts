@@ -133,8 +133,9 @@ describe('burrowing', () => {
       expect(c.height).toBeGreaterThanOrEqual(g - under - 1e-9);
       finite(c);
     }
-    // The cited worm travels at 15 mm/s: ninety units east in a minute, no more, no less.
-    expect(c.at.wx).toBeCloseTo(unitsOfMm(EARTHWORM.pace.wanderMmS) * 60, 6);
+    // The cited worm crawls at 15 mm/s, and DIGGING is the crawl over the dig discount (`burrow.digDiscount`,
+    // 5 GAME TUNING against the measured 30-75x): eighteen units east in a minute, no more, no less.
+    expect(c.at.wx).toBeCloseTo((unitsOfMm(EARTHWORM.pace.wanderMmS) / EARTHWORM.burrow!.digDiscount!) * 60, 6);
     c.behaviour = 'flee';
     for (let i = 0; i < 60 * 10; i += 1) burrow(c, EARTHWORM, w, 1 / 60);
     expect(c.height).toBeCloseTo(slope(c.at) - under, 6);
@@ -303,7 +304,8 @@ describe('the dispatch and the guards', () => {
     const worm = creature(EARTHWORM, world(0, 0), -1.2);
     worm.behaviour = 'burrow';
     worm.target = world(100, 0);
-    expect(move(worm, EARTHWORM, w, 1)).toBeCloseTo(unitsOfMm(EARTHWORM.pace.wanderMmS), 9);
+    // Digging: the crawl over the dig discount.
+    expect(move(worm, EARTHWORM, w, 1)).toBeCloseTo(unitsOfMm(EARTHWORM.pace.wanderMmS) / EARTHWORM.burrow!.digDiscount!, 9);
     expect(worm.height).toBeLessThan(0);
     const flyer = creature(HOUSEFLY, world(0, 0), 0);
     flyer.behaviour = 'fly';
@@ -352,7 +354,8 @@ describe("a pace is the individual's", () => {
       c.behaviour = 'burrow';
       c.target = world(100_000, 0);
     }
-    expect(paceOf(cited, EARTHWORM)).toBeCloseTo(unitsOfMm(EARTHWORM.pace.wanderMmS), 12);
+    // Digging ('burrow'): the crawl over the dig discount; a big worm digs faster in the same proportion.
+    expect(paceOf(cited, EARTHWORM)).toBeCloseTo(unitsOfMm(EARTHWORM.pace.wanderMmS) / EARTHWORM.burrow!.digDiscount!, 12);
     expect(paceOf(big, EARTHWORM)).toBeCloseTo(2 * paceOf(cited, EARTHWORM), 12);
     const one = burrow(cited, EARTHWORM, w, 1);
     expect(burrow(big, EARTHWORM, w, 1)).toBeCloseTo(2 * one, 9);

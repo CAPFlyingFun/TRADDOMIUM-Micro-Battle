@@ -45,7 +45,10 @@
  * metalness into one map, the loader sets both factors to 1 and lets
  * the map multiply them down, and the exporter baked a roughness range
  * that tops out at 0.46 — so every animal shipped as wet plastic. The
- * packed map goes, and that part of the lesson still stands.
+ * packed map goes, and that part of the lesson still stands — and when
+ * the EMISSIVE map goes its factor goes with it, or a file whose glow
+ * was a black map behind a white factor lights up (the worker, §7.2 of
+ * rigs.md).
  *
  * THE NORMAL MAP STAYS, and the rule that dropped it is worth reading
  * back: "the packed map and the normal map cost texture memory and
@@ -62,6 +65,34 @@
  * `keepNormal` is the switch rather than a silent always, because the
  * original reasoning still holds somewhere: a rung that cannot afford
  * three texture fetches an animal should still be able to say so.
+ *
+ * ─── the ants (Creature Lab, 2026-09-09) ────────────────────────────
+ *
+ * Two more rigs, read in `docs/research/creature-lab/rigs.md`, and
+ * three finders that were wrong or missing on them. `findAntennae`
+ * used to take the mirrored pair with the HIGHEST tips on a head hub,
+ * which on the worker are the mandibles — its antennae are long and
+ * droop to jaw height, and the midline face chain outranked them — so
+ * the jaws would have waved and the feelers stood still. The rule that
+ * holds on all four legged rigs is LENGTH: the antennae are the longest
+ * mirrored pair on a head hub by a wide margin (aphid 1.33 vs 0.30, fly
+ * 0.07/0.08 with the 0.10 proboscis unmirrored, queen 0.93 vs 0.36,
+ * worker 1.80 vs 0.24). `findWings` returned ONE pair of the queen's
+ * two — the hind, whose tips sit highest — so it now returns EVERY
+ * mirrored pair of hub children that hangs above the body, ranked fore
+ * to hind. And nothing found the mandibles, the head or the gaster at
+ * all; `findMandibles` and `findTrunk` do, by the same method.
+ *
+ * ─── a pair is MUTUAL ───────────────────────────────────────────────
+ *
+ * The one thing the ant rigs taught the pairing: a mirror must be
+ * mutual. Seeded by "the longest chain", the fly's midline proboscis
+ * (0.104, longer than either feeler) would take the −X feeler as its
+ * mirror — the scores are within the tolerance — and the feeler pair
+ * would never form. `mutualPairs` therefore finds every candidate's
+ * best mirror and keeps only the pairs where each is the other's, so
+ * a midline chain can pair with nothing and the true pairs come out
+ * whatever order the candidates are considered in.
  *
  * Reads no world coordinate: everything here is a rig at the identity.
  */
@@ -97,9 +128,19 @@ export interface LegSpec {
   readonly rank: number;
   /** 0 or 1: which half of the alternating tripod. */
   readonly phase: number;
+  /**
+   * The second bone of the chain — the femur, the joint a foot is
+   * lifted at — or null on a two-bone leg. Its rest, and the axis a
+   * positive turn RAISES the foot about: the leg's own sideways
+   * (rest direction × up), expressed in the femur's parent frame, which
+   * is the coxa's, so the axis rides with the coxa's yaw.
+   */
+  readonly femur: string | null;
+  readonly femurRest: THREE.Quaternion;
+  readonly liftAxis: THREE.Vector3;
 }
 
-/** One wing: the hinge bone, its rest, and the body's up and forward in its parent's frame. */
+/** One wing: the hinge bone, its rest, the body's up and forward in its parent's frame, and where it rests. */
 export interface WingSpec {
   readonly bone: string;
   readonly tip: string;
@@ -107,6 +148,44 @@ export interface WingSpec {
   readonly side: number;
   readonly up: THREE.Vector3;
   readonly forward: THREE.Vector3;
+  /**
+   * The yaw the file baked, radians: atan2(dir.x, −dir.z) of root→tip
+   * in the rig's frame, signed — the fly's ±0.14, the queen's ±1.5. The
+   * poser turns from THIS to the yaw it wants, so a rig baked folded
+   * and one baked spread take the same rule.
+   */
+  readonly restYaw: number;
+  /** 0 fore … counted within its own side, front to back by the root's Z. */
+  readonly rank: number;
+}
+
+/**
+ * One mandible: the jaw's root bone, its rest, and the hinge it opens
+ * about. The hinge is the rig's own — the body's up made perpendicular
+ * to the jaw's rest direction (root→tip), so a jaw that lies in a
+ * tilted plane swings in that plane rather than twisting — expressed
+ * in the root's parent frame. A positive turn about it carries the tip
+ * toward +X, so `side × angle` opens (tips apart) on both sides.
+ */
+export interface JawSpec {
+  readonly bone: string;
+  readonly tip: string;
+  readonly rest: THREE.Quaternion;
+  readonly side: number;
+  readonly hinge: THREE.Vector3;
+}
+
+/**
+ * A trunk joint — the head's first bone off the thorax, or the
+ * gaster's — with the body's up and its X in the joint's parent frame:
+ * a turn is about the up, a nod or a gaster pitch about the X.
+ */
+export interface JointSpec {
+  readonly bone: string;
+  readonly tip: string;
+  readonly rest: THREE.Quaternion;
+  readonly up: THREE.Vector3;
+  readonly x: THREE.Vector3;
 }
 
 /** One antenna: the root bone of the feeler, its rest, and the body's up in its parent's frame. */
@@ -133,6 +212,11 @@ export interface RigAnatomy {
   readonly legs: readonly LegSpec[];
   readonly wings: readonly WingSpec[];
   readonly antennae: readonly AntennaSpec[];
+  /** The jaws, −X first; empty on a rig with no mirrored mouthpart pair (the fly's proboscis is one chain). */
+  readonly mandibles: readonly JawSpec[];
+  /** The head chain's root off the thorax, and the gaster's; null on a chain rig. */
+  readonly head: JointSpec | null;
+  readonly gaster: JointSpec | null;
   readonly chain: ChainSpec | null;
   /** The body length in rig units, measured as the header says. */
   readonly spine: number;
@@ -220,6 +304,19 @@ export function findLegs(root: THREE.Object3D, bones: readonly THREE.Bone[] = bo
     const p = at.get(foot)!;
     const side = p.x >= 0 ? 1 : -1;
     const rank = feet.filter((o) => (at.get(o)!.x >= 0 ? 1 : -1) === side && at.get(o)!.z > p.z).length;
+    // The femur: the coxa's one child, when the chain has one. The lift
+    // axis is the leg's sideways at rest — its horizontal direction from
+    // the femur to the foot, crossed with up — so a positive turn raises
+    // the foot ((d × up) × d = up for a horizontal unit d).
+    const femurBone = boneChildren(coxa)[0];
+    const femur = femurBone !== undefined && femurBone !== foot ? femurBone : null;
+    let liftAxis = new THREE.Vector3(0, 0, side);
+    if (femur !== null) {
+      const d = positionOf(foot, new THREE.Vector3()).sub(positionOf(femur, _v));
+      d.y = 0;
+      if (d.lengthSq() > 1e-12) liftAxis = inParentFrame(femur, root, d.normalize().cross(_v.set(0, 1, 0)));
+      else liftAxis = inParentFrame(femur, root, liftAxis);
+    }
     legs.push({
       coxa: coxa.name,
       tip: foot.name,
@@ -228,6 +325,9 @@ export function findLegs(root: THREE.Object3D, bones: readonly THREE.Bone[] = bo
       side,
       rank,
       phase: ((side === 1 ? 1 : 0) + rank) % 2,
+      femur: femur === null ? null : femur.name,
+      femurRest: femur === null ? new THREE.Quaternion() : femur.quaternion.clone(),
+      liftAxis,
     });
   }
   return legs;
@@ -256,89 +356,229 @@ function mirrorOf(of: THREE.Bone, among: readonly THREE.Bone[], at: (b: THREE.Bo
 }
 
 /**
- * THE WINGS: the mirrored pair of the hub's own children that are not
- * legs and not body — the pair whose tips sit highest. On the housefly
- * that is `Bone_022`/`Bone_024` (tips `Bone_021`/`Bone_023`, the two
- * highest points on the rig, folded back over the abdomen). The aphid's
- * hub has only legs and the two body chains under it, so it has none —
- * and this returns none without being told the species cannot fly.
+ * Every MUTUAL mirrored pair among the candidates — see the header:
+ * each of a pair is the other's best mirror, so a midline chain that
+ * scores within tolerance of one side's feeler cannot take it. Each
+ * pair is returned −X first.
+ */
+function mutualPairs(among: readonly THREE.Bone[], at: (b: THREE.Bone) => THREE.Vector3, width: number, height: number): [THREE.Bone, THREE.Bone][] {
+  const pairs: [THREE.Bone, THREE.Bone][] = [];
+  const taken = new Set<THREE.Bone>();
+  for (const a of among) {
+    if (taken.has(a)) continue;
+    const b = mirrorOf(a, among, at, width, height);
+    if (b === null || taken.has(b) || mirrorOf(b, among, at, width, height) !== a) continue;
+    taken.add(a);
+    taken.add(b);
+    pairs.push(at(a).x < at(b).x ? [a, b] : [b, a]);
+  }
+  return pairs;
+}
+
+/** The sum of a chain's rest offsets from a root to its tip, rig units — how long the limb is. */
+function chainLength(bone: THREE.Bone): number {
+  let sum = 0;
+  let at = bone;
+  for (;;) {
+    const kids = boneChildren(at);
+    if (kids.length !== 1) return sum;
+    sum += kids[0].position.length();
+    at = kids[0];
+  }
+}
+
+/** The bones' bounding box at the identity, and the positions memoised for the finders below. */
+function frameOf(root: THREE.Object3D, bones: readonly THREE.Bone[]): {
+  width: number; height: number; centreX: number; at: (b: THREE.Bone) => THREE.Vector3; tipAt: (b: THREE.Bone) => THREE.Vector3;
+} {
+  root.updateMatrixWorld(true);
+  const box = new THREE.Box3();
+  for (const b of bones) box.expandByPoint(positionOf(b, _v));
+  const pos = new Map<THREE.Bone, THREE.Vector3>();
+  const at = (b: THREE.Bone): THREE.Vector3 => {
+    let p = pos.get(b);
+    if (p === undefined) { p = positionOf(b, new THREE.Vector3()); pos.set(b, p); }
+    return p;
+  };
+  return {
+    width: box.max.x - box.min.x,
+    height: box.max.y - box.min.y,
+    centreX: (box.min.x + box.max.x) / 2,
+    at,
+    tipAt: (b: THREE.Bone): THREE.Vector3 => at(tipOf(b)),
+  };
+}
+
+/** The yaw of a chain from −Z, signed toward +X: atan2(dir.x, −dir.z) of root→tip in the rig's frame. */
+function restYawOf(root: THREE.Bone, at: (b: THREE.Bone) => THREE.Vector3): number {
+  const dir = at(tipOf(root)).clone().sub(at(root));
+  return Math.atan2(dir.x, -dir.z);
+}
+
+/**
+ * THE WINGS: every mirrored pair of the hub's own children that are not
+ * legs, not body, and hang ABOVE the thorax — ranked fore to hind by the
+ * root's Z within each side. On the housefly that is one pair,
+ * `Bone_022`/`Bone_024` (tips `Bone_021`/`Bone_023`, the two highest
+ * points on the rig, folded back over the abdomen). On the queen it is
+ * two: the forewings `Bone_046`/`Bone_049` and the hindwings
+ * `Bone_052`/`Bone_055`, told apart by the 0.13 units the fore roots sit
+ * further forward. The aphid's hub has only legs and the two body chains
+ * under it, so it has none — and this returns none without being told
+ * the species cannot fly.
  */
 export function findWings(root: THREE.Object3D, bones: readonly THREE.Bone[], legs: readonly LegSpec[]): WingSpec[] {
   const hub = hubOf(bones);
   if (hub === null) return [];
-  root.updateMatrixWorld(true);
-  const box = new THREE.Box3();
-  for (const b of bones) box.expandByPoint(positionOf(b, _v));
-  const width = box.max.x - box.min.x;
-  const height = box.max.y - box.min.y;
-  const centreX = (box.min.x + box.max.x) / 2;
+  const { width, height, centreX, at, tipAt } = frameOf(root, bones);
   const coxae = new Set(legs.map((l) => l.coxa));
-  const pos = new Map<THREE.Bone, THREE.Vector3>();
-  const at = (b: THREE.Bone): THREE.Vector3 => {
-    let p = pos.get(b);
-    if (p === undefined) { p = positionOf(b, new THREE.Vector3()); pos.set(b, p); }
-    return p;
-  };
-  const candidates = boneChildren(hub).filter((b) => !coxae.has(b.name) && Math.abs(at(tipOf(b)).x - centreX) > width * MEDIAN_BAND);
+  const hubY = at(hub).y;
+  const candidates = boneChildren(hub).filter((b) =>
+    !coxae.has(b.name) && Math.abs(tipAt(b).x - centreX) > width * MEDIAN_BAND && tipAt(b).y > hubY);
   if (candidates.length < 2) return [];
-  const tipAt = (b: THREE.Bone): THREE.Vector3 => at(tipOf(b));
-  const highest = [...candidates].sort((a, b) => tipAt(b).y - tipAt(a).y)[0];
-  const mirror = mirrorOf(highest, candidates, tipAt, width, height);
-  if (mirror === null) return [];
-  return [highest, mirror].map((bone) => ({
-    bone: bone.name,
-    tip: tipOf(bone).name,
-    rest: bone.quaternion.clone(),
-    side: tipAt(bone).x >= centreX ? 1 : -1,
-    up: inParentFrame(bone, root, _v.set(0, 1, 0)),
-    forward: inParentFrame(bone, root, _v.set(0, 0, 1)),
-  }));
+  const pairs = mutualPairs(candidates, tipAt, width, height);
+  if (pairs.length === 0) return [];
+  // Fore to hind: the pair whose roots sit furthest forward is rank 0.
+  pairs.sort((p, q) => (at(q[0]).z + at(q[1]).z) - (at(p[0]).z + at(p[1]).z));
+  const wings: WingSpec[] = [];
+  pairs.forEach((pair, rank) => {
+    for (const bone of pair) {
+      wings.push({
+        bone: bone.name,
+        tip: tipOf(bone).name,
+        rest: bone.quaternion.clone(),
+        side: tipAt(bone).x >= centreX ? 1 : -1,
+        up: inParentFrame(bone, root, _v.set(0, 1, 0)),
+        forward: inParentFrame(bone, root, _v.set(0, 0, 1)),
+        restYaw: restYawOf(bone, at),
+        rank,
+      });
+    }
+  });
+  return wings;
 }
 
-/**
- * THE ANTENNAE: on a secondary hub — the head, where the feelers and
- * mouthparts join — the mirrored pair with the highest tips. The aphid's
- * head hub `Bone_005` carries three low mouthpart chains and two high
- * feelers (`Bone_051`/`Bone_056`); the housefly's `Bone_002` carries the
- * proboscis and two short feelers (`Bone_050`/`Bone_052`). A rig with no
- * second hub has none.
- */
-export function findAntennae(root: THREE.Object3D, bones: readonly THREE.Bone[], legs: readonly LegSpec[]): AntennaSpec[] {
+/** The secondary hubs' mirrored pairs — every hub but the thorax, every child chain that is not a leg. */
+function headPairs(root: THREE.Object3D, bones: readonly THREE.Bone[], legs: readonly LegSpec[]): { pairs: [THREE.Bone, THREE.Bone][]; frame: ReturnType<typeof frameOf> } {
   const main = hubOf(bones);
-  root.updateMatrixWorld(true);
-  const box = new THREE.Box3();
-  for (const b of bones) box.expandByPoint(positionOf(b, _v));
-  const width = box.max.x - box.min.x;
-  const height = box.max.y - box.min.y;
+  const frame = frameOf(root, bones);
   const tips = new Set(legs.map((l) => l.tip));
-  const pos = new Map<THREE.Bone, THREE.Vector3>();
-  const at = (b: THREE.Bone): THREE.Vector3 => {
-    let p = pos.get(b);
-    if (p === undefined) { p = positionOf(b, new THREE.Vector3()); pos.set(b, p); }
-    return p;
-  };
-  const tipAt = (b: THREE.Bone): THREE.Vector3 => at(tipOf(b));
-  let found: AntennaSpec[] = [];
-  let best = -Infinity;
+  const pairs: [THREE.Bone, THREE.Bone][] = [];
   for (const hub of bones) {
     if (hub === main) continue;
     const kids = boneChildren(hub).filter((b) => !tips.has(tipOf(b).name));
     if (kids.length < 2) continue;
-    const highest = [...kids].sort((a, b) => tipAt(b).y - tipAt(a).y)[0];
-    const mirror = mirrorOf(highest, kids, tipAt, width, height);
-    if (mirror === null) continue;
-    const y = tipAt(highest).y;
-    if (y <= best) continue;
-    best = y;
-    found = [highest, mirror].map((bone) => ({
+    for (const pair of mutualPairs(kids, frame.tipAt, frame.width, frame.height)) pairs.push(pair);
+  }
+  return { pairs, frame };
+}
+
+/**
+ * THE ANTENNAE: on the secondary hubs — the head, where the feelers and
+ * mouthparts join — the LONGEST mirrored pair by rest length. The
+ * aphid's head hub `Bone_005` carries three short mouthpart chains and
+ * two long feelers (`Bone_051`/`Bone_056`); the housefly's `Bone_002`
+ * the proboscis and two short feelers (`Bone_050`/`Bone_052`); the
+ * queen's `Bone_002` two mandibles and two antennae (`Bone_068`/
+ * `Bone_073`); the worker's `Bone_002` the face chain and two antennae
+ * (`Bone_050`/`Bone_054`), its mandibles a level down on the face
+ * `Bone_045`. Length separates every one of them where height did not
+ * — see the header. A rig with no second hub has none.
+ */
+export function findAntennae(root: THREE.Object3D, bones: readonly THREE.Bone[], legs: readonly LegSpec[]): AntennaSpec[] {
+  const { pairs, frame } = headPairs(root, bones, legs);
+  let best: [THREE.Bone, THREE.Bone] | null = null;
+  let longest = -Infinity;
+  for (const pair of pairs) {
+    const length = Math.min(chainLength(pair[0]), chainLength(pair[1]));
+    if (length > longest) { longest = length; best = pair; }
+  }
+  if (best === null) return [];
+  return best.map((bone) => ({
+    bone: bone.name,
+    tip: tipOf(bone).name,
+    rest: bone.quaternion.clone(),
+    side: frame.tipAt(bone).x >= 0 ? 1 : -1,
+    up: inParentFrame(bone, root, _v.set(0, 1, 0)),
+  }));
+}
+
+/**
+ * THE MANDIBLES: on the secondary hubs, the mirrored pair that is not
+ * the antennae and whose tips reach furthest FORWARD — the jaws are at
+ * the very front of the head on both ants (queen `Bone_059`/`Bone_063`
+ * off the head `Bone_002`; worker `Bone_057`/`Bone_060` off the face
+ * `Bone_045`). The housefly has none: its proboscis is one midline
+ * chain, and a chain with no mutual mirror is not a pair. The aphid's
+ * head carries a short mirrored labial pair (`Bone_043`/`Bone_046`,
+ * tips 0.16 units apart) which this returns — an aphid works its
+ * mouthparts when it feeds and never bites, and the poser's feed
+ * strokes and idle twitch are all it will ever be asked for.
+ *
+ * The hinge is read from the jaw's own rest: the body's up made
+ * perpendicular to the chain's rest direction, so the tip swings in the
+ * plane the jaw lies in. Expressed in the root's parent frame, as every
+ * axis here is.
+ */
+export function findMandibles(root: THREE.Object3D, bones: readonly THREE.Bone[], legs: readonly LegSpec[], antennae: readonly AntennaSpec[]): JawSpec[] {
+  const { pairs, frame } = headPairs(root, bones, legs);
+  const feelers = new Set(antennae.map((a) => a.bone));
+  let best: [THREE.Bone, THREE.Bone] | null = null;
+  let front = -Infinity;
+  for (const pair of pairs) {
+    if (feelers.has(pair[0].name) || feelers.has(pair[1].name)) continue;
+    const z = frame.tipAt(pair[0]).z + frame.tipAt(pair[1]).z;
+    if (z > front) { front = z; best = pair; }
+  }
+  if (best === null) return [];
+  return best.map((bone) => {
+    const dir = frame.tipAt(bone).clone().sub(frame.at(bone)).normalize();
+    const hinge = new THREE.Vector3(0, 1, 0).addScaledVector(dir, -dir.y);
+    if (hinge.lengthSq() < 1e-9) hinge.set(0, 1, 0);
+    return {
       bone: bone.name,
       tip: tipOf(bone).name,
       rest: bone.quaternion.clone(),
-      side: tipAt(bone).x >= 0 ? 1 : -1,
-      up: inParentFrame(bone, root, _v.set(0, 1, 0)),
-    }));
-  }
-  return found;
+      side: frame.tipAt(bone).x >= 0 ? 1 : -1,
+      hinge: inParentFrame(bone, root, hinge.normalize()),
+    };
+  });
+}
+
+/** A trunk joint from its root bone. */
+function jointOf(root: THREE.Object3D, bone: THREE.Bone): JointSpec {
+  return {
+    bone: bone.name,
+    tip: tipOf(bone).name,
+    rest: bone.quaternion.clone(),
+    up: inParentFrame(bone, root, _v.set(0, 1, 0)),
+    x: inParentFrame(bone, root, _v.set(1, 0, 0)),
+  };
+}
+
+/**
+ * THE HEAD AND THE GASTER: of the thorax hub's children that lie in the
+ * median band and are not legs, the chain whose tip reaches furthest
+ * forward is the head's (queen and worker `Bone_004`, fly `Bone_004`,
+ * aphid `Bone_007`) and the one reaching furthest back is the gaster's
+ * (queen `Bone_007`, worker `Bone_008`, fly `Bone_008`, aphid
+ * `Bone_004`). Each must actually lie on its side of the hub, or a rig
+ * with one body chain reports only what it has. Null on a chain rig.
+ */
+export function findTrunk(root: THREE.Object3D, bones: readonly THREE.Bone[], legs: readonly LegSpec[]): { head: JointSpec | null; gaster: JointSpec | null } {
+  const hub = hubOf(bones);
+  if (hub === null) return { head: null, gaster: null };
+  const { width, centreX, at, tipAt } = frameOf(root, bones);
+  const coxae = new Set(legs.map((l) => l.coxa));
+  const trunk = boneChildren(hub).filter((b) => !coxae.has(b.name) && Math.abs(tipAt(b).x - centreX) <= width * MEDIAN_BAND);
+  if (trunk.length === 0) return { head: null, gaster: null };
+  const hubZ = at(hub).z;
+  const sorted = [...trunk].sort((a, b) => tipAt(b).z - tipAt(a).z);
+  const fore = sorted[0];
+  const aft = sorted[sorted.length - 1];
+  const head = tipAt(fore).z > hubZ ? jointOf(root, fore) : null;
+  const gaster = aft !== fore && tipAt(aft).z < hubZ ? jointOf(root, aft) : null;
+  return { head, gaster };
 }
 
 /**
@@ -434,6 +674,8 @@ export function measureRig(root: THREE.Object3D, chainNames: readonly string[] |
   const legs = findLegs(root, bones);
   const wings = findWings(root, bones, legs);
   const antennae = findAntennae(root, bones, legs);
+  const mandibles = findMandibles(root, bones, legs, antennae);
+  const { head, gaster } = findTrunk(root, bones, legs);
   const box = rigBox(root, bones);
   let chain: ChainSpec | null = null;
   if (chainNames !== null) {
@@ -454,7 +696,7 @@ export function measureRig(root: THREE.Object3D, chainNames: readonly string[] |
       chain = { bones: ordered.map((b) => b.name), dirs, lengths, lift: Math.max(0, meanY - box.min.y) };
     }
   }
-  return { legs, wings, antennae, chain, spine: measureSpine(root, chainNames, bones), box, triangles: trianglesOf(root) };
+  return { legs, wings, antennae, mandibles, head, gaster, chain, spine: measureSpine(root, chainNames, bones), box, triangles: trianglesOf(root) };
 }
 
 /**
@@ -483,6 +725,13 @@ export function dressRig(
       for (const slot of drop) {
         const texture = std[slot];
         if (texture !== null && texture !== std.map) texture.dispose();
+        // THE WORKER GLOWED WHITE. `worker.glb` carries `emissiveFactor
+        // [1,1,1]` behind a BLACK emissive map — three renders factor ×
+        // map, so the file is dark as exported — and dropping the map
+        // while leaving the factor lit the whole ant as a flat white
+        // light (rigs.md §7.2). A map that goes takes its factor with it;
+        // a material with a colour and no map keeps what it declared.
+        if (slot === 'emissiveMap' && texture !== null) std.emissive.setScalar(0);
         std[slot] = null;
       }
       std.roughness = roughness;

@@ -31,7 +31,8 @@ export {
   walk,
 } from './locomotion';
 export type { Locomotion } from './locomotion';
-export { applyDemand, demandOf } from './demand';
+export { applyDemand, demandOf, newMutableIntent, playerDemand, wordFor } from './demand';
+export type { MutableIntent } from './demand';
 export { ControlLedger } from './control';
 export type { ControlAuthority, Possession } from './control';
 export {
@@ -47,4 +48,12 @@ export {
 } from './finder';
 export type { FinderSighting, SightingOptions, Viewpoint, ViewpointOptions } from './finder';
 export { CELLS_PER_UPDATE, CreatureSim, EVICT_BEYOND, NEAR_STEP_S } from './CreatureSim';
-export type { CreatureSimOptions } from './CreatureSim';
+export type { CreatureSimCost, CreatureSimCounts, CreatureSimOptions } from './CreatureSim';
+// --- B2: the ground brain, the predation policy, containment, and the three species' researched behaviour (intent.ts, world.ts) ---
+export type { CreaturePolicy, DisturbanceSource, PredationPolicy } from './world';
+export {
+  CARBOHYDRATE_OR_DRINK, DROP_CHANCE_DEFAULT, GROUND_FORAGE_LENGTHS, GROUND_HOME_RANGE, HOST_FLEE_LENGTHS, HOST_FLEE_WALK_MM, LOOM,
+  PROTEIN_AT, PROTEIN_OR_DRINK, SEVERE_ALARM_FRACTION, TAKEOFF_WIND_MAX,
+  beginTakeoff, contactMmOf, containTarget, creatureById, digDiscountOf, digPaceFactor, dropChanceOf, homeOf, isPredator,
+  nearestDisturbance, nearestDisturbanceGap, nearestHostInSight, nearestPrey, predationOf, preyOf, takeoffWeatherAllows,
+} from './intent';

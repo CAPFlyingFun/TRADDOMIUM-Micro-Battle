@@ -74,6 +74,21 @@
  * not read here at all: they are the species' to interpret, and a body
  * does not move on a toggle.
  *
+ * WHERE THE SPECIES INTERPRETS THEM (the Lab's possession, 2026-09-09).
+ * Two helpers at the foot of this file are the player's half of the
+ * sentence in the header, beside the AI's `demandOf`:
+ *
+ *   playerDemand(state, species, intent, world, out) → Intent   the toggles read
+ *   wordFor(state, species, intent, world)           → Behaviour the word for it
+ *
+ * `playerDemand` folds the toggles that ARE movement into the axes — a
+ * plant body's `secondary` is a drop, a winged body's aloft is a
+ * descent — and `wordFor` derives the behaviour WORD a possessed body
+ * is in from the request and where it stands, so a renderer that
+ * animates by the word sees a walking ant walk and the needs tick as
+ * they do for the AI. Neither moves anything: the body is still moved
+ * by `applyDemand`, once, whoever asked.
+ *
  * THE FLOOR A FLIER MEASURES FROM IS THE SURFACE UNDER IT (Joshua,
  * 2026-09-08, from the beach with the finder on: "it looks like the
  * flies are underwater still... do they have a ceiling on the fly that's
@@ -127,11 +142,13 @@
  * net/ already reach for — and nothing else of input/.
  */
 import { clampAxis, NEUTRAL_INTENT, type Intent } from '../input/Intent';
-import { distance, translate, type WorldPoint } from '../world/coords';
+import { distance, distanceSquared, translate, type WorldPoint } from '../world/coords';
+import type { PlantSource, ResourceKind } from '../world/ecology/resources';
 import { SEA_LEVEL } from '../world/heightfield';
+import { CELL_SPAN } from '../world/objects/cells';
 import { ahead, headingToward, wrapHeading } from './heading';
 import { paceRatio, sizeRatio, unitsOfMm, type CreatureSpecies } from './species';
-import type { Behaviour, CreatureState } from './state';
+import { behaviourAllowedFor, type Behaviour, type CreatureState } from './state';
 import type { CreatureWorld } from './world';
 
 // ---------------------------------------------------------------------------
@@ -201,8 +218,10 @@ export function paceOf(state: CreatureState, species: CreatureSpecies): number {
     case 'attack':
       return ratio * unitsOfMm(species.pace.fleeMmS);
     case 'wander':
-    case 'burrow':
       return ratio * unitsOfMm(species.pace.wanderMmS);
+    case 'burrow':
+      // Digging: the crawl over the dig discount (`digFactor`). The word is the whole distinction.
+      return digFactor(state, species, 'burrow') * ratio * unitsOfMm(species.pace.wanderMmS);
     case 'feed':
       return state.target === null ? 0 : ratio * unitsOfMm(species.pace.wanderMmS);
     default:
@@ -297,7 +316,33 @@ function wayOf(species: CreatureSpecies, how: Locomotion): Locomotion {
  */
 function planePace(state: CreatureState, species: CreatureSpecies, how: Locomotion, sprint: boolean): number {
   if (how === 'fly' && species.flight !== null) return unitsOfMm(sprint ? species.flight.burstMmS : species.flight.cruiseMmS);
-  return paceRatio(state, species) * unitsOfMm(sprint ? species.pace.fleeMmS : species.pace.wanderMmS);
+  return digFactor(state, species, how) * paceRatio(state, species) * unitsOfMm(sprint ? species.pace.fleeMmS : species.pace.wanderMmS);
+}
+
+/**
+ * NEW GROUND IS SLOW. A worm travelling an existing burrow, or crawling
+ * on the surface, moves at its crawl; a worm DIGGING moves at the crawl
+ * over the species' `burrow.digDiscount` — measured at 30-75x for
+ * Lumbricus (Ruiz et al. 2015, 2017), set by the table (5, GAME TUNING,
+ * the reason written beside it: a 1 m bench would otherwise show a worm
+ * that never moves). The worm has no memory of its burrows yet, so the
+ * WORD is the whole distinction: 'burrow' is digging, everything else in
+ * the soil is travel. Every other species and every other way is 1.
+ */
+function digFactor(state: CreatureState, species: CreatureSpecies, how: Locomotion): number {
+  if (how !== 'burrow' || species.burrow === null || state.behaviour !== 'burrow') return 1;
+  const discount = species.burrow.digDiscount;
+  return discount !== undefined && discount >= 1 ? 1 / discount : 1;
+}
+
+/**
+ * THE TURN RATE OF A WAY: the flier's in the air (`flight.turnRadSAir` —
+ * a fly's saccade, a queen's wind-steered arc), the body's own
+ * everywhere else. One rule for the request's saturation and for the
+ * step that honours it, so the AI's demand and the integrator agree.
+ */
+function turnRateOf(species: CreatureSpecies, how: Locomotion): number {
+  return how === 'fly' && species.flight !== null ? species.flight.turnRadSAir : species.pace.turnRadS;
 }
 
 /**
@@ -434,7 +479,7 @@ export function demandOf(
   if (target === null) {
     forward = pace > 0 ? 1 : 0;
   } else if (Number.isFinite(target.wx) && Number.isFinite(target.wz)) {
-    const maxTurn = species.pace.turnRadS * dt;
+    const maxTurn = turnRateOf(species, way) * dt;
     turn = saturate(wrapHeading(headingToward(state.at, target) - state.heading) / maxTurn);
     forward = pace > 0 && distance(state.at, target) > 0 ? 1 : 0;
   }
@@ -442,7 +487,7 @@ export function demandOf(
   // The vertical is measured where the body will LAND (the header): the
   // same turn and the same step the body's half is about to take.
   let vertical = 0;
-  const heading = turn !== 0 ? wrapHeading(state.heading + turn * species.pace.turnRadS * dt) : state.heading;
+  const heading = turn !== 0 ? wrapHeading(state.heading + turn * turnRateOf(species, way) * dt) : state.heading;
   const landing = forward > 0 ? planeStep(state, species, heading, forward, 0, pace * dt) : state.at;
   const wanted = wantedHeight(state, species, world, way, landing);
   if (Number.isFinite(wanted)) {
@@ -494,7 +539,7 @@ export function applyDemand(
   const sprint = intent.sprint === true;
 
   // THE TURN, a rate and not an ease (the header).
-  if (turn !== 0) state.heading = wrapHeading(state.heading + turn * species.pace.turnRadS * dt);
+  if (turn !== 0) state.heading = wrapHeading(state.heading + turn * turnRateOf(species, way) * dt);
 
   // THE STEP ON THE PLANE.
   let moved = 0;
@@ -545,4 +590,243 @@ export function applyDemand(
   }
   state.pitch = pitchOf(state.height - before, moved);
   return moved;
+}
+
+// ---------------------------------------------------------------------------
+// The player's half: what the species reads into a demand, and the word for it
+// ---------------------------------------------------------------------------
+
+/**
+ * A demand a caller may write into — the seven fields, none optional and
+ * none readonly — so `playerDemand` can fill one the caller keeps and a
+ * frame allocates nothing. Assignable to `Intent`.
+ */
+export interface MutableIntent {
+  forward: number;
+  strafe: number;
+  turn: number;
+  sprint: boolean;
+  vertical: number;
+  primary: boolean;
+  secondary: boolean;
+}
+
+/** A neutral demand to write into: what a simulation makes once and keeps. */
+export function newMutableIntent(): MutableIntent {
+  return { forward: 0, strafe: 0, turn: 0, sprint: false, vertical: 0, primary: false, secondary: false };
+}
+
+/** Above the ground by more than this, a winged body is in the air, world units: a float's noise, not a height. */
+const AIRBORNE_EPSILON = 1e-9;
+
+/**
+ * Is a winged body standing on the ground? It reads the GROUND and not
+ * the floor: a fly held at a pond's surface by `applyDemand`'s clamp is
+ * over the water and stays in the air's way of moving, which is what
+ * keeps it from being walked onto the bed. A ground the world cannot
+ * price falls back to the word it is in.
+ */
+function grounded(state: CreatureState, world: CreatureWorld): boolean {
+  const ground = world.groundAt(state.at);
+  if (!Number.isFinite(ground)) return !isAirborne(state.behaviour);
+  return state.height <= ground + AIRBORNE_EPSILON;
+}
+
+/** On its host: within the plant's own size of the plant's foot, which is as far as a stem or a leaf reaches. Nothing with no host. */
+function onHost(state: CreatureState, host: PlantSource | null): boolean {
+  if (host === null) return false;
+  const reach = Math.max(0, host.size);
+  return distanceSquared(state.at, host.at) <= reach * reach;
+}
+
+/**
+ * Is a resource site of one of `kinds` within `radius` of `at`? The
+ * cells the circle touches, scanned the way the brain's `nearestSite`
+ * scans them — but a yes or a no, so nothing is allocated, and nothing
+ * here imports the brain: the brain imports the legs and the legs
+ * import this file, and a third edge would close the cycle the header
+ * says this file exists to avoid.
+ */
+function siteWithin(world: CreatureWorld, at: WorldPoint, kinds: readonly ResourceKind[], radius: number): boolean {
+  if (kinds.length === 0 || !(radius > 0)) return false;
+  const cx0 = Math.floor((at.wx - radius) / CELL_SPAN);
+  const cx1 = Math.floor((at.wx + radius) / CELL_SPAN);
+  const cz0 = Math.floor((at.wz - radius) / CELL_SPAN);
+  const cz1 = Math.floor((at.wz + radius) / CELL_SPAN);
+  const r2 = radius * radius;
+  for (let cz = cz0; cz <= cz1; cz += 1) {
+    for (let cx = cx0; cx <= cx1; cx += 1) {
+      const cell = world.resourcesOf(cx, cz);
+      if (cell === null) continue;
+      const sites = cell.sites;
+      for (let i = 0; i < sites.length; i += 1) {
+        const site = sites[i];
+        if (kinds.includes(site.kind) && distanceSquared(at, site.at) <= r2) return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Is there something to eat where it stands? On its host plant, or
+ * within a body length of a site of a kind it eats — the "already on
+ * it" the brains use when they choose `feed`, so a possessed worker
+ * feeds exactly where its AI would have.
+ */
+function atFood(state: CreatureState, species: CreatureSpecies, world: CreatureWorld, host: PlantSource | null): boolean {
+  if (onHost(state, host)) return true;
+  return siteWithin(world, state.at, species.needs.eats, bodyLength(state, species));
+}
+
+/** Still: idle, or rest when the body is tired — the fatigue bar's way back (`wordFor`). */
+function restOrIdle(state: CreatureState, species: CreatureSpecies): Behaviour {
+  return state.fatigue >= species.needs.restAt ? 'rest' : 'idle';
+}
+
+/**
+ * THE PLAYER'S DEMAND AS THE BODY IS MOVED BY IT. `applyDemand` reads the
+ * axes and not the toggles — "a body does not move on a toggle" — and
+ * `input/Intent.ts` says the toggles' MEANING is the species' to decide.
+ * This is where the species decides it, for the two toggles that ARE
+ * movement, and for the one thing a plant body does with no request:
+ *
+ *   secondary, a plant body           → vertical −1: the drop. With the
+ *                                       word `flee` (`wordFor`) the fall
+ *                                       is at gravity's rate (`DROP_MM_S`);
+ *                                       the Lab's aphid controls say
+ *                                       "DROP / EVADE" (the brief, §21).
+ *   secondary, a winged body aloft    → vertical −1: come down to land.
+ *   no vertical, a plant body OFF its → vertical −1: there is nothing
+ *   host                                under it but the ground, so it
+ *                                       comes down at its own climbing
+ *                                       pace. On its host it holds its
+ *                                       height, as the AI's does — the
+ *                                       plant is not a surface yet, and
+ *                                       the height on a stem is a
+ *                                       remembered one.
+ *
+ * Everything else is copied through, bounded axis by axis (`clampAxis`)
+ * and with an absent toggle read as not held, so what comes out is a
+ * complete request whatever the producer left out. Written into `out`,
+ * which the caller keeps, and returned: one object a frame, and the
+ * simulation keeps exactly one. `primary` is copied and never read here:
+ * feeding is a word (`wordFor`), and a word is not a movement.
+ */
+export function playerDemand(
+  state: CreatureState,
+  species: CreatureSpecies,
+  intent: Intent,
+  world: CreatureWorld,
+  out: MutableIntent,
+  host: PlantSource | null = null,
+): Intent {
+  out.forward = clampAxis(intent.forward);
+  out.strafe = clampAxis(intent.strafe);
+  out.turn = clampAxis(intent.turn);
+  out.sprint = intent.sprint === true;
+  out.primary = intent.primary === true;
+  out.secondary = intent.secondary === true;
+  let vertical = clampAxis(intent.vertical);
+  if (species.medium === 'plant') {
+    if (out.secondary) vertical = -1;
+    else if (vertical === 0 && !onHost(state, host)) vertical = -1;
+  } else if (out.secondary && species.flight !== null && !grounded(state, world)) {
+    vertical = -1;
+  }
+  out.vertical = vertical;
+  return out;
+}
+
+/**
+ * THE WORD FOR A DEMAND — what a possessed body is DOING, so a renderer
+ * that animates by the word (`fauna/`) sees a walking ant walk and a
+ * landing fly land, and so the needs tick as they do for the AI (a
+ * `feed` brings hunger down, a moving word tires). The brain is not
+ * driving a possessed body and writes no word; this derives one from
+ * the request and where the body stands, every frame, and every word is
+ * one the species may use — a demand that produced another throws here
+ * as the brain throws, because a worm in the air is a bug and not a
+ * state (`tests/creaturePossession.test.ts` holds it for every species at
+ * every corner of the intent).
+ *
+ * In order, per medium — the first rule that fits is the word:
+ *
+ *   soil    vertical down → `burrow`; up → `surface`; primary at litter,
+ *           standing → `feed`; sprint and moving → `flee`; UP AT THE
+ *           SURFACE (above the band's top) → `surface`, moving or not,
+ *           because `surface` and `feed` are the words that hold a soil
+ *           body up (`applyDemand`) and any other would pull it back
+ *           under; moving → `burrow`; still → `idle`, or `rest`.
+ *   winged  aloft (above the GROUND — `grounded`): descending, or
+ *           secondary → `land`; moving or climbing → `fly`; still →
+ *           `hover`. On the ground: vertical up → `takeoff`; else the
+ *           ground's words below.
+ *   ground, primary at food, standing → `feed`; a plant body's secondary
+ *   plant   → `flee` (the drop); sprint and moving → `flee`; moving —
+ *           a turn in place is moving, the legs are — → `wander`; still
+ *           → `idle`, or `rest`.
+ *
+ * REST IS THE WAY BACK. Fatigue climbs on every moving word and comes
+ * down only on `rest`, and a bar may only move if there is a way to move
+ * it back (CLAUDE.md): a still body whose fatigue has reached the
+ * species' `restAt` rests, and reads idle again once it has not. That is
+ * the one word here the request did not ask for, and the one the brief's
+ * list (still → idle) does not name — flagged as such.
+ *
+ * Feeding needs the body STILL: a walk across the food is a walk, and a
+ * renderer working the mandibles on `feed` should not be doing it at
+ * walking pace. `host` is the plant a plant body sits on when the caller
+ * has it (the simulation caches it); null says none, or not known.
+ */
+export function wordFor(
+  state: CreatureState,
+  species: CreatureSpecies,
+  intent: Intent,
+  world: CreatureWorld,
+  host: PlantSource | null = null,
+): Behaviour {
+  const word = wordOf(state, species, intent, world, host);
+  if (!behaviourAllowedFor(species, word)) {
+    throw new Error(`creatures/demand: ${species.id} (${species.medium}) was asked for "${word}", which its medium does not allow`);
+  }
+  return word;
+}
+
+function wordOf(state: CreatureState, species: CreatureSpecies, intent: Intent, world: CreatureWorld, host: PlantSource | null): Behaviour {
+  const forward = clampAxis(intent.forward);
+  const strafe = clampAxis(intent.strafe);
+  const turn = clampAxis(intent.turn);
+  const vertical = clampAxis(intent.vertical);
+  const sprint = intent.sprint === true;
+  const primary = intent.primary === true;
+  const secondary = intent.secondary === true;
+  const moving = forward !== 0 || strafe !== 0 || turn !== 0;
+
+  const burrow = species.burrow;
+  if (species.medium === 'soil' && burrow !== null) {
+    if (vertical < 0) return 'burrow';
+    if (vertical > 0) return 'surface';
+    if (primary && !moving && atFood(state, species, world, host)) return 'feed';
+    if (sprint && moving) return 'flee';
+    const ground = world.groundAt(state.at);
+    if (Number.isFinite(ground) && state.height > ground - unitsOfMm(burrow.boreMm) / 2) return 'surface';
+    if (moving) return 'burrow';
+    return restOrIdle(state, species);
+  }
+
+  if (species.flight !== null) {
+    if (!grounded(state, world)) {
+      if (vertical < 0 || secondary) return 'land';
+      if (moving || vertical > 0) return 'fly';
+      return 'hover';
+    }
+    if (vertical > 0) return 'takeoff';
+  }
+
+  if (primary && !moving && atFood(state, species, world, host)) return 'feed';
+  if (species.medium === 'plant' && secondary) return 'flee';
+  if (sprint && moving) return 'flee';
+  if (moving) return 'wander';
+  return restOrIdle(state, species);
 }
