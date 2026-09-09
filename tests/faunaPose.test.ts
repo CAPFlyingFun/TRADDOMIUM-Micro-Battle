@@ -14,12 +14,19 @@
  *   on the synthetic legged rig the tripod is real: a mirrored pair's
  *     feet move in OPPOSITE directions and a tripod's three together,
  *     and a swinging foot lifts off the ground
+ *   THE ROOT'S FRAME IS (UP, HEADING): on the ground the quaternion is
+ *     the old `Euler(−pitch, heading, bank, 'YXZ')` to 1e-12, on a wall
+ *     local +Y is the wall's normal and local +Z the heading carried
+ *     onto it, the attitude is a local turn, the drawn up eases onto a
+ *     new up within a second and settles exactly, and a half turn
+ *     (a takeoff from the ceiling) is a turn and not a snap
  */
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
-import { STRIDE_LENGTHS } from '../src/fauna/gait';
+import { FACE_NORMALS, WORLD_UP, aheadOn, rotateBetween, vec3, type MutableVec3 } from '../src/creatures';
 import {
-  JAW_FEED, JAW_OPEN, JAW_TWITCH, LEG_LIFT, newMotion, poseGaster, poseHead, poseJaws, poseLegs, resetMotion, stepMotion,
+  JAW_FEED, JAW_OPEN, JAW_TWITCH, LEG_LIFT, UP_EASE_S, UP_SETTLED, drawnAhead, easeUp, newMotion, poseGaster, poseHead, poseJaws,
+  poseLegs, resetMotion, rootQuaternion, stepMotion,
   type BoundJaw, type BoundJoint, type BoundLeg, type RigMotion,
 } from '../src/fauna/motion';
 import { bonesOf, findLegs, findTrunk, measureRig, type JawSpec } from '../src/fauna/rig';
@@ -306,12 +313,14 @@ describe('the tripod on a rig', () => {
     const m = newMotion();
     m.moving = 1;
     const body = 3.9;
-    // The forward station of each foot (z relative to its rest) over one stride, sampled.
+    // The forward station of each foot (z relative to its rest) over one
+    // stride, sampled. The legs read the STRIDE COUNT the view keeps
+    // (`RigMotion.strides`), not the raw distance.
     const stations = new Map<string, number[]>();
     const heights = new Map<string, number[]>();
     const steps = 40;
     for (let k = 0; k < steps; k += 1) {
-      m.gone = (k / steps) * STRIDE_LENGTHS * body;
+      m.strides = k / steps;
       poseLegs(legs, m, body, 0);
       for (const l of legs) {
         const p = footAt(root, l.spec.tip);
@@ -348,7 +357,7 @@ describe('the tripod on a rig', () => {
     expect(LEG_LIFT).toBeGreaterThan(0);
     // Standing: the stride contributes nothing; the feet are within the stir of their rest.
     m.moving = 0;
-    m.gone = 0.123 * body;
+    m.strides = 0.123;
     poseLegs(legs, m, body, 0);
     for (const l of legs) {
       expect(footAt(root, l.spec.tip).distanceTo(rest.get(l.spec.tip)!)).toBeLessThan(0.05);
@@ -380,5 +389,180 @@ describe('the head and the gaster', () => {
     const back = new THREE.Vector3(0, 0, -1).applyQuaternion(g.bone.quaternion);
     expect(back.y).toBeLessThan(-0.1);
     expect(g.bone.quaternion.angleTo(g.spec.rest)).toBeLessThan(0.5);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The root's frame
+// ---------------------------------------------------------------------------
+
+const HEADINGS = [0, 0.3, -1.1, Math.PI / 2, -Math.PI / 2, 2.9, Math.PI, -2.2, 3.1];
+const PITCHES = [0, 0.25, -0.4, 0.6];
+const BANKS = [0, 0.3, -0.7];
+
+function v(): MutableVec3 {
+  return { x: 0, y: 0, z: 0 };
+}
+
+/** Two quaternions the same rotation: the same components once the sign is aligned. */
+function sameRotation(a: THREE.Quaternion, b: THREE.Quaternion, digits: number): void {
+  const sign = a.dot(b) < 0 ? -1 : 1;
+  expect(a.x).toBeCloseTo(sign * b.x, digits);
+  expect(a.y).toBeCloseTo(sign * b.y, digits);
+  expect(a.z).toBeCloseTo(sign * b.z, digits);
+  expect(a.w).toBeCloseTo(sign * b.w, digits);
+}
+
+describe('the root\'s frame', () => {
+  it('ON THE GROUND is the old Euler(−pitch, heading, bank, YXZ) to 1e-12, for every heading, pitch and bank', () => {
+    const q = new THREE.Quaternion();
+    const old = new THREE.Quaternion();
+    const euler = new THREE.Euler(0, 0, 0, 'YXZ');
+    for (const h of HEADINGS) for (const p of PITCHES) for (const b of BANKS) {
+      const ahead = drawnAhead(WORLD_UP, h, WORLD_UP, v());
+      rootQuaternion(WORLD_UP, ahead, p, b, q);
+      old.setFromEuler(euler.set(-p, h, b, 'YXZ'));
+      sameRotation(q, old, 12);
+    }
+    // And the ahead on the ground is the actor convention TO THE BIT: nothing was carried.
+    for (const h of HEADINGS) {
+      const a = drawnAhead(WORLD_UP, h, WORLD_UP, v());
+      expect(a.x).toBe(Math.sin(h));
+      expect(a.y).toBe(0);
+      expect(a.z).toBe(Math.cos(h));
+      // The same numbers in a different object are the same up.
+      const b = drawnAhead(WORLD_UP, h, vec3(0, 1, 0), v());
+      expect(b.x).toBe(a.x);
+      expect(b.z).toBe(a.z);
+    }
+  });
+
+  it('ON A WALL maps local +Y to the wall\'s normal and local +Z to the heading carried onto it, +X to the left', () => {
+    const q = new THREE.Quaternion();
+    for (const up of FACE_NORMALS) {
+      for (const h of HEADINGS) {
+        const ahead = aheadOn(up, h, v());
+        rootQuaternion(up, ahead, 0, 0, q);
+        const y = new THREE.Vector3(0, 1, 0).applyQuaternion(q);
+        const z = new THREE.Vector3(0, 0, 1).applyQuaternion(q);
+        const x = new THREE.Vector3(1, 0, 0).applyQuaternion(q);
+        expect(y.x).toBeCloseTo(up.x, 12); expect(y.y).toBeCloseTo(up.y, 12); expect(y.z).toBeCloseTo(up.z, 12);
+        expect(z.x).toBeCloseTo(ahead.x, 12); expect(z.y).toBeCloseTo(ahead.y, 12); expect(z.z).toBeCloseTo(ahead.z, 12);
+        // Left is up × ahead: on the ground, (cos h, 0, −sin h) — the mirror of `rightOn`.
+        const left = new THREE.Vector3(up.x, up.y, up.z).cross(new THREE.Vector3(ahead.x, ahead.y, ahead.z));
+        expect(x.distanceTo(left)).toBeLessThan(1e-12);
+        // A right-handed, unit frame: a rotation and never a reflection.
+        expect(x.clone().cross(y).distanceTo(z)).toBeLessThan(1e-12);
+      }
+    }
+    // The east wall, heading 0: the body's ahead is the ground's +z carried onto +x's face — straight up the wall.
+    const east = FACE_NORMALS[0];
+    const ahead = aheadOn(east, 0, v());
+    expect(ahead.x).toBeCloseTo(0, 12);
+    expect(ahead.z).toBeCloseTo(1, 12);
+  });
+
+  it('applies the attitude as LOCAL turns: nose up tilts the ahead toward the body\'s up on the wall as on the ground', () => {
+    const q = new THREE.Quaternion();
+    for (const up of [WORLD_UP, FACE_NORMALS[0], FACE_NORMALS[3], FACE_NORMALS[5]]) {
+      for (const h of HEADINGS) {
+        const ahead = aheadOn(up, h, v());
+        for (const p of PITCHES) {
+          rootQuaternion(up, ahead, p, 0, q);
+          const nose = new THREE.Vector3(0, 0, 1).applyQuaternion(q);
+          // Nose up positive: the ahead climbs toward the up by sin p, and keeps cos p along the heading.
+          expect(nose.x * up.x + nose.y * up.y + nose.z * up.z).toBeCloseTo(Math.sin(p), 12);
+          expect(nose.x * ahead.x + nose.y * ahead.y + nose.z * ahead.z).toBeCloseTo(Math.cos(p), 12);
+        }
+        // A bank rolls about the body's ahead: the ahead does not move, the up does.
+        rootQuaternion(up, ahead, 0, 0.5, q);
+        const nose = new THREE.Vector3(0, 0, 1).applyQuaternion(q);
+        expect(nose.x).toBeCloseTo(ahead.x, 12); expect(nose.y).toBeCloseTo(ahead.y, 12); expect(nose.z).toBeCloseTo(ahead.z, 12);
+        const y = new THREE.Vector3(0, 1, 0).applyQuaternion(q);
+        expect(y.x * up.x + y.y * up.y + y.z * up.z).toBeCloseTo(Math.cos(0.5), 12);
+      }
+    }
+    // A number that is not a number leaves the quaternion as it was.
+    q.identity();
+    rootQuaternion(WORLD_UP, vec3(Number.NaN, 0, 1), 0, 0, q);
+    expect(q.equals(new THREE.Quaternion())).toBe(true);
+  });
+
+  it('CARRIES THE HEADING into a drawn up that lags the state\'s: the ahead is aheadOn(up, h) turned by rotateBetween(up, drawn)', () => {
+    // The body has just walked off the east wall onto the top: the state's
+    // up is +y, the drawn up is still half-way round the edge.
+    const drawn = new THREE.Vector3(1, 1, 0).normalize();
+    for (const h of HEADINGS) {
+      const expected = rotateBetween(WORLD_UP, drawn, aheadOn(WORLD_UP, h, v()), v());
+      const got = drawnAhead(WORLD_UP, h, drawn, v());
+      expect(got.x).toBeCloseTo(expected.x, 12);
+      expect(got.y).toBeCloseTo(expected.y, 12);
+      expect(got.z).toBeCloseTo(expected.z, 12);
+      // Still a unit tangent of the DRAWN up: the basis the root is built on is orthonormal.
+      expect(Math.hypot(got.x, got.y, got.z)).toBeCloseTo(1, 12);
+      expect(got.x * drawn.x + got.y * drawn.y + got.z * drawn.z).toBeCloseTo(0, 12);
+    }
+  });
+
+  it('EASES THE UP onto a new up within a second and then settles on it exactly; on the ground it is WORLD_UP to the bit', () => {
+    const DT = 1 / 60;
+    const drawn = new THREE.Vector3(0, 1, 0);
+    // The ground: a thousand frames, and it is the same object's numbers unchanged.
+    for (let k = 0; k < 1000; k += 1) easeUp(drawn, WORLD_UP, DT);
+    expect(drawn.x).toBe(0); expect(drawn.y).toBe(1); expect(drawn.z).toBe(0);
+    // An edge: a quarter turn to the east wall. Not a snap — after one
+    // frame it has barely moved — and a monotone turn that is within a
+    // degree in a second and exactly the target soon after.
+    const east = FACE_NORMALS[0];
+    easeUp(drawn, east, DT);
+    // A tenth of the way at most in a sixtieth of a second: about 9° of the 90.
+    expect(drawn.y).toBeGreaterThan(0.98);
+    expect(drawn.x).toBeGreaterThan(0.05);
+    let lastGap = drawn.distanceTo(new THREE.Vector3(1, 0, 0));
+    let settledAt = -1;
+    for (let k = 1; k < 120; k += 1) {
+      easeUp(drawn, east, DT);
+      const gap = drawn.distanceTo(new THREE.Vector3(1, 0, 0));
+      expect(gap).toBeLessThanOrEqual(lastGap + 1e-12);
+      expect(drawn.length()).toBeCloseTo(1, 12);
+      lastGap = gap;
+      if (settledAt < 0 && drawn.x === 1 && drawn.y === 0 && drawn.z === 0) settledAt = (k + 1) * DT;
+    }
+    expect(lastGap).toBeLessThan(Math.PI / 180);
+    expect(settledAt).toBeGreaterThan(0.5);
+    expect(settledAt).toBeLessThan(1.2);
+    // The time constant is what it says: after one UP_EASE_S the gap is about 1/e of a quarter turn's chord.
+    const fresh = new THREE.Vector3(0, 1, 0);
+    let t = 0;
+    while (t < UP_EASE_S - 1e-9) { easeUp(fresh, east, DT); t += DT; }
+    const angle = Math.acos(Math.min(1, fresh.dot(new THREE.Vector3(1, 0, 0))));
+    expect(angle).toBeCloseTo((Math.PI / 2) * Math.exp(-1), 1);
+    expect(UP_SETTLED).toBeLessThan(0.01);
+  });
+
+  it('turns a HALF TURN — a takeoff from the ceiling — as a turn about the surface frame\'s axis, never a snap or a zero', () => {
+    const DT = 1 / 60;
+    const drawn = new THREE.Vector3(0, -1, 0);
+    const ys: number[] = [];
+    for (let k = 0; k < 180; k += 1) {
+      easeUp(drawn, WORLD_UP, DT);
+      expect(drawn.length()).toBeCloseTo(1, 12);
+      // The ceiling's up turns to the ground's about +x (the fixed choice `rotateBetween` makes for −y): it swings through −z... +z, never x.
+      expect(Math.abs(drawn.x)).toBeLessThan(1e-9);
+      ys.push(drawn.y);
+    }
+    // Monotone from −1 to +1, no frame jumping more than a few degrees, and exactly up at the end.
+    for (let k = 1; k < ys.length; k += 1) {
+      expect(ys[k]).toBeGreaterThanOrEqual(ys[k - 1] - 1e-12);
+      expect(ys[k] - ys[k - 1]).toBeLessThan(0.2);
+    }
+    expect(ys[0]).toBeLessThan(-0.9);
+    expect(drawn.y).toBe(1);
+    // A target that is not a number moves nothing.
+    const still = new THREE.Vector3(0, 0, 1);
+    easeUp(still, vec3(Number.NaN, 0, 0), DT);
+    expect(still.z).toBe(1);
+    easeUp(still, WORLD_UP, Number.NaN);
+    expect(still.z).toBe(1);
   });
 });

@@ -43,6 +43,28 @@
  * body (`FollowCamera.retarget`). Nothing here touches a creature's
  * state: not its place, not its needs, not its word (the brief, §4).
  *
+ * SURFACES (Creature Lab D; Joshua, 2026-09-09: "All the insects
+ * besides the worm need to be able to climb vertical and upside down
+ * while sticking to the surface. I tried crawling up the wall in the
+ * Queen and I got teleported to the top of it"). The bench offers its
+ * block as two solids (`LabWorld.climbables`: the pillar and the slab)
+ * and the simulation's world carries them through, so the one
+ * integrator keeps a climber's feet on whatever face it stands on. The
+ * held body's demand is therefore read in THREE dimensions: the
+ * player's LOOK — the follow camera's wanted look while following, the
+ * free camera's lens direction otherwise — is projected onto the held
+ * body's own face by `control/PlayerDemand.demandFromLook`, so the
+ * stick's "ahead" is where the player looks AS SEEN FROM THE WALL, and
+ * steering is looking on every face. On the ground with a level look
+ * that is the old `demandFrom` to 1e-12, which its tests pin. The
+ * follow camera orbits off the body's `up` (`FollowTarget.up`): out
+ * from a wall, under a ceiling, never inside the block. And the
+ * overlay's surface word says which face the feet are on — `on top`,
+ * `on wall`, `on ceiling` (`faceUnder`, `faceWord`) — before the old
+ * ground/air/host words, whose AGL is height over the FLOOR now that
+ * the block is not in the ground: a body on the slab's top reads
+ * 200 mm, which is true.
+ *
  * OBSERVE is an empty ledger and the free camera. RESET is the world's
  * reset, the ledger cleared, a fresh `CreatureSim` from the same
  * spawns, and the queen held again — the three lines `labWorld.ts`'s
@@ -75,13 +97,13 @@ import type { PlayerId } from '../actor/PlayerId';
 import type { AppScene, FrameInfo, SceneContext, SceneFactory } from '../app/Scene';
 import { assets, type Assets } from '../assets/assets';
 import {
-  FollowCamera, TAP_PIXELS, demandFrom, lookDeltaOf, pickCreature, type FollowTarget, type MutableLook, type Ndc, type Viewport,
+  FollowCamera, TAP_PIXELS, demandFromLook, lookDeltaOf, pickCreature, type FollowTarget, type MutableLook, type Ndc, type Viewport,
 } from '../control';
 import {
   CREATURE_SPECIES, ControlLedger, CreatureSim, LAB_CREATURE_IDS, LAB_FLOOR, LAB_SEED, MM_PER_UNIT, WORLD_UP, createLabWorld,
-  labSpawns, newMutableIntent, unitsOfMm,
-  type CreatureId, type CreatureSpecies, type CreatureState, type CreatureWorld, type Disturbance, type DisturbanceSource,
-  type LabWorld, type MutableIntent, type PredationPolicy, type Vec3,
+  faceUnder, faceWord, labSpawns, newMutableIntent, unitsOfMm,
+  type Climbable, type CreatureId, type CreatureSpecies, type CreatureState, type CreatureWorld, type Disturbance,
+  type DisturbanceSource, type LabWorld, type MutableIntent, type MutableVec3, type PredationPolicy, type Vec3,
 } from '../creatures';
 import type { CreaturePolicy } from '../creatures/world';
 import { FaunaView } from '../fauna/FaunaView';
@@ -228,6 +250,8 @@ export class CreatureLab {
       water: bench.water,
       weather: bench.weather,
       disturbances: bench.disturbances,
+      // The block as solids (Creature Lab D): what a climber's feet stay on, and what the worm treats as ground it cannot enter.
+      climbables: bench.climbables,
     };
     this.sim = this.build();
   }
@@ -472,8 +496,15 @@ function newLine(species: CreatureSpecies): CreatureLine {
   };
 }
 
-/** The ground/surface word for a body: where it is relative to the ground under it, read by its medium. */
-function surfaceWord(c: CreatureState, species: CreatureSpecies, ground: number): string {
+/**
+ * The ground/surface word for a body: the box face under its feet when
+ * there is one (Creature Lab D: `on top`, `on wall`, `on ceiling` —
+ * asked fresh, never remembered), else where it is relative to the
+ * ground under it, read by its medium.
+ */
+function surfaceWord(c: CreatureState, species: CreatureSpecies, ground: number, climbables: readonly Climbable[]): string {
+  const face = faceUnder(c.at, c.height, c.up, climbables);
+  if (face !== null) return faceWord(face.normal);
   if (!Number.isFinite(ground)) return 'no ground';
   const above = c.height - ground;
   if (above < -SURFACE_EPSILON) return 'underground';
@@ -514,6 +545,10 @@ export function buildCreatureLabScene(ctx: SceneContext, hooks: CreatureLabHooks
   const intent: MutableIntent = newMutableIntent();
   const target: MutableTarget = { at: CENTRE, height: LAB_FLOOR, heading: 0, up: WORLD_UP, lengthUnits: 1 };
   const look: MutableLook = { dx: 0, dy: 0 };
+  /** The player's look as a world direction, for the demand: written by the active camera each frame (the header, SURFACES). */
+  const lookDir: MutableVec3 = { x: 0, y: 0, z: 0 };
+  /** The free camera's lens direction, read through three and copied into `lookDir` — a direction, so the render frame's is the world's. */
+  const lensDir = new THREE.Vector3();
   const flySnap: MutableSnapshot = {
     keys: EMPTY_KEYS, pointer: { down: false, buttons: 0, x: 0, y: 0, dx: 0, dy: 0 }, touches: [], wheel: 0,
   };
@@ -591,7 +626,7 @@ export function buildCreatureLabScene(ctx: SceneContext, hooks: CreatureLabHooks
       line.alarm = c.alarm;
       line.speedMmS = speeds.get(c.id)?.mmS ?? 0;
       line.aglMm = Number.isFinite(ground) ? (c.height - ground) * MM_PER_UNIT : 0;
-      line.surface = surfaceWord(c, species, ground);
+      line.surface = surfaceWord(c, species, ground, lab.world.climbables);
       line.sinceThink = c.sinceThink;
       line.thinkS = species.thinkS;
       line.hostId = c.hostId;
@@ -851,12 +886,23 @@ export function buildCreatureLabScene(ctx: SceneContext, hooks: CreatureLabHooks
       const isFollowing = held !== null && cameraMode === 'follow';
       const camera = isFollowing ? follow.camera : free.camera;
 
-      // THE PLAYER'S HALF: the thumbs into the held body's heading frame,
-      // steering toward where the active camera looks. The free camera's
-      // yaw is its rotation about +Y exactly as `FreeFlyCamera` sets it.
+      // THE PLAYER'S HALF: the thumbs into the held body's frame ON ITS
+      // FACE, steering toward where the player looks. The look is the
+      // follow camera's WANTED bearing as a direction (not the lens's
+      // measured one — `FollowCamera`'s header says why), or the free
+      // camera's lens direction; `demandFromLook` projects it onto the
+      // held body's `up` (the header, SURFACES).
       if (held !== null && heldSpecies !== null) {
-        const yaw = isFollowing ? follow.yaw : free.camera.rotation.y;
-        lab.setIntent(demandFrom(snap, stickRead, yaw, held.heading, heldSpecies.medium, ui === null ? NO_HELD : ui.buttons, heldSpecies.flight !== null, intent));
+        if (isFollowing) follow.wantedLook(lookDir);
+        else {
+          free.camera.getWorldDirection(lensDir);
+          lookDir.x = lensDir.x;
+          lookDir.y = lensDir.y;
+          lookDir.z = lensDir.z;
+        }
+        lab.setIntent(demandFromLook(
+          snap, stickRead, lookDir, held.heading, held.up, heldSpecies.medium, ui === null ? NO_HELD : ui.buttons, heldSpecies.flight !== null, intent,
+        ));
       } else {
         lab.setIntent(NEUTRAL_INTENT);
       }

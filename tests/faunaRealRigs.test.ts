@@ -677,7 +677,8 @@ describe('the ant rigs, posed', () => {
         let highest = -Infinity;
         let lowest = Infinity;
         for (let k = 0; k < 40; k += 1) {
-          m.gone = (k / 40) * 0.4 * a.spine;
+          // The legs run on the stride COUNT now (`motion.ts`, `RigMotion.strides`): one full cycle over the forty samples.
+          m.strides = k / 40;
           poseLegs(legs, m, a.spine, 0);
           const y = worldOf(clone, l.spec.tip).y - rest.get(l.spec.tip)!.y;
           highest = Math.max(highest, y);

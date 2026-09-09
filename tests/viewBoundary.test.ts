@@ -424,6 +424,13 @@ describe('the creatures/fauna seam', () => {
     // or a drawn body and the pace it was drawn walking would stop
     // agreeing about what one animal's size is.
     'sizeRatio',
+    // The surface frame's pure arithmetic (Creature Lab D): what a
+    // heading MEANS on a face, and the one rotation that carries a frame
+    // round an edge — a unit vector and a number in, a vector out, no
+    // simulation behind them. The renderer must call them rather than
+    // restate the ahead, or a drawn body and the body the integrator
+    // moves would stop agreeing about which way an ant on a wall faces.
+    'aheadOn', 'rotateBetween',
   ]);
 
   it('has a fauna renderer to check', () => {

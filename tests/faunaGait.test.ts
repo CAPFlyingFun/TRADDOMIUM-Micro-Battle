@@ -9,12 +9,21 @@
  *   the lift is zero throughout stance and rises only in swing
  *   the tripod a leg belongs to is the rule `rig.ts` uses for `phase`
  *   the stride advances with DISTANCE, not time
+ *   THE STRIDE IS THE SPEED'S (Joshua, 2026-09-09: the aphid's legs
+ *     "kind of was in slow motion"): the ants at their wander take the
+ *     full stride they always took, and the aphid — 0.57 body lengths a
+ *     second on a 1.4 mm body — takes a short one and steps about four
+ *     times a second, six when it flees, instead of 1.4
  */
 import { describe, expect, it } from 'vitest';
+import { APHID, QUEEN, WORKER } from '../src/creatures';
 import {
-  STRIDES_PER_LENGTH, STRIDE_LENGTHS, SWING_DUTY, TRIPODS, inSwing, legCycle, lift, protraction, strideCycle, strideFrequency,
-  tripodOf,
+  STRIDES_PER_LENGTH, STRIDE_FULL_SPEED, STRIDE_LENGTHS, STRIDE_MIN_FRACTION, SWING_DUTY, TRIPODS, inSwing, legCycle, lift, protraction,
+  strideCycle, strideFrequency, strideLengthsAt, tripodOf,
 } from '../src/fauna/gait';
+
+/** A species' pace in body lengths a second, from the table's own numbers. */
+const lengthsPerS = (mmS: number, lengthMm: number): number => mmS / lengthMm;
 
 const SAMPLES = 400;
 
@@ -85,17 +94,75 @@ describe('the tripod', () => {
     expect(lift(0)).toBeCloseTo(0, 6);
   });
 
-  it('advances the stride with distance in body lengths, wraps, and offsets by the creature\'s phase', () => {
+  it('advances the stride with the strides walked, wraps, and offsets by the creature\'s phase', () => {
     expect(STRIDE_LENGTHS).toBeCloseTo(0.4, 9);
     expect(STRIDES_PER_LENGTH).toBeCloseTo(2.5, 9);
+    // The cycle is the fraction of the stride count: a whole stride is back at the start.
     expect(strideCycle(0, 0)).toBe(0);
-    expect(strideCycle(STRIDE_LENGTHS, 0)).toBeCloseTo(0, 9);
-    expect(strideCycle(STRIDE_LENGTHS / 2, 0)).toBeCloseTo(0.5, 9);
+    expect(strideCycle(1, 0)).toBeCloseTo(0, 9);
+    expect(strideCycle(0.5, 0)).toBeCloseTo(0.5, 9);
     expect(strideCycle(0, 0.3)).toBeCloseTo(0.3, 9);
-    expect(strideCycle(STRIDE_LENGTHS * 0.9, 0.3)).toBeCloseTo(0.2, 9);
-    // The derived rate: a body moving one length a second takes 2.5 strides in it; standing still takes none.
-    expect(strideFrequency(1)).toBeCloseTo(STRIDES_PER_LENGTH, 9);
+    expect(strideCycle(0.9, 0.3)).toBeCloseTo(0.2, 9);
+    // The derived rate: standing still takes no strides, and a negative speed is not a speed.
     expect(strideFrequency(0)).toBe(0);
     expect(strideFrequency(-1)).toBe(0);
+    // At and over the full speed the full stride: 2.5 strides a body, so 6.25 a second at 2.5 bodies a second.
+    expect(strideFrequency(STRIDE_FULL_SPEED)).toBeCloseTo(STRIDE_FULL_SPEED * STRIDES_PER_LENGTH, 9);
+  });
+});
+
+describe('the stride is the speed\'s', () => {
+  it('is the full stride at the full speed and above, shrinks with the speed below it, and never under the minimum', () => {
+    expect(STRIDE_FULL_SPEED).toBe(2.5);
+    expect(STRIDE_MIN_FRACTION).toBe(0.35);
+    expect(strideLengthsAt(STRIDE_FULL_SPEED)).toBeCloseTo(STRIDE_LENGTHS, 12);
+    expect(strideLengthsAt(STRIDE_FULL_SPEED * 3)).toBeCloseTo(STRIDE_LENGTHS, 12);
+    expect(strideLengthsAt(STRIDE_FULL_SPEED / 2)).toBeCloseTo(STRIDE_LENGTHS / 2, 12);
+    expect(strideLengthsAt(0)).toBeCloseTo(STRIDE_LENGTHS * STRIDE_MIN_FRACTION, 12);
+    expect(strideLengthsAt(-3)).toBeCloseTo(STRIDE_LENGTHS * STRIDE_MIN_FRACTION, 12);
+    // Never zero, never NaN: a count divided by it is always a number.
+    expect(strideLengthsAt(Number.NaN)).toBeGreaterThan(0);
+    expect(strideLengthsAt(Number.POSITIVE_INFINITY)).toBeCloseTo(STRIDE_LENGTHS, 12);
+    // Monotone: a faster walker never takes a shorter stride.
+    let last = 0;
+    for (let v = 0; v <= 4; v += 0.05) {
+      const stride = strideLengthsAt(v);
+      expect(stride).toBeGreaterThanOrEqual(last - 1e-12);
+      last = stride;
+    }
+  });
+
+  it('leaves the two ants Joshua approved exactly as they were: the queen and the worker wander at or over the full speed', () => {
+    const queen = lengthsPerS(QUEEN.pace.wanderMmS, QUEEN.lengthMm);
+    const worker = lengthsPerS(WORKER.pace.wanderMmS, WORKER.lengthMm);
+    // 20 mm/s on 8 mm is exactly the full speed; 8.55 on 3 is over it.
+    expect(queen).toBeCloseTo(2.5, 9);
+    expect(worker).toBeCloseTo(2.85, 9);
+    expect(strideLengthsAt(queen)).toBeCloseTo(STRIDE_LENGTHS, 12);
+    expect(strideLengthsAt(worker)).toBeCloseTo(STRIDE_LENGTHS, 12);
+    // Which is the old rate, unchanged: 6.25 and 7.1 strides a second.
+    expect(strideFrequency(queen)).toBeCloseTo(queen * STRIDES_PER_LENGTH, 9);
+    expect(strideFrequency(worker)).toBeCloseTo(worker * STRIDES_PER_LENGTH, 9);
+    expect(strideFrequency(queen)).toBeCloseTo(6.25, 6);
+    expect(strideFrequency(worker)).toBeCloseTo(7.125, 6);
+  });
+
+  it('MEASURES THE APHID\'S SLOW MOTION and takes it out: 1.4 strides a second at the old stride, 4.1 at its own, 6.3 fleeing', () => {
+    // 0.8 mm/s on a 1.4 mm body: 0.57 body lengths a second (MEASURED, Alford et al. 2012 via aphid.md).
+    const wander = lengthsPerS(APHID.pace.wanderMmS, APHID.lengthMm);
+    const flee = lengthsPerS(APHID.pace.fleeMmS, APHID.lengthMm);
+    expect(wander).toBeCloseTo(0.5714, 3);
+    // THE CAUSE: at one fixed stride the legs cycled 1.4 times a second.
+    expect(wander * STRIDES_PER_LENGTH).toBeCloseTo(1.43, 2);
+    // THE LAW: 0.23 of the full stride, clamped to the minimum 0.35 — a 0.14-body stride, 4.1 a second.
+    expect(wander / STRIDE_FULL_SPEED).toBeLessThan(STRIDE_MIN_FRACTION);
+    expect(strideLengthsAt(wander)).toBeCloseTo(0.14, 9);
+    expect(strideFrequency(wander)).toBeCloseTo(4.08, 2);
+    // Fleeing at 2.5 mm/s: 1.8 body lengths a second, 0.71 of the full stride, 6.3 a second — a scurry, not a sprint in slow motion.
+    expect(flee).toBeCloseTo(1.786, 3);
+    expect(strideLengthsAt(flee)).toBeCloseTo(STRIDE_LENGTHS * flee / STRIDE_FULL_SPEED, 12);
+    expect(strideFrequency(flee)).toBeCloseTo(6.25, 2);
+    // And the aphid's walk is now the same ORDER as the ants', which is what "walk like the queen and worker" asks.
+    expect(strideFrequency(wander)).toBeGreaterThan(strideFrequency(2.5) / 2);
   });
 });

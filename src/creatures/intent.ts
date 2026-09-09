@@ -176,6 +176,7 @@ import { WATER_SIM_DEFAULTS } from '../world/water/sim';
 import { unitsOfMetres } from './finder';
 import { ahead, headingToward, wrapHeading } from './heading';
 import { arrived, floorAt, isAirborne, isMoving } from './locomotion';
+import { faceIndexUnder, floorOverBoxes, routeAround } from './surface';
 import { PERCH_FRACTION } from './population';
 import { paceRatio, sizeRatio, unitsOfMm, type CreatureId, type CreatureSpecies, type FlightSpec } from './species';
 import { behaviourAllowed, behaviourAllowedFor, type Behaviour, type CreatureState } from './state';
@@ -988,6 +989,7 @@ export function think(
   if (!Number.isFinite(state.targetHeight)) state.targetHeight = state.height;
   if (!Number.isFinite(state.behaviourUntilS) || state.behaviourUntilS < 0) state.behaviourUntilS = 0;
   containTarget(state, world);
+  routeTarget(state, species, world);
   if (!behaviourAllowedFor(species, state.behaviour)) {
     throw new Error(`creatures/intent: ${species.id} (${species.medium}) chose "${state.behaviour}", which its medium does not allow`);
   }
@@ -1017,6 +1019,36 @@ export function containTarget(state: CreatureState, world: CreatureWorld): boole
     if (Number.isFinite(was) && Number.isFinite(now)) state.targetHeight += now - was;
   }
   state.target = inward;
+  return true;
+}
+
+/**
+ * THE BRAIN KEEPS OFF THE PEDESTAL (Creature Lab D). A climber standing
+ * on the GROUND — no box face under it, not in the air — in a world
+ * with solids has its target replaced by `routeAround`'s answer: the
+ * target itself when the straight line to it crosses no box standing in
+ * its way at its height, else a corner of that box's footprint grown by
+ * a body length, so an ant on an errand walks round the pillar rather
+ * than up it. A walker that meets a box climbs it (`surfaceStep`); this
+ * is how the AI mostly does not. A body already ON a face needs nothing
+ * here — `demandOf` aims it down by the surface — and a stand's target
+ * is a bearing, not a place, as `containTarget` leaves it. When the
+ * target moves to a waypoint, a site the ant was heading for
+ * (`hostId`) is let go: arriving at the corner is not arriving at the
+ * food, and the next think, hungry with the site still in sight, aims
+ * at it again from the corner. Returns whether the target was replaced.
+ */
+export function routeTarget(state: CreatureState, species: CreatureSpecies, world: CreatureWorld): boolean {
+  const target = state.target;
+  const boxes = world.climbables;
+  if (target === null || !species.climber || boxes === undefined || boxes.length === 0) return false;
+  if (state.behaviour === 'defend' || isAirborne(state.behaviour)) return false;
+  if (faceIndexUnder(state.at, state.height, state.up, boxes) >= 0) return false;
+  const body = sizeRatio(state, species) * unitsOfMm(species.lengthMm);
+  const routed = routeAround(state.at, target, state.height, body, boxes);
+  if (routed === target) return false;
+  state.target = routed;
+  if (species.medium === 'ground') state.hostId = null;
   return true;
 }
 
@@ -1606,7 +1638,14 @@ function thinkAir(
   const body = sizeRatio(state, species) * unitsOfMm(species.lengthMm);
   const lo = unitsOfMm(flight.cruiseMm[0]);
   const climb = unitsOfMm(flight.climbMmS);
-  const floor = floorAt(world, state.at);
+  // The floor is raised to a box top under the body where the world has
+  // solids (Creature Lab D): the integrator lands a flier on the slab
+  // (`demand.ts`, `floorOverBoxes`), and a brain that measured its
+  // height from the floor beneath would wait out a land clock the body
+  // had already finished, standing on the slab and still calling it air.
+  const boxes = world.climbables;
+  const under = floorAt(world, state.at);
+  const floor = boxes !== undefined && boxes.length > 0 && Number.isFinite(under) ? floorOverBoxes(state.at, state.height, under, boxes) : under;
   const g = Number.isFinite(floor) ? floor : state.height;
   const above = state.height - g;
   const grounded = sky.rainMmHr >= RAINING_MM_HR || sky.night;

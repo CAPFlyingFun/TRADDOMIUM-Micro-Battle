@@ -7,12 +7,14 @@
  *   labTool.ts          the tool record, the scene id, and every
  *                       `data-action` / `data-field` name (pure)
  *   labMeshes.ts        the bench drawn: the floor sampled from the
- *                       world's own ground, the block, the plants, the
+ *                       world's own floor, the block as its two solids
+ *                       (the slab on its pillar), the plants, the
  *                       litter, the puddle, the bounds, the lights
  *   LabUi.ts            the HUD: possess row, tools, the right thumb's
  *                       held buttons, the per-creature overlay (DOM)
  *   CreatureLabScene.ts the scene and the `CreatureLab` it wraps: the
  *                       bench, the ledger, the simulation, the cameras,
+ *                       the look projected onto the held body's face,
  *                       tap-to-possess and the disturb tool
  *
  * Renderer-side: three and the DOM are allowed. It reads `creatures/`,

@@ -123,6 +123,29 @@
  * gravity's, not its own. A flight does not scale either: a hop is the
  * wing's, and the wing is not in the table's length.
  *
+ * A CLIMBER IN A WORLD WITH SOLIDS WALKS ON THEM (Creature Lab D, 2026-09-09;
+ * Joshua: "All the insects besides the worm need to be able to climb
+ * vertical and upside down while sticking to the surface. I tried
+ * crawling up the wall in the Queen and I got teleported to the top of
+ * it"). Where a species is a `climber` and the world offers
+ * `climbables`, the walk's plane step AND its height are ONE call,
+ * `surfaceStep` (`surface.ts`): the request is taken on whatever face
+ * the body stands on, carried round every edge it crosses, and the
+ * height is where the feet are — up a wall at the walking pace, never a
+ * jump to the top. The same `up` the step writes is what the brain's
+ * half turns about: on a face `demandOf` aims by `aimOnSurface` and
+ * measures its turn with `signedAngleAbout`, so a queen left on the
+ * slab heads for the edge and comes down, and on the underside heads
+ * for the pillar. The air reads the boxes too — `floorOverBoxes` puts a
+ * box top under a flier over it, so a queen lands on the slab and a fly
+ * under it keeps the floor — and a body in the air has the world's up:
+ * the fly branch sets it, which is the release from a wall or a
+ * ceiling. Everything else — the soil, the air's arithmetic, a
+ * non-climber, a world without solids, and above all the flat case the
+ * identity soak holds — is the old code in the old order: the surface
+ * path is a branch taken only when a climber stands in a world that
+ * has something to climb.
+ *
  * NEVER NaN. A `dt` that is not a positive finite number moves nothing;
  * a ground the world cannot price (non-finite) leaves the height alone;
  * an intent is clamped axis by axis before it is read; a vertical step
@@ -149,6 +172,9 @@ import { CELL_SPAN } from '../world/objects/cells';
 import { ahead, headingToward, wrapHeading } from './heading';
 import { paceRatio, sizeRatio, unitsOfMm, type CreatureSpecies } from './species';
 import { behaviourAllowedFor, type Behaviour, type CreatureState } from './state';
+import {
+  WORLD_UP, aheadOn, aimOnSurface, faceIndexUnder, floorOverBoxes, signedAngleAbout, surfaceStep, type Climbable, type MutableVec3,
+} from './surface';
 import type { CreatureWorld } from './world';
 
 // ---------------------------------------------------------------------------
@@ -276,6 +302,29 @@ export function floorAt(world: CreatureWorld, at: WorldPoint): number {
   return depth > 0 ? ground + depth : ground;
 }
 
+/**
+ * THE SOLIDS A BODY MAY STAND ON, or null: the world's `climbables` when
+ * it has any. One read, so the three places that ask — the walk, the
+ * air's floor and the brain's aim — agree on what "a world with solids"
+ * means: a list with something in it.
+ */
+function solidsOf(world: CreatureWorld): readonly Climbable[] | null {
+  const boxes = world.climbables;
+  return boxes !== undefined && boxes.length > 0 ? boxes : null;
+}
+
+/**
+ * THE FLOOR A FLIER MEASURES FROM: `floorAt` — the ground or the water's
+ * surface — raised to the top of a box under the body when the world has
+ * boxes (`floorOverBoxes`), so a queen over the slab lands on the slab
+ * and a fly under it keeps the floor. Without boxes it IS `floorAt`.
+ */
+function flierFloor(world: CreatureWorld, at: WorldPoint, height: number): number {
+  const floor = floorAt(world, at);
+  const boxes = solidsOf(world);
+  return boxes === null ? floor : floorOverBoxes(at, height, floor, boxes);
+}
+
 /** This individual's body length, world units: the cited length at its own size. */
 function bodyLength(state: CreatureState, species: CreatureSpecies): number {
   return sizeRatio(state, species) * unitsOfMm(species.lengthMm);
@@ -346,6 +395,24 @@ function turnRateOf(species: CreatureSpecies, how: Locomotion): number {
 }
 
 /**
+ * THE ARRIVE RULE: the target itself when a plain forward toward it is
+ * close enough to take the last step straight — within the step, or a
+ * quarter of a body length — rather than orbit a target inside its own
+ * turning circle; null otherwise. `planeStep`'s own test, named so the
+ * surface path can ask it before deciding whether the step is a snap or
+ * a walk along whatever is underfoot.
+ */
+function arriveSnap(state: CreatureState, species: CreatureSpecies, forward: number, strafe: number, step: number): WorldPoint | null {
+  const target = state.target;
+  if (target !== null && strafe === 0 && forward > 0 && Number.isFinite(target.wx) && Number.isFinite(target.wz)) {
+    const remaining = distance(state.at, target);
+    const arriveWithin = Math.max(forward * step, ARRIVE_LENGTHS * bodyLength(state, species));
+    if (remaining <= arriveWithin) return target;
+  }
+  return null;
+}
+
+/**
  * THE STEP ON THE PLANE, shared by the preview and the move so the two
  * cannot differ by a bit: where a body with `heading` (already turned)
  * lands after `step` units of pace along `forward` and across `strafe`.
@@ -366,12 +433,8 @@ function planeStep(
     forward /= magnitude;
     strafe /= magnitude;
   }
-  const target = state.target;
-  if (target !== null && strafe === 0 && forward > 0 && Number.isFinite(target.wx) && Number.isFinite(target.wz)) {
-    const remaining = distance(at, target);
-    const arriveWithin = Math.max(forward * step, ARRIVE_LENGTHS * bodyLength(state, species));
-    if (remaining <= arriveWithin) return target;
-  }
+  const snap = arriveSnap(state, species, forward, strafe, step);
+  if (snap !== null) return snap;
   if (strafe === 0) return ahead(at, heading, forward * step);
   // Ahead is (sin h, cos h); RIGHT is ahead × up = (−cos h, sin h). The
   // capsule's rule (`actor/Transform.ts`), and the same fix: v0 called
@@ -417,7 +480,7 @@ function verticalStep(state: CreatureState, species: CreatureSpecies, how: Locom
 function wantedHeight(state: CreatureState, species: CreatureSpecies, world: CreatureWorld, how: Locomotion, at: WorldPoint): number {
   if (how === 'fly' && species.flight !== null) {
     const spec = species.flight;
-    const floor = floorAt(world, at);
+    const floor = flierFloor(world, at, state.height);
     if (!Number.isFinite(floor)) return NaN;
     const ceiling = floor + unitsOfMm(spec.ceilingMm);
     const lo = Math.min(ceiling, floor + unitsOfMm(spec.cruiseMm[0]));
@@ -446,6 +509,10 @@ function wantedHeight(state: CreatureState, species: CreatureSpecies, world: Cre
 // ---------------------------------------------------------------------------
 // The AI's half
 // ---------------------------------------------------------------------------
+
+/** Scratch for the brain's aim on a face: the body's ahead and the surface's answer. Never escape. */
+const _ahead: MutableVec3 = { x: 0, y: 0, z: 0 };
+const _aim: MutableVec3 = { x: 0, y: 0, z: 0 };
 
 /**
  * WHAT THE BRAIN WANTS, as an Intent: the target and the word the brain
@@ -485,7 +552,17 @@ export function demandOf(
     forward = pace > 0 ? 1 : 0;
   } else if (Number.isFinite(target.wx) && Number.isFinite(target.wz)) {
     const maxTurn = turnRateOf(species, way) * dt;
-    turn = saturate(wrapHeading(headingToward(state.at, target) - state.heading) / maxTurn);
+    const boxes = way === 'walk' && species.climber ? solidsOf(world) : null;
+    if (boxes !== null && faceIndexUnder(state.at, state.height, state.up, boxes) >= 0) {
+      // ON A BOX FACE: the turn is the signed angle about the face's up from
+      // the body's ahead to the way the surface offers toward the target
+      // (`aimOnSurface`), the target's height being the ground's there.
+      aheadOn(state.up, state.heading, _ahead);
+      const aim = aimOnSurface(state, target, world.groundAt(target), boxes, _aim);
+      turn = aim === null ? 0 : saturate(signedAngleAbout(state.up, _ahead, aim) / maxTurn);
+    } else {
+      turn = saturate(wrapHeading(headingToward(state.at, target) - state.heading) / maxTurn);
+    }
     forward = pace > 0 && distance(state.at, target) > 0 ? 1 : 0;
   }
 
@@ -546,6 +623,15 @@ export function applyDemand(
   // THE TURN, a rate and not an ease (the header).
   if (turn !== 0) state.heading = wrapHeading(state.heading + turn * turnRateOf(species, way) * dt);
 
+  // A CLIMBER WITH SOMETHING TO CLIMB: the plane step and the height are the surface's (the header).
+  const boxes = way === 'walk' && species.climber ? solidsOf(world) : null;
+  if (boxes !== null) {
+    const before = state.height;
+    const moved = surfaceMove(state, species, world, boxes, forward, strafe, vertical, sprint, dt, way);
+    state.pitch = pitchOf(state.height - before, moved);
+    return moved;
+  }
+
   // THE STEP ON THE PLANE.
   let moved = 0;
   if (forward !== 0 || strafe !== 0) {
@@ -564,7 +650,9 @@ export function applyDemand(
   const lift = vertical !== 0 ? verticalStep(state, species, way, vertical < 0, dt) : 0;
   const risen = lift > 0 ? state.height + vertical * lift : state.height;
   if (way === 'fly' && species.flight !== null) {
-    const floor = floorAt(world, state.at);
+    // In the air the feet point up, whatever they pointed at when it left: the release from a wall or a ceiling.
+    if (state.up !== WORLD_UP) state.up = WORLD_UP;
+    const floor = flierFloor(world, state.at, state.height);
     if (Number.isFinite(floor)) state.height = Math.min(floor + unitsOfMm(species.flight.ceilingMm), Math.max(floor, risen));
   } else if (way === 'burrow' && species.burrow !== null) {
     const spec = species.burrow;
@@ -597,6 +685,81 @@ export function applyDemand(
   return moved;
 }
 
+/**
+ * THE WALK OF A CLIMBER IN A WORLD WITH SOLIDS: the plane step and the
+ * height as one (`surfaceStep`), returning the distance moved along the
+ * surface. What stays the old rule, and why:
+ *
+ *   - A PLANT body on its stem — no face under it and its height above
+ *     the ground — keeps the plant rule exactly: `planeStep`, then the
+ *     stem's height, `max(ground, risen)`. A stem is not a solid yet.
+ *   - A body on the GROUND whose plain forward reaches its target takes
+ *     the arrive snap `planeStep` would have taken (`arriveSnap`), so a
+ *     brain's leash still ends ON the target and not in an orbit round
+ *     it; on a face there is no snap — the target is on the ground and
+ *     the way there is along the surface.
+ *   - A body standing still on the ground has its height read from the
+ *     ground where it stands, as every walker did, and the world's up;
+ *     standing still on a face it is left where it is.
+ *   - A plant body that ends up on the ground with no face under it may
+ *     still climb its stem: the vertical lifts it off the ground by the
+ *     plant rule after the step, so an aphid at its host's foot goes up
+ *     the stem as it always did — and one that walks into the pillar
+ *     climbs that instead.
+ */
+function surfaceMove(
+  state: CreatureState, species: CreatureSpecies, world: CreatureWorld, boxes: readonly Climbable[],
+  forward: number, strafe: number, vertical: number, sprint: boolean, dt: number, way: Locomotion,
+): number {
+  const ground = world.groundAt(state.at);
+  const lift = vertical !== 0 ? verticalStep(state, species, way, vertical < 0, dt) : 0;
+  const risen = lift > 0 ? state.height + vertical * lift : state.height;
+  const plant = species.medium === 'plant';
+  const onFace = faceIndexUnder(state.at, state.height, state.up, boxes) >= 0;
+  let moved = 0;
+
+  if (plant && !onFace && Number.isFinite(ground) && state.height > ground + AIRBORNE_EPSILON) {
+    // On its stem: the plant rule, untouched.
+    if (forward !== 0 || strafe !== 0) {
+      const step = planePace(state, species, way, sprint) * dt;
+      const before = state.at;
+      const after = planeStep(state, species, state.heading, forward, strafe, step);
+      if (after !== before) {
+        moved = strafe === 0 && after !== state.target ? Math.abs(forward * step) : distance(before, after);
+        state.at = after;
+      }
+    }
+    const under = world.groundAt(state.at);
+    if (Number.isFinite(under)) state.height = Math.max(under, risen);
+    return moved;
+  }
+
+  if (forward !== 0 || strafe !== 0) {
+    const step = planePace(state, species, way, sprint) * dt;
+    const snap = onFace ? null : arriveSnap(state, species, forward, strafe, step);
+    if (snap !== null) {
+      if (snap !== state.at) {
+        moved = distance(state.at, snap);
+        state.at = snap;
+        const under = world.groundAt(snap);
+        if (Number.isFinite(under)) state.height = under;
+      }
+    } else {
+      moved = surfaceStep(state, forward, strafe, step, world.groundAt, boxes);
+    }
+  } else if (!onFace) {
+    if (Number.isFinite(ground)) state.height = ground;
+    if (state.up !== WORLD_UP) state.up = WORLD_UP;
+  }
+
+  if (plant && lift > 0 && faceIndexUnder(state.at, state.height, state.up, boxes) < 0) {
+    // At its host's foot, climbing: the stem's height, by the plant rule.
+    const under = world.groundAt(state.at);
+    if (Number.isFinite(under)) state.height = Math.max(under, risen);
+  }
+  return moved;
+}
+
 // ---------------------------------------------------------------------------
 // The player's half: what the species reads into a demand, and the word for it
 // ---------------------------------------------------------------------------
@@ -625,13 +788,17 @@ export function newMutableIntent(): MutableIntent {
 const AIRBORNE_EPSILON = 1e-9;
 
 /**
- * Is a winged body standing on the ground? It reads the GROUND and not
+ * Is a winged body standing on the ground — or on a box face, which is
+ * standing too? It reads the GROUND and not
  * the floor: a fly held at a pond's surface by `applyDemand`'s clamp is
  * over the water and stays in the air's way of moving, which is what
  * keeps it from being walked onto the bed. A ground the world cannot
  * price falls back to the word it is in.
  */
 function grounded(state: CreatureState, world: CreatureWorld): boolean {
+  // A body on a box face — a wall, the underside, the slab's top — is standing, not flying (Creature Lab D).
+  const boxes = solidsOf(world);
+  if (boxes !== null && faceIndexUnder(state.at, state.height, state.up, boxes) >= 0) return true;
   const ground = world.groundAt(state.at);
   if (!Number.isFinite(ground)) return !isAirborne(state.behaviour);
   return state.height <= ground + AIRBORNE_EPSILON;

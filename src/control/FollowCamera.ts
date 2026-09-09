@@ -43,11 +43,44 @@
  * and closes a loop (v0's `PlayerAnt.update`: "do not ask the follow
  * where it got to").
  *
- * WORLD-UP ALWAYS. The lens is aimed with `lookAt` about the world's up,
- * so no roll creeps in whatever the creature's pitch — a fly banking, a
- * worm nosing down. Surface traversal (a wall, an underside; the
- * brief's §14, Creature Lab D) is the phase that will want a camera
- * whose up is the surface's, and it is not this one.
+ * THE ORBIT IS OFF THE BODY'S UP (Creature Lab D; Joshua, 2026-09-09:
+ * "I tried crawling up the wall in the Queen and I got teleported to
+ * the top of it"). The target carries the unit normal of what it stands
+ * on (`FollowTarget.up`, `CreatureState.up`), and the orbit is measured
+ * off it: behind along the face, out along its normal, so the camera on
+ * an ant climbing a wall stands out from the wall and not inside it,
+ * and under an ant on the ceiling it hangs below. The bearing is one
+ * number measured in the up's own plane (`creatures/surface.ts`,
+ * `aheadOn`), so when the body wraps an edge and its up changes, the
+ * WANTED and the VIEW bearings are both re-expressed in the new frame
+ * by the same rotation the body's ahead was carried by (`rotateBetween`):
+ * behind the body before the edge is behind it after. But an edge is a
+ * quarter turn of the frame in one frame of the sim, and a quarter turn
+ * of the eye in one frame is the cut the brief forbids; so the lens
+ * carries a RESIDUAL rotation, the inverse of the edge's, that leaves
+ * the eye exactly where it was on the frame the body crosses and then
+ * eases to nothing with the time constant `UP_EASE_S`. It is a rotation
+ * and not an eased up-vector on purpose: the frame `aheadOn` builds on
+ * an up is the minimal rotation from +y, which is not the composition
+ * of two edges (a wall to the ceiling under it, one wall to the next),
+ * so a look re-expressed in the new frame and read through a half-eased
+ * up jumps by up to a right angle on the crossing frame. A residual
+ * rotation applied to the WHOLE new frame is continuous by construction,
+ * whatever the two faces. On the ground the residual is the identity,
+ * the view's up is `WORLD_UP` exactly and every line of the old
+ * arithmetic runs unchanged, which the old tests pin.
+ *
+ * THE LOOK-AT IS STILL ABOUT THE WORLD'S UP, normally: a fly banking, a
+ * worm nosing down, an ant on a wall — none of them rolls the picture,
+ * and an ant on the ceiling appears upside down, which is what it is.
+ * Only when the view runs within `VERTICAL_LOOK_DEGREES` of straight up
+ * or straight down is the world's up no longer an answer for `lookAt`,
+ * and the tangent the view runs along is used instead, so the picture
+ * is defined rather than left to a degenerate cross product. With
+ * `ELEVATION_MAX` where it is the orbit never reaches the vertical on
+ * any face — the eye under a ceiling at full elevation looks up some
+ * twenty degrees off the normal — so this is a guard on the arithmetic,
+ * not a look a player will see.
  *
  * THE HANDOFF (§4). `retarget` starts a `HANDOFF_S` blend from the pose
  * the lens is in NOW to the new creature's pose: a smoothstep, whose
@@ -74,7 +107,7 @@
  */
 import * as THREE from 'three';
 import { wrapHeading } from '../creatures/heading';
-import type { MutableVec3, Vec3 } from '../creatures/surface';
+import { FACE_NORMALS, WORLD_UP as SURFACE_UP, aheadOn, headingOn, rotateBetween, type MutableVec3, type Vec3 } from '../creatures/surface';
 import type { InputSnapshot } from '../input/Input';
 import { headingOfYaw, yawForHeading, type LookTuning } from '../perf/FreeFlyCamera';
 import type { CameraPose } from '../session/GameSession';
@@ -181,6 +214,29 @@ export const LOOK_HOLD_S = 1.5;
 export const DRIFT_TAU_S = 1.2;
 /** How long a switch between creatures takes to blend, seconds (the brief, §4: "camera hands off cleanly"). */
 export const HANDOFF_S = 0.4;
+/**
+ * The residual rotation an edge leaves on the lens eases to nothing
+ * with this time constant, seconds. GAME TUNING: an edge is a quarter
+ * turn, and a quarter turn of the eye in one frame is a cut; a quarter
+ * of a second is four time constants inside a second — under two
+ * degrees of a right angle left — so the eye is round the corner
+ * before the ant has taken two strides on the next face.
+ */
+export const UP_EASE_S = 0.25;
+/**
+ * Within this of straight up or down, degrees, the world's up is no
+ * longer an answer for `lookAt` and the view's own tangent is used
+ * (the header). GAME TUNING: `ELEVATION_MAX` keeps the eye seven degrees
+ * off the vertical and the view — aimed a length ahead of the body —
+ * some twenty, on every face, so nothing a player does reaches it.
+ */
+export const VERTICAL_LOOK_DEGREES = 5;
+/** The cosine of that angle: what the view's component along world up is compared with. */
+const VERTICAL_LOOK_COS = Math.cos((VERTICAL_LOOK_DEGREES * Math.PI) / 180);
+/** A residual whose half-angle's cosine is within this of one is the identity: under three microradians, snapped so an ease has an end. */
+const RESIDUAL_SETTLED = 1e-12;
+
+const IDENTITY = new THREE.Quaternion();
 
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
 
@@ -220,6 +276,23 @@ export class FollowCamera {
   private elevation = REST_ELEVATION;
   /** Seconds since the last drag; the drift starts at `LOOK_HOLD_S`. */
   private sinceLook = LOOK_HOLD_S;
+  /** The target's up as last seen, so a change of face — and the re-expression of both bearings — is detected by value. The frame the bearings are measured in. */
+  private readonly lastUp: MutableVec3 = { x: SURFACE_UP.x, y: SURFACE_UP.y, z: SURFACE_UP.z };
+  /** The residual rotation an edge left on the lens (the header): the identity on the ground and once an edge has eased away. */
+  private readonly residual = new THREE.Quaternion();
+  /** The view's up and ahead this frame: the target's frame turned by the residual. `WORLD_UP` and (sin h, 0, cos h) exactly on the ground. */
+  private readonly viewUp: MutableVec3 = { x: SURFACE_UP.x, y: SURFACE_UP.y, z: SURFACE_UP.z };
+  private readonly aheadView: MutableVec3 = { x: 0, y: 0, z: 0 };
+  /** Scratch for an edge: a direction carried across it, the new frame's three axes, and the rotation between the two frames. */
+  private readonly carried: MutableVec3 = { x: 0, y: 0, z: 0 };
+  private readonly e1: MutableVec3 = { x: 0, y: 0, z: 0 };
+  private readonly e2: MutableVec3 = { x: 0, y: 0, z: 0 };
+  private readonly e3: MutableVec3 = { x: 0, y: 0, z: 0 };
+  private readonly basis = new THREE.Matrix4();
+  private readonly edge = new THREE.Quaternion();
+  private readonly turned = new THREE.Vector3();
+  private readonly axisY = new THREE.Vector3();
+  private readonly axisZ = new THREE.Vector3();
   private look: LookTuning = { sensitivity: 1, invertY: false };
 
   /** Whether the lens has ever been placed: the first target is snapped to, not blended from the origin. */
@@ -253,20 +326,18 @@ export class FollowCamera {
 
   /**
    * THE WANTED LOOK AS A DIRECTION: the unit vector of the bearing the
-   * player is asking to look along, in the followed body's own surface
-   * frame — what `PlayerDemand.demandFromLook` projects the stick onto.
-   * The wanted bearing and not the lens's measured one, for the header's
+   * player is asking to look along, tangent to the lens's own up — what
+   * `PlayerDemand.demandFromLook` projects onto the body's face. The
+   * wanted bearing and not the lens's measured one, for the header's
    * reason (`yaw`). On the ground it is `(sin wantHeading, 0, cos
-   * wantHeading)`, the direction `headingOfYaw(yaw)` names; on a wall or
-   * a ceiling it is the same heading carried onto that face
-   * (`creatures/surface.ts`, `aheadOn`) — Creature Lab D's leaf; until
-   * it lands the horizontal reading stands.
+   * wantHeading)` exactly, the direction `headingOfYaw(yaw)` names; on a
+   * wall or a ceiling it is the same bearing carried onto that face
+   * (`creatures/surface.ts`, `aheadOn`) and turned by the residual an
+   * edge left, so across an edge it turns with the eye and never jumps.
    */
   wantedLook(into: MutableVec3): Vec3 {
-    into.x = Math.sin(this.wantHeading);
-    into.y = 0;
-    into.z = Math.cos(this.wantHeading);
-    return into;
+    aheadOn(this.lastUp, this.wantHeading, into);
+    return this.turnByResidual(into);
   }
 
   /** Whether a handoff blend is still running: a HUD may say so, a test does. */
@@ -318,6 +389,8 @@ export class FollowCamera {
     this.wantHeading = this.viewHeading = wrapHeading(target.heading);
     this.wantElevation = this.elevation = REST_ELEVATION;
     this.sinceLook = LOOK_HOLD_S;
+    // The frame snaps to the new creature's: the handoff blend covers the eye.
+    this.setUp(target.up);
   }
 
   /**
@@ -329,6 +402,30 @@ export class FollowCamera {
   update(dt: number, target: FollowTarget, look: LookDelta = NO_LOOK): void {
     if (!this.finiteTarget(target)) return;
     const step = Number.isFinite(dt) && dt > 0 ? dt : 0;
+
+    // 0. THE EDGE. A target whose up is not the one last seen has wrapped
+    // an edge (or is the first target this lens has ever had). A bearing
+    // is a number in its up's own plane, so both bearings are carried
+    // into the new frame by the rotation that carried the body's ahead
+    // — `h' = headingOn(new, R(old → new) · aheadOn(old, h))` — and the
+    // residual takes on the INVERSE of the rotation between the two
+    // frames, so the eye and the look are exactly where they were on
+    // this frame and ease round over `UP_EASE_S` (the header). Compared
+    // by value: the integrator hands out the shared frozen normals, but
+    // a copy must read the same.
+    const up = target.up;
+    const last = this.lastUp;
+    if (!this.hasPose) {
+      this.setUp(up);
+    } else if (up.x !== last.x || up.y !== last.y || up.z !== last.z) {
+      this.wantHeading = this.reexpress(last, up, this.wantHeading);
+      this.viewHeading = this.reexpress(last, up, this.viewHeading);
+      this.frameChange(last, up, this.edge);
+      this.residual.multiply(this.edge);
+      last.x = up.x;
+      last.y = up.y;
+      last.z = up.z;
+    }
 
     // 1. THE LOOK: the drag writes the wanted angles. Dragging right
     // turns the view clockwise, as it does on the free-fly camera
@@ -365,18 +462,40 @@ export class FollowCamera {
       this.elevation = this.wantElevation;
     }
 
+    // 3b. THE EASE OF THE RESIDUAL toward the identity: a slerp, which
+    // scales the angle an edge left by e^(−dt/τ) about the same axis.
+    // On the ground the residual IS the identity and nothing here runs.
+    const residual = this.residual;
+    if (step > 0 && residual.w !== 1) {
+      residual.slerp(IDENTITY, closes(step, UP_EASE_S));
+      if (1 - Math.abs(residual.w) < RESIDUAL_SETTLED) residual.identity();
+    }
+
     // 4. THE POSE, off the creature's live position: the eye on its
-    // orbit behind the view bearing, the aim a length ahead along it.
-    // `toLocal` is the one door from a world position to a rendered one.
+    // orbit behind the view bearing along the face and out along the
+    // face's up, both turned by the residual; the aim a length ahead
+    // along the face at the body's own height. On the ground `aheadView`
+    // is (sin h, 0, cos h) and the up (0, 1, 0), and these are the old
+    // sums to the bit. `toLocal` is the one door from a world position
+    // to a rendered one.
     const length = target.lengthUnits;
     const orbit = Math.max(MIN_ORBIT, ORBIT_LENGTHS * length);
     const here = toLocal(target.at);
-    const sin = Math.sin(this.viewHeading);
-    const cos = Math.cos(this.viewHeading);
+    const ahead = this.turnByResidual(aheadOn(up, this.viewHeading, this.aheadView));
+    const vu = this.viewUp;
+    vu.x = up.x;
+    vu.y = up.y;
+    vu.z = up.z;
+    this.turnByResidual(vu);
     const flat = Math.cos(this.elevation) * orbit;
     const rise = Math.sin(this.elevation) * orbit;
-    this.aim.set(here.lx + sin * AHEAD_LENGTHS * length, target.height, here.lz + cos * AHEAD_LENGTHS * length);
-    this.eye.set(here.lx - sin * flat, target.height + rise, here.lz - cos * flat);
+    const reach = AHEAD_LENGTHS * length;
+    this.aim.set(here.lx + ahead.x * reach, target.height + ahead.y * reach, here.lz + ahead.z * reach);
+    this.eye.set(
+      here.lx - ahead.x * flat + vu.x * rise,
+      target.height - ahead.y * flat + vu.y * rise,
+      here.lz - ahead.z * flat + vu.z * rise,
+    );
     let near = nearFor(orbit);
 
     // 5. THE HANDOFF: a smoothstep from the remembered pose to this one.
@@ -401,7 +520,19 @@ export class FollowCamera {
       if (this.blendT >= HANDOFF_S) this.blend = null;
     }
 
-    // 6. COMMIT.
+    // 6. COMMIT. The look-at is about the world's up — an ant on the
+    // ceiling appears upside down, which is what it is — unless the view
+    // runs within `VERTICAL_LOOK_DEGREES` of the vertical, where world up
+    // and the view are parallel and `lookAt` would have to invent a
+    // roll; then the tangent the view runs along is the up, and the
+    // picture is defined (the header).
+    this.dir.subVectors(this.aim, this.eye);
+    const along = this.dir.length();
+    if (along > 0 && Math.abs(this.dir.y) > VERTICAL_LOOK_COS * along) {
+      this.camera.up.set(ahead.x, ahead.y, ahead.z);
+    } else {
+      this.camera.up.copy(WORLD_UP);
+    }
     this.camera.position.copy(this.eye);
     this.camera.lookAt(this.aim);
     this.setNear(near);
@@ -454,9 +585,56 @@ export class FollowCamera {
     this.camera.updateProjectionMatrix();
   }
 
+  /** Snap the frame to a target's with no residual: a retarget, a first placement. */
+  private setUp(up: Vec3): void {
+    this.lastUp.x = up.x;
+    this.lastUp.y = up.y;
+    this.lastUp.z = up.z;
+    this.residual.identity();
+  }
+
+  /** A bearing measured in `from`'s plane, re-expressed in `to`'s: the same direction carried across the edge by the body's own rotation. */
+  private reexpress(from: Vec3, to: Vec3, heading: number): number {
+    aheadOn(from, heading, this.carried);
+    rotateBetween(from, to, this.carried, this.carried);
+    return headingOn(to, this.carried);
+  }
+
+  /**
+   * THE INVERSE OF THE EDGE, as a quaternion: the rotation that takes
+   * the new frame's axes back onto the old one's, so that applied to
+   * anything measured in the new frame it reads as it did in the old.
+   * Built from `rotateBetween` on the three axes and read off as a
+   * matrix, rather than from an axis and an angle restated here, so the
+   * one antiparallel choice `creatures/surface.ts` fixes is the one
+   * this lens makes too.
+   */
+  private frameChange(from: Vec3, to: Vec3, out: THREE.Quaternion): void {
+    const e1 = rotateBetween(from, to, FACE_NORMALS[0], this.e1);
+    const e2 = rotateBetween(from, to, FACE_NORMALS[2], this.e2);
+    const e3 = rotateBetween(from, to, FACE_NORMALS[4], this.e3);
+    this.basis.makeBasis(
+      this.turned.set(e1.x, e1.y, e1.z),
+      this.axisY.set(e2.x, e2.y, e2.z),
+      this.axisZ.set(e3.x, e3.y, e3.z),
+    );
+    out.setFromRotationMatrix(this.basis).conjugate();
+  }
+
+  /** `v` turned by the residual, in place. The identity leaves it untouched to the bit — the ground's case. */
+  private turnByResidual(v: MutableVec3): MutableVec3 {
+    if (this.residual.w === 1) return v;
+    this.turned.set(v.x, v.y, v.z).applyQuaternion(this.residual);
+    v.x = this.turned.x;
+    v.y = this.turned.y;
+    v.z = this.turned.z;
+    return v;
+  }
+
   private finiteTarget(target: FollowTarget): boolean {
     return Number.isFinite(target.at.wx) && Number.isFinite(target.at.wz)
       && Number.isFinite(target.height) && Number.isFinite(target.heading)
-      && Number.isFinite(target.lengthUnits) && target.lengthUnits > 0;
+      && Number.isFinite(target.lengthUnits) && target.lengthUnits > 0
+      && Number.isFinite(target.up.x) && Number.isFinite(target.up.y) && Number.isFinite(target.up.z);
   }
 }

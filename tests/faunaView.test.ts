@@ -25,6 +25,12 @@
  *   the trail is kept in world points: an origin shift moves the drawn
  *     body with the world
  *   a missing file is an honest box
+ *   A BODY ON A WALL (Creature Lab D): the rig's local +Y is the wall's
+ *     normal and local +Z the heading carried onto it; the drawn up
+ *     eases onto a new up within a second and settles exactly, and
+ *     snaps on lend; a climber walking straight up strides; the walk
+ *     bob is along the normal; the drawn centre is off the wall by the
+ *     rig's box half-extent — and on the ground nothing changed
  *   no clip is played and no die is rolled — source text
  *   dispose lets go of everything
  *   300 creatures cost what the brief allows
@@ -36,13 +42,14 @@ import * as THREE from 'three';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Assets } from '../src/assets/assets';
 import {
-  APHID, CREATURE_IDS, CREATURE_SPECIES, EARTHWORM, HOUSEFLY, newCreature, rigScale, unitsOfMm,
-  type Behaviour, type CreatureId, type CreatureState, type Tier,
+  APHID, CREATURE_IDS, CREATURE_SPECIES, EARTHWORM, FACE_NORMALS, HOUSEFLY, WORLD_UP, aheadOn, newCreature, rigScale, unitsOfMm,
+  type Behaviour, type CreatureId, type CreatureState, type Tier, type Vec3,
 } from '../src/creatures';
 import {
   BODY_SAMPLES, BURROW_HIDE, BURROW_KEEP, CRUMBS_PER_LENGTH, FaunaView, HYSTERESIS, LOOK, POOL_SIZES, REVEAL_HOLD,
   SPINE_TOLERANCE, impostorCapFor, poolSizeFor,
 } from '../src/fauna/FaunaView';
+import { UP_EASE_S } from '../src/fauna/motion';
 import { WING_FLAP } from '../src/fauna/wings';
 import { local, world, type LocalPoint, type WorldPoint } from '../src/world/coords';
 import { SOIL_TILE } from '../src/world/soilTypes';
@@ -995,6 +1002,166 @@ describe('the fly and the aphid', () => {
     for (const y of ys) expect(Math.abs(y - 25.5)).toBeLessThanOrEqual(body * LOOK.aphid.restBob + 1e-9);
     expect(Math.max(...ys) - Math.min(...ys)).toBeGreaterThan(0);
     expect(sway).toBeGreaterThan(0.01);
+  });
+});
+
+describe('a body on a wall', () => {
+  const EAST: Vec3 = FACE_NORMALS[0];
+  const CEILING: Vec3 = FACE_NORMALS[3];
+
+  function axis(root: THREE.Object3D, x: number, y: number, z: number): THREE.Vector3 {
+    return new THREE.Vector3(x, y, z).applyQuaternion(root.quaternion);
+  }
+
+  it('turns the rig so local +Y is the wall\'s normal and local +Z the heading carried onto it, from the first frame', async () => {
+    const v = await keep(view('ultra-low'));
+    for (const [up, heading] of [[EAST, 0.7], [EAST, -2.1], [CEILING, 0.3], [FACE_NORMALS[5], 1.9]] as const) {
+      const a = creature('aphid', 'a', 8, 0, { behaviour: 'wander', height: 110, heading });
+      a.up = up;
+      v.update([a], EYE, 1 / 60);
+      const root = v.rigs('aphid')[0];
+      expect(root.visible).toBe(true);
+      const y = axis(root, 0, 1, 0);
+      const z = axis(root, 0, 0, 1);
+      const ahead = aheadOn(up, heading, { x: 0, y: 0, z: 0 });
+      expect(y.x).toBeCloseTo(up.x, 9); expect(y.y).toBeCloseTo(up.y, 9); expect(y.z).toBeCloseTo(up.z, 9);
+      expect(z.x).toBeCloseTo(ahead.x, 9); expect(z.y).toBeCloseTo(ahead.y, 9); expect(z.z).toBeCloseTo(ahead.z, 9);
+      // Lent with this up: the drawn up IS the state's, no ease.
+      const drawn = v.drawnUps('aphid')[0];
+      expect(drawn.x).toBe(up.x); expect(drawn.y).toBe(up.y); expect(drawn.z).toBe(up.z);
+      // Placed on the body's point, and the aphid's resting breath (`LOOK.aphid.restBob`) is ALONG THE NORMAL:
+      // exact on the two axes across the face, within the breath along it.
+      const breath = unitsOfMm(APHID.lengthMm) * LOOK.aphid.restBob + 1e-9;
+      for (const [axisName, want, n] of [['x', 8, up.x], ['y', 110, up.y], ['z', 0, up.z]] as const) {
+        const got = root.position[axisName];
+        if (n === 0) expect(got, axisName).toBeCloseTo(want, 9);
+        else expect(Math.abs(got - want), axisName).toBeLessThanOrEqual(breath);
+      }
+      v.update([], EYE, 1 / 60);
+    }
+    // And on the ground the frame is the old yaw: rotation.y the heading, x and z zero.
+    const g = creature('aphid', 'g', 8, 0, { behaviour: 'wander', height: 0, heading: 1.3 });
+    v.update([g], EYE, 1 / 60);
+    const root = v.rigs('aphid')[0];
+    expect(root.rotation.y).toBeCloseTo(1.3, 9);
+    expect(root.rotation.x).toBeCloseTo(0, 9);
+    expect(root.rotation.z).toBeCloseTo(0, 9);
+    expect(v.drawnUps('aphid')[0].y).toBe(1);
+  });
+
+  it('EASES THE UP round an edge — within a second, settling exactly — with the heading never eased, and SNAPS it on lend', async () => {
+    const v = await keep(view('ultra-low'));
+    const a = creature('aphid', 'a', 8, 0, { behaviour: 'wander', height: 100, heading: 0.4 });
+    // On the ground first, so the rig holds it with WORLD_UP drawn.
+    v.update([a], EYE, 1 / 60);
+    const root = v.rigs('aphid')[0];
+    const drawn = v.drawnUps('aphid')[0];
+    expect(drawn.y).toBe(1);
+    // The edge: the state's up becomes the east wall's in one frame, and the heading turns too.
+    a.up = EAST;
+    a.heading = -1.2;
+    v.update([a], EYE, 1 / 60);
+    // Not a cut: after one frame the drawn up has barely left +y...
+    expect(axis(root, 0, 1, 0).y).toBeGreaterThan(0.9);
+    expect(drawn.x).toBeGreaterThan(0);
+    // ...but the HEADING is the state's already: the ahead is aheadOn(EAST, −1.2) carried onto the drawn up, so it is
+    // the state's ahead turned by the small rotation between the two ups — within that angle of it.
+    const ahead = aheadOn(EAST, -1.2, { x: 0, y: 0, z: 0 });
+    const z = axis(root, 0, 0, 1);
+    const upAngle = Math.acos(Math.min(1, drawn.dot(new THREE.Vector3(1, 0, 0))));
+    expect(Math.acos(Math.min(1, z.dot(new THREE.Vector3(ahead.x, ahead.y, ahead.z))))).toBeLessThanOrEqual(upAngle + 1e-9);
+    // Within a second: within a degree of the wall's normal; by one and a half, exactly it.
+    for (let k = 0; k < 59; k += 1) v.update([a], EYE, 1 / 60);
+    expect(axis(root, 0, 1, 0).distanceTo(new THREE.Vector3(1, 0, 0))).toBeLessThan(Math.PI / 180);
+    for (let k = 0; k < 30; k += 1) v.update([a], EYE, 1 / 60);
+    expect(drawn.x).toBe(1); expect(drawn.y).toBe(0); expect(drawn.z).toBe(0);
+    const zSettled = axis(root, 0, 0, 1);
+    expect(zSettled.x).toBeCloseTo(ahead.x, 9); expect(zSettled.y).toBeCloseTo(ahead.y, 9); expect(zSettled.z).toBeCloseTo(ahead.z, 9);
+    expect(UP_EASE_S).toBeLessThan(0.5);
+    // A rig handed over snaps: release it, lend it to a body on the ceiling — the first frame is exact.
+    v.update([], EYE, 1 / 60);
+    expect(v.holders('aphid')).toEqual([null, null]);
+    const c = creature('aphid', 'c', 8, 0, { behaviour: 'wander', height: 112, heading: 2 });
+    c.up = CEILING;
+    v.update([c], EYE, 1 / 60);
+    const held = v.holders('aphid').indexOf('c');
+    expect(held).toBeGreaterThanOrEqual(0);
+    const d = v.drawnUps('aphid')[held];
+    expect(d.x).toBe(0); expect(d.y).toBe(-1); expect(d.z).toBe(0);
+    expect(axis(v.rigs('aphid')[held], 0, 1, 0).y).toBeCloseTo(-1, 9);
+  });
+
+  it('STRIDES when walking straight up a wall — the measured motion is 3-D — and bobs along the normal, not up', async () => {
+    const v = await keep(view('ultra-low'));
+    const a = creature('aphid', 'a', 8, 0, { behaviour: 'wander', height: 100, heading: 0 });
+    a.up = EAST;
+    v.update([a], EYE, 1 / 60);
+    const root = v.rigs('aphid')[0];
+    const legs = v.anatomy('aphid')!.legs.map((l) => ({ bone: root.getObjectByName(l.coxa) as THREE.Bone, rest: l.rest }));
+    // Straight up the wall at the wander pace: the point on the plane never moves.
+    const body = unitsOfMm(APHID.lengthMm);
+    const step = unitsOfMm(APHID.pace.wanderMmS) / 60;
+    let swing = 0;
+    let bobOut = 0;
+    for (let k = 0; k < 120; k += 1) {
+      a.height += step;
+      v.update([a], EYE, 1 / 60);
+      for (const l of legs) swing = Math.max(swing, l.bone.quaternion.angleTo(l.rest));
+      // The bob is along +x, the wall's normal: the drawn y is the body's height exactly, x is out from the wall.
+      expect(root.position.y).toBe(a.height);
+      expect(root.position.z).toBeCloseTo(0, 12);
+      expect(root.position.x).toBeGreaterThanOrEqual(8);
+      bobOut = Math.max(bobOut, root.position.x - 8);
+    }
+    const m = v.motionOf('aphid', 0)!;
+    expect(m.moving).toBeGreaterThan(0.9);
+    expect(m.gone).toBeCloseTo(step * 120, 9);
+    // Two seconds at 4.1 strides a second: about eight strides.
+    expect(m.strides).toBeGreaterThan(7.5);
+    expect(m.strides).toBeLessThan(8.7);
+    expect(swing).toBeGreaterThan(0.15);
+    expect(bobOut).toBeGreaterThan(0);
+    expect(bobOut).toBeLessThan(body * 0.1);
+    // And on the ground the same walk bobs UP, and the drawn x is the body's exactly.
+    v.update([], EYE, 1 / 60);
+    const g = creature('aphid', 'g', 8, 0, { behaviour: 'wander', height: 0, heading: 0 });
+    let bobUp = 0;
+    for (let k = 0; k < 120; k += 1) {
+      g.at = world(8, g.at.wz + step);
+      v.update([g], EYE, 1 / 60);
+      const r = v.rigs('aphid')[v.holders('aphid').indexOf('g')];
+      expect(r.position.x).toBe(toLocal(g.at).lx);
+      bobUp = Math.max(bobUp, r.position.y);
+    }
+    expect(bobUp).toBeGreaterThan(0);
+    expect(bobUp).toBeCloseTo(bobOut, 6);
+  });
+
+  it('draws the centre off the wall by the rig\'s box half-extent along the normal, where the pick ray finds it', async () => {
+    const v = await keep(view('ultra-low'));
+    const a = creature('aphid', 'a', 8, 0, { behaviour: 'idle', height: 100, heading: 1 });
+    a.up = EAST;
+    v.update([a], EYE, 1 / 60);
+    const root = v.rigs('aphid')[0];
+    const box = v.anatomy('aphid')!.box;
+    const scale = root.scale.x;
+    const p = v.positionOf('a')!.clone();
+    const off = p.clone().sub(root.position);
+    // Along the normal: the box centre's y (the synthetic rig's feet are at y = 0, so half its height), scaled.
+    expect(off.x).toBeCloseTo(((box.min.y + box.max.y) / 2) * scale, 9);
+    expect(off.x).toBeGreaterThan(0);
+    // Along the heading: the box centre's z, scaled — the same number a body on the ground shows in its heading.
+    const ahead = aheadOn(EAST, 1, { x: 0, y: 0, z: 0 });
+    expect(off.dot(new THREE.Vector3(ahead.x, ahead.y, ahead.z))).toBeCloseTo(((box.min.z + box.max.z) / 2) * scale, 9);
+    // The same animal on the ground: the same offsets, in the ground's frame.
+    v.update([], EYE, 1 / 60);
+    const g = creature('aphid', 'g', 8, 0, { behaviour: 'idle', height: 0, heading: 1 });
+    v.update([g], EYE, 1 / 60);
+    const rg = v.rigs('aphid')[v.holders('aphid').indexOf('g')];
+    const offG = v.positionOf('g')!.clone().sub(rg.position);
+    expect(offG.y).toBeCloseTo(off.x, 9);
+    expect(offG.dot(new THREE.Vector3(Math.sin(1), 0, Math.cos(1)))).toBeCloseTo(((box.min.z + box.max.z) / 2) * scale, 9);
+    expect(WORLD_UP.y).toBe(1);
   });
 });
 

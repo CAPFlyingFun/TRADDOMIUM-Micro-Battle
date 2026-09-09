@@ -4,15 +4,19 @@
  * through the one integrator, its senses still run, and release hands it
  * back where it stands with the same id and the same needs. The player's
  * helpers in `demand.ts` — `wordFor` and `playerDemand` — are legal for
- * every species at every corner of the intent.
+ * every species at every corner of the intent. And the block is the
+ * world's (Creature Lab D): a possessed climber driven into the pillar
+ * climbs it at its walking pace and reaches the underside feet up, UP
+ * from there is a takeoff with the world's up, and the worm walks under
+ * the slab and never onto anything.
  */
 import { describe, expect, it } from 'vitest';
 import { playerId } from '../src/actor/PlayerId';
 import { NEUTRAL_INTENT, type Intent } from '../src/input/Intent';
 import {
-  APHID, BLOCK, CREATURE_SPECIES, ControlLedger, CreatureSim, EARTHWORM, HOUSEFLY, LAB_CREATURE_IDS, LAB_PLANTS, LAB_SEED, LAB_SITES,
-  LITTER_CORNER, PROTEIN_SPOT, QUEEN, WORKER, behaviourAllowedFor, createLabWorld, labSpawns, newCreature, newMutableIntent,
-  paceRatio, playerDemand, sizeRatio, unitsOfMm, wordFor,
+  APHID, CREATURE_SPECIES, ControlLedger, CreatureSim, EARTHWORM, HOUSEFLY, LAB_CLIMBABLES, LAB_CREATURE_IDS, LAB_FLOOR, LAB_PLANTS,
+  LAB_SEED, LAB_SITES, LITTER_CORNER, PILLAR_BOX, PROTEIN_SPOT, QUEEN, SLAB_BOX, SURFACE_SKIN, WORKER, WORLD_UP, behaviourAllowedFor,
+  createLabWorld, faceUnder, labSpawns, newCreature, newMutableIntent, paceRatio, playerDemand, sizeRatio, unitsOfMm, wordFor,
   type Behaviour, type CreatureId, type CreatureSpecies, type CreatureState, type LabWorld, type NewCreatureOptions,
 } from '../src/creatures';
 import { distance, world, type WorldPoint } from '../src/world/coords';
@@ -639,22 +643,112 @@ describe('playerDemand', () => {
   });
 });
 
-describe('the block and the box are the world\'s, not the possession\'s', () => {
-  it('a possessed queen walked onto the block top stands on it — the ground rule, as it is for the AI', () => {
+describe('the block is the world\'s, not the possession\'s: a possessed climber walks up it and a possessed worm ignores it', () => {
+  /** The furthest a body's height may move in one frame at its walking pace: the no-jump bound on a wall. */
+  function heightBound(c: CreatureState, species: CreatureSpecies): number {
+    return unitsOfMm(species.pace.wanderMmS * paceRatio(c, species)) * DT + 2 * SURFACE_SKIN;
+  }
+
+  it('a possessed queen driven forward climbs the pillar at her walking pace — never a jump to the top — reaches the underside upside down, and UP from there puts her in the air with the world\'s up', () => {
     const l = lab(['queen']);
     const queen = l.by.get('queen')!;
+    expect(QUEEN.climber).toBe(true);
+    expect(l.world.climbables).toBe(LAB_CLIMBABLES);
     l.control.possess(queen.id, A);
-    // She spawns east of the block facing it (heading −π/2: ahead is −X).
+    // She spawns east of the block facing it (heading −π/2: ahead is −X), on the floor.
     expect(queen.heading).toBeCloseTo(-Math.PI / 2, 9);
+    expect(queen.up).toBe(WORLD_UP);
+    expect(queen.height).toBe(LAB_FLOOR);
     l.intent = FORWARD;
-    let onTop = false;
-    run(l, 10, () => {
-      if (Math.abs(queen.at.wx) <= BLOCK.size / 2 && Math.abs(queen.at.wz) <= BLOCK.size / 2) {
-        onTop = true;
-        expect(queen.height).toBe(l.world.groundAt(queen.at));
-      }
+    const ups: string[] = ['ground'];
+    let highest = LAB_FLOOR;
+    let last = { at: queen.at, height: queen.height };
+    run(l, 12, () => {
+      // No teleport, in either dimension, on any frame.
+      expect(distance(queen.at, last.at)).toBeLessThanOrEqual(planeBound(queen, QUEEN));
+      expect(Math.abs(queen.height - last.height)).toBeLessThanOrEqual(heightBound(queen, QUEEN));
+      last = { at: queen.at, height: queen.height };
+      highest = Math.max(highest, queen.height);
+      const word = queen.up === WORLD_UP ? 'ground' : queen.up.y < -0.5 ? 'ceiling' : queen.up.x > 0.5 ? '+x wall' : 'other';
+      if (ups[ups.length - 1] !== word) ups.push(word);
+      expect(queen.behaviour).toBe('wander');
+      expect(faceUnder(queen.at, queen.height, queen.up, LAB_CLIMBABLES) === null).toBe(queen.up === WORLD_UP && queen.height === LAB_FLOOR);
     });
-    expect(onTop).toBe(true);
+    // Floor → the pillar's east wall → the underside (feet up) and, at her pace, no further in twelve seconds.
+    expect(ups).toEqual(['ground', '+x wall', 'ceiling']);
+    expect(queen.up.y).toBe(-1);
+    expect(queen.height).toBeCloseTo(LAB_FLOOR + 12, 5);
+    expect(highest).toBeLessThanOrEqual(LAB_FLOOR + 12 + 1e-6);
+    expect(queen.at.wx).toBeGreaterThan(PILLAR_BOX.max.x);
+    expect(queen.at.wx).toBeLessThan(SLAB_BOX.max.x);
+    // Twelve seconds of walking is twelve seconds of path: the climb was walked, not skipped.
+    const pace = paceRatio(queen, QUEEN) * unitsOfMm(QUEEN.pace.wanderMmS);
+    const walked = (14 - PILLAR_BOX.max.x) + 12 + (queen.at.wx - PILLAR_BOX.max.x);
+    expect(walked).toBeCloseTo(pace * 12, 2);
+
+    // UP from the underside: a takeoff, in the air, feet down again.
+    l.intent = { ...NEUTRAL_INTENT, vertical: 1 };
+    l.sim.update(FOCUS, DT);
+    expect(queen.behaviour).toBe('takeoff');
+    expect(queen.up).toBe(WORLD_UP);
+    run(l, 1);
+    expect(['takeoff', 'fly']).toContain(queen.behaviour);
+    expect(queen.up).toBe(WORLD_UP);
+    expect(queen.height).toBeGreaterThan(LAB_FLOOR + 12);
+    expect(Number.isFinite(queen.height)).toBe(true);
+  });
+
+  it('a possessed queen on the slab\'s top walks off the edge and down the wall; a possessed worker climbs too; the worm walks under the slab and never onto anything', () => {
+    const l = lab(['queen', 'worker', 'earthworm']);
+    const queen = l.by.get('queen')!;
+    const worker = l.by.get('worker')!;
+    const worm = l.by.get('earthworm')!;
+    // Put her on the top, facing east, by the state's own rule: replaced, never mutated.
+    queen.at = world(0, 0);
+    queen.height = SLAB_BOX.max.y + SURFACE_SKIN;
+    queen.heading = Math.PI / 2;
+    l.control.possess(queen.id, A);
+    l.intent = FORWARD;
+    let onWall = false;
+    let last = queen.height;
+    run(l, 8, () => {
+      expect(Math.abs(queen.height - last)).toBeLessThanOrEqual(heightBound(queen, QUEEN));
+      last = queen.height;
+      if (queen.up.x > 0.5) onWall = true;
+    });
+    expect(onWall).toBe(true);
+    expect(queen.height).toBeLessThan(SLAB_BOX.max.y);
     expect(queen.behaviour).toBe('wander');
+
+    // The worker, put on the floor south of the pillar facing it (heading π: ahead is (0, −1), north toward the origin), climbs its south wall.
+    worker.at = world(0, PILLAR_BOX.max.z + 4);
+    worker.height = LAB_FLOOR;
+    worker.heading = Math.PI;
+    l.control.possess(worker.id, A);
+    expect(WORKER.climber).toBe(true);
+    let climbed = false;
+    run(l, 15, () => {
+      if (worker.up.z > 0.5) climbed = true;
+      expect(worker.behaviour).toBe('wander');
+    });
+    expect(climbed).toBe(true);
+    expect(worker.height).toBeGreaterThan(LAB_FLOOR + 1);
+
+    // The worm: no feet, no climbing. Surfaced and driven straight through the block's footprint, it stays in the ground's rule.
+    expect(EARTHWORM.climber).toBe(false);
+    worm.at = world(0, 30);
+    worm.height = LAB_FLOOR;
+    worm.heading = Math.PI;
+    worm.behaviour = 'surface';
+    l.control.possess(worm.id, A);
+    l.intent = { ...FORWARD, vertical: 1 };
+    run(l, 30, () => {
+      expect(worm.up).toBe(WORLD_UP);
+      expect(worm.height).toBeLessThanOrEqual(LAB_FLOOR + 1e-9);
+      expect(worm.height).toBeGreaterThanOrEqual(LAB_FLOOR - unitsOfMm(EARTHWORM.burrow!.underMm) - 1e-9);
+    });
+    // Its target stays null and it went somewhere: through the footprint, on the floor.
+    expect(worm.target).toBeNull();
+    expect(worm.at.wz).toBeLessThan(30);
   });
 });

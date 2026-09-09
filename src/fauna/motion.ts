@@ -73,6 +73,54 @@
  * it; in a one-metre box with the animal possessed, a pronk is not a
  * walk. `−side × protraction` puts both feet of a pair forward on +1.
  *
+ * ─── the stride is counted, not divided out of the distance ─────────
+ *
+ * `RigMotion.strides` is how many stride cycles the body has walked,
+ * advanced each frame by the distance walked over the stride the
+ * measured SPEED takes (`gait.strideLengthsAt` — the header there has
+ * Joshua's aphid and the biology). Every poser that beats with the
+ * stride — the legs, the walk bob, the gaster's bounce, the antennae's
+ * tap — reads that count; `gone`, the raw distance, stays for whatever
+ * wants a distance. A count only advances with distance, so a stopped
+ * animal still has still feet.
+ *
+ * ─── the root's frame is an up and a heading, not a yaw ─────────────
+ *
+ * Joshua, 2026-09-09: "All the insects besides the worm need to be able
+ * to climb vertical and upside down while sticking to the surface."
+ * A body on a wall has `CreatureState.up` = the wall's normal and its
+ * heading measured in the wall's plane (`creatures/surface.ts`,
+ * `aheadOn`). The root quaternion is built from that basis — local +Z
+ * the ahead, local +Y the up, local +X = up × ahead, the animal's LEFT,
+ * which is the rigs' +X side (`gait.ts`) — and the flight attitude is
+ * applied AFTER it as local turns in the sense the old Euler had: nose
+ * up a negative turn about the body's X, then the bank about the body's
+ * Z. For `up = WORLD_UP` the basis is the yaw about +y and the
+ * composition is the old `Euler(−pitch, heading, bank, 'YXZ')` to 1e-12
+ * (`tests/faunaPose.test.ts` pins it), so nothing on the island turns
+ * differently.
+ *
+ * THE UP IS EASED, THE HEADING IS NOT. The simulation's up changes by a
+ * quarter turn in one frame at an edge and by a half at a takeoff from
+ * a ceiling, and a body that snapped with it would be the "world-up
+ * recovery" the brief forbids. So each rig keeps a `drawnUp` turned
+ * toward the state's up with the time constant `UP_EASE_S` (`easeUp`),
+ * and the basis is built from THAT, with the heading CARRIED into it:
+ * `drawnAhead` is `aheadOn(up, heading)` rotated by the one rotation
+ * from the state's up to the drawn one (`rotateBetween`), which is the
+ * rotation the body's own ahead was carried round the edge by. The
+ * heading itself is never eased — a possessed ant's turn must not trail
+ * the simulation — and when the drawn up IS the state's up, which is
+ * every frame on the ground and the steady state on a face, the carry
+ * is the identity and the basis is exact with no lag. The ease turns
+ * about the two ups' common perpendicular rather than lerping between
+ * them, because a lerp from the ceiling's up to the ground's passes
+ * through zero and a normalised zero is a snap; opposite ups turn about
+ * the axis `rotateBetween` fixes for that case, so a takeoff from the
+ * ceiling rolls the same way every time. Within `UP_SETTLED` of the
+ * target the drawn up is SET to it, so the exact basis is reached and
+ * not merely approached.
+ *
  * ─── wings ──────────────────────────────────────────────────────────
  *
  * The wings are `wings.ts`: the yaw rule that folds a rig baked spread
@@ -119,12 +167,13 @@
  * rotation is a bone's local quaternion.
  */
 import * as THREE from 'three';
-import { STRIDES_PER_LENGTH as GAIT_STRIDES_PER_LENGTH, legCycle, lift as gaitLift, protraction, strideCycle } from './gait';
+import { aheadOn, rotateBetween, type MutableVec3, type Vec3 } from '../creatures';
+import { STRIDES_PER_LENGTH as GAIT_STRIDES_PER_LENGTH, legCycle, lift as gaitLift, protraction, strideCycle, strideLengthsAt } from './gait';
 import type { AntennaSpec, ChainSpec, JawSpec, JointSpec, LegSpec } from './rig';
 
 /** How far a leg swings, radians. GAME TUNING (TCS, measured in the creature's frame). */
 export const LEG_SWING = 0.22;
-/** Full strides per body length travelled — `gait.ts`'s number, re-exported for the bobs that count strides. */
+/** Full strides per body length at the full stride — `gait.ts`'s number, re-exported for the readers that pin it; the posers count strides now. */
 export const STRIDES_PER_LENGTH = GAIT_STRIDES_PER_LENGTH;
 /** How far the femur pitches to lift a swinging foot, radians. GAME TUNING: enough to clear the ground, not a high step. */
 export const LEG_LIFT = 0.18;
@@ -184,6 +233,20 @@ export const BANK_MAX = 0.8;
 /** Seconds the attitude takes to follow its target — a smoothing, so a sim step does not snap the body. GAME TUNING. */
 export const ATTITUDE_EASE_S = 0.15;
 /**
+ * Seconds the drawn up takes to turn onto the state's up after an edge
+ * or a takeoff from a ceiling. GAME TUNING at the attitude ease's order:
+ * an edge is a quarter turn, a takeoff from the ceiling a half, and a
+ * snap is the thing the brief forbids (the header).
+ */
+export const UP_EASE_S = 0.15;
+/**
+ * The chord within which the drawn up is set exactly to the state's up:
+ * two thousandths — about a tenth of a degree, invisible — reached from
+ * a quarter turn in about a second at `UP_EASE_S`. GAME TUNING of a
+ * tolerance, so the exact basis arrives rather than being approached.
+ */
+export const UP_SETTLED = 2e-3;
+/**
  * Speed, in body lengths a second, above which the animal counts as
  * moving; the lever eases over this many seconds. GAME TUNING, set
  * under the slowest walker: a worm's 3 mm/s wander is 0.02 of its
@@ -198,8 +261,10 @@ export const MOVING_EASE_S = 0.1;
  * simulation.
  */
 export interface RigMotion {
-  /** World units travelled while lent — what drives the gait. */
+  /** World units travelled while lent — the raw distance, for whatever wants one. */
   gone: number;
+  /** Stride cycles walked while lent — what drives the gait, the bobs and the antennae's tap (the header). */
+  strides: number;
   /** Seconds lent — what drives the idle clocks and the wingbeat. */
   alive: number;
   /** 0..1 levers, eased: moving, and in the air. */
@@ -220,12 +285,12 @@ export interface RigMotion {
 }
 
 export function newMotion(): RigMotion {
-  return { gone: 0, alive: 0, moving: 0, air: 0, pitch: 0, bank: 0, bite: 0, feed: 0, biteS: -1, bites: 0, turnRate: 0 };
+  return { gone: 0, strides: 0, alive: 0, moving: 0, air: 0, pitch: 0, bank: 0, bite: 0, feed: 0, biteS: -1, bites: 0, turnRate: 0 };
 }
 
 /** Put a motion back to the moment of lending, in one place, so a rig handed on forgets its last holder entirely. */
 export function resetMotion(m: RigMotion, airborne: boolean): void {
-  m.gone = 0; m.alive = 0; m.moving = 0; m.air = airborne ? 1 : 0; m.pitch = 0; m.bank = 0;
+  m.gone = 0; m.strides = 0; m.alive = 0; m.moving = 0; m.air = airborne ? 1 : 0; m.pitch = 0; m.bank = 0;
   m.bite = 0; m.feed = 0; m.biteS = -1; m.bites = 0; m.turnRate = 0;
 }
 
@@ -233,7 +298,14 @@ export function resetMotion(m: RigMotion, airborne: boolean): void {
 export interface MotionSignals {
   /** Seconds this frame. */
   readonly dt: number;
-  /** World units moved on the plane this frame, and in height. */
+  /**
+   * World units moved this frame: ALONG THE SURFACE, in three
+   * dimensions, for a legged rig — a wall-climber walks straight up
+   * with no planar travel and its legs must not stop — and on the
+   * plane for the worm's chain, whose trail is planar. `climbed` is the
+   * change in height, signed; the planar part the flight pitch reads
+   * is derived from the two (`stepMotion`).
+   */
   readonly moved: number;
   readonly climbed: number;
   /** Radians the heading changed this frame, wrapped. */
@@ -262,13 +334,23 @@ export function stepMotion(m: RigMotion, s: MotionSignals): void {
   m.gone += s.moved;
   m.alive += dt;
   const speed = dt > 0 ? s.moved / dt : 0;
+  // THE STRIDE COUNT: the distance in bodies over the stride the speed
+  // takes (`gait.strideLengthsAt`, never zero). No distance, no stride.
+  const bodyLength = Math.max(1e-6, s.bodyLength);
+  const lengths = s.moved / bodyLength;
+  m.strides += lengths / strideLengthsAt(speed / bodyLength);
   const movingNow = speed > MOVING_AT * s.bodyLength ? 1 : 0;
   m.moving = ease(m.moving, movingNow, MOVING_EASE_S, dt);
   m.air = ease(m.air, s.airborne ? 1 : 0, AIR_EASE_S, dt);
-  // Attitude follows the measured climb and turn, and only counts in the air.
+  // Attitude follows the measured climb and turn, and only counts in the
+  // air. The pitch is the climb against the PLANAR speed, derived from
+  // the 3-D distance and the climb so a fly's pitch is the number it was
+  // when `moved` was planar.
   const climbRate = dt > 0 ? s.climbed / dt : 0;
+  const planar = Math.sqrt(Math.max(0, s.moved * s.moved - s.climbed * s.climbed));
+  const planarSpeed = dt > 0 ? planar / dt : 0;
   const turnRate = dt > 0 ? s.turned / dt : 0;
-  const pitchTarget = clamp(Math.atan2(climbRate, Math.max(speed, 1e-6)) * PITCH_GAIN, -PITCH_MAX, PITCH_MAX) * m.air;
+  const pitchTarget = clamp(Math.atan2(climbRate, Math.max(planarSpeed, 1e-6)) * PITCH_GAIN, -PITCH_MAX, PITCH_MAX) * m.air;
   // A heading grows anticlockwise (a left turn, facing +Z); banking into
   // it drops the +X side, which is a negative roll about the body's +Z.
   const bankTarget = clamp(-turnRate * BANK_PER_RAD_S, -BANK_MAX, BANK_MAX) * m.air;
@@ -316,6 +398,7 @@ const _z = new THREE.Vector3();
 const _m = new THREE.Matrix4();
 const UP = new THREE.Vector3(0, 1, 0);
 const FORWARD = new THREE.Vector3(0, 0, 1);
+const X_AXIS = new THREE.Vector3(1, 0, 0);
 
 /** A bone with the spec it was found by, resolved on one clone. */
 export interface BoundLeg { readonly bone: THREE.Bone; readonly spec: LegSpec; readonly femur: THREE.Bone | null }
@@ -332,8 +415,9 @@ export interface BoundJoint { readonly bone: THREE.Bone; readonly spec: JointSpe
  * The femur, where the chain has one, pitches about the leg's own
  * sideways by the swing's lift, so a foot in the air clears the ground.
  */
-export function poseLegs(legs: readonly BoundLeg[], m: RigMotion, bodyLength: number, phase: number): void {
-  const cycle = strideCycle(m.gone / Math.max(1e-6, bodyLength), phase);
+export function poseLegs(legs: readonly BoundLeg[], m: RigMotion, _bodyLength: number, phase: number): void {
+  // The strides walked, counted by the view at the speed's own stride length (the header); the body length is in the count.
+  const cycle = strideCycle(m.strides, phase);
   const stir = (m.alive * IDLE_RATE + phase) * Math.PI * 2;
   const ground = 1 - m.air;
   for (const { bone, spec, femur } of legs) {
@@ -359,8 +443,8 @@ export function poseLegs(legs: readonly BoundLeg[], m: RigMotion, bodyLength: nu
  * tap at the stride rate while walking — feelers that beat the ground
  * ahead — mixed by the moving lever.
  */
-export function poseAntennae(antennae: readonly BoundAntenna[], m: RigMotion, phase: number, bodyLength: number = 1): void {
-  const strides = (m.gone / Math.max(1e-6, bodyLength)) * STRIDES_PER_LENGTH + phase;
+export function poseAntennae(antennae: readonly BoundAntenna[], m: RigMotion, phase: number, _bodyLength: number = 1): void {
+  const strides = m.strides + phase;
   for (const { bone, spec } of antennae) {
     const rate = spec.side > 0 ? ANTENNA_RATE : ANTENNA_RATE_OTHER;
     const wander = Math.sin((m.alive * rate + phase) * Math.PI * 2 + spec.side) * ANTENNA_SWAY * (1 - m.moving);
@@ -436,9 +520,9 @@ export function poseHead(head: BoundJoint | null, m: RigMotion, phase: number): 
  * about the body's X pitches the tip down — the sting posture), a slow
  * bob at rest, a small bounce at the stride rate walking.
  */
-export function poseGaster(gaster: BoundJoint | null, m: RigMotion, bodyLength: number, phase: number): void {
+export function poseGaster(gaster: BoundJoint | null, m: RigMotion, _bodyLength: number, phase: number): void {
   if (gaster === null) return;
-  const strides = (m.gone / Math.max(1e-6, bodyLength)) * STRIDES_PER_LENGTH + phase;
+  const strides = m.strides + phase;
   const pitch = m.bite * GASTER_BITE_CURL
     + Math.sin((m.alive * GASTER_BOB_RATE + phase) * Math.PI * 2) * GASTER_BOB * (1 - m.moving)
     + Math.sin(strides * Math.PI * 4) * GASTER_STRIDE_BOUNCE * m.moving * (1 - m.air);
@@ -448,13 +532,105 @@ export function poseGaster(gaster: BoundJoint | null, m: RigMotion, bodyLength: 
 
 /** The walking bob, world units above the ground: highest mid-stride, twice a stride cycle. */
 export function walkBob(m: RigMotion, bodyLength: number, phase: number): number {
-  const strides = (m.gone / Math.max(1e-6, bodyLength)) * STRIDES_PER_LENGTH + phase;
+  const strides = m.strides + phase;
   return Math.abs(Math.sin(strides * Math.PI)) * bodyLength * WALK_BOB * m.moving * (1 - m.air);
 }
 
 /** A resting bob for an animal that sits and breathes, world units. `amplitude` is a fraction of the body length. */
 export function restBob(m: RigMotion, bodyLength: number, phase: number, amplitude: number, rate: number): number {
   return Math.sin((m.alive * rate + phase) * Math.PI * 2) * bodyLength * amplitude * (1 - m.moving) * (1 - m.air);
+}
+
+// ---------------------------------------------------------------------------
+// The root's frame: an eased up, a carried heading, a basis (the header)
+// ---------------------------------------------------------------------------
+
+/** Scratch for the frame: the turning axis, the carried ahead, the basis' left, the local attitude turns. Never escape. */
+const _axis = new THREE.Vector3();
+const _left = new THREE.Vector3();
+const _aheadV = new THREE.Vector3();
+const _upV = new THREE.Vector3();
+const _carried: MutableVec3 = { x: 0, y: 0, z: 0 };
+
+/** Two ups within `UP_SETTLED` of each other, by chord. */
+function settled(drawn: THREE.Vector3, up: Vec3): boolean {
+  const dx = drawn.x - up.x;
+  const dy = drawn.y - up.y;
+  const dz = drawn.z - up.z;
+  return dx * dx + dy * dy + dz * dz < UP_SETTLED * UP_SETTLED;
+}
+
+/**
+ * Turn the drawn up toward the state's up by the fraction of the angle
+ * between them an exponential ease of `UP_EASE_S` takes in `dt`, about
+ * their common perpendicular — or, when they are opposite, about the
+ * axis `rotateBetween` fixes for that case (the header says why not a
+ * lerp). Within `UP_SETTLED` of the target it is SET to it, so on the
+ * ground, where the two never differ, the drawn up is `WORLD_UP` to the
+ * bit every frame. A target or a dt that is not a number moves nothing.
+ */
+export function easeUp(drawn: THREE.Vector3, up: Vec3, dt: number): void {
+  if (!Number.isFinite(up.x) || !Number.isFinite(up.y) || !Number.isFinite(up.z)) return;
+  if (settled(drawn, up)) {
+    drawn.set(up.x, up.y, up.z);
+    return;
+  }
+  if (!(dt > 0) || !Number.isFinite(dt)) return;
+  const k = 1 - Math.exp(-dt / UP_EASE_S);
+  const c = drawn.x * up.x + drawn.y * up.y + drawn.z * up.z;
+  _axis.set(drawn.y * up.z - drawn.z * up.y, drawn.z * up.x - drawn.x * up.z, drawn.x * up.y - drawn.y * up.x);
+  const s = _axis.length();
+  let angle: number;
+  if (s < 1e-9) {
+    // Opposite (not settled, so not the same): a half turn, about the
+    // axis the surface frame fixes — +x projected off the drawn up, or
+    // +z when the drawn up is nearly ±x — so every reader rolls the same way.
+    if (Math.abs(drawn.x) < 0.9) _axis.set(1 - drawn.x * drawn.x, -drawn.x * drawn.y, -drawn.x * drawn.z);
+    else _axis.set(-drawn.z * drawn.x, -drawn.z * drawn.y, 1 - drawn.z * drawn.z);
+    angle = Math.PI;
+  } else {
+    angle = Math.atan2(s, c);
+  }
+  _axis.normalize();
+  drawn.applyAxisAngle(_axis, angle * k).normalize();
+  if (settled(drawn, up)) drawn.set(up.x, up.y, up.z);
+}
+
+/**
+ * THE AHEAD THE ROOT IS BUILT ON: `aheadOn(up, heading)` carried from
+ * the state's up onto the drawn one by the one rotation between them,
+ * into `out`. When the two are the same object or the same numbers the
+ * carry is skipped and the answer is `aheadOn`'s exactly — on the
+ * ground, `(sin h, 0, cos h)` to the bit.
+ */
+export function drawnAhead(up: Vec3, heading: number, drawnUp: Vec3, out: MutableVec3): MutableVec3 {
+  aheadOn(up, heading, out);
+  if (drawnUp === up || (drawnUp.x === up.x && drawnUp.y === up.y && drawnUp.z === up.z)) return out;
+  _carried.x = out.x;
+  _carried.y = out.y;
+  _carried.z = out.z;
+  return rotateBetween(up, drawnUp, _carried, out);
+}
+
+/**
+ * THE ROOT QUATERNION from a unit up and a unit ahead tangent to it —
+ * local +Z the ahead, +Y the up, +X = up × ahead (the animal's left) —
+ * then the flight attitude as LOCAL turns: nose up a negative turn
+ * about the body's X, then the bank about the body's Z. For
+ * `up = WORLD_UP` and `ahead = (sin h, 0, cos h)` this is the old
+ * `Euler(−pitch, heading, bank, 'YXZ')` to 1e-12 (the header); an
+ * ahead or an up that is not a number leaves `out` as it was.
+ */
+export function rootQuaternion(up: Vec3, ahead: Vec3, pitch: number, bank: number, out: THREE.Quaternion): THREE.Quaternion {
+  if (!Number.isFinite(up.x + up.y + up.z + ahead.x + ahead.y + ahead.z + pitch + bank)) return out;
+  _upV.set(up.x, up.y, up.z);
+  _aheadV.set(ahead.x, ahead.y, ahead.z);
+  _left.crossVectors(_upV, _aheadV);
+  _m.makeBasis(_left, _upV, _aheadV);
+  out.setFromRotationMatrix(_m);
+  if (pitch !== 0) out.multiply(_turn.setFromAxisAngle(X_AXIS, -pitch));
+  if (bank !== 0) out.multiply(_turn.setFromAxisAngle(FORWARD, bank));
+  return out;
 }
 
 /**

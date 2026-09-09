@@ -5,16 +5,22 @@
  * driving the ledger, the label and the policy; the overlay naming
  * every creature; the right thumb's cluster showing only what the held
  * body's medium can honour; a tap on a drawn body taking it; the
- * disturb tool and the camera's presence reaching the bench. three's
- * scene graph builds without WebGL under jsdom; the rigs are the
- * loader's honest placeholders, so no file is fetched.
+ * disturb tool and the camera's presence reaching the bench; and, since
+ * Creature Lab D, the block's two solids handed to the simulation, the
+ * held body's up handed to the follow camera, and the overlay naming
+ * the face under a climber's feet. three's scene graph builds without
+ * WebGL under jsdom; the rigs are the loader's honest placeholders, so
+ * no file is fetched.
  */
 import * as THREE from 'three';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { playerId } from '../src/actor/PlayerId';
 import type { AppHandle, SceneContext } from '../src/app/Scene';
 import type { Assets } from '../src/assets/assets';
-import { CREATURE_SPECIES, LAB_CREATURE_IDS, labSpawns, type CreatureId, type CreatureState } from '../src/creatures';
+import {
+  BLOCK, CREATURE_SPECIES, FACE_NORMALS, LAB_CREATURE_IDS, LAB_FLOOR, MM_PER_UNIT, PILLAR, PILLAR_BOX, SLAB_BOX, WORLD_UP, labSpawns,
+  type CreatureId, type CreatureState, type Vec3,
+} from '../src/creatures';
 import { Input } from '../src/input/Input';
 import {
   LAB_ACTION, LAB_BUTTON_ACTION, LAB_FIELD, LAB_HUD_ROLE, LAB_SCENE_ID, LAB_TOOL_ID, OBSERVE_LABEL, POSSESS_ROW, PREDATION_ORDER,
@@ -210,7 +216,11 @@ describe('CreatureLabScene', () => {
     expect(r.scene.name).toBe(LAB_SCENE_ID);
     const bench = must(r.scene.three.getObjectByName('lab:bench'), 'the bench');
     expect(bench.getObjectByName('lab:floor')).toBeInstanceOf(THREE.Mesh);
-    expect(bench.getObjectByName('lab:block')).toBeInstanceOf(THREE.Mesh);
+    // The block is its two solids (Creature Lab D): the slab on its pillar, each with its edges.
+    expect(bench.getObjectByName('lab:pillar')).toBeInstanceOf(THREE.Mesh);
+    expect(bench.getObjectByName('lab:slab')).toBeInstanceOf(THREE.Mesh);
+    expect(bench.getObjectByName('lab:pillar-edges')).toBeInstanceOf(THREE.LineSegments);
+    expect(bench.getObjectByName('lab:slab-edges')).toBeInstanceOf(THREE.LineSegments);
     expect(bench.getObjectByName('lab:puddle')).toBeInstanceOf(THREE.Mesh);
     expect(bench.getObjectByName('lab:bounds')).toBeInstanceOf(THREE.LineSegments);
     expect(bench.getObjectByName('lab:sun')).toBeInstanceOf(THREE.DirectionalLight);
@@ -221,10 +231,18 @@ describe('CreatureLabScene', () => {
     expect(r.scene.three.getObjectByName('fauna')).not.toBeUndefined();
     expect(r.uiLayer.querySelector(`[data-role="${LAB_HUD_ROLE}"]`)).not.toBeNull();
     expect(r.uiLayer.querySelector('[data-control="stick"]')).not.toBeNull();
-    // The floor is the world's ground: sampled from labGroundAt, so the block's top is in it.
+    // The floor is the world's floor: sampled from labFloorAt, flat under the block (tests/labMeshes.test.ts has the rest).
     const floor = bench.getObjectByName('lab:floor') as THREE.Mesh;
     const position = floor.geometry.getAttribute('position');
     expect(position.count).toBeGreaterThan(10_000);
+  });
+
+  it('hands the simulation the bench\'s two solids as its climbables', async () => {
+    const r = await entered();
+    const climbables = r.scene.lab.simWorld.climbables;
+    expect(climbables).toBe(r.scene.lab.world.climbables);
+    expect(climbables).toEqual([PILLAR_BOX, SLAB_BOX]);
+    expect(climbables!.map((b) => b.id)).toEqual(['lab:pillar', 'lab:slab']);
   });
 
   it('spawns the five, exactly one each, and the queen is held by the local player by default', async () => {
@@ -345,6 +363,53 @@ describe('CreatureLabScene', () => {
     expect(panel.hidden).toBe(true);
     expect(r.field(LAB_FIELD.debug)).toBe('DEBUG: OFF');
     expect(r.scene.debug).toBe(false);
+  });
+
+  it('the overlay names the face under a climber\'s feet, and AGL is height over the floor', async () => {
+    const r = await entered();
+    r.frame(2);
+    const queen = r.creature('queen');
+    /** Put the held queen somewhere by hand and read her block off the overlay, refreshed by the possess row (no frame: nothing moves her). */
+    const wordAt = (wx: number, wz: number, height: number, up: Vec3): string => {
+      queen.at = world(wx, wz);
+      queen.height = height;
+      queen.up = up;
+      r.press(possessAction('queen'));
+      return overlay(r).queen;
+    };
+    const east = PILLAR.size / 2;
+    // On the pillar's east face, a skin outside it, halfway up.
+    expect(wordAt(east + 1e-6, 0, LAB_FLOOR + 5, FACE_NORMALS[0])).toMatch(/AGL 50 mm · on wall/);
+    // Under the slab, outside the pillar's footprint, feet on the underside.
+    expect(wordAt(6, 0, SLAB_BOX.min.y - 1e-6, FACE_NORMALS[3])).toMatch(/on ceiling/);
+    // On the slab's top: 200 mm over the floor, which is true — the block is not in the ground.
+    const onTop = wordAt(0, 0, LAB_FLOOR + BLOCK.height + 1e-6, WORLD_UP);
+    expect(onTop).toMatch(/on top/);
+    expect(onTop).toMatch(new RegExp(`AGL ${Math.round(BLOCK.height * MM_PER_UNIT)} mm`));
+    // Back on the floor: the old word.
+    expect(wordAt(14, 0, LAB_FLOOR, WORLD_UP)).toMatch(/AGL 0 mm · on ground/);
+  });
+
+  it('the follow camera is handed the held body\'s up each frame', async () => {
+    const r = await entered();
+    r.frame(2);
+    const update = vi.spyOn(r.scene.follow, 'update');
+    const queen = r.creature('queen');
+    // On the ground the target's up is the one shared WORLD_UP object.
+    r.frame(1, 0);
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(update.mock.calls[0][1].up).toBe(WORLD_UP);
+    // Stood by hand on the pillar's east face: the target carries that face's normal.
+    queen.at = world(PILLAR.size / 2 + 1e-6, 0);
+    queen.height = LAB_FLOOR + 5;
+    queen.up = FACE_NORMALS[0];
+    r.frame(1, 0);
+    expect(update).toHaveBeenCalledTimes(2);
+    const target = update.mock.calls[1][1];
+    expect(target.up).toBe(FACE_NORMALS[0]);
+    expect(target.at).toBe(queen.at);
+    expect(target.height).toBe(queen.height);
+    update.mockRestore();
   });
 
   it('shows the right thumb only the buttons the held medium can use', async () => {

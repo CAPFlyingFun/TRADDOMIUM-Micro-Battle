@@ -1,6 +1,6 @@
 /**
- * The Creature Lab's world: a bounded metre, a block whose top is the
- * ground, a bumpy patch, a real puddle, plants the resource layer knows,
+ * The Creature Lab's world: a bounded metre, a block that is two solids
+ * a climber walks on with the floor under it, a bumpy patch, a real puddle, plants the resource layer knows,
  * resources the brains can find, disturbances that expire, the ants'
  * home at the block's foot, a reset that puts the world back, and five
  * deterministic spawns each on a surface its medium allows, each at a
@@ -8,9 +8,10 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  APHID, BLOCK, BLOCK_CLEARANCE, BUMP, CREATURE_SPECIES, DISTURB_HOLD_S, EARTHWORM, HOUSEFLY, LAB_CREATURE_IDS, LAB_FLOOR, LAB_HALF,
-  LAB_PLANTS, LAB_SITES, LAB_SIZE, LITTER_CORNER, PUDDLE, PUDDLE_EDGE, QUEEN, WORKER, createLabWorld, floorAt, isLand, labSpawns,
-  nearestSite, newCreature, onBlock, puddleDepthAt, unitsOfMm,
+  APHID, BLOCK, BLOCK_CLEARANCE, BUMP, CREATURE_SPECIES, DISTURB_HOLD_S, EARTHWORM, HOUSEFLY, LAB_CLIMBABLES, LAB_CREATURE_IDS, LAB_FLOOR,
+  LAB_HALF, LAB_PLANTS, LAB_SITES, LAB_SIZE, LITTER_CORNER, PILLAR, PILLAR_BOX, PUDDLE, PUDDLE_EDGE, QUEEN, SLAB, SLAB_BOX, WORKER,
+  createLabWorld, faceUnder, floorAt, isLand, labFloorAt, labGroundAt, labSpawns, nearestSite, newCreature, onBlock, puddleDepthAt,
+  unitsOfMm,
 } from '../src/creatures';
 import { GROUND_HOME_RANGE, homeOf, hostPlantOf } from '../src/creatures/intent';
 import { LAB_HOME, LAB_SEED } from '../src/creatures/labWorld';
@@ -34,21 +35,47 @@ describe('the box', () => {
     expect(lab.inBounds(world(NaN, 0))).toBe(false);
   });
 
-  it('the floor is flat, the block\'s top is the ground over its footprint and nothing else is, and the ground is finite everywhere inside', () => {
+  it('the floor is flat, under the slab too — the block is not in the ground — and the ground is finite everywhere inside', () => {
     const lab = createLabWorld();
     expect(lab.groundAt(world(40, 10))).toBe(LAB_FLOOR);
-    expect(lab.groundAt(world(0, 0))).toBe(LAB_FLOOR + BLOCK.height);
-    expect(lab.groundAt(world(BLOCK.size / 2, BLOCK.size / 2))).toBe(LAB_FLOOR + BLOCK.height);
+    expect(lab.groundAt(world(0, 0))).toBe(LAB_FLOOR);
+    expect(lab.groundAt(world(BLOCK.size / 2, BLOCK.size / 2))).toBe(LAB_FLOOR);
     expect(lab.groundAt(world(BLOCK.size / 2 + 0.01, 0))).toBe(LAB_FLOOR);
+    expect(labGroundAt).toBe(labFloorAt);
+    expect(lab.groundAt).toBe(labFloorAt);
+    // The footprint is still a footprint: what the inward target and the home are kept clear of.
     expect(onBlock(world(-10, 10))).toBe(true);
     expect(onBlock(world(-10.01, 10))).toBe(false);
-    // A cliff at the edge: the normal tips over.
+    // No cliff anywhere: the normal is up on the floor and up where the slab's edge used to be a step.
     expect(lab.normalAt(world(40, 10)).ny).toBeCloseTo(1, 12);
-    expect(lab.normalAt(world(BLOCK.size / 2, 0)).ny).toBeLessThan(0.1);
+    expect(lab.normalAt(world(BLOCK.size / 2, 0)).ny).toBeCloseTo(1, 12);
     for (let x = -50; x <= 50; x += 2.5) {
       for (let z = -50; z <= 50; z += 2.5) expect(Number.isFinite(lab.groundAt(world(x, z)))).toBe(true);
     }
     expect(Number.isNaN(lab.groundAt(world(NaN, 0)))).toBe(true);
+  });
+
+  it('the block is a slab on a pedestal: two climbables the world offers, the slab\'s top where the block\'s top was, its underside at LAB_FLOOR + 12, the pillar sunk a centimetre', () => {
+    const lab = createLabWorld();
+    expect(lab.climbables).toBe(LAB_CLIMBABLES);
+    expect(LAB_CLIMBABLES).toEqual([PILLAR_BOX, SLAB_BOX]);
+    expect(SLAB_BOX.max.y).toBe(LAB_FLOOR + BLOCK.height);
+    expect(SLAB_BOX.min.y).toBe(LAB_FLOOR + 12);
+    expect(SLAB_BOX.min.y).toBe(PILLAR_BOX.max.y);
+    expect(SLAB_BOX.max.x - SLAB_BOX.min.x).toBe(BLOCK.size);
+    expect(SLAB_BOX.max.y - SLAB_BOX.min.y).toBe(SLAB.thickness);
+    expect(PILLAR_BOX.max.x - PILLAR_BOX.min.x).toBe(PILLAR.size);
+    expect(PILLAR_BOX.min.y).toBe(LAB_FLOOR - PILLAR.sink);
+    expect(PILLAR_BOX.max.y).toBe(LAB_FLOOR + PILLAR.height);
+    // The pillar's foot is under the floor, so no face of it is coplanar with the ground.
+    expect(PILLAR_BOX.min.y).toBeLessThan(lab.groundAt(world(PILLAR_BOX.max.x, 0)));
+    // The underside is a face a body can stand on, feet up; the top is a face too; the floor under the slab is nobody's face.
+    expect(faceUnder(world(7, 7), LAB_FLOOR + 12, { x: 0, y: -1, z: 0 }, lab.climbables)?.box).toBe(SLAB_BOX);
+    expect(faceUnder(world(7, 7), LAB_FLOOR + 20, { x: 0, y: 1, z: 0 }, lab.climbables)?.box).toBe(SLAB_BOX);
+    expect(faceUnder(world(7, 7), LAB_FLOOR, { x: 0, y: 1, z: 0 }, lab.climbables)).toBeNull();
+    // A reset world offers the same solids.
+    lab.reset();
+    expect(lab.climbables).toBe(LAB_CLIMBABLES);
   });
 
   it('the patch is uneven within ±5 mm, deterministic, and flat ground all round it', () => {

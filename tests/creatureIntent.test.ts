@@ -11,13 +11,15 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  APHID, BEHAVIOURS_BY_MEDIUM, CREATURE_IDS, CREATURE_SPECIES, EARTHWORM, HOUSEFLY, QUEEN, WORKER, newCreature, unitsOfMm,
-  type CreatureSpecies, type CreatureState, type CreatureWeather, type CreatureWorld, type Disturbance,
+  APHID, BEHAVIOURS_BY_MEDIUM, CREATURE_IDS, CREATURE_SPECIES, EARTHWORM, FACE_NORMALS, HOUSEFLY, LAB_CLIMBABLES, LAB_FLOOR, PILLAR_BOX,
+  QUEEN, SLAB_BOX, SURFACE_SKIN, WORKER, WORLD_UP, createLabWorld, faceUnder, faceWord, newCreature, paceRatio, sizeRatio, unitsOfMm,
+  type Behaviour, type CreatureSpecies, type CreatureState, type CreatureWeather, type CreatureWorld, type Disturbance,
 } from '../src/creatures';
 import {
   ALARM_FLEES_AT, FLOOD_CLOSING, FLOOD_THREAT, GROUND_HOME_RANGE, GROUND_WANDER_LENGTHS, HOST_WALK_LENGTHS, RAINING_MM_HR, hostPlantOf,
-  isLand, nearestSite, senseAlarm, senseFlood, think, thinkDue, thinkPending, tickNeeds,
+  isLand, nearestSite, routeTarget, senseAlarm, senseFlood, think, thinkDue, thinkPending, tickNeeds,
 } from '../src/creatures/intent';
+import { LAB_HOME } from '../src/creatures/labWorld';
 import { unitsOfMetres } from '../src/creatures/finder';
 import { floorAt, isAirborne, move } from '../src/creatures/locomotion';
 import { HOST_FLEE_LENGTHS } from '../src/creatures/intent';
@@ -1334,5 +1336,151 @@ describe('the ground brain (the Lab\'s ants)', () => {
     };
     expect(walkFrom(big)).toBeCloseTo(2 * walkFrom(cited), 6);
     expect(walkFrom(cited)).toBeLessThanOrEqual(GROUND_WANDER_LENGTHS * unitsOfMm(WORKER.lengthMm) + 1e-9);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Creature Lab D: the brain and the block
+// ---------------------------------------------------------------------------
+
+describe('the brain and the block (Creature Lab D)', () => {
+  const lab = createLabWorld();
+  const clearanceOf = (c: CreatureState, species: CreatureSpecies): number => sizeRatio(c, species) * unitsOfMm(species.lengthMm);
+
+  /** Inside the pillar's footprint, on the plane. */
+  const inPillar = (p: WorldPoint): boolean => Math.abs(p.wx) <= PILLAR_BOX.max.x && Math.abs(p.wz) <= PILLAR_BOX.max.z;
+
+  interface Placed {
+    readonly height?: number;
+    readonly behaviour?: Behaviour;
+    readonly hunger?: number;
+    readonly fatigue?: number;
+    readonly heading?: number;
+  }
+
+  /** A creature placed in the Lab by hand: on the floor unless a height is named. */
+  function placed(species: CreatureSpecies, at: WorldPoint, options: Placed = {}): CreatureState {
+    const c = newCreature({
+      id: `${species.id}:0,0:7`, species: species.id, cellKey: '0,0', at, height: options.height ?? LAB_FLOOR,
+      heading: options.heading ?? 0.4, phase: 0.3, behaviour: options.behaviour ?? 'idle', hostId: null,
+      hunger: options.hunger ?? 0.1, fatigue: options.fatigue ?? 0.1,
+    });
+    c.sinceThink = c.phase * species.thinkS;
+    return c;
+  }
+
+  it('routeTarget: an AI worker whose target lies across the pillar is routed to a grown corner of it and lets go of the site it was heading for; on a face, in the air, in a stand, or as a worm, nothing changes', () => {
+    const w = placed(WORKER, world(-15, 0), { behaviour: 'wander' });
+    const across = world(15, 0);
+    w.target = across;
+    w.hostId = 'carrion:0,0:0';
+    expect(routeTarget(w, WORKER, lab)).toBe(true);
+    expect(w.target).not.toBe(across);
+    expect(Math.abs(w.target!.wx)).toBeCloseTo(PILLAR_BOX.max.x + clearanceOf(w, WORKER), 12);
+    expect(Math.abs(w.target!.wz)).toBeCloseTo(PILLAR_BOX.max.z + clearanceOf(w, WORKER), 12);
+    expect(w.hostId).toBeNull();
+    expect(w.at).toEqual(world(-15, 0));
+    // A clear target is left alone, site and all.
+    const clear = world(-15, 20);
+    w.target = clear;
+    w.hostId = 'carrion:0,0:0';
+    expect(routeTarget(w, WORKER, lab)).toBe(false);
+    expect(w.target).toBe(clear);
+    expect(w.hostId).toBe('carrion:0,0:0');
+    // The same errand through `think`: the target it chose never crosses the pillar's grown square in 600 s, and it never climbs.
+    const rand = mulberry32(9);
+    const home: CreatureWorld = { ...lab, home: LAB_HOME };
+    const worker = placed(WORKER, world(-12, -12), { hunger: 0.2 });
+    let routed = 0;
+    let faces = 0;
+    for (let i = 0; i < 600 * 30; i += 1) {
+      tickNeeds(worker, WORKER, 1 / 30);
+      if (thinkDue(worker, WORKER)) {
+        const from = worker.at;
+        think(worker, WORKER, home, rand, null, null);
+        const t = worker.target;
+        if (t !== null && worker.behaviour === 'wander') {
+          // Never a straight line through the pillar's footprint: checked by walking the line.
+          for (let k = 0; k <= 40; k += 1) {
+            const f = k / 40;
+            expect(inPillar(world(from.wx + (t.wx - from.wx) * f, from.wz + (t.wz - from.wz) * f)), `t=${i / 30}`).toBe(false);
+          }
+          if (Math.abs(Math.abs(t.wx) - (PILLAR_BOX.max.x + clearanceOf(worker, WORKER))) < 1e-9) routed += 1;
+        }
+      }
+      move(worker, WORKER, home, 1 / 30);
+      if (faceUnder(worker.at, worker.height, worker.up, LAB_CLIMBABLES) !== null) faces += 1;
+      expect(inPillar(worker.at)).toBe(false);
+      expect(worker.height).toBe(LAB_FLOOR);
+    }
+    expect(routed).toBeGreaterThan(0);
+    expect(faces).toBe(0);
+    // A stand faces its bearing; a flier's target is in the air; a body on a face is the surface's to aim; a worm has no feet.
+    const stand = placed(WORKER, world(-8, 0), { behaviour: 'defend' });
+    stand.target = across;
+    expect(routeTarget(stand, WORKER, lab)).toBe(false);
+    const flier = placed(QUEEN, world(-8, 0), { height: LAB_FLOOR + 30, behaviour: 'fly' });
+    flier.target = across;
+    expect(routeTarget(flier, QUEEN, lab)).toBe(false);
+    const onWall = placed(QUEEN, world(PILLAR_BOX.max.x + SURFACE_SKIN, 0), { height: LAB_FLOOR + 5, behaviour: 'wander' });
+    onWall.up = FACE_NORMALS[0];
+    onWall.target = across;
+    expect(routeTarget(onWall, QUEEN, lab)).toBe(false);
+    const worm = placed(EARTHWORM, world(-15, 0), { behaviour: 'surface' });
+    worm.target = across;
+    expect(routeTarget(worm, EARTHWORM, lab)).toBe(false);
+    expect(routeTarget(worm, EARTHWORM, fakeWorld())).toBe(false);
+  });
+
+  it('an AI queen left on the slab\'s top heads for the edge and comes down — over the wall, along the underside, down the pillar — to the floor, every word legal, never a jump', () => {
+    const rand = mulberry32(31);
+    const queen = placed(QUEEN, world(0, 0), { height: SLAB_BOX.max.y + SURFACE_SKIN, hunger: 0, fatigue: 0 });
+    const home: CreatureWorld = { ...lab, home: LAB_HOME };
+    const ups = new Set<string>();
+    let last = queen.height;
+    let down = -1;
+    const bound = unitsOfMm(QUEEN.pace.fleeMmS * paceRatio(queen, QUEEN)) / 30 + 1e-3;
+    for (let i = 0; i < 300 * 30 && down < 0; i += 1) {
+      tickNeeds(queen, QUEEN, 1 / 30);
+      if (thinkDue(queen, QUEEN)) think(queen, QUEEN, home, rand, null, null);
+      move(queen, QUEEN, home, 1 / 30);
+      expect(BEHAVIOURS_BY_MEDIUM.ground).toContain(queen.behaviour);
+      expect(Math.abs(queen.height - last)).toBeLessThanOrEqual(bound);
+      last = queen.height;
+      ups.add(queen.up.y < -0.5 ? 'ceiling' : queen.up.y > 0.5 ? 'up' : 'wall');
+      if (queen.up === WORLD_UP && queen.height === LAB_FLOOR) down = i / 30;
+    }
+    expect(down).toBeGreaterThan(0);
+    expect(ups.has('wall')).toBe(true);
+    expect(ups.has('ceiling')).toBe(true);
+    expect(faceUnder(queen.at, queen.height, queen.up, LAB_CLIMBABLES)).toBeNull();
+  });
+
+  it('on the underside an AI queen heads for the pillar first — feet up, aimed horizontally at its footprint — and comes down it to the floor', () => {
+    const rand = mulberry32(32);
+    const queen = placed(QUEEN, world(7, 3), { height: SLAB_BOX.min.y - SURFACE_SKIN, hunger: 0, fatigue: 0, heading: Math.PI / 2 });
+    queen.up = FACE_NORMALS[3];
+    expect(faceUnder(queen.at, queen.height, queen.up, LAB_CLIMBABLES)?.box).toBe(SLAB_BOX);
+    const home: CreatureWorld = { ...lab, home: LAB_HOME };
+    const trail: string[] = ['slab on ceiling'];
+    let down = -1;
+    for (let i = 0; i < 120 * 30 && down < 0; i += 1) {
+      tickNeeds(queen, QUEEN, 1 / 30);
+      if (thinkDue(queen, QUEEN)) think(queen, QUEEN, home, rand, null, null);
+      move(queen, QUEEN, home, 1 / 30);
+      expect(BEHAVIOURS_BY_MEDIUM.ground).toContain(queen.behaviour);
+      const face = faceUnder(queen.at, queen.height, queen.up, LAB_CLIMBABLES);
+      const w = face === null ? 'ground' : `${face.box === SLAB_BOX ? 'slab' : 'pillar'} ${faceWord(face.normal)}${face.normal.x > 0.5 ? ' +x' : ''}`;
+      if (trail[trail.length - 1] !== w) trail.push(w);
+      if (queen.up === WORLD_UP && queen.height === LAB_FLOOR) down = i / 30;
+    }
+    expect(down).toBeGreaterThan(0);
+    // The pillar's east wall first — the way down is the pedestal, not the slab's edge — and the floor at the end. On the
+    // pillar's walls her aim is the projection of a floor target, a diagonal, so she may spiral round the pillar on the way;
+    // she never goes back up onto the slab's walls or its top.
+    expect(trail[1]).toBe('pillar on wall +x');
+    expect(trail[trail.length - 1]).toBe('ground');
+    expect(trail.filter((w) => w.startsWith('slab'))).toEqual(['slab on ceiling']);
+    expect(Math.abs(Math.max(Math.abs(queen.at.wx), Math.abs(queen.at.wz)))).toBeGreaterThan(PILLAR_BOX.max.x);
   });
 });

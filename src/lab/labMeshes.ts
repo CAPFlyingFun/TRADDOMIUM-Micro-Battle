@@ -2,22 +2,43 @@
  * THE BENCH, DRAWN: the Creature Lab's cubic metre as meshes.
  *
  * Everything here is a picture of what `creatures/labWorld.ts` already
- * IS. The floor is SAMPLED from `labGroundAt` at half-centimetre steps,
+ * IS. The floor is SAMPLED from `labFloorAt` at half-centimetre steps,
  * so the uneven patch and the puddle's dish appear exactly where the
  * animals feel them and never where a second copy of the numbers put
  * them; the block, the plants, the litter, the puddle and the protein
- * spot stand at the world's own spots (`BLOCK`, `LAB_PLANTS`,
- * `LITTER_CORNER`, `PUDDLE`, `PROTEIN_SPOT`). A mesh that disagreed
- * with the query the brain reads would show an aphid feeding on air.
+ * spot stand at the world's own spots (`PILLAR_BOX`, `SLAB_BOX`,
+ * `LAB_PLANTS`, `LITTER_CORNER`, `PUDDLE`, `PROTEIN_SPOT`). A mesh that
+ * disagreed with the query the brain reads would show an aphid feeding
+ * on air.
  *
- * WALLS AND UNDERSIDE ARE DRAWN AND NOT WALKABLE. The block is a box
- * with six faces so a player can see what Phase D will make climbable
- * (the brief's §6 and §14: "top → down wall → underneath → around
- * corner → back upward"); today only its top is ground (`labWorld.ts`,
- * "ITS TOP IS THE GROUND over its footprint and that is all it is"). The
- * bounds are four faint panes and a gold wire cube: there is no wall to
- * walk into — containment is the brain's (`inwardTarget`) — and the
- * panes only say where the box ends.
+ * THE BLOCK IS DRAWN AS WHAT IT IS: TWO SOLIDS, AND THE FLOOR DOES NOT
+ * CARRY IT (Creature Lab D, 2026-09-09). Joshua, from the phone: "I
+ * tried crawling up the wall in the Queen and I got teleported to the
+ * top of it where I also saw some z-fighting from layers." The
+ * z-fighting was this file's: the floor used to be sampled from a
+ * `labGroundAt` that stepped up to the block's top over its footprint,
+ * so the floor mesh carried a 20 cm plateau at EXACTLY the height of
+ * the box's own top face — two coplanar faces, drawn by two meshes,
+ * fighting for every pixel. Now the ground is the floor alone
+ * (`labFloorAt`: the bumps, the dish, and flat under the slab) and the
+ * block is the world's two `Climbable`s drawn as two boxes: the SLAB
+ * (`SLAB_BOX`, 20 × 8 × 20 cm, its top where the block's top always was)
+ * on the PILLAR (`PILLAR_BOX`, 8 × 13 × 8 cm), whose foot is sunk a
+ * centimetre into the floor (`PILLAR.sink`) so no face of it is coplanar
+ * with the floor either. The pillar's top and the slab's underside
+ * share a plane, but they face OPPOSITE ways — the pillar's top faces
+ * into the slab and is back-face culled from below, and the slab's top
+ * hides it from above — so nothing fights there. Each box is sized
+ * `max − min` and stood at its centre — a picture of the solid the feet
+ * feel, never a second set of numbers.
+ *
+ * WALLS AND UNDERSIDES ARE WALKABLE NOW (Creature Lab D; the brief's §6
+ * and §14: "top → down wall → underneath → around corner → back
+ * upward"). The slab has an underneath a climber walks out along upside
+ * down, which is why the block became a slab on a pedestal
+ * (`labWorld.ts`). The bounds are still four faint panes and a gold wire
+ * cube: there is no wall to walk into — containment is the brain's
+ * (`inwardTarget`) — and the panes only say where the box ends.
  *
  * PRIMITIVE GEOMETRY IN THE FLORA'S COLOURS. The island's plants are
  * `flora/WorldObjects.ts`'s streamed instanced families and are not
@@ -45,8 +66,9 @@
  */
 import * as THREE from 'three';
 import {
-  BLOCK, BUMP, LAB_FLOOR, LAB_HALF, LAB_PLANTS, LAB_SIZE, LITTER_CORNER, PROTEIN_SPOT, PUDDLE, labGroundAt,
+  BUMP, LAB_FLOOR, LAB_HALF, LAB_PLANTS, LAB_SIZE, LITTER_CORNER, PILLAR_BOX, PROTEIN_SPOT, PUDDLE, SLAB_BOX, labFloorAt, labGroundAt,
 } from '../creatures/labWorld';
+import type { Climbable } from '../creatures/surface';
 import { world, type LocalPoint, type WorldPoint } from '../world/coords';
 import { toLocal as originToLocal } from '../world/origin';
 import { valueNoise } from '../world/random';
@@ -68,7 +90,7 @@ export const SKY_INTENSITY = 1.0;
 /** TCS gold, for the bounds. */
 const GOLD = 0xc9a94a;
 
-/** Flat-shaded basalt for the block: a shade lighter than the island's stones so its faces read apart. */
+/** Flat-shaded basalt for the block — the slab and its pillar alike: a shade lighter than the island's stones so its faces read apart. */
 const BLOCK_COLOUR = new THREE.Color().setHSL(0.06, 0.06, 0.42);
 const ROCK_COLOUR = new THREE.Color().setHSL(0.06, 0.08, 0.34);
 /** Bare soil, a warm brown; the puddle's bed is the same soil wet — darker; the bump patch a touch paler where it is worn. */
@@ -111,7 +133,10 @@ export interface LabMeshes {
   /** Everything, placed. Add it to the scene; `dispose` removes nothing from the scene, it only frees the GPU. */
   readonly group: THREE.Group;
   readonly floor: THREE.Mesh;
+  /** The SLAB: the block's top is its top, and it is what the name `block` meant before the pedestal (`lab:slab`). */
   readonly block: THREE.Mesh;
+  /** The PILLAR under the slab (`lab:pillar`), its foot sunk into the floor. */
+  readonly pillar: THREE.Mesh;
   readonly sun: THREE.DirectionalLight;
   readonly sky: THREE.HemisphereLight;
   /** Re-place the group after an origin rebase. The bench never moves; the origin might. */
@@ -136,11 +161,13 @@ function keep<G extends THREE.BufferGeometry>(owned: Owned, geometry: G): G {
 }
 
 /**
- * THE FLOOR: a grid sampled from the world's own ground, coloured by
- * what the ground is there — wet in the dish, worn on the patch, soil
- * everywhere else, mottled by the island's value noise so it is not one
- * flat brown. The block's footprint is left in the grid (its top is the
- * ground there) and the block mesh stands over it.
+ * THE FLOOR: a grid sampled from the world's own floor (`labFloorAt`:
+ * the sheet with nothing standing on it), coloured by what the ground
+ * is there — wet in the dish, worn on the patch, soil everywhere else,
+ * mottled by the island's value noise so it is not one flat brown. It
+ * runs FLAT under the block's footprint: the block is not in the
+ * floor, it stands on it (the header's z-fighting), and the pillar's
+ * sunk foot is what meets the sheet there.
  */
 function buildFloor(owned: Owned): THREE.Mesh {
   const n = Math.round(LAB_SIZE / FLOOR_STEP) + 1;
@@ -153,7 +180,7 @@ function buildFloor(owned: Owned): THREE.Mesh {
     for (let i = 0; i < n; i += 1) {
       const x = -LAB_HALF + i * FLOOR_STEP;
       const at = world(x, z);
-      const y = labGroundAt(at);
+      const y = labFloorAt(at);
       positions[v * 3] = x;
       positions[v * 3 + 1] = y;
       positions[v * 3 + 2] = z;
@@ -189,16 +216,24 @@ function buildFloor(owned: Owned): THREE.Mesh {
   return mesh;
 }
 
-/** The central test block: six faces and its edges, standing on the floor over its footprint. */
-function buildBlock(owned: Owned, group: THREE.Group): THREE.Mesh {
-  const geometry = keep(owned, new THREE.BoxGeometry(BLOCK.size, BLOCK.height, BLOCK.size));
+/**
+ * ONE OF THE BLOCK'S SOLIDS, drawn as the `Climbable` it is: a box
+ * sized `max − min`, stood at the box's centre, six flat faces and its
+ * gold edges. The box's x and z ARE bench coordinates — the bench sits
+ * on the world origin (`CENTRE`), as every spot this file reads — and
+ * its y is the height above sea level, which is the group's own y. The
+ * names are the solids' (`lab:pillar`, `lab:slab`), so a test and a
+ * probe find the box the feet feel and not a picture of it.
+ */
+function buildSolid(owned: Owned, group: THREE.Group, box: Climbable): THREE.Mesh {
+  const geometry = keep(owned, new THREE.BoxGeometry(box.max.x - box.min.x, box.max.y - box.min.y, box.max.z - box.min.z));
   const mesh = new THREE.Mesh(geometry, lambert(owned, BLOCK_COLOUR, { flatShading: true }));
-  mesh.name = 'lab:block';
-  mesh.position.set(BLOCK.at.wx, LAB_FLOOR + BLOCK.height / 2, BLOCK.at.wz);
+  mesh.name = box.id;
+  mesh.position.set((box.min.x + box.max.x) / 2, (box.min.y + box.max.y) / 2, (box.min.z + box.max.z) / 2);
   group.add(mesh);
   const edges = keep(owned, new THREE.EdgesGeometry(geometry));
   const line = new THREE.LineSegments(edges, lineMaterial(owned, GOLD, 0.35));
-  line.name = 'lab:block-edges';
+  line.name = `${box.id}-edges`;
   line.position.copy(mesh.position);
   group.add(line);
   return mesh;
@@ -433,7 +468,9 @@ export function buildLabMeshes(origin: LabOrigin = { toLocal: originToLocal }): 
 
   const floor = buildFloor(owned);
   group.add(floor);
-  const block = buildBlock(owned, group);
+  // The block: the pillar first, its foot in the floor, and the slab it carries.
+  const pillar = buildSolid(owned, group, PILLAR_BOX);
+  const block = buildSolid(owned, group, SLAB_BOX);
   for (const plant of LAB_PLANTS) {
     const mesh = buildPlant(owned, plant.family, plant.at, plant.size);
     if (mesh !== null) group.add(mesh);
@@ -459,6 +496,7 @@ export function buildLabMeshes(origin: LabOrigin = { toLocal: originToLocal }): 
     group,
     floor,
     block,
+    pillar,
     sun,
     sky,
     place,

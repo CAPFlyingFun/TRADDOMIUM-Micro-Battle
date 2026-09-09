@@ -59,6 +59,41 @@
  *   "behind" once the player lets go. It also makes "nothing pressed"
  *   exactly `NEUTRAL_INTENT`, which a test pins.
  *
+ * THE STICK ON A WALL, AND UNDER A CEILING (Creature Lab D; Joshua,
+ * 2026-09-09: "All the insects besides the worm need to be able to
+ * climb vertical and upside down while sticking to the surface"). The
+ * four clauses above were written for a body whose feet are on the
+ * ground, where "the camera's horizontal frame" and "the creature's
+ * frame" share a plane. On a wall they do not, and `demandFromLook` is
+ * the same sentence said in the body's own frame (`creatures/surface.ts`):
+ * the stick's AHEAD is the player's look projected onto the face the
+ * body stands on, its RIGHT is the SCREEN'S right — the look × the
+ * lens's up, which is the world's — projected onto the face, and the
+ * push is a vector in THAT frame resolved onto the body's ahead and
+ * right. So with the camera looking up the wall a push up walks up the
+ * wall; with the camera looking along it a push up walks along it; and
+ * on the CEILING the stick still means what the player sees: the way
+ * the look runs across the ceiling is "up" on the stick, and "right" is
+ * the right of the PICTURE — which is the upside-down body's LEFT hand.
+ * That last clause is the whole reason the right is the screen's and
+ * not the body's: a level picture of an ant on the ceiling has its
+ * right hand at the screen's left, and a stick that moved it by its own
+ * right would walk it to the screen's left — item 1's complaint on
+ * another face. On the ground the two rights are one vector; on a
+ * vertical wall the screen's right runs INTO the wall and has no
+ * projection, so the body's own right stands there — the one frame the
+ * player can read on a wall — and a push right walks a climbing ant to
+ * ITS right, which for a look up the wall is also the picture's.
+ * Steering is still looking, as the signed angle ABOUT THE FACE'S UP
+ * from the body's ahead to the look's projection. A look with no projection —
+ * the free camera staring straight at the wall, or a look that is not a
+ * number — is read as no difference, exactly as `demandFrom` reads a
+ * NaN yaw. With `up = +y` and a horizontal look every line of this is
+ * `demandFrom`'s arithmetic to 1e-12, and a test holds the two together
+ * over the whole grid: the flat case is the general one, and the old
+ * function stands beside the new so the island's reading is the old
+ * arithmetic in the old order.
+ *
  * THE CAMERA'S YAW IS NOT A HEADING, and the half turn between them is
  * `perf/FreeFlyCamera.headingOfYaw` — used here rather than restated,
  * so this file never has to remember which of the two it is holding.
@@ -100,11 +135,11 @@
 import { newMutableIntent, type MutableIntent } from '../creatures/demand';
 import { wrapHeading } from '../creatures/heading';
 import type { Medium } from '../creatures/species';
-import type { Vec3 } from '../creatures/surface';
+import { WORLD_UP, aheadOn, cross, rightOn, signedAngleAbout, tangentOf, type MutableVec3, type Vec3 } from '../creatures/surface';
 import type { InputSnapshot } from '../input/Input';
 import { clampAxis, type Intent } from '../input/Intent';
 import type { StickReading } from '../input/MoveStick';
-import { headingOfYaw, yawForHeading } from '../perf/FreeFlyCamera';
+import { headingOfYaw } from '../perf/FreeFlyCamera';
 
 /**
  * The Lab's on-screen controls, as booleans the Lab's UI fills each
@@ -279,6 +314,25 @@ export function demandFrom(
 }
 
 /**
+ * A tangent shorter than this has no direction: the look is along the
+ * normal, or not a number. Well under any push a thumb can make, well
+ * over the rounding a unit vector carries.
+ */
+const NO_PROJECTION = 1e-9;
+
+/** Scratch the surface reading writes into, so a frame allocates nothing. */
+const _aheadBody: MutableVec3 = { x: 0, y: 0, z: 0 };
+const _rightBody: MutableVec3 = { x: 0, y: 0, z: 0 };
+const _aheadLook: MutableVec3 = { x: 0, y: 0, z: 0 };
+const _rightLook: MutableVec3 = { x: 0, y: 0, z: 0 };
+
+/** A unit direction, or nearly: what `aheadOn` gives a finite heading on a finite up, and not what it gives a NaN (`|| 0` reads that as zero). */
+function isDirection(v: Vec3): boolean {
+  const len = Math.hypot(v.x, v.y, v.z);
+  return Number.isFinite(len) && len > NO_PROJECTION;
+}
+
+/**
  * ONE FRAME OF THE PLAYER'S WANT, ON WHATEVER THE BODY STANDS ON. The
  * same sentence as `demandFrom` — camera-relative stick, pace as a
  * ceiling, steering is looking — said for a body whose feet may be on
@@ -294,10 +348,12 @@ export function demandFrom(
  * no projection: the push is then taken in the body's own frame and
  * nothing turns, exactly as a NaN yaw is read by `demandFrom`.
  *
- * On the ground, with a horizontal look, this is `demandFrom` to the
- * bit — the flat case is the general one with `up = +y` — and a test
- * holds the two together. CREATURE LAB D'S LEAF: until it lands, the
- * horizontal reading below stands (the look's bearing, `demandFrom`).
+ * On the ground, with a horizontal look, this is `demandFrom` to
+ * 1e-12 on every axis — the flat case is the general one with
+ * `up = +y` — and a test holds the two together over the whole grid.
+ * `demandFrom` keeps its own two-dimensional arithmetic rather than
+ * delegating here, so the island's reading is the old sentence in the
+ * old order and the agreement is a fact a test measures, not a tautology.
  */
 export function demandFromLook(
   snapshot: InputSnapshot,
@@ -310,8 +366,104 @@ export function demandFromLook(
   winged = false,
   out: MutableIntent = newMutableIntent(),
 ): Intent {
-  void creatureUp;
-  const flat = Math.hypot(look.x, look.z);
-  const yaw = flat > 0 && Number.isFinite(flat) ? yawForHeading(Math.atan2(look.x, look.z)) : NaN;
-  return demandFrom(snapshot, stick, yaw, creatureHeading, medium, buttons, winged, out);
+  const keys = snapshot.keys;
+
+  // THE PLANE REQUEST IN THE LOOK'S FRAME, exactly as `demandFrom` reads
+  // it: x across (right positive), y along (away from the camera
+  // positive), keys and stick as vectors, the unit disc as the ceiling.
+  let x = axis(anyHeld(keys, KEYS.left), anyHeld(keys, KEYS.right));
+  let y = axis(anyHeld(keys, KEYS.back), anyHeld(keys, KEYS.ahead));
+  if (stick !== null && Number.isFinite(stick.x) && Number.isFinite(stick.y)) {
+    x += stick.x;
+    y += stick.y;
+  }
+  const magnitude = Math.hypot(x, y);
+  if (magnitude > 1) {
+    x /= magnitude;
+    y /= magnitude;
+  }
+  const moving = magnitude > 0;
+
+  // THE TWO FRAMES ON THE FACE. The body's ahead and right are the
+  // heading carried onto its up (`aheadOn`, `rightOn`: on the ground
+  // (sin h, 0, cos h) and (−cos h, 0, sin h), the capsule's rule). The
+  // look's ahead is its projection onto the face, unit length; its
+  // right is that ahead × up — the same construction, so on every face
+  // the stick's x is the right hand of a body facing the way the player
+  // looks. A look with no projection reads as the body's own ahead: no
+  // difference, nothing turns, the push in the body's frame. A body
+  // with no frame (a heading or an up that is not a number) reads the
+  // look's frame as its own, which is what `demandFrom` does with a NaN
+  // heading; neither frame is a push that goes nowhere.
+  aheadOn(creatureUp, creatureHeading, _aheadBody);
+  const bodyOk = isDirection(_aheadBody);
+  tangentOf(creatureUp, look, _aheadLook);
+  const projected = Math.hypot(_aheadLook.x, _aheadLook.y, _aheadLook.z);
+  let lookOk = projected > NO_PROJECTION && Number.isFinite(projected);
+  if (lookOk) {
+    _aheadLook.x /= projected;
+    _aheadLook.y /= projected;
+    _aheadLook.z /= projected;
+  } else if (bodyOk) {
+    _aheadLook.x = _aheadBody.x;
+    _aheadLook.y = _aheadBody.y;
+    _aheadLook.z = _aheadBody.z;
+  }
+  if (!bodyOk && lookOk) {
+    _aheadBody.x = _aheadLook.x;
+    _aheadBody.y = _aheadLook.y;
+    _aheadBody.z = _aheadLook.z;
+  }
+  const framed = bodyOk || lookOk;
+  rightOn(creatureUp, _aheadBody, _rightBody);
+  // THE STICK'S RIGHT IS THE SCREEN'S RIGHT where the face has one (the
+  // header): the look × the lens's up — both lenses are world-up
+  // (`FollowCamera`, `FreeFlyCamera`) — projected onto the face. On the
+  // ground that is the look's ahead × up, the old arithmetic to the
+  // bit; on the ceiling it is the OPPOSITE of the body's right; on a
+  // vertical wall it runs along the normal and has no projection, and
+  // the body's own right stands. (A look up a wall on a slant reads the
+  // body's right too, since its screen-right is still along the normal;
+  // that tilts the strafe with the climb, noted and not fixed.)
+  cross(_aheadLook, WORLD_UP, _rightLook);
+  tangentOf(creatureUp, _rightLook, _rightLook);
+  const across = Math.hypot(_rightLook.x, _rightLook.y, _rightLook.z);
+  if (across > NO_PROJECTION && Number.isFinite(across)) {
+    _rightLook.x /= across;
+    _rightLook.y /= across;
+    _rightLook.z /= across;
+  } else {
+    rightOn(creatureUp, _aheadLook, _rightLook);
+  }
+
+  // THE PUSH AS A WORLD VECTOR, resolved onto the body's two axes: the
+  // rotation by the angle between the two frames, written as dot
+  // products because on a face the angle is about `up` and not +y.
+  const wx = y * _aheadLook.x + x * _rightLook.x;
+  const wy = y * _aheadLook.y + x * _rightLook.y;
+  const wz = y * _aheadLook.z + x * _rightLook.z;
+  const forward = framed ? wx * _aheadBody.x + wy * _aheadBody.y + wz * _aheadBody.z : 0;
+  const strafe = framed ? wx * _rightBody.x + wy * _rightBody.y + wz * _rightBody.z : 0;
+
+  // Steering is looking, while driving; at rest the body is left alone.
+  // The error is the signed angle about the FACE'S up, so a positive
+  // turn is a left turn on the floor, on a wall and on the ceiling
+  // alike (`creatures/surface.ts`, the header).
+  const turn = moving && lookOk && bodyOk ? saturate(signedAngleAbout(creatureUp, _aheadBody, _aheadLook) / STEER_SATURATION) : 0;
+
+  // The vertical, as the medium reads it.
+  const up = buttons.up || anyHeld(keys, KEYS.up);
+  const down = buttons.down || anyHeld(keys, KEYS.down);
+  const vertical = verticalFor(medium, winged, axis(down, up));
+
+  // `|| 0` turns a −0 out of the dot products into +0, as `demandFrom`
+  // does: "nothing pressed" must equal NEUTRAL on every face.
+  out.forward = clampAxis(forward) || 0;
+  out.strafe = clampAxis(strafe) || 0;
+  out.turn = clampAxis(turn) || 0;
+  out.vertical = clampAxis(vertical) || 0;
+  out.sprint = buttons.sprint || anyHeld(keys, KEYS.sprint);
+  out.primary = buttons.primary || anyHeld(keys, KEYS.primary);
+  out.secondary = buttons.secondary || anyHeld(keys, KEYS.secondary);
+  return out;
 }

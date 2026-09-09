@@ -32,15 +32,23 @@
  *   the patch       `BUMP`: a 20 cm square of ±5 mm value noise at a
  *                   2 cm wavelength (`world/random.ts`, the island's own
  *                   noise), deterministic — the same bumps every time.
- *   the block       `BLOCK`: 20 cm square, 20 cm tall, on the origin.
- *                   ITS TOP IS THE GROUND over its footprint and that is
- *                   all it is today: a walker crossing the footprint's
- *                   edge steps up 20 cm in one frame, because walls and
- *                   undersides are surfaces of a later phase (the
- *                   brief's §14; Creature Lab D) and are NOT surfaces
- *                   yet. `inwardTarget` steers a wandering animal clear
- *                   of the footprint so the step is a thing a player
- *                   sees, not a thing the AI does all day.
+ *   the block       `BLOCK`: 20 cm square, 20 cm tall, on the origin —
+ *                   a SLAB ON A PEDESTAL, two `Climbable` boxes
+ *                   (`PILLAR_BOX`, `SLAB_BOX`, listed as `LAB_CLIMBABLES`
+ *                   and offered as the world's `climbables`). The
+ *                   ground is the FLOOR everywhere, under the slab too:
+ *                   a climber walks into the pillar and up it, out
+ *                   along the underside, round the slab's edge and onto
+ *                   its top (`surface.ts`; the brief's §14, Creature
+ *                   Lab D), and the worm walks under it. The block's
+ *                   top used to be the ground over its footprint, a
+ *                   20 cm step in one frame, and that is gone: nothing
+ *                   in the ground answers for the block any more.
+ *                   `inwardTarget` still keeps a wandering animal clear
+ *                   of the footprint, and the brain keeps off the
+ *                   pillar (`intent.routeTarget`), so a climb is a
+ *                   thing a player sees, not a thing the AI does all
+ *                   day.
  *   the puddle      `PUDDLE`: a 10 cm circle in the north-west corner, a
  *                   parabolic dish 5 mm deep at the centre, full to the
  *                   floor — so the water's surface is the floor's level
@@ -73,9 +81,10 @@
  *                   point (`intent.ts`, `GROUND_HOME_RANGE`); the block's
  *                   foot is that point because the block is what the
  *                   ants are here to be watched on (§6, §14). The range
- *                   reaches over half the block's top, so a wander may
- *                   climb the step the block paragraph describes — a
- *                   thing to see, on purpose, not all day.
+ *                   reaches under the slab and past the pillar, so a
+ *                   wander may be routed round the pedestal, and a flee
+ *                   that meets it climbs — a thing to see, on purpose,
+ *                   not all day.
  *   the spawns      `labSpawns`: the five, deterministic, each on a
  *                   surface its medium allows — queen and worker on the
  *                   floor beside the block, worm in its band under the
@@ -167,9 +176,10 @@ export const BLOCK = Object.freeze({ at: world(0, 0), size: 20, height: 20 });
  * are `Climbable`s (`surface.ts`) in world coordinates, y the height.
  * The pillar's foot is sunk a centimetre into the floor so no face of it
  * is coplanar with the ground — the z-fighting Joshua saw on the old
- * block's top was the floor mesh's plateau under the box's own top face.
- * GAME TUNING throughout: the brief's 15-25 cm block, given an
- * underneath.
+ * block's top was the floor mesh's plateau under the box's own top face,
+ * and since the ground is the floor alone (`labGroundAt` is `labFloorAt`)
+ * the floor mesh has no plateau to fight with. GAME TUNING throughout:
+ * the brief's 15-25 cm block, given an underneath.
  */
 export const PILLAR = Object.freeze({ size: 8, height: 12, sink: 1 });
 export const SLAB = Object.freeze({ size: BLOCK.size, thickness: BLOCK.height - PILLAR.height });
@@ -322,19 +332,16 @@ export function labFloorAt(at: WorldPoint): number {
 }
 
 /**
- * THE GROUND: the floor; the block's top over its footprint; the bumps
- * over the patch; the dish under the puddle. The block wins over the
- * patch and the puddle — they do not overlap, but a rule should not
- * depend on it. (Creature Lab D's leaf makes this the FLOOR alone and
- * hands the block to `climbables`; until it lands the step stands.)
+ * THE GROUND: the floor — the bumps over the patch, the dish under the
+ * puddle, and the flat floor everywhere else, under the slab included.
+ * The block is not in it: the block is the world's `climbables`
+ * (Creature Lab D), stood on by `surface.ts` and never by a step in
+ * the ground. One name for the floor, so the mesh, the spawns and the
+ * creatures all read the same sheet.
  */
-export function labGroundAt(at: WorldPoint): number {
-  if (!Number.isFinite(at.wx) || !Number.isFinite(at.wz)) return NaN;
-  if (onBlock(at)) return LAB_FLOOR + BLOCK.height;
-  return labFloorAt(at);
-}
+export const labGroundAt = labFloorAt;
 
-/** The ground's normal, by central differences over a millimetre: up on the floor, tipped on the bumps, a cliff at the block's edge. */
+/** The ground's normal, by central differences over a millimetre: up on the floor, tipped on the bumps, and up under the slab — the block is not in the ground. */
 export function labNormalAt(at: WorldPoint): Normal {
   const e = 0.1;
   const gx = (labGroundAt(world(at.wx + e, at.wz)) - labGroundAt(world(at.wx - e, at.wz))) / (2 * e);
@@ -382,6 +389,8 @@ export interface LabWorld extends CreatureWorld {
   readonly water: WaterQuery;
   /** The ants' nest stand-in: `LAB_HOME`, the block's foot. Never absent in the lab. */
   readonly home: WorldPoint;
+  /** The block as solids — the pillar and the slab, `LAB_CLIMBABLES` — for every climber in the box. Never absent in the lab. */
+  readonly climbables: readonly Climbable[];
   /** The lab's own clock, simulation seconds since construction or the last `reset`. What a standing disturbance expires against. */
   readonly clock: number;
   /** The DISTURB tool: a synthetic disturbance that stands for `holdS` seconds of the lab's clock. */
@@ -483,6 +492,7 @@ export function createLabWorld(options: LabWorldOptions = {}): LabWorld {
     sites: LAB_SITES,
     water: LAB_WATER,
     home: LAB_HOME,
+    climbables: LAB_CLIMBABLES,
     get clock(): number {
       return clock;
     },

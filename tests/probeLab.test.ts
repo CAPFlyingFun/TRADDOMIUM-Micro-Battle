@@ -155,15 +155,19 @@ describe('probe-lab.mjs judges a teleport by the species\' own numbers', () => {
 });
 
 describe('probe-lab.mjs covers the brief\'s acceptance list (§39)', () => {
-  it('saves the eight shots this phase can take, numbered as the brief numbers them', () => {
-    for (const name of ['1-all-five', '2-queen-controlled', '3-worm', '4-fly', '5-aphid', '6-worker', '7-observer', '8-worm-underground']) {
+  it('saves the shots the brief numbers, and the two Creature Lab D added', () => {
+    for (const name of [
+      '1-all-five', '2-queen-controlled', '3-worm', '4-fly', '5-aphid', '5-aphid-model', '6-worker', '7-observer', '8-worm-underground',
+      '9-queen-wall', '9-queen-underside', '10-queen-release',
+    ]) {
       expect(source, name).toContain(`shot(page, '${name}')`);
     }
   });
 
-  it('logs shots 9 and 10 as SKIPPED by name rather than leaving them out', () => {
-    expect(source).toMatch(/SKIPPED \(deferred to Creature Lab D[^)]*\): lab-9-queen-underside/);
-    expect(source).toMatch(/SKIPPED \(deferred to Creature Lab D[^)]*\): lab-10-queen-release/);
+  it('no longer logs shots 9 and 10 as SKIPPED: surface traversal is built', () => {
+    expect(source).not.toMatch(/SKIPPED \(deferred to Creature Lab D/);
+    expect(source).toContain("(c) => c?.surface === 'on wall'");
+    expect(source).toContain("(c) => c?.surface === 'on ceiling'");
   });
 });
 

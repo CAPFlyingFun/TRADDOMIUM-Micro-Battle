@@ -10,7 +10,8 @@
  *                    heading frame (pure; the species interprets the
  *                    toggles in `creatures/demand.ts`)
  *   FollowCamera.ts  behind and above the held creature, in ITS body
- *                    lengths; orbits on a world bearing; hands off
+ *                    lengths; orbits on a bearing in the body's own up,
+ *                    so a wall or a ceiling is seen from out of it; hands off
  *                    without a cut
  *   pick.ts          which drawn centre a tap means, with a thumb's
  *                    reach so an aphid is tappable
@@ -23,7 +24,7 @@
 export {
   BACK_LENGTHS, UP_LENGTHS, AHEAD_LENGTHS, ORBIT_LENGTHS, REST_ELEVATION, ELEVATION_MIN, ELEVATION_MAX,
   MIN_NEAR, MAX_NEAR, DEPTH_RATIO, NEAR_OF_ORBIT, MIN_ORBIT, LOOK_RADIANS_PER_PIXEL,
-  EASE_TAU_S, LOOK_HOLD_S, DRIFT_TAU_S, HANDOFF_S, NO_LOOK,
+  EASE_TAU_S, LOOK_HOLD_S, DRIFT_TAU_S, HANDOFF_S, UP_EASE_S, VERTICAL_LOOK_DEGREES, NO_LOOK,
   FollowCamera, lookDeltaOf,
   type FollowTarget, type LookDelta, type MutableLook,
 } from './FollowCamera';

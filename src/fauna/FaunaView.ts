@@ -114,6 +114,33 @@
  * the grab mechanic puts a per-jaw lever on `CreatureState`, these two
  * lists are what it replaces.
  *
+ * ─── a body on a wall ───────────────────────────────────────────────
+ *
+ * Joshua, 2026-09-09: "All the insects besides the worm need to be able
+ * to climb vertical and upside down while sticking to the surface."
+ * The state carries `up`, the normal of what the body stands on
+ * (`CreatureState.up`, `creatures/surface.ts`), and a lent rig's root
+ * is placed and turned by it: the root quaternion is the basis (up,
+ * heading-on-that-up) with the flight attitude applied after it as
+ * local turns (`motion.rootQuaternion`), the walk bob is along the up
+ * — a body on the ceiling bobs DOWN — and the distance handed to the
+ * gait is the 3-D distance along the surface, so an ant walking
+ * straight up a wall, with no planar travel at all, still strides. The
+ * up the root is built on is the rig's own `drawnUp`, eased toward the
+ * state's (`motion.easeUp`, `UP_EASE_S`) so an edge is a turn and not
+ * a cut, with the heading carried into it and never eased; on the
+ * ground the two never differ and the frame is the old yaw to 1e-12.
+ * `lend` snaps the drawn up to the holder's, since a rig changing hands
+ * has nothing to ease from. The worm's chain keeps its planar trail and
+ * `layChain`'s own frame — the worm does not climb.
+ *
+ * THE IMPOSTORS KEEP THE HORIZONTAL MATRIX. The Lab lends a rig to every
+ * one of its five animals, so no impostor is ever drawn where there is
+ * a wall, and the island has no walls until it has a rock worth
+ * climbing; an impostor turned to a wall's frame would be twenty
+ * triangles of arithmetic for a case that cannot be seen. When the
+ * island grows a climbable, this is the line to revisit.
+ *
  * ─── the pick surface ───────────────────────────────────────────────
  *
  * Tap-to-possess needs to know where each animal is DRAWN, in the
@@ -129,11 +156,12 @@ import * as THREE from 'three';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import type { Assets } from '../assets/assets';
 import { AIRBORNE, CREATURE_IDS, rigScale, sizeRatio, unitsOfMm } from '../creatures';
-import type { Behaviour, CreatureId, CreatureSpecies, CreatureState } from '../creatures';
+import type { Behaviour, CreatureId, CreatureSpecies, CreatureState, MutableVec3 } from '../creatures';
 import { distance, distanceSquared, translate, type LocalPoint, type WorldPoint } from '../world/coords';
 import { toLocal as originToLocal } from '../world/origin';
 import {
-  layChain, newMotion, pointAlongPath, poseAntennae, poseGaster, poseHead, poseJaws, poseLegs, resetMotion, restBob, stepMotion, walkBob,
+  drawnAhead, easeUp, layChain, newMotion, pointAlongPath, poseAntennae, poseGaster, poseHead, poseJaws, poseLegs, resetMotion, restBob,
+  rootQuaternion, stepMotion, walkBob,
   type BoundAntenna, type BoundJaw, type BoundJoint, type BoundLeg, type RigMotion,
 } from './motion';
 import { disposeRig, dressRig, measureRig, placeholderFor, type RigAnatomy } from './rig';
@@ -425,6 +453,12 @@ interface Rig {
   readonly headOffset: THREE.Vector3;
   readonly headFrame: THREE.Quaternion;
   readonly motion: RigMotion;
+  /**
+   * The up the root is BUILT on: the holder's `up` eased after an edge
+   * (`motion.easeUp`), the holder's exactly on the ground and once
+   * settled. Snapped to the holder's in `lend`. The rig's own scratch.
+   */
+  readonly drawnUp: THREE.Vector3;
   trail: Trail | null;
   /** The creature's id, or null when free. */
   holder: string | null;
@@ -509,6 +543,8 @@ export class FaunaView {
   /** The vector `positionOf` answers in. Owned here; overwritten by the next call. */
   private readonly pick = new THREE.Vector3();
   private readonly centre = new THREE.Vector3();
+  /** The ahead a root is built on this frame (`motion.drawnAhead`). Scratch. */
+  private readonly ahead: MutableVec3 = { x: 0, y: 0, z: 0 };
 
   private rigsLent = zeroCounts();
   private impostors = zeroCounts();
@@ -691,6 +727,16 @@ export class FaunaView {
     return (this.slots.get(species)?.rigs ?? []).map((r) => r.trail?.spacing ?? 0);
   }
 
+  /** The up each rig of a species is built on (the header, "a body on a wall"), in pool order. The vectors are the rigs' own: read, never write. */
+  drawnUps(species: CreatureId): readonly THREE.Vector3[] {
+    return (this.slots.get(species)?.rigs ?? []).map((r) => r.drawnUp);
+  }
+
+  /** What a rig of a species remembers of its holder's motion (`motion.ts`), or null for no such rig. The rig's own object: read, never write. */
+  motionOf(species: CreatureId, k: number): Readonly<RigMotion> | null {
+    return this.slots.get(species)?.rigs[k]?.motion ?? null;
+  }
+
   // ─── the pick surface ──────────────────────────────────────────────
 
   /**
@@ -787,7 +833,10 @@ export class FaunaView {
       const root = cloneSkinned(template);
       root.visible = false;
       root.name = `${slot.species.id}:rig:${k}`;
-      // Heading about Y, then pitch about the body's X, then bank about its Z.
+      // The root is turned by its QUATERNION (`motion.rootQuaternion`);
+      // the Euler three derives from it reads heading about Y, then
+      // pitch about the body's X, then bank about its Z — the old order,
+      // which on the ground is what the quaternion composes to.
       root.rotation.order = 'YXZ';
       const bones = new Map<string, THREE.Bone>();
       root.traverse((n) => { if ((n as THREE.Bone).isBone) bones.set(n.name, n as THREE.Bone); });
@@ -828,7 +877,8 @@ export class FaunaView {
       }
       slot.rigs.push({
         root, legs, wings, antennae, jaws, head, gaster, chain, headOffset, headFrame,
-        motion: newMotion(), trail: null, holder: null, creature: -1, lastAt: null, lastHeight: 0, lastHeading: 0,
+        motion: newMotion(), drawnUp: new THREE.Vector3(0, 1, 0), trail: null, holder: null, creature: -1, lastAt: null, lastHeight: 0,
+        lastHeading: 0,
       });
       slot.group.add(root);
     }
@@ -1030,6 +1080,9 @@ export class FaunaView {
         const sn = Math.sin(c.heading);
         // A rotation about +Y by the heading — ahead is (sin h, cos h),
         // the actor convention — with the ellipsoid's long axis on +Z.
+        // HORIZONTAL whatever the animal's `up`: an impostor is never
+        // drawn where there is a wall (the header, "the impostors keep
+        // the horizontal matrix").
         const o = count * 16;
         into[o] = cs * r; into[o + 1] = 0; into[o + 2] = -sn * r; into[o + 3] = 0;
         into[o + 4] = 0; into[o + 5] = r; into[o + 6] = 0; into[o + 7] = 0;
@@ -1066,6 +1119,8 @@ export class FaunaView {
     const bodyLength = this.lengthOf(slot, c);
     rig.root.scale.setScalar(this.rigScaleOf(slot, c));
     resetMotion(rig.motion, AIRBORNE.includes(c.behaviour));
+    // A rig changing hands has nothing to ease from: the drawn up is the holder's, at once.
+    rig.drawnUp.set(c.up.x, c.up.y, c.up.z);
     for (const jaw of rig.jaws) jaw.angle = 0;
     rig.lastAt = c.at;
     rig.lastHeight = c.height;
@@ -1174,8 +1229,16 @@ export class FaunaView {
 
   /** Pose one lent rig from what its creature did since last frame. */
   private pose(slot: Slot, rig: Rig, c: CreatureState, dt: number): void {
-    const moved = rig.lastAt === null ? 0 : distance(c.at, rig.lastAt);
+    const anatomy = slot.anatomy;
+    const chain = anatomy?.chain ?? null;
+    const chained = chain !== null && rig.chain.length >= 2 && rig.trail !== null;
+    const planar = rig.lastAt === null ? 0 : distance(c.at, rig.lastAt);
     const climbed = c.height - rig.lastHeight;
+    // THE MEASURED MOTION IS ALONG THE SURFACE for a legged rig — the
+    // 3-D distance, so a climber walking straight up a wall with no
+    // planar travel still strides (the header). The worm's chain keeps
+    // the planar distance its trail is measured in.
+    const moved = chained ? planar : Math.hypot(planar, climbed);
     const turned = wrapAngle(c.heading - rig.lastHeading);
     rig.lastAt = c.at;
     rig.lastHeight = c.height;
@@ -1195,8 +1258,6 @@ export class FaunaView {
     });
     // THE ONE WORLD → LOCAL CROSSING, through the origin like every renderer.
     const here = this.toLocal(c.at);
-    const anatomy = slot.anatomy;
-    const chain = anatomy?.chain ?? null;
     if (chain !== null && rig.chain.length >= 2 && rig.trail !== null) {
       // THE REVEAL IS THE ANIMAL'S, and it was decided for the whole
       // body in pass 1. Reading it back here rather than asking the
@@ -1239,9 +1300,14 @@ export class FaunaView {
       return;
     }
     const bob = walkBob(m, bodyLength, c.phase) + restBob(m, bodyLength, c.phase, slot.look.restBob, slot.look.restBobRate);
-    rig.root.position.set(here.lx, c.height + bob, here.lz);
-    // Nose up is a negative turn about +X; heading about +Y; bank about the body's +Z.
-    rig.root.rotation.set(-m.pitch, c.heading, m.bank);
+    // THE FRAME IS (UP, HEADING), the header: the drawn up eased onto the
+    // state's, the heading carried into it and never eased, the bob
+    // along the up, and the attitude as local turns after the basis.
+    const up = rig.drawnUp;
+    easeUp(up, c.up, dt);
+    drawnAhead(c.up, c.heading, up, this.ahead);
+    rig.root.position.set(here.lx + up.x * bob, c.height + up.y * bob, here.lz + up.z * bob);
+    rootQuaternion(up, this.ahead, m.pitch, m.bank, rig.root.quaternion);
     poseLegs(rig.legs, m, bodyLength, c.phase);
     poseWings(rig.wings, m, c.phase, slot.hz);
     poseAntennae(rig.antennae, m, c.phase, bodyLength);

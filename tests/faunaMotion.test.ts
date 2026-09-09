@@ -24,8 +24,9 @@
  */
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
-import { EARTHWORM, rigScale, unitsOfMm } from '../src/creatures';
-import { layChain, newMotion, stepMotion, type RigMotion } from '../src/fauna/motion';
+import { APHID, EARTHWORM, QUEEN, rigScale, unitsOfMm } from '../src/creatures';
+import { STRIDES_PER_LENGTH, strideFrequency } from '../src/fauna/gait';
+import { PITCH_GAIN, layChain, newMotion, resetMotion, stepMotion, type RigMotion } from '../src/fauna/motion';
 import { chainOf, measureRig, type ChainSpec } from '../src/fauna/rig';
 import { wormRig } from './faunaFixtures';
 
@@ -211,5 +212,97 @@ describe('the worm chain: the head is the first bone and the rest follow its pat
     const tail = (points - 1) * 3;
     const tangent = new THREE.Vector3(path[tail] - path[tail - 3], path[tail + 1] - path[tail - 2], path[tail + 2] - path[tail - 1]).normalize();
     expect(run.dot(tangent)).toBeLessThan(0.5);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The stride count
+// ---------------------------------------------------------------------------
+
+const DT = 1 / 60;
+
+/** Walk a motion for `seconds` at `mmS` on a body of `lengthMm`, and return the strides it counted. */
+function walk(m: RigMotion, mmS: number, lengthMm: number, seconds: number, climbShare = 0): number {
+  const body = unitsOfMm(lengthMm);
+  const step = unitsOfMm(mmS) * DT;
+  const before = m.strides;
+  for (let k = 0; k < Math.round(seconds / DT); k += 1) {
+    stepMotion(m, { dt: DT, moved: step, climbed: step * climbShare, turned: 0, airborne: false, bodyLength: body, phase: 0.3 });
+  }
+  return m.strides - before;
+}
+
+describe('the stride count (Joshua, 2026-09-09: the aphid\'s legs "kind of was in slow motion")', () => {
+  it('counts the queen\'s strides at the old rate — 6.25 a second at her wander — and the aphid\'s at 4.1, not 1.4', () => {
+    const queen = newMotion();
+    expect(walk(queen, QUEEN.pace.wanderMmS, QUEEN.lengthMm, 1)).toBeCloseTo(6.25, 6);
+    // Which is what one fixed stride gave: the two ants are unchanged.
+    expect(walk(newMotion(), QUEEN.pace.wanderMmS, QUEEN.lengthMm, 1)).toBeCloseTo((QUEEN.pace.wanderMmS / QUEEN.lengthMm) * STRIDES_PER_LENGTH, 6);
+    const aphid = newMotion();
+    const strides = walk(aphid, APHID.pace.wanderMmS, APHID.lengthMm, 1);
+    expect(strides).toBeCloseTo(strideFrequency(APHID.pace.wanderMmS / APHID.lengthMm), 6);
+    expect(strides).toBeGreaterThan(4);
+    expect(strides).toBeLessThan(4.2);
+    // The old law would have counted 1.4.
+    expect((APHID.pace.wanderMmS / APHID.lengthMm) * STRIDES_PER_LENGTH).toBeLessThan(1.5);
+    // Fleeing: about 6.3.
+    expect(walk(newMotion(), APHID.pace.fleeMmS, APHID.lengthMm, 1)).toBeCloseTo(strideFrequency(APHID.pace.fleeMmS / APHID.lengthMm), 6);
+    expect(walk(newMotion(), APHID.pace.fleeMmS, APHID.lengthMm, 1)).toBeGreaterThan(6);
+  });
+
+  it('only advances with distance: a stopped animal has still feet, however long it stands, and a lent rig starts at zero', () => {
+    const m = newMotion();
+    walk(m, 10, 5, 0.5);
+    const walked = m.strides;
+    expect(walked).toBeGreaterThan(0);
+    for (let k = 0; k < 600; k += 1) stepMotion(m, { dt: DT, moved: 0, climbed: 0, turned: 0, airborne: false, bodyLength: 1, phase: 0 });
+    expect(m.strides).toBe(walked);
+    expect(m.gone).toBeGreaterThan(0);
+    // Slowing does not moonwalk: the count is monotone in the distance whatever the pace does.
+    let last = m.strides;
+    for (let k = 0; k < 300; k += 1) {
+      const step = 0.05 * (1 + Math.sin(k / 20));
+      stepMotion(m, { dt: DT, moved: step, climbed: 0, turned: 0, airborne: false, bodyLength: 1, phase: 0 });
+      expect(m.strides).toBeGreaterThanOrEqual(last);
+      last = m.strides;
+    }
+    resetMotion(m, false);
+    expect(m.strides).toBe(0);
+    expect(newMotion().strides).toBe(0);
+  });
+
+  it('strides on a climb: a body walking straight up, with the 3-D distance handed in, counts the same strides as one walking along', () => {
+    const along = walk(newMotion(), 20, 8, 1, 0);
+    const up = walk(newMotion(), 20, 8, 1, 1);
+    expect(up).toBeCloseTo(along, 9);
+  });
+
+  it('reads the flight pitch off the PLANAR speed, derived from the 3-D distance and the climb, so a fly\'s pitch is the number it was', () => {
+    // The old signal was planar distance and climb; the new is the 3-D
+    // distance and the same climb. The pitch target must be identical.
+    const planar = 1.5;
+    const climb = 0.5;
+    const now = newMotion();
+    for (let k = 0; k < 120; k += 1) {
+      stepMotion(now, { dt: DT, moved: planar, climbed: 0, turned: 0, airborne: true, bodyLength: 6.5, phase: 0 });
+    }
+    // One climbing frame with the 3-D distance: the pitch eases toward
+    // the target the OLD signal (planar distance, climb) had — the climb
+    // rate against the planar speed — and not toward one with the climb
+    // in the denominator too.
+    const before = { ...now };
+    const expectedTarget = Math.atan2(climb / DT, planar / DT) * PITCH_GAIN;
+    const wrongTarget = Math.atan2(climb / DT, Math.hypot(planar, climb) / DT) * PITCH_GAIN;
+    stepMotion(now, { dt: DT, moved: Math.hypot(planar, climb), climbed: climb, turned: 0, airborne: true, bodyLength: 6.5, phase: 0 });
+    expect(now.pitch).toBeGreaterThan(before.pitch);
+    const k = 1 - Math.exp(-DT / 0.15);
+    expect(now.pitch).toBeCloseTo(before.pitch + (expectedTarget * now.air - before.pitch) * k, 9);
+    expect(Math.abs(now.pitch - (before.pitch + (wrongTarget * now.air - before.pitch) * k))).toBeGreaterThan(1e-4);
+    // A climb with NO planar travel is a vertical pitch target, not a NaN.
+    const vertical = newMotion();
+    vertical.air = 1;
+    stepMotion(vertical, { dt: DT, moved: climb, climbed: climb, turned: 0, airborne: true, bodyLength: 6.5, phase: 0 });
+    expect(Number.isFinite(vertical.pitch)).toBe(true);
+    expect(vertical.pitch).toBeGreaterThan(0);
   });
 });

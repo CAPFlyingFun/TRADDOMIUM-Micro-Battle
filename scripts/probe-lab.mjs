@@ -57,10 +57,11 @@
  * Q down. Never Space, though it is also "up": a button just pressed
  * keeps focus, and Space on a focused button CLICKS it.
  *
- * SHOTS 9 AND 10 of the brief's §39 — the queen on the block's side and
- * underside, and her release from the underside to world-up — are
- * surface traversal, Creature Lab D, and are logged SKIPPED, never
- * quietly left out.
+ * SHOTS 9 AND 10 of the brief's §39 — the queen on the pillar's wall and
+ * the slab's underside, and her release from the underside to the air —
+ * are Creature Lab D's, driven here by W into the pillar and read back
+ * off the overlay's surface word; a walker whose height jumps more than
+ * it can walk in a chunk of frames fails by name (`driveUntil`).
  *
  * Run after npm run build:
  *
@@ -162,6 +163,9 @@ const HOLD_FRAMES = 20;
 const SETTLE_FRAMES = 30;
 /** The follow camera's handoff is a blend (`control/FollowCamera.ts`, HANDOFF_S); a few frames and the lens is on the animal. */
 const HANDOFF_FRAMES = 6;
+/** The surface drive (Creature Lab D): W in chunks this long, up to this many frames per stage — the wall is ~5 s off at 20 mm/s, the underside ~6 s more. */
+const DRIVE_CHUNK = 10;
+const SURFACE_FRAMES = QUICK ? 100 : 160;
 const ALARM_FRAMES = 12;
 const TIMEOUT = { menu: 90_000, lab: 240_000, overlay: 60_000, click: 60_000, shot: 120_000 };
 
@@ -299,6 +303,8 @@ function parseBlock(raw) {
   const host = /\bhost\s*[:=]?\s*([\w.:-]+)/i.exec(flat);
   // Where the body is DRAWN, CSS pixels: what a DISTURB tap is aimed at. `px —` is a body not drawn this frame.
   const px = /\bpx\s+(-?\d+)\s*,\s*(-?\d+)/i.exec(flat);
+  // Where the feet are (`CreatureLabScene.surfaceWord`): the face under a climber — Creature Lab D — or the ground, air, host or soil word.
+  const surface = /\b(on top|on wall|on ceiling|on ground|on host|on surface|airborne|underground|no ground)\b/i.exec(flat);
   return {
     text: flat,
     control,
@@ -309,6 +315,7 @@ function parseBlock(raw) {
     heightMm,
     position,
     screen: px ? { x: Number(px[1]), y: Number(px[2]) } : null,
+    surface: surface ? surface[1].toLowerCase() : null,
     speedMmS: speed ? toMm(Number(speed[1]), speed[2] ? speed[2].slice(0, -2) : 'mm') : null,
     host: host ? host[1] : null,
     lengthMm: num(/\b(?:length|body)\s*[:=]?\s*(-?\d+(?:\.\d+)?)\s*mm\b/i.exec(flat)),
@@ -409,10 +416,15 @@ function drawnShare(png) {
 }
 
 /**
- * The bench's block is a 200 mm step in the GROUND, and the overlay's
- * height is AGL — measured against the ground under the body — so a fly
- * crossing the block's edge, or a queen stepping onto its top, reads a
- * 200 mm jump with no motion at all (creatures/labWorld BLOCK.size).
+ * The bench's block is a slab on a pedestal, a solid a climber walks up
+ * and under (Creature Lab D, creatures/labWorld PILLAR and SLAB), and
+ * the overlay's height is AGL — measured against the FLOOR under the
+ * body, since the block is no longer in the ground. A walker's height
+ * therefore changes at its walking pace, never in a step; but a FLIER
+ * crossing the slab's edge below its top is lifted onto it in one frame
+ * (`floorOverBoxes`: the floor under a body over the slab is the slab),
+ * which reads as a jump of up to the block's height with no motion.
+ * The budget stays as the honest bound for that one case.
  */
 const BLOCK_STEP_MM = 200;
 
@@ -541,6 +553,32 @@ async function proveResponds(page, id) {
   if (!check(evidence !== null, `${id} held W for ${HOLD_FRAMES} frames and the overlay shows no movement (no position change, no speed, no moving word): "${after?.text}"`)) return;
   const offered = [before?.position ? 'position' : null, mid?.speedMmS !== null ? 'speed' : null].filter(Boolean).join(', ') || 'word only';
   log(`${id} answers W: ${evidence} (the overlay offers ${offered}; ${summary({ creatures: { [id]: after } }, id)})`);
+}
+
+/**
+ * Hold W for `id` in chunks of `DRIVE_CHUNK` frames, reading the overlay
+ * between chunks, until `wanted(block)` is true or `maxFrames` have gone.
+ * Every chunk's height change is held to what the body could honestly
+ * climb in it: a walker's flee pace over the chunk plus a body length,
+ * at twice the cited length — the no-teleport rule of the switch soak,
+ * applied to a climb. Returns whether it got there, the frames it took,
+ * and the last reading.
+ */
+async function driveUntil(page, id, wanted, maxFrames) {
+  let last = (await read(page)).creatures[id];
+  let frames = 0;
+  const seconds = DRIVE_CHUNK * SIM_DT_CAP;
+  const budget = LENGTH_MARGIN * (BODY_LENGTH_MM[id] + seconds * HONEST_PLANE_MM_S[id]);
+  while (frames < maxFrames) {
+    await hold(page, [KEY.ahead], DRIVE_CHUNK);
+    frames += DRIVE_CHUNK;
+    const now = (await read(page)).creatures[id];
+    const dh = moved(last, now).height;
+    if (dh !== null) check(dh <= budget, `${id} climbed ${dh} mm in ${DRIVE_CHUNK} frames of W (allowed ${budget.toFixed(0)}): a walker teleported, not walked`);
+    last = now;
+    if (wanted(now)) return { hit: true, frames, last };
+  }
+  return { hit: false, frames, last };
 }
 
 /** The switch soak, §36: the five in a ring, `cycles` times round, every switch checked. */
@@ -751,6 +789,13 @@ async function main() {
     const aphid = (await read(page)).creatures.aphid;
     if (aphid?.host) log(`the possessed aphid is still on its host: ${aphid.host}`);
     await shot(page, '5-aphid');
+    // Joshua, 2026-09-09: "grab a screenshot of the model with maybe no
+    // overlay to make sure everything is good." The overlay off, the
+    // legs mid-stride, the follow camera four bodies back.
+    await turnOff(page, ACTION.debug, FIELD.debug);
+    await hold(page, [KEY.ahead], Math.ceil(HOLD_FRAMES / 2));
+    await shot(page, '5-aphid-model');
+    await turnOn(page, ACTION.debug, FIELD.debug);
 
     p = await possess(page, 'housefly');
     checkOneControlled(p.r, 'housefly', 'possessing the fly');
@@ -830,9 +875,33 @@ async function main() {
     for (const f of [FIELD.fps, FIELD.frameMs, FIELD.aiMs, FIELD.animMs]) check(end.fields[f] !== null, `the overlay has no [data-field="${f}"]`);
     check(stats.length > 0, 'no frame stats were sampled during the observer soak');
 
-    // ── SHOTS 9 AND 10: NOT THIS PHASE ───────────────────────────
-    log('SKIPPED (deferred to Creature Lab D, surface traversal): lab-9-queen-underside — the queen on the block\'s side and underside');
-    log('SKIPPED (deferred to Creature Lab D, surface traversal): lab-10-queen-release — the queen releasing from the underside and recovering to world-up');
+    // ── 7. SURFACES (Creature Lab D): shots 9 and 10 ─────────────
+    phase('surfaces: the queen up the pillar, under the slab, and let go');
+    // The reset put the queen at her spawn, (14, 0) facing −x, and the
+    // pillar's east face stands at x = 4 (creatures/labWorld PILLAR): W
+    // walks her into it and, the surface step being real, UP it — never
+    // onto its top in one frame, which is what Joshua saw on alpha.39.
+    const climb = await driveUntil(page, 'queen', (c) => c?.surface === 'on wall', SURFACE_FRAMES);
+    if (check(climb.hit, `the queen held W for ${climb.frames} frames and never read "on wall" (last: "${climb.last?.text}")`)) {
+      log(`queen on the wall after ${climb.frames} frames: ${summary({ creatures: { queen: climb.last } }, 'queen')}`);
+    }
+    await shot(page, '9-queen-wall');
+    const under = await driveUntil(page, 'queen', (c) => c?.surface === 'on ceiling', SURFACE_FRAMES);
+    if (check(under.hit, `the queen held W for ${under.frames} more frames and never read "on ceiling" (last: "${under.last?.text}")`)) {
+      const agl = under.last?.heightMm;
+      check(agl !== null && agl >= 100 && agl <= 140, `on the ceiling the queen's AGL reads ${agl} mm; the slab's underside is 120 mm up`);
+      log(`queen on the underside after ${under.frames} frames: ${summary({ creatures: { queen: under.last } }, 'queen')}`);
+    }
+    await shot(page, '9-queen-underside');
+    // THE RELEASE (§14): UP on a standing winged body is a takeoff; she
+    // lets go of the ceiling, the air takes her, and her up is the world's
+    // again — the renderer rolls her over rather than snapping.
+    await hold(page, [KEY.up], HOLD_FRAMES);
+    const released = (await read(page)).creatures.queen;
+    check(AIR_WORDS.includes(released?.behaviour ?? '') || released?.surface === 'airborne',
+      `UP from the underside did not release the queen: word "${released?.behaviour}", surface "${released?.surface}"`);
+    log(`queen released: ${summary({ creatures: { queen: released } }, 'queen')} (surface ${released?.surface})`);
+    await shot(page, '10-queen-release');
 
     if (pageNoise.length > 0) fail(`the page logged errors: ${pageNoise.join(' | ')}`);
     log(`${switches} switches, ${elapsed()} on the wall clock`);
@@ -846,7 +915,7 @@ async function main() {
     process.exitCode = 1;
   } else {
     log('PASS: five up with the queen held; each answers the thumbs; the switch soak duplicated, teleported and reset nothing; '
-      + 'the AI words were legal and the fly flew; a tap alarms; reset is the spawn; predation cycles; the page logged nothing');
+      + 'the AI words were legal and the fly flew; a tap alarms; reset is the spawn; the queen climbed the pillar, walked the underside and let go; predation cycles; the page logged nothing');
   }
 }
 

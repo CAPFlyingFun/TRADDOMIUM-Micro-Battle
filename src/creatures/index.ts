@@ -44,8 +44,9 @@ export {
 export type { LabWorld, LabWorldOptions } from './labWorld';
 // --- Creature Lab D: surfaces (walls and undersides) ---
 export {
-  FACE_NORMALS, FACE_TOLERANCE, SURFACE_SKIN, WORLD_UP, aheadOn, aimOnSurface, cross, dot, faceUnder, faceWord, floorOverBoxes,
-  headingOn, normalize, rightOn, rotateBetween, routeAround, signedAngleAbout, surfaceStep, tangentBasis, tangentOf, vec3,
+  FACE_NORMALS, FACE_TOLERANCE, MAX_EDGES_PER_STEP, SURFACE_SKIN, WORLD_UP, aheadOn, aimOnSurface, cross, dot, faceIndexUnder, faceUnder,
+  faceWord, floorOverBoxes, headingOn, normalize, rightOn, rotateBetween, routeAround, signedAngleAbout, surfaceStep, tangentBasis,
+  tangentOf, vec3,
 } from './surface';
 export type { Climbable, FaceHit, FaceWord, MutableVec3, SurfaceBody, Vec3 } from './surface';
 export { wrapHeading } from './heading';
@@ -62,5 +63,5 @@ export {
   CARBOHYDRATE_OR_DRINK, DROP_CHANCE_DEFAULT, GROUND_FORAGE_LENGTHS, GROUND_HOME_RANGE, HOST_FLEE_LENGTHS, HOST_FLEE_WALK_MM, LOOM,
   PROTEIN_AT, PROTEIN_OR_DRINK, SEVERE_ALARM_FRACTION, TAKEOFF_WIND_MAX,
   beginTakeoff, contactMmOf, containTarget, creatureById, digDiscountOf, digPaceFactor, dropChanceOf, homeOf, isPredator,
-  nearestDisturbance, nearestDisturbanceGap, nearestHostInSight, nearestPrey, predationOf, preyOf, takeoffWeatherAllows,
+  nearestDisturbance, nearestDisturbanceGap, nearestHostInSight, nearestPrey, predationOf, preyOf, routeTarget, takeoffWeatherAllows,
 } from './intent';
