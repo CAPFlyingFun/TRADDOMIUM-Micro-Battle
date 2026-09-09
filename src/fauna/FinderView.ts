@@ -87,6 +87,10 @@ export const PIN_LOOK: Readonly<Record<CreatureId, PinLook>> = Object.freeze({
   // A fly never burrows, so its second colour is only ever a placeholder
   // kept for the table's shape — the species table is what says so.
   housefly: Object.freeze({ colour: 0x6fd8ff, buried: 0xcdf1ff }),
+  // The ants, for the Lab: gold for the queen, amber for the worker;
+  // neither burrows yet, so the second colour is the table's shape.
+  queen: Object.freeze({ colour: 0xffc83d, buried: 0xffe9a8 }),
+  worker: Object.freeze({ colour: 0xff9a3d, buried: 0xffd9b0 }),
 });
 
 /** Where a world position is drawn. `world/origin.toLocal` is the default; a test hands in its own. */

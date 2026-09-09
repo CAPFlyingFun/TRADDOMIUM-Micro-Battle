@@ -196,12 +196,12 @@ describe('loading and the size', () => {
 
 describe('the pool', () => {
   it('is sized by the rung, and the impostor capped by the species\' own cap', () => {
-    expect(POOL_SIZES.high).toEqual({ earthworm: 4, aphid: 8, housefly: 6 });
+    expect(POOL_SIZES.high).toEqual({ earthworm: 4, aphid: 8, housefly: 6, queen: 1, worker: 1 });
     for (const rung of ['ultra-low', 'low', 'medium', 'high', 'ultra-high']) {
       for (const id of CREATURE_IDS) expect(poolSizeFor(rung, id)).toBeGreaterThan(0);
       for (const s of SPECIES) expect(impostorCapFor(s, rung)).toBe(s.population.caps[rung as 'high']);
     }
-    let last = { earthworm: 0, aphid: 0, housefly: 0 };
+    let last = { earthworm: 0, aphid: 0, housefly: 0, queen: 0, worker: 0 };
     for (const rung of ['ultra-low', 'low', 'medium', 'high', 'ultra-high']) {
       for (const id of CREATURE_IDS) expect(POOL_SIZES[rung][id]).toBeGreaterThanOrEqual(last[id]);
       last = { ...POOL_SIZES[rung] };

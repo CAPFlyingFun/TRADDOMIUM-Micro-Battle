@@ -11,12 +11,12 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  APHID, BEHAVIOURS_BY_MEDIUM, CREATURE_IDS, CREATURE_SPECIES, EARTHWORM, HOUSEFLY, newCreature, unitsOfMm,
+  APHID, BEHAVIOURS_BY_MEDIUM, CREATURE_IDS, CREATURE_SPECIES, EARTHWORM, HOUSEFLY, QUEEN, WORKER, newCreature, unitsOfMm,
   type CreatureSpecies, type CreatureState, type CreatureWeather, type CreatureWorld, type Disturbance,
 } from '../src/creatures';
 import {
-  ALARM_FLEES_AT, FLOOD_CLOSING, FLOOD_THREAT, HOST_WALK_LENGTHS, RAINING_MM_HR, hostPlantOf, isLand, nearestSite, senseAlarm,
-  senseFlood, think, thinkDue, thinkPending, tickNeeds,
+  ALARM_FLEES_AT, FLOOD_CLOSING, FLOOD_THREAT, GROUND_WANDER_LENGTHS, HOST_WALK_LENGTHS, RAINING_MM_HR, hostPlantOf, isLand,
+  nearestSite, senseAlarm, senseFlood, think, thinkDue, thinkPending, tickNeeds,
 } from '../src/creatures/intent';
 import { unitsOfMetres } from '../src/creatures/finder';
 import { floorAt, isAirborne, move } from '../src/creatures/locomotion';
@@ -1185,4 +1185,120 @@ describe('the fly and the water', () => {
     expect(underSurface, `under the pond's surface on ${underSurface} of ${overPond} frames over it`).toBe(0);
     expect(wetPerches, `perched with water under it on ${wetPerches} frames`).toBe(0);
   }, 30_000);
+});
+
+describe('the ground brain (the Lab\'s ants)', () => {
+  it('a worker lives in the shared words, never flies, never attacks on its own, feeds at food in sight when hungry, and a thousand seconds is finite', () => {
+    const w = fakeWorld();
+    // Two units off: inside the worker's measured sight of 50 mm (five units), which is how far a 48-facet eye resolves motion.
+    const nectar: ResourceSite = { id: 'flower:0,0:2', kind: 'nectar', at: world(502, 501), above: 5, amount: 3, ownerId: 'flower:0,0:2' };
+    w.sites = [nectar];
+    const rand = mulberry32(51);
+    const c = spawn(WORKER, world(500, 500));
+    // Hungry from the start, while the food is still in sight: a random walk of a minute would carry a five-unit eye past it.
+    c.hunger = 0.95;
+    const seen = new Set<string>();
+    let nonFinite = 0;
+    let fed = false;
+    for (let i = 0; i < 30 * 1000; i += 1) {
+      step(c, WORKER, w, rand, 1 / 30);
+      seen.add(c.behaviour);
+      if (c.behaviour === 'feed') {
+        fed = true;
+        expect(c.hostId).toBe(nectar.id);
+      }
+      expect(BEHAVIOURS_BY_MEDIUM.ground).toContain(c.behaviour);
+      expect(c.height).toBe(ground(c.at));
+      if (![c.at.wx, c.at.wz, c.height, c.heading, c.pitch, c.targetHeight, c.hunger, c.fatigue, c.alarm].every(Number.isFinite)) nonFinite += 1;
+    }
+    expect(nonFinite).toBe(0);
+    expect(fed).toBe(true);
+    expect(seen.has('wander')).toBe(true);
+    expect(seen.has('idle')).toBe(true);
+    expect(seen.has('attack')).toBe(false);
+    expect(seen.has('fly')).toBe(false);
+    // Its walks are short loops: never more than a few body lengths from where its last walk began, all told well inside a metre.
+    expect(distance(c.at, world(500, 500))).toBeLessThan(unitsOfMetres(1));
+  }, 60_000);
+
+  it('a defensive ant turns to face a disturbance and holds its ground; a skittish one would flee', () => {
+    const w = fakeWorld();
+    const rand = mulberry32(52);
+    const c = spawn(WORKER, world(500, 500));
+    c.behaviour = 'idle';
+    c.behaviourUntilS = 100;
+    c.behaviourS = 1;
+    for (let i = 0; i < 30 * 2; i += 1) step(c, WORKER, w, rand, 1 / 30);
+    const before = c.at;
+    // The threat stands east of it.
+    w.list = [{ at: world(before.wx + 1, before.wz), height: c.height, radius: 0 }];
+    let thoughts = 0;
+    while (thoughts < 1) if (step(c, WORKER, w, rand, 1 / 30)) thoughts += 1;
+    expect(c.behaviour).toBe('defend');
+    expect(c.alarm).toBeGreaterThanOrEqual(ALARM_FLEES_AT);
+    // The face point is TOWARD the threat: east.
+    expect(c.target!.wx).toBeGreaterThan(before.wx);
+    for (let i = 0; i < 30 * 2; i += 1) step(c, WORKER, w, rand, 1 / 30);
+    // It turned to face east (heading π/2) and did not move.
+    expect(Math.abs(c.heading - Math.PI / 2)).toBeLessThan(0.05);
+    expect(distance(c.at, before)).toBeLessThan(1e-9);
+    w.list = [];
+    for (let i = 0; i < 30 * 30; i += 1) step(c, WORKER, w, rand, 1 / 30);
+    expect(c.behaviour).not.toBe('defend');
+    // The same alarm on a skittish ground animal is a flee, away.
+    const timid: CreatureSpecies = { ...WORKER, temperament: 'skittish' };
+    const t = spawn(timid, world(500, 500));
+    t.behaviour = 'idle';
+    t.behaviourUntilS = 100;
+    t.behaviourS = 1;
+    w.list = [{ at: world(501, 500), height: t.height, radius: 0 }];
+    let th = 0;
+    while (th < 1) if (step(t, timid, w, rand, 1 / 30)) th += 1;
+    expect(t.behaviour).toBe('flee');
+    expect(t.target!.wx).toBeLessThan(500);
+  });
+
+  it('a worker chosen "fly" is a bug the brain throws on; the winged queen may use the air words', () => {
+    const w = fakeWorld();
+    const worker = spawn(WORKER, world(500, 500));
+    worker.behaviour = 'fly';
+    worker.behaviourUntilS = 100;
+    expect(() => think(worker, WORKER, w, () => 0.5, null)).toThrow(/does not allow/);
+    const queen = spawn(QUEEN, world(500, 500));
+    queen.behaviour = 'fly';
+    queen.behaviourUntilS = 100;
+    expect(() => think(queen, QUEEN, w, () => 0.5, null)).not.toThrow();
+    // The ground brain never puts her up on its own, yet: her flight is the Lab's own leaf.
+    const grounded = spawn(QUEEN, world(500, 500));
+    const rand = mulberry32(53);
+    for (let i = 0; i < 30 * 300; i += 1) {
+      step(grounded, QUEEN, w, rand, 1 / 30);
+      expect(isAirborne(grounded.behaviour)).toBe(false);
+      expect(grounded.height).toBe(ground(grounded.at));
+    }
+  });
+
+  it('a ground species\' flee and wander distances scale by its pace law, not its length', () => {
+    const w = fakeWorld();
+    const cited = spawn(WORKER, world(500, 500));
+    const big = newCreature({
+      id: 'worker:0,0:2', species: 'worker', cellKey: '0,0', at: cited.at, height: cited.height, heading: 0.4, phase: 0.3, lengthMm: WORKER.lengthMm * 2,
+    });
+    const timid: CreatureSpecies = { ...WORKER, temperament: 'skittish' };
+    const disturbance: Disturbance[] = [{ at: world(502, 500), height: cited.height, radius: 0 }];
+    expect(senseAlarm(cited, timid, disturbance)).toBe(true);
+    expect(senseAlarm(big, timid, disturbance)).toBe(true);
+    const near = distance(cited.at, cited.target!);
+    expect(near).toBeCloseTo(unitsOfMm(WORKER.pace.fleeMmS) * WORKER.senses.alarmS, 6);
+    expect(distance(big.at, big.target!)).toBeCloseTo(Math.pow(2, 0.75) * near, 6);
+    // The wander reach, on the other hand, is body lengths: the bigger ant walks proportionally further.
+    const walkFrom = (c: CreatureState): number => {
+      const s = { ...c, alarm: 0, target: null, behaviour: 'idle' as const, behaviourS: 10, behaviourUntilS: 1, hunger: 0 };
+      think(s, WORKER, w, () => 0.5, null);
+      expect(s.behaviour).toBe('wander');
+      return distance(s.at, s.target!);
+    };
+    expect(walkFrom(big)).toBeCloseTo(2 * walkFrom(cited), 6);
+    expect(walkFrom(cited)).toBeLessThanOrEqual(GROUND_WANDER_LENGTHS * unitsOfMm(WORKER.lengthMm) + 1e-9);
+  });
 });

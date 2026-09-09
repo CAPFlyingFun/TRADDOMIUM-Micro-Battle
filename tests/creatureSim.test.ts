@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import {
-  APHID, CREATURE_IDS, CREATURE_SPECIES, EARTHWORM, HOUSEFLY, NO_BURROW_EDITOR, unitsOfMm,
+  APHID, CREATURE_IDS, CREATURE_SPECIES, EARTHWORM, HOUSEFLY, NO_BURROW_EDITOR, QUEEN, unitsOfMm,
   type BurrowEditor, type CreatureId, type CreatureSpecies, type CreatureState, type CreatureWeather, type CreatureWorld,
   type Disturbance,
 } from '../src/creatures';
@@ -465,5 +465,24 @@ describe('living', () => {
     expect(cellAt(FOCUS)).toEqual({ cx: 5, cz: 3 });
     const id: CreatureId = 'aphid';
     expect(untimed.counts(id).cap).toBe(APHID.population.caps.medium);
+  });
+});
+
+describe('the Lab\'s ants and the wild simulation', () => {
+  it('the default simulation runs the wild three and never generates an ant; a table naming the measured queen runs her with no wild density', () => {
+    const sim = new CreatureSim({ world: fakeWorld(), seed: 5 });
+    expect(sim.species.map((s) => s.id)).toEqual(CREATURE_IDS);
+    expect(sim.species.some((s) => s.id === 'queen')).toBe(false);
+    settle(sim, FOCUS);
+    expect(sim.creatures().some((c) => c.species === 'queen' || c.species === 'worker')).toBe(false);
+    // The rigs are measured (species.ts, from tests/faunaRealRigs.test.ts), so the table accepts her —
+    // and, with no wild density, generates none from any cell: the Lab places her.
+    const lab = new CreatureSim({ world: fakeWorld('grassland'), seed: 5, species: [QUEEN], rung: 'ultra-high' });
+    settle(lab, FOCUS);
+    expect(lab.generated('queen')).toBe(0);
+    expect(lab.counts('queen').resident).toBe(0);
+    expect(lab.counts('queen').cap).toBe(1);
+    for (let i = 0; i < 60; i += 1) lab.update(FOCUS, 1 / 60);
+    expect(lab.cost().thoughts).toBe(0);
   });
 });

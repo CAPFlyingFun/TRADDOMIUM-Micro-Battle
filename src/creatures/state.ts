@@ -22,15 +22,22 @@
  * states and its lesson is on the union: "the temptation to add a state
  * per species is how an FSM becomes an if-ladder". Three media need
  * three more words than land does — a worm burrows and surfaces, a fly
- * takes off, flies, hovers and lands — and that is the list. Which
+ * takes off, flies, hovers and lands — and the fourth medium, the
+ * ground an ant walks, adds two: `defend` (turn to face a threat and
+ * hold) and `attack` (close on it at the burst). That is the list. Which
  * words a species may use is a property of its MEDIUM
- * (`BEHAVIOURS_BY_MEDIUM`), so a worm can never be told to fly and an
- * intent that tries is a bug the test catches, not a state the game has.
+ * (`BEHAVIOURS_BY_MEDIUM`), plus the air words for a ground species
+ * that carries a flight spec (`behaviourAllowedFor`), so a worm can
+ * never be told to fly, a worker cannot either, and an intent that tries
+ * is a bug the test catches, not a state the game has. What is NOT here,
+ * on purpose: `climb`. Surface traversal — a wall, an underside — is a
+ * later phase of the Lab (Joshua's brief, §14), and a word with no body
+ * rule behind it would be an unbuilt ability that looks built.
  *
  * Pure: no three, no DOM. `src/creatures/` is core.
  */
 import type { WorldPoint } from '../world/coords';
-import { CREATURE_SPECIES, type CreatureId, type Medium } from './species';
+import { CREATURE_SPECIES, type CreatureId, type CreatureSpecies, type Medium } from './species';
 
 export type Behaviour =
   | 'idle'     // standing, sitting, hanging on a stem
@@ -43,25 +50,44 @@ export type Behaviour =
   | 'takeoff'  // air: leaving a perch
   | 'fly'      // air: cruising toward a target
   | 'hover'    // air: holding over a spot before landing
-  | 'land';    // air: descending onto the ground or a plant
+  | 'land'     // air: descending onto the ground or a plant
+  | 'defend'   // ground: facing a threat and holding — a stand, not a charge
+  | 'attack';  // ground: closing on a target at the burst pace; only ever chosen where the Lab's predation option allows
 
 export const BEHAVIOURS: readonly Behaviour[] = Object.freeze([
-  'idle', 'wander', 'feed', 'rest', 'flee', 'burrow', 'surface', 'takeoff', 'fly', 'hover', 'land',
+  'idle', 'wander', 'feed', 'rest', 'flee', 'burrow', 'surface', 'takeoff', 'fly', 'hover', 'land', 'defend', 'attack',
 ]);
 
-/** The words a medium allows. A species uses no behaviour outside its medium's list. */
+/** The words a medium allows. A species uses no behaviour outside its medium's list (plus `AIR_WORDS` when it flies). */
 const SOIL_BEHAVIOURS: readonly Behaviour[] = Object.freeze(['idle', 'wander', 'feed', 'rest', 'flee', 'burrow', 'surface']);
 const PLANT_BEHAVIOURS: readonly Behaviour[] = Object.freeze(['idle', 'wander', 'feed', 'rest', 'flee']);
 const AIR_BEHAVIOURS: readonly Behaviour[] = Object.freeze(['idle', 'wander', 'feed', 'rest', 'flee', 'takeoff', 'fly', 'hover', 'land']);
+const GROUND_BEHAVIOURS: readonly Behaviour[] = Object.freeze(['idle', 'wander', 'feed', 'rest', 'flee', 'defend', 'attack']);
 
 export const BEHAVIOURS_BY_MEDIUM: Readonly<Record<Medium, readonly Behaviour[]>> = Object.freeze({
   soil: SOIL_BEHAVIOURS,
   plant: PLANT_BEHAVIOURS,
   air: AIR_BEHAVIOURS,
+  ground: GROUND_BEHAVIOURS,
 });
 
+/** The words a body uses only with wings: what a flight spec adds to a ground species' list. */
+export const AIR_WORDS: readonly Behaviour[] = Object.freeze(['takeoff', 'fly', 'hover', 'land']);
+
+/** Whether a MEDIUM allows a word. A species' own answer is `behaviourAllowedFor`, which knows about wings. */
 export function behaviourAllowed(medium: Medium, behaviour: Behaviour): boolean {
   return BEHAVIOURS_BY_MEDIUM[medium].includes(behaviour);
+}
+
+/**
+ * Whether THIS species may use a word: its medium's list, and the air
+ * words when it carries a flight spec — the winged queen flies, the
+ * worker does not, and the table's validator is what keeps a flight spec
+ * off a soil or plant species. The brain throws on any other word.
+ */
+export function behaviourAllowedFor(species: CreatureSpecies, behaviour: Behaviour): boolean {
+  if (behaviourAllowed(species.medium, behaviour)) return true;
+  return species.flight !== null && AIR_WORDS.includes(behaviour);
 }
 
 /** Behaviours in which the body is off the ground and in the air. A renderer reads this; it never reads a mode enum. */

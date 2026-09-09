@@ -85,6 +85,8 @@ export const CREATURE_WORDS: Readonly<Record<CreatureId, string>> = Object.freez
   earthworm: 'WORM',
   aphid: 'APHID',
   housefly: 'FLY',
+  queen: 'QUEEN',
+  worker: 'WORKER',
 });
 
 /** The two read-only queries the scene hands in. Neither may change anything. */

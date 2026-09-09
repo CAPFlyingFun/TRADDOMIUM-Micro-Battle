@@ -129,11 +129,13 @@ export const POOL_SIZES: Readonly<Record<string, Readonly<Record<CreatureId, num
   // that graphics give way before frame rate does. Everything past the
   // pool is a twenty-triangle impostor, which at ant scale a few metres
   // off is what the eye sees anyway. GAME TUNING until his phone says.
-  'ultra-low': Object.freeze({ earthworm: 1, aphid: 2, housefly: 1 }),
-  low: Object.freeze({ earthworm: 1, aphid: 3, housefly: 2 }),
-  medium: Object.freeze({ earthworm: 2, aphid: 5, housefly: 4 }),
-  high: Object.freeze({ earthworm: 4, aphid: 8, housefly: 6 }),
-  'ultra-high': Object.freeze({ earthworm: 6, aphid: 16, housefly: 10 }),
+  // The two ants are not in the wild yet: the Creature Lab draws one of
+  // each, so one rig apiece at every rung is the whole of their pool.
+  'ultra-low': Object.freeze({ earthworm: 1, aphid: 2, housefly: 1, queen: 1, worker: 1 }),
+  low: Object.freeze({ earthworm: 1, aphid: 3, housefly: 2, queen: 1, worker: 1 }),
+  medium: Object.freeze({ earthworm: 2, aphid: 5, housefly: 4, queen: 1, worker: 1 }),
+  high: Object.freeze({ earthworm: 4, aphid: 8, housefly: 6, queen: 1, worker: 1 }),
+  'ultra-high': Object.freeze({ earthworm: 6, aphid: 16, housefly: 10, queen: 1, worker: 1 }),
 });
 
 /** The pool for a rung named by the detail ladder; an unknown name is `medium`. */
@@ -291,6 +293,12 @@ export const LOOK: Readonly<Record<CreatureId, SpeciesLook>> = Object.freeze({
   // An aphid on a stem breathes: a slow, small bob so a colony is not a row of beads.
   aphid: Object.freeze({ girth: 0.42, colour: 0x86b04a, restBob: 0.012, restBobRate: 0.4 }),
   housefly: Object.freeze({ girth: 0.34, colour: 0x3a3a40, restBob: 0, restBobRate: 0 }),
+  // The fire ants: girth from the rigs' thorax height over their length
+  // (queen 4.67 mm at 8, worker 1.29 mm at 3.0 — rigs.md); the reddish
+  // brown of S. invicta, the queen darker. Placeholders for the fauna
+  // pass to refine against the drawn rig.
+  queen: Object.freeze({ girth: 0.58, colour: 0x6e2f16, restBob: 0, restBobRate: 0 }),
+  worker: Object.freeze({ girth: 0.43, colour: 0x9a4a22, restBob: 0, restBobRate: 0 }),
 });
 
 /** Where a world position is drawn. `world/origin.toLocal` is the default; a test may hand in its own. */

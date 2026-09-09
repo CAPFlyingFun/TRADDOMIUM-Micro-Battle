@@ -5,7 +5,7 @@
  * write a NaN.
  */
 import { describe, expect, it } from 'vitest';
-import { APHID, EARTHWORM, HOUSEFLY, newCreature, unitsOfMm, type CreatureState, type CreatureWorld } from '../src/creatures';
+import { APHID, EARTHWORM, HOUSEFLY, QUEEN, WORKER, newCreature, unitsOfMm, type CreatureState, type CreatureWorld } from '../src/creatures';
 import { wrapHeading } from '../src/creatures/heading';
 import { DROP_MM_S, arrived, burrow, floorAt, fly, isAirborne, isMoving, move, paceOf, walk } from '../src/creatures/locomotion';
 import { distance, world, type WorldPoint } from '../src/world/coords';
@@ -394,5 +394,60 @@ describe("a pace is the individual's", () => {
     }
     expect(large.height).toBeCloseTo(small.height, 12);
     expect(50 - small.height).toBeCloseTo(unitsOfMm(DROP_MM_S) * 0.01, 9);
+  });
+});
+
+describe("a pace is the species' law, a body is its length (the Lab's ants)", () => {
+  it('a worker twice the cited length walks 2^0.75 as far in a second, and stops twice as far from its target', () => {
+    const w = fakeWorld(() => 0);
+    const cited = sized(WORKER, world(0, 0), 0, WORKER.lengthMm);
+    const big = sized(WORKER, world(0, 0), 0, WORKER.lengthMm * 2);
+    for (const c of [cited, big]) {
+      c.behaviour = 'wander';
+      c.target = world(100_000, 0);
+    }
+    expect(paceOf(cited, WORKER)).toBeCloseTo(unitsOfMm(WORKER.pace.wanderMmS), 12);
+    expect(paceOf(big, WORKER) / paceOf(cited, WORKER)).toBeCloseTo(Math.pow(2, 0.75), 12);
+    const one = walk(cited, WORKER, w, 1);
+    expect(walk(big, WORKER, w, 1) / one).toBeCloseTo(Math.pow(2, 0.75), 9);
+    // A ground walker stands on the ground, whatever its size.
+    expect(cited.height).toBe(0);
+    expect(big.height).toBe(0);
+    // The arrive radius is a quarter of the BODY: linear in the length, not in the pace law.
+    const nearTarget = (lengthMm: number): CreatureState => {
+      const c = sized(WORKER, world(0, 0), 0, lengthMm);
+      c.target = world(0, 0.1);
+      return c;
+    };
+    expect(arrived(nearTarget(WORKER.lengthMm), WORKER)).toBe(false);
+    expect(arrived(nearTarget(WORKER.lengthMm * 2), WORKER)).toBe(true);
+  });
+
+  it('the winged queen flies by the fly rule when her word is airborne, and walks on the ground when it is not; the fly\'s own path is unchanged', () => {
+    const w = fakeWorld();
+    const start = world(0, 0);
+    const q = creature(QUEEN, start, slope(start));
+    q.behaviour = 'takeoff';
+    q.target = world(400, 300);
+    q.targetHeight = slope(start) + 10_000;
+    const ceiling = unitsOfMm(QUEEN.flight!.ceilingMm);
+    for (let i = 0; i < 60 * 5; i += 1) {
+      move(q, QUEEN, w, 1 / 60);
+      const g = slope(q.at);
+      expect(q.height).toBeGreaterThanOrEqual(g - 1e-9);
+      expect(q.height).toBeLessThanOrEqual(g + ceiling + 1e-9);
+      finite(q);
+    }
+    expect(q.height - slope(q.at)).toBeCloseTo(unitsOfMm(QUEEN.flight!.cruiseMm[1]), 3);
+    q.behaviour = 'land';
+    for (let i = 0; i < 60 * 5; i += 1) move(q, QUEEN, w, 1 / 60);
+    expect(q.height).toBeCloseTo(slope(q.at), 6);
+    q.behaviour = 'wander';
+    q.target = world(-400, 300);
+    expect(move(q, QUEEN, w, 1)).toBeCloseTo(unitsOfMm(QUEEN.pace.wanderMmS), 9);
+    expect(q.height).toBeCloseTo(slope(q.at), 12);
+    expect(isMoving('defend')).toBe(false);
+    expect(isMoving('attack')).toBe(true);
+    expect(isAirborne('defend')).toBe(false);
   });
 });

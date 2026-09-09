@@ -14,8 +14,15 @@
  */
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 
 const gltfLoader = new GLTFLoader();
+// The ant rigs (v0's queen, TCS's worker) are meshopt-compressed and a
+// bare GLTFLoader refuses them outright ("setMeshoptDecoder must be
+// called before loading compressed files"); the three wild rigs never
+// needed it. The decoder ships inside three — no served wasm — and an
+// uncompressed file is unaffected by its presence.
+gltfLoader.setMeshoptDecoder(MeshoptDecoder);
 const textureLoader = new THREE.TextureLoader();
 
 /** Backoff between attempts, in ms: 0.5 s, 1 s, 2 s. */

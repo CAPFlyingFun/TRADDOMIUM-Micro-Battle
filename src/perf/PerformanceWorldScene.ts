@@ -88,8 +88,7 @@ import { WORLD_SEED } from '../world/objects/seed';
 import { PLANT_FAMILIES, plantSourcesOf } from '../world/objects/plants';
 import { ResourceLayer, waterQueryOf, type WaterQuery } from '../world/ecology';
 import {
-  CREATURE_IDS, CREATURE_SPECIES, CreatureSim, isUnderground, metresOfUnits, nearestSighting, viewpointFor,
-  type CreatureId,
+  CREATURE_IDS, CREATURE_SPECIES, CreatureSim, isUnderground, metresOfUnits, nearestSighting, viewpointFor, type CreatureId, type WildCreatureId,
 } from '../creatures';
 import { FaunaView } from '../fauna/FaunaView';
 import { FinderView } from '../fauna/FinderView';
@@ -142,6 +141,8 @@ const FINDER_WORD: Readonly<Record<CreatureId, string>> = Object.freeze({
   earthworm: 'worm',
   aphid: 'aphid',
   housefly: 'fly',
+  queen: 'queen',
+  worker: 'worker',
 });
 
 /** The actor heading from one world point to another: ahead is (sin h, cos h). */
@@ -483,7 +484,7 @@ const RESOURCE_REACH = 40 * 100;
 const EYE_PRESENCE = 10;
 
 /** Which perf-world row switches which species. */
-const SPECIES_LAYER: Readonly<Record<CreatureId, WorldLayerId>> = Object.freeze({
+const SPECIES_LAYER: Readonly<Record<WildCreatureId, WorldLayerId>> = Object.freeze({
   earthworm: 'worms',
   aphid: 'aphids',
   housefly: 'flies',
@@ -967,7 +968,7 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
      */
     let cameraTop: number = CAMERA_SPEEDS[DEFAULT_CAMERA_SPEED];
     /** What each species row was at the last look. */
-    const speciesOn: Record<CreatureId, boolean> = { earthworm: false, aphid: false, housefly: false };
+    const speciesOn: Record<WildCreatureId, boolean> = { earthworm: false, aphid: false, housefly: false };
     /** The rung the bubble was BUILT at: a changed setting is noticed once. */
     let builtObjectsDetail: DetailTier | null = null;
     /** The air's colour as a colour, so the blend never restates it. */
@@ -1670,7 +1671,7 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
       // one above ground does it fall back to the nearest of anything,
       // which is when the readout says `under` and means it.
       const list = creatures.creatures();
-      const from = lastShown === null ? 0 : (CREATURE_IDS.indexOf(lastShown) + 1) % CREATURE_IDS.length;
+      const from = lastShown === null ? 0 : ((CREATURE_IDS as readonly CreatureId[]).indexOf(lastShown) + 1) % CREATURE_IDS.length;
       let near = null;
       for (let i = 0; i < CREATURE_IDS.length && near === null; i += 1) {
         const id = CREATURE_IDS[(from + i) % CREATURE_IDS.length];

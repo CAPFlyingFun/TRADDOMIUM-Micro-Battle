@@ -75,13 +75,29 @@
  * A BIG ONE GOES FURTHER, AND FOR THE SAME REASON IT GOES FASTER. Every
  * pace this file reads — how far a fresh heading is aimed, how far a
  * flee carries, how long a walk to a stem should take — is multiplied by
- * `sizeRatio(state, species)`, and so is every distance measured in body
- * lengths, because the measured law is a fraction of the animal's own
- * body a second (Joshua, 2026-09-08: the earthworm "should be based on
- * size and dynamic"). What is NOT scaled is what belongs to the KIND
- * rather than the body: how far it can sense a disturbance, the band it
- * burrows in, and a fly's flight — a hop is the wing's, and the wing is
- * not in the table's length.
+ * `paceRatio(state, species)`, the length ratio raised to the species'
+ * own law (1 for the worm, 0.75 for an ant), and every distance measured
+ * in body lengths by `sizeRatio`, the length ratio itself, because the
+ * measured law is a fraction of the animal's own body a second (Joshua,
+ * 2026-09-08: the earthworm "should be based on size and dynamic"). What
+ * is NOT scaled is what belongs to the KIND rather than the body: how
+ * far it can sense a disturbance, the band it burrows in, and a fly's
+ * flight — a hop is the wing's, and the wing is not in the table's
+ * length.
+ *
+ * THE GROUND BRAIN IS THE LAB'S FIRST ANT BRAIN AND NO MORE. The two
+ * ants (`species.ts`, QUEEN and WORKER) live in the fourth medium, and
+ * `thinkGround` gives them the shared words — idle, wander, feed, rest,
+ * flee — and the ground's own `defend`: a defensive species turns to
+ * face a disturbance and holds (Haight 2010: a threat near the nest is
+ * met), a skittish one runs. It never chooses `attack`: whether an ant
+ * hunts is the Lab's predation option (Joshua's brief, §25: OFF / NORMAL
+ * / FORCE TEST) and is decided where that option lives, not here. It
+ * never takes off either: the queen's flight — wing activation, the
+ * weather gate, the one long flight, the landing — is the Lab's own
+ * leaf and arrives with it. A species' brain is its medium's, so a
+ * fourth medium is a fourth brain, and a sixth animal on the ground is
+ * a table entry.
  *
  * Pure: no three, no DOM. `src/creatures/` is core.
  */
@@ -94,8 +110,8 @@ import { unitsOfMetres } from './finder';
 import { ahead, headingToward, wrapHeading } from './heading';
 import { arrived, floorAt, isAirborne, isMoving } from './locomotion';
 import { PERCH_FRACTION } from './population';
-import { sizeRatio, unitsOfMm, type CreatureSpecies, type FlightSpec } from './species';
-import { behaviourAllowed, type Behaviour, type CreatureState } from './state';
+import { paceRatio, sizeRatio, unitsOfMm, type CreatureSpecies, type FlightSpec } from './species';
+import { behaviourAllowedFor, type Behaviour, type CreatureState } from './state';
 import type { CreatureWeather, CreatureWorld, Disturbance } from './world';
 
 // ---------------------------------------------------------------------------
@@ -118,6 +134,23 @@ export const ATTRACTION_CHANCE = 0.5;
 const LANDWARD_TRIES = 4;
 /** A flier takes off into level flight once it has this much of its cruise floor under it. GAME TUNING. */
 const TAKEOFF_FRACTION = 0.8;
+/**
+ * How far a ground creature's aimless walk is aimed, body lengths. GAME
+ * TUNING with a biological shape: a fire-ant forager is never far from a
+ * tunnel exit — every point of the territory within 26 cm of one
+ * (Tschinkel 2011) — so a wander is a short loop, not a crossing. Twenty
+ * bodies is 6 cm for the table's worker and 16 for the queen.
+ */
+export const GROUND_WANDER_LENGTHS = 20;
+/** How many spots a ground creature tries before it stays where it is: only dry land is walked to. GAME TUNING. */
+const GROUND_WANDER_TRIES = 4;
+/**
+ * How long a ground creature stands between one thing and the next,
+ * seconds. GAME TUNING: an ant is rarely idle on the surface (Cassill
+ * 2009: four in five awake at any moment), so the pause is a beat and
+ * not a rest — a rest is the `rest` word, with the species' own length.
+ */
+export const GROUND_IDLE_S: readonly [number, number] = Object.freeze([1, 5]) as readonly [number, number];
 /**
  * How far away a fresh-water edge is worth watching, world units: 50 m.
  * GAME TUNING — Joshua's starting test radius (2026-09-08: "~50 m as a
@@ -224,7 +257,7 @@ export function thinkDue(state: CreatureState, species: CreatureSpecies): boolea
  */
 function fleeDistance(state: CreatureState, species: CreatureSpecies): number {
   if (species.flight !== null) return unitsOfMm(species.flight.hopMm[1]);
-  return sizeRatio(state, species) * unitsOfMm(species.pace.fleeMmS) * species.senses.alarmS;
+  return paceRatio(state, species) * unitsOfMm(species.pace.fleeMmS) * species.senses.alarmS;
 }
 
 /**
@@ -502,10 +535,13 @@ export function think(
     case 'air':
       thinkAir(state, species, world, rand, sky);
       break;
+    case 'ground':
+      thinkGround(state, species, world, rand, ground);
+      break;
   }
   if (!Number.isFinite(state.targetHeight)) state.targetHeight = state.height;
   if (!Number.isFinite(state.behaviourUntilS) || state.behaviourUntilS < 0) state.behaviourUntilS = 0;
-  if (!behaviourAllowed(species.medium, state.behaviour)) {
+  if (!behaviourAllowedFor(species, state.behaviour)) {
     throw new Error(`creatures/intent: ${species.id} (${species.medium}) chose "${state.behaviour}", which its medium does not allow`);
   }
 }
@@ -602,7 +638,7 @@ function newHeading(
   // As far as THIS worm gets in the time it holds the heading, so the
   // target is where it will actually be and not where the cited animal
   // would have been.
-  state.target = ahead(state.at, heading, sizeRatio(state, species) * unitsOfMm(species.pace.wanderMmS) * hold);
+  state.target = ahead(state.at, heading, paceRatio(state, species) * unitsOfMm(species.pace.wanderMmS) * hold);
   state.hostId = null;
   if (Number.isFinite(ground)) state.targetHeight = ground - (unitsOfMm(spec.underMm) + unitsOfMm(spec.boreMm) / 2) / 2;
   renew(state, 'burrow', hold);
@@ -683,9 +719,126 @@ function walkOnHost(
   const perch = PERCH_FRACTION[0] + (PERCH_FRACTION[1] - PERCH_FRACTION[0]) * rand();
   state.target = target;
   state.targetHeight = (Number.isFinite(ground) ? ground : state.height) + perch * Math.max(0, host.size);
-  const pace = sizeRatio(state, species) * unitsOfMm(species.pace.wanderMmS);
+  const pace = paceRatio(state, species) * unitsOfMm(species.pace.wanderMmS);
   const far = Math.sqrt(distanceSquared(state.at, target)) + Math.abs(state.targetHeight - state.height);
   enter(state, 'wander', pace > 0 ? far / pace + 1 : 1);
+}
+
+/**
+ * GROUND. An ant's life in the shared words, and the ground's own stand.
+ * Idle → a short walk to a spot on dry land within a few body lengths
+ * (`GROUND_WANDER_LENGTHS`), or to food when hungry and food is in
+ * sight → feed there → a beat of idle → again; rest when tired. On
+ * alarm a DEFENSIVE species turns to face the disturbance and holds its
+ * ground for the alarm's length — a stand, at no pace — and a skittish
+ * one flees as the plant brain does, on the ground. Neither hunts: no
+ * `attack` is chosen here (the header). No takeoff: the queen's wings
+ * are the Lab's own leaf. Nothing about the sky yet — a fire ant
+ * forages by day or night as the soil's temperature says (Porter &
+ * Tschinkel 1987), and the temperature is not a thing a creature can
+ * read from `CreatureWeather` today.
+ */
+function thinkGround(
+  state: CreatureState, species: CreatureSpecies, world: CreatureWorld, rand: () => number, ground: number,
+): void {
+  const needs = species.needs;
+  const body = sizeRatio(state, species) * unitsOfMm(species.lengthMm);
+  const g = Number.isFinite(ground) ? ground : state.height;
+  const done = state.behaviourS >= state.behaviourUntilS;
+
+  if (state.alarm >= ALARM_FLEES_AT) {
+    if (species.temperament === 'defensive') {
+      if (state.behaviour !== 'defend') {
+        // `raiseAlarm` wrote the AWAY point; the threat is the other way.
+        // A point a body length toward it is what the legs turn to face
+        // — and `defend` has no pace, so it is faced and not walked to.
+        const toward = state.target === null ? state.heading : wrapHeading(headingToward(state.at, state.target) + Math.PI);
+        state.target = ahead(state.at, toward, body);
+        state.targetHeight = g;
+        state.hostId = null;
+        enter(state, 'defend', species.senses.alarmS);
+      }
+      return;
+    }
+    if (state.behaviour !== 'flee') {
+      if (state.target === null) state.target = ahead(state.at, wrapHeading(state.heading + Math.PI), fleeDistance(state, species));
+      state.targetHeight = g;
+      state.hostId = null;
+      enter(state, 'flee', species.senses.alarmS);
+    }
+    return;
+  }
+
+  switch (state.behaviour) {
+    case 'flee':
+    case 'defend':
+    case 'attack':
+      if (!done) return;
+      state.target = null;
+      state.hostId = null;
+      enter(state, 'idle', draw(rand, GROUND_IDLE_S));
+      return;
+    case 'wander':
+      if (!done && !arrived(state, species)) return;
+      state.target = null;
+      if (state.hostId !== null && state.hunger >= needs.feedAt) {
+        enter(state, 'feed', draw(rand, needs.feedS));
+        return;
+      }
+      state.hostId = null;
+      enter(state, 'idle', draw(rand, GROUND_IDLE_S));
+      return;
+    case 'feed':
+    case 'rest':
+      if (!done) return;
+      state.target = null;
+      state.hostId = null;
+      enter(state, 'idle', draw(rand, GROUND_IDLE_S));
+      return;
+    default: {
+      // Idle, and any word a save carried.
+      if (!done) return;
+      if (state.fatigue >= needs.restAt) {
+        state.target = null;
+        state.hostId = null;
+        enter(state, 'rest', draw(rand, needs.restS));
+        return;
+      }
+      const pace = paceRatio(state, species) * unitsOfMm(species.pace.wanderMmS);
+      if (state.hunger >= needs.feedAt) {
+        const site = nearestSite(world, state.at, needs.eats, unitsOfMm(species.senses.sightMm));
+        if (site !== null && distanceSquared(state.at, site.at) <= body * body) {
+          // Already on it.
+          state.target = null;
+          state.hostId = site.id;
+          enter(state, 'feed', draw(rand, needs.feedS));
+          return;
+        }
+        if (site !== null && isLand(world, site.at)) {
+          state.target = site.at;
+          state.hostId = site.id;
+          state.targetHeight = g;
+          const far = Math.sqrt(distanceSquared(state.at, site.at));
+          enter(state, 'wander', pace > 0 ? far / pace + 1 : 1);
+          return;
+        }
+      }
+      // Nowhere in particular: a few body lengths off, on dry land, or another beat where it stands.
+      for (let i = 0; i < GROUND_WANDER_TRIES; i += 1) {
+        const theta = rand() * Math.PI * 2;
+        const r = GROUND_WANDER_LENGTHS * body * Math.sqrt(rand());
+        const spot = translate(state.at, Math.sin(theta) * r, Math.cos(theta) * r);
+        if (!isLand(world, spot)) continue;
+        state.target = spot;
+        state.hostId = null;
+        state.targetHeight = g;
+        enter(state, 'wander', pace > 0 ? r / pace + 1 : 1);
+        return;
+      }
+      state.target = null;
+      enter(state, 'idle', draw(rand, GROUND_IDLE_S));
+    }
+  }
 }
 
 /**

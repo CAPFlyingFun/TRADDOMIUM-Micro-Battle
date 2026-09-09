@@ -100,6 +100,11 @@ const SPECIES_SALT: Readonly<Record<CreatureId, number>> = Object.freeze({
   earthworm: 0x1_0000,
   aphid: 0x2_0000,
   housefly: 0x3_0000,
+  // The two ants carry an empty density table and are never drawn from a
+  // cell (`species.ts`, the header); their salts are here so the map is
+  // total and a future wild population would not collide with the three.
+  queen: 0x4_0000,
+  worker: 0x5_0000,
 });
 const SITE = 0x8000;
 const CELL_Q = 0xfff0;
