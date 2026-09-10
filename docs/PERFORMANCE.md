@@ -121,17 +121,91 @@ is what Baseline B is for.
 
 ---
 
-## Baseline B — Rung Rigs / Impostors *(pending: same seeded run at RIGS: RUNG)*
+## Baseline B — Rung Rigs / Impostors
 
-**Run this on alpha.42 or later.** Alpha.41 — the build Baseline A was
-measured on — could not count rigs against impostors, so a B measured on
-it would not be comparable to A in the one dimension B exists to test.
-Alpha.42 adds the DRAWN census (rigs and impostors at every threshold and
-at the end) and the `WHERE THE FRAME WENT` split, and a POOL selector for
-Baseline C.
+The run that settled the design question. Same room, same seed, same
+spawn rate, same viewport as A; RIGS: RUNG instead of ALL.
 
-Same room, same seed, same spawn rate, same viewport; RIGS: RUNG instead
-of ALL. At the medium rung the pools are earthworm 2, aphid 5, housefly
+| | |
+|---|---|
+| **Date** | 2026-09-10T21:16:23Z |
+| **Build** | `1.0.0-alpha.42` · `1f320dd` |
+| **Viewport** | 810 × 374 css px |
+| **Rigs** | RUNG (medium) — 13 skeletons, the rest impostors |
+| **Predation** | **NORMAL** — ⚠️ differs from A, see the caveat |
+| **Spawn rate** | 1 creature/s, seeded |
+
+### What it measured
+
+| | |
+|---|---|
+| **Sustained at 30+ fps** | **400 creatures — and never fell below 30** |
+| Total placed | 400 |
+| Duration | 415.0 s |
+| Average FPS | 60.1 |
+| Average frame time | 16.6 ms |
+| Lowest FPS (5 s average) | 59.5 |
+| Worst single frame | 49 ms |
+| FPS after the 10 s hold | 60.1 |
+| Ending | the run's own 400 ceiling — **NOT a breaking point** |
+
+Drawn at the end: 13 full rigs, 332 impostors, **55 not drawn**. By
+species: aphid 96, queen 89, worker 79, earthworm 75, housefly 61.
+
+### The 55
+
+Not frustum culling — `FaunaView` does none in this path. They are
+**earthworms underground**. `FaunaView.drawn()` refuses to draw a
+burrower deeper than `BURROW_HIDE` (0.3) body-lengths below the ground
+with no cutaway open, and of the five species only the earthworm has a
+non-null `burrow` spec. 75 worms were placed; about 55 were deep at the
+end. Correct behaviour that was invisible in the numbers, which is why
+alpha.43 makes the report account for every creature.
+
+### What follows from it
+
+**The cost is the skeletons, and nothing else is close.** Baseline A
+broke at 178 creatures carrying 178 skeletons. Baseline B carried 400 at
+a locked 60 fps with 13. Every other variable was the same.
+
+That answers the fork Baseline B existed to decide, and it answers it at
+the top of the table rather than the bottom: **the impostor ladder is the
+answer to the multiplayer target.** 230 nearby creatures is not merely
+reachable — B passed 230 without the frame rate moving, and Joshua's own
+screenshot at 339 creatures reads 60.1 fps.
+
+**Where B's real limit is remains unknown.** Nothing degraded: the lowest
+five-second average across the whole run was 59.5 fps, and the run
+stopped because the test's own 400-creature ceiling stopped it. The
+phone was never loaded. Alpha.43 removes that ceiling and ramps the
+spawn rate so a run can reach whatever the actual limit is.
+
+### Two caveats that limit what B may be compared against
+
+**1. Predation was NORMAL, where A's was OFF.** `startStress()` sets it
+off at the start of every run, but the PREDATION button was not refused
+mid-run, and `conditions()` was evaluated when the REPORT was written
+rather than when the run began — so a tap during the run rewrote the
+record silently. This does not invalidate B; predation on is strictly
+*more* AI work, so 400-at-60 was achieved against a harder test than A's.
+But it means A and B are not matched on that axis, and it is a flaw in
+the instrument rather than in the run. Alpha.43 refuses the room-holding
+toggles mid-run and snapshots the conditions at the START.
+
+**2. `creature drawing` in the frame split is CPU only, and the label
+oversold it.** That number is the scene's stopwatch around
+`FaunaView.update()` — posing rigs and filling impostor matrices. The GPU
+cost of actually rendering skinned meshes happens later, inside the
+render call, and therefore lands in `everything else` along with the
+terrain, the sky and the wait for vsync. So B's "0.8 ms of creature
+drawing" means 0.8 ms of CPU creature work, NOT that 345 bodies cost
+0.8 ms to put on screen. Reading it the other way would badly
+underestimate what a rig costs. Alpha.43 relabels it.
+
+With that understood, the useful reading of B's split is: at 400
+creatures the CPU spends 0.8 ms updating them and 0.5 ms simulating them,
+against a 16.6 ms frame that is mostly waiting for vsync. Neither the
+simulation nor the creature update is anywhere near being the limit. At the medium rung the pools are earthworm 2, aphid 5, housefly
 4, queen 1, worker 1 — **13 animated skeletons**, and everything past
 them is a twenty-triangle impostor.
 
@@ -159,6 +233,23 @@ multiplayer target. If B lands near the bottom — barely better than A's
 impostor work will help: the AI and sensing tick is where the budget has
 to be found instead. The report's `WHERE THE FRAME WENT` block answers
 this directly rather than by algebra.
+
+## Baseline D — the actual ceiling *(pending: alpha.43, ramped, no ceiling)*
+
+B never loaded the phone, so the number everyone wants is still unknown.
+Alpha.43 ramps the spawn rate — 1/s for the first ten seconds of
+spawning, 2/s for the next ten, 3/s for the next, and so on (Joshua,
+2026-09-10) — and raises the run's ceiling from 400 to 10,000, so a run
+ends on the under-10-fps rule rather than on a guard.
+
+The ramp costs precision and the report says so: at rate *N* the
+five-second window sees 5*N* arrivals, so a threshold's creature count is
+only good to about ±5*N*. At 40/s that is ±200. Each crossing prints the
+rate in force.
+
+Cumulative creatures after *k* ten-second brackets is 5*k*(*k*+1) — so
+about 210 by 60 s and 550 by 100 s, against the 400 seconds B took to
+reach 400.
 
 ## Baseline C — species alone *(pending: five runs, one species each)*
 

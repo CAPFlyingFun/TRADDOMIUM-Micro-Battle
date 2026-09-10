@@ -424,6 +424,13 @@ describe('the creatures/fauna seam', () => {
     // or a drawn body and the pace it was drawn walking would stop
     // agreeing about what one animal's size is.
     'sizeRatio',
+    // Metres to world units. The rig/impostor band is written in METRES
+    // because that is how Joshua asked for it ("render at 0.6m away"),
+    // and one unit is a centimetre — so the renderer must convert with
+    // the same function the finder and the simulation use rather than
+    // keep a 100 of its own. Pure arithmetic over a number: no table, no
+    // simulation, nothing that could drag the brain in behind it.
+    'unitsOfMetres',
     // The surface frame's pure arithmetic (Creature Lab D): what a
     // heading MEANS on a face, and the one rotation that carries a frame
     // round an edge — a unit vector and a number in, a vector out, no

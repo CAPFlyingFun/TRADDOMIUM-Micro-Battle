@@ -18,18 +18,85 @@
  * A rig is expensive twice over: the aphid is 30,947 triangles and the
  * housefly 25,635 (the worm a modest 3,144), and a skinned mesh cannot
  * be instanced — every animal that shows its legs needs its own bones,
- * which is what `SkeletonUtils.clone` gives it. So the pool is a few
- * rigs per species (`POOL_SIZES`, by detail rung, GAME TUNING) and the
- * rigs go to the NEAREST creatures that are drawn at all. Everything
- * else in the near tiers is an impostor: a twenty-triangle ellipsoid in
- * the species' colour, its length, turned to its heading, one draw call
- * a species. The far tier is not drawn: at the distances the simulation
- * calls far, a 2.5 mm aphid is under a pixel.
+ * which is what `SkeletonUtils.clone` gives it. The Creature Lab put a
+ * number on the difference: 0.52 ms of frame time per full-rig creature,
+ * 52 of them at 30 fps on Joshua's phone (Baseline A), against 400 at a
+ * locked 60.1 fps when all but thirteen were impostors and the drawing
+ * of 345 bodies came to 0.8 ms (Baseline B, 2026-09-10). A rig is some
+ * 250 impostors. So the rigs go to the few NEAREST animals and
+ * everything else in the near tiers is an impostor: a twenty-triangle
+ * ellipsoid in the species' colour, its length, turned to its heading,
+ * one draw call a species. The far tier is not drawn: at the distances
+ * the simulation calls far, a 2.5 mm aphid is under a pixel.
  *
- * A rig KEEPS its creature while that creature stays within a margin of
- * the pool's cut (`HYSTERESIS`): two animals at the same distance would
- * otherwise trade a rig every frame, and a rig that changes hands is a
- * body that snaps from one pose to another.
+ * ─── the rig goes to the NEAREST ANIMAL, whatever species it is ──────
+ *
+ * Joshua, 2026-09-10, from the phone, looking at a crowd: "we need to
+ * try render at 0.6m away and it fades as right now, it's random. Some
+ * close up change while others don't. Needs to be more consistent."
+ *
+ * He is right, and the cause was that the pool was PER SPECIES and the
+ * lending was by rank WITHIN a species. At the medium rung that is two
+ * worms, five aphids, four flies, one queen and one worker, so the
+ * single nearest queen wore a skeleton at three metres while an aphid at
+ * thirty centimetres was the sixth-nearest aphid and drew as an
+ * ellipsoid. Nearness only ever competed inside a species, which is
+ * exactly why it read as random.
+ *
+ * The decision is GLOBAL and distance-first now (`allocate`, the pass
+ * between the census and the drawing): every candidate of every species
+ * goes into one list, sorted by the distance pass 1 already measured,
+ * and the nearest `rigBudgetFor(rung)` of them are MARKED. The pools
+ * serve the marks and decide nothing themselves. A tie falls back to the
+ * creature's id, so two animals at the same distance cannot trade forms
+ * every frame on the sort's whim.
+ *
+ * THE BUDGET IS A HARD CAP; THE RADIUS IS ONLY A PREFERENCE. Joshua's
+ * own constraint, in the same breath: "I don't want unlimited full rigs
+ * inside 0.6 m because that could defeat RUNG optimization." A hundred
+ * and fifty ants piling into arm's reach must not become a hundred and
+ * fifty skeletons and put the phone back at Baseline A's 52. So the
+ * budget is the SUM of the rung's `POOL_SIZES` — thirteen at medium,
+ * the same thirteen skeletons that table has always paid for — and being
+ * nearer is how an animal spends one of them, never a licence to add
+ * another. Each species' pool is sized to the WHOLE budget, since the
+ * nearest thirteen may all be aphids; the clones past the first few are
+ * bones and a scene node over shared geometry, and cost their build time
+ * and nothing else until one is lent.
+ *
+ * ─── the band, and the crossfade ────────────────────────────────────
+ *
+ * Inside `RIG_NEAR` an animal prefers a rig; past `RIG_FAR` it cannot
+ * hold one; between the two it keeps whatever it has. THAT BAND IS THE
+ * HYSTERESIS — winning needs 0.6 m and losing needs 0.8, so one standing
+ * at 0.6001 m and taking a step cannot swap form every frame — and it
+ * replaces the rank margin this file used to keep for the job.
+ *
+ * The swap itself is a CROSSFADE over `FADE_S`, and its two properties
+ * are the whole point: at no instant is an animal invisible, and at no
+ * instant are two full-strength bodies drawn for one animal. The rig
+ * fades on its MATERIAL and the impostor fades by SCALE in its instance
+ * matrix — which is how one instance of a shared `InstancedMesh` fades
+ * without a per-instance alpha the shader would have to be taught. Each
+ * rig carries its own material clone, so a fading body does not fade its
+ * species, and `transparent` is set only WHILE a fade runs: a skinned
+ * mesh left transparent sorts against the opaque terrain for the rest of
+ * the session.
+ *
+ * A body MET FOR THE FIRST TIME snaps to whichever form it wins. There
+ * is nothing to cross-fade from — the same reason `lend` snaps a rig's
+ * drawn up and `reveal` judges a burrower at the line itself.
+ *
+ * ─── the census closes ──────────────────────────────────────────────
+ *
+ * alpha.42's stress report read 400 creatures, 13 rigs and 332
+ * impostors, and Joshua asked where the other 55 had gone. They were
+ * earthworms underground: `drawn()` refuses a burrower deeper than
+ * `BURROW_HIDE` with no cutaway over it, which is correct behaviour and
+ * was invisible in the numbers, which is the defect. `FaunaCost` now
+ * accounts for every body handed in — `rigs + impostors + notDrawn` is
+ * the list's length and `hidden + pastCap + farTier` is `notDrawn` — so
+ * a missing animal is a number and not a question.
  *
  * ─── the size is the table's, and the file is checked against it ───
  *
@@ -155,7 +222,7 @@
 import * as THREE from 'three';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import type { Assets } from '../assets/assets';
-import { AIRBORNE, CREATURE_IDS, rigScale, sizeRatio, unitsOfMm } from '../creatures';
+import { AIRBORNE, CREATURE_IDS, rigScale, sizeRatio, unitsOfMetres, unitsOfMm } from '../creatures';
 import type { Behaviour, CreatureId, CreatureSpecies, CreatureState, MutableVec3 } from '../creatures';
 import { distance, distanceSquared, translate, type LocalPoint, type WorldPoint } from '../world/coords';
 import { toLocal as originToLocal } from '../world/origin';
@@ -207,19 +274,59 @@ export function poolSizeFor(rung: string, id: CreatureId): number {
   return (POOL_SIZES[rung] ?? POOL_SIZES.medium)[id];
 }
 
+/**
+ * HOW MANY RIGS THE WHOLE VIEW MAY LEND AT A RUNG — the sum of that
+ * rung's `POOL_SIZES`, which is where the number comes from and why
+ * `POOL_SIZES` stays.
+ *
+ * The lending is global and distance-first now (the header), so the
+ * per-species split above no longer decides who wears a skeleton. What
+ * it still decides is the TOTAL, and deliberately: thirteen at medium is
+ * exactly what that rung paid for when the pools were separate, so
+ * moving the decision changes WHO gets a rig and not what rigs cost.
+ * Read the table's own docblock for how each rung's numbers were
+ * arrived at and what a full pool weighs in triangles.
+ */
+export function rigBudgetFor(rung: string): number {
+  const table = POOL_SIZES[rung] ?? POOL_SIZES.medium;
+  let sum = 0;
+  for (const count of Object.values(table)) sum += count;
+  return sum;
+}
+
+/**
+ * THE BAND. Inside `RIG_NEAR` an animal prefers a full rig; past
+ * `RIG_FAR` it cannot hold one; between them it keeps whatever it has,
+ * and that gap IS the hysteresis — winning a rig needs 0.6 m and losing
+ * one needs 0.8, so an animal standing on the near line and taking a
+ * step cannot swap form every frame.
+ *
+ * GAME TUNING, Joshua's own numbers, 2026-09-10: "we need to try render
+ * at 0.6m away and it fades as right now, it's random", with the cap
+ * that follows it — "I don't want unlimited full rigs inside 0.6 m
+ * because that could defeat RUNG optimization". Metres through the units
+ * helper because a world unit is a centimetre and a radius written as 60
+ * would read as an accident.
+ */
+export const RIG_NEAR = unitsOfMetres(0.6);
+export const RIG_FAR = unitsOfMetres(0.8);
+
+/**
+ * How long a body takes to cross between its rig and its impostor,
+ * seconds of SIMULATION time. GAME TUNING: about a third of a second is
+ * long enough that the eye reads a dissolve rather than a pop, and short
+ * enough that a rig lent on the way past has finished arriving before the
+ * animal is behind the camera. It is spent in both directions at once —
+ * the rig's opacity 0 → 1 while that animal's impostor scales 1 → 0 — so
+ * the body is neither missing nor doubled at any point in it.
+ */
+export const FADE_S = 0.3;
+
 /** The impostor cap for a rung: the species' own population cap, since the simulation never holds more than that. */
 export function impostorCapFor(species: CreatureSpecies, rung: string): number {
   const caps = species.population.caps as Readonly<Record<string, number>>;
   return caps[rung] ?? caps.medium;
 }
-
-/**
- * A rig keeps its creature while the creature is within this factor of
- * the pool's cut distance. GAME TUNING: 15% is wider than any one sim
- * step moves a creature relative to the others, so a boundary only
- * changes hands when something has genuinely walked past.
- */
-export const HYSTERESIS = 1.15;
 
 /** The spine may be off the cited length by this fraction before the load warns. From the brief. */
 export const SPINE_TOLERANCE = 0.35;
@@ -298,7 +405,8 @@ export const REVEAL_HOLD = 12;
  * than `BURROW_HIDE`; one met for the first time is judged at the line
  * itself.
  *
- * GAME TUNING — `HYSTERESIS` in the other axis, and for the same reason:
+ * GAME TUNING — the rig band (`RIG_NEAR`/`RIG_FAR`) in the other axis,
+ * and for the same reason:
  * the band is 3 to 4.5 mm under the surface for the cited 150 mm worm
  * and scales with the animal, as `BURROW_HIDE` does. A worm nosing up at
  * its own pace takes the same fraction of a second to cross it at any
@@ -384,7 +492,21 @@ export interface FaunaViewOptions {
   readonly ceilingAt?: (at: WorldPoint) => number;
 }
 
-/** What the HUD is told. Plain numbers. */
+/**
+ * What the HUD is told. Plain numbers, and they ACCOUNT FOR EVERY
+ * CREATURE HANDED TO `update` — see the header's last section for the
+ * report that did not:
+ *
+ *   rigs + impostors + notDrawn      = the creatures handed in
+ *   hidden + pastCap + farTier       = notDrawn
+ *
+ * The counts are of BODIES, one per animal, which is what makes those
+ * two identities true: a body crossing between its two forms is counted
+ * where its RIG is, though a shrinking impostor is drawn for it as well.
+ * So an impostor mesh's `count` may exceed `impostors` by the crossfades
+ * in flight, and `impostors` remains the number of animals the ellipsoid
+ * is carrying rather than the number of instances the GPU is handed.
+ */
 export interface FaunaCost {
   readonly meanMs: number;
   readonly peakMs: number;
@@ -392,6 +514,19 @@ export interface FaunaCost {
   readonly rigsLent: Readonly<Record<CreatureId, number>>;
   /** Impostors drawn this frame, per species. */
   readonly impostors: Readonly<Record<CreatureId, number>>;
+  /** Handed in, drawn in no form. */
+  readonly notDrawn: number;
+  /**
+   * Of those: the view is showing nothing of it on purpose — a burrower
+   * deeper than `BURROW_HIDE` with no cutaway over it (the 55 of
+   * alpha.42), a species switched off with `setEnabled`, or one this
+   * view was never given a slot for.
+   */
+  readonly hidden: number;
+  /** Of those: drawable, but the species' impostor cap was already full. */
+  readonly pastCap: number;
+  /** Of those: tier `far`, the simulation's own cut, which this view only obeys. */
+  readonly farTier: number;
 }
 
 /**
@@ -459,6 +594,17 @@ interface Rig {
    * settled. Snapped to the holder's in `lend`. The rig's own scratch.
    */
   readonly drawnUp: THREE.Vector3;
+  /**
+   * THIS CLONE'S OWN MATERIALS, cloned off the template's when the rig
+   * was built. A crossfade is written on them, and a pool that shared
+   * one material would fade every rig of the species at once. The clones
+   * share the template's MAPS — a material clone copies texture
+   * references, not textures — so the cost is a small uniform block
+   * apiece and no texture memory.
+   */
+  readonly materials: THREE.Material[];
+  /** What `transparent` currently reads on those materials, so a fade only sets it (and `needsUpdate`) when it changes. */
+  transparent: boolean;
   trail: Trail | null;
   /** The creature's id, or null when free. */
   holder: string | null;
@@ -499,6 +645,36 @@ function zeroCounts(): Record<CreatureId, number> {
   return out;
 }
 
+/**
+ * GIVE ONE CLONE ITS OWN MATERIALS, and hand them back for the fade to
+ * write on and the pool to dispose.
+ *
+ * `SkeletonUtils.clone` shares the template's, which is right for
+ * everything except a crossfade: an opacity written on a shared material
+ * fades every rig of the species at once. A material clone copies the
+ * settings and the texture REFERENCES — the skin, the normal map and the
+ * compiled program are still the template's — so what is actually new
+ * per body is a uniform block, which is the smallest thing a fade of one
+ * body can be made of.
+ */
+function ownMaterials(root: THREE.Object3D): THREE.Material[] {
+  const own: THREE.Material[] = [];
+  root.traverse((n) => {
+    const mesh = n as THREE.Mesh;
+    if (mesh.isMesh !== true) return;
+    if (Array.isArray(mesh.material)) {
+      const list = mesh.material.map((material) => material.clone());
+      mesh.material = list;
+      for (const material of list) own.push(material);
+    } else {
+      const one = mesh.material.clone();
+      mesh.material = one;
+      own.push(one);
+    }
+  });
+  return own;
+}
+
 function wrapAngle(a: number): number {
   let w = (a + Math.PI) % (Math.PI * 2);
   if (w < 0) w += Math.PI * 2;
@@ -529,12 +705,43 @@ export class FaunaView {
   private readonly reveals = new Map<string, Reveal>();
   private frame = 0;
 
+  /**
+   * HOW MUCH OF EACH DRAWN BODY ITS RIG IS CARRYING, 0..1, by creature
+   * id — the crossfade, kept per ANIMAL rather than per rig so that a
+   * rig handed back to the same creature picks the fade up where it was
+   * instead of starting again. An animal with no entry has not been
+   * drawn before and snaps to whichever form it wins; one with no rig is
+   * pinned at 0, which is what makes the impostor's `1 - fade` the whole
+   * of its body. Entries not drawn this frame are dropped, as `reveals`
+   * are.
+   */
+  private readonly fades = new Map<string, number>();
+  /** Which rig holds a creature, by creature id. Written by `lend` and `release`; the allocator's only question. */
+  private readonly byHolder = new Map<string, Rig>();
+
   // Scratch, allocated once and grown as the creature list grows.
   private d2 = new Float64Array(512);
   private rigged = new Uint8Array(512);
-  private readonly byId = new Map<string, number>();
+  /** Every drawn creature's index in this frame's list, by id. Rewritten in pass 1. */
+  private readonly byIndex = new Map<string, number>();
+  /** Every candidate of every species, the pass-2 sort's own list. */
+  private readonly eligible: number[] = [];
+  /** This frame's creature list, so the sort can reach an id for a tie. Set in `update`. */
+  private frameCreatures: readonly CreatureState[] = [];
   private readonly path = new Float64Array((TRAIL_CAPACITY + 1) * 3);
-  private readonly byDistance = (a: number, b: number): number => this.d2[a] - this.d2[b];
+  /**
+   * NEAREST FIRST, AND THE SAME ORDER EVERY FRAME. Distance decides; a
+   * tie falls back to the creature's id, because two animals at the same
+   * distance sorted by luck would trade forms every frame — which is
+   * half of what "it's random" was describing.
+   */
+  private readonly byNearest = (a: number, b: number): number => {
+    const d = this.d2[a] - this.d2[b];
+    if (d !== 0) return d;
+    const ia = this.frameCreatures[a].id;
+    const ib = this.frameCreatures[b].id;
+    return ia < ib ? -1 : ia > ib ? 1 : 0;
+  };
 
   // THE PICK SURFACE's scratch: who is drawn this frame and where, in
   // local render space. The list and the positions are reused across
@@ -550,6 +757,10 @@ export class FaunaView {
 
   private rigsLent = zeroCounts();
   private impostors = zeroCounts();
+  // The census (`FaunaCost`): everything handed in that this view drew nothing of.
+  private hidden = 0;
+  private pastCap = 0;
+  private farTier = 0;
   private frames = 0;
   private totalMs = 0;
   private peakMs = 0;
@@ -583,6 +794,9 @@ export class FaunaView {
       };
       this.slots.set(species.id, slot);
       this.order.push(slot);
+      // A species this view was given reads 0 rather than nothing before its first frame.
+      this.rigsLent[species.id] = 0;
+      this.impostors[species.id] = 0;
       this.buildImpostor(slot);
       this.loads.push(this.load(slot));
     }
@@ -677,17 +891,29 @@ export class FaunaView {
       const eyeY = Number.isFinite(eyeHeight) ? eyeHeight : null;
       this.frame += 1;
       this.room(creatures.length);
+      this.frameCreatures = creatures;
       this.drawnList.length = 0;
       this.drawnIndex.clear();
+      this.byIndex.clear();
+      this.hidden = 0;
+      this.pastCap = 0;
+      this.farTier = 0;
       for (const slot of this.order) slot.candidates.length = 0;
-      // PASS 1: who is drawn at all, and how far away, bucketed by species.
+      // PASS 1: who is drawn at all, and how far away, bucketed by
+      // species — and, for everyone who is not, WHY NOT. The order of
+      // the three refusals is the order they cost: a species switched
+      // off never advances a latch, and neither does the simulation's
+      // own far cut, so `drawn` (which advances one) is asked last.
       for (let i = 0; i < creatures.length; i += 1) {
         const c = creatures[i];
         const slot = this.slots.get(c.species);
-        if (slot === undefined || !slot.enabled || c.tier === 'far' || !this.drawn(slot, c)) continue;
+        if (slot === undefined || !slot.enabled) { this.hidden += 1; continue; }
+        if (c.tier === 'far') { this.farTier += 1; continue; }
+        if (!this.drawn(slot, c)) { this.hidden += 1; continue; }
         const dy = eyeY === null ? 0 : c.height - eyeY;
         this.d2[i] = distanceSquared(c.at, eye) + dy * dy;
         this.rigged[i] = 0;
+        this.byIndex.set(c.id, i);
         slot.candidates.push(i);
       }
       // Every burrower in reach was measured above, so anything older
@@ -695,11 +921,18 @@ export class FaunaView {
       // Its latch is dropped rather than kept for an animal that will
       // come back somewhere else.
       for (const [id, reveal] of this.reveals) if (reveal.frame !== this.frame) this.reveals.delete(id);
-      // PASS 2: each species lends, poses and fills.
+      // PASS 2: the rigs are dealt out ACROSS EVERY SPECIES AT ONCE, by
+      // distance. Nothing below chooses a holder.
+      this.allocate(creatures, step);
+      // PASS 3: each species poses what it holds and fills its impostor.
       for (const slot of this.order) {
         if (!slot.enabled) continue;
         this.drawSpecies(slot, creatures, step);
       }
+      // A fade belongs to an animal on the screen. One drawn in no form
+      // this frame is forgotten, so it is met afresh — and snaps — when
+      // it comes back.
+      for (const id of this.fades.keys()) if (!this.drawnIndex.has(id)) this.fades.delete(id);
     }
     const spent = now() - began;
     this.frames += 1;
@@ -713,6 +946,10 @@ export class FaunaView {
       peakMs: this.peakMs,
       rigsLent: { ...this.rigsLent },
       impostors: { ...this.impostors },
+      notDrawn: this.hidden + this.pastCap + this.farTier,
+      hidden: this.hidden,
+      pastCap: this.pastCap,
+      farTier: this.farTier,
     });
   }
 
@@ -860,15 +1097,53 @@ export class FaunaView {
 
   // ─── the pool and the impostor ─────────────────────────────────────
 
-  /** The pool a slot should hold: the Lab's named size where it named one, else the rung's. */
+  /**
+   * The pool a slot should hold: the Lab's named size where it named
+   * one, else THE WHOLE RUNG'S BUDGET.
+   *
+   * Not the species' own share of it. The lending is global and by
+   * distance (the header), so the nearest thirteen at medium may all be
+   * aphids, and a pool holding the old five would leave eight of them as
+   * ellipsoids in arm's reach — which is the bug this pass is fixing,
+   * merely moved. Every species carries the budget and the budget is
+   * what is actually spent: an unlent clone is a skeleton and a scene
+   * node over the template's own geometry, drawn never and posed never.
+   */
   private poolTarget(slot: Slot): number {
     const named = this.poolOverride.get(slot.species.id);
-    return named === undefined ? poolSizeFor(this.rung, slot.species.id) : named;
+    return named === undefined ? rigBudgetFor(this.rung) : named;
+  }
+
+  /**
+   * HOW MANY RIGS MAY BE HELD AT ONCE, across every species.
+   *
+   * The rung's budget, or — when the Creature Lab has named pools — the
+   * sum of what it asked for. A named pool is the Lab saying "rig these,
+   * I am measuring rigs" (see `setPoolSize`), and a bench that answers
+   * "how many fully active insects can this room hold" cannot be capped
+   * at the device budget the question is about.
+   */
+  private rigBudget(): number {
+    if (this.poolOverride.size === 0) return rigBudgetFor(this.rung);
+    let sum = 0;
+    for (const slot of this.order) {
+      const named = this.poolOverride.get(slot.species.id);
+      sum += named === undefined ? poolSizeFor(this.rung, slot.species.id) : named;
+    }
+    return sum;
   }
 
   /** Every rig thrown away and built again: a new rung, or a template that has just arrived. */
   private buildPool(slot: Slot): void {
-    for (const rig of slot.rigs) slot.group.remove(rig.root);
+    // Every rig LETS GO before it is thrown away: `byHolder` answers the
+    // allocator's only question, and an entry pointing at a clone that
+    // is no longer in the pool would hand a creature a rig nothing poses.
+    for (const rig of slot.rigs) {
+      this.release(rig);
+      slot.group.remove(rig.root);
+      for (const material of rig.materials) material.dispose();
+      rig.materials.length = 0;
+    }
     slot.rigs = [];
     this.sizePool(slot, this.poolTarget(slot));
   }
@@ -882,7 +1157,9 @@ export class FaunaView {
    * a rig that had a holder lets go of it first; a clone shares the
    * template's geometry and material (`SkeletonUtils.clone`), so it is
    * dropped, never disposed — disposing one would take the template's
-   * geometry with it and every other rig of the species.
+   * geometry with it and every other rig of the species. Its MATERIALS
+   * are its own (`ownMaterials`, so a crossfade is one body's), and
+   * those do go with it.
    */
   private sizePool(slot: Slot, count: number): void {
     const template = slot.template;
@@ -892,6 +1169,8 @@ export class FaunaView {
       if (rig === undefined) break;
       this.release(rig);
       slot.group.remove(rig.root);
+      for (const material of rig.materials) material.dispose();
+      rig.materials.length = 0;
     }
     const anatomy = slot.anatomy;
     for (let k = slot.rigs.length; k < count; k += 1) {
@@ -942,8 +1221,8 @@ export class FaunaView {
       }
       slot.rigs.push({
         root, legs, wings, antennae, jaws, head, gaster, chain, headOffset, headFrame,
-        motion: newMotion(), drawnUp: new THREE.Vector3(0, 1, 0), trail: null, holder: null, creature: -1, lastAt: null, lastHeight: 0,
-        lastHeading: 0,
+        motion: newMotion(), drawnUp: new THREE.Vector3(0, 1, 0), materials: ownMaterials(root), transparent: false, trail: null,
+        holder: null, creature: -1, lastAt: null, lastHeight: 0, lastHeading: 0,
       });
       slot.group.add(root);
     }
@@ -1080,93 +1359,282 @@ export class FaunaView {
     return open / BODY_SAMPLES;
   }
 
+  /**
+   * PASS 2: THE RIGS ARE DEALT OUT ACROSS EVERY SPECIES AT ONCE, BY
+   * DISTANCE — which is the whole of the fix for "some close up change
+   * while others don't" (the header).
+   *
+   * Four steps, in this order for reasons each states:
+   *
+   *   MARK   every candidate the band admits goes into one list, sorted
+   *          nearest first with the id as the tie, and the first
+   *          `rigBudget()` of them are marked. Nothing about a species
+   *          is consulted; the marks are the decision.
+   *   LET GO a rig whose creature is drawn in NO form this frame is
+   *          released at once rather than faded: a crossfade needs a
+   *          body to fade against, and a buried worm has none.
+   *   HAND   each mark without a rig takes a free clone of its species,
+   *          or the clone of whichever animal of that species is
+   *          furthest through fading out. A marked holder is never taken
+   *          from: it is nearer, which is the only thing that ranks.
+   *   CAP    the budget bounds rigs HELD, not rigs marked, so the
+   *          fade-outs still holding one are counted and the least-lent
+   *          are let go until the total is inside it. Without this a
+   *          camera sweeping a crowd would carry the marked thirteen
+   *          plus a tail of fading skeletons, and the tail is exactly
+   *          the cost the budget exists to refuse.
+   *
+   * Then the fades themselves, once the holders have settled: a body
+   * with a rig rises toward 1, one without falls toward 0, and one met
+   * for the first time is simply put where it belongs.
+   */
+  private allocate(creatures: readonly CreatureState[], dt: number): void {
+    const budget = this.rigBudget();
+    const list = this.eligible;
+    list.length = 0;
+    for (const slot of this.order) {
+      if (!slot.enabled || slot.rigs.length === 0) continue;
+      // A NAMED POOL HAS NO BAND. The band is a device budget for a wild
+      // population strung across a forest; the Creature Lab names a pool
+      // to ask "how many fully active insects can this room hold"
+      // (`setPoolSize`), and a bench answering that question about a
+      // one-metre room cannot have its skeletons taken away at 0.8 m.
+      const gated = !this.poolOverride.has(slot.species.id);
+      const wins = gated ? RIG_NEAR * RIG_NEAR : Infinity;
+      const keeps = gated ? RIG_FAR * RIG_FAR : Infinity;
+      for (const i of slot.candidates) {
+        const d2 = this.d2[i];
+        // Inside the near line anything may win one; in the band only
+        // what already holds one keeps it. THAT is the hysteresis.
+        if (d2 <= wins || (d2 <= keeps && this.byHolder.has(creatures[i].id))) list.push(i);
+      }
+    }
+    list.sort(this.byNearest);
+    const marks = Math.min(list.length, budget);
+    for (let k = 0; k < marks; k += 1) this.rigged[list[k]] = 1;
+
+    for (const slot of this.order) {
+      for (const rig of slot.rigs) {
+        if (rig.holder === null) continue;
+        const idx = this.byIndex.get(rig.holder);
+        // GONE, OR NO LONGER ONE OF THE MARKED. The second half is what
+        // makes the band a band: a holder still inside RIG_FAR was made
+        // eligible above and will have been marked, so an UNMARKED holder
+        // is one that has either walked out past the far line or been
+        // outrun by `budget` nearer bodies. Without this it kept its
+        // skeleton for as long as nothing else wanted one, and a body
+        // could stand three metres out wearing a rig — which is the
+        // "some close up change while others don't" this whole allocation
+        // exists to end, in its other direction.
+        if (idx === undefined || this.rigged[idx] !== 1) this.release(rig);
+        else rig.creature = idx;
+      }
+    }
+
+    for (let k = 0; k < marks; k += 1) {
+      const idx = list[k];
+      const c = creatures[idx];
+      if (this.byHolder.has(c.id)) continue;
+      const slot = this.slots.get(c.species);
+      if (slot === undefined) continue;
+      const rig = this.spare(slot, this.d2[idx]);
+      // Every clone of the species is held by a nearer animal: this one
+      // waits as an impostor rather than a nearer body being demoted.
+      if (rig === null) { this.rigged[idx] = 0; continue; }
+      // Whoever is giving it up loses the mark with it.
+      if (rig.creature >= 0) this.rigged[rig.creature] = 0;
+      this.release(rig);
+      this.lend(slot, rig, c);
+      rig.creature = idx;
+    }
+
+    let held = 0;
+    for (const slot of this.order) for (const rig of slot.rigs) if (rig.holder !== null) held += 1;
+    while (held > budget) {
+      const going = this.leastLent();
+      if (going === null) break;
+      this.release(going);
+      held -= 1;
+    }
+
+    const rate = dt > 0 ? dt / FADE_S : 0;
+    for (const slot of this.order) {
+      for (const i of slot.candidates) {
+        const c = creatures[i];
+        const rig = this.byHolder.get(c.id);
+        // NO RIG IS NO FADE. The impostor draws `1 - fade` of the body,
+        // so an animal that has just been let go of has to be pinned at
+        // zero — `release` does it — or the ellipsoid would come back
+        // shrunken and the animal would be half there.
+        if (rig === undefined) { this.fades.set(c.id, 0); continue; }
+        const target = this.rigged[i] === 1 ? 1 : 0;
+        const was = this.fades.get(c.id);
+        // Met for the first time: there is nothing to cross-fade from.
+        let now = was === undefined ? target : was;
+        // THREE WAYS, NOT TWO. `target > was ? up : down` sends the
+        // SETTLED case — target equal to what it already is — down the
+        // fade-out branch, so a body that had finished arriving decayed
+        // one step, climbed back the next frame, and shimmered at
+        // 1 → 1-rate → 1 for as long as it was drawn. A rig that has
+        // arrived stays arrived; only a target that has actually moved
+        // moves the fade.
+        if (was !== undefined) {
+          now = target > was ? Math.min(1, was + rate) : target < was ? Math.max(0, was - rate) : was;
+        }
+        if (now <= 0 && target === 0) { this.release(rig); continue; }
+        this.fades.set(c.id, now);
+      }
+    }
+  }
+
+  /**
+   * A CLONE OF THIS SPECIES FOR AN ANIMAL `d2` AWAY: one free to lend;
+   * else the one whose animal is furthest through fading out; else the
+   * one held by the FURTHEST marked animal, if that animal is further
+   * off than this one; else none.
+   *
+   * The last clause is what keeps a species whose pool is smaller than
+   * the budget honest — the Lab names such pools, and the rung's own
+   * table did until this pass. Without it the animal that happened to
+   * hold the single clone last frame would keep it while something
+   * nearer stood beside it as an ellipsoid, which is the complaint. The
+   * marks are walked nearest first, so a donor found here is always
+   * further away than the claimant and the swap cannot go back and
+   * forth within a frame.
+   */
+  private spare(slot: Slot, d2: number): Rig | null {
+    let fading: Rig | null = null;
+    let least = Infinity;
+    let marked: Rig | null = null;
+    let furthest = d2;
+    for (const rig of slot.rigs) {
+      if (rig.holder === null) return rig;
+      if (this.rigged[rig.creature] === 1) {
+        const held = this.d2[rig.creature];
+        if (held > furthest) { furthest = held; marked = rig; }
+        continue;
+      }
+      const fade = this.fades.get(rig.holder) ?? 0;
+      if (fade < least) { least = fade; fading = rig; }
+    }
+    return fading ?? marked;
+  }
+
+  /** The held rig, anywhere in the view, whose animal is furthest through fading out. Null when every holder is marked. */
+  private leastLent(): Rig | null {
+    let going: Rig | null = null;
+    let least = Infinity;
+    for (const slot of this.order) {
+      for (const rig of slot.rigs) {
+        if (rig.holder === null || this.rigged[rig.creature] === 1) continue;
+        const fade = this.fades.get(rig.holder) ?? 0;
+        if (fade < least) { least = fade; going = rig; }
+      }
+    }
+    return going;
+  }
+
+  /**
+   * PASS 3: pose what this species holds and fill its impostor. It
+   * chooses no holders — `allocate` did that across every species at
+   * once — and the crossfade is why a body may appear in both: a rig at
+   * `fade` opacity over an ellipsoid at `1 - fade` of its size is one
+   * animal drawn once, never half of one and never two.
+   */
   private drawSpecies(slot: Slot, creatures: readonly CreatureState[], dt: number): void {
     const id = slot.species.id;
     const cand = slot.candidates;
-    cand.sort(this.byDistance);
-    const rigs = slot.rigs;
-    const n = rigs.length;
+    cand.sort(this.byNearest);
     let lent = 0;
-    if (n > 0) {
-      const byId = this.byId;
-      byId.clear();
-      for (let k = 0; k < cand.length; k += 1) byId.set(creatures[cand[k]].id, cand[k]);
-      // THE CUT: the distance of the last creature that would get a rig
-      // by rank alone; a holder stays within a margin of it.
-      const cut = cand.length > n ? this.d2[cand[n - 1]] : Infinity;
-      const keepWithin = cut * HYSTERESIS * HYSTERESIS;
-      for (const rig of rigs) {
-        if (rig.holder === null) continue;
-        const idx = byId.get(rig.holder);
-        if (idx === undefined || this.d2[idx] > keepWithin) {
-          this.release(rig);
-        } else {
-          this.rigged[idx] = 1;
-          rig.creature = idx;
-        }
-      }
-      // The free rigs go to the nearest creatures without one, by rank.
-      let free = 0;
-      for (let k = 0; k < cand.length && k < n; k += 1) {
-        const idx = cand[k];
-        if (this.rigged[idx] === 1) continue;
-        while (free < n && rigs[free].holder !== null) free += 1;
-        if (free >= n) break;
-        this.lend(slot, rigs[free], creatures[idx]);
-        rigs[free].creature = idx;
-        this.rigged[idx] = 1;
-      }
-      for (const rig of rigs) {
-        if (rig.holder === null) { rig.root.visible = false; continue; }
-        this.pose(slot, rig, creatures[rig.creature], dt);
-        rig.root.visible = true;
-        lent += 1;
-      }
+    for (const rig of slot.rigs) {
+      if (rig.holder === null) { rig.root.visible = false; continue; }
+      this.pose(slot, rig, creatures[rig.creature], dt);
+      rig.root.visible = true;
+      lent += 1;
     }
     this.rigsLent[id] = lent;
     // THE IMPOSTORS: everyone else drawn, nearest first, never past the cap.
     const mesh = slot.impostor;
     let count = 0;
-    if (mesh !== null) {
-      const into = mesh.instanceMatrix.array as Float32Array;
-      for (let k = 0; k < cand.length && count < slot.cap; k += 1) {
-        const idx = cand[k];
-        if (this.rigged[idx] === 1) continue;
-        const c = creatures[idx];
-        // THE ELLIPSOID IS THIS ANIMAL'S. Past the pool the whole
-        // population is impostors, so it is here that a range of sizes
-        // is mostly seen; a constant here would make the sizes the few
-        // lent rigs show read as an accident rather than as the world.
-        const len = this.lengthOf(slot, c);
-        const r = (len * slot.look.girth) / 2;
-        const half = len / 2;
-        const here = this.toLocal(c.at);
-        const cs = Math.cos(c.heading);
-        const sn = Math.sin(c.heading);
-        // A rotation about +Y by the heading — ahead is (sin h, cos h),
-        // the actor convention — with the ellipsoid's long axis on +Z.
-        // HORIZONTAL whatever the animal's `up`: an impostor is never
-        // drawn where there is a wall (the header, "the impostors keep
-        // the horizontal matrix").
-        const o = count * 16;
-        into[o] = cs * r; into[o + 1] = 0; into[o + 2] = -sn * r; into[o + 3] = 0;
-        into[o + 4] = 0; into[o + 5] = r; into[o + 6] = 0; into[o + 7] = 0;
-        into[o + 8] = sn * half; into[o + 9] = 0; into[o + 10] = cs * half; into[o + 11] = 0;
-        into[o + 12] = here.lx; into[o + 13] = c.height + r; into[o + 14] = here.lz; into[o + 15] = 1;
-        this.drew(c.id, here.lx, c.height + r, here.lz);
-        count += 1;
+    let bodies = 0;
+    const into = mesh === null ? null : mesh.instanceMatrix.array as Float32Array;
+    for (let k = 0; k < cand.length; k += 1) {
+      const idx = cand[k];
+      const c = creatures[idx];
+      const rig = this.byHolder.get(c.id);
+      const fade = rig === undefined ? 0 : this.fades.get(c.id) ?? 1;
+      // A body its rig has arrived on needs no ellipsoid at all.
+      if (fade >= 1) continue;
+      if (into === null || count >= slot.cap) {
+        // Nothing is drawn of it — unless a rig is carrying most of it
+        // already, in which case it is that rig's body and counted there.
+        if (rig === undefined) this.pastCap += 1;
+        continue;
       }
+      // THE ELLIPSOID IS THIS ANIMAL'S. Past the pool the whole
+      // population is impostors, so it is here that a range of sizes
+      // is mostly seen; a constant here would make the sizes the few
+      // lent rigs show read as an accident rather than as the world.
+      // And it is this animal's SHARE of itself: the crossfade is a
+      // scale in this matrix, which is how one instance of a shared mesh
+      // fades without the shader learning a per-instance alpha.
+      const len = this.lengthOf(slot, c) * (1 - fade);
+      const r = (len * slot.look.girth) / 2;
+      const half = len / 2;
+      const here = this.toLocal(c.at);
+      const cs = Math.cos(c.heading);
+      const sn = Math.sin(c.heading);
+      // A rotation about +Y by the heading — ahead is (sin h, cos h),
+      // the actor convention — with the ellipsoid's long axis on +Z.
+      // HORIZONTAL whatever the animal's `up`: an impostor is never
+      // drawn where there is a wall (the header, "the impostors keep
+      // the horizontal matrix").
+      const o = count * 16;
+      into[o] = cs * r; into[o + 1] = 0; into[o + 2] = -sn * r; into[o + 3] = 0;
+      into[o + 4] = 0; into[o + 5] = r; into[o + 6] = 0; into[o + 7] = 0;
+      into[o + 8] = sn * half; into[o + 9] = 0; into[o + 10] = cs * half; into[o + 11] = 0;
+      into[o + 12] = here.lx; into[o + 13] = c.height + r; into[o + 14] = here.lz; into[o + 15] = 1;
+      // The pick surface is told once per animal, and a crossfading one
+      // was already told by its rig.
+      if (rig === undefined) { this.drew(c.id, here.lx, c.height + r, here.lz); bodies += 1; }
+      count += 1;
+    }
+    if (mesh !== null) {
       mesh.count = count;
       mesh.instanceMatrix.needsUpdate = true;
     }
-    this.impostors[id] = count;
+    this.impostors[id] = bodies;
+  }
+
+  /**
+   * WRITE A CROSSFADE ONTO A RIG'S OWN MATERIALS.
+   *
+   * `transparent` is toggled, and only on the frames it changes, because
+   * three compiles `OPAQUE` into the shader — an opaque program forces
+   * alpha to 1 and would ignore `opacity` altogether — and the define
+   * only changes when the material asks to be built again. That is also
+   * why a settled rig is put back: a skinned mesh left transparent joins
+   * the sorted transparent pass against the opaque terrain for the rest
+   * of the session, which is a look nobody asked for.
+   */
+  private applyFade(rig: Rig, fade: number): void {
+    const settled = fade >= 1;
+    for (const material of rig.materials) material.opacity = settled ? 1 : fade;
+    if (rig.transparent === !settled) return;
+    rig.transparent = !settled;
+    for (const material of rig.materials) { material.transparent = !settled; material.needsUpdate = true; }
   }
 
   private release(rig: Rig): void {
+    if (rig.holder === null) return;
+    // The animal keeps no half-fade it has no rig to draw.
+    this.fades.set(rig.holder, 0);
+    this.byHolder.delete(rig.holder);
     rig.holder = null;
     rig.creature = -1;
     rig.lastAt = null;
     rig.root.visible = false;
+    this.applyFade(rig, 1);
   }
 
   /**
@@ -1181,6 +1649,7 @@ export class FaunaView {
    */
   private lend(slot: Slot, rig: Rig, c: CreatureState): void {
     rig.holder = c.id;
+    this.byHolder.set(c.id, rig);
     const bodyLength = this.lengthOf(slot, c);
     rig.root.scale.setScalar(this.rigScaleOf(slot, c));
     resetMotion(rig.motion, AIRBORNE.includes(c.behaviour));
@@ -1294,6 +1763,10 @@ export class FaunaView {
 
   /** Pose one lent rig from what its creature did since last frame. */
   private pose(slot: Slot, rig: Rig, c: CreatureState, dt: number): void {
+    // HOW MUCH OF THIS BODY THE RIG IS CARRYING, written every frame
+    // from the animal in front of it rather than latched on the rig —
+    // the same rule the scale below follows.
+    this.applyFade(rig, this.fades.get(c.id) ?? 1);
     const anatomy = slot.anatomy;
     const chain = anatomy?.chain ?? null;
     const chained = chain !== null && rig.chain.length >= 2 && rig.trail !== null;
@@ -1397,7 +1870,13 @@ export class FaunaView {
     if (this.disposed) return;
     this.disposed = true;
     for (const slot of this.order) {
-      for (const rig of slot.rigs) slot.group.remove(rig.root);
+      for (const rig of slot.rigs) {
+        slot.group.remove(rig.root);
+        // The clone's own materials go with it; its geometry and its
+        // maps are the template's and go below, once.
+        for (const material of rig.materials) material.dispose();
+        rig.materials.length = 0;
+      }
       slot.rigs = [];
       if (slot.impostor !== null) { slot.group.remove(slot.impostor); slot.impostor.dispose(); slot.impostor = null; }
       if (slot.template !== null) { disposeRig(slot.template); slot.template = null; }
@@ -1407,6 +1886,11 @@ export class FaunaView {
     for (const material of this.materials) material.dispose();
     this.materials.length = 0;
     this.reveals.clear();
+    this.fades.clear();
+    this.byHolder.clear();
+    this.byIndex.clear();
+    this.eligible.length = 0;
+    this.frameCreatures = [];
     this.drawnList.length = 0;
     this.drawnIndex.clear();
     this.slots.clear();

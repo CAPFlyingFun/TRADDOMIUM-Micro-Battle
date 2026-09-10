@@ -665,17 +665,37 @@ export function labSpawns(options: LabSpawnOptions = {}): readonly NewCreatureOp
  * and report a frame rate about a bench that had stopped filling up.
  *
  * So the Lab hands the simulation and the renderer a table whose caps
- * are the BENCH's: `LAB_CAPACITY`, flat across every rung, comfortably
- * over the run's own ceiling (`lab/stressTest.MAX_CREATURES`). Nothing
- * else about the species changes — every pace, sense, need and range is
- * the island's, which is the whole point of testing here — and while the
+ * are the BENCH's: `LAB_CAPACITY`, flat across every rung. Nothing else
+ * about the species changes — every pace, sense, need and range is the
+ * island's, which is the whole point of testing here — and while the
  * bench holds its ordinary five the raised cap changes nothing at all,
  * because a cap only bites when there are more animals than it allows.
+ *
+ * WHY THIS NUMBER, now that the spawn rate ramps and the run's own
+ * ceiling is ten thousand (`lab/stressTest.MAX_CREATURES`): the cap is
+ * PER SPECIES, and the mixed run — the one the report is written from —
+ * draws its five roughly evenly, so no species sees much past two
+ * thousand of the ten. Four thousand and ninety-six leaves that a
+ * doubling of headroom on the species the draw happens to favour, at a
+ * table five species wide.
+ *
+ * IT MUST EXCEED THE RUN'S OWN CEILING, and that is why it is 12,000
+ * against `MAX_CREATURES`'s 10,000 rather than something tidier. A cap
+ * is PER SPECIES, so a mixed run spreads its crowd over five of them and
+ * would never notice — but a ONE-SPECIES run (POOL: QUEEN, and the four
+ * like it, which is the whole of Baseline C) puts every body into a
+ * single cap. Below the run's ceiling that cap would bite first, and the
+ * report would print a frame rate about a bench that had quietly stopped
+ * filling up, with nothing on the page to say so. `tests/labStressWorld`
+ * pins the inequality for exactly that reason.
+ *
+ * The cost is five impostor meshes sized to it — about 3.8 MB of
+ * instance matrices — allocated once when the bench is built.
  *
  * It is the table, and not a second simulation: the brief's §35 ("No
  * separate 'lab version' of the creature code") is kept exactly.
  */
-export const LAB_CAPACITY = 512;
+export const LAB_CAPACITY = 12_000;
 
 /** The five, with the bench's capacity in place of the island's device budget (the header). Frozen, built once. */
 export const LAB_SPECIES_TABLE: readonly CreatureSpecies[] = Object.freeze(LAB_CREATURE_IDS.map((id) => {

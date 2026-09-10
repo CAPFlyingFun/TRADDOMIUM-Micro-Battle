@@ -36,7 +36,8 @@ import type { CreatureId, CreatureSpecies, Medium } from '../creatures/species';
 import type { Behaviour } from '../creatures/state';
 import type { PredationPolicy } from '../creatures/world';
 import {
-  HUD_HZ, LAB_ACTION, LAB_BUTTON_ACTION, LAB_BUTTON_KINDS, LAB_FIELD, LAB_HUD_ROLE, POSSESS_ROW, buttonLabel, buttonsFor,
+  HELD_DURING_A_RUN, HUD_HZ, LAB_ACTION, LAB_BUTTON_ACTION, LAB_BUTTON_KINDS, LAB_FIELD, LAB_HUD_ROLE, POSSESS_ROW, buttonLabel,
+  buttonsFor,
   cameraLabel, controlLabel, creatureField, onOffLabel, possessAction, predationLabel, rigModeLabel, stressLabel,
   stressPoolLabel,
   type LabAction, type LabButtonKind, type LabCameraMode, type LabRigMode, type StressPool,
@@ -494,6 +495,32 @@ export class LabUi {
     if (running && this.stressReport.textContent !== r.stressText) this.stressReport.textContent = r.stressText;
     const finished = r.stressPhase === 'done';
     if (this.stressButtons.hidden === finished) this.stressButtons.hidden = !finished;
+
+    // THE ROOM IS HELD STILL WHILE A RUN IS GOING, and the buttons that
+    // would move it say so rather than going dead under a thumb. The
+    // scene refuses them too — this is the half that is visible, not the
+    // half that is correct (`CreatureLabScene.HELD_DURING_A_RUN`). It
+    // exists because Baseline B's report printed a predation setting the
+    // run had not been started with: the button worked, mid-run, and the
+    // run silently stopped being comparable to the one before it.
+    const holding = running && !finished;
+    for (const action of HELD_DURING_A_RUN) {
+      const button = this.tools.get(action);
+      if (!button) continue;
+      // The camera button has its own reason to be disabled (nobody held);
+      // never re-enable something another rule has already switched off.
+      if (holding) {
+        button.disabled = true;
+        button.style.opacity = '0.45';
+      } else if (button.disabled && action !== LAB_ACTION.camera) {
+        button.disabled = false;
+        button.style.opacity = '1';
+      }
+    }
+    for (const button of this.possess.values()) {
+      button.disabled = holding;
+      button.style.opacity = holding ? '0.45' : '1';
+    }
 
     // The right thumb: the medium's buttons, or none.
     this.layoutCluster(r.held);

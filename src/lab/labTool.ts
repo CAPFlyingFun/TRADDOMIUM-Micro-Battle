@@ -89,6 +89,30 @@ export const LAB_ACTION = {
 
 export type LabAction = (typeof LAB_ACTION)[keyof typeof LAB_ACTION];
 
+/**
+ * WHAT A STRESS RUN HOLDS STILL, and therefore what the Lab refuses
+ * while one is going (Joshua: "Keep the player/camera in the normal test
+ * position so each run is comparable").
+ *
+ * It lives here rather than in the scene because BOTH halves of the
+ * refusal need it and they may not import each other: the scene ignores
+ * these actions, and the HUD greys them so the refusal is visible rather
+ * than felt as a dead tap.
+ *
+ * Every entry is something `startStress` deliberately sets. The list
+ * exists because Baseline B (alpha.42) printed a predation setting the
+ * run had not been started with — the button worked, mid-run, and the
+ * run stopped being comparable to the one before it without saying so.
+ *
+ * OBSERVE is deliberately absent: it only re-asserts what the run
+ * already holds. STOP, COPY, RUN AGAIN, RESET and Back to hub are absent
+ * because leaving or ending a run is always allowed.
+ */
+export const HELD_DURING_A_RUN: readonly LabAction[] = Object.freeze([
+  LAB_ACTION.camera, LAB_ACTION.predation, LAB_ACTION.disturb, LAB_ACTION.cameraDisturbs,
+  LAB_ACTION.reset, LAB_ACTION.debug, LAB_ACTION.rigs,
+]);
+
 const POSSESS_PREFIX = 'lab:possess:';
 
 /** The possess row's action for a species: `lab:possess:queen`. */

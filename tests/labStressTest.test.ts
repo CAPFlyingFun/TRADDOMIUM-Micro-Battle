@@ -1,10 +1,10 @@
 /**
  * The stress test's arithmetic, played out under node against a
  * pretend phone: a rolling average over TIME, a warm-up nothing is
- * recorded during, one creature a second from a seeded draw, each
- * threshold recorded once at the count that reached it, and a run that
- * ends on the hold below the last threshold rather than on one bad
- * frame.
+ * recorded during, a seeded draw arriving at a RAMPING rate, each
+ * threshold recorded once at the count that reached it — with the rate
+ * that count is good to — and a run that ends on the hold below the last
+ * threshold rather than on one bad frame.
  *
  * The phone is a function from creature count to frame rate, so a whole
  * six-minute run is a few thousand loop iterations here.
@@ -15,12 +15,18 @@
  * one in only when a test gives it a sampler, because the OTHER half of
  * the census contract is that a run nobody measured prints no census at
  * all rather than a column of zeroes.
+ *
+ * Since the rate began to ramp (2026-09-10) a frame may owe SEVERAL
+ * creatures, so `drive` collects an array from every frame rather than a
+ * species or a null — and a test that only ever read the first would
+ * quietly measure a slower run than the one that ran.
  */
 import { describe, expect, it } from 'vitest';
 import type { CreatureId } from '../src/creatures/species';
 import {
-  BREAK_HOLD_S, MAX_CREATURES, RECOVERY_S, RollingFps, SETTLE_S, SPAWN_EVERY_S, STRESS_SEED, StressTest, THRESHOLDS,
-  WINDOW_S, stressBlock, stressReport, type StressConditions, type StressSample,
+  BREAK_HOLD_S, MAX_CREATURES, MAX_RUN_S, RAMP_EVERY_S, RECOVERY_S, RollingFps, SETTLE_S, SPAWN_EVERY_S, STRESS_SEED,
+  StressTest, THRESHOLDS, WINDOW_S, crossingSlack, stressBlock, stressOwedBy, stressRatePerS, stressReport,
+  type StressConditions, type StressSample,
 } from '../src/lab/stressTest';
 import {
   nextStressPool, stressPoolLabel, stressPoolWords, type StressPool,
@@ -58,16 +64,36 @@ function drive(
     // The sample is read BEFORE the frame, from the bench as it stands:
     // a threshold is recorded against the count that reached it, and the
     // creature this frame places has not been drawn yet.
-    const species = sampler === undefined ? test.frame(dt) : test.frame(dt, sampler(spawned.length));
+    const owed = sampler === undefined ? test.frame(dt) : test.frame(dt, sampler(spawned.length));
     seconds += dt;
-    if (species !== null) spawned.push(species);
+    // Every one of them, not the first: the caller's half of the contract.
+    for (const species of owed) spawned.push(species);
   }
   return { spawned, seconds };
 }
 
-/** A pretend renderer with a rig pool of `cap`: everything past it draws as an impostor, at a fixed cost. */
+/**
+ * A pretend renderer with a rig pool of `cap`: everything past it draws
+ * as an impostor, at a fixed cost, and every body is drawn one way or
+ * the other — `notDrawn` is zero because this renderer hides nothing.
+ * The one that does is `hidingSamplerOf`, below.
+ */
 function samplerOf(cap: number, drawMs = 4, aiMs = 2): Sampler {
-  return (n) => ({ rigs: Math.min(n, cap), impostors: Math.max(0, n - cap), drawMs, aiMs });
+  return (n) => ({ rigs: Math.min(n, cap), impostors: Math.max(0, n - cap), notDrawn: 0, drawMs, aiMs });
+}
+
+/**
+ * The renderer the accounting is actually about: one body in every
+ * `every` is underground with no cutaway open and is not drawn at all,
+ * the rest split over a rig pool of `cap`. The three still add up to the
+ * crowd, which is the identity the report prints.
+ */
+function hidingSamplerOf(cap: number, every: number): Sampler {
+  return (n) => {
+    const notDrawn = Math.floor(n / every);
+    const shown = n - notDrawn;
+    return { rigs: Math.min(shown, cap), impostors: Math.max(0, shown - cap), notDrawn, drawMs: 4, aiMs: 2 };
+  };
 }
 
 /** A phone that holds 60 fps until `knee` creatures, then falls off linearly to 5 fps at `floor`. */
@@ -135,7 +161,7 @@ describe('RollingFps: frames over the seconds they took', () => {
 });
 
 describe('the run: warm-up, one a second, and a seeded draw', () => {
-  it('spawns nothing until the settle has passed AND the window is full, then one every second', () => {
+  it('spawns nothing until the settle has passed AND the window is full, then one a second', () => {
     const test = new StressTest({ species: FIVE });
     test.start();
     // The settle plus all but a tenth of the window: nothing is placed yet.
@@ -184,6 +210,165 @@ describe('the run: warm-up, one a second, and a seeded draw', () => {
     const summed = Object.values(result.bySpecies).reduce((a, b) => a + b, 0);
     expect(summed).toBe(result.creatures);
     expect(result.creatures).toBe(run.spawned.length);
+  });
+});
+
+/** Seconds this run has spent SPAWNING: its own clock, less the window it filled first. */
+function spawningSeconds(test: StressTest): number {
+  return Math.max(0, test.readout().elapsedS - WINDOW_S);
+}
+
+describe('the ramp: one more a second every ten seconds of SPAWNING', () => {
+  it('is one a second for the first ten, two for the next ten, and 5k(k+1) after k brackets', () => {
+    const test = new StressTest({ species: FIVE });
+    test.start();
+    drive(test, () => 60, () => test.readout().phase === 'spawning');
+    for (const k of [1, 2, 3, 4]) {
+      drive(test, () => 60, () => spawningSeconds(test) >= k * RAMP_EVERY_S);
+      expect(test.rate()).toBe(k + 1);
+      // Joshua's arithmetic, 10 × (1 + 2 + … + k), give or take the frame
+      // the drive's own clock stops on.
+      const owed = 5 * k * (k + 1);
+      expect(stressOwedBy(k * RAMP_EVERY_S)).toBe(owed);
+      expect(test.readout().creatures).toBeGreaterThanOrEqual(owed - 1);
+      expect(test.readout().creatures).toBeLessThanOrEqual(owed + 1);
+    }
+  });
+
+  it('reads the ramp off the SPAWNING clock, so the settle and the window fill cost nothing', () => {
+    const test = new StressTest({ species: FIVE });
+    test.start();
+    // A rebuild frame, the settle, and the whole window fill first: by the
+    // time the first body is placed the run's clock already reads five.
+    test.frame(0.9);
+    drive(test, () => 60, () => test.readout().phase === 'spawning');
+    // Five seconds of window fill, to a float's precision.
+    expect(test.readout().elapsedS).toBeGreaterThan(WINDOW_S - 0.1);
+    expect(test.rate()).toBe(1);
+    // Nine more seconds of spawning. The run's clock now reads fourteen,
+    // which IS the second bracket if the ramp is read off the wrong one.
+    drive(test, () => 60, () => spawningSeconds(test) >= 9);
+    expect(test.readout().elapsedS).toBeGreaterThan(RAMP_EVERY_S + 3);
+    expect(test.rate()).toBe(1);
+    expect(test.readout().creatures).toBeLessThanOrEqual(11);
+    // And the step lands on the spawning clock's ten, not the run's.
+    drive(test, () => 60, () => spawningSeconds(test) >= RAMP_EVERY_S + 0.5);
+    expect(test.rate()).toBe(2);
+  });
+
+  it("carries the clock's remainder across a rate change: no spawn dropped, none doubled", () => {
+    // The frame a bracket turns on is the risk: a clock set back to zero
+    // there loses whatever was already owed, and one restarted at the new
+    // interval pays it twice.
+    const test = new StressTest({ species: FIVE });
+    test.start();
+    drive(test, () => 60, () => test.readout().phase === 'spawning');
+    drive(test, () => 60, () => spawningSeconds(test) >= RAMP_EVERY_S - 0.5);
+    const before = test.readout().creatures;
+    drive(test, () => 60, () => spawningSeconds(test) >= RAMP_EVERY_S + 0.5);
+    // Half a second at one a second and half at two: one body, or the two
+    // the boundary itself can land on — never none, never three.
+    expect(test.readout().creatures - before).toBeGreaterThanOrEqual(1);
+    expect(test.readout().creatures - before).toBeLessThanOrEqual(2);
+  });
+
+  it('owes SEVERAL creatures in one call when a frame is long and the rate is high', () => {
+    // Eleven frames a second — above the last threshold, so the run keeps
+    // going — for the whole of the thirty-ninth bracket.
+    const test = new StressTest({ species: FIVE });
+    test.start();
+    drive(test, () => 11, () => spawningSeconds(test) >= 39 * RAMP_EVERY_S + 1);
+    expect(test.rate()).toBe(40);
+    const before = test.readout().creatures;
+    // A 200 ms hitch at forty a second owes eight — nine when the clock's
+    // remainder was nearly due — and the caller is handed all of them.
+    const owed = test.frame(0.2);
+    expect(owed.length).toBeGreaterThanOrEqual(8);
+    expect(owed.length).toBeLessThanOrEqual(9);
+    expect(test.readout().creatures).toBe(before + owed.length);
+  });
+
+  it('hands back ONE array, emptied by the next frame: place them now', () => {
+    const test = new StressTest({ species: FIVE });
+    test.start();
+    drive(test, () => 60, () => test.readout().phase === 'spawning');
+    const owed = test.frame(3);
+    expect(owed.length).toBe(3);
+    const kept = owed;
+    test.frame(1 / 60);
+    // The same array, not a copy: a caller that stashed it would be
+    // holding a window onto the next frame's answer instead of its own.
+    expect(kept).toBe(owed);
+    expect(kept.length).toBeLessThan(3);
+  });
+
+  it('records the rate in force at each crossing, and the report prints it with the ±', () => {
+    // Sixty frames a second until two hundred bodies, five at nine
+    // hundred: by the time anything is crossed the ramp is well past one
+    // a second, which is the case a bare count would misrepresent.
+    const test = new StressTest({ species: FIVE });
+    test.start();
+    drive(test, phoneOf(200, 900), () => test.finished, samplerOf(13));
+    const result = test.result();
+    expect(result.crossings.length).toBe(THRESHOLDS.length);
+    let last = 0;
+    for (const c of result.crossings) {
+      expect(Number.isInteger(c.rate)).toBe(true);
+      expect(c.rate).toBeGreaterThan(1);
+      // The rate only ever climbs, so the ± only ever widens.
+      expect(c.rate).toBeGreaterThanOrEqual(last);
+      expect(crossingSlack(c.rate, WINDOW_S)).toBe(WINDOW_S * c.rate);
+      last = c.rate;
+    }
+    const thirty = result.crossings.find((c) => c.fps === 30)!;
+    const text = stressReport(result, CONDITIONS);
+    expect(text).toContain(`SUSTAINED AT 30+ FPS: ${thirty.creatures} creatures  (± ${crossingSlack(thirty.rate)}, arriving at ${thirty.rate}/s)`);
+    for (const c of result.crossings) {
+      expect(text).toMatch(new RegExp(`below ${c.fps} fps {6}${c.creatures} +\\(\\d+ s\\) +± ${crossingSlack(c.rate)} +at ${c.rate}/s`));
+    }
+    expect(text).toContain(`Each count is good to about ± one ${WINDOW_S} s window of arrivals at the rate`);
+    expect(text).toContain('At 1/s that is ± 5; at 40/s, ± 200.');
+    // And the conditions say the sequence is still the same one every run.
+    expect(text).toContain(`+1/s every ${RAMP_EVERY_S} s of spawning`);
+    expect(text).toContain('RUN AGAIN repeats this exact sequence');
+  });
+
+  it('says the rate on the live panel while it is spawning, and not once it has stopped', () => {
+    const test = new StressTest({ species: FIVE, maxCreatures: 40 });
+    test.start();
+    drive(test, () => 60, (s) => s >= SETTLE_S + WINDOW_S + 11);
+    expect(test.readout().phase).toBe('spawning');
+    expect(stressBlock(test.readout())).toContain('rate      2/s');
+    drive(test, () => 60, () => test.finished);
+    expect(stressBlock(test.readout())).not.toContain('rate      ');
+  });
+
+  it('owes the integral of the rate, so a bracket\'s turn costs nothing', () => {
+    // The clock-and-remainder shape this replaced paid one extra creature
+    // every time a bracket turned, always in the same direction.
+    for (const k of [0, 1, 2, 5, 39]) expect(stressOwedBy(k * RAMP_EVERY_S)).toBe(5 * k * (k + 1));
+    // Half-way through the third bracket: two whole brackets, then 3/s.
+    expect(stressOwedBy(2 * RAMP_EVERY_S + 5)).toBe(30 + 15);
+    // A slower base run owes proportionally fewer, and nothing is owed
+    // before the clock starts or off a clock that is not one.
+    expect(stressOwedBy(RAMP_EVERY_S, 2)).toBe(5);
+    expect(stressOwedBy(0)).toBe(0);
+    expect(stressOwedBy(-1)).toBe(0);
+    expect(stressOwedBy(Number.NaN)).toBe(0);
+  });
+
+  it('a rate is a rate whatever base a caller asked for', () => {
+    expect(stressRatePerS(0)).toBe(1);
+    expect(stressRatePerS(RAMP_EVERY_S - 0.001)).toBe(1);
+    expect(stressRatePerS(RAMP_EVERY_S)).toBe(2);
+    expect(stressRatePerS(39 * RAMP_EVERY_S)).toBe(40);
+    // A run driven at one every two seconds ramps to one a second, not two.
+    expect(stressRatePerS(RAMP_EVERY_S, 2)).toBe(1);
+    // Nothing is a rate before the clock has started, or off a clock that is not one.
+    expect(stressRatePerS(-5)).toBe(1);
+    expect(stressRatePerS(Number.NaN)).toBe(1);
+    expect(crossingSlack(0)).toBe(0);
+    expect(crossingSlack(40)).toBe(200);
   });
 });
 
@@ -282,9 +467,8 @@ describe('the ending', () => {
     const phone = phoneOf(10, 45);
     for (let i = 0; i < 200_000 && !test.finished; i += 1) {
       const dt = 1 / Math.max(0.5, phone(spawned.length));
-      const species = test.frame(dt);
+      for (const species of test.frame(dt)) spawned.push(species);
       seconds += dt;
-      if (species !== null) spawned.push(species);
       const r = test.readout();
       if (r.phase === 'recovery' && brokeAt < 0) {
         brokeAt = seconds;
@@ -324,9 +508,8 @@ describe('the ending', () => {
     for (let i = 0; i < 200_000 && !test.finished; i += 1) {
       const recovering = test.readout().phase === 'recovery';
       const dt = 1 / (recovering ? 40 : Math.max(2, 60 - spawnedTotal * 2));
-      const species = test.frame(dt);
+      spawnedTotal += test.frame(dt).length;
       seconds += dt;
-      if (species !== null) spawnedTotal += 1;
     }
     const result = test.result();
     expect(result.ending).toBe('broke');
@@ -355,11 +538,21 @@ describe('the ending', () => {
     expect(test.result().ending).toBe('stopped');
   });
 
-  it('the default ceiling is the one the header names, and a full run stays inside it', () => {
-    expect(MAX_CREATURES).toBe(400);
+  it('the default ceiling is the one the header names, and the ramp reaches it inside the run', () => {
+    expect(MAX_CREATURES).toBe(10_000);
     expect(SPAWN_EVERY_S).toBe(1);
+    expect(RAMP_EVERY_S).toBe(10);
     expect(BREAK_HOLD_S).toBe(5);
     expect(RECOVERY_S).toBe(10);
+    // The arithmetic the header states: 5k(k+1) after k brackets, so 44
+    // whole brackets is 9,900 at 440 s of spawning and the forty-fifth
+    // rate clears the last hundred in a couple of seconds. That, plus the
+    // window fill, is what has to fit inside MAX_RUN_S — otherwise the
+    // ceiling would be unreachable and the guard would be the clock's.
+    const brackets = 44;
+    expect(5 * brackets * (brackets + 1)).toBe(9_900);
+    const toCeilingS = brackets * RAMP_EVERY_S + (MAX_CREATURES - 9_900) / (brackets + 1);
+    expect(toCeilingS).toBeLessThan(MAX_RUN_S - WINDOW_S);
   });
 });
 
@@ -462,7 +655,7 @@ describe('the drawn census: rigs, impostors, and where the frame went', () => {
     drive(test, phoneOf(6, 50), () => test.finished, samplerOf(8));
     const text = stressReport(test.result(), CONDITIONS);
     for (const want of THRESHOLDS) {
-      expect(text).toMatch(new RegExp(`below ${want} fps {6}\\d+ +\\(\\d+ s\\) {3}\\d+ rigs · \\d+ impostors`));
+      expect(text).toMatch(new RegExp(`below ${want} fps {6}\\d+ +\\(\\d+ s\\) +± \\d+ +at \\d+/s +\\d+ rigs · \\d+ impostors`));
     }
   });
 
@@ -473,7 +666,7 @@ describe('the drawn census: rigs, impostors, and where the frame went', () => {
     const test = new StressTest({ species: FIVE, maxCreatures: 20 });
     test.start();
     drive(test, () => 60, () => test.finished, (n) => ({
-      rigs: n <= 10 ? n : 2, impostors: n <= 10 ? 0 : n - 2, aiMs: 1, drawMs: 3,
+      rigs: n <= 10 ? n : 2, impostors: n <= 10 ? 0 : n - 2, notDrawn: 0, aiMs: 1, drawMs: 3,
     }));
     const result = test.result();
     expect(result.finalRigs).toBe(2);
@@ -531,8 +724,12 @@ describe('the drawn census: rigs, impostors, and where the frame went', () => {
     drive(test, () => 60, (s) => s >= 20, samplerOf(8));
     const r = test.readout();
     expect(r.rigs).toBe(8);
-    expect(r.impostors).toBe(r.creatures - 8);
-    expect(stressBlock(r)).toContain(`drawn     8 rigs · ${r.creatures - 8} impostors`);
+    // The sample is the bench as it stood when the frame began, so it may
+    // be a creature or two behind the count — what the panel must show is
+    // the SPLIT, and that the pool is full and the rest are impostors.
+    expect(r.impostors).toBeGreaterThan(0);
+    expect(r.rigs! + r.impostors!).toBeLessThanOrEqual(r.creatures);
+    expect(stressBlock(r)).toContain(`drawn     8 rigs · ${r.impostors} impostors`);
   });
 
   it('discards the settle\'s samples with the settle\'s frames', () => {
@@ -540,7 +737,7 @@ describe('the drawn census: rigs, impostors, and where the frame went', () => {
     // would put a 900 ms drawing cost in the mean of a run it is not part of.
     const test = new StressTest({ species: FIVE, maxCreatures: 5 });
     test.start();
-    test.frame(0.9, { rigs: 999, impostors: 999, aiMs: 900, drawMs: 900 });
+    test.frame(0.9, { rigs: 999, impostors: 999, notDrawn: 999, aiMs: 900, drawMs: 900 });
     drive(test, () => 60, () => test.finished, samplerOf(8, 4, 2));
     const result = test.result();
     expect(result.peakRigs).toBeLessThanOrEqual(8);
@@ -555,13 +752,101 @@ describe('the drawn census: rigs, impostors, and where the frame went', () => {
     drive(test, () => 60, () => test.finished, () => {
       n += 1;
       return n % 3 === 0
-        ? { rigs: Number.NaN, impostors: -1, aiMs: Number.NaN, drawMs: Number.POSITIVE_INFINITY }
-        : { rigs: 4, impostors: 1, aiMs: 2, drawMs: 4 };
+        ? { rigs: Number.NaN, impostors: -1, notDrawn: -2, aiMs: Number.NaN, drawMs: Number.POSITIVE_INFINITY }
+        : { rigs: 4, impostors: 1, notDrawn: 0, aiMs: 2, drawMs: 4 };
     });
     const result = test.result();
     expect(result.meanDrawMs).toBeCloseTo(4, 9);
     expect(result.finalRigs).toBe(4);
     expect(result.peakImpostors).toBe(1);
+  });
+});
+
+describe('the census accounts for the whole crowd (Joshua: where did the other 55 go?)', () => {
+  it('carries the not-drawn number into the report, and the three sum to what was placed', () => {
+    // One body in four underground with no cutaway open, the rest split
+    // over a rig pool of thirteen: 13 + 17 + 10 = 40, which is the
+    // identity the block prints so a reader can check it.
+    const test = new StressTest({ species: FIVE, maxCreatures: 40 });
+    test.start();
+    drive(test, () => 60, () => test.finished, hidingSamplerOf(13, 4));
+    const result = test.result();
+    expect(result.creatures).toBe(40);
+    expect(result.finalRigs).toBe(13);
+    expect(result.finalImpostors).toBe(17);
+    expect(result.finalNotDrawn).toBe(10);
+    expect(result.finalRigs! + result.finalImpostors! + result.finalNotDrawn!).toBe(result.creatures);
+    const text = stressReport(result, CONDITIONS);
+    expect(text).toContain('DRAWN AT THE END');
+    expect(text).toMatch(/\n {2}full rigs {11}13\n/);
+    expect(text).toMatch(/\n {2}impostors {11}17\n/);
+    expect(text).toMatch(/\n {2}not drawn {11}10 {3}\(underground burrowers, or past a cap\)\n/);
+    expect(text).toContain('\n  ---\n');
+    // The total is the RENDERER's — every body it was handed — and the
+    // run's own count is named beside it. Here nothing else is in the
+    // room, so they agree and no "already there" line is printed.
+    expect(text).toMatch(/\n {2}bodies in the room {2}40\n/);
+    expect(text).toMatch(/\n {2}of those, the run's 40\n/);
+    expect(text).not.toContain('already there');
+    expect(text).not.toContain('MISMATCH');
+    // `total placed` was the old wording, and it was the wrong number to
+    // compare the renderer's three against; it is gone.
+    expect(text).not.toContain('total placed');
+  });
+
+  it('names the bodies that were already in the room instead of crying bug at them', () => {
+    // THE CREATURE LAB'S OWN FIVE. The run spawns into a room that is not
+    // empty — the bench's queen, worker, worm, aphid and fly are standing
+    // there before STRESS is pressed — so the renderer is always handed
+    // five more bodies than the run placed. The first version of this
+    // block called that a MISMATCH and a bug, which it is not.
+    const test = new StressTest({ species: FIVE, maxCreatures: 20 });
+    test.start();
+    drive(test, () => 60, () => test.finished, (n) => ({
+      rigs: n + 5, impostors: 0, notDrawn: 0, aiMs: 1, drawMs: 2,
+    }));
+    const result = test.result();
+    expect(result.finalRigs).toBe(25);
+    const text = stressReport(result, CONDITIONS);
+    expect(text).toMatch(/\n {2}bodies in the room {2}25\n/);
+    expect(text).toMatch(/\n {2}of those, the run's 20\n/);
+    expect(text).toMatch(/\n {2}already there {7}5 {3}\(the bench's own animals, not spawned by this run\)\n/);
+    expect(text).not.toContain('MISMATCH');
+  });
+
+  it('DOES cry bug the one way that is one: fewer bodies drawn than the run placed', () => {
+    // The run cannot have spawned more than the renderer was handed. That
+    // direction is a real disagreement and stays loud.
+    const test = new StressTest({ species: FIVE, maxCreatures: 20 });
+    test.start();
+    drive(test, () => 60, () => test.finished, (n) => ({
+      rigs: Math.max(0, n - 3), impostors: 0, notDrawn: 0, aiMs: 1, drawMs: 2,
+    }));
+    const text = stressReport(test.result(), CONDITIONS);
+    expect(text).toContain('MISMATCH: the run placed 20 but only 17 reached the renderer');
+    expect(text).toContain('3 bodies are unaccounted for');
+  });
+
+  it('drops a sample whose not-drawn number is not one, rather than printing the rest of it', () => {
+    const test = new StressTest({ species: FIVE, maxCreatures: 5 });
+    test.start();
+    drive(test, () => 60, () => test.finished, () => ({
+      rigs: 3, impostors: 1, notDrawn: Number.NaN, aiMs: 2, drawMs: 4,
+    }));
+    const result = test.result();
+    expect(result.finalRigs).toBeNull();
+    expect(result.finalNotDrawn).toBeNull();
+    expect(result.meanDrawMs).toBeNull();
+    expect(stressReport(result, CONDITIONS)).not.toContain('DRAWN AT THE END');
+  });
+
+  it('the live panel names the bodies nobody drew, beside the ones that were', () => {
+    const test = new StressTest({ species: FIVE });
+    test.start();
+    drive(test, () => 60, (s) => s >= 20, hidingSamplerOf(8, 4));
+    const r = test.readout();
+    expect(r.notDrawn).toBeGreaterThan(0);
+    expect(stressBlock(r)).toContain(`${r.rigs} rigs · ${r.impostors} impostors · ${r.notDrawn} not drawn`);
   });
 });
 
@@ -581,13 +866,20 @@ describe('a run nobody measured says so, and never with a zero', () => {
       expect(c.rigs).toBeNull();
       expect(c.impostors).toBeNull();
     }
+    expect(result.finalNotDrawn).toBeNull();
     const text = stressReport(result, CONDITIONS);
     expect(text).not.toContain('DRAWN AT THE END');
     expect(text).not.toContain('WHERE THE FRAME WENT');
     expect(text).not.toContain('rigs ·');
     expect(text).not.toContain('impostors');
+    // Including the accounting: nobody counted, so there is nothing to
+    // account for — and a `total placed` under a column of em-dashes
+    // would read as a renderer that drew none of them.
+    expect(text).not.toContain('not drawn');
+    expect(text).not.toContain('total placed');
+    expect(text).not.toContain('MISMATCH');
     // And the threshold lines are exactly what they were before the census existed.
-    expect(text).toMatch(/below 30 fps {6}\d+ +\(\d+ s\)\n/);
+    expect(text).toMatch(/below 30 fps {6}\d+ +\(\d+ s\) +± \d+ +at \d+\/s\n/);
   });
 
   it('leaves the live panel\'s census out too', () => {
@@ -597,6 +889,7 @@ describe('a run nobody measured says so, and never with a zero', () => {
     const r = test.readout();
     expect(r.rigs).toBeNull();
     expect(r.impostors).toBeNull();
+    expect(r.notDrawn).toBeNull();
     expect(stressBlock(r)).not.toContain('drawn');
   });
 });

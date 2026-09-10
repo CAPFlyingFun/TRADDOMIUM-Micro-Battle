@@ -47,16 +47,45 @@
  *              then says the empty bench could not hold 45 — a claim
  *              about the reset button, printed as a claim about the
  *              crowd.
- *   spawning   one creature every `SPAWN_EVERY_S`, the species drawn
- *              from a SEEDED generator so RUN AGAIN is the same test and
- *              not another one (CLAUDE.md: never `Math.random`). Each
- *              threshold records the count the first time the rolling
- *              average falls through it.
+ *   spawning   the species drawn from a SEEDED generator so RUN AGAIN
+ *              is the same test and not another one (CLAUDE.md: never
+ *              `Math.random`), at a rate that RAMPS — one a second for
+ *              the first ten seconds of spawning, two for the next ten,
+ *              three for the ten after that (below). Each threshold
+ *              records the count the first time the rolling average
+ *              falls through it.
  *   recovery   spawning stops when the average has held under the last
  *              threshold for `BREAK_HOLD_S`; the bodies already there
  *              keep living for `RECOVERY_S` so the report can say what
  *              the phone settles to once nothing new is arriving.
  *   done       the report stands until RUN AGAIN or RESET.
+ *
+ * ─── the ramp, and what reading it costs ────────────────────────────
+ *
+ * Joshua, 2026-09-10, correcting his own first wording: "I meant
+ * increase the rate every 10 seconds, like the example, rather than
+ * every 10 spawned insects: 0-10 s = 1/sec, 10-20 s = 2/sec, 20-30 s =
+ * 3/sec, 30-40 s = 4/sec etc. That should let us reach the actual
+ * breaking point much faster." The run that asked for it is why: at one
+ * a second the phone was still locked at 60.1 fps when the test's own
+ * four-hundredth creature stopped it, so the flat rate had spent seven
+ * minutes measuring patience rather than the phone. Under the ramp the
+ * same four hundred arrive in a hundred seconds and ten thousand inside
+ * eight minutes.
+ *
+ * The clock the rate is read from is the SPAWNING clock and not the
+ * run's: the settle and the window fill are the bench being built, and
+ * a rate measured from them would open at two a second.
+ *
+ * WHAT IT COSTS, and why every count now carries a ±. A threshold is
+ * crossed by a FIVE-SECOND average, so the crowd has already grown by
+ * five seconds of arrivals before the average can report the crossing
+ * at all: at rate N a count is good to about ±5N — ±5 at the start,
+ * ±200 at forty a second. That is not noise to be tidied away, it is
+ * the price of reaching the breaking point in one sitting, so the rate
+ * in force is recorded ON the crossing, printed beside it, and the
+ * arithmetic is stated in the report. A ramped run that printed a bare
+ * "below 30 fps: 812" would be claiming a precision it does not have.
  *
  * ─── the DRAWN census, and the two kinds of number in it ────────────
  *
@@ -78,6 +107,17 @@
  * so its mean is the shape of a tick repeated, not a budget, and it is
  * printed outside the frame's split for exactly that reason.
  *
+ * THE CENSUS ACCOUNTS FOR EVERYONE, which is what `notDrawn` is for.
+ * The first RIGS: RUNG run reported four hundred placed and 13 rigs +
+ * 332 impostors drawn, and Joshua asked where the other fifty-five had
+ * gone: they were earthworms underground, which the renderer refuses to
+ * draw while no cutaway is open. The refusal is correct; three numbers
+ * that do not add up to the crowd are what made it read as fifty-five
+ * lost animals. So the report prints the identity — rigs + impostors +
+ * not drawn = placed — and prints the DISCREPANCY when it fails, since
+ * a renderer and a run that disagree about how many bodies exist is
+ * exactly the thing worth knowing.
+ *
  * A run driven with NO samples — every test that predates them, and any
  * caller with nothing to measure — leaves every census number null, and
  * the report then prints neither block rather than a column of zeroes.
@@ -94,7 +134,10 @@
  *
  * Pure: no three, no DOM, no clock of its own (the timestamp is handed
  * in). Allocation-free per frame: the window is a ring, the counts an
- * object made once.
+ * object made once, and the species a frame owes come back in ONE array
+ * that is emptied and refilled rather than a new one each frame — this
+ * object sits inside the thing it is measuring, and at forty a second
+ * most frames would otherwise allocate.
  */
 import { mulberry32 } from '../world/random';
 import type { CreatureId } from '../creatures/species';
@@ -116,8 +159,20 @@ export const WINDOW_S = 5;
  */
 export const SETTLE_S = 1;
 
-/** One creature every this many seconds. Joshua: "1 random currently implemented insect per second". */
+/**
+ * The FIRST bracket's interval: one creature every this many seconds
+ * until the ramp's first step, and the unit every later rate is a
+ * multiple of. Joshua's original brief: "1 random currently implemented
+ * insect per second".
+ */
 export const SPAWN_EVERY_S = 1;
+
+/**
+ * How often the rate gains one a second, seconds of SPAWNING (never of
+ * the run — the header says why). Joshua, 2026-09-10: "0-10 s = 1/sec,
+ * 10-20 s = 2/sec, 20-30 s = 3/sec, 30-40 s = 4/sec etc."
+ */
+export const RAMP_EVERY_S = 10;
 
 /** The frame rates whose creature count the run records, highest first. Joshua's four. */
 export const THRESHOLDS: readonly number[] = Object.freeze([45, 30, 20, 10]);
@@ -129,24 +184,86 @@ export const BREAK_HOLD_S = 5;
 export const RECOVERY_S = 10;
 
 /**
- * The most creatures a run will place. GAME TUNING, and a guard rather
- * than a target: Joshua is "hoping we might get close to 200", and a
- * phone that never reaches ten frames a second would otherwise spawn
- * until the tab is killed — which loses the report, the one thing the
- * run is for. A run that reaches this stops and SAYS it stopped here, so
- * the number is never mistaken for a breaking point.
+ * The most creatures a run will place. GAME TUNING, and a GUARD rather
+ * than a target — Joshua, 2026-09-10: "remove the 400 stress-test
+ * ceiling. Keep going until we actually cross the FPS thresholds and hit
+ * the existing under-10-FPS stop condition." Ten thousand is far past
+ * anything a phone is expected to hold, which is the whole point of the
+ * number; it is not removed altogether because a run that spawns until
+ * the tab is killed loses its report, and the report is the one thing
+ * the run is for. A run that reaches this stops and SAYS it stopped
+ * here — the ending reads "NOT a breaking point" — so it can never be
+ * mistaken for a limit of the phone.
  */
-export const MAX_CREATURES = 400;
+export const MAX_CREATURES = 10_000;
 
 /**
  * The longest a run may take, seconds. GAME TUNING, the same guard from
- * the other side: at one a second, four hundred creatures is under seven
- * minutes, and anything past ten is a run nobody is still watching.
+ * the other side, and the ramp is what keeps it comfortable: after k
+ * ten-second brackets a run has placed 5k(k+1), so 44 whole brackets is
+ * 9,900 at 440 s of spawning and the forty-fifth rate clears the last
+ * hundred a couple of seconds later — the ten-thousandth creature lands
+ * about 442 s in, plus the five-second window fill. Ten minutes would
+ * allow roughly 18,000, so the creature ceiling is always what a long
+ * run meets first, and this stays what it was for: anything past ten
+ * minutes is a run nobody is still watching.
  */
 export const MAX_RUN_S = 600;
 
 /** The seed the species draw runs on, so two runs are the same run. */
 export const STRESS_SEED = 0x57_2e_55;
+
+/**
+ * THE RATE IN FORCE after `spawningS` seconds of SPAWNING, creatures a
+ * second: one more each `RAMP_EVERY_S`, in units of the first bracket's
+ * interval, so a caller that asked for a slower base keeps the base it
+ * asked for and the ramp still doubles it, trebles it and so on.
+ *
+ * Exported because the run, the report, the live panel and the tests all
+ * have to mean the same thing by "at 4/s", and a second copy of this
+ * arithmetic is how they would stop meaning it.
+ */
+export function stressRatePerS(spawningS: number, spawnEveryS: number = SPAWN_EVERY_S): number {
+  const brackets = Number.isFinite(spawningS) && spawningS > 0 ? Math.floor(spawningS / RAMP_EVERY_S) : 0;
+  return (1 + brackets) / spawnEveryS;
+}
+
+/**
+ * HOW MANY CREATURES THE RAMP HAS OWED after `spawningS` seconds of
+ * spawning — the rate INTEGRATED over the run rather than a clock ticked
+ * down, which is what makes a bracket's turn cost nothing.
+ *
+ * A spawn clock that accumulates seconds and pays one out per interval
+ * is the obvious shape and it is subtly wrong here: at the moment the
+ * bracket turns, whatever is banked on that clock is suddenly measured
+ * against the SHORTER interval, so a clock holding the second it was
+ * about to pay one for pays TWO instead. Once per bracket, always in the
+ * same direction, and by the fortieth it has silently added a creature
+ * to every count in the report. The integral cannot do that: k whole
+ * brackets have owed exactly `RAMP_EVERY_S`·k(k+1)/2 — Joshua's 5k(k+1)
+ * at his ten seconds and one a second — and the part-bracket owes its
+ * own rate times its own seconds. Nothing is dropped either: the caller
+ * places the difference between what is owed and what it has placed, so
+ * a frame long enough to owe eight hands back eight.
+ */
+export function stressOwedBy(spawningS: number, spawnEveryS: number = SPAWN_EVERY_S): number {
+  if (!(Number.isFinite(spawningS) && spawningS > 0 && spawnEveryS > 0)) return 0;
+  const brackets = Math.floor(spawningS / RAMP_EVERY_S);
+  const rest = spawningS - brackets * RAMP_EVERY_S;
+  return ((RAMP_EVERY_S * brackets * (brackets + 1)) / 2 + (brackets + 1) * rest) / spawnEveryS;
+}
+
+/**
+ * HOW WRONG A THRESHOLD'S COUNT MAY BE, in creatures: the arrivals the
+ * rolling window sees before it can report the crossing (the header's
+ * ±5N). Whole, because a count is. The window is a parameter rather
+ * than the constant because a run may have been driven on a shorter
+ * one, and a ± that quietly assumed five seconds would be exactly the
+ * kind of number this function exists to prevent.
+ */
+export function crossingSlack(rate: number, windowS: number = WINDOW_S): number {
+  return Number.isFinite(rate) && rate > 0 && windowS > 0 ? Math.round(rate * windowS) : 0;
+}
 
 export type StressPhase = 'idle' | 'warmup' | 'spawning' | 'recovery' | 'done';
 
@@ -164,6 +281,14 @@ export interface StressSample {
   readonly rigs: number;
   /** Creatures drawn as a 20-triangle impostor this frame. */
   readonly impostors: number;
+  /**
+   * Creatures the renderer did NOT draw this frame: an earthworm under
+   * the soil with no cutaway open, or a body past a pool or a cap. It is
+   * not an error term — refusing to draw what cannot be seen is the
+   * renderer working — it is the number that makes the census add up to
+   * the crowd (the header).
+   */
+  readonly notDrawn: number;
   /** The creature simulation's own cost, ms — its LAST TICK's reading. */
   readonly aiMs: number;
   /** The creature renderer's own wall time this frame, ms. */
@@ -181,6 +306,13 @@ export interface Crossing {
   readonly rigs: number | null;
   /** Impostors drawn on that same frame, or null. */
   readonly impostors: number | null;
+  /**
+   * The spawn rate in force when this was recorded, creatures a second.
+   * The count above is good to about `crossingSlack` of it, so a
+   * crossing at 40/s is a different KIND of number from one at 1/s and
+   * must never be printed as though it were the same.
+   */
+  readonly rate: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -283,6 +415,10 @@ export interface StressReadout {
   readonly rigs: number | null;
   /** The latest sample's impostor count, or null. */
   readonly impostors: number | null;
+  /** The latest sample's not-drawn count, or null. */
+  readonly notDrawn: number | null;
+  /** The spawn rate now, creatures a second — one more every `RAMP_EVERY_S` of spawning. */
+  readonly rate: number;
 }
 
 export interface StressOptions {
@@ -311,7 +447,13 @@ export class StressTest {
   private phase: StressPhase = 'idle';
   private settled = 0;
   private elapsed = 0;
-  private sinceSpawn = 0;
+  /**
+   * Seconds spent SPAWNING — the ramp's own clock, and not `elapsed`
+   * (the header). The only spawn state there is: what is owed at any
+   * moment is a function of this and `count`, so there is no second
+   * clock to fall out of step with it.
+   */
+  private spawningS = 0;
   private belowLast = 0;
   private recovered = 0;
   private ending: StressEnding | null = null;
@@ -319,6 +461,14 @@ export class StressTest {
   private count = 0;
   private readonly counts = new Map<CreatureId, number>();
   private readonly crossings: Crossing[] = [];
+
+  /**
+   * THE SPECIES THIS FRAME OWES: one array for the life of the run,
+   * emptied at the top of every `frame` and refilled. The caller places
+   * what is in it and lets go of it; keeping it would be keeping a
+   * window onto the next frame's answer.
+   */
+  private readonly owed: CreatureId[] = [];
 
   /** The whole run's frames and seconds, for the average; and the extremes. */
   private runFrames = 0;
@@ -345,7 +495,11 @@ export class StressTest {
   constructor(options: StressOptions) {
     this.speciesPool = options.species.slice();
     this.seed = options.seed ?? STRESS_SEED;
-    this.spawnEveryS = options.spawnEveryS ?? SPAWN_EVERY_S;
+    // Clamped positive: the spawn clock DRAINS in a while-loop now, so a
+    // zero or negative interval would not be a very fast run, it would be
+    // a frame that never ends.
+    const every = options.spawnEveryS ?? SPAWN_EVERY_S;
+    this.spawnEveryS = Number.isFinite(every) && every > 0 ? every : SPAWN_EVERY_S;
     this.maxCreatures = options.maxCreatures ?? MAX_CREATURES;
     this.window = new RollingFps(options.windowS ?? WINDOW_S);
     this.rand = mulberry32(this.seed);
@@ -372,13 +526,14 @@ export class StressTest {
     this.phase = 'idle';
     this.settled = 0;
     this.elapsed = 0;
-    this.sinceSpawn = 0;
+    this.spawningS = 0;
     this.belowLast = 0;
     this.recovered = 0;
     this.ending = null;
     this.count = 0;
     this.counts.clear();
     this.crossings.length = 0;
+    this.owed.length = 0;
     this.runFrames = 0;
     this.runSeconds = 0;
     this.worstFrameS = 0;
@@ -423,13 +578,28 @@ export class StressTest {
     this.finish('stopped');
   }
 
+  /** The spawn rate now, creatures a second: `stressRatePerS` on the spawning clock. */
+  rate(): number {
+    return stressRatePerS(this.spawningS, this.spawnEveryS);
+  }
+
   /**
-   * ONE FRAME. Returns the species to spawn now, or null. The caller
-   * MUST place what it is given: the count is advanced here, and a
-   * report whose count and bench disagreed would be worthless.
+   * ONE FRAME. Returns the species to spawn now — usually none, usually
+   * one once the ramp is going, and SEVERAL when a frame is long or the
+   * rate is high: at forty a second and sixty frames a second a frame
+   * owes less than one, but a 200 ms hitch at that rate owes eight, and
+   * a run that dropped seven of them would under-count the crowd exactly
+   * where the phone is struggling — which is the only place the run is
+   * looking.
+   *
+   * The caller MUST place every one it is given: the count is advanced
+   * here, and a report whose count and bench disagreed would be
+   * worthless. The array is the run's own and is emptied by the next
+   * call, so place them now rather than keeping it.
    */
-  frame(rawDt: number, sample?: StressSample | null): CreatureId | null {
-    if (!this.running) return null;
+  frame(rawDt: number, sample?: StressSample | null): readonly CreatureId[] {
+    this.owed.length = 0;
+    if (!this.running) return this.owed;
     const dt = Number.isFinite(rawDt) && rawDt > 0 ? rawDt : 0;
 
     // THE SETTLE. These frames are thrown away — not averaged, not
@@ -442,7 +612,7 @@ export class StressTest {
     // taken while the bench is being torn down is a census of a rebuild.
     if (this.phase === 'warmup' && this.settled < SETTLE_S) {
       this.settled += dt;
-      return null;
+      return this.owed;
     }
 
     this.window.add(rawDt);
@@ -457,21 +627,27 @@ export class StressTest {
     // The window must be full before any reading is used for anything:
     // a threshold crossed on two seconds of frames is a claim about a
     // scene that was still loading (the header).
-    if (!this.window.full()) return null;
+    if (!this.window.full()) return this.owed;
     const fps = this.window.fps();
     if (fps < this.lowestFps) this.lowestFps = fps;
 
     if (this.phase === 'warmup') {
       this.phase = 'spawning';
-      this.sinceSpawn = this.spawnEveryS;
+      this.spawningS = 0;
     }
 
     if (this.phase === 'recovery') {
       this.recovered += dt;
       this.recoveryFps = fps;
       if (this.recovered >= RECOVERY_S) this.phase = 'done';
-      return null;
+      return this.owed;
     }
+
+    // THE RAMP'S CLOCK, which starts HERE and not at `start()`: the
+    // settle and the window fill are the bench being built, and a rate
+    // read from the run's clock would open the spawning at two a second.
+    this.spawningS += dt;
+    const rate = this.rate();
 
     // THE THRESHOLDS, in order and once each: a run that falls straight
     // past three of them in one bad frame records all three at the count
@@ -487,6 +663,11 @@ export class StressTest {
         // so the split AT THIS COUNT is the whole point of the line.
         rigs: this.lastSample?.rigs ?? null,
         impostors: this.lastSample?.impostors ?? null,
+        // The rate is what says how precise the count beside it is, so it
+        // is recorded WITH it: reconstructing it from `atS` later would
+        // be reconstructing it from a clock that is not the one the ramp
+        // was read from.
+        rate,
       });
     }
 
@@ -497,24 +678,33 @@ export class StressTest {
     this.belowLast = fps < last ? this.belowLast + dt : 0;
     if (this.belowLast >= BREAK_HOLD_S) {
       this.finish('broke');
-      return null;
+      return this.owed;
     }
     if (this.elapsed >= MAX_RUN_S) {
       this.finish('timeout');
-      return null;
+      return this.owed;
     }
 
-    this.sinceSpawn += dt;
-    if (this.sinceSpawn < this.spawnEveryS) return null;
-    this.sinceSpawn -= this.spawnEveryS;
-    if (this.count >= this.maxCreatures) {
-      this.finish('ceiling');
-      return null;
+    // WHAT THIS FRAME OWES: everything the ramp has owed since spawning
+    // opened, less what has already been placed. Nothing is carried in a
+    // clock, so the frame a bracket turns on neither drops a spawn nor
+    // pays one twice (`stressOwedBy` argues it), and a frame that owes
+    // several hands back several — which is not the exception it sounds
+    // like, since one interval is 25 ms by the fortieth bracket and a
+    // frame is longer than that whenever the phone is in the state the
+    // run is looking for.
+    const due = Math.floor(stressOwedBy(this.spawningS, this.spawnEveryS));
+    while (this.count < due) {
+      if (this.count >= this.maxCreatures) {
+        this.finish('ceiling');
+        return this.owed;
+      }
+      const species = this.speciesPool[Math.min(this.speciesPool.length - 1, Math.floor(this.rand() * this.speciesPool.length))];
+      this.count += 1;
+      this.counts.set(species, (this.counts.get(species) ?? 0) + 1);
+      this.owed.push(species);
     }
-    const species = this.speciesPool[Math.min(this.speciesPool.length - 1, Math.floor(this.rand() * this.speciesPool.length))];
-    this.count += 1;
-    this.counts.set(species, (this.counts.get(species) ?? 0) + 1);
-    return species;
+    return this.owed;
   }
 
   /**
@@ -525,7 +715,7 @@ export class StressTest {
    * report would print it.
    */
   private measure(s: StressSample): void {
-    if (!(ok(s.rigs) && ok(s.impostors) && ok(s.aiMs) && ok(s.drawMs))) return;
+    if (!(ok(s.rigs) && ok(s.impostors) && ok(s.notDrawn) && ok(s.aiMs) && ok(s.drawMs))) return;
     this.lastSample = s;
     this.sampleFrames += 1;
     this.drawMsTotal += s.drawMs;
@@ -557,6 +747,8 @@ export class StressTest {
       ending: this.ending,
       rigs: this.lastSample?.rigs ?? null,
       impostors: this.lastSample?.impostors ?? null,
+      notDrawn: this.lastSample?.notDrawn ?? null,
+      rate: this.rate(),
     };
   }
 
@@ -576,8 +768,10 @@ export class StressTest {
       recoveryFps: this.recoveryFps,
       crossings: this.crossings.slice(),
       ending: this.ending ?? 'stopped',
+      windowS: this.window.windowS,
       finalRigs: this.lastSample?.rigs ?? null,
       finalImpostors: this.lastSample?.impostors ?? null,
+      finalNotDrawn: this.lastSample?.notDrawn ?? null,
       peakRigs: this.sampleFrames > 0 ? this.peakRigsSeen : null,
       peakImpostors: this.sampleFrames > 0 ? this.peakImpostorsSeen : null,
       meanDrawMs: this.sampleFrames > 0 ? this.drawMsTotal / this.sampleFrames : null,
@@ -601,9 +795,13 @@ export interface StressResult {
   readonly recoveryFps: number;
   readonly crossings: readonly Crossing[];
   readonly ending: StressEnding;
+  /** The rolling window the thresholds were read through, seconds — what a crossing's ± is five of. */
+  readonly windowS: number;
   /** The census of the LAST measured frame; null when the run was driven without samples. */
   readonly finalRigs: number | null;
   readonly finalImpostors: number | null;
+  /** Bodies the renderer drew NEITHER way on that frame — the crowd's remainder (the header). */
+  readonly finalNotDrawn: number | null;
   /** The most rigs, and the most impostors, drawn in any one measured frame. */
   readonly peakRigs: number | null;
   readonly peakImpostors: number | null;
@@ -643,6 +841,12 @@ function fps(value: number): string {
   return value > 0 ? value.toFixed(1) : '—';
 }
 
+/** A spawn rate in words: `4/s`, and a fraction only where the run's base made one. */
+function rateWords(rate: number): string {
+  if (!(Number.isFinite(rate) && rate > 0)) return '—';
+  return `${Number.isInteger(rate) ? rate : rate.toFixed(2)}/s`;
+}
+
 /** A census number, or an em-dash: a run nobody measured has no zero to print. */
 function whole(value: number | null): string {
   return value === null ? '—' : String(value);
@@ -671,6 +875,13 @@ function ok(value: number): boolean {
  *     and drawing, and not crowding;
  *   - a run stopped by the ceiling or by hand is not a breaking point,
  *     and says so where the ending is printed;
+ *   - every threshold count carries the ± the ramp costs it and the rate
+ *     it was crossed at, because a count reached at forty a second is
+ *     good to about two hundred and must not be pasted as though it were
+ *     good to one;
+ *   - the drawn census ACCOUNTS for the whole crowd — rigs, impostors and
+ *     the bodies nobody drew, summed against the number placed — and
+ *     prints the discrepancy rather than hiding it if they disagree;
  *   - the census blocks appear only when the scene measured one, so a
  *     report that does not mention rigs is a report that did not count
  *     them rather than one that found none.
@@ -678,6 +889,9 @@ function ok(value: number): boolean {
 export function stressReport(result: StressResult, conditions: StressConditions): string {
   const at = (want: number): Crossing | null => result.crossings.find((c) => c.fps === want) ?? null;
   const thirty = at(30);
+  // The window is the RUN's, not the constant: a run driven on a shorter
+  // one has a smaller ± and must be allowed to say so.
+  const slackOf = (c: Crossing): number => crossingSlack(c.rate, result.windowS);
   const lines: string[] = [];
 
   lines.push('STRESS TEST COMPLETE — TRADDOMIUM Creature Lab');
@@ -686,7 +900,7 @@ export function stressReport(result: StressResult, conditions: StressConditions)
     ? `SUSTAINED AT 30+ FPS: ${result.creatures} creatures — never fell below 30 fps (${ENDING_WORDS[result.ending]})`
     : thirty.creatures === 0
       ? 'SUSTAINED AT 30+ FPS: 0 creatures — READ THE CAVEAT BELOW'
-      : `SUSTAINED AT 30+ FPS: ${thirty.creatures} creatures`);
+      : `SUSTAINED AT 30+ FPS: ${thirty.creatures} creatures  (± ${slackOf(thirty)}, arriving at ${rateWords(thirty.rate)})`);
   // A threshold recorded at zero is a reading about the EMPTY bench, and
   // therefore about this device and this build rather than about the
   // crowd — the number Joshua asked for cannot be measured on a phone
@@ -714,11 +928,39 @@ export function stressReport(result: StressResult, conditions: StressConditions)
 
   // WHAT WAS ACTUALLY DRAWN. The whole reason the run is repeated at
   // RIGS: RUNG: the totals are the same test, the split is not.
-  if (result.finalRigs !== null || result.finalImpostors !== null || result.peakRigs !== null) {
+  if (result.finalRigs !== null || result.finalImpostors !== null || result.finalNotDrawn !== null || result.peakRigs !== null) {
     lines.push('');
     lines.push('DRAWN AT THE END');
     lines.push(`  ${'full rigs'.padEnd(20)}${whole(result.finalRigs)}`);
     lines.push(`  ${'impostors'.padEnd(20)}${whole(result.finalImpostors)}`);
+    lines.push(`  ${'not drawn'.padEnd(20)}${whole(result.finalNotDrawn)}   (underground burrowers, or past a cap)`);
+    lines.push('  ---');
+    // THE IDENTITY, and WHAT IT IS AGAINST. The three above are the
+    // RENDERER's count — every body it was handed — while `creatures` is
+    // the RUN's, which counts only what the run itself spawned. Those are
+    // not the same number and were never going to be: the room the run
+    // spawns into already has animals in it (the Creature Lab's own five
+    // stand on the bench before STRESS is pressed), and a mixed run of
+    // four therefore has nine bodies in the room. Reporting the gap as a
+    // disagreement, as this block first did, cried bug at the bench being
+    // a bench. So the total is the renderer's, the run's own count is
+    // named beside it, and the remainder is stated as what it is.
+    if (result.finalRigs !== null && result.finalImpostors !== null && result.finalNotDrawn !== null) {
+      const drawn = result.finalRigs + result.finalImpostors + result.finalNotDrawn;
+      lines.push(`  ${'bodies in the room'.padEnd(20)}${drawn}`);
+      lines.push(`  ${'of those, the run\'s'.padEnd(20)}${result.creatures}`);
+      const already = drawn - result.creatures;
+      if (already > 0) {
+        lines.push(`  ${'already there'.padEnd(20)}${already}   (the bench's own animals, not spawned by this run)`);
+      } else if (already < 0) {
+        // The only direction that IS a disagreement: the run cannot have
+        // spawned more bodies than the renderer was ever handed.
+        lines.push(`  MISMATCH: the run placed ${result.creatures} but only ${drawn} reached the renderer —`);
+        lines.push(`  ${-already} ${already === -1 ? 'body is' : 'bodies are'} unaccounted for, which is a bug.`);
+      }
+    } else {
+      lines.push(`  ${'total placed'.padEnd(20)}${result.creatures}`);
+    }
     lines.push(`  ${'peak full rigs'.padEnd(20)}${whole(result.peakRigs)}`);
   }
 
@@ -758,8 +1000,20 @@ export function stressReport(result: StressResult, conditions: StressConditions)
     // and the split tell two different halves of the same story.
     const census = c.rigs === null && c.impostors === null ? '' : `   ${whole(c.rigs)} rigs · ${whole(c.impostors)} impostors`;
     const empty = c.creatures === 0 ? '  ← empty bench' : '';
-    lines.push(`  below ${String(want).padStart(2)} fps      ${String(c.creatures).padEnd(5)} (${c.atS.toFixed(0)} s)${census}${empty}`);
+    // The ± and the rate ride WITH the count rather than being left to a
+    // footnote, because the count is what gets pasted somewhere else.
+    // Each group is padded to its own column so four lines read down as
+    // well as across, and the line is trimmed so one with no census does
+    // not end in that padding.
+    const when = `(${c.atS.toFixed(0)} s)`.padEnd(9);
+    const slack = `± ${String(slackOf(c)).padEnd(5)}at ${rateWords(c.rate).padEnd(6)}`;
+    lines.push(`  below ${String(want).padStart(2)} fps      ${String(c.creatures).padEnd(6)}${when}${slack}${census}${empty}`.trimEnd());
   }
+  lines.push('');
+  lines.push(`Each count is good to about ± one ${result.windowS} s window of arrivals at the rate`);
+  lines.push('printed beside it: the average cannot report a crossing until the crowd');
+  lines.push('has already grown by that much. At 1/s that is ± 5; at 40/s, ± 200. The');
+  lines.push('ramp is what buys a breaking point in one sitting, and that is its price.');
   lines.push('');
   lines.push(`Ended: ${ENDING_WORDS[result.ending]}`);
   lines.push('');
@@ -772,7 +1026,8 @@ export function stressReport(result: StressResult, conditions: StressConditions)
   lines.push(`  predation  ${conditions.predation}`);
   lines.push(`  camera     ${conditions.camera}`);
   lines.push(`  pool       ${conditions.pool}`);
-  lines.push(`  spawn rate 1 per ${SPAWN_EVERY_S} s, seeded — RUN AGAIN repeats this exact sequence`);
+  lines.push(`  spawn rate 1 per ${SPAWN_EVERY_S} s, +1/s every ${RAMP_EVERY_S} s of spawning`);
+  lines.push('             (1/s, 2/s, 3/s …), seeded — RUN AGAIN repeats this exact sequence');
   lines.push('');
   lines.push('NOTE: creatures do not collide with or avoid one another — no such');
   lines.push('system exists yet. This measures AI, senses, movement and drawing.');
@@ -795,9 +1050,15 @@ export function stressBlock(r: StressReadout): string {
   lines.push(`insects   ${r.creatures}`);
   // The split, while it is happening: at RIGS: RUNG this is the line that
   // shows the rig pool filling and the impostors taking over.
-  if (r.rigs !== null || r.impostors !== null) lines.push(`drawn     ${whole(r.rigs)} rigs · ${whole(r.impostors)} impostors`);
+  if (r.rigs !== null || r.impostors !== null || r.notDrawn !== null) {
+    lines.push(`drawn     ${whole(r.rigs)} rigs · ${whole(r.impostors)} impostors · ${whole(r.notDrawn)} not drawn`);
+  }
   lines.push(r.fps > 0 ? `fps       ${r.fps.toFixed(1)}  (${WINDOW_S} s average)` : `fps       — (filling the ${WINDOW_S} s window)`);
   lines.push(`elapsed   ${r.elapsedS.toFixed(0)} s`);
+  // The rate only while it is doing anything: printed during the recovery
+  // it would read as a bench still filling up, which is the one thing the
+  // recovery is not.
+  if (r.phase === 'spawning') lines.push(`rate      ${rateWords(r.rate)}`);
   lines.push(r.nextFps === null ? 'waiting   the hold under the last threshold' : `waiting   for the average to fall under ${r.nextFps}`);
   if (r.crossings.length > 0) {
     lines.push('');

@@ -119,7 +119,7 @@ import { setOrigin, toLocal, toWorld } from '../world/origin';
 import { LabUi, type CreatureLine, type LabReadout } from './LabUi';
 import { HORIZON, buildLabMeshes, type LabMeshes } from './labMeshes';
 import {
-  CAMERA_PRESENCE, DISTURB_RADIUS, LAB_ACTION, LAB_SCENE_ID, POSSESS_ROW, TAP_SLOP_PX, nextPredation, nextRigMode,
+  CAMERA_PRESENCE, DISTURB_RADIUS, HELD_DURING_A_RUN, LAB_ACTION, LAB_SCENE_ID, POSSESS_ROW, TAP_SLOP_PX, nextPredation, nextRigMode,
   nextStressPool, stressPoolWords, type LabAction, type LabCameraMode, type LabRigMode, type StressPool,
 } from './labTool';
 import { StressTest, stressBlock, stressReport, type StressConditions, type StressPhase, type StressSample } from './stressTest';
@@ -480,6 +480,7 @@ interface MutableNdc extends Ndc {
 interface MutableSample extends StressSample {
   rigs: number;
   impostors: number;
+  notDrawn: number;
   aiMs: number;
   drawMs: number;
 }
@@ -578,7 +579,7 @@ export function buildCreatureLabScene(ctx: SceneContext, hooks: CreatureLabHooks
   /** The finished report, built once when the run ends and shown until RUN AGAIN or RESET. */
   let report = '';
   /** The census handed to the run each frame, rewritten in place (`census`). */
-  const sample: MutableSample = { rigs: 0, impostors: 0, aiMs: 0, drawMs: 0 };
+  const sample: MutableSample = { rigs: 0, impostors: 0, notDrawn: 0, aiMs: 0, drawMs: 0 };
 
   // Per-frame scratch, rewritten in place (the header: no allocation on the frame path that is this file's).
   const intent: MutableIntent = newMutableIntent();
@@ -808,6 +809,47 @@ export function buildCreatureLabScene(ctx: SceneContext, hooks: CreatureLabHooks
   });
 
   /**
+   * THE CONDITIONS ARE SNAPSHOT WHEN THE RUN STARTS, NOT WHEN THE REPORT
+   * IS WRITTEN — and Baseline B is why.
+   *
+   * That run (alpha.42, 400 creatures at 60 fps) printed `predation
+   * NORMAL` where Baseline A had printed `predation OFF`. `startStress`
+   * sets it off at the start of every run and always did; what it could
+   * not do was stop a thumb from cycling the button afterwards. The
+   * report then read `lab.predation` at the END and printed the value it
+   * found, with nothing to say it had ever been anything else. So two
+   * runs that were not the same test were recorded as though the second
+   * had always been that way — the precise failure the CONDITIONS block
+   * exists to prevent, committed by the block itself.
+   *
+   * The snapshot is the fix, and the refusal below is the belt to its
+   * braces. Both, because they fail differently: a refusal I forget to
+   * extend to some future button leaves the snapshot still honest, and a
+   * condition that drifts for a reason no button owns still gets caught
+   * HERE, by `withDrift`, and SAID rather than silently overwritten.
+   */
+  let heldConditions: StressConditions | null = null;
+
+  /**
+   * The run's conditions, with any that moved under it named as moved.
+   * Nothing is hidden and nothing is quietly rewritten: a field that
+   * drifted prints what the run STARTED at and what it ended at, so a
+   * pasted report can never claim a stillness it did not have.
+   *
+   * `stamp` is exempt — it is a clock, and it is meant to move.
+   */
+  const withDrift = (started: StressConditions, ended: StressConditions): StressConditions => {
+    const out = { ...started } as Record<string, string>;
+    const end = ended as unknown as Record<string, string>;
+    for (const key of Object.keys(out)) {
+      if (key === 'stamp') continue;
+      if (out[key] !== end[key]) out[key] = `${out[key]}  ⚠ CHANGED DURING THE RUN, ended ${end[key]}`;
+    }
+    return out as unknown as StressConditions;
+  };
+
+
+  /**
    * START A RUN, from the same bench every time: the five back at their
    * spawns, nobody held, the camera at the bench's fixed viewpoint,
    * predation off and the camera not disturbing anybody (Joshua: "Keep
@@ -834,6 +876,9 @@ export function buildCreatureLabScene(ctx: SceneContext, hooks: CreatureLabHooks
       if (rigMode === 'all') for (const species of LAB_SPECIES) fauna.setPoolSize(species.id, 1);
     }
     stress.start();
+    // The room is held: THIS is what the run was run under, and it is
+    // what the report will print however the bench looks by the end.
+    heldConditions = conditions();
     ui?.refreshNow();
   };
 
@@ -888,6 +933,15 @@ export function buildCreatureLabScene(ctx: SceneContext, hooks: CreatureLabHooks
     const cost = lab.sim.cost();
     sample.rigs = rigs;
     sample.impostors = impostors;
+    // AND THE ONES DRAWN IN NO FORM, so the report's arithmetic closes.
+    // Baseline B placed 400 and reported 13 rigs + 332 impostors, and the
+    // missing 55 read as lost animals: they were earthworms under the
+    // ground, which the view refuses to draw with no cutaway open. The
+    // refusal is right; three numbers that did not add up to the crowd
+    // were the bug. This is the renderer's own count, not a subtraction —
+    // a difference worked out here would hide a disagreement instead of
+    // showing it.
+    sample.notDrawn = drawn.notDrawn;
     // The same sum the HUD's `ai` line reads, so the panel and the report
     // can never print two different numbers for one thing.
     sample.aiMs = cost.thinkMs + cost.moveMs + cost.demandMs;
@@ -915,8 +969,14 @@ export function buildCreatureLabScene(ctx: SceneContext, hooks: CreatureLabHooks
     // Three small objects a frame is a cost paid INSIDE the thing being
     // measured, which is why it is worth naming — and why it is bounded
     // to the run rather than left on the Lab's ordinary frame.
-    const species = stress.frame(rawDt, stress.running ? census() : null);
-    if (species !== null) {
+    //
+    // SEVERAL, not one. Since the rate ramps, a frame owes every creature
+    // whose turn fell inside it — one a second at the start, forty a
+    // second eight minutes in, and more than one in a single frame long
+    // before that. Every body handed back MUST be placed: the run has
+    // already counted them, and a report whose count and bench disagreed
+    // would be worthless.
+    for (const species of stress.frame(rawDt, stress.running ? census() : null)) {
       lab.sim.spawn(labStressSpawn(placed, species));
       placed += 1;
       const n = (crowd.get(species) ?? 0) + 1;
@@ -924,12 +984,17 @@ export function buildCreatureLabScene(ctx: SceneContext, hooks: CreatureLabHooks
       if (rigMode === 'all' && fauna !== null) fauna.setPoolSize(species, 1 + n);
     }
     if (stress.finished && report === '') {
-      report = stressReport(stress.result(), conditions());
+      report = stressReport(stress.result(), heldConditions === null ? conditions() : withDrift(heldConditions, conditions()));
       ui?.refreshNow();
     }
   };
 
   const onAction = (action: LabAction): void => {
+    // THE ROOM IS HELD STILL WHILE A RUN IS GOING (see HELD_DURING_A_RUN).
+    // The button does nothing rather than quietly making this run a
+    // different experiment from the last one; the HUD greys it so the
+    // refusal is visible rather than felt as a dead tap.
+    if (stress.running && HELD_DURING_A_RUN.includes(action)) return;
     switch (action) {
       case LAB_ACTION.observe:
         observe();
@@ -1075,7 +1140,9 @@ export function buildCreatureLabScene(ctx: SceneContext, hooks: CreatureLabHooks
 
       ui = new LabUi(ctx.uiLayer, {
         readout: readoutNow,
-        onPossess: (species) => possess(species),
+        // Possession is held with the rest: an observer run that grew a
+        // player halfway through is not the run it says it is.
+        onPossess: (species) => { if (!stress.running) possess(species); },
         onAction,
         onBack: () => hooks.onBack(),
       });

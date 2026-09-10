@@ -27,12 +27,15 @@ import {
   buildCreatureLabScene, buttonsFor, controlLabel, creatureField, creatureLabTool, nextPredation, possessAction, possessedSpeciesOf,
   predationLabel, type CreatureLabHooks, type CreatureLabScene, type LabButtonKind,
 } from '../src/lab';
-import { DISTURB_RADIUS, rigModeLabel, stressPoolLabel, stressPoolWords } from '../src/lab/labTool';
-import { MAX_CREATURES, RECOVERY_S, SETTLE_S, SPAWN_EVERY_S, WINDOW_S } from '../src/lab/stressTest';
+import { DISTURB_RADIUS, HELD_DURING_A_RUN, rigModeLabel, stressPoolLabel, stressPoolWords } from '../src/lab/labTool';
+import { BREAK_HOLD_S, MAX_CREATURES, RECOVERY_S, SETTLE_S, SPAWN_EVERY_S, WINDOW_S } from '../src/lab/stressTest';
+import { rigBudgetFor } from '../src/fauna/FaunaView';
 import { world } from '../src/world/coords';
 import { setOrigin } from '../src/world/origin';
 
 const SIXTY = 1 / 60;
+/** The rung the Lab builds its view at (`CreatureLabScene.LAB_RUNG`, private there). */
+const LAB_RUNG_NAME = 'medium';
 const PLAYER = playerId('creature-lab-test-player');
 
 function must<T>(value: T | null | undefined, what: string): T {
@@ -656,10 +659,6 @@ describe('the stress test on the bench (Joshua, 2026-09-10)', () => {
     const cost = must(r.scene.fauna, 'the fauna view').cost;
     return LAB_CREATURE_IDS.reduce((total, id) => total + (cost.rigsLent[id] ?? 0), 0);
   };
-  const poolTotal = (r: Rig): number => {
-    const fauna = must(r.scene.fauna, 'the fauna view');
-    return LAB_CREATURE_IDS.reduce((total, id) => total + fauna.poolSize(id), 0);
-  };
   /** A `  label   N` line of the report, or −1 when the block is not printed at all. */
   const reported = (text: string, label: string): number => {
     const found = new RegExp(`^ {2}${label} +(\\d+)$`, 'm').exec(text);
@@ -717,6 +716,64 @@ describe('the stress test on the bench (Joshua, 2026-09-10)', () => {
     expect(r.scene.debug).toBe(false);
     expect(r.field(LAB_FIELD.stress)).toBe('STRESS: WARMING UP');
     expect(panel(r)).toContain('WARMING UP');
+  });
+
+  /**
+   * AND KEEPS IT STILL — the hole Baseline B fell through.
+   *
+   * That run (alpha.42, 400 creatures at 60 fps) reported `predation
+   * NORMAL` where Baseline A had reported `predation OFF`. `startStress`
+   * had set it off, as it always did; nothing stopped a thumb from
+   * cycling the button a moment later, and `conditions()` was read when
+   * the REPORT was written, so it printed the value it found at the end
+   * with no sign it had ever been anything else. Two runs that were not
+   * the same test went into the record as though they were.
+   */
+  it('refuses the room-holding buttons mid-run, and the HUD greys them so it is not a dead tap', async () => {
+    const r = await entered();
+    r.press(LAB_ACTION.stress);
+    r.frame(1);
+    for (const action of HELD_DURING_A_RUN) {
+      const button = r.button(action);
+      expect(button.disabled, `${action} while running`).toBe(true);
+      // Pressed anyway — a disabled button can still be clicked by a probe,
+      // and the SCENE's refusal is the half that has to be correct.
+      button.click();
+    }
+    r.button(possessAction('worker')).click();
+    r.frame(1);
+    expect(r.scene.lab.predation).toBe('off');
+    expect(r.scene.cameraDisturbs).toBe(false);
+    expect(r.scene.debug).toBe(false);
+    expect(r.heldSpecies()).toBeNull();
+    expect(placedTotal(r)).toBeGreaterThanOrEqual(LAB_CREATURE_IDS.length);
+
+    // And they come back when the run is over, so the Lab is a Lab again.
+    r.press(LAB_ACTION.stress);
+    r.frame(60 * (SETTLE_S + WINDOW_S + RECOVERY_S + 2));
+    expect(r.field(LAB_FIELD.stress)).toBe('STRESS: DONE');
+    for (const action of HELD_DURING_A_RUN) {
+      // The camera button has its own reason to be off: nobody is held.
+      if (action === LAB_ACTION.camera) continue;
+      expect(r.button(action).disabled, `${action} once done`).toBe(false);
+    }
+  });
+
+  it('names a condition that moved under the run instead of printing the value it ended on', async () => {
+    const r = await entered();
+    r.press(LAB_ACTION.stress);
+    r.frame(60 * (SETTLE_S + WINDOW_S + 1));
+    // Reach past the button, the way something the refusal does not cover
+    // one day might. The snapshot is what makes this catchable at all.
+    r.scene.lab.setPredation('force');
+    r.frame(60 * (RECOVERY_S + BREAK_HOLD_S + 4), SIXTY, 1 / 4);
+    const text = panel(r);
+    expect(text).toContain('STRESS TEST COMPLETE');
+    // The run STARTED at OFF, so that is what it is recorded as — and the
+    // drift is named rather than silently overwriting it.
+    expect(text).toMatch(/predation\s+OFF/);
+    expect(text).toContain('CHANGED DURING THE RUN');
+    expect(text).toContain('ended FORCE');
   });
 
   it('spawns nothing during the warm-up, then about one a second, each with its own skeleton', async () => {
@@ -812,9 +869,14 @@ describe('the stress test on the bench (Joshua, 2026-09-10)', () => {
     expect(r.field(LAB_FIELD.rigs)).toBe(rigModeLabel('rung'));
     r.press(LAB_ACTION.stress);
     r.frame(60 * (WINDOW_S + 6));
-    const fauna = must(r.scene.fauna, 'the fauna view');
-    // At RIGS: RUNG the pools are the detail ladder's and the crowd draws as impostors.
-    expect(fauna.poolSize('aphid')).toBeLessThan(placedTotal(r));
+    // At RIGS: RUNG the LENDING is the detail ladder's budget and the rest
+    // of the crowd draws as impostors. The assertion is about what is lent
+    // and not about `poolSize`: every species' pool is the whole rung
+    // budget now, because the allocation is by distance across species and
+    // the nearest thirteen bodies may all be of one kind.
+    const lent = rigsDrawn(r);
+    expect(lent).toBeLessThan(placedTotal(r));
+    expect(lent).toBeLessThanOrEqual(rigBudgetFor(LAB_RUNG_NAME));
     expect(MAX_CREATURES).toBeGreaterThan(100);
   });
 
@@ -829,7 +891,7 @@ describe('the stress test on the bench (Joshua, 2026-09-10)', () => {
     // THE LIVE LINE, while the crowd is arriving. At RIGS: ALL every drawn
     // body carries a skeleton, so the impostor half of the split is zero —
     // and that zero is a count, not the absence of one.
-    const live = /^drawn +(\d+) rigs · (\d+) impostors$/m.exec(panel(r));
+    const live = /^drawn +(\d+) rigs · (\d+) impostors · (\d+) not drawn$/m.exec(panel(r));
     expect(live, `the live block should carry a drawn line:\n${panel(r)}`).not.toBeNull();
     const shownRigs = Number(must(live, 'the live census')[1]);
     expect(shownRigs).toBeGreaterThan(LAB_CREATURE_IDS.length);
@@ -857,7 +919,10 @@ describe('the stress test on the bench (Joshua, 2026-09-10)', () => {
     // Long enough that the crowd outgrows the rung's pools, which is the
     // whole point of this run: the same insects, drawn two ways.
     r.frame(60 * (SETTLE_S + WINDOW_S + 20));
-    const pools = poolTotal(r);
+    // The budget is what caps the skeletons; `poolTotal` is only how many
+    // clones exist to lend from, and since the pools became budget-sized
+    // that is five times the budget rather than a ceiling on anything.
+    const pools = rigBudgetFor(LAB_RUNG_NAME);
     expect(pools).toBeLessThan(placedTotal(r));
 
     const { text, lentBefore } = settle(r);

@@ -3,11 +3,16 @@
  * injected loader, three's scene graph, and the creature state the
  * simulation would hand it.
  *
- *   rigs go to the nearest creatures that are drawn at all, and stay
- *     with them across frames — a boundary only changes hands when
- *     something has genuinely walked past (hysteresis)
+ *   THE RIG GOES TO THE NEAREST ANIMAL OF ANY SPECIES, inside the near
+ *     line, never past the far one, never more of them than the rung's
+ *     budget however many crowd in, and in the same order every frame
+ *   the band is the hysteresis: crossing back and forth over the near
+ *     line changes nothing until the far line is passed
+ *   the swap is a crossfade — never invisible, never doubled
  *   everything else near is an impostor, never past the cap; nothing
  *     far is drawn
+ *   the census closes: rigs + impostors + notDrawn is what was handed
+ *     in, and hidden + pastCap + farTier is notDrawn
  *   a burrowed worm is not drawn; a surfaced one lies on the ground
  *   the soil cutaway's reveal is the ANIMAL's, not its nose tile's: a
  *     ceiling that flips every frame moves nothing, hides nothing and
@@ -46,8 +51,8 @@ import {
   type Behaviour, type CreatureId, type CreatureState, type Tier, type Vec3,
 } from '../src/creatures';
 import {
-  BODY_SAMPLES, BURROW_HIDE, BURROW_KEEP, CRUMBS_PER_LENGTH, FaunaView, HYSTERESIS, LOOK, POOL_SIZES, REVEAL_HOLD,
-  SPINE_TOLERANCE, impostorCapFor, poolSizeFor,
+  BODY_SAMPLES, BURROW_HIDE, BURROW_KEEP, CRUMBS_PER_LENGTH, FADE_S, FaunaView, LOOK, POOL_SIZES, REVEAL_HOLD, RIG_FAR,
+  RIG_NEAR, SPINE_TOLERANCE, impostorCapFor, poolSizeFor, rigBudgetFor,
 } from '../src/fauna/FaunaView';
 import { UP_EASE_S } from '../src/fauna/motion';
 import { WING_FLAP } from '../src/fauna/wings';
@@ -119,6 +124,25 @@ function worldPosition(o: THREE.Object3D): THREE.Vector3 {
   return new THREE.Vector3().setFromMatrixPosition(o.matrixWorld);
 }
 
+/**
+ * WHO ACTUALLY HOLDS A RIG, in pool order. Every species' pool is the
+ * whole rung budget now (`rigBudgetFor`), so `holders` is mostly nulls
+ * and what a test means by "the rigs are with A and B" is this.
+ */
+function held(v: FaunaView, species: CreatureId): string[] {
+  return v.holders(species).filter((h): h is string => h !== null);
+}
+
+/** Every rig this view is lending, of any species. */
+function lentAll(v: FaunaView, ids: readonly CreatureId[] = CREATURE_IDS): number {
+  return ids.reduce((sum, id) => sum + v.cost.rigsLent[id], 0);
+}
+
+/** Every impostor BODY this view is carrying, of any species. */
+function impostorsAll(v: FaunaView, ids: readonly CreatureId[] = CREATURE_IDS): number {
+  return ids.reduce((sum, id) => sum + v.cost.impostors[id], 0);
+}
+
 describe('loading and the size', () => {
   it('scales each template by rigScale so the measured spine is the cited length, and warns about none of them', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
@@ -171,10 +195,18 @@ describe('loading and the size', () => {
     expect(material.normalMap).not.toBeNull();
     expect(material.roughnessMap).toBeNull();
     expect(material.metalnessMap).toBeNull();
-    // Every clone wears the same material.
+    // EVERY CLONE WEARS ITS OWN COPY OF THAT MATERIAL, and the crossfade
+    // is why: opacity is per-rig, and a shared material would fade every
+    // skeleton of the species together the moment one crossed the band.
+    // The GEOMETRY is still shared — that is where the triangles are —
+    // and the copy carries the same maps, so dressing still happens once.
     for (const root of v.rigs('housefly')) {
       const clone = root.getObjectByName('output_unwrapped') as THREE.SkinnedMesh;
-      expect(clone.material).toBe(material);
+      const worn = clone.material as THREE.MeshStandardMaterial;
+      expect(worn).not.toBe(material);
+      expect(worn.map).toBe(material.map);
+      expect(worn.normalMap).toBe(material.normalMap);
+      expect(worn.roughness).toBe(material.roughness);
       expect(clone.geometry).toBe(mesh.geometry);
       expect(clone.skeleton).not.toBe(mesh.skeleton);
     }
@@ -216,12 +248,70 @@ describe('the pool', () => {
     expect(poolSizeFor('nonsense', 'aphid')).toBe(POOL_SIZES.medium.aphid);
   });
 
+  it('BUDGETS THE RIGS AS THE SUM OF THE RUNG\'S TABLE, and gives every species a pool of that size', async () => {
+    // The table is where the number comes from and why it stays: moving
+    // the decision from "the nearest five aphids" to "the nearest
+    // thirteen animals" must not change what thirteen rigs cost.
+    expect(rigBudgetFor('medium')).toBe(2 + 5 + 4 + 1 + 1);
+    for (const rung of ['ultra-low', 'low', 'medium', 'high', 'ultra-high']) {
+      let sum = 0;
+      for (const count of Object.values(POOL_SIZES[rung])) sum += count;
+      expect(rigBudgetFor(rung)).toBe(sum);
+    }
+    expect(rigBudgetFor('nonsense')).toBe(rigBudgetFor('medium'));
+    // And a pool serves ANY MIX: if the nearest thirteen are all aphids,
+    // thirteen aphid rigs are what is needed.
+    const v = await keep(view('medium'));
+    for (const id of CREATURE_IDS) expect(v.poolSize(id)).toBe(rigBudgetFor('medium'));
+  });
+
+  it('SAYS WHAT THE BUDGET-SIZED POOLS COST TO BUILD, against the rung table\'s own', async () => {
+    // Per-species pools sized to the whole budget means five times the
+    // clones at every rung. Cheap in theory — `SkeletonUtils.clone`
+    // shares the template's geometry and a clone is bones and scene
+    // nodes — and this is the measurement rather than the theory.
+    const v = await keep(view('medium'));
+    const bones: Record<string, number> = {};
+    for (const s of SPECIES) {
+      let n = 0;
+      v.template(s.id)!.traverse((o) => { if ((o as THREE.Bone).isBone) n += 1; });
+      bones[s.id] = n;
+    }
+    const buildTo = (count: (id: CreatureId) => number): number => {
+      for (const id of CREATURE_IDS) v.setPoolSize(id, 0);
+      const began = performance.now();
+      for (const id of CREATURE_IDS) v.setPoolSize(id, count(id));
+      return performance.now() - began;
+    };
+    // Warm the paths first — the first clone of a template pays for
+    // everything V8 has not seen yet, and that is not what is being
+    // compared here.
+    buildTo((id) => poolSizeFor('medium', id));
+    const wasMs = buildTo((id) => poolSizeFor('medium', id));
+    const nowMs = buildTo(() => rigBudgetFor('medium'));
+    const wasClones = CREATURE_IDS.reduce((sum, id) => sum + poolSizeFor('medium', id), 0);
+    const nowClones = CREATURE_IDS.length * rigBudgetFor('medium');
+    // eslint-disable-next-line no-console
+    console.info(
+      `[fauna pools] medium, the wild three (bones: worm ${bones.earthworm}, aphid ${bones.aphid}, fly ${bones.housefly}): `
+      + `${wasClones} clones in ${wasMs.toFixed(2)} ms by the rung table, ${nowClones} clones in ${nowMs.toFixed(2)} ms at the budget `
+      + `(${(nowMs / Math.max(wasMs, 1e-6)).toFixed(1)}x for ${(nowClones / wasClones).toFixed(1)}x the clones)`,
+    );
+    v.clearPoolSizes();
+    for (const id of CREATURE_IDS) expect(v.poolSize(id)).toBe(rigBudgetFor('medium'));
+    // It is a load-time cost and it stays one: the clones past the first
+    // few are never posed and never drawn until one is lent.
+    expect(nowMs).toBeLessThan(250);
+  });
+
   it('lends rigs to the nearest non-far creatures, impostors for the rest, nothing for the far, never past the cap', async () => {
     const v = await keep(view('ultra-low'));
-    const n = poolSizeFor('ultra-low', 'aphid');
+    const n = rigBudgetFor('ultra-low');
     const cap = impostorCapFor(APHID, 'ultra-low');
     const near: CreatureState[] = [];
-    for (let i = 0; i < 40; i += 1) near.push(creature('aphid', `a${i}`, 10 + i * 5, 0, { tier: i % 2 === 0 ? 'full' : 'near' }));
+    // Two units apart from the eye outwards, so the first n are inside
+    // the near line and the rest trail out past the far one.
+    for (let i = 0; i < 40; i += 1) near.push(creature('aphid', `a${i}`, 4 + i * 2, 0, { tier: i % 2 === 0 ? 'full' : 'near' }));
     const far = [creature('aphid', 'far', 1, 0, { tier: 'far' }), creature('aphid', 'far2', 2, 0, { tier: 'far' })];
     v.update([...far, ...near], EYE, 1 / 60);
     expect(v.cost.rigsLent.aphid).toBe(n);
@@ -243,60 +333,57 @@ describe('the pool', () => {
     expect(p.y).toBeLessThan(unitsOfMm(APHID.lengthMm));
   });
 
-  it('keeps a rig with its creature across frames, and only hands it over when another has genuinely passed', async () => {
+  it('keeps a rig with its creature across frames, and hands it to the nearer one when the pool is the constraint', async () => {
     const v = await keep(view('ultra-low'));
-    expect(poolSizeFor('ultra-low', 'earthworm')).toBe(1);
+    // One clone, so nearness has to be settled rather than accommodated.
+    v.setPoolSize('earthworm', 1);
     const a = creature('earthworm', 'A', 10, 0, { behaviour: 'surface' });
     const b = creature('earthworm', 'B', 11, 0, { behaviour: 'surface' });
     v.update([a, b], EYE, 1 / 60);
-    expect(v.holders('earthworm')).toEqual(['A']);
-    // B edges nearer than A, within the margin: A keeps the rig.
+    expect(held(v, 'earthworm')).toEqual(['A']);
+    // B edges nearer: the one clone follows the nearest animal, and
+    // there is no margin to hide behind when there is only one.
     b.at = world(9.5, 0);
     for (let f = 0; f < 5; f += 1) v.update([a, b], EYE, 1 / 60);
-    expect(v.holders('earthworm')).toEqual(['A']);
+    expect(held(v, 'earthworm')).toEqual(['B']);
     expect(v.cost.impostors.earthworm).toBe(1);
-    // B walks well past: the rig changes hands.
-    b.at = world(10 / HYSTERESIS - 1, 0);
-    v.update([a, b], EYE, 1 / 60);
-    expect(v.holders('earthworm')).toEqual(['B']);
     // A creature that stops being drawn releases its rig.
     b.behaviour = 'burrow';
     v.update([a, b], EYE, 1 / 60);
-    expect(v.holders('earthworm')).toEqual(['A']);
+    expect(held(v, 'earthworm')).toEqual(['A']);
     // A creature that leaves the list releases it too.
     v.update([b], EYE, 1 / 60);
-    expect(v.holders('earthworm')).toEqual([null]);
+    expect(held(v, 'earthworm')).toEqual([]);
     expect(v.cost.rigsLent.earthworm).toBe(0);
     expect(v.rigs('earthworm')[0].visible).toBe(false);
   });
 
   it('measures distance in 3D when the eye\'s height is given', async () => {
     const v = await keep(view('ultra-low'));
-    const low = creature('aphid', 'low', 20, 0, { height: 0 });
-    const high = creature('aphid', 'high', 5, 0, { height: 100 });
+    // Flat, `high` is much the nearer; in 3D it is the further, and both
+    // are inside the near line either way so only the ORDER tells.
+    const low = creature('aphid', 'low', 50, 0, { height: 0 });
+    const high = creature('aphid', 'high', 20, 0, { height: 48 });
     v.update([low, high], EYE, 1 / 60, 0);
-    // With N = 3 both get rigs; with the pool forced to one the order tells. Check by the impostor instead:
-    // the nearer-in-3D creature is the first candidate.
-    expect(v.holders('aphid').slice(0, 2)).toEqual(['low', 'high']);
-    v.update([low, high], EYE, 1 / 60);
+    expect(held(v, 'aphid')).toEqual(['low', 'high']);
     // Flat distance: the high one is nearer and sorts first when the pool is rebuilt from free.
     v.setEnabled('aphid', false);
     v.setEnabled('aphid', true);
     v.update([low, high], EYE, 1 / 60);
-    expect(v.holders('aphid').slice(0, 2)).toEqual(['high', 'low']);
+    expect(held(v, 'aphid')).toEqual(['high', 'low']);
   });
 
   it('rebuilds the pools and the caps on a new rung, and switches a species off entirely', async () => {
     const v = await keep(view('ultra-low'));
-    expect(v.rigs('aphid')).toHaveLength(poolSizeFor('ultra-low', 'aphid'));
+    expect(v.rigs('aphid')).toHaveLength(rigBudgetFor('ultra-low'));
     v.setRung('high');
     expect(v.detail).toBe('high');
-    expect(v.rigs('aphid')).toHaveLength(poolSizeFor('high', 'aphid'));
+    expect(v.rigs('aphid')).toHaveLength(rigBudgetFor('high'));
     expect(v.impostor('aphid')!.instanceMatrix.count).toBe(impostorCapFor(APHID, 'high'));
     const aphids = Array.from({ length: 10 }, (_, i) => creature('aphid', `a${i}`, 10 + i, 0));
     v.update(aphids, EYE, 1 / 60);
-    // Ten aphids, a pool of eight at high: every rig lent, the other two impostors.
-    expect(v.cost.rigsLent.aphid).toBe(Math.min(10, poolSizeFor('high', 'aphid')));
+    // Ten aphids inside the near line and twenty rigs budgeted at high: all ten wear one.
+    expect(v.cost.rigsLent.aphid).toBe(Math.min(10, rigBudgetFor('high')));
     v.setEnabled('aphid', false);
     expect(v.isEnabled('aphid')).toBe(false);
     expect(v.group.getObjectByName('fauna:aphid')!.visible).toBe(false);
@@ -305,11 +392,13 @@ describe('the pool', () => {
     v.update(aphids, EYE, 1 / 60);
     expect(v.cost.rigsLent.aphid).toBe(0);
     expect(v.holders('aphid').every((h) => h === null)).toBe(true);
+    // A species switched off is drawn in no form, and the census says which.
+    expect(v.cost.hidden).toBe(10);
+    expect(v.cost.notDrawn).toBe(10);
     v.setEnabled('aphid', true);
     v.update(aphids, EYE, 1 / 60);
     expect(v.group.getObjectByName('fauna:aphid')!.visible).toBe(true);
-    // Ten aphids, a pool of eight at high: every rig lent, the other two impostors.
-    expect(v.cost.rigsLent.aphid).toBe(Math.min(10, poolSizeFor('high', 'aphid')));
+    expect(v.cost.rigsLent.aphid).toBe(Math.min(10, rigBudgetFor('high')));
   });
 
   it('shrugs off a non-finite eye and a bad dt', async () => {
@@ -347,11 +436,10 @@ describe('the size is the animal\'s, not the species\'', () => {
 
   it('draws two worms of different lengths at their own scales, spans and trail spacings', async () => {
     const v = await keep(view('medium'));
-    expect(poolSizeFor('medium', 'earthworm')).toBe(2);
     const small = creature('earthworm', 'small', 5, 0, { behaviour: 'surface', heading: Math.PI / 2, lengthMm: SMALL_MM });
     const big = creature('earthworm', 'big', 9, 0, { behaviour: 'surface', heading: Math.PI / 2, lengthMm: BIG_MM });
     v.update([small, big], EYE, 1 / 60);
-    expect(v.holders('earthworm')).toEqual(['small', 'big']);
+    expect(held(v, 'earthworm')).toEqual(['small', 'big']);
 
     // THE ROOT SCALE. The template's is the species'; each lent rig wears
     // it through its holder's ratio, so the two differ by exactly the
@@ -387,18 +475,18 @@ describe('the size is the animal\'s, not the species\'', () => {
     // it held the rig — and the pool is only rebuilt by a rung change,
     // which need never come.
     const v = await keep(view('ultra-low'));
-    expect(poolSizeFor('ultra-low', 'earthworm')).toBe(1);
+    v.setPoolSize('earthworm', 1);
     const small = creature('earthworm', 'small', 50, 0, { behaviour: 'surface', heading: Math.PI / 2, lengthMm: SMALL_MM });
     const big = creature('earthworm', 'big', 10, 0, { behaviour: 'surface', heading: Math.PI / 2, lengthMm: BIG_MM });
     v.update([small], EYE, 1 / 60);
-    expect(v.holders('earthworm')).toEqual(['small']);
+    expect(held(v, 'earthworm')).toEqual(['small']);
     expect(v.rigs('earthworm')[0].scale.x).toBeCloseTo(rigScale(EARTHWORM) * (SMALL_MM / EARTHWORM.lengthMm), 12);
     expect(spanOf(v, 0)).toBeCloseTo(SMALL, 3);
 
     // The big one arrives four times nearer — well past the hysteresis
     // margin — and the one rig goes to it. ONE frame; nothing after it.
     v.update([small, big], EYE, 1 / 60);
-    expect(v.holders('earthworm')).toEqual(['big']);
+    expect(held(v, 'earthworm')).toEqual(['big']);
     expect(v.rigs('earthworm')[0].scale.x).toBeCloseTo(rigScale(EARTHWORM) * (BIG_MM / EARTHWORM.lengthMm), 12);
     expect(spanOf(v, 0)).toBeCloseTo(BIG, 3);
     expect(v.trailSpacings('earthworm')[0]).toBeCloseTo(BIG / CRUMBS_PER_LENGTH, 12);
@@ -410,11 +498,12 @@ describe('the size is the animal\'s, not the species\'', () => {
 
   it('gives every impostor past the pool its own length and girth', async () => {
     const v = await keep(view('ultra-low'));
-    const held = creature('earthworm', 'held', 4, 0, { behaviour: 'surface', lengthMm: EARTHWORM.lengthMm });
+    v.setPoolSize('earthworm', 1);
+    const one = creature('earthworm', 'held', 4, 0, { behaviour: 'surface', lengthMm: EARTHWORM.lengthMm });
     const s = creature('earthworm', 's', 20, 0, { behaviour: 'surface', lengthMm: SMALL_MM });
     const b = creature('earthworm', 'b', 30, 0, { behaviour: 'surface', lengthMm: BIG_MM });
-    v.update([held, s, b], EYE, 1 / 60);
-    expect(v.holders('earthworm')).toEqual(['held']);
+    v.update([one, s, b], EYE, 1 / 60);
+    expect(held(v, 'earthworm')).toEqual(['held']);
     expect(v.cost.impostors.earthworm).toBe(2);
     const m = v.impostor('earthworm')!.instanceMatrix.array as Float32Array;
     // Nearest first: the ellipsoid's long half-axis is its third column,
@@ -445,7 +534,7 @@ describe('the size is the animal\'s, not the species\'', () => {
     const small = creature('earthworm', 'small', 5, 0, { behaviour: 'burrow', height: GROUND - depth, lengthMm: SMALL_MM });
     const big = creature('earthworm', 'big', 6, 0, { behaviour: 'burrow', height: GROUND - depth, lengthMm: BIG_MM });
     v.update([small, big], EYE, 1 / 60, GROUND + 50);
-    expect(v.holders('earthworm')).toEqual(['big', null]);
+    expect(held(v, 'earthworm')).toEqual(['big']);
     expect(v.cost.impostors.earthworm).toBe(0);
   });
 });
@@ -603,6 +692,9 @@ describe('the worm', () => {
     // body between where the animal is and where it was. A trail is a
     // record of a crawl; a broken crawl is not a record of anything.
     const v = await keep(view('ultra-low', loader(), { groundAt: () => 10 }));
+    // A NAMED POOL HAS NO BAND: this is about the trail's world points,
+    // not about the distance policy, and the worm walks metres from the eye.
+    v.setPoolSize('earthworm', 1);
     const w = creature('earthworm', 'w', 0, 0, { behaviour: 'surface', heading: Math.PI / 2, height: 10 });
     const body = unitsOfMm(EARTHWORM.lengthMm);
     for (let f = 0; f < 200; f += 1) {
@@ -637,7 +729,7 @@ describe('the worm', () => {
     const nosing = creature('earthworm', 'nosing', 5, 0, { behaviour: 'burrow', height: 10 - BURROW_HIDE + 0.01 });
     const deep = creature('earthworm', 'deep', 6, 0, { behaviour: 'surface', height: 10 - BURROW_HIDE - 0.01 });
     v.update([nosing, deep], EYE, 1 / 60);
-    expect(v.holders('earthworm')).toEqual(['nosing']);
+    expect(held(v, 'earthworm')).toEqual(['nosing']);
     expect(v.cost.impostors.earthworm).toBe(0);
   });
 
@@ -706,6 +798,9 @@ describe('the worm', () => {
     let shift = 0;
     const origin = { toLocal: (at: WorldPoint): LocalPoint => local(at.wx - shift, at.wz) };
     const v = await keep(view('ultra-low', loader(), { origin }));
+    // A NAMED POOL HAS NO BAND: this is about the trail's world points,
+    // not about the distance policy, and the worm walks metres from the eye.
+    v.setPoolSize('earthworm', 1);
     const w = creature('earthworm', 'w', 100, 0, { behaviour: 'surface', heading: Math.PI / 2 });
     for (let f = 0; f < 40; f += 1) { w.at = world(w.at.wx + 0.5, w.at.wz); v.update([w], EYE, 1 / 60); }
     v.group.updateMatrixWorld(true);
@@ -772,7 +867,7 @@ describe('the worm', () => {
     for (let f = 0; f < REVEAL_HOLD * 2; f += 1) {
       v.update([w], EYE, 1 / 60);
       expect(v.cost.rigsLent.earthworm, `frame ${f}`).toBe(1);
-      expect(v.holders('earthworm'), `frame ${f}`).toEqual(['w']);
+      expect(held(v, 'earthworm'), `frame ${f}`).toEqual(['w']);
       expect(v.rigs('earthworm')[0].visible, `frame ${f}`).toBe(true);
       seen.push(extent());
       open = !open;
@@ -853,11 +948,11 @@ describe('the worm', () => {
     const v = await keep(view('ultra-low', loader(), { groundAt: () => 10 }));
     const w = creature('earthworm', 'w', 5, 0, { behaviour: 'burrow', height: 10 - BURROW_HIDE + 0.01 });
     v.update([w], EYE, 1 / 60);
-    expect(v.holders('earthworm')).toEqual(['w']);
+    expect(held(v, 'earthworm')).toEqual(['w']);
     // Past the line, still within the margin: it does not blink out.
     w.height = 10 - BURROW_HIDE * BURROW_KEEP + 0.01;
     v.update([w], EYE, 1 / 60);
-    expect(v.holders('earthworm')).toEqual(['w']);
+    expect(held(v, 'earthworm')).toEqual(['w']);
     // Past the margin it goes, and it does not come back until it is
     // above the line itself rather than merely above the margin.
     w.height = 10 - BURROW_HIDE * BURROW_KEEP - 0.01;
@@ -899,7 +994,7 @@ describe('the worm', () => {
       v.update([w], EYE, 1 / 60);
       open = !open;
     }
-    expect(v.holders('earthworm')).toEqual(['w']);
+    expect(held(v, 'earthworm')).toEqual(['w']);
     v.group.updateMatrixWorld(true);
     const root = v.rigs('earthworm')[0];
     const names = EARTHWORM.model.chain ?? [];
@@ -1080,15 +1175,15 @@ describe('a body on a wall', () => {
     expect(UP_EASE_S).toBeLessThan(0.5);
     // A rig handed over snaps: release it, lend it to a body on the ceiling — the first frame is exact.
     v.update([], EYE, 1 / 60);
-    expect(v.holders('aphid')).toEqual([null, null]);
+    expect(held(v, 'aphid')).toEqual([]);
     const c = creature('aphid', 'c', 8, 0, { behaviour: 'wander', height: 112, heading: 2 });
     c.up = CEILING;
     v.update([c], EYE, 1 / 60);
-    const held = v.holders('aphid').indexOf('c');
-    expect(held).toBeGreaterThanOrEqual(0);
-    const d = v.drawnUps('aphid')[held];
+    const holderIndex = v.holders('aphid').indexOf('c');
+    expect(holderIndex).toBeGreaterThanOrEqual(0);
+    const d = v.drawnUps('aphid')[holderIndex];
     expect(d.x).toBe(0); expect(d.y).toBe(-1); expect(d.z).toBe(0);
-    expect(axis(v.rigs('aphid')[held], 0, 1, 0).y).toBeCloseTo(-1, 9);
+    expect(axis(v.rigs('aphid')[holderIndex], 0, 1, 0).y).toBeCloseTo(-1, 9);
   });
 
   it('STRIDES when walking straight up a wall — the measured motion is 3-D — and bobs along the normal, not up', async () => {
@@ -1175,6 +1270,11 @@ describe('the pick surface', () => {
     // A third aphid past the pool of two: an impostor.
     const b = creature('aphid', 'b', 9, 1, { behaviour: 'wander', height: 0 });
     const c = creature('aphid', 'c', 10, 2, { behaviour: 'wander', height: 0 });
+    // A NAMED POOL HAS NO BAND. This is about WHERE a body is drawn — the
+    // rig's box centre, the chain's middle, the ellipsoid's — so the forms
+    // are pinned by the pool's size rather than left to the distance
+    // policy: two aphids rigged and the third an impostor, as before.
+    v.setPoolSize('aphid', 2);
     for (let k = 0; k < 5; k += 1) v.update([f, a, w, far, b, c], EYE, 1 / 60);
     expect(v.drawnIds().slice().sort()).toEqual(['a', 'b', 'c', 'f', 'w']);
     expect(v.positionOf('far')).toBeNull();
@@ -1196,7 +1296,7 @@ describe('the pick surface', () => {
     expect(wormMid.x).toBeCloseTo(-12 - Math.sin(1) * body / 2, 0);
     expect(wormMid.z).toBeCloseTo(3 - Math.cos(1) * body / 2, 0);
     // An impostor: whichever of the three aphids has none, its ellipsoid's centre sits a girth-radius up.
-    const impostored = ['a', 'b', 'c'].filter((id) => !v.holders('aphid').includes(id));
+    const impostored = ['a', 'b', 'c'].filter((id) => !held(v, 'aphid').includes(id));
     expect(impostored).toHaveLength(1);
     const r = (unitsOfMm(APHID.lengthMm) * LOOK.aphid.girth) / 2;
     const heightOf = { a: 25.5, b: 0, c: 0 }[impostored[0] as 'a' | 'b' | 'c'];
@@ -1319,7 +1419,14 @@ describe('the budget', () => {
     const lent = cost.rigsLent.earthworm + cost.rigsLent.aphid + cost.rigsLent.housefly;
     // eslint-disable-next-line no-console
     console.info(`[fauna budget] 300 creatures at high: mean ${cost.meanMs.toFixed(3)} ms, peak ${cost.peakMs.toFixed(3)} ms, rigs lent ${lent} (worm ${cost.rigsLent.earthworm}, aphid ${cost.rigsLent.aphid}, fly ${cost.rigsLent.housefly}), impostors ${cost.impostors.earthworm + cost.impostors.aphid + cost.impostors.housefly}`);
-    expect(lent).toBe(POOL_SIZES.high.earthworm + POOL_SIZES.high.aphid + POOL_SIZES.high.housefly);
+    // THE BAND CAPS THIS NOW, not the pool. The 300 are scattered over
+    // metres, so only what is inside RIG_FAR can hold a skeleton at all —
+    // fewer than the rung's budget, and that is the optimisation working
+    // rather than a shortfall. What must hold is that it never EXCEEDS the
+    // budget, and that every body is still accounted for.
+    expect(lent).toBeGreaterThan(0);
+    expect(lent).toBeLessThanOrEqual(rigBudgetFor('high'));
+    expect(lent + impostorsAll(v) + cost.notDrawn).toBe(creatures.length);
     // The brief's budget is 0.6 ms; the assertion is looser so a slow CI box does not fail it, and the line above is the measurement.
     expect(cost.meanMs).toBeLessThan(2.5);
     expect(CRUMBS_PER_LENGTH).toBeGreaterThan(0);
@@ -1328,12 +1435,16 @@ describe('the budget', () => {
 
 describe('a pool the Lab can grow: one rig per creature', () => {
   it('starts at the rung\'s budget and takes a named size instead', async () => {
-    const v = await view('medium');
-    expect(v.poolSize('aphid')).toBe(poolSizeFor('medium', 'aphid'));
+    const v = await keep(view('medium'));
+    // Every species' pool is the whole RUNG BUDGET now, not its own slice:
+    // the allocation is by distance across species, so if the nearest
+    // thirteen bodies happen all to be aphids, thirteen aphid clones are
+    // what serving them honestly takes (`rigBudgetFor`).
+    expect(v.poolSize('aphid')).toBe(rigBudgetFor('medium'));
     v.setPoolSize('aphid', 40);
     expect(v.poolSize('aphid')).toBe(40);
     // The others are untouched: a named pool is one species' own.
-    expect(v.poolSize('housefly')).toBe(poolSizeFor('medium', 'housefly'));
+    expect(v.poolSize('housefly')).toBe(rigBudgetFor('medium'));
   });
 
   it('grows ONE at a time without rebuilding the rest — the stress test lends a skeleton a second', async () => {
@@ -1363,7 +1474,7 @@ describe('a pool the Lab can grow: one rig per creature', () => {
     // Nine bodies still drawn, as impostors — nothing vanished with the rigs.
     expect(v.cost.impostors.aphid).toBe(9);
     v.clearPoolSizes();
-    expect(v.poolSize('aphid')).toBe(poolSizeFor('medium', 'aphid'));
+    expect(v.poolSize('aphid')).toBe(rigBudgetFor('medium'));
   });
 
   it('lends every creature a rig when the pool is the crowd\'s size', async () => {
@@ -1381,5 +1492,173 @@ describe('a pool the Lab can grow: one rig per creature', () => {
     await v.ready();
     expect(v.poolSize('earthworm')).toBe(9);
     views.push(v);
+  });
+});
+
+/**
+ * THE RIG GOES TO THE NEAREST BODY, WHATEVER SPECIES IT IS — Joshua's
+ * complaint from the phone, and the whole reason the allocation moved.
+ *
+ * "we need to try render at 0.6m away and it fades as right now, it's
+ * random. Some close up change while others don't." It was not random:
+ * the pool was PER SPECIES and lending was by rank inside it, so at the
+ * medium rung's worm 2 / aphid 5 / fly 4 / queen 1 / worker 1 the single
+ * nearest queen kept a skeleton three metres out while an aphid thirty
+ * centimetres away was the sixth-nearest aphid and drew as an ellipsoid.
+ *
+ * The band is what stops a body at the line flickering: it WINS a rig by
+ * getting inside RIG_NEAR and KEEPS it until it passes RIG_FAR.
+ */
+describe('the rig goes to the nearest, and the band stops it flickering', () => {
+  const near = (n: number, from: number, step: number): CreatureState[] =>
+    Array.from({ length: n }, (_, i) => creature('aphid', `a${i}`, from + i * step, 0));
+
+  it('prefers a near aphid over a far fly — the per-species rank that made it look random is gone', async () => {
+    const v = await keep(view('medium'));
+    // Six aphids inside 0.6 m, and one fly farther out than all of them.
+    const crowd = [...near(6, 5, 5), creature('housefly', 'f0', 50, 0, { behaviour: 'fly', height: 20 })];
+    v.update(crowd, EYE, 1 / 60, 0);
+    // Every one of the seven is inside the near line and the budget is 13,
+    // so all seven hold rigs — including six aphids, which the old
+    // per-species pool of five could not have done.
+    expect(v.cost.rigsLent.aphid).toBe(6);
+    expect(v.cost.rigsLent.housefly).toBe(1);
+
+    // Now the budget is the pressure, and the fly is the far one.
+    const tight = await keep(view('ultra-low'));
+    const budget = rigBudgetFor('ultra-low');
+    const many = [...near(budget + 2, 4, 4), creature('housefly', 'f0', 58, 0, { behaviour: 'fly', height: 20 })];
+    tight.update(many, EYE, 1 / 60, 0);
+    expect(lentAll(tight)).toBe(budget);
+    // The fly is the FARTHEST body inside the line, so it is the one that
+    // goes without — under the old rule its own pool would have kept it a
+    // skeleton ahead of every aphid nearer than it.
+    expect(tight.cost.rigsLent.housefly).toBe(0);
+    expect(tight.cost.rigsLent.aphid).toBe(budget);
+    expect(held(tight, 'aphid')).toEqual(many.slice(0, budget).map((c) => c.id));
+  });
+
+  it('lends nothing beyond RIG_FAR, however free the budget is', async () => {
+    const v = await keep(view('medium'));
+    // One body, nothing competing for the thirteen rigs, just too far.
+    const far = [creature('aphid', 'far', RIG_FAR + 2, 0)];
+    v.update(far, EYE, 1 / 60, 0);
+    expect(lentAll(v)).toBe(0);
+    expect(v.cost.impostors.aphid).toBe(1);
+    // And one just inside the near line does get one.
+    v.update([creature('aphid', 'in', RIG_NEAR - 2, 0)], EYE, 1 / 60, 0);
+    expect(lentAll(v)).toBe(1);
+  });
+
+  it('never lends past the budget however many crowd inside 0.6 m — the RUNG optimisation survives a swarm', async () => {
+    // Joshua's own constraint: "I don't want unlimited full rigs inside
+    // 0.6 m because that could defeat RUNG optimization." 150 ants piling
+    // into the radius must not put the phone back at Baseline A's 52.
+    const v = await keep(view('medium'));
+    const swarm = Array.from({ length: 150 }, (_, i) => creature('aphid', `a${i}`, 1 + (i % 50), (i / 50) | 0));
+    v.update(swarm, EYE, 1 / 60, 0);
+    expect(lentAll(v)).toBe(rigBudgetFor('medium'));
+    // Nobody is unaccounted for: the rest are impostors up to the species'
+    // own cap, and the overflow is COUNTED rather than quietly dropped.
+    expect(lentAll(v) + impostorsAll(v) + v.cost.notDrawn).toBe(swarm.length);
+    expect(v.cost.pastCap).toBe(v.cost.notDrawn);
+  });
+
+  it('KEEPS a rig across RIG_NEAR and only gives it up past RIG_FAR: a body at the line does not flicker', async () => {
+    const v = await keep(view('medium'));
+    const walk = (x: number): number => {
+      v.update([creature('aphid', 'one', x, 0)], EYE, 1 / 60, 0);
+      return v.cost.rigsLent.aphid;
+    };
+    expect(walk(RIG_NEAR - 5)).toBe(1);
+    // Out through the band, a step at a time: it holds what it won.
+    for (let x = RIG_NEAR - 1; x < RIG_FAR - 1; x += 2) {
+      expect(walk(x), `holding at ${x}`).toBe(1);
+    }
+    expect(walk(RIG_FAR + 1)).toBe(0);
+    // And coming back it must reach RIG_NEAR again, not merely RIG_FAR —
+    // otherwise the band would be a line with extra steps.
+    expect(walk(RIG_FAR - 5)).toBe(0);
+    expect(walk(RIG_NEAR - 1)).toBe(1);
+  });
+
+  it('crossfades when a body ARRIVES, and is never invisible nor two whole bodies at once', async () => {
+    const v = await keep(view('medium'));
+    const bodyAt = (x: number): CreatureState => creature('aphid', 'one', x, 0);
+    // Met OUTSIDE the far line: an impostor, and nothing to fade from.
+    for (let i = 0; i < 3; i += 1) v.update([bodyAt(RIG_FAR + 20)], EYE, 1 / 60, 0);
+    expect(v.cost.rigsLent.aphid).toBe(0);
+
+    // Now it walks inside the near line and the rig fades UP over FADE_S.
+    const opacity = (): number => {
+      let o = 0;
+      v.group.getObjectByName('aphid:rig:0')?.traverse((x) => {
+        const material = (x as THREE.Mesh).material as THREE.MeshStandardMaterial | undefined;
+        if (material && 'opacity' in material) o = Math.max(o, material.opacity);
+      });
+      return o;
+    };
+    const impostorScale = (): number => {
+      const mesh = v.impostor('aphid');
+      if (mesh === null || mesh.count === 0) return 0;
+      const scale = new THREE.Vector3();
+      new THREE.Matrix4()
+        .fromArray(mesh.instanceMatrix.array as Float32Array, 0)
+        .decompose(new THREE.Vector3(), new THREE.Quaternion(), scale);
+      return scale.length();
+    };
+    const seen: number[] = [];
+    for (let i = 0; i < Math.ceil(FADE_S * 60) + 4; i += 1) {
+      v.update([bodyAt(RIG_NEAR - 20)], EYE, 1 / 60, 0);
+      // SOMETHING of the animal is on screen every single frame — the whole
+      // point of crossfading rather than swapping.
+      expect(opacity() + impostorScale(), `frame ${i}`).toBeGreaterThan(0.05);
+      seen.push(opacity());
+    }
+    // It climbed rather than popped, never went backwards, and arrived.
+    expect(seen[0]).toBeLessThan(0.5);
+    expect(seen.some((o) => o > 0.05 && o < 0.95)).toBe(true);
+    for (let i = 1; i < seen.length; i += 1) expect(seen[i]).toBeGreaterThanOrEqual(seen[i - 1] - 1e-9);
+    expect(seen[seen.length - 1]).toBeCloseTo(1, 2);
+    // And once arrived it STAYS arrived: the settled case must not decay
+    // one step and climb back, which is a shimmer on every rigged body.
+    for (let i = 0; i < 6; i += 1) {
+      v.update([bodyAt(RIG_NEAR - 20)], EYE, 1 / 60, 0);
+      expect(opacity()).toBeCloseTo(1, 6);
+    }
+  });
+
+  it('accounts for every creature it is handed, and the two identities hold', async () => {
+    // The 55 of Baseline B: 400 placed, 13 rigs + 332 impostors, and the
+    // rest earthworms under the ground that the view refuses to draw.
+    const v = await keep(view('medium', loader(), { groundAt: () => 0 }));
+    const crowd = [
+      ...Array.from({ length: 12 }, (_, i) => creature('aphid', `a${i}`, 2 + i * 3, 0)),
+      // Burrowers well under the ground with no cutaway: drawn in no form.
+      ...Array.from({ length: 7 }, (_, i) => creature('earthworm', `e${i}`, 2 + i * 3, 4, { behaviour: 'burrow', height: -unitsOfMm(400) })),
+      // The simulation's own cut, which the view only obeys.
+      creature('housefly', 'f-far', 10, 0, { tier: 'far', behaviour: 'fly', height: 20 }),
+    ];
+    v.update(crowd, EYE, 1 / 60, 0);
+    const cost = v.cost;
+    expect(lentAll(v) + impostorsAll(v) + cost.notDrawn).toBe(crowd.length);
+    expect(cost.hidden + cost.pastCap + cost.farTier).toBe(cost.notDrawn);
+    expect(cost.farTier).toBe(1);
+    expect(cost.hidden).toBe(7);
+  });
+
+  it('a NAMED pool has no band: the Lab measuring a one-metre room keeps its skeletons', async () => {
+    // `setPoolSize` is the Creature Lab asking "how many fully active
+    // insects can this room hold". A bench answering that cannot have its
+    // rigs taken away at 0.8 m, so a named pool is not distance-gated.
+    const v = await keep(view('medium'));
+    v.setPoolSize('aphid', 4);
+    const spread = [
+      creature('aphid', 'a0', 10, 0),
+      creature('aphid', 'a1', RIG_FAR + 40, 0),
+      creature('aphid', 'a2', RIG_FAR + 90, 0),
+    ];
+    v.update(spread, EYE, 1 / 60, 0);
+    expect(v.cost.rigsLent.aphid).toBe(3);
   });
 });
