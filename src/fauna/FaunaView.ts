@@ -516,6 +516,8 @@ export class FaunaView {
   private readonly groundAt: ((at: WorldPoint) => number) | null;
   private readonly ceilingAt: ((at: WorldPoint) => number) | null;
   private rung: string;
+  /** Pools the Lab has named, past the rung's budget (`setPoolSize`). Empty on the island. */
+  private readonly poolOverride = new Map<CreatureId, number>();
   private readonly loads: Promise<void>[] = [];
   private disposed = false;
 
@@ -607,6 +609,42 @@ export class FaunaView {
 
   isEnabled(species: CreatureId): boolean {
     return this.slots.get(species)?.enabled ?? false;
+  }
+
+  /**
+   * LEND A SPECIES A POOL OF ITS OWN, past what the detail rung budgets.
+   *
+   * The rung's pool is a DEVICE BUDGET for a wild population seen across
+   * a forest, where everything past the nearest few is a twenty-triangle
+   * impostor and the eye cannot tell (the header). The Creature Lab's
+   * stress test is the other case: every animal is within a metre of the
+   * camera, and "how many FULLY ACTIVE insects can this room hold"
+   * (Joshua, 2026-09-10) is a question about animated skeletons, not
+   * about impostors. So the Lab names the pool it wants, one rig per
+   * creature, and `clearPoolSizes` gives the rung its budget back.
+   *
+   * An override set before the model has loaded is remembered and
+   * applied when it lands.
+   */
+  setPoolSize(species: CreatureId, count: number): void {
+    const slot = this.slots.get(species);
+    if (slot === undefined || !Number.isFinite(count)) return;
+    const want = Math.max(0, Math.floor(count));
+    if (this.poolOverride.get(species) === want) return;
+    this.poolOverride.set(species, want);
+    this.sizePool(slot, want);
+  }
+
+  /** Every pool back to its rung's budget. */
+  clearPoolSizes(): void {
+    if (this.poolOverride.size === 0) return;
+    this.poolOverride.clear();
+    for (const slot of this.order) this.sizePool(slot, this.poolTarget(slot));
+  }
+
+  /** How many rigs a species' pool holds — what a HUD prints and a test reads. */
+  poolSize(species: CreatureId): number {
+    return this.slots.get(species)?.rigs.length ?? 0;
   }
 
   /** A new rung: the pools and the impostor caps are rebuilt; nothing about the creatures changes. */
@@ -822,14 +860,41 @@ export class FaunaView {
 
   // ─── the pool and the impostor ─────────────────────────────────────
 
+  /** The pool a slot should hold: the Lab's named size where it named one, else the rung's. */
+  private poolTarget(slot: Slot): number {
+    const named = this.poolOverride.get(slot.species.id);
+    return named === undefined ? poolSizeFor(this.rung, slot.species.id) : named;
+  }
+
+  /** Every rig thrown away and built again: a new rung, or a template that has just arrived. */
   private buildPool(slot: Slot): void {
     for (const rig of slot.rigs) slot.group.remove(rig.root);
     slot.rigs = [];
+    this.sizePool(slot, this.poolTarget(slot));
+  }
+
+  /**
+   * BRING A POOL TO `count` WITHOUT REBUILDING IT. Cloning a skinned rig
+   * is the expensive thing this file does — the queen's is 103,491
+   * triangles — so a pool that grows one at a time (the stress test
+   * lends a skeleton to every creature it places, one a second) must add
+   * ONE clone, not re-clone the lot. Rigs are removed from the end, and
+   * a rig that had a holder lets go of it first; a clone shares the
+   * template's geometry and material (`SkeletonUtils.clone`), so it is
+   * dropped, never disposed — disposing one would take the template's
+   * geometry with it and every other rig of the species.
+   */
+  private sizePool(slot: Slot, count: number): void {
     const template = slot.template;
     if (template === null) return;
-    const count = poolSizeFor(this.rung, slot.species.id);
+    while (slot.rigs.length > count) {
+      const rig = slot.rigs.pop();
+      if (rig === undefined) break;
+      this.release(rig);
+      slot.group.remove(rig.root);
+    }
     const anatomy = slot.anatomy;
-    for (let k = 0; k < count; k += 1) {
+    for (let k = slot.rigs.length; k < count; k += 1) {
       const root = cloneSkinned(template);
       root.visible = false;
       root.name = `${slot.species.id}:rig:${k}`;

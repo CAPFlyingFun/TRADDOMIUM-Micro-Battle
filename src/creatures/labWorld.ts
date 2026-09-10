@@ -143,9 +143,13 @@ import type { Habitat, HabitatKind } from '../world/habitat';
 import { normalOfGradient, type Normal } from '../world/heightfield';
 import { cellAt, cellKey } from '../world/objects/cells';
 import { stableHash, valueNoise } from '../world/random';
+import { TAU, wrapHeading } from './heading';
 import { CALM_WEATHER } from './intent';
 import { drawLengthMm } from './population';
-import { APHID, CREATURE_SPECIES, EARTHWORM, HOUSEFLY, QUEEN, WORKER, unitsOfMm, type CreatureId } from './species';
+import {
+  APHID, CREATURE_SPECIES, EARTHWORM, HOUSEFLY, LAB_CREATURE_IDS, QUEEN, WORKER, unitsOfMm,
+  type CreatureId, type CreatureSpecies,
+} from './species';
 import type { NewCreatureOptions } from './state';
 import type { Climbable } from './surface';
 import type { CreatureWeather, CreatureWorld, Disturbance } from './world';
@@ -633,4 +637,140 @@ export function labSpawns(options: LabSpawnOptions = {}): readonly NewCreatureOp
       behaviour: 'idle', hunger: 0.3, fatigue: 0.1,
     },
   ];
+}
+
+// ---------------------------------------------------------------------------
+// THE STRESS TEST'S CROWD (Joshua, 2026-09-10)
+// ---------------------------------------------------------------------------
+
+/**
+ * THE BENCH'S CAPACITY, and why the Lab's species table is not the
+ * island's.
+ *
+ * Joshua, 2026-09-10: "Spawn 1 random currently implemented insect per
+ * second inside the existing 1 m room, using the normal creature systems
+ * … the main number I care about is how many fully active insects that
+ * 1 m room can sustain at 30+ FPS."
+ *
+ * A cap is a MAXIMUM, and it is a statement about a DEVICE's budget for
+ * a WILD population streamed out of the cells: how many of a species
+ * this phone should simulate at once on Kauaʻi. The Lab is not that. Its
+ * animals are PLACED, one at a time, by a person who has decided to
+ * place them, and the island's answer — one queen, one worker, 24 worms,
+ * 80 aphids, 30 flies at the medium rung — would quietly freeze the
+ * twenty-fifth worm and every queen after the first (`CreatureSim.select`
+ * keeps the nearest up to the cap and tiers the rest `far`, which is to
+ * say: not thought, not moved, not drawn, not even handed to the
+ * renderer). A stress test run against that would flatten out at the cap
+ * and report a frame rate about a bench that had stopped filling up.
+ *
+ * So the Lab hands the simulation and the renderer a table whose caps
+ * are the BENCH's: `LAB_CAPACITY`, flat across every rung, comfortably
+ * over the run's own ceiling (`lab/stressTest.MAX_CREATURES`). Nothing
+ * else about the species changes — every pace, sense, need and range is
+ * the island's, which is the whole point of testing here — and while the
+ * bench holds its ordinary five the raised cap changes nothing at all,
+ * because a cap only bites when there are more animals than it allows.
+ *
+ * It is the table, and not a second simulation: the brief's §35 ("No
+ * separate 'lab version' of the creature code") is kept exactly.
+ */
+export const LAB_CAPACITY = 512;
+
+/** The five, with the bench's capacity in place of the island's device budget (the header). Frozen, built once. */
+export const LAB_SPECIES_TABLE: readonly CreatureSpecies[] = Object.freeze(LAB_CREATURE_IDS.map((id) => {
+  const species = CREATURE_SPECIES[id];
+  const caps: Record<string, number> = {};
+  for (const rung of Object.keys(species.population.caps)) caps[rung] = LAB_CAPACITY;
+  return Object.freeze({
+    ...species,
+    population: Object.freeze({ ...species.population, caps: Object.freeze(caps) }),
+  }) as CreatureSpecies;
+}));
+
+/**
+ * The salt the stress crowd's places and sizes are drawn under. Disjoint
+ * from `LENGTH_SALT` and from `LAB_SEED`'s bumps, so the hundredth
+ * creature's spot is not some bump's height.
+ */
+const STRESS_SALT = 0x7_0000;
+
+/** How far inside the box a stress body is placed, world units: clear of the panes, and clear of the block's footprint by a body. */
+const STRESS_MARGIN = 6;
+
+/**
+ * ONE OF THE STRESS TEST'S CROWD, placed deterministically from its
+ * INDEX alone — so RUN AGAIN puts the hundredth fly exactly where the
+ * hundredth fly was, and two runs are two readings of one test rather
+ * than two tests (`lab/stressTest.ts` draws the species the same way,
+ * from the same kind of seeded stream).
+ *
+ * Each body stands where its MEDIUM allows, exactly as `labSpawns`
+ * places the original five — a ground body on the floor, a worm in its
+ * band under it, an aphid part-way up one of the host plants the
+ * resource layer named, a fly in its cruise band over the floor — and
+ * takes a length drawn from its species' range. Nothing is placed
+ * inside the block: the pillar and the slab are solids now (Creature
+ * Lab D), and a body started inside one would be a body the surface
+ * step has to argue its way out of, which is not what the run measures.
+ *
+ * The id is `stress:<species>:<index>`, a shape `labSpawns` never makes,
+ * so the crowd can never collide with the bench's own five.
+ */
+export function labStressSpawn(index: number, species: CreatureId, seed: number = LAB_SEED): NewCreatureOptions {
+  const table = CREATURE_SPECIES[species];
+  const salt = STRESS_SALT ^ (seed | 0);
+  const u = (q: number): number => stableHash(index, q, salt);
+
+  // A spot inside the box, outside the block's footprint plus a margin:
+  // the ray from the middle is pushed out past the corner when it lands on it.
+  const edge = LAB_HALF - STRESS_MARGIN;
+  let wx = (u(1) * 2 - 1) * edge;
+  let wz = (u(2) * 2 - 1) * edge;
+  const clear = BLOCK.size / 2 + STRESS_MARGIN;
+  if (Math.abs(wx) <= clear && Math.abs(wz) <= clear) {
+    // Push it out along whichever axis it is nearer the edge of, keeping its sign.
+    if (Math.abs(wx) >= Math.abs(wz)) wx = wx >= 0 ? clear : -clear;
+    else wz = wz >= 0 ? clear : -clear;
+  }
+  const at = world(wx, wz);
+  const ground = labGroundAt(at);
+  const heading = wrapHeading(u(3) * TAU - Math.PI);
+  const lengthMm = drawLengthMm(table, u(4));
+  const phase = u(5);
+
+  const common = { id: `stress:${species}:${index}`, species, cellKey: cellKey(cellAt(at)), heading, lengthMm, phase };
+  // The needs are drawn too, so a crowd does not all get hungry on the same tick.
+  const hunger = u(6) * 0.6;
+  const fatigue = u(7) * 0.4;
+
+  switch (table.medium) {
+    case 'soil': {
+      const spec = table.burrow;
+      const under = spec === null ? 0 : unitsOfMm(spec.underMm);
+      const bore = spec === null ? 0 : unitsOfMm(spec.boreMm);
+      // The middle of the band, as the population places one.
+      return { ...common, at, height: ground - (under + bore / 2) / 2, behaviour: 'burrow', hunger, fatigue };
+    }
+    case 'plant': {
+      // On one of the host plants the bench carries, part-way up its stem.
+      const hosts = LAB_PLANTS.filter((p) => table.population.hosts !== null && table.population.hosts.includes(p.family));
+      const host = hosts.length > 0 ? hosts[Math.min(hosts.length - 1, Math.floor(u(8) * hosts.length))] : BROADLEAF;
+      const perch = 0.2 + 0.6 * u(9);
+      return {
+        ...common, cellKey: cellKey(cellAt(host.at)), at: host.at,
+        height: labGroundAt(host.at) + perch * host.size, behaviour: 'idle', hostId: host.id, hunger, fatigue,
+      };
+    }
+    case 'air': {
+      const spec = table.flight;
+      const lo = spec === null ? 0 : unitsOfMm(spec.cruiseMm[0]);
+      const hi = spec === null ? 0 : unitsOfMm(spec.cruiseMm[1]);
+      // In the cruise band, but never over the box's ceiling: the bench is a metre tall.
+      const top = Math.min(hi, LAB_SIZE - STRESS_MARGIN);
+      return { ...common, at, height: ground + lo + u(10) * Math.max(0, top - lo), behaviour: 'fly', hunger, fatigue };
+    }
+    default:
+      return { ...common, at, height: ground, behaviour: 'idle', hunger, fatigue };
+  }
 }

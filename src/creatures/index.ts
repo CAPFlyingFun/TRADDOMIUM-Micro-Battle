@@ -36,10 +36,10 @@ export type { MutableIntent } from './demand';
 export { ControlLedger } from './control';
 export type { ControlAuthority, Possession } from './control';
 export {
-  APHID_PERCH_FRACTION, BLOCK, BLOCK_CLEARANCE, BUMP, DISTURB_HOLD_S, INWARD_DISTANCE, LAB_CLIMBABLES, LAB_FLOOR, LAB_HABITAT,
-  LAB_HALF, LAB_PLANTS, LAB_SEED, LAB_SITES, LAB_SIZE, LAB_WATER, LITTER_CORNER, PILLAR, PILLAR_BOX, PROTEIN_SPOT, PUDDLE,
-  PUDDLE_EDGE, SLAB, SLAB_BOX, createLabWorld, labFloorAt, labGroundAt, labInBounds, labInwardTarget, labNormalAt, labSpawns,
-  onBlock, puddleDepthAt,
+  APHID_PERCH_FRACTION, BLOCK, BLOCK_CLEARANCE, BUMP, DISTURB_HOLD_S, INWARD_DISTANCE, LAB_CAPACITY, LAB_CLIMBABLES, LAB_FLOOR,
+  LAB_HABITAT, LAB_HALF, LAB_PLANTS, LAB_SEED, LAB_SITES, LAB_SIZE, LAB_SPECIES_TABLE, LAB_WATER, LITTER_CORNER, PILLAR,
+  PILLAR_BOX, PROTEIN_SPOT, PUDDLE, PUDDLE_EDGE, SLAB, SLAB_BOX, createLabWorld, labFloorAt, labGroundAt, labInBounds,
+  labInwardTarget, labNormalAt, labSpawns, labStressSpawn, onBlock, puddleDepthAt,
 } from './labWorld';
 export type { LabWorld, LabWorldOptions } from './labWorld';
 // --- Creature Lab D: surfaces (walls and undersides) ---

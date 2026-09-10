@@ -37,9 +37,10 @@ import type { Behaviour } from '../creatures/state';
 import type { PredationPolicy } from '../creatures/world';
 import {
   HUD_HZ, LAB_ACTION, LAB_BUTTON_ACTION, LAB_BUTTON_KINDS, LAB_FIELD, LAB_HUD_ROLE, POSSESS_ROW, buttonLabel, buttonsFor,
-  cameraLabel, controlLabel, creatureField, onOffLabel, possessAction, predationLabel,
-  type LabAction, type LabButtonKind, type LabCameraMode,
+  cameraLabel, controlLabel, creatureField, onOffLabel, possessAction, predationLabel, rigModeLabel, stressLabel,
+  type LabAction, type LabButtonKind, type LabCameraMode, type LabRigMode,
 } from './labTool';
+import type { StressPhase } from './stressTest';
 
 // ---------------------------------------------------------------------------
 // What the HUD is told
@@ -88,6 +89,16 @@ export interface LabReadout {
   readonly aiMs: number;
   readonly animMs: number;
   readonly lines: readonly CreatureLine[];
+  /** THE STRESS TEST (Joshua, 2026-09-10). `idle` hides its panel entirely. */
+  readonly stressPhase: StressPhase;
+  readonly stressCreatures: number;
+  /**
+   * What the panel shows: the live block while a run is going, the whole
+   * copyable report when it is done. Composed by the scene — the HUD
+   * shows what it is given and works nothing out (the header).
+   */
+  readonly stressText: string;
+  readonly rigs: LabRigMode;
 }
 
 export interface LabUiHooks {
@@ -131,6 +142,17 @@ const CSS = {
     `display:flex;flex-direction:column;gap:4px;pointer-events:none;font:${SHEET_FONT};color:${PARCHMENT};`,
   block: `white-space:pre;padding:3px 6px;background:${PANEL};border:1px solid rgba(201,169,74,0.35);border-radius:4px;`,
   /** The right thumb's cluster: a column of pairs, 48 px targets. */
+  /**
+   * THE STRESS PANEL: where the creature overlay sits, but wider — a
+   * thirty-line report is not a five-line block — and PRESSABLE, since
+   * COPY and RUN AGAIN live in it. It is in the DOM only while a run is
+   * going or its report stands, so it never covers the bench otherwise.
+   */
+  stress:
+    `position:absolute;left:156px;top:96px;width:400px;max-width:calc(100% - 320px);max-height:calc(100% - 106px);` +
+    `overflow:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:6px;pointer-events:auto;` +
+    `padding:6px 8px;background:${PANEL};color:${PARCHMENT};font:${SHEET_FONT};border:1px solid ${GOLD};border-radius:6px;`,
+  report: 'margin:0;white-space:pre;user-select:text;-webkit-user-select:text;',
   cluster: `position:absolute;right:${EDGE_RIGHT};bottom:${FLOOR};display:grid;grid-template-columns:auto auto;gap:6px;pointer-events:auto;`,
   held:
     `min-width:64px;min-height:48px;padding:0 8px;font:${FONT};color:${PARCHMENT};background:${BUTTON};` +
@@ -155,6 +177,11 @@ const TOOL_ROWS: readonly (readonly ToolSpec[])[] = [
     { action: LAB_ACTION.cameraDisturbs, field: LAB_FIELD.cameraDisturbs },
     { action: LAB_ACTION.debug, field: LAB_FIELD.debug },
   ],
+  // The stress test's own row: the run, and the one option that changes its answer.
+  [
+    { action: LAB_ACTION.stress, field: LAB_FIELD.stress },
+    { action: LAB_ACTION.rigs, field: LAB_FIELD.rigs },
+  ],
 ];
 
 interface HeldState {
@@ -173,6 +200,10 @@ export class LabUi {
   private readonly blocks = new Map<CreatureId, HTMLElement>();
   private readonly cluster: HTMLElement;
   private readonly overlay: HTMLElement;
+  /** The stress test's panel, its report and the row of buttons under it (`lab/stressTest.ts`). */
+  private readonly stress: HTMLElement;
+  private readonly stressReport: HTMLElement;
+  private readonly stressButtons: HTMLElement;
   private readonly heldButtons = new Map<LabButtonKind, HTMLButtonElement>();
   /** The right thumb's state, written by the buttons' pointer events and read by the scene every frame. */
   private readonly held: HeldState = { up: false, down: false, primary: false, secondary: false, sprint: false };
@@ -240,6 +271,38 @@ export class LabUi {
     }
     this.root.appendChild(this.overlay);
 
+    // THE STRESS PANEL: built once, hidden while there is no run.
+    this.stress = el(doc, 'div', CSS.stress);
+    this.stress.dataset.role = 'lab-stress-panel';
+    this.stressReport = el(doc, 'pre', CSS.report);
+    this.stressReport.dataset.field = LAB_FIELD.stressReport;
+    this.fields.set(LAB_FIELD.stressReport, this.stressReport);
+    this.stress.appendChild(this.stressReport);
+    this.stressButtons = el(doc, 'div', CSS.row);
+    for (const [action, label] of [
+      [LAB_ACTION.stressCopy, 'COPY'] as const,
+      [LAB_ACTION.stressAgain, 'RUN AGAIN'] as const,
+      [LAB_ACTION.stressReset, 'RESET'] as const,
+    ]) {
+      const button = doc.createElement('button');
+      button.type = 'button';
+      button.dataset.action = action;
+      button.textContent = label;
+      button.style.cssText = CSS.button;
+      button.addEventListener('click', () => {
+        // COPY is the HUD's own: it owns the text and the clipboard is a DOM
+        // concern, so the scene is not asked to reach into an element it does
+        // not own. Everything else is the scene's decision.
+        if (action === LAB_ACTION.stressCopy) void this.copyReport(button);
+        else this.hooks.onAction(action);
+        this.refreshNow();
+      });
+      this.stressButtons.appendChild(button);
+    }
+    this.stress.appendChild(this.stressButtons);
+    this.stress.hidden = true;
+    this.root.appendChild(this.stress);
+
     // THE RIGHT THUMB: every held button built once; which show is the medium's.
     this.cluster = el(doc, 'div', CSS.cluster);
     this.cluster.dataset.role = 'lab-held';
@@ -277,6 +340,7 @@ export class LabUi {
     this.fields.clear();
     this.blocks.clear();
     this.heldButtons.clear();
+    this.stress.remove();
     this.held.up = this.held.down = this.held.primary = this.held.secondary = this.held.sprint = false;
   }
 
@@ -387,17 +451,66 @@ export class LabUi {
     this.set(LAB_FIELD.aiMs, `ai ${r.aiMs.toFixed(2)} ms`);
     this.set(LAB_FIELD.animMs, `anim ${r.animMs.toFixed(2)} ms`);
 
+    // The stress test: its button's word, the option that changes its
+    // answer, and the panel — which carries the live block while a run is
+    // going and the whole report when it is done. The report is only
+    // written when it CHANGES, so a thumb that has selected a line of it
+    // to copy does not lose the selection ten times a second.
+    this.set(LAB_FIELD.stress, stressLabel(r.stressPhase, r.stressCreatures));
+    this.set(LAB_FIELD.rigs, rigModeLabel(r.rigs));
+    const running = r.stressPhase !== 'idle';
+    if (this.stress.hidden === running) this.stress.hidden = !running;
+    if (running && this.stressReport.textContent !== r.stressText) this.stressReport.textContent = r.stressText;
+    const finished = r.stressPhase === 'done';
+    if (this.stressButtons.hidden === finished) this.stressButtons.hidden = !finished;
+
     // The right thumb: the medium's buttons, or none.
     this.layoutCluster(r.held);
 
-    // The overlay.
-    if (this.overlay.hidden === r.debug) this.overlay.hidden = !r.debug;
+    // The overlay: never beside the stress panel, which stands where it does.
+    const overlay = r.debug && !running;
+    if (this.overlay.hidden === overlay) this.overlay.hidden = !overlay;
     for (const line of r.lines) {
       const block = this.blocks.get(line.species);
       if (!block) continue;
       const text = blockText(line);
       if (block.textContent !== text) block.textContent = text;
     }
+  }
+
+  /**
+   * THE REPORT ONTO THE CLIPBOARD, and if the browser will not have it,
+   * SELECTED so a thumb can long-press and copy. `navigator.clipboard`
+   * wants a user gesture and a secure origin: the button is the gesture
+   * and GitHub Pages is the origin, but an iOS Safari that refuses
+   * anyway must not leave the report unreachable — which is the whole
+   * point of a report meant to be pasted into a card.
+   */
+  private async copyReport(button: HTMLButtonElement): Promise<void> {
+    const text = this.stressReport.textContent ?? '';
+    const say = (word: string): void => {
+      button.textContent = word;
+      const doc = button.ownerDocument;
+      doc.defaultView?.setTimeout(() => { button.textContent = 'COPY'; }, 1200);
+    };
+    try {
+      await button.ownerDocument.defaultView?.navigator?.clipboard?.writeText(text);
+      say('COPIED');
+      return;
+    } catch {
+      // Fall through to the selection.
+    }
+    const doc = button.ownerDocument;
+    const selection = doc.defaultView?.getSelection?.();
+    if (selection && doc.createRange) {
+      const range = doc.createRange();
+      range.selectNodeContents(this.stressReport);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      say('SELECTED');
+      return;
+    }
+    say('COPY FAILED');
   }
 
   private layoutCluster(held: CreatureSpecies | null): void {

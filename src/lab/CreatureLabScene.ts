@@ -99,9 +99,10 @@ import { assets, type Assets } from '../assets/assets';
 import {
   FollowCamera, TAP_PIXELS, demandFromLook, lookDeltaOf, pickCreature, type FollowTarget, type MutableLook, type Ndc, type Viewport,
 } from '../control';
+
 import {
-  CREATURE_SPECIES, ControlLedger, CreatureSim, LAB_CREATURE_IDS, LAB_FLOOR, LAB_SEED, MM_PER_UNIT, WORLD_UP, createLabWorld,
-  faceUnder, faceWord, labSpawns, newMutableIntent, unitsOfMm,
+  CREATURE_SPECIES, ControlLedger, CreatureSim, LAB_CREATURE_IDS, LAB_FLOOR, LAB_SEED, LAB_SPECIES_TABLE, MM_PER_UNIT,
+  WORLD_UP, createLabWorld, faceUnder, faceWord, labSpawns, labStressSpawn, newMutableIntent, unitsOfMm,
   type Climbable, type CreatureId, type CreatureSpecies, type CreatureState, type CreatureWorld, type Disturbance,
   type DisturbanceSource, type LabWorld, type MutableIntent, type MutableVec3, type PredationPolicy, type Vec3,
 } from '../creatures';
@@ -118,9 +119,10 @@ import { setOrigin, toLocal, toWorld } from '../world/origin';
 import { LabUi, type CreatureLine, type LabReadout } from './LabUi';
 import { HORIZON, buildLabMeshes, type LabMeshes } from './labMeshes';
 import {
-  CAMERA_PRESENCE, DISTURB_RADIUS, LAB_ACTION, LAB_SCENE_ID, POSSESS_ROW, TAP_SLOP_PX, nextPredation,
-  type LabAction, type LabCameraMode,
+  CAMERA_PRESENCE, DISTURB_RADIUS, LAB_ACTION, LAB_SCENE_ID, POSSESS_ROW, TAP_SLOP_PX, nextPredation, nextRigMode,
+  type LabAction, type LabCameraMode, type LabRigMode,
 } from './labTool';
+import { StressTest, stressBlock, stressReport, type StressConditions, type StressPhase } from './stressTest';
 
 // ---------------------------------------------------------------------------
 // Hooks
@@ -152,8 +154,16 @@ export type CreatureLabWire = (ctx: SceneContext) => CreatureLabHooks;
 // Numbers
 // ---------------------------------------------------------------------------
 
-/** The five, in the table's order: what the simulation runs and the renderer draws. */
-export const LAB_SPECIES: readonly CreatureSpecies[] = Object.freeze(LAB_CREATURE_IDS.map((id) => CREATURE_SPECIES[id]));
+/**
+ * The five, in the table's order: what the simulation runs and the
+ * renderer draws — with the BENCH'S capacity in place of the island's
+ * per-device cap (`creatures/labWorld.LAB_SPECIES_TABLE`, which argues
+ * it). Every other number is the island's, which is the point of
+ * testing here; and while the bench holds its ordinary five the raised
+ * cap changes nothing, because a cap only bites when there are more
+ * animals than it allows.
+ */
+export const LAB_SPECIES: readonly CreatureSpecies[] = LAB_SPECIES_TABLE;
 
 /** The bench's centre: the rendered origin sits on it, so local and world coordinates agree in the box. */
 const CENTRE: WorldPoint = world(0, 0);
@@ -486,6 +496,10 @@ interface MutableReadout extends LabReadout {
   aiMs: number;
   animMs: number;
   lines: CreatureLine[];
+  stressPhase: StressPhase;
+  stressCreatures: number;
+  stressText: string;
+  rigs: LabRigMode;
 }
 
 function newLine(species: CreatureSpecies): CreatureLine {
@@ -541,6 +555,18 @@ export function buildCreatureLabScene(ctx: SceneContext, hooks: CreatureLabHooks
   let frameMs = 0;
   let animMs = 0;
 
+  // THE STRESS TEST (Joshua, 2026-09-10): the run's arithmetic is
+  // `stressTest.ts`'s; what is here is the bench it fills, the skeletons
+  // it lends and the report it leaves standing.
+  const stress = new StressTest({ species: LAB_CREATURE_IDS });
+  /** ALL — one animated rig per creature — or the detail rung's budget (`labTool.LabRigMode`). */
+  let rigMode: LabRigMode = 'all';
+  /** How many the crowd has placed, and how many of each: the placement's index, and the rigs to lend. */
+  let placed = 0;
+  const crowd = new Map<CreatureId, number>();
+  /** The finished report, built once when the run ends and shown until RUN AGAIN or RESET. */
+  let report = '';
+
   // Per-frame scratch, rewritten in place (the header: no allocation on the frame path that is this file's).
   const intent: MutableIntent = newMutableIntent();
   const target: MutableTarget = { at: CENTRE, height: LAB_FLOOR, heading: 0, up: WORLD_UP, lengthUnits: 1 };
@@ -563,6 +589,7 @@ export function buildCreatureLabScene(ctx: SceneContext, hooks: CreatureLabHooks
   const readout: MutableReadout = {
     held: null, camera: 'follow', predation: lab.predation, disturbArmed: false, cameraDisturbs: false, debug: true,
     fps: 0, frameMs: 0, aiMs: 0, animMs: 0, lines: POSSESS_ROW.map((entry) => newLine(CREATURE_SPECIES[entry.species])),
+    stressPhase: 'idle', stressCreatures: 0, stressText: '', rigs: 'all',
   };
 
   const following = (): boolean => cameraMode === 'follow' && lab.ledger.size > 0;
@@ -665,7 +692,15 @@ export function buildCreatureLabScene(ctx: SceneContext, hooks: CreatureLabHooks
     readout.frameMs = frameMs;
     readout.aiMs = cost.thinkMs + cost.moveMs + cost.demandMs;
     readout.animMs = animMs;
-    fillLines();
+    const run = stress.readout();
+    readout.stressPhase = run.phase;
+    readout.stressCreatures = run.creatures;
+    readout.stressText = stress.finished ? report : run.phase === 'idle' ? '' : stressBlock(run);
+    readout.rigs = rigMode;
+    // The per-creature overlay is hidden while a run is going (`LabUi`), so
+    // there is nothing to project for it: five lines of arithmetic and five
+    // matrix projections a HUD refresh, kept out of the thing being measured.
+    if (run.phase === 'idle') fillLines();
     return readout;
   };
 
@@ -741,6 +776,91 @@ export function buildCreatureLabScene(ctx: SceneContext, hooks: CreatureLabHooks
     lab.world.setCameraDisturbance(on ? eyeDisturbance : null);
   };
 
+  /**
+   * WHAT THE RUN WAS RUN UNDER. Printed in the report so two runs that
+   * were not the same test cannot be read as though they were — the
+   * build above all, since the number moves with every change to the
+   * creatures or the renderer.
+   */
+  const conditions = (): StressConditions => ({
+    stamp: new Date().toISOString(),
+    build: `${__APP_VERSION__} · ${__BUILD_COMMIT__}`,
+    viewport: `${Math.round(viewport.width)} × ${Math.round(viewport.height)} css px`,
+    rigs: rigMode,
+    rung: LAB_RUNG,
+    predation: lab.predation.toUpperCase(),
+    camera: 'free, the bench viewpoint, observer',
+  });
+
+  /**
+   * START A RUN, from the same bench every time: the five back at their
+   * spawns, nobody held, the camera at the bench's fixed viewpoint,
+   * predation off and the camera not disturbing anybody (Joshua: "Keep
+   * the player/camera in the normal test position so each run is
+   * comparable"). Anything a hand had changed is put back HERE rather
+   * than trusted, because a run is only comparable to the last one if
+   * the room is.
+   */
+  const startStress = (): void => {
+    reset();
+    lab.observe();
+    lab.setPredation('off');
+    setCameraDisturbs(false);
+    debug = false;
+    free.restore(FREE_START);
+    cameraMode = 'free';
+    followPlaced = false;
+    crowd.clear();
+    placed = 0;
+    report = '';
+    if (fauna !== null) {
+      fauna.clearPoolSizes();
+      // One rig for the bench's own body of each species; the crowd's are lent as they land.
+      if (rigMode === 'all') for (const species of LAB_SPECIES) fauna.setPoolSize(species.id, 1);
+    }
+    stress.start();
+    ui?.refreshNow();
+  };
+
+  /** Clear the run and the report, give the rung its pools back, and put the bench back to its five. */
+  const resetStress = (): void => {
+    stress.reset();
+    report = '';
+    crowd.clear();
+    placed = 0;
+    fauna?.clearPoolSizes();
+    reset();
+    ui?.refreshNow();
+  };
+
+  /**
+   * ONE FRAME OF THE RUN. The test is handed the RAW frame time — the
+   * unclamped one, for `FrameStats`'s reason — and answers with a
+   * species to place, or nothing. Every body it names is placed: the
+   * count is the test's and the bench must match it.
+   *
+   * The skeleton is lent HERE and not by the renderer's own budget: the
+   * rung's pool is a device budget for a wild population seen across a
+   * forest, and every creature in this room is within a metre of the
+   * camera (`FaunaView.setPoolSize` argues it). At RIGS: RUNG the pool
+   * is left alone and everything past it draws as an impostor, which is
+   * the other question and the other number.
+   */
+  const driveStress = (rawDt: number): void => {
+    const species = stress.frame(rawDt);
+    if (species !== null) {
+      lab.sim.spawn(labStressSpawn(placed, species));
+      placed += 1;
+      const n = (crowd.get(species) ?? 0) + 1;
+      crowd.set(species, n);
+      if (rigMode === 'all' && fauna !== null) fauna.setPoolSize(species, 1 + n);
+    }
+    if (stress.finished && report === '') {
+      report = stressReport(stress.result(), conditions());
+      ui?.refreshNow();
+    }
+  };
+
   const onAction = (action: LabAction): void => {
     switch (action) {
       case LAB_ACTION.observe:
@@ -763,6 +883,25 @@ export function buildCreatureLabScene(ctx: SceneContext, hooks: CreatureLabHooks
         return;
       case LAB_ACTION.debug:
         debug = !debug;
+        return;
+      case LAB_ACTION.stress:
+        if (stress.running) stress.stop();
+        else startStress();
+        return;
+      case LAB_ACTION.stressAgain:
+        startStress();
+        return;
+      case LAB_ACTION.stressReset:
+        resetStress();
+        return;
+      case LAB_ACTION.stressCopy:
+        // The HUD owns the clipboard: it holds the text and the element (`LabUi.copyReport`).
+        return;
+      case LAB_ACTION.rigs:
+        rigMode = nextRigMode(rigMode);
+        // Between runs the choice takes effect at once, so what is on the
+        // bench is what the next run will measure.
+        if (!stress.running && fauna !== null) fauna.clearPoolSizes();
         return;
     }
   };
@@ -877,6 +1016,9 @@ export function buildCreatureLabScene(ctx: SceneContext, hooks: CreatureLabHooks
     update(frame: FrameInfo) {
       stats.record(frame.rawDt, frame.simDt);
       if (Number.isFinite(frame.rawDt) && frame.rawDt > 0) frameMs += (frame.rawDt * 1000 - frameMs) * 0.1;
+      // THE STRESS TEST'S FRAME, first: a creature placed now is simulated
+      // and drawn on the same frame it was counted on.
+      driveStress(frame.rawDt);
       const snap = ctx.input.snapshot();
       const stickRead = stick === null ? null : stick.read();
       if (taps.observe(snap)) tap(taps.x, taps.y);

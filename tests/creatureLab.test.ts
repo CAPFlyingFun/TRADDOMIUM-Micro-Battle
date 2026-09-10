@@ -27,7 +27,8 @@ import {
   buildCreatureLabScene, buttonsFor, controlLabel, creatureField, creatureLabTool, nextPredation, possessAction, possessedSpeciesOf,
   predationLabel, type CreatureLabHooks, type CreatureLabScene, type LabButtonKind,
 } from '../src/lab';
-import { DISTURB_RADIUS } from '../src/lab/labTool';
+import { DISTURB_RADIUS, rigModeLabel } from '../src/lab/labTool';
+import { MAX_CREATURES, RECOVERY_S, SETTLE_S, SPAWN_EVERY_S, WINDOW_S } from '../src/lab/stressTest';
 import { world } from '../src/world/coords';
 import { setOrigin } from '../src/world/origin';
 
@@ -56,7 +57,7 @@ interface Rig {
   readonly field: (name: string) => string;
   readonly button: (action: string) => HTMLButtonElement;
   readonly press: (action: string) => void;
-  readonly frame: (n?: number, simDt?: number) => void;
+  readonly frame: (n?: number, simDt?: number, rawDt?: number) => void;
   readonly creature: (species: CreatureId) => CreatureState;
   readonly heldSpecies: () => CreatureId | null;
   readonly shownButtons: () => LabButtonKind[];
@@ -94,10 +95,12 @@ function rig(): Rig {
   const scene = buildCreatureLabScene(ctx, hooks);
   scene.resize(932, 430);
   let elapsed = 0;
-  const frame = (n = 1, simDt = SIXTY): void => {
+  // `rawDt` is separate from `simDt` on purpose (ARCHITECTURE §2.4), and the
+  // stress test reads the RAW one — so a test that wants a slow phone says so.
+  const frame = (n = 1, simDt = SIXTY, rawDt = SIXTY): void => {
     for (let i = 0; i < n; i += 1) {
       elapsed += simDt;
-      scene.update({ rawDt: SIXTY, simDt, elapsed });
+      scene.update({ rawDt, simDt, elapsed });
       input.endFrame();
     }
   };
@@ -602,5 +605,142 @@ describe('CreatureLabScene', () => {
     expect(r.uiLayer.querySelector('[data-control="stick"]')).toBeNull();
     expect(r.scene.three.getObjectByName('lab:bench')).toBeUndefined();
     expect(r.scene.three.getObjectByName('fauna')).toBeUndefined();
+  });
+});
+
+describe('the stress test on the bench (Joshua, 2026-09-10)', () => {
+  /** The panel's text, or '' when the panel is not up. */
+  const panel = (r: Rig): string => {
+    const node = r.uiLayer.querySelector<HTMLElement>('[data-role="lab-stress-panel"]');
+    return node === null || node.hidden ? '' : node.textContent ?? '';
+  };
+  const placedTotal = (r: Rig): number =>
+    LAB_CREATURE_IDS.reduce((total, id) => total + r.scene.lab.sim.placed(id), 0);
+
+  it('offers the run and the one option that changes its answer, and hides the panel until there is one', async () => {
+    const r = await entered();
+    expect(r.field(LAB_FIELD.stress)).toBe('STRESS TEST');
+    expect(r.field(LAB_FIELD.rigs)).toBe(rigModeLabel('all'));
+    expect(panel(r)).toBe('');
+    expect(placedTotal(r)).toBe(LAB_CREATURE_IDS.length);
+  });
+
+  it('holds the room still when it starts, so two runs are two readings of one test', async () => {
+    const r = await entered();
+    // Leave the room as unlike the test position as the buttons allow.
+    r.press(LAB_ACTION.predation);
+    r.press(LAB_ACTION.cameraDisturbs);
+    r.press(possessAction('housefly'));
+    r.frame(4);
+    expect(r.heldSpecies()).toBe('housefly');
+
+    r.press(LAB_ACTION.stress);
+    r.frame(1);
+    expect(r.heldSpecies()).toBeNull();
+    expect(r.scene.cameraMode).toBe('free');
+    expect(r.scene.lab.predation).toBe('off');
+    expect(r.scene.cameraDisturbs).toBe(false);
+    expect(r.scene.debug).toBe(false);
+    expect(r.field(LAB_FIELD.stress)).toBe('STRESS: WARMING UP');
+    expect(panel(r)).toContain('WARMING UP');
+  });
+
+  it('spawns nothing during the warm-up, then about one a second, each with its own skeleton', async () => {
+    const r = await entered();
+    r.press(LAB_ACTION.stress);
+    const fauna = must(r.scene.fauna, 'the fauna view');
+    // The settle plus four of the window's five seconds: still the bench's own five.
+    r.frame(60 * (SETTLE_S + WINDOW_S - 1));
+    expect(placedTotal(r)).toBe(LAB_CREATURE_IDS.length);
+    // Six more seconds — the last of the window, then five of spawning: one a
+    // second, give or take the frame the clock lands on.
+    r.frame(60 * 6);
+    const crowd = placedTotal(r) - LAB_CREATURE_IDS.length;
+    expect(crowd).toBeGreaterThanOrEqual(5);
+    expect(crowd).toBeLessThanOrEqual(7);
+    // The HUD paints at `HUD_HZ`, so its count is the bench's or one behind it —
+    // never ahead, and never adrift.
+    const shown = Number(/insects\s+(\d+)/.exec(panel(r))?.[1] ?? -1);
+    expect(shown).toBeLessThanOrEqual(crowd);
+    expect(shown).toBeGreaterThanOrEqual(crowd - 1);
+    // RIGS: ALL means a rig apiece — the bench's own body of a species, plus its crowd.
+    const lent = LAB_CREATURE_IDS.reduce((total, id) => total + fauna.poolSize(id), 0);
+    expect(lent).toBe(LAB_CREATURE_IDS.length + crowd);
+    expect(SPAWN_EVERY_S).toBe(1);
+  });
+
+  it('runs to a report: the thresholds, the recovery, and the copyable block', async () => {
+    const r = await entered();
+    r.press(LAB_ACTION.stress);
+    // A phone at eight frames a second: under every threshold at once, so the
+    // run records all four, holds, and settles.
+    const slow = 1 / 8;
+    for (let i = 0; i < 400 && r.scene.lab.sim.placed('queen') >= 0; i += 1) {
+      r.frame(1, SIXTY, slow);
+      if (r.field(LAB_FIELD.stress) === 'STRESS: DONE') break;
+    }
+    expect(r.field(LAB_FIELD.stress)).toBe('STRESS: DONE');
+    const text = panel(r);
+    expect(text).toContain('STRESS TEST COMPLETE');
+    expect(text).toContain('SUSTAINED AT 30+ FPS');
+    expect(text).toContain('Total insects');
+    expect(text).toContain('INSECTS AT EACH THRESHOLD');
+    expect(text).toContain('below 10 fps');
+    expect(text).toContain(`FPS after ${RECOVERY_S} s hold`);
+    expect(text).toContain('do not collide with or avoid one another');
+    // The conditions name the run, so a pasted report can be placed.
+    expect(text).toContain('one animated skeleton per insect');
+    expect(text).toContain('predation  OFF');
+    expect(text).toContain('932 × 430 css px');
+    // And the buttons to do it again are there now, and were not before.
+    for (const action of [LAB_ACTION.stressCopy, LAB_ACTION.stressAgain, LAB_ACTION.stressReset]) {
+      expect(r.button(action).hidden, action).toBe(false);
+    }
+  });
+
+  it('RUN AGAIN is the same test: the same creatures, in the same order', async () => {
+    const speciesOf = (r: Rig): string[] => {
+      const out: string[] = [];
+      for (const id of LAB_CREATURE_IDS) for (let i = 0; i < r.scene.lab.sim.placed(id) - 1; i += 1) out.push(id);
+      return out.sort();
+    };
+    const r = await entered();
+    r.press(LAB_ACTION.stress);
+    r.frame(60 * (WINDOW_S + 8));
+    const first = speciesOf(r);
+    expect(first.length).toBeGreaterThan(4);
+
+    r.press(LAB_ACTION.stress);   // stop
+    r.press(LAB_ACTION.stressAgain);
+    r.frame(60 * (WINDOW_S + 8));
+    expect(speciesOf(r)).toEqual(first);
+  });
+
+  it('RESET takes the crowd away, gives the rung its pools back and puts the queen back in hand', async () => {
+    const r = await entered();
+    const fauna = must(r.scene.fauna, 'the fauna view');
+    r.press(LAB_ACTION.stress);
+    r.frame(60 * (WINDOW_S + 6));
+    expect(placedTotal(r)).toBeGreaterThan(LAB_CREATURE_IDS.length);
+
+    r.press(LAB_ACTION.stressReset);
+    r.frame(2);
+    expect(placedTotal(r)).toBe(LAB_CREATURE_IDS.length);
+    expect(panel(r)).toBe('');
+    expect(r.field(LAB_FIELD.stress)).toBe('STRESS TEST');
+    expect(r.heldSpecies()).toBe('queen');
+    expect(fauna.poolSize('aphid')).toBeGreaterThan(0);
+  });
+
+  it('RIGS names which question is being asked, and never lends past the run\'s ceiling', async () => {
+    const r = await entered();
+    r.press(LAB_ACTION.rigs);
+    expect(r.field(LAB_FIELD.rigs)).toBe(rigModeLabel('rung'));
+    r.press(LAB_ACTION.stress);
+    r.frame(60 * (WINDOW_S + 6));
+    const fauna = must(r.scene.fauna, 'the fauna view');
+    // At RIGS: RUNG the pools are the detail ladder's and the crowd draws as impostors.
+    expect(fauna.poolSize('aphid')).toBeLessThan(placedTotal(r));
+    expect(MAX_CREATURES).toBeGreaterThan(100);
   });
 });

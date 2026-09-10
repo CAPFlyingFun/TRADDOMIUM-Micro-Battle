@@ -1325,3 +1325,61 @@ describe('the budget', () => {
     expect(CRUMBS_PER_LENGTH).toBeGreaterThan(0);
   });
 });
+
+describe('a pool the Lab can grow: one rig per creature', () => {
+  it('starts at the rung\'s budget and takes a named size instead', async () => {
+    const v = await view('medium');
+    expect(v.poolSize('aphid')).toBe(poolSizeFor('medium', 'aphid'));
+    v.setPoolSize('aphid', 40);
+    expect(v.poolSize('aphid')).toBe(40);
+    // The others are untouched: a named pool is one species' own.
+    expect(v.poolSize('housefly')).toBe(poolSizeFor('medium', 'housefly'));
+  });
+
+  it('grows ONE at a time without rebuilding the rest — the stress test lends a skeleton a second', async () => {
+    const v = await view('medium');
+    v.setPoolSize('housefly', 1);
+    const first = v.group.getObjectByName('housefly:rig:0');
+    expect(first).toBeDefined();
+    for (let n = 2; n <= 12; n += 1) {
+      v.setPoolSize('housefly', n);
+      expect(v.poolSize('housefly')).toBe(n);
+      // The rig that was already there is the SAME object: nothing was re-cloned.
+      expect(v.group.getObjectByName('housefly:rig:0')).toBe(first);
+    }
+    expect(v.group.getObjectByName('housefly:rig:11')).toBeDefined();
+  });
+
+  it('shrinks by letting go of the rigs it drops, and gives the rung its budget back', async () => {
+    const v = await view('medium');
+    v.setPoolSize('aphid', 12);
+    const creatures = Array.from({ length: 12 }, (_, i) => creature('aphid', `a${i}`, i * 3, 0));
+    v.update(creatures, EYE, 1 / 60, 1);
+    expect(v.cost.rigsLent.aphid).toBe(12);
+    v.setPoolSize('aphid', 3);
+    expect(v.poolSize('aphid')).toBe(3);
+    v.update(creatures, EYE, 1 / 60, 1);
+    expect(v.cost.rigsLent.aphid).toBe(3);
+    // Nine bodies still drawn, as impostors — nothing vanished with the rigs.
+    expect(v.cost.impostors.aphid).toBe(9);
+    v.clearPoolSizes();
+    expect(v.poolSize('aphid')).toBe(poolSizeFor('medium', 'aphid'));
+  });
+
+  it('lends every creature a rig when the pool is the crowd\'s size', async () => {
+    const v = await view('medium');
+    const creatures = Array.from({ length: 30 }, (_, i) => creature('housefly', `f${i}`, i, 0, { behaviour: 'fly', height: 20 }));
+    v.setPoolSize('housefly', creatures.length);
+    v.update(creatures, EYE, 1 / 60, 1);
+    expect(v.cost.rigsLent.housefly).toBe(30);
+    expect(v.cost.impostors.housefly).toBe(0);
+  });
+
+  it('remembers a size named before the model has loaded, and applies it when it lands', async () => {
+    const v = new FaunaView({ species: SPECIES, loadModel: loader(), rung: 'medium' });
+    v.setPoolSize('earthworm', 9);
+    await v.ready();
+    expect(v.poolSize('earthworm')).toBe(9);
+    views.push(v);
+  });
+});

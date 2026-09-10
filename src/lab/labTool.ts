@@ -73,6 +73,16 @@ export const LAB_ACTION = {
   reset: 'lab:reset',
   /** The per-creature debug overlay on or off (brief §8). */
   debug: 'lab:debug',
+  /** THE STRESS TEST: start a run, or stop the one running (Joshua, 2026-09-10). */
+  stress: 'lab:stress',
+  /** Run the same test again — the same seeded sequence, from the same bench. */
+  stressAgain: 'lab:stress-again',
+  /** Clear the report and put the bench back to its five. */
+  stressReset: 'lab:stress-reset',
+  /** Put the finished report on the clipboard. */
+  stressCopy: 'lab:stress-copy',
+  /** RIGS: ALL (one animated skeleton per creature) or RUNG (the detail budget, the rest as impostors). */
+  rigs: 'lab:rigs',
 } as const;
 
 export type LabAction = (typeof LAB_ACTION)[keyof typeof LAB_ACTION];
@@ -116,6 +126,12 @@ export const LAB_FIELD = {
   frameMs: 'lab-frame-ms',
   aiMs: 'lab-ai-ms',
   animMs: 'lab-anim-ms',
+  /** The STRESS button's own label: what it is doing, and the count while it does it. */
+  stress: 'lab-stress',
+  /** The RIGS toggle's label. */
+  rigs: 'lab-rigs',
+  /** The live line while a run is going, and the finished report when it is done. */
+  stressReport: 'lab-stress-report',
 } as const;
 
 /** The debug overlay's block for a species: `lab-earthworm`. */
@@ -218,3 +234,45 @@ export const TAP_SLOP_PX = 12;
 
 /** The lab HUD's refresh rate: readable, and cheap in the scene measuring the animals. */
 export const HUD_HZ = 10;
+
+// ---------------------------------------------------------------------------
+// The stress test's words (Joshua, 2026-09-10)
+// ---------------------------------------------------------------------------
+
+/**
+ * WHICH SKELETONS A RUN LENDS. `all` gives every creature its own
+ * animated rig — what "fully active" means when every animal is within
+ * a metre of the camera — and `rung` leaves the detail ladder's budget
+ * alone, so everything past it draws as an impostor. The two answer
+ * different questions and the report says which was asked
+ * (`lab/stressTest.stressReport`).
+ */
+export type LabRigMode = 'all' | 'rung';
+
+export function nextRigMode(mode: LabRigMode): LabRigMode {
+  return mode === 'all' ? 'rung' : 'all';
+}
+
+export function rigModeLabel(mode: LabRigMode): string {
+  return `RIGS: ${mode === 'all' ? 'ALL' : 'RUNG'}`;
+}
+
+/**
+ * What the STRESS button says. Idle it offers the run; running it offers
+ * to stop it and counts what is on the bench; done it says so, and the
+ * panel below it carries the report and RUN AGAIN.
+ */
+export function stressLabel(phase: string, creatures: number): string {
+  switch (phase) {
+    case 'warmup':
+      return 'STRESS: WARMING UP';
+    case 'spawning':
+      return `STOP (${creatures})`;
+    case 'recovery':
+      return `STRESS: SETTLING (${creatures})`;
+    case 'done':
+      return 'STRESS: DONE';
+    default:
+      return 'STRESS TEST';
+  }
+}
