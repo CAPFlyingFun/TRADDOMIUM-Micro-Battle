@@ -83,6 +83,8 @@ export const LAB_ACTION = {
   stressCopy: 'lab:stress-copy',
   /** RIGS: ALL (one animated skeleton per creature) or RUNG (the detail budget, the rest as impostors). */
   rigs: 'lab:rigs',
+  /** POOL: the species the next run draws from — MIX, or one species alone (`nextStressPool`). */
+  stressPool: 'lab:stress-pool',
 } as const;
 
 export type LabAction = (typeof LAB_ACTION)[keyof typeof LAB_ACTION];
@@ -130,6 +132,8 @@ export const LAB_FIELD = {
   stress: 'lab-stress',
   /** The RIGS toggle's label. */
   rigs: 'lab-rigs',
+  /** The POOL toggle's label: which species the next run draws from. */
+  stressPool: 'lab-stress-pool',
   /** The live line while a run is going, and the finished report when it is done. */
   stressReport: 'lab-stress-report',
 } as const;
@@ -255,6 +259,53 @@ export function nextRigMode(mode: LabRigMode): LabRigMode {
 
 export function rigModeLabel(mode: LabRigMode): string {
   return `RIGS: ${mode === 'all' ? 'ALL' : 'RUNG'}`;
+}
+
+/**
+ * A RUN'S SPECIES POOL: every species mixed, or one species alone.
+ *
+ * Joshua, 2026-09-10, after the mixed run gave the first density number:
+ * he wants workers only, queens only, flies only, aphids only and worms
+ * only, to find which animal is the expensive one. A mixed run cannot
+ * answer that — the seeded draw hands out roughly a fifth of each, so a
+ * species five times the cost of the others moves the total by less than
+ * the noise between two builds.
+ *
+ * `mix` is not a `CreatureId` and never can be (`creatures/species.ts`
+ * lists the five), so the union needs no tag.
+ */
+export type StressPool = 'mix' | CreatureId;
+
+/** MIX → the first species → ... → the last → MIX. An id the lab does not run falls back to MIX. */
+export function nextStressPool(pool: StressPool, ids: readonly CreatureId[]): StressPool {
+  if (ids.length === 0) return 'mix';
+  if (pool === 'mix') return ids[0];
+  const i = ids.indexOf(pool);
+  if (i < 0) return 'mix';
+  return i + 1 < ids.length ? ids[i + 1] : 'mix';
+}
+
+/**
+ * THE BUTTON'S TEXT, which is why it is short: it sits in the stress row
+ * on a phone in landscape beside STRESS and RIGS. The species id in
+ * capitals, except `earthworm`, which is four letters longer than the
+ * row can spare and is WORM everywhere else in this file
+ * (`POSSESS_ROW`).
+ */
+export function stressPoolLabel(pool: StressPool): string {
+  if (pool === 'mix') return 'POOL: MIX';
+  return `POOL: ${pool === 'earthworm' ? 'WORM' : pool.toUpperCase()}`;
+}
+
+/**
+ * THE REPORT'S WORDS, which is why they are not the button's. A pasted
+ * report outlives the conversation that produced it and is read by
+ * someone who never saw the row, so the species' REAL id goes in —
+ * `earthworm only`, not `WORM only`, which could be any of several
+ * animals a year from now.
+ */
+export function stressPoolWords(pool: StressPool): string {
+  return pool === 'mix' ? 'all five, mixed' : `${pool} only`;
 }
 
 /**

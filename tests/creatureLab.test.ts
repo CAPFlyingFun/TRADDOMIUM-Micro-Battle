@@ -27,7 +27,7 @@ import {
   buildCreatureLabScene, buttonsFor, controlLabel, creatureField, creatureLabTool, nextPredation, possessAction, possessedSpeciesOf,
   predationLabel, type CreatureLabHooks, type CreatureLabScene, type LabButtonKind,
 } from '../src/lab';
-import { DISTURB_RADIUS, rigModeLabel } from '../src/lab/labTool';
+import { DISTURB_RADIUS, rigModeLabel, stressPoolLabel, stressPoolWords } from '../src/lab/labTool';
 import { MAX_CREATURES, RECOVERY_S, SETTLE_S, SPAWN_EVERY_S, WINDOW_S } from '../src/lab/stressTest';
 import { world } from '../src/world/coords';
 import { setOrigin } from '../src/world/origin';
@@ -617,10 +617,84 @@ describe('the stress test on the bench (Joshua, 2026-09-10)', () => {
   const placedTotal = (r: Rig): number =>
     LAB_CREATURE_IDS.reduce((total, id) => total + r.scene.lab.sim.placed(id), 0);
 
-  it('offers the run and the one option that changes its answer, and hides the panel until there is one', async () => {
+  /**
+   * THE PANEL STANDS CLEAR OF THE TOOLS, and STOP is therefore
+   * pressable. A PROXY, and honest about being one: jsdom lays nothing
+   * out, so this pins the two style numbers a Chromium measurement
+   * turned into a rule rather than the geometry itself. Measured at
+   * 810 × 374, 932 × 430 and 667 × 375, the right-hand column — three
+   * tool rows and the perf line — runs to y 156. The panel is `left:156
+   * width:400` with `pointer-events:auto`, and it is later in the DOM,
+   * so anywhere it overlaps a button it does not merely cover the button
+   * but takes its taps. At top 96 that cost STOP a 22 px sliver with two
+   * buttons in the stress row and ALL of it once POOL made three — the
+   * one control that abandons a seven-minute run, unpressable.
+   */
+  it('stands below the tool column, so STOP is not a button the panel eats', async () => {
+    const r = await entered();
+    const node = must(r.uiLayer.querySelector<HTMLElement>('[data-role="lab-stress-panel"]'), 'the stress panel');
+    // jsdom re-serialises cssText with spaces after the colons, so the
+    // declarations are compared with the whitespace taken out.
+    const css = (el: HTMLElement): string => el.style.cssText.replace(/\s+/g, '');
+    const top = Number(/top:(\d+)px/.exec(css(node))?.[1] ?? -1);
+    expect(top).toBeGreaterThanOrEqual(156);
+    // And the report scrolls inside the panel while the buttons under it do not,
+    // so COPY is never parked below thirty lines of report on a phone.
+    const report = must(r.uiLayer.querySelector<HTMLElement>(`[data-field="${LAB_FIELD.stressReport}"]`), 'the report');
+    expect(css(report)).toContain('overflow:auto');
+    expect(css(report)).toContain('min-height:0');
+    expect(css(node)).toContain('overflow:hidden');
+  });
+  /**
+   * THE RIGS THE VIEW IS HOLDING RIGHT NOW, summed across the five —
+   * asked of `FaunaView` itself rather than worked out from the pool
+   * sizes, because a buried worm is placed, poolled and not drawn. This
+   * is what a census taken on the NEXT frame will read: the scene files
+   * the run's frame before the renderer runs again.
+   */
+  const rigsDrawn = (r: Rig): number => {
+    const cost = must(r.scene.fauna, 'the fauna view').cost;
+    return LAB_CREATURE_IDS.reduce((total, id) => total + (cost.rigsLent[id] ?? 0), 0);
+  };
+  const poolTotal = (r: Rig): number => {
+    const fauna = must(r.scene.fauna, 'the fauna view');
+    return LAB_CREATURE_IDS.reduce((total, id) => total + fauna.poolSize(id), 0);
+  };
+  /** A `  label   N` line of the report, or −1 when the block is not printed at all. */
+  const reported = (text: string, label: string): number => {
+    const found = new RegExp(`^ {2}${label} +(\\d+)$`, 'm').exec(text);
+    return found === null ? -1 : Number(found[1]);
+  };
+  /**
+   * STOP THE RUN AND SIT OUT THE RECOVERY, one frame at a time, and
+   * answer with the report and with the view's rig count as it stood on
+   * the frame BEFORE the report was built — which is the frame the
+   * report's census was taken from.
+   *
+   * The recovery's ten seconds are spent eight frames a second rather
+   * than sixty: `rawDt` is the run's clock and `simDt` is the bench's,
+   * they are separate values (ARCHITECTURE §2.4), and the run does not
+   * care how many frames its ten seconds took.
+   */
+  const settle = (r: Rig): { readonly text: string; readonly lentBefore: number } => {
+    r.press(LAB_ACTION.stress);
+    let lentBefore = -1;
+    for (let i = 0; i < 200; i += 1) {
+      const before = rigsDrawn(r);
+      r.frame(1, SIXTY, 1 / 8);
+      if (panel(r).includes('DRAWN AT THE END')) {
+        lentBefore = before;
+        break;
+      }
+    }
+    return { text: panel(r), lentBefore };
+  };
+
+  it('offers the run and the two options that change its answer, and hides the panel until there is one', async () => {
     const r = await entered();
     expect(r.field(LAB_FIELD.stress)).toBe('STRESS TEST');
     expect(r.field(LAB_FIELD.rigs)).toBe(rigModeLabel('all'));
+    expect(r.field(LAB_FIELD.stressPool)).toBe(stressPoolLabel('mix'));
     expect(panel(r)).toBe('');
     expect(placedTotal(r)).toBe(LAB_CREATURE_IDS.length);
   });
@@ -742,5 +816,121 @@ describe('the stress test on the bench (Joshua, 2026-09-10)', () => {
     // At RIGS: RUNG the pools are the detail ladder's and the crowd draws as impostors.
     expect(fauna.poolSize('aphid')).toBeLessThan(placedTotal(r));
     expect(MAX_CREATURES).toBeGreaterThan(100);
+  });
+
+  // ─── the census (Joshua, 2026-09-10: "how many creatures were drawn as
+  //     full rigs versus impostors") ────────────────────────────────────
+
+  it('counts what was DRAWN, not only what was placed — live, and in the report', async () => {
+    const r = await entered();
+    r.press(LAB_ACTION.stress);
+    r.frame(60 * (SETTLE_S + WINDOW_S + 12));
+
+    // THE LIVE LINE, while the crowd is arriving. At RIGS: ALL every drawn
+    // body carries a skeleton, so the impostor half of the split is zero —
+    // and that zero is a count, not the absence of one.
+    const live = /^drawn +(\d+) rigs · (\d+) impostors$/m.exec(panel(r));
+    expect(live, `the live block should carry a drawn line:\n${panel(r)}`).not.toBeNull();
+    const shownRigs = Number(must(live, 'the live census')[1]);
+    expect(shownRigs).toBeGreaterThan(LAB_CREATURE_IDS.length);
+    expect(Number(must(live, 'the live census')[2])).toBe(0);
+
+    // THE REPORT'S BLOCK, and the frame it is a census OF: the run is
+    // handed the previous frame's drawing, because `rawDt` is the previous
+    // frame's duration — the two halves of one reading.
+    const { text, lentBefore } = settle(r);
+    expect(lentBefore).toBeGreaterThan(0);
+    expect(reported(text, 'full rigs')).toBe(lentBefore);
+    expect(reported(text, 'impostors')).toBe(0);
+    expect(reported(text, 'peak full rigs')).toBeGreaterThanOrEqual(lentBefore);
+    // Not everyone placed is drawn — a buried worm is neither rig nor
+    // impostor — so the census is the VIEW's number and never the bench's.
+    expect(reported(text, 'full rigs')).toBeLessThanOrEqual(placedTotal(r));
+    expect(text).toContain('WHERE THE FRAME WENT');
+    expect(text).toContain('pool       all five, mixed');
+  });
+
+  it('at RIGS: RUNG the report splits the crowd into the rung\'s pools and the impostors past them', async () => {
+    const r = await entered();
+    r.press(LAB_ACTION.rigs);
+    r.press(LAB_ACTION.stress);
+    // Long enough that the crowd outgrows the rung's pools, which is the
+    // whole point of this run: the same insects, drawn two ways.
+    r.frame(60 * (SETTLE_S + WINDOW_S + 20));
+    const pools = poolTotal(r);
+    expect(pools).toBeLessThan(placedTotal(r));
+
+    const { text, lentBefore } = settle(r);
+    const rigs = reported(text, 'full rigs');
+    const impostors = reported(text, 'impostors');
+    expect(rigs).toBe(lentBefore);
+    // The rung's budget is a ceiling on the skeletons; everything past it
+    // is twenty triangles, and the report says so rather than reporting a
+    // crowd that all looked the same.
+    expect(rigs).toBeLessThanOrEqual(pools);
+    expect(impostors).toBeGreaterThan(0);
+    expect(rigs + impostors).toBeGreaterThan(pools);
+    expect(rigs + impostors).toBeLessThanOrEqual(placedTotal(r));
+    expect(text).toContain('RUNG (medium)');
+  });
+
+  // ─── the species pool (Joshua, 2026-09-10: workers only, queens only,
+  //     flies only, aphids only, worms only) ──────────────────────────
+
+  it('POOL cycles MIX through the five and back, and the button says which', async () => {
+    const r = await entered();
+    expect(r.field(LAB_FIELD.stressPool)).toBe(stressPoolLabel('mix'));
+    for (const id of LAB_CREATURE_IDS) {
+      r.press(LAB_ACTION.stressPool);
+      expect(r.field(LAB_FIELD.stressPool)).toBe(stressPoolLabel(id));
+    }
+    r.press(LAB_ACTION.stressPool);
+    expect(r.field(LAB_FIELD.stressPool)).toBe(stressPoolLabel('mix'));
+  });
+
+  it('a queens-only run spawns queens and nothing else, and the report names the pool', async () => {
+    const r = await entered();
+    r.press(LAB_ACTION.stressPool);
+    expect(r.field(LAB_FIELD.stressPool)).toBe(stressPoolLabel('queen'));
+    r.press(LAB_ACTION.stress);
+    r.frame(60 * (SETTLE_S + WINDOW_S + 8));
+    // The bench's own five are placed too, so every species reads one; the
+    // crowd is what is past that, and all of it is queens.
+    expect(r.scene.lab.sim.placed('queen')).toBeGreaterThan(5);
+    for (const id of LAB_CREATURE_IDS) {
+      if (id !== 'queen') expect(r.scene.lab.sim.placed(id), id).toBe(1);
+    }
+    expect(settle(r).text).toContain(`pool       ${stressPoolWords('queen')}`);
+  });
+
+  it('POOL is refused while a run is going: the run it would rename is still going', async () => {
+    const r = await entered();
+    r.press(LAB_ACTION.stress);
+    r.frame(60 * (SETTLE_S + WINDOW_S + 4));
+    const crowd = placedTotal(r);
+    expect(crowd).toBeGreaterThan(LAB_CREATURE_IDS.length);
+
+    r.press(LAB_ACTION.stressPool);
+    r.frame(2);
+    expect(r.field(LAB_FIELD.stressPool)).toBe(stressPoolLabel('mix'));
+    expect(r.field(LAB_FIELD.stress)).toBe(`STOP (${crowd - LAB_CREATURE_IDS.length})`);
+    expect(placedTotal(r)).toBe(crowd);
+    expect(panel(r)).toContain('SPAWNING');
+  });
+
+  it('POOL clears a standing report: a mixed run\'s numbers under a button saying QUEEN would be read as the queens\'', async () => {
+    const r = await entered();
+    r.press(LAB_ACTION.stress);
+    r.frame(60 * (SETTLE_S + WINDOW_S + 4));
+    expect(settle(r).text).toContain('STRESS TEST COMPLETE');
+
+    r.press(LAB_ACTION.stressPool);
+    r.frame(2);
+    expect(panel(r)).toBe('');
+    expect(r.field(LAB_FIELD.stress)).toBe('STRESS TEST');
+    expect(r.field(LAB_FIELD.stressPool)).toBe(stressPoolLabel('queen'));
+    // And the bench is back, the way RESET leaves it.
+    expect(placedTotal(r)).toBe(LAB_CREATURE_IDS.length);
+    expect(r.heldSpecies()).toBe('queen');
   });
 });

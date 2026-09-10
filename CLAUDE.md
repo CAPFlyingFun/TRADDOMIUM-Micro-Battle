@@ -128,6 +128,40 @@ looking.
 **The feeling bar.** approach → head aims → jaws open → reach → grab →
 carry, never press → object teleports.
 
+**Ants do not push each other; the world still pushes everyone**
+(Joshua, 2026-09-10, deciding it on the back of Baseline A). There is NO
+hard body collision between normal ants, insects or players. They may
+overlap. What stays fully solid is the WORLD: terrain, trees, rocks,
+tunnel walls, roots, logs, structures and every other world surface — an
+ant is stopped by the ground and by things, never by another ant.
+
+Three consequences, all binding:
+
+- **Combat is sensors, not shoving.** Hitboxes, hurtboxes and sensing
+  volumes decide what lands. A body never blocks another body as a
+  fighting mechanic.
+- **Soft separation, if it is ever added, is STEERING and nothing else.**
+  A light push-apart so a crowd does not visually stack into one animal
+  is allowed later; it may bias where an ant wants to walk, and it may
+  never become a barrier. The test it has to pass is the one that
+  motivated the rule: it must not jam a tunnel and must not let one
+  player wall another in.
+- **The exception is size.** An "alpha" insect or a boss big enough to be
+  swarmed is a CRAWLABLE SURFACE: ants attach to it and move across its
+  body to attack and to work together. Ants attached to it still do not
+  collide with one another. The machinery for this already exists —
+  `creatures/surface.ts` carries a body over faces by a heading and an
+  `up` — but every `Climbable` there is a static, world-axis-aligned box,
+  and a boss's body moves and turns. The gap to close is a `Climbable`
+  whose frame is a live transform, not a new climbing system.
+
+This is a decision that BUYS something, which is why it is recorded here
+rather than left implicit: creature-creature collision would be an
+all-pairs cost paid every tick on exactly the crowds the game is trying
+to hold, and `docs/PERFORMANCE.md`'s baselines are measured without it.
+A future change that quietly adds body blocking invalidates every one of
+those numbers.
+
 **A meter may only move if there is a way to move it back. An unavailable
 action must never look functional.** "Multiplayer" in the UI may never
 imply more than exists; the honest caption is pinned by a test.

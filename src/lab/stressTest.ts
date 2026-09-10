@@ -58,6 +58,32 @@
  *              the phone settles to once nothing new is arriving.
  *   done       the report stands until RUN AGAIN or RESET.
  *
+ * ─── the DRAWN census, and the two kinds of number in it ────────────
+ *
+ * Joshua, 2026-09-10, after the first real run: repeat it at RIGS: RUNG
+ * and say "how many creatures were drawn as full rigs versus
+ * impostors". That census is the only thing that makes the two runs
+ * readable side by side — 178 bodies carrying 178 skeletons and 178
+ * bodies carrying eight are not the same measurement, and the totals
+ * alone cannot tell them apart. So the scene hands a `StressSample` in
+ * with the frame time, and the run keeps the census beside every
+ * threshold it records as well as at the end.
+ *
+ * The two millisecond figures in that sample are NOT the same kind of
+ * number, and the report must never print them as though they were.
+ * `drawMs` is the scene's own wall time around the creature renderer,
+ * taken this frame, so its mean is a per-frame cost and comes OUT of
+ * the frame. `aiMs` is `CreatureSim.cost()`, which answers the LAST
+ * TICK's reading — and the sim does not necessarily tick every frame —
+ * so its mean is the shape of a tick repeated, not a budget, and it is
+ * printed outside the frame's split for exactly that reason.
+ *
+ * A run driven with NO samples — every test that predates them, and any
+ * caller with nothing to measure — leaves every census number null, and
+ * the report then prints neither block rather than a column of zeroes.
+ * A zero standing in for "nobody counted" is the one error a pasted
+ * report can never be recovered from.
+ *
  * ─── what makes a run comparable to the last one ────────────────────
  *
  * The seed, the spawn clock and the thresholds are here; the scene holds
@@ -127,6 +153,23 @@ export type StressPhase = 'idle' | 'warmup' | 'spawning' | 'recovery' | 'done';
 /** Why a run stopped spawning — the report says which, because they mean different things. */
 export type StressEnding = 'broke' | 'ceiling' | 'timeout' | 'stopped';
 
+/**
+ * WHAT THE SCENE SAW THIS FRAME, handed in beside the frame time. The
+ * run keeps none of the renderer's or the sim's vocabulary — these are
+ * four numbers — but it is the only place that knows which frame they
+ * belong to, which is what makes a census at a threshold possible.
+ */
+export interface StressSample {
+  /** Creatures drawn with an animated skeleton this frame. */
+  readonly rigs: number;
+  /** Creatures drawn as a 20-triangle impostor this frame. */
+  readonly impostors: number;
+  /** The creature simulation's own cost, ms — its LAST TICK's reading. */
+  readonly aiMs: number;
+  /** The creature renderer's own wall time this frame, ms. */
+  readonly drawMs: number;
+}
+
 /** One threshold, and the run when it fell through it. */
 export interface Crossing {
   readonly fps: number;
@@ -134,6 +177,10 @@ export interface Crossing {
   readonly creatures: number;
   /** Seconds into the run. */
   readonly atS: number;
+  /** Rigs drawn on the frame that recorded this, or null when the run was driven without samples. */
+  readonly rigs: number | null;
+  /** Impostors drawn on that same frame, or null. */
+  readonly impostors: number | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -232,6 +279,10 @@ export interface StressReadout {
   /** Seconds left of the recovery hold, while recovering. */
   readonly recoveryLeftS: number;
   readonly ending: StressEnding | null;
+  /** The latest sample's rig count, or null while nothing has been measured. */
+  readonly rigs: number | null;
+  /** The latest sample's impostor count, or null. */
+  readonly impostors: number | null;
 }
 
 export interface StressOptions {
@@ -251,7 +302,7 @@ export interface StressOptions {
  */
 export class StressTest {
   private readonly window: RollingFps;
-  private readonly pool: readonly CreatureId[];
+  private speciesPool: readonly CreatureId[];
   private readonly seed: number;
   private readonly spawnEveryS: number;
   private readonly maxCreatures: number;
@@ -278,8 +329,21 @@ export class StressTest {
   private brokeAtFps = 0;
   private recoveryFps = 0;
 
+  /**
+   * THE CENSUS, over the frames a sample actually arrived on. Separate
+   * from `runFrames` because the two are not the same population: a
+   * caller may drive the run with no samples at all, and a mean over
+   * frames nobody measured is not a mean.
+   */
+  private lastSample: StressSample | null = null;
+  private sampleFrames = 0;
+  private drawMsTotal = 0;
+  private aiMsTotal = 0;
+  private peakRigsSeen = 0;
+  private peakImpostorsSeen = 0;
+
   constructor(options: StressOptions) {
-    this.pool = options.species.slice();
+    this.speciesPool = options.species.slice();
     this.seed = options.seed ?? STRESS_SEED;
     this.spawnEveryS = options.spawnEveryS ?? SPAWN_EVERY_S;
     this.maxCreatures = options.maxCreatures ?? MAX_CREATURES;
@@ -321,6 +385,36 @@ export class StressTest {
     this.lowestFps = Infinity;
     this.brokeAtFps = 0;
     this.recoveryFps = 0;
+    this.lastSample = null;
+    this.sampleFrames = 0;
+    this.drawMsTotal = 0;
+    this.aiMsTotal = 0;
+    this.peakRigsSeen = 0;
+    this.peakImpostorsSeen = 0;
+  }
+
+  /** The species this run draws from. */
+  get pool(): readonly CreatureId[] {
+    return this.speciesPool;
+  }
+
+  /**
+   * DRAW FROM THESE SPECIES FROM NOW ON — the workers-only, queens-only,
+   * flies-only runs Joshua asked for after the mixed one, to find which
+   * animal is the expensive one.
+   *
+   * It refuses while a run is going rather than throwing, because it is
+   * wired to a button a thumb can reach mid-run and a half-changed pool
+   * would make the report a lie about its own sequence. Otherwise it
+   * RESETS: a run drawn from a different pool is a different test, so
+   * the standing report, the counts and the seeded draw must not survive
+   * into it. An empty pool is refused outright — a run with nothing to
+   * spawn never reaches a threshold and never ends.
+   */
+  setPool(species: readonly CreatureId[]): void {
+    if (this.running || species.length === 0) return;
+    this.speciesPool = species.slice();
+    this.reset();
   }
 
   /** Stop a run where it stands and go straight to the report (the button says STOP). */
@@ -334,7 +428,7 @@ export class StressTest {
    * MUST place what it is given: the count is advanced here, and a
    * report whose count and bench disagreed would be worthless.
    */
-  frame(rawDt: number): CreatureId | null {
+  frame(rawDt: number, sample?: StressSample | null): CreatureId | null {
     if (!this.running) return null;
     const dt = Number.isFinite(rawDt) && rawDt > 0 ? rawDt : 0;
 
@@ -344,6 +438,8 @@ export class StressTest {
     // when this ends.
     // Only in the warm-up: a run STOPped inside its own settle must
     // still be able to reach its report rather than sit here forever.
+    // A sample handed in with such a frame goes with it: a rig count
+    // taken while the bench is being torn down is a census of a rebuild.
     if (this.phase === 'warmup' && this.settled < SETTLE_S) {
       this.settled += dt;
       return null;
@@ -355,6 +451,7 @@ export class StressTest {
       this.runFrames += 1;
       this.runSeconds += dt;
       if (dt > this.worstFrameS) this.worstFrameS = dt;
+      if (sample) this.measure(sample);
     }
 
     // The window must be full before any reading is used for anything:
@@ -381,7 +478,16 @@ export class StressTest {
     // it had, which is the truth about that count.
     for (let i = this.crossings.length; i < THRESHOLDS.length; i += 1) {
       if (fps >= THRESHOLDS[i]) break;
-      this.crossings.push({ fps: THRESHOLDS[i], creatures: this.count, atS: this.elapsed });
+      this.crossings.push({
+        fps: THRESHOLDS[i],
+        creatures: this.count,
+        atS: this.elapsed,
+        // This frame's census, not the run's latest: at RIGS: RUNG the
+        // rig pool fills early and every body after it is an impostor,
+        // so the split AT THIS COUNT is the whole point of the line.
+        rigs: this.lastSample?.rigs ?? null,
+        impostors: this.lastSample?.impostors ?? null,
+      });
     }
 
     // THE BREAKING POINT: the average held under the last threshold for
@@ -405,10 +511,27 @@ export class StressTest {
       this.finish('ceiling');
       return null;
     }
-    const species = this.pool[Math.min(this.pool.length - 1, Math.floor(this.rand() * this.pool.length))];
+    const species = this.speciesPool[Math.min(this.speciesPool.length - 1, Math.floor(this.rand() * this.speciesPool.length))];
     this.count += 1;
     this.counts.set(species, (this.counts.get(species) ?? 0) + 1);
     return species;
+  }
+
+  /**
+   * ONE MEASURED FRAME'S CENSUS. A sample whose numbers are not all
+   * finite and non-negative is not a measurement and is dropped whole,
+   * the way `RollingFps` drops a frame time that is not one: half a
+   * sample would put a NaN through every mean that follows and the
+   * report would print it.
+   */
+  private measure(s: StressSample): void {
+    if (!(ok(s.rigs) && ok(s.impostors) && ok(s.aiMs) && ok(s.drawMs))) return;
+    this.lastSample = s;
+    this.sampleFrames += 1;
+    this.drawMsTotal += s.drawMs;
+    this.aiMsTotal += s.aiMs;
+    if (s.rigs > this.peakRigsSeen) this.peakRigsSeen = s.rigs;
+    if (s.impostors > this.peakImpostorsSeen) this.peakImpostorsSeen = s.impostors;
   }
 
   private finish(ending: StressEnding): void {
@@ -432,6 +555,8 @@ export class StressTest {
       nextFps: this.crossings.length < THRESHOLDS.length ? THRESHOLDS[this.crossings.length] : null,
       recoveryLeftS: this.phase === 'recovery' ? Math.max(0, RECOVERY_S - this.recovered) : 0,
       ending: this.ending,
+      rigs: this.lastSample?.rigs ?? null,
+      impostors: this.lastSample?.impostors ?? null,
     };
   }
 
@@ -451,6 +576,12 @@ export class StressTest {
       recoveryFps: this.recoveryFps,
       crossings: this.crossings.slice(),
       ending: this.ending ?? 'stopped',
+      finalRigs: this.lastSample?.rigs ?? null,
+      finalImpostors: this.lastSample?.impostors ?? null,
+      peakRigs: this.sampleFrames > 0 ? this.peakRigsSeen : null,
+      peakImpostors: this.sampleFrames > 0 ? this.peakImpostorsSeen : null,
+      meanDrawMs: this.sampleFrames > 0 ? this.drawMsTotal / this.sampleFrames : null,
+      meanAiMs: this.sampleFrames > 0 ? this.aiMsTotal / this.sampleFrames : null,
     };
   }
 }
@@ -470,6 +601,16 @@ export interface StressResult {
   readonly recoveryFps: number;
   readonly crossings: readonly Crossing[];
   readonly ending: StressEnding;
+  /** The census of the LAST measured frame; null when the run was driven without samples. */
+  readonly finalRigs: number | null;
+  readonly finalImpostors: number | null;
+  /** The most rigs, and the most impostors, drawn in any one measured frame. */
+  readonly peakRigs: number | null;
+  readonly peakImpostors: number | null;
+  /** The creature renderer's mean wall time over the measured frames, ms — a true per-frame cost. */
+  readonly meanDrawMs: number | null;
+  /** The mean of `CreatureSim.cost()` over those frames, ms — a TICK's reading, not a frame's (the header). */
+  readonly meanAiMs: number | null;
 }
 
 /** What the run was run under, printed so two runs can be compared honestly. */
@@ -483,6 +624,8 @@ export interface StressConditions {
   readonly rung: string;
   readonly predation: string;
   readonly camera: string;
+  /** Which species the run drew from, in words: `all five, mixed`, `queen only` (`labTool.stressPoolWords`). */
+  readonly pool: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -500,6 +643,21 @@ function fps(value: number): string {
   return value > 0 ? value.toFixed(1) : '—';
 }
 
+/** A census number, or an em-dash: a run nobody measured has no zero to print. */
+function whole(value: number | null): string {
+  return value === null ? '—' : String(value);
+}
+
+/** A millisecond figure in the frame block's right-aligned column, or an em-dash there. */
+function msCol(value: number | null): string {
+  return (value === null ? '—' : value.toFixed(1)).padStart(7);
+}
+
+/** Whether a sampled number is one: finite and not negative. A count and a duration are both. */
+function ok(value: number): boolean {
+  return Number.isFinite(value) && value >= 0;
+}
+
 /**
  * THE COPYABLE REPORT. One block of plain text, the numbers Joshua
  * listed and the conditions they were measured under — and the honest
@@ -512,7 +670,10 @@ function fps(value: number): string {
  *     in `creatures/` does), so this measures thinking, moving, sensing
  *     and drawing, and not crowding;
  *   - a run stopped by the ceiling or by hand is not a breaking point,
- *     and says so where the ending is printed.
+ *     and says so where the ending is printed;
+ *   - the census blocks appear only when the scene measured one, so a
+ *     report that does not mention rigs is a report that did not count
+ *     them rather than one that found none.
  */
 export function stressReport(result: StressResult, conditions: StressConditions): string {
   const at = (want: number): Crossing | null => result.crossings.find((c) => c.fps === want) ?? null;
@@ -550,13 +711,54 @@ export function stressReport(result: StressResult, conditions: StressConditions)
   lines.push(`Worst single frame  ${result.worstFrameMs.toFixed(0)} ms`);
   lines.push(`Final FPS           ${fps(result.finalFps)}   (when spawning stopped)`);
   lines.push(`FPS after ${RECOVERY_S} s hold  ${fps(result.recoveryFps)}   (no new insects)`);
+
+  // WHAT WAS ACTUALLY DRAWN. The whole reason the run is repeated at
+  // RIGS: RUNG: the totals are the same test, the split is not.
+  if (result.finalRigs !== null || result.finalImpostors !== null || result.peakRigs !== null) {
+    lines.push('');
+    lines.push('DRAWN AT THE END');
+    lines.push(`  ${'full rigs'.padEnd(20)}${whole(result.finalRigs)}`);
+    lines.push(`  ${'impostors'.padEnd(20)}${whole(result.finalImpostors)}`);
+    lines.push(`  ${'peak full rigs'.padEnd(20)}${whole(result.peakRigs)}`);
+  }
+
+  // WHERE THE FRAME WENT. Two figures that split the frame, and a third
+  // that deliberately does not.
+  if (result.meanDrawMs !== null || result.meanAiMs !== null) {
+    const drawn = result.meanDrawMs;
+    // Floored at zero: the two means are taken over different populations
+    // of frames (every frame, and every SAMPLED frame), so a run whose
+    // samples all landed on its slow frames can subtract to a negative,
+    // and a negative here would read as the renderer giving time back.
+    const rest = drawn === null ? null : Math.max(0, result.averageFrameMs - drawn);
+    lines.push('');
+    lines.push('WHERE THE FRAME WENT (mean per frame)');
+    lines.push(`  ${'creature drawing'.padEnd(16)}${msCol(drawn)} ms`);
+    lines.push(`  ${'everything else'.padEnd(16)}${msCol(rest)} ms   (terrain, sky, UI, present, and the sim)`);
+    // THE THIRD LINE IS NOT PART OF THE SPLIT, and the next person to read
+    // this will try to make the three add up. They do not and must not:
+    // the sim's work is already inside `everything else` (it is inside the
+    // frame time the whole split is taken from), and it is not even a
+    // per-frame number — `CreatureSim.cost()` answers its LAST TICK, and
+    // the sim does not tick every frame. Adding it to the drawing figure
+    // would count it twice and call a tick's cost a frame's.
+    lines.push(`  ${'sim tick'.padEnd(16)}${msCol(result.meanAiMs)} ms   (the sim's own last-tick reading, not a per-frame cost)`);
+  }
+
   lines.push('');
   lines.push('INSECTS AT EACH THRESHOLD');
   for (const want of THRESHOLDS) {
     const c = at(want);
-    lines.push(c === null
-      ? `  below ${String(want).padStart(2)} fps      never reached`
-      : `  below ${String(want).padStart(2)} fps      ${String(c.creatures).padEnd(5)} (${c.atS.toFixed(0)} s)${c.creatures === 0 ? '  ← empty bench' : ''}`);
+    if (c === null) {
+      lines.push(`  below ${String(want).padStart(2)} fps      never reached`);
+      continue;
+    }
+    // The census this threshold was crossed AT, when there is one: at
+    // RIGS: RUNG the rig pool is full long before 30 fps, so the count
+    // and the split tell two different halves of the same story.
+    const census = c.rigs === null && c.impostors === null ? '' : `   ${whole(c.rigs)} rigs · ${whole(c.impostors)} impostors`;
+    const empty = c.creatures === 0 ? '  ← empty bench' : '';
+    lines.push(`  below ${String(want).padStart(2)} fps      ${String(c.creatures).padEnd(5)} (${c.atS.toFixed(0)} s)${census}${empty}`);
   }
   lines.push('');
   lines.push(`Ended: ${ENDING_WORDS[result.ending]}`);
@@ -569,6 +771,7 @@ export function stressReport(result: StressResult, conditions: StressConditions)
   lines.push(`  detail     ${conditions.rung}`);
   lines.push(`  predation  ${conditions.predation}`);
   lines.push(`  camera     ${conditions.camera}`);
+  lines.push(`  pool       ${conditions.pool}`);
   lines.push(`  spawn rate 1 per ${SPAWN_EVERY_S} s, seeded — RUN AGAIN repeats this exact sequence`);
   lines.push('');
   lines.push('NOTE: creatures do not collide with or avoid one another — no such');
@@ -590,6 +793,9 @@ export function stressBlock(r: StressReadout): string {
         : r.phase.toUpperCase();
   lines.push(`STRESS TEST · ${phase}`);
   lines.push(`insects   ${r.creatures}`);
+  // The split, while it is happening: at RIGS: RUNG this is the line that
+  // shows the rig pool filling and the impostors taking over.
+  if (r.rigs !== null || r.impostors !== null) lines.push(`drawn     ${whole(r.rigs)} rigs · ${whole(r.impostors)} impostors`);
   lines.push(r.fps > 0 ? `fps       ${r.fps.toFixed(1)}  (${WINDOW_S} s average)` : `fps       — (filling the ${WINDOW_S} s window)`);
   lines.push(`elapsed   ${r.elapsedS.toFixed(0)} s`);
   lines.push(r.nextFps === null ? 'waiting   the hold under the last threshold' : `waiting   for the average to fall under ${r.nextFps}`);

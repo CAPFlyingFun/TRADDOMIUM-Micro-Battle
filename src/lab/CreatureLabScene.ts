@@ -120,9 +120,9 @@ import { LabUi, type CreatureLine, type LabReadout } from './LabUi';
 import { HORIZON, buildLabMeshes, type LabMeshes } from './labMeshes';
 import {
   CAMERA_PRESENCE, DISTURB_RADIUS, LAB_ACTION, LAB_SCENE_ID, POSSESS_ROW, TAP_SLOP_PX, nextPredation, nextRigMode,
-  type LabAction, type LabCameraMode, type LabRigMode,
+  nextStressPool, stressPoolWords, type LabAction, type LabCameraMode, type LabRigMode, type StressPool,
 } from './labTool';
-import { StressTest, stressBlock, stressReport, type StressConditions, type StressPhase } from './stressTest';
+import { StressTest, stressBlock, stressReport, type StressConditions, type StressPhase, type StressSample } from './stressTest';
 
 // ---------------------------------------------------------------------------
 // Hooks
@@ -476,6 +476,14 @@ interface MutableNdc extends Ndc {
   y: number;
 }
 
+/** The run's per-frame census, rewritten in place: a run is minutes long and this is read every frame of it. */
+interface MutableSample extends StressSample {
+  rigs: number;
+  impostors: number;
+  aiMs: number;
+  drawMs: number;
+}
+
 /** The overlay's speed reading per creature: last place, smoothed mm/s. */
 interface Speed {
   wx: number;
@@ -500,6 +508,7 @@ interface MutableReadout extends LabReadout {
   stressCreatures: number;
   stressText: string;
   rigs: LabRigMode;
+  stressPool: StressPool;
 }
 
 function newLine(species: CreatureSpecies): CreatureLine {
@@ -561,11 +570,15 @@ export function buildCreatureLabScene(ctx: SceneContext, hooks: CreatureLabHooks
   const stress = new StressTest({ species: LAB_CREATURE_IDS });
   /** ALL — one animated rig per creature — or the detail rung's budget (`labTool.LabRigMode`). */
   let rigMode: LabRigMode = 'all';
+  /** Which species the next run draws from: all five mixed, or one alone (`labTool.StressPool`). */
+  let stressPool: StressPool = 'mix';
   /** How many the crowd has placed, and how many of each: the placement's index, and the rigs to lend. */
   let placed = 0;
   const crowd = new Map<CreatureId, number>();
   /** The finished report, built once when the run ends and shown until RUN AGAIN or RESET. */
   let report = '';
+  /** The census handed to the run each frame, rewritten in place (`census`). */
+  const sample: MutableSample = { rigs: 0, impostors: 0, aiMs: 0, drawMs: 0 };
 
   // Per-frame scratch, rewritten in place (the header: no allocation on the frame path that is this file's).
   const intent: MutableIntent = newMutableIntent();
@@ -589,7 +602,7 @@ export function buildCreatureLabScene(ctx: SceneContext, hooks: CreatureLabHooks
   const readout: MutableReadout = {
     held: null, camera: 'follow', predation: lab.predation, disturbArmed: false, cameraDisturbs: false, debug: true,
     fps: 0, frameMs: 0, aiMs: 0, animMs: 0, lines: POSSESS_ROW.map((entry) => newLine(CREATURE_SPECIES[entry.species])),
-    stressPhase: 'idle', stressCreatures: 0, stressText: '', rigs: 'all',
+    stressPhase: 'idle', stressCreatures: 0, stressText: '', rigs: 'all', stressPool: 'mix',
   };
 
   const following = (): boolean => cameraMode === 'follow' && lab.ledger.size > 0;
@@ -697,6 +710,7 @@ export function buildCreatureLabScene(ctx: SceneContext, hooks: CreatureLabHooks
     readout.stressCreatures = run.creatures;
     readout.stressText = stress.finished ? report : run.phase === 'idle' ? '' : stressBlock(run);
     readout.rigs = rigMode;
+    readout.stressPool = stressPool;
     // The per-creature overlay is hidden while a run is going (`LabUi`), so
     // there is nothing to project for it: five lines of arithmetic and five
     // matrix projections a HUD refresh, kept out of the thing being measured.
@@ -790,6 +804,7 @@ export function buildCreatureLabScene(ctx: SceneContext, hooks: CreatureLabHooks
     rung: LAB_RUNG,
     predation: lab.predation.toUpperCase(),
     camera: 'free, the bench viewpoint, observer',
+    pool: stressPoolWords(stressPool),
   });
 
   /**
@@ -834,6 +849,53 @@ export function buildCreatureLabScene(ctx: SceneContext, hooks: CreatureLabHooks
   };
 
   /**
+   * WHAT WAS DRAWN, AND WHAT IT COST — the census the run files beside
+   * its frame time, so the report can say how many of the crowd carried
+   * a skeleton and how many were twenty triangles (Joshua, 2026-09-10).
+   * Nothing new is measured here: the renderer already counts the rigs
+   * it lends and the impostors it fills, the simulation already times
+   * its own tick, and `animMs` is this file's own stopwatch around
+   * `fauna.update`. This adds them up and hands them over.
+   *
+   * WHICH FRAME IT IS, and why that is the right one. Every number here
+   * was produced by the PREVIOUS frame — `update` files the run's frame
+   * before `lab.advance` and `fauna.update` have run again — and so was
+   * `frame.rawDt`, which is the wall-clock of the frame that just ended
+   * (`app/FrameClock`: `now − lastMs`). Rig count, draw time and frame
+   * time are therefore three readings of ONE frame. Reading the census
+   * after the renderer instead would file THIS frame's split against
+   * LAST frame's duration, which is the pairing that would actually be
+   * wrong, and it would leave the run's own spawn a frame late.
+   *
+   * The null is as much of the answer as the numbers: a scene with no
+   * renderer drew nothing and MEASURED nothing, and a report cannot
+   * tell those apart once they are both a zero (`stressTest.ts`'s
+   * header — an em-dash, never a zero standing in for unknown).
+   */
+  const census = (): StressSample | null => {
+    if (fauna === null) return null;
+    const drawn = fauna.cost;
+    let rigs = 0;
+    let impostors = 0;
+    for (const id of LAB_CREATURE_IDS) {
+      // The two ants have no entry until the view has drawn them once —
+      // the tables are seeded over the WILD three (`FaunaView.zeroCounts`)
+      // — and one `undefined` here would NaN the sum, which `measure`
+      // would then drop as not a measurement, silently.
+      rigs += drawn.rigsLent[id] ?? 0;
+      impostors += drawn.impostors[id] ?? 0;
+    }
+    const cost = lab.sim.cost();
+    sample.rigs = rigs;
+    sample.impostors = impostors;
+    // The same sum the HUD's `ai` line reads, so the panel and the report
+    // can never print two different numbers for one thing.
+    sample.aiMs = cost.thinkMs + cost.moveMs + cost.demandMs;
+    sample.drawMs = animMs;
+    return sample;
+  };
+
+  /**
    * ONE FRAME OF THE RUN. The test is handed the RAW frame time — the
    * unclamped one, for `FrameStats`'s reason — and answers with a
    * species to place, or nothing. Every body it names is placed: the
@@ -847,7 +909,13 @@ export function buildCreatureLabScene(ctx: SceneContext, hooks: CreatureLabHooks
    * the other question and the other number.
    */
   const driveStress = (rawDt: number): void => {
-    const species = stress.frame(rawDt);
+    // The census is built only while a run is going: `fauna.cost` copies
+    // two per-species tables on every call, and a run that is not going
+    // ignores its sample (`StressTest.frame` returns before reading it).
+    // Three small objects a frame is a cost paid INSIDE the thing being
+    // measured, which is why it is worth naming — and why it is bounded
+    // to the run rather than left on the Lab's ordinary frame.
+    const species = stress.frame(rawDt, stress.running ? census() : null);
     if (species !== null) {
       lab.sim.spawn(labStressSpawn(placed, species));
       placed += 1;
@@ -902,6 +970,20 @@ export function buildCreatureLabScene(ctx: SceneContext, hooks: CreatureLabHooks
         // Between runs the choice takes effect at once, so what is on the
         // bench is what the next run will measure.
         if (!stress.running && fauna !== null) fauna.clearPoolSizes();
+        return;
+      case LAB_ACTION.stressPool:
+        // Refused mid-run, the way RIGS is. `StressTest.setPool` refuses
+        // too, but the BUTTON'S WORD is this file's: a label that changed
+        // to QUEEN while a mixed run carried on underneath it is the lie
+        // the refusal exists to prevent.
+        if (stress.running) return;
+        stressPool = nextStressPool(stressPool, LAB_CREATURE_IDS);
+        stress.setPool(stressPool === 'mix' ? LAB_CREATURE_IDS : [stressPool]);
+        // A run from a different pool is a different test, so the standing
+        // report goes with the choice — through RESET's own path, because
+        // a report saying `all five, mixed` under a button saying QUEEN
+        // would be read as the queens' number by whoever pasted it.
+        resetStress();
         return;
     }
   };

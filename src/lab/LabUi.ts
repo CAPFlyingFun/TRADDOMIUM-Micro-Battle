@@ -8,7 +8,7 @@
  * what the scene said and a test can drive it with a plain object.
  *
  * MOBILE FIRST, 932 × 430. The possess row sits top-left where a thumb
- * reaches it without leaving the stick; the tools top-right in two short
+ * reaches it without leaving the stick; the tools top-right in three short
  * rows; the held buttons bottom-right where the right thumb rests
  * (CLAUDE.md: "Controls belong to the thumbs, not the screen"), and the
  * stick — `input/MoveStick.ts`, the scene's — bottom-left. The overlay
@@ -38,7 +38,8 @@ import type { PredationPolicy } from '../creatures/world';
 import {
   HUD_HZ, LAB_ACTION, LAB_BUTTON_ACTION, LAB_BUTTON_KINDS, LAB_FIELD, LAB_HUD_ROLE, POSSESS_ROW, buttonLabel, buttonsFor,
   cameraLabel, controlLabel, creatureField, onOffLabel, possessAction, predationLabel, rigModeLabel, stressLabel,
-  type LabAction, type LabButtonKind, type LabCameraMode, type LabRigMode,
+  stressPoolLabel,
+  type LabAction, type LabButtonKind, type LabCameraMode, type LabRigMode, type StressPool,
 } from './labTool';
 import type { StressPhase } from './stressTest';
 
@@ -99,6 +100,11 @@ export interface LabReadout {
    */
   readonly stressText: string;
   readonly rigs: LabRigMode;
+  /**
+   * Which species the NEXT run draws from — the run in progress is
+   * unaffected, since `StressTest.setPool` refuses while one is going.
+   */
+  readonly stressPool: StressPool;
 }
 
 export interface LabUiHooks {
@@ -143,16 +149,38 @@ const CSS = {
   block: `white-space:pre;padding:3px 6px;background:${PANEL};border:1px solid rgba(201,169,74,0.35);border-radius:4px;`,
   /** The right thumb's cluster: a column of pairs, 48 px targets. */
   /**
-   * THE STRESS PANEL: where the creature overlay sits, but wider — a
-   * thirty-line report is not a five-line block — and PRESSABLE, since
-   * COPY and RUN AGAIN live in it. It is in the DOM only while a run is
-   * going or its report stands, so it never covers the bench otherwise.
+   * THE STRESS PANEL: wider than the creature overlay — a thirty-line
+   * report is not a five-line block — and PRESSABLE, since COPY and RUN
+   * AGAIN live in it. It is in the DOM only while a run is going or its
+   * report stands, so it never covers the bench otherwise.
+   *
+   * It sits BELOW the tools rather than beside them, and that is the
+   * whole reason for the 160. `pointer-events:auto` on a panel this wide
+   * does not merely draw over the tool rows, it EATS THEIR TAPS: the
+   * panel is later in the DOM, so `elementFromPoint` answers the panel.
+   * The right-hand column runs to y 156 at every supported size (three
+   * tool rows and the perf line, measured in Chromium at 810 × 374,
+   * 932 × 430 and 667 × 375), and the panel used to start at 96 — inside
+   * it. With two buttons in the stress row that left STOP a 22 px
+   * sliver; with the POOL button it left STOP nothing at all, so the one
+   * control that abandons a seven-minute run could not be pressed. Below
+   * the column it cannot happen at any width, which is worth more than
+   * the 64 px of height it costs.
    */
   stress:
-    `position:absolute;left:156px;top:96px;width:400px;max-width:calc(100% - 320px);max-height:calc(100% - 106px);` +
-    `overflow:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:6px;pointer-events:auto;` +
+    `position:absolute;left:156px;top:160px;width:400px;max-width:calc(100% - 320px);max-height:calc(100% - 170px);` +
+    `overflow:hidden;display:flex;flex-direction:column;gap:6px;pointer-events:auto;` +
     `padding:6px 8px;background:${PANEL};color:${PARCHMENT};font:${SHEET_FONT};border:1px solid ${GOLD};border-radius:6px;`,
-  report: 'margin:0;white-space:pre;user-select:text;-webkit-user-select:text;',
+  /**
+   * The report scrolls; the buttons under it do NOT. The panel used to
+   * scroll as one piece, which put COPY below thirty lines of report on
+   * a phone — the button the whole run exists to reach, behind a scroll.
+   * `flex:1 1 auto` with `min-height:0` is what lets a flex child
+   * actually shrink and scroll instead of pushing the row off the end.
+   */
+  report:
+    'margin:0;white-space:pre;user-select:text;-webkit-user-select:text;' +
+    'flex:1 1 auto;min-height:0;overflow:auto;overscroll-behavior:contain;',
   cluster: `position:absolute;right:${EDGE_RIGHT};bottom:${FLOOR};display:grid;grid-template-columns:auto auto;gap:6px;pointer-events:auto;`,
   held:
     `min-width:64px;min-height:48px;padding:0 8px;font:${FONT};color:${PARCHMENT};background:${BUTTON};` +
@@ -177,10 +205,12 @@ const TOOL_ROWS: readonly (readonly ToolSpec[])[] = [
     { action: LAB_ACTION.cameraDisturbs, field: LAB_FIELD.cameraDisturbs },
     { action: LAB_ACTION.debug, field: LAB_FIELD.debug },
   ],
-  // The stress test's own row: the run, and the one option that changes its answer.
+  // The stress test's own row: the run, and the two options that change its
+  // answer — which skeletons it lends, and which animals it spawns.
   [
     { action: LAB_ACTION.stress, field: LAB_FIELD.stress },
     { action: LAB_ACTION.rigs, field: LAB_FIELD.rigs },
+    { action: LAB_ACTION.stressPool, field: LAB_FIELD.stressPool },
   ],
 ];
 
@@ -458,6 +488,7 @@ export class LabUi {
     // to copy does not lose the selection ten times a second.
     this.set(LAB_FIELD.stress, stressLabel(r.stressPhase, r.stressCreatures));
     this.set(LAB_FIELD.rigs, rigModeLabel(r.rigs));
+    this.set(LAB_FIELD.stressPool, stressPoolLabel(r.stressPool));
     const running = r.stressPhase !== 'idle';
     if (this.stress.hidden === running) this.stress.hidden = !running;
     if (running && this.stressReport.textContent !== r.stressText) this.stressReport.textContent = r.stressText;

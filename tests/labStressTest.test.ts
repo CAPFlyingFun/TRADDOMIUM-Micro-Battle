@@ -8,40 +8,66 @@
  *
  * The phone is a function from creature count to frame rate, so a whole
  * six-minute run is a few thousand loop iterations here.
+ *
+ * Since 2026-09-10 the pretend phone also has a pretend RENDERER: a
+ * `StressSample` per frame saying how many bodies it drew as rigs and how
+ * many as impostors, and what the drawing and the sim cost. `drive` hands
+ * one in only when a test gives it a sampler, because the OTHER half of
+ * the census contract is that a run nobody measured prints no census at
+ * all rather than a column of zeroes.
  */
 import { describe, expect, it } from 'vitest';
 import type { CreatureId } from '../src/creatures/species';
 import {
   BREAK_HOLD_S, MAX_CREATURES, RECOVERY_S, RollingFps, SETTLE_S, SPAWN_EVERY_S, STRESS_SEED, StressTest, THRESHOLDS,
-  WINDOW_S, stressReport, type StressConditions,
+  WINDOW_S, stressBlock, stressReport, type StressConditions, type StressSample,
 } from '../src/lab/stressTest';
+import {
+  nextStressPool, stressPoolLabel, stressPoolWords, type StressPool,
+} from '../src/lab/labTool';
 
 const FIVE: readonly CreatureId[] = ['queen', 'worker', 'earthworm', 'aphid', 'housefly'] as CreatureId[];
 
 const CONDITIONS: StressConditions = {
   stamp: '2026-09-10T00:00:00Z', build: 'test', viewport: '932 × 430', rigs: 'all', rung: 'medium',
-  predation: 'OFF', camera: 'free, bench viewpoint',
+  predation: 'OFF', camera: 'free, bench viewpoint', pool: 'all five, mixed',
 };
+
+/** What the pretend renderer reports for a bench holding `creatures` bodies. */
+type Sampler = (creatures: number) => StressSample;
 
 /**
  * Run frames until `until` says stop, at whatever frame rate the pretend
  * phone gives for the creatures now alive. Every species handed back is
  * counted, as the scene must place every one it is given.
+ *
+ * With no `sampler` the run is driven exactly as it was before the census
+ * existed — `frame` is called with one argument — which is the case the
+ * null half of the contract is about.
  */
 function drive(
   test: StressTest,
   phone: (creatures: number) => number,
   until: (seconds: number) => boolean,
+  sampler?: Sampler,
 ): { spawned: CreatureId[]; seconds: number } {
   const spawned: CreatureId[] = [];
   let seconds = 0;
   for (let i = 0; i < 200_000 && !until(seconds); i += 1) {
     const dt = 1 / Math.max(0.5, phone(spawned.length));
-    const species = test.frame(dt);
+    // The sample is read BEFORE the frame, from the bench as it stands:
+    // a threshold is recorded against the count that reached it, and the
+    // creature this frame places has not been drawn yet.
+    const species = sampler === undefined ? test.frame(dt) : test.frame(dt, sampler(spawned.length));
     seconds += dt;
     if (species !== null) spawned.push(species);
   }
   return { spawned, seconds };
+}
+
+/** A pretend renderer with a rig pool of `cap`: everything past it draws as an impostor, at a fixed cost. */
+function samplerOf(cap: number, drawMs = 4, aiMs = 2): Sampler {
+  return (n) => ({ rigs: Math.min(n, cap), impostors: Math.max(0, n - cap), drawMs, aiMs });
 }
 
 /** A phone that holds 60 fps until `knee` creatures, then falls off linearly to 5 fps at `floor`. */
@@ -395,5 +421,256 @@ describe('the report', () => {
     drive(test, () => 60, () => test.finished);
     const rung = stressReport(test.result(), { ...CONDITIONS, rigs: 'rung' });
     expect(rung).toContain('RUNG (medium) — the rest draw as impostors');
+  });
+
+  it('names the species pool in the conditions, in the report\'s words and not the button\'s', () => {
+    const test = new StressTest({ species: ['queen'] as CreatureId[], maxCreatures: 6 });
+    test.start();
+    drive(test, () => 60, () => test.finished);
+    const text = stressReport(test.result(), { ...CONDITIONS, pool: stressPoolWords('queen' as CreatureId) });
+    expect(text).toMatch(/\n {2}pool {7}queen only\n/);
+    expect(stressReport(test.result(), CONDITIONS)).toMatch(/\n {2}pool {7}all five, mixed\n/);
+  });
+});
+
+describe('the drawn census: rigs, impostors, and where the frame went', () => {
+  it('records the census at the moment each threshold was crossed, not the run\'s latest', () => {
+    // A rig pool of forty against a phone whose four thresholds fall at
+    // roughly 22, 37, 47 and 57 creatures: the first two are crossed while
+    // the pool is still filling and read no impostors at all, the last two
+    // after it is full. If a crossing carried the run's LATEST sample
+    // instead of its own, all four would read the same pair.
+    const test = new StressTest({ species: FIVE });
+    test.start();
+    drive(test, phoneOf(4, 60), () => test.finished, samplerOf(40));
+    const crossings = test.result().crossings;
+    expect(crossings.length).toBe(THRESHOLDS.length);
+    for (const c of crossings) {
+      expect(c.rigs).toBe(Math.min(c.creatures, 40));
+      expect(c.impostors).toBe(Math.max(0, c.creatures - 40));
+    }
+    expect(crossings[0].impostors).toBe(0);
+    expect(crossings[crossings.length - 1].impostors).toBeGreaterThan(0);
+    // They are not all the same number, which is what "at that moment" buys.
+    expect(new Set(crossings.map((c) => c.impostors)).size).toBeGreaterThan(1);
+    expect(crossings[0].rigs).toBeLessThan(crossings[crossings.length - 1].rigs!);
+  });
+
+  it('prints the census on every threshold line that has one', () => {
+    const test = new StressTest({ species: FIVE });
+    test.start();
+    drive(test, phoneOf(6, 50), () => test.finished, samplerOf(8));
+    const text = stressReport(test.result(), CONDITIONS);
+    for (const want of THRESHOLDS) {
+      expect(text).toMatch(new RegExp(`below ${want} fps {6}\\d+ +\\(\\d+ s\\) {3}\\d+ rigs · \\d+ impostors`));
+    }
+  });
+
+  it('keeps the last sample as the end of the run, and the highest as the peak', () => {
+    // A renderer that lends skeletons while the pool is its own and takes
+    // them back when the crowd outgrows it: rigs climb to ten, then fall to
+    // two and stay there. The peak is the ten; the end is the two.
+    const test = new StressTest({ species: FIVE, maxCreatures: 20 });
+    test.start();
+    drive(test, () => 60, () => test.finished, (n) => ({
+      rigs: n <= 10 ? n : 2, impostors: n <= 10 ? 0 : n - 2, aiMs: 1, drawMs: 3,
+    }));
+    const result = test.result();
+    expect(result.finalRigs).toBe(2);
+    expect(result.finalImpostors).toBe(18);
+    expect(result.peakRigs).toBe(10);
+    expect(result.peakImpostors).toBe(18);
+    const text = stressReport(result, CONDITIONS);
+    expect(text).toContain('DRAWN AT THE END');
+    expect(text).toMatch(/\n {2}full rigs {11}2\n/);
+    expect(text).toMatch(/\n {2}impostors {11}18\n/);
+    expect(text).toMatch(/\n {2}peak full rigs {6}10\n/);
+  });
+
+  it('splits the frame between the creature drawing and everything else, and leaves the sim tick OUT of it', () => {
+    // 60 fps flat, 4 ms of creature drawing and a 2 ms sim tick. The two
+    // halves must add back to the frame: the sim's reading is already inside
+    // `everything else` and is printed beside the split, not in it.
+    const test = new StressTest({ species: FIVE, maxCreatures: 15 });
+    test.start();
+    drive(test, () => 60, () => test.finished, samplerOf(8, 4, 2));
+    const result = test.result();
+    expect(result.meanDrawMs).toBeCloseTo(4, 9);
+    expect(result.meanAiMs).toBeCloseTo(2, 9);
+    const text = stressReport(result, CONDITIONS);
+    expect(text).toContain('WHERE THE FRAME WENT (mean per frame)');
+    const read = (label: string): number => {
+      const m = text.match(new RegExp(`${label} +([\\d.]+) ms`));
+      expect(m).not.toBeNull();
+      return Number(m![1]);
+    };
+    const drawn = read('creature drawing');
+    const rest = read('everything else');
+    const tick = read('sim tick');
+    expect(drawn).toBeCloseTo(result.meanDrawMs!, 1);
+    expect(rest).toBeCloseTo(result.averageFrameMs - result.meanDrawMs!, 1);
+    expect(drawn + rest).toBeCloseTo(result.averageFrameMs, 1);
+    expect(tick).toBeCloseTo(result.meanAiMs!, 1);
+    // The subtraction that would have been wrong: taking the tick out too.
+    expect(rest).not.toBeCloseTo(result.averageFrameMs - result.meanDrawMs! - result.meanAiMs!, 1);
+    expect(text).toContain('not a per-frame cost');
+  });
+
+  it('floors `everything else` at zero rather than printing a renderer that gave time back', () => {
+    // A pretend renderer claiming more drawing time than the whole frame took.
+    const test = new StressTest({ species: FIVE, maxCreatures: 6 });
+    test.start();
+    drive(test, () => 60, () => test.finished, samplerOf(2, 500, 1));
+    const text = stressReport(test.result(), CONDITIONS);
+    expect(text).toMatch(/everything else +0\.0 ms/);
+  });
+
+  it('the live panel carries the split while the run is going', () => {
+    const test = new StressTest({ species: FIVE });
+    test.start();
+    drive(test, () => 60, (s) => s >= 20, samplerOf(8));
+    const r = test.readout();
+    expect(r.rigs).toBe(8);
+    expect(r.impostors).toBe(r.creatures - 8);
+    expect(stressBlock(r)).toContain(`drawn     8 rigs · ${r.creatures - 8} impostors`);
+  });
+
+  it('discards the settle\'s samples with the settle\'s frames', () => {
+    // The rebuild frame draws a bench being torn down. Counting its census
+    // would put a 900 ms drawing cost in the mean of a run it is not part of.
+    const test = new StressTest({ species: FIVE, maxCreatures: 5 });
+    test.start();
+    test.frame(0.9, { rigs: 999, impostors: 999, aiMs: 900, drawMs: 900 });
+    drive(test, () => 60, () => test.finished, samplerOf(8, 4, 2));
+    const result = test.result();
+    expect(result.peakRigs).toBeLessThanOrEqual(8);
+    expect(result.meanDrawMs).toBeCloseTo(4, 9);
+    expect(result.meanAiMs).toBeCloseTo(2, 9);
+  });
+
+  it('ignores a sample that is not a measurement rather than putting a NaN through every mean', () => {
+    const test = new StressTest({ species: FIVE, maxCreatures: 5 });
+    test.start();
+    let n = 0;
+    drive(test, () => 60, () => test.finished, () => {
+      n += 1;
+      return n % 3 === 0
+        ? { rigs: Number.NaN, impostors: -1, aiMs: Number.NaN, drawMs: Number.POSITIVE_INFINITY }
+        : { rigs: 4, impostors: 1, aiMs: 2, drawMs: 4 };
+    });
+    const result = test.result();
+    expect(result.meanDrawMs).toBeCloseTo(4, 9);
+    expect(result.finalRigs).toBe(4);
+    expect(result.peakImpostors).toBe(1);
+  });
+});
+
+describe('a run nobody measured says so, and never with a zero', () => {
+  it('leaves every census number null and prints neither block nor a census on any line', () => {
+    const test = new StressTest({ species: FIVE });
+    test.start();
+    drive(test, phoneOf(8, 45), () => test.finished);
+    const result = test.result();
+    expect(result.finalRigs).toBeNull();
+    expect(result.finalImpostors).toBeNull();
+    expect(result.peakRigs).toBeNull();
+    expect(result.peakImpostors).toBeNull();
+    expect(result.meanDrawMs).toBeNull();
+    expect(result.meanAiMs).toBeNull();
+    for (const c of result.crossings) {
+      expect(c.rigs).toBeNull();
+      expect(c.impostors).toBeNull();
+    }
+    const text = stressReport(result, CONDITIONS);
+    expect(text).not.toContain('DRAWN AT THE END');
+    expect(text).not.toContain('WHERE THE FRAME WENT');
+    expect(text).not.toContain('rigs ·');
+    expect(text).not.toContain('impostors');
+    // And the threshold lines are exactly what they were before the census existed.
+    expect(text).toMatch(/below 30 fps {6}\d+ +\(\d+ s\)\n/);
+  });
+
+  it('leaves the live panel\'s census out too', () => {
+    const test = new StressTest({ species: FIVE });
+    test.start();
+    drive(test, () => 60, (s) => s >= 20);
+    const r = test.readout();
+    expect(r.rigs).toBeNull();
+    expect(r.impostors).toBeNull();
+    expect(stressBlock(r)).not.toContain('drawn');
+  });
+});
+
+describe('the species pool: one animal at a time', () => {
+  it('refuses a change mid-run, because the report has to describe the sequence that ran', () => {
+    const test = new StressTest({ species: FIVE });
+    test.start();
+    drive(test, () => 60, (s) => s >= 12);
+    const before = test.readout().creatures;
+    expect(before).toBeGreaterThan(0);
+    test.setPool(['queen'] as CreatureId[]);
+    expect(test.pool).toEqual(FIVE);
+    expect(test.readout().creatures).toBe(before);
+    expect(test.readout().phase).toBe('spawning');
+  });
+
+  it('replaces the pool and RESETS when idle: a different pool is a different test', () => {
+    const test = new StressTest({ species: FIVE, maxCreatures: 6 });
+    test.start();
+    drive(test, () => 60, () => test.finished);
+    expect(test.result().creatures).toBe(6);
+    test.setPool(['queen', 'worker'] as CreatureId[]);
+    expect(test.pool).toEqual(['queen', 'worker']);
+    const r = test.readout();
+    expect(r.phase).toBe('idle');
+    expect(r.creatures).toBe(0);
+    expect(r.crossings).toEqual([]);
+    expect(r.ending).toBeNull();
+  });
+
+  it('refuses an empty pool: a run with nothing to spawn never reaches a threshold', () => {
+    const test = new StressTest({ species: FIVE });
+    test.setPool([]);
+    expect(test.pool).toEqual(FIVE);
+    test.start();
+    const run = drive(test, () => 60, (s) => s >= 20);
+    expect(run.spawned.length).toBeGreaterThan(0);
+  });
+
+  it('a species-only run spawns only that species', () => {
+    const test = new StressTest({ species: FIVE, maxCreatures: 20 });
+    test.setPool(['queen'] as CreatureId[]);
+    test.start();
+    const run = drive(test, () => 60, () => test.finished);
+    expect(run.spawned.length).toBe(20);
+    expect(new Set(run.spawned)).toEqual(new Set(['queen']));
+    expect(test.result().bySpecies).toEqual({ queen: 20 });
+  });
+});
+
+describe('the POOL control\'s words', () => {
+  it('cycles MIX → each species in turn → MIX', () => {
+    const seen: StressPool[] = [];
+    let pool: StressPool = 'mix';
+    for (let i = 0; i < FIVE.length + 1; i += 1) {
+      pool = nextStressPool(pool, FIVE);
+      seen.push(pool);
+    }
+    expect(seen).toEqual([...FIVE, 'mix']);
+  });
+
+  it('falls back to MIX for a species this lab does not run, and for an empty list', () => {
+    expect(nextStressPool('housefly' as CreatureId, ['queen', 'worker'] as CreatureId[])).toBe('mix');
+    expect(nextStressPool('mix', [])).toBe('mix');
+  });
+
+  it('shortens for the button and never for the report', () => {
+    expect(stressPoolLabel('mix')).toBe('POOL: MIX');
+    expect(stressPoolLabel('queen' as CreatureId)).toBe('POOL: QUEEN');
+    expect(stressPoolLabel('earthworm' as CreatureId)).toBe('POOL: WORM');
+    expect(stressPoolWords('mix')).toBe('all five, mixed');
+    expect(stressPoolWords('earthworm' as CreatureId)).toBe('earthworm only');
+    // A pasted report names the real id, whatever the row had space for.
+    for (const id of FIVE) expect(stressPoolWords(id)).toBe(`${id} only`);
   });
 });
