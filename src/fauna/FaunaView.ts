@@ -295,21 +295,82 @@ export function rigBudgetFor(rung: string): number {
 }
 
 /**
- * THE BAND. Inside `RIG_NEAR` an animal prefers a full rig; past
- * `RIG_FAR` it cannot hold one; between them it keeps whatever it has,
- * and that gap IS the hysteresis — winning a rig needs 0.6 m and losing
- * one needs 0.8, so an animal standing on the near line and taking a
- * step cannot swap form every frame.
+ * THE THREE TIERS, and the two rules that keep them honest.
  *
- * GAME TUNING, Joshua's own numbers, 2026-09-10: "we need to try render
- * at 0.6m away and it fades as right now, it's random", with the cap
- * that follows it — "I don't want unlimited full rigs inside 0.6 m
- * because that could defeat RUNG optimization". Metres through the units
- * helper because a world unit is a centimetre and a radius written as 60
- * would read as an accident.
+ * Joshua and ChatGPT, 2026-09-10, after the first band shipped:
+ *
+ *   LOD0  0 – 0.5 m   full rig, animated every frame, normal senses
+ *   LOD1  0.5 – 0.8 m the REAL MESH, placed in the world every frame,
+ *                     but its bones re-posed only every
+ *                     `REDUCED_POSE_S` — "still move the whole model
+ *                     through the world, just don't animate every bone"
+ *   LOD2  > 0.8 m     the twenty-triangle impostor
+ *
+ * The middle tier is the point of the whole thing: it keeps the
+ * recognisable silhouette of an ant — six legs, antennae, a gaster —
+ * for a body that is still fairly close, without paying to move every
+ * joint of it sixty times a second.
+ *
+ * RULE ONE: DISTANCE DECIDES PRIORITY, PERFORMANCE DECIDES CAPACITY
+ * (Joshua's words). Everything inside `LOD0_IN` WANTS a full rig and the
+ * nearest are served first; when the full budget runs out the rest fall
+ * to LOD1 rather than to an impostor. That is what stops "an ant 10 cm
+ * from the camera turning into a procedural blob while an ant 45 cm away
+ * keeps the expensive rig" — the inconsistency he saw on the phone. A
+ * hard distance-only rule would have let a hundred ants crowd a food
+ * item inside half a metre and put the phone back at Baseline A's 52.
+ *
+ * RULE TWO: EVERY BOUNDARY IS TWO NUMBERS. A body climbs a tier by
+ * reaching the IN radius and only falls back at the OUT one, so an
+ * animal wandering 0.499 → 0.501 → 0.498 m cannot strobe between forms.
+ * GAME TUNING, his numbers.
  */
-export const RIG_NEAR = unitsOfMetres(0.6);
-export const RIG_FAR = unitsOfMetres(0.8);
+export const LOD0_IN = unitsOfMetres(0.45);
+export const LOD0_OUT = unitsOfMetres(0.55);
+export const LOD1_IN = unitsOfMetres(0.75);
+export const LOD1_OUT = unitsOfMetres(0.85);
+
+/**
+ * How often a REDUCED body's bones are re-posed, seconds. GAME TUNING:
+ * "optionally update its pose every few hundred milliseconds so it
+ * doesn't look completely taxidermied". Four times a second is slow
+ * enough to be most of the saving and quick enough that a body which
+ * stops and starts is not frozen mid-stride for a visible beat.
+ *
+ * The body still MOVES every frame at this tier — position, facing and
+ * scale are written from the creature exactly as at LOD0. It is only the
+ * legs, wings, antennae, jaws, head, gaster and the worm's chain that
+ * hold still between refreshes.
+ */
+export const REDUCED_POSE_S = 0.25;
+
+/**
+ * What a REDUCED body costs against a full one, as a share of the full
+ * budget. GAME TUNING and A GUESS UNTIL THE BENCH SAYS: a frozen rig
+ * still costs its draw call and its skinned geometry on the GPU, and
+ * saves the per-frame CPU posing, so it is cheaper but not free. Two
+ * middle bodies per full one is a deliberately cautious opening bid —
+ * the Creature Lab exists to replace it with a measurement.
+ */
+export const REDUCED_PER_FULL = 2;
+
+/** The full-rig budget for a rung: the same total the pools paid for before the tiers. */
+export function fullBudgetFor(rung: string): number {
+  return rigBudgetFor(rung);
+}
+
+/** How many bodies may hold the real mesh with their bones held still. */
+export function reducedBudgetFor(rung: string): number {
+  return rigBudgetFor(rung) * REDUCED_PER_FULL;
+}
+
+/**
+ * Kept as the names the first band shipped under, so nothing that reads
+ * "the radius a rig is won at" has to be hunted down: they are the OUTER
+ * edges of the two boundaries, which is what a body loses a tier at.
+ */
+export const RIG_NEAR = LOD0_OUT;
+export const RIG_FAR = LOD1_OUT;
 
 /**
  * How long a body takes to cross between its rig and its impostor,
@@ -320,7 +381,7 @@ export const RIG_FAR = unitsOfMetres(0.8);
  * the rig's opacity 0 → 1 while that animal's impostor scales 1 → 0 — so
  * the body is neither missing nor doubled at any point in it.
  */
-export const FADE_S = 0.3;
+export const FADE_S = 0.2;
 
 /** The impostor cap for a rung: the species' own population cap, since the simulation never holds more than that. */
 export function impostorCapFor(species: CreatureSpecies, rung: string): number {
@@ -510,8 +571,14 @@ export interface FaunaViewOptions {
 export interface FaunaCost {
   readonly meanMs: number;
   readonly peakMs: number;
-  /** Rigs lent this frame, per species. */
+  /** FULL rigs lent this frame — the real mesh, posed every frame — per species. */
   readonly rigsLent: Readonly<Record<CreatureId, number>>;
+  /**
+   * REDUCED bodies this frame, per species: the real mesh, moved through
+   * the world every frame, with its bones re-posed only every
+   * `REDUCED_POSE_S`. The middle tier (LOD1).
+   */
+  readonly reduced: Readonly<Record<CreatureId, number>>;
   /** Impostors drawn this frame, per species. */
   readonly impostors: Readonly<Record<CreatureId, number>>;
   /** Handed in, drawn in no form. */
@@ -613,6 +680,8 @@ interface Rig {
   lastAt: WorldPoint | null;
   lastHeight: number;
   lastHeading: number;
+  /** Seconds since this clone's BONES were last posed. Zero every frame at LOD0; a slow clock at LOD1. */
+  sincePosed: number;
 }
 
 /** One species: its template, its pool, its impostor. */
@@ -716,6 +785,14 @@ export class FaunaView {
    * are.
    */
   private readonly fades = new Map<string, number>();
+  /**
+   * WHAT TIER EACH BODY HELD LAST FRAME — 1 full, 2 reduced, absent for
+   * an impostor. Every boundary in this ladder is two numbers, and the
+   * one that applies depends on which side the body is already on, so
+   * the previous answer is part of this frame's question. Pruned with
+   * the fades when a body stops being drawn.
+   */
+  private readonly tier = new Map<string, number>();
   /** Which rig holds a creature, by creature id. Written by `lend` and `release`; the allocator's only question. */
   private readonly byHolder = new Map<string, Rig>();
 
@@ -756,6 +833,8 @@ export class FaunaView {
   private readonly ahead: MutableVec3 = { x: 0, y: 0, z: 0 };
 
   private rigsLent = zeroCounts();
+  /** Bodies wearing the real mesh with their bones held still (LOD1), per species. */
+  private reducedLent = zeroCounts();
   private impostors = zeroCounts();
   // The census (`FaunaCost`): everything handed in that this view drew nothing of.
   private hidden = 0;
@@ -933,6 +1012,7 @@ export class FaunaView {
       // this frame is forgotten, so it is met afresh — and snaps — when
       // it comes back.
       for (const id of this.fades.keys()) if (!this.drawnIndex.has(id)) this.fades.delete(id);
+      for (const id of this.tier.keys()) if (!this.drawnIndex.has(id)) this.tier.delete(id);
     }
     const spent = now() - began;
     this.frames += 1;
@@ -945,6 +1025,7 @@ export class FaunaView {
       meanMs: this.frames === 0 ? 0 : this.totalMs / this.frames,
       peakMs: this.peakMs,
       rigsLent: { ...this.rigsLent },
+      reduced: { ...this.reducedLent },
       impostors: { ...this.impostors },
       notDrawn: this.hidden + this.pastCap + this.farTier,
       hidden: this.hidden,
@@ -1111,7 +1192,11 @@ export class FaunaView {
    */
   private poolTarget(slot: Slot): number {
     const named = this.poolOverride.get(slot.species.id);
-    return named === undefined ? rigBudgetFor(this.rung) : named;
+    // BOTH TIERS COME OUT OF THIS POOL. A reduced body is the same clone
+    // as a full one — the difference is whether its bones move this
+    // frame — so a species must be able to serve the whole ladder if the
+    // nearest bodies all happen to be its own.
+    return named === undefined ? fullBudgetFor(this.rung) + reducedBudgetFor(this.rung) : named;
   }
 
   /**
@@ -1123,8 +1208,26 @@ export class FaunaView {
    * "how many fully active insects can this room hold" cannot be capped
    * at the device budget the question is about.
    */
-  private rigBudget(): number {
-    if (this.poolOverride.size === 0) return rigBudgetFor(this.rung);
+  private fullBudget(): number {
+    return this.budgetOf(fullBudgetFor(this.rung));
+  }
+
+  /**
+   * HOW MANY MAY HOLD THE MESH WITH THEIR BONES HELD STILL (LOD1).
+   *
+   * Zero while the Lab has NAMED pools: naming one is the bench saying
+   * "rig these, I am measuring animated skeletons", and handing it a
+   * middle tier on top would answer a question it did not ask — the
+   * number it printed would stop being the one Baselines A and B are
+   * written in.
+   */
+  private reducedBudget(): number {
+    return this.poolOverride.size === 0 ? reducedBudgetFor(this.rung) : 0;
+  }
+
+  /** A rung number, or the sum the Lab named instead of it. */
+  private budgetOf(rungBudget: number): number {
+    if (this.poolOverride.size === 0) return rungBudget;
     let sum = 0;
     for (const slot of this.order) {
       const named = this.poolOverride.get(slot.species.id);
@@ -1222,7 +1325,7 @@ export class FaunaView {
       slot.rigs.push({
         root, legs, wings, antennae, jaws, head, gaster, chain, headOffset, headFrame,
         motion: newMotion(), drawnUp: new THREE.Vector3(0, 1, 0), materials: ownMaterials(root), transparent: false, trail: null,
-        holder: null, creature: -1, lastAt: null, lastHeight: 0, lastHeading: 0,
+        holder: null, creature: -1, lastAt: null, lastHeight: 0, lastHeading: 0, sincePosed: 0,
       });
       slot.group.add(root);
     }
@@ -1389,44 +1492,63 @@ export class FaunaView {
    * for the first time is simply put where it belongs.
    */
   private allocate(creatures: readonly CreatureState[], dt: number): void {
-    const budget = this.rigBudget();
+    const full = this.fullBudget();
+    const reduced = this.reducedBudget();
     const list = this.eligible;
     list.length = 0;
     for (const slot of this.order) {
       if (!slot.enabled || slot.rigs.length === 0) continue;
-      // A NAMED POOL HAS NO BAND. The band is a device budget for a wild
-      // population strung across a forest; the Creature Lab names a pool
-      // to ask "how many fully active insects can this room hold"
+      // A NAMED POOL HAS NO TIERS. The ladder is a device budget for a
+      // wild population strung across a forest; the Creature Lab names a
+      // pool to ask "how many fully active insects can this room hold"
       // (`setPoolSize`), and a bench answering that question about a
-      // one-metre room cannot have its skeletons taken away at 0.8 m.
+      // one-metre room cannot have its skeletons taken away at 0.85 m.
       const gated = !this.poolOverride.has(slot.species.id);
-      const wins = gated ? RIG_NEAR * RIG_NEAR : Infinity;
-      const keeps = gated ? RIG_FAR * RIG_FAR : Infinity;
+      // EVERY BOUNDARY IS TWO NUMBERS (see LOD0_IN): a body reaches for a
+      // mesh at LOD1_IN and only gives it up at LOD1_OUT, so what it
+      // already holds is part of the question.
+      const wants = gated ? LOD1_IN * LOD1_IN : Infinity;
+      const keeps = gated ? LOD1_OUT * LOD1_OUT : Infinity;
       for (const i of slot.candidates) {
         const d2 = this.d2[i];
-        // Inside the near line anything may win one; in the band only
-        // what already holds one keeps it. THAT is the hysteresis.
-        if (d2 <= wins || (d2 <= keeps && this.byHolder.has(creatures[i].id))) list.push(i);
+        const has = this.tier.get(creatures[i].id) ?? 0;
+        if (d2 <= wants || (d2 <= keeps && has > 0)) list.push(i);
       }
     }
     list.sort(this.byNearest);
-    const marks = Math.min(list.length, budget);
-    for (let k = 0; k < marks; k += 1) this.rigged[list[k]] = 1;
+    // THE LADDER. The nearest take the full budget; whoever is left over
+    // — whether because they are past the near line or because the
+    // budget ran out under them — takes the reduced one. Distance is the
+    // priority; the budgets are the capacity.
+    let fulls = 0;
+    let reduceds = 0;
+    for (const idx of list) {
+      const d2 = this.d2[idx];
+      const gated = !this.poolOverride.has(creatures[idx].species);
+      const has = this.tier.get(creatures[idx].id) ?? 0;
+      // Reaching LOD0 needs LOD0_IN; keeping it only needs LOD0_OUT.
+      const wantsFull = !gated || d2 <= (has === 1 ? LOD0_OUT * LOD0_OUT : LOD0_IN * LOD0_IN);
+      if (wantsFull && fulls < full) { this.rigged[idx] = 1; fulls += 1; continue; }
+      if (reduceds < reduced) { this.rigged[idx] = 2; reduceds += 1; continue; }
+      this.rigged[idx] = 0;
+    }
+    const marks = fulls + reduceds;
 
     for (const slot of this.order) {
       for (const rig of slot.rigs) {
         if (rig.holder === null) continue;
         const idx = this.byIndex.get(rig.holder);
-        // GONE, OR NO LONGER ONE OF THE MARKED. The second half is what
-        // makes the band a band: a holder still inside RIG_FAR was made
-        // eligible above and will have been marked, so an UNMARKED holder
-        // is one that has either walked out past the far line or been
-        // outrun by `budget` nearer bodies. Without this it kept its
-        // skeleton for as long as nothing else wanted one, and a body
-        // could stand three metres out wearing a rig — which is the
-        // "some close up change while others don't" this whole allocation
-        // exists to end, in its other direction.
-        if (idx === undefined || this.rigged[idx] !== 1) this.release(rig);
+        // GONE FROM THE WORLD, and nothing else. A holder that has left
+        // every tier is NOT released here: it keeps its clone while it
+        // crossfades out, and the fade releases it when it reaches zero.
+        //
+        // Releasing on the mark instead — which this briefly did, to fix
+        // a "holder past the far line never lets go" that was not real —
+        // deletes the mesh on the first frame it falls out of a tier and
+        // there is no fade OUT at all, only a pop to a growing ellipsoid.
+        // What made it look unreleased was a test reading the count one
+        // frame after the body crossed, while the fade was still running.
+        if (idx === undefined) this.release(rig);
         else rig.creature = idx;
       }
     }
@@ -1450,7 +1572,8 @@ export class FaunaView {
 
     let held = 0;
     for (const slot of this.order) for (const rig of slot.rigs) if (rig.holder !== null) held += 1;
-    while (held > budget) {
+    const meshes = full + reduced;
+    while (held > meshes) {
       const going = this.leastLent();
       if (going === null) break;
       this.release(going);
@@ -1466,8 +1589,13 @@ export class FaunaView {
         // so an animal that has just been let go of has to be pinned at
         // zero — `release` does it — or the ellipsoid would come back
         // shrunken and the animal would be half there.
-        if (rig === undefined) { this.fades.set(c.id, 0); continue; }
-        const target = this.rigged[i] === 1 ? 1 : 0;
+        if (rig === undefined) { this.fades.set(c.id, 0); this.tier.delete(c.id); continue; }
+        // EITHER MESH TIER IS THE BODY BEING THERE. The fade crosses
+        // between the real mesh and the impostor, and LOD1 is the real
+        // mesh — so a body dropping from full to reduced does not fade at
+        // all, it simply stops being re-posed. Only leaving the mesh
+        // entirely fades.
+        const target = this.rigged[i] > 0 ? 1 : 0;
         const was = this.fades.get(c.id);
         // Met for the first time: there is nothing to cross-fade from.
         let now = was === undefined ? target : was;
@@ -1481,8 +1609,13 @@ export class FaunaView {
         if (was !== undefined) {
           now = target > was ? Math.min(1, was + rate) : target < was ? Math.max(0, was - rate) : was;
         }
-        if (now <= 0 && target === 0) { this.release(rig); continue; }
+        if (now <= 0 && target === 0) { this.tier.delete(c.id); this.release(rig); continue; }
         this.fades.set(c.id, now);
+        // NEXT FRAME'S QUESTION NEEDS THIS FRAME'S ANSWER: which side of
+        // each boundary the body is already on is what makes the pair of
+        // radii a hysteresis rather than two arbitrary numbers.
+        const marked = this.rigged[i];
+        if (marked === 0) this.tier.delete(c.id); else this.tier.set(c.id, marked);
       }
     }
   }
@@ -1546,12 +1679,32 @@ export class FaunaView {
     const cand = slot.candidates;
     cand.sort(this.byNearest);
     let lent = 0;
+    let frozen = 0;
+    /** Holders on no tier: mid-crossfade, on their way to an ellipsoid. */
+    let leaving = 0;
     for (const rig of slot.rigs) {
       if (rig.holder === null) { rig.root.visible = false; continue; }
-      this.pose(slot, rig, creatures[rig.creature], dt);
+      // WHICH TIER, AND THEREFORE WHETHER THE BONES MOVE THIS FRAME.
+      // LOD1 keeps the mesh and its place in the world; what it gives up
+      // is the per-frame posing, refreshed on its own slow clock so the
+      // body is not left standing mid-stride for a visible beat.
+      const mark = this.rigged[rig.creature];
+      const full = mark === 1;
+      rig.sincePosed += dt;
+      const refresh = full || rig.sincePosed >= REDUCED_POSE_S;
+      if (refresh) rig.sincePosed = 0;
+      this.pose(slot, rig, creatures[rig.creature], dt, refresh);
       rig.root.visible = true;
-      lent += 1;
+      // COUNTED BY THE TIER IT IS ON, not by the clone it happens to be
+      // holding. A body on NO tier still holds its clone for as long as
+      // the crossfade lasts — that is what a crossfade is — but it is on
+      // its way to being an ellipsoid and is counted as one, or the
+      // middle tier's number would swell every time anything left.
+      if (full) lent += 1;
+      else if (mark === 2) frozen += 1;
+      else leaving += 1;
     }
+    this.reducedLent[id] = frozen;
     this.rigsLent[id] = lent;
     // THE IMPOSTORS: everyone else drawn, nearest first, never past the cap.
     const mesh = slot.impostor;
@@ -1603,6 +1756,7 @@ export class FaunaView {
       mesh.count = count;
       mesh.instanceMatrix.needsUpdate = true;
     }
+    bodies += leaving;
     this.impostors[id] = bodies;
   }
 
@@ -1762,7 +1916,7 @@ export class FaunaView {
   }
 
   /** Pose one lent rig from what its creature did since last frame. */
-  private pose(slot: Slot, rig: Rig, c: CreatureState, dt: number): void {
+  private pose(slot: Slot, rig: Rig, c: CreatureState, dt: number, refresh: boolean): void {
     // HOW MUCH OF THIS BODY THE RIG IS CARRYING, written every frame
     // from the animal in front of it rather than latched on the rig —
     // the same rule the scale below follows.
@@ -1831,7 +1985,11 @@ export class FaunaView {
         path[points * 3 + 2] = l.lz;
         points += 1;
       }
-      layChain(rig.root, rig.chain, chain, scale, rig.headOffset, rig.headFrame, path, points, m, bodyLength, c.phase);
+      // THE CHAIN IS THIS BODY'S POSE, and it is what LOD1 stops paying
+      // for: the crumbs are still collected every frame — a trail is a
+      // record of a crawl and a gap in it never comes back — but the
+      // fifteen bones are only laid along them on the refresh.
+      if (refresh) layChain(rig.root, rig.chain, chain, scale, rig.headOffset, rig.headFrame, path, points, m, bodyLength, c.phase);
       // The body's middle: half a length back along the path it was laid on.
       const mid = pointAlongPath(path, points, bodyLength / 2, this.centre);
       this.drew(c.id, mid.x, mid.y, mid.z);
@@ -1846,12 +2004,22 @@ export class FaunaView {
     drawnAhead(c.up, c.heading, up, this.ahead);
     rig.root.position.set(here.lx + up.x * bob, c.height + up.y * bob, here.lz + up.z * bob);
     rootQuaternion(up, this.ahead, m.pitch, m.bank, rig.root.quaternion);
-    poseLegs(rig.legs, m, bodyLength, c.phase);
-    poseWings(rig.wings, m, c.phase, slot.hz);
-    poseAntennae(rig.antennae, m, c.phase, bodyLength);
-    poseJaws(rig.jaws, m, c.phase, dt);
-    poseHead(rig.head, m, c.phase);
-    poseGaster(rig.gaster, m, bodyLength, c.phase);
+    // PLACED ABOVE, POSED HERE, and the line between them is the middle
+    // tier. Where the body IS — its position, its facing, its scale, the
+    // bob along its up — is written every frame at every tier, so a
+    // reduced body still walks across the room like the animal it is.
+    // What LOD1 gives up is everything below: six legs, two antennae,
+    // the jaws, the head, the gaster and a fly's wings, each of them a
+    // handful of quaternions a frame, sixty times a second, for a body
+    // that is half a metre off and a few dozen pixels tall.
+    if (refresh) {
+      poseLegs(rig.legs, m, bodyLength, c.phase);
+      poseWings(rig.wings, m, c.phase, slot.hz);
+      poseAntennae(rig.antennae, m, c.phase, bodyLength);
+      poseJaws(rig.jaws, m, c.phase, dt);
+      poseHead(rig.head, m, c.phase);
+      poseGaster(rig.gaster, m, bodyLength, c.phase);
+    }
     // The drawn centre: the rig's box centre, scaled, turned as the root is, on the root; a placeholder's box is its own.
     const centre = this.centre;
     if (anatomy !== null) {
@@ -1887,6 +2055,7 @@ export class FaunaView {
     this.materials.length = 0;
     this.reveals.clear();
     this.fades.clear();
+    this.tier.clear();
     this.byHolder.clear();
     this.byIndex.clear();
     this.eligible.length = 0;

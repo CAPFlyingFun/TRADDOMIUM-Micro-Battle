@@ -162,6 +162,53 @@ to hold, and `docs/PERFORMANCE.md`'s baselines are measured without it.
 A future change that quietly adds body blocking invalidates every one of
 those numbers.
 
+**Three tiers, and distance decides priority while performance decides
+capacity** (Joshua and ChatGPT, 2026-09-10, on the back of Baselines A
+and B). A drawn creature is on one of three rungs:
+
+- **LOD0, inside 0.45 m** — full rig, animated every frame, normal AI.
+- **LOD1, out to 0.85 m** — the REAL MESH, moved through the world every
+  frame, with its bones re-posed only every `REDUCED_POSE_S`. "Still
+  move the whole model through the world, just don't animate every
+  bone." This middle tier is the point: it keeps the silhouette of an
+  ant — six legs, antennae, a gaster — for a body that is still fairly
+  close, without paying to move every joint of it sixty times a second.
+- **LOD2, beyond that** — the twenty-triangle impostor.
+
+Two rules hold it together, and neither is optional:
+
+- **Distance is PRIORITY, the budget is CAPACITY.** Everything inside
+  LOD0 wants a full rig and the nearest are served first; when the full
+  budget runs out the rest fall to LOD1, never to a blob. That is what
+  stops "an ant 10 cm from the camera turning into a procedural blob
+  while an ant 45 cm away keeps the expensive rig". A hard
+  distance-only rule would let a hundred ants crowd a food item inside
+  half a metre and put the phone back at Baseline A's 52 full rigs.
+- **Every boundary is TWO numbers.** A body climbs a tier at the IN
+  radius and only falls back at the OUT one, so one wandering across a
+  line cannot strobe between forms. Leaving the mesh entirely
+  crossfades; moving between the two MESH tiers does not fade at all,
+  because the mesh is already there.
+
+**THE LOD CENTRE IS THE CAMERA, NEVER THE INSECT** (Joshua, 2026-09-10:
+"That range is based on the camera as that's what the player sees in
+1st (not added yet), 3rd person, etc… needs to be around the camera not
+insect"). The radius is about WHAT IS ON SCREEN, so it is measured from
+the eye the frame was drawn from — the follow camera in first or third
+person, the observer camera in observer mode — in three dimensions,
+height included (`FaunaView.update`'s `eye`/`eyeHeight`, which the scene
+fills from the ACTIVE camera). Never from the player's body, never from
+the room's centre, never from a fixed point. A body's own position is
+what is being measured, not what it is measured from.
+
+The consequence is worth stating so it is never mistaken for a bug: the
+Creature Lab's bench viewpoint stands 1.00 m from the centre of its 1 m
+room, so NONE of that room's floor is inside 0.45 m and only 23% is
+inside 0.85 m. That is the rule working. A radius written for a camera
+riding with an ant does not cover a box being looked at from outside it,
+and the answer if the bench ever needs one is to move the BENCH's
+camera, not to anchor the ladder to something else.
+
 **A meter may only move if there is a way to move it back. An unavailable
 action must never look functional.** "Multiplayer" in the UI may never
 imply more than exists; the honest caption is pinned by a test.

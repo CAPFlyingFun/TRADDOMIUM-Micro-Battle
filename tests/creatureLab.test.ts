@@ -661,7 +661,9 @@ describe('the stress test on the bench (Joshua, 2026-09-10)', () => {
   };
   /** A `  label   N` line of the report, or −1 when the block is not printed at all. */
   const reported = (text: string, label: string): number => {
-    const found = new RegExp(`^ {2}${label} +(\\d+)$`, 'm').exec(text);
+    // A trailing note is allowed: several of these lines say what the
+    // tier IS beside its number ("(animated every frame)").
+    const found = new RegExp(`^ {2}${label} +(\\d+)(?: {2,}\\(.*\\))?$`, 'm').exec(text);
     return found === null ? -1 : Number(found[1]);
   };
   /**
@@ -891,7 +893,7 @@ describe('the stress test on the bench (Joshua, 2026-09-10)', () => {
     // THE LIVE LINE, while the crowd is arriving. At RIGS: ALL every drawn
     // body carries a skeleton, so the impostor half of the split is zero —
     // and that zero is a count, not the absence of one.
-    const live = /^drawn +(\d+) rigs · (\d+) impostors · (\d+) not drawn$/m.exec(panel(r));
+    const live = /^drawn +(\d+) rigs · (\d+) reduced$/m.exec(panel(r));
     expect(live, `the live block should carry a drawn line:\n${panel(r)}`).not.toBeNull();
     const shownRigs = Number(must(live, 'the live census')[1]);
     expect(shownRigs).toBeGreaterThan(LAB_CREATURE_IDS.length);

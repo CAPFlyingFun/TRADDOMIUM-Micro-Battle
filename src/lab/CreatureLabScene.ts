@@ -479,6 +479,7 @@ interface MutableNdc extends Ndc {
 /** The run's per-frame census, rewritten in place: a run is minutes long and this is read every frame of it. */
 interface MutableSample extends StressSample {
   rigs: number;
+  reduced: number;
   impostors: number;
   notDrawn: number;
   aiMs: number;
@@ -579,7 +580,7 @@ export function buildCreatureLabScene(ctx: SceneContext, hooks: CreatureLabHooks
   /** The finished report, built once when the run ends and shown until RUN AGAIN or RESET. */
   let report = '';
   /** The census handed to the run each frame, rewritten in place (`census`). */
-  const sample: MutableSample = { rigs: 0, impostors: 0, notDrawn: 0, aiMs: 0, drawMs: 0 };
+  const sample: MutableSample = { rigs: 0, reduced: 0, impostors: 0, notDrawn: 0, aiMs: 0, drawMs: 0 };
 
   // Per-frame scratch, rewritten in place (the header: no allocation on the frame path that is this file's).
   const intent: MutableIntent = newMutableIntent();
@@ -921,6 +922,7 @@ export function buildCreatureLabScene(ctx: SceneContext, hooks: CreatureLabHooks
     if (fauna === null) return null;
     const drawn = fauna.cost;
     let rigs = 0;
+    let reduced = 0;
     let impostors = 0;
     for (const id of LAB_CREATURE_IDS) {
       // The two ants have no entry until the view has drawn them once —
@@ -928,10 +930,13 @@ export function buildCreatureLabScene(ctx: SceneContext, hooks: CreatureLabHooks
       // — and one `undefined` here would NaN the sum, which `measure`
       // would then drop as not a measurement, silently.
       rigs += drawn.rigsLent[id] ?? 0;
+      reduced += drawn.reduced[id] ?? 0;
       impostors += drawn.impostors[id] ?? 0;
     }
     const cost = lab.sim.cost();
     sample.rigs = rigs;
+    // THE MIDDLE TIER, which is the number this ladder exists to price.
+    sample.reduced = reduced;
     sample.impostors = impostors;
     // AND THE ONES DRAWN IN NO FORM, so the report's arithmetic closes.
     // Baseline B placed 400 and reported 13 rigs + 332 impostors, and the

@@ -51,8 +51,9 @@ import {
   type Behaviour, type CreatureId, type CreatureState, type Tier, type Vec3,
 } from '../src/creatures';
 import {
-  BODY_SAMPLES, BURROW_HIDE, BURROW_KEEP, CRUMBS_PER_LENGTH, FADE_S, FaunaView, LOOK, POOL_SIZES, REVEAL_HOLD, RIG_FAR,
-  RIG_NEAR, SPINE_TOLERANCE, impostorCapFor, poolSizeFor, rigBudgetFor,
+  BODY_SAMPLES, BURROW_HIDE, BURROW_KEEP, CRUMBS_PER_LENGTH, FADE_S, FaunaView, LOD0_IN, LOD0_OUT, LOD1_IN, LOD1_OUT, LOOK,
+  POOL_SIZES, REDUCED_POSE_S, REVEAL_HOLD, SPINE_TOLERANCE, fullBudgetFor, impostorCapFor, poolSizeFor, reducedBudgetFor,
+  rigBudgetFor,
 } from '../src/fauna/FaunaView';
 import { UP_EASE_S } from '../src/fauna/motion';
 import { WING_FLAP } from '../src/fauna/wings';
@@ -259,10 +260,14 @@ describe('the pool', () => {
       expect(rigBudgetFor(rung)).toBe(sum);
     }
     expect(rigBudgetFor('nonsense')).toBe(rigBudgetFor('medium'));
+    // The full budget IS that sum; the pool is bigger, because the middle
+    // tier's bodies come out of the same clones.
+    expect(fullBudgetFor('medium')).toBe(rigBudgetFor('medium'));
+    expect(reducedBudgetFor('medium')).toBe(rigBudgetFor('medium') * 2);
     // And a pool serves ANY MIX: if the nearest thirteen are all aphids,
     // thirteen aphid rigs are what is needed.
     const v = await keep(view('medium'));
-    for (const id of CREATURE_IDS) expect(v.poolSize(id)).toBe(rigBudgetFor('medium'));
+    for (const id of CREATURE_IDS) expect(v.poolSize(id)).toBe(fullBudgetFor('medium') + reducedBudgetFor('medium'));
   });
 
   it('SAYS WHAT THE BUDGET-SIZED POOLS COST TO BUILD, against the rung table\'s own', async () => {
@@ -288,9 +293,9 @@ describe('the pool', () => {
     // compared here.
     buildTo((id) => poolSizeFor('medium', id));
     const wasMs = buildTo((id) => poolSizeFor('medium', id));
-    const nowMs = buildTo(() => rigBudgetFor('medium'));
+    const nowMs = buildTo(() => fullBudgetFor('medium') + reducedBudgetFor('medium'));
     const wasClones = CREATURE_IDS.reduce((sum, id) => sum + poolSizeFor('medium', id), 0);
-    const nowClones = CREATURE_IDS.length * rigBudgetFor('medium');
+    const nowClones = CREATURE_IDS.length * (fullBudgetFor('medium') + reducedBudgetFor('medium'));
     // eslint-disable-next-line no-console
     console.info(
       `[fauna pools] medium, the wild three (bones: worm ${bones.earthworm}, aphid ${bones.aphid}, fly ${bones.housefly}): `
@@ -298,7 +303,7 @@ describe('the pool', () => {
       + `(${(nowMs / Math.max(wasMs, 1e-6)).toFixed(1)}x for ${(nowClones / wasClones).toFixed(1)}x the clones)`,
     );
     v.clearPoolSizes();
-    for (const id of CREATURE_IDS) expect(v.poolSize(id)).toBe(rigBudgetFor('medium'));
+    for (const id of CREATURE_IDS) expect(v.poolSize(id)).toBe(fullBudgetFor('medium') + reducedBudgetFor('medium'));
     // It is a load-time cost and it stays one: the clones past the first
     // few are never posed and never drawn until one is lent.
     expect(nowMs).toBeLessThan(250);
@@ -306,27 +311,32 @@ describe('the pool', () => {
 
   it('lends rigs to the nearest non-far creatures, impostors for the rest, nothing for the far, never past the cap', async () => {
     const v = await keep(view('ultra-low'));
-    const n = rigBudgetFor('ultra-low');
+    const n = fullBudgetFor('ultra-low');
     const cap = impostorCapFor(APHID, 'ultra-low');
     const near: CreatureState[] = [];
-    // Two units apart from the eye outwards, so the first n are inside
+    // Two units apart from the eye outwards, so the first few are inside
     // the near line and the rest trail out past the far one.
     for (let i = 0; i < 40; i += 1) near.push(creature('aphid', `a${i}`, 4 + i * 2, 0, { tier: i % 2 === 0 ? 'full' : 'near' }));
     const far = [creature('aphid', 'far', 1, 0, { tier: 'far' }), creature('aphid', 'far2', 2, 0, { tier: 'far' })];
     v.update([...far, ...near], EYE, 1 / 60);
     expect(v.cost.rigsLent.aphid).toBe(n);
-    // The nearest N drawn creatures hold the rigs — never the far ones, however near they are.
+    // The nearest N drawn creatures hold the FULL rigs — never the far
+    // ones, however near they are: `far` is the simulation's own cut.
     const holders = new Set(v.holders('aphid'));
     for (let i = 0; i < n; i += 1) expect(holders.has(`a${i}`)).toBe(true);
     expect(holders.has('far')).toBe(false);
-    expect(v.cost.impostors.aphid).toBe(Math.min(cap, 40 - n));
+    // Everything from the full budget out to LOD1_OUT keeps the MESH; the
+    // ellipsoids start past that, which is the ladder's whole point.
+    const meshes = n + v.cost.reduced.aphid;
+    expect(v.cost.reduced.aphid).toBeGreaterThan(0);
+    expect(v.cost.impostors.aphid).toBe(Math.min(cap, 40 - meshes));
     expect(v.cost.impostors.aphid).toBeLessThanOrEqual(cap);
     expect(v.impostor('aphid')!.count).toBe(v.cost.impostors.aphid);
     // And the impostor sits where its creature is, turned to its heading, on the ground.
     const m = new THREE.Matrix4();
     v.impostor('aphid')!.getMatrixAt(0, m);
     const p = new THREE.Vector3().setFromMatrixPosition(m);
-    const first = toLocal(near[n].at);
+    const first = toLocal(near[meshes].at);
     expect(p.x).toBeCloseTo(first.lx, 5);
     expect(p.z).toBeCloseTo(first.lz, 5);
     expect(p.y).toBeGreaterThan(0);
@@ -375,10 +385,10 @@ describe('the pool', () => {
 
   it('rebuilds the pools and the caps on a new rung, and switches a species off entirely', async () => {
     const v = await keep(view('ultra-low'));
-    expect(v.rigs('aphid')).toHaveLength(rigBudgetFor('ultra-low'));
+    expect(v.rigs('aphid')).toHaveLength(fullBudgetFor('ultra-low') + reducedBudgetFor('ultra-low'));
     v.setRung('high');
     expect(v.detail).toBe('high');
-    expect(v.rigs('aphid')).toHaveLength(rigBudgetFor('high'));
+    expect(v.rigs('aphid')).toHaveLength(fullBudgetFor('high') + reducedBudgetFor('high'));
     expect(v.impostor('aphid')!.instanceMatrix.count).toBe(impostorCapFor(APHID, 'high'));
     const aphids = Array.from({ length: 10 }, (_, i) => creature('aphid', `a${i}`, 10 + i, 0));
     v.update(aphids, EYE, 1 / 60);
@@ -1425,8 +1435,9 @@ describe('the budget', () => {
     // rather than a shortfall. What must hold is that it never EXCEEDS the
     // budget, and that every body is still accounted for.
     expect(lent).toBeGreaterThan(0);
-    expect(lent).toBeLessThanOrEqual(rigBudgetFor('high'));
-    expect(lent + impostorsAll(v) + cost.notDrawn).toBe(creatures.length);
+    expect(lent).toBeLessThanOrEqual(fullBudgetFor('high'));
+    const reduced = CREATURE_IDS.reduce((sum, id) => sum + cost.reduced[id], 0);
+    expect(lent + reduced + impostorsAll(v) + cost.notDrawn).toBe(creatures.length);
     // The brief's budget is 0.6 ms; the assertion is looser so a slow CI box does not fail it, and the line above is the measurement.
     expect(cost.meanMs).toBeLessThan(2.5);
     expect(CRUMBS_PER_LENGTH).toBeGreaterThan(0);
@@ -1440,11 +1451,11 @@ describe('a pool the Lab can grow: one rig per creature', () => {
     // the allocation is by distance across species, so if the nearest
     // thirteen bodies happen all to be aphids, thirteen aphid clones are
     // what serving them honestly takes (`rigBudgetFor`).
-    expect(v.poolSize('aphid')).toBe(rigBudgetFor('medium'));
+    expect(v.poolSize('aphid')).toBe(fullBudgetFor('medium') + reducedBudgetFor('medium'));
     v.setPoolSize('aphid', 40);
     expect(v.poolSize('aphid')).toBe(40);
     // The others are untouched: a named pool is one species' own.
-    expect(v.poolSize('housefly')).toBe(rigBudgetFor('medium'));
+    expect(v.poolSize('housefly')).toBe(fullBudgetFor('medium') + reducedBudgetFor('medium'));
   });
 
   it('grows ONE at a time without rebuilding the rest — the stress test lends a skeleton a second', async () => {
@@ -1474,7 +1485,7 @@ describe('a pool the Lab can grow: one rig per creature', () => {
     // Nine bodies still drawn, as impostors — nothing vanished with the rigs.
     expect(v.cost.impostors.aphid).toBe(9);
     v.clearPoolSizes();
-    expect(v.poolSize('aphid')).toBe(rigBudgetFor('medium'));
+    expect(v.poolSize('aphid')).toBe(fullBudgetFor('medium') + reducedBudgetFor('medium'));
   });
 
   it('lends every creature a rig when the pool is the crowd\'s size', async () => {
@@ -1496,100 +1507,151 @@ describe('a pool the Lab can grow: one rig per creature', () => {
 });
 
 /**
- * THE RIG GOES TO THE NEAREST BODY, WHATEVER SPECIES IT IS — Joshua's
- * complaint from the phone, and the whole reason the allocation moved.
+ * THE THREE TIERS (Joshua and ChatGPT, 2026-09-10).
  *
- * "we need to try render at 0.6m away and it fades as right now, it's
- * random. Some close up change while others don't." It was not random:
- * the pool was PER SPECIES and lending was by rank inside it, so at the
- * medium rung's worm 2 / aphid 5 / fly 4 / queen 1 / worker 1 the single
- * nearest queen kept a skeleton three metres out while an aphid thirty
- * centimetres away was the sixth-nearest aphid and drew as an ellipsoid.
+ *   LOD0  full rig, animated every frame
+ *   LOD1  the same mesh, moved through the world every frame, bones
+ *         re-posed only every REDUCED_POSE_S
+ *   LOD2  the twenty-triangle impostor
  *
- * The band is what stops a body at the line flickering: it WINS a rig by
- * getting inside RIG_NEAR and KEEPS it until it passes RIG_FAR.
+ * The two rules under it are what these tests are about. DISTANCE
+ * DECIDES PRIORITY, PERFORMANCE DECIDES CAPACITY: everything inside
+ * LOD0_IN wants a full rig, nearest first, and the overflow falls to
+ * LOD1 rather than to a blob — so "an ant 10 cm from the camera never
+ * turns into a procedural blob while an ant 45 cm away keeps the
+ * expensive rig". And EVERY BOUNDARY IS TWO NUMBERS, so a body
+ * wandering across one cannot strobe between forms.
  */
-describe('the rig goes to the nearest, and the band stops it flickering', () => {
-  const near = (n: number, from: number, step: number): CreatureState[] =>
+describe('the three tiers: full, reduced, impostor', () => {
+  const aphidsAt = (n: number, from: number, step: number): CreatureState[] =>
     Array.from({ length: n }, (_, i) => creature('aphid', `a${i}`, from + i * step, 0));
+  const reducedAll = (v: FaunaView, ids: readonly CreatureId[] = CREATURE_IDS): number =>
+    ids.reduce((sum, id) => sum + v.cost.reduced[id], 0);
 
-  it('prefers a near aphid over a far fly — the per-species rank that made it look random is gone', async () => {
+  it('prefers a near aphid over a far fly: nearness competes ACROSS species now', async () => {
     const v = await keep(view('medium'));
-    // Six aphids inside 0.6 m, and one fly farther out than all of them.
-    const crowd = [...near(6, 5, 5), creature('housefly', 'f0', 50, 0, { behaviour: 'fly', height: 20 })];
+    const crowd = [...aphidsAt(6, 5, 5), creature('housefly', 'f0', 40, 0, { behaviour: 'fly', height: 20 })];
     v.update(crowd, EYE, 1 / 60, 0);
-    // Every one of the seven is inside the near line and the budget is 13,
-    // so all seven hold rigs — including six aphids, which the old
+    // All seven are inside LOD0_IN and the full budget is thirteen, so
+    // all seven are fully rigged — including six aphids, which the old
     // per-species pool of five could not have done.
     expect(v.cost.rigsLent.aphid).toBe(6);
     expect(v.cost.rigsLent.housefly).toBe(1);
-
-    // Now the budget is the pressure, and the fly is the far one.
-    const tight = await keep(view('ultra-low'));
-    const budget = rigBudgetFor('ultra-low');
-    const many = [...near(budget + 2, 4, 4), creature('housefly', 'f0', 58, 0, { behaviour: 'fly', height: 20 })];
-    tight.update(many, EYE, 1 / 60, 0);
-    expect(lentAll(tight)).toBe(budget);
-    // The fly is the FARTHEST body inside the line, so it is the one that
-    // goes without — under the old rule its own pool would have kept it a
-    // skeleton ahead of every aphid nearer than it.
-    expect(tight.cost.rigsLent.housefly).toBe(0);
-    expect(tight.cost.rigsLent.aphid).toBe(budget);
-    expect(held(tight, 'aphid')).toEqual(many.slice(0, budget).map((c) => c.id));
+    expect(reducedAll(v)).toBe(0);
   });
 
-  it('lends nothing beyond RIG_FAR, however free the budget is', async () => {
+  it('OVERFLOWS TO THE MIDDLE TIER, never to a blob: no body is worse off than one further away', async () => {
+    // The rule Joshua asked for in his own words. A tight budget and a
+    // crowd all well inside the near line: the budget must bite, and
+    // when it does the losers keep their MESH.
+    const v = await keep(view('ultra-low'));
+    const full = fullBudgetFor('ultra-low');
+    const crowd = aphidsAt(full + 8, 2, 2);
+    v.update(crowd, EYE, 1 / 60, 0);
+    expect(v.cost.rigsLent.aphid).toBe(full);
+    expect(reducedAll(v)).toBe(8);
+    expect(v.cost.impostors.aphid).toBe(0);
+    // MONOTONE IN DISTANCE, which is the property that makes it read as
+    // sane: nobody nearer is ever drawn more cheaply than someone
+    // further away. The crowd is laid out nearest-first.
+    const tierOf = (id: string): number =>
+      (held(v, 'aphid').includes(id) ? 2 : v.drawnIds().includes(id) ? 1 : 0);
+    const tiers = crowd.map((c) => tierOf(c.id));
+    for (let i = 1; i < tiers.length; i += 1) expect(tiers[i]).toBeLessThanOrEqual(tiers[i - 1]);
+  });
+
+  it('a REDUCED body still moves through the world, but its bones hold still between refreshes', async () => {
+    // The whole point of the middle tier: "still move the whole model
+    // through the world, just don't animate every bone."
+    const v = await keep(view('ultra-low'));
+    const full = fullBudgetFor('ultra-low');
+    const crowd = aphidsAt(full + 1, 2, 2);
+    const last = crowd[crowd.length - 1];
+    for (let i = 0; i < 4; i += 1) v.update(crowd, EYE, 1 / 60, 0);
+    expect(reducedAll(v)).toBe(1);
+
+    const rigOf = (id: string): THREE.Object3D => {
+      const k = v.holders('aphid').indexOf(id);
+      expect(k, `${id} should hold a mesh`).toBeGreaterThanOrEqual(0);
+      return v.rigs('aphid')[k];
+    };
+    const legQuat = (root: THREE.Object3D): THREE.Quaternion | null => {
+      let found: THREE.Quaternion | null = null;
+      root.traverse((o) => { if (found === null && /leg/i.test(o.name)) found = o.quaternion.clone(); });
+      return found;
+    };
+    const root = rigOf(last.id);
+    const wasAt = root.position.clone();
+    const wasLeg = legQuat(root);
+    // Walk it, and step less than one refresh.
+    for (let i = 0; i < 4; i += 1) {
+      last.at = world(last.at.wx + 0.4, last.at.wz);
+      v.update(crowd, EYE, 1 / 60, 0);
+    }
+    expect(root.position.distanceTo(wasAt)).toBeGreaterThan(0.5);
+    if (wasLeg !== null) expect(legQuat(root)!.angleTo(wasLeg)).toBeCloseTo(0, 9);
+
+    // Past the refresh the legs catch up — not taxidermy, just slow.
+    for (let i = 0; i < Math.ceil(REDUCED_POSE_S * 60) + 2; i += 1) {
+      last.at = world(last.at.wx + 0.4, last.at.wz);
+      v.update(crowd, EYE, 1 / 60, 0);
+    }
+    if (wasLeg !== null) expect(legQuat(root)!.angleTo(wasLeg)).toBeGreaterThan(1e-6);
+  });
+
+  it('holds nothing past LOD1_OUT, however free the budgets are', async () => {
     const v = await keep(view('medium'));
-    // One body, nothing competing for the thirteen rigs, just too far.
-    const far = [creature('aphid', 'far', RIG_FAR + 2, 0)];
-    v.update(far, EYE, 1 / 60, 0);
-    expect(lentAll(v)).toBe(0);
+    v.update([creature('aphid', 'far', LOD1_OUT + 2, 0)], EYE, 1 / 60, 0);
+    expect(lentAll(v) + reducedAll(v)).toBe(0);
     expect(v.cost.impostors.aphid).toBe(1);
-    // And one just inside the near line does get one.
-    v.update([creature('aphid', 'in', RIG_NEAR - 2, 0)], EYE, 1 / 60, 0);
+    v.update([creature('aphid', 'in', LOD0_IN - 2, 0)], EYE, 1 / 60, 0);
     expect(lentAll(v)).toBe(1);
   });
 
-  it('never lends past the budget however many crowd inside 0.6 m — the RUNG optimisation survives a swarm', async () => {
-    // Joshua's own constraint: "I don't want unlimited full rigs inside
-    // 0.6 m because that could defeat RUNG optimization." 150 ants piling
-    // into the radius must not put the phone back at Baseline A's 52.
+  it('never lends past the two budgets however many crowd inside half a metre', async () => {
+    // "I don't want unlimited full rigs inside 0.6 m because that could
+    // defeat RUNG optimization." A swarm must not put the phone back at
+    // Baseline A's 52.
     const v = await keep(view('medium'));
-    const swarm = Array.from({ length: 150 }, (_, i) => creature('aphid', `a${i}`, 1 + (i % 50), (i / 50) | 0));
+    const swarm = Array.from({ length: 150 }, (_, i) => creature('aphid', `a${i}`, 1 + (i % 40), (i / 40) | 0));
     v.update(swarm, EYE, 1 / 60, 0);
-    expect(lentAll(v)).toBe(rigBudgetFor('medium'));
-    // Nobody is unaccounted for: the rest are impostors up to the species'
-    // own cap, and the overflow is COUNTED rather than quietly dropped.
-    expect(lentAll(v) + impostorsAll(v) + v.cost.notDrawn).toBe(swarm.length);
-    expect(v.cost.pastCap).toBe(v.cost.notDrawn);
+    expect(lentAll(v)).toBeLessThanOrEqual(fullBudgetFor('medium'));
+    expect(reducedAll(v)).toBeLessThanOrEqual(reducedBudgetFor('medium'));
+    expect(lentAll(v) + reducedAll(v) + impostorsAll(v) + v.cost.notDrawn).toBe(swarm.length);
   });
 
-  it('KEEPS a rig across RIG_NEAR and only gives it up past RIG_FAR: a body at the line does not flicker', async () => {
+  it('every boundary is TWO numbers: a body at either line does not strobe', async () => {
     const v = await keep(view('medium'));
+    const settle = Math.ceil(FADE_S * 60) + 2;
     const walk = (x: number): number => {
-      v.update([creature('aphid', 'one', x, 0)], EYE, 1 / 60, 0);
-      return v.cost.rigsLent.aphid;
+      // Long enough for a crossfade to finish. A single frame after a
+      // body crosses a line reads it mid-dissolve — still holding its
+      // clone, already on no tier — which is not a tier, it is a
+      // transition, and reading it as one is how a fade gets mistaken
+      // for a stuck rig.
+      for (let i = 0; i < settle; i += 1) v.update([creature('aphid', 'one', x, 0)], EYE, 1 / 60, 0);
+      return v.cost.rigsLent.aphid === 1 ? 2 : v.cost.reduced.aphid === 1 ? 1 : 0;
     };
-    expect(walk(RIG_NEAR - 5)).toBe(1);
-    // Out through the band, a step at a time: it holds what it won.
-    for (let x = RIG_NEAR - 1; x < RIG_FAR - 1; x += 2) {
-      expect(walk(x), `holding at ${x}`).toBe(1);
-    }
-    expect(walk(RIG_FAR + 1)).toBe(0);
-    // And coming back it must reach RIG_NEAR again, not merely RIG_FAR —
-    // otherwise the band would be a line with extra steps.
-    expect(walk(RIG_FAR - 5)).toBe(0);
-    expect(walk(RIG_NEAR - 1)).toBe(1);
+    // Won at LOD0_IN, kept out to LOD0_OUT, then the middle tier.
+    expect(walk(LOD0_IN - 2)).toBe(2);
+    for (let x = LOD0_IN + 1; x < LOD0_OUT - 1; x += 2) expect(walk(x), `full at ${x}`).toBe(2);
+    expect(walk(LOD0_OUT + 2)).toBe(1);
+    // Coming back it must reach LOD0_IN again, not merely LOD0_OUT.
+    expect(walk(LOD0_OUT - 2)).toBe(1);
+    expect(walk(LOD0_IN - 1)).toBe(2);
+    // And the same at the outer line.
+    for (let x = LOD1_IN + 1; x < LOD1_OUT - 1; x += 2) expect(walk(x), `mesh at ${x}`).toBe(1);
+    expect(walk(LOD1_OUT + 2)).toBe(0);
+    expect(walk(LOD1_OUT - 2)).toBe(0);
+    expect(walk(LOD1_IN - 2)).toBe(1);
   });
 
-  it('crossfades when a body ARRIVES, and is never invisible nor two whole bodies at once', async () => {
+  it('crossfades only when the MESH goes, not between the two mesh tiers', async () => {
     const v = await keep(view('medium'));
     const bodyAt = (x: number): CreatureState => creature('aphid', 'one', x, 0);
-    // Met OUTSIDE the far line: an impostor, and nothing to fade from.
-    for (let i = 0; i < 3; i += 1) v.update([bodyAt(RIG_FAR + 20)], EYE, 1 / 60, 0);
-    expect(v.cost.rigsLent.aphid).toBe(0);
+    for (let i = 0; i < 3; i += 1) v.update([bodyAt(LOD1_OUT + 20)], EYE, 1 / 60, 0);
+    expect(lentAll(v) + reducedAll(v)).toBe(0);
 
-    // Now it walks inside the near line and the rig fades UP over FADE_S.
     const opacity = (): number => {
       let o = 0;
       v.group.getObjectByName('aphid:rig:0')?.traverse((x) => {
@@ -1598,67 +1660,54 @@ describe('the rig goes to the nearest, and the band stops it flickering', () => 
       });
       return o;
     };
-    const impostorScale = (): number => {
-      const mesh = v.impostor('aphid');
-      if (mesh === null || mesh.count === 0) return 0;
-      const scale = new THREE.Vector3();
-      new THREE.Matrix4()
-        .fromArray(mesh.instanceMatrix.array as Float32Array, 0)
-        .decompose(new THREE.Vector3(), new THREE.Quaternion(), scale);
-      return scale.length();
-    };
     const seen: number[] = [];
     for (let i = 0; i < Math.ceil(FADE_S * 60) + 4; i += 1) {
-      v.update([bodyAt(RIG_NEAR - 20)], EYE, 1 / 60, 0);
-      // SOMETHING of the animal is on screen every single frame — the whole
-      // point of crossfading rather than swapping.
-      expect(opacity() + impostorScale(), `frame ${i}`).toBeGreaterThan(0.05);
+      v.update([bodyAt(LOD0_IN - 20)], EYE, 1 / 60, 0);
       seen.push(opacity());
     }
-    // It climbed rather than popped, never went backwards, and arrived.
     expect(seen[0]).toBeLessThan(0.5);
     expect(seen.some((o) => o > 0.05 && o < 0.95)).toBe(true);
     for (let i = 1; i < seen.length; i += 1) expect(seen[i]).toBeGreaterThanOrEqual(seen[i - 1] - 1e-9);
     expect(seen[seen.length - 1]).toBeCloseTo(1, 2);
-    // And once arrived it STAYS arrived: the settled case must not decay
-    // one step and climb back, which is a shimmer on every rigged body.
+    // Arrived stays arrived: no shimmer on a settled body.
     for (let i = 0; i < 6; i += 1) {
-      v.update([bodyAt(RIG_NEAR - 20)], EYE, 1 / 60, 0);
+      v.update([bodyAt(LOD0_IN - 20)], EYE, 1 / 60, 0);
       expect(opacity()).toBeCloseTo(1, 6);
     }
+    // And crossing INTO the middle tier is not a fade at all — the mesh
+    // is already there, it simply stops being re-posed.
+    for (let i = 0; i < 8; i += 1) {
+      v.update([bodyAt(LOD0_OUT + 5)], EYE, 1 / 60, 0);
+      expect(opacity()).toBeCloseTo(1, 6);
+    }
+    expect(v.cost.reduced.aphid).toBe(1);
   });
 
-  it('accounts for every creature it is handed, and the two identities hold', async () => {
-    // The 55 of Baseline B: 400 placed, 13 rigs + 332 impostors, and the
-    // rest earthworms under the ground that the view refuses to draw.
+  it('accounts for every creature it is handed, and the identities hold', async () => {
     const v = await keep(view('medium', loader(), { groundAt: () => 0 }));
     const crowd = [
       ...Array.from({ length: 12 }, (_, i) => creature('aphid', `a${i}`, 2 + i * 3, 0)),
-      // Burrowers well under the ground with no cutaway: drawn in no form.
       ...Array.from({ length: 7 }, (_, i) => creature('earthworm', `e${i}`, 2 + i * 3, 4, { behaviour: 'burrow', height: -unitsOfMm(400) })),
-      // The simulation's own cut, which the view only obeys.
       creature('housefly', 'f-far', 10, 0, { tier: 'far', behaviour: 'fly', height: 20 }),
     ];
     v.update(crowd, EYE, 1 / 60, 0);
     const cost = v.cost;
-    expect(lentAll(v) + impostorsAll(v) + cost.notDrawn).toBe(crowd.length);
+    expect(lentAll(v) + reducedAll(v) + impostorsAll(v) + cost.notDrawn).toBe(crowd.length);
     expect(cost.hidden + cost.pastCap + cost.farTier).toBe(cost.notDrawn);
     expect(cost.farTier).toBe(1);
     expect(cost.hidden).toBe(7);
   });
 
-  it('a NAMED pool has no band: the Lab measuring a one-metre room keeps its skeletons', async () => {
-    // `setPoolSize` is the Creature Lab asking "how many fully active
-    // insects can this room hold". A bench answering that cannot have its
-    // rigs taken away at 0.8 m, so a named pool is not distance-gated.
+  it('a NAMED pool is all full: the Lab measures animated skeletons, not a ladder', async () => {
     const v = await keep(view('medium'));
     v.setPoolSize('aphid', 4);
     const spread = [
       creature('aphid', 'a0', 10, 0),
-      creature('aphid', 'a1', RIG_FAR + 40, 0),
-      creature('aphid', 'a2', RIG_FAR + 90, 0),
+      creature('aphid', 'a1', LOD1_OUT + 40, 0),
+      creature('aphid', 'a2', LOD1_OUT + 90, 0),
     ];
     v.update(spread, EYE, 1 / 60, 0);
     expect(v.cost.rigsLent.aphid).toBe(3);
+    expect(v.cost.reduced.aphid).toBe(0);
   });
 });

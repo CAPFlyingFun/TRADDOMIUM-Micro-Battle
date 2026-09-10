@@ -272,3 +272,53 @@ Two of the five are worth calling out in advance:
 A cheap species may reach the run's 400-creature ceiling before it ever
 falls under 10 fps. That ends the run with `ceiling — NOT a breaking
 point`, which is an answer ("more than 400"), not a failure.
+
+---
+
+## The LOD ladder (alpha.44) — what changed under every baseline after B
+
+Baselines A and B were measured with TWO representations: a full rig or
+an impostor. Alpha.44 puts a third between them, so **no baseline before
+it is comparable to one after it** on anything but the totals.
+
+| | radius | what it costs |
+|---|---|---|
+| LOD0 | inside 0.45 m | full rig, animated every frame |
+| LOD1 | out to 0.85 m | the real mesh, re-posed 4×/s instead of 60×/s |
+| LOD2 | beyond | the 20-triangle impostor |
+
+The middle tier's budget is `REDUCED_PER_FULL` = 2 × the full budget,
+and that number is **a guess until the bench replaces it**. A frozen rig
+still costs its draw call and its skinned geometry on the GPU and saves
+only the per-frame CPU posing, so it is cheaper than a full rig and not
+free. Nothing has measured how much cheaper.
+
+The pools grew to hold both tiers: 117 clones at medium against 11, and
+**22.7 ms of load time against 1.7 ms** (measured in
+`tests/faunaView.test.ts`, printed on every run). A one-time cost.
+
+### The Lab's own geometry, which the ladder does not fix
+
+The LOD centre is the viewer, and the bench viewpoint stands **1.00 m**
+from the centre of a 1 m room. So of that room's floor:
+
+| viewpoint | to centre | inside 0.45 m | inside 0.85 m |
+|---|---|---|---|
+| **today** (62, +48, 62) | 1.00 m | **0.0%** | 23.3% |
+| (40, +30, 40) | 0.64 m | 16.4% | 66.5% |
+| (30, +22, 30) | 0.48 m | 31.1% | 88.4% |
+| camera at the room's centre | 0.12 m | 59.1% | 100.0% |
+
+Not one square centimetre of the bench is inside LOD0 from where the
+observer stands. Any viewpoint with real LOD0 coverage is INSIDE the
+box, which is inherent: a 1 m room seen whole cannot also be seen from
+within half a metre of all of it.
+
+**This is the rule working, not a bug, and the fix is never to move the
+centre.** The LOD centre is the CAMERA — that is what the player sees,
+in first person, in third, and in observer mode — so in play the radius
+rides with the eye and covers a proper bubble around whatever the player
+is looking at. It is the Creature Lab's BENCH CAMERA that is unusual, in
+standing outside the thing it is looking at. Moving that camera is a
+product decision about what the Lab looks like, not an engineering one,
+and it is open. Anchoring the ladder to the insect instead is not.

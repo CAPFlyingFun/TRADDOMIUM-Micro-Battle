@@ -277,8 +277,16 @@ export type StressEnding = 'broke' | 'ceiling' | 'timeout' | 'stopped';
  * belong to, which is what makes a census at a threshold possible.
  */
 export interface StressSample {
-  /** Creatures drawn with an animated skeleton this frame. */
+  /** Creatures drawn with an animated skeleton this frame (LOD0). */
   readonly rigs: number;
+  /**
+   * Creatures wearing the REAL MESH with their bones held still (LOD1):
+   * moved through the world every frame, re-posed a few times a second.
+   * The middle tier, and the number this whole ladder exists to price —
+   * a body here keeps its silhouette without paying for six legs, two
+   * antennae and a gaster sixty times a second.
+   */
+  readonly reduced: number;
   /** Creatures drawn as a 20-triangle impostor this frame. */
   readonly impostors: number;
   /**
@@ -304,6 +312,8 @@ export interface Crossing {
   readonly atS: number;
   /** Rigs drawn on the frame that recorded this, or null when the run was driven without samples. */
   readonly rigs: number | null;
+  /** Bodies on the middle tier on that same frame, or null. */
+  readonly reduced: number | null;
   /** Impostors drawn on that same frame, or null. */
   readonly impostors: number | null;
   /**
@@ -413,6 +423,8 @@ export interface StressReadout {
   readonly ending: StressEnding | null;
   /** The latest sample's rig count, or null while nothing has been measured. */
   readonly rigs: number | null;
+  /** The latest sample's middle-tier count, or null. */
+  readonly reduced: number | null;
   /** The latest sample's impostor count, or null. */
   readonly impostors: number | null;
   /** The latest sample's not-drawn count, or null. */
@@ -662,6 +674,7 @@ export class StressTest {
         // rig pool fills early and every body after it is an impostor,
         // so the split AT THIS COUNT is the whole point of the line.
         rigs: this.lastSample?.rigs ?? null,
+        reduced: this.lastSample?.reduced ?? null,
         impostors: this.lastSample?.impostors ?? null,
         // The rate is what says how precise the count beside it is, so it
         // is recorded WITH it: reconstructing it from `atS` later would
@@ -746,6 +759,7 @@ export class StressTest {
       recoveryLeftS: this.phase === 'recovery' ? Math.max(0, RECOVERY_S - this.recovered) : 0,
       ending: this.ending,
       rigs: this.lastSample?.rigs ?? null,
+      reduced: this.lastSample?.reduced ?? null,
       impostors: this.lastSample?.impostors ?? null,
       notDrawn: this.lastSample?.notDrawn ?? null,
       rate: this.rate(),
@@ -770,6 +784,7 @@ export class StressTest {
       ending: this.ending ?? 'stopped',
       windowS: this.window.windowS,
       finalRigs: this.lastSample?.rigs ?? null,
+      finalReduced: this.lastSample?.reduced ?? null,
       finalImpostors: this.lastSample?.impostors ?? null,
       finalNotDrawn: this.lastSample?.notDrawn ?? null,
       peakRigs: this.sampleFrames > 0 ? this.peakRigsSeen : null,
@@ -799,6 +814,8 @@ export interface StressResult {
   readonly windowS: number;
   /** The census of the LAST measured frame; null when the run was driven without samples. */
   readonly finalRigs: number | null;
+  /** Bodies on the middle tier at the end: the real mesh, bones held still. */
+  readonly finalReduced: number | null;
   readonly finalImpostors: number | null;
   /** Bodies the renderer drew NEITHER way on that frame — the crowd's remainder (the header). */
   readonly finalNotDrawn: number | null;
@@ -931,7 +948,8 @@ export function stressReport(result: StressResult, conditions: StressConditions)
   if (result.finalRigs !== null || result.finalImpostors !== null || result.finalNotDrawn !== null || result.peakRigs !== null) {
     lines.push('');
     lines.push('DRAWN AT THE END');
-    lines.push(`  ${'full rigs'.padEnd(20)}${whole(result.finalRigs)}`);
+    lines.push(`  ${'full rigs'.padEnd(20)}${whole(result.finalRigs)}   (animated every frame)`);
+    lines.push(`  ${'reduced'.padEnd(20)}${whole(result.finalReduced)}   (real mesh, bones held still)`);
     lines.push(`  ${'impostors'.padEnd(20)}${whole(result.finalImpostors)}`);
     lines.push(`  ${'not drawn'.padEnd(20)}${whole(result.finalNotDrawn)}   (underground burrowers, or past a cap)`);
     lines.push('  ---');
@@ -946,7 +964,7 @@ export function stressReport(result: StressResult, conditions: StressConditions)
     // a bench. So the total is the renderer's, the run's own count is
     // named beside it, and the remainder is stated as what it is.
     if (result.finalRigs !== null && result.finalImpostors !== null && result.finalNotDrawn !== null) {
-      const drawn = result.finalRigs + result.finalImpostors + result.finalNotDrawn;
+      const drawn = result.finalRigs + (result.finalReduced ?? 0) + result.finalImpostors + result.finalNotDrawn;
       lines.push(`  ${'bodies in the room'.padEnd(20)}${drawn}`);
       lines.push(`  ${'of those, the run\'s'.padEnd(20)}${result.creatures}`);
       const already = drawn - result.creatures;
@@ -998,7 +1016,8 @@ export function stressReport(result: StressResult, conditions: StressConditions)
     // The census this threshold was crossed AT, when there is one: at
     // RIGS: RUNG the rig pool is full long before 30 fps, so the count
     // and the split tell two different halves of the same story.
-    const census = c.rigs === null && c.impostors === null ? '' : `   ${whole(c.rigs)} rigs · ${whole(c.impostors)} impostors`;
+    const census = c.rigs === null && c.impostors === null ? ''
+      : `   ${whole(c.rigs)} rigs · ${whole(c.reduced)} reduced · ${whole(c.impostors)} impostors`;
     const empty = c.creatures === 0 ? '  ← empty bench' : '';
     // The ± and the rate ride WITH the count rather than being left to a
     // footnote, because the count is what gets pasted somewhere else.
@@ -1051,7 +1070,8 @@ export function stressBlock(r: StressReadout): string {
   // The split, while it is happening: at RIGS: RUNG this is the line that
   // shows the rig pool filling and the impostors taking over.
   if (r.rigs !== null || r.impostors !== null || r.notDrawn !== null) {
-    lines.push(`drawn     ${whole(r.rigs)} rigs · ${whole(r.impostors)} impostors · ${whole(r.notDrawn)} not drawn`);
+    lines.push(`drawn     ${whole(r.rigs)} rigs · ${whole(r.reduced)} reduced`);
+    lines.push(`          ${whole(r.impostors)} impostors · ${whole(r.notDrawn)} not drawn`);
   }
   lines.push(r.fps > 0 ? `fps       ${r.fps.toFixed(1)}  (${WINDOW_S} s average)` : `fps       — (filling the ${WINDOW_S} s window)`);
   lines.push(`elapsed   ${r.elapsedS.toFixed(0)} s`);
