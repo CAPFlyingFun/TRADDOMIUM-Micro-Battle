@@ -22,7 +22,7 @@
  * ends the session, which flushes, and then leaves through
  * `ui/navigation.quitToMenu`.
  */
-import { PauseOverlay, quitToMenu } from '../ui';
+import { PauseOverlay, quitToMenu, type PauseStressControls } from '../ui';
 import type { AppScene, FrameInfo, SceneContext, SceneFactory } from './Scene';
 
 /** What the shell hands a world: where to report PAUSE, and where to hand its save point. */
@@ -31,6 +31,8 @@ export interface WorldShellHooks {
   onPause(): void;
   /** The world can save now; calling `save` writes its current state through the app's session. */
   onSavePoint(save: () => Promise<void>): void;
+  /** Gives the pause sheet access to a world's optional stress bench. */
+  onStressControls(controls: PauseStressControls): void;
 }
 
 /** Builds the world scene itself against the shell's hooks. */
@@ -41,6 +43,7 @@ export function withPauseMenu(build: WorldBuilder): SceneFactory {
     let pause: PauseOverlay | null = null;
     let offEscape: (() => void) | null = null;
     let savePoint: (() => Promise<void>) | null = null;
+    let stressControls: PauseStressControls | null = null;
     const toggle = (): void => {
       if (!pause) return;
       if (pause.isOpen) pause.hide();
@@ -50,6 +53,9 @@ export function withPauseMenu(build: WorldBuilder): SceneFactory {
       onPause: () => pause?.show(),
       onSavePoint: (save) => {
         savePoint = save;
+      },
+      onStressControls: (controls) => {
+        stressControls = controls;
       },
     });
 
@@ -64,6 +70,7 @@ export function withPauseMenu(build: WorldBuilder): SceneFactory {
         await world.enter();
         pause = new PauseOverlay(ctx, {
           session,
+          stress: stressControls,
           onResume: () => {},
           onQuit: () =>
             void (async () => {
@@ -93,6 +100,8 @@ export function withPauseMenu(build: WorldBuilder): SceneFactory {
         offEscape?.();
         offEscape = null;
         savePoint = null;
+        stressControls?.exit();
+        stressControls = null;
         pause?.dispose();
         pause = null;
         world.dispose();

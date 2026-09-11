@@ -95,6 +95,15 @@ export interface PlantSource {
   /** The plant's stable id where its family carries one, else null. */
   readonly id: string | null;
   readonly variant: number;
+  /**
+   * Shape inputs shared with the object renderer. They are optional so a
+   * source saved before plant attachment existed remains a valid source; the
+   * surface helper supplies the same family defaults in that case.
+   */
+  readonly girth?: number;
+  readonly spin?: number;
+  readonly lean?: number;
+  readonly leanDir?: number;
 }
 
 /** The nearest edge of fresh water to a point: where it is, and how far, world units on the plane. */

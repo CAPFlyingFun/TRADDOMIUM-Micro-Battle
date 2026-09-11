@@ -68,9 +68,11 @@ import { world, type WorldPoint } from '../world/coords';
 import type { Habitat } from '../world/habitat';
 import { SEA_LEVEL } from '../world/heightfield';
 import type { PlantSource } from '../world/ecology/resources';
+import { plantSurfaceAt, type PlantVector } from '../world/ecology/plantSurface';
 import { stableHash } from '../world/random';
 import { CELL_SPAN, cellKey, cellOrigin, type ObjectCellId } from '../world/objects/cells';
 import { wrapHeading } from './heading';
+import { headingOn } from './surface';
 import { MM_PER_UNIT, unitsOfMm, type CreatureId, type CreatureSpecies } from './species';
 import { newCreature, type CreatureState } from './state';
 
@@ -83,6 +85,10 @@ export interface PopulateCreaturesOptions {
   readonly plantsOf: (cx: number, cz: number) => readonly PlantSource[] | null;
   /** The ground's height, world units above mean sea level. */
   readonly groundAt: (at: WorldPoint) => number;
+  /** Ground normal used to orient a host creature on the host's surface. */
+  readonly normalAt?: (at: WorldPoint) => PlantVector;
+  /** The renderer's blended cell normal, when a streamed flora world supplies one. */
+  readonly cellNormalAt?: (at: WorldPoint) => PlantVector;
 }
 
 /** A cell is 16 m square: 256 m², 0.0256 ha. The unit the table's densities are multiplied by. */
@@ -292,7 +298,12 @@ export function populateCreatures(
     // Born inside its own cell, so two cells never share a creature.
     wx = Math.min(origin.wx + CELL_SPAN - 1e-6, Math.max(origin.wx + 1e-6, wx));
     wz = Math.min(origin.wz + CELL_SPAN - 1e-6, Math.max(origin.wz + 1e-6, wz));
-    const at = world(wx, wz);
+    // Keep the state position in sync with any host-surface correction below.
+    // Host placement moves the point away from the plant's foot; creating this
+    // value once and then only updating the scalar coordinates leaves the
+    // creature's `at` (and every finder/pick consumer of it) at the old
+    // ground-site position.
+    let at = world(wx, wz);
 
     // NOTHING AT SEA, and nothing under it.
     const ground = options.groundAt(at);
@@ -300,11 +311,34 @@ export function populateCreatures(
     if (options.habitatAt(at).kind === 'sea') continue;
 
     let height: number;
+    let up: PlantVector | undefined;
+    let heading = wrapHeading(stableHash(cx, cz, base + Q.heading) * Math.PI * 2);
     let hostId: string | null = null;
     if (hosts !== null) {
       const plant = hosts[s];
       const f = PERCH_FRACTION[0] + (PERCH_FRACTION[1] - PERCH_FRACTION[0]) * stableHash(cx, cz, base + Q.height);
-      height = ground + f * Math.max(0, plant.size);
+      if (options.normalAt !== undefined) {
+        // The object renderer and the creature use one surface query. This
+        // replaces the old "foot + vertical fraction" placement with an
+        // actual point on the host's frond/stem, while keeping a fallback
+        // below for callers that only provide the old world contract.
+        const plantUp = options.normalAt(plant.at);
+        const cellUp = options.cellNormalAt?.(plant.at);
+        const surface = plantSurfaceAt(plant, f, theta, {
+          ground: plantUp,
+          ...(cellUp === undefined ? {} : { cell: cellUp }),
+        });
+        const plantGround = options.groundAt(plant.at);
+        const baseGround = Number.isFinite(plantGround) ? plantGround : ground;
+        wx = plant.at.wx + surface.point.x;
+        wz = plant.at.wz + surface.point.z;
+        at = world(wx, wz);
+        height = baseGround + surface.point.y;
+        up = surface.normal;
+        heading = headingOn(surface.normal, surface.tangent);
+      } else {
+        height = ground + f * Math.max(0, plant.size);
+      }
       hostId = plant.id;
     } else if (species.burrow !== null) {
       height = ground - under;
@@ -318,7 +352,8 @@ export function populateCreatures(
       cellKey: key,
       at,
       height,
-      heading: wrapHeading(stableHash(cx, cz, base + Q.heading) * Math.PI * 2),
+      heading,
+      up,
       lengthMm: drawLengthMm(species, stableHash(cx, cz, base + Q.length)),
       phase: stableHash(cx, cz, base + Q.phase),
       behaviour: species.burrow !== null ? 'burrow' : 'idle',

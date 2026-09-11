@@ -25,7 +25,7 @@ import { DEFAULT_SPEED, headingOfYaw } from '../src/perf/FreeFlyCamera';
 import { soilAlbedoAt } from '../src/terrain/undergroundLook';
 import {
   REMOTE_CAPSULES_ROLE, SOIL_FLOOR_EYE, createPerformanceWorldScene, soilHalfTilesFor,
-  type PerformanceWorldHooks, type PerfWorldSettings,
+  type IslandStressControls, type PerformanceWorldHooks, type PerfWorldSettings,
 } from '../src/perf/PerformanceWorldScene';
 import { BUILT_LAYERS } from '../src/perf/layerToggles';
 import { WORLD_LAYERS } from '../src/world/WorldLoader';
@@ -78,6 +78,7 @@ interface RigOptions {
   readonly clock?: PerformanceWorldHooks['clock'];
   readonly skyOverride?: PerformanceWorldHooks['skyOverride'];
   readonly detailOverride?: PerformanceWorldHooks['detailOverride'];
+  readonly onStressControls?: PerformanceWorldHooks['onStressControls'];
 }
 
 function rig(initial: AppState, options: RigOptions = {}) {
@@ -105,6 +106,7 @@ function rig(initial: AppState, options: RigOptions = {}) {
   const fractions: number[] = [];
   let pauses = 0;
   let savePoint: (() => Promise<void>) | null = null;
+  let stressControls: IslandStressControls | null = null;
   const hooks: PerformanceWorldHooks = {
     // What the shell does with PAUSE: the overlay opens and requests `paused`.
     onPause: () => {
@@ -117,6 +119,10 @@ function rig(initial: AppState, options: RigOptions = {}) {
     resume: options.resume,
     onSavePoint: (save) => {
       savePoint = save;
+    },
+    onStressControls: (controls) => {
+      stressControls = controls;
+      options.onStressControls?.(controls);
     },
     identity: options.identity,
     practiceBot: options.practiceBot,
@@ -135,7 +141,10 @@ function rig(initial: AppState, options: RigOptions = {}) {
   const field = (name: string): string =>
     must(uiLayer.querySelector<HTMLElement>(`[data-field="${name}"]`), `field ${name}`).textContent ?? '';
   const frame = (simDt = SIXTY): void => scene.update({ rawDt: SIXTY, simDt, elapsed: 0 });
-  return { scene, states, app, uiLayer, input, fractions, pauses: () => pauses, savePoint: () => savePoint, field, frame };
+  return {
+    scene, states, app, uiLayer, input, fractions, pauses: () => pauses,
+    savePoint: () => savePoint, stressControls: () => stressControls, field, frame,
+  };
 }
 
 /** The world's START pose, as the scene places it. */
@@ -1010,6 +1019,25 @@ describe('PerformanceWorldScene with the real island under it', () => {
     onBytes(buffer.byteLength, buffer.byteLength);
     return buffer;
   };
+
+  it('stress enables a disabled ambient species temporarily, then restores its Fauna slot', async () => {
+    const run = rig('loading', { survey, landcover });
+    await run.scene.enter();
+    run.frame();
+    const aphids = must(run.scene.three.getObjectByName('fauna:aphid'), 'aphid fauna slot');
+    const box = must(run.uiLayer.querySelector<HTMLInputElement>('[data-action="layer:aphids"]'), 'aphid layer');
+    box.checked = false;
+    box.dispatchEvent(new Event('change'));
+    run.frame();
+    expect(aphids.visible).toBe(false);
+
+    const controls = must(run.stressControls(), 'island stress controls');
+    controls.start();
+    expect(aphids.visible).toBe(true);
+    controls.exit();
+    expect(aphids.visible).toBe(false);
+    run.scene.dispose();
+  });
 
   it('draws the sky over the island: a dome that follows the camera, a sun that follows the clock, and a toggle that restores noon', async () => {
     // Phase 5. Two rigs at two hours of the same day, both over the island.

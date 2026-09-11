@@ -430,6 +430,7 @@ export function registerScenes(options: RegisterScenesOptions = {}): void {
       createPerformanceWorldScene({
         onPause: shell.onPause,
         onSavePoint: shell.onSavePoint,
+           onStressControls: shell.onStressControls,
         onLoadProgress: (fraction) => worldLoad.report(WORLD_MILESTONE, fraction),
         // THE SURVEY, wired here and nowhere else. The scene takes it as
         // a hook so that constructing it does not reach the network; this

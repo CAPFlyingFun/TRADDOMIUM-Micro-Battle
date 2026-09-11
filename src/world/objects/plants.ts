@@ -75,6 +75,10 @@ export function plantSourcesOf(
         size: batch.size[i],
         id: batch.ids === null ? `${family}:${cx},${cz}:${batch.site[i]}` : batch.ids[i],
         variant: batch.variant[i],
+        girth: batch.girth[i],
+        spin: batch.spin[i],
+        lean: batch.lean[i],
+        leanDir: batch.leanDir[i],
       });
     }
   }

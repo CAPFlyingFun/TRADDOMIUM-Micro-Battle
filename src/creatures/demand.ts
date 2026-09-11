@@ -679,6 +679,11 @@ export function applyDemand(
       // ground; down in a flee is a DROP at gravity's rate (`verticalStep`).
       // A ground body's height is the ground's, whatever the request.
       state.height = species.medium === 'plant' ? Math.max(ground, risen) : ground;
+      // Host placement gives a plant body the host surface's frame. Once an
+      // alarm drop reaches the ground, it is no longer on that surface and
+      // must stand in the world frame again. Without this hand-off the next
+      // ground step would keep an old leaf normal forever.
+      if (state.height <= ground + AIRBORNE_EPSILON && state.up !== WORLD_UP) state.up = WORLD_UP;
     }
   }
   state.pitch = pitchOf(state.height - before, moved);

@@ -171,6 +171,30 @@
   min-width: 0;
 }
 
+/* The island stress sheet keeps controls in a wrapping row so a landscape
+   phone never pushes COPY or EXIT below the fold. The report is selectable
+   text: long runs must remain usable when clipboard access is unavailable. */
+.ui-stress-actions {
+  justify-content: flex-start;
+}
+
+.ui-stress-report {
+  box-sizing: border-box;
+  max-height: min(42vh, 360px);
+  overflow: auto;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid rgba(201, 169, 74, 0.45);
+  border-radius: 8px;
+  background: rgba(6, 9, 12, 0.72);
+  color: var(--ui-ink);
+  font: 12px/1.35 var(--ui-mono);
+  white-space: pre-wrap;
+  user-select: text;
+  -webkit-user-select: text;
+  touch-action: pan-y;
+}
+
 /* The menu's RESUME and every slot row carry a second line — when the game
    was last played, or that the slot is empty — inside the button, so the
    column does not grow a row for it: six rows already overflow a 430 px
@@ -409,6 +433,10 @@
     padding-top: 4px;
     padding-bottom: 4px;
     gap: 2px;
+  }
+  .ui-stress-report {
+    max-height: 30vh;
+    padding: 8px;
   }
 }
 

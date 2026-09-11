@@ -6,6 +6,7 @@
 export type {
   CellResources, EcologyWorld, NearestWater, PlantSource, ResourceKind, ResourceSite, WaterQuery,
 } from './resources';
+export { plantSurfaceAt, type PlantSurface, type PlantVector } from './plantSurface';
 export { HONEYDEW_HOST_FAMILIES, OFFERED_KINDS, RESOURCE_KINDS } from './resources';
 export {
   FLOOR_LITTER_CM2, FLOOR_LITTER_FILL, FLOOR_LITTER_PER_SIDE, FOREST_FLOOR_ABOVE, HOST_PERCH_OF_SIZE,

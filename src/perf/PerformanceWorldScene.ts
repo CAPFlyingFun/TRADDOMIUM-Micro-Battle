@@ -86,9 +86,10 @@ import { HabitatMap } from '../world/habitat';
 import { VEG_BYTES, decodeVeg } from '../world/landcover';
 import { WORLD_SEED } from '../world/objects/seed';
 import { PLANT_FAMILIES, plantSourcesOf } from '../world/objects/plants';
+import { cellAt, cellKey } from '../world/objects/cells';
 import { ResourceLayer, waterQueryOf, type WaterQuery } from '../world/ecology';
 import {
-  CREATURE_IDS, CREATURE_SPECIES, CreatureSim, isUnderground, metresOfUnits, nearestSighting, viewpointFor, type CreatureId, type WildCreatureId,
+  CREATURE_IDS, CREATURE_SPECIES, CreatureSim, isUnderground, metresOfUnits, nearestSighting, unitsOfMm, viewpointFor, type CreatureId, type WildCreatureId,
 } from '../creatures';
 import { FaunaView } from '../fauna/FaunaView';
 import { FinderView } from '../fauna/FinderView';
@@ -119,7 +120,7 @@ import { COARSE_BYTES, decodeCoarse, type DemGrid } from '../world/dem';
 import { repairGrid } from '../world/demRepair';
 import { Heightfield, SEA_LEVEL } from '../world/heightfield';
 import { toLocal } from '../world/origin';
-import { compassBearing, distanceSquared, translate, type WorldPoint } from '../world/coords';
+import { compassBearing, distanceSquared, translate, world, type WorldPoint } from '../world/coords';
 import { BotHud, type BotReadout } from './BotHud';
 import { FrameStats } from './FrameStats';
 import { CAMERA_SPEEDS, FreeFlyCamera, headingOfYaw, yawForHeading } from './FreeFlyCamera';
@@ -131,6 +132,12 @@ import {
 import { BUILT_LAYERS, LayerToggles } from './layerToggles';
 import { PERF_WORLD_SCENE_ID } from './perfTool';
 import type { CreatureLodSettings } from '../fauna/creatureLod';
+import {
+  STRESS_SEED, StressTest, stressReport, type StressConditions, type StressReadout, type StressSample,
+} from '../lab/stressTest';
+import {
+  ISLAND_STRESS_SPECIES, islandStressCreatureId, islandStressPoint, type IslandStressGround,
+} from './islandStressTest';
 
 /**
  * The finder's word for each species: the SINGULAR, because its line
@@ -368,6 +375,26 @@ export interface PerformanceWorldHooks {
    * transport and an identity.
    */
   practiceBot?(): NetworkIdentity | null;
+  /**
+   * The pause shell owns the controls, but the real island owns the bench.
+   * The callback receives a stable controller once the scene has entered.
+   * It is deliberately structural so the shell does not import perf/.
+   */
+  onStressControls?(controls: IslandStressControls): void;
+}
+
+/** The small command/read surface exposed to the pause stress sheet. */
+export interface IslandStressControls {
+  readonly active: boolean;
+  readonly running: boolean;
+  readonly finished: boolean;
+  readonly report: string;
+  readonly error?: string;
+  readonly readout: StressReadout;
+  start(): void;
+  stop(): void;
+  runAgain(): void;
+  exit(): void;
 }
 
 /**
@@ -937,6 +964,24 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
      * its aphids sit on the objects' plants; each species is its own row.
      */
     let creatures: CreatureSim | null = null;
+    /** The island simulation is kept intact while the temporary bench runs. */
+    let ambientCreatures: CreatureSim | null = null;
+    let stressCreatures: CreatureSim | null = null;
+    let stressActive = false;
+    let stressCentre: WorldPoint | null = null;
+    let stressPlaced = 0;
+    let stressReportText = '';
+    let stressDrawMs = 0;
+    let stressPlacementError = '';
+    let stressPreviousUncapped = false;
+    let stressPreviousAllRigs = false;
+    const stressPreviousEnabled: Partial<Record<WildCreatureId, boolean>> = {};
+    const stress = new StressTest({ species: ISLAND_STRESS_SPECIES });
+    const stressSample = {
+      rigs: 0, reduced: 0, impostors: 0, notDrawn: 0, aiMs: 0, drawMs: 0,
+      rigBudget: 0, reducedBudget: 0, withinFull: 0, withinReduced: 0,
+      hidden: 0, pastCap: 0, farTier: 0, lod: undefined as StressSample['lod'],
+    } satisfies StressSample;
     /**
      * And how they look: one loaded rig per species from the GLBs, a
      * small pool of skeleton clones lent to the nearest, impostors past
@@ -1389,6 +1434,7 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
           rung: detail,
           now: () => performance.now(),
         });
+        ambientCreatures = creatures;
       } else {
         creatures.setRung(detail);
       }
@@ -1513,11 +1559,15 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
      */
     const updateCreatures = (dt: number, rawFrameMs: number = Number.NaN): void => {
       if (creatures === null) return;
-      syncCreatureLayers();
+      // The ambient simulation is frozen for the duration of the bench. Its
+      // species switches must not leak into the temporary population.
+      if (!stressActive) syncCreatureLayers();
       const pose = fly.pose();
       creatures.update(pose.at, dt);
       // Drawn AFTER they moved, at where they are this frame.
+      const drawStarted = performance.now();
       if (fauna !== null) fauna.update(creatures.creatures(), pose.at, dt, pose.height, rawFrameMs);
+      stressDrawMs = Math.max(0, performance.now() - drawStarted);
       // And the pins over them, from the same list, at the size the
       // camera's own field and the viewport make PIN_PIXELS. Off, this
       // is one `visible` check.
@@ -1544,6 +1594,220 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
           ready: cost.ready, lit: sense.lit, readyIn: cost.readyIn, sighted: cost.sighted,
         });
       }
+    };
+
+    /**
+     * The island stress bench is the Lab's seeded arithmetic on the live
+     * island, not a second world. Ambient CreatureSim is retained untouched
+     * and simply becomes current again on exit, so no stress body can reach a
+     * save or survive into ordinary play.
+     */
+    const stressConditions = (): StressConditions => ({
+      stamp: new Date().toISOString(),
+      build: `${__APP_VERSION__} · ${__BUILD_COMMIT__}`,
+      viewport: `${Math.round(viewWidth)} × ${Math.round(viewHeight)} css px`,
+      rigs: 'lod',
+      rung: fauna?.detail ?? 'medium',
+      predation: 'OFF',
+      camera: 'captured island camera, observer',
+      pool: 'three island species, mixed',
+      ...(fauna === null ? {} : { lod: fauna.cost.lod }),
+    });
+
+    const stressCensus = (): StressSample | null => {
+      if (fauna === null || creatures === null) return null;
+      const drawn = fauna.cost;
+      let rigs = 0;
+      let reduced = 0;
+      let impostors = 0;
+      for (const id of ISLAND_STRESS_SPECIES) {
+        rigs += drawn.rigsLent[id] ?? 0;
+        reduced += drawn.reduced[id] ?? 0;
+        impostors += drawn.impostors[id] ?? 0;
+      }
+      const cost = creatures.cost();
+      stressSample.rigs = rigs;
+      stressSample.reduced = reduced;
+      stressSample.impostors = impostors;
+      stressSample.notDrawn = drawn.notDrawn;
+      stressSample.aiMs = cost.thinkMs + cost.moveMs + cost.demandMs;
+      stressSample.drawMs = stressDrawMs;
+      stressSample.rigBudget = drawn.fullBudget;
+      stressSample.reducedBudget = drawn.reducedBudget;
+      stressSample.withinFull = drawn.withinFull;
+      stressSample.withinReduced = drawn.withinReduced;
+      stressSample.hidden = drawn.hidden;
+      stressSample.pastCap = drawn.pastCap;
+      stressSample.farTier = drawn.farTier;
+      stressSample.lod = drawn.lod;
+      return stressSample;
+    };
+
+    const finishStressReport = (): void => {
+      if (!stress.finished || stressReportText !== '') return;
+      stressReportText = stressReport(stress.result(), stressConditions());
+      if (stressPlacementError !== '') stressReportText += `\n\nPLACEMENT\n  ${stressPlacementError}`;
+    };
+
+    const addStressCreature = (species: CreatureId): void => {
+      if (stressCreatures === null || stressCentre === null || field === null || habitat === null) return;
+      const world: IslandStressGround = {
+        groundAt: at => field!.heightAt(at),
+        habitatAt: at => habitat!.at(at),
+      };
+      const at = islandStressPoint(stressCentre, stressPlaced, world);
+      // A completely unusable one-metre patch is not silently turned into a
+      // water/cliff spawn. The run is stopped and reports the actual reason
+      // rather than creating a population that violates its own boundary.
+      if (at === null) {
+        stressPlacementError = 'No valid island ground was found inside the 1 m test circle; no water or cliff bodies were spawned.';
+        stress.stop();
+        return;
+      }
+      const table = CREATURE_SPECIES[species];
+      const ground = field.heightAt(at);
+      let height = ground;
+      let behaviour: 'burrow' | 'idle' | 'fly' = 'idle';
+      if (table.medium === 'soil') {
+        const under = table.burrow === null ? 0 : unitsOfMm(table.burrow.underMm);
+        const bore = table.burrow === null ? 0 : unitsOfMm(table.burrow.boreMm);
+        height = ground - under - bore / 2;
+        behaviour = 'burrow';
+      } else if (table.medium === 'air') {
+        const flight = table.flight;
+        const low = flight === null ? 0 : unitsOfMm(flight.cruiseMm[0]);
+        const high = flight === null ? low : unitsOfMm(flight.cruiseMm[1]);
+        height = ground + (low + high) / 2;
+        behaviour = 'fly';
+      } else if (table.medium === 'plant') {
+        // Aphids need a host in ordinary ecology. The stress bench measures
+        // the creature systems around the camera, so it uses the live ground
+        // at a valid island point and leaves host selection to the normal
+        // host-aware brain when a generated plant is available.
+        height = ground + 1;
+      }
+      stressCreatures.spawn({
+        id: islandStressCreatureId(stressPlaced, species),
+        species,
+        cellKey: cellKey(cellAt(at)),
+        at,
+        height,
+        heading: (stressPlaced * 2.399963229728653) % (Math.PI * 2),
+        phase: (stressPlaced * 0.6180339887498949) % 1,
+        behaviour,
+        hunger: ((stressPlaced * 0.37) % 1) * 0.6,
+        fatigue: ((stressPlaced * 0.23) % 1) * 0.4,
+      });
+      stressPlaced += 1;
+    };
+
+    const driveStress = (rawDt: number): void => {
+      if (!stressActive) return;
+      for (const species of stress.frame(rawDt, stress.running ? stressCensus() : null)) {
+        addStressCreature(species);
+      }
+      finishStressReport();
+    };
+
+    const restoreAmbientCreatures = (): void => {
+      if (!stressActive) return;
+      stress.reset();
+      stressCreatures = null;
+      creatures = ambientCreatures;
+      stressActive = false;
+      stressCentre = null;
+      stressPlaced = 0;
+      stressReportText = '';
+      stressPlacementError = '';
+      stressDrawMs = 0;
+      if (fauna !== null) {
+        fauna.clearPoolSizes();
+        fauna.setUncapped(stressPreviousUncapped);
+        fauna.setAllRigs(stressPreviousAllRigs);
+      }
+      // Re-read layer switches only after the ambient simulation is current.
+      syncCreatureLayers();
+      // The stress renderer enables every slot so all three seeded species are
+      // measured. Put each Fauna slot back exactly as the run found it,
+      // including one the player had disabled before entering the sheet.
+      if (fauna !== null) {
+        for (const id of CREATURE_IDS) fauna.setEnabled(id, stressPreviousEnabled[id] ?? true);
+      }
+    };
+
+    const beginStress = (): void => {
+      if (stressActive || ambientCreatures === null || field === null || habitat === null) return;
+      const pose = fly.pose();
+      stressCentre = world(pose.at.wx, pose.at.wz);
+      stressPlaced = 0;
+      stressReportText = '';
+      stress.reset();
+      stress.start();
+      // The temporary stress population must not inherit a disabled ambient
+      // Fauna slot. Snapshot all slots first so every exit can restore the
+      // player's per-species visibility without guessing from layer toggles.
+      if (fauna !== null) {
+        for (const id of CREATURE_IDS) {
+          stressPreviousEnabled[id] = fauna.isEnabled(id);
+          fauna.setEnabled(id, true);
+        }
+      }
+      stressCreatures = new CreatureSim({
+        world: {
+          groundAt: at => field!.heightAt(at),
+          normalAt: at => field!.normalAt(at),
+          habitatAt: at => habitat!.at(at),
+          plantsOf: (cx, cz) => {
+            const population = objects?.populationOf({ cx, cz }) ?? null;
+            return population === null ? null : plantSourcesOf(population, PLANT_FAMILIES);
+          },
+          resourcesOf: (cx, cz) => (resourcesOn && resources !== null ? resources.sitesOf(cx, cz) : null),
+          get water(): WaterQuery | null {
+            return waterQuery;
+          },
+          weather: () => ({
+            rainMmHr: weatherNow.rainMmHr,
+            windX: weatherNow.windX,
+            windZ: weatherNow.windZ,
+            night: sunElevationDeg < 0,
+          }),
+          disturbances: () => [{ at: stressCentre!, height: pose.height, radius: EYE_PRESENCE }],
+        },
+        seed: STRESS_SEED,
+        rung: fauna?.detail ?? 'medium',
+        populate: false,
+        now: () => performance.now(),
+      });
+      creatures = stressCreatures;
+      stressActive = true;
+      if (fauna !== null) {
+        stressPreviousUncapped = fauna.isUncapped();
+        stressPreviousAllRigs = fauna.isAllRigs();
+        fauna.setUncapped(true);
+        fauna.setAllRigs(false);
+      }
+    };
+
+    const stopStress = (): void => {
+      if (!stressActive) return;
+      stress.stop();
+      finishStressReport();
+    };
+
+    const islandStressControls: IslandStressControls = {
+      get active(): boolean { return stressActive; },
+      get running(): boolean { return stress.running; },
+      get finished(): boolean { return stress.finished; },
+      get report(): string { return stressReportText; },
+      get error(): string { return stressPlacementError; },
+      get readout(): StressReadout { return stress.readout(); },
+      start: beginStress,
+      stop: stopStress,
+      runAgain: () => {
+        restoreAmbientCreatures();
+        beginStress();
+      },
+      exit: restoreAmbientCreatures,
     };
 
     /**
@@ -2738,6 +3002,7 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         // `menu`, where the hub owns what happens next.
         if (ctx.app.state === 'loading') ctx.app.requestState('playing');
         stateChanged(ctx.app.state);
+        hooks.onStressControls?.(islandStressControls);
       },
 
       update(frame: FrameInfo) {
@@ -2764,7 +3029,14 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         updateFresh(frame.simDt);
         updateObjects();
         updateResources(frame.simDt);
-        updateCreatures(frame.simDt, frame.rawDt * 1000);
+        // The stress sheet lives over the pause overlay. Its run uses raw
+        // elapsed time while paused so the temporary bodies still think and
+        // the seeded bench can be measured without unpausing ordinary play.
+        updateCreatures(stressActive ? frame.rawDt : frame.simDt, frame.rawDt * 1000);
+        // The report pairs the previous renderer census with the same raw
+        // frame duration, as the Lab bench does. Newly owed bodies therefore
+        // appear on the next measured frame.
+        driveStress(frame.rawDt);
         updateSoil();
         // AFTER the ocean, so the swell it asks about is this frame's.
         adaptWater();
@@ -2843,6 +3115,9 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
       },
 
       dispose() {
+        // Menu/scene disposal is an exit path too. Restore the ambient
+        // simulation before its renderer and terrain dependencies disappear.
+        restoreAmbientCreatures();
         antennae?.dispose(); antennae = null;
         if (sense) { three.remove(sense.group); sense.dispose(); sense = null; }
         soilInspector?.dispose(); soilInspector = null;
@@ -2878,6 +3153,8 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         }
         resources = null;
         creatures = null;
+        ambientCreatures = null;
+        stressCreatures = null;
         if (finder) {
           three.remove(finder.group);
           finder.dispose();

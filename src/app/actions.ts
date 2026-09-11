@@ -43,6 +43,12 @@ export const ACTION = {
    */
   resume: 'resume',
   quit: 'quit',
+  islandStress: 'island-stress',
+  stressStart: 'stress-start',
+  stressStop: 'stress-stop',
+  stressAgain: 'stress-again',
+  stressExit: 'stress-exit',
+  stressCopy: 'stress-copy',
 } as const;
 
 export type Action = (typeof ACTION)[keyof typeof ACTION];

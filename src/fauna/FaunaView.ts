@@ -1524,6 +1524,12 @@ export class FaunaView {
     this.uncapped = on;
   }
 
+  /** Whether an uncapped allocation is currently selected (the stress bench
+   * temporarily changes this and must put it back exactly as it found it). */
+  isUncapped(): boolean {
+    return this.uncapped;
+  }
+
   /**
    * EVERY DRAWN BODY WEARS A FULL RIG, whatever its distance — RIGS: ALL
    * on the bench, and the question Baselines A and C ask ("how many
@@ -1535,6 +1541,11 @@ export class FaunaView {
     this.allRigs = on;
     this.lodState = this.lodAdaptive.state(on);
     this.lodEffective = effectiveCreatureLod(this.lodSettings, this.lodSettings.mode === 'auto' && !on ? this.lodState.multiplier : 1);
+  }
+
+  /** Whether distance LOD is currently bypassed. */
+  isAllRigs(): boolean {
+    return this.allRigs;
   }
 
   /** A rung number, or the sum the Lab named instead of it. */
@@ -2112,22 +2123,29 @@ export class FaunaView {
       const len = this.lengthOf(slot, c) * (1 - fade);
       const r = (len * slot.look.girth) / 2;
       const half = len / 2;
-      const here = this.toLocal(c.at);
-      const cs = Math.cos(c.heading);
-      const sn = Math.sin(c.heading);
-      // A rotation about +Y by the heading — ahead is (sin h, cos h),
-      // the actor convention — with the ellipsoid's long axis on +Z.
-      // HORIZONTAL whatever the animal's `up`: an impostor is never
-      // drawn where there is a wall (the header, "the impostors keep
-      // the horizontal matrix").
+      // The procedural body carries the same surface frame as a rig. This
+      // matters for a host creature: an aphid's ellipsoid must sit on the
+      // leaf, not revert to a horizontal island-plane body while its full
+      // rig is attached to the leaf normal.
+      const up = c.up;
+      drawnAhead(up, c.heading, up, this.ahead);
+      const ahead = this.ahead;
+      const left = {
+        x: up.y * ahead.z - up.z * ahead.y,
+        y: up.z * ahead.x - up.x * ahead.z,
+        z: up.x * ahead.y - up.y * ahead.x,
+      };
+      const centreY = c.height + up.y * r;
       const o = count * 16;
-      into[o] = cs * r; into[o + 1] = 0; into[o + 2] = -sn * r; into[o + 3] = 0;
-      into[o + 4] = 0; into[o + 5] = r; into[o + 6] = 0; into[o + 7] = 0;
-      into[o + 8] = sn * half; into[o + 9] = 0; into[o + 10] = cs * half; into[o + 11] = 0;
-      into[o + 12] = here.lx; into[o + 13] = c.height + r; into[o + 14] = here.lz; into[o + 15] = 1;
+      // local +X = up × ahead, local +Y = up, local +Z = ahead.
+      into[o] = left.x * r; into[o + 1] = left.y * r; into[o + 2] = left.z * r; into[o + 3] = 0;
+      into[o + 4] = up.x * r; into[o + 5] = up.y * r; into[o + 6] = up.z * r; into[o + 7] = 0;
+      into[o + 8] = ahead.x * half; into[o + 9] = ahead.y * half; into[o + 10] = ahead.z * half; into[o + 11] = 0;
+      const centre = this.toLocal(translate(c.at, up.x * r, up.z * r));
+      into[o + 12] = centre.lx; into[o + 13] = centreY; into[o + 14] = centre.lz; into[o + 15] = 1;
       // The pick surface is told once per animal, and a crossfading one
       // was already told by its rig.
-      if (rig === undefined) { this.drew(c.id, here.lx, c.height + r, here.lz); bodies += 1; }
+      if (rig === undefined) { this.drew(c.id, centre.lx, centreY, centre.lz); bodies += 1; }
       count += 1;
     }
     if (mesh !== null) {

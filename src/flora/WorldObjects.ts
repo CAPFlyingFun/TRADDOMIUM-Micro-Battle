@@ -123,8 +123,11 @@ import { CELL_SPAN, cellCentre, cellKey, cellsWithin, distanceToCell, type Objec
 import { FAMILY_SPECS, OBJECT_FAMILIES, familyReach, type ObjectFamily } from '../world/objects/families';
 import { objectBudgetFor, type ObjectBudget } from '../world/objects/budget';
 import {
-  populateCell, type CellPopulation, type FamilyBatch, FLOWER_TINTS, GRASS_BROAD, GRASS_SEED_HEAD, TREE_BROAD, TREE_PALM, TREE_SCRUB,
+  populateCell, type CellPopulation, type FamilyBatch, FLOWER_TINTS, GRASS_BROAD, GRASS_SEED_HEAD, TREE_PALM, TREE_SCRUB,
 } from '../world/objects/populate';
+import {
+  BLADE_WIDTH_OF_HEIGHT, FLOWER_UNIT_HEAD, GROWS_LIKE_GRASS, plantTransformOf,
+} from '../world/objects/plantTransform';
 import { NO_DELTAS, type WorldDelta } from '../world/objects/seed';
 import { bladeGeometry, broadBladeGeometry } from './bladeGeometry';
 import { ROCK_VARIANTS, rockGeometry, stoneGeometry, twigGeometry } from './propGeometry';
@@ -152,37 +155,10 @@ const REFRESH_EVERY_FRAMES = 6;
 /** Trees are drawn with boughs inside this fraction of their reach, trunk-only beyond. */
 const TREE_NEAR_OF_REACH = 0.4;
 
-/** How far a rock sinks into the slope, as a fraction of its size, so it does not perch. */
-const ROCK_SINK = 0.15;
-/** A stone, half that: a pebble on the ground, not in it. */
-const STONE_SINK = ROCK_SINK * 0.5;
-/** A tree's foot is buried at least this fraction of its height (v0's 2%), and never more than this much. */
-const TREE_BURIAL = 0.02;
-const TREE_BURIAL_MAX = 0.3;
 /** How far either side of an object's foot the ground is read for its normal: a quarter metre. */
 const CONTACT_STEP = 0.25 * M;
 /** A foot that moves more than this (half a centimetre) when a tile lands means the ground under the cell changed. */
 const FOOT_MOVED = 0.5;
-/** How much of the slope a blade of grass follows, the rest being straight up. */
-const GRASS_FOLLOWS_GROUND = 0.5;
-
-/** The blade's own width over its height, from the file; `girth` is scaled against it. */
-const BLADE_WIDTH_OF_HEIGHT = 0.3256 / 4.9716;
-/** A blade is never wider than a centimetre, whatever its height. */
-const BLADE_MAX_WIDTH = 1.0 * M / 100;
-/** The broad-leaf tree's baked girth over height, the ratio an instance's girth is taken against. */
-const TREE_BAKED_GIRTH = 0.045;
-
-/** A leaf is lifted this far off the ground along the normal — three millimetres — so it does not z-fight the terrain. */
-const LEAF_LIFT = 0.3;
-/** A shrub's foot is buried at least this fraction of its height, like a tree's, and never more than `TREE_BURIAL_MAX`. */
-const SHRUB_BURIAL = 0.04;
-/** The unit geometries' own proportions, which an instance's girth is scaled against. */
-const FLOWER_UNIT_HEAD = 0.2;
-const FERN_UNIT_SPREAD = 1;
-const BROADLEAF_UNIT_REACH = 1;
-const SHRUB_UNIT_WIDTH = 1;
-const COASTAL_UNIT_SPREAD = 2;
 /**
  * The flower heads' colours by variant — white, yellow, red, violet —
  * PASTEL on purpose: the instance colour multiplies the whole
@@ -192,16 +168,6 @@ const COASTAL_UNIT_SPREAD = 2;
 const FLOWER_PALETTE: readonly (readonly [number, number, number])[] = Object.freeze([
   [1, 1, 0.92], [1, 0.9, 0.35], [1, 0.45, 0.5], [0.75, 0.55, 1],
 ]);
-/**
- * The families that grow up the way grass does — following the CELL's
- * normal at half weight rather than reading the ground under each of
- * them — because, like grass, none of them is bedded or laid flat and
- * a few hundred normals a cell buys a lean no eye could find.
- */
-const GROWS_LIKE_GRASS: ReadonlySet<ObjectFamily> = new Set<ObjectFamily>(['grass', 'fern', 'reed', 'flower', 'broadleaf', 'coastal']);
-/** The families that lie ALONG the slope, their length on the tangent: the twig's frame. */
-const LIES_FLAT: ReadonlySet<ObjectFamily> = new Set<ObjectFamily>(['twig', 'leaf']);
-
 export interface WorldObjectsOptions {
   /** The live ground, for feet. Never the plane position. */
   readonly field: Heightfield;
@@ -677,183 +643,51 @@ export class WorldObjects {
       case 'coastal': this.colour.setHSL(0.21, 0.5, 0.40); swing = 0.3; break;
     }
     baseR = this.colour.r; baseG = this.colour.g; baseB = this.colour.b;
-    // The cell's own normal, for the grass and what grows like it; a blade follows it half way.
-    const growsLikeGrass = GROWS_LIKE_GRASS.has(family);
-    const liesFlat = LIES_FLAT.has(family);
-    let cellUx = 0, cellUy = 1, cellUz = 0;
-    if (growsLikeGrass) {
-      const cn = this.field.normalAt(cellCentre(id));
-      const w = GRASS_FOLLOWS_GROUND;
-      cellUx = w * cn.nx; cellUy = w * cn.ny + (1 - w); cellUz = w * cn.nz;
-      const l = Math.hypot(cellUx, cellUy, cellUz);
-      cellUx /= l; cellUy /= l; cellUz /= l;
-    }
+    // The cell normal is part of the shared plant transform. Families that
+    // grow like grass use its half-slope blend; shrubs and trees use their
+    // foot normal before forcing their visual up to world-up.
+    const cellNormal = this.field.normalAt(cellCentre(id));
     const point = { wx: 0, wz: 0 } as unknown as { wx: number; wz: number };
     for (let i = 0; i < n; i += 1) {
       const size = batch.size[i];
       const girth = batch.girth[i];
-      // ── the ground under this object: its normal, unless the family grows up like grass ──
-      let ux = cellUx, uy = cellUy, uz = cellUz;
-      if (!growsLikeGrass) {
+      // ── the ground under this object, for families not using the cell normal ──
+      let groundNormal = cellNormal;
+      if (!GROWS_LIKE_GRASS.has(family)) {
         point.wx = batch.wx[i];
         point.wz = batch.wz[i];
-        const gn = this.field.normalAt(point as unknown as WorldPoint, CONTACT_STEP);
-        ux = gn.nx; uy = gn.ny; uz = gn.nz;
+        groundNormal = this.field.normalAt(point as unknown as WorldPoint, CONTACT_STEP);
       }
-      // ── scale, bedding and stand, by family ──
-      let sx: number, sy: number, sz: number;
-      // The offset from the foot to the object's origin, world axes.
-      let ox = 0, oy = 0, oz = 0;
-      switch (family) {
-        case 'grass': {
-          const width = Math.min(BLADE_MAX_WIDTH, size * girth) / BLADE_WIDTH_OF_HEIGHT;
-          sx = width; sy = size; sz = width * 0.6;
-          stand[i] = batch.variant[i] === GRASS_SEED_HEAD ? 2 : batch.variant[i] === GRASS_BROAD ? 1 : 0;
-          break;
-        }
-        // ── the seven ──
-        case 'fern': {
-          // The crown's spread is `girth` of its height, at the frond tips.
-          const spread = size * girth / FERN_UNIT_SPREAD;
-          sx = spread; sy = size; sz = spread;
-          stand[i] = 0;
-          break;
-        }
-        case 'reed': {
-          // A cluster of blades scaled like grass: the width is the girth of the height.
-          const width = size * girth / BLADE_WIDTH_OF_HEIGHT;
-          sx = width; sy = size; sz = width;
-          stand[i] = 0;
-          break;
-        }
-        case 'flower': {
-          // The head's radius is `girth` of the stem's height.
-          const head = size * girth / FLOWER_UNIT_HEAD;
-          sx = head; sy = size; sz = head;
-          stand[i] = 0;
-          break;
-        }
-        case 'leaf': {
-          // Lies along the slope like a twig: length on the tangent, the
-          // tent of its midrib along the normal, lifted a hair off the ground.
-          const width = size * girth;
-          sx = width; sy = size; sz = width;
-          ox = ux * LEAF_LIFT; oy = uy * LEAF_LIFT; oz = uz * LEAF_LIFT;
-          stand[i] = 0;
-          break;
-        }
-        case 'shrub': {
-          // Grows up whatever the slope, buried like a tree: at least a
-          // little, and on a slope as deep as half the canopy's radius
-          // times the slope, so the downhill side does not hang in the air.
-          const width = size * girth / SHRUB_UNIT_WIDTH;
-          sx = width; sy = size; sz = width;
-          const slopeRise = uy > 1e-6 ? 0.5 * (width * 0.5) * Math.hypot(ux, uz) / uy : size * TREE_BURIAL_MAX;
-          oy = -Math.min(size * TREE_BURIAL_MAX, Math.max(size * SHRUB_BURIAL, slopeRise));
-          stand[i] = 0;
-          ux = 0; uy = 1; uz = 0;
-          break;
-        }
-        case 'broadleaf': {
-          // The leaves reach out `girth`-and-a-bit of the height.
-          const reach = size * girth * 1.6 / BROADLEAF_UNIT_REACH;
-          sx = reach; sy = size; sz = reach;
-          stand[i] = 0;
-          break;
-        }
-        case 'coastal': {
-          // Low and wide: the spread is `girth` of the height.
-          const spread = size * girth / COASTAL_UNIT_SPREAD;
-          sx = spread; sy = size; sz = spread;
-          stand[i] = 0;
-          break;
-        }
-        case 'twig': {
-          // Lies along the slope on its radius: lifted by the radius along the normal.
-          const radius = size * girth;
-          sx = radius; sy = size; sz = radius;
-          ox = ux * radius; oy = uy * radius; oz = uz * radius;
-          stand[i] = 0;
-          break;
-        }
-        case 'stone': {
-          sx = size; sy = size; sz = size * girth;
-          const sink = size * STONE_SINK;
-          ox = -ux * sink; oy = -uy * sink; oz = -uz * sink;
-          stand[i] = batch.variant[i] & 1;
-          break;
-        }
-        case 'rock': {
-          sx = size; sy = size; sz = size * girth;
-          const sink = size * ROCK_SINK;
-          ox = -ux * sink; oy = -uy * sink; oz = -uz * sink;
-          stand[i] = batch.variant[i] % ROCK_VARIANTS;
-          break;
-        }
-        default: {
-          const wide = batch.variant[i] === TREE_BROAD ? girth / TREE_BAKED_GIRTH : 1;
-          sx = size * wide; sy = size; sz = size * wide;
-          // Buried at least v0's 2%, and on a slope as deep as the trunk's
-          // radius times the slope, so the downhill side meets the ground.
-          const trunk = size * girth * 0.5;
-          const slopeRise = uy > 1e-6 ? trunk * Math.hypot(ux, uz) / uy : size * TREE_BURIAL_MAX;
-          oy = -Math.min(size * TREE_BURIAL_MAX, Math.max(size * TREE_BURIAL, slopeRise));
-          stand[i] = batch.variant[i] === TREE_PALM ? 2 : batch.variant[i] === TREE_SCRUB ? 1 : 0;
-          // A tree grows up whatever the slope.
-          ux = 0; uy = 1; uz = 0;
-          break;
-        }
-      }
-      yOffset[i] = -oy;
-      // ── the frame [X, U, Z]: X the tangent at the spin, Z = X × U ──
-      const cs = cosOf(batch.spin[i]);
-      const sn = sinOf(batch.spin[i]);
-      const d = cs * ux + sn * uz;
-      let xx = cs - d * ux, xy = -d * uy, xz = sn - d * uz;
-      const xl = Math.hypot(xx, xy, xz);
-      xx /= xl; xy /= xl; xz /= xl;
-      const zx = xy * uz - xz * uy, zy = xz * ux - xx * uz, zz = xx * uy - xy * ux;
-      // A twig's length is along the tangent — and a leaf's: its frame is
-      // [Z, X, U], the same triad read in a different order (cyclic, so
-      // still right-handed).
-      let ax0 = xx, ay0 = xy, az0 = xz, bx0 = ux, by0 = uy, bz0 = uz, cx0 = zx, cy0 = zy, cz0 = zz;
-      if (liesFlat) {
-        ax0 = zx; ay0 = zy; az0 = zz;
-        bx0 = xx; by0 = xy; bz0 = xz;
-        cx0 = ux; cy0 = uy; cz0 = uz;
-      }
-      // ── the departure from rest: a tilt by `lean` about a tangent axis at `leanDir`, in the frame ──
-      // Rodrigues for a unit axis (ax, 0, az) in frame coordinates: T's
-      // rows below. For a twig the axis is its own X (leanDir ignored):
-      // propping one end is a turn about the sideways axis.
-      const lean = batch.lean[i];
-      const cl = cosOf(lean);
-      const sl = sinOf(lean);
-      const ax = liesFlat ? 1 : cosOf(batch.leanDir[i]);
-      const az = liesFlat ? 0 : -sinOf(batch.leanDir[i]);
-      const k = 1 - cl;
-      const t00 = cl + ax * ax * k, t01 = -az * sl, t02 = ax * az * k;
-      const t10 = az * sl, t11 = cl, t12 = -ax * sl;
-      const t20 = ax * az * k, t21 = ax * sl, t22 = cl + az * az * k;
-      // R = F · T: column j of R is F applied to column j of T.
+      const transform = plantTransformOf({
+        family, size, variant: batch.variant[i], girth, spin: batch.spin[i], lean: batch.lean[i], leanDir: batch.leanDir[i],
+      }, {
+        ground: { x: groundNormal.nx, y: groundNormal.ny, z: groundNormal.nz },
+        cell: { x: cellNormal.nx, y: cellNormal.ny, z: cellNormal.nz },
+      });
+      if (family === 'grass') stand[i] = batch.variant[i] === GRASS_SEED_HEAD ? 2 : batch.variant[i] === GRASS_BROAD ? 1 : 0;
+      else if (family === 'tree') stand[i] = batch.variant[i] === TREE_PALM ? 2 : batch.variant[i] === TREE_SCRUB ? 1 : 0;
+      else if (family === 'stone') stand[i] = batch.variant[i] & 1;
+      else if (family === 'rock') stand[i] = batch.variant[i] % ROCK_VARIANTS;
+      else stand[i] = 0;
+      yOffset[i] = -transform.origin.y;
       const o = i * 16;
-      matrices[o] = (ax0 * t00 + bx0 * t10 + cx0 * t20) * sx;
-      matrices[o + 1] = (ay0 * t00 + by0 * t10 + cy0 * t20) * sx;
-      matrices[o + 2] = (az0 * t00 + bz0 * t10 + cz0 * t20) * sx;
+      matrices[o] = transform.x.x * transform.scaleX;
+      matrices[o + 1] = transform.x.y * transform.scaleX;
+      matrices[o + 2] = transform.x.z * transform.scaleX;
       matrices[o + 3] = 0;
-      matrices[o + 4] = (ax0 * t01 + bx0 * t11 + cx0 * t21) * sy;
-      matrices[o + 5] = (ay0 * t01 + by0 * t11 + cy0 * t21) * sy;
-      matrices[o + 6] = (az0 * t01 + bz0 * t11 + cz0 * t21) * sy;
+      matrices[o + 4] = transform.y.x * transform.scaleY;
+      matrices[o + 5] = transform.y.y * transform.scaleY;
+      matrices[o + 6] = transform.y.z * transform.scaleY;
       matrices[o + 7] = 0;
-      matrices[o + 8] = (ax0 * t02 + bx0 * t12 + cx0 * t22) * sz;
-      matrices[o + 9] = (ay0 * t02 + by0 * t12 + cy0 * t22) * sz;
-      matrices[o + 10] = (az0 * t02 + bz0 * t12 + cz0 * t22) * sz;
+      matrices[o + 8] = transform.z.x * transform.scaleZ;
+      matrices[o + 9] = transform.z.y * transform.scaleZ;
+      matrices[o + 10] = transform.z.z * transform.scaleZ;
       matrices[o + 11] = 0;
       // THE ONE WORLD → LOCAL CROSSING, through the origin like every renderer.
       const here = toLocal({ wx: batch.wx[i], wz: batch.wz[i] } as WorldPoint);
-      matrices[o + 12] = here.lx + ox;
+      matrices[o + 12] = here.lx + transform.origin.x;
       matrices[o + 13] = 0;
-      matrices[o + 14] = here.lz + oz;
+      matrices[o + 14] = here.lz + transform.origin.z;
       matrices[o + 15] = 1;
       const shade = 1 - swing / 2 + swing * batch.tint[i];
       if (family === 'flower') {
@@ -1059,23 +893,6 @@ export class WorldObjects {
     this.stale.length = 0;
     this.staleSet.clear();
   }
-}
-
-/**
- * Sine and cosine to a third of a degree, from a table: the composer
- * takes six of each per object and a blade's spin to that precision is
- * invisible. 1,024 entries round the circle.
- */
-const TRIG_STEPS = 1024;
-const SIN_TABLE = new Float32Array(TRIG_STEPS);
-for (let i = 0; i < TRIG_STEPS; i += 1) SIN_TABLE[i] = Math.sin((i / TRIG_STEPS) * Math.PI * 2);
-const TRIG_SCALE = TRIG_STEPS / (Math.PI * 2);
-function sinOf(angle: number): number {
-  const i = Math.round(angle * TRIG_SCALE) % TRIG_STEPS;
-  return SIN_TABLE[i < 0 ? i + TRIG_STEPS : i];
-}
-function cosOf(angle: number): number {
-  return sinOf(angle + Math.PI / 2);
 }
 
 /**

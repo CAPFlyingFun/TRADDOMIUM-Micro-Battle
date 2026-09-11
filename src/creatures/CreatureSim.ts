@@ -85,7 +85,7 @@ import { distanceSquared, type WorldPoint } from '../world/coords';
 import type { SoilPoint } from '../world/soilTypes';
 import type { PlantSource } from '../world/ecology/resources';
 import { isObjectRung } from '../world/objects/budget';
-import { cellAt, cellKey, cellsWithin, distanceToCell, type ObjectCellId } from '../world/objects/cells';
+import { cellAt, cellCentre, cellKey, cellsWithin, distanceToCell, type ObjectCellId } from '../world/objects/cells';
 import { mulberry32, stableSeed } from '../world/random';
 import type { ControlLedger } from './control';
 import { applyDemand, newMutableIntent, playerDemand, wordFor, type MutableIntent } from './demand';
@@ -590,6 +590,14 @@ export class CreatureSim implements CreatureSimulation {
   private generate(run: Run, id: ObjectCellId): void {
     const creatures = populateCreatures(id, run.species, {
       seed: this.seed, habitatAt: this.habitatAt, plantsOf: this.plantsOf, groundAt: this.groundAt,
+      normalAt: (at) => {
+        const n = this.world.normalAt(at);
+        return { x: n.nx, y: n.ny, z: n.nz };
+      },
+      cellNormalAt: () => {
+        const n = this.world.normalAt(cellCentre(id));
+        return { x: n.nx, y: n.ny, z: n.nz };
+      },
     });
     run.cells.set(cellKey(id), { id, creatures });
     for (const c of creatures) {

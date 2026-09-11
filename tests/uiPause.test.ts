@@ -10,6 +10,7 @@ import { createStorageRoot } from '../src/persistence/StorageRoot';
 import { memoryKeyValueStore } from '../src/persistence/store';
 import type { GameSession } from '../src/session/GameSession';
 import { PauseOverlay, pauseWords } from '../src/ui/PauseOverlay';
+import type { PauseStressControls } from '../src/ui/PauseOverlay';
 
 function fakeSession(canPauseWorld: boolean): GameSession {
   return {
@@ -107,5 +108,100 @@ describe('PauseOverlay', () => {
     expect(veil?.querySelector<HTMLElement>('[data-action="resume"]')?.closest('section')?.hidden).toBe(false);
     overlay.dispose();
     expect(veil?.isConnected).toBe(false);
+  });
+
+  it('offers the solo island stress sheet and routes every control', () => {
+    let active = false;
+    let running = false;
+    const controls: PauseStressControls = {
+      get active() { return active; },
+      get running() { return running; },
+      finished: false,
+      report: '',
+      readout: {
+        phase: 'idle', creatures: 0, bySpecies: {}, fps: 0, elapsedS: 0,
+        crossings: [], nextFps: 45, recoveryLeftS: 0, ending: null,
+        rigs: null, rigBudget: null, reducedBudget: null, withinFull: null,
+        withinReduced: null, reduced: null, impostors: null, notDrawn: null,
+        rate: 0, lod: null,
+      },
+      start: vi.fn(() => { active = true; running = true; }),
+      stop: vi.fn(() => { running = false; }),
+      runAgain: vi.fn(() => { active = true; running = true; }),
+      exit: vi.fn(() => { active = false; running = false; }),
+    };
+    const uiLayer = document.createElement('div');
+    document.body.appendChild(uiLayer);
+    const ctx = {
+      uiLayer,
+      storage: createStorageRoot(memoryKeyValueStore()),
+      app: { requestState: vi.fn() },
+    } as unknown as SceneContext;
+    const overlay = new PauseOverlay(ctx, {
+      session: fakeSession(true), onResume: vi.fn(), onQuit: vi.fn(), stress: controls,
+    });
+    overlay.show();
+    expect(uiLayer.querySelector('[data-action="island-stress"]')).not.toBeNull();
+    uiLayer.querySelector<HTMLButtonElement>('[data-action="island-stress"]')!.click();
+    expect(uiLayer.querySelector<HTMLElement>('[data-role="island-stress"]')?.hidden).toBe(false);
+    uiLayer.querySelector<HTMLButtonElement>('[data-action="stress-start"]')!.click();
+    uiLayer.querySelector<HTMLButtonElement>('[data-action="stress-stop"]')!.click();
+    uiLayer.querySelector<HTMLButtonElement>('[data-action="stress-again"]')!.click();
+    uiLayer.querySelector<HTMLButtonElement>('[data-action="stress-exit"]')!.click();
+    expect(controls.start).toHaveBeenCalledTimes(1);
+    expect(controls.stop).toHaveBeenCalledTimes(1);
+    expect(controls.runAgain).toHaveBeenCalledTimes(1);
+    expect(controls.exit).toHaveBeenCalledTimes(1);
+    overlay.dispose();
+  });
+
+  it('does not offer the island stress sheet to multiplayer sessions', () => {
+    const controls = {
+      active: false, running: false, finished: false, report: '', readout: {},
+      start: vi.fn(), stop: vi.fn(), runAgain: vi.fn(), exit: vi.fn(),
+    } as unknown as PauseStressControls;
+    const uiLayer = document.createElement('div');
+    document.body.appendChild(uiLayer);
+    const ctx = {
+      uiLayer,
+      storage: createStorageRoot(memoryKeyValueStore()),
+      app: { requestState: vi.fn() },
+    } as unknown as SceneContext;
+    const overlay = new PauseOverlay(ctx, {
+      session: fakeSession(false), onResume: vi.fn(), onQuit: vi.fn(), stress: controls,
+    });
+    overlay.show();
+    expect(uiLayer.querySelector('[data-action="island-stress"]')).toBeNull();
+    overlay.dispose();
+  });
+
+  it('renders a finished report and gives clipboard failures visible feedback', async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error('denied'));
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true, value: { writeText },
+    });
+    const controls = {
+      active: true, running: false, finished: true, report: 'ISLAND STRESS REPORT',
+      readout: { phase: 'done', creatures: 4, fps: 60, recoveryLeftS: 0 },
+      start: vi.fn(), stop: vi.fn(), runAgain: vi.fn(), exit: vi.fn(),
+    } as unknown as PauseStressControls;
+    const uiLayer = document.createElement('div');
+    document.body.appendChild(uiLayer);
+    const ctx = {
+      uiLayer,
+      storage: createStorageRoot(memoryKeyValueStore()),
+      app: { requestState: vi.fn() },
+    } as unknown as SceneContext;
+    const overlay = new PauseOverlay(ctx, {
+      session: fakeSession(true), onResume: vi.fn(), onQuit: vi.fn(), stress: controls,
+    });
+    overlay.show();
+    uiLayer.querySelector<HTMLButtonElement>('[data-action="island-stress"]')!.click();
+    expect(uiLayer.querySelector('[data-role="stress-report"]')?.textContent).toBe('ISLAND STRESS REPORT');
+    uiLayer.querySelector<HTMLButtonElement>('[data-action="stress-copy"]')!.click();
+    await Promise.resolve();
+    expect(writeText).toHaveBeenCalledWith('ISLAND STRESS REPORT');
+    expect(uiLayer.querySelector('[data-role="stress-copy-status"]')?.textContent).toContain('failed');
+    overlay.dispose();
   });
 });

@@ -35,7 +35,7 @@ export { timeAgo } from './timeAgo';
 export {
   SCREEN_ID, destination, goToScreen, quitToMenu, startSession, type Destination, type ScreenId,
 } from './navigation';
-export { PauseOverlay, pauseWords, type PauseHooks } from './PauseOverlay';
+export { PauseOverlay, pauseWords, type PauseHooks, type PauseStressControls } from './PauseOverlay';
 export {
   ProfileScene, createProfileScene, shortDeviceId, PROFILE_NAME_ACTION, PROFILE_SAVE_ACTION,
   type ProfileHooks, type ProfileSource, type ProfileView,

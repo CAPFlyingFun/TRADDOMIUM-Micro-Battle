@@ -196,6 +196,8 @@ export interface NewCreatureOptions {
   readonly at: WorldPoint;
   readonly height: number;
   readonly heading: number;
+  /** Unit normal of the surface at the spawn point; omitted for ground-up. */
+  readonly up?: Vec3;
   /** This individual's body length, mm. Omitted: the species' cited length, which is the animal the table describes. */
   readonly lengthMm?: number;
   /** Where in the think cycle it starts, 0..1, so a cell's creatures do not all think on the same frame. */
@@ -227,7 +229,11 @@ export function newCreature(options: NewCreatureOptions): CreatureState {
     at: options.at,
     height: options.height,
     heading: options.heading,
-    up: WORLD_UP,
+    up: options.up === undefined ? WORLD_UP : {
+      x: options.up.x,
+      y: options.up.y,
+      z: options.up.z,
+    },
     pitch: 0,
     behaviour: options.behaviour ?? 'idle',
     behaviourS: 0,
