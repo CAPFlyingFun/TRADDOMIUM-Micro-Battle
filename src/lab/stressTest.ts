@@ -318,6 +318,18 @@ export interface StressSample {
   readonly reducedBudget: number;
   readonly withinFull: number;
   readonly withinReduced: number;
+  /**
+   * WHY EACH NOT-DRAWN BODY WAS NOT DRAWN, so a limit can never hide
+   * inside one number again. `hidden` is a burrower deeper than
+   * `BURROW_HIDE` with no cutaway over it — the 55 of Baseline B, and
+   * correct. `pastCap` is the species' impostor cap, and `farTier` is
+   * the simulation's own `far` cut: those two ARE limits, and a run that
+   * prints them as "not drawn" alongside the worms is a run whose
+   * numbers cannot be read.
+   */
+  readonly hidden: number;
+  readonly pastCap: number;
+  readonly farTier: number;
 }
 
 /** One threshold, and the run when it fell through it. */
@@ -823,6 +835,9 @@ export class StressTest {
       finalReducedBudget: this.lastSample?.reducedBudget ?? null,
       finalWithinFull: this.lastSample?.withinFull ?? null,
       finalWithinReduced: this.lastSample?.withinReduced ?? null,
+      finalHidden: this.lastSample?.hidden ?? null,
+      finalPastCap: this.lastSample?.pastCap ?? null,
+      finalFarTier: this.lastSample?.farTier ?? null,
       peakRigs: this.sampleFrames > 0 ? this.peakRigsSeen : null,
       peakImpostors: this.sampleFrames > 0 ? this.peakImpostorsSeen : null,
       meanDrawMs: this.sampleFrames > 0 ? this.drawMsTotal / this.sampleFrames : null,
@@ -867,6 +882,10 @@ export interface StressResult {
   readonly finalReducedBudget: number | null;
   readonly finalWithinFull: number | null;
   readonly finalWithinReduced: number | null;
+  /** Why the not-drawn were not drawn: underground, past an impostor cap, or cut `far` by the simulation. */
+  readonly finalHidden: number | null;
+  readonly finalPastCap: number | null;
+  readonly finalFarTier: number | null;
   /** The most rigs, and the most impostors, drawn in any one measured frame. */
   readonly peakRigs: number | null;
   readonly peakImpostors: number | null;
@@ -882,8 +901,13 @@ export interface StressConditions {
   readonly stamp: string;
   readonly build: string;
   readonly viewport: string;
-  /** `all` — one rig per creature — or the detail rung's pool, past which bodies draw as impostors. */
-  readonly rigs: 'all' | 'rung' | 'rung2' | 'rung4';
+  /**
+   * `all` — one animated skeleton per creature, distance ignored — or
+   * `lod`, the three tiers decided by distance alone. NEITHER HAS A
+   * BUDGET: the bench is uncapped in both, so a run ends because the
+   * phone ended it and never because a table did.
+   */
+  readonly rigs: 'all' | 'lod';
   readonly rung: string;
   readonly predation: string;
   readonly camera: string;
@@ -926,7 +950,11 @@ function whole(value: number | null): string {
  */
 function ofCap(value: number | null, cap: number | null): string {
   if (value === null) return '—';
-  return cap === null || cap <= 0 ? String(value) : `${value}/${cap}`;
+  // NO CAP PRINTS NO CAP. The bench runs uncapped (`FaunaView.setUncapped`),
+  // so the budget it reports is infinite — and "13/Infinity" would be a
+  // limit written where the whole point is that there is not one.
+  const capped = cap !== null && Number.isFinite(cap) && cap > 0;
+  return capped ? `${value}/${cap}` : String(value);
 }
 
 /** A millisecond figure in the frame block's right-aligned column, or an em-dash there. */
@@ -1011,7 +1039,15 @@ export function stressReport(result: StressResult, conditions: StressConditions)
     lines.push(`  ${'full rigs'.padEnd(20)}${ofCap(result.finalRigs, result.finalRigBudget)}   (animated every frame)`);
     lines.push(`  ${'reduced'.padEnd(20)}${ofCap(result.finalReduced, result.finalReducedBudget)}   (real mesh, bones held still)`);
     lines.push(`  ${'impostors'.padEnd(20)}${whole(result.finalImpostors)}`);
-    lines.push(`  ${'not drawn'.padEnd(20)}${whole(result.finalNotDrawn)}   (underground burrowers, or past a cap)`);
+    lines.push(`  ${'not drawn'.padEnd(20)}${whole(result.finalNotDrawn)}`);
+    if (result.finalHidden !== null || result.finalPastCap !== null || result.finalFarTier !== null) {
+      // SPLIT, because the three mean opposite things. A buried worm is
+      // the renderer being right; the other two are LIMITS, and a run
+      // that quietly counts them with the worms cannot be read at all.
+      lines.push(`    ${'underground'.padEnd(18)}${whole(result.finalHidden)}   (burrowers below BURROW_HIDE — correct, not a limit)`);
+      lines.push(`    ${'past a cap'.padEnd(18)}${whole(result.finalPastCap)}   (impostor cap — A LIMIT if this is not zero)`);
+      lines.push(`    ${'cut far'.padEnd(18)}${whole(result.finalFarTier)}   (the simulation's own cut — A LIMIT if this is not zero)`);
+    }
     if (result.finalWithinFull !== null || result.finalWithinReduced !== null) {
       lines.push('  ---');
       // WHAT THE LADDER WAS ASKED FOR, against what it was allowed. Two
@@ -1109,8 +1145,17 @@ export function stressReport(result: StressResult, conditions: StressConditions)
   lines.push(`  build      ${conditions.build}`);
   lines.push(`  when       ${conditions.stamp}`);
   lines.push(`  viewport   ${conditions.viewport}`);
-  lines.push(`  rigs       ${conditions.rigs === 'all' ? 'ALL — one animated skeleton per insect' : `RUNG (${conditions.rung}) — the rest draw as impostors`}`);
-  lines.push(`  detail     ${conditions.rung}`);
+  lines.push(`  rigs       ${conditions.rigs === 'all'
+    ? 'ALL — one animated skeleton per insect, no budget'
+    : 'LOD — full rig / frozen mesh / impostor by DISTANCE, no budget'}`);
+  // THE RUNG, AND WHAT IT DOES NOT DO. It is the player's own setting
+  // now (Joshua, 2026-09-11: "should be on High to match settings not
+  // medium"), and on an uncapped bench it sizes no creature budget and
+  // no population cap — `LAB_SPECIES_TABLE` already flattens those. It
+  // is a condition the run was taken under, not a lever on the number,
+  // and a line that let it read as a lever would be the wrong kind of
+  // honest.
+  lines.push(`  detail     ${conditions.rung}   (the player's setting; caps nothing on this bench)`);
   lines.push(`  predation  ${conditions.predation}`);
   lines.push(`  camera     ${conditions.camera}`);
   lines.push(`  pool       ${conditions.pool}`);

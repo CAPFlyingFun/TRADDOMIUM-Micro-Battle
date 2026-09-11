@@ -69,7 +69,7 @@ interface Rig {
 
 const rigs: Rig[] = [];
 
-function rig(): Rig {
+function rig(detail?: 'low' | 'medium' | 'high'): Rig {
   const app: AppHandle = {
     state: 'menu',
     requestState: () => {},
@@ -94,6 +94,9 @@ function rig(): Rig {
     },
     loadModel: placeholders,
     now: () => (clock += 0.01),
+    // Absent unless a test names one, which is the probe's and the
+    // test's case: no settings to read means `medium`.
+    settings: detail === undefined ? undefined : () => ({ detail }),
   };
   const scene = buildCreatureLabScene(ctx, hooks);
   scene.resize(932, 430);
@@ -136,8 +139,8 @@ function rig(): Rig {
   return r;
 }
 
-async function entered(): Promise<Rig> {
-  const r = rig();
+async function entered(detail?: 'low' | 'medium' | 'high'): Promise<Rig> {
+  const r = rig(detail);
   await r.scene.enter();
   await must(r.scene.fauna, 'the fauna view').ready();
   return r;
@@ -803,9 +806,15 @@ describe('the stress test on the bench (Joshua, 2026-09-10)', () => {
     const shown = Number(/insects\s+(\d+)/.exec(panel(r))?.[1] ?? -1);
     expect(shown).toBeLessThanOrEqual(crowd);
     expect(shown).toBeGreaterThanOrEqual(crowd - 1);
-    // RIGS: ALL means a rig apiece — the bench's own body of a species, plus its crowd.
-    const lent = LAB_CREATURE_IDS.reduce((total, id) => total + fauna.poolSize(id), 0);
-    expect(lent).toBe(LAB_CREATURE_IDS.length + crowd);
+    // RIGS: ALL means a rig apiece for everything DRAWN — asked of the
+    // view rather than of the pool sizes, since the pool warms and grows
+    // on demand now and a buried worm is placed, cloned and not drawn.
+    const cost = fauna.cost;
+    const drawnBodies = LAB_CREATURE_IDS.length + crowd - cost.notDrawn;
+    expect(rigsDrawn(r)).toBe(drawnBodies);
+    // And nothing is cheap: no middle tier, no ellipsoid, no budget.
+    expect(LAB_CREATURE_IDS.reduce((t, id) => t + cost.impostors[id], 0)).toBe(0);
+    expect(cost.fullBudget).toBe(Number.POSITIVE_INFINITY);
     expect(SPAWN_EVERY_S).toBe(1);
   });
 
@@ -875,7 +884,7 @@ describe('the stress test on the bench (Joshua, 2026-09-10)', () => {
   it('RIGS names which question is being asked, and never lends past the run\'s ceiling', async () => {
     const r = await entered();
     r.press(LAB_ACTION.rigs);
-    expect(r.field(LAB_FIELD.rigs)).toBe(rigModeLabel('rung'));
+    expect(r.field(LAB_FIELD.rigs)).toBe(rigModeLabel('lod'));
     r.press(LAB_ACTION.stress);
     r.frame(60 * (WINDOW_S + 6));
     // At RIGS: RUNG the LENDING is the detail ladder's budget and the rest
@@ -945,7 +954,7 @@ describe('the stress test on the bench (Joshua, 2026-09-10)', () => {
     expect(impostors).toBeGreaterThan(0);
     expect(rigs + impostors).toBeGreaterThan(pools);
     expect(rigs + impostors).toBeLessThanOrEqual(placedTotal(r));
-    expect(text).toContain('RUNG (medium)');
+    expect(text).toContain('LOD — full rig / frozen mesh / impostor by DISTANCE, no budget');
   });
 
   it('THE REPORT SAYS WHAT THE LADDER WAS ALLOWED, not only what it spent', async () => {
@@ -959,9 +968,12 @@ describe('the stress test on the bench (Joshua, 2026-09-10)', () => {
     r.press(LAB_ACTION.stress);
     r.frame(60 * (SETTLE_S + WINDOW_S + 20));
     const { text } = settle(r);
-    // THE CAP, beside the count, on both mesh tiers.
-    expect(cappedAt(text, 'full rigs')).toBe(rigBudgetFor(LAB_RUNG_NAME));
-    expect(cappedAt(text, 'reduced')).toBe(rigBudgetFor(LAB_RUNG_NAME) * 2);
+    // NO CAP, on either mesh tier, because the bench has none — the line
+    // prints the count alone rather than "13/Infinity", which would be a
+    // limit written where the point is that there is not one.
+    expect(cappedAt(text, 'full rigs')).toBe(-1);
+    expect(cappedAt(text, 'reduced')).toBe(-1);
+    expect(rigBudgetFor(LAB_RUNG_NAME)).toBe(13);   // what the GAME ships with, and the bench does not
     // AND THE DEMAND: how many were inside each tier's radius before any
     // budget refused them. The bench camera stands outside its own room,
     // so LOD0's count may honestly be zero — what may not happen is the
@@ -971,27 +983,59 @@ describe('the stress test on the bench (Joshua, 2026-09-10)', () => {
     expect(reported(text, 'inside LOD1')).toBeGreaterThanOrEqual(reported(text, 'inside LOD0'));
   });
 
-  it('RIGS cycles RUNG → x2 → x4 → ALL, because thirteen was inherited and not measured', async () => {
-    // `fullBudgetFor` is the SUM OF `POOL_SIZES`, a clone-pool table
-    // sized for an island where a handful of animals are near. It is not
-    // a measurement of any phone, and the phone is the instrument — so
-    // the multiples are on the button he already has rather than in a
-    // number I would have had to guess.
+  it('MEASURES AT THE RUNG THE PLAYER PLAYS AT, not at a constant in this file', async () => {
+    // Joshua, 2026-09-11, reading a report that said `detail medium`:
+    // "should be on High to match settings not medium". The bench used
+    // to hardcode one, so every number it printed carried a rung his
+    // phone does not use.
+    const high = await entered('high');
+    high.press(LAB_ACTION.rigs);
+    high.press(LAB_ACTION.stress);
+    high.frame(60 * (SETTLE_S + WINDOW_S + 4));
+    expect(settle(high).text).toContain('detail     high');
+
+    const low = await entered('low');
+    low.press(LAB_ACTION.stress);
+    low.frame(60 * (SETTLE_S + WINDOW_S + 4));
+    expect(settle(low).text).toContain('detail     low');
+
+    // No settings to read — a probe, a test — is `medium`, and the line
+    // says what the rung DOES here, which on an uncapped bench is
+    // nothing: it caps no budget and no population.
+    const plain = await entered();
+    plain.press(LAB_ACTION.stress);
+    plain.frame(60 * (SETTLE_S + WINDOW_S + 4));
+    expect(settle(plain).text).toContain("detail     medium   (the player's setting; caps nothing on this bench)");
+  });
+
+  it('RIGS cycles ALL → LOD, and NEITHER has a budget — a bench measures the phone', async () => {
+    // Joshua, 2026-09-11: "Remove any limits because it is a stress test,
+    // and if you keep adding rules, how can I actually get the correct
+    // numbers?" The rung's 13 full rigs and 26 frozen meshes are a clone
+    // table sized for the island; a run that stops there measures the
+    // table. Both bench modes are uncapped now, and RIGS chooses only
+    // which question is asked: every body rigged, or the three tiers by
+    // distance.
     const r = await entered();
     expect(r.field(LAB_FIELD.rigs)).toBe(rigModeLabel('all'));
-    for (const mode of ['rung', 'rung2', 'rung4', 'all'] as const) {
-      r.press(LAB_ACTION.rigs);
-      expect(r.field(LAB_FIELD.rigs)).toBe(rigModeLabel(mode));
-    }
-    // And RUNG x2 really is twice the capacity, in the report's own words.
     r.press(LAB_ACTION.rigs);
+    expect(r.field(LAB_FIELD.rigs)).toBe(rigModeLabel('lod'));
     r.press(LAB_ACTION.rigs);
-    expect(r.field(LAB_FIELD.rigs)).toBe(rigModeLabel('rung2'));
+    expect(r.field(LAB_FIELD.rigs)).toBe(rigModeLabel('all'));
+
+    // At RIGS: LOD the report prints no cap on either mesh tier, because
+    // there is none — an em-dash where a number would be a limit.
+    r.press(LAB_ACTION.rigs);
     r.press(LAB_ACTION.stress);
     r.frame(60 * (SETTLE_S + WINDOW_S + 20));
     const { text } = settle(r);
-    expect(cappedAt(text, 'full rigs')).toBe(rigBudgetFor(LAB_RUNG_NAME) * 2);
-    expect(cappedAt(text, 'reduced')).toBe(rigBudgetFor(LAB_RUNG_NAME) * 4);
+    expect(cappedAt(text, 'full rigs')).toBe(-1);
+    expect(cappedAt(text, 'reduced')).toBe(-1);
+    expect(text).toContain('no budget');
+    // And the ladder is still a ladder: what is drawn cheaply is drawn
+    // cheaply because of where it stands, not because a table ran out.
+    expect(reported(text, 'full rigs')).toBeGreaterThanOrEqual(0);
+    expect(reported(text, 'inside LOD1')).toBeGreaterThanOrEqual(reported(text, 'inside LOD0'));
   });
 
   // ─── the species pool (Joshua, 2026-09-10: workers only, queens only,

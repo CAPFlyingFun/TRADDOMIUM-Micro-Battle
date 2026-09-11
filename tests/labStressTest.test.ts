@@ -94,6 +94,7 @@ function census(over: Partial<StressSample> = {}): StressSample {
   return {
     rigs: 0, reduced: 0, impostors: 0, notDrawn: 0, aiMs: 2, drawMs: 4,
     rigBudget: 0, reducedBudget: 0, withinFull: 0, withinReduced: 0,
+    hidden: 0, pastCap: 0, farTier: 0,
     ...over,
   };
 }
@@ -108,7 +109,12 @@ function hidingSamplerOf(cap: number, every: number): Sampler {
   return (n) => {
     const notDrawn = Math.floor(n / every);
     const shown = n - notDrawn;
-    return census({ rigs: Math.min(shown, cap), impostors: Math.max(0, shown - cap), notDrawn, rigBudget: cap, withinFull: shown });
+    // Its not-drawn are all UNDERGROUND — this renderer hides bodies, it
+    // never caps them — which is what the report's split has to show.
+    return census({
+      rigs: Math.min(shown, cap), impostors: Math.max(0, shown - cap),
+      notDrawn, hidden: notDrawn, rigBudget: cap, withinFull: shown,
+    });
   };
 }
 
@@ -628,8 +634,10 @@ describe('the report', () => {
     const test = new StressTest({ species: FIVE, maxCreatures: 8 });
     test.start();
     drive(test, () => 60, () => test.finished);
-    const rung = stressReport(test.result(), { ...CONDITIONS, rigs: 'rung' });
-    expect(rung).toContain('RUNG (medium) — the rest draw as impostors');
+    const lod = stressReport(test.result(), { ...CONDITIONS, rigs: 'lod' });
+    expect(lod).toContain('LOD — full rig / frozen mesh / impostor by DISTANCE, no budget');
+    // Both bench modes say "no budget", because neither has one.
+    expect(stressReport(test.result(), CONDITIONS)).toContain('no budget');
   });
 
   it('names the species pool in the conditions, in the report\'s words and not the button\'s', () => {
@@ -806,7 +814,13 @@ describe('the census accounts for the whole crowd (Joshua: where did the other 5
     expect(text).toContain('DRAWN AT THE END');
     expect(text).toMatch(/\n {2}full rigs {11}13\/13 {3}\(animated every frame\)\n/);
     expect(text).toMatch(/\n {2}impostors {11}17\n/);
-    expect(text).toMatch(/\n {2}not drawn {11}10 {3}\(underground burrowers, or past a cap\)\n/);
+    expect(text).toMatch(/\n {2}not drawn {11}10\n/);
+    // AND WHY, split three ways. Two of the three are limits and one is
+    // a worm underground; a single number cannot say which, and this
+    // renderer hides its bodies rather than capping them.
+    expect(text).toMatch(/\n {4}underground {7}10 {3}\(burrowers below BURROW_HIDE — correct, not a limit\)\n/);
+    expect(text).toMatch(/\n {4}past a cap {8}0 {3}\(impostor cap — A LIMIT if this is not zero\)\n/);
+    expect(text).toMatch(/\n {4}cut far {11}0 {3}\(the simulation's own cut — A LIMIT if this is not zero\)\n/);
     expect(text).toContain('\n  ---\n');
     // The total is the RENDERER's — every body it was handed — and the
     // run's own count is named beside it. Here nothing else is in the

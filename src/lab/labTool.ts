@@ -276,35 +276,34 @@ export const HUD_HZ = 10;
  * (`lab/stressTest.stressReport`).
  */
 /**
- * WHAT THE LADDER IS ALLOWED THIS RUN.
+ * WHAT THE LADDER IS ALLOWED THIS RUN — and on this bench the answer to
+ * "allowed" is always ALL OF IT.
  *
- * `all` is one animated skeleton per creature — Baseline A's question,
- * "how many fully active insects can this room hold", and no tiers at
- * all. The rest are the detail ladder at one, two and four times the
- * rung's own capacity.
+ * `all` is one animated skeleton per creature, whatever its distance:
+ * Baselines A and C's question, "how many fully active insects can this
+ * room hold". `lod` is the three tiers decided by DISTANCE ALONE — a
+ * full rig inside `LOD0_IN`, the real mesh with its bones held still out
+ * to `LOD1_OUT`, the impostor past that — with NO budget capping any of
+ * them.
  *
- * The multiples exist because the rung's number is not a measurement of
- * any phone: `fullBudgetFor` is the SUM OF `POOL_SIZES`, a clone-pool
- * table sized for an island where a handful of animals are near. Joshua,
- * 2026-09-10, with 1,077 insects in a one-metre room: "LOD still not
- * correct and rendering as a procedural too close" — it was thirteen of
- * thirteen, and thirteen was inherited rather than measured. His phone
- * is the instrument, so the instrument is what moves it.
+ * It used to read RUNG and mean "the detail rung's pools", which is 13
+ * full rigs and 26 frozen meshes at medium. Joshua, 2026-09-11: "Remove
+ * any limits because it is a stress test, and if you keep adding rules,
+ * how can I actually get the correct numbers?" A bench that stops at
+ * thirteen measures thirteen; the phone never gets asked. The word
+ * changed with the behaviour, because a button reading RUNG over a run
+ * with no rung budget in it would be the lie the labels exist to stop.
  */
-export type LabRigMode = 'all' | 'rung' | 'rung2' | 'rung4';
+export type LabRigMode = 'all' | 'lod';
 
 export function nextRigMode(mode: LabRigMode): LabRigMode {
-  return mode === 'rung' ? 'rung2' : mode === 'rung2' ? 'rung4' : mode === 'rung4' ? 'all' : 'rung';
+  return mode === 'all' ? 'lod' : 'all';
 }
 
 export function rigModeLabel(mode: LabRigMode): string {
-  return `RIGS: ${mode === 'all' ? 'ALL' : mode === 'rung' ? 'RUNG' : mode === 'rung2' ? 'RUNG x2' : 'RUNG x4'}`;
+  return `RIGS: ${mode === 'all' ? 'ALL' : 'LOD'}`;
 }
 
-/** The ladder's capacity multiplier a mode asks for (`FaunaView.setLodScale`); ALL names its own pools instead. */
-export function rigModeScale(mode: LabRigMode): number {
-  return mode === 'rung2' ? 2 : mode === 'rung4' ? 4 : 1;
-}
 
 /**
  * A RUN'S SPECIES POOL: every species mixed, or one species alone.

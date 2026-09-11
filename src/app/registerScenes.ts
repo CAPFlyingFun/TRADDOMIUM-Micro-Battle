@@ -569,6 +569,11 @@ export function registerScenes(options: RegisterScenesOptions = {}): void {
         return { playerId: playerIdOf(p), name: p.displayName };
       },
       onBack: () => goToScreen(ctx, SCREEN_ID.editors),
+      // THE BENCH MEASURES AT THE RUNG HE PLAYS AT (Joshua, 2026-09-11:
+      // "should be on High to match settings not medium"). The same
+      // store the world reads, so the Creature Lab's reports can never
+      // name a detail level his Settings do not show.
+      settings: () => openSettings(ctx.storage).read(),
     })),
   );
 }

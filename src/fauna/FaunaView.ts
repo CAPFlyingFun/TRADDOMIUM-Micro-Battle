@@ -901,8 +901,10 @@ export class FaunaView {
   private reducedLent = zeroCounts();
   private impostors = zeroCounts();
   // The census (`FaunaCost`): everything handed in that this view drew nothing of.
-  /** The ladder's capacity multiplier: one, unless the Creature Lab is asking a bigger question (`setLodScale`). */
-  private lodScale = 1;
+  /** No budget and no pool ceiling: the Creature Lab sets it, the game never does (`setUncapped`). */
+  private uncapped = false;
+  /** Every drawn body wants a full rig, distance ignored: RIGS: ALL (`setAllRigs`). */
+  private allRigs = false;
   private hidden = 0;
   private pastCap = 0;
   private farTier = 0;
@@ -1274,7 +1276,11 @@ export class FaunaView {
     // as a full one — the difference is whether its bones move this
     // frame — so a species must be able to serve the whole ladder if the
     // nearest bodies all happen to be its own.
-    return named === undefined ? (fullBudgetFor(this.rung) + reducedBudgetFor(this.rung)) * this.lodScale : named;
+    if (named !== undefined) return named;
+    // UNCAPPED IS UNCAPPED: the pool still grows a few clones a frame
+    // (`POOL_GROWTH_PER_FRAME`), so this is a ceiling and not an
+    // allocation — there is simply no ceiling on a bench.
+    return this.uncapped ? Number.POSITIVE_INFINITY : fullBudgetFor(this.rung) + reducedBudgetFor(this.rung);
   }
 
   /**
@@ -1301,7 +1307,7 @@ export class FaunaView {
    * at the device budget the question is about.
    */
   private fullBudget(): number {
-    return this.budgetOf(fullBudgetFor(this.rung)) * this.lodScale;
+    return this.uncapped ? Number.POSITIVE_INFINITY : this.budgetOf(fullBudgetFor(this.rung));
   }
 
   /**
@@ -1314,30 +1320,39 @@ export class FaunaView {
    * written in.
    */
   private reducedBudget(): number {
-    return this.poolOverride.size === 0 ? reducedBudgetFor(this.rung) * this.lodScale : 0;
+    if (this.allRigs) return 0;
+    return this.uncapped ? Number.POSITIVE_INFINITY : reducedBudgetFor(this.rung);
   }
 
   /**
-   * THE LADDER'S CAPACITY, MULTIPLIED — one, two or four times the
-   * rung's own numbers.
+   * NO BUDGET, NO POOL CEILING — the Creature Lab's switch, and nothing
+   * else's.
    *
-   * It exists because the rung's numbers are not a measurement of any
-   * phone. `fullBudgetFor` is the SUM OF `POOL_SIZES`, a clone-pool
-   * table sized for the island, where a handful of animals are near and
-   * the rest are scattered over hundreds of metres. Thirteen is plenty
-   * there and nowhere near enough in a one-metre room, and the Creature
-   * Lab is where "how many can this phone actually hold" is answered by
-   * the phone rather than by me. RIGS cycles it, the report records it,
-   * and nothing outside the Lab moves it off one.
+   * Joshua, 2026-09-11: "Remove any limits because it is a stress test,
+   * and if you keep adding rules, how can I actually get the correct
+   * numbers?" He is right, and it is not a concession: a bench that
+   * stops handing out rigs at thirteen measures THIRTEEN. The phone
+   * never gets asked. Everything the ladder decides here is decided by
+   * DISTANCE, every creature inside a radius gets that radius's
+   * treatment, and the run ends when the frame rate ends it.
+   *
+   * The game keeps its budgets — a phone in a forest has to — and the
+   * numbers for them come from here. That is the whole point of a
+   * bench: measure uncapped, then choose a cap.
    */
-  setLodScale(scale: number): void {
-    const next = Number.isFinite(scale) && scale >= 1 ? Math.floor(scale) : 1;
-    if (next === this.lodScale) return;
-    this.lodScale = next;
+  setUncapped(on: boolean): void {
+    this.uncapped = on;
   }
 
-  get lodScaleNow(): number {
-    return this.lodScale;
+  /**
+   * EVERY DRAWN BODY WEARS A FULL RIG, whatever its distance — RIGS: ALL
+   * on the bench, and the question Baselines A and C ask ("how many
+   * fully active insects can this room hold"). There is no middle tier
+   * and no impostor: one animated skeleton per animal, or the run is
+   * measuring something else.
+   */
+  setAllRigs(on: boolean): void {
+    this.allRigs = on;
   }
 
   /** A rung number, or the sum the Lab named instead of it. */
@@ -1618,7 +1633,7 @@ export class FaunaView {
       // pool to ask "how many fully active insects can this room hold"
       // (`setPoolSize`), and a bench answering that question about a
       // one-metre room cannot have its skeletons taken away at 0.85 m.
-      const gated = !this.poolOverride.has(slot.species.id);
+      const gated = !this.allRigs && !this.poolOverride.has(slot.species.id);
       // EVERY BOUNDARY IS TWO NUMBERS (see LOD0_IN): a body reaches for a
       // mesh at LOD1_IN and only gives it up at LOD1_OUT, so what it
       // already holds is part of the question.
@@ -1645,7 +1660,7 @@ export class FaunaView {
     let reduceds = 0;
     for (const idx of list) {
       const d2 = this.d2[idx];
-      const gated = !this.poolOverride.has(creatures[idx].species);
+      const gated = !this.allRigs && !this.poolOverride.has(creatures[idx].species);
       const has = this.tier.get(creatures[idx].id) ?? 0;
       // Reaching LOD0 needs LOD0_IN; keeping it only needs LOD0_OUT.
       const wantsFull = !gated || d2 <= (has === 1 ? LOD0_OUT * LOD0_OUT : LOD0_IN * LOD0_IN);

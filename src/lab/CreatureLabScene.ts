@@ -96,6 +96,7 @@ import * as THREE from 'three';
 import type { PlayerId } from '../actor/PlayerId';
 import type { AppScene, FrameInfo, SceneContext, SceneFactory } from '../app/Scene';
 import { assets, type Assets } from '../assets/assets';
+import { detailFor, type DetailTier } from '../assets/detailQuality';
 import {
   FollowCamera, TAP_PIXELS, demandFromLook, lookDeltaOf, pickCreature, type FollowTarget, type MutableLook, type Ndc, type Viewport,
 } from '../control';
@@ -119,7 +120,7 @@ import { setOrigin, toLocal, toWorld } from '../world/origin';
 import { LabUi, type CreatureLine, type LabReadout } from './LabUi';
 import { HORIZON, buildLabMeshes, type LabMeshes } from './labMeshes';
 import {
-  CAMERA_PRESENCE, DISTURB_RADIUS, HELD_DURING_A_RUN, LAB_ACTION, LAB_SCENE_ID, POSSESS_ROW, TAP_SLOP_PX, nextPredation, nextRigMode, rigModeScale,
+  CAMERA_PRESENCE, DISTURB_RADIUS, HELD_DURING_A_RUN, LAB_ACTION, LAB_SCENE_ID, POSSESS_ROW, TAP_SLOP_PX, nextPredation, nextRigMode,
   nextStressPool, stressPoolWords, type LabAction, type LabCameraMode, type LabRigMode, type StressPool,
 } from './labTool';
 import { StressTest, stressBlock, stressReport, type StressConditions, type StressPhase, type StressSample } from './stressTest';
@@ -146,6 +147,23 @@ export interface CreatureLabHooks {
   loadModel?: Assets['loadModel'];
   /** A millisecond clock for the cost lines only. Absent: `performance.now`. */
   now?(): number;
+  /**
+   * THE PLAYER'S OWN SETTINGS, read once when the bench is built — for
+   * the DETAIL rung and nothing else.
+   *
+   * Joshua, 2026-09-11, reading a report that said `detail medium`:
+   * "should be on High to match settings not medium". The bench used to
+   * hardcode `medium` while his phone plays at high, so every number it
+   * printed carried a rung he does not use. What the rung IS is a
+   * device-class word — the same one `PerformanceWorldScene` hands
+   * `CreatureSim` and `FaunaView` — so the honest thing is to read the
+   * same setting the game reads. Absent (a test, a probe): `medium`.
+   *
+   * It is read at BUILD and not per frame: the rung sizes pools and
+   * caps, and a rung that changed under a running measurement would make
+   * the measurement about the change.
+   */
+  settings?(): { readonly detail?: 'low' | 'medium' | 'high' } | null;
 }
 
 export type CreatureLabWire = (ctx: SceneContext) => CreatureLabHooks;
@@ -208,8 +226,30 @@ export const FREE_START: CameraPose = Object.freeze({
 const FREE_NEAR = 0.05;
 const FREE_FAR = 400;
 
-/** The detail rung the lab draws at: one rig per ant either way, and rigs for the three (`fauna/FaunaView.POOL_SIZES`). */
-const LAB_RUNG = 'medium';
+/**
+ * THE DETAIL RUNG THE BENCH RUNS AT — the player's own, not a constant.
+ *
+ * Joshua, 2026-09-11: "should be on High to match settings not medium."
+ * `PerformanceWorldScene` derives the creature rung from
+ * `settings.detail` through `detailFor`, and the bench now reads the
+ * same setting through the same function, so a report cannot name a rung
+ * he does not play at.
+ *
+ * WHAT THE RUNG STILL DOES HERE, stated plainly because it is less than
+ * it looks: on an UNCAPPED bench (`FaunaView.setUncapped`) it no longer
+ * sizes the rig budget, and `LAB_SPECIES_TABLE` already flattens every
+ * population cap to `LAB_CAPACITY` at every rung — so the rung changes
+ * no creature number on this bench. It is carried and printed because it
+ * is part of the CONDITIONS a run was taken under and because the same
+ * word drives the rest of the renderer elsewhere. The report says so
+ * rather than letting the line imply a lever it is not.
+ */
+const LAB_RUNG_FALLBACK: DetailTier = 'medium';
+
+function labRungFrom(hooks: CreatureLabHooks): DetailTier {
+  const chosen = hooks.settings?.()?.detail;
+  return chosen === undefined ? LAB_RUNG_FALLBACK : detailFor(chosen);
+}
 
 /** How the overlay's speed reading is smoothed: a short time constant, so it reads and does not flicker. GAME TUNING. */
 const SPEED_TAU_S = 0.15;
@@ -240,6 +280,12 @@ export interface CreatureLabOptions {
   readonly now?: () => number;
   /** The seed the five body lengths are drawn under (`labSpawns`). Default `LAB_SEED`. */
   readonly seed?: number;
+  /**
+   * The detail rung the simulation runs at — the PLAYER'S, handed down
+   * from the scene (`labRungFrom`). Default `medium`, which is what a
+   * test or a probe with no settings to read gets.
+   */
+  readonly rung?: DetailTier;
 }
 
 /**
@@ -263,11 +309,14 @@ export class CreatureLab {
   private readonly ids = new Map<CreatureId, string>();
   private readonly now: () => number;
   private readonly seed: number | undefined;
+  /** The player's detail rung, carried for the simulation and for the report's CONDITIONS. */
+  readonly rung: DetailTier;
 
   constructor(player: PlayerId, options: CreatureLabOptions = {}) {
     this.player = player;
     this.now = options.now ?? (() => 0);
     this.seed = options.seed;
+    this.rung = options.rung ?? LAB_RUNG_FALLBACK;
     this.world = createLabWorld();
     const lab = this;
     const bench = this.world;
@@ -303,7 +352,7 @@ export class CreatureLab {
       control: this.ledger,
       intentOf: (player) => (player === this.player ? this.intentNow : NEUTRAL_INTENT),
       now: this.now,
-      rung: LAB_RUNG,
+      rung: this.rung,
     });
     this.ids.clear();
     for (const spawn of labSpawns(this.seed === undefined ? {} : { seed: this.seed })) {
@@ -515,6 +564,9 @@ interface MutableSample extends StressSample {
   reducedBudget: number;
   withinFull: number;
   withinReduced: number;
+  hidden: number;
+  pastCap: number;
+  farTier: number;
 }
 
 /** The overlay's speed reading per creature: last place, smoothed mm/s. */
@@ -573,7 +625,11 @@ export function buildCreatureLabScene(ctx: SceneContext, hooks: CreatureLabHooks
   three.background = new THREE.Color(HORIZON);
 
   const now = hooks.now ?? ((): number => performance.now());
-  const lab = new CreatureLab(hooks.identity().playerId, { now });
+  // THE PLAYER'S RUNG, read once here and carried by the bench: the
+  // simulation, the renderer and the report's CONDITIONS all take it
+  // from `lab.rung`, so there is one answer to "what was this measured
+  // at" and it is the same word his Settings show.
+  const lab = new CreatureLab(hooks.identity().playerId, { now, rung: labRungFrom(hooks) });
   const follow = new FollowCamera();
   const free = new FreeFlyCamera(60, FREE_NEAR, FREE_FAR);
   free.speed = CAMERA_SPEEDS.slow;
@@ -614,6 +670,7 @@ export function buildCreatureLabScene(ctx: SceneContext, hooks: CreatureLabHooks
   const sample: MutableSample = {
     rigs: 0, reduced: 0, impostors: 0, notDrawn: 0, aiMs: 0, drawMs: 0,
     rigBudget: 0, reducedBudget: 0, withinFull: 0, withinReduced: 0,
+    hidden: 0, pastCap: 0, farTier: 0,
   };
 
   // Per-frame scratch, rewritten in place (the header: no allocation on the frame path that is this file's).
@@ -832,12 +889,33 @@ export function buildCreatureLabScene(ctx: SceneContext, hooks: CreatureLabHooks
    * build above all, since the number moves with every change to the
    * creatures or the renderer.
    */
+  /**
+   * THE BENCH HAS NO BUDGET, in either mode, and that is the whole of
+   * what RIGS now chooses between.
+   *
+   * Joshua, 2026-09-11: "Remove any limits because it is a stress test,
+   * and if you keep adding rules, how can I actually get the correct
+   * numbers?" So `setUncapped` is on for as long as the Lab is open: no
+   * full-rig budget, no middle-tier budget, no pool ceiling. RIGS: ALL
+   * then says every drawn body wears a full rig whatever its distance;
+   * RIGS: LOD says the three tiers are decided by distance alone. Either
+   * way the run ends because the phone ended it.
+   *
+   * The GAME still has budgets. The numbers for them are what these runs
+   * are for.
+   */
+  const applyRigMode = (): void => {
+    if (fauna === null) return;
+    fauna.setUncapped(true);
+    fauna.setAllRigs(rigMode === 'all');
+  };
+
   const conditions = (): StressConditions => ({
     stamp: new Date().toISOString(),
     build: `${__APP_VERSION__} · ${__BUILD_COMMIT__}`,
     viewport: `${Math.round(viewport.width)} × ${Math.round(viewport.height)} css px`,
     rigs: rigMode,
-    rung: LAB_RUNG,
+    rung: lab.rung,
     predation: lab.predation.toUpperCase(),
     camera: 'free, the bench viewpoint, observer',
     pool: stressPoolWords(stressPool),
@@ -905,12 +983,7 @@ export function buildCreatureLabScene(ctx: SceneContext, hooks: CreatureLabHooks
     crowd.clear();
     placed = 0;
     report = '';
-    if (fauna !== null) {
-      fauna.clearPoolSizes();
-      fauna.setLodScale(rigModeScale(rigMode));
-      // One rig for the bench's own body of each species; the crowd's are lent as they land.
-      if (rigMode === 'all') for (const species of LAB_SPECIES) fauna.setPoolSize(species.id, 1);
-    }
+    if (fauna !== null) applyRigMode();
     stress.start();
     // The room is held: THIS is what the run was run under, and it is
     // what the report will print however the bench looks by the end.
@@ -994,6 +1067,12 @@ export function buildCreatureLabScene(ctx: SceneContext, hooks: CreatureLabHooks
     sample.reducedBudget = drawn.reducedBudget;
     sample.withinFull = drawn.withinFull;
     sample.withinReduced = drawn.withinReduced;
+    // AND WHY EACH NOT-DRAWN BODY WAS NOT DRAWN. Two of the three are
+    // limits; the third is a worm underground, which is the renderer
+    // being right. One number for all three cannot say which.
+    sample.hidden = drawn.hidden;
+    sample.pastCap = drawn.pastCap;
+    sample.farTier = drawn.farTier;
     return sample;
   };
 
@@ -1082,10 +1161,7 @@ export function buildCreatureLabScene(ctx: SceneContext, hooks: CreatureLabHooks
         rigMode = nextRigMode(rigMode);
         // Between runs the choice takes effect at once, so what is on the
         // bench is what the next run will measure.
-        if (!stress.running && fauna !== null) {
-          fauna.clearPoolSizes();
-          fauna.setLodScale(rigModeScale(rigMode));
-        }
+        if (!stress.running) applyRigMode();
         return;
       case LAB_ACTION.stressPool:
         // Refused mid-run, the way RIGS is. `StressTest.setPool` refuses
@@ -1182,7 +1258,7 @@ export function buildCreatureLabScene(ctx: SceneContext, hooks: CreatureLabHooks
       fauna = new FaunaView({
         species: LAB_SPECIES,
         loadModel: hooks.loadModel ?? assets.loadModel,
-        rung: LAB_RUNG,
+        rung: lab.rung,
         groundAt: (at) => bench.groundAt(at),
       });
       // The rigs load in the background; the impostors carry the animals until they arrive.

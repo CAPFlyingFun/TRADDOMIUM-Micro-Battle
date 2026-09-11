@@ -376,11 +376,8 @@ And two things changed that move the numbers:
   builds `POOL_GROWTH_PER_FRAME` more when an animal asks for one it
   cannot have, to the same ceiling. A body therefore waits a few frames
   for its mesh after a cold start, then `FADE_S` to arrive.
-- **RIGS cycles RUNG → ×2 → ×4 → ALL.** The rung's capacity is the sum
-  of `POOL_SIZES` — a clone table sized for an island where a handful of
-  animals are near — and is not a measurement of anybody's phone.
-  Rather than guess a better number, the multiples are on the button, so
-  Baseline D can find it.
+- **RIGS cycled RUNG → ×2 → ×4 → ALL, for about a day.** See below: it
+  was the wrong answer to the right complaint.
 
 **LOD1's cheap material is still not built.** Joshua asked for a 64×64
 texture on the middle tier; alpha.44 and .45 ship only the frozen-bones
@@ -388,3 +385,135 @@ half, which is the CPU half. A frozen rig still costs its draw call and
 its full skinned geometry on the GPU, so `REDUCED_PER_FULL` = 2 remains
 a guess, and by Baseline A's own slope the ceiling on TOTAL meshes is
 the GPU's, not the poser's.
+
+
+## alpha.46 — the bench has no budget
+
+Joshua, 2026-09-11: *"Remove any limits because it is a stress test, and
+if you keep adding rules, how can I actually get the correct numbers?"*
+
+He is right and the ×2/×4 multiplier alpha.45 added was the wrong shape
+of fix — a new rule layered on a limit that should not have been on a
+bench in the first place. **A bench that stops handing out rigs at 13
+measures 13.** The phone never gets asked.
+
+So the Creature Lab now runs `FaunaView.setUncapped(true)` for as long as
+it is open: no full-rig budget, no middle-tier budget, no pool ceiling.
+RIGS is back to two positions and chooses only which QUESTION is asked:
+
+| | what it measures |
+|---|---|
+| **RIGS: ALL** | one animated skeleton per drawn body, distance ignored — Baselines A and C's question |
+| **RIGS: LOD** | the three tiers decided by the radii ALONE — full rig inside 0.45 m, frozen mesh to 0.85 m, impostor past it |
+
+Neither has a budget. A run ends because the frame rate ended it.
+
+**Why this is the measurement that was wanted all along:** uncapped runs
+price the TIERS. Run ALL and you get the marginal cost of a full rig.
+Run LOD from the same viewpoint and the difference is what the frozen
+mesh and the impostor save. Those three numbers let any budget be
+computed — including the one the game should ship with. A capped run
+gives none of them: it flattens at the cap and reports a frame rate
+about a bench that had stopped filling up.
+
+The game keeps its budgets. **Measure uncapped, then choose a cap.**
+
+### The limits that are left, and why they are visible
+
+Two ceilings remain, and neither has ever bound: `MAX_CREATURES`
+(10,000) and `LAB_CAPACITY` (12,000 per species, which is also the
+impostor cap and the simulation's `far` cut). They are not free to
+raise — the five impostor meshes preallocate instance matrices at that
+size, about 3.8 MB — so they stay until a run actually reaches one.
+
+What changed is that they can no longer hide. The report's `not drawn`
+line splits three ways:
+
+```
+  not drawn           186
+    underground       186   (burrowers below BURROW_HIDE — correct, not a limit)
+    past a cap          0   (impostor cap — A LIMIT if this is not zero)
+    cut far             0   (the simulation's own cut — A LIMIT if this is not zero)
+```
+
+Baseline B's missing 55 were the first line. If either of the other two
+is ever non-zero, the run hit a ceiling and its numbers are about the
+ceiling. The ending already says when `MAX_CREATURES` stopped a run
+rather than the frame rate.
+
+
+### The rung is the player's now
+
+Joshua, 2026-09-11, reading `detail medium` in a report taken on a phone
+set to high: *"should be on High to match settings not medium."* The
+bench hardcoded `medium`, so every number it printed named a rung he does
+not play at. It now reads `settings.detail` through `detailFor`, the same
+call `PerformanceWorldScene` makes, and a probe or a test with no
+settings to read still gets `medium`.
+
+What the rung does on this bench is **nothing**, and the report says so:
+uncapped, it sizes no rig budget, and `LAB_SPECIES_TABLE` already
+flattens every population cap to `LAB_CAPACITY` at every rung. It is a
+condition a run was taken under, not a lever on the number. The line
+reads `detail  high   (the player's setting; caps nothing on this bench)`
+so it cannot be mistaken for one.
+
+## Baseline C-ALL — the first uncapped full-rig run *(alpha.45, ramped)*
+
+| | |
+|---|---|
+| **Date** | 2026-09-11T00:50:32Z |
+| **Build** | `1.0.0-alpha.45` · `a2a7d55` |
+| **Viewport** | 810 × 374 css px |
+| **Rigs** | ALL — one animated skeleton per drawn body |
+| **Detail** | medium (hardcoded; alpha.46 reads the player's) |
+| **Predation** | OFF |
+| **Camera** | the moved bench viewpoint, 0.56 m from the middle |
+
+| | |
+|---|---|
+| **Sustained at 30+ fps** | **77 creatures** (± 20, arriving at 4/s) |
+| Total placed | 230 |
+| Duration | 78.2 s |
+| Average FPS | 32.1 · 31.1 ms |
+| Lowest FPS (5 s) | 7.9 |
+| Worst single frame | 158 ms |
+| Ending | held under 10 fps for 5 s — **a real breaking point** |
+
+Drawn at the end: **198 full rigs**, 0 reduced, 0 impostors, 37 not
+drawn. Inside LOD0: 135. Inside LOD1: 198 — every drawn body was within
+0.85 m, which is what moving the bench into the room bought.
+
+Crossings: 45 → 56 (34 s, ±15 at 3/s) · 30 → 77 (39 s, ±20 at 4/s) ·
+20 → 89 (42 s, ±20 at 4/s) · 10 → 198 (63 s, ±30 at 6/s).
+
+### The finding that matters, and it is not the headline
+
+```
+WHERE THE FRAME WENT (mean per frame)
+  creature drawing    1.4 ms
+  everything else    29.8 ms   (terrain, sky, UI, present, and the sim)
+  sim tick            0.2 ms
+```
+
+**Posing 198 skinned rigs costs 1.4 ms of CPU.** The frame is 31 ms. The
+other 29.8 ms is not the creature renderer's stopwatch — it is the GPU
+submitting and skinning those meshes, plus present and vsync.
+
+That reframes the whole ladder. **LOD1 as built saves the 1.4 ms and
+nothing else**, because freezing the bones skips the posing and changes
+not one thing about the draw: same mesh, same triangle count, same
+material, same skinned vertex shader. Its ceiling is therefore about 4%
+of this frame.
+
+What the 29.8 ms responds to is FEWER OR CHEAPER DRAWS — which is the
+impostor, and which is the half of LOD1 that is still unbuilt: a
+decimated mesh with a 64×64 material. `REDUCED_PER_FULL = 2` was always
+labelled a guess; this says the honest opening value for LOD1-as-shipped
+is close to **1**, and that the middle tier does not earn its place until
+its geometry and material get cheaper.
+
+**The run to do next is the same seed at RIGS: LOD.** Same crowd, same
+viewpoint, most bodies on the middle tier or as impostors. The difference
+between 31 ms and whatever that reads is the real price of the ladder,
+and it is a number neither of us can guess from here.

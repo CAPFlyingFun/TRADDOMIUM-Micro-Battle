@@ -1685,31 +1685,70 @@ describe('the three tiers: full, reduced, impostor', () => {
     for (let i = 0; i < clones; i += 1) expect(holders.has(`a${i}`)).toBe(true);
   });
 
-  it('takes a CAPACITY MULTIPLIER, because the rung\'s number is a clone table and not a measurement', async () => {
+  it('TAKES NO BUDGET AT ALL when the bench asks: distance decides, and nothing else does', async () => {
+    // Joshua, 2026-09-11: "Remove any limits because it is a stress test,
+    // and if you keep adding rules, how can I actually get the correct
+    // numbers?" A bench that stops handing out rigs at thirteen measures
+    // thirteen — the phone is never asked. `setUncapped` is the Creature
+    // Lab's switch and the game never touches it.
     const v = await keep(view('ultra-low'));
     const full = fullBudgetFor('ultra-low');
     const reduced = reducedBudgetFor('ultra-low');
-    expect(v.lodScaleNow).toBe(1);
-    const crowd = aphidsAt((full + reduced) * 2 + 4, 2, 1);
-    settle(v, crowd);
+    // Everyone well inside LOD0_IN, and far more of them than the rung allows.
+    // Half a unit apart, so the whole crowd is inside LOD0_IN and the
+    // only thing that can refuse any of them is a budget.
+    const crowd = aphidsAt(full + reduced + 30, 2, 0.5);
+    expect(crowd[crowd.length - 1].at.wx).toBeLessThan(LOD0_IN);
+    settle(v, crowd, EYE, 0, 60);
     expect(lentAll(v)).toBe(full);
     expect(reducedAll(v)).toBe(reduced);
+    expect(impostorsAll(v)).toBeGreaterThan(0);
 
-    v.setLodScale(2);
-    expect(v.lodScaleNow).toBe(2);
-    settle(v, crowd);
-    expect(v.cost.fullBudget).toBe(full * 2);
-    expect(v.cost.reducedBudget).toBe(reduced * 2);
-    expect(lentAll(v)).toBe(full * 2);
-    expect(reducedAll(v)).toBe(reduced * 2);
-    // The pool followed it up: both tiers come out of the same clones.
-    expect(v.poolSize('aphid')).toBe((full + reduced) * 2);
+    v.setUncapped(true);
+    settle(v, crowd, EYE, 0, 60);
+    // EVERY body inside LOD0_IN wears a full rig, and not one is an
+    // ellipsoid, because nothing but the radius had a say.
+    expect(lentAll(v)).toBe(crowd.length);
+    expect(reducedAll(v)).toBe(0);
+    expect(impostorsAll(v)).toBe(0);
+    expect(v.cost.fullBudget).toBe(Number.POSITIVE_INFINITY);
+    expect(v.cost.reducedBudget).toBe(Number.POSITIVE_INFINITY);
+    // The pool grew past the rung's ceiling to serve them.
+    expect(v.poolSize('aphid')).toBe(crowd.length);
+    expect(v.poolSize('aphid')).toBeGreaterThan(full + reduced);
+  });
 
-    // Nonsense is one, and one is the floor: nothing outside the Lab moves it.
-    v.setLodScale(0);
-    expect(v.lodScaleNow).toBe(1);
-    v.setLodScale(Number.NaN);
-    expect(v.lodScaleNow).toBe(1);
+  it('UNCAPPED STILL OBEYS THE RADII: the middle tier and the impostor are where distance puts them', async () => {
+    // Removing the budget removes the BUDGET. It does not turn the
+    // ladder off: a body past LOD1_IN still wears the frozen mesh and a
+    // body past LOD1_OUT is still an ellipsoid, however much room there
+    // is. Otherwise "no limits" would quietly mean "no LOD", and the run
+    // would be measuring Baseline A again under a different button.
+    const v = await keep(view('ultra-low'));
+    v.setUncapped(true);
+    const near = aphidsAt(20, 2, 0.5);                     // all inside LOD0_IN
+    const mid = Array.from({ length: 20 }, (_, i) => creature('aphid', `m${i}`, LOD0_OUT + 2 + i * 0.8, 0));
+    const far = Array.from({ length: 20 }, (_, i) => creature('aphid', `f${i}`, LOD1_OUT + 2 + i, 0));
+    expect(mid[mid.length - 1].at.wx).toBeLessThan(LOD1_IN);
+    settle(v, [...near, ...mid, ...far], EYE, 0, 60);
+    expect(lentAll(v)).toBe(near.length);
+    expect(reducedAll(v)).toBe(mid.length);
+    expect(impostorsAll(v)).toBe(far.length);
+  });
+
+  it('RIGS: ALL ignores the radii entirely — one animated skeleton per body, wherever it stands', async () => {
+    // The other question the bench asks, and Baselines A and C's: "how
+    // many fully active insects can this room hold". No middle tier, no
+    // impostor, no distance.
+    const v = await keep(view('ultra-low'));
+    v.setUncapped(true);
+    v.setAllRigs(true);
+    const spread = Array.from({ length: 30 }, (_, i) => creature('aphid', `a${i}`, 2 + i * 6, 0));
+    expect(spread[spread.length - 1].at.wx).toBeGreaterThan(LOD1_OUT);
+    settle(v, spread, EYE, 0, 60);
+    expect(lentAll(v)).toBe(spread.length);
+    expect(reducedAll(v)).toBe(0);
+    expect(impostorsAll(v)).toBe(0);
   });
 
   it('a REDUCED body still moves through the world, but its bones hold still between refreshes', async () => {
