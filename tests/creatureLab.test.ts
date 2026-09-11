@@ -838,7 +838,7 @@ describe('the stress test on the bench (Joshua, 2026-09-10)', () => {
     expect(text).toContain(`FPS after ${RECOVERY_S} s hold`);
     expect(text).toContain('do not collide with or avoid one another');
     // The conditions name the run, so a pasted report can be placed.
-    expect(text).toContain('one animated skeleton per insect');
+    expect(text).toContain('every body the full textured model');
     expect(text).toContain('predation  OFF');
     expect(text).toContain('932 × 430 css px');
     // And the buttons to do it again are there now, and were not before.
@@ -909,7 +909,7 @@ describe('the stress test on the bench (Joshua, 2026-09-10)', () => {
     // THE LIVE LINE, while the crowd is arriving. At RIGS: ALL every drawn
     // body carries a skeleton, so the impostor half of the split is zero —
     // and that zero is a count, not the absence of one.
-    const live = /^drawn +(\d+)(?:\/\d+)? rigs · (\d+)(?:\/\d+)? reduced$/m.exec(panel(r));
+    const live = /^drawn +(\d+)(?:\/\d+)? textured · (\d+)(?:\/\d+)? solid$/m.exec(panel(r));
     expect(live, `the live block should carry a drawn line:\n${panel(r)}`).not.toBeNull();
     const shownRigs = Number(must(live, 'the live census')[1]);
     expect(shownRigs).toBeGreaterThan(LAB_CREATURE_IDS.length);
@@ -920,41 +920,38 @@ describe('the stress test on the bench (Joshua, 2026-09-10)', () => {
     // frame's duration — the two halves of one reading.
     const { text, lentBefore } = settle(r);
     expect(lentBefore).toBeGreaterThan(0);
-    expect(reported(text, 'full rigs')).toBe(lentBefore);
+    expect(reported(text, 'textured')).toBe(lentBefore);
     expect(reported(text, 'impostors')).toBe(0);
     expect(reported(text, 'peak full rigs')).toBeGreaterThanOrEqual(lentBefore);
     // Not everyone placed is drawn — a buried worm is neither rig nor
     // impostor — so the census is the VIEW's number and never the bench's.
-    expect(reported(text, 'full rigs')).toBeLessThanOrEqual(placedTotal(r));
+    expect(reported(text, 'textured')).toBeLessThanOrEqual(placedTotal(r));
     expect(text).toContain('WHERE THE FRAME WENT');
     expect(text).toContain('pool       all five, mixed');
   });
 
-  it('at RIGS: RUNG the report splits the crowd into the rung\'s pools and the impostors past them', async () => {
+  it('at RIGS: LOD the report splits the crowd by DISTANCE — textured near, solid mid, ellipsoids past', async () => {
     const r = await entered();
     r.press(LAB_ACTION.rigs);
     r.press(LAB_ACTION.stress);
-    // Long enough that the crowd outgrows the rung's pools, which is the
-    // whole point of this run: the same insects, drawn two ways.
+    // Long enough that the crowd spreads across all three bands, which is
+    // the whole point of this run: the same insects, drawn three ways.
     r.frame(60 * (SETTLE_S + WINDOW_S + 20));
-    // The budget is what caps the skeletons; `poolTotal` is only how many
-    // clones exist to lend from, and since the pools became budget-sized
-    // that is five times the budget rather than a ceiling on anything.
-    const pools = rigBudgetFor(LAB_RUNG_NAME);
-    expect(pools).toBeLessThan(placedTotal(r));
-
     const { text, lentBefore } = settle(r);
-    const rigs = reported(text, 'full rigs');
+    const textured = reported(text, 'textured');
+    const solid = reported(text, 'solid colour');
     const impostors = reported(text, 'impostors');
-    expect(rigs).toBe(lentBefore);
-    // The rung's budget is a ceiling on the skeletons; everything past it
-    // is twenty triangles, and the report says so rather than reporting a
-    // crowd that all looked the same.
-    expect(rigs).toBeLessThanOrEqual(pools);
+    expect(textured).toBe(lentBefore);
+    // NOTHING CAPPED ANY OF THEM: the split is where the bodies stand.
+    expect(cappedAt(text, 'textured')).toBe(-1);
+    expect(cappedAt(text, 'solid colour')).toBe(-1);
+    // The bench camera is 0.56 m from the middle of a 1 m room, so the
+    // far half of it is past 0.6 m: there are ellipsoids, and there are
+    // bodies wearing the model in its own colours as well.
     expect(impostors).toBeGreaterThan(0);
-    expect(rigs + impostors).toBeGreaterThan(pools);
-    expect(rigs + impostors).toBeLessThanOrEqual(placedTotal(r));
-    expect(text).toContain('LOD — full rig / frozen mesh / impostor by DISTANCE, no budget');
+    expect(textured + solid).toBeGreaterThan(0);
+    expect(textured + solid + impostors).toBeLessThanOrEqual(placedTotal(r));
+    expect(text).toContain('LOD — textured to 0.3 m, solid colour to 0.6 m, impostor past it, no budget');
   });
 
   it('THE REPORT SAYS WHAT THE LADDER WAS ALLOWED, not only what it spent', async () => {
@@ -971,16 +968,16 @@ describe('the stress test on the bench (Joshua, 2026-09-10)', () => {
     // NO CAP, on either mesh tier, because the bench has none — the line
     // prints the count alone rather than "13/Infinity", which would be a
     // limit written where the point is that there is not one.
-    expect(cappedAt(text, 'full rigs')).toBe(-1);
-    expect(cappedAt(text, 'reduced')).toBe(-1);
+    expect(cappedAt(text, 'textured')).toBe(-1);
+    expect(cappedAt(text, 'solid colour')).toBe(-1);
     expect(rigBudgetFor(LAB_RUNG_NAME)).toBe(13);   // what the GAME ships with, and the bench does not
     // AND THE DEMAND: how many were inside each tier's radius before any
     // budget refused them. The bench camera stands outside its own room,
     // so LOD0's count may honestly be zero — what may not happen is the
     // line being absent, which is the state that could not be diagnosed.
-    expect(text).toMatch(/^ {2}inside LOD0 {9}\d+ {3}\(wanted a full rig\)$/m);
-    expect(text).toMatch(/^ {2}inside LOD1 {9}\d+ {3}\(wanted the mesh\)$/m);
-    expect(reported(text, 'inside LOD1')).toBeGreaterThanOrEqual(reported(text, 'inside LOD0'));
+    expect(text).toMatch(/^ {2}inside 0\.3 m {8}\d+ {3}\(wanted its own textures\)$/m);
+    expect(text).toMatch(/^ {2}inside 0\.6 m {8}\d+ {3}\(wanted the model at all\)$/m);
+    expect(reported(text, 'inside 0.6 m')).toBeGreaterThanOrEqual(reported(text, 'inside 0.3 m'));
   });
 
   it('MEASURES AT THE RUNG THE PLAYER PLAYS AT, not at a constant in this file', async () => {
@@ -1029,13 +1026,13 @@ describe('the stress test on the bench (Joshua, 2026-09-10)', () => {
     r.press(LAB_ACTION.stress);
     r.frame(60 * (SETTLE_S + WINDOW_S + 20));
     const { text } = settle(r);
-    expect(cappedAt(text, 'full rigs')).toBe(-1);
-    expect(cappedAt(text, 'reduced')).toBe(-1);
+    expect(cappedAt(text, 'textured')).toBe(-1);
+    expect(cappedAt(text, 'solid colour')).toBe(-1);
     expect(text).toContain('no budget');
     // And the ladder is still a ladder: what is drawn cheaply is drawn
     // cheaply because of where it stands, not because a table ran out.
-    expect(reported(text, 'full rigs')).toBeGreaterThanOrEqual(0);
-    expect(reported(text, 'inside LOD1')).toBeGreaterThanOrEqual(reported(text, 'inside LOD0'));
+    expect(reported(text, 'textured')).toBeGreaterThanOrEqual(0);
+    expect(reported(text, 'inside 0.6 m')).toBeGreaterThanOrEqual(reported(text, 'inside 0.3 m'));
   });
 
   // ─── the species pool (Joshua, 2026-09-10: workers only, queens only,

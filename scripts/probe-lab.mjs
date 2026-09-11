@@ -105,6 +105,7 @@ const ACTION = {
   cameraDisturbs: 'lab:camera-disturbs',
   reset: 'lab:reset',
   debug: 'lab:debug',
+  rigs: 'lab:rigs',
 };
 const possessAction = (id) => `lab:possess:${id}`;
 const FIELD = {
@@ -116,6 +117,7 @@ const FIELD = {
   frameMs: 'lab-frame-ms',
   aiMs: 'lab-ai-ms',
   animMs: 'lab-anim-ms',
+  rigs: 'lab-rigs',
 };
 /** The debug overlay's root (`LabUi`, `data-role`): `hidden` while DEBUG is off, and every shot wants it up. */
 const OVERLAY_ROLE = 'lab-overlay';
@@ -678,7 +680,33 @@ async function observerSoak(page) {
   await shot(page, '7-observer');
   const last = stats[stats.length - 1];
   log(`frame stats at the end of the soak: fps "${last.fps}", frame "${last.frame}", AI "${last.ai}", animation "${last.anim}"`);
+  await lookAtTheLadder(page);
   return stats;
+}
+
+/**
+ * THE LADDER, LOOKED AT (Joshua's ladder of 2026-09-11). RIGS: ALL gives
+ * every body the full textured model, so a bench left in it never draws
+ * the two far tiers and a shot of it proves nothing about them. One
+ * press puts the room on RIGS: LOD — textured inside 0.3 m, the same
+ * model in the species' solid colour to 0.6 m, the impostor past it —
+ * and the shot is the only look anybody gets at the solid coat before
+ * the build reaches a phone. The press is undone after, so every later
+ * step measures the bench it has always measured.
+ */
+async function lookAtTheLadder(page) {
+  phase('the ladder: RIGS: LOD');
+  await press(page, ACTION.rigs);
+  await frames(page, 40);
+  const r = await read(page);
+  const word = r.fields[FIELD.rigs] ?? '';
+  check(/lod/i.test(word), `RIGS should read LOD after one press; it reads "${word}"`);
+  log(`${word}: the solid-colour coat and the impostor are what the shot below is of`);
+  await shot(page, '11-ladder-lod');
+  await press(page, ACTION.rigs);
+  await frames(page, 10);
+  const back = (await read(page)).fields[FIELD.rigs] ?? '';
+  check(/all/i.test(back), `RIGS should be back to ALL for the rest of the run; it reads "${back}"`);
 }
 
 /**

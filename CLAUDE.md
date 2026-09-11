@@ -162,73 +162,76 @@ to hold, and `docs/PERFORMANCE.md`'s baselines are measured without it.
 A future change that quietly adds body blocking invalidates every one of
 those numbers.
 
-**Three tiers, and distance decides priority while performance decides
-capacity** (Joshua and ChatGPT, 2026-09-10, on the back of Baselines A
-and B). A drawn creature is on one of three rungs:
+**The ladder, as Joshua specified it on 2026-09-11 — and the
+measurement that made him respecify it.** A drawn creature is on one of
+four rungs, all decided by distance from the CAMERA:
 
-- **LOD0, inside 0.45 m** — full rig, animated every frame, normal AI.
-- **LOD1, out to 0.85 m** — the REAL MESH, moved through the world every
-  frame, with its bones re-posed only every `REDUCED_POSE_S`. "Still
-  move the whole model through the world, just don't animate every
-  bone." This middle tier is the point: it keeps the silhouette of an
-  ant — six legs, antennae, a gaster — for a body that is still fairly
-  close, without paying to move every joint of it sixty times a second.
-- **LOD2, beyond that** — the twenty-triangle impostor.
+|  |  |
+|---|---|
+| 0 – 0.3 m | the full model: its own textures, animated every frame |
+| 0.3 – 0.5 m | THE SAME MODEL, STILL ANIMATED, in a solid matching colour |
+| 0.5 – 0.6 m | that flat model crossfades to the impostor, BY DISTANCE |
+| over 0.6 m | the twenty-triangle impostor, in the same solid colour |
+
+His words: "do full model and everything from 0-0.3m, from 0.3-0.5m, the
+texture will be a solid matching color but model still there and
+animated… from 0.5-0.6 it will fade to procedural and over 0.6m is
+procedural same solid color, no model or animation."
+
+**The middle tier gives up its TEXTURE, never its MOTION, and that is a
+measurement rather than a preference.** It used to keep the textures and
+freeze the bones, re-posing four times a second. His own uncapped run
+(Baseline C-ALL) priced that: posing 198 skinned rigs cost 1.3 ms of a
+31 ms frame. The frame is not the posing — it is the GPU submitting and
+shading those meshes — so the lever is the MATERIAL. Animation is nearly
+free and is what makes an ant read as alive; keep it.
+
+The colour is `LOOK[species].colour`, the same number the impostor is
+built from, so "same solid color" is true by construction and not by two
+tables being kept in step.
 
 Four rules hold it together, and none is optional:
 
 - **Distance is PRIORITY, the budget is CAPACITY.** Everything inside
-  LOD0 wants a full rig and the nearest are served first; when the full
-  budget runs out the rest fall to LOD1. That is what stops "an ant
-  10 cm from the camera turning into a procedural blob while an ant
-  45 cm away keeps the expensive rig". A hard distance-only rule would
-  let a hundred ants crowd a food item inside half a metre and put the
-  phone back at Baseline A's 52 full rigs.
-  **Past BOTH budgets it is a blob, and IN THE GAME that is not a bug**:
-  at the rung's own numbers a room holds 13 full rigs and 26 frozen
-  meshes, so the fortieth-nearest body draws as an ellipsoid however
-  close it stands. Joshua met this at 1,077 insects in a one-metre room
-  — "rendering as a procedural too close" — and it was 13 of 13. On the
-  BENCH the answer is to take the budget off (below); in the GAME the
-  answer is a HUD that says which limit is binding, which is why both
-  counts print against their cap (`13/13 rigs`) with the demand under
-  them (`inside 412 at LOD0`), and print the count alone where there is
-  no cap. **A count with no cap beside it is not a reading — and a cap
-  on a stress bench is not a measurement.**
+  0.3 m wants its textures and the nearest are served first; when that
+  budget runs out the rest fall to the solid coat, and past both they
+  are ellipsoids. In the GAME that is not a bug — a phone in a forest
+  has budgets — but the HUD has to say WHICH limit is binding, which is
+  why both counts print against their cap (`13/13 textured`) with the
+  demand under them (`inside 412 in 0.3 m`), and print the count alone
+  where there is no cap. **A count with no cap beside it is not a
+  reading — and a cap on a stress bench is not a measurement.**
 - **Rank is hysteretic too, not only distance.** Two radii cure a body
   wandering across a line; they do nothing when four hundred bodies are
-  inside one radius and thirteen may wear a rig, because then nobody
-  crosses anything and the "nearest thirteen" are a different thirteen
-  every frame — each swap a fade out and a fade in, so a perfectly
-  stable crowd shimmers. A body that holds a tier therefore sorts from
-  `HOLD_ADVANTAGE` of its distance: a challenger has to be a fifth
-  nearer to take its place.
+  inside one radius and thirteen may be textured, because then nobody
+  crosses anything and the nearest thirteen are a different thirteen
+  every frame. A body that holds a tier sorts from `HOLD_ADVANTAGE` of
+  its distance: a challenger has to be a fifth nearer to take its place.
 - **The rung's capacity is a CLONE TABLE, not a measurement, and THE
   BENCH HAS NO CAPACITY AT ALL** (Joshua, 2026-09-11: "Remove any limits
   because it is a stress test, and if you keep adding rules, how can I
   actually get the correct numbers?"). `fullBudgetFor` is the sum of
   `POOL_SIZES`, sized for an island where a handful of animals are near;
-  do not defend thirteen as though a phone had chosen it. So the
-  Creature Lab runs `FaunaView.setUncapped(true)` — no full budget, no
-  middle-tier budget, no pool ceiling — and RIGS chooses only WHICH
-  QUESTION: `ALL` rigs every drawn body whatever its distance, `LOD`
-  lets the three radii decide and nothing else. A run ends because the
-  phone ended it. The GAME keeps its budgets, and the numbers for them
-  come from these runs: **measure uncapped, then choose a cap.** Adding a
-  rule to the bench to work around a limit on the bench is the mistake
-  to avoid; take the limit off instead. The pool grows to demand
-  (`POOL_WARM` clones up front, `POOL_GROWTH_PER_FRAME` after), which is
-  what makes an uncapped bench affordable. **And the bench measures at
-  the rung the player plays at** (Joshua, 2026-09-11: "should be on High
-  to match settings not medium"): the Creature Lab reads
+  do not defend thirteen as though a phone had chosen it. The Creature
+  Lab runs `FaunaView.setUncapped(true)` — no budget, no pool ceiling —
+  and RIGS chooses only WHICH QUESTION: `ALL` gives every drawn body the
+  full textured model whatever its distance, `LOD` lets the radii decide
+  and nothing else. A run ends because the phone ended it. **Measure
+  uncapped, then choose a cap.** Adding a rule to the bench to work
+  around a limit on the bench is the mistake to avoid; take the limit off
+  instead. The pool grows to demand (`POOL_WARM` up front,
+  `POOL_GROWTH_PER_FRAME` after), which is what makes that affordable.
+  And the bench measures at the rung the player plays at — it reads
   `settings.detail` through `detailFor`, exactly as the world does, and
-  its report says the rung caps nothing here — a condition the run was
-  taken under, never a lever on the number.
-- **Every boundary is TWO numbers.** A body climbs a tier at the IN
-  radius and only falls back at the OUT one, so one wandering across a
-  line cannot strobe between forms. Leaving the mesh entirely
-  crossfades; moving between the two MESH tiers does not fade at all,
-  because the mesh is already there.
+  its report says the rung caps nothing there.
+- **The latching boundary is TWO numbers; the fade is neither latched
+  nor timed.** A body wins its textures at `TEXTURED_IN` and keeps them
+  to `TEXTURED_OUT`, so one sitting on the line cannot strobe. The
+  crossfade needs no hysteresis because it is continuous in DISTANCE:
+  `meshShare` is 1 at 0.5 m, 0 at 0.6 m and a straight ramp between, and
+  the impostor draws the rest of the animal. It is simply true every
+  frame — nothing to start, hold, finish or get out of step with the
+  tiers, which is what the timed crossfade it replaces kept doing.
 
 **THE LOD CENTRE IS THE CAMERA, NEVER THE INSECT** (Joshua, 2026-09-10:
 "That range is based on the camera as that's what the player sees in
@@ -243,14 +246,20 @@ what is being measured, not what it is measured from.
 
 The consequence is worth stating so it is never mistaken for a bug: a
 radius written for a camera riding with an ant does not cover a box
-being looked at from OUTSIDE it. The Creature Lab's bench used to stand
-1.00 m from the centre of its 1 m room, so none of that room's floor was
-inside 0.45 m and 23% was inside 0.85 m — the ladder working exactly as
-specified, on a bench that could never see it work. The answer was to
-move the BENCH (`FREE_START` now stands in the room at 0.56 m from the
-middle: 23% of the floor inside `LOD0_IN`, 79% inside `LOD1_OUT`, at the
-cost of framing 77% of it rather than 96%), and it will always be to
-move the bench. Never anchor the ladder to something else.
+being looked at from OUTSIDE it. The Creature Lab's bench stood 1.00 m
+from the centre of its 1 m room, so none of that room's floor was inside
+the near radius — the ladder working exactly as specified, on a bench
+that could never see it work. Joshua: "if the room is a 1x1x1m block and
+I asked for 0.6m, then most of the room should be rendered."
+
+**THE BENCH VIEWPOINT IS A FUNCTION OF THE RADII AND MOVES WHEN THEY
+DO.** `FREE_START` now stands in the room at 0.32 m from the middle,
+which puts 17% of the floor inside `TEXTURED_IN`, 53% inside `FADE_FROM`
+and 68% inside `MESH_OUT` — every rung on one screen — at the cost of
+framing 52% of the floor rather than 96%. Both columns are measured
+against the real frustum at 932 × 430, in `docs/PERFORMANCE.md`. When a
+radius changes, recompute that table and move the bench. Never anchor
+the ladder to something else.
 
 **A meter may only move if there is a way to move it back. An unavailable
 action must never look functional.** "Multiplayer" in the UI may never

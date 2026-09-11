@@ -1036,8 +1036,8 @@ export function stressReport(result: StressResult, conditions: StressConditions)
   if (result.finalRigs !== null || result.finalImpostors !== null || result.finalNotDrawn !== null || result.peakRigs !== null) {
     lines.push('');
     lines.push('DRAWN AT THE END');
-    lines.push(`  ${'full rigs'.padEnd(20)}${ofCap(result.finalRigs, result.finalRigBudget)}   (animated every frame)`);
-    lines.push(`  ${'reduced'.padEnd(20)}${ofCap(result.finalReduced, result.finalReducedBudget)}   (real mesh, bones held still)`);
+    lines.push(`  ${'textured'.padEnd(20)}${ofCap(result.finalRigs, result.finalRigBudget)}   (the model's own materials)`);
+    lines.push(`  ${'solid colour'.padEnd(20)}${ofCap(result.finalReduced, result.finalReducedBudget)}   (same model, still animated, no texture)`);
     lines.push(`  ${'impostors'.padEnd(20)}${whole(result.finalImpostors)}`);
     lines.push(`  ${'not drawn'.padEnd(20)}${whole(result.finalNotDrawn)}`);
     if (result.finalHidden !== null || result.finalPastCap !== null || result.finalFarTier !== null) {
@@ -1054,8 +1054,8 @@ export function stressReport(result: StressResult, conditions: StressConditions)
       // counts that are equal to their caps with hundreds asking is the
       // signature of a BUDGET limit; counts short of their caps is the
       // signature of there being nobody else near enough to serve.
-      lines.push(`  ${'inside LOD0'.padEnd(20)}${whole(result.finalWithinFull)}   (wanted a full rig)`);
-      lines.push(`  ${'inside LOD1'.padEnd(20)}${whole(result.finalWithinReduced)}   (wanted the mesh)`);
+      lines.push(`  ${'inside 0.3 m'.padEnd(20)}${whole(result.finalWithinFull)}   (wanted its own textures)`);
+      lines.push(`  ${'inside 0.6 m'.padEnd(20)}${whole(result.finalWithinReduced)}   (wanted the model at all)`);
     }
     lines.push('  ---');
     // THE IDENTITY, and WHAT IT IS AGAINST. The three above are the
@@ -1122,7 +1122,7 @@ export function stressReport(result: StressResult, conditions: StressConditions)
     // RIGS: RUNG the rig pool is full long before 30 fps, so the count
     // and the split tell two different halves of the same story.
     const census = c.rigs === null && c.impostors === null ? ''
-      : `   ${whole(c.rigs)} rigs · ${whole(c.reduced)} reduced · ${whole(c.impostors)} impostors`;
+      : `   ${whole(c.rigs)} textured · ${whole(c.reduced)} solid · ${whole(c.impostors)} impostors`;
     const empty = c.creatures === 0 ? '  ← empty bench' : '';
     // The ± and the rate ride WITH the count rather than being left to a
     // footnote, because the count is what gets pasted somewhere else.
@@ -1146,8 +1146,8 @@ export function stressReport(result: StressResult, conditions: StressConditions)
   lines.push(`  when       ${conditions.stamp}`);
   lines.push(`  viewport   ${conditions.viewport}`);
   lines.push(`  rigs       ${conditions.rigs === 'all'
-    ? 'ALL — one animated skeleton per insect, no budget'
-    : 'LOD — full rig / frozen mesh / impostor by DISTANCE, no budget'}`);
+    ? 'ALL — every body the full textured model, distance ignored, no budget'
+    : 'LOD — textured to 0.3 m, solid colour to 0.6 m, impostor past it, no budget'}`);
   // THE RUNG, AND WHAT IT DOES NOT DO. It is the player's own setting
   // now (Joshua, 2026-09-11: "should be on High to match settings not
   // medium"), and on an uncapped bench it sizes no creature budget and
@@ -1190,11 +1190,11 @@ export function stressBlock(r: StressReadout): string {
     // stands. The counts alone cannot tell those apart, which is what
     // "LOD still not correct and rendering as a procedural too close"
     // was looking at on a bench reading 13 of 13.
-    lines.push(`drawn     ${ofCap(r.rigs, r.rigBudget)} rigs · ${ofCap(r.reduced, r.reducedBudget)} reduced`);
+    lines.push(`drawn     ${ofCap(r.rigs, r.rigBudget)} textured · ${ofCap(r.reduced, r.reducedBudget)} solid`);
     lines.push(`          ${whole(r.impostors)} impostors · ${whole(r.notDrawn)} not drawn`);
     if (r.withinFull !== null || r.withinReduced !== null) {
       // The DEMAND, by distance alone and before any budget refused it.
-      lines.push(`inside    ${whole(r.withinFull)} at LOD0 · ${whole(r.withinReduced)} at LOD1`);
+      lines.push(`inside    ${whole(r.withinFull)} in 0.3 m · ${whole(r.withinReduced)} in 0.6 m`);
     }
   }
   lines.push(r.fps > 0 ? `fps       ${r.fps.toFixed(1)}  (${WINDOW_S} s average)` : `fps       — (filling the ${WINDOW_S} s window)`);

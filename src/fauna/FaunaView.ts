@@ -295,54 +295,78 @@ export function rigBudgetFor(rung: string): number {
 }
 
 /**
- * THE THREE TIERS, and the two rules that keep them honest.
+ * THE LADDER, AS JOSHUA SPECIFIED IT ON 2026-09-11 — and the measurement
+ * that made him respecify it.
  *
- * Joshua and ChatGPT, 2026-09-10, after the first band shipped:
+ *   0 – 0.3 m    the full model: its own textures, animated every frame
+ *   0.3 – 0.5 m  THE SAME MODEL, STILL ANIMATED, in a solid matching
+ *                colour — the texture is what goes, not the motion
+ *   0.5 – 0.6 m  that flat model crossfades to the impostor, by DISTANCE
+ *   over 0.6 m   the twenty-triangle impostor, in the same solid colour
  *
- *   LOD0  0 – 0.5 m   full rig, animated every frame, normal senses
- *   LOD1  0.5 – 0.8 m the REAL MESH, placed in the world every frame,
- *                     but its bones re-posed only every
- *                     `REDUCED_POSE_S` — "still move the whole model
- *                     through the world, just don't animate every bone"
- *   LOD2  > 0.8 m     the twenty-triangle impostor
+ * His words: "do full model and everything from 0-0.3m, from 0.3-0.5m,
+ * the texture will be a solid matching color but model still there and
+ * animated… from 0.5-0.6 it will fade to procedural and over 0.6m is
+ * procedural same solid color, no model or animation."
  *
- * The middle tier is the point of the whole thing: it keeps the
- * recognisable silhouette of an ant — six legs, antennae, a gaster —
- * for a body that is still fairly close, without paying to move every
- * joint of it sixty times a second.
+ * WHY THE MIDDLE TIER CHANGED SIDES. It used to keep the textures and
+ * FREEZE THE BONES, re-posing four times a second — a CPU saving. His
+ * own uncapped run (Baseline C-ALL, `docs/PERFORMANCE.md`) priced that:
+ * posing 198 skinned rigs cost 1.3 ms of a 31 ms frame. The frame is not
+ * the posing. It is the GPU submitting and shading those meshes, so the
+ * lever that matters is the MATERIAL, not the skeleton — and a flat
+ * colour drops the texture fetch on every fragment of every one of them
+ * while the animation, which is nearly free and is what makes an ant
+ * read as alive, stays. The old tier's ceiling was about 4% of the
+ * frame; this one is aimed where the other 96% is.
  *
- * RULE ONE: DISTANCE DECIDES PRIORITY, PERFORMANCE DECIDES CAPACITY
- * (Joshua's words). Everything inside `LOD0_IN` WANTS a full rig and the
- * nearest are served first; when the full budget runs out the rest fall
- * to LOD1 rather than to an impostor. That is what stops "an ant 10 cm
- * from the camera turning into a procedural blob while an ant 45 cm away
- * keeps the expensive rig" — the inconsistency he saw on the phone. A
- * hard distance-only rule would have let a hundred ants crowd a food
- * item inside half a metre and put the phone back at Baseline A's 52.
+ * THE COLOUR IS `LOOK[species].colour`, the same number the impostor is
+ * built from, which is what makes "same solid color" true by
+ * construction rather than by two tables agreeing.
  *
- * RULE TWO: EVERY BOUNDARY IS TWO NUMBERS. A body climbs a tier by
- * reaching the IN radius and only falls back at the OUT one, so an
- * animal wandering 0.499 → 0.501 → 0.498 m cannot strobe between forms.
- * GAME TUNING, his numbers.
+ * THE TEXTURE BOUNDARY IS TWO NUMBERS, because a body sitting on it
+ * would otherwise strobe between textured and flat. The FADE needs no
+ * hysteresis: it is continuous in distance, so there is no latch to
+ * flicker — at 0.5 m the mesh is whole, at 0.6 m it is gone, and every
+ * step between is a fraction of each.
+ *
+ * GAME TUNING, his numbers, ±7% on the one boundary that latches.
  */
-export const LOD0_IN = unitsOfMetres(0.45);
-export const LOD0_OUT = unitsOfMetres(0.55);
-export const LOD1_IN = unitsOfMetres(0.75);
-export const LOD1_OUT = unitsOfMetres(0.85);
+export const TEXTURED_IN = unitsOfMetres(0.28);
+export const TEXTURED_OUT = unitsOfMetres(0.32);
+
+/** Where the flat model begins to give way to the impostor, and where it has finished. */
+export const FADE_FROM = unitsOfMetres(0.5);
+export const FADE_TO = unitsOfMetres(0.6);
 
 /**
- * How often a REDUCED body's bones are re-posed, seconds. GAME TUNING:
- * "optionally update its pose every few hundred milliseconds so it
- * doesn't look completely taxidermied". Four times a second is slow
- * enough to be most of the saving and quick enough that a body which
- * stops and starts is not frozen mid-stride for a visible beat.
- *
- * The body still MOVES every frame at this tier — position, facing and
- * scale are written from the creature exactly as at LOD0. It is only the
- * legs, wings, antennae, jaws, head, gaster and the worm's chain that
- * hold still between refreshes.
+ * WHO MAY HOLD A CLONE AT ALL. A body claims one at `MESH_IN` — the far
+ * end of the fade, where it is drawn at nothing and grows in as it
+ * approaches — and keeps it to `MESH_OUT`, which is the hysteresis. In
+ * the slack between them it is drawn at zero and therefore not drawn:
+ * `drawSpecies` skips a rig whose fade has reached zero, so the hold
+ * costs a clone and never a draw call.
  */
-export const REDUCED_POSE_S = 0.25;
+export const MESH_IN = FADE_TO;
+export const MESH_OUT = unitsOfMetres(0.62);
+
+/**
+ * HOW MUCH OF THE BODY IS THE MESH at a distance: 1 at `FADE_FROM` and
+ * nearer, 0 at `FADE_TO` and beyond, a straight ramp between. The
+ * impostor draws `1 - fade` of itself, so the two always sum to one
+ * animal.
+ *
+ * It is a function of DISTANCE and not of time, which is the change from
+ * the fade this replaces. A timed crossfade has to be started, held and
+ * finished, and it runs at the wrong moment whenever a body crosses the
+ * line while something else is deciding tiers. A distance ramp is simply
+ * true every frame: no latch, no clock, nothing to get out of step.
+ */
+export function meshShare(d2: number): number {
+  if (d2 <= FADE_FROM * FADE_FROM) return 1;
+  if (d2 >= FADE_TO * FADE_TO) return 0;
+  return (FADE_TO - Math.sqrt(d2)) / (FADE_TO - FADE_FROM);
+}
 
 /**
  * What a REDUCED body costs against a full one, as a share of the full
@@ -366,22 +390,11 @@ export function reducedBudgetFor(rung: string): number {
 
 /**
  * Kept as the names the first band shipped under, so nothing that reads
- * "the radius a rig is won at" has to be hunted down: they are the OUTER
- * edges of the two boundaries, which is what a body loses a tier at.
+ * "the radius a rig is won at" has to be hunted down. They are the outer
+ * edges of the two things a body can lose: its TEXTURE and its MESH.
  */
-export const RIG_NEAR = LOD0_OUT;
-export const RIG_FAR = LOD1_OUT;
-
-/**
- * How long a body takes to cross between its rig and its impostor,
- * seconds of SIMULATION time. GAME TUNING: about a third of a second is
- * long enough that the eye reads a dissolve rather than a pop, and short
- * enough that a rig lent on the way past has finished arriving before the
- * animal is behind the camera. It is spent in both directions at once —
- * the rig's opacity 0 → 1 while that animal's impostor scales 1 → 0 — so
- * the body is neither missing nor doubled at any point in it.
- */
-export const FADE_S = 0.2;
+export const RIG_NEAR = TEXTURED_OUT;
+export const RIG_FAR = MESH_OUT;
 
 /**
  * WHAT A BODY THAT ALREADY HOLDS A MESH IS WORTH IN THE QUEUE — its
@@ -724,6 +737,12 @@ interface Rig {
    * apiece and no texture memory.
    */
   readonly materials: THREE.Material[];
+  /** Every mesh of this clone with both of its material sets (`skinsOf`). */
+  readonly skins: Skin[];
+  /** Only the SOLID ones: the crossfade is the flat tier's, since the textured tier never reaches the fade band. */
+  readonly flat: THREE.Material[];
+  /** Which set is bound right now, so `skin` writes nothing on a frame that changes nothing. */
+  wearing: 'textured' | 'solid';
   /** What `transparent` currently reads on those materials, so a fade only sets it (and `needsUpdate`) when it changes. */
   transparent: boolean;
   trail: Trail | null;
@@ -734,8 +753,6 @@ interface Rig {
   lastAt: WorldPoint | null;
   lastHeight: number;
   lastHeading: number;
-  /** Seconds since this clone's BONES were last posed. Zero every frame at LOD0; a slow clock at LOD1. */
-  sincePosed: number;
 }
 
 /** One species: its template, its pool, its impostor. */
@@ -780,22 +797,58 @@ function zeroCounts(): Record<CreatureId, number> {
  * per body is a uniform block, which is the smallest thing a fade of one
  * body can be made of.
  */
-function ownMaterials(root: THREE.Object3D): THREE.Material[] {
-  const own: THREE.Material[] = [];
+function skinsOf(root: THREE.Object3D, colour: number): { skins: Skin[]; materials: THREE.Material[]; flat: THREE.Material[] } {
+  const skins: Skin[] = [];
+  const materials: THREE.Material[] = [];
+  const flat: THREE.Material[] = [];
   root.traverse((n) => {
     const mesh = n as THREE.Mesh;
     if (mesh.isMesh !== true) return;
-    if (Array.isArray(mesh.material)) {
-      const list = mesh.material.map((material) => material.clone());
-      mesh.material = list;
-      for (const material of list) own.push(material);
-    } else {
-      const one = mesh.material.clone();
-      mesh.material = one;
-      own.push(one);
-    }
+    const source = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    const own = source.map((material) => material.clone());
+    const plain = source.map((material) => flatLike(material, colour));
+    for (const m of own) materials.push(m);
+    for (const m of plain) { materials.push(m); flat.push(m); }
+    const textured = Array.isArray(mesh.material) ? own : own[0];
+    const solid = Array.isArray(mesh.material) ? plain : plain[0];
+    mesh.material = textured;
+    skins.push({ mesh, textured, solid });
   });
-  return own;
+  return { skins, materials, flat };
+}
+
+/**
+ * THE SOLID-COLOUR TWIN of one of a model's materials — "the texture
+ * will be a solid matching color but model still there and animated"
+ * (Joshua, 2026-09-11).
+ *
+ * The colour is `LOOK[species].colour`, which is the same number the
+ * impostor is built from, so the two tiers match by construction rather
+ * than by two tables being kept in step. `MeshLambertMaterial` is the
+ * impostor's class too: lit, so it still obeys "light decides what
+ * shows", and cheap, because the whole point is the fragment that no
+ * longer fetches a texture.
+ *
+ * TWO THINGS ARE CARRIED ACROSS, and only two. `side`, because a
+ * single-sided wing turned double-sided would gain faces. And a CUTOUT:
+ * where the original alpha-tests (a fly's wing is a quad with a shaped
+ * alpha channel), the same map drives the same cutout, or the wings
+ * would become cardboard. A material with no cutout gets no map at all,
+ * which is the saving.
+ */
+function flatLike(source: THREE.Material, colour: number): THREE.Material {
+  const cut = (source as THREE.MeshStandardMaterial).alphaTest ?? 0;
+  const map = cut > 0 ? (source as THREE.MeshStandardMaterial).map ?? null : null;
+  return new THREE.MeshLambertMaterial({
+    color: colour, fog: true, side: source.side, alphaTest: cut, alphaMap: map,
+  });
+}
+
+/** One mesh of a clone and its two coats: the model's own, and the species' solid colour. */
+interface Skin {
+  readonly mesh: THREE.Mesh;
+  readonly textured: THREE.Material | THREE.Material[];
+  readonly solid: THREE.Material | THREE.Material[];
 }
 
 function wrapAngle(a: number): number {
@@ -1078,7 +1131,7 @@ export class FaunaView {
       for (const [id, reveal] of this.reveals) if (reveal.frame !== this.frame) this.reveals.delete(id);
       // PASS 2: the rigs are dealt out ACROSS EVERY SPECIES AT ONCE, by
       // distance. Nothing below chooses a holder.
-      this.allocate(creatures, step);
+      this.allocate(creatures);
       // PASS 3: each species poses what it holds and fills its impostor.
       for (const slot of this.order) {
         if (!slot.enabled) continue;
@@ -1452,10 +1505,11 @@ export class FaunaView {
           }
         }
       }
+      const coats = skinsOf(root, slot.look.colour);
       slot.rigs.push({
         root, legs, wings, antennae, jaws, head, gaster, chain, headOffset, headFrame,
-        motion: newMotion(), drawnUp: new THREE.Vector3(0, 1, 0), materials: ownMaterials(root), transparent: false, trail: null,
-        holder: null, creature: -1, lastAt: null, lastHeight: 0, lastHeading: 0, sincePosed: 0,
+        motion: newMotion(), drawnUp: new THREE.Vector3(0, 1, 0), ...coats, wearing: 'textured', transparent: false, trail: null,
+        holder: null, creature: -1, lastAt: null, lastHeight: 0, lastHeading: 0,
       });
       slot.group.add(root);
     }
@@ -1621,7 +1675,7 @@ export class FaunaView {
    * with a rig rises toward 1, one without falls toward 0, and one met
    * for the first time is simply put where it belongs.
    */
-  private allocate(creatures: readonly CreatureState[], dt: number): void {
+  private allocate(creatures: readonly CreatureState[]): void {
     const full = this.fullBudget();
     const reduced = this.reducedBudget();
     const list = this.eligible;
@@ -1634,11 +1688,11 @@ export class FaunaView {
       // (`setPoolSize`), and a bench answering that question about a
       // one-metre room cannot have its skeletons taken away at 0.85 m.
       const gated = !this.allRigs && !this.poolOverride.has(slot.species.id);
-      // EVERY BOUNDARY IS TWO NUMBERS (see LOD0_IN): a body reaches for a
-      // mesh at LOD1_IN and only gives it up at LOD1_OUT, so what it
+      // EVERY LATCHING BOUNDARY IS TWO NUMBERS: a body reaches for a
+      // clone at MESH_IN and only gives it up at MESH_OUT, so what it
       // already holds is part of the question.
-      const wants = gated ? LOD1_IN * LOD1_IN : Infinity;
-      const keeps = gated ? LOD1_OUT * LOD1_OUT : Infinity;
+      const wants = gated ? MESH_IN * MESH_IN : Infinity;
+      const keeps = gated ? MESH_OUT * MESH_OUT : Infinity;
       for (const i of slot.candidates) {
         const d2 = this.d2[i];
         const has = this.tier.get(creatures[i].id) ?? 0;
@@ -1646,8 +1700,8 @@ export class FaunaView {
         // the RADII alone and for every species alike, so the HUD can
         // say whether a near ellipsoid is the ladder finding nobody
         // closer or the ladder having nothing left to give.
-        if (d2 <= LOD0_IN * LOD0_IN) this.withinFull += 1;
-        if (d2 <= LOD1_IN * LOD1_IN) this.withinReduced += 1;
+        if (d2 <= TEXTURED_IN * TEXTURED_IN) this.withinFull += 1;
+        if (d2 <= MESH_IN * MESH_IN) this.withinReduced += 1;
         if (d2 <= wants || (d2 <= keeps && has > 0)) list.push(i);
       }
     }
@@ -1662,8 +1716,9 @@ export class FaunaView {
       const d2 = this.d2[idx];
       const gated = !this.allRigs && !this.poolOverride.has(creatures[idx].species);
       const has = this.tier.get(creatures[idx].id) ?? 0;
-      // Reaching LOD0 needs LOD0_IN; keeping it only needs LOD0_OUT.
-      const wantsFull = !gated || d2 <= (has === 1 ? LOD0_OUT * LOD0_OUT : LOD0_IN * LOD0_IN);
+      // Keeping its TEXTURE is easier than winning it back: TEXTURED_IN
+      // to reach, TEXTURED_OUT to hold.
+      const wantsFull = !gated || d2 <= (has === 1 ? TEXTURED_OUT * TEXTURED_OUT : TEXTURED_IN * TEXTURED_IN);
       if (wantsFull && fulls < full) { this.rigged[idx] = 1; fulls += 1; continue; }
       if (reduceds < reduced) { this.rigged[idx] = 2; reduceds += 1; continue; }
       this.rigged[idx] = 0;
@@ -1690,8 +1745,8 @@ export class FaunaView {
 
     // EVERY MARK, not the first `fulls + reduceds` of the list. The two
     // are usually the same set and are not always: `wantsFull` reaches
-    // for `LOD0_OUT` when the body already holds a full rig and for
-    // `LOD0_IN` when it does not, so a holder a little further out can
+    // for `TEXTURED_OUT` when the body already holds a textured rig and
+    // for `TEXTURED_IN` when it does not, so one a little further out can
     // be marked after a nearer body has been passed over. Walking a
     // prefix then stopped short of it — the mark was spent and no mesh
     // was ever lent against it. The list is still nearest-first, so a
@@ -1723,7 +1778,6 @@ export class FaunaView {
       held -= 1;
     }
 
-    const rate = dt > 0 ? dt / FADE_S : 0;
     for (const slot of this.order) {
       for (const i of slot.candidates) {
         const c = creatures[i];
@@ -1733,34 +1787,47 @@ export class FaunaView {
         // zero — `release` does it — or the ellipsoid would come back
         // shrunken and the animal would be half there.
         if (rig === undefined) { this.fades.set(c.id, 0); this.tier.delete(c.id); continue; }
-        // EITHER MESH TIER IS THE BODY BEING THERE. The fade crosses
-        // between the real mesh and the impostor, and LOD1 is the real
-        // mesh — so a body dropping from full to reduced does not fade at
-        // all, it simply stops being re-posed. Only leaving the mesh
-        // entirely fades.
-        const target = this.rigged[i] > 0 ? 1 : 0;
-        const was = this.fades.get(c.id);
-        // Met for the first time: there is nothing to cross-fade from.
-        let now = was === undefined ? target : was;
-        // THREE WAYS, NOT TWO. `target > was ? up : down` sends the
-        // SETTLED case — target equal to what it already is — down the
-        // fade-out branch, so a body that had finished arriving decayed
-        // one step, climbed back the next frame, and shimmered at
-        // 1 → 1-rate → 1 for as long as it was drawn. A rig that has
-        // arrived stays arrived; only a target that has actually moved
-        // moves the fade.
-        if (was !== undefined) {
-          now = target > was ? Math.min(1, was + rate) : target < was ? Math.max(0, was - rate) : was;
-        }
-        if (now <= 0 && target === 0) { this.tier.delete(c.id); this.release(rig); continue; }
+        // THE FADE IS THE DISTANCE, and only the distance: whole at
+        // `FADE_FROM`, gone at `FADE_TO`, a straight ramp between. A body
+        // the budget refused entirely (`rigged` 0) is an ellipsoid now,
+        // not a body on its way to being one, so it fades by the clock of
+        // the ladder rather than by one of its own.
+        //
+        // The timed crossfade this replaces had to be started, held and
+        // finished, and it ran at the wrong moment whenever a body
+        // crossed the line while something else was deciding tiers. This
+        // is simply true every frame.
+        // UNGATED IS UNFADED. RIGS: ALL and a named pool both say "draw
+        // every one of these as a model, wherever it stands" — the radii
+        // do not apply to them, and neither does the ramp the radii
+        // define, or a body past 0.6 m would dissolve out of a run whose
+        // whole question is how many models the phone can hold.
+        const gated = !this.allRigs && !this.poolOverride.has(c.species);
+        const now = this.rigged[i] === 0 ? 0 : gated ? meshShare(this.d2[i]) : 1;
+        if (now <= 0) { this.tier.delete(c.id); this.fades.set(c.id, 0); this.release(rig); continue; }
         this.fades.set(c.id, now);
         // NEXT FRAME'S QUESTION NEEDS THIS FRAME'S ANSWER: which side of
         // each boundary the body is already on is what makes the pair of
         // radii a hysteresis rather than two arbitrary numbers.
-        const marked = this.rigged[i];
-        if (marked === 0) this.tier.delete(c.id); else this.tier.set(c.id, marked);
+        this.tier.set(c.id, this.rigged[i]);
       }
     }
+  }
+
+  /**
+   * WHICH COAT THIS CLONE WEARS THIS FRAME — the model's own textures
+   * inside `TEXTURED_OUT`, the species' solid colour beyond it.
+   *
+   * Swapping a material REFERENCE is free; swapping a material's `map`
+   * is a shader recompile and a hitch. So both coats are built once when
+   * the clone is (`skinsOf`) and this only ever rebinds them, and only
+   * on the frame the tier actually changes.
+   */
+  private skin(rig: Rig, textured: boolean): void {
+    const want = textured ? 'textured' : 'solid';
+    if (rig.wearing === want) return;
+    rig.wearing = want;
+    for (const s of rig.skins) s.mesh.material = textured ? s.textured : s.solid;
   }
 
   /**
@@ -1849,22 +1916,24 @@ export class FaunaView {
     let leaving = 0;
     for (const rig of slot.rigs) {
       if (rig.holder === null) { rig.root.visible = false; continue; }
-      // WHICH TIER, AND THEREFORE WHETHER THE BONES MOVE THIS FRAME.
-      // LOD1 keeps the mesh and its place in the world; what it gives up
-      // is the per-frame posing, refreshed on its own slow clock so the
-      // body is not left standing mid-stride for a visible beat.
+      // WHICH TIER, AND THEREFORE WHICH MATERIALS. Both mesh tiers are
+      // ANIMATED EVERY FRAME — "model still there and animated" — and
+      // what the far one gives up is the TEXTURE: the same skeleton, the
+      // same motion, in the species' solid colour. The posing was
+      // measured at 1.3 ms for 198 rigs of a 31 ms frame, so freezing it
+      // was never going to be the saving; the fragment work is.
       const mark = this.rigged[rig.creature];
       const full = mark === 1;
-      rig.sincePosed += dt;
-      const refresh = full || rig.sincePosed >= REDUCED_POSE_S;
-      if (refresh) rig.sincePosed = 0;
-      this.pose(slot, rig, creatures[rig.creature], dt, refresh);
+      // PAST THE FADE IT IS NOT DRAWN. A holder in the slack between
+      // `MESH_IN` and `MESH_OUT` is at zero share, and a draw call for
+      // nothing is a draw call: the clone is kept (that is the
+      // hysteresis) and the mesh is not submitted.
+      if ((this.fades.get(rig.holder) ?? 0) <= 0) { rig.root.visible = false; leaving += 1; continue; }
+      this.skin(rig, full);
+      this.pose(slot, rig, creatures[rig.creature], dt);
       rig.root.visible = true;
       // COUNTED BY THE TIER IT IS ON, not by the clone it happens to be
-      // holding. A body on NO tier still holds its clone for as long as
-      // the crossfade lasts — that is what a crossfade is — but it is on
-      // its way to being an ellipsoid and is counted as one, or the
-      // middle tier's number would swell every time anything left.
+      // holding.
       if (full) lent += 1;
       else if (mark === 2) frozen += 1;
       else leaving += 1;
@@ -1938,10 +2007,14 @@ export class FaunaView {
    */
   private applyFade(rig: Rig, fade: number): void {
     const settled = fade >= 1;
-    for (const material of rig.materials) material.opacity = settled ? 1 : fade;
+    // ONLY THE SOLID COAT EVER FADES. The crossfade band is 0.5–0.6 m and
+    // the textures are gone by 0.32 m, so a textured material can never
+    // be in it — writing one would be a transparent pass bought for a
+    // body that is never in the fade.
+    for (const material of rig.flat) material.opacity = settled ? 1 : fade;
     if (rig.transparent === !settled) return;
     rig.transparent = !settled;
-    for (const material of rig.materials) { material.transparent = !settled; material.needsUpdate = true; }
+    for (const material of rig.flat) { material.transparent = !settled; material.needsUpdate = true; }
   }
 
   private release(rig: Rig): void {
@@ -2081,7 +2154,7 @@ export class FaunaView {
   }
 
   /** Pose one lent rig from what its creature did since last frame. */
-  private pose(slot: Slot, rig: Rig, c: CreatureState, dt: number, refresh: boolean): void {
+  private pose(slot: Slot, rig: Rig, c: CreatureState, dt: number): void {
     // HOW MUCH OF THIS BODY THE RIG IS CARRYING, written every frame
     // from the animal in front of it rather than latched on the rig —
     // the same rule the scale below follows.
@@ -2153,8 +2226,8 @@ export class FaunaView {
       // THE CHAIN IS THIS BODY'S POSE, and it is what LOD1 stops paying
       // for: the crumbs are still collected every frame — a trail is a
       // record of a crawl and a gap in it never comes back — but the
-      // fifteen bones are only laid along them on the refresh.
-      if (refresh) layChain(rig.root, rig.chain, chain, scale, rig.headOffset, rig.headFrame, path, points, m, bodyLength, c.phase);
+      // fifteen bones are laid along them every frame.
+      layChain(rig.root, rig.chain, chain, scale, rig.headOffset, rig.headFrame, path, points, m, bodyLength, c.phase);
       // The body's middle: half a length back along the path it was laid on.
       const mid = pointAlongPath(path, points, bodyLength / 2, this.centre);
       this.drew(c.id, mid.x, mid.y, mid.z);
@@ -2177,14 +2250,12 @@ export class FaunaView {
     // the jaws, the head, the gaster and a fly's wings, each of them a
     // handful of quaternions a frame, sixty times a second, for a body
     // that is half a metre off and a few dozen pixels tall.
-    if (refresh) {
-      poseLegs(rig.legs, m, bodyLength, c.phase);
-      poseWings(rig.wings, m, c.phase, slot.hz);
-      poseAntennae(rig.antennae, m, c.phase, bodyLength);
-      poseJaws(rig.jaws, m, c.phase, dt);
-      poseHead(rig.head, m, c.phase);
-      poseGaster(rig.gaster, m, bodyLength, c.phase);
-    }
+    poseLegs(rig.legs, m, bodyLength, c.phase);
+    poseWings(rig.wings, m, c.phase, slot.hz);
+    poseAntennae(rig.antennae, m, c.phase, bodyLength);
+    poseJaws(rig.jaws, m, c.phase, dt);
+    poseHead(rig.head, m, c.phase);
+    poseGaster(rig.gaster, m, bodyLength, c.phase);
     // The drawn centre: the rig's box centre, scaled, turned as the root is, on the root; a placeholder's box is its own.
     const centre = this.centre;
     if (anatomy !== null) {

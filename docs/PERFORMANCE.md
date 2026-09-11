@@ -517,3 +517,74 @@ its geometry and material get cheaper.
 viewpoint, most bodies on the middle tier or as impostors. The difference
 between 31 ms and whatever that reads is the real price of the ladder,
 and it is a number neither of us can guess from here.
+
+
+## alpha.47 — the ladder Joshua respecified, from his own measurement
+
+Joshua, 2026-09-11, after Baseline C-ALL: *"do full model and everything
+from 0-0.3m, from 0.3-0.5m, the texture will be a solid matching color
+but model still there and animated… from 0.5-0.6 it will fade to
+procedural and over 0.6m is procedural same solid color, no model or
+animation."*
+
+|  | what is drawn |
+|---|---|
+| 0 – 0.3 m | the full model, its own textures, animated every frame |
+| 0.3 – 0.5 m | the same model, **still animated**, in the species' solid colour |
+| 0.5 – 0.6 m | that flat model crossfades to the impostor, **by distance** |
+| over 0.6 m | the impostor, in the same solid colour |
+
+**Why the middle tier changed sides.** It used to keep the textures and
+freeze the bones. His own run priced that: **1.3 ms of a 31 ms frame for
+198 skinned rigs.** The frame is not the posing. So the tier now gives up
+the TEXTURE and keeps the MOTION, which puts the saving on the fragment
+side where the other 29.6 ms is, and keeps the thing that makes an ant
+read as alive. The old tier's ceiling was 4% of the frame.
+
+The solid colour is `LOOK[species].colour` — the number the impostor is
+already built from — so the two far tiers match by construction. The flat
+material is `MeshLambertMaterial`, the impostor's own class: lit, so
+"light decides what shows" still holds, and with no map to sample. Where
+a material alpha-tests (a fly's wing is a shaped cutout on a quad) the
+same map drives the same cutout, or the wings would become cardboard;
+everything else gets no texture at all, which is the saving.
+
+Both coats are built when a clone is and the tier only rebinds
+`mesh.material`. Swapping a reference is free; swapping a material's
+`map` is a shader recompile and a hitch.
+
+**The crossfade is distance, not time.** `meshShare(d²)` is 1 at 0.5 m,
+0 at 0.6 m and a straight ramp between; the impostor draws `1 - share`.
+A timed fade had to be started, held and finished, and it ran at the
+wrong moment whenever a body crossed a line while something else was
+deciding tiers. A ramp is simply true every frame. The one latching
+boundary left is the texture line, which keeps its two numbers.
+
+### What to run next
+
+The same seeded run at **RIGS: LOD**. Baseline C-ALL is the control: 231
+bodies, 199 of them full textured models, 31.0 ms. The LOD run draws the
+same crowd with most of it solid-coloured or procedural. **The gap
+between 31.0 ms and whatever that reads is the ladder's whole worth** —
+and if it is small, the answer is not more tiers, it is fewer triangles.
+
+
+### The bench viewpoint, recomputed for the 0.3 / 0.5 / 0.6 ladder
+
+The bench viewpoint is a function of the radii, so tightening them moved
+it for the third time. At (34, 34) — chosen for the 0.45 / 0.85 ladder —
+**0.0%** of the floor was inside the new near radius, which is the same
+failure as the original perch at 1.00 m, one rung in.
+
+| viewpoint | to middle | framed | textured (0.3 m) | solid (0.5 m) | any model (0.6 m) |
+|---|---|---|---|---|---|
+| ~~(62, +48, 62)~~ | 1.00 m | 96.5% | 0.0% | — | — |
+| ~~(34, +28, 34)~~ | 0.56 m | 77.0% | **0.0%** | 29.0% | 41.4% |
+| (28, +24, 28) | 0.46 m | 66.4% | 6.5% | 38.4% | 52.1% |
+| (24, +20, 24) | 0.39 m | 59.2% | 12.0% | 45.7% | 60.2% |
+| **(20, +16, 20)** *now* | 0.32 m | 52.2% | **16.6%** | 53.0% | 68.3% |
+| (16, +13, 16) | 0.26 m | 45.7% | 19.3% | 59.7% | 76.0% |
+
+Framing is the frustum test against the real lens — 60° vertical at
+932 × 430, so 103° across — over a 400 × 400 lattice of the floor, not an
+estimate. **When a radius changes, recompute this and move the bench.**

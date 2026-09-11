@@ -187,39 +187,38 @@ export const LAB_SPECIES: readonly CreatureSpecies[] = LAB_SPECIES_TABLE;
 const CENTRE: WorldPoint = world(0, 0);
 
 /**
- * Where the free camera starts: inside the south-east corner, looking
- * down at the block — the whole bench in frame, the block in the middle.
- * GAME TUNING. `yaw` is `FreeFlyCamera`'s: π/4 looks along (−1, −1)/√2.
+ * Where the free camera starts: inside the room, close, looking down at
+ * the block — with every rung of the ladder on screen at once.
  *
- * IT STANDS IN THE ROOM NOW, and that is the point. It used to sit at
- * (62, 62) and 48 up, which is 1.00 m from the centre of a room 1 m
- * across — so NONE of that floor was inside `LOD0_IN` (0.45 m) and only
- * 23% was inside `LOD1_OUT`. The ladder was working and the bench could
- * not see it work: every body in the room was on the far tier before
- * the budget was even consulted. Joshua, 2026-09-10: "if the room is a
+ * THE BENCH VIEWPOINT IS A FUNCTION OF THE RADII, so it moves when they
+ * do. It sat at (62, 62) and 48 up until 2026-09-10, which is 1.00 m
+ * from the centre of a room 1 m across — outside its own subject, with
+ * NONE of that floor inside the near radius. Joshua: "if the room is a
  * 1x1x1m block and I asked for 0.6m, then most of the room should be
- * rendered."
+ * rendered." It moved to (34, 34) for the 0.45/0.85 ladder, and his
+ * 2026-09-11 respecification tightened that to 0.3/0.5/0.6 — which put
+ * the near tier back out of reach of the bench, 0.0% of the floor inside
+ * `TEXTURED_IN` again.
  *
- * The answer to that is to move the BENCH, never the LOD centre (see
- * CLAUDE.md's rule; the centre is the camera and is measured from the
- * eye the frame was drawn from). At (34, 34) and 28 up the eye is 0.56 m
- * from the room's middle and the floor reads 23% inside `LOD0_IN`, 63%
- * inside `LOD1_IN` and 79% inside `LOD1_OUT` — all three rungs on screen
- * at once, which is what a bench for a detail ladder has to show, and
- * "most of the room" on a real mesh, which is what he asked for.
+ * At (20, 20) and 16 up the eye is 0.32 m from the middle and the floor
+ * reads 17% inside `TEXTURED_IN`, 53% inside `FADE_FROM` and 68% inside
+ * `MESH_OUT` — the textured model, the solid coat, the crossfade and the
+ * impostor, all of them on one screen, which is what a bench for a
+ * detail ladder has to show.
  *
- * IT IS A TRADE AND THE OTHER SIDE OF IT IS FRAMING: at 932 × 430 the
- * old perch had 96% of the floor inside the frustum and this one has
- * 77%, because you cannot stand inside a one-metre room and still see
- * all four of its corners through a 103° lens. Measured, both of them,
- * against this viewport rather than guessed. Standing outside and seeing
- * everything at the far tier is the worse half of that trade for a bench
- * whose subject is the near tiers; the stick reaches the rest.
+ * IT IS A TRADE, and the other side of it is framing: 52% of the floor
+ * is inside the frustum here against 96% from the old perch, because you
+ * cannot stand this close in a one-metre room and still see its corners
+ * through a 103° lens. Measured against the real frustum at 932 × 430
+ * rather than guessed, and tabulated in `docs/PERFORMANCE.md`. For a
+ * bench whose subject is the near rungs it is the better half; the stick
+ * reaches the rest.
  *
  * The pitch is the one that points at the block's middle from here.
+ * `yaw` is `FreeFlyCamera`'s: π/4 looks along (−1, −1)/√2.
  */
 export const FREE_START: CameraPose = Object.freeze({
-  at: world(34, 34), height: LAB_FLOOR + 28, yaw: Math.PI / 4, pitch: -0.36,
+  at: world(20, 20), height: LAB_FLOOR + 16, yaw: Math.PI / 4, pitch: -0.21,
 });
 
 /** The free camera's glass: half a millimetre to four metres — the box and nothing beyond it. */

@@ -598,7 +598,7 @@ describe('the report', () => {
     expect(text).toContain('INSECTS AT EACH THRESHOLD');
     for (const want of THRESHOLDS) expect(text).toContain(`below ${String(want).padStart(2)} fps`);
     for (const id of FIVE) expect(text).toContain(id);
-    expect(text).toContain('one animated skeleton per insect');
+    expect(text).toContain('every body the full textured model');
     expect(text).toContain('do not collide with or avoid one another');
     expect(text).toContain('RUN AGAIN repeats this exact sequence');
     expect(text).toContain('build      test');
@@ -635,7 +635,7 @@ describe('the report', () => {
     test.start();
     drive(test, () => 60, () => test.finished);
     const lod = stressReport(test.result(), { ...CONDITIONS, rigs: 'lod' });
-    expect(lod).toContain('LOD — full rig / frozen mesh / impostor by DISTANCE, no budget');
+    expect(lod).toContain('LOD — textured to 0.3 m, solid colour to 0.6 m, impostor past it, no budget');
     // Both bench modes say "no budget", because neither has one.
     expect(stressReport(test.result(), CONDITIONS)).toContain('no budget');
   });
@@ -679,7 +679,7 @@ describe('the drawn census: rigs, impostors, and where the frame went', () => {
     drive(test, phoneOf(6, 50), () => test.finished, samplerOf(8));
     const text = stressReport(test.result(), CONDITIONS);
     for (const want of THRESHOLDS) {
-      expect(text).toMatch(new RegExp(`below ${want} fps {6}\\d+ +\\(\\d+ s\\) +± \\d+ +at \\d+/s +\\d+ rigs · \\d+ reduced · \\d+ impostors`));
+      expect(text).toMatch(new RegExp(`below ${want} fps {6}\\d+ +\\(\\d+ s\\) +± \\d+ +at \\d+/s +\\d+ textured · \\d+ solid · \\d+ impostors`));
     }
   });
 
@@ -699,7 +699,7 @@ describe('the drawn census: rigs, impostors, and where the frame went', () => {
     expect(result.peakImpostors).toBe(18);
     const text = stressReport(result, CONDITIONS);
     expect(text).toContain('DRAWN AT THE END');
-    expect(text).toMatch(/\n {2}full rigs {11}2 {3}\(animated every frame\)\n/);
+    expect(text).toMatch(/\n {2}textured {12}2 {3}\(the model's own materials\)\n/);
     expect(text).toMatch(/\n {2}impostors {11}18\n/);
     expect(text).toMatch(/\n {2}peak full rigs {6}10\n/);
   });
@@ -758,12 +758,12 @@ describe('the drawn census: rigs, impostors, and where the frame went', () => {
     // EACH COUNT AGAINST ITS CAP: this pretend renderer's pool is eight
     // and eight are lent, which is the reading that says the ladder ran
     // out of BUDGET rather than out of animals near enough to serve.
-    expect(stressBlock(r)).toContain(`drawn     8/8 rigs · ${r.reduced} reduced`);
+    expect(stressBlock(r)).toContain(`drawn     8/8 textured · ${r.reduced} solid`);
     expect(stressBlock(r)).toContain(`${r.impostors} impostors`);
     // And the demand beside it: everyone this renderer drew was inside
     // the near line, so the line says how many wanted the rig that eight
     // of them got.
-    expect(stressBlock(r)).toContain(`inside    ${r.withinFull} at LOD0`);
+    expect(stressBlock(r)).toContain(`inside    ${r.withinFull} in 0.3 m`);
   });
 
   it('discards the settle\'s samples with the settle\'s frames', () => {
@@ -812,7 +812,7 @@ describe('the census accounts for the whole crowd (Joshua: where did the other 5
     expect(result.finalRigs! + result.finalImpostors! + result.finalNotDrawn!).toBe(result.creatures);
     const text = stressReport(result, CONDITIONS);
     expect(text).toContain('DRAWN AT THE END');
-    expect(text).toMatch(/\n {2}full rigs {11}13\/13 {3}\(animated every frame\)\n/);
+    expect(text).toMatch(/\n {2}textured {12}13\/13 {3}\(the model's own materials\)\n/);
     expect(text).toMatch(/\n {2}impostors {11}17\n/);
     expect(text).toMatch(/\n {2}not drawn {11}10\n/);
     // AND WHY, split three ways. Two of the three are limits and one is
@@ -880,7 +880,7 @@ describe('the census accounts for the whole crowd (Joshua: where did the other 5
     drive(test, () => 60, (s) => s >= 20, hidingSamplerOf(8, 4));
     const r = test.readout();
     expect(r.notDrawn).toBeGreaterThan(0);
-    expect(stressBlock(r)).toContain(`${r.rigs} rigs · ${r.reduced} reduced`);
+    expect(stressBlock(r)).toContain(`${r.rigs} textured · ${r.reduced} solid`);
     expect(stressBlock(r)).toContain(`${r.impostors} impostors · ${r.notDrawn} not drawn`);
   });
 });
