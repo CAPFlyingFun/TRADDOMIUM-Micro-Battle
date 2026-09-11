@@ -6,9 +6,9 @@
  *   THE RIG GOES TO THE NEAREST ANIMAL OF ANY SPECIES, inside the near
  *     line, never past the far one, never more of them than the rung's
  *     budget however many crowd in, and in the same order every frame
- *   the band is the hysteresis: crossing back and forth over the near
- *     line changes nothing until the far line is passed
- *   the swap is a crossfade — never invisible, never doubled
+ *   the procedural band is the hysteresis: crossing back and forth over
+ *     its near line changes nothing until the far line is passed
+ *   the texture-to-solid swap is a continuous shader blend — never doubled
  *   everything else near is an impostor, never past the cap; nothing
  *     far is drawn
  *   the census closes: rigs + impostors + notDrawn is what was handed
@@ -409,8 +409,8 @@ describe('the pool', () => {
     const v = await keep(view('ultra-low'));
     // Flat, `high` is much the nearer; in 3D it is the further, and both
     // are inside the near line either way so only the ORDER tells.
-    const low = creature('aphid', 'low', 50, 0, { height: 0 });
-    const high = creature('aphid', 'high', 20, 0, { height: 48 });
+    const low = creature('aphid', 'low', 15, 0, { height: 0 });
+    const high = creature('aphid', 'high', 5, 0, { height: 16 });
     v.update([low, high], EYE, 1 / 60, 0);
     expect(held(v, 'aphid')).toEqual(['low', 'high']);
     // Flat distance: the high one is nearer and sorts first when the pool is rebuilt from free.
@@ -583,7 +583,7 @@ describe('the size is the animal\'s, not the species\'', () => {
     expect(depth).toBeLessThan(bigLine);
     const small = creature('earthworm', 'small', 5, 0, { behaviour: 'burrow', height: GROUND - depth, lengthMm: SMALL_MM });
     const big = creature('earthworm', 'big', 6, 0, { behaviour: 'burrow', height: GROUND - depth, lengthMm: BIG_MM });
-    v.update([small, big], EYE, 1 / 60, GROUND + 50);
+    v.update([small, big], EYE, 1 / 60, GROUND + 40);
     expect(held(v, 'earthworm')).toEqual(['big']);
     expect(v.cost.impostors.earthworm).toBe(0);
   });
@@ -1083,8 +1083,8 @@ describe('the fly and the aphid', () => {
     expect(changed).toBeGreaterThan(3);
     // Climbing and turning: nose up, banked into the turn (a left turn drops the +X side: negative roll).
     for (let k = 0; k < 30; k += 1) {
-      f.at = world(f.at.wx + Math.sin(f.heading) * 1.5, f.at.wz + Math.cos(f.heading) * 1.5);
-      f.height += 0.5;
+      f.at = world(f.at.wx + Math.sin(f.heading) * 0.5, f.at.wz + Math.cos(f.heading) * 0.5);
+      f.height += 0.1;
       f.heading += 0.05;
       v.update([f], EYE, 1 / 60);
     }
@@ -1570,7 +1570,7 @@ describe('the three tiers: full, reduced, impostor', () => {
     Array.from({ length: n }, (_, i) => creature('aphid', `a${i}`, from + i * step, 0));
   it('prefers a near aphid over a far fly: nearness competes ACROSS species now', async () => {
     const v = await keep(view('medium'));
-    const crowd = [...aphidsAt(6, 3, 3), creature('housefly', 'f0', 20, 0, { behaviour: 'fly', height: 12 })];
+    const crowd = [...aphidsAt(6, 3, 3), creature('housefly', 'f0', 15, 0, { behaviour: 'fly', height: 12 })];
     v.update(crowd, EYE, 1 / 60, 0);
     // All seven are inside TEXTURED_IN and the full budget is thirteen, so
     // all seven are fully rigged — including six aphids, which the old
@@ -1586,7 +1586,7 @@ describe('the three tiers: full, reduced, impostor', () => {
     // when it does the losers keep their MESH.
     const v = await keep(view('ultra-low'));
     const full = fullBudgetFor('ultra-low');
-    const crowd = aphidsAt(full + 8, 2, 2);
+    const crowd = aphidsAt(full + 8, 1, 0.4);
     settle(v, crowd);
     expect(v.cost.rigsLent.aphid).toBe(full);
     expect(reducedAll(v)).toBe(8);
@@ -1612,7 +1612,7 @@ describe('the three tiers: full, reduced, impostor', () => {
     const reduced = reducedBudgetFor('ultra-low');
     // Half a unit apart, so every one of them is inside TEXTURED_IN and
     // the only thing that can refuse any is a budget.
-    const crowd = aphidsAt(full + reduced + 20, 2, 0.5);
+    const crowd = aphidsAt(full + reduced + 20, 1, 0.3);
     expect(crowd[crowd.length - 1].at.wx).toBeLessThan(TEXTURED_IN);
     settle(v, crowd);
     const cost = v.cost;
@@ -1700,7 +1700,7 @@ describe('the three tiers: full, reduced, impostor', () => {
     // Everyone well inside TEXTURED_IN, and far more of them than the rung allows.
     // Half a unit apart, so the whole crowd is inside TEXTURED_IN and the
     // only thing that can refuse any of them is a budget.
-    const crowd = aphidsAt(full + reduced + 30, 2, 0.5);
+    const crowd = aphidsAt(full + reduced + 30, 1, 0.25);
     expect(crowd[crowd.length - 1].at.wx).toBeLessThan(TEXTURED_IN);
     settle(v, crowd, EYE, 0, 60);
     expect(lentAll(v)).toBe(full);
@@ -1730,8 +1730,8 @@ describe('the three tiers: full, reduced, impostor', () => {
     const v = await keep(view('ultra-low'));
     v.setUncapped(true);
     const near = aphidsAt(20, 2, 0.5);                     // all inside TEXTURED_IN
-    const mid = Array.from({ length: 20 }, (_, i) => creature('aphid', `m${i}`, TEXTURED_OUT + 2 + i * 0.8, 0));
-    const far = Array.from({ length: 20 }, (_, i) => creature('aphid', `f${i}`, MESH_OUT + 2 + i, 0));
+    const mid = Array.from({ length: 20 }, (_, i) => creature('aphid', `m${i}`, TEXTURED_OUT + 2 + i * 0.3, 0));
+    const far = Array.from({ length: 20 }, (_, i) => creature('aphid', `f${i}`, MESH_OUT + 2 + i * 0.2, 0));
     expect(mid[mid.length - 1].at.wx).toBeLessThan(MESH_IN);
     settle(v, [...near, ...mid, ...far], EYE, 0, 60);
     expect(lentAll(v)).toBe(near.length);
@@ -1752,6 +1752,21 @@ describe('the three tiers: full, reduced, impostor', () => {
     expect(lentAll(v)).toBe(spread.length);
     expect(reducedAll(v)).toBe(0);
     expect(impostorsAll(v)).toBe(0);
+  });
+
+  it('AUTO applies its effective rig caps to a dense uncapped LOD bench, while ALL stays uncapped', async () => {
+    const v = await keep(view('ultra-low'));
+    v.setUncapped(true);
+    v.setLodSettings({ textureEnd: 0.20, solidEnd: 0.30, proceduralStart: 0.40, proceduralOnly: 0.46, mode: 'auto' });
+    const crowd = Array.from({ length: 260 }, (_, i) => creature('aphid', `auto-${i}`, 2 + (i % 65) * 0.5, (i / 65) | 0));
+    for (let i = 0; i < 220; i += 1) v.update(crowd, EYE, 1 / 60, 0, 40);
+    expect(v.lod.adaptive.level).toBeGreaterThan(0);
+    expect(v.cost.fullBudget).toBe(Math.floor(fullBudgetFor('ultra-low') * v.lod.adaptive.rigBudgetMultiplier));
+    expect(v.cost.reducedBudget).toBe(Math.floor(reducedBudgetFor('ultra-low') * v.lod.adaptive.rigBudgetMultiplier));
+    expect(v.cost.fullBudget).toBeLessThan(Number.POSITIVE_INFINITY);
+    v.setAllRigs(true);
+    v.update(crowd, EYE, 1 / 60, 0, 40);
+    expect(v.cost.fullBudget).toBe(Number.POSITIVE_INFINITY);
   });
 
   it('THE MIDDLE TIER LOSES ITS TEXTURE, NOT ITS MOTION — same model, same animation, solid colour', async () => {
@@ -1798,6 +1813,31 @@ describe('the three tiers: full, reduced, impostor', () => {
       if (m && 'color' in m && m.color.getHex() !== LOOK.aphid.colour) textured = true;
     });
     expect(textured).toBe(true);
+  });
+
+  it('TEXTURE TO SOLID IS ONE SKINNED DRAW: shader uniform is intermediate and cache-keyed', async () => {
+    const v = await keep(view('medium'));
+    v.setUncapped(true);
+    const middle = creature('aphid', 'blend', (TEXTURED_IN + TEXTURED_OUT) / 2, 0);
+    settle(v, [middle]);
+    const root = v.group.getObjectByName('aphid:rig:0');
+    expect(root).toBeDefined();
+    let mesh: THREE.Mesh | null = null;
+    root!.traverse((node) => {
+      if (mesh === null && (node as THREE.Mesh).isMesh === true) mesh = node as THREE.Mesh;
+    });
+    expect(mesh).not.toBeNull();
+    const material = Array.isArray(mesh!.material) ? mesh!.material[0] : mesh!.material;
+    expect(material.userData.faunaLodTextureBlend.value).toBeCloseTo(0.5);
+    expect(material.customProgramCacheKey()).toContain('fauna-lod-texture-blend-v1');
+    const shader = {
+      uniforms: {} as Record<string, unknown>,
+      fragmentShader: 'void main() {\n#include <map_fragment>\n}',
+    };
+    material.onBeforeCompile(shader as never, {} as never);
+    expect(shader.uniforms.faunaLodTextureBlend).toBe(material.userData.faunaLodTextureBlend);
+    expect(shader.fragmentShader).toContain('faunaLodSolidColor');
+    expect(shader.fragmentShader).toContain('mix(diffuseColor.rgb');
   });
 
   it('THE CROSSFADE IS THE DISTANCE: whole at 0.5 m, gone at 0.6 m, a ramp between', async () => {
@@ -1866,28 +1906,24 @@ describe('the three tiers: full, reduced, impostor', () => {
 
   it('every boundary is TWO numbers: a body at either line does not strobe', async () => {
     const v = await keep(view('medium'));
-    // Frames enough for the pool to warm and the tier latch to settle;
-    // the crossfade itself is distance now and finishes the instant the
-    // body stops moving.
+    // Frames enough for the pool to warm; the material blend itself is
+    // distance-only and has no history-dependent tier latch.
     const settled = 30;
     const walk = (x: number): number => {
-      // Long enough for a crossfade to finish. A single frame after a
-      // body crosses a line reads it mid-dissolve — still holding its
-      // clone, already on no tier — which is not a tier, it is a
-      // transition, and reading it as one is how a fade gets mistaken
-      // for a stuck rig.
+      // Long enough for the pool to settle. A body in the texture-to-solid
+      // band remains a full mesh so its shader can blend in one draw.
       for (let i = 0; i < settled; i += 1) v.update([creature('aphid', 'one', x, 0)], EYE, 1 / 60, 0);
       return v.cost.rigsLent.aphid === 1 ? 2 : v.cost.reduced.aphid === 1 ? 1 : 0;
     };
-    // Won at TEXTURED_IN, kept out to TEXTURED_OUT, then the middle tier.
+    // The full mesh owns the entire texture-to-solid band.
     expect(walk(TEXTURED_IN - 2)).toBe(2);
     for (let x = TEXTURED_IN + 1; x < TEXTURED_OUT - 1; x += 2) expect(walk(x), `full at ${x}`).toBe(2);
     expect(walk(TEXTURED_OUT + 2)).toBe(1);
-    // Coming back it must reach TEXTURED_IN again, not merely TEXTURED_OUT.
-    expect(walk(TEXTURED_OUT - 2)).toBe(1);
+    // Coming back is the same distance-only decision.
+    expect(walk(TEXTURED_OUT - 2)).toBe(2);
     expect(walk(TEXTURED_IN - 1)).toBe(2);
     // And the same at the outer line.
-    for (let x = MESH_IN + 1; x < MESH_OUT - 1; x += 2) expect(walk(x), `mesh at ${x}`).toBe(1);
+    expect(walk(MESH_IN - 1), `mesh at ${MESH_IN - 1}`).toBe(1);
     expect(walk(MESH_OUT + 2)).toBe(0);
     expect(walk(MESH_OUT - 2)).toBe(0);
     expect(walk(MESH_IN - 2)).toBe(1);

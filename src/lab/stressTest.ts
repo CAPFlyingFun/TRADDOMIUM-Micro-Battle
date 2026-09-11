@@ -141,6 +141,7 @@
  */
 import { mulberry32 } from '../world/random';
 import type { CreatureId } from '../creatures/species';
+import type { CreatureLodSnapshot } from '../fauna/creatureLod';
 
 // ---------------------------------------------------------------------------
 // The numbers. Joshua's, except where a line says otherwise.
@@ -330,6 +331,8 @@ export interface StressSample {
   readonly hidden: number;
   readonly pastCap: number;
   readonly farTier: number;
+  /** Baseline/effective creature bands and Auto adaptation at this frame. */
+  readonly lod?: CreatureLodSnapshot;
 }
 
 /** One threshold, and the run when it fell through it. */
@@ -471,6 +474,7 @@ export interface StressReadout {
   readonly withinReduced: number | null;
   /** The spawn rate now, creatures a second — one more every `RAMP_EVERY_S` of spawning. */
   readonly rate: number;
+  readonly lod: CreatureLodSnapshot | null;
 }
 
 export interface StressOptions {
@@ -807,6 +811,7 @@ export class StressTest {
       impostors: this.lastSample?.impostors ?? null,
       notDrawn: this.lastSample?.notDrawn ?? null,
       rate: this.rate(),
+      lod: this.lastSample?.lod ?? null,
     };
   }
 
@@ -842,6 +847,7 @@ export class StressTest {
       peakImpostors: this.sampleFrames > 0 ? this.peakImpostorsSeen : null,
       meanDrawMs: this.sampleFrames > 0 ? this.drawMsTotal / this.sampleFrames : null,
       meanAiMs: this.sampleFrames > 0 ? this.aiMsTotal / this.sampleFrames : null,
+      finalLod: this.lastSample?.lod ?? null,
     };
   }
 }
@@ -893,6 +899,8 @@ export interface StressResult {
   readonly meanDrawMs: number | null;
   /** The mean of `CreatureSim.cost()` over those frames, ms — a TICK's reading, not a frame's (the header). */
   readonly meanAiMs: number | null;
+  /** LOD state on the final measured frame, if the renderer supplied one. */
+  readonly finalLod: CreatureLodSnapshot | null;
 }
 
 /** What the run was run under, printed so two runs can be compared honestly. */
@@ -913,6 +921,8 @@ export interface StressConditions {
   readonly camera: string;
   /** Which species the run drew from, in words: `all five, mixed`, `queen only` (`labTool.stressPoolWords`). */
   readonly pool: string;
+  /** Baseline settings and the adaptive state at run start. */
+  readonly lod?: CreatureLodSnapshot;
 }
 
 // ---------------------------------------------------------------------------
@@ -1038,6 +1048,9 @@ export function stressReport(result: StressResult, conditions: StressConditions)
     lines.push('DRAWN AT THE END');
     lines.push(`  ${'textured'.padEnd(20)}${ofCap(result.finalRigs, result.finalRigBudget)}   (the model's own materials)`);
     lines.push(`  ${'solid colour'.padEnd(20)}${ofCap(result.finalReduced, result.finalReducedBudget)}   (same model, still animated, no texture)`);
+    if (result.finalRigBudget !== null || result.finalReducedBudget !== null) {
+      lines.push(`  ${'effective capacity'.padEnd(20)}${whole(result.finalRigBudget)} full rigs · ${whole(result.finalReducedBudget)} solid rigs`);
+    }
     lines.push(`  ${'impostors'.padEnd(20)}${whole(result.finalImpostors)}`);
     lines.push(`  ${'not drawn'.padEnd(20)}${whole(result.finalNotDrawn)}`);
     if (result.finalHidden !== null || result.finalPastCap !== null || result.finalFarTier !== null) {
@@ -1054,8 +1067,10 @@ export function stressReport(result: StressResult, conditions: StressConditions)
       // counts that are equal to their caps with hundreds asking is the
       // signature of a BUDGET limit; counts short of their caps is the
       // signature of there being nobody else near enough to serve.
-      lines.push(`  ${'inside 0.3 m'.padEnd(20)}${whole(result.finalWithinFull)}   (wanted its own textures)`);
-      lines.push(`  ${'inside 0.6 m'.padEnd(20)}${whole(result.finalWithinReduced)}   (wanted the model at all)`);
+      const fullBand = result.finalLod?.effective.textureEnd.toFixed(2) ?? '0.3';
+      const modelBand = result.finalLod?.effective.proceduralOnly.toFixed(2) ?? '0.6';
+      lines.push(`  ${`inside ${fullBand} m`.padEnd(20)}${whole(result.finalWithinFull)}   (wanted its own textures)`);
+      lines.push(`  ${`inside ${modelBand} m`.padEnd(20)}${whole(result.finalWithinReduced)}   (wanted the model at all)`);
     }
     lines.push('  ---');
     // THE IDENTITY, and WHAT IT IS AGAINST. The three above are the
@@ -1109,6 +1124,12 @@ export function stressReport(result: StressResult, conditions: StressConditions)
     // would count it twice and call a tick's cost a frame's.
     lines.push(`  ${'sim tick'.padEnd(16)}${msCol(result.meanAiMs)} ms   (the sim's own last-tick reading, not a per-frame cost)`);
   }
+  if (result.finalLod !== null) {
+    const lod = result.finalLod;
+    lines.push('');
+    lines.push(`FINAL CREATURE LOD · ${lod.mode.toUpperCase()} · effective ${lod.effective.textureEnd.toFixed(2)} / ${lod.effective.solidEnd.toFixed(2)} / ${lod.effective.proceduralStart.toFixed(2)} / ${lod.effective.proceduralOnly.toFixed(2)} m`);
+    lines.push(`  adaptive level ${lod.adaptive.level}, ${lod.adaptive.fps.toFixed(1)} fps, ${lod.adaptive.acceptedFrames} measured frames`);
+  }
 
   lines.push('');
   lines.push('INSECTS AT EACH THRESHOLD');
@@ -1145,9 +1166,22 @@ export function stressReport(result: StressResult, conditions: StressConditions)
   lines.push(`  build      ${conditions.build}`);
   lines.push(`  when       ${conditions.stamp}`);
   lines.push(`  viewport   ${conditions.viewport}`);
+  const bands = conditions.lod?.baseline;
   lines.push(`  rigs       ${conditions.rigs === 'all'
     ? 'ALL — every body the full textured model, distance ignored, no budget'
-    : 'LOD — textured to 0.3 m, solid colour to 0.6 m, impostor past it, no budget'}`);
+    : bands === undefined
+      ? 'LOD — textured to 0.3 m, solid colour to 0.6 m, impostor past it, no budget'
+      : `LOD — texture to ${bands.textureEnd.toFixed(2)} m, solid to ${bands.proceduralStart.toFixed(2)} m, procedural past ${bands.proceduralOnly.toFixed(2)} m, no budget`}`);
+  const lod = conditions.lod;
+  if (lod !== undefined) {
+    const b = lod.baseline;
+    const e = lod.effective;
+    lines.push(`  creature LOD ${lod.mode.toUpperCase()} · baseline ${b.textureEnd.toFixed(2)} / ${b.solidEnd.toFixed(2)} / ${b.proceduralStart.toFixed(2)} / ${b.proceduralOnly.toFixed(2)} m`);
+    lines.push(`               effective ${e.textureEnd.toFixed(2)} / ${e.solidEnd.toFixed(2)} / ${e.proceduralStart.toFixed(2)} / ${e.proceduralOnly.toFixed(2)} m · ${lod.adaptive.fps.toFixed(1)} fps`);
+    lines.push(lod.adaptive.bypassed || conditions.rigs === 'all'
+      ? '               Auto adaptation bypassed by explicit ALL raw mode'
+      : `               Auto level ${lod.adaptive.level} · ${lod.adaptive.acceptedFrames} measured frames (${lod.adaptive.ignoredFrames} spikes/tab/loading ignored)`);
+  }
   // THE RUNG, AND WHAT IT DOES NOT DO. It is the player's own setting
   // now (Joshua, 2026-09-11: "should be on High to match settings not
   // medium"), and on an uncapped bench it sizes no creature budget and
@@ -1194,10 +1228,15 @@ export function stressBlock(r: StressReadout): string {
     lines.push(`          ${whole(r.impostors)} impostors · ${whole(r.notDrawn)} not drawn`);
     if (r.withinFull !== null || r.withinReduced !== null) {
       // The DEMAND, by distance alone and before any budget refused it.
-      lines.push(`inside    ${whole(r.withinFull)} in 0.3 m · ${whole(r.withinReduced)} in 0.6 m`);
+      const fullDistance = r.lod?.effective.textureEnd.toFixed(2) ?? '0.3';
+      const reducedDistance = r.lod?.effective.proceduralOnly.toFixed(2) ?? '0.6';
+      lines.push(`inside    ${whole(r.withinFull)} in ${fullDistance} m · ${whole(r.withinReduced)} in ${reducedDistance} m`);
     }
   }
   lines.push(r.fps > 0 ? `fps       ${r.fps.toFixed(1)}  (${WINDOW_S} s average)` : `fps       — (filling the ${WINDOW_S} s window)`);
+  if (r.lod !== null) {
+    lines.push(`lod       ${r.lod.mode} · effective ${r.lod.effective.textureEnd.toFixed(2)} / ${r.lod.effective.solidEnd.toFixed(2)} / ${r.lod.effective.proceduralStart.toFixed(2)} / ${r.lod.effective.proceduralOnly.toFixed(2)} m`);
+  }
   lines.push(`elapsed   ${r.elapsedS.toFixed(0)} s`);
   // The rate only while it is doing anything: printed during the recovery
   // it would read as a bench still filling up, which is the one thing the

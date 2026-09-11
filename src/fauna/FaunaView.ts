@@ -233,6 +233,18 @@ import {
 } from './motion';
 import { disposeRig, dressRig, measureRig, placeholderFor, type RigAnatomy } from './rig';
 import { poseWings, wingbeatHzOf, type BoundWing } from './wings';
+import {
+  CREATURE_LOD_DEFAULTS, CreatureLodAdaptive, creatureLodSnapshot,
+  creatureLodTextureBlend, effectiveCreatureLod, sanitizeCreatureLodSettings,
+  type CreatureLodSettings, type CreatureLodSnapshot,
+} from './creatureLod';
+export {
+  CREATURE_LOD_DEFAULTS, CREATURE_LOD_LIMITS, DEFAULT_CREATURE_LOD_SETTINGS,
+  sanitizeCreatureLodSettings, sanitizeCreatureLod, creatureLodTier, creatureLodTextureBlend, creatureLodIsOrdered,
+  CreatureLodAdaptive,
+  type CreatureLodMode, type CreatureLodDistances, type CreatureLodSettings,
+  type CreatureLodAdaptiveState, type CreatureLodSnapshot,
+} from './creatureLod';
 
 /**
  * The words that ask the jaws for a bite and for a feed — booleans for
@@ -324,20 +336,19 @@ export function rigBudgetFor(rung: string): number {
  * built from, which is what makes "same solid color" true by
  * construction rather than by two tables agreeing.
  *
- * THE TEXTURE BOUNDARY IS TWO NUMBERS, because a body sitting on it
- * would otherwise strobe between textured and flat. The FADE needs no
- * hysteresis: it is continuous in distance, so there is no latch to
- * flicker — at 0.5 m the mesh is whole, at 0.6 m it is gone, and every
- * step between is a fraction of each.
+ * THE TEXTURE TRANSITION IS TWO NUMBERS: the textured shader blends to the
+ * matching solid colour between them. There is no latch or history-dependent
+ * band: at the first endpoint the texture is whole, at the second it is
+ * fully solid, and every step between is a fraction of each.
  *
  * GAME TUNING, his numbers, ±7% on the one boundary that latches.
  */
-export const TEXTURED_IN = unitsOfMetres(0.28);
-export const TEXTURED_OUT = unitsOfMetres(0.32);
+export const TEXTURED_IN = unitsOfMetres(CREATURE_LOD_DEFAULTS.textureEnd);
+export const TEXTURED_OUT = unitsOfMetres(CREATURE_LOD_DEFAULTS.solidEnd);
 
 /** Where the flat model begins to give way to the impostor, and where it has finished. */
-export const FADE_FROM = unitsOfMetres(0.5);
-export const FADE_TO = unitsOfMetres(0.6);
+export const FADE_FROM = unitsOfMetres(CREATURE_LOD_DEFAULTS.proceduralStart);
+export const FADE_TO = unitsOfMetres(CREATURE_LOD_DEFAULTS.proceduralOnly);
 
 /**
  * WHO MAY HOLD A CLONE AT ALL. A body claims one at `MESH_IN` — the far
@@ -348,7 +359,7 @@ export const FADE_TO = unitsOfMetres(0.6);
  * costs a clone and never a draw call.
  */
 export const MESH_IN = FADE_TO;
-export const MESH_OUT = unitsOfMetres(0.62);
+export const MESH_OUT = unitsOfMetres(CREATURE_LOD_DEFAULTS.proceduralOnly + 0.02);
 
 /**
  * HOW MUCH OF THE BODY IS THE MESH at a distance: 1 at `FADE_FROM` and
@@ -362,10 +373,10 @@ export const MESH_OUT = unitsOfMetres(0.62);
  * line while something else is deciding tiers. A distance ramp is simply
  * true every frame: no latch, no clock, nothing to get out of step.
  */
-export function meshShare(d2: number): number {
-  if (d2 <= FADE_FROM * FADE_FROM) return 1;
-  if (d2 >= FADE_TO * FADE_TO) return 0;
-  return (FADE_TO - Math.sqrt(d2)) / (FADE_TO - FADE_FROM);
+export function meshShare(d2: number, fadeFrom: number = FADE_FROM, fadeTo: number = FADE_TO): number {
+  if (d2 <= fadeFrom * fadeFrom) return 1;
+  if (d2 >= fadeTo * fadeTo) return 0;
+  return (fadeTo - Math.sqrt(Math.max(0, d2))) / (fadeTo - fadeFrom);
 }
 
 /**
@@ -402,9 +413,10 @@ export const RIG_FAR = MESH_OUT;
  * A holder at 30 cm sorts as though it stood at 24, so a challenger has
  * to be a fifth nearer to take its place.
  *
- * The two RADII are already hysteretic (`LOD0_IN` / `LOD0_OUT`), and
- * that is the right cure for a body wandering across a line. It is the
- * wrong cure for the other way a tier is lost, which is RANK: when four
+ * The outer MESH radii are hysteretic (`MESH_IN` / `MESH_OUT`), and that is
+ * the right cure for a body wandering across the procedural line. The
+ * texture endpoints are not latches: they are a shader blend. The other way
+ * a tier is lost is RANK: when four
  * hundred animals stand inside `LOD0_IN` and thirteen may wear a rig,
  * nobody crosses a radius at all and the nearest thirteen are simply a
  * different thirteen every frame. Each swap is a fade out and a fade in,
@@ -597,6 +609,10 @@ export interface FaunaViewOptions {
   readonly groundAt?: (at: WorldPoint) => number;
   /** Visible soil ceiling, including a prepared observer section; does not move the animal. */
   readonly ceilingAt?: (at: WorldPoint) => number;
+  /** Player-facing distance bands, in metres. */
+  readonly lod?: CreatureLodSettings;
+  /** Descriptive alias for callers that prefer the full setting name. */
+  readonly lodSettings?: CreatureLodSettings;
 }
 
 /**
@@ -661,6 +677,12 @@ export interface FaunaCost {
    */
   readonly withinFull: number;
   readonly withinReduced: number;
+  /** Aggregate body counts, useful to player-facing HUDs and reports. */
+  readonly textured: number;
+  readonly solid: number;
+  readonly procedural: number;
+  /** Baseline and effective distance bands, plus the Auto controller state. */
+  readonly lod: CreatureLodSnapshot;
 }
 
 /**
@@ -811,8 +833,9 @@ function skinsOf(root: THREE.Object3D, colour: number): { skins: Skin[]; materia
     for (const m of plain) { materials.push(m); flat.push(m); }
     const textured = Array.isArray(mesh.material) ? own : own[0];
     const solid = Array.isArray(mesh.material) ? plain : plain[0];
+    const textureBlends = own.map((material) => installTextureBlend(material, colour));
     mesh.material = textured;
-    skins.push({ mesh, textured, solid });
+    skins.push({ mesh, textured, solid, textureBlends });
   });
   return { skins, materials, flat };
 }
@@ -844,11 +867,42 @@ function flatLike(source: THREE.Material, colour: number): THREE.Material {
   });
 }
 
+/**
+ * Keep the transition in one draw. The textured material remains bound while
+ * the shader mixes its sampled colour with the same lit solid colour used by
+ * the reduced material. Once the amount reaches one, `skin` binds the solid
+ * material and the texture fetch disappears altogether.
+ */
+function installTextureBlend(material: THREE.Material, colour: number): { value: number } {
+  const amount = { value: 0 };
+  const solid = new THREE.Color(colour);
+  const previous = material.onBeforeCompile;
+  const previousCacheKey = material.customProgramCacheKey.bind(material);
+  material.userData.faunaLodTextureBlend = amount;
+  material.userData.faunaLodSolidColor = solid;
+  material.customProgramCacheKey = () => `${previousCacheKey()}:fauna-lod-texture-blend-v1`;
+  material.onBeforeCompile = (shader, renderer) => {
+    previous.call(material, shader, renderer);
+    shader.uniforms.faunaLodTextureBlend = amount;
+    shader.uniforms.faunaLodSolidColor = { value: solid };
+    const declarations = 'uniform float faunaLodTextureBlend;\nuniform vec3 faunaLodSolidColor;\n';
+    shader.fragmentShader = shader.fragmentShader.replace('void main() {', `${declarations}void main() {`);
+    const mix = 'diffuseColor.rgb = mix(diffuseColor.rgb, faunaLodSolidColor, faunaLodTextureBlend);';
+    if (shader.fragmentShader.includes('#include <map_fragment>')) {
+      shader.fragmentShader = shader.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>\n${mix}`);
+    } else if (shader.fragmentShader.includes('#include <color_fragment>')) {
+      shader.fragmentShader = shader.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>\n${mix}`);
+    }
+  };
+  return amount;
+}
+
 /** One mesh of a clone and its two coats: the model's own, and the species' solid colour. */
 interface Skin {
   readonly mesh: THREE.Mesh;
   readonly textured: THREE.Material | THREE.Material[];
   readonly solid: THREE.Material | THREE.Material[];
+  readonly textureBlends: { value: number }[];
 }
 
 function wrapAngle(a: number): number {
@@ -868,6 +922,10 @@ export class FaunaView {
   private readonly groundAt: ((at: WorldPoint) => number) | null;
   private readonly ceilingAt: ((at: WorldPoint) => number) | null;
   private rung: string;
+  private lodSettings: CreatureLodSettings = { ...CREATURE_LOD_DEFAULTS };
+  private readonly lodAdaptive = new CreatureLodAdaptive();
+  private lodState = this.lodAdaptive.state();
+  private lodEffective = effectiveCreatureLod(this.lodSettings, 1);
   /** Pools the Lab has named, past the rung's budget (`setPoolSize`). Empty on the island. */
   private readonly poolOverride = new Map<CreatureId, number>();
   private readonly loads: Promise<void>[] = [];
@@ -976,6 +1034,7 @@ export class FaunaView {
     this.groundAt = options.groundAt ?? null;
     this.ceilingAt = options.ceilingAt ?? null;
     this.rung = options.rung;
+    this.setLodSettings(options.lod ?? options.lodSettings ?? CREATURE_LOD_DEFAULTS);
     this.group.name = 'fauna';
     for (const species of options.species) {
       const group = new THREE.Group();
@@ -1076,6 +1135,30 @@ export class FaunaView {
     }
   }
 
+  /** Change the player-facing bands without rebuilding models or simulation. */
+  setLodSettings(settings: CreatureLodSettings): void {
+    const next = sanitizeCreatureLodSettings(settings);
+    const changed = JSON.stringify(next) !== JSON.stringify(this.lodSettings);
+    this.lodSettings = next;
+    if (next.mode === 'manual') this.lodAdaptive.reset();
+    this.lodState = this.lodAdaptive.state(this.allRigs);
+    this.lodEffective = effectiveCreatureLod(next, next.mode === 'auto' && !this.allRigs ? this.lodState.multiplier : 1);
+    if (changed) {
+      // The allocator's latches are distance decisions. Forgetting them on a
+      // changed slider prevents a body from retaining the old band for one
+      // frame and gives the player an immediate, coherent change.
+      this.tier.clear();
+    }
+  }
+
+  setCreatureLodSettings(settings: CreatureLodSettings): void {
+    this.setLodSettings(settings);
+  }
+
+  get lod(): CreatureLodSnapshot {
+    return creatureLodSnapshot(this.lodSettings, this.lodState);
+  }
+
   get detail(): string {
     return this.rung;
   }
@@ -1087,8 +1170,27 @@ export class FaunaView {
    * in 3D, so a camera high over a lawn lends no rigs to what is under
    * it. `dt` is the clamped simulation step, never raw wall-clock.
    */
-  update(creatures: readonly CreatureState[], eye: WorldPoint, dt: number, eyeHeight: number = Number.NaN): void {
+  update(
+    creatures: readonly CreatureState[],
+    eye: WorldPoint,
+    dt: number,
+    eyeHeight: number = Number.NaN,
+    rawFrameMs: number = Number.NaN,
+  ): void {
     if (this.disposed) return;
+    const hidden = typeof document !== 'undefined' && (document.hidden || document.visibilityState === 'hidden');
+    if (!this.allRigs && Number.isFinite(rawFrameMs)) {
+      this.lodState = this.lodSettings.mode === 'auto'
+        ? this.lodAdaptive.update(rawFrameMs, rawFrameMs / 1000, { hidden })
+        : this.lodAdaptive.observe(rawFrameMs, rawFrameMs / 1000, { hidden });
+      this.lodEffective = effectiveCreatureLod(
+        this.lodSettings,
+        this.lodSettings.mode === 'auto' ? this.lodState.multiplier : 1,
+      );
+    } else {
+      this.lodState = this.lodAdaptive.state(this.allRigs);
+      this.lodEffective = effectiveCreatureLod(this.lodSettings, this.lodSettings.mode === 'auto' && !this.allRigs ? this.lodState.multiplier : 1);
+    }
     const began = now();
     const eyeLocal = this.toLocal(eye);
     if (Number.isFinite(eyeLocal.lx) && Number.isFinite(eyeLocal.lz)) {
@@ -1150,6 +1252,15 @@ export class FaunaView {
   }
 
   get cost(): FaunaCost {
+    let textured = 0;
+    let solid = 0;
+    let procedural = 0;
+    for (const slot of this.order) {
+      const id = slot.species.id;
+      textured += this.rigsLent[id] ?? 0;
+      solid += this.reducedLent[id] ?? 0;
+      procedural += this.impostors[id] ?? 0;
+    }
     return Object.freeze({
       meanMs: this.frames === 0 ? 0 : this.totalMs / this.frames,
       peakMs: this.peakMs,
@@ -1164,6 +1275,10 @@ export class FaunaView {
       reducedBudget: this.reducedBudget(),
       withinFull: this.withinFull,
       withinReduced: this.withinReduced,
+      textured,
+      solid,
+      procedural,
+      lod: this.lod,
     });
   }
 
@@ -1360,7 +1475,15 @@ export class FaunaView {
    * at the device budget the question is about.
    */
   private fullBudget(): number {
-    return this.uncapped ? Number.POSITIVE_INFINITY : this.budgetOf(fullBudgetFor(this.rung));
+    if (this.allRigs) return Number.POSITIVE_INFINITY;
+    const base = this.budgetOf(fullBudgetFor(this.rung));
+    // Auto is an adaptive capacity mode as well as a distance mode. It
+    // deliberately applies on the uncapped Lab bench so a dense run can
+    // measure the mode's real capacity; explicit ALL/raw remains infinite.
+    if (this.lodSettings.mode === 'auto') {
+      return Math.max(1, Math.floor(base * this.lodState.rigBudgetMultiplier));
+    }
+    return this.uncapped ? Number.POSITIVE_INFINITY : base;
   }
 
   /**
@@ -1374,7 +1497,11 @@ export class FaunaView {
    */
   private reducedBudget(): number {
     if (this.allRigs) return 0;
-    return this.uncapped ? Number.POSITIVE_INFINITY : reducedBudgetFor(this.rung);
+    const base = this.budgetOf(reducedBudgetFor(this.rung));
+    if (this.lodSettings.mode === 'auto') {
+      return Math.max(1, Math.floor(base * this.lodState.rigBudgetMultiplier));
+    }
+    return this.uncapped ? Number.POSITIVE_INFINITY : base;
   }
 
   /**
@@ -1406,6 +1533,8 @@ export class FaunaView {
    */
   setAllRigs(on: boolean): void {
     this.allRigs = on;
+    this.lodState = this.lodAdaptive.state(on);
+    this.lodEffective = effectiveCreatureLod(this.lodSettings, this.lodSettings.mode === 'auto' && !on ? this.lodState.multiplier : 1);
   }
 
   /** A rung number, or the sum the Lab named instead of it. */
@@ -1678,6 +1807,13 @@ export class FaunaView {
   private allocate(creatures: readonly CreatureState[]): void {
     const full = this.fullBudget();
     const reduced = this.reducedBudget();
+    const texturedIn = unitsOfMetres(this.lodEffective.textureEnd);
+    // The ordered slider pair defines a continuous shader blend. The full
+    // mesh is retained through `solidEnd`; only the procedural outer pair
+    // below is history-dependent.
+    const texturedOut = unitsOfMetres(this.lodEffective.solidEnd);
+    const meshIn = unitsOfMetres(this.lodEffective.proceduralOnly);
+    const meshOut = unitsOfMetres(this.lodEffective.proceduralOnly + 0.02);
     const list = this.eligible;
     list.length = 0;
     for (const slot of this.order) {
@@ -1688,21 +1824,20 @@ export class FaunaView {
       // (`setPoolSize`), and a bench answering that question about a
       // one-metre room cannot have its skeletons taken away at 0.85 m.
       const gated = !this.allRigs && !this.poolOverride.has(slot.species.id);
-      // EVERY LATCHING BOUNDARY IS TWO NUMBERS: a body reaches for a
-      // clone at MESH_IN and only gives it up at MESH_OUT, so what it
-      // already holds is part of the question.
-      const wants = gated ? MESH_IN * MESH_IN : Infinity;
-      const keeps = gated ? MESH_OUT * MESH_OUT : Infinity;
+      // A body reaches for a clone at MESH_IN and only gives it up at
+      // MESH_OUT. The texture transition itself is not latched: the full
+      // mesh is retained through SOLID_END so its shader can blend.
+      const wants = gated ? meshIn * meshIn : Infinity;
+      const keeps = gated ? meshOut * meshOut : Infinity;
       for (const i of slot.candidates) {
         const d2 = this.d2[i];
-        const has = this.tier.get(creatures[i].id) ?? 0;
         // THE DEMAND, before a budget has refused any of it. Counted on
         // the RADII alone and for every species alike, so the HUD can
         // say whether a near ellipsoid is the ladder finding nobody
         // closer or the ladder having nothing left to give.
-        if (d2 <= TEXTURED_IN * TEXTURED_IN) this.withinFull += 1;
-        if (d2 <= MESH_IN * MESH_IN) this.withinReduced += 1;
-        if (d2 <= wants || (d2 <= keeps && has > 0)) list.push(i);
+        if (d2 <= texturedIn * texturedIn) this.withinFull += 1;
+        if (d2 <= meshIn * meshIn) this.withinReduced += 1;
+        if (d2 <= wants || d2 <= keeps) list.push(i);
       }
     }
     list.sort(this.byNearest);
@@ -1715,10 +1850,10 @@ export class FaunaView {
     for (const idx of list) {
       const d2 = this.d2[idx];
       const gated = !this.allRigs && !this.poolOverride.has(creatures[idx].species);
-      const has = this.tier.get(creatures[idx].id) ?? 0;
-      // Keeping its TEXTURE is easier than winning it back: TEXTURED_IN
-      // to reach, TEXTURED_OUT to hold.
-      const wantsFull = !gated || d2 <= (has === 1 ? TEXTURED_OUT * TEXTURED_OUT : TEXTURED_IN * TEXTURED_IN);
+      // The full mesh owns the whole texture-to-solid transition. This is a
+      // distance-only decision: no previous tier may turn the blend into an
+      // instant material swap or widen the band.
+      const wantsFull = !gated || d2 <= texturedOut * texturedOut;
       if (wantsFull && fulls < full) { this.rigged[idx] = 1; fulls += 1; continue; }
       if (reduceds < reduced) { this.rigged[idx] = 2; reduceds += 1; continue; }
       this.rigged[idx] = 0;
@@ -1744,13 +1879,10 @@ export class FaunaView {
     }
 
     // EVERY MARK, not the first `fulls + reduceds` of the list. The two
-    // are usually the same set and are not always: `wantsFull` reaches
-    // for `TEXTURED_OUT` when the body already holds a textured rig and
-    // for `TEXTURED_IN` when it does not, so one a little further out can
-    // be marked after a nearer body has been passed over. Walking a
-    // prefix then stopped short of it — the mark was spent and no mesh
-    // was ever lent against it. The list is still nearest-first, so a
-    // donor found below is still always further off than its claimant.
+    // are usually the same set and are not always: a body can be marked for
+    // the full texture-to-solid band while a nearer one is passed over, so
+    // a prefix would spend the mark and never lend its mesh. The list is
+    // still nearest-first, so a donor found below is always further off.
     for (const idx of list) {
       if (this.rigged[idx] === 0) continue;
       const c = creatures[idx];
@@ -1803,7 +1935,11 @@ export class FaunaView {
         // define, or a body past 0.6 m would dissolve out of a run whose
         // whole question is how many models the phone can hold.
         const gated = !this.allRigs && !this.poolOverride.has(c.species);
-        const now = this.rigged[i] === 0 ? 0 : gated ? meshShare(this.d2[i]) : 1;
+        const now = this.rigged[i] === 0 ? 0 : gated ? meshShare(
+          this.d2[i],
+          unitsOfMetres(this.lodEffective.proceduralStart),
+          meshIn,
+        ) : 1;
         if (now <= 0) { this.tier.delete(c.id); this.fades.set(c.id, 0); this.release(rig); continue; }
         this.fades.set(c.id, now);
         // NEXT FRAME'S QUESTION NEEDS THIS FRAME'S ANSWER: which side of
@@ -1815,19 +1951,21 @@ export class FaunaView {
   }
 
   /**
-   * WHICH COAT THIS CLONE WEARS THIS FRAME — the model's own textures
-   * inside `TEXTURED_OUT`, the species' solid colour beyond it.
+   * WHICH COAT THIS CLONE WEARS THIS FRAME. Full-tier bodies use one
+   * textured draw and continuously mix it toward the matching solid colour
+   * across the two endpoints; reduced-tier bodies bind the solid material.
    *
    * Swapping a material REFERENCE is free; swapping a material's `map`
-   * is a shader recompile and a hitch. So both coats are built once when
-   * the clone is (`skinsOf`) and this only ever rebinds them, and only
-   * on the frame the tier actually changes.
+   * is a shader recompile and a hitch. Both coats are built once when the
+   * clone is (`skinsOf`), and the blend is a uniform update on the one draw.
    */
-  private skin(rig: Rig, textured: boolean): void {
-    const want = textured ? 'textured' : 'solid';
+  private skin(rig: Rig, textured: boolean, blend: number): void {
+    const amount = Math.max(0, Math.min(1, blend));
+    const want = textured && amount < 1 ? 'textured' : 'solid';
+    for (const s of rig.skins) for (const uniform of s.textureBlends) uniform.value = amount;
     if (rig.wearing === want) return;
     rig.wearing = want;
-    for (const s of rig.skins) s.mesh.material = textured ? s.textured : s.solid;
+    for (const s of rig.skins) s.mesh.material = want === 'textured' ? s.textured : s.solid;
   }
 
   /**
@@ -1929,7 +2067,13 @@ export class FaunaView {
       // nothing is a draw call: the clone is kept (that is the
       // hysteresis) and the mesh is not submitted.
       if ((this.fades.get(rig.holder) ?? 0) <= 0) { rig.root.visible = false; leaving += 1; continue; }
-      this.skin(rig, full);
+      const blend = full && !this.allRigs && !this.poolOverride.has(slot.species.id)
+        ? creatureLodTextureBlend(
+          Math.sqrt(Math.max(0, this.d2[rig.creature])) / unitsOfMetres(1),
+          this.lodEffective,
+        )
+        : 0;
+      this.skin(rig, full, blend);
       this.pose(slot, rig, creatures[rig.creature], dt);
       rig.root.visible = true;
       // COUNTED BY THE TIER IT IS ON, not by the clone it happens to be

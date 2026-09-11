@@ -61,6 +61,7 @@ import type { CameraReadout } from './FreeFlyCamera';
 import type { FrameSummary } from './FrameStats';
 import type { LayerToggle } from './layerToggles';
 import { compassBearing, compassWord } from '../world/coords';
+import type { CreatureLodSnapshot } from '../fauna/creatureLod';
 
 /** DOM refreshes per second. */
 export const HUD_HZ = 5;
@@ -293,6 +294,11 @@ export interface CreaturesReadout {
   readonly drawMs: number;
   /** Rigs the renderer currently has posed. */
   readonly rigs: number;
+  /** Body census and effective distance state from the shared fauna view. */
+  readonly textured?: number;
+  readonly solid?: number;
+  readonly procedural?: number;
+  readonly lod?: CreatureLodSnapshot | null;
   /** The resource layer's sites inside the bubble, and how many of them are water edges. Null when the layer is off. */
   readonly resources: { readonly sites: number; readonly waterEdges: number } | null;
   /** The terrain-edit seam: whether this build has one, and bores that actually changed soil. */
@@ -700,7 +706,7 @@ export function finderWords(f: FinderReadout | null): string {
 }
 
 /**
- * The creatures' six lines, or the honest absence of them: all empty
+ * The creatures' seven lines, or the honest absence of them: all empty
  * while the hook has nothing built to report, because a species line
  * reading `worms 0 of 40` about a simulation that does not exist yet
  * would be a count nobody took. Each line is held to
@@ -708,8 +714,11 @@ export function finderWords(f: FinderReadout | null): string {
  * at ultra-high, and the cost line's worst case is handled in
  * `costWords`.
  */
-function creatureWords(c: CreaturesReadout | null): readonly [string, string, string, string, string, string] {
-  if (c === null) return ['', '', '', '', '', ''];
+function creatureWords(c: CreaturesReadout | null): readonly [string, string, string, string, string, string, string] {
+  if (c === null) return ['', '', '', '', '', '', ''];
+  const lodWords = c.lod === undefined || c.lod === null
+    ? 'lod unavailable'
+    : `${c.lod.mode} ${c.lod.adaptive.fps.toFixed(0)}fps · eff ${c.lod.effective.textureEnd.toFixed(2)}/${c.lod.effective.solidEnd.toFixed(2)}/${c.lod.effective.proceduralStart.toFixed(2)}/${c.lod.effective.proceduralOnly.toFixed(2)}m · ${c.textured ?? c.rigs}/${c.solid ?? 0}/${c.procedural ?? 0}`;
   return [
     speciesWords('worms', c.worms),
     speciesWords('aphids', c.aphids),
@@ -723,6 +732,7 @@ function creatureWords(c: CreaturesReadout | null): readonly [string, string, st
     // terrain editor, the worm's bores go to a no-op, and the sheet
     // says so rather than printing how many times nothing happened.
     c.ground.built ? `ground edits ${compact(c.ground.applied)}` : 'ground edits off',
+    lodWords,
   ];
 }
 
@@ -755,7 +765,7 @@ export class PerfHud {
   /** The plant families' line: built with the `objects()` hook, in CAMERA with the ecology block. */
   private readonly plantsLine: HTMLElement | null;
   /** Built only when the owner offers a `creatures()` hook; null otherwise. In CAMERA — see the header. */
-  private readonly creatureLines: readonly [HTMLElement, HTMLElement, HTMLElement, HTMLElement, HTMLElement, HTMLElement] | null;
+  private readonly creatureLines: readonly [HTMLElement, HTMLElement, HTMLElement, HTMLElement, HTMLElement, HTMLElement, HTMLElement] | null;
   private readonly boxes = new Map<WorldLayerId, HTMLInputElement>();
   /** Each layer row's wrapper and its text node, so the label can follow the model. */
   private readonly rows = new Map<string, { wrap: HTMLElement; text: Text }>();
@@ -858,7 +868,7 @@ export class PerfHud {
     this.shadowLine = hooks.weather === undefined ? null : line(camera, 'weather-shadow');
     // THE ECOLOGY BLOCK, IN CAMERA, under the clock — the plant count
     // first, with the objects' hook it comes from, then the creatures'
-    // six. The FRAME column is already tall enough to meet the stick at
+    // seven. The FRAME column is already tall enough to meet the stick at
     // the design canvas (see the header); this column is five lines and
     // the widest on the sheet, so these cost it neither height nor width.
     this.plantsLine = hooks.objects === undefined ? null : line(camera, 'veg-plants');
@@ -867,7 +877,7 @@ export class PerfHud {
       ? null
       : [
         line(camera, 'eco-worms'), line(camera, 'eco-aphids'), line(camera, 'eco-flies'),
-        line(camera, 'eco-cost'), line(camera, 'eco-resources'), line(camera, 'eco-ground'),
+        line(camera, 'eco-cost'), line(camera, 'eco-resources'), line(camera, 'eco-ground'), line(camera, 'eco-lod'),
       ];
     // Before LAYERS, which is a column of rows rather than a readout and
     // reads best last.

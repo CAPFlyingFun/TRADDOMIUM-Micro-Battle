@@ -130,6 +130,7 @@ import {
 } from './PerfHud';
 import { BUILT_LAYERS, LayerToggles } from './layerToggles';
 import { PERF_WORLD_SCENE_ID } from './perfTool';
+import type { CreatureLodSettings } from '../fauna/creatureLod';
 
 /**
  * The finder's word for each species: the SINGULAR, because its line
@@ -209,6 +210,8 @@ export interface PerfWorldSettings {
    */
   readonly textures: 'low' | 'medium' | 'high';
   readonly detail: 'low' | 'medium' | 'high';
+  /** Player-facing creature distance bands and Manual/Auto mode. */
+  readonly creatureLod?: CreatureLodSettings;
 }
 
 export interface PerformanceWorldHooks {
@@ -297,7 +300,7 @@ export interface PerformanceWorldHooks {
    * returning from it is a state change — so no event bus is needed and
    * the document is not parsed every frame. Absent: the scene's defaults.
    */
-  settings?(): PerfWorldSettings;
+     settings?(): PerfWorldSettings;
   /**
    * The player folded or unfolded the perf HUD by its corner button. The
    * scene never writes settings itself (perf/ may not import ui/); the
@@ -1400,6 +1403,7 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
             const ready = soilDepth > 0 && soilView?.readyTiles.some(t => t.tx === Math.floor(at.wx / SOIL_TILE) && t.tz === Math.floor(at.wz / SOIL_TILE));
             return ground.heightAt(at) - (ready ? soilDepth : 0);
           },
+          lod: hooks.settings?.()?.creatureLod,
         });
         // The rigs load in the background; the impostors carry the
         // animals until they arrive, and a rig that never arrives is a
@@ -1507,13 +1511,13 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
      * after the camera whatever dt is, so a paused world still fills in
      * around a flying eye the way the objects do.
      */
-    const updateCreatures = (dt: number): void => {
+    const updateCreatures = (dt: number, rawFrameMs: number = Number.NaN): void => {
       if (creatures === null) return;
       syncCreatureLayers();
       const pose = fly.pose();
       creatures.update(pose.at, dt);
       // Drawn AFTER they moved, at where they are this frame.
-      if (fauna !== null) fauna.update(creatures.creatures(), pose.at, dt, pose.height);
+      if (fauna !== null) fauna.update(creatures.creatures(), pose.at, dt, pose.height, rawFrameMs);
       // And the pins over them, from the same list, at the size the
       // camera's own field and the viewport make PIN_PIXELS. Off, this
       // is one `visible` check.
@@ -2283,6 +2287,7 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         finderOn = s.finderOn;
         finder?.setEnabled(finderOn);
       }
+      if (s.creatureLod !== undefined) fauna?.setLodSettings(s.creatureLod);
       // The sea is a compiled program and a loaded texture per tier, so
       // a changed quality setting is a rebuild. No-ops when it has not
       // changed, which is every state change but the one that did.
@@ -2471,6 +2476,10 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
             moveMs: cost.moveMs,
             drawMs: fauna === null ? 0 : fauna.cost.meanMs,
             rigs: fauna === null ? 0 : CREATURE_IDS.reduce((sum, id) => sum + (fauna?.cost.rigsLent[id] ?? 0), 0),
+            lod: fauna?.cost.lod ?? null,
+            textured: fauna?.cost.textured ?? 0,
+            solid: fauna?.cost.solid ?? 0,
+            procedural: fauna?.cost.procedural ?? 0,
             resources: resourcesOn && resources !== null ? { sites, waterEdges } : null,
             ground: { built: sim.burrows.editor.built, applied: sim.burrows.applied },
           };
@@ -2755,7 +2764,7 @@ export function createPerformanceWorldScene(hooks: PerformanceWorldHooks): Scene
         updateFresh(frame.simDt);
         updateObjects();
         updateResources(frame.simDt);
-        updateCreatures(frame.simDt);
+        updateCreatures(frame.simDt, frame.rawDt * 1000);
         updateSoil();
         // AFTER the ocean, so the swell it asks about is this frame's.
         adaptWater();

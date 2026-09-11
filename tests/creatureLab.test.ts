@@ -946,12 +946,12 @@ describe('the stress test on the bench (Joshua, 2026-09-10)', () => {
     expect(cappedAt(text, 'textured')).toBe(-1);
     expect(cappedAt(text, 'solid colour')).toBe(-1);
     // The bench camera is 0.56 m from the middle of a 1 m room, so the
-    // far half of it is past 0.6 m: there are ellipsoids, and there are
+    // far half of it is past 0.46 m: there are ellipsoids, and there are
     // bodies wearing the model in its own colours as well.
     expect(impostors).toBeGreaterThan(0);
     expect(textured + solid).toBeGreaterThan(0);
     expect(textured + solid + impostors).toBeLessThanOrEqual(placedTotal(r));
-    expect(text).toContain('LOD — textured to 0.3 m, solid colour to 0.6 m, impostor past it, no budget');
+    expect(text).toContain('LOD — texture to 0.20 m, solid to 0.40 m, procedural past 0.46 m, no budget');
   });
 
   it('THE REPORT SAYS WHAT THE LADDER WAS ALLOWED, not only what it spent', async () => {
@@ -975,9 +975,9 @@ describe('the stress test on the bench (Joshua, 2026-09-10)', () => {
     // budget refused them. The bench camera stands outside its own room,
     // so LOD0's count may honestly be zero — what may not happen is the
     // line being absent, which is the state that could not be diagnosed.
-    expect(text).toMatch(/^ {2}inside 0\.3 m {8}\d+ {3}\(wanted its own textures\)$/m);
-    expect(text).toMatch(/^ {2}inside 0\.6 m {8}\d+ {3}\(wanted the model at all\)$/m);
-    expect(reported(text, 'inside 0.6 m')).toBeGreaterThanOrEqual(reported(text, 'inside 0.3 m'));
+    expect(text).toMatch(/^ {2}inside 0\.20 m\s+\d+\s+\(wanted its own textures\)$/m);
+    expect(text).toMatch(/^ {2}inside 0\.46 m\s+\d+\s+\(wanted the model at all\)$/m);
+    expect(reported(text, 'inside 0.46 m')).toBeGreaterThanOrEqual(reported(text, 'inside 0.20 m'));
   });
 
   it('MEASURES AT THE RUNG THE PLAYER PLAYS AT, not at a constant in this file', async () => {
@@ -1032,7 +1032,7 @@ describe('the stress test on the bench (Joshua, 2026-09-10)', () => {
     // And the ladder is still a ladder: what is drawn cheaply is drawn
     // cheaply because of where it stands, not because a table ran out.
     expect(reported(text, 'textured')).toBeGreaterThanOrEqual(0);
-    expect(reported(text, 'inside 0.6 m')).toBeGreaterThanOrEqual(reported(text, 'inside 0.3 m'));
+    expect(reported(text, 'inside 0.46 m')).toBeGreaterThanOrEqual(reported(text, 'inside 0.20 m'));
   });
 
   // ─── the species pool (Joshua, 2026-09-10: workers only, queens only,

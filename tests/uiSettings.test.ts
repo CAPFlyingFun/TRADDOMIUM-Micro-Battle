@@ -67,7 +67,7 @@ describe('settings sanitize', () => {
     const s = sanitizeSettings({ version: 7, fov: 70, terrainRelief: 1.5, showFix: true });
     expect(s).toEqual({ ...SETTINGS_DEFAULTS, fov: 70, version: SETTINGS_VERSION });
     expect(Object.keys(s).sort()).toEqual([
-      'cameraSpeed', 'detail', 'finderOn', 'fov', 'hudCollapsed', 'invertY', 'lookSensitivity', 'showFps',
+      'cameraSpeed', 'creatureLod', 'detail', 'finderOn', 'fov', 'hudCollapsed', 'invertY', 'lookSensitivity', 'showFps',
       'textures', 'timeOfDay', 'version',
     ]);
   });
@@ -80,7 +80,7 @@ describe('settings store round trip', () => {
     expect(store.read()).toEqual(SETTINGS_DEFAULTS);
     const written = {
       version: SETTINGS_VERSION, fov: 95, lookSensitivity: 1.75, invertY: true, textures: 'high', detail: 'high', showFps: false,
-      hudCollapsed: true, finderOn: true, cameraSpeed: 'slow', timeOfDay: 13.25,
+      hudCollapsed: true, finderOn: true, cameraSpeed: 'slow', timeOfDay: 13.25, creatureLod: SETTINGS_DEFAULTS.creatureLod,
     } as const;
     store.write(written);
     expect(store.read()).toEqual(written);

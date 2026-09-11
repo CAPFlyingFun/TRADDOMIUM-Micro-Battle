@@ -17,6 +17,10 @@ import {
   CAMERA_SPEED_LEVELS, QUALITY_LEVELS, SETTINGS_LIMITS, sanitizeSettings,
   type CameraSpeed, type Quality, type Settings,
 } from './settingsStore';
+import {
+  CREATURE_LOD_DEFAULTS, CREATURE_LOD_LIMITS, sanitizeCreatureLodSettings,
+  type CreatureLodSettings,
+} from '../fauna/creatureLod';
 
 export interface SettingsPanelHooks {
   /** The settings document. The panel is its only writer but one: the perf world writes `hudCollapsed` from the HUD's own button. */
@@ -29,6 +33,8 @@ export function settingAction(field: keyof Omit<Settings, 'version'>): string {
 }
 
 export const SETTING_RESET_ACTION = 'setting:reset';
+export const CREATURE_LOD_RESET_ACTION = 'setting:creatureLod:reset';
+export const SETTING_COPY_ACTION = 'setting:copy';
 
 const QUALITY_LABEL: Readonly<Record<Quality, string>> = {
   low: 'Low',
@@ -54,6 +60,10 @@ export class SettingsPanel {
   /** One per control: pushes the current document back into the DOM. */
   private readonly syncs: Array<(s: Settings) => void> = [];
 
+  private lodOf(s: Settings): CreatureLodSettings {
+    return s.creatureLod ?? CREATURE_LOD_DEFAULTS;
+  }
+
   constructor(host: HTMLElement, private readonly hooks: SettingsPanelHooks) {
     this.current = hooks.store.read();
     this.element = titledPanel(host, 'Settings');
@@ -61,9 +71,11 @@ export class SettingsPanel {
     this.buildRange('lookSensitivity', 'Look sensitivity', (v) => `${v.toFixed(2)}×`);
     this.buildSwitch('invertY', 'Invert look up/down');
     this.buildQuality();
+    this.buildCreatureLod();
     this.buildSwitch('showFps', 'Show frame rate');
     actionsRow(this.element, [
       namedButton(SETTING_RESET_ACTION, 'Reset to defaults', () => this.write(sanitizeSettings(undefined)), { compact: true }),
+      namedButton(SETTING_COPY_ACTION, 'Copy settings', () => { void this.copySettings(); }, { compact: true }),
       actionRow(ACTION.back, 'Back', () => this.hooks.onBack(), { compact: true }),
     ]);
     this.sync();
@@ -176,6 +188,92 @@ export class SettingsPanel {
     });
     labelledRow(this.element, 'Camera speed', [select]);
     note(this.element, 'The fastest a full push of the move stick flies. A gentle push is 1 m/s whichever you choose — this sets the top of the range, not the whole of it.');
+  }
+
+  /**
+   * The four bands are one ordered ladder, not independent quality sliders.
+   * Their min/max values follow their neighbours and the store sanitizes the
+   * write as a second guard for keyboard edits or a tampered document.
+   */
+  private buildCreatureLod(): void {
+    this.buildCreatureRange('textureEnd', 'Texture ends', (v) => `${v.toFixed(2)} m`, 'Textured model ends');
+    this.buildCreatureRange('solidEnd', 'Solid transition ends', (v) => `${v.toFixed(2)} m`, 'Solid animated model is complete');
+    this.buildCreatureRange('proceduralStart', 'Procedural fade starts', (v) => `${v.toFixed(2)} m`, 'Solid model starts fading');
+    this.buildCreatureRange('proceduralOnly', 'Procedural only', (v) => `${v.toFixed(2)} m`, 'No real model or animation beyond this');
+    const mode = this.element.ownerDocument.createElement('select');
+    mode.className = 'ui-select';
+    mode.dataset.action = 'setting:creatureLod.mode';
+    mode.setAttribute('aria-label', 'Creature detail adaptation');
+    for (const value of ['manual', 'auto'] as const) {
+      const option = this.element.ownerDocument.createElement('option');
+      option.value = value;
+      option.textContent = value === 'auto' ? 'Auto — adapt for lower-end devices' : 'Manual';
+      mode.appendChild(option);
+    }
+    mode.addEventListener('change', () => {
+      this.write({ ...this.current, creatureLod: sanitizeCreatureLodSettings({ ...this.lodOf(this.current), mode: mode.value }) });
+    });
+    this.syncs.push((s) => { mode.value = this.lodOf(s).mode; });
+    labelledRow(this.element, 'Creature detail mode', [mode]);
+    note(this.element, 'Auto uses sustained frame times to move the effective bands inward on slower devices, then recovers gradually. Your baseline distances never change.');
+    const reset = namedButton(CREATURE_LOD_RESET_ACTION, 'Reset creature distances', () => {
+      this.write({ ...this.current, creatureLod: { ...CREATURE_LOD_DEFAULTS } });
+    }, { compact: true });
+    labelledRow(this.element, 'Creature detail', [reset]);
+  }
+
+  private buildCreatureRange(
+    field: keyof Omit<CreatureLodSettings, 'mode'>,
+    label: string,
+    show: (v: number) => string,
+    description: string,
+  ): void {
+    const doc = this.element.ownerDocument;
+    const input = doc.createElement('input');
+    input.type = 'range';
+    input.className = 'ui-range';
+    input.dataset.action = `setting:creatureLod.${field}`;
+    input.step = String(CREATURE_LOD_LIMITS.step);
+    input.setAttribute('aria-label', label);
+    const readout = doc.createElement('span');
+    readout.className = 'ui-readout';
+    input.addEventListener('input', () => {
+      this.write({
+        ...this.current,
+        creatureLod: sanitizeCreatureLodSettings({ ...this.lodOf(this.current), [field]: Number(input.value) }),
+      });
+    });
+    this.syncs.push((s) => {
+      const lod = this.lodOf(s);
+      const index = ['textureEnd', 'solidEnd', 'proceduralStart', 'proceduralOnly'].indexOf(field);
+      const values = [lod.textureEnd, lod.solidEnd, lod.proceduralStart, lod.proceduralOnly];
+      input.min = String(index === 0 ? CREATURE_LOD_LIMITS.min : values[index - 1] + CREATURE_LOD_LIMITS.step);
+      input.max = String(index === values.length - 1 ? CREATURE_LOD_LIMITS.max : values[index + 1] - CREATURE_LOD_LIMITS.step);
+      input.value = String(lod[field]);
+      readout.textContent = show(lod[field]);
+    });
+    labelledRow(this.element, label, [input, readout]);
+    note(this.element, description);
+  }
+
+  private async copySettings(): Promise<void> {
+    const text = JSON.stringify(this.current, null, 2);
+    try {
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        return;
+      }
+    } catch {
+      // Fall through to the DOM copy path on permission-denied browsers.
+    }
+    const area = this.element.ownerDocument.createElement('textarea');
+    area.value = text;
+    area.setAttribute('aria-hidden', 'true');
+    area.style.position = 'fixed';
+    area.style.opacity = '0';
+    this.element.ownerDocument.body.appendChild(area);
+    area.select();
+    try { this.element.ownerDocument.execCommand('copy'); } finally { area.remove(); }
   }
 
   private buildLadder(field: 'textures' | 'detail', label: string, caption: string): void {

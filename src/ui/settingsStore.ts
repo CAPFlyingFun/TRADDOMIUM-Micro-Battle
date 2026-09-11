@@ -11,6 +11,10 @@
  */
 import { finiteNumber, type StoreSpec, type Store, type Versioned } from '../persistence/store';
 import type { StorageRoot } from '../persistence/StorageRoot';
+import {
+  CREATURE_LOD_DEFAULTS, sanitizeCreatureLodSettings,
+  type CreatureLodSettings,
+} from '../fauna/creatureLod';
 
 export type Quality = 'low' | 'medium' | 'high';
 
@@ -50,6 +54,11 @@ export interface Settings extends Versioned {
    * over both could only ever be tuned for whichever bit first.
    */
   readonly detail: Quality;
+  /**
+   * The player-facing creature bands, in metres. FaunaView consumes the
+   * document through the scene hooks so the island and Creature Lab agree.
+   */
+  readonly creatureLod?: CreatureLodSettings;
   /** The frame-rate readout. Reader: perf/PerfHud. */
   readonly showFps: boolean;
   /**
@@ -117,6 +126,7 @@ export const SETTINGS_DEFAULTS: Settings = {
   // pass can move either axis on its own.
   textures: 'medium',
   detail: 'medium',
+  creatureLod: { ...CREATURE_LOD_DEFAULTS },
   // On while the game is being built: the only machine whose frame rate
   // matters is the one in Joshua's hand, and judging a change without the
   // readout is guessing.
@@ -173,6 +183,7 @@ export function sanitizeSettings(raw: unknown, defaults: Settings = SETTINGS_DEF
     // is exactly what that one setting used to mean.
     textures: isQuality(r.textures) ? r.textures : (isQuality(r.quality) ? r.quality : defaults.textures),
     detail: isQuality(r.detail) ? r.detail : (isQuality(r.quality) ? r.quality : defaults.detail),
+    creatureLod: sanitizeCreatureLodSettings(r.creatureLod, defaults.creatureLod ?? CREATURE_LOD_DEFAULTS),
     showFps: typeof r.showFps === 'boolean' ? r.showFps : defaults.showFps,
     // No SETTINGS_VERSION bump: a new field with a default reads an older document as it was, plus the default.
     hudCollapsed: typeof r.hudCollapsed === 'boolean' ? r.hudCollapsed : defaults.hudCollapsed,

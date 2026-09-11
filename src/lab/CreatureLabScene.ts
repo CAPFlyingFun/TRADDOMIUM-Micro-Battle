@@ -124,6 +124,7 @@ import {
   nextStressPool, stressPoolWords, type LabAction, type LabCameraMode, type LabRigMode, type StressPool,
 } from './labTool';
 import { StressTest, stressBlock, stressReport, type StressConditions, type StressPhase, type StressSample } from './stressTest';
+import type { CreatureLodSettings, CreatureLodSnapshot } from '../fauna/creatureLod';
 
 // ---------------------------------------------------------------------------
 // Hooks
@@ -163,7 +164,7 @@ export interface CreatureLabHooks {
    * caps, and a rung that changed under a running measurement would make
    * the measurement about the change.
    */
-  settings?(): { readonly detail?: 'low' | 'medium' | 'high' } | null;
+  settings?(): { readonly detail?: 'low' | 'medium' | 'high'; readonly creatureLod?: CreatureLodSettings } | null;
 }
 
 export type CreatureLabWire = (ctx: SceneContext) => CreatureLabHooks;
@@ -566,6 +567,7 @@ interface MutableSample extends StressSample {
   hidden: number;
   pastCap: number;
   farTier: number;
+  lod?: CreatureLodSnapshot;
 }
 
 /** The overlay's speed reading per creature: last place, smoothed mm/s. */
@@ -918,6 +920,7 @@ export function buildCreatureLabScene(ctx: SceneContext, hooks: CreatureLabHooks
     predation: lab.predation.toUpperCase(),
     camera: 'free, the bench viewpoint, observer',
     pool: stressPoolWords(stressPool),
+    ...(fauna === null ? {} : { lod: fauna.cost.lod }),
   });
 
   /**
@@ -951,11 +954,18 @@ export function buildCreatureLabScene(ctx: SceneContext, hooks: CreatureLabHooks
    * `stamp` is exempt — it is a clock, and it is meant to move.
    */
   const withDrift = (started: StressConditions, ended: StressConditions): StressConditions => {
-    const out = { ...started } as Record<string, string>;
-    const end = ended as unknown as Record<string, string>;
+    const out = { ...started } as Record<string, unknown>;
+    const end = ended as unknown as Record<string, unknown>;
     for (const key of Object.keys(out)) {
-      if (key === 'stamp') continue;
-      if (out[key] !== end[key]) out[key] = `${out[key]}  ⚠ CHANGED DURING THE RUN, ended ${end[key]}`;
+      // LOD's adaptive state is expected to move during an Auto run. The
+      // report keeps the start snapshot here and prints the final snapshot
+      // separately, rather than replacing this typed object with a warning
+      // string that would make stressReport unable to read its bands.
+      if (key === 'stamp' || key === 'lod') continue;
+      if (JSON.stringify(out[key]) !== JSON.stringify(end[key])) {
+        const shown = (value: unknown): string => typeof value === 'string' ? value : JSON.stringify(value);
+        out[key] = `${shown(out[key])}  ⚠ CHANGED DURING THE RUN, ended ${shown(end[key])}`;
+      }
     }
     return out as unknown as StressConditions;
   };
@@ -1072,6 +1082,7 @@ export function buildCreatureLabScene(ctx: SceneContext, hooks: CreatureLabHooks
     sample.hidden = drawn.hidden;
     sample.pastCap = drawn.pastCap;
     sample.farTier = drawn.farTier;
+    sample.lod = drawn.lod;
     return sample;
   };
 
@@ -1259,6 +1270,7 @@ export function buildCreatureLabScene(ctx: SceneContext, hooks: CreatureLabHooks
         loadModel: hooks.loadModel ?? assets.loadModel,
         rung: lab.rung,
         groundAt: (at) => bench.groundAt(at),
+        lod: hooks.settings?.()?.creatureLod,
       });
       // The rigs load in the background; the impostors carry the animals until they arrive.
       void fauna.ready();
@@ -1337,7 +1349,7 @@ export function buildCreatureLabScene(ctx: SceneContext, hooks: CreatureLabHooks
       measureSpeeds(frame.simDt);
       if (fauna !== null) {
         const began = now();
-        fauna.update(lab.sim.creatures(), eyeAt, frame.simDt, eyeHeight);
+        fauna.update(lab.sim.creatures(), eyeAt, frame.simDt, eyeHeight, frame.rawDt * 1000);
         animMs = now() - began;
       }
 
