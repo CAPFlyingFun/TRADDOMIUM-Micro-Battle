@@ -662,8 +662,15 @@ describe('the stress test on the bench (Joshua, 2026-09-10)', () => {
   /** A `  label   N` line of the report, or −1 when the block is not printed at all. */
   const reported = (text: string, label: string): number => {
     // A trailing note is allowed: several of these lines say what the
-    // tier IS beside its number ("(animated every frame)").
-    const found = new RegExp(`^ {2}${label} +(\\d+)(?: {2,}\\(.*\\))?$`, 'm').exec(text);
+    // tier IS beside its number ("(animated every frame)"). And the two
+    // mesh tiers print against their CAP — `13/13` — so the count is the
+    // first half of what may be a pair.
+    const found = new RegExp(`^ {2}${label} +(\\d+)(?:/\\d+)?(?: {2,}\\(.*\\))?$`, 'm').exec(text);
+    return found === null ? -1 : Number(found[1]);
+  };
+  /** The CAP beside a reported count, or -1 where the line prints none. */
+  const cappedAt = (text: string, label: string): number => {
+    const found = new RegExp(`^ {2}${label} +\\d+/(\\d+)(?: {2,}\\(.*\\))?$`, 'm').exec(text);
     return found === null ? -1 : Number(found[1]);
   };
   /**
@@ -893,7 +900,7 @@ describe('the stress test on the bench (Joshua, 2026-09-10)', () => {
     // THE LIVE LINE, while the crowd is arriving. At RIGS: ALL every drawn
     // body carries a skeleton, so the impostor half of the split is zero —
     // and that zero is a count, not the absence of one.
-    const live = /^drawn +(\d+) rigs · (\d+) reduced$/m.exec(panel(r));
+    const live = /^drawn +(\d+)(?:\/\d+)? rigs · (\d+)(?:\/\d+)? reduced$/m.exec(panel(r));
     expect(live, `the live block should carry a drawn line:\n${panel(r)}`).not.toBeNull();
     const shownRigs = Number(must(live, 'the live census')[1]);
     expect(shownRigs).toBeGreaterThan(LAB_CREATURE_IDS.length);
@@ -939,6 +946,52 @@ describe('the stress test on the bench (Joshua, 2026-09-10)', () => {
     expect(rigs + impostors).toBeGreaterThan(pools);
     expect(rigs + impostors).toBeLessThanOrEqual(placedTotal(r));
     expect(text).toContain('RUNG (medium)');
+  });
+
+  it('THE REPORT SAYS WHAT THE LADDER WAS ALLOWED, not only what it spent', async () => {
+    // Joshua, 2026-09-10, with 1,077 insects in the one-metre room: "LOD
+    // still not correct and rendering as a procedural too close". The
+    // centre was right, the radii were right, and the ladder had spent
+    // thirteen of thirteen full rigs with hundreds of bodies inside the
+    // radius asking for one — which the bench printed as a bare "13".
+    const r = await entered();
+    r.press(LAB_ACTION.rigs);
+    r.press(LAB_ACTION.stress);
+    r.frame(60 * (SETTLE_S + WINDOW_S + 20));
+    const { text } = settle(r);
+    // THE CAP, beside the count, on both mesh tiers.
+    expect(cappedAt(text, 'full rigs')).toBe(rigBudgetFor(LAB_RUNG_NAME));
+    expect(cappedAt(text, 'reduced')).toBe(rigBudgetFor(LAB_RUNG_NAME) * 2);
+    // AND THE DEMAND: how many were inside each tier's radius before any
+    // budget refused them. The bench camera stands outside its own room,
+    // so LOD0's count may honestly be zero — what may not happen is the
+    // line being absent, which is the state that could not be diagnosed.
+    expect(text).toMatch(/^ {2}inside LOD0 {9}\d+ {3}\(wanted a full rig\)$/m);
+    expect(text).toMatch(/^ {2}inside LOD1 {9}\d+ {3}\(wanted the mesh\)$/m);
+    expect(reported(text, 'inside LOD1')).toBeGreaterThanOrEqual(reported(text, 'inside LOD0'));
+  });
+
+  it('RIGS cycles RUNG → x2 → x4 → ALL, because thirteen was inherited and not measured', async () => {
+    // `fullBudgetFor` is the SUM OF `POOL_SIZES`, a clone-pool table
+    // sized for an island where a handful of animals are near. It is not
+    // a measurement of any phone, and the phone is the instrument — so
+    // the multiples are on the button he already has rather than in a
+    // number I would have had to guess.
+    const r = await entered();
+    expect(r.field(LAB_FIELD.rigs)).toBe(rigModeLabel('all'));
+    for (const mode of ['rung', 'rung2', 'rung4', 'all'] as const) {
+      r.press(LAB_ACTION.rigs);
+      expect(r.field(LAB_FIELD.rigs)).toBe(rigModeLabel(mode));
+    }
+    // And RUNG x2 really is twice the capacity, in the report's own words.
+    r.press(LAB_ACTION.rigs);
+    r.press(LAB_ACTION.rigs);
+    expect(r.field(LAB_FIELD.rigs)).toBe(rigModeLabel('rung2'));
+    r.press(LAB_ACTION.stress);
+    r.frame(60 * (SETTLE_S + WINDOW_S + 20));
+    const { text } = settle(r);
+    expect(cappedAt(text, 'full rigs')).toBe(rigBudgetFor(LAB_RUNG_NAME) * 2);
+    expect(cappedAt(text, 'reduced')).toBe(rigBudgetFor(LAB_RUNG_NAME) * 4);
   });
 
   // ─── the species pool (Joshua, 2026-09-10: workers only, queens only,

@@ -297,28 +297,94 @@ The pools grew to hold both tiers: 117 clones at medium against 11, and
 **22.7 ms of load time against 1.7 ms** (measured in
 `tests/faunaView.test.ts`, printed on every run). A one-time cost.
 
-### The Lab's own geometry, which the ladder does not fix
+### The Lab's own geometry — closed (alpha.45)
 
-The LOD centre is the viewer, and the bench viewpoint stands **1.00 m**
-from the centre of a 1 m room. So of that room's floor:
+The LOD centre is the viewer, and the bench viewpoint used to stand
+**1.00 m** from the centre of a 1 m room. So of that room's floor:
 
-| viewpoint | to centre | inside 0.45 m | inside 0.85 m |
-|---|---|---|---|
-| **today** (62, +48, 62) | 1.00 m | **0.0%** | 23.3% |
-| (40, +30, 40) | 0.64 m | 16.4% | 66.5% |
-| (30, +22, 30) | 0.48 m | 31.1% | 88.4% |
-| camera at the room's centre | 0.12 m | 59.1% | 100.0% |
+| viewpoint | to middle | framed | inside 0.45 m | inside 0.85 m |
+|---|---|---|---|---|
+| ~~(62, +48, 62)~~ *was* | 1.00 m | 96.5% | **0.0%** | 23.3% |
+| (45, +38, 45) | 0.74 m | 87.8% | 7.2% | 53.3% |
+| (40, +34, 40) | 0.66 m | 84.2% | 13.6% | 64.2% |
+| **(34, +28, 34)** *now* | 0.56 m | 77.0% | **23.2%** | **78.7%** |
+| (30, +24, 30) | 0.49 m | 69.3% | 29.9% | 87.9% |
 
-Not one square centimetre of the bench is inside LOD0 from where the
-observer stands. Any viewpoint with real LOD0 coverage is INSIDE the
-box, which is inherent: a 1 m room seen whole cannot also be seen from
-within half a metre of all of it.
+Framing is the frustum test against the real lens — 60° vertical at
+932 × 430, so 103° across — not an estimate. Both columns are computed
+over a 400 × 400 lattice of the floor.
 
-**This is the rule working, not a bug, and the fix is never to move the
-centre.** The LOD centre is the CAMERA — that is what the player sees,
-in first person, in third, and in observer mode — so in play the radius
-rides with the eye and covers a proper bubble around whatever the player
-is looking at. It is the Creature Lab's BENCH CAMERA that is unusual, in
-standing outside the thing it is looking at. Moving that camera is a
-product decision about what the Lab looks like, not an engineering one,
-and it is open. Anchoring the ladder to the insect instead is not.
+Not one square centimetre of the bench was inside LOD0 from where the
+observer stood. **That is the rule working, and the fix is never to move
+the centre** — the LOD centre is the CAMERA, which is what the player
+sees, in first person, in third and in observer mode, so in play the
+radius rides with the eye and covers a proper bubble around whatever the
+player is looking at. It was the Creature Lab's BENCH CAMERA that was
+unusual, in standing outside the thing it was looking at.
+
+So the bench moved. `FREE_START` now stands IN the room at 0.56 m from
+the middle, which puts 79% of the floor on a real mesh and 23% on a full
+rig, and costs 20 points of framing — you cannot stand inside a
+one-metre room and still see all four of its corners through a 103°
+lens. For a bench whose subject is the near tiers that is the better
+half of the trade; the stick reaches the rest.
+
+## What alpha.45 changed, and why B and D still are not comparable
+
+Joshua, 2026-09-10, at 1,077 insects: *"LOD still not correct and
+rendering as a procedural too close… the room is a 1 meter block and
+from the camera center needs to be the center of the sphere… where do
+you have it?"*
+
+**The centre was already the camera** and is unchanged:
+`CreatureLabScene` reads the eye off the ACTIVE camera
+(`camera.position`, follow or free) and `FaunaView.update` squares every
+creature's distance from it in 3D, height included. Four things were
+actually wrong, in descending order of what he could see:
+
+1. **The budget was binding, and nothing said so.** 13 full rigs and 26
+   frozen ones is the whole of medium's capacity, so with hundreds of
+   bodies inside LOD0's radius the fortieth-nearest drew as an
+   ellipsoid at any distance. The counts printed bare. They now print
+   against their caps — `13/13 rigs · 25/26 reduced` — with the demand
+   under them, `inside 412 at LOD0 · 998 at LOD1`. A count with no cap
+   beside it cannot tell "nothing nearer to draw" from "nothing left to
+   give", and those are opposite diagnoses.
+2. **Rank churned.** The two radii are hysteretic; RANK was not. With
+   400 bodies inside one radius and 13 rigs, nobody crosses a boundary
+   and the nearest 13 are a different 13 every frame — a fade out and a
+   fade in each time, so a stable crowd shimmers. A holder now sorts
+   from `HOLD_ADVANTAGE` (0.8) of its distance: a challenger has to be a
+   fifth nearer to take its place.
+3. **LOD1 holders were unprotected.** `spare()` tested `rigged === 1`,
+   so a body wearing the FROZEN mesh was filed with the ones fading out
+   and could lose its clone to a claimant standing further away — a
+   priority inversion in the one direction the ladder guarantees. Latent
+   at a pool equal to the budget; live the moment either moves.
+4. **The lending walked a prefix.** It served `list[0 … fulls+reduceds]`
+   rather than every marked body, and the marks are not always that
+   prefix: `wantsFull` reaches to `LOD0_OUT` for a body that already
+   holds a rig and only to `LOD0_IN` for one that does not, so a holder
+   slightly further out can be marked after a nearer body is passed
+   over. The mark was spent and no mesh was lent against it.
+
+And two things changed that move the numbers:
+
+- **The pool grows to demand.** It was cut to the whole ladder's size
+  for EVERY species up front — five pools' worth of skeletons for a
+  frame that can only lend one pool's. It now warms to `POOL_WARM` and
+  builds `POOL_GROWTH_PER_FRAME` more when an animal asks for one it
+  cannot have, to the same ceiling. A body therefore waits a few frames
+  for its mesh after a cold start, then `FADE_S` to arrive.
+- **RIGS cycles RUNG → ×2 → ×4 → ALL.** The rung's capacity is the sum
+  of `POOL_SIZES` — a clone table sized for an island where a handful of
+  animals are near — and is not a measurement of anybody's phone.
+  Rather than guess a better number, the multiples are on the button, so
+  Baseline D can find it.
+
+**LOD1's cheap material is still not built.** Joshua asked for a 64×64
+texture on the middle tier; alpha.44 and .45 ship only the frozen-bones
+half, which is the CPU half. A frozen rig still costs its draw call and
+its full skinned geometry on the GPU, so `REDUCED_PER_FULL` = 2 remains
+a guess, and by Baseline A's own slope the ceiling on TOTAL meshes is
+the GPU's, not the poser's.

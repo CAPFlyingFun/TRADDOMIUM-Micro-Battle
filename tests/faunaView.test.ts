@@ -51,9 +51,9 @@ import {
   type Behaviour, type CreatureId, type CreatureState, type Tier, type Vec3,
 } from '../src/creatures';
 import {
-  BODY_SAMPLES, BURROW_HIDE, BURROW_KEEP, CRUMBS_PER_LENGTH, FADE_S, FaunaView, LOD0_IN, LOD0_OUT, LOD1_IN, LOD1_OUT, LOOK,
-  POOL_SIZES, REDUCED_POSE_S, REVEAL_HOLD, SPINE_TOLERANCE, fullBudgetFor, impostorCapFor, poolSizeFor, reducedBudgetFor,
-  rigBudgetFor,
+  BODY_SAMPLES, BURROW_HIDE, BURROW_KEEP, CRUMBS_PER_LENGTH, FADE_S, FaunaView, HOLD_ADVANTAGE, LOD0_IN, LOD0_OUT, LOD1_IN,
+  LOD1_OUT, LOOK, POOL_SIZES, POOL_WARM, REDUCED_POSE_S, REVEAL_HOLD, SPINE_TOLERANCE, fullBudgetFor, impostorCapFor,
+  poolSizeFor, reducedBudgetFor, rigBudgetFor,
 } from '../src/fauna/FaunaView';
 import { UP_EASE_S } from '../src/fauna/motion';
 import { WING_FLAP } from '../src/fauna/wings';
@@ -130,6 +130,24 @@ function worldPosition(o: THREE.Object3D): THREE.Vector3 {
  * whole rung budget now (`rigBudgetFor`), so `holders` is mostly nulls
  * and what a test means by "the rigs are with A and B" is this.
  */
+/**
+ * THE POOL WARMS OVER FRAMES NOW, so a test that wants the ladder at its
+ * full budget has to give it the frames. `POOL_WARM` clones are cut up
+ * front and `POOL_GROWTH_PER_FRAME` more are built each frame a body
+ * asks for one it cannot have (`FaunaView.spare`), which is what lets a
+ * per-species ceiling and a budget spent across all species coexist
+ * without five pools' worth of skeletons being cut for a frame that can
+ * only lend one pool's.
+ *
+ * Thirty frames is warm-up AND arrival: at four clones a frame the
+ * ceiling is reached inside ten, and a rig lent on the last of those
+ * still needs `FADE_S` — twelve frames at 60 — to finish crossing in.
+ * Read a count before that and it is a count of a transition.
+ */
+function settle(v: FaunaView, creatures: readonly CreatureState[], eye = EYE, height = 0, frames = 30): void {
+  for (let i = 0; i < frames; i += 1) v.update(creatures, eye, 1 / 60, height);
+}
+
 function held(v: FaunaView, species: CreatureId): string[] {
   return v.holders(species).filter((h): h is string => h !== null);
 }
@@ -137,6 +155,11 @@ function held(v: FaunaView, species: CreatureId): string[] {
 /** Every rig this view is lending, of any species. */
 function lentAll(v: FaunaView, ids: readonly CreatureId[] = CREATURE_IDS): number {
   return ids.reduce((sum, id) => sum + v.cost.rigsLent[id], 0);
+}
+
+/** Every body wearing the mesh with its bones held still (LOD1), of any species. */
+function reducedAll(v: FaunaView, ids: readonly CreatureId[] = CREATURE_IDS): number {
+  return ids.reduce((sum, id) => sum + v.cost.reduced[id], 0);
 }
 
 /** Every impostor BODY this view is carrying, of any species. */
@@ -265,9 +288,20 @@ describe('the pool', () => {
     expect(fullBudgetFor('medium')).toBe(rigBudgetFor('medium'));
     expect(reducedBudgetFor('medium')).toBe(rigBudgetFor('medium') * 2);
     // And a pool serves ANY MIX: if the nearest thirteen are all aphids,
-    // thirteen aphid rigs are what is needed.
+    // thirteen aphid rigs are what is needed. That is the CEILING, and
+    // it is reached by demand rather than cut up front — five species
+    // each holding the whole ladder's worth of skeletons would be five
+    // times what any one frame can lend.
     const v = await keep(view('medium'));
-    for (const id of CREATURE_IDS) expect(v.poolSize(id)).toBe(fullBudgetFor('medium') + reducedBudgetFor('medium'));
+    const ceiling = fullBudgetFor('medium') + reducedBudgetFor('medium');
+    for (const id of CREATURE_IDS) expect(v.poolSize(id)).toBe(POOL_WARM);
+    const aphids = Array.from({ length: ceiling + 4 }, (_, i) => creature('aphid', `a${i}`, 4 + i, 0));
+    settle(v, aphids);
+    expect(v.poolSize('aphid')).toBe(ceiling);
+    // And the ceiling is a ceiling: the crowd is bigger and the pool is not.
+    expect(lentAll(v) + reducedAll(v)).toBe(ceiling);
+    // Nobody else was cloned for it — the aphids asked, the aphids grew.
+    expect(v.poolSize('housefly')).toBe(POOL_WARM);
   });
 
   it('SAYS WHAT THE BUDGET-SIZED POOLS COST TO BUILD, against the rung table\'s own', async () => {
@@ -303,9 +337,12 @@ describe('the pool', () => {
       + `(${(nowMs / Math.max(wasMs, 1e-6)).toFixed(1)}x for ${(nowClones / wasClones).toFixed(1)}x the clones)`,
     );
     v.clearPoolSizes();
-    for (const id of CREATURE_IDS) expect(v.poolSize(id)).toBe(fullBudgetFor('medium') + reducedBudgetFor('medium'));
-    // It is a load-time cost and it stays one: the clones past the first
-    // few are never posed and never drawn until one is lent.
+    // Cleared is WARM, not full: the ceiling is reached again by demand.
+    for (const id of CREATURE_IDS) expect(v.poolSize(id)).toBe(POOL_WARM);
+    // The number printed above is the ceiling's worst case — every
+    // species grown all the way — and it is a cost the warm pool now
+    // spreads over frames instead of paying at load. The clones past the
+    // first few are never posed and never drawn until one is lent.
     expect(nowMs).toBeLessThan(250);
   });
 
@@ -318,7 +355,7 @@ describe('the pool', () => {
     // the near line and the rest trail out past the far one.
     for (let i = 0; i < 40; i += 1) near.push(creature('aphid', `a${i}`, 4 + i * 2, 0, { tier: i % 2 === 0 ? 'full' : 'near' }));
     const far = [creature('aphid', 'far', 1, 0, { tier: 'far' }), creature('aphid', 'far2', 2, 0, { tier: 'far' })];
-    v.update([...far, ...near], EYE, 1 / 60);
+    settle(v, [...far, ...near]);
     expect(v.cost.rigsLent.aphid).toBe(n);
     // The nearest N drawn creatures hold the FULL rigs — never the far
     // ones, however near they are: `far` is the simulation's own cut.
@@ -385,13 +422,16 @@ describe('the pool', () => {
 
   it('rebuilds the pools and the caps on a new rung, and switches a species off entirely', async () => {
     const v = await keep(view('ultra-low'));
-    expect(v.rigs('aphid')).toHaveLength(fullBudgetFor('ultra-low') + reducedBudgetFor('ultra-low'));
+    expect(v.rigs('aphid')).toHaveLength(POOL_WARM);
     v.setRung('high');
     expect(v.detail).toBe('high');
-    expect(v.rigs('aphid')).toHaveLength(fullBudgetFor('high') + reducedBudgetFor('high'));
+    // A new rung throws every clone away and warms again; what changed
+    // is the CEILING it may grow back to, and the impostor cap.
+    expect(v.rigs('aphid')).toHaveLength(POOL_WARM);
     expect(v.impostor('aphid')!.instanceMatrix.count).toBe(impostorCapFor(APHID, 'high'));
     const aphids = Array.from({ length: 10 }, (_, i) => creature('aphid', `a${i}`, 10 + i, 0));
-    v.update(aphids, EYE, 1 / 60);
+    settle(v, aphids);
+    expect(v.rigs('aphid').length).toBeLessThanOrEqual(fullBudgetFor('high') + reducedBudgetFor('high'));
     // Ten aphids inside the near line and twenty rigs budgeted at high: all ten wear one.
     expect(v.cost.rigsLent.aphid).toBe(Math.min(10, rigBudgetFor('high')));
     v.setEnabled('aphid', false);
@@ -1447,15 +1487,15 @@ describe('the budget', () => {
 describe('a pool the Lab can grow: one rig per creature', () => {
   it('starts at the rung\'s budget and takes a named size instead', async () => {
     const v = await keep(view('medium'));
-    // Every species' pool is the whole RUNG BUDGET now, not its own slice:
-    // the allocation is by distance across species, so if the nearest
-    // thirteen bodies happen all to be aphids, thirteen aphid clones are
-    // what serving them honestly takes (`rigBudgetFor`).
-    expect(v.poolSize('aphid')).toBe(fullBudgetFor('medium') + reducedBudgetFor('medium'));
+    // A RUNG pool is warm and grows to its ceiling; a NAMED one is cut
+    // to the size asked for, at once. The Lab names a pool to say "rig
+    // exactly these, I am measuring rigs", and a bench that asked for
+    // forty and got the warm two would be measuring the warm-up.
+    expect(v.poolSize('aphid')).toBe(POOL_WARM);
     v.setPoolSize('aphid', 40);
     expect(v.poolSize('aphid')).toBe(40);
     // The others are untouched: a named pool is one species' own.
-    expect(v.poolSize('housefly')).toBe(fullBudgetFor('medium') + reducedBudgetFor('medium'));
+    expect(v.poolSize('housefly')).toBe(POOL_WARM);
   });
 
   it('grows ONE at a time without rebuilding the rest — the stress test lends a skeleton a second', async () => {
@@ -1485,7 +1525,10 @@ describe('a pool the Lab can grow: one rig per creature', () => {
     // Nine bodies still drawn, as impostors — nothing vanished with the rigs.
     expect(v.cost.impostors.aphid).toBe(9);
     v.clearPoolSizes();
-    expect(v.poolSize('aphid')).toBe(fullBudgetFor('medium') + reducedBudgetFor('medium'));
+    expect(v.poolSize('aphid')).toBe(POOL_WARM);
+    // ...and the rung's ceiling is what it climbs back to under demand.
+    settle(v, creatures);
+    expect(v.poolSize('aphid')).toBe(creatures.length);
   });
 
   it('lends every creature a rig when the pool is the crowd\'s size', async () => {
@@ -1525,9 +1568,6 @@ describe('a pool the Lab can grow: one rig per creature', () => {
 describe('the three tiers: full, reduced, impostor', () => {
   const aphidsAt = (n: number, from: number, step: number): CreatureState[] =>
     Array.from({ length: n }, (_, i) => creature('aphid', `a${i}`, from + i * step, 0));
-  const reducedAll = (v: FaunaView, ids: readonly CreatureId[] = CREATURE_IDS): number =>
-    ids.reduce((sum, id) => sum + v.cost.reduced[id], 0);
-
   it('prefers a near aphid over a far fly: nearness competes ACROSS species now', async () => {
     const v = await keep(view('medium'));
     const crowd = [...aphidsAt(6, 5, 5), creature('housefly', 'f0', 40, 0, { behaviour: 'fly', height: 20 })];
@@ -1547,7 +1587,7 @@ describe('the three tiers: full, reduced, impostor', () => {
     const v = await keep(view('ultra-low'));
     const full = fullBudgetFor('ultra-low');
     const crowd = aphidsAt(full + 8, 2, 2);
-    v.update(crowd, EYE, 1 / 60, 0);
+    settle(v, crowd);
     expect(v.cost.rigsLent.aphid).toBe(full);
     expect(reducedAll(v)).toBe(8);
     expect(v.cost.impostors.aphid).toBe(0);
@@ -1558,6 +1598,118 @@ describe('the three tiers: full, reduced, impostor', () => {
       (held(v, 'aphid').includes(id) ? 2 : v.drawnIds().includes(id) ? 1 : 0);
     const tiers = crowd.map((c) => tierOf(c.id));
     for (let i = 1; i < tiers.length; i += 1) expect(tiers[i]).toBeLessThanOrEqual(tiers[i - 1]);
+  });
+
+  it('SAYS WHAT THE CAPS ARE AND HOW MANY WANTED EACH TIER — the reading that tells the two refusals apart', async () => {
+    // Joshua, 2026-09-10, with 1,077 insects in the one-metre room:
+    // "LOD still not correct and rendering as a procedural too close".
+    // The ladder was doing exactly what it was told — 13 of 13 full rigs
+    // and 26 of 26 frozen ones, and the four hundredth-nearest body is
+    // an ellipsoid however close it stands. The HUD printed the counts
+    // and not the caps, so there was no way to see that from the screen.
+    const v = await keep(view('ultra-low'));
+    const full = fullBudgetFor('ultra-low');
+    const reduced = reducedBudgetFor('ultra-low');
+    const crowd = aphidsAt(full + reduced + 20, 2, 1);
+    settle(v, crowd);
+    const cost = v.cost;
+    // THE CAPACITY: what the ladder may spend, not what it spent.
+    expect(cost.fullBudget).toBe(full);
+    expect(cost.reducedBudget).toBe(reduced);
+    // THE DEMAND: everyone inside each radius, before any budget refused
+    // them. Every body here is well inside the near line.
+    expect(cost.withinFull).toBe(crowd.length);
+    expect(cost.withinReduced).toBe(crowd.length);
+    // And the pair is the diagnosis: spent to the last slot, with twenty
+    // bodies inside the full-rig radius that could not have one.
+    expect(lentAll(v)).toBe(cost.fullBudget);
+    expect(reducedAll(v)).toBe(cost.reducedBudget);
+    expect(cost.withinFull - cost.fullBudget).toBe(reduced + 20);
+
+    // A ROOM WITH ROOM TO SPARE reads the other way round: the ladder
+    // ran out of ANIMALS, not of budget, and nothing near is a blob.
+    const few = await keep(view('ultra-low'));
+    const four = aphidsAt(4, 2, 1);
+    settle(few, four);
+    expect(few.cost.withinFull).toBe(4);
+    expect(few.cost.fullBudget).toBe(full);
+    expect(lentAll(few)).toBe(4);
+    expect(impostorsAll(few)).toBe(0);
+  });
+
+  it('A HOLDER IS NOT DISPLACED BY A HAIR: rank is hysteretic too, or a crowd inside one radius shimmers', async () => {
+    // The two radii cure a body WANDERING ACROSS A LINE. They do nothing
+    // for the other way a tier is lost: when everyone is inside LOD0_IN
+    // and only a few may wear a rig, nobody crosses anything and the
+    // "nearest thirteen" are simply a different thirteen every frame.
+    const v = await keep(view('ultra-low'));
+    const meshes = fullBudgetFor('ultra-low') + reducedBudgetFor('ultra-low');
+    // Twenty bodies, a unit apart, well inside the near line: the budget
+    // bites and the last two are ellipsoids.
+    const crowd = aphidsAt(meshes + 2, 10, 1);
+    settle(v, crowd);
+    const before = new Set(held(v, 'aphid'));
+    expect(before.size).toBe(meshes);
+    expect(before.has(`a${meshes + 1}`)).toBe(false);
+
+    // THE HAIR: the furthest body steps to just inside the last holder.
+    // It is nearer now, and not by enough — a holder's distance is worth
+    // HOLD_ADVANTAGE of itself in the queue.
+    const nudged = crowd.map((c, i) => (i === meshes + 1 ? creature('aphid', c.id, 10 + meshes - 0.5, 0) : c));
+    settle(v, nudged);
+    expect(new Set(held(v, 'aphid'))).toEqual(before);
+
+    // AND THE STRIDE: nearer than the discount, and it takes the place.
+    const overtaken = 10 + meshes - 1;
+    const past = crowd.map((c, i) => (i === meshes + 1 ? creature('aphid', c.id, overtaken * HOLD_ADVANTAGE - 1, 0) : c));
+    settle(v, past);
+    expect(held(v, 'aphid')).toContain(`a${meshes + 1}`);
+  });
+
+  it('LENDS THE NEAREST FIRST WHILE THE POOL IS STILL WARMING, not whoever asked first', async () => {
+    // The pool grows a few clones a frame, so for the first handful of
+    // frames there are fewer clones than the budget allows. That is
+    // exactly the window in which "distance is priority" has to hold:
+    // the clones that exist belong to the nearest bodies.
+    const v = await keep(view('ultra-low'));
+    const crowd = aphidsAt(20, 2, 2);
+    // Three frames: POOL_WARM plus three frames' growth, and short of
+    // the eighteen meshes the rung would allow.
+    for (let i = 0; i < 3; i += 1) v.update(crowd, EYE, 1 / 60, 0);
+    const clones = v.poolSize('aphid');
+    expect(clones).toBe(POOL_WARM + 3 * 4);
+    expect(clones).toBeLessThan(fullBudgetFor('ultra-low') + reducedBudgetFor('ultra-low'));
+    // The crowd is laid out nearest-first, so the holders are its head.
+    const holders = new Set(held(v, 'aphid'));
+    expect(holders.size).toBe(clones);
+    for (let i = 0; i < clones; i += 1) expect(holders.has(`a${i}`)).toBe(true);
+  });
+
+  it('takes a CAPACITY MULTIPLIER, because the rung\'s number is a clone table and not a measurement', async () => {
+    const v = await keep(view('ultra-low'));
+    const full = fullBudgetFor('ultra-low');
+    const reduced = reducedBudgetFor('ultra-low');
+    expect(v.lodScaleNow).toBe(1);
+    const crowd = aphidsAt((full + reduced) * 2 + 4, 2, 1);
+    settle(v, crowd);
+    expect(lentAll(v)).toBe(full);
+    expect(reducedAll(v)).toBe(reduced);
+
+    v.setLodScale(2);
+    expect(v.lodScaleNow).toBe(2);
+    settle(v, crowd);
+    expect(v.cost.fullBudget).toBe(full * 2);
+    expect(v.cost.reducedBudget).toBe(reduced * 2);
+    expect(lentAll(v)).toBe(full * 2);
+    expect(reducedAll(v)).toBe(reduced * 2);
+    // The pool followed it up: both tiers come out of the same clones.
+    expect(v.poolSize('aphid')).toBe((full + reduced) * 2);
+
+    // Nonsense is one, and one is the floor: nothing outside the Lab moves it.
+    v.setLodScale(0);
+    expect(v.lodScaleNow).toBe(1);
+    v.setLodScale(Number.NaN);
+    expect(v.lodScaleNow).toBe(1);
   });
 
   it('a REDUCED body still moves through the world, but its bones hold still between refreshes', async () => {

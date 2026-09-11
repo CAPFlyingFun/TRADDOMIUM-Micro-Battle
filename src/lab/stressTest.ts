@@ -301,6 +301,23 @@ export interface StressSample {
   readonly aiMs: number;
   /** The creature renderer's own wall time this frame, ms. */
   readonly drawMs: number;
+  /**
+   * THE CAPS the two mesh counts above are up against, and the DEMAND
+   * the radii put on them: how many bodies were inside `LOD0_IN` and
+   * inside `LOD1_IN` of the eye before any budget refused them.
+   *
+   * Joshua, 2026-09-10, looking at 1,077 insects in the one-metre room:
+   * "LOD still not correct and rendering as a procedural too close". It
+   * was not the centre and it was not the radii — it was thirteen of
+   * thirteen full rigs, with some four hundred bodies inside the radius
+   * that wanted one. `13` on its own cannot say that; `13 / 13, 412
+   * asked` can, and it is the difference between the ladder having
+   * nothing nearer to draw and the ladder having nothing left to give.
+   */
+  readonly rigBudget: number;
+  readonly reducedBudget: number;
+  readonly withinFull: number;
+  readonly withinReduced: number;
 }
 
 /** One threshold, and the run when it fell through it. */
@@ -429,6 +446,17 @@ export interface StressReadout {
   readonly impostors: number | null;
   /** The latest sample's not-drawn count, or null. */
   readonly notDrawn: number | null;
+  /**
+   * THE CAPS AND THE DEMAND on the latest sample, or null. `rigs` and
+   * `reduced` above say what the ladder SPENT; these say what it was
+   * allowed and how many bodies were inside each radius asking. A near
+   * body drawn as an ellipsoid means one of two entirely different
+   * things depending on which of these is binding.
+   */
+  readonly rigBudget: number | null;
+  readonly reducedBudget: number | null;
+  readonly withinFull: number | null;
+  readonly withinReduced: number | null;
   /** The spawn rate now, creatures a second — one more every `RAMP_EVERY_S` of spawning. */
   readonly rate: number;
 }
@@ -759,6 +787,10 @@ export class StressTest {
       recoveryLeftS: this.phase === 'recovery' ? Math.max(0, RECOVERY_S - this.recovered) : 0,
       ending: this.ending,
       rigs: this.lastSample?.rigs ?? null,
+      rigBudget: this.lastSample?.rigBudget ?? null,
+      reducedBudget: this.lastSample?.reducedBudget ?? null,
+      withinFull: this.lastSample?.withinFull ?? null,
+      withinReduced: this.lastSample?.withinReduced ?? null,
       reduced: this.lastSample?.reduced ?? null,
       impostors: this.lastSample?.impostors ?? null,
       notDrawn: this.lastSample?.notDrawn ?? null,
@@ -787,6 +819,10 @@ export class StressTest {
       finalReduced: this.lastSample?.reduced ?? null,
       finalImpostors: this.lastSample?.impostors ?? null,
       finalNotDrawn: this.lastSample?.notDrawn ?? null,
+      finalRigBudget: this.lastSample?.rigBudget ?? null,
+      finalReducedBudget: this.lastSample?.reducedBudget ?? null,
+      finalWithinFull: this.lastSample?.withinFull ?? null,
+      finalWithinReduced: this.lastSample?.withinReduced ?? null,
       peakRigs: this.sampleFrames > 0 ? this.peakRigsSeen : null,
       peakImpostors: this.sampleFrames > 0 ? this.peakImpostorsSeen : null,
       meanDrawMs: this.sampleFrames > 0 ? this.drawMsTotal / this.sampleFrames : null,
@@ -819,6 +855,18 @@ export interface StressResult {
   readonly finalImpostors: number | null;
   /** Bodies the renderer drew NEITHER way on that frame — the crowd's remainder (the header). */
   readonly finalNotDrawn: number | null;
+  /**
+   * THE LADDER'S CAPS AND ITS DEMAND on the last measured frame. The
+   * four counts above say what was drawn; these say what the renderer
+   * was allowed to draw and how many bodies were inside each tier's
+   * radius asking to be. A report without them cannot answer the one
+   * question a crowded room raises — whether a near ellipsoid is the
+   * ladder finding nobody closer, or the ladder having nothing left.
+   */
+  readonly finalRigBudget: number | null;
+  readonly finalReducedBudget: number | null;
+  readonly finalWithinFull: number | null;
+  readonly finalWithinReduced: number | null;
   /** The most rigs, and the most impostors, drawn in any one measured frame. */
   readonly peakRigs: number | null;
   readonly peakImpostors: number | null;
@@ -835,7 +883,7 @@ export interface StressConditions {
   readonly build: string;
   readonly viewport: string;
   /** `all` — one rig per creature — or the detail rung's pool, past which bodies draw as impostors. */
-  readonly rigs: 'all' | 'rung';
+  readonly rigs: 'all' | 'rung' | 'rung2' | 'rung4';
   readonly rung: string;
   readonly predation: string;
   readonly camera: string;
@@ -867,6 +915,18 @@ function rateWords(rate: number): string {
 /** A census number, or an em-dash: a run nobody measured has no zero to print. */
 function whole(value: number | null): string {
   return value === null ? '—' : String(value);
+}
+
+/**
+ * A COUNT AGAINST ITS CAP — `13/13`, or just the count when nothing
+ * capped it. It is the whole of the instrument this release adds: the
+ * count says what the ladder spent and the cap says what it had, and a
+ * near animal drawn as an ellipsoid means one thing when they are equal
+ * and an entirely different one when they are not.
+ */
+function ofCap(value: number | null, cap: number | null): string {
+  if (value === null) return '—';
+  return cap === null || cap <= 0 ? String(value) : `${value}/${cap}`;
 }
 
 /** A millisecond figure in the frame block's right-aligned column, or an em-dash there. */
@@ -948,10 +1008,19 @@ export function stressReport(result: StressResult, conditions: StressConditions)
   if (result.finalRigs !== null || result.finalImpostors !== null || result.finalNotDrawn !== null || result.peakRigs !== null) {
     lines.push('');
     lines.push('DRAWN AT THE END');
-    lines.push(`  ${'full rigs'.padEnd(20)}${whole(result.finalRigs)}   (animated every frame)`);
-    lines.push(`  ${'reduced'.padEnd(20)}${whole(result.finalReduced)}   (real mesh, bones held still)`);
+    lines.push(`  ${'full rigs'.padEnd(20)}${ofCap(result.finalRigs, result.finalRigBudget)}   (animated every frame)`);
+    lines.push(`  ${'reduced'.padEnd(20)}${ofCap(result.finalReduced, result.finalReducedBudget)}   (real mesh, bones held still)`);
     lines.push(`  ${'impostors'.padEnd(20)}${whole(result.finalImpostors)}`);
     lines.push(`  ${'not drawn'.padEnd(20)}${whole(result.finalNotDrawn)}   (underground burrowers, or past a cap)`);
+    if (result.finalWithinFull !== null || result.finalWithinReduced !== null) {
+      lines.push('  ---');
+      // WHAT THE LADDER WAS ASKED FOR, against what it was allowed. Two
+      // counts that are equal to their caps with hundreds asking is the
+      // signature of a BUDGET limit; counts short of their caps is the
+      // signature of there being nobody else near enough to serve.
+      lines.push(`  ${'inside LOD0'.padEnd(20)}${whole(result.finalWithinFull)}   (wanted a full rig)`);
+      lines.push(`  ${'inside LOD1'.padEnd(20)}${whole(result.finalWithinReduced)}   (wanted the mesh)`);
+    }
     lines.push('  ---');
     // THE IDENTITY, and WHAT IT IS AGAINST. The three above are the
     // RENDERER's count — every body it was handed — while `creatures` is
@@ -1070,8 +1139,18 @@ export function stressBlock(r: StressReadout): string {
   // The split, while it is happening: at RIGS: RUNG this is the line that
   // shows the rig pool filling and the impostors taking over.
   if (r.rigs !== null || r.impostors !== null || r.notDrawn !== null) {
-    lines.push(`drawn     ${whole(r.rigs)} rigs · ${whole(r.reduced)} reduced`);
+    // EACH COUNT AGAINST ITS CAP. `4/13` is the ladder running out of
+    // animals; `13/13` is the ladder running out of budget, and the
+    // nearest body it could not serve is an ellipsoid however close it
+    // stands. The counts alone cannot tell those apart, which is what
+    // "LOD still not correct and rendering as a procedural too close"
+    // was looking at on a bench reading 13 of 13.
+    lines.push(`drawn     ${ofCap(r.rigs, r.rigBudget)} rigs · ${ofCap(r.reduced, r.reducedBudget)} reduced`);
     lines.push(`          ${whole(r.impostors)} impostors · ${whole(r.notDrawn)} not drawn`);
+    if (r.withinFull !== null || r.withinReduced !== null) {
+      // The DEMAND, by distance alone and before any budget refused it.
+      lines.push(`inside    ${whole(r.withinFull)} at LOD0 · ${whole(r.withinReduced)} at LOD1`);
+    }
   }
   lines.push(r.fps > 0 ? `fps       ${r.fps.toFixed(1)}  (${WINDOW_S} s average)` : `fps       — (filling the ${WINDOW_S} s window)`);
   lines.push(`elapsed   ${r.elapsedS.toFixed(0)} s`);

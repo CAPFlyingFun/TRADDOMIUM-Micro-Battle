@@ -175,15 +175,40 @@ and B). A drawn creature is on one of three rungs:
   close, without paying to move every joint of it sixty times a second.
 - **LOD2, beyond that** — the twenty-triangle impostor.
 
-Two rules hold it together, and neither is optional:
+Four rules hold it together, and none is optional:
 
 - **Distance is PRIORITY, the budget is CAPACITY.** Everything inside
   LOD0 wants a full rig and the nearest are served first; when the full
-  budget runs out the rest fall to LOD1, never to a blob. That is what
-  stops "an ant 10 cm from the camera turning into a procedural blob
-  while an ant 45 cm away keeps the expensive rig". A hard
-  distance-only rule would let a hundred ants crowd a food item inside
-  half a metre and put the phone back at Baseline A's 52 full rigs.
+  budget runs out the rest fall to LOD1. That is what stops "an ant
+  10 cm from the camera turning into a procedural blob while an ant
+  45 cm away keeps the expensive rig". A hard distance-only rule would
+  let a hundred ants crowd a food item inside half a metre and put the
+  phone back at Baseline A's 52 full rigs.
+  **But past BOTH budgets it is a blob, and that is not a bug**: at the
+  rung's own numbers the room holds 13 full rigs and 26 frozen meshes,
+  so the fortieth-nearest body draws as an ellipsoid however close it
+  stands. Joshua met this at 1,077 insects in a one-metre room —
+  "rendering as a procedural too close" — and it was 13 of 13. There is
+  no capacity that makes a thousand skinned insects in a cubic metre
+  affordable; what there is is a HUD that says which limit is binding,
+  which is why both counts print against their cap (`13/13 rigs`) with
+  the demand under them (`inside 412 at LOD0`). **A count with no cap
+  beside it is not a reading.**
+- **Rank is hysteretic too, not only distance.** Two radii cure a body
+  wandering across a line; they do nothing when four hundred bodies are
+  inside one radius and thirteen may wear a rig, because then nobody
+  crosses anything and the "nearest thirteen" are a different thirteen
+  every frame — each swap a fade out and a fade in, so a perfectly
+  stable crowd shimmers. A body that holds a tier therefore sorts from
+  `HOLD_ADVANTAGE` of its distance: a challenger has to be a fifth
+  nearer to take its place.
+- **The rung's capacity is a CLONE TABLE, not a measurement.**
+  `fullBudgetFor` is the sum of `POOL_SIZES`, sized for an island where
+  a handful of animals are near. Do not defend thirteen as though a
+  phone had chosen it. RIGS on the Creature Lab cycles RUNG → ×2 → ×4 →
+  ALL so the phone can say what it holds, and the pool grows to demand
+  (`POOL_WARM` clones up front, `POOL_GROWTH_PER_FRAME` after) so a
+  bigger ceiling costs nothing where the animals are not.
 - **Every boundary is TWO numbers.** A body climbs a tier at the IN
   radius and only falls back at the OUT one, so one wandering across a
   line cannot strobe between forms. Leaving the mesh entirely
@@ -201,13 +226,16 @@ fills from the ACTIVE camera). Never from the player's body, never from
 the room's centre, never from a fixed point. A body's own position is
 what is being measured, not what it is measured from.
 
-The consequence is worth stating so it is never mistaken for a bug: the
-Creature Lab's bench viewpoint stands 1.00 m from the centre of its 1 m
-room, so NONE of that room's floor is inside 0.45 m and only 23% is
-inside 0.85 m. That is the rule working. A radius written for a camera
-riding with an ant does not cover a box being looked at from outside it,
-and the answer if the bench ever needs one is to move the BENCH's
-camera, not to anchor the ladder to something else.
+The consequence is worth stating so it is never mistaken for a bug: a
+radius written for a camera riding with an ant does not cover a box
+being looked at from OUTSIDE it. The Creature Lab's bench used to stand
+1.00 m from the centre of its 1 m room, so none of that room's floor was
+inside 0.45 m and 23% was inside 0.85 m — the ladder working exactly as
+specified, on a bench that could never see it work. The answer was to
+move the BENCH (`FREE_START` now stands in the room at 0.56 m from the
+middle: 23% of the floor inside `LOD0_IN`, 79% inside `LOD1_OUT`, at the
+cost of framing 77% of it rather than 96%), and it will always be to
+move the bench. Never anchor the ladder to something else.
 
 **A meter may only move if there is a way to move it back. An unavailable
 action must never look functional.** "Multiplayer" in the UI may never

@@ -383,6 +383,39 @@ export const RIG_FAR = LOD1_OUT;
  */
 export const FADE_S = 0.2;
 
+/**
+ * WHAT A BODY THAT ALREADY HOLDS A MESH IS WORTH IN THE QUEUE — its
+ * distance, multiplied by this, when the nearest-first order is decided.
+ * A holder at 30 cm sorts as though it stood at 24, so a challenger has
+ * to be a fifth nearer to take its place.
+ *
+ * The two RADII are already hysteretic (`LOD0_IN` / `LOD0_OUT`), and
+ * that is the right cure for a body wandering across a line. It is the
+ * wrong cure for the other way a tier is lost, which is RANK: when four
+ * hundred animals stand inside `LOD0_IN` and thirteen may wear a rig,
+ * nobody crosses a radius at all and the nearest thirteen are simply a
+ * different thirteen every frame. Each swap is a fade out and a fade in,
+ * so a crowd shimmers between mesh and ellipsoid while every distance in
+ * it is perfectly stable.
+ *
+ * GAME TUNING. A fifth is enough that ordinary milling cannot displace a
+ * holder and small enough that walking past one still does.
+ */
+export const HOLD_ADVANTAGE = 0.8;
+
+/**
+ * HOW MANY CLONES ONE FRAME MAY BUILD. The pool grows on demand rather
+ * than being cut to its ceiling up front (`poolTarget`), because the
+ * ceiling is per species and the budget is global: five species each
+ * sized for the whole ladder is five times the skeletons any one frame
+ * can lend. Building one costs about 0.2 ms, so four a frame warms a
+ * cold pool in a sixth of a second and never lands as a hitch.
+ */
+export const POOL_GROWTH_PER_FRAME = 4;
+
+/** The pool a species starts with, before any animal has asked for one. */
+export const POOL_WARM = 2;
+
 /** The impostor cap for a rung: the species' own population cap, since the simulation never holds more than that. */
 export function impostorCapFor(species: CreatureSpecies, rung: string): number {
   const caps = species.population.caps as Readonly<Record<string, number>>;
@@ -594,6 +627,27 @@ export interface FaunaCost {
   readonly pastCap: number;
   /** Of those: tier `far`, the simulation's own cut, which this view only obeys. */
   readonly farTier: number;
+  /**
+   * THE CAPS THE COUNTS ABOVE ARE UP AGAINST — how many bodies may wear
+   * a full rig and the frozen mesh at all this frame.
+   *
+   * Printed beside the counts because the pair is the only way to tell
+   * the two reasons a near animal is an ellipsoid apart. `4 / 13` says
+   * the ladder ran out of ANIMALS inside its radius; `13 / 13` says it
+   * ran out of BUDGET, and the next nearest body is an impostor however
+   * close it stands. Joshua, 2026-09-10, looking at 1,077 insects in a
+   * one-metre room: "LOD still not correct and rendering as a procedural
+   * too close" — it was `13 / 13`, and the HUD did not say so.
+   */
+  readonly fullBudget: number;
+  readonly reducedBudget: number;
+  /**
+   * HOW MANY WANTED EACH TIER, by distance alone and before any budget:
+   * candidates inside `LOD0_IN` and inside `LOD1_IN` of the eye. The
+   * demand against the capacity above.
+   */
+  readonly withinFull: number;
+  readonly withinReduced: number;
 }
 
 /**
@@ -811,14 +865,24 @@ export class FaunaView {
    * tie falls back to the creature's id, because two animals at the same
    * distance sorted by luck would trade forms every frame — which is
    * half of what "it's random" was describing.
+   *
+   * A body that already holds a tier sorts from `HOLD_ADVANTAGE` of its
+   * distance: the other half of "it's random" is rank, not distance, and
+   * a crowd inside one radius has no radius left to be hysteretic about.
    */
   private readonly byNearest = (a: number, b: number): number => {
-    const d = this.d2[a] - this.d2[b];
+    const d = this.ranked(a) - this.ranked(b);
     if (d !== 0) return d;
     const ia = this.frameCreatures[a].id;
     const ib = this.frameCreatures[b].id;
     return ia < ib ? -1 : ia > ib ? 1 : 0;
   };
+
+  /** What this body's distance is WORTH in the queue: its own, or a holder's discount on it. */
+  private ranked(i: number): number {
+    const tier = this.tier.get(this.frameCreatures[i].id) ?? 0;
+    return tier > 0 ? this.d2[i] * HOLD_ADVANTAGE * HOLD_ADVANTAGE : this.d2[i];
+  }
 
   // THE PICK SURFACE's scratch: who is drawn this frame and where, in
   // local render space. The list and the positions are reused across
@@ -837,9 +901,16 @@ export class FaunaView {
   private reducedLent = zeroCounts();
   private impostors = zeroCounts();
   // The census (`FaunaCost`): everything handed in that this view drew nothing of.
+  /** The ladder's capacity multiplier: one, unless the Creature Lab is asking a bigger question (`setLodScale`). */
+  private lodScale = 1;
   private hidden = 0;
   private pastCap = 0;
   private farTier = 0;
+  /** Candidates inside `LOD0_IN` / `LOD1_IN` of the eye this frame, before any budget. Pass 2 fills them. */
+  private withinFull = 0;
+  private withinReduced = 0;
+  /** Clones built during THIS frame's allocation, against `POOL_GROWTH_PER_FRAME`. Zeroed in `update`. */
+  private grewThisFrame = 0;
   private frames = 0;
   private totalMs = 0;
   private peakMs = 0;
@@ -932,7 +1003,7 @@ export class FaunaView {
   clearPoolSizes(): void {
     if (this.poolOverride.size === 0) return;
     this.poolOverride.clear();
-    for (const slot of this.order) this.sizePool(slot, this.poolTarget(slot));
+    for (const slot of this.order) this.warmPool(slot);
   }
 
   /** How many rigs a species' pool holds — what a HUD prints and a test reads. */
@@ -977,6 +1048,9 @@ export class FaunaView {
       this.hidden = 0;
       this.pastCap = 0;
       this.farTier = 0;
+      this.withinFull = 0;
+      this.withinReduced = 0;
+      this.grewThisFrame = 0;
       for (const slot of this.order) slot.candidates.length = 0;
       // PASS 1: who is drawn at all, and how far away, bucketed by
       // species — and, for everyone who is not, WHY NOT. The order of
@@ -1031,6 +1105,10 @@ export class FaunaView {
       hidden: this.hidden,
       pastCap: this.pastCap,
       farTier: this.farTier,
+      fullBudget: this.fullBudget(),
+      reducedBudget: this.reducedBudget(),
+      withinFull: this.withinFull,
+      withinReduced: this.withinReduced,
     });
   }
 
@@ -1196,7 +1274,21 @@ export class FaunaView {
     // as a full one — the difference is whether its bones move this
     // frame — so a species must be able to serve the whole ladder if the
     // nearest bodies all happen to be its own.
-    return named === undefined ? fullBudgetFor(this.rung) + reducedBudgetFor(this.rung) : named;
+    return named === undefined ? (fullBudgetFor(this.rung) + reducedBudgetFor(this.rung)) * this.lodScale : named;
+  }
+
+  /**
+   * THE CLONES A SPECIES STARTS WITH. The rest are built as animals ask
+   * for them (`spare`), which is why the ceiling above may be the whole
+   * ladder for every species at once without five pools' worth of
+   * skeletons being cut for a frame that can only ever lend one pool's.
+   */
+  private warmPool(slot: Slot): void {
+    // A NAMED POOL IS NOT A CEILING, IT IS AN ORDER. The Creature Lab
+    // names one to say "rig exactly these", and a bench that asked for
+    // forty and got two would be measuring the warm-up.
+    const named = this.poolOverride.get(slot.species.id);
+    this.sizePool(slot, named ?? Math.min(POOL_WARM, this.poolTarget(slot)));
   }
 
   /**
@@ -1209,7 +1301,7 @@ export class FaunaView {
    * at the device budget the question is about.
    */
   private fullBudget(): number {
-    return this.budgetOf(fullBudgetFor(this.rung));
+    return this.budgetOf(fullBudgetFor(this.rung)) * this.lodScale;
   }
 
   /**
@@ -1222,7 +1314,30 @@ export class FaunaView {
    * written in.
    */
   private reducedBudget(): number {
-    return this.poolOverride.size === 0 ? reducedBudgetFor(this.rung) : 0;
+    return this.poolOverride.size === 0 ? reducedBudgetFor(this.rung) * this.lodScale : 0;
+  }
+
+  /**
+   * THE LADDER'S CAPACITY, MULTIPLIED — one, two or four times the
+   * rung's own numbers.
+   *
+   * It exists because the rung's numbers are not a measurement of any
+   * phone. `fullBudgetFor` is the SUM OF `POOL_SIZES`, a clone-pool
+   * table sized for the island, where a handful of animals are near and
+   * the rest are scattered over hundreds of metres. Thirteen is plenty
+   * there and nowhere near enough in a one-metre room, and the Creature
+   * Lab is where "how many can this phone actually hold" is answered by
+   * the phone rather than by me. RIGS cycles it, the report records it,
+   * and nothing outside the Lab moves it off one.
+   */
+  setLodScale(scale: number): void {
+    const next = Number.isFinite(scale) && scale >= 1 ? Math.floor(scale) : 1;
+    if (next === this.lodScale) return;
+    this.lodScale = next;
+  }
+
+  get lodScaleNow(): number {
+    return this.lodScale;
   }
 
   /** A rung number, or the sum the Lab named instead of it. */
@@ -1248,7 +1363,7 @@ export class FaunaView {
       rig.materials.length = 0;
     }
     slot.rigs = [];
-    this.sizePool(slot, this.poolTarget(slot));
+    this.warmPool(slot);
   }
 
   /**
@@ -1512,6 +1627,12 @@ export class FaunaView {
       for (const i of slot.candidates) {
         const d2 = this.d2[i];
         const has = this.tier.get(creatures[i].id) ?? 0;
+        // THE DEMAND, before a budget has refused any of it. Counted on
+        // the RADII alone and for every species alike, so the HUD can
+        // say whether a near ellipsoid is the ladder finding nobody
+        // closer or the ladder having nothing left to give.
+        if (d2 <= LOD0_IN * LOD0_IN) this.withinFull += 1;
+        if (d2 <= LOD1_IN * LOD1_IN) this.withinReduced += 1;
         if (d2 <= wants || (d2 <= keeps && has > 0)) list.push(i);
       }
     }
@@ -1532,7 +1653,6 @@ export class FaunaView {
       if (reduceds < reduced) { this.rigged[idx] = 2; reduceds += 1; continue; }
       this.rigged[idx] = 0;
     }
-    const marks = fulls + reduceds;
 
     for (const slot of this.order) {
       for (const rig of slot.rigs) {
@@ -1553,8 +1673,16 @@ export class FaunaView {
       }
     }
 
-    for (let k = 0; k < marks; k += 1) {
-      const idx = list[k];
+    // EVERY MARK, not the first `fulls + reduceds` of the list. The two
+    // are usually the same set and are not always: `wantsFull` reaches
+    // for `LOD0_OUT` when the body already holds a full rig and for
+    // `LOD0_IN` when it does not, so a holder a little further out can
+    // be marked after a nearer body has been passed over. Walking a
+    // prefix then stopped short of it — the mark was spent and no mesh
+    // was ever lent against it. The list is still nearest-first, so a
+    // donor found below is still always further off than its claimant.
+    for (const idx of list) {
+      if (this.rigged[idx] === 0) continue;
       const c = creatures[idx];
       if (this.byHolder.has(c.id)) continue;
       const slot = this.slots.get(c.species);
@@ -1640,15 +1768,37 @@ export class FaunaView {
     let least = Infinity;
     let marked: Rig | null = null;
     let furthest = d2;
+    let free: Rig | null = null;
     for (const rig of slot.rigs) {
-      if (rig.holder === null) return rig;
-      if (this.rigged[rig.creature] === 1) {
+      if (rig.holder === null) { free = rig; break; }
+      // EITHER MESH TIER IS PROTECTED, and by the same rule. This read
+      // `=== 1`, so a body holding the FROZEN mesh was filed with the
+      // ones fading out and could be taken by a claimant standing
+      // further away than it — a priority inversion in the one direction
+      // the ladder is supposed to guarantee. LOD1 is a body being drawn,
+      // not a body leaving.
+      if (this.rigged[rig.creature] > 0) {
         const held = this.d2[rig.creature];
         if (held > furthest) { furthest = held; marked = rig; }
         continue;
       }
       const fade = this.fades.get(rig.holder) ?? 0;
       if (fade < least) { least = fade; fading = rig; }
+    }
+    if (free !== null) return free;
+    // NOTHING FREE: GROW BEFORE RECYCLING, while the ceiling and this
+    // frame's allowance both have room. Taking the clone of a body that
+    // is fading out is cheaper than building one and it is the wrong
+    // first move — in a crowd there is nearly always someone fading, so
+    // a pool that recycled first would never reach the budget it is
+    // allowed and the ladder would run permanently short of meshes.
+    // Build while there is room; recycle once there is not.
+    const ceiling = this.poolTarget(slot);
+    if (slot.rigs.length < ceiling && this.grewThisFrame < POOL_GROWTH_PER_FRAME) {
+      this.grewThisFrame += 1;
+      this.sizePool(slot, slot.rigs.length + 1);
+      const grown = slot.rigs[slot.rigs.length - 1];
+      if (grown !== undefined && grown.holder === null) return grown;
     }
     return fading ?? marked;
   }

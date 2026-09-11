@@ -79,7 +79,23 @@ function drive(
  * The one that does is `hidingSamplerOf`, below.
  */
 function samplerOf(cap: number, drawMs = 4, aiMs = 2): Sampler {
-  return (n) => ({ rigs: Math.min(n, cap), reduced: 0, impostors: Math.max(0, n - cap), notDrawn: 0, drawMs, aiMs });
+  return (n) => census({ rigs: Math.min(n, cap), impostors: Math.max(0, n - cap), drawMs, aiMs, rigBudget: cap, withinFull: n });
+}
+
+/**
+ * A CENSUS WITH EVERY FIELD, from the few a test cares about. The
+ * renderer reports the ladder's CAPS and its DEMAND beside the counts
+ * now, and a test that only says "four rigs" still has to hand over a
+ * whole sample — so the defaults are the honest ones for a pretend
+ * renderer: nothing on the middle tier, nothing hidden, and a cap the
+ * caller names when the point is that the cap bit.
+ */
+function census(over: Partial<StressSample> = {}): StressSample {
+  return {
+    rigs: 0, reduced: 0, impostors: 0, notDrawn: 0, aiMs: 2, drawMs: 4,
+    rigBudget: 0, reducedBudget: 0, withinFull: 0, withinReduced: 0,
+    ...over,
+  };
 }
 
 /**
@@ -92,7 +108,7 @@ function hidingSamplerOf(cap: number, every: number): Sampler {
   return (n) => {
     const notDrawn = Math.floor(n / every);
     const shown = n - notDrawn;
-    return { rigs: Math.min(shown, cap), reduced: 0, impostors: Math.max(0, shown - cap), notDrawn, drawMs: 4, aiMs: 2 };
+    return census({ rigs: Math.min(shown, cap), impostors: Math.max(0, shown - cap), notDrawn, rigBudget: cap, withinFull: shown });
   };
 }
 
@@ -665,8 +681,8 @@ describe('the drawn census: rigs, impostors, and where the frame went', () => {
     // two and stay there. The peak is the ten; the end is the two.
     const test = new StressTest({ species: FIVE, maxCreatures: 20 });
     test.start();
-    drive(test, () => 60, () => test.finished, (n) => ({
-      rigs: n <= 10 ? n : 2, reduced: 0, impostors: n <= 10 ? 0 : n - 2, notDrawn: 0, aiMs: 1, drawMs: 3,
+    drive(test, () => 60, () => test.finished, (n) => census({
+      rigs: n <= 10 ? n : 2, impostors: n <= 10 ? 0 : n - 2, aiMs: 1, drawMs: 3,
     }));
     const result = test.result();
     expect(result.finalRigs).toBe(2);
@@ -731,8 +747,15 @@ describe('the drawn census: rigs, impostors, and where the frame went', () => {
     expect(r.rigs! + r.impostors!).toBeLessThanOrEqual(r.creatures);
     // The live block puts the two mesh tiers on one line and the cheap
     // half on the next: five numbers do not fit across a phone.
-    expect(stressBlock(r)).toContain(`drawn     8 rigs · ${r.reduced} reduced`);
+    // EACH COUNT AGAINST ITS CAP: this pretend renderer's pool is eight
+    // and eight are lent, which is the reading that says the ladder ran
+    // out of BUDGET rather than out of animals near enough to serve.
+    expect(stressBlock(r)).toContain(`drawn     8/8 rigs · ${r.reduced} reduced`);
     expect(stressBlock(r)).toContain(`${r.impostors} impostors`);
+    // And the demand beside it: everyone this renderer drew was inside
+    // the near line, so the line says how many wanted the rig that eight
+    // of them got.
+    expect(stressBlock(r)).toContain(`inside    ${r.withinFull} at LOD0`);
   });
 
   it('discards the settle\'s samples with the settle\'s frames', () => {
@@ -740,7 +763,7 @@ describe('the drawn census: rigs, impostors, and where the frame went', () => {
     // would put a 900 ms drawing cost in the mean of a run it is not part of.
     const test = new StressTest({ species: FIVE, maxCreatures: 5 });
     test.start();
-    test.frame(0.9, { rigs: 999, reduced: 999, impostors: 999, notDrawn: 999, aiMs: 900, drawMs: 900 });
+    test.frame(0.9, census({ rigs: 999, reduced: 999, impostors: 999, notDrawn: 999, aiMs: 900, drawMs: 900 }));
     drive(test, () => 60, () => test.finished, samplerOf(8, 4, 2));
     const result = test.result();
     expect(result.peakRigs).toBeLessThanOrEqual(8);
@@ -755,8 +778,8 @@ describe('the drawn census: rigs, impostors, and where the frame went', () => {
     drive(test, () => 60, () => test.finished, () => {
       n += 1;
       return n % 3 === 0
-        ? { rigs: Number.NaN, reduced: 0, impostors: -1, notDrawn: -2, aiMs: Number.NaN, drawMs: Number.POSITIVE_INFINITY }
-        : { rigs: 4, reduced: 0, impostors: 1, notDrawn: 0, aiMs: 2, drawMs: 4 };
+        ? census({ rigs: Number.NaN, impostors: -1, notDrawn: -2, aiMs: Number.NaN, drawMs: Number.POSITIVE_INFINITY })
+        : census({ rigs: 4, impostors: 1 });
     });
     const result = test.result();
     expect(result.meanDrawMs).toBeCloseTo(4, 9);
@@ -781,7 +804,7 @@ describe('the census accounts for the whole crowd (Joshua: where did the other 5
     expect(result.finalRigs! + result.finalImpostors! + result.finalNotDrawn!).toBe(result.creatures);
     const text = stressReport(result, CONDITIONS);
     expect(text).toContain('DRAWN AT THE END');
-    expect(text).toMatch(/\n {2}full rigs {11}13 {3}\(animated every frame\)\n/);
+    expect(text).toMatch(/\n {2}full rigs {11}13\/13 {3}\(animated every frame\)\n/);
     expect(text).toMatch(/\n {2}impostors {11}17\n/);
     expect(text).toMatch(/\n {2}not drawn {11}10 {3}\(underground burrowers, or past a cap\)\n/);
     expect(text).toContain('\n  ---\n');
@@ -805,9 +828,7 @@ describe('the census accounts for the whole crowd (Joshua: where did the other 5
     // block called that a MISMATCH and a bug, which it is not.
     const test = new StressTest({ species: FIVE, maxCreatures: 20 });
     test.start();
-    drive(test, () => 60, () => test.finished, (n) => ({
-      rigs: n + 5, reduced: 0, impostors: 0, notDrawn: 0, aiMs: 1, drawMs: 2,
-    }));
+    drive(test, () => 60, () => test.finished, (n) => census({ rigs: n + 5, aiMs: 1, drawMs: 2 }));
     const result = test.result();
     expect(result.finalRigs).toBe(25);
     const text = stressReport(result, CONDITIONS);
@@ -822,9 +843,7 @@ describe('the census accounts for the whole crowd (Joshua: where did the other 5
     // direction is a real disagreement and stays loud.
     const test = new StressTest({ species: FIVE, maxCreatures: 20 });
     test.start();
-    drive(test, () => 60, () => test.finished, (n) => ({
-      rigs: Math.max(0, n - 3), reduced: 0, impostors: 0, notDrawn: 0, aiMs: 1, drawMs: 2,
-    }));
+    drive(test, () => 60, () => test.finished, (n) => census({ rigs: Math.max(0, n - 3), aiMs: 1, drawMs: 2 }));
     const text = stressReport(test.result(), CONDITIONS);
     expect(text).toContain('MISMATCH: the run placed 20 but only 17 reached the renderer');
     expect(text).toContain('3 bodies are unaccounted for');
@@ -833,9 +852,7 @@ describe('the census accounts for the whole crowd (Joshua: where did the other 5
   it('drops a sample whose not-drawn number is not one, rather than printing the rest of it', () => {
     const test = new StressTest({ species: FIVE, maxCreatures: 5 });
     test.start();
-    drive(test, () => 60, () => test.finished, () => ({
-      rigs: 3, reduced: 0, impostors: 1, notDrawn: Number.NaN, aiMs: 2, drawMs: 4,
-    }));
+    drive(test, () => 60, () => test.finished, () => census({ rigs: 3, impostors: 1, notDrawn: Number.NaN }));
     const result = test.result();
     expect(result.finalRigs).toBeNull();
     expect(result.finalNotDrawn).toBeNull();

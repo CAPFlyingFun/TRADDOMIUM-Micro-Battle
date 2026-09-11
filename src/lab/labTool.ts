@@ -275,14 +275,35 @@ export const HUD_HZ = 10;
  * different questions and the report says which was asked
  * (`lab/stressTest.stressReport`).
  */
-export type LabRigMode = 'all' | 'rung';
+/**
+ * WHAT THE LADDER IS ALLOWED THIS RUN.
+ *
+ * `all` is one animated skeleton per creature — Baseline A's question,
+ * "how many fully active insects can this room hold", and no tiers at
+ * all. The rest are the detail ladder at one, two and four times the
+ * rung's own capacity.
+ *
+ * The multiples exist because the rung's number is not a measurement of
+ * any phone: `fullBudgetFor` is the SUM OF `POOL_SIZES`, a clone-pool
+ * table sized for an island where a handful of animals are near. Joshua,
+ * 2026-09-10, with 1,077 insects in a one-metre room: "LOD still not
+ * correct and rendering as a procedural too close" — it was thirteen of
+ * thirteen, and thirteen was inherited rather than measured. His phone
+ * is the instrument, so the instrument is what moves it.
+ */
+export type LabRigMode = 'all' | 'rung' | 'rung2' | 'rung4';
 
 export function nextRigMode(mode: LabRigMode): LabRigMode {
-  return mode === 'all' ? 'rung' : 'all';
+  return mode === 'rung' ? 'rung2' : mode === 'rung2' ? 'rung4' : mode === 'rung4' ? 'all' : 'rung';
 }
 
 export function rigModeLabel(mode: LabRigMode): string {
-  return `RIGS: ${mode === 'all' ? 'ALL' : 'RUNG'}`;
+  return `RIGS: ${mode === 'all' ? 'ALL' : mode === 'rung' ? 'RUNG' : mode === 'rung2' ? 'RUNG x2' : 'RUNG x4'}`;
+}
+
+/** The ladder's capacity multiplier a mode asks for (`FaunaView.setLodScale`); ALL names its own pools instead. */
+export function rigModeScale(mode: LabRigMode): number {
+  return mode === 'rung2' ? 2 : mode === 'rung4' ? 4 : 1;
 }
 
 /**

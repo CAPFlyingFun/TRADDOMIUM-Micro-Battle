@@ -119,7 +119,7 @@ import { setOrigin, toLocal, toWorld } from '../world/origin';
 import { LabUi, type CreatureLine, type LabReadout } from './LabUi';
 import { HORIZON, buildLabMeshes, type LabMeshes } from './labMeshes';
 import {
-  CAMERA_PRESENCE, DISTURB_RADIUS, HELD_DURING_A_RUN, LAB_ACTION, LAB_SCENE_ID, POSSESS_ROW, TAP_SLOP_PX, nextPredation, nextRigMode,
+  CAMERA_PRESENCE, DISTURB_RADIUS, HELD_DURING_A_RUN, LAB_ACTION, LAB_SCENE_ID, POSSESS_ROW, TAP_SLOP_PX, nextPredation, nextRigMode, rigModeScale,
   nextStressPool, stressPoolWords, type LabAction, type LabCameraMode, type LabRigMode, type StressPool,
 } from './labTool';
 import { StressTest, stressBlock, stressReport, type StressConditions, type StressPhase, type StressSample } from './stressTest';
@@ -169,12 +169,39 @@ export const LAB_SPECIES: readonly CreatureSpecies[] = LAB_SPECIES_TABLE;
 const CENTRE: WorldPoint = world(0, 0);
 
 /**
- * Where the free camera starts: over the south-east corner, looking down
- * at the block's top — the whole bench in frame, the block in the middle.
+ * Where the free camera starts: inside the south-east corner, looking
+ * down at the block — the whole bench in frame, the block in the middle.
  * GAME TUNING. `yaw` is `FreeFlyCamera`'s: π/4 looks along (−1, −1)/√2.
+ *
+ * IT STANDS IN THE ROOM NOW, and that is the point. It used to sit at
+ * (62, 62) and 48 up, which is 1.00 m from the centre of a room 1 m
+ * across — so NONE of that floor was inside `LOD0_IN` (0.45 m) and only
+ * 23% was inside `LOD1_OUT`. The ladder was working and the bench could
+ * not see it work: every body in the room was on the far tier before
+ * the budget was even consulted. Joshua, 2026-09-10: "if the room is a
+ * 1x1x1m block and I asked for 0.6m, then most of the room should be
+ * rendered."
+ *
+ * The answer to that is to move the BENCH, never the LOD centre (see
+ * CLAUDE.md's rule; the centre is the camera and is measured from the
+ * eye the frame was drawn from). At (34, 34) and 28 up the eye is 0.56 m
+ * from the room's middle and the floor reads 23% inside `LOD0_IN`, 63%
+ * inside `LOD1_IN` and 79% inside `LOD1_OUT` — all three rungs on screen
+ * at once, which is what a bench for a detail ladder has to show, and
+ * "most of the room" on a real mesh, which is what he asked for.
+ *
+ * IT IS A TRADE AND THE OTHER SIDE OF IT IS FRAMING: at 932 × 430 the
+ * old perch had 96% of the floor inside the frustum and this one has
+ * 77%, because you cannot stand inside a one-metre room and still see
+ * all four of its corners through a 103° lens. Measured, both of them,
+ * against this viewport rather than guessed. Standing outside and seeing
+ * everything at the far tier is the worse half of that trade for a bench
+ * whose subject is the near tiers; the stick reaches the rest.
+ *
+ * The pitch is the one that points at the block's middle from here.
  */
 export const FREE_START: CameraPose = Object.freeze({
-  at: world(62, 62), height: LAB_FLOOR + 48, yaw: Math.PI / 4, pitch: -0.31,
+  at: world(34, 34), height: LAB_FLOOR + 28, yaw: Math.PI / 4, pitch: -0.36,
 });
 
 /** The free camera's glass: half a millimetre to four metres — the box and nothing beyond it. */
@@ -484,6 +511,10 @@ interface MutableSample extends StressSample {
   notDrawn: number;
   aiMs: number;
   drawMs: number;
+  rigBudget: number;
+  reducedBudget: number;
+  withinFull: number;
+  withinReduced: number;
 }
 
 /** The overlay's speed reading per creature: last place, smoothed mm/s. */
@@ -580,7 +611,10 @@ export function buildCreatureLabScene(ctx: SceneContext, hooks: CreatureLabHooks
   /** The finished report, built once when the run ends and shown until RUN AGAIN or RESET. */
   let report = '';
   /** The census handed to the run each frame, rewritten in place (`census`). */
-  const sample: MutableSample = { rigs: 0, reduced: 0, impostors: 0, notDrawn: 0, aiMs: 0, drawMs: 0 };
+  const sample: MutableSample = {
+    rigs: 0, reduced: 0, impostors: 0, notDrawn: 0, aiMs: 0, drawMs: 0,
+    rigBudget: 0, reducedBudget: 0, withinFull: 0, withinReduced: 0,
+  };
 
   // Per-frame scratch, rewritten in place (the header: no allocation on the frame path that is this file's).
   const intent: MutableIntent = newMutableIntent();
@@ -873,6 +907,7 @@ export function buildCreatureLabScene(ctx: SceneContext, hooks: CreatureLabHooks
     report = '';
     if (fauna !== null) {
       fauna.clearPoolSizes();
+      fauna.setLodScale(rigModeScale(rigMode));
       // One rig for the bench's own body of each species; the crowd's are lent as they land.
       if (rigMode === 'all') for (const species of LAB_SPECIES) fauna.setPoolSize(species.id, 1);
     }
@@ -951,6 +986,14 @@ export function buildCreatureLabScene(ctx: SceneContext, hooks: CreatureLabHooks
     // can never print two different numbers for one thing.
     sample.aiMs = cost.thinkMs + cost.moveMs + cost.demandMs;
     sample.drawMs = animMs;
+    // THE CAPS AND THE DEMAND, so the counts above can be read. Both are
+    // the renderer's own: the caps are what `FaunaView` would spend this
+    // frame (the rung, times whatever RIGS is asking for), and the
+    // demand is who was inside each radius before any of it was spent.
+    sample.rigBudget = drawn.fullBudget;
+    sample.reducedBudget = drawn.reducedBudget;
+    sample.withinFull = drawn.withinFull;
+    sample.withinReduced = drawn.withinReduced;
     return sample;
   };
 
@@ -1039,7 +1082,10 @@ export function buildCreatureLabScene(ctx: SceneContext, hooks: CreatureLabHooks
         rigMode = nextRigMode(rigMode);
         // Between runs the choice takes effect at once, so what is on the
         // bench is what the next run will measure.
-        if (!stress.running && fauna !== null) fauna.clearPoolSizes();
+        if (!stress.running && fauna !== null) {
+          fauna.clearPoolSizes();
+          fauna.setLodScale(rigModeScale(rigMode));
+        }
         return;
       case LAB_ACTION.stressPool:
         // Refused mid-run, the way RIGS is. `StressTest.setPool` refuses
