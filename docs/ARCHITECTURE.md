@@ -93,6 +93,17 @@ src/
                 sea), habitat.ts (what belongs where) and objects/ (cells,
                 families, the deterministic populator, the per-rung
                 budgets, the world seed and the delta seam).
+                tombs/ (the TOMBS milestone) is the settlement's first
+                building as a PLAN rather than a model: site.ts, the one
+                canonical world coordinate it stands on, searched for in
+                the survey and re-measured before being written down;
+                types.ts, what a room, a slab, a pillar, a ring, a lamp,
+                a doorway and an interaction ARE, in local metres, with
+                `Slab.solid` the one answer to whether a body stops; and
+                plan.ts, which expands a small LabSpec into all of them.
+                Nothing in it knows what a mesh is, so the building's
+                collision and its reachability are testable in plain
+                node and a server could hold them.
   actor/        Player{Transform, Vitals, GroundLocomotion, Flight,
                 SurfaceGrip, Rig} composed from small pure modules.
                 Phase 1 holds the contracts: ActorId, PlayerId,
@@ -138,6 +149,15 @@ src/
                 world/objects, this is to world/weather and its solar
                 clock: the only place a reading meets a light. Added in
                 Phase 5.
+  tombs/        the TOMBS laboratory's renderer: LabView (the building
+                a LabLayout describes, batched into one InstancedMesh per
+                surface, with the two lamp sets and the array's rings)
+                and labLook (pure: what each surface is made of, and how
+                dark the room goes on emergency power). What terrain/ is
+                to world/heightfield and flora/ to world/objects, this is
+                to world/tombs: the only place a floor plan meets a mesh,
+                and the ONE place local metres become world units. Added
+                in the TOMBS milestone.
   camera/       FollowCamera + CameraOwnership. Phase 0 has FreeFlyCamera
                 only (under perf/).
   input/        keyboard / pointer / touch (Input.ts, DOM) → one shared
