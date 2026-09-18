@@ -415,9 +415,26 @@ describe('the TOMBS laboratory as planned', () => {
     const emergency = here.filter((l) => l.mode === 'emergency');
     expect(normal.length).toBeGreaterThan(0);
     expect(emergency.length).toBeGreaterThan(0);
-    // The emergency set is the smaller and the dimmer one: the change reads as a loss.
+    // THE CHANGE READS AS A LOSS — but the quantity that has to fall is
+    // the SET's output, not one lamp's. This used to compare a single
+    // emergency lamp's intensity with a single normal one's and demand it
+    // be lower, and `probe:tombs` photographed what that produced: a
+    // control room too dark to work in, which is the wrong scene, because
+    // chapter 2 has Jack and Sarah still at the consoles after the lever,
+    // reading a boundary off a screen. An emergency luminaire is a
+    // BRIGHTER focused unit; what makes the room an emergency is that
+    // there are three of them instead of eight and they are deep red,
+    // whose luminance is well under half the white one's.
+    //
+    // So: fewer lamps, and less light in total, weighted by the colour
+    // each actually emits. That still fails the day somebody makes the
+    // emergency state the brighter one, which is what the rule is for.
     expect(emergency.length).toBeLessThan(normal.length);
-    expect(emergency[0].intensity).toBeLessThan(normal[0].intensity);
+    const rec709 = (c: number): number =>
+      (0.2126 * ((c >> 16) & 0xff) + 0.7152 * ((c >> 8) & 0xff) + 0.0722 * (c & 0xff)) / 255;
+    const output = (set: typeof here): number =>
+      set.reduce((sum, l) => sum + l.intensity * rec709(l.colour), 0);
+    expect(output(emergency)).toBeLessThan(output(normal) / 2);
     for (const room of ROOM_IDS) {
       expect(lab.lamps.some((l) => l.room === room && l.mode === 'normal'), `${room} has no lighting`).toBe(true);
       expect(lab.lamps.some((l) => l.room === room && l.mode === 'emergency'), `${room} has no emergency lighting`).toBe(true);

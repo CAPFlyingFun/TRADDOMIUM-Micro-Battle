@@ -150,10 +150,28 @@ describe('the room went dark', () => {
     expect(normal.r).toBeLessThan(normal.b);
   });
 
+  /**
+   * THE CEILING IS 4, AND IT USED TO BE 1 — which was an assumption about
+   * three rather than a fact about it. `AmbientLight.intensity` has no
+   * upper bound; 1 only reads as "sane" if you also assume the surfaces
+   * are bright enough to do the rest of the work.
+   *
+   * They are not, and `probe:tombs` measured it: a pixel of this palette's
+   * floor came back RGB(3, 6, 8) and a pixel of its wall RGB(36, 48, 46).
+   * The reason is that a material's colour is sRGB and its albedo is
+   * LINEAR — the floor's 0x4e5459 is 0.31 as a hex and 0.08 as an albedo —
+   * so an interior with no sky in it, lit to 1, is a black room whatever
+   * its palette says. Raising the floor's own colour was tried first and
+   * moved the pixel by three levels; the light is the lever, not the paint.
+   *
+   * 4 is a bound on carelessness, not a target: what the two states have
+   * to keep is the RELATIONSHIP the tests above pin, and this one only
+   * stops either of them running away.
+   */
   it('keeps both intensities inside a sane range', () => {
     for (const mode of LIGHT_MODES) {
       expect(LIGHTING[mode].ambientIntensity, mode).toBeGreaterThan(0);
-      expect(LIGHTING[mode].ambientIntensity, mode).toBeLessThanOrEqual(1);
+      expect(LIGHTING[mode].ambientIntensity, mode).toBeLessThanOrEqual(4);
     }
   });
 });
@@ -185,11 +203,26 @@ describe('luminance', () => {
     expect(luminance(0x0000ff)).toBeCloseTo(0.0722, 6);
   });
 
-  it('puts the floor below every other surface — a lit room reads as light falling on something', () => {
+  /**
+   * The two exemptions are DISPLAY FACES, not room surfaces, and both are
+   * dark by design: a monitor is dark glass, and a readout's colour is
+   * the BEZEL its emissive sits in. `readout` joined `screen` here when
+   * `probe:tombs` photographed a floor that came back pure black in every
+   * shot — the rule below had been holding the floor under a bezel rather
+   * than under the building, which is not what it is for. The rule itself
+   * is unchanged: of the things a room is MADE of, the floor is the
+   * darkest, so light falling on it reads as light.
+   */
+  it('puts the floor below every surface the room is made of — a lit room reads as light falling on something', () => {
     const floor = luminance(LOOK.floor.colour);
+    const faces: readonly Surface[] = ['screen', 'readout'];
     for (const surface of CONTRACT) {
-      if (surface === 'floor' || surface === 'screen') continue;
+      if (surface === 'floor' || faces.includes(surface)) continue;
       expect(luminance(LOOK[surface].colour), surface).toBeGreaterThan(floor);
     }
+  });
+
+  it('keeps the floor dark enough to be a floor — it is still the darkest thing underfoot', () => {
+    expect(luminance(LOOK.floor.colour)).toBeLessThan(luminance(LOOK.wall.colour) / 2);
   });
 });

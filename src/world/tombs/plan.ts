@@ -281,7 +281,21 @@ const NORMAL_COLOUR = 0xdfe6f2;
 /** Ch 2's emergency lighting: red, and dimmer than what it replaces. */
 const EMERGENCY_COLOUR = 0xff3b21;
 const NORMAL_INTENSITY = 1.0;
-const EMERGENCY_INTENSITY = 0.45;
+/**
+ * EARNED AT THE PROBE, not guessed. It began at 0.45 — half a normal
+ * lamp, on the reasoning that emergency light is dim light — and
+ * `probe:tombs` photographed a control room nobody could have worked in,
+ * which is the wrong scene: chapter 2 has Jack and Sarah still at the
+ * consoles after the lever, reading a boundary off a screen.
+ *
+ * So an emergency luminaire is BRIGHTER than a ceiling panel, and what
+ * makes the room read as an emergency is that there are three of them
+ * instead of eight and they are deep red — a colour whose luminance is a
+ * fifth of the white one's before any intensity is applied. The darkness
+ * is the AMBIENT's job (`tombs/labLook.ts`, a tenth of the normal
+ * state); the lamp's job is to be a pool of light in it.
+ */
+const EMERGENCY_INTENSITY = 1.6;
 /** A lamp carries about this many room-heights before it is not worth drawing. */
 const LAMP_REACH_PER_METRE = 2.4;
 
@@ -291,6 +305,9 @@ const PANEL_DEEP = 0.6;
 const PANEL_THICK = 0.06;
 /** How much of its slot a strip light fills, leaving a dark joint between runs. */
 const STRIP_FILL = 0.8;
+
+/** The dome an emergency lamp sits in: small, so the two sets never read as one row of fittings. */
+const EMERGENCY_FITTING = vec(0.22, 0.14, 0.22);
 
 /** Desk, console and cabinet heights, in one place so a room reads consistently. */
 const DESK_HEIGHT = 0.75;
@@ -662,7 +679,15 @@ function openingTrim(b: Build, o: OpeningSpec, aperture: Box): void {
 // Lighting: both sets, in every room, at once
 // ---------------------------------------------------------------------------
 
-function lamp(b: Build, id: string, room: RoomId, at: Vec3, mode: LightMode, ceiling: number): void {
+/**
+ * A lamp AND the fixture you see it in — one object, because they are
+ * one thing. The plan sizes the fixture because the plan knows the room;
+ * `tombs/LabView` draws it and darkens it with the lever. Neither emits
+ * a slab for it: a lamp that were both a slab and a fitting would be
+ * drawn twice and only half of it would obey the lever, which is exactly
+ * the bug this shape was introduced to close.
+ */
+function lamp(b: Build, id: string, room: RoomId, at: Vec3, mode: LightMode, ceiling: number, fitting: Vec3): void {
   const lit: Lamp = {
     id,
     room,
@@ -671,6 +696,7 @@ function lamp(b: Build, id: string, room: RoomId, at: Vec3, mode: LightMode, cei
     colour: mode === 'normal' ? NORMAL_COLOUR : EMERGENCY_COLOUR,
     intensity: mode === 'normal' ? NORMAL_INTENSITY : EMERGENCY_INTENSITY,
     reach: ceiling * LAMP_REACH_PER_METRE,
+    fitting,
   };
   b.lamps.push(lit);
 }
@@ -679,20 +705,18 @@ function lightsOf(b: Build, r: Interior): void {
   const plan = LIGHTING[r.id];
   const wide = plan.strip ? ((r.x1 - r.x0) / plan.cols) * STRIP_FILL : PANEL_WIDE;
   let n = 0;
+  const panel = vec(wide, PANEL_THICK, PANEL_DEEP);
   for (const x of spread(r.x0, r.x1, plan.cols)) {
     for (const z of spread(r.z0, r.z1, plan.rows)) {
       n += 1;
-      slab(b, `light-panel:${r.id}:${n}`, r.id, 'readout',
-        box(vec(x, r.ceiling - PANEL_THICK / 2, z), vec(wide, PANEL_THICK, PANEL_DEEP)), false);
-      lamp(b, `lamp:${r.id}:normal:${n}`, r.id, vec(x, r.ceiling - PANEL_THICK, z), 'normal', r.ceiling);
+      lamp(b, `lamp:${r.id}:normal:${n}`, r.id, vec(x, r.ceiling - PANEL_THICK / 2, z), 'normal', r.ceiling, panel);
     }
   }
   // Ch 2: fewer, dimmer and red. High on the wall line rather than in the
   // ceiling grid, so the two sets never read as one row of fittings.
   spread(r.x0, r.x1, plan.emergency).forEach((x, i) => {
     const at = vec(x, r.ceiling - 0.3, midZ(r));
-    slab(b, `emergency-lamp:${r.id}:${i + 1}`, r.id, 'accent', box(at, vec(0.22, 0.14, 0.22)), false);
-    lamp(b, `lamp:${r.id}:emergency:${i + 1}`, r.id, at, 'emergency', r.ceiling);
+    lamp(b, `lamp:${r.id}:emergency:${i + 1}`, r.id, at, 'emergency', r.ceiling, EMERGENCY_FITTING);
   });
 }
 
@@ -759,10 +783,11 @@ function laboratoryFit(b: Build, r: Interior, aisleX: number): void {
 
 /** The corridor from the laboratory to the main control room (ch 2). */
 function corridorFit(b: Build, r: Interior): void {
-  // Ch 2: "another alarm sounded overhead". One beacon, over the middle.
+  // Ch 2: "another alarm sounded overhead". One beacon, over the middle —
+  // a lamp whose fitting IS the beacon, so it goes red with the set
+  // rather than sitting there as a dead lump beside a light.
   const beaconAt = vec(midX(r), r.ceiling - 0.25, r.z0 + 0.5);
-  slab(b, 'corridor-beacon', r.id, 'accent', box(beaconAt, vec(0.3, 0.22, 0.3)), false);
-  lamp(b, 'lamp:corridor:emergency:beacon', r.id, beaconAt, 'emergency', r.ceiling);
+  lamp(b, 'lamp:corridor:emergency:beacon', r.id, beaconAt, 'emergency', r.ceiling, vec(0.3, 0.22, 0.3));
   // The cable tray the corridor carries the building's signals in. Ours:
   // the manuscript walks the corridor, it does not describe its ceiling.
   slab(b, 'corridor-cable-tray', r.id, 'metal',

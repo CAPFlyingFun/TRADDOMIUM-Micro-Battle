@@ -35,7 +35,8 @@
     "probe:sense": "node scripts/probe-sense.mjs",
     "probe:lab": "node scripts/probe-lab.mjs",
     "bake:humans": "node scripts/bakeHumans.mjs",
-    "probe:humans": "node scripts/probe-humans.mjs"
+    "probe:humans": "node scripts/probe-humans.mjs",
+    "probe:tombs": "node scripts/probe-tombs.mjs"
   },
   "dependencies": {
     "three": "^0.185.0"

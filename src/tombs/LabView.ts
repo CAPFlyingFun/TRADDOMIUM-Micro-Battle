@@ -141,7 +141,7 @@ import { UNITS_PER_METRE } from '../world/dem';
 import { TOMBS_GROUND_UNITS } from '../world/tombs/site';
 import type { LabLayout, Lamp, LightMode, Pillar, RoomId, Slab, Surface } from '../world/tombs/types';
 import {
-  FITTING, FITTING_DARK, FITTING_LIT, LIGHTING, RING_LOOK, lookFor,
+  FITTING_DARK, FITTING_LIT, LIGHTING, RING_LOOK, lookFor,
   type LightingLook, type SurfaceLook,
 } from './labLook';
 
@@ -167,7 +167,7 @@ const TAU = Math.PI * 2;
  * world is drawn is the right thing to read it from.
  */
 const LIGHTS_AT: Readonly<Record<DetailTier, number>> = Object.freeze({
-  'ultra-low': 2, low: 3, medium: 4, high: 6, 'ultra-high': 8,
+  'ultra-low': 3, low: 4, medium: 6, high: 8, 'ultra-high': 12,
 });
 
 /** Sides on the unit cylinder every pillar is drawn from. A round thing at arm's length; twelve is already a circle. */
@@ -510,14 +510,16 @@ export class LabView {
         this.sets.push({ mode, lights: [], fittings: null, material: null, lamps: 0, roomsLit: 0, roomsWithLamps: 0 });
         continue;
       }
-      const size = FITTING[mode];
       const material = this.track(new THREE.MeshBasicMaterial({ color: FITTING_LIT, vertexColors: true, fog: true }));
       const mesh = new THREE.InstancedMesh(this.box(true), material, lamps.length);
       const tints = new THREE.InstancedBufferAttribute(new Float32Array(lamps.length * 3), 3);
       mesh.instanceColor = tints;
       for (let i = 0; i < lamps.length; i += 1) {
         const lamp = lamps[i];
-        M4.makeScale(size.width * M, size.height * M, size.depth * M);
+        // THE PLAN SIZES THE FITTING, this file draws it. One owner: when
+        // the plan drew its own emissive panel as well, pulling the lever
+        // darkened this fitting and left that panel burning.
+        M4.makeScale(lamp.fitting.x * M, lamp.fitting.y * M, lamp.fitting.z * M);
         M4.setPosition(lamp.at.x * M, lamp.at.y * M, lamp.at.z * M);
         mesh.setMatrixAt(i, M4);
         COLOUR.setHex(lamp.colour);

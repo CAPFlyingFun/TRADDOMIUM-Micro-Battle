@@ -159,6 +159,20 @@ export interface Lamp {
   readonly intensity: number;
   /** How far it carries, in metres. */
   readonly reach: number;
+  /**
+   * The FIXTURE the lamp is housed in — its full extents in local
+   * metres, drawn where the lamp is.
+   *
+   * It lives on the lamp because a lamp and the thing you can see it in
+   * are ONE object with ONE owner, and the day they had two the ceiling
+   * was drawn twice: the plan emitted an emissive panel and the renderer
+   * emitted a fitting in the same place, so pulling the shutdown lever
+   * darkened one of them and the room stayed lit by the other. The plan
+   * SIZES it, because the plan knows the room — a corridor wants a strip
+   * the length of its bay, a chamber wants a bay panel. The renderer
+   * DRAWS it and switches it, because the renderer owns the lever.
+   */
+  readonly fitting: Vec3;
 }
 
 /** What the player does at an interaction point. */

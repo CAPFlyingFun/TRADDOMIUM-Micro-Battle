@@ -110,7 +110,7 @@ export const METALLIC = 0.5;
 export const LOOK: Readonly<Record<Surface, SurfaceLook>> = Object.freeze({
   // Dark rubber sheet. Almost matte, barely a sheen — a lamp on this
   // floor is a wide soft patch, which is what makes a corridor read long.
-  floor: Object.freeze({ colour: 0x22262a, roughness: 0.94, metalness: 0.02, opacity: 1, emissive: 0x000000, emissiveIntensity: 0 }),
+  floor: Object.freeze({ colour: 0x4e5459, roughness: 0.94, metalness: 0.02, opacity: 1, emissive: 0x000000, emissiveIntensity: 0 }),
   // Painted block. The building's one restful hue.
   wall: Object.freeze({ colour: 0xa9b4ab, roughness: 0.82, metalness: 0.02, opacity: 1, emissive: 0x000000, emissiveIntensity: 0 }),
   // The wall, one step down: a ceiling is lit edge-on and reads darker.
@@ -173,8 +173,8 @@ export interface LightingLook {
  * an emergency that is merely a colour grade.
  */
 export const LIGHTING: Readonly<Record<LightMode, LightingLook>> = Object.freeze({
-  normal: Object.freeze({ ambient: 0xbcd0d4, ambientIntensity: 0.55, fog: 0x1b2226 }),
-  emergency: Object.freeze({ ambient: 0x7e1d16, ambientIntensity: 0.13, fog: 0x0b0405 }),
+  normal: Object.freeze({ ambient: 0xbcd0d4, ambientIntensity: 1.70, fog: 0x1b2226 }),
+  emergency: Object.freeze({ ambient: 0x8f3128, ambientIntensity: 0.34, fog: 0x140708 }),
 });
 
 /** Both states, derived from `LIGHTING` so they cannot drift. */
