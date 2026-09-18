@@ -100,7 +100,7 @@ const HUMANS = [
   // looked for "the black, unsaturated thing on the chest", found 35,884
   // texels of Jack's dark clothing and repainted 5,572 of them. A detector
   // that cannot tell a lanyard from a dark shirt does not get to decide.
-  { master: 'Sarah-Lab.glb', out: 'sarah.glb', who: 'Sarah Bennett', lanyard: true },
+  { master: 'Sarah-Lab.glb', out: 'sarah.glb', who: 'Sarah Bennett', lanyard: false },
 ];
 
 /**
