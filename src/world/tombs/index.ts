@@ -15,3 +15,7 @@ export {
   type Box, type Doing, type Doorway, type Interaction, type LabLayout, type Lamp,
   type LightMode, type Pillar, type Ring, type Room, type RoomId, type Slab, type Surface, type Vec3,
 } from './types';
+export {
+  ARRAY_SPINS, LAB_SPEC, planLab,
+  type LabSpec, type OpeningKind, type OpeningSpec, type RoomSpec,
+} from './plan';
