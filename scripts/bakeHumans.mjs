@@ -93,14 +93,14 @@ const RELEASE = 'https://github.com/CAPFlyingFun/TRADDOMIUM-Micro-Battle/release
 
 /** Master file → what the game asks the loader for. */
 const HUMANS = [
-  { master: 'Jack-Lab.glb', out: 'jack.glb', who: 'Jack Bennett', lanyard: false },
-  // Sarah is the one wearing an ID on a cord, and the only one whose base
-  // colour is repaired. The flag is DELIBERATELY a fact about the master
-  // rather than something the bake works out: the first version of this
-  // looked for "the black, unsaturated thing on the chest", found 35,884
-  // texels of Jack's dark clothing and repainted 5,572 of them. A detector
-  // that cannot tell a lanyard from a dark shirt does not get to decide.
-  { master: 'Sarah-Lab.glb', out: 'sarah.glb', who: 'Sarah Bennett', lanyard: false },
+  { master: 'Jack-Lab.glb', out: 'jack.glb', who: 'Jack Bennett', panel: null },
+  // `panel` names the front-panel file a body gets, or null for none. It is
+  // DELIBERATELY a fact about the master rather than something the bake works
+  // out: an earlier version asked the texture "what is black and unsaturated
+  // on the chest", found 35,884 texels of Jack's dark clothing and repainted
+  // 5,572 of them. A detector that cannot tell a lanyard from a dark shirt
+  // does not get to decide.
+  { master: 'Sarah-Lab.glb', out: 'sarah.glb', who: 'Sarah Bennett', panel: 'sarah' },
 ];
 
 /**
@@ -182,95 +182,56 @@ async function liftRoughness(doc, who) {
 }
 
 // ---------------------------------------------------------------------------
-// The lanyard's white fringe
+// The front panel: a coherent picture of a body that has no coherent atlas
 // ---------------------------------------------------------------------------
 
 /**
- * How far off the cord the fringe reaches, in metres, and how wide a
- * neighbourhood the repair reads. Both EARNED at the probe rather than
- * guessed: 8 mm and 16 mm removed 18% of the fringe and touched nothing on
- * the badge, where 4 mm removed 13% and clipped it.
+ * THE PANEL — an orthographic front view of the chest, and the answer to a
+ * question Joshua asked on 2026-09-18: "is there a way to retexture the model
+ * and make your own UV image?"
+ *
+ * Yes, and this is it. Sarah's own atlas is about 103,000 PER-TRIANGLE
+ * ISLANDS: two patches that touch in the image are unrelated scraps of body,
+ * so nothing that works on pictures works on it. Painting it, cloning in it,
+ * running an upscaler or an AI inpaint over it all bleed one island into the
+ * next — measured, on an enhanced copy: 5.7% of texels inside islands changed
+ * CLASS (29,485 shirt to skin, 12,160 cord to shirt) and every triangle came
+ * back as a visible facet.
+ *
+ * So the chest is projected onto a plane. Each panel pixel GATHERS the nearest
+ * front-facing texel to it, keeping the frontmost surface so the badge is not
+ * sampled through to the shirt behind it, and what comes out is an ordinary
+ * picture: the shirt one region, the lanyard one strip, the badge one
+ * rectangle with its printing legible. In THAT, a repair is a repair.
+ *
+ * Two ways to use it, and the second is the point:
+ *
+ *  - `npm run bake:humans -- --panels` writes each panel to
+ *    `art/humans/panels/<who>-front.png`. Paint that file however you like —
+ *    any editor, any tool — save it beside the original as
+ *    `<who>-front-edited.png`, and the next bake projects your changes onto
+ *    the model. Only the pixels you CHANGED are written back, so nothing else
+ *    is touched and nothing is softened by a round trip.
+ *  - With no edited file, the bake runs the automatic repair below.
+ *
+ * The masters are never written. The panel is a lens, not a new asset.
  */
-const FRINGE_REACH = 0.008;
-const FRINGE_READ = 0.016;
-/** How far off the local tangent plane a neighbour may lie and still count. */
-const FRINGE_SHEET = 0.005;
-/** Brighter than this is not lanyard. A black cord is nowhere near it. */
-const FRINGE_BRIGHT = 105;
-/** And this much of what surrounds a texel must actually BE cord. */
-const FRINGE_NEED = 0.07;
+const PANEL = Object.freeze({ X0: -0.26, X1: 0.26, Y0: 0.92, Y1: 1.58, WIDE: 780 });
+const PANEL_DIR = join(MASTERS, 'panels');
 
-/**
- * REPAIR THE WHITE FRINGE ALONG SARAH'S LANYARD — in 3D, because the atlas
- * cannot be painted.
- *
- * Joshua, 2026-09-18: "around her neck where the lanyard hangs, the textures
- * are like messed up in a few spots and behind her badge, is a white patch on
- * her shirt. Any chance to fix it by tweaking the image?"
- *
- * WHY NOT BY TWEAKING THE IMAGE. Her texture is not a picture of a person; it
- * is ~103,000 PER-TRIANGLE ISLANDS, so two patches that touch in the atlas are
- * unrelated scraps of body. Any spatially coherent edit — an AI repaint, a
- * clone brush, an upscaler — bleeds one island into its neighbour, which is
- * how "sharpen the borders" turns every triangle into a visible facet. That
- * was measured on an enhanced copy of this very texture: 5.7% of texels inside
- * islands changed CLASS (29,485 shirt to skin, 12,160 cord to shirt) and the
- * fringe got slightly worse.
- *
- * So the repair is done where the model is coherent: SPACE. Every texel is
- * given the position and normal of the surface it covers, and a neighbour
- * means "near it on her body", never "near it in the picture". Two conditions
- * do the work:
- *
- *  - A neighbour must lie on the SAME SHEET (within a few mm of the local
- *    tangent plane). The badge is a flat card standing ~10 mm proud of the
- *    shirt, so a plain 3D ball around it is mostly SHIRT — which made the
- *    badge read as a bright outlier against burgundy and very nearly painted
- *    it out. The sheet test keeps the badge's neighbours on the badge.
- *  - The colour a texel is repaired WITH must be cord: dark AND unsaturated.
- *    Burgundy is dark too (luminance about 52), and when it was allowed into
- *    that pool the repair painted dark burgundy nicks across her collar.
- *
- * WHAT IT DOES NOT DO, stated plainly: it removes about a fifth of the fringe.
- * The fringe runs the whole length of the cord, so locally it IS the surface
- * and no outlier test can see all of it. Removing the rest means repainting
- * the cord as an object, which is a bigger job than a bake step.
- *
- * WHO IT RUNS ON IS A FACT ABOUT THE MASTER, not a guess. Only Sarah wears
- * the ID, and `HUMANS[].lanyard` says so — because the first version of this
- * asked the texture instead, found 35,884 texels of Jack's dark clothing
- * answering to "black and unsaturated on the chest", and repainted 5,572 of
- * them.
- */
-async function repairLanyard(doc, who) {
-  const prims = doc.getRoot().listMeshes().flatMap((m) => m.listPrimitives());
-  const prim = prims.sort((a, b) => b.getAttribute('POSITION').getCount() - a.getAttribute('POSITION').getCount())[0];
-  if (!prim) return;
-  const material = prim.getMaterial();
-  const tex = material?.getBaseColorTexture();
-  const uvAttr = prim.getAttribute('TEXCOORD_0');
-  const nAttr = prim.getAttribute('NORMAL');
-  if (!tex || !uvAttr || !nAttr || !prim.getIndices()) return;
-
-  const [W, H] = tex.getSize();
-  if (W !== H) return;
-  const S = W;
-  const { data: img } = await sharp(Buffer.from(tex.getImage())).removeAlpha().raw()
-    .toBuffer({ resolveWithObject: true });
-
-  // Every texel learns which piece of her it covers. glTF puts (0,0) at the
-  // TOP-LEFT, so the row is v*S — the one convention that had to be right, and
-  // the body itself settled it: with v*S her chest reads burgundy 81% of the
-  // time, flipped only 57%.
+/** Per-texel position and normal, by rasterising the mesh into its own atlas. */
+function texelMap(prim, S) {
   const P = prim.getAttribute('POSITION').getArray();
-  const N = nAttr.getArray();
-  const UV = uvAttr.getArray();
+  const N = prim.getAttribute('NORMAL').getArray();
+  const UV = prim.getAttribute('TEXCOORD_0').getArray();
   const IDX = prim.getIndices().getArray();
   const pos = new Float32Array(S * S * 3);
   const nrm = new Float32Array(S * S * 3);
   const ok = new Uint8Array(S * S);
   for (let t = 0; t < IDX.length; t += 3) {
     const v = [IDX[t], IDX[t + 1], IDX[t + 2]];
+    // glTF puts (0,0) at the TOP-LEFT, so the row is v*S. The body settled
+    // this: that way her chest reads burgundy 81% of the time, flipped 57%.
     const ux = v.map((i) => UV[i * 2] * S);
     const uy = v.map((i) => UV[i * 2 + 1] * S);
     const x0 = Math.floor(Math.min(...ux)) - 1, x1 = Math.ceil(Math.max(...ux)) + 1;
@@ -296,91 +257,201 @@ async function repairLanyard(doc, who) {
       ok[i] = 1;
     }
   }
+  return { pos, nrm, ok };
+}
 
-  const lum = (i) => 0.2126 * img[i * 3] + 0.7152 * img[i * 3 + 1] + 0.0722 * img[i * 3 + 2];
-  const sat = (i) => {
-    const mx = Math.max(img[i * 3], img[i * 3 + 1], img[i * 3 + 2]);
-    const mn = Math.min(img[i * 3], img[i * 3 + 1], img[i * 3 + 2]);
+/** Which panel pixel a texel lands on, or null when it is not on the front. */
+function panelPixelOf(map, i, PW, PH) {
+  const { pos, nrm, ok } = map;
+  if (!ok[i] || nrm[i * 3 + 2] < 0.10) return null;
+  const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2];
+  if (x < PANEL.X0 || x > PANEL.X1 || y < PANEL.Y0 || y > PANEL.Y1 || z <= 0) return null;
+  const fx = Math.round((x - PANEL.X0) / (PANEL.X1 - PANEL.X0) * (PW - 1));
+  const fy = Math.round((PANEL.Y1 - y) / (PANEL.Y1 - PANEL.Y0) * (PH - 1));
+  if (fx < 0 || fy < 0 || fx >= PW || fy >= PH) return null;
+  return fy * PW + fx;
+}
+
+/** The picture itself: every pixel gathers the nearest front-facing texel. */
+function buildPanel(img, map, S) {
+  const PW = PANEL.WIDE;
+  const PH = Math.round(PW * (PANEL.Y1 - PANEL.Y0) / (PANEL.X1 - PANEL.X0));
+  const CELL = 4;
+  const cols = Math.ceil(PW / CELL), rows = Math.ceil(PH / CELL);
+  const bins = Array.from({ length: cols * rows }, () => []);
+  const at = new Float32Array(S * S * 2);
+  for (let i = 0; i < S * S; i += 1) {
+    const p = panelPixelOf(map, i, PW, PH);
+    if (p === null) continue;
+    const fx = p % PW, fy = (p / PW) | 0;
+    at[i * 2] = fx; at[i * 2 + 1] = fy;
+    bins[Math.min(rows - 1, (fy / CELL) | 0) * cols + Math.min(cols - 1, (fx / CELL) | 0)].push(i);
+  }
+  const panel = Buffer.alloc(PW * PH * 3);
+  const covered = new Uint8Array(PW * PH);
+  for (let py = 0; py < PH; py += 1) for (let px = 0; px < PW; px += 1) {
+    const c0 = (px / CELL) | 0, r0 = (py / CELL) | 0;
+    let best = -1, bestD = Infinity, bestZ = -99;
+    for (let ring = 1; ring <= 6 && best < 0; ring += 1)
+    for (let dr = -ring; dr <= ring; dr += 1) for (let dc = -ring; dc <= ring; dc += 1) {
+      const c = c0 + dc, r = r0 + dr;
+      if (c < 0 || r < 0 || c >= cols || r >= rows) continue;
+      for (const i of bins[r * cols + c]) {
+        const dx = at[i * 2] - px, dy = at[i * 2 + 1] - py;
+        const dd = dx * dx + dy * dy;
+        const z = map.pos[i * 3 + 2];
+        // Nearest wins, but the FRONTMOST surface wins a tie: the badge stands
+        // proud of the shirt and must not be sampled through.
+        if (z > bestZ + 0.004 || (Math.abs(z - bestZ) <= 0.004 && dd < bestD)) { best = i; bestD = dd; bestZ = z; }
+      }
+    }
+    if (best < 0) continue;
+    const p = py * PW + px;
+    covered[p] = 1;
+    panel[p * 3] = img[best * 3]; panel[p * 3 + 1] = img[best * 3 + 1]; panel[p * 3 + 2] = img[best * 3 + 2];
+  }
+  return { panel, PW, PH, covered };
+}
+
+/**
+ * The automatic repair, done in the panel where the cord is a SHAPE.
+ *
+ * Seed the cord where it is unambiguous — dark and unsaturated — then close
+ * the holes the fringe bit out of it, so the strip becomes one object. Inside
+ * it, anything that is not cord is the white bleed and is replaced by the cord
+ * around it. In one ring outside it, pale pixels are the halo on the shirt and
+ * are replaced by the shirt BEYOND the halo, never by the cord.
+ */
+function autoRepairPanel(panel, covered, PW, PH) {
+  const lum = (d, p) => 0.2126 * d[p * 3] + 0.7152 * d[p * 3 + 1] + 0.0722 * d[p * 3 + 2];
+  const sat = (d, p) => {
+    const mx = Math.max(d[p * 3], d[p * 3 + 1], d[p * 3 + 2]);
+    const mn = Math.min(d[p * 3], d[p * 3 + 1], d[p * 3 + 2]);
     return mx === 0 ? 0 : (mx - mn) / mx;
   };
-  const onChest = (i) => {
-    const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2];
-    return y > 0.96 && y < 1.52 && z > 0 && Math.abs(x) < 0.22;
+  const disc = (src, r, erode) => {
+    const dst = new Uint8Array(PW * PH);
+    for (let y = 0; y < PH; y += 1) for (let x = 0; x < PW; x += 1) {
+      let v = erode ? 1 : 0;
+      for (let dy = -r; dy <= r && (erode ? v : !v); dy += 1) for (let dx = -r; dx <= r; dx += 1) {
+        if (dx * dx + dy * dy > r * r) continue;
+        const nx = x + dx, ny = y + dy;
+        const inside = nx >= 0 && ny >= 0 && nx < PW && ny < PH && src[ny * PW + nx];
+        if (erode) { if (!inside) { v = 0; break; } } else if (inside) { v = 1; break; }
+      }
+      dst[y * PW + x] = v;
+    }
+    return dst;
   };
-  // THE CORD IS FOUND BY ITS OWN COLOUR, not by a box drawn by hand: it is the
-  // only black, UNSATURATED thing on the front of her chest.
-  const seed = [];
-  for (let i = 0; i < S * S; i += 1) {
-    if (ok[i] && onChest(i) && lum(i) < 30 && sat(i) < 0.45) seed.push(i);
+  const seed = new Uint8Array(PW * PH);
+  for (let p = 0; p < PW * PH; p += 1) if (covered[p] && lum(panel, p) < 55 && sat(panel, p) < 0.55) seed[p] = 1;
+  const strip = disc(disc(seed, 4, false), 4, true);
+  const ring = disc(strip, 3, false);
+  for (let p = 0; p < PW * PH; p += 1) if (strip[p]) ring[p] = 0;
+  const out = Buffer.from(panel);
+  const median = (p, want, R, accept) => {
+    const x = p % PW, y = (p / PW) | 0;
+    const r = [], g = [], b = [];
+    for (let dy = -R; dy <= R; dy += 1) for (let dx = -R; dx <= R; dx += 1) {
+      const nx = x + dx, ny = y + dy;
+      if (nx < 0 || ny < 0 || nx >= PW || ny >= PH) continue;
+      const q = ny * PW + nx;
+      if (!covered[q] || want[q] !== 1 || !accept(q)) continue;
+      r.push(panel[q * 3]); g.push(panel[q * 3 + 1]); b.push(panel[q * 3 + 2]);
+    }
+    if (r.length < 6) return null;
+    const m = (a) => { a.sort((u, v) => u - v); return a[a.length >> 1]; };
+    return [m(r), m(g), m(b)];
+  };
+  const notStrip = new Uint8Array(PW * PH);
+  for (let p = 0; p < PW * PH; p += 1) notStrip[p] = strip[p] || ring[p] ? 0 : 1;
+  let inside = 0, beside = 0;
+  for (let p = 0; p < PW * PH; p += 1) {
+    if (!strip[p] || !covered[p] || lum(panel, p) <= 80) continue;
+    const m = median(p, strip, 9, (q) => lum(panel, q) < 55 && sat(panel, q) < 0.55);
+    if (!m) continue;
+    out[p * 3] = m[0]; out[p * 3 + 1] = m[1]; out[p * 3 + 2] = m[2]; inside += 1;
   }
-  if (seed.length < 500) {
-    console.log(`  ${who}: no lanyard found, base colour left as it is`);
+  for (let p = 0; p < PW * PH; p += 1) {
+    if (!ring[p] || !covered[p]) continue;
+    if (!(sat(panel, p) < 0.34 && lum(panel, p) > 80)) continue;
+    const m = median(p, notStrip, 11, (q) => lum(panel, q) > 25);
+    if (!m) continue;
+    out[p * 3] = m[0]; out[p * 3 + 1] = m[1]; out[p * 3 + 2] = m[2]; beside += 1;
+  }
+  return { fixed: out, inside, beside };
+}
+
+/**
+ * Build the panel for one body, repair it (or take the repair Joshua painted),
+ * and project ONLY WHAT CHANGED back onto the base colour. Writing the whole
+ * panel back would replace good texels with a resampled copy of themselves and
+ * soften everything it touched; writing the delta leaves the rest of her
+ * exactly as the master has it.
+ */
+async function panelPass(doc, who, key, exportOnly) {
+  const prims = doc.getRoot().listMeshes().flatMap((m) => m.listPrimitives());
+  const prim = prims.sort((a, b) => b.getAttribute('POSITION').getCount() - a.getAttribute('POSITION').getCount())[0];
+  const tex = prim?.getMaterial()?.getBaseColorTexture();
+  if (!prim || !tex || !prim.getAttribute('NORMAL') || !prim.getAttribute('TEXCOORD_0') || !prim.getIndices()) return;
+  const [W, H] = tex.getSize();
+  if (W !== H) return;
+  const S = W;
+  const { data: img } = await sharp(Buffer.from(tex.getImage())).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+  const map = texelMap(prim, S);
+  const { panel, PW, PH, covered } = buildPanel(img, map, S);
+
+  if (exportOnly) {
+    mkdirSync(PANEL_DIR, { recursive: true });
+    const file = join(PANEL_DIR, `${key}-front.png`);
+    await sharp(panel, { raw: { width: PW, height: PH, channels: 3 } }).png().toFile(file);
+    console.log(`  ${who}: panel ${PW}x${PH} (${((PANEL.X1 - PANEL.X0) * 1000 / PW).toFixed(2)} mm a pixel) -> ${file}`);
     return;
   }
-  const bucket = (a, cell) => {
-    const g = new Map();
-    for (const i of a) {
-      const k = `${Math.floor(pos[i * 3] / cell)},${Math.floor(pos[i * 3 + 1] / cell)},${Math.floor(pos[i * 3 + 2] / cell)}`;
-      let e = g.get(k); if (!e) { e = []; g.set(k, e); } e.push(i);
-    }
-    return g;
-  };
-  const around = (g, cell, i, fn) => {
-    const cx = Math.floor(pos[i * 3] / cell), cy = Math.floor(pos[i * 3 + 1] / cell), cz = Math.floor(pos[i * 3 + 2] / cell);
-    for (let dx = -1; dx <= 1; dx += 1) for (let dy = -1; dy <= 1; dy += 1) for (let dz = -1; dz <= 1; dz += 1) {
-      const e = g.get(`${cx + dx},${cy + dy},${cz + dz}`);
-      if (e) for (const j of e) if (fn(j) === false) return;
-    }
-  };
-  const sgrid = bucket(seed, FRINGE_REACH);
-  const RE2 = FRINGE_REACH * FRINGE_REACH;
-  const roi = [];
-  for (let i = 0; i < S * S; i += 1) {
-    if (!ok[i] || !onChest(i)) continue;
-    let hit = false;
-    around(sgrid, FRINGE_REACH, i, (j) => {
-      const ax = pos[j * 3] - pos[i * 3], ay = pos[j * 3 + 1] - pos[i * 3 + 1], az = pos[j * 3 + 2] - pos[i * 3 + 2];
-      if (ax * ax + ay * ay + az * az <= RE2) { hit = true; return false; }
-      return true;
-    });
-    if (hit) roi.push(i);
+
+  const edited = join(PANEL_DIR, `${key}-front-edited.png`);
+  let fixed;
+  let note;
+  if (existsSync(edited)) {
+    const { data, info } = await sharp(edited).resize(PW, PH, { kernel: 'nearest' }).removeAlpha().raw()
+      .toBuffer({ resolveWithObject: true });
+    if (info.width !== PW || info.height !== PH) return;
+    fixed = data;
+    note = `painted panel ${key}-front-edited.png`;
+  } else {
+    const auto = autoRepairPanel(panel, covered, PW, PH);
+    fixed = auto.fixed;
+    note = `auto: ${auto.inside} px inside the cord, ${auto.beside} px of halo beside it`;
   }
-  const grid = bucket(roi, FRINGE_READ);
-  const R2 = FRINGE_READ * FRINGE_READ;
-  const med = (a) => { a.sort((p, q) => p - q); return a[a.length >> 1]; };
+  const moved = new Uint8Array(PW * PH);
+  let nMoved = 0;
+  for (let p = 0; p < PW * PH; p += 1) {
+    if (panel[p * 3] !== fixed[p * 3] || panel[p * 3 + 1] !== fixed[p * 3 + 1] || panel[p * 3 + 2] !== fixed[p * 3 + 2]) {
+      moved[p] = 1; nMoved += 1;
+    }
+  }
+  if (nMoved === 0) { console.log(`  ${who}: panel unchanged, base colour left as it is`); return; }
   const out = Buffer.from(img);
   const changed = new Uint8Array(S * S);
-  let fixed = 0;
-  for (const i of roi) {
-    if (lum(i) <= FRINGE_BRIGHT) continue;
-    const nx = nrm[i * 3], ny = nrm[i * 3 + 1], nz = nrm[i * 3 + 2];
-    const js = [];
-    around(grid, FRINGE_READ, i, (j) => {
-      const ax = pos[j * 3] - pos[i * 3], ay = pos[j * 3 + 1] - pos[i * 3 + 1], az = pos[j * 3 + 2] - pos[i * 3 + 2];
-      if (ax * ax + ay * ay + az * az > R2) return true;
-      if (Math.abs(ax * nx + ay * ny + az * nz) > FRINGE_SHEET) return true;
-      js.push(j); return true;
-    });
-    if (js.length < 10) continue;
-    const cord = js.filter((j) => lum(j) < 40 && sat(j) < 0.5);
-    if (cord.length < 8 || cord.length / js.length < FRINGE_NEED) continue;
-    out[i * 3] = med(cord.map((j) => img[j * 3]));
-    out[i * 3 + 1] = med(cord.map((j) => img[j * 3 + 1]));
-    out[i * 3 + 2] = med(cord.map((j) => img[j * 3 + 2]));
-    changed[i] = 1; fixed += 1;
+  let wrote = 0;
+  for (let i = 0; i < S * S; i += 1) {
+    const p = panelPixelOf(map, i, PW, PH);
+    if (p === null || !moved[p]) continue;
+    out[i * 3] = fixed[p * 3]; out[i * 3 + 1] = fixed[p * 3 + 1]; out[i * 3 + 2] = fixed[p * 3 + 2];
+    changed[i] = 1; wrote += 1;
   }
   // Bleed one texel into the gutter so bilinear sampling at an island's edge
   // cannot pull the old fringe back onto the surface.
   for (let y = 1; y < S - 1; y += 1) for (let x = 1; x < S - 1; x += 1) {
     const i = y * S + x;
-    if (ok[i] || changed[i]) continue;
+    if (map.ok[i] || changed[i]) continue;
     for (const j of [i - 1, i + 1, i - S, i + S]) if (changed[j]) {
       out[i * 3] = out[j * 3]; out[i * 3 + 1] = out[j * 3 + 1]; out[i * 3 + 2] = out[j * 3 + 2];
       break;
     }
   }
   tex.setImage(await sharp(out, { raw: { width: S, height: S, channels: 3 } }).png().toBuffer());
-  console.log(`  ${who}: lanyard fringe — cord ${seed.length} texels, ${roi.length} within reach, ${fixed} repaired`);
+  console.log(`  ${who}: ${note} — ${nMoved} panel px -> ${wrote} texels`);
 }
 
 async function main() {
@@ -394,6 +465,7 @@ async function main() {
     return;
   }
 
+  const PANELS_ONLY = process.argv.includes('--panels');
   await MeshoptEncoder.ready;
   const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'meshopt.encoder': MeshoptEncoder });
 
@@ -403,7 +475,9 @@ async function main() {
     const before = statSync(from).size;
     const doc = await io.read(from);
 
-    if (human.lanyard) await repairLanyard(doc, human.who);
+    if (human.panel) await panelPass(doc, human.who, human.panel, PANELS_ONLY);
+    // `--panels` only exports the pictures to paint; it writes no model.
+    if (PANELS_ONLY) continue;
     await liftRoughness(doc, human.who);
 
     // WHAT THE MAPS ARE WORTH, one slot at a time. `textureCompress` is

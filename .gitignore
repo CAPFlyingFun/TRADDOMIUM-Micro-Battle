@@ -32,4 +32,13 @@ probe-*.png
 # which already holds them unchanged and with a checksum (Joshua,
 # 2026-09-18: "Preserve the master GLBs unchanged"). `bake:humans` prints
 # the one-line fetch when the directory is empty.
-art/humans/
+art/humans/*
+
+# ...EXCEPT the front panels. `bake:panels` writes `<who>-front.png`, an
+# orthographic picture of the chest that CAN be painted — unlike the master
+# atlas, which is 103,000 per-triangle islands and where any ordinary image
+# edit bleeds one body part into another. A `<who>-front-edited.png` beside it
+# is hand work and belongs in the repository; the reference is committed with
+# it so an edit can be diffed without re-baking a 33 MB master.
+!art/humans/panels/
+!art/humans/panels/*.png

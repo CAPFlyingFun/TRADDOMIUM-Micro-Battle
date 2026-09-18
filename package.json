@@ -35,6 +35,7 @@
     "probe:sense": "node scripts/probe-sense.mjs",
     "probe:lab": "node scripts/probe-lab.mjs",
     "bake:humans": "node scripts/bakeHumans.mjs",
+    "bake:panels": "node scripts/bakeHumans.mjs --panels",
     "probe:humans": "node scripts/probe-humans.mjs",
     "probe:tombs": "node scripts/probe-tombs.mjs"
   },
