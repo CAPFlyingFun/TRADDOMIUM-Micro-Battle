@@ -22,3 +22,14 @@ probe-*.png
 # here so a future scratch-render rule (v0 had `*.png`) cannot drop them.
 !art/*.png
 !art/*.jpg
+
+# THE HUMAN MASTERS ARE NOT COMMITTED, and they are the one exception to
+# the rule above. Jack-Lab.glb and Sarah-Lab.glb are 45 MB and 33 MB —
+# 82 MB that would sit in every clone of this repository forever, to be
+# read by one script that turns them into 7.7 MB of `public/models/`.
+#
+# Their master store is the GitHub release `Jack_Sarah_Lab_Models_GLB`,
+# which already holds them unchanged and with a checksum (Joshua,
+# 2026-09-18: "Preserve the master GLBs unchanged"). `bake:humans` prints
+# the one-line fetch when the directory is empty.
+art/humans/
