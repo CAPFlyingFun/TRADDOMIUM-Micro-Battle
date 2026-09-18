@@ -93,8 +93,14 @@ const RELEASE = 'https://github.com/CAPFlyingFun/TRADDOMIUM-Micro-Battle/release
 
 /** Master file → what the game asks the loader for. */
 const HUMANS = [
-  { master: 'Jack-Lab.glb', out: 'jack.glb', who: 'Jack Bennett' },
-  { master: 'Sarah-Lab.glb', out: 'sarah.glb', who: 'Sarah Bennett' },
+  { master: 'Jack-Lab.glb', out: 'jack.glb', who: 'Jack Bennett', lanyard: false },
+  // Sarah is the one wearing an ID on a cord, and the only one whose base
+  // colour is repaired. The flag is DELIBERATELY a fact about the master
+  // rather than something the bake works out: the first version of this
+  // looked for "the black, unsaturated thing on the chest", found 35,884
+  // texels of Jack's dark clothing and repainted 5,572 of them. A detector
+  // that cannot tell a lanyard from a dark shirt does not get to decide.
+  { master: 'Sarah-Lab.glb', out: 'sarah.glb', who: 'Sarah Bennett', lanyard: true },
 ];
 
 /**
@@ -175,6 +181,208 @@ async function liftRoughness(doc, who) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// The lanyard's white fringe
+// ---------------------------------------------------------------------------
+
+/**
+ * How far off the cord the fringe reaches, in metres, and how wide a
+ * neighbourhood the repair reads. Both EARNED at the probe rather than
+ * guessed: 8 mm and 16 mm removed 18% of the fringe and touched nothing on
+ * the badge, where 4 mm removed 13% and clipped it.
+ */
+const FRINGE_REACH = 0.008;
+const FRINGE_READ = 0.016;
+/** How far off the local tangent plane a neighbour may lie and still count. */
+const FRINGE_SHEET = 0.005;
+/** Brighter than this is not lanyard. A black cord is nowhere near it. */
+const FRINGE_BRIGHT = 105;
+/** And this much of what surrounds a texel must actually BE cord. */
+const FRINGE_NEED = 0.07;
+
+/**
+ * REPAIR THE WHITE FRINGE ALONG SARAH'S LANYARD — in 3D, because the atlas
+ * cannot be painted.
+ *
+ * Joshua, 2026-09-18: "around her neck where the lanyard hangs, the textures
+ * are like messed up in a few spots and behind her badge, is a white patch on
+ * her shirt. Any chance to fix it by tweaking the image?"
+ *
+ * WHY NOT BY TWEAKING THE IMAGE. Her texture is not a picture of a person; it
+ * is ~103,000 PER-TRIANGLE ISLANDS, so two patches that touch in the atlas are
+ * unrelated scraps of body. Any spatially coherent edit — an AI repaint, a
+ * clone brush, an upscaler — bleeds one island into its neighbour, which is
+ * how "sharpen the borders" turns every triangle into a visible facet. That
+ * was measured on an enhanced copy of this very texture: 5.7% of texels inside
+ * islands changed CLASS (29,485 shirt to skin, 12,160 cord to shirt) and the
+ * fringe got slightly worse.
+ *
+ * So the repair is done where the model is coherent: SPACE. Every texel is
+ * given the position and normal of the surface it covers, and a neighbour
+ * means "near it on her body", never "near it in the picture". Two conditions
+ * do the work:
+ *
+ *  - A neighbour must lie on the SAME SHEET (within a few mm of the local
+ *    tangent plane). The badge is a flat card standing ~10 mm proud of the
+ *    shirt, so a plain 3D ball around it is mostly SHIRT — which made the
+ *    badge read as a bright outlier against burgundy and very nearly painted
+ *    it out. The sheet test keeps the badge's neighbours on the badge.
+ *  - The colour a texel is repaired WITH must be cord: dark AND unsaturated.
+ *    Burgundy is dark too (luminance about 52), and when it was allowed into
+ *    that pool the repair painted dark burgundy nicks across her collar.
+ *
+ * WHAT IT DOES NOT DO, stated plainly: it removes about a fifth of the fringe.
+ * The fringe runs the whole length of the cord, so locally it IS the surface
+ * and no outlier test can see all of it. Removing the rest means repainting
+ * the cord as an object, which is a bigger job than a bake step.
+ *
+ * WHO IT RUNS ON IS A FACT ABOUT THE MASTER, not a guess. Only Sarah wears
+ * the ID, and `HUMANS[].lanyard` says so — because the first version of this
+ * asked the texture instead, found 35,884 texels of Jack's dark clothing
+ * answering to "black and unsaturated on the chest", and repainted 5,572 of
+ * them.
+ */
+async function repairLanyard(doc, who) {
+  const prims = doc.getRoot().listMeshes().flatMap((m) => m.listPrimitives());
+  const prim = prims.sort((a, b) => b.getAttribute('POSITION').getCount() - a.getAttribute('POSITION').getCount())[0];
+  if (!prim) return;
+  const material = prim.getMaterial();
+  const tex = material?.getBaseColorTexture();
+  const uvAttr = prim.getAttribute('TEXCOORD_0');
+  const nAttr = prim.getAttribute('NORMAL');
+  if (!tex || !uvAttr || !nAttr || !prim.getIndices()) return;
+
+  const [W, H] = tex.getSize();
+  if (W !== H) return;
+  const S = W;
+  const { data: img } = await sharp(Buffer.from(tex.getImage())).removeAlpha().raw()
+    .toBuffer({ resolveWithObject: true });
+
+  // Every texel learns which piece of her it covers. glTF puts (0,0) at the
+  // TOP-LEFT, so the row is v*S — the one convention that had to be right, and
+  // the body itself settled it: with v*S her chest reads burgundy 81% of the
+  // time, flipped only 57%.
+  const P = prim.getAttribute('POSITION').getArray();
+  const N = nAttr.getArray();
+  const UV = uvAttr.getArray();
+  const IDX = prim.getIndices().getArray();
+  const pos = new Float32Array(S * S * 3);
+  const nrm = new Float32Array(S * S * 3);
+  const ok = new Uint8Array(S * S);
+  for (let t = 0; t < IDX.length; t += 3) {
+    const v = [IDX[t], IDX[t + 1], IDX[t + 2]];
+    const ux = v.map((i) => UV[i * 2] * S);
+    const uy = v.map((i) => UV[i * 2 + 1] * S);
+    const x0 = Math.floor(Math.min(...ux)) - 1, x1 = Math.ceil(Math.max(...ux)) + 1;
+    const y0 = Math.floor(Math.min(...uy)) - 1, y1 = Math.ceil(Math.max(...uy)) + 1;
+    if ((x1 - x0) * (y1 - y0) > 40000) continue;
+    const d = (uy[1] - uy[2]) * (ux[0] - ux[2]) + (ux[2] - ux[1]) * (uy[0] - uy[2]);
+    for (let y = y0; y <= y1; y += 1) for (let x = x0; x <= x1; x += 1) {
+      if (x < 0 || y < 0 || x >= S || y >= S) continue;
+      let l0 = 1 / 3, l1 = 1 / 3, l2 = 1 / 3;
+      if (Math.abs(d) > 1e-9) {
+        l0 = ((uy[1] - uy[2]) * (x - ux[2]) + (ux[2] - ux[1]) * (y - uy[2])) / d;
+        l1 = ((uy[2] - uy[0]) * (x - ux[2]) + (ux[0] - ux[2]) * (y - uy[2])) / d;
+        l2 = 1 - l0 - l1;
+        if (l0 < -0.35 || l1 < -0.35 || l2 < -0.35) continue;
+      }
+      const i = y * S + x;
+      for (let k = 0; k < 3; k += 1) {
+        pos[i * 3 + k] = l0 * P[v[0] * 3 + k] + l1 * P[v[1] * 3 + k] + l2 * P[v[2] * 3 + k];
+        nrm[i * 3 + k] = l0 * N[v[0] * 3 + k] + l1 * N[v[1] * 3 + k] + l2 * N[v[2] * 3 + k];
+      }
+      const L = Math.hypot(nrm[i * 3], nrm[i * 3 + 1], nrm[i * 3 + 2]) || 1;
+      nrm[i * 3] /= L; nrm[i * 3 + 1] /= L; nrm[i * 3 + 2] /= L;
+      ok[i] = 1;
+    }
+  }
+
+  const lum = (i) => 0.2126 * img[i * 3] + 0.7152 * img[i * 3 + 1] + 0.0722 * img[i * 3 + 2];
+  const sat = (i) => {
+    const mx = Math.max(img[i * 3], img[i * 3 + 1], img[i * 3 + 2]);
+    const mn = Math.min(img[i * 3], img[i * 3 + 1], img[i * 3 + 2]);
+    return mx === 0 ? 0 : (mx - mn) / mx;
+  };
+  const onChest = (i) => {
+    const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2];
+    return y > 0.96 && y < 1.52 && z > 0 && Math.abs(x) < 0.22;
+  };
+  // THE CORD IS FOUND BY ITS OWN COLOUR, not by a box drawn by hand: it is the
+  // only black, UNSATURATED thing on the front of her chest.
+  const seed = [];
+  for (let i = 0; i < S * S; i += 1) {
+    if (ok[i] && onChest(i) && lum(i) < 30 && sat(i) < 0.45) seed.push(i);
+  }
+  if (seed.length < 500) {
+    console.log(`  ${who}: no lanyard found, base colour left as it is`);
+    return;
+  }
+  const bucket = (a, cell) => {
+    const g = new Map();
+    for (const i of a) {
+      const k = `${Math.floor(pos[i * 3] / cell)},${Math.floor(pos[i * 3 + 1] / cell)},${Math.floor(pos[i * 3 + 2] / cell)}`;
+      let e = g.get(k); if (!e) { e = []; g.set(k, e); } e.push(i);
+    }
+    return g;
+  };
+  const around = (g, cell, i, fn) => {
+    const cx = Math.floor(pos[i * 3] / cell), cy = Math.floor(pos[i * 3 + 1] / cell), cz = Math.floor(pos[i * 3 + 2] / cell);
+    for (let dx = -1; dx <= 1; dx += 1) for (let dy = -1; dy <= 1; dy += 1) for (let dz = -1; dz <= 1; dz += 1) {
+      const e = g.get(`${cx + dx},${cy + dy},${cz + dz}`);
+      if (e) for (const j of e) if (fn(j) === false) return;
+    }
+  };
+  const sgrid = bucket(seed, FRINGE_REACH);
+  const RE2 = FRINGE_REACH * FRINGE_REACH;
+  const roi = [];
+  for (let i = 0; i < S * S; i += 1) {
+    if (!ok[i] || !onChest(i)) continue;
+    let hit = false;
+    around(sgrid, FRINGE_REACH, i, (j) => {
+      const ax = pos[j * 3] - pos[i * 3], ay = pos[j * 3 + 1] - pos[i * 3 + 1], az = pos[j * 3 + 2] - pos[i * 3 + 2];
+      if (ax * ax + ay * ay + az * az <= RE2) { hit = true; return false; }
+      return true;
+    });
+    if (hit) roi.push(i);
+  }
+  const grid = bucket(roi, FRINGE_READ);
+  const R2 = FRINGE_READ * FRINGE_READ;
+  const med = (a) => { a.sort((p, q) => p - q); return a[a.length >> 1]; };
+  const out = Buffer.from(img);
+  const changed = new Uint8Array(S * S);
+  let fixed = 0;
+  for (const i of roi) {
+    if (lum(i) <= FRINGE_BRIGHT) continue;
+    const nx = nrm[i * 3], ny = nrm[i * 3 + 1], nz = nrm[i * 3 + 2];
+    const js = [];
+    around(grid, FRINGE_READ, i, (j) => {
+      const ax = pos[j * 3] - pos[i * 3], ay = pos[j * 3 + 1] - pos[i * 3 + 1], az = pos[j * 3 + 2] - pos[i * 3 + 2];
+      if (ax * ax + ay * ay + az * az > R2) return true;
+      if (Math.abs(ax * nx + ay * ny + az * nz) > FRINGE_SHEET) return true;
+      js.push(j); return true;
+    });
+    if (js.length < 10) continue;
+    const cord = js.filter((j) => lum(j) < 40 && sat(j) < 0.5);
+    if (cord.length < 8 || cord.length / js.length < FRINGE_NEED) continue;
+    out[i * 3] = med(cord.map((j) => img[j * 3]));
+    out[i * 3 + 1] = med(cord.map((j) => img[j * 3 + 1]));
+    out[i * 3 + 2] = med(cord.map((j) => img[j * 3 + 2]));
+    changed[i] = 1; fixed += 1;
+  }
+  // Bleed one texel into the gutter so bilinear sampling at an island's edge
+  // cannot pull the old fringe back onto the surface.
+  for (let y = 1; y < S - 1; y += 1) for (let x = 1; x < S - 1; x += 1) {
+    const i = y * S + x;
+    if (ok[i] || changed[i]) continue;
+    for (const j of [i - 1, i + 1, i - S, i + S]) if (changed[j]) {
+      out[i * 3] = out[j * 3]; out[i * 3 + 1] = out[j * 3 + 1]; out[i * 3 + 2] = out[j * 3 + 2];
+      break;
+    }
+  }
+  tex.setImage(await sharp(out, { raw: { width: S, height: S, channels: 3 } }).png().toBuffer());
+  console.log(`  ${who}: lanyard fringe — cord ${seed.length} texels, ${roi.length} within reach, ${fixed} repaired`);
+}
+
 async function main() {
   if (!existsSync(OUT)) mkdirSync(OUT, { recursive: true });
   const missing = HUMANS.filter((h) => !existsSync(join(MASTERS, h.master)));
@@ -195,6 +403,7 @@ async function main() {
     const before = statSync(from).size;
     const doc = await io.read(from);
 
+    if (human.lanyard) await repairLanyard(doc, human.who);
     await liftRoughness(doc, human.who);
 
     // WHAT THE MAPS ARE WORTH, one slot at a time. `textureCompress` is
