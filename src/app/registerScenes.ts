@@ -33,6 +33,7 @@ import { heldHourMs } from '../world/weather/solar';
 import { isBuiltSky, type Sky } from '../world/weather/weather';
 import { PERF_WORLD_MAP_ID, PERF_WORLD_SCENE_ID, perfWorldTool } from '../perf/perfTool';
 import { LAB_SCENE_ID, createCreatureLabScene, creatureLabTool } from '../lab';
+import { TOMBS_SCENE_ID, createTombsLabScene, tombsTool } from '../tombs';
 import {
   LocalSoloSession, isSoloSlot, newSoloGame, readSoloSlots, resumeSoloSlot, restorableStateOf, savedSoloGame,
   soloSlotSpec, toolSoloSlot, type KnownMap, type SoloSlot,
@@ -574,6 +575,27 @@ export function registerScenes(options: RegisterScenesOptions = {}): void {
       // "should be on High to match settings not medium"). The same
       // store the world reads, so the Creature Lab's reports can never
       // name a detail level his Settings do not show.
+      settings: () => openSettings(ctx.storage).read(),
+    })),
+  );
+
+  // THE TOMBS LABORATORY (the TOMBS milestone). The building chapters 1 to 3
+  // happen in — Jack's laboratory, the corridor, the main control room, the
+  // array chamber behind the reinforced port, the plant — walkable at eye
+  // height, with the shutdown lever on a button because chapter 2 is what it
+  // is for. Registered the same way as the Creature Lab: a plain tool scene in
+  // the menu state, no session behind it.
+  //
+  // It is the building ALONE. Standing it on the island at TOMBS_SITE, with a
+  // body rather than a free camera, is the milestone's next step; this is the
+  // door Joshua can open in the meantime, and the bench that step is built on.
+  registerTool(tombsTool);
+  registerScene(
+    TOMBS_SCENE_ID,
+    createTombsLabScene((ctx) => ({
+      onBack: () => goToScreen(ctx, SCREEN_ID.editors),
+      // The same store the world reads, so the Lab can never draw at a detail
+      // rung his Settings do not show.
       settings: () => openSettings(ctx.storage).read(),
     })),
   );

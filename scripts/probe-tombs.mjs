@@ -167,3 +167,87 @@ try {
   await server?.close();
   rmSync(HTML, { force: true });
 }
+
+// ---------------------------------------------------------------------------
+// The door a player actually opens
+// ---------------------------------------------------------------------------
+
+/**
+ * THE SECOND HALF, and the one that can fail for a reason the first cannot:
+ * the shots above prove the BUILDING draws, not that anybody can reach it.
+ * A module that renders beautifully and is registered nowhere is a module
+ * nobody can see, which is exactly what the laboratory was until it was wired
+ * into the hub. So this half boots the BUILT app at the bare URL and walks the
+ * route Joshua walks — menu, EDITORS, the hub's OPEN on `tool:lab.tombs` —
+ * pressing the same `data-action`s his thumbs press and reading the same
+ * `data-field`s he reads. No `?scene=` shortcut: a probe that skips a step a
+ * player cannot skip is measuring a route nobody plays.
+ */
+import { preview } from 'vite';
+
+const TOOL = 'lab.tombs';
+const HUD = 'tombs-lab-hud';
+const APP_PORT = 4193;
+
+async function walkTheApp() {
+  log('--- the route a player takes ---');
+  const server = await preview({
+    root: ROOT,
+    preview: { host: '127.0.0.1', port: APP_PORT, strictPort: false, open: false },
+    logLevel: 'error',
+  });
+  const url = server.resolvedUrls.local[0];
+  const browser = await chromium.launch({ executablePath: chromiumPath(), args: CHROMIUM_ARGS });
+  try {
+    const page = await browser.newPage({ viewport: VIEWPORT });
+    const errors = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+    await page.goto(url, { waitUntil: 'load' });
+    await page.waitForSelector('[data-action="new-game"]', { timeout: 120_000 });
+    log('bare URL -> menu');
+    await page.click('[data-action="editors"]', { timeout: 60_000 });
+    await page.waitForSelector(`[data-action="tool:${TOOL}"]`, { state: 'attached', timeout: 60_000 });
+    log(`EDITORS -> the hub lists "${TOOL}"`);
+    await page.click(`[data-action="tool:${TOOL}"]`, { timeout: 60_000 });
+    await page.waitForSelector(`[data-role="${HUD}"]`, { timeout: 180_000 });
+    log('OPEN -> the laboratory is up');
+
+    const read = async () => page.evaluate(() => {
+      const out = {};
+      for (const el of document.querySelectorAll('[data-field]')) out[el.getAttribute('data-field')] = el.textContent.trim();
+      return out;
+    });
+    await page.waitForTimeout(1500);
+    let hud = await read();
+    for (const [k, v] of Object.entries(hud)) log(`  ${k}: ${v}`);
+    await page.screenshot({ path: path.join(SHOTS, 'tombs-app-1-arrive.png') });
+
+    // CHAPTER 2 ON A BUTTON: "He pulled the physical shutdown lever, and the
+    // room went dark… The emergency lights switched on."
+    await page.click('[data-action="tombs:lever"]', { timeout: 60_000 });
+    await page.waitForTimeout(1200);
+    hud = await read();
+    log(`  after the lever -> ${hud['tombs-lighting'] ?? '(no lighting line)'}`);
+    await page.screenshot({ path: path.join(SHOTS, 'tombs-app-2-lever.png') });
+
+    await page.click('[data-action="tombs:teleport:chamber"]', { timeout: 60_000 });
+    await page.click('[data-action="tombs:lever"]', { timeout: 60_000 });
+    await page.click('[data-action="tombs:array"]', { timeout: 60_000 });
+    await page.waitForTimeout(1500);
+    hud = await read();
+    log(`  in the chamber -> room ${hud['tombs-room'] ?? '?'}, array ${hud['tombs-array'] ?? '?'}`);
+    await page.screenshot({ path: path.join(SHOTS, 'tombs-app-3-array.png') });
+
+    if (errors.length) {
+      log(`PAGE ERRORS: ${errors.slice(0, 3).join(' | ')}`);
+      process.exitCode = 1;
+    } else {
+      log('no page errors');
+    }
+  } finally {
+    await browser.close();
+    await server.close();
+  }
+}
+
+await walkTheApp();
