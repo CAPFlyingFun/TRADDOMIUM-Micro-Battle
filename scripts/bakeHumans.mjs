@@ -93,14 +93,30 @@ const RELEASE = 'https://github.com/CAPFlyingFun/TRADDOMIUM-Micro-Battle/release
 
 /** Master file → what the game asks the loader for. */
 const HUMANS = [
-  { master: 'Jack-Lab.glb', out: 'jack.glb', who: 'Jack Bennett', panel: null },
-  // `panel` names the front-panel file a body gets, or null for none. It is
-  // DELIBERATELY a fact about the master rather than something the bake works
-  // out: an earlier version asked the texture "what is black and unsaturated
-  // on the chest", found 35,884 texels of Jack's dark clothing and repainted
-  // 5,572 of them. A detector that cannot tell a lanyard from a dark shirt
-  // does not get to decide.
-  { master: 'Sarah-Lab.glb', out: 'sarah.glb', who: 'Sarah Bennett', panel: 'sarah' },
+  { master: 'Jack-Lab.glb', out: 'jack.glb', who: 'Jack Bennett', panel: null, repair: false },
+  // SARAH IS Lab2, AND Lab1 IS KEPT (Joshua, 2026-09-18: "go ahead and switch
+  // to this one… it does look a lot better even the textures"). Meshy's second
+  // pass fixes the thing every repair in this file was fighting: Lab1's atlas
+  // is SHATTERED — 110,574 open edges against 99,375 shared, every triangle
+  // its own island — and Lab2's is WELDED, 140,863 shared against 24,028 open.
+  // Same detail (101,918 triangles against 103,108) in 13.88 MB rather than
+  // 33.45, and THE LANYARD IS GEOMETRY rather than a cord painted onto the
+  // shirt with a white halo bled down both sides of it.
+  //
+  // What it costs is hands: 8 joints past the wrist rather than 37, so four
+  // per hand instead of about eighteen — no individual finger curl. Joshua's
+  // call, and a cheap one for a woman standing at a console: "we don't need
+  // all fingers rigged for either". Jack stays on his own master, which he
+  // was happy with.
+  //
+  // Lab1 is NOT deleted. It is the only rig with real fingers, and the day
+  // Sarah has to use her hands it is what a re-rig starts from.
+  //
+  // `panel` names the front-panel picture a body can be painted through, and
+  // `repair` says whether the automatic lanyard pass runs. Sarah keeps the
+  // panel — a flat front view is still the easiest thing to paint — and no
+  // longer needs the repair, because there is no halo left to remove.
+  { master: 'Sarah-Lab2.glb', out: 'sarah.glb', who: 'Sarah Bennett', panel: 'sarah', repair: false },
 ];
 
 /**
@@ -389,7 +405,7 @@ function autoRepairPanel(panel, covered, PW, PH) {
  * soften everything it touched; writing the delta leaves the rest of her
  * exactly as the master has it.
  */
-async function panelPass(doc, who, key, exportOnly) {
+async function panelPass(doc, who, key, exportOnly, repair) {
   const prims = doc.getRoot().listMeshes().flatMap((m) => m.listPrimitives());
   const prim = prims.sort((a, b) => b.getAttribute('POSITION').getCount() - a.getAttribute('POSITION').getCount())[0];
   const tex = prim?.getMaterial()?.getBaseColorTexture();
@@ -412,6 +428,10 @@ async function panelPass(doc, who, key, exportOnly) {
   const edited = join(PANEL_DIR, `${key}-front-edited.png`);
   let fixed;
   let note;
+  if (!existsSync(edited) && !repair) {
+    console.log(`  ${who}: panel available to paint, no automatic repair asked for`);
+    return;
+  }
   if (existsSync(edited)) {
     const { data, info } = await sharp(edited).resize(PW, PH, { kernel: 'nearest' }).removeAlpha().raw()
       .toBuffer({ resolveWithObject: true });
@@ -461,6 +481,18 @@ async function main() {
     console.error(`[bake:humans] no masters in art/humans/ — ${missing.map((m) => m.master).join(', ')}`);
     console.error(`[bake:humans] fetch them once, then re-run:`);
     console.error(`[bake:humans]   mkdir -p art/humans && curl -sSL -o /tmp/h.zip "${RELEASE}" && unzip -o /tmp/h.zip -d art/humans`);
+    if (missing.some((m) => m.master === 'Sarah-Lab2.glb')) {
+      // SAY THE TRUE THING RATHER THAN THE HOPEFUL ONE. The release above holds
+      // Jack-Lab.glb and Sarah-Lab.glb, the pair from 2026-09-18. Sarah-Lab2 is
+      // Meshy's second pass, which Joshua brought in later the same day and
+      // which the bake now reads: until it is added to that release (or its
+      // own), the command above CANNOT produce it, and a clone that follows
+      // the instruction and still fails deserves to be told why.
+      console.error('[bake:humans]');
+      console.error('[bake:humans] Sarah-Lab2.glb is NOT in that release yet — it is Meshy\'s second pass,');
+      console.error('[bake:humans] the one with a welded atlas and a modelled lanyard. Ask Joshua for it,');
+      console.error('[bake:humans] or add it to the release so this command is true again.');
+    }
     process.exitCode = 1;
     return;
   }
@@ -475,7 +507,7 @@ async function main() {
     const before = statSync(from).size;
     const doc = await io.read(from);
 
-    if (human.panel) await panelPass(doc, human.who, human.panel, PANELS_ONLY);
+    if (human.panel) await panelPass(doc, human.who, human.panel, PANELS_ONLY, human.repair === true);
     // `--panels` only exports the pictures to paint; it writes no model.
     if (PANELS_ONLY) continue;
     await liftRoughness(doc, human.who);
