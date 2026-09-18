@@ -103,7 +103,77 @@ const HUMANS = [
  */
 const SIZES = { baseColorTexture: 2048, normalTexture: 2048, metallicRoughnessTexture: 1024 };
 
+/**
+ * WHAT THE BODY'S ROUGHNESS IS LIFTED TO, and why it is lifted at all.
+ *
+ * Joshua, 2026-09-18: "see how glossy the clothes and body looks?" It is,
+ * and the map is why. Both masters carry ONE `BakedMaterial` over the
+ * whole body, and its roughness channel is very nearly a single number —
+ * measured on Sarah's, 97% of it lies between 0.4 and 0.7, the peak is
+ * 0.5-0.6, and NOTHING is above 0.8:
+ *
+ *   0.4-0.5  23.8%      0.6-0.7  19.5%
+ *   0.5-0.6  54.0%      0.7-0.8   0.3%      0.8-0.9  0.1%
+ *
+ * Cloth belongs around 0.85-0.95 and skin around 0.6-0.75, so a map that
+ * says 0.55 everywhere puts the same broad specular highlight on a
+ * cotton top as on a forearm — which on screen reads as latex. It is a
+ * photogrammetry bake that never separated the two materials.
+ *
+ * SO THERE IS NOTHING TO PRESERVE, and the fix is a curve rather than a
+ * mask: every value is raised by the exponent that lands THIS texture's
+ * own mean on the target, which keeps the little variation the map does
+ * carry in the right order while moving the whole body out of the
+ * plastic band. Computed per texture, so it stays true if the art is
+ * re-exported at a different level.
+ *
+ * METALNESS IS NOT TOUCHED. It averages 0.002 — nobody is metal — but it
+ * peaks at 0.44 on the watch, the badge clip and the belt buckle, and
+ * those are the one place the map is doing real work.
+ *
+ * 0.80 rather than 0.90: at 0.90 the cloth goes a shade flat, and 0.80
+ * leaves jersey the trace of sheen jersey has. Both were rendered
+ * (`npm run probe:humans`, shots/humans-5-sarah-rough0*.png) before this
+ * number was chosen.
+ */
+const TARGET_ROUGHNESS = 0.8;
+
 const mb = (bytes) => `${(bytes / 1048576).toFixed(2)} MB`;
+
+/**
+ * Raise the roughness channel of every metallic-roughness map until its
+ * mean sits on `TARGET_ROUGHNESS`, leaving metalness alone.
+ *
+ * glTF packs roughness in GREEN and metalness in BLUE, so this reads and
+ * writes one channel of a three-channel image. The exponent is solved
+ * from the texture's own mean — `mean ** k = target` — so a map that
+ * already reads matte is barely touched and this one, which reads 0.55,
+ * is moved where it needs to go.
+ */
+async function liftRoughness(doc, who) {
+  for (const material of doc.getRoot().listMaterials()) {
+    const tex = material.getMetallicRoughnessTexture();
+    if (!tex) continue;
+    const src = tex.getImage();
+    if (!src) continue;
+    const { data, info } = await sharp(Buffer.from(src)).raw().toBuffer({ resolveWithObject: true });
+    const ch = info.channels;
+    let sum = 0;
+    let n = 0;
+    for (let i = 0; i < data.length; i += ch) { sum += data[i + 1]; n += 1; }
+    const mean = sum / n / 255;
+    if (!(mean > 0 && mean < 1)) continue;
+    const k = Math.log(TARGET_ROUGHNESS) / Math.log(mean);
+    // A lookup over the 256 values a byte can hold, rather than a power
+    // per pixel: this runs over four million of them.
+    const curve = new Uint8Array(256);
+    for (let v = 0; v < 256; v += 1) curve[v] = Math.round(255 * (v / 255) ** k);
+    for (let i = 0; i < data.length; i += ch) data[i + 1] = curve[data[i + 1]];
+    const out = await sharp(data, { raw: { width: info.width, height: info.height, channels: ch } }).png().toBuffer();
+    tex.setImage(new Uint8Array(out)).setMimeType('image/png');
+    console.log(`[bake:humans]   ${who}: roughness mean ${mean.toFixed(3)} -> ${TARGET_ROUGHNESS.toFixed(2)} (curve ^${k.toFixed(3)}), metalness untouched`);
+  }
+}
 
 async function main() {
   if (!existsSync(OUT)) mkdirSync(OUT, { recursive: true });
@@ -124,6 +194,8 @@ async function main() {
     const to = join(OUT, human.out);
     const before = statSync(from).size;
     const doc = await io.read(from);
+
+    await liftRoughness(doc, human.who);
 
     // WHAT THE MAPS ARE WORTH, one slot at a time. `textureCompress` is
     // given a slot filter so the metallic-roughness map can be told a
