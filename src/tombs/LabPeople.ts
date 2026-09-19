@@ -283,6 +283,26 @@ export class LabPeople {
     this.group.position.y = groundUnits;
   }
 
+  /**
+   * Take one person out of the room, or put them back.
+   *
+   * Exists for exactly one case: in chapter 1 the player IS Jack, so the
+   * walking body wears his model — and a room containing the player AND
+   * an idle copy of him at the next desk is a bug the moment you look at
+   * it. The scene hides the double while the player is walking and
+   * restores him the instant the camera goes back to flying, because in
+   * FLY mode there is no player body and the room should be as the plan
+   * describes it.
+   *
+   * Unknown ids are ignored rather than refused: the plan owns who is in
+   * the building, and a scene asking after somebody who is not here has
+   * asked a reasonable question and got a truthful nothing.
+   */
+  hide(id: string, hidden: boolean): void {
+    const name = `tombs-person:${id}`;
+    for (const body of this.bodies) if (body.name === name) body.visible = !hidden;
+  }
+
   /** How many bodies are actually standing in the room, for a HUD line or a probe. */
   get standing(): number {
     return this.bodies.length;
@@ -463,7 +483,7 @@ function placeholderBody(): THREE.Object3D {
  * one, and a leak that only ever shows up as memory is the kind nobody
  * finds.
  */
-function release(root: THREE.Object3D): void {
+export function release(root: THREE.Object3D): void {
   const done = new Set<object>();
   root.traverse((node) => {
     const skinned = node as THREE.SkinnedMesh;

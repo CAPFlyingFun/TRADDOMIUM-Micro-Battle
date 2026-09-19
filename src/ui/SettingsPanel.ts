@@ -21,6 +21,8 @@ import {
   CREATURE_LOD_DEFAULTS, CREATURE_LOD_LIMITS, sanitizeCreatureLodSettings,
   type CreatureLodSettings,
 } from '../fauna/creatureLod';
+import { MIX_DEFAULTS, MIX_RANGE_DB, curveGain, type MixLevels } from '../audio/mix';
+import { BUS_LABEL, BUSES, type Bus } from '../audio/manifest';
 
 export interface SettingsPanelHooks {
   /** The settings document. The panel is its only writer but one: the perf world writes `hudCollapsed` from the HUD's own button. */
@@ -35,6 +37,11 @@ export function settingAction(field: keyof Omit<Settings, 'version'>): string {
 export const SETTING_RESET_ACTION = 'setting:reset';
 export const CREATURE_LOD_RESET_ACTION = 'setting:creatureLod:reset';
 export const SETTING_COPY_ACTION = 'setting:copy';
+
+/** One fader per bus, plus the master: `setting:mix:voice`, and so on. */
+export function mixAction(bus: Bus | 'master'): string {
+  return `setting:mix:${bus}`;
+}
 
 const QUALITY_LABEL: Readonly<Record<Quality, string>> = {
   low: 'Low',
@@ -72,6 +79,7 @@ export class SettingsPanel {
     this.buildSwitch('invertY', 'Invert look up/down');
     this.buildQuality();
     this.buildCreatureLod();
+    this.buildMix();
     this.buildSwitch('showFps', 'Show frame rate');
     actionsRow(this.element, [
       namedButton(SETTING_RESET_ACTION, 'Reset to defaults', () => this.write(sanitizeSettings(undefined)), { compact: true }),
@@ -188,6 +196,59 @@ export class SettingsPanel {
     });
     labelledRow(this.element, 'Camera speed', [select]);
     note(this.element, 'The fastest a full push of the move stick flies. A gentle push is 1 m/s whichever you choose — this sets the top of the range, not the whole of it.');
+  }
+
+  /**
+   * THE MIXER: the master and the four buses, which is what separating
+   * them was for.
+   *
+   * Step 7 of the TOMBS milestone put Chapter 1's dialogue on VOICE and
+   * the room it is spoken in on AMBIENCE, SFX and MUSIC, and until there
+   * is a fader per bus that separation is a fact nobody can hear. These
+   * are the controls Joshua balances the chapter with on the device.
+   *
+   * THE READOUT IS IN DECIBELS, not in per cent, and that is the point of
+   * the curve rather than a flourish: the fader is decibel-shaped
+   * (`audio/mix.ts`), its midpoint is exactly -10 dB — half as loud — and
+   * a per-cent readout would say "50%" there and teach the player that the
+   * control is broken. `−∞ dB` at the bottom is literally true: the curve
+   * is shifted to reach zero, so an ambience bus turned off is silent and
+   * not merely quiet.
+   */
+  private buildMix(): void {
+    for (const bus of ['master', ...BUSES] as const) {
+      this.buildFader(bus, bus === 'master' ? 'Master volume' : BUS_LABEL[bus]);
+    }
+    note(this.element, `Each fader spans ${MIX_RANGE_DB.toFixed(1)} dB and the middle of the travel is half as loud. Voice, effects, ambience and music are separate buses: dialogue quietens the room it is spoken in on its own.`);
+  }
+
+  /** One bus fader. `step` is a hundredth: finer than a thumb can place and coarse enough to store. */
+  private buildFader(bus: Bus | 'master', label: string): void {
+    const doc = this.element.ownerDocument;
+    const input = doc.createElement('input');
+    input.type = 'range';
+    input.className = 'ui-range';
+    input.dataset.action = mixAction(bus);
+    input.min = '0';
+    input.max = '1';
+    input.step = '0.01';
+    input.setAttribute('aria-label', label);
+    const readout = doc.createElement('span');
+    readout.className = 'ui-readout';
+    input.addEventListener('input', () => {
+      this.write({ ...this.current, mix: { ...this.mixOf(this.current), [bus]: Number(input.value) } });
+    });
+    this.syncs.push((s) => {
+      const level = this.mixOf(s)[bus];
+      input.value = String(level);
+      const gain = curveGain(level);
+      readout.textContent = gain <= 0 ? '−∞ dB' : `${(20 * Math.log10(gain)).toFixed(1)} dB`;
+    });
+    labelledRow(this.element, label, [input, readout]);
+  }
+
+  private mixOf(s: Settings): MixLevels {
+    return s.mix ?? MIX_DEFAULTS;
   }
 
   /**

@@ -173,29 +173,64 @@ async function main() {
     };
 
     // --- 2. the body moves, and the gait says so ---
+    //
+    // HOW LONG TO HOLD IS A PROPERTY OF THE RENDERER, NOT OF THE BODY.
+    // This one draws about a frame and a half a second and `FrameClock`
+    // caps sim dt at 0.1 s, so a second of wall clock buys the walker
+    // about 0.15 s of simulated time — a fifth of a metre at walking
+    // pace. A fixed 900 ms hold was therefore ONE frame of a body still
+    // accelerating out of rest: no measurable travel, and a stance that
+    // still read `stand` because it had not yet passed 0.10 m/s. That
+    // measured the probe's frame rate, not the walker.
+    //
+    // So hold the key and WATCH, keeping the furthest the body got and
+    // the first frame whose gait was not `stand`. The two are read
+    // separately on purpose: forward from the spawn is a desk, and a
+    // body pressed against it correctly reports `stand` again, so a
+    // single late sample could miss the walk it plainly did.
     await page.keyboard.down('KeyW');
-    await page.waitForTimeout(900);
-    hud = await read();
-    const moving = hud['tombs-mode'] ?? '';
+    let moving = '';
+    let lastMode = '';
+    let afterW = null;
+    let travelled = 0;
+    for (let i = 0; i < 14; i += 1) {
+      await page.waitForTimeout(500);
+      lastMode = (await read())['tombs-mode'] ?? '';
+      if (lastMode.includes('walk') || lastMode.includes('run')) moving = lastMode;
+      const at = await where();
+      if (at !== null && start !== null) {
+        const away = Math.hypot(at.x - start.x, at.z - start.z);
+        if (away > travelled) { travelled = away; afterW = at; }
+      }
+      if (moving !== '' && travelled > 0.05) break;
+    }
     await page.keyboard.up('KeyW');
     await page.waitForTimeout(250);
-    check(moving.includes('walk') || moving.includes('run'), `while moving the gait reports ${moving}`);
-    const afterW = await where();
-    check(
-      afterW !== null && start !== null && Math.hypot(afterW.x - start.x, afterW.z - start.z) > 0.05,
-      `W moved the body ${afterW && start ? Math.hypot(afterW.x - start.x, afterW.z - start.z).toFixed(2) : '?'} m`,
-    );
+    check(moving !== '', `while moving the gait reports ${moving === '' ? lastMode : moving}`);
+    check(afterW !== null && travelled > 0.05, `W moved the body ${travelled.toFixed(2)} m`);
     await page.screenshot({ path: path.join(SHOTS, 'player-2-walking.png') });
 
-    // --- 3. RUN raises the ceiling, and says so ---
+    // --- 3. RUN is offered, and offers the change ---
+    //
+    // NOT "the body reached running pace". This renderer runs at about a
+    // frame and a half a second, so a body accelerating on a 0.12 s time
+    // constant covers a tenth of a metre in the second this probe can
+    // spend — nowhere near the 2.0 m/s the run stance begins at. Asserting
+    // the speed here would be retuning a per-second system from probe
+    // wall-clock, which is the one thing CLAUDE.md says never to do. What
+    // IS observable is the control: it appears only with a body to run,
+    // and its face offers the change rather than reporting the state.
+    const runFace = async () => page.textContent('[data-action="tombs:run"]');
+    check((await runFace()) === 'RUN', `RUN offers the change: "${await runFace()}"`);
     await page.click('[data-action="tombs:run"]', { timeout: 60_000 });
-    await page.keyboard.down('KeyW');
-    await page.waitForTimeout(900);
-    hud = await read();
-    const running = hud['tombs-mode'] ?? '';
-    await page.keyboard.up('KeyW');
-    await page.waitForTimeout(250);
-    check(running.includes('run'), `with RUN held the gait reports ${running}`);
+    // The HUD is repainted from the frame loop, so the word changes on
+    // the NEXT FRAME — which at this frame rate is most of a second away.
+    // Wait for the frame rather than for a stopwatch.
+    await page.waitForFunction(
+      () => (document.querySelector('[data-action="tombs:run"]')?.textContent ?? '') !== 'RUN',
+      null, { timeout: 30_000 },
+    ).catch(() => {});
+    check((await runFace()) === 'STOP RUNNING', `pressed, it offers the way back: "${await runFace()}"`);
     await page.click('[data-action="tombs:run"]', { timeout: 60_000 });
 
     // --- 4. the building stops the body ---
@@ -207,18 +242,41 @@ async function main() {
       && cornered.x > LAB.x0 - 0.01 && cornered.x < LAB.x1 + 0.01
       && cornered.z > LAB.z0 - 0.01 && cornered.z < LAB.z1 + 0.01;
     check(inside, `after 8 s walked into the corner the body is still in the room at ${JSON.stringify(cornered)}`);
-    check(cornered !== null && cornered.y > -0.05 && cornered.y < 0.6, `the body is on the floor, y ${cornered?.y}`);
+    // Walking, `tombs-pos` reports the FEET, so this is the body's own
+    // height above the laboratory floor and not the camera's boom.
+    check(cornered !== null && cornered.y > -0.05 && cornered.y < 0.3, `the body is on the floor, y ${cornered?.y}`);
     await page.screenshot({ path: path.join(SHOTS, 'player-3-cornered.png') });
 
     // --- 5. reach: the prompt and the INTERACT control appear together ---
+    //
+    // THE SPAWN IS NOT "AWAY FROM EVERYTHING", which this probe first
+    // assumed and the plan flatly contradicts: a new game begins at
+    // (-6.00, 13.00) and `use:sarah-workstation` sits at (-6.00, 12.20)
+    // with a reach of 1.2, so the player starts 0.80 m inside it. That is
+    // the plan working — you open the game already at a desk. So the
+    // "nothing in reach" half is checked from the CORRIDOR, which has no
+    // interaction points at all.
+    await page.click('[data-action="tombs:teleport:corridor"]', { timeout: 60_000 });
+    // A teleport moves the body; the HUD learns of it on the next frame,
+    // and the ROOM LINE is what says that frame has been. Reading the
+    // prompt 600 ms later read the frame BEFORE the teleport — the body
+    // was already in the corridor and the sheet still carried the
+    // laboratory's desk.
+    await page.waitForFunction(
+      () => ((document.querySelector('[data-field="tombs-room"]')?.textContent) ?? '').includes('corridor'),
+      null, { timeout: 30_000 },
+    ).catch(() => log('  the corridor teleport never reached the room line'));
     const promptAway = (await read())['tombs-prompt'] ?? '';
     const interactAway = await has('tombs:interact');
-    check(promptAway === '' && !interactAway, 'away from everything: no prompt and no INTERACT control');
+    check(promptAway === '' && !interactAway, `in the corridor: no prompt and no INTERACT control (prompt "${promptAway}")`);
 
-    // Teleport to the laboratory to get a known start, then walk to Jack's
+    // Back to the laboratory for a known start, then walk to Jack's
     // workstation at (-6.00, 10.20) — `use:jack-workstation` has reach 1.2.
     await page.click('[data-action="tombs:teleport:laboratory"]', { timeout: 60_000 });
-    await page.waitForTimeout(500);
+    await page.waitForFunction(
+      () => ((document.querySelector('[data-field="tombs-room"]')?.textContent) ?? '').includes('Laboratory'),
+      null, { timeout: 30_000 },
+    ).catch(() => log('  the laboratory teleport never reached the room line'));
     let reached = false;
     for (let i = 0; i < 14 && !reached; i += 1) {
       await holdKey('KeyW', 700);

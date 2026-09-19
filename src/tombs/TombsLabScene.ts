@@ -91,20 +91,38 @@
  * is named in `tombsTool.ts`.
  */
 import * as THREE from 'three';
+import { HUMAN_POSE_TURNS, poseHuman } from '../actor/humanPose';
+import { newJointTurn, type HumanGait, type HumanMeasure, type HumanStance, type MutableJointTurn } from '../actor/humanRig';
+import { measureHuman } from '../actor/humanSkeleton';
+import { newWalkerState, step as walkStep, type WalkWorld, type WalkerState } from '../actor/Walker';
 import type { AppScene, FrameInfo, SceneContext, SceneFactory } from '../app/Scene';
+import type { InputSnapshot } from '../input/Input';
+import type { StickReading } from '../input/MoveStick';
+import { assets } from '../assets/assets';
+import { AudioEngine, newAudioStatus, type AudioStatus } from '../audio/AudioEngine';
+import { MIX_DEFAULTS, type MixLevels } from '../audio/mix';
+import { AUDIO_MANIFEST } from '../audio/audioManifest';
+import { NO_BUTTONS, demandFrom } from '../control/PlayerDemand';
+import { newMutableIntent } from '../creatures/demand';
+import { HumanRig } from '../view/HumanRig';
 import { detailFor, type DetailTier } from '../assets/detailQuality';
 import { MoveStick } from '../input/MoveStick';
 import { FrameStats } from '../perf/FrameStats';
-import { CAMERA_SPEEDS, FreeFlyCamera } from '../perf/FreeFlyCamera';
+import { CAMERA_SPEEDS, FreeFlyCamera, headingOfYaw } from '../perf/FreeFlyCamera';
 import { UNITS_PER_METRE } from '../world/dem';
-import { holds, planLab, type LabLayout, type LightMode, type Room, type RoomId, type Vec3 } from '../world/tombs';
-import { LabPeople } from './LabPeople';
+import { holds, planLab, type Interaction, type LabLayout, type LightMode, type Room, type RoomId, type Vec3 } from '../world/tombs';
+import {
+  ceilingOver, groundUnder, indexLab, moveBody, nearestInteraction, newRayHit, rayHit,
+  type LabSolids,
+} from '../world/tombs/collide';
+import { LabPeople, release } from './LabPeople';
 import { LabView } from './LabView';
 import { LIGHTING, type LightingLook } from './labLook';
 import {
-  BACK_LABEL, EYE_HEIGHT_M, OUTSIDE_ROOM, TOMBS_ACTION, TOMBS_FIELD, TOMBS_HUD_HZ, TOMBS_HUD_ROLE, TOMBS_SCENE_ID,
-  arrayLabel, arrayLine, drawsLine, fpsLine, leverLabel, lightingLine, peopleLine, posLine, roomLabel, roomLine,
-  teleportAction, teleportedRoomOf,
+  AUDIO_LABEL, BACK_LABEL, EYE_HEIGHT_M, OUTSIDE_ROOM, TOMBS_ACTION, TOMBS_FIELD, TOMBS_HUD_HZ, TOMBS_HUD_ROLE,
+  TOMBS_SCENE_ID, arrayLabel, arrayLine, audioLine, drawsLine, fpsLine, interactLabel, leverLabel, lightingLine,
+  modeLine, peopleLine, posLine, promptLine, roomLabel, roomLine, runLabel, teleportAction, teleportedRoomOf,
+  walkLabel,
 } from './tombsTool';
 
 // ---------------------------------------------------------------------------
@@ -133,6 +151,14 @@ export interface TombsLabSettings {
   readonly fov?: number;
   /** Multiplier on look-drag turn rate; 1 is the tuned feel. */
   readonly lookSensitivity?: number;
+  /**
+   * THE MASTER AND THE FOUR BUSES, each 0 to 1 (`audio/mix.ts`). Absent:
+   * `MIX_DEFAULTS`, the story repository's own measured mix undeparted
+   * from. Read at `enter()` with the rest, and again whenever the player
+   * plays a line, because Settings is one screen away and a fader moved
+   * between two lines should be heard on the second.
+   */
+  readonly mix?: MixLevels;
   /** False is the shipped feel: dragging DOWN lifts the view. */
   readonly invertY?: boolean;
 }
@@ -187,6 +213,29 @@ const M = UNITS_PER_METRE;
  */
 const FLOOR_UNITS = 0;
 
+/**
+ * THE ROOM'S OWN SOUND, by the story repository's id.
+ *
+ * `amb_computer_lab` is a real recorded computer-room tone Joshua
+ * supplied and confirmed loops seamlessly, and it is the one asset in
+ * chapter 1 that belongs to THIS room rather than to a moment in it. It
+ * is named here rather than chosen at the call site because a bed is a
+ * property of the place.
+ */
+const LAB_BED = 'amb_computer_lab';
+
+/**
+ * How far behind the head the third-person camera sits, in metres, and
+ * how close it is allowed to be pulled when a wall is in the way.
+ *
+ * The pull-in is not a nicety: the laboratory is 12 m by 6.6 m with
+ * workstations in it, so a fixed 2.5 m boom would spend half its time
+ * inside a wall, and a camera inside a wall shows the room from the
+ * outside. `rayHit` is asked, every frame, how far it may go.
+ */
+const BOOM_M = 2.4;
+const BOOM_MIN_M = 0.45;
+
 /** The rung a probe or a test with no settings to read gets: the conservative one. */
 const RUNG_FALLBACK: DetailTier = 'medium';
 
@@ -238,6 +287,24 @@ interface TombsReadout {
   readonly x: number;
   readonly y: number;
   readonly z: number;
+  /** Is a body being walked, and what is it doing? */
+  readonly walking: boolean;
+  readonly stance: string;
+  /**
+   * Is the RUN button held on? This is the BUTTON'S state, not the
+   * body's: a sprinting body standing still still reads `stance:
+   * 'stand'`, so a control that took its word from the stance would
+   * flip back to RUN every time the player let go of the stick.
+   */
+  readonly sprinting: boolean;
+  /** What is in reach, in the plan's own words, and what to call the control that does it. */
+  readonly prompt: string;
+  readonly reachLabel: string;
+  /** The audio, as `AudioStatus` reports it. */
+  readonly audioRunning: boolean;
+  readonly decoded: number;
+  readonly failed: number;
+  readonly playing: number;
 }
 
 interface MutableReadout extends TombsReadout {
@@ -251,6 +318,15 @@ interface MutableReadout extends TombsReadout {
   x: number;
   y: number;
   z: number;
+  walking: boolean;
+  stance: string;
+  sprinting: boolean;
+  prompt: string;
+  reachLabel: string;
+  audioRunning: boolean;
+  decoded: number;
+  failed: number;
+  playing: number;
 }
 
 interface TombsHudHooks {
@@ -303,6 +379,18 @@ class TombsHud {
   private readonly fields = new Map<string, HTMLElement>();
   private readonly lever: HTMLButtonElement;
   private readonly array: HTMLButtonElement;
+  private readonly walk: HTMLButtonElement;
+  private readonly run: HTMLButtonElement;
+  /**
+   * The INTERACT control is CREATED AND DESTROYED rather than shown and
+   * hidden, and that is the standing rule rather than a preference: an
+   * unavailable action must never look functional, and a disabled button
+   * that is on screen nine tenths of the time is a control that reads as
+   * broken. When nothing is in reach there is nothing there.
+   */
+  private readonly prompt: HTMLElement;
+  private readonly promptRow: HTMLElement;
+  private interact: HTMLButtonElement | null = null;
   private readonly detach: Array<() => void> = [];
   private sinceRefresh = Infinity;
 
@@ -320,6 +408,7 @@ class TombsHud {
     const left = el(doc, 'div', `${CSS.panel}top:8px;left:${EDGE_LEFT};max-width:min(440px,52%);`);
     left.appendChild(this.field(doc, TOMBS_FIELD.room, `${CSS.line}color:${GOLD};letter-spacing:0.06em;`));
     left.appendChild(this.field(doc, TOMBS_FIELD.pos, `${CSS.line}opacity:0.85;`));
+    left.appendChild(this.field(doc, TOMBS_FIELD.mode, `${CSS.line}opacity:0.85;`));
     const roomRow = el(doc, 'div', CSS.row);
     // THE ROOMS COME FROM THE LAYOUT, in the plan's order and under the
     // plan's names: six buttons because the plan has six rooms, and a
@@ -333,6 +422,11 @@ class TombsHud {
     const controls = el(doc, 'div', `${CSS.row}justify-content:flex-end;`);
     this.lever = this.button(doc, TOMBS_ACTION.lever, leverLabel('normal'));
     this.array = this.button(doc, TOMBS_ACTION.array, arrayLabel(false));
+    this.walk = this.button(doc, TOMBS_ACTION.walk, walkLabel(false));
+    this.run = this.button(doc, TOMBS_ACTION.run, runLabel(false));
+    controls.appendChild(this.walk);
+    controls.appendChild(this.run);
+    controls.appendChild(this.button(doc, TOMBS_ACTION.audio, AUDIO_LABEL));
     controls.appendChild(this.lever);
     controls.appendChild(this.array);
     controls.appendChild(this.button(doc, TOMBS_ACTION.back, BACK_LABEL));
@@ -344,7 +438,19 @@ class TombsHud {
     perf.appendChild(this.field(doc, TOMBS_FIELD.people, CSS.line));
     perf.appendChild(this.field(doc, TOMBS_FIELD.fps, CSS.line));
     right.appendChild(perf);
+    right.appendChild(this.field(doc, TOMBS_FIELD.audio, `${CSS.line}opacity:0.85;`));
     this.root.appendChild(right);
+
+    // BOTTOM CENTRE: what is in reach and the one control that does it.
+    // Not bottom-left — `input/MoveStick.ts` owns that corner and the
+    // thumb that rests in it — and not top, where the room row already
+    // is: a prompt belongs under the eye, near the thing it is about.
+    this.promptRow = el(doc, 'div',
+      `${CSS.panel}bottom:10px;left:50%;transform:translateX(-50%);align-items:center;gap:6px;`);
+    this.prompt = this.field(doc, TOMBS_FIELD.prompt, `${CSS.line}color:${GOLD};`);
+    this.promptRow.appendChild(this.prompt);
+    this.promptRow.style.display = 'none';
+    this.root.appendChild(this.promptRow);
 
     uiLayer.appendChild(this.root);
     this.refreshNow();
@@ -406,11 +512,45 @@ class TombsHud {
     this.set(TOMBS_FIELD.draws, drawsLine(r.drawCalls));
     this.set(TOMBS_FIELD.people, peopleLine(r.standing, r.missing));
     this.set(TOMBS_FIELD.fps, fpsLine(r.fps));
+    this.set(TOMBS_FIELD.mode, modeLine(r.walking, r.stance));
+    this.set(TOMBS_FIELD.prompt, promptLine(r.prompt));
+    this.set(TOMBS_FIELD.audio, audioLine(r.audioRunning, r.decoded, r.failed, r.playing));
+    this.setReach(r.reachLabel);
     // The two buttons offer the CHANGE; the two lines above report the state.
     const lever = leverLabel(r.lighting);
     if (this.lever.textContent !== lever) this.lever.textContent = lever;
     const array = arrayLabel(r.running);
     if (this.array.textContent !== array) this.array.textContent = array;
+    const walk = walkLabel(r.walking);
+    if (this.walk.textContent !== walk) this.walk.textContent = walk;
+    // RUN is offered only while there is a body to run: on a flying
+    // camera it would be a control with nothing to act on. Its WORD is
+    // the way back, like every other control on this HUD — a button
+    // that still reads RUN after it has been pressed is a control the
+    // player cannot tell the state of.
+    this.run.style.display = r.walking ? '' : 'none';
+    const run = runLabel(r.sprinting);
+    if (this.run.textContent !== run) this.run.textContent = run;
+  }
+
+  /** The prompt and its control appear together and go together. */
+  private setReach(label: string): void {
+    const want = interactLabel(label);
+    if (want === '') {
+      this.promptRow.style.display = 'none';
+      if (this.interact !== null) {
+        this.interact.remove();
+        this.interact = null;
+      }
+      return;
+    }
+    this.promptRow.style.display = '';
+    if (this.interact === null) {
+      this.interact = this.button(this.promptRow.ownerDocument, TOMBS_ACTION.interact, want);
+      this.promptRow.appendChild(this.interact);
+    } else if (this.interact.textContent !== want) {
+      this.interact.textContent = want;
+    }
   }
 }
 
@@ -450,8 +590,73 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
   let lighting: LightMode = 'normal';
   let arrayRunning = false;
 
+  // ---------------------------------------------------------------- THE BODY
+  //
+  // THE PLAYER IS JACK, which is why the walking body wears his model and
+  // why the idle copy of him at the next desk is hidden while it is being
+  // walked. Chapter 1 opens on Jack at his workstation; a room containing
+  // the player AND a second Jack standing beside him is a bug the moment
+  // you look at it. FLY mode has no body, so the plan's own room comes
+  // straight back the instant the camera takes over again.
+  //
+  // The collision index is built ONCE from the plan. It is the same
+  // `Slab.solid` the renderer reads and the same one a server would hold
+  // — `world/tombs/types.ts`'s third rule, cashed in: the player does not
+  // get a private list.
+  const solids: LabSolids = indexLab(layout);
+  /**
+   * THE BODY. `spawn.yaw` is a CAMERA yaw — the plan's own "looking up
+   * the room" — and an actor's heading is a half turn from it
+   * (`FreeFlyCamera.headingOfYaw`). The two share the name `rotation.y`
+   * and are not the same number: a camera at yaw 0 looks down -Z, and a
+   * body at heading 0 walks and faces +Z. Every heading in this file
+   * goes through that one conversion.
+   */
+  const walker: WalkerState = newWalkerState(
+    layout.spawn.at.x, layout.spawn.at.y, layout.spawn.at.z, headingOfYaw(layout.spawn.yaw));
+  const ray = newRayHit();
+  const intent = newMutableIntent();
+  const turns: MutableJointTurn[] = Array.from({ length: HUMAN_POSE_TURNS }, newJointTurn);
+  const gait: { stance: HumanStance; phase: number; seconds: number; lean: number } = {
+    stance: 'stand', phase: 0, seconds: 0, lean: 0,
+  };
+  const aim = new THREE.Vector3();
+
+  /**
+   * `world/tombs/collide` satisfies `WalkWorld` structurally, which is
+   * the whole point of the walker declaring its own query interface: the
+   * pure locomotion never imports the building, and the building never
+   * hears of a walker.
+   */
+  const walkWorld: WalkWorld = {
+    moveBody: (from, radius, height, delta, out) => moveBody(solids, from, radius, height, delta, out),
+    groundUnder: (x, z, fromY) => groundUnder(solids, x, z, fromY),
+    ceilingOver: (x, z, fromY) => ceilingOver(solids, x, z, fromY),
+  };
+
+  let walking = false;
+  let sprinting = false;
+  let body: THREE.Object3D | null = null;
+  let bodyRig: HumanRig | null = null;
+  let bodyMeasure: HumanMeasure | null = null;
+  let clock = 0;
+
+  const audio = new AudioEngine({ manifest: AUDIO_MANIFEST, levels: MIX_DEFAULTS, assets });
+  /** The player's faders, taken from Settings; `MIX_DEFAULTS` where there are none. */
+  const applyMix = (): void => { audio.setLevels(hooks.settings?.()?.mix ?? MIX_DEFAULTS); };
+  const audioStatus: AudioStatus = newAudioStatus();
+  /**
+   * Which chapter-1 line the next press speaks. It WALKS THE CHAPTER
+   * rather than replaying one line, because the thing being judged is
+   * whether eighty-eight clips are all reachable and all sound like the
+   * same room — which one clip on repeat cannot answer.
+   */
+  let nextLine = 0;
+
   const readout: MutableReadout = {
     room: OUTSIDE_ROOM, lighting: 'normal', running: false, drawCalls: 0, standing: 0, missing: 0, fps: 0, x: 0, y: 0, z: 0,
+    walking: false, stance: 'stand', sprinting: false, prompt: '', reachLabel: '',
+    audioRunning: false, decoded: 0, failed: 0, playing: 0,
   };
 
   /** The air this lighting wants: the view's own look while it stands, the same table before it is built. */
@@ -478,12 +683,42 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
 
   /** The camera's place read back into the plan's metres, written into the scratch point. */
   const metresOf = (): MutableVec3 => {
+    // WALKING, THE PLACE THAT MATTERS IS THE FEET. The camera is on a
+    // boom behind the head and is pulled in by whatever is behind it, so
+    // reading it back would report a point that is partly a function of
+    // the wall — useless for checking a position against the floor plan,
+    // which is the whole reason this line exists.
+    if (walking) {
+      POINT.x = walker.x;
+      POINT.y = walker.y;
+      POINT.z = walker.z;
+      return POINT;
+    }
     const p = free.camera.position;
     POINT.x = p.x / M;
     POINT.y = (p.y - FLOOR_UNITS) / M;
     POINT.z = p.z / M;
     return POINT;
   };
+
+  /**
+   * WHAT IS IN REACH, worked out from where the body IS — never
+   * remembered from the last frame.
+   *
+   * It used to be a field written once per frame in `walkTheBody`, and
+   * that is a latch on a fact that is already measurable. THE HUD
+   * REPAINTS ON THE PRESS (`TombsHud.button`), so a teleport repainted
+   * the room line from the body's new place and the prompt from the desk
+   * the body had just left — a control offering to read a run log two
+   * rooms away, and no frame in between to correct it. Deriving it costs
+   * a walk over a handful of points; remembering it cost a lie.
+   *
+   * Null while the camera is flying: a prompt belongs to a body, and
+   * there is no body to reach with.
+   */
+  const reachNow = (): Interaction | null => (
+    walking ? nearestInteraction(layout, { x: walker.x, y: walker.y + EYE_HEIGHT_M, z: walker.z }) : null
+  );
 
   const roomNow = (): Room | null => {
     const at = metresOf();
@@ -505,6 +740,17 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
     readout.x = POINT.x;
     readout.y = POINT.y;
     readout.z = POINT.z;
+    readout.walking = walking;
+    readout.stance = walker.stance;
+    readout.sprinting = sprinting;
+    const reach = reachNow();
+    readout.prompt = reach === null ? '' : reach.prompt;
+    readout.reachLabel = reach === null ? '' : reach.label;
+    audio.readStatus(audioStatus);
+    readout.audioRunning = audioStatus.state === 'running';
+    readout.decoded = audioStatus.decoded;
+    readout.failed = audioStatus.failed + audioStatus.missing;
+    readout.playing = audioStatus.playing;
     return readout;
   };
 
@@ -531,8 +777,136 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
       if (room.id !== id) continue;
       const pose = free.pose();
       standAt(room.inside.at.x, floorOf(room), room.inside.at.z, pose.yaw, pose.pitch);
+      // AND THE BODY GOES TOO. Without this the room buttons silently
+      // stop working the moment you stand up: the camera is moved, and
+      // the very next frame `walkTheBody` puts it back at the head of a
+      // body that never left. The teleport looked broken; it was the
+      // camera being overruled by the thing it is supposed to follow.
+      if (walking) {
+        walker.x = room.inside.at.x;
+        walker.z = room.inside.at.z;
+        walker.y = floorOf(room);
+        walker.vx = 0;
+        walker.vz = 0;
+        walker.vy = 0;
+      }
       return;
     }
+  };
+
+  /**
+   * Stand up, or go back to flying.
+   *
+   * Entering WALK drops the body where the camera is standing and faces
+   * it the way the camera looks, so the switch is continuous rather than
+   * a teleport. Leaving it hands the camera back exactly where the eye
+   * already was, for the same reason.
+   */
+  const setWalking = (want: boolean): void => {
+    if (want === walking) return;
+    walking = want;
+    people?.hide('jack', want);
+    if (body !== null) body.visible = want;
+    if (!want) return;
+    const at = metresOf();
+    const pose = free.pose();
+    walker.x = at.x;
+    walker.z = at.z;
+    walker.heading = headingOfYaw(pose.yaw);
+    walker.vx = 0;
+    walker.vz = 0;
+    walker.vy = 0;
+    // Onto whatever is under the camera, so standing up never starts in a
+    // fall from wherever the free camera happened to be flying.
+    walker.y = groundUnder(solids, at.x, at.z, at.y);
+    if (!Number.isFinite(walker.y)) walker.y = at.y - EYE_HEIGHT_M;
+  };
+
+  /**
+   * THE TAP THAT UNLOCKS THE SOUND, and the next line of chapter 1.
+   *
+   * `unlock()` must be called from inside a real gesture — an
+   * AudioContext on iOS starts suspended and silence is indistinguishable
+   * from a bug — so this is wired to a button and not to `enter()`. The
+   * room's own bed starts with it, because a voice line with no room
+   * behind it is the thing four separate buses exist to let you balance.
+   */
+  const speak = async (): Promise<void> => {
+    const ok = await audio.unlock();
+    if (!ok) return;
+    // The faders may have moved since the last line: Settings is one
+    // screen away and this tool is not disposed by opening it.
+    applyMix();
+    if (AUDIO_MANIFEST.sounds.some((a) => a.assetId === LAB_BED)) void audio.startBed(LAB_BED);
+    const lines = AUDIO_MANIFEST.voice;
+    if (lines.length === 0) return;
+    const line = lines[nextLine % lines.length];
+    nextLine += 1;
+    void audio.playLine(line.lineId);
+  };
+
+  /**
+   * ONE FRAME OF THE WALKING BODY: what the thumbs asked for, where that
+   * puts the feet, where the eye goes, and what the body looks like doing
+   * it.
+   *
+   * THE ORDER MATTERS AND SO DOES THE CLOCK EACH STEP USES. The body is
+   * the WORLD, so it integrates on SIM dt, exactly as the array's rings
+   * do. The camera and the gait's breath are instruments and read RAW dt.
+   * Mixing them is how a paused world ends up with a body still walking
+   * across it.
+   */
+  const walkTheBody = (snapshot: InputSnapshot, reading: StickReading | null, simDt: number, rawDt: number): void => {
+    const yaw = free.pose().yaw;
+    // The stick and the keys become ONE Intent in the body's own heading
+    // frame — the same call the Creature Lab makes for a possessed ant.
+    // `ground` is the medium; RUN is a button here because a thumb has no
+    // shift key, and it arrives as the intent's own sprint flag.
+    //
+    // THE TWO CALLS WANT THE LOOK IN DIFFERENT UNITS, which is the trap
+    // this seam exists to spring safely: `demandFrom` takes the CAMERA'S
+    // yaw and converts inside, while `walkStep` — core, and so unable to
+    // import the conversion — takes the look already in the ACTOR
+    // convention. Handing the raw yaw to both is a half turn that cancels
+    // itself in the movement and never does in the facing: the body walks
+    // where the camera looks and stands there back to front, never
+    // turning, because the steering error reads as zero.
+    demandFrom(snapshot, reading, yaw, walker.heading, 'ground',
+      { ...NO_BUTTONS, sprint: sprinting }, false, intent);
+    walkStep(walker, walkWorld, intent, headingOfYaw(yaw), simDt);
+
+    // THE EYE: at the head, then pushed back along the camera's OWN
+    // forward. Taking the direction from three after the rotation is
+    // applied rather than rebuilding it from yaw and pitch means there is
+    // no second copy of the camera's convention to get wrong.
+    const headY = FLOOR_UNITS + (walker.y + EYE_HEIGHT_M) * M;
+    const pose = free.pose();
+    free.place(walker.x * M, headY, walker.z * M, pose.yaw, pose.pitch);
+    free.camera.getWorldDirection(aim);
+    // How far back the room allows. The ray leaves the HEAD and travels
+    // backwards; anything it finds is a wall the camera would otherwise
+    // be standing inside.
+    const back = { x: -aim.x, y: -aim.y, z: -aim.z };
+    const head = { x: walker.x, y: walker.y + EYE_HEIGHT_M, z: walker.z };
+    const hit = rayHit(solids, head, back, BOOM_M, ray);
+    const boom = Math.max(BOOM_MIN_M, hit ? ray.distance - BOOM_MIN_M : BOOM_M);
+    free.camera.position.addScaledVector(aim, -boom * M);
+
+    // THE BODY. Its gait phase is the walker's, advanced by DISTANCE
+    // covered rather than by time, which is what keeps the feet planted
+    // at half speed; the breath runs on the raw clock beside it.
+    if (body !== null) {
+      body.position.set(walker.x * M, FLOOR_UNITS + walker.y * M, walker.z * M);
+      body.rotation.y = walker.heading;
+    }
+    if (bodyRig !== null && bodyMeasure !== null) {
+      gait.stance = walker.stance;
+      gait.phase = walker.phase;
+      gait.seconds = clock;
+      gait.lean = walker.lean;
+      bodyRig.apply(poseHuman(bodyMeasure, bodyRig.bind, gait as HumanGait, turns));
+    }
+    void rawDt;
   };
 
   const act = (action: string): void => {
@@ -547,6 +921,27 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
     }
     if (action === TOMBS_ACTION.array) {
       setArray(!arrayRunning);
+      return;
+    }
+    if (action === TOMBS_ACTION.walk) {
+      setWalking(!walking);
+      return;
+    }
+    if (action === TOMBS_ACTION.run) {
+      sprinting = !sprinting;
+      return;
+    }
+    if (action === TOMBS_ACTION.interact) {
+      // The plan says what is here; doing it is a later milestone. What
+      // this does NOT do is pretend: the control only exists while
+      // something is in reach, and pressing it reports the plan's own
+      // words rather than changing a world that has nothing to change.
+      const reach = reachNow();
+      if (reach !== null) console.info(`[tombs] ${reach.label}: ${reach.prompt} (${reach.doing})`);
+      return;
+    }
+    if (action === TOMBS_ACTION.audio) {
+      void speak();
       return;
     }
     const room = teleportedRoomOf(action, roomIds);
@@ -581,6 +976,7 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
       const rung: DetailTier = settings?.detail === undefined ? RUNG_FALLBACK : detailFor(settings.detail);
       if (settings?.fov !== undefined) free.setFov(settings.fov);
       free.setLook({ sensitivity: settings?.lookSensitivity ?? 1, invertY: settings?.invertY ?? false });
+      applyMix();
 
       // `ambient: true`: nothing else lights this scene — there is no sky
       // here to wash, which is the case `LabView` asks for it in.
@@ -613,6 +1009,40 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
       // passed through and not negated.
       standAt(layout.spawn.at.x, layout.spawn.at.y, layout.spawn.at.z, layout.spawn.yaw, 0);
 
+      // THE PLAYER'S OWN BODY, loaded the same way the room's people are
+      // and NOT AWAITED for the same reason. It starts hidden: the scene
+      // opens on the free camera, and a body standing in the room with
+      // nobody driving it would be a third person at the desks.
+      // A body that does not arrive costs the THIRD PERSON, not the
+      // player: the walker still walks, the camera still looks and the
+      // room is still solid, because none of that is drawn by the body.
+      // So the placeholder is an empty node and a line in the console
+      // rather than a magenta column standing where a person should be.
+      void assets.loadModel('models/jack.glb', () => {
+        console.error('[tombs] the player body did not load; walking continues in first person');
+        return new THREE.Object3D();
+      }).then((model) => {
+        if (view === null) {
+          release(model);
+          return;
+        }
+        model.name = 'tombs-player';
+        model.scale.setScalar(M);
+        model.visible = walking;
+        model.traverse((node) => {
+          const mesh = node as THREE.Mesh;
+          if (mesh.isMesh === true) mesh.frustumCulled = false;
+        });
+        try {
+          bodyRig = new HumanRig(model);
+          bodyMeasure = measureHuman(bodyRig.bind);
+        } catch (error) {
+          console.error('[tombs] the player body could not be posed; it keeps its bind pose', error);
+        }
+        body = model;
+        three.add(model);
+      });
+
       hud = new TombsHud(ctx.uiLayer, layout.rooms, { readout: readoutNow, onAction: act });
       // THE STICK — the same fixed, visible one the Performance World and
       // the Creature Lab read, bottom-left, under the left thumb.
@@ -626,9 +1056,20 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
 
     update(frame: FrameInfo) {
       stats.record(frame.rawDt, frame.simDt);
+      clock += frame.rawDt;
+      const snapshot = ctx.input.snapshot();
+      const reading = stick === null ? null : stick.read();
       // THE EYE, by RAW dt: keys and the stick together, camera-relative,
       // the way every free camera in this build flies.
-      free.update(ctx.input.snapshot(), frame.rawDt, stick === null ? null : stick.read());
+      //
+      // WALKING, THE STICK IS THE BODY'S and only the LOOK is the
+      // camera's, so it is withheld here and handed to `demandFrom`
+      // instead. The keys still reach the free camera and still move it;
+      // its position is overwritten below, which is cheaper than teaching
+      // it a second mode and leaves one camera in this file rather than
+      // two.
+      free.update(snapshot, frame.rawDt, walking ? null : reading);
+      if (walking) walkTheBody(snapshot, reading, frame.simDt, frame.rawDt);
       // THE RINGS, by SIM dt: they are the world, not an instrument.
       view?.update(frame.simDt);
       // THE PEOPLE, by RAW dt. Their breath and their sway are not the
@@ -636,6 +1077,7 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
       // reads as the renderer having died, which is the same argument the
       // camera and the HUD are on raw time for.
       people?.update(frame.rawDt);
+      audio.update(frame.rawDt);
       hud?.update(frame.rawDt);
     },
 
@@ -655,6 +1097,15 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
         view.dispose();
         view = null;
       }
+      if (body !== null) {
+        three.remove(body);
+        bodyRig?.dispose();
+        bodyRig = null;
+        bodyMeasure = null;
+        release(body);
+        body = null;
+      }
+      void audio.dispose();
       // A body may still be in flight; `LabPeople` abandons it by epoch.
       if (people !== null) {
         three.remove(people.group);

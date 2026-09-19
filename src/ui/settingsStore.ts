@@ -10,6 +10,7 @@
  * Every number is GAME TUNING, not measured biology.
  */
 import { finiteNumber, type StoreSpec, type Store, type Versioned } from '../persistence/store';
+import { MIX_DEFAULTS, sanitizeMixLevels, type MixLevels } from '../audio/mix';
 import type { StorageRoot } from '../persistence/StorageRoot';
 import {
   CREATURE_LOD_DEFAULTS, sanitizeCreatureLodSettings,
@@ -104,6 +105,21 @@ export interface Settings extends Versioned {
    * Reader: perf/PerformanceWorldScene, through the Performance World.
    */
   readonly timeOfDay: number | null;
+  /**
+   * THE FOUR BUSES AND THE MASTER, each 0 to 1 along a decibel curve
+   * (`audio/mix.ts` owns the arithmetic; this is only where the numbers
+   * live). Separating VOICE, SFX, AMBIENCE and MUSIC buys nothing until
+   * somebody can move them against each other, which is what the
+   * milestone's step 7 is for: Chapter 1 is a room tone with people
+   * talking over it, and whether that balance works is a question only a
+   * phone in a quiet room can answer.
+   *
+   * All five default to 1 because the per-asset mix is already the story
+   * repository's own measured one (`MIX_DEFAULTS`). A fader is the
+   * player's DEPARTURE from that, not a second mix.
+   * Reader: tombs/TombsLabScene, through the Tombs laboratory.
+   */
+  readonly mix: MixLevels;
 }
 
 /** Bumped when a field changes meaning; an older document reads as defaults. */
@@ -146,6 +162,8 @@ export const SETTINGS_DEFAULTS: Settings = {
   // NULL: the island's own clock. The sky is Kaua'i's until a player
   // deliberately holds it somewhere else.
   timeOfDay: null,
+  // UNITY, ALL FIVE — the measured mix, undeparted from (`audio/mix.ts`).
+  mix: { ...MIX_DEFAULTS },
 };
 
 /**
@@ -190,6 +208,7 @@ export function sanitizeSettings(raw: unknown, defaults: Settings = SETTINGS_DEF
     finderOn: typeof r.finderOn === 'boolean' ? r.finderOn : defaults.finderOn,
     cameraSpeed: isCameraSpeed(r.cameraSpeed) ? r.cameraSpeed : defaults.cameraSpeed,
     timeOfDay: isHeldHour(r.timeOfDay) ? r.timeOfDay : defaults.timeOfDay,
+    mix: sanitizeMixLevels(r.mix, defaults.mix ?? MIX_DEFAULTS),
   };
 }
 

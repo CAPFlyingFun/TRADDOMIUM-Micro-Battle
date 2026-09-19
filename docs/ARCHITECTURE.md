@@ -104,14 +104,38 @@ src/
                 Nothing in it knows what a mesh is, so the building's
                 collision and its reachability are testable in plain
                 node and a server could hold them.
+                collide.ts turns a plan into what a body can touch:
+                LabSolids indexes every solid slab and pillar into a flat
+                grid ONCE, moveBody sweeps a capsule through it axis by
+                axis with a step-up, groundUnder/ceilingOver answer what
+                is below and above a point, rayHit is what the camera's
+                boom asks, and nearestInteraction is what is in reach.
+                Core, so the building stops a body identically on a
+                phone and on a server.
   actor/        Player{Transform, Vitals, GroundLocomotion, Flight,
                 SurfaceGrip, Rig} composed from small pure modules.
                 Phase 1 holds the contracts: ActorId, PlayerId,
                 ActorState (position is a WorldPoint), CapsuleTuning and
                 the pure flat-plane Transform.step.
-  view/         three.js visual adapters for actors (CapsuleView) — the
-                only place actor state meets a mesh; actor/ stays
-                three-free.
+                The TOMBS milestone adds a HUMAN on foot, all of it pure:
+                Walker.ts (a 0.25 m x 1.75 m capsule integrated against a
+                WalkWorld of three questions, pace as a CEILING, steering
+                IS looking, the gait phase advanced by DISTANCE so the
+                feet stay planted at half speed, and a hysteretic
+                stand/walk/run stance); humanRig.ts (the CONTRACT: the
+                seventeen joints a humanoid is posed by, a HumanMeasure
+                read off a bind pose, and a JointTurn as an axis and an
+                angle — never a matrix, so nothing here meets three);
+                humanSkeleton.ts (measureHuman: which bone is which,
+                found by MEASURING the bind pose rather than by trusting
+                a name, including which side is left); and humanPose.ts
+                (poseHuman: one stance, one phase and one breath into
+                fifteen turns, parent before child).
+  view/         three.js visual adapters for actors (CapsuleView, and
+                HumanRig, which reads a GLB's bind pose out as
+                BindJoints and writes actor/humanPose's turns back onto
+                its bones) — the only place actor state meets a mesh;
+                actor/ stays three-free.
   terrain/      the ground's renderer and its residency: TerrainView, a
                 geometry clipmap of concentric rings over
                 world/heightfield (its innermost rings FINER than the
@@ -157,7 +181,11 @@ src/
                 to world/heightfield and flora/ to world/objects, this is
                 to world/tombs: the only place a floor plan meets a mesh,
                 and the ONE place local metres become world units. Added
-                in the TOMBS milestone.
+                in the TOMBS milestone. LabPeople stands the plan's
+                people in it — one GLB each, a tagged placeholder where
+                one will not load, posed down from their bind pose by
+                actor/humanPose and breathing on RAW dt — and hides
+                whichever of them the player is currently being.
   camera/       FollowCamera + CameraOwnership. Phase 0 has FreeFlyCamera
                 only (under perf/).
   input/        keyboard / pointer / touch (Input.ts, DOM) → one shared
@@ -290,6 +318,19 @@ src/
   perf/         PerformanceWorldScene, FreeFlyCamera, PerfHud,
                 FrameStats (pure).
   persistence/  versioned storage wrapper with defensive reads.
+  audio/        the game's sound, in three layers that do not reach past
+                each other: manifest.ts (the CONTRACT — a VoiceLine, a
+                SoundAsset, the four buses VOICE / SFX / AMBIENCE /
+                MUSIC, and which bus an asset is carried on); mix.ts
+                (PURE: the fader's decibel curve, solved so its midpoint
+                is exactly half-loudness and its bottom is exactly
+                silence, and the duck that steps the beds down under a
+                line and brings them back on a LINEAR ramp that arrives);
+                and AudioEngine.ts, the only file here allowed to touch
+                the platform — one AudioContext, one gain node per bus,
+                unlocked from a real gesture because iOS starts it
+                suspended. audioManifest.ts is BAKED from the story
+                repository by `bake:audio` and is data, not code.
   assets/       assetUrl(), loadModel() with retry + tagged placeholder,
                 loadTexture(). The only loader in the codebase.
 tests/          vitest. simulationCore.test.ts is the import-boundary test.
@@ -329,7 +370,14 @@ fauna → NEVER actor, view, session, ui, net, perf
 control → three (FollowCamera, pick), input(Input.ts types, Intent.ts, MoveStick types), creatures(demand's MutableIntent, species types), perf(FreeFlyCamera's yaw helpers), session(CameraPose as a TYPE), world(coords, origin) — nothing else
 lab → three, DOM (its own UI), app(Scene contract), creatures, fauna, control, input, assets(loadModel), devtools(DevTool contract), perf(FreeFlyCamera), session(types), world(coords, origin, random) — NEVER net, persistence
 actor → NEVER view (a state module does not know what it looks like)
+audio(manifest, mix) → persistence(finiteNumber) only — pure, and runs in plain node
+audio(AudioEngine) → assets(assetUrl), and the Web Audio API; NEVER three, world, actor, session
+tombs → three, DOM (its own HUD), app(Scene), world(tombs), actor(Walker, human*),
+        view(HumanRig), audio, control(PlayerDemand), input, perf(FreeFlyCamera),
+        assets(loadModel) — NEVER net, persistence
 ui → NEVER world, actor, autonomy, session internals (typed hooks only)
+ui(settingsStore) → audio(manifest, mix) for the mixer's shape and its sanitizer — the
+        document's only widening, and both are pure
 camera → NEVER actor mode enums (continuous signals only)
 worker → net (Host, protocol, Transport) and NOTHING else of src/
 worker → NEVER three, the DOM or node: workerd is its own runtime

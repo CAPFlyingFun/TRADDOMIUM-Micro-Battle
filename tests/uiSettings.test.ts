@@ -63,12 +63,27 @@ describe('settings sanitize', () => {
     expect(sanitizeSettings({ quality: 2 }).textures).toBe(SETTINGS_DEFAULTS.textures);
   });
 
+  it('keeps the five faders in 0..1 and falls back to the measured mix', () => {
+    // The default is UNITY on all five: the per-asset mix is already the
+    // story repository's own, and a fader is the player's departure from
+    // it rather than a second mix (`audio/mix.ts`).
+    expect(SETTINGS_DEFAULTS.mix).toEqual({ master: 1, voice: 1, sfx: 1, ambience: 1, music: 1 });
+    expect(sanitizeSettings({ mix: { ambience: 0.25 } }).mix.ambience).toBe(0.25);
+    expect(sanitizeSettings({ mix: { ambience: 0 } }).mix.ambience).toBe(0);
+    expect(sanitizeSettings({ mix: { ambience: 9 } }).mix.ambience).toBe(1);
+    expect(sanitizeSettings({ mix: { ambience: -2 } }).mix.ambience).toBe(0);
+    expect(sanitizeSettings({ mix: { ambience: '0.5' } }).mix.ambience).toBe(1);
+    // A document written before the mixer existed reads as the measured mix.
+    expect(sanitizeSettings({ fov: 70 }).mix).toEqual(SETTINGS_DEFAULTS.mix);
+    expect(sanitizeSettings({ mix: 'loud' }).mix).toEqual(SETTINGS_DEFAULTS.mix);
+  });
+
   it('drops unknown keys and always stamps the current version', () => {
     const s = sanitizeSettings({ version: 7, fov: 70, terrainRelief: 1.5, showFix: true });
     expect(s).toEqual({ ...SETTINGS_DEFAULTS, fov: 70, version: SETTINGS_VERSION });
     expect(Object.keys(s).sort()).toEqual([
-      'cameraSpeed', 'creatureLod', 'detail', 'finderOn', 'fov', 'hudCollapsed', 'invertY', 'lookSensitivity', 'showFps',
-      'textures', 'timeOfDay', 'version',
+      'cameraSpeed', 'creatureLod', 'detail', 'finderOn', 'fov', 'hudCollapsed', 'invertY', 'lookSensitivity', 'mix',
+      'showFps', 'textures', 'timeOfDay', 'version',
     ]);
   });
 });
@@ -81,6 +96,7 @@ describe('settings store round trip', () => {
     const written = {
       version: SETTINGS_VERSION, fov: 95, lookSensitivity: 1.75, invertY: true, textures: 'high', detail: 'high', showFps: false,
       hudCollapsed: true, finderOn: true, cameraSpeed: 'slow', timeOfDay: 13.25, creatureLod: SETTINGS_DEFAULTS.creatureLod,
+      mix: { master: 0.8, voice: 1, sfx: 0.5, ambience: 0.25, music: 0 },
     } as const;
     store.write(written);
     expect(store.read()).toEqual(written);
