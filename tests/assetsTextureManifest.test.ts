@@ -31,7 +31,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
-  BAKED_TEXTURES, TEXTURE_DIR, bakedTexture, textureSizeFor, textureUrl,
+  BAKED_TEXTURES, TEXTURE_DIR, bakedTexture, textureSizeFor, textureUrl, type TextureName,
 } from '../src/assets/textureManifest';
 import {
   MOBILE_TIERS, TEXTURE_QUALITY, TEXTURE_TIERS, textureBytes, type TextureTier,
@@ -210,11 +210,19 @@ describe('what this actually costs a phone', () => {
     // 1536 — 12.6 MiB on the GPU with its mip chain — plus a 1024 foam,
     // and the audit found three duplicate copies of the pair resident at
     // once. This is the same two textures on the ladder.
+    //
+    // THE OCEAN'S TWO, NAMED, rather than "everything in the manifest".
+    // They were the same list when this was written and stopped being it
+    // the day a third texture was baked (`tombs-screen`, for the
+    // laboratory's monitors), which quietly turned a claim about the
+    // OCEAN into a claim about the whole game and failed on a texture the
+    // ocean never loads. A budget is a budget for something.
+    const OCEAN: readonly TextureName[] = ['water-normal', 'surf-foam'];
     const budget: Record<string, number> = {};
     for (const tier of MOBILE_TIERS) {
       let bytes = 0;
-      for (const texture of BAKED_TEXTURES) {
-        const side = textureSizeFor(texture.name, tier);
+      for (const name of OCEAN) {
+        const side = textureSizeFor(name, tier);
         bytes += Math.round((side * side * 4 * 4) / 3);
       }
       budget[tier] = bytes;
@@ -231,6 +239,24 @@ describe('what this actually costs a phone', () => {
     // The 1536 v0 shipped, for one of the two textures alone.
     const v0Ripple = Math.round((1536 * 1536 * 4 * 4) / 3);
     expect(v0Ripple / budget.medium).toBeGreaterThan(4);
+  });
+
+  it('keeps every OTHER texture small enough that adding one is not a decision', () => {
+    // The ocean's budget above is the one that was argued. Everything
+    // else on the ladder is held to a plainer rule: a texture that is not
+    // the ocean's may not, at the tier a modest phone picks, cost more
+    // than the ocean's smallest. `tombs-screen` is a flat interface and
+    // is 12 KiB on the wire at medium; the rule exists so the next one is
+    // looked at rather than waved through.
+    const OCEAN = new Set<TextureName>(['water-normal', 'surf-foam']);
+    const others = BAKED_TEXTURES.filter((t) => !OCEAN.has(t.name));
+    expect(others.length).toBeGreaterThan(0);
+    const foam = textureSizeFor('surf-foam', 'medium');
+    const ceiling = Math.round((foam * foam * 4 * 4) / 3);
+    for (const texture of others) {
+      const side = textureSizeFor(texture.name, 'medium');
+      expect(Math.round((side * side * 4 * 4) / 3), texture.name).toBeLessThanOrEqual(ceiling);
+    }
   });
 
   it('agrees with the ladder’s own cost model', () => {

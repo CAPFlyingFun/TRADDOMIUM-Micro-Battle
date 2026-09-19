@@ -17,8 +17,9 @@
 import { describe, expect, it } from 'vitest';
 import type { Surface } from '../src/world/tombs/types';
 import {
-  FITTING, FITTING_DARK, FITTING_LIT, LIGHTING, LIGHT_MODES, LOOK, METALLIC, RING_LOOK, SURFACES,
-  ambientLevel, lookFor, luminance,
+  FITTING, FITTING_DARK, FITTING_LIT, LIGHTING, LIGHT_MODES, LOOK, METALLIC, RING_LOOK,
+  SCREEN_ATLAS, SCREEN_ATLAS_SIZE, SCREEN_LIT, SURFACES,
+  ambientLevel, lookFor, luminance, screenPanelFor, screenPanelUv,
 } from '../src/tombs/labLook';
 
 /** Every surface the CONTRACT names, written out by hand — so the union growing fails this file rather than sliding past it. */
@@ -89,6 +90,17 @@ describe('what lights itself, and what does not', () => {
   it('leaves the monitors dark — a building whose every screen glows is a set, not a workplace', () => {
     expect(LOOK.screen.emissive).toBe(0x000000);
     expect(LOOK.screen.emissiveIntensity).toBe(0);
+  });
+
+  it('keeps the lit screen SEPARATE from the surface, so a missing texture falls back to dark glass', () => {
+    // The rule above is about the SURFACE and still holds. `SCREEN_LIT`
+    // is what a screen with a picture ON it looks like, and `LabView`
+    // applies it only once the atlas has loaded — so the failure is the
+    // old dark glass rather than a white glowing box.
+    expect(SCREEN_LIT.emissive).not.toBe(LOOK.screen.emissive);
+    expect(SCREEN_LIT.emissiveIntensity).toBeGreaterThan(0);
+    // And still well under the one thing that is meant to be a light.
+    expect(SCREEN_LIT.emissiveIntensity).toBeLessThan(LOOK.readout.emissiveIntensity);
   });
 
   it('emits from nothing else, and never disagrees with itself about emitting', () => {
@@ -224,5 +236,68 @@ describe('luminance', () => {
 
   it('keeps the floor dark enough to be a floor — it is still the darkest thing underfoot', () => {
     expect(luminance(LOOK.floor.colour)).toBeLessThan(luminance(LOOK.wall.colour) / 2);
+  });
+});
+
+describe('the screen atlas', () => {
+  it('holds every panel inside the texture, without overlapping', () => {
+    const rects = Object.entries(SCREEN_ATLAS);
+    for (const [name, r] of rects) {
+      expect(r.x >= 0 && r.y >= 0, name).toBe(true);
+      expect(r.x + r.w, name).toBeLessThanOrEqual(SCREEN_ATLAS_SIZE);
+      expect(r.y + r.h, name).toBeLessThanOrEqual(SCREEN_ATLAS_SIZE);
+    }
+    // A panel that grew into its neighbour would print half of one screen
+    // on the other, and the shot that would catch it is one frame of one
+    // probe. Here it is arithmetic.
+    for (let i = 0; i < rects.length; i += 1) {
+      for (let j = i + 1; j < rects.length; j += 1) {
+        const [an, a] = rects[i];
+        const [bn, b] = rects[j];
+        const apart = a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y;
+        expect(apart, `${an} overlaps ${bn}`).toBe(true);
+      }
+    }
+  });
+
+  it('gives each of the plan\'s two screen shapes the panel drawn for it', () => {
+    // The four workstation monitors, 0.62 x 0.46.
+    expect(screenPanelFor(0.62, 0.46)).toBe('terminal');
+    // The structural monitor, 0.80 x 0.60 — the same shape, the same panel.
+    expect(screenPanelFor(0.80, 0.60)).toBe('terminal');
+    // The six camera panels, 0.84 wide by 0.36 tall.
+    expect(screenPanelFor(0.84, 0.36)).toBe('feed');
+    // A degenerate slab asks for nothing and gets the safe answer.
+    expect(screenPanelFor(0, 1)).toBe('terminal');
+    expect(screenPanelFor(1, Number.NaN)).toBe('terminal');
+  });
+
+  it('measures the fit in LOG aspect, so squashed and stretched cost the same', () => {
+    const terminal = SCREEN_ATLAS.terminal.w / SCREEN_ATLAS.terminal.h;
+    const feed = SCREEN_ATLAS.feed.w / SCREEN_ATLAS.feed.h;
+    // The geometric mean of the two is the tipping point by construction.
+    const middle = Math.sqrt(terminal * feed);
+    expect(screenPanelFor(middle * 0.99, 1)).toBe('terminal');
+    expect(screenPanelFor(middle * 1.01, 1)).toBe('feed');
+  });
+
+  it('flips the atlas once, so a rectangle measured from the top comes out measured from the bottom', () => {
+    // The terminal is drawn at the TOP of the image, so in three's UVs —
+    // which count v up from the bottom — it is the TOP of the texture.
+    const terminal = screenPanelUv(SCREEN_ATLAS.terminal);
+    expect(terminal.v1).toBeCloseTo(1, 6);
+    expect(terminal.v0).toBeCloseTo(1 - 576 / 1024, 6);
+    expect(terminal.u0).toBeCloseTo(0, 6);
+    expect(terminal.u1).toBeCloseTo(768 / 1024, 6);
+    // The feed is drawn at the BOTTOM of the image and reaches v = 0.
+    const feed = screenPanelUv(SCREEN_ATLAS.feed);
+    expect(feed.v0).toBeCloseTo(0, 6);
+    expect(feed.v1).toBeCloseTo(1 - 586 / 1024, 6);
+    // Every rectangle stays the right way up and the right way round.
+    for (const rect of Object.values(SCREEN_ATLAS)) {
+      const uv = screenPanelUv(rect);
+      expect(uv.u1).toBeGreaterThan(uv.u0);
+      expect(uv.v1).toBeGreaterThan(uv.v0);
+    }
   });
 });

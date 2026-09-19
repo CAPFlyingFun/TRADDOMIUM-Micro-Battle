@@ -73,6 +73,13 @@ const SHOTS_WANTED = [
   { id: '7-array', room: 'chamber', at: [-6.0, 2.2, -1.2], look: [-6.0, 2.6, -5.2], note: 'the array: five articulated rings around the central platform' },
   { id: '8-utility', room: 'utility', at: [7.2, EYE, 4.6], look: [7.2, 1.6, -6.0], note: 'the plant: capacitors, the reactor housing, the grid feed' },
   { id: '9-outside', room: null, at: [4.0, 12.0, 34.0], look: [0.0, 2.0, 3.0], note: 'the building on its ground, from the south' },
+  // THE CAMERA BANK, framed on purpose, because the screens are the one
+  // surface in this building whose texture can be wrong SILENTLY: the
+  // atlas is picked per slab from its own aspect, so a monitor that got
+  // the wrong panel is stretched rather than missing, and no other shot
+  // here looks at the east wall of the control room at all.
+  { id: '10-screens', room: 'control', at: [-2.6, 2.0, 3.0], look: [1.0, 2.0, 3.0], note: 'the six camera feeds and the structural monitor, on the east wall' },
+  { id: '11-monitor', room: 'laboratory', at: [-6.0, 1.30, 10.85], look: [-6.0, 1.10, 9.92], note: "Jack's monitor close: the workstation panel of the screen atlas" },
 ];
 
 const PAGE = `<!doctype html><html><head><meta charset="utf-8"><style>
@@ -81,6 +88,8 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"><style>
 import * as THREE from 'three';
 import { planLab } from '/src/world/tombs/index.ts';
 import { LabView } from '/src/tombs/index.ts';
+import { assets } from '/src/assets/assets.ts';
+import { textureUrl } from '/src/assets/textureManifest.ts';
 
 const M = 100; // world units per metre; the probe's cameras are written in metres
 
@@ -98,9 +107,20 @@ const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(62, ${VIEWPORT.width} / ${VIEWPORT.height}, 2, 200_000);
 
 const layout = planLab();
+// THE SCREENS' ATLAS, because without it this probe photographs the
+// FALLBACK. LabView draws dark glass when it has no texture, which is
+// the right thing in the game and would be a picture of nothing here:
+// the shots below exist to catch a screen that got the wrong panel, and
+// every screen was black in the first run for exactly this reason.
+// (No backticks in this comment: it lives inside a template literal.)
+const screenTexture = await assets.loadTexture(textureUrl('tombs-screen', 'high'));
+if (screenTexture !== null) {
+  screenTexture.colorSpace = THREE.SRGBColorSpace;
+  screenTexture.anisotropy = 4;
+}
 // groundUnits 0 so the plan's own metres are the scene's own metres x 100
 // and a camera written from the floor plan lands where the floor plan says.
-const view = new LabView({ groundUnits: 0, ambient: true, detail: 'medium' });
+const view = new LabView({ groundUnits: 0, ambient: true, detail: 'medium', screenTexture });
 view.build(layout);
 scene.add(view.group);
 scene.fog = new THREE.Fog(view.lighting.fog, 6 * M, 46 * M);

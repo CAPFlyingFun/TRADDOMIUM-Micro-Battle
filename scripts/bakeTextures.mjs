@@ -62,6 +62,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, wri
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
+import sharp from 'sharp';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SOURCE_DIR = path.join(ROOT, 'art', 'textures');
@@ -91,6 +92,14 @@ const TEXTURES = [
     source: 'surf-foam.jpg',
     kind: 'colour',
     note: 'Foam, read as a brightness where the wave has broken.',
+  },
+  {
+    name: 'tombs-screen',
+    source: 'tombs-screen.svg',
+    kind: 'colour',
+    note: 'The TOMBS laboratory\'s screens: an atlas of a workstation terminal and a camera feed, '
+      + 'and a flat patch for the four thin edges of the box each one is. Authored as SVG, which is '
+      + 'why it is the one master in this directory you can open in a text editor and edit.',
   },
 ];
 
@@ -139,8 +148,8 @@ function readLadder() {
  * rungs are exactly where that shows.
  */
 async function bakeOne(page, { source, kind }, rungs) {
-  const bytes = readFileSync(path.join(SOURCE_DIR, source));
-  const mime = source.endsWith('.png') ? 'image/png' : 'image/jpeg';
+  const bytes = await masterBytes(source, rungs);
+  const mime = source.endsWith('.jpg') || source.endsWith('.jpeg') ? 'image/jpeg' : 'image/png';
   const dataUrl = `data:${mime};base64,${bytes.toString('base64')}`;
   return page.evaluate(async ({ dataUrl, sizes, encoding }) => {
     const img = new Image();
@@ -165,6 +174,30 @@ async function bakeOne(page, { source, kind }, rungs) {
     }
     return { master, baked };
   }, { dataUrl, sizes: rungs.map((r) => r.size), encoding: ENCODING[kind] });
+}
+
+/**
+ * The master as PIXELS — which for every source but one is simply the
+ * file on disk.
+ *
+ * AN SVG IS RASTERISED HERE, BY SHARP, AND NOT BY THE BROWSER. A vector
+ * master is the right thing for a screen full of text: it is 40 KB of
+ * XML that a person can open and edit, and it resamples to any rung
+ * without ever having been a bitmap. But an SVG loaded into an `<img>`
+ * is a DOCUMENT IN A SANDBOX — it may not reach the system's fonts, so
+ * every label on it would render in whatever the browser fell back to,
+ * or in nothing. librsvg, which is what sharp renders with, has the
+ * fonts. It is one branch here rather than a second bake script,
+ * because everything after this line is the same work for every master.
+ *
+ * The raster is taken at the LARGEST RUNG rather than at the SVG's own
+ * declared size, so the ladder's top rung is drawn rather than resampled.
+ */
+async function masterBytes(source, rungs) {
+  const file = path.join(SOURCE_DIR, source);
+  if (!source.endsWith('.svg')) return readFileSync(file);
+  const side = Math.max(...rungs.map((r) => r.size));
+  return sharp(file, { density: 96 }).resize(side, side, { fit: 'fill' }).png().toBuffer();
 }
 
 /**
@@ -307,6 +340,35 @@ export function textureUrl(name: TextureName, tier: TextureTier, base = '/'): st
 `);
 }
 
+/**
+ * Where Chromium is, the same way `bakeArt.mjs` finds it. A bake that
+ * cannot start is a bake nobody runs: this script launched the pinned
+ * download and nothing else, so on a machine whose browser lives
+ * somewhere else — a CI image, this sandbox — it failed at the first
+ * line with a message about installing Playwright, which was not the
+ * problem.
+ */
+function chromiumPath() {
+  const override = process.env.PLAYWRIGHT_CHROMIUM;
+  if (override) {
+    if (existsSync(override)) return override;
+    throw new Error(`PLAYWRIGHT_CHROMIUM=${override} does not exist`);
+  }
+  if (existsSync(chromium.executablePath())) return undefined;
+  const browsers = process.env.PLAYWRIGHT_BROWSERS_PATH;
+  for (const guess of [
+    browsers ? path.join(browsers, 'chromium') : null,
+    '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
+    '/opt/pw-browsers/chromium/chrome',
+  ]) {
+    if (guess && existsSync(guess)) return guess;
+  }
+  throw new Error(
+    `no Chromium found: Playwright expects ${chromium.executablePath()}. `
+    + 'Point PLAYWRIGHT_CHROMIUM at a chrome binary.',
+  );
+}
+
 function writeMachineFile(file, body) {
   mkdirSync(path.dirname(file), { recursive: true });
   writeFileSync(file, body, 'utf8');
@@ -321,7 +383,7 @@ async function run() {
   if (existsSync(OUT_DIR)) rmSync(OUT_DIR, { recursive: true });
   mkdirSync(OUT_DIR, { recursive: true });
 
-  const browser = await chromium.launch();
+  const browser = await chromium.launch({ executablePath: chromiumPath() });
   const page = await browser.newPage();
   const entries = [];
   try {
@@ -330,7 +392,9 @@ async function run() {
       if (!existsSync(file)) throw new Error(`bake:textures: no master ${path.relative(ROOT, file)}`);
 
       // Measure the master before choosing rungs: never upscale.
-      const probe = await bakeOne(page, texture, [rungs[0]]);
+      // An SVG has no pixels of its own, so it is measured against the
+      // WHOLE ladder — it can be drawn at any of them.
+      const probe = await bakeOne(page, texture, texture.source.endsWith('.svg') ? rungs : [rungs[0]]);
       const masterSize = Math.min(probe.master.width, probe.master.height);
       const wanted = rungs.filter((r) => r.size <= masterSize);
       if (wanted.length === 0) {

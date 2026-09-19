@@ -141,8 +141,9 @@ import { UNITS_PER_METRE } from '../world/dem';
 import { TOMBS_GROUND_UNITS } from '../world/tombs/site';
 import type { LabLayout, Lamp, LightMode, Pillar, RoomId, Slab, Surface } from '../world/tombs/types';
 import {
-  FITTING_DARK, FITTING_LIT, LIGHTING, RING_LOOK, lookFor,
-  type LightingLook, type SurfaceLook,
+  FITTING_DARK, FITTING_LIT, LIGHTING, RING_LOOK, SCREEN_ATLAS, SCREEN_LIT, lookFor,
+  screenPanelFor, screenPanelUv,
+  type LightingLook, type ScreenPanel, type SurfaceLook,
 } from './labLook';
 
 /** 100 world units to the metre, as everywhere. The plan is in metres; the scene is in units. */
@@ -229,6 +230,16 @@ export interface LabViewOptions {
   readonly ambient?: boolean;
   /** Whether the building casts and takes the sun's shadow. True by default. */
   readonly shadows?: boolean;
+  /**
+   * THE SCREEN ATLAS — `tombs-screen` off the texture ladder, or nothing.
+   *
+   * A view is handed the texture rather than loading it, because this
+   * file has no business knowing what a URL is (`assets/` is the one
+   * loader, ARCHITECTURE §3). WITHOUT IT the screens are dark glass,
+   * exactly as they were: the picture is an addition and never a
+   * requirement, so a probe that does not bother still draws a building.
+   */
+  readonly screenTexture?: THREE.Texture | null;
 }
 
 /** What a probe or a HUD line reads off the built building. */
@@ -300,6 +311,9 @@ export class LabView {
 
   private unitBox: THREE.BoxGeometry | null = null;
   private unitBoxColoured: THREE.BoxGeometry | null = null;
+  /** One box per (thin axis, atlas panel) a screen actually asks for. */
+  private readonly screenBoxes = new Map<string, THREE.BoxGeometry>();
+  private readonly screenTexture: THREE.Texture | null;
   private unitCylinder: THREE.CylinderGeometry | null = null;
   private ambientLight: THREE.AmbientLight | null = null;
 
@@ -312,6 +326,7 @@ export class LabView {
     this.detail = options.detail ?? 'medium';
     this.maxLights = Math.max(0, Math.floor(options.maxLights ?? LIGHTS_AT[this.detail]));
     this.shadows = options.shadows ?? true;
+    this.screenTexture = options.screenTexture ?? null;
     this.group.name = 'tombs-lab';
     this.group.position.y = options.groundUnits ?? TOMBS_GROUND_UNITS;
     if (options.ambient ?? true) {
@@ -422,15 +437,40 @@ export class LabView {
     }
     this.slabCount = layout.slabs.length;
     for (const [surface, slabs] of bySurface) {
-      const mesh = new THREE.InstancedMesh(this.box(), this.materialFor(surface), slabs.length);
-      for (let i = 0; i < slabs.length; i += 1) {
-        const { at, size } = slabs[i].box;
-        M4.makeScale(size.x * M, size.y * M, size.z * M);
-        M4.setPosition(at.x * M, at.y * M, at.z * M);
-        mesh.setMatrixAt(i, M4);
+      // A SCREEN IS NOT ONE MESH BUT A FEW, and every other surface still
+      // is. The atlas panel a screen shows depends on its own shape and
+      // the face that shows it depends on which axis is thin, so the
+      // screens split into one instanced mesh per (thin axis, panel) —
+      // three of them for this plan, against one for everything else.
+      // Same material, same texture, one draw call per group.
+      for (const [key, group] of this.groupSlabs(surface, slabs)) {
+        const geometry = key === '' ? this.box() : this.screenBox(key);
+        const mesh = new THREE.InstancedMesh(geometry, this.materialFor(surface), group.length);
+        for (let i = 0; i < group.length; i += 1) {
+          const { at, size } = group[i].box;
+          M4.makeScale(size.x * M, size.y * M, size.z * M);
+          M4.setPosition(at.x * M, at.y * M, at.z * M);
+          mesh.setMatrixAt(i, M4);
+        }
+        this.finish(mesh, `slab:${surface}${key === '' ? '' : `:${key}`}`,
+          CASTS_SHADOW.has(surface), TAKES_SHADOW.has(surface));
       }
-      this.finish(mesh, `slab:${surface}`, CASTS_SHADOW.has(surface), TAKES_SHADOW.has(surface));
     }
+  }
+
+  /**
+   * The slabs of one surface, split into the groups that need different
+   * geometry. Everything but a lit screen is one group under the key `''`.
+   */
+  private groupSlabs(surface: Surface, slabs: readonly Slab[]): Map<string, Slab[]> {
+    const groups = new Map<string, Slab[]>();
+    for (const slab of slabs) {
+      const key = surface === 'screen' && this.screenTexture !== null ? screenKey(slab) : '';
+      const list = groups.get(key);
+      if (list) list.push(slab);
+      else groups.set(key, [slab]);
+    }
+    return groups;
   }
 
   /**
@@ -609,6 +649,42 @@ export class LabView {
     return this.unitBoxColoured;
   }
 
+  /**
+   * A unit box whose TWO BROAD FACES carry one panel of the screen atlas
+   * and whose four thin edges carry the bezel patch.
+   *
+   * three's `BoxGeometry` gives every face the whole 0..1 square, laid out
+   * so the image reads the right way round FROM OUTSIDE that face — which
+   * is why a screen on the east wall and a monitor on a desk both come out
+   * unmirrored with no per-instance work. All this does is squeeze each
+   * face's existing square into a rectangle of the atlas, which preserves
+   * that property because it is a linear remap.
+   *
+   * Face order is three's own: +x, -x, +y, -y, +z, -z, four vertices each.
+   */
+  private screenBox(key: string): THREE.BoxGeometry {
+    const held = this.screenBoxes.get(key);
+    if (held) return held;
+    const [thin, panel] = key.split(':') as ['x' | 'y' | 'z', ScreenPanel];
+    const geometry = new THREE.BoxGeometry(1, 1, 1);
+    const uv = geometry.getAttribute('uv') as THREE.BufferAttribute;
+    const broad = screenPanelUv(SCREEN_ATLAS[panel]);
+    const edge = screenPanelUv(SCREEN_ATLAS.bezel);
+    const faceOfAxis: Record<'x' | 'y' | 'z', [number, number]> = { x: [0, 1], y: [2, 3], z: [4, 5] };
+    const lit = new Set(faceOfAxis[thin]);
+    for (let face = 0; face < 6; face += 1) {
+      const to = lit.has(face) ? broad : edge;
+      for (let k = 0; k < 4; k += 1) {
+        const i = face * 4 + k;
+        uv.setXY(i, to.u0 + uv.getX(i) * (to.u1 - to.u0), to.v0 + uv.getY(i) * (to.v1 - to.v0));
+      }
+    }
+    uv.needsUpdate = true;
+    this.geometries.push(geometry);
+    this.screenBoxes.set(key, geometry);
+    return geometry;
+  }
+
   /** The unit cylinder every pillar is drawn from: diameter 1, height 1, centred on its middle. */
   private cylinder(): THREE.CylinderGeometry {
     if (!this.unitCylinder) {
@@ -624,6 +700,17 @@ export class LabView {
     if (held) return held;
     const material = this.track(new THREE.MeshStandardMaterial(standard(lookFor(surface))));
     material.name = `tombs:${surface}`;
+    // THE PICTURE, AND ONLY THEN THE GLOW. `LOOK.screen` is dark glass and
+    // stays dark glass; `SCREEN_LIT` is what a screen with something ON it
+    // looks like, so a texture that did not load leaves the old, safe look
+    // rather than a white glowing box (`labLook.ts`).
+    if (surface === 'screen' && this.screenTexture !== null) {
+      material.map = this.screenTexture;
+      material.emissiveMap = this.screenTexture;
+      material.emissive = new THREE.Color(SCREEN_LIT.emissive);
+      material.emissiveIntensity = SCREEN_LIT.emissiveIntensity;
+      material.needsUpdate = true;
+    }
     this.surfaceMaterials.set(surface, material);
     return material;
   }
@@ -678,6 +765,22 @@ export class LabView {
     this.pillarCount = 0;
     this.bounds.makeEmpty();
   }
+}
+
+/**
+ * Which screen box a slab needs: its thinnest axis, and the atlas panel
+ * whose aspect its broad face is closest to.
+ *
+ * The thin axis is what makes a slab a PANEL rather than a block, and it
+ * is read off the plan's own numbers rather than declared, so a screen
+ * moved from a wall to a desk gets the right faces with nothing to
+ * update.
+ */
+function screenKey(slab: Slab): string {
+  const { x, y, z } = slab.box.size;
+  if (x <= y && x <= z) return `x:${screenPanelFor(z, y)}`;
+  if (y <= x && y <= z) return `y:${screenPanelFor(x, z)}`;
+  return `z:${screenPanelFor(x, y)}`;
 }
 
 /** A `SurfaceLook` as `MeshStandardMaterial` wants it. Transparency only where the look asks for it. */

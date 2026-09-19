@@ -223,6 +223,121 @@ export const FITTING: Readonly<Record<LightMode, FittingLook>> = Object.freeze({
 export const FITTING_LIT = 0xffffff;
 export const FITTING_DARK = 0x2a2e31;
 
+// ---------------------------------------------------------------------------
+// The screens
+// ---------------------------------------------------------------------------
+
+/**
+ * THE SCREENS CARRY A PICTURE, AND THE SURFACE STILL DOES NOT EMIT.
+ *
+ * Joshua, 2026-09-19, looking at a shot of the laboratory: "that black is
+ * the computer screen?" — and then, "could you create a fake TOMBS image
+ * to fit the screens so it's more obvious to be a computer screen". He
+ * had spent a message thinking two of them were an artefact on the back
+ * of Jack's neck, which is what a flat near-black rectangle with no bezel
+ * and no content looks like from three metres.
+ *
+ * READ THIS AGAINST `LOOK.screen`, WHICH IS UNCHANGED. The rule this file
+ * has carried from the start — "a screen DOES NOT EMIT; a building whose
+ * every monitor glows is a set, not a workplace" — is about the SURFACE,
+ * and it still holds: dark glass, emissive 0x000000, and that is what a
+ * screen with nothing on it is. What emits now is the IMAGE, and only
+ * when there is one. `LabView` applies `SCREEN_LIT` to the screen
+ * material ONLY once the atlas has loaded, so a missing texture falls
+ * back to the dark glass rather than to a white glowing box — which is
+ * the right failure and the reason the two are separate constants.
+ *
+ * It is also more true to the manuscript than the old blank was. Chapter
+ * 1 opens with Jack AT HIS CONSOLE reading diagnostic data; a laboratory
+ * where the diagnostics are running on a screen nobody has woken is the
+ * version that was wrong.
+ *
+ * The intensity is well under the readout's 1.6, and the map it
+ * multiplies is mostly near-black with thin bright lines, so the average
+ * emission off a screen is a fraction of a lit instrument's. Nothing here
+ * is neon.
+ */
+export const SCREEN_LIT = Object.freeze({
+  /** White, so the atlas's own colours come through the emissive map unshifted. */
+  emissive: 0xffffff,
+  emissiveIntensity: 0.85,
+});
+
+/** The atlas is square, like every texture on the ladder. */
+export const SCREEN_ATLAS_SIZE = 1024;
+
+/**
+ * A rectangle in the atlas, IN TEXELS WITH Y DOWN FROM THE TOP — the way
+ * `art/textures/tombs-screen.svg` draws it, so the two files can be read
+ * against each other line for line. `screenPanelUv` is the one place the
+ * flip to three's bottom-up v happens.
+ */
+export interface ScreenRect {
+  readonly x: number;
+  readonly y: number;
+  readonly w: number;
+  readonly h: number;
+}
+
+/**
+ * WHAT IS ON THE SCREEN ATLAS, and why it is an atlas at all.
+ *
+ * The building's eleven screens are two shapes: four workstation monitors
+ * at 0.62 x 0.46 (1.35) and the control room's six camera panels at
+ * 0.84 x 0.36 (2.33), with the structural monitor at 0.80 x 0.60 (1.33)
+ * joining the first group. One image stretched across both would be
+ * stretched by 1.7 on one of them, and a stretched logo is worse than no
+ * logo. Two images would be two textures and two materials.
+ *
+ * So: one texture, two panels, and the UV rectangle is chosen per slab
+ * from the aspect of its own broad face. `bezel` is the third rectangle —
+ * a flat patch of dark plastic that the four THIN edges of every screen
+ * sample, so a 5 cm edge shows a casing rather than a squashed copy of
+ * the whole interface.
+ */
+export const SCREEN_ATLAS: Readonly<Record<'terminal' | 'feed' | 'bezel', ScreenRect>> = Object.freeze({
+  /** The workstation terminal: 768 x 576 is 1.333, against the monitor's 1.348. */
+  terminal: Object.freeze({ x: 0, y: 0, w: 768, h: 576 }),
+  /** A camera feed: 1024 x 438 is 2.338, against the control panel's 2.333. */
+  feed: Object.freeze({ x: 0, y: 586, w: 1024, h: 438 }),
+  /** Dark plastic, for the four edges of the box each screen is. */
+  bezel: Object.freeze({ x: 800, y: 16, w: 208, h: 208 }),
+});
+
+export type ScreenPanel = 'terminal' | 'feed';
+
+/**
+ * Which panel a screen of this shape shows, by whichever of the two the
+ * broad face is closer to in LOG aspect — so "twice as wide as it should
+ * be" and "half as wide" are the same distance from a fit, which is what
+ * stretching actually costs.
+ */
+export function screenPanelFor(wide: number, tall: number): ScreenPanel {
+  if (!(wide > 0) || !(tall > 0)) return 'terminal';
+  const want = Math.log(wide / tall);
+  const terminal = Math.log(SCREEN_ATLAS.terminal.w / SCREEN_ATLAS.terminal.h);
+  const feed = Math.log(SCREEN_ATLAS.feed.w / SCREEN_ATLAS.feed.h);
+  return Math.abs(want - terminal) <= Math.abs(want - feed) ? 'terminal' : 'feed';
+}
+
+/**
+ * A rectangle as UVs three can use: `u0, v0` the bottom-left corner,
+ * `u1, v1` the top-right. THE FLIP LIVES HERE. Every texture in this
+ * project loads with three's default `flipY`, so the image's TOP row is
+ * v = 1, and a rectangle measured downward from the top becomes one
+ * measured upward from the bottom exactly once, in this function.
+ */
+export function screenPanelUv(rect: ScreenRect, size = SCREEN_ATLAS_SIZE): {
+  readonly u0: number; readonly v0: number; readonly u1: number; readonly v1: number;
+} {
+  return Object.freeze({
+    u0: rect.x / size,
+    u1: (rect.x + rect.w) / size,
+    v0: 1 - (rect.y + rect.h) / size,
+    v1: 1 - rect.y / size,
+  });
+}
+
 /**
  * Rec. 709 luminance of a packed 0xRRGGBB colour, 0..1.
  *

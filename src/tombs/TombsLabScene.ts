@@ -106,6 +106,8 @@ import { NO_BUTTONS, demandFrom } from '../control/PlayerDemand';
 import { newMutableIntent } from '../creatures/demand';
 import { HumanRig } from '../view/HumanRig';
 import { detailFor, type DetailTier } from '../assets/detailQuality';
+import { textureUrl } from '../assets/textureManifest';
+import { tierFor } from '../assets/textureQuality';
 import { MoveStick } from '../input/MoveStick';
 import { FrameStats } from '../perf/FrameStats';
 import { CAMERA_SPEEDS, FreeFlyCamera, headingOfYaw } from '../perf/FreeFlyCamera';
@@ -147,6 +149,13 @@ export interface TombsLabSettings {
    * medium"). Absent: `medium`, the conservative rung.
    */
   readonly detail?: 'low' | 'medium' | 'high';
+  /**
+   * THE TEXTURE RUNG, for the screens' atlas. Read through `tierFor`,
+   * exactly as the world reads it, so the monitors in this room are drawn
+   * at the size the player's Textures setting asks for and not at a size
+   * this file chose. Absent: `medium`.
+   */
+  readonly textures?: 'low' | 'medium' | 'high';
   /** Camera field of view in degrees. */
   readonly fov?: number;
   /** Multiplier on look-drag turn rate; 1 is the tuned feel. */
@@ -978,11 +987,28 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
       free.setLook({ sensitivity: settings?.lookSensitivity ?? 1, invertY: settings?.invertY ?? false });
       applyMix();
 
+      // THE SCREENS' PICTURE, off the texture ladder at the rung the
+      // player's Textures setting picks. Awaited before the building is
+      // built because `LabView` reads it once, at `build`, to choose the
+      // screens' geometry as well as their material — and it is 12 KiB at
+      // medium, so waiting for it costs nothing anyone can feel. A null
+      // (no network, a bad path) leaves the screens as the dark glass
+      // they have always been; it is never a reason not to draw a room.
+      const screenTexture = await assets.loadTexture(
+        textureUrl('tombs-screen', tierFor(settings?.textures ?? 'medium')),
+      );
+      if (screenTexture !== null) {
+        screenTexture.colorSpace = THREE.SRGBColorSpace;
+        screenTexture.anisotropy = 4;
+      }
+
       // `ambient: true`: nothing else lights this scene — there is no sky
       // here to wash, which is the case `LabView` asks for it in.
       // `shadows: false`: no sun either, so a shadow flag on every mesh
       // would be a promise nothing in this scene can keep.
-      view = new LabView({ groundUnits: FLOOR_UNITS, ambient: true, detail: rung, shadows: false });
+      view = new LabView({
+        groundUnits: FLOOR_UNITS, ambient: true, detail: rung, shadows: false, screenTexture,
+      });
       view.build(layout);
       view.setLighting(lighting);
       view.setArrayRunning(arrayRunning);

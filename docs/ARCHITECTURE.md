@@ -181,7 +181,12 @@ src/
                 to world/heightfield and flora/ to world/objects, this is
                 to world/tombs: the only place a floor plan meets a mesh,
                 and the ONE place local metres become world units. Added
-                in the TOMBS milestone. LabPeople stands the plan's
+                in the TOMBS milestone. The building's eleven SCREENS take
+                one texture off the ladder (`tombs-screen`, authored as
+                SVG) and pick their panel from their own aspect, so a
+                monitor and a camera feed share a material and a draw
+                call; the surface stays dark glass when there is no
+                texture. LabPeople stands the plan's
                 people in it — one GLB each, a tagged placeholder where
                 one will not load, posed down from their bind pose by
                 actor/humanPose and breathing on RAW dt — and hides

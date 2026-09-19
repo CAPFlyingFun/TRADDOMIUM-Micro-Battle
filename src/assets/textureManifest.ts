@@ -16,6 +16,7 @@
  *
  *   water-normal   master 1536, 128: 33 KiB, 256: 148 KiB, 512: 628 KiB, 1024: 2484 KiB
  *   surf-foam      master 1024, 128: 7 KiB, 256: 26 KiB, 512: 107 KiB, 1024: 380 KiB
+ *   tombs-screen   master 2048, 128: 2 KiB, 256: 4 KiB, 512: 12 KiB, 1024: 33 KiB, 2048: 86 KiB
  *
  * Rungs the bake was offered: 128, 256, 512, 1024, 2048.
  */
@@ -24,7 +25,7 @@ import { TEXTURE_QUALITY, type TextureTier } from './textureQuality';
 /** How a texture must be encoded — see `scripts/bakeTextures.mjs`. */
 export type TextureKind = 'normal' | 'colour';
 
-export type TextureName = 'water-normal' | 'surf-foam';
+export type TextureName = 'water-normal' | 'surf-foam' | 'tombs-screen';
 
 export interface BakedTexture {
   readonly name: TextureName;
@@ -56,6 +57,15 @@ const BAKED: readonly BakedTexture[] = [
     masterSize: 1024,
     /** The rungs that exist on disk, coarsest first. */
     sizes: Object.freeze([128, 256, 512, 1024]),
+  },
+  {
+    /** The TOMBS laboratory's screens: an atlas of a workstation terminal and a camera feed, and a flat patch for the four thin edges of the box each one is. Authored as SVG, which is why it is the one master in this directory you can open in a text editor and edit. */
+    name: 'tombs-screen',
+    kind: 'colour',
+    /** The master's own size. Nothing above this was baked. */
+    masterSize: 2048,
+    /** The rungs that exist on disk, coarsest first. */
+    sizes: Object.freeze([128, 256, 512, 1024, 2048]),
   },
 ];
 
