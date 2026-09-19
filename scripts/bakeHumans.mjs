@@ -14,16 +14,21 @@
  * checksum. This script is the only thing that reads them and it opens
  * them read-only.
  *
- * WHAT THE MASTERS COST, measured rather than assumed:
+ * WHAT THE MASTERS COST, measured rather than assumed. The first pair is
+ * what this script was written against; the second is the Lab2 pass, which
+ * is what it reads now (both entries in HUMANS, below, say why):
  *
  *   Jack-Lab.glb    47.5 MB   102,613 tris   69 joints   2K + 2K + 4K PNG
  *   Sarah-Lab.glb   35.1 MB   103,108 tris   69 joints   2K + 2K + 4K PNG
+ *   Jack-Lab2.glb   23.0 MB   198,474 tris   69 joints   2K + 2K + 4K PNG
+ *   Sarah-Lab2.glb  13.9 MB   101,918 tris   35 joints   2K + 2K + 4K PNG
  *
- * That is 82 MB down the wire and about 128 MB of texture VRAM EACH once
- * the PNGs are decompressed with their mip chains. The triangles are not
- * the problem and never were — 205,000 for the pair is nothing beside the
- * 5.5 M the insects already push at 31 ms (`docs/PERFORMANCE.md`,
- * Baseline C-ALL). Texture memory is a cliff, not a slope: the tab is
+ * That is 82 MB down the wire for the first pair and about 128 MB of
+ * texture VRAM EACH once the PNGs are decompressed with their mip chains.
+ * The triangles are not the problem and never were — 300,000 for the Lab2
+ * pair is nothing beside the 5.5 M the insects already push at 31 ms
+ * (`docs/PERFORMANCE.md`, Baseline C-ALL), and Jack's doubling arrives in
+ * HALF the bytes. Texture memory is a cliff, not a slope: the tab is
  * killed, not slowed.
  *
  * MESHOPT, NOT DRACO, AND THAT IS THE ONE PLACE THIS DEPARTS FROM BEYOND
@@ -80,7 +85,7 @@ import { fileURLToPath } from 'node:url';
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { dedup, meshopt, prune, textureCompress, weld } from '@gltf-transform/functions';
-import { MeshoptEncoder } from 'meshoptimizer';
+import { MeshoptDecoder, MeshoptEncoder } from 'meshoptimizer';
 import sharp from 'sharp';
 import { authorSarah } from './authorSarah.mjs';
 import { printBadge } from './printBadge.mjs';
@@ -109,17 +114,60 @@ const HUMANS = [
   // welded to the cloth, and what separates hers is that the fill may only
   // grow within the card's own plane.
   //
-  // JACK'S SLAB IS THE WHOLE HOLDER FRONT, and it used to be two thirds of
-  // it. `yMax` was 1.160 where the front runs to 1.180, so the art filled
-  // 60.7 x 66.0 mm and the top of the badge stayed the scan's grey vinyl —
-  // Joshua's "the badge is too small for the badge holder", exactly. The
-  // front measures 61.9 x 95.5 mm, aspect 0.648 against art that is 0.678:
-  // a frame that needs almost no stretching is the check that it is the
-  // right frame. Everything above y 1.180 is the lanyard, which narrows
-  // from the card's 61 mm to 9 mm within five millimetres.
+  // JACK IS Lab2 (Joshua, 2026-09-19: "Here is Jack again, with all fingers
+  // rigged"), and Lab1 is kept for the same reason Sarah's is.
+  //
+  // It is the SAME 69-BONE UniRig armature refitted to a new mesh — every
+  // bone name and its place in the list is identical, and every one of the
+  // 69 has moved, by up to 240 mm. Nothing here reads a bone by name, so
+  // that costs nothing: `actor/humanSkeleton.measureHuman` finds the
+  // seventeen joints it poses by MEASURING the bind pose, which is why it
+  // was written that way.
+  //
+  // WHAT CHANGED, measured against Lab1:
+  //
+  //                        Lab1        Lab2
+  //   file                 45.30 MB    22.97 MB
+  //   triangles            102,613     198,474
+  //   open edges           43.6%       15.9%
+  //   influence sets       11          2
+  //   influences/vertex    5.61        2.78
+  //   FURTHEST INFLUENCE   1,328 mm    492 mm
+  //   weight past set 0    6.80%       0.83%
+  //
+  // READ THE LAST THREE ROWS TOGETHER, because they are the arm that
+  // exploded. Lab1 weighted vertices to bones A METRE AND A THIRD away and
+  // spread them over forty-four influences, of which three.js reads four;
+  // which four you got was the exporter's business, and 6.8% of the weight
+  // was simply thrown away. Lab2 tops out at 492 mm, holds 99.17% of its
+  // weight in the set three.js reads, and never puts less than 77% of a
+  // vertex's weight there. The same welding story as Sarah's Lab2 — half
+  // the file, twice the triangles, a third of the open edges — and unlike
+  // hers it KEEPS THE FINGERS: 44 joints past |x| 0.55 m, the same as Lab1.
+  //
+  // THE BADGE IS A REAL CARD NOW, and that is what re-measured the slab.
+  // Lab1's holder front was 61.9 x 95.5 mm; Lab2's printed face is
+  // 50.2 x 85.9 mm — within half a millimetre of a CR80 ID card's 85.6 mm
+  // height, which is the independent check that the frame is the card's
+  // and not the slab's. It also has NO CLEAN DEPTH GAP, where Lab1 had one:
+  // the shirt beside the card reaches z 0.1251 and the card's own front
+  // runs 0.1260 to 0.1330, so 0.9 mm is all there is. That is Sarah's
+  // situation rather than Lab1's, and it is `findCard`'s plane-gated fill
+  // that separates them — the slab only has to bound it.
+  //
+  // zMin was swept: 0.1265 finds 81.7 mm, 0.1260 finds 85.9 mm, 0.1258
+  // finds 90.0 mm and leaks into the clip. 0.1260 is the plateau — the
+  // width reads 50.2 mm at every setting, and yMin, yMax and xHalf change
+  // nothing there, which is what says the geometry is deciding.
+  //
+  // The art is drawn at aspect 0.678 and the face is 0.584, so it is
+  // squeezed 14% narrower to fill the holder edge to edge (Joshua,
+  // 2026-09-19 on the last one: "Don't trim it as it aligns with the badge
+  // holder"). Lab1 needed 4%. The art was drawn for Lab1's oversized
+  // holder; a redraw at 0.58 would need none.
   {
-    master: 'Jack-Lab.glb', out: 'jack.glb', who: 'Jack Bennett', panel: null, repair: false,
-    badge: { art: 'art/humans/badge/jack-tombs.webp', slab: { zMin: 0.1085, yMin: 1.070, yMax: 1.180, xMid: -0.005, xHalf: 0.040 } },
+    master: 'Jack-Lab2.glb', out: 'jack.glb', who: 'Jack Bennett', panel: null, repair: false,
+    badge: { art: 'art/humans/badge/jack-tombs.webp', slab: { zMin: 0.1260, yMin: 1.070, yMax: 1.170, xMid: 0.003, xHalf: 0.035 } },
   },
   // SARAH IS Lab2, AND Lab1 IS KEPT (Joshua, 2026-09-18: "go ahead and switch
   // to this one… it does look a lot better even the textures"). Meshy's second
@@ -644,6 +692,56 @@ async function panelPass(doc, who, key, exportOnly, repair) {
   console.log(`  ${who}: ${note} — ${nMoved} panel px -> ${wrote} texels`);
 }
 
+/**
+ * Read every baked model's bind pose out as `BindJoint[]` and write the
+ * test fixture.
+ *
+ * The POSITION is the translation of the INVERSE of the inverse bind
+ * matrix — the bone's rest place in the same mesh space the vertices are
+ * in, which is what makes `measureHuman`'s rules arithmetic rather than
+ * guesswork. Rounded to a micrometre so a re-bake of the same master
+ * produces the same file and a diff means something.
+ */
+async function writeBindFixture() {
+  // The BAKED models, which are meshopt-compressed and quantized, so the
+  // reader needs the decoder: the fixture has to describe the bones the
+  // game actually loads, and quantization moves them by a fraction of a
+  // millimetre.
+  await MeshoptDecoder.ready;
+  const io = new NodeIO().registerExtensions(ALL_EXTENSIONS)
+    .registerDependencies({ 'meshopt.decoder': MeshoptDecoder });
+  const out = {
+    _comment: 'Bind-pose joints of the two human masters, measured from public/models/*.glb by the'
+      + ' inverse bind matrices. Checked in so tests/humanSkeleton.test.ts can assert against the REAL'
+      + ' skeletons without loading 3 MB of GLB. Regenerate with `node scripts/bakeHumans.mjs --bind`'
+      + ' after any re-bake: a new master moves every bone.',
+  };
+  for (const human of HUMANS) {
+    const doc = await io.read(join(OUT, human.out));
+    const skin = doc.getRoot().listSkins()[0];
+    const joints = skin.listJoints();
+    const index = new Map(joints.map((j, i) => [j, i]));
+    const m = skin.getInverseBindMatrices().getArray();
+    const round = (v) => Math.round(v * 1e6) / 1e6;
+    out[human.out.replace(/\.glb$/, '')] = joints.map((joint, i) => {
+      const o = i * 16;
+      const t = [m[o + 12], m[o + 13], m[o + 14]];
+      const parent = joint.getParentNode?.() ?? null;
+      return {
+        name: joint.getName(),
+        parent: parent && index.has(parent) ? index.get(parent) : -1,
+        x: round(-(m[o] * t[0] + m[o + 1] * t[1] + m[o + 2] * t[2])),
+        y: round(-(m[o + 4] * t[0] + m[o + 5] * t[1] + m[o + 6] * t[2])),
+        z: round(-(m[o + 8] * t[0] + m[o + 9] * t[1] + m[o + 10] * t[2])),
+      };
+    });
+    console.log(`[bake:humans] ${human.who}: ${joints.length} bind joints read from ${human.out}`);
+  }
+  const file = join(ROOT, 'tests', 'fixtures', 'humanBind.json');
+  writeFileSync(file, `${JSON.stringify(out, null, 1)}\n`);
+  console.log(`[bake:humans] wrote ${file}`);
+}
+
 async function main() {
   if (!existsSync(OUT)) mkdirSync(OUT, { recursive: true });
   if (!existsSync(CACHE)) mkdirSync(CACHE, { recursive: true });
@@ -652,19 +750,32 @@ async function main() {
     console.error(`[bake:humans] no masters in art/humans/ — ${missing.map((m) => m.master).join(', ')}`);
     console.error(`[bake:humans] fetch them once, then re-run:`);
     console.error(`[bake:humans]   mkdir -p art/humans && curl -sSL -o /tmp/h.zip "${RELEASE}" && unzip -o /tmp/h.zip -d art/humans`);
-    if (missing.some((m) => m.master === 'Sarah-Lab2.glb')) {
-      // SAY THE TRUE THING RATHER THAN THE HOPEFUL ONE. The release above holds
-      // Jack-Lab.glb and Sarah-Lab.glb, the pair from 2026-09-18. Sarah-Lab2 is
-      // Meshy's second pass, which Joshua brought in later the same day and
-      // which the bake now reads: until it is added to that release (or its
-      // own), the command above CANNOT produce it, and a clone that follows
-      // the instruction and still fails deserves to be told why.
+    const second = missing.filter((m) => /-Lab2\.glb$/.test(m.master)).map((m) => m.master);
+    if (second.length > 0) {
+      // SAY THE TRUE THING RATHER THAN THE HOPEFUL ONE. The release above
+      // holds Jack-Lab.glb and Sarah-Lab.glb, the pair from 2026-09-18.
+      // The Lab2 pass is what Joshua brought in afterwards and what the
+      // bake now reads: until they are added to that release (or their
+      // own), the command above CANNOT produce them, and a clone that
+      // follows the instruction and still fails deserves to be told why.
       console.error('[bake:humans]');
-      console.error('[bake:humans] Sarah-Lab2.glb is NOT in that release yet — it is Meshy\'s second pass,');
-      console.error('[bake:humans] the one with a welded atlas and a modelled lanyard. Ask Joshua for it,');
-      console.error('[bake:humans] or add it to the release so this command is true again.');
+      console.error(`[bake:humans] ${second.join(' and ')} ${second.length > 1 ? 'are' : 'is'} NOT in that release yet — the second`);
+      console.error('[bake:humans] Meshy pass, with a welded atlas, a modelled lanyard and a real-size ID');
+      console.error('[bake:humans] card. Ask Joshua for them, or add them to the release so this command');
+      console.error('[bake:humans] is true again.');
     }
     process.exitCode = 1;
+    return;
+  }
+
+  // `--bind` writes the fixture the skeleton tests read, from the BAKED
+  // models — the same bytes the game loads. `tests/fixtures/humanBind.json`
+  // has told the reader to run this since it was written; until now the
+  // flag did not exist, which is the sort of gap that is only found by
+  // someone who needs it. A new master moves every bone, so this is the
+  // one command between a new scan and a test that still describes it.
+  if (process.argv.includes('--bind')) {
+    await writeBindFixture();
     return;
   }
 
@@ -760,10 +871,30 @@ async function main() {
     // set 0. A vertex keeps its nearest bone whatever happens, so no
     // vertex is ever left unweighted and collapses to the origin.
     //
-    // Sarah needs none of this — her master carries sixteen influences
+    // Sarah needs none of this — her master carries eight influences
     // rather than forty-four and poses cleanly — but the rule is applied
     // to both, because "the one that needed it" is not a property a bake
     // should have to know.
+    //
+    // RE-CHECKED ON JACK-Lab2 (2026-09-19), because that master is clean
+    // enough to make the rule look redundant: 2 influence sets, nothing
+    // reaching further than 492 mm, 99.17% of the weight already in the
+    // set three.js reads. Baked both ways and rendered the same two
+    // frames: the standing pose differs on 3.87% of its pixels and ALL OF
+    // THEM ARE THE SILHOUETTE — a one-pixel edge round the head, arms and
+    // hands, nothing torn and nothing inside the body. So on this master
+    // the rule is very nearly a no-op, and that is an argument for keeping
+    // it rather than against: it costs nothing here and it is the only
+    // thing standing between the bake and the next master like Lab1.
+    //
+    // AND IT DOES NOT COST THE FINGERS, which was the one real worry —
+    // Joshua's headline for this master is "with all fingers rigged", and
+    // a top-four cut is exactly what drops a finger's small weight. Of
+    // the 17,330 hand-bone influences Jack's master holds over 5,805 hand
+    // vertices, set 0 alone would ship 16,329 and the prune ships 16,355.
+    // It ships MORE of them, because three.js reads four influences
+    // whatever we do and the prune is the only step that picks which
+    // four on purpose.
     for (const prim of doc.getRoot().listMeshes().flatMap((m) => m.listPrimitives())) {
       pruneStrayInfluences(prim, doc, human.who);
       for (const name of prim.listSemantics()) {

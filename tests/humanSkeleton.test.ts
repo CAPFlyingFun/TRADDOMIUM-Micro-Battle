@@ -94,6 +94,21 @@ const REAL: readonly Master[] = [
     legLength: 0.6382,
     hipWidth: 0.1355,
   },
+  // JACK IS Lab2 SINCE 2026-09-19, and this row is the best evidence the
+  // rule is worth having. The new master is the SAME 69-bone armature with
+  // the same names in the same order — and its LEGS ARE THE OTHER WAY
+  // ROUND: 59-61 was his left leg and is now his right. Nothing here was
+  // told that. `measureHuman` reads the sides off the bind pose, so the
+  // swap arrived as two lines of this fixture changing and every shape
+  // assertion below still passing, including "left and right agree with
+  // leftSign on every limb". A rule that matched `Bone_059` to a name
+  // would have put the man's knees on backwards and passed its own test.
+  //
+  // The arms did not move (35-37 left, 10-12 right) and neither did the
+  // spine, which is why the two halves are worth pinning separately.
+  // `legLength` fell 48 mm because the scan itself is a little shorter —
+  // the poser reads it, so his stride follows it (`humanPose`'s hip swing
+  // is `asin(step / 2 * legLength)`).
   {
     who: 'jack',
     bind: MASTERS.jack,
@@ -102,13 +117,13 @@ const REAL: readonly Master[] = [
       pelvis: 1, spine: 3, chest: 5, neck: 6, head: 8,
       shoulderL: 35, elbowL: 36, wristL: 37,
       shoulderR: 10, elbowR: 11, wristR: 12,
-      hipL: 59, kneeL: 60, ankleL: 61,
-      hipR: 64, kneeR: 65, ankleR: 66,
+      hipL: 64, kneeL: 65, ankleL: 66,
+      hipR: 59, kneeR: 60, ankleR: 61,
     },
-    height: 1.3716,
-    armSpan: 1.0387,
-    legLength: 0.6782,
-    hipWidth: 0.1355,
+    height: 1.3603,
+    armSpan: 1.0499,
+    legLength: 0.6298,
+    hipWidth: 0.1356,
   },
 ];
 

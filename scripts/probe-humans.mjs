@@ -190,6 +190,20 @@ async function main() {
     await shot('humans-2-jack-face.png', 'Jack close, as baked');
     await page.evaluate(() => window.__frame('sarah', 1.5, 1.0));
     await shot('humans-3-sarah-face.png', 'Sarah close, as baked');
+    // THE BADGE, CLOSE, AND AS BAKED — before the roughness ladder below,
+    // which strips the maps off and cannot put them back.
+    //
+    // `bake:humans` lifts the ID card onto its own material and prints the
+    // TOMBS artwork on it, and the slab that finds the card is MEASURED PER
+    // MASTER — so a new scan moves it, and the failure is silent: the art
+    // prints on whatever was found, cropped short or running onto the
+    // cloth, and every other shot here is too far away to show which.
+    // Joshua has already had to say "the badge is too small for the badge
+    // holder" from a device once. This is the shot that says it first.
+    for (const who of ['jack', 'sarah']) {
+      await page.evaluate((w) => window.__frame(w, w === 'jack' ? 1.12 : 1.10, 0.30), who);
+      await shot(`humans-7-${who}-badge.png`, `${who}'s ID card, as printed`);
+    }
     // THE LADDER, on the body the question was about: Sarah's top is the
     // shiniest thing either of them wears.
     await page.evaluate(() => window.__frame('sarah', 1.25, 1.1));
