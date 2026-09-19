@@ -62,9 +62,83 @@ const CORD_GROW = 0.005, CORD_SHEET = 0.002;
 /** Clustering: link within 4 mm, keep a piece of 400+ texels spanning 50 mm+. */
 const CORD_LINK = 0.004, CORD_MIN_TEXELS = 400, CORD_MIN_SPAN = 0.05;
 
-const SHIRT_AO = 0.55, CORD_AO = 0.45;
-const SHIRT_GRAIN = 0.035, CORD_GRAIN = 0.06;
+/**
+ * THE SYNTHETIC OCCLUSION, and why the shirt's share of it is now SMALL.
+ *
+ * It was 0.55 when the top was a flat colour: with every trace of the
+ * scan's own shading thrown away, a baked contact shadow was the only
+ * thing left putting a crease under the collar. The shade term below
+ * restores the scan's real luminance, which ALREADY contains those
+ * shadows — photogrammetry photographs them. Left at 0.55 the two would
+ * multiply and the collar would go twice as dark as the day it was
+ * photographed. A quarter is enough to deepen a crease the lighting in
+ * this windowless room will not find on its own.
+ *
+ * The CORD keeps its 0.45: it is still painted flat (its own texels are
+ * the fringe being removed, so there is no honest luminance to keep) and
+ * the bake is the only shading it has.
+ */
+const SHIRT_AO = 0.25, CORD_AO = 0.45;
+/**
+ * The grain existed to break up a flat fill. With the cloth's own folds
+ * back it is a texture on top of a texture, so the shirt's is halved;
+ * the cord, still flat, keeps its own.
+ */
+const SHIRT_GRAIN = 0.018, CORD_GRAIN = 0.06;
 const GUTTER_PASSES = 6;
+
+/**
+ * THE SHADE: HOW MUCH OF THE SCAN'S OWN LIGHT THE NEW COLOUR KEEPS.
+ *
+ * Joshua, seeing Sarah in the game beside the reference photographs: "the
+ * game model doesn't have the red follow the shirt line and curve around.
+ * It paints it flat which looks weird." He is right, and it is this
+ * file's doing. The top was painted ONE median colour, rgb(106,10,41),
+ * over every texel it covered, and the argument for that — that the
+ * master's 2048 normal map carries every fold and the occlusion bake puts
+ * the contact shadow back — does not survive contact with the laboratory.
+ * That room is lit by a flat ambient with no sun in it, so a normal map
+ * has almost nothing to catch, and an occlusion bake is a contact shadow
+ * rather than the broad shading that makes cloth read as cloth. The
+ * ruching down her side, the fold under the bust and the way the hem
+ * turns around her hip are all LUMINANCE, and all of it was discarded.
+ *
+ * So the colour is replaced and THE LIGHT IS KEPT: every texel takes the
+ * base colour scaled by its own brightness against the region's median.
+ * The scan is a bad painter and an honest colorimeter — that was already
+ * the argument for taking its median — and it is an equally honest
+ * PHOTOMETER, which is the half of it this file used to throw away.
+ *
+ * TWO GUARDS, because the flat fill was not chosen for nothing. Joshua
+ * named four spots on this master, among them "just under the badge
+ * there's a little white splotch": local blemishes that are bright
+ * OUTLIERS in exactly the channel now being kept. A blemish is small and
+ * a fold is broad, so the shade field is MEDIAN-FILTERED first — a median
+ * deletes a speck and leaves an edge, which a blur cannot do — and then
+ * clamped, so nothing that survives can drive a texel to white or black.
+ */
+const SHADE_MEDIAN_R = 3;
+const SHADE_MIN = 0.62, SHADE_MAX = 1.30;
+
+/**
+ * HOW FAR IN FROM AN EDGE THE SCAN'S LIGHT STOPS BEING EVIDENCE.
+ *
+ * The median above deletes a speck and keeps a fold, which is what a
+ * median is for. It says nothing about the garment's EDGE, and an edge is
+ * where photogrammetry is least trustworthy: there the cloth has been
+ * blended into whatever lies behind it, so the brightness recorded is a
+ * mixture rather than a measurement, and a mixture must not be allowed to
+ * drive the new colour brighter than the cloth around it.
+ *
+ * So within this many texels of anything that is not this garment the
+ * shade is capped at neutral. The cap is one-sided on purpose: a genuine
+ * SHADOW under the cord still darkens the cloth, and only lightening is
+ * refused. That asymmetry is the whole of the rule.
+ *
+ * It does NOT fix the ragged neckline — see the closing pass below for
+ * what that actually is.
+ */
+const EDGE_TEXELS = 7;
 
 /** Weld by position so a UV seam does not break a surface into two. */
 function weldMap(P) {
@@ -249,7 +323,52 @@ export async function authorSarah(doc, { cacheDir, stamp, log = console.log }) {
     }
     for (const t of add) shirt.add(t);
   }
-  log(`  shirt ${shirtSeed.length} seeds -> ${shirt.size} triangles`);
+  // AND THEN THE HOLES ARE CLOSED — the half the growth above cannot do,
+  // because anything it steps over that reads as pale is protected by the
+  // very guard that keeps the shirt off her neck. A whitish texel has
+  // `mx` over 135, little saturation and r, g and b within a hair of each
+  // other, which is the definition of `isSkinLike`; widening that test
+  // would let her neck through with it.
+  //
+  // Shape settles what colour cannot. Her neck is a large connected
+  // region and a hole is a GAP inside the cloth, so a triangle is claimed
+  // here only when it is SURROUNDED by shirt — four fifths of its
+  // neighbours or more. A neck triangle's neighbourhood is mostly neck
+  // and never reaches that, whatever its colour. This is a morphological
+  // closing and the fraction is the whole of its judgement. It claims
+  // SIXTY triangles on this master, which is the honest size of the
+  // problem it solves.
+  //
+  // WHAT IT DOES NOT SOLVE, because the diagnosis was wrong twice before
+  // it was right: the pale band beside the lanyard is NOT a halo painted
+  // on the cloth. Magnified, it is her actual SKIN at the neckline, and
+  // what is wrong with it is that the shirt/skin boundary is RAGGED —
+  // feathered into wisps by the scan, so the neckline reads as torn
+  // rather than hemmed. That is a segmentation problem in the scan's own
+  // silhouette, not a shading or a classification one, and no amount of
+  // repainting the cloth touches it. It is one of the four spots Joshua
+  // named and it is still open.
+  let closed = 0;
+  for (let round = 0; round < 3; round++) {
+    const add = [];
+    const seen = new Set();
+    for (const t of shirt) for (let k = 0; k < 3; k++) for (const n of byVert.get(rep[IDX[t * 3 + k]]) ?? []) {
+      if (shirt.has(n) || seen.has(n) || !cnt[n]) continue;
+      seen.add(n);
+      const c = centre(n);
+      if (c[1] > 1.46 || c[1] < 0.80) continue;
+      const near = new Set();
+      for (let j = 0; j < 3; j++) for (const m of byVert.get(rep[IDX[n * 3 + j]]) ?? []) {
+        if (m !== n && cnt[m]) near.add(m);
+      }
+      if (near.size === 0) continue;
+      let onShirtCount = 0;
+      for (const m of near) if (shirt.has(m)) onShirtCount += 1;
+      if (onShirtCount / near.size >= 0.8) add.push(n);
+    }
+    for (const t of add) { shirt.add(t); closed += 1; }
+  }
+  log(`  shirt ${shirtSeed.length} seeds -> ${shirt.size} triangles (${closed} of them holes closed against the skin guard)`);
 
   // ------------------------------------------------------------- THE PAINT
   const onShirt = new Uint8Array(nt);
@@ -277,12 +396,85 @@ export async function authorSarah(doc, { cacheDir, stamp, log = console.log }) {
     h = Math.imul(h ^ (h >>> 13), 3266489917);
     return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
   };
+  // THE SHADE FIELD for the shirt (see the constants' header). Rec. 709
+  // luminance, because it is the standard weighting for how bright a
+  // colour LOOKS, and the question here is exactly how lit this texel was.
+  const shade = new Float32Array(S * S);
+  const lum = (i) => 0.2126 * img[i * 3] + 0.7152 * img[i * 3 + 1] + 0.0722 * img[i * 3 + 2];
+  {
+    const ls = texels[0].map(lum).sort((a, b) => a - b);
+    const mid = ls.length ? ls[ls.length >> 1] : 1;
+    const raw = new Float32Array(S * S);
+    const inSet = new Uint8Array(S * S);
+    for (const i of texels[0]) { raw[i] = mid > 0 ? lum(i) / mid : 1; inSet[i] = 1; }
+    // Median over a (2R+1) square, counting only texels that are the
+    // shirt: the neighbourhood must not average in her arm or the cord.
+    const window = [];
+    let clamped = 0;
+    for (const i of texels[0]) {
+      const x = i % S, y = (i / S) | 0;
+      window.length = 0;
+      for (let dy = -SHADE_MEDIAN_R; dy <= SHADE_MEDIAN_R; dy++) {
+        const ny = y + dy;
+        if (ny < 0 || ny >= S) continue;
+        for (let dx = -SHADE_MEDIAN_R; dx <= SHADE_MEDIAN_R; dx++) {
+          const nx = x + dx;
+          if (nx < 0 || nx >= S) continue;
+          const j = ny * S + nx;
+          if (inSet[j]) window.push(raw[j]);
+        }
+      }
+      window.sort((a, b) => a - b);
+      const v = window.length ? window[window.length >> 1] : 1;
+      if (v < SHADE_MIN || v > SHADE_MAX) clamped += 1;
+      shade[i] = Math.min(SHADE_MAX, Math.max(SHADE_MIN, v));
+    }
+
+    // THE EDGE BAND (see `EDGE_TEXELS`). Grown outward from every shirt
+    // texel that touches something which is not the shirt, so the band
+    // follows the cord and the neckline without either being named.
+    let band = new Uint8Array(S * S);
+    for (const i of texels[0]) {
+      const x = i % S, y = (i / S) | 0;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = x + dx, ny = y + dy;
+        if (nx < 0 || ny < 0 || nx >= S || ny >= S) { band[i] = 1; break; }
+        if (!inSet[ny * S + nx]) { band[i] = 1; break; }
+      }
+    }
+    for (let p = 1; p < EDGE_TEXELS; p++) {
+      const next = Uint8Array.from(band);
+      for (const i of texels[0]) {
+        if (band[i]) continue;
+        const x = i % S, y = (i / S) | 0;
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          const nx = x + dx, ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= S || ny >= S) continue;
+          if (band[ny * S + nx]) { next[i] = 1; break; }
+        }
+      }
+      band = next;
+    }
+    let capped = 0;
+    for (const i of texels[0]) {
+      if (!band[i] || shade[i] <= 1) continue;
+      shade[i] = 1;
+      capped += 1;
+    }
+    const pct = texels[0].length ? (100 * clamped / texels[0].length).toFixed(1) : '0.0';
+    const pctEdge = texels[0].length ? (100 * capped / texels[0].length).toFixed(1) : '0.0';
+    log(`  shade from the scan's own light: median luminance ${mid.toFixed(1)}, ${pct}% clamped to ${SHADE_MIN}..${SHADE_MAX}, ${pctEdge}% of edge-band texels capped at neutral`);
+  }
+
   const strength = [SHIRT_AO, CORD_AO], grain = [SHIRT_GRAIN, CORD_GRAIN];
   for (let g = 0; g < 2; g++) for (const i of texels[g]) {
     const n = hash(Math.round(pos[i * 3] * 2000), Math.round(pos[i * 3 + 1] * 2000), Math.round(pos[i * 3 + 2] * 2000));
     const k = 1 + (n - 0.5) * 2 * grain[g];
     const a = 1 - strength[g] * (1 - Math.min(1, Math.max(0, ao[i])));
-    for (let c = 0; c < 3; c++) out[i * 3 + c] = Math.max(0, Math.min(255, Math.round(base[g][c] * k * a)));
+    // The cord is painted flat — its own texels ARE the fringe being
+    // removed, so there is no luminance of its own worth keeping.
+    const sh = g === 0 ? shade[i] : 1;
+    for (let c = 0; c < 3; c++) out[i * 3 + c] = Math.max(0, Math.min(255, Math.round(base[g][c] * sh * k * a)));
   }
   log(`  shirt rgb(${base[0].join(',')}) over ${texels[0].length.toLocaleString()} texels; cord rgb(${base[1].join(',')}) over ${texels[1].length.toLocaleString()}`);
 
