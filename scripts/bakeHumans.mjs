@@ -83,6 +83,7 @@ import { dedup, meshopt, prune, textureCompress, weld } from '@gltf-transform/fu
 import { MeshoptEncoder } from 'meshoptimizer';
 import sharp from 'sharp';
 import { authorSarah } from './authorSarah.mjs';
+import { printBadge } from './printBadge.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
@@ -97,7 +98,19 @@ const RELEASE = 'https://github.com/CAPFlyingFun/TRADDOMIUM-Micro-Battle/release
 
 /** Master file → what the game asks the loader for. */
 const HUMANS = [
-  { master: 'Jack-Lab.glb', out: 'jack.glb', who: 'Jack Bennett', panel: null, repair: false },
+  //
+  // `badge` lifts the ID card round their neck onto its own material and
+  // prints Joshua's TOMBS artwork on it — see `printBadge.mjs` for why a
+  // 70x38-texel island cannot be fixed where it is. The SLAB is measured
+  // per person, and the two scans are genuinely different: Jack's depth
+  // histogram has a clean gap (chest to z 0.100, nothing to 0.108, card at
+  // 0.110), so the slab alone isolates 35 triangles; Sarah's has no gap at
+  // all — her scan fused card, sleeve and clip into one 32 mm lump welded
+  // to the cloth — so she also needs `rejectShirt`.
+  {
+    master: 'Jack-Lab.glb', out: 'jack.glb', who: 'Jack Bennett', panel: null, repair: false,
+    badge: { art: 'art/humans/badge/jack-tombs.webp', slab: { zMin: 0.104, yMin: 1.040, yMax: 1.160, xMid: -0.003, xHalf: 0.045 } },
+  },
   // SARAH IS Lab2, AND Lab1 IS KEPT (Joshua, 2026-09-18: "go ahead and switch
   // to this one… it does look a lot better even the textures"). Meshy's second
   // pass fixes the thing every repair in this file was fighting: Lab1's atlas
@@ -126,7 +139,10 @@ const HUMANS = [
   // shadow, and lifts the ID card onto its own material so the TOMBS
   // artwork on it is legible. It touches nothing above the collarbone —
   // the scan's face is better than anything procedural would put there.
-  { master: 'Sarah-Lab2.glb', out: 'sarah.glb', who: 'Sarah Bennett', panel: 'sarah', repair: false, author: true },
+  {
+    master: 'Sarah-Lab2.glb', out: 'sarah.glb', who: 'Sarah Bennett', panel: 'sarah', repair: false, author: true,
+    badge: { art: 'art/humans/badge/sarah-tombs.webp', slab: { zMin: 0.156, yMin: 1.050, yMax: 1.152, xMid: 0.005, xHalf: 0.040 }, rejectShirt: true },
+  },
 ];
 
 /**
@@ -526,9 +542,14 @@ async function main() {
       await authorSarah(doc, {
         cacheDir: CACHE,
         stamp: `${human.master.replace(/\.glb$/, '')}-${before}`,
-        root: ROOT,
         log: (line) => console.log(`[bake:humans] ${line}`),
       });
+    }
+    // AFTER the clothing, never before: the occlusion bake is cached
+    // against the master's own geometry, and lifting the card out first
+    // would silently change what that cache is a bake OF.
+    if (human.badge) {
+      await printBadge(doc, human.badge, { root: ROOT, log: (line) => console.log(`[bake:humans]   ${human.who}: ${line}`) });
     }
     await liftRoughness(doc, human.who);
 

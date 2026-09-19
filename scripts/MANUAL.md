@@ -90,6 +90,17 @@ cannot be wired because it is never run on its own:
   `bake:humans` script. Every threshold in it was measured on
   `Sarah-Lab2.glb` and is quoted with what it separates — it is an
   authoring pass for one body, not a general tool.
+- `scripts/printBadge.mjs` — prints a TOMBS ID card on the badge round
+  Jack's or Sarah's neck. Both were scanned wearing a real lanyard, and in
+  the body's 2048 atlas the card's UV island is about SEVENTY BY
+  THIRTY-EIGHT TEXELS — at that size a logo is twenty texels wide, so
+  better art placed there changes nothing. It lifts the card's triangles
+  onto their own material and rebuilds their UVs from the card's own
+  plane. The card is found by a DEPTH SLAB measured per person, and the
+  two scans differ: Jack's has a clean gap behind the card, Sarah's fused
+  card, sleeve and clip into one 32 mm lump welded to the cloth and needs
+  a colour gate as well. A module, not a command; imported by the
+  `bake:humans` script, which holds each person's slab.
 - `scripts/relayHarness.mjs` — starts `wrangler dev --local` on a free
   port, waits for `/health`, and stops it again, cleaning up its Durable
   Object state. Imported by `npm run probe:relay`,

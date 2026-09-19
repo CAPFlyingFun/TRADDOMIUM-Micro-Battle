@@ -26,12 +26,17 @@
  * colour over the region it covers. The scan is a bad painter but an honest
  * colorimeter, so nothing is invented there either.
  *
+ * HER BADGE IS NOT HERE. The ID card round her neck is printed by
+ * `printBadge.mjs`, which does the same job for Jack — see that file for
+ * why a 70x38-texel island cannot be fixed in place. The bake runs this
+ * pass FIRST and the badge after, because the occlusion bake is cached
+ * against the master's geometry and lifting the card out would change it.
+ *
  * THESE NUMBERS BELONG TO ONE MASTER. Every threshold below was measured on
  * `Sarah-Lab2.glb` and is quoted with what it separates. This is an
  * authoring pass for one body, not a general tool, and it says so rather
  * than pretending to generalise.
  */
-import { readFileSync } from 'node:fs';
 import sharp from 'sharp';
 import { surfaceOf } from './humanSurface.mjs';
 
@@ -61,31 +66,6 @@ const SHIRT_AO = 0.55, CORD_AO = 0.45;
 const SHIRT_GRAIN = 0.035, CORD_GRAIN = 0.06;
 const GUTTER_PASSES = 6;
 
-// ---------------------------------------------------------------- the badge
-//
-// IN THE BODY'S 2048 ATLAS THE CARD'S ISLAND IS SEVENTY BY THIRTY-EIGHT
-// TEXELS. That is why the printing on it reads as mush in every shot: at 38
-// texels tall a logo is twenty texels wide, and no art survives that.
-// Replacing those texels with better art changes nothing — so the card's
-// triangles are lifted into a primitive of their own with a dedicated
-// texture, and their UVs are rebuilt from the card's own plane, which also
-// lands the artwork upright without anyone working out how the old island
-// was rotated.
-const BADGE_ART = 'art/humans/badge/sarah-tombs.webp';
-/** The slab the card hangs in. Its back face sits at z ≈ 0.167 and the shirt
- * behind it never reaches 0.156, so DEPTH is what separates them. */
-const CARD_SLAB = { zMin: 0.156, yMin: 1.050, yMax: 1.152, xMid: 0.005, xHalf: 0.040 };
-const BADGE_TEX_W = 640;
-/** How much of the lump is vinyl sleeve, top and bottom. */
-const BADGE_INSET = 0.06;
-const SLEEVE = '#c9ccd0';
-
-const TYPE = {
-  POSITION: 'VEC3', NORMAL: 'VEC3', TANGENT: 'VEC4', TEXCOORD_0: 'VEC2', TEXCOORD_1: 'VEC2',
-  COLOR_0: 'VEC4', JOINTS_0: 'VEC4', JOINTS_1: 'VEC4', JOINTS_2: 'VEC4',
-  WEIGHTS_0: 'VEC4', WEIGHTS_1: 'VEC4', WEIGHTS_2: 'VEC4',
-};
-
 /** Weld by position so a UV seam does not break a surface into two. */
 function weldMap(P) {
   const key = new Map(), rep = new Int32Array(P.length / 3);
@@ -102,7 +82,7 @@ function weldMap(P) {
  *
  * `cacheDir` holds the occlusion bake between runs — see `humanSurface.mjs`.
  */
-export async function authorSarah(doc, { cacheDir, stamp, root = '.', log = console.log }) {
+export async function authorSarah(doc, { cacheDir, stamp, log = console.log }) {
   const mesh = doc.getRoot().listMeshes()[0];
   const prim = mesh.listPrimitives()[0];
   const tex = prim.getMaterial().getBaseColorTexture();
@@ -330,144 +310,5 @@ export async function authorSarah(doc, { cacheDir, stamp, root = '.', log = cons
   tex.setImage(new Uint8Array(await sharp(out, { raw: { width: S, height: S, channels: 3 } }).png().toBuffer()))
     .setMimeType('image/png');
 
-  // ------------------------------------------------------------- THE BADGE
-  const card = findCard(P, IDX, nt, S, img, tri, pos, nrm, cnt, col, rep, byVert);
-  await printBadge(doc, mesh, prim, card, root, log);
-  return { S, cordTexels: cordTex.size, shirtTexels: texels[0].length, shirtColour: base[0], cardTriangles: card.tris.size };
-}
-
-/** Find the ID card's triangles: the pale forward-facing patch on her front,
- * grown through the slab it hangs in and refused entry to the burgundy top. */
-function findCard(P, IDX, nt, S, img, tri, pos, nrm, cnt, col, rep, byVert) {
-  const mask = new Uint8Array(S * S);
-  for (let i = 0; i < S * S; i++) {
-    const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2];
-    if (y < 1.00 || y > 1.20 || Math.abs(x) > 0.07 || z < 0.10) continue;
-    const L = Math.hypot(nrm[i * 3], nrm[i * 3 + 1], nrm[i * 3 + 2]) || 1;
-    if (nrm[i * 3 + 2] / L < 0.6) continue;
-    const r = img[i * 3], g = img[i * 3 + 1], b = img[i * 3 + 2];
-    const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
-    if (mx < 150 || (mx ? (mx - mn) / mx : 0) > 0.26) continue;
-    mask[i] = 1;
-  }
-  // The biggest connected patch of that is the card's printed face.
-  const seen = new Uint8Array(S * S); let best = [];
-  for (let i = 0; i < S * S; i++) {
-    if (!mask[i] || seen[i]) continue;
-    const stack = [i], part = []; seen[i] = 1;
-    while (stack.length) {
-      const c = stack.pop(); part.push(c);
-      const x = c % S, y = (c / S) | 0;
-      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [-1, -1], [1, -1], [-1, 1]]) {
-        const nx = x + dx, ny = y + dy;
-        if (nx < 0 || ny < 0 || nx >= S || ny >= S) continue;
-        const j = ny * S + nx;
-        if (mask[j] && !seen[j]) { seen[j] = 1; stack.push(j); }
-      }
-    }
-    if (part.length > best.length) best = part;
-  }
-  const seed = new Set();
-  for (const i of best) { const t = tri[i]; if (t >= 0) seed.add(t); }
-
-  const burgundy = new Uint8Array(nt);
-  for (let t = 0; t < nt; t++) {
-    if (!cnt[t]) continue;
-    const [r, g, b] = col(t);
-    const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
-    if ((mx ? (mx - mn) / mx : 0) > 0.30 && r > g * 1.6 && r > b * 1.3) burgundy[t] = 1;
-  }
-  const inSlab = (v) => {
-    const x = P[v * 3], y = P[v * 3 + 1], z = P[v * 3 + 2];
-    return z > CARD_SLAB.zMin && y > CARD_SLAB.yMin && y < CARD_SLAB.yMax
-      && Math.abs(x - CARD_SLAB.xMid) < CARD_SLAB.xHalf;
-  };
-  const okTri = new Uint8Array(nt);
-  for (let t = 0; t < nt; t++) {
-    if (burgundy[t]) continue;                     // the card is fused to the cloth; colour is the only edge
-    if (inSlab(IDX[t * 3]) && inSlab(IDX[t * 3 + 1]) && inSlab(IDX[t * 3 + 2])) okTri[t] = 1;
-  }
-  const tris = new Set([...seed].filter((t) => okTri[t]));
-  const stack = [...tris];
-  while (stack.length) {
-    const t = stack.pop();
-    for (let k = 0; k < 3; k++) for (const n of byVert.get(rep[IDX[t * 3 + k]]) ?? []) {
-      if (!tris.has(n) && okTri[n]) { tris.add(n); stack.push(n); }
-    }
-  }
-  const m = [9, 9, 9], M = [-9, -9, -9];
-  for (const t of tris) for (let k = 0; k < 3; k++) {
-    const v = IDX[t * 3 + k];
-    for (let j = 0; j < 3; j++) { m[j] = Math.min(m[j], P[v * 3 + j]); M[j] = Math.max(M[j], P[v * 3 + j]); }
-  }
-  return { tris, m, M };
-}
-
-/** Lift the card onto its own primitive, rebuild its UVs from its own plane
- * and print the artwork on it. */
-async function printBadge(doc, mesh, prim, card, root, log) {
-  const { tris, m, M } = card;
-  const P = prim.getAttribute('POSITION').getArray();
-  const IDX = prim.getIndices().getArray();
-  const W = M[0] - m[0], H = M[1] - m[1];
-  log(`  badge ${tris.size} triangles, ${(W * 1000).toFixed(1)} x ${(H * 1000).toFixed(1)} mm, aspect ${(W / H).toFixed(3)}`);
-
-  const semantics = prim.listSemantics();
-  const remap = new Map(), order = [];
-  for (const t of tris) for (let k = 0; k < 3; k++) {
-    const v = IDX[t * 3 + k];
-    if (!remap.has(v)) { remap.set(v, order.length); order.push(v); }
-  }
-  const buffer = doc.getRoot().listBuffers()[0];
-  const attrs = {};
-  for (const s of semantics) {
-    const from = prim.getAttribute(s);
-    const a = from.getArray(), w = from.getElementSize();
-    const buf = new a.constructor(order.length * w);
-    order.forEach((v, i) => { for (let k = 0; k < w; k++) buf[i * w + k] = a[v * w + k]; });
-    attrs[s] = buf;
-  }
-  // The card's plane is the world x/y plane — it hangs facing the viewer —
-  // so its width and height map straight to u and v. v counts DOWN, because
-  // glTF puts (0,0) at the image's top-left.
-  const uv = new Float32Array(order.length * 2);
-  order.forEach((v, i) => { uv[i * 2] = (P[v * 3] - m[0]) / W; uv[i * 2 + 1] = (M[1] - P[v * 3 + 1]) / H; });
-  attrs.TEXCOORD_0 = uv;
-
-  const cardIdx = new Uint32Array(tris.size * 3);
-  { let n = 0; for (const t of tris) for (let k = 0; k < 3; k++) cardIdx[n++] = remap.get(IDX[t * 3 + k]); }
-  const keep = new Uint32Array((IDX.length / 3 - tris.size) * 3);
-  { let n = 0; for (let t = 0; t < IDX.length / 3; t++) { if (tris.has(t)) continue; for (let k = 0; k < 3; k++) keep[n++] = IDX[t * 3 + k]; } }
-  prim.setIndices(doc.createAccessor().setType('SCALAR').setArray(keep).setBuffer(buffer));
-
-  // THE GEOMETRY IS NOT CARD-SHAPED AND THE ART IS. The scan fused card,
-  // vinyl sleeve and clip into one lump, so its aspect is not a printed
-  // card's. The art is fitted by HEIGHT and centred on a sleeve-grey field:
-  // the printing keeps its proportions and the spare width reads as the
-  // sleeve it actually is. Stretching the art to the lump would widen every
-  // letter by a third.
-  const TW = BADGE_TEX_W, TH = Math.round(TW * H / W);
-  const artFile = `${root}/${BADGE_ART}`;
-  const src = sharp(readFileSync(artFile));
-  const meta = await src.metadata();
-  const artH = Math.round(TH * (1 - 2 * BADGE_INSET));
-  const artW = Math.round(artH * meta.width / meta.height);
-  const art = await sharp(readFileSync(artFile)).resize(artW, artH, { kernel: 'lanczos3' }).toBuffer();
-  const png = await sharp({ create: { width: TW, height: TH, channels: 3, background: SLEEVE } })
-    .composite([{ input: art, left: Math.round((TW - artW) / 2), top: Math.round((TH - artH) / 2) }])
-    .png().toBuffer();
-  log(`  badge texture ${TW}x${TH}, art ${artW}x${artH} inset ${(BADGE_INSET * 100).toFixed(0)}%`);
-
-  const tex = doc.createTexture('sarah-badge').setMimeType('image/png').setImage(new Uint8Array(png));
-  const mat = doc.createMaterial('SarahBadge')
-    .setBaseColorTexture(tex).setBaseColorFactor([1, 1, 1, 1])
-    .setRoughnessFactor(0.35).setMetallicFactor(0);   // a card in a vinyl sleeve is a little glossy
-  const cardPrim = doc.createPrimitive().setMaterial(mat)
-    .setIndices(doc.createAccessor().setType('SCALAR').setArray(cardIdx).setBuffer(buffer));
-  for (const [s, arr] of Object.entries(attrs)) {
-    const acc = doc.createAccessor().setType(TYPE[s] ?? 'VEC3').setArray(arr).setBuffer(buffer);
-    if (prim.getAttribute(s)?.getNormalized?.()) acc.setNormalized(true);
-    cardPrim.setAttribute(s, acc);
-  }
-  mesh.addPrimitive(cardPrim);
+  return { S, cordTexels: cordTex.size, shirtTexels: texels[0].length, shirtColour: base[0] };
 }
