@@ -103,13 +103,23 @@ const HUMANS = [
   // prints Joshua's TOMBS artwork on it — see `printBadge.mjs` for why a
   // 70x38-texel island cannot be fixed where it is. The SLAB is measured
   // per person, and the two scans are genuinely different: Jack's depth
-  // histogram has a clean gap (chest to z 0.100, nothing to 0.108, card at
-  // 0.110), so the slab alone isolates 35 triangles; Sarah's has no gap at
-  // all — her scan fused card, sleeve and clip into one 32 mm lump welded
-  // to the cloth — so she also needs `rejectShirt`.
+  // histogram has a clean gap (chest to z 0.100, nothing to 0.108, badge
+  // front at 0.110..0.113), so the slab alone isolates it; Sarah's has no
+  // gap at all — her scan fused card, sleeve and clip into one 32 mm lump
+  // welded to the cloth, and what separates hers is that the fill may only
+  // grow within the card's own plane.
+  //
+  // JACK'S SLAB IS THE WHOLE HOLDER FRONT, and it used to be two thirds of
+  // it. `yMax` was 1.160 where the front runs to 1.180, so the art filled
+  // 60.7 x 66.0 mm and the top of the badge stayed the scan's grey vinyl —
+  // Joshua's "the badge is too small for the badge holder", exactly. The
+  // front measures 61.9 x 95.5 mm, aspect 0.648 against art that is 0.678:
+  // a frame that needs almost no stretching is the check that it is the
+  // right frame. Everything above y 1.180 is the lanyard, which narrows
+  // from the card's 61 mm to 9 mm within five millimetres.
   {
     master: 'Jack-Lab.glb', out: 'jack.glb', who: 'Jack Bennett', panel: null, repair: false,
-    badge: { art: 'art/humans/badge/jack-tombs.webp', slab: { zMin: 0.104, yMin: 1.040, yMax: 1.160, xMid: -0.003, xHalf: 0.045 } },
+    badge: { art: 'art/humans/badge/jack-tombs.webp', slab: { zMin: 0.1085, yMin: 1.070, yMax: 1.180, xMid: -0.005, xHalf: 0.040 } },
   },
   // SARAH IS Lab2, AND Lab1 IS KEPT (Joshua, 2026-09-18: "go ahead and switch
   // to this one… it does look a lot better even the textures"). Meshy's second
@@ -141,7 +151,7 @@ const HUMANS = [
   // the scan's face is better than anything procedural would put there.
   {
     master: 'Sarah-Lab2.glb', out: 'sarah.glb', who: 'Sarah Bennett', panel: 'sarah', repair: false, author: true,
-    badge: { art: 'art/humans/badge/sarah-tombs.webp', slab: { zMin: 0.156, yMin: 1.050, yMax: 1.152, xMid: 0.005, xHalf: 0.040 }, rejectShirt: true },
+    badge: { art: 'art/humans/badge/sarah-tombs.webp', slab: { zMin: 0.156, yMin: 1.050, yMax: 1.152, xMid: 0.005, xHalf: 0.040 } },
   },
 ];
 

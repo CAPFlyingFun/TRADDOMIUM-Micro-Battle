@@ -11,36 +11,51 @@
  * also lands the artwork upright and square without anyone having to work
  * out how the old island was rotated.
  *
- * THE CARD IS FOUND BY A DEPTH SLAB, because a badge hangs OFF a chest and
- * the chest behind it never reaches that depth. The slab is per-person and
- * measured, not guessed, and the two of them are genuinely different:
+ * THE CARD IS FOUND BY A DEPTH SLAB AND THEN BY ITS OWN PLANE. A badge
+ * hangs OFF a chest, so the slab gets close; but the two scans are
+ * genuinely different, and only one of them is separated by depth alone:
  *
  *   Jack   the histogram has a clean gap — chest at z 0.082..0.100,
- *          NOTHING at 0.102..0.108, card at 0.110..0.114. The slab alone
- *          isolates it: 35 triangles, 62.2 x 73.7 x 4.8 mm.
+ *          NOTHING at 0.102..0.108, badge front at 0.110..0.113.
  *   Sarah  no gap at all. Her scan fused card, vinyl sleeve and clip into
- *          one lump 32 mm deep and welded it to the cloth, so the slab
- *          alone takes 75 x 91 mm of shirt with it. She needs the colour
- *          gate below as well, which cuts it to 57.9 x 81.9 mm.
+ *          one lump 32 mm deep and WELDED IT TO THE CLOTH, so a fill
+ *          through the slab alone takes 75 x 91 mm of shirt with it.
  *
- * So `rejectShirt` is not a knob someone might like — it is the difference
- * between a scan that separated the card and one that did not.
+ * What separates hers is that a badge is a FLAT SHEET and a chest is not:
+ * the fill grows only through neighbours within a card's thickness of the
+ * seed's plane. See `findCard` for the two colour gates that came before
+ * it and the two opposite ways they failed.
  *
- * THE GEOMETRY IS NOT CARD-SHAPED AND THE ART IS. Jack's lump measures
- * 0.843 wide-over-tall and Sarah's 0.707, where their printed cards crop
- * to 0.621 and 0.602. So the art is fitted by HEIGHT and centred on a
- * sleeve-grey field: the printing keeps its proportions and the spare
- * width reads as the vinyl sleeve it actually is. Stretching the art to
- * the lump's aspect would widen every letter by a fifth to a third.
+ * THE ART FILLS THE HOLDER'S WHOLE FRONT, and that is Joshua's call
+ * against my first answer. I fitted it by height on a sleeve-grey field,
+ * reasoning that the printing should keep its proportions and the spare
+ * width should read as vinyl. On the model that came out as a badge
+ * holder printed INSIDE the badge holder geometry — a small card floating
+ * in a grey surround, with a dead band above it. He drew the two boxes
+ * over a render: "It's fine as is, it just needs to be made bigger...
+ * Don't trim it as it aligns with the badge holder."
+ *
+ * So the art is stretched to the face rather than letterboxed into it,
+ * and — the part that took three passes — THE FACE HAS TO BE THE WHOLE
+ * HOLDER. Jack's slab was cut off at y 1.160, which is two thirds of the
+ * way up his badge, so the art filled 60.7 x 66.0 mm of a 61.9 x 95.5 mm
+ * front and the top third stayed the scan's grey vinyl. That is exactly
+ * the red box he drew inside the blue one. Opened to the real front the
+ * two faces measure 0.648 (Jack) and 0.682 (Sarah) wide-over-tall against
+ * art that is 0.678 and 0.680 — a 4% widen and none at all, where the
+ * clipped faces wanted 36% and 5%. A frame that needs no stretching is
+ * the check that it is the right frame.
  */
 import { readFileSync } from 'node:fs';
 import sharp from 'sharp';
 import { rasterize } from './humanSurface.mjs';
 
 const TEX_W = 640;
-/** How much of the lump is sleeve, top and bottom. */
-const INSET = 0.06;
-const SLEEVE = '#c9ccd0';
+/** How square-on a triangle must face to count as the card's printed sheet. */
+const FLAT_FACING = 0.7;
+/** How far out of the card's OWN plane a lifted triangle may sit. A badge in
+ * a vinyl sleeve is a few millimetres thick; nothing further out is card. */
+const CARD_HALF_THICK = 0.003;
 
 const TYPE = {
   POSITION: 'VEC3', NORMAL: 'VEC3', TANGENT: 'VEC4', TEXCOORD_0: 'VEC2', TEXCOORD_1: 'VEC2',
@@ -62,13 +77,13 @@ function weldMap(P) {
 /**
  * Which triangles are the card.
  *
- * Everything whose three vertices sit in the slab, and — when the scan
- * welded the card to the cloth — nothing whose own colour says it is the
- * shirt. The result is the connected piece containing the palest, flattest,
- * most forward-facing patch on the chest, so a stray slab-shaped thing
- * elsewhere cannot be mistaken for a badge.
+ * The seed is the palest, flattest, most forward-facing patch inside the
+ * slab — the PRINTING itself. A plane is fitted to it, and the card is then
+ * grown from the seed through welded neighbours that stay within a card's
+ * thickness of that plane. A badge is a flat sheet; nothing else about it
+ * is needed to say where it stops.
  */
-function findCard(prim, S, img, slab, rejectShirt) {
+function findCard(prim, S, img, slab) {
   const P = prim.getAttribute('POSITION').getArray();
   const IDX = prim.getIndices().getArray();
   const nt = IDX.length / 3;
@@ -107,31 +122,12 @@ function findCard(prim, S, img, slab, rejectShirt) {
   }
   if (!biggest.length) throw new Error('no printed face found in the badge slab — the slab is wrong');
 
-  // Every triangle's own colour, for the shirt gate.
-  const shirt = new Uint8Array(nt);
-  if (rejectShirt) {
-    const sum = new Float64Array(nt * 3), cnt = new Int32Array(nt);
-    for (let i = 0; i < S * S; i++) {
-      const t = tri[i];
-      if (t < 0) continue;
-      sum[t * 3] += img[i * 3]; sum[t * 3 + 1] += img[i * 3 + 1]; sum[t * 3 + 2] += img[i * 3 + 2];
-      cnt[t] += 1;
-    }
-    for (let t = 0; t < nt; t++) {
-      if (!cnt[t]) continue;
-      const r = sum[t * 3] / cnt[t], g = sum[t * 3 + 1] / cnt[t], b = sum[t * 3 + 2] / cnt[t];
-      const mx = Math.max(r, g, b), mn = Math.min(r, g, b);
-      if ((mx ? (mx - mn) / mx : 0) > 0.30 && r > g * 1.6 && r > b * 1.3) shirt[t] = 1;
-    }
-  }
-
   const inSlab = (v) => {
     const x = P[v * 3], y = P[v * 3 + 1], z = P[v * 3 + 2];
     return z > slab.zMin && y > slab.yMin && y < slab.yMax && Math.abs(x - slab.xMid) < slab.xHalf;
   };
   const allowed = new Uint8Array(nt);
   for (let t = 0; t < nt; t++) {
-    if (shirt[t]) continue;
     if (inSlab(IDX[t * 3]) && inSlab(IDX[t * 3 + 1]) && inSlab(IDX[t * 3 + 2])) allowed[t] = 1;
   }
   const rep = weldMap(P);
@@ -143,28 +139,106 @@ function findCard(prim, S, img, slab, rejectShirt) {
       let a = byVert.get(v); if (!a) { a = []; byVert.set(v, a); } a.push(t);
     }
   }
-  const tris = new Set();
-  const stack = [];
-  for (const i of biggest) { const t = tri[i]; if (t >= 0 && allowed[t] && !tris.has(t)) { tris.add(t); stack.push(t); } }
+  const seeded = [];
+  for (const i of biggest) { const t = tri[i]; if (t >= 0 && allowed[t] && !seeded.includes(t)) seeded.push(t); }
+  if (!seeded.length) throw new Error('the printed face is not inside the badge slab — the slab is wrong');
+
+  const nrmOf = (t) => {
+    const a = IDX[t * 3] * 3, b = IDX[t * 3 + 1] * 3, c = IDX[t * 3 + 2] * 3;
+    const e1 = [P[b] - P[a], P[b + 1] - P[a + 1], P[b + 2] - P[a + 2]];
+    const e2 = [P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]];
+    const n = [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]];
+    const L = Math.hypot(n[0], n[1], n[2]) || 1;
+    return [n[0] / L, n[1] / L, n[2] / L, L / 2];
+  };
+
+  // THE CARD IS A FLAT SHEET, SO THE CARD IS WHAT LIES IN ITS PLANE — and
+  // the plane comes from the seed, area-weighted so a sliver in it cannot
+  // tilt the fit.
+  //
+  // This replaces a colour gate, and the colour gate is worth recording
+  // because both of its failures were mine. Sarah's scan fused card, vinyl
+  // sleeve and clip into one lump and welded it to her shirt, so a flood
+  // fill through the slab alone took 75 x 91 mm of cloth with it. I gated
+  // it on burgundy, read from each triangle's mean over the texels the
+  // rasteriser landed on it. Ninety-one of her 251 triangles are too thin
+  // in the atlas for a single texel centre to fall inside, so they were
+  // never tested at all, came across as card, and drew as the RED STREAKS
+  // Joshua saw: "Sarah's had a red streak and looks messed up… what's the
+  // red from?" I then sampled those triangles at their UV centroid instead
+  // — and her card's island is SEVENTY BY THIRTY-EIGHT TEXELS, so a
+  // centroid near its edge rounds onto the shirt next door. That rejected
+  // 17 triangles of the printed face itself and PUNCHED A WEDGE THROUGH THE
+  // CARD, which drew the burgundy shirt behind it: the same streak, from
+  // the opposite mistake.
+  //
+  // Geometry has neither failure mode. Measured on Sarah, growing only
+  // within 3 mm of the seed's plane never leaves the badge at all — 125
+  // triangles reached, 125 kept, the front sheet complete, and the face
+  // 53.3 x 79.1 mm against art that is 0.675 to her 0.680. No colour is
+  // read, so no atlas resolution can mislead it.
+  const c = [0, 0, 0], pn = [0, 0, 0];
+  let area = 0;
+  for (const t of seeded) {
+    const n = nrmOf(t);
+    for (let k = 0; k < 3; k++) {
+      const v = IDX[t * 3 + k];
+      for (let j = 0; j < 3; j++) c[j] += P[v * 3 + j] * n[3] / 3;
+    }
+    area += n[3];
+    for (let j = 0; j < 3; j++) pn[j] += n[j] * n[3];
+  }
+  for (let j = 0; j < 3; j++) c[j] /= area;
+  {
+    const L = Math.hypot(pn[0], pn[1], pn[2]) || 1;
+    for (let j = 0; j < 3; j++) pn[j] /= L;
+  }
+  const inPlane = (t) => {
+    for (let k = 0; k < 3; k++) {
+      const v = IDX[t * 3 + k];
+      const d = (P[v * 3] - c[0]) * pn[0] + (P[v * 3 + 1] - c[1]) * pn[1] + (P[v * 3 + 2] - c[2]) * pn[2];
+      if (Math.abs(d) > CARD_HALF_THICK) return false;
+    }
+    return true;
+  };
+
+  // The gate is applied AS THE FILL GROWS, not after it. Trimming a finished
+  // fill leaves whatever the fill reached THROUGH an out-of-plane bridge and
+  // happened to land back in the plane beyond it; refusing the bridge is
+  // what makes the reached set and the kept set the same set.
+  const tris = new Set(), stack = [];
+  let refused = 0;
+  for (const t of seeded) { tris.add(t); stack.push(t); }
   while (stack.length) {
     const t = stack.pop();
     for (let k = 0; k < 3; k++) for (const n of byVert.get(rep[IDX[t * 3 + k]]) ?? []) {
-      if (!tris.has(n)) { tris.add(n); stack.push(n); }
+      if (tris.has(n)) continue;
+      if (!inPlane(n)) { refused += 1; continue; }
+      tris.add(n); stack.push(n);
     }
   }
-  if (!tris.size) throw new Error('the printed face is not inside the badge slab — the slab is wrong');
+
+  // THE ARTWORK IS SQUARED AGAINST THE PRINTED FACE, and on a card that
+  // hangs at an angle the printed face is what FACES FORWARD within the
+  // plane, not everything in it: the sleeve's rolled edges are in the plane
+  // too and would widen the frame by their thickness. u runs with x, v with
+  // y — the card's tilt is uniform, so a uniform map in world x/y is a
+  // uniform map in the card's own plane, foreshortened exactly as the
+  // geometry is.
+  const flat = [...tris].filter((t) => nrmOf(t)[2] >= FLAT_FACING);
+  const frame = flat.length ? flat : [...tris];
   const m = [9, 9, 9], M = [-9, -9, -9];
-  for (const t of tris) for (let k = 0; k < 3; k++) {
+  for (const t of frame) for (let k = 0; k < 3; k++) {
     const v = IDX[t * 3 + k];
     for (let j = 0; j < 3; j++) { m[j] = Math.min(m[j], P[v * 3 + j]); M[j] = Math.max(M[j], P[v * 3 + j]); }
   }
-  return { tris, m, M };
+  return { tris, dropped: refused, m, M, flat: flat.length };
 }
 
 /**
  * Lift the card onto its own primitive and print `spec.art` on it.
  *
- * `spec` is `{ art, slab: { zMin, yMin, yMax, xMid, xHalf }, rejectShirt }`.
+ * `spec` is `{ art, slab: { zMin, yMin, yMax, xMid, xHalf } }`.
  * Mutates `doc`; returns what it found, so a caller can print a report
  * rather than trust a silent success.
  */
@@ -176,11 +250,11 @@ export async function printBadge(doc, spec, { root = '.', log = () => {} } = {})
   const { data: img } = await sharp(Buffer.from(tex.getImage()))
     .removeAlpha().raw().toBuffer({ resolveWithObject: true });
 
-  const { tris, m, M } = findCard(prim, S, img, spec.slab, spec.rejectShirt === true);
+  const { tris, dropped, m, M, flat } = findCard(prim, S, img, spec.slab);
   const P = prim.getAttribute('POSITION').getArray();
   const IDX = prim.getIndices().getArray();
   const W = M[0] - m[0], H = M[1] - m[1];
-  log(`badge ${tris.size} triangles, ${(W * 1000).toFixed(1)} x ${(H * 1000).toFixed(1)} mm, aspect ${(W / H).toFixed(3)}`);
+  log(`badge ${tris.size} triangles (${flat} flat, ${dropped} neighbours refused as out of its plane), printed face ${(W * 1000).toFixed(1)} x ${(H * 1000).toFixed(1)} mm, aspect ${(W / H).toFixed(3)}`);
 
   const semantics = prim.listSemantics();
   const remap = new Map(), order = [];
@@ -213,18 +287,28 @@ export async function printBadge(doc, spec, { root = '.', log = () => {} } = {})
   const TW = TEX_W, TH = Math.round(TW * H / W);
   const artFile = `${root}/${spec.art}`;
   const meta = await sharp(readFileSync(artFile)).metadata();
-  const artH = Math.round(TH * (1 - 2 * INSET));
-  const artW = Math.round(artH * meta.width / meta.height);
-  const art = await sharp(readFileSync(artFile)).resize(artW, artH, { kernel: 'lanczos3' }).toBuffer();
-  const png = await sharp({ create: { width: TW, height: TH, channels: 3, background: SLEEVE } })
-    .composite([{ input: art, left: Math.round((TW - artW) / 2), top: Math.round((TH - artH) / 2) }])
+  // `fit: 'fill'` — the whole art onto the whole face, no letterbox and no
+  // crop. See the header: this is a decision, not a default.
+  const png = await sharp(readFileSync(artFile))
+    .resize(TW, TH, { fit: 'fill', kernel: 'lanczos3' })
+    .flatten({ background: '#ffffff' })
     .png().toBuffer();
-  log(`badge texture ${TW}x${TH}, art ${artW}x${artH} inset ${(INSET * 100).toFixed(0)}%`);
+  const stretch = (TW / TH) / (meta.width / meta.height);
+  log(`badge texture ${TW}x${TH}, art filled edge to edge (widened ${((stretch - 1) * 100).toFixed(0)}%)`);
 
   const badgeTex = doc.createTexture('badge').setMimeType('image/png').setImage(new Uint8Array(png));
+  // CLAMP, not repeat: the sleeve's flap sits outside 0..1 and must take the
+  // card's edge colour. Repeating would wrap the TOMBS footer onto it.
+
   const mat = doc.createMaterial('TombsBadge')
     .setBaseColorTexture(badgeTex).setBaseColorFactor([1, 1, 1, 1])
     .setRoughnessFactor(0.35).setMetallicFactor(0);   // a card in a vinyl sleeve is a little glossy
+  // CLAMP, NOT REPEAT. The sleeve's flap is carried on this material but its
+  // UVs fall outside 0..1, because the frame is the flat face's. Clamped, it
+  // takes the card's own edge colour; repeated, it would wrap the TOMBS
+  // footer band back onto the top of the holder.
+  const CLAMP_TO_EDGE = 33071;
+  mat.getBaseColorTextureInfo()?.setWrapS(CLAMP_TO_EDGE).setWrapT(CLAMP_TO_EDGE);
   const cardPrim = doc.createPrimitive().setMaterial(mat)
     .setIndices(doc.createAccessor().setType('SCALAR').setArray(cardIdx).setBuffer(buffer));
   for (const [s, arr] of Object.entries(attrs)) {
