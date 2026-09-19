@@ -190,10 +190,10 @@ const RING_SEGMENTS_AT: Readonly<Record<DetailTier, { readonly tube: number; rea
  * bodies standing in it. A floor casts nothing it is not already under,
  * and a screen face is a decal on a panel that is already casting.
  */
-const CASTS_SHADOW: ReadonlySet<Surface> = new Set<Surface>(['wall', 'ceiling', 'metal', 'panel', 'desk', 'accent']);
+const CASTS_SHADOW: ReadonlySet<Surface> = new Set<Surface>(['wall', 'ceiling', 'metal', 'panel', 'desk', 'seat', 'accent']);
 
 /** Which surfaces take one: the large flat things a shadow would be read on. */
-const TAKES_SHADOW: ReadonlySet<Surface> = new Set<Surface>(['floor', 'wall', 'ceiling', 'desk', 'panel']);
+const TAKES_SHADOW: ReadonlySet<Surface> = new Set<Surface>(['floor', 'wall', 'ceiling', 'desk', 'panel', 'seat']);
 
 // Scratch, allocated once at module scope and reused. Nothing here
 // survives the call it is used in.

@@ -88,7 +88,7 @@ describe('the index over the laboratory plan', () => {
     expect(SOLIDS.ids).toHaveLength(SOLIDS.count);
 
     // The measurement the module's cell size was chosen against.
-    expect(SOLIDS.count).toBe(98);
+    expect(SOLIDS.count).toBe(102);
   });
 
   it('leaves out what the plan says is not solid', () => {
@@ -211,8 +211,11 @@ describe('a wall is the only way a room is sealed', () => {
 describe('the step, and the floor face it was written for', () => {
   it('is a quarter of a metre and clears nothing the plan means to stop a body', () => {
     // Every solid top face in the building, in order, jumps 0.000 →
-    // 0.450 (the entrance bench) → 0.600 (the array platform) → 0.750
-    // (the desks). The step sits in that gap by construction.
+    // 0.450 (the entrance bench and the four chair seats) → 0.600 (the
+    // array platform) → 0.750 (the desks). The step sits in that gap by
+    // construction — which is why a chair's base and column are drawn
+    // and NOT solid: a 0.04 m disc under the seat would be the first
+    // thing in the building a body could step onto.
     expect(STEP_UP).toBe(0.25);
     expect(STEP_UP).toBeLessThan(0.45);
   });

@@ -482,6 +482,95 @@ describe('a laboratory three metres wider', () => {
 });
 
 /**
+ * A CHAIR HAS TO READ AS A CHAIR.
+ *
+ * Joshua, from the device: "Are these gray pillars chairs? Haha, doesn't
+ * look like a chair." It was one box, and a box at that size is a
+ * plinth. What makes the silhouette a chair is not its colour — it is a
+ * pad at sitting height with DAYLIGHT UNDER IT and a back standing
+ * clear ABOVE it, and those are the three things checked here, on every
+ * chair in the building rather than on the one in the screenshot.
+ *
+ * The fourth check is the one a screenshot would never catch: a chair
+ * faces its own desk. That is derived inside `plan.ts` from where the
+ * two stand, so a workstation moved to the other side of a room turns
+ * its chair round with no second number to remember — and this is what
+ * would fail if that derivation were ever replaced by a literal.
+ */
+describe('the chairs at the workstations', () => {
+  const layout = planLab();
+  const deskIds = layout.slabs.filter((s) => s.id.endsWith(':desk')).map((s) => s.id);
+
+  it('gives every workstation a chair in four pieces', () => {
+    expect(deskIds.length).toBe(4);
+    for (const deskId of deskIds) {
+      const id = deskId.replace(/:desk$/, '');
+      for (const part of ['chair-seat', 'chair-back']) {
+        expect(layout.slabs.some((s) => s.id === `${id}:${part}`), `${id}:${part}`).toBe(true);
+      }
+      for (const part of ['chair-base', 'chair-column']) {
+        expect(layout.pillars.some((q) => q.id === `${id}:${part}`), `${id}:${part}`).toBe(true);
+      }
+      // The single box is GONE, not merely joined by the others.
+      expect(layout.slabs.some((s) => s.id === `${id}:chair`)).toBe(false);
+    }
+  });
+
+  it('holds the pad at a sitting height, with the floor visible under it', () => {
+    for (const seat of layout.slabs.filter((s) => s.id.endsWith(':chair-seat'))) {
+      const top = seat.box.at.y + seat.box.size.y / 2;
+      const under = seat.box.at.y - seat.box.size.y / 2;
+      // EN 1335-1 / BIFMA G1 put a task chair's seat at 0.40-0.52 m.
+      expect(top, seat.id).toBeGreaterThanOrEqual(0.40);
+      expect(top, seat.id).toBeLessThanOrEqual(0.52);
+      // A pad, not a plinth: most of the height under it is air.
+      expect(under, seat.id).toBeGreaterThan(0.3);
+      expect(seat.surface, seat.id).toBe('seat');
+    }
+  });
+
+  it('stands the back clear above the pad, and only the two of them stop a body', () => {
+    for (const back of layout.slabs.filter((s) => s.id.endsWith(':chair-back'))) {
+      const seat = layout.slabs.find((s) => s.id === back.id.replace('chair-back', 'chair-seat'));
+      const seatTop = seat!.box.at.y + seat!.box.size.y / 2;
+      const backFoot = back.box.at.y - back.box.size.y / 2;
+      // The gap is what daylight between a pad and a back looks like in
+      // a plan. Without it the two are one L-shaped lump.
+      expect(backFoot, back.id).toBeGreaterThan(seatTop);
+      expect(back.box.at.y + back.box.size.y / 2, back.id).toBeGreaterThan(0.9);
+      // Thin on one axis and a seat's width on the other: a back, not a wall.
+      const thin = Math.min(back.box.size.x, back.box.size.z);
+      const wide = Math.max(back.box.size.x, back.box.size.z);
+      expect(thin, back.id).toBeLessThan(0.1);
+      expect(wide, back.id).toBeGreaterThan(0.3);
+      expect(back.solid, back.id).toBe(true);
+      expect(seat!.solid, seat!.id).toBe(true);
+    }
+    // The base and the column are DRAWN and not solid, which is what
+    // keeps `collide.ts`'s claim true that nothing solid stands between
+    // the floor at 0.000 and the first face at 0.450.
+    for (const q of layout.pillars.filter((x) => /chair-(base|column)$/.test(x.id))) {
+      expect(q.solid, q.id).toBe(false);
+      expect(q.at.y + q.height, q.id).toBeLessThan(0.45);
+    }
+  });
+
+  it('turns each chair to face its own desk', () => {
+    for (const deskId of deskIds) {
+      const id = deskId.replace(/:desk$/, '');
+      const desk = layout.slabs.find((s) => s.id === deskId)!;
+      const seat = layout.slabs.find((s) => s.id === `${id}:chair-seat`)!;
+      const back = layout.slabs.find((s) => s.id === `${id}:chair-back`)!;
+      // The back sits on the side of the pad AWAY from the desk, so the
+      // vector pad→back and the vector pad→desk point opposite ways.
+      const toBack = { x: back.box.at.x - seat.box.at.x, z: back.box.at.z - seat.box.at.z };
+      const toDesk = { x: desk.box.at.x - seat.box.at.x, z: desk.box.at.z - seat.box.at.z };
+      expect(toBack.x * toDesk.x + toBack.z * toDesk.z, `${id} back faces its desk`).toBeLessThan(0);
+    }
+  });
+});
+
+/**
  * JACK AND SARAH ARE IN THE ROOM.
  *
  * A laboratory with nobody in it is a set, and the two of them standing at

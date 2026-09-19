@@ -312,8 +312,42 @@ const EMERGENCY_FITTING = vec(0.22, 0.14, 0.22);
 /** Desk, console and cabinet heights, in one place so a room reads consistently. */
 const DESK_HEIGHT = 0.75;
 const CONSOLE_HEIGHT = 1.0;
-const CHAIR = 0.55;
-const CHAIR_HEIGHT = 0.9;
+
+/**
+ * A TASK CHAIR, IN FOUR PIECES — because one box is not a chair.
+ *
+ * Joshua, 2026-09-19, looking at the laboratory: "Are these gray pillars
+ * chairs? Haha, doesn't look like a chair." It was one 0.55 m box 0.9 m
+ * tall, which is a plinth. A chair is recognised by its SILHOUETTE —
+ * a pad at sitting height, a gap, a back above it, and daylight under
+ * all of it — so the shape is what had to change, not the colour.
+ *
+ * The numbers are a real task chair's (EN 1335-1 / BIFMA G1): a seat
+ * 0.40-0.52 m off the floor, here 0.45; a pad about 0.45 m square; a
+ * backrest around 0.45 m tall; a five-star base about 0.65 m across.
+ * The base is drawn as a DISC rather than five arms because a `Pillar`
+ * is an upright cylinder with no rotation in it, and radiating arms
+ * would mean putting rotation into the plan contract to win a detail
+ * nobody can resolve from across the room.
+ *
+ * 0.45 IS ALSO THE ENTRANCE BENCH'S HEIGHT, and that is deliberate
+ * rather than a coincidence: `collide.ts` justifies `STEP_UP` by there
+ * being NOTHING solid between the floor at 0.000 and the bench at
+ * 0.450, so a chair seat landing exactly on 0.450 keeps that
+ * measurement true. The column and the base are the reason it stays
+ * true — they are NOT solid, so the lowest face a body can meet is
+ * still the seat. A body is stopped by a chair, never lifted onto one.
+ */
+const CHAIR_SEAT = 0.45;
+const CHAIR_SEAT_TOP = 0.45;
+const CHAIR_SEAT_THICK = 0.07;
+const CHAIR_BACK_TALL = 0.45;
+const CHAIR_BACK_THICK = 0.06;
+/** The daylight between the pad and the foot of the back. Half the reason it reads as a chair. */
+const CHAIR_BACK_GAP = 0.05;
+const CHAIR_COLUMN_RADIUS = 0.035;
+const CHAIR_BASE_RADIUS = 0.30;
+const CHAIR_BASE_THICK = 0.04;
 /** A flush wall panel: an intercom, a camera screen, a readout. */
 const PANEL_SKIN = 0.08;
 
@@ -742,7 +776,8 @@ function lightsOf(b: Build, r: Interior): void {
 
 /**
  * A workstation: the desk, the monitor over it, the keyboard shelf on it
- * and the wheeled chair behind it.
+ * and the wheeled chair behind it — the chair in its own four pieces,
+ * turned to face this desk (`chair`, below).
  *
  * One function, used four times, because chapter 1 turns on there being
  * MORE THAN ONE of them — Jack's chair "rolled backward and nearly
@@ -757,7 +792,47 @@ function workstation(b: Build, r: Interior, id: string, x: number, z: number, wi
     box(vec(x, DESK_HEIGHT + 0.33, z - deep / 2 + 0.12), vec(0.62, 0.46, 0.05)), false);
   slab(b, `${id}:keyboard`, r.id, 'desk',
     box(vec(x, DESK_HEIGHT + 0.015, z + deep / 2 - 0.16), vec(0.62, 0.03, 0.22)), false);
-  slab(b, `${id}:chair`, r.id, 'panel', resting(chairX, chairZ, CHAIR, CHAIR, CHAIR_HEIGHT), true);
+  chair(b, r, id, chairX, chairZ, x - chairX, z - chairZ);
+}
+
+/**
+ * ONE CHAIR, FACING ITS OWN DESK.
+ *
+ * `toDeskX`/`toDeskZ` is the vector from the chair to the desk it
+ * belongs to, and the chair turns to the DOMINANT axis of it. That is
+ * the whole of the facing rule, and it is derived rather than passed
+ * because `workstation` already knows both places — a chair that has to
+ * be told which way to face is a chair that will one day be told wrong.
+ * Axis-aligned is not a simplification here: every box in this building
+ * is, so a back at 30 degrees could not be expressed anyway.
+ *
+ * Only the pad and the back are SOLID. A body walks into the seat and
+ * stops; its feet pass through the base, which nobody can see and which
+ * is what keeps `STEP_UP`'s measurement true (the constants above).
+ */
+function chair(b: Build, r: Interior, id: string, x: number, z: number, toDeskX: number, toDeskZ: number): void {
+  // The dominant axis, and never both: `>=` settles a perfect diagonal
+  // toward X rather than leaving the sign of 0 to decide it.
+  const alongX = Math.abs(toDeskX) >= Math.abs(toDeskZ);
+  const faceX = alongX ? Math.sign(toDeskX) || 1 : 0;
+  const faceZ = alongX ? 0 : Math.sign(toDeskZ) || 1;
+  // The back stands at the REAR edge of the pad, which is the side the
+  // chair is facing away from.
+  const backOff = CHAIR_SEAT / 2 - CHAIR_BACK_THICK / 2;
+
+  pillar(b, `${id}:chair-base`, r.id, 'metal',
+    vec(x, 0, z), CHAIR_BASE_RADIUS, CHAIR_BASE_THICK, false);
+  pillar(b, `${id}:chair-column`, r.id, 'metal',
+    vec(x, CHAIR_BASE_THICK, z), CHAIR_COLUMN_RADIUS,
+    CHAIR_SEAT_TOP - CHAIR_SEAT_THICK - CHAIR_BASE_THICK, false);
+  slab(b, `${id}:chair-seat`, r.id, 'seat',
+    box(vec(x, CHAIR_SEAT_TOP - CHAIR_SEAT_THICK / 2, z),
+      vec(CHAIR_SEAT, CHAIR_SEAT_THICK, CHAIR_SEAT)), true);
+  slab(b, `${id}:chair-back`, r.id, 'seat',
+    box(vec(x - faceX * backOff, CHAIR_SEAT_TOP + CHAIR_BACK_GAP + CHAIR_BACK_TALL / 2, z - faceZ * backOff),
+      alongX
+        ? vec(CHAIR_BACK_THICK, CHAIR_BACK_TALL, CHAIR_SEAT)
+        : vec(CHAIR_SEAT, CHAIR_BACK_TALL, CHAIR_BACK_THICK)), true);
 }
 
 /** Jack's laboratory (ch 1), and the far end Sarah turns toward (ch 2). */

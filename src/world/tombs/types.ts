@@ -75,6 +75,12 @@ export type Surface =
   | 'metal'
   /** A worktop. */
   | 'desk'
+  /**
+   * A task chair's pad and back. Its own material because a chair is the
+   * one thing in the building a body is meant to READ AS FURNITURE at a
+   * glance, and it is neither a worktop nor a machine's casing.
+   */
+  | 'seat'
   /** A machine's casing. */
   | 'panel'
   /** A dark monitor face. */

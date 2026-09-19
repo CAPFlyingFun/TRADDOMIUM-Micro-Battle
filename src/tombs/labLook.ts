@@ -123,6 +123,21 @@ export const LOOK: Readonly<Record<Surface, SurfaceLook>> = Object.freeze({
   metal: Object.freeze({ colour: 0x8b9198, roughness: 0.34, metalness: 0.88, opacity: 1, emissive: 0x000000, emissiveIntensity: 0 }),
   // Laminate worktop, neutral and pale, so what is standing on it shows.
   desk: Object.freeze({ colour: 0xa8ada9, roughness: 0.58, metalness: 0.04, opacity: 1, emissive: 0x000000, emissiveIntensity: 0 }),
+  // A TASK CHAIR'S PAD AND BACK: moulded grey plastic, almost matte.
+  //
+  // Its own entry rather than `panel`'s, for two reasons that are both
+  // about being READ. A chair is the one fixture a player identifies by
+  // shape alone, so it has to be told apart from the casing standing
+  // next to it — 0.396 against the panel's 0.376, and bluer where the
+  // panel is green. And it is the one surface here that wears NO MAP on
+  // purpose: the building's other materials are photographs of steel,
+  // concrete and chequer plate, and chequer plate on a seat pad is a
+  // picture of the wrong thing. Smooth beside all that grain is itself
+  // how a chair reads.
+  //
+  // Above the FLOOR, which is this file's standing rule and is checked:
+  // of the things a room is made of, the floor is the darkest.
+  seat: Object.freeze({ colour: 0x5f666b, roughness: 0.86, metalness: 0.06, opacity: 1, emissive: 0x000000, emissiveIntensity: 0 }),
   // Powder-coated casing, darker than the wall behind it.
   panel: Object.freeze({ colour: 0x59625e, roughness: 0.52, metalness: 0.22, opacity: 1, emissive: 0x000000, emissiveIntensity: 0 }),
   // Dark glass. NOT a light source: see the header.

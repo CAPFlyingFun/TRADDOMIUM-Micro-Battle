@@ -24,7 +24,7 @@ import {
 
 /** Every surface the CONTRACT names, written out by hand — so the union growing fails this file rather than sliding past it. */
 const CONTRACT: readonly Surface[] = [
-  'floor', 'wall', 'ceiling', 'glass', 'metal', 'desk', 'panel', 'screen', 'readout', 'accent',
+  'floor', 'wall', 'ceiling', 'glass', 'metal', 'desk', 'seat', 'panel', 'screen', 'readout', 'accent',
 ];
 
 const channels = (colour: number): { r: number; g: number; b: number } => ({
@@ -312,6 +312,16 @@ describe('the surfaces\' textures', () => {
     for (const surface of ['floor', 'wall', 'ceiling', 'metal', 'desk', 'panel', 'accent'] as const) {
       expect(SURFACE_TEXTURE[surface], surface).toBeDefined();
     }
+  });
+
+  it('leaves the seat bare, which is a decision and not an omission', () => {
+    // There is no upholstery master in the library the other five came
+    // from, and the nearest ones — brushed steel, chequer plate — would
+    // be a picture of the wrong thing on a seat pad. So a chair is drawn
+    // in its palette colour alone, which is the renderer's documented
+    // fallback rather than a special case. Give it a map the day there
+    // is a map of a chair.
+    expect(SURFACE_TEXTURE.seat).toBeUndefined();
   });
 
   it('lists every texture once, which is what a loader fetches', () => {

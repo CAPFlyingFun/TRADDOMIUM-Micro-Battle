@@ -103,7 +103,13 @@ src/
                 plan.ts, which expands a small LabSpec into all of them.
                 Nothing in it knows what a mesh is, so the building's
                 collision and its reachability are testable in plain
-                node and a server could hold them.
+                node and a server could hold them. A FIXTURE IS A
+                SILHOUETTE, not a labelled box: a task chair is four
+                pieces (disc base, column, pad, back) at real chair
+                dimensions, turned to face its own desk by a rule derived
+                from where the two stand, and only its pad and back are
+                solid — so the lowest face a body can meet is still the
+                0.450 that collide.ts measures STEP_UP against.
                 collide.ts turns a plan into what a body can touch:
                 LabSolids indexes every solid slab and pillar into a flat
                 grid ONCE, moveBody sweeps a capsule through it axis by

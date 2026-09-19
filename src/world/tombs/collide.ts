@@ -23,21 +23,21 @@
  *
  * ─── why there is an index at all ────────────────────────────────────
  *
- * MEASURED on the real plan (`planLab()`, the canonical `LAB_SPEC`): 134
- * slabs of which 88 are solid, and 10 pillars all of which are. NINETY-
- * EIGHT SOLIDS. The laboratory alone holds 21 of them. A step that
- * walked the whole layout would test all 98 for one axis, three times
+ * MEASURED on the real plan (`planLab()`, the canonical `LAB_SPEC`): 138
+ * slabs of which 92 are solid, and 18 pillars of which 10 are. ONE
+ * HUNDRED AND TWO SOLIDS. The laboratory alone holds 25 of them. A step
+ * that walked the whole layout would test all 102 for one axis, three times
  * over for three axes, and again for the ground query and again for the
  * camera's ray — several hundred tests to move a body 20 mm.
  *
  * So the solids are prepared once into a flat, struct-of-arrays table and
  * a coarse grid on x and z. MEASURED at a 2 m cell over the building's
- * 26.8 x 26.8 m footprint: 14 x 14 = 196 cells holding 774 entries, a
- * mean of 3.9 solids a cell and a worst cell of 10. A body's move touches
- * one or two cells, so a step tests four to ten solids rather than 98 —
+ * 26.8 x 26.8 m footprint: 14 x 14 = 196 cells holding 778 entries, a
+ * mean of 4.0 solids a cell and a worst cell of 10. A body's move touches
+ * one or two cells, so a step tests four to ten solids rather than 102 —
  * and that is with the big floor and ceiling slabs registered in every
- * cell they cross, which is where most of those 774 entries come from.
- * Finer cells do not pay: a 1 m cell costs 729 cells and 2,185 entries to
+ * cell they cross, which is where most of those 778 entries come from.
+ * Finer cells do not pay: a 1 m cell costs 729 cells and 2,194 entries to
  * take the worst bucket from 10 to 10.
  *
  * The grid is x/z ONLY. A building is wide and short — 26.8 m across, 7.65
@@ -92,8 +92,9 @@
  *
  * 0.25 m is MEASURED against the plan rather than picked. Every solid top
  * face in the building, in order: 0.000 (twelve room floors), 0.450 (the
- * entrance bench), 0.600 (the array platform), 0.750 (four desks), 0.900
- * (six chairs), 1.000 (the two consoles and the wall under the reinforced
+ * entrance bench and the four chair SEATS), 0.600 (the array platform),
+ * 0.750 (four desks), 0.900 (two laboratory benches), 0.950 (the four
+ * chair BACKS), 1.000 (the two consoles and the wall under the reinforced
  * port), and up from there. There is NOTHING between 0.000 and 0.450, so
  * a 0.25 m step clears the failure it was written for by a wide margin
  * and cannot reach a single thing the plan means a body to be stopped by.
@@ -179,7 +180,7 @@ const GROUND_GRIP = 1e-3;
 
 /**
  * The broad-phase cell, in metres. Measured in the header: 2 m gives 196
- * cells, 774 entries and a worst bucket of 10 over the real plan, and 1 m
+ * cells, 778 entries and a worst bucket of 10 over the real plan, and 1 m
  * triples the memory to improve that worst bucket by nothing.
  */
 const CELL = 2.0;
@@ -192,8 +193,8 @@ const CELL = 2.0;
  * Every solid in a `LabLayout`, prepared for querying.
  *
  * Struct of arrays, not an array of structs: the axis solver reads one
- * field of many solids in a row, and a table of 98 objects would be 98
- * pointer chases to read 98 numbers.
+ * field of many solids in a row, and a table of 102 objects would be 102
+ * pointer chases to read 102 numbers.
  *
  * A slab is its AABB. A PILLAR IS A CIRCLE, kept as a circle — `types.ts`
  * says a pillar exists partly because "a body stopping against a round
