@@ -69,7 +69,11 @@
  * (see `wear`).
  */
 import * as THREE from 'three';
+import { HUMAN_POSE_TURNS, poseHuman } from '../actor/humanPose';
+import { newJointTurn, type HumanGait, type HumanMeasure, type HumanStance, type MutableJointTurn } from '../actor/humanRig';
+import { measureHuman } from '../actor/humanSkeleton';
 import { assets, type Assets } from '../assets/assets';
+import { HumanRig } from '../view/HumanRig';
 import { UNITS_PER_METRE } from '../world/dem';
 import { TOMBS_GROUND_UNITS } from '../world/tombs/site';
 import type { LabLayout, Person } from '../world/tombs/types';
@@ -159,6 +163,47 @@ export class LabPeople {
   private readonly shadows: boolean;
   private readonly bodies: THREE.Object3D[] = [];
 
+  /**
+   * THE RIGS, AND WHY THERE IS ONE AT ALL.
+   *
+   * Neither master carries an animation clip, so both ship in their BIND
+   * POSE — a T, arms straight out at shoulder height. It reads as broken
+   * rather than as unfinished, which is worse than an empty room: an
+   * empty room looks unbuilt, and a man standing with his arms out looks
+   * like a bug.
+   *
+   * So every body that turns out to have a skeleton is posed here.
+   * `measureHuman` finds the joints (the bones are called `Bone_000`; see
+   * `actor/humanRig.ts` for why nothing can be looked up by name),
+   * `poseHuman` says how to turn them, and `HumanRig` applies it.
+   *
+   * A body with NO skeleton keeps its bind pose and is not an error: that
+   * is the magenta placeholder, which has no bones to turn.
+   */
+  private readonly rigs: Array<{ readonly rig: HumanRig; readonly measure: HumanMeasure }> = [];
+
+  /** One turn buffer for every body: `poseHuman` writes into it and nothing outlives the call. */
+  private readonly turns: MutableJointTurn[] = Array.from({ length: HUMAN_POSE_TURNS }, newJointTurn);
+
+  /**
+   * The gait, rewritten in place each update. Mutable so a frame
+   * allocates nothing, and `stance` stays `stand` because nobody in this
+   * room walks yet — the walking body is the player's, not theirs.
+   */
+  private readonly gait: { stance: HumanStance; phase: number; seconds: number; lean: number } = {
+    stance: 'stand', phase: 0, seconds: 0, lean: 0,
+  };
+
+  /**
+   * A free-running clock for the breath and the sway, in seconds.
+   *
+   * RAW time, not simulation time — the same call `TombsLabScene` makes
+   * for its camera and its HUD. A body breathing is not the world
+   * advancing, and a paused room with two people frozen mid-breath would
+   * read as the renderer having died.
+   */
+  private clock = 0;
+
   /** How many of `bodies` came back as `loadModel`'s placeholder rather than a file. */
   private missing = 0;
 
@@ -206,6 +251,24 @@ export class LabPeople {
     this.clear();
     const mine = this.epoch;
     await Promise.all(layout.people.map((person) => this.place(person, mine)));
+  }
+
+  /**
+   * BREATHE. Every frame, with RAW dt (see `clock`).
+   *
+   * Two bodies and fifteen joint turns each is not a cost worth tiering:
+   * this project's own measurement says posing 198 skinned rigs costs
+   * 1.3 ms of a 31 ms frame (`docs/PERFORMANCE.md`, Baseline C-ALL), so
+   * two is under twenty microseconds. What it buys is the difference
+   * between two people and two mannequins.
+   */
+  update(rawDt: number): void {
+    if (!Number.isFinite(rawDt) || rawDt <= 0 || this.rigs.length === 0) return;
+    this.clock += rawDt;
+    this.gait.seconds = this.clock;
+    for (const { rig, measure } of this.rigs) {
+      rig.apply(poseHuman(measure, rig.bind, this.gait as HumanGait, this.turns));
+    }
   }
 
   /**
@@ -283,6 +346,7 @@ export class LabPeople {
     model.rotation.y = person.yaw;
 
     this.wear(model);
+    this.stand(model, person);
     if (model.userData.isPlaceholder === true) this.missing += 1;
     this.group.add(model);
     this.bodies.push(model);
@@ -303,6 +367,29 @@ export class LabPeople {
    * nothing to lose: two bodies in a windowless room are not what a
    * frustum test is for.
    */
+  /**
+   * Out of the T and onto their feet.
+   *
+   * IT NEVER THROWS, deliberately. A body that cannot be posed is still a
+   * body: the placeholder has no skeleton, and a future master could be
+   * rigged in a way `measureHuman` refuses (it throws rather than return
+   * a plausible wrong index — see its header). Either way the right
+   * outcome is a person standing in their bind pose with a line in the
+   * console, not a laboratory with nobody in it.
+   */
+  private stand(model: THREE.Object3D, person: Person): void {
+    if (model.userData.isPlaceholder === true) return;
+    try {
+      const rig = new HumanRig(model);
+      const measure = measureHuman(rig.bind);
+      this.rigs.push({ rig, measure });
+      this.gait.seconds = this.clock;
+      rig.apply(poseHuman(measure, rig.bind, this.gait as HumanGait, this.turns));
+    } catch (error) {
+      console.error(`[tombs] ${person.id}: could not be posed, so ${person.who} keeps the bind pose`, error);
+    }
+  }
+
   private wear(model: THREE.Object3D): void {
     const shadows = this.shadows;
     model.traverse((node) => {
@@ -317,6 +404,8 @@ export class LabPeople {
   /** Everything standing, released; the epoch moved on so nothing in flight can land. */
   private clear(): void {
     this.epoch += 1;
+    for (const { rig } of this.rigs) rig.dispose();
+    this.rigs.length = 0;
     for (const body of this.bodies) {
       this.group.remove(body);
       release(body);

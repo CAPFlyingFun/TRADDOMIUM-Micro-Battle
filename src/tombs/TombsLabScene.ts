@@ -631,6 +631,11 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
       free.update(ctx.input.snapshot(), frame.rawDt, stick === null ? null : stick.read());
       // THE RINGS, by SIM dt: they are the world, not an instrument.
       view?.update(frame.simDt);
+      // THE PEOPLE, by RAW dt. Their breath and their sway are not the
+      // world advancing — a paused room with two bodies frozen mid-breath
+      // reads as the renderer having died, which is the same argument the
+      // camera and the HUD are on raw time for.
+      people?.update(frame.rawDt);
       hud?.update(frame.rawDt);
     },
 

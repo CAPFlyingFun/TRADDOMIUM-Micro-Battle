@@ -156,6 +156,140 @@ const HUMANS = [
 ];
 
 /**
+ * How far from a vertex a bone may be and still be believed, as a
+ * fraction of the skeleton's own height.
+ *
+ * IT IS A FRACTION so it stays right for a re-export at another scale,
+ * and 0.12 of Jack's 1.61 m joint span is 194 mm. The number was chosen
+ * by rendering three of them, because both directions of getting it
+ * wrong are real and they look nothing alike:
+ *
+ *   0.18  290 mm, 13.8% of weight re-spread. Kills the cross-body spray
+ *         but leaves the shoulder seams torn: a deltoid vertex can still
+ *         reach across the joint, and at 77 degrees that still splits.
+ *   0.12  194 mm, 25.6% re-spread, 2,467 vertices rescued. Both arms
+ *         hang clean. CHOSEN.
+ *   0.09  145 mm, 48.7% re-spread, 8,682 rescued. WORSE than 0.18 — with
+ *         half the weight discarded the skin goes rigid and a hole opens
+ *         at the right shoulder. Pruning past the point where a joint
+ *         has two bones to blend between does not clean a seam, it tears
+ *         one.
+ *
+ * So this is not "as tight as possible". It is the width at which a
+ * shoulder still has both of its bones and nothing has one from the far
+ * side of the ribcage.
+ */
+const MAX_BIND_REACH = 0.12;
+
+/**
+ * Gather every influence set, discard the ones naming a bone further from
+ * the vertex than `MAX_BIND_REACH` of the body's height, keep the four
+ * strongest of the rest, renormalise, and write them back as set 0.
+ *
+ * Bone positions come from the skin's INVERSE BIND MATRICES, whose
+ * inverse's translation is the bone's rest position in the same mesh
+ * space `POSITION` is in — so the two are directly comparable, which is
+ * the whole reason this can be done as arithmetic rather than as a guess.
+ */
+function pruneStrayInfluences(prim, doc, who) {
+  const position = prim.getAttribute('POSITION');
+  const skin = doc.getRoot().listSkins()[0];
+  if (!position || !skin) return;
+  const ibm = skin.getInverseBindMatrices();
+  if (!ibm) return;
+
+  const sets = [];
+  for (let i = 0; ; i += 1) {
+    const j = prim.getAttribute(`JOINTS_${i}`);
+    const w = prim.getAttribute(`WEIGHTS_${i}`);
+    if (!j || !w) break;
+    sets.push([j, w]);
+  }
+  if (sets.length === 0) return;
+
+  // Bone rest positions: the translation of the inverse of each IBM.
+  const m = ibm.getArray();
+  const bones = m.length / 16;
+  const bone = new Float64Array(bones * 3);
+  for (let b = 0; b < bones; b += 1) {
+    const o = b * 16;
+    const t = [m[o + 12], m[o + 13], m[o + 14]];
+    bone[b * 3] = -(m[o] * t[0] + m[o + 1] * t[1] + m[o + 2] * t[2]);
+    bone[b * 3 + 1] = -(m[o + 4] * t[0] + m[o + 5] * t[1] + m[o + 6] * t[2]);
+    bone[b * 3 + 2] = -(m[o + 8] * t[0] + m[o + 9] * t[1] + m[o + 10] * t[2]);
+  }
+  let lo = Infinity, hi = -Infinity;
+  for (let b = 0; b < bones; b += 1) {
+    lo = Math.min(lo, bone[b * 3 + 1]);
+    hi = Math.max(hi, bone[b * 3 + 1]);
+  }
+  const reach = (hi - lo) * MAX_BIND_REACH;
+
+  const count = position.getCount();
+  const outJ = new Uint16Array(count * 4);
+  const outW = new Float32Array(count * 4);
+  const p = [0, 0, 0];
+  const pool = [];
+  let dropped = 0, weightLost = 0, rescued = 0;
+
+  for (let v = 0; v < count; v += 1) {
+    position.getElement(v, p);
+    pool.length = 0;
+    let near = -1, nearD = Infinity;
+    for (const [J, W] of sets) {
+      const je = [0, 0, 0, 0], we = [0, 0, 0, 0];
+      J.getElement(v, je);
+      W.getElement(v, we);
+      for (let k = 0; k < 4; k += 1) {
+        const w = we[k];
+        if (!(w > 0)) continue;
+        const b = je[k];
+        const d = Math.hypot(p[0] - bone[b * 3], p[1] - bone[b * 3 + 1], p[2] - bone[b * 3 + 2]);
+        if (d < nearD) { nearD = d; near = b; }
+        if (d > reach) { dropped += 1; weightLost += w; continue; }
+        pool.push([b, w]);
+      }
+    }
+    if (pool.length === 0) {
+      // EVERY INFLUENCE WAS REFUSED, so the rule has no opinion here and
+      // must not pretend to one: the vertex keeps exactly what the master
+      // gave it.
+      //
+      // This is not a formality. Sarah's ID CARD hangs on a lanyard out
+      // in front of her chest, further from any bone than the reach — so
+      // all 65 of its vertices land in this branch. Collapsing each onto
+      // its own nearest bone would bind one corner of the card to the
+      // spine and another to a clavicle and shear the card between them,
+      // which is the one piece of this model that has already cost a day.
+      // Where the rule cannot judge, it leaves well alone.
+      for (const [J, W] of sets) {
+        const je = [0, 0, 0, 0], we = [0, 0, 0, 0];
+        J.getElement(v, je);
+        W.getElement(v, we);
+        for (let k = 0; k < 4; k += 1) if (we[k] > 0) pool.push([je[k], we[k]]);
+      }
+      if (pool.length === 0) pool.push([near < 0 ? 0 : near, 1]);
+      rescued += 1;
+    }
+    pool.sort((a, b2) => b2[1] - a[1]);
+    let sum = 0;
+    for (let k = 0; k < 4 && k < pool.length; k += 1) sum += pool[k][1];
+    for (let k = 0; k < 4; k += 1) {
+      const e = k < pool.length ? pool[k] : null;
+      outJ[v * 4 + k] = e ? e[0] : 0;
+      outW[v * 4 + k] = e && sum > 0 ? e[1] / sum : 0;
+    }
+  }
+
+  prim.setAttribute('JOINTS_0', doc.createAccessor().setType('VEC4').setArray(outJ));
+  prim.setAttribute('WEIGHTS_0', doc.createAccessor().setType('VEC4').setArray(outW));
+  const mean = count > 0 ? weightLost / count : 0;
+  console.log(`[bake:humans]   ${who}: skin pruned at ${(reach * 1000).toFixed(0)} mm reach — `
+    + `${dropped.toLocaleString()} stray influences dropped over ${count.toLocaleString()} vertices, `
+    + `${(mean * 100).toFixed(2)}% mean weight re-spread, ${rescued} vertices left as the master had them`);
+}
+
+/**
  * The size each map is worth. `undefined` leaves a map alone — there is
  * no entry here that grows one, because a bake may only ever spend less.
  */
@@ -601,7 +735,37 @@ async function main() {
     // 12 influences apiece and are drawn with four.
     //
     // The masters keep all of it. This is the web build.
+    //
+    // AND THE FOUR ARE CHOSEN, NOT INHERITED — which is the part this
+    // block used to get wrong, silently, for as long as nothing moved.
+    //
+    // Dropping sets 1..10 and keeping set 0 is only right if set 0 holds
+    // the four bones that should drive the vertex. It holds the four
+    // STRONGEST, which is not the same thing. An auto-rigger fitted to a
+    // photogrammetry scan sprays small weights across the skeleton, and
+    // some of that spray lands on bones nowhere near the vertex: measured
+    // on Jack, a single 77.5 degree turn of his left shoulder flung 5,141
+    // vertices more than a quarter of a metre, and 4,601 of those carry
+    // an influence from a bone HALF A METRE TO NINE TENTHS OF A METRE
+    // away — cross-body, on a skeleton whose whole joint span is 1.37 m.
+    // His arm did not bend; it burst into a spray of triangles.
+    //
+    // It never showed because nothing ever moved. Both masters ship in
+    // their bind pose, and a stray weight on a bone that never turns is
+    // invisible. The first pose this project ever applied found it.
+    //
+    // So the influences are gathered from EVERY set, the ones naming a
+    // bone further than `MAX_BIND_REACH` are discarded as the noise they
+    // are, and the four strongest of what remains are renormalised into
+    // set 0. A vertex keeps its nearest bone whatever happens, so no
+    // vertex is ever left unweighted and collapses to the origin.
+    //
+    // Sarah needs none of this — her master carries sixteen influences
+    // rather than forty-four and poses cleanly — but the rule is applied
+    // to both, because "the one that needed it" is not a property a bake
+    // should have to know.
     for (const prim of doc.getRoot().listMeshes().flatMap((m) => m.listPrimitives())) {
+      pruneStrayInfluences(prim, doc, human.who);
       for (const name of prim.listSemantics()) {
         if (/^(JOINTS|WEIGHTS)_([1-9]\d*)$/.test(name)) prim.setAttribute(name, null);
       }
