@@ -43,10 +43,45 @@ export interface Assets {
   loadTexture(path: string): Promise<THREE.Texture | null>;
 }
 
-/** Prefix a public-folder path with the deployed base (`./` on Pages, `/` in dev). */
+/**
+ * Prefix a public-folder path with the deployed base (`./` on Pages, `/`
+ * in dev) AND STAMP IT WITH THE FILE'S OWN CONTENT REVISION.
+ *
+ * The revision is the fix for a cache bug that cost a device pass.
+ * Vite content-hashes everything it BUNDLES — `index-ByLXqhBP.js` is a
+ * name no cache has ever seen — but `public/` is copied verbatim and
+ * keeps a stable path, so a phone may go on serving the
+ * `models/sarah.glb` it already has. On 2026-09-19 Joshua's device
+ * showed the new build stamp and the old badge at the same time, because
+ * `__BUILD_COMMIT__` rides in the hashed bundle and the GLB did not.
+ * Code and art from different releases, with the version line insisting
+ * all was well.
+ *
+ * `__PUBLIC_REV__` is a per-file content hash built by `vite.config.ts`
+ * (see its header for why per-file and not per-commit: the alternative
+ * re-downloads 52 MB of island for one changed model). A path with no
+ * entry — dev, vitest, a file added after the build — simply gets no
+ * query string, so this can never produce a URL that does not resolve.
+ *
+ * Read defensively, like `ui/buildInfo.ts` reads its stamps: the define
+ * does not exist under a bare `tsc` or a runner that does not replace
+ * it, and a missing constant must cost a query string, not the asset.
+ */
 export function assetUrl(path: string): string {
   const base = import.meta.env.BASE_URL;
-  return `${base.endsWith('/') ? base : `${base}/`}${path.replace(/^\/+/, '')}`;
+  const clean = path.replace(/^\/+/, '');
+  const url = `${base.endsWith('/') ? base : `${base}/`}${clean}`;
+  return `${url}${revisionOf(clean)}`;
+}
+
+/** `?r=<hash>` for a known file, '' for anything else. Never throws. */
+function revisionOf(path: string): string {
+  try {
+    const rev = __PUBLIC_REV__[path];
+    return typeof rev === 'string' && rev.length > 0 ? `?r=${rev}` : '';
+  } catch {
+    return '';
+  }
 }
 
 export async function loadModel(

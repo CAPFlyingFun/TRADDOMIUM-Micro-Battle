@@ -31,3 +31,20 @@ declare const __BUILD_DATE__: string;
  * relay from the address bar.
  */
 declare const __RELAY_URL__: string;
+
+/**
+ * A CONTENT HASH PER FILE IN `public/`, keyed by the path `assetUrl`
+ * takes — `models/jack.glb`, `kauai-1025.bin`, `audio/voice/x.mp3`.
+ *
+ * It exists because Vite hashes what it BUNDLES and copies `public/`
+ * verbatim, so a stable URL like `v1/models/sarah.glb` can be served
+ * from a phone's cache long after the build that replaced it shipped.
+ * The symptom is a device showing a NEW build stamp and OLD art at the
+ * same time, which is what happened on 2026-09-19 (`vite.config.ts`
+ * tells the story). `assetUrl` appends the revision so a changed file
+ * gets a URL no cache has seen, and an unchanged file keeps its.
+ *
+ * EMPTY in dev and in vitest — a missing entry simply means no query
+ * string, never a broken URL.
+ */
+declare const __PUBLIC_REV__: Record<string, string>;

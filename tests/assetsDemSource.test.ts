@@ -107,10 +107,15 @@ describe('when the connection is not the connection', () => {
     const fetchImpl = vi.fn(async () => {
       throw new Error('network down');
     });
+    // The filename, then anything, then the complaint — the URL now
+    // carries the file's content revision (`?r=<hash>`,
+    // `src/assets/assets.ts`), and that belongs in the message: a failure
+    // report naming the exact URL tried is worth more than one naming
+    // only the file.
     await expect(fetchExactly('kauai-1025.bin', COARSE_BYTES, {
       fetchImpl: fetchImpl as unknown as typeof fetch,
       retries: 0,
-    })).rejects.toThrow(/kauai-1025\.bin could not be fetched/);
+    })).rejects.toThrow(/kauai-1025\.bin.* could not be fetched/);
   });
 
   it('treats a non-200 as a failure, not as a file', async () => {
