@@ -37,14 +37,19 @@
  *
  * So the art is stretched to the face rather than letterboxed into it,
  * and — the part that took three passes — THE FACE HAS TO BE THE WHOLE
- * HOLDER. Jack's slab was cut off at y 1.160, which is two thirds of the
- * way up his badge, so the art filled 60.7 x 66.0 mm of a 61.9 x 95.5 mm
- * front and the top third stayed the scan's grey vinyl. That is exactly
- * the red box he drew inside the blue one. Opened to the real front the
- * two faces measure 0.648 (Jack) and 0.682 (Sarah) wide-over-tall against
- * art that is 0.678 and 0.680 — a 4% widen and none at all, where the
- * clipped faces wanted 36% and 5%. A frame that needs no stretching is
- * the check that it is the right frame.
+ * PRINTED FACE. Jack's slab was cut off at y 1.160, which is two thirds of
+ * the way up his badge, so the art filled 60.7 x 66.0 mm of a 60.5 x 95.6 mm
+ * face and the top third stayed the scan's grey vinyl. That is exactly the
+ * red box he drew inside the blue one.
+ *
+ * Opened to the real face and squared against the CARD rather than the
+ * world, the two measure 0.633 (Jack) and 0.644 (Sarah) wide-over-tall.
+ * A CR80 identity card is 53.98 x 85.60 mm, which is 0.630 — so the badges
+ * the scanner captured are real cards to within half a percent, and it is
+ * the ARTWORK, at 0.678, that is the wide one. Filling squeezes it by 5
+ * to 7%, and squeezing a too-wide picture onto a correctly-shaped card is
+ * the right direction to be wrong in. The frames the clipped, world-aligned
+ * boxes gave wanted 36% and 5% the other way.
  */
 import { readFileSync } from 'node:fs';
 import sharp from 'sharp';
@@ -72,6 +77,50 @@ function weldMap(P) {
     rep[v] = key.get(k);
   }
   return rep;
+}
+
+/**
+ * The smallest rectangle containing a set of 2D points, by rotating calipers
+ * on its convex hull.
+ *
+ * Every minimum-area rectangle has a side flush with a hull edge (Freeman &
+ * Shapira 1975), so trying each hull edge as an axis and keeping the best is
+ * exact rather than a search. The hull is Andrew's monotone chain.
+ */
+function minAreaRect(pts) {
+  const p = pts.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lower = [];
+  for (const q of p) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], q) <= 0) lower.pop();
+    lower.push(q);
+  }
+  const upper = [];
+  for (let i = p.length - 1; i >= 0; i -= 1) {
+    const q = p[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], q) <= 0) upper.pop();
+    upper.push(q);
+  }
+  lower.pop(); upper.pop();
+  const h = lower.concat(upper);
+  if (h.length < 2) throw new Error('the printed face has no outline to square the art against');
+  let best = null;
+  for (let i = 0; i < h.length; i += 1) {
+    const a = h[i], b = h[(i + 1) % h.length];
+    const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    if (L < 1e-9) continue;
+    const ex = [(b[0] - a[0]) / L, (b[1] - a[1]) / L];
+    const ey = [-ex[1], ex[0]];
+    let x0 = 9, x1 = -9, y0 = 9, y1 = -9;
+    for (const q of pts) {
+      const x = q[0] * ex[0] + q[1] * ex[1], y = q[0] * ey[0] + q[1] * ey[1];
+      x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+    }
+    const area = (x1 - x0) * (y1 - y0);
+    if (!best || area < best.area) best = { area, ex, ey, w: x1 - x0, h: y1 - y0 };
+  }
+  if (!best) throw new Error('the printed face is degenerate — no rectangle fits it');
+  return best;
 }
 
 /**
@@ -218,21 +267,97 @@ function findCard(prim, S, img, slab) {
     }
   }
 
-  // THE ARTWORK IS SQUARED AGAINST THE PRINTED FACE, and on a card that
-  // hangs at an angle the printed face is what FACES FORWARD within the
-  // plane, not everything in it: the sleeve's rolled edges are in the plane
-  // too and would widen the frame by their thickness. u runs with x, v with
-  // y — the card's tilt is uniform, so a uniform map in world x/y is a
-  // uniform map in the card's own plane, foreshortened exactly as the
-  // geometry is.
+  // WHAT IS LIFTED IS THE PRINTED FACE, AND THE RIM STAYS ON THE BODY.
+  //
+  // Joshua, comparing the two badges: "The bottom also wraps underneath just
+  // a little bit. Needs to look like Sarah's now." Measured, that is one
+  // number: Jack's rolled bottom edge reaches 0.81 mm BELOW his printed face
+  // and Sarah's reaches nothing at all. Both rims used to be carried on the
+  // card's material with UVs outside 0..1, and the sampler clamps — so
+  // Sarah's rim took the art's white margin at her top and right and looked
+  // like card stock, and Jack's took the burgundy TOMBS STAFF band at his
+  // bottom and looked like a sticker folded round the edge.
+  //
+  // A printed card's edge is not printed. So the rim is left where it
+  // already is, on the body, wearing the scan's own picture of a plastic
+  // edge — which is exactly what makes Sarah's bottom read right. It costs a
+  // sub-millimetre seam around the printing on a 96 mm card, and that seam
+  // is a badge holder's lip.
   const flat = [...tris].filter((t) => nrmOf(t)[2] >= FLAT_FACING);
-  const frame = flat.length ? flat : [...tris];
-  const m = [9, 9, 9], M = [-9, -9, -9];
-  for (const t of frame) for (let k = 0; k < 3; k++) {
-    const v = IDX[t * 3 + k];
-    for (let j = 0; j < 3; j++) { m[j] = Math.min(m[j], P[v * 3 + j]); M[j] = Math.max(M[j], P[v * 3 + j]); }
+  const face = new Set(flat.length ? flat : [...tris]);
+
+  // THE ARTWORK IS SQUARED AGAINST THE CARD, NOT AGAINST THE WORLD.
+  //
+  // "It appears Jack's badge needs to maybe rotate like 1-2° clockwise as it
+  // isn't level with the badge holder." His eye was half a degree out: the
+  // card hangs at 1.43°. u used to run with world x and v with world y, so
+  // the printing came out level with the ROOM and crooked on the badge, and
+  // no amount of fitting could fix that because the frame had no idea the
+  // card was turned.
+  //
+  // The frame is now the printed face's own MINIMUM-AREA RECTANGLE, found in
+  // the card's plane by rotating calipers on its outline. That is stronger
+  // than fitting an axis to the vertices: a scan's vertices are not evenly
+  // spread, so a principal axis leans toward wherever the mesh happens to be
+  // dense, while the smallest rectangle that contains a rectangle is that
+  // rectangle whatever the sampling. It also measures the card tighter —
+  // the world-aligned box was 3.6% larger than Jack's card and 1.3% larger
+  // than Sarah's, and every one of those percent went into stretching the
+  // art to fill space the card did not have.
+  const up = [0, 1, 0];
+  {
+    const d = pn[1];
+    for (let j = 0; j < 3; j++) up[j] = (j === 1 ? 1 : 0) - pn[j] * d;
+    const L = Math.hypot(up[0], up[1], up[2]) || 1;
+    for (let j = 0; j < 3; j++) up[j] /= L;
   }
-  return { tris, dropped: refused, m, M, flat: flat.length };
+  // right = up x normal, so (right, up, normal) is right-handed with the
+  // normal pointing at the viewer — the same handedness as the screen.
+  const right = [
+    up[1] * pn[2] - up[2] * pn[1],
+    up[2] * pn[0] - up[0] * pn[2],
+    up[0] * pn[1] - up[1] * pn[0],
+  ];
+  {
+    const L = Math.hypot(right[0], right[1], right[2]) || 1;
+    for (let j = 0; j < 3; j++) right[j] /= L;
+  }
+  const flatten = (v) => {
+    const q = [P[v * 3] - c[0], P[v * 3 + 1] - c[1], P[v * 3 + 2] - c[2]];
+    return [
+      q[0] * right[0] + q[1] * right[1] + q[2] * right[2],
+      q[0] * up[0] + q[1] * up[1] + q[2] * up[2],
+    ];
+  };
+  const pts = [];
+  for (const t of face) for (let k = 0; k < 3; k++) pts.push(flatten(IDX[t * 3 + k]));
+  const rect = minAreaRect(pts);
+
+  // The rect's axes come out in an arbitrary order and sign. The card is
+  // taller than it is wide, so the LONGER side is its up; point it up, and
+  // the right follows from it by a quarter turn.
+  const tall = rect.h >= rect.w;
+  let ey = tall ? rect.ey : rect.ex;
+  if (ey[1] < 0) ey = [-ey[0], -ey[1]];
+  const ex = [ey[1], -ey[0]];
+  const roll = Math.atan2(ey[0], ey[1]) * 180 / Math.PI;
+  const UX = [0, 0, 0], UY = [0, 0, 0];
+  for (let j = 0; j < 3; j++) {
+    UX[j] = right[j] * ex[0] + up[j] * ex[1];
+    UY[j] = right[j] * ey[0] + up[j] * ey[1];
+  }
+  let u0 = 9, u1 = -9, v0 = 9, v1 = -9;
+  for (const q of pts) {
+    const u = q[0] * ex[0] + q[1] * ex[1], v = q[0] * ey[0] + q[1] * ey[1];
+    u0 = Math.min(u0, u); u1 = Math.max(u1, u); v0 = Math.min(v0, v); v1 = Math.max(v1, v);
+  }
+  return {
+    tris: face,
+    rim: tris.size - face.size,
+    dropped: refused,
+    roll,
+    frame: { c, ux: UX, uy: UY, u0, v1, w: u1 - u0, h: v1 - v0 },
+  };
 }
 
 /**
@@ -250,11 +375,11 @@ export async function printBadge(doc, spec, { root = '.', log = () => {} } = {})
   const { data: img } = await sharp(Buffer.from(tex.getImage()))
     .removeAlpha().raw().toBuffer({ resolveWithObject: true });
 
-  const { tris, dropped, m, M, flat } = findCard(prim, S, img, spec.slab);
+  const { tris, rim, dropped, roll, frame } = findCard(prim, S, img, spec.slab);
   const P = prim.getAttribute('POSITION').getArray();
   const IDX = prim.getIndices().getArray();
-  const W = M[0] - m[0], H = M[1] - m[1];
-  log(`badge ${tris.size} triangles (${flat} flat, ${dropped} neighbours refused as out of its plane), printed face ${(W * 1000).toFixed(1)} x ${(H * 1000).toFixed(1)} mm, aspect ${(W / H).toFixed(3)}`);
+  const W = frame.w, H = frame.h;
+  log(`badge ${tris.size} printed-face triangles (${rim} rim left on the body, ${dropped} neighbours refused as out of its plane), printed face ${(W * 1000).toFixed(1)} x ${(H * 1000).toFixed(1)} mm, aspect ${(W / H).toFixed(3)}, hanging at ${roll >= 0 ? '' : '-'}${Math.abs(roll).toFixed(2)}° ${roll >= 0 ? 'clockwise' : 'anticlockwise'}`);
 
   const semantics = prim.listSemantics();
   const remap = new Map(), order = [];
@@ -271,11 +396,17 @@ export async function printBadge(doc, spec, { root = '.', log = () => {} } = {})
     order.forEach((v, i) => { for (let k = 0; k < w; k++) buf[i * w + k] = a[v * w + k]; });
     attrs[s] = buf;
   }
-  // The card's plane is the world x/y plane — it hangs facing the viewer —
-  // so its width and height map straight to u and v. v counts DOWN, because
-  // glTF puts (0,0) at the image's top-left.
+  // The UVs are the card's own frame: how far along its right, how far down
+  // from its top. v counts DOWN because glTF puts (0,0) at the image's
+  // top-left. Nothing here refers to the world, which is the whole point —
+  // a badge that hangs crooked prints straight.
+  const { c, ux, uy, u0, v1 } = frame;
   const uv = new Float32Array(order.length * 2);
-  order.forEach((v, i) => { uv[i * 2] = (P[v * 3] - m[0]) / W; uv[i * 2 + 1] = (M[1] - P[v * 3 + 1]) / H; });
+  order.forEach((v, i) => {
+    const q = [P[v * 3] - c[0], P[v * 3 + 1] - c[1], P[v * 3 + 2] - c[2]];
+    uv[i * 2] = ((q[0] * ux[0] + q[1] * ux[1] + q[2] * ux[2]) - u0) / W;
+    uv[i * 2 + 1] = (v1 - (q[0] * uy[0] + q[1] * uy[1] + q[2] * uy[2])) / H;
+  });
   attrs.TEXCOORD_0 = uv;
 
   const cardIdx = new Uint32Array(tris.size * 3);
@@ -297,16 +428,15 @@ export async function printBadge(doc, spec, { root = '.', log = () => {} } = {})
   log(`badge texture ${TW}x${TH}, art filled edge to edge (widened ${((stretch - 1) * 100).toFixed(0)}%)`);
 
   const badgeTex = doc.createTexture('badge').setMimeType('image/png').setImage(new Uint8Array(png));
-  // CLAMP, not repeat: the sleeve's flap sits outside 0..1 and must take the
-  // card's edge colour. Repeating would wrap the TOMBS footer onto it.
-
   const mat = doc.createMaterial('TombsBadge')
     .setBaseColorTexture(badgeTex).setBaseColorFactor([1, 1, 1, 1])
     .setRoughnessFactor(0.35).setMetallicFactor(0);   // a card in a vinyl sleeve is a little glossy
-  // CLAMP, NOT REPEAT. The sleeve's flap is carried on this material but its
-  // UVs fall outside 0..1, because the frame is the flat face's. Clamped, it
-  // takes the card's own edge colour; repeated, it would wrap the TOMBS
-  // footer band back onto the top of the holder.
+  // CLAMP, NOT REPEAT — and now it should never be asked to do anything. The
+  // frame is the smallest rectangle CONTAINING the printed face, so every
+  // lifted vertex lands inside 0..1 by construction. It stays because the
+  // day it is asked, repeating would wrap the TOMBS footer band back onto
+  // the top of the card, and a bilinear tap half a texel over the edge of a
+  // 640-wide image should take the edge rather than the far side.
   const CLAMP_TO_EDGE = 33071;
   mat.getBaseColorTextureInfo()?.setWrapS(CLAMP_TO_EDGE).setWrapT(CLAMP_TO_EDGE);
   const cardPrim = doc.createPrimitive().setMaterial(mat)
