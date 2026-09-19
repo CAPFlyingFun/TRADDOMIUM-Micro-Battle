@@ -107,6 +107,7 @@ import { newMutableIntent } from '../creatures/demand';
 import { HumanRig } from '../view/HumanRig';
 import { detailFor, type DetailTier } from '../assets/detailQuality';
 import { textureUrl } from '../assets/textureManifest';
+import { SURFACE_TEXTURES } from './labLook';
 import { tierFor } from '../assets/textureQuality';
 import { MoveStick } from '../input/MoveStick';
 import { FrameStats } from '../perf/FrameStats';
@@ -982,7 +983,7 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
       // drawn at, and the three that belong to the eye itself. The camera
       // SPEED is deliberately not among them (the header).
       const settings = hooks.settings?.() ?? null;
-      const rung: DetailTier = settings?.detail === undefined ? RUNG_FALLBACK : detailFor(settings.detail);
+      const detail: DetailTier = settings?.detail === undefined ? RUNG_FALLBACK : detailFor(settings.detail);
       if (settings?.fov !== undefined) free.setFov(settings.fov);
       free.setLook({ sensitivity: settings?.lookSensitivity ?? 1, invertY: settings?.invertY ?? false });
       applyMix();
@@ -994,20 +995,34 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
       // medium, so waiting for it costs nothing anyone can feel. A null
       // (no network, a bad path) leaves the screens as the dark glass
       // they have always been; it is never a reason not to draw a room.
-      const screenTexture = await assets.loadTexture(
-        textureUrl('tombs-screen', tierFor(settings?.textures ?? 'medium')),
-      );
+      const rung = tierFor(settings?.textures ?? 'medium');
+      const screenTexture = await assets.loadTexture(textureUrl('tombs-screen', rung));
       if (screenTexture !== null) {
         screenTexture.colorSpace = THREE.SRGBColorSpace;
         screenTexture.anisotropy = 4;
       }
+
+      // THE SURFACES' OWN TEXTURES, fetched together and at the same rung.
+      // They REPEAT, so unlike the screen atlas they wrap — and the
+      // building is drawn whether or not any of them arrive.
+      const surfaceTextures: Record<string, THREE.Texture> = {};
+      await Promise.all(SURFACE_TEXTURES.map(async (name) => {
+        const map = await assets.loadTexture(textureUrl(name as never, rung));
+        if (map === null) return;
+        map.colorSpace = THREE.SRGBColorSpace;
+        map.wrapS = THREE.RepeatWrapping;
+        map.wrapT = THREE.RepeatWrapping;
+        map.anisotropy = 8;
+        surfaceTextures[name] = map;
+      }));
 
       // `ambient: true`: nothing else lights this scene — there is no sky
       // here to wash, which is the case `LabView` asks for it in.
       // `shadows: false`: no sun either, so a shadow flag on every mesh
       // would be a promise nothing in this scene can keep.
       view = new LabView({
-        groundUnits: FLOOR_UNITS, ambient: true, detail: rung, shadows: false, screenTexture,
+        groundUnits: FLOOR_UNITS, ambient: true, detail: detail, shadows: false,
+        screenTexture, surfaceTextures,
       });
       view.build(layout);
       view.setLighting(lighting);

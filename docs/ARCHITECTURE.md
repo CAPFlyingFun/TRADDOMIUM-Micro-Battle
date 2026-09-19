@@ -191,6 +191,18 @@ src/
                 one will not load, posed down from their bind pose by
                 actor/humanPose and breathing on RAW dt — and hides
                 whichever of them the player is currently being.
+                Its SURFACES wear the same ladder: `SURFACE_TEXTURE` in
+                labLook maps a surface to a map, a tile size in METRES
+                and that map's own mean linear brightness, and LabView
+                divides the palette colour by that mean — so a map
+                changes the GRAIN and never the room's tone, and a light
+                wall map cannot blow out a surface a dark one left
+                black. The UVs are derived in the vertex shader from the
+                INSTANCE matrix, not from the unit box: a flat face
+                reads its world position on the plane its normal names
+                (so tiling runs unbroken across adjacent slabs of one
+                wall) and a curved one keeps its own wrap. Untextured is
+                the fallback, not a second look.
   camera/       FollowCamera + CameraOwnership. Phase 0 has FreeFlyCamera
                 only (under perf/).
   input/        keyboard / pointer / touch (Input.ts, DOM) → one shared

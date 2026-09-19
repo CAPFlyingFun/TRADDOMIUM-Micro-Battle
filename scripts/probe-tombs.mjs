@@ -88,6 +88,7 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"><style>
 import * as THREE from 'three';
 import { planLab } from '/src/world/tombs/index.ts';
 import { LabView } from '/src/tombs/index.ts';
+import { SURFACE_TEXTURES } from '/src/tombs/labLook.ts';
 import { assets } from '/src/assets/assets.ts';
 import { textureUrl } from '/src/assets/textureManifest.ts';
 
@@ -118,9 +119,20 @@ if (screenTexture !== null) {
   screenTexture.colorSpace = THREE.SRGBColorSpace;
   screenTexture.anisotropy = 4;
 }
+// And the surfaces' own, which is what these shots are now mostly of.
+const surfaceTextures = {};
+for (const name of SURFACE_TEXTURES) {
+  const map = await assets.loadTexture(textureUrl(name, 'high'));
+  if (map === null) continue;
+  map.colorSpace = THREE.SRGBColorSpace;
+  map.wrapS = THREE.RepeatWrapping;
+  map.wrapT = THREE.RepeatWrapping;
+  map.anisotropy = 8;
+  surfaceTextures[name] = map;
+}
 // groundUnits 0 so the plan's own metres are the scene's own metres x 100
 // and a camera written from the floor plan lands where the floor plan says.
-const view = new LabView({ groundUnits: 0, ambient: true, detail: 'medium', screenTexture });
+const view = new LabView({ groundUnits: 0, ambient: true, detail: 'medium', screenTexture, surfaceTextures });
 view.build(layout);
 scene.add(view.group);
 scene.fog = new THREE.Fog(view.lighting.fog, 6 * M, 46 * M);

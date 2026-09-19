@@ -16,6 +16,11 @@
  *
  *   water-normal   master 1536, 128: 33 KiB, 256: 148 KiB, 512: 628 KiB, 1024: 2484 KiB
  *   surf-foam      master 1024, 128: 7 KiB, 256: 26 KiB, 512: 107 KiB, 1024: 380 KiB
+ *   lab-floor      master 1024, 128: 2 KiB, 256: 7 KiB, 512: 24 KiB, 1024: 119 KiB
+ *   lab-wall       master 1024, 128: 1 KiB, 256: 4 KiB, 512: 9 KiB, 1024: 23 KiB
+ *   lab-steel      master 1024, 128: 1 KiB, 256: 4 KiB, 512: 22 KiB, 1024: 111 KiB
+ *   lab-worktop    master 1024, 128: 2 KiB, 256: 10 KiB, 512: 62 KiB, 1024: 284 KiB
+ *   lab-plate      master 1024, 128: 5 KiB, 256: 14 KiB, 512: 50 KiB, 1024: 205 KiB
  *   tombs-screen   master 2048, 128: 2 KiB, 256: 4 KiB, 512: 12 KiB, 1024: 33 KiB, 2048: 86 KiB
  *
  * Rungs the bake was offered: 128, 256, 512, 1024, 2048.
@@ -25,7 +30,7 @@ import { TEXTURE_QUALITY, type TextureTier } from './textureQuality';
 /** How a texture must be encoded — see `scripts/bakeTextures.mjs`. */
 export type TextureKind = 'normal' | 'colour';
 
-export type TextureName = 'water-normal' | 'surf-foam' | 'tombs-screen';
+export type TextureName = 'water-normal' | 'surf-foam' | 'lab-floor' | 'lab-wall' | 'lab-steel' | 'lab-worktop' | 'lab-plate' | 'tombs-screen';
 
 export interface BakedTexture {
   readonly name: TextureName;
@@ -52,6 +57,51 @@ const BAKED: readonly BakedTexture[] = [
   {
     /** Foam, read as a brightness where the wave has broken. */
     name: 'surf-foam',
+    kind: 'colour',
+    /** The master's own size. Nothing above this was baked. */
+    masterSize: 1024,
+    /** The rungs that exist on disk, coarsest first. */
+    sizes: Object.freeze([128, 256, 512, 1024]),
+  },
+  {
+    /** BE's rubber-stud-floor. labLook has called the floor "dark rubber sheet, almost matte" since it was written; this is a photograph of exactly that. */
+    name: 'lab-floor',
+    kind: 'colour',
+    /** The master's own size. Nothing above this was baked. */
+    masterSize: 1024,
+    /** The rungs that exist on disk, coarsest first. */
+    sizes: Object.freeze([128, 256, 512, 1024]),
+  },
+  {
+    /** BE's lab-wall-texture: a panelled wall. Worn by the wall AND the ceiling, which labLook calls "the wall, a step darker" — so they are one texture and two colours, as it says. */
+    name: 'lab-wall',
+    kind: 'colour',
+    /** The master's own size. Nothing above this was baked. */
+    masterSize: 1024,
+    /** The rungs that exist on disk, coarsest first. */
+    sizes: Object.freeze([128, 256, 512, 1024]),
+  },
+  {
+    /** BE's brushed-steel, for labLook's "brushed stainless". Also the only texture the PILLARS wear, and the most forgiving one for it: its grain is directional and nearly featureless. */
+    name: 'lab-steel',
+    kind: 'colour',
+    /** The master's own size. Nothing above this was baked. */
+    masterSize: 1024,
+    /** The rungs that exist on disk, coarsest first. */
+    sizes: Object.freeze([128, 256, 512, 1024]),
+  },
+  {
+    /** BE's raw-concrete, tinted pale by the desk's own colour into a laminate worktop. A photographed laminate is not in the set and this is the nearest grain that is not metal. */
+    name: 'lab-worktop',
+    kind: 'colour',
+    /** The master's own size. Nothing above this was baked. */
+    masterSize: 1024,
+    /** The rungs that exist on disk, coarsest first. */
+    sizes: Object.freeze([128, 256, 512, 1024]),
+  },
+  {
+    /** BE's diamond-plate, for the machine casings labLook calls `panel`. Tiles cleanly and reads as equipment rather than as architecture. */
+    name: 'lab-plate',
     kind: 'colour',
     /** The master's own size. Nothing above this was baked. */
     masterSize: 1024,

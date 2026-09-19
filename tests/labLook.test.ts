@@ -18,7 +18,7 @@ import { describe, expect, it } from 'vitest';
 import type { Surface } from '../src/world/tombs/types';
 import {
   FITTING, FITTING_DARK, FITTING_LIT, LIGHTING, LIGHT_MODES, LOOK, METALLIC, RING_LOOK,
-  SCREEN_ATLAS, SCREEN_ATLAS_SIZE, SCREEN_LIT, SURFACES,
+  SCREEN_ATLAS, SCREEN_ATLAS_SIZE, SCREEN_LIT, SURFACES, SURFACE_TEXTURE, SURFACE_TEXTURES,
   ambientLevel, lookFor, luminance, screenPanelFor, screenPanelUv,
 } from '../src/tombs/labLook';
 
@@ -298,6 +298,46 @@ describe('the screen atlas', () => {
       const uv = screenPanelUv(rect);
       expect(uv.u1).toBeGreaterThan(uv.u0);
       expect(uv.v1).toBeGreaterThan(uv.v0);
+    }
+  });
+});
+
+describe('the surfaces\' textures', () => {
+  it('names a texture only for surfaces that are a material, and never for the three that are not', () => {
+    // Glass is clear, a readout is a glow, and a screen has its own
+    // atlas. A map on any of those would be a picture of the wrong thing.
+    for (const surface of ['glass', 'readout', 'screen'] as const) {
+      expect(SURFACE_TEXTURE[surface], surface).toBeUndefined();
+    }
+    for (const surface of ['floor', 'wall', 'ceiling', 'metal', 'desk', 'panel', 'accent'] as const) {
+      expect(SURFACE_TEXTURE[surface], surface).toBeDefined();
+    }
+  });
+
+  it('lists every texture once, which is what a loader fetches', () => {
+    const named = new Set(Object.values(SURFACE_TEXTURE).map((t) => t.texture));
+    expect([...SURFACE_TEXTURES].sort()).toEqual([...named].sort());
+    // The wall and the ceiling share one, which is labLook's own sentence
+    // about them — "the wall, one step down" — as an asset rather than as
+    // a second picture.
+    expect(SURFACE_TEXTURE.ceiling?.texture).toBe(SURFACE_TEXTURE.wall?.texture);
+    expect(LOOK.ceiling.colour).not.toBe(LOOK.wall.colour);
+  });
+
+  it('keeps every map\'s mean inside a band a palette can survive', () => {
+    // `LabView` divides the palette colour by `level`, uncapped, so the
+    // drawn mean is the palette's whatever the map. That is exact, and it
+    // is exact for a black map too — which would take the colour to
+    // nonsense and draw a surface that is entirely its own noise. THIS is
+    // the guard: a map outside this band is a map chosen wrongly, and it
+    // should be recognised here rather than clamped in the renderer.
+    for (const [surface, wears] of Object.entries(SURFACE_TEXTURE)) {
+      expect(wears.level, `${surface} level`).toBeGreaterThan(0.02);
+      expect(wears.level, `${surface} level`).toBeLessThan(0.95);
+      // And a tile nobody could mistake for a mistake: between a hand's
+      // width and a small room.
+      expect(wears.tile, `${surface} tile`).toBeGreaterThanOrEqual(0.2);
+      expect(wears.tile, `${surface} tile`).toBeLessThanOrEqual(4);
     }
   });
 });

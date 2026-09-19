@@ -93,6 +93,54 @@ const TEXTURES = [
     kind: 'colour',
     note: 'Foam, read as a brightness where the wave has broken.',
   },
+  // ─── THE TOMBS LABORATORY'S SURFACES ───────────────────────────────
+  //
+  // Joshua's, from Beyond Extinction's `assets/textures/godot/lab/`, which
+  // is where he already had a lab material library: "add more of the lab
+  // textures from BE in this lab... floor, wall, other textures we can use
+  // to make the lab look more realistic versus a solid color."
+  //
+  // FIVE, NOT FIFTEEN, and each one is chosen against the sentence
+  // `labLook.ts` already wrote about that surface rather than for being
+  // the most interesting picture in the folder. The palette still decides
+  // the COLOUR — every one of these is a grey that the material's own
+  // colour tints — so the building's look is unchanged and only its
+  // detail is new.
+  {
+    name: 'lab-floor',
+    source: 'lab-floor.jpg',
+    kind: 'colour',
+    note: "BE's rubber-stud-floor. labLook has called the floor \"dark rubber sheet, almost matte\" "
+      + 'since it was written; this is a photograph of exactly that.',
+  },
+  {
+    name: 'lab-wall',
+    source: 'lab-wall.jpg',
+    kind: 'colour',
+    note: "BE's lab-wall-texture: a panelled wall. Worn by the wall AND the ceiling, which labLook "
+      + 'calls "the wall, a step darker" — so they are one texture and two colours, as it says.',
+  },
+  {
+    name: 'lab-steel',
+    source: 'lab-steel.jpg',
+    kind: 'colour',
+    note: "BE's brushed-steel, for labLook's \"brushed stainless\". Also the only texture the PILLARS "
+      + 'wear, and the most forgiving one for it: its grain is directional and nearly featureless.',
+  },
+  {
+    name: 'lab-worktop',
+    source: 'lab-worktop.jpg',
+    kind: 'colour',
+    note: "BE's raw-concrete, tinted pale by the desk's own colour into a laminate worktop. A "
+      + 'photographed laminate is not in the set and this is the nearest grain that is not metal.',
+  },
+  {
+    name: 'lab-plate',
+    source: 'lab-plate.jpg',
+    kind: 'colour',
+    note: "BE's diamond-plate, for the machine casings labLook calls `panel`. Tiles cleanly and "
+      + 'reads as equipment rather than as architecture.',
+  },
   {
     name: 'tombs-screen',
     source: 'tombs-screen.svg',

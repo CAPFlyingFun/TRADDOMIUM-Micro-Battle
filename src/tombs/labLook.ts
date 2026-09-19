@@ -224,6 +224,101 @@ export const FITTING_LIT = 0xffffff;
 export const FITTING_DARK = 0x2a2e31;
 
 // ---------------------------------------------------------------------------
+// What the surfaces are made of, in pictures
+// ---------------------------------------------------------------------------
+
+/**
+ * THE TEXTURE EACH SURFACE WEARS, AND HOW BIG ITS PATTERN IS.
+ *
+ * Joshua, 2026-09-19: "add more of the lab textures from BE in this
+ * lab... floor, wall, other textures we can use to make the lab look
+ * more realistic versus a solid color." The five are his own, from
+ * Beyond Extinction's lab material library, baked onto this project's
+ * texture ladder by `bake:textures`.
+ *
+ * THE PALETTE ABOVE STILL DECIDES THE COLOUR. Every one of these is a
+ * grey, and `MeshStandardMaterial` multiplies the map by the material's
+ * colour — so `LOOK.floor`'s dark rubber and `LOOK.wall`'s pale
+ * grey-green are exactly as they were, and what is new is the grain
+ * underneath them. That is also why the wall and the CEILING share one
+ * texture: labLook has always said the ceiling is "the wall, one step
+ * down", and one picture with two colours is that sentence rather than a
+ * second asset.
+ *
+ * `tile` IS IN METRES AND IS THE WHOLE TILING RULE. Every slab in this
+ * building is a unit box scaled to its size, so the same 0..1 UV covers
+ * a 0.6 m monitor and a 26 m corridor floor; left alone, one floor tile
+ * would be twenty-six metres across. `LabView` derives the UV from the
+ * instance's own scale instead, and this is the number it divides by —
+ * a floor tile is 1.2 m, a wall panel 1.5 m, and they stay that size
+ * whatever they are laid across.
+ *
+ * NOTHING HERE FOR `glass`, `readout` OR `screen`. Glass is clear,
+ * readout is a glow, and the screen has its own atlas below.
+ */
+export interface SurfaceTexture {
+  /** The name in `assets/textureManifest`, which is the baked file's name. */
+  readonly texture: string;
+  /** How many metres one repeat of the pattern covers. */
+  readonly tile: number;
+  /**
+   * THE MAP'S OWN MEAN BRIGHTNESS, 0..1 LINEAR — and the reason the
+   * palette above survives contact with a photograph.
+   *
+   * `MeshStandardMaterial` multiplies the material's colour by the map,
+   * so a surface's drawn luminance is `palette x map`. Measured over the
+   * five masters (Rec. 709, converted to linear, every texel):
+   *
+   *   lab-floor     0.0404
+   *   lab-wall      0.7596
+   *   lab-steel     0.5112
+   *   lab-worktop   0.1621
+   *   lab-plate     0.4174
+   *
+   * That is an EIGHTEENFOLD spread, and multiplying it through turned
+   * the floor — whose palette colour is a deliberate dark rubber — into
+   * black, and left the wall almost exactly as bright as its near-white
+   * photograph. The first attempt at this shipped that, and the shot
+   * showed it.
+   *
+   * So `LabView` divides the palette colour by this number. The map then
+   * contributes only its VARIATION about its own mean, and the mean
+   * itself is whatever `LOOK` says it is — which is what makes "the
+   * palette still decides the colour" a fact rather than a hope, and what
+   * keeps `tests/labLook.test.ts`'s claims about which surface is darker
+   * than which true of the drawn building and not just of the table.
+   *
+   * It also holds at DISTANCE, which an eyeballed tint would not: a mip
+   * chain averages toward the map's mean, so a mean-normalised texture is
+   * the palette's colour exactly where the detail has been filtered away.
+   */
+  readonly level: number;
+}
+
+export const SURFACE_TEXTURE: Readonly<Partial<Record<Surface, SurfaceTexture>>> = Object.freeze({
+  // Studded rubber sheet, laid in 1.2 m bays like the real thing.
+  floor: Object.freeze({ texture: 'lab-floor', tile: 1.2, level: 0.0404 }),
+  // A panelled wall. 1.5 m is a panel a person's width and a half.
+  wall: Object.freeze({ texture: 'lab-wall', tile: 1.5, level: 0.7596 }),
+  // The same panel overhead, a step darker by `LOOK.ceiling`.
+  ceiling: Object.freeze({ texture: 'lab-wall', tile: 1.5, level: 0.7596 }),
+  // Brushed stainless. Fine grain, so a small tile: at 0.8 m the grain
+  // reads as grain rather than as stripes.
+  metal: Object.freeze({ texture: 'lab-steel', tile: 0.8, level: 0.5112 }),
+  // A laminate worktop: concrete grain, tinted pale by `LOOK.desk`.
+  desk: Object.freeze({ texture: 'lab-worktop', tile: 1.6, level: 0.1621 }),
+  // Machine casing. Chequer plate at 0.5 m is equipment-sized.
+  panel: Object.freeze({ texture: 'lab-plate', tile: 0.5, level: 0.4174 }),
+  // Painted metal: the steel again, under the warning amber.
+  accent: Object.freeze({ texture: 'lab-steel', tile: 0.8, level: 0.5112 }),
+});
+
+/** Every texture the building asks for, once each — what a loader has to fetch. */
+export const SURFACE_TEXTURES: readonly string[] = Object.freeze(
+  [...new Set(Object.values(SURFACE_TEXTURE).map((t) => t.texture))].sort(),
+);
+
+// ---------------------------------------------------------------------------
 // The screens
 // ---------------------------------------------------------------------------
 

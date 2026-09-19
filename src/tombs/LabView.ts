@@ -141,7 +141,7 @@ import { UNITS_PER_METRE } from '../world/dem';
 import { TOMBS_GROUND_UNITS } from '../world/tombs/site';
 import type { LabLayout, Lamp, LightMode, Pillar, RoomId, Slab, Surface } from '../world/tombs/types';
 import {
-  FITTING_DARK, FITTING_LIT, LIGHTING, RING_LOOK, SCREEN_ATLAS, SCREEN_LIT, lookFor,
+  FITTING_DARK, FITTING_LIT, LIGHTING, RING_LOOK, SCREEN_ATLAS, SCREEN_LIT, SURFACE_TEXTURE, lookFor,
   screenPanelFor, screenPanelUv,
   type LightingLook, type ScreenPanel, type SurfaceLook,
 } from './labLook';
@@ -240,6 +240,16 @@ export interface LabViewOptions {
    * requirement, so a probe that does not bother still draws a building.
    */
   readonly screenTexture?: THREE.Texture | null;
+  /**
+   * THE SURFACES' TEXTURES, by the name `labLook.SURFACE_TEXTURE` gives
+   * them — `lab-floor`, `lab-wall` and the rest, off the texture ladder.
+   *
+   * Handed in rather than loaded, for the same reason the screen atlas
+   * is: `assets/` is the one loader. A surface with nothing here is drawn
+   * in its palette colour alone, exactly as the whole building was until
+   * now, so a probe or a test that passes none still gets a building.
+   */
+  readonly surfaceTextures?: Readonly<Record<string, THREE.Texture>> | null;
 }
 
 /** What a probe or a HUD line reads off the built building. */
@@ -314,6 +324,7 @@ export class LabView {
   /** One box per (thin axis, atlas panel) a screen actually asks for. */
   private readonly screenBoxes = new Map<string, THREE.BoxGeometry>();
   private readonly screenTexture: THREE.Texture | null;
+  private readonly surfaceTextures: Readonly<Record<string, THREE.Texture>>;
   private unitCylinder: THREE.CylinderGeometry | null = null;
   private ambientLight: THREE.AmbientLight | null = null;
 
@@ -327,6 +338,7 @@ export class LabView {
     this.maxLights = Math.max(0, Math.floor(options.maxLights ?? LIGHTS_AT[this.detail]));
     this.shadows = options.shadows ?? true;
     this.screenTexture = options.screenTexture ?? null;
+    this.surfaceTextures = options.surfaceTextures ?? {};
     this.group.name = 'tombs-lab';
     this.group.position.y = options.groundUnits ?? TOMBS_GROUND_UNITS;
     if (options.ambient ?? true) {
@@ -711,6 +723,26 @@ export class LabView {
       material.emissiveIntensity = SCREEN_LIT.emissiveIntensity;
       material.needsUpdate = true;
     }
+    const wears = SURFACE_TEXTURE[surface];
+    const texture = wears ? this.surfaceTextures[wears.texture] : undefined;
+    if (wears && texture) {
+      // THE PALETTE'S LUMINANCE, KEPT. The shader multiplies this colour
+      // by the map, so the colour is divided by the map's own mean first
+      // and the map is left contributing only its variation (`labLook`'s
+      // `level`).
+      //
+      // NO CAP. The first attempt clamped the boost at eightfold as "a
+      // guard", and the guard was the bug: the rubber floor's map has a
+      // mean of 0.0404 and needs 24.7, so the clamp left the floor three
+      // times too dark and the shot showed the same black slab this
+      // change existed to fix. There is nothing to guard against here —
+      // the product is the palette's luminance BY CONSTRUCTION, whatever
+      // the factor — so the check belongs where a bad map can be
+      // recognised as a bad map, which is `tests/labLook.test.ts` holding
+      // every `level` inside a sane band.
+      material.color.multiplyScalar(1 / wears.level);
+      tileBySize(material, texture, wears.tile * M);
+    }
     this.surfaceMaterials.set(surface, material);
     return material;
   }
@@ -765,6 +797,71 @@ export class LabView {
     this.pillarCount = 0;
     this.bounds.makeEmpty();
   }
+}
+
+/**
+ * WEAR A TEXTURE AT A FIXED SIZE, WHATEVER THE THING IS.
+ *
+ * Every slab in this building is ONE unit box scaled to its size, and
+ * every face of it carries the same 0..1 UV. Left alone that puts one
+ * floor tile across a twenty-six metre corridor and another across a
+ * two-metre landing, and neither is a floor. Setting `map.repeat` cannot
+ * fix it either: the repeat belongs to the TEXTURE, and one texture is
+ * shared by every slab of the surface.
+ *
+ * So the UV is DERIVED IN THE VERTEX SHADER from the instance's own
+ * matrix, which already carries both the size and the place:
+ *
+ *   - a FLAT face takes the two world axes it lies in, which for an
+ *     axis-aligned box is exact — no blend, no third sample. It uses the
+ *     WORLD position rather than the local one, so the tiling runs
+ *     unbroken from one slab into the next and a floor laid in six pieces
+ *     reads as one floor.
+ *   - a CURVED face — the pillars, and only the pillars — has no world
+ *     plane to lie in, and a normal that turns would seam four times
+ *     around it. It keeps the cylinder's own wrap instead, scaled to the
+ *     real circumference and height, which is continuous by construction.
+ *
+ * The branch is decided by whether the normal is axis-aligned, which is
+ * a property of the geometry and not a flag anybody has to remember to
+ * pass.
+ *
+ * `tileUnits` is how many WORLD UNITS one repeat covers —
+ * `SURFACE_TEXTURE`'s metres times `UNITS_PER_METRE`.
+ */
+function tileBySize(material: THREE.MeshStandardMaterial, texture: THREE.Texture, tileUnits: number): void {
+  material.map = texture;
+  material.onBeforeCompile = (shader) => {
+    shader.uniforms.labTile = { value: Math.max(1e-3, tileUnits) };
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nuniform float labTile;')
+      .replace('#include <uv_vertex>', `#include <uv_vertex>
+        #ifdef USE_MAP
+        {
+          #ifdef USE_INSTANCING
+            vec3 labAt = ( instanceMatrix * vec4( position, 1.0 ) ).xyz;
+            vec3 labSize = vec3(
+              length( instanceMatrix[ 0 ].xyz ),
+              length( instanceMatrix[ 1 ].xyz ),
+              length( instanceMatrix[ 2 ].xyz ) );
+          #else
+            vec3 labAt = position;
+            vec3 labSize = vec3( 1.0 );
+          #endif
+          vec3 labN = abs( normal );
+          vec2 labUv;
+          if ( max( labN.x, max( labN.y, labN.z ) ) > 0.999 ) {
+            labUv = labN.x > 0.5 ? labAt.zy : ( labN.y > 0.5 ? labAt.xz : labAt.xy );
+          } else {
+            labUv = vec2( uv.x * 3.14159265 * labSize.x, uv.y * labSize.y );
+          }
+          vMapUv = labUv / labTile;
+        }
+        #endif`);
+  };
+  // A material whose program is already compiled will not run the hook
+  // again on its own.
+  material.needsUpdate = true;
 }
 
 /**
