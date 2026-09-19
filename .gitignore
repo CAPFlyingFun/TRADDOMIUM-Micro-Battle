@@ -42,3 +42,12 @@ art/humans/*
 # it so an edit can be diffed without re-baking a 33 MB master.
 !art/humans/panels/
 !art/humans/panels/*.png
+# THE BADGE IS AUTHORED ART, not a master scan: Joshua drew the TOMBS card
+# and the bake prints it onto the ID hanging round Sarah's neck. It is 0.8 MB
+# and it is the only copy in the repository, so it is tracked.
+!art/humans/badge/
+!art/humans/badge/*.webp
+
+# The occlusion bake, derived from a master and cached so the next run does
+# not pay two minutes a body for it again.
+art/humans/cache/

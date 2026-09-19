@@ -82,11 +82,15 @@ import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { dedup, meshopt, prune, textureCompress, weld } from '@gltf-transform/functions';
 import { MeshoptEncoder } from 'meshoptimizer';
 import sharp from 'sharp';
+import { authorSarah } from './authorSarah.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
 const MASTERS = join(ROOT, 'art', 'humans');
 const OUT = join(ROOT, 'public', 'models');
+/** Where the occlusion bake is kept between runs. Derived from a master and
+ * nothing else, so it is regenerated rather than tracked. */
+const CACHE = join(MASTERS, 'cache');
 
 /** Where the masters live when they are not on this disk. One release, one asset, one checksum. */
 const RELEASE = 'https://github.com/CAPFlyingFun/TRADDOMIUM-Micro-Battle/releases/download/Jack_Sarah_Lab_Models_GLB/Jack.and.Sarah.Lab.glb.models.zip';
@@ -116,7 +120,13 @@ const HUMANS = [
   // `repair` says whether the automatic lanyard pass runs. Sarah keeps the
   // panel — a flat front view is still the easiest thing to paint — and no
   // longer needs the repair, because there is no halo left to remove.
-  { master: 'Sarah-Lab2.glb', out: 'sarah.glb', who: 'Sarah Bennett', panel: 'sarah', repair: false },
+  //
+  // `author` runs `authorSarah.mjs`: it replaces the lanyard and the top
+  // with flat colour taken from the scan's own median plus a baked contact
+  // shadow, and lifts the ID card onto its own material so the TOMBS
+  // artwork on it is legible. It touches nothing above the collarbone —
+  // the scan's face is better than anything procedural would put there.
+  { master: 'Sarah-Lab2.glb', out: 'sarah.glb', who: 'Sarah Bennett', panel: 'sarah', repair: false, author: true },
 ];
 
 /**
@@ -476,6 +486,7 @@ async function panelPass(doc, who, key, exportOnly, repair) {
 
 async function main() {
   if (!existsSync(OUT)) mkdirSync(OUT, { recursive: true });
+  if (!existsSync(CACHE)) mkdirSync(CACHE, { recursive: true });
   const missing = HUMANS.filter((h) => !existsSync(join(MASTERS, h.master)));
   if (missing.length > 0) {
     console.error(`[bake:humans] no masters in art/humans/ — ${missing.map((m) => m.master).join(', ')}`);
@@ -510,6 +521,15 @@ async function main() {
     if (human.panel) await panelPass(doc, human.who, human.panel, PANELS_ONLY, human.repair === true);
     // `--panels` only exports the pictures to paint; it writes no model.
     if (PANELS_ONLY) continue;
+    if (human.author) {
+      console.log(`[bake:humans] ${human.who}: authoring the clothing and printing the badge`);
+      await authorSarah(doc, {
+        cacheDir: CACHE,
+        stamp: `${human.master.replace(/\.glb$/, '')}-${before}`,
+        root: ROOT,
+        log: (line) => console.log(`[bake:humans] ${line}`),
+      });
+    }
     await liftRoughness(doc, human.who);
 
     // WHAT THE MAPS ARE WORTH, one slot at a time. `textureCompress` is
