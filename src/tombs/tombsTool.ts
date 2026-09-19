@@ -110,6 +110,8 @@ export const TOMBS_FIELD = {
   array: 'tombs-array',
   /** `LabView.stats.drawCalls`: what the building costs to submit. */
   draws: 'tombs-draws',
+  /** How many people are standing in the building, and how many are stand-ins. */
+  people: 'tombs-people',
   fps: 'tombs-fps',
   /** Where the camera is, in the PLAN'S metres, so a reading can be checked against the floor plan without arithmetic. */
   pos: 'tombs-pos',
@@ -132,6 +134,25 @@ export function arrayLine(running: boolean): string {
 
 export function drawsLine(drawCalls: number): string {
   return `draws ${Math.max(0, Math.round(drawCalls))}`;
+}
+
+/**
+ * WHO IS ACTUALLY IN THE ROOM.
+ *
+ * The draw count cannot answer this — it reads `LabView.stats`, which is
+ * the BUILDING and has never included a body. So a laboratory with two
+ * unreachable models in it printed exactly what a laboratory with two
+ * people in it printed, which is how "I don't see any Jack or Sarah in
+ * the Lab" went unnoticed on this side.
+ *
+ * `missing` is named separately for the same reason: a line reading
+ * "2 standing" with two magenta capsules in the room is not a reading.
+ */
+export function peopleLine(standing: number, missing: number): string {
+  const n = Math.max(0, Math.round(standing));
+  const gone = Math.max(0, Math.round(missing));
+  if (n === 0) return 'nobody here';
+  return gone > 0 ? `${n} standing, ${gone} missing` : `${n} standing`;
 }
 
 export function fpsLine(fps: number): string {

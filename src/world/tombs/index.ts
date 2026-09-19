@@ -13,7 +13,7 @@ export {
 export {
   box, holds, maxOf, minOf, overlaps, spanning, union, vec,
   type Box, type Doing, type Doorway, type Interaction, type LabLayout, type Lamp,
-  type LightMode, type Pillar, type Ring, type Room, type RoomId, type Slab, type Surface, type Vec3,
+  type LightMode, type Person, type Pillar, type Ring, type Room, type RoomId, type Slab, type Surface, type Vec3,
 } from './types';
 export {
   ARRAY_SPINS, LAB_SPEC, planLab,

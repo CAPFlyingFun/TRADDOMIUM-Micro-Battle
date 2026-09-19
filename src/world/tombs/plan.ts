@@ -74,7 +74,7 @@
 import {
   box, maxOf, minOf, spanning, union, vec,
   type Box, type Doing, type Doorway, type Interaction, type LabLayout, type Lamp,
-  type LightMode, type Pillar, type Ring, type Room, type RoomId, type Slab, type Surface, type Vec3,
+  type LightMode, type Person, type Pillar, type Ring, type Room, type RoomId, type Slab, type Surface, type Vec3,
 } from './types';
 
 // ---------------------------------------------------------------------------
@@ -398,6 +398,21 @@ interface Build {
   readonly rings: Ring[];
   readonly lamps: Lamp[];
   readonly interactions: Interaction[];
+  readonly people: Person[];
+}
+
+/**
+ * Stand someone on the floor at `x, z`, looking at `faceX, faceZ`.
+ *
+ * Both human masters are modelled FACING +Z, so a body looking along
+ * (dx, dz) turns by `atan2(dx, dz)` — three's own `rotation.y`, which is
+ * the same convention `spawn.yaw` already uses.
+ */
+function stand(
+  b: Build, room: RoomId, id: string, who: string, model: string,
+  x: number, z: number, faceX: number, faceZ: number,
+): void {
+  b.people.push({ id, who, model, room, at: vec(x, 0, z), yaw: Math.atan2(faceX - x, faceZ - z) });
 }
 
 function slab(b: Build, id: string, room: RoomId, surface: Surface, shape: Box, solid: boolean): void {
@@ -773,6 +788,22 @@ function laboratoryFit(b: Build, r: Interior, aisleX: number): void {
     slab(b, `sample-cabinet-${i + 1}`, r.id, 'panel', against(r, 'west', z, 1.0, 0.7, 1.0, 2.0), true);
   });
 
+  // JACK AND SARAH THEMSELVES, because chapter 1 opens with both of them
+  // in this room and a laboratory with nobody in it is a set. Each stands
+  // a step BEHIND their own chair, facing their own desk — at the chair
+  // they would be standing inside the seat.
+  //
+  // Nothing animates them yet and nothing talks to them: they are two
+  // bodies at two desks, which is what the milestone asks for. The
+  // interaction points below are still the things the player touches.
+  // Each stands OUT IN THE AISLE beside their own chair, turned back
+  // toward their own desk. Not behind the chair: a 0.55 m seat and a 0.8 m
+  // desk leave 1.2 m between Jack's chair and Sarah's desk, and a body is
+  // half a metre wide — he would be standing in one or the other. Not on
+  // the far side either: the desk is 0.4 m off the north wall.
+  stand(b, r.id, 'jack', 'Jack Bennett', 'models/jack.glb', aisleX + 1.30, jackZ + 0.45, aisleX, jackZ);
+  stand(b, r.id, 'sarah', 'Sarah Bennett', 'models/sarah.glb', aisleX + 1.30, sarahZ + 0.80, aisleX, sarahZ);
+
   touch(b, 'jack-workstation', r.id, vec(aisleX, DESK_HEIGHT + 0.33, jackZ), REACH_DESK, 'read',
     "Jack's workstation", 'Read the diagnostic data');
   touch(b, 'sarah-workstation', r.id, vec(aisleX, DESK_HEIGHT + 0.33, sarahZ), REACH_DESK, 'read',
@@ -957,7 +988,7 @@ function wayOut(spec: LabSpec): OpeningSpec {
  */
 export function planLab(spec: LabSpec = LAB_SPEC): LabLayout {
   const rooms = interiorsOf(spec);
-  const b: Build = { slabs: [], pillars: [], rings: [], lamps: [], interactions: [] };
+  const b: Build = { slabs: [], pillars: [], rings: [], lamps: [], interactions: [], people: [] };
 
   shellOf(b, spec, rooms);
 
@@ -1006,6 +1037,7 @@ export function planLab(spec: LabSpec = LAB_SPEC): LabLayout {
     lamps: Object.freeze(b.lamps),
     doorways: Object.freeze(doorways),
     interactions: Object.freeze(b.interactions),
+    people: Object.freeze(b.people),
     spawn: Object.freeze({ at: spec.spawn.at, yaw: spec.spawn.yaw }),
     bounds,
   });

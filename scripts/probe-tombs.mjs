@@ -183,7 +183,7 @@ try {
  * `data-field`s he reads. No `?scene=` shortcut: a probe that skips a step a
  * player cannot skip is measuring a route nobody plays.
  */
-import { preview } from 'vite';
+import { build, preview } from 'vite';
 
 const TOOL = 'lab.tombs';
 const HUD = 'tombs-lab-hud';
@@ -191,6 +191,16 @@ const APP_PORT = 4193;
 
 async function walkTheApp() {
   log('--- the route a player takes ---');
+  // BUILD FIRST. `preview` serves `dist/`, and `dist/` is whatever was
+  // built last — which for one run of this probe was a build from before
+  // the change being tested. It reported a laboratory that worked and
+  // photographed one that did not have the new code in it at all.
+  //
+  // That is the exact failure this project's own rule is about: a probe
+  // that measures something the device is not running. Four seconds of
+  // build is the price of the walkthrough meaning anything.
+  log('building, because preview serves dist/ and a stale dist/ is a lie');
+  await build({ root: ROOT, logLevel: 'error' });
   const server = await preview({
     root: ROOT,
     preview: { host: '127.0.0.1', port: APP_PORT, strictPort: false, open: false },
@@ -217,7 +227,15 @@ async function walkTheApp() {
       for (const el of document.querySelectorAll('[data-field]')) out[el.getAttribute('data-field')] = el.textContent.trim();
       return out;
     });
-    await page.waitForTimeout(1500);
+    // LONG ENOUGH FOR THE PEOPLE. The building is drawn immediately, but
+    // Jack and Sarah are 6.2 MB of GLB fetched after the door opens, and
+    // this renderer runs at about a frame and a half a second. At 1.5 s
+    // the probe photographed an empty laboratory and reported it as
+    // working, which is the failure this wait exists to stop.
+    await page.waitForFunction(
+      () => (document.querySelector('[data-field="tombs-people"]')?.textContent ?? '').includes('standing'),
+      null, { timeout: 60_000 },
+    ).catch(() => log('  the people never arrived within 60 s'));
     let hud = await read();
     for (const [k, v] of Object.entries(hud)) log(`  ${k}: ${v}`);
     await page.screenshot({ path: path.join(SHOTS, 'tombs-app-1-arrive.png') });

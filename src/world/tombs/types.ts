@@ -225,6 +225,32 @@ export interface Room {
   readonly inside: Box;
 }
 
+/**
+ * SOMEONE STANDING IN THE BUILDING.
+ *
+ * The plan says WHO is here and WHERE they stand; it says nothing about
+ * what they are made of. `model` is a path under `public/models/` and is
+ * the one string a renderer needs — core never loads it, never imports
+ * three, and never knows how tall the file turns out to be.
+ *
+ * `at` is where the FEET go, on the room's floor, in local metres. `yaw`
+ * is three's own `rotation.y` about +Y, the same convention `spawn.yaw`
+ * uses, and both human masters are modelled FACING +Z — so a person
+ * looking along (dx, dz) has `yaw = atan2(dx, dz)`.
+ */
+export interface Person {
+  readonly id: string;
+  /** What a person would call them. */
+  readonly who: string;
+  /** A path under `public/models/`, e.g. `models/sarah.glb`. */
+  readonly model: string;
+  readonly room: RoomId;
+  /** The feet, on the floor. */
+  readonly at: Vec3;
+  /** Radians about +Y, three's `rotation.y`. */
+  readonly yaw: number;
+}
+
 /** The whole building, expanded. */
 export interface LabLayout {
   readonly rooms: readonly Room[];
@@ -234,6 +260,7 @@ export interface LabLayout {
   readonly lamps: readonly Lamp[];
   readonly doorways: readonly Doorway[];
   readonly interactions: readonly Interaction[];
+  readonly people: readonly Person[];
   /** Where a new game begins, and which way it faces (radians about +Y). */
   readonly spawn: { readonly at: Vec3; readonly yaw: number };
   /** Everything the building occupies, for a streaming bubble or a cull. */

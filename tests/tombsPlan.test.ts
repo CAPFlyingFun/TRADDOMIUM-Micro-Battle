@@ -480,3 +480,89 @@ describe('a laboratory three metres wider', () => {
     expect(new Set(everyId(big)).size).toBe(everyId(big).length);
   });
 });
+
+/**
+ * JACK AND SARAH ARE IN THE ROOM.
+ *
+ * A laboratory with nobody in it is a set, and the two of them standing at
+ * their own desks is the whole of what this milestone asks for — no
+ * animation, no dialogue, two bodies at two workstations. What the plan
+ * owes a renderer is small and exactly checkable: who, where their FEET
+ * go, and which way they turn. Everything else about them — how tall the
+ * file turns out to be, what it is made of, whether it has loaded yet —
+ * belongs to the renderer and is deliberately not here.
+ */
+describe('the people in the laboratory', () => {
+  const layout = planLab();
+  const lab = layout.rooms.find((r) => r.id === 'laboratory');
+  const byId = new Map(layout.people.map((p) => [p.id, p]));
+
+  it('puts exactly Jack and Sarah in, and both in the laboratory', () => {
+    expect(layout.people.map((p) => p.id).sort()).toEqual(['jack', 'sarah']);
+    for (const p of layout.people) expect(p.room, p.id).toBe('laboratory');
+  });
+
+  it('names a model the game actually ships', () => {
+    for (const p of layout.people) expect(p.model, p.id).toMatch(/^models\/[a-z]+\.glb$/);
+    expect(byId.get('jack')?.model).toBe('models/jack.glb');
+    expect(byId.get('sarah')?.model).toBe('models/sarah.glb');
+  });
+
+  it('stands them ON THE FLOOR, inside the laboratory, clear of its walls', () => {
+    expect(lab).toBeDefined();
+    const inside = lab!.inside;
+    const x0 = inside.at.x - inside.size.x / 2, x1 = inside.at.x + inside.size.x / 2;
+    const z0 = inside.at.z - inside.size.z / 2, z1 = inside.at.z + inside.size.z / 2;
+    for (const p of layout.people) {
+      expect(p.at.y, `${p.id} floats or sinks`).toBe(0);
+      // A shoulder's clearance, so nobody is drawn half inside a wall.
+      expect(p.at.x, `${p.id} x`).toBeGreaterThan(x0 + 0.3);
+      expect(p.at.x, `${p.id} x`).toBeLessThan(x1 - 0.3);
+      expect(p.at.z, `${p.id} z`).toBeGreaterThan(z0 + 0.3);
+      expect(p.at.z, `${p.id} z`).toBeLessThan(z1 - 0.3);
+    }
+  });
+
+  /**
+   * THE YAW IS CHECKED AGAINST THE DESK IT IS SUPPOSED TO FACE, not
+   * against a number someone wrote down — a hard-coded angle here would
+   * pass forever while the desks moved out from under it. Both masters are
+   * modelled facing +Z, so the forward vector is (sin yaw, cos yaw).
+   */
+  it('turns each of them toward their own workstation', () => {
+    for (const [who, deskId] of [['jack', 'jack-workstation:desk'], ['sarah', 'sarah-workstation:desk']] as const) {
+      const p = byId.get(who);
+      const desk = layout.slabs.find((s) => s.id === deskId);
+      expect(p, who).toBeDefined();
+      expect(desk, deskId).toBeDefined();
+      const toDesk = { x: desk!.box.at.x - p!.at.x, z: desk!.box.at.z - p!.at.z };
+      const len = Math.hypot(toDesk.x, toDesk.z);
+      expect(len, `${who} is standing on their own desk`).toBeGreaterThan(0.5);
+      const forward = { x: Math.sin(p!.yaw), z: Math.cos(p!.yaw) };
+      const dot = (forward.x * toDesk.x + forward.z * toDesk.z) / len;
+      expect(dot, `${who} faces ${(p!.yaw * 180 / Math.PI).toFixed(1)}deg, away from ${deskId}`).toBeGreaterThan(0.99);
+    }
+  });
+
+  /**
+   * A body is a ~0.5 m column standing from the ankle to the crown, and
+   * the test is a genuine 3D overlap rather than a footprint one — the
+   * first version compared footprints only and flagged `floor:laboratory`,
+   * which is the one solid every person in the building is supposed to be
+   * standing on.
+   */
+  it('does not stand either of them inside a solid', () => {
+    const KNEE = 0.05, CROWN = 1.70, SHOULDERS = 0.5;
+    for (const p of layout.people) {
+      const hit = layout.slabs.filter((s) => {
+        if (!s.solid) return false;
+        const top = s.box.at.y + s.box.size.y / 2;
+        const bottom = s.box.at.y - s.box.size.y / 2;
+        if (top <= KNEE || bottom >= CROWN) return false;   // under the feet, or over the head
+        return Math.abs(s.box.at.x - p.at.x) < (s.box.size.x + SHOULDERS) / 2
+          && Math.abs(s.box.at.z - p.at.z) < (s.box.size.z + SHOULDERS) / 2;
+      });
+      expect(hit.map((s) => s.id), `${p.id} stands in`).toEqual([]);
+    }
+  });
+});

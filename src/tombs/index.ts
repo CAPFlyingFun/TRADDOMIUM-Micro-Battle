@@ -9,6 +9,8 @@
  *   LabView.ts   the assembly: one InstancedMesh per surface, a torus
  *                per ring, both lamp sets at once, and the ONE place
  *                local metres become world units
+ *   LabPeople.ts the two bodies the plan says are in the room, loaded
+ *                from `public/models/` and stood at their own desks
  *   tombsTool.ts the Editors / Dev Tools hub entry, the scene id, and
  *                every `data-action` / `data-field` name the laboratory
  *                answers to. Pure: no three, no DOM
@@ -34,10 +36,11 @@ export {
   type FittingLook, type LightingLook, type SurfaceLook,
 } from './labLook';
 export { LabView, type LabViewOptions, type LabViewStats } from './LabView';
+export { LabPeople, type LabPeopleOptions } from './LabPeople';
 export {
   BACK_LABEL, EYE_HEIGHT_M, OUTSIDE_ROOM, TOMBS_ACTION, TOMBS_FIELD, TOMBS_HUD_HZ, TOMBS_HUD_ROLE,
   TOMBS_SCENE_ID, TOMBS_TOOL_ID,
-  arrayLabel, arrayLine, drawsLine, fpsLine, leverLabel, lightingLine, posLine, roomLabel, roomLine,
+  arrayLabel, arrayLine, drawsLine, fpsLine, leverLabel, lightingLine, peopleLine, posLine, roomLabel, roomLine,
   teleportAction, teleportedRoomOf, tombsTool,
   type TombsAction,
 } from './tombsTool';

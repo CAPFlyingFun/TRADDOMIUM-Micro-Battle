@@ -98,11 +98,12 @@ import { FrameStats } from '../perf/FrameStats';
 import { CAMERA_SPEEDS, FreeFlyCamera } from '../perf/FreeFlyCamera';
 import { UNITS_PER_METRE } from '../world/dem';
 import { holds, planLab, type LabLayout, type LightMode, type Room, type RoomId, type Vec3 } from '../world/tombs';
+import { LabPeople } from './LabPeople';
 import { LabView } from './LabView';
 import { LIGHTING, type LightingLook } from './labLook';
 import {
   BACK_LABEL, EYE_HEIGHT_M, OUTSIDE_ROOM, TOMBS_ACTION, TOMBS_FIELD, TOMBS_HUD_HZ, TOMBS_HUD_ROLE, TOMBS_SCENE_ID,
-  arrayLabel, arrayLine, drawsLine, fpsLine, leverLabel, lightingLine, posLine, roomLabel, roomLine,
+  arrayLabel, arrayLine, drawsLine, fpsLine, leverLabel, lightingLine, peopleLine, posLine, roomLabel, roomLine,
   teleportAction, teleportedRoomOf,
 } from './tombsTool';
 
@@ -229,6 +230,9 @@ interface TombsReadout {
   readonly lighting: LightMode;
   readonly running: boolean;
   readonly drawCalls: number;
+  /** How many bodies are standing in the building, and how many of those are stand-ins. */
+  readonly standing: number;
+  readonly missing: number;
   readonly fps: number;
   /** The camera, in the plan's LOCAL METRES. */
   readonly x: number;
@@ -241,6 +245,8 @@ interface MutableReadout extends TombsReadout {
   lighting: LightMode;
   running: boolean;
   drawCalls: number;
+  standing: number;
+  missing: number;
   fps: number;
   x: number;
   y: number;
@@ -335,6 +341,7 @@ class TombsHud {
     right.appendChild(this.field(doc, TOMBS_FIELD.array, CSS.line));
     const perf = el(doc, 'div', `${CSS.row}justify-content:flex-end;gap:10px;opacity:0.85;`);
     perf.appendChild(this.field(doc, TOMBS_FIELD.draws, CSS.line));
+    perf.appendChild(this.field(doc, TOMBS_FIELD.people, CSS.line));
     perf.appendChild(this.field(doc, TOMBS_FIELD.fps, CSS.line));
     right.appendChild(perf);
     this.root.appendChild(right);
@@ -397,6 +404,7 @@ class TombsHud {
     this.set(TOMBS_FIELD.lighting, lightingLine(r.lighting));
     this.set(TOMBS_FIELD.array, arrayLine(r.running));
     this.set(TOMBS_FIELD.draws, drawsLine(r.drawCalls));
+    this.set(TOMBS_FIELD.people, peopleLine(r.standing, r.missing));
     this.set(TOMBS_FIELD.fps, fpsLine(r.fps));
     // The two buttons offer the CHANGE; the two lines above report the state.
     const lever = leverLabel(r.lighting);
@@ -434,6 +442,7 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
   three.background = background;
 
   let view: LabView | null = null;
+  let people: LabPeople | null = null;
   let hud: TombsHud | null = null;
   let stick: MoveStick | null = null;
   let offKey: (() => void) | null = null;
@@ -442,7 +451,7 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
   let arrayRunning = false;
 
   const readout: MutableReadout = {
-    room: OUTSIDE_ROOM, lighting: 'normal', running: false, drawCalls: 0, fps: 0, x: 0, y: 0, z: 0,
+    room: OUTSIDE_ROOM, lighting: 'normal', running: false, drawCalls: 0, standing: 0, missing: 0, fps: 0, x: 0, y: 0, z: 0,
   };
 
   /** The air this lighting wants: the view's own look while it stands, the same table before it is built. */
@@ -490,6 +499,8 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
     readout.lighting = lighting;
     readout.running = arrayRunning;
     readout.drawCalls = view === null ? 0 : view.stats.drawCalls;
+    readout.standing = people === null ? 0 : people.standing;
+    readout.missing = people === null ? 0 : people.placeholders;
     readout.fps = stats.summary().meanFps;
     readout.x = POINT.x;
     readout.y = POINT.y;
@@ -582,6 +593,19 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
       three.add(view.group);
       applyAir();
 
+      // JACK AND SARAH, at their own desks. NOT AWAITED: the building is
+      // already drawn and the door should open on it, not on a network
+      // round trip for 6 MB of human. They arrive when they arrive, and
+      // `build` never rejects — one unreachable file cannot take the
+      // scene's entry down with it.
+      //
+      // `shadows: false` for the same reason `LabView` gets it: there is
+      // no sun in here, so a shadow flag is a promise nothing in this
+      // scene can keep.
+      people = new LabPeople({ groundUnits: FLOOR_UNITS, shadows: false });
+      three.add(people.group);
+      void people.build(layout);
+
       // WHERE A NEW GAME BEGINS (`LabSpec.spawn`): on the laboratory
       // floor between the workstations, facing north up the room —
       // chapter 1's opening shot. The spawn's yaw is already three's own
@@ -625,6 +649,12 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
         three.remove(view.group);
         view.dispose();
         view = null;
+      }
+      // A body may still be in flight; `LabPeople` abandons it by epoch.
+      if (people !== null) {
+        three.remove(people.group);
+        people.dispose();
+        people = null;
       }
       three.fog = null;
       three.background = null;
