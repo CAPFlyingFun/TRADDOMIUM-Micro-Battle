@@ -73,6 +73,23 @@ export const TOMBS_ACTION = {
   lever: 'tombs:lever',
   /** The array's five articulated rings: turning, or at rest (ch 2, ch 3). */
   array: 'tombs:array',
+  /** Stand up and walk, or go back to flying the camera. */
+  walk: 'tombs:walk',
+  /** Hold the run ceiling on, for a thumb that has no shift key. */
+  run: 'tombs:run',
+  /**
+   * Do the thing that is in reach. Offered ONLY when something is —
+   * a control that is always there and usually does nothing is exactly
+   * the unavailable action that must never look functional.
+   */
+  interact: 'tombs:interact',
+  /**
+   * Play the chapter-1 sample, AND — the part that matters on a phone —
+   * be the user gesture that unlocks the AudioContext. iOS starts one
+   * suspended and will only resume it inside a real tap, so the first
+   * press of this button is the difference between audio and silence.
+   */
+  audio: 'tombs:audio',
 } as const;
 
 export type TombsAction = (typeof TOMBS_ACTION)[keyof typeof TOMBS_ACTION];
@@ -115,6 +132,12 @@ export const TOMBS_FIELD = {
   fps: 'tombs-fps',
   /** Where the camera is, in the PLAN'S metres, so a reading can be checked against the floor plan without arithmetic. */
   pos: 'tombs-pos',
+  /** Whether a body is being walked or the camera is being flown, and what the body is doing. */
+  mode: 'tombs-mode',
+  /** What is in reach, in the plan's own words — or empty when nothing is. */
+  prompt: 'tombs-prompt',
+  /** The audio: whether the context is running, what is decoded, what is playing. */
+  audio: 'tombs-audio',
 } as const;
 
 /** What the room line reads when the camera is in none of them — outside the building, or inside a wall. */
@@ -177,6 +200,68 @@ export function leverLabel(mode: LightMode): string {
 export function arrayLabel(running: boolean): string {
   return running ? 'STOP ARRAY' : 'START ARRAY';
 }
+
+/**
+ * WALKING OR FLYING, and what the body is doing while it walks.
+ *
+ * Two facts on one line because they are one question — "is a person
+ * standing in this building, and is he moving" — and because the stance
+ * is the only outward sign that the gait is running at all. A pose bug
+ * shows up here as a body that reports `walk` and stands still.
+ */
+export function modeLine(walking: boolean, stance: string): string {
+  return walking ? `MODE: WALKING (${stance})` : 'MODE: FLYING';
+}
+
+/** Same rule as the lever: the button offers the change, `tombs-mode` reports the state. */
+export function walkLabel(walking: boolean): string {
+  return walking ? 'FLY THE CAMERA' : 'STAND AND WALK';
+}
+
+/** And again: pressing it starts running, or stops. */
+export function runLabel(running: boolean): string {
+  return running ? 'STOP RUNNING' : 'RUN';
+}
+
+/**
+ * WHAT IS IN REACH, in the plan's own words — `Interaction.prompt`,
+ * which already reads "Read the diagnostic data" rather than
+ * "use:jack-workstation".
+ *
+ * Empty when nothing is in reach, and the INTERACT control is hidden
+ * with it. A prompt line that always said something would be a line
+ * nobody reads, and a button that is always there and usually does
+ * nothing is the unavailable action the standing rule forbids.
+ */
+export function promptLine(prompt: string | null): string {
+  return prompt === null || prompt.length === 0 ? '' : prompt;
+}
+
+/** The INTERACT control's face: the plan's own label for the thing, or nothing to show. */
+export function interactLabel(label: string | null): string {
+  return label === null || label.length === 0 ? '' : label.toUpperCase();
+}
+
+/**
+ * THE AUDIO LINE, and it leads with the LOCK because that is the one
+ * state that looks identical to a bug.
+ *
+ * A phone that has not been tapped has a suspended AudioContext, and a
+ * suspended context plays nothing while every counter reads healthy. So
+ * `locked` is the first word when the context is not running, and the
+ * counts follow — decoded, failed, and what is sounding now. `failed` is
+ * printed even at zero for the same reason `peopleLine` prints
+ * `missing`: a clip that did not load is a silent no-op by design, and a
+ * silent no-op that is never counted is a silent no-op nobody finds.
+ */
+export function audioLine(running: boolean, decoded: number, failed: number, playing: number): string {
+  const n = (v: number): number => (Number.isFinite(v) ? Math.max(0, Math.round(v)) : 0);
+  const head = running ? 'AUDIO' : 'AUDIO: locked';
+  return `${head} ${n(decoded)} decoded, ${n(failed)} failed, ${n(playing)} playing`;
+}
+
+/** The sample button's face. It never reports state: pressing it always plays the line. */
+export const AUDIO_LABEL = 'PLAY CH.1 LINE';
 
 /** A room button's face: the plan's own name for the room, in capitals. */
 export function roomLabel(name: string): string {

@@ -790,18 +790,30 @@ function laboratoryFit(b: Build, r: Interior, aisleX: number): void {
 
   // JACK AND SARAH THEMSELVES, because chapter 1 opens with both of them
   // in this room and a laboratory with nobody in it is a set. Each stands
-  // a step BEHIND their own chair, facing their own desk — at the chair
-  // they would be standing inside the seat.
+  // beside their own desk, turned back toward it. Not behind the chair: a
+  // 0.55 m seat and a 0.8 m desk leave 1.2 m between Jack's chair and
+  // Sarah's desk, and a body is half a metre wide — he would be standing
+  // in one or the other. Not on the far side either: the desk is 0.4 m
+  // off the north wall.
   //
-  // Nothing animates them yet and nothing talks to them: they are two
-  // bodies at two desks, which is what the milestone asks for. The
-  // interaction points below are still the things the player touches.
-  // Each stands OUT IN THE AISLE beside their own chair, turned back
-  // toward their own desk. Not behind the chair: a 0.55 m seat and a 0.8 m
-  // desk leave 1.2 m between Jack's chair and Sarah's desk, and a body is
-  // half a metre wide — he would be standing in one or the other. Not on
-  // the far side either: the desk is 0.4 m off the north wall.
-  stand(b, r.id, 'jack', 'Jack Bennett', 'models/jack.glb', aisleX + 1.30, jackZ + 0.45, aisleX, jackZ);
+  // JACK STANDS ON THE WEST SIDE, AND THAT IS A COMPOSITION FIX rather
+  // than a clearance one. He used to stand at `aisleX + 1.30`, which is
+  // (-4.70, 10.65) — and the spawn is (-6.00, 13.00) looking up the room,
+  // with the sliding door at (-3.50, 9.20). The bearing from the spawn to
+  // Jack is 29.0° off the axis and the bearing to the door is 33.3°: FOUR
+  // DEGREES APART. The first thing a player saw was a man standing in the
+  // doorway. West of his desk he is 29.7° the OTHER way, the door is
+  // clear, and he reads in profile working at his own workstation, which
+  // is what chapter 1 opens on.
+  //
+  // The spot is measured, not guessed: his desk spans x -6.90..-5.10 and
+  // the west workstation's begins at -9.70, so (-7.60, 10.20) has 0.70 m
+  // of clearance east and 2.10 m west for a body half a metre wide, and
+  // 0.80 m north to the wall. He stands at his desk's OWN z, so "facing
+  // his workstation" is exactly due east rather than nearly so — which is
+  // what the plan test checks, and what caught the first attempt at this
+  // standing him in the north wall.
+  stand(b, r.id, 'jack', 'Jack Bennett', 'models/jack.glb', aisleX - 1.60, jackZ, aisleX, jackZ);
   stand(b, r.id, 'sarah', 'Sarah Bennett', 'models/sarah.glb', aisleX + 1.30, sarahZ + 0.80, aisleX, sarahZ);
 
   touch(b, 'jack-workstation', r.id, vec(aisleX, DESK_HEIGHT + 0.33, jackZ), REACH_DESK, 'read',

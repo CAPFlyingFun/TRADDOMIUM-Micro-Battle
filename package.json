@@ -37,7 +37,8 @@
     "bake:humans": "node scripts/bakeHumans.mjs",
     "bake:panels": "node scripts/bakeHumans.mjs --panels",
     "probe:humans": "node scripts/probe-humans.mjs",
-    "probe:tombs": "node scripts/probe-tombs.mjs"
+    "probe:tombs": "node scripts/probe-tombs.mjs",
+    "probe:player": "node scripts/probe-player.mjs"
   },
   "dependencies": {
     "three": "^0.185.0"
