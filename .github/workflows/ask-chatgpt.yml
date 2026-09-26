@@ -1,0 +1,94 @@
+name: Ask ChatGPT
+
+# A SECOND OPINION, ON THE SAME PATTERN AS THE STORY REPOSITORY'S AUDIO RUN.
+#
+# Joshua, 2026-09-26: "are you able to run the ChatGPT like ElevenLabs to
+# talk to the agent?" Yes — and this is how. Claude cannot READ
+# `secrets.CHATGPT_API_KEY`; nobody outside a runner can, because the API
+# has no endpoint that returns a secret's value. What Claude can do is
+# START this workflow, and GitHub decrypts the key into one step's process
+# environment on its own machine. The key is never in a file, a log, an
+# artifact or this repository.
+#
+# MANUAL ONLY, never on push, for the reason tmb-story's audio workflow is
+# manual: every `ask` run spends Joshua's OpenAI credits. `list-models`
+# spends nothing and is the way to check the key works.
+#
+# WHAT THIS IS NOT. This is the OpenAI API, not Joshua's ChatGPT account:
+# a stateless model with no memory of his projects, his chats or the scene
+# player it built. Everything it knows about this game has to be in the
+# prompt, which is what `context` is for. For an interactive two-model
+# conversation he already has the better tool — `gamedev-console`, which
+# runs both models side by side in his browser.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'ask (spends credits) or list-models (free, checks the key)'
+        required: true
+        default: 'list-models'
+        type: choice
+        options:
+          - list-models
+          - ask
+      prompt:
+        description: 'The question. Required for mode=ask.'
+        required: false
+        default: ''
+      context:
+        description: 'Repo files to include verbatim, comma-separated, e.g. src/tombs/labLook.ts,docs/ARCHITECTURE.md'
+        required: false
+        default: ''
+      model:
+        description: 'Model id. A wrong one fails with the list of real ones.'
+        required: false
+        default: 'gpt-4o'
+      max_output_tokens:
+        description: 'Ceiling on the reply, so a runaway answer cannot run up a bill'
+        required: false
+        default: '4000'
+
+concurrency:
+  group: ask-chatgpt
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  ask:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Fail on the real reason rather than on a 401 nobody can read.
+      - name: The key has to exist
+        env:
+          KEY: ${{ secrets.CHATGPT_API_KEY }}
+        run: |
+          if [ -z "${KEY:-}" ]; then
+            echo "::error::CHATGPT_API_KEY is not set as a repository secret on this repo."
+            echo "Settings -> Secrets and variables -> Actions -> New repository secret."
+            exit 1
+          fi
+          echo "CHATGPT_API_KEY is present (${#KEY} characters). Its value is never printed."
+
+      - name: Ask
+        env:
+          # THE ONLY PLACE THE SECRET IS USED. Into the process environment,
+          # never into a file, a log or an artifact.
+          OPENAI_API_KEY: ${{ secrets.CHATGPT_API_KEY }}
+          MODE: ${{ inputs.mode }}
+          PROMPT: ${{ inputs.prompt }}
+          CONTEXT: ${{ inputs.context }}
+          MODEL: ${{ inputs.model }}
+          MAX_TOKENS: ${{ inputs.max_output_tokens }}
+        run: node .github/scripts/askChatgpt.mjs
+
+      - name: Keep the answer
+        if: always() && hashFiles('chatgpt-answer.md') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: chatgpt-answer
+          path: chatgpt-answer.md
+          retention-days: 14
