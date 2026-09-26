@@ -24,7 +24,7 @@ const KEY = process.env.OPENAI_API_KEY ?? '';
 const MODE = process.env.MODE ?? 'list-models';
 const PROMPT = (process.env.PROMPT ?? '').trim();
 const CONTEXT = (process.env.CONTEXT ?? '').trim();
-const MODEL = (process.env.MODEL ?? 'gpt-4o').trim();
+const MODEL = (process.env.MODEL ?? 'gpt-5.5').trim();
 const MAX_TOKENS = Math.max(1, Math.min(32000, Number(process.env.MAX_TOKENS) || 4000));
 
 /** Everything a reader should see, in the log and in the artifact. */

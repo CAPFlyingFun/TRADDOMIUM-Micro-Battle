@@ -40,9 +40,9 @@ on:
         required: false
         default: ''
       model:
-        description: 'Model id. A wrong one fails with the list of real ones.'
+        description: 'Model id. A wrong one fails with the list of real ones. Try gpt-5.3-codex for code.'
         required: false
-        default: 'gpt-4o'
+        default: 'gpt-5.5'
       max_output_tokens:
         description: 'Ceiling on the reply, so a runaway answer cannot run up a bill'
         required: false
