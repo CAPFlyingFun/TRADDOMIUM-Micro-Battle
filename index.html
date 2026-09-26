@@ -112,6 +112,81 @@
         opacity: 0;
         pointer-events: none;
       }
+      /* ─── LANDSCAPE ONLY ─────────────────────────────────────────────
+         This game is a THUMBSTICK game. Movement is a stick under the
+         left thumb and the camera is the right one; it is not a
+         tap-to-move that would survive a tall screen. Held upright the
+         controls have nowhere to sit and the 3D camera — which keeps a
+         fixed VERTICAL field of view, so a narrow viewport shows LESS of
+         the room, not more — frames a wall. So portrait is refused
+         rather than laid out.
+
+         A PROMPT AND NOT AN API, because there is no API. iOS Safari
+         does not implement Screen Orientation Lock at all, and
+         everywhere else `lock()` needs fullscreen first. Beyond
+         Extinction reached the same conclusion and says so in its own
+         markup; this is the same gate in this game's black and gold.
+
+         PURE CSS, IN THE STATIC DOCUMENT. It is not a scene, not a
+         component and touches no script, so it covers the splash, the
+         menu, the world and every dev tool alike, it is up before the
+         first module is parsed, and it cannot get stuck in a bad JS
+         state — which a gate that hides the whole game must never do.
+
+         `pointer: coarse` IS LOAD-BEARING: it is what keeps the gate off
+         a narrow desktop window, where a tall viewport is a resized
+         window and not a phone nobody has turned. `manifest.webmanifest`
+         already asks for `"orientation": "landscape"`, which an
+         INSTALLED app honours on Android; this is what covers Safari,
+         the browser tab, and every phone that ignores it. */
+      #orient {
+        display: none;
+      }
+      @media (orientation: portrait) and (pointer: coarse) {
+        #orient {
+          display: flex;
+          position: fixed;
+          inset: 0;
+          z-index: 200;
+          align-items: center;
+          justify-content: center;
+          text-align: center;
+          padding: 24px;
+          background: #06090c;
+        }
+        /* Nothing behind the gate may be touched, scrolled or read out. */
+        #app,
+        #ui,
+        #boot {
+          visibility: hidden;
+        }
+      }
+      #orient .phone {
+        width: 46px;
+        height: 80px;
+        margin: 0 auto 26px;
+        border: 3px solid #c9a94a;
+        border-radius: 9px;
+        animation: orient-turn 2.4s ease-in-out infinite;
+      }
+      @keyframes orient-turn {
+        0%, 42% { transform: rotate(0deg); }
+        58%, 100% { transform: rotate(-90deg); }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        #orient .phone { animation: none; transform: rotate(-90deg); }
+      }
+      #orient .title {
+        font: 600 19px/1.3 system-ui, sans-serif;
+        letter-spacing: 0.04em;
+        color: #e8e2c8;
+      }
+      #orient .hint {
+        margin: 10px auto 0;
+        max-width: 30ch;
+        font: 13px/1.5 system-ui, sans-serif;
+        color: #c9a94a;
+      }
       /* COVERING the screen, sized and centred from viewport units so the
          picture is right on the FIRST paint — #boot is fixed to the
          viewport, so these describe its box exactly. Landscape by
@@ -166,6 +241,16 @@
           <source media="(orientation: portrait)" srcset="./splash-portrait.webp" />
           <img src="./splash.webp" alt="TRADDOMIUM: Micro Battle!" />
         </picture>
+      </div>
+    </div>
+    <!-- Landscape-only gate. See #orient in the stylesheet above: it is
+         pure CSS in the static document so it covers every screen and
+         can never be left up, or down, by a script. -->
+    <div id="orient" role="alertdialog" aria-label="Rotate your device">
+      <div>
+        <div class="phone" aria-hidden="true"></div>
+        <div class="title">Turn your phone sideways</div>
+        <p class="hint">TRADDOMIUM plays in landscape — the stick needs a thumb on each side.</p>
       </div>
     </div>
     <script type="module" src="/src/main.ts"></script>

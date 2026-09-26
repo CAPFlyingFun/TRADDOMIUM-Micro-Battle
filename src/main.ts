@@ -17,6 +17,37 @@ import { App } from './app/App';
 import { watchForUpdates } from './app/updateCheck';
 import { BUILD_INFO, dismissBootSplash, reportBoot } from './ui';
 
+/**
+ * THE ROTATION THAT LEAVES SAFARI LAID OUT AT THE OLD WIDTH.
+ *
+ * iOS Safari can keep the LAYOUT VIEWPORT at the previous orientation's
+ * width after a turn — most often when the device is turned through the
+ * landscape gate (`#orient` in `index.html`), which is precisely the
+ * turn this game asks every phone player to make. The page then lays out
+ * at the portrait width and the browser scales it up, so the HUD and its
+ * controls come back oversized and overflowing.
+ *
+ * Re-asserting the viewport meta forces a recompute: collapse it to the
+ * bare width, then restore on the next frame. TWICE, because iOS reports
+ * its final size late — the second pass is after the rotation animation
+ * has settled, and a re-assert that changes nothing costs nothing.
+ *
+ * Diagnosed and solved first in Beyond Extinction, whose own comment
+ * records the same symptom; carried here because this game now has the
+ * same gate and therefore the same turn.
+ */
+const VIEWPORT = document.querySelector('meta[name="viewport"]');
+const VIEWPORT_CONTENT = VIEWPORT?.getAttribute('content') ?? '';
+const kickViewport = (): void => {
+  if (VIEWPORT === null || VIEWPORT_CONTENT === '') return;
+  VIEWPORT.setAttribute('content', 'width=device-width');
+  requestAnimationFrame(() => VIEWPORT.setAttribute('content', VIEWPORT_CONTENT));
+};
+window.addEventListener('orientationchange', () => {
+  kickViewport();
+  window.setTimeout(kickViewport, 350);
+});
+
 const host = document.getElementById('app');
 const uiLayer = document.getElementById('ui');
 if (!host || !uiLayer) throw new Error('index.html must provide #app and #ui');
