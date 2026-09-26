@@ -209,6 +209,18 @@ src/
                 (so tiling runs unbroken across adjacent slabs of one
                 wall) and a curved one keeps its own wrap. Untextured is
                 the fallback, not a second look.
+  story/        the chapters as BEATS, and core: an ordered list of runs
+                of `lineId`s from the voice manifest, each naming one of a
+                handful of reusable CAMERAS by identity. Pure data, no
+                three and no DOM, so a server could read it. It holds no
+                POSE — placement is prose, because the moment a camera
+                here carries coordinates it is a second floor plan and the
+                two will disagree; world/tombs/plan.ts is the only one.
+                The manifest is authoritative and moves (its last bake
+                took chapter 1 from 88 lines to 85), so
+                tests/storyChapter1.test.ts pins the fit: every line
+                played exactly once, in the manifest's order, none
+                invented, no insert held past six lines.
   camera/       FollowCamera + CameraOwnership. Phase 0 has FreeFlyCamera
                 only (under perf/).
   input/        keyboard / pointer / touch (Input.ts, DOM) → one shared

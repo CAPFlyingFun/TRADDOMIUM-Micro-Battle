@@ -59,6 +59,8 @@ const CORE: readonly CoreEntry[] = [
   { path: 'src/autonomy', required: false },
   // Phase 7: the island's animals. A server can run the same tick, so no three, no DOM.
   { path: 'src/creatures', required: true },
+  // The chapters as beats: pure data over the voice manifest, no three, no DOM.
+  { path: 'src/story', required: true },
 ];
 
 /**
