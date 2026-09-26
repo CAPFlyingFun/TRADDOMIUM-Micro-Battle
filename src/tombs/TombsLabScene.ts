@@ -108,6 +108,7 @@ import { HumanRig } from '../view/HumanRig';
 import { detailFor, type DetailTier } from '../assets/detailQuality';
 import { textureUrl } from '../assets/textureManifest';
 import { SURFACE_TEXTURES } from './labLook';
+import { beatOfLine } from '../story/chapter1';
 import { tierFor } from '../assets/textureQuality';
 import { MoveStick } from '../input/MoveStick';
 import { FrameStats } from '../perf/FrameStats';
@@ -122,10 +123,12 @@ import { LabPeople, release } from './LabPeople';
 import { LabView } from './LabView';
 import { LIGHTING, type LightingLook } from './labLook';
 import {
-  AUDIO_LABEL, BACK_LABEL, EYE_HEIGHT_M, OUTSIDE_ROOM, TOMBS_ACTION, TOMBS_FIELD, TOMBS_HUD_HZ, TOMBS_HUD_ROLE,
+  AUDIO_LABEL, BACK_LABEL, EYE_HEIGHT_M, OUTSIDE_ROOM, PREV_LABEL,
+  TOMBS_ACTION, TOMBS_FIELD, TOMBS_HUD_HZ, TOMBS_HUD_ROLE,
   TOMBS_SCENE_ID, arrayLabel, arrayLine, audioLine, drawsLine, fpsLine, interactLabel, leverLabel, lightingLine,
   modeLine, peopleLine, posLine, promptLine, roomLabel, roomLine, runLabel, teleportAction, teleportedRoomOf,
   walkLabel,
+  audioLabel, beatLine, dialogueLine, progressLine, speakerLine,
 } from './tombsTool';
 
 // ---------------------------------------------------------------------------
@@ -315,6 +318,18 @@ interface TombsReadout {
   readonly decoded: number;
   readonly failed: number;
   readonly playing: number;
+  /**
+   * THE LINE ON SCREEN, all of it quoted from the manifest and the beat
+   * list. `lineAt` is ONE-BASED and 0 means the chapter has not started,
+   * which is the one state the pane has to tell apart from line one —
+   * before the first press there is nothing to show and the pane is not
+   * there at all.
+   */
+  readonly lineAt: number;
+  readonly lineCount: number;
+  readonly speaker: string;
+  readonly text: string;
+  readonly beatTitle: string;
 }
 
 interface MutableReadout extends TombsReadout {
@@ -337,6 +352,11 @@ interface MutableReadout extends TombsReadout {
   decoded: number;
   failed: number;
   playing: number;
+  lineAt: number;
+  lineCount: number;
+  speaker: string;
+  text: string;
+  beatTitle: string;
 }
 
 interface TombsHudHooks {
@@ -401,6 +421,16 @@ class TombsHud {
   private readonly prompt: HTMLElement;
   private readonly promptRow: HTMLElement;
   private interact: HTMLButtonElement | null = null;
+  /**
+   * The dialogue pane. The PANEL is always there because the control
+   * that starts the chapter lives in it; the three QUOTED LINES are
+   * what appears with the first line and not before.
+   */
+  private readonly dialogue: HTMLElement;
+  private readonly dialogueText: HTMLElement;
+  private readonly dialogueControls: HTMLElement;
+  private prev: HTMLButtonElement | null = null;
+  private readonly next: HTMLButtonElement;
   private readonly detach: Array<() => void> = [];
   private sinceRefresh = Infinity;
 
@@ -436,7 +466,6 @@ class TombsHud {
     this.run = this.button(doc, TOMBS_ACTION.run, runLabel(false));
     controls.appendChild(this.walk);
     controls.appendChild(this.run);
-    controls.appendChild(this.button(doc, TOMBS_ACTION.audio, AUDIO_LABEL));
     controls.appendChild(this.lever);
     controls.appendChild(this.array);
     controls.appendChild(this.button(doc, TOMBS_ACTION.back, BACK_LABEL));
@@ -461,6 +490,40 @@ class TombsHud {
     this.promptRow.appendChild(this.prompt);
     this.promptRow.style.display = 'none';
     this.root.appendChild(this.promptRow);
+
+    // BOTTOM-RIGHT: WHO IS TALKING AND WHAT THEY SAID.
+    //
+    // The only corner left, and the right one anyway. The stick owns
+    // bottom-left, the room row and the lever own the two top corners,
+    // and the reach prompt owns bottom-centre — a pane here collides
+    // with none of them and sits under the thumb that is not steering.
+    //
+    // THE QUOTED LINES ARE ABSENT UNTIL SOMETHING HAS BEEN SAID, rather
+    // than empty: a quotation mark with nothing in it is the unavailable
+    // thing this HUD's own rules forbid. THE PANEL IS NOT, and that is a
+    // bug the probe caught rather than a preference — the control that
+    // starts the chapter lives in this panel, so hiding the panel until
+    // the chapter starts hides the only way to start it.
+    //
+    // PREV is built and destroyed the way INTERACT is, because on line
+    // one there is nowhere back to.
+    this.dialogue = el(doc, 'div',
+      `${CSS.panel}bottom:10px;right:${EDGE_RIGHT};max-width:min(360px,44%);gap:3px;`);
+    this.dialogueText = el(doc, 'div', 'display:flex;flex-direction:column;gap:3px;');
+    this.dialogueText.appendChild(this.field(doc, TOMBS_FIELD.beat,
+      `${CSS.line}color:${GOLD};letter-spacing:0.06em;opacity:0.9;font-size:10px;`));
+    this.dialogueText.appendChild(this.field(doc, TOMBS_FIELD.speaker, `${CSS.line}color:${GOLD};`));
+    // The one readout in this HUD that WRAPS. Every other line is a
+    // reading and fits; a line of dialogue is a sentence and does not.
+    this.dialogueText.appendChild(this.field(doc, TOMBS_FIELD.line,
+      'white-space:normal;line-height:1.35;'));
+    this.dialogueText.style.display = 'none';
+    this.dialogue.appendChild(this.dialogueText);
+    this.dialogueControls = el(doc, 'div', `${CSS.row}justify-content:flex-end;`);
+    this.next = this.button(doc, TOMBS_ACTION.audio, AUDIO_LABEL);
+    this.dialogueControls.appendChild(this.next);
+    this.dialogue.appendChild(this.dialogueControls);
+    this.root.appendChild(this.dialogue);
 
     uiLayer.appendChild(this.root);
     this.refreshNow();
@@ -526,6 +589,7 @@ class TombsHud {
     this.set(TOMBS_FIELD.prompt, promptLine(r.prompt));
     this.set(TOMBS_FIELD.audio, audioLine(r.audioRunning, r.decoded, r.failed, r.playing));
     this.setReach(r.reachLabel);
+    this.setDialogue(r);
     // The two buttons offer the CHANGE; the two lines above report the state.
     const lever = leverLabel(r.lighting);
     if (this.lever.textContent !== lever) this.lever.textContent = lever;
@@ -541,6 +605,47 @@ class TombsHud {
     this.run.style.display = r.walking ? '' : 'none';
     const run = runLabel(r.sprinting);
     if (this.run.textContent !== run) this.run.textContent = run;
+  }
+
+  /**
+   * THE PANE FOLLOWS THE LINE, and the line is the only thing that
+   * decides whether it exists. `lineAt === 0` is the chapter not started;
+   * `lineAt === 1` is the first line, where PREV has nowhere to go and so
+   * is not built.
+   */
+  private setDialogue(r: TombsReadout): void {
+    if (r.lineAt < 1) {
+      this.dialogueText.style.display = 'none';
+      this.dropPrev();
+      if (this.next.textContent !== AUDIO_LABEL) this.next.textContent = AUDIO_LABEL;
+      return;
+    }
+    this.dialogueText.style.display = '';
+    const beat = beatLine(r.beatTitle);
+    const where = progressLine(r.lineAt, r.lineCount);
+    // The beat is a title and the counter is a number, and a reader wants
+    // both on one line: `THE SMARTER SCIENTIST · 8 / 85`. A chapter with
+    // no beats written yet prints the counter alone rather than a dot
+    // with nothing before it.
+    this.set(TOMBS_FIELD.beat, beat === '' ? where : `${beat} · ${where}`);
+    this.set(TOMBS_FIELD.speaker, speakerLine(r.speaker));
+    this.set(TOMBS_FIELD.line, dialogueLine(r.text));
+    const next = audioLabel(true);
+    if (this.next.textContent !== next) this.next.textContent = next;
+    if (r.lineAt > 1) {
+      if (this.prev === null) {
+        this.prev = this.button(this.dialogue.ownerDocument, TOMBS_ACTION.prevLine, PREV_LABEL);
+        this.dialogueControls.insertBefore(this.prev, this.next);
+      }
+    } else {
+      this.dropPrev();
+    }
+  }
+
+  private dropPrev(): void {
+    if (this.prev === null) return;
+    this.prev.remove();
+    this.prev = null;
   }
 
   /** The prompt and its control appear together and go together. */
@@ -661,12 +766,13 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
    * whether eighty-eight clips are all reachable and all sound like the
    * same room — which one clip on repeat cannot answer.
    */
-  let nextLine = 0;
+  let lineAt = 0;
 
   const readout: MutableReadout = {
     room: OUTSIDE_ROOM, lighting: 'normal', running: false, drawCalls: 0, standing: 0, missing: 0, fps: 0, x: 0, y: 0, z: 0,
     walking: false, stance: 'stand', sprinting: false, prompt: '', reachLabel: '',
     audioRunning: false, decoded: 0, failed: 0, playing: 0,
+    lineAt: 0, lineCount: AUDIO_MANIFEST.voice.length, speaker: '', text: '', beatTitle: '',
   };
 
   /** The air this lighting wants: the view's own look while it stands, the same table before it is built. */
@@ -841,18 +947,42 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
    * room's own bed starts with it, because a voice line with no room
    * behind it is the thing four separate buses exist to let you balance.
    */
-  const speak = async (): Promise<void> => {
+  const speak = async (step: 1 | -1): Promise<void> => {
+    const lines = AUDIO_MANIFEST.voice;
+    if (lines.length === 0) return;
+    // WHERE THE STEP LANDS IS DECIDED BEFORE THE AWAIT, and written to
+    // the readout before it too. `unlock()` is a round trip on the first
+    // press, and a pane that only caught up after the audio device did
+    // would sit blank through it — the reader is watching the words, not
+    // the decoder.
+    const want = lineAt === 0 && step === 1 ? 1 : lineAt + step;
+    if (want < 1 || want > lines.length) return;
+    lineAt = want;
+    publishLine();
     const ok = await audio.unlock();
     if (!ok) return;
     // The faders may have moved since the last line: Settings is one
     // screen away and this tool is not disposed by opening it.
     applyMix();
     if (AUDIO_MANIFEST.sounds.some((a) => a.assetId === LAB_BED)) void audio.startBed(LAB_BED);
-    const lines = AUDIO_MANIFEST.voice;
-    if (lines.length === 0) return;
-    const line = lines[nextLine % lines.length];
-    nextLine += 1;
-    void audio.playLine(line.lineId);
+    void audio.playLine(lines[want - 1].lineId);
+  };
+
+  /**
+   * WHAT THE PANE SAYS, quoted and never composed. The speaker and the
+   * words are the manifest's own fields; the beat is whichever of
+   * `story/chapter1.ts`'s fourteen owns this line, and EMPTY when none
+   * does — chapters 2 to 6 are in the story repository and have no beats
+   * written yet, and a pane that guessed a title for them would be
+   * inventing structure the chapter does not have.
+   */
+  const publishLine = (): void => {
+    const line = lineAt >= 1 ? AUDIO_MANIFEST.voice[lineAt - 1] : null;
+    readout.lineAt = line === null ? 0 : lineAt;
+    readout.lineCount = AUDIO_MANIFEST.voice.length;
+    readout.speaker = line?.characterName ?? '';
+    readout.text = line?.text ?? '';
+    readout.beatTitle = line === null ? '' : beatOfLine(line.lineId)?.title ?? '';
   };
 
   /**
@@ -951,7 +1081,11 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
       return;
     }
     if (action === TOMBS_ACTION.audio) {
-      void speak();
+      void speak(1);
+      return;
+    }
+    if (action === TOMBS_ACTION.prevLine) {
+      void speak(-1);
       return;
     }
     const room = teleportedRoomOf(action, roomIds);

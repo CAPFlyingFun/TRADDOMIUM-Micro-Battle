@@ -90,6 +90,14 @@ export const TOMBS_ACTION = {
    * press of this button is the difference between audio and silence.
    */
   audio: 'tombs:audio',
+  /**
+   * The line BEFORE the one showing. It exists because the pane shows
+   * what was said, and a reader who missed it has no other way back —
+   * the same rule as every meter in this project: nothing moves one way
+   * only. It is created and destroyed with the first line rather than
+   * sitting dead at the start of the chapter.
+   */
+  prevLine: 'tombs:line:prev',
 } as const;
 
 export type TombsAction = (typeof TOMBS_ACTION)[keyof typeof TOMBS_ACTION];
@@ -138,6 +146,12 @@ export const TOMBS_FIELD = {
   prompt: 'tombs-prompt',
   /** The audio: whether the context is running, what is decoded, what is playing. */
   audio: 'tombs-audio',
+  /** Which BEAT is playing, by `story/chapter1.ts`'s name for it, and where in the chapter. */
+  beat: 'tombs-beat',
+  /** Who is speaking, by the manifest's own `characterName`. */
+  speaker: 'tombs-speaker',
+  /** What they are saying, by the manifest's own `text`. */
+  line: 'tombs-line',
 } as const;
 
 /** What the room line reads when the camera is in none of them — outside the building, or inside a wall. */
@@ -260,8 +274,58 @@ export function audioLine(running: boolean, decoded: number, failed: number, pla
   return `${head} ${n(decoded)} decoded, ${n(failed)} failed, ${n(playing)} playing`;
 }
 
-/** The sample button's face. It never reports state: pressing it always plays the line. */
+/**
+ * THE DIALOGUE PANE, in four lines and no invention.
+ *
+ * Every word it shows is the manifest's or the beat list's: the speaker
+ * is `characterName`, the words are `text`, the beat is
+ * `story/chapter1.ts`'s title. Nothing here composes a sentence of its
+ * own, because a pane that paraphrased the script would be a second
+ * script — and the chapter moves (its last bake went from 88 lines to
+ * 85), so the only safe thing to print is what was baked.
+ *
+ * ALL FOUR RETURN '' WHEN THERE IS NOTHING TO SAY, which is how the pane
+ * knows to be absent: before the first press no line has been spoken,
+ * and a dialogue pane showing an empty quotation is worse than no pane.
+ */
+export function beatLine(title: string): string {
+  return title.trim() === '' ? '' : title.trim().toUpperCase();
+}
+
+export function speakerLine(name: string): string {
+  return name.trim();
+}
+
+export function dialogueLine(text: string): string {
+  return text.trim();
+}
+
+/**
+ * Where in the chapter, one-based and out of the whole: `12 / 85`. Zero
+ * or a nonsense total reads empty rather than `0 / 0`, which is a
+ * counter that has broken rather than a chapter that has not started.
+ */
+export function progressLine(at: number, total: number): string {
+  const a = Math.round(at);
+  const n = Math.round(total);
+  if (!Number.isFinite(a) || !Number.isFinite(n) || a < 1 || n < 1) return '';
+  return `${Math.min(a, n)} / ${n}`;
+}
+
+/** The step-back control's face. */
+export const PREV_LABEL = 'PREV';
+
+/** The sample button's face before anything has played. */
 export const AUDIO_LABEL = 'PLAY CH.1 LINE';
+
+/**
+ * And after: the button says which way it goes, like RUN and the lever.
+ * A control that still reads PLAY CH.1 LINE on line forty is telling the
+ * player they are at the start of the chapter.
+ */
+export function audioLabel(started: boolean): string {
+  return started ? 'NEXT LINE' : AUDIO_LABEL;
+}
 
 /** A room button's face: the plan's own name for the room, in capitals. */
 export function roomLabel(name: string): string {

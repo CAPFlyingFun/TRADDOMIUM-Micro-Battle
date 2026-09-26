@@ -145,6 +145,17 @@ async function main() {
       return m ? { x: +m[1], y: +m[2], z: +m[3] } : null;
     };
     const has = async (action) => (await page.$(`[data-action="${action}"]`)) !== null;
+    /**
+     * A field that is in the DOM but inside a hidden panel is NOT on
+     * screen, and `read()` cannot tell the difference — it reads
+     * textContent. The dialogue pane is hidden rather than destroyed
+     * (it is a readout, not a control), so its visibility has to be
+     * asked of the layout.
+     */
+    const visible = async (field) => page.evaluate((name) => {
+      const el = document.querySelector(`[data-field="${name}"]`);
+      return el !== null && el.getClientRects().length > 0;
+    }, field);
 
     // Let the people arrive before anything else: they are 6 MB of GLB
     // fetched after the door opens, and a body walked through the room
@@ -297,13 +308,43 @@ async function main() {
     // --- 6. audio: the tap that unlocks the context ---
     const before = (await read())['tombs-audio'] ?? '';
     check(before.includes('locked'), `before any tap the audio line reads "${before}"`);
+    // THE PANE IS ABSENT BEFORE THE CHAPTER STARTS. An empty quotation is
+    // the thing this HUD's own rules forbid, so it is checked here rather
+    // than assumed from the code.
+    check((await read())['tombs-line'] === undefined || !(await visible('tombs-line')),
+      'before the first line there is no dialogue pane');
+    check(!(await has('tombs:line:prev')), 'and no way back from a chapter that has not started');
+
     await page.click('[data-action="tombs:audio"]', { timeout: 60_000 });
     await page.waitForTimeout(2500);
     const after = (await read())['tombs-audio'] ?? '';
     check(!after.includes('locked'), `after a real tap the audio line reads "${after}"`);
     check(/([1-9]\d*) decoded/.test(after), 'at least one clip decoded');
     check(/\b0 failed\b/.test(after), 'no clip failed to load');
-    await page.screenshot({ path: path.join(SHOTS, 'player-5-audio.png') });
+
+    // --- 7. the dialogue pane walks the chapter, both ways ---
+    let pane = await read();
+    check(await visible('tombs-line'), 'the dialogue pane appeared with the first line');
+    check((pane['tombs-speaker'] ?? '').length > 0, `it names the speaker: "${pane['tombs-speaker']}"`);
+    check((pane['tombs-line'] ?? '').length > 0, `it prints the words: "${(pane['tombs-line'] ?? '').slice(0, 44)}"`);
+    check(/\b1 \/ \d+$/.test(pane['tombs-beat'] ?? ''), `and where it is: "${pane['tombs-beat']}"`);
+    check(!(await has('tombs:line:prev')), 'on line one there is nowhere back, so no PREV control');
+    await page.screenshot({ path: path.join(SHOTS, 'player-6-dialogue.png') });
+
+    await page.click('[data-action="tombs:audio"]', { timeout: 60_000 });
+    await page.waitForTimeout(700);
+    pane = await read();
+    const second = pane['tombs-line'] ?? '';
+    check(/\b2 \/ \d+$/.test(pane['tombs-beat'] ?? ''), `NEXT advanced the chapter: "${pane['tombs-beat']}"`);
+    check(await has('tombs:line:prev'), 'and PREV appeared, because now there is a line to go back to');
+
+    await page.click('[data-action="tombs:line:prev"]', { timeout: 60_000 });
+    await page.waitForTimeout(700);
+    pane = await read();
+    check(/\b1 \/ \d+$/.test(pane['tombs-beat'] ?? ''), `PREV went back: "${pane['tombs-beat']}"`);
+    check((pane['tombs-line'] ?? '') !== second, 'and the words changed with it');
+    check(!(await has('tombs:line:prev')), 'PREV took itself away again at the start of the chapter');
+    await page.screenshot({ path: path.join(SHOTS, 'player-7-dialogue-back.png') });
 
     if (errors.length) {
       log(`PAGE ERRORS: ${errors.slice(0, 5).join(' | ')}`);

@@ -243,3 +243,13 @@ export const CHAPTER_1_BEATS: readonly Beat[] = Object.freeze([
 
 /** Every line the chapter accounts for, in order — what a test compares against the manifest. */
 export const CHAPTER_1_LINES: readonly string[] = Object.freeze(CHAPTER_1_BEATS.flatMap((b) => [...b.lines]));
+
+/**
+ * THE BEAT A LINE BELONGS TO, or null for a line this chapter does not
+ * carry. Linear over fourteen beats, which is cheaper than the Map that
+ * would have to be kept in step with them.
+ */
+export function beatOfLine(lineId: string): Beat | null {
+  for (const beat of CHAPTER_1_BEATS) if (beat.lines.includes(lineId)) return beat;
+  return null;
+}

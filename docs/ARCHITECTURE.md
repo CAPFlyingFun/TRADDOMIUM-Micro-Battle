@@ -197,6 +197,16 @@ src/
                 one will not load, posed down from their bind pose by
                 actor/humanPose and breathing on RAW dt — and hides
                 whichever of them the player is currently being.
+                Its HUD carries the DIALOGUE PANE (bottom-right, the one
+                corner the stick, the room row, the lever and the reach
+                prompt all leave free): the beat and the position, the
+                speaker, the line, and NEXT/PREV. Every word in it is
+                quoted — `characterName` and `text` from the voice
+                manifest, the title from story/, and the counter alone
+                where a chapter has no beats written. The three quoted
+                lines are absent until something has been said; the PANEL
+                is not, because the control that starts the chapter lives
+                in it.
                 Its SURFACES wear the same ladder: `SURFACE_TEXTURE` in
                 labLook maps a surface to a map, a tile size in METRES
                 and that map's own mean linear brightness, and LabView
