@@ -131,6 +131,13 @@ async function main() {
     await page.waitForSelector(`[data-role="${HUD}"]`, { timeout: 180_000 });
     log('bare URL -> EDITORS -> OPEN -> the laboratory is up');
 
+    // Simulation controls now live in the expandable laboratory tools drawer.
+    const pressTool = async (action) => {
+      await page.locator('.tombs-tools > summary').click();
+      await page.click(`[data-action="${action}"]`, { timeout: 60_000 });
+      await page.locator('.tombs-tools > summary').click();
+    };
+
     const read = async () => page.evaluate(() => {
       const out = {};
       for (const el of document.querySelectorAll('[data-field]')) {
@@ -166,7 +173,7 @@ async function main() {
     ).catch(() => log('  the people never arrived within 60 s'));
 
     // --- 1. stand up and walk ---
-    await page.click('[data-action="tombs:walk"]', { timeout: 60_000 });
+    await pressTool('tombs:walk');
     await page.waitForTimeout(600);
     let hud = await read();
     check((hud['tombs-mode'] ?? '').includes('WALKING'), `STAND AND WALK -> ${hud['tombs-mode']}`);
@@ -233,7 +240,7 @@ async function main() {
     // and its face offers the change rather than reporting the state.
     const runFace = async () => page.textContent('[data-action="tombs:run"]');
     check((await runFace()) === 'RUN', `RUN offers the change: "${await runFace()}"`);
-    await page.click('[data-action="tombs:run"]', { timeout: 60_000 });
+    await pressTool('tombs:run');
     // The HUD is repainted from the frame loop, so the word changes on
     // the NEXT FRAME — which at this frame rate is most of a second away.
     // Wait for the frame rather than for a stopwatch.
@@ -242,7 +249,7 @@ async function main() {
       null, { timeout: 30_000 },
     ).catch(() => {});
     check((await runFace()) === 'STOP RUNNING', `pressed, it offers the way back: "${await runFace()}"`);
-    await page.click('[data-action="tombs:run"]', { timeout: 60_000 });
+    await pressTool('tombs:run');
 
     // --- 4. the building stops the body ---
     // Long enough to cross a 12 m room several times over at walking pace.
@@ -267,7 +274,7 @@ async function main() {
     // the plan working — you open the game already at a desk. So the
     // "nothing in reach" half is checked from the CORRIDOR, which has no
     // interaction points at all.
-    await page.click('[data-action="tombs:teleport:corridor"]', { timeout: 60_000 });
+    await pressTool('tombs:teleport:corridor');
     // A teleport moves the body; the HUD learns of it on the next frame,
     // and the ROOM LINE is what says that frame has been. Reading the
     // prompt 600 ms later read the frame BEFORE the teleport — the body
@@ -283,7 +290,7 @@ async function main() {
 
     // Back to the laboratory for a known start, then walk to Jack's
     // workstation at (-6.00, 10.20) — `use:jack-workstation` has reach 1.2.
-    await page.click('[data-action="tombs:teleport:laboratory"]', { timeout: 60_000 });
+    await pressTool('tombs:teleport:laboratory');
     await page.waitForFunction(
       () => ((document.querySelector('[data-field="tombs-room"]')?.textContent) ?? '').includes('Laboratory'),
       null, { timeout: 30_000 },

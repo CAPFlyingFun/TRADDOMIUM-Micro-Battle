@@ -1,0 +1,43 @@
+/* Scoped to the laboratory; no menu, island, or input-system theme changes. */
+.tombs-cinematic { --story-width: min(390px, 36%); --story-height: 38%; color-scheme: dark; }
+.tombs-cinematic * { box-sizing: border-box; }
+.tombs-cinematic button, .tombs-cinematic summary { min-height: 44px !important; cursor: pointer; font: 13px/1.35 system-ui, sans-serif !important; }
+.tombs-cinematic button:focus-visible, .tombs-cinematic summary:focus-visible, .tombs-dialogue-text:focus-visible { outline: 2px solid #b1fff2; outline-offset: 3px; }
+.tombs-cinematic button:hover { background: #294a51 !important; }
+.tombs-cinematic button:disabled { opacity: .45; cursor: default; }
+.tombs-toolbar { position: absolute; top: max(10px, env(safe-area-inset-top)); left: max(12px, env(safe-area-inset-left)); right: max(12px, env(safe-area-inset-right)); display: flex; gap: 10px; align-items: center; pointer-events: auto; z-index: 3; }
+.tombs-brand { margin-right: auto; font: 12px/1.4 ui-monospace, monospace; letter-spacing: .15em; color: #c7e2e3; text-shadow: 0 1px 5px #000; }
+.tombs-tools summary { display: flex; align-items: center; padding: 8px 14px; border: 1px solid #86b0b14a; border-radius: 6px; background: #102831f2; color: #dcebea; }
+.tombs-tools[open] { position: relative; }
+.tombs-tools[open] .tombs-tool-panel { position: static !important; max-width: none !important; align-items: stretch !important; background: #0d222bf5 !important; }
+.tombs-tools[open] { position: absolute; right: 80px; top: 0; width: min(440px, calc(100vw - 112px)); max-height: calc(100dvh - 30px); overflow-y: auto; background: #0d222b; border-radius: 6px; }
+.tombs-tools[open] summary { position: sticky; top: 0; background: #19353e; }
+.tombs-tool-panel > div { white-space: normal !important; }
+.tombs-input { position: absolute; inset: 0 var(--story-width) 0 0; pointer-events: none; }
+.tombs-reach { max-width: calc(100% - 175px); left: auto !important; right: 12px; transform: none !important; }
+.tombs-reach [data-field] { white-space: normal !important; }
+.tombs-dialogue { top: 72px; bottom: max(12px, env(safe-area-inset-bottom)) !important; right: max(12px, env(safe-area-inset-right)) !important; width: calc(var(--story-width) - 20px); max-width: none !important; padding: 20px !important; gap: 16px !important; border-color: #86b0b14a !important; background: #09171ef5 !important; box-shadow: 0 12px 40px #0004; }
+.tombs-dialogue-text { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y; gap: 18px !important; padding-right: 6px; scrollbar-width: thin; scrollbar-color: #486c72 transparent; }
+.tombs-dialogue [data-field="tombs-beat"] { white-space: normal !important; font: 11px/1.6 ui-monospace, monospace !important; letter-spacing: .14em !important; }
+.tombs-dialogue [data-field="tombs-speaker"] { white-space: normal !important; font: 16px/1.4 system-ui, sans-serif; color: #9ed6d5 !important; }
+.tombs-dialogue [data-field="tombs-line"] { font: 22px/1.6 Georgia, serif; color: #e5ece5; }
+.tombs-dialogue-controls { flex-shrink: 0; padding-top: 12px; border-top: 1px solid #86b0b14a; gap: 8px !important; }
+.tombs-cinematic[data-started="false"] .tombs-dialogue { top: auto; }
+@media (orientation: portrait) {
+  .tombs-cinematic { --story-width: 0px; }
+  .tombs-brand { max-width: 135px; font-size: 10px; }
+  .tombs-dialogue { top: auto; left: max(10px, env(safe-area-inset-left)); right: max(10px, env(safe-area-inset-right)) !important; height: var(--story-height); width: auto; padding: 16px !important; }
+  .tombs-input { bottom: calc(var(--story-height) + 24px); }
+  .tombs-dialogue [data-field="tombs-line"] { font-size: 20px; }
+  .tombs-cinematic[data-started="false"] .tombs-dialogue { height: auto; }
+  .tombs-cinematic[data-started="false"] .tombs-input { bottom: 100px; }
+}
+@media (orientation: landscape) and (max-height: 500px) {
+  .tombs-cinematic { --story-width: 40%; }
+  .tombs-dialogue { top: 64px; padding: 12px !important; gap: 8px !important; }
+  .tombs-dialogue-text { gap: 10px !important; }
+  .tombs-dialogue [data-field="tombs-line"] { font-size: 18px; line-height: 1.5; }
+  .tombs-dialogue-controls { padding-top: 8px; }
+}
+/* MoveStick is normally viewport-fixed. Only this lab hosts it in the stage. */
+.tombs-input [data-control="stick"] { position: absolute !important; }
