@@ -61,6 +61,11 @@ const FLAT_FACING = 0.7;
 /** How far out of the card's OWN plane a lifted triangle may sit. A badge in
  * a vinyl sleeve is a few millimetres thick; nothing further out is card. */
 const CARD_HALF_THICK = 0.003;
+/** How far in FRONT of the card a detached piece of it may stand and still
+ * be printed, and how square-on it must face. See `findCard`. */
+const LIP_REACH = 0.010, LIP_FACING = 0.7;
+/** And how far BEHIND it a detached piece of the printed sheet may lie. */
+const CARD_BACK = 0.0035;
 
 const TYPE = {
   POSITION: 'VEC3', NORMAL: 'VEC3', TANGENT: 'VEC4', TEXCOORD_0: 'VEC2', TEXCOORD_1: 'VEC2',
@@ -351,9 +356,44 @@ function findCard(prim, S, img, slab) {
     const u = q[0] * ex[0] + q[1] * ex[1], v = q[0] * ey[0] + q[1] * ey[1];
     u0 = Math.min(u0, u); u1 = Math.max(u1, u); v0 = Math.min(v0, v); v1 = Math.max(v1, v);
   }
+  // THE WHOLE PRINTED FACE, INCLUDING THE PIECES THE FILL CANNOT REACH.
+  //
+  // Joshua, 2026-09-29: "the top of the badge for Jack looks cut-off". It
+  // was. Along the top of his card the scan left the printed sheet in
+  // DETACHED pieces, one to two millimetres behind the rest and joined to
+  // it by nothing but the sleeve's out-of-plane edge — so the plane-gated
+  // fill never reached them, they kept the body's grey smear, and the
+  // lifted face had holes in it through which that smear covered the top
+  // of the TOMBS wordmark. Measured on Jack-Lab2: 14 triangles, facing the
+  // viewer at 0.97 to 0.99, 1.2 to 1.9 mm behind the plane.
+  //
+  // So once the frame is known, every triangle that faces the viewer, lies
+  // within the card's thickness of its plane (a little further in FRONT,
+  // where a clear sleeve's lip would be) and projects wholly inside the
+  // printed rectangle is printed too, through the same frame, so the art
+  // runs on unbroken. The frame itself is not refitted: it was measured
+  // from the connected face, and these pieces sit inside it by definition.
+  const W = u1 - u0, H = v1 - v0;
+  const inFrame = (v) => {
+    const q = [P[v * 3] - c[0], P[v * 3 + 1] - c[1], P[v * 3 + 2] - c[2]];
+    const u = q[0] * UX[0] + q[1] * UX[1] + q[2] * UX[2] - u0;
+    const w = v1 - (q[0] * UY[0] + q[1] * UY[1] + q[2] * UY[2]);
+    const d = q[0] * pn[0] + q[1] * pn[1] + q[2] * pn[2];
+    return u >= -0.0005 && u <= W + 0.0005 && w >= -0.0005 && w <= H + 0.0005 && d >= -CARD_BACK && d <= LIP_REACH;
+  };
+  const lip = [];
+  for (let t = 0; t < nt; t++) {
+    if (face.has(t)) continue;
+    const n = nrmOf(t);
+    if (n[0] * pn[0] + n[1] * pn[1] + n[2] * pn[2] < LIP_FACING) continue;
+    if (inFrame(IDX[t * 3]) && inFrame(IDX[t * 3 + 1]) && inFrame(IDX[t * 3 + 2])) lip.push(t);
+  }
+  for (const t of lip) face.add(t);
+
   return {
     tris: face,
-    rim: tris.size - face.size,
+    lip: lip.length,
+    rim: tris.size - face.size + lip.length,
     dropped: refused,
     roll,
     frame: { c, ux: UX, uy: UY, u0, v1, w: u1 - u0, h: v1 - v0 },
@@ -375,11 +415,11 @@ export async function printBadge(doc, spec, { root = '.', log = () => {} } = {})
   const { data: img } = await sharp(Buffer.from(tex.getImage()))
     .removeAlpha().raw().toBuffer({ resolveWithObject: true });
 
-  const { tris, rim, dropped, roll, frame } = findCard(prim, S, img, spec.slab);
+  const { tris, lip, rim, dropped, roll, frame } = findCard(prim, S, img, spec.slab);
   const P = prim.getAttribute('POSITION').getArray();
   const IDX = prim.getIndices().getArray();
   const W = frame.w, H = frame.h;
-  log(`badge ${tris.size} printed-face triangles (${rim} rim left on the body, ${dropped} neighbours refused as out of its plane), printed face ${(W * 1000).toFixed(1)} x ${(H * 1000).toFixed(1)} mm, aspect ${(W / H).toFixed(3)}, hanging at ${roll >= 0 ? '' : '-'}${Math.abs(roll).toFixed(2)}° ${roll >= 0 ? 'clockwise' : 'anticlockwise'}`);
+  log(`badge ${tris.size} printed-face triangles (${lip} of them detached pieces printed through the frame, ${rim} rim left on the body, ${dropped} neighbours refused as out of its plane), printed face ${(W * 1000).toFixed(1)} x ${(H * 1000).toFixed(1)} mm, aspect ${(W / H).toFixed(3)}, hanging at ${roll >= 0 ? '' : '-'}${Math.abs(roll).toFixed(2)}° ${roll >= 0 ? 'clockwise' : 'anticlockwise'}`);
 
   const semantics = prim.listSemantics();
   const remap = new Map(), order = [];
