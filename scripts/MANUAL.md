@@ -42,8 +42,15 @@ as listed, prose included, so a path is written there only to list it.
 
 # Manual-only
 
-Nothing here is run by hand. The one entry is a helper module, which
-cannot be wired because it is never run on its own:
+One entry is run by hand; the rest are helper modules, which cannot be
+wired because they are never run on their own:
+
+- `scripts/bakeStoryLab.py` — bakes the story's painted laboratory into
+  `public/models/lab-story.glb` from `art/story/lab-night.jpg`: recovers
+  the picture's camera, rebuilds the room as boxes and bakes the picture
+  onto them (`src/storylab`). Manual because it needs Python 3 with numpy
+  and OpenCV, which the repository does not ship:
+  `python3 scripts/bakeStoryLab.py`.
 
 - `scripts/probeWeather.mjs` — the canned Open-Meteo the world probes
   share: routes the island's weather request to a reply for the places

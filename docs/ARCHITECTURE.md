@@ -219,6 +219,14 @@ src/
                 (so tiling runs unbroken across adjacent slabs of one
                 wall) and a curved one keeps its own wrap. Untextured is
                 the fallback, not a second look.
+  storylab/     Chapter 1's laboratory as the STORY paints it, rebuilt
+                in 3D: the painted picture's camera recovered from its own
+                lines, the room as boxes with the picture baked back onto
+                them (public/models/lab-story.glb, from
+                scripts/bakeStoryLab.py), and the real Jack and Sarah posed
+                in it (actor/humanSeated for the chair). A dev tool with no
+                session, like tombs/; not the game's floor plan, which
+                stays world/tombs. Added alpha.61.
   story/        the chapters as BEATS, and core: an ordered list of runs
                 of `lineId`s from the voice manifest, each naming one of a
                 handful of reusable CAMERAS by identity. Pure data, no
