@@ -89,6 +89,7 @@ import { MeshoptDecoder, MeshoptEncoder } from 'meshoptimizer';
 import sharp from 'sharp';
 import { authorSarah } from './authorSarah.mjs';
 import { printBadge } from './printBadge.mjs';
+import { clearShirtLogo } from './clearShirtLogo.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
@@ -165,8 +166,20 @@ const HUMANS = [
   // 2026-09-19 on the last one: "Don't trim it as it aligns with the badge
   // holder"). Lab1 needed 4%. The art was drawn for Lab1's oversized
   // holder; a redraw at 0.58 would need none.
+  //
+  // `logo` is the box on his chest where the master printed "TOIARG" — the
+  // scanner's attempt at TOMBS — and `clearShirtLogo.mjs` paints it out
+  // (Joshua, 2026-09-29: paint over it rather than repair the text). The
+  // box was read off an orthographic render of this master and holds the
+  // word and its tagline with a few millimetres to spare.
+  //
+  // The photograph on his card is his 2D storyboard face from TMB-Story's
+  // character sheet, not the stranger ChatGPT drew there first (Joshua,
+  // 2026-09-29: "ChatGPT did the wrong face for Jack... use the 2D image of
+  // Jack").
   {
     master: 'Jack-Lab2.glb', out: 'jack.glb', who: 'Jack Bennett', panel: null, repair: false,
+    logo: { box: { x0: 0.040, x1: 0.125, y0: 1.295, y1: 1.340, zMin: 0.03 } },
     badge: { art: 'art/humans/badge/jack-tombs.webp', slab: { zMin: 0.1260, yMin: 1.070, yMax: 1.170, xMid: 0.003, xHalf: 0.035 } },
   },
   // SARAH IS Lab2, AND Lab1 IS KEPT (Joshua, 2026-09-18: "go ahead and switch
@@ -745,7 +758,17 @@ async function writeBindFixture() {
 async function main() {
   if (!existsSync(OUT)) mkdirSync(OUT, { recursive: true });
   if (!existsSync(CACHE)) mkdirSync(CACHE, { recursive: true });
-  const missing = HUMANS.filter((h) => !existsSync(join(MASTERS, h.master)));
+  // `--only=jack` (or `--only=sarah`) bakes one body, so a new master for
+  // one of them never waits on the other's.
+  const onlyArg = process.argv.find((a) => a.startsWith('--only='));
+  const only = onlyArg ? onlyArg.slice('--only='.length).replace(/\.glb$/, '') : null;
+  const chosen = only ? HUMANS.filter((h) => h.out.replace(/\.glb$/, '') === only) : HUMANS;
+  if (only && !chosen.length) {
+    console.error(`[bake:humans] --only=${only} names nobody — expected one of ${HUMANS.map((h) => h.out.replace(/\.glb$/, '')).join(', ')}`);
+    process.exitCode = 1;
+    return;
+  }
+  const missing = chosen.filter((h) => !existsSync(join(MASTERS, h.master)));
   if (missing.length > 0) {
     console.error(`[bake:humans] no masters in art/humans/ — ${missing.map((m) => m.master).join(', ')}`);
     console.error(`[bake:humans] fetch them once, then re-run:`);
@@ -783,7 +806,7 @@ async function main() {
   await MeshoptEncoder.ready;
   const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'meshopt.encoder': MeshoptEncoder });
 
-  for (const human of HUMANS) {
+  for (const human of chosen) {
     const from = join(MASTERS, human.master);
     const to = join(OUT, human.out);
     const before = statSync(from).size;
@@ -803,6 +826,9 @@ async function main() {
     // AFTER the clothing, never before: the occlusion bake is cached
     // against the master's own geometry, and lifting the card out first
     // would silently change what that cache is a bake OF.
+    if (human.logo) {
+      await clearShirtLogo(doc, human.logo, { log: (line) => console.log(`[bake:humans]   ${human.who}: ${line}`) });
+    }
     if (human.badge) {
       await printBadge(doc, human.badge, { root: ROOT, log: (line) => console.log(`[bake:humans]   ${human.who}: ${line}`) });
     }

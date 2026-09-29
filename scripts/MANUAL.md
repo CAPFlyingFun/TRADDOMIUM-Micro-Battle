@@ -108,6 +108,14 @@ wired because they are never run on their own:
   card, sleeve and clip into one 32 mm lump welded to the cloth and needs
   a colour gate as well. A module, not a command; imported by the
   `bake:humans` script, which holds each person's slab.
+- `scripts/clearShirtLogo.mjs` — paints out the "TOIARG" logo the scanner
+  printed on Jack's polo where TOMBS was meant to be (Joshua, 2026-09-29:
+  paint over it rather than repair the text). The letters and their halo
+  are found in SPACE inside a box on the chest and refilled from the polo
+  round them, gathered in 3D so the fill crosses UV seams; the colour,
+  normal and roughness maps are all filled, because the roughness map
+  printed the logo as a satin block of its own. A module, not a command;
+  imported by the `bake:humans` script, which holds the box.
 - `scripts/relayHarness.mjs` — starts `wrangler dev --local` on a free
   port, waits for `/health`, and stops it again, cleaning up its Durable
   Object state. Imported by `npm run probe:relay`,
