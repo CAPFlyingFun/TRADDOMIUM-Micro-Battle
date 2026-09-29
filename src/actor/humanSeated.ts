@@ -75,6 +75,21 @@ const SHIN_TARGET = 8 * DEG;
 /** Knees a little apart, the way a person sits. */
 const THIGH_SPREAD = 7 * DEG;
 
+/**
+ * One arm: down from the T, pitched forward, twisted in about its own
+ * length, bent at the elbow, and the hand bent at the wrist — `wristBend`
+ * the way the elbow bends, `wristTilt` about the forward axis. Folded, the
+ * hands wrap back round the other arm instead of sticking out past the body.
+ */
+interface ArmSpec {
+  readonly down: number;
+  readonly forward: number;
+  readonly twist: number;
+  readonly elbow: number;
+  readonly wristBend: number;
+  readonly wristTilt: number;
+}
+
 interface Style {
   /** Spine: + tips forward. A doze slumps BACK into the chair. */
   readonly spine: number;
@@ -84,29 +99,39 @@ interface Style {
   readonly head: number;
   /** Neck and head roll toward the chosen shoulder. */
   readonly roll: number;
-  /** Upper arm down from the T, swung forward, and twisted inward about its own length. */
-  readonly armDown: number;
-  readonly armForward: number;
-  readonly armTwist: number;
-  readonly elbow: number;
-  readonly wrist: number;
+  /**
+   * The two arms. Folded arms are not a mirror image: one forearm lies OVER
+   * the other, further forward and a little higher, and each hand reaches
+   * past the middle toward the other elbow. A symmetric fold puts both
+   * forearms at the same height and they pass through each other
+   * (Joshua, 2026-09-29: "Jack's hands cross through each other").
+   */
+  readonly over: ArmSpec;
+  readonly under: ArmSpec;
   /** Breath rise at the chest, radians, and its rate in Hz. */
   readonly breath: number;
   readonly breathHz: number;
 }
 
 const STYLES: Readonly<Record<SeatedStyle, Style>> = {
-  // Arms folded: upper arms down and a little forward, twisted in so the
-  // bent forearms cross in front of the chest rather than pointing ahead.
+  // Arms folded across the chest: the upper arms hang a little forward, the
+  // forearms turn in across the body, the OVER one in front of the UNDER.
   doze: {
-    spine: -9 * DEG, chest: 5 * DEG, neck: 16 * DEG, head: 10 * DEG, roll: 16 * DEG,
-    armDown: 74 * DEG, armForward: 34 * DEG, armTwist: 62 * DEG, elbow: 112 * DEG, wrist: 6 * DEG,
+    spine: -9 * DEG, chest: 5 * DEG, neck: 26 * DEG, head: 18 * DEG, roll: 20 * DEG,
+    // Found by search against both real skeletons (tests/humanSeated.test.ts
+    // pins the result): the elbows at the sides (never past hanging, which
+    // drives the upper arm into the chest), the forearms stacked across the
+    // stomach with their centre lines a forearm's thickness apart, the right
+    // over the left, 6 cm in front of it and 7-9 cm higher, the hands level.
+    over: { down: 88 * DEG, forward: 45 * DEG, twist: 81 * DEG, elbow: 85 * DEG, wristBend: 11 * DEG, wristTilt: 9 * DEG },
+    under: { down: 88 * DEG, forward: 26 * DEG, twist: 83 * DEG, elbow: 81 * DEG, wristBend: 12 * DEG, wristTilt: -5 * DEG },
     breath: 1.6 * DEG, breathHz: 0.2,
   },
   // At the desk: upper arms down and forward, forearms out over the lap.
   sit: {
     spine: 2 * DEG, chest: 2 * DEG, neck: 4 * DEG, head: 2 * DEG, roll: 0,
-    armDown: 80 * DEG, armForward: 24 * DEG, armTwist: 25 * DEG, elbow: 70 * DEG, wrist: 4 * DEG,
+    over: { down: 80 * DEG, forward: 24 * DEG, twist: 25 * DEG, elbow: 70 * DEG, wristBend: 0, wristTilt: 4 * DEG },
+    under: { down: 80 * DEG, forward: 24 * DEG, twist: 25 * DEG, elbow: 70 * DEG, wristBend: 0, wristTilt: 4 * DEG },
     breath: 1.0 * DEG, breathHz: 0.25,
   },
 };
@@ -173,17 +198,18 @@ export function poseSeated(
   write(out[3], j.head, qMul(rz(roll * 0.4), rx(st.head)));
 
   // Arms. `s` is the direction the arm runs in the bind: +1 along +X.
-  const arm = (i: number, shoulder: number, elbow: number, wrist: number, s: number) => {
+  const arm = (i: number, shoulder: number, elbow: number, wrist: number, s: number, a: ArmSpec) => {
     // Read right to left: twist about its own length, bring it down, then
     // pitch the lowered arm forward. The pitch is about X, not Y: `Ry`
     // swings a HORIZONTAL arm fore and aft, but by then the arm hangs, and
     // turning a hanging arm about the vertical only spins it in place.
-    write(out[i], shoulder, qMul(rx(-st.armForward), qMul(rz(-s * st.armDown), rx(st.armTwist))));
-    write(out[i + 1], elbow, ry(-s * st.elbow));
-    write(out[i + 2], wrist, rz(-s * st.wrist));
+    write(out[i], shoulder, qMul(rx(-a.forward), qMul(rz(-s * a.down), rx(a.twist))));
+    write(out[i + 1], elbow, ry(-s * a.elbow));
+    write(out[i + 2], wrist, qMul(ry(-s * a.wristBend), rz(-s * a.wristTilt)));
   };
-  arm(4, j.shoulderL, j.elbowL, j.wristL, L);
-  arm(7, j.shoulderR, j.elbowR, j.wristR, -L);
+  // The right forearm over the left, the commoner fold (and either reads).
+  arm(4, j.shoulderL, j.elbowL, j.wristL, L, st.under);
+  arm(7, j.shoulderR, j.elbowR, j.wristR, -L, st.over);
 
   // Legs: thigh forward to level and yawed a little out, shin back down,
   // foot back to flat. A bone's bind lean is measured as the angle it

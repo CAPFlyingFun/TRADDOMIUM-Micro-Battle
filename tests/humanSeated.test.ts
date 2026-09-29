@@ -24,6 +24,17 @@ type V = [number, number, number];
 const sub = (a: V, b: V): V => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
 const len = (a: V) => Math.hypot(a[0], a[1], a[2]);
 const deg = (r: number) => (r * 180) / Math.PI;
+const dot = (a: V, b: V) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+/** Closest distance between segments p1-q1 and p2-q2. */
+function segmentGap(p1: V, q1: V, p2: V, q2: V): number {
+  const d1 = sub(q1, p1), d2 = sub(q2, p2), r = sub(p1, p2);
+  const a = dot(d1, d1), e = dot(d2, d2), f = dot(d2, r), c = dot(d1, r), b = dot(d1, d2);
+  const den = a * e - b * b;
+  let s = den > 1e-12 ? Math.min(1, Math.max(0, (b * f - c * e) / den)) : 0;
+  let t = (b * s + f) / e;
+  if (t < 0) { t = 0; s = Math.min(1, Math.max(0, -c / a)); } else if (t > 1) { t = 1; s = Math.min(1, Math.max(0, (b - c) / a)); }
+  return len(sub([p1[0] + d1[0] * s, p1[1] + d1[1] * s, p1[2] + d1[2] * s], [p2[0] + d2[0] * t, p2[1] + d2[1] * t, p2[2] + d2[2] * t]));
+}
 
 for (const master of MASTERS) {
   const bind = master.bind;
@@ -60,6 +71,24 @@ for (const master of MASTERS) {
         expect(hips[1]).toBeCloseTo((bind[j.hipL].y + bind[j.hipR].y) / 2, 9);
       });
     }
+
+    it('doze: the forearms fold one over the other and never pass through each other', () => {
+      // Joshua, 2026-09-29: "Jack's hands cross through each other". Folded
+      // arms STACK: the centre lines of the two forearms pass at least a
+      // forearm's thickness apart (7 cm), the right (over) forearm lies in
+      // front of and above the left, each wrist is past the middle, and the
+      // elbows stay out at the sides rather than swinging into the chest.
+      const p = pose('doze');
+      const u = 1.7 / m.height; // metres per bind unit
+      const gap = segmentGap(p[j.elbowL], p[j.wristL], p[j.elbowR], p[j.wristR]) * u;
+      expect(gap).toBeGreaterThan(0.07);
+      const chest = p[j.chest], L = m.leftSign < 0 ? -1 : 1;
+      expect(-(p[j.wristL][0] - chest[0]) * L * u).toBeGreaterThan(0.03);
+      expect((p[j.wristR][0] - chest[0]) * L * u).toBeGreaterThan(0.03);
+      expect((p[j.wristR][2] - p[j.wristL][2]) * u).toBeGreaterThan(0.04);
+      expect((p[j.wristR][1] - p[j.wristL][1]) * u).toBeGreaterThan(0.04);
+      for (const e of [j.elbowL, j.elbowR]) expect(Math.abs(p[e][0] - chest[0]) * u).toBeGreaterThan(0.15);
+    });
 
     it('doze: arms folded in front of the chest, head dropped toward the chosen shoulder', () => {
       const p = pose('doze');

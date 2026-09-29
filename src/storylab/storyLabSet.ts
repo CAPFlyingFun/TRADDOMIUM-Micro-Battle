@@ -71,10 +71,39 @@ export function yawToward(from: Vec3M, to: Vec3M): number {
 /** Jack's monitor on the back desk: the 2D story's `jack-monitor`, measured on the picture. */
 export const JACK_MONITOR: Vec3M = [0.8, 1.21, -3.8];
 
-/** Jack, asleep in his chair at the story's opening (stage (720, 1200)). */
+/**
+ * THE FLOOR A CHAIR OR A PERSON MAY STAND ON: the aisle between the two
+ * runs of cabinets, measured on the picture (the cabinets' front faces and
+ * the centre desk's front edge). The 2D story kept its figures inside a
+ * traced floor polygon for the same reason; this is that rule in metres.
+ * The right run stops at `rightRunEnds`; nearer the camera the table there
+ * steps out to `rightNear`.
+ */
+export const AISLE = Object.freeze({
+  left: -0.50, right: 1.22, deskFront: -3.65, rightRunEnds: -1.46, rightNear: 1.06,
+});
+
+/** The chair's footprint: its five-star base, casters included. */
+export const CHAIR_FOOTPRINT = CHAIR.baseRadius + CHAIR.casterRadius;
+
+/** True when a round footprint of `radius` at `at` lies wholly on the aisle's floor. */
+export function onAisle(at: Vec3M, radius: number): boolean {
+  const right = at[2] + radius > AISLE.rightRunEnds ? Math.min(AISLE.right, AISLE.rightNear) : AISLE.right;
+  return at[0] - radius >= AISLE.left && at[0] + radius <= right && at[2] - radius >= AISLE.deskFront;
+}
+
+/**
+ * Jack, asleep in his chair at the story's opening. The 2D story has him at
+ * stage (720, 1200), which through the picture's camera is room x = −0.43 —
+ * but there the chair's base would stand 0.25 m into the left cabinets
+ * (Joshua, 2026-09-29: "Jack's chair is in the desk cabinets"). The 2D
+ * stage clamped the same chair against its floor polygon; this is that
+ * clamp: as close to the left run as the base allows, 5 cm clear.
+ */
+const JACK_AT: Vec3M = [AISLE.left + CHAIR_FOOTPRINT + 0.05, 0, -3.0];
 export const JACK_CHAIR: Placement = Object.freeze({
-  at: [-0.43, 0, -3.05] as Vec3M,
-  yaw: yawToward([-0.43, 0, -3.05], [JACK_MONITOR[0], 0, JACK_MONITOR[2]]),
+  at: JACK_AT,
+  yaw: yawToward(JACK_AT, [JACK_MONITOR[0], 0, JACK_MONITOR[2]]),
 });
 
 /**
@@ -87,7 +116,7 @@ export const SARAH_STAND: Placement = Object.freeze({
 });
 
 /** Where Jack's head is when he is asleep in the chair, for a camera to look at. */
-export const JACK_HEAD_SEATED: Vec3M = [-0.40, 1.2, -3.02];
+export const JACK_HEAD_SEATED: Vec3M = [JACK_AT[0] + 0.02, 1.2, JACK_AT[2] + 0.03];
 
 export interface Shot {
   readonly id: string;
