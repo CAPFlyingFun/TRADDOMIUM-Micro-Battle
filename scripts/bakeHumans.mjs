@@ -90,6 +90,7 @@ import sharp from 'sharp';
 import { authorSarah } from './authorSarah.mjs';
 import { printBadge } from './printBadge.mjs';
 import { clearShirtLogo } from './clearShirtLogo.mjs';
+import { paintSarah } from './paintSarah.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
@@ -210,9 +211,25 @@ const HUMANS = [
   // shadow, and lifts the ID card onto its own material so the TOMBS
   // artwork on it is legible. It touches nothing above the collarbone —
   // the scan's face is better than anything procedural would put there.
+  //
+  // SARAH IS Lab3, AND SHE IS PAINTED, NOT REPAIRED (Joshua, 2026-09-29,
+  // sending Meshy's UNTEXTURED pass with four fingers rigged a hand: "Let's
+  // see if we can texture manually since this non-textured looks good").
+  // Rendered plain, every fault the Lab2 notes above fought — the ragged
+  // neckline, the patches on the strap — turned out to be paint, never
+  // geometry: the collar is a clean crew neck, the lanyard a real strap, the
+  // card a card. So `paint` runs `paintSarah.mjs`, which colours every texel
+  // by WHERE IT IS on her body and paints her face in front projection, and
+  // `author` and the panel retire with the scan they were written for.
+  //
+  //   Sarah-Lab3.glb  19.66 MB  313,076 tris  61 joints  no textures
+  //
+  // The card is welded flush to the bump, so the slab is the card's own
+  // outline in x and y and generous in z; the plane-gated fill does the rest.
+  // Lab2 is kept for the same reason Lab1 was.
   {
-    master: 'Sarah-Lab2.glb', out: 'sarah.glb', who: 'Sarah Bennett', panel: 'sarah', repair: false, author: true,
-    badge: { art: 'art/humans/badge/sarah-tombs.webp', slab: { zMin: 0.156, yMin: 1.050, yMax: 1.152, xMid: 0.005, xHalf: 0.040 } },
+    master: 'Sarah-Lab3.glb', out: 'sarah.glb', who: 'Sarah Bennett', panel: null, repair: false, paint: true,
+    badge: { art: 'art/humans/badge/sarah-tombs.webp', slab: { zMin: 0.085, yMin: 1.096, yMax: 1.178, xMid: -0.0003, xHalf: 0.0305 } },
   },
 ];
 
@@ -815,6 +832,15 @@ async function main() {
     if (human.panel) await panelPass(doc, human.who, human.panel, PANELS_ONLY, human.repair === true);
     // `--panels` only exports the pictures to paint; it writes no model.
     if (PANELS_ONLY) continue;
+    if (human.paint) {
+      console.log(`[bake:humans] ${human.who}: painting the untextured master`);
+      await paintSarah(doc, {
+        cacheDir: CACHE,
+        root: ROOT,
+        stamp: `${human.master.replace(/\.glb$/, '')}-${before}`,
+        log: (line) => console.log(`[bake:humans]   ${line}`),
+      });
+    }
     if (human.author) {
       console.log(`[bake:humans] ${human.who}: authoring the clothing and printing the badge`);
       await authorSarah(doc, {
@@ -832,7 +858,9 @@ async function main() {
     if (human.badge) {
       await printBadge(doc, human.badge, { root: ROOT, log: (line) => console.log(`[bake:humans]   ${human.who}: ${line}`) });
     }
-    await liftRoughness(doc, human.who);
+    // A painted body's roughness is AUTHORED — wet eyes and lips, matte
+    // cloth — so it is not lifted toward the scans' matte mean.
+    if (!human.paint) await liftRoughness(doc, human.who);
 
     // WHAT THE MAPS ARE WORTH, one slot at a time. `textureCompress` is
     // given a slot filter so the metallic-roughness map can be told a

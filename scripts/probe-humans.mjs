@@ -201,7 +201,8 @@ async function main() {
     // Joshua has already had to say "the badge is too small for the badge
     // holder" from a device once. This is the shot that says it first.
     for (const who of ['jack', 'sarah']) {
-      await page.evaluate((w) => window.__frame(w, w === 'jack' ? 1.12 : 1.10, 0.30), who);
+      // Sarah's card (Lab3) hangs 1.098-1.176 m, centred at 1.137.
+      await page.evaluate((w) => window.__frame(w, w === 'jack' ? 1.12 : 1.137, 0.30), who);
       await shot(`humans-7-${who}-badge.png`, `${who}'s ID card, as printed`);
     }
     // THE LADDER, on the body the question was about: Sarah's top is the

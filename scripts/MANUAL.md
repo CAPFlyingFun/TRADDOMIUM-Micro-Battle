@@ -116,6 +116,14 @@ wired because they are never run on their own:
   normal and roughness maps are all filled, because the roughness map
   printed the logo as a satin block of its own. A module, not a command;
   imported by the `bake:humans` script, which holds the box.
+- `scripts/paintSarah.mjs` — paints Sarah's untextured `Sarah-Lab3.glb`
+  from nothing: every texel coloured by where it sits on her body (skin,
+  hair, top with its neckband, skirt, shoes, bands, the lanyard found by its
+  shape along a measured path, card), and her face and front projected from
+  the reference photograph she was made from (`art/humans/ref/`), each
+  region taking the photograph only where its pixel is that material. The
+  occlusion bake supplies the shading the photograph does not. A module, not
+  a command; imported by the `bake:humans` script.
 - `scripts/relayHarness.mjs` — starts `wrangler dev --local` on a free
   port, waits for `/health`, and stops it again, cleaning up its Durable
   Object state. Imported by `npm run probe:relay`,
