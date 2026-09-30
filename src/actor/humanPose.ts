@@ -129,13 +129,23 @@ const TAU = Math.PI * 2;
 export const HUMAN_POSE_TURNS = 15;
 
 /**
- * How far the upper arm comes down from the horizontal bind. 77.5° of
- * the 90° that would hang it dead vertical, so the 12.5° left over is
- * the flare that carries the forearm and hand clear of the hips: the
- * hanging wrist lands 0.256 from the body's centre line on Sarah and
- * 0.237 on Jack, against a hip half-width of 0.068 on both.
+ * How far from vertical a hanging arm is left, shoulder to wrist in one
+ * line. The arm is not lowered by a fixed angle any more: each master's
+ * T-pose is read for its own droop and its own elbow kink (`writeArm`),
+ * because Jack's upper arm droops 9° below the horizontal while his
+ * forearm lies level, and a fixed 77.5° drop turned that hidden 11° kink
+ * into an elbow at his ribs with the forearm and hand flaring out.
+ *
+ * And the angle is wider than an anatomy table's because of where it is
+ * measured from: the rig's shoulder joint sits up by the base of the
+ * neck, not in the ball of the shoulder, so a small angle from there runs
+ * the upper arm straight down the side of the chest. Rendered at 10°,
+ * 14°, 17° and 20° on both masters: 10° and 14° press the arm into the
+ * ribs with no gap under it — "Jack's arms are folded in his sides"
+ * (Joshua, 2026-09-30) — 20° starts to read as an A-pose, and 17° hangs
+ * the arm clear of the body with the hand beside the thigh. GAME TUNING.
  */
-const ARM_DOWN = 77.5 * DEG;
+const ARM_FLARE = 17 * DEG;
 
 /** Arms hang a little in front of the torso, not beside it. */
 const SHOULDER_ROLL = 6 * DEG;
@@ -147,17 +157,23 @@ const SHOULDER_ROLL = 6 * DEG;
  */
 const WRIST_IN = 8 * DEG;
 
-/** Elbow flexion held whatever the arm is doing. A runner's arms are up. */
+/**
+ * Elbow flexion held whatever the arm is doing. A walker's arm HANGS: a
+ * few degrees of bend, the hand beside the thigh (Joshua, 2026-09-30,
+ * on 24° walking and 10° standing: "Jack's arms are folded in his sides"
+ * — held that way, the forearms stood out in front of the hips with the
+ * upper arms tucked against the ribs). A runner's arms are up.
+ */
 const ELBOW_BENDS: Readonly<Record<HumanStance, number>> = {
-  stand: 10 * DEG,
-  walk: 24 * DEG,
+  stand: 6 * DEG,
+  walk: 8 * DEG,
   run: 72 * DEG,
 };
 
 /** Extra flexion as an arm comes forward, and none as it goes back. */
 const ELBOW_PUMPS: Readonly<Record<HumanStance, number>> = {
   stand: 0,
-  walk: 10 * DEG,
+  walk: 14 * DEG,
   run: 18 * DEG,
 };
 
@@ -339,6 +355,23 @@ function writeTurnXZ(turn: MutableJointTurn, joint: number, xRadians: number, zR
 }
 
 /**
+ * An elbow: the bind's kink taken out about Z first, then the bend about
+ * Y — `Ry(bend) · Rz(straighten)` as one axis and angle.
+ */
+function writeElbow(turn: MutableJointTurn, joint: number, bend: number, straighten: number): void {
+  const sy = Math.sin(bend * 0.5), cy = Math.cos(bend * 0.5);
+  const sz = Math.sin(straighten * 0.5), cz = Math.cos(straighten * 0.5);
+  let qx = sy * sz, qy = sy * cz, qz = cy * sz, qw = cy * cz;
+  if (qw < 0) { qx = -qx; qy = -qy; qz = -qz; qw = -qw; }
+  const sine = Math.hypot(qx, qy, qz);
+  if (sine < 1e-9) {
+    writeTurn(turn, joint, 0, 1, 0, 0);
+    return;
+  }
+  writeTurn(turn, joint, qx / sine, qy / sine, qz / sine, 2 * Math.atan2(sine, qw));
+}
+
+/**
  * Shoulder, elbow and wrist of one arm, written at `at`, `at + 1` and
  * `at + 2`.
  *
@@ -354,6 +387,7 @@ function writeTurnXZ(turn: MutableJointTurn, joint: number, xRadians: number, zR
  */
 function writeArm(
   out: MutableJointTurn[],
+  bind: readonly BindJoint[],
   at: number,
   shoulder: number,
   elbow: number,
@@ -362,10 +396,17 @@ function writeArm(
   forward: number,
   stance: HumanStance,
 ): void {
+  // The T-pose this master was rigged in: how far its upper arm already
+  // droops below the horizontal, and how far its forearm is kinked back
+  // up from the line of the upper arm. The shoulder lowers the rest of
+  // the way to ARM_FLARE; the elbow takes the kink out before it bends.
+  const s = bind[shoulder], e = bind[elbow], w = bind[wrist];
+  const droop = Math.atan2(s.y - e.y, Math.abs(e.x - s.x));
+  const kink = droop - Math.atan2(e.y - w.y, Math.abs(w.x - e.x));
   // Negative X is forward for a hanging arm, so the roll and the swing
   // share one angle and one sign.
-  writeTurnXZ(out[at], shoulder, -(SHOULDER_ROLL + ARM_SWINGS[stance] * forward), -xSign * ARM_DOWN);
-  writeTurn(out[at + 1], elbow, 0, 1, 0, -xSign * (ELBOW_BENDS[stance] + ELBOW_PUMPS[stance] * Math.max(0, forward)));
+  writeTurnXZ(out[at], shoulder, -(SHOULDER_ROLL + ARM_SWINGS[stance] * forward), -xSign * (Math.PI / 2 - ARM_FLARE - droop));
+  writeElbow(out[at + 1], elbow, -xSign * (ELBOW_BENDS[stance] + ELBOW_PUMPS[stance] * Math.max(0, forward)), -xSign * kink);
   writeTurn(out[at + 2], wrist, 0, 0, 1, -xSign * WRIST_IN);
 }
 
@@ -540,8 +581,8 @@ export function poseHuman(
     -sway * (1 - SWAY_COUNTER) - leanRoll * NECK_LEVEL,
   );
 
-  writeArm(out, 3, joints.shoulderL, joints.elbowL, joints.wristL, left, -cycle, stance);
-  writeArm(out, 6, joints.shoulderR, joints.elbowR, joints.wristR, -left, cycle, stance);
+  writeArm(out, bind, 3, joints.shoulderL, joints.elbowL, joints.wristL, left, -cycle, stance);
+  writeArm(out, bind, 6, joints.shoulderR, joints.elbowR, joints.wristR, -left, cycle, stance);
 
   // The left foot lands, furthest forward, at phase 0.25; the right half
   // a cycle later.
