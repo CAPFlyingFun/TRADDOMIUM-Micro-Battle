@@ -91,6 +91,7 @@ import { authorSarah } from './authorSarah.mjs';
 import { printBadge } from './printBadge.mjs';
 import { clearShirtLogo } from './clearShirtLogo.mjs';
 import { paintSarah } from './paintSarah.mjs';
+import { smoothLegWeights } from './smoothLegWeights.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
@@ -228,7 +229,7 @@ const HUMANS = [
   // outline in x and y and generous in z; the plane-gated fill does the rest.
   // Lab2 is kept for the same reason Lab1 was.
   {
-    master: 'Sarah-Lab3.glb', out: 'sarah.glb', who: 'Sarah Bennett', panel: null, repair: false, paint: true,
+    master: 'Sarah-Lab3.glb', out: 'sarah.glb', who: 'Sarah Bennett', panel: null, repair: false, paint: true, smoothLegs: true,
     badge: { art: 'art/humans/badge/sarah-tombs.webp', slab: { zMin: 0.085, yMin: 1.096, yMax: 1.178, xMid: -0.0003, xHalf: 0.0305 } },
   },
 ];
@@ -955,6 +956,9 @@ async function main() {
         if (/^(JOINTS|WEIGHTS)_([1-9]\d*)$/.test(name)) prim.setAttribute(name, null);
       }
     }
+    // A master rigged with hard edges at the knee and ankle tears there as
+    // soon as the walk bends them (`smoothLegWeights.mjs` has the renders).
+    if (human.smoothLegs) smoothLegWeights(doc, { log: (line) => console.log(`[bake:humans]   ${human.who}: ${line}`) });
 
     await doc.transform(
       dedup(),

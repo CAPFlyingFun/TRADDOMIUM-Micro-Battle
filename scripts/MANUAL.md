@@ -124,6 +124,12 @@ wired because they are never run on their own:
   region taking the photograph only where its pixel is that material. The
   occlusion bake supplies the shading the photograph does not. A module, not
   a command; imported by the `bake:humans` script.
+- `scripts/smoothLegWeights.mjs` — rebuilds Sarah's hip, knee and ankle
+  skin weights from height with a smooth blend across each joint, because
+  her Lab3 master was rigged with hard edges there and tore open along
+  them as soon as a walk bent a knee or an ankle. A module, not a command;
+  imported by the `bake:humans` script, run on the bodies whose entry asks
+  for it.
 - `scripts/relayHarness.mjs` — starts `wrangler dev --local` on a free
   port, waits for `/health`, and stops it again, cleaning up its Durable
   Object state. Imported by `npm run probe:relay`,

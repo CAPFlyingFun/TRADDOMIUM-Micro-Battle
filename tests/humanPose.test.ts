@@ -459,11 +459,18 @@ describe('poseHuman: walking and running', () => {
     });
 
     it(`${master.name} swings each arm with the opposite leg`, () => {
+      // Sampled round the whole cycle, half a sample off the grid. The
+      // legs cross twice a cycle, at a phase that moves with the stance
+      // share (0.05 and 0.55 walking, 0.45 and 0.95 running), where the
+      // arms cross too; no sample lands on one, so every sample has a
+      // lead for the arms to agree with. The lead is the THIGHS', read at
+      // the knees: an arm swings against the thigh, and a swinging foot
+      // trails its own thigh by as much as the knee has folded.
       for (const stance of ['walk', 'run'] as const) {
-        for (const phase of PHASES) {
-          const after = poseAt(bind, measure, gaitOf({ stance, phase }));
+        for (let k = 0; k < 40; k += 1) {
+          const after = poseAt(bind, measure, gaitOf({ stance, phase: (k + 0.5) / 40 }));
           const armLead = after[j.wristL].z - after[j.wristR].z;
-          const legLead = after[j.ankleR].z - after[j.ankleL].z;
+          const legLead = after[j.kneeR].z - after[j.kneeL].z;
           expect(Math.abs(legLead)).toBeGreaterThan(0);
           expect(armLead * legLead).toBeGreaterThan(0);
         }
@@ -503,14 +510,24 @@ describe('poseHuman: walking and running', () => {
       }
     });
 
-    it(`${master.name} runs with more ankle travel than it walks, at every phase`, () => {
-      for (const phase of PHASES) {
-        const walk = poseAt(bind, measure, gaitOf({ stance: 'walk', phase }));
-        const run = poseAt(bind, measure, gaitOf({ stance: 'run', phase }));
-        for (const ankle of [j.ankleL, j.ankleR]) {
-          const rest = bindAt(bind, ankle);
-          expect(length(sub(run[ankle], rest))).toBeGreaterThan(length(sub(walk[ankle], rest)));
+    it(`${master.name} runs with more ankle travel than it walks, over a cycle`, () => {
+      // Over a CYCLE, not phase by phase: a run spends less of its cycle
+      // on the ground than a walk, so at one phase a walking foot can be
+      // mid-swing while a running one is planted under the hip. What a
+      // run must have is the longer reach and the higher fold.
+      for (const ankle of [j.ankleL, j.ankleR]) {
+        const rest = bindAt(bind, ankle);
+        const reach = { walk: 0, run: 0 };
+        const lift = { walk: 0, run: 0 };
+        for (let k = 0; k < 40; k += 1) {
+          for (const stance of ['walk', 'run'] as const) {
+            const at = poseAt(bind, measure, gaitOf({ stance, phase: k / 40 }))[ankle];
+            reach[stance] = Math.max(reach[stance], Math.abs(at.z - rest.z));
+            lift[stance] = Math.max(lift[stance], at.y - rest.y);
+          }
         }
+        expect(reach.run).toBeGreaterThan(reach.walk);
+        expect(lift.run).toBeGreaterThan(lift.walk);
       }
     });
 
