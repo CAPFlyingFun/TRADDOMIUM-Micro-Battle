@@ -168,24 +168,47 @@ const ARM_SWINGS: Readonly<Record<HumanStance, number>> = {
   run: 38 * DEG,
 };
 
-/** Step length as a fraction of leg length; the hip angle falls out of it. */
+/**
+ * How far the planted foot sweeps back under the body while it carries
+ * weight, as a fraction of leg length; the hip angle falls out of it.
+ * GAME TUNING toward the measured: an adult's stride is about 1.55 leg
+ * lengths at an ordinary walk (1.4 m on a 0.9 m leg), of which the stance
+ * foot covers `STANCE_SHARES.walk` of the cycle — 0.9 of a leg. The run
+ * sweeps further; most of its extra distance is the flight between
+ * stances, which `STANCE_SHARES.run` gives it.
+ */
 const STEP_LENGTHS: Readonly<Record<HumanStance, number>> = {
   stand: 0,
-  walk: 0.75,
+  walk: 0.9,
   run: 1.15,
 };
 
 /**
- * One whole gait cycle of THIS body, in its bind's units: two of its own
- * steps, left foot to left foot. A caller advancing the phase by
- * distance divides by this and by nothing else, because the foot on the
- * ground sweeps back exactly one step per half cycle (`hipSwing` below)
- * and a stride of any other length is a foot that slides — forward when
- * the body covers more than the pose steps, back when it covers less.
- * Zero for a body standing, whose phase does not advance.
+ * What share of a cycle each foot is ON THE GROUND. MEASURED: walking
+ * stance is about 60% of the gait cycle (Perry & Burnfield, Gait
+ * Analysis, 2nd ed., 2010), which is what gives a walk its moment of
+ * double support; running stance falls below half — about 40% at an easy
+ * run (Novacheck, Gait & Posture 7:77–95, 1998), which is the flight.
+ * Standing has no cycle; the share is only there so nothing divides by 0.
+ */
+const STANCE_SHARES: Readonly<Record<HumanStance, number>> = {
+  stand: 0.6,
+  walk: 0.6,
+  run: 0.4,
+};
+
+/**
+ * One whole gait cycle of THIS body, in its bind's units, left foot to
+ * left foot. A caller advancing the phase by distance divides by this and
+ * by nothing else, because the planted foot sweeps back one step at a
+ * constant rate over its stance share of the cycle (`legCycle`), so the
+ * body has to cover step ÷ share in a cycle for that foot to stand still
+ * on the ground. A stride of any other length is a foot that slides —
+ * forward when the body covers more than the pose steps, back when it
+ * covers less. Zero for a body standing, whose phase does not advance.
  */
 export function humanStride(measure: HumanMeasure, stance: HumanStance): number {
-  return 2 * STEP_LENGTHS[stance] * measure.legLength;
+  return (STEP_LENGTHS[stance] * measure.legLength) / STANCE_SHARES[stance];
 }
 
 /**
@@ -345,12 +368,28 @@ function writeArm(
 
 /**
  * Hip, knee and ankle of one leg, written at `at`, `at + 1` and
- * `at + 2`. `forward` is −1..+1, where this leg is in its own swing.
+ * `at + 2`, at `legPhase` 0..1 of its own cycle: 0 is the moment it
+ * lands, furthest forward.
+ *
+ * THE FOOT DRIVES THE BODY, so the cycle is two different motions and
+ * not one sine. For `share` of it the foot is PLANTED: it sweeps from
+ * furthest forward to furthest back at a CONSTANT rate, which is the rate
+ * the body passes over a foot standing still on the ground (`humanStride`
+ * is what makes the two rates the same number). The rest is the SWING: a
+ * cubic that leaves and arrives at that same rate, so the foot neither
+ * jerks as it lifts nor stubs as it lands, overshooting a little at each
+ * end the way a real foot rolls off and reaches, with the knee folding
+ * to clear the ground in the middle of it — most at mid-swing, where the
+ * foot passes under the hip and the ground is nearest.
+ *
+ * A sine did neither. Its foot moved fastest mid-stance, so no planted
+ * foot stood still; and its knee folded through the whole back half of
+ * the sweep, so the foot came off the ground while it still carried the
+ * body and came down straight-legged a quarter-cycle before it had
+ * finished swinging forward — landing, and then sliding on.
  *
  * The knee is the one joint in the body that may only go one way, so its
- * flexion is `max(0, -forward)`: it bends through the back half of the
- * leg's swing, where a trailing leg has to fold to clear the ground, and
- * is exactly straight through the whole front half. A knee cannot be
+ * flexion is `kneeBend × sin(π u)`, never negative: a knee cannot be
  * hyperextended by a phase, a lean or an amplitude, because the only
  * angle that reaches it is a positive one.
  */
@@ -360,14 +399,31 @@ function writeLeg(
   hip: number,
   knee: number,
   ankle: number,
-  forward: number,
+  legPhase: number,
+  share: number,
   hipSwing: number,
   kneeBend: number,
   ankleRoll: number,
 ): void {
+  let forward: number;
+  let fold = 0;
+  if (legPhase < share) {
+    forward = 1 - (2 * legPhase) / share;
+  } else {
+    // Hermite from −1 to +1 with both end slopes equal to the stance's,
+    // per unit of the swing: −2 (1 − share) / share.
+    const u = (legPhase - share) / (1 - share);
+    const m = (-2 * (1 - share)) / share;
+    forward = ((-4 * u + 6) * u) * u - 1 + m * (((2 * u - 3) * u + 1) * u);
+    fold = Math.sin(Math.PI * u);
+  }
   writeTurn(out[at], hip, 1, 0, 0, -hipSwing * forward);
-  writeTurn(out[at + 1], knee, 1, 0, 0, kneeBend * Math.max(0, -forward));
+  writeTurn(out[at + 1], knee, 1, 0, 0, kneeBend * fold);
   writeTurn(out[at + 2], ankle, 1, 0, 0, -ankleRoll * forward);
+}
+
+function fract(x: number): number {
+  return x - Math.floor(x);
 }
 
 /**
@@ -427,7 +483,11 @@ export function poseHuman(
   // half a cycle behind it, and each arm goes with the OPPOSITE leg, which
   // is what a counter-rotating torso does and what a body with both arms
   // swinging together does not.
-  const cycle = Math.sin(gait.phase * TAU);
+  // The legs cross — both under the hips, one planted, one swinging —
+  // at a phase that moves with the stance share (`legCycle`), and the
+  // arms cross with them.
+  const share = STANCE_SHARES[stance];
+  const cycle = Math.sin((gait.phase - (share / 2 - 0.25)) * TAU);
 
   const knee = bind[joints.kneeL];
   const ankle = bind[joints.ankleL];
@@ -478,8 +538,10 @@ export function poseHuman(
   writeArm(out, 3, joints.shoulderL, joints.elbowL, joints.wristL, left, -cycle, stance);
   writeArm(out, 6, joints.shoulderR, joints.elbowR, joints.wristR, -left, cycle, stance);
 
-  writeLeg(out, 9, joints.hipL, joints.kneeL, joints.ankleL, cycle, hipSwing, kneeBend, ankleRoll);
-  writeLeg(out, 12, joints.hipR, joints.kneeR, joints.ankleR, -cycle, hipSwing, kneeBend, ankleRoll);
+  // The left foot lands, furthest forward, at phase 0.25; the right half
+  // a cycle later.
+  writeLeg(out, 9, joints.hipL, joints.kneeL, joints.ankleL, fract(gait.phase - 0.25), share, hipSwing, kneeBend, ankleRoll);
+  writeLeg(out, 12, joints.hipR, joints.kneeR, joints.ankleR, fract(gait.phase + 0.25), share, hipSwing, kneeBend, ankleRoll);
 
   return usedPrefix(out, HUMAN_POSE_TURNS);
 }

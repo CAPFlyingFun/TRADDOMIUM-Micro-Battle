@@ -92,6 +92,7 @@
  */
 import * as THREE from 'three';
 import { HUMAN_POSE_TURNS, humanStride, poseHuman } from '../actor/humanPose';
+import { createFeet, groundFeet, type FeetState, type FootGround } from '../actor/humanFeet';
 import { newJointTurn, type HumanGait, type HumanMeasure, type HumanStance, type MutableJointTurn } from '../actor/humanRig';
 import { measureHuman } from '../actor/humanSkeleton';
 import { newWalkerState, step as walkStep, type WalkWorld, type WalkerState } from '../actor/Walker';
@@ -738,6 +739,26 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
   const aim = new THREE.Vector3();
   /** Where the walker stood when the body was last posed, for its stride. */
   const strode = { x: walker.x, z: walker.z };
+  /**
+   * THE FEET (`actor/humanFeet`): after the pose, each foot is put on the
+   * floor under it and HELD there while it carries weight, and the body
+   * comes down onto the lower one — the feet drive the body. They let go
+   * while the walker is in the air. Every floor here has full grip; the
+   * rule for one that does not is `FootGround.grip`, read per solid when a
+   * solid has a surface to say so.
+   */
+  let feet: FeetState | null = null;
+  const feetTurns: MutableJointTurn[] = [];
+  const underFoot: { y: number; grip: number } = { y: 0, grip: 1 };
+  const footFrame = {
+    dt: 0, released: false, rootX: 0, rootY: 0, rootZ: 0, rootYaw: 0, unitsPerMetre: 1,
+    groundAt: (x: number, z: number, fromY: number): FootGround | null => {
+      const y = groundUnder(solids, x, z, fromY);
+      if (!Number.isFinite(y)) return null;
+      underFoot.y = y;
+      return underFoot;
+    },
+  };
 
   /**
    * `world/tombs/collide` satisfies `WalkWorld` structurally, which is
@@ -923,6 +944,7 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
   const setWalking = (want: boolean): void => {
     if (want === walking) return;
     walking = want;
+    feet = null;
     people?.hide('jack', want);
     if (body !== null) body.visible = want;
     if (!want) return;
@@ -1037,21 +1059,35 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
     // THE BODY. Its gait phase is advanced by DISTANCE covered rather
     // than by time, which is what keeps the feet planted at half speed;
     // the breath runs on the raw clock beside it. The distance is the
-    // walker's but the stride is the BODY's (`humanStride`): Jack's pose
-    // steps 0.94 m a cycle, and the walker's 1.5 m measured-human stride
-    // slid each planted foot a third of a step forward.
-    if (body !== null) {
-      body.position.set(walker.x * M, FLOOR_UNITS + walker.y * M, walker.z * M);
-      body.rotation.y = walker.heading;
-    }
+    // walker's but the stride is the BODY's (`humanStride`, in bind units,
+    // `bindScale` of them to the metre): Jack's pose steps 1.1 m a cycle,
+    // and the walker's 1.5 m measured-human stride slid each planted foot
+    // a quarter of a step forward.
+    let rootDrop = 0;
     if (bodyRig !== null && bodyMeasure !== null) {
       gait.stance = walker.stance;
-      const stride = humanStride(bodyMeasure, walker.stance);
+      const stride = humanStride(bodyMeasure, walker.stance) / bodyRig.bindScale;
       const travelled = Math.hypot(walker.x - strode.x, walker.z - strode.z);
       if (stride > 0) gait.phase = (gait.phase + travelled / stride) % 1;
       gait.seconds = clock;
       gait.lean = walker.lean;
-      bodyRig.apply(poseHuman(bodyMeasure, bodyRig.bind, gait as HumanGait, turns));
+      const posed = poseHuman(bodyMeasure, bodyRig.bind, gait as HumanGait, turns);
+      // The soles stand at bind y −1 on both masters (`view/HumanRig`).
+      if (feet === null) feet = createFeet(bodyMeasure, bodyRig.bind, -1);
+      footFrame.dt = simDt;
+      footFrame.released = !walker.grounded;
+      footFrame.rootX = walker.x;
+      footFrame.rootY = walker.y;
+      footFrame.rootZ = walker.z;
+      footFrame.rootYaw = walker.heading;
+      footFrame.unitsPerMetre = bodyRig.bindScale;
+      const grounded = groundFeet(feet, bodyMeasure, bodyRig.bind, posed, footFrame, feetTurns);
+      rootDrop = grounded.rootDrop;
+      bodyRig.apply(grounded.turns);
+    }
+    if (body !== null) {
+      body.position.set(walker.x * M, FLOOR_UNITS + (walker.y - rootDrop) * M, walker.z * M);
+      body.rotation.y = walker.heading;
     }
     strode.x = walker.x;
     strode.z = walker.z;
@@ -1286,6 +1322,7 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
         bodyRig?.dispose();
         bodyRig = null;
         bodyMeasure = null;
+        feet = null;
         release(body);
         body = null;
       }
