@@ -176,6 +176,19 @@ const STEP_LENGTHS: Readonly<Record<HumanStance, number>> = {
 };
 
 /**
+ * One whole gait cycle of THIS body, in its bind's units: two of its own
+ * steps, left foot to left foot. A caller advancing the phase by
+ * distance divides by this and by nothing else, because the foot on the
+ * ground sweeps back exactly one step per half cycle (`hipSwing` below)
+ * and a stride of any other length is a foot that slides — forward when
+ * the body covers more than the pose steps, back when it covers less.
+ * Zero for a body standing, whose phase does not advance.
+ */
+export function humanStride(measure: HumanMeasure, stance: HumanStance): number {
+  return 2 * STEP_LENGTHS[stance] * measure.legLength;
+}
+
+/**
  * How far the knee bend picks the foot up off the line of the thigh, as
  * a fraction of leg length. Resolved against the skeleton's own shin,
  * which is why `bind` is a parameter at all.

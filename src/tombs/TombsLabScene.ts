@@ -91,7 +91,7 @@
  * is named in `tombsTool.ts`.
  */
 import * as THREE from 'three';
-import { HUMAN_POSE_TURNS, poseHuman } from '../actor/humanPose';
+import { HUMAN_POSE_TURNS, humanStride, poseHuman } from '../actor/humanPose';
 import { newJointTurn, type HumanGait, type HumanMeasure, type HumanStance, type MutableJointTurn } from '../actor/humanRig';
 import { measureHuman } from '../actor/humanSkeleton';
 import { newWalkerState, step as walkStep, type WalkWorld, type WalkerState } from '../actor/Walker';
@@ -736,6 +736,8 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
     stance: 'stand', phase: 0, seconds: 0, lean: 0,
   };
   const aim = new THREE.Vector3();
+  /** Where the walker stood when the body was last posed, for its stride. */
+  const strode = { x: walker.x, z: walker.z };
 
   /**
    * `world/tombs/collide` satisfies `WalkWorld` structurally, which is
@@ -1032,20 +1034,27 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
     const boom = Math.max(BOOM_MIN_M, hit ? ray.distance - BOOM_MIN_M : BOOM_M);
     free.camera.position.addScaledVector(aim, -boom * M);
 
-    // THE BODY. Its gait phase is the walker's, advanced by DISTANCE
-    // covered rather than by time, which is what keeps the feet planted
-    // at half speed; the breath runs on the raw clock beside it.
+    // THE BODY. Its gait phase is advanced by DISTANCE covered rather
+    // than by time, which is what keeps the feet planted at half speed;
+    // the breath runs on the raw clock beside it. The distance is the
+    // walker's but the stride is the BODY's (`humanStride`): Jack's pose
+    // steps 0.94 m a cycle, and the walker's 1.5 m measured-human stride
+    // slid each planted foot a third of a step forward.
     if (body !== null) {
       body.position.set(walker.x * M, FLOOR_UNITS + walker.y * M, walker.z * M);
       body.rotation.y = walker.heading;
     }
     if (bodyRig !== null && bodyMeasure !== null) {
       gait.stance = walker.stance;
-      gait.phase = walker.phase;
+      const stride = humanStride(bodyMeasure, walker.stance);
+      const travelled = Math.hypot(walker.x - strode.x, walker.z - strode.z);
+      if (stride > 0) gait.phase = (gait.phase + travelled / stride) % 1;
       gait.seconds = clock;
       gait.lean = walker.lean;
       bodyRig.apply(poseHuman(bodyMeasure, bodyRig.bind, gait as HumanGait, turns));
     }
+    strode.x = walker.x;
+    strode.z = walker.z;
     void rawDt;
   };
 
