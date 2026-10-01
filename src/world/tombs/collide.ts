@@ -26,7 +26,7 @@
  * MEASURED on the real plan (`planLab()`, the canonical `LAB_SPEC`): 138
  * slabs of which 92 are solid, and 18 pillars of which 10 are. ONE
  * HUNDRED AND TWO SOLIDS. The laboratory alone holds 25 of them. A step
- * that walked the whole layout would test all 102 for one axis, three times
+ * that walked the whole layout would test all 114 for one axis, three times
  * over for three axes, and again for the ground query and again for the
  * camera's ray — several hundred tests to move a body 20 mm.
  *
@@ -34,7 +34,7 @@
  * a coarse grid on x and z. MEASURED at a 2 m cell over the building's
  * 26.8 x 26.8 m footprint: 14 x 14 = 196 cells holding 778 entries, a
  * mean of 4.0 solids a cell and a worst cell of 10. A body's move touches
- * one or two cells, so a step tests four to ten solids rather than 102 —
+ * one or two cells, so a step tests four to ten solids rather than 114 —
  * and that is with the big floor and ceiling slabs registered in every
  * cell they cross, which is where most of those 778 entries come from.
  * Finer cells do not pay: a 1 m cell costs 729 cells and 2,194 entries to
@@ -193,8 +193,8 @@ const CELL = 2.0;
  * Every solid in a `LabLayout`, prepared for querying.
  *
  * Struct of arrays, not an array of structs: the axis solver reads one
- * field of many solids in a row, and a table of 102 objects would be 102
- * pointer chases to read 102 numbers.
+ * field of many solids in a row, and a table of 114 objects would be 114
+ * pointer chases to read 114 numbers.
  *
  * A slab is its AABB. A PILLAR IS A CIRCLE, kept as a circle — `types.ts`
  * says a pillar exists partly because "a body stopping against a round
@@ -954,7 +954,7 @@ export function rayHit(
  * The closest interaction whose own `reach` contains `at`, or `null`.
  *
  * CLOSEST BY DISTANCE, not by the biggest margin. The reaches in the plan
- * differ on purpose — 0.9 m for a wall intercom and a lever you have to
+ * differ on purpose — 0.9 m for a desk intercom and a lever you have to
  * be at, 1.2 m for a desk, 1.4 m for a console you stand back from, 1.5 m
  * for the mapping display and the array — and ranking by margin would let
  * the mapping display 1.4 m away beat a console 1.3 m away for no reason

@@ -312,6 +312,33 @@ const EMERGENCY_FITTING = vec(0.22, 0.14, 0.22);
 /** Desk, console and cabinet heights, in one place so a room reads consistently. */
 const DESK_HEIGHT = 0.75;
 const CONSOLE_HEIGHT = 1.0;
+/** A workstation desk: its depth, its top's thickness, its end panels', and where its back panel starts. */
+const WORKSTATION_DEEP = 0.8;
+const DESK_TOP = 0.04;
+const DESK_END = 0.04;
+const DESK_BACK_FROM = 0.3;
+/** The keyboard's middle, in from the desk's front edge. */
+const KEYBOARD_INSET = 0.16;
+/**
+ * A chair PULLED IN: its middle this far behind the keyboard's. Measured
+ * on Jack seated (`actor/humanSeated`): his hips sit over the seat's
+ * middle and his shoulders 1 cm ahead of them, and the keys are
+ * comfortable at 0.30 m in front — about 65% of his 0.60 m arm, with the
+ * elbows bent (`actor/humanReach` holds to 90% and no further). At the
+ * old 0.9 m from the desk's middle the keyboard was 0.66 m away: past
+ * the end of his arm.
+ */
+const CHAIR_TO_KEYS = 0.3;
+/**
+ * Jack's desk intercom, measured off the approved picture's unit in
+ * TMB-Story (`labRoom.js`: keyboard middle x 0.22, intercom −0.28, and
+ * 0.10 m further from the sitter): its offset from the keyboard's middle
+ * and its size, a base with a sloped speaker face drawn as one box.
+ */
+const INTERCOM_LEFT_OF_KEYS = 0.5;
+const INTERCOM_BEHIND_KEYS = 0.1;
+const INTERCOM_UNIT = vec(0.24, 0.078, 0.2);
+const CHAIR_PULLED_IN = WORKSTATION_DEEP / 2 - KEYBOARD_INSET + CHAIR_TO_KEYS;
 
 /**
  * A TASK CHAIR, IN FOUR PIECES — because one box is not a chair.
@@ -786,12 +813,24 @@ function lightsOf(b: Build, r: Interior): void {
  * coincidence between two hand-placed boxes.
  */
 function workstation(b: Build, r: Interior, id: string, x: number, z: number, wide: number, chairZ: number, chairX: number): void {
-  const deep = 0.8;
-  slab(b, `${id}:desk`, r.id, 'desk', resting(x, z, wide, deep, DESK_HEIGHT), true);
+  const deep = WORKSTATION_DEEP;
+  // A top on two ends and a back panel, with the knee space under it open:
+  // a seated body's knees go 0.45 m in front of its hips, and a desk that
+  // was one block to the floor held every chair far enough out that the
+  // keyboard sat past the end of the sitter's arm.
+  slab(b, `${id}:desk`, r.id, 'desk',
+    box(vec(x, DESK_HEIGHT - DESK_TOP / 2, z), vec(wide, DESK_TOP, deep)), true);
+  const under = DESK_HEIGHT - DESK_TOP;
+  for (const [end, side] of [['desk-end-a', -1], ['desk-end-b', 1]] as const) {
+    slab(b, `${id}:${end}`, r.id, 'desk',
+      box(vec(x + side * (wide / 2 - DESK_END / 2), under / 2, z), vec(DESK_END, under, deep)), true);
+  }
+  slab(b, `${id}:desk-back`, r.id, 'desk',
+    box(vec(x, (under + DESK_BACK_FROM) / 2, z - deep / 2 + DESK_END / 2), vec(wide - 2 * DESK_END, under - DESK_BACK_FROM, DESK_END)), true);
   slab(b, `${id}:monitor`, r.id, 'screen',
     box(vec(x, DESK_HEIGHT + 0.33, z - deep / 2 + 0.12), vec(0.62, 0.46, 0.05)), false);
   slab(b, `${id}:keyboard`, r.id, 'desk',
-    box(vec(x, DESK_HEIGHT + 0.015, z + deep / 2 - 0.16), vec(0.62, 0.03, 0.22)), false);
+    box(vec(x, DESK_HEIGHT + 0.015, z + deep / 2 - KEYBOARD_INSET), vec(0.62, 0.03, 0.22)), false);
   chair(b, r, id, chairX, chairZ, x - chairX, z - chairZ);
 }
 
@@ -841,17 +880,27 @@ function laboratoryFit(b: Build, r: Interior, aisleX: number): void {
   // door beyond it. Sarah's is 2.0 m south of his — a chair's roll away.
   const jackZ = r.z0 + 0.8;
   const sarahZ = jackZ + 2.0;
-  workstation(b, r, 'jack-workstation', aisleX, jackZ, 1.8, jackZ + 0.9, aisleX);
+  workstation(b, r, 'jack-workstation', aisleX, jackZ, 1.8, jackZ + CHAIR_PULLED_IN, aisleX);
   workstation(b, r, 'sarah-workstation', aisleX, sarahZ, 1.6, sarahZ, aisleX + 1.4);
   // "another workstation" is not the only other one: the room is a
   // laboratory, and two more stand at the west end.
   const westX = r.x0 + 2.5;
-  workstation(b, r, 'west-workstation-1', westX, r.z0 + 1.6, 1.6, r.z0 + 2.5, westX);
-  workstation(b, r, 'west-workstation-2', westX, r.z0 + 4.1, 1.6, r.z0 + 5.0, westX);
+  workstation(b, r, 'west-workstation-1', westX, r.z0 + 1.6, 1.6, r.z0 + 1.6 + CHAIR_PULLED_IN, westX);
+  workstation(b, r, 'west-workstation-2', westX, r.z0 + 4.1, 1.6, r.z0 + 4.1 + CHAIR_PULLED_IN, westX);
 
-  // Ch 1: "He reached for the intercom." By the door, at a standing height.
-  slab(b, 'lab-intercom:panel', r.id, 'panel',
-    against(r, 'east', r.z0 + 0.5, 1.4, PANEL_SKIN, 0.25, 0.3), false);
+  // Ch 1: "He reached for the intercom." / "Jack tapped the button again."
+  // A DESK UNIT ON JACK'S OWN DESK, where the approved lab picture has it
+  // (TMB-Story's `visual/engine/labRoom.js` builds the same unit from that
+  // picture): half a metre to his LEFT of the keyboard's middle and a
+  // hand's width further back, with its push-to-talk button on top. It
+  // used to be a wall panel by the door at standing height, which nobody
+  // seated at this desk could reach "for" — Joshua, 2026-10-01: "need to
+  // use the actual Unicom". He faces −z here, so his left is −x.
+  const keysZ = jackZ + WORKSTATION_DEEP / 2 - KEYBOARD_INSET;
+  const intercomX = aisleX - INTERCOM_LEFT_OF_KEYS;
+  const intercomZ = keysZ - INTERCOM_BEHIND_KEYS;
+  slab(b, 'lab-intercom:unit', r.id, 'panel',
+    box(vec(intercomX, DESK_HEIGHT + INTERCOM_UNIT.y / 2, intercomZ), INTERCOM_UNIT), false);
 
   // THE FAR END (ch 2): benches, then the sample cabinets Sarah turns
   // toward. Both runs are spread, so a longer room gets a longer bench
@@ -895,7 +944,8 @@ function laboratoryFit(b: Build, r: Interior, aisleX: number): void {
     "Jack's workstation", 'Read the diagnostic data');
   touch(b, 'sarah-workstation', r.id, vec(aisleX, DESK_HEIGHT + 0.33, sarahZ), REACH_DESK, 'read',
     "Sarah's workstation", 'Read the run log');
-  touch(b, 'lab-intercom', r.id, vec(r.x1 - PANEL_SKIN / 2, 1.4, r.z0 + 0.5), REACH_CLOSE, 'speak',
+  // The button: on top of the unit, where a fingertip lands.
+  touch(b, 'lab-intercom', r.id, vec(intercomX, DESK_HEIGHT + INTERCOM_UNIT.y, intercomZ), REACH_CLOSE, 'speak',
     'Laboratory intercom', 'Call Sarah');
 }
 
