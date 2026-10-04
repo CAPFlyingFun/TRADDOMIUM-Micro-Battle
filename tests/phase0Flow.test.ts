@@ -94,6 +94,14 @@ function rig() {
   };
 
   const press = (action: string): void => {
+    // Island entry now lives under Extras; drive both real controls.
+    if (action === 'new-game') {
+      uiLayer.querySelector<HTMLButtonElement>('[data-action="extras"]')?.click();
+      action = 'island';
+    }
+    if (action === 'resume' && !uiLayer.querySelector('[data-action="resume"]')) {
+      uiLayer.querySelector<HTMLButtonElement>('[data-action="extras"]')?.click();
+    }
     const button = uiLayer.querySelector<HTMLButtonElement>(`[data-action="${action}"]`);
     if (!button) throw new Error(`no [data-action="${action}"] on screen; UI reads: "${uiLayer.textContent}"`);
     if (button.disabled) throw new Error(`[data-action="${action}"] is disabled`);
@@ -225,10 +233,11 @@ describe('Phase 0 flow', () => {
     await r.settle();
 
     expect(r.scenes.current?.name).toBe('menu');
+    r.press('extras');
     const resume = r.uiLayer.querySelector<HTMLButtonElement>('[data-action="resume"]');
     expect(resume).not.toBeNull();
     expect(resume?.disabled).toBe(false);
-    expect(resume?.textContent).toContain('Last played just now');
+    expect(resume?.textContent).toContain('Resume Island');
     const save = JSON.parse(r.kv.get(SOLO_SAVE_SPEC.key) ?? 'null') as { camera: { at: { wx: number; wz: number } } };
     expect(save.camera.at).toEqual({ wx: 123, wz: -678 });
     // One game, so RESUME opens it rather than asking which.
@@ -315,6 +324,7 @@ describe('Phase 0 flow', () => {
   it('EDITORS opens the hub; OPEN on the Performance World starts a solo game there', async () => {
     const r = rig();
     await boot(r);
+    r.press('extras');
     r.press('editors');
     await r.settle();
     expect(r.scenes.current?.name).toBe('devtools');

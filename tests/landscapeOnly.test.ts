@@ -52,8 +52,10 @@ describe('landscape only', () => {
     expect(block).toContain('visibility: hidden');
   });
 
-  it('asks an installed app for landscape too, which is the half that IS an API', () => {
-    expect(MANIFEST.orientation).toBe('landscape');
+  it('allows installed TOMBS to rotate while retaining the island CSS gate', () => {
+    expect(MANIFEST.orientation).toBe('any');
+    expect(HTML).toContain('body:has(.tombs-cinematic) #orient');
+    expect(HTML).toContain('body:has([data-screen]) #orient');
   });
 
   it('re-asserts the viewport when the phone turns', () => {

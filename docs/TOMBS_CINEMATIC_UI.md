@@ -24,6 +24,16 @@ Typecheck and production build passed (existing bundle-size warnings remain). Th
 
 Browser validation used the actual HUD module in a separate DOM-only harness at 390×844, 844×390 and 667×375. Long dialogue scrolled independently, navigation stayed visible, and rotation preserved the line and scroll position. The expanded tools drawer exposed a 14px overlap with Back; its reserved space was increased by 30px to remove that overlap.
 
-**Merge blockers:** the real game could not initialize WebGL in the test browser, so actual joystick movement, interaction, 3D visibility, audio and character behavior remain unverified. Additionally, current main's static portrait/coarse-pointer orientation gate blocks phone portrait play; this refresh intentionally preserves that newer landscape-only rule rather than silently overriding it. The portrait HUD harness is not evidence that portrait gameplay works. Reconcile that rule with the requested portrait experience and complete a WebGL-capable browser/device review before merging. The PR remains draft and unmerged.
+**Merge blocker:** the real game could not initialize WebGL in the test browser, so actual joystick movement, interaction, 3D visibility, audio and character behavior remain unverified. The portrait HUD harness is not evidence that portrait gameplay works. Complete a WebGL-capable browser/device review before merging. The PR remains draft and unmerged.
+
+## TOMBS primary entry — 2026-10-04
+
+At Joshua's explicit request, Play opens TOMBS Laboratory, which returns directly to the main menu. The menu says laboratory progress is not saved; it does not offer laboratory Continue. Extras contains Island new-game/multiplayer and Resume Island when a saved island exists, plus Editors and Profile. Island session/slot/save ownership is unchanged.
+
+The portrait gate now exempts front-door screens and the cinematic laboratory HUD, while remaining active for the island. The PWA manifest allows either orientation so an installed application can use portrait TOMBS too. No physical laboratory layout, materials, textures, story or audio changed.
+
+Version diagnosis: main and the published GitHub Pages v1 bundle were alpha.69 / 18b49c6, without the cinematic UI; the blue UI was on unmerged PR #9 (9dbbe7c). The ordinary Replit artifact still served the older alpha.47 workspace. The prior blue browser images were explicitly DOM-only HUD validation in an isolated checkout, not a deployed game. This is a branch/entry-version difference, not an established cache fault. The Pages workflow serves legacy v0 at the site root and current main at /v1/.
+
+The new integrated browser attempt again stopped at Starting with WebGL and WebGL2 unavailable (GL_VENDOR/GL_RENDERER Disabled; BindToCurrentSequence failed). It did not reach Play, Extras, the laboratory or island. Do not treat the earlier DOM harness as integrated validation of this menu change.
 
 Further cinematic camera direction, animation and automatic line completion should be separate changes using the game's existing story/camera and audio owners.

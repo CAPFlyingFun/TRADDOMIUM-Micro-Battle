@@ -125,9 +125,7 @@ async function main() {
     // --- the route a player walks, with no shortcut ---
     await page.goto(url, { waitUntil: 'load' });
     await page.waitForSelector('[data-action="new-game"]', { timeout: 120_000 });
-    await page.click('[data-action="editors"]', { timeout: 60_000 });
-    await page.waitForSelector(`[data-action="tool:${TOOL}"]`, { state: 'attached', timeout: 60_000 });
-    await page.click(`[data-action="tool:${TOOL}"]`, { timeout: 60_000 });
+    await page.click('[data-action="play-tombs"]', { timeout: 60_000 });
     await page.waitForSelector(`[data-role="${HUD}"]`, { timeout: 180_000 });
     log('bare URL -> EDITORS -> OPEN -> the laboratory is up');
 
