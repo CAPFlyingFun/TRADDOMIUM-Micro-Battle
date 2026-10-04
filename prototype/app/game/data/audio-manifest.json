@@ -1,0 +1,2308 @@
+{
+  "source": {
+    "repository": "https://github.com/CAPFlyingFun/TMB-Story",
+    "revision": "57f5ee202b674b8960e4e5dcfe087a0496005528"
+  },
+  "lines": {
+    "wake:1": {
+      "src": "/audio/clips/system/system-2e8d8d3e2911.mp3",
+      "sha256": "906d98a78d6c8cc087bdc0323494c02aa0fc81d239dd6e572c80334ecc7457dc",
+      "clipId": "system-2e8d8d3e2911",
+      "speaker": "system",
+      "sourceText": "Warning. unauthorized system access."
+    },
+    "wake:2": {
+      "src": "/audio/clips/jack/jack-bennett-2b8704441765.mp3",
+      "sha256": "e9375e564a4179adfe247883f5295d438e112a07151dc8f2aa07b49be66e3d40",
+      "clipId": "jack-bennett-2b8704441765",
+      "speaker": "jack",
+      "sourceText": "What? Okay, I'm awake."
+    },
+    "wake:3": {
+      "src": "/audio/clips/jack/jack-bennett-85dfddc7134b.mp3",
+      "sha256": "e3ce268e898a15d11a1b903167b4e57f57daa524fd4b184d5efa8e08db4dc45b",
+      "clipId": "jack-bennett-85dfddc7134b",
+      "speaker": "jack",
+      "sourceText": "That's not good."
+    },
+    "trace:0": {
+      "src": "/audio/clips/jack/jack-bennett-492f4059781a.mp3",
+      "sha256": "5c843f5be70cb42feabb4fa409aaf122fc07093afe8a162854aea00066c2b2c7",
+      "clipId": "jack-bennett-492f4059781a",
+      "speaker": "jack",
+      "sourceText": "Come on. What are you doing?"
+    },
+    "trace:1": {
+      "src": "/audio/clips/jack/jack-bennett-b9c31e4c82cf.mp3",
+      "sha256": "a3697bc3a041ba2b722ced1cab75a30f4d3214dba00ed124e06130e78fb126a3",
+      "clipId": "jack-bennett-b9c31e4c82cf",
+      "speaker": "jack",
+      "sourceText": "No. Where'd you go?"
+    },
+    "trace:2": {
+      "src": "/audio/clips/system/system-610b0d021f1b.mp3",
+      "sha256": "b682bc33db672327bbc651da459482554961ec797cb1500572feb5337661bee7",
+      "clipId": "system-610b0d021f1b",
+      "speaker": "system",
+      "sourceText": "Security protocol violation."
+    },
+    "trace:3": {
+      "src": "/audio/clips/jack/jack-bennett-549daf1f1de8.mp3",
+      "sha256": "e7445a1e7264249fc2ac94496a47be96dddbbdb68d67cae595cfd93d077fd737",
+      "clipId": "jack-bennett-549daf1f1de8",
+      "speaker": "jack",
+      "sourceText": "Okay. Definitely awake now."
+    },
+    "lock:0": {
+      "src": "/audio/clips/jack/jack-bennett-ecf78584ec95.mp3",
+      "sha256": "cb35c2e1174f29c2e03ab0a6d9d00302d957dfa922decc852c0643e680ca8e71",
+      "clipId": "jack-bennett-ecf78584ec95",
+      "speaker": "jack",
+      "sourceText": "Oh, no you don't."
+    },
+    "lock:2": {
+      "src": "/audio/clips/jack/jack-bennett-2ffc77da7b3f.mp3",
+      "sha256": "847cb174adf78e4d74e7c034c9ca25f7a6071095b98e354ad7770716eb4685ae",
+      "clipId": "jack-bennett-2ffc77da7b3f",
+      "speaker": "jack",
+      "sourceText": "Well, that's new."
+    },
+    "call:0": {
+      "src": "/audio/clips/jack/jack-bennett-45ac1e9fe1de.mp3",
+      "sha256": "b4b7bca0c123e810fa7c1cae7961794126dbc60b30e98a3ad1d99f4d2fe58537",
+      "clipId": "jack-bennett-45ac1e9fe1de",
+      "speaker": "jack",
+      "sourceText": "Sarah, you there?"
+    },
+    "call:1": {
+      "src": "/audio/clips/sarah/sarah-bennett-3f51406be04d.mp3",
+      "sha256": "49f5df9f71e2277c2f30e355c438115ecff1925005cfdc4359e27fff2e0fa697",
+      "clipId": "sarah-bennett-3f51406be04d",
+      "speaker": "sarah",
+      "sourceText": "I'm here,"
+    },
+    "call:2": {
+      "src": "/audio/clips/sarah/sarah-bennett-0df3f0a6bee0.mp3",
+      "sha256": "f389d0253bb007ff90f540788e1fc10401c515b4a752323b9a6b00385bae39d8",
+      "clipId": "sarah-bennett-0df3f0a6bee0",
+      "speaker": "sarah",
+      "sourceText": "What's wrong?"
+    },
+    "call:3": {
+      "src": "/audio/clips/jack/jack-bennett-3141593a1c9d.mp3",
+      "sha256": "63ea4d1ce8f0905d29086243604c7459b1d0a216a4c77704dbe0fb9f5d2da518",
+      "clipId": "jack-bennett-3141593a1c9d",
+      "speaker": "jack",
+      "sourceText": "I've got something weird on my computer. It tripped a security alarm."
+    },
+    "call:4": {
+      "src": "/audio/clips/sarah/sarah-bennett-c0ca574b594a.mp3",
+      "sha256": "fed184b9006e0816a9f737de592ee4e4856b5f98d9f77e10ab4d5863d07bf143",
+      "clipId": "sarah-bennett-c0ca574b594a",
+      "speaker": "sarah",
+      "sourceText": "Define weird."
+    },
+    "call:5": {
+      "src": "/audio/clips/jack/jack-bennett-a376700976d7.mp3",
+      "sha256": "c96fc9b43f51488dbeb41ed8d9b0a6a32de7bc45c9483bfd86b4e5d838bb12eb",
+      "clipId": "jack-bennett-a376700976d7",
+      "speaker": "jack",
+      "sourceText": "I think somebody's in the system."
+    },
+    "call:6": {
+      "src": "/audio/clips/sarah/sarah-bennett-81ff0dc894cf.mp3",
+      "sha256": "abbbadae5b02b2a543513dfd1bf554ef86cc34d3f00ce84ec28a4a74b292f3b1",
+      "clipId": "sarah-bennett-81ff0dc894cf",
+      "speaker": "sarah",
+      "sourceText": "Are you sure?"
+    },
+    "call:7": {
+      "src": "/audio/clips/jack/jack-bennett-3d94cfec7c01.mp3",
+      "sha256": "7bdcaadaecc780c50a8be836ad82ea7c836481d5bdcf6e491b71d88f99541ccf",
+      "clipId": "jack-bennett-3d94cfec7c01",
+      "speaker": "jack",
+      "sourceText": "No. That's why I'm calling the smarter scientist."
+    },
+    "call:8": {
+      "src": "/audio/clips/sarah/sarah-bennett-5a071d01be77.mp3",
+      "sha256": "25ef2c42ac1ed8d13e9408b5ecb81e7ea914384dbb938cbb30bc8167cf58d445",
+      "clipId": "sarah-bennett-5a071d01be77",
+      "speaker": "sarah",
+      "sourceText": "Good answer."
+    },
+    "call:9": {
+      "src": "/audio/clips/jack/jack-bennett-632f5041e805.mp3",
+      "sha256": "5fe38aacc15b011dbc74289edb4f853c4033ebdbd181044682a2e6952f19d21e",
+      "clipId": "jack-bennett-632f5041e805",
+      "speaker": "jack",
+      "sourceText": "Can you come take a look?"
+    },
+    "call:10": {
+      "src": "/audio/clips/sarah/sarah-bennett-2a350447dd17.mp3",
+      "sha256": "e7bc1b902cf3f00fa28136a814a293a5d114aaf72d3b135061e5729239708528",
+      "clipId": "sarah-bennett-2a350447dd17",
+      "speaker": "sarah",
+      "sourceText": "I'm on my way,"
+    },
+    "arrive:0": {
+      "src": "/audio/clips/sarah/sarah-bennett-41421ed41839.mp3",
+      "sha256": "0c1842493aa8482f1be6771712c50681d0153b87f8d37d21f91e0d1306616e82",
+      "clipId": "sarah-bennett-41421ed41839",
+      "speaker": "sarah",
+      "sourceText": "Please tell me you didn't break something."
+    },
+    "arrive:1": {
+      "src": "/audio/clips/jack/jack-bennett-6aa0f73ed972.mp3",
+      "sha256": "2542db120aebfeec3cd8f43d3410a5836132897a7e7227a73c74eb2e652345f8",
+      "clipId": "jack-bennett-6aa0f73ed972",
+      "speaker": "jack",
+      "sourceText": "I was asleep,"
+    },
+    "arrive:2": {
+      "src": "/audio/clips/sarah/sarah-bennett-e240820580d9.mp3",
+      "sha256": "33e58117fd9cb4dafe4b4e5036675093f8dd6c33a082b5072dc8eae32d4b3ef7",
+      "clipId": "sarah-bennett-e240820580d9",
+      "speaker": "sarah",
+      "sourceText": "You called me in here to admit that?"
+    },
+    "arrive:3": {
+      "src": "/audio/clips/jack/jack-bennett-1ecaa1e81e25.mp3",
+      "sha256": "891d059bab70946490969c4e617e35bce0993d71a9b7217e5f37b3c3abc0cfb3",
+      "clipId": "jack-bennett-1ecaa1e81e25",
+      "speaker": "jack",
+      "sourceText": "No. That was my defense."
+    },
+    "arrive:4": {
+      "src": "/audio/clips/sarah/sarah-bennett-da6d3f2466a2.mp3",
+      "sha256": "61ae2ff01d531b36e1481ff9a2447ec0bcdf8802eea616236e8631fdad1b145c",
+      "clipId": "sarah-bennett-da6d3f2466a2",
+      "speaker": "sarah",
+      "sourceText": "Against what?"
+    },
+    "arrive:5": {
+      "src": "/audio/clips/jack/jack-bennett-ab5acb662fb5.mp3",
+      "sha256": "f79f7a28fbbd03206583b56aac5adf77f2637986fb4d11df11a0b119cf223381",
+      "clipId": "jack-bennett-ab5acb662fb5",
+      "speaker": "jack",
+      "sourceText": "Whatever this is."
+    },
+    "logs:0": {
+      "src": "/audio/clips/sarah/sarah-bennett-5965a9732934.mp3",
+      "sha256": "17988ecccf37b52ab8c7b08298c26c2fe3b06d0c7c124cc2dea7f82cdeffd688",
+      "clipId": "sarah-bennett-5965a9732934",
+      "speaker": "sarah",
+      "sourceText": "These are clean,"
+    },
+    "logs:1": {
+      "src": "/audio/clips/jack/jack-bennett-e42d2e1230ff.mp3",
+      "sha256": "62cf2f4c47968969b896e171bfaca33cc876ae0049936b0bb3450190d3842014",
+      "clipId": "jack-bennett-e42d2e1230ff",
+      "speaker": "jack",
+      "sourceText": "Exactly."
+    },
+    "logs:2": {
+      "src": "/audio/clips/sarah/sarah-bennett-7cb92747650b.mp3",
+      "sha256": "fe935fc8700a9814ff341933708ac59a49a54c02a14cb3eccc01ecd6bc181659",
+      "clipId": "sarah-bennett-7cb92747650b",
+      "speaker": "sarah",
+      "sourceText": "Too clean."
+    },
+    "logs:3": {
+      "src": "/audio/clips/jack/jack-bennett-6de493fd3169.mp3",
+      "sha256": "b3f3180aabbdbd9b71c6f50646b02025975831a11c75ae7bc45fb3ef8124194e",
+      "clipId": "jack-bennett-6de493fd3169",
+      "speaker": "jack",
+      "sourceText": "That's what I was thinking."
+    },
+    "logs:4": {
+      "src": "/audio/clips/sarah/sarah-bennett-deff6b10a48b.mp3",
+      "sha256": "bf287e03ed5d46277f83090f029b4a7d988d8764d40973761db3574fc3f17488",
+      "clipId": "sarah-bennett-deff6b10a48b",
+      "speaker": "sarah",
+      "sourceText": "No, you were sleeping."
+    },
+    "logs:5": {
+      "src": "/audio/clips/jack/jack-bennett-29c879a5b799.mp3",
+      "sha256": "8318b380ec648993303768cf2af1c077b53bdbc005974138ebb511a21781fb10",
+      "clipId": "jack-bennett-29c879a5b799",
+      "speaker": "jack",
+      "sourceText": "I was thinking eventually."
+    },
+    "baby:0": {
+      "src": "/audio/clips/jack/jack-bennett-e61a5b7e36cd.mp3",
+      "sha256": "53807bf1cea8a5bd664b32459e5da6eda6dc7f82dd309ea2838a5d28875299b2",
+      "clipId": "jack-bennett-e61a5b7e36cd",
+      "speaker": "jack",
+      "sourceText": "You know, you're supposed to be resting."
+    },
+    "baby:1": {
+      "src": "/audio/clips/sarah/sarah-bennett-e9ec137bc087.mp3",
+      "sha256": "f8462f93c781c9f8a1ae76ade7e58c3f561150aef6087ab5703b310df8186d42",
+      "clipId": "sarah-bennett-e9ec137bc087",
+      "speaker": "sarah",
+      "sourceText": "So are you."
+    },
+    "baby:2": {
+      "src": "/audio/clips/jack/jack-bennett-c1ff018af109.mp3",
+      "sha256": "e44289f1e56fbab3a41a0a519721c66f35e2de3614282e831f2feb666a6f13cb",
+      "clipId": "jack-bennett-c1ff018af109",
+      "speaker": "jack",
+      "sourceText": "I'm not the pregnant one."
+    },
+    "baby:3": {
+      "src": "/audio/clips/sarah/sarah-bennett-4db8c4b299cf.mp3",
+      "sha256": "f725db71ff379e6682336612e894d7359b7fff8ecc9963cadbe122871eb0f5fc",
+      "clipId": "sarah-bennett-4db8c4b299cf",
+      "speaker": "sarah",
+      "sourceText": "No. You're the one I found asleep at a laboratory terminal."
+    },
+    "baby:4": {
+      "src": "/audio/clips/sarah/sarah-bennett-dc90fc8720b4.mp3",
+      "sha256": "fc51823635337c046fac15da6c3a8ae31eacfd54423b31d13199ed2bea990db5",
+      "clipId": "sarah-bennett-dc90fc8720b4",
+      "speaker": "sarah",
+      "sourceText": "Lately the baby seems to think eleven at night is morning."
+    },
+    "baby:5": {
+      "src": "/audio/clips/jack/jack-bennett-a8fc65386727.mp3",
+      "sha256": "0aec057e9a28942080e5e3168334fd528f3ded8241a3d431362ac63ae22c7482",
+      "clipId": "jack-bennett-a8fc65386727",
+      "speaker": "jack",
+      "sourceText": "Already takes after me."
+    },
+    "baby:6": {
+      "src": "/audio/clips/sarah/sarah-bennett-b4465ab7292c.mp3",
+      "sha256": "c4661b26cf3bbf0586e5277004297a19a6dd7ff3b7cfcbb40a6d2d989fabd9d5",
+      "clipId": "sarah-bennett-b4465ab7292c",
+      "speaker": "sarah",
+      "sourceText": "That's what I'm afraid of."
+    },
+    "request:0": {
+      "src": "/audio/clips/system/system-f6a28699a3b1.mp3",
+      "sha256": "86efb212e74965954513d9bcef34b7aef0c9a018c17733c5c8681772aec55d45",
+      "clipId": "system-f6a28699a3b1",
+      "speaker": "system",
+      "sourceText": "Tombs array remote initialization request."
+    },
+    "request:1": {
+      "src": "/audio/clips/sarah/sarah-bennett-415320486988.mp3",
+      "sha256": "3bbbf3a628198d992832727c1ac055820c3e1c5aa4e05aca25fba02276c09dc3",
+      "clipId": "sarah-bennett-415320486988",
+      "speaker": "sarah",
+      "sourceText": "Did you do that?"
+    },
+    "request:2": {
+      "src": "/audio/clips/jack/jack-bennett-a40ffc6ce592.mp3",
+      "sha256": "39a5817986a153cce4d1d177d0163835be3082e18e6cedbe3c6460d998c0a5e5",
+      "clipId": "jack-bennett-a40ffc6ce592",
+      "speaker": "jack",
+      "sourceText": "No."
+    },
+    "request:3": {
+      "src": "/audio/clips/sarah/sarah-bennett-13bbe7381eb1.mp3",
+      "sha256": "cf00460b74adc0015e0e6fef70b1a196802b941127c46e4d13e002bb05aaf3fc",
+      "clipId": "sarah-bennett-13bbe7381eb1",
+      "speaker": "sarah",
+      "sourceText": "Cancel it."
+    },
+    "reject:0": {
+      "src": "/audio/clips/system/system-0fe0cf2a5742.mp3",
+      "sha256": "965bb475a96c2e8d1cfa86e9f3fd519d846defbfba4283dca9c7d6275580fca8",
+      "clipId": "system-0fe0cf2a5742",
+      "speaker": "system",
+      "sourceText": "Request denied."
+    },
+    "reject:1": {
+      "src": "/audio/clips/system/system-0fe0cf2a5742.mp3",
+      "sha256": "965bb475a96c2e8d1cfa86e9f3fd519d846defbfba4283dca9c7d6275580fca8",
+      "clipId": "system-0fe0cf2a5742",
+      "speaker": "system",
+      "sourceText": "Request denied."
+    },
+    "reject:2": {
+      "src": "/audio/clips/jack/jack-bennett-5d311a6c90d7.mp3",
+      "sha256": "a54dc74e360c2b878ca81a5c1efb919e92b9ed35bf2d8b9b6302c595229700f6",
+      "clipId": "jack-bennett-5d311a6c90d7",
+      "speaker": "jack",
+      "sourceText": "That's not supposed to happen."
+    },
+    "credentials:0": {
+      "src": "/audio/clips/system/system-28a18477a67e.mp3",
+      "sha256": "9dc5a72289080b80143b059e402007ac98328de47691b7378c24aa54a3c1be53",
+      "clipId": "system-28a18477a67e",
+      "speaker": "system",
+      "sourceText": "Access revoked."
+    },
+    "credentials:1": {
+      "src": "/audio/clips/sarah/sarah-bennett-85c20ef1167a.mp3",
+      "sha256": "d520dadac4f065d49d9383f7b5d79b737f833bfadafd30f8c1de4ef82c8689a8",
+      "clipId": "sarah-bennett-85c20ef1167a",
+      "speaker": "sarah",
+      "sourceText": "Your credentials?"
+    },
+    "credentials:2": {
+      "src": "/audio/clips/jack/jack-bennett-308767fde297.mp3",
+      "sha256": "54e05d973d22b92ea5e9dc6d24ca86e6129a125eede92dcdd52669806c49a800",
+      "clipId": "jack-bennett-308767fde297",
+      "speaker": "jack",
+      "sourceText": "Revoked."
+    },
+    "credentials:3": {
+      "src": "/audio/clips/sarah/sarah-bennett-d5bc7656345e.mp3",
+      "sha256": "8c7231b0eaddd81c24ee75c3fdd7226603b48176f25f76a3cdde4a8f06beccde",
+      "clipId": "sarah-bennett-d5bc7656345e",
+      "speaker": "sarah",
+      "sourceText": "You're the project administrator."
+    },
+    "credentials:4": {
+      "src": "/audio/clips/jack/jack-bennett-9cc3304964a3.mp3",
+      "sha256": "4adbb23f47b326d1b9f6affb084fd613891648252ba1c941a8e578322dcb23e9",
+      "clipId": "jack-bennett-9cc3304964a3",
+      "speaker": "jack",
+      "sourceText": "I know."
+    },
+    "credentials:5": {
+      "src": "/audio/clips/sarah/sarah-bennett-ed9388bef578.mp3",
+      "sha256": "3de29b7e288af6fe8ebe0ab5190e1e8fe6cd50e06e6e330636c8bbf07aa4776e",
+      "clipId": "sarah-bennett-ed9388bef578",
+      "speaker": "sarah",
+      "sourceText": "Who can revoke you?"
+    },
+    "credentials:6": {
+      "src": "/audio/clips/jack/jack-bennett-77753d8b9f45.mp3",
+      "sha256": "d73b4d5072d5f6c815af97ee5246b46f33ee89d24d9cdddeb293146a67f5de19",
+      "clipId": "jack-bennett-77753d8b9f45",
+      "speaker": "jack",
+      "sourceText": "Me."
+    },
+    "credentials:7": {
+      "src": "/audio/clips/sarah/sarah-bennett-ea3f24b4acf1.mp3",
+      "sha256": "0717050440989b9904a23de9045e2b6f2d0c2d7e8bb6bacccee2da1d8cd3f0cb",
+      "clipId": "sarah-bennett-ea3f24b4acf1",
+      "speaker": "sarah",
+      "sourceText": "Jack."
+    },
+    "credentials:8": {
+      "src": "/audio/clips/jack/jack-bennett-13662115397f.mp3",
+      "sha256": "a68f7e576b3a8d5d9d4daf43c471dbad8a35f668286d11d41f1e131cf13122cd",
+      "clipId": "jack-bennett-13662115397f",
+      "speaker": "jack",
+      "sourceText": "I didn't."
+    },
+    "corridor:0": {
+      "src": "/audio/clips/sarah/sarah-bennett-cd46b63bc354.mp3",
+      "sha256": "b512234e7baaf12bd5abca5ba17e5655c2877414a751bef27708c695f486a126",
+      "clipId": "sarah-bennett-cd46b63bc354",
+      "speaker": "sarah",
+      "sourceText": "Was that the array?"
+    },
+    "corridor:1": {
+      "src": "/audio/clips/jack/jack-bennett-bd00dcb7c5b7.mp3",
+      "sha256": "ae48e0b1c76bc2d840288b24c41313ebad7d276277f6b500d5673c7f4d2cd1de",
+      "clipId": "jack-bennett-bd00dcb7c5b7",
+      "speaker": "jack",
+      "sourceText": "Stay here."
+    },
+    "corridor:2": {
+      "src": "/audio/clips/sarah/sarah-bennett-4f136b57e3c4.mp3",
+      "sha256": "6e0964b0c3f8c68316715dfcc4d11af578da6ee81926c9d2a1bc66a20c5da5af",
+      "clipId": "sarah-bennett-4f136b57e3c4",
+      "speaker": "sarah",
+      "sourceText": "Absolutely not."
+    },
+    "corridor:3": {
+      "src": "/audio/clips/sarah/sarah-bennett-f7770a9d0f31.mp3",
+      "sha256": "382243c1e33305fd8d8f195d9432f6acd8b209e64bcea52e4e440017e19142a5",
+      "clipId": "sarah-bennett-f7770a9d0f31",
+      "speaker": "sarah",
+      "sourceText": "Being thirty-two weeks pregnant does not mean made of glass."
+    },
+    "corridor:4": {
+      "src": "/audio/clips/jack/jack-bennett-2e54338f8610.mp3",
+      "sha256": "ae83aa75209daccc0c3b456f26e571b2c9b9a8307d6df4afe855f6b8874d4458",
+      "clipId": "jack-bennett-2e54338f8610",
+      "speaker": "jack",
+      "sourceText": "It means you're carrying something considerably more important than this laboratory."
+    },
+    "corridor:5": {
+      "src": "/audio/clips/sarah/sarah-bennett-2259f23f0542.mp3",
+      "sha256": "eae9778c2ad7c0ffd62aadbaed0693aaf940ff269321d4760880e13e0b0ef6ce",
+      "clipId": "sarah-bennett-2259f23f0542",
+      "speaker": "sarah",
+      "sourceText": "And you're his father."
+    },
+    "corridor:7": {
+      "src": "/audio/clips/jack/jack-bennett-f97fd1efdcb9.mp3",
+      "sha256": "d52a40ac976acf65ac4b61aab72487ada618bd2113b6e00975c8b23f66cc7b5f",
+      "clipId": "jack-bennett-f97fd1efdcb9",
+      "speaker": "jack",
+      "sourceText": "Fine. But stay with me."
+    },
+    "corridor:8": {
+      "src": "/audio/clips/sarah/sarah-bennett-baa0baf1f9c0.mp3",
+      "sha256": "5f5a423ae4549e0711093f57d7941aab29ddd479daec7fff98b883d6bb8f2860",
+      "clipId": "sarah-bennett-baa0baf1f9c0",
+      "speaker": "sarah",
+      "sourceText": "That I can do."
+    },
+    "power:0": {
+      "src": "/audio/clips/system/system-b24e7deec995.mp3",
+      "sha256": "6f123f0c436e80a5c9348dc3c17a12aebb614fad15e285d989f1092e67b8f2ab",
+      "clipId": "system-b24e7deec995",
+      "speaker": "system",
+      "sourceText": "Warning. array power above standby threshold."
+    },
+    "power:1": {
+      "src": "/audio/clips/jack/jack-bennett-c54d5957b6d4.mp3",
+      "sha256": "2f631cfbcef447698d262fc44bfde09f4852b8d8a9ac1862e14f4c7365aae586",
+      "clipId": "jack-bennett-c54d5957b6d4",
+      "speaker": "jack",
+      "sourceText": "Control, this is Bennett. Shut down power to TOMBS."
+    },
+    "power:2": {
+      "src": "/audio/clips/lena/lena-ortiz-a7bbe431a3f7.mp3",
+      "sha256": "164ab222f936eeb5cce9e4d691e886f3fa70f92b4cd34ceb9d9fca0ddede436a",
+      "clipId": "lena-ortiz-a7bbe431a3f7",
+      "speaker": "lena",
+      "sourceText": "Jack, we were about to call you. We're seeing a massive draw from your building."
+    },
+    "power:3": {
+      "src": "/audio/clips/jack/jack-bennett-1c3683eb9326.mp3",
+      "sha256": "65abebf0db4152672ea0f5e18766a28877800af1fab112eafba40fcdf37dca49",
+      "clipId": "jack-bennett-1c3683eb9326",
+      "speaker": "jack",
+      "sourceText": "How massive?"
+    },
+    "power:4": {
+      "src": "/audio/clips/lena/lena-ortiz-d21ae94b73c2.mp3",
+      "sha256": "642c5948c008d2f8fffb7f74225d61b52ba59dd148e702133ca827b7f0655b12",
+      "clipId": "lena-ortiz-d21ae94b73c2",
+      "speaker": "lena",
+      "sourceText": "Fourteen megawatts and climbing."
+    },
+    "power:5": {
+      "src": "/audio/clips/jack/jack-bennett-cc208f1dda15.mp3",
+      "sha256": "644edc3c0f104436aa4cf899af0aeb8d59b44832b421f99e5bceb39156ef3e94",
+      "clipId": "jack-bennett-cc208f1dda15",
+      "speaker": "jack",
+      "sourceText": "Fourteen?"
+    },
+    "power:6": {
+      "src": "/audio/clips/lena/lena-ortiz-1d9f80cf34fe.mp3",
+      "sha256": "2da25fe6c5fcd05b4f460259f87b53bba2982f7d0e5ff59eb360d8c1bc66b044",
+      "clipId": "lena-ortiz-1d9f80cf34fe",
+      "speaker": "lena",
+      "sourceText": "Fifteen now."
+    },
+    "power:7": {
+      "src": "/audio/clips/sarah/sarah-bennett-ec2c9df490ca.mp3",
+      "sha256": "ee61e45c51eb41ea32bb0558cfb489366344fabae2ceb23eb54a25608d768f99",
+      "clipId": "sarah-bennett-ec2c9df490ca",
+      "speaker": "sarah",
+      "sourceText": "Yesterday's full test didn't use half that."
+    },
+    "disconnect:0": {
+      "src": "/audio/clips/jack/jack-bennett-056828a8affb.mp3",
+      "sha256": "ab0b96eb753651e558273434afb4207359f1a7fa8684108d5e1dbc532a1c64d4",
+      "clipId": "jack-bennett-056828a8affb",
+      "speaker": "jack",
+      "sourceText": "Possible network intrusion. Cut external access to the laboratory and disconnect TOMBS from the island grid."
+    },
+    "disconnect:1": {
+      "src": "/audio/clips/lena/lena-ortiz-183aa0466dc6.mp3",
+      "sha256": "448fbcdde41c6984c65e89ef12a35873c2708a1be7c184d08f080b346fea7062",
+      "clipId": "lena-ortiz-183aa0466dc6",
+      "speaker": "lena",
+      "sourceText": "Doing it now."
+    },
+    "disconnect:3": {
+      "src": "/audio/clips/jack/jack-bennett-ec935f7b75df.mp3",
+      "sha256": "99c9586e8abd40bd9b9d52e02513d6823a30941176b676c1ba4be9d031ddb47b",
+      "clipId": "jack-bennett-ec935f7b75df",
+      "speaker": "jack",
+      "sourceText": "It's still running."
+    },
+    "disconnect:4": {
+      "src": "/audio/clips/lena/lena-ortiz-877f35951f4b.mp3",
+      "sha256": "f7da748cc8bc11f715bd1a9a74008198c38eeed0d7c2c6b4256d6ecd260f3609",
+      "clipId": "lena-ortiz-877f35951f4b",
+      "speaker": "lena",
+      "sourceText": "That's impossible."
+    },
+    "disconnect:5": {
+      "src": "/audio/clips/jack/jack-bennett-90ff5f3518f5.mp3",
+      "sha256": "473126a855dfebc198c797580385099923c903e2572b35525a6505bae33781d9",
+      "clipId": "jack-bennett-90ff5f3518f5",
+      "speaker": "jack",
+      "sourceText": "Tonight's developing a theme."
+    },
+    "reactor:0": {
+      "src": "/audio/clips/sarah/sarah-bennett-adbb35e72258.mp3",
+      "sha256": "f7291ff39a0a75ed8c099d1bbec9c4a5ebcb61faa8d8f93932ac7fa92506318b",
+      "clipId": "sarah-bennett-adbb35e72258",
+      "speaker": "sarah",
+      "sourceText": "Backup capacitors?"
+    },
+    "reactor:1": {
+      "src": "/audio/clips/jack/jack-bennett-e7a2ba2045df.mp3",
+      "sha256": "2354c3b867a9832b7083dae331e0320961a67d16b87e0aa29e65fcff836a4805",
+      "clipId": "jack-bennett-e7a2ba2045df",
+      "speaker": "jack",
+      "sourceText": "Not enough for this."
+    },
+    "reactor:2": {
+      "src": "/audio/clips/sarah/sarah-bennett-ff51fdb19894.mp3",
+      "sha256": "6affa3a6d999f9355edd3304552a9f356edfa8e611094a091519ae2e92d89326",
+      "clipId": "sarah-bennett-ff51fdb19894",
+      "speaker": "sarah",
+      "sourceText": "Internal reactor?"
+    },
+    "reactor:3": {
+      "src": "/audio/clips/jack/jack-bennett-43ebc224a239.mp3",
+      "sha256": "54a0d70104f213b0431c7c996f50d1f0fd9ce8e1aed5193efc0436ac7131d6c6",
+      "clipId": "jack-bennett-43ebc224a239",
+      "speaker": "jack",
+      "sourceText": "Offline."
+    },
+    "reactor:4": {
+      "src": "/audio/clips/sarah/sarah-bennett-f00492e96b79.mp3",
+      "sha256": "6d53a594e06a9c998be6d6fc48c5db783ca3c86c7a0ec124ea1d6157f7db5a4f",
+      "clipId": "sarah-bennett-f00492e96b79",
+      "speaker": "sarah",
+      "sourceText": "Then where is it getting the power?"
+    },
+    "reactor:5": {
+      "src": "/audio/clips/jack/jack-bennett-780e5837165b.mp3",
+      "sha256": "320fad52094122a4d6180b62a9f9e6ac476c43add62d6c575938c61591341b08",
+      "clipId": "jack-bennett-780e5837165b",
+      "speaker": "jack",
+      "sourceText": "I don't know."
+    },
+    "array:1": {
+      "src": "/audio/clips/sarah/sarah-bennett-b96f9b147d4b.mp3",
+      "sha256": "d38baccea8f89f998ec60ab999c93e39dad33213a46e39113e1505e7d977819c",
+      "clipId": "sarah-bennett-b96f9b147d4b",
+      "speaker": "sarah",
+      "sourceText": "You didn't authorize an experiment?"
+    },
+    "array:2": {
+      "src": "/audio/clips/jack/jack-bennett-a40ffc6ce592.mp3",
+      "sha256": "39a5817986a153cce4d1d177d0163835be3082e18e6cedbe3c6460d998c0a5e5",
+      "clipId": "jack-bennett-a40ffc6ce592",
+      "speaker": "jack",
+      "sourceText": "No."
+    },
+    "array:3": {
+      "src": "/audio/clips/sarah/sarah-bennett-74e51eb863fe.mp3",
+      "sha256": "085d9b01984f60f07b7cab23ff9847282dcdc0b21997a9f246b61a4bbdcbbbf8",
+      "clipId": "sarah-bennett-74e51eb863fe",
+      "speaker": "sarah",
+      "sourceText": "Boundary emitters are active."
+    },
+    "array:4": {
+      "src": "/audio/clips/jack/jack-bennett-b757c90281ee.mp3",
+      "sha256": "5a18f7bef3e95aeb0fbfbd1b65c361184a7627ffef29d35f1bbbf307b5530ed8",
+      "clipId": "jack-bennett-b757c90281ee",
+      "speaker": "jack",
+      "sourceText": "Kill them."
+    },
+    "array:5": {
+      "src": "/audio/clips/sarah/sarah-bennett-5a95550ec41a.mp3",
+      "sha256": "33d744248f8973865ec31dcf02c0d8160e586fcc892c4d978c72e27cbd6c46a8",
+      "clipId": "sarah-bennett-5a95550ec41a",
+      "speaker": "sarah",
+      "sourceText": "They're not responding."
+    },
+    "shutdown:0": {
+      "src": "/audio/clips/jack/jack-bennett-f17abf0f2055.mp3",
+      "sha256": "5a5ef7ac05d4c890156710989f2d4cb9b25d9a2aef25bdf5cc1138ce7ceaaa49",
+      "clipId": "jack-bennett-f17abf0f2055",
+      "speaker": "jack",
+      "sourceText": "Then we'll do it the old-fashioned way."
+    },
+    "shutdown:1": {
+      "src": "/audio/clips/sarah/sarah-bennett-3a3ecc089ad1.mp3",
+      "sha256": "31520d1a3251662986db9c5fcff7da95b177236226e820ec9d6bf5f4ba9c90ee",
+      "clipId": "sarah-bennett-3a3ecc089ad1",
+      "speaker": "sarah",
+      "sourceText": "Okay."
+    },
+    "shutdown:2": {
+      "src": "/audio/clips/jack/jack-bennett-610e06dfd154.mp3",
+      "sha256": "aac6886db3d7deb5c0f1f33d83c2edbf7662c1928ec9bb7b9452decbf92eb0b6",
+      "clipId": "jack-bennett-610e06dfd154",
+      "speaker": "jack",
+      "sourceText": "That worked."
+    },
+    "shutdown:3": {
+      "src": "/audio/clips/sarah/sarah-bennett-ea3f24b4acf1.mp3",
+      "sha256": "0717050440989b9904a23de9045e2b6f2d0c2d7e8bb6bacccee2da1d8cd3f0cb",
+      "clipId": "sarah-bennett-ea3f24b4acf1",
+      "speaker": "sarah",
+      "sourceText": "Jack."
+    },
+    "shutdown:4": {
+      "src": "/audio/clips/jack/jack-bennett-42c3bfb9a2b4.mp3",
+      "sha256": "9ce4584fb8aa6461dc3337eba9ecda4f2cfd04cd348d300cdf1de7afdc3da610",
+      "clipId": "jack-bennett-42c3bfb9a2b4",
+      "speaker": "jack",
+      "sourceText": "I cut the physical connection."
+    },
+    "shutdown:5": {
+      "src": "/audio/clips/sarah/sarah-bennett-ddc844d802c1.mp3",
+      "sha256": "a04ac578518f81a5ef4d1fed211b66e0014f9ba936b77b4de89aa6b3cd10d08b",
+      "clipId": "sarah-bennett-ddc844d802c1",
+      "speaker": "sarah",
+      "sourceText": "Apparently TOMBS disagrees."
+    },
+    "shutdown:6": {
+      "src": "/audio/clips/jack/jack-bennett-200595efed86.mp3",
+      "sha256": "70195d013a9df4248dfdd0c0af4fa57ae5543dcce6b753414ceb35d32a4cb130",
+      "clipId": "jack-bennett-200595efed86",
+      "speaker": "jack",
+      "sourceText": "Machines don't get opinions."
+    },
+    "shutdown:7": {
+      "src": "/audio/clips/sarah/sarah-bennett-9551539fdf4c.mp3",
+      "sha256": "a7f8d8985afa9809da2465c91ce35e4d52fde524f9101f3fb8693e23f9cab0d5",
+      "clipId": "sarah-bennett-9551539fdf4c",
+      "speaker": "sarah",
+      "sourceText": "This one seems pretty committed."
+    },
+    "boundary:0": {
+      "src": "/audio/clips/system/system-fcd581c75258.mp3",
+      "sha256": "27687ebc51e17796e04ca495fde44679d7060edca94bc0cb3f67821837069d14",
+      "clipId": "system-fcd581c75258",
+      "speaker": "system",
+      "sourceText": "Boundary acquisition in progress."
+    },
+    "boundary:1": {
+      "src": "/audio/clips/sarah/sarah-bennett-dcec64e6da6f.mp3",
+      "sha256": "997d5fde46b4020a8c4cc4bf2f3f054e027dcd9ecdf07563955c014b93f4562b",
+      "clipId": "sarah-bennett-dcec64e6da6f",
+      "speaker": "sarah",
+      "sourceText": "What boundary?"
+    },
+    "boundary:2": {
+      "src": "/audio/clips/jack/jack-bennett-640222e0d776.mp3",
+      "sha256": "f18391242f680179725c27338fc5ece2dcae5f67e307f536d4c85b1a2107aa38",
+      "clipId": "jack-bennett-640222e0d776",
+      "speaker": "jack",
+      "sourceText": "That's wrong."
+    },
+    "boundary:3": {
+      "src": "/audio/clips/sarah/sarah-bennett-a987593b7315.mp3",
+      "sha256": "6bbdd269cd096fbffd216e5c9feca4862fa028ac04615ede7facacd8d4b8ddb4",
+      "clipId": "sarah-bennett-a987593b7315",
+      "speaker": "sarah",
+      "sourceText": "What?"
+    },
+    "boundary:4": {
+      "src": "/audio/clips/jack/jack-bennett-25248177f5d1.mp3",
+      "sha256": "e3f9d0f323514b4a892c4ee732295d382242ef23ce0c1f66450159684efd5fd9",
+      "clipId": "jack-bennett-25248177f5d1",
+      "speaker": "jack",
+      "sourceText": "The target dimensions."
+    },
+    "boundary:5": {
+      "src": "/audio/clips/sarah/sarah-bennett-722b17edf2d6.mp3",
+      "sha256": "293220fc61b22e5abcd442fb0f3bc7c869fc566ddca428fd5da8221d26df2e35",
+      "clipId": "sarah-bennett-722b17edf2d6",
+      "speaker": "sarah",
+      "sourceText": "That can't be right. That's kilometers."
+    },
+    "map:0": {
+      "src": "/audio/clips/sarah/sarah-bennett-febee7b24bb6.mp3",
+      "sha256": "4f34449ae8113e23ca38fc16a24e3bdd31f6ad4f77b4ac2782508ac6019d7ac4",
+      "clipId": "sarah-bennett-febee7b24bb6",
+      "speaker": "sarah",
+      "sourceText": "That's us."
+    },
+    "map:1": {
+      "src": "/audio/clips/jack/jack-bennett-a8902a82734a.mp3",
+      "sha256": "77cc6a6aa28d7ad591974acf64e3723ad70041af557cebb694ebbb49b0aaeaf7",
+      "clipId": "jack-bennett-a8902a82734a",
+      "speaker": "jack",
+      "sourceText": "No. The array can't do this."
+    },
+    "map:2": {
+      "src": "/audio/clips/sarah/sarah-bennett-9caa3294cc78.mp3",
+      "sha256": "07bde6a668ce9c2a1fd5371024f5934e9ced34df0f82bf8838d1e1a6100a48fb",
+      "clipId": "sarah-bennett-9caa3294cc78",
+      "speaker": "sarah",
+      "sourceText": "The boundary says otherwise."
+    },
+    "map:3": {
+      "src": "/audio/clips/jack/jack-bennett-4da90a3fd46c.mp3",
+      "sha256": "772353a46d3be88ffc3034eb09ccbb6373dec5c2f3d8604424b9993948f04eeb",
+      "clipId": "jack-bennett-4da90a3fd46c",
+      "speaker": "jack",
+      "sourceText": "Not a town."
+    },
+    "map:4": {
+      "src": "/audio/clips/sarah/sarah-bennett-fe4505ac766b.mp3",
+      "sha256": "af146f1a7760e7c95e1d39542812502e4a0191a6f899041d130516856b754a52",
+      "clipId": "sarah-bennett-fe4505ac766b",
+      "speaker": "sarah",
+      "sourceText": "Target mass is still calculating."
+    },
+    "shelter:0": {
+      "src": "/audio/clips/jack/jack-bennett-a5ebf75877b4.mp3",
+      "sha256": "6a2d5aee07beeec7fa42bee5f8a5bcf4196ca5a9876deb1d35415fe253133cfb",
+      "clipId": "jack-bennett-a5ebf75877b4",
+      "speaker": "jack",
+      "sourceText": "Control, initiate a settlement-wide emergency."
+    },
+    "shelter:1": {
+      "src": "/audio/clips/lena/lena-ortiz-9c95d5dc1ebc.mp3",
+      "sha256": "b4ae2e4016bec77c31f903010b4aecef3590d2b2be5035dc389441db283a5cfa",
+      "clipId": "lena-ortiz-9c95d5dc1ebc",
+      "speaker": "lena",
+      "sourceText": "What level?"
+    },
+    "shelter:2": {
+      "src": "/audio/clips/jack/jack-bennett-027a6f4b630a.mp3",
+      "sha256": "2c80e40fb1ec0e19b8af1bf5b1066359d9579af94ae6a431a557b24e651b84ea",
+      "clipId": "jack-bennett-027a6f4b630a",
+      "speaker": "jack",
+      "sourceText": "Full evacuation protocol."
+    },
+    "shelter:3": {
+      "src": "/audio/clips/sarah/sarah-bennett-1b1502996659.mp3",
+      "sha256": "dbf92765080a0f244319fe8587c725359d499d4635db75dbbb2823b1aed3e48c",
+      "clipId": "sarah-bennett-1b1502996659",
+      "speaker": "sarah",
+      "sourceText": "Evacuate where?"
+    },
+    "shelter:4": {
+      "src": "/audio/clips/lena/lena-ortiz-a79634541f5a.mp3",
+      "sha256": "0456aa2ecfb91e078c8c5f4844f13b87a62a079af18dfb52c14dc7bc21ff277a",
+      "clipId": "lena-ortiz-a79634541f5a",
+      "speaker": "lena",
+      "sourceText": "Jack?"
+    },
+    "shelter:5": {
+      "src": "/audio/clips/jack/jack-bennett-99c7e97c98c0.mp3",
+      "sha256": "a852481ad41f5a9bba7b62189dbe7d929d448a9bf730507a47347d60437b221c",
+      "clipId": "jack-bennett-99c7e97c98c0",
+      "speaker": "jack",
+      "sourceText": "Change that order. Tell everyone to get indoors and away from exterior walls. Nobody leaves the developed zone until we understand what this thing is doing."
+    },
+    "shelter:6": {
+      "src": "/audio/clips/lena/lena-ortiz-1ddb7ebe9f6a.mp3",
+      "sha256": "30dd9ae94f93185e11044550abfcd9f4fb5b3fde61c59bc895d272b598fe15d8",
+      "clipId": "lena-ortiz-1ddb7ebe9f6a",
+      "speaker": "lena",
+      "sourceText": "Understood."
+    },
+    "overload:0": {
+      "src": "/audio/clips/sarah/sarah-bennett-7aa1e8332530.mp3",
+      "sha256": "109d1552f8867df239247f98b9464b1d3cbd0c7287badcbe4cace83c15d020d8",
+      "clipId": "sarah-bennett-7aa1e8332530",
+      "speaker": "sarah",
+      "sourceText": "Could we overload the emitters?"
+    },
+    "overload:1": {
+      "src": "/audio/clips/jack/jack-bennett-eceedfd38338.mp3",
+      "sha256": "4fd68edb9d5013372f082838a3a773a0a691f1d3477ae29d0c7d0117f42b2090",
+      "clipId": "jack-bennett-eceedfd38338",
+      "speaker": "jack",
+      "sourceText": "Maybe."
+    },
+    "overload:2": {
+      "src": "/audio/clips/sarah/sarah-bennett-8e2def3c83f1.mp3",
+      "sha256": "a3deb96d40f00dac5329508b5057e5c6000af17fff99aa375a6aef2c6002319d",
+      "clipId": "sarah-bennett-8e2def3c83f1",
+      "speaker": "sarah",
+      "sourceText": "Maybe good, or maybe everyone-inside-the-field-dies bad?"
+    },
+    "overload:3": {
+      "src": "/audio/clips/jack/jack-bennett-465352a1fb00.mp3",
+      "sha256": "21506fc279efd5a5486cb560769275864b9c818e6469431da02d407bedeb9f18",
+      "clipId": "jack-bennett-465352a1fb00",
+      "speaker": "jack",
+      "sourceText": "The second one."
+    },
+    "overload:4": {
+      "src": "/audio/clips/sarah/sarah-bennett-0439755d1cb4.mp3",
+      "sha256": "2c464b13ec63855dd6f2f97d4343b50cacdc446f4b113eca6cad7e267076f697",
+      "clipId": "sarah-bennett-0439755d1cb4",
+      "speaker": "sarah",
+      "sourceText": "Then let's not."
+    },
+    "acquired:0": {
+      "src": "/audio/clips/system/system-33aa4d2852d2.mp3",
+      "sha256": "c1cc60177637e0d62012e98f2ecf4699dcd8b0836475f3430ee2c8371c5d3bff",
+      "clipId": "system-33aa4d2852d2",
+      "speaker": "system",
+      "sourceText": "Boundary acquired."
+    },
+    "acquired:1": {
+      "src": "/audio/clips/jack/jack-bennett-a40ffc6ce592.mp3",
+      "sha256": "39a5817986a153cce4d1d177d0163835be3082e18e6cedbe3c6460d998c0a5e5",
+      "clipId": "jack-bennett-a40ffc6ce592",
+      "speaker": "jack",
+      "sourceText": "No."
+    },
+    "acquired:2": {
+      "src": "/audio/clips/system/system-cf9c6f65b3f9.mp3",
+      "sha256": "d5351824e90d8dc010d2453dfb9f3547860b811fa9efa94fdd56ae4bde424100",
+      "clipId": "system-cf9c6f65b3f9",
+      "speaker": "system",
+      "sourceText": "Scale factor calculating."
+    },
+    "acquired:3": {
+      "src": "/audio/clips/sarah/sarah-bennett-aa9dec3d0c15.mp3",
+      "sha256": "87f3634b59919a432e48ad330b131252b89a4fe7925249d101f0aa49987cc615",
+      "clipId": "sarah-bennett-aa9dec3d0c15",
+      "speaker": "sarah",
+      "sourceText": "Someone isn't just activating TOMBS."
+    },
+    "acquired:4": {
+      "src": "/audio/clips/jack/jack-bennett-a40ffc6ce592.mp3",
+      "sha256": "39a5817986a153cce4d1d177d0163835be3082e18e6cedbe3c6460d998c0a5e5",
+      "clipId": "jack-bennett-a40ffc6ce592",
+      "speaker": "jack",
+      "sourceText": "No."
+    },
+    "acquired:5": {
+      "src": "/audio/clips/sarah/sarah-bennett-85bf29553f5b.mp3",
+      "sha256": "0cd79eed8e31359616323d668e0911dae2472e3b1cdc373b63fc1cb40f810fea",
+      "clipId": "sarah-bennett-85bf29553f5b",
+      "speaker": "sarah",
+      "sourceText": "They're running it."
+    },
+    "manual:0": {
+      "src": "/audio/clips/jack/jack-bennett-dcf9e09fbfe0.mp3",
+      "sha256": "bd727a381e978c29491b4b2272bfd9ee09c003150486370982ed47121af6e47b",
+      "clipId": "jack-bennett-dcf9e09fbfe0",
+      "speaker": "jack",
+      "sourceText": "Give me manual control."
+    },
+    "manual:1": {
+      "src": "/audio/clips/system/system-74d1f262d4ed.mp3",
+      "sha256": "f1f16e2cebe9775d74380df6f2d983aefb6e7b52e50591fc9fdae909aaeecde6",
+      "clipId": "system-74d1f262d4ed",
+      "speaker": "system",
+      "sourceText": "Access denied."
+    },
+    "manual:2": {
+      "src": "/audio/clips/jack/jack-bennett-1fd731321d27.mp3",
+      "sha256": "c72997dca5989a9a9e1dc650e21d8b1ce1c3ac16f78dffe36253abca408c23f3",
+      "clipId": "jack-bennett-1fd731321d27",
+      "speaker": "jack",
+      "sourceText": "Come on. Give me manual control!"
+    },
+    "manual:3": {
+      "src": "/audio/clips/system/system-74d1f262d4ed.mp3",
+      "sha256": "f1f16e2cebe9775d74380df6f2d983aefb6e7b52e50591fc9fdae909aaeecde6",
+      "clipId": "system-74d1f262d4ed",
+      "speaker": "system",
+      "sourceText": "Access denied."
+    },
+    "manual:4": {
+      "src": "/audio/clips/sarah/sarah-bennett-8c55da68698b.mp3",
+      "sha256": "f48c27a51c85bf8ddf2fdd6cb8517d70c27a85ceffbbd0119b87087b82bb6af2",
+      "clipId": "sarah-bennett-8c55da68698b",
+      "speaker": "sarah",
+      "sourceText": "I'll try to interrupt the calculation."
+    },
+    "manual:5": {
+      "src": "/audio/clips/jack/jack-bennett-cfa169a3dc78.mp3",
+      "sha256": "4fd73328a24194f13132b9187dd3f00f3050d27728fc3205d89fa9864b920b11",
+      "clipId": "jack-bennett-cfa169a3dc78",
+      "speaker": "jack",
+      "sourceText": "Do it."
+    },
+    "manual:6": {
+      "src": "/audio/clips/sarah/sarah-bennett-9c7975427519.mp3",
+      "sha256": "bb3681ef8b2bf813985230f754372f9955b78b94b8aba25c78fcfd4be2cec247",
+      "clipId": "sarah-bennett-9c7975427519",
+      "speaker": "sarah",
+      "sourceText": "Nothing."
+    },
+    "manual:7": {
+      "src": "/audio/clips/jack/jack-bennett-239101410ce7.mp3",
+      "sha256": "06614f1f6edbcf42f56987359b7686b8b735549dbcacf98e4a5595a9b933471d",
+      "clipId": "jack-bennett-239101410ce7",
+      "speaker": "jack",
+      "sourceText": "Again."
+    },
+    "manual:8": {
+      "src": "/audio/clips/sarah/sarah-bennett-1062d8c5e927.mp3",
+      "sha256": "3086cf248f60d8f667f623f8f5e390668d4b7e8798955a6a19ce578223e3cfc1",
+      "clipId": "sarah-bennett-1062d8c5e927",
+      "speaker": "sarah",
+      "sourceText": "I am."
+    },
+    "steady:0": {
+      "src": "/audio/clips/jack/jack-bennett-a8fa7357e25b.mp3",
+      "sha256": "2f34e8b45e1cdc49a41a7a8f9ff36ea6ab6d0ff1abf987254444d51b3f2b345d",
+      "clipId": "jack-bennett-a8fa7357e25b",
+      "speaker": "jack",
+      "sourceText": "You okay?"
+    },
+    "steady:1": {
+      "src": "/audio/clips/sarah/sarah-bennett-b37eac4867d0.mp3",
+      "sha256": "b34033f2c0858b1f327a660150774e54c4813ea9080f43452433d6f909ad1108",
+      "clipId": "sarah-bennett-b37eac4867d0",
+      "speaker": "sarah",
+      "sourceText": "I'm fine."
+    },
+    "steady:2": {
+      "src": "/audio/clips/jack/jack-bennett-f5a2573e3125.mp3",
+      "sha256": "8335d555c404ed7b28652702ae3cca4732be3c245bba9acb2e38bb157bca86b9",
+      "clipId": "jack-bennett-f5a2573e3125",
+      "speaker": "jack",
+      "sourceText": "Sarah."
+    },
+    "steady:3": {
+      "src": "/audio/clips/sarah/sarah-bennett-629f5e5193c0.mp3",
+      "sha256": "bd2f19ab96dcfd27f93f16278d27c43c8a78b80085ef4eded1684360ce00cb07",
+      "clipId": "sarah-bennett-629f5e5193c0",
+      "speaker": "sarah",
+      "sourceText": "I'm fine. Keep working."
+    },
+    "steady:4": {
+      "src": "/audio/clips/system/system-e71707fdf287.mp3",
+      "sha256": "5b4049437fd831e501d308867c60ede10f00e614a2108e8694df38ca57c47feb",
+      "clipId": "system-e71707fdf287",
+      "speaker": "system",
+      "sourceText": "Scale factor locked."
+    },
+    "steady:5": {
+      "src": "/audio/clips/sarah/sarah-bennett-06efb30fb3b2.mp3",
+      "sha256": "70f410070fa91a42177d72d224204b6cdbb10604c6725dbf3eff9a0d4ff03adb",
+      "clipId": "sarah-bennett-06efb30fb3b2",
+      "speaker": "sarah",
+      "sourceText": "What does that mean?"
+    },
+    "steady:6": {
+      "src": "/audio/clips/jack/jack-bennett-0dfd7d43951e.mp3",
+      "sha256": "73ebd884672f7dce7a3653fa5391808b477e71ede7e5a2e37bc2d6c30cfacd64",
+      "clipId": "jack-bennett-0dfd7d43951e",
+      "speaker": "jack",
+      "sourceText": "That's not possible."
+    },
+    "steady:7": {
+      "src": "/audio/clips/sarah/sarah-bennett-958eaedc07e7.mp3",
+      "sha256": "76e1845fcadeed9830dcc5ab8692a62cf25c8eccd87cd5b927aa1a2280b5e6da",
+      "clipId": "sarah-bennett-958eaedc07e7",
+      "speaker": "sarah",
+      "sourceText": "What does it mean?"
+    },
+    "recovery:0": {
+      "src": "/audio/clips/jack/jack-bennett-c0395cccedb6.mp3",
+      "sha256": "835581236b162c81f8a2dbe6091ca596d5c06778d383e47516d024b66797781c",
+      "clipId": "jack-bennett-c0395cccedb6",
+      "speaker": "jack",
+      "sourceText": "Sarah!"
+    },
+    "recovery:1": {
+      "src": "/audio/clips/jack/jack-bennett-f2aea80be3e4.mp3",
+      "sha256": "fbd19ecacfb6d6379b6a0ae584019bb4dcc382c1d068fa450c95f14b4cf07e68",
+      "clipId": "jack-bennett-f2aea80be3e4",
+      "speaker": "jack",
+      "sourceText": "Are you hurt?"
+    },
+    "recovery:2": {
+      "src": "/audio/clips/sarah/sarah-bennett-48c297bd2c4b.mp3",
+      "sha256": "2d078f0dd585cd75140d03473b1be5894518dbaa440040bc1ebf0b9ae89f8a3e",
+      "clipId": "sarah-bennett-48c297bd2c4b",
+      "speaker": "sarah",
+      "sourceText": "I'm here. I don't think so."
+    },
+    "recovery:3": {
+      "src": "/audio/clips/jack/jack-bennett-7eb5cca77acb.mp3",
+      "sha256": "702a27d05daf7decd0f24b6ba73eb8f336c2c2a1d019575d3be5b1c888e826fe",
+      "clipId": "jack-bennett-7eb5cca77acb",
+      "speaker": "jack",
+      "sourceText": "The baby?"
+    },
+    "recovery:4": {
+      "src": "/audio/clips/sarah/sarah-bennett-1b1537965df2.mp3",
+      "sha256": "966db11f1c54674ac7430223f975dd9dabc30bfb40b87db376a6b164816a8c41",
+      "clipId": "sarah-bennett-1b1537965df2",
+      "speaker": "sarah",
+      "sourceText": "Give me a second."
+    },
+    "recovery:5": {
+      "src": "/audio/clips/jack/jack-bennett-a8a6aa7ae3b3.mp3",
+      "sha256": "64d71bbfa154a70cf44cbc9164e72baa6aa7e851a17f8a27d14c163dab7828da",
+      "clipId": "jack-bennett-a8a6aa7ae3b3",
+      "speaker": "jack",
+      "sourceText": "Sarah?"
+    },
+    "recovery:6": {
+      "src": "/audio/clips/sarah/sarah-bennett-8929c6c39671.mp3",
+      "sha256": "620b12958c8c4db7890d78447619f409a10871180b890a90dba4087d67215832",
+      "clipId": "sarah-bennett-8929c6c39671",
+      "speaker": "sarah",
+      "sourceText": "He moved."
+    },
+    "recovery:7": {
+      "src": "/audio/clips/jack/jack-bennett-c8c9dc64aced.mp3",
+      "sha256": "f6fa388a4c9e7b5eb3cee60cadbcaa72f0cc6a1186d35bf42051ca0db29bf7cb",
+      "clipId": "jack-bennett-c8c9dc64aced",
+      "speaker": "jack",
+      "sourceText": "Okay."
+    },
+    "recovery:8": {
+      "src": "/audio/clips/sarah/sarah-bennett-b6e7be6e8f2c.mp3",
+      "sha256": "86cf9886e48bce599f20fbbdbac7e5964b315b9cade5da700f87d976b682a3bb",
+      "clipId": "sarah-bennett-b6e7be6e8f2c",
+      "speaker": "sarah",
+      "sourceText": "We're okay."
+    },
+    "normal:1": {
+      "src": "/audio/clips/sarah/sarah-bennett-f12af34376aa.mp3",
+      "sha256": "0f4afb298f9cce1fae45ce08a725c8071575a01068c3055e2e1ee77b44d3ad5c",
+      "clipId": "sarah-bennett-f12af34376aa",
+      "speaker": "sarah",
+      "sourceText": "Did it fail?"
+    },
+    "sensors:0": {
+      "src": "/audio/clips/jack/jack-bennett-9a08dbde529e.mp3",
+      "sha256": "f3d0b82779a8b53702c9df53ee37735e485e5c91defc4b36668fef085571edd4",
+      "clipId": "jack-bennett-9a08dbde529e",
+      "speaker": "jack",
+      "sourceText": "TOMBS is offline."
+    },
+    "sensors:1": {
+      "src": "/audio/clips/sarah/sarah-bennett-bd865e7dd361.mp3",
+      "sha256": "d169518092c9fecff2319106736e7442fdb6900f760d773e43156f2c56496ee3",
+      "clipId": "sarah-bennett-bd865e7dd361",
+      "speaker": "sarah",
+      "sourceText": "Offline because you stopped it?"
+    },
+    "sensors:2": {
+      "src": "/audio/clips/jack/jack-bennett-a40ffc6ce592.mp3",
+      "sha256": "39a5817986a153cce4d1d177d0163835be3082e18e6cedbe3c6460d998c0a5e5",
+      "clipId": "jack-bennett-a40ffc6ce592",
+      "speaker": "jack",
+      "sourceText": "No."
+    },
+    "sensors:3": {
+      "src": "/audio/clips/jack/jack-bennett-3b14d2243587.mp3",
+      "sha256": "736750c2277e02c362ae1ce269d9dcf6e7348cdb2db54980bd6b962cd576cb4d",
+      "clipId": "jack-bennett-3b14d2243587",
+      "speaker": "jack",
+      "sourceText": "Offline because it finished."
+    },
+    "sensors:4": {
+      "src": "/audio/clips/sarah/sarah-bennett-792a914ed1ed.mp3",
+      "sha256": "962b9e9cea9922bc5b8657ec705db2c276464577deacda7c81fbb9abe4915fe1",
+      "clipId": "sarah-bennett-792a914ed1ed",
+      "speaker": "sarah",
+      "sourceText": "Finished what?"
+    },
+    "sensors:5": {
+      "src": "/audio/clips/jack/jack-bennett-f9af46b91604.mp3",
+      "sha256": "2e15b316683feb3503776873d7aab2ed3819a99bee569b40ceb2a0bd4eb710a5",
+      "clipId": "jack-bennett-f9af46b91604",
+      "speaker": "jack",
+      "sourceText": "Everything says we're fine."
+    },
+    "sensors:6": {
+      "src": "/audio/clips/jack/jack-bennett-20e4802bf61f.mp3",
+      "sha256": "c6a700d8deecc2147f2160847c45bae701983ac04b8b7fba1c058b5e4a1164b0",
+      "clipId": "jack-bennett-20e4802bf61f",
+      "speaker": "jack",
+      "sourceText": "Which means something is very wrong."
+    },
+    "lena:1": {
+      "src": "/audio/clips/jack/jack-bennett-e6c4a53338aa.mp3",
+      "sha256": "57e61c5e84b45bec040c427bc852e77eca62ce07e90947bfbf76c61f3fbab43d",
+      "clipId": "jack-bennett-e6c4a53338aa",
+      "speaker": "jack",
+      "sourceText": "I'm here."
+    },
+    "lena:2": {
+      "src": "/audio/clips/lena/lena-ortiz-59d77df9f648.mp3",
+      "sha256": "0e149d76a5616ae01f1c646953df70629ebc3383b7e6aaae3bc218610b8439fd",
+      "clipId": "lena-ortiz-59d77df9f648",
+      "speaker": "lena",
+      "sourceText": "Something happened."
+    },
+    "lena:3": {
+      "src": "/audio/clips/jack/jack-bennett-b94145d639e6.mp3",
+      "sha256": "5ffc7f37e485db54fa43f50a3dcfa59ed049006798226921c186bb1ec2611c61",
+      "clipId": "jack-bennett-b94145d639e6",
+      "speaker": "jack",
+      "sourceText": "I know. Status?"
+    },
+    "lena:4": {
+      "src": "/audio/clips/lena/lena-ortiz-8a2bc98d79c3.mp3",
+      "sha256": "a892f3bbb5aae85005cb2cc65880dac5a78dc9da5b68dc7737b0194648558d32",
+      "clipId": "lena-ortiz-8a2bc98d79c3",
+      "speaker": "lena",
+      "sourceText": "We've got power. Most systems are responding, but communications are down."
+    },
+    "lena:5": {
+      "src": "/audio/clips/jack/jack-bennett-0274ba4b6e6e.mp3",
+      "sha256": "62c6567fd39d406c5acc2c5528989a4ee3e1144c46680630ed06624f5a6f50e5",
+      "clipId": "jack-bennett-0274ba4b6e6e",
+      "speaker": "jack",
+      "sourceText": "Internal?"
+    },
+    "lena:6": {
+      "src": "/audio/clips/lena/lena-ortiz-f1942462de08.mp3",
+      "sha256": "49d7fc4f2b8ef0f13548d7c5a9b55c907b6ffaf07ebe30bc5abf33d2d6bf7bc5",
+      "clipId": "lena-ortiz-f1942462de08",
+      "speaker": "lena",
+      "sourceText": "External. We can't reach anything beyond the settlement."
+    },
+    "lena:7": {
+      "src": "/audio/clips/jack/jack-bennett-e743198ac7aa.mp3",
+      "sha256": "faf44783a1efb7d23fe2138b63851e5aec4e8ed5921ed032bba775f0554c858c",
+      "clipId": "jack-bennett-e743198ac7aa",
+      "speaker": "jack",
+      "sourceText": "Satellite?"
+    },
+    "lena:8": {
+      "src": "/audio/clips/lena/lena-ortiz-b20ef6a3bec7.mp3",
+      "sha256": "e3b2f0265a5f973483e59acd974a75d1c66924247719a0dfa6b2aed99b878bdb",
+      "clipId": "lena-ortiz-b20ef6a3bec7",
+      "speaker": "lena",
+      "sourceText": "Nothing."
+    },
+    "lena:9": {
+      "src": "/audio/clips/jack/jack-bennett-d093f1782c12.mp3",
+      "sha256": "344966a7656b2363e5ec1bd5c3be959bb01089a5bbc2766f6f9a6a50fed82dea",
+      "clipId": "jack-bennett-d093f1782c12",
+      "speaker": "jack",
+      "sourceText": "Radio?"
+    },
+    "lena:10": {
+      "src": "/audio/clips/lena/lena-ortiz-b20ef6a3bec7.mp3",
+      "sha256": "e3b2f0265a5f973483e59acd974a75d1c66924247719a0dfa6b2aed99b878bdb",
+      "clipId": "lena-ortiz-b20ef6a3bec7",
+      "speaker": "lena",
+      "sourceText": "Nothing."
+    },
+    "window:0": {
+      "src": "/audio/clips/sarah/sarah-bennett-ea3f24b4acf1.mp3",
+      "sha256": "0717050440989b9904a23de9045e2b6f2d0c2d7e8bb6bacccee2da1d8cd3f0cb",
+      "clipId": "sarah-bennett-ea3f24b4acf1",
+      "speaker": "sarah",
+      "sourceText": "Jack."
+    },
+    "window:1": {
+      "src": "/audio/clips/jack/jack-bennett-383407311440.mp3",
+      "sha256": "2750cf3cd37b9e097c3eb1440d5d700ac8e81b722e5e1ec996bd4a0e2506e0c4",
+      "clipId": "jack-bennett-383407311440",
+      "speaker": "jack",
+      "sourceText": "Try the emergency frequencies."
+    },
+    "window:2": {
+      "src": "/audio/clips/sarah/sarah-bennett-ea3f24b4acf1.mp3",
+      "sha256": "0717050440989b9904a23de9045e2b6f2d0c2d7e8bb6bacccee2da1d8cd3f0cb",
+      "clipId": "sarah-bennett-ea3f24b4acf1",
+      "speaker": "sarah",
+      "sourceText": "Jack."
+    },
+    "window:3": {
+      "src": "/audio/clips/jack/jack-bennett-10b63e74da2b.mp3",
+      "sha256": "9702cc0daf75f96cfe54aa6b3a962fbfd9f73b0ea9540ddfa139e080d2c87a15",
+      "clipId": "jack-bennett-10b63e74da2b",
+      "speaker": "jack",
+      "sourceText": "One second."
+    },
+    "window:4": {
+      "src": "/audio/clips/sarah/sarah-bennett-48d614b54be7.mp3",
+      "sha256": "a4b426c4d336b53f4666027757d9a42fc3a43821e9a30df10338b8236ac3c3e3",
+      "clipId": "sarah-bennett-48d614b54be7",
+      "speaker": "sarah",
+      "sourceText": "Jack, come here."
+    },
+    "outside:1": {
+      "src": "/audio/clips/sarah/sarah-bennett-01bc4c5eccf6.mp3",
+      "sha256": "6a39c712c3a21cbfafeb65b665dc78c88887d1057091461c6d187aec89ced009",
+      "clipId": "sarah-bennett-01bc4c5eccf6",
+      "speaker": "sarah",
+      "sourceText": "Is that... grass?"
+    },
+    "outside:2": {
+      "src": "/audio/clips/jack/jack-bennett-a40ffc6ce592.mp3",
+      "sha256": "39a5817986a153cce4d1d177d0163835be3082e18e6cedbe3c6460d998c0a5e5",
+      "clipId": "jack-bennett-a40ffc6ce592",
+      "speaker": "jack",
+      "sourceText": "No."
+    },
+    "outside:3": {
+      "src": "/audio/clips/sarah/sarah-bennett-0b3888b61ebd.mp3",
+      "sha256": "ba48639481cffeeb7c21f22847d26c804f7752a3b0167a85684a520ca906388f",
+      "clipId": "sarah-bennett-0b3888b61ebd",
+      "speaker": "sarah",
+      "sourceText": "Jack, what did TOMBS do?"
+    },
+    "outside:4": {
+      "src": "/audio/clips/jack/jack-bennett-81be04b23e76.mp3",
+      "sha256": "82d34a08ce75dbc6db8da3b240a993f9adc285abba1b502ad52861836213ea82",
+      "clipId": "jack-bennett-81be04b23e76",
+      "speaker": "jack",
+      "sourceText": "External cameras."
+    },
+    "zoom:0": {
+      "src": "/audio/clips/sarah/sarah-bennett-a016c88a726f.mp3",
+      "sha256": "60fad881e861804fa10cb48b66646999433d9201804fb2731c19764c3730314b",
+      "clipId": "sarah-bennett-a016c88a726f",
+      "speaker": "sarah",
+      "sourceText": "Can you zoom out?"
+    },
+    "zoom:1": {
+      "src": "/audio/clips/jack/jack-bennett-480e1453b996.mp3",
+      "sha256": "a992fbf903062abb6c264087a7444ecc6039d13d888996c8492efdfbcb609bbe",
+      "clipId": "jack-bennett-480e1453b996",
+      "speaker": "jack",
+      "sourceText": "It is zoomed out."
+    },
+    "water:0": {
+      "src": "/audio/clips/sarah/sarah-bennett-11edcf15d86c.mp3",
+      "sha256": "8c7e64a327f955b607cd2d22f7d53862e4bb8f545b476bc10ce869d302895efe",
+      "clipId": "sarah-bennett-11edcf15d86c",
+      "speaker": "sarah",
+      "sourceText": "That's a drop of water."
+    },
+    "tremor:1": {
+      "src": "/audio/clips/sarah/sarah-bennett-1d0a1f8b9f13.mp3",
+      "sha256": "1c179fe626901411d31e8f6be105f5d9a1e5e3d5e2711fb56a5be32f6e76584a",
+      "clipId": "sarah-bennett-1d0a1f8b9f13",
+      "speaker": "sarah",
+      "sourceText": "Was that us?"
+    },
+    "tremor:2": {
+      "src": "/audio/clips/jack/jack-bennett-f96fcb348ff2.mp3",
+      "sha256": "c27eb3087834844c1b96e46a6922f739d61a99f5a7ffd8446f02e6bd2ba04885",
+      "clipId": "jack-bennett-f96fcb348ff2",
+      "speaker": "jack",
+      "sourceText": "No seismic event."
+    },
+    "tremor:3": {
+      "src": "/audio/clips/sarah/sarah-bennett-2cf2fe73c1cd.mp3",
+      "sha256": "b3eaf87df5bde296493c34d8ccc18aae4cd9eaefc02bb7b89cece5df5910acb8",
+      "clipId": "sarah-bennett-2cf2fe73c1cd",
+      "speaker": "sarah",
+      "sourceText": "Then what was it?"
+    },
+    "event:0": {
+      "src": "/audio/clips/sarah/sarah-bennett-726f339a2436.mp3",
+      "sha256": "fb9919788189fe612a7f091f08b6fdeb9a7db598b2374847ff59b475303fd389",
+      "clipId": "sarah-bennett-726f339a2436",
+      "speaker": "sarah",
+      "sourceText": "The town..."
+    },
+    "event:1": {
+      "src": "/audio/clips/system/system-f0a87639d1a7.mp3",
+      "sha256": "72b0b4aec4d564cf62935f1050c5fdb44d7b2ac15edf7f3b1d4d7476cae048be",
+      "clipId": "system-f0a87639d1a7",
+      "speaker": "system",
+      "sourceText": "Boundary event complete."
+    },
+    "event:2": {
+      "src": "/audio/clips/sarah/sarah-bennett-937447a849cb.mp3",
+      "sha256": "f96d7df32ccad6bfbfde406ee8443e5f4a8269ccd7f7576d0b15f25b691913e8",
+      "clipId": "sarah-bennett-937447a849cb",
+      "speaker": "sarah",
+      "sourceText": "No."
+    },
+    "everyone:0": {
+      "src": "/audio/clips/sarah/sarah-bennett-b4091489c6ca.mp3",
+      "sha256": "71ae5c047fcd70adf4f62880040e4621d19e69eecfdc25f1269fbb2ea0a1b0a4",
+      "clipId": "sarah-bennett-b4091489c6ca",
+      "speaker": "sarah",
+      "sourceText": "It took all of us."
+    },
+    "everyone:1": {
+      "src": "/audio/clips/jack/jack-bennett-cc67d3e9caf0.mp3",
+      "sha256": "b0930c689d871097e50e919ef0a2dbf28640e327acff1091b9de2a0f42fa6289",
+      "clipId": "jack-bennett-cc67d3e9caf0",
+      "speaker": "jack",
+      "sourceText": "Everyone inside the boundary."
+    },
+    "everyone:2": {
+      "src": "/audio/clips/sarah/sarah-bennett-21740b10948d.mp3",
+      "sha256": "d2184616f7a46f5d5916278adce52833dda38976be2cc6e61896e2e360a1153f",
+      "clipId": "sarah-bennett-21740b10948d",
+      "speaker": "sarah",
+      "sourceText": "The homes?"
+    },
+    "everyone:3": {
+      "src": "/audio/clips/jack/jack-bennett-930d0f9640e4.mp3",
+      "sha256": "9bb513920219eadae280bb4053f8cfb4da35721b024f313f8e7c6dadb0700121",
+      "clipId": "jack-bennett-930d0f9640e4",
+      "speaker": "jack",
+      "sourceText": "Yes."
+    },
+    "everyone:4": {
+      "src": "/audio/clips/sarah/sarah-bennett-d349b5ce84f9.mp3",
+      "sha256": "30edbc5c0459ff02c50a9b90db36d63eccf83190837d3d7a8d41122ea1751b10",
+      "clipId": "sarah-bennett-d349b5ce84f9",
+      "speaker": "sarah",
+      "sourceText": "The medical center?"
+    },
+    "everyone:5": {
+      "src": "/audio/clips/jack/jack-bennett-930d0f9640e4.mp3",
+      "sha256": "9bb513920219eadae280bb4053f8cfb4da35721b024f313f8e7c6dadb0700121",
+      "clipId": "jack-bennett-930d0f9640e4",
+      "speaker": "jack",
+      "sourceText": "Yes."
+    },
+    "everyone:6": {
+      "src": "/audio/clips/sarah/sarah-bennett-512e0e85d0e7.mp3",
+      "sha256": "2437f7553820a92867c9d27419ea4f7e80b4417e72b7d022f1dccb58353a9bce",
+      "clipId": "sarah-bennett-512e0e85d0e7",
+      "speaker": "sarah",
+      "sourceText": "Five hundred people."
+    },
+    "everyone:7": {
+      "src": "/audio/clips/sarah/sarah-bennett-e56721982863.mp3",
+      "sha256": "7bcd9161ef650109e4455d152ed7b9b2038ae7ea73e504bb1a3aff212748e569",
+      "clipId": "sarah-bennett-e56721982863",
+      "speaker": "sarah",
+      "sourceText": "Jack..."
+    },
+    "end:0": {
+      "src": "/audio/clips/narrator/narrator-920e81486ce0.mp3",
+      "sha256": "d7db83720c3a0e71465e4dd1372010608e18fb08bdb4bf0123ca31639ba74c9c",
+      "clipId": "narrator-920e81486ce0",
+      "speaker": "narrator",
+      "sourceText": "Their town had shrunk."
+    },
+    "end:1": {
+      "src": "/audio/clips/narrator/narrator-b7b08a6201b3.mp3",
+      "sha256": "85666fd9033310a15908b8945f4ef88ee3882ea4de6b3fe047c8fd49f11c8a99",
+      "clipId": "narrator-b7b08a6201b3",
+      "speaker": "narrator",
+      "sourceText": "And the island had not."
+    },
+    "lab:wake:0": {
+      "src": "/audio/clips/narrator/narrator-a6f00f720f9c.mp3",
+      "sha256": "a50094095782423bb699d3ea27430df7d66666bb23ddc9fd625ced8701691d40",
+      "clipId": "narrator-a6f00f720f9c",
+      "speaker": "narrator",
+      "sourceText": "It was March fifth, in the year twenty-one ten."
+    },
+    "lab:wake:1": {
+      "src": "/audio/clips/narrator/narrator-646dff306d03.mp3",
+      "sha256": "d8e83242b860955e452f4c3462c56e079a97127421eca41fce018548d84df18c",
+      "clipId": "narrator-646dff306d03",
+      "speaker": "narrator",
+      "sourceText": "It was almost eleven at night on a remote island somewhere in the Atlantic Ocean. The island stretched roughly fifty-six kilometers across, about thirty-five miles from one side to the other, but most of it remained undeveloped wilderness. Near its center sat a research settlement of laboratories, homes, workshops, medical facilities, and other buildings supporting the nearly five hundred people who lived there."
+    },
+    "lab:wake:2": {
+      "src": "/audio/clips/narrator/narrator-0b2f58c70a4c.mp3",
+      "sha256": "63a2dbd5fb2329bb1c31408f3c65a3b8dc752d57c533d89967d05db589e88c6e",
+      "clipId": "narrator-0b2f58c70a4c",
+      "speaker": "narrator",
+      "sourceText": "Deep inside one of those laboratories, Dr. Jack Bennett was hard at work. Technically."
+    },
+    "lab:wake:3": {
+      "src": "/audio/clips/system/system-2e8d8d3e2911.mp3",
+      "sha256": "906d98a78d6c8cc087bdc0323494c02aa0fc81d239dd6e572c80334ecc7457dc",
+      "clipId": "system-2e8d8d3e2911",
+      "speaker": "system",
+      "sourceText": "Warning. unauthorized system access."
+    },
+    "lab:wake:4": {
+      "src": "/audio/clips/jack/jack-bennett-2b8704441765.mp3",
+      "sha256": "e9375e564a4179adfe247883f5295d438e112a07151dc8f2aa07b49be66e3d40",
+      "clipId": "jack-bennett-2b8704441765",
+      "speaker": "jack",
+      "sourceText": "What? Okay, I'm awake."
+    },
+    "lab:wake:5": {
+      "src": "/audio/clips/jack/jack-bennett-85dfddc7134b.mp3",
+      "sha256": "e3ce268e898a15d11a1b903167b4e57f57daa524fd4b184d5efa8e08db4dc45b",
+      "clipId": "jack-bennett-85dfddc7134b",
+      "speaker": "jack",
+      "sourceText": "That's not good."
+    },
+    "lab:trace:0": {
+      "src": "/audio/clips/jack/jack-bennett-492f4059781a.mp3",
+      "sha256": "5c843f5be70cb42feabb4fa409aaf122fc07093afe8a162854aea00066c2b2c7",
+      "clipId": "jack-bennett-492f4059781a",
+      "speaker": "jack",
+      "sourceText": "Come on. What are you doing?"
+    },
+    "lab:trace:1": {
+      "src": "/audio/clips/narrator/narrator-1bb0c18f4491.mp3",
+      "sha256": "593284c8e85d98ca18bee923e10c515bd5649c83574b593fc521cc0f2d1dddc1",
+      "clipId": "narrator-1bb0c18f4491",
+      "speaker": "narrator",
+      "sourceText": "An unfamiliar connection appeared for half a second and vanished."
+    },
+    "lab:trace:2": {
+      "src": "/audio/clips/jack/jack-bennett-b9c31e4c82cf.mp3",
+      "sha256": "a3697bc3a041ba2b722ced1cab75a30f4d3214dba00ed124e06130e78fb126a3",
+      "clipId": "jack-bennett-b9c31e4c82cf",
+      "speaker": "jack",
+      "sourceText": "No. Where'd you go?"
+    },
+    "lab:trace:3": {
+      "src": "/audio/clips/system/system-610b0d021f1b.mp3",
+      "sha256": "b682bc33db672327bbc651da459482554961ec797cb1500572feb5337661bee7",
+      "clipId": "system-610b0d021f1b",
+      "speaker": "system",
+      "sourceText": "Security protocol violation."
+    },
+    "lab:trace:4": {
+      "src": "/audio/clips/jack/jack-bennett-549daf1f1de8.mp3",
+      "sha256": "e7445a1e7264249fc2ac94496a47be96dddbbdb68d67cae595cfd93d077fd737",
+      "clipId": "jack-bennett-549daf1f1de8",
+      "speaker": "jack",
+      "sourceText": "Okay. Definitely awake now."
+    },
+    "lab:trace:5": {
+      "src": "/audio/clips/jack/jack-bennett-27b114bdd284.mp3",
+      "sha256": "d1cdb6619ae210963dbd4c4ca0582536d8e87821f06240d2598f0bec583d80f0",
+      "clipId": "jack-bennett-27b114bdd284",
+      "speaker": "jack",
+      "sourceText": "That's impossible."
+    },
+    "lab:trace:6": {
+      "src": "/audio/clips/system/system-a6ce88995aab.mp3",
+      "sha256": "5d315c6e70045ad898ea7ef91624677418a4a323d7f15eee3d1ccf27b2a86403",
+      "clipId": "system-a6ce88995aab",
+      "speaker": "system",
+      "sourceText": "Tombs project."
+    },
+    "lab:lock:0": {
+      "src": "/audio/clips/jack/jack-bennett-ecf78584ec95.mp3",
+      "sha256": "cb35c2e1174f29c2e03ab0a6d9d00302d957dfa922decc852c0643e680ca8e71",
+      "clipId": "jack-bennett-ecf78584ec95",
+      "speaker": "jack",
+      "sourceText": "Oh, no you don't."
+    },
+    "lab:lock:1": {
+      "src": "/audio/clips/narrator/narrator-c2bcc3f581cf.mp3",
+      "sha256": "bfbe77a90f5e2800f02e74a7fd99851d5cff7a95b1fd08c6eb35ae1401e21219",
+      "clipId": "narrator-c2bcc3f581cf",
+      "speaker": "narrator",
+      "sourceText": "He immediately locked the terminal. The screen went black for three seconds, then came back on and reopened the same directory."
+    },
+    "lab:lock:2": {
+      "src": "/audio/clips/jack/jack-bennett-2ffc77da7b3f.mp3",
+      "sha256": "847cb174adf78e4d74e7c034c9ca25f7a6071095b98e354ad7770716eb4685ae",
+      "clipId": "jack-bennett-2ffc77da7b3f",
+      "speaker": "jack",
+      "sourceText": "Well, that's new."
+    },
+    "lab:call:0": {
+      "src": "/audio/clips/jack/jack-bennett-a8a6aa7ae3b3.mp3",
+      "sha256": "64d71bbfa154a70cf44cbc9164e72baa6aa7e851a17f8a27d14c163dab7828da",
+      "clipId": "jack-bennett-a8a6aa7ae3b3",
+      "speaker": "jack",
+      "sourceText": "Sarah?"
+    },
+    "lab:call:1": {
+      "src": "/audio/clips/jack/jack-bennett-45ac1e9fe1de.mp3",
+      "sha256": "b4b7bca0c123e810fa7c1cae7961794126dbc60b30e98a3ad1d99f4d2fe58537",
+      "clipId": "jack-bennett-45ac1e9fe1de",
+      "speaker": "jack",
+      "sourceText": "Sarah, you there?"
+    },
+    "lab:call:2": {
+      "src": "/audio/clips/sarah/sarah-bennett-3f51406be04d.mp3",
+      "sha256": "49f5df9f71e2277c2f30e355c438115ecff1925005cfdc4359e27fff2e0fa697",
+      "clipId": "sarah-bennett-3f51406be04d",
+      "speaker": "sarah",
+      "sourceText": "I'm here,"
+    },
+    "lab:call:3": {
+      "src": "/audio/clips/sarah/sarah-bennett-0df3f0a6bee0.mp3",
+      "sha256": "f389d0253bb007ff90f540788e1fc10401c515b4a752323b9a6b00385bae39d8",
+      "clipId": "sarah-bennett-0df3f0a6bee0",
+      "speaker": "sarah",
+      "sourceText": "What's wrong?"
+    },
+    "lab:call:4": {
+      "src": "/audio/clips/jack/jack-bennett-3141593a1c9d.mp3",
+      "sha256": "63ea4d1ce8f0905d29086243604c7459b1d0a216a4c77704dbe0fb9f5d2da518",
+      "clipId": "jack-bennett-3141593a1c9d",
+      "speaker": "jack",
+      "sourceText": "I've got something weird on my computer. It tripped a security alarm."
+    },
+    "lab:call:5": {
+      "src": "/audio/clips/sarah/sarah-bennett-c0ca574b594a.mp3",
+      "sha256": "fed184b9006e0816a9f737de592ee4e4856b5f98d9f77e10ab4d5863d07bf143",
+      "clipId": "sarah-bennett-c0ca574b594a",
+      "speaker": "sarah",
+      "sourceText": "Define weird."
+    },
+    "lab:call:6": {
+      "src": "/audio/clips/jack/jack-bennett-a376700976d7.mp3",
+      "sha256": "c96fc9b43f51488dbeb41ed8d9b0a6a32de7bc45c9483bfd86b4e5d838bb12eb",
+      "clipId": "jack-bennett-a376700976d7",
+      "speaker": "jack",
+      "sourceText": "I think somebody's in the system."
+    },
+    "lab:call:7": {
+      "src": "/audio/clips/sarah/sarah-bennett-81ff0dc894cf.mp3",
+      "sha256": "abbbadae5b02b2a543513dfd1bf554ef86cc34d3f00ce84ec28a4a74b292f3b1",
+      "clipId": "sarah-bennett-81ff0dc894cf",
+      "speaker": "sarah",
+      "sourceText": "Are you sure?"
+    },
+    "lab:call:8": {
+      "src": "/audio/clips/jack/jack-bennett-3d94cfec7c01.mp3",
+      "sha256": "7bdcaadaecc780c50a8be836ad82ea7c836481d5bdcf6e491b71d88f99541ccf",
+      "clipId": "jack-bennett-3d94cfec7c01",
+      "speaker": "jack",
+      "sourceText": "No. That's why I'm calling the smarter scientist."
+    },
+    "lab:call:9": {
+      "src": "/audio/clips/sarah/sarah-bennett-5a071d01be77.mp3",
+      "sha256": "25ef2c42ac1ed8d13e9408b5ecb81e7ea914384dbb938cbb30bc8167cf58d445",
+      "clipId": "sarah-bennett-5a071d01be77",
+      "speaker": "sarah",
+      "sourceText": "Good answer."
+    },
+    "lab:call:10": {
+      "src": "/audio/clips/jack/jack-bennett-632f5041e805.mp3",
+      "sha256": "5fe38aacc15b011dbc74289edb4f853c4033ebdbd181044682a2e6952f19d21e",
+      "clipId": "jack-bennett-632f5041e805",
+      "speaker": "jack",
+      "sourceText": "Can you come take a look?"
+    },
+    "lab:call:11": {
+      "src": "/audio/clips/sarah/sarah-bennett-2a350447dd17.mp3",
+      "sha256": "e7bc1b902cf3f00fa28136a814a293a5d114aaf72d3b135061e5729239708528",
+      "clipId": "sarah-bennett-2a350447dd17",
+      "speaker": "sarah",
+      "sourceText": "I'm on my way,"
+    },
+    "lab:call:12": {
+      "src": "/audio/clips/narrator/narrator-91b25dbe2d24.mp3",
+      "sha256": "e318bdd1af9d366affb877bcff335405ce8bc25896f078e18edf17db32406bbe",
+      "clipId": "narrator-91b25dbe2d24",
+      "speaker": "narrator",
+      "sourceText": "Jack released the intercom and looked back at the monitor. The TOMBS directory was still open."
+    },
+    "lab:call:13": {
+      "src": "/audio/clips/jack/jack-bennett-31ac40401ca8.mp3",
+      "sha256": "cb67a4cd21f38b023c005cee8ece5f772184882cc40bca3c58e9e96b7279958c",
+      "clipId": "jack-bennett-31ac40401ca8",
+      "speaker": "jack",
+      "sourceText": "Who are you?"
+    },
+    "lab:call:14": {
+      "src": "/audio/clips/narrator/narrator-34f450c1a659.mp3",
+      "sha256": "055b0dc4b275c795d1412b00d4792b02817d9b4370cc819caea8af30afd065a8",
+      "clipId": "narrator-34f450c1a659",
+      "speaker": "narrator",
+      "sourceText": "The cursor moved without him touching anything."
+    },
+    "lab:call:15": {
+      "src": "/audio/clips/system/system-49a4bf38c005.mp3",
+      "sha256": "78604150ca2d385996ad15f2276319706be559d071bac2dd1159ea23f99d11a4",
+      "clipId": "system-49a4bf38c005",
+      "speaker": "system",
+      "sourceText": "Boundary control."
+    },
+    "lab:call:16": {
+      "src": "/audio/clips/jack/jack-bennett-9b850bb838a8.mp3",
+      "sha256": "508e30f07f963ba8911b57d6ea0c0153655e43d93cdbfe4b5164564541958d81",
+      "clipId": "jack-bennett-9b850bb838a8",
+      "speaker": "jack",
+      "sourceText": "No, no, no."
+    },
+    "lab:arrive:0": {
+      "src": "/audio/clips/sarah/sarah-bennett-41421ed41839.mp3",
+      "sha256": "0c1842493aa8482f1be6771712c50681d0153b87f8d37d21f91e0d1306616e82",
+      "clipId": "sarah-bennett-41421ed41839",
+      "speaker": "sarah",
+      "sourceText": "Please tell me you didn't break something."
+    },
+    "lab:arrive:1": {
+      "src": "/audio/clips/jack/jack-bennett-6aa0f73ed972.mp3",
+      "sha256": "2542db120aebfeec3cd8f43d3410a5836132897a7e7227a73c74eb2e652345f8",
+      "clipId": "jack-bennett-6aa0f73ed972",
+      "speaker": "jack",
+      "sourceText": "I was asleep,"
+    },
+    "lab:arrive:2": {
+      "src": "/audio/clips/sarah/sarah-bennett-e240820580d9.mp3",
+      "sha256": "33e58117fd9cb4dafe4b4e5036675093f8dd6c33a082b5072dc8eae32d4b3ef7",
+      "clipId": "sarah-bennett-e240820580d9",
+      "speaker": "sarah",
+      "sourceText": "You called me in here to admit that?"
+    },
+    "lab:arrive:3": {
+      "src": "/audio/clips/jack/jack-bennett-1ecaa1e81e25.mp3",
+      "sha256": "891d059bab70946490969c4e617e35bce0993d71a9b7217e5f37b3c3abc0cfb3",
+      "clipId": "jack-bennett-1ecaa1e81e25",
+      "speaker": "jack",
+      "sourceText": "No. That was my defense."
+    },
+    "lab:arrive:4": {
+      "src": "/audio/clips/sarah/sarah-bennett-da6d3f2466a2.mp3",
+      "sha256": "61ae2ff01d531b36e1481ff9a2447ec0bcdf8802eea616236e8631fdad1b145c",
+      "clipId": "sarah-bennett-da6d3f2466a2",
+      "speaker": "sarah",
+      "sourceText": "Against what?"
+    },
+    "lab:arrive:5": {
+      "src": "/audio/clips/jack/jack-bennett-ab5acb662fb5.mp3",
+      "sha256": "f79f7a28fbbd03206583b56aac5adf77f2637986fb4d11df11a0b119cf223381",
+      "clipId": "jack-bennett-ab5acb662fb5",
+      "speaker": "jack",
+      "sourceText": "Whatever this is."
+    },
+    "lab:arrive:6": {
+      "src": "/audio/clips/jack/jack-bennett-68873cb0ae3a.mp3",
+      "sha256": "fd34903857bb0d392e061e17762a1f2565ef637ab56296f1ac164b218534539b",
+      "clipId": "jack-bennett-68873cb0ae3a",
+      "speaker": "jack",
+      "sourceText": "I was reviewing yesterday's test results."
+    },
+    "lab:arrive:7": {
+      "src": "/audio/clips/sarah/sarah-bennett-ecb1ce66f7bc.mp3",
+      "sha256": "ea391106ac61ffde46951c8bf10dbbc0ccea8b90503a54b30fe5f609bd3ed4c6",
+      "clipId": "sarah-bennett-ecb1ce66f7bc",
+      "speaker": "sarah",
+      "sourceText": "You were sleeping,"
+    },
+    "lab:arrive:8": {
+      "src": "/audio/clips/jack/jack-bennett-fa0505b74e44.mp3",
+      "sha256": "e08b2d1c29bc7f14bccde1e00550e7f0f2b1c1723bc6323bd49ae87eca5cb5d7",
+      "clipId": "jack-bennett-fa0505b74e44",
+      "speaker": "jack",
+      "sourceText": "I was reviewing them internally."
+    },
+    "lab:arrive:9": {
+      "src": "/audio/clips/sarah/sarah-bennett-d26997d1aa80.mp3",
+      "sha256": "ef6be7a98833cd9706b22be4914c37be76b3fd6455d93e7038f29b292aeb234f",
+      "clipId": "sarah-bennett-d26997d1aa80",
+      "speaker": "sarah",
+      "sourceText": "With your eyes closed?"
+    },
+    "lab:arrive:10": {
+      "src": "/audio/clips/jack/jack-bennett-050e0785c171.mp3",
+      "sha256": "4b45eea1a2e54e8e980f7628efd35f2bad3ce97e68a650c05e6636c9563b3a54",
+      "clipId": "jack-bennett-050e0785c171",
+      "speaker": "jack",
+      "sourceText": "It's an advanced technique."
+    },
+    "lab:arrive:11": {
+      "src": "/audio/clips/sarah/sarah-bennett-ea3f24b4acf1.mp3",
+      "sha256": "0717050440989b9904a23de9045e2b6f2d0c2d7e8bb6bacccee2da1d8cd3f0cb",
+      "clipId": "sarah-bennett-ea3f24b4acf1",
+      "speaker": "sarah",
+      "sourceText": "Jack."
+    },
+    "lab:arrive:12": {
+      "src": "/audio/clips/jack/jack-bennett-06415c9f30d8.mp3",
+      "sha256": "e98cd6d2b5a53c3fcd3d6af6e113948989e6fe28f604b77007df1b274856968e",
+      "clipId": "jack-bennett-06415c9f30d8",
+      "speaker": "jack",
+      "sourceText": "Right. Problem."
+    },
+    "lab:arrive:13": {
+      "src": "/audio/clips/jack/jack-bennett-eb7b0cfc9b60.mp3",
+      "sha256": "627e24f0a30abc9eda9c4c229b55b8fa894c1aff9b40d36d5006ae4e0c20944c",
+      "clipId": "jack-bennett-eb7b0cfc9b60",
+      "speaker": "jack",
+      "sourceText": "I got an unauthorized access warning. I checked the network monitor and saw a connection I didn't recognize, but it disappeared before I could trace it."
+    },
+    "lab:arrive:14": {
+      "src": "/audio/clips/sarah/sarah-bennett-d446f7575941.mp3",
+      "sha256": "5424e8c1bb8a91d7d95981aacfe9018724a3cca7bcf0cc94b3b8551d846fefd3",
+      "clipId": "sarah-bennett-d446f7575941",
+      "speaker": "sarah",
+      "sourceText": "And then?"
+    },
+    "lab:arrive:15": {
+      "src": "/audio/clips/jack/jack-bennett-4b4b13be3859.mp3",
+      "sha256": "a852a7c5319d5e6662730e1454ea9389c6cfc10fe83633b60c31938e5fa09039",
+      "clipId": "jack-bennett-4b4b13be3859",
+      "speaker": "jack",
+      "sourceText": "It opened the TOMBS directory."
+    },
+    "lab:arrive:16": {
+      "src": "/audio/clips/sarah/sarah-bennett-65056aba0745.mp3",
+      "sha256": "bd02b4a857f7acc35ddfc191de7cd502bdf7441af126c4bff21619ac000f7d55",
+      "clipId": "sarah-bennett-65056aba0745",
+      "speaker": "sarah",
+      "sourceText": "By itself?"
+    },
+    "lab:arrive:17": {
+      "src": "/audio/clips/jack/jack-bennett-d97b90a6d54e.mp3",
+      "sha256": "d0ff5b7c43de2c4e5f3931656a6e3884173ba8402deec1f80a1fb7c1c1aee98b",
+      "clipId": "jack-bennett-d97b90a6d54e",
+      "speaker": "jack",
+      "sourceText": "Yep."
+    },
+    "lab:arrive:18": {
+      "src": "/audio/clips/sarah/sarah-bennett-a1dc5fafa6a9.mp3",
+      "sha256": "5f43d5fe032f9325bb7ca59b8ba7682a9bab6d421a5161dcf206bc7c417f22e8",
+      "clipId": "sarah-bennett-a1dc5fafa6a9",
+      "speaker": "sarah",
+      "sourceText": "You locked the terminal?"
+    },
+    "lab:arrive:19": {
+      "src": "/audio/clips/jack/jack-bennett-d97b90a6d54e.mp3",
+      "sha256": "d0ff5b7c43de2c4e5f3931656a6e3884173ba8402deec1f80a1fb7c1c1aee98b",
+      "clipId": "jack-bennett-d97b90a6d54e",
+      "speaker": "jack",
+      "sourceText": "Yep."
+    },
+    "lab:arrive:20": {
+      "src": "/audio/clips/sarah/sarah-bennett-1ebe0c684d41.mp3",
+      "sha256": "2a27a4d349d895130664771ef8a3921f401d206f0b57a93e64431588ad1b123b",
+      "clipId": "sarah-bennett-1ebe0c684d41",
+      "speaker": "sarah",
+      "sourceText": "And?"
+    },
+    "lab:arrive:21": {
+      "src": "/audio/clips/jack/jack-bennett-92ce22fee124.mp3",
+      "sha256": "83a49afed8efdf4802767fb0a69806e7e5ffc23563e989f9298c08d8e70e2655",
+      "clipId": "jack-bennett-92ce22fee124",
+      "speaker": "jack",
+      "sourceText": "It unlocked itself."
+    },
+    "lab:arrive:22": {
+      "src": "/audio/clips/jack/jack-bennett-9cc3304964a3.mp3",
+      "sha256": "4adbb23f47b326d1b9f6affb084fd613891648252ba1c941a8e578322dcb23e9",
+      "clipId": "jack-bennett-9cc3304964a3",
+      "speaker": "jack",
+      "sourceText": "I know."
+    },
+    "lab:logs:0": {
+      "src": "/audio/clips/narrator/narrator-a1d352c4ee9f.mp3",
+      "sha256": "1861551ba01afa984d06bfa886c3944d3dbdc2b327c922227b5266383f803722",
+      "clipId": "narrator-a1d352c4ee9f",
+      "speaker": "narrator",
+      "sourceText": "She pulled another chair beside him and nudged his out of the way."
+    },
+    "lab:logs:1": {
+      "src": "/audio/clips/sarah/sarah-bennett-dc74b2a7f99a.mp3",
+      "sha256": "6bed4cc9196a656161fd0c1d28c53d400a9b31c4110d13cf2b04c4796d823310",
+      "clipId": "sarah-bennett-dc74b2a7f99a",
+      "speaker": "sarah",
+      "sourceText": "Move."
+    },
+    "lab:logs:2": {
+      "src": "/audio/clips/jack/jack-bennett-01f2a89496de.mp3",
+      "sha256": "95e653deeef01a8fca7e6884294935507b8adc532378208690722f635688648a",
+      "clipId": "jack-bennett-01f2a89496de",
+      "speaker": "jack",
+      "sourceText": "I'm sitting here."
+    },
+    "lab:logs:3": {
+      "src": "/audio/clips/sarah/sarah-bennett-a7934bd42c67.mp3",
+      "sha256": "83b59b8efac18d5caecb060a47f34c016f5f6e7416edcd39bf4533855b9c8f0a",
+      "clipId": "sarah-bennett-a7934bd42c67",
+      "speaker": "sarah",
+      "sourceText": "Then move your chair."
+    },
+    "lab:logs:4": {
+      "src": "/audio/clips/jack/jack-bennett-6d611e695fd8.mp3",
+      "sha256": "67a0e105da8447a45cef3892d605e0b727295540e7c694716047788150004438",
+      "clipId": "jack-bennett-6d611e695fd8",
+      "speaker": "jack",
+      "sourceText": "Oh."
+    },
+    "lab:logs:5": {
+      "src": "/audio/clips/narrator/narrator-0444653f442f.mp3",
+      "sha256": "eb38ad53ce42d0cd103a2684238382bb4659c20b901c96530d1d3aca336061f5",
+      "clipId": "narrator-0444653f442f",
+      "speaker": "narrator",
+      "sourceText": "Jack rolled sideways to give her room."
+    },
+    "lab:logs:6": {
+      "src": "/audio/clips/sarah/sarah-bennett-ad67f921e02e.mp3",
+      "sha256": "042037ff47ae111ba852ae960a2cb368f725889f7ccfbcfbbade804fc00fe96d",
+      "clipId": "sarah-bennett-ad67f921e02e",
+      "speaker": "sarah",
+      "sourceText": "You said the connection disappeared?"
+    },
+    "lab:logs:7": {
+      "src": "/audio/clips/jack/jack-bennett-f3736d27f9d7.mp3",
+      "sha256": "9bdb0fc8333f0d959767d2e5c75335877e847a3cf905ec82f041c6a42da9604d",
+      "clipId": "jack-bennett-f3736d27f9d7",
+      "speaker": "jack",
+      "sourceText": "Almost immediately."
+    },
+    "lab:logs:8": {
+      "src": "/audio/clips/sarah/sarah-bennett-563ad9289e68.mp3",
+      "sha256": "e96bfea8ab0b4aeccaa9d2cb6d1a787b52e2756e8d7e6206ce2aff54c04263ba",
+      "clipId": "sarah-bennett-563ad9289e68",
+      "speaker": "sarah",
+      "sourceText": "External?"
+    },
+    "lab:logs:9": {
+      "src": "/audio/clips/jack/jack-bennett-211b122503c9.mp3",
+      "sha256": "eab082e7439e84c206181d9dc66f92f0f7ed503c6f3dfa9e8b3a447f248f7a11",
+      "clipId": "jack-bennett-211b122503c9",
+      "speaker": "jack",
+      "sourceText": "I couldn't tell."
+    },
+    "lab:logs:10": {
+      "src": "/audio/clips/sarah/sarah-bennett-6fe63af821c3.mp3",
+      "sha256": "5e3bd58a46620924401824d8344cb7fc4fc2e1d3188a080ebbb89e2da0e98d1b",
+      "clipId": "sarah-bennett-6fe63af821c3",
+      "speaker": "sarah",
+      "sourceText": "That's reassuring."
+    },
+    "lab:logs:11": {
+      "src": "/audio/clips/jack/jack-bennett-2a98eedf112f.mp3",
+      "sha256": "a4119de106eb40b7f821ddcd666800707b64bfb646a21744ed773b257ebc2d58",
+      "clipId": "jack-bennett-2a98eedf112f",
+      "speaker": "jack",
+      "sourceText": "I thought so."
+    },
+    "lab:logs:12": {
+      "src": "/audio/clips/sarah/sarah-bennett-5965a9732934.mp3",
+      "sha256": "17988ecccf37b52ab8c7b08298c26c2fe3b06d0c7c124cc2dea7f82cdeffd688",
+      "clipId": "sarah-bennett-5965a9732934",
+      "speaker": "sarah",
+      "sourceText": "These are clean,"
+    },
+    "lab:logs:13": {
+      "src": "/audio/clips/jack/jack-bennett-e42d2e1230ff.mp3",
+      "sha256": "62cf2f4c47968969b896e171bfaca33cc876ae0049936b0bb3450190d3842014",
+      "clipId": "jack-bennett-e42d2e1230ff",
+      "speaker": "jack",
+      "sourceText": "Exactly."
+    },
+    "lab:logs:14": {
+      "src": "/audio/clips/sarah/sarah-bennett-7cb92747650b.mp3",
+      "sha256": "fe935fc8700a9814ff341933708ac59a49a54c02a14cb3eccc01ecd6bc181659",
+      "clipId": "sarah-bennett-7cb92747650b",
+      "speaker": "sarah",
+      "sourceText": "Too clean."
+    },
+    "lab:logs:15": {
+      "src": "/audio/clips/jack/jack-bennett-6de493fd3169.mp3",
+      "sha256": "b3f3180aabbdbd9b71c6f50646b02025975831a11c75ae7bc45fb3ef8124194e",
+      "clipId": "jack-bennett-6de493fd3169",
+      "speaker": "jack",
+      "sourceText": "That's what I was thinking."
+    },
+    "lab:logs:16": {
+      "src": "/audio/clips/sarah/sarah-bennett-deff6b10a48b.mp3",
+      "sha256": "bf287e03ed5d46277f83090f029b4a7d988d8764d40973761db3574fc3f17488",
+      "clipId": "sarah-bennett-deff6b10a48b",
+      "speaker": "sarah",
+      "sourceText": "No, you were sleeping."
+    },
+    "lab:logs:17": {
+      "src": "/audio/clips/jack/jack-bennett-29c879a5b799.mp3",
+      "sha256": "8318b380ec648993303768cf2af1c077b53bdbc005974138ebb511a21781fb10",
+      "clipId": "jack-bennett-29c879a5b799",
+      "speaker": "jack",
+      "sourceText": "I was thinking eventually."
+    },
+    "lab:baby:0": {
+      "src": "/audio/clips/jack/jack-bennett-e61a5b7e36cd.mp3",
+      "sha256": "53807bf1cea8a5bd664b32459e5da6eda6dc7f82dd309ea2838a5d28875299b2",
+      "clipId": "jack-bennett-e61a5b7e36cd",
+      "speaker": "jack",
+      "sourceText": "You know, you're supposed to be resting."
+    },
+    "lab:baby:1": {
+      "src": "/audio/clips/sarah/sarah-bennett-e9ec137bc087.mp3",
+      "sha256": "f8462f93c781c9f8a1ae76ade7e58c3f561150aef6087ab5703b310df8186d42",
+      "clipId": "sarah-bennett-e9ec137bc087",
+      "speaker": "sarah",
+      "sourceText": "So are you."
+    },
+    "lab:baby:2": {
+      "src": "/audio/clips/jack/jack-bennett-c1ff018af109.mp3",
+      "sha256": "e44289f1e56fbab3a41a0a519721c66f35e2de3614282e831f2feb666a6f13cb",
+      "clipId": "jack-bennett-c1ff018af109",
+      "speaker": "jack",
+      "sourceText": "I'm not the pregnant one."
+    },
+    "lab:baby:3": {
+      "src": "/audio/clips/sarah/sarah-bennett-4db8c4b299cf.mp3",
+      "sha256": "f725db71ff379e6682336612e894d7359b7fff8ecc9963cadbe122871eb0f5fc",
+      "clipId": "sarah-bennett-4db8c4b299cf",
+      "speaker": "sarah",
+      "sourceText": "No. You're the one I found asleep at a laboratory terminal."
+    },
+    "lab:baby:4": {
+      "src": "/audio/clips/jack/jack-bennett-48aebe4e6970.mp3",
+      "sha256": "bd6e0936f2a96b4926f16b0b71772c2ee2dd79a4f5bd54381ee1bb67197d9d51",
+      "clipId": "jack-bennett-48aebe4e6970",
+      "speaker": "jack",
+      "sourceText": "That's different."
+    },
+    "lab:baby:5": {
+      "src": "/audio/clips/sarah/sarah-bennett-0e24152e8551.mp3",
+      "sha256": "dc7a0f7a42c5e8ec232f240bed1984b86459e44eb241ab4e5b3bb6be7bc9f7b7",
+      "clipId": "sarah-bennett-0e24152e8551",
+      "speaker": "sarah",
+      "sourceText": "How?"
+    },
+    "lab:baby:6": {
+      "src": "/audio/clips/jack/jack-bennett-753cad07ca15.mp3",
+      "sha256": "8c5d01b57181dcd8e8f385faee84c7ce80ca924a1aa89996a036773a286b0472",
+      "clipId": "jack-bennett-753cad07ca15",
+      "speaker": "jack",
+      "sourceText": "I wasn't uncomfortable?"
+    },
+    "lab:baby:7": {
+      "src": "/audio/clips/jack/jack-bennett-941e93bf213e.mp3",
+      "sha256": "7b51e7e88b6cfce30b37324f5c7aa8545db6e7be0b3c18e792736a8ba619e2fb",
+      "clipId": "jack-bennett-941e93bf213e",
+      "speaker": "jack",
+      "sourceText": "Fair."
+    },
+    "lab:baby:8": {
+      "src": "/audio/clips/sarah/sarah-bennett-dc90fc8720b4.mp3",
+      "sha256": "fc51823635337c046fac15da6c3a8ae31eacfd54423b31d13199ed2bea990db5",
+      "clipId": "sarah-bennett-dc90fc8720b4",
+      "speaker": "sarah",
+      "sourceText": "Lately the baby seems to think eleven at night is morning."
+    },
+    "lab:baby:9": {
+      "src": "/audio/clips/narrator/narrator-550b3249d9e8.mp3",
+      "sha256": "6625034d2d861abe76b885d8dd93fa507590c93904625ad3b90197aff9a122b9",
+      "clipId": "narrator-550b3249d9e8",
+      "speaker": "narrator",
+      "sourceText": "Sarah rested a hand briefly against her stomach before returning to the keyboard."
+    },
+    "lab:baby:10": {
+      "src": "/audio/clips/jack/jack-bennett-a8fc65386727.mp3",
+      "sha256": "0aec057e9a28942080e5e3168334fd528f3ded8241a3d431362ac63ae22c7482",
+      "clipId": "jack-bennett-a8fc65386727",
+      "speaker": "jack",
+      "sourceText": "Already takes after me."
+    },
+    "lab:baby:11": {
+      "src": "/audio/clips/sarah/sarah-bennett-b4465ab7292c.mp3",
+      "sha256": "c4661b26cf3bbf0586e5277004297a19a6dd7ff3b7cfcbb40a6d2d989fabd9d5",
+      "clipId": "sarah-bennett-b4465ab7292c",
+      "speaker": "sarah",
+      "sourceText": "That's what I'm afraid of."
+    }
+  },
+  "effects": {
+    "amb_computer_lab": {
+      "src": "/audio/sfx/ambience/amb_computer_lab.mp3",
+      "sha256": "f530df86590018f29b89767b91768b2a8581203de1cc46c5a01840786109913f",
+      "category": "ambience",
+      "loop": true,
+      "gain": 0.202,
+      "duck": 0.7,
+      "credit": {
+        "title": "Computer Lab",
+        "author": "freesound_community",
+        "authorUrl": "https://pixabay.com/users/freesound_community-46691455/",
+        "source": "Pixabay",
+        "sourceUrl": "https://pixabay.com/sound-effects/",
+        "license": "Pixabay Content License",
+        "licenseUrl": "https://pixabay.com/service/license-summary/",
+        "addedBy": "Joshua",
+        "addedOn": "2026-09-18"
+      }
+    },
+    "amb_console_alarm_bed": {
+      "src": "/audio/sfx/alarm/amb_console_alarm_bed.mp3",
+      "sha256": "2a50693624ee533e44f6b33a146445a13c00135028e600e18dea5c5b13e6397a",
+      "category": "alarm",
+      "loop": true,
+      "gain": 0.052,
+      "duck": 0.4
+    },
+    "amb_intercom_channel_open": {
+      "src": "/audio/sfx/ambience/amb_intercom_channel_open.mp3",
+      "sha256": "6ae06555ee5aec4b864cdd11a32f77ce76b8ce8b454d5d63eb57a825475e350b",
+      "category": "ambience",
+      "loop": true,
+      "gain": 0.01,
+      "duck": 0.7
+    },
+    "amb_night_outside": {
+      "src": "/audio/sfx/ambience/amb_night_outside.mp3",
+      "sha256": "2c79c0edbf188318c5aa4faf743b526c504520a8dffbf043619f7e39a5e83b36",
+      "category": "ambience",
+      "loop": true,
+      "gain": 0.309,
+      "duck": 0.7,
+      "credit": {
+        "source": "Pixabay",
+        "sourceUrl": "https://pixabay.com/sound-effects/",
+        "license": "Pixabay Content License",
+        "licenseUrl": "https://pixabay.com/service/license-summary/",
+        "addedBy": "Joshua",
+        "addedOn": "2026-09-18",
+        "title": "Night Ambience",
+        "author": "freesound_community",
+        "authorUrl": "https://pixabay.com/users/freesound_community-46691455/"
+      }
+    },
+    "amb_settlement_sirens": {
+      "src": "/audio/sfx/alarm/amb_settlement_sirens.mp3",
+      "sha256": "681c1f164f9272ddc3934ff5879ae82df3b6cba5b4860009ffbd1b090391b694",
+      "category": "alarm",
+      "loop": true,
+      "gain": 0.061,
+      "duck": 0.4
+    },
+    "amb_tombs_array_power_rise": {
+      "src": "/audio/sfx/system/amb_tombs_array_power_rise.mp3",
+      "sha256": "f1bd62a7dfacc8ec40600ab0c967373f97023d0213cb5770ac8e76feaac4f8f0",
+      "category": "system",
+      "loop": true,
+      "gain": 0.013,
+      "duck": 0.5
+    },
+    "sfx_access_denied_tone": {
+      "src": "/audio/sfx/system/sfx_access_denied_tone.mp3",
+      "sha256": "42ab11f176b2aebae4f8fd4468d05337d834305e596dbf14a3cfc05871a1e396",
+      "category": "system",
+      "loop": false,
+      "gain": 0.1,
+      "duck": 0.5
+    },
+    "sfx_access_revoked_tone": {
+      "src": "/audio/sfx/system/sfx_access_revoked_tone.mp3",
+      "sha256": "c38b13848a8ca2872bc5985e7a52f11aa1f51167a42d05e25173f14c5b448386",
+      "category": "system",
+      "loop": false,
+      "gain": 0.042,
+      "duck": 0.5
+    },
+    "sfx_alert_warning_hit": {
+      "src": "/audio/sfx/alarm/sfx_alert_warning_hit.mp3",
+      "sha256": "ce62bfd71c0df555c17501cc16a5fb5e207a4ab48a234805a3b71254b4f957f1",
+      "category": "alarm",
+      "loop": false,
+      "gain": 0.05,
+      "duck": 0.4
+    },
+    "sfx_array_rings_move": {
+      "src": "/audio/sfx/system/sfx_array_rings_move.mp3",
+      "sha256": "5e377c423e1afea07b4fdcca5629910071c94ad539cc1963ba26b589ad0c056a",
+      "category": "system",
+      "loop": true,
+      "gain": 0.038,
+      "duck": 0.5
+    },
+    "sfx_boundary_event_collapse": {
+      "src": "/audio/sfx/system/sfx_boundary_event_collapse.mp3",
+      "sha256": "4ec161a13a4f04bc75d63a3c83a9330445e4f4568585e32942f66dd96c11884a",
+      "category": "system",
+      "loop": false,
+      "gain": 0.116,
+      "duck": 0.5
+    },
+    "sfx_boundary_event_return": {
+      "src": "/audio/sfx/system/sfx_boundary_event_return.mp3",
+      "sha256": "ec3ec75d0d4a7c5edba69756a3bd294a8be68525f3e527fba8c250cef392d9bc",
+      "category": "system",
+      "loop": false,
+      "gain": 0.135,
+      "duck": 0.5
+    },
+    "sfx_building_shake": {
+      "src": "/audio/sfx/foley/sfx_building_shake.mp3",
+      "sha256": "ed41f04966e2b85aecd2b6744bd77901b8ad4113dbd1e2aa78272e253aeaae43",
+      "category": "foley",
+      "loop": false,
+      "gain": 0.058,
+      "duck": 1
+    },
+    "sfx_chair_roll_fast": {
+      "src": "/audio/sfx/foley/sfx_chair_roll_fast.mp3",
+      "sha256": "f85bc7ee65cd3b379baea8fc0e29125e0ae7ec6a7acff5b6e802c5999e4b4f83",
+      "category": "foley",
+      "loop": false,
+      "gain": 0.074,
+      "duck": 1
+    },
+    "sfx_console_alarm_erupt": {
+      "src": "/audio/sfx/alarm/sfx_console_alarm_erupt.mp3",
+      "sha256": "a6fb32b84ac5c7cd9b0f8d92f8e6299ee3d1a9657c0bd9b512477de619da5124",
+      "category": "alarm",
+      "loop": false,
+      "gain": 0.042,
+      "duck": 0.4
+    },
+    "sfx_console_tone_soft": {
+      "src": "/audio/sfx/interface/sfx_console_tone_soft.mp3",
+      "sha256": "c13deb076d30b45f1529135f4d2475c4c695ad4396ac84cdb10ecf72d19d6ce9",
+      "category": "interface",
+      "loop": false,
+      "gain": 0.085,
+      "duck": 1
+    },
+    "sfx_distant_vibration_deep": {
+      "src": "/audio/sfx/system/sfx_distant_vibration_deep.mp3",
+      "sha256": "84471671d9f5d2ed291be6a5235baa4e39d97385f4326b609fce149390155f92",
+      "category": "system",
+      "loop": false,
+      "gain": 0.065,
+      "duck": 0.5
+    },
+    "sfx_equipment_power_up_soft": {
+      "src": "/audio/sfx/system/sfx_equipment_power_up_soft.mp3",
+      "sha256": "a453099d5a3e81ae78da9965e32ddc86d59743d9ebcb9dfda49bd00f312ea814",
+      "category": "system",
+      "loop": false,
+      "gain": 0.061,
+      "duck": 0.5
+    },
+    "sfx_footsteps_sarah_sneakers": {
+      "src": "/audio/sfx/foley/sfx_footsteps_sarah_sneakers.mp3",
+      "sha256": "f54c8944210be7840f0e5755f9d3f824a59b79a036a71d8d62c71fa45b7ae39e",
+      "category": "foley",
+      "loop": false,
+      "gain": 0.133,
+      "duck": 1
+    },
+    "sfx_intercom_close": {
+      "src": "/audio/sfx/interface/sfx_intercom_close.mp3",
+      "sha256": "dbfe5bc3324a9d82c0027158c5c4a1ebe4f23f13398f7623211af6250b956e27",
+      "category": "interface",
+      "loop": false,
+      "gain": 0.041,
+      "duck": 1
+    },
+    "sfx_intercom_open": {
+      "src": "/audio/sfx/interface/sfx_intercom_open.mp3",
+      "sha256": "f9b638aa21abaa8c0d39f412e15d7e22a08469c4f832b14138515b2fd98a5784",
+      "category": "interface",
+      "loop": false,
+      "gain": 0.123,
+      "duck": 1
+    },
+    "sfx_keyboard_typing_short": {
+      "src": "/audio/sfx/foley/sfx_keyboard_typing_short.mp3",
+      "sha256": "9a8e4deb1c6993b7ad769a3f9b983847fd8bb2528fcceab6f2faff72196213df",
+      "category": "foley",
+      "loop": false,
+      "gain": 0.251,
+      "duck": 1
+    },
+    "sfx_lab_door_slide": {
+      "src": "/audio/sfx/foley/sfx_lab_door_slide.mp3",
+      "sha256": "7e31fa4feccae21d506850e6b93c8eb7d7e7a66f57f81961b07037ebc4242bbc",
+      "category": "foley",
+      "loop": false,
+      "gain": 0.03,
+      "duck": 1
+    },
+    "sfx_shutdown_lever_pull": {
+      "src": "/audio/sfx/foley/sfx_shutdown_lever_pull.mp3",
+      "sha256": "589aae05dd9ae39685c8f012e2aca187f8b25ea03bd43568f4ca5b309a3d3fba",
+      "category": "foley",
+      "loop": false,
+      "gain": 0.117,
+      "duck": 1
+    },
+    "sfx_system_notify_soft": {
+      "src": "/audio/sfx/interface/sfx_system_notify_soft.mp3",
+      "sha256": "dbcd23bf1bcf7e8672f10525f401766a25fdf0dd1dc4092c437ed207c9fa6a9f",
+      "category": "interface",
+      "loop": false,
+      "gain": 0.088,
+      "duck": 1
+    },
+    "sfx_terminal_lock_engage": {
+      "src": "/audio/sfx/interface/sfx_terminal_lock_engage.mp3",
+      "sha256": "f9f5855948338f322e8dd91507d2136f14f87892a9df8abc78583bfd4c1a6301",
+      "category": "interface",
+      "loop": false,
+      "gain": 0.09,
+      "duck": 1
+    },
+    "sfx_wrist_terminal_chirp": {
+      "src": "/audio/sfx/interface/sfx_wrist_terminal_chirp.mp3",
+      "sha256": "27e80e457e2e0571c939da3d3e3b3b8351058c1b905b6537342722f20ec351b5",
+      "category": "interface",
+      "loop": false,
+      "gain": 0.041,
+      "duck": 1
+    }
+  },
+  "missing": [
+    {
+      "key": "wake:0",
+      "speaker": "narrator",
+      "text": "March fifth, 2110. Almost eleven at night.",
+      "reason": "cinematic-caption"
+    },
+    {
+      "key": "lock:1",
+      "speaker": "narrator",
+      "text": "The screen goes black. Three seconds later, the same directory reopens.",
+      "reason": "cinematic-caption"
+    },
+    {
+      "key": "corridor:6",
+      "speaker": "sarah",
+      "text": "So we're both going.",
+      "reason": "source-speaker-mismatch",
+      "sourceSpeaker": "jack-bennett",
+      "sourceClip": "jack-bennett-7df39e406705"
+    },
+    {
+      "key": "disconnect:2",
+      "speaker": "lena",
+      "text": "Jack? We disconnected you.",
+      "reason": "source-speaker-mismatch",
+      "sourceSpeaker": "jack-bennett",
+      "sourceClip": "jack-bennett-90d6c9b3d753"
+    },
+    {
+      "key": "array:0",
+      "speaker": "narrator",
+      "text": "Beyond the reinforced window, every ring is moving.",
+      "reason": "cinematic-caption"
+    },
+    {
+      "key": "normal:0",
+      "speaker": "narrator",
+      "text": "The alarms stop. The laboratory looks exactly as it did before.",
+      "reason": "cinematic-caption"
+    },
+    {
+      "key": "lena:0",
+      "speaker": "lena",
+      "text": "Jack! Jack, answer me!",
+      "reason": "source-speaker-mismatch",
+      "sourceSpeaker": "jack-bennett",
+      "sourceClip": "jack-bennett-2a675d4ecfca"
+    },
+    {
+      "key": "outside:0",
+      "speaker": "narrator",
+      "text": "The street is there. The building across from them is there. Everything inside the settlement looks normal.",
+      "reason": "cinematic-caption"
+    },
+    {
+      "key": "camera:0",
+      "speaker": "narrator",
+      "text": "The perimeter feeds come online.",
+      "reason": "cinematic-caption"
+    },
+    {
+      "key": "north:0",
+      "speaker": "narrator",
+      "text": "The northern edge is buried beneath towering grass.",
+      "reason": "cinematic-caption"
+    },
+    {
+      "key": "west:0",
+      "speaker": "narrator",
+      "text": "The western road ends at an enormous wall of earth and vegetation.",
+      "reason": "cinematic-caption"
+    },
+    {
+      "key": "tree:0",
+      "speaker": "narrator",
+      "text": "A tree Jack has walked past hundreds of times. Now the camera cannot fit its trunk on the screen.",
+      "reason": "cinematic-caption"
+    },
+    {
+      "key": "tremor:0",
+      "speaker": "narrator",
+      "text": "A faint, deep vibration passes through the building.",
+      "reason": "cinematic-caption"
+    }
+  ]
+}
