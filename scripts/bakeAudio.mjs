@@ -30,15 +30,16 @@
  * bytes (1.84 MB) and 20 sound assets at 2,126,115 bytes (2.03 MB), 3.86
  * MB together. There is no ffmpeg on this machine and none is needed.
  *
- * THAT IS TRUE OF CHAPTER 1 AND NOT OF THE SOURCE AS A WHOLE, which is
- * why the check below exists rather than a comment saying it is fine: of
- * the 32 sound assets, TWO are `.wav` — `amb_alarm_pulse` and
- * `amb_alarm_pulse_fast`, both procedural alarm beds, and both chapters 2
- * and 3. The day `CHAPTER` becomes 2 this script must refuse loudly, not
- * copy a WAV into `public/` for iOS Safari to decline at the first alarm
- * with the clip counted as `failed` and nobody knowing why. When that day
- * comes the fix is a transcode step here or an mp3 in the story
- * repository — a decision, made once, in daylight.
+ * THAT CHECK IS WHY THIS BAKE COULD GROW. From the first bake until
+ * 2026-10-04 two of the story repository's sound assets were `.wav` —
+ * `amb_alarm_pulse` and `amb_alarm_pulse_fast`, procedural alarm beds
+ * belonging to chapters 2 and 3 — and this script said that the day
+ * `CHAPTER` became 2 it must refuse loudly rather than copy a WAV into
+ * `public/` for iOS Safari to decline at the first alarm, with the clip
+ * counted as `failed` and nobody knowing why. It never had to refuse:
+ * the masters became mp3 upstream and the gate opened on its own. The
+ * check STAYS, because what made it useful was being there before it was
+ * needed.
  *
  * The extension is checked AND the first bytes are, because a renamed
  * file is the failure a suffix cannot see. Both legal openings are
@@ -141,12 +142,17 @@ import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 /**
- * The chapter this build carries. ONE LINE, deliberately: the milestone
- * is "Chapter 1 sample only", and the next milestone should be this
- * number and a re-run — not a search through the script for every place
- * a 1 was written down.
+ * THE CHAPTERS THIS BUILD CARRIES. One line, deliberately: the next
+ * milestone should be this list and a re-run, not a search through the
+ * script for every place a number was written down.
+ *
+ * It was `1` from the first bake until 2026-10-04, held there by the two
+ * WAV alarm beds described in the header. The story repository's sound
+ * assets are all mp3 now and its manuscript has reached nine chapters,
+ * so the thing this script was waiting for has happened. Joshua, asked
+ * how much to take: all nine.
  */
-const CHAPTER = 1;
+const CHAPTERS = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -336,7 +342,7 @@ function manifestSource(voice, sounds, busCounts, bytes, perCharacter) {
  * bus); this file is only their sum, written down so the build needs
  * neither of them present.
  *
- * Chapter ${CHAPTER}, copied out of \`capflyingfun/tmb-story\` and into
+ * Chapters ${CHAPTERS.join(', ')}, copied out of \`capflyingfun/tmb-story\` and into
  * \`public/audio/\`: ${voice.length} voice lines and ${sounds.length} sound assets, ${mb(bytes)} of mp3.
  *
 ${characters}
@@ -361,7 +367,7 @@ ${characters}
 import type { AudioManifest } from '../audio/manifest';
 
 export const AUDIO_MANIFEST: AudioManifest = {
-  chapter: ${CHAPTER},
+  chapters: [${CHAPTERS.join(', ')}],
   voice: [
 ${lines.join('\n')}
   ],
@@ -411,7 +417,8 @@ function main() {
     return;
   }
 
-  const inChapter = (entry) => Array.isArray(entry.chapters) && entry.chapters.includes(CHAPTER);
+  const wanted = new Set(CHAPTERS);
+  const inChapter = (entry) => Array.isArray(entry.chapters) && entry.chapters.some((c) => wanted.has(c));
 
   // Read and check EVERYTHING before writing anything: a bake that fails
   // half way leaves `public/audio/` describing neither the old chapter nor
@@ -506,7 +513,7 @@ function main() {
 
   // ---- the report ----
 
-  say(`chapter ${CHAPTER} from ${SOURCE}`);
+  say(`chapters ${CHAPTERS.join(', ')} from ${SOURCE}`);
   say('');
   say(`VOICE  ${voice.length} lines`);
   for (const [character, row] of perCharacter) {

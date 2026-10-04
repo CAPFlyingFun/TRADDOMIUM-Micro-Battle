@@ -22,7 +22,10 @@ const MANIFEST = AUDIO_MANIFEST.voice.filter((l) => l.chapters.includes(1)).map(
 
 describe('chapter 1 as beats', () => {
   it('accounts for every voice line the manifest carries, and invents none', () => {
-    expect(AUDIO_MANIFEST.chapter).toBe(1);
+    // Plural since alpha.69 — the build carries all nine chapters now,
+    // and this beat list is chapter 1's, so it checks only that its own
+    // chapter is among them.
+    expect(AUDIO_MANIFEST.chapters).toContain(1);
     expect(MANIFEST.length).toBeGreaterThan(0);
     const claimed = new Set(CHAPTER_1_LINES);
     expect([...claimed].filter((id) => !MANIFEST.includes(id)), 'lines no manifest entry matches').toEqual([]);
