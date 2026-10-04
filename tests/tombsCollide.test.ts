@@ -88,7 +88,7 @@ describe('the index over the laboratory plan', () => {
     expect(SOLIDS.ids).toHaveLength(SOLIDS.count);
 
     // The measurement the module's cell size was chosen against.
-    expect(SOLIDS.count).toBe(102);
+    expect(SOLIDS.count).toBe(114);
   });
 
   it('leaves out what the plan says is not solid', () => {

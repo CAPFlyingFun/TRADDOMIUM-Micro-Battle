@@ -120,8 +120,16 @@ export interface SoundAsset {
  * be a second copy of that rule.
  */
 export interface AudioManifest {
-  /** The chapter this build carries. 1, until the milestone says otherwise. */
-  readonly chapter: number;
+  /**
+   * EVERY CHAPTER THIS BUILD CARRIES, ascending. Plural since alpha.69:
+   * the story repository reached nine chapters and its last two WAV sound
+   * assets became mp3, which is what the bake had been waiting for.
+   *
+   * A LINE belongs to one or more chapters (`VoiceLine.chapters`) and this
+   * is their union — what a chapter picker offers, and what a reader
+   * checks a beat list against.
+   */
+  readonly chapters: readonly number[];
   readonly voice: readonly VoiceLine[];
   readonly sounds: readonly SoundAsset[];
   readonly busCounts: Readonly<Record<Bus, number>>;

@@ -119,6 +119,22 @@ how much of the stick's travel is spent below walking pace. The default
 is MEDIUM: `fast` is a speed for crossing the island, and since the
 ecology arrived the island is not what there is to look at.
 
+**THE GAME IS LANDSCAPE ONLY** (Joshua, 2026-09-26: "let's force
+landscape only like Beyond Extinction has, as it would play better since
+it's not a tap to move"). Movement is a stick under a thumb; held upright
+there is nowhere for the thumbs to go, and the 3D camera keeps a fixed
+VERTICAL field of view, so a narrow viewport shows LESS of the room and
+frames a wall. There is no API for this — iOS Safari does not implement
+Screen Orientation Lock at all and elsewhere `lock()` needs fullscreen —
+so it is a PROMPT: `#orient` in `index.html`, pure CSS on
+`(orientation: portrait) and (pointer: coarse)`, in the static document
+so it covers the splash, the menu, the world and every dev tool, and so
+no script can leave it stuck up or down. `pointer: coarse` is
+load-bearing: it keeps the gate off a narrow desktop window. The
+manifest's `"orientation": "landscape"` is the other half, for an
+installed app. Do not build a portrait layout for anything; the gate
+means nobody will ever see one.
+
 **Controls belong to the thumbs, not the screen.** Screen space near the
 thumbs is the scarcest resource; action controls have first claim.
 Before adding a control, check whether a gesture can carry it. Movement

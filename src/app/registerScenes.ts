@@ -34,6 +34,7 @@ import { isBuiltSky, type Sky } from '../world/weather/weather';
 import { PERF_WORLD_MAP_ID, PERF_WORLD_SCENE_ID, perfWorldTool } from '../perf/perfTool';
 import { LAB_SCENE_ID, createCreatureLabScene, creatureLabTool } from '../lab';
 import { TOMBS_SCENE_ID, createTombsLabScene, tombsTool } from '../tombs';
+import { STORY_LAB_SCENE_ID, createStoryLabScene, storyLabTool } from '../storylab';
 import {
   LocalSoloSession, isSoloSlot, newSoloGame, readSoloSlots, resumeSoloSlot, restorableStateOf, savedSoloGame,
   soloSlotSpec, toolSoloSlot, type KnownMap, type SoloSlot,
@@ -596,6 +597,20 @@ export function registerScenes(options: RegisterScenesOptions = {}): void {
       onBack: () => goToScreen(ctx, SCREEN_ID.editors),
       // The same store the world reads, so the Lab can never draw at a detail
       // rung his Settings do not show.
+      settings: () => openSettings(ctx.storage).read(),
+    })),
+  );
+
+  // CHAPTER 1'S LABORATORY IN 3D (Joshua, 2026-09-29): the story's painted
+  // lab rebuilt as a room from the picture itself, with the real Jack and
+  // Sarah posed in it. Not the TOMBS building above — that is the game's
+  // floor plan; this is the story's set. A tool scene in the menu state,
+  // the same shape as the laboratory's.
+  registerTool(storyLabTool);
+  registerScene(
+    STORY_LAB_SCENE_ID,
+    createStoryLabScene((ctx) => ({
+      onBack: () => goToScreen(ctx, SCREEN_ID.editors),
       settings: () => openSettings(ctx.storage).read(),
     })),
   );

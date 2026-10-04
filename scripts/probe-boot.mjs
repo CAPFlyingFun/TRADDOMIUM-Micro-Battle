@@ -446,6 +446,59 @@ async function screenshot(page, file) {
   }
 }
 
+/**
+ * THE LANDSCAPE GATE, TURNED BOTH WAYS AND ON BOTH KINDS OF SCREEN.
+ *
+ * `tests/landscapeOnly.test.ts` proves the rule is WRITTEN. Only a
+ * browser can say whether it FIRES, because what decides is a media
+ * query the CSS engine evaluates — and the half that is easiest to get
+ * wrong is `pointer: coarse`, which is invisible in the markup and is
+ * the whole difference between a phone held upright and a narrow window
+ * on a desk.
+ *
+ * Three states, and the third is the one worth the extra page: a TOUCH
+ * device upright (gate up, game hidden), the same device turned (gate
+ * gone), and a MOUSE at the same portrait size (gate never appears).
+ */
+async function checkOrientationGate(browser, url) {
+  const shown = async (page) => page.evaluate(() => {
+    const gate = document.getElementById('orient');
+    if (gate === null) return 'missing';
+    return getComputedStyle(gate).display !== 'none' && gate.getClientRects().length > 0;
+  });
+  const appHidden = async (page) => page.evaluate(() =>
+    ['app', 'ui', 'boot'].every((id) => {
+      const node = document.getElementById(id);
+      return node === null || getComputedStyle(node).visibility === 'hidden';
+    }));
+
+  for (const [what, viewport, hasTouch, want] of [
+    ['a phone held upright', { width: 430, height: 932 }, true, true],
+    ['the same phone turned', { width: 932, height: 430 }, true, false],
+    ['a narrow window on a desk', { width: 430, height: 932 }, false, false],
+  ]) {
+    const page = await browser.newPage({ viewport, hasTouch, isMobile: hasTouch });
+    try {
+      await page.goto(url, { waitUntil: 'load' });
+      await page.waitForTimeout(400);
+      const up = await shown(page);
+      if (up === want) {
+        log(`  ok   ${what} (${viewport.width}×${viewport.height}, touch ${hasTouch}): gate ${up ? 'up' : 'down'}`);
+      } else {
+        fail(`${what} (${viewport.width}×${viewport.height}, touch ${hasTouch}): gate ${up ? 'up' : 'down'}, wanted ${want ? 'up' : 'down'}`);
+      }
+      if (want === true) {
+        // A gate the player can reach past is not a gate.
+        if (await appHidden(page)) log('  ok   and the game behind it is hidden, not merely covered');
+        else fail('the gate is up but #app/#ui/#boot are still visible behind it');
+        await screenshot(page, path.join(ROOT, 'shots', 'orient-gate.png'));
+      }
+    } finally {
+      await page.close();
+    }
+  }
+}
+
 async function main() {
   if (!existsSync(DIST_INDEX)) {
     fail('dist/index.html is missing. Run `npm run build` first: the probe measures the built output, the same files GitHub Pages serves.');
@@ -477,6 +530,7 @@ async function main() {
     page.on('pageerror', (error) => pageErrors.push(error.message));
 
     try {
+      await checkOrientationGate(browser, url);
       await drive(page, url);
     } finally {
       // Wherever the drive stopped: the first world shot is taken inside

@@ -6,10 +6,14 @@
  * been in it (Joshua: "I don't see any Jack or Sarah in the Lab"). The
  * models were baked, shipped and never referenced by a line in `src/`.
  * This file is that line, and it is deliberately the whole of it: TWO
- * BODIES AT TWO DESKS. No animation, no dialogue, no walking, no
- * interaction, no gaze — a person here is a mesh with a position and a
- * yaw, and the interaction points the player touches are still the
- * plan's, not theirs.
+ * BODIES AT TWO DESKS. No dialogue, no walking, no interaction — a
+ * person here is a body with a position and a yaw, breathing, and the
+ * interaction points the player touches are still the plan's, not theirs.
+ * The one thing a person DOES is look: their head turns to the player
+ * within `LOOK_RANGE_M` (`lookAt`, through `actor/humanAim`), because a
+ * colleague who stares at their desk while you stand beside them reads as
+ * a mannequin (Joshua, 2026-09-30: "it will know exactly where to
+ * position the head angles to face each thing").
  *
  * It sits beside `LabView` rather than inside it because the two have
  * different lifetimes and different failure modes. The building is built
@@ -69,6 +73,7 @@
  * (see `wear`).
  */
 import * as THREE from 'three';
+import { aimBody, createAim, type AimState } from '../actor/humanAim';
 import { HUMAN_POSE_TURNS, poseHuman } from '../actor/humanPose';
 import { newJointTurn, type HumanGait, type HumanMeasure, type HumanStance, type MutableJointTurn } from '../actor/humanRig';
 import { measureHuman } from '../actor/humanSkeleton';
@@ -76,7 +81,7 @@ import { assets, type Assets } from '../assets/assets';
 import { HumanRig } from '../view/HumanRig';
 import { UNITS_PER_METRE } from '../world/dem';
 import { TOMBS_GROUND_UNITS } from '../world/tombs/site';
-import type { LabLayout, Person } from '../world/tombs/types';
+import type { LabLayout, Person, Vec3 } from '../world/tombs/types';
 
 /** 100 world units to the metre, as everywhere. The plan is in metres; the scene is in units. */
 const M = UNITS_PER_METRE;
@@ -110,6 +115,14 @@ const PLACEHOLDER_RADIUS_M = 0.15;
 const PLACEHOLDER_COLOUR = 0xd81b8f;
 
 /** Segments around and along the placeholder's capsule. A marker; it does not need to be round. */
+/**
+ * A person turns their head to the player within this, horizontally, and
+ * lets it come home beyond it. GAME TUNING: across a desk and a chair's
+ * roll, not across the room — a laboratory where everyone tracks you from
+ * ten metres reads as a horror film.
+ */
+export const LOOK_RANGE_M = 4;
+
 const PLACEHOLDER_CAPS = 4;
 const PLACEHOLDER_SIDES = 10;
 
@@ -180,7 +193,25 @@ export class LabPeople {
    * A body with NO skeleton keeps its bind pose and is not an error: that
    * is the magenta placeholder, which has no bones to turn.
    */
-  private readonly rigs: Array<{ readonly rig: HumanRig; readonly measure: HumanMeasure }> = [];
+  private readonly rigs: Array<{
+    readonly rig: HumanRig;
+    readonly measure: HumanMeasure;
+    readonly person: Person;
+    /** The head's raycast (`actor/humanAim`): eases toward the player and home again. */
+    readonly aim: AimState;
+    readonly aimed: MutableJointTurn[];
+    /** Where this person's eye is, plan metres; written by `update`, read by `eyes`. */
+    readonly eye: { id: string; x: number; y: number; z: number; seen: boolean };
+  }> = [];
+
+  /** What everyone looks at, plan metres, or null; set by `lookAt`. */
+  private readonly target = { x: 0, y: 0, z: 0 };
+  private looking = false;
+  private readonly frame = {
+    dt: 0, rootX: 0, rootY: 0, rootZ: 0, rootYaw: 0, unitsPerMetre: 1,
+    target: null as Vec3 | null, bodyFree: false,
+  };
+  private readonly seen: Array<{ readonly id: string; readonly x: number; readonly y: number; readonly z: number }> = [];
 
   /** One turn buffer for every body: `poseHuman` writes into it and nothing outlives the call. */
   private readonly turns: MutableJointTurn[] = Array.from({ length: HUMAN_POSE_TURNS }, newJointTurn);
@@ -266,9 +297,54 @@ export class LabPeople {
     if (!Number.isFinite(rawDt) || rawDt <= 0 || this.rigs.length === 0) return;
     this.clock += rawDt;
     this.gait.seconds = this.clock;
-    for (const { rig, measure } of this.rigs) {
-      rig.apply(poseHuman(measure, rig.bind, this.gait as HumanGait, this.turns));
+    const frame = this.frame;
+    frame.dt = rawDt;
+    for (const entry of this.rigs) {
+      const { rig, measure, person } = entry;
+      const posed = poseHuman(measure, rig.bind, this.gait as HumanGait, this.turns);
+      // THE HEAD FOLLOWS THE PLAYER, the body stays at its desk: a person
+      // here is placed by the plan and does not walk, so only the head and
+      // the chest may turn (`bodyFree: false`).
+      frame.rootX = person.at.x;
+      frame.rootY = person.at.y;
+      frame.rootZ = person.at.z;
+      frame.rootYaw = person.yaw;
+      frame.unitsPerMetre = rig.bindScale;
+      frame.target = this.looking
+        && Math.hypot(this.target.x - person.at.x, this.target.z - person.at.z) <= LOOK_RANGE_M
+        ? this.target : null;
+      const aimed = aimBody(entry.aim, measure, rig.bind, posed, frame, entry.aimed);
+      rig.apply(aimed.turns);
+      const eye = entry.aim.eye;
+      entry.eye.x = eye.x;
+      entry.eye.y = eye.y;
+      entry.eye.z = eye.z;
+      entry.eye.seen = true;
     }
+  }
+
+  /**
+   * Where everyone turns their head: the player's eye, plan metres — the
+   * frame `Person.at` is in — or null for nobody. Read on the next
+   * `update`; nothing is kept but the three numbers.
+   */
+  lookAt(target: Vec3 | null): void {
+    this.looking = target !== null;
+    if (target === null) return;
+    this.target.x = target.x;
+    this.target.y = target.y;
+    this.target.z = target.z;
+  }
+
+  /**
+   * Each posed person's eye, plan metres, as of the last `update` — for
+   * the player's own head to find someone to look at. Somebody posed but
+   * not yet updated is left out rather than reported at the origin.
+   */
+  eyes(): readonly { readonly id: string; readonly x: number; readonly y: number; readonly z: number }[] {
+    this.seen.length = 0;
+    for (const { eye } of this.rigs) if (eye.seen) this.seen.push(eye);
+    return this.seen;
   }
 
   /**
@@ -402,7 +478,11 @@ export class LabPeople {
     try {
       const rig = new HumanRig(model);
       const measure = measureHuman(rig.bind);
-      this.rigs.push({ rig, measure });
+      // The live masters' soles are at bind y −1 (`view/HumanRig`).
+      this.rigs.push({
+        rig, measure, person, aim: createAim(measure, rig.bind, -1), aimed: [],
+        eye: { id: person.id, x: 0, y: 0, z: 0, seen: false },
+      });
       this.gait.seconds = this.clock;
       rig.apply(poseHuman(measure, rig.bind, this.gait as HumanGait, this.turns));
     } catch (error) {

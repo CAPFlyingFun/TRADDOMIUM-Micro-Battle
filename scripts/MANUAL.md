@@ -42,8 +42,15 @@ as listed, prose included, so a path is written there only to list it.
 
 # Manual-only
 
-Nothing here is run by hand. The one entry is a helper module, which
-cannot be wired because it is never run on its own:
+One entry is run by hand; the rest are helper modules, which cannot be
+wired because they are never run on their own:
+
+- `scripts/bakeStoryLab.py` — bakes the story's painted laboratory into
+  `public/models/lab-story.glb` from `art/story/lab-night.jpg`: recovers
+  the picture's camera, rebuilds the room as boxes and bakes the picture
+  onto them (`src/storylab`). Manual because it needs Python 3 with numpy
+  and OpenCV, which the repository does not ship:
+  `python3 scripts/bakeStoryLab.py`.
 
 - `scripts/probeWeather.mjs` — the canned Open-Meteo the world probes
   share: routes the island's weather request to a reply for the places
@@ -101,6 +108,28 @@ cannot be wired because it is never run on its own:
   card, sleeve and clip into one 32 mm lump welded to the cloth and needs
   a colour gate as well. A module, not a command; imported by the
   `bake:humans` script, which holds each person's slab.
+- `scripts/clearShirtLogo.mjs` — paints out the "TOIARG" logo the scanner
+  printed on Jack's polo where TOMBS was meant to be (Joshua, 2026-09-29:
+  paint over it rather than repair the text). The letters and their halo
+  are found in SPACE inside a box on the chest and refilled from the polo
+  round them, gathered in 3D so the fill crosses UV seams; the colour,
+  normal and roughness maps are all filled, because the roughness map
+  printed the logo as a satin block of its own. A module, not a command;
+  imported by the `bake:humans` script, which holds the box.
+- `scripts/paintSarah.mjs` — paints Sarah's untextured `Sarah-Lab3.glb`
+  from nothing: every texel coloured by where it sits on her body (skin,
+  hair, top with its neckband, skirt, shoes, bands, the lanyard found by its
+  shape along a measured path, card), and her face and front projected from
+  the reference photograph she was made from (`art/humans/ref/`), each
+  region taking the photograph only where its pixel is that material. The
+  occlusion bake supplies the shading the photograph does not. A module, not
+  a command; imported by the `bake:humans` script.
+- `scripts/smoothLegWeights.mjs` — rebuilds Sarah's hip, knee and ankle
+  skin weights from height with a smooth blend across each joint, because
+  her Lab3 master was rigged with hard edges there and tore open along
+  them as soon as a walk bent a knee or an ankle. A module, not a command;
+  imported by the `bake:humans` script, run on the bodies whose entry asks
+  for it.
 - `scripts/relayHarness.mjs` — starts `wrangler dev --local` on a free
   port, waits for `/health`, and stops it again, cleaning up its Durable
   Object state. Imported by `npm run probe:relay`,

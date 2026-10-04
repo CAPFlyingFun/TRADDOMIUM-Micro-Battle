@@ -89,6 +89,9 @@ import { MeshoptDecoder, MeshoptEncoder } from 'meshoptimizer';
 import sharp from 'sharp';
 import { authorSarah } from './authorSarah.mjs';
 import { printBadge } from './printBadge.mjs';
+import { clearShirtLogo } from './clearShirtLogo.mjs';
+import { paintSarah } from './paintSarah.mjs';
+import { smoothLegWeights } from './smoothLegWeights.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
@@ -165,8 +168,20 @@ const HUMANS = [
   // 2026-09-19 on the last one: "Don't trim it as it aligns with the badge
   // holder"). Lab1 needed 4%. The art was drawn for Lab1's oversized
   // holder; a redraw at 0.58 would need none.
+  //
+  // `logo` is the box on his chest where the master printed "TOIARG" — the
+  // scanner's attempt at TOMBS — and `clearShirtLogo.mjs` paints it out
+  // (Joshua, 2026-09-29: paint over it rather than repair the text). The
+  // box was read off an orthographic render of this master and holds the
+  // word and its tagline with a few millimetres to spare.
+  //
+  // The photograph on his card is his 2D storyboard face from TMB-Story's
+  // character sheet, not the stranger ChatGPT drew there first (Joshua,
+  // 2026-09-29: "ChatGPT did the wrong face for Jack... use the 2D image of
+  // Jack").
   {
     master: 'Jack-Lab2.glb', out: 'jack.glb', who: 'Jack Bennett', panel: null, repair: false,
+    logo: { box: { x0: 0.040, x1: 0.125, y0: 1.295, y1: 1.340, zMin: 0.03 } },
     badge: { art: 'art/humans/badge/jack-tombs.webp', slab: { zMin: 0.1260, yMin: 1.070, yMax: 1.170, xMid: 0.003, xHalf: 0.035 } },
   },
   // SARAH IS Lab2, AND Lab1 IS KEPT (Joshua, 2026-09-18: "go ahead and switch
@@ -197,9 +212,25 @@ const HUMANS = [
   // shadow, and lifts the ID card onto its own material so the TOMBS
   // artwork on it is legible. It touches nothing above the collarbone —
   // the scan's face is better than anything procedural would put there.
+  //
+  // SARAH IS Lab3, AND SHE IS PAINTED, NOT REPAIRED (Joshua, 2026-09-29,
+  // sending Meshy's UNTEXTURED pass with four fingers rigged a hand: "Let's
+  // see if we can texture manually since this non-textured looks good").
+  // Rendered plain, every fault the Lab2 notes above fought — the ragged
+  // neckline, the patches on the strap — turned out to be paint, never
+  // geometry: the collar is a clean crew neck, the lanyard a real strap, the
+  // card a card. So `paint` runs `paintSarah.mjs`, which colours every texel
+  // by WHERE IT IS on her body and paints her face in front projection, and
+  // `author` and the panel retire with the scan they were written for.
+  //
+  //   Sarah-Lab3.glb  19.66 MB  313,076 tris  61 joints  no textures
+  //
+  // The card is welded flush to the bump, so the slab is the card's own
+  // outline in x and y and generous in z; the plane-gated fill does the rest.
+  // Lab2 is kept for the same reason Lab1 was.
   {
-    master: 'Sarah-Lab2.glb', out: 'sarah.glb', who: 'Sarah Bennett', panel: 'sarah', repair: false, author: true,
-    badge: { art: 'art/humans/badge/sarah-tombs.webp', slab: { zMin: 0.156, yMin: 1.050, yMax: 1.152, xMid: 0.005, xHalf: 0.040 } },
+    master: 'Sarah-Lab3.glb', out: 'sarah.glb', who: 'Sarah Bennett', panel: null, repair: false, paint: true, smoothLegs: true,
+    badge: { art: 'art/humans/badge/sarah-tombs.webp', slab: { zMin: 0.085, yMin: 1.096, yMax: 1.178, xMid: -0.0003, xHalf: 0.0305 } },
   },
 ];
 
@@ -745,7 +776,17 @@ async function writeBindFixture() {
 async function main() {
   if (!existsSync(OUT)) mkdirSync(OUT, { recursive: true });
   if (!existsSync(CACHE)) mkdirSync(CACHE, { recursive: true });
-  const missing = HUMANS.filter((h) => !existsSync(join(MASTERS, h.master)));
+  // `--only=jack` (or `--only=sarah`) bakes one body, so a new master for
+  // one of them never waits on the other's.
+  const onlyArg = process.argv.find((a) => a.startsWith('--only='));
+  const only = onlyArg ? onlyArg.slice('--only='.length).replace(/\.glb$/, '') : null;
+  const chosen = only ? HUMANS.filter((h) => h.out.replace(/\.glb$/, '') === only) : HUMANS;
+  if (only && !chosen.length) {
+    console.error(`[bake:humans] --only=${only} names nobody — expected one of ${HUMANS.map((h) => h.out.replace(/\.glb$/, '')).join(', ')}`);
+    process.exitCode = 1;
+    return;
+  }
+  const missing = chosen.filter((h) => !existsSync(join(MASTERS, h.master)));
   if (missing.length > 0) {
     console.error(`[bake:humans] no masters in art/humans/ — ${missing.map((m) => m.master).join(', ')}`);
     console.error(`[bake:humans] fetch them once, then re-run:`);
@@ -783,7 +824,7 @@ async function main() {
   await MeshoptEncoder.ready;
   const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'meshopt.encoder': MeshoptEncoder });
 
-  for (const human of HUMANS) {
+  for (const human of chosen) {
     const from = join(MASTERS, human.master);
     const to = join(OUT, human.out);
     const before = statSync(from).size;
@@ -792,6 +833,15 @@ async function main() {
     if (human.panel) await panelPass(doc, human.who, human.panel, PANELS_ONLY, human.repair === true);
     // `--panels` only exports the pictures to paint; it writes no model.
     if (PANELS_ONLY) continue;
+    if (human.paint) {
+      console.log(`[bake:humans] ${human.who}: painting the untextured master`);
+      await paintSarah(doc, {
+        cacheDir: CACHE,
+        root: ROOT,
+        stamp: `${human.master.replace(/\.glb$/, '')}-${before}`,
+        log: (line) => console.log(`[bake:humans]   ${line}`),
+      });
+    }
     if (human.author) {
       console.log(`[bake:humans] ${human.who}: authoring the clothing and printing the badge`);
       await authorSarah(doc, {
@@ -803,10 +853,15 @@ async function main() {
     // AFTER the clothing, never before: the occlusion bake is cached
     // against the master's own geometry, and lifting the card out first
     // would silently change what that cache is a bake OF.
+    if (human.logo) {
+      await clearShirtLogo(doc, human.logo, { log: (line) => console.log(`[bake:humans]   ${human.who}: ${line}`) });
+    }
     if (human.badge) {
       await printBadge(doc, human.badge, { root: ROOT, log: (line) => console.log(`[bake:humans]   ${human.who}: ${line}`) });
     }
-    await liftRoughness(doc, human.who);
+    // A painted body's roughness is AUTHORED — wet eyes and lips, matte
+    // cloth — so it is not lifted toward the scans' matte mean.
+    if (!human.paint) await liftRoughness(doc, human.who);
 
     // WHAT THE MAPS ARE WORTH, one slot at a time. `textureCompress` is
     // given a slot filter so the metallic-roughness map can be told a
@@ -901,6 +956,9 @@ async function main() {
         if (/^(JOINTS|WEIGHTS)_([1-9]\d*)$/.test(name)) prim.setAttribute(name, null);
       }
     }
+    // A master rigged with hard edges at the knee and ankle tears there as
+    // soon as the walk bends them (`smoothLegWeights.mjs` has the renders).
+    if (human.smoothLegs) smoothLegWeights(doc, { log: (line) => console.log(`[bake:humans]   ${human.who}: ${line}`) });
 
     await doc.transform(
       dedup(),

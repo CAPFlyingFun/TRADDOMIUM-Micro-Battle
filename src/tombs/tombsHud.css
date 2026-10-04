@@ -10,7 +10,7 @@
 .tombs-tools summary { display: flex; align-items: center; padding: 8px 14px; border: 1px solid #86b0b14a; border-radius: 6px; background: #102831f2; color: #dcebea; }
 .tombs-tools[open] { position: relative; }
 .tombs-tools[open] .tombs-tool-panel { position: static !important; max-width: none !important; align-items: stretch !important; background: #0d222bf5 !important; }
-.tombs-tools[open] { position: absolute; right: 80px; top: 0; width: min(440px, calc(100vw - 112px)); max-height: calc(100dvh - 30px); overflow-y: auto; background: #0d222b; border-radius: 6px; }
+.tombs-tools[open] { position: absolute; right: 110px; top: 0; width: min(440px, calc(100vw - 142px)); max-height: calc(100dvh - 30px); overflow-y: auto; background: #0d222b; border-radius: 6px; }
 .tombs-tools[open] summary { position: sticky; top: 0; background: #19353e; }
 .tombs-tool-panel > div { white-space: normal !important; }
 .tombs-input { position: absolute; inset: 0 var(--story-width) 0 0; pointer-events: none; }

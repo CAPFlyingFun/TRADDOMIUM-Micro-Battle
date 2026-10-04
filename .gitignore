@@ -47,6 +47,11 @@ art/humans/*
 # and it is the only copy in the repository, so it is tracked.
 !art/humans/badge/
 !art/humans/badge/*.webp
+# THE REFERENCE PHOTOGRAPHS are what Sarah-Lab3 was made from, and her face
+# and front are projected from the front one (`paintSarah.mjs`). 0.9 MB,
+# the only copies, so tracked.
+!art/humans/ref/
+!art/humans/ref/*.jpg
 
 # The occlusion bake, derived from a master and cached so the next run does
 # not pay two minutes a body for it again.

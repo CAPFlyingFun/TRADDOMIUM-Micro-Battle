@@ -91,8 +91,14 @@
  * is named in `tombsTool.ts`.
  */
 import * as THREE from 'three';
-import { HUMAN_POSE_TURNS, poseHuman } from '../actor/humanPose';
-import { newJointTurn, type HumanGait, type HumanMeasure, type HumanStance, type MutableJointTurn } from '../actor/humanRig';
+import { aimBody, createAim, type AimState } from '../actor/humanAim';
+import { HUMAN_POSE_TURNS, humanStride, poseHuman } from '../actor/humanPose';
+import { createReach, reachHands, type HandTarget, type ReachState } from '../actor/humanReach';
+import { poseSeated, posedJoints, SEATED_TURNS } from '../actor/humanSeated';
+import { createFeet, groundFeet, type FeetState, type FootGround } from '../actor/humanFeet';
+import {
+  newJointTurn, type BindJoint, type HumanGait, type HumanMeasure, type HumanStance, type JointTurn, type MutableJointTurn,
+} from '../actor/humanRig';
 import { measureHuman } from '../actor/humanSkeleton';
 import { newWalkerState, step as walkStep, type WalkWorld, type WalkerState } from '../actor/Walker';
 import type { AppScene, FrameInfo, SceneContext, SceneFactory } from '../app/Scene';
@@ -120,6 +126,7 @@ import {
   type LabSolids,
 } from '../world/tombs/collide';
 import { LabPeople, release } from './LabPeople';
+import { lookAtOf, rollStep, rolledToward, useOf, type LabUse } from './labUse';
 import { LabView } from './LabView';
 import { LIGHTING, type LightingLook } from './labLook';
 import { EYE_HEIGHT_M, OUTSIDE_ROOM, TOMBS_ACTION, TOMBS_SCENE_ID, teleportedRoomOf } from './tombsTool';
@@ -231,6 +238,60 @@ const FLOOR_UNITS = 0;
  */
 const LAB_BED = 'amb_computer_lab';
 
+// ---- THE HEAD AND THE HANDS (the player drives the body; these follow) ----
+
+/**
+ * The eye of a body seated at a desk, above the floor, metres — MEASURED
+ * on Jack in `poseSeated` with his soles on the floor: shoulders at
+ * 1.00 m, the eye a fifth of a metre over them. The camera rides here
+ * while he sits, and INTERACT reaches from here, which is what brings the
+ * intercom on his desk (0.74 m from this eye) inside its 0.9 m.
+ */
+const SEATED_EYE_M = 1.2;
+
+/** The prompt button's words while seated with nothing else in reach, and while looking at a console. */
+const GET_UP_LABEL = 'Get up';
+const LOOK_AWAY_LABEL = 'Look away';
+
+/**
+ * Walking up to a wall control or a lever before the hand goes out:
+ * root to target, horizontal metres. GAME TUNING from Jack's measured
+ * 0.60 m arm with his shoulder 0.18 m off his middle — at 0.42 m a button
+ * at shoulder height is about three quarters of his arm away, inside the
+ * 0.85 at which `actor/humanReach` takes hold.
+ */
+const STAND_OFF_M = 0.42;
+/** An approach that has not arrived by then gives up and reaches from where it is. */
+const APPROACH_SECONDS = 2.5;
+/** The walk up to it: half a push, a walk and not a run. */
+const APPROACH_PUSH = 0.5;
+/** A push on the stick past this takes the body back: up out of the chair, or off an approach. */
+const TAKE_BACK_PUSH = 0.3;
+
+/**
+ * With nothing in hand and nothing in reach, the head looks at a person
+ * this close (horizontal metres) who is within `PERSON_LOOK_DEG` of
+ * where the camera looks — and otherwise along the camera's own line, out
+ * to `LOOK_AHEAD_M`. A camera looking more than `LOOK_BEHIND_DEG` away
+ * from the body's facing is looking BEHIND it: the head comes home rather
+ * than wrenching round to its limit. GAME TUNING.
+ */
+const PERSON_LOOK_M = 2.5;
+const PERSON_LOOK_COS = Math.cos((60 * Math.PI) / 180);
+const LOOK_AHEAD_M = 3;
+const LOOK_BEHIND_COS = Math.cos((100 * Math.PI) / 180);
+
+/**
+ * How far the seated pose lifts the soles above the bind's, metres, so
+ * the body can be lowered onto the floor: the lower ankle's rise, in
+ * bind units over `bindScale`. Measured once per body.
+ */
+function seatDropOf(measure: HumanMeasure, bind: readonly BindJoint[], posed: readonly JointTurn[], bindScale: number): number {
+  const p = posedJoints(bind, posed);
+  const j = measure.joints;
+  return Math.min(p[j.ankleL][1] - bind[j.ankleL].y, p[j.ankleR][1] - bind[j.ankleR].y) / bindScale;
+}
+
 /**
  * How far behind the head the third-person camera sits, in metres, and
  * how close it is allowed to be pulled when a wall is in the way.
@@ -242,6 +303,15 @@ const LAB_BED = 'amb_computer_lab';
  */
 const BOOM_M = 2.4;
 const BOOM_MIN_M = 0.45;
+/**
+ * SEATED, the camera comes in close behind the chair. The ray pulls the
+ * boom in only for SOLIDS, and a monitor is not one: at the full 2.4 m,
+ * Jack seated at his desk was framed from behind Sarah's, with her screen
+ * standing exactly in front of his head (measured in the lab: his head
+ * 1.18 m from the back of her monitor). 0.9 m keeps the camera on his
+ * side of it, over his shoulders, on his own screen.
+ */
+const SEATED_BOOM_M = 0.9;
 
 /** The rung a probe or a test with no settings to read gets: the conservative one. */
 const RUNG_FALLBACK: DetailTier = 'medium';
@@ -367,6 +437,28 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
     stance: 'stand', phase: 0, seconds: 0, lean: 0,
   };
   const aim = new THREE.Vector3();
+  /** Where the walker stood when the body was last posed, for its stride. */
+  const strode = { x: walker.x, z: walker.z };
+  /**
+   * THE FEET (`actor/humanFeet`): after the pose, each foot is put on the
+   * floor under it and HELD there while it carries weight, and the body
+   * comes down onto the lower one — the feet drive the body. They let go
+   * while the walker is in the air. Every floor here has full grip; the
+   * rule for one that does not is `FootGround.grip`, read per solid when a
+   * solid has a surface to say so.
+   */
+  let feet: FeetState | null = null;
+  const feetTurns: MutableJointTurn[] = [];
+  const underFoot: { y: number; grip: number } = { y: 0, grip: 1 };
+  const footFrame = {
+    dt: 0, released: false, rootX: 0, rootY: 0, rootZ: 0, rootYaw: 0, unitsPerMetre: 1,
+    groundAt: (x: number, z: number, fromY: number): FootGround | null => {
+      const y = groundUnder(solids, x, z, fromY);
+      if (!Number.isFinite(y)) return null;
+      underFoot.y = y;
+      return underFoot;
+    },
+  };
 
   /**
    * `world/tombs/collide` satisfies `WalkWorld` structurally, which is
@@ -379,6 +471,56 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
     groundUnder: (x, z, fromY) => groundUnder(solids, x, z, fromY),
     ceilingOver: (x, z, fromY) => ceilingOver(solids, x, z, fromY),
   };
+
+  // ------------------------------------------------- THE HEAD AND THE HANDS
+  //
+  // THE PLAYER MOVES THE BODY; THE HEAD AND THE HANDS FOLLOW (Joshua,
+  // 2026-09-30: "you can move the body around, but some of the hands and
+  // head movements are automatic... press a button on mobile (like 'E'
+  // for computer) to trigger the animations"). The head is a raycast to a
+  // target every frame (`actor/humanAim`); the hands go to targets and let
+  // go by REACH, not by angle (`actor/humanReach`); and what the targets
+  // are comes from the plan's own interaction (`./labUse`). INTERACT — the
+  // prompt button, or E — is the only thing that starts a use.
+  let aimState: AimState | null = null;
+  let reachState: ReachState | null = null;
+  const aimTurns: MutableJointTurn[] = [];
+  const reachTurns: MutableJointTurn[] = [];
+  const seatTurns: MutableJointTurn[] = Array.from({ length: SEATED_TURNS }, newJointTurn);
+  /** Metres the seated pose lifts the soles; once per body. */
+  let seatDrop: number | null = null;
+  const lookPoint = { x: 0, y: 0, z: 0 };
+  const aimFrame = {
+    dt: 0, rootX: 0, rootY: 0, rootZ: 0, rootYaw: 0, unitsPerMetre: 1,
+    target: null as Vec3 | null, bodyFree: false,
+  };
+  const handsNow: HandTarget[] = [];
+  const reachFrame = {
+    dt: 0, rootX: 0, rootY: 0, rootZ: 0, rootYaw: 0, unitsPerMetre: 1, seated: false,
+    hands: handsNow as readonly HandTarget[],
+  };
+  /**
+   * WHAT THE BODY IS DOING WITH ITS HANDS — the one latch this needs, in
+   * one object. `seat` is a sit (a toggle: the stick gets you up); `act`
+   * is a press, a grip or a look, which can happen WHILE seated — the
+   * intercom is on Jack's desk. Everything else is derived every frame.
+   */
+  const using = {
+    seat: null as LabUse | null,
+    act: null as LabUse | null,
+    /** Seconds into the current act — or into its approach, while `approaching`. */
+    age: 0,
+    /** Walking up to a press or a grip before the hand goes out. */
+    approaching: false,
+    /** Where the body stood before it sat, to stand back up there rather than inside the chair. */
+    fromX: 0,
+    fromZ: 0,
+    fromHeading: 0,
+    /** The seated body's roll toward what it reaches for (`labUse.rollStep`), metres, and toward what. */
+    roll: 0,
+    rollToward: null as Vec3 | null,
+  };
+  const rolled = { x: 0, z: 0 };
 
   let walking = false;
   let sprinting = false;
@@ -463,9 +605,26 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
    * Null while the camera is flying: a prompt belongs to a body, and
    * there is no body to reach with.
    */
-  const reachNow = (): Interaction | null => (
-    walking ? nearestInteraction(layout, { x: walker.x, y: walker.y + EYE_HEIGHT_M, z: walker.z }) : null
-  );
+  const reachNow = (): Interaction | null => {
+    if (!walking) return null;
+    const seat = using.seat;
+    if (seat === null) return nearestInteraction(layout, { x: walker.x, y: walker.y + EYE_HEIGHT_M, z: walker.z });
+    // SEATED, the desk you sit at is not what INTERACT offers — the stick
+    // gets you up — but the next thing in reach from the chair is: Jack's
+    // intercom, from his. Measured from the SEATED eye.
+    const eyeY = walker.y + SEATED_EYE_M;
+    let best: Interaction | null = null;
+    let bestD = Infinity;
+    for (const i of layout.interactions) {
+      if (i.id === seat.id) continue;
+      const d = Math.hypot(i.at.x - walker.x, i.at.y - eyeY, i.at.z - walker.z);
+      if (d <= i.reach && d < bestD) {
+        best = i;
+        bestD = d;
+      }
+    }
+    return best;
+  };
 
   const roomNow = (): Room | null => {
     const at = metresOf();
@@ -491,8 +650,17 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
     readout.stance = walker.stance;
     readout.sprinting = sprinting;
     const reach = reachNow();
-    readout.prompt = reach === null ? '' : reach.prompt;
-    readout.reachLabel = reach === null ? '' : reach.label;
+    if (reach === null && using.seat !== null) {
+      // Nothing else to reach from the chair: the button gets you up.
+      readout.prompt = 'Push the stick to stand';
+      readout.reachLabel = GET_UP_LABEL;
+    } else if (reach !== null && using.act !== null && using.act.mode === 'look' && using.act.id === reach.id) {
+      readout.prompt = reach.prompt;
+      readout.reachLabel = LOOK_AWAY_LABEL;
+    } else {
+      readout.prompt = reach === null ? '' : reach.prompt;
+      readout.reachLabel = reach === null ? '' : reach.label;
+    }
     audio.readStatus(audioStatus);
     readout.audioRunning = audioStatus.state === 'running';
     readout.decoded = audioStatus.decoded;
@@ -530,6 +698,8 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
       // body that never left. The teleport looked broken; it was the
       // camera being overruled by the thing it is supposed to follow.
       if (walking) {
+        standUp();
+        using.act = null;
         walker.x = room.inside.at.x;
         walker.z = room.inside.at.z;
         walker.y = floorOf(room);
@@ -551,7 +721,10 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
    */
   const setWalking = (want: boolean): void => {
     if (want === walking) return;
+    standUp();
+    using.act = null;
     walking = want;
+    feet = null;
     people?.hide('jack', want);
     if (body !== null) body.visible = want;
     if (!want) return;
@@ -627,6 +800,88 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
    * Mixing them is how a paused world ends up with a body still walking
    * across it.
    */
+  /** Into the chair: the body goes to the seat, facing the keyboard, and the hands go to the keys. */
+  const sitDown = (use: LabUse): void => {
+    if (use.seat === null) return;
+    using.fromX = walker.x;
+    using.fromZ = walker.z;
+    using.fromHeading = walker.heading;
+    walker.x = use.seat.x;
+    walker.z = use.seat.z;
+    walker.heading = use.seat.yaw;
+    walker.vx = 0;
+    walker.vz = 0;
+    walker.vy = 0;
+    using.seat = use;
+    using.act = null;
+    using.roll = 0;
+    using.rollToward = null;
+    feet = null;
+  };
+
+  /** Out of the chair, back where the body stood before it sat — never inside the chair it leaves. */
+  const standUp = (): void => {
+    if (using.seat === null) return;
+    walker.x = using.fromX;
+    walker.z = using.fromZ;
+    walker.heading = using.fromHeading;
+    using.seat = null;
+    using.act = null;
+    using.roll = 0;
+    using.rollToward = null;
+    feet = null;
+  };
+
+  /**
+   * WHERE THE HEAD AIMS, in order: what the hands are using; the thing in
+   * reach (a workstation is read off its monitor); a person near and in
+   * front of where the camera looks; and otherwise along the camera's own
+   * line — unless that line is behind the body, when the head comes home.
+   * `look` is the camera's world direction, already measured this frame.
+   */
+  const lookTarget = (look: THREE.Vector3, eyeY: number): Vec3 | null => {
+    if (using.act !== null) return using.act.look;
+    if (using.seat !== null) return using.seat.look;
+    const reach = reachNow();
+    if (reach !== null) return lookAtOf(layout, reach);
+    const flat = Math.hypot(look.x, look.z);
+    if (people !== null && flat > 1e-6) {
+      let best: Vec3 | null = null;
+      let bestD = PERSON_LOOK_M;
+      for (const eye of people.eyes()) {
+        if (eye.id === 'jack') continue; // the player is Jack; his idle double is hidden while he walks
+        const dx = eye.x - walker.x;
+        const dz = eye.z - walker.z;
+        const d = Math.hypot(dx, dz);
+        if (d >= bestD || d < 1e-6) continue;
+        if ((dx * look.x + dz * look.z) / (d * flat) < PERSON_LOOK_COS) continue;
+        best = eye;
+        bestD = d;
+      }
+      if (best !== null) return best;
+    }
+    if (flat < 1e-6) return null;
+    const facing = (Math.sin(walker.heading) * look.x + Math.cos(walker.heading) * look.z) / flat;
+    if (facing < LOOK_BEHIND_COS) return null;
+    lookPoint.x = walker.x + look.x * LOOK_AHEAD_M;
+    lookPoint.y = eyeY + look.y * LOOK_AHEAD_M;
+    lookPoint.z = walker.z + look.z * LOOK_AHEAD_M;
+    return lookPoint;
+  };
+
+  /** The hands' targets this frame: the keys while seated, less any hand an act has taken, plus that act's. */
+  const fillHands = (): void => {
+    handsNow.length = 0;
+    const act = using.act !== null && !using.approaching ? using.act : null;
+    if (using.seat !== null) {
+      for (const h of using.seat.hands) {
+        if (act !== null && act.hands.some((a) => a.side === h.side)) continue;
+        handsNow.push(h);
+      }
+    }
+    if (act !== null) for (const h of act.hands) handsNow.push(h);
+  };
+
   const walkTheBody = (snapshot: InputSnapshot, reading: StickReading | null, simDt: number, rawDt: number): void => {
     const yaw = free.pose().yaw;
     // The stick and the keys become ONE Intent in the body's own heading
@@ -644,13 +899,42 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
     // turning, because the steering error reads as zero.
     demandFrom(snapshot, reading, yaw, walker.heading, 'ground',
       { ...NO_BUTTONS, sprint: sprinting }, false, intent);
-    walkStep(walker, walkWorld, intent, headingOfYaw(yaw), simDt);
+
+    // THE HANDS' OWN WALK. A press or a grip from where the body stands
+    // walks it up to the thing first — approach, then reach — and the
+    // stick takes the body back at any moment: out of an approach, or up
+    // out of a chair. Seated, the walker stays put; the body is the chair's.
+    const push = Math.hypot(intent.forward, intent.strafe);
+    let steer = headingOfYaw(yaw);
+    if (using.act !== null) using.age += simDt;
+    if (using.seat !== null) {
+      if (push > TAKE_BACK_PUSH) standUp();
+    } else if (using.act !== null && using.approaching) {
+      const t: Vec3 = using.act.hands.length > 0 ? using.act.hands[0] : using.act.look;
+      const dx = t.x - walker.x;
+      const dz = t.z - walker.z;
+      if (push > TAKE_BACK_PUSH) {
+        using.act = null;
+      } else if (Math.hypot(dx, dz) <= STAND_OFF_M || using.age > APPROACH_SECONDS) {
+        using.approaching = false;
+        using.age = 0;
+      } else {
+        intent.forward = APPROACH_PUSH;
+        intent.strafe = 0;
+        intent.turn = 0;
+        steer = Math.atan2(dx, dz);
+      }
+    }
+    if (using.act !== null && !using.approaching && using.age > using.act.seconds) using.act = null;
+    if (using.seat === null) walkStep(walker, walkWorld, intent, steer, simDt);
+    const seated = using.seat !== null;
 
     // THE EYE: at the head, then pushed back along the camera's OWN
     // forward. Taking the direction from three after the rotation is
     // applied rather than rebuilding it from yaw and pitch means there is
     // no second copy of the camera's convention to get wrong.
-    const headY = FLOOR_UNITS + (walker.y + EYE_HEIGHT_M) * M;
+    const eyeM = seated ? SEATED_EYE_M : EYE_HEIGHT_M;
+    const headY = FLOOR_UNITS + (walker.y + eyeM) * M;
     const pose = free.pose();
     free.place(walker.x * M, headY, walker.z * M, pose.yaw, pose.pitch);
     free.camera.getWorldDirection(aim);
@@ -658,25 +942,90 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
     // backwards; anything it finds is a wall the camera would otherwise
     // be standing inside.
     const back = { x: -aim.x, y: -aim.y, z: -aim.z };
-    const head = { x: walker.x, y: walker.y + EYE_HEIGHT_M, z: walker.z };
-    const hit = rayHit(solids, head, back, BOOM_M, ray);
-    const boom = Math.max(BOOM_MIN_M, hit ? ray.distance - BOOM_MIN_M : BOOM_M);
+    const head = { x: walker.x, y: walker.y + eyeM, z: walker.z };
+    const boomMax = seated ? SEATED_BOOM_M : BOOM_M;
+    const hit = rayHit(solids, head, back, boomMax, ray);
+    const boom = Math.max(BOOM_MIN_M, hit ? ray.distance - BOOM_MIN_M : boomMax);
     free.camera.position.addScaledVector(aim, -boom * M);
 
-    // THE BODY. Its gait phase is the walker's, advanced by DISTANCE
-    // covered rather than by time, which is what keeps the feet planted
-    // at half speed; the breath runs on the raw clock beside it.
+    // THE BODY. Its gait phase is advanced by DISTANCE covered rather
+    // than by time, which is what keeps the feet planted at half speed;
+    // the breath runs on the raw clock beside it. The distance is the
+    // walker's but the stride is the BODY's (`humanStride`, in bind units,
+    // `bindScale` of them to the metre): Jack's pose steps 1.1 m a cycle,
+    // and the walker's 1.5 m measured-human stride slid each planted foot
+    // a quarter of a step forward.
+    let rootDrop = 0;
+    let rootX = walker.x;
+    let rootZ = walker.z;
+    if (bodyRig !== null && bodyMeasure !== null) {
+      let base: readonly JointTurn[];
+      if (using.seat !== null && using.seat.seat !== null) {
+        // SEATED: the seated pose, lowered until the soles meet the floor,
+        // rolled toward whatever a hand is reaching for and cannot yet.
+        base = poseSeated(bodyMeasure, bodyRig.bind, { style: 'sit', seconds: clock }, seatTurns);
+        if (seatDrop === null) seatDrop = seatDropOf(bodyMeasure, bodyRig.bind, base, bodyRig.bindScale);
+        rootDrop = seatDrop;
+        const reaching = using.act !== null && using.act.hands.length > 0 ? using.act.hands[0] : null;
+        if (reaching !== null) using.rollToward = reaching;
+        const at = using.rollToward === null ? using.seat.seat : rolledToward(using.seat.seat, using.rollToward, using.roll, rolled);
+        rootX = at.x;
+        rootZ = at.z;
+      } else {
+        gait.stance = walker.stance;
+        const stride = humanStride(bodyMeasure, walker.stance) / bodyRig.bindScale;
+        const travelled = Math.hypot(walker.x - strode.x, walker.z - strode.z);
+        if (stride > 0) gait.phase = (gait.phase + travelled / stride) % 1;
+        gait.seconds = clock;
+        gait.lean = walker.lean;
+        const posed = poseHuman(bodyMeasure, bodyRig.bind, gait as HumanGait, turns);
+        // The soles stand at bind y −1 on both masters (`view/HumanRig`).
+        if (feet === null) feet = createFeet(bodyMeasure, bodyRig.bind, -1);
+        footFrame.dt = simDt;
+        footFrame.released = !walker.grounded;
+        footFrame.rootX = walker.x;
+        footFrame.rootY = walker.y;
+        footFrame.rootZ = walker.z;
+        footFrame.rootYaw = walker.heading;
+        footFrame.unitsPerMetre = bodyRig.bindScale;
+        const grounded = groundFeet(feet, bodyMeasure, bodyRig.bind, posed, footFrame, feetTurns);
+        rootDrop = grounded.rootDrop;
+        base = grounded.turns;
+      }
+
+      // THE HEAD, then THE HANDS, on top of the pose — the body is the
+      // player's (`bodyFree: false`), so only the neck and the chest turn.
+      if (aimState === null) aimState = createAim(bodyMeasure, bodyRig.bind, -1);
+      if (reachState === null) reachState = createReach(bodyMeasure, bodyRig.bind, -1);
+      aimFrame.dt = simDt;
+      aimFrame.rootX = rootX;
+      aimFrame.rootY = walker.y - rootDrop;
+      aimFrame.rootZ = rootZ;
+      aimFrame.rootYaw = walker.heading;
+      aimFrame.unitsPerMetre = bodyRig.bindScale;
+      aimFrame.target = lookTarget(aim, walker.y + eyeM);
+      const aimed = aimBody(aimState, bodyMeasure, bodyRig.bind, base, aimFrame, aimTurns);
+      fillHands();
+      reachFrame.dt = simDt;
+      reachFrame.rootX = rootX;
+      reachFrame.rootY = walker.y - rootDrop;
+      reachFrame.rootZ = rootZ;
+      reachFrame.rootYaw = walker.heading;
+      reachFrame.unitsPerMetre = bodyRig.bindScale;
+      reachFrame.seated = seated;
+      const reached = reachHands(reachState, bodyMeasure, bodyRig.bind, aimed.turns, reachFrame, reachTurns);
+      if (seated) {
+        const act = using.act !== null && !using.approaching && using.act.hands.length > 0 ? using.act.hands[0] : null;
+        using.roll = rollStep(using.roll, act !== null, act !== null && reached[act.side].holding, simDt);
+      }
+      bodyRig.apply(reached.turns);
+    }
     if (body !== null) {
-      body.position.set(walker.x * M, FLOOR_UNITS + walker.y * M, walker.z * M);
+      body.position.set(rootX * M, FLOOR_UNITS + (walker.y - rootDrop) * M, rootZ * M);
       body.rotation.y = walker.heading;
     }
-    if (bodyRig !== null && bodyMeasure !== null) {
-      gait.stance = walker.stance;
-      gait.phase = walker.phase;
-      gait.seconds = clock;
-      gait.lean = walker.lean;
-      bodyRig.apply(poseHuman(bodyMeasure, bodyRig.bind, gait as HumanGait, turns));
-    }
+    strode.x = walker.x;
+    strode.z = walker.z;
     void rawDt;
   };
 
@@ -703,12 +1052,34 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
       return;
     }
     if (action === TOMBS_ACTION.interact) {
-      // The plan says what is here; doing it is a later milestone. What
-      // this does NOT do is pretend: the control only exists while
-      // something is in reach, and pressing it reports the plan's own
-      // words rather than changing a world that has nothing to change.
+      // THE BODY DOES IT; THE WORLD DOES NOT CHANGE YET. Pressing sits at a
+      // workstation with the hands on the keys, presses an intercom, grips
+      // the lever or reads a console — all of it the body (`./labUse`).
+      // What the press does NOT do is pretend the world answered: no screen
+      // changes and no call connects, so the plan's own words still go to
+      // the console rather than to a HUD line claiming a result.
       const reach = reachNow();
-      if (reach !== null) console.info(`[tombs] ${reach.label}: ${reach.prompt} (${reach.doing})`);
+      if (reach === null) {
+        standUp();
+        return;
+      }
+      console.info(`[tombs] ${reach.label}: ${reach.prompt} (${reach.doing})`);
+      if (using.act !== null && using.act.mode === 'look' && using.act.id === reach.id) {
+        using.act = null;
+        return;
+      }
+      if (bodyMeasure === null) return;
+      const from = using.seat !== null && using.seat.seat !== null
+        ? using.seat.seat : { x: walker.x, z: walker.z, yaw: walker.heading };
+      const use = useOf(layout, reach, from, bodyMeasure.leftSign < 0 ? -1 : 1);
+      if (use.mode === 'sit') {
+        sitDown(use);
+        return;
+      }
+      using.act = use;
+      using.age = 0;
+      // Seated, the chair rolls instead (`labUse.rollStep`); standing, the body walks up to it first.
+      using.approaching = using.seat === null && use.hands.length > 0;
       return;
     }
     if (action === TOMBS_ACTION.audio) {
@@ -856,6 +1227,8 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
 
       offKey = ctx.input.onKeyDown((code) => {
         if (code === 'Escape') hooks.onBack();
+        // E is INTERACT at a keyboard, as the prompt button is under a thumb.
+        if (code === 'KeyE') act(TOMBS_ACTION.interact);
       });
       hud.refreshNow();
     },
@@ -882,6 +1255,8 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
       // world advancing — a paused room with two bodies frozen mid-breath
       // reads as the renderer having died, which is the same argument the
       // camera and the HUD are on raw time for.
+      // Everyone in reach turns their head to the player's eye.
+      people?.lookAt(walking && aimState !== null ? aimState.eye : null);
       people?.update(frame.rawDt);
       audio.update(frame.rawDt);
       hud?.update(frame.rawDt);
@@ -908,6 +1283,12 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
         bodyRig?.dispose();
         bodyRig = null;
         bodyMeasure = null;
+        feet = null;
+        aimState = null;
+        reachState = null;
+        seatDrop = null;
+        using.seat = null;
+        using.act = null;
         release(body);
         body = null;
       }

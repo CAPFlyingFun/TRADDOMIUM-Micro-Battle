@@ -6,13 +6,13 @@
  * be found from the bind pose's geometry (`src/actor/humanSkeleton.ts`
  * explains every rule and the margin it wins by). A rule like that is
  * only worth as much as the skeletons it has been run against, so this
- * file runs it against BOTH masters exactly as they are — Sarah's 35
+ * file runs it against BOTH masters exactly as they are — Sarah's 61
  * joints and Jack's 69, read out of `fixtures/humanBind.json`, which is
  * what the GLBs' inverse bind matrices give.
  *
  * Two kinds of assertion, and the second kind is the point:
  *
- *  - THE INDICES ARE PINNED. Sarah's left wrist is joint 20 and Jack's is
+ *  - THE INDICES ARE PINNED. Sarah's left wrist is joint 33 and Jack's is
  *    37, and a change that moves either is a change to the pose of two
  *    people standing in the laboratory. Pinning them is what makes this a
  *    regression test rather than a restatement of the code.
@@ -74,24 +74,31 @@ interface Master {
  * is the same answer for both and it is asserted from the geometry
  * below: both masters face +z (glTF's convention, and verified for these
  * two by rendering them from +z), and a body facing +z wears its left
- * arm on +x. So Sarah's left wrist is index 20, the chain a viewer sees
+ * arm on +x. So Sarah's left wrist is index 33, the chain a viewer sees
  * on their RIGHT.
  */
 const REAL: readonly Master[] = [
+  // SARAH IS Lab3 SINCE 2026-09-29: Meshy's untextured pass, rigged with
+  // four fingers a hand, so 61 joints where Lab2 had 35. The spine and the
+  // right arm kept their places; the left arm moved from 18-20 to 31-33
+  // because her right hand's sixteen finger bones now come before it, and
+  // the legs from 25-32 to 51-58 for both hands' worth. Every shape
+  // assertion below passed on it unchanged. She is 6 mm taller in the
+  // joints and 17 mm shorter in the leg — a new sculpt, not a new person.
   {
     who: 'sarah',
     bind: MASTERS.sarah,
-    count: 35,
+    count: 61,
     joints: {
       pelvis: 1, spine: 3, chest: 5, neck: 6, head: 8,
-      shoulderL: 18, elbowL: 19, wristL: 20,
+      shoulderL: 31, elbowL: 32, wristL: 33,
       shoulderR: 10, elbowR: 11, wristR: 12,
-      hipL: 30, kneeL: 31, ankleL: 32,
-      hipR: 25, kneeR: 26, ankleR: 27,
+      hipL: 56, kneeL: 57, ankleL: 58,
+      hipR: 51, kneeR: 52, ankleR: 53,
     },
-    height: 1.3434,
+    height: 1.3490,
     armSpan: 1.0612,
-    legLength: 0.6382,
+    legLength: 0.6209,
     hipWidth: 0.1355,
   },
   // JACK IS Lab2 SINCE 2026-09-19, and this row is the best evidence the

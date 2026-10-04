@@ -62,7 +62,7 @@ export interface Beat {
 export const CHAPTER_1_CAMERAS: readonly BeatCamera[] = Object.freeze([
   Object.freeze({ id: "jack-console-medium", subject: "Jack at his workstation, and whoever is standing over it", placement: "In the open floor south of Jack's desk, looking north at the desk, his chair and the monitor.", shot: "medium" }),
   Object.freeze({ id: "monitor-insert", subject: "The monitor face, and the hands at the keyboard under it", placement: "Close at Jack's desk, over the keyboard and into the screen's glow.", shot: "insert" }),
-  Object.freeze({ id: "intercom-insert", subject: "The intercom panel beside the sliding door", placement: "At the east wall by the door, close on the panel with the lit room behind it.", shot: "insert" }),
+  Object.freeze({ id: "intercom-insert", subject: "The intercom unit on Jack's desk", placement: "Low at the desk's edge, close on the unit and its push-to-talk button to the left of his keyboard, with Jack's reaching hand coming into frame.", shot: "insert" }),
   Object.freeze({ id: "east-door-wide", subject: "The doorway, and the length of room between it and the workstations", placement: "Among the north workstations, looking east at the sliding door, so anyone entering comes in behind Jack.", shot: "wide" }),
   Object.freeze({ id: "over-shoulder-screen", subject: "The screen past Jack, with Sarah leaning into the frame", placement: "Behind Jack's right shoulder at his chair, looking down the line of his arm to the monitor.", shot: "over-shoulder" }),
   Object.freeze({ id: "north-workstations-wide", subject: "Both north desks and the aisle between them", placement: "Well south in the room, square to the north wall, both workstations and the floor between them in frame.", shot: "wide" }),
