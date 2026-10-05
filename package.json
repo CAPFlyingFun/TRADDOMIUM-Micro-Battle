@@ -4,7 +4,7 @@
   "version": "1.0.0-alpha.69",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "npm --prefix prototype run dev",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "test": "vitest run",
@@ -40,7 +40,10 @@
     "probe:storylab": "node scripts/probe-storylab.mjs",
     "probe:tombs": "node scripts/probe-tombs.mjs",
     "probe:player": "node scripts/probe-player.mjs",
-    "bake:audio": "node scripts/bakeAudio.mjs"
+    "bake:audio": "node scripts/bakeAudio.mjs",
+    "dev:systems": "vite",
+    "dev:hybrid": "npm --prefix prototype run dev",
+    "build:hybrid": "npm --prefix prototype run build:pwa"
   },
   "dependencies": {
     "three": "^0.185.0"

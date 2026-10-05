@@ -1,0 +1,1114 @@
+{
+  "wake": [
+    {
+      "speaker": "narrator",
+      "text": "It was March fifth, in the year twenty-one ten.",
+      "voiceKey": "chapter1:wake:0",
+      "sourceIndex": 0
+    },
+    {
+      "speaker": "narrator",
+      "text": "It was almost eleven at night on a remote island somewhere in the Atlantic Ocean. The island stretched roughly fifty-six kilometers across, about thirty-five miles from one side to the other, but most of it remained undeveloped wilderness. Near its center sat a research settlement of laboratories, homes, workshops, medical facilities, and other buildings supporting the nearly five hundred people who lived there.",
+      "voiceKey": "chapter1:wake:1",
+      "sourceIndex": 1
+    },
+    {
+      "speaker": "narrator",
+      "text": "Deep inside one of those laboratories, Dr. Jack Bennett was hard at work. Technically.",
+      "voiceKey": "chapter1:wake:2",
+      "sourceIndex": 2
+    },
+    {
+      "speaker": "narrator",
+      "text": "Jack sat slumped in his chair with his arms folded across his chest, his head tilted toward one shoulder, and several pages of diagnostic data glowing on the monitor in front of him. His eyes were closed.",
+      "voiceKey": "chapter1:wake:3",
+      "sourceIndex": 3
+    },
+    {
+      "speaker": "narrator",
+      "text": "A warning tone chirped from Jack's console. He shifted but did not wake. A second tone followed, louder than the first, and the diagnostic display flashed amber.",
+      "voiceKey": "chapter1:wake:4",
+      "sourceIndex": 4
+    },
+    {
+      "speaker": "system",
+      "text": "Warning. Unauthorized system access.",
+      "voiceKey": "chapter1:wake:5",
+      "sourceIndex": 5
+    },
+    {
+      "speaker": "narrator",
+      "text": "Jack jerked awake so quickly that his chair rolled backward and nearly struck another workstation.",
+      "voiceKey": "chapter1:wake:6",
+      "sourceIndex": 6
+    },
+    {
+      "speaker": "jack",
+      "text": "What? Okay, I'm awake.",
+      "voiceKey": "chapter1:wake:7",
+      "sourceIndex": 7
+    },
+    {
+      "speaker": "narrator",
+      "text": "The warning repeated while Jack rubbed his eyes and leaned toward the monitor.",
+      "voiceKey": "chapter1:wake:8",
+      "sourceIndex": 8
+    },
+    {
+      "speaker": "jack",
+      "text": "That's not good.",
+      "voiceKey": "chapter1:wake:9",
+      "sourceIndex": 9
+    }
+  ],
+  "trace": [
+    {
+      "speaker": "narrator",
+      "text": "Several windows were opening and closing on their own. Lines of commands streamed across one side of the display faster than he could read them. Jack grabbed the keyboard and opened the network monitor.",
+      "voiceKey": "chapter1:trace:0",
+      "sourceIndex": 10
+    },
+    {
+      "speaker": "jack",
+      "text": "Come on. What are you doing?",
+      "voiceKey": "chapter1:trace:1",
+      "sourceIndex": 11
+    },
+    {
+      "speaker": "narrator",
+      "text": "An unfamiliar connection appeared for half a second and vanished.",
+      "voiceKey": "chapter1:trace:2",
+      "sourceIndex": 12
+    },
+    {
+      "speaker": "narrator",
+      "text": "Jack frowned.",
+      "voiceKey": "chapter1:trace:3",
+      "sourceIndex": 13
+    },
+    {
+      "speaker": "jack",
+      "text": "No. Where'd you go?",
+      "voiceKey": "chapter1:trace:4",
+      "sourceIndex": 14
+    },
+    {
+      "speaker": "narrator",
+      "text": "He refreshed the display, but the connection was gone. Another warning tone sounded from the console and a red message filled the center of his screen.",
+      "voiceKey": "chapter1:trace:5",
+      "sourceIndex": 15
+    },
+    {
+      "speaker": "system",
+      "text": "Security protocol violation.",
+      "voiceKey": "chapter1:trace:6",
+      "sourceIndex": 16
+    },
+    {
+      "speaker": "jack",
+      "text": "Okay. Definitely awake now.",
+      "voiceKey": "chapter1:trace:7",
+      "sourceIndex": 17
+    },
+    {
+      "speaker": "narrator",
+      "text": "Jack entered a command and pulled up the laboratory access logs. Nothing looked unusual. He tried another search and got the same result.",
+      "voiceKey": "chapter1:trace:8",
+      "sourceIndex": 18
+    },
+    {
+      "speaker": "jack",
+      "text": "That's impossible.",
+      "voiceKey": "chapter1:trace:9",
+      "sourceIndex": 19
+    },
+    {
+      "speaker": "narrator",
+      "text": "The system beeped, and a directory opened by itself. Jack stopped typing when he recognized the folder.",
+      "voiceKey": "chapter1:trace:10",
+      "sourceIndex": 20
+    },
+    {
+      "speaker": "system",
+      "text": "Tombs project.",
+      "voiceKey": "chapter1:trace:11",
+      "sourceIndex": 21
+    }
+  ],
+  "lock": [
+    {
+      "speaker": "jack",
+      "text": "Oh, no you don't.",
+      "voiceKey": "chapter1:lock:0",
+      "sourceIndex": 22
+    },
+    {
+      "speaker": "narrator",
+      "text": "He immediately locked the terminal. The screen went black for three seconds, then came back on and reopened the same directory.",
+      "voiceKey": "chapter1:lock:1",
+      "sourceIndex": 23
+    },
+    {
+      "speaker": "narrator",
+      "text": "Jack stared at it.",
+      "voiceKey": "chapter1:lock:2",
+      "sourceIndex": 24
+    },
+    {
+      "speaker": "jack",
+      "text": "Well, that's new.",
+      "voiceKey": "chapter1:lock:3",
+      "sourceIndex": 25
+    }
+  ],
+  "call": [
+    {
+      "speaker": "narrator",
+      "text": "He reached for the intercom.",
+      "voiceKey": "chapter1:call:0",
+      "sourceIndex": 26
+    },
+    {
+      "speaker": "jack",
+      "text": "Sarah?",
+      "voiceKey": "chapter1:call:1",
+      "sourceIndex": 27
+    },
+    {
+      "speaker": "narrator",
+      "text": "Static answered him.",
+      "voiceKey": "chapter1:call:2",
+      "sourceIndex": 28
+    },
+    {
+      "speaker": "narrator",
+      "text": "Jack tapped the button again.",
+      "voiceKey": "chapter1:call:3",
+      "sourceIndex": 29
+    },
+    {
+      "speaker": "jack",
+      "text": "Sarah, you there?",
+      "voiceKey": "chapter1:call:4",
+      "sourceIndex": 30
+    },
+    {
+      "speaker": "narrator",
+      "text": "Sarah answered through the speaker.",
+      "voiceKey": "chapter1:call:5",
+      "sourceIndex": 31
+    },
+    {
+      "speaker": "sarah",
+      "text": "I'm here. What's wrong?",
+      "voiceKey": "chapter1:call:6",
+      "sourceIndex": 32
+    },
+    {
+      "speaker": "jack",
+      "text": "I've got something weird on my computer. It tripped a security alarm.",
+      "voiceKey": "chapter1:call:7",
+      "sourceIndex": 33
+    },
+    {
+      "speaker": "narrator",
+      "text": "Sarah leaned closer to the intercom.",
+      "voiceKey": "chapter1:call:8",
+      "sourceIndex": 34
+    },
+    {
+      "speaker": "sarah",
+      "text": "Define weird.",
+      "voiceKey": "chapter1:call:9",
+      "sourceIndex": 35
+    },
+    {
+      "speaker": "narrator",
+      "text": "Jack reopened the network monitor.",
+      "voiceKey": "chapter1:call:10",
+      "sourceIndex": 36
+    },
+    {
+      "speaker": "jack",
+      "text": "I think somebody's in the system.",
+      "voiceKey": "chapter1:call:11",
+      "sourceIndex": 37
+    },
+    {
+      "speaker": "narrator",
+      "text": "There was a brief pause before Sarah asked,",
+      "voiceKey": "chapter1:call:12",
+      "sourceIndex": 38
+    },
+    {
+      "speaker": "sarah",
+      "text": "Are you sure?",
+      "voiceKey": "chapter1:call:13",
+      "sourceIndex": 39
+    },
+    {
+      "speaker": "narrator",
+      "text": "Jack scanned the empty connection list.",
+      "voiceKey": "chapter1:call:14",
+      "sourceIndex": 40
+    },
+    {
+      "speaker": "jack",
+      "text": "No. That's why I'm calling the smarter scientist.",
+      "voiceKey": "chapter1:call:15",
+      "sourceIndex": 41
+    },
+    {
+      "speaker": "narrator",
+      "text": "Sarah laughed softly through the speaker.",
+      "voiceKey": "chapter1:call:16",
+      "sourceIndex": 42
+    },
+    {
+      "speaker": "sarah",
+      "text": "Good answer.",
+      "voiceKey": "chapter1:call:17",
+      "sourceIndex": 43
+    },
+    {
+      "speaker": "narrator",
+      "text": "Jack smiled despite himself.",
+      "voiceKey": "chapter1:call:18",
+      "sourceIndex": 44
+    },
+    {
+      "speaker": "jack",
+      "text": "Can you come take a look?",
+      "voiceKey": "chapter1:call:19",
+      "sourceIndex": 45
+    },
+    {
+      "speaker": "sarah",
+      "text": "I'm on my way,",
+      "voiceKey": "chapter1:call:20",
+      "sourceIndex": 46
+    },
+    {
+      "speaker": "narrator",
+      "text": "Sarah replied.",
+      "voiceKey": "chapter1:call:21",
+      "sourceIndex": 47
+    },
+    {
+      "speaker": "narrator",
+      "text": "Jack released the intercom and looked back at the monitor. The TOMBS directory was still open.",
+      "voiceKey": "chapter1:call:22",
+      "sourceIndex": 48
+    },
+    {
+      "speaker": "jack",
+      "text": "Who are you?",
+      "voiceKey": "chapter1:call:23",
+      "sourceIndex": 49
+    },
+    {
+      "speaker": "narrator",
+      "text": "The cursor moved without him touching anything.",
+      "voiceKey": "chapter1:call:24",
+      "sourceIndex": 50
+    },
+    {
+      "speaker": "narrator",
+      "text": "Jack froze as a file opened.",
+      "voiceKey": "chapter1:call:25",
+      "sourceIndex": 51
+    },
+    {
+      "speaker": "system",
+      "text": "Boundary control.",
+      "voiceKey": "chapter1:call:26",
+      "sourceIndex": 52
+    },
+    {
+      "speaker": "jack",
+      "text": "No, no, no.",
+      "voiceKey": "chapter1:call:27",
+      "sourceIndex": 53
+    }
+  ],
+  "arrive": [
+    {
+      "speaker": "narrator",
+      "text": "He reached for the keyboard just as the laboratory door slid open behind him.",
+      "voiceKey": "chapter1:arrive:0",
+      "sourceIndex": 54
+    },
+    {
+      "speaker": "narrator",
+      "text": "Sarah Bennett walked straight in, tablet tucked beneath one arm, already crossing toward him. She glanced from Jack to the computer.",
+      "voiceKey": "chapter1:arrive:1",
+      "sourceIndex": 55
+    },
+    {
+      "speaker": "sarah",
+      "text": "Please tell me you didn't break something.",
+      "voiceKey": "chapter1:arrive:2",
+      "sourceIndex": 56
+    },
+    {
+      "speaker": "jack",
+      "text": "I was asleep,",
+      "voiceKey": "chapter1:arrive:3",
+      "sourceIndex": 57
+    },
+    {
+      "speaker": "narrator",
+      "text": "Jack replied.",
+      "voiceKey": "chapter1:arrive:4",
+      "sourceIndex": 58
+    },
+    {
+      "speaker": "narrator",
+      "text": "Sarah closed the distance between them.",
+      "voiceKey": "chapter1:arrive:5",
+      "sourceIndex": 59
+    },
+    {
+      "speaker": "sarah",
+      "text": "You called me in here to admit that?",
+      "voiceKey": "chapter1:arrive:6",
+      "sourceIndex": 60
+    },
+    {
+      "speaker": "narrator",
+      "text": "Jack gestured toward the console.",
+      "voiceKey": "chapter1:arrive:7",
+      "sourceIndex": 61
+    },
+    {
+      "speaker": "jack",
+      "text": "No. That was my defense.",
+      "voiceKey": "chapter1:arrive:8",
+      "sourceIndex": 62
+    },
+    {
+      "speaker": "narrator",
+      "text": "Sarah raised an eyebrow.",
+      "voiceKey": "chapter1:arrive:9",
+      "sourceIndex": 63
+    },
+    {
+      "speaker": "sarah",
+      "text": "Against what?",
+      "voiceKey": "chapter1:arrive:10",
+      "sourceIndex": 64
+    },
+    {
+      "speaker": "narrator",
+      "text": "Jack pointed toward the monitor.",
+      "voiceKey": "chapter1:arrive:11",
+      "sourceIndex": 65
+    },
+    {
+      "speaker": "jack",
+      "text": "Whatever this is. I was reviewing yesterday's test results.",
+      "voiceKey": "chapter1:arrive:12",
+      "sourceIndex": 66
+    },
+    {
+      "speaker": "sarah",
+      "text": "You were sleeping,",
+      "voiceKey": "chapter1:arrive:13",
+      "sourceIndex": 67
+    },
+    {
+      "speaker": "narrator",
+      "text": "Sarah corrected him.",
+      "voiceKey": "chapter1:arrive:14",
+      "sourceIndex": 68
+    },
+    {
+      "speaker": "narrator",
+      "text": "Jack sat a little straighter.",
+      "voiceKey": "chapter1:arrive:15",
+      "sourceIndex": 69
+    },
+    {
+      "speaker": "jack",
+      "text": "I was reviewing them internally.",
+      "voiceKey": "chapter1:arrive:16",
+      "sourceIndex": 70
+    },
+    {
+      "speaker": "narrator",
+      "text": "Sarah glanced at him.",
+      "voiceKey": "chapter1:arrive:17",
+      "sourceIndex": 71
+    },
+    {
+      "speaker": "sarah",
+      "text": "With your eyes closed?",
+      "voiceKey": "chapter1:arrive:18",
+      "sourceIndex": 72
+    },
+    {
+      "speaker": "narrator",
+      "text": "Jack nodded solemnly.",
+      "voiceKey": "chapter1:arrive:19",
+      "sourceIndex": 73
+    },
+    {
+      "speaker": "jack",
+      "text": "It's an advanced technique.",
+      "voiceKey": "chapter1:arrive:20",
+      "sourceIndex": 74
+    },
+    {
+      "speaker": "narrator",
+      "text": "She leaned over his shoulder and studied the screen.",
+      "voiceKey": "chapter1:arrive:21",
+      "sourceIndex": 75
+    },
+    {
+      "speaker": "sarah",
+      "text": "Jack.",
+      "voiceKey": "chapter1:arrive:22",
+      "sourceIndex": 76
+    },
+    {
+      "speaker": "narrator",
+      "text": "Jack straightened in his chair while Sarah placed her tablet beside the keyboard.",
+      "voiceKey": "chapter1:arrive:23",
+      "sourceIndex": 77
+    },
+    {
+      "speaker": "jack",
+      "text": "Right. Problem. I got an unauthorized access warning. I checked the network monitor and saw a connection I didn't recognize, but it disappeared before I could trace it.",
+      "voiceKey": "chapter1:arrive:24",
+      "sourceIndex": 78
+    },
+    {
+      "speaker": "narrator",
+      "text": "Sarah tapped the edge of the keyboard.",
+      "voiceKey": "chapter1:arrive:25",
+      "sourceIndex": 79
+    },
+    {
+      "speaker": "sarah",
+      "text": "And then?",
+      "voiceKey": "chapter1:arrive:26",
+      "sourceIndex": 80
+    },
+    {
+      "speaker": "narrator",
+      "text": "Jack pointed to the open directory.",
+      "voiceKey": "chapter1:arrive:27",
+      "sourceIndex": 81
+    },
+    {
+      "speaker": "jack",
+      "text": "It opened the TOMBS directory.",
+      "voiceKey": "chapter1:arrive:28",
+      "sourceIndex": 82
+    },
+    {
+      "speaker": "narrator",
+      "text": "Sarah's attention sharpened.",
+      "voiceKey": "chapter1:arrive:29",
+      "sourceIndex": 83
+    },
+    {
+      "speaker": "sarah",
+      "text": "By itself?",
+      "voiceKey": "chapter1:arrive:30",
+      "sourceIndex": 84
+    },
+    {
+      "speaker": "jack",
+      "text": "Yep.",
+      "voiceKey": "chapter1:arrive:31",
+      "sourceIndex": 85
+    },
+    {
+      "speaker": "narrator",
+      "text": "Sarah looked at the terminal lock indicator.",
+      "voiceKey": "chapter1:arrive:32",
+      "sourceIndex": 86
+    },
+    {
+      "speaker": "sarah",
+      "text": "You locked the terminal?",
+      "voiceKey": "chapter1:arrive:33",
+      "sourceIndex": 87
+    },
+    {
+      "speaker": "narrator",
+      "text": "Jack nodded.",
+      "voiceKey": "chapter1:arrive:34",
+      "sourceIndex": 88
+    },
+    {
+      "speaker": "jack",
+      "text": "Yep.",
+      "voiceKey": "chapter1:arrive:35",
+      "sourceIndex": 89
+    },
+    {
+      "speaker": "narrator",
+      "text": "Sarah waited.",
+      "voiceKey": "chapter1:arrive:36",
+      "sourceIndex": 90
+    },
+    {
+      "speaker": "sarah",
+      "text": "And?",
+      "voiceKey": "chapter1:arrive:37",
+      "sourceIndex": 91
+    },
+    {
+      "speaker": "narrator",
+      "text": "Jack leaned back.",
+      "voiceKey": "chapter1:arrive:38",
+      "sourceIndex": 92
+    },
+    {
+      "speaker": "jack",
+      "text": "It unlocked itself.",
+      "voiceKey": "chapter1:arrive:39",
+      "sourceIndex": 93
+    },
+    {
+      "speaker": "narrator",
+      "text": "Sarah stared at him for a moment before looking back at the monitor. Jack pointed at the screen.",
+      "voiceKey": "chapter1:arrive:40",
+      "sourceIndex": 94
+    },
+    {
+      "speaker": "jack",
+      "text": "I know.",
+      "voiceKey": "chapter1:arrive:41",
+      "sourceIndex": 95
+    }
+  ],
+  "logs": [
+    {
+      "speaker": "narrator",
+      "text": "Sarah started powering up the other console next to Jack.",
+      "voiceKey": "chapter1:logs:0",
+      "sourceIndex": 96
+    },
+    {
+      "speaker": "sarah",
+      "text": "Can I take your chair?",
+      "voiceKey": "chapter1:logs:1",
+      "sourceIndex": 97
+    },
+    {
+      "speaker": "narrator",
+      "text": "Jack kept one hand on the keyboard.",
+      "voiceKey": "chapter1:logs:2",
+      "sourceIndex": 98
+    },
+    {
+      "speaker": "jack",
+      "text": "I'm sitting here.",
+      "voiceKey": "chapter1:logs:3",
+      "sourceIndex": 99
+    },
+    {
+      "speaker": "narrator",
+      "text": "Sarah nudged the arm of his chair, looking slightly annoyed, but sympathetic.",
+      "voiceKey": "chapter1:logs:4",
+      "sourceIndex": 100
+    },
+    {
+      "speaker": "sarah",
+      "text": "Let me have your chair and get another chair.",
+      "voiceKey": "chapter1:logs:5",
+      "sourceIndex": 101
+    },
+    {
+      "speaker": "jack",
+      "text": "Oh. Of course. Anything for you.",
+      "voiceKey": "chapter1:logs:6",
+      "sourceIndex": 102
+    },
+    {
+      "speaker": "narrator",
+      "text": "Jack gave Sarah his chair, crossed to the next workstation, and dragged its chair back, wheels squeaking against the floor, before pulling himself up to his own screen.",
+      "voiceKey": "chapter1:logs:7",
+      "sourceIndex": 103
+    },
+    {
+      "speaker": "narrator",
+      "text": "Sarah was already typing.",
+      "voiceKey": "chapter1:logs:8",
+      "sourceIndex": 104
+    },
+    {
+      "speaker": "sarah",
+      "text": "You said the connection disappeared?",
+      "voiceKey": "chapter1:logs:9",
+      "sourceIndex": 105
+    },
+    {
+      "speaker": "narrator",
+      "text": "Jack watched his own log scroll.",
+      "voiceKey": "chapter1:logs:10",
+      "sourceIndex": 106
+    },
+    {
+      "speaker": "jack",
+      "text": "Almost immediately.",
+      "voiceKey": "chapter1:logs:11",
+      "sourceIndex": 107
+    },
+    {
+      "speaker": "narrator",
+      "text": "Sarah opened the connection history on her screen.",
+      "voiceKey": "chapter1:logs:12",
+      "sourceIndex": 108
+    },
+    {
+      "speaker": "sarah",
+      "text": "External?",
+      "voiceKey": "chapter1:logs:13",
+      "sourceIndex": 109
+    },
+    {
+      "speaker": "narrator",
+      "text": "Jack shook his head.",
+      "voiceKey": "chapter1:logs:14",
+      "sourceIndex": 110
+    },
+    {
+      "speaker": "jack",
+      "text": "I couldn't tell.",
+      "voiceKey": "chapter1:logs:15",
+      "sourceIndex": 111
+    },
+    {
+      "speaker": "narrator",
+      "text": "Sarah exhaled through her nose.",
+      "voiceKey": "chapter1:logs:16",
+      "sourceIndex": 112
+    },
+    {
+      "speaker": "sarah",
+      "text": "That's reassuring.",
+      "voiceKey": "chapter1:logs:17",
+      "sourceIndex": 113
+    },
+    {
+      "speaker": "jack",
+      "text": "I thought so.",
+      "voiceKey": "chapter1:logs:18",
+      "sourceIndex": 114
+    },
+    {
+      "speaker": "narrator",
+      "text": "Jack pulled up the TOMBS directory again, tracing back through what had changed.",
+      "voiceKey": "chapter1:logs:19",
+      "sourceIndex": 115
+    },
+    {
+      "speaker": "sarah",
+      "text": "These are clean,",
+      "voiceKey": "chapter1:logs:20",
+      "sourceIndex": 116
+    },
+    {
+      "speaker": "narrator",
+      "text": "Sarah murmured after a few seconds, still scanning her own feed.",
+      "voiceKey": "chapter1:logs:21",
+      "sourceIndex": 117
+    },
+    {
+      "speaker": "narrator",
+      "text": "Jack pointed at his own screen.",
+      "voiceKey": "chapter1:logs:22",
+      "sourceIndex": 118
+    },
+    {
+      "speaker": "jack",
+      "text": "Mine too. Whoever it was covered both trails.",
+      "voiceKey": "chapter1:logs:23",
+      "sourceIndex": 119
+    },
+    {
+      "speaker": "narrator",
+      "text": "Sarah narrowed her eyes at the display.",
+      "voiceKey": "chapter1:logs:24",
+      "sourceIndex": 120
+    },
+    {
+      "speaker": "sarah",
+      "text": "Too clean.",
+      "voiceKey": "chapter1:logs:25",
+      "sourceIndex": 121
+    },
+    {
+      "speaker": "narrator",
+      "text": "Jack nodded.",
+      "voiceKey": "chapter1:logs:26",
+      "sourceIndex": 122
+    },
+    {
+      "speaker": "jack",
+      "text": "That's what I was thinking.",
+      "voiceKey": "chapter1:logs:27",
+      "sourceIndex": 123
+    },
+    {
+      "speaker": "narrator",
+      "text": "Sarah looked sideways at him.",
+      "voiceKey": "chapter1:logs:28",
+      "sourceIndex": 124
+    },
+    {
+      "speaker": "sarah",
+      "text": "No, you were sleeping.",
+      "voiceKey": "chapter1:logs:29",
+      "sourceIndex": 125
+    },
+    {
+      "speaker": "jack",
+      "text": "I was thinking eventually.",
+      "voiceKey": "chapter1:logs:30",
+      "sourceIndex": 126
+    }
+  ],
+  "baby": [
+    {
+      "speaker": "narrator",
+      "text": "Sarah shook her head, but Jack caught the beginning of a smile. He glanced at the time and then at her.",
+      "voiceKey": "chapter1:baby:0",
+      "sourceIndex": 127
+    },
+    {
+      "speaker": "jack",
+      "text": "You know, you're supposed to be resting.",
+      "voiceKey": "chapter1:baby:1",
+      "sourceIndex": 128
+    },
+    {
+      "speaker": "narrator",
+      "text": "Sarah kept typing.",
+      "voiceKey": "chapter1:baby:2",
+      "sourceIndex": 129
+    },
+    {
+      "speaker": "sarah",
+      "text": "So are you.",
+      "voiceKey": "chapter1:baby:3",
+      "sourceIndex": 130
+    },
+    {
+      "speaker": "narrator",
+      "text": "Jack glanced at her stomach.",
+      "voiceKey": "chapter1:baby:4",
+      "sourceIndex": 131
+    },
+    {
+      "speaker": "jack",
+      "text": "I'm not the pregnant one.",
+      "voiceKey": "chapter1:baby:5",
+      "sourceIndex": 132
+    },
+    {
+      "speaker": "narrator",
+      "text": "Sarah looked over at him.",
+      "voiceKey": "chapter1:baby:6",
+      "sourceIndex": 133
+    },
+    {
+      "speaker": "sarah",
+      "text": "No. You're the one I found asleep at a laboratory terminal.",
+      "voiceKey": "chapter1:baby:7",
+      "sourceIndex": 134
+    },
+    {
+      "speaker": "narrator",
+      "text": "Jack spread his hands.",
+      "voiceKey": "chapter1:baby:8",
+      "sourceIndex": 135
+    },
+    {
+      "speaker": "jack",
+      "text": "That's different.",
+      "voiceKey": "chapter1:baby:9",
+      "sourceIndex": 136
+    },
+    {
+      "speaker": "narrator",
+      "text": "Sarah stopped typing long enough to look at him.",
+      "voiceKey": "chapter1:baby:10",
+      "sourceIndex": 137
+    },
+    {
+      "speaker": "sarah",
+      "text": "How?",
+      "voiceKey": "chapter1:baby:11",
+      "sourceIndex": 138
+    },
+    {
+      "speaker": "narrator",
+      "text": "Jack considered it.",
+      "voiceKey": "chapter1:baby:12",
+      "sourceIndex": 139
+    },
+    {
+      "speaker": "jack",
+      "text": "I wasn't uncomfortable?",
+      "voiceKey": "chapter1:baby:13",
+      "sourceIndex": 140
+    },
+    {
+      "speaker": "narrator",
+      "text": "Sarah gave him a look that answered the question for him.",
+      "voiceKey": "chapter1:baby:14",
+      "sourceIndex": 141
+    },
+    {
+      "speaker": "narrator",
+      "text": "Jack surrendered with a small nod.",
+      "voiceKey": "chapter1:baby:15",
+      "sourceIndex": 142
+    },
+    {
+      "speaker": "jack",
+      "text": "Fair.",
+      "voiceKey": "chapter1:baby:16",
+      "sourceIndex": 143
+    },
+    {
+      "speaker": "sarah",
+      "text": "Lately the baby seems to think eleven at night is morning.",
+      "voiceKey": "chapter1:baby:17",
+      "sourceIndex": 144
+    },
+    {
+      "speaker": "narrator",
+      "text": "Sarah rested a hand briefly against her stomach, then returned to typing.",
+      "voiceKey": "chapter1:baby:18",
+      "sourceIndex": 145
+    },
+    {
+      "speaker": "narrator",
+      "text": "Jack smiled at the movement beneath her hand.",
+      "voiceKey": "chapter1:baby:19",
+      "sourceIndex": 146
+    },
+    {
+      "speaker": "jack",
+      "text": "Already takes after me.",
+      "voiceKey": "chapter1:baby:20",
+      "sourceIndex": 147
+    },
+    {
+      "speaker": "narrator",
+      "text": "Sarah's hands went still.",
+      "voiceKey": "chapter1:baby:21",
+      "sourceIndex": 148
+    },
+    {
+      "speaker": "sarah",
+      "text": "That's what I'm afraid of.",
+      "voiceKey": "chapter1:baby:22",
+      "sourceIndex": 149
+    }
+  ],
+  "request": [
+    {
+      "speaker": "narrator",
+      "text": "A new warning tone interrupted them. Both turned toward the main console as another message appeared.",
+      "voiceKey": "chapter1:request:0",
+      "sourceIndex": 150
+    },
+    {
+      "speaker": "system",
+      "text": "Tombs array remote initialization request.",
+      "voiceKey": "chapter1:request:1",
+      "sourceIndex": 151
+    },
+    {
+      "speaker": "narrator",
+      "text": "Sarah sat upright.",
+      "voiceKey": "chapter1:request:2",
+      "sourceIndex": 152
+    },
+    {
+      "speaker": "sarah",
+      "text": "Did you do that?",
+      "voiceKey": "chapter1:request:3",
+      "sourceIndex": 153
+    },
+    {
+      "speaker": "narrator",
+      "text": "Jack reached for the console.",
+      "voiceKey": "chapter1:request:4",
+      "sourceIndex": 154
+    },
+    {
+      "speaker": "jack",
+      "text": "No.",
+      "voiceKey": "chapter1:request:5",
+      "sourceIndex": 155
+    },
+    {
+      "speaker": "narrator",
+      "text": "Sarah pointed at the request.",
+      "voiceKey": "chapter1:request:6",
+      "sourceIndex": 156
+    },
+    {
+      "speaker": "sarah",
+      "text": "Cancel it.",
+      "voiceKey": "chapter1:request:7",
+      "sourceIndex": 157
+    }
+  ],
+  "reject": [
+    {
+      "speaker": "narrator",
+      "text": "Jack reached across the console and rejected the request.",
+      "voiceKey": "chapter1:reject:0",
+      "sourceIndex": 158
+    },
+    {
+      "speaker": "system",
+      "text": "Request denied.",
+      "voiceKey": "chapter1:reject:1",
+      "sourceIndex": 159
+    },
+    {
+      "speaker": "narrator",
+      "text": "He tried again.",
+      "voiceKey": "chapter1:reject:2",
+      "sourceIndex": 160
+    },
+    {
+      "speaker": "system",
+      "text": "Request denied.",
+      "voiceKey": "chapter1:reject:3",
+      "sourceIndex": 161
+    },
+    {
+      "speaker": "narrator",
+      "text": "Jack's expression hardened.",
+      "voiceKey": "chapter1:reject:4",
+      "sourceIndex": 162
+    },
+    {
+      "speaker": "jack",
+      "text": "That's not supposed to happen.",
+      "voiceKey": "chapter1:reject:5",
+      "sourceIndex": 163
+    }
+  ],
+  "credentials": [
+    {
+      "speaker": "narrator",
+      "text": "He entered his administrator credentials, but a new message appeared before he could issue another command.",
+      "voiceKey": "chapter1:credentials:0",
+      "sourceIndex": 164
+    },
+    {
+      "speaker": "system",
+      "text": "Access revoked.",
+      "voiceKey": "chapter1:credentials:1",
+      "sourceIndex": 165
+    },
+    {
+      "speaker": "narrator",
+      "text": "Sarah looked from the message to him.",
+      "voiceKey": "chapter1:credentials:2",
+      "sourceIndex": 166
+    },
+    {
+      "speaker": "sarah",
+      "text": "Your credentials?",
+      "voiceKey": "chapter1:credentials:3",
+      "sourceIndex": 167
+    },
+    {
+      "speaker": "narrator",
+      "text": "Jack stared at the warning.",
+      "voiceKey": "chapter1:credentials:4",
+      "sourceIndex": 168
+    },
+    {
+      "speaker": "jack",
+      "text": "Revoked.",
+      "voiceKey": "chapter1:credentials:5",
+      "sourceIndex": 169
+    },
+    {
+      "speaker": "narrator",
+      "text": "Sarah turned toward him.",
+      "voiceKey": "chapter1:credentials:6",
+      "sourceIndex": 170
+    },
+    {
+      "speaker": "sarah",
+      "text": "You're the project administrator.",
+      "voiceKey": "chapter1:credentials:7",
+      "sourceIndex": 171
+    },
+    {
+      "speaker": "narrator",
+      "text": "Jack tried his credentials again.",
+      "voiceKey": "chapter1:credentials:8",
+      "sourceIndex": 172
+    },
+    {
+      "speaker": "jack",
+      "text": "I know.",
+      "voiceKey": "chapter1:credentials:9",
+      "sourceIndex": 173
+    },
+    {
+      "speaker": "narrator",
+      "text": "Sarah leaned toward the screen.",
+      "voiceKey": "chapter1:credentials:10",
+      "sourceIndex": 174
+    },
+    {
+      "speaker": "sarah",
+      "text": "Who can revoke you?",
+      "voiceKey": "chapter1:credentials:11",
+      "sourceIndex": 175
+    },
+    {
+      "speaker": "narrator",
+      "text": "Jack stopped typing.",
+      "voiceKey": "chapter1:credentials:12",
+      "sourceIndex": 176
+    },
+    {
+      "speaker": "jack",
+      "text": "Me.",
+      "voiceKey": "chapter1:credentials:13",
+      "sourceIndex": 177
+    },
+    {
+      "speaker": "narrator",
+      "text": "Sarah slowly turned toward him.",
+      "voiceKey": "chapter1:credentials:14",
+      "sourceIndex": 178
+    },
+    {
+      "speaker": "sarah",
+      "text": "Jack.",
+      "voiceKey": "chapter1:credentials:15",
+      "sourceIndex": 179
+    },
+    {
+      "speaker": "narrator",
+      "text": "Jack met her eyes.",
+      "voiceKey": "chapter1:credentials:16",
+      "sourceIndex": 180
+    },
+    {
+      "speaker": "jack",
+      "text": "I didn't.",
+      "voiceKey": "chapter1:credentials:17",
+      "sourceIndex": 181
+    }
+  ]
+}

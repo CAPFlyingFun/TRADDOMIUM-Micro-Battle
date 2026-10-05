@@ -1,0 +1,13 @@
+import {readFileSync,writeFileSync,readdirSync,copyFileSync} from 'node:fs';
+import {pwaRevision} from './pwa-revision.mjs';
+import {resolve} from 'node:path';
+const dist=resolve('dist'),root=resolve('..');
+for(const file of ['icon-192.png','icon-512.webp','icon-maskable-512.webp'])copyFileSync(resolve(root,'public',file),resolve(dist,file));
+const manifest={id:'./',name:'TRADDOMIUM: Micro Battle!',short_name:'TRADDOMIUM',description:'A playable cinematic Chapter One, with the original island and advanced systems in Extras.',start_url:'./',scope:'./',display:'standalone',orientation:'any',background_color:'#071217',theme_color:'#071217',icons:[{src:'./icon-192.png',sizes:'192x192',type:'image/png',purpose:'any'},{src:'./icon-512.webp',sizes:'512x512',type:'image/webp',purpose:'any'},{src:'./icon-maskable-512.webp',sizes:'512x512',type:'image/webp',purpose:'maskable'}]};
+writeFileSync(resolve(dist,'manifest.webmanifest'),JSON.stringify(manifest,null,2)+'\n');
+const files=['./','./index.html','./manifest.webmanifest','./icon-192.png','./icon-512.webp','./icon-maskable-512.webp',...readdirSync(resolve(dist,'assets')).filter(f=>/\.(js|css)$/.test(f)).map(f=>'./assets/'+f)];
+const revision=pwaRevision(dist);
+writeFileSync(resolve(dist,'version.json'),JSON.stringify({version:'hybrid-1',revision})+'\n');
+const sw=readFileSync('scripts/pwa-worker.js','utf8').replace('__SHELL__',JSON.stringify(files)).replace('__REVISION__',JSON.stringify(revision));
+writeFileSync(resolve(dist,'sw.js'),sw);
+console.log(`PWA shell ${revision}: ${files.length} precached files; Chapter One assets cache as fetched.`);

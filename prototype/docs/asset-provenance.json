@@ -1,0 +1,105 @@
+{
+  "archive": {
+    "name": "TMB-Interactive-Story-ChatGPT-source_1791143652703.zip",
+    "sha256": "9ebb42e24aba881d8b2b01633e5a3753fc920328d4b30bcefa84d75cc6d3463e",
+    "sourceCommit": "0f30b02a9ed9d6054e4ac54cde80f8da544cd050"
+  },
+  "repository": "CAPFlyingFun/TMB-Story",
+  "revision": "dfe810e670a42867b014dae4a206df5d80350414",
+  "files": {
+    "/assets/tombs-laboratory.jpg": {
+      "repository": "CAPFlyingFun/TMB-Story",
+      "revision": "dfe810e670a42867b014dae4a206df5d80350414",
+      "source": "assets/backgrounds/lab-main.jpg",
+      "bytes": 602297,
+      "sha256": "ac9e4ec310aa1b0d0d99675b3904cd36f595b10d074460de500190bc0e5c73b0",
+      "gitBlob": "335f674e0779600506009339a5df6fc98cfa270f"
+    },
+    "/assets/jack-reference.png": {
+      "repository": "CAPFlyingFun/TMB-Story",
+      "revision": "dfe810e670a42867b014dae4a206df5d80350414",
+      "source": "assets/portraits/jack-3d.png",
+      "bytes": 40206,
+      "sha256": "845fb802d140430692df4051cef2cbaac658968b5be6ed8218401d21fe3ac88e",
+      "gitBlob": "9acb7dbe11b1a6ef4a4cc6ab51648f3dbd91c91b"
+    },
+    "/assets/sarah-reference.png": {
+      "repository": "CAPFlyingFun/TMB-Story",
+      "revision": "dfe810e670a42867b014dae4a206df5d80350414",
+      "source": "assets/portraits/sarah-3d.png",
+      "bytes": 49169,
+      "sha256": "69d9effc28138762b051f3fe774410380f93efd5b65fb4f81fc9c5b22b9ef093",
+      "gitBlob": "170ebac3a39db235dbcafd727e27408d1d786a91"
+    },
+    "/assets/lab3d/jack.glb": {
+      "repository": "CAPFlyingFun/TRADDOMIUM-Micro-Battle",
+      "source": "Git history: public/models/jack.glb",
+      "bytes": 2984300,
+      "sha256": "0575c64d53501f4cb320722f1a4f7a246cd4ae87254ca7dd00c7146983cf0bdd",
+      "gitBlob": "a4f8f307d147ebc527a086b5cf79c55368a9b34f",
+      "exactPrototypeBlob": true
+    },
+    "/assets/lab3d/sarah.glb": {
+      "repository": "CAPFlyingFun/TRADDOMIUM-Micro-Battle",
+      "source": "Git history: public/models/sarah.glb",
+      "bytes": 2707620,
+      "sha256": "5d352516af19b194791b05ced7ac58f605842760175d50525a53b4804697dee2",
+      "gitBlob": "8aa6ea59aa08af05e3010f1babb642ce9764f305",
+      "exactPrototypeBlob": true
+    },
+    "/assets/intro/island-night.jpg": {
+      "repository": "CAPFlyingFun/TMB-Story",
+      "revision": "dfe810e670a42867b014dae4a206df5d80350414",
+      "source": "assets/backgrounds/island-night.jpg",
+      "bytes": 317864,
+      "sha256": "dc3991421c6854177a0573aac74ee4d4d1d00cf974835a3047c7e7fbdb846678",
+      "gitBlob": "6e734e4f3fe528b655db9d55947136a864dfa9a5"
+    },
+    "/assets/intro/clouds/wisp-1.png": {
+      "repository": "CAPFlyingFun/TMB-Story",
+      "revision": "dfe810e670a42867b014dae4a206df5d80350414",
+      "source": "assets/backgrounds/clouds/wisp-1.png",
+      "bytes": 72643,
+      "sha256": "f5c7e67884993337bec2ff4881e5bf6fb1b523d21c1672550e01bfa106919766",
+      "gitBlob": "af4bec6f17e7fa0fcbca29c8d66468314d656567"
+    },
+    "/assets/intro/clouds/wisp-2.png": {
+      "repository": "CAPFlyingFun/TMB-Story",
+      "revision": "dfe810e670a42867b014dae4a206df5d80350414",
+      "source": "assets/backgrounds/clouds/wisp-2.png",
+      "bytes": 57621,
+      "sha256": "4d851c7d6668c3c69258db83b88e22bbf700c4ac5a647192d7695f32069a6afb",
+      "gitBlob": "4ef8d91529f30864996aec17cd9c057577285a35"
+    },
+    "/assets/intro/clouds/wisp-3.png": {
+      "repository": "CAPFlyingFun/TMB-Story",
+      "revision": "dfe810e670a42867b014dae4a206df5d80350414",
+      "source": "assets/backgrounds/clouds/wisp-3.png",
+      "bytes": 88889,
+      "sha256": "41d777d60bae25119a59ccbc3a9b4c28d9c833afe981830249bd993642196de0",
+      "gitBlob": "a268779136b34924daf575aa63b422931e67f84a"
+    },
+    "/assets/intro/clouds/wisp-4.png": {
+      "repository": "CAPFlyingFun/TMB-Story",
+      "revision": "dfe810e670a42867b014dae4a206df5d80350414",
+      "source": "assets/backgrounds/clouds/wisp-4.png",
+      "bytes": 55077,
+      "sha256": "1405c72d6b60eb01e89502dd3465ce99263a871eed77876c287f66ca44ea9eb0",
+      "gitBlob": "feb527c5234c5e76e1ee0956d59389bb3b7d8246"
+    }
+  },
+  "omittedPrototypeModels": {
+    "public/assets/lab3d/jack.glb": {
+      "path": "public/assets/lab3d/jack.glb",
+      "bytes": 2984300,
+      "gitBlob": "a4f8f307d147ebc527a086b5cf79c55368a9b34f"
+    },
+    "public/assets/lab3d/sarah.glb": {
+      "path": "public/assets/lab3d/sarah.glb",
+      "bytes": 2707620,
+      "gitBlob": "8aa6ea59aa08af05e3010f1babb642ce9764f305"
+    }
+  },
+  "modelPolicy": "Exact omitted prototype GLBs recovered from authorized TRADDOMIUM history by Git blob ID, not current Story models or the separate character-viewer variants. Original bytes preserved; actual rig/pose tests required.",
+  "imagePolicy": "Authorized Story lab background and 3D portraits replace missing title/portrait binaries. Procedural lab layout and materials remain from the ZIP."
+}

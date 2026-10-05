@@ -1,0 +1,1001 @@
+{
+  "revision": "dfe810e670a42867b014dae4a206df5d80350414",
+  "segments": 182,
+  "files": {
+    "audio/clips/narrator/narrator-a6f00f720f9c.mp3": {
+      "src": "/audio/chapter-01/a50094095782-narrator-a6f00f720f9c.mp3",
+      "sha256": "a50094095782423bb699d3ea27430df7d66666bb23ddc9fd625ced8701691d40",
+      "bytes": 47691
+    },
+    "audio/clips/narrator/narrator-646dff306d03.mp3": {
+      "src": "/audio/chapter-01/d8e83242b860-narrator-646dff306d03.mp3",
+      "sha256": "d8e83242b860955e452f4c3462c56e079a97127421eca41fce018548d84df18c",
+      "bytes": 403792
+    },
+    "audio/clips/narrator/narrator-0b2f58c70a4c.mp3": {
+      "src": "/audio/chapter-01/63a2dbd5fb23-narrator-0b2f58c70a4c.mp3",
+      "sha256": "63a2dbd5fb2329bb1c31408f3c65a3b8dc752d57c533d89967d05db589e88c6e",
+      "bytes": 87815
+    },
+    "audio/clips/narrator/narrator-765e3fa279dd.mp3": {
+      "src": "/audio/chapter-01/a0dcaed659a3-narrator-765e3fa279dd.mp3",
+      "sha256": "a0dcaed659a3d33173b0b2155a9ec5a1253960bebff603386194ce83ac135e39",
+      "bytes": 204008
+    },
+    "audio/clips/narrator/narrator-1de8e47c4e66.mp3": {
+      "src": "/audio/chapter-01/31b9509bd964-narrator-1de8e47c4e66.mp3",
+      "sha256": "31b9509bd964deb21756c99c8875e308469fdac7c8c429f491df790df846085e",
+      "bytes": 173497
+    },
+    "audio/clips/system/system-884c6f5a459a.mp3": {
+      "src": "/audio/chapter-01/d7ea1d798f54-system-884c6f5a459a.mp3",
+      "sha256": "d7ea1d798f54e0cd5fa6fff3689beb05290154ae36b8d76ab10d26b2dc6e06d7",
+      "bytes": 35152
+    },
+    "audio/clips/narrator/narrator-32bdc09c24ff.mp3": {
+      "src": "/audio/chapter-01/6edbbd264d02-narrator-32bdc09c24ff.mp3",
+      "sha256": "6edbbd264d029f7f7532d8b2f6f88dd0582d845f21ac11adbc82b5d6aeb8141e",
+      "bytes": 91159
+    },
+    "audio/clips/jack/jack-bennett-2b8704441765.mp3": {
+      "src": "/audio/chapter-01/e9375e564a41-jack-bennett-2b8704441765.mp3",
+      "sha256": "e9375e564a4179adfe247883f5295d438e112a07151dc8f2aa07b49be66e3d40",
+      "bytes": 22613
+    },
+    "audio/clips/narrator/narrator-aba313549aa8.mp3": {
+      "src": "/audio/chapter-01/cf706bc47454-narrator-aba313549aa8.mp3",
+      "sha256": "cf706bc47454d7f93badd766a6a9e175f320fa8be5117d3eed9d206cc3c3935a",
+      "bytes": 67753
+    },
+    "audio/clips/jack/jack-bennett-85dfddc7134b.mp3": {
+      "src": "/audio/chapter-01/e3ce268e898a-jack-bennett-85dfddc7134b.mp3",
+      "sha256": "e3ce268e898a15d11a1b903167b4e57f57daa524fd4b184d5efa8e08db4dc45b",
+      "bytes": 15926
+    },
+    "audio/clips/narrator/narrator-93519474e9ea.mp3": {
+      "src": "/audio/chapter-01/7579a6d8abc3-narrator-93519474e9ea.mp3",
+      "sha256": "7579a6d8abc3a795f4bd077cb5167bfba8aad7900ceeaf806ed645786789ccd8",
+      "bytes": 192723
+    },
+    "audio/clips/jack/jack-bennett-492f4059781a.mp3": {
+      "src": "/audio/chapter-01/5c843f5be70c-jack-bennett-492f4059781a.mp3",
+      "sha256": "5c843f5be70cb42feabb4fa409aaf122fc07093afe8a162854aea00066c2b2c7",
+      "bytes": 21777
+    },
+    "audio/clips/narrator/narrator-1bb0c18f4491.mp3": {
+      "src": "/audio/chapter-01/593284c8e85d-narrator-1bb0c18f4491.mp3",
+      "sha256": "593284c8e85d98ca18bee923e10c515bd5649c83574b593fc521cc0f2d1dddc1",
+      "bytes": 63573
+    },
+    "audio/clips/narrator/narrator-c9d9bba60b27.mp3": {
+      "src": "/audio/chapter-01/7e2952970319-narrator-c9d9bba60b27.mp3",
+      "sha256": "7e2952970319d2373420f5a908ae9db21d9b63897627b77301184cb2a78cbcf4",
+      "bytes": 23449
+    },
+    "audio/clips/jack/jack-bennett-b9c31e4c82cf.mp3": {
+      "src": "/audio/chapter-01/a3697bc3a041-jack-bennett-b9c31e4c82cf.mp3",
+      "sha256": "a3697bc3a041ba2b722ced1cab75a30f4d3214dba00ed124e06130e78fb126a3",
+      "bytes": 18852
+    },
+    "audio/clips/narrator/narrator-5290a9122d0f.mp3": {
+      "src": "/audio/chapter-01/5af8bcad1b74-narrator-5290a9122d0f.mp3",
+      "sha256": "5af8bcad1b74a40e5543ebfc2e64107f43ec8dda338d9f433517c208acbf2706",
+      "bytes": 137970
+    },
+    "audio/clips/system/system-610b0d021f1b.mp3": {
+      "src": "/audio/chapter-01/b682bc33db67-system-610b0d021f1b.mp3",
+      "sha256": "b682bc33db672327bbc651da459482554961ec797cb1500572feb5337661bee7",
+      "bytes": 26375
+    },
+    "audio/clips/jack/jack-bennett-549daf1f1de8.mp3": {
+      "src": "/audio/chapter-01/e7445a1e7264-jack-bennett-549daf1f1de8.mp3",
+      "sha256": "e7445a1e7264249fc2ac94496a47be96dddbbdb68d67cae595cfd93d077fd737",
+      "bytes": 26375
+    },
+    "audio/clips/narrator/narrator-36d912fb5b4f.mp3": {
+      "src": "/audio/chapter-01/312462dfa927-narrator-36d912fb5b4f.mp3",
+      "sha256": "312462dfa92771e78d6d79beb35518aa6e56df106c4d4957ce1c10c36fa6d7c1",
+      "bytes": 145911
+    },
+    "audio/clips/jack/jack-bennett-27b114bdd284.mp3": {
+      "src": "/audio/chapter-01/d1cdb6619ae2-jack-bennett-27b114bdd284.mp3",
+      "sha256": "d1cdb6619ae210963dbd4c4ca0582536d8e87821f06240d2598f0bec583d80f0",
+      "bytes": 18016
+    },
+    "audio/clips/narrator/narrator-1008b9e9b430.mp3": {
+      "src": "/audio/chapter-01/5d0e905aa145-narrator-1008b9e9b430.mp3",
+      "sha256": "5d0e905aa1457f85272a2078d2db2c2c0ab2389e070451a89cdea611a9d84849",
+      "bytes": 107877
+    },
+    "audio/clips/system/system-a6ce88995aab.mp3": {
+      "src": "/audio/chapter-01/5d315c6e7004-system-a6ce88995aab.mp3",
+      "sha256": "5d315c6e70045ad898ea7ef91624677418a4a323d7f15eee3d1ccf27b2a86403",
+      "bytes": 17598
+    },
+    "audio/clips/jack/jack-bennett-ecf78584ec95.mp3": {
+      "src": "/audio/chapter-01/cb35c2e1174f-jack-bennett-ecf78584ec95.mp3",
+      "sha256": "cb35c2e1174f29c2e03ab0a6d9d00302d957dfa922decc852c0643e680ca8e71",
+      "bytes": 15926
+    },
+    "audio/clips/narrator/narrator-c2bcc3f581cf.mp3": {
+      "src": "/audio/chapter-01/bfbe77a90f5e-narrator-c2bcc3f581cf.mp3",
+      "sha256": "bfbe77a90f5e2800f02e74a7fd99851d5cff7a95b1fd08c6eb35ae1401e21219",
+      "bytes": 117072
+    },
+    "audio/clips/narrator/narrator-858ca109e086.mp3": {
+      "src": "/audio/chapter-01/97539ba90d39-narrator-858ca109e086.mp3",
+      "sha256": "97539ba90d3942aa0e67e26b1c5236bc897c8e9ca42b3180e0b93530eaa784ca",
+      "bytes": 24703
+    },
+    "audio/clips/jack/jack-bennett-2ffc77da7b3f.mp3": {
+      "src": "/audio/chapter-01/847cb174adf7-jack-bennett-2ffc77da7b3f.mp3",
+      "sha256": "847cb174adf78e4d74e7c034c9ca25f7a6071095b98e354ad7770716eb4685ae",
+      "bytes": 18016
+    },
+    "audio/clips/narrator/narrator-b68629175254.mp3": {
+      "src": "/audio/chapter-01/9e85c1c19302-narrator-b68629175254.mp3",
+      "sha256": "9e85c1c193025103ea814d81b0fdf7c88840dc43905bb7c9c9736d9be29caccb",
+      "bytes": 27629
+    },
+    "audio/clips/jack/jack-bennett-a8a6aa7ae3b3.mp3": {
+      "src": "/audio/chapter-01/64d71bbfa154-jack-bennett-a8a6aa7ae3b3.mp3",
+      "sha256": "64d71bbfa154a70cf44cbc9164e72baa6aa7e851a17f8a27d14c163dab7828da",
+      "bytes": 12164
+    },
+    "audio/clips/narrator/narrator-d3ceae9f0f0b.mp3": {
+      "src": "/audio/chapter-01/467b663db471-narrator-d3ceae9f0f0b.mp3",
+      "sha256": "467b663db4717beafdff80993e59769b691ae3fefaf196658b4919047e5dbaa0",
+      "bytes": 26375
+    },
+    "audio/clips/narrator/narrator-ed5637682370.mp3": {
+      "src": "/audio/chapter-01/877a821fb535-narrator-ed5637682370.mp3",
+      "sha256": "877a821fb535c69e2f60a2e2c0d292be59811f823ea352f30e0cffea63ced7cc",
+      "bytes": 31391
+    },
+    "audio/clips/jack/jack-bennett-45ac1e9fe1de.mp3": {
+      "src": "/audio/chapter-01/b4b7bca0c123-jack-bennett-45ac1e9fe1de.mp3",
+      "sha256": "b4b7bca0c123e810fa7c1cae7961794126dbc60b30e98a3ad1d99f4d2fe58537",
+      "bytes": 20524
+    },
+    "audio/clips/narrator/narrator-1aa99b827f8f.mp3": {
+      "src": "/audio/chapter-01/88c56f1c5e91-narrator-1aa99b827f8f.mp3",
+      "sha256": "88c56f1c5e91704ed1c1335d2a5c00b91ef249028c781ee6e9180f7417d0180b",
+      "bytes": 34316
+    },
+    "audio/clips/sarah/sarah-bennett-284f0b08b165.mp3": {
+      "src": "/audio/chapter-01/db073c5e6400-sarah-bennett-284f0b08b165.mp3",
+      "sha256": "db073c5e6400d40aeb45eac2c92790a3b519d90b409225f8d202e319cb2a86db",
+      "bytes": 18016
+    },
+    "audio/clips/jack/jack-bennett-3141593a1c9d.mp3": {
+      "src": "/audio/chapter-01/63ea4d1ce8f0-jack-bennett-3141593a1c9d.mp3",
+      "sha256": "63ea4d1ce8f0905d29086243604c7459b1d0a216a4c77704dbe0fb9f5d2da518",
+      "bytes": 54378
+    },
+    "audio/clips/narrator/narrator-32af39ff1f88.mp3": {
+      "src": "/audio/chapter-01/c9b7353589ff-narrator-32af39ff1f88.mp3",
+      "sha256": "c9b7353589ffa73f012320e1b3584726de65f5aa8ac2141687221982e9486a0a",
+      "bytes": 38078
+    },
+    "audio/clips/sarah/sarah-bennett-c0ca574b594a.mp3": {
+      "src": "/audio/chapter-01/fed184b9006e-sarah-bennett-c0ca574b594a.mp3",
+      "sha256": "fed184b9006e0816a9f737de592ee4e4856b5f98d9f77e10ab4d5863d07bf143",
+      "bytes": 15090
+    },
+    "audio/clips/narrator/narrator-1c904f05b2e0.mp3": {
+      "src": "/audio/chapter-01/46cae4968960-narrator-1c904f05b2e0.mp3",
+      "sha256": "46cae49689606994491692f644671ed5ff9ad74ec65c210ea1f7cc54521f61aa",
+      "bytes": 38078
+    },
+    "audio/clips/jack/jack-bennett-a376700976d7.mp3": {
+      "src": "/audio/chapter-01/c96fc9b43f51-jack-bennett-a376700976d7.mp3",
+      "sha256": "c96fc9b43f51488dbeb41ed8d9b0a6a32de7bc45c9483bfd86b4e5d838bb12eb",
+      "bytes": 27629
+    },
+    "audio/clips/narrator/narrator-051b376028db.mp3": {
+      "src": "/audio/chapter-01/91ea32f1b160-narrator-051b376028db.mp3",
+      "sha256": "91ea32f1b16075b184f2c2d9adbc1682c4306d8deba8d260cb98d5ad024677a4",
+      "bytes": 43511
+    },
+    "audio/clips/sarah/sarah-bennett-81ff0dc894cf.mp3": {
+      "src": "/audio/chapter-01/abbbadae5b02-sarah-bennett-81ff0dc894cf.mp3",
+      "sha256": "abbbadae5b02b2a543513dfd1bf554ef86cc34d3f00ce84ec28a4a74b292f3b1",
+      "bytes": 13000
+    },
+    "audio/clips/narrator/narrator-f0cf0393d705.mp3": {
+      "src": "/audio/chapter-01/4faae206a689-narrator-f0cf0393d705.mp3",
+      "sha256": "4faae206a689bd7246d2949f4d71e9c0121607764c71ca79837b462ab701d06d",
+      "bytes": 39750
+    },
+    "audio/clips/jack/jack-bennett-3d94cfec7c01.mp3": {
+      "src": "/audio/chapter-01/7bdcaadaecc7-jack-bennett-3d94cfec7c01.mp3",
+      "sha256": "7bdcaadaecc780c50a8be836ad82ea7c836481d5bdcf6e491b71d88f99541ccf",
+      "bytes": 41004
+    },
+    "audio/clips/narrator/narrator-b3dcdf13d972.mp3": {
+      "src": "/audio/chapter-01/d8c6da0d320f-narrator-b3dcdf13d972.mp3",
+      "sha256": "d8c6da0d320ffdd1b94f7b31b20ea883309249108dd27c432b2654630c53ddd2",
+      "bytes": 40586
+    },
+    "audio/clips/sarah/sarah-bennett-5a071d01be77.mp3": {
+      "src": "/audio/chapter-01/25ef2c42ac1e-sarah-bennett-5a071d01be77.mp3",
+      "sha256": "25ef2c42ac1ed8d13e9408b5ecb81e7ea914384dbb938cbb30bc8167cf58d445",
+      "bytes": 14254
+    },
+    "audio/clips/narrator/narrator-840d9089ed45.mp3": {
+      "src": "/audio/chapter-01/3278e217af53-narrator-840d9089ed45.mp3",
+      "sha256": "3278e217af53c9aa8f863b97915cb05b9767cf2bd28da65c3f47081878b19441",
+      "bytes": 32226
+    },
+    "audio/clips/jack/jack-bennett-632f5041e805.mp3": {
+      "src": "/audio/chapter-01/5fe38aacc15b-jack-bennett-632f5041e805.mp3",
+      "sha256": "5fe38aacc15b011dbc74289edb4f853c4033ebdbd181044682a2e6952f19d21e",
+      "bytes": 17598
+    },
+    "audio/clips/sarah/sarah-bennett-2a350447dd17.mp3": {
+      "src": "/audio/chapter-01/e7bc1b902cf3-sarah-bennett-2a350447dd17.mp3",
+      "sha256": "e7bc1b902cf3f00fa28136a814a293a5d114aaf72d3b135061e5729239708528",
+      "bytes": 18016
+    },
+    "audio/clips/narrator/narrator-71c02a29e9a7.mp3": {
+      "src": "/audio/chapter-01/82f8691ebc13-narrator-71c02a29e9a7.mp3",
+      "sha256": "82f8691ebc139fb7e33b714c405695666fd95e1f8b271ebbac2b058348dac9d6",
+      "bytes": 22613
+    },
+    "audio/clips/narrator/narrator-91b25dbe2d24.mp3": {
+      "src": "/audio/chapter-01/e318bdd1af9d-narrator-91b25dbe2d24.mp3",
+      "sha256": "e318bdd1af9d366affb877bcff335405ce8bc25896f078e18edf17db32406bbe",
+      "bytes": 92413
+    },
+    "audio/clips/jack/jack-bennett-31ac40401ca8.mp3": {
+      "src": "/audio/chapter-01/cb67a4cd21f3-jack-bennett-31ac40401ca8.mp3",
+      "sha256": "cb67a4cd21f38b023c005cee8ece5f772184882cc40bca3c58e9e96b7279958c",
+      "bytes": 15926
+    },
+    "audio/clips/narrator/narrator-34f450c1a659.mp3": {
+      "src": "/audio/chapter-01/055b0dc4b275-narrator-34f450c1a659.mp3",
+      "sha256": "055b0dc4b275c795d1412b00d4792b02817d9b4370cc819caea8af30afd065a8",
+      "bytes": 45601
+    },
+    "audio/clips/narrator/narrator-8584cb5fea7b.mp3": {
+      "src": "/audio/chapter-01/c8436555f532-narrator-8584cb5fea7b.mp3",
+      "sha256": "c8436555f532126b916c88a4b5f24118eafc5b748262bea156faf8371061808a",
+      "bytes": 35988
+    },
+    "audio/clips/system/system-49a4bf38c005.mp3": {
+      "src": "/audio/chapter-01/78604150ca2d-system-49a4bf38c005.mp3",
+      "sha256": "78604150ca2d385996ad15f2276319706be559d071bac2dd1159ea23f99d11a4",
+      "bytes": 19688
+    },
+    "audio/clips/jack/jack-bennett-9b850bb838a8.mp3": {
+      "src": "/audio/chapter-01/508e30f07f96-jack-bennett-9b850bb838a8.mp3",
+      "sha256": "508e30f07f963ba8911b57d6ea0c0153655e43d93cdbfe4b5164564541958d81",
+      "bytes": 13000
+    },
+    "audio/clips/narrator/narrator-e2bfa452045f.mp3": {
+      "src": "/audio/chapter-01/c05742d2e541-narrator-e2bfa452045f.mp3",
+      "sha256": "c05742d2e5410eb8e665e2867e0ab3cd223fe3b499ce57db31f6b999705091fb",
+      "bytes": 69425
+    },
+    "audio/clips/narrator/narrator-843953ba3301.mp3": {
+      "src": "/audio/chapter-01/7dd39e8383e5-narrator-843953ba3301.mp3",
+      "sha256": "7dd39e8383e52f2685af03b6959aa6d0e1259b51ff474f97cd1e16b04c76556e",
+      "bytes": 142986
+    },
+    "audio/clips/sarah/sarah-bennett-41421ed41839.mp3": {
+      "src": "/audio/chapter-01/0c1842493aa8-sarah-bennett-41421ed41839.mp3",
+      "sha256": "0c1842493aa8482f1be6771712c50681d0153b87f8d37d21f91e0d1306616e82",
+      "bytes": 30137
+    },
+    "audio/clips/jack/jack-bennett-6aa0f73ed972.mp3": {
+      "src": "/audio/chapter-01/2542db120aeb-jack-bennett-6aa0f73ed972.mp3",
+      "sha256": "2542db120aebfeec3cd8f43d3410a5836132897a7e7227a73c74eb2e652345f8",
+      "bytes": 20942
+    },
+    "audio/clips/narrator/narrator-4f160e832b0d.mp3": {
+      "src": "/audio/chapter-01/cecaaa2e9ac3-narrator-4f160e832b0d.mp3",
+      "sha256": "cecaaa2e9ac3799ec2fcab9d4f467ec358aaa375ffb23b12c4f35b1ee1bab8c1",
+      "bytes": 21777
+    },
+    "audio/clips/narrator/narrator-34c58d279a37.mp3": {
+      "src": "/audio/chapter-01/d3786a097acb-narrator-34c58d279a37.mp3",
+      "sha256": "d3786a097acb48aa8e073cac9be1489a3a185c9c91b326a32d91062b96085246",
+      "bytes": 38914
+    },
+    "audio/clips/sarah/sarah-bennett-e240820580d9.mp3": {
+      "src": "/audio/chapter-01/33e58117fd9c-sarah-bennett-e240820580d9.mp3",
+      "sha256": "33e58117fd9cb4dafe4b4e5036675093f8dd6c33a082b5072dc8eae32d4b3ef7",
+      "bytes": 31391
+    },
+    "audio/clips/narrator/narrator-5224d2902b7a.mp3": {
+      "src": "/audio/chapter-01/f8e07da92b90-narrator-5224d2902b7a.mp3",
+      "sha256": "f8e07da92b906fa9226d980a1f3e65b390823238d106dac5383421984c64dc7a",
+      "bytes": 35988
+    },
+    "audio/clips/jack/jack-bennett-1ecaa1e81e25.mp3": {
+      "src": "/audio/chapter-01/891d059bab70-jack-bennett-1ecaa1e81e25.mp3",
+      "sha256": "891d059bab70946490969c4e617e35bce0993d71a9b7217e5f37b3c3abc0cfb3",
+      "bytes": 29301
+    },
+    "audio/clips/narrator/narrator-27054517a6fd.mp3": {
+      "src": "/audio/chapter-01/6572be987c55-narrator-27054517a6fd.mp3",
+      "sha256": "6572be987c5572ffbbe6978eb24abc20ccd3093672142af5e04fdb7bab8f29dc",
+      "bytes": 29301
+    },
+    "audio/clips/sarah/sarah-bennett-da6d3f2466a2.mp3": {
+      "src": "/audio/chapter-01/61ae2ff01d53-sarah-bennett-da6d3f2466a2.mp3",
+      "sha256": "61ae2ff01d531b36e1481ff9a2447ec0bcdf8802eea616236e8631fdad1b145c",
+      "bytes": 13836
+    },
+    "audio/clips/narrator/narrator-1c03de6091bf.mp3": {
+      "src": "/audio/chapter-01/c9296739009d-narrator-1c03de6091bf.mp3",
+      "sha256": "c9296739009dfce69a1fef8e7fac63ed5c85e49246c262cc8251da070ffc5302",
+      "bytes": 32226
+    },
+    "audio/clips/jack/jack-bennett-5658c97ddd78.mp3": {
+      "src": "/audio/chapter-01/c3b8c6c7a7cd-jack-bennett-5658c97ddd78.mp3",
+      "sha256": "c3b8c6c7a7cd236fad6c93d44515bbfdce5e7d397f386d936ff00e13c06297fe",
+      "bytes": 54378
+    },
+    "audio/clips/sarah/sarah-bennett-ecb1ce66f7bc.mp3": {
+      "src": "/audio/chapter-01/ea391106ac61-sarah-bennett-ecb1ce66f7bc.mp3",
+      "sha256": "ea391106ac61ffde46951c8bf10dbbc0ccea8b90503a54b30fe5f609bd3ed4c6",
+      "bytes": 21777
+    },
+    "audio/clips/narrator/narrator-0407ebd1b851.mp3": {
+      "src": "/audio/chapter-01/07e8589fdd65-narrator-0407ebd1b851.mp3",
+      "sha256": "07e8589fdd65b3ad3d5387a920561db6a04c562e0138154eeab76a14a1d07daa",
+      "bytes": 24703
+    },
+    "audio/clips/narrator/narrator-6bad52582d7d.mp3": {
+      "src": "/audio/chapter-01/0293a62097f3-narrator-6bad52582d7d.mp3",
+      "sha256": "0293a62097f3556f3416d940b6628a33b0b996782cd7622cc2a67d6498bde096",
+      "bytes": 29301
+    },
+    "audio/clips/jack/jack-bennett-fa0505b74e44.mp3": {
+      "src": "/audio/chapter-01/e08b2d1c29bc-jack-bennett-fa0505b74e44.mp3",
+      "sha256": "e08b2d1c29bc7f14bccde1e00550e7f0f2b1c1723bc6323bd49ae87eca5cb5d7",
+      "bytes": 30137
+    },
+    "audio/clips/narrator/narrator-fb38695cee9c.mp3": {
+      "src": "/audio/chapter-01/af553c97cd6c-narrator-fb38695cee9c.mp3",
+      "sha256": "af553c97cd6ce2dd1358ab1a95bddf0f8fdbc5f1eb9bbf17925ee3b907075b4e",
+      "bytes": 26375
+    },
+    "audio/clips/sarah/sarah-bennett-d26997d1aa80.mp3": {
+      "src": "/audio/chapter-01/ef6be7a98833-sarah-bennett-d26997d1aa80.mp3",
+      "sha256": "ef6be7a98833cd9706b22be4914c37be76b3fd6455d93e7038f29b292aeb234f",
+      "bytes": 18852
+    },
+    "audio/clips/narrator/narrator-97cf7a61f4d6.mp3": {
+      "src": "/audio/chapter-01/6c52c6c0a80b-narrator-97cf7a61f4d6.mp3",
+      "sha256": "6c52c6c0a80b553c6cd76f7fab3e01383ec38b2e77cfda1161d5ea0eff3fece7",
+      "bytes": 29301
+    },
+    "audio/clips/jack/jack-bennett-050e0785c171.mp3": {
+      "src": "/audio/chapter-01/4b45eea1a2e5-jack-bennett-050e0785c171.mp3",
+      "sha256": "4b45eea1a2e54e8e980f7628efd35f2bad3ce97e68a650c05e6636c9563b3a54",
+      "bytes": 25539
+    },
+    "audio/clips/narrator/narrator-c1710dc66304.mp3": {
+      "src": "/audio/chapter-01/8efdfbea0b2c-narrator-c1710dc66304.mp3",
+      "sha256": "8efdfbea0b2ca4dd868b5499c6bd979baae00ad1565f2ada429c8856ee319687",
+      "bytes": 46437
+    },
+    "audio/clips/sarah/sarah-bennett-ea3f24b4acf1.mp3": {
+      "src": "/audio/chapter-01/071705044098-sarah-bennett-ea3f24b4acf1.mp3",
+      "sha256": "0717050440989b9904a23de9045e2b6f2d0c2d7e8bb6bacccee2da1d8cd3f0cb",
+      "bytes": 9239
+    },
+    "audio/clips/narrator/narrator-d8e8df53dcc2.mp3": {
+      "src": "/audio/chapter-01/bed1fdc1b92a-narrator-d8e8df53dcc2.mp3",
+      "sha256": "bed1fdc1b92af134cdfaab9870988ae4d9541774c57e03f7d5d2474fdd9d4f9e",
+      "bytes": 71097
+    },
+    "audio/clips/jack/jack-bennett-5520e22c887a.mp3": {
+      "src": "/audio/chapter-01/3a82a6158d3c-jack-bennett-5520e22c887a.mp3",
+      "sha256": "3a82a6158d3c71b08baf69a294e63d837dde3b155ca510b756dec0ec0887fa0d",
+      "bytes": 152599
+    },
+    "audio/clips/narrator/narrator-35fd1eeab7f0.mp3": {
+      "src": "/audio/chapter-01/f7d2f4df5dfd-narrator-35fd1eeab7f0.mp3",
+      "sha256": "f7d2f4df5dfdaa0f28210ad20608b298d543ba5b7df2261f4fd52e12b43e62b0",
+      "bytes": 35152
+    },
+    "audio/clips/sarah/sarah-bennett-d446f7575941.mp3": {
+      "src": "/audio/chapter-01/5424e8c1bb8a-sarah-bennett-d446f7575941.mp3",
+      "sha256": "5424e8c1bb8a91d7d95981aacfe9018724a3cca7bcf0cc94b3b8551d846fefd3",
+      "bytes": 14254
+    },
+    "audio/clips/narrator/narrator-7782d6316db5.mp3": {
+      "src": "/audio/chapter-01/02499fd9d42a-narrator-7782d6316db5.mp3",
+      "sha256": "02499fd9d42a96aa4035ca17874026a945c091c8d580161f143a5d051c3d1f12",
+      "bytes": 38078
+    },
+    "audio/clips/jack/jack-bennett-4b4b13be3859.mp3": {
+      "src": "/audio/chapter-01/a852a7c5319d-jack-bennett-4b4b13be3859.mp3",
+      "sha256": "a852a7c5319d5e6662730e1454ea9389c6cfc10fe83633b60c31938e5fa09039",
+      "bytes": 27211
+    },
+    "audio/clips/narrator/narrator-8d592672a2db.mp3": {
+      "src": "/audio/chapter-01/5d787f965933-narrator-8d592672a2db.mp3",
+      "sha256": "5d787f965933fce21d3205e0a04edd34415353b9abac6e26c1d525a75244e487",
+      "bytes": 30973
+    },
+    "audio/clips/sarah/sarah-bennett-65056aba0745.mp3": {
+      "src": "/audio/chapter-01/bd02b4a857f7-sarah-bennett-65056aba0745.mp3",
+      "sha256": "bd02b4a857f7acc35ddfc191de7cd502bdf7441af126c4bff21619ac000f7d55",
+      "bytes": 13836
+    },
+    "audio/clips/jack/jack-bennett-d97b90a6d54e.mp3": {
+      "src": "/audio/chapter-01/d0ff5b7c43de-jack-bennett-d97b90a6d54e.mp3",
+      "sha256": "d0ff5b7c43de2c4e5f3931656a6e3884173ba8402deec1f80a1fb7c1c1aee98b",
+      "bytes": 8403
+    },
+    "audio/clips/narrator/narrator-1812ac877876.mp3": {
+      "src": "/audio/chapter-01/36f5062588b7-narrator-1812ac877876.mp3",
+      "sha256": "36f5062588b75fa589bbad2d61206d2c2914a28ef1491fe360718e262a26b1b2",
+      "bytes": 41839
+    },
+    "audio/clips/sarah/sarah-bennett-a1dc5fafa6a9.mp3": {
+      "src": "/audio/chapter-01/5f43d5fe032f-sarah-bennett-a1dc5fafa6a9.mp3",
+      "sha256": "5f43d5fe032f9325bb7ca59b8ba7682a9bab6d421a5161dcf206bc7c417f22e8",
+      "bytes": 18016
+    },
+    "audio/clips/narrator/narrator-0d3174211b67.mp3": {
+      "src": "/audio/chapter-01/49472d07ff2a-narrator-0d3174211b67.mp3",
+      "sha256": "49472d07ff2a3d424ec7af38e0591636a67712053ea393b4e6172dd70dc2166d",
+      "bytes": 21777
+    },
+    "audio/clips/narrator/narrator-2fdc212a47bb.mp3": {
+      "src": "/audio/chapter-01/adb33941b9d0-narrator-2fdc212a47bb.mp3",
+      "sha256": "adb33941b9d00d751bea11ab84b17a0912a5b20d533cd915e97c6fe450872802",
+      "bytes": 20524
+    },
+    "audio/clips/sarah/sarah-bennett-1ebe0c684d41.mp3": {
+      "src": "/audio/chapter-01/2a27a4d349d8-sarah-bennett-1ebe0c684d41.mp3",
+      "sha256": "2a27a4d349d895130664771ef8a3921f401d206f0b57a93e64431588ad1b123b",
+      "bytes": 10911
+    },
+    "audio/clips/narrator/narrator-7c57da6619ef.mp3": {
+      "src": "/audio/chapter-01/e311531df53e-narrator-7c57da6619ef.mp3",
+      "sha256": "e311531df53ece9fb3ad8fbb51fd57d49aa2f63a17fc60508948248103b2fb98",
+      "bytes": 26375
+    },
+    "audio/clips/jack/jack-bennett-92ce22fee124.mp3": {
+      "src": "/audio/chapter-01/83a49afed8ef-jack-bennett-92ce22fee124.mp3",
+      "sha256": "83a49afed8efdf4802767fb0a69806e7e5ffc23563e989f9298c08d8e70e2655",
+      "bytes": 20942
+    },
+    "audio/clips/narrator/narrator-d8826abbed8a.mp3": {
+      "src": "/audio/chapter-01/26cab6ec6cd2-narrator-d8826abbed8a.mp3",
+      "sha256": "26cab6ec6cd2cc9e5cc7268904028fa9ef63bf44cf9ee3cadb687172926b14ea",
+      "bytes": 93248
+    },
+    "audio/clips/jack/jack-bennett-9cc3304964a3.mp3": {
+      "src": "/audio/chapter-01/4adbb23f47b3-jack-bennett-9cc3304964a3.mp3",
+      "sha256": "4adbb23f47b326d1b9f6affb084fd613891648252ba1c941a8e578322dcb23e9",
+      "bytes": 11328
+    },
+    "audio/clips/narrator/narrator-1975e7572552.mp3": {
+      "src": "/audio/chapter-01/271cfe6a4a33-narrator-1975e7572552.mp3",
+      "sha256": "271cfe6a4a339978743f3d29298f228541a63e055603a36a2b7e25f0ed45fa93",
+      "bytes": 55214
+    },
+    "audio/clips/sarah/sarah-bennett-8c46e3a53152.mp3": {
+      "src": "/audio/chapter-01/48aa0f804a9d-sarah-bennett-8c46e3a53152.mp3",
+      "sha256": "48aa0f804a9d5f558e51727c57bc0a48f8d61cc25a0d6bd0a7db0b0e26859796",
+      "bytes": 18852
+    },
+    "audio/clips/narrator/narrator-37174f507f7e.mp3": {
+      "src": "/audio/chapter-01/e12b7cb6acf5-narrator-37174f507f7e.mp3",
+      "sha256": "e12b7cb6acf5cac105f90716aa4b6782c4d576e9bdd6ea5087d853068b51d29e",
+      "bytes": 38078
+    },
+    "audio/clips/jack/jack-bennett-01f2a89496de.mp3": {
+      "src": "/audio/chapter-01/95e653deeef0-jack-bennett-01f2a89496de.mp3",
+      "sha256": "95e653deeef01a8fca7e6884294935507b8adc532378208690722f635688648a",
+      "bytes": 19688
+    },
+    "audio/clips/narrator/narrator-4411afab67cb.mp3": {
+      "src": "/audio/chapter-01/deb7717f98e0-narrator-4411afab67cb.mp3",
+      "sha256": "deb7717f98e076217fe67411b1c056d9e11e5ee111218cf76c4359e460c44f39",
+      "bytes": 72351
+    },
+    "audio/clips/sarah/sarah-bennett-bf55452b11b2.mp3": {
+      "src": "/audio/chapter-01/c3dd794609aa-sarah-bennett-bf55452b11b2.mp3",
+      "sha256": "c3dd794609aa140a6e0d2cc7408514c7e87a12a5c697baf2ef1178b1b09e23dc",
+      "bytes": 32226
+    },
+    "audio/clips/jack/jack-bennett-a5c6ccccd8ca.mp3": {
+      "src": "/audio/chapter-01/da788d056411-jack-bennett-a5c6ccccd8ca.mp3",
+      "sha256": "da788d0564116694d1756416b1f722c234ce669b13c8904aa93cbdb93a913009",
+      "bytes": 30973
+    },
+    "audio/clips/narrator/narrator-25bf9a648f08.mp3": {
+      "src": "/audio/chapter-01/c386c4ea25a5-narrator-25bf9a648f08.mp3",
+      "sha256": "c386c4ea25a53d42b7aa2850ec628aa4a8f9249481d435c62bc33e67043e62ff",
+      "bytes": 156360
+    },
+    "audio/clips/narrator/narrator-90d95cfdf22a.mp3": {
+      "src": "/audio/chapter-01/aebb7e3bbd6c-narrator-90d95cfdf22a.mp3",
+      "sha256": "aebb7e3bbd6c02230c15ed666901f5d43232e26f1eeff256a526bb3018a15e3b",
+      "bytes": 30137
+    },
+    "audio/clips/sarah/sarah-bennett-ad67f921e02e.mp3": {
+      "src": "/audio/chapter-01/042037ff47ae-sarah-bennett-ad67f921e02e.mp3",
+      "sha256": "042037ff47ae111ba852ae960a2cb368f725889f7ccfbcfbbade804fc00fe96d",
+      "bytes": 27629
+    },
+    "audio/clips/narrator/narrator-bd792dfac828.mp3": {
+      "src": "/audio/chapter-01/f559aac6e031-narrator-bd792dfac828.mp3",
+      "sha256": "f559aac6e031b6337129cb7ab9c8c83a3d3b611321e27b9b69a1ef0ee61fe308",
+      "bytes": 38078
+    },
+    "audio/clips/jack/jack-bennett-f3736d27f9d7.mp3": {
+      "src": "/audio/chapter-01/9bdb0fc8333f-jack-bennett-f3736d27f9d7.mp3",
+      "sha256": "9bdb0fc8333f0d959767d2e5c75335877e847a3cf905ec82f041c6a42da9604d",
+      "bytes": 20524
+    },
+    "audio/clips/narrator/narrator-22289c65a15f.mp3": {
+      "src": "/audio/chapter-01/9ee607aead92-narrator-22289c65a15f.mp3",
+      "sha256": "9ee607aead92d48ee2c177a7f0b212e6ddf310d4da11e61d1180aa235cffc0cd",
+      "bytes": 52288
+    },
+    "audio/clips/sarah/sarah-bennett-563ad9289e68.mp3": {
+      "src": "/audio/chapter-01/e96bfea8ab0b-sarah-bennett-563ad9289e68.mp3",
+      "sha256": "e96bfea8ab0b4aeccaa9d2cb6d1a787b52e2756e8d7e6206ce2aff54c04263ba",
+      "bytes": 12164
+    },
+    "audio/clips/narrator/narrator-19f698a32342.mp3": {
+      "src": "/audio/chapter-01/67e2e6fe68c8-narrator-19f698a32342.mp3",
+      "sha256": "67e2e6fe68c8fb3702b1d6fd0bd2400d0165c92084c701f3c79211bb9f1ef9bf",
+      "bytes": 26375
+    },
+    "audio/clips/jack/jack-bennett-211b122503c9.mp3": {
+      "src": "/audio/chapter-01/eab082e7439e-jack-bennett-211b122503c9.mp3",
+      "sha256": "eab082e7439e84c206181d9dc66f92f0f7ed503c6f3dfa9e8b3a447f248f7a11",
+      "bytes": 16762
+    },
+    "audio/clips/narrator/narrator-9aea695990da.mp3": {
+      "src": "/audio/chapter-01/d9ed9e962f52-narrator-9aea695990da.mp3",
+      "sha256": "d9ed9e962f5280934d18547fdf8111c36d7b3cf545958aa15580fe264966c7f4",
+      "bytes": 36824
+    },
+    "audio/clips/sarah/sarah-bennett-6fe63af821c3.mp3": {
+      "src": "/audio/chapter-01/5e3bd58a4662-sarah-bennett-6fe63af821c3.mp3",
+      "sha256": "5e3bd58a46620924401824d8344cb7fc4fc2e1d3188a080ebbb89e2da0e98d1b",
+      "bytes": 20524
+    },
+    "audio/clips/jack/jack-bennett-2a98eedf112f.mp3": {
+      "src": "/audio/chapter-01/a4119de106eb-jack-bennett-2a98eedf112f.mp3",
+      "sha256": "a4119de106eb40b7f821ddcd666800707b64bfb646a21744ed773b257ebc2d58",
+      "bytes": 13836
+    },
+    "audio/clips/narrator/narrator-86e124a3c0e4.mp3": {
+      "src": "/audio/chapter-01/67217a2cc284-narrator-86e124a3c0e4.mp3",
+      "sha256": "67217a2cc284d511243545c9e808b9ca7fa82c3bafdbd85cf5d7a9f40da5eb5c",
+      "bytes": 79038
+    },
+    "audio/clips/sarah/sarah-bennett-5965a9732934.mp3": {
+      "src": "/audio/chapter-01/17988ecccf37-sarah-bennett-5965a9732934.mp3",
+      "sha256": "17988ecccf37b52ab8c7b08298c26c2fe3b06d0c7c124cc2dea7f82cdeffd688",
+      "bytes": 19688
+    },
+    "audio/clips/narrator/narrator-89a435f8f818.mp3": {
+      "src": "/audio/chapter-01/7749c9872673-narrator-89a435f8f818.mp3",
+      "sha256": "7749c987267300c3391cb53b4e8fc68ffbb9663baf7d42cb5ade59e61b25feb3",
+      "bytes": 58140
+    },
+    "audio/clips/narrator/narrator-590eeb9e8f49.mp3": {
+      "src": "/audio/chapter-01/d086134b8c7b-narrator-590eeb9e8f49.mp3",
+      "sha256": "d086134b8c7b46dfe1b2bd136b552e4db0d80a62356034785d5abb1c11b71e89",
+      "bytes": 34316
+    },
+    "audio/clips/jack/jack-bennett-57a1f5dfe461.mp3": {
+      "src": "/audio/chapter-01/19ac12f39eab-jack-bennett-57a1f5dfe461.mp3",
+      "sha256": "19ac12f39eab8c9d7d17bcfe4f937cd4423bb701090ededae85689d5b100ff54",
+      "bytes": 38078
+    },
+    "audio/clips/narrator/narrator-446ac6fd8722.mp3": {
+      "src": "/audio/chapter-01/10b2b09ce5e6-narrator-446ac6fd8722.mp3",
+      "sha256": "10b2b09ce5e6bb3657826c7a361ecfa58c7f51765e41747d4e82244f2db58094",
+      "bytes": 41004
+    },
+    "audio/clips/sarah/sarah-bennett-7cb92747650b.mp3": {
+      "src": "/audio/chapter-01/fe935fc8700a-sarah-bennett-7cb92747650b.mp3",
+      "sha256": "fe935fc8700a9814ff341933708ac59a49a54c02a14cb3eccc01ecd6bc181659",
+      "bytes": 15090
+    },
+    "audio/clips/jack/jack-bennett-6de493fd3169.mp3": {
+      "src": "/audio/chapter-01/b3f3180aabbd-jack-bennett-6de493fd3169.mp3",
+      "sha256": "b3f3180aabbdbd9b71c6f50646b02025975831a11c75ae7bc45fb3ef8124194e",
+      "bytes": 22613
+    },
+    "audio/clips/narrator/narrator-a08e54e449b2.mp3": {
+      "src": "/audio/chapter-01/bf27cb284bb4-narrator-a08e54e449b2.mp3",
+      "sha256": "bf27cb284bb42961a5697c1b52fc28b473c268f748a8de0db0fe12ca14942bf7",
+      "bytes": 34316
+    },
+    "audio/clips/sarah/sarah-bennett-deff6b10a48b.mp3": {
+      "src": "/audio/chapter-01/bf287e03ed5d-sarah-bennett-deff6b10a48b.mp3",
+      "sha256": "bf287e03ed5d46277f83090f029b4a7d988d8764d40973761db3574fc3f17488",
+      "bytes": 20524
+    },
+    "audio/clips/jack/jack-bennett-29c879a5b799.mp3": {
+      "src": "/audio/chapter-01/8318b380ec64-jack-bennett-29c879a5b799.mp3",
+      "sha256": "8318b380ec648993303768cf2af1c077b53bdbc005974138ebb511a21781fb10",
+      "bytes": 23449
+    },
+    "audio/clips/narrator/narrator-cab4ca6ef144.mp3": {
+      "src": "/audio/chapter-01/bfd4fd39a12c-narrator-cab4ca6ef144.mp3",
+      "sha256": "bfd4fd39a12c8520adce2183224a0b9af4895058c506e7dc17bef8e359fc6f7f",
+      "bytes": 107877
+    },
+    "audio/clips/jack/jack-bennett-e61a5b7e36cd.mp3": {
+      "src": "/audio/chapter-01/53807bf1cea8-jack-bennett-e61a5b7e36cd.mp3",
+      "sha256": "53807bf1cea8a5bd664b32459e5da6eda6dc7f82dd309ea2838a5d28875299b2",
+      "bytes": 34316
+    },
+    "audio/clips/narrator/narrator-a1ae4cf23cd8.mp3": {
+      "src": "/audio/chapter-01/3e21368d35cc-narrator-a1ae4cf23cd8.mp3",
+      "sha256": "3e21368d35cce6e34d51367652a218882fdc87c4e3533d624d87ad764d560868",
+      "bytes": 25539
+    },
+    "audio/clips/sarah/sarah-bennett-e9ec137bc087.mp3": {
+      "src": "/audio/chapter-01/f8462f93c781-sarah-bennett-e9ec137bc087.mp3",
+      "sha256": "f8462f93c781c9f8a1ae76ade7e58c3f561150aef6087ab5703b310df8186d42",
+      "bytes": 13836
+    },
+    "audio/clips/narrator/narrator-acd5a4e16a58.mp3": {
+      "src": "/audio/chapter-01/0084828609c4-narrator-acd5a4e16a58.mp3",
+      "sha256": "0084828609c40aca80f88d5aff90d10d9d5361b2550d637d40b21bb8091e295b",
+      "bytes": 31391
+    },
+    "audio/clips/jack/jack-bennett-c1ff018af109.mp3": {
+      "src": "/audio/chapter-01/e44289f1e56f-jack-bennett-c1ff018af109.mp3",
+      "sha256": "e44289f1e56fbab3a41a0a519721c66f35e2de3614282e831f2feb666a6f13cb",
+      "bytes": 23449
+    },
+    "audio/clips/narrator/narrator-6fe67128d919.mp3": {
+      "src": "/audio/chapter-01/51767b867888-narrator-6fe67128d919.mp3",
+      "sha256": "51767b86788851a1d94a9b02a6271fe3b325572e46205e871b0436da77ab31c3",
+      "bytes": 27211
+    },
+    "audio/clips/sarah/sarah-bennett-4db8c4b299cf.mp3": {
+      "src": "/audio/chapter-01/f725db71ff37-sarah-bennett-4db8c4b299cf.mp3",
+      "sha256": "f725db71ff379e6682336612e894d7359b7fff8ecc9963cadbe122871eb0f5fc",
+      "bytes": 47691
+    },
+    "audio/clips/narrator/narrator-9044cb8cfbea.mp3": {
+      "src": "/audio/chapter-01/76b78155824f-narrator-9044cb8cfbea.mp3",
+      "sha256": "76b78155824fa025448c28468a8b652b4585f191412d60b0c648c5e4e58b79e8",
+      "bytes": 25539
+    },
+    "audio/clips/jack/jack-bennett-48aebe4e6970.mp3": {
+      "src": "/audio/chapter-01/bd6e0936f2a9-jack-bennett-48aebe4e6970.mp3",
+      "sha256": "bd6e0936f2a96b4926f16b0b71772c2ee2dd79a4f5bd54381ee1bb67197d9d51",
+      "bytes": 16762
+    },
+    "audio/clips/narrator/narrator-e7569b3cf356.mp3": {
+      "src": "/audio/chapter-01/f41db6014323-narrator-e7569b3cf356.mp3",
+      "sha256": "f41db60143236a0f1cbc57214b2ae8079d8e75f22b240441aac7d1c0dba9e557",
+      "bytes": 44347
+    },
+    "audio/clips/sarah/sarah-bennett-0e24152e8551.mp3": {
+      "src": "/audio/chapter-01/dc7a0f7a42c5-sarah-bennett-0e24152e8551.mp3",
+      "sha256": "dc7a0f7a42c5e8ec232f240bed1984b86459e44eb241ab4e5b3bb6be7bc9f7b7",
+      "bytes": 13836
+    },
+    "audio/clips/narrator/narrator-652f9e97d9a7.mp3": {
+      "src": "/audio/chapter-01/133ba2900f64-narrator-652f9e97d9a7.mp3",
+      "sha256": "133ba2900f649e2315fd59d9d7365589019f1e05f1fc0f6d949e2be6cf6a17e8",
+      "bytes": 27211
+    },
+    "audio/clips/jack/jack-bennett-753cad07ca15.mp3": {
+      "src": "/audio/chapter-01/8c5d01b57181-jack-bennett-753cad07ca15.mp3",
+      "sha256": "8c5d01b57181dcd8e8f385faee84c7ce80ca924a1aa89996a036773a286b0472",
+      "bytes": 21777
+    },
+    "audio/clips/narrator/narrator-e7cbaa2b7eab.mp3": {
+      "src": "/audio/chapter-01/616202c9510b-narrator-e7cbaa2b7eab.mp3",
+      "sha256": "616202c9510bd31e59f570b52d00fe20c94cc2dab6f9d8120c329fcba79ed117",
+      "bytes": 51453
+    },
+    "audio/clips/narrator/narrator-721c3080cc8d.mp3": {
+      "src": "/audio/chapter-01/71f5dc514b4f-narrator-721c3080cc8d.mp3",
+      "sha256": "71f5dc514b4fff18bbb6679024949b5b43ae59b3b3c98c24e4c8b70358e36749",
+      "bytes": 36824
+    },
+    "audio/clips/jack/jack-bennett-941e93bf213e.mp3": {
+      "src": "/audio/chapter-01/7b51e7e88b6c-jack-bennett-941e93bf213e.mp3",
+      "sha256": "7b51e7e88b6cfce30b37324f5c7aa8545db6e7be0b3c18e792736a8ba619e2fb",
+      "bytes": 12164
+    },
+    "audio/clips/sarah/sarah-bennett-dc90fc8720b4.mp3": {
+      "src": "/audio/chapter-01/fc5182363533-sarah-bennett-dc90fc8720b4.mp3",
+      "sha256": "fc51823635337c046fac15da6c3a8ae31eacfd54423b31d13199ed2bea990db5",
+      "bytes": 52288
+    },
+    "audio/clips/narrator/narrator-4ae27aba679f.mp3": {
+      "src": "/audio/chapter-01/9d819e7110d0-narrator-4ae27aba679f.mp3",
+      "sha256": "9d819e7110d0197735431b5239cfc2cabc02ddd08ed23b9ffba8754e8ca9f093",
+      "bytes": 78202
+    },
+    "audio/clips/narrator/narrator-b86243241021.mp3": {
+      "src": "/audio/chapter-01/3a0d4f439830-narrator-b86243241021.mp3",
+      "sha256": "3a0d4f43983038c2f09b25b71f9aea31078b0ab31e7856f096c3eb4f5b0eb68a",
+      "bytes": 44765
+    },
+    "audio/clips/jack/jack-bennett-a8fc65386727.mp3": {
+      "src": "/audio/chapter-01/0aec057e9a28-jack-bennett-a8fc65386727.mp3",
+      "sha256": "0aec057e9a28942080e5e3168334fd528f3ded8241a3d431362ac63ae22c7482",
+      "bytes": 21777
+    },
+    "audio/clips/narrator/narrator-20150e76792b.mp3": {
+      "src": "/audio/chapter-01/0d0856ad0985-narrator-20150e76792b.mp3",
+      "sha256": "0d0856ad0985c4a5bbe80d053248ae06f2b49e93106bd82a50899a799403a428",
+      "bytes": 31391
+    },
+    "audio/clips/sarah/sarah-bennett-b4465ab7292c.mp3": {
+      "src": "/audio/chapter-01/c4661b26cf3b-sarah-bennett-b4465ab7292c.mp3",
+      "sha256": "c4661b26cf3bbf0586e5277004297a19a6dd7ff3b7cfcbb40a6d2d989fabd9d5",
+      "bytes": 21777
+    },
+    "audio/clips/narrator/narrator-2525fa15c09f.mp3": {
+      "src": "/audio/chapter-01/72777db3a904-narrator-2525fa15c09f.mp3",
+      "sha256": "72777db3a9044cf4ce558bb2b6f34c09cc0151fb4add0525463cde53611f617a",
+      "bytes": 98264
+    },
+    "audio/clips/system/system-f6a28699a3b1.mp3": {
+      "src": "/audio/chapter-01/86efb212e749-system-f6a28699a3b1.mp3",
+      "sha256": "86efb212e74965954513d9bcef34b7aef0c9a018c17733c5c8681772aec55d45",
+      "bytes": 37660
+    },
+    "audio/clips/narrator/narrator-a4fba24c9781.mp3": {
+      "src": "/audio/chapter-01/b7c047908493-narrator-a4fba24c9781.mp3",
+      "sha256": "b7c047908493c0bbd3374255ec4ce9d6763aa1cf85ce34d8e60deb2d43d11f4e",
+      "bytes": 24703
+    },
+    "audio/clips/sarah/sarah-bennett-415320486988.mp3": {
+      "src": "/audio/chapter-01/3bbbf3a62819-sarah-bennett-415320486988.mp3",
+      "sha256": "3bbbf3a628198d992832727c1ac055820c3e1c5aa4e05aca25fba02276c09dc3",
+      "bytes": 19688
+    },
+    "audio/clips/narrator/narrator-6c867569f46f.mp3": {
+      "src": "/audio/chapter-01/0872bad21f5b-narrator-6c867569f46f.mp3",
+      "sha256": "0872bad21f5b5b33fa59967258c71d884cf8b1734e2cc27cfac9a81ae8187340",
+      "bytes": 30973
+    },
+    "audio/clips/jack/jack-bennett-a40ffc6ce592.mp3": {
+      "src": "/audio/chapter-01/39a5817986a1-jack-bennett-a40ffc6ce592.mp3",
+      "sha256": "39a5817986a153cce4d1d177d0163835be3082e18e6cedbe3c6460d998c0a5e5",
+      "bytes": 10911
+    },
+    "audio/clips/narrator/narrator-f11884b76889.mp3": {
+      "src": "/audio/chapter-01/ce686fdeacae-narrator-f11884b76889.mp3",
+      "sha256": "ce686fdeacaec2553763c25a85aca13f2c8c23c848c1a783985dd798667f2188",
+      "bytes": 33898
+    },
+    "audio/clips/sarah/sarah-bennett-13bbe7381eb1.mp3": {
+      "src": "/audio/chapter-01/cf00460b74ad-sarah-bennett-13bbe7381eb1.mp3",
+      "sha256": "cf00460b74adc0015e0e6fef70b1a196802b941127c46e4d13e002bb05aaf3fc",
+      "bytes": 13000
+    },
+    "audio/clips/narrator/narrator-6da685659713.mp3": {
+      "src": "/audio/chapter-01/1668f0659066-narrator-6da685659713.mp3",
+      "sha256": "1668f06590660261d69dd32ef928688e294289407087e44765e40b28ddc37593",
+      "bytes": 55214
+    },
+    "audio/clips/system/system-0fe0cf2a5742.mp3": {
+      "src": "/audio/chapter-01/965bb475a96c-system-0fe0cf2a5742.mp3",
+      "sha256": "965bb475a96c2e8d1cfa86e9f3fd519d846defbfba4283dca9c7d6275580fca8",
+      "bytes": 17598
+    },
+    "audio/clips/narrator/narrator-2dd67493e557.mp3": {
+      "src": "/audio/chapter-01/f51fd5493721-narrator-2dd67493e557.mp3",
+      "sha256": "f51fd5493721524824d88672fbfd2c5bbb982f582bdf4bf6281fbed7a47b642e",
+      "bytes": 20524
+    },
+    "audio/clips/narrator/narrator-4229fb08c275.mp3": {
+      "src": "/audio/chapter-01/5bf10fff9367-narrator-4229fb08c275.mp3",
+      "sha256": "5bf10fff9367e4f440f3d335883a709c589fc0d027738dbd6815c6ce4d9a07fc",
+      "bytes": 30137
+    },
+    "audio/clips/jack/jack-bennett-5d311a6c90d7.mp3": {
+      "src": "/audio/chapter-01/a54dc74e360c-jack-bennett-5d311a6c90d7.mp3",
+      "sha256": "a54dc74e360c2b878ca81a5c1efb919e92b9ed35bf2d8b9b6302c595229700f6",
+      "bytes": 25539
+    },
+    "audio/clips/narrator/narrator-cddc94b869d1.mp3": {
+      "src": "/audio/chapter-01/3b8a9c760a3a-narrator-cddc94b869d1.mp3",
+      "sha256": "3b8a9c760a3ae573c4aee96dd15cd301ac752f79b0987c5ac2fe079f97b18e59",
+      "bytes": 85725
+    },
+    "audio/clips/system/system-28a18477a67e.mp3": {
+      "src": "/audio/chapter-01/9dc5a7228908-system-28a18477a67e.mp3",
+      "sha256": "9dc5a72289080b80143b059e402007ac98328de47691b7378c24aa54a3c1be53",
+      "bytes": 18016
+    },
+    "audio/clips/narrator/narrator-b306b6263592.mp3": {
+      "src": "/audio/chapter-01/f70cf65570d8-narrator-b306b6263592.mp3",
+      "sha256": "f70cf65570d86cd756e42cfec09c124e16101fdae6c1b42e826ed19c8fc80d76",
+      "bytes": 35152
+    },
+    "audio/clips/sarah/sarah-bennett-85c20ef1167a.mp3": {
+      "src": "/audio/chapter-01/d520dadac4f0-sarah-bennett-85c20ef1167a.mp3",
+      "sha256": "d520dadac4f065d49d9383f7b5d79b737f833bfadafd30f8c1de4ef82c8689a8",
+      "bytes": 20524
+    },
+    "audio/clips/narrator/narrator-d4abdf24a364.mp3": {
+      "src": "/audio/chapter-01/71a75a6c8737-narrator-d4abdf24a364.mp3",
+      "sha256": "71a75a6c873707a0060708446a24730cc7f8e321b7dec5375c96aff895e817b6",
+      "bytes": 29301
+    },
+    "audio/clips/jack/jack-bennett-308767fde297.mp3": {
+      "src": "/audio/chapter-01/54e05d973d22-jack-bennett-308767fde297.mp3",
+      "sha256": "54e05d973d22b92ea5e9dc6d24ca86e6129a125eede92dcdd52669806c49a800",
+      "bytes": 13836
+    },
+    "audio/clips/narrator/narrator-b5f5252f998d.mp3": {
+      "src": "/audio/chapter-01/db6b80068c5b-narrator-b5f5252f998d.mp3",
+      "sha256": "db6b80068c5bb6d493c32fd8b3dc5758bcd2f6bde081d4d3e0c5e4ab166c3910",
+      "bytes": 27211
+    },
+    "audio/clips/sarah/sarah-bennett-d5bc7656345e.mp3": {
+      "src": "/audio/chapter-01/8c7231b0eadd-sarah-bennett-d5bc7656345e.mp3",
+      "sha256": "8c7231b0eaddd81c24ee75c3fdd7226603b48176f25f76a3cdde4a8f06beccde",
+      "bytes": 27629
+    },
+    "audio/clips/narrator/narrator-7fd987f61325.mp3": {
+      "src": "/audio/chapter-01/b231b03dd830-narrator-7fd987f61325.mp3",
+      "sha256": "b231b03dd83023ee299ee30e2b5addf55c5b4a9078ae9e617319afe37d78ee8b",
+      "bytes": 37660
+    },
+    "audio/clips/narrator/narrator-62bcf9506134.mp3": {
+      "src": "/audio/chapter-01/e02458de3472-narrator-62bcf9506134.mp3",
+      "sha256": "e02458de3472f7bf50057b3805ab5dd7239f0d1ed27a3b68b173f119fd6b1af5",
+      "bytes": 32226
+    },
+    "audio/clips/sarah/sarah-bennett-ed9388bef578.mp3": {
+      "src": "/audio/chapter-01/3de29b7e288a-sarah-bennett-ed9388bef578.mp3",
+      "sha256": "3de29b7e288af6fe8ebe0ab5190e1e8fe6cd50e06e6e330636c8bbf07aa4776e",
+      "bytes": 21777
+    },
+    "audio/clips/narrator/narrator-aa1f758718e0.mp3": {
+      "src": "/audio/chapter-01/4f85949366a4-narrator-aa1f758718e0.mp3",
+      "sha256": "4f85949366a4871d9eb01d25aba5f3ce5b6b6a2b97b307fb25cd9ce1e4ab0b1d",
+      "bytes": 28465
+    },
+    "audio/clips/jack/jack-bennett-77753d8b9f45.mp3": {
+      "src": "/audio/chapter-01/d73b4d5072d5-jack-bennett-77753d8b9f45.mp3",
+      "sha256": "d73b4d5072d5f6c815af97ee5246b46f33ee89d24d9cdddeb293146a67f5de19",
+      "bytes": 10075
+    },
+    "audio/clips/narrator/narrator-e23f8bb8d695.mp3": {
+      "src": "/audio/chapter-01/d6bb6e723f7e-narrator-e23f8bb8d695.mp3",
+      "sha256": "d6bb6e723f7eb03e1861356965f8e0590aa8a407db35361dbd299bb8f84c6a18",
+      "bytes": 34316
+    },
+    "audio/clips/narrator/narrator-fe9506954a9a.mp3": {
+      "src": "/audio/chapter-01/0e0ce0fef9f0-narrator-fe9506954a9a.mp3",
+      "sha256": "0e0ce0fef9f09f26042772716b763b094e985157b9f2ee9b0fe76a915eabfdfc",
+      "bytes": 24703
+    },
+    "audio/clips/jack/jack-bennett-13662115397f.mp3": {
+      "src": "/audio/chapter-01/a68f7e576b3a-jack-bennett-13662115397f.mp3",
+      "sha256": "a68f7e576b3a8d5d9d4daf43c471dbad8a35f668286d11d41f1e131cf13122cd",
+      "bytes": 12164
+    },
+    "audio/sfx/ambience/amb_computer_lab.mp3": {
+      "src": "/audio/chapter-01/f530df865900-amb_computer_lab.mp3",
+      "sha256": "f530df86590018f29b89767b91768b2a8581203de1cc46c5a01840786109913f",
+      "bytes": 901920
+    },
+    "audio/sfx/interface/sfx_console_tone_soft.mp3": {
+      "src": "/audio/chapter-01/c13deb076d30-sfx_console_tone_soft.mp3",
+      "sha256": "c13deb076d30b45f1529135f4d2475c4c695ad4396ac84cdb10ecf72d19d6ce9",
+      "bytes": 24703
+    },
+    "audio/sfx/alarm/amb_console_alarm_bed.mp3": {
+      "src": "/audio/chapter-01/2a50693624ee-amb_console_alarm_bed.mp3",
+      "sha256": "2a50693624ee533e44f6b33a146445a13c00135028e600e18dea5c5b13e6397a",
+      "bytes": 193141
+    },
+    "audio/sfx/foley/sfx_chair_roll_fast.mp3": {
+      "src": "/audio/chapter-01/f85bc7ee65cd-sfx_chair_roll_fast.mp3",
+      "sha256": "f85bc7ee65cd3b379baea8fc0e29125e0ae7ec6a7acff5b6e802c5999e4b4f83",
+      "bytes": 33062
+    },
+    "audio/sfx/foley/sfx_keyboard_typing_short.mp3": {
+      "src": "/audio/chapter-01/9a8e4deb1c69-sfx_keyboard_typing_short.mp3",
+      "sha256": "9a8e4deb1c6993b7ad769a3f9b983847fd8bb2528fcceab6f2faff72196213df",
+      "bytes": 48945
+    },
+    "audio/sfx/alarm/sfx_alert_warning_hit.mp3": {
+      "src": "/audio/chapter-01/ce62bfd71c0d-sfx_alert_warning_hit.mp3",
+      "sha256": "ce62bfd71c0df555c17501cc16a5fb5e207a4ab48a234805a3b71254b4f957f1",
+      "bytes": 24703
+    },
+    "audio/sfx/interface/sfx_system_notify_soft.mp3": {
+      "src": "/audio/chapter-01/dbcd23bf1bcf-sfx_system_notify_soft.mp3",
+      "sha256": "dbcd23bf1bcf7e8672f10525f401766a25fdf0dd1dc4092c437ed207c9fa6a9f",
+      "bytes": 24703
+    },
+    "audio/sfx/interface/sfx_terminal_lock_engage.mp3": {
+      "src": "/audio/chapter-01/f9f585594833-sfx_terminal_lock_engage.mp3",
+      "sha256": "f9f5855948338f322e8dd91507d2136f14f87892a9df8abc78583bfd4c1a6301",
+      "bytes": 33062
+    },
+    "audio/sfx/system/sfx_equipment_power_up_soft.mp3": {
+      "src": "/audio/chapter-01/a453099d5a3e-sfx_equipment_power_up_soft.mp3",
+      "sha256": "a453099d5a3e81ae78da9965e32ddc86d59743d9ebcb9dfda49bd00f312ea814",
+      "bytes": 40586
+    },
+    "audio/sfx/interface/sfx_intercom_open.mp3": {
+      "src": "/audio/chapter-01/f9b638aa21ab-sfx_intercom_open.mp3",
+      "sha256": "f9b638aa21abaa8c0d39f412e15d7e22a08469c4f832b14138515b2fd98a5784",
+      "bytes": 24703
+    },
+    "audio/sfx/ambience/amb_intercom_channel_open.mp3": {
+      "src": "/audio/chapter-01/6ae06555ee5a-amb_intercom_channel_open.mp3",
+      "sha256": "6ae06555ee5aec4b864cdd11a32f77ce76b8ce8b454d5d63eb57a825475e350b",
+      "bytes": 160958
+    },
+    "audio/sfx/interface/sfx_intercom_static.mp3": {
+      "src": "/audio/chapter-01/0535ccbf27c2-sfx_intercom_static.mp3",
+      "sha256": "0535ccbf27c2d5411b56eaaf1e93e8f453b09d44d4406518f37cf2196be5b81a",
+      "bytes": 40586
+    },
+    "audio/sfx/interface/sfx_intercom_close.mp3": {
+      "src": "/audio/chapter-01/dbfe5bc3324a-sfx_intercom_close.mp3",
+      "sha256": "dbfe5bc3324a9d82c0027158c5c4a1ebe4f23f13398f7623211af6250b956e27",
+      "bytes": 17180
+    },
+    "audio/sfx/foley/sfx_lab_door_slide.mp3": {
+      "src": "/audio/chapter-01/7e31fa4fecca-sfx_lab_door_slide.mp3",
+      "sha256": "7e31fa4feccae21d506850e6b93c8eb7d7e7a66f57f81961b07037ebc4242bbc",
+      "bytes": 40586
+    },
+    "audio/sfx/foley/sfx_footsteps_sarah_sneakers.mp3": {
+      "src": "/audio/chapter-01/f54c8944210b-sfx_footsteps_sarah_sneakers.mp3",
+      "sha256": "f54c8944210be7840f0e5755f9d3f824a59b79a036a71d8d62c71fa45b7ae39e",
+      "bytes": 48945
+    },
+    "audio/sfx/foley/sfx_chair_roll_slow.mp3": {
+      "src": "/audio/chapter-01/88910487337d-sfx_chair_roll_slow.mp3",
+      "sha256": "88910487337d423625de88e6fb6ec07b257dbce3fc9cd7215bd9b8d7341462fe",
+      "bytes": 40586
+    },
+    "audio/sfx/system/amb_tombs_array_power_rise.mp3": {
+      "src": "/audio/chapter-01/f1bd62a7dfac-amb_tombs_array_power_rise.mp3",
+      "sha256": "f1bd62a7dfacc8ec40600ab0c967373f97023d0213cb5770ac8e76feaac4f8f0",
+      "bytes": 321036
+    },
+    "audio/sfx/system/sfx_access_denied_tone.mp3": {
+      "src": "/audio/chapter-01/42ab11f176b2-sfx_access_denied_tone.mp3",
+      "sha256": "42ab11f176b2aebae4f8fd4468d05337d834305e596dbf14a3cfc05871a1e396",
+      "bytes": 24703
+    },
+    "audio/sfx/system/sfx_access_revoked_tone.mp3": {
+      "src": "/audio/chapter-01/c38b13848a8c-sfx_access_revoked_tone.mp3",
+      "sha256": "c38b13848a8ca2872bc5985e7a52f11aa1f51167a42d05e25173f14c5b448386",
+      "bytes": 33062
+    }
+  },
+  "staging": {
+    "approach": 55,
+    "closeDistance": 59,
+    "pointMonitor": 65,
+    "tablet": 77,
+    "chairExchange": 103,
+    "personal": 127,
+    "warning": 150,
+    "lock": 23,
+    "door": 54
+  },
+  "cueCount": 34,
+  "cuePolicy": "Current canonical manifest, once per cue ID; no legacy repair duplicates or retired canonical cues.",
+  "arrivalReconciliation": "Approach begins when Sarah walks straight in, not at the later pointing line.",
+  "upstreamCueProblems": []
+}

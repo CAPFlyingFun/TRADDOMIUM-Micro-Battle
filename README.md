@@ -1,3 +1,7 @@
+> **Production entry: hybrid Chapter One.** The normal Pages/PWA URL and existing `/v1/` installs now open the cinematic laboratory. Extras opens the preserved island/advanced systems at `/island/` and archived build at `/legacy/`. All original `src/`, `public/`, worker code and island save keys remain intact.
+>
+> Install the root dependencies with `npm ci`, then install the hybrid with `pnpm --dir prototype install --frozen-lockfile` (pnpm 11.25.0). `npm run dev` starts the hybrid; `npm run dev:systems` starts the original systems sandbox. `npm run build` still validates/builds that sandbox; `npm run build:hybrid` builds the normal PWA. The deployment workflow builds and assembles all mounts. See [integration notes](prototype/docs/production-integration.md).
+
 # TRADDOMIUM: Micro Battle!
 
 A browser-based direct-control ant survival RPG built with three.js,

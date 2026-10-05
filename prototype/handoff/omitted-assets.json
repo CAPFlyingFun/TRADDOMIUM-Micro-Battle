@@ -1,0 +1,2362 @@
+[
+  {
+    "path": "assets/badges/jack.jpeg",
+    "bytes": 386887,
+    "gitBlob": "94298ef9f2c87fb88f7a2021e50731abc3f23ab3"
+  },
+  {
+    "path": "assets/badges/sarah.jpeg",
+    "bytes": 354680,
+    "gitBlob": "e4e4140db10da6593c02a587d5480d3f55729a3d"
+  },
+  {
+    "path": "assets/texture-repairs/sarah/basecolor-2k.png",
+    "bytes": 5782980,
+    "gitBlob": "5a2047accf994bbd4ed6a2cb45f4e97fe44c2848"
+  },
+  {
+    "path": "public/assets/jack-reference.webp",
+    "bytes": 39670,
+    "gitBlob": "f82addc44c3023b007092f5a091fb8f68b8ea45c"
+  },
+  {
+    "path": "public/assets/lab3d/jack.glb",
+    "bytes": 2984300,
+    "gitBlob": "a4f8f307d147ebc527a086b5cf79c55368a9b34f"
+  },
+  {
+    "path": "public/assets/lab3d/sarah.glb",
+    "bytes": 2707620,
+    "gitBlob": "8aa6ea59aa08af05e3010f1babb642ce9764f305"
+  },
+  {
+    "path": "public/assets/sarah-reference.webp",
+    "bytes": 40150,
+    "gitBlob": "9f070fee5c710c1a8879bae8c310db3ecb66b40d"
+  },
+  {
+    "path": "public/assets/scale-atlas.webp",
+    "bytes": 538652,
+    "gitBlob": "819ee952a34d43dd093143bff25393f36c59ebff"
+  },
+  {
+    "path": "public/assets/settlement-edge.webp",
+    "bytes": 235840,
+    "gitBlob": "3440b3865a2cfa40f259cba065602d58150b52fd"
+  },
+  {
+    "path": "public/assets/tombs-laboratory.webp",
+    "bytes": 171322,
+    "gitBlob": "804a9f23c32fb26c77eb5d932309468350304349"
+  },
+  {
+    "path": "public/audio/chapter-01/0084828609c4-narrator-acd5a4e16a58.mp3",
+    "bytes": 31391,
+    "gitBlob": "2d448674b48c514c739ef4dffe00363c6799c0bd"
+  },
+  {
+    "path": "public/audio/chapter-01/02499fd9d42a-narrator-7782d6316db5.mp3",
+    "bytes": 38078,
+    "gitBlob": "f62d047fa4cdd15e77606ceaa2a649216a510904"
+  },
+  {
+    "path": "public/audio/chapter-01/0293a62097f3-narrator-6bad52582d7d.mp3",
+    "bytes": 29301,
+    "gitBlob": "5e7f99ae2f97560ce769bc04f270b8e73c73b1bd"
+  },
+  {
+    "path": "public/audio/chapter-01/042037ff47ae-sarah-bennett-ad67f921e02e.mp3",
+    "bytes": 27629,
+    "gitBlob": "d0b961561d95bab33f44ba632810b17b01ea2a02"
+  },
+  {
+    "path": "public/audio/chapter-01/0535ccbf27c2-sfx_intercom_static.mp3",
+    "bytes": 40586,
+    "gitBlob": "6ff19f097fe22ffa06732c644ce7a2d69bce13b4"
+  },
+  {
+    "path": "public/audio/chapter-01/055b0dc4b275-narrator-34f450c1a659.mp3",
+    "bytes": 45601,
+    "gitBlob": "2f09663c24ab46c7ffd9f5e6f8459f6a2d6125f6"
+  },
+  {
+    "path": "public/audio/chapter-01/071705044098-sarah-bennett-ea3f24b4acf1.mp3",
+    "bytes": 9239,
+    "gitBlob": "75594ae5a4487fe0b3fe70315d9f003d62fb8721"
+  },
+  {
+    "path": "public/audio/chapter-01/07e8589fdd65-narrator-0407ebd1b851.mp3",
+    "bytes": 24703,
+    "gitBlob": "9c57a74c15bff97d05f4a09bd42f9fad23d70b6b"
+  },
+  {
+    "path": "public/audio/chapter-01/0872bad21f5b-narrator-6c867569f46f.mp3",
+    "bytes": 30973,
+    "gitBlob": "3c9adc624e5ba14b24d6cba9ca4c63cf6ac8c58e"
+  },
+  {
+    "path": "public/audio/chapter-01/0894ff733ec6-narrator-98744cc92aa4.mp3",
+    "bytes": 47691,
+    "gitBlob": "abc387fc5ad4d72f4256fba3cf740bf7984442fc"
+  },
+  {
+    "path": "public/audio/chapter-01/0aec057e9a28-jack-bennett-a8fc65386727.mp3",
+    "bytes": 21777,
+    "gitBlob": "85a2e0bcd09460032de51f9a653b077e56777f2e"
+  },
+  {
+    "path": "public/audio/chapter-01/0c1842493aa8-sarah-bennett-41421ed41839.mp3",
+    "bytes": 30137,
+    "gitBlob": "cab0f25d1db6c7d1dcc94f5cb482b175c87fea69"
+  },
+  {
+    "path": "public/audio/chapter-01/0d0856ad0985-narrator-20150e76792b.mp3",
+    "bytes": 31391,
+    "gitBlob": "49123c27b90261bb0c45e4034e913795b1c0f339"
+  },
+  {
+    "path": "public/audio/chapter-01/0e0ce0fef9f0-narrator-fe9506954a9a.mp3",
+    "bytes": 24703,
+    "gitBlob": "e673bd63409404dc67a7fb72fea63343216a057e"
+  },
+  {
+    "path": "public/audio/chapter-01/10b2b09ce5e6-narrator-446ac6fd8722.mp3",
+    "bytes": 41004,
+    "gitBlob": "2d520cbfe3194308ba7ee1a81330043e0a8a753c"
+  },
+  {
+    "path": "public/audio/chapter-01/133ba2900f64-narrator-652f9e97d9a7.mp3",
+    "bytes": 27211,
+    "gitBlob": "fb564e7da615ff96a468ed521444cd3950652090"
+  },
+  {
+    "path": "public/audio/chapter-01/1668f0659066-narrator-6da685659713.mp3",
+    "bytes": 55214,
+    "gitBlob": "3bd94b07430259c437e85daaa272d97601817926"
+  },
+  {
+    "path": "public/audio/chapter-01/17988ecccf37-sarah-bennett-5965a9732934.mp3",
+    "bytes": 19688,
+    "gitBlob": "bf483bda3c1fc17746697faab95b842d28fffb7a"
+  },
+  {
+    "path": "public/audio/chapter-01/19ac12f39eab-jack-bennett-57a1f5dfe461.mp3",
+    "bytes": 38078,
+    "gitBlob": "3cc29d41071db3ebb2c82302ffba909d687506b6"
+  },
+  {
+    "path": "public/audio/chapter-01/2542db120aeb-jack-bennett-6aa0f73ed972.mp3",
+    "bytes": 20942,
+    "gitBlob": "2e47d583d1daa7a3cfdf380598038325dc36e7b9"
+  },
+  {
+    "path": "public/audio/chapter-01/25ef2c42ac1e-sarah-bennett-5a071d01be77.mp3",
+    "bytes": 14254,
+    "gitBlob": "fc175537856a4379b8661d32e9401d0cdd2459be"
+  },
+  {
+    "path": "public/audio/chapter-01/26cab6ec6cd2-narrator-d8826abbed8a.mp3",
+    "bytes": 93248,
+    "gitBlob": "7150015a38602f041a6459360e40a666a2974122"
+  },
+  {
+    "path": "public/audio/chapter-01/271cfe6a4a33-narrator-1975e7572552.mp3",
+    "bytes": 55214,
+    "gitBlob": "6fc08e3f5fd0956dc82989a10036aabd8fa0c61b"
+  },
+  {
+    "path": "public/audio/chapter-01/2a27a4d349d8-sarah-bennett-1ebe0c684d41.mp3",
+    "bytes": 10911,
+    "gitBlob": "b0907b05dbf7cfb13106a58ba75d15cca7cd93a4"
+  },
+  {
+    "path": "public/audio/chapter-01/2a50693624ee-amb_console_alarm_bed.mp3",
+    "bytes": 193141,
+    "gitBlob": "72aeb775cbfcc262176f114bfe18a4f1e653be93"
+  },
+  {
+    "path": "public/audio/chapter-01/312462dfa927-narrator-36d912fb5b4f.mp3",
+    "bytes": 145911,
+    "gitBlob": "f321701679b9bd6786da2b9a1d8af1c88b2e4983"
+  },
+  {
+    "path": "public/audio/chapter-01/31b9509bd964-narrator-1de8e47c4e66.mp3",
+    "bytes": 173497,
+    "gitBlob": "c4f1ec34069c4b9c072d9d470e06f54649ecdb28"
+  },
+  {
+    "path": "public/audio/chapter-01/3278e217af53-narrator-840d9089ed45.mp3",
+    "bytes": 32226,
+    "gitBlob": "c23d6541a06ddfc400680af26914b9e7ad5e91ca"
+  },
+  {
+    "path": "public/audio/chapter-01/33e58117fd9c-sarah-bennett-e240820580d9.mp3",
+    "bytes": 31391,
+    "gitBlob": "5e1536813fffd75dc5b8d0c4bb18e10aed881835"
+  },
+  {
+    "path": "public/audio/chapter-01/36f5062588b7-narrator-1812ac877876.mp3",
+    "bytes": 41839,
+    "gitBlob": "29a0126eeb311c26b11f606d7e29c78091d7cad2"
+  },
+  {
+    "path": "public/audio/chapter-01/39a5817986a1-jack-bennett-a40ffc6ce592.mp3",
+    "bytes": 10911,
+    "gitBlob": "6935eb1a52cf9dd3493cbc4af19beefd71575448"
+  },
+  {
+    "path": "public/audio/chapter-01/3a0d4f439830-narrator-b86243241021.mp3",
+    "bytes": 44765,
+    "gitBlob": "87c791d4d23cf42bf69875182491a1377d84f5f0"
+  },
+  {
+    "path": "public/audio/chapter-01/3a82a6158d3c-jack-bennett-5520e22c887a.mp3",
+    "bytes": 152599,
+    "gitBlob": "2d37d81f06910710ce4591b911602df8705b2984"
+  },
+  {
+    "path": "public/audio/chapter-01/3b8a9c760a3a-narrator-cddc94b869d1.mp3",
+    "bytes": 85725,
+    "gitBlob": "037f5232fc12a05c6ea521d7c8e402f7a4764a8d"
+  },
+  {
+    "path": "public/audio/chapter-01/3bbbf3a62819-sarah-bennett-415320486988.mp3",
+    "bytes": 19688,
+    "gitBlob": "bc3bf57fc0b8998e0e08c2c3e0f56c0c04131d33"
+  },
+  {
+    "path": "public/audio/chapter-01/3de29b7e288a-sarah-bennett-ed9388bef578.mp3",
+    "bytes": 21777,
+    "gitBlob": "b9c20812e4f4c30fa10f238298e513d9d30c709c"
+  },
+  {
+    "path": "public/audio/chapter-01/3e21368d35cc-narrator-a1ae4cf23cd8.mp3",
+    "bytes": 25539,
+    "gitBlob": "2843b90328b60b0425100b4b85a023bbd907fc9d"
+  },
+  {
+    "path": "public/audio/chapter-01/42ab11f176b2-sfx_access_denied_tone.mp3",
+    "bytes": 24703,
+    "gitBlob": "d99d5d6610648701e26e28fe1ecfdd824da05c5a"
+  },
+  {
+    "path": "public/audio/chapter-01/467b663db471-narrator-d3ceae9f0f0b.mp3",
+    "bytes": 26375,
+    "gitBlob": "c859f0fa113c2b249d7ef9d44b75124d79e5bc85"
+  },
+  {
+    "path": "public/audio/chapter-01/46cae4968960-narrator-1c904f05b2e0.mp3",
+    "bytes": 38078,
+    "gitBlob": "537a7793566ac21199701f8a34467504d67ebf07"
+  },
+  {
+    "path": "public/audio/chapter-01/48aa0f804a9d-sarah-bennett-8c46e3a53152.mp3",
+    "bytes": 18852,
+    "gitBlob": "425ed83ffda96eb8505e16d635867b134f8abe43"
+  },
+  {
+    "path": "public/audio/chapter-01/49472d07ff2a-narrator-0d3174211b67.mp3",
+    "bytes": 21777,
+    "gitBlob": "6eb6b5f40f7bc144a5c85b6f1338202ed3f8bfd0"
+  },
+  {
+    "path": "public/audio/chapter-01/4adbb23f47b3-jack-bennett-9cc3304964a3.mp3",
+    "bytes": 11328,
+    "gitBlob": "0aaf4a0f5954cd776017db07409b66a2b302c31e"
+  },
+  {
+    "path": "public/audio/chapter-01/4b45eea1a2e5-jack-bennett-050e0785c171.mp3",
+    "bytes": 25539,
+    "gitBlob": "52248cdbd33e414e2cdbb657e5dda4b0d45526a6"
+  },
+  {
+    "path": "public/audio/chapter-01/4f85949366a4-narrator-aa1f758718e0.mp3",
+    "bytes": 28465,
+    "gitBlob": "fc68315b48cb1d92dd5aaf4efd971ce5b48a3dc4"
+  },
+  {
+    "path": "public/audio/chapter-01/4faae206a689-narrator-f0cf0393d705.mp3",
+    "bytes": 39750,
+    "gitBlob": "4821caadac61650bdefe07e1c271770a029c6010"
+  },
+  {
+    "path": "public/audio/chapter-01/508e30f07f96-jack-bennett-9b850bb838a8.mp3",
+    "bytes": 13000,
+    "gitBlob": "7e9849c2097ac6b37a41d061891b7ea6dd1abd97"
+  },
+  {
+    "path": "public/audio/chapter-01/51767b867888-narrator-6fe67128d919.mp3",
+    "bytes": 27211,
+    "gitBlob": "470c3c801cf96ad681a43dcc41f0244e63e45aa3"
+  },
+  {
+    "path": "public/audio/chapter-01/53807bf1cea8-jack-bennett-e61a5b7e36cd.mp3",
+    "bytes": 34316,
+    "gitBlob": "4767f80d513fc74022a3dab356a131635959e681"
+  },
+  {
+    "path": "public/audio/chapter-01/5424e8c1bb8a-sarah-bennett-d446f7575941.mp3",
+    "bytes": 14254,
+    "gitBlob": "f56d6eeb387121a8a58dd2123535b862b9703696"
+  },
+  {
+    "path": "public/audio/chapter-01/54e05d973d22-jack-bennett-308767fde297.mp3",
+    "bytes": 13836,
+    "gitBlob": "3c9960ca68a969634721ed4b4476fd461ec0e988"
+  },
+  {
+    "path": "public/audio/chapter-01/593284c8e85d-narrator-1bb0c18f4491.mp3",
+    "bytes": 63573,
+    "gitBlob": "395c47b8f5a58601a2ea20feb2c05e12e9400f91"
+  },
+  {
+    "path": "public/audio/chapter-01/5af8bcad1b74-narrator-5290a9122d0f.mp3",
+    "bytes": 137970,
+    "gitBlob": "0088efb525bfe70b2067c6215a44a3a14fb50a9d"
+  },
+  {
+    "path": "public/audio/chapter-01/5bf10fff9367-narrator-4229fb08c275.mp3",
+    "bytes": 30137,
+    "gitBlob": "80fdf6b29a226ad3b9f067a96f30e58b9bd1f10b"
+  },
+  {
+    "path": "public/audio/chapter-01/5c843f5be70c-jack-bennett-492f4059781a.mp3",
+    "bytes": 21777,
+    "gitBlob": "626ad6777e4e4ebfa6fdba3c2fda8969952c8b8a"
+  },
+  {
+    "path": "public/audio/chapter-01/5d0e905aa145-narrator-1008b9e9b430.mp3",
+    "bytes": 107877,
+    "gitBlob": "c2867ba3901ca588f3b7dca59b8c6211f8a365ce"
+  },
+  {
+    "path": "public/audio/chapter-01/5d315c6e7004-system-a6ce88995aab.mp3",
+    "bytes": 17598,
+    "gitBlob": "155b497abc6b44bc81e7d1c944d8e402afcc605b"
+  },
+  {
+    "path": "public/audio/chapter-01/5d787f965933-narrator-8d592672a2db.mp3",
+    "bytes": 30973,
+    "gitBlob": "b18d826f17b9aa5c5cff2b942327a03cbb3608a1"
+  },
+  {
+    "path": "public/audio/chapter-01/5e3bd58a4662-sarah-bennett-6fe63af821c3.mp3",
+    "bytes": 20524,
+    "gitBlob": "5bba6940489dfdd96407914c762ca990231f0a79"
+  },
+  {
+    "path": "public/audio/chapter-01/5f43d5fe032f-sarah-bennett-a1dc5fafa6a9.mp3",
+    "bytes": 18016,
+    "gitBlob": "c0109b9d35c08a09ccd6efea32535313c1fde5e3"
+  },
+  {
+    "path": "public/audio/chapter-01/5fe38aacc15b-jack-bennett-632f5041e805.mp3",
+    "bytes": 17598,
+    "gitBlob": "4eb139ae6ec5029303d0b90d3534a51ed76ec19d"
+  },
+  {
+    "path": "public/audio/chapter-01/616202c9510b-narrator-e7cbaa2b7eab.mp3",
+    "bytes": 51453,
+    "gitBlob": "21837b6ecbccd2f172cb59509b4d168a30fb2ae7"
+  },
+  {
+    "path": "public/audio/chapter-01/61ae2ff01d53-sarah-bennett-da6d3f2466a2.mp3",
+    "bytes": 13836,
+    "gitBlob": "2005b7b3d4393a61d684b2cad616e1e14cdaa6f3"
+  },
+  {
+    "path": "public/audio/chapter-01/63a2dbd5fb23-narrator-0b2f58c70a4c.mp3",
+    "bytes": 87815,
+    "gitBlob": "ae54c19b099a370cbf3b0068463f6652c072fbf2"
+  },
+  {
+    "path": "public/audio/chapter-01/63ea4d1ce8f0-jack-bennett-3141593a1c9d.mp3",
+    "bytes": 54378,
+    "gitBlob": "4b9196d73f850305c810f3eb9dc31f30520650c0"
+  },
+  {
+    "path": "public/audio/chapter-01/64d71bbfa154-jack-bennett-a8a6aa7ae3b3.mp3",
+    "bytes": 12164,
+    "gitBlob": "c5262296a54b0840e8bdadd55464891fec40e74b"
+  },
+  {
+    "path": "public/audio/chapter-01/6572be987c55-narrator-27054517a6fd.mp3",
+    "bytes": 29301,
+    "gitBlob": "4fa409bdfdc3700a0c4d8bc2f38e906daa75d904"
+  },
+  {
+    "path": "public/audio/chapter-01/67217a2cc284-narrator-86e124a3c0e4.mp3",
+    "bytes": 79038,
+    "gitBlob": "85c7388bf035d9c77e5278d37f371bc160af6fbe"
+  },
+  {
+    "path": "public/audio/chapter-01/67e2e6fe68c8-narrator-19f698a32342.mp3",
+    "bytes": 26375,
+    "gitBlob": "0567bb79229c0fc58ec19b17fff94675aaf7466a"
+  },
+  {
+    "path": "public/audio/chapter-01/6ae06555ee5a-amb_intercom_channel_open.mp3",
+    "bytes": 160958,
+    "gitBlob": "6d18866fd6712add9c7d4cb57cf9533ed298d138"
+  },
+  {
+    "path": "public/audio/chapter-01/6c52c6c0a80b-narrator-97cf7a61f4d6.mp3",
+    "bytes": 29301,
+    "gitBlob": "26ce0adaa69deab2d1c24828672da5b10cbc4dbf"
+  },
+  {
+    "path": "public/audio/chapter-01/6edbbd264d02-narrator-32bdc09c24ff.mp3",
+    "bytes": 91159,
+    "gitBlob": "94bd2a0f3598af979bd3296adfeee5b9c7ce0838"
+  },
+  {
+    "path": "public/audio/chapter-01/71a75a6c8737-narrator-d4abdf24a364.mp3",
+    "bytes": 29301,
+    "gitBlob": "a2ed6fa86195499c18d691755d0d35fe0d4d30ea"
+  },
+  {
+    "path": "public/audio/chapter-01/71f5dc514b4f-narrator-721c3080cc8d.mp3",
+    "bytes": 36824,
+    "gitBlob": "2c0c219b8fcf34de90c81909f88811dd13dadb12"
+  },
+  {
+    "path": "public/audio/chapter-01/72777db3a904-narrator-2525fa15c09f.mp3",
+    "bytes": 98264,
+    "gitBlob": "0f0ebd260e1720a479974ec70ac7aaa5989cb7e9"
+  },
+  {
+    "path": "public/audio/chapter-01/7579a6d8abc3-narrator-93519474e9ea.mp3",
+    "bytes": 192723,
+    "gitBlob": "ce9a59874b113d9e8e163df61e62826b2e966742"
+  },
+  {
+    "path": "public/audio/chapter-01/76b78155824f-narrator-9044cb8cfbea.mp3",
+    "bytes": 25539,
+    "gitBlob": "ba94738c8ccb1369f4d8ff2e90cc1100666f8df7"
+  },
+  {
+    "path": "public/audio/chapter-01/7749c9872673-narrator-89a435f8f818.mp3",
+    "bytes": 58140,
+    "gitBlob": "28ccf66f4743ac063a74bbc51eff810da0881064"
+  },
+  {
+    "path": "public/audio/chapter-01/78604150ca2d-system-49a4bf38c005.mp3",
+    "bytes": 19688,
+    "gitBlob": "50097929546bed2de9412afffaf30b40e22e9113"
+  },
+  {
+    "path": "public/audio/chapter-01/78cbd99273a9-narrator-c103b3838cd2.mp3",
+    "bytes": 42675,
+    "gitBlob": "303c6615228434475b4b576c79ef9d1063910c97"
+  },
+  {
+    "path": "public/audio/chapter-01/7b51e7e88b6c-jack-bennett-941e93bf213e.mp3",
+    "bytes": 12164,
+    "gitBlob": "fa3c580f490dfae6e956fd43b2202d0c19335740"
+  },
+  {
+    "path": "public/audio/chapter-01/7bdcaadaecc7-jack-bennett-3d94cfec7c01.mp3",
+    "bytes": 41004,
+    "gitBlob": "76a81fed9975d8dfd6cad3bad55ff859de6ab99a"
+  },
+  {
+    "path": "public/audio/chapter-01/7e2952970319-narrator-c9d9bba60b27.mp3",
+    "bytes": 23449,
+    "gitBlob": "3a8f37f7ccd09de5f80284a20b98eb32e935b635"
+  },
+  {
+    "path": "public/audio/chapter-01/7e31fa4fecca-sfx_lab_door_slide.mp3",
+    "bytes": 40586,
+    "gitBlob": "737a20a59e55dcddfd9b40702d3fb8ffad55732b"
+  },
+  {
+    "path": "public/audio/chapter-01/82f8691ebc13-narrator-71c02a29e9a7.mp3",
+    "bytes": 22613,
+    "gitBlob": "350a9bf7d510684cf26925f717e4dfbef47f6cc6"
+  },
+  {
+    "path": "public/audio/chapter-01/8318b380ec64-jack-bennett-29c879a5b799.mp3",
+    "bytes": 23449,
+    "gitBlob": "b87b2b5f0c0ddce5ef73d834bd2f2aaa8c18683f"
+  },
+  {
+    "path": "public/audio/chapter-01/83a49afed8ef-jack-bennett-92ce22fee124.mp3",
+    "bytes": 20942,
+    "gitBlob": "aa78cf6f8617b402bd40372f313d1b91815f79dd"
+  },
+  {
+    "path": "public/audio/chapter-01/847cb174adf7-jack-bennett-2ffc77da7b3f.mp3",
+    "bytes": 18016,
+    "gitBlob": "074b4de1f374f4b36e38093f798911db7e3a648b"
+  },
+  {
+    "path": "public/audio/chapter-01/86efb212e749-system-f6a28699a3b1.mp3",
+    "bytes": 37660,
+    "gitBlob": "4beb1f615250f6428644de6179ae3de1d09ee600"
+  },
+  {
+    "path": "public/audio/chapter-01/877a821fb535-narrator-ed5637682370.mp3",
+    "bytes": 31391,
+    "gitBlob": "ace7c0b548da97d843976e88ce30c49df6a8cb05"
+  },
+  {
+    "path": "public/audio/chapter-01/88910487337d-sfx_chair_roll_slow.mp3",
+    "bytes": 40586,
+    "gitBlob": "5acedce7c2084eab2ae6c7b289f6d1990c984666"
+  },
+  {
+    "path": "public/audio/chapter-01/88c56f1c5e91-narrator-1aa99b827f8f.mp3",
+    "bytes": 34316,
+    "gitBlob": "0175f75b46a055666a2c815242470241aa11b482"
+  },
+  {
+    "path": "public/audio/chapter-01/891d059bab70-jack-bennett-1ecaa1e81e25.mp3",
+    "bytes": 29301,
+    "gitBlob": "d261f4747c57bb291f61d4db1bca2ac884ee5fb1"
+  },
+  {
+    "path": "public/audio/chapter-01/8c5d01b57181-jack-bennett-753cad07ca15.mp3",
+    "bytes": 21777,
+    "gitBlob": "db0c1bffebe6684e02b6084a9dd2e96ed9ce13ae"
+  },
+  {
+    "path": "public/audio/chapter-01/8c7231b0eadd-sarah-bennett-d5bc7656345e.mp3",
+    "bytes": 27629,
+    "gitBlob": "a0ff3536fe8d3155e764ebf2457d86f1add5f11a"
+  },
+  {
+    "path": "public/audio/chapter-01/8efdfbea0b2c-narrator-c1710dc66304.mp3",
+    "bytes": 46437,
+    "gitBlob": "ff7faa963017ac0845da9bc4db9e026d8e4b0f13"
+  },
+  {
+    "path": "public/audio/chapter-01/91ea32f1b160-narrator-051b376028db.mp3",
+    "bytes": 43511,
+    "gitBlob": "d4208e1d365809248dfedb527df15e2e46d6a2e0"
+  },
+  {
+    "path": "public/audio/chapter-01/95e653deeef0-jack-bennett-01f2a89496de.mp3",
+    "bytes": 19688,
+    "gitBlob": "2eb8adcbb21c3ced20c1bea35b0c6161017f4e58"
+  },
+  {
+    "path": "public/audio/chapter-01/965bb475a96c-system-0fe0cf2a5742.mp3",
+    "bytes": 17598,
+    "gitBlob": "8ba73c985c7e6de78bbbbde22cb033a73e54c44a"
+  },
+  {
+    "path": "public/audio/chapter-01/97539ba90d39-narrator-858ca109e086.mp3",
+    "bytes": 24703,
+    "gitBlob": "1056d2f78dc695063052606c5971e4b048da38fd"
+  },
+  {
+    "path": "public/audio/chapter-01/9a8e4deb1c69-sfx_keyboard_typing_short.mp3",
+    "bytes": 48945,
+    "gitBlob": "fd869d5359d91aab493bf57a867129840387cdf3"
+  },
+  {
+    "path": "public/audio/chapter-01/9bdb0fc8333f-jack-bennett-f3736d27f9d7.mp3",
+    "bytes": 20524,
+    "gitBlob": "d7091b50e240b8ffa035a5a1ff6f51573c20a4ff"
+  },
+  {
+    "path": "public/audio/chapter-01/9d819e7110d0-narrator-4ae27aba679f.mp3",
+    "bytes": 78202,
+    "gitBlob": "d348b0ee22be048dd1538546355e9fee3bb0be4a"
+  },
+  {
+    "path": "public/audio/chapter-01/9dc5a7228908-system-28a18477a67e.mp3",
+    "bytes": 18016,
+    "gitBlob": "770e9377256b806145a15a5a9e00046d32fd181b"
+  },
+  {
+    "path": "public/audio/chapter-01/9e85c1c19302-narrator-b68629175254.mp3",
+    "bytes": 27629,
+    "gitBlob": "e80e724714c6359129f3936d15dc0e3576603727"
+  },
+  {
+    "path": "public/audio/chapter-01/9ee607aead92-narrator-22289c65a15f.mp3",
+    "bytes": 52288,
+    "gitBlob": "3677eeba7d84e198a9d23eec23ca1ab81b8b18b0"
+  },
+  {
+    "path": "public/audio/chapter-01/a0dcaed659a3-narrator-765e3fa279dd.mp3",
+    "bytes": 204008,
+    "gitBlob": "ce2848724049417c921ec7bebf0b047ad96e5d17"
+  },
+  {
+    "path": "public/audio/chapter-01/a3697bc3a041-jack-bennett-b9c31e4c82cf.mp3",
+    "bytes": 18852,
+    "gitBlob": "adca2dc99e2e16e08fcfe1a54016b487476b9d4c"
+  },
+  {
+    "path": "public/audio/chapter-01/a4119de106eb-jack-bennett-2a98eedf112f.mp3",
+    "bytes": 13836,
+    "gitBlob": "c18d8dcf6be3f5f057097f7d023ea7cff26944ad"
+  },
+  {
+    "path": "public/audio/chapter-01/a453099d5a3e-sfx_equipment_power_up_soft.mp3",
+    "bytes": 40586,
+    "gitBlob": "a7b23ee36ab7919cb93b1a6db31d58e1d7fcb2da"
+  },
+  {
+    "path": "public/audio/chapter-01/a50094095782-narrator-a6f00f720f9c.mp3",
+    "bytes": 47691,
+    "gitBlob": "e4f9682cf17a91a70fc2b0ec6b60da5447510138"
+  },
+  {
+    "path": "public/audio/chapter-01/a54dc74e360c-jack-bennett-5d311a6c90d7.mp3",
+    "bytes": 25539,
+    "gitBlob": "d676b0ef6993516df527268e3cbed55d5dd1d22d"
+  },
+  {
+    "path": "public/audio/chapter-01/a68f7e576b3a-jack-bennett-13662115397f.mp3",
+    "bytes": 12164,
+    "gitBlob": "7e892aee2e2e25ef0585e1077530f67e8347ee3d"
+  },
+  {
+    "path": "public/audio/chapter-01/a852a7c5319d-jack-bennett-4b4b13be3859.mp3",
+    "bytes": 27211,
+    "gitBlob": "5f3305dcb334865a414bb28dd75c398d84774a3c"
+  },
+  {
+    "path": "public/audio/chapter-01/abbbadae5b02-sarah-bennett-81ff0dc894cf.mp3",
+    "bytes": 13000,
+    "gitBlob": "34f8eecf4464be3b1290ee626a8bd9bc5a7ae752"
+  },
+  {
+    "path": "public/audio/chapter-01/adb33941b9d0-narrator-2fdc212a47bb.mp3",
+    "bytes": 20524,
+    "gitBlob": "f1a6f32b486d504c571708ba967ca3e847c6997d"
+  },
+  {
+    "path": "public/audio/chapter-01/aebb7e3bbd6c-narrator-90d95cfdf22a.mp3",
+    "bytes": 30137,
+    "gitBlob": "1d85fe943abcc914a7f372034d3d6a973f98365c"
+  },
+  {
+    "path": "public/audio/chapter-01/af553c97cd6c-narrator-fb38695cee9c.mp3",
+    "bytes": 26375,
+    "gitBlob": "1ec08ac99b5cff39dcf4a60eb04e30cd571ebad2"
+  },
+  {
+    "path": "public/audio/chapter-01/b231b03dd830-narrator-7fd987f61325.mp3",
+    "bytes": 37660,
+    "gitBlob": "66ca0621d5c4c16965a200eeab7b039ef7ad59dc"
+  },
+  {
+    "path": "public/audio/chapter-01/b3f3180aabbd-jack-bennett-6de493fd3169.mp3",
+    "bytes": 22613,
+    "gitBlob": "8f7414e6ac2d570c6f63124a88cdbdd0a316b7a7"
+  },
+  {
+    "path": "public/audio/chapter-01/b4b7bca0c123-jack-bennett-45ac1e9fe1de.mp3",
+    "bytes": 20524,
+    "gitBlob": "60d135fa5adbfd372b9b3d01af9b735b982896d8"
+  },
+  {
+    "path": "public/audio/chapter-01/b682bc33db67-system-610b0d021f1b.mp3",
+    "bytes": 26375,
+    "gitBlob": "1457ce91d4b777a93edaf7d1d60445b6b02e1730"
+  },
+  {
+    "path": "public/audio/chapter-01/b7c047908493-narrator-a4fba24c9781.mp3",
+    "bytes": 24703,
+    "gitBlob": "d01b5a65ebf8a226f56afbaeff224c032ef18514"
+  },
+  {
+    "path": "public/audio/chapter-01/bd02b4a857f7-sarah-bennett-65056aba0745.mp3",
+    "bytes": 13836,
+    "gitBlob": "4c4bea71d44beb468e46f84107b0ca6ec04db70a"
+  },
+  {
+    "path": "public/audio/chapter-01/bd6e0936f2a9-jack-bennett-48aebe4e6970.mp3",
+    "bytes": 16762,
+    "gitBlob": "d607f501fe8b8a87f1b0a77d541e0752c4247154"
+  },
+  {
+    "path": "public/audio/chapter-01/bed1fdc1b92a-narrator-d8e8df53dcc2.mp3",
+    "bytes": 71097,
+    "gitBlob": "7920110c045dd4b0c1c177ad96e65673fa096030"
+  },
+  {
+    "path": "public/audio/chapter-01/bf27cb284bb4-narrator-a08e54e449b2.mp3",
+    "bytes": 34316,
+    "gitBlob": "fc9b414332c07086d5d0d8254c2746e96d8254aa"
+  },
+  {
+    "path": "public/audio/chapter-01/bf287e03ed5d-sarah-bennett-deff6b10a48b.mp3",
+    "bytes": 20524,
+    "gitBlob": "17799155c05d38aa72d0212b12f8060ec0760b05"
+  },
+  {
+    "path": "public/audio/chapter-01/bfbe77a90f5e-narrator-c2bcc3f581cf.mp3",
+    "bytes": 117072,
+    "gitBlob": "3ad081d5baa6fa3d5305b77febd1a9de1e03b38b"
+  },
+  {
+    "path": "public/audio/chapter-01/bfd4fd39a12c-narrator-cab4ca6ef144.mp3",
+    "bytes": 107877,
+    "gitBlob": "a4e7427d8e9ccbb980d7db660a90956336516f16"
+  },
+  {
+    "path": "public/audio/chapter-01/c05742d2e541-narrator-e2bfa452045f.mp3",
+    "bytes": 69425,
+    "gitBlob": "4351e9d15fbe472e8d16a7c4fa38bffe4bfa6582"
+  },
+  {
+    "path": "public/audio/chapter-01/c13deb076d30-sfx_console_tone_soft.mp3",
+    "bytes": 24703,
+    "gitBlob": "0c9beb13ce331fdd041a878820605d33d8463d0e"
+  },
+  {
+    "path": "public/audio/chapter-01/c386c4ea25a5-narrator-25bf9a648f08.mp3",
+    "bytes": 156360,
+    "gitBlob": "47c67a8ed696b0ab51837ac00605fdbae3c53c8a"
+  },
+  {
+    "path": "public/audio/chapter-01/c38b13848a8c-sfx_access_revoked_tone.mp3",
+    "bytes": 33062,
+    "gitBlob": "fbe19487ffa1f49ce88938a70f37533c800c9d3b"
+  },
+  {
+    "path": "public/audio/chapter-01/c3b8c6c7a7cd-jack-bennett-5658c97ddd78.mp3",
+    "bytes": 54378,
+    "gitBlob": "02d28cf84e7f567a0ba8343eb373dd95751b9417"
+  },
+  {
+    "path": "public/audio/chapter-01/c3dd794609aa-sarah-bennett-bf55452b11b2.mp3",
+    "bytes": 32226,
+    "gitBlob": "36297f0bcee8eea66f1eb23ba8781f545ec71eab"
+  },
+  {
+    "path": "public/audio/chapter-01/c4661b26cf3b-sarah-bennett-b4465ab7292c.mp3",
+    "bytes": 21777,
+    "gitBlob": "1bf1f8785b03d24ad7addd2bf3d33c2c1ef97c30"
+  },
+  {
+    "path": "public/audio/chapter-01/c8436555f532-narrator-8584cb5fea7b.mp3",
+    "bytes": 35988,
+    "gitBlob": "10075c174add7b091f955373295bffa0a2067caf"
+  },
+  {
+    "path": "public/audio/chapter-01/c9218aab3f45-narrator-1fe67963523b.mp3",
+    "bytes": 99100,
+    "gitBlob": "8c199ddb966929ea05f0215f7081efed361cc69a"
+  },
+  {
+    "path": "public/audio/chapter-01/c96fc9b43f51-jack-bennett-a376700976d7.mp3",
+    "bytes": 27629,
+    "gitBlob": "a95f284dd50971437c06ae732128da9791a97e3d"
+  },
+  {
+    "path": "public/audio/chapter-01/c9b7353589ff-narrator-32af39ff1f88.mp3",
+    "bytes": 38078,
+    "gitBlob": "f574b1846c51e8fb0c4c83bfdf0ca1e569f38bb0"
+  },
+  {
+    "path": "public/audio/chapter-01/cb35c2e1174f-jack-bennett-ecf78584ec95.mp3",
+    "bytes": 15926,
+    "gitBlob": "a40c66d485168afb7978cb6ee80f12996ceda2eb"
+  },
+  {
+    "path": "public/audio/chapter-01/cb67a4cd21f3-jack-bennett-31ac40401ca8.mp3",
+    "bytes": 15926,
+    "gitBlob": "99588b741e2a5b123c3583a8ce1654683a859d01"
+  },
+  {
+    "path": "public/audio/chapter-01/ce62bfd71c0d-sfx_alert_warning_hit.mp3",
+    "bytes": 24703,
+    "gitBlob": "30f9041a65f3f4b349b1357cbc4e0c384a070d2a"
+  },
+  {
+    "path": "public/audio/chapter-01/ce686fdeacae-narrator-f11884b76889.mp3",
+    "bytes": 33898,
+    "gitBlob": "63c5f7f293a3822eaa02931e49c97f375d13fd0d"
+  },
+  {
+    "path": "public/audio/chapter-01/cecaaa2e9ac3-narrator-4f160e832b0d.mp3",
+    "bytes": 21777,
+    "gitBlob": "318e1e4677020ad9b3be420f42df50dc3813cee4"
+  },
+  {
+    "path": "public/audio/chapter-01/cf00460b74ad-sarah-bennett-13bbe7381eb1.mp3",
+    "bytes": 13000,
+    "gitBlob": "6a38c4472e4b2040aefe83d1908a9a05a35a681a"
+  },
+  {
+    "path": "public/audio/chapter-01/cf706bc47454-narrator-aba313549aa8.mp3",
+    "bytes": 67753,
+    "gitBlob": "1e89ef4871338cdf560caba2d2fdbe310af1baad"
+  },
+  {
+    "path": "public/audio/chapter-01/d086134b8c7b-narrator-590eeb9e8f49.mp3",
+    "bytes": 34316,
+    "gitBlob": "5b82d3b059805c98d4924d75e224794a4aed0a00"
+  },
+  {
+    "path": "public/audio/chapter-01/d0ff5b7c43de-jack-bennett-d97b90a6d54e.mp3",
+    "bytes": 8403,
+    "gitBlob": "1b0712b582dfbee09b984745a541a193894bcd74"
+  },
+  {
+    "path": "public/audio/chapter-01/d1cdb6619ae2-jack-bennett-27b114bdd284.mp3",
+    "bytes": 18016,
+    "gitBlob": "2b150132ade05437d12fe16ac4f31a78c6c982bc"
+  },
+  {
+    "path": "public/audio/chapter-01/d520dadac4f0-sarah-bennett-85c20ef1167a.mp3",
+    "bytes": 20524,
+    "gitBlob": "5d2e065d8b73db3d6d9584a272f207899e704c3e"
+  },
+  {
+    "path": "public/audio/chapter-01/d6bb6e723f7e-narrator-e23f8bb8d695.mp3",
+    "bytes": 34316,
+    "gitBlob": "b52a5a089609a81c97ebd179de3b8689aa674026"
+  },
+  {
+    "path": "public/audio/chapter-01/d73b4d5072d5-jack-bennett-77753d8b9f45.mp3",
+    "bytes": 10075,
+    "gitBlob": "2a23d3fde09a327b9559fa3d3fab4395314348dc"
+  },
+  {
+    "path": "public/audio/chapter-01/d7ea1d798f54-system-884c6f5a459a.mp3",
+    "bytes": 35152,
+    "gitBlob": "25f614c357b7cb213a84937b0443c251843766cc"
+  },
+  {
+    "path": "public/audio/chapter-01/d8c6da0d320f-narrator-b3dcdf13d972.mp3",
+    "bytes": 40586,
+    "gitBlob": "a62c9b53ffb8504296882dc5bad656823c4f41a8"
+  },
+  {
+    "path": "public/audio/chapter-01/d8e83242b860-narrator-646dff306d03.mp3",
+    "bytes": 403792,
+    "gitBlob": "0545ec03992ca84ff3e4871ae6205d2868cbf58e"
+  },
+  {
+    "path": "public/audio/chapter-01/d9ed9e962f52-narrator-9aea695990da.mp3",
+    "bytes": 36824,
+    "gitBlob": "9cfcb11b67b4b4efb529080e2437c24023a4351f"
+  },
+  {
+    "path": "public/audio/chapter-01/da788d056411-jack-bennett-a5c6ccccd8ca.mp3",
+    "bytes": 30973,
+    "gitBlob": "aaa0081bef8993aac4c18cce8a86199d4cac88ac"
+  },
+  {
+    "path": "public/audio/chapter-01/db073c5e6400-sarah-bennett-284f0b08b165.mp3",
+    "bytes": 18016,
+    "gitBlob": "fba2b03cb881f37352bcee50efbcbacda93a0fe8"
+  },
+  {
+    "path": "public/audio/chapter-01/db6b80068c5b-narrator-b5f5252f998d.mp3",
+    "bytes": 27211,
+    "gitBlob": "477890f416d5133b22de032ead2ea32eebe6a87c"
+  },
+  {
+    "path": "public/audio/chapter-01/dbcd23bf1bcf-sfx_system_notify_soft.mp3",
+    "bytes": 24703,
+    "gitBlob": "9c3fabaa5c15a5903007117aaf1fd8341f32018b"
+  },
+  {
+    "path": "public/audio/chapter-01/dbfe5bc3324a-sfx_intercom_close.mp3",
+    "bytes": 17180,
+    "gitBlob": "878d3672fa7ed38d81d7388fbb7b157dbd8ecdb2"
+  },
+  {
+    "path": "public/audio/chapter-01/dc7a0f7a42c5-sarah-bennett-0e24152e8551.mp3",
+    "bytes": 13836,
+    "gitBlob": "c5dfdb0deabaf43df8b0fbd2f3692f62c63c3969"
+  },
+  {
+    "path": "public/audio/chapter-01/deb7717f98e0-narrator-4411afab67cb.mp3",
+    "bytes": 72351,
+    "gitBlob": "e069866a272507b30a04a41524159e772ffa1b50"
+  },
+  {
+    "path": "public/audio/chapter-01/e02458de3472-narrator-62bcf9506134.mp3",
+    "bytes": 32226,
+    "gitBlob": "32db509d46411bcf389a664cdd894121fce357cc"
+  },
+  {
+    "path": "public/audio/chapter-01/e08b2d1c29bc-jack-bennett-fa0505b74e44.mp3",
+    "bytes": 30137,
+    "gitBlob": "1da533e546c6695a1dfef9524192963f2b22942d"
+  },
+  {
+    "path": "public/audio/chapter-01/e12b7cb6acf5-narrator-37174f507f7e.mp3",
+    "bytes": 38078,
+    "gitBlob": "22eb0128ea63ff87a583feacf6ff4925863d4967"
+  },
+  {
+    "path": "public/audio/chapter-01/e311531df53e-narrator-7c57da6619ef.mp3",
+    "bytes": 26375,
+    "gitBlob": "fc0138a1d0884c03a8653d7a83a2ffc88ce2725f"
+  },
+  {
+    "path": "public/audio/chapter-01/e318bdd1af9d-narrator-91b25dbe2d24.mp3",
+    "bytes": 92413,
+    "gitBlob": "ece0cca382821add95d518fe19316306ae7bfab5"
+  },
+  {
+    "path": "public/audio/chapter-01/e3ce268e898a-jack-bennett-85dfddc7134b.mp3",
+    "bytes": 15926,
+    "gitBlob": "25cb233e9ae89b595b53c10c7aa1c8fe93ca62f3"
+  },
+  {
+    "path": "public/audio/chapter-01/e44289f1e56f-jack-bennett-c1ff018af109.mp3",
+    "bytes": 23449,
+    "gitBlob": "5041389b14fddfa9475f6eb2881c06949dba6f65"
+  },
+  {
+    "path": "public/audio/chapter-01/e7445a1e7264-jack-bennett-549daf1f1de8.mp3",
+    "bytes": 26375,
+    "gitBlob": "d9c4dd3107a5220a0104fb7a8172dd884f6fd26d"
+  },
+  {
+    "path": "public/audio/chapter-01/e7bc1b902cf3-sarah-bennett-2a350447dd17.mp3",
+    "bytes": 18016,
+    "gitBlob": "1aa9af5b60a830ba095731ee1fb2aaede1369579"
+  },
+  {
+    "path": "public/audio/chapter-01/e9375e564a41-jack-bennett-2b8704441765.mp3",
+    "bytes": 22613,
+    "gitBlob": "bfb7c94f12b7eb9d5e5fad9b5bef6946037b2de5"
+  },
+  {
+    "path": "public/audio/chapter-01/e96bfea8ab0b-sarah-bennett-563ad9289e68.mp3",
+    "bytes": 12164,
+    "gitBlob": "04d1b04234a5df3b25fefd349caf483a13729f2f"
+  },
+  {
+    "path": "public/audio/chapter-01/ea391106ac61-sarah-bennett-ecb1ce66f7bc.mp3",
+    "bytes": 21777,
+    "gitBlob": "174dbed936e0860168bb33e8a049e6c1c6095523"
+  },
+  {
+    "path": "public/audio/chapter-01/eab082e7439e-jack-bennett-211b122503c9.mp3",
+    "bytes": 16762,
+    "gitBlob": "c1d6007c7f10b408bfb55ff8a10472e25277735c"
+  },
+  {
+    "path": "public/audio/chapter-01/ef6be7a98833-sarah-bennett-d26997d1aa80.mp3",
+    "bytes": 18852,
+    "gitBlob": "22b74992f96a05a1a5477c98eff51c876b0105a1"
+  },
+  {
+    "path": "public/audio/chapter-01/f1bd62a7dfac-amb_tombs_array_power_rise.mp3",
+    "bytes": 321036,
+    "gitBlob": "6c0e0cf8c8f7638bd7e9f798d5f61ebf2441171e"
+  },
+  {
+    "path": "public/audio/chapter-01/f41db6014323-narrator-e7569b3cf356.mp3",
+    "bytes": 44347,
+    "gitBlob": "03e88f8373a0f20cb772ea56896162015338414e"
+  },
+  {
+    "path": "public/audio/chapter-01/f51fd5493721-narrator-2dd67493e557.mp3",
+    "bytes": 20524,
+    "gitBlob": "86b50119e88a775d2794e1e8ed61e73f02f3bcb1"
+  },
+  {
+    "path": "public/audio/chapter-01/f530df865900-amb_computer_lab.mp3",
+    "bytes": 901920,
+    "gitBlob": "f7fbe7e3db6cd6bcf3a25599a8a9fb1be2283b76"
+  },
+  {
+    "path": "public/audio/chapter-01/f54c8944210b-sfx_footsteps_sarah_sneakers.mp3",
+    "bytes": 48945,
+    "gitBlob": "919721652aacf89746932902ac238abcae391605"
+  },
+  {
+    "path": "public/audio/chapter-01/f559aac6e031-narrator-bd792dfac828.mp3",
+    "bytes": 38078,
+    "gitBlob": "10e670adf48aa4f8282968c7b42beb1b74cfc6f3"
+  },
+  {
+    "path": "public/audio/chapter-01/f70cf65570d8-narrator-b306b6263592.mp3",
+    "bytes": 35152,
+    "gitBlob": "ab49df5c3f3fd158cd66805aaf95e87a7afbff6c"
+  },
+  {
+    "path": "public/audio/chapter-01/f725db71ff37-sarah-bennett-4db8c4b299cf.mp3",
+    "bytes": 47691,
+    "gitBlob": "4312d34f38fd8dcb6680d21f80ff31af86f05bc4"
+  },
+  {
+    "path": "public/audio/chapter-01/f7d2f4df5dfd-narrator-35fd1eeab7f0.mp3",
+    "bytes": 35152,
+    "gitBlob": "ad392bd168667232da576224e06dc718eb385eb4"
+  },
+  {
+    "path": "public/audio/chapter-01/f8462f93c781-sarah-bennett-e9ec137bc087.mp3",
+    "bytes": 13836,
+    "gitBlob": "50f79bcf289814bbd98416857676ce338c488cf9"
+  },
+  {
+    "path": "public/audio/chapter-01/f85bc7ee65cd-sfx_chair_roll_fast.mp3",
+    "bytes": 33062,
+    "gitBlob": "5aa3c5c46b272b0f34739523a1153fb1c21b90aa"
+  },
+  {
+    "path": "public/audio/chapter-01/f8e07da92b90-narrator-5224d2902b7a.mp3",
+    "bytes": 35988,
+    "gitBlob": "63570f4d6e5b72fb671031b1c6e663aa578c23a3"
+  },
+  {
+    "path": "public/audio/chapter-01/f9b638aa21ab-sfx_intercom_open.mp3",
+    "bytes": 24703,
+    "gitBlob": "37f4cb19db59a6519e5ad59e97f8a277115d922a"
+  },
+  {
+    "path": "public/audio/chapter-01/f9f585594833-sfx_terminal_lock_engage.mp3",
+    "bytes": 33062,
+    "gitBlob": "0020baec2ce3a7e8a7a6fe8b850d2a81f040972a"
+  },
+  {
+    "path": "public/audio/chapter-01/fc5182363533-sarah-bennett-dc90fc8720b4.mp3",
+    "bytes": 52288,
+    "gitBlob": "3c0acfc96372bd2d896a8258628103e2d46582b0"
+  },
+  {
+    "path": "public/audio/chapter-01/fe935fc8700a-sarah-bennett-7cb92747650b.mp3",
+    "bytes": 15090,
+    "gitBlob": "822970509362053079152cadb1ff8452a25ea335"
+  },
+  {
+    "path": "public/audio/chapter-01/fed184b9006e-sarah-bennett-c0ca574b594a.mp3",
+    "bytes": 15090,
+    "gitBlob": "30da40de27dc1da15f91b070446210144ee1ef2b"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-01f2a89496de.mp3",
+    "bytes": 19688,
+    "gitBlob": "2eb8adcbb21c3ced20c1bea35b0c6161017f4e58"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-0274ba4b6e6e.mp3",
+    "bytes": 13836,
+    "gitBlob": "ffa7a91aa4698930277b63b974b72e109022fad6"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-027a6f4b630a.mp3",
+    "bytes": 23449,
+    "gitBlob": "ea3d4b42854e9b37daac8b37d7d59f6f891d74a5"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-050e0785c171.mp3",
+    "bytes": 25539,
+    "gitBlob": "52248cdbd33e414e2cdbb657e5dda4b0d45526a6"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-056828a8affb.mp3",
+    "bytes": 105787,
+    "gitBlob": "53ae37d4338f4c71ed28bb21fe861296201baaf3"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-06415c9f30d8.mp3",
+    "bytes": 18852,
+    "gitBlob": "809f6f0eec2f6d858326c0ec9a8e85d9d8ae8d1b"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-0dfd7d43951e.mp3",
+    "bytes": 19688,
+    "gitBlob": "c24f1b35b336f29585c0354cd5772c7372fcbcce"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-10b63e74da2b.mp3",
+    "bytes": 13000,
+    "gitBlob": "7b588ffce2869b6c953ded54b02953c42ef70945"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-13662115397f.mp3",
+    "bytes": 12164,
+    "gitBlob": "7e892aee2e2e25ef0585e1077530f67e8347ee3d"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-1c3683eb9326.mp3",
+    "bytes": 16762,
+    "gitBlob": "612f318738f858bfbf370b78b857e260c7ac968e"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-1ecaa1e81e25.mp3",
+    "bytes": 29301,
+    "gitBlob": "d261f4747c57bb291f61d4db1bca2ac884ee5fb1"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-1fd731321d27.mp3",
+    "bytes": 32226,
+    "gitBlob": "fcd77a4daf8937e056444fd6d6e75cab77420bf6"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-200595efed86.mp3",
+    "bytes": 24703,
+    "gitBlob": "745d413619b254aa072e783711a2dd3c917fcea5"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-20e4802bf61f.mp3",
+    "bytes": 33062,
+    "gitBlob": "0f9c1de7a9ea5209cd75ad3c592674b7d099c86b"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-211b122503c9.mp3",
+    "bytes": 16762,
+    "gitBlob": "c1d6007c7f10b408bfb55ff8a10472e25277735c"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-239101410ce7.mp3",
+    "bytes": 10075,
+    "gitBlob": "297b06602719c19751936e1a073451a3edf712cd"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-25248177f5d1.mp3",
+    "bytes": 21777,
+    "gitBlob": "4cfc2ea310fe3768dbe7ca7d78cc237e8b5c01fb"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-27b114bdd284.mp3",
+    "bytes": 18016,
+    "gitBlob": "2b150132ade05437d12fe16ac4f31a78c6c982bc"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-29c879a5b799.mp3",
+    "bytes": 23449,
+    "gitBlob": "b87b2b5f0c0ddce5ef73d834bd2f2aaa8c18683f"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-2a98eedf112f.mp3",
+    "bytes": 13836,
+    "gitBlob": "c18d8dcf6be3f5f057097f7d023ea7cff26944ad"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-2b8704441765.mp3",
+    "bytes": 22613,
+    "gitBlob": "bfb7c94f12b7eb9d5e5fad9b5bef6946037b2de5"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-2e54338f8610.mp3",
+    "bytes": 64409,
+    "gitBlob": "9f6aa52113f6d745dbf1d78f01378a5688e833eb"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-2ffc77da7b3f.mp3",
+    "bytes": 18016,
+    "gitBlob": "074b4de1f374f4b36e38093f798911db7e3a648b"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-308767fde297.mp3",
+    "bytes": 13836,
+    "gitBlob": "3c9960ca68a969634721ed4b4476fd461ec0e988"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-3141593a1c9d.mp3",
+    "bytes": 54378,
+    "gitBlob": "4b9196d73f850305c810f3eb9dc31f30520650c0"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-31ac40401ca8.mp3",
+    "bytes": 15926,
+    "gitBlob": "99588b741e2a5b123c3583a8ce1654683a859d01"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-383407311440.mp3",
+    "bytes": 27211,
+    "gitBlob": "0d8df8c149b384c14d91ffde460c0dbbb3c55348"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-3b14d2243587.mp3",
+    "bytes": 23449,
+    "gitBlob": "38150b38c2e7c69d3f8acb5b570bcda40dbad33c"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-3d94cfec7c01.mp3",
+    "bytes": 41004,
+    "gitBlob": "76a81fed9975d8dfd6cad3bad55ff859de6ab99a"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-42c3bfb9a2b4.mp3",
+    "bytes": 27211,
+    "gitBlob": "9e9098e4f7f0cc63bc629c79cd6c33cd8560f226"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-43ebc224a239.mp3",
+    "bytes": 13000,
+    "gitBlob": "15676cca3a31b1577db8d1019c3f388d498d5978"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-45ac1e9fe1de.mp3",
+    "bytes": 20524,
+    "gitBlob": "60d135fa5adbfd372b9b3d01af9b735b982896d8"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-465352a1fb00.mp3",
+    "bytes": 18852,
+    "gitBlob": "8b2ffe74042e2c23339cd66d9e990347a2cd9d2f"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-480e1453b996.mp3",
+    "bytes": 19688,
+    "gitBlob": "b67fef7fa2d4881badbdc60767d6e92d81e0eb74"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-48aebe4e6970.mp3",
+    "bytes": 16762,
+    "gitBlob": "d607f501fe8b8a87f1b0a77d541e0752c4247154"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-492f4059781a.mp3",
+    "bytes": 21777,
+    "gitBlob": "626ad6777e4e4ebfa6fdba3c2fda8969952c8b8a"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-4b4b13be3859.mp3",
+    "bytes": 27211,
+    "gitBlob": "5f3305dcb334865a414bb28dd75c398d84774a3c"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-4da90a3fd46c.mp3",
+    "bytes": 15090,
+    "gitBlob": "d3b131abfaa39151ba9568d2ce4c499c93bb5b6e"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-549daf1f1de8.mp3",
+    "bytes": 26375,
+    "gitBlob": "d9c4dd3107a5220a0104fb7a8172dd884f6fd26d"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-5d311a6c90d7.mp3",
+    "bytes": 25539,
+    "gitBlob": "d676b0ef6993516df527268e3cbed55d5dd1d22d"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-610e06dfd154.mp3",
+    "bytes": 14254,
+    "gitBlob": "7e02b976ab5d508892ca44701fd55e89013a3083"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-632f5041e805.mp3",
+    "bytes": 17598,
+    "gitBlob": "4eb139ae6ec5029303d0b90d3534a51ed76ec19d"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-640222e0d776.mp3",
+    "bytes": 13836,
+    "gitBlob": "8a163e06c6a0c5e48c775b7a3fd4c82e85ea8b9d"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-68873cb0ae3a.mp3",
+    "bytes": 35152,
+    "gitBlob": "216c666afcb8177d20d36fa0480c1648a57e85da"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-6aa0f73ed972.mp3",
+    "bytes": 20942,
+    "gitBlob": "2e47d583d1daa7a3cfdf380598038325dc36e7b9"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-6d611e695fd8.mp3",
+    "bytes": 9239,
+    "gitBlob": "dd896eb65cea3917a91b6435658969d149848962"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-6de493fd3169.mp3",
+    "bytes": 22613,
+    "gitBlob": "8f7414e6ac2d570c6f63124a88cdbdd0a316b7a7"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-753cad07ca15.mp3",
+    "bytes": 21777,
+    "gitBlob": "db0c1bffebe6684e02b6084a9dd2e96ed9ce13ae"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-77753d8b9f45.mp3",
+    "bytes": 10075,
+    "gitBlob": "2a23d3fde09a327b9559fa3d3fab4395314348dc"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-780e5837165b.mp3",
+    "bytes": 13836,
+    "gitBlob": "45964a6d4340f3fe2be2f50e7c38c46e965bb49a"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-7eb5cca77acb.mp3",
+    "bytes": 14254,
+    "gitBlob": "7ba15ba5a8da8cc7b79c6c9833e3449557a816cc"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-81be04b23e76.mp3",
+    "bytes": 19688,
+    "gitBlob": "89e2cb9312f37a13f5e30ec28147fd686aff2133"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-85dfddc7134b.mp3",
+    "bytes": 15926,
+    "gitBlob": "25cb233e9ae89b595b53c10c7aa1c8fe93ca62f3"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-90ff5f3518f5.mp3",
+    "bytes": 24285,
+    "gitBlob": "f7944b0b01e6184c626a71a1120efe106b8f2a39"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-92ce22fee124.mp3",
+    "bytes": 20942,
+    "gitBlob": "aa78cf6f8617b402bd40372f313d1b91815f79dd"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-930d0f9640e4.mp3",
+    "bytes": 11328,
+    "gitBlob": "097c06fb99e3e3429f1ad68e799dcde361762914"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-941e93bf213e.mp3",
+    "bytes": 12164,
+    "gitBlob": "fa3c580f490dfae6e956fd43b2202d0c19335740"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-99c7e97c98c0.mp3",
+    "bytes": 133373,
+    "gitBlob": "49b2ec253ec0b98c3f1a20eea8f2999ab2ad8860"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-9a08dbde529e.mp3",
+    "bytes": 20942,
+    "gitBlob": "c6a1595e40acef9a27ab6db97cc5d8d96ab4e20f"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-9b850bb838a8.mp3",
+    "bytes": 13000,
+    "gitBlob": "7e9849c2097ac6b37a41d061891b7ea6dd1abd97"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-9cc3304964a3.mp3",
+    "bytes": 11328,
+    "gitBlob": "0aaf4a0f5954cd776017db07409b66a2b302c31e"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-a376700976d7.mp3",
+    "bytes": 27629,
+    "gitBlob": "a95f284dd50971437c06ae732128da9791a97e3d"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-a40ffc6ce592.mp3",
+    "bytes": 10911,
+    "gitBlob": "6935eb1a52cf9dd3493cbc4af19beefd71575448"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-a5ebf75877b4.mp3",
+    "bytes": 41004,
+    "gitBlob": "37398cb6b440a8f506c1ef663a568e927ea37a0d"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-a8902a82734a.mp3",
+    "bytes": 24703,
+    "gitBlob": "271ee0344230ad2efaebb7a97e8d1760f4ed676b"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-a8a6aa7ae3b3.mp3",
+    "bytes": 12164,
+    "gitBlob": "c5262296a54b0840e8bdadd55464891fec40e74b"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-a8fa7357e25b.mp3",
+    "bytes": 12164,
+    "gitBlob": "5d525ed0d574f09a2dfece301ecd8be0b42a79e2"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-a8fc65386727.mp3",
+    "bytes": 21777,
+    "gitBlob": "85a2e0bcd09460032de51f9a653b077e56777f2e"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-ab5acb662fb5.mp3",
+    "bytes": 17598,
+    "gitBlob": "7867beb1d51e2cd9661667bce4b50c268fe41397"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-b757c90281ee.mp3",
+    "bytes": 13000,
+    "gitBlob": "c821028a763e63ad1636c33be8dff0d5b8a9352e"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-b94145d639e6.mp3",
+    "bytes": 22613,
+    "gitBlob": "210fabbc56fe305953a365fb2c52fdcc7f374b3c"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-b9c31e4c82cf.mp3",
+    "bytes": 18852,
+    "gitBlob": "adca2dc99e2e16e08fcfe1a54016b487476b9d4c"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-bd00dcb7c5b7.mp3",
+    "bytes": 14254,
+    "gitBlob": "78d92ac0ec6c92cc4483cb8fa8925ec3ecb6f561"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-c0395cccedb6.mp3",
+    "bytes": 10911,
+    "gitBlob": "e43c53eb30377a97ea019585284c44c46029043a"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-c1ff018af109.mp3",
+    "bytes": 23449,
+    "gitBlob": "5041389b14fddfa9475f6eb2881c06949dba6f65"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-c54d5957b6d4.mp3",
+    "bytes": 48527,
+    "gitBlob": "9874748a242d021e04e498981f2720e0ed05be0a"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-c8c9dc64aced.mp3",
+    "bytes": 12164,
+    "gitBlob": "ff3e47e2172cc034877faa71a85f23dfe57edb4a"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-cc208f1dda15.mp3",
+    "bytes": 15926,
+    "gitBlob": "e0196103963ff9fc1d4efb95ea533f6666239f12"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-cc67d3e9caf0.mp3",
+    "bytes": 26375,
+    "gitBlob": "872899fccaf5d6b5cd78a662d38bdee0ee473c8c"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-cfa169a3dc78.mp3",
+    "bytes": 8403,
+    "gitBlob": "26f24c8b34e5ec30d48ab228ada3005bdff041f6"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-d093f1782c12.mp3",
+    "bytes": 11328,
+    "gitBlob": "2c1805380cf225ae0e241be7937dd2df312d2e41"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-d97b90a6d54e.mp3",
+    "bytes": 8403,
+    "gitBlob": "1b0712b582dfbee09b984745a541a193894bcd74"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-dcf9e09fbfe0.mp3",
+    "bytes": 22613,
+    "gitBlob": "841c66c440d80153b503c22bb8a24396a33de5b6"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-e42d2e1230ff.mp3",
+    "bytes": 12164,
+    "gitBlob": "02f7863dbe2af37fe0a52706e14b58d589f46104"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-e61a5b7e36cd.mp3",
+    "bytes": 34316,
+    "gitBlob": "4767f80d513fc74022a3dab356a131635959e681"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-e6c4a53338aa.mp3",
+    "bytes": 12164,
+    "gitBlob": "82d54d1336a642bfef6ba88960590c30138ed810"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-e743198ac7aa.mp3",
+    "bytes": 17598,
+    "gitBlob": "29d951f721dab928c303a078430f079cb13b5aa8"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-e7a2ba2045df.mp3",
+    "bytes": 18852,
+    "gitBlob": "5b78f282870bbd6ccc390cfdcf0da1f1f4c914c2"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-eb7b0cfc9b60.mp3",
+    "bytes": 132537,
+    "gitBlob": "82200adbcc87fab9e60d568ce8dace1a678da6dc"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-ec935f7b75df.mp3",
+    "bytes": 19688,
+    "gitBlob": "e30986c5b973dbdde030e3b01f040d4bbf2bac8f"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-eceedfd38338.mp3",
+    "bytes": 11328,
+    "gitBlob": "7c310b3a5aa61549ed1087bd25e9b1de69058d3e"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-ecf78584ec95.mp3",
+    "bytes": 15926,
+    "gitBlob": "a40c66d485168afb7978cb6ee80f12996ceda2eb"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-f17abf0f2055.mp3",
+    "bytes": 28465,
+    "gitBlob": "d62a8c5e1c51d6b2c1291548949c3ca170bc4e28"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-f2aea80be3e4.mp3",
+    "bytes": 15926,
+    "gitBlob": "e5966882b93a6d2d7aa8bfd6f122fbb56475610d"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-f3736d27f9d7.mp3",
+    "bytes": 20524,
+    "gitBlob": "d7091b50e240b8ffa035a5a1ff6f51573c20a4ff"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-f5a2573e3125.mp3",
+    "bytes": 12164,
+    "gitBlob": "daeb70a775405ba37ad91b1edfd1b075fca9302d"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-f96fcb348ff2.mp3",
+    "bytes": 20942,
+    "gitBlob": "4768cbb1b03148699b7609d9246a13d4e4652764"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-f97fd1efdcb9.mp3",
+    "bytes": 21777,
+    "gitBlob": "325dab12d625f645446bf4a57b14aa1fd0369106"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-f9af46b91604.mp3",
+    "bytes": 25539,
+    "gitBlob": "94f7d2cfeba9b0a924ac02fdc841f99d6dff248a"
+  },
+  {
+    "path": "public/audio/clips/jack/jack-bennett-fa0505b74e44.mp3",
+    "bytes": 30137,
+    "gitBlob": "1da533e546c6695a1dfef9524192963f2b22942d"
+  },
+  {
+    "path": "public/audio/clips/lena/lena-ortiz-183aa0466dc6.mp3",
+    "bytes": 19688,
+    "gitBlob": "047e9e2f1d243acdf19b77e53cb3eaf58e93f1f4"
+  },
+  {
+    "path": "public/audio/clips/lena/lena-ortiz-1d9f80cf34fe.mp3",
+    "bytes": 18852,
+    "gitBlob": "1d95aba7eaac6adddf6a02258d525ef530a69f7f"
+  },
+  {
+    "path": "public/audio/clips/lena/lena-ortiz-1ddb7ebe9f6a.mp3",
+    "bytes": 15926,
+    "gitBlob": "b44666f16fe197c84543d0749893b18e166db0f0"
+  },
+  {
+    "path": "public/audio/clips/lena/lena-ortiz-59d77df9f648.mp3",
+    "bytes": 20524,
+    "gitBlob": "9416980321725a303b1d5dea99b2d6a2522118e8"
+  },
+  {
+    "path": "public/audio/clips/lena/lena-ortiz-877f35951f4b.mp3",
+    "bytes": 21777,
+    "gitBlob": "4cd049f0d20d5dce2d708f37ce12141ab3288b8f"
+  },
+  {
+    "path": "public/audio/clips/lena/lena-ortiz-8a2bc98d79c3.mp3",
+    "bytes": 82799,
+    "gitBlob": "3892d6f7b1ca5255ddca632ac88ee849938cf36b"
+  },
+  {
+    "path": "public/audio/clips/lena/lena-ortiz-9c95d5dc1ebc.mp3",
+    "bytes": 15926,
+    "gitBlob": "cbfcad43dae9b6ff7f56dc0e9448714b1f2af8c0"
+  },
+  {
+    "path": "public/audio/clips/lena/lena-ortiz-a79634541f5a.mp3",
+    "bytes": 13000,
+    "gitBlob": "45715378401f4f5809858f1e8d548b9d4d22e08e"
+  },
+  {
+    "path": "public/audio/clips/lena/lena-ortiz-a7bbe431a3f7.mp3",
+    "bytes": 65663,
+    "gitBlob": "397a73e0e349983f7e923229df9af1c3a65779ee"
+  },
+  {
+    "path": "public/audio/clips/lena/lena-ortiz-b20ef6a3bec7.mp3",
+    "bytes": 13836,
+    "gitBlob": "d09d3b546b47e02cac420454363d93813eac46fa"
+  },
+  {
+    "path": "public/audio/clips/lena/lena-ortiz-d21ae94b73c2.mp3",
+    "bytes": 33062,
+    "gitBlob": "97aba2c7b72f391d8ab2e2ade113db3f296f6663"
+  },
+  {
+    "path": "public/audio/clips/lena/lena-ortiz-f1942462de08.mp3",
+    "bytes": 51453,
+    "gitBlob": "74a626f4dfc5451dd3e620ecfd695b89c29ee715"
+  },
+  {
+    "path": "public/audio/clips/narrator/narrator-0444653f442f.mp3",
+    "bytes": 38914,
+    "gitBlob": "821d86a6e4f4f7a6312569de949ba6e672f22582"
+  },
+  {
+    "path": "public/audio/clips/narrator/narrator-0b2f58c70a4c.mp3",
+    "bytes": 87815,
+    "gitBlob": "ae54c19b099a370cbf3b0068463f6652c072fbf2"
+  },
+  {
+    "path": "public/audio/clips/narrator/narrator-1bb0c18f4491.mp3",
+    "bytes": 63573,
+    "gitBlob": "395c47b8f5a58601a2ea20feb2c05e12e9400f91"
+  },
+  {
+    "path": "public/audio/clips/narrator/narrator-34f450c1a659.mp3",
+    "bytes": 45601,
+    "gitBlob": "2f09663c24ab46c7ffd9f5e6f8459f6a2d6125f6"
+  },
+  {
+    "path": "public/audio/clips/narrator/narrator-550b3249d9e8.mp3",
+    "bytes": 72351,
+    "gitBlob": "4ad987d1bc390ea6e0225b70c78c7830d20c03b9"
+  },
+  {
+    "path": "public/audio/clips/narrator/narrator-646dff306d03.mp3",
+    "bytes": 403792,
+    "gitBlob": "0545ec03992ca84ff3e4871ae6205d2868cbf58e"
+  },
+  {
+    "path": "public/audio/clips/narrator/narrator-91b25dbe2d24.mp3",
+    "bytes": 92413,
+    "gitBlob": "ece0cca382821add95d518fe19316306ae7bfab5"
+  },
+  {
+    "path": "public/audio/clips/narrator/narrator-920e81486ce0.mp3",
+    "bytes": 25539,
+    "gitBlob": "6e0c4addc889e820f30edb42d3fe2633b31df595"
+  },
+  {
+    "path": "public/audio/clips/narrator/narrator-a1d352c4ee9f.mp3",
+    "bytes": 61066,
+    "gitBlob": "9f8791bd223d76d2b46446c532192c88ed0e96b6"
+  },
+  {
+    "path": "public/audio/clips/narrator/narrator-a6f00f720f9c.mp3",
+    "bytes": 47691,
+    "gitBlob": "e4f9682cf17a91a70fc2b0ec6b60da5447510138"
+  },
+  {
+    "path": "public/audio/clips/narrator/narrator-b7b08a6201b3.mp3",
+    "bytes": 27211,
+    "gitBlob": "2e01e23482d64a7a764111dee61cac6250e5a854"
+  },
+  {
+    "path": "public/audio/clips/narrator/narrator-c2bcc3f581cf.mp3",
+    "bytes": 117072,
+    "gitBlob": "3ad081d5baa6fa3d5305b77febd1a9de1e03b38b"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-01bc4c5eccf6.mp3",
+    "bytes": 18852,
+    "gitBlob": "5a1b66403e8109559fd357d84841b17a76e08145"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-0439755d1cb4.mp3",
+    "bytes": 20942,
+    "gitBlob": "3fd6ae7312c3b0915611461357a0a996e7a9039f"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-06efb30fb3b2.mp3",
+    "bytes": 14254,
+    "gitBlob": "60a7f9f133ed482443e4e366925097ec17c5d1ab"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-0b3888b61ebd.mp3",
+    "bytes": 22613,
+    "gitBlob": "2409a556dc8b495ec946dbd345b4a5566a95e34e"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-0df3f0a6bee0.mp3",
+    "bytes": 16762,
+    "gitBlob": "a9b20b7a3b5cd9ad7ebc71389c2bfd644e97e150"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-0e24152e8551.mp3",
+    "bytes": 13836,
+    "gitBlob": "c5dfdb0deabaf43df8b0fbd2f3692f62c63c3969"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-1062d8c5e927.mp3",
+    "bytes": 9239,
+    "gitBlob": "af723d39599381b908bda1332651c2441452c91d"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-11edcf15d86c.mp3",
+    "bytes": 22613,
+    "gitBlob": "6806fbf45f3834f8656bd7b46ef1ec2d596b0b00"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-13bbe7381eb1.mp3",
+    "bytes": 13000,
+    "gitBlob": "6a38c4472e4b2040aefe83d1908a9a05a35a681a"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-1b1502996659.mp3",
+    "bytes": 19688,
+    "gitBlob": "c64797d3efa6d8b9d6528e913cca9116b26f5e08"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-1b1537965df2.mp3",
+    "bytes": 16762,
+    "gitBlob": "288b23dd612af1d1d08d30d39f3b7c9e49b9476e"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-1d0a1f8b9f13.mp3",
+    "bytes": 13000,
+    "gitBlob": "d0d0242121424acdd230c01cecd7cafb713c7ec0"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-1ebe0c684d41.mp3",
+    "bytes": 10911,
+    "gitBlob": "b0907b05dbf7cfb13106a58ba75d15cca7cd93a4"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-21740b10948d.mp3",
+    "bytes": 12164,
+    "gitBlob": "e933748694bad8fe5d94293fb47b03109bab3d18"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-2259f23f0542.mp3",
+    "bytes": 21777,
+    "gitBlob": "8e694183a94af16fdbf357a1fb01576bf901a82d"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-2a350447dd17.mp3",
+    "bytes": 18016,
+    "gitBlob": "1aa9af5b60a830ba095731ee1fb2aaede1369579"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-2cf2fe73c1cd.mp3",
+    "bytes": 18852,
+    "gitBlob": "beb18421b4a211dde04bfbc97527591150b2bdeb"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-3a3ecc089ad1.mp3",
+    "bytes": 10075,
+    "gitBlob": "169aa4753290e46aa2c732866ccdceacf4656ec3"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-3f51406be04d.mp3",
+    "bytes": 15090,
+    "gitBlob": "29372125beed0d0ab458e1a69804b412d3712a80"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-41421ed41839.mp3",
+    "bytes": 30137,
+    "gitBlob": "cab0f25d1db6c7d1dcc94f5cb482b175c87fea69"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-415320486988.mp3",
+    "bytes": 19688,
+    "gitBlob": "bc3bf57fc0b8998e0e08c2c3e0f56c0c04131d33"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-48c297bd2c4b.mp3",
+    "bytes": 24703,
+    "gitBlob": "7be5d115d42cff3a0ada10a7efdbac2807cff576"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-48d614b54be7.mp3",
+    "bytes": 16762,
+    "gitBlob": "f34641d5f209f15711d1cff0ba46fbc7de981a05"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-4db8c4b299cf.mp3",
+    "bytes": 47691,
+    "gitBlob": "4312d34f38fd8dcb6680d21f80ff31af86f05bc4"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-4f136b57e3c4.mp3",
+    "bytes": 17598,
+    "gitBlob": "2ccf3b5b1b3fe06b069f8aa1394a29382b5b4df0"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-512e0e85d0e7.mp3",
+    "bytes": 20524,
+    "gitBlob": "abb45c6d1d63e6b3324d9d3dd00d402b6860fd46"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-563ad9289e68.mp3",
+    "bytes": 12164,
+    "gitBlob": "04d1b04234a5df3b25fefd349caf483a13729f2f"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-5965a9732934.mp3",
+    "bytes": 19688,
+    "gitBlob": "bf483bda3c1fc17746697faab95b842d28fffb7a"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-5a071d01be77.mp3",
+    "bytes": 14254,
+    "gitBlob": "fc175537856a4379b8661d32e9401d0cdd2459be"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-5a95550ec41a.mp3",
+    "bytes": 21777,
+    "gitBlob": "fb3ea36dbc608a1a05a28424980b28fa031afe1a"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-629f5e5193c0.mp3",
+    "bytes": 19688,
+    "gitBlob": "1bd4995409b53e0ef8aaf677df53c00934229a45"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-65056aba0745.mp3",
+    "bytes": 13836,
+    "gitBlob": "4c4bea71d44beb468e46f84107b0ca6ec04db70a"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-6fe63af821c3.mp3",
+    "bytes": 20524,
+    "gitBlob": "5bba6940489dfdd96407914c762ca990231f0a79"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-722b17edf2d6.mp3",
+    "bytes": 33898,
+    "gitBlob": "0280181eca81f599fd0007455d1fb54ad95aeb41"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-726f339a2436.mp3",
+    "bytes": 14254,
+    "gitBlob": "f04ebfc6372ff0ce03a3a71275b74f067dedabc4"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-74e51eb863fe.mp3",
+    "bytes": 26375,
+    "gitBlob": "2f350ca4a5f0921ec96110304c8b32e6a8a9946b"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-792a914ed1ed.mp3",
+    "bytes": 17598,
+    "gitBlob": "13197d377744ab5b379d0f87e666a74411a30603"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-7aa1e8332530.mp3",
+    "bytes": 28465,
+    "gitBlob": "9338c2bbd2f985a87efee7440aaa75fa9010028c"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-7cb92747650b.mp3",
+    "bytes": 15090,
+    "gitBlob": "822970509362053079152cadb1ff8452a25ea335"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-81ff0dc894cf.mp3",
+    "bytes": 13000,
+    "gitBlob": "34f8eecf4464be3b1290ee626a8bd9bc5a7ae752"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-85bf29553f5b.mp3",
+    "bytes": 18016,
+    "gitBlob": "400214cfa06ebb6a7bc87aba8247b69a64e8f753"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-85c20ef1167a.mp3",
+    "bytes": 20524,
+    "gitBlob": "5d2e065d8b73db3d6d9584a272f207899e704c3e"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-8929c6c39671.mp3",
+    "bytes": 11328,
+    "gitBlob": "8de393ebc8a33a95648e4bf3b04ec04e1bc60335"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-8c55da68698b.mp3",
+    "bytes": 33062,
+    "gitBlob": "c985453e7da51ffa4490e2cfc8e7251cad0beaf2"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-8e2def3c83f1.mp3",
+    "bytes": 53960,
+    "gitBlob": "7f4ba4eb01ec71149c09e8ff75c4a8e6af6252da"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-937447a849cb.mp3",
+    "bytes": 9239,
+    "gitBlob": "1d99c76ff59f2ff358a3542d797e85b117374182"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-9551539fdf4c.mp3",
+    "bytes": 27629,
+    "gitBlob": "f0a3a64ac104933cd32b7dc5828043755326c592"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-958eaedc07e7.mp3",
+    "bytes": 16762,
+    "gitBlob": "fc17b34b06bde45b1da2c31528a063ee4210f5cb"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-9c7975427519.mp3",
+    "bytes": 10911,
+    "gitBlob": "5543894077def0d1f4f005d5038f8d95ee712f7c"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-9caa3294cc78.mp3",
+    "bytes": 24285,
+    "gitBlob": "8b10e30e339745c9586d3a687c1a9ae3f5624e70"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-a016c88a726f.mp3",
+    "bytes": 18852,
+    "gitBlob": "2b7f78a102db3f5cf8615f90e42eea2cd97ecfde"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-a1dc5fafa6a9.mp3",
+    "bytes": 18016,
+    "gitBlob": "c0109b9d35c08a09ccd6efea32535313c1fde5e3"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-a7934bd42c67.mp3",
+    "bytes": 19688,
+    "gitBlob": "884e641d39f03cfe99b021105506f1bc6d391a9f"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-a987593b7315.mp3",
+    "bytes": 9239,
+    "gitBlob": "17c982888387ec6de56e8210004164ccb4f191fd"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-aa9dec3d0c15.mp3",
+    "bytes": 35152,
+    "gitBlob": "cdbc00024cb517f8357a7c19492037e5b356a2c2"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-ad67f921e02e.mp3",
+    "bytes": 27629,
+    "gitBlob": "d0b961561d95bab33f44ba632810b17b01ea2a02"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-adbb35e72258.mp3",
+    "bytes": 19688,
+    "gitBlob": "fb483808ef579364ba675bfe5d1273213c6ae49a"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-b37eac4867d0.mp3",
+    "bytes": 12164,
+    "gitBlob": "fa1b879aad7ea17a08d8f88c25c441e730562e30"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-b4091489c6ca.mp3",
+    "bytes": 20942,
+    "gitBlob": "560b7a62756905d836dd47b35ce3f5ff503ef214"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-b4465ab7292c.mp3",
+    "bytes": 21777,
+    "gitBlob": "1bf1f8785b03d24ad7addd2bf3d33c2c1ef97c30"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-b6e7be6e8f2c.mp3",
+    "bytes": 12164,
+    "gitBlob": "aefea2922b7dd2e0e286f3bcd34b81941db02577"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-b96f9b147d4b.mp3",
+    "bytes": 33062,
+    "gitBlob": "319001e285b6ffcd62ab62abe765cf3966ee661b"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-baa0baf1f9c0.mp3",
+    "bytes": 17598,
+    "gitBlob": "6c1bc094ce284aa016e7b30ecb994042a3ceec6e"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-bd865e7dd361.mp3",
+    "bytes": 27629,
+    "gitBlob": "ac242de4cb9adb74b93ea20cfaef968bc50f80fb"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-c0ca574b594a.mp3",
+    "bytes": 15090,
+    "gitBlob": "30da40de27dc1da15f91b070446210144ee1ef2b"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-cd46b63bc354.mp3",
+    "bytes": 17598,
+    "gitBlob": "3c156e5d89c81d0c6e687aeff4a2a745febdd227"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-d26997d1aa80.mp3",
+    "bytes": 18852,
+    "gitBlob": "22b74992f96a05a1a5477c98eff51c876b0105a1"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-d349b5ce84f9.mp3",
+    "bytes": 20942,
+    "gitBlob": "300578f500f1646399a71348cd93ba63654f0698"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-d446f7575941.mp3",
+    "bytes": 14254,
+    "gitBlob": "f56d6eeb387121a8a58dd2123535b862b9703696"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-d5bc7656345e.mp3",
+    "bytes": 27629,
+    "gitBlob": "a0ff3536fe8d3155e764ebf2457d86f1add5f11a"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-da6d3f2466a2.mp3",
+    "bytes": 13836,
+    "gitBlob": "2005b7b3d4393a61d684b2cad616e1e14cdaa6f3"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-dc74b2a7f99a.mp3",
+    "bytes": 11328,
+    "gitBlob": "c96093577519609d678d270bc070a408e792a645"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-dc90fc8720b4.mp3",
+    "bytes": 52288,
+    "gitBlob": "3c0acfc96372bd2d896a8258628103e2d46582b0"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-dcec64e6da6f.mp3",
+    "bytes": 18016,
+    "gitBlob": "56cc39f22117125b3d33e3073d45194446aa81e0"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-ddc844d802c1.mp3",
+    "bytes": 27211,
+    "gitBlob": "72ca63b845b851493fcc5b3751f76980be498639"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-deff6b10a48b.mp3",
+    "bytes": 20524,
+    "gitBlob": "17799155c05d38aa72d0212b12f8060ec0760b05"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-e240820580d9.mp3",
+    "bytes": 31391,
+    "gitBlob": "5e1536813fffd75dc5b8d0c4bb18e10aed881835"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-e56721982863.mp3",
+    "bytes": 9239,
+    "gitBlob": "e512839d8e73ec9875bc5c151c18520d975beea9"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-e9ec137bc087.mp3",
+    "bytes": 13836,
+    "gitBlob": "50f79bcf289814bbd98416857676ce338c488cf9"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-ea3f24b4acf1.mp3",
+    "bytes": 9239,
+    "gitBlob": "75594ae5a4487fe0b3fe70315d9f003d62fb8721"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-ec2c9df490ca.mp3",
+    "bytes": 35988,
+    "gitBlob": "48dcd0c48d9536c43dd660c34c1db76b679031b0"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-ecb1ce66f7bc.mp3",
+    "bytes": 21777,
+    "gitBlob": "174dbed936e0860168bb33e8a049e6c1c6095523"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-ed9388bef578.mp3",
+    "bytes": 21777,
+    "gitBlob": "b9c20812e4f4c30fa10f238298e513d9d30c709c"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-f00492e96b79.mp3",
+    "bytes": 31391,
+    "gitBlob": "f893fc6347dba7da1bfaac888c6d338a3ebffb0e"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-f12af34376aa.mp3",
+    "bytes": 15926,
+    "gitBlob": "a02eabeab68a78094b4962e1c30f59085b948604"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-f7770a9d0f31.mp3",
+    "bytes": 51035,
+    "gitBlob": "d18e25f29022d0c53a63208c704a1e13ad44acb8"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-fe4505ac766b.mp3",
+    "bytes": 30137,
+    "gitBlob": "98fe3933c15ff13fe1b396aab137465e87443426"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-febee7b24bb6.mp3",
+    "bytes": 13836,
+    "gitBlob": "4b964723fc06d2fa868fa8d56bf3bbefdb3641ed"
+  },
+  {
+    "path": "public/audio/clips/sarah/sarah-bennett-ff51fdb19894.mp3",
+    "bytes": 20942,
+    "gitBlob": "bbaf72a50c6cacebfeb109461af3f470ef7567f8"
+  },
+  {
+    "path": "public/audio/clips/system/system-0fe0cf2a5742.mp3",
+    "bytes": 17598,
+    "gitBlob": "8ba73c985c7e6de78bbbbde22cb033a73e54c44a"
+  },
+  {
+    "path": "public/audio/clips/system/system-28a18477a67e.mp3",
+    "bytes": 18016,
+    "gitBlob": "770e9377256b806145a15a5a9e00046d32fd181b"
+  },
+  {
+    "path": "public/audio/clips/system/system-2e8d8d3e2911.mp3",
+    "bytes": 35988,
+    "gitBlob": "f9ba24391acf4b7ae362247c59ed059f3275632e"
+  },
+  {
+    "path": "public/audio/clips/system/system-33aa4d2852d2.mp3",
+    "bytes": 19688,
+    "gitBlob": "db9d0d9c101c120c5df41b46901bacaa698067bf"
+  },
+  {
+    "path": "public/audio/clips/system/system-49a4bf38c005.mp3",
+    "bytes": 19688,
+    "gitBlob": "50097929546bed2de9412afffaf30b40e22e9113"
+  },
+  {
+    "path": "public/audio/clips/system/system-610b0d021f1b.mp3",
+    "bytes": 26375,
+    "gitBlob": "1457ce91d4b777a93edaf7d1d60445b6b02e1730"
+  },
+  {
+    "path": "public/audio/clips/system/system-74d1f262d4ed.mp3",
+    "bytes": 17598,
+    "gitBlob": "bf1dc518c424a5f96a3dbbf188bc759de8fc16ac"
+  },
+  {
+    "path": "public/audio/clips/system/system-a6ce88995aab.mp3",
+    "bytes": 17598,
+    "gitBlob": "155b497abc6b44bc81e7d1c944d8e402afcc605b"
+  },
+  {
+    "path": "public/audio/clips/system/system-b24e7deec995.mp3",
+    "bytes": 42675,
+    "gitBlob": "f648c9532af5238af0c248db2dd57763f93b0bb5"
+  },
+  {
+    "path": "public/audio/clips/system/system-cf9c6f65b3f9.mp3",
+    "bytes": 26375,
+    "gitBlob": "6b3bd47986eadbc345336c151b58d39263c9ee4f"
+  },
+  {
+    "path": "public/audio/clips/system/system-e71707fdf287.mp3",
+    "bytes": 20524,
+    "gitBlob": "9d89f715b7cf837b2b34c221fcf74e7c4ad9b8c4"
+  },
+  {
+    "path": "public/audio/clips/system/system-f0a87639d1a7.mp3",
+    "bytes": 19688,
+    "gitBlob": "9dc5f39cf14c91204267b35111f7320c5990e2d8"
+  },
+  {
+    "path": "public/audio/clips/system/system-f6a28699a3b1.mp3",
+    "bytes": 37660,
+    "gitBlob": "4beb1f615250f6428644de6179ae3de1d09ee600"
+  },
+  {
+    "path": "public/audio/clips/system/system-fcd581c75258.mp3",
+    "bytes": 30137,
+    "gitBlob": "70fc396346563903fcb3c4cb8273c541a2bbac3f"
+  },
+  {
+    "path": "public/audio/sfx/alarm/amb_console_alarm_bed.mp3",
+    "bytes": 193141,
+    "gitBlob": "72aeb775cbfcc262176f114bfe18a4f1e653be93"
+  },
+  {
+    "path": "public/audio/sfx/alarm/amb_settlement_sirens.mp3",
+    "bytes": 193141,
+    "gitBlob": "afcc80a556a5ca12fb3cbf4704fa2ad98c42720b"
+  },
+  {
+    "path": "public/audio/sfx/alarm/sfx_alert_warning_hit.mp3",
+    "bytes": 24703,
+    "gitBlob": "30f9041a65f3f4b349b1357cbc4e0c384a070d2a"
+  },
+  {
+    "path": "public/audio/sfx/alarm/sfx_console_alarm_erupt.mp3",
+    "bytes": 48945,
+    "gitBlob": "ee0f73750f9f69bbba5cf48776d063e4f676210d"
+  },
+  {
+    "path": "public/audio/sfx/ambience/amb_computer_lab.mp3",
+    "bytes": 901920,
+    "gitBlob": "f7fbe7e3db6cd6bcf3a25599a8a9fb1be2283b76"
+  },
+  {
+    "path": "public/audio/sfx/ambience/amb_intercom_channel_open.mp3",
+    "bytes": 160958,
+    "gitBlob": "6d18866fd6712add9c7d4cb57cf9533ed298d138"
+  },
+  {
+    "path": "public/audio/sfx/ambience/amb_night_outside.mp3",
+    "bytes": 3601440,
+    "gitBlob": "aa941d991990602710fe73cb706e2dea48acf3fc"
+  },
+  {
+    "path": "public/audio/sfx/foley/sfx_building_shake.mp3",
+    "bytes": 65245,
+    "gitBlob": "6a3eaf01bc08cbe98d3cb83210815573be2ef199"
+  },
+  {
+    "path": "public/audio/sfx/foley/sfx_chair_roll_fast.mp3",
+    "bytes": 33062,
+    "gitBlob": "5aa3c5c46b272b0f34739523a1153fb1c21b90aa"
+  },
+  {
+    "path": "public/audio/sfx/foley/sfx_footsteps_sarah_sneakers.mp3",
+    "bytes": 48945,
+    "gitBlob": "919721652aacf89746932902ac238abcae391605"
+  },
+  {
+    "path": "public/audio/sfx/foley/sfx_keyboard_typing_short.mp3",
+    "bytes": 48945,
+    "gitBlob": "fd869d5359d91aab493bf57a867129840387cdf3"
+  },
+  {
+    "path": "public/audio/sfx/foley/sfx_lab_door_slide.mp3",
+    "bytes": 40586,
+    "gitBlob": "737a20a59e55dcddfd9b40702d3fb8ffad55732b"
+  },
+  {
+    "path": "public/audio/sfx/foley/sfx_shutdown_lever_pull.mp3",
+    "bytes": 48945,
+    "gitBlob": "da63d6d03d1ba6a962a7e6f86b8a599085ab486e"
+  },
+  {
+    "path": "public/audio/sfx/interface/sfx_console_tone_soft.mp3",
+    "bytes": 24703,
+    "gitBlob": "0c9beb13ce331fdd041a878820605d33d8463d0e"
+  },
+  {
+    "path": "public/audio/sfx/interface/sfx_intercom_close.mp3",
+    "bytes": 17180,
+    "gitBlob": "878d3672fa7ed38d81d7388fbb7b157dbd8ecdb2"
+  },
+  {
+    "path": "public/audio/sfx/interface/sfx_intercom_open.mp3",
+    "bytes": 24703,
+    "gitBlob": "37f4cb19db59a6519e5ad59e97f8a277115d922a"
+  },
+  {
+    "path": "public/audio/sfx/interface/sfx_system_notify_soft.mp3",
+    "bytes": 24703,
+    "gitBlob": "9c3fabaa5c15a5903007117aaf1fd8341f32018b"
+  },
+  {
+    "path": "public/audio/sfx/interface/sfx_terminal_lock_engage.mp3",
+    "bytes": 33062,
+    "gitBlob": "0020baec2ce3a7e8a7a6fe8b850d2a81f040972a"
+  },
+  {
+    "path": "public/audio/sfx/interface/sfx_wrist_terminal_chirp.mp3",
+    "bytes": 24703,
+    "gitBlob": "b02472988a8f696eb254cf7ebd05e0dda6a66e3a"
+  },
+  {
+    "path": "public/audio/sfx/system/amb_tombs_array_power_rise.mp3",
+    "bytes": 321036,
+    "gitBlob": "6c0e0cf8c8f7638bd7e9f798d5f61ebf2441171e"
+  },
+  {
+    "path": "public/audio/sfx/system/sfx_access_denied_tone.mp3",
+    "bytes": 24703,
+    "gitBlob": "d99d5d6610648701e26e28fe1ecfdd824da05c5a"
+  },
+  {
+    "path": "public/audio/sfx/system/sfx_access_revoked_tone.mp3",
+    "bytes": 33062,
+    "gitBlob": "fbe19487ffa1f49ce88938a70f37533c800c9d3b"
+  },
+  {
+    "path": "public/audio/sfx/system/sfx_array_rings_move.mp3",
+    "bytes": 97010,
+    "gitBlob": "1b1e1c7fced0894f74c4ca199c5ba585827e3fdd"
+  },
+  {
+    "path": "public/audio/sfx/system/sfx_boundary_event_collapse.mp3",
+    "bytes": 65245,
+    "gitBlob": "18a7467be3dcbcfeb84ad39a06320c5f0d3d1dd0"
+  },
+  {
+    "path": "public/audio/sfx/system/sfx_boundary_event_return.mp3",
+    "bytes": 48945,
+    "gitBlob": "ce89e082b0655ec26ec2786c461acdcc2708afcb"
+  },
+  {
+    "path": "public/audio/sfx/system/sfx_distant_vibration_deep.mp3",
+    "bytes": 97010,
+    "gitBlob": "a107b353c7bf011b88feb229a632f35872080e84"
+  },
+  {
+    "path": "public/audio/sfx/system/sfx_equipment_power_up_soft.mp3",
+    "bytes": 40586,
+    "gitBlob": "a7b23ee36ab7919cb93b1a6db31d58e1d7fcb2da"
+  },
+  {
+    "path": "public/favicon.svg",
+    "bytes": 252,
+    "gitBlob": "ae0969b498f6f15c47dc3efebe95e1a62369d469"
+  },
+  {
+    "path": "public/models/jack-badge-desktop-59ea51bb-0.bin",
+    "bytes": 16777216,
+    "gitBlob": "bd5c1086fd14afc68d3971f9ee541279464dc8ab"
+  },
+  {
+    "path": "public/models/jack-badge-desktop-59ea51bb-1.bin",
+    "bytes": 16777216,
+    "gitBlob": "138497d8d478892acf3010a16166a880c6e2d14a"
+  },
+  {
+    "path": "public/models/jack-badge-desktop-59ea51bb-2.bin",
+    "bytes": 16406668,
+    "gitBlob": "4e4b83b0b924ad2eae8d99911f464ffedcadb9ae"
+  },
+  {
+    "path": "public/models/jack-badge-mobile-13d869af-0.bin",
+    "bytes": 16777216,
+    "gitBlob": "31e80d5a7a7b98734a168e5c1f8143eb6fd834ae"
+  },
+  {
+    "path": "public/models/jack-badge-mobile-13d869af-1.bin",
+    "bytes": 16777216,
+    "gitBlob": "d85e753c9b2efa74a5a617e5acb14147b288af04"
+  },
+  {
+    "path": "public/models/jack-badge-mobile-13d869af-2.bin",
+    "bytes": 781700,
+    "gitBlob": "42e99aead07807fa0d68d2d351de6350b4685929"
+  },
+  {
+    "path": "public/models/sarah-badge-desktop-0b98f5e2-0.bin",
+    "bytes": 16777216,
+    "gitBlob": "6f96af6c4945e45851975a05b56d432e6de76af7"
+  },
+  {
+    "path": "public/models/sarah-badge-desktop-0b98f5e2-1.bin",
+    "bytes": 16777216,
+    "gitBlob": "c3c54e763c13d53ee40a62336bed5d6037919722"
+  },
+  {
+    "path": "public/models/sarah-badge-desktop-0b98f5e2-2.bin",
+    "bytes": 3280840,
+    "gitBlob": "28134fdd709b55c6a7888a048fbbe16f83d4f7b6"
+  },
+  {
+    "path": "public/models/sarah-badge-mobile-25d0b9e8-0.bin",
+    "bytes": 16777216,
+    "gitBlob": "f017e50ffee3628dce947979532f242160f23ed9"
+  },
+  {
+    "path": "public/models/sarah-badge-mobile-25d0b9e8-1.bin",
+    "bytes": 5125948,
+    "gitBlob": "4100f71790f9ee4dfd64c48a9e771baf2b22ee96"
+  }
+]

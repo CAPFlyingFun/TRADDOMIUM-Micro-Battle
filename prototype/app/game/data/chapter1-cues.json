@@ -1,0 +1,255 @@
+{
+  "staging": {
+    "approach": 55,
+    "closeDistance": 59,
+    "pointMonitor": 65,
+    "tablet": 77,
+    "chairExchange": 103,
+    "personal": 127,
+    "warning": 150,
+    "lock": 23,
+    "door": 54
+  },
+  "events": [
+    {
+      "id": "ch01-010-first-chirp",
+      "sourceIndex": 4,
+      "asset": "chapter1:sfx_console_tone_soft",
+      "gain": 0.067,
+      "timing": "before",
+      "offsetMs": 0
+    },
+    {
+      "id": "ch01-011-second-chirp",
+      "sourceIndex": 4,
+      "asset": "chapter1:sfx_console_tone_soft",
+      "gain": 0.067,
+      "timing": "during",
+      "offsetMs": 2600
+    },
+    {
+      "id": "ch01-020-chair-startle",
+      "sourceIndex": 6,
+      "asset": "chapter1:sfx_chair_roll_fast",
+      "gain": 0.05,
+      "timing": "during",
+      "offsetMs": 1100
+    },
+    {
+      "id": "ch01-030-jack-types",
+      "sourceIndex": 10,
+      "asset": "chapter1:sfx_keyboard_typing_short",
+      "gain": 0.234,
+      "timing": "during",
+      "offsetMs": 4200
+    },
+    {
+      "id": "ch01-040-second-alarm",
+      "sourceIndex": 15,
+      "asset": "chapter1:sfx_alert_warning_hit",
+      "gain": 0.016,
+      "timing": "during",
+      "offsetMs": 2300
+    },
+    {
+      "id": "ch01-031-jack-searches",
+      "sourceIndex": 18,
+      "asset": "chapter1:sfx_keyboard_typing_short",
+      "gain": 0.234,
+      "timing": "during",
+      "offsetMs": 1200
+    },
+    {
+      "id": "ch01-050-directory-opens",
+      "sourceIndex": 20,
+      "asset": "chapter1:sfx_system_notify_soft",
+      "gain": 0.029,
+      "timing": "before",
+      "offsetMs": 0
+    },
+    {
+      "id": "ch01-060-terminal-lock",
+      "sourceIndex": 23,
+      "asset": "chapter1:sfx_terminal_lock_engage",
+      "gain": 0.075,
+      "timing": "during",
+      "offsetMs": 800
+    },
+    {
+      "id": "ch01-061-terminal-returns",
+      "sourceIndex": 23,
+      "asset": "chapter1:sfx_equipment_power_up_soft",
+      "gain": 0.036,
+      "timing": "after",
+      "offsetMs": 0
+    },
+    {
+      "id": "ch01-070-intercom-open",
+      "sourceIndex": 27,
+      "asset": "chapter1:sfx_intercom_open",
+      "gain": 0.052,
+      "timing": "before",
+      "offsetMs": 0
+    },
+    {
+      "id": "ch01-072-static-answers",
+      "sourceIndex": 28,
+      "asset": "chapter1:sfx_intercom_static",
+      "gain": 0.014,
+      "timing": "before",
+      "offsetMs": 0
+    },
+    {
+      "id": "ch01-073-intercom-retap",
+      "sourceIndex": 29,
+      "asset": "chapter1:sfx_intercom_open",
+      "gain": 0.052,
+      "timing": "during",
+      "offsetMs": 500
+    },
+    {
+      "id": "ch01-080-intercom-close",
+      "sourceIndex": 48,
+      "asset": "chapter1:sfx_intercom_close",
+      "gain": 0.031,
+      "timing": "during",
+      "offsetMs": 700
+    },
+    {
+      "id": "ch01-090-file-opens",
+      "sourceIndex": 52,
+      "asset": "chapter1:sfx_system_notify_soft",
+      "gain": 0.029,
+      "timing": "before",
+      "offsetMs": 0
+    },
+    {
+      "id": "ch01-100-door-slides",
+      "sourceIndex": 54,
+      "asset": "chapter1:sfx_lab_door_slide",
+      "gain": 0.018,
+      "timing": "during",
+      "offsetMs": 1500
+    },
+    {
+      "id": "ch01-101-sarah-enters",
+      "sourceIndex": 55,
+      "asset": "chapter1:sfx_footsteps_sarah_sneakers",
+      "gain": 0.146,
+      "timing": "during",
+      "offsetMs": 300
+    },
+    {
+      "id": "ch01-110-sarah-crosses",
+      "sourceIndex": 59,
+      "asset": "chapter1:sfx_footsteps_sarah_sneakers",
+      "gain": 0.146,
+      "timing": "during",
+      "offsetMs": 300
+    },
+    {
+      "id": "ch01-120-second-chair",
+      "sourceIndex": 103,
+      "asset": "chapter1:sfx_chair_roll_slow",
+      "gain": 0.038,
+      "timing": "during",
+      "offsetMs": 5100
+    },
+    {
+      "id": "ch01-121-jack-makes-room",
+      "sourceIndex": 103,
+      "asset": "chapter1:sfx_chair_roll_slow",
+      "gain": 0.038,
+      "timing": "during",
+      "offsetMs": 700
+    },
+    {
+      "id": "ch01-130-sarah-types",
+      "sourceIndex": 104,
+      "asset": "chapter1:sfx_keyboard_typing_short",
+      "gain": 0.234,
+      "timing": "during",
+      "offsetMs": 300
+    },
+    {
+      "id": "ch01-131-sarah-history",
+      "sourceIndex": 108,
+      "asset": "chapter1:sfx_keyboard_typing_short",
+      "gain": 0.234,
+      "timing": "during",
+      "offsetMs": 250
+    },
+    {
+      "id": "ch01-132-sarah-digs",
+      "sourceIndex": 115,
+      "asset": "chapter1:sfx_keyboard_typing_short",
+      "gain": 0.234,
+      "timing": "during",
+      "offsetMs": 1600
+    },
+    {
+      "id": "ch01-133-sarah-keeps-typing",
+      "sourceIndex": 129,
+      "asset": "chapter1:sfx_keyboard_typing_short",
+      "gain": 0.234,
+      "timing": "during",
+      "offsetMs": 200
+    },
+    {
+      "id": "ch01-140-sarah-resumes",
+      "sourceIndex": 145,
+      "asset": "chapter1:sfx_keyboard_typing_short",
+      "gain": 0.234,
+      "timing": "during",
+      "offsetMs": 200
+    },
+    {
+      "id": "ch01-150-interrupting-tone",
+      "sourceIndex": 150,
+      "asset": "chapter1:sfx_alert_warning_hit",
+      "gain": 0.016,
+      "timing": "before",
+      "offsetMs": 0
+    },
+    {
+      "id": "ch01-160-denied-first",
+      "sourceIndex": 159,
+      "asset": "chapter1:sfx_access_denied_tone",
+      "gain": 0.083,
+      "timing": "before",
+      "offsetMs": 0
+    },
+    {
+      "id": "ch01-161-denied-second",
+      "sourceIndex": 161,
+      "asset": "chapter1:sfx_access_denied_tone",
+      "gain": 0.083,
+      "timing": "before",
+      "offsetMs": 0
+    },
+    {
+      "id": "ch01-171-jack-credentials",
+      "sourceIndex": 164,
+      "asset": "chapter1:sfx_keyboard_typing_short",
+      "gain": 0.234,
+      "timing": "during",
+      "offsetMs": 500
+    },
+    {
+      "id": "ch01-170-revoked",
+      "sourceIndex": 165,
+      "asset": "chapter1:sfx_access_revoked_tone",
+      "gain": 0.079,
+      "timing": "before",
+      "offsetMs": 0
+    },
+    {
+      "id": "ch01-172-jack-retries",
+      "sourceIndex": 172,
+      "asset": "chapter1:sfx_keyboard_typing_short",
+      "gain": 0.234,
+      "timing": "during",
+      "offsetMs": 250
+    }
+  ]
+}

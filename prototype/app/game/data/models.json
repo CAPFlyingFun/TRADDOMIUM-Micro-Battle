@@ -1,0 +1,41 @@
+{
+  "jack": {
+    "desktop": {
+      "parts": [
+        "/models/jack-badge-desktop-59ea51bb-0.bin",
+        "/models/jack-badge-desktop-59ea51bb-1.bin",
+        "/models/jack-badge-desktop-59ea51bb-2.bin"
+      ],
+      "bytes": 49961100,
+      "sha256": "59ea51bb1abf79dfe807faca801f1937871208cee024d3757933a7341c985870"
+    },
+    "mobile": {
+      "parts": [
+        "/models/jack-badge-mobile-13d869af-0.bin",
+        "/models/jack-badge-mobile-13d869af-1.bin",
+        "/models/jack-badge-mobile-13d869af-2.bin"
+      ],
+      "bytes": 34336132,
+      "sha256": "13d869afc8b235527e6396a133d2b67efc4f4b702e036edd8c8c5e96ab622b71"
+    }
+  },
+  "sarah": {
+    "desktop": {
+      "parts": [
+        "/models/sarah-badge-desktop-0b98f5e2-0.bin",
+        "/models/sarah-badge-desktop-0b98f5e2-1.bin",
+        "/models/sarah-badge-desktop-0b98f5e2-2.bin"
+      ],
+      "bytes": 36835272,
+      "sha256": "0b98f5e2d6125dd2b0f81c9812346228ed5b392975ff61ec3a94578c8cc04414"
+    },
+    "mobile": {
+      "parts": [
+        "/models/sarah-badge-mobile-25d0b9e8-0.bin",
+        "/models/sarah-badge-mobile-25d0b9e8-1.bin"
+      ],
+      "bytes": 21903164,
+      "sha256": "25d0b9e8f37e721a2598a25e48419d82d7b745169006bd3cdb81a359af244c92"
+    }
+  }
+}

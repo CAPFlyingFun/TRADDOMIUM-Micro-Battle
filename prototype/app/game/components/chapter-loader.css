@@ -1,0 +1,9 @@
+.chapter-loader{min-height:100dvh;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;padding:32px;text-align:center;background:#040812;color:#e6eee9}
+.chapter-loader h1{font-size:clamp(26px,5vw,42px);font-weight:400;margin:0}
+.chapter-loader p,.chapter-loader small{max-width:420px;color:#a6b9b5;line-height:1.6}
+.chapter-loader progress{appearance:none;width:min(360px,100%);height:5px;border:0;border-radius:0;background:#263435}
+.chapter-loader progress::-webkit-progress-bar{background:#263435}
+.chapter-loader progress::-webkit-progress-value{background:#b2d7c7}
+.chapter-loader progress::-moz-progress-bar{background:#b2d7c7}
+.chapter-loader output{font:16px ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.chapter-loader button{width:min(360px,100%)}
