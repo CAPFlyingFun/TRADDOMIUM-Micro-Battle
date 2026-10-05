@@ -34,7 +34,7 @@ export default function StoryPlayer({threeD=false,save,settings,paused:userPause
  const patch=useCallback((p:Partial<SaveState>)=>onSave({...save,...p,updatedAt:new Date().toISOString()}),[save,onSave]);
  const advance=useCallback(()=>{if(!paused&&line)patch({line:save.line+1});},[line,paused,patch,save.line]);
  const lineKey=`${save.queue}:${save.line}`;
- const voice=useVoicePlayback(lineKey,line,lines[save.line+1]?.voiceKey||`${save.queue}:${save.line+1}`,opening?{...settings,autoAdvance:true}:settings,paused,advance);
+ const voice=useVoicePlayback(lineKey,line,lines[save.line+1]?.voiceKey||`${save.queue}:${save.line+1}`,settings,paused,advance);
  const [textElapsed,setTextElapsed]=useState(0);
  const textDuration=Math.max(2.6,(line?.text.split(/\s+/).length||0)*.34);
  const openingDateDuration=useRef(0);

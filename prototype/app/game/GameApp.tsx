@@ -13,7 +13,7 @@ export default function GameApp(){
  useEffect(()=>{setSettings(readSettings());setReady(true);},[]);
  useEffect(()=>{soundscape.configure(settings);if(ready&&!persistSettings(settings))setStorageWarning(true);},[settings,ready]);
  useEffect(()=>{if(view!=='lab3d')soundscape.clear();},[view]);
- const start=()=>{soundscape.unlock().then(()=>soundscape.configure(settings));setView('lab3d');};
+ const start=()=>{setSettings(s=>({...s,autoAdvance:true}));soundscape.unlock().then(()=>soundscape.configure(settings));setView('lab3d');};
  const back=()=>{setView('title');soundscape.clear();};
  const soundToggle=()=>{soundscape.unlock();setSettings(s=>({...s,sound:!s.sound}));};
  return <div className={`tmb-app ${settings.reducedMotion?'reduce-motion':''}`}>
