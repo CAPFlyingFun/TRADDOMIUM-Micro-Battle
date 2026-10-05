@@ -42,10 +42,16 @@ the existing site's output or modify its two-build deployment workflow.
   rewritten.
 - Terminal investigation, intercom, Sarah's arrival, logs/conversation and
   administrator rejection use the prototype's existing progression.
-- Camera manipulation is not player walking. No free walking or pathfinding
-  has been added.
+- Between dialogue queues, Jack and Sarah can be controlled independently.
+  Keyboard WASD/arrows, portrait floor taps, and landscape touch directions
+  share a ground-plane movement authority. Sarah unlocks after her entrance.
+  Furniture routing uses A*; progression still requires the canonical actions.
+- Dialogue transitions return both characters to their captured staging anchors
+  before recorded speech resumes. Rotation and pause do not reset their positions.
+- Automatic canonical shot ranges are separate from camera geometry. Manual
+  camera views/orbit remain available; Auto shot resumes cinematic direction.
 - The original procedural lab arrangement/materials and navy/teal UI remain.
-  Layout D, enhanced texture atlas, objectives/exploration and island integration
+  Layout D, enhanced texture atlas and island integration
   are later milestones.
 - TMB-Story is the canonical Read/Listen/Watch source. This playable candidate
   consumes a pinned Chapter One export; it does not create a second canon.

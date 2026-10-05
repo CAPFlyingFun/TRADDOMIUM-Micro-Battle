@@ -7,7 +7,7 @@ export default function LabCameraControls({view,together,disabled,onView,onGestu
  const [open,setOpen]=useState(false),[gesture,setGesture]=useState<CameraGesture>('orbit');
  return <div className="lab-camera-controls">
   {open&&<div id="lab-camera-adjustments" className="lab-camera-panel" role="group" aria-label="Camera adjustments">
-   <div className="lab-camera-row">{(['orbit','pan'] as const).map(mode=><button key={mode} disabled={disabled} aria-pressed={gesture===mode} onClick={()=>{setGesture(mode);onGesture(mode);}}>{mode==='orbit'?'Orbit':'Pan'}</button>)}<button disabled={disabled} onClick={onReset}><RotateCcw size={15}/>Reset</button></div>
+   <div className="lab-camera-row">{(['orbit','pan'] as const).map(mode=><button key={mode} disabled={disabled} aria-pressed={gesture===mode} onClick={()=>{setGesture(mode);onGesture(mode);}}>{mode==='orbit'?'Orbit':'Pan'}</button>)}<button disabled={disabled} onClick={onReset} title="Resume cinematic camera"><RotateCcw size={15}/>Auto shot</button></div>
    <div className="lab-camera-row"><span>Zoom</span><button disabled={disabled} aria-label="Zoom out" onClick={()=>onZoom(1.18)}><Minus size={18}/></button><button disabled={disabled} aria-label="Zoom in" onClick={()=>onZoom(1/1.18)}><Plus size={18}/></button></div>
    <p>Drag to {gesture}. Pinch or scroll to zoom.</p>
   </div>}

@@ -10,7 +10,7 @@ import { freshSave } from '../lib/state';
 import { soundscape } from '../lib/audio';
 import CinematicScene from './CinematicScene';
 import StoryOpening from './StoryOpening';
-import LabStage from './LabStage';
+import LabStage,{type LabStageHandle} from './LabStage';
 import ConsolePanel from './ConsolePanel';
 import VoiceControls from './VoiceControls';
 import {useVoicePlayback} from '../lib/useVoicePlayback';
@@ -19,9 +19,11 @@ import {useChapterOneEffects} from '../lib/useChapterOneEffects';
 import {openingSegment} from '../lib/opening';
 interface Props {threeD?:boolean;save:SaveState;settings:Settings;paused:boolean;onSave:(s:SaveState)=>void;onSettings:(s:Settings)=>void;onPause:()=>void;onFinish:()=>void;}
 export default function StoryPlayer({threeD=false,save,settings,paused:userPaused,onSave,onSettings,onPause,onFinish}:Props) {
+ const lab=useRef<LabStageHandle>(null);
+ const [staging,setStaging]=useState(false);
  const [stageReady,setStageReady]=useState(false),[arrived,setArrived]=useState(false);
  const opening=threeD&&openingSegment(save)!==null;
- const paused=userPaused||(threeD&&!opening&&(!stageReady||(save.sceneId==='sarah'&&!arrived)));
+ const paused=userPaused||(threeD&&!opening&&(!stageReady||staging||(save.sceneId==='sarah'&&!arrived)));
  const index=story.findIndex(s=>s.id===save.sceneId),scene=story[index];
  const soundScene=opening?(save.line===0?'date':'island'):scene.id;
  const lines=(threeD?(labDialogue as Record<string,Line[]>)[save.queue]:undefined)||dialogue[save.queue]||[],line=lines[save.line];
@@ -57,10 +59,11 @@ export default function StoryPlayer({threeD=false,save,settings,paused:userPause
   if(paused || line || !ready || (isActivation&&!activationReady))return;
   if(threeD&&scene.id==='revoked'){onFinish();}
   else if(index===story.length-1){onSave({...save,completed:true});onFinish();}
-  else onSave(freshSave(story[index+1].id));
+  else {if(threeD)setStaging(true);onSave(freshSave(story[index+1].id));}
  };
  const interact=(a:Interaction)=>{
   if(paused||line||(threeD&&a.id==='baby'&&!save.done.includes('logs'))||(a.requires&&!save.done.includes(a.requires)))return;
+  if(threeD)setStaging(true);
   if(a.effect){setBlackout(true);window.setTimeout(()=>setBlackout(false),a.effect==='shutdown'?2100:950);}
   patch({queue:a.dialogue,line:0,done:[...new Set([...save.done,a.id])],camera:scene.id==='cameras'?a.id:save.camera});
  };
@@ -97,10 +100,10 @@ export default function StoryPlayer({threeD=false,save,settings,paused:userPause
  useEffect(()=>{if(isActivation&&activation===0)soundscape.effect('sfx_boundary_event_collapse');if(isActivation&&activation===3)soundscape.effect('sfx_boundary_event_return');},[isActivation,activation]);
  const character=line?characters[line.speaker]:null;
  return <main className={`game-screen ${threeD?'lab-game':''} ${settings.largeText?'large-text':''} ${settings.reducedMotion?'reduce-motion':''} ${isActivation?'activation-screen':''}`}>
-  {opening?<StoryOpening segment={save.line as 0|1} elapsed={settings.voices&&voice.hasRecording?voice.state.elapsed:textElapsed} duration={settings.voices&&voice.hasRecording?voice.state.duration||textDuration:textDuration} chapterOffset={openingOffset} paused={paused||(settings.voices&&voice.hasRecording&&voice.state.status!=='playing')} reducedMotion={settings.reducedMotion} softEffects={settings.softEffects}/>:threeD?<LabStage frame={{sceneId:scene.id,queue:save.queue,line:save.line,done:save.done,speaker:line?.speaker||'',sourceIndex:line?.sourceIndex,paused:userPaused,reducedMotion:settings.reducedMotion,interactive:!paused&&!line}} onReady={()=>setStageReady(true)} onArrived={()=>setArrived(true)} onUnavailable={()=>{setStageReady(false);setArrived(false);}} onInteract={target=>{
+  {opening?<StoryOpening segment={save.line as 0|1} elapsed={settings.voices&&voice.hasRecording?voice.state.elapsed:textElapsed} duration={settings.voices&&voice.hasRecording?voice.state.duration||textDuration:textDuration} chapterOffset={openingOffset} paused={paused||(settings.voices&&voice.hasRecording&&voice.state.status!=='playing')} reducedMotion={settings.reducedMotion} softEffects={settings.softEffects}/>:threeD?<LabStage ref={lab} onStaging={setStaging} frame={{sceneId:scene.id,queue:save.queue,line:save.line,done:save.done,speaker:line?.speaker||'',sourceIndex:line?.sourceIndex,paused:userPaused,reducedMotion:settings.reducedMotion,interactive:stageReady&&!line&&!staging}} onReady={()=>setStageReady(true)} onArrived={()=>setArrived(true)} onUnavailable={()=>{setStageReady(false);setArrived(false);setStaging(false);}} onInteract={target=>{
    if(paused||line)return;
    if(target==='comm'&&scene.id==='alarm'&&ready){next();return;}
-   const action=target==='terminal'?scene.actions.find(a=>a.required&&!save.done.includes(a.id)&&(!a.requires||save.done.includes(a.requires))):target==='sarah'?scene.actions.find(a=>a.id==='baby'):undefined;
+   const action=scene.actions.find(a=>a.id===target)||(target==='terminal'?scene.actions.find(a=>a.required&&!save.done.includes(a.id)&&(!a.requires||save.done.includes(a.requires))):target==='sarah'?scene.actions.find(a=>a.id==='baby'):undefined);
    if(action)interact(action);
   }}/>:<CinematicScene look={scene.look} intensity={scene.intensity} reducedMotion={settings.reducedMotion} softEffects={settings.softEffects} paused={paused} camera={save.camera} activation={isActivation?activation:-1} blackout={blackout} focus={line?.speaker}/> }
   <header className="game-header"><div className="tombs-wordmark"><span className="tombs-mark">T</span><span>TOMBS<span className="micro-label">RESEARCH DIVISION</span></span></div><div className="chapter-track"><span>0{scene.chapter}</span><i/><span>{['The Alarm','The Boundary','The Activation'][scene.chapter-1]}</span></div><button className="icon-button" onClick={onPause} aria-label="Pause game"><CirclePause size={23}/></button></header>
@@ -121,9 +124,9 @@ export default function StoryPlayer({threeD=false,save,settings,paused:userPause
     <span className="key-hint dialogue-key-hint"><kbd>E</kbd> / <kbd>SPACE</kbd> to skip</span>
    </section>:<section className={`interaction-dock ${scene.id==='ending'?'ending-dock':''}`} aria-label="Scene interactions">
     {scene.id==='ending'?<div className="end-mark"><span className="eyebrow">END OF CHAPTER THREE</span><h2>Their town had shrunk.<br/><em>And the island had not.</em></h2></div>:scene.objective&&<p className="objective"><span className="objective-diamond"/>{scene.objective}</p>}
-    {scene.actions.length>0&&<div className={`action-list ${scene.actions.length>3?'many-actions':''}`}>{scene.actions.map(a=><button key={a.id} className={`action-button ${save.done.includes(a.id)?'inspected':''}`} disabled={(!!a.requires&&!save.done.includes(a.requires))||(threeD&&a.id==='baby'&&!save.done.includes('logs'))} onClick={()=>interact(a)}><span className="action-icon">{save.done.includes(a.id)?<Check size={18}/>:<span className="interaction-dot"/>}</span><span><strong>{a.label}</strong><small>{a.detail}</small></span>{!a.required&&<em>Optional</em>}</button>)}</div>}
-    {ready&&<button className="primary-button scene-exit" onClick={next}>{threeD&&scene.id==='revoked'?'Finish Chapter One':scene.exit}<ArrowRight size={19}/></button>}
-    {!ready&&<span className="interaction-help">Select a highlighted control to investigate.</span>}
+    {scene.actions.length>0&&<div className={`action-list ${scene.actions.length>3?'many-actions':''}`}>{scene.actions.map(a=><button key={a.id} className={`action-button ${save.done.includes(a.id)?'inspected':''}`} disabled={(!!a.requires&&!save.done.includes(a.requires))||(threeD&&a.id==='baby'&&!save.done.includes('logs'))} onClick={()=>threeD?lab.current?.requestInteraction(a.id==='baby'?'sarah':'terminal',a.id):interact(a)}><span className="action-icon">{save.done.includes(a.id)?<Check size={18}/>:<span className="interaction-dot"/>}</span><span><strong>{a.label}</strong><small>{a.detail}</small></span>{!a.required&&<em>Optional</em>}</button>)}</div>}
+    {ready&&<button className="primary-button scene-exit" onClick={()=>threeD&&scene.id==='alarm'?lab.current?.requestInteraction('comm'):next()}>{threeD&&scene.id==='revoked'?'Finish Chapter One':scene.exit}<ArrowRight size={19}/></button>}
+    {!ready&&<span className="interaction-help">{threeD?'Walk around, then choose an objective or tap a console.':'Select a highlighted control to investigate.'}</span>}
    </section>}
   <div className="story-progress" aria-label={`Chapter ${scene.chapter} of 3`}><span style={{width:`${(index+1)/story.length*100}%`}}/></div>
  </main>;

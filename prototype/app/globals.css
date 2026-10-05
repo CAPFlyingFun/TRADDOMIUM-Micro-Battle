@@ -89,3 +89,18 @@
 .lab-camera-row{display:flex;align-items:center;gap:6px}.lab-camera-row button{flex:1;border:1px solid #86b0b13a}.lab-camera-row+.lab-camera-row{margin-top:6px}.lab-camera-row>span{flex:1;padding-left:8px;font-size:14px;color:#b9d2d6}.lab-camera-panel p{margin:8px 0 0;font-size:12px;line-height:1.4;color:#9bb9bf}
 @media(max-width:380px){.lab-camera-controls .lab-camera-tools button{padding:7px 6px;font-size:13px}}
 @media(max-height:400px) and (orientation:landscape){.lab-camera-panel{padding:6px}.lab-camera-panel p{display:none}}
+
+/* Exploration HUD occupies only the 3D viewport. Portrait favours tap-to-move;
+   landscape also exposes held directional controls, without orientation locks. */
+.lab-player-controls{position:absolute;bottom:78px;left:16px;max-width:270px;z-index:4;color:#bed7d8}
+.lab-player-controls>div{display:inline-flex;gap:4px;padding:4px;background:#07171fe8;border:1px solid #6ea3a65c;border-radius:7px}
+.lab-player-controls button,.lab-movement-pad button{min-height:44px;min-width:64px;border:1px solid transparent;border-radius:4px;background:transparent;color:#c4dddd;font:inherit}
+.lab-player-controls button[aria-pressed=true]{background:#294a51;border-color:#77bab8;color:#ebf9f2}
+.lab-player-controls p{margin-top:6px;max-width:250px;padding:6px 8px;background:#07171fdf;border-radius:4px;font-size:12px;line-height:1.4}
+.lab-movement-pad{display:none;position:absolute;right:16px;bottom:78px;z-index:4;grid-template:repeat(3,44px)/repeat(3,44px);gap:2px}
+.lab-movement-pad button{min-width:44px;background:#102b35d9;border-color:#6ea3a65c;font-size:23px;touch-action:none;user-select:none}
+.lab-movement-pad button:active{background:#47777d}
+.move-forward{grid-area:1/2}.move-left{grid-area:2/1}.move-right{grid-area:2/3}.move-back{grid-area:3/2}
+@media(pointer:coarse) and (orientation:landscape){.lab-movement-pad{display:grid}.lab-player-controls{max-width:calc(100% - 170px)}.lab-player-controls p{display:none}}
+@media(max-height:400px) and (orientation:landscape){.lab-movement-pad{grid-template:repeat(2,44px)/repeat(3,44px);bottom:68px}.move-back{grid-area:2/2}.lab-player-controls{bottom:68px}}
+@media(max-width:400px){.lab-player-controls{left:12px;max-width:230px}.lab-player-controls p{font-size:11px}}
