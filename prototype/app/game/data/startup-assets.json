@@ -1,0 +1,826 @@
+[
+  {
+    "path": "/assets/intro/clouds/wisp-1.png",
+    "bytes": 72643
+  },
+  {
+    "path": "/assets/intro/clouds/wisp-2.png",
+    "bytes": 57621
+  },
+  {
+    "path": "/assets/intro/clouds/wisp-3.png",
+    "bytes": 88889
+  },
+  {
+    "path": "/assets/intro/clouds/wisp-4.png",
+    "bytes": 55077
+  },
+  {
+    "path": "/assets/intro/island-night.jpg",
+    "bytes": 317864
+  },
+  {
+    "path": "/assets/jack-reference.png",
+    "bytes": 40206
+  },
+  {
+    "path": "/assets/lab3d/jack.glb",
+    "bytes": 2984300
+  },
+  {
+    "path": "/assets/lab3d/sarah.glb",
+    "bytes": 2707620
+  },
+  {
+    "path": "/assets/sarah-reference.png",
+    "bytes": 49169
+  },
+  {
+    "path": "/assets/tombs-laboratory.jpg",
+    "bytes": 602297
+  },
+  {
+    "path": "/audio/chapter-01/0084828609c4-narrator-acd5a4e16a58.mp3",
+    "bytes": 31391
+  },
+  {
+    "path": "/audio/chapter-01/02499fd9d42a-narrator-7782d6316db5.mp3",
+    "bytes": 38078
+  },
+  {
+    "path": "/audio/chapter-01/0293a62097f3-narrator-6bad52582d7d.mp3",
+    "bytes": 29301
+  },
+  {
+    "path": "/audio/chapter-01/042037ff47ae-sarah-bennett-ad67f921e02e.mp3",
+    "bytes": 27629
+  },
+  {
+    "path": "/audio/chapter-01/0535ccbf27c2-sfx_intercom_static.mp3",
+    "bytes": 40586
+  },
+  {
+    "path": "/audio/chapter-01/055b0dc4b275-narrator-34f450c1a659.mp3",
+    "bytes": 45601
+  },
+  {
+    "path": "/audio/chapter-01/071705044098-sarah-bennett-ea3f24b4acf1.mp3",
+    "bytes": 9239
+  },
+  {
+    "path": "/audio/chapter-01/07e8589fdd65-narrator-0407ebd1b851.mp3",
+    "bytes": 24703
+  },
+  {
+    "path": "/audio/chapter-01/0872bad21f5b-narrator-6c867569f46f.mp3",
+    "bytes": 30973
+  },
+  {
+    "path": "/audio/chapter-01/0aec057e9a28-jack-bennett-a8fc65386727.mp3",
+    "bytes": 21777
+  },
+  {
+    "path": "/audio/chapter-01/0c1842493aa8-sarah-bennett-41421ed41839.mp3",
+    "bytes": 30137
+  },
+  {
+    "path": "/audio/chapter-01/0d0856ad0985-narrator-20150e76792b.mp3",
+    "bytes": 31391
+  },
+  {
+    "path": "/audio/chapter-01/0e0ce0fef9f0-narrator-fe9506954a9a.mp3",
+    "bytes": 24703
+  },
+  {
+    "path": "/audio/chapter-01/10b2b09ce5e6-narrator-446ac6fd8722.mp3",
+    "bytes": 41004
+  },
+  {
+    "path": "/audio/chapter-01/133ba2900f64-narrator-652f9e97d9a7.mp3",
+    "bytes": 27211
+  },
+  {
+    "path": "/audio/chapter-01/1668f0659066-narrator-6da685659713.mp3",
+    "bytes": 55214
+  },
+  {
+    "path": "/audio/chapter-01/17988ecccf37-sarah-bennett-5965a9732934.mp3",
+    "bytes": 19688
+  },
+  {
+    "path": "/audio/chapter-01/19ac12f39eab-jack-bennett-57a1f5dfe461.mp3",
+    "bytes": 38078
+  },
+  {
+    "path": "/audio/chapter-01/2542db120aeb-jack-bennett-6aa0f73ed972.mp3",
+    "bytes": 20942
+  },
+  {
+    "path": "/audio/chapter-01/25ef2c42ac1e-sarah-bennett-5a071d01be77.mp3",
+    "bytes": 14254
+  },
+  {
+    "path": "/audio/chapter-01/26cab6ec6cd2-narrator-d8826abbed8a.mp3",
+    "bytes": 93248
+  },
+  {
+    "path": "/audio/chapter-01/271cfe6a4a33-narrator-1975e7572552.mp3",
+    "bytes": 55214
+  },
+  {
+    "path": "/audio/chapter-01/2a27a4d349d8-sarah-bennett-1ebe0c684d41.mp3",
+    "bytes": 10911
+  },
+  {
+    "path": "/audio/chapter-01/2a50693624ee-amb_console_alarm_bed.mp3",
+    "bytes": 193141
+  },
+  {
+    "path": "/audio/chapter-01/312462dfa927-narrator-36d912fb5b4f.mp3",
+    "bytes": 145911
+  },
+  {
+    "path": "/audio/chapter-01/31b9509bd964-narrator-1de8e47c4e66.mp3",
+    "bytes": 173497
+  },
+  {
+    "path": "/audio/chapter-01/3278e217af53-narrator-840d9089ed45.mp3",
+    "bytes": 32226
+  },
+  {
+    "path": "/audio/chapter-01/33e58117fd9c-sarah-bennett-e240820580d9.mp3",
+    "bytes": 31391
+  },
+  {
+    "path": "/audio/chapter-01/36f5062588b7-narrator-1812ac877876.mp3",
+    "bytes": 41839
+  },
+  {
+    "path": "/audio/chapter-01/39a5817986a1-jack-bennett-a40ffc6ce592.mp3",
+    "bytes": 10911
+  },
+  {
+    "path": "/audio/chapter-01/3a0d4f439830-narrator-b86243241021.mp3",
+    "bytes": 44765
+  },
+  {
+    "path": "/audio/chapter-01/3a82a6158d3c-jack-bennett-5520e22c887a.mp3",
+    "bytes": 152599
+  },
+  {
+    "path": "/audio/chapter-01/3b8a9c760a3a-narrator-cddc94b869d1.mp3",
+    "bytes": 85725
+  },
+  {
+    "path": "/audio/chapter-01/3bbbf3a62819-sarah-bennett-415320486988.mp3",
+    "bytes": 19688
+  },
+  {
+    "path": "/audio/chapter-01/3de29b7e288a-sarah-bennett-ed9388bef578.mp3",
+    "bytes": 21777
+  },
+  {
+    "path": "/audio/chapter-01/3e21368d35cc-narrator-a1ae4cf23cd8.mp3",
+    "bytes": 25539
+  },
+  {
+    "path": "/audio/chapter-01/42ab11f176b2-sfx_access_denied_tone.mp3",
+    "bytes": 24703
+  },
+  {
+    "path": "/audio/chapter-01/467b663db471-narrator-d3ceae9f0f0b.mp3",
+    "bytes": 26375
+  },
+  {
+    "path": "/audio/chapter-01/46cae4968960-narrator-1c904f05b2e0.mp3",
+    "bytes": 38078
+  },
+  {
+    "path": "/audio/chapter-01/48aa0f804a9d-sarah-bennett-8c46e3a53152.mp3",
+    "bytes": 18852
+  },
+  {
+    "path": "/audio/chapter-01/49472d07ff2a-narrator-0d3174211b67.mp3",
+    "bytes": 21777
+  },
+  {
+    "path": "/audio/chapter-01/4adbb23f47b3-jack-bennett-9cc3304964a3.mp3",
+    "bytes": 11328
+  },
+  {
+    "path": "/audio/chapter-01/4b45eea1a2e5-jack-bennett-050e0785c171.mp3",
+    "bytes": 25539
+  },
+  {
+    "path": "/audio/chapter-01/4f85949366a4-narrator-aa1f758718e0.mp3",
+    "bytes": 28465
+  },
+  {
+    "path": "/audio/chapter-01/4faae206a689-narrator-f0cf0393d705.mp3",
+    "bytes": 39750
+  },
+  {
+    "path": "/audio/chapter-01/508e30f07f96-jack-bennett-9b850bb838a8.mp3",
+    "bytes": 13000
+  },
+  {
+    "path": "/audio/chapter-01/51767b867888-narrator-6fe67128d919.mp3",
+    "bytes": 27211
+  },
+  {
+    "path": "/audio/chapter-01/53807bf1cea8-jack-bennett-e61a5b7e36cd.mp3",
+    "bytes": 34316
+  },
+  {
+    "path": "/audio/chapter-01/5424e8c1bb8a-sarah-bennett-d446f7575941.mp3",
+    "bytes": 14254
+  },
+  {
+    "path": "/audio/chapter-01/54e05d973d22-jack-bennett-308767fde297.mp3",
+    "bytes": 13836
+  },
+  {
+    "path": "/audio/chapter-01/593284c8e85d-narrator-1bb0c18f4491.mp3",
+    "bytes": 63573
+  },
+  {
+    "path": "/audio/chapter-01/5af8bcad1b74-narrator-5290a9122d0f.mp3",
+    "bytes": 137970
+  },
+  {
+    "path": "/audio/chapter-01/5bf10fff9367-narrator-4229fb08c275.mp3",
+    "bytes": 30137
+  },
+  {
+    "path": "/audio/chapter-01/5c843f5be70c-jack-bennett-492f4059781a.mp3",
+    "bytes": 21777
+  },
+  {
+    "path": "/audio/chapter-01/5d0e905aa145-narrator-1008b9e9b430.mp3",
+    "bytes": 107877
+  },
+  {
+    "path": "/audio/chapter-01/5d315c6e7004-system-a6ce88995aab.mp3",
+    "bytes": 17598
+  },
+  {
+    "path": "/audio/chapter-01/5d787f965933-narrator-8d592672a2db.mp3",
+    "bytes": 30973
+  },
+  {
+    "path": "/audio/chapter-01/5e3bd58a4662-sarah-bennett-6fe63af821c3.mp3",
+    "bytes": 20524
+  },
+  {
+    "path": "/audio/chapter-01/5f43d5fe032f-sarah-bennett-a1dc5fafa6a9.mp3",
+    "bytes": 18016
+  },
+  {
+    "path": "/audio/chapter-01/5fe38aacc15b-jack-bennett-632f5041e805.mp3",
+    "bytes": 17598
+  },
+  {
+    "path": "/audio/chapter-01/616202c9510b-narrator-e7cbaa2b7eab.mp3",
+    "bytes": 51453
+  },
+  {
+    "path": "/audio/chapter-01/61ae2ff01d53-sarah-bennett-da6d3f2466a2.mp3",
+    "bytes": 13836
+  },
+  {
+    "path": "/audio/chapter-01/63a2dbd5fb23-narrator-0b2f58c70a4c.mp3",
+    "bytes": 87815
+  },
+  {
+    "path": "/audio/chapter-01/63ea4d1ce8f0-jack-bennett-3141593a1c9d.mp3",
+    "bytes": 54378
+  },
+  {
+    "path": "/audio/chapter-01/64d71bbfa154-jack-bennett-a8a6aa7ae3b3.mp3",
+    "bytes": 12164
+  },
+  {
+    "path": "/audio/chapter-01/6572be987c55-narrator-27054517a6fd.mp3",
+    "bytes": 29301
+  },
+  {
+    "path": "/audio/chapter-01/67217a2cc284-narrator-86e124a3c0e4.mp3",
+    "bytes": 79038
+  },
+  {
+    "path": "/audio/chapter-01/67e2e6fe68c8-narrator-19f698a32342.mp3",
+    "bytes": 26375
+  },
+  {
+    "path": "/audio/chapter-01/6ae06555ee5a-amb_intercom_channel_open.mp3",
+    "bytes": 160958
+  },
+  {
+    "path": "/audio/chapter-01/6c52c6c0a80b-narrator-97cf7a61f4d6.mp3",
+    "bytes": 29301
+  },
+  {
+    "path": "/audio/chapter-01/6edbbd264d02-narrator-32bdc09c24ff.mp3",
+    "bytes": 91159
+  },
+  {
+    "path": "/audio/chapter-01/71a75a6c8737-narrator-d4abdf24a364.mp3",
+    "bytes": 29301
+  },
+  {
+    "path": "/audio/chapter-01/71f5dc514b4f-narrator-721c3080cc8d.mp3",
+    "bytes": 36824
+  },
+  {
+    "path": "/audio/chapter-01/72777db3a904-narrator-2525fa15c09f.mp3",
+    "bytes": 98264
+  },
+  {
+    "path": "/audio/chapter-01/7579a6d8abc3-narrator-93519474e9ea.mp3",
+    "bytes": 192723
+  },
+  {
+    "path": "/audio/chapter-01/76b78155824f-narrator-9044cb8cfbea.mp3",
+    "bytes": 25539
+  },
+  {
+    "path": "/audio/chapter-01/7749c9872673-narrator-89a435f8f818.mp3",
+    "bytes": 58140
+  },
+  {
+    "path": "/audio/chapter-01/78604150ca2d-system-49a4bf38c005.mp3",
+    "bytes": 19688
+  },
+  {
+    "path": "/audio/chapter-01/7b51e7e88b6c-jack-bennett-941e93bf213e.mp3",
+    "bytes": 12164
+  },
+  {
+    "path": "/audio/chapter-01/7bdcaadaecc7-jack-bennett-3d94cfec7c01.mp3",
+    "bytes": 41004
+  },
+  {
+    "path": "/audio/chapter-01/7dd39e8383e5-narrator-843953ba3301.mp3",
+    "bytes": 142986
+  },
+  {
+    "path": "/audio/chapter-01/7e2952970319-narrator-c9d9bba60b27.mp3",
+    "bytes": 23449
+  },
+  {
+    "path": "/audio/chapter-01/7e31fa4fecca-sfx_lab_door_slide.mp3",
+    "bytes": 40586
+  },
+  {
+    "path": "/audio/chapter-01/82f8691ebc13-narrator-71c02a29e9a7.mp3",
+    "bytes": 22613
+  },
+  {
+    "path": "/audio/chapter-01/8318b380ec64-jack-bennett-29c879a5b799.mp3",
+    "bytes": 23449
+  },
+  {
+    "path": "/audio/chapter-01/83a49afed8ef-jack-bennett-92ce22fee124.mp3",
+    "bytes": 20942
+  },
+  {
+    "path": "/audio/chapter-01/847cb174adf7-jack-bennett-2ffc77da7b3f.mp3",
+    "bytes": 18016
+  },
+  {
+    "path": "/audio/chapter-01/86efb212e749-system-f6a28699a3b1.mp3",
+    "bytes": 37660
+  },
+  {
+    "path": "/audio/chapter-01/877a821fb535-narrator-ed5637682370.mp3",
+    "bytes": 31391
+  },
+  {
+    "path": "/audio/chapter-01/88910487337d-sfx_chair_roll_slow.mp3",
+    "bytes": 40586
+  },
+  {
+    "path": "/audio/chapter-01/88c56f1c5e91-narrator-1aa99b827f8f.mp3",
+    "bytes": 34316
+  },
+  {
+    "path": "/audio/chapter-01/891d059bab70-jack-bennett-1ecaa1e81e25.mp3",
+    "bytes": 29301
+  },
+  {
+    "path": "/audio/chapter-01/8c5d01b57181-jack-bennett-753cad07ca15.mp3",
+    "bytes": 21777
+  },
+  {
+    "path": "/audio/chapter-01/8c7231b0eadd-sarah-bennett-d5bc7656345e.mp3",
+    "bytes": 27629
+  },
+  {
+    "path": "/audio/chapter-01/8efdfbea0b2c-narrator-c1710dc66304.mp3",
+    "bytes": 46437
+  },
+  {
+    "path": "/audio/chapter-01/91ea32f1b160-narrator-051b376028db.mp3",
+    "bytes": 43511
+  },
+  {
+    "path": "/audio/chapter-01/95e653deeef0-jack-bennett-01f2a89496de.mp3",
+    "bytes": 19688
+  },
+  {
+    "path": "/audio/chapter-01/965bb475a96c-system-0fe0cf2a5742.mp3",
+    "bytes": 17598
+  },
+  {
+    "path": "/audio/chapter-01/97539ba90d39-narrator-858ca109e086.mp3",
+    "bytes": 24703
+  },
+  {
+    "path": "/audio/chapter-01/9a8e4deb1c69-sfx_keyboard_typing_short.mp3",
+    "bytes": 48945
+  },
+  {
+    "path": "/audio/chapter-01/9bdb0fc8333f-jack-bennett-f3736d27f9d7.mp3",
+    "bytes": 20524
+  },
+  {
+    "path": "/audio/chapter-01/9d819e7110d0-narrator-4ae27aba679f.mp3",
+    "bytes": 78202
+  },
+  {
+    "path": "/audio/chapter-01/9dc5a7228908-system-28a18477a67e.mp3",
+    "bytes": 18016
+  },
+  {
+    "path": "/audio/chapter-01/9e85c1c19302-narrator-b68629175254.mp3",
+    "bytes": 27629
+  },
+  {
+    "path": "/audio/chapter-01/9ee607aead92-narrator-22289c65a15f.mp3",
+    "bytes": 52288
+  },
+  {
+    "path": "/audio/chapter-01/a0dcaed659a3-narrator-765e3fa279dd.mp3",
+    "bytes": 204008
+  },
+  {
+    "path": "/audio/chapter-01/a3697bc3a041-jack-bennett-b9c31e4c82cf.mp3",
+    "bytes": 18852
+  },
+  {
+    "path": "/audio/chapter-01/a4119de106eb-jack-bennett-2a98eedf112f.mp3",
+    "bytes": 13836
+  },
+  {
+    "path": "/audio/chapter-01/a453099d5a3e-sfx_equipment_power_up_soft.mp3",
+    "bytes": 40586
+  },
+  {
+    "path": "/audio/chapter-01/a50094095782-narrator-a6f00f720f9c.mp3",
+    "bytes": 47691
+  },
+  {
+    "path": "/audio/chapter-01/a54dc74e360c-jack-bennett-5d311a6c90d7.mp3",
+    "bytes": 25539
+  },
+  {
+    "path": "/audio/chapter-01/a68f7e576b3a-jack-bennett-13662115397f.mp3",
+    "bytes": 12164
+  },
+  {
+    "path": "/audio/chapter-01/a852a7c5319d-jack-bennett-4b4b13be3859.mp3",
+    "bytes": 27211
+  },
+  {
+    "path": "/audio/chapter-01/abbbadae5b02-sarah-bennett-81ff0dc894cf.mp3",
+    "bytes": 13000
+  },
+  {
+    "path": "/audio/chapter-01/adb33941b9d0-narrator-2fdc212a47bb.mp3",
+    "bytes": 20524
+  },
+  {
+    "path": "/audio/chapter-01/aebb7e3bbd6c-narrator-90d95cfdf22a.mp3",
+    "bytes": 30137
+  },
+  {
+    "path": "/audio/chapter-01/af553c97cd6c-narrator-fb38695cee9c.mp3",
+    "bytes": 26375
+  },
+  {
+    "path": "/audio/chapter-01/b231b03dd830-narrator-7fd987f61325.mp3",
+    "bytes": 37660
+  },
+  {
+    "path": "/audio/chapter-01/b3f3180aabbd-jack-bennett-6de493fd3169.mp3",
+    "bytes": 22613
+  },
+  {
+    "path": "/audio/chapter-01/b4b7bca0c123-jack-bennett-45ac1e9fe1de.mp3",
+    "bytes": 20524
+  },
+  {
+    "path": "/audio/chapter-01/b682bc33db67-system-610b0d021f1b.mp3",
+    "bytes": 26375
+  },
+  {
+    "path": "/audio/chapter-01/b7c047908493-narrator-a4fba24c9781.mp3",
+    "bytes": 24703
+  },
+  {
+    "path": "/audio/chapter-01/bd02b4a857f7-sarah-bennett-65056aba0745.mp3",
+    "bytes": 13836
+  },
+  {
+    "path": "/audio/chapter-01/bd6e0936f2a9-jack-bennett-48aebe4e6970.mp3",
+    "bytes": 16762
+  },
+  {
+    "path": "/audio/chapter-01/bed1fdc1b92a-narrator-d8e8df53dcc2.mp3",
+    "bytes": 71097
+  },
+  {
+    "path": "/audio/chapter-01/bf27cb284bb4-narrator-a08e54e449b2.mp3",
+    "bytes": 34316
+  },
+  {
+    "path": "/audio/chapter-01/bf287e03ed5d-sarah-bennett-deff6b10a48b.mp3",
+    "bytes": 20524
+  },
+  {
+    "path": "/audio/chapter-01/bfbe77a90f5e-narrator-c2bcc3f581cf.mp3",
+    "bytes": 117072
+  },
+  {
+    "path": "/audio/chapter-01/bfd4fd39a12c-narrator-cab4ca6ef144.mp3",
+    "bytes": 107877
+  },
+  {
+    "path": "/audio/chapter-01/c05742d2e541-narrator-e2bfa452045f.mp3",
+    "bytes": 69425
+  },
+  {
+    "path": "/audio/chapter-01/c13deb076d30-sfx_console_tone_soft.mp3",
+    "bytes": 24703
+  },
+  {
+    "path": "/audio/chapter-01/c386c4ea25a5-narrator-25bf9a648f08.mp3",
+    "bytes": 156360
+  },
+  {
+    "path": "/audio/chapter-01/c38b13848a8c-sfx_access_revoked_tone.mp3",
+    "bytes": 33062
+  },
+  {
+    "path": "/audio/chapter-01/c3b8c6c7a7cd-jack-bennett-5658c97ddd78.mp3",
+    "bytes": 54378
+  },
+  {
+    "path": "/audio/chapter-01/c3dd794609aa-sarah-bennett-bf55452b11b2.mp3",
+    "bytes": 32226
+  },
+  {
+    "path": "/audio/chapter-01/c4661b26cf3b-sarah-bennett-b4465ab7292c.mp3",
+    "bytes": 21777
+  },
+  {
+    "path": "/audio/chapter-01/c8436555f532-narrator-8584cb5fea7b.mp3",
+    "bytes": 35988
+  },
+  {
+    "path": "/audio/chapter-01/c9296739009d-narrator-1c03de6091bf.mp3",
+    "bytes": 32226
+  },
+  {
+    "path": "/audio/chapter-01/c96fc9b43f51-jack-bennett-a376700976d7.mp3",
+    "bytes": 27629
+  },
+  {
+    "path": "/audio/chapter-01/c9b7353589ff-narrator-32af39ff1f88.mp3",
+    "bytes": 38078
+  },
+  {
+    "path": "/audio/chapter-01/cb35c2e1174f-jack-bennett-ecf78584ec95.mp3",
+    "bytes": 15926
+  },
+  {
+    "path": "/audio/chapter-01/cb67a4cd21f3-jack-bennett-31ac40401ca8.mp3",
+    "bytes": 15926
+  },
+  {
+    "path": "/audio/chapter-01/ce62bfd71c0d-sfx_alert_warning_hit.mp3",
+    "bytes": 24703
+  },
+  {
+    "path": "/audio/chapter-01/ce686fdeacae-narrator-f11884b76889.mp3",
+    "bytes": 33898
+  },
+  {
+    "path": "/audio/chapter-01/cecaaa2e9ac3-narrator-4f160e832b0d.mp3",
+    "bytes": 21777
+  },
+  {
+    "path": "/audio/chapter-01/cf00460b74ad-sarah-bennett-13bbe7381eb1.mp3",
+    "bytes": 13000
+  },
+  {
+    "path": "/audio/chapter-01/cf706bc47454-narrator-aba313549aa8.mp3",
+    "bytes": 67753
+  },
+  {
+    "path": "/audio/chapter-01/d086134b8c7b-narrator-590eeb9e8f49.mp3",
+    "bytes": 34316
+  },
+  {
+    "path": "/audio/chapter-01/d0ff5b7c43de-jack-bennett-d97b90a6d54e.mp3",
+    "bytes": 8403
+  },
+  {
+    "path": "/audio/chapter-01/d1cdb6619ae2-jack-bennett-27b114bdd284.mp3",
+    "bytes": 18016
+  },
+  {
+    "path": "/audio/chapter-01/d3786a097acb-narrator-34c58d279a37.mp3",
+    "bytes": 38914
+  },
+  {
+    "path": "/audio/chapter-01/d520dadac4f0-sarah-bennett-85c20ef1167a.mp3",
+    "bytes": 20524
+  },
+  {
+    "path": "/audio/chapter-01/d6bb6e723f7e-narrator-e23f8bb8d695.mp3",
+    "bytes": 34316
+  },
+  {
+    "path": "/audio/chapter-01/d73b4d5072d5-jack-bennett-77753d8b9f45.mp3",
+    "bytes": 10075
+  },
+  {
+    "path": "/audio/chapter-01/d7ea1d798f54-system-884c6f5a459a.mp3",
+    "bytes": 35152
+  },
+  {
+    "path": "/audio/chapter-01/d8c6da0d320f-narrator-b3dcdf13d972.mp3",
+    "bytes": 40586
+  },
+  {
+    "path": "/audio/chapter-01/d8e83242b860-narrator-646dff306d03.mp3",
+    "bytes": 403792
+  },
+  {
+    "path": "/audio/chapter-01/d9ed9e962f52-narrator-9aea695990da.mp3",
+    "bytes": 36824
+  },
+  {
+    "path": "/audio/chapter-01/da788d056411-jack-bennett-a5c6ccccd8ca.mp3",
+    "bytes": 30973
+  },
+  {
+    "path": "/audio/chapter-01/db073c5e6400-sarah-bennett-284f0b08b165.mp3",
+    "bytes": 18016
+  },
+  {
+    "path": "/audio/chapter-01/db6b80068c5b-narrator-b5f5252f998d.mp3",
+    "bytes": 27211
+  },
+  {
+    "path": "/audio/chapter-01/dbcd23bf1bcf-sfx_system_notify_soft.mp3",
+    "bytes": 24703
+  },
+  {
+    "path": "/audio/chapter-01/dbfe5bc3324a-sfx_intercom_close.mp3",
+    "bytes": 17180
+  },
+  {
+    "path": "/audio/chapter-01/dc7a0f7a42c5-sarah-bennett-0e24152e8551.mp3",
+    "bytes": 13836
+  },
+  {
+    "path": "/audio/chapter-01/deb7717f98e0-narrator-4411afab67cb.mp3",
+    "bytes": 72351
+  },
+  {
+    "path": "/audio/chapter-01/e02458de3472-narrator-62bcf9506134.mp3",
+    "bytes": 32226
+  },
+  {
+    "path": "/audio/chapter-01/e08b2d1c29bc-jack-bennett-fa0505b74e44.mp3",
+    "bytes": 30137
+  },
+  {
+    "path": "/audio/chapter-01/e12b7cb6acf5-narrator-37174f507f7e.mp3",
+    "bytes": 38078
+  },
+  {
+    "path": "/audio/chapter-01/e311531df53e-narrator-7c57da6619ef.mp3",
+    "bytes": 26375
+  },
+  {
+    "path": "/audio/chapter-01/e318bdd1af9d-narrator-91b25dbe2d24.mp3",
+    "bytes": 92413
+  },
+  {
+    "path": "/audio/chapter-01/e3ce268e898a-jack-bennett-85dfddc7134b.mp3",
+    "bytes": 15926
+  },
+  {
+    "path": "/audio/chapter-01/e44289f1e56f-jack-bennett-c1ff018af109.mp3",
+    "bytes": 23449
+  },
+  {
+    "path": "/audio/chapter-01/e7445a1e7264-jack-bennett-549daf1f1de8.mp3",
+    "bytes": 26375
+  },
+  {
+    "path": "/audio/chapter-01/e7bc1b902cf3-sarah-bennett-2a350447dd17.mp3",
+    "bytes": 18016
+  },
+  {
+    "path": "/audio/chapter-01/e9375e564a41-jack-bennett-2b8704441765.mp3",
+    "bytes": 22613
+  },
+  {
+    "path": "/audio/chapter-01/e96bfea8ab0b-sarah-bennett-563ad9289e68.mp3",
+    "bytes": 12164
+  },
+  {
+    "path": "/audio/chapter-01/ea391106ac61-sarah-bennett-ecb1ce66f7bc.mp3",
+    "bytes": 21777
+  },
+  {
+    "path": "/audio/chapter-01/eab082e7439e-jack-bennett-211b122503c9.mp3",
+    "bytes": 16762
+  },
+  {
+    "path": "/audio/chapter-01/ef6be7a98833-sarah-bennett-d26997d1aa80.mp3",
+    "bytes": 18852
+  },
+  {
+    "path": "/audio/chapter-01/f1bd62a7dfac-amb_tombs_array_power_rise.mp3",
+    "bytes": 321036
+  },
+  {
+    "path": "/audio/chapter-01/f41db6014323-narrator-e7569b3cf356.mp3",
+    "bytes": 44347
+  },
+  {
+    "path": "/audio/chapter-01/f51fd5493721-narrator-2dd67493e557.mp3",
+    "bytes": 20524
+  },
+  {
+    "path": "/audio/chapter-01/f530df865900-amb_computer_lab.mp3",
+    "bytes": 901920
+  },
+  {
+    "path": "/audio/chapter-01/f54c8944210b-sfx_footsteps_sarah_sneakers.mp3",
+    "bytes": 48945
+  },
+  {
+    "path": "/audio/chapter-01/f559aac6e031-narrator-bd792dfac828.mp3",
+    "bytes": 38078
+  },
+  {
+    "path": "/audio/chapter-01/f70cf65570d8-narrator-b306b6263592.mp3",
+    "bytes": 35152
+  },
+  {
+    "path": "/audio/chapter-01/f725db71ff37-sarah-bennett-4db8c4b299cf.mp3",
+    "bytes": 47691
+  },
+  {
+    "path": "/audio/chapter-01/f7d2f4df5dfd-narrator-35fd1eeab7f0.mp3",
+    "bytes": 35152
+  },
+  {
+    "path": "/audio/chapter-01/f8462f93c781-sarah-bennett-e9ec137bc087.mp3",
+    "bytes": 13836
+  },
+  {
+    "path": "/audio/chapter-01/f85bc7ee65cd-sfx_chair_roll_fast.mp3",
+    "bytes": 33062
+  },
+  {
+    "path": "/audio/chapter-01/f8e07da92b90-narrator-5224d2902b7a.mp3",
+    "bytes": 35988
+  },
+  {
+    "path": "/audio/chapter-01/f9b638aa21ab-sfx_intercom_open.mp3",
+    "bytes": 24703
+  },
+  {
+    "path": "/audio/chapter-01/f9f585594833-sfx_terminal_lock_engage.mp3",
+    "bytes": 33062
+  },
+  {
+    "path": "/audio/chapter-01/fc5182363533-sarah-bennett-dc90fc8720b4.mp3",
+    "bytes": 52288
+  },
+  {
+    "path": "/audio/chapter-01/fe935fc8700a-sarah-bennett-7cb92747650b.mp3",
+    "bytes": 15090
+  },
+  {
+    "path": "/audio/chapter-01/fed184b9006e-sarah-bennett-c0ca574b594a.mp3",
+    "bytes": 15090
+  }
+]

@@ -102,7 +102,8 @@ class Soundscape implements VoiceBackend {
     if(this.silent)this.stopShots();
     const wanted=new Set<string>();
     if(!blackout&&!this.silent){
-      wanted.add('amb_computer_lab');
+      if(sceneId==='island')wanted.add('amb_night_outside');
+      else if(sceneId!=='date')wanted.add('amb_computer_lab');
       if(sceneId==='alarm'||(intensity>=2&&!activation)||sceneId==='recovery'||(activation&&phase>=3))wanted.add('amb_console_alarm_bed');
       if(['revoked','corridor','power','array','boundary','acquired','locked'].includes(sceneId)||(activation&&phase===0))wanted.add('amb_tombs_array_power_rise');
       if(['array','boundary','acquired','locked'].includes(sceneId)||(activation&&phase===0))wanted.add('sfx_array_rings_move');

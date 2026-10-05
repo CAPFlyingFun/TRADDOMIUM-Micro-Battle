@@ -46,6 +46,46 @@
       "sha256": "5d352516af19b194791b05ced7ac58f605842760175d50525a53b4804697dee2",
       "gitBlob": "8aa6ea59aa08af05e3010f1babb642ce9764f305",
       "exactPrototypeBlob": true
+    },
+    "/assets/intro/island-night.jpg": {
+      "repository": "CAPFlyingFun/TMB-Story",
+      "revision": "dfe810e670a42867b014dae4a206df5d80350414",
+      "source": "assets/backgrounds/island-night.jpg",
+      "bytes": 317864,
+      "sha256": "dc3991421c6854177a0573aac74ee4d4d1d00cf974835a3047c7e7fbdb846678",
+      "gitBlob": "6e734e4f3fe528b655db9d55947136a864dfa9a5"
+    },
+    "/assets/intro/clouds/wisp-1.png": {
+      "repository": "CAPFlyingFun/TMB-Story",
+      "revision": "dfe810e670a42867b014dae4a206df5d80350414",
+      "source": "assets/backgrounds/clouds/wisp-1.png",
+      "bytes": 72643,
+      "sha256": "f5c7e67884993337bec2ff4881e5bf6fb1b523d21c1672550e01bfa106919766",
+      "gitBlob": "af4bec6f17e7fa0fcbca29c8d66468314d656567"
+    },
+    "/assets/intro/clouds/wisp-2.png": {
+      "repository": "CAPFlyingFun/TMB-Story",
+      "revision": "dfe810e670a42867b014dae4a206df5d80350414",
+      "source": "assets/backgrounds/clouds/wisp-2.png",
+      "bytes": 57621,
+      "sha256": "4d851c7d6668c3c69258db83b88e22bbf700c4ac5a647192d7695f32069a6afb",
+      "gitBlob": "4ef8d91529f30864996aec17cd9c057577285a35"
+    },
+    "/assets/intro/clouds/wisp-3.png": {
+      "repository": "CAPFlyingFun/TMB-Story",
+      "revision": "dfe810e670a42867b014dae4a206df5d80350414",
+      "source": "assets/backgrounds/clouds/wisp-3.png",
+      "bytes": 88889,
+      "sha256": "41d777d60bae25119a59ccbc3a9b4c28d9c833afe981830249bd993642196de0",
+      "gitBlob": "a268779136b34924daf575aa63b422931e67f84a"
+    },
+    "/assets/intro/clouds/wisp-4.png": {
+      "repository": "CAPFlyingFun/TMB-Story",
+      "revision": "dfe810e670a42867b014dae4a206df5d80350414",
+      "source": "assets/backgrounds/clouds/wisp-4.png",
+      "bytes": 55077,
+      "sha256": "1405c72d6b60eb01e89502dd3465ce99263a871eed77876c287f66ca44ea9eb0",
+      "gitBlob": "feb527c5234c5e76e1ee0956d59389bb3b7d8246"
     }
   },
   "omittedPrototypeModels": {

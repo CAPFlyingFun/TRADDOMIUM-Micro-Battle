@@ -9,17 +9,21 @@ import type { SaveState, Settings } from '../lib/state';
 import { freshSave } from '../lib/state';
 import { soundscape } from '../lib/audio';
 import CinematicScene from './CinematicScene';
+import StoryOpening from './StoryOpening';
 import LabStage from './LabStage';
 import ConsolePanel from './ConsolePanel';
 import VoiceControls from './VoiceControls';
 import {useVoicePlayback} from '../lib/useVoicePlayback';
 import {lineEffects} from '../data/audio-cues';
 import {useChapterOneEffects} from '../lib/useChapterOneEffects';
+import {openingSegment} from '../lib/opening';
 interface Props {threeD?:boolean;save:SaveState;settings:Settings;paused:boolean;onSave:(s:SaveState)=>void;onSettings:(s:Settings)=>void;onPause:()=>void;onFinish:()=>void;}
 export default function StoryPlayer({threeD=false,save,settings,paused:userPaused,onSave,onSettings,onPause,onFinish}:Props) {
  const [stageReady,setStageReady]=useState(false),[arrived,setArrived]=useState(false);
- const paused=userPaused||(threeD&&(!stageReady||(save.sceneId==='sarah'&&!arrived)));
+ const opening=threeD&&openingSegment(save)!==null;
+ const paused=userPaused||(threeD&&!opening&&(!stageReady||(save.sceneId==='sarah'&&!arrived)));
  const index=story.findIndex(s=>s.id===save.sceneId),scene=story[index];
+ const soundScene=opening?(save.line===0?'date':'island'):scene.id;
  const lines=(threeD?(labDialogue as Record<string,Line[]>)[save.queue]:undefined)||dialogue[save.queue]||[],line=lines[save.line];
  const [blackout,setBlackout]=useState(false);
  const [activation,setActivation]=useState(0);
@@ -30,7 +34,23 @@ export default function StoryPlayer({threeD=false,save,settings,paused:userPause
  const patch=useCallback((p:Partial<SaveState>)=>onSave({...save,...p,updatedAt:new Date().toISOString()}),[save,onSave]);
  const advance=useCallback(()=>{if(!paused&&line)patch({line:save.line+1});},[line,paused,patch,save.line]);
  const lineKey=`${save.queue}:${save.line}`;
- const voice=useVoicePlayback(lineKey,line,lines[save.line+1]?.voiceKey||`${save.queue}:${save.line+1}`,settings,paused,advance);
+ const voice=useVoicePlayback(lineKey,line,lines[save.line+1]?.voiceKey||`${save.queue}:${save.line+1}`,opening?{...settings,autoAdvance:true}:settings,paused,advance);
+ const [textElapsed,setTextElapsed]=useState(0);
+ const textDuration=Math.max(2.6,(line?.text.split(/\s+/).length||0)*.34);
+ const openingDateDuration=useRef(0);
+ if(opening&&save.line===0)openingDateDuration.current=settings.voices&&voice.hasRecording?voice.state.duration||textDuration:textDuration;
+ const openingOffset=save.line===1?openingDateDuration.current+(settings.voices?0.42:0):0;
+ useEffect(()=>{
+  setTextElapsed(0);
+ },[lineKey]);
+ useEffect(()=>{
+  if(!opening||paused||(settings.voices&&voice.hasRecording))return;
+  let last=performance.now();
+  const timer=window.setInterval(()=>{
+   const now=performance.now();setTextElapsed(t=>t+Math.min(now-last,250)/1000);last=now;
+  },100);
+  return()=>window.clearInterval(timer);
+ },[opening,paused,settings.voices,voice.hasRecording,lineKey]);
  useChapterOneEffects(lineKey,scene.chapter===1?line?.sourceIndex:undefined,voice.state,paused);
  const skip=useCallback(()=>{voice.stop();advance();},[voice.stop,advance]);
  const next=()=>{
@@ -55,8 +75,8 @@ export default function StoryPlayer({threeD=false,save,settings,paused:userPause
  },[skip,line,onPause,paused,userPaused]);
  useEffect(()=>{
   soundscape.setPaused(paused);
-  soundscape.scene(scene.id,scene.intensity,scene.id==='boundary'&&save.done.includes('shelter'),blackout,isActivation?activation:-1,scene.chapter===1);
- },[scene.id,scene.intensity,save.done,paused,blackout,isActivation,activation]);
+  soundscape.scene(soundScene,scene.intensity,scene.id==='boundary'&&save.done.includes('shelter'),blackout,isActivation?activation:-1,scene.chapter===1);
+ },[scene.id,soundScene,scene.intensity,save.done,paused,blackout,isActivation,activation]);
  useEffect(()=>{const effect=scene.chapter===1?undefined:lineEffects[lineKey];if(line&&effect)soundscape.effect(effect);},[lineKey,line,scene.chapter]);
  useEffect(()=>()=>soundscape.clear(),[]);
  useEffect(()=>{
@@ -77,21 +97,21 @@ export default function StoryPlayer({threeD=false,save,settings,paused:userPause
  useEffect(()=>{if(isActivation&&activation===0)soundscape.effect('sfx_boundary_event_collapse');if(isActivation&&activation===3)soundscape.effect('sfx_boundary_event_return');},[isActivation,activation]);
  const character=line?characters[line.speaker]:null;
  return <main className={`game-screen ${threeD?'lab-game':''} ${settings.largeText?'large-text':''} ${settings.reducedMotion?'reduce-motion':''} ${isActivation?'activation-screen':''}`}>
-  {threeD?<LabStage frame={{sceneId:scene.id,queue:save.queue,line:save.line,done:save.done,speaker:line?.speaker||'',sourceIndex:line?.sourceIndex,paused:userPaused,reducedMotion:settings.reducedMotion,interactive:!paused&&!line}} onReady={()=>setStageReady(true)} onArrived={()=>setArrived(true)} onUnavailable={()=>{setStageReady(false);setArrived(false);}} onInteract={target=>{
+  {opening?<StoryOpening segment={save.line as 0|1} elapsed={settings.voices&&voice.hasRecording?voice.state.elapsed:textElapsed} duration={settings.voices&&voice.hasRecording?voice.state.duration||textDuration:textDuration} chapterOffset={openingOffset} paused={paused||(settings.voices&&voice.hasRecording&&voice.state.status!=='playing')} reducedMotion={settings.reducedMotion} softEffects={settings.softEffects}/>:threeD?<LabStage frame={{sceneId:scene.id,queue:save.queue,line:save.line,done:save.done,speaker:line?.speaker||'',sourceIndex:line?.sourceIndex,paused:userPaused,reducedMotion:settings.reducedMotion,interactive:!paused&&!line}} onReady={()=>setStageReady(true)} onArrived={()=>setArrived(true)} onUnavailable={()=>{setStageReady(false);setArrived(false);}} onInteract={target=>{
    if(paused||line)return;
    if(target==='comm'&&scene.id==='alarm'&&ready){next();return;}
    const action=target==='terminal'?scene.actions.find(a=>a.required&&!save.done.includes(a.id)&&(!a.requires||save.done.includes(a.requires))):target==='sarah'?scene.actions.find(a=>a.id==='baby'):undefined;
    if(action)interact(action);
   }}/>:<CinematicScene look={scene.look} intensity={scene.intensity} reducedMotion={settings.reducedMotion} softEffects={settings.softEffects} paused={paused} camera={save.camera} activation={isActivation?activation:-1} blackout={blackout} focus={line?.speaker}/> }
   <header className="game-header"><div className="tombs-wordmark"><span className="tombs-mark">T</span><span>TOMBS<span className="micro-label">RESEARCH DIVISION</span></span></div><div className="chapter-track"><span>0{scene.chapter}</span><i/><span>{['The Alarm','The Boundary','The Activation'][scene.chapter-1]}</span></div><button className="icon-button" onClick={onPause} aria-label="Pause game"><CirclePause size={23}/></button></header>
-  <div className="scene-heading"><span className="eyebrow">{scene.location}</span><h1>{scene.title}</h1></div>
+  {!opening&&<div className="scene-heading"><span className="eyebrow">{scene.location}</span><h1>{scene.title}</h1></div>}
   {!threeD&&!isActivation&&scene.id!=='ending'&&<ConsolePanel scene={scene} done={save.done} camera={save.camera} line={save.line}/>}
   {scene.look==='cameras'&&<div className="camera-overlay"><ScanLine size={20}/><span>CAM {({north:'01',west:'02',tree:'03',zoom:'04',water:'05'} as Record<string,string>)[save.camera]}<small>PERIMETER · LIVE</small></span><span className="camera-crosshair">＋</span></div>}
   {isActivation?<div className={`activation-caption phase-${activation}`} role="status">
     <span className="eyebrow">{['Boundary acquired','Scale factor locked','','','TOMBS OFFLINE'][activation]}</span>
     <p>{['The rings accelerate.','“Jack!”','The sound vanishes.','Everything snaps back.','Sound returns.'][activation]}</p>
     {activationReady&&<button className="primary-button" onClick={next}>Find Sarah <ArrowRight size={18}/></button>}
-   </div>:threeD&&!stageReady?<section className="interaction-dock lab-wait"><p>Load the laboratory to begin.</p><button className="secondary-button" onClick={onPause}>Menu / Return to title</button></section>:threeD&&scene.id==='sarah'&&!arrived?<section className="interaction-dock lab-wait"><span className="eyebrow">SARAH IS ON HER WAY</span><p>The laboratory door opens.</p></section>:line?<section className={`dialogue-dock ${line.speaker==='narrator'?'narration':''}`} aria-label="Dialogue">
+   </div>:threeD&&!stageReady&&!opening?<section className="interaction-dock lab-wait"><p>Prepare the laboratory to continue.</p><button className="secondary-button" onClick={onPause}>Menu / Return to title</button></section>:threeD&&scene.id==='sarah'&&!arrived?<section className="interaction-dock lab-wait"><span className="eyebrow">SARAH IS ON HER WAY</span><p>The laboratory door opens.</p></section>:line?<section className={`dialogue-dock ${line.speaker==='narrator'?'narration':''}`} aria-label="Dialogue">
     <div className="dialogue-person">
      {character?.portrait?<span className={`portrait portrait-${line.speaker}`} style={{backgroundImage:`url(${character.portrait})`}}/>:line.speaker==='lena'?<span className="portrait voice"><Radio/></span>:null}
      <div>{character?.name&&<h2 style={{color:character.color}}>{character.name}</h2>}{character?.name&&<span className="speaker-role">{character.role}</span>}</div>
