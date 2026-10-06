@@ -4,7 +4,7 @@ import type {LabView} from './lab-camera';
 export const chapterOneShots:readonly {start:number;title:string;view:LabView}[]=[
  {start:2,title:'Late shift',view:'room'},
  {start:4,title:'Security warning',view:'room'},
- {start:6,title:'Jack wakes',view:'room'},
+ {start:6,title:'Jack wakes',view:'firstperson'},
  {start:8,title:'Security warning',view:'terminal'},
  {start:26,title:'Calling Sarah',view:'webcam'},
  {start:48,title:'The directory',view:'terminal'},

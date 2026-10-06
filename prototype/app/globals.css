@@ -168,3 +168,18 @@ html{height:100%;overscroll-behavior:none}body{min-height:100%;-webkit-text-size
 .extras-screen{height:100dvh;overflow:auto;padding:calc(var(--safe-top) + 24px) max(24px,var(--safe-right)) calc(var(--safe-bottom) + 24px) max(24px,var(--safe-left));background:#09171e}
 .extras-screen h1{font:32px Georgia,serif;margin:24px 0}.extras-screen p{max-width:560px;line-height:1.6;color:#aac4c6;margin-bottom:20px}.extras-screen a{display:flex;flex-direction:column;gap:6px;padding:18px;background:#152d33;border:1px solid #365056;max-width:560px;margin:12px 0;text-decoration:none}.extras-screen small{color:#a7bfc3}
 @media(orientation:landscape) and (max-height:520px){.title-content{top:calc(var(--safe-top) + 55px);margin-top:0}.title-header{top:calc(var(--safe-top) + 8px)}.title-menu button{min-height:44px}.title-location{display:none}}
+
+/* Movie-style CC floats over the full scene; transport and camera tools reserve
+   measured space, including browser/PWA safe areas, without a transcript panel. */
+.lab-game .lab-stage,.lab-game .story-opening{grid-row:1/3}
+.lab-game .dialogue-dock{z-index:6;background:transparent;border:0;backdrop-filter:none;box-shadow:none;pointer-events:none}
+.lab-game .dialogue-dock .voice-controls{pointer-events:auto}
+.lab-game .spoken-line,.lab-game .dialogue-person,.lab-game .voice-controls{color:#fff;text-shadow:0 1px 3px #000,0 2px 7px #000,1px 0 2px #000,-1px 0 2px #000}
+.lab-game .spoken-line{font-family:system-ui,-apple-system,sans-serif;font-weight:600;font-size:16px;line-height:1.3}
+.lab-game .voice-controls{background:transparent;backdrop-filter:none}
+.lab-game .lab-camera-controls{bottom:calc(var(--dock-height,170px) + 8px);max-width:calc(100% - 24px)}
+.lab-game .lab-camera-tools{max-width:100%;overflow-x:auto;justify-content:flex-start}
+.lab-game .lab-camera-tools button{min-width:54px;padding:6px 9px;font-size:12px}
+.lab-game .lab-player-controls,.lab-game .lab-movement-pad{bottom:calc(var(--dock-height,170px) + 74px)}
+@media(orientation:landscape){.lab-game .spoken-line{font-size:15px}.lab-game .lab-player-controls,.lab-game .lab-movement-pad{bottom:calc(var(--dock-height,110px) + 58px)}}
+.lab-game .voice-status,.lab-game .voice-controls button,.lab-game .voice-controls svg{color:#fff;filter:drop-shadow(0 1px 2px #000)}

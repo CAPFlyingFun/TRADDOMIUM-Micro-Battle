@@ -1,5 +1,5 @@
 /** Layout D preserves story console/door coordinates while widening the room. */
-export const spareChairHome={x:-2.8,z:.75};
+export const spareChairHome={x:-1.75,z:1.85};
 export const roomBounds={xMin:-5.75,xMax:5.75,zMin:-2.95,zMax:3.2};
 // Fetch the spare via the front aisle, clear of Sarah and her new seat.
 export function chairRetrievalPosition(progress:number){

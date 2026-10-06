@@ -25,11 +25,11 @@ export default function LabStage(props:Props){
   return()=>{cancelled=true;viewer.current?.dispose();viewer.current=null;};
  },[attempt]);
  useEffect(()=>{viewer.current?.update(props.frame);},[props.frame]);
- useEffect(()=>{setView(props.frame.interactive?'room':['sarah','revoked'].includes(props.frame.sceneId)?'conversation':'room');},[props.frame.sceneId,props.frame.interactive]);
+
  return <div className="lab-stage">
   <div ref={host} className="lab-canvas"/>
    {!ready&&<div className="lab-load"><span className="eyebrow">CHAPTER ONE / 3D PREVIEW</span><h2>{failed?'The lab is unavailable.':'Entering the laboratory.'}</h2><p role="status">{message}</p><small>Both characters · 5.7 MB combined</small>{failed&&<button className="primary-button" onClick={()=>setAttempt(x=>x+1)}>Retry 3D</button>}</div>}
-  {ready&&props.frame.interactive&&<LabPlayerControls selected={selected} sarahAvailable={['sarah','revoked'].includes(props.frame.sceneId)} message={controlMessage} paused={props.frame.paused} onMovement={(x,z)=>viewer.current?.setMovement(x,z)} onSelect={person=>{viewer.current?.selectPerson(person);setView('room');}}/>}
+  {ready&&props.frame.interactive&&<LabPlayerControls selected={selected} sarahAvailable={['sarah','revoked'].includes(props.frame.sceneId)} message={controlMessage} paused={props.frame.paused} onMovement={(x,z)=>viewer.current?.setMovement(x,z)} onSelect={person=>{viewer.current?.selectPerson(person);setView('firstperson');}}/>}
   {ready&&<LabCameraControls view={view} together={['sarah','revoked'].includes(props.frame.sceneId)} disabled={props.frame.paused} onView={v=>{setView(v);viewer.current?.setView(v);}} onGesture={g=>viewer.current?.setGesture(g)} onZoom={f=>viewer.current?.zoom(f)} onReset={()=>viewer.current?.resetView()}/>}
 
   {ready&&!props.frame.interactive&&['sarah','revoked'].includes(props.frame.sceneId)&&<span className="lab-scene-tag">DIAGNOSTIC LAB / JACK & SARAH</span>}

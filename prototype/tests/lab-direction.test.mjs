@@ -5,7 +5,7 @@ test('canonical opening, arrival and final exchange select their intended shots'
  assert.equal(chapterOneShot(2).view,'room');
  assert.equal(chapterOneShot(4).view,'room');
  assert.equal(chapterOneShot(27).view,'webcam');
- assert.equal(chapterOneShot(6).view,'room');
+ assert.equal(chapterOneShot(6).view,'firstperson');
  assert.equal(chapterOneShot(8).view,'terminal');
  assert.equal(chapterOneShot(54).view,'room');
  assert.equal(chapterOneShot(59).view,'conversation');

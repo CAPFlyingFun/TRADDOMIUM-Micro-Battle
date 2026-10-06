@@ -60,7 +60,7 @@ export function buildLab(scene:T.Scene,mobile:boolean){
    const wheel=new T.Mesh(new T.CylinderGeometry(.048,.048,.05,16),dark);wheel.rotation.z=Math.PI/2;wheel.position.set(0,.048,.33);leg.add(wheel);wheels.push(wheel);}
   return {root,seat,wheels};
  }
- const jackChair=chair(-.9,.51),sarahChair=chair(spareChairHome.x,spareChairHome.z);
+ const jackChair=chair(-.9,.51),sarahChair=chair(spareChairHome.x,spareChairHome.z);sarahChair.seat.rotation.y=Math.PI;
  const tablet=box(.25,.018,.34,-.38,.845,-.1,dark);tablet.visible=false;
  // Layout D: central paired cinematic station, perimeter equipment and an
  // auxiliary desk at front left; the right-hand aisle stays open for play.

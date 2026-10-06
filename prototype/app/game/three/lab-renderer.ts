@@ -14,7 +14,7 @@ import {createBodyMotion} from './body-motion';
 import { assetUrl } from '../../../lib/asset-url';
 import { assertCompatibleRig } from './rig-contract';
 import chapterCues from '../data/chapter1-cues.json';
-import {labShot,type LabView,type CameraGesture} from './lab-camera';
+import {labShot,measureEyeMount,firstPersonShot,type EyeMount,type LabView,type CameraGesture} from './lab-camera';
 export type {LabView,CameraGesture} from './lab-camera';
 import {jackOpening} from './jack-opening';
 const staging=chapterCues.staging;
@@ -45,15 +45,17 @@ export function createLabRenderer(host:HTMLElement,mobile:boolean,events:Events)
  selectedRing.rotation.x=-Math.PI/2;selectedRing.visible=false;scene.add(selectedRing);
  const desiredPos=new T.Vector3(),desiredTarget=new T.Vector3();
  let jack:T.Object3D|null=null,sarah:T.Object3D|null=null,jackMotion:ReturnType<typeof createBodyMotion>|null=null,sarahMotion:ReturnType<typeof createBodyMotion>|null=null;
+ const eyeMounts:Partial<Record<Person,EyeMount>>={};let lookYaw=Math.PI,lookPitch=-.12;
  let desiredFov=48,webcamSpeaker='jack',directed=true,lastShot=-1;
  const targetFor=(selected:LabView)=>{
+  if(selected==='firstperson')return;
   const shot=labShot(selected,camera.aspect,webcamSpeaker,['sarah','revoked'].includes(frame.sceneId));
   desiredPos.copy(shot.position);desiredTarget.copy(shot.target);desiredFov=shot.fov;
  };
- function applyView(selected:LabView){events.view(selected);controls.enableDamping=false;controls.update();view=selected;autoCamera=true;targetFor(view);if(frame.reducedMotion){camera.position.copy(desiredPos);controls.target.copy(desiredTarget);camera.fov=desiredFov;camera.updateProjectionMatrix();controls.update();}}
+ function applyView(selected:LabView){events.view(selected);controls.enableDamping=false;controls.update();view=selected;autoCamera=true;controls.enabled=!frame.paused&&view!=='firstperson';if(view==='firstperson'){const actor=player.selected==='jack'?jack:sarah;if(actor)lookYaw=actor.rotation.y;lookPitch=-.12;}targetFor(view);if(frame.reducedMotion&&view!=='firstperson'){camera.position.copy(desiredPos);controls.target.copy(desiredTarget);camera.fov=desiredFov;camera.updateProjectionMatrix();controls.update();}}
  function setView(selected:LabView){directed=false;applyView(selected);}
  function setGesture(selected:CameraGesture){controls.mouseButtons.LEFT=selected==='pan'?T.MOUSE.PAN:T.MOUSE.ROTATE;controls.touches.ONE=selected==='pan'?T.TOUCH.PAN:T.TOUCH.ROTATE;}
- function zoom(factor:number){directed=false;autoCamera=false;const offset=camera.position.clone().sub(controls.target);offset.setLength(T.MathUtils.clamp(offset.length()*factor,controls.minDistance,controls.maxDistance));camera.position.copy(controls.target).add(offset);controls.update();}
+ function zoom(factor:number){if(view==='firstperson')return;directed=false;autoCamera=false;const offset=camera.position.clone().sub(controls.target);offset.setLength(T.MathUtils.clamp(offset.length()*factor,controls.minDistance,controls.maxDistance));camera.position.copy(controls.target).add(offset);controls.update();}
  function resize(){const b=host.getBoundingClientRect();renderer.setSize(b.width,Math.max(1,b.height));camera.aspect=b.width/Math.max(1,b.height);camera.updateProjectionMatrix();targetFor(view);if(!loaded){camera.position.copy(desiredPos);controls.target.copy(desiredTarget);camera.fov=desiredFov;camera.updateProjectionMatrix();controls.update();}}
  const observer=new ResizeObserver(resize);observer.observe(host);resize();
  const dragStart=()=>{autoCamera=false;controls.enableDamping=!frame.reducedMotion;controls.dampingFactor=.12;};controls.addEventListener('start',dragStart);
@@ -62,25 +64,25 @@ export function createLabRenderer(host:HTMLElement,mobile:boolean,events:Events)
   return {jack:pose(jack),sarah:pose(sarah)};
  }
  function selectPerson(person:Person){
-  if(player.select(person)){keys.clear();touchDirection={x:0,z:0};marker.visible=false;autoCamera=true;view='room';targetFor(view);events.control(person,`Controlling ${person==='jack'?'Jack':'Sarah'}. Tap the floor to walk.`);}
+  if(player.select(person)){keys.clear();touchDirection={x:0,z:0};marker.visible=false;applyView('firstperson');events.control(person,`Controlling ${person==='jack'?'Jack':'Sarah'}. Tap the floor to walk.`);}
  }
  function requestInteraction(target:string,action=target){
   if(!frame.interactive||frame.paused||!loaded)return;
   const current=player.snapshot(),person=player.selected;
   const point=target==='sarah'?findInteractionPoint(current[person],current[person==='jack'?'sarah':'jack']):target==='comm'?{x:.8,z:.75}:person==='sarah'?{x:-1.8,z:.65}:{x:-.9,z:.65};
-  if(point&&player.goTo(point,action)){applyView('room');marker.position.set(point.x,.015,point.z);marker.visible=true;events.control(person,'Walking to the interaction…');}
+  if(point&&player.goTo(point,action)){applyView('firstperson');marker.position.set(point.x,.015,point.z);marker.visible=true;events.control(person,'Walking to the interaction…');}
   else events.control(person,'That spot is blocked. Try another position.');
  }
  function keyDown(e:KeyboardEvent){
   if(!frame.interactive||frame.paused||!loaded||e.ctrlKey||e.metaKey||e.altKey||['INPUT','TEXTAREA','SELECT'].includes((e.target as HTMLElement)?.tagName))return;
-  const k=e.key.toLowerCase();if((e.target as HTMLElement)?.tagName==='BUTTON'&&['enter',' '].includes(k))return;if(['w','a','s','d','arrowup','arrowdown','arrowleft','arrowright'].includes(k)){e.preventDefault();keys.add(k);marker.visible=false;autoCamera=true;view='room';targetFor(view);}
+  const k=e.key.toLowerCase();if((e.target as HTMLElement)?.tagName==='BUTTON'&&['enter',' '].includes(k))return;if(['w','a','s','d','arrowup','arrowdown','arrowleft','arrowright'].includes(k)){e.preventDefault();keys.add(k);marker.visible=false;if(view!=='firstperson')applyView('firstperson');}
   if(k==='c'&&!e.repeat){e.preventDefault();selectPerson(player.selected==='jack'?'sarah':'jack');}
  }
  const keyUp=(e:KeyboardEvent)=>keys.delete(e.key.toLowerCase()),clearKeys=()=>{keys.clear();touchDirection={x:0,z:0};};
  window.addEventListener('keydown',keyDown);window.addEventListener('keyup',keyUp);window.addEventListener('blur',clearKeys);
- const raycaster=new T.Raycaster();let pointer:{x:number;y:number;id:number}|null=null;const pointers=new Set<number>();let dragged=false;
- function down(e:PointerEvent){pointers.add(e.pointerId);if(pointers.size===1){pointer={x:e.clientX,y:e.clientY,id:e.pointerId};dragged=false;}else {dragged=true;directed=false;}}
- function move(e:PointerEvent){if(pointer&&Math.hypot(pointer.x-e.clientX,pointer.y-e.clientY)>7){dragged=true;directed=false;}}
+ const raycaster=new T.Raycaster();let pointer:{x:number;y:number;id:number}|null=null;const pointers=new Set<number>();let dragged=false;let lastPointer={x:0,y:0};
+ function down(e:PointerEvent){if(view==='firstperson')renderer.domElement.setPointerCapture(e.pointerId);lastPointer={x:e.clientX,y:e.clientY};pointers.add(e.pointerId);if(pointers.size===1){pointer={x:e.clientX,y:e.clientY,id:e.pointerId};dragged=false;}else {dragged=true;directed=false;}}
+ function move(e:PointerEvent){if(view==='firstperson'&&pointer&&pointers.size===1&&!frame.paused){lookYaw-=(e.clientX-lastPointer.x)*.004;lookPitch=T.MathUtils.clamp(lookPitch-(e.clientY-lastPointer.y)*.004,-1.55,1.05);lastPointer={x:e.clientX,y:e.clientY};}if(pointer&&Math.hypot(pointer.x-e.clientX,pointer.y-e.clientY)>7){dragged=true;directed=false;}}
  function cancel(e:PointerEvent){pointers.delete(e.pointerId);pointer=null;dragged=true;}
  function up(e:PointerEvent){
   pointers.delete(e.pointerId);const start=pointer;pointer=null;
@@ -93,7 +95,7 @@ export function createLabRenderer(host:HTMLElement,mobile:boolean,events:Events)
    // Opaque surfaces occlude controls; do not activate through desks or walls.
    if(hit.object instanceof T.Mesh){
     if(Math.abs(hit.point.y)<.1&&walkable(hit.point)&&player.goTo(hit.point)){
-     applyView('room');marker.position.set(hit.point.x,.015,hit.point.z);marker.visible=true;events.control(player.selected,'Walking · tap a console or choose an objective to interact.');
+     if(view!=='firstperson')applyView('firstperson');marker.position.set(hit.point.x,.015,hit.point.z);marker.visible=true;events.control(player.selected,'Walking · tap a console or choose an objective to interact.');
     }
     break;
    }
@@ -113,7 +115,7 @@ export function createLabRenderer(host:HTMLElement,mobile:boolean,events:Events)
   const response=await fetch(assetUrl(`/assets/lab3d/${person}.glb`),{signal:abort.signal});if(!response.ok)throw new Error(`${person} model unavailable (HTTP ${response.status})`);
   const array=await response.arrayBuffer();bytes+=array.byteLength;if(!closed)events.status(`Loading ${person==='jack'?'Jack':'Sarah'} · ${Math.round(bytes/total*100)}%`);
   const gltf=await new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).parseAsync(array,'');if(closed){release(gltf.scene);throw new Error('Closed');}
-  const actor=gltf.scene;assertCompatibleRig(actor,person);if(person==='sarah')prepareSeatedSarah(actor);
+  const actor=gltf.scene;assertCompatibleRig(actor,person);eyeMounts[person]=measureEyeMount(actor);if(person==='sarah')prepareSeatedSarah(actor);
   actor.traverse(o=>{const m=o as T.Mesh;if(!m.isMesh)return;for(const mat of Array.isArray(m.material)?m.material:[m.material])for(const value of Object.values(mat))if(value instanceof T.Texture)value.anisotropy=Math.min(8,renderer.capabilities.getMaxAnisotropy());});
   actor.traverse(o=>{const mesh=o as T.Mesh;if(!mesh.isMesh)return;mesh.castShadow=!mobile;mesh.receiveShadow=false;mesh.frustumCulled=false;for(const m of Array.isArray(mesh.material)?mesh.material:[mesh.material])if(m instanceof T.MeshStandardMaterial){m.metalness=0;m.onBeforeCompile=shader=>{shader.fragmentShader=shader.fragmentShader.replace('#include <roughnessmap_fragment>','#include <roughnessmap_fragment>\nroughnessFactor = max(roughnessFactor, 0.78);');};m.customProgramCacheKey=()=> 'tmb-lab-matte-v1';}});
   scene.add(actor);return actor;
@@ -152,7 +154,7 @@ export function createLabRenderer(host:HTMLElement,mobile:boolean,events:Events)
     // Jack gives Sarah the original chair. The spare returns to his own screen.
     room.jackChair.root.position.set(T.MathUtils.lerp(-.9,-1.8,move),0,.51+opening.roll);
     room.sarahChair.root.position.set(returning>0?retrieval.x:spareChairHome.x,0,returning>0?T.MathUtils.lerp(retrieval.z-.12,.51,jackSit):spareChairHome.z);
-    room.sarahChair.seat.rotation.y=jackSit>0?jack.rotation.y-Math.PI:0;
+    room.sarahChair.seat.rotation.y=jackSit>0?jack.rotation.y-Math.PI:returning>0?retrieval.yaw:Math.PI;
     if(entering&&sarah){
      sarah.visible=true;arrival=Math.min(1.5,arrival+step);
      if(arrival>=1.5&&!arrivalReported){arrivalReported=true;events.arrived();}
@@ -209,17 +211,18 @@ export function createLabRenderer(host:HTMLElement,mobile:boolean,events:Events)
    else if(nearSarah)desiredTarget.set((jack.position.x+sarah!.position.x)/2,(jack.position.y+sarah!.position.y)/2+1.57,.5);
    else desiredTarget.set(jack.position.x,jack.position.y+1.57,jack.position.z);
   }
+  if(view==='firstperson'&&loaded){const person=player.active?player.selected:'jack',actor=person==='jack'?jack:sarah,mount=eyeMounts[person];if(actor&&mount){const shot=firstPersonShot(actor,mount,lookYaw,lookPitch);desiredPos.copy(shot.position);desiredTarget.copy(shot.target);desiredFov=shot.fov;autoCamera=true;}}
   if(!autoCamera&&!frame.paused)controls.update();
-  if(autoCamera&&!frame.paused){const blend=frame.reducedMotion?1:1-Math.exp(-dt*3);camera.position.lerp(desiredPos,blend);controls.target.lerp(desiredTarget,blend);camera.fov=T.MathUtils.lerp(camera.fov,desiredFov,blend);camera.updateProjectionMatrix();controls.update();}
+  if(autoCamera&&!frame.paused){const blend=frame.reducedMotion||view==='firstperson'?1:1-Math.exp(-dt*3);camera.position.lerp(desiredPos,blend);controls.target.lerp(desiredTarget,blend);camera.fov=T.MathUtils.lerp(camera.fov,desiredFov,blend);camera.updateProjectionMatrix();if(view==='firstperson'){camera.lookAt(desiredTarget);camera.updateMatrixWorld(true);}else controls.update();}
   room.display(frame.queue,frame.line,frame.done,frame.sourceIndex===staging.lock&&clock<blackUntil);
   room.ceilingFixtures.visible=camera.position.y<2.95;renderer.render(scene,camera);
  }
  raf=requestAnimationFrame(tick);
- return {setMovement:(x:number,z:number)=>{touchDirection={x,z};if(x||z){autoCamera=true;view='room';targetFor(view);marker.visible=false;}},setView,setGesture,zoom,selectPerson,requestInteraction,resetView:()=>{directed=true;applyView(player.exploring?'room':chapterOneShot(frame.sourceIndex??lastSource).view);},update(next:LabFrame){const changed=next.sceneId!==frame.sceneId;if(next.sourceIndex===staging.lock&&frame.sourceIndex!==staging.lock)blackUntil=clock+3;if(loaded&&next.interactive!==frame.interactive){
+ return {setMovement:(x:number,z:number)=>{touchDirection={x,z};if(x||z){if(view!=='firstperson')applyView('firstperson');marker.visible=false;}},setView,setGesture,zoom,selectPerson,requestInteraction,resetView:()=>{directed=true;applyView(player.exploring?'firstperson':chapterOneShot(frame.sourceIndex??lastSource).view);},update(next:LabFrame){const changed=next.sceneId!==frame.sceneId;if(next.sourceIndex===staging.lock&&frame.sourceIndex!==staging.lock)blackUntil=clock+3;if(loaded&&next.interactive!==frame.interactive){
    player.setExploring(next.interactive,poses());keys.clear();marker.visible=false;
-   if(player.returning)events.staging(true);
-   if(next.interactive){applyView('room');events.control(player.selected,'Tap the floor to walk · WASD / arrows on keyboard.');}
+   if(player.returning){directed=true;events.staging(true);}
+   if(next.interactive){applyView('firstperson');events.control(player.selected,'Tap the floor to walk · WASD / arrows on keyboard.');}
   }
-  if(next.paused){keys.clear();touchDirection={x:0,z:0};}frame=next;if(next.speaker==='jack'||next.speaker==='sarah')webcamSpeaker=next.speaker;if(view==='webcam'&&autoCamera)targetFor(view);room.display(next.queue,next.line,next.done);controls.enabled=!next.paused;if(changed)directed=true;
+  if(next.paused){keys.clear();touchDirection={x:0,z:0};}frame=next;if(next.speaker==='jack'||next.speaker==='sarah')webcamSpeaker=next.speaker;if(view==='webcam'&&autoCamera)targetFor(view);room.display(next.queue,next.line,next.done);controls.enabled=!next.paused&&view!=='firstperson';if(changed)directed=true;
   if(!player.active&&next.sourceIndex!==undefined){const shot=chapterOneShot(next.sourceIndex);if(directed&&(changed||shot.start!==lastShot))applyView(shot.view);lastShot=shot.start;}},dispose(){closed=true;abort.abort();clearTimeout(timeout);cancelAnimationFrame(raf);observer.disconnect();controls.dispose();window.removeEventListener('keydown',keyDown);window.removeEventListener('keyup',keyUp);window.removeEventListener('blur',clearKeys);renderer.domElement.removeEventListener('wheel',manualWheel);renderer.domElement.removeEventListener('pointerdown',down);renderer.domElement.removeEventListener('pointermove',move);renderer.domElement.removeEventListener('pointercancel',cancel);renderer.domElement.removeEventListener('pointerup',up);renderer.domElement.removeEventListener('webglcontextlost',contextLost);release(scene);environment.dispose();renderer.dispose();renderer.forceContextLoss();renderer.domElement.remove();}};
 }

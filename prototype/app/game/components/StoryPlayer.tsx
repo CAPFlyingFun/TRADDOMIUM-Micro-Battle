@@ -20,7 +20,9 @@ import {useChapterOneEffects} from '../lib/useChapterOneEffects';
 import {openingSegment} from '../lib/opening';
 interface Props {threeD?:boolean;save:SaveState;settings:Settings;paused:boolean;onSave:(s:SaveState)=>void;onSettings:(s:Settings)=>void;onPause:()=>void;onFinish:()=>void;}
 export default function StoryPlayer({threeD=false,save,settings,paused:userPaused,onSave,onSettings,onPause,onFinish}:Props) {
+ const screen=useRef<HTMLElement>(null);
  const lab=useRef<LabStageHandle>(null);
+ useEffect(()=>{const root=screen.current;if(!root||!threeD)return;const dock=root.querySelector('.dialogue-dock,.interaction-dock');if(!dock)return;const observer=new ResizeObserver(()=>root.style.setProperty('--dock-height',`${dock.getBoundingClientRect().height}px`));observer.observe(dock);return()=>observer.disconnect();});
  const [staging,setStaging]=useState(false);
  const [stageReady,setStageReady]=useState(false),[arrived,setArrived]=useState(false);
  const opening=threeD&&openingSegment(save)!==null;
@@ -100,7 +102,7 @@ export default function StoryPlayer({threeD=false,save,settings,paused:userPause
  },[isActivation,paused]);
  useEffect(()=>{if(isActivation&&activation===0)soundscape.effect('sfx_boundary_event_collapse');if(isActivation&&activation===3)soundscape.effect('sfx_boundary_event_return');},[isActivation,activation]);
  const character=line?characters[line.speaker]:null;
- return <main className={`game-screen ${threeD?'lab-game':''} ${settings.largeText?'large-text':''} ${settings.reducedMotion?'reduce-motion':''} ${isActivation?'activation-screen':''}`}>
+ return <main ref={screen} className={`game-screen ${threeD?'lab-game':''} ${settings.largeText?'large-text':''} ${settings.reducedMotion?'reduce-motion':''} ${isActivation?'activation-screen':''}`}>
   {opening?<StoryOpening segment={save.line as 0|1} elapsed={settings.voices&&voice.hasRecording?voice.state.elapsed:textElapsed} duration={settings.voices&&voice.hasRecording?voice.state.duration||textDuration:textDuration} chapterOffset={openingOffset} paused={paused||(settings.voices&&voice.hasRecording&&voice.state.status!=='playing')} reducedMotion={settings.reducedMotion} softEffects={settings.softEffects}/>:threeD?<LabStage ref={lab} onStaging={setStaging} frame={{sceneId:scene.id,queue:save.queue,line:save.line,done:save.done,speaker:line?.speaker||'',sourceIndex:line?.sourceIndex,elapsed:settings.voices&&voice.hasRecording?voice.state.elapsed:textElapsed,paused:userPaused,reducedMotion:settings.reducedMotion,interactive:stageReady&&!line&&!staging}} onReady={()=>setStageReady(true)} onArrived={()=>setArrived(true)} onUnavailable={()=>{setStageReady(false);setArrived(false);setStaging(false);}} onInteract={target=>{
    if(paused||line)return;
    if(target==='comm'&&scene.id==='alarm'&&ready){next();return;}
