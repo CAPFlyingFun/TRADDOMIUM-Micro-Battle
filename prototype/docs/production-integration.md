@@ -71,3 +71,24 @@ main. Production main remains an ordinary forward-moving branch; the backup and
 prototype branches are kept. To roll back, restore production files/workflow from
 the backup as a new commit and redeploy. Do not delete or force-reset unrelated
 history. The backup preserves the former root/v1 entry layout too.
+
+## Layout D and centred captions (2026-10-06 UTC)
+
+The Chapter One room now follows the approved D concept: a 12 × 7 m
+cutaway, central paired story workstation, perimeter equipment, rear benches,
+and an auxiliary left desk. Original console and entrance coordinates stay
+compatible with the canonical staging. The spare sits beside the shared desk;
+Jack retrieves it via the front aisle rather than crossing Sarah’s seat.
+Navigation footprints include the new furniture and auxiliary chair.
+
+The user’s ZIP contains the enhanced 2560 × 2560 atlas. Five colour tiles
+are extracted to WebP at 256 px for phones and 512 px for desktop; hashes
+and provenance are included in the asset inventory. Physical roughness,
+metalness and an inexpensive static environment add subtle highlights without
+planar reflection passes. Ceiling fixtures disappear for overhead views.
+
+Narration and dialogue now share short timed captions, centred in the bottom
+strip for both orientations. Landscape uses the full-width cinematic viewport
+and a horizontal transport. Audio remains intact; timing is estimated unless
+explicit editorial cues are supplied. Playback errors retain the scrollable
+full transcript. Safari uses dvh and standalone uses safe-area insets.

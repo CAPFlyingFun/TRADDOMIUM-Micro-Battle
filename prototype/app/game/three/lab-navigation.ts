@@ -1,3 +1,4 @@
+import {roomBounds} from './lab-layout';
 /** Ground-plane navigation for the existing procedural room (metres).
  * Furniture footprints include body clearance. No world or model scale changes.
  */
@@ -5,10 +6,15 @@ export type FloorPoint={x:number;z:number};
 const clearance=.16;
 const obstacles=[
  {x0:-2.25,x1:.45,z0:-.9,z1:.2}, // Shared workstation
- {x0:-3.58,x1:-.62,z0:-3,z1:-2.2}, // Instrument bench
- {x0:-3.85,x1:-3.15,z0:-1.3,z1:-.7}, // Rack
+ {x0:-3.7,x1:.3,z0:-3,z1:-2.2}, // Instrument bench
+ {x0:-5.05,x1:-4.25,z0:-2.95,z1:-2.25},
+ {x0:.5,x1:1.3,z0:-2.95,z1:-2.25},
+ {x0:-5.95,x1:-5.05,z0:-2.65,z1:2.4},
+ {x0:5.05,x1:5.95,z0:-2.65,z1:2.4},
+ {x0:-5.08,x1:-3.52,z0:1.3,z1:2.1},
+ {x0:-4.65,x1:-3.95,z0:2.05,z1:2.7}, // Rack
 ];
-export function walkable(p:FloorPoint){return Number.isFinite(p.x)&&Number.isFinite(p.z)&&p.x>=-3.75&&p.x<=3.75&&p.z>=-2.95&&p.z<=3.2&&!obstacles.some(b=>p.x>b.x0-clearance&&p.x<b.x1+clearance&&p.z>b.z0-clearance&&p.z<b.z1+clearance);}
+export function walkable(p:FloorPoint){return Number.isFinite(p.x)&&Number.isFinite(p.z)&&p.x>=roomBounds.xMin&&p.x<=roomBounds.xMax&&p.z>=roomBounds.zMin&&p.z<=roomBounds.zMax&&!obstacles.some(b=>p.x>b.x0-clearance&&p.x<b.x1+clearance&&p.z>b.z0-clearance&&p.z<b.z1+clearance);}
 function clearSegment(a:FloorPoint,b:FloorPoint){const n=Math.ceil(Math.hypot(b.x-a.x,b.z-a.z)/.04);for(let i=0;i<=n;i++){const t=n?i/n:0;if(!walkable({x:a.x+(b.x-a.x)*t,z:a.z+(b.z-a.z)*t}))return false;}return true;}
 export function moveOnFloor(start:FloorPoint,direction:FloorPoint,distance:number):FloorPoint{
  const length=Math.hypot(direction.x,direction.z);if(!length||!Number.isFinite(distance))return {...start};

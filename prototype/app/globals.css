@@ -134,21 +134,33 @@ html{height:100%;overscroll-behavior:none}body{min-height:100%;-webkit-text-size
  .lab-game .interaction-dock{max-height:35dvh;padding:12px 16px max(10px,var(--safe-bottom))}
  .lab-game .interaction-dock .objective{margin-bottom:8px}.lab-game .scene-exit{margin-top:8px}.lab-game .interaction-help{margin-top:6px}
 }
+/* One bottom-centred caption strip in both orientations. Landscape uses a
+   wider scene and a horizontal transport rather than a right transcript panel. */
+.lab-game .spoken-line{width:min(100%,700px);align-self:center;text-align:center;padding-right:0;font-size:17px;line-height:1.4;font-style:normal}
+.lab-game .timed-caption{min-height:2.8em;max-height:5.6em;color:#d6e4e1}
+.lab-game .dialogue-person{justify-content:center;margin:0 0 4px}
+.lab-game .dialogue-person .portrait,.lab-game .speaker-role{display:none}
+.lab-game .voice-controls{width:min(100%,700px);align-self:center}
 @media(orientation:landscape){
- .lab-game.game-screen{grid-template-columns:minmax(0,63fr) minmax(280px,37fr);grid-template-rows:minmax(0,1fr);padding-bottom:var(--safe-bottom)}
- .lab-game .dialogue-dock,.lab-game .interaction-dock{grid-column:2;grid-row:1;align-self:stretch;margin-top:64px;max-height:none;height:auto;padding:16px;overflow:auto;border-left:1px solid #779b9e40}
- .lab-game .dialogue-dock{overflow:hidden}.lab-game .spoken-line{flex:1 1 auto;max-height:none;font-size:clamp(16px,1.7vw,23px);line-height:1.5;margin:8px 0}
- .lab-game .voice-controls{flex:0 0 auto}.lab-game .dialogue-person{margin-bottom:0}
+ .lab-game.game-screen{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr) auto;padding-bottom:0}
+ .lab-game .dialogue-dock,.lab-game .interaction-dock{grid-column:1;grid-row:2;margin-top:0;max-height:46dvh;height:auto;padding:8px 22px max(8px,var(--safe-bottom));border-left:0}
+ .lab-game .spoken-line{flex:0 1 auto;font-size:16px;max-height:5.6em;margin:0 0 4px}
+ .lab-game .voice-controls{display:grid;grid-template-columns:minmax(120px,1fr) auto;column-gap:20px;align-items:center;margin-top:0}
+ .lab-game .voice-status{grid-column:1;grid-row:1}.lab-game .voice-progress{grid-column:1;grid-row:2;margin:0}
+ .lab-game .voice-buttons{grid-column:2;grid-row:1/3;margin:0;gap:12px}
+ .lab-game .dialogue-person{margin:0}.lab-game .dialogue-person h2{font-size:12px}
  .lab-game .game-header{top:calc(var(--safe-top) + 9px)}
- .lab-leave{right:calc(var(--safe-right) + 38%);top:calc(var(--safe-top) + 62px)}
- .lab-game .scene-heading{top:calc(var(--safe-top) + 73px)}
+ .lab-leave{right:calc(var(--safe-right) + 18px);top:calc(var(--safe-top) + 58px)}
+ .lab-game .scene-heading{top:calc(var(--safe-top) + 62px)}
+ .lab-game .scene-heading h1{font-size:20px;margin-top:4px}
+ .lab-game .interaction-dock .action-list{display:flex;flex-direction:row;flex-wrap:wrap}
+ .lab-game .interaction-dock .action-button{flex:1;min-width:140px}
 }
 @media(orientation:landscape) and (max-height:430px){
- .lab-game .dialogue-dock,.lab-game .interaction-dock{margin-top:54px;padding:10px 12px}
- .lab-game .dialogue-person .portrait,.lab-game .speaker-role{display:none}
- .lab-game .spoken-line{font-size:16px;margin:4px 0;line-height:1.4}
  .lab-game .game-header .tombs-mark{width:30px;height:30px}.lab-game .game-header .micro-label{font-size:9px}
- .lab-game .scene-heading{top:calc(var(--safe-top) + 60px)}.lab-leave{top:calc(var(--safe-top) + 52px)}
+ .lab-game .scene-heading .eyebrow{display:none}
+ .lab-game .spoken-line{font-size:15px;min-height:2.8em;max-height:4.2em}
+ .lab-game .lab-camera-controls{bottom:6px}
 }
 .title-screen{height:100dvh;min-height:0;overflow:auto}.title-header{top:calc(var(--safe-top) + 20px);left:calc(var(--safe-left) + 5%);right:calc(var(--safe-right) + 5%)}
 .title-footer{bottom:calc(var(--safe-bottom) + 18px)}.title-content{margin-top:var(--safe-top)}

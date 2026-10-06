@@ -86,6 +86,56 @@
       "bytes": 55077,
       "sha256": "1405c72d6b60eb01e89502dd3465ce99263a871eed77876c287f66ca44ea9eb0",
       "gitBlob": "feb527c5234c5e76e1ee0956d59389bb3b7d8246"
+    },
+    "/assets/lab-materials/floor.256.webp": {
+      "bytes": 20168,
+      "sha256": "c936947e2fb3f67988f243cdb2cc9f30f393f45a2ecf2fe66924e2ffa60f0e60",
+      "source": "Approved Wink-enhanced 2560x2560 atlas from uploaded ZIP; 4x4 tile extraction."
+    },
+    "/assets/lab-materials/floor.512.webp": {
+      "bytes": 73912,
+      "sha256": "f5839555df01acf3e064fa7e4758de41aa0235faaad8e0fb8194b1d7e21956ae",
+      "source": "Approved Wink-enhanced 2560x2560 atlas from uploaded ZIP; 4x4 tile extraction."
+    },
+    "/assets/lab-materials/wall.256.webp": {
+      "bytes": 3942,
+      "sha256": "2d139fa6948256b99ffe0520e28ee8cebbe825382eb10fe69cee24e982f70e2f",
+      "source": "Approved Wink-enhanced 2560x2560 atlas from uploaded ZIP; 4x4 tile extraction."
+    },
+    "/assets/lab-materials/wall.512.webp": {
+      "bytes": 42668,
+      "sha256": "625941818f62f5c6fccf3eb9e33f3c7cc988585bef60c7748aa8eb88a0489aeb",
+      "source": "Approved Wink-enhanced 2560x2560 atlas from uploaded ZIP; 4x4 tile extraction."
+    },
+    "/assets/lab-materials/worktop.256.webp": {
+      "bytes": 3996,
+      "sha256": "2558da5eb4d7429d9a7d8ef20cb53d403e95562f87535d4946d9586047aecb6d",
+      "source": "Approved Wink-enhanced 2560x2560 atlas from uploaded ZIP; 4x4 tile extraction."
+    },
+    "/assets/lab-materials/worktop.512.webp": {
+      "bytes": 50098,
+      "sha256": "bbd798a5d10378e4b0b4e86116749eef51b704d33b79d3e9fad6f68b7eb37281",
+      "source": "Approved Wink-enhanced 2560x2560 atlas from uploaded ZIP; 4x4 tile extraction."
+    },
+    "/assets/lab-materials/steel.256.webp": {
+      "bytes": 3398,
+      "sha256": "07bd4480fb08d427fe0e4b3358a9cb5a8e91c73d4ede5b7fa4c3a96241f98350",
+      "source": "Approved Wink-enhanced 2560x2560 atlas from uploaded ZIP; 4x4 tile extraction."
+    },
+    "/assets/lab-materials/steel.512.webp": {
+      "bytes": 11778,
+      "sha256": "8a14b7a31c26e5e8fc87a577c3757fb4264e3eaf104e536e1b0c03ee6e1faf71",
+      "source": "Approved Wink-enhanced 2560x2560 atlas from uploaded ZIP; 4x4 tile extraction."
+    },
+    "/assets/lab-materials/chair.256.webp": {
+      "bytes": 21810,
+      "sha256": "d80526322bc59311889d3f72b329aa994516b96a04bb1ff95d46a8304a2ff71b",
+      "source": "Approved Wink-enhanced 2560x2560 atlas from uploaded ZIP; 4x4 tile extraction."
+    },
+    "/assets/lab-materials/chair.512.webp": {
+      "bytes": 80648,
+      "sha256": "02c054bc827d5c4ee6e00a8d67cb821c17a400d2ddd0492157d0f2e97fe26499",
+      "source": "Approved Wink-enhanced 2560x2560 atlas from uploaded ZIP; 4x4 tile extraction."
     }
   },
   "omittedPrototypeModels": {
