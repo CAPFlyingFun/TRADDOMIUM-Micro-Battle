@@ -3,8 +3,10 @@ import assert from 'node:assert/strict';
 import {chapterOneShot} from '../app/game/three/lab-direction.ts';
 test('canonical opening, arrival and final exchange select their intended shots',()=>{
  assert.equal(chapterOneShot(2).view,'room');
- assert.equal(chapterOneShot(4).view,'terminal');
+ assert.equal(chapterOneShot(4).view,'room');
  assert.equal(chapterOneShot(27).view,'webcam');
+ assert.equal(chapterOneShot(6).view,'room');
+ assert.equal(chapterOneShot(8).view,'terminal');
  assert.equal(chapterOneShot(54).view,'room');
  assert.equal(chapterOneShot(59).view,'conversation');
  assert.equal(chapterOneShot(65).view,'terminal');

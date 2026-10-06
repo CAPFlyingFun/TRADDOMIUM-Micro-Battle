@@ -1,3 +1,4 @@
+import {rearWorkstation} from './jack-opening';
 import {roomBounds} from './lab-layout';
 /** Ground-plane navigation for the existing procedural room (metres).
  * Furniture footprints include body clearance. No world or model scale changes.
@@ -5,6 +6,7 @@ import {roomBounds} from './lab-layout';
 export type FloorPoint={x:number;z:number};
 const clearance=.16;
 const obstacles=[
+ {x0:rearWorkstation.x-rearWorkstation.width/2,x1:rearWorkstation.x+rearWorkstation.width/2,z0:rearWorkstation.z-rearWorkstation.depth/2,z1:rearWorkstation.z+rearWorkstation.depth/2},
  {x0:-2.25,x1:.45,z0:-.9,z1:.2}, // Shared workstation
  {x0:-3.7,x1:.3,z0:-3,z1:-2.2}, // Instrument bench
  {x0:-5.05,x1:-4.25,z0:-2.95,z1:-2.25},

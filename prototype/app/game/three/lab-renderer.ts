@@ -16,9 +16,10 @@ import { assertCompatibleRig } from './rig-contract';
 import chapterCues from '../data/chapter1-cues.json';
 import {labShot,type LabView,type CameraGesture} from './lab-camera';
 export type {LabView,CameraGesture} from './lab-camera';
+import {jackOpening} from './jack-opening';
 const staging=chapterCues.staging;
 
-export type LabFrame={sceneId:string;queue:string;line:number;done:string[];speaker:string;sourceIndex?:number;paused:boolean;reducedMotion:boolean;interactive:boolean};
+export type LabFrame={sceneId:string;queue:string;line:number;done:string[];speaker:string;sourceIndex?:number;elapsed?:number;paused:boolean;reducedMotion:boolean;interactive:boolean};
 type Events={status:(text:string)=>void;ready:()=>void;arrived:()=>void;interact:(target:string)=>void;failed:()=>void;staging:(busy:boolean)=>void;control:(person:Person,message:string)=>void;view:(view:LabView)=>void};
 export function createLabRenderer(host:HTMLElement,mobile:boolean,events:Events){
  const renderer=new T.WebGLRenderer({antialias:true,alpha:false,powerPreference:'high-performance'});
@@ -138,8 +139,9 @@ export function createLabRenderer(host:HTMLElement,mobile:boolean,events:Events)
     if(source>=staging.chairExchange)chairPull=Math.min(9,chairPull+step);
     const rise=smooth(chairPull,0,1.2),outbound=smooth(chairPull,1.2,3.5),returning=smooth(chairPull,4,7),jackSit=smooth(chairPull,7,9);
     const move=smooth(chairPull,.8,2.8),lower=smooth(chairPull,2.8,4.3);
+    const opening=jackOpening(source,frame.elapsed??0,frame.reducedMotion);
     const retrieval=chairRetrievalPosition(outbound*(1-returning));
-    jack.position.set(retrieval.x,-.35*(1-rise+jackSit),retrieval.z);
+    jack.position.set(retrieval.x,-.35*(1-rise+jackSit),retrieval.z+opening.roll);
     const exchanging=chairPull>0&&chairPull<9;
     const personal=entering&&!exchanging&&((source>=staging.personal&&source<staging.warning)||source>=165||frame.speaker==='sarah');
     const sarahPersonal=entering&&!exchanging&&((source>=staging.personal&&source<staging.warning)||source>=165||frame.speaker==='jack');
@@ -148,7 +150,7 @@ export function createLabRenderer(host:HTMLElement,mobile:boolean,events:Events)
     const jackYaw=jackWalking?(retrieval.yaw+(chairPull<4?0:Math.PI)):Math.PI-jackTurn;
     jack.rotation.y=T.MathUtils.lerp(jack.rotation.y,jackYaw,blend);
     // Jack gives Sarah the original chair. The spare returns to his own screen.
-    room.jackChair.root.position.set(T.MathUtils.lerp(-.9,-1.8,move),0,.51);
+    room.jackChair.root.position.set(T.MathUtils.lerp(-.9,-1.8,move),0,.51+opening.roll);
     room.sarahChair.root.position.set(returning>0?retrieval.x:spareChairHome.x,0,returning>0?T.MathUtils.lerp(retrieval.z-.12,.51,jackSit):spareChairHome.z);
     room.sarahChair.seat.rotation.y=jackSit>0?jack.rotation.y-Math.PI:0;
     if(entering&&sarah){
@@ -170,8 +172,9 @@ export function createLabRenderer(host:HTMLElement,mobile:boolean,events:Events)
      sarahMotion?.pose(clock,lower>0?'seated':approach>0&&approach<5?'walk':'idle',frame.speaker==='sarah',lower>.95&&!sarahPersonal,frame.reducedMotion,sarahGaze,lower);
      if(chairPull>4&&chairPull<7)room.sarahChair.wheels.forEach(w=>w.rotateY(step*3));
     }
+    if(opening.roll>0)room.jackChair.wheels.forEach(w=>w.rotation.y=opening.roll/.048);
     if(chairPull>.8&&chairPull<2.8)room.jackChair.wheels.forEach(w=>w.rotateY(step*3));
-    jackMotion?.pose(clock,jackWalking?'walk':rise>.99&&jackSit===0?'idle':'seated',frame.speaker==='jack',!exchanging&&!personal&&source>5,frame.reducedMotion,jackGaze,1-rise+jackSit);
+    jackMotion?.pose(clock,jackWalking?'walk':rise>.99&&jackSit===0?'idle':'seated',frame.speaker==='jack',!exchanging&&!personal&&source>5,frame.reducedMotion,jackGaze,1-rise+jackSit,opening);
    }
   }
   if(loaded&&player.active&&jack&&sarah){

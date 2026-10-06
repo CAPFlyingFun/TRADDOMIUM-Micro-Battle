@@ -1,6 +1,7 @@
 import * as T from 'three';
 import {assetUrl} from '../../../lib/asset-url';
 import {spareChairHome} from './lab-layout';
+import {rearWorkstation} from './jack-opening';
 
 export function buildLab(scene:T.Scene,mobile:boolean){
  // Atlas colour tiles with separate physical material settings; no baked gloss.
@@ -35,6 +36,13 @@ export function buildLab(scene:T.Scene,mobile:boolean){
  const keys=box(.6,.026,.22,-.9,.84,.04,dark);keys.userData.target='terminal';
  for(let row=0;row<4;row++)for(let col=0;col<12;col++)box(.035,.012,.033,-1.15+col*.046,.863,-.035+row*.044,steel);
  const comm=box(.2,.04,.24,.16,.85,.04,teal);comm.userData.target='comm';
+ // Rear island is about 3 metres behind Jack's desk. His startled caster
+ // roll stops just short of its front edge, exactly as the manuscript describes.
+ const rear=rearWorkstation;
+ box(rear.width,.08,rear.depth,rear.x,.8,rear.z,top);
+ for(const x of [rear.x-.9,rear.x+.9])box(.12,.75,.6,x,.38,rear.z,steel);
+ box(.7,.46,.08,rear.x,1.1,rear.z+.08,dark);box(.06,.27,.06,rear.x,.94,rear.z+.08,steel);
+ box(.56,.026,.21,rear.x,.855,rear.z-.18,dark);
  // Sarah works at the adjacent console while Jack keeps his own screen.
  box(.06,.31,.06,-1.85,.98,-.58,steel);box(.76,.48,.08,-1.85,1.21,-.58,dark);
  const sarahScreen=new T.Mesh(new T.PlaneGeometry(.69,.41),new T.MeshBasicMaterial({map:texture}));sarahScreen.position.set(-1.85,1.21,-.533);sarahScreen.userData.target='terminal';scene.add(sarahScreen);

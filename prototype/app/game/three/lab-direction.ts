@@ -3,7 +3,9 @@ import type {LabView} from './lab-camera';
 // offsets. They stage the existing manuscript; they do not add story events.
 export const chapterOneShots:readonly {start:number;title:string;view:LabView}[]=[
  {start:2,title:'Late shift',view:'room'},
- {start:4,title:'Security warning',view:'terminal'},
+ {start:4,title:'Security warning',view:'room'},
+ {start:6,title:'Jack wakes',view:'room'},
+ {start:8,title:'Security warning',view:'terminal'},
  {start:26,title:'Calling Sarah',view:'webcam'},
  {start:48,title:'The directory',view:'terminal'},
  {start:54,title:'Sarah arrives',view:'room'},
