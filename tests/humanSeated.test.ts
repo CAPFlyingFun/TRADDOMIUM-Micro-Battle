@@ -78,6 +78,17 @@ for (const master of MASTERS) {
       // forearm's thickness apart (7 cm), the right (over) forearm lies in
       // front of and above the left, each wrist is past the middle, and the
       // elbows stay out at the sides rather than swinging into the chest.
+      //
+      // "Out at the sides" was 15 cm from the chest on the scans, whose
+      // shoulders stood further out than that. Re-measured on the toon
+      // masters 2026-10-07, Sarah's shoulder joints stand only 13.2 cm from
+      // her chest (Jack's 15.1 and 20.9 — his chest joint is 2.3 cm off his
+      // midline), so the absolute line would fail her for having narrow
+      // shoulders while her elbows hang OUTSIDE them. What it guards against
+      // is an elbow swung in past its own shoulder, so that is what it now
+      // says: each elbow at least as far out as its shoulder in the bind
+      // (Sarah 14.1 and 14.0 against 13.2; Jack 15.6 and 21.3 against 15.1
+      // and 20.9).
       const p = pose('doze');
       const u = 1.7 / m.height; // metres per bind unit
       const gap = segmentGap(p[j.elbowL], p[j.wristL], p[j.elbowR], p[j.wristR]) * u;
@@ -87,7 +98,9 @@ for (const master of MASTERS) {
       expect((p[j.wristR][0] - chest[0]) * L * u).toBeGreaterThan(0.03);
       expect((p[j.wristR][2] - p[j.wristL][2]) * u).toBeGreaterThan(0.04);
       expect((p[j.wristR][1] - p[j.wristL][1]) * u).toBeGreaterThan(0.04);
-      for (const e of [j.elbowL, j.elbowR]) expect(Math.abs(p[e][0] - chest[0]) * u).toBeGreaterThan(0.15);
+      for (const [e, s] of [[j.elbowL, j.shoulderL], [j.elbowR, j.shoulderR]]) {
+        expect(Math.abs(p[e][0] - chest[0])).toBeGreaterThanOrEqual(Math.abs(bind[s].x - bind[j.chest].x));
+      }
     });
 
     it('doze: arms folded in front of the chest, head dropped toward the chosen shoulder', () => {

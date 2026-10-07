@@ -6,14 +6,15 @@
  * be found from the bind pose's geometry (`src/actor/humanSkeleton.ts`
  * explains every rule and the margin it wins by). A rule like that is
  * only worth as much as the skeletons it has been run against, so this
- * file runs it against BOTH masters exactly as they are — Sarah's 61
- * joints and Jack's 69, read out of `fixtures/humanBind.json`, which is
- * what the GLBs' inverse bind matrices give.
+ * file runs it against BOTH masters exactly as they are — Sarah's 29
+ * joints and Jack's 69 (the toon masters, since 2026-10-07), read out of
+ * `fixtures/humanBind.json`, which is what the GLBs' inverse bind
+ * matrices give.
  *
  * Two kinds of assertion, and the second kind is the point:
  *
- *  - THE INDICES ARE PINNED. Sarah's left wrist is joint 33 and Jack's is
- *    37, and a change that moves either is a change to the pose of two
+ *  - THE INDICES ARE PINNED. Sarah's left wrist is joint 17 and Jack's is
+ *    12, and a change that moves either is a change to the pose of two
  *    people standing in the laboratory. Pinning them is what makes this a
  *    regression test rather than a restatement of the code.
  *  - THE SHAPE IS ASSERTED WITHOUT REFERENCE TO ANY INDEX. Ankles below
@@ -74,63 +75,67 @@ interface Master {
  * is the same answer for both and it is asserted from the geometry
  * below: both masters face +z (glTF's convention, and verified for these
  * two by rendering them from +z), and a body facing +z wears its left
- * arm on +x. So Sarah's left wrist is index 33, the chain a viewer sees
+ * arm on +x. So Sarah's left wrist is index 17, the chain a viewer sees
  * on their RIGHT.
  */
 const REAL: readonly Master[] = [
-  // SARAH IS Lab3 SINCE 2026-09-29: Meshy's untextured pass, rigged with
-  // four fingers a hand, so 61 joints where Lab2 had 35. The spine and the
-  // right arm kept their places; the left arm moved from 18-20 to 31-33
-  // because her right hand's sixteen finger bones now come before it, and
-  // the legs from 25-32 to 51-58 for both hands' worth. Every shape
-  // assertion below passed on it unchanged. She is 6 mm taller in the
-  // joints and 17 mm shorter in the leg — a new sculpt, not a new person.
+  // SARAH IS THE TOON MASTER SINCE 2026-10-07 (re-measured on the toon
+  // masters that day): Joshua's Pixar-style Meshy re-sculpt, rigged with
+  // MITTEN hands — one joint past each wrist and no fingers — so 29 joints
+  // where Lab3 had 61. The spine kept its places (1, 3, 5, 6, 8) and so did
+  // the right arm (10-12); the left arm moved from 31-33 to 15-17 because
+  // there are no right-hand finger bones before it any more, and the legs
+  // from 51-58 to 19-26 — LEFT leg first now (19-21), where Lab3 had the
+  // right first. Every shape assertion below passed on it unchanged. The
+  // toon proportions show in the spans: 40 mm shorter in the joints, a
+  // wrist-to-wrist span 90 mm narrower (short arms on narrow shoulders),
+  // and a leg 25 mm longer.
   {
     who: 'sarah',
     bind: MASTERS.sarah,
-    count: 61,
+    count: 29,
     joints: {
       pelvis: 1, spine: 3, chest: 5, neck: 6, head: 8,
-      shoulderL: 31, elbowL: 32, wristL: 33,
+      shoulderL: 15, elbowL: 16, wristL: 17,
       shoulderR: 10, elbowR: 11, wristR: 12,
-      hipL: 56, kneeL: 57, ankleL: 58,
-      hipR: 51, kneeR: 52, ankleR: 53,
+      hipL: 19, kneeL: 20, ankleL: 21,
+      hipR: 24, kneeR: 25, ankleR: 26,
     },
-    height: 1.3490,
-    armSpan: 1.0612,
-    legLength: 0.6209,
-    hipWidth: 0.1355,
+    height: 1.3095,
+    armSpan: 0.9709,
+    legLength: 0.6456,
+    hipWidth: 0.1468,
   },
-  // JACK IS Lab2 SINCE 2026-09-19, and this row is the best evidence the
-  // rule is worth having. The new master is the SAME 69-bone armature with
-  // the same names in the same order — and its LEGS ARE THE OTHER WAY
-  // ROUND: 59-61 was his left leg and is now his right. Nothing here was
-  // told that. `measureHuman` reads the sides off the bind pose, so the
-  // swap arrived as two lines of this fixture changing and every shape
-  // assertion below still passing, including "left and right agree with
-  // leftSign on every limb". A rule that matched `Bone_059` to a name
-  // would have put the man's knees on backwards and passed its own test.
+  // JACK IS THE TOON MASTER SINCE 2026-10-07 (re-measured on the toon
+  // masters that day), and he has done it AGAIN. The same 69-bone armature
+  // with five fingers a hand — and this time BOTH PAIRS OF LIMBS are the
+  // other way round: 10-12 was his right arm and is now his left, 35-37
+  // the reverse, and the legs swapped back (59-61 is his left leg again,
+  // 64-66 his right). Nothing here was told; `measureHuman` reads the sides
+  // off the bind pose, and every shape assertion below still passes,
+  // including "left and right agree with leftSign on every limb". The
+  // first time this happened (Lab2, 2026-09-19) it was only the legs.
   //
-  // The arms did not move (35-37 left, 10-12 right) and neither did the
-  // spine, which is why the two halves are worth pinning separately.
-  // `legLength` fell 48 mm because the scan itself is a little shorter —
-  // the poser reads it, so his stride follows it (`humanPose`'s hip swing
-  // is `asin(step / 2 * legLength)`).
+  // The spine did not move (1, 3, 5, 6, 8). The toon arms are longer:
+  // wrist to wrist is 71 mm wider than the scan's, and `humanReach` reads
+  // the difference (his fingertip reach is 0.68 m where the scan's was
+  // 0.60). `legLength` rose 14 mm, so his stride follows it (`humanPose`'s
+  // hip swing is `asin(step / 2 * legLength)`).
   {
     who: 'jack',
     bind: MASTERS.jack,
     count: 69,
     joints: {
       pelvis: 1, spine: 3, chest: 5, neck: 6, head: 8,
-      shoulderL: 35, elbowL: 36, wristL: 37,
-      shoulderR: 10, elbowR: 11, wristR: 12,
-      hipL: 64, kneeL: 65, ankleL: 66,
-      hipR: 59, kneeR: 60, ankleR: 61,
+      shoulderL: 10, elbowL: 11, wristL: 12,
+      shoulderR: 35, elbowR: 36, wristR: 37,
+      hipL: 59, kneeL: 60, ankleL: 61,
+      hipR: 64, kneeR: 65, ankleR: 66,
     },
-    height: 1.3603,
-    armSpan: 1.0499,
-    legLength: 0.6298,
-    hipWidth: 0.1356,
+    height: 1.3497,
+    armSpan: 1.1209,
+    legLength: 0.6438,
+    hipWidth: 0.1487,
   },
 ];
 
@@ -194,8 +199,10 @@ describe('measureHuman on the two masters', () => {
         const ankleAt = joints[`ankle${side}`];
         const ankle = bind[ankleAt];
         // Both masters carry two joints of foot past the ankle, and the
-        // first of them is the toe: it drops 0.073 while travelling 0.107
-        // forward. A rule that took the chain's last joint would pose that
+        // first of them is the toe: re-measured on the toon masters
+        // 2026-10-07, it drops 0.056 while travelling 0.124 forward on
+        // Sarah, and 0.103 while travelling 0.109 on Jack — his is the
+        // closer call, and still a forward step. A rule that took the chain's last joint would pose that
         // one as the ankle and stand the body on its toe tips.
         const toe = bind.findIndex((joint) => joint.parent === ankleAt);
         expect(toe, `${side} foot continues past the ankle`).toBeGreaterThan(0);
@@ -248,8 +255,9 @@ describe('measureHuman on the two masters', () => {
 
     it(`${who}: is bound in a T — both arms within a few degrees of horizontal`, () => {
       const { joints } = measureHuman(bind);
-      // Measured: Sarah's arms rise 0.011 over 0.378 and 0.384 (1.7°),
-      // Jack's fall 0.023 and 0.028 over 0.345 (3.8° and 4.7°). Six
+      // Re-measured on the toon masters 2026-10-07: Sarah's arms are dead
+      // level (0.000 over 0.384, 0°), Jack's fall 0.023 over 0.417 (3.1°)
+      // on both sides. Six
       // degrees is the smallest round number that clears both, and a rig
       // that arrived in an A-pose would fail here rather than in a
       // screenshot of a scientist holding their arms out at 45°.
@@ -259,9 +267,10 @@ describe('measureHuman on the two masters', () => {
 
     it(`${who}: the spans are the body's, in the file's own metres`, () => {
       const measure = measureHuman(bind);
-      // The joint span is 79% (Sarah) and 81% (Jack) of the 1.700 m the
-      // masters are modelled at, because the crown joint is inside the
-      // skull and the lowest joint is the toe. A rig that arrived in
+      // The joint span is 77% (Sarah) and 79% (Jack) of the 1.700 m the
+      // masters are modelled at (re-measured on the toon masters
+      // 2026-10-07), because the crown joint is inside the skull and the
+      // lowest joint is the toe. A rig that arrived in
       // centimetres would miss this window by a factor of a hundred.
       expect(measure.height / STATURE_M).toBeGreaterThan(0.75);
       expect(measure.height / STATURE_M).toBeLessThan(0.85);

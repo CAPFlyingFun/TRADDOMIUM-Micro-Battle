@@ -261,6 +261,14 @@ function sameRotation(a: JointTurn, b: JointTurn, tol: number): boolean {
 
 const fmt = (r: number) => (r / DEG).toFixed(3);
 
+/**
+ * How far a target on the left may come out from the mirror of the same
+ * target on the right, ON THE BODY ITSELF — the bind's own asymmetry. Re-
+ * measured on the toon masters 2026-10-07; see the mirror test for why
+ * Sarah's is wider.
+ */
+const MIRROR_TOLERANCE: Readonly<Record<string, number>> = { jack: 0.5 * DEG, sarah: 2 * DEG };
+
 // ─── the cases ────────────────────────────────────────────────────────
 
 describe.each(BODIES)('humanAim — $who', (body) => {
@@ -510,11 +518,37 @@ describe.each(BODIES)('humanAim — $who', (body) => {
       console.log(
         `[aim ${body.who}] mirror ${degrees}°: head ${fmt(r.result.headYaw)} / ${fmt(l.result.headYaw)}, body ${fmt(r.result.bodyYaw)} / ${fmt(l.result.bodyYaw)}, pitch ${fmt(r.result.headPitch)} / ${fmt(l.result.headPitch)}`,
       );
-      // The scans are not perfectly symmetric (the crowns sit 3-11 mm off the midline), so within half a degree.
-      expect(Math.abs(r.result.headYaw + l.result.headYaw)).toBeLessThan(0.5 * DEG);
-      expect(Math.abs(r.result.bodyYaw + l.result.bodyYaw)).toBeLessThan(0.5 * DEG);
-      expect(Math.abs(r.result.headPitch - l.result.headPitch)).toBeLessThan(0.5 * DEG);
+      // The masters are not perfectly symmetric, so on the body itself the
+      // mirror holds within a tolerance. The scans' crowns sat 3-11 mm off
+      // the midline and half a degree held for both. Re-measured on the toon
+      // masters 2026-10-07: Jack's crown is on the midline and his pairs
+      // still agree within 0.4°, but Sarah's crown joint sits 45 mm (bind)
+      // to her right of her pelvis and 23 mm behind her neck, which carries
+      // her eye off the midline and leans her neck chain one way: her 80°
+      // pair comes out 0.79° apart and her 140° bodies 1.66° (37.06 /
+      // 38.72). The test below this one shows that is HER and not the
+      // solver — her mirror image reproduces it to a millionth of a degree.
+      const tolerance = MIRROR_TOLERANCE[body.who];
+      expect(Math.abs(r.result.headYaw + l.result.headYaw)).toBeLessThan(tolerance);
+      expect(Math.abs(r.result.bodyYaw + l.result.bodyYaw)).toBeLessThan(tolerance);
+      expect(Math.abs(r.result.headPitch - l.result.headPitch)).toBeLessThan(tolerance);
       expect(Math.sign(r.result.headYaw)).toBe(-Math.sign(body.measure.leftSign));
+    }
+  });
+
+  it('is exactly mirror-symmetric: the mirrored body looking right is this body looking left', () => {
+    // Every bind x negated: the same person reflected, whose right is this
+    // body's left. Whatever asymmetry the test above has to tolerate is in
+    // the bind; the solver adds none.
+    const reflected = body.bind.map((joint) => ({ ...joint, x: -joint.x }));
+    const mirror: Body = { ...body, who: `${body.who}-mirror`, bind: reflected, measure: measureHuman(reflected) };
+    const mirrorTurns = standing(mirror);
+    for (const degrees of [25, 80, 140]) {
+      const l = run(body, turns, frameFor(targetAt(body, turns, -degrees * DEG, 5 * DEG, 1.5), true), SETTLE_FRAMES);
+      const m = run(mirror, mirrorTurns, frameFor(targetAt(mirror, mirrorTurns, degrees * DEG, 5 * DEG, 1.5), true), SETTLE_FRAMES);
+      expect(m.result.headYaw).toBeCloseTo(-l.result.headYaw, 8);
+      expect(m.result.bodyYaw).toBeCloseTo(-l.result.bodyYaw, 8);
+      expect(m.result.headPitch).toBeCloseTo(l.result.headPitch, 8);
     }
   });
 

@@ -61,12 +61,17 @@
  * ─── the materials are the baker's, not ours ─────────────────────────
  *
  * Nothing here recolours a human, forces a roughness or swaps a
- * material. The clothing, the skin and Sarah's badge were authored at
- * bake time on purpose (`scripts/bakeHumans.mjs`, `scripts/authorSarah.mjs`,
+ * material. The clothing and the skin were authored at bake time on
+ * purpose (`scripts/bakeHumans.mjs`, `scripts/authorSarah.mjs`,
  * and the roughness question was settled against a rendered comparison in
  * `scripts/probe-humans.mjs`). A renderer that "fixed" any of it here
  * would be throwing that work away one frame after it loaded, and the
  * fix would live in the wrong file.
+ *
+ * The BADGE is no longer in either skin (Joshua, 2026-10-07: "I separated
+ * the badges from the body, so the badge could be like a soft body"): it
+ * is `models/badge.glb`, loaded once per build and hung on each chest as
+ * a pendulum by `view/HumanBadge` (see `hang`).
  *
  * The two things that ARE set on a loaded mesh are both about the
  * renderer rather than the look: the shadow flags, and `frustumCulled`
@@ -74,10 +79,12 @@
  */
 import * as THREE from 'three';
 import { aimBody, createAim, type AimState } from '../actor/humanAim';
+import { swingBadge } from '../actor/humanBadge';
 import { HUMAN_POSE_TURNS, poseHuman } from '../actor/humanPose';
 import { newJointTurn, type HumanGait, type HumanMeasure, type HumanStance, type MutableJointTurn } from '../actor/humanRig';
 import { measureHuman } from '../actor/humanSkeleton';
 import { assets, type Assets } from '../assets/assets';
+import { attachBadge, type BadgeHandle } from '../view/HumanBadge';
 import { HumanRig } from '../view/HumanRig';
 import { UNITS_PER_METRE } from '../world/dem';
 import { TOMBS_GROUND_UNITS } from '../world/tombs/site';
@@ -85,6 +92,13 @@ import type { LabLayout, Person, Vec3 } from '../world/tombs/types';
 
 /** 100 world units to the metre, as everywhere. The plan is in metres; the scene is in units. */
 const M = UNITS_PER_METRE;
+
+/**
+ * The badge everyone wears, its own model since the toon bodies
+ * (`scripts/bakeBadge.mjs`; hung by `view/HumanBadge`). Loaded ONCE per
+ * build and cloned onto each body, which shares its geometry and textures.
+ */
+const BADGE_MODEL = 'models/badge.glb';
 
 /**
  * Both masters measure 1.700 m from the floor to the crown with their
@@ -202,7 +216,18 @@ export class LabPeople {
     readonly aimed: MutableJointTurn[];
     /** Where this person's eye is, plan metres; written by `update`, read by `eyes`. */
     readonly eye: { id: string; x: number; y: number; z: number; seen: boolean };
+    /** The badge on their chest, once the badge file has landed; null until then, or for good if it never does. */
+    badge: BadgeHandle | null;
   }> = [];
+
+  /**
+   * The badge's template, for this build: loaded beside the bodies and
+   * NEVER awaited by them — a body stands, breathes and looks whether or
+   * not its badge ever arrives (`hang`). Null when it did not load.
+   */
+  private badgeTemplate: Promise<THREE.Object3D | null> | null = null;
+  /** The template once it landed, held so `clear` can release it. */
+  private badgeLoaded: THREE.Object3D | null = null;
 
   /** What everyone looks at, plan metres, or null; set by `lookAt`. */
   private readonly target = { x: 0, y: 0, z: 0 };
@@ -281,6 +306,7 @@ export class LabPeople {
   async build(layout: LabLayout): Promise<void> {
     this.clear();
     const mine = this.epoch;
+    this.badgeTemplate = layout.people.length > 0 ? this.loadBadge(mine) : null;
     await Promise.all(layout.people.map((person) => this.place(person, mine)));
   }
 
@@ -315,6 +341,7 @@ export class LabPeople {
         ? this.target : null;
       const aimed = aimBody(entry.aim, measure, rig.bind, posed, frame, entry.aimed);
       rig.apply(aimed.turns);
+      swingBadge(entry.badge, rawDt);
       const eye = entry.aim.eye;
       entry.eye.x = eye.x;
       entry.eye.y = eye.y;
@@ -479,12 +506,14 @@ export class LabPeople {
       const rig = new HumanRig(model);
       const measure = measureHuman(rig.bind);
       // The live masters' soles are at bind y −1 (`view/HumanRig`).
-      this.rigs.push({
+      const entry = {
         rig, measure, person, aim: createAim(measure, rig.bind, -1), aimed: [],
-        eye: { id: person.id, x: 0, y: 0, z: 0, seen: false },
-      });
+        eye: { id: person.id, x: 0, y: 0, z: 0, seen: false }, badge: null,
+      };
+      this.rigs.push(entry);
       this.gait.seconds = this.clock;
       rig.apply(poseHuman(measure, rig.bind, this.gait as HumanGait, this.turns));
+      void this.hang(model, entry);
     } catch (error) {
       console.error(`[tombs] ${person.id}: could not be posed, so ${person.who} keeps the bind pose`, error);
     }
@@ -501,9 +530,69 @@ export class LabPeople {
     });
   }
 
+  /**
+   * The badge file, once per build. A missing file costs the badges and a
+   * line in the console, never a body: `loadModel` hands back an empty
+   * node tagged `isPlaceholder`, which is refused here. A template that
+   * lands after the build it belonged to is released at once.
+   */
+  private async loadBadge(mine: number): Promise<THREE.Object3D | null> {
+    let template: THREE.Object3D;
+    try {
+      template = await this.loadModel(BADGE_MODEL, () => new THREE.Object3D());
+    } catch (error) {
+      console.error('[tombs] the badge did not load; everyone stands without one', error);
+      return null;
+    }
+    if (mine !== this.epoch) {
+      release(template);
+      return null;
+    }
+    if (template.userData.isPlaceholder === true) {
+      console.error(`[tombs] ${BADGE_MODEL} did not load; everyone stands without a badge`);
+      return null;
+    }
+    this.badgeLoaded = template;
+    return template;
+  }
+
+  /**
+   * A badge on one posed body, when the template arrives. Measured off
+   * the body's bind skin (`view/HumanBadge`), so the rig is put at rest
+   * for the measurement and its pose given back. Never throws: a body
+   * that cannot wear the badge still stands in the room.
+   */
+  private async hang(model: THREE.Object3D, entry: (typeof this.rigs)[number]): Promise<void> {
+    const pending = this.badgeTemplate;
+    if (pending === null) return;
+    const template = await pending;
+    if (template === null || !this.rigs.includes(entry) || entry.badge !== null) return;
+    try {
+      entry.badge = attachBadge(model, entry.measure, entry.rig.bind, template, {
+        rest: () => entry.rig.rest(),
+        shadows: this.shadows,
+        label: entry.person.id,
+      });
+    } catch (error) {
+      console.error(`[tombs] ${entry.person.id}: the badge could not be hung; ${entry.person.who} goes without`, error);
+    }
+  }
+
   /** Everything standing, released; the epoch moved on so nothing in flight can land. */
   private clear(): void {
     this.epoch += 1;
+    // Badges come off BEFORE the bodies are released: a badge is a clone
+    // sharing the template's geometry, and `release` walks everything
+    // under a body — it would free the template out from under the rest.
+    for (const entry of this.rigs) {
+      entry.badge?.dispose();
+      entry.badge = null;
+    }
+    if (this.badgeLoaded !== null) {
+      release(this.badgeLoaded);
+      this.badgeLoaded = null;
+    }
+    this.badgeTemplate = null;
     for (const { rig } of this.rigs) rig.dispose();
     this.rigs.length = 0;
     for (const body of this.bodies) {

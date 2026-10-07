@@ -92,6 +92,8 @@ import { printBadge } from './printBadge.mjs';
 import { clearShirtLogo } from './clearShirtLogo.mjs';
 import { paintSarah } from './paintSarah.mjs';
 import { smoothLegWeights } from './smoothLegWeights.mjs';
+import { bakeBadge } from './bakeBadge.mjs';
+import { smoothSeatWeights } from './smoothSeatWeights.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
@@ -103,6 +105,14 @@ const CACHE = join(MASTERS, 'cache');
 
 /** Where the masters live when they are not on this disk. One release, one asset, one checksum. */
 const RELEASE = 'https://github.com/CAPFlyingFun/TRADDOMIUM-Micro-Battle/releases/download/Jack_Sarah_Lab_Models_GLB/Jack.and.Sarah.Lab.glb.models.zip';
+/**
+ * The toon masters (2026-10-07). Three zips, each holding one
+ * `Meshy_AI_*.glb` in a folder: rename them to the `master` names in HUMANS
+ * and to `Badge-Toon.glb`.
+ */
+const TOON_RELEASE = 'https://github.com/CAPFlyingFun/TRADDOMIUM-Micro-Battle/releases/tag/New-Jack-and-Sarah-Pixar-Models';
+/** The badge master and what it bakes to (`bakeBadge.mjs`). */
+const BADGE = { master: 'Badge-Toon.glb', out: 'badge.glb' };
 
 /** Master file → what the game asks the loader for. */
 const HUMANS = [
@@ -179,10 +189,34 @@ const HUMANS = [
   // character sheet, not the stranger ChatGPT drew there first (Joshua,
   // 2026-09-29: "ChatGPT did the wrong face for Jack... use the 2D image of
   // Jack").
+  //
+  // JACK IS NOW THE TOON (Joshua, 2026-10-07, release
+  // `New-Jack-and-Sarah-Pixar-Models`: "a new version and cartoonish/Pixar
+  // style characters for Jack and Sarah and I separated the badges from the
+  // body"). Everything above is the history of the scans and stays as the
+  // record of why the bake is shaped the way it is; Lab2 is kept for the
+  // same reason Lab1 was.
+  //
+  //   Jack-Toon.glb   22.13 MB  197,994 tris  69 joints  2K colour, normal, metal-rough
+  //   Sarah-Toon.glb  22.21 MB  199,299 tris  29 joints  2K colour, normal, metal-rough
+  //
+  // Same Meshy armature family (Bone_000..), so `measureHuman` finds his
+  // joints by measurement as before. NO BADGE AND NO LOGO: the toon wears a
+  // plain navy tee and no card, and the card is its own model now
+  // (`bakeBadge.mjs`, hung at run time). Its roughness is authored, a toon
+  // material rather than a scan's single number, so it is not lifted.
+  //
+  // AND ITS SKIN IS NOT PRUNED (`reach: Infinity`: the four strongest
+  // influences are still chosen, nothing is refused for distance). The toon
+  // proportions break `MAX_BIND_REACH`'s premise: a big head, a ponytail and
+  // a pregnant belly put real skin a long way from the bone that should move
+  // it, and 0.12 of the span re-spread a THIRD of the weight on both bodies
+  // (32.8% Jack, 27.3% Sarah). Rendered both ways, walking and seated: pruned,
+  // Sarah's seat tore into flaps under the thigh and her walking hip threw a
+  // shard; unpruned, both are clean. Meshy's toon rig has no cross-body
+  // spray to remove.
   {
-    master: 'Jack-Lab2.glb', out: 'jack.glb', who: 'Jack Bennett', panel: null, repair: false,
-    logo: { box: { x0: 0.040, x1: 0.125, y0: 1.295, y1: 1.340, zMin: 0.03 } },
-    badge: { art: 'art/humans/badge/jack-tombs.webp', slab: { zMin: 0.1260, yMin: 1.070, yMax: 1.170, xMid: 0.003, xHalf: 0.035 } },
+    master: 'Jack-Toon.glb', out: 'jack.glb', who: 'Jack Bennett', panel: null, repair: false, authored: true, reach: Infinity, smoothSeat: true,
   },
   // SARAH IS Lab2, AND Lab1 IS KEPT (Joshua, 2026-09-18: "go ahead and switch
   // to this one… it does look a lot better even the textures"). Meshy's second
@@ -228,9 +262,13 @@ const HUMANS = [
   // The card is welded flush to the bump, so the slab is the card's own
   // outline in x and y and generous in z; the plane-gated fill does the rest.
   // Lab2 is kept for the same reason Lab1 was.
+  //
+  // SARAH IS NOW THE TOON, TEXTURED BY MESHY, so `paintSarah` retires with
+  // Lab3 (Lab3 is kept). Her hands are mittens again (29 joints, no
+  // fingers), Joshua's note on the release. `smoothLegs` stays: it is
+  // harmless on clean weights and it is the one fix her rigs have needed.
   {
-    master: 'Sarah-Lab3.glb', out: 'sarah.glb', who: 'Sarah Bennett', panel: null, repair: false, paint: true, smoothLegs: true,
-    badge: { art: 'art/humans/badge/sarah-tombs.webp', slab: { zMin: 0.085, yMin: 1.096, yMax: 1.178, xMid: -0.0003, xHalf: 0.0305 } },
+    master: 'Sarah-Toon.glb', out: 'sarah.glb', who: 'Sarah Bennett', panel: null, repair: false, authored: true, smoothLegs: true, reach: Infinity, smoothSeat: true,
   },
 ];
 
@@ -270,7 +308,7 @@ const MAX_BIND_REACH = 0.12;
  * space `POSITION` is in — so the two are directly comparable, which is
  * the whole reason this can be done as arithmetic rather than as a guess.
  */
-function pruneStrayInfluences(prim, doc, who) {
+function pruneStrayInfluences(prim, doc, who, reachFraction = MAX_BIND_REACH) {
   const position = prim.getAttribute('POSITION');
   const skin = doc.getRoot().listSkins()[0];
   if (!position || !skin) return;
@@ -302,7 +340,7 @@ function pruneStrayInfluences(prim, doc, who) {
     lo = Math.min(lo, bone[b * 3 + 1]);
     hi = Math.max(hi, bone[b * 3 + 1]);
   }
-  const reach = (hi - lo) * MAX_BIND_REACH;
+  const reach = (hi - lo) * reachFraction;
 
   const count = position.getCount();
   const outJ = new Uint16Array(count * 4);
@@ -781,7 +819,7 @@ async function main() {
   const onlyArg = process.argv.find((a) => a.startsWith('--only='));
   const only = onlyArg ? onlyArg.slice('--only='.length).replace(/\.glb$/, '') : null;
   const chosen = only ? HUMANS.filter((h) => h.out.replace(/\.glb$/, '') === only) : HUMANS;
-  if (only && !chosen.length) {
+  if (only && only !== 'badge' && !chosen.length) {
     console.error(`[bake:humans] --only=${only} names nobody — expected one of ${HUMANS.map((h) => h.out.replace(/\.glb$/, '')).join(', ')}`);
     process.exitCode = 1;
     return;
@@ -790,7 +828,9 @@ async function main() {
   if (missing.length > 0) {
     console.error(`[bake:humans] no masters in art/humans/ — ${missing.map((m) => m.master).join(', ')}`);
     console.error(`[bake:humans] fetch them once, then re-run:`);
-    console.error(`[bake:humans]   mkdir -p art/humans && curl -sSL -o /tmp/h.zip "${RELEASE}" && unzip -o /tmp/h.zip -d art/humans`);
+    console.error(`[bake:humans]   download the three zips from ${TOON_RELEASE}`);
+    console.error('[bake:humans]   and save each Meshy_AI_*.glb in art/humans/ as Jack-Toon.glb, Sarah-Toon.glb, Badge-Toon.glb');
+    console.error(`[bake:humans]   (the older scans are in ${RELEASE})`);
     const second = missing.filter((m) => /-Lab2\.glb$/.test(m.master)).map((m) => m.master);
     if (second.length > 0) {
       // SAY THE TRUE THING RATHER THAN THE HOPEFUL ONE. The release above
@@ -861,7 +901,7 @@ async function main() {
     }
     // A painted body's roughness is AUTHORED — wet eyes and lips, matte
     // cloth — so it is not lifted toward the scans' matte mean.
-    if (!human.paint) await liftRoughness(doc, human.who);
+    if (!human.paint && !human.authored) await liftRoughness(doc, human.who);
 
     // WHAT THE MAPS ARE WORTH, one slot at a time. `textureCompress` is
     // given a slot filter so the metallic-roughness map can be told a
@@ -951,7 +991,7 @@ async function main() {
     // whatever we do and the prune is the only step that picks which
     // four on purpose.
     for (const prim of doc.getRoot().listMeshes().flatMap((m) => m.listPrimitives())) {
-      pruneStrayInfluences(prim, doc, human.who);
+      pruneStrayInfluences(prim, doc, human.who, human.reach ?? MAX_BIND_REACH);
       for (const name of prim.listSemantics()) {
         if (/^(JOINTS|WEIGHTS)_([1-9]\d*)$/.test(name)) prim.setAttribute(name, null);
       }
@@ -959,6 +999,9 @@ async function main() {
     // A master rigged with hard edges at the knee and ankle tears there as
     // soon as the walk bends them (`smoothLegWeights.mjs` has the renders).
     if (human.smoothLegs) smoothLegWeights(doc, { log: (line) => console.log(`[bake:humans]   ${human.who}: ${line}`) });
+    // Seated, a hem and the cloth under it are rigged to different bones and
+    // z-fight; smoothing the weights in space folds them together.
+    if (human.smoothSeat) smoothSeatWeights(doc, { log: (line) => console.log(`[bake:humans]   ${human.who}: ${line}`) });
 
     await doc.transform(
       dedup(),
@@ -991,6 +1034,20 @@ async function main() {
     console.log(`[bake:humans] ${human.who}`);
     console.log(`[bake:humans]   ${human.master} ${mb(before)}  ->  ${human.out} ${mb(after)}   (${(before / after).toFixed(1)}x smaller)`);
     console.log(`[bake:humans]   ${Math.round(tris).toLocaleString()} triangles · ${joints} joints · ${tex.join(' · ')}`);
+  }
+
+  // The badge is baked with the humans, and alone with `--only=badge`.
+  if (!PANELS_ONLY && (!only || only === 'badge')) {
+    const from = join(MASTERS, BADGE.master);
+    if (!existsSync(from)) {
+      console.error(`[bake:humans] no ${BADGE.master} in art/humans/ — it is in ${TOON_RELEASE}`);
+      process.exitCode = 1;
+      return;
+    }
+    const to = join(OUT, BADGE.out);
+    console.log('[bake:humans] TOMBS badge');
+    await bakeBadge(io, from, to, sharp, (line) => console.log(`[bake:humans]   ${line}`));
+    console.log(`[bake:humans]   ${BADGE.master} ${mb(statSync(from).size)}  ->  ${BADGE.out} ${mb(statSync(to).size)}`);
   }
 }
 

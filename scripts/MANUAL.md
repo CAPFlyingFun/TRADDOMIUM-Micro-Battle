@@ -97,6 +97,8 @@ wired because they are never run on their own:
   `bake:humans` script. Every threshold in it was measured on
   `Sarah-Lab2.glb` and is quoted with what it separates — it is an
   authoring pass for one body, not a general tool.
+- `scripts/bakeBadge.mjs` — cuts the TOMBS card and clip out of Joshua's toon lanyard master (`art/humans/Badge-Toon.glb`) and bakes `public/models/badge.glb` in the frame the runtime hangs it by. Imported by `bakeHumans.mjs` (`npm run bake:humans`, or `-- --only=badge`).
+- `scripts/smoothSeatWeights.mjs` — smooths the bone weights in space across the hips so a shirt's hem and the cloth under it fold together when a body sits. A module, imported by `bake:humans` for bodies with `smoothSeat`.
 - `scripts/printBadge.mjs` — prints a TOMBS ID card on the badge round
   Jack's or Sarah's neck. Both were scanned wearing a real lanyard, and in
   the body's 2048 atlas the card's UV island is about SEVENTY BY

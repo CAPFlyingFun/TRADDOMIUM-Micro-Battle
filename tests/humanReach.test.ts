@@ -24,6 +24,17 @@
  * each other front to back, so this is the prototype's "0.30 in front of
  * the chest"; Sarah's chest stands 4 cm behind her pivot, and placing the
  * desk by the CHAIR is what a desk is.
+ *
+ * ─── the toon masters (2026-10-07) ────────────────────────────────────
+ *
+ * The desk is a desk: it stays in metres. The bodies at it changed. Since
+ * the toon re-sculpts Jack's fingertip reach is 0.68 m and Sarah's 0.55 m
+ * (the scans' were 0.60 and 0.63), so the SAME keyboard sits at 67% of
+ * his arm and 82% of hers, and every number below that is a share, an
+ * angle at which a hand lets go, or a spot both arms can reach is a fact
+ * about the body, re-measured on the toon masters 2026-10-07 and pinned
+ * per body in `AT_THE_DESK`. The rules those numbers come out of
+ * (`humanReach.ts` header) did not change.
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -202,6 +213,50 @@ const BODIES: readonly Body[] = (['sarah', 'jack'] as const).map((who) => ({
   measure: measureHuman(MASTERS[who]),
 }));
 
+/**
+ * What each body measures out to at the desk below. Re-measured on the toon
+ * masters 2026-10-07; each figure's own test says what it is.
+ */
+interface AtTheDesk {
+  /** Shoulder to middle fingertip, metres, and shoulder joint to shoulder joint. */
+  readonly arm: number;
+  readonly shoulders: number;
+  /** Either hand's share of its arm, holding the keyboard square on. */
+  readonly keyboardShare: number;
+  /**
+   * Turning the chair right: a heading at which the right arm is still
+   * holding but STRETCHED (share over 0.84), or null when it never is; and
+   * a heading by which both hands have let go, with what let the right one
+   * go — its reach (share past HOLD_OUT) or its angle (past ANGLE_OUT).
+   */
+  readonly stretchedAt: number | null;
+  readonly releasedAt: number;
+  readonly rightLetsGoBy: 'reach' | 'angle';
+  /** The intercom's button from the keyboard's middle, metres: to the body's left, nearer, above. */
+  readonly intercom: { readonly left: number; readonly nearer: number; readonly above: number };
+}
+
+const AT_THE_DESK: Readonly<Record<string, AtTheDesk>> = {
+  // Short toon arms on narrow shoulders: the keyboard is already 82% of her
+  // reach square on, so turning right stretches her right arm to 0.89 by
+  // 30° and it lets go by REACH at about 35°; the left lets go by angle
+  // at about 80°.
+  sarah: {
+    arm: 0.552, shoulders: 0.239, keyboardShare: 0.818,
+    stretchedAt: 30, releasedAt: 90, rightLetsGoBy: 'reach',
+    intercom: { left: 0.17, nearer: 0.12, above: 0.04 },
+  },
+  // The toon arms are longer than the scan's: square on the keyboard is
+  // 67% of his reach, and turning right never stretches the right arm past
+  // 0.83 of it — it lets go by ANGLE, at about 118°, not by reach. The left
+  // lets go by angle at about 80°, as hers does.
+  jack: {
+    arm: 0.681, shoulders: 0.336, keyboardShare: 0.666,
+    stretchedAt: null, releasedAt: 120, rightLetsGoBy: 'angle',
+    intercom: { left: 0.24, nearer: 0.06, above: 0.04 },
+  },
+};
+
 function seated(body: Body): readonly JointTurn[] {
   const out: MutableJointTurn[] = [];
   return poseSeated(body.measure, body.bind, { style: 'sit', seconds: 0 }, out).map((t) => ({ ...t }));
@@ -252,16 +307,26 @@ function desk(body: Body) {
 }
 
 /**
- * The intercom's button: 0.20 m to the body's left of the keyboard's
- * middle, 0.10 m nearer, 0.04 m above the keys — the top of a 5 cm box
- * standing on the desk. The brief's "0.06 m nearer, at the keys" is past
- * the agreed 85% on both masters (Sarah 0.89, Jack 0.91 of an arm), so
- * no right hand would take hold of it; this is the nearest spot on that
- * side both reach AND that brings the two arms into conflict.
+ * The intercom's button: to the body's left of the keyboard's middle,
+ * nearer, and 0.04 m above the keys — the top of a 5 cm box standing on
+ * the desk. It has to be a spot the right hand reaches across the body to
+ * (under the agreed 85% of the arm) AND one that brings the two arms into
+ * conflict, or the crossing tests below test nothing.
+ *
+ * On the scans one spot did both for both bodies (0.20 left, 0.10 nearer).
+ * Re-measured on the toon masters 2026-10-07, NO single spot does: a grid
+ * over 0.10-0.26 m left and 0.02-0.15 m nearer found every spot Jack's
+ * longer arms come into conflict at (0.19 m left or more) past Sarah's
+ * reach, and every spot she reaches leaving his arms 10-20 cm apart. So
+ * each body has its own (`AT_THE_DESK`), both chosen to be alike: the
+ * right hand at about 80% of its arm, the arms 5-7 cm inside each other's
+ * clearance, and a slide of about 9 cm making room — Sarah's 0.17 m left
+ * and 0.12 m nearer, Jack's 0.24 m and 0.06 m.
  */
 function intercom(body: Body): Vec3 {
   const d = desk(body);
-  return { x: d.keys.x + 0.2 * d.left, y: d.keys.y + 0.04, z: d.keys.z - 0.1 };
+  const at = AT_THE_DESK[body.who].intercom;
+  return { x: d.keys.x + at.left * d.left, y: d.keys.y + at.above, z: d.keys.z - at.nearer };
 }
 
 function keyboard(body: Body): HandTarget[] {
@@ -334,13 +399,17 @@ describe.each(BODIES)('humanReach on $who', (body) => {
     const [L, R] = state.arms;
     const j = body.measure.joints;
     const shoulders = dist(body.bind[j.shoulderL], body.bind[j.shoulderR]) / UNITS_PER_METRE;
-    const want = body.who === 'jack' ? { arm: 0.6, shoulders: 0.37 } : { arm: 0.63, shoulders: 0.35 };
+    // Re-measured on the toon masters 2026-10-07 (the scans' were Jack 0.60
+    // and 0.37, Sarah 0.63 and 0.35). Sarah's fingertip is the END of her
+    // mitten — one joint past the wrist, 0.10 m — where Jack's is his
+    // middle finger's tip, 0.19 m out.
+    const want = AT_THE_DESK[body.who];
     for (const arm of [L, R]) {
       expect(arm.ok).toBe(true);
       expect(arm.tip).not.toBe(arm.wrist);
-      expect(Math.abs(arm.length / UNITS_PER_METRE - want.arm)).toBeLessThan(0.03);
+      expect(Math.abs(arm.length / UNITS_PER_METRE - want.arm)).toBeLessThan(0.01);
     }
-    expect(Math.abs(shoulders - want.shoulders)).toBeLessThan(0.03);
+    expect(Math.abs(shoulders - want.shoulders)).toBeLessThan(0.01);
     MEASURED.push(
       `${body.who}: arm L ${(L.length / UNITS_PER_METRE).toFixed(3)} m, R ${(R.length / UNITS_PER_METRE).toFixed(3)} m ` +
         `(hand ${(L.hand / UNITS_PER_METRE).toFixed(3)}), shoulders ${shoulders.toFixed(3)} m apart`,
@@ -360,7 +429,11 @@ describe.each(BODIES)('humanReach on $who', (body) => {
       expect(status.holding, side).toBe(true);
       expect(status.weight).toBe(1);
       expect(status.yielded).toBe('none');
-      expect(Math.abs(status.share - 0.7)).toBeLessThanOrEqual(0.08);
+      // The scans both held it at 0.7 ± 0.08. Re-measured on the toon
+      // masters 2026-10-07: 0.67 of Jack's arm and 0.82 of Sarah's — still
+      // under the 0.85 a hand takes hold at, which is what "comfortably" is.
+      expect(Math.abs(status.share - AT_THE_DESK[body.who].keyboardShare)).toBeLessThanOrEqual(0.01);
+      expect(status.share).toBeLessThan(0.85);
       expect(dist(arm.tip, target)).toBeLessThan(0.01);
       const down = Math.acos(clamp(-arm.palm.y / Math.hypot(arm.palm.x, arm.palm.y, arm.palm.z), -1, 1)) / DEG;
       expect(down).toBeLessThan(20);
@@ -373,7 +446,15 @@ describe.each(BODIES)('humanReach on $who', (body) => {
     }
   });
 
-  it('turns in the chair: holds at 30° right, the right arm stretched at 45°, both let go at 90° and rest on the thighs', () => {
+  it('turns in the chair: holds at 30° right, the right arm stretches, both let go and rest on the thighs', () => {
+    // The scans both held at 30°, had the right arm stretched past 0.84 at
+    // 45°, and had let both hands go by 90°, the right by its reach. On the
+    // toon masters (re-measured 2026-10-07) only the first is still true of
+    // both: Sarah's short arm is stretched by 30° and let go by 35°, and
+    // Jack's long one never stretches and lets go by ANGLE at about 118°.
+    // So the headings come from `AT_THE_DESK`, and what let the right hand
+    // go is asserted at the moment it lets go.
+    const want = AT_THE_DESK[body.who];
     const b = bench(body);
     const input = seated(body);
     const targets = keyboard(body);
@@ -381,35 +462,56 @@ describe.each(BODIES)('humanReach on $who', (body) => {
     at(0, 30);
     // The chair swivels at 90°/s, the way a person turns in one.
     let result = at(0, 1);
+    const square = result.R.share;
     for (let d = 1; d <= 30; d += 1.5) result = at(d, 1);
     result = at(30, 30);
     expect(result.L.holding).toBe(true);
     expect(result.R.holding).toBe(true);
+    // Turning right carries the keyboard toward the left hand and away from the right.
+    expect(result.R.share).toBeGreaterThan(square);
     const at30 = `L ${result.L.share.toFixed(3)} R ${result.R.share.toFixed(3)}`;
-    for (let d = 30; d <= 45; d += 1.5) result = at(d, 1);
-    result = at(45, 30);
-    expect(result.L.holding).toBe(true);
-    expect(result.R.holding).toBe(true);
-    expect(result.R.share).toBeGreaterThan(0.84);
-    const at45 = `L ${result.L.share.toFixed(3)} R ${result.R.share.toFixed(3)} (${result.R.angle.toFixed(1)}°)`;
-    for (let d = 45; d <= 90; d += 1.5) result = at(d, 1);
-    result = at(90, 60);
+    let at45 = 'never stretched';
+    if (want.stretchedAt !== null) {
+      for (let d = 30; d <= want.stretchedAt; d += 1.5) result = at(d, 1);
+      result = at(want.stretchedAt, 30);
+      expect(result.L.holding).toBe(true);
+      expect(result.R.holding).toBe(true);
+      expect(result.R.share).toBeGreaterThan(0.84);
+      at45 = `at ${want.stretchedAt}° L ${result.L.share.toFixed(3)} R ${result.R.share.toFixed(3)} (${result.R.angle.toFixed(1)}°)`;
+    }
+    let widest = 0;
+    let letGo: { share: number; angle: number } | null = null;
+    for (let d = want.stretchedAt ?? 30; d <= want.releasedAt; d += 1.5) {
+      result = at(d, 1);
+      if (result.R.holding) widest = Math.max(widest, result.R.share);
+      else if (letGo === null) letGo = { share: result.R.share, angle: result.R.angle };
+    }
+    if (want.stretchedAt === null) expect(widest).toBeLessThanOrEqual(0.84);
+    expect(letGo).not.toBeNull();
+    if (want.rightLetsGoBy === 'reach') {
+      expect(letGo!.share).toBeGreaterThan(0.9);
+      expect(Math.abs(letGo!.angle)).toBeLessThanOrEqual(90);
+    } else {
+      expect(Math.abs(letGo!.angle)).toBeGreaterThan(90);
+      expect(letGo!.share).toBeLessThanOrEqual(0.9);
+    }
+    result = at(want.releasedAt, 60);
     expect(result.L.holding).toBe(false);
     expect(Math.abs(result.L.angle)).toBeGreaterThan(90);
     expect(result.L.angle).toBeGreaterThan(0); // outward
     expect(result.R.holding).toBe(false);
-    expect(result.R.share).toBeGreaterThan(0.9);
     expect(result.L.weight).toBe(0);
     expect(result.R.weight).toBe(0);
     expect(result.L.rest).toBe(1);
-    const yaw = yawRight(body, 90);
+    const yaw = yawRight(body, want.releasedAt);
     const arms = armsOf(body, b.state, result.turns, yaw);
     const restL = restPoint(body, input, 'L', yaw);
     const restR = restPoint(body, input, 'R', yaw);
     expect(dist(arms.L.tip, restL)).toBeLessThan(0.03);
     expect(dist(arms.R.tip, restR)).toBeLessThan(0.03);
     MEASURED.push(
-      `${body.who} turning: 30° ${at30}; 45° ${at45}; 90° L ${result.L.share.toFixed(3)} at ${result.L.angle.toFixed(1)}°, ` +
+      `${body.who} turning: 30° ${at30}; stretched ${at45}; right let go by ${want.rightLetsGoBy} at share ${letGo!.share.toFixed(3)}, ` +
+        `${letGo!.angle.toFixed(1)}°; ${want.releasedAt}° L ${result.L.share.toFixed(3)} at ${result.L.angle.toFixed(1)}°, ` +
         `R ${result.R.share.toFixed(3)} at ${result.R.angle.toFixed(1)}°; rest miss L ${(dist(arms.L.tip, restL) * 1000).toFixed(1)} mm ` +
         `R ${(dist(arms.R.tip, restR) * 1000).toFixed(1)} mm`,
     );
@@ -609,8 +711,14 @@ describe.each(BODIES)('humanReach on $who', (body) => {
 
   it('reaches from the posed shoulders, not the bind, wherever the body stands: a chest leaned forward still lands the fingertip', () => {
     const j = body.measure.joints;
-    // An aim pass's turn, appended after the pose: the LAST chest turn wins.
-    const input = seated(body).concat([{ joint: j.chest, ax: 1, ay: 0, az: 0, radians: 12 * DEG }]);
+    // An aim pass's turn, appended after the pose: the LAST turn naming a
+    // joint wins. It leans the SPINE, which the seated pose also names. On
+    // the scans it leaned the chest; re-measured on the toon masters
+    // 2026-10-07, Jack's chest joint sits level with his shoulders, so a
+    // 12° chest pitch carried them only 7.8 mm and this test's own guard
+    // (over 1 cm, below) could no longer tell a leaned shoulder from the
+    // bind's. The spine is 0.17 lower and carries them 40 mm.
+    const input = seated(body).concat([{ joint: j.spine, ax: 1, ay: 0, az: 0, radians: 12 * DEG }]);
     const yaw = 0.4;
     const rootX = 2;
     const rootZ = -3;

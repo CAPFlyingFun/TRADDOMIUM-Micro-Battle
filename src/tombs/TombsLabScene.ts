@@ -92,6 +92,7 @@
  */
 import * as THREE from 'three';
 import { aimBody, createAim, type AimState } from '../actor/humanAim';
+import { swingBadge } from '../actor/humanBadge';
 import { HUMAN_POSE_TURNS, humanStride, poseHuman } from '../actor/humanPose';
 import { createReach, reachHands, type HandTarget, type ReachState } from '../actor/humanReach';
 import { poseSeated, posedJoints, SEATED_TURNS } from '../actor/humanSeated';
@@ -110,6 +111,7 @@ import { MIX_DEFAULTS, type MixLevels } from '../audio/mix';
 import { AUDIO_MANIFEST } from '../audio/audioManifest';
 import { NO_BUTTONS, demandFrom } from '../control/PlayerDemand';
 import { newMutableIntent } from '../creatures/demand';
+import { attachBadge, type BadgeHandle } from '../view/HumanBadge';
 import { HumanRig } from '../view/HumanRig';
 import { detailFor, type DetailTier } from '../assets/detailQuality';
 import { textureUrl } from '../assets/textureManifest';
@@ -896,6 +898,9 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
   let body: THREE.Object3D | null = null;
   let bodyRig: HumanRig | null = null;
   let bodyMeasure: HumanMeasure | null = null;
+  /** The badge on the player's chest (`view/HumanBadge`), and the template it was cloned from. */
+  let bodyBadge: BadgeHandle | null = null;
+  let badgeTemplate: THREE.Object3D | null = null;
   let clock = 0;
 
   const audio = new AudioEngine({ manifest: AUDIO_MANIFEST, levels: MIX_DEFAULTS, assets });
@@ -1096,6 +1101,9 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
     feet = null;
     people?.hide('jack', want);
     if (body !== null) body.visible = want;
+    // The body is put down somewhere new: what the badge remembers of its
+    // last motion belongs to the last walk.
+    bodyBadge?.reset();
     if (!want) return;
     const at = metresOf();
     const pose = free.pose();
@@ -1393,9 +1401,11 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
       body.position.set(rootX * M, FLOOR_UNITS + (walker.y - rootDrop) * M, rootZ * M);
       body.rotation.y = walker.heading;
     }
+    // After the pose AND the placement: the badge reads where the chest
+    // is now. Raw time, like the breath — it is the body, not the world.
+    swingBadge(bodyBadge, rawDt);
     strode.x = walker.x;
     strode.z = walker.z;
-    void rawDt;
   };
 
   const act = (action: string): void => {
@@ -1587,6 +1597,28 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
         }
         body = model;
         three.add(model);
+        // HIS BADGE, on its own file and its own schedule: the body never
+        // waits for it, and a badge that does not arrive is a line in the
+        // console and a chest without one.
+        void assets.loadModel('models/badge.glb', () => new THREE.Object3D()).then((template) => {
+          if (view === null || body !== model) {
+            release(template);
+            return;
+          }
+          if (template.userData.isPlaceholder === true) {
+            console.error('[tombs] models/badge.glb did not load; the player walks without a badge');
+            return;
+          }
+          badgeTemplate = template;
+          const rig = bodyRig;
+          const measure = bodyMeasure;
+          if (rig === null || measure === null) return;
+          try {
+            bodyBadge = attachBadge(model, measure, rig.bind, template, { rest: () => rig.rest(), label: 'player' });
+          } catch (error) {
+            console.error('[tombs] the player badge could not be hung', error);
+          }
+        });
       });
 
       hud = new TombsHud(ctx.uiLayer, layout.rooms, { readout: readoutNow, onAction: act });
@@ -1646,6 +1678,14 @@ export function buildTombsLabScene(ctx: SceneContext, hooks: TombsLabHooks): Tom
         three.remove(view.group);
         view.dispose();
         view = null;
+      }
+      // The badge comes off before the body is released: `release` walks
+      // the body and would free the template's shared geometry with it.
+      bodyBadge?.dispose();
+      bodyBadge = null;
+      if (badgeTemplate !== null) {
+        release(badgeTemplate);
+        badgeTemplate = null;
       }
       if (body !== null) {
         three.remove(body);

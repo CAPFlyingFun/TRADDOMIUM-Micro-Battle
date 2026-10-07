@@ -1,7 +1,10 @@
 /**
  * `tombs/labUse` against the REAL laboratory plan, and — for the two uses
  * the chapter turns on, the keyboard and the intercom — against the real
- * arm solver on Jack's own bind, seated where the use seats him.
+ * arm solver on Jack's own bind, seated where the use seats him, and on
+ * Sarah's in the same chair: hers is the shorter arm since the toon
+ * masters (2026-10-07), and the only one that still has to ROLL to the
+ * intercom, so she is what proves the roll.
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -147,8 +150,18 @@ describe('what using a thing in the lab does with the body', () => {
   });
 });
 
-describe("Jack seated at his own desk, on the real arm solver", () => {
-  const bind = MASTERS.jack;
+/**
+ * How far each body rolls its chair to take the intercom. On the scans
+ * Jack rolled. Re-measured on the toon masters 2026-10-07: his fingertip
+ * reach is 0.68 m (it was 0.60), and he takes the button from where he
+ * sits — left share 0.825, held from the first frame, no roll — which is
+ * the roll doing its job ("exactly as far as this arm needs"). Sarah's
+ * 0.55 m arm in his chair rolls 0.14 m, inside ROLL_MAX_M, and holds.
+ */
+const ROLLS: Readonly<Record<'jack' | 'sarah', 'none' | 'some'>> = { jack: 'none', sarah: 'some' };
+
+for (const who of ['jack', 'sarah'] as const) describe(`${who} seated at Jack's desk, on the real arm solver`, () => {
+  const bind = MASTERS[who];
   const measure = measureHuman(bind);
   const leftSign = (measure.leftSign < 0 ? -1 : 1) as 1 | -1;
   const turns = poseSeated(measure, bind, { style: 'sit', seconds: 0 }, [] as MutableJointTurn[]).map((t) => ({ ...t }));
@@ -181,7 +194,7 @@ describe("Jack seated at his own desk, on the real arm solver", () => {
     }
   });
 
-  it("rolls in toward the desk intercom until the left hand takes the button, the right still on the keys", () => {
+  it("rolls toward the desk intercom only as far as the left hand needs to take the button, the right still on the keys", () => {
     const press = useOf(LAYOUT, find('use:lab-intercom'), seat, leftSign);
     const right = sit.hands.find((h) => h.side === 'R')!;
     const hands = [press.hands[0], right];
@@ -198,10 +211,16 @@ describe("Jack seated at his own desk, on the real arm solver", () => {
       if (heldAt < 0 && r.L.holding) heldAt = i;
       roll = rollStep(roll, true, r.L.holding, 1 / 60);
     }
-    console.info(`intercom: rolled ${roll.toFixed(3)} m, held from frame ${heldAt}; L share ${r!.L.share.toFixed(3)}, R share ${r!.R.share.toFixed(3)}`);
+    console.info(`${who} intercom: rolled ${roll.toFixed(3)} m, held from frame ${heldAt}; L share ${r!.L.share.toFixed(3)}, R share ${r!.R.share.toFixed(3)}`);
     expect(r!.L.holding).toBe(true);
     expect(r!.R.holding).toBe(true);
-    expect(roll).toBeGreaterThan(0);
+    if (ROLLS[who] === 'none') {
+      expect(heldAt).toBe(0);
+      expect(roll).toBe(0);
+    } else {
+      expect(heldAt).toBeGreaterThan(0);
+      expect(roll).toBeGreaterThan(0);
+    }
     expect(roll).toBeLessThan(ROLL_MAX_M);
     // and back, once the press is over
     for (let i = 0; i < 60; i += 1) roll = rollStep(roll, false, false, 1 / 60);

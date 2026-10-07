@@ -23,9 +23,10 @@
  *
  *  2. THE ARM is shoulder → elbow → wrist → FINGERTIP, and the fingertip
  *     is the wrist's descendant furthest from it in the bind — the middle
- *     finger's tip on both masters. Its LENGTH is the sum of the three
- *     spans in the bind: Jack 0.60 m, Sarah 0.63-0.64 m (her forearms
- *     differ by 7 mm, so each arm is measured on its own).
+ *     finger's tip on Jack and the end of Sarah's fingerless mitten hand.
+ *     Its LENGTH is the sum of the three spans in the bind, and each arm
+ *     is measured on its own: on the toon masters (2026-10-07) Jack 0.68 m
+ *     and Sarah 0.55 m.
  *
  *  3. A HAND HOLDS only while its target is COMFORTABLY within reach from
  *     its OWN shoulder: the shoulder joint to the target no further than
@@ -51,8 +52,8 @@
  *
  *  6. THE FINGERTIP ARRIVES, not the wrist. The wrist is placed a hand's
  *     length short of the target along the HORIZONTAL approach from the
- *     shoulder, raised HAND_RAISE, and exactly a hand's length from the
- *     target — so the hand pointed from the wrist to the target puts the
+ *     shoulder, raised to tip the hand HAND_TIP down, and exactly a
+ *     hand's length from the target — so the hand pointed from the wrist to the target puts the
  *     tip on it, fingers tipped a few degrees down onto what they hold.
  *
  *  7. THE PALM lies flat on what it holds. In the T-pose bind both palms
@@ -158,11 +159,19 @@ export const REST_ALONG = 0.62;
 export const REST_ABOVE_M = 0.1;
 
 /**
- * How far the wrist is raised above the fingertip's height, metres. GAME
- * TUNING, from the approved prototype: 3 cm over a 15-18 cm hand tips the
- * fingers 10-12° down onto the keys — a typist's hand, not a flat board.
+ * How far the hand tips down from the wrist onto what it holds, radians:
+ * the wrist is raised `hand · sin(HAND_TIP)` above the fingertip's height.
+ * GAME TUNING, from the approved prototype — a typist's hand, not a flat
+ * board — which raised the wrist 3 cm over a 15-18 cm hand, tipping the
+ * fingers 10-12° down.
+ *
+ * It was that 3 cm, in metres, until the toon masters (2026-10-07):
+ * Sarah's mitten hand is 10 cm from wrist to tip, and the same 3 cm tipped
+ * it 17.5° and put her palm 21° off down on a keyboard. The angle is what
+ * was approved, so the angle is what is kept; on Jack's 19 cm hand it
+ * raises the wrist 3.3 cm, within 3 mm of before.
  */
-export const HAND_RAISE_M = 0.03;
+export const HAND_TIP = 10 * DEG;
 
 /**
  * The longest a solved arm (shoulder to wrist) may be, as a share of
@@ -904,7 +913,7 @@ function solveArm(state: ReachState, arm: ArmRig, T: Vec, palm: Vec, into: ArmSo
 
   // The wrist: a hand's length from the target, raised, short along the approach.
   const hand = arm.hand;
-  const raise = Math.min(HAND_RAISE_M * upm, 0.9 * hand);
+  const raise = hand * Math.sin(HAND_TIP);
   const back = Math.sqrt(hand * hand - raise * raise);
   const wx = T.x - apx * back;
   const wy = T.y + raise;

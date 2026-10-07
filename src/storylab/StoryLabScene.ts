@@ -36,6 +36,7 @@
  */
 import * as THREE from 'three';
 import { HUMAN_POSE_TURNS, poseHuman } from '../actor/humanPose';
+import { swingBadge } from '../actor/humanBadge';
 import { newJointTurn, type HumanMeasure, type MutableJointTurn } from '../actor/humanRig';
 import { SEATED_TURNS, poseSeated } from '../actor/humanSeated';
 import { measureHuman } from '../actor/humanSkeleton';
@@ -45,6 +46,7 @@ import { MoveStick } from '../input/MoveStick';
 import { FrameStats } from '../perf/FrameStats';
 import { CAMERA_SPEEDS, FreeFlyCamera } from '../perf/FreeFlyCamera';
 import { release } from '../tombs/LabPeople';
+import { attachBadge, type BadgeHandle } from '../view/HumanBadge';
 import { HumanRig, findSkinnedMesh } from '../view/HumanRig';
 import { UNITS_PER_METRE } from '../world/dem';
 import {
@@ -171,7 +173,15 @@ export function buildStoryLabScene(ctx: SceneContext, hooks: StoryLabHooks): App
   three.add(hemi, key, key.target, screenGlow);
 
   let room: THREE.Object3D | null = null;
-  const bodies: Array<{ model: THREE.Object3D; rig: HumanRig; measure: HumanMeasure; seated: boolean }> = [];
+  const bodies: Array<{ model: THREE.Object3D; rig: HumanRig; measure: HumanMeasure; seated: boolean; badge: BadgeHandle | null }> = [];
+  /**
+   * The badge both of them wear, its own file since the toon bodies
+   * (`view/HumanBadge`): loaded once, cloned per body, never waited on by
+   * a body. Null when it did not load — a line in the console, not a
+   * missing person.
+   */
+  let badgeTemplate: Promise<THREE.Object3D | null> | null = null;
+  let badgeLoaded: THREE.Object3D | null = null;
   let loaded = { room: false, jack: false, sarah: false };
   let disposed = false;
   let seconds = 0;
@@ -298,7 +308,16 @@ export function buildStoryLabScene(ctx: SceneContext, hooks: StoryLabHooks): App
         const rig = new HumanRig(model);
         const measure = measureHuman(rig.bind);
         placeBody(model, rig, measure, where, seated);
-        bodies.push({ model, rig, measure, seated });
+        const entry = { model, rig, measure, seated, badge: null as BadgeHandle | null };
+        bodies.push(entry);
+        void badgeTemplate?.then((template) => {
+          if (disposed || template === null || !bodies.includes(entry)) return;
+          try {
+            entry.badge = attachBadge(model, measure, rig.bind, template, { rest: () => rig.rest(), label: file });
+          } catch (error) {
+            console.error(`[storylab] ${file}: the badge could not be hung`, error);
+          }
+        });
       } catch (error) {
         console.error(`[storylab] ${file} could not be posed; it keeps its bind pose`, error);
         model.scale.setScalar(M);
@@ -331,6 +350,15 @@ export function buildStoryLabScene(ctx: SceneContext, hooks: StoryLabHooks): App
         loaded = { ...loaded, room: true };
         refresh();
       });
+      badgeTemplate = assets.loadModel('models/badge.glb', () => new THREE.Object3D()).then((template) => {
+        if (disposed) { release(template); return null; }
+        if (template.userData.isPlaceholder === true) {
+          console.error('[storylab] models/badge.glb did not load; Jack and Sarah go without badges');
+          return null;
+        }
+        badgeLoaded = template;
+        return template;
+      });
       loadPerson('models/jack.glb', JACK_CHAIR, true, () => { loaded = { ...loaded, jack: true }; });
       loadPerson('models/sarah.glb', SARAH_STAND, false, () => { loaded = { ...loaded, sarah: true }; });
     },
@@ -356,6 +384,7 @@ export function buildStoryLabScene(ctx: SceneContext, hooks: StoryLabHooks): App
       for (const b of bodies) {
         if (b.seated) b.rig.apply(poseSeated(b.measure, b.rig.bind, { style: 'doze', seconds, headSide: 1 }, turns));
         else b.rig.apply(poseHuman(b.measure, b.rig.bind, { stance: 'stand', phase: 0, seconds, lean: 0 }, turns));
+        swingBadge(b.badge, frame.rawDt);
       }
     },
 
@@ -371,6 +400,10 @@ export function buildStoryLabScene(ctx: SceneContext, hooks: StoryLabHooks): App
       hud = null;
       stick?.dispose();
       stick = null;
+      // Badges off first: `release` walks a body and would free the
+      // template's shared geometry along with it.
+      for (const b of bodies) { b.badge?.dispose(); b.badge = null; }
+      if (badgeLoaded) { release(badgeLoaded); badgeLoaded = null; }
       for (const b of bodies) { three.remove(b.model); b.rig.dispose(); release(b.model); }
       bodies.length = 0;
       for (const c of chairs) { three.remove(c); release(c); }
