@@ -6,7 +6,6 @@ import {createLabPlayer,type Person,type PlayerPoses} from './lab-player';
 import {visibleForInteraction} from './lab-interaction';
 import {chapterOneShot} from './lab-direction';
 import {walkable,findInteractionPoint} from './lab-navigation';
-import {prepareSeatedSarah} from './seated-skin';
 import {buildLab} from './lab-room';
 import {spareChairHome,chairRetrievalPosition} from './lab-layout';
 import {RoomEnvironment} from 'three/addons/environments/RoomEnvironment.js';
@@ -115,7 +114,7 @@ export function createLabRenderer(host:HTMLElement,mobile:boolean,events:Events)
   const response=await fetch(assetUrl(`/assets/lab3d/${person}.glb`),{signal:abort.signal});if(!response.ok)throw new Error(`${person} model unavailable (HTTP ${response.status})`);
   const array=await response.arrayBuffer();bytes+=array.byteLength;if(!closed)events.status(`Loading ${person==='jack'?'Jack':'Sarah'} · ${Math.round(bytes/total*100)}%`);
   const gltf=await new GLTFLoader().setMeshoptDecoder(MeshoptDecoder).parseAsync(array,'');if(closed){release(gltf.scene);throw new Error('Closed');}
-  const actor=gltf.scene;assertCompatibleRig(actor,person);eyeMounts[person]=measureEyeMount(actor);if(person==='sarah')prepareSeatedSarah(actor);
+  const actor=gltf.scene;assertCompatibleRig(actor,person);eyeMounts[person]=measureEyeMount(actor);
   actor.traverse(o=>{const m=o as T.Mesh;if(!m.isMesh)return;for(const mat of Array.isArray(m.material)?m.material:[m.material])for(const value of Object.values(mat))if(value instanceof T.Texture)value.anisotropy=Math.min(8,renderer.capabilities.getMaxAnisotropy());});
   actor.traverse(o=>{const mesh=o as T.Mesh;if(!mesh.isMesh)return;mesh.castShadow=!mobile;mesh.receiveShadow=false;mesh.frustumCulled=false;for(const m of Array.isArray(mesh.material)?mesh.material:[mesh.material])if(m instanceof T.MeshStandardMaterial){m.metalness=0;m.onBeforeCompile=shader=>{shader.fragmentShader=shader.fragmentShader.replace('#include <roughnessmap_fragment>','#include <roughnessmap_fragment>\nroughnessFactor = max(roughnessFactor, 0.78);');};m.customProgramCacheKey=()=> 'tmb-lab-matte-v1';}});
   scene.add(actor);return actor;
@@ -171,7 +170,7 @@ export function createLabRenderer(host:HTMLElement,mobile:boolean,events:Events)
      const gaze=(actor:T.Object3D,target:T.Object3D)=>{const d=target.position.clone().sub(actor.position);d.y=0;d.applyQuaternion(actor.quaternion.clone().invert());return T.MathUtils.clamp(Math.atan2(d.x,d.z),-.9,.9);};
      jackGaze=T.MathUtils.lerp(jackGaze,personal?gaze(jack,sarah):0,blend);
      sarahGaze=T.MathUtils.lerp(sarahGaze,sarahPersonal?gaze(sarah,jack):0,blend);
-     sarahMotion?.pose(clock,lower>0?'seated':approach>0&&approach<5?'walk':'idle',frame.speaker==='sarah',lower>.95&&!sarahPersonal,frame.reducedMotion,sarahGaze,lower);
+     sarahMotion?.pose(clock,lower>0?'seated':approach>0&&approach<5?'walk':'idle',frame.speaker==='sarah',false,frame.reducedMotion,sarahGaze,lower);
      if(chairPull>4&&chairPull<7)room.sarahChair.wheels.forEach(w=>w.rotateY(step*3));
     }
     if(opening.roll>0)room.jackChair.wheels.forEach(w=>w.rotation.y=opening.roll/.048);
