@@ -63,6 +63,26 @@ describe("Sarah's fingers (public/models/sarah.glb)", () => {
     for (let i = 0; i < 29; i += 1) expect(joints[i].getName()).toMatch(/^Bone_\d{3}$/);
   }, 60000);
 
+  it('points every finger bone along its finger (local +Y to the next joint), as every other bone does', async () => {
+    // Joshua, 2026-10-07: "the finger bones end up not straight, but upwards". An
+    // unturned node's +Y is the sky, and a skeleton viewer draws the bone that way.
+    const { joints } = await load();
+    const world = (n: (typeof joints)[number]) => n.getWorldMatrix();
+    for (const j of joints) {
+      if (!/^(thumb|index|middle|ring|pinky)[1-4]_[LR]$/.test(j.getName())) continue;
+      const m = world(j);
+      const y = [m[4], m[5], m[6]];
+      const yl = Math.hypot(...y);
+      const kid = j.listChildren()[0];
+      const ref = kid ?? j.getParentNode()!;
+      const r = world(ref);
+      const d = kid ? [r[12] - m[12], r[13] - m[13], r[14] - m[14]] : [m[12] - r[12], m[13] - r[13], m[14] - r[14]];
+      const dl = Math.hypot(...d);
+      const cos = (y[0] * d[0] + y[1] * d[1] + y[2] * d[2]) / (yl * dl);
+      expect(cos, j.getName()).toBeGreaterThan(0.99);
+    }
+  }, 60000);
+
   it('every finger bone moves its finger, and nothing outside the hands', async () => {
     const { joints, prim } = await load();
     const P = prim.getAttribute('POSITION')!, J = prim.getAttribute('JOINTS_0')!, W = prim.getAttribute('WEIGHTS_0')!;

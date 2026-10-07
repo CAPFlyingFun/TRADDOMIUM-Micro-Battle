@@ -40,10 +40,10 @@
     },
     "/assets/lab3d/sarah.glb": {
       "repository": "CAPFlyingFun/TRADDOMIUM-Micro-Battle",
-      "source": "public/models/sarah.glb (toon master, bump weights fixed, fingers rigged, TRADDOMIUM alpha.72, 2026-10-07)",
-      "bytes": 3048068,
-      "sha256": "5e61d282e0390fa65d433b4075d27a82c44f273f1e9bc3045a32a048c421c857",
-      "gitBlob": "ea701d14f60d738ddb89ed280c88c0c77f358efc"
+      "source": "public/models/sarah.glb (toon master, bump weights fixed, fingers rigged, TRADDOMIUM alpha.73, 2026-10-07)",
+      "bytes": 3051204,
+      "sha256": "b3d809f86c9be2f53ac9753d4cb93810f8b35a85dc48c9854ba27405b2608e54",
+      "gitBlob": "187c9494d5eea996495079c375803638b847261d"
     },
     "/assets/intro/island-night.jpg": {
       "repository": "CAPFlyingFun/TMB-Story",

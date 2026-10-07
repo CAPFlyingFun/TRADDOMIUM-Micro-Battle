@@ -312,7 +312,21 @@ export function rigFingers(doc, { log = () => {} } = {}) {
       for (let i = 0; i < ch.joints.length; i += 1) {
         const node = doc.createNode(`${ch.name}${i + 1}_${side}`);
         const parentWorld = new THREE.Matrix4().fromArray(parent.getWorldMatrix());
-        const world = new THREE.Matrix4().makeTranslation(ch.joints[i].x, ch.joints[i].y, ch.joints[i].z);
+        // THE BONE'S OWN AXES, as every other bone in these rigs has them (and as
+        // Blender and every skeleton viewer read them): local +Y along the bone, to
+        // the next joint, the tip carrying on its finger's last direction. A node
+        // left unturned would point +Y at the sky, and a viewer draws every finger
+        // bone standing straight up (Joshua, 2026-10-07: "the finger bones end up not
+        // straight, but upwards"). Skinning does not care either way; tools do.
+        // Local +Z is the palm's normal, so a curl is a turn about local X.
+        const next = ch.joints[Math.min(i + 1, ch.joints.length - 1)];
+        const prev = ch.joints[Math.max(i - 1, 0)];
+        const along = (i < ch.joints.length - 1 ? next.clone().sub(ch.joints[i]) : ch.joints[i].clone().sub(prev)).normalize();
+        const xAxis = new THREE.Vector3().crossVectors(along, normal);
+        if (xAxis.lengthSq() < 1e-8) xAxis.set(1, 0, 0);
+        xAxis.normalize();
+        const zAxis = new THREE.Vector3().crossVectors(xAxis, along).normalize();
+        const world = new THREE.Matrix4().makeBasis(xAxis, along, zAxis).setPosition(ch.joints[i]);
         const local = parentWorld.clone().invert().multiply(world);
         const tr = new THREE.Vector3(), q = new THREE.Quaternion(), sc = new THREE.Vector3();
         local.decompose(tr, q, sc);
