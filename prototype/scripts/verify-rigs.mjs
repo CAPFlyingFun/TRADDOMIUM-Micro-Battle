@@ -3,13 +3,11 @@ import * as T from 'three';
 import { newRigFixture } from '../tests/helpers/new-rig-fixture.mjs';
 import { assertCompatibleRig } from '../app/game/three/rig-contract.ts';
 import { createBodyMotion } from '../app/game/three/body-motion.ts';
-import { prepareSeatedSarah } from '../app/game/three/seated-skin.ts';
 
 for (const who of ['jack', 'sarah']) {
   const { root, doc } = await newRigFixture(who);
   const result = assertCompatibleRig(root, who);
-  if (who === 'sarah') prepareSeatedSarah(root);
-  const motion = createBodyMotion(root);
+  const motion = createBodyMotion(root, { pregnant: who === 'sarah' });
   for (const pose of ['idle', 'walk', 'seated']) {
     motion.pose(1, pose, true, true, false);
     root.traverse(object => {

@@ -3,7 +3,15 @@ import * as T from 'three';
 // The supplied UniRig models use different left/right numbering. Discover the
 // side from rest-space position, and aim bones geometrically rather than assume
 // their local Euler axes. Model data and bind matrices remain unchanged.
-export function createBodyMotion(root:T.Object3D) {
+//
+// `pregnant` (Sarah, 32 weeks): seated, she sits upright with a slight lean back,
+// thighs a little below level and further apart so they clear the bump, and her
+// hands resting on her thighs. Her bump keeps its shape because of its bone
+// weights (TRADDOMIUM scripts/protectBumpWeights.mjs, baked into sarah.glb),
+// not because of this pose: the arms rest beside it, they do not cover it.
+export interface BodyMotionOptions { readonly pregnant?: boolean }
+export function createBodyMotion(root:T.Object3D,options:BodyMotionOptions={}) {
+ const pregnant=options.pregnant===true;
  const bones=new Map<string,T.Bone>(),rest=new Map<T.Bone,T.Quaternion>();
  root.updateMatrixWorld(true);
  root.traverse(o=>{if((o as T.Bone).isBone){bones.set(o.name,o as T.Bone);rest.set(o as T.Bone,o.quaternion.clone());}});
@@ -27,8 +35,8 @@ export function createBodyMotion(root:T.Object3D) {
   root.updateMatrixWorld(true);
   for(const arm of arms){
    const s=arm.side,step=mode==='walk'?Math.sin(time*5.2+s)*.20:0;
-   aim(arm.names[0],arm.names[1],mode==='seated'?(typing?v(s*.19,-.68,.73):v(s*.2,-1,.2)):v(s*.16,-1,step+.05));
-   aim(arm.names[1],arm.names[2],mode==='seated'?(typing?v(s*.08,-.12+(!reduced?Math.sin(time*10+s)*.05:0),1):v(s*.1,-.5,.5+gesture)):v(s*.1,-1,.15+gesture-step));
+   aim(arm.names[0],arm.names[1],mode==='seated'?(typing?v(s*.19,-.68,.73):pregnant?v(s*.24,-1,.55):v(s*.2,-1,.2)):v(s*.16,-1,step+.05));
+   aim(arm.names[1],arm.names[2],mode==='seated'?(typing?v(s*.08,-.12+(!reduced?Math.sin(time*10+s)*.05:0),1):pregnant?v(s*.12,-.85,1+gesture):v(s*.1,-.5,.5+gesture)):v(s*.1,-1,.15+gesture-step));
   }
   if(mode==='seated')for(const arm of arms){const wrist=bones.get(arm.names[2]);const hand=wrist?.children.find(o=>(o as T.Bone).isBone);if(wrist&&hand)wrist.rotateOnAxis(hand.position.clone().normalize(),Math.PI);}
   const sleep=T.MathUtils.clamp(opening.sleep??0,0,1),jolt=opening.jolt??0;
@@ -37,14 +45,14 @@ export function createBodyMotion(root:T.Object3D) {
    aim(arm.names[0],arm.names[1],v(arm.side*.35,-.8,.38));upper.quaternion.slerpQuaternions(uq,upper.quaternion.clone(),sleep);root.updateMatrixWorld(true);
    aim(arm.names[1],arm.names[2],v(-arm.side*.9,.5,.25));fore.quaternion.slerpQuaternions(fq,fore.quaternion.clone(),sleep);root.updateMatrixWorld(true);
   }
-  if(spine){spine.rotateX(sleep*.12-jolt*.1);root.updateMatrixWorld(true);}
+  if(spine){spine.rotateX(sleep*.12-jolt*.1-(pregnant&&mode==='seated'?.05*seatBlend:0));root.updateMatrixWorld(true);}
   const beforeLegs=new Map<T.Bone,T.Quaternion>();
   if(mode==='seated'&&seatBlend<1)for(const leg of legs)for(const name of leg.names){const b=bones.get(name)!;beforeLegs.set(b,b.quaternion.clone());}
   for(const leg of legs){
    const step=mode==='walk'?Math.sin(time*5.2+(leg.side>0?0:Math.PI))*.24:0;
    if(mode==='seated'){
-    aim(leg.names[0],leg.names[1],v(leg.side*.04,-.05,1));
-    aim(leg.names[1],leg.names[2],v(0,-1,-.06));
+    aim(leg.names[0],leg.names[1],pregnant?v(leg.side*.2,-.17,1):v(leg.side*.04,-.05,1));
+    aim(leg.names[1],leg.names[2],pregnant?v(leg.side*.03,-1,.02):v(0,-1,-.06));
     aim(leg.names[2],leg.names[3],v(0,-.65,.76));
    }else if(mode==='walk'){
     aim(leg.names[0],leg.names[1],v(0,-1,step));

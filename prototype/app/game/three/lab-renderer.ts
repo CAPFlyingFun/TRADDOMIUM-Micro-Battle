@@ -122,7 +122,7 @@ export function createLabRenderer(host:HTMLElement,mobile:boolean,events:Events)
  void(async()=>{
   try{
    jack=await load('jack');jackMotion=createBodyMotion(jack);jack.position.set(-.9,-.35,.45);jack.rotation.y=Math.PI;
-   sarah=await load('sarah');sarahMotion=createBodyMotion(sarah);sarah.userData.target='sarah';sarah.visible=false;
+   sarah=await load('sarah');sarahMotion=createBodyMotion(sarah,{pregnant:true});sarah.userData.target='sarah';sarah.visible=false;
    if(closed)return;loaded=true;events.status('');events.ready();
   }catch(error){if(!closed){console.error('Laboratory character loading failed',error);events.status(`Could not load the laboratory characters: ${error instanceof Error?error.message:'unknown error'}. Retry, or use Menu to return to the title.`);events.failed();}}
   finally{clearTimeout(timeout);}

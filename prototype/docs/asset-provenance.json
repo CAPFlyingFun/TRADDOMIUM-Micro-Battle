@@ -17,35 +17,33 @@
     },
     "/assets/jack-reference.png": {
       "repository": "CAPFlyingFun/TMB-Story",
-      "revision": "dfe810e670a42867b014dae4a206df5d80350414",
+      "revision": "21344b8 (toon portraits, 2026-10-07)",
       "source": "assets/portraits/jack-3d.png",
-      "bytes": 40206,
-      "sha256": "845fb802d140430692df4051cef2cbaac658968b5be6ed8218401d21fe3ac88e",
-      "gitBlob": "9acb7dbe11b1a6ef4a4cc6ab51648f3dbd91c91b"
+      "bytes": 43401,
+      "sha256": "a2c4b57c8f34269140f6028536bf794736e7f2088de9c27b9559513fed08b13c",
+      "gitBlob": "8ab86d6cd9c92290b0b33fb982f76a479fd8cd94"
     },
     "/assets/sarah-reference.png": {
       "repository": "CAPFlyingFun/TMB-Story",
-      "revision": "dfe810e670a42867b014dae4a206df5d80350414",
+      "revision": "21344b8 (toon portraits, 2026-10-07)",
       "source": "assets/portraits/sarah-3d.png",
-      "bytes": 49169,
-      "sha256": "69d9effc28138762b051f3fe774410380f93efd5b65fb4f81fc9c5b22b9ef093",
-      "gitBlob": "170ebac3a39db235dbcafd727e27408d1d786a91"
+      "bytes": 52983,
+      "sha256": "198072b8369d7a3c8ee97b33471bde64cd72157e7edafe5742ea8d81b63bc58a",
+      "gitBlob": "68c73300d6c67e2089580815505473398c7afbc9"
     },
     "/assets/lab3d/jack.glb": {
       "repository": "CAPFlyingFun/TRADDOMIUM-Micro-Battle",
-      "source": "Git history: public/models/jack.glb",
-      "bytes": 2984300,
-      "sha256": "0575c64d53501f4cb320722f1a4f7a246cd4ae87254ca7dd00c7146983cf0bdd",
-      "gitBlob": "a4f8f307d147ebc527a086b5cf79c55368a9b34f",
-      "exactPrototypeBlob": true
+      "source": "public/models/jack.glb (toon masters, TRADDOMIUM alpha.70, 2026-10-07)",
+      "bytes": 3064472,
+      "sha256": "3e5c3fe97bd9c90530a8662d96e0e1012c85416801de66b6c769c2aad80e4ab3",
+      "gitBlob": "c565436d1ba5d2ea0c0454740805b84de8c61927"
     },
     "/assets/lab3d/sarah.glb": {
       "repository": "CAPFlyingFun/TRADDOMIUM-Micro-Battle",
-      "source": "Git history: public/models/sarah.glb",
-      "bytes": 2707620,
-      "sha256": "5d352516af19b194791b05ced7ac58f605842760175d50525a53b4804697dee2",
-      "gitBlob": "8aa6ea59aa08af05e3010f1babb642ce9764f305",
-      "exactPrototypeBlob": true
+      "source": "public/models/sarah.glb (toon master, bump weights fixed, TRADDOMIUM alpha.71, 2026-10-07)",
+      "bytes": 3033640,
+      "sha256": "b7794a2771034b9aa430d3cdd25dbf9db78a9f5f6acbe30e1c135e4a21abcd90",
+      "gitBlob": "53a4b91022e3571c24b179ccc1e24fbdfbfd48cc"
     },
     "/assets/intro/island-night.jpg": {
       "repository": "CAPFlyingFun/TMB-Story",
