@@ -95,6 +95,7 @@ import { smoothLegWeights } from './smoothLegWeights.mjs';
 import { bakeBadge } from './bakeBadge.mjs';
 import { smoothSeatWeights } from './smoothSeatWeights.mjs';
 import { protectBumpWeights } from './protectBumpWeights.mjs';
+import { rigFingers } from './rigFingers.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
@@ -269,7 +270,7 @@ const HUMANS = [
   // fingers), Joshua's note on the release. `smoothLegs` stays: it is
   // harmless on clean weights and it is the one fix her rigs have needed.
   {
-    master: 'Sarah-Toon.glb', out: 'sarah.glb', who: 'Sarah Bennett', panel: null, repair: false, authored: true, smoothLegs: true, reach: Infinity, smoothSeat: true, protectBump: true,
+    master: 'Sarah-Toon.glb', out: 'sarah.glb', who: 'Sarah Bennett', panel: null, repair: false, authored: true, smoothLegs: true, reach: Infinity, smoothSeat: true, protectBump: true, rigFingers: true,
   },
 ];
 
@@ -997,6 +998,11 @@ async function main() {
         if (/^(JOINTS|WEIGHTS)_([1-9]\d*)$/.test(name)) prim.setAttribute(name, null);
       }
     }
+    // A mitten hand gets its fingers (rigFingers.mjs): bones measured from the
+    // hand's own fingers, appended after the master's joints, and the hand's
+    // weights shared out along them. After the prune, which has put every
+    // influence the master had into set 0, where these are written.
+    if (human.rigFingers) rigFingers(doc, { log: (line) => console.log(`[bake:humans]   ${human.who}: ${line}`) });
     // A master rigged with hard edges at the knee and ankle tears there as
     // soon as the walk bends them (`smoothLegWeights.mjs` has the renders).
     if (human.smoothLegs) smoothLegWeights(doc, { log: (line) => console.log(`[bake:humans]   ${human.who}: ${line}`) });

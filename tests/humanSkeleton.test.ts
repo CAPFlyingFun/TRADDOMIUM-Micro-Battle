@@ -90,10 +90,15 @@ const REAL: readonly Master[] = [
   // toon proportions show in the spans: 40 mm shorter in the joints, a
   // wrist-to-wrist span 90 mm narrower (short arms on narrow shoulders),
   // and a leg 25 mm longer.
+  //
+  // AND HER FINGERS ARE RIGGED AT BAKE TIME (2026-10-07, scripts/rigFingers.mjs):
+  // 40 joints, five four-jointed fingers a hand, APPENDED after the master's
+  // 29, so every index below is unchanged and every assertion passed on the
+  // baked 69 as it had on the 29.
   {
     who: 'sarah',
     bind: MASTERS.sarah,
-    count: 29,
+    count: 69,
     joints: {
       pelvis: 1, spine: 3, chest: 5, neck: 6, head: 8,
       shoulderL: 15, elbowL: 16, wristL: 17,

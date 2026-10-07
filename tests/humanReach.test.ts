@@ -237,14 +237,17 @@ interface AtTheDesk {
 }
 
 const AT_THE_DESK: Readonly<Record<string, AtTheDesk>> = {
-  // Short toon arms on narrow shoulders: the keyboard is already 82% of her
-  // reach square on, so turning right stretches her right arm to 0.89 by
-  // 30° and it lets go by REACH at about 35°; the left lets go by angle
-  // at about 80°.
+  // Her fingers rigged (2026-10-07, scripts/rigFingers.mjs): the arm now runs
+  // to her middle fingertip, 0.20 m past the wrist, instead of to the end of
+  // the mitten bone at 0.10 m. Measured again: the keyboard is 69% of her
+  // reach square on; turning right never stretches her right arm past 0.75,
+  // and it lets go by ANGLE, as Jack's does. The intercom spot that brings
+  // her arms into conflict is now his (a grid over 0.18-0.24 m left and
+  // 0.04-0.10 m nearer passed everywhere but 0.18/0.10).
   sarah: {
-    arm: 0.552, shoulders: 0.239, keyboardShare: 0.818,
-    stretchedAt: 30, releasedAt: 90, rightLetsGoBy: 'reach',
-    intercom: { left: 0.17, nearer: 0.12, above: 0.04 },
+    arm: 0.652, shoulders: 0.239, keyboardShare: 0.692,
+    stretchedAt: null, releasedAt: 120, rightLetsGoBy: 'angle',
+    intercom: { left: 0.24, nearer: 0.06, above: 0.04 },
   },
   // The toon arms are longer than the scan's: square on the keyboard is
   // 67% of his reach, and turning right never stretches the right arm past
@@ -314,14 +317,10 @@ function desk(body: Body) {
  * conflict, or the crossing tests below test nothing.
  *
  * On the scans one spot did both for both bodies (0.20 left, 0.10 nearer).
- * Re-measured on the toon masters 2026-10-07, NO single spot does: a grid
- * over 0.10-0.26 m left and 0.02-0.15 m nearer found every spot Jack's
- * longer arms come into conflict at (0.19 m left or more) past Sarah's
- * reach, and every spot she reaches leaving his arms 10-20 cm apart. So
- * each body has its own (`AT_THE_DESK`), both chosen to be alike: the
- * right hand at about 80% of its arm, the arms 5-7 cm inside each other's
- * clearance, and a slide of about 9 cm making room — Sarah's 0.17 m left
- * and 0.12 m nearer, Jack's 0.24 m and 0.06 m.
+ * On the toon masters with Sarah's mitten hands none did: her reach ended at
+ * the mitten bone, 10 cm short of her fingertips. With her fingers rigged
+ * (2026-10-07) one spot does both again: 0.24 m left, 0.06 m nearer, which
+ * AT_THE_DESK still names per body so a future master can part them.
  */
 function intercom(body: Body): Vec3 {
   const d = desk(body);
@@ -400,9 +399,9 @@ describe.each(BODIES)('humanReach on $who', (body) => {
     const j = body.measure.joints;
     const shoulders = dist(body.bind[j.shoulderL], body.bind[j.shoulderR]) / UNITS_PER_METRE;
     // Re-measured on the toon masters 2026-10-07 (the scans' were Jack 0.60
-    // and 0.37, Sarah 0.63 and 0.35). Sarah's fingertip is the END of her
-    // mitten — one joint past the wrist, 0.10 m — where Jack's is his
-    // middle finger's tip, 0.19 m out.
+    // and 0.37, Sarah 0.63 and 0.35). Both fingertips are a middle finger's
+    // tip, 0.19-0.20 m past the wrist, now that Sarah's fingers are rigged
+    // (scripts/rigFingers.mjs); before, hers was the end of her mitten bone.
     const want = AT_THE_DESK[body.who];
     for (const arm of [L, R]) {
       expect(arm.ok).toBe(true);
@@ -430,7 +429,7 @@ describe.each(BODIES)('humanReach on $who', (body) => {
       expect(status.weight).toBe(1);
       expect(status.yielded).toBe('none');
       // The scans both held it at 0.7 ± 0.08. Re-measured on the toon
-      // masters 2026-10-07: 0.67 of Jack's arm and 0.82 of Sarah's — still
+      // masters 2026-10-07: 0.67 of Jack's arm and 0.69 of Sarah's — still
       // under the 0.85 a hand takes hold at, which is what "comfortably" is.
       expect(Math.abs(status.share - AT_THE_DESK[body.who].keyboardShare)).toBeLessThanOrEqual(0.01);
       expect(status.share).toBeLessThan(0.85);
