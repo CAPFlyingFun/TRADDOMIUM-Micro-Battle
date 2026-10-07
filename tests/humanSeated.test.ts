@@ -130,3 +130,33 @@ for (const master of MASTERS) {
     });
   });
 }
+
+// Joshua, 2026-10-07, on the toon masters: "Sarah doesn't sleep like Jack" and "if Sarah does
+// sleep like Jack, her hands and arms need to be differently as it changes the belly".
+describe('doze: the same sleep on every body, and a pregnant body cradles rather than folds', () => {
+  for (const master of MASTERS) {
+    const bind = master.bind;
+    const m = measureHuman(bind);
+    const j = m.joints;
+    it(`${master.name}: the head drops to the same pitch whatever the bind's own head lean`, () => {
+      const P = posedJoints(bind, poseSeated(m, bind, { style: 'doze', seconds: 0 }, []));
+      const pitch = deg(Math.atan2(P[j.head][2] - P[j.neck][2], P[j.head][1] - P[j.neck][1]));
+      // 38° is where Jack's approved doze lands; the roll and the breath move it a little.
+      expect(pitch).toBeGreaterThan(33);
+      expect(pitch).toBeLessThan(43);
+    });
+    it(`${master.name}: cradling, the hands stay on their own sides, low in front, never crossed`, () => {
+      const P = posedJoints(bind, poseSeated(m, bind, { style: 'doze', seconds: 0, arms: 'cradle' }, []));
+      const mid = (bind[j.hipL].x + bind[j.hipR].x) / 2;
+      const L = m.leftSign < 0 ? -1 : 1;
+      // each wrist on its own side of the centre line (the fingertips may meet past it)
+      expect(L * (P[j.wristL][0] - mid)).toBeGreaterThan(0);
+      expect(L * (P[j.wristR][0] - mid)).toBeLessThan(0);
+      // in front of the hips and below the chest: on the bump, not across the chest
+      for (const w of [j.wristL, j.wristR]) {
+        expect(P[w][2]).toBeGreaterThan(bind[j.hipL].z);
+        expect(P[w][1]).toBeLessThan(bind[j.chest].y);
+      }
+    });
+  }
+});

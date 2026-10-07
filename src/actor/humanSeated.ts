@@ -56,6 +56,16 @@ export interface SeatedPose {
   readonly headSide?: number;
   /** A free-running clock in seconds, for the breath. */
   readonly seconds: number;
+  /**
+   * What the dozing arms do. `fold` (the default) is Jack's, arms folded
+   * across the chest. `cradle` rests the hands on the sides of a pregnant
+   * belly instead: folded forearms press straight into a bump and dent it
+   * (Joshua, 2026-10-07, of Sarah: "her hands and arms need to be
+   * differently as it changes the belly and doesn't look good"). The
+   * skeleton cannot see a belly, so the owner says which, from what it
+   * knows of the person.
+   */
+  readonly arms?: 'fold' | 'cradle';
 }
 
 /** Every seated pose writes these sixteen joints, parent before child, every frame. */
@@ -136,6 +146,34 @@ const STYLES: Readonly<Record<SeatedStyle, Style>> = {
   },
 };
 
+/**
+ * A dozing pregnant body's arms: the upper arms hang by her sides, a little
+ * forward and a little out, the elbows bend, and the hands cup the underside
+ * of the bump from either side, fingertips meeting below the navel. Nothing
+ * crosses the front of the belly, so nothing presses into it. GAME TUNING,
+ * chosen from three sweeps of four variants rendered front and side on the
+ * toon Sarah (2026-10-07): more forward and the hands float in front of the
+ * bump; less, or a deeper elbow, and they sink into its underside.
+ */
+const CRADLE: { readonly over: ArmSpec; readonly under: ArmSpec } = {
+  over: { down: 74 * DEG, forward: 18 * DEG, twist: 60 * DEG, elbow: 48 * DEG, wristBend: 35 * DEG, wristTilt: 0 },
+  under: { down: 74 * DEG, forward: 18 * DEG, twist: 60 * DEG, elbow: 48 * DEG, wristBend: 35 * DEG, wristTilt: 0 },
+};
+
+/**
+ * WHERE A DOZING HEAD ENDS UP, as the forward pitch of the neck-to-crown line
+ * from upright. The style's neck and head angles are TURNS, and a turn lands
+ * wherever the bind started: Jack's toon head already leans 15° forward in
+ * the bind and Sarah's leans 8° back, so the same doze dropped his chin to
+ * 38° and hers only to 16° — he slept and she looked down at her hands
+ * (Joshua, 2026-10-07: "Sarah doesn't sleep like Jack"). So the doze aims at
+ * the PITCH Jack's approved doze reaches and the neck makes up the difference
+ * on each body, the way the legs reach their targets from each body's own lean.
+ */
+const DOZE_HEAD_PITCH = 38 * DEG;
+/** Per skeleton, the neck correction that lands the doze on DOZE_HEAD_PITCH. */
+const dozeNeckFix = new WeakMap<readonly BindJoint[], number>();
+
 // ------------------------------------------------------------ quaternions
 // [x, y, z, w]. Small and local: a core module cannot reach for three's.
 
@@ -192,9 +230,31 @@ export function poseSeated(
   const side = (pose.headSide ?? 1) < 0 ? -1 : 1;
   const roll = side * L * st.roll;
 
+  let neckFix = 0;
+  if (pose.style === 'doze') {
+    const known = dozeNeckFix.get(bind);
+    if (known === undefined) {
+      // One pass with no correction, measure where the head went, and keep
+      // the difference: the pitch is close to linear in the neck's turn
+      // over these angles, so one correction lands it.
+      const probe: MutableJointTurn[] = [];
+      for (let k = 0; k < 4; k += 1) probe.push(newJointTurn());
+      write(probe[0], j.spine, rx(st.spine));
+      write(probe[1], j.chest, rx(st.chest));
+      write(probe[2], j.neck, rx(st.neck));
+      write(probe[3], j.head, rx(st.head));
+      const P = posedJoints(bind, probe);
+      const pitch = Math.atan2(P[j.head][2] - P[j.neck][2], P[j.head][1] - P[j.neck][1]);
+      neckFix = DOZE_HEAD_PITCH - pitch;
+      dozeNeckFix.set(bind, neckFix);
+    } else {
+      neckFix = known;
+    }
+  }
+
   write(out[0], j.spine, rx(st.spine));
   write(out[1], j.chest, rx(st.chest - breath));
-  write(out[2], j.neck, qMul(rz(roll * 0.6), rx(st.neck + breath * 0.5)));
+  write(out[2], j.neck, qMul(rz(roll * 0.6), rx(st.neck + neckFix + breath * 0.5)));
   write(out[3], j.head, qMul(rz(roll * 0.4), rx(st.head)));
 
   // Arms. `s` is the direction the arm runs in the bind: +1 along +X.
@@ -208,8 +268,9 @@ export function poseSeated(
     write(out[i + 2], wrist, qMul(ry(-s * a.wristBend), rz(-s * a.wristTilt)));
   };
   // The right forearm over the left, the commoner fold (and either reads).
-  arm(4, j.shoulderL, j.elbowL, j.wristL, L, st.under);
-  arm(7, j.shoulderR, j.elbowR, j.wristR, -L, st.over);
+  const arms = pose.style === 'doze' && pose.arms === 'cradle' ? CRADLE : st;
+  arm(4, j.shoulderL, j.elbowL, j.wristL, L, arms.under);
+  arm(7, j.shoulderR, j.elbowR, j.wristR, -L, arms.over);
 
   // Legs: thigh forward to level and yawed a little out, shin back down,
   // foot back to flat. A bone's bind lean is measured as the angle it
