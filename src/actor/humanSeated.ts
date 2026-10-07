@@ -66,6 +66,14 @@ export interface SeatedPose {
    * knows of the person.
    */
   readonly arms?: 'fold' | 'cradle';
+  /**
+   * `pregnant`: a sitting posture for a body carrying late in a pregnancy
+   * (Joshua, 2026-10-07, of Sarah at 32 weeks: "torso relatively upright,
+   * slightly more open hip angle, knees/feet positioned naturally, enough
+   * thigh-to-belly clearance, subtle lumbar/postural adjustment, arms resting
+   * naturally"). Applies to `sit`; a doze keeps its own slump.
+   */
+  readonly posture?: 'pregnant';
 }
 
 /** Every seated pose writes these sixteen joints, parent before child, every frame. */
@@ -98,6 +106,8 @@ interface ArmSpec {
   readonly elbow: number;
   readonly wristBend: number;
   readonly wristTilt: number;
+  /** The forearm rolled about its own length before the elbow bends (+ turns the palm down). */
+  readonly pronate?: number;
 }
 
 interface Style {
@@ -173,6 +183,28 @@ const CRADLE: { readonly over: ArmSpec; readonly under: ArmSpec } = {
 const DOZE_HEAD_PITCH = 38 * DEG;
 /** Per skeleton, the neck correction that lands the doze on DOZE_HEAD_PITCH. */
 const dozeNeckFix = new WeakMap<readonly BindJoint[], number>();
+
+/**
+ * The pregnant sit (`posture: 'pregnant'`). Every number is a small move from
+ * the plain sit, and GAME TUNING checked against front and side renders of the
+ * toon Sarah:
+ *   - the thighs a little below level (80° rather than 88° from hanging), which
+ *     opens the hip and lowers the thigh away from the underside of the bump;
+ *   - the knees further apart (13° each rather than 7°), which is how a late
+ *     pregnancy sits and what gives the bump room between the thighs;
+ *   - the spine upright with a slight lean back into the chair (−3°) and the
+ *     chest open, rather than tipped forward over a desk;
+ *   - the arms relaxed: upper arms hanging a little forward, forearms sloping
+ *     down to the thighs and turned palm-down (`pronate`), so the hands rest
+ *     on the thighs outside the bump — not cradling it, which a scene asks for
+ *     when it wants it. They are clear of the bump because that is how she
+ *     sits, not to hide it: the bump is round seated because of its weights
+ *     (`scripts/protectBumpWeights.mjs`), and is checked with the arms away.
+ */
+const PREGNANT_SIT = {
+  thigh: 80 * DEG, spread: 13 * DEG, spine: -3 * DEG, chest: -1 * DEG,
+  arm: { down: 82 * DEG, forward: 28 * DEG, twist: 0, elbow: 24 * DEG, wristBend: -20 * DEG, wristTilt: 0, pronate: 170 * DEG } as ArmSpec,
+};
 
 // ------------------------------------------------------------ quaternions
 // [x, y, z, w]. Small and local: a core module cannot reach for three's.
@@ -252,8 +284,9 @@ export function poseSeated(
     }
   }
 
-  write(out[0], j.spine, rx(st.spine));
-  write(out[1], j.chest, rx(st.chest - breath));
+  const pregnant = pose.style === 'sit' && pose.posture === 'pregnant';
+  write(out[0], j.spine, rx(pregnant ? PREGNANT_SIT.spine : st.spine));
+  write(out[1], j.chest, rx((pregnant ? PREGNANT_SIT.chest : st.chest) - breath));
   write(out[2], j.neck, qMul(rz(roll * 0.6), rx(st.neck + neckFix + breath * 0.5)));
   write(out[3], j.head, qMul(rz(roll * 0.4), rx(st.head)));
 
@@ -263,12 +296,19 @@ export function poseSeated(
     // pitch the lowered arm forward. The pitch is about X, not Y: `Ry`
     // swings a HORIZONTAL arm fore and aft, but by then the arm hangs, and
     // turning a hanging arm about the vertical only spins it in place.
-    write(out[i], shoulder, qMul(rx(-a.forward), qMul(rz(-s * a.down), rx(a.twist))));
-    write(out[i + 1], elbow, ry(-s * a.elbow));
+    // `pronate` turns the palm down. A forearm has no twist bone in these
+    // rigs, so the whole roll at the elbow would wring its skin like a
+    // towel; half is taken at the shoulder instead, with the elbow's hinge
+    // turned back by the same amount so the bend still points forward —
+    // the elbow joint itself then only bends.
+    const roll = (a.pronate ?? 0) / 2;
+    write(out[i], shoulder, qMul(rx(-a.forward), qMul(rz(-s * a.down), rx(a.twist + roll))));
+    write(out[i + 1], elbow, roll ? qMul(rx(-roll), qMul(ry(-s * a.elbow), rx(2 * roll))) : ry(-s * a.elbow));
     write(out[i + 2], wrist, qMul(ry(-s * a.wristBend), rz(-s * a.wristTilt)));
   };
   // The right forearm over the left, the commoner fold (and either reads).
-  const arms = pose.style === 'doze' && pose.arms === 'cradle' ? CRADLE : st;
+  const arms = pose.style === 'doze' && pose.arms === 'cradle' ? CRADLE
+    : pregnant ? { over: PREGNANT_SIT.arm, under: PREGNANT_SIT.arm } : st;
   arm(4, j.shoulderL, j.elbowL, j.wristL, L, arms.under);
   arm(7, j.shoulderR, j.elbowR, j.wristR, -L, arms.over);
 
@@ -278,10 +318,12 @@ export function poseSeated(
   // swings it; the flexions are what take each bone from there to its
   // target, and the ankle undoes whatever the two left the foot tilted by.
   const lean = (a: number, b: number) => Math.atan2(-(bind[b].z - bind[a].z), -(bind[b].y - bind[a].y));
+  const thighTarget = pregnant ? PREGNANT_SIT.thigh : THIGH_TARGET;
+  const spread = pregnant ? PREGNANT_SIT.spread : THIGH_SPREAD;
   const leg = (i: number, hip: number, knee: number, ankle: number, out_: number) => {
-    const hipFlex = THIGH_TARGET + lean(hip, knee);
+    const hipFlex = thighTarget + lean(hip, knee);
     const kneeFlex = hipFlex - SHIN_TARGET - lean(knee, ankle);
-    write(out[i], hip, qMul(ry(out_ * THIGH_SPREAD), rx(-hipFlex)));
+    write(out[i], hip, qMul(ry(out_ * spread), rx(-hipFlex)));
     write(out[i + 1], knee, rx(kneeFlex));
     write(out[i + 2], ankle, rx(hipFlex - kneeFlex));
   };

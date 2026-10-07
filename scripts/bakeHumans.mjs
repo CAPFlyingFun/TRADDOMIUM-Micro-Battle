@@ -94,6 +94,7 @@ import { paintSarah } from './paintSarah.mjs';
 import { smoothLegWeights } from './smoothLegWeights.mjs';
 import { bakeBadge } from './bakeBadge.mjs';
 import { smoothSeatWeights } from './smoothSeatWeights.mjs';
+import { protectBumpWeights } from './protectBumpWeights.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
@@ -268,7 +269,7 @@ const HUMANS = [
   // fingers), Joshua's note on the release. `smoothLegs` stays: it is
   // harmless on clean weights and it is the one fix her rigs have needed.
   {
-    master: 'Sarah-Toon.glb', out: 'sarah.glb', who: 'Sarah Bennett', panel: null, repair: false, authored: true, smoothLegs: true, reach: Infinity, smoothSeat: true,
+    master: 'Sarah-Toon.glb', out: 'sarah.glb', who: 'Sarah Bennett', panel: null, repair: false, authored: true, smoothLegs: true, reach: Infinity, smoothSeat: true, protectBump: true,
   },
 ];
 
@@ -1002,6 +1003,10 @@ async function main() {
     // Seated, a hem and the cloth under it are rigged to different bones and
     // z-fight; smoothing the weights in space folds them together.
     if (human.smoothSeat) smoothSeatWeights(doc, { log: (line) => console.log(`[bake:humans]   ${human.who}: ${line}`) });
+    // A pregnant bump skinned partly to the thighs collapses into the lap when
+    // she sits (protectBumpWeights.mjs has the measurement). After the seat
+    // pass, so its spatial average cannot carry thigh weight back up.
+    if (human.protectBump) protectBumpWeights(doc, { log: (line) => console.log(`[bake:humans]   ${human.who}: ${line}`) });
 
     await doc.transform(
       dedup(),
