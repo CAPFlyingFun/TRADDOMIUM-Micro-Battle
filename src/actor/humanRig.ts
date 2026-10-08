@@ -174,6 +174,12 @@ export interface HumanGait {
    * Leans the spine into the turn. Zero when going straight.
    */
   readonly lean: number;
+  /**
+   * How big a pregnant bump the body carries, 0 (none) to 2 (twice full term).
+   * Optional; absent is 0. A late pregnancy walks shorter and wider, the thighs
+   * kept round the bump rather than driven up into it (`humanPose.carryGait`).
+   */
+  readonly carry?: number;
 }
 
 export const STANDING: HumanGait = Object.freeze({ stance: 'stand', phase: 0, seconds: 0, lean: 0 });

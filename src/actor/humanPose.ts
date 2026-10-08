@@ -223,8 +223,22 @@ const STANCE_SHARES: Readonly<Record<HumanStance, number>> = {
  * forward when the body covers more than the pose steps, back when it
  * covers less. Zero for a body standing, whose phase does not advance.
  */
-export function humanStride(measure: HumanMeasure, stance: HumanStance): number {
-  return (STEP_LENGTHS[stance] * measure.legLength) / STANCE_SHARES[stance];
+export function humanStride(measure: HumanMeasure, stance: HumanStance, carry = 0): number {
+  return (STEP_LENGTHS[stance] * carryGait(carry).step * measure.legLength) / STANCE_SHARES[stance];
+}
+
+/**
+ * HOW A BUMP CHANGES THE WALK (Joshua, 2026-10-08, walking the base Sarah at 200%:
+ * "walking looks a little weird between the hips, pubic area, and under the
+ * belly"). A full stride swung each thigh up into the underside of the bump. A late
+ * pregnancy walks with a shorter step and the feet further apart, the thighs passing
+ * either side of the bump: so `carry` (0 none, 1 full term, 2 twice that) shortens
+ * the step to `step` of itself and turns each thigh out by `spread` radians.
+ * BIOLOGICAL SHAPE eased for the rig, GAME TUNING in its numbers.
+ */
+export function carryGait(carry: number): { step: number; spread: number } {
+  const c = Math.min(2, Math.max(0, Number.isFinite(carry) ? carry : 0));
+  return { step: 1 - 0.18 * c, spread: c * 3.5 * DEG };
 }
 
 /**
@@ -448,6 +462,7 @@ function writeLeg(
   share: number,
   hipSwing: number,
   kneeBend: number,
+  spread = 0,
 ): void {
   let forward: number;
   let fold = 0;
@@ -461,12 +476,16 @@ function writeLeg(
     forward = ((-4 * u + 6) * u) * u - 1 + m * (((2 * u - 3) * u + 1) * u);
     fold = (1 - Math.cos(2 * Math.PI * u)) / 2;
   }
-  writeTurn(out[at], hip, 1, 0, 0, -hipSwing * forward);
+  if (spread === 0) writeTurn(out[at], hip, 1, 0, 0, -hipSwing * forward);
+  else writeTurnXZ(out[at], hip, -hipSwing * forward, spread);
   writeTurn(out[at + 1], knee, 1, 0, 0, kneeBend * fold);
   // The ankle undoes the hip and the knee, so the sole stays level with
   // the ground while it is on it; in the swing the toes trail by part of
   // the fold.
-  writeTurn(out[at + 2], ankle, 1, 0, 0, hipSwing * forward - kneeBend * fold * (1 - TOE_TRAIL));
+  const ankleFlex = hipSwing * forward - kneeBend * fold * (1 - TOE_TRAIL);
+  // a thigh turned out tips the foot onto its edge; the ankle sets it back flat
+  if (spread === 0) writeTurn(out[at + 2], ankle, 1, 0, 0, ankleFlex);
+  else writeTurnXZ(out[at + 2], ankle, ankleFlex, -spread);
 }
 
 function fract(x: number): number {
@@ -546,7 +565,8 @@ export function poseHuman(
   // cancels, which is the point: the same fraction is the same angle on
   // Sarah's 0.638 leg and Jack's 0.678, and would be on a re-export in
   // millimetres.
-  const step = STEP_LENGTHS[stance] * measure.legLength;
+  const carried = carryGait(gait.carry ?? 0);
+  const step = STEP_LENGTHS[stance] * carried.step * measure.legLength;
   const hipSwing = measure.legLength > 0
     ? Math.asin(clamp(step / (2 * measure.legLength), 0, 1))
     : 0;
@@ -586,8 +606,8 @@ export function poseHuman(
 
   // The left foot lands, furthest forward, at phase 0.25; the right half
   // a cycle later.
-  writeLeg(out, 9, joints.hipL, joints.kneeL, joints.ankleL, fract(gait.phase - 0.25), share, hipSwing, kneeBend);
-  writeLeg(out, 12, joints.hipR, joints.kneeR, joints.ankleR, fract(gait.phase + 0.25), share, hipSwing, kneeBend);
+  writeLeg(out, 9, joints.hipL, joints.kneeL, joints.ankleL, fract(gait.phase - 0.25), share, hipSwing, kneeBend, left * carried.spread);
+  writeLeg(out, 12, joints.hipR, joints.kneeR, joints.ankleR, fract(gait.phase + 0.25), share, hipSwing, kneeBend, -left * carried.spread);
 
   return usedPrefix(out, HUMAN_POSE_TURNS);
 }

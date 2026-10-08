@@ -351,8 +351,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     else {
       const stance = pose === 'walk' ? 'walk' : 'stand';
       // the stride is in bind units, `bindScale` of them to the metre
-      const phase = pose === 'walk' ? ((walked * rig.bindScale) / humanStride(measure, 'walk')) % 1 : 0;
-      base = poseHuman(measure, rig.bind, { stance, phase, seconds, lean: 0 }, poseOut);
+      const carry = bump / 100;
+      const phase = pose === 'walk' ? ((walked * rig.bindScale) / humanStride(measure, 'walk', carry)) % 1 : 0;
+      base = poseHuman(measure, rig.bind, { stance, phase, seconds, lean: 0, carry }, poseOut);
     }
     if (curl <= 0 || fingers.length === 0) return base;
     const extra: JointTurn[] = [];
@@ -400,7 +401,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     } else felt.primed = 1;
     felt.p.copy(tmp);
     if (pose === 'walk' && measure && rig) {
-      const stride = humanStride(measure, 'walk') / rig.bindScale; // metres
+      const stride = humanStride(measure, 'walk', bump / 100) / rig.bindScale; // metres
       up += walkBounceAccel((walked / stride) % 1, stride / WALK_SPEED);
     }
     stepBellySpring(spring, dt, up, left);

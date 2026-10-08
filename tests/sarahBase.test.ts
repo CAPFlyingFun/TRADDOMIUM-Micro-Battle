@@ -30,9 +30,9 @@ describe('the base mannequin (public/models/sarah-base.glb)', () => {
     for (const g of GARMENTS) expect(names).toContain(g);
     for (const name of [BELLY_MOTION.tilt, BELLY_MOTION.bob, BELLY_MOTION.sway]) expect(names0).toContain(name);
     // the four sizes and the three motions, on every primitive, so the clothes move with her
-    for (const name of ['breast0', 'breast100', 'breastBob']) expect(names0).toContain(name);
+    for (const name of ['breast0', 'breast100', 'breastBob', 'navelIn', 'navelOut']) expect(names0).toContain(name);
     // the six sizes, the three motions, the two breast ends and the breasts' bounce, on every primitive, so the clothes move with her
-    for (const p of mesh.listPrimitives()) expect(p.listTargets().length).toBe(BELLY_KEYS.length - 1 + 3 + 3);
+    for (const p of mesh.listPrimitives()) expect(p.listTargets().length).toBe(BELLY_KEYS.length - 1 + 3 + 3 + 2);
   }, 60000);
 
   it('the flat key draws the bump in by several centimetres and leaves the back, the bust and the legs alone', async () => {

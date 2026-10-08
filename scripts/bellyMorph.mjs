@@ -102,6 +102,21 @@ export const BREAST_BIG = 1.3;
 export const BREAST_DEPTH_M = 0.1;
 export const BREAST_RADIUS_M = 0.075;
 
+/** The navel targets: deeper, and popped out. */
+export const NAVEL_TARGETS = Object.freeze({ in: 'navelIn', out: 'navelOut' });
+/**
+ * The navel at a real one's size (Joshua, 2026-10-08: "base the bellybutton size on the
+ * average real life size"). BIOLOGICAL SHAPE: an adult navel is about 1.5-2 cm across
+ * and an innie 0.5-1 cm deep; a pregnancy outie stands about 0.5-1 cm out, some 1.5 cm
+ * across. So: an 18 mm opening (`NAVEL_R` its radius), `navelIn` deepening the
+ * master's 1 mm dimple (the rest of it is painted on) to about 8 mm, `navelOut` a 15 mm nub (`NAVEL_OUT_R`)
+ * standing 6 mm proud of the skin round it. Metres, on a 1.70 m body.
+ */
+export const NAVEL_R = 0.009;
+export const NAVEL_IN_M = 0.007;
+export const NAVEL_OUT_R = 0.0075;
+export const NAVEL_OUT_M = 0.006;
+
 const COL = 0.01;
 
 export function bellyMorph(doc, { log = () => {} } = {}) {
@@ -800,6 +815,91 @@ export function bellyMorph(doc, { log = () => {} } = {}) {
     weights.push(0);
   }
   report.push(`breasts: tips at ${tips.map((t) => (t < 0 ? 'none' : `(${pos[t * 3].toFixed(3)}, ${pos[t * 3 + 1].toFixed(2)})`)).join(' and ')}, ${BREAST_SMALL}x to ${BREAST_BIG}x`);
+  // THE NAVEL (Joshua, 2026-10-08: "make the bellybutton more obvious as it's so small...
+  // 0-99% is inside, 100% flat but still drawn so you see it, 101-200% 'pops' outside").
+  // The master's is a 3 mm dimple. Found as the deepest small dimple on the belly's
+  // centre line (the skin within NAVEL_R ringed by skin standing proud of it), between
+  // the pubis and the bump's peak. Two targets: `navelIn` deepens it to a clear hollow,
+  // `navelOut` raises it into a small round outie; the lab chooses from the bump.
+  // Found against a fitted surface: for each point on the centre line, a quadratic
+  // patch fitted to the skin 1.2-3 cm round it, and the navel is the point lying
+  // deepest under its patch (a plain ring average read the belly's own curve).
+  const centreLine = [];
+  for (let i = 0; i < n; i += 1) {
+    const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2];
+    if (Math.abs(x) < 0.04 && y > yBot + 0.1 && y < peakY + 0.08 && z > torso(y).axis + 0.05) centreLine.push(i);
+  }
+  let navel = -1, navelDepth = 0;
+  for (const i of centreLine) {
+    if (Math.abs(pos[i * 3]) > 0.005) continue;
+    const A = [0, 1, 2, 3, 4].map(() => [0, 0, 0, 0, 0]), B = [0, 0, 0, 0, 0];
+    let cnt = 0;
+    for (const k of centreLine) {
+      const dx = pos[k * 3] - pos[i * 3], dy = pos[k * 3 + 1] - pos[i * 3 + 1], d = Math.hypot(dx, dy);
+      if (d < 0.012 || d > 0.03) continue;
+      const f = [1, dx, dy, dx * dx, dy * dy];
+      for (let r = 0; r < 5; r += 1) { B[r] += f[r] * pos[k * 3 + 2]; for (let c = 0; c < 5; c += 1) A[r][c] += f[r] * f[c]; }
+      cnt += 1;
+    }
+    if (cnt < 20) continue;
+    for (let r = 0; r < 5; r += 1) {
+      let m = r;
+      for (let k = r + 1; k < 5; k += 1) if (Math.abs(A[k][r]) > Math.abs(A[m][r])) m = k;
+      [A[r], A[m]] = [A[m], A[r]]; [B[r], B[m]] = [B[m], B[r]];
+      if (Math.abs(A[r][r]) < 1e-12) continue;
+      for (let k = r + 1; k < 5; k += 1) { const f = A[k][r] / A[r][r]; for (let c = r; c < 5; c += 1) A[k][c] -= f * A[r][c]; B[k] -= f * B[r]; }
+    }
+    const coef = [0, 0, 0, 0, 0];
+    for (let r = 4; r >= 0; r -= 1) { let t = B[r]; for (let c = r + 1; c < 5; c += 1) t -= A[r][c] * coef[c]; coef[r] = Math.abs(A[r][r]) < 1e-12 ? 0 : t / A[r][r]; }
+    const depth = coef[0] - pos[i * 3 + 2];
+    if (depth > navelDepth) { navelDepth = depth; navel = i; }
+  }
+  if (navel >= 0) {
+    const nx = pos[navel * 3], ny = pos[navel * 3 + 1], nz = pos[navel * 3 + 2];
+    const axisZ = torso(ny).axis;
+    const ol = Math.hypot(nx, nz - axisZ) || 1;
+    const out = [nx / ol, 0, (nz - axisZ) / ol];
+    // the rim: the skin round the dimple, which the outie fills to and rises past
+    const rim = nz + navelDepth;
+    const navelTarget = (kind) => {
+      const delta = new Float32Array(n * 3);
+      for (let i = 0; i < n; i += 1) {
+        const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2];
+        const r = Math.hypot(x - nx, y - ny);
+        if (r > NAVEL_R * 1.6 || Math.abs(z - nz) > 0.03) continue;
+        const u = r / NAVEL_R;
+        let push;
+        if (kind === 'in') push = -NAVEL_IN_M * Math.max(0, 1 - u * u) ** 2;
+        else {
+          // up to the rim (the dimple filled), then a dome NAVEL_OUT_M above it, its
+          // foot eased into the belly over the half-radius past the rim
+          const uo = r / NAVEL_OUT_R;
+          const dome = NAVEL_OUT_M * Math.max(0, 1 - uo * uo) ** 1.5;
+          const fill = Math.max(0, rim - z) * (1 - smooth(0.7, 1.2, u));
+          push = dome + fill;
+        }
+        if (!push) continue;
+        for (let a = 0; a < 3; a += 1) delta[i * 3 + a] = out[a] * push;
+      }
+      // not relaxed: the mesh is coarse here (a vertex every 4-5 mm) and relaxing a
+      // shape this small averaged it away to 2 mm
+      return delta;
+    };
+    for (const [name, kind] of [[NAVEL_TARGETS.in, 'in'], [NAVEL_TARGETS.out, 'out']]) {
+      const delta = navelTarget(kind);
+      const ndelta = normalDelta(delta);
+      for (const p of mesh.listPrimitives()) {
+        const count = p.getAttribute('POSITION').getCount();
+        const t = doc.createPrimitiveTarget(name);
+        t.setAttribute('POSITION', doc.createAccessor().setType('VEC3').setBuffer(buffer).setArray(p === prim ? delta : new Float32Array(count * 3)));
+        t.setAttribute('NORMAL', doc.createAccessor().setType('VEC3').setBuffer(buffer).setArray(p === prim ? ndelta : new Float32Array(count * 3)));
+        p.addTarget(t);
+      }
+      names.push(name);
+      weights.push(0);
+    }
+    report.push(`navel at ${ny.toFixed(3)} m, ${(navelDepth * 1000).toFixed(1)} mm deep`);
+  } else report.push('no navel found');
   report.push(`motion: tilt, bob, sway over ${mask.filter((w) => w > 0).length.toLocaleString()} vertices`);
   mesh.setExtras({ ...extras, targetNames: names });
   mesh.setWeights(weights);

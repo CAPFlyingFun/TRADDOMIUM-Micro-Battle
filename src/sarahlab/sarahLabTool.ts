@@ -265,15 +265,22 @@ export function walkBounceAccel(phase: number, strideSeconds: number): number {
   return -w * w * WALK_BOUNCE_M * Math.cos(4 * Math.PI * phase);
 }
 
+/** How much of the spring's travel the bump shows. GAME TUNING. */
+export const BELLY_SWING = 0.45;
+
 /** The three motion targets' weights for a bump size, a resting tilt and the spring. */
 export function bellyMotionWeights(bumpPercent: number, tiltDeg: number, s: BellySpring): Record<string, number> {
   // a bigger belly is heavier: it tilts and swings by its size, the model's own being 1
   const size = Math.min(BUMP_MAX_PERCENT, Math.max(0, bumpPercent)) / 100;
   const tilt = Math.min(BELLY_TILT_MAX_DEG, Math.max(0, tiltDeg)) * (Math.PI / 180);
   const bob = s.y / BELLY_MOTION.bobM;
+  // how much it swings: grows with the bump to full term and NO further, at half the
+  // spring's travel (Joshua, 2026-10-08: "the belly especially past 100% is too
+  // exaggerated... lower even more"). A bigger belly is heavier, which moves less.
+  const swing = BELLY_SWING * Math.min(1, size);
   return {
-    [BELLY_MOTION.tilt]: (Math.min(1, size) * tilt + sizeTiltDeg(bumpPercent) * (Math.PI / 180)) / BELLY_MOTION.tiltRad + size * BOUNCE_TILT * bob,
-    [BELLY_MOTION.bob]: size * bob,
-    [BELLY_MOTION.sway]: size * (s.x / BELLY_MOTION.bobM),
+    [BELLY_MOTION.tilt]: (Math.min(1, size) * tilt + sizeTiltDeg(bumpPercent) * (Math.PI / 180)) / BELLY_MOTION.tiltRad + swing * BOUNCE_TILT * bob,
+    [BELLY_MOTION.bob]: swing * bob,
+    [BELLY_MOTION.sway]: swing * (s.x / BELLY_MOTION.bobM),
   };
 }

@@ -96,6 +96,7 @@ import { bakeBadge } from './bakeBadge.mjs';
 import { smoothSeatWeights } from './smoothSeatWeights.mjs';
 import { smoothArmpitWeights } from './smoothArmpitWeights.mjs';
 import { smoothHandWeights } from './smoothHandWeights.mjs';
+import { smoothCreaseWeights } from './smoothCreaseWeights.mjs';
 import { protectBumpWeights } from './protectBumpWeights.mjs';
 import { rigFingers } from './rigFingers.mjs';
 import { bellyMorph } from './bellyMorph.mjs';
@@ -285,7 +286,7 @@ const HUMANS = [
   // grows a fitted shirt and leggings from her skin (growClothes.mjs), after the
   // same weight passes her toon body needs.
   {
-    master: 'Sarah-Base.glb', out: 'sarah-base.glb', who: 'Sarah (base)', panel: null, repair: false, authored: true, smoothLegs: true, reach: Infinity, smoothSeat: true, smoothArmpits: true, smoothHands: true, protectBump: 'overhang', bellyMorph: true, clothes: true,
+    master: 'Sarah-Base.glb', out: 'sarah-base.glb', who: 'Sarah (base)', panel: null, repair: false, authored: true, smoothLegs: true, reach: Infinity, smoothSeat: true, smoothArmpits: true, smoothHands: true, protectBump: 'overhang', smoothCrease: true, bellyMorph: true, clothes: true,
   },
 ];
 
@@ -1034,6 +1035,9 @@ async function main() {
     // she sits (protectBumpWeights.mjs has the measurement). After the seat
     // pass, so its spatial average cannot carry thigh weight back up.
     if (human.protectBump) protectBumpWeights(doc, { overhang: human.protectBump === 'overhang', log: (line) => console.log(`[bake:humans]   ${human.who}: ${line}`) });
+    // Walking, the skin from a big bump's underside to the thigh tore into a lip;
+    // easing the weights along the skin there folds it. After the bump's own pass.
+    if (human.smoothCrease) smoothCreaseWeights(doc, { log: (line) => console.log(`[bake:humans]   ${human.who}: ${line}`) });
     // The bump as a slider, then clothes grown from the skin: last of the body
     // passes, so the clothes copy the final weights and the morph.
     if (human.bellyMorph) bellyMorph(doc, { log: (line) => console.log(`[bake:humans]   ${human.who}: ${line}`) });
