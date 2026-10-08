@@ -62,9 +62,9 @@ describe('public/manifest.webmanifest', () => {
     expect(manifest.description).toContain('/v1/');
   });
 
-  it('runs standalone in landscape', () => {
+  it('runs standalone with rotatable TOMBS', () => {
     expect(manifest.display).toBe('standalone');
-    expect(manifest.orientation).toBe('landscape');
+    expect(manifest.orientation).toBe('any');
   });
 
   it('takes its colours from index.html', () => {

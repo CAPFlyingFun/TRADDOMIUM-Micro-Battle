@@ -7,6 +7,7 @@
  * as disabled rather than as a button that throws.
  */
 import { describe, expect, it, vi } from 'vitest';
+import { ACTION } from '../src/app/actions';
 import type { AppScene, SceneContext } from '../src/app/Scene';
 import { registerScene } from '../src/app/registry';
 import { createStorageRoot } from '../src/persistence/StorageRoot';
@@ -70,6 +71,29 @@ function hooksWith(offers: SessionOffers, overrides: Partial<MainMenuHooks> = {}
     ...overrides,
   };
 }
+
+it('makes TOMBS primary and keeps island saves exclusively under Extras', async () => {
+  const { ctx, uiLayer, offers } = rig();
+  const play = vi.fn();
+  const resume = vi.fn();
+  const scene = new MainMenuScene(ctx, hooksWith(offers, {
+    onPlayTombs: play, onResume: resume,
+    savedGame: () => ({ slot: 2, savedAt: minutesAgo(3) }),
+  }));
+  await scene.enter();
+  expect(uiLayer.querySelector('[data-action="resume"]')).toBeNull();
+  byAction(uiLayer, ACTION.playTombs)!.click();
+  expect(play).toHaveBeenCalledOnce();
+  expect(resume).not.toHaveBeenCalled();
+  byAction(uiLayer, ACTION.extras)!.click();
+  expect(byAction(uiLayer, ACTION.island)!.textContent).toContain('Island');
+  expect(byAction(uiLayer, ACTION.resume)!.textContent).toBe('Resume Island');
+  byAction(uiLayer, ACTION.resume)!.click();
+  expect(resume).toHaveBeenCalledWith(2);
+  byAction(uiLayer, ACTION.back)!.click();
+  expect(byAction(uiLayer, ACTION.playTombs)).not.toBeNull();
+  scene.dispose();
+});
 
 const noPlay: SoloPlay = { newGame: () => {}, resume: () => {} };
 

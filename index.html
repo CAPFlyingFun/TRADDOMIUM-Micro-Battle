@@ -161,6 +161,18 @@
           visibility: hidden;
         }
       }
+      /* Front-door screens and TOMBS support portrait; retain the island gate.
+         :has follows DOM disposal automatically, including failed transitions. */
+      @media (orientation: portrait) and (pointer: coarse) {
+        body:has([data-screen]) #orient,
+        body:has(.tombs-cinematic) #orient { display: none; }
+        body:has([data-screen]) #app,
+        body:has([data-screen]) #ui,
+        body:has([data-screen]) #boot,
+        body:has(.tombs-cinematic) #app,
+        body:has(.tombs-cinematic) #ui,
+        body:has(.tombs-cinematic) #boot { visibility: visible; }
+      }
       #orient .phone {
         width: 46px;
         height: 80px;
