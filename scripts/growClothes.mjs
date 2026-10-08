@@ -73,7 +73,7 @@ export const SWIM = {
   cupStrapX: 0.085, strapX: 0.105, strapTop: 0.03, strap: 0.024, crossTo: 0.075,
   waistFront: -0.05, waistSide: 0.005, waistBack: 0.025,
   crotch: 0.1, legCutFront: 0.085, legCutBack: 0.045, backScoop: 0.06,
-  trim: 0.0045, overShoulder: 0.025, armFrom: 0.15,
+  trim: 0.0045, overShoulder: 0.025, armFrom: 0.15, archBelowTip: 0.011, archSlope: 0.6,
 };
 /**
  * The red tee and black leggings of Joshua's reference sheet (2026-10-08: "I would
@@ -345,7 +345,16 @@ export async function growClothes(doc, { log = () => {}, which = ['shirt', 'legg
     // the panel's top: the neckline at the front, dropping to the band round the sides and back
     const sideDrop = smoothstep(0.11, 0.17, ax);
     const topEdge = fr * (neckline * (1 - sideDrop) + (bandHi + 0.03) * sideDrop) + (1 - fr) * bandHi;
-    const f = Math.min(y - bandLo, topEdge - y);
+    // THE FRONT RIDES ON SKIN THE BUMP LEAVES ALONE. Measured on the baked body, the
+    // line above which belly200 moves the skin less than a centimetre runs from 1.1 cm
+    // under the tips at the centre down at about 0.6 m per metre out to the band at the
+    // sides: an arch, like an underwire's. Below it the bump grows into the panel and
+    // stretches it, so at the front the top stops there; round the sides and back,
+    // which the bump never reaches, the band keeps its height.
+    const arch = tipY - SWIM.archBelowTip - SWIM.archSlope * Math.hypot(x, 0.015);
+    const frontLo = arch + Math.log1p(Math.exp((bandLo - arch) / 0.008)) * 0.008; // a soft max(arch, bandLo)
+    const lo = fr * frontLo + (1 - fr) * bandLo;
+    const f = Math.min(y - lo, topEdge - y);
     // front straps from the top of each cup up over the shoulder; at the back they
     // cross to the band's far side
     return Math.max(f, straps(x, y, z, { frontY: tipY + SWIM.scoopCup - 0.005, cross: kind === 'bralette', backX: shoulderX, backY: bandHi - 0.005 }));
