@@ -57,11 +57,11 @@ export const TARGET = 'belly';
  */
 export const KEYS = [['belly75', 0.75], ['belly50', 0.5], ['belly25', 0.25], [TARGET, 0]];
 /** A smaller bump grows from this far up between the pubis and the breastbone. */
-export const GROW_FROM = 0.22;
+export const GROW_FROM = 0.15;
 /** ...and that point rises by this much of the same span as the bump grows to full size. */
-export const GROW_RISE = 0.3;
+export const GROW_RISE = 0.25;
 /** Above the grow point a smaller bump keeps size^TEARDROP of its height (below it, size): the teardrop. */
-export const TEARDROP = 0.35;
+export const TEARDROP = 0.6;
 /** Flat keeps this much of the bump: enough for the navel. */
 export const FLAT_KEEP = 0.05;
 
@@ -284,7 +284,7 @@ export function bellyMorph(doc, { log = () => {} } = {}) {
       // field's own scale, so a fixed softness on her)
       let small = 0;
       if (size > 0) {
-        const soft = 1 - size, sa = (0.07 * soft) / size, sy = (0.018 * soft) / size;
+        const soft = 1 - size, sa = (0.11 * soft) / size, sy = (0.03 * soft) / size;
         // a large bump fills up under the bust, a small one sits low: the point
         // it grows from rises with its size
         const gy = growY + GROW_RISE * size * (yTop - yBot);
