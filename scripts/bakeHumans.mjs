@@ -96,6 +96,8 @@ import { bakeBadge } from './bakeBadge.mjs';
 import { smoothSeatWeights } from './smoothSeatWeights.mjs';
 import { protectBumpWeights } from './protectBumpWeights.mjs';
 import { rigFingers } from './rigFingers.mjs';
+import { bellyMorph } from './bellyMorph.mjs';
+import { growClothes } from './growClothes.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
@@ -271,6 +273,17 @@ const HUMANS = [
   // harmless on clean weights and it is the one fix her rigs have needed.
   {
     master: 'Sarah-Toon.glb', out: 'sarah.glb', who: 'Sarah Bennett', panel: null, repair: false, authored: true, smoothLegs: true, reach: Infinity, smoothSeat: true, protectBump: true, rigFingers: true,
+  },
+  //
+  // SARAH'S BASE MANNEQUIN (Joshua, 2026-10-07): the body Sarah may be rebuilt
+  // from — bald, no clothes, all five fingers rigged by Meshy this time (71
+  // joints). It is NOT the game's Sarah: only the Sarah Lab dev tool loads
+  // `sarah-base.glb`, so it can be tried "before placing live". The bake adds
+  // the `belly` morph target (bellyMorph.mjs, full term to nearly flat) and
+  // grows a fitted shirt and leggings from her skin (growClothes.mjs), after the
+  // same weight passes her toon body needs.
+  {
+    master: 'Sarah-Base.glb', out: 'sarah-base.glb', who: 'Sarah (base)', panel: null, repair: false, authored: true, smoothLegs: true, reach: Infinity, smoothSeat: true, protectBump: true, bellyMorph: true, clothes: true,
   },
 ];
 
@@ -1013,6 +1026,10 @@ async function main() {
     // she sits (protectBumpWeights.mjs has the measurement). After the seat
     // pass, so its spatial average cannot carry thigh weight back up.
     if (human.protectBump) protectBumpWeights(doc, { log: (line) => console.log(`[bake:humans]   ${human.who}: ${line}`) });
+    // The bump as a slider, then clothes grown from the skin: last of the body
+    // passes, so the clothes copy the final weights and the morph.
+    if (human.bellyMorph) bellyMorph(doc, { log: (line) => console.log(`[bake:humans]   ${human.who}: ${line}`) });
+    if (human.clothes) growClothes(doc, { log: (line) => console.log(`[bake:humans]   ${human.who}: ${line}`) });
 
     await doc.transform(
       dedup(),

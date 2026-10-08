@@ -82,7 +82,14 @@ function findHands(skin, at) {
     if (best < 0) continue;
     const parent = joints.indexOf(joints[best].getParentNode());
     if (parent < 0) continue;
-    hands.push({ sign, end: best, wrist: parent, mitten: kids[best].length === 0 });
+    // A hand that already has fingers: the furthest joint is a fingertip, and a few
+    // joints up from it is a hand bone that branches into four or more.
+    let up = best, fingered = false;
+    for (let k = 0; k < 5 && up >= 0; k += 1) {
+      if (kids[up].length >= 4) { fingered = true; break; }
+      up = joints.indexOf(joints[up].getParentNode());
+    }
+    hands.push({ sign, end: best, wrist: parent, mitten: !fingered && kids[best].length === 0 });
   }
   return hands;
 }

@@ -1,0 +1,75 @@
+/**
+ * THE SARAH LAB'S HUB ENTRY and every name the scene answers to. Pure: no
+ * three, no DOM, so a probe and a test can read the names without a renderer.
+ *
+ * Joshua, 2026-10-07, on rebuilding Sarah from his base mannequin with a belly
+ * slider and clothes grown from her body: "Good to test Sarah maybe in a
+ * separate link in like a Dev menu I can play around with before placing live".
+ * So nothing here is the game's Sarah: the lab loads `models/sarah-base.glb`,
+ * which no other scene reads.
+ */
+import type { DevTool } from '../devtools/DevTool';
+
+export const SARAH_LAB_SCENE_ID = 'lab:sarah';
+export const SARAH_LAB_TOOL_ID = 'lab.sarah';
+/** The only file the lab loads, and the only place it is used. */
+export const SARAH_BASE_MODEL = 'models/sarah-base.glb';
+
+export const sarahLabTool: DevTool = {
+  id: SARAH_LAB_TOOL_ID,
+  title: 'Sarah Lab (base model)',
+  description:
+    "Sarah rebuilt from the base mannequin, to try before she goes live: the BUMP slider runs from full term to "
+    + 'nearly flat, FINGERS curls all ten, SHIRT and LEGGINGS show the clothes grown from her body, and STAND, '
+    + 'WALK and SIT pose her. Drag to turn round her, pinch or scroll to come closer. Not used by the story or the game.',
+  sceneId: SARAH_LAB_SCENE_ID,
+};
+
+/** The HUD root's `data-role`: what a probe waits for. */
+export const SARAH_LAB_HUD_ROLE = 'sarah-lab-hud';
+
+export type SarahLabPose = 'stand' | 'walk' | 'sit';
+
+export const SARAH_LAB_ACTION = Object.freeze({
+  back: 'sarahlab:back',
+  stand: 'sarahlab:stand',
+  walk: 'sarahlab:walk',
+  sit: 'sarahlab:sit',
+  shirt: 'sarahlab:shirt',
+  leggings: 'sarahlab:leggings',
+  turn: 'sarahlab:turn',
+});
+
+export const SARAH_LAB_FIELD = Object.freeze({
+  status: 'sarahlab-status',
+  bump: 'sarahlab-bump',
+  fingers: 'sarahlab-fingers',
+});
+
+/** The morph target the bake writes (`scripts/bellyMorph.mjs`). */
+export const BELLY_TARGET = 'belly';
+/** The clothes' material names (`scripts/growClothes.mjs`). */
+export const GARMENTS = ['shirt', 'leggings'] as const;
+export type Garment = (typeof GARMENTS)[number];
+
+/** The bump slider reads as how much bump there is; the morph's weight is how flat. */
+export function bellyWeight(bumpPercent: number): number {
+  return 1 - Math.min(100, Math.max(0, bumpPercent)) / 100;
+}
+
+export function bumpLine(bumpPercent: number): string {
+  const p = Math.round(Math.min(100, Math.max(0, bumpPercent)));
+  return p === 100 ? 'BUMP 100% · as modelled' : p === 0 ? 'BUMP 0% · nearly flat' : `BUMP ${p}%`;
+}
+
+export function fingersLine(curlPercent: number): string {
+  const p = Math.round(Math.min(100, Math.max(0, curlPercent)));
+  return p === 0 ? 'FINGERS · open' : p === 100 ? 'FINGERS · fist' : `FINGERS · ${p}% curled`;
+}
+
+export function statusLine(loaded: boolean, failed: boolean, garments: readonly string[], hasBelly: boolean): string {
+  if (failed) return 'models/sarah-base.glb did not load';
+  if (!loaded) return 'loading Sarah…';
+  const g = garments.length ? garments.join(' + ') : 'no clothes in this file';
+  return `base model · ${hasBelly ? 'belly slider' : 'no belly slider'} · ${g}`;
+}

@@ -35,6 +35,7 @@ import { PERF_WORLD_MAP_ID, PERF_WORLD_SCENE_ID, perfWorldTool } from '../perf/p
 import { LAB_SCENE_ID, createCreatureLabScene, creatureLabTool } from '../lab';
 import { TOMBS_SCENE_ID, createTombsLabScene, tombsTool } from '../tombs';
 import { STORY_LAB_SCENE_ID, createStoryLabScene, storyLabTool } from '../storylab';
+import { SARAH_LAB_SCENE_ID, createSarahLabScene, sarahLabTool } from '../sarahlab';
 import {
   LocalSoloSession, isSoloSlot, newSoloGame, readSoloSlots, resumeSoloSlot, restorableStateOf, savedSoloGame,
   soloSlotSpec, toolSoloSlot, type KnownMap, type SoloSlot,
@@ -612,6 +613,18 @@ export function registerScenes(options: RegisterScenesOptions = {}): void {
     createStoryLabScene((ctx) => ({
       onBack: () => goToScreen(ctx, SCREEN_ID.editors),
       settings: () => openSettings(ctx.storage).read(),
+    })),
+  );
+
+  // THE SARAH LAB (Joshua, 2026-10-07: "Good to test Sarah maybe in a separate
+  // link in like a Dev menu I can play around with before placing live"): the
+  // base mannequin with its belly slider and grown clothes. Loads its own file,
+  // which nothing else reads.
+  registerTool(sarahLabTool);
+  registerScene(
+    SARAH_LAB_SCENE_ID,
+    createSarahLabScene((ctx) => ({
+      onBack: () => goToScreen(ctx, SCREEN_ID.editors),
     })),
   );
 }
