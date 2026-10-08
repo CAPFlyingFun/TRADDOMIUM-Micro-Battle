@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest';
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { MeshoptDecoder } from 'meshoptimizer';
-import { BELLY_KEYS, BELLY_TARGET, GARMENTS, SARAH_BASE_MODEL, bellyWeights, bumpLine, fingersLine, sarahLabTool, statusLine } from '../src/sarahlab/sarahLabTool';
+import { BELLY_KEYS, BELLY_MOTION, BELLY_SPRING, BELLY_TARGET, bellyMotionWeights, restingBellySpring, stepBellySpring, walkBounceAccel, GARMENTS, SARAH_BASE_MODEL, bellyWeights, bumpLine, fingersLine, sarahLabTool, statusLine } from '../src/sarahlab/sarahLabTool';
 
 async function load() {
   await MeshoptDecoder.ready;
@@ -28,7 +28,9 @@ describe('the base mannequin (public/models/sarah-base.glb)', () => {
     expect(names0).toContain(BELLY_TARGET);
     const names = mesh.listPrimitives().map((p) => p.getMaterial()?.getName());
     for (const g of GARMENTS) expect(names).toContain(g);
-    for (const p of mesh.listPrimitives()) expect(p.listTargets().length).toBe(BELLY_KEYS.length - 1);
+    for (const name of [BELLY_MOTION.tilt, BELLY_MOTION.bob, BELLY_MOTION.sway]) expect(names0).toContain(name);
+    // the four sizes and the three motions, on every primitive, so the clothes move with her
+    for (const p of mesh.listPrimitives()) expect(p.listTargets().length).toBe(BELLY_KEYS.length - 1 + 3);
   }, 60000);
 
   it('the flat key draws the bump in by several centimetres and leaves the back, the bust and the legs alone', async () => {
@@ -63,6 +65,84 @@ describe('the base mannequin (public/models/sarah-base.glb)', () => {
     expect(highMoved).toBe(0);
     expect(lowMoved).toBe(0);
   }, 60000);
+});
+
+describe("the bump's weight (motion targets)", () => {
+  it('tilts, bobs and sways the bump alone: the back, the bust and the legs hold still', async () => {
+    const { doc, mesh } = await load();
+    const body = mesh.listPrimitives().reduce((a, p) => (p.getAttribute('POSITION')!.getCount() > a.getAttribute('POSITION')!.getCount() ? p : a));
+    const names = (mesh.getExtras() as { targetNames?: string[] }).targetNames ?? [];
+    const P = body.getAttribute('POSITION')!;
+    const s = doc.getRoot().listNodes().find((n) => n.getMesh() === mesh)!.getWorldMatrix()[5];
+    let lo = Infinity, hi = -Infinity;
+    const v = [0, 0, 0], d = [0, 0, 0];
+    for (let i = 0; i < P.getCount(); i += 1) { P.getElement(i, v); lo = Math.min(lo, v[1]); hi = Math.max(hi, v[1]); }
+    const metres = 1.7 / ((hi - lo) * s);
+    for (const name of [BELLY_MOTION.tilt, BELLY_MOTION.bob, BELLY_MOTION.sway]) {
+      const T = body.listTargets()[names.indexOf(name)].getAttribute('POSITION')!;
+      let most = 0, stray = 0;
+      for (let i = 0; i < P.getCount(); i += 1) {
+        P.getElement(i, v); T.getElement(i, d);
+        const moved = Math.hypot(...d) * s * metres, y = (v[1] - lo) * s * metres;
+        most = Math.max(most, moved);
+        if (moved > 0.001 && (v[2] * s * metres < -0.08 || y > 1.3 || y < 0.7)) stray += 1;
+      }
+      expect(most, name).toBeGreaterThan(0.005);
+      expect(most, name).toBeLessThan(0.04);
+      expect(stray, name).toBe(0);
+      // the lab reads the bake's sizes from BELLY_MOTION: they must be the same numbers
+      if (name !== BELLY_MOTION.tilt) expect(most, name).toBeCloseTo(BELLY_MOTION.bobM, 3);
+    }
+  }, 60000);
+});
+
+describe('the bump\'s spring', () => {
+  it('lags a jolt and settles like a weight, not a jelly: the second swing is a fraction of the first', () => {
+    const s = restingBellySpring();
+    s.vy = 0.3;
+    const ys: number[] = [];
+    for (let k = 0; k < 240; k += 1) { stepBellySpring(s, 1 / 60, 0, 0); ys.push(s.y); }
+    const first = Math.max(...ys.slice(0, 20));
+    // the opposite swing, then the next same-side peak
+    const firstAt = ys.indexOf(first);
+    const back = Math.min(...ys.slice(firstAt, firstAt + 30));
+    expect(first).toBeGreaterThan(0.004);
+    expect(first).toBeLessThanOrEqual(BELLY_SPRING.maxM);
+    expect(-back / first).toBeLessThan(0.45);
+    expect(-back / first).toBeGreaterThan(0.15);
+    // four seconds on, it has stopped
+    expect(Math.abs(s.y)).toBeLessThan(0.0002);
+  });
+
+  it('throws the bump against the body: rising drops it, a step left swings it right; a jump is clamped', () => {
+    const s = restingBellySpring();
+    stepBellySpring(s, 0.05, 5, 5);
+    expect(s.y).toBeGreaterThan(0);
+    expect(s.x).toBeLessThan(0);
+    const t = restingBellySpring();
+    stepBellySpring(t, 0.05, 1e6, Number.NaN);
+    expect(Math.abs(t.y)).toBeLessThanOrEqual(BELLY_SPRING.maxM);
+    expect(t.x).toBe(0);
+  });
+
+  it('scales with the bump: a flat belly carries no weight, and the slider tilts a full one by its degrees', () => {
+    const s = restingBellySpring();
+    s.y = 0.01; s.x = 0.005;
+    for (const w of Object.values(bellyMotionWeights(0, 3, s))) expect(w).toBe(0);
+    const still = bellyMotionWeights(100, 3, restingBellySpring());
+    expect(still[BELLY_MOTION.tilt]).toBeCloseTo((3 * Math.PI) / 180 / BELLY_MOTION.tiltRad, 6);
+    expect(still[BELLY_MOTION.bob]).toBe(0);
+    const half = bellyMotionWeights(50, 2, restingBellySpring());
+    expect(half[BELLY_MOTION.tilt]).toBeCloseTo((0.5 * 2 * Math.PI) / 180 / BELLY_MOTION.tiltRad, 6);
+    expect(bellyMotionWeights(100, 99, restingBellySpring())[BELLY_MOTION.tilt]).toBeCloseTo(still[BELLY_MOTION.tilt], 6);
+  });
+
+  it("adds a walk's bounce, two a stride", () => {
+    expect(walkBounceAccel(0, 1)).toBeLessThan(0);
+    expect(walkBounceAccel(0.25, 1)).toBeGreaterThan(0);
+    expect(walkBounceAccel(0.5, 1)).toBeCloseTo(walkBounceAccel(0, 1), 9);
+    expect(walkBounceAccel(0.3, 0)).toBe(0);
+  });
 });
 
 describe('every belly size (no spikes)', () => {

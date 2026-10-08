@@ -20,7 +20,7 @@ export const sarahLabTool: DevTool = {
   title: 'Sarah Lab (base model)',
   description:
     "Sarah rebuilt from the base mannequin, to try before she goes live: the BUMP slider runs from full term to "
-    + 'nearly flat, FINGERS curls all ten, SHIRT and LEGGINGS show the clothes grown from her body, and STAND, '
+    + 'nearly flat, WEIGHT tilts the bump down 0 to 3° and BOUNCE (or WALK) shows it move, FINGERS curls all ten, SHIRT and LEGGINGS show the clothes grown from her body, and STAND, '
     + 'WALK and SIT pose her. Drag to turn round her, pinch or scroll to come closer. Not used by the story or the game.',
   sceneId: SARAH_LAB_SCENE_ID,
 };
@@ -38,12 +38,14 @@ export const SARAH_LAB_ACTION = Object.freeze({
   shirt: 'sarahlab:shirt',
   leggings: 'sarahlab:leggings',
   turn: 'sarahlab:turn',
+  bounce: 'sarahlab:bounce',
 });
 
 export const SARAH_LAB_FIELD = Object.freeze({
   status: 'sarahlab-status',
   bump: 'sarahlab-bump',
   fingers: 'sarahlab-fingers',
+  weight: 'sarahlab-weight',
 });
 
 /** The flat morph target the bake writes (`scripts/bellyMorph.mjs`). */
@@ -96,4 +98,96 @@ export function statusLine(loaded: boolean, failed: boolean, garments: readonly 
   if (!loaded) return 'loading Sarah…';
   const g = garments.length ? garments.join(' + ') : 'no clothes in this file';
   return `base model · ${hasBelly ? 'belly slider' : 'no belly slider'} · ${g}`;
+}
+
+// ------------------------------------------------------------ the bump's weight
+
+/**
+ * THE BUMP HAS WEIGHT (Joshua, 2026-10-07: "add a weight with the belly so it can
+ * move and kind of jiggle, but not like jello... it could still tilt the belly
+ * downward like 1-3° to look heavy"). The bake writes three motion targets
+ * (`scripts/bellyMorph.mjs`), each the full bump moved with its edges held:
+ * `bellyTilt` pitches it front-down by `BELLY_MOTION.tiltRad`, `bellyBob` drops it
+ * and `bellySway` moves it to her left by `BELLY_MOTION.bobM`. A renderer drives
+ * them with `stepBellySpring` and `bellyMotionWeights`; all of it scales with the
+ * bump, so a flat belly does not move at all.
+ */
+export const BELLY_MOTION = Object.freeze({
+  tilt: 'bellyTilt',
+  bob: 'bellyBob',
+  sway: 'bellySway',
+  /** bellyTilt at weight 1, radians (the bake's MOTION_TILT_RAD) */
+  tiltRad: 0.1,
+  /** bellyBob and bellySway at weight 1, metres (the bake's MOTION_BOB_M) */
+  bobM: 0.01,
+});
+
+/**
+ * The spring: a mass that lags the body and settles. GAME TUNING, chosen to read
+ * as heavy rather than as jelly: a low, slow bounce (2.2 Hz) damped so the second
+ * swing is about a third of the first (ζ 0.32), and never more than 1.5 cm.
+ */
+export const BELLY_SPRING = Object.freeze({ hz: 2.2, damping: 0.32, maxM: 0.015, maxAccel: 40 });
+/** At rest the tilt the weight slider sets, degrees, from 0 to this. */
+export const BELLY_TILT_MAX_DEG = 3;
+/** Each centimetre the bump drops also pitches it this many tilt-target weights: it swings, not slides. */
+const BOUNCE_TILT = 0.25;
+
+/** The bump's displacement from where it hangs, metres (y down, x to her left), and how fast. */
+export interface BellySpring { y: number; vy: number; x: number; vx: number }
+export const restingBellySpring = (): BellySpring => ({ y: 0, vy: 0, x: 0, vx: 0 });
+
+/**
+ * One step of the spring, in place. `upAccel` and `leftAccel` are the body's own
+ * acceleration there (m/s², up and to her left): the bump lags it, so the body
+ * rising throws the bump down and a step to the left throws it right. Substeps of
+ * at most 1/240 s keep it stable on a slow frame; a jump (a pose change, a
+ * teleport) is clamped rather than flung.
+ */
+export function stepBellySpring(s: BellySpring, dt: number, upAccel: number, leftAccel: number): BellySpring {
+  const w = 2 * Math.PI * BELLY_SPRING.hz, c = 2 * BELLY_SPRING.damping * w;
+  const clampA = (a: number) => (Number.isFinite(a) ? Math.max(-BELLY_SPRING.maxAccel, Math.min(BELLY_SPRING.maxAccel, a)) : 0);
+  const ay = clampA(upAccel), ax = clampA(leftAccel);
+  const total = Math.min(Math.max(0, Number.isFinite(dt) ? dt : 0), 0.1);
+  const steps = Math.max(1, Math.ceil(total / (1 / 240)));
+  const h = total / steps;
+  for (let k = 0; k < steps && h > 0; k += 1) {
+    s.vy += (-w * w * s.y - c * s.vy + ay) * h;
+    s.vx += (-w * w * s.x - c * s.vx - ax) * h;
+    s.y += s.vy * h;
+    s.x += s.vx * h;
+    const m = BELLY_SPRING.maxM;
+    if (Math.abs(s.y) > m) { s.y = Math.sign(s.y) * m; s.vy = 0; }
+    if (Math.abs(s.x) > m) { s.x = Math.sign(s.x) * m; s.vx = 0; }
+  }
+  return s;
+}
+
+/**
+ * A walk's own bounce, as the acceleration of the body: the hips rise and fall
+ * twice a stride, about 2 cm either way (BIOLOGICAL SHAPE: the centre of mass
+ * travels some 4 to 5 cm in a walking step). The lab's walk turns joints and
+ * never lifts the body, so it adds this; a body that really moves feeds its own.
+ */
+export function walkBounceAccel(phase: number, strideSeconds: number): number {
+  if (!(strideSeconds > 0)) return 0;
+  const w = (4 * Math.PI) / strideSeconds; // two steps a stride
+  return -w * w * 0.02 * Math.cos(4 * Math.PI * phase);
+}
+
+/** The three motion targets' weights for a bump size, a resting tilt and the spring. */
+export function bellyMotionWeights(bumpPercent: number, tiltDeg: number, s: BellySpring): Record<string, number> {
+  const size = Math.min(100, Math.max(0, bumpPercent)) / 100;
+  const tilt = Math.min(BELLY_TILT_MAX_DEG, Math.max(0, tiltDeg)) * (Math.PI / 180);
+  const bob = s.y / BELLY_MOTION.bobM;
+  return {
+    [BELLY_MOTION.tilt]: size * (tilt / BELLY_MOTION.tiltRad + BOUNCE_TILT * bob),
+    [BELLY_MOTION.bob]: size * bob,
+    [BELLY_MOTION.sway]: size * (s.x / BELLY_MOTION.bobM),
+  };
+}
+
+export function weightLine(tiltDeg: number): string {
+  const d = Math.min(BELLY_TILT_MAX_DEG, Math.max(0, tiltDeg));
+  return d === 0 ? 'WEIGHT · no tilt' : `WEIGHT · tilts ${d.toFixed(1)}° down`;
 }

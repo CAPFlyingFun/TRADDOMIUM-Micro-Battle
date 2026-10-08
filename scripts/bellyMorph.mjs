@@ -57,7 +57,7 @@ export const TARGET = 'belly';
  */
 export const KEYS = [['belly75', 0.75], ['belly50', 0.5], ['belly25', 0.25], [TARGET, 0]];
 /** A smaller bump grows from this far up between the pubis and the breastbone. */
-export const GROW_FROM = 0.15;
+export const GROW_FROM = 0.03;
 /** ...and that point rises by this much of the same span as the bump grows to full size. */
 export const GROW_RISE = 0.25;
 /** Above the grow point a smaller bump keeps size^TEARDROP of its height (below it, size): the teardrop. */
@@ -68,6 +68,13 @@ export const FLAT_KEEP = 0.05;
 export const UNDER_M = 0.07;
 /** How far behind the full-term mound the flat body's pubis sits, metres (measured on her: the mound stood 3.4 cm proud of the thighs' front, a flat body's 1 cm). */
 export const MOUND_M = 0.025;
+
+/** The motion targets' names: the bump's weight, driven by a renderer's spring. */
+export const MOTION_TARGETS = Object.freeze({ tilt: 'bellyTilt', bob: 'bellyBob', sway: 'bellySway' });
+/** bellyTilt at weight 1 pitches the bump front-down by this, radians (0.1 = 5.7°). */
+export const MOTION_TILT_RAD = 0.1;
+/** bellyBob and bellySway at weight 1 move the bump this far, metres. */
+export const MOTION_BOB_M = 0.01;
 
 const COL = 0.01;
 
@@ -296,9 +303,16 @@ export function bellyMorph(doc, { log = () => {} } = {}) {
       // point it grows from, the bump is shrunk less in height than below it
       // (`TEARDROP`: the upper half's scale is size^TEARDROP), blended smoothly
       // across that point so no crease marks the change.
+      //
+      // AND IT SITS ON THE PUBIS AT EVERY SIZE (Joshua, the same night: "have it start
+      // at the lowest part and expand upwards and outwards... so the bottom of the belly
+      // touches the area more so it looks seamless"). Below the grow point the bump is
+      // not shrunk in height at all, only in depth and width, so its underside reaches
+      // the pubis as the full one does; shrinking it toward the grow point there lifted
+      // a smaller belly's bottom off the mound and left a band of flat skin under it.
       const up = size ** TEARDROP;
       const blend = smooth(gy - 0.04, gy + 0.04, y);
-      const scaleY = size * (1 - blend) + up * blend;
+      const scaleY = 1 - blend + up * blend;
       const ta = theta / size, ty = gy + (y - gy) / scaleY;
       let sum = 0, wsum = 0;
       for (let da = -2; da <= 2; da += 1) for (let dy = -2; dy <= 2; dy += 1) {
@@ -456,6 +470,56 @@ export function bellyMorph(doc, { log = () => {} } = {}) {
     weights.push(0);
     report.push(`${name} ${Math.round(size * 100)}%: ${moved.toLocaleString()} vertices, up to ${(-most * 100).toFixed(1)} cm`);
   }
+  // THE BUMP HAS WEIGHT (Joshua, 2026-10-07: "add a weight with the belly so it can
+  // move and kind of jiggle, but not like jello... it could still tilt the belly
+  // downward like 1-3° to look heavy"). Three more targets, each a small motion of
+  // the full bump with its edges held still, for a renderer to drive with a spring
+  // and a resting tilt (`bellyMotionWeights` in the Sarah Lab):
+  //   bellyTilt  the bump pitched front-down by MOTION_TILT_RAD about its own centre
+  //   bellyBob   the bump dropped MOTION_BOB_M (a bounce, either sign)
+  //   bellySway  the bump moved MOTION_BOB_M to her left (either sign)
+  // The hold is a mask from the full field: nothing at the bump's edge (the waist,
+  // the bust's crease, the pubis), all of it where the bump stands well out.
+  const mask = new Float32Array(n);
+  for (let i = 0; i < n; i += 1) {
+    const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2];
+    if (y <= yBot || y >= yTop) continue;
+    const yt = topAt(x);
+    if (y >= yt) continue;
+    const t = torso(y);
+    const theta = Math.atan2(x, z - t.axis), rho = Math.hypot(x, z - t.axis), oval = ovalAt(theta, t);
+    if (Math.abs(theta) > SECTOR || rho <= oval) continue;
+    mask[i] = smooth(0.003, 0.06, rho - oval) * smooth(yBot, yBot + 0.05, y) * smooth(yt, yt - 0.06, y) * smooth(SECTOR, SECTOR - 0.5, Math.abs(theta));
+  }
+  const pivotY = peakY, pivotZ = torso(peakY).axis;
+  const cs = Math.cos(MOTION_TILT_RAD), sn = Math.sin(MOTION_TILT_RAD);
+  const motions = [
+    [MOTION_TARGETS.tilt, (i, out) => {
+      const y = pos[i * 3 + 1] - pivotY, z = pos[i * 3 + 2] - pivotZ;
+      out[0] = 0; out[1] = (y * cs - z * sn) - y; out[2] = (y * sn + z * cs) - z;
+    }],
+    [MOTION_TARGETS.bob, (i, out) => { out[0] = 0; out[1] = -MOTION_BOB_M; out[2] = 0; }],
+    [MOTION_TARGETS.sway, (i, out) => { out[0] = MOTION_BOB_M; out[1] = 0; out[2] = 0; }],
+  ];
+  const d3 = [0, 0, 0];
+  for (const [name, at] of motions) {
+    const delta = new Float32Array(n * 3);
+    for (let i = 0; i < n; i += 1) {
+      if (!(mask[i] > 0)) continue;
+      at(i, d3);
+      for (let a = 0; a < 3; a += 1) delta[i * 3 + a] = d3[a] * mask[i];
+    }
+    for (const p of mesh.listPrimitives()) {
+      const count = p.getAttribute('POSITION').getCount();
+      const t = doc.createPrimitiveTarget(name);
+      t.setAttribute('POSITION', doc.createAccessor().setType('VEC3').setBuffer(buffer).setArray(p === prim ? delta : new Float32Array(count * 3)));
+      t.setAttribute('NORMAL', doc.createAccessor().setType('VEC3').setBuffer(buffer).setArray(new Float32Array(count * 3)));
+      p.addTarget(t);
+    }
+    names.push(name);
+    weights.push(0);
+  }
+  report.push(`motion: tilt, bob, sway over ${mask.filter((w) => w > 0).length.toLocaleString()} vertices`);
   mesh.setExtras({ ...extras, targetNames: names });
   mesh.setWeights(weights);
   log(`belly: the centre's ${(centre.rise * 100).toFixed(1)} cm bump (from ${centre.bot.toFixed(2)} to ${centre.top.toFixed(2)} m up), grown from ${growY.toFixed(2)} m; ${report.join('; ')}`);
