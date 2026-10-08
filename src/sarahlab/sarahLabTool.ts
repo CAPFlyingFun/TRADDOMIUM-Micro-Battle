@@ -46,15 +46,39 @@ export const SARAH_LAB_FIELD = Object.freeze({
   fingers: 'sarahlab-fingers',
 });
 
-/** The morph target the bake writes (`scripts/bellyMorph.mjs`). */
+/** The flat morph target the bake writes (`scripts/bellyMorph.mjs`). */
 export const BELLY_TARGET = 'belly';
+/**
+ * The bake's key sizes, largest first: how much bump each target leaves (the
+ * full belly is the model itself, no target). Each smaller key is the same belly
+ * shrunk, so the slider crossfades the two keys either side of it and every size
+ * on the way is round (Joshua, 2026-10-07, with month-by-month photographs: "the
+ * belly is not rounded like it should").
+ */
+export const BELLY_KEYS: readonly (readonly [number, string | null])[] = [
+  [1, null], [0.75, 'belly75'], [0.5, 'belly50'], [0.25, 'belly25'], [0, BELLY_TARGET],
+];
 /** The clothes' material names (`scripts/growClothes.mjs`). */
 export const GARMENTS = ['shirt', 'leggings'] as const;
 export type Garment = (typeof GARMENTS)[number];
 
-/** The bump slider reads as how much bump there is; the morph's weight is how flat. */
-export function bellyWeight(bumpPercent: number): number {
-  return 1 - Math.min(100, Math.max(0, bumpPercent)) / 100;
+/**
+ * The bump slider reads as how much bump there is. Each target's weight: the two
+ * keys either side of the slider share it, every other target is 0.
+ */
+export function bellyWeights(bumpPercent: number): Record<string, number> {
+  const b = Math.min(100, Math.max(0, bumpPercent)) / 100;
+  const out: Record<string, number> = {};
+  for (const [, name] of BELLY_KEYS) if (name) out[name] = 0;
+  for (let i = 0; i < BELLY_KEYS.length - 1; i += 1) {
+    const [s0, n0] = BELLY_KEYS[i], [s1, n1] = BELLY_KEYS[i + 1];
+    if (b > s0 || b < s1) continue;
+    const f = (s0 - b) / (s0 - s1);
+    if (n0) out[n0] = 1 - f;
+    if (n1) out[n1] = f;
+    break;
+  }
+  return out;
 }
 
 export function bumpLine(bumpPercent: number): string {

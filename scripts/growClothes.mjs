@@ -108,8 +108,7 @@ export function growClothes(doc, { log = () => {}, which = ['shirt', 'leggings']
 
   const P = body.getAttribute('POSITION'), J = body.getAttribute('JOINTS_0'), W = body.getAttribute('WEIGHTS_0');
   const UV = body.getAttribute('TEXCOORD_0');
-  const target = body.listTargets()[0] || null;
-  const TP = target?.getAttribute('POSITION') || null, TN = target?.getAttribute('NORMAL') || null;
+  const targets = body.listTargets();
   const n = P.getCount();
   const pos = new Float32Array(n * 3);
   const v = [0, 0, 0], j4 = [0, 0, 0, 0], w4 = [0, 0, 0, 0];
@@ -191,7 +190,7 @@ export function growClothes(doc, { log = () => {}, which = ['shirt', 'leggings']
     const m = used.length;
     const gp = new Float32Array(m * 3), gn = new Float32Array(m * 3), guv = new Float32Array(m * 2);
     const gj = new (J.getArray().constructor)(m * 4), gw = new Float32Array(m * 4);
-    const tp = new Float32Array(m * 3), tn = new Float32Array(m * 3);
+    const tps = targets.map(() => new Float32Array(m * 3)), tns = targets.map(() => new Float32Array(m * 3));
     const uv = [0, 0], d = [0, 0, 0];
     used.forEach((old, k) => {
       const nrm = normal(old);
@@ -200,15 +199,18 @@ export function growClothes(doc, { log = () => {}, which = ['shirt', 'leggings']
       if (UV) { UV.getElement(old, uv); guv.set(uv, k * 2); }
       J.getElement(old, j4); W.getElement(old, w4);
       gj.set(j4, k * 4); gw.set(w4, k * 4);
-      // The garment's flat shape stands off the body's FLAT shape: the body's move,
-      // plus the turn of its normal times the cloth's thickness. Copying only the
-      // move left the cloth 6 mm off the skin along the old normal, which on the
-      // flattened bump points sideways, and the skin showed through in streaks.
-      if (TN) { TN.getElement(old, d); tn.set(d, k * 3); }
-      if (TP) {
-        TP.getElement(old, d);
-        for (let a = 0; a < 3; a += 1) tp[k * 3 + a] = d[a] + (TN ? tn[k * 3 + a] : 0) * spec.thickness;
-      }
+      // Each of the garment's belly shapes stands off the body's SAME shape: the
+      // body's move, plus the turn of its normal times the cloth's thickness.
+      // Copying only the move left the cloth 6 mm off the skin along the old
+      // normal, which on a smaller bump points sideways, and the skin showed.
+      targets.forEach((t, ti) => {
+        const TP = t.getAttribute('POSITION'), TN = t.getAttribute('NORMAL');
+        if (TN) { TN.getElement(old, d); tns[ti].set(d, k * 3); }
+        if (TP) {
+          TP.getElement(old, d);
+          for (let a = 0; a < 3; a += 1) tps[ti][k * 3 + a] = d[a] + (TN ? tns[ti][k * 3 + a] : 0) * spec.thickness;
+        }
+      });
     });
     const indices = m > 65535 ? new Uint32Array(faces.length) : new Uint16Array(faces.length);
     faces.forEach((old, k) => { indices[k] = remap.get(old); });
@@ -227,14 +229,14 @@ export function growClothes(doc, { log = () => {}, which = ['shirt', 'leggings']
       .setMaterial(material);
     if (UV) prim.setAttribute('TEXCOORD_0', acc3(guv, 'VEC2'));
     // every primitive of a mesh carries the same targets
-    for (const t of body.listTargets()) {
+    targets.forEach((t, ti) => {
       const gt = doc.createPrimitiveTarget(t.getName());
-      gt.setAttribute('POSITION', acc3(t === target ? tp : new Float32Array(m * 3), 'VEC3'));
-      gt.setAttribute('NORMAL', acc3(t === target ? tn : new Float32Array(m * 3), 'VEC3'));
+      gt.setAttribute('POSITION', acc3(tps[ti], 'VEC3'));
+      gt.setAttribute('NORMAL', acc3(tns[ti], 'VEC3'));
       prim.addTarget(gt);
-    }
+    });
     mesh.addPrimitive(prim);
-    log(`clothes: ${name}: ${m.toLocaleString()} vertices, ${(faces.length / 3).toLocaleString()} triangles, ${(spec.thickness * 1000).toFixed(0)} mm off the skin${target ? ', with the belly morph' : ''}`);
+    log(`clothes: ${name}: ${m.toLocaleString()} vertices, ${(faces.length / 3).toLocaleString()} triangles, ${(spec.thickness * 1000).toFixed(0)} mm off the skin, with ${targets.length} belly shape${targets.length === 1 ? '' : 's'}`);
   }
   void chestY;
 }

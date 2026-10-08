@@ -7,8 +7,8 @@
  * A DEV TOOL scene (ARCHITECTURE §8), the Story Lab's shape: no session, a
  * BACK control, one model. What it shows is what the bake put in the file:
  *
- *   BUMP      the `belly` morph target (`scripts/bellyMorph.mjs`): 100% is
- *             the master as modelled, 0% nearly flat. Every primitive that
+ *   BUMP      the belly morph targets (`scripts/bellyMorph.mjs`): 100% is the
+ *             master as modelled, 0% nearly flat, round all the way between. Every primitive that
  *             carries the target follows it, so the clothes grown from her
  *             body shrink with it.
  *   FINGERS   all ten curled together, toward the palm: the master's own
@@ -32,7 +32,7 @@ import { HumanRig, findSkinnedMesh } from '../view/HumanRig';
 import { UNITS_PER_METRE } from '../world/dem';
 import {
   BELLY_TARGET, GARMENTS, SARAH_BASE_MODEL, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID,
-  bellyWeight, bumpLine, fingersLine, statusLine, type Garment, type SarahLabPose,
+  bellyWeights, bumpLine, fingersLine, statusLine, type Garment, type SarahLabPose,
 } from './sarahLabTool';
 
 const M = UNITS_PER_METRE;
@@ -197,8 +197,11 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
 
   function applyLook(): void {
     for (const mesh of skinned) {
-      const at = mesh.morphTargetDictionary?.[BELLY_TARGET];
-      if (at !== undefined && mesh.morphTargetInfluences) mesh.morphTargetInfluences[at] = bellyWeight(bump);
+      const dict = mesh.morphTargetDictionary, influences = mesh.morphTargetInfluences;
+      if (dict && influences) for (const [name, w] of Object.entries(bellyWeights(bump))) {
+        const at = dict[name];
+        if (at !== undefined) influences[at] = w;
+      }
       const name = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material).name as Garment;
       if ((GARMENTS as readonly string[]).includes(name)) mesh.visible = shown[name];
     }

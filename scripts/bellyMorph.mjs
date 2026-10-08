@@ -1,29 +1,42 @@
 /**
- * THE BUMP AS A SLIDER — a morph target that takes a pregnant body's belly
- * from the master's full term down to nearly flat.
+ * THE BUMP AS A SLIDER — morph targets that take a pregnant body's belly from
+ * the master's full term down to nearly flat, round at every size.
  *
  * Joshua, 2026-10-07, on the base mannequin: "reversing the belly size from
  * this max size to almost flat". Two separate generations (one pregnant, one
- * not) cannot be blended — they never share vertices in the same order — so
- * the flatter shape is made from THIS mesh: the same vertices, moved, stored
- * as the difference (glTF morph target `belly`, weight 0 = as authored, 1 =
- * flat). A renderer blends between them with one number; clothes grown from
- * the body (`growClothes.mjs`) copy the same difference and shrink with it.
+ * not) cannot be blended — they never share vertices in the same order — so the
+ * smaller shapes are made from THIS mesh: the same vertices, moved, stored as
+ * differences (glTF morph targets). Clothes grown from the body
+ * (`growClothes.mjs`) copy every target and shrink with it.
  *
- * THE FLAT SHAPE, measured from the mesh and nothing else. Down the front of
- * the torso, in columns 1 cm wide, each column's front-most surface is read
- * as a profile over height: the bump is its peak between the hips and the
- * chest; above the peak the profile falls to the crease under the bust, and
- * below it to the pubis. Those two minima are the column's ANCHORS, and a
- * non-pregnant abdomen is the line between them with a gentle `BULGE_M`
- * forward at its middle, fading across the body as the bump does. Every
- * vertex in the column between its anchors that stands in front of that
- * surface is drawn back toward it, keeping `KEEP` of how far it stood out —
- * enough that the navel and the skin's own relief survive.
+ * AND ROUND ALL THE WAY (Joshua, the same evening, with a month-by-month series
+ * of photographs: "the belly is not rounded like it should"). The first version
+ * kept the full bump's footprint and squashed its depth, so every size between
+ * was a wide shield, and it moved only along z, so the sides of the bump stayed
+ * standing. A real bump is a round dome at every month, starting small and low
+ * over the pubis and growing up and out. So:
  *
- * Nothing behind the flat surface moves: not the back, not the sides, not the
- * breasts (above the upper anchor), not the hips (below the lower one). The
- * NORMALS move too (a NORMAL target), or the flat belly is lit as a dome.
+ *   - THE TORSO WITHOUT THE BUMP is an oval round a vertical axis at each
+ *     height: as deep as a flat front (pubis to breastbone, a gentle `BULGE_M`)
+ *     and as wide as the torso's BACK half there, which the bump never widens.
+ *   - THE BUMP is a height field over (angle round that axis, height): how far
+ *     the outermost skin stands outside the oval.
+ *   - A SMALLER BELLY is that field shrunk by its size — in angle, height and
+ *     depth alike — toward a point low on the front (`GROW_FROM` of the way up
+ *     from the pubis, rising by `GROW_RISE` with size, so a large bump still
+ *     fills up under the bust), its edge softened as it gets smaller. Each
+ *     vertex outside the oval is drawn toward it along its own direction from
+ *     the axis by the ratio of the small field to the full one, so the skin
+ *     under and beside the bump moves in proportion and nothing folds.
+ *   - FOUR KEYS (`KEYS`: 75%, 50%, 25%, flat), one target each; a renderer
+ *     crossfades the two either side of its slider.
+ *
+ * Nothing moves above each column's crease under the bust (the breasts), below
+ * the pubis, or round the back; where the full bump barely stands out the move
+ * eases to nothing, so the waist and hips are never cut into. Every profile is
+ * smoothed and read between samples, never from the nearest one: a step
+ * between two neighbouring readings once left a vertex behind as a spike. The
+ * NORMALS move too, or a smaller belly is lit as the big one.
  *
  * The body faces +z and is measured in the master's own units (metres).
  * A module, not a command; imported by `bakeHumans.mjs` for bodies with
@@ -33,12 +46,24 @@ import * as THREE from 'three';
 
 /** How far forward a flat (not pregnant) belly still stands of its anchor line, metres. */
 export const BULGE_M = 0.022;
-/** Of how far a vertex stood in front of the flat surface, how much it keeps. */
-export const KEEP = 0.12;
 /** Half the width of the belly's columns, metres either side of the centre. */
 export const HALF_WIDTH_M = 0.2;
-/** The morph target's name, in the mesh's `extras.targetNames`. */
+/** The morph target's name, in the mesh's `extras.targetNames`: the flat one. */
 export const TARGET = 'belly';
+/**
+ * The key sizes, as targets: the belly at 75%, 50% and 25% of its full size (in
+ * width, height and depth alike) and flat. Between two keys a renderer blends the
+ * two targets, so every size on the way is near a round belly, never a squashed one.
+ */
+export const KEYS = [['belly75', 0.75], ['belly50', 0.5], ['belly25', 0.25], [TARGET, 0]];
+/** A smaller bump grows from this far up between the pubis and the breastbone. */
+export const GROW_FROM = 0.22;
+/** ...and that point rises by this much of the same span as the bump grows to full size. */
+export const GROW_RISE = 0.3;
+/** Above the grow point a smaller bump keeps size^TEARDROP of its height (below it, size): the teardrop. */
+export const TEARDROP = 0.35;
+/** Flat keeps this much of the bump: enough for the navel. */
+export const FLAT_KEEP = 0.05;
 
 const COL = 0.01;
 
@@ -68,13 +93,12 @@ export function bellyMorph(doc, { log = () => {} } = {}) {
   // Per centimetre of height, along the body's centre: the front (the bump's
   // profile), the back, and the waist's half width (arms are out at the T).
   const y0 = hipY - 0.15, rows = Math.ceil((chestY - y0) / COL);
-  const frontC = new Float32Array(rows).fill(-Infinity), back = new Float32Array(rows).fill(Infinity), half = new Float32Array(rows);
+  const frontC = new Float32Array(rows).fill(-Infinity), back = new Float32Array(rows).fill(Infinity);
   for (let i = 0; i < n; i += 1) {
     const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2];
     const r = Math.floor((y - y0) / COL);
     if (r < 0 || r >= rows || Math.abs(x) > 0.3) continue;
     if (Math.abs(x) < 0.03) { frontC[r] = Math.max(frontC[r], z); back[r] = Math.min(back[r], z); }
-    half[r] = Math.max(half[r], Math.abs(x));
   }
   // fill rows a sparse front missed (they read the back of the body)
   for (let r = 1; r < rows - 1; r += 1) {
@@ -101,18 +125,8 @@ export function bellyMorph(doc, { log = () => {} } = {}) {
   const yTop = rowY(top), yBot = hipY - 0.075;
   const zTop = frontC[top], zBot = at(frontC, yBot);
   const rise = frontC[peak] - Math.max(zTop, zBot);
-  if (process.env.BELLY_DEBUG) console.log({ yTop, zTop, yBot, zBot, peakY: rowY(peak), peakZ: frontC[peak] });
   if (top === peak || rise < 0.04) { log(`belly: no bump to flatten (rise ${(rise * 100).toFixed(1)} cm); no morph`); return; }
 
-  // THE FLAT FRONT: at the centre, the line from pubis to breastbone with a gentle
-  // bulge; across the body, an oval as wide as the waist at that height.
-  const flatAt = (x, y) => {
-    const t = (y - yBot) / (yTop - yBot);
-    const zc = zBot + (zTop - zBot) * t + BULGE_M * Math.sin(Math.PI * t);
-    const zb = at(back, y), w = Math.max(0.08, at(half, y));
-    const zm = (zc + zb) / 2;
-    return { z: zm + (zc - zm) * Math.sqrt(Math.max(0, 1 - (x / w) ** 2)), w };
-  };
   const smooth = (a, b, x) => { const u = Math.min(1, Math.max(0, (x - a) / (b - a))); return u * u * (3 - 2 * u); };
 
   // THE BREASTS ARE NOT THE BELLY. Off the centre line, a breast's underside meets
@@ -154,28 +168,163 @@ export function bellyMorph(doc, { log = () => {} } = {}) {
     return w.sort((p, q) => p - q)[Math.floor(w.length / 2)];
   });
 
-  // Every vertex sharing a position gets the same move, or a UV seam opens.
-  const delta = new Float32Array(n * 3);
-  let moved = 0, most = 0;
+  // THE TORSO WITHOUT THE BUMP, as a cross-section at each height: an oval round a
+  // vertical axis halfway between the back and the flat front, as deep as the flat
+  // front and as wide as the torso's BACK half there (the bump widens the front of
+  // the body, never the back). A bump vertex is described by its angle round that
+  // axis and how far it stands outside the oval along it, so the belly's sides are
+  // drawn in as well as its front: a flattening along z alone left the sides of the
+  // full belly standing, a shield from the front and a nub from the side.
+  const halfBack = new Float32Array(rows);
   for (let i = 0; i < n; i += 1) {
     const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2];
-    const c = colOf(x);
-    if (c < 0 || c >= cols) continue;
-    const yt = tops[c];
-    if (y <= yBot || y >= yt) continue;
-    const { z: zFlat, w } = flatAt(x, y);
-    if (z <= zFlat) continue;
-    // fade toward the sides of the waist, and into the anchors
-    // (the wide fade at the top only where a breast sits over a crease; down the
-    // middle the flat line meets the breastbone itself and needs none)
-    const topFade = yt < yTop - 0.005 ? 0.04 : 0.006;
-    const k = smooth(w, 0.55 * w, Math.abs(x)) * smooth(yBot, yBot + 0.006, y) * smooth(yt, yt - topFade, y);
-    const d = -(z - zFlat) * (1 - KEEP) * k;
-    delta[i * 3 + 2] = d;
-    if (d < 0) { moved += 1; most = Math.min(most, d); }
+    const r = Math.floor((y - y0) / COL);
+    if (r < 0 || r >= rows || Math.abs(x) > 0.3) continue;
+    if (z < back[r] + 0.1) halfBack[r] = Math.max(halfBack[r], Math.abs(x));
   }
-  const centre = { rise, bot: yBot, top: yTop };
+  // The per-centimetre readings are noisy and a step between two rows would step
+  // the oval, leaving one vertex outside it and its neighbour 4 mm away inside (a
+  // spike when the belly flattens). So both are smoothed down the body (a median,
+  // then a mean, over 7 rows) and read between rows, never from the nearest one.
+  const soften = (arr) => {
+    const med = Float32Array.from(arr, (_, r) => {
+      const w = [];
+      for (let d = -3; d <= 3; d += 1) if (r + d >= 0 && r + d < rows && Number.isFinite(arr[r + d]) && arr[r + d] !== 0) w.push(arr[r + d]);
+      return w.length ? w.sort((p, q) => p - q)[Math.floor(w.length / 2)] : arr[r];
+    });
+    return Float32Array.from(med, (_, r) => {
+      let sum = 0, cnt = 0;
+      for (let d = -3; d <= 3; d += 1) if (r + d >= 0 && r + d < rows) { sum += med[r + d]; cnt += 1; }
+      return sum / cnt;
+    });
+  };
+  const halfS = soften(halfBack), backS = soften(back);
+  const lerpAt = (arr, y) => {
+    const f = Math.min(rows - 1, Math.max(0, (y - y0) / COL - 0.5)), r = Math.floor(f), t = f - r;
+    return arr[r] * (1 - t) + arr[Math.min(rows - 1, r + 1)] * t;
+  };
+  const torso = (y) => {
+    const tt = (y - yBot) / (yTop - yBot);
+    const zc = zBot + (zTop - zBot) * tt + BULGE_M * Math.sin(Math.PI * Math.min(1, Math.max(0, tt))), zb = lerpAt(backS, y);
+    const axis = (zc + zb) / 2;
+    return { axis, front: zc - axis, half: Math.max(0.07, lerpAt(halfS, y)) };
+  };
+  const ovalAt = (theta, t) => 1 / Math.sqrt((Math.sin(theta) / t.half) ** 2 + (Math.cos(theta) / t.front) ** 2);
+  const SECTOR = (115 * Math.PI) / 180;
 
+  // THE BUMP'S HEIGHT FIELD over (angle, height): how far the outermost skin stands
+  // outside the oval. Each smaller belly is read off it, so it keeps her shape.
+  const DA = (2 * Math.PI) / 180, DY = 0.005;
+  const ga = Math.ceil((2 * SECTOR) / DA) + 1, gh = Math.ceil((yTop - yBot) / DY) + 1;
+  let field = new Float32Array(ga * gh).fill(-1);
+  const polar = new Float32Array(n * 3); // theta, rho, oval
+  for (let i = 0; i < n; i += 1) {
+    const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2];
+    if (y <= yBot || y >= yTop) continue;
+    const t = torso(y);
+    const theta = Math.atan2(x, z - t.axis), rho = Math.hypot(x, z - t.axis), oval = ovalAt(theta, t);
+    polar[i * 3] = theta; polar[i * 3 + 1] = rho; polar[i * 3 + 2] = oval;
+    if (Math.abs(theta) > SECTOR) continue;
+    const ca = Math.round((theta + SECTOR) / DA), cy = Math.round((y - yBot) / DY);
+    const h = rho - oval;
+    if (h > field[cy * ga + ca]) field[cy * ga + ca] = h;
+  }
+  for (let pass = 0; pass < 4; pass += 1) {
+    const next = new Float32Array(field);
+    for (let cy = 0; cy < gh; cy += 1) for (let ca = 0; ca < ga; ca += 1) {
+      if (field[cy * ga + ca] >= 0 && pass > 0) continue;
+      let sum = 0, cnt = 0;
+      for (let dy = -1; dy <= 1; dy += 1) for (let dx = -1; dx <= 1; dx += 1) {
+        const X = ca + dx, Y = cy + dy;
+        if (X < 0 || X >= ga || Y < 0 || Y >= gh) continue;
+        const v = field[Y * ga + X];
+        if (v >= 0) { sum += v; cnt += 1; }
+      }
+      if (cnt) next[cy * ga + ca] = sum / cnt;
+    }
+    field = next;
+  }
+  for (let k = 0; k < field.length; k += 1) field[k] = Math.max(0, field[k]);
+  const heightAt = (theta, y) => {
+    const fa = (theta + SECTOR) / DA, fy = (y - yBot) / DY;
+    const a0 = Math.floor(fa), y0g = Math.floor(fy), ta = fa - a0, ty = fy - y0g;
+    const get = (X, Y) => (X < 0 || X >= ga || Y < 0 || Y >= gh ? 0 : field[Y * ga + X]);
+    return (get(a0, y0g) * (1 - ta) + get(a0 + 1, y0g) * ta) * (1 - ty) + (get(a0, y0g + 1) * (1 - ta) + get(a0 + 1, y0g + 1) * ta) * ty;
+  };
+
+  // A SMALLER BELLY IS THE SAME BELLY, SMALLER: the field shrunk by `size` toward
+  // the front, low in the abdomen (`GROW_FROM` of the way up from the pubis — a
+  // bump starts just above it and grows up and out), in angle, height and depth
+  // alike, so every size is round. Each vertex outside the oval is drawn toward
+  // it along its own direction from the axis, by the ratio of the small field to
+  // the full one there, so the skin under and beside the bump moves in proportion
+  // and nothing folds. Where the full bump hardly stands out, the ratio eases to 1,
+  // so the waist and hips are never cut into.
+  // the crease's height read between columns, so it cannot step between them either
+  const topAt = (x) => {
+    const f = (x + HALF_WIDTH_M) / COL - 0.5, c = Math.floor(f), t = f - c;
+    const get = (k) => (k < 0 || k >= cols ? yTop : tops[k]);
+    return get(c) * (1 - t) + get(c + 1) * t;
+  };
+  const growY = yBot + GROW_FROM * (yTop - yBot);
+  const deltaFor = (size) => {
+    const delta = new Float32Array(n * 3);
+    let moved = 0, most = 0;
+    for (let i = 0; i < n; i += 1) {
+      const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2];
+      if (y <= yBot || y >= yTop) continue;
+      const yt = topAt(x);
+      if (y >= yt) continue;
+      const theta = polar[i * 3], rho = polar[i * 3 + 1], oval = polar[i * 3 + 2];
+      if (Math.abs(theta) > SECTOR || rho <= oval) continue;
+      const full = heightAt(theta, y);
+      if (full < 0.001) continue;
+      // a smaller belly's edge is soft, as a real early bump is: the shrunk field
+      // is read through a blur that widens as the belly gets smaller (in the full
+      // field's own scale, so a fixed softness on her)
+      let small = 0;
+      if (size > 0) {
+        const soft = 1 - size, sa = (0.07 * soft) / size, sy = (0.018 * soft) / size;
+        // a large bump fills up under the bust, a small one sits low: the point
+        // it grows from rises with its size
+        const gy = growY + GROW_RISE * size * (yTop - yBot);
+        // THE TEARDROP (Joshua, 2026-10-07, with three more month-by-month series):
+        // a growing bump is not a small ball sitting low but a teardrop, a long
+        // gentle slope down from under the bust, fullest low, curving back in
+        // quickly to the pubis, and only rounds out as it grows. So above the
+        // point it grows from, the bump is shrunk less in height than below it
+        // (`TEARDROP`: the upper half's scale is size^TEARDROP), blended smoothly
+        // across that point so no crease marks the change.
+        const up = size ** TEARDROP;
+        const blend = smooth(gy - 0.04, gy + 0.04, y);
+        const scaleY = size * (1 - blend) + up * blend;
+        const ta = theta / size, ty = gy + (y - gy) / scaleY;
+        let sum = 0, wsum = 0;
+        for (let da = -2; da <= 2; da += 1) for (let dy = -2; dy <= 2; dy += 1) {
+          const w = Math.exp(-(da * da + dy * dy) / 4);
+          sum += w * heightAt(ta + da * sa, ty + dy * sy);
+          wsum += w;
+        }
+        small = (size * sum) / wsum;
+      }
+      let ratio = Math.min(1, Math.max(FLAT_KEEP, small / full));
+      ratio = 1 - (1 - ratio) * smooth(0.004, 0.025, full);
+      // a wide fade into the chest everywhere: a 6 mm one (where no breast sits over a
+      // crease) let the top of a smaller bump pull in 3 cm against a still neighbour
+      const topFade = 0.045;
+      const k = smooth(yBot, yBot + 0.006, y) * smooth(yt, yt - topFade, y) * smooth(SECTOR, SECTOR - 0.35, Math.abs(theta));
+      const pull = (rho - oval) * (1 - ratio) * k;
+      if (pull <= 0) continue;
+      const t = torso(y);
+      const ux = x / rho, uz = (z - t.axis) / rho;
+      delta[i * 3] = -ux * pull;
+      delta[i * 3 + 2] = -uz * pull;
+      moved += 1;
+      most = Math.max(most, pull);
+    }
+    return { delta, moved, most: -most };
+  };
+  const centre = { rise, bot: yBot, top: yTop };
   // Normals: recompute both shapes the same way over welded positions, and store
   // the difference (so the authored normals stay as they were at weight 0).
   const idx = prim.getIndices().getArray();
@@ -202,7 +351,9 @@ export function bellyMorph(doc, { log = () => {} } = {}) {
     }
     return out;
   };
-  const before = normalsOf(null), after = normalsOf(delta);
+  const before = normalsOf(null);
+  const normalDelta = (delta) => {
+  const after = normalsOf(delta);
   // Squashing the bump pinches its widest ring, and a few faces there fold; their
   // recomputed normals spike and light as a dark seam. So the flat shape's normals
   // are SMOOTHED across the moved region (and a ring round it) over the welded
@@ -242,18 +393,32 @@ export function bellyMorph(doc, { log = () => {} } = {}) {
     if (dot < Math.cos((75 * Math.PI) / 180)) continue;
     for (let a = 0; a < 3; a += 1) ndelta[i * 3 + a] = field[r * 3 + a] - before[r * 3 + a];
   }
+  return ndelta;
+  };
 
-  // The other primitives (none on the masters) get an empty target, as glTF requires.
+  // One target a key size; the renderer crossfades the two either side of the
+  // slider (`bellyWeights` in the Sarah Lab), so the belly is round all the way.
+  // The other primitives (none on the masters) get empty targets, as glTF requires.
   const buffer = doc.getRoot().listBuffers()[0];
-  for (const p of mesh.listPrimitives()) {
-    const count = p.getAttribute('POSITION').getCount();
-    const t = doc.createPrimitiveTarget(TARGET);
-    t.setAttribute('POSITION', doc.createAccessor().setType('VEC3').setBuffer(buffer).setArray(p === prim ? delta : new Float32Array(count * 3)));
-    t.setAttribute('NORMAL', doc.createAccessor().setType('VEC3').setBuffer(buffer).setArray(p === prim ? ndelta : new Float32Array(count * 3)));
-    p.addTarget(t);
-  }
   const extras = mesh.getExtras() || {};
-  mesh.setExtras({ ...extras, targetNames: [...(extras.targetNames || []), TARGET] });
-  mesh.setWeights([...(mesh.getWeights() || []), 0]);
-  log(`belly: morph target '${TARGET}' on ${moved.toLocaleString()} vertices; the centre's ${(centre.rise * 100).toFixed(1)} cm rise flattens by up to ${(-most * 100).toFixed(1)} cm (from ${centre.bot.toFixed(2)} to ${centre.top.toFixed(2)} m up)`);
+  const names = [...(extras.targetNames || [])];
+  const weights = [...(mesh.getWeights() || [])];
+  const report = [];
+  for (const [name, size] of KEYS) {
+    const { delta, moved, most } = deltaFor(size);
+    const ndelta = normalDelta(delta);
+    for (const p of mesh.listPrimitives()) {
+      const count = p.getAttribute('POSITION').getCount();
+      const t = doc.createPrimitiveTarget(name);
+      t.setAttribute('POSITION', doc.createAccessor().setType('VEC3').setBuffer(buffer).setArray(p === prim ? delta : new Float32Array(count * 3)));
+      t.setAttribute('NORMAL', doc.createAccessor().setType('VEC3').setBuffer(buffer).setArray(p === prim ? ndelta : new Float32Array(count * 3)));
+      p.addTarget(t);
+    }
+    names.push(name);
+    weights.push(0);
+    report.push(`${name} ${Math.round(size * 100)}%: ${moved.toLocaleString()} vertices, up to ${(-most * 100).toFixed(1)} cm`);
+  }
+  mesh.setExtras({ ...extras, targetNames: names });
+  mesh.setWeights(weights);
+  log(`belly: the centre's ${(centre.rise * 100).toFixed(1)} cm bump (from ${centre.bot.toFixed(2)} to ${centre.top.toFixed(2)} m up), grown from ${growY.toFixed(2)} m; ${report.join('; ')}`);
 }

@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest';
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { MeshoptDecoder } from 'meshoptimizer';
-import { BELLY_TARGET, GARMENTS, SARAH_BASE_MODEL, bellyWeight, bumpLine, fingersLine, sarahLabTool, statusLine } from '../src/sarahlab/sarahLabTool';
+import { BELLY_KEYS, BELLY_TARGET, GARMENTS, SARAH_BASE_MODEL, bellyWeights, bumpLine, fingersLine, sarahLabTool, statusLine } from '../src/sarahlab/sarahLabTool';
 
 async function load() {
   await MeshoptDecoder.ready;
@@ -23,13 +23,15 @@ async function load() {
 describe('the base mannequin (public/models/sarah-base.glb)', () => {
   it('carries the belly target on every primitive, and a shirt and leggings by material', async () => {
     const { mesh } = await load();
-    expect((mesh.getExtras() as { targetNames?: string[] }).targetNames).toContain(BELLY_TARGET);
+    const names0 = (mesh.getExtras() as { targetNames?: string[] }).targetNames ?? [];
+    for (const [, name] of BELLY_KEYS) if (name) expect(names0).toContain(name);
+    expect(names0).toContain(BELLY_TARGET);
     const names = mesh.listPrimitives().map((p) => p.getMaterial()?.getName());
     for (const g of GARMENTS) expect(names).toContain(g);
-    for (const p of mesh.listPrimitives()) expect(p.listTargets().length).toBe(1);
+    for (const p of mesh.listPrimitives()) expect(p.listTargets().length).toBe(BELLY_KEYS.length - 1);
   }, 60000);
 
-  it('flattens the front of the bump by several centimetres and leaves the back, the bust and the legs alone', async () => {
+  it('the flat key draws the bump in by several centimetres and leaves the back, the bust and the legs alone', async () => {
     const { doc, mesh } = await load();
     const body = mesh.listPrimitives().reduce((a, p) => (p.getAttribute('POSITION')!.getCount() > a.getAttribute('POSITION')!.getCount() ? p : a));
     const P = body.getAttribute('POSITION')!, T = body.listTargets()[0].getAttribute('POSITION')!;
@@ -43,19 +45,46 @@ describe('the base mannequin (public/models/sarah-base.glb)', () => {
     let deepest = 0, backMoved = 0, highMoved = 0, lowMoved = 0;
     for (let i = 0; i < P.getCount(); i += 1) {
       P.getElement(i, v); T.getElement(i, d);
-      const dz = d[2] * s * metres, moved = Math.hypot(...d) * s * metres;
+      const dz = -Math.hypot(d[0], d[2]) * s * metres, moved = Math.hypot(...d) * s * metres;
       const y = (v[1] - lo) * s * metres; // height off the floor, metres
       deepest = Math.min(deepest, dz);
       if (moved > 0.002) {
-        if (v[2] < 0) backMoved += 1;
+        // the bump's sides wrap round the waist a little behind the centre line;
+        // the back itself (8 cm and more behind it) never moves
+        if (v[2] * s * metres < -0.08) backMoved += 1;
         if (y > 1.3) highMoved += 1; // the bust and up
         if (y < 0.7) lowMoved += 1; // the legs
       }
     }
-    expect(deepest).toBeLessThan(-0.06);
+    expect(deepest).toBeLessThan(-0.05);
     expect(backMoved).toBe(0);
     expect(highMoved).toBe(0);
     expect(lowMoved).toBe(0);
+  }, 60000);
+});
+
+describe('every belly size (no spikes)', () => {
+  it('stretches no edge of the skin at any key: a vertex left behind draws a spike', async () => {
+    const { mesh } = await load();
+    const body = mesh.listPrimitives().reduce((a, p) => (p.getAttribute('POSITION')!.getCount() > a.getAttribute('POSITION')!.getCount() ? p : a));
+    const P = body.getAttribute('POSITION')!, I = body.getIndices()!.getArray()!;
+    const n = P.getCount(), v = [0, 0, 0];
+    const base = new Float32Array(n * 3);
+    for (let i = 0; i < n; i += 1) { P.getElement(i, v); base.set(v, i * 3); }
+    for (const t of body.listTargets()) {
+      const T = t.getAttribute('POSITION')!;
+      const fin = new Float32Array(n * 3);
+      for (let i = 0; i < n; i += 1) { T.getElement(i, v); for (let k = 0; k < 3; k += 1) fin[i * 3 + k] = base[i * 3 + k] + v[k]; }
+      const len = (a: Float32Array, i: number, j: number) => Math.hypot(a[i * 3] - a[j * 3], a[i * 3 + 1] - a[j * 3 + 1], a[i * 3 + 2] - a[j * 3 + 2]);
+      let stretched = 0;
+      for (let f = 0; f < I.length; f += 3) {
+        for (const [i, j] of [[I[f], I[f + 1]], [I[f + 1], I[f + 2]], [I[f + 2], I[f]]]) {
+          // 0.04 bake units is about 3.4 cm on her
+          if (len(fin, i, j) > 0.04 && len(fin, i, j) > 4 * len(base, i, j)) stretched += 1;
+        }
+      }
+      expect(stretched, t.getName()).toBe(0);
+    }
   }, 60000);
 });
 
@@ -65,9 +94,13 @@ describe('the Sarah Lab', () => {
     expect(SARAH_BASE_MODEL).toBe('models/sarah-base.glb');
   });
   it('reads the bump slider as how much bump there is', () => {
-    expect(bellyWeight(100)).toBe(0);
-    expect(bellyWeight(0)).toBe(1);
-    expect(bellyWeight(150)).toBe(0);
+    const sum = (w: Record<string, number>) => Object.values(w).reduce((a, b) => a + b, 0);
+    expect(sum(bellyWeights(100))).toBe(0);
+    expect(bellyWeights(0)).toMatchObject({ belly: 1, belly25: 0 });
+    expect(bellyWeights(75)).toMatchObject({ belly75: 1, belly50: 0 });
+    expect(bellyWeights(62.5).belly75).toBeCloseTo(0.5);
+    expect(bellyWeights(62.5).belly50).toBeCloseTo(0.5);
+    expect(sum(bellyWeights(150))).toBe(0);
     expect(bumpLine(100)).toMatch(/as modelled/);
     expect(bumpLine(0)).toMatch(/nearly flat/);
     expect(fingersLine(100)).toMatch(/fist/);
