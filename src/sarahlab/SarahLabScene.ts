@@ -17,7 +17,8 @@
  *             targets, `stepBellySpring`, `stepBreastSpring`); BOUNCE nudges both.
  *   FINGERS   all ten curled together, toward the palm: the master's own
  *             finger chains, found from the bind pose, never by name.
- *   SHIRT, LEGGINGS   the garments (`scripts/growClothes.mjs`), by material.
+ *   OUTFIT    cycles the garments (`scripts/growClothes.mjs`), by material:
+ *             tee + leggings, bikini, swimsuit, none (`OUTFITS`).
  *   STAND, WALK, SIT  the game's own poses: `poseHuman` and the pregnant sit.
  *
  * The camera ORBITS her: drag to go round, pinch or wheel to come closer.
@@ -35,7 +36,7 @@ import { release } from '../tombs/LabPeople';
 import { HumanRig, findSkinnedMesh } from '../view/HumanRig';
 import { UNITS_PER_METRE } from '../world/dem';
 import {
-  BELLY_MOTION, BELLY_TARGET, BREAST_TARGETS, BUMP_MAX_PERCENT, GARMENTS, SARAH_BASE_MODEL, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID,
+  BELLY_MOTION, BELLY_TARGET, BREAST_TARGETS, BUMP_MAX_PERCENT, GARMENTS, OUTFITS, outfitLine, SARAH_BASE_MODEL, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID,
   bellyMotionWeights, bellyWeights, breastBobWeight, breastWeights, fingerBend, THUMB_TO_PALM, bumpLine, fingersLine, restingBellySpring, statusLine, stepBellySpring, stepBreastSpring, walkBounceAccel,
   type Garment, type SarahLabPose,
 } from './sarahLabTool';
@@ -167,7 +168,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let feel: { bone: THREE.Bone; local: THREE.Vector3 } | null = null;
   const felt = { p: new THREE.Vector3(), v: new THREE.Vector3(), primed: 0 };
   const tmp = new THREE.Vector3();
-  const shown: Record<Garment, boolean> = { shirt: true, leggings: true };
+  let outfit = 0;
+  const shownNow = (g: Garment) => OUTFITS[outfit].garments.includes(g);
   let turning = false;
   let seconds = 0;
   let walked = 0;
@@ -206,12 +208,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     lit(buttons.walk, pose === 'walk');
     lit(buttons.sit, pose === 'sit');
     lit(buttons.turn, turning);
-    for (const g of GARMENTS) {
-      const b = buttons[g];
-      if (!b) continue;
-      b.style.display = garments.includes(g) ? '' : 'none';
-      lit(b, shown[g]);
-    }
+    if (buttons.outfit) buttons.outfit.textContent = outfitLine(outfit);
   }
 
   /** The bump's weight, every frame: its resting tilt and where the spring has it. */
@@ -235,7 +232,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         if (at !== undefined) influences[at] = w;
       }
       const name = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material).name as Garment;
-      if ((GARMENTS as readonly string[]).includes(name)) mesh.visible = shown[name];
+      if ((GARMENTS as readonly string[]).includes(name)) mesh.visible = shownNow(name);
     }
   }
 
@@ -316,12 +313,11 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     slider(SARAH_LAB_FIELD.fingers, curl, (v) => { curl = v; });
     const row = document.createElement('div');
     row.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap';
-    buttons.shirt = btn('SHIRT', SARAH_LAB_ACTION.shirt, () => { shown.shirt = !shown.shirt; applyLook(); });
-    buttons.leggings = btn('LEGGINGS', SARAH_LAB_ACTION.leggings, () => { shown.leggings = !shown.leggings; applyLook(); });
+    buttons.outfit = btn(outfitLine(outfit), SARAH_LAB_ACTION.outfit, () => { outfit = (outfit + 1) % OUTFITS.length; applyLook(); });
     buttons.turn = btn('TURN', SARAH_LAB_ACTION.turn, () => { turning = !turning; });
     // a nudge up, as a hop would: the bump lags, drops and settles
     buttons.bounce = btn('BOUNCE', SARAH_LAB_ACTION.bounce, () => { spring.vy += 0.3; breastSpring.vy += 0.3; });
-    for (const b of [buttons.shirt, buttons.leggings, buttons.turn, buttons.bounce]) { b.style.padding = '8px 10px'; b.style.fontSize = '12px'; row.appendChild(b); }
+    for (const b of [buttons.outfit, buttons.turn, buttons.bounce]) { b.style.padding = '8px 10px'; b.style.fontSize = '12px'; row.appendChild(b); }
     right.appendChild(row);
     root.appendChild(right);
 

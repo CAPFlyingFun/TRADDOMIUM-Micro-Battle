@@ -242,7 +242,7 @@ describe('the Sarah Lab', () => {
     expect(bumpLine(100)).toMatch(/as modelled/);
     expect(bumpLine(0)).toMatch(/nearly flat/);
     expect(fingersLine(100)).toMatch(/fist/);
-    expect(statusLine(true, false, ['shirt', 'leggings'], true)).toBe('base model · belly slider · shirt + leggings');
+    expect(statusLine(true, false, ['shirt', 'leggings'], true)).toBe('base model · belly slider · 2 garments');
     expect(statusLine(false, true, [], false)).toMatch(/did not load/);
   });
 });

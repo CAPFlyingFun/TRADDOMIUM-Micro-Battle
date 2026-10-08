@@ -272,3 +272,259 @@ export async function paintGarment({ doc, material, file, colour, isCloth, x, n,
   void smooth; void filled;
   return { colourPng, normalPng };
 }
+
+// --------------------------------------------------------- a sheet of the whole body
+
+/**
+ * A SHEET DRAWN ON A WHOLE BODY (a bikini, a swimsuit: anything worn on the skin).
+ * Its figures are fitted by the BODY's outline rather than the garment's: the
+ * drawing's silhouette (its alpha) against the model's, row by row from head to
+ * foot, which holds whatever the garment covers. The drawing's arms hang and the
+ * model's stand out in a T, so arm pixels are dropped: per row, the figure's runs
+ * are kept only where they fall where the model's body (fitted overall) says the
+ * body is, and where a row cannot be read the overall fit stands in.
+ *
+ * Returns, per view, `at(p)`: the sheet pixel a point of the model lies on, or null.
+ */
+export async function readBodySheet(file, { isCloth, bodyPos, isArm, n }) {
+  const { data, info } = await sharp(file).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  const W = info.width, H = info.height;
+  const body = new Uint8Array(W * H), cloth = new Uint8Array(W * H);
+  for (let i = 0; i < W * H; i += 1) {
+    if (data[i * 4 + 3] < 200) continue;
+    body[i] = 1;
+    if (isCloth(data[i * 4], data[i * 4 + 1], data[i * 4 + 2])) cloth[i] = 1;
+  }
+  // the figures: split at the emptiest columns, one in each eighth's boundary zone
+  const colSum = new Float32Array(W);
+  for (let y = 0; y < H; y += 1) for (let x = 0; x < W; x += 1) colSum[x] += body[y * W + x];
+  const cuts = [0];
+  for (let k = 1; k < VIEWS.length; k += 1) {
+    const c = Math.round((k * W) / VIEWS.length), r = Math.round(W / VIEWS.length / 3);
+    let best = c;
+    for (let x = c - r; x <= c + r; x += 1) if (colSum[x] < colSum[best]) best = x;
+    cuts.push(best);
+  }
+  cuts.push(W);
+  const m = bodyPos.length / 3;
+  let yLo = Infinity, yHi = -Infinity;
+  for (let i = 0; i < m; i += 1) { yLo = Math.min(yLo, bodyPos[i * 3 + 1]); yHi = Math.max(yHi, bodyPos[i * 3 + 1]); }
+  const views = VIEWS.map((v, k) => {
+    const [dx, , dz] = v.d, R = [dz, 0, -dx];
+    const x0 = cuts[k], x1 = cuts[k + 1];
+    let top = H, bot = -1;
+    for (let y = 0; y < H; y += 1) for (let x = x0; x < x1; x += 1) if (body[y * W + x]) { top = Math.min(top, y); bot = Math.max(bot, y); }
+    if (bot < 0) return null;
+    const rowOf = (y) => top + ((yHi - y) / (yHi - yLo)) * (bot - top);
+    // the model's outline across this view, by height (arms left out)
+    const BIN = 0.01, ext = new Map();
+    for (let i = 0; i < m; i += 1) {
+      if (isArm(i)) continue;
+      const y = bodyPos[i * 3 + 1], u = bodyPos[i * 3] * R[0] + bodyPos[i * 3 + 2] * R[2], b = Math.round(y / BIN);
+      const e = ext.get(b);
+      if (!e) ext.set(b, [u, u]); else { e[0] = Math.min(e[0], u); e[1] = Math.max(e[1], u); }
+    }
+    // the figure's outline by row, all runs
+    const runsAt = (row) => {
+      const out = [];
+      let s = -1;
+      for (let x = x0; x <= x1; x += 1) {
+        const on = x < x1 && body[row * W + x];
+        if (on && s < 0) s = x;
+        if (!on && s >= 0) { out.push([s, x - 1]); s = -1; }
+      }
+      return out;
+    };
+    // the overall fit: a scale and a centre, from rows whose outline is one plain run
+    const pairs = [];
+    for (const [b, e] of ext) {
+      const y = b * BIN, row = Math.round(rowOf(y));
+      if (row < top || row > bot) continue;
+      const runs = runsAt(row);
+      if (runs.length !== 1 || e[1] - e[0] < 0.05) continue;
+      pairs.push([(runs[0][1] - runs[0][0]) / (e[1] - e[0]), (runs[0][0] + runs[0][1]) / 2, (e[0] + e[1]) / 2]);
+    }
+    if (pairs.length < 10) return null;
+    const med = (arr) => arr.sort((a, b) => a - b)[Math.floor(arr.length / 2)];
+    const scale = med(pairs.map((q) => q[0]));
+    const offset = med(pairs.map((q) => q[1] - q[2] * scale));
+    // per row: the runs that overlap where the fit puts the body, their span; where
+    // that span is close to the fit's, it is used, otherwise the fit
+    const rowFit = new Map();
+    for (const [b, e] of ext) {
+      const y = b * BIN, row = Math.round(rowOf(y));
+      if (row < top || row > bot) continue;
+      const pl = offset + e[0] * scale, pr = offset + e[1] * scale, w = pr - pl;
+      const keep = runsAt(row).filter(([a, c]) => c >= pl - 0.1 * w && a <= pr + 0.1 * w && (c - a) > 0.25 * w * 0.5);
+      let L = pl, Rr = pr;
+      if (keep.length) {
+        const ml = Math.min(...keep.map((q) => q[0])), mr = Math.max(...keep.map((q) => q[1]));
+        if (Math.abs(ml - pl) < 0.15 * w) L = ml;
+        if (Math.abs(mr - pr) < 0.15 * w) Rr = mr;
+      }
+      rowFit.set(b, [e[0], e[1], L, Rr]);
+    }
+    const fitAt = (y) => {
+      const b = Math.round(y / BIN);
+      let s = [0, 0, 0, 0], c = 0;
+      for (let d = -2; d <= 2; d += 1) { const f = rowFit.get(b + d); if (f) { for (let q = 0; q < 4; q += 1) s[q] += f[q]; c += 1; } }
+      return c ? s.map((v) => v / c) : null;
+    };
+    const at = (p) => {
+      const f = fitAt(p[1]);
+      if (!f || f[1] - f[0] < 1e-4) return null;
+      const u = p[0] * R[0] + p[2] * R[2];
+      const col = Math.round(f[2] + ((u - f[0]) / (f[1] - f[0])) * (f[3] - f[2])), row = Math.round(rowOf(p[1]));
+      if (col < x0 || col >= x1 || row < 0 || row >= H || !body[row * W + col]) return null;
+      return row * W + col;
+    };
+    // the head is the drawing's (eyes, lips) and never cloth
+    const neckRow = top + 0.17 * (bot - top);
+    return { d: v.d, at, neckRow };
+  });
+  // the drawing's colours with its broad light divided out: each fabric pixel's colour
+  // over the blurred brightness of the fabric round it, at the fabric's median brightness
+  const lum = new Float32Array(W * H);
+  for (let i = 0; i < W * H; i += 1) lum[i] = cloth[i] ? 0.3 * data[i * 4] + 0.59 * data[i * 4 + 1] + 0.11 * data[i * 4 + 2] : 0;
+  const box = (src, r) => {
+    const tmp = new Float32Array(W * H), out = new Float32Array(W * H);
+    for (let y = 0; y < H; y += 1) { let s = 0; for (let x = -r; x <= r; x += 1) if (x >= 0 && x < W) s += src[y * W + x]; for (let x = 0; x < W; x += 1) { tmp[y * W + x] = s; if (x + r + 1 < W) s += src[y * W + x + r + 1]; if (x - r >= 0) s -= src[y * W + x - r]; } }
+    for (let x = 0; x < W; x += 1) { let s = 0; for (let y = -r; y <= r; y += 1) if (y >= 0 && y < H) s += tmp[y * W + x]; for (let y = 0; y < H; y += 1) { out[y * W + x] = s; if (y + r + 1 < H) s += tmp[(y + r + 1) * W + x]; if (y - r >= 0) s -= tmp[(y - r) * W + x]; } }
+    return out;
+  };
+  const num = box(lum, DELIGHT_PX), den = box(Float32Array.from(cloth), DELIGHT_PX);
+  const lums = [];
+  for (let i = 0; i < W * H; i += 7) if (cloth[i]) lums.push(lum[i]);
+  lums.sort((a, b) => a - b);
+  const L0 = lums[Math.floor(lums.length / 2)] || 128;
+  const colourAt = (i) => {
+    const broad = den[i] > 0 ? num[i] / den[i] : L0, k = Math.min(1.6, Math.max(0.6, L0 / Math.max(1, broad)));
+    return [data[i * 4] * k, data[i * 4 + 1] * k, data[i * 4 + 2] * k];
+  };
+  // coverage of a body point: how many of the views that face it see cloth there
+  const coverage = (i) => {
+    let s = 0, w = 0;
+    const p = [bodyPos[i * 3], bodyPos[i * 3 + 1], bodyPos[i * 3 + 2]];
+    for (const v of views) {
+      if (!v) continue;
+      const f = n[i * 3] * v.d[0] + n[i * 3 + 2] * v.d[2];
+      if (f <= 0.15) continue;
+      const px = v.at(p);
+      if (px === null || Math.floor(px / W) < v.neckRow) continue;
+      const wt = f ** 4;
+      s += wt * cloth[px]; w += wt;
+    }
+    return w > 0 ? s / w : 0;
+  };
+  return { W, H, views, cloth, colourAt, coverage, data };
+}
+
+/**
+ * Bakes a body-sheet garment's colour (the drawing's own, light taken out) onto its
+ * cloth: every texel found on the cloth and coloured by the views that face it.
+ */
+export async function paintFromBodySheet({ doc, material, sheet, x, n, uv, faces, log = () => {} }) {
+  const T = TEXTURE;
+  const col = new Float32Array(T * T * 3).fill(NaN);
+  const p = [0, 0, 0], q = [0, 0, 0];
+  for (let f = 0; f < faces.length; f += 3) {
+    const a = faces[f], b = faces[f + 1], c = faces[f + 2];
+    const ua = uv[a * 2] * T, va = uv[a * 2 + 1] * T, ub = uv[b * 2] * T, vb = uv[b * 2 + 1] * T, uc = uv[c * 2] * T, vc = uv[c * 2 + 1] * T;
+    const area = (ub - ua) * (vc - va) - (uc - ua) * (vb - va);
+    if (Math.abs(area) < 1e-9) continue;
+    const minU = Math.max(0, Math.floor(Math.min(ua, ub, uc))), maxU = Math.min(T - 1, Math.ceil(Math.max(ua, ub, uc)));
+    const minV = Math.max(0, Math.floor(Math.min(va, vb, vc))), maxV = Math.min(T - 1, Math.ceil(Math.max(va, vb, vc)));
+    for (let ty = minV; ty <= maxV; ty += 1) for (let tx = minU; tx <= maxU; tx += 1) {
+      const px = tx + 0.5, py = ty + 0.5;
+      const w1 = ((ub - px) * (vc - py) - (uc - px) * (vb - py)) / area, w2 = ((uc - px) * (va - py) - (ua - px) * (vc - py)) / area, w3 = 1 - w1 - w2;
+      if (w1 < -0.02 || w2 < -0.02 || w3 < -0.02) continue;
+      for (let k = 0; k < 3; k += 1) { p[k] = x[a * 3 + k] * w1 + x[b * 3 + k] * w2 + x[c * 3 + k] * w3; q[k] = n[a * 3 + k] * w1 + n[b * 3 + k] * w2 + n[c * 3 + k] * w3; }
+      const acc = [0, 0, 0];
+      let ws = 0;
+      for (const v of sheet.views) {
+        if (!v) continue;
+        const fc = q[0] * v.d[0] + q[2] * v.d[2];
+        if (fc <= 0.1) continue;
+        const pix = v.at(p);
+        if (pix === null || !sheet.cloth[pix]) continue;
+        const c3 = sheet.colourAt(pix), w = fc ** VIEW_SHARPNESS;
+        for (let k = 0; k < 3; k += 1) acc[k] += c3[k] * w;
+        ws += w;
+      }
+      if (ws > 0) for (let k = 0; k < 3; k += 1) col[(ty * T + tx) * 3 + k] = acc[k] / ws;
+    }
+  }
+  // texels no view saw take their neighbours' colour; then the islands are bled out
+  for (let pass = 0; pass < 24; pass += 1) {
+    const next = Float32Array.from(col);
+    let open = 0;
+    for (let i = 0; i < T * T; i += 1) {
+      if (!Number.isNaN(col[i * 3])) continue;
+      const tx = i % T, ty = (i / T) | 0;
+      const s = [0, 0, 0];
+      let c = 0;
+      for (const [ox, oy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const X = tx + ox, Y = ty + oy;
+        if (X < 0 || Y < 0 || X >= T || Y >= T) continue;
+        const j = Y * T + X;
+        if (!Number.isNaN(col[j * 3])) { for (let k = 0; k < 3; k += 1) s[k] += col[j * 3 + k]; c += 1; }
+      }
+      if (c) for (let k = 0; k < 3; k += 1) next[i * 3 + k] = s[k] / c; else open += 1;
+    }
+    col.set(next);
+    if (!open) break;
+  }
+  const rgb = Buffer.alloc(T * T * 3);
+  for (let i = 0; i < T * T * 3; i += 1) rgb[i] = Number.isNaN(col[i]) ? 128 : Math.round(Math.min(255, Math.max(0, col[i])));
+  const png = await sharp(rgb, { raw: { width: T, height: T, channels: 3 } }).png().toBuffer();
+  const tex = doc.createTexture(`${material.getName()}-colour`).setImage(png).setMimeType('image/png');
+  material.setBaseColorFactor([1, 1, 1, 1]).setBaseColorTexture(tex);
+  log(`painted from ${sheet.file ?? 'a body sheet'}: ${sheet.views.filter(Boolean).length} of ${VIEWS.length} views fitted by the body's outline`);
+}
+
+/**
+ * A plain garment with a trim: the fabric colour, and `trim` along every edge,
+ * `width` metres in from it. `f` is the garment's own edge field at each vertex
+ * (zero on the edge, metres inside), read between vertices texel by texel, so the
+ * trim's inner line is as smooth as the cut.
+ */
+export async function paintTrim({ doc, material, colour, trim, width, f, uv, faces, log = () => {} }) {
+  const T = TEXTURE;
+  const val = new Float32Array(T * T).fill(NaN);
+  for (let k = 0; k < faces.length; k += 3) {
+    const a = faces[k], b = faces[k + 1], c = faces[k + 2];
+    const ua = uv[a * 2] * T, va = uv[a * 2 + 1] * T, ub = uv[b * 2] * T, vb = uv[b * 2 + 1] * T, uc = uv[c * 2] * T, vc = uv[c * 2 + 1] * T;
+    const area = (ub - ua) * (vc - va) - (uc - ua) * (vb - va);
+    if (Math.abs(area) < 1e-9) continue;
+    const minU = Math.max(0, Math.floor(Math.min(ua, ub, uc))), maxU = Math.min(T - 1, Math.ceil(Math.max(ua, ub, uc)));
+    const minV = Math.max(0, Math.floor(Math.min(va, vb, vc))), maxV = Math.min(T - 1, Math.ceil(Math.max(va, vb, vc)));
+    for (let ty = minV; ty <= maxV; ty += 1) for (let tx = minU; tx <= maxU; tx += 1) {
+      const px = tx + 0.5, py = ty + 0.5;
+      const w1 = ((ub - px) * (vc - py) - (uc - px) * (vb - py)) / area, w2 = ((uc - px) * (va - py) - (ua - px) * (vc - py)) / area, w3 = 1 - w1 - w2;
+      if (w1 < -0.02 || w2 < -0.02 || w3 < -0.02) continue;
+      val[ty * T + tx] = f[a] * w1 + f[b] * w2 + f[c] * w3;
+    }
+  }
+  for (let pass = 0; pass < 8; pass += 1) {
+    const next = Float32Array.from(val);
+    for (let i = 0; i < T * T; i += 1) {
+      if (!Number.isNaN(val[i])) continue;
+      const tx = i % T, ty = (i / T) | 0;
+      let s = 0, c = 0;
+      for (const [ox, oy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const X = tx + ox, Y = ty + oy; if (X >= 0 && Y >= 0 && X < T && Y < T && !Number.isNaN(val[Y * T + X])) { s += val[Y * T + X]; c += 1; } }
+      if (c) next[i] = s / c;
+    }
+    val.set(next);
+  }
+  const toS = (cl) => Math.round(255 * Math.min(1, Math.max(0, cl <= 0.0031308 ? cl * 12.92 : 1.055 * cl ** (1 / 2.4) - 0.055)));
+  const rgb = Buffer.alloc(T * T * 3);
+  for (let i = 0; i < T * T; i += 1) {
+    const v = Number.isNaN(val[i]) ? 1 : val[i];
+    // a soft step a millimetre wide, so the trim's edge is clean, not stair-stepped
+    const t = Math.min(1, Math.max(0, (v - width + 0.0008) / 0.0016));
+    for (let k = 0; k < 3; k += 1) rgb[i * 3 + k] = toS(trim[k] * (1 - t) + colour[k] * t);
+  }
+  const png = await sharp(rgb, { raw: { width: T, height: T, channels: 3 } }).png().toBuffer();
+  material.setBaseColorFactor([1, 1, 1, 1]).setBaseColorTexture(doc.createTexture(`${material.getName()}-colour`).setImage(png).setMimeType('image/png'));
+  log(`trimmed ${(width * 1000).toFixed(0)} mm at every edge`);
+}

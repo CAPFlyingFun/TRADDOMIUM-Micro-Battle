@@ -12,7 +12,9 @@
  *   shots/sarahlab-3-walk.png      WALK, bump back at 100
  *   shots/sarahlab-4-sit.png       SIT
  *   shots/sarahlab-5-fist.png      STAND, FINGERS at 100, close on the hands
- *   shots/sarahlab-6-bare.png      SHIRT and LEGGINGS off
+ *   shots/sarahlab-6-bikini.png    OUTFIT once: the bikini
+ *   shots/sarahlab-7-swimsuit.png  OUTFIT twice: the swimsuit
+ *   shots/sarahlab-8-bare.png      OUTFIT three times: none
  *
  * and fails on a console error, a model that did not load, a file without the
  * belly slider or the clothes, or a blank frame.
@@ -98,7 +100,7 @@ async function main() {
       .then(() => check(true, 'the base model loaded'))
       .catch(async () => check(false, `the base model loaded: ${await page.textContent(status)}`));
     const line = await page.textContent(status);
-    check(/belly slider/.test(line) && /shirt \+ leggings/.test(line), `the file has the belly slider and both garments: "${line}"`);
+    check(/belly slider/.test(line) && /4 garments/.test(line), `the file has the belly slider and all four garments: "${line}"`);
     await page.waitForTimeout(1500);
     await shot(page, 'sarahlab-1-full.png', 'FULL BUMP, dressed');
 
@@ -139,10 +141,16 @@ async function main() {
 
     for (let i = 0; i < 6; i += 1) await page.mouse.wheel(0, 300);
     await setSlider('sarahlab-fingers', 0);
-    await page.click('[data-action="sarahlab:shirt"]');
-    await page.click('[data-action="sarahlab:leggings"]');
+    await page.click('[data-action="sarahlab:outfit"]');
+    await page.waitForTimeout(800);
+    check(/bikini/.test(await page.textContent('[data-action="sarahlab:outfit"]')), 'OUTFIT reads bikini');
+    await shot(page, 'sarahlab-6-bikini.png', 'OUTFIT bikini');
+    await page.click('[data-action="sarahlab:outfit"]');
+    await page.waitForTimeout(800);
+    await shot(page, 'sarahlab-7-swimsuit.png', 'OUTFIT swimsuit');
+    await page.click('[data-action="sarahlab:outfit"]');
     await page.waitForTimeout(1200);
-    await shot(page, 'sarahlab-6-bare.png', 'SHIRT and LEGGINGS off');
+    await shot(page, 'sarahlab-8-bare.png', 'OUTFIT none');
     check(errors.length === 0, errors.length ? `no console errors:\n${errors.join('\n')}` : 'no console errors');
   } finally {
     await browser.close();

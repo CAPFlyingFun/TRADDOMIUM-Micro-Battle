@@ -20,7 +20,7 @@ export const sarahLabTool: DevTool = {
   title: 'Sarah Lab (base model)',
   description:
     "Sarah rebuilt from the base mannequin, to try before she goes live: the BUMP slider runs from twice full term (twins and more, her breasts growing with it) to "
-    + 'nearly flat, its own weight sags the belly past full term, BOUNCE (or WALK) shows it and her breasts move, FINGERS curls all ten, SHIRT and LEGGINGS show the clothes grown from her body, and STAND, '
+    + 'nearly flat, its own weight sags the belly past full term, BOUNCE (or WALK) shows it and her breasts move, FINGERS curls all ten, OUTFIT cycles the clothes grown from her body (a red tee over black leggings, a bikini, a swimsuit, none), and STAND, '
     + 'WALK and SIT pose her. Drag to turn round her, pinch or scroll to come closer. Not used by the story or the game.',
   sceneId: SARAH_LAB_SCENE_ID,
 };
@@ -35,10 +35,9 @@ export const SARAH_LAB_ACTION = Object.freeze({
   stand: 'sarahlab:stand',
   walk: 'sarahlab:walk',
   sit: 'sarahlab:sit',
-  shirt: 'sarahlab:shirt',
-  leggings: 'sarahlab:leggings',
   turn: 'sarahlab:turn',
   bounce: 'sarahlab:bounce',
+  outfit: 'sarahlab:outfit',
 });
 
 export const SARAH_LAB_FIELD = Object.freeze({
@@ -62,8 +61,24 @@ export const BELLY_KEYS: readonly (readonly [number, string | null])[] = [
   [2, 'belly200'], [1.5, 'belly150'], [1, null], [0.75, 'belly75'], [0.5, 'belly50'], [0.25, 'belly25'], [0, BELLY_TARGET],
 ];
 /** The clothes' material names (`scripts/growClothes.mjs`). */
-export const GARMENTS = ['shirt', 'leggings'] as const;
+export const GARMENTS = ['shirt', 'leggings', 'bikini', 'swimsuit'] as const;
 export type Garment = (typeof GARMENTS)[number];
+
+/**
+ * THE OUTFITS the OUTFIT button cycles through, each the garments it shows (Joshua,
+ * 2026-10-08: the red tee over black leggings, then "something simple like a bikini...
+ * swimsuit... all one piece outfit"). Clothes that hang off the body (shirts that
+ * flare, jackets, shorts) wait for a real second mesh.
+ */
+export const OUTFITS: readonly { readonly name: string; readonly garments: readonly Garment[] }[] = [
+  { name: 'tee + leggings', garments: ['shirt', 'leggings'] },
+  { name: 'bikini', garments: ['bikini'] },
+  { name: 'swimsuit', garments: ['swimsuit'] },
+  { name: 'none', garments: [] },
+];
+export function outfitLine(index: number): string {
+  return `OUTFIT · ${OUTFITS[((index % OUTFITS.length) + OUTFITS.length) % OUTFITS.length].name}`;
+}
 
 /**
  * The bump slider reads as how much bump there is. Each target's weight: the two
@@ -159,7 +174,7 @@ export function fingersLine(curlPercent: number): string {
 export function statusLine(loaded: boolean, failed: boolean, garments: readonly string[], hasBelly: boolean): string {
   if (failed) return 'models/sarah-base.glb did not load';
   if (!loaded) return 'loading Sarah…';
-  const g = garments.length ? garments.join(' + ') : 'no clothes in this file';
+  const g = garments.length ? `${garments.length} garment${garments.length === 1 ? '' : 's'}` : 'no clothes in this file';
   return `base model · ${hasBelly ? 'belly slider' : 'no belly slider'} · ${g}`;
 }
 
