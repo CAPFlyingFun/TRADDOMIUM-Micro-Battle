@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest';
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { MeshoptDecoder } from 'meshoptimizer';
-import { BELLY_KEYS, BELLY_MOTION, BELLY_SPRING, BELLY_TARGET, bellyMotionWeights, breastWeights, fingerBend, FINGER_LIMITS_DEG, restingBellySpring, stepBellySpring, walkBounceAccel, GARMENTS, SARAH_BASE_MODEL, bellyWeights, bumpLine, fingersLine, sarahLabTool, statusLine } from '../src/sarahlab/sarahLabTool';
+import { BELLY_KEYS, BELLY_MOTION, BELLY_SPRING, BELLY_TARGET, bellyMotionWeights, breastBobWeight, breastWeights, BREAST_SPRING, stepBreastSpring, fingerBend, FINGER_LIMITS_DEG, restingBellySpring, stepBellySpring, walkBounceAccel, GARMENTS, SARAH_BASE_MODEL, bellyWeights, bumpLine, fingersLine, sarahLabTool, statusLine } from '../src/sarahlab/sarahLabTool';
 
 async function load() {
   await MeshoptDecoder.ready;
@@ -30,9 +30,9 @@ describe('the base mannequin (public/models/sarah-base.glb)', () => {
     for (const g of GARMENTS) expect(names).toContain(g);
     for (const name of [BELLY_MOTION.tilt, BELLY_MOTION.bob, BELLY_MOTION.sway]) expect(names0).toContain(name);
     // the four sizes and the three motions, on every primitive, so the clothes move with her
-    for (const name of ['breast0', 'breast100']) expect(names0).toContain(name);
-    // the six sizes, the three motions and the two breast ends, on every primitive, so the clothes move with her
-    for (const p of mesh.listPrimitives()) expect(p.listTargets().length).toBe(BELLY_KEYS.length - 1 + 3 + 2);
+    for (const name of ['breast0', 'breast100', 'breastBob']) expect(names0).toContain(name);
+    // the six sizes, the three motions, the two breast ends and the breasts' bounce, on every primitive, so the clothes move with her
+    for (const p of mesh.listPrimitives()) expect(p.listTargets().length).toBe(BELLY_KEYS.length - 1 + 3 + 3);
   }, 60000);
 
   it('the flat key draws the bump in by several centimetres and leaves the back, the bust and the legs alone', async () => {
@@ -148,6 +148,21 @@ describe('the bump\'s spring', () => {
     expect(bellyMotionWeights(200, 10, restingBellySpring())[BELLY_MOTION.tilt]).toBeCloseTo(deg(30), 6);
   });
 
+  it('lets the breasts bounce on a spring of their own, lighter and quicker, as big as they are', () => {
+    const s = restingBellySpring(), b = restingBellySpring();
+    s.vy = 0.3; b.vy = 0.3;
+    let peakS = 0, peakB = 0, tS = 0, tB = 0;
+    for (let k = 1; k <= 60; k += 1) {
+      stepBellySpring(s, 1 / 120, 0, 0); stepBreastSpring(b, 1 / 120, 0, 0);
+      if (s.y > peakS) { peakS = s.y; tS = k; }
+      if (b.y > peakB) { peakB = b.y; tB = k; }
+    }
+    expect(tB).toBeLessThan(tS); // quicker
+    expect(peakB).toBeLessThanOrEqual(BREAST_SPRING.maxM);
+    const lifted = restingBellySpring(); lifted.y = 0.01;
+    expect(breastBobWeight(200, lifted)).toBeCloseTo(2 * breastBobWeight(100, lifted), 6);
+  });
+
   it("adds a walk's bounce, two a stride", () => {
     expect(walkBounceAccel(0, 1)).toBeLessThan(0);
     expect(walkBounceAccel(0.25, 1)).toBeGreaterThan(0);
@@ -230,4 +245,23 @@ describe('the Sarah Lab', () => {
     expect(statusLine(true, false, ['shirt', 'leggings'], true)).toBe('base model · belly slider · shirt + leggings');
     expect(statusLine(false, true, [], false)).toMatch(/did not load/);
   });
+});
+
+describe('the pregnant sit lays the hands palm-down on any rig', () => {
+  it("reads each rig's own palms: the toon's face forward (no turn), the mannequin's face down (a quarter turn)", async () => {
+    const { bindPalmRoll } = await import('../src/actor/humanSeated');
+    const { measureHuman } = await import('../src/actor/humanSkeleton');
+    await MeshoptDecoder.ready;
+    const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'meshopt.decoder': MeshoptDecoder });
+    const roll = async (file: string) => {
+      const doc = await io.read(file);
+      const joints = doc.getRoot().listSkins()[0].listJoints();
+      const bind = joints.map((j) => { const m = j.getWorldMatrix(); const p = j.getParentNode(); return { x: m[12], y: m[13], z: m[14], parent: p ? joints.indexOf(p as never) : -1 }; });
+      const me = measureHuman(bind as never);
+      return [me.joints.wristL, me.joints.wristR].map((w) => (bindPalmRoll(bind as never, w) * 180) / Math.PI);
+    };
+    // Joshua, 2026-10-08: "the palms and hands are facing outwards, not inwards like normal"
+    for (const d of await roll('public/models/sarah.glb')) expect(Math.abs(d)).toBeLessThan(10);
+    for (const d of await roll(`public/${SARAH_BASE_MODEL}`)) expect(Math.abs(d - 90)).toBeLessThan(15);
+  }, 60000);
 });

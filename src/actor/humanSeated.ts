@@ -206,6 +206,59 @@ const PREGNANT_SIT = {
   arm: { down: 82 * DEG, forward: 28 * DEG, twist: 0, elbow: 24 * DEG, wristBend: -20 * DEG, wristTilt: 0, pronate: 170 * DEG } as ArmSpec,
 };
 
+// ------------------------------------------------------------ the palms
+
+/**
+ * WHICH WAY THIS RIG'S PALMS FACE IN ITS T, as a turn about world X from facing
+ * forward (+Z) — the way the toon masters' do, which every arm above was tuned on.
+ * Joshua, 2026-10-08, on the base Sarah sitting: "the palms and hands are facing
+ * outwards, not inwards like normal". Her mannequin was rigged palms DOWN, a quarter
+ * turn from the toons, so the same 170° `pronate` that lays a toon's hand on her thigh
+ * turned the mannequin's palm out to the side. Read from the skeleton, never from a
+ * name: under the wrist, the first joint with four or more branches is the hand; the
+ * branch furthest from the others is the thumb; the palm faces along (wrist to
+ * knuckles) × (little finger to index), signed by the side. A rig with no fingers
+ * reads 0 and keeps the tuned arm exactly.
+ */
+const palmRolls = new WeakMap<readonly BindJoint[], Map<number, number>>();
+export function bindPalmRoll(bind: readonly BindJoint[], wrist: number): number {
+  let known = palmRolls.get(bind);
+  if (!known) palmRolls.set(bind, (known = new Map()));
+  const hit = known.get(wrist);
+  if (hit !== undefined) return hit;
+  const kids: number[][] = bind.map(() => []);
+  bind.forEach((b, i) => { if (b.parent >= 0) kids[b.parent].push(i); });
+  let hand = -1;
+  const queue = [wrist];
+  while (queue.length) { const j = queue.shift()!; if (kids[j].length >= 4) { hand = j; break; } queue.push(...kids[j]); }
+  let roll = 0;
+  if (hand >= 0) {
+    // each finger's SECOND joint: a rig whose fingers were added at bake time starts
+    // every chain at nearly the same point, where no finger can be told from another
+    const bases = kids[hand].map((k) => { const b = bind[kids[k][0] ?? k]; return [b.x, b.y, b.z]; });
+    const c = [0, 1, 2].map((a) => bases.reduce((t, b) => t + b[a], 0) / bases.length);
+    const dist = (b: number[], o: number[]) => Math.hypot(b[0] - o[0], b[1] - o[1], b[2] - o[2]);
+    const thumb = bases.reduce((best, b, i) => (dist(b, c) > dist(bases[best], c) ? i : best), 0);
+    const rest = bases.filter((_, i) => i !== thumb).sort((a, b) => dist(a, bases[thumb]) - dist(b, bases[thumb]));
+    if (rest.length >= 2) {
+      const index = rest[0], pinky = rest[rest.length - 1];
+      const w = bind[wrist];
+      const along = [c[0] - w.x, c[1] - w.y, c[2] - w.z];
+      const across = [index[0] - pinky[0], index[1] - pinky[1], index[2] - pinky[2]];
+      const side = Math.sign(w.x) || 1;
+      const palm = [
+        (along[1] * across[2] - along[2] * across[1]) * side,
+        (along[2] * across[0] - along[0] * across[2]) * side,
+        (along[0] * across[1] - along[1] * across[0]) * side,
+      ];
+      // the signed angle about +X from +Z to the palm, in the y-z plane
+      if (Math.hypot(palm[1], palm[2]) > 1e-9) roll = Math.atan2(-palm[1], palm[2]);
+    }
+  }
+  known.set(wrist, roll);
+  return roll;
+}
+
 // ------------------------------------------------------------ quaternions
 // [x, y, z, w]. Small and local: a core module cannot reach for three's.
 
@@ -292,6 +345,10 @@ export function poseSeated(
 
   // Arms. `s` is the direction the arm runs in the bind: +1 along +X.
   const arm = (i: number, shoulder: number, elbow: number, wrist: number, s: number, a: ArmSpec) => {
+    // the pregnant sit was tuned on the toon Sarah, palms forward in her T: a rig whose
+    // palms face elsewhere is turned back by the difference (bindPalmRoll). The other
+    // arms were tuned on each rig as it is, Jack's palms-down included, and keep them.
+    const fix = a === PREGNANT_SIT.arm ? bindPalmRoll(bind, wrist) : 0;
     // Read right to left: twist about its own length, bring it down, then
     // pitch the lowered arm forward. The pitch is about X, not Y: `Ry`
     // swings a HORIZONTAL arm fore and aft, but by then the arm hangs, and
@@ -301,7 +358,7 @@ export function poseSeated(
     // towel; half is taken at the shoulder instead, with the elbow's hinge
     // turned back by the same amount so the bend still points forward —
     // the elbow joint itself then only bends.
-    const roll = (a.pronate ?? 0) / 2;
+    const roll = ((a.pronate ?? 0) - fix) / 2;
     write(out[i], shoulder, qMul(rx(-a.forward), qMul(rz(-s * a.down), rx(a.twist + roll))));
     write(out[i + 1], elbow, roll ? qMul(rx(-roll), qMul(ry(-s * a.elbow), rx(2 * roll))) : ry(-s * a.elbow));
     write(out[i + 2], wrist, qMul(ry(-s * a.wristBend), rz(-s * a.wristTilt)));

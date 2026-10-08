@@ -93,7 +93,7 @@ export const MOTION_SAG_FORWARD = (30 * Math.PI) / 180;
 export const MOTION_BOB_M = 0.01;
 
 /** The breast targets: their size at the two ends of the breast scale (the model's own is the middle). */
-export const BREAST_TARGETS = Object.freeze({ small: 'breast0', big: 'breast100' });
+export const BREAST_TARGETS = Object.freeze({ small: 'breast0', big: 'breast100', bob: 'breastBob' });
 /** breast0 is this much of the model's breasts... */
 export const BREAST_SMALL = 0.85;
 /** ...and breast100 this much (about a cup and a half more). */
@@ -759,7 +759,7 @@ export function bellyMorph(doc, { log = () => {} } = {}) {
     }
     return best;
   });
-  const breastTarget = (scale) => {
+  const breastTarget = (scale, drop = 0) => {
     const delta = new Float32Array(n * 3);
     for (const tip of tips) {
       if (tip < 0) continue;
@@ -777,14 +777,17 @@ export function bellyMorph(doc, { log = () => {} } = {}) {
         const w = (1 - smooth(BREAST_RADIUS_M * 0.75, BREAST_RADIUS_M * 1.35, d)) * smooth(cz - 0.02, cz + 0.02, z) * smooth(crease - 0.005, crease + 0.03, y);
         if (!(w > 0)) continue;
         delta[i * 3] += (scale - 1) * (x - bx) * w;
-        delta[i * 3 + 1] += (scale - 1) * (y - by) * w;
+        delta[i * 3 + 1] += (scale - 1) * (y - by) * w - drop * w;
         delta[i * 3 + 2] += (scale - 1) * (z - bz) * w;
       }
     }
     return relax(delta, 40);
   };
-  for (const [name, scale] of [[BREAST_TARGETS.small, BREAST_SMALL], [BREAST_TARGETS.big, BREAST_BIG]]) {
-    const delta = breastTarget(scale);
+  // ...and THE BREASTS BOUNCE TOO (Joshua, 2026-10-08: "add the same bounce for the
+  // breasts"): `breastBob`, both breasts dropped MOTION_BOB_M with the same hold, for
+  // the lab's second spring
+  for (const [name, scale, drop] of [[BREAST_TARGETS.small, BREAST_SMALL, 0], [BREAST_TARGETS.big, BREAST_BIG, 0], [BREAST_TARGETS.bob, 1, MOTION_BOB_M]]) {
+    const delta = breastTarget(scale, drop);
     const ndelta = normalDelta(delta);
     for (const p of mesh.listPrimitives()) {
       const count = p.getAttribute('POSITION').getCount();

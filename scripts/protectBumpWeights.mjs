@@ -77,7 +77,21 @@ function pelvisAndHips(skin, at) {
   return hips.length === 2 ? { pelvis, hips } : null;
 }
 
-export function protectBumpWeights(doc, { log = () => {} } = {}) {
+/**
+ * A BUMP THAT HANGS BELOW THE HIP JOINTS (`overhang`; Joshua, 2026-10-08, on the base
+ * Sarah seated: "no matter the belly slider, the bottom half of the belly is gone").
+ * The toon's bump ends above the groin crease; the base mannequin's hangs 7.5 cm under
+ * the hip joints, so everything under `CREASE_FROM` still swung with the thighs and
+ * the lower half of the belly folded into her lap, cut off flat. With `overhang`, skin
+ * far enough in front of the hip line (`OVERHANG_FROM`..`OVERHANG_TO` ahead of it: the
+ * belly hanging over the lap, never the thigh's own front) is lifted onto the pelvis
+ * down to `OVERHANG_DEPTH` under the hip joints.
+ */
+export const OVERHANG_FROM = 0.08;
+export const OVERHANG_TO = 0.13;
+export const OVERHANG_DEPTH = 0.11;
+
+export function protectBumpWeights(doc, { log = () => {}, overhang = false } = {}) {
   const skin = doc.getRoot().listSkins()[0];
   if (!skin) return;
   const at = jointPositions(skin);
@@ -97,7 +111,9 @@ export function protectBumpWeights(doc, { log = () => {} } = {}) {
       const p = [0, 0, 0], j = [0, 0, 0, 0], w = [0, 0, 0, 0];
       for (let v = 0; v < P.getCount(); v += 1) {
         P.getElement(v, p);
-        const k = smoothstep(FRONT_FROM, FRONT_TO, p[2] - hipZ) * smoothstep(CREASE_FROM, CREASE_TO, p[1] - hipY);
+        const ahead = p[2] - hipZ;
+        const crease = overhang ? CREASE_FROM - OVERHANG_DEPTH * smoothstep(OVERHANG_FROM, OVERHANG_TO, ahead) : CREASE_FROM;
+        const k = smoothstep(FRONT_FROM, FRONT_TO, ahead) * smoothstep(crease, crease + (CREASE_TO - CREASE_FROM), p[1] - hipY);
         if (k <= 0) continue;
         J.getElement(v, j);
         W.getElement(v, w);

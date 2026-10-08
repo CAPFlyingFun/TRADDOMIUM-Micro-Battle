@@ -20,7 +20,7 @@ export const sarahLabTool: DevTool = {
   title: 'Sarah Lab (base model)',
   description:
     "Sarah rebuilt from the base mannequin, to try before she goes live: the BUMP slider runs from twice full term (twins and more, her breasts growing with it) to "
-    + 'nearly flat, WEIGHT tilts the bump down 0 to 10° and BOUNCE (or WALK) shows it move, FINGERS curls all ten, SHIRT and LEGGINGS show the clothes grown from her body, and STAND, '
+    + 'nearly flat, its own weight sags the belly past full term, BOUNCE (or WALK) shows it and her breasts move, FINGERS curls all ten, SHIRT and LEGGINGS show the clothes grown from her body, and STAND, '
     + 'WALK and SIT pose her. Drag to turn round her, pinch or scroll to come closer. Not used by the story or the game.',
   sceneId: SARAH_LAB_SCENE_ID,
 };
@@ -45,7 +45,6 @@ export const SARAH_LAB_FIELD = Object.freeze({
   status: 'sarahlab-status',
   bump: 'sarahlab-bump',
   fingers: 'sarahlab-fingers',
-  weight: 'sarahlab-weight',
 });
 
 /** The flat morph target the bake writes (`scripts/bellyMorph.mjs`). */
@@ -93,10 +92,24 @@ export function bellyWeights(bumpPercent: number): Record<string, number> {
  * with 50%, 150% with 75%, 200% with 100%): half the bump's percent. The model's own
  * breasts are 50%; the bake's `breast0` and `breast100` are the two ends.
  */
-export const BREAST_TARGETS = Object.freeze({ small: 'breast0', big: 'breast100' });
+export const BREAST_TARGETS = Object.freeze({ small: 'breast0', big: 'breast100', bob: 'breastBob' });
 export function breastPercent(bumpPercent: number): number {
   return Math.min(BUMP_MAX_PERCENT, Math.max(0, Number.isFinite(bumpPercent) ? bumpPercent : 100)) / 2;
 }
+/**
+ * The breasts' own spring: lighter than the bump, so a little quicker and a little
+ * looser. GAME TUNING.
+ */
+export const BREAST_SPRING = Object.freeze({ hz: 2.8, damping: 0.28, maxM: 0.012, maxAccel: 40 });
+/** One step of the breasts' spring, in place (the same body motion as the bump's). */
+export function stepBreastSpring(s: BellySpring, dt: number, upAccel: number, leftAccel: number): BellySpring {
+  return stepSpring(s, dt, upAccel, leftAccel, BREAST_SPRING);
+}
+/** breastBob's weight: the spring's drop, bigger breasts swinging more. */
+export function breastBobWeight(bumpPercent: number, s: BellySpring): number {
+  return (breastPercent(bumpPercent) / 50) * (s.y / BELLY_MOTION.bobM);
+}
+
 export function breastWeights(bumpPercent: number): Record<string, number> {
   const b = breastPercent(bumpPercent);
   return {
@@ -208,8 +221,13 @@ export const restingBellySpring = (): BellySpring => ({ y: 0, vy: 0, x: 0, vx: 0
  * teleport) is clamped rather than flung.
  */
 export function stepBellySpring(s: BellySpring, dt: number, upAccel: number, leftAccel: number): BellySpring {
-  const w = 2 * Math.PI * BELLY_SPRING.hz, c = 2 * BELLY_SPRING.damping * w;
-  const clampA = (a: number) => (Number.isFinite(a) ? Math.max(-BELLY_SPRING.maxAccel, Math.min(BELLY_SPRING.maxAccel, a)) : 0);
+  return stepSpring(s, dt, upAccel, leftAccel, BELLY_SPRING);
+}
+
+interface SpringTuning { readonly hz: number; readonly damping: number; readonly maxM: number; readonly maxAccel: number }
+function stepSpring(s: BellySpring, dt: number, upAccel: number, leftAccel: number, tune: SpringTuning): BellySpring {
+  const w = 2 * Math.PI * tune.hz, c = 2 * tune.damping * w;
+  const clampA = (a: number) => (Number.isFinite(a) ? Math.max(-tune.maxAccel, Math.min(tune.maxAccel, a)) : 0);
   const ay = clampA(upAccel), ax = clampA(leftAccel);
   const total = Math.min(Math.max(0, Number.isFinite(dt) ? dt : 0), 0.1);
   const steps = Math.max(1, Math.ceil(total / (1 / 240)));
@@ -219,7 +237,7 @@ export function stepBellySpring(s: BellySpring, dt: number, upAccel: number, lef
     s.vx += (-w * w * s.x - c * s.vx - ax) * h;
     s.y += s.vy * h;
     s.x += s.vx * h;
-    const m = BELLY_SPRING.maxM;
+    const m = tune.maxM;
     if (Math.abs(s.y) > m) { s.y = Math.sign(s.y) * m; s.vy = 0; }
     if (Math.abs(s.x) > m) { s.x = Math.sign(s.x) * m; s.vx = 0; }
   }
@@ -229,13 +247,22 @@ export function stepBellySpring(s: BellySpring, dt: number, upAccel: number, lef
 /**
  * A walk's own bounce, as the acceleration of the body: the hips rise and fall
  * twice a stride, about 2 cm either way (BIOLOGICAL SHAPE: the centre of mass
- * travels some 4 to 5 cm in a walking step). The lab's walk turns joints and
- * never lifts the body, so it adds this; a body that really moves feeds its own.
+ * travels some 4 to 5 cm in a walking step), eased to WALK_BOUNCE_M. The lab's walk
+ * turns joints and never lifts the body, so it adds this; a body that really moves
+ * feeds its own.
  */
+/**
+ * How far the walk lifts the body each step, metres, for the springs to feel. 2 cm
+ * is about a real walk's; it threw the bump about too much to look at (Joshua,
+ * 2026-10-08: "the bounce is a little too much while walking... maybe lower 60%
+ * less"), so 40% of it. GAME TUNING.
+ */
+export const WALK_BOUNCE_M = 0.02 * 0.4;
+
 export function walkBounceAccel(phase: number, strideSeconds: number): number {
   if (!(strideSeconds > 0)) return 0;
   const w = (4 * Math.PI) / strideSeconds; // two steps a stride
-  return -w * w * 0.02 * Math.cos(4 * Math.PI * phase);
+  return -w * w * WALK_BOUNCE_M * Math.cos(4 * Math.PI * phase);
 }
 
 /** The three motion targets' weights for a bump size, a resting tilt and the spring. */
@@ -249,9 +276,4 @@ export function bellyMotionWeights(bumpPercent: number, tiltDeg: number, s: Bell
     [BELLY_MOTION.bob]: size * bob,
     [BELLY_MOTION.sway]: size * (s.x / BELLY_MOTION.bobM),
   };
-}
-
-export function weightLine(tiltDeg: number): string {
-  const d = Math.min(BELLY_TILT_MAX_DEG, Math.max(0, tiltDeg));
-  return d === 0 ? 'WEIGHT · no tilt' : `WEIGHT · tilts ${d.toFixed(1)}° down`;
 }

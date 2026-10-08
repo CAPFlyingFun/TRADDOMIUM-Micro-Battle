@@ -12,9 +12,9 @@
  *             her breasts follow at half its percent (`breastWeights`), round all the way between. Every primitive that
  *             carries the target follows it, so the clothes grown from her
  *             body shrink with it.
- *   WEIGHT    the bump's resting tilt, 0 to 10° front-down, and a spring that
- *             lets it lag and settle as she moves (the bake's motion targets,
- *             `stepBellySpring`); BOUNCE gives it a nudge to watch it settle.
+ *   (weight)  past full term the bump sags by its size, and two springs let the
+ *             bump and the breasts lag and settle as she moves (the bake's motion
+ *             targets, `stepBellySpring`, `stepBreastSpring`); BOUNCE nudges both.
  *   FINGERS   all ten curled together, toward the palm: the master's own
  *             finger chains, found from the bind pose, never by name.
  *   SHIRT, LEGGINGS   the garments (`scripts/growClothes.mjs`), by material.
@@ -35,8 +35,8 @@ import { release } from '../tombs/LabPeople';
 import { HumanRig, findSkinnedMesh } from '../view/HumanRig';
 import { UNITS_PER_METRE } from '../world/dem';
 import {
-  BELLY_MOTION, BELLY_TARGET, BELLY_TILT_MAX_DEG, BUMP_MAX_PERCENT, GARMENTS, SARAH_BASE_MODEL, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID,
-  bellyMotionWeights, bellyWeights, breastWeights, fingerBend, THUMB_TO_PALM, bumpLine, fingersLine, restingBellySpring, statusLine, stepBellySpring, walkBounceAccel, weightLine,
+  BELLY_MOTION, BELLY_TARGET, BREAST_TARGETS, BUMP_MAX_PERCENT, GARMENTS, SARAH_BASE_MODEL, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID,
+  bellyMotionWeights, bellyWeights, breastBobWeight, breastWeights, fingerBend, THUMB_TO_PALM, bumpLine, fingersLine, restingBellySpring, statusLine, stepBellySpring, stepBreastSpring, walkBounceAccel,
   type Garment, type SarahLabPose,
 } from './sarahLabTool';
 
@@ -157,9 +157,12 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let pose: SarahLabPose = 'stand';
   let bump = 100;
   let curl = 0;
-  /** The weight slider, 0..100 of BELLY_TILT_MAX_DEG, added to the size's own tilt: none to start. */
-  let weight = 0;
+  // The bump's spring and the breasts' (lighter, quicker), fed the same motion. The
+  // bump's weight is its size's own (`bellyMotionWeights`): the WEIGHT slider that
+  // added to it is gone (Joshua, 2026-10-08: "keep the current weights... just not
+  // have that slider option").
   const spring = restingBellySpring();
+  const breastSpring = restingBellySpring();
   /** A point at the front of her middle, in the spine bone's frame: what the spring feels move. */
   let feel: { bone: THREE.Bone; local: THREE.Vector3 } | null = null;
   const felt = { p: new THREE.Vector3(), v: new THREE.Vector3(), primed: 0 };
@@ -194,8 +197,6 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     const bumpField = fields[SARAH_LAB_FIELD.bump], fingerField = fields[SARAH_LAB_FIELD.fingers];
     if (bumpField) bumpField.textContent = bumpLine(bump);
     if (fingerField) fingerField.textContent = fingersLine(curl);
-    const weightField = fields[SARAH_LAB_FIELD.weight];
-    if (weightField) weightField.textContent = weightLine(tiltDeg());
     const lit = (b: HTMLButtonElement | undefined, on: boolean) => {
       if (!b) return;
       b.style.background = on ? 'rgba(212,168,83,0.92)' : 'rgba(16,20,26,0.72)';
@@ -213,15 +214,13 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     }
   }
 
-  function tiltDeg(): number { return (weight / 100) * BELLY_TILT_MAX_DEG; }
-
   /** The bump's weight, every frame: its resting tilt and where the spring has it. */
   function applyMotion(): void {
-    const w = bellyMotionWeights(bump, tiltDeg(), spring);
+    const w: Record<string, number> = { ...bellyMotionWeights(bump, 0, spring), [BREAST_TARGETS.bob]: breastBobWeight(bump, breastSpring) };
     for (const mesh of skinned) {
       const dict = mesh.morphTargetDictionary, influences = mesh.morphTargetInfluences;
       if (!dict || !influences) continue;
-      for (const name of [BELLY_MOTION.tilt, BELLY_MOTION.bob, BELLY_MOTION.sway]) {
+      for (const name of [BELLY_MOTION.tilt, BELLY_MOTION.bob, BELLY_MOTION.sway, BREAST_TARGETS.bob]) {
         const at = dict[name];
         if (at !== undefined) influences[at] = w[name];
       }
@@ -314,7 +313,6 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       right.append(label, input);
     };
     slider(SARAH_LAB_FIELD.bump, bump, (v) => { bump = v; }, BUMP_MAX_PERCENT);
-    slider(SARAH_LAB_FIELD.weight, weight, (v) => { weight = v; });
     slider(SARAH_LAB_FIELD.fingers, curl, (v) => { curl = v; });
     const row = document.createElement('div');
     row.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap';
@@ -322,7 +320,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     buttons.leggings = btn('LEGGINGS', SARAH_LAB_ACTION.leggings, () => { shown.leggings = !shown.leggings; applyLook(); });
     buttons.turn = btn('TURN', SARAH_LAB_ACTION.turn, () => { turning = !turning; });
     // a nudge up, as a hop would: the bump lags, drops and settles
-    buttons.bounce = btn('BOUNCE', SARAH_LAB_ACTION.bounce, () => { spring.vy += 0.3; });
+    buttons.bounce = btn('BOUNCE', SARAH_LAB_ACTION.bounce, () => { spring.vy += 0.3; breastSpring.vy += 0.3; });
     for (const b of [buttons.shirt, buttons.leggings, buttons.turn, buttons.bounce]) { b.style.padding = '8px 10px'; b.style.fontSize = '12px'; row.appendChild(b); }
     right.appendChild(row);
     root.appendChild(right);
@@ -406,6 +404,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       up += walkBounceAccel((walked / stride) % 1, stride / WALK_SPEED);
     }
     stepBellySpring(spring, dt, up, left);
+    stepBreastSpring(breastSpring, dt, up, left);
     applyMotion();
   }
 
