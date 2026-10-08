@@ -19,7 +19,7 @@ export const sarahLabTool: DevTool = {
   id: SARAH_LAB_TOOL_ID,
   title: 'Sarah Lab (base model)',
   description:
-    "Sarah rebuilt from the base mannequin, to try before she goes live: the BUMP slider runs from full term to "
+    "Sarah rebuilt from the base mannequin, to try before she goes live: the BUMP slider runs from twice full term (twins and more) to "
     + 'nearly flat, WEIGHT tilts the bump down 0 to 3° and BOUNCE (or WALK) shows it move, FINGERS curls all ten, SHIRT and LEGGINGS show the clothes grown from her body, and STAND, '
     + 'WALK and SIT pose her. Drag to turn round her, pinch or scroll to come closer. Not used by the story or the game.',
   sceneId: SARAH_LAB_SCENE_ID,
@@ -55,10 +55,12 @@ export const BELLY_TARGET = 'belly';
  * full belly is the model itself, no target). Each smaller key is the same belly
  * shrunk, so the slider crossfades the two keys either side of it and every size
  * on the way is round (Joshua, 2026-10-07, with month-by-month photographs: "the
- * belly is not rounded like it should").
+ * belly is not rounded like it should"). Past the model, 150% and 200% grow the same
+ * belly deeper and lower, for twins and more ("can we make the belly stretch bigger
+ * than the current max... and let it naturally sag more at the bottom").
  */
 export const BELLY_KEYS: readonly (readonly [number, string | null])[] = [
-  [1, null], [0.75, 'belly75'], [0.5, 'belly50'], [0.25, 'belly25'], [0, BELLY_TARGET],
+  [2, 'belly200'], [1.5, 'belly150'], [1, null], [0.75, 'belly75'], [0.5, 'belly50'], [0.25, 'belly25'], [0, BELLY_TARGET],
 ];
 /** The clothes' material names (`scripts/growClothes.mjs`). */
 export const GARMENTS = ['shirt', 'leggings'] as const;
@@ -68,8 +70,11 @@ export type Garment = (typeof GARMENTS)[number];
  * The bump slider reads as how much bump there is. Each target's weight: the two
  * keys either side of the slider share it, every other target is 0.
  */
+/** The bump slider's top: twice the model's own belly. */
+export const BUMP_MAX_PERCENT = 200;
+
 export function bellyWeights(bumpPercent: number): Record<string, number> {
-  const b = Math.min(100, Math.max(0, bumpPercent)) / 100;
+  const b = Math.min(BUMP_MAX_PERCENT, Math.max(0, Number.isFinite(bumpPercent) ? bumpPercent : 100)) / 100;
   const out: Record<string, number> = {};
   for (const [, name] of BELLY_KEYS) if (name) out[name] = 0;
   for (let i = 0; i < BELLY_KEYS.length - 1; i += 1) {
@@ -84,8 +89,10 @@ export function bellyWeights(bumpPercent: number): Record<string, number> {
 }
 
 export function bumpLine(bumpPercent: number): string {
-  const p = Math.round(Math.min(100, Math.max(0, bumpPercent)));
-  return p === 100 ? 'BUMP 100% · as modelled' : p === 0 ? 'BUMP 0% · nearly flat' : `BUMP ${p}%`;
+  const p = Math.round(Math.min(BUMP_MAX_PERCENT, Math.max(0, bumpPercent)));
+  if (p === 100) return 'BUMP 100% · as modelled';
+  if (p === 0) return 'BUMP 0% · nearly flat';
+  return p > 100 ? `BUMP ${p}% · past full term` : `BUMP ${p}%`;
 }
 
 export function fingersLine(curlPercent: number): string {
@@ -128,7 +135,7 @@ export const BELLY_MOTION = Object.freeze({
  * swing is about a third of the first (ζ 0.32), and never more than 1.5 cm.
  */
 export const BELLY_SPRING = Object.freeze({ hz: 2.2, damping: 0.32, maxM: 0.015, maxAccel: 40 });
-/** At rest the tilt the weight slider sets, degrees, from 0 to this. */
+/** At rest the tilt the weight slider sets for the model's own belly, degrees, from 0 to this (a bigger one tilts by its size). */
 export const BELLY_TILT_MAX_DEG = 3;
 /** Each centimetre the bump drops also pitches it this many tilt-target weights: it swings, not slides. */
 const BOUNCE_TILT = 0.25;
@@ -177,7 +184,8 @@ export function walkBounceAccel(phase: number, strideSeconds: number): number {
 
 /** The three motion targets' weights for a bump size, a resting tilt and the spring. */
 export function bellyMotionWeights(bumpPercent: number, tiltDeg: number, s: BellySpring): Record<string, number> {
-  const size = Math.min(100, Math.max(0, bumpPercent)) / 100;
+  // a bigger belly is heavier: it tilts and swings by its size, the model's own being 1
+  const size = Math.min(BUMP_MAX_PERCENT, Math.max(0, bumpPercent)) / 100;
   const tilt = Math.min(BELLY_TILT_MAX_DEG, Math.max(0, tiltDeg)) * (Math.PI / 180);
   const bob = s.y / BELLY_MOTION.bobM;
   return {
@@ -189,5 +197,5 @@ export function bellyMotionWeights(bumpPercent: number, tiltDeg: number, s: Bell
 
 export function weightLine(tiltDeg: number): string {
   const d = Math.min(BELLY_TILT_MAX_DEG, Math.max(0, tiltDeg));
-  return d === 0 ? 'WEIGHT · no tilt' : `WEIGHT · tilts ${d.toFixed(1)}° down`;
+  return d === 0 ? 'WEIGHT · no tilt' : `WEIGHT · ${d.toFixed(1)}° down at full term`;
 }

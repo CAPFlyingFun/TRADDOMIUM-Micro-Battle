@@ -8,6 +8,7 @@
  *
  *   shots/sarahlab-1-full.png      as loaded: full bump, shirt and leggings
  *   shots/sarahlab-2-flat.png      BUMP slider at 0
+ *   shots/sarahlab-2b-twins.png    BUMP slider at 200, past full term
  *   shots/sarahlab-3-walk.png      WALK, bump back at 100
  *   shots/sarahlab-4-sit.png       SIT
  *   shots/sarahlab-5-fist.png      STAND, FINGERS at 100, close on the hands
@@ -113,6 +114,11 @@ async function main() {
     await page.waitForTimeout(800);
     check(/nearly flat/.test(await page.textContent('[data-field="sarahlab-bump"]')), 'the BUMP line reads nearly flat');
     await shot(page, 'sarahlab-2-flat.png', 'BUMP 0');
+
+    check(await setSlider('sarahlab-bump', 200), 'the BUMP slider moved to 200');
+    await page.waitForTimeout(800);
+    check(/200% · past full term/.test(await page.textContent('[data-field="sarahlab-bump"]')), 'the BUMP line reads 200% past full term');
+    await shot(page, 'sarahlab-2b-twins.png', 'BUMP 200');
 
     await setSlider('sarahlab-bump', 100);
     await page.click('[data-action="sarahlab:walk"]');

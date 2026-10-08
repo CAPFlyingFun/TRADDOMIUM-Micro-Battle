@@ -55,13 +55,21 @@ export const TARGET = 'belly';
  * width, height and depth alike) and flat. Between two keys a renderer blends the
  * two targets, so every size on the way is near a round belly, never a squashed one.
  */
-export const KEYS = [['belly75', 0.75], ['belly50', 0.5], ['belly25', 0.25], [TARGET, 0]];
+export const KEYS = [['belly200', 2], ['belly150', 1.5], ['belly75', 0.75], ['belly50', 0.5], ['belly25', 0.25], [TARGET, 0]];
 /** A smaller bump grows from this far up between the pubis and the breastbone. */
 export const GROW_FROM = 0.03;
 /** ...and that point rises by this much of the same span as the bump grows to full size. */
 export const GROW_RISE = 0.25;
 /** Above the grow point a smaller bump keeps size^TEARDROP of its height (below it, size): the teardrop. */
 export const TEARDROP = 0.6;
+/** Past full term (sizes over 1) the bump widens by size^GROW_WIDE... */
+export const GROW_WIDE = 0.2;
+/** ...rises above its grow point by size^GROW_UP (the bust is in the way)... */
+export const GROW_UP = 0.25;
+/** ...and stretches DOWN below it by size^GROW_SAG: the weight fills the bottom and hangs. */
+export const GROW_SAG = 0.6;
+/** ...and stands out by size^GROW_DEEP of the full bump's depth. */
+export const GROW_DEEP = 0.75;
 /** Flat keeps this much of the bump: enough for the navel. */
 export const FLAT_KEEP = 0.05;
 /** Under the bump, its pull carries on down past the pubis and fades out over this, metres. */
@@ -173,10 +181,21 @@ export function bellyMorph(doc, { log = () => {} } = {}) {
     crease[c] = breast ? Math.min(yTop, rowY(low)) : yTop;
   }
   // a moving median, so one column's stray reading cannot notch the boundary
-  const tops = Float32Array.from(crease, (_, c) => {
+  const medianTops = Float32Array.from(crease, (_, c) => {
     const w = [];
     for (let d = -3; d <= 3; d += 1) if (c + d >= 0 && c + d < cols) w.push(crease[c + d]);
     return w.sort((p, q) => p - q)[Math.floor(w.length / 2)];
+  });
+  // ...then eased across 9 cm, so the line the bump stops at under the bust bends
+  // rather than steps where a breast begins (a step there left a notch at the
+  // breast's outer edge on a big belly, and a lump under it on a smaller one)
+  const tops = Float32Array.from(medianTops, (_, c) => {
+    let sum = 0, wsum = 0;
+    for (let d = -4; d <= 4; d += 1) {
+      const k = Math.min(cols - 1, Math.max(0, c + d)), w = 5 - Math.abs(d);
+      sum += w * medianTops[k]; wsum += w;
+    }
+    return sum / wsum;
   });
 
   // THE TORSO WITHOUT THE BUMP, as a cross-section at each height: an oval round a
@@ -334,9 +353,79 @@ export function bellyMorph(doc, { log = () => {} } = {}) {
   // pubis, fading out over `UNDER_M` toward the crotch, on the front skin only
   // (near the oval's surface, never the inner thighs or the seat).
   const edgeY = yBot + 0.012;
+  // SMOOTH AT EVERY SIZE (Joshua, 2026-10-07, with screenshots at 50% and 75%: "the
+  // top and bottom of the belly needs to be smoother at certain sizes"). Each vertex
+  // used to work out its own share of the shrink from the bump's raw height there,
+  // and where the bump is thin (under the bust, over the pubis) neighbours read
+  // different shares and the outline rippled. The share is worked out on the field's
+  // own grid instead, blurred, and every vertex reads it between grid points.
+  const blurGrid = (g, passes) => {
+    let cur = g;
+    for (let pass = 0; pass < passes; pass += 1) {
+      const next = new Float32Array(cur.length);
+      for (let cy = 0; cy < gh; cy += 1) for (let ca = 0; ca < ga; ca += 1) {
+        let sum = 0, cnt = 0;
+        for (let dy = -1; dy <= 1; dy += 1) for (let dx = -1; dx <= 1; dx += 1) {
+          const X = Math.min(ga - 1, Math.max(0, ca + dx)), Y = Math.min(gh - 1, Math.max(0, cy + dy));
+          const w = (dx === 0 ? 2 : 1) * (dy === 0 ? 2 : 1);
+          sum += w * cur[Y * ga + X]; cnt += w;
+        }
+        next[cy * ga + ca] = sum / cnt;
+      }
+      cur = next;
+    }
+    return cur;
+  };
+  const readGrid = (g, theta, y) => {
+    const fa = Math.min(ga - 1, Math.max(0, (theta + SECTOR) / DA)), fy = Math.min(gh - 1, Math.max(0, (y - yBot) / DY));
+    const a0 = Math.min(ga - 2, Math.floor(fa)), y0g = Math.min(gh - 2, Math.floor(fy)), ta = fa - a0, ty = fy - y0g;
+    const get = (X, Y) => g[Y * ga + X];
+    return (get(a0, y0g) * (1 - ta) + get(a0 + 1, y0g) * ta) * (1 - ty) + (get(a0, y0g + 1) * (1 - ta) + get(a0 + 1, y0g + 1) * ta) * ty;
+  };
+  const cellTheta = (ca) => ca * DA - SECTOR, cellY = (cy) => yBot + cy * DY;
+  // the share of each bit of bump a smaller belly KEEPS (1 = all of it), blurred
+  const fullBlur = blurGrid(field, 4);
+  const keepGrid = (size) => {
+    const g = new Float32Array(ga * gh).fill(1);
+    for (let cy = 0; cy < gh; cy += 1) for (let ca = 0; ca < ga; ca += 1) {
+      const full = field[cy * ga + ca];
+      if (full < 0.001) continue;
+      g[cy * ga + ca] = 1 - pullFor(size, cellTheta(ca), cellY(cy), full) / full;
+    }
+    return blurGrid(g, 6);
+  };
+  // A BIGGER BELLY THAN THE MASTER (Joshua, the same night: "can we make the belly
+  // stretch bigger than the current max... and let it naturally sag more at the
+  // bottom so I can use in other games with twins, triplets"). The same bump, grown
+  // from the full-term grow point: deeper by its size, wider by size^GROW_WIDE, a
+  // little taller above (size^GROW_UP, the bust is in the way) and stretched DOWN
+  // below by size^GROW_SAG, so the extra weight fills the bottom and hangs. The grown
+  // height is a grid too, blurred, and a vertex is pushed out to it along its own
+  // direction from the axis; skin the full bump never reached (the sides, the band
+  // under the bust) is pushed out by the grown height itself.
+  const growGrid = (size) => {
+    const gy = growY + GROW_RISE * (yTop - yBot);
+    const wide = size ** GROW_WIDE, up = size ** GROW_UP, sag = size ** GROW_SAG;
+    const g = new Float32Array(ga * gh);
+    for (let cy = 0; cy < gh; cy += 1) for (let ca = 0; ca < ga; ca += 1) {
+      const y = cellY(cy);
+      const blend = smooth(gy - 0.05, gy + 0.05, y);
+      const scaleY = sag * (1 - blend) + up * blend;
+      g[cy * ga + ca] = size ** GROW_DEEP * heightAt(cellTheta(ca) / wide, gy + (y - gy) / scaleY);
+    }
+    return blurGrid(g, 4);
+  };
+  // the middle a grown bump swells from: at its fullest height, a third of the way
+  // from the spine's axis to the front of the full bump
+  const growC = (() => {
+    const t = torso(peakY);
+    return { y: peakY - 0.02, z: t.axis + 0.35 * (frontC[peak] - t.axis) };
+  })();
   const deltaFor = (size) => {
     const delta = new Float32Array(n * 3);
     let moved = 0, most = 0;
+    const grow = size > 1;
+    const keep = grow ? null : keepGrid(size), big = grow ? growGrid(size) : null;
     for (let i = 0; i < n; i += 1) {
       const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2];
       if (y <= yBot - UNDER_M || y >= yTop) continue;
@@ -349,30 +438,57 @@ export function bellyMorph(doc, { log = () => {} } = {}) {
       const side = smooth(SECTOR, SECTOR - 0.35, Math.abs(theta));
       // a wide fade into the chest everywhere: a 6 mm one (where no breast sits over a
       // crease) let the top of a smaller bump pull in 3 cm against a still neighbour
-      const topFade = 0.045;
-      const up = smooth(yt, yt - topFade, y);
-      // under the edge the pull fades out toward the crotch
-      const down = smooth(yBot - UNDER_M, edgeY, y);
-      const yr = Math.max(y, edgeY);
-      // the skin's own pull, where it stands outside the oval
-      let pull = rho > oval ? pullFor(size, theta, yr, rho - oval) * up * down * side : 0;
-      // THE FOLD: low on the belly, where the full bump's underside tucks in over the
-      // mound, the skin inside the oval moves with the outermost skin at its height (a
-      // fold left still while the skin over it drew back stood out as a point), and
-      // under the edge that pull carries down over the mound. Only near the front
-      // surface (within a few centimetres of the oval), never between the thighs.
-      const low = 1 - smooth(yBot + 0.03, yBot + 0.07, y);
-      if (low > 0) {
-        const front = smooth(-0.035, -0.01, rho - oval);
-        const outer = pullFor(size, theta, yr, heightAt(theta, yr));
-        pull = Math.max(pull, outer * front * low * up * down * side);
+      const topFade = 0.06;
+      const upF = smooth(yt, yt - topFade, y);
+      let pull;
+      if (grow) {
+        if (y < yBot - 0.01 || rho < oval - 0.04) continue;
+        const h = rho - oval;
+        // how much MORE bump there is here than at full term, from two blurred grids:
+        // smooth everywhere, and added to the skin as it is, so the navel and the
+        // curve of her own belly ride out on top of it
+        const extra = readGrid(big, theta, y) - readGrid(fullBlur, theta, y);
+        // the bust sits on a big belly: a long fade under it, so no ledge; and a slow
+        // start over the pubis, so the underside curves back in to it
+        const out = Math.max(0, extra) * smooth(yt, yt - 0.14, y) * side
+          * smooth(yBot - 0.01, yBot + 0.12, y) * smooth(-0.04, 0, h);
+        if (!(out > 0)) continue;
+        // OUT FROM THE BUMP'S OWN MIDDLE, not from her spine: the lower half grows
+        // forward AND down, so its underside comes out round and hangs over the pubis
+        // (the sag); the upper half grows forward, never up into the bust
+        let dx = x, dy = y - growC.y, dzz = z - growC.z;
+        if (dy > 0) dy *= 0.15;
+        const l = Math.hypot(dx, dy, dzz) || 1;
+        delta[i * 3] = (dx / l) * out;
+        delta[i * 3 + 1] = (dy / l) * out;
+        delta[i * 3 + 2] = (dzz / l) * out;
+        moved += 1;
+        most = Math.max(most, out);
+        continue;
+      } else {
+        // under the edge the pull fades out toward the crotch
+        const down = smooth(yBot - UNDER_M, edgeY, y);
+        const yr = Math.max(y, edgeY);
+        const lose = 1 - readGrid(keep, theta, yr);
+        // the skin's own pull, where it stands outside the oval
+        pull = rho > oval ? (rho - oval) * lose * upF * down * side : 0;
+        // THE FOLD: low on the belly, where the full bump's underside tucks in over the
+        // mound, the skin inside the oval moves with the outermost skin at its height (a
+        // fold left still while the skin over it drew back stood out as a point), and
+        // under the edge that pull carries down over the mound. Only near the front
+        // surface (within a few centimetres of the oval), never between the thighs.
+        const low = 1 - smooth(yBot + 0.03, yBot + 0.07, y);
+        if (low > 0) {
+          const front = smooth(-0.035, -0.01, rho - oval);
+          pull = Math.max(pull, heightAt(theta, yr) * lose * front * low * upF * down * side);
+        }
       }
-      if (!(pull > 0)) continue;
+      if (pull === 0 || !Number.isFinite(pull)) continue;
       const ux = x / rho, uz = dz / rho;
       delta[i * 3] = -ux * pull;
       delta[i * 3 + 2] = -uz * pull;
       moved += 1;
-      most = Math.max(most, pull);
+      most = Math.max(most, Math.abs(pull));
     }
     return { delta, moved, most: -most };
   };
@@ -424,7 +540,7 @@ export function bellyMorph(doc, { log = () => {} } = {}) {
     link(a, b); link(a, c); link(b, a); link(b, c); link(c, a); link(c, b);
   }
   const region = new Set();
-  for (let i = 0; i < n; i += 1) if (delta[i * 3 + 2] < 0) region.add(rep[i]);
+  for (let i = 0; i < n; i += 1) if (delta[i * 3] !== 0 || delta[i * 3 + 2] !== 0) region.add(rep[i]);
   for (let ring = 0; ring < 2; ring += 1) for (const r of [...region]) for (const u of nb.get(r) || []) region.add(u);
   let field = new Float32Array(after);
   for (let it = 0; it < 8; it += 1) {

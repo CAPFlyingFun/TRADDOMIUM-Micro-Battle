@@ -8,7 +8,7 @@
  * BACK control, one model. What it shows is what the bake put in the file:
  *
  *   BUMP      the belly morph targets (`scripts/bellyMorph.mjs`): 100% is the
- *             master as modelled, 0% nearly flat, round all the way between. Every primitive that
+ *             master as modelled, 200% twice that (twins and more), 0% nearly flat, round all the way between. Every primitive that
  *             carries the target follows it, so the clothes grown from her
  *             body shrink with it.
  *   WEIGHT    the bump's resting tilt, 0 to 3° front-down, and a spring that
@@ -34,7 +34,7 @@ import { release } from '../tombs/LabPeople';
 import { HumanRig, findSkinnedMesh } from '../view/HumanRig';
 import { UNITS_PER_METRE } from '../world/dem';
 import {
-  BELLY_MOTION, BELLY_TARGET, BELLY_TILT_MAX_DEG, GARMENTS, SARAH_BASE_MODEL, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID,
+  BELLY_MOTION, BELLY_TARGET, BELLY_TILT_MAX_DEG, BUMP_MAX_PERCENT, GARMENTS, SARAH_BASE_MODEL, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID,
   bellyMotionWeights, bellyWeights, bumpLine, fingersLine, restingBellySpring, statusLine, stepBellySpring, walkBounceAccel, weightLine,
   type Garment, type SarahLabPose,
 } from './sarahLabTool';
@@ -294,7 +294,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
 
     const right = document.createElement('div');
     right.style.cssText = `${panel}flex-direction:column;align-items:stretch;right:max(12px,env(safe-area-inset-right));top:12px;width:min(230px,40vw);padding:10px;border-radius:12px;background:rgba(10,13,18,0.66);border:1px solid rgba(255,255,255,0.1)`;
-    const slider = (field: string, value: number, onInput: (v: number) => void) => {
+    const slider = (field: string, value: number, onInput: (v: number) => void, max = 100) => {
       const label = document.createElement('div');
       label.dataset.field = field;
       label.style.cssText = 'font-size:12px;letter-spacing:.05em';
@@ -302,13 +302,13 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       const input = document.createElement('input');
       input.type = 'range';
       input.min = '0';
-      input.max = '100';
+      input.max = String(max);
       input.value = String(value);
       input.style.cssText = 'width:100%;accent-color:#d4a853;height:28px';
       input.addEventListener('input', () => { onInput(Number(input.value)); applyLook(); refresh(); });
       right.append(label, input);
     };
-    slider(SARAH_LAB_FIELD.bump, bump, (v) => { bump = v; });
+    slider(SARAH_LAB_FIELD.bump, bump, (v) => { bump = v; }, BUMP_MAX_PERCENT);
     slider(SARAH_LAB_FIELD.weight, weight, (v) => { weight = v; });
     slider(SARAH_LAB_FIELD.fingers, curl, (v) => { curl = v; });
     const row = document.createElement('div');
