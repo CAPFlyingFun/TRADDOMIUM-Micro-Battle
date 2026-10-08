@@ -62,14 +62,16 @@ export const GROW_FROM = 0.03;
 export const GROW_RISE = 0.25;
 /** Above the grow point a smaller bump keeps size^TEARDROP of its height (below it, size): the teardrop. */
 export const TEARDROP = 0.6;
-/** Past full term (sizes over 1) the bump widens by size^GROW_WIDE... */
-export const GROW_WIDE = 0.2;
+/** Past full term (sizes over 1) the bump does NOT widen (Joshua: "don't make the width wider when going past 100%, only the belly depth")... */
+export const GROW_WIDE = 0;
 /** ...rises above its grow point by size^GROW_UP (the bust is in the way)... */
 export const GROW_UP = 0.25;
 /** ...and stretches DOWN below it by size^GROW_SAG: the weight fills the bottom and hangs. */
-export const GROW_SAG = 0.6;
+export const GROW_SAG = 0.85;
 /** ...and stands out by size^GROW_DEEP of the full bump's depth. */
 export const GROW_DEEP = 0.75;
+/** ...and the push relaxed over the skin this many times, so it comes out one round curve. */
+export const GROW_RELAX = 180;
 /** Flat keeps this much of the bump: enough for the navel. */
 export const FLAT_KEEP = 0.05;
 /** Under the bump, its pull carries on down past the pubis and fades out over this, metres. */
@@ -79,10 +81,26 @@ export const MOUND_M = 0.025;
 
 /** The motion targets' names: the bump's weight, driven by a renderer's spring. */
 export const MOTION_TARGETS = Object.freeze({ tilt: 'bellyTilt', bob: 'bellyBob', sway: 'bellySway' });
-/** bellyTilt at weight 1 pitches the bump front-down by this, radians (0.1 = 5.7°). */
-export const MOTION_TILT_RAD = 0.1;
+/**
+ * bellyTilt at weight 1 is the weight's full droop, what the lab calls 20° (Joshua:
+ * 200% tilts 20°): the bump's lower front dropped MOTION_SAG_M, leaning forward by
+ * MOTION_SAG_FORWARD. It began as a rigid turn and became a sag (see `sag` below).
+ */
+export const MOTION_TILT_RAD = (20 * Math.PI) / 180;
+export const MOTION_SAG_M = 0.06;
+export const MOTION_SAG_FORWARD = (30 * Math.PI) / 180;
 /** bellyBob and bellySway at weight 1 move the bump this far, metres. */
 export const MOTION_BOB_M = 0.01;
+
+/** The breast targets: their size at the two ends of the breast scale (the model's own is the middle). */
+export const BREAST_TARGETS = Object.freeze({ small: 'breast0', big: 'breast100' });
+/** breast0 is this much of the model's breasts... */
+export const BREAST_SMALL = 0.85;
+/** ...and breast100 this much (about a cup and a half more). */
+export const BREAST_BIG = 1.3;
+/** A breast's reach from its tip to the chest wall, and its radius, metres (measured on her: about 10 cm and 7.5 cm). */
+export const BREAST_DEPTH_M = 0.1;
+export const BREAST_RADIUS_M = 0.075;
 
 const COL = 0.01;
 
@@ -384,7 +402,7 @@ export function bellyMorph(doc, { log = () => {} } = {}) {
   };
   const cellTheta = (ca) => ca * DA - SECTOR, cellY = (cy) => yBot + cy * DY;
   // the share of each bit of bump a smaller belly KEEPS (1 = all of it), blurred
-  const fullBlur = blurGrid(field, 4);
+  const fullBlur = blurGrid(field, 7);
   const keepGrid = (size) => {
     const g = new Float32Array(ga * gh).fill(1);
     for (let cy = 0; cy < gh; cy += 1) for (let ca = 0; ca < ga; ca += 1) {
@@ -397,7 +415,7 @@ export function bellyMorph(doc, { log = () => {} } = {}) {
   // A BIGGER BELLY THAN THE MASTER (Joshua, the same night: "can we make the belly
   // stretch bigger than the current max... and let it naturally sag more at the
   // bottom so I can use in other games with twins, triplets"). The same bump, grown
-  // from the full-term grow point: deeper by its size, wider by size^GROW_WIDE, a
+  // from the full-term grow point: deeper (size^GROW_DEEP), no wider (GROW_WIDE 0), a
   // little taller above (size^GROW_UP, the bust is in the way) and stretched DOWN
   // below by size^GROW_SAG, so the extra weight fills the bottom and hangs. The grown
   // height is a grid too, blurred, and a vertex is pushed out to it along its own
@@ -419,7 +437,7 @@ export function bellyMorph(doc, { log = () => {} } = {}) {
   // from the spine's axis to the front of the full bump
   const growC = (() => {
     const t = torso(peakY);
-    return { y: peakY - 0.02, z: t.axis + 0.35 * (frontC[peak] - t.axis) };
+    return { y: peakY - 0.05, z: t.axis + 0.35 * (frontC[peak] - t.axis) };
   })();
   const deltaFor = (size) => {
     const delta = new Float32Array(n * 3);
@@ -442,22 +460,33 @@ export function bellyMorph(doc, { log = () => {} } = {}) {
       const upF = smooth(yt, yt - topFade, y);
       let pull;
       if (grow) {
-        if (y < yBot - 0.01 || rho < oval - 0.04) continue;
+        if (y < yBot - UNDER_M || rho < oval - 0.05) continue;
         const h = rho - oval;
         // how much MORE bump there is here than at full term, from two blurred grids:
         // smooth everywhere, and added to the skin as it is, so the navel and the
-        // curve of her own belly ride out on top of it
-        const extra = readGrid(big, theta, y) - readGrid(fullBlur, theta, y);
-        // the bust sits on a big belly: a long fade under it, so no ledge; and a slow
-        // start over the pubis, so the underside curves back in to it
+        // curve of her own belly ride out on top of it. Under the pubis line there is
+        // no grid; the skin there takes the bottom row's
+        const ye = Math.max(y, yBot + 0.05); // the skin over the pubis takes the growth from just above it, filling the pocket under the bump
+        const extra = readGrid(big, theta, ye) - readGrid(fullBlur, theta, ye);
+        // the bust sits on a big belly: a long fade under it, so no ledge. And A
+        // TEARDROP AT THE BOTTOM (Joshua, 2026-10-07: "past 100%, smooth out more along
+        // the bottom of the belly and pubic area to look smoother and like a teardrop"):
+        // the growth tapers down over the pubis and past it, so the underside runs
+        // smoothly into the mound as the point of a drop, never tucks in under itself
         const out = Math.max(0, extra) * smooth(yt, yt - 0.14, y) * side
-          * smooth(yBot - 0.01, yBot + 0.12, y) * smooth(-0.04, 0, h);
+          * smooth(yBot - UNDER_M, yBot + 0.07, y) * smooth(-0.05, 0, h);
         if (!(out > 0)) continue;
-        // OUT FROM THE BUMP'S OWN MIDDLE, not from her spine: the lower half grows
+        // OUT FROM THE BUMP'S OWN MIDDLE, seen from the side: the lower half grows
         // forward AND down, so its underside comes out round and hangs over the pubis
-        // (the sag); the upper half grows forward, never up into the bust
-        let dx = x, dy = y - growC.y, dzz = z - growC.z;
+        // (the sag); the upper half grows forward, never up into the bust; nothing grows
+        // sideways; and at the very bottom the drop turns to forward, so the point of
+        // the teardrop is not pushed down into the thighs
+        const dx = 0;
+        // (always leaning forward: on her flanks, level with the middle, a direction that
+        // flipped from forward to straight down within millimetres tore the skin)
+        let dy = y - growC.y, dzz = Math.max(0, z - growC.z) + 0.06;
         if (dy > 0) dy *= 0.15;
+        else dy *= smooth(yBot - 0.02, yBot + 0.12, y);
         const l = Math.hypot(dx, dy, dzz) || 1;
         delta[i * 3] = (dx / l) * out;
         delta[i * 3 + 1] = (dy / l) * out;
@@ -572,8 +601,59 @@ export function bellyMorph(doc, { log = () => {} } = {}) {
   const names = [...(extras.targetNames || [])];
   const weights = [...(mesh.getWeights() || [])];
   const report = [];
+  // A GROWN BELLY IS RELAXED OVER THE SKIN ITSELF: each vertex's push eased toward its
+  // neighbours' many times, the skin past the bump held still. A push worked out from
+  // a grid and a few fades leaves corners where they meet (a flat front, a shelf under
+  // it); relaxed over the mesh, the same growth comes out as one round curve.
+  let weldCache = null;
+  const welded = () => {
+    if (weldCache) return weldCache;
+    const map = new Map(), rep = new Int32Array(n);
+    for (let i = 0; i < n; i += 1) {
+      const k = `${Math.round(pos[i * 3] * 1e5)},${Math.round(pos[i * 3 + 1] * 1e5)},${Math.round(pos[i * 3 + 2] * 1e5)}`;
+      if (!map.has(k)) map.set(k, i);
+      rep[i] = map.get(k);
+    }
+    const nb = new Map();
+    const link = (a, b) => { if (a === b) return; if (!nb.has(a)) nb.set(a, new Set()); nb.get(a).add(b); };
+    const ix = prim.getIndices().getArray();
+    for (let f = 0; f < ix.length; f += 3) {
+      const a = rep[ix[f]], b = rep[ix[f + 1]], c = rep[ix[f + 2]];
+      link(a, b); link(a, c); link(b, a); link(b, c); link(c, a); link(c, b);
+    }
+    weldCache = { rep, nb: new Map([...nb].map(([k, v]) => [k, [...v]])) };
+    return weldCache;
+  };
+  const relax = (delta, iterations) => {
+    const { rep, nb } = welded();
+    const region = new Set();
+    for (let i = 0; i < n; i += 1) if (delta[i * 3] !== 0 || delta[i * 3 + 1] !== 0 || delta[i * 3 + 2] !== 0) region.add(rep[i]);
+    // the skin just past the push may be drawn along a little, so the edge eases too
+    for (let ring = 0; ring < 3; ring += 1) for (const r of [...region]) for (const u of nb.get(r) || []) region.add(u);
+    const list = [...region];
+    let cur = new Float32Array(n * 3);
+    for (let i = 0; i < n; i += 1) if (rep[i] === i) for (let a = 0; a < 3; a += 1) cur[i * 3 + a] = delta[i * 3 + a];
+    for (let it = 0; it < iterations; it += 1) {
+      const next = new Float32Array(cur);
+      for (const r of list) {
+        const ns = nb.get(r);
+        if (!ns || !ns.length) continue;
+        let x = 0, y = 0, z = 0;
+        for (const u of ns) { x += cur[u * 3]; y += cur[u * 3 + 1]; z += cur[u * 3 + 2]; }
+        next[r * 3] = 0.5 * cur[r * 3] + (0.5 * x) / ns.length;
+        next[r * 3 + 1] = 0.5 * cur[r * 3 + 1] + (0.5 * y) / ns.length;
+        next[r * 3 + 2] = 0.5 * cur[r * 3 + 2] + (0.5 * z) / ns.length;
+      }
+      cur = next;
+    }
+    const out = new Float32Array(n * 3);
+    for (let i = 0; i < n; i += 1) for (let a = 0; a < 3; a += 1) out[i * 3 + a] = cur[rep[i] * 3 + a];
+    return out;
+  };
   for (const [name, size] of KEYS) {
-    const { delta, moved, most } = deltaFor(size);
+    const made = deltaFor(size);
+    const { moved, most } = made;
+    const delta = size > 1 ? relax(made.delta, GROW_RELAX) : made.delta;
     const ndelta = normalDelta(delta);
     for (const p of mesh.listPrimitives()) {
       const count = p.getAttribute('POSITION').getCount();
@@ -591,7 +671,7 @@ export function bellyMorph(doc, { log = () => {} } = {}) {
   // downward like 1-3° to look heavy"). Three more targets, each a small motion of
   // the full bump with its edges held still, for a renderer to drive with a spring
   // and a resting tilt (`bellyMotionWeights` in the Sarah Lab):
-  //   bellyTilt  the bump pitched front-down by MOTION_TILT_RAD about its own centre
+  //   bellyTilt  the bump's weight: its lower front dropped and eased (the lab's "20°")
   //   bellyBob   the bump dropped MOTION_BOB_M (a bounce, either sign)
   //   bellySway  the bump moved MOTION_BOB_M to her left (either sign)
   // The hold is a mask from the full field: nothing at the bump's edge (the waist,
@@ -607,24 +687,51 @@ export function bellyMorph(doc, { log = () => {} } = {}) {
     if (Math.abs(theta) > SECTOR || rho <= oval) continue;
     mask[i] = smooth(0.003, 0.06, rho - oval) * smooth(yBot, yBot + 0.05, y) * smooth(yt, yt - 0.06, y) * smooth(SECTOR, SECTOR - 0.5, Math.abs(theta));
   }
-  const pivotY = peakY, pivotZ = torso(peakY).axis;
-  const cs = Math.cos(MOTION_TILT_RAD), sn = Math.sin(MOTION_TILT_RAD);
   const motions = [
-    [MOTION_TARGETS.tilt, (i, out) => {
-      const y = pos[i * 3 + 1] - pivotY, z = pos[i * 3 + 2] - pivotZ;
-      out[0] = 0; out[1] = (y * cs - z * sn) - y; out[2] = (y * sn + z * cs) - z;
-    }],
+    [MOTION_TARGETS.tilt, null], // the sag: built on its own below
     [MOTION_TARGETS.bob, (i, out) => { out[0] = 0; out[1] = -MOTION_BOB_M; out[2] = 0; }],
     [MOTION_TARGETS.sway, (i, out) => { out[0] = MOTION_BOB_M; out[1] = 0; out[2] = 0; }],
   ];
   const d3 = [0, 0, 0];
-  for (const [name, at] of motions) {
+  // THE WEIGHT AS A SAG, NOT A SWING (Joshua, 2026-10-07, on 200% tilted 20°: "still
+  // looks too sharp and could be smoother… at the bottom of the belly"). A rigid turn
+  // about the bump's middle swung its bottom back into the pubis, where the hold ended
+  // within 5 cm, and pinched it into a lip; it also flattened the front. So the weight
+  // drops the bump instead: the lower front most, down and a little forward, the top
+  // under the bust a third as much, fading out over the pubis and the bust, and the
+  // whole of it relaxed over the skin so it comes out one smooth curve.
+  const SAG_SECTOR = (75 * Math.PI) / 180;
+  const sag = () => {
     const delta = new Float32Array(n * 3);
+    const dirY = -Math.cos(MOTION_SAG_FORWARD), dirZ = Math.sin(MOTION_SAG_FORWARD);
     for (let i = 0; i < n; i += 1) {
-      if (!(mask[i] > 0)) continue;
-      at(i, d3);
-      for (let a = 0; a < 3; a += 1) delta[i * 3 + a] = d3[a] * mask[i];
+      const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2];
+      if (y <= yBot - 0.015 || y >= yTop) continue;
+      const yt = topAt(x);
+      if (y >= yt) continue;
+      const t = torso(y);
+      const theta = Math.atan2(x, z - t.axis), rho = Math.hypot(x, z - t.axis), oval = ovalAt(theta, t);
+      // the front of the belly only: a sag that reached round her flanks moved her back
+      if (Math.abs(theta) > SAG_SECTOR) continue;
+      // most in the lower middle, easing out both ways: to the pubis slowly (so the
+      // underside stays round, not a shelf) and to the bust to a third
+      const height = smooth(yBot - 0.015, growC.y - 0.06, y) * (0.35 + 0.65 * (1 - smooth(growC.y - 0.06, yt, y)));
+      const w = height * smooth(-0.02, 0.06, rho - oval) * smooth(yt, yt - 0.08, y) * smooth(SAG_SECTOR, SAG_SECTOR - 0.6, Math.abs(theta));
+      if (!(w > 0)) continue;
+      delta[i * 3 + 1] = dirY * MOTION_SAG_M * w;
+      delta[i * 3 + 2] = dirZ * MOTION_SAG_M * w;
     }
+    return relax(delta, 150);
+  };
+  for (const [name, at] of motions) {
+    let delta = new Float32Array(n * 3);
+    if (at) {
+      for (let i = 0; i < n; i += 1) {
+        if (!(mask[i] > 0)) continue;
+        at(i, d3);
+        for (let a = 0; a < 3; a += 1) delta[i * 3 + a] = d3[a] * mask[i];
+      }
+    } else delta = sag();
     for (const p of mesh.listPrimitives()) {
       const count = p.getAttribute('POSITION').getCount();
       const t = doc.createPrimitiveTarget(name);
@@ -635,6 +742,61 @@ export function bellyMorph(doc, { log = () => {} } = {}) {
     names.push(name);
     weights.push(0);
   }
+  // THE BREASTS GROW WITH THE BUMP (Joshua, 2026-10-07: "normally when pregnant the
+  // breast size gets bigger": belly 50% with breasts 25%, 100% with 50%, 150% with
+  // 75%, 200% with 100%). The model's own breasts are 50%; two targets reach either
+  // end, `breast0` (BREAST_SMALL of their size) and `breast100` (BREAST_BIG), and the
+  // lab sets them from the bump. Each breast is found from its own tip (the most
+  // forward point above its column's crease, either side of the centre) and scaled out
+  // from a base behind it, fading to nothing at its edges and above the crease under
+  // it, so the chest, the armpit and the belly never move; then relaxed over the skin.
+  const tips = [1, -1].map((side) => {
+    let best = -1;
+    for (let i = 0; i < n; i += 1) {
+      const x = side * pos[i * 3], y = pos[i * 3 + 1];
+      if (x < 0.03 || x > 0.2 || y < topAt(pos[i * 3]) + 0.01 || y > chestY + 0.25) continue;
+      if (best < 0 || pos[i * 3 + 2] > pos[best * 3 + 2]) best = i;
+    }
+    return best;
+  });
+  const breastTarget = (scale) => {
+    const delta = new Float32Array(n * 3);
+    for (const tip of tips) {
+      if (tip < 0) continue;
+      const tx = pos[tip * 3], ty = pos[tip * 3 + 1], tz = pos[tip * 3 + 2];
+      // the base: behind the tip on the chest wall; the ball the breast is: centred
+      // between them, a little high (a breast hangs from its top)
+      const bx = tx, by = ty + 0.015, bz = tz - BREAST_DEPTH_M;
+      const cx = tx, cy = ty + 0.02, cz = tz - BREAST_DEPTH_M * 0.55;
+      for (let i = 0; i < n; i += 1) {
+        const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2];
+        if (Math.sign(x) !== Math.sign(tx)) continue;
+        const d = Math.hypot(x - cx, y - cy, z - cz);
+        if (d > BREAST_RADIUS_M * 1.4) continue;
+        const crease = topAt(x);
+        const w = (1 - smooth(BREAST_RADIUS_M * 0.75, BREAST_RADIUS_M * 1.35, d)) * smooth(cz - 0.02, cz + 0.02, z) * smooth(crease - 0.005, crease + 0.03, y);
+        if (!(w > 0)) continue;
+        delta[i * 3] += (scale - 1) * (x - bx) * w;
+        delta[i * 3 + 1] += (scale - 1) * (y - by) * w;
+        delta[i * 3 + 2] += (scale - 1) * (z - bz) * w;
+      }
+    }
+    return relax(delta, 40);
+  };
+  for (const [name, scale] of [[BREAST_TARGETS.small, BREAST_SMALL], [BREAST_TARGETS.big, BREAST_BIG]]) {
+    const delta = breastTarget(scale);
+    const ndelta = normalDelta(delta);
+    for (const p of mesh.listPrimitives()) {
+      const count = p.getAttribute('POSITION').getCount();
+      const t = doc.createPrimitiveTarget(name);
+      t.setAttribute('POSITION', doc.createAccessor().setType('VEC3').setBuffer(buffer).setArray(p === prim ? delta : new Float32Array(count * 3)));
+      t.setAttribute('NORMAL', doc.createAccessor().setType('VEC3').setBuffer(buffer).setArray(p === prim ? ndelta : new Float32Array(count * 3)));
+      p.addTarget(t);
+    }
+    names.push(name);
+    weights.push(0);
+  }
+  report.push(`breasts: tips at ${tips.map((t) => (t < 0 ? 'none' : `(${pos[t * 3].toFixed(3)}, ${pos[t * 3 + 1].toFixed(2)})`)).join(' and ')}, ${BREAST_SMALL}x to ${BREAST_BIG}x`);
   report.push(`motion: tilt, bob, sway over ${mask.filter((w) => w > 0).length.toLocaleString()} vertices`);
   mesh.setExtras({ ...extras, targetNames: names });
   mesh.setWeights(weights);

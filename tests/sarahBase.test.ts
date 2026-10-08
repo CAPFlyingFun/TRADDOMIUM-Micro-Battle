@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest';
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { MeshoptDecoder } from 'meshoptimizer';
-import { BELLY_KEYS, BELLY_MOTION, BELLY_SPRING, BELLY_TARGET, bellyMotionWeights, restingBellySpring, stepBellySpring, walkBounceAccel, GARMENTS, SARAH_BASE_MODEL, bellyWeights, bumpLine, fingersLine, sarahLabTool, statusLine } from '../src/sarahlab/sarahLabTool';
+import { BELLY_KEYS, BELLY_MOTION, BELLY_SPRING, BELLY_TARGET, bellyMotionWeights, breastWeights, fingerBend, FINGER_LIMITS_DEG, restingBellySpring, stepBellySpring, walkBounceAccel, GARMENTS, SARAH_BASE_MODEL, bellyWeights, bumpLine, fingersLine, sarahLabTool, statusLine } from '../src/sarahlab/sarahLabTool';
 
 async function load() {
   await MeshoptDecoder.ready;
@@ -30,7 +30,9 @@ describe('the base mannequin (public/models/sarah-base.glb)', () => {
     for (const g of GARMENTS) expect(names).toContain(g);
     for (const name of [BELLY_MOTION.tilt, BELLY_MOTION.bob, BELLY_MOTION.sway]) expect(names0).toContain(name);
     // the four sizes and the three motions, on every primitive, so the clothes move with her
-    for (const p of mesh.listPrimitives()) expect(p.listTargets().length).toBe(BELLY_KEYS.length - 1 + 3);
+    for (const name of ['breast0', 'breast100']) expect(names0).toContain(name);
+    // the six sizes, the three motions and the two breast ends, on every primitive, so the clothes move with her
+    for (const p of mesh.listPrimitives()) expect(p.listTargets().length).toBe(BELLY_KEYS.length - 1 + 3 + 2);
   }, 60000);
 
   it('the flat key draws the bump in by several centimetres and leaves the back, the bust and the legs alone', async () => {
@@ -88,7 +90,8 @@ describe("the bump's weight (motion targets)", () => {
         if (moved > 0.001 && (v[2] * s * metres < -0.08 || y > 1.3 || y < 0.7)) stray += 1;
       }
       expect(most, name).toBeGreaterThan(0.005);
-      expect(most, name).toBeLessThan(0.04);
+      // a bounce or a sway is a centimetre; the tilt is a true 20° turn of the whole bump
+      expect(most, name).toBeLessThan(name === BELLY_MOTION.tilt ? 0.12 : 0.04);
       expect(stray, name).toBe(0);
       // the lab reads the bake's sizes from BELLY_MOTION: they must be the same numbers
       if (name !== BELLY_MOTION.tilt) expect(most, name).toBeCloseTo(BELLY_MOTION.bobM, 3);
@@ -134,7 +137,15 @@ describe('the bump\'s spring', () => {
     expect(still[BELLY_MOTION.bob]).toBe(0);
     const half = bellyMotionWeights(50, 2, restingBellySpring());
     expect(half[BELLY_MOTION.tilt]).toBeCloseTo((0.5 * 2 * Math.PI) / 180 / BELLY_MOTION.tiltRad, 6);
-    expect(bellyMotionWeights(100, 99, restingBellySpring())[BELLY_MOTION.tilt]).toBeCloseTo(still[BELLY_MOTION.tilt], 6);
+    // up to 10°, and a bigger belly tilts by the slider's degrees, not twice them
+    const ten = (10 * Math.PI) / 180 / BELLY_MOTION.tiltRad;
+    expect(bellyMotionWeights(100, 99, restingBellySpring())[BELLY_MOTION.tilt]).toBeCloseTo(ten, 6);
+    // past 100% the size tilts it by itself, evenly to 20° at 200%, on top of the slider
+    const deg = (d: number) => (d * Math.PI) / 180 / BELLY_MOTION.tiltRad;
+    expect(bellyMotionWeights(100, 0, restingBellySpring())[BELLY_MOTION.tilt]).toBe(0);
+    expect(bellyMotionWeights(150, 0, restingBellySpring())[BELLY_MOTION.tilt]).toBeCloseTo(deg(10), 6);
+    expect(bellyMotionWeights(200, 0, restingBellySpring())[BELLY_MOTION.tilt]).toBeCloseTo(deg(20), 6);
+    expect(bellyMotionWeights(200, 10, restingBellySpring())[BELLY_MOTION.tilt]).toBeCloseTo(deg(30), 6);
   });
 
   it("adds a walk's bounce, two a stride", () => {
@@ -142,6 +153,25 @@ describe('the bump\'s spring', () => {
     expect(walkBounceAccel(0.25, 1)).toBeGreaterThan(0);
     expect(walkBounceAccel(0.5, 1)).toBeCloseTo(walkBounceAccel(0, 1), 9);
     expect(walkBounceAccel(0.3, 0)).toBe(0);
+  });
+});
+
+describe("Sarah's fingers in the lab", () => {
+  it('bend each joint only toward the palm and only as far as a hand can: never backward, never past its limit', () => {
+    const deg = (r: number) => (r * 180) / Math.PI;
+    for (const thumb of [false, true]) {
+      const limits = thumb ? FINGER_LIMITS_DEG.thumb : FINGER_LIMITS_DEG.finger;
+      limits.forEach((limit, k) => {
+        expect(fingerBend(0, k, thumb)).toBe(0);
+        expect(deg(fingerBend(100, k, thumb))).toBeCloseTo(limit, 6);
+        expect(deg(fingerBend(50, k, thumb))).toBeCloseTo(limit / 2, 6);
+        expect(fingerBend(-40, k, thumb)).toBe(0); // no bending back
+        expect(deg(fingerBend(250, k, thumb))).toBeCloseTo(limit, 6); // no bending past
+      });
+    }
+    // a fist no longer folds a finger 240° into its own palm, and the thumb's base barely bends
+    expect(FINGER_LIMITS_DEG.finger.reduce((a, b) => a + b, 0)).toBeLessThanOrEqual(220);
+    expect(FINGER_LIMITS_DEG.thumb[0]).toBeLessThan(FINGER_LIMITS_DEG.thumb[1]);
   });
 });
 
@@ -188,6 +218,12 @@ describe('the Sarah Lab', () => {
     expect(bellyWeights(125).belly150).toBeCloseTo(0.5);
     expect(bellyWeights(500)).toMatchObject({ belly200: 1, belly150: 0 });
     expect(bumpLine(160)).toMatch(/past full term/);
+    // the breasts at half the bump: 25% at 50, the model's own at 100, 100% at 200
+    expect(breastWeights(50)).toEqual({ breast0: 0.5, breast100: 0 });
+    expect(breastWeights(100)).toEqual({ breast0: 0, breast100: 0 });
+    expect(breastWeights(150)).toEqual({ breast0: 0, breast100: 0.5 });
+    expect(breastWeights(200)).toEqual({ breast0: 0, breast100: 1 });
+    expect(bumpLine(150)).toMatch(/breasts 75%/);
     expect(bumpLine(100)).toMatch(/as modelled/);
     expect(bumpLine(0)).toMatch(/nearly flat/);
     expect(fingersLine(100)).toMatch(/fist/);

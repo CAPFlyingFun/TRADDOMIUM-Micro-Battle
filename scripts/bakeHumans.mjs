@@ -94,6 +94,8 @@ import { paintSarah } from './paintSarah.mjs';
 import { smoothLegWeights } from './smoothLegWeights.mjs';
 import { bakeBadge } from './bakeBadge.mjs';
 import { smoothSeatWeights } from './smoothSeatWeights.mjs';
+import { smoothArmpitWeights } from './smoothArmpitWeights.mjs';
+import { smoothHandWeights } from './smoothHandWeights.mjs';
 import { protectBumpWeights } from './protectBumpWeights.mjs';
 import { rigFingers } from './rigFingers.mjs';
 import { bellyMorph } from './bellyMorph.mjs';
@@ -283,7 +285,7 @@ const HUMANS = [
   // grows a fitted shirt and leggings from her skin (growClothes.mjs), after the
   // same weight passes her toon body needs.
   {
-    master: 'Sarah-Base.glb', out: 'sarah-base.glb', who: 'Sarah (base)', panel: null, repair: false, authored: true, smoothLegs: true, reach: Infinity, smoothSeat: true, protectBump: true, bellyMorph: true, clothes: true,
+    master: 'Sarah-Base.glb', out: 'sarah-base.glb', who: 'Sarah (base)', panel: null, repair: false, authored: true, smoothLegs: true, reach: Infinity, smoothSeat: true, smoothArmpits: true, smoothHands: true, protectBump: true, bellyMorph: true, clothes: true,
   },
 ];
 
@@ -1022,6 +1024,12 @@ async function main() {
     // Seated, a hem and the cloth under it are rigged to different bones and
     // z-fight; smoothing the weights in space folds them together.
     if (human.smoothSeat) smoothSeatWeights(doc, { log: (line) => console.log(`[bake:humans]   ${human.who}: ${line}`) });
+    // Arms down, a master whose weights step from chest to arm in millimetres tears
+    // a ragged armpit; smoothing them in space round the shoulders folds it.
+    if (human.smoothArmpits) smoothArmpitWeights(doc, { log: (line) => console.log(`[bake:humans]   ${human.who}: ${line}`) });
+    // A knuckle whose skin changes bone in a step breaks open when the finger
+    // bends; easing the weights along the skin of the hands folds it instead.
+    if (human.smoothHands) smoothHandWeights(doc, { log: (line) => console.log(`[bake:humans]   ${human.who}: ${line}`) });
     // A pregnant bump skinned partly to the thighs collapses into the lap when
     // she sits (protectBumpWeights.mjs has the measurement). After the seat
     // pass, so its spatial average cannot carry thigh weight back up.

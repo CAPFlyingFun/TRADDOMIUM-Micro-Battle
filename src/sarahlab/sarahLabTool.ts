@@ -19,8 +19,8 @@ export const sarahLabTool: DevTool = {
   id: SARAH_LAB_TOOL_ID,
   title: 'Sarah Lab (base model)',
   description:
-    "Sarah rebuilt from the base mannequin, to try before she goes live: the BUMP slider runs from twice full term (twins and more) to "
-    + 'nearly flat, WEIGHT tilts the bump down 0 to 3° and BOUNCE (or WALK) shows it move, FINGERS curls all ten, SHIRT and LEGGINGS show the clothes grown from her body, and STAND, '
+    "Sarah rebuilt from the base mannequin, to try before she goes live: the BUMP slider runs from twice full term (twins and more, her breasts growing with it) to "
+    + 'nearly flat, WEIGHT tilts the bump down 0 to 10° and BOUNCE (or WALK) shows it move, FINGERS curls all ten, SHIRT and LEGGINGS show the clothes grown from her body, and STAND, '
     + 'WALK and SIT pose her. Drag to turn round her, pinch or scroll to come closer. Not used by the story or the game.',
   sceneId: SARAH_LAB_SCENE_ID,
 };
@@ -88,11 +88,52 @@ export function bellyWeights(bumpPercent: number): Record<string, number> {
   return out;
 }
 
+/**
+ * THE BREASTS FOLLOW THE BUMP (Joshua, 2026-10-07: belly 50% with breasts 25%, 100%
+ * with 50%, 150% with 75%, 200% with 100%): half the bump's percent. The model's own
+ * breasts are 50%; the bake's `breast0` and `breast100` are the two ends.
+ */
+export const BREAST_TARGETS = Object.freeze({ small: 'breast0', big: 'breast100' });
+export function breastPercent(bumpPercent: number): number {
+  return Math.min(BUMP_MAX_PERCENT, Math.max(0, Number.isFinite(bumpPercent) ? bumpPercent : 100)) / 2;
+}
+export function breastWeights(bumpPercent: number): Record<string, number> {
+  const b = breastPercent(bumpPercent);
+  return {
+    [BREAST_TARGETS.small]: b < 50 ? (50 - b) / 50 : 0,
+    [BREAST_TARGETS.big]: b > 50 ? (b - 50) / 50 : 0,
+  };
+}
+
 export function bumpLine(bumpPercent: number): string {
   const p = Math.round(Math.min(BUMP_MAX_PERCENT, Math.max(0, bumpPercent)));
-  if (p === 100) return 'BUMP 100% · as modelled';
-  if (p === 0) return 'BUMP 0% · nearly flat';
-  return p > 100 ? `BUMP ${p}% · past full term` : `BUMP ${p}%`;
+  const breasts = ` · breasts ${Math.round(breastPercent(p))}%`;
+  if (p === 100) return `BUMP 100% · as modelled${breasts}`;
+  if (p === 0) return `BUMP 0% · nearly flat${breasts}`;
+  return (p > 100 ? `BUMP ${p}% · past full term` : `BUMP ${p}%`) + breasts;
+}
+
+/**
+ * HOW FAR EACH FINGER JOINT BENDS AT A FULL CURL, degrees, knuckle first (Joshua,
+ * 2026-10-08: "add finger limits and try and make sure the fingers bend
+ * realistically"). It used to be 80° at every joint, so a fist bent each finger 240°
+ * into its own palm, and the thumb half that at all three joints, its base included.
+ * BIOLOGICAL SHAPE, eased for a mesh: a hand's knuckle flexes to about 90°, the middle
+ * joint 100°, the tip 70°; these stop short of that so a fist closes without the
+ * fingertips driving through the palm. The thumb's base barely bends (it swings), so
+ * most of its fold is in the two joints past it. Nothing bends backward: the slider
+ * runs 0 to 100% and a bend is never below zero.
+ */
+export const FINGER_LIMITS_DEG = Object.freeze({ finger: [70, 90, 55], thumb: [25, 45, 60] });
+/** How much the thumb's fold leans into the palm as well as across it toward the little finger. */
+export const THUMB_TO_PALM = 0.6;
+
+/** One finger joint's bend, radians, for a curl percent: never backward, never past its limit. */
+export function fingerBend(curlPercent: number, jointInChain: number, thumb: boolean): number {
+  const limits = thumb ? FINGER_LIMITS_DEG.thumb : FINGER_LIMITS_DEG.finger;
+  const limit = limits[Math.min(limits.length - 1, Math.max(0, jointInChain))];
+  const curl = Math.min(100, Math.max(0, Number.isFinite(curlPercent) ? curlPercent : 0)) / 100;
+  return curl * limit * (Math.PI / 180);
 }
 
 export function fingersLine(curlPercent: number): string {
@@ -123,8 +164,8 @@ export const BELLY_MOTION = Object.freeze({
   tilt: 'bellyTilt',
   bob: 'bellyBob',
   sway: 'bellySway',
-  /** bellyTilt at weight 1, radians (the bake's MOTION_TILT_RAD) */
-  tiltRad: 0.1,
+  /** bellyTilt at weight 1, radians (the bake's MOTION_TILT_RAD): a true 20° turn */
+  tiltRad: (20 * Math.PI) / 180,
   /** bellyBob and bellySway at weight 1, metres (the bake's MOTION_BOB_M) */
   bobM: 0.01,
 });
@@ -135,10 +176,25 @@ export const BELLY_MOTION = Object.freeze({
  * swing is about a third of the first (ζ 0.32), and never more than 1.5 cm.
  */
 export const BELLY_SPRING = Object.freeze({ hz: 2.2, damping: 0.32, maxM: 0.015, maxAccel: 40 });
-/** At rest the tilt the weight slider sets for the model's own belly, degrees, from 0 to this (a bigger one tilts by its size). */
-export const BELLY_TILT_MAX_DEG = 3;
+/**
+ * The weight slider's tilt, degrees front-down, from 0 to this. It was 3°; Joshua
+ * asked for more on the big sizes (2026-10-07: "maybe just add a tilt in the belly
+ * direction downwards like 10° or so"). A belly smaller than the model's tilts in
+ * proportion; the model's and bigger tilt by the slider's degrees.
+ */
+export const BELLY_TILT_MAX_DEG = 10;
+/**
+ * Past the model's own belly the weight tilts it by itself (Joshua, 2026-10-07: "no
+ * tilt until 100% then 200% = 20°"): rising evenly from none at 100% to 20° at 200%,
+ * a fifth of a degree for every percent over 100. The WEIGHT slider adds to it, from 0.
+ */
+export const SIZE_TILT_DEG_PER_PERCENT = 0.2;
+export function sizeTiltDeg(bumpPercent: number): number {
+  const p = Math.min(BUMP_MAX_PERCENT, Math.max(100, Number.isFinite(bumpPercent) ? bumpPercent : 100));
+  return (p - 100) * SIZE_TILT_DEG_PER_PERCENT;
+}
 /** Each centimetre the bump drops also pitches it this many tilt-target weights: it swings, not slides. */
-const BOUNCE_TILT = 0.25;
+const BOUNCE_TILT = 0.25 * (0.1 / ((20 * Math.PI) / 180)); // the same swing as before the tilt target became 20°
 
 /** The bump's displacement from where it hangs, metres (y down, x to her left), and how fast. */
 export interface BellySpring { y: number; vy: number; x: number; vx: number }
@@ -189,7 +245,7 @@ export function bellyMotionWeights(bumpPercent: number, tiltDeg: number, s: Bell
   const tilt = Math.min(BELLY_TILT_MAX_DEG, Math.max(0, tiltDeg)) * (Math.PI / 180);
   const bob = s.y / BELLY_MOTION.bobM;
   return {
-    [BELLY_MOTION.tilt]: size * (tilt / BELLY_MOTION.tiltRad + BOUNCE_TILT * bob),
+    [BELLY_MOTION.tilt]: (Math.min(1, size) * tilt + sizeTiltDeg(bumpPercent) * (Math.PI / 180)) / BELLY_MOTION.tiltRad + size * BOUNCE_TILT * bob,
     [BELLY_MOTION.bob]: size * bob,
     [BELLY_MOTION.sway]: size * (s.x / BELLY_MOTION.bobM),
   };
@@ -197,5 +253,5 @@ export function bellyMotionWeights(bumpPercent: number, tiltDeg: number, s: Bell
 
 export function weightLine(tiltDeg: number): string {
   const d = Math.min(BELLY_TILT_MAX_DEG, Math.max(0, tiltDeg));
-  return d === 0 ? 'WEIGHT · no tilt' : `WEIGHT · ${d.toFixed(1)}° down at full term`;
+  return d === 0 ? 'WEIGHT · no tilt' : `WEIGHT · tilts ${d.toFixed(1)}° down`;
 }

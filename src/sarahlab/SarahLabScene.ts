@@ -8,10 +8,11 @@
  * BACK control, one model. What it shows is what the bake put in the file:
  *
  *   BUMP      the belly morph targets (`scripts/bellyMorph.mjs`): 100% is the
- *             master as modelled, 200% twice that (twins and more), 0% nearly flat, round all the way between. Every primitive that
+ *             master as modelled, 200% twice that (twins and more), 0% nearly flat;
+ *             her breasts follow at half its percent (`breastWeights`), round all the way between. Every primitive that
  *             carries the target follows it, so the clothes grown from her
  *             body shrink with it.
- *   WEIGHT    the bump's resting tilt, 0 to 3° front-down, and a spring that
+ *   WEIGHT    the bump's resting tilt, 0 to 10° front-down, and a spring that
  *             lets it lag and settle as she moves (the bake's motion targets,
  *             `stepBellySpring`); BOUNCE gives it a nudge to watch it settle.
  *   FINGERS   all ten curled together, toward the palm: the master's own
@@ -35,15 +36,13 @@ import { HumanRig, findSkinnedMesh } from '../view/HumanRig';
 import { UNITS_PER_METRE } from '../world/dem';
 import {
   BELLY_MOTION, BELLY_TARGET, BELLY_TILT_MAX_DEG, BUMP_MAX_PERCENT, GARMENTS, SARAH_BASE_MODEL, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID,
-  bellyMotionWeights, bellyWeights, bumpLine, fingersLine, restingBellySpring, statusLine, stepBellySpring, walkBounceAccel, weightLine,
+  bellyMotionWeights, bellyWeights, breastWeights, fingerBend, THUMB_TO_PALM, bumpLine, fingersLine, restingBellySpring, statusLine, stepBellySpring, walkBounceAccel, weightLine,
   type Garment, type SarahLabPose,
 } from './sarahLabTool';
 
 const M = UNITS_PER_METRE;
 /** A walk on the spot, metres a second: an unhurried pace. */
 const WALK_SPEED = 1.1;
-/** A full fist, per finger joint. */
-const FIST = (80 * Math.PI) / 180;
 
 export interface SarahLabHooks {
   onBack(): void;
@@ -101,8 +100,14 @@ function findFingers(bind: readonly BindJoint[], measure: HumanMeasure): Finger[
       const joints = chain.slice(0, -1);
       if (joints.length === 0) continue;
       const dir = at(chain[chain.length - 1]).sub(at(chain[0])).normalize();
-      const axis = new THREE.Vector3().crossVectors(dir, palm).normalize();
-      out.push({ joints, axis, thumb: i === thumbIndex });
+      const thumb = i === thumbIndex;
+      // A finger closes toward the palm. THE THUMB folds ACROSS it, toward the little
+      // finger (Joshua, 2026-10-08: "some of the fingers are bending the wrong
+      // direction like the thumb"): bent straight toward the palm from where it
+      // sits, it hooked down under the hand.
+      const toward = thumb ? palm.clone().multiplyScalar(THUMB_TO_PALM).sub(across).normalize() : palm;
+      const axis = new THREE.Vector3().crossVectors(dir, toward).normalize();
+      out.push({ joints, axis, thumb });
     }
   }
   return out;
@@ -152,8 +157,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let pose: SarahLabPose = 'stand';
   let bump = 100;
   let curl = 0;
-  /** The weight slider, 0..100 of BELLY_TILT_MAX_DEG: two degrees to start. */
-  let weight = 67;
+  /** The weight slider, 0..100 of BELLY_TILT_MAX_DEG, added to the size's own tilt: none to start. */
+  let weight = 0;
   const spring = restingBellySpring();
   /** A point at the front of her middle, in the spine bone's frame: what the spring feels move. */
   let feel: { bone: THREE.Bone; local: THREE.Vector3 } | null = null;
@@ -226,7 +231,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   function applyLook(): void {
     for (const mesh of skinned) {
       const dict = mesh.morphTargetDictionary, influences = mesh.morphTargetInfluences;
-      if (dict && influences) for (const [name, w] of Object.entries(bellyWeights(bump))) {
+      if (dict && influences) for (const [name, w] of Object.entries({ ...bellyWeights(bump), ...breastWeights(bump) })) {
         const at = dict[name];
         if (at !== undefined) influences[at] = w;
       }
@@ -352,10 +357,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       base = poseHuman(measure, rig.bind, { stance, phase, seconds, lean: 0 }, poseOut);
     }
     if (curl <= 0 || fingers.length === 0) return base;
-    const k = (curl / 100) * FIST;
     const extra: JointTurn[] = [];
     for (const f of fingers) {
-      for (const j of f.joints) extra.push({ joint: j, ax: f.axis.x, ay: f.axis.y, az: f.axis.z, radians: k * (f.thumb ? 0.5 : 1) });
+      f.joints.forEach((j, k) => extra.push({ joint: j, ax: f.axis.x, ay: f.axis.y, az: f.axis.z, radians: fingerBend(curl, k, f.thumb) }));
     }
     return [...base, ...extra];
   }
