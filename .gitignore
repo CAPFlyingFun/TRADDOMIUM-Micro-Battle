@@ -52,6 +52,10 @@ art/humans/*
 # the only copies, so tracked.
 !art/humans/ref/
 !art/humans/ref/*.jpg
+# Outfit reference sheets (eight-view turnarounds) that growClothes paints its
+# garments from (scripts/paintGarment.mjs). Committed: the bake reads them.
+!art/humans/outfits/
+!art/humans/outfits/*.png
 
 # The occlusion bake, derived from a master and cached so the next run does
 # not pay two minutes a body for it again.

@@ -105,9 +105,11 @@ export const BREAST_SPRING = Object.freeze({ hz: 2.8, damping: 0.28, maxM: 0.012
 export function stepBreastSpring(s: BellySpring, dt: number, upAccel: number, leftAccel: number): BellySpring {
   return stepSpring(s, dt, upAccel, leftAccel, BREAST_SPRING);
 }
+/** How much of their spring's travel the breasts show (Joshua, 2026-10-08: "reduce the breast bounce by 55%"). GAME TUNING. */
+export const BREAST_SWING = 0.45;
 /** breastBob's weight: the spring's drop, bigger breasts swinging more. */
 export function breastBobWeight(bumpPercent: number, s: BellySpring): number {
-  return (breastPercent(bumpPercent) / 50) * (s.y / BELLY_MOTION.bobM);
+  return BREAST_SWING * (breastPercent(bumpPercent) / 50) * (s.y / BELLY_MOTION.bobM);
 }
 
 export function breastWeights(bumpPercent: number): Record<string, number> {

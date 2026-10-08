@@ -1041,7 +1041,7 @@ async function main() {
     // The bump as a slider, then clothes grown from the skin: last of the body
     // passes, so the clothes copy the final weights and the morph.
     if (human.bellyMorph) bellyMorph(doc, { log: (line) => console.log(`[bake:humans]   ${human.who}: ${line}`) });
-    if (human.clothes) growClothes(doc, { log: (line) => console.log(`[bake:humans]   ${human.who}: ${line}`) });
+    if (human.clothes) await growClothes(doc, { log: (line) => console.log(`[bake:humans]   ${human.who}: ${line}`) });
 
     await doc.transform(
       dedup(),
