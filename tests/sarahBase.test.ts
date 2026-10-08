@@ -34,7 +34,9 @@ describe('the base mannequin (public/models/sarah-base.glb)', () => {
   it('the flat key draws the bump in by several centimetres and leaves the back, the bust and the legs alone', async () => {
     const { doc, mesh } = await load();
     const body = mesh.listPrimitives().reduce((a, p) => (p.getAttribute('POSITION')!.getCount() > a.getAttribute('POSITION')!.getCount() ? p : a));
-    const P = body.getAttribute('POSITION')!, T = body.listTargets()[0].getAttribute('POSITION')!;
+    // by name: the targets are stored 75%, 50%, 25%, flat, and [0] is the 75% one
+    const flatAt = ((mesh.getExtras() as { targetNames?: string[] }).targetNames ?? []).indexOf(BELLY_TARGET);
+    const P = body.getAttribute('POSITION')!, T = body.listTargets()[flatAt].getAttribute('POSITION')!;
     // the mesh node may carry quantization's scale: read sizes through it
     const node = doc.getRoot().listNodes().find((n) => n.getMesh() === mesh)!;
     const s = node.getWorldMatrix()[5];

@@ -64,6 +64,10 @@ export const GROW_RISE = 0.25;
 export const TEARDROP = 0.6;
 /** Flat keeps this much of the bump: enough for the navel. */
 export const FLAT_KEEP = 0.05;
+/** Under the bump, its pull carries on down past the pubis and fades out over this, metres. */
+export const UNDER_M = 0.07;
+/** How far behind the full-term mound the flat body's pubis sits, metres (measured on her: the mound stood 3.4 cm proud of the thighs' front, a flat body's 1 cm). */
+export const MOUND_M = 0.025;
 
 const COL = 0.01;
 
@@ -203,9 +207,13 @@ export function bellyMorph(doc, { log = () => {} } = {}) {
     const f = Math.min(rows - 1, Math.max(0, (y - y0) / COL - 0.5)), r = Math.floor(f), t = f - r;
     return arr[r] * (1 - t) + arr[Math.min(rows - 1, r + 1)] * t;
   };
+  // ...and the flat body's pubis sits `MOUND_M` behind the full-term one: a bump at
+  // term carries the mound forward with it, and anchoring the flat front on the
+  // mound as the master has it left it standing as a stub under every smaller belly.
+  const zBotFlat = zBot - MOUND_M;
   const torso = (y) => {
     const tt = (y - yBot) / (yTop - yBot);
-    const zc = zBot + (zTop - zBot) * tt + BULGE_M * Math.sin(Math.PI * Math.min(1, Math.max(0, tt))), zb = lerpAt(backS, y);
+    const zc = zBotFlat + (zTop - zBotFlat) * tt + BULGE_M * Math.sin(Math.PI * Math.min(1, Math.max(0, tt))), zb = lerpAt(backS, y);
     const axis = (zc + zb) / 2;
     return { axis, front: zc - axis, half: Math.max(0.07, lerpAt(halfS, y)) };
   };
@@ -267,56 +275,86 @@ export function bellyMorph(doc, { log = () => {} } = {}) {
     return get(c) * (1 - t) + get(c + 1) * t;
   };
   const growY = yBot + GROW_FROM * (yTop - yBot);
+  // How far a vertex standing `h` outside the oval at (theta, y) is drawn in, before
+  // the fades: the shrunk field read against the full one.
+  const pullFor = (size, theta, y, h) => {
+    const full = heightAt(theta, y);
+    if (full < 0.001) return 0;
+    // a smaller belly's edge is soft, as a real early bump is: the shrunk field
+    // is read through a blur that widens as the belly gets smaller (in the full
+    // field's own scale, so a fixed softness on her)
+    let small = 0;
+    if (size > 0) {
+      const soft = 1 - size, sa = (0.11 * soft) / size, sy = (0.03 * soft) / size;
+      // a large bump fills up under the bust, a small one sits low: the point
+      // it grows from rises with its size
+      const gy = growY + GROW_RISE * size * (yTop - yBot);
+      // THE TEARDROP (Joshua, 2026-10-07, with three more month-by-month series):
+      // a growing bump is not a small ball sitting low but a teardrop, a long
+      // gentle slope down from under the bust, fullest low, curving back in
+      // quickly to the pubis, and only rounds out as it grows. So above the
+      // point it grows from, the bump is shrunk less in height than below it
+      // (`TEARDROP`: the upper half's scale is size^TEARDROP), blended smoothly
+      // across that point so no crease marks the change.
+      const up = size ** TEARDROP;
+      const blend = smooth(gy - 0.04, gy + 0.04, y);
+      const scaleY = size * (1 - blend) + up * blend;
+      const ta = theta / size, ty = gy + (y - gy) / scaleY;
+      let sum = 0, wsum = 0;
+      for (let da = -2; da <= 2; da += 1) for (let dy = -2; dy <= 2; dy += 1) {
+        const w = Math.exp(-(da * da + dy * dy) / 4);
+        sum += w * heightAt(ta + da * sa, ty + dy * sy);
+        wsum += w;
+      }
+      small = (size * sum) / wsum;
+    }
+    let ratio = Math.min(1, Math.max(FLAT_KEEP, small / full));
+    ratio = 1 - (1 - ratio) * smooth(0.004, 0.025, full);
+    return h * (1 - ratio);
+  };
+  // UNDER THE BUMP (Joshua, 2026-10-07: "that bottom part between the legs right
+  // under the belly isn't really moving and stands out like a stub"). A full-term
+  // bump carries the pubic mound forward with it; when the belly stopped dead at
+  // the pubis line, a smaller belly left the mound standing where the big one had
+  // pushed it. So the bump's own pull at its bottom edge carries on DOWN past the
+  // pubis, fading out over `UNDER_M` toward the crotch, on the front skin only
+  // (near the oval's surface, never the inner thighs or the seat).
+  const edgeY = yBot + 0.012;
   const deltaFor = (size) => {
     const delta = new Float32Array(n * 3);
     let moved = 0, most = 0;
     for (let i = 0; i < n; i += 1) {
       const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2];
-      if (y <= yBot || y >= yTop) continue;
+      if (y <= yBot - UNDER_M || y >= yTop) continue;
       const yt = topAt(x);
       if (y >= yt) continue;
-      const theta = polar[i * 3], rho = polar[i * 3 + 1], oval = polar[i * 3 + 2];
-      if (Math.abs(theta) > SECTOR || rho <= oval) continue;
-      const full = heightAt(theta, y);
-      if (full < 0.001) continue;
-      // a smaller belly's edge is soft, as a real early bump is: the shrunk field
-      // is read through a blur that widens as the belly gets smaller (in the full
-      // field's own scale, so a fixed softness on her)
-      let small = 0;
-      if (size > 0) {
-        const soft = 1 - size, sa = (0.11 * soft) / size, sy = (0.03 * soft) / size;
-        // a large bump fills up under the bust, a small one sits low: the point
-        // it grows from rises with its size
-        const gy = growY + GROW_RISE * size * (yTop - yBot);
-        // THE TEARDROP (Joshua, 2026-10-07, with three more month-by-month series):
-        // a growing bump is not a small ball sitting low but a teardrop, a long
-        // gentle slope down from under the bust, fullest low, curving back in
-        // quickly to the pubis, and only rounds out as it grows. So above the
-        // point it grows from, the bump is shrunk less in height than below it
-        // (`TEARDROP`: the upper half's scale is size^TEARDROP), blended smoothly
-        // across that point so no crease marks the change.
-        const up = size ** TEARDROP;
-        const blend = smooth(gy - 0.04, gy + 0.04, y);
-        const scaleY = size * (1 - blend) + up * blend;
-        const ta = theta / size, ty = gy + (y - gy) / scaleY;
-        let sum = 0, wsum = 0;
-        for (let da = -2; da <= 2; da += 1) for (let dy = -2; dy <= 2; dy += 1) {
-          const w = Math.exp(-(da * da + dy * dy) / 4);
-          sum += w * heightAt(ta + da * sa, ty + dy * sy);
-          wsum += w;
-        }
-        small = (size * sum) / wsum;
-      }
-      let ratio = Math.min(1, Math.max(FLAT_KEEP, small / full));
-      ratio = 1 - (1 - ratio) * smooth(0.004, 0.025, full);
+      const t = torso(y);
+      const dz = z - t.axis;
+      const theta = Math.atan2(x, dz), rho = Math.hypot(x, dz), oval = ovalAt(theta, t);
+      if (Math.abs(theta) > SECTOR) continue;
+      const side = smooth(SECTOR, SECTOR - 0.35, Math.abs(theta));
       // a wide fade into the chest everywhere: a 6 mm one (where no breast sits over a
       // crease) let the top of a smaller bump pull in 3 cm against a still neighbour
       const topFade = 0.045;
-      const k = smooth(yBot, yBot + 0.006, y) * smooth(yt, yt - topFade, y) * smooth(SECTOR, SECTOR - 0.35, Math.abs(theta));
-      const pull = (rho - oval) * (1 - ratio) * k;
-      if (pull <= 0) continue;
-      const t = torso(y);
-      const ux = x / rho, uz = (z - t.axis) / rho;
+      const up = smooth(yt, yt - topFade, y);
+      // under the edge the pull fades out toward the crotch
+      const down = smooth(yBot - UNDER_M, edgeY, y);
+      const yr = Math.max(y, edgeY);
+      // the skin's own pull, where it stands outside the oval
+      let pull = rho > oval ? pullFor(size, theta, yr, rho - oval) * up * down * side : 0;
+      // THE FOLD: low on the belly, where the full bump's underside tucks in over the
+      // mound, the skin inside the oval moves with the outermost skin at its height (a
+      // fold left still while the skin over it drew back stood out as a point), and
+      // under the edge that pull carries down over the mound. Only near the front
+      // surface (within a few centimetres of the oval), never between the thighs.
+      const low = 1 - smooth(yBot + 0.03, yBot + 0.07, y);
+      if (low > 0) {
+        const front = smooth(-0.035, -0.01, rho - oval);
+        const outer = pullFor(size, theta, yr, heightAt(theta, yr));
+        pull = Math.max(pull, outer * front * low * up * down * side);
+      }
+      if (!(pull > 0)) continue;
+      const ux = x / rho, uz = dz / rho;
       delta[i * 3] = -ux * pull;
       delta[i * 3 + 2] = -uz * pull;
       moved += 1;
