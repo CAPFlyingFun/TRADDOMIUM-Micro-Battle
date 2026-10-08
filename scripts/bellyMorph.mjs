@@ -92,12 +92,12 @@ export const MOTION_SAG_FORWARD = (30 * Math.PI) / 180;
 /** bellyBob and bellySway at weight 1 move the bump this far, metres. */
 export const MOTION_BOB_M = 0.01;
 
-/** The breast targets: their size at the two ends of the breast scale (the model's own is the middle). */
+/** Breast growth above the original model: normal to twice its local shape scale. */
 export const BREAST_TARGETS = Object.freeze({ small: 'breast0', big: 'breast100', bob: 'breastBob' });
 /** breast0 is this much of the model's breasts... */
-export const BREAST_SMALL = 0.85;
-/** ...and breast100 this much (about a cup and a half more). */
-export const BREAST_BIG = 1.3;
+export const BREAST_SMALL = 1;
+/** Joshua, 2026-10-08: +100% at belly 200%, +50% at belly 100%. */
+export const BREAST_BIG = 2;
 /** A breast's reach from its tip to the chest wall, and its radius, metres (measured on her: about 10 cm and 7.5 cm). */
 export const BREAST_DEPTH_M = 0.1;
 export const BREAST_RADIUS_M = 0.075;
@@ -758,8 +758,8 @@ export function bellyMorph(doc, { log = () => {} } = {}) {
     weights.push(0);
   }
   // THE BREASTS GROW WITH THE BUMP (Joshua, 2026-10-07: "normally when pregnant the
-  // breast size gets bigger": belly 50% with breasts 25%, 100% with 50%, 150% with
-  // 75%, 200% with 100%). The model's own breasts are 50%; two targets reach either
+  // breast size gets bigger": clarified as normal at belly 0%, +50% at 100%,
+  // +100% at 200%). The model's own breasts are normal; two targets reach either
   // end, `breast0` (BREAST_SMALL of their size) and `breast100` (BREAST_BIG), and the
   // lab sets them from the bump. Each breast is found from its own tip (the most
   // forward point above its column's crease, either side of the centre) and scaled out

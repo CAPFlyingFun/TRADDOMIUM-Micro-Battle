@@ -87,8 +87,8 @@ export const SWIM = {
  */
 export const GARMENTS = {
   shirt: {
-    // the sheet's own red (its median, sRGB 189 45 60), a touch deeper for the scene's lights
-    colour: [0.48, 0.024, 0.04], thickness: 0.008, roughness: 0.82, cut: 'tee', bridge: true,
+    // Joshua, 2026-10-08: bright red tee; keep the reference's folds and seams.
+    colour: [0.72, 0.018, 0.028], thickness: 0.008, roughness: 0.82, cut: 'tee', bridge: true,
     // the eight-view sheet it is dressed from, and which of its pixels are the tee
     sheet: 'art/humans/outfits/red-tee-sheet.png',
     isCloth: (r, g, b) => r > 70 && r > g * 1.7 && r > b * 1.6,
@@ -424,6 +424,10 @@ export async function growClothes(doc, { log = () => {}, which = ['shirt', 'legg
   };
 
   const buffer = root.listBuffers()[0];
+  // One bit per garment. Hide only faces wholly inside visible cloth;
+  // retain the skin along every neckline, hem and cuff.
+  const cover = new Uint8Array(n);
+  const garmentNames = Object.keys(GARMENTS);
   for (const name of which) {
     const spec = GARMENTS[name];
     const fv = new Float32Array(n);
@@ -454,6 +458,7 @@ export async function growClothes(doc, { log = () => {}, which = ['shirt', 'legg
       }
       for (let i = 0; i < n; i += 1) fv[i] = cov[rep[i]] - 0.5;
     } else for (let i = 0; i < n; i += 1) fv[i] = field[name](i, spec);
+    for (let i = 0; i < n; i += 1) if (fv[i] > 0.003) cover[i] |= 1 << garmentNames.indexOf(name);
     // THE MESH REFINED WHERE AN EDGE RUNS (the base mannequin's back has a vertex every
     // 2 cm, its front every 3 mm; a 24 mm strap cut from 2 cm triangles came out
     // ragged): every triangle the garment's edge passes near has its longest edge
@@ -701,7 +706,7 @@ export async function growClothes(doc, { log = () => {}, which = ['shirt', 'legg
         const p = bodyAt(k), q = normalAt(k);
         for (let c = 0; c < 3; c += 1) { x[k * 3 + c] = p[c] + q[c] * spec.thickness; nn[k * 3 + c] = q[c]; }
       }
-      if (spec.bridge > 0) hullFill(x, nn);
+      if (spec.bridge) hullFill(x, nn);
       for (let k = 0; k < m; k += 1) { const r = grep[k]; if (r !== k) for (let c = 0; c < 3; c += 1) x[k * 3 + c] = x[r * 3 + c]; }
       // the cloth's own normals, from its own faces
       const acc2 = new Float32Array(m * 3);
@@ -786,5 +791,6 @@ export async function growClothes(doc, { log = () => {}, which = ['shirt', 'legg
     if (name === 'shirt') log(`clothes: the bust's tips at ${tipY.toFixed(3)} m, the crop top's hem at ${cropY.toFixed(3)} m`);
     log(`clothes: ${name}: ${m.toLocaleString()} vertices, ${(faces.length / 3).toLocaleString()} triangles, edges cut clean, ${(spec.thickness * 1000).toFixed(0)} mm off the skin, ${spec.bridge ? 'hollows spanned' : 'on the skin'}, with ${targets.length} shapes`);
   }
+  body.setAttribute('_CLOTH_COVER', doc.createAccessor().setType('SCALAR').setBuffer(buffer).setArray(cover));
   void chestY;
 }

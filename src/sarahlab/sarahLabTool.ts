@@ -64,6 +64,16 @@ export const BELLY_KEYS: readonly (readonly [number, string | null])[] = [
 export const GARMENTS = ['shirt', 'leggings', 'bikini', 'swimsuit'] as const;
 export type Garment = (typeof GARMENTS)[number];
 
+/** Keep skin at garment boundaries; remove only faces fully covered by one shown garment. */
+export function uncoveredSkinIndices(indices: ArrayLike<number>, coverage: ArrayLike<number>, shown: number): Uint32Array {
+  const kept: number[] = [];
+  for (let i = 0; i < indices.length; i += 3) {
+    const a = indices[i], b = indices[i + 1], c = indices[i + 2];
+    if (!(coverage[a] & coverage[b] & coverage[c] & shown)) kept.push(a, b, c);
+  }
+  return new Uint32Array(kept);
+}
+
 /**
  * THE OUTFITS the OUTFIT button cycles through, each the garments it shows (Joshua,
  * 2026-10-08: the red tee over black leggings, then "something simple like a bikini...
@@ -103,9 +113,9 @@ export function bellyWeights(bumpPercent: number): Record<string, number> {
 }
 
 /**
- * THE BREASTS FOLLOW THE BUMP (Joshua, 2026-10-07: belly 50% with breasts 25%, 100%
- * with 50%, 150% with 75%, 200% with 100%): half the bump's percent. The model's own
- * breasts are 50%; the bake's `breast0` and `breast100` are the two ends.
+ * Joshua clarified 2026-10-08: zero belly is the original model's normal bust,
+ * 100% belly is 50% bigger, 200% is 100% bigger. Percent here is added local
+ * shape scale, not volume or an absolute percentage of the original size.
  */
 export const BREAST_TARGETS = Object.freeze({ small: 'breast0', big: 'breast100', bob: 'breastBob' });
 export function breastPercent(bumpPercent: number): number {
@@ -124,20 +134,20 @@ export function stepBreastSpring(s: BellySpring, dt: number, upAccel: number, le
 export const BREAST_SWING = 0.45;
 /** breastBob's weight: the spring's drop, bigger breasts swinging more. */
 export function breastBobWeight(bumpPercent: number, s: BellySpring): number {
-  return BREAST_SWING * (breastPercent(bumpPercent) / 50) * (s.y / BELLY_MOTION.bobM);
+  return BREAST_SWING * (1 + breastPercent(bumpPercent) / 100) * (s.y / BELLY_MOTION.bobM);
 }
 
 export function breastWeights(bumpPercent: number): Record<string, number> {
   const b = breastPercent(bumpPercent);
   return {
-    [BREAST_TARGETS.small]: b < 50 ? (50 - b) / 50 : 0,
-    [BREAST_TARGETS.big]: b > 50 ? (b - 50) / 50 : 0,
+    [BREAST_TARGETS.small]: 0,
+    [BREAST_TARGETS.big]: b / 100,
   };
 }
 
 export function bumpLine(bumpPercent: number): string {
   const p = Math.round(Math.min(BUMP_MAX_PERCENT, Math.max(0, bumpPercent)));
-  const breasts = ` · breasts ${Math.round(breastPercent(p))}%`;
+  const breasts = ` · breasts ${(1 + breastPercent(p) / 100).toFixed(2)}×`;
   if (p === 100) return `BUMP 100% · as modelled${breasts}`;
   if (p === 0) return `BUMP 0% · nearly flat${breasts}`;
   return (p > 100 ? `BUMP ${p}% · past full term` : `BUMP ${p}%`) + breasts;

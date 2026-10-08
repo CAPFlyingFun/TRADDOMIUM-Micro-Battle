@@ -9,7 +9,7 @@
  *
  *   BUMP      the belly morph targets (`scripts/bellyMorph.mjs`): 100% is the
  *             master as modelled, 200% twice that (twins and more), 0% nearly flat;
- *             her breasts follow at half its percent (`breastWeights`), round all the way between. Every primitive that
+ *             her bust grows from the normal model at 0% to 1.5× at 100% and 2× at 200%. Every primitive that
  *             carries the target follows it, so the clothes grown from her
  *             body shrink with it.
  *   (weight)  past full term the bump sags by its size, and two springs let the
@@ -38,7 +38,7 @@ import { UNITS_PER_METRE } from '../world/dem';
 import {
   BELLY_MOTION, BELLY_TARGET, BREAST_TARGETS, BUMP_MAX_PERCENT, GARMENTS, OUTFITS, outfitLine, SARAH_BASE_MODEL, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID,
   bellyMotionWeights, bellyWeights, breastBobWeight, breastWeights, fingerBend, THUMB_TO_PALM, bumpLine, fingersLine, restingBellySpring, statusLine, stepBellySpring, stepBreastSpring, walkBounceAccel,
-  type Garment, type SarahLabPose,
+  uncoveredSkinIndices, type Garment, type SarahLabPose,
 } from './sarahLabTool';
 
 const M = UNITS_PER_METRE;
@@ -149,6 +149,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let measure: HumanMeasure | null = null;
   let fingers: Finger[] = [];
   let skinned: THREE.SkinnedMesh[] = [];
+  const skinCutouts: { geometry: THREE.BufferGeometry; indices: Uint32Array[]; applied: number }[] = [];
   let garments: Garment[] = [];
   let hasBelly = false;
   let loaded = false;
@@ -225,6 +226,13 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   }
 
   function applyLook(): void {
+    for (const cut of skinCutouts) if (cut.applied !== outfit) {
+      const index = cut.geometry.index!;
+      index.array.set(cut.indices[outfit]);
+      index.needsUpdate = true;
+      cut.geometry.setDrawRange(0, cut.indices[outfit].length);
+      cut.applied = outfit;
+    }
     for (const mesh of skinned) {
       const dict = mesh.morphTargetDictionary, influences = mesh.morphTargetInfluences;
       if (dict && influences) for (const [name, w] of Object.entries({ ...bellyWeights(bump), ...breastWeights(bump) })) {
@@ -438,6 +446,17 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
           if (mesh.morphTargetDictionary?.[BELLY_TARGET] !== undefined) hasBelly = true;
           const name = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material).name;
           if ((GARMENTS as readonly string[]).includes(name)) found.add(name as Garment);
+          const index = mesh.geometry.index;
+          const cover = mesh.geometry.getAttribute('_cloth_cover');
+          if (index && cover) {
+            // Cache CPU indices per outfit; reuse a single GPU index buffer.
+            const coverage = Uint8Array.from({ length: cover.count }, (_, i) => cover.getX(i));
+            const indices = OUTFITS.map((look) => {
+              const shown = look.garments.reduce((mask, g) => mask | (1 << GARMENTS.indexOf(g)), 0);
+              return uncoveredSkinIndices(index.array, coverage, shown);
+            });
+            skinCutouts.push({ geometry: mesh.geometry, indices, applied: -1 });
+          }
         });
         garments = GARMENTS.filter((g) => found.has(g));
         model = loadedModel;
@@ -476,6 +495,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       hud = null;
       if (model) { three.remove(model); rig?.dispose(); release(model); model = null; }
       skinned = [];
+      skinCutouts.length = 0;
       three.remove(hemi, key, rim, floor, ring, stool);
       floor.geometry.dispose();
       (floor.material as THREE.Material).dispose();

@@ -103,6 +103,7 @@ async function main() {
     check(/belly slider/.test(line) && /4 garments/.test(line), `the file has the belly slider and all four garments: "${line}"`);
     await page.waitForTimeout(1500);
     await shot(page, 'sarahlab-1-full.png', 'FULL BUMP, dressed');
+    check(/breasts 1.50×/.test(await page.textContent('[data-field="sarahlab-bump"]')), '100% belly has 1.50× breast scale');
 
     const setSlider = (field, value) => page.evaluate(([f, v]) => {
       const label = document.querySelector(`[data-field="${f}"]`);
@@ -115,11 +116,13 @@ async function main() {
     check(await setSlider('sarahlab-bump', 0), 'the BUMP slider moved to 0');
     await page.waitForTimeout(800);
     check(/nearly flat/.test(await page.textContent('[data-field="sarahlab-bump"]')), 'the BUMP line reads nearly flat');
+    check(/breasts 1.00×/.test(await page.textContent('[data-field="sarahlab-bump"]')), '0% belly has normal breast scale');
     await shot(page, 'sarahlab-2-flat.png', 'BUMP 0');
 
     check(await setSlider('sarahlab-bump', 200), 'the BUMP slider moved to 200');
     await page.waitForTimeout(800);
     check(/200% · past full term/.test(await page.textContent('[data-field="sarahlab-bump"]')), 'the BUMP line reads 200% past full term');
+    check(/breasts 2.00×/.test(await page.textContent('[data-field="sarahlab-bump"]')), '200% belly has 2.00× breast scale');
     await shot(page, 'sarahlab-2b-twins.png', 'BUMP 200');
 
     await setSlider('sarahlab-bump', 100);
@@ -130,6 +133,18 @@ async function main() {
     await page.click('[data-action="sarahlab:sit"]');
     await page.waitForTimeout(1500);
     await shot(page, 'sarahlab-4-sit.png', 'SIT');
+
+    // Intermediate shapes and bent knees: the garment must stay closed as both
+    // growth targets and bone motion are combined, not just at the endpoints.
+    for (const pose of ['stand', 'walk', 'sit']) {
+      await page.click(`[data-action="sarahlab:${pose}"]`);
+      for (const bump of [50, 150, 200]) {
+        await setSlider('sarahlab-bump', bump);
+        await page.waitForTimeout(800);
+        await shot(page, `sarahlab-fit-${pose}-${bump}.png`, `${pose.toUpperCase()} BUMP ${bump}`);
+      }
+    }
+    await setSlider('sarahlab-bump', 100);
 
     await page.click('[data-action="sarahlab:stand"]');
     check(await setSlider('sarahlab-fingers', 100), 'the FINGERS slider moved to 100');
