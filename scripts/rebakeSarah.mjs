@@ -19,6 +19,8 @@ import { rebuildShirtHem } from './rebuildShirtHem.mjs';
 import { shirtFabric } from './shirtFabric.mjs';
 import { refineEarlyShirt } from './refineEarlyShirt.mjs';
 import { clearShirtBust } from './clearShirtBust.mjs';
+import { refineEarlyWaist } from './refineEarlyWaist.mjs';
+import { smoothShirtUnderbust } from './smoothShirtUnderbust.mjs';
 import { fitClothToSkin } from './fitClothToSkin.mjs';
 
 export async function recoverSarahBody(doc) {
@@ -222,6 +224,8 @@ async function main() {
   await shirtFabric(doc, { log });
   refineEarlyShirt(doc, lab, { log });
   clearShirtBust(doc, lab, { log });
+  refineEarlyWaist(doc, lab, { log });
+  smoothShirtUnderbust(doc, lab, { log });
   await doc.transform(dedup(), weld(), meshopt({ encoder: MeshoptEncoder, level: 'medium' }), prune());
   alignCoincidentClothWeights(doc);
   try { await io.write(temp, doc); await rename(temp, file); }

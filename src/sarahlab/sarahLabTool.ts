@@ -59,7 +59,7 @@ export const BELLY_TARGET = 'belly';
  * than the current max... and let it naturally sag more at the bottom").
  */
 export const BELLY_KEYS: readonly (readonly [number, string | null])[] = [
-  [2, 'belly200'], [1.5, 'belly150'], [1, null], [0.75, 'belly75'], [0.6, 'belly60'], [0.5, 'belly50'], [0.25, 'belly25'], [0, BELLY_TARGET],
+  [2, 'belly200'], [1.5, 'belly150'], [1, null], [0.75, 'belly75'], [0.6, 'belly60'], [0.5, 'belly50'], [0.3, 'belly30'], [0.25, 'belly25'], [0, BELLY_TARGET],
 ];
 /** The clothes' material names (`scripts/growClothes.mjs`). */
 export const GARMENTS = ['shirt', 'leggings', 'bikini', 'swimsuit'] as const;

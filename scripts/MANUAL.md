@@ -151,3 +151,7 @@ wired because they are never run on their own:
   machine and neither of which is testing that plumbing.
 
 - `scripts/clearShirtBust.mjs` — adds local cloth ease at the outer bust for lowered-arm poses, with matching normals at every slider anchor.
+
+- `scripts/refineEarlyWaist.mjs` — narrows the front silhouette below 60% on skin and garments together, with an explicit halfway width at 30%; leaves height/depth and 60%+ unchanged.
+
+- `scripts/smoothShirtUnderbust.mjs` — fills local under-bust hollows outward across shared cloth vertices, with matching normals at each belly anchor.

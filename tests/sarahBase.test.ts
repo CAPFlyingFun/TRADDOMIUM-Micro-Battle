@@ -104,7 +104,7 @@ describe('the base mannequin (public/models/sarah-base.glb)', () => {
     for (const p of mesh.listPrimitives()) expect(p.listTargets().length).toBe(BELLY_KEYS.length - 1 + 3 + 3 + 2);
   }, 60000);
 
-  it('the flat key draws the bump in by several centimetres and leaves the back, the bust and the legs alone', async () => {
+  it('the flat key narrows the waist while preserving back depth, bust and legs', async () => {
     const { doc, mesh } = await load();
     const body = mesh.listPrimitives().reduce((a, p) => (p.getAttribute('POSITION')!.getCount() > a.getAttribute('POSITION')!.getCount() ? p : a));
     // by name: the targets are stored 75%, 50%, 25%, flat, and [0] is the 75% one
@@ -124,9 +124,10 @@ describe('the base mannequin (public/models/sarah-base.glb)', () => {
       const y = (v[1] - lo) * s * metres; // height off the floor, metres
       deepest = Math.min(deepest, dz);
       if (moved > 0.002) {
-        // the bump's sides wrap round the waist a little behind the centre line;
-        // the back itself (8 cm and more behind it) never moves
-        if (v[2] * s * metres < -0.08) backMoved += 1;
+        // The front-view waist refinement changes X around the torso, including
+        // its rear half. Back depth and height still hold, so side views do not
+        // change while the front silhouette narrows.
+        if (v[2] * s * metres < -0.08 && Math.hypot(d[1], d[2]) * s * metres > .002) backMoved += 1;
         if (y > 1.3) highMoved += 1; // the bust and up
         if (y < 0.7) lowMoved += 1; // the legs
       }
@@ -305,6 +306,9 @@ describe('the Sarah Lab', () => {
     expect(sum(bellyWeights(100))).toBe(0);
     expect(bellyWeights(0)).toMatchObject({ belly: 1, belly25: 0 });
     expect(bellyWeights(75)).toMatchObject({ belly75: 1, belly50: 0 });
+    expect(bellyWeights(30)).toMatchObject({ belly30: 1, belly25: 0, belly50: 0 });
+    expect(bellyWeights(40).belly30).toBeCloseTo(.5, 8);
+    expect(bellyWeights(40).belly50).toBeCloseTo(.5, 8);
     expect(bellyWeights(60)).toMatchObject({ belly60: 1, belly50: 0, belly75: 0 });
     expect(bellyWeights(62.5).belly75).toBeCloseTo(1/6);
     expect(bellyWeights(62.5).belly60).toBeCloseTo(5/6);

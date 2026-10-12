@@ -289,3 +289,24 @@ the complete body and the belly geometry. The displacement is smoothed across sh
 fabric down into the under-bust fold. All slider anchors receive matching
 normal changes; coincident seam vertices share skin weights after export. This cleanup ships with the reviewed smoothing/early-shape work;
 further front belly shaping is deferred until Joshua supplies a reference.
+
+### alpha.89: inward early waist silhouette (2026-10-12)
+
+Joshua clarified that the remaining “love handles” are the left/right outline
+from the front, rather than depth or lighting. `refineEarlyWaist.mjs` adjusts X
+only, with a broad inward waist curve at zero and an explicit 30% key halfway
+toward the accepted 60% width. The waist field fades before the bust and hips;
+its maximum inward correction is 18% of the local half-width. Skin and all
+four garments receive the same field so the shirt does not cut into the body.
+Y/Z and all 60–200% targets are preserved. Surface-normal corrections track the
+new width. Joshua approved the straight front and side 0/30/60% previews, then requested
+a complete 0/10/20/30/40/50/60% comparison for this push. This work is separate
+from the alpha.88 bust cleanup.
+
+The final alpha.89 review also exposed a pinched fold immediately below the bust.
+`smoothShirtUnderbust.mjs` bridges those local hollows between the cup and torso, sampling the existing
+front surface through triangle interiors, then fairs the transition across the
+shirt's shared mesh topology. It does not pull the fabric back into the skin; positions
+and normals are encoded at every slider anchor, including 30%. Waist width and
+belly geometry are outside this local correction. The complete seven-step front
+and side sweep is repeated after this smoothing pass.
