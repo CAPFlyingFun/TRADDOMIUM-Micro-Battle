@@ -1,7 +1,7 @@
 /** Keep the complete body beneath cloth, without using skin cutout masks. */
 import { Triangle, Vector3 } from 'three';
 
-function aliasGroups(positions,indices){
+export function aliasGroups(positions,indices){
   const count=positions.length/3,aliases=new Int32Array(count),buckets=new Map(),neighbours=Array.from({length:count},()=>new Set()),cellSize=.0001,radius2=cellSize*cellSize;
   for(let i=0;i<count;i++){
     const cell=[0,1,2].map(c=>Math.floor(positions[i*3+c]/cellSize));let best=-1,bestD=radius2;
@@ -15,6 +15,25 @@ function aliasGroups(positions,indices){
   }
   for(let i=0;i<count;i++)if(aliases[i]!==i)neighbours[i]=neighbours[aliases[i]];
   return {aliases,neighbours};
+}
+
+/** Area-weighted final surface normals, shared by coincident UV vertices. */
+export function fittedNormals(primitive, positions, aliases) {
+  const indices=primitive.getIndices()?.getArray(), original=primitive.getAttribute('NORMAL')?.getArray();
+  if(!indices || !original)return null;
+  const sums=new Float32Array(positions.length), out=new Float32Array(positions.length);
+  const a=new Vector3(),b=new Vector3(),c=new Vector3();
+  for(let f=0;f<indices.length;f+=3){
+    const ids=[indices[f],indices[f+1],indices[f+2]];
+    a.fromArray(positions,ids[0]*3);b.fromArray(positions,ids[1]*3).sub(a);c.fromArray(positions,ids[2]*3).sub(a);b.cross(c);
+    for(const i of ids){const r=aliases[i];sums[r*3]+=b.x;sums[r*3+1]+=b.y;sums[r*3+2]+=b.z;}
+  }
+  for(let i=0;i<aliases.length;i++){
+    a.fromArray(sums,aliases[i]*3);
+    if(a.lengthSq()<1e-16)a.fromArray(original,i*3);
+    a.normalize().toArray(out,i*3);
+  }
+  return out;
 }
 
 export function fitClothToSkin(doc,{log=()=>{},sliderSamples=null,hipY=null}={}){
@@ -119,6 +138,36 @@ export function fitClothToSkin(doc,{log=()=>{},sliderSamples=null,hipY=null}={})
         const minimumGap=Math.min(constraint.clearance,.004);
         if(distance<minimumGap){point.copy(surface).addScaledVector(n,minimumGap).toArray(positions,i*3);}
       }
+      // Fair the final shirt surface, rather than only its clearance offsets.
+      // The lower panel join and the protected cup boundary otherwise survive
+      // as hard contour lines. Use shared UV vertices and retain skin clearance.
+      if(source.p.getMaterial().getName()==='shirt' && hipY!==null){
+        const smooth=(a,b,v)=>{const t=Math.max(0,Math.min(1,(v-a)/(b-a)));return t*t*(3-2*t);};
+        const weights=new Float32Array(source.aliases.length);
+        const hem=new Set(source.hemLoop);
+        for(let i=0;i<weights.length;i++){
+          const x=Math.abs(source.base[i*3]),y=source.base[i*3+1],z=source.base[i*3+2];
+          const abdomen=smooth(hipY+.015,hipY+.10,y)*smooth(1.22,1.13,y);
+          const underBust=smooth(1.08,1.17,y)*smooth(1.30,1.235,y);
+          weights[i]=hem.has(source.aliases[i])?0:.45*Math.max(abdomen,underBust)*smooth(-.06,.025,z)*smooth(.25,.19,x);
+        }
+        for(let pass=0;pass<150;pass++){
+          const next=new Float32Array(positions);
+          for(let i=0;i<weights.length;i++){
+            if(source.aliases[i]!==i || !weights[i])continue;
+            const ns=[...source.neighbours[i]];if(!ns.length)continue;
+            for(let c=0;c<3;c++)next[i*3+c]+=weights[i]*(ns.reduce((v,j)=>v+positions[j*3+c],0)/ns.length-positions[i*3+c]);
+            const constraint=constraints[i];
+            if(constraint){
+              point.fromArray(next,i*3);closest.fromArray(constraint.point);direction.fromArray(constraint.normal);
+              const gap=point.clone().sub(closest).dot(direction);
+              if(gap<.004)point.addScaledVector(direction,.004-gap).toArray(next,i*3);
+            }
+          }
+          for(let i=0;i<weights.length;i++)if(source.aliases[i]!==i)next.set(next.subarray(source.aliases[i]*3,source.aliases[i]*3+3),i*3);
+          positions.set(next);
+        }
+      }
       // Fair the actual open hem loop after skin fitting. Its analytic source
       // curve is smooth, but triangle-by-triangle skin projection can add
       // small notches back at the boundary. Carry most of that fairing into
@@ -182,9 +231,30 @@ export function fitClothToSkin(doc,{log=()=>{},sliderSamples=null,hipY=null}={})
         source.p.listTargets()[index].getAttribute('POSITION').setArray(Float32Array.from(source.shapes[index],(v,i)=>v+corrections[k][i]-baseCorrection[i]));
       });
     }
+    // Encode lighting at the SAME combined slider keys as the fitted surface.
+    // Keeping pre-fit normals draws the old belly and under-bust creases over
+    // the corrected cloth, especially at the smaller belly settings.
+    for(const source of sources){
+      const samples=source.out.map(p=>fittedNormals(source.p,p,source.aliases));
+      if(!samples[0])continue;
+      const old=source.p.listTargets().map(t=>t.getAttribute('NORMAL')?.getArray());
+      const contribution=(sample,i,except=null)=>Object.entries(sample.weights).reduce((sum,[name,w])=>{
+        const k=names.indexOf(name);return sum+(name!==except&&k>=0&&old[k]?old[k][i]*w:0);
+      },0);
+      const baseNormals=Float32Array.from(samples[baseSample],(v,i)=>v-contribution(sliderSamples[baseSample],i));
+      // Capture all contributions before replacing any target arrays.
+      const targets=sliderSamples.map((sample,k)=>sample.bellyTarget?Float32Array.from(samples[k],(v,i)=>v-baseNormals[i]-contribution(sample,i,sample.bellyTarget)):null);
+      source.p.getAttribute('NORMAL').setArray(baseNormals);
+      sliderSamples.forEach((sample,k)=>{if(targets[k])source.p.listTargets()[names.indexOf(sample.bellyTarget)].getAttribute('NORMAL').setArray(targets[k]);});
+    }
     return;
   }
   for(const source of sources){
+    const normals=source.out.map(p=>fittedNormals(source.p,p,source.aliases));
+    if(normals[0]){
+      source.p.getAttribute('NORMAL').setArray(normals[0]);
+      source.p.listTargets().forEach((t,k)=>{if(t.getAttribute('NORMAL'))t.getAttribute('NORMAL').setArray(Float32Array.from(normals[k+1],(v,i)=>v-normals[0][i]));});
+    }
     source.p.getAttribute('POSITION').setArray(source.out[0]);
     source.p.listTargets().forEach((t,shape)=>t.getAttribute('POSITION').setArray(Float32Array.from(source.out[shape+1],(v,i)=>v-source.out[0][i])));
   }

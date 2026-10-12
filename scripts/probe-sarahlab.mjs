@@ -69,7 +69,7 @@ function brightness(file) {
 
 async function shot(page, name, what) {
   const file = path.join(SHOTS, name);
-  await page.screenshot({ path: file });
+  await page.screenshot({ path: file, timeout: 120_000 });
   const b = brightness(file);
   check(b.mean > 8 && b.spread > 40, `${what}: a picture, not a blank (mean ${b.mean.toFixed(1)}, spread ${b.spread.toFixed(0)}) -> shots/${name}`);
 }
@@ -143,9 +143,21 @@ async function main() {
       };
       const drag = async (dx, dy = 0) => {
         await page.mouse.move(430, 180); await page.mouse.down();
-        await page.mouse.move(430 + dx, 180 + dy, { steps: 3 }); await page.mouse.up();
+        await page.mouse.move(430 + dx, 180 + dy, { steps: process.env.SARAH_SMOOTH_SWEEP ? 1 : 3 }); await page.mouse.up();
       };
       await page.mouse.move(430, 180); await page.mouse.wheel(0, -650); await drag(62.5);
+      if (process.env.SARAH_SMOOTH_SWEEP) {
+        for (const value of (process.env.SARAH_SMOOTH_VALUES || '0,20,40,60,80,100').split(',').map(Number)) {
+          await bump(value);
+          await shot(page, `sarahlab-smooth-${value}-front.png`, `SMOOTH ${value} FRONT`);
+          await drag(-196.35);
+          await shot(page, `sarahlab-smooth-${value}-profile.png`, `SMOOTH ${value} PROFILE`);
+          await drag(196.35);
+        }
+        check(errors.length===0,'no console errors');
+        if(failures) throw new Error(`${failures} check(s) failed`);
+        log('PASS'); return;
+      }
       if (process.env.SARAH_NAVEL_ONLY) {
         for(let i=0;i<3;i++) await page.click('[data-action="sarahlab:outfit"]');
         await page.mouse.wheel(0,-800);
@@ -292,7 +304,7 @@ async function main() {
     await page.mouse.wheel(0, -650);
     const drag = async (dx, dy = 0) => {
       await page.mouse.move(430, 180); await page.mouse.down();
-      await page.mouse.move(430 + dx, 180 + dy, { steps: 3 });
+      await page.mouse.move(430 + dx, 180 + dy, { steps: process.env.SARAH_SMOOTH_SWEEP ? 1 : 3 });
       await page.mouse.up();
     };
     await drag(62.5); // initial yaw .5 -> front

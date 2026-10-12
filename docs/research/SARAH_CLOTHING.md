@@ -235,3 +235,57 @@ Walking review adds graded hip ease: shirt clearance blends from 6 mm at the
 upper waist to 12 mm beside the moving hips. Collar/bust remain at 6 mm and
 leggings at 4 mm. This gives the thigh motion a small margin without increasing
 the whole shirt’s offset.
+
+### Pending review: final shirt surface and lighting (2026-10-12)
+
+Joshua requested a smoother under-bust and abdomen/side transition, reviewed at
+0/20/40/60/80/100 before publishing. The final skin-fitting step previously
+updated positions without updating normal morphs. Recompute welded geometric
+normals at the combined runtime slider keys and encode them alongside the fitted
+positions. Fair the final shirt surface locally below the bust and across the
+abdomen, pin the hem, and constrain each pass to retain skin clearance. Body,
+neckline, textures and customization controls remain as before.
+`SARAH_TEE_ONLY=1 SARAH_SMOOTH_SWEEP=1 npm run probe:sarahlab` captures front and
+quarter views at all six requested settings. This pass is pending visual approval.
+
+### Pending review: upper-band fit below 60% (2026-10-12)
+
+Joshua accepted 60–200% and requested a lower-reading belly at 0–59%. Keep the
+lower band unchanged; blend through the middle into a closer upper band, with
+9 mm front-to-skin clearance. Apply the stronger tuck at 0/25 and a reduced tuck
+at 50. `refineEarlyShirt.mjs` first inserts a 60% anchor as the old interpolation
+of 50/75 on every primitive, then changes only the shirt's 0/25/50 keys. Runtime
+interpolation now includes this anchor, preserving the accepted 60–200% range.
+The postprocess runs after final fitting/material baking; its marker is the
+60% anchor and a fresh rebake recreates it from the unmodified fitted keys.
+Review uses straight FRONT and true PROFILE at 0/10/20/30/40/50/60:
+`SARAH_TEE_ONLY=1 SARAH_SMOOTH_SWEEP=1 SARAH_SMOOTH_VALUES=0,10,20,30,40,50,60 npm run probe:sarahlab`.
+No push until Joshua has reviewed the images.
+The tuck fades out across the front abdomen before the side seams (full inside
+9 cm from centre, zero at 14 cm), is capped at 22 mm before blending, and
+retains original lighting outside the adjusted vertices. This prevents the
+underarm skinning and accepted bust shading from being pulled into this edit.
+
+### Pending review: early front contour (2026-10-12)
+
+A plain-colour diagnostic retained the front outline, so baked artwork was not
+its main cause. At 0–25% the cross-section still rolled from about 9 cm depth at
+the centre to 5 cm at 12 cm off-centre, almost unchanged between these keys.
+The early-shirt postprocess now fills that shoulder into a flatter fabric panel,
+with a maximum 12/9/3 mm adjustment at 0/25/50%. It holds X/Y, the central profile,
+the back and the bust, and moves outward from the fitted cloth to retain skin
+clearance. The front depth guide excludes back-panel points and interpolates between
+populated front rows so sparse rows cannot leave horizontal bands. A regression
+test reproduces the back-only row case. Updated normals follow the surface.
+The existing 60% anchor isolates all of this from the accepted 60–200% shapes.
+Review uses straight front and 90-degree side views at 0/10/20/30/40/50/60%.
+
+### alpha.88: bust overlap cleanup
+
+The pale outer-bust patches in the side preview were body/cloth overlap with
+lowered arms. `clearShirtBust.mjs` adds up to 8 mm of local outward/forward ease
+above 1.14 m, tapering around the outer bust and away from the sleeve. It keeps
+the complete body and the belly geometry. The displacement is smoothed across shared seam vertices and avoids pushing
+fabric down into the under-bust fold. All slider anchors receive matching
+normal changes; coincident seam vertices share skin weights after export. This cleanup ships with the reviewed smoothing/early-shape work;
+further front belly shaping is deferred until Joshua supplies a reference.

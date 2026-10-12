@@ -17,6 +17,8 @@ import { bellyMorph } from './bellyMorph.mjs';
 import { growClothes, jointPositions, partsOf } from './growClothes.mjs';
 import { rebuildShirtHem } from './rebuildShirtHem.mjs';
 import { shirtFabric } from './shirtFabric.mjs';
+import { refineEarlyShirt } from './refineEarlyShirt.mjs';
+import { clearShirtBust } from './clearShirtBust.mjs';
 import { fitClothToSkin } from './fitClothToSkin.mjs';
 
 export async function recoverSarahBody(doc) {
@@ -176,7 +178,7 @@ export async function softenSarahChestRelief(body) {
   body.setExtras({...body.getExtras(),chestReliefSoftened:4,navelReliefSoftened:2});
 }
 
-function alignCoincidentClothWeights(doc) {
+export function alignCoincidentClothWeights(doc) {
   for(const primitive of doc.getRoot().listMeshes()[0].listPrimitives()) {
     if(!['shirt','leggings'].includes(primitive.getMaterial()?.getName())) continue;
     const position=primitive.getAttribute('POSITION'),joints=primitive.getAttribute('JOINTS_0'),weights=primitive.getAttribute('WEIGHTS_0');
@@ -218,6 +220,8 @@ async function main() {
   const skin=doc.getRoot().listSkins()[0],{hipY}=partsOf(skin,jointPositions(skin));
   fitClothToSkin(doc, { log, sliderSamples, hipY });
   await shirtFabric(doc, { log });
+  refineEarlyShirt(doc, lab, { log });
+  clearShirtBust(doc, lab, { log });
   await doc.transform(dedup(), weld(), meshopt({ encoder: MeshoptEncoder, level: 'medium' }), prune());
   alignCoincidentClothWeights(doc);
   try { await io.write(temp, doc); await rename(temp, file); }

@@ -305,8 +305,10 @@ describe('the Sarah Lab', () => {
     expect(sum(bellyWeights(100))).toBe(0);
     expect(bellyWeights(0)).toMatchObject({ belly: 1, belly25: 0 });
     expect(bellyWeights(75)).toMatchObject({ belly75: 1, belly50: 0 });
-    expect(bellyWeights(62.5).belly75).toBeCloseTo(0.5);
-    expect(bellyWeights(62.5).belly50).toBeCloseTo(0.5);
+    expect(bellyWeights(60)).toMatchObject({ belly60: 1, belly50: 0, belly75: 0 });
+    expect(bellyWeights(62.5).belly75).toBeCloseTo(1/6);
+    expect(bellyWeights(62.5).belly60).toBeCloseTo(5/6);
+    expect(bellyWeights(62.5).belly50).toBe(0);
     // past the model: 150% is its own key, 175% halfway to 200%, and it stops at 200%
     expect(bellyWeights(150)).toMatchObject({ belly150: 1, belly200: 0, belly75: 0 });
     expect(bellyWeights(175).belly200).toBeCloseTo(0.5);

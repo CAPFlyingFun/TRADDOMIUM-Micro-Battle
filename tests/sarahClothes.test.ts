@@ -14,6 +14,21 @@ import { growClothes, GARMENTS } from '../scripts/growClothes.mjs';
 // @ts-ignore
 import { fitClothToSkin } from '../scripts/fitClothToSkin.mjs';
 
+// @ts-ignore
+import { shirtFrontDepthGuide } from '../scripts/refineEarlyShirt.mjs';
+
+it('interpolates sparse front rows without pulling the shirt toward back-panel samples', () => {
+  const guide = shirtFrontDepthGuide(new Float32Array([
+    0, .912, .10,
+    0, .928, -.18, // this row contains back cloth only
+    0, .944, .12,
+    .20, .928, .30, // the side is not the centre profile
+  ]));
+  expect(guide(.928)).toBeCloseTo(.11, 6);
+  expect(guide(.924)).toBeCloseTo(.1075, 6);
+  expect(guide(.932)).toBeCloseTo(.1125, 6);
+});
+
 async function load() {
   await MeshoptDecoder.ready;
   return new NodeIO().registerExtensions(ALL_EXTENSIONS)
@@ -21,6 +36,24 @@ async function load() {
 }
 
 describe('Sarah clothing rebuild', () => {
+  it('updates fabric lighting to match the fitted triangle', () => {
+    const doc=new Document(), buffer=doc.createBuffer();
+    const attr=(v:number[])=>doc.createAccessor().setBuffer(buffer).setType('VEC3').setArray(new Float32Array(v));
+    const ids=()=>doc.createAccessor().setBuffer(buffer).setType('SCALAR').setArray(new Uint16Array([0,1,2]));
+    const body=doc.createPrimitive().setMaterial(doc.createMaterial('Material_0'))
+      .setAttribute('POSITION',attr([-1,-1,0,1,-1,0,0,1,0]))
+      .setAttribute('NORMAL',attr([0,0,1,0,0,1,0,0,1])).setIndices(ids());
+    const shirt=doc.createPrimitive().setMaterial(doc.createMaterial('shirt'))
+      .setAttribute('POSITION',attr([0,0,-.004,.1,0,.002,0,.1,.05]))
+      .setAttribute('NORMAL',attr([0,0,1,0,0,1,0,0,1])).setIndices(ids());
+    doc.createMesh().addPrimitive(body).addPrimitive(shirt);
+    fitClothToSkin(doc);
+    const p=shirt.getAttribute('POSITION')!.getArray()!, n=shirt.getAttribute('NORMAL')!.getArray()!;
+    const a=new Vector3().fromArray(p,0), b=new Vector3().fromArray(p,3), c=new Vector3().fromArray(p,6);
+    const expected=b.sub(a).cross(c.sub(a)).normalize();
+    expect(new Vector3().fromArray(n,0).dot(expected)).toBeGreaterThan(.9999);
+  });
+
   it('fits inward fabric outside retained skin without flattening a distant drape', () => {
     const doc = new Document(), buffer = doc.createBuffer();
     const attr = (values: number[]) => doc.createAccessor().setBuffer(buffer).setType('VEC3').setArray(new Float32Array(values));
