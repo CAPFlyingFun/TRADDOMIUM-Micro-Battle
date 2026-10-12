@@ -28,13 +28,14 @@ export const sarahLabTool: DevTool = {
 /** The HUD root's `data-role`: what a probe waits for. */
 export const SARAH_LAB_HUD_ROLE = 'sarah-lab-hud';
 
-export type SarahLabPose = 'stand' | 'walk' | 'sit';
+export type SarahLabPose = 'stand' | 'walk' | 'sit' | 'tpose';
 
 export const SARAH_LAB_ACTION = Object.freeze({
   back: 'sarahlab:back',
   stand: 'sarahlab:stand',
   walk: 'sarahlab:walk',
   sit: 'sarahlab:sit',
+  tpose: 'sarahlab:tpose',
   turn: 'sarahlab:turn',
   bounce: 'sarahlab:bounce',
   outfit: 'sarahlab:outfit',
@@ -113,13 +114,18 @@ export function bellyWeights(bumpPercent: number): Record<string, number> {
 }
 
 /**
- * Joshua clarified 2026-10-08: zero belly is the original model's normal bust,
- * 100% belly is 50% bigger, 200% is 100% bigger. Percent here is added local
- * shape scale, not volume or an absolute percentage of the original size.
+ * Original bust at zero. Research-informed nominal volume targets are 1.30 at
+ * belly 100 and an optional larger 1.55 at 200. Width is capped at +10%.
+ * These are artistic shape targets, not measured anatomy or predictions.
  */
 export const BREAST_TARGETS = Object.freeze({ small: 'breast0', big: 'breast100', bob: 'breastBob' });
+/** Nominal volume target, not measured mesh volume or a medical prediction. */
+export function breastVolumeRatio(bumpPercent: number): number {
+  const p = Math.min(BUMP_MAX_PERCENT, Math.max(0, Number.isFinite(bumpPercent) ? bumpPercent : 100));
+  return p <= 100 ? 1 + 0.30 * p / 100 : 1.30 + 0.25 * (p - 100) / 100;
+}
 export function breastPercent(bumpPercent: number): number {
-  return Math.min(BUMP_MAX_PERCENT, Math.max(0, Number.isFinite(bumpPercent) ? bumpPercent : 100)) / 2;
+  return (breastVolumeRatio(bumpPercent) - 1) / 0.55 * 100;
 }
 /**
  * The breasts' own spring: lighter than the bump, so a little quicker and a little
@@ -134,7 +140,7 @@ export function stepBreastSpring(s: BellySpring, dt: number, upAccel: number, le
 export const BREAST_SWING = 0.45;
 /** breastBob's weight: the spring's drop, bigger breasts swinging more. */
 export function breastBobWeight(bumpPercent: number, s: BellySpring): number {
-  return BREAST_SWING * (1 + breastPercent(bumpPercent) / 100) * (s.y / BELLY_MOTION.bobM);
+  return BREAST_SWING * breastVolumeRatio(bumpPercent) * (s.y / BELLY_MOTION.bobM);
 }
 
 export function breastWeights(bumpPercent: number): Record<string, number> {
@@ -145,9 +151,16 @@ export function breastWeights(bumpPercent: number): Record<string, number> {
   };
 }
 
+/** 0.075 mm per percent, capped at the baked 10.5 mm projection (140%). */
+export function navelWeights(bumpPercent: number): Record<string, number> {
+  const p=Math.min(BUMP_MAX_PERCENT,Math.max(0,Number.isFinite(bumpPercent)?bumpPercent:100));
+  const out=Math.min(1,p/140);
+  return {navelIn:0,navelOut:out};
+}
+
 export function bumpLine(bumpPercent: number): string {
   const p = Math.round(Math.min(BUMP_MAX_PERCENT, Math.max(0, bumpPercent)));
-  const breasts = ` · breasts ${(1 + breastPercent(p) / 100).toFixed(2)}×`;
+  const breasts = ` · bust volume target ${breastVolumeRatio(p).toFixed(2)}×`;
   if (p === 100) return `BUMP 100% · as modelled${breasts}`;
   if (p === 0) return `BUMP 0% · nearly flat${breasts}`;
   return (p > 100 ? `BUMP ${p}% · past full term` : `BUMP ${p}%`) + breasts;

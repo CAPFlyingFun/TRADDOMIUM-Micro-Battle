@@ -40,15 +40,15 @@ import { paintFromBodySheet, paintGarment, paintTrim, readBodySheet } from './pa
 /** The crop top's hem, this far under the breasts' tips: just under the bust, on the top of the bump. */
 export const CROP_UNDER_TIP = 0.075;
 /** A tee's hem under the hip joints: at the front (under the bump) and the back (over the top of the seat). */
-export const HEM_FRONT = 0.075;
-export const HEM_BACK = 0.05;
+export const HEM_FRONT = 0.04;
+export const HEM_BACK = -0.015;
 /** Leggings' waistband over the hip joints, front (under the bump) and back. */
 export const WAIST_FRONT = 0.03;
 export const WAIST_BACK = 0.1;
 /** The leggings' panel runs up under the top's hem by this much. */
 export const PANEL_OVERLAP = 0.03;
 /** The neckline under the neck joint: a scoop at the front, high at the back. */
-export const SCOOP_FRONT = 0.1;
+export const SCOOP_FRONT = 0.14;
 export const SCOOP_BACK = 0.03;
 /** Short sleeves: this far from the shoulder to the elbow. */
 export const SLEEVE = 0.42;
@@ -88,7 +88,7 @@ export const SWIM = {
 export const GARMENTS = {
   shirt: {
     // Joshua, 2026-10-08: bright red tee; keep the reference's folds and seams.
-    colour: [0.72, 0.018, 0.028], thickness: 0.008, roughness: 0.82, cut: 'tee', bridge: true,
+    colour: [0.72, 0.018, 0.028], thickness: 0.006, roughness: 0.82, cut: 'tee', bridge: true,
     // the eight-view sheet it is dressed from, and which of its pixels are the tee
     sheet: 'art/humans/outfits/red-tee-sheet.png',
     isCloth: (r, g, b) => r > 70 && r > g * 1.7 && r > b * 1.6,
@@ -103,7 +103,7 @@ export const GARMENTS = {
   swimsuit: { colour: [0.02, 0.06, 0.2], trim: [0.012, 0.012, 0.014], thickness: 0.0025, roughness: 0.62, bridge: 'cleavage' },
 };
 
-function jointPositions(skin) {
+export function jointPositions(skin) {
   const m = skin.getInverseBindMatrices().getArray();
   const out = [];
   for (let o = 0; o < m.length; o += 16) {
@@ -113,7 +113,7 @@ function jointPositions(skin) {
 }
 
 /** Every joint's part of the body, from the skeleton's shape. */
-function partsOf(skin, at) {
+export function partsOf(skin, at) {
   const joints = skin.listJoints();
   const kids = joints.map((j) => j.listChildren().filter((c) => joints.includes(c)).map((c) => joints.indexOf(c)));
   const part = new Array(joints.length).fill('torso');
@@ -153,7 +153,7 @@ function partsOf(skin, at) {
     ankleY = Math.min(ankleY, at[j].y);
     void prev;
   }
-  return { part, hipY, ankleY, chestY: at[chest].y, neckY: at[children[0]].y, shoulders };
+  return { part, pelvis, hipY, ankleY, chestY: at[chest].y, neckY: at[children[0]].y, shoulders };
 }
 
 export async function growClothes(doc, { log = () => {}, which = ['shirt', 'leggings', 'bikini', 'swimsuit'], paint = true } = {}) {
@@ -165,7 +165,7 @@ export async function growClothes(doc, { log = () => {}, which = ['shirt', 'legg
   const at = jointPositions(skin);
   const parts = partsOf(skin, at);
   if (!parts) { log('clothes: no pelvis and chest found; no clothes'); return; }
-  const { part, hipY, ankleY, chestY, neckY, shoulders } = parts;
+  const { part, pelvis, hipY, ankleY, chestY, neckY, shoulders } = parts;
 
   const P = body.getAttribute('POSITION'), J = body.getAttribute('JOINTS_0'), W = body.getAttribute('WEIGHTS_0');
   const UV = body.getAttribute('TEXCOORD_0');
@@ -384,13 +384,21 @@ export async function growClothes(doc, { log = () => {}, which = ['shirt', 'legg
   const field = {
     shirt: (i, spec) => {
       const s = share[i], y = pos[i * 3 + 1], z = pos[i * 3 + 2];
-      if (s.head > 0.5) return -1;
+      // The neckline itself excludes the head; a bone-weight cutoff here
+      // introduced notches where neck influences changed.
       // the neckline: a scoop at the front, high at the back
-      const scoop = SCOOP_BACK + (SCOOP_FRONT - SCOOP_BACK) * smoothstep(-0.03, 0.06, z);
+      const round = Math.sqrt(Math.max(0, 1 - (pos[i * 3] / 0.10) ** 2));
+      const scoop = SCOOP_BACK + (SCOOP_FRONT - SCOOP_BACK) * round * smoothstep(-0.10, -0.07, z);
       let f = neckY - scoop - y;
       // the hem: a crop top's straight round under the bust; a tee's under the bump at
       // the front and over the top of the seat at the back
-      const hemY = spec.cut === 'crop' ? cropY : hipY - HEM_BACK - (HEM_FRONT - HEM_BACK) * smoothstep(-0.02, 0.08, z);
+      // Ease around the torso angle, rather than switching at a fixed depth.
+      // The reference has a high seat/side hem and a longer centre under the bump.
+      const frontFacing = Math.max(0,z / (Math.hypot(pos[i*3],z) || 1));
+      // A rounded front arc sweeps toward the hips. Smoothstep made an S-shaped
+      // edge that hooked back toward the abdomen before reaching each side.
+      const frontArc = Math.sqrt(frontFacing);
+      const hemY = spec.cut === 'crop' ? cropY : hipY - HEM_BACK - (HEM_FRONT - HEM_BACK) * frontArc;
       f = Math.min(f, y - hemY);
       // a tee's inner thighs: it hangs across, never wraps between the legs
       if (spec.cut !== 'crop' && s.legs > 0.6 && y < hipY && z > -0.03) {
@@ -590,6 +598,14 @@ export async function growClothes(doc, { log = () => {}, which = ['shirt', 'legg
         for (let q2 = 0; q2 < 4; q2 += 1) if (wa[q2] > 0) skinMix.set(ja[q2], (skinMix.get(ja[q2]) ?? 0) + wa[q2] * w);
       }
       const l = Math.hypot(...nn) || 1; baseN[k * 3] = nn[0] / l; baseN[k * 3 + 1] = nn[1] / l; baseN[k * 3 + 2] = nn[2] / l;
+      // The overlapping tee hem is one fabric sheet, not two trouser legs.
+      // Blend its lower band onto the pelvis so standing/walking thigh turns
+      // cannot pull neighbouring hem vertices in different directions.
+      if(name==='shirt' && spec.cut!=='crop') {
+        const hold=smoothstep(hipY+.18,hipY+.04,base[k*3+1]);
+        for(const [joint,weight] of skinMix)skinMix.set(joint,weight*(1-hold));
+        skinMix.set(pelvis,(skinMix.get(pelvis)??0)+hold);
+      }
       const top = [...skinMix].sort((x, y) => y[1] - x[1]).slice(0, 4), sum = top.reduce((x, e) => x + e[1], 0) || 1;
       for (let q2 = 0; q2 < 4; q2 += 1) { gj[k * 4 + q2] = top[q2] ? top[q2][0] : 0; gw[k * 4 + q2] = top[q2] ? top[q2][1] / sum : 0; }
     });
@@ -610,6 +626,100 @@ export async function growClothes(doc, { log = () => {}, which = ['shirt', 'legg
     }
     const reps = [...new Set(grep)];
     const nbList = new Map(reps.map((r) => [r, [...(nbs.get(r) || [])]]));
+    // The lower tee edge is a fabric hem, not a cut following each thigh fold.
+    // Count welded edges so UV seams are not mistaken for open boundaries.
+    const edges = new Map();
+    for (let f = 0; f < faces.length; f += 3) {
+      const tri = faces.slice(f, f + 3).map((k) => grep[k]);
+      for (let j = 0; j < 3; j += 1) {
+        const a = tri[j], b = tri[(j + 1) % 3];
+        if (a === b) continue;
+        const key = a < b ? `${a},${b}` : `${b},${a}`;
+        const e = edges.get(key);
+        if (e) e.count += 1; else edges.set(key, { a, b, count: 1 });
+      }
+    }
+    // Keep the neckline's cut fixed while fabric hollows are filled. Without
+    // this hold, envelope projection lifts the front edge back toward the neck.
+    const collarDistance = new Map(), collarNeighbours = new Map();
+    for (const { a, b, count } of edges.values()) if (count === 1
+      && base[a * 3 + 1] > tipY + 0.025 && base[b * 3 + 1] > tipY + 0.025) {
+      collarDistance.set(a, 0); collarDistance.set(b, 0);
+      for (const [u, v] of [[a, b], [b, a]]) {
+        if (!collarNeighbours.has(u)) collarNeighbours.set(u, new Set());
+        collarNeighbours.get(u).add(v);
+      }
+    }
+    for (let ring = 1; ring <= 8; ring += 1) {
+      for (const [r, d] of [...collarDistance]) if (d === ring - 1)
+        for (const u of nbList.get(r) || []) if (!collarDistance.has(u)) collarDistance.set(u, ring);
+    }
+    const hemNeighbours = new Map();
+    for (const { a, b, count } of edges.values()) {
+      if (count !== 1 || base[a * 3 + 1] > hipY+.05 || base[b * 3 + 1] > hipY+.05) continue;
+      for (const [u, v] of [[a, b], [b, a]]) {
+        if (!hemNeighbours.has(u)) hemNeighbours.set(u, new Set());
+        hemNeighbours.get(u).add(v);
+      }
+    }
+    const smoothTee = (x) => {
+      if (name !== 'shirt') return;
+      // Relax the hem along its own loop and fade surface smoothing upward.
+      // Apply to every morph shape, so interpolated hems stay equally smooth.
+      for (let pass = 0; pass < 120; pass += 1) {
+        const next = new Float32Array(x);
+        for (const r of reps) {
+          const hem = hemNeighbours.get(r), collar = collarNeighbours.get(r);
+          const edge = collar?.size === 2 ? collar : hem;
+          const ns = edge?.size === 2 ? [...edge] : nbList.get(r);
+          const chest = spec.bridge ? .5 * smoothstep(.078, .035, Math.abs(base[r * 3]))
+            * smoothstep(tipY - .14, tipY - .07, base[r * 3 + 1])
+            * smoothstep(tipY + .20, tipY + .13, base[r * 3 + 1])
+            * smoothstep(-.025, .015, base[r * 3 + 2])
+            * smoothstep(0, 8, collarDistance.get(r) ?? 8) : 0;
+          // Slice envelopes can leave small ridges along the upper belly sides.
+          // Fair the actual cloth surface as well as its displacement field.
+          const belly = spec.bridge ? .4
+            * smoothstep(hipY - .03, hipY + .09, base[r * 3 + 1])
+            * smoothstep(tipY - .01, tipY - .09, base[r * 3 + 1])
+            * smoothstep(-.025, .035, base[r * 3 + 2])
+            * smoothstep(.24, .18, Math.abs(base[r * 3])) : 0;
+          const junction = spec.bridge ? .5 * smoothstep(.16, .10, Math.abs(base[r * 3]))
+            * smoothstep(tipY - .15, tipY - .10, base[r * 3 + 1])
+            * smoothstep(tipY - .025, tipY - .065, base[r * 3 + 1])
+            * smoothstep(-.015, .025, base[r * 3 + 2]) : 0;
+          const rear = spec.bridge ? .35 * smoothstep(-.015, -.06, base[r * 3 + 2])
+            * smoothstep(.23, .15, Math.abs(base[r * 3]))
+            * smoothstep(hipY + .24, hipY + .12, base[r * 3 + 1]) : 0;
+          const amount = edge?.size === 2 ? 0.45
+            : Math.max(chest, junction, belly, rear, 0.25 * smoothstep(hipY + 0.10, hipY - 0.03, base[r * 3 + 1]));
+          if (!amount || !ns.length) continue;
+          for (let c = 0; c < 3; c += 1) {
+            const mean = ns.reduce((sum, u) => sum + x[u * 3 + c], 0) / ns.length;
+            next[r * 3 + c] = x[r * 3 + c] + amount * (mean - x[r * 3 + c]);
+          }
+        }
+        x.set(next);
+      }
+    };
+    // Distance along the cloth from its actual open hem, across UV seams too.
+    const hemDistance = new Map([...hemNeighbours.keys()].map(r=>[r,0]));
+    // Measure against the actual boundary segments. Edge-path distances vary
+    // with triangle directions and made the stitch stripe wander in and out.
+    if(name==='shirt') {
+      const segments=[];
+      for(const [a,neighbours] of hemNeighbours)for(const b of neighbours)if(a<b)segments.push([a,b]);
+      for(const r of reps) {
+        if(base[r*3+1]>hipY+.18)continue;
+        let best=.09;
+        for(const [a,b] of segments) {
+          const dx=base[b*3]-base[a*3],dy=base[b*3+1]-base[a*3+1],dz=base[b*3+2]-base[a*3+2];
+          const t=Math.max(0,Math.min(1,((base[r*3]-base[a*3])*dx+(base[r*3+1]-base[a*3+1])*dy+(base[r*3+2]-base[a*3+2])*dz)/(dx*dx+dy*dy+dz*dz||1)));
+          best=Math.min(best,Math.hypot(base[r*3]-base[a*3]-t*dx,base[r*3+1]-base[a*3+1]-t*dy,base[r*3+2]-base[a*3+2]-t*dz));
+        }
+        if(best<.09)hemDistance.set(r,best);
+      }
+    }
     // THE CLOTH BRIDGES HOLLOWS (the reference's tee falls straight from the bust onto
     // the bump; grown flat onto the skin it showed every curve and the crease under
     // the breasts): each vertex moves toward its neighbours' average only when that is
@@ -645,6 +755,16 @@ export async function growClothes(doc, { log = () => {}, which = ['shirt', 'legg
       // (facing down, they stayed tucked in while the cloth below came forward, and
       // left a lip), faded out round the sides by how far out it is
       const front = (k) => smoothstep(-0.2, 0.2, nn[k * 3 + 2]) * smoothstep(0.19, 0.13, Math.abs(x[k * 3]));
+      // Preserve the rounded outer bust. The cloth envelope fills the cleavage
+      // and abdomen hollows, but must not project the cups onto flatter planes.
+      const span = (k) => {
+        if (name !== 'shirt') return 1;
+        const ax = Math.abs(x[k * 3]), y = x[k * 3 + 1], z = x[k * 3 + 2];
+        const cup = smoothstep(0.025, 0.055, ax)
+          * smoothstep(tipY - 0.11, tipY - 0.075, y)
+          * smoothstep(tipY + 0.19, tipY + 0.13, y) * smoothstep(0.005, 0.055, z);
+        return (1 - cup) * smoothstep(0, 8, collarDistance.get(grep[k]) ?? 8);
+      };
       const cols = new Map(), rows = new Map();
       for (const r of reps) {
         if (front(r) <= 0) continue;
@@ -672,7 +792,7 @@ export async function growClothes(doc, { log = () => {}, which = ['shirt', 'legg
       const below = (h, u, w) => w < atHull(h, u);
       const disp = new Float32Array(m * 3);
       for (const r of reps) {
-        const f = front(r);
+        const f = front(r) * span(r);
         if (f <= 0) continue;
         let px = x[r * 3], py = x[r * 3 + 1], pz = x[r * 3 + 2];
         const ch = spec.bridge === 'cleavage' ? null : colH.get(Math.round(px / BIN));
@@ -698,7 +818,52 @@ export async function growClothes(doc, { log = () => {}, which = ['shirt', 'legg
         }
         disp.set(next);
       }
-      for (const r of reps) for (let c = 0; c < 3; c += 1) x[r * 3 + c] += disp[r * 3 + c];
+      // A tee stretches across the sternum rather than tracing two separate cups.
+      // Keep the original row envelope as an anchor: neighbour averaging alone
+      // loses most of this lift in the deep, narrow cleft. Move only forward here
+      // so opposing vertices cannot collapse sideways into a centre seam.
+      const chestLift = new Map();
+      if (name === 'shirt') for (const r of reps) {
+        const px = x[r * 3], py = x[r * 3 + 1], pz = x[r * 3 + 2];
+        const weight = smoothstep(.078, .04, Math.abs(px))
+          * smoothstep(tipY - .12, tipY - .065, py)
+          * smoothstep(tipY + .20, tipY + .13, py)
+          * smoothstep(0, 8, collarDistance.get(r) ?? 8)
+          * smoothstep(-.025, .015, pz);
+        const h = rowH.get(Math.round(py / BIN));
+        if (weight > 0 && h) chestLift.set(r,
+          Math.max(0, Math.min(.10, atHull(h, px) - .001 - pz)) * weight);
+      }
+      for (const r of reps) {
+        for (let c = 0; c < 3; c += 1) x[r * 3 + c] += disp[r * 3 + c] * span(r);
+        if (chestLift.has(r)) {
+          x[r * 3] -= disp[r * 3] * span(r);
+          x[r * 3 + 1] -= disp[r * 3 + 1] * span(r);
+          x[r * 3 + 2] += Math.max(0, chestLift.get(r) - disp[r * 3 + 2] * span(r));
+        }
+      }
+      // The shirt drapes over the seat; unlike leggings it must span the cleft.
+      // Mirror the row envelopes for the rear and move only outward in depth.
+      if (name === 'shirt') {
+        const backRows = new Map();
+        for (const r of reps) {
+          if (x[r*3+2] >= -.025) continue;
+          const row = Math.round(x[r*3+1]/BIN);
+          if (!backRows.has(row)) backRows.set(row, []);
+          backRows.get(row).push([x[r*3],-x[r*3+2]]);
+        }
+        const envelopes = new Map([...backRows].map(([row,points])=>[row,upperHull(points)]));
+        for (const r of reps) {
+          const px=x[r*3],py=x[r*3+1],pz=x[r*3+2];
+          const w=smoothstep(.13,.045,Math.abs(px))*smoothstep(-.015,-.06,pz)
+            *smoothstep(hipY+.24,hipY+.12,py);
+          if (!w) continue;
+          const h=envelopes.get(Math.round(py/BIN));
+          if (!h) continue;
+          const lift=Math.max(0,Math.min(.045,atHull(h,px)+.002+pz));
+          x[r*3+2]-=lift*w;
+        }
+      }
     };
     const shape = (bodyAt, normalAt) => {
       const x = new Float32Array(m * 3), nn = new Float32Array(m * 3);
@@ -707,8 +872,62 @@ export async function growClothes(doc, { log = () => {}, which = ['shirt', 'legg
         for (let c = 0; c < 3; c += 1) { x[k * 3 + c] = p[c] + q[c] * spec.thickness; nn[k * 3 + c] = q[c]; }
       }
       if (spec.bridge) hullFill(x, nn);
+      smoothTee(x);
+      // Fairing a convex seat can pull fabric inside the leggings. Restore an
+      // outward clearance constraint after smoothing, including the side panels.
+      if (name === 'shirt' && spec.bridge) {
+        const rows=new Map(), bin=.015;
+        for(const r of reps) {
+          const p=bodyAt(r); if(p[2]>=-.025 || Math.abs(p[0])>.25) continue;
+          const row=Math.round(p[1]/bin);
+          if(!rows.has(row))rows.set(row,[]); rows.get(row).push([p[0],-p[2]]);
+        }
+        const hulls=[...rows].map(([row,points])=>[row*bin,upperHull(points)]).sort((a,b)=>a[0]-b[0]);
+        for(const r of reps) {
+          const p=bodyAt(r); if(p[2]>=-.025 || p[1]>=hipY+.35) continue;
+          const px=x[r*3],py=x[r*3+1];
+          let lo=null,hi=null;
+          for(const [y,h] of hulls) {
+            const depth=atHull(h,px); if(!Number.isFinite(depth))continue;
+            if(y<=py)lo=[y,depth];else {hi=[y,depth];break;}
+          }
+          const t=lo&&hi?Math.max(0,Math.min(1,(py-lo[0])/(hi[0]-lo[0]))):0;
+          const depth=lo&&hi?lo[1]*(1-t)+hi[1]*t:(lo||hi)?.[1];
+          const weight=smoothstep(.23,.15,Math.abs(p[0]))*smoothstep(-.015,-.07,p[2])
+            *smoothstep(hipY+.35,hipY+.15,p[1]);
+          if(Number.isFinite(depth))x[r*3+2]+=Math.min(0,-depth-spec.thickness-.006-x[r*3+2])*weight;
+          // Keep the side overlap outside the leggings too, where backward
+          // clearance fades and the surface faces sideways rather than back.
+          if(Math.abs(p[0])>.13 && p[1]<hipY+.18) {
+            x[r*3]=Math.sign(p[0])*Math.max(Math.abs(x[r*3]),Math.abs(p[0])+spec.thickness);
+          }
+        }
+      }
+      // Clearance constraints can reintroduce small steps at the side hem.
+      // Fair its closed boundary last, retaining the cloth's overall cut.
+      if(name==='shirt') for(let pass=0;pass<40;pass++) {
+        const next=new Float32Array(x);
+        for(const r of reps) {
+          const d=hemDistance.get(r)??Infinity,weight=.35*smoothstep(.035,.007,d);
+          if(!weight)continue;
+          const edge=hemNeighbours.get(r),ns=edge?.size===2?[...edge]:nbList.get(r);
+          if(!ns?.length)continue;
+          for(let c=0;c<3;c++)next[r*3+c]=x[r*3+c]*(1-weight)+weight*ns.reduce((sum,u)=>sum+x[u*3+c],0)/ns.length;
+        }
+        x.set(next);
+      }
       for (let k = 0; k < m; k += 1) { const r = grep[k]; if (r !== k) for (let c = 0; c < 3; c += 1) x[k * 3 + c] = x[r * 3 + c]; }
       // the cloth's own normals, from its own faces
+      if(name==='shirt') for(const r of reps) {
+        const d=hemDistance.get(r)??Infinity;
+        const roll=.0015*smoothstep(.014,.004,d);
+        // A continuous outward fold: triangle normals near the cut can flip
+        // between almost degenerate faces and put teeth back into the edge.
+        const length=Math.hypot(x[r*3],x[r*3+2])||1;
+        x[r*3]+=x[r*3]/length*roll;
+        x[r*3+2]+=x[r*3+2]/length*roll;
+      }
+      for(let k=0;k<m;k++)for(let c=0;c<3;c++)x[k*3+c]=x[grep[k]*3+c];
       const acc2 = new Float32Array(m * 3);
       for (let f = 0; f < faces.length; f += 3) {
         const [a, b, c] = [faces[f], faces[f + 1], faces[f + 2]];
@@ -723,6 +942,20 @@ export async function growClothes(doc, { log = () => {}, which = ['shirt', 'legg
         // faces wound as the skin's: keep the side the skin's normal points to
         let sgn = acc2[g * 3] * baseN[k * 3] + acc2[g * 3 + 1] * baseN[k * 3 + 1] + acc2[g * 3 + 2] * baseN[k * 3 + 2] < 0 ? -1 : 1;
         for (let c = 0; c < 3; c += 1) outN[k * 3 + c] = (sgn * acc2[g * 3 + c]) / l;
+      }
+      // The original back is coarser than the belly; smooth its cloth shading
+      // over the same welded surface so row transitions do not read as ridges.
+      if(name==='shirt' && spec.bridge) for(let pass=0;pass<24;pass++) {
+        const next=new Float32Array(outN);
+        for(const r of reps) {
+          const w=Math.max(.5*smoothstep(-.015,-.06,base[r*3+2])
+            *smoothstep(hipY+.4,hipY+.15,base[r*3+1]),.6*smoothstep(.035,.007,hemDistance.get(r)??Infinity));
+          const ns=nbList.get(r);if(!w||!ns.length)continue;
+          for(let c=0;c<3;c++)next[r*3+c]+=w*(ns.reduce((s,u)=>s+outN[u*3+c],0)/ns.length-outN[r*3+c]);
+          const l=Math.hypot(...next.subarray(r*3,r*3+3))||1;
+          for(let c=0;c<3;c++)next[r*3+c]/=l;
+        }
+        for(let k=0;k<m;k++)for(let c=0;c<3;c++)outN[k*3+c]=next[grep[k]*3+c];
       }
       return { x, n: outN };
     };
@@ -765,6 +998,16 @@ export async function growClothes(doc, { log = () => {}, which = ['shirt', 'legg
       .setAttribute('WEIGHTS_0', acc3(gw, 'VEC4'))
       .setMaterial(material);
     if (UV) prim.setAttribute('TEXCOORD_0', acc3(guv, 'VEC2'));
+    if(name==='shirt') {
+      const colour=new Float32Array(m*3);
+      for(let k=0;k<m;k++) {
+        const d=hemDistance.get(grep[k])??Infinity;
+        const band=smoothstep(.014,.006,d),stitch=Number.isFinite(d)?Math.exp(-(((d-.007)/.004)**2)):0;
+        const tint=1-.12*band-.05*stitch;
+        colour.set([tint,tint,tint],k*3);
+      }
+      prim.setAttribute('COLOR_0',acc3(colour,'VEC3'));
+    }
     // every primitive of a mesh carries the same targets
     targets.forEach((tg, ti) => {
       const gt = doc.createPrimitiveTarget(tg.getName());
@@ -784,10 +1027,14 @@ export async function growClothes(doc, { log = () => {}, which = ['shirt', 'legg
     if (paint && spec.sheet) {
       await paintGarment({
         doc, material, file: spec.sheet, colour: spec.colour, isCloth: spec.isCloth,
-        x: gb.x, n: gb.n, uv: guv, faces, plain: (k) => armShare[k] > 0.4,
+        x: gb.x, n: gb.n, uv: guv, faces,
+        plain: (k) => armShare[k]>.4
+          || (name==='shirt' && (hemDistance.get(grep[k])??Infinity)<.045),
+        detailStrength: name === 'shirt' ? .35 : 1,
         log: (line) => log(`clothes: ${name}: ${line}`),
       });
     }
+    if (name === 'shirt') material.setNormalScale(0.25);
     if (name === 'shirt') log(`clothes: the bust's tips at ${tipY.toFixed(3)} m, the crop top's hem at ${cropY.toFixed(3)} m`);
     log(`clothes: ${name}: ${m.toLocaleString()} vertices, ${(faces.length / 3).toLocaleString()} triangles, edges cut clean, ${(spec.thickness * 1000).toFixed(0)} mm off the skin, ${spec.bridge ? 'hollows spanned' : 'on the skin'}, with ${targets.length} shapes`);
   }

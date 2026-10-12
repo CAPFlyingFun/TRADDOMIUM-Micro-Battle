@@ -1,3 +1,4 @@
+import { garmentTexturePanel } from './garmentTexturePanel';
 /**
  * THE SARAH LAB — Sarah rebuilt from Joshua's base mannequin, on a turntable,
  * to try before anything of it goes live (Joshua, 2026-10-07: "Good to test
@@ -20,6 +21,7 @@
  *   OUTFIT    cycles the garments (`scripts/growClothes.mjs`), by material:
  *             tee + leggings, bikini, swimsuit, none (`OUTFITS`).
  *   STAND, WALK, SIT  the game's own poses: `poseHuman` and the pregnant sit.
+ *   T-POSE exposes the side hem by restoring the master's bind pose.
  *
  * The camera ORBITS her: drag to go round, pinch or wheel to come closer.
  * The model is authored in metres and scaled by M on one node, as the Story
@@ -37,8 +39,8 @@ import { HumanRig, findSkinnedMesh } from '../view/HumanRig';
 import { UNITS_PER_METRE } from '../world/dem';
 import {
   BELLY_MOTION, BELLY_TARGET, BREAST_TARGETS, BUMP_MAX_PERCENT, GARMENTS, OUTFITS, outfitLine, SARAH_BASE_MODEL, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID,
-  bellyMotionWeights, bellyWeights, breastBobWeight, breastWeights, fingerBend, THUMB_TO_PALM, bumpLine, fingersLine, restingBellySpring, statusLine, stepBellySpring, stepBreastSpring, walkBounceAccel,
-  uncoveredSkinIndices, type Garment, type SarahLabPose,
+  bellyMotionWeights, bellyWeights, breastBobWeight, breastWeights, navelWeights, fingerBend, THUMB_TO_PALM, bumpLine, fingersLine, restingBellySpring, statusLine, stepBellySpring, stepBreastSpring, walkBounceAccel,
+  type Garment, type SarahLabPose,
 } from './sarahLabTool';
 
 const M = UNITS_PER_METRE;
@@ -149,7 +151,6 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let measure: HumanMeasure | null = null;
   let fingers: Finger[] = [];
   let skinned: THREE.SkinnedMesh[] = [];
-  const skinCutouts: { geometry: THREE.BufferGeometry; indices: Uint32Array[]; applied: number }[] = [];
   let garments: Garment[] = [];
   let hasBelly = false;
   let loaded = false;
@@ -190,6 +191,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
 
   // ------------------------------------------------------------------ HUD
   let hud: HTMLElement | null = null;
+  let texturePanel: ReturnType<typeof garmentTexturePanel> | null = null;
   const fields: Record<string, HTMLElement> = {};
   const buttons: Record<string, HTMLButtonElement> = {};
   const pointers = new Map<number, { x: number; y: number }>();
@@ -208,6 +210,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     lit(buttons.stand, pose === 'stand');
     lit(buttons.walk, pose === 'walk');
     lit(buttons.sit, pose === 'sit');
+    lit(buttons.tpose, pose === 'tpose');
     lit(buttons.turn, turning);
     if (buttons.outfit) buttons.outfit.textContent = outfitLine(outfit);
   }
@@ -226,16 +229,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   }
 
   function applyLook(): void {
-    for (const cut of skinCutouts) if (cut.applied !== outfit) {
-      const index = cut.geometry.index!;
-      index.array.set(cut.indices[outfit]);
-      index.needsUpdate = true;
-      cut.geometry.setDrawRange(0, cut.indices[outfit].length);
-      cut.applied = outfit;
-    }
     for (const mesh of skinned) {
       const dict = mesh.morphTargetDictionary, influences = mesh.morphTargetInfluences;
-      if (dict && influences) for (const [name, w] of Object.entries({ ...bellyWeights(bump), ...breastWeights(bump) })) {
+      if (dict && influences) for (const [name, w] of Object.entries({ ...bellyWeights(bump), ...breastWeights(bump), ...navelWeights(bump) })) {
         const at = dict[name];
         if (at !== undefined) influences[at] = w;
       }
@@ -250,7 +246,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     root.style.cssText = 'position:absolute;inset:0;font:600 13px system-ui,sans-serif;color:#e8e2d8;touch-action:none;user-select:none';
     // the orbit: the whole screen under the controls
     root.addEventListener('pointerdown', (e) => {
-      if ((e.target as HTMLElement).closest('button,input')) return;
+      if ((e.target as HTMLElement).closest('button,input,select,summary')) return;
       root.setPointerCapture(e.pointerId);
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       if (pointers.size === 2) {
@@ -295,7 +291,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
 
     const poses = document.createElement('div');
     poses.style.cssText = `${panel}left:max(12px,env(safe-area-inset-left));bottom:16px`;
-    for (const [p, label, action] of [['stand', 'STAND', SARAH_LAB_ACTION.stand], ['walk', 'WALK', SARAH_LAB_ACTION.walk], ['sit', 'SIT', SARAH_LAB_ACTION.sit]] as const) {
+    for (const [p, label, action] of [['stand', 'STAND', SARAH_LAB_ACTION.stand], ['walk', 'WALK', SARAH_LAB_ACTION.walk], ['sit', 'SIT', SARAH_LAB_ACTION.sit], ['tpose', 'T-POSE', SARAH_LAB_ACTION.tpose]] as const) {
       buttons[p] = btn(label, action, () => { pose = p; });
       poses.appendChild(buttons[p]);
     }
@@ -327,6 +323,16 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     buttons.bounce = btn('BOUNCE', SARAH_LAB_ACTION.bounce, () => { spring.vy += 0.3; breastSpring.vy += 0.3; });
     for (const b of [buttons.outfit, buttons.turn, buttons.bounce]) { b.style.padding = '8px 10px'; b.style.fontSize = '12px'; row.appendChild(b); }
     right.appendChild(row);
+    right.style.maxHeight = 'calc(100% - 85px)';
+    right.style.overflowY = 'auto';
+    right.style.touchAction = 'pan-y';
+    for (const event of ['pointerdown', 'pointermove', 'pointerup', 'wheel']) right.addEventListener(event, e => e.stopPropagation());
+    texturePanel = garmentTexturePanel(() => skinned, (garment) => {
+      const next = OUTFITS.findIndex(look => look.garments.includes(garment));
+      if (next >= 0) outfit = next;
+      applyLook(); refresh();
+    });
+    right.appendChild(texturePanel.element);
     root.appendChild(right);
 
     const info = document.createElement('div');
@@ -359,6 +365,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       const phase = pose === 'walk' ? ((walked * rig.bindScale) / humanStride(measure, 'walk', carry)) % 1 : 0;
       base = poseHuman(measure, rig.bind, { stance, phase, seconds, lean: 0, carry }, poseOut);
     }
+    // The master bind pose holds both arms out, exposing the shirt's sides.
+    if (pose === 'tpose') base = base.map(turn => ({ ...turn, radians: 0 }));
     if (curl <= 0 || fingers.length === 0) return base;
     const extra: JointTurn[] = [];
     for (const f of fingers) {
@@ -446,17 +454,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
           if (mesh.morphTargetDictionary?.[BELLY_TARGET] !== undefined) hasBelly = true;
           const name = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material).name;
           if ((GARMENTS as readonly string[]).includes(name)) found.add(name as Garment);
-          const index = mesh.geometry.index;
-          const cover = mesh.geometry.getAttribute('_cloth_cover');
-          if (index && cover) {
-            // Cache CPU indices per outfit; reuse a single GPU index buffer.
-            const coverage = Uint8Array.from({ length: cover.count }, (_, i) => cover.getX(i));
-            const indices = OUTFITS.map((look) => {
-              const shown = look.garments.reduce((mask, g) => mask | (1 << GARMENTS.indexOf(g)), 0);
-              return uncoveredSkinIndices(index.array, coverage, shown);
-            });
-            skinCutouts.push({ geometry: mesh.geometry, indices, applied: -1 });
-          }
+
         });
         garments = GARMENTS.filter((g) => found.has(g));
         model = loadedModel;
@@ -491,11 +489,12 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
 
     dispose() {
       disposed = true;
+      texturePanel?.dispose();
+      texturePanel = null;
       hud?.remove();
       hud = null;
       if (model) { three.remove(model); rig?.dispose(); release(model); model = null; }
       skinned = [];
-      skinCutouts.length = 0;
       three.remove(hemi, key, rim, floor, ring, stool);
       floor.geometry.dispose();
       (floor.material as THREE.Material).dispose();

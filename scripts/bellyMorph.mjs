@@ -92,12 +92,12 @@ export const MOTION_SAG_FORWARD = (30 * Math.PI) / 180;
 /** bellyBob and bellySway at weight 1 move the bump this far, metres. */
 export const MOTION_BOB_M = 0.01;
 
-/** Breast growth above the original model: normal to twice its local shape scale. */
+/** Breast growth above the original: rounded nominal volume targets. */
 export const BREAST_TARGETS = Object.freeze({ small: 'breast0', big: 'breast100', bob: 'breastBob' });
 /** breast0 is this much of the model's breasts... */
 export const BREAST_SMALL = 1;
-/** Joshua, 2026-10-08: +100% at belly 200%, +50% at belly 100%. */
-export const BREAST_BIG = 2;
+/** Larger optional nominal volume ratio; the usual setting targets 1.30. */
+export const BREAST_BIG = 1.55;
 /** A breast's reach from its tip to the chest wall, and its radius, metres (measured on her: about 10 cm and 7.5 cm). */
 export const BREAST_DEPTH_M = 0.1;
 export const BREAST_RADIUS_M = 0.075;
@@ -109,13 +109,14 @@ export const NAVEL_TARGETS = Object.freeze({ in: 'navelIn', out: 'navelOut' });
  * average real life size"). BIOLOGICAL SHAPE: an adult navel is about 1.5-2 cm across
  * and an innie 0.5-1 cm deep; a pregnancy outie stands about 0.5-1 cm out, some 1.5 cm
  * across. So: an 18 mm opening (`NAVEL_R` its radius), `navelIn` deepening the
- * master's 1 mm dimple (the rest of it is painted on) to about 8 mm, `navelOut` a 15 mm nub (`NAVEL_OUT_R`)
- * standing 6 mm proud of the skin round it. Metres, on a 1.70 m body.
+ * master's 1 mm dimple (the rest of it is painted on) to about 8 mm, `navelOut` a 36 mm nub (`NAVEL_OUT_R`)
+ * standing 10.5 mm proud, per the final visual size adjustment (+100%
+ * circumference, +50% outward projection). Metres, on a 1.70 m body.
  */
 export const NAVEL_R = 0.009;
 export const NAVEL_IN_M = 0.007;
-export const NAVEL_OUT_R = 0.0075;
-export const NAVEL_OUT_M = 0.006;
+export const NAVEL_OUT_R = 0.018;
+export const NAVEL_OUT_M = 0.0105;
 
 const COL = 0.01;
 
@@ -469,9 +470,8 @@ export function bellyMorph(doc, { log = () => {} } = {}) {
       const theta = Math.atan2(x, dz), rho = Math.hypot(x, dz), oval = ovalAt(theta, t);
       if (Math.abs(theta) > SECTOR) continue;
       const side = smooth(SECTOR, SECTOR - 0.35, Math.abs(theta));
-      // a wide fade into the chest everywhere: a 6 mm one (where no breast sits over a
-      // crease) let the top of a smaller bump pull in 3 cm against a still neighbour
-      const topFade = 0.06;
+      // Fade over 10 cm below the bust, so smaller keys have no abrupt upper ledge.
+      const topFade = 0.10;
       const upF = smooth(yt, yt - topFade, y);
       let pull;
       if (grow) {
@@ -639,12 +639,12 @@ export function bellyMorph(doc, { log = () => {} } = {}) {
     weldCache = { rep, nb: new Map([...nb].map(([k, v]) => [k, [...v]])) };
     return weldCache;
   };
-  const relax = (delta, iterations) => {
+  const relax = (delta, iterations, expand = true) => {
     const { rep, nb } = welded();
     const region = new Set();
     for (let i = 0; i < n; i += 1) if (delta[i * 3] !== 0 || delta[i * 3 + 1] !== 0 || delta[i * 3 + 2] !== 0) region.add(rep[i]);
-    // the skin just past the push may be drawn along a little, so the edge eases too
-    for (let ring = 0; ring < 3; ring += 1) for (const r of [...region]) for (const u of nb.get(r) || []) region.add(u);
+    // Growth can draw the adjacent skin along; shrink keeps back and limbs pinned.
+    for (let ring = 0; ring < (expand ? 3 : 0); ring += 1) for (const r of [...region]) for (const u of nb.get(r) || []) region.add(u);
     const list = [...region];
     let cur = new Float32Array(n * 3);
     for (let i = 0; i < n; i += 1) if (rep[i] === i) for (let a = 0; a < 3; a += 1) cur[i * 3 + a] = delta[i * 3 + a];
@@ -665,10 +665,42 @@ export function bellyMorph(doc, { log = () => {} } = {}) {
     for (let i = 0; i < n; i += 1) for (let a = 0; a < 3; a += 1) out[i * 3 + a] = cur[rep[i] * 3 + a];
     return out;
   };
+  // Fair the actual upper-abdomen surface as well as the displacement. Smoothing
+  // displacement alone preserves the master's crease under the bust at small keys.
+  const fairUpperBelly = (delta, size) => {
+    const { rep, nb } = welded();
+    const amount = new Map();
+    for (let i = 0; i < n; i += 1) {
+      if (rep[i] !== i) continue;
+      const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2], yt = topAt(x);
+      const w = smooth(yt - 0.16, yt - 0.09, y) * smooth(yt + 0.025, yt - 0.015, y)
+        * smooth(-0.025, 0.035, z) * smooth(0.21, 0.17, Math.abs(x));
+      if (w > 0) amount.set(i, 0.4 * w * Math.sqrt(1 - size));
+    }
+    let cur = Float32Array.from(pos, (v, k) => v + delta[k]);
+    for (let pass = 0; pass < 100; pass += 1) {
+      const next = new Float32Array(cur);
+      for (const [r, w] of amount) {
+        const ns = nb.get(r);
+        if (!ns?.length) continue;
+        for (let c = 0; c < 3; c += 1) {
+          const mean = ns.reduce((sum, u) => sum + cur[u * 3 + c], 0) / ns.length;
+          next[r * 3 + c] = cur[r * 3 + c] + w * (mean - cur[r * 3 + c]);
+        }
+      }
+      cur = next;
+    }
+    return Float32Array.from(delta, (_, k) => cur[rep[Math.floor(k / 3)] * 3 + k % 3] - pos[k]);
+  };
   for (const [name, size] of KEYS) {
     const made = deltaFor(size);
     const { moved, most } = made;
-    const delta = size > 1 ? relax(made.delta, GROW_RELAX) : made.delta;
+    const relaxed = relax(made.delta, size > 1 ? GROW_RELAX : 120, size > 1);
+    const delta = size > 1 ? relaxed : fairUpperBelly(relaxed, size);
+    if (size <= 1) for (let i = 0; i < n; i += 1) {
+      const front = smooth(-0.065, -0.025, pos[i * 3 + 2]);
+      for (let c = 0; c < 3; c += 1) delta[i * 3 + c] *= front;
+    }
     const ndelta = normalDelta(delta);
     for (const p of mesh.listPrimitives()) {
       const count = p.getAttribute('POSITION').getCount();
@@ -757,14 +789,9 @@ export function bellyMorph(doc, { log = () => {} } = {}) {
     names.push(name);
     weights.push(0);
   }
-  // THE BREASTS GROW WITH THE BUMP (Joshua, 2026-10-07: "normally when pregnant the
-  // breast size gets bigger": clarified as normal at belly 0%, +50% at 100%,
-  // +100% at 200%). The model's own breasts are normal; two targets reach either
-  // end, `breast0` (BREAST_SMALL of their size) and `breast100` (BREAST_BIG), and the
-  // lab sets them from the bump. Each breast is found from its own tip (the most
-  // forward point above its column's crease, either side of the centre) and scaled out
-  // from a base behind it, fading to nothing at its edges and above the crease under
-  // it, so the chest, the armpit and the belly never move; then relaxed over the skin.
+  // Nominal volume growth is smaller than the earlier forward-depth multiplier.
+  // Keep a rounded cap, add at most 10% width, and tilt slightly with weight.
+  // The chest attachment fades to the surrounding body; the tip stays rounded.
   const tips = [1, -1].map((side) => {
     let best = -1;
     for (let i = 0; i < n; i += 1) {
@@ -779,24 +806,29 @@ export function bellyMorph(doc, { log = () => {} } = {}) {
     for (const tip of tips) {
       if (tip < 0) continue;
       const tx = pos[tip * 3], ty = pos[tip * 3 + 1], tz = pos[tip * 3 + 2];
-      // the base: behind the tip on the chest wall; the ball the breast is: centred
-      // between them, a little high (a breast hangs from its top)
-      const bx = tx, by = ty + 0.015, bz = tz - BREAST_DEPTH_M;
-      const cx = tx, cy = ty + 0.02, cz = tz - BREAST_DEPTH_M * 0.55;
+      // Grow a rounded cap as an affine shape, rather than applying a radial
+      // falloff through its tip (which flattened the enlarged front).
+      // `scale` is the nominal volume ratio. Width/height grow at most 10%;
+      // the remaining growth is forward. A small rotation adds weight.
+      const bx = tx, by = ty + 0.025, bz = tz - BREAST_DEPTH_M;
+      const wide = Math.min(1.10, Math.cbrt(scale));
+      const deep = scale / (wide * wide);
+      const angle = 0.05 * (scale - 1) / (BREAST_BIG - 1);
       for (let i = 0; i < n; i += 1) {
         const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2];
         if (Math.sign(x) !== Math.sign(tx)) continue;
-        const d = Math.hypot(x - cx, y - cy, z - cz);
-        if (d > BREAST_RADIUS_M * 1.4) continue;
-        const crease = topAt(x);
-        const w = (1 - smooth(BREAST_RADIUS_M * 0.75, BREAST_RADIUS_M * 1.35, d)) * smooth(cz - 0.02, cz + 0.02, z) * smooth(crease - 0.005, crease + 0.03, y);
+        // Fade around the attachment in x/y, with no falloff at the rounded tip.
+        const r = Math.hypot((x - tx) / 0.09, (y - ty) / 0.09);
+        const w = (1 - smooth(0.65, 1.35, r)) * smooth(bz, bz + 0.04, z)
+          * smooth(topAt(x) - 0.015, topAt(x) + 0.025, y);
         if (!(w > 0)) continue;
-        delta[i * 3] += (scale - 1) * (x - bx) * w;
-        delta[i * 3 + 1] += (scale - 1) * (y - by) * w - drop * w;
-        delta[i * 3 + 2] += (scale - 1) * (z - bz) * w;
+        const yy = (y - by) * wide, zz = (z - bz) * deep;
+        delta[i * 3] += (wide - 1) * (x - bx) * w;
+        delta[i * 3 + 1] += (by + yy * Math.cos(angle) - zz * Math.sin(angle) - y - drop) * w;
+        delta[i * 3 + 2] += (bz + yy * Math.sin(angle) + zz * Math.cos(angle) - z) * w;
       }
     }
-    return relax(delta, 40);
+    return relax(delta, 12);
   };
   // ...and THE BREASTS BOUNCE TOO (Joshua, 2026-10-08: "add the same bounce for the
   // breasts"): `breastBob`, both breasts dropped MOTION_BOB_M with the same hold, for
@@ -831,7 +863,9 @@ export function bellyMorph(doc, { log = () => {} } = {}) {
   }
   let navel = -1, navelDepth = 0;
   for (const i of centreLine) {
-    if (Math.abs(pos[i * 3]) > 0.005) continue;
+    // The reference navel is at 0.933 m. Searching the entire abdomen selected
+    // a shallow surface irregularity four centimetres above its painted centre.
+    if (Math.abs(pos[i * 3]) > 0.005 || Math.abs(pos[i*3+1]-.933)>.018) continue;
     const A = [0, 1, 2, 3, 4].map(() => [0, 0, 0, 0, 0]), B = [0, 0, 0, 0, 0];
     let cnt = 0;
     for (const k of centreLine) {
@@ -866,7 +900,8 @@ export function bellyMorph(doc, { log = () => {} } = {}) {
       for (let i = 0; i < n; i += 1) {
         const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2];
         const r = Math.hypot(x - nx, y - ny);
-        if (r > NAVEL_R * 1.6 || Math.abs(z - nz) > 0.03) continue;
+        const patchRadius=kind==='in'?NAVEL_R*1.6:Math.max(NAVEL_R*1.6,NAVEL_OUT_R*1.25);
+        if (r > patchRadius || Math.abs(z - nz) > 0.03) continue;
         const u = r / NAVEL_R;
         let push;
         if (kind === 'in') push = -NAVEL_IN_M * Math.max(0, 1 - u * u) ** 2;
@@ -888,6 +923,20 @@ export function bellyMorph(doc, { log = () => {} } = {}) {
     for (const [name, kind] of [[NAVEL_TARGETS.in, 'in'], [NAVEL_TARGETS.out, 'out']]) {
       const delta = navelTarget(kind);
       const ndelta = normalDelta(delta);
+      if(kind==='out') {
+        // Tiny domes lose their rounded lighting in the broad belly-normal
+        // relaxation. Use the dome's smooth slope and replace authored seam
+        // normals locally, fading back to them outside the raised patch.
+        const authored=prim.getAttribute('NORMAL').getArray();
+        for(let i=0;i<n;i++) {
+          const dx=pos[i*3]-nx,dy=pos[i*3+1]-ny,r=Math.hypot(dx,dy);
+          if(r>NAVEL_OUT_R*1.25 || Math.abs(pos[i*3+2]-nz)>.03)continue;
+          const slope=3*NAVEL_OUT_M/(NAVEL_OUT_R*NAVEL_OUT_R)*Math.sqrt(Math.max(0,1-(r/NAVEL_OUT_R)**2));
+          const normal=[before[i*3]+dx*slope,before[i*3+1]+dy*slope,before[i*3+2]];
+          const length=Math.hypot(...normal)||1,weight=1-smooth(NAVEL_OUT_R,NAVEL_OUT_R*1.25,r);
+          for(let a=0;a<3;a++)ndelta[i*3+a]=(normal[a]/length-authored[i*3+a])*weight;
+        }
+      }
       for (const p of mesh.listPrimitives()) {
         const count = p.getAttribute('POSITION').getCount();
         const t = doc.createPrimitiveTarget(name);

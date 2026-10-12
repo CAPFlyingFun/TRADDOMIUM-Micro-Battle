@@ -107,6 +107,9 @@ wired because they are never run on their own:
 - `scripts/bellyMorph.mjs` — adds the belly morph targets to a pregnant body: sizes from nearly flat to twice full term (deeper and lower, never wider), the weight's sag and the bob and sway a spring drives, and the breasts' two ends, all measured from the mesh itself, with matching normals. A module, imported by `bake:humans` for bodies with `bellyMorph` (Sarah's base mannequin); pinned by `tests/sarahBase.test.ts`.
 - `scripts/paintGarment.mjs` — the garments' textures: a tee's fabric detail from an eight-view reference sheet (`art/humans/outfits/`), cut out by colour, fitted to the cloth row by row, its lighting taken out, baked as a colour texture and a normal map; swimwear's fabric and edge trim; and (`readBodySheet`) a sheet drawn on a whole body, fitted by the body's outline, for a garment's coverage and colours. A module, called by `growClothes.mjs`.
 - `scripts/growClothes.mjs` — grows a fitted shirt and leggings from a body's own skin (copied, pushed out by the cloth's thickness, same bone weights, same belly morph), each its own primitive and material. A module, imported by `bake:humans` for bodies with `clothes`.
+- `scripts/rebuildShirtHem.mjs` — replaces the shirt's lower panels with a continuous fabric tube and a curved sewn hem. Imported by `npm run bake:sarah-clothes`.
+- `scripts/fitClothToSkin.mjs` — fits clothing over the complete skin mesh across the combined slider shapes, smooths seam movement weights, and fairs the final hem. Imported by `npm run bake:sarah-clothes`.
+- `scripts/shirtFabric.mjs` — bakes the shirt's cotton jersey normal and roughness textures. Imported by `npm run bake:sarah-clothes`; its optional direct command is `node scripts/shirtFabric.mjs`.
 - `scripts/printBadge.mjs` — prints a TOMBS ID card on the badge round
   Jack's or Sarah's neck. Both were scanned wearing a real lanyard, and in
   the body's 2048 atlas the card's UV island is about SEVENTY BY

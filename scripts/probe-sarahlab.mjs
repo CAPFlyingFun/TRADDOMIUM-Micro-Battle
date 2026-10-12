@@ -31,7 +31,7 @@ const ROOT = path.resolve(HERE, '..');
 const SHOTS = path.join(ROOT, 'shots');
 const CHROMIUM_ARGS = ['--use-gl=angle', '--use-angle=swiftshader', '--disable-dev-shm-usage'];
 /** Joshua's phone in landscape. */
-const VIEWPORT = { width: 932, height: 430 };
+const VIEWPORT = (process.env.SARAH_TEXTURE_ONLY || process.env.SARAH_CLOSE_ONLY || process.env.SARAH_TEE_ONLY || process.env.SARAH_SWEEP || process.env.SARAH_HEM_ONLY || process.env.SARAH_NAVEL_ONLY) ? { width: 1400, height: 800 } : { width: 932, height: 430 };
 const APP_PORT = 4197;
 const TOOL = 'lab.sarah';
 const HUD = 'sarah-lab-hud';
@@ -101,9 +101,119 @@ async function main() {
       .catch(async () => check(false, `the base model loaded: ${await page.textContent(status)}`));
     const line = await page.textContent(status);
     check(/belly slider/.test(line) && /4 garments/.test(line), `the file has the belly slider and all four garments: "${line}"`);
+    if (process.env.SARAH_TEXTURE_ONLY) {
+      await page.click('[data-action="sarahlab:tpose"]');
+      await page.click('[data-role="sarahlab-textures"] summary');
+      await page.setInputFiles('[data-field="texture-upload"]',process.env.SARAH_TEXTURE_IMAGE);
+      await page.waitForFunction(()=>document.querySelector('[data-field="texture-status"]')?.textContent?.includes('texture-test.png'));
+      await shot(page,'sarahlab-upload-auto.png','TEXTURE UPLOADED');
+      await page.click('[data-action="sarahlab:texture-mirror-x"]');
+      check(await page.getAttribute('[data-action="sarahlab:texture-mirror-x"]','aria-pressed')==='true','mirror X toggled');
+      await page.click('[data-action="sarahlab:texture-mirror-y"]');
+      check(await page.getAttribute('[data-action="sarahlab:texture-mirror-y"]','aria-pressed')==='true','mirror Y toggled');
+      await shot(page,'sarahlab-upload-mirrored.png','TEXTURE MIRRORED');
+      check(!readFileSync(path.join(SHOTS,'sarahlab-upload-auto.png')).equals(readFileSync(path.join(SHOTS,'sarahlab-upload-mirrored.png'))),'mirrored image renders differently');
+      await page.click('[data-action="sarahlab:texture-rotate"]');
+      await page.selectOption('[data-field="texture-mode"]','tile');
+      await shot(page,'sarahlab-upload-tiled.png','TEXTURE TILED');
+      await page.click('[data-action="sarahlab:texture-reset"]');
+      check((await page.textContent('[data-field="texture-status"]')).includes('Original shirt'),'reset restores original');
+      await shot(page,'sarahlab-upload-reset.png','TEXTURE RESET');
+      await page.selectOption('[data-field="texture-garment"]','leggings');
+      await page.setInputFiles('[data-field="texture-upload"]',process.env.SARAH_TEXTURE_IMAGE);
+      await page.waitForFunction(()=>document.querySelector('[data-field="texture-status"]')?.textContent?.includes('texture-test.png'));
+      await shot(page,'sarahlab-upload-leggings.png','LEGGINGS UPLOAD');
+      await page.click('[data-action="sarahlab:texture-reset"]');
+      await page.setViewportSize({width:932,height:430});
+      await page.locator('[data-action="sarahlab:texture-reset"]').scrollIntoViewIfNeeded();
+      await shot(page,'sarahlab-upload-landscape.png','TEXTURE MOBILE LANDSCAPE');
+      await page.setViewportSize({width:390,height:844});
+      await page.locator('[data-action="sarahlab:texture-reset"]').scrollIntoViewIfNeeded();
+      await shot(page,'sarahlab-upload-portrait.png','TEXTURE MOBILE PORTRAIT');
+      check(errors.length===0,'no console errors');
+      if(failures)throw new Error(`${failures} checks failed`);
+      log('PASS');return;
+    }
+    if (process.env.SARAH_TEE_ONLY || process.env.SARAH_SWEEP || process.env.SARAH_HEM_ONLY || process.env.SARAH_NAVEL_ONLY) {
+      const bump = async (value) => {
+        await page.locator('[data-field="sarahlab-bump"] + input').evaluate((input, v) => {
+          input.value = String(v); input.dispatchEvent(new Event('input', { bubbles: true }));
+        }, value);
+        await page.waitForTimeout(600);
+      };
+      const drag = async (dx, dy = 0) => {
+        await page.mouse.move(430, 180); await page.mouse.down();
+        await page.mouse.move(430 + dx, 180 + dy, { steps: 3 }); await page.mouse.up();
+      };
+      await page.mouse.move(430, 180); await page.mouse.wheel(0, -650); await drag(62.5);
+      if (process.env.SARAH_NAVEL_ONLY) {
+        for(let i=0;i<3;i++) await page.click('[data-action="sarahlab:outfit"]');
+        await page.mouse.wheel(0,-800);
+        for(const value of (process.env.SARAH_NAVEL_VALUES||'100,200').split(',').map(Number)) {
+          await bump(value);
+          await shot(page,`sarahlab-navel-${value}-front.png`,`NAVEL ${value} FRONT`);
+          await drag(-85);
+          await shot(page,`sarahlab-navel-${value}-quarter.png`,`NAVEL ${value} QUARTER`);
+          await drag(85);
+        }
+        check(errors.length===0,'no console errors');
+        if(failures) throw new Error(`${failures} check(s) failed`);
+        log('PASS'); return;
+      }
+      if (process.env.SARAH_HEM_ONLY) {
+        if (process.env.SARAH_TPOSE) await page.click('[data-action="sarahlab:tpose"]');
+        for (const value of (process.env.SARAH_HEM_VALUES||'50,100,200').split(',').map(Number)) {
+          await bump(value);
+          await shot(page,`sarahlab-hem-${value}-front.png`,`HEM ${value} FRONT`);
+          if(process.env.SARAH_FRONT_ONLY) continue;
+          await drag(-196.35);
+          await shot(page,`sarahlab-hem-${value}-side.png`,`HEM ${value} SIDE`);
+          await drag(-196.35);
+          await shot(page,`sarahlab-hem-${value}-back.png`,`HEM ${value} BACK`);
+          await drag(392.7);
+        }
+        if (process.env.SARAH_FABRIC_CLOSE) {
+          await bump(100); await page.mouse.move(430,180); await page.mouse.wheel(0,-1000);
+          await shot(page,'sarahlab-fabric-close-front.png','FABRIC CLOSE FRONT');
+          await drag(-85); await shot(page,'sarahlab-fabric-close-quarter.png','FABRIC CLOSE QUARTER');
+          await drag(85); await page.mouse.wheel(0,1000);
+        }
+        for (const [pose,value] of [['walk',50],['sit',200]]) {
+          await page.click(`[data-action="sarahlab:${pose}"]`); await bump(value);
+          await shot(page,`sarahlab-hem-${pose}.png`,`HEM ${pose}`);
+        }
+        check(errors.length===0,'no console errors');
+        if(failures) throw new Error(`${failures} check(s) failed`);
+        log('PASS'); return;
+      }
+      if (process.env.SARAH_SWEEP) {
+        for (let i = 0; i < 3; i++) await page.click('[data-action="sarahlab:outfit"]');
+        for (const value of (process.env.SARAH_SWEEP_VALUES || '20,30,40,50,60,70').split(',').map(Number)) {
+          await bump(value);
+          await shot(page, `sarahlab-bare-${value}-front.png`, `BARE ${value} FRONT`);
+        }
+        await page.click('[data-action="sarahlab:outfit"]');
+      }
+      for (const value of [50, 100, 200]) {
+        await bump(value);
+        await shot(page, `sarahlab-tee-${value}-front.png`, `TEE ${value} FRONT`);
+      }
+      await drag(-150);
+      await shot(page, 'sarahlab-tee-200-side.png', 'TEE 200 SIDE');
+      await drag(150, -60);
+      await shot(page, 'sarahlab-tee-200-under.png', 'TEE 200 UNDERSIDE');
+      await drag(0, 60);
+      for (const [pose, value] of [['walk', 50], ['sit', 200]]) {
+        await page.click(`[data-action="sarahlab:${pose}"]`); await bump(value);
+        await shot(page, `sarahlab-tee-${pose}-${value}.png`, `TEE ${pose} ${value}`);
+      }
+      check(errors.length === 0, 'no console errors');
+      if (failures) throw new Error(`${failures} check(s) failed`);
+      log('PASS'); return;
+    }
     await page.waitForTimeout(1500);
     await shot(page, 'sarahlab-1-full.png', 'FULL BUMP, dressed');
-    check(/breasts 1.50×/.test(await page.textContent('[data-field="sarahlab-bump"]')), '100% belly has 1.50× breast scale');
+    check(/bust volume target 1.30×/.test(await page.textContent('[data-field="sarahlab-bump"]')), '100% belly has 1.30× nominal bust volume');
 
     const setSlider = (field, value) => page.evaluate(([f, v]) => {
       const label = document.querySelector(`[data-field="${f}"]`);
@@ -116,15 +226,16 @@ async function main() {
     check(await setSlider('sarahlab-bump', 0), 'the BUMP slider moved to 0');
     await page.waitForTimeout(800);
     check(/nearly flat/.test(await page.textContent('[data-field="sarahlab-bump"]')), 'the BUMP line reads nearly flat');
-    check(/breasts 1.00×/.test(await page.textContent('[data-field="sarahlab-bump"]')), '0% belly has normal breast scale');
+    check(/bust volume target 1.00×/.test(await page.textContent('[data-field="sarahlab-bump"]')), '0% belly has normal breast scale');
     await shot(page, 'sarahlab-2-flat.png', 'BUMP 0');
 
     check(await setSlider('sarahlab-bump', 200), 'the BUMP slider moved to 200');
     await page.waitForTimeout(800);
     check(/200% · past full term/.test(await page.textContent('[data-field="sarahlab-bump"]')), 'the BUMP line reads 200% past full term');
-    check(/breasts 2.00×/.test(await page.textContent('[data-field="sarahlab-bump"]')), '200% belly has 2.00× breast scale');
+    check(/bust volume target 1.55×/.test(await page.textContent('[data-field="sarahlab-bump"]')), '200% belly has 1.55× nominal bust volume');
     await shot(page, 'sarahlab-2b-twins.png', 'BUMP 200');
 
+    if (!process.env.SARAH_CLOSE_ONLY) {
     await setSlider('sarahlab-bump', 100);
     await page.click('[data-action="sarahlab:walk"]');
     await page.waitForTimeout(1500);
@@ -166,6 +277,38 @@ async function main() {
     await page.click('[data-action="sarahlab:outfit"]');
     await page.waitForTimeout(1200);
     await shot(page, 'sarahlab-8-bare.png', 'OUTFIT none');
+    } else {
+      for (const [pose, bump] of [['walk', 50], ['sit', 200]]) {
+        await page.click(`[data-action="sarahlab:${pose}"]`);
+        await setSlider('sarahlab-bump', bump);
+        await page.waitForTimeout(800);
+        await shot(page, `sarahlab-fit-${pose}-${bump}.png`, `${pose} ${bump}`);
+      }
+      await page.click('[data-action="sarahlab:stand"]');
+      for (let i = 0; i < 3; i += 1) await page.click('[data-action="sarahlab:outfit"]');
+    }
+    // Close-up geometry checks: inspect the bare transition separately from cloth.
+    await page.mouse.move(430, 180);
+    await page.mouse.wheel(0, -650);
+    const drag = async (dx, dy = 0) => {
+      await page.mouse.move(430, 180); await page.mouse.down();
+      await page.mouse.move(430 + dx, 180 + dy, { steps: 3 });
+      await page.mouse.up();
+    };
+    await drag(62.5); // initial yaw .5 -> front
+    for (const outfit of ['bare', 'tee']) {
+      if (outfit === 'tee') await page.click('[data-action="sarahlab:outfit"]');
+      for (const bump of [20, 50, 80, 200]) {
+        await setSlider('sarahlab-bump', bump);
+        await page.waitForTimeout(500);
+        await shot(page, `sarahlab-close-${outfit}-${bump}-front.png`, `CLOSE ${outfit} ${bump} FRONT`);
+      }
+      await drag(-150);
+      await shot(page, `sarahlab-close-${outfit}-200-side.png`, `CLOSE ${outfit} 200 SIDE`);
+      await drag(150, -60);
+      await shot(page, `sarahlab-close-${outfit}-200-under.png`, `CLOSE ${outfit} 200 UNDERSIDE`);
+      await drag(0, 60);
+    }
     check(errors.length === 0, errors.length ? `no console errors:\n${errors.join('\n')}` : 'no console errors');
   } finally {
     await browser.close();

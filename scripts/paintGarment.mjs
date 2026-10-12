@@ -141,7 +141,7 @@ async function readSheet(file, isCloth) {
  * `x`, `n`: the cloth's positions and normals; `uv`, `faces`: its layout; `plain(k)`:
  * true for a vertex the sheet must not dress (the sleeves).
  */
-export async function paintGarment({ doc, material, file, colour, isCloth, x, n, uv, faces, plain, log = () => {} }) {
+export async function paintGarment({ doc, material, file, colour, isCloth, x, n, uv, faces, plain, detailStrength = 1, log = () => {} }) {
   const sheet = await readSheet(file, isCloth);
   const m = x.length / 3;
   // per view: the right vector, and the cloth's extent seen from it, height by height
@@ -220,7 +220,7 @@ export async function paintGarment({ doc, material, file, colour, isCloth, x, n,
       // fades to plain cloth toward the sleeves, so no hard edge marks where the sheet stops
       const plainShare = (plain(a) ? w1 : 0) + (plain(b) ? w2 : 0) + (plain(c) ? w3 : 0);
       const d = wsum > 0 ? sum / wsum : 1;
-      det[ty * T + tx] = 1 + (d - 1) * (1 - plainShare);
+      det[ty * T + tx] = 1 + (d - 1) * (1 - plainShare) * detailStrength;
     }
   }
   // bleed the texels out past each island's edge, so filtering never reads the empty gaps

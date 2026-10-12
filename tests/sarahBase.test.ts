@@ -22,25 +22,66 @@ async function load() {
 }
 
 describe('the base mannequin (public/models/sarah-base.glb)', () => {
-  it('bakes a normal bust at zero and real growth to twice the original, on body and garments', async () => {
+  it('adds 0.075 mm of navel projection per percent and caps at 140%', () => {
+    expect(labTool.navelWeights(0)).toEqual({navelIn:0,navelOut:0});
+    for(const percent of [1,25,50,75,100,125,140,150,200]) {
+      expect(labTool.navelWeights(percent).navelOut*10.5).toBeCloseTo(Math.min(10.5,percent*.075));
+      expect(labTool.navelWeights(percent).navelIn).toBe(0);
+    }
+    expect(labTool.navelWeights(200)).toEqual({navelIn:0,navelOut:1});
+  });
+  it('carries a sewn hem band on the shirt and a real projecting navel on the body', async () => {
+    const {mesh}=await load();
+    const shirt=mesh.listPrimitives().find(p=>p.getMaterial()?.getName()==='shirt')!;
+    const colour=shirt.getAttribute('COLOR_0')!, rgb:number[]=[];let low=1,high=0;
+    for(let i=0;i<colour.getCount();i++){colour.getElement(i,rgb);low=Math.min(low,...rgb);high=Math.max(high,...rgb);}
+    expect(low).toBeLessThan(.85);
+    expect(high).toBeCloseTo(1);
+    const body=mesh.listPrimitives().find(p=>p.getMaterial()?.getName()==='Material_0')!;
+    const names=(mesh.getExtras() as {targetNames:string[]}).targetNames;
+    const out=body.listTargets()[names.indexOf('navelOut')].getAttribute('POSITION')!.getArray()!;
+    let projection=0;
+    for(const value of out) projection=Math.max(projection,value);
+    expect(projection).toBeGreaterThan(.002);
+  });
+  it('keeps sewn UV copies attached to the same skin when the body moves', async () => {
+    const {mesh}=await load(),shirt=mesh.listPrimitives().find(p=>p.getMaterial()?.getName()==='shirt')!;
+    const P=shirt.getAttribute('POSITION')!,J=shirt.getAttribute('JOINTS_0')!,W=shirt.getAttribute('WEIGHTS_0')!;
+    const positions:number[]=[],ids:number[]=[],weights:number[]=[],seen=new Map<string,Map<number,number>>();let copies=0;
+    for(let i=0;i<P.getCount();i++){
+      P.getElement(i,positions);J.getElement(i,ids);W.getElement(i,weights);
+      expect(weights.reduce((s,w)=>s+w,0)).toBeCloseTo(1,3);
+      const key=positions.map(v=>v.toFixed(7)).join(','),effective=new Map<number,number>();
+      ids.forEach((j,k)=>effective.set(j,(effective.get(j)||0)+weights[k]));
+      const previous=seen.get(key);
+      if(previous){for(const j of new Set([...previous.keys(),...effective.keys()]))expect(effective.get(j)||0).toBeCloseTo(previous.get(j)||0,3);copies++;}
+      else seen.set(key,effective);
+    }
+    expect(copies).toBeGreaterThan(10);
+  });
+  it('bakes a normal bust at zero and rounded growth without stretching the lower bust, on body and garments', async () => {
     const { mesh } = await load();
     const names = (mesh.getExtras() as { targetNames: string[] }).targetNames;
     const body = mesh.listPrimitives().find((p) => !GARMENTS.includes(p.getMaterial()?.getName() as typeof GARMENTS[number]))!;
     const normal = body.listTargets()[names.indexOf('breast0')].getAttribute('POSITION')!;
     const grown = body.listTargets()[names.indexOf('breast100')].getAttribute('POSITION')!;
     const v = [0, 0, 0];
-    let shrink = 0, depth = 0;
+    let shrink = 0, depth = 0, drop = 0, width = 0;
     for (let i = 0; i < normal.getCount(); i += 1) {
       normal.getElement(i, v); shrink = Math.max(shrink, Math.hypot(...v));
-      grown.getElement(i, v); depth = Math.max(depth, v[2]);
+      grown.getElement(i, v); depth = Math.max(depth, v[2]); drop = Math.max(drop, -v[1]); width = Math.max(width, Math.abs(v[0]));
     }
     expect(shrink).toBeLessThan(0.0002);
-    expect(depth).toBeGreaterThan(0.06);
+    expect(depth).toBeGreaterThan(0.015);
+    expect(depth).toBeLessThan(0.04);
+    // Limit the absolute drop; the forward increase is now much smaller.
+    expect(drop).toBeLessThan(0.015);
+    expect(width).toBeLessThan(0.012);
     for (const p of mesh.listPrimitives().filter((p) => ['shirt', 'swimsuit'].includes(p.getMaterial()?.getName() ?? ''))) {
       const t = p.listTargets()[names.indexOf('breast100')].getAttribute('POSITION')!;
       let most = 0;
       for (let i = 0; i < t.getCount(); i += 1) { t.getElement(i, v); most = Math.max(most, v[2]); }
-      expect(most).toBeGreaterThan(0.05);
+      expect(most).toBeGreaterThan(0.01);
     }
   }, 60000);
   it('carries the belly target on every primitive, and a shirt and leggings by material', async () => {
@@ -188,7 +229,7 @@ describe('the bump\'s spring', () => {
     expect(tB).toBeLessThan(tS); // quicker
     expect(peakB).toBeLessThanOrEqual(BREAST_SPRING.maxM);
     const lifted = restingBellySpring(); lifted.y = 0.01;
-    expect(breastBobWeight(200, lifted)).toBeCloseTo((2 / 1.5) * breastBobWeight(100, lifted), 6);
+    expect(breastBobWeight(200, lifted)).toBeCloseTo((1.55 / 1.3) * breastBobWeight(100, lifted), 6);
     expect(breastBobWeight(0, lifted)).toBeGreaterThan(0);
   });
 
@@ -272,18 +313,18 @@ describe('the Sarah Lab', () => {
     expect(bellyWeights(125).belly150).toBeCloseTo(0.5);
     expect(bellyWeights(500)).toMatchObject({ belly200: 1, belly150: 0 });
     expect(bumpLine(160)).toMatch(/past full term/);
-    // Original model at zero belly, then +50% at 100 and +100% at 200.
+    // Original model at zero, then nominal volume targets 1.30 and 1.55.
     expect(breastWeights(0)).toEqual({ breast0: 0, breast100: 0 });
-    expect(breastWeights(50)).toEqual({ breast0: 0, breast100: 0.25 });
-    expect(breastWeights(100)).toEqual({ breast0: 0, breast100: 0.5 });
-    expect(breastWeights(150)).toEqual({ breast0: 0, breast100: 0.75 });
-    expect(breastWeights(200)).toEqual({ breast0: 0, breast100: 1 });
+    expect(breastWeights(50).breast100).toBeCloseTo(.15 / .55, 8);
+    expect(breastWeights(100).breast100).toBeCloseTo(.30 / .55, 8);
+    expect(breastWeights(150).breast100).toBeCloseTo(.425 / .55, 8);
+    expect(breastWeights(200).breast100).toBeCloseTo(1, 8);
     expect(breastWeights(-10)).toEqual(breastWeights(0));
     expect(breastWeights(300)).toEqual(breastWeights(200));
     expect(breastWeights(Number.NaN)).toEqual(breastWeights(100));
-    expect(bumpLine(0)).toMatch(/breasts 1.00×/);
-    expect(bumpLine(100)).toMatch(/breasts 1.50×/);
-    expect(bumpLine(200)).toMatch(/breasts 2.00×/);
+    expect(bumpLine(0)).toMatch(/bust volume target 1.00×/);
+    expect(bumpLine(100)).toMatch(/bust volume target 1.30×/);
+    expect(bumpLine(200)).toMatch(/bust volume target 1.55×/);
     expect(bumpLine(100)).toMatch(/as modelled/);
     expect(bumpLine(0)).toMatch(/nearly flat/);
     expect(fingersLine(100)).toMatch(/fist/);
