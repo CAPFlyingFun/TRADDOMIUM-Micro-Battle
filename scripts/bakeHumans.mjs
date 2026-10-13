@@ -102,7 +102,7 @@ import { rigFingers } from './rigFingers.mjs';
 import { bellyMorph } from './bellyMorph.mjs';
 import { growClothes, jointPositions, partsOf } from './growClothes.mjs';
 import { bakeRoundBelly } from './roundBelly.mjs';
-import { bakeBellyV2 } from './bellyV2.mjs';
+import { bakeBellyV2, paintOutFoldShadow } from './bellyV2.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
@@ -1057,7 +1057,8 @@ async function main() {
       // v2's own belly: her master IS 100%, never reshaped (Joshua, 2026-10-13)
       const skin = doc.getRoot().listSkins()[0];
       const parts = partsOf(skin, jointPositions(skin));
-      bakeBellyV2(doc, bellyMorph, { hipY: parts.hipY, navel: human.navel ?? null, armParts: human.armsDown ? parts.part : null, log: (line) => console.log(`[bake:humans]   ${human.who}: ${line}`) });
+      const v2 = bakeBellyV2(doc, bellyMorph, { hipY: parts.hipY, navel: human.navel ?? null, armParts: human.armsDown ? parts.part : null, log: (line) => console.log(`[bake:humans]   ${human.who}: ${line}`) });
+      await paintOutFoldShadow(doc, v2, { sharp, log: (line) => console.log(`[bake:humans]   ${human.who}: ${line}`) });
     } else if (human.roundBelly) {
       const skin = doc.getRoot().listSkins()[0];
       const parts = partsOf(skin, jointPositions(skin));

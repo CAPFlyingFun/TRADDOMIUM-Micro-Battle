@@ -59,6 +59,12 @@ export const V2_CURVE_WIDTH = 0.22;
  * they have faded out (0.75 of the way to 100%). GAME TUNING. */
 export const V2_SOFTEN_PASSES = 40;
 export const V2_SOFTEN_UNTIL = 0.75;
+/** The U-ridge: how sharp skin must be to count (offset from its neighbours' middle
+ * over their spacing), how many rings round it are relaxed with it, and how many
+ * passes. GAME TUNING. */
+export const V2_RIDGE_SHARP = 0.12;
+export const V2_RIDGE_RINGS = 4;
+export const V2_RIDGE_PASSES = 60;
 /** THE GROWN SIZES (Joshua, 2026-10-13): each one's bump, as a multiple of her 100%
  * bump's reach in front of the pubis-to-crease line, carried along forward turned
  * down by the bump's own 20° sag (`BELLY_MOTION.tiltRad`), with this share of the
@@ -294,6 +300,15 @@ export function bakeBellyV2(doc, bellyMorph, { hipY, navel = null, armParts = nu
     lowW[r] = smooth(yBot - 0.08, yBot - 0.04, y) * smooth(yBot + 0.12, yBot + 0.07, y) * smooth(0.2, 0.15, Math.abs(x)) * smooth(zF - 0.05, zF - 0.02, z);
     return lowW[r] > 0;
   });
+  // where the U-ridge can run: the front of her from the tops of the thighs up past
+  // the hips to the navel's height, the navel itself kept well clear
+  const inZone = new Uint8Array(n), ridgeAt0 = new Set();
+  const ridgeZone = [...nb.keys()].filter((r) => {
+    const x = base[r * 3], y = base[r * 3 + 1];
+    if (arm[r] || Math.abs(x) > 0.22 || y < yBot - 0.08 || y > yBot + 0.24 || baseN[r * 3 + 2] < -0.3) return false;
+    if (navel && Math.hypot(x - navel[0], y - navel[1]) < 0.035) return false;
+    inZone[r] = 1; return true;
+  });
   for (const [name, s] of Object.entries(V2_SMALL_SIZES)) {
     const t = targetOf(mesh, body, name); if (!t) continue;
     const D = t.getAttribute('POSITION'), d = D.getArray();
@@ -324,6 +339,28 @@ export function bakeBellyV2(doc, bellyMorph, { hipY, navel = null, armParts = nu
         const o = pos.slice();
         for (const r of lowBand) { const w = 0.5 * soften * lowW[r], q = nb.get(r); for (let c = 0; c < 3; c += 1) { let a = 0; for (const u of q) a += o[u * 3 + c]; pos[r * 3 + c] = o[r * 3 + c] + w * (a / q.size - o[r * 3 + c]); } }
       }
+      // THE U-SHAPED RIDGE, FOUND IN THE SKIN ITSELF (Joshua: "that underbelly U-shaped
+      // ridge... join the edges together or something to make it disappear"): where the
+      // master's bump met her hips, this size's skin still folds sharply, a U from each
+      // hip down under the belly. Each vertex's sharpness (how far it stands off the
+      // middle of its neighbours, over their spacing) finds it wherever it runs; the
+      // sharp skin and a few rings round it are relaxed until the fold is gone
+      const sharp = new Float32Array(n);
+      for (const r of ridgeZone) {
+        const q = nb.get(r); let ax = 0, ay = 0, az = 0, len = 0;
+        for (const u of q) { ax += pos[u * 3]; ay += pos[u * 3 + 1]; az += pos[u * 3 + 2]; len += Math.hypot(pos[u * 3] - pos[r * 3], pos[u * 3 + 1] - pos[r * 3 + 1], pos[u * 3 + 2] - pos[r * 3 + 2]); }
+        const k = q.size; sharp[r] = Math.hypot(ax / k - pos[r * 3], ay / k - pos[r * 3 + 1], az / k - pos[r * 3 + 2]) / Math.max(1e-6, len / k);
+      }
+      let ring = new Set(ridgeZone.filter((r) => sharp[r] > V2_RIDGE_SHARP));
+      const found = ring.size;
+      for (let g = 0; g < V2_RIDGE_RINGS + (name === 'belly' ? 3 : 0); g += 1) { const next = new Set(ring); for (const r of ring) for (const u of nb.get(r)) if (inZone[u]) next.add(u); ring = next; }
+      const ridge = [...ring];
+      for (let p = 0; p < V2_RIDGE_PASSES; p += 1) {
+        const o = pos.slice();
+        for (const r of ridge) { const w = 0.5 * soften, q = nb.get(r); for (let c = 0; c < 3; c += 1) { let a = 0; for (const u of q) a += o[u * 3 + c]; pos[r * 3 + c] = o[r * 3 + c] + w * (a / q.size - o[r * 3 + c]); } }
+      }
+      log(`belly: ${name} U-ridge: ${found} sharp vertices, ${ridge.length} relaxed`);
+      if (name === 'belly') for (const r of ridge) ridgeAt0.add(r);
     }
     for (let i = 0; i < n; i += 1) if (rep[i] !== i) for (let c = 0; c < 3; c += 1) pos[i * 3 + c] = pos[rep[i] * 3 + c];
     D.setArray(pos.map((v, i) => v - base[i]));
@@ -422,4 +459,70 @@ export function bakeBellyV2(doc, bellyMorph, { hipY, navel = null, armParts = nu
   }
   const now = P0.getArray(); for (let i = 0; i < now.length; i += 1) if (now[i] !== master[i]) throw new Error('Sarah v2 belly: the 100% body moved');
   log(`belly: v2's own: 100% is the master untouched; 0-75% faired into her over ${free.length.toLocaleString('en-US')} vertices (under-bust ${crease.lo.toFixed(3)}-${crease.hi.toFixed(3)} m), pubis in ${(V2_PUBIS_IN_M * 1000).toFixed(0)} mm at 0%; 150-200% her 100% bump carried further; the switchable 100% refine drawn toward v1's profile`);
+  return { fold: ridgeAt0, rep };
+}
+
+/**
+ * THE FOLD'S PAINTED SHADOW (Joshua, 2026-10-13: the U-shaped line under the belly at
+ * the small sizes "still looks like... no changes"). Rendered without its texture the
+ * skin there is smooth: the line is PAINTED into her skin texture, the master's own
+ * shadow in the fold under her 100% bump. That fold is tucked under the bump at 100%,
+ * so the paint is lifted only there: over the fold's texels (found from the U-ridge
+ * the small sizes relax), a texel darker than the skin round it is brought up to it,
+ * feathered at the edge. Lighter detail is never touched, and nothing outside the fold.
+ * Mutates the body's base colour texture.
+ */
+export async function paintOutFoldShadow(doc, { fold, rep }, { sharp, log = () => {} } = {}) {
+  const mesh = doc.getRoot().listMeshes()[0];
+  const body = mesh.listPrimitives().find((p) => p.getMaterial()?.getName() === 'Material_0');
+  const tex = body.getMaterial().getBaseColorTexture(); if (!tex || !fold.size) return;
+  const UV = body.getAttribute('TEXCOORD_0'), idx = body.getIndices().getArray();
+  const { data, info } = await sharp(Buffer.from(tex.getImage())).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+  const W = info.width, H = info.height, mask = new Float32Array(W * H);
+  const uv = [0, 0];
+  const at = (i) => { UV.getElement(i, uv); return [uv[0] * W, uv[1] * H]; };
+  // the fold's triangles, drawn into a mask
+  for (let f = 0; f < idx.length; f += 3) {
+    const a = idx[f], b = idx[f + 1], c = idx[f + 2];
+    if (!fold.has(rep[a]) || !fold.has(rep[b]) || !fold.has(rep[c])) continue;
+    const A = at(a), B = at(b), C = at(c);
+    const x0 = Math.max(0, Math.floor(Math.min(A[0], B[0], C[0]))), x1 = Math.min(W - 1, Math.ceil(Math.max(A[0], B[0], C[0])));
+    const y0 = Math.max(0, Math.floor(Math.min(A[1], B[1], C[1]))), y1 = Math.min(H - 1, Math.ceil(Math.max(A[1], B[1], C[1])));
+    if (x1 - x0 > W / 4 || y1 - y0 > H / 4) continue; // a triangle across a seam
+    const d = (B[1] - C[1]) * (A[0] - C[0]) + (C[0] - B[0]) * (A[1] - C[1]); if (Math.abs(d) < 1e-9) continue;
+    for (let y = y0; y <= y1; y += 1) for (let x = x0; x <= x1; x += 1) {
+      const px = x + 0.5, py = y + 0.5;
+      const l1 = ((B[1] - C[1]) * (px - C[0]) + (C[0] - B[0]) * (py - C[1])) / d, l2 = ((C[1] - A[1]) * (px - C[0]) + (A[0] - C[0]) * (py - C[1])) / d;
+      if (l1 >= -0.02 && l2 >= -0.02 && 1 - l1 - l2 >= -0.02) mask[y * W + x] = 1;
+    }
+  }
+  // feathered: a box blur of the mask, twice
+  const blur1 = (src, r) => {
+    const tmp = new Float32Array(W * H), out = new Float32Array(W * H);
+    for (let y = 0; y < H; y += 1) { let s = 0; for (let x = -r; x <= r; x += 1) s += src[y * W + Math.min(W - 1, Math.max(0, x))]; for (let x = 0; x < W; x += 1) { tmp[y * W + x] = s / (2 * r + 1); s += src[y * W + Math.min(W - 1, x + r + 1)] - src[y * W + Math.max(0, x - r)]; } }
+    for (let x = 0; x < W; x += 1) { let s = 0; for (let y = -r; y <= r; y += 1) s += tmp[Math.min(H - 1, Math.max(0, y)) * W + x]; for (let y = 0; y < H; y += 1) { out[y * W + x] = s / (2 * r + 1); s += tmp[Math.min(H - 1, y + r + 1) * W + x] - tmp[Math.max(0, y - r) * W + x]; } }
+    return out;
+  };
+  const R = Math.max(4, Math.round(W / 256));
+  const soft = blur1(blur1(mask, R), R);
+  let painted = 0; for (const v of mask) painted += v;
+  // the skin round each texel: a wide blur of the texture itself, each channel
+  const skin = [0, 1, 2].map((c) => { const ch = new Float32Array(W * H); for (let i = 0; i < W * H; i += 1) ch[i] = data[i * 3 + c]; return blur1(blur1(ch, 3 * R), 3 * R); });
+  const out = Buffer.from(data);
+  for (let i = 0; i < W * H; i += 1) {
+    const m = Math.min(1, soft[i] * 1.5); if (m <= 0) continue;
+    for (let c = 0; c < 3; c += 1) { const v = data[i * 3 + c], s = skin[c][i] * 1.02; if (s > v) out[i * 3 + c] = Math.round(v + (s - v) * m); }
+  }
+  tex.setImage(await sharp(out, { raw: { width: W, height: H, channels: 3 } }).png().toBuffer()).setMimeType('image/png');
+  // the fold's relief is in the normal map too: there it is flattened to the skin's
+  // own surface (the wide blur of the map), feathered the same way
+  const ntex = body.getMaterial().getNormalTexture();
+  if (ntex) {
+    const n = await sharp(Buffer.from(ntex.getImage())).removeAlpha().resize(W, H).raw().toBuffer();
+    const flat = [0, 1, 2].map((c) => { const ch = new Float32Array(W * H); for (let i = 0; i < W * H; i += 1) ch[i] = n[i * 3 + c]; return blur1(blur1(ch, 3 * R), 3 * R); });
+    const nout = Buffer.from(n);
+    for (let i = 0; i < W * H; i += 1) { const m = Math.min(1, soft[i] * 1.5); if (m > 0) for (let c = 0; c < 3; c += 1) nout[i * 3 + c] = Math.round(n[i * 3 + c] + (flat[c][i] - n[i * 3 + c]) * m); }
+    ntex.setImage(await sharp(nout, { raw: { width: W, height: H, channels: 3 } }).png().toBuffer()).setMimeType('image/png');
+  }
+  log(`belly: the fold's painted shadow lifted over ${Math.round(painted).toLocaleString('en-US')} texels of the ${W}x${H} skin`);
 }
