@@ -10,10 +10,12 @@
  *    belly's own mapped area (the under-bust crease above, the pubis below, the
  *    flanks) so the bump's edge fades into her, with the navel held and the pubis
  *    drawn in toward the legs.
- *  - 100-200% grow past it: `bellyMorph`'s grown sizes, rounded toward the late
- *    photographs (`REF_LATE`), as v1's were, but over her own unrounded body.
- *  - The groin, the pelvis and the tops of the thighs are anchored in every size
- *    (`anchor`), and the bump's weight (tilt, bob, sway) never reaches the thighs.
+ *  - 100-200% are her own 100% bump carried further, forward and 20° down
+ *    (`V2_GROWTH`): the same shape, longer and lower. The line from the pubis to the
+ *    under-bust crease never moves, so the groin, the crease and the ribs stay where
+ *    100% has them, and the bump's weight (tilt, bob, sway) never reaches the thighs.
+ *  - The Lab's CURVE button shows a refined 100% (`bellyRefine`): the upper belly as
+ *    one quintic Hermite curve, drawn toward v1's approved profile. Never the master.
  *  - The breasts are their own targets (`breast0`, `breast100`, `breastBob`); no belly
  *    size reaches above the under-bust crease.
  *  - 30% and 60% are added as v1's clothing pass adds them, so the Lab's stops are
@@ -28,8 +30,6 @@ const smooth = (a, b, x) => { const u = Math.min(1, Math.max(0, (x - a) / (b - a
 
 /** The sizes below 100%, and how far along each is. */
 export const V2_SMALL_SIZES = Object.freeze({ belly: 0, belly25: 0.25, belly50: 0.5, belly75: 0.75 });
-/** The grown sizes, rounded toward the late photographs. */
-export const V2_GROWN_SIZES = Object.freeze(['belly150', 'belly200']);
 /** The pubis drawn back toward the legs at 0%, less as the belly grows, metres
  * (Joshua: "the bottom of the belly near the pubic area is a little forward, you can
  * move it in closer between the legs"). GAME TUNING. */
@@ -37,21 +37,6 @@ export const V2_PUBIS_IN_M = 0.008;
 /** Fairing passes (Taubin pairs) over each small size's skin: they fade the bump's
  * edge into the body ("between belly edge and body, add more smoothing"). GAME TUNING. */
 export const V2_EDGE_PASSES = 30;
-/** Where the anchor holds, metres below the pubis line (`hipY - 0.075`): the tops of
- * the thighs are still below `ANCHOR_FROM`; the pubic mound above it may move a
- * little with the bump (holding it too tore the skin where the bump meets the groin,
- * 2026-10-13). GAME TUNING. */
-export const V2_ANCHOR_FROM = -0.07;
-export const V2_ANCHOR_TO = -0.07;
-/** The fold between the bump and the anchored groin: skin within this distance,
- * along the skin, of the anchored skin, metres. GAME TUNING. */
-export const V2_FOLD_REACH = 0.05;
-/** Relaxation sweeps solving the fold's move. */
-export const V2_FOLD_ITERATIONS = 400;
-/** Fairing passes (Taubin pairs) over the fold in every size. */
-export const V2_FOLD_FAIR = 60;
-/** How far past the fold, along the skin, that fairing reaches (fading). */
-export const V2_FOLD_FAIR_BEYOND = 0.1;
 
 /**
  * V1'S APPROVED SIDE PROFILES, the reference v2's curve is drawn toward: the centre
@@ -64,30 +49,28 @@ export const V1_PROFILES = Object.freeze({
   belly150: Object.freeze([0, 0.26, 0.48, 0.64, 0.76, 0.86, 0.93, 0.98, 1, 1, 0.98, 0.94, 0.88, 0.8, 0.69, 0.56, 0.42, 0.28, 0.16, 0.07, 0]),
   belly200: Object.freeze([0, 0.26, 0.49, 0.65, 0.77, 0.86, 0.93, 0.98, 1, 1, 0.98, 0.95, 0.89, 0.82, 0.72, 0.59, 0.44, 0.29, 0.17, 0.07, 0]),
 });
-/** How far each profile moves from its own toward v1's. GAME TUNING. */
+/** How far the refined 100% profile moves from her own toward v1's. GAME TUNING. */
 export const V2_SHAPE_MIX = 0.85;
 /** Fairing passes (Taubin pairs) after the curve is set. */
 export const V2_CURVE_FAIR = 30;
 /** How far out from the centre line the drawn curves reach, fading all the way, metres. */
 export const V2_CURVE_WIDTH = 0.22;
-/** Plain relaxing passes over the fold of a grown size, which take in a flap. */
-export const V2_FOLD_RELAX = 80;
 /** The small sizes' lower outline: how many relaxing passes, and the size by which
  * they have faded out (0.75 of the way to 100%). GAME TUNING. */
 export const V2_SOFTEN_PASSES = 40;
 export const V2_SOFTEN_UNTIL = 0.75;
-/** How far along the skin from the fold the still groin joins its smoothing, metres. */
-export const V2_GROIN_MERGE = 0.03;
-/** The groin under a hanging bump settles this far behind its underside, at most
- * this far from where her 100% body has it, metres. */
-export const V2_REST_GAP = 0.004;
-export const V2_REST_MAX = 0.03;
-/** Sweeps settling the fold of a grown size into a membrane. */
-export const V2_WEB_ITERATIONS = 400;
-/** The top of a grown belly held at her 100% body: how much, and from how far up
- * between the widest row (0) and the crease (1) it starts. GAME TUNING. */
-export const V2_TOP_HOLD = 0.6;
-export const V2_TOP_HOLD_FROM = 0.5;
+/** THE GROWN SIZES (Joshua, 2026-10-13): each one's bump, as a multiple of her 100%
+ * bump's reach in front of the pubis-to-crease line, carried along forward turned
+ * down by the bump's own 20° sag (`BELLY_MOTION.tiltRad`), with this share of the
+ * growth as breadth. GAME TUNING, matched to the projection of the sizes it replaces. */
+export const V2_GROWTH = Object.freeze({ belly150: 1.35, belly200: 1.7 });
+export const V2_TILT_RAD = (20 * Math.PI) / 180;
+export const V2_BREADTH = 0.25;
+/** Skin less than this far in front of the line (the tops of the thighs, the flanks)
+ * is not bump and does not grow; the growth eases in over the next 4 cm. GAME TUNING. */
+export const V2_REACH_FROM = 0.03;
+/** Fairing passes (Taubin pairs) over a grown bump. */
+export const V2_GROWN_FAIR = 10;
 /** The separate, switchable curve for her 100% body. */
 export const V2_REFINE_TARGET = 'bellyRefine';
 
@@ -347,80 +330,7 @@ export function bakeBellyV2(doc, bellyMorph, { hipY, navel = null, armParts = nu
     const TN = t.getAttribute('NORMAL'); if (TN) TN.setArray(normalDelta(pos, base, idx, rep, baseN, TN.getArray()));
   }
 
-  // 4. the anchor: the groin, the pelvis and the tops of the thighs hold still in
-  // every size and under the bump's weight. Still means BEHIND the bump: below the
-  // pubis line, skin no further forward than the pubis and thighs there. The bump
-  // itself (well in front of them, or above the line) moves as built. The skin of the
-  // fold between the two takes neither: its move is SOLVED from theirs, the smoothest
-  // move that meets both (harmonic, over the welded skin), so the fold stretches
-  // evenly instead of tearing or crumpling at a cut
-  let zFront = -Infinity;
-  for (let i = 0; i < n; i += 1) { const x = base[i * 3], y = base[i * 3 + 1]; if (Math.abs(x) < 0.15 && y > yBot - 0.05 && y < yBot - 0.02) zFront = Math.max(zFront, base[i * 3 + 2]); }
-  const STILL = 0, MOVES = 1, FOLD = 2;
-  const kind = new Uint8Array(n).fill(MOVES);
-  for (const r of nb.keys()) {
-    const y = base[r * 3 + 1], z = base[r * 3 + 2];
-    if (arm[r] || y < yBot + V2_ANCHOR_FROM || (y < yBot + V2_ANCHOR_TO && z < zFront + 0.01)) kind[r] = STILL;
-  }
-  // the fold: skin within `V2_FOLD_REACH` of the still skin, measured ALONG the skin,
-  // so the bump's round underside a hand's width away is untouched
-  const dist = new Float32Array(n).fill(Infinity);
-  const near = [...nb.keys()].filter((r) => base[r * 3 + 1] < yBot + 0.15);
-  for (const r of near) if (kind[r] === STILL) dist[r] = 0;
-  for (let sweep = 0; sweep < 80; sweep += 1) {
-    let changed = false;
-    for (const r of near) {
-      if (kind[r] === STILL) continue;
-      let best = dist[r];
-      for (const u of nb.get(r)) { const l = dist[u] + Math.hypot(base[u * 3] - base[r * 3], base[u * 3 + 1] - base[r * 3 + 1], base[u * 3 + 2] - base[r * 3 + 2]); if (l < best) best = l; }
-      if (best < dist[r]) { dist[r] = best; changed = true; }
-    }
-    if (!changed) break;
-  }
-  for (const r of near) if (kind[r] !== STILL && dist[r] < V2_FOLD_REACH) kind[r] = FOLD;
-  // and the other way: how far, along the skin, each still vertex is from skin that moves
-  const fromMoving = new Float32Array(n).fill(Infinity);
-  for (const r of near) if (kind[r] !== STILL) fromMoving[r] = 0;
-  for (let sweep = 0; sweep < 40; sweep += 1) {
-    let changed = false;
-    for (const r of near) {
-      if (kind[r] !== STILL) continue;
-      let best = fromMoving[r];
-      for (const u of nb.get(r)) { const l = fromMoving[u] + Math.hypot(base[u * 3] - base[r * 3], base[u * 3 + 1] - base[r * 3 + 1], base[u * 3 + 2] - base[r * 3 + 2]); if (l < best) best = l; }
-      if (best < fromMoving[r]) { fromMoving[r] = best; changed = true; }
-    }
-    if (!changed) break;
-  }
-  const fold = [...nb.keys()].filter((r) => kind[r] === FOLD);
-  const solve = (d) => {
-    const D = new Float32Array(n * 3);
-    for (const r of nb.keys()) if (kind[r] === MOVES) for (let c = 0; c < 3; c += 1) D[r * 3 + c] = d[r * 3 + c];
-    for (let it = 0; it < V2_FOLD_ITERATIONS; it += 1) {
-      for (const r of fold) { const q = nb.get(r); for (let c = 0; c < 3; c += 1) { let a = 0; for (const u of q) a += D[u * 3 + c]; D[r * 3 + c] = a / q.size; } }
-    }
-    const out = new Float32Array(n * 3); for (let i = 0; i < n; i += 1) for (let c = 0; c < 3; c += 1) out[i * 3 + c] = D[rep[i] * 3 + c];
-    return out;
-  };
-  // the fairing reaches past the fold onto the bump's underside, fading out, so the
-  // edge where the solved fold meets the grown bump is rounded too
-  const fairBand = near.filter((r) => kind[r] !== STILL && dist[r] < V2_FOLD_REACH + V2_FOLD_FAIR_BEYOND);
-  const fairBandW = new Float32Array(n); for (const r of fairBand) fairBandW[r] = smooth(V2_FOLD_REACH + V2_FOLD_FAIR_BEYOND, V2_FOLD_REACH, dist[r]) * smooth(0, 0.01, dist[r]);
-  for (const name of V2_GROWN_SIZES) {
-    const t = targetOf(mesh, body, name); if (!t) continue;
-    const A = t.getAttribute('POSITION'), d = solve(A.getArray());
-    // a stretched fold carries the master's small creases with it: fair it
-    const pos = new Float32Array(n * 3); for (let i = 0; i < pos.length; i += 1) pos[i] = base[i] + d[i];
-    const step = (lambda) => {
-      const o = pos.slice();
-      for (const r of fairBand) { const w = lambda * fairBandW[r], q = nb.get(r); for (let c = 0; c < 3; c += 1) { let a = 0; for (const u of q) a += o[u * 3 + c]; pos[r * 3 + c] = o[r * 3 + c] + w * (a / q.size - o[r * 3 + c]); } }
-    };
-    for (let p = 0; p < V2_FOLD_FAIR; p += 1) { step(0.5); step(-0.53); }
-    for (let i = 0; i < n; i += 1) if (rep[i] !== i) for (let c = 0; c < 3; c += 1) pos[i * 3 + c] = pos[rep[i] * 3 + c];
-    A.setArray(pos.map((v, i) => v - base[i]));
-    const TN = t.getAttribute('NORMAL'); if (TN) TN.setArray(normalDelta(pos, base, idx, rep, baseN, solve(TN.getArray())));
-  }
-  // the smaller sizes draw the belly IN, toward the body, and are left as faired
-  // above; the bump's weight (tilt, bob, sway) never reaches the thighs, as v1's
+  // the bump's weight (tilt, bob, sway) never reaches the thighs, as v1's
   for (const name of ['bellyTilt', 'bellyBob', 'bellySway']) {
     const t = targetOf(mesh, body, name); if (!t) continue;
     for (const sem of ['POSITION', 'NORMAL']) {
@@ -430,114 +340,65 @@ export function bakeBellyV2(doc, bellyMorph, { hipY, navel = null, armParts = nu
       A.setArray(d);
     }
   }
-  // 5. THE CURVE (Joshua, 2026-10-13: "G2-continuous abdominal curvature... compare
-  // normalized side-profile curves rather than matching vertex indices"). Each grown
-  // size's centre-line profile, as height over the chord from the pubis to the
-  // under-bust crease over its own peak, is moved `V2_SHAPE_MIX` of the way to v1's
-  // approved profile at the same size (`V1_PROFILES`): a convex shoulder under the
-  // bust instead of a straight cone, a round underside instead of a shelf. The peak's
-  // depth is kept (same projection); below the pubis line nothing moves; the navel is
-  // held; the change is shared across the belly and faired.
-  // the upper belly's fairing: below each column's crease (and over it between the
-  // breasts, where the curve ends), above the bump's middle, never the navel
+
+  // 4. THE GROWN SIZES ARE HER 100% BUMP, CARRIED FURTHER (Joshua, 2026-10-13: "keep the
+  // same overall shape from 100% (normal), but just extend downwards (apply the same
+  // 20° tilt)"; "the groin area falls below the starting 100% height"). Every point of
+  // the bump is measured by how far it stands in front of the straight line from the
+  // pubis to the under-bust crease, and a grown size carries it that much further
+  // again (`V2_GROWTH`), along forward turned down by `V2_TILT_RAD` (the bump's own
+  // sag), with a little breadth. So 150% and 200% are the 100% belly's own curve, only
+  // longer and lower: the line itself (pubis, groin, crease, ribs, the waist behind it)
+  // never moves, the breasts are never reached, and nothing has to be cut, solved or
+  // stitched where the bump meets the body.
+  let zFront = -Infinity;
+  for (let i = 0; i < n; i += 1) { const x = base[i * 3], y = base[i * 3 + 1]; if (Math.abs(x) < 0.15 && y > yBot - 0.05 && y < yBot - 0.02) zFront = Math.max(zFront, base[i * 3 + 2]); }
+  {
+    let zb = -Infinity, zt = -Infinity;
+    for (let i = 0; i < n; i += 1) {
+      if (Math.abs(base[i * 3]) > 0.02) continue;
+      const y = base[i * 3 + 1];
+      if (Math.abs(y - yBot) < 0.004) zb = Math.max(zb, base[i * 3 + 2]);
+      if (Math.abs(y - shape.yTop) < 0.004) zt = Math.max(zt, base[i * 3 + 2]);
+    }
+    const chord = (y) => zb + (zt - zb) * (y - yBot) / (shape.yTop - yBot);
+    const fwd = Math.cos(V2_TILT_RAD), down = Math.sin(V2_TILT_RAD);
+    const reach = new Float32Array(n), breadth = new Float32Array(n);
+    for (const r of nb.keys()) {
+      if (arm[r]) continue;
+      const x = base[r * 3], y = base[r * 3 + 1], h = base[r * 3 + 2] - chord(y);
+      if (h <= 0) continue;
+      const c = crease.at(x);
+      const w = smooth(yBot, yBot + 0.03, y) * smooth(c + 0.005, c - 0.03, y);
+      reach[r] = h * smooth(V2_REACH_FROM, V2_REACH_FROM + 0.04, h) * w;
+      breadth[r] = x * smooth(V2_REACH_FROM, V2_REACH_FROM + 0.04, h) * w;
+    }
+    const fairW = new Float32Array(n);
+    const region = [...nb.keys()].filter((r) => reach[r] > 0);
+    for (const r of region) fairW[r] = navel ? smooth(NAVEL_HOLD_M, 2 * NAVEL_HOLD_M, Math.hypot(base[r * 3] - navel[0], base[r * 3 + 1] - navel[1])) : 1;
+    for (const [name, k] of Object.entries(V2_GROWTH)) {
+      const t = targetOf(mesh, body, name); if (!t) continue;
+      const pos = new Float32Array(base);
+      for (const r of region) {
+        const e = (k - 1) * reach[r];
+        pos[r * 3] += (k - 1) * V2_BREADTH * breadth[r];
+        pos[r * 3 + 1] -= e * down;
+        pos[r * 3 + 2] += e * fwd;
+      }
+      const step = (lambda) => { const o = pos.slice(); for (const r of region) { const w = lambda * fairW[r], q = nb.get(r); for (let c = 0; c < 3; c += 1) { let a = 0; for (const u of q) a += o[u * 3 + c]; pos[r * 3 + c] = o[r * 3 + c] + w * (a / q.size - o[r * 3 + c]); } } };
+      for (let p = 0; p < V2_GROWN_FAIR; p += 1) { step(0.5); step(-0.53); }
+      for (let i = 0; i < n; i += 1) if (rep[i] !== i) for (let c = 0; c < 3; c += 1) pos[i * 3 + c] = pos[rep[i] * 3 + c];
+      t.getAttribute('POSITION').setArray(pos.map((v, i) => v - base[i]));
+      const TN = t.getAttribute('NORMAL'); if (TN) TN.setArray(normalDelta(pos, base, idx, rep, baseN, null));
+      let most = 0; for (const r of region) most = Math.max(most, (k - 1) * reach[r]);
+      log(`belly: ${name} is her 100% bump carried ${Math.round((k - 1) * 100)}% further, ${Math.round(V2_TILT_RAD * 180 / Math.PI)}° down (up to ${(most * 100).toFixed(1)} cm); the pubis, groin and crease stay where 100% has them`);
+    }
+  }
+
+  // 5. her 100% curve, for comparison only (the Lab's CURVE): the upper belly drawn as
+  // one quintic Hermite curve into the under-bust crease
   const upperFair = [...nb.keys()].filter((r) => { const x = base[r * 3], y = base[r * 3 + 1]; return Math.abs(x) < 0.18 && y > yBot + 0.15 && y < crease.at(x) - 0.004 + (Math.abs(x) < 0.06 ? 0.045 : 0) && base[r * 3 + 2] > zFront && (!navel || Math.hypot(x - navel[0], y - navel[1]) > 2 * NAVEL_HOLD_M); });
   const upperOpts = { n, nb, rep, zFront, crease, yBot, fairW: upperFair };
-  for (const name of V2_GROWN_SIZES) {
-    const t = targetOf(mesh, body, name); if (!t) continue;
-    const D = t.getAttribute('POSITION'), d = D.getArray();
-    const pos = new Float32Array(n * 3); for (let i = 0; i < pos.length; i += 1) pos[i] = base[i] + d[i];
-    // a grown bump hangs below the pubis line: its curve runs from its own lowest
-    // front (the first row up where it stands 3 cm proud of the pubis)
-    let low = yBot;
-    for (let y = yBot - 0.1; y < yBot; y += 0.0025) {
-      let z = -Infinity; for (let i = 0; i < n; i += 1) if (Math.abs(pos[i * 3]) < 0.12 && Math.abs(pos[i * 3 + 1] - y) < 0.00125) z = Math.max(z, pos[i * 3 + 2]);
-      if (z > zFront + 0.03) { low = y - 0.005; break; }
-    }
-    const info = roundProfile(pos, idx, { hipY, navel, shape: V1_PROFILES[name], mix: V2_SHAPE_MIX, yTopHint: shape.yTop, passes: V2_CURVE_FAIR, bottomY: Math.min(yBot, low) });
-    if (!info) continue;
-    // the low skin of the bump faired, so its rounding carries no edge
-    {
-      const band = [...nb.keys()].filter((r) => { const y = base[r * 3 + 1]; return y > yBot - 0.12 && y < yBot + 0.1 && base[r * 3 + 2] > zFront - 0.02 && kind[r] !== STILL; });
-      const step = (lambda) => { const o = pos.slice(); for (const r of band) { const q = nb.get(r); for (let c = 0; c < 3; c += 1) { let a = 0; for (const u of q) a += o[u * 3 + c]; pos[r * 3 + c] = o[r * 3 + c] + lambda * (a / q.size - o[r * 3 + c]); } } };
-      for (let p = 0; p < 20; p += 1) { step(0.5); step(-0.53); }
-      for (let i = 0; i < n; i += 1) if (rep[i] !== i) for (let c = 0; c < 3; c += 1) pos[i * 3 + c] = pos[rep[i] * 3 + c];
-      log(`belly: ${name} curve from ${Math.min(yBot, low).toFixed(3)} to ${shape.yTop.toFixed(3)} m`);
-    }
-    const pulled = upperCurve(pos, upperOpts);
-    // where the grown bump meets the groin, the skin is relaxed (plain, shrinking
-    // smoothing) so a flap pulls back into the curve it hangs from
-    {
-      // ... and the groin round it (Joshua: "150% or greater the groin area starts
-      // breaking and needs to merge/smooth... between the legs, groin, and bottom
-      // belly"): the still skin within a few centimetres joins the relaxing, held
-      // more the further it is from the fold, so the join between them merges
-      const fold = near.filter((r) => (kind[r] !== STILL || fromMoving[r] < V2_GROIN_MERGE) && base[r * 3 + 1] < yBot + 0.05 && base[r * 3 + 1] > yBot - 0.09);
-      const fw = new Float32Array(n); for (const r of fold) fw[r] = kind[r] === STILL ? 0.5 * smooth(V2_GROIN_MERGE, 0, fromMoving[r]) : 0.5;
-      for (let p = 0; p < V2_FOLD_RELAX; p += 1) {
-        const o = pos.slice();
-        for (const r of fold) { const w = fw[r], q = nb.get(r); for (let c = 0; c < 3; c += 1) { let a = 0; for (const u of q) a += o[u * 3 + c]; pos[r * 3 + c] = o[r * 3 + c] + w * (a / q.size - o[r * 3 + c]); } }
-      }
-      // then the fold itself drawn as a MEMBRANE between the bump and the groin: its
-      // skin settles to the smoothest surface its edges allow (harmonic, in place),
-      // so the master's small creases there cannot crumple or cross through
-      const web = near.filter((r) => (kind[r] === FOLD || (kind[r] === STILL && fromMoving[r] < V2_GROIN_MERGE)) && base[r * 3 + 1] < yBot + 0.08 && base[r * 3 + 1] > yBot - 0.08 && base[r * 3 + 2] > zFront - 0.06);
-      log(`belly: ${name} fold membrane over ${web.length} vertices`);
-      for (let it = 0; it < V2_WEB_ITERATIONS; it += 1) {
-        for (const r of web) { const q = nb.get(r); for (let c = 0; c < 3; c += 1) { let a = 0; for (const u of q) a += pos[u * 3 + c]; pos[r * 3 + c] = a / q.size; } }
-      }
-      for (let i = 0; i < n; i += 1) if (rep[i] !== i) for (let c = 0; c < 3; c += 1) pos[i * 3 + c] = pos[rep[i] * 3 + c];
-    }
-    // THE TOP HELD (Joshua, 2026-10-13: "keep the top part of the belly fixed beyond
-    // 100%, but also leave the shape now, so do a combination/hybrid"): under the bust
-    // a grown size stays where her 100% body is, letting go down the curve, so the new
-    // shape carries the growth below and the top of the belly does not climb the ribs
-    for (const r of nb.keys()) {
-      const x = base[r * 3], y = base[r * 3 + 1];
-      if (Math.abs(x) > 0.2 || base[r * 3 + 2] < zFront) continue;
-      const c = crease.at(x), from = info.yPeak + V2_TOP_HOLD_FROM * (c - info.yPeak);
-      const w = V2_TOP_HOLD * smooth(from, c - 0.01, y) * smooth(c + 0.04, c + 0.01, y) * smooth(V2_CURVE_WIDTH, 0.04, Math.abs(x));
-      if (w > 0) for (let k = 0; k < 3; k += 1) pos[r * 3 + k] += (base[r * 3 + k] - pos[r * 3 + k]) * w;
-    }
-    {
-      const step = (lambda) => { const o = pos.slice(); for (const r of upperFair) { const q = nb.get(r); for (let k = 0; k < 3; k += 1) { let a = 0; for (const u of q) a += o[u * 3 + k]; pos[r * 3 + k] = o[r * 3 + k] + lambda * (a / q.size - o[r * 3 + k]); } } };
-      for (let p = 0; p < 20; p += 1) { step(0.5); step(-0.53); }
-      for (let i = 0; i < n; i += 1) if (rep[i] !== i) for (let k = 0; k < 3; k += 1) pos[i * 3 + k] = pos[rep[i] * 3 + k];
-    }
-    // THE BUMP RESTS ON THE GROIN, NEVER THROUGH IT: a grown bump hangs over the still
-    // pubis. Wherever the bump's underside comes down over it, the groin's skin under
-    // it settles a few millimetres behind, so the two never cross; then that skin is
-    // relaxed so it settles smoothly
-    let settled = 0;
-    {
-      const H = 0.004, cellOf = (x, y) => `${Math.floor(x / H)},${Math.floor(y / H)}`;
-      const under = new Map();
-      for (const r of nb.keys()) {
-        if (kind[r] === STILL) continue;
-        const dz = pos[r * 3 + 2] - base[r * 3 + 2], dy = pos[r * 3 + 1] - base[r * 3 + 1];
-        if (Math.hypot(dz, dy) < 0.01 || base[r * 3 + 1] < yBot - 0.03) continue;
-        const k = cellOf(pos[r * 3], pos[r * 3 + 1]); const z = pos[r * 3 + 2];
-        if (!under.has(k) || z < under.get(k)) under.set(k, z);
-      }
-      const moved = [];
-      for (const r of nb.keys()) {
-        if (kind[r] !== STILL && kind[r] !== FOLD) continue;
-        const x = pos[r * 3], y = pos[r * 3 + 1];
-        if (Math.abs(x) > 0.16 || y < yBot - 0.1 || y > yBot + 0.05) continue;
-        let zb = Infinity; const cx = Math.floor(x / H), cy = Math.floor(y / H);
-        for (let a = -1; a <= 1; a += 1) for (let b = -1; b <= 1; b += 1) { const z = under.get(`${cx + a},${cy + b}`); if (z !== undefined && z < zb) zb = z; }
-        if (!Number.isFinite(zb)) continue;
-        const lim = zb - V2_REST_GAP;
-        if (pos[r * 3 + 2] > lim && pos[r * 3 + 2] < zb + 0.03) { pos[r * 3 + 2] = Math.max(lim, base[r * 3 + 2] - V2_REST_MAX); moved.push(r); settled += 1; }
-      }
-      const set = new Set(moved); for (const r of moved) for (const u of nb.get(r)) if (kind[u] === STILL) set.add(u);
-      const zone = [...set];
-      for (let p = 0; p < 20; p += 1) { const o = pos.slice(); for (const r of zone) { const q = nb.get(r); for (let k = 0; k < 3; k += 1) { let a = 0; for (const u of q) a += o[u * 3 + k]; pos[r * 3 + k] = 0.5 * o[r * 3 + k] + 0.5 * a / q.size; } } }
-      for (let i = 0; i < n; i += 1) if (rep[i] !== i) for (let k = 0; k < 3; k += 1) pos[i * 3 + k] = pos[rep[i] * 3 + k];
-    }
-    log(`belly: ${name} upper belly one curve to the crease (moved up to ${(-pulled * 100).toFixed(1)} cm), its top held at 100%; ${settled} groin vertices settled under the bump`);
-    D.setArray(pos.map((v, i) => v - base[i]));
-    const TN = t.getAttribute('NORMAL'); if (TN) TN.setArray(normalDelta(pos, base, idx, info.rep, baseN, TN.getArray()));
-  }
   // and the same curve for her 100%, NOT applied to the master: a separate target,
   // `bellyRefine`, that the Lab can switch on to compare (the master stays 100%)
   {
@@ -560,5 +421,5 @@ export function bakeBellyV2(doc, bellyMorph, { hipY, navel = null, armParts = nu
     A.setArray(d);
   }
   const now = P0.getArray(); for (let i = 0; i < now.length; i += 1) if (now[i] !== master[i]) throw new Error('Sarah v2 belly: the 100% body moved');
-  log(`belly: v2's own: 100% is the master untouched; 0-75% faired into her over ${free.length.toLocaleString('en-US')} vertices (under-bust ${crease.lo.toFixed(3)}-${crease.hi.toFixed(3)} m), pubis in ${(V2_PUBIS_IN_M * 1000).toFixed(0)} mm at 0%; 150-200% and the switchable 100% refine drawn toward v1's profiles; groin anchored below ${(yBot + V2_ANCHOR_TO).toFixed(3)} m, ${fold.length.toLocaleString('en-US')} fold vertices solved`);
+  log(`belly: v2's own: 100% is the master untouched; 0-75% faired into her over ${free.length.toLocaleString('en-US')} vertices (under-bust ${crease.lo.toFixed(3)}-${crease.hi.toFixed(3)} m), pubis in ${(V2_PUBIS_IN_M * 1000).toFixed(0)} mm at 0%; 150-200% her 100% bump carried further; the switchable 100% refine drawn toward v1's profile`);
 }
