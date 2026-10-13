@@ -38,7 +38,7 @@ import { release } from '../tombs/LabPeople';
 import { HumanRig, findSkinnedMesh } from '../view/HumanRig';
 import { UNITS_PER_METRE } from '../world/dem';
 import {
-  BELLY_MOTION, BELLY_TARGET, BREAST_TARGETS, BUMP_MAX_PERCENT, GARMENTS, OUTFITS, outfitLine, modelLine, SARAH_LAB_MODELS, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID,
+  BELLY_MOTION, BELLY_TARGET, BREAST_TARGETS, BUMP_MAX_PERCENT, GARMENTS, OUTFITS, outfitLine, modelLine, refineLine, refineWeight, BELLY_REFINE_TARGET, SARAH_LAB_MODELS, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID,
   bellyMotionWeights, bellyWeights, breastBobWeight, breastWeights, navelWeights, fingerBend, THUMB_TO_PALM, bumpLine, fingersLine, restingBellySpring, statusLine, stepBellySpring, stepBreastSpring, walkBounceAccel,
   type Garment, type SarahLabPose,
 } from './sarahLabTool';
@@ -174,6 +174,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let modelIndex = 0;
   const shownNow = (g: Garment) => OUTFITS[outfit].garments.includes(g);
   let turning = false;
+  // v2's switchable curve refinement (CURVE), off: her master as modelled
+  let refine = false;
   let seconds = 0;
   let walked = 0;
   const poseOut: MutableJointTurn[] = Array.from({ length: Math.max(HUMAN_POSE_TURNS, SEATED_TURNS) }, newJointTurn);
@@ -215,6 +217,12 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     lit(buttons.turn, turning);
     if (buttons.outfit) buttons.outfit.textContent = outfitLine(outfit);
     if (buttons.model) buttons.model.textContent = modelLine(modelIndex);
+    if (buttons.refine) {
+      // only v2 has the switchable curve: the button is not shown for v1
+      buttons.refine.style.display = SARAH_LAB_MODELS[modelIndex].id === 'v2' ? '' : 'none';
+      buttons.refine.textContent = refineLine(refine);
+      lit(buttons.refine, refine);
+    }
   }
 
   /** The bump's weight, every frame: its resting tilt and where the spring has it. */
@@ -233,7 +241,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   function applyLook(): void {
     for (const mesh of skinned) {
       const dict = mesh.morphTargetDictionary, influences = mesh.morphTargetInfluences;
-      if (dict && influences) for (const [name, w] of Object.entries({ ...bellyWeights(bump), ...breastWeights(bump), ...navelWeights(bump) })) {
+      if (dict && influences) for (const [name, w] of Object.entries({ ...bellyWeights(bump), ...breastWeights(bump), ...navelWeights(bump), [BELLY_REFINE_TARGET]: refineWeight(refine, bump) })) {
         const at = dict[name];
         if (at !== undefined) influences[at] = w;
       }
@@ -321,10 +329,11 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     row.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap';
     buttons.outfit = btn(outfitLine(outfit), SARAH_LAB_ACTION.outfit, () => { outfit = (outfit + 1) % OUTFITS.length; applyLook(); });
     buttons.model = btn(modelLine(modelIndex), SARAH_LAB_ACTION.model, () => { modelIndex = (modelIndex + 1) % SARAH_LAB_MODELS.length; loadSarah(); });
+    buttons.refine = btn(refineLine(refine), SARAH_LAB_ACTION.refine, () => { refine = !refine; applyLook(); refresh(); });
     buttons.turn = btn('TURN', SARAH_LAB_ACTION.turn, () => { turning = !turning; });
     // a nudge up, as a hop would: the bump lags, drops and settles
     buttons.bounce = btn('BOUNCE', SARAH_LAB_ACTION.bounce, () => { spring.vy += 0.3; breastSpring.vy += 0.3; });
-    for (const b of [buttons.model, buttons.outfit, buttons.turn, buttons.bounce]) { b.style.padding = '8px 10px'; b.style.fontSize = '12px'; row.appendChild(b); }
+    for (const b of [buttons.model, buttons.refine, buttons.outfit, buttons.turn, buttons.bounce]) { b.style.padding = '8px 10px'; b.style.fontSize = '12px'; row.appendChild(b); }
     right.appendChild(row);
     right.style.maxHeight = 'calc(100% - 85px)';
     right.style.overflowY = 'auto';

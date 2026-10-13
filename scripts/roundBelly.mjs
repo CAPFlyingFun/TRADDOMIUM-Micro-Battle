@@ -69,12 +69,14 @@ export function roundBelly(body, { hipY, navel = null, log = () => {}, force = f
 
 /** The same rounding on positions only (metres, mutated in place). Returns the
  * anchors and the welded-vertex map, or null when there is no bump. */
-export function roundProfile(pos, idx, { hipY, navel = null, shape = REF_LATE, mix = REF_MIX, passes = FAIR_PASSES, yTopHint = null } = {}) {
+export function roundProfile(pos, idx, { hipY, navel = null, shape = REF_LATE, mix = REF_MIX, passes = FAIR_PASSES, yTopHint = null, bottomY = null } = {}) {
   const n = pos.length / 3;
   const before = new Float32Array(pos);
 
   // --- the centre-line profile, 5 mm rows, from below the pubis to the chest
-  const y0 = hipY - 0.15, rows = Math.ceil(0.6 / ROW);
+  // `bottomY` (Sarah v2's grown sizes, whose bump hangs below the pubis line) moves the
+  // curve's lower end; left out, everything is as v1 was baked
+  const y0 = bottomY == null ? hipY - 0.15 : Math.min(hipY - 0.15, bottomY - 0.03), rows = Math.ceil((0.45 + hipY - y0) / ROW);
   const rowOf = (y) => Math.floor((y - y0) / ROW);
   const rowY = (r) => y0 + (r + 0.5) * ROW;
   const centre = new Float32Array(rows).fill(-Infinity);
@@ -97,7 +99,7 @@ export function roundProfile(pos, idx, { hipY, navel = null, shape = REF_LATE, m
   for (let r = peak + 2; r < rows; r += 2) { const fall = (prof[r - 2] - prof[r]) / (2 * ROW); if (fall > 1) steep = true; if (steep && fall < 0.5) { top = r; break; } }
   if (yTopHint != null) top = rowOf(yTopHint);
   if (peak < 0 || top < 0) return null;
-  const yTop = rowY(top), yBot = hipY - 0.075, zTop = lerpRows(prof, yTop), zBot = lerpRows(prof, yBot);
+  const yTop = rowY(top), yBot = bottomY ?? hipY - 0.075, zTop = lerpRows(prof, yTop), zBot = lerpRows(prof, yBot);
   const chord = (y) => zBot + (zTop - zBot) * (y - yBot) / (yTop - yBot);
 
   // --- the bump's height above the chord, smoothed hard along the body: its

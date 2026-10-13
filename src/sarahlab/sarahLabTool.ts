@@ -55,6 +55,7 @@ export const SARAH_LAB_ACTION = Object.freeze({
   bounce: 'sarahlab:bounce',
   outfit: 'sarahlab:outfit',
   model: 'sarahlab:model',
+  refine: 'sarahlab:refine',
 });
 
 export const SARAH_LAB_FIELD = Object.freeze({
@@ -113,6 +114,28 @@ export function outfitLine(index: number): string {
  */
 /** The bump slider's top: twice the model's own belly. */
 export const BUMP_MAX_PERCENT = 200;
+
+/**
+ * SARAH v2'S CURVE, SWITCHABLE (Joshua, 2026-10-13: "If a curvature correction is
+ * necessary at 100%, implement it as a separate, reversible shape refinement that can
+ * be toggled for comparison"). Her master is 100% and is never reshaped; the bake
+ * writes the corrected upper-belly curve at 100% as its own target, and the Lab's
+ * CURVE button turns it on. Full at 100%, gone by 85% (the smaller sizes are built
+ * from the master) and by 150% (the grown sizes carry the curve themselves).
+ * v1 has no such target and the button is not shown for it.
+ */
+export const BELLY_REFINE_TARGET = 'bellyRefine';
+
+export function refineWeight(on: boolean, bumpPercent: number): number {
+  if (!on) return 0;
+  const b = Math.min(BUMP_MAX_PERCENT, Math.max(0, Number.isFinite(bumpPercent) ? bumpPercent : 100)) / 100;
+  if (b <= 1) { const u = Math.min(1, Math.max(0, (b - 0.85) / 0.15)); return u * u * (3 - 2 * u); }
+  return Math.max(0, 1 - (b - 1) / 0.5);
+}
+
+export function refineLine(on: boolean): string {
+  return on ? 'CURVE · refined' : 'CURVE · as modelled';
+}
 
 export function bellyWeights(bumpPercent: number): Record<string, number> {
   const b = Math.min(BUMP_MAX_PERCENT, Math.max(0, Number.isFinite(bumpPercent) ? bumpPercent : 100)) / 100;

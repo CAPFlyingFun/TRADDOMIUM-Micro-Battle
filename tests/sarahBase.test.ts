@@ -361,3 +361,25 @@ describe('the pregnant sit lays the hands palm-down on any rig', () => {
     for (const d of await roll(`public/${SARAH_BASE_MODEL}`)) expect(Math.abs(d - 90)).toBeLessThan(15);
   }, 60000);
 });
+
+describe("Sarah v2's own belly (public/models/sarah-v2.glb; scripts/bellyV2.mjs)", () => {
+  it('steps through the same keys as v1, carries the switchable curve, and moves no breast with the belly', async () => {
+    await MeshoptDecoder.ready;
+    const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'meshopt.decoder': MeshoptDecoder });
+    const doc = await io.read(`public/${labTool.SARAH_V2_MODEL}`);
+    const names: string[] = doc.getRoot().listMeshes()[0].getExtras().targetNames as string[];
+    // every stop of the slider has its own key (a missing 30% or 60% showed 100%)
+    for (const [, name] of BELLY_KEYS) if (name) expect(names).toContain(name);
+    expect(names).toContain(labTool.BELLY_REFINE_TARGET);
+  }, 60000);
+
+  it('turns the curve on at 100% only when asked, fading out below and above', () => {
+    expect(labTool.refineWeight(false, 100)).toBe(0);
+    expect(labTool.refineWeight(true, 100)).toBe(1);
+    expect(labTool.refineWeight(true, 80)).toBe(0);
+    expect(labTool.refineWeight(true, 125)).toBeCloseTo(0.5);
+    expect(labTool.refineWeight(true, 150)).toBe(0);
+    expect(labTool.refineLine(false)).toBe('CURVE · as modelled');
+    expect(labTool.refineLine(true)).toBe('CURVE · refined');
+  });
+});
