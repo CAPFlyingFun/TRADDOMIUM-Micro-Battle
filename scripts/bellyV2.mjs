@@ -37,6 +37,11 @@ export const V2_PUBIS_IN_M = 0.008;
 /** Fairing passes (Taubin pairs) over each small size's skin: they fade the bump's
  * edge into the body ("between belly edge and body, add more smoothing"). GAME TUNING. */
 export const V2_EDGE_PASSES = 30;
+/** How far over the under-bust crease the small sizes' fairing reaches, fading to
+ * nothing there, so the top of the belly meets the breasts without a step
+ * (Joshua, 2026-10-13: "smooth more at the top of the belly area just under the
+ * breasts"). GAME TUNING. */
+export const V2_UNDERBUST_REACH = 0.012;
 
 /**
  * V1'S APPROVED SIDE PROFILES, the reference v2's curve is drawn toward: the centre
@@ -268,6 +273,10 @@ export function bakeBellyV2(doc, bellyMorph, { hipY, navel = null, armParts = nu
   // 1. every size and the breasts, from her own body as it is
   bellyMorph(doc, { log });
   const { rep, nb } = weld(base, idx);
+  // the arms are lifted out of the way for the bake: no smoothing may reach them, or
+  // the skin of her side next to them is pulled a hundred metres up after them (the
+  // sliver from the shoulder and the shadow under the arm, Joshua 2026-10-13)
+  for (const [r, q] of nb) { if (arm[r]) { nb.delete(r); continue; } for (const u of [...q]) if (arm[u]) q.delete(u); if (!q.size) nb.delete(r); }
 
   // 2. the bump's own measure, read and NOT applied: where the under-bust crease is
   const probe = new Float32Array(base);
@@ -280,12 +289,12 @@ export function bakeBellyV2(doc, bellyMorph, { hipY, navel = null, armParts = nu
   const free = [];
   for (const r of nb.keys()) {
     const x = base[r * 3], y = base[r * 3 + 1];
-    if (Math.abs(x) < 0.22 && y > yBot - 0.07 && y < crease.at(x) - 0.005 && baseN[r * 3 + 2] > -0.2) free.push(r);
+    if (Math.abs(x) < 0.22 && y > yBot - 0.07 && y < crease.at(x) + V2_UNDERBUST_REACH && baseN[r * 3 + 2] > -0.2) free.push(r);
   }
   const fairW = new Float32Array(n);
   for (const r of free) {
     const x = base[r * 3], y = base[r * 3 + 1], c = crease.at(x);
-    let w = smooth(yBot - 0.07, yBot - 0.03, y) * smooth(c - 0.005, c - 0.03, y) * smooth(0.22, 0.17, Math.abs(x)) * smooth(-0.2, 0.15, baseN[r * 3 + 2]);
+    let w = smooth(yBot - 0.07, yBot - 0.03, y) * smooth(c + V2_UNDERBUST_REACH, c - 0.03, y) * smooth(0.22, 0.17, Math.abs(x)) * smooth(-0.2, 0.15, baseN[r * 3 + 2]);
     if (navel) w *= smooth(NAVEL_HOLD_M, 2 * NAVEL_HOLD_M, Math.hypot(x - navel[0], y - navel[1]));
     fairW[r] = w;
   }
@@ -456,6 +465,21 @@ export function bakeBellyV2(doc, bellyMorph, { hipY, navel = null, armParts = nu
     const A = t.getAttribute(sem); if (!A) continue;
     const d = A.getArray().slice(); for (let i = 0; i < n; i += 1) if (arm[i]) d[i * 3] = d[i * 3 + 1] = d[i * 3 + 2] = 0;
     A.setArray(d);
+  }
+  // THE NORMALS, AGAIN, WITH HER ARMS WHERE THEY ARE (Joshua, 2026-10-13: a shadow
+  // under each arm from 0 to 100% that went away past 100%). Every size's normals were
+  // first read from faces built while the arms were lifted out of the way, and the
+  // faces that join the arm to her side then pointed anywhere: the side under the arm,
+  // which the smaller sizes move, took that as a dark patch. So each size's normals
+  // are read once more from the finished body, arms down
+  const names = mesh.getExtras().targetNames || [];
+  const sizeNames = new Set([...Object.keys(V2_SMALL_SIZES), 'belly30', 'belly60', ...Object.keys(V2_GROWTH), V2_REFINE_TARGET]);
+  for (const name of sizeNames) {
+    const t = body.listTargets()[names.indexOf(name)]; if (!t) continue;
+    const TN = t.getAttribute('NORMAL'); if (!TN) continue;
+    const d = t.getAttribute('POSITION').getArray();
+    const pos = new Float32Array(n * 3); for (let i = 0; i < pos.length; i += 1) pos[i] = master[i] + d[i];
+    TN.setArray(blendNormals(pos, master, idx, rep, masterN).map((v, i) => v - masterN[i]));
   }
   const now = P0.getArray(); for (let i = 0; i < now.length; i += 1) if (now[i] !== master[i]) throw new Error('Sarah v2 belly: the 100% body moved');
   log(`belly: v2's own: 100% is the master untouched; 0-75% faired into her over ${free.length.toLocaleString('en-US')} vertices (under-bust ${crease.lo.toFixed(3)}-${crease.hi.toFixed(3)} m), pubis in ${(V2_PUBIS_IN_M * 1000).toFixed(0)} mm at 0%; 150-200% her 100% bump carried further; the switchable 100% refine drawn toward v1's profile`);
