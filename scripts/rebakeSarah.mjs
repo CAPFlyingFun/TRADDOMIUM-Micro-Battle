@@ -14,6 +14,7 @@ import sharp from 'sharp';
 import { rename, rm } from 'node:fs/promises';
 import { build as bundle } from 'esbuild';
 import { bellyMorph } from './bellyMorph.mjs';
+import { bakeRoundBelly } from './roundBelly.mjs';
 import { growClothes, jointPositions, partsOf } from './growClothes.mjs';
 import { rebuildShirtHem } from './rebuildShirtHem.mjs';
 import { shirtFabric } from './shirtFabric.mjs';
@@ -22,6 +23,9 @@ import { clearShirtBust } from './clearShirtBust.mjs';
 import { refineEarlyWaist } from './refineEarlyWaist.mjs';
 import { smoothShirtUnderbust } from './smoothShirtUnderbust.mjs';
 import { fitClothToSkin } from './fitClothToSkin.mjs';
+
+/** Sarah base's navel (x, y), metres, held still while the belly is faired. MEASURED. */
+export const SARAH_NAVEL = Object.freeze([0.002, 0.937]);
 
 export async function recoverSarahBody(doc) {
   const root = doc.getRoot(), mesh = root.listMeshes()[0], skin = root.listSkins()[0];
@@ -209,7 +213,10 @@ async function main() {
   fairSarahChest(body);
   await softenSarahChestRelief(body);
   const log = (s) => console.log(`[bake:sarah-clothes] ${s}`);
-  bellyMorph(doc, { log });
+  // Joshua, 2026-10-13: the belly halfway to his traced 22-40 week photographs and
+  // smoothed; 0-50% kept exactly as approved (roundBelly.mjs).
+  const skin0 = doc.getRoot().listSkins()[0];
+  bakeRoundBelly(doc, bellyMorph, { hipY: partsOf(skin0, jointPositions(skin0)).hipY, navel: SARAH_NAVEL, log });
   await growClothes(doc, { log });
   await rebuildShirtHem(doc, { log });
   // Fit the combinations rendered by the slider, not isolated morph targets.

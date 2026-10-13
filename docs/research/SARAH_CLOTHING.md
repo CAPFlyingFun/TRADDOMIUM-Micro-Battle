@@ -310,3 +310,15 @@ shirt's shared mesh topology. It does not pull the fabric back into the skin; po
 and normals are encoded at every slider anchor, including 30%. Waist width and
 belly geometry are outside this local correction. The complete seven-step front
 and side sweep is repeated after this smoothing pass.
+
+### alpha.90: the belly matched to the week-by-week photographs (2026-10-13)
+
+Joshua asked for a rounder, smoother, "watermelon" belly and supplied his 10–40 week
+side-photograph strip. Each photo's belly edge was traced from the shorts to the
+under-bust crease and normalised to its own peak (`roundBelly.mjs`, `REF_MID` from 22
+and 27 weeks, `REF_LATE` from 31, 38 and 40). A first pass that replaced the curve
+outright read to him as less round and more jagged; the shipped balance moves each
+size halfway from its own curve toward the photographs' and fairs the region with
+the navel held. 0, 25 and 50% keep their exact approved shapes; 75–200% change by up
+to 7 mm at 100% and 2 cm at 200%. The motion targets are kept off the thighs. The
+clothes rebuild from the new body through the unchanged chain.
