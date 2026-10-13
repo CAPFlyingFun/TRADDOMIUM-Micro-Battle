@@ -38,7 +38,7 @@ import { release } from '../tombs/LabPeople';
 import { HumanRig, findSkinnedMesh } from '../view/HumanRig';
 import { UNITS_PER_METRE } from '../world/dem';
 import {
-  BELLY_MOTION, BELLY_TARGET, BREAST_TARGETS, BUMP_MAX_PERCENT, GARMENTS, OUTFITS, outfitLine, SARAH_BASE_MODEL, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID,
+  BELLY_MOTION, BELLY_TARGET, BREAST_TARGETS, BUMP_MAX_PERCENT, GARMENTS, OUTFITS, outfitLine, modelLine, SARAH_LAB_MODELS, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID,
   bellyMotionWeights, bellyWeights, breastBobWeight, breastWeights, navelWeights, fingerBend, THUMB_TO_PALM, bumpLine, fingersLine, restingBellySpring, statusLine, stepBellySpring, stepBreastSpring, walkBounceAccel,
   type Garment, type SarahLabPose,
 } from './sarahLabTool';
@@ -171,6 +171,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   const felt = { p: new THREE.Vector3(), v: new THREE.Vector3(), primed: 0 };
   const tmp = new THREE.Vector3();
   let outfit = 0;
+  let modelIndex = 0;
   const shownNow = (g: Garment) => OUTFITS[outfit].garments.includes(g);
   let turning = false;
   let seconds = 0;
@@ -198,7 +199,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let pinch = 0;
 
   function refresh(): void {
-    if (fields.status) fields.status.textContent = statusLine(loaded, failed, garments, hasBelly);
+    if (fields.status) fields.status.textContent = statusLine(loaded, failed, garments, hasBelly, modelIndex);
     const bumpField = fields[SARAH_LAB_FIELD.bump], fingerField = fields[SARAH_LAB_FIELD.fingers];
     if (bumpField) bumpField.textContent = bumpLine(bump);
     if (fingerField) fingerField.textContent = fingersLine(curl);
@@ -213,6 +214,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     lit(buttons.tpose, pose === 'tpose');
     lit(buttons.turn, turning);
     if (buttons.outfit) buttons.outfit.textContent = outfitLine(outfit);
+    if (buttons.model) buttons.model.textContent = modelLine(modelIndex);
   }
 
   /** The bump's weight, every frame: its resting tilt and where the spring has it. */
@@ -318,10 +320,11 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     const row = document.createElement('div');
     row.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap';
     buttons.outfit = btn(outfitLine(outfit), SARAH_LAB_ACTION.outfit, () => { outfit = (outfit + 1) % OUTFITS.length; applyLook(); });
+    buttons.model = btn(modelLine(modelIndex), SARAH_LAB_ACTION.model, () => { modelIndex = (modelIndex + 1) % SARAH_LAB_MODELS.length; loadSarah(); });
     buttons.turn = btn('TURN', SARAH_LAB_ACTION.turn, () => { turning = !turning; });
     // a nudge up, as a hop would: the bump lags, drops and settles
     buttons.bounce = btn('BOUNCE', SARAH_LAB_ACTION.bounce, () => { spring.vy += 0.3; breastSpring.vy += 0.3; });
-    for (const b of [buttons.outfit, buttons.turn, buttons.bounce]) { b.style.padding = '8px 10px'; b.style.fontSize = '12px'; row.appendChild(b); }
+    for (const b of [buttons.model, buttons.outfit, buttons.turn, buttons.bounce]) { b.style.padding = '8px 10px'; b.style.fontSize = '12px'; row.appendChild(b); }
     right.appendChild(row);
     right.style.maxHeight = 'calc(100% - 85px)';
     right.style.overflowY = 'auto';
@@ -421,6 +424,53 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     applyMotion();
   }
 
+  /** Load the chosen model, putting away the one shown (MODEL switches v1 and v2). */
+  function loadSarah(): void {
+    if (model) { three.remove(model); rig?.dispose(); release(model); model = null; }
+    rig = null; measure = null; fingers = []; skinned = []; garments = []; hasBelly = false; feel = null;
+    felt.primed = 0; loaded = false; failed = false;
+    refresh();
+    const path = SARAH_LAB_MODELS[modelIndex].path;
+    void assets.loadModel(path, () => new THREE.Object3D()).then((loadedModel) => {
+      if (disposed || path !== SARAH_LAB_MODELS[modelIndex].path) { release(loadedModel); return; }
+      if (loadedModel.userData.isPlaceholder === true) { failed = true; refresh(); return; }
+      try {
+        rig = new HumanRig(loadedModel);
+        measure = measureHuman(rig.bind);
+        fingers = findFingers(rig.bind, measure);
+      } catch (error) {
+        console.error('[sarahlab] the base model could not be rigged; it stands in its bind pose', error);
+        rig = null;
+        measure = null;
+      }
+      loadedModel.scale.setScalar(M);
+      const found = new Set<Garment>();
+      loadedModel.traverse((n) => {
+        const mesh = n as THREE.SkinnedMesh;
+        if (mesh.isSkinnedMesh !== true) return;
+        mesh.frustumCulled = false;
+        skinned.push(mesh);
+        if (mesh.morphTargetDictionary?.[BELLY_TARGET] !== undefined) hasBelly = true;
+        const name = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material).name;
+        if ((GARMENTS as readonly string[]).includes(name)) found.add(name as Garment);
+
+      });
+      garments = GARMENTS.filter((g) => found.has(g));
+      model = loadedModel;
+      three.add(loadedModel);
+      // the spring feels a point at the front of her middle, carried by her spine
+      const skinMesh = findSkinnedMesh(loadedModel);
+      if (skinMesh && measure) {
+        loadedModel.updateMatrixWorld(true);
+        const bone = skinMesh.skeleton.bones[measure.joints.spine];
+        if (bone) feel = { bone, local: bone.worldToLocal(new THREE.Vector3(0, 1.0 * M, 0.2 * M)) };
+      }
+      loaded = true;
+      applyLook();
+      refresh();
+    });
+  }
+
   return {
     name: SARAH_LAB_SCENE_ID,
     three,
@@ -432,44 +482,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       camera.updateProjectionMatrix();
       placeCamera();
       buildHud();
-      void assets.loadModel(SARAH_BASE_MODEL, () => new THREE.Object3D()).then((loadedModel) => {
-        if (disposed) { release(loadedModel); return; }
-        if (loadedModel.userData.isPlaceholder === true) { failed = true; refresh(); return; }
-        try {
-          rig = new HumanRig(loadedModel);
-          measure = measureHuman(rig.bind);
-          fingers = findFingers(rig.bind, measure);
-        } catch (error) {
-          console.error('[sarahlab] the base model could not be rigged; it stands in its bind pose', error);
-          rig = null;
-          measure = null;
-        }
-        loadedModel.scale.setScalar(M);
-        const found = new Set<Garment>();
-        loadedModel.traverse((n) => {
-          const mesh = n as THREE.SkinnedMesh;
-          if (mesh.isSkinnedMesh !== true) return;
-          mesh.frustumCulled = false;
-          skinned.push(mesh);
-          if (mesh.morphTargetDictionary?.[BELLY_TARGET] !== undefined) hasBelly = true;
-          const name = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material).name;
-          if ((GARMENTS as readonly string[]).includes(name)) found.add(name as Garment);
-
-        });
-        garments = GARMENTS.filter((g) => found.has(g));
-        model = loadedModel;
-        three.add(loadedModel);
-        // the spring feels a point at the front of her middle, carried by her spine
-        const skinMesh = findSkinnedMesh(loadedModel);
-        if (skinMesh && measure) {
-          loadedModel.updateMatrixWorld(true);
-          const bone = skinMesh.skeleton.bones[measure.joints.spine];
-          if (bone) feel = { bone, local: bone.worldToLocal(new THREE.Vector3(0, 1.0 * M, 0.2 * M)) };
-        }
-        loaded = true;
-        applyLook();
-        refresh();
-      });
+      loadSarah();
     },
 
     update(frame: FrameInfo) {

@@ -322,3 +322,20 @@ size halfway from its own curve toward the photographs' and fairs the region wit
 the navel held. 0, 25 and 50% keep their exact approved shapes; 75–200% change by up
 to 7 mm at 100% and 2 cm at 200%. The motion targets are kept off the thighs. The
 clothes rebuild from the new body through the unchanged chain.
+
+### alpha.91: Sarah v2 beside v1, with a MODEL switch (2026-10-13)
+
+Joshua supplied a newer Meshy master (`art/humans/Sarah-V2.glb`, not committed): 36
+weeks, arms down at her sides, a realistic skin, the outie navel modelled, all five
+fingers rigged. `bake:humans` builds `public/models/sarah-v2.glb` with the same weight
+passes and `bakeRoundBelly` (sizes, sag, bounce, breasts, rounded toward his photos).
+New for an arms-down master:
+- the belly bake lifts the arm vertices (skin mostly on the arm bones) out of every
+  reading and leaves them out of every target (`armParts`), or the hanging hands were
+  carved by the flat size;
+- the generated navel shapes are left empty (`navelModelled`): her own outie stays;
+- `humanSkeleton` picks the spine before the legs, since hanging hands put the spine's
+  subtree below the pelvis;
+- the seated arms raise a lowered bind back to the T inside the turn (shoulder `R·D⁻¹`,
+  elbow and wrist `D·R·D⁻¹`), and `bindPalmRoll` reads the palm in the T frame.
+v2 has no clothes yet. `SARAH_COMPARE=1 npm run probe:sarahlab` shoots both models.

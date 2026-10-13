@@ -46,6 +46,8 @@ import type { BindJoint, HumanMeasure, JointTurn, MutableJointTurn } from './hum
 import { newJointTurn } from './humanRig';
 
 const DEG = Math.PI / 180;
+/** A bind whose upper arm hangs more than this below level is an arms-down rig. */
+const ARMS_DOWN_FROM = 30 * DEG;
 const TAU = Math.PI * 2;
 
 export type SeatedStyle = 'doze' | 'sit';
@@ -251,6 +253,14 @@ export function bindPalmRoll(bind: readonly BindJoint[], wrist: number): number 
         (along[2] * across[0] - along[0] * across[2]) * side,
         (along[0] * across[1] - along[1] * across[0]) * side,
       ];
+      // An arms-down bind (Sarah v2): read the palm as it would face with the hand
+      // raised back to the T, turning it about Z by the hand's own droop.
+      const drop = Math.atan2(-along[1], side * along[0]);
+      if (drop > ARMS_DOWN_FROM) {
+        const t = side * drop, c0 = Math.cos(t), s0 = Math.sin(t);
+        const x = palm[0] * c0 - palm[1] * s0, y = palm[0] * s0 + palm[1] * c0;
+        palm[0] = x; palm[1] = y;
+      }
       // the signed angle about +X from +Z to the palm, in the y-z plane
       if (Math.hypot(palm[1], palm[2]) > 1e-9) roll = Math.atan2(-palm[1], palm[2]);
     }
@@ -359,9 +369,21 @@ export function poseSeated(
     // turned back by the same amount so the bend still points forward —
     // the elbow joint itself then only bends.
     const roll = ((a.pronate ?? 0) - fix) / 2;
-    write(out[i], shoulder, qMul(rx(-a.forward), qMul(rz(-s * a.down), rx(a.twist + roll))));
-    write(out[i + 1], elbow, roll ? qMul(rx(-roll), qMul(ry(-s * a.elbow), rx(2 * roll))) : ry(-s * a.elbow));
-    write(out[i + 2], wrist, qMul(ry(-s * a.wristBend), rz(-s * a.wristTilt)));
+    // A master rigged with its arms already DOWN (Sarah v2): the specs are turns
+    // of an arm held out in a T, so the arm is first raised back to that T in the
+    // turn (the shoulder's turn ends with D⁻¹, the droop undone) and the joints
+    // below see their turns in the lowered arm's frame (D·R·D⁻¹). The T-pose
+    // masters the specs were tuned on droop a few degrees at most, under
+    // ARMS_DOWN_FROM, and keep their turns exactly.
+    const sb = bind[shoulder], eb = bind[elbow];
+    const droop = Math.atan2(sb.y - eb.y, Math.abs(eb.x - sb.x));
+    const lowered = droop > ARMS_DOWN_FROM;
+    const D = rz(-s * droop), Dinv = rz(s * droop);
+    const inT = (q: Q) => (lowered ? qMul(D, qMul(q, Dinv)) : q);
+    const shoulderTurn = qMul(rx(-a.forward), qMul(rz(-s * a.down), rx(a.twist + roll)));
+    write(out[i], shoulder, lowered ? qMul(shoulderTurn, Dinv) : shoulderTurn);
+    write(out[i + 1], elbow, inT(roll ? qMul(rx(-roll), qMul(ry(-s * a.elbow), rx(2 * roll))) : ry(-s * a.elbow)));
+    write(out[i + 2], wrist, inT(qMul(ry(-s * a.wristBend), rz(-s * a.wristTilt))));
   };
   // The right forearm over the left, the commoner fold (and either reads).
   const arms = pose.style === 'doze' && pose.arms === 'cradle' ? CRADLE

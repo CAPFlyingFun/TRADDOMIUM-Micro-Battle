@@ -12,15 +12,30 @@ import type { DevTool } from '../devtools/DevTool';
 
 export const SARAH_LAB_SCENE_ID = 'lab:sarah';
 export const SARAH_LAB_TOOL_ID = 'lab.sarah';
-/** The only file the lab loads, and the only place it is used. */
+/** The lab's first model, v1, and the only place its path is written. */
 export const SARAH_BASE_MODEL = 'models/sarah-base.glb';
+/** Sarah v2 (Joshua, 2026-10-13): the newer master, arms down, outie navel modelled, five fingers rigged. */
+export const SARAH_V2_MODEL = 'models/sarah-v2.glb';
+
+/**
+ * The models the lab can show, in the order MODEL cycles them (Joshua, 2026-10-13:
+ * "add an option to switch between both models to compare"). v2 has no clothes yet.
+ */
+export const SARAH_LAB_MODELS = Object.freeze([
+  Object.freeze({ id: 'v1', path: SARAH_BASE_MODEL }),
+  Object.freeze({ id: 'v2', path: SARAH_V2_MODEL }),
+]);
+
+export function modelLine(index: number): string {
+  return `MODEL · ${SARAH_LAB_MODELS[((index % SARAH_LAB_MODELS.length) + SARAH_LAB_MODELS.length) % SARAH_LAB_MODELS.length].id}`;
+}
 
 export const sarahLabTool: DevTool = {
   id: SARAH_LAB_TOOL_ID,
   title: 'Sarah Lab (base model)',
   description:
     "Sarah rebuilt from the base mannequin, to try before she goes live: the BUMP slider runs from twice full term (twins and more, her breasts growing with it) to "
-    + 'nearly flat, its own weight sags the belly past full term, BOUNCE (or WALK) shows it and her breasts move, FINGERS curls all ten, OUTFIT cycles the clothes grown from her body (a red tee over black leggings, a bikini, a swimsuit, none), and STAND, '
+    + 'nearly flat, its own weight sags the belly past full term, BOUNCE (or WALK) shows it and her breasts move, FINGERS curls all ten, MODEL switches between v1 and the newer v2 to compare, OUTFIT cycles the clothes grown from her body (a red tee over black leggings, a bikini, a swimsuit, none), and STAND, '
     + 'WALK and SIT pose her. Drag to turn round her, pinch or scroll to come closer. Not used by the story or the game.',
   sceneId: SARAH_LAB_SCENE_ID,
 };
@@ -39,6 +54,7 @@ export const SARAH_LAB_ACTION = Object.freeze({
   turn: 'sarahlab:turn',
   bounce: 'sarahlab:bounce',
   outfit: 'sarahlab:outfit',
+  model: 'sarahlab:model',
 });
 
 export const SARAH_LAB_FIELD = Object.freeze({
@@ -194,11 +210,12 @@ export function fingersLine(curlPercent: number): string {
   return p === 0 ? 'FINGERS · open' : p === 100 ? 'FINGERS · fist' : `FINGERS · ${p}% curled`;
 }
 
-export function statusLine(loaded: boolean, failed: boolean, garments: readonly string[], hasBelly: boolean): string {
-  if (failed) return 'models/sarah-base.glb did not load';
-  if (!loaded) return 'loading Sarah…';
-  const g = garments.length ? `${garments.length} garment${garments.length === 1 ? '' : 's'}` : 'no clothes in this file';
-  return `base model · ${hasBelly ? 'belly slider' : 'no belly slider'} · ${g}`;
+export function statusLine(loaded: boolean, failed: boolean, garments: readonly string[], hasBelly: boolean, model = 0): string {
+  const m = SARAH_LAB_MODELS[((model % SARAH_LAB_MODELS.length) + SARAH_LAB_MODELS.length) % SARAH_LAB_MODELS.length];
+  if (failed) return `${m.path} did not load`;
+  if (!loaded) return `loading Sarah ${m.id}…`;
+  const g = garments.length ? `${garments.length} garment${garments.length === 1 ? '' : 's'}` : 'no clothes in this file yet';
+  return `${m.id === 'v1' ? 'base model' : `model ${m.id}`} · ${hasBelly ? 'belly slider' : 'no belly slider'} · ${g}`;
 }
 
 // ------------------------------------------------------------ the bump's weight

@@ -100,7 +100,8 @@ import { smoothCreaseWeights } from './smoothCreaseWeights.mjs';
 import { protectBumpWeights } from './protectBumpWeights.mjs';
 import { rigFingers } from './rigFingers.mjs';
 import { bellyMorph } from './bellyMorph.mjs';
-import { growClothes } from './growClothes.mjs';
+import { growClothes, jointPositions, partsOf } from './growClothes.mjs';
+import { bakeRoundBelly } from './roundBelly.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
@@ -287,6 +288,14 @@ const HUMANS = [
   // same weight passes her toon body needs.
   {
     master: 'Sarah-Base.glb', out: 'sarah-base.glb', who: 'Sarah (base)', panel: null, repair: false, authored: true, smoothLegs: true, reach: Infinity, smoothSeat: true, smoothArmpits: true, smoothHands: true, protectBump: 'overhang', smoothCrease: true, bellyMorph: true, clothes: true,
+  },
+  // SARAH v2 (Joshua, 2026-10-13): a newer Meshy master of the same woman at 36
+  // weeks, arms down at her sides, a realistic skin, the outie navel modelled into
+  // the mesh and all five fingers rigged. Baked beside v1 so the Sarah Lab can
+  // switch between them and compare; the same weight passes and the same belly
+  // (sizes, sag, bounce, breasts), rounded toward the photographs. No clothes yet.
+  {
+    master: 'Sarah-V2.glb', out: 'sarah-v2.glb', who: 'Sarah (v2)', panel: null, repair: false, authored: true, smoothLegs: true, reach: Infinity, smoothSeat: true, smoothArmpits: true, smoothHands: true, protectBump: 'overhang', smoothCrease: true, bellyMorph: true, roundBelly: true, navel: [0, 1.012], armsDown: true, navelModelled: true,
   },
 ];
 
@@ -1040,7 +1049,21 @@ async function main() {
     if (human.smoothCrease) smoothCreaseWeights(doc, { log: (line) => console.log(`[bake:humans]   ${human.who}: ${line}`) });
     // The bump as a slider, then clothes grown from the skin: last of the body
     // passes, so the clothes copy the final weights and the morph.
-    if (human.bellyMorph) bellyMorph(doc, { log: (line) => console.log(`[bake:humans]   ${human.who}: ${line}`) });
+    if (human.roundBelly) {
+      const skin = doc.getRoot().listSkins()[0];
+      const parts = partsOf(skin, jointPositions(skin));
+      bakeRoundBelly(doc, bellyMorph, { hipY: parts.hipY, navel: human.navel ?? null, armParts: human.armsDown ? parts.part : null, log: (line) => console.log(`[bake:humans]   ${human.who}: ${line}`) });
+    } else if (human.bellyMorph) bellyMorph(doc, { log: (line) => console.log(`[bake:humans]   ${human.who}: ${line}`) });
+    // A master with its own navel modelled (v2's outie) keeps it as it is: the
+    // generated navel shapes look for a navel in the wrong place on it.
+    if (human.navelModelled) {
+      const mesh = doc.getRoot().listMeshes()[0], names = mesh.getExtras().targetNames ?? [];
+      for (const name of ['navelIn', 'navelOut']) for (const p of mesh.listPrimitives()) {
+        const t = p.listTargets()[names.indexOf(name)]; if (!t) continue;
+        for (const sem of t.listSemantics()) { const A = t.getAttribute(sem); A.setArray(new Float32Array(A.getArray().length)); }
+      }
+      console.log(`[bake:humans]   ${human.who}: navel: modelled in the mesh; the generated navel shapes are left empty`);
+    }
     if (human.clothes) await growClothes(doc, { log: (line) => console.log(`[bake:humans]   ${human.who}: ${line}`) });
 
     await doc.transform(

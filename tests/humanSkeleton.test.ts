@@ -371,6 +371,19 @@ describe('measureHuman on a sparser rig', () => {
     expect(backward.joints.hipL).toBe(PLAIN_JOINTS.hipL);
   });
 
+  it('reads a rig bound with its arms DOWN, hands below the pelvis (Sarah v2)', () => {
+    // The spine's subtree reaches below the pelvis through the hanging hands, so
+    // it must not be taken for a third leg.
+    const down = figure();
+    down[7] = bone('elbow-x', 6, -0.1, 0.2, 0);
+    down[8] = bone('wrist-x', 7, -0.12, -0.06, 0);
+    down[10] = bone('elbow+x', 9, 0.1, 0.2, 0);
+    down[11] = bone('wrist+x', 10, 0.12, -0.06, 0);
+    const measure = measureHuman(down);
+    expect(measure.joints).toEqual(PLAIN_JOINTS);
+    expect(measure.leftSign).toBe(1);
+  });
+
   it('takes the facing from the head when the feet end straight under the ankle', () => {
     // No forward toe to measure: the last joint of each foot is directly
     // below the one above it, so it reads as more leg rather than a foot,

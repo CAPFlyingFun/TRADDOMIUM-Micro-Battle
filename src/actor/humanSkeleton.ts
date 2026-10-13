@@ -415,14 +415,18 @@ export function measureHuman(bind: readonly BindJoint[]): HumanMeasure {
   // The legs are the pelvis's children that reach below it; the spine is
   // the one that reaches highest above it. Both are subtree questions,
   // because a child joint on its own says nothing about where its limb goes.
+  // The spine is picked first: a master rigged with its arms DOWN (Sarah v2)
+  // hangs its hands below the pelvis, so the spine's subtree reaches below it
+  // too, and only its top tells it from a leg.
   const legChains: number[][] = [];
   let spineStart = -1;
   for (const child of tree.children[pelvis]) {
-    if (tree.lowest[child] < joint[pelvis].y - tolerance) {
-      legChains.push(mainLine(tree, child));
-      continue;
-    }
     if (spineStart < 0 || tree.highest[child] > tree.highest[spineStart]) spineStart = child;
+  }
+  if (spineStart >= 0 && tree.highest[spineStart] <= joint[pelvis].y + tolerance) spineStart = -1;
+  for (const child of tree.children[pelvis]) {
+    if (child === spineStart) continue;
+    if (tree.lowest[child] < joint[pelvis].y - tolerance) legChains.push(mainLine(tree, child));
   }
   if (legChains.length !== 2) {
     fail(`${legChains.length} of the pelvis's ${tree.children[pelvis].length} children at ${describe(joint, pelvis)} descend below it; a human has two legs`);

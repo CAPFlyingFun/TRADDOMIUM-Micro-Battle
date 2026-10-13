@@ -11,7 +11,7 @@ import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { MeshoptDecoder } from 'meshoptimizer';
 import * as labTool from '../src/sarahlab/sarahLabTool';
-import { BELLY_KEYS, BELLY_MOTION, BELLY_SPRING, BELLY_TARGET, bellyMotionWeights, breastBobWeight, breastWeights, BREAST_SPRING, stepBreastSpring, fingerBend, FINGER_LIMITS_DEG, restingBellySpring, stepBellySpring, walkBounceAccel, GARMENTS, SARAH_BASE_MODEL, bellyWeights, bumpLine, fingersLine, sarahLabTool, statusLine } from '../src/sarahlab/sarahLabTool';
+import { BELLY_KEYS, BELLY_MOTION, BELLY_SPRING, BELLY_TARGET, bellyMotionWeights, breastBobWeight, breastWeights, BREAST_SPRING, stepBreastSpring, fingerBend, FINGER_LIMITS_DEG, restingBellySpring, stepBellySpring, walkBounceAccel, GARMENTS, SARAH_BASE_MODEL, bellyWeights, bumpLine, fingersLine, sarahLabTool, statusLine, modelLine, SARAH_LAB_MODELS } from '../src/sarahlab/sarahLabTool';
 
 async function load() {
   await MeshoptDecoder.ready;
@@ -336,6 +336,10 @@ describe('the Sarah Lab', () => {
     expect(fingersLine(100)).toMatch(/fist/);
     expect(statusLine(true, false, ['shirt', 'leggings'], true)).toBe('base model · belly slider · 2 garments');
     expect(statusLine(false, true, [], false)).toMatch(/did not load/);
+    expect(statusLine(true, false, [], true, 1)).toBe('model v2 · belly slider · no clothes in this file yet');
+    expect(modelLine(0)).toBe('MODEL · v1');
+    expect(modelLine(1)).toBe('MODEL · v2');
+    expect(SARAH_LAB_MODELS.map((m) => m.path)).toEqual(['models/sarah-base.glb', 'models/sarah-v2.glb']);
   });
 });
 

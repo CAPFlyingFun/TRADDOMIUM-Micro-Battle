@@ -265,10 +265,40 @@ export const KEEP_SIZES = Object.freeze(['belly', 'belly25', 'belly50']);
  * round the other sizes, then put the small sizes back where they were.
  * `bellyMorph` is passed in so this file does not import the bake.
  */
-export function bakeRoundBelly(doc, bellyMorph, { hipY, navel = null, log = () => {} } = {}) {
+export function bakeRoundBelly(doc, bellyMorph, { hipY, navel = null, armParts = null, log = () => {} } = {}) {
   const mesh = doc.getRoot().listMeshes()[0];
   const body = mesh.listPrimitives().find((p) => p.getMaterial()?.getName() === 'Material_0');
-  if (body.getExtras().bellyRounded === 1) { log('belly: already rounded; building as is'); bellyMorph(doc, { log }); return; }
+  // ARMS DOWN (Sarah v2): the hands hang beside the hips, inside every reading
+  // the belly takes (the waist, the flat front, the columns), and a size would
+  // carve them. So the arms are lifted out of the way for the bake, put back,
+  // and none of the belly's targets moves them.
+  let arm = null, armPos = null;
+  if (armParts) {
+    const J = body.getAttribute('JOINTS_0'), W = body.getAttribute('WEIGHTS_0'), P0 = body.getAttribute('POSITION');
+    const j = [0, 0, 0, 0], w = [0, 0, 0, 0];
+    arm = new Uint8Array(P0.getCount());
+    for (let i = 0; i < arm.length; i += 1) {
+      J.getElement(i, j); W.getElement(i, w);
+      let a = 0; for (let k = 0; k < 4; k += 1) if (armParts[j[k]] === 'arms' || armParts[j[k]] === 'upperArm') a += w[k];
+      arm[i] = a > 0.5 ? 1 : 0;
+    }
+    armPos = new Float32Array(P0.getArray());
+    const lifted = armPos.slice(); for (let i = 0; i < arm.length; i += 1) if (arm[i]) lifted[i * 3 + 1] += 100;
+    P0.setArray(lifted);
+    log(`belly: ${arm.reduce((a, b) => a + b, 0).toLocaleString('en-US')} arm vertices kept out of the belly`);
+  }
+  const restoreArms = () => {
+    if (!arm) return;
+    const P0 = body.getAttribute('POSITION'), cur = P0.getArray().slice();
+    for (let i = 0; i < arm.length; i += 1) if (arm[i]) for (let c = 0; c < 3; c += 1) cur[i * 3 + c] = armPos[i * 3 + c];
+    P0.setArray(cur);
+    for (const t of body.listTargets()) for (const sem of ['POSITION', 'NORMAL']) {
+      const A = t.getAttribute(sem); if (!A) continue;
+      const d = A.getArray().slice(); for (let i = 0; i < arm.length; i += 1) if (arm[i]) d[i * 3] = d[i * 3 + 1] = d[i * 3 + 2] = 0;
+      A.setArray(d);
+    }
+  };
+  if (body.getExtras().bellyRounded === 1) { log('belly: already rounded; building as is'); bellyMorph(doc, { log }); restoreArms(); return; }
   const clear = () => {
     for (const p of mesh.listPrimitives()) for (const t of [...p.listTargets()]) t.dispose();
     mesh.setWeights([]).setExtras({ ...mesh.getExtras(), targetNames: [] });
@@ -309,5 +339,6 @@ export function bakeRoundBelly(doc, bellyMorph, { hipY, navel = null, log = () =
     t.getAttribute('POSITION').setArray(k.pos.map((v, i) => v - base[i]));
     if (k.nrm && t.getAttribute('NORMAL')) t.getAttribute('NORMAL').setArray(k.nrm.map((v, i) => v - baseN[i]));
   }
+  restoreArms();
   log(`belly: ${KEEP_SIZES.join(', ')} kept exactly as approved`);
 }

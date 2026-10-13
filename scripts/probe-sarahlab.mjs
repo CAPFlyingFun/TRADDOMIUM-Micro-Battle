@@ -3,6 +3,7 @@
  *
  *     npm run probe:sarahlab
  *
+ * SARAH_COMPARE=1 shoots v1 and v2 (MODEL) at the same sizes and poses.
  * Builds, serves dist/, opens the BARE URL, presses EDITORS and the Sarah
  * Lab's OPEN, waits for the base model, then works every control at 932 x 430:
  *
@@ -133,6 +134,33 @@ async function main() {
       check(errors.length===0,'no console errors');
       if(failures)throw new Error(`${failures} checks failed`);
       log('PASS');return;
+    }
+    if (process.env.SARAH_COMPARE) {
+      // MODEL: v1 and v2 side by side, at the same sizes and poses (Joshua, 2026-10-13)
+      const bump = async (value) => {
+        await page.locator('[data-field="sarahlab-bump"] + input').evaluate((input, v) => {
+          input.value = String(v); input.dispatchEvent(new Event('input', { bubbles: true }));
+        }, value);
+        await page.waitForTimeout(600);
+      };
+      for (let i = 0; i < 3; i += 1) await page.click('[data-action="sarahlab:outfit"]'); // none
+      for (const id of ['v1', 'v2']) {
+        if (id === 'v2') {
+          await page.click('[data-action="sarahlab:model"]');
+          await page.waitForFunction((sel) => (document.querySelector(sel)?.textContent ?? '').startsWith('model v2'), status, { timeout: 180_000 })
+            .then(() => check(true, 'MODEL switched to v2 and it loaded'))
+            .catch(async () => check(false, `MODEL v2 loaded: ${await page.textContent(status)}`));
+          check(/belly slider/.test(await page.textContent(status)), 'v2 has the belly slider');
+        }
+        for (const [pose, value] of [['stand', 0], ['stand', 100], ['stand', 200], ['walk', 140], ['sit', 100]]) {
+          await page.click(`[data-action="sarahlab:${pose}"]`); await bump(value);
+          await page.waitForTimeout(800);
+          await shot(page, `sarahlab-compare-${id}-${pose}-${value}.png`, `${id} ${pose} ${value}`);
+        }
+      }
+      check(errors.length === 0, errors.length ? `no console errors:\n${errors.join('\n')}` : 'no console errors');
+      if (failures) throw new Error(`${failures} check(s) failed`);
+      log('PASS'); return;
     }
     if (process.env.SARAH_TEE_ONLY || process.env.SARAH_SWEEP || process.env.SARAH_HEM_ONLY || process.env.SARAH_NAVEL_ONLY) {
       const bump = async (value) => {
