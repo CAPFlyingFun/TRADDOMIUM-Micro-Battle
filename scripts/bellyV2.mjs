@@ -37,6 +37,10 @@ export const V2_PUBIS_IN_M = 0.008;
 /** Fairing passes (Taubin pairs) over each small size's skin: they fade the bump's
  * edge into the body ("between belly edge and body, add more smoothing"). GAME TUNING. */
 export const V2_EDGE_PASSES = 30;
+/** Over how much height a smaller size's move fades in on the thighs, metres. */
+export const V2_THIGH_EASE = 0.1;
+/** Passes smoothing a smaller size's move over the thighs and hips. */
+export const V2_THIGH_PASSES = 60;
 /** How far over the under-bust crease the small sizes' fairing reaches, fading to
  * nothing there, so the top of the belly meets the breasts without a step
  * (Joshua, 2026-10-13: "smooth more at the top of the belly area just under the
@@ -73,10 +77,12 @@ export const V2_RIDGE_PASSES = 60;
 /** THE GROWN SIZES (Joshua, 2026-10-13): each one's bump, as a multiple of her 100%
  * bump's reach in front of the pubis-to-crease line, carried along forward turned
  * down by the bump's own 20° sag (`BELLY_MOTION.tiltRad`), with this share of the
- * growth as breadth. GAME TUNING, matched to the projection of the sizes it replaces. */
+ * growth as breadth: 1/7 of 70% more makes her 10% wider at 200% (Joshua, 2026-10-13:
+ * "the belly diameter can increase a max of 10% past 100%... 1% per 10%"). GAME
+ * TUNING, the reach matched to the projection of the sizes it replaces. */
 export const V2_GROWTH = Object.freeze({ belly150: 1.35, belly200: 1.7 });
 export const V2_TILT_RAD = (20 * Math.PI) / 180;
-export const V2_BREADTH = 0.25;
+export const V2_BREADTH = 1 / 7;
 /** Skin less than this far in front of the line (the tops of the thighs, the flanks)
  * is not bump and does not grow; the growth eases in over the next 4 cm. GAME TUNING. */
 export const V2_REACH_FROM = 0.03;
@@ -131,6 +137,33 @@ function underBust(base, yTop) {
 }
 
 function targetOf(mesh, body, name) { const i = (mesh.getExtras().targetNames || []).indexOf(name); return i < 0 ? null : body.listTargets()[i]; }
+
+/** A size's normals as a delta over the base's: the change in the welded faces'
+ * normals from `base` to `pos`, added to the base's own (authored) normal. */
+function deltaNormals(pos, base, idx, rep, baseN) {
+  const n = pos.length / 3;
+  const faceN = (P) => {
+    const fn = new Float32Array(n * 3);
+    for (let f = 0; f < idx.length; f += 3) {
+      const a = idx[f], b = idx[f + 1], c = idx[f + 2];
+      const ux = P[b * 3] - P[a * 3], uy = P[b * 3 + 1] - P[a * 3 + 1], uz = P[b * 3 + 2] - P[a * 3 + 2];
+      const vx = P[c * 3] - P[a * 3], vy = P[c * 3 + 1] - P[a * 3 + 1], vz = P[c * 3 + 2] - P[a * 3 + 2];
+      const qx = uy * vz - uz * vy, qy = uz * vx - ux * vz, qz = ux * vy - uy * vx;
+      for (const x of [rep[a], rep[b], rep[c]]) { fn[x * 3] += qx; fn[x * 3 + 1] += qy; fn[x * 3 + 2] += qz; }
+    }
+    for (let i = 0; i < n; i += 1) { const l = Math.hypot(fn[i * 3], fn[i * 3 + 1], fn[i * 3 + 2]) || 1; fn[i * 3] /= l; fn[i * 3 + 1] /= l; fn[i * 3 + 2] /= l; }
+    return fn;
+  };
+  const f0 = faceN(base), f1 = faceN(pos), out = new Float32Array(n * 3);
+  for (let i = 0; i < n; i += 1) {
+    const r = rep[i];
+    const sign = f0[r * 3] * baseN[i * 3] + f0[r * 3 + 1] * baseN[i * 3 + 1] + f0[r * 3 + 2] * baseN[i * 3 + 2] < 0 ? -1 : 1;
+    let x = baseN[i * 3] + sign * (f1[r * 3] - f0[r * 3]), y = baseN[i * 3 + 1] + sign * (f1[r * 3 + 1] - f0[r * 3 + 1]), z = baseN[i * 3 + 2] + sign * (f1[r * 3 + 2] - f0[r * 3 + 2]);
+    const l = Math.hypot(x, y, z) || 1; x /= l; y /= l; z /= l;
+    out[i * 3] = x - baseN[i * 3]; out[i * 3 + 1] = y - baseN[i * 3 + 1]; out[i * 3 + 2] = z - baseN[i * 3 + 2];
+  }
+  return out;
+}
 
 /** Normals of `pos` (a size of the body), as a delta over the base's. */
 function normalDelta(pos, base, idx, rep, baseN, oldDelta) {
@@ -306,21 +339,48 @@ export function bakeBellyV2(doc, bellyMorph, { hipY, navel = null, armParts = nu
   const lowBand = [...nb.keys()].filter((r) => {
     const x = base[r * 3], y = base[r * 3 + 1], z = base[r * 3 + 2];
     if (arm[r] || Math.abs(x) > 0.2 || y < yBot - 0.08 || y > yBot + 0.12 || z < zF - 0.05) return false;
-    lowW[r] = smooth(yBot - 0.08, yBot - 0.04, y) * smooth(yBot + 0.12, yBot + 0.07, y) * smooth(0.2, 0.15, Math.abs(x)) * smooth(zF - 0.05, zF - 0.02, z);
+    lowW[r] = smooth(yBot - 0.05, yBot - 0.01, y) * smooth(yBot + 0.12, yBot + 0.07, y) * smooth(0.2, 0.15, Math.abs(x)) * smooth(zF - 0.05, zF - 0.02, z);
     return lowW[r] > 0;
   });
   // where the U-ridge can run: the front of her from the tops of the thighs up past
   // the hips to the navel's height, the navel itself kept well clear
-  const inZone = new Uint8Array(n), ridgeAt0 = new Set();
+  const inZone = new Uint8Array(n), zoneW = new Float32Array(n), ridgeAt0 = new Set();
   const ridgeZone = [...nb.keys()].filter((r) => {
     const x = base[r * 3], y = base[r * 3 + 1];
     if (arm[r] || Math.abs(x) > 0.22 || y < yBot - 0.08 || y > yBot + 0.24 || baseN[r * 3 + 2] < -0.3) return false;
     if (navel && Math.hypot(x - navel[0], y - navel[1]) < 0.035) return false;
-    inZone[r] = 1; return true;
+    inZone[r] = 1;
+    // feathered at every edge of the zone, so the relaxing never leaves a step where it
+    // stops (it had cut a ledge across both thighs at 0%, Joshua 2026-10-13)
+    zoneW[r] = smooth(yBot - 0.045, yBot - 0.005, y) * smooth(yBot + 0.24, yBot + 0.18, y) * smooth(0.22, 0.17, Math.abs(x)) * smooth(-0.3, 0, baseN[r * 3 + 2]);
+    return true;
   });
   for (const [name, s] of Object.entries(V2_SMALL_SIZES)) {
     const t = targetOf(mesh, body, name); if (!t) continue;
-    const D = t.getAttribute('POSITION'), d = D.getArray();
+    const D = t.getAttribute('POSITION'), d = D.getArray().slice();
+    // THE SIZE'S LOWER EDGE, EASED (Joshua, 2026-10-13: a line across both thighs "at
+    // the fingertip point"): the shared bake ends each smaller size at a fixed height on
+    // her thighs, a few millimetres of move to none between one row and the next. Below
+    // the pubis line the move is now faded in over `V2_THIGH_EASE` from where it stops
+    let yc = Infinity;
+    for (let i = 0; i < n; i += 1) {
+      if (arm[i] || base[i * 3 + 1] > yBot || base[i * 3 + 2] < zF - 0.08) continue;
+      if (Math.hypot(d[i * 3], d[i * 3 + 1], d[i * 3 + 2]) > 0.0005) yc = Math.min(yc, base[i * 3 + 1]);
+    }
+    if (Number.isFinite(yc)) for (let i = 0; i < n; i += 1) {
+      const y = base[i * 3 + 1]; if (y > yc + V2_THIGH_EASE) continue;
+      const f = smooth(yc, yc + V2_THIGH_EASE, y); for (let c = 0; c < 3; c += 1) d[i * 3 + c] *= f;
+    }
+    // and the MOVE itself (not the skin) smoothed over the thighs and hips, so no row
+    // can step: the shape of her legs is untouched, only how the size changes them
+    {
+      const band = [...nb.keys()].filter((r) => base[r * 3 + 1] < yBot + 0.06 && base[r * 3 + 1] > yc - 0.06);
+      for (let p = 0; p < V2_THIGH_PASSES; p += 1) {
+        const o = d.slice();
+        for (const r of band) { const q = nb.get(r); for (let c = 0; c < 3; c += 1) { let a = 0; for (const u of q) a += o[u * 3 + c]; d[r * 3 + c] = 0.5 * o[r * 3 + c] + 0.5 * a / q.size; } }
+      }
+      for (let i = 0; i < n; i += 1) if (rep[i] !== i) for (let c = 0; c < 3; c += 1) d[i * 3 + c] = d[rep[i] * 3 + c];
+    }
     const pos = new Float32Array(n * 3); for (let i = 0; i < pos.length; i += 1) pos[i] = base[i] + d[i];
     for (const r of free) {
       const x = base[r * 3], y = base[r * 3 + 1];
@@ -340,14 +400,17 @@ export function bakeBellyV2(doc, bellyMorph, { hipY, navel = null, armParts = nu
     // half belly outline is really hard - smooth the vertices like v1"): the master's
     // fold under its bump stays in the skin as a hard V once the bump is gone. At the
     // small sizes the skin over that fold, from the hips round under the belly, is
-    // relaxed plainly (it may settle in a little, which is the point), most at 0%
+    // relaxed, most at 0%
     // and not at all by 75%
     const soften = (1 - Math.min(1, s / V2_SOFTEN_UNTIL)) ** 1.5;
     if (soften > 0) {
-      for (let p = 0; p < V2_SOFTEN_PASSES; p += 1) {
-        const o = pos.slice();
-        for (const r of lowBand) { const w = 0.5 * soften * lowW[r], q = nb.get(r); for (let c = 0; c < 3; c += 1) { let a = 0; for (const u of q) a += o[u * 3 + c]; pos[r * 3 + c] = o[r * 3 + c] + w * (a / q.size - o[r * 3 + c]); } }
-      }
+      // Taubin pairs (shrink, then swell back), so the thighs round it keep their
+      // volume and no step is left where the softening fades out
+      const relax = (set, wOf, passes) => {
+        const step = (lambda) => { const o = pos.slice(); for (const r of set) { const w = lambda * wOf(r), q = nb.get(r); for (let c = 0; c < 3; c += 1) { let a = 0; for (const u of q) a += o[u * 3 + c]; pos[r * 3 + c] = o[r * 3 + c] + w * (a / q.size - o[r * 3 + c]); } } };
+        for (let p = 0; p < passes; p += 1) { step(0.5); step(-0.53); }
+      };
+      relax(lowBand, (r) => soften * lowW[r], V2_SOFTEN_PASSES);
       // THE U-SHAPED RIDGE, FOUND IN THE SKIN ITSELF (Joshua: "that underbelly U-shaped
       // ridge... join the edges together or something to make it disappear"): where the
       // master's bump met her hips, this size's skin still folds sharply, a U from each
@@ -364,9 +427,11 @@ export function bakeBellyV2(doc, bellyMorph, { hipY, navel = null, armParts = nu
       const found = ring.size;
       for (let g = 0; g < V2_RIDGE_RINGS + (name === 'belly' ? 3 : 0); g += 1) { const next = new Set(ring); for (const r of ring) for (const u of nb.get(r)) if (inZone[u]) next.add(u); ring = next; }
       const ridge = [...ring];
+      // the fold itself relaxed plainly (Taubin leaves a sharp fold standing), the
+      // thighs below it kept out by the zone's feather
       for (let p = 0; p < V2_RIDGE_PASSES; p += 1) {
         const o = pos.slice();
-        for (const r of ridge) { const w = 0.5 * soften, q = nb.get(r); for (let c = 0; c < 3; c += 1) { let a = 0; for (const u of q) a += o[u * 3 + c]; pos[r * 3 + c] = o[r * 3 + c] + w * (a / q.size - o[r * 3 + c]); } }
+        for (const r of ridge) { const w = 0.5 * soften * zoneW[r], q = nb.get(r); for (let c = 0; c < 3; c += 1) { let a = 0; for (const u of q) a += o[u * 3 + c]; pos[r * 3 + c] = o[r * 3 + c] + w * (a / q.size - o[r * 3 + c]); } }
       }
       log(`belly: ${name} U-ridge: ${found} sharp vertices, ${ridge.length} relaxed`);
       if (name === 'belly') for (const r of ridge) ridgeAt0.add(r);
@@ -471,7 +536,10 @@ export function bakeBellyV2(doc, bellyMorph, { hipY, navel = null, armParts = nu
   // first read from faces built while the arms were lifted out of the way, and the
   // faces that join the arm to her side then pointed anywhere: the side under the arm,
   // which the smaller sizes move, took that as a dark patch. So each size's normals
-  // are read once more from the finished body, arms down
+  // are read once more from the finished body, arms down. And as a CHANGE: the turn
+  // of each face between 100% and this size is added to her own authored normal, so
+  // where the skin barely moves the shading is exactly hers (a hard switch to the
+  // faces' own normals drew a jagged line across her thighs at 0%)
   const names = mesh.getExtras().targetNames || [];
   const sizeNames = new Set([...Object.keys(V2_SMALL_SIZES), 'belly30', 'belly60', ...Object.keys(V2_GROWTH), V2_REFINE_TARGET]);
   for (const name of sizeNames) {
@@ -479,7 +547,7 @@ export function bakeBellyV2(doc, bellyMorph, { hipY, navel = null, armParts = nu
     const TN = t.getAttribute('NORMAL'); if (!TN) continue;
     const d = t.getAttribute('POSITION').getArray();
     const pos = new Float32Array(n * 3); for (let i = 0; i < pos.length; i += 1) pos[i] = master[i] + d[i];
-    TN.setArray(blendNormals(pos, master, idx, rep, masterN).map((v, i) => v - masterN[i]));
+    TN.setArray(deltaNormals(pos, master, idx, rep, masterN));
   }
   const now = P0.getArray(); for (let i = 0; i < now.length; i += 1) if (now[i] !== master[i]) throw new Error('Sarah v2 belly: the 100% body moved');
   log(`belly: v2's own: 100% is the master untouched; 0-75% faired into her over ${free.length.toLocaleString('en-US')} vertices (under-bust ${crease.lo.toFixed(3)}-${crease.hi.toFixed(3)} m), pubis in ${(V2_PUBIS_IN_M * 1000).toFixed(0)} mm at 0%; 150-200% her 100% bump carried further; the switchable 100% refine drawn toward v1's profile`);
