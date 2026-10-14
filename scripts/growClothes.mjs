@@ -71,8 +71,8 @@ export const REFINE_ROUNDS = 6;
 export const SWIM = {
   bandBelowTip: 0.095, bandTopBelowTip: 0.062, scoopCentre: 0.03, scoopCup: 0.065,
   cupStrapX: 0.085, strapX: 0.105, strapTop: 0.03, strap: 0.024, crossTo: 0.075,
-  waistFront: -0.05, waistSide: 0.045, waistBack: 0.025, vDepth: -0.06, vHalfWidth: 0.17,
-  crotch: 0.1, legCutFront: 0.085, briefLegCutFront: 0.1, legCutBack: 0.045, backScoop: 0.06,
+  waistFront: -0.05, waistSide: 0.005, waistBack: 0.025, briefFront: -0.065, briefSide: 0.012, briefHalfWidth: 0.18, briefBack: 0.022,
+  crotch: 0.1, legCutFront: 0.085, briefLegCutFront: 0.075, briefLegCutBack: 0.1, legCutBack: 0.045, backScoop: 0.06,
   trim: 0.0045, overShoulder: 0.025, armFrom: 0.15, archBelowTip: 0.011, archSlope: 0.6,
 };
 /**
@@ -365,13 +365,15 @@ export async function growClothes(doc, { log = () => {}, which = ['shirt', 'legg
   const swimBottom = (i) => {
     if (!skinOnly(i)) return -1;
     const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2], fr = front(z), o = outer(x);
-    // A HIGH-LEG V (Joshua, 2026-10-13, with reference photographs of V-front bikini
-    // bottoms: "go up to the top of her hips"): from the top of each hip the waist runs
-    // in a straight line down to a point low at the centre front, under the bump, so the
-    // brief keeps one cut at every size and the belly sits above its V
-    const frontWaist = hipY + SWIM.vDepth + (SWIM.waistSide - SWIM.vDepth) * Math.min(1, Math.abs(x) / SWIM.vHalfWidth);
-    const waist = fr * frontWaist + (1 - fr) * (hipY + SWIM.waistBack);
-    const legLine = hipY - SWIM.crotch + o * (fr * SWIM.briefLegCutFront + (1 - fr) * SWIM.legCutBack);
+    // A LOW STRING BRIEF UNDER THE BUMP (Joshua, 2026-10-14, with ChatGPT's turnaround
+    // of a pregnant Sarah in a red bikini: "base it off this"): the waistband dips in a
+    // soft U under the belly at the front and rises to the ties on each hip, where it is
+    // narrowest; the back is a little higher over the seat
+    const u = smoothstep(0, SWIM.briefHalfWidth, Math.abs(x));
+    const frontWaist = hipY + SWIM.briefFront + (SWIM.briefSide - SWIM.briefFront) * u;
+    const waist = fr * frontWaist + (1 - fr) * (hipY + SWIM.briefBack);
+    // cheeky at the back, as the reference: the leg opening rises steeply over the seat
+    const legLine = hipY - SWIM.crotch + o * (fr * SWIM.briefLegCutFront + (1 - fr) * SWIM.briefLegCutBack);
     return Math.min(waist - y, y - legLine);
   };
   // the one-piece: everything from the leg openings up to a scoop neckline, open at
