@@ -78,10 +78,31 @@ export const BELLY_TARGET = 'belly';
 export const BELLY_KEYS: readonly (readonly [number, string | null])[] = [
   [2, 'belly200'], [1.5, 'belly150'], [1, null], [0.75, 'belly75'], [0.6, 'belly60'], [0.5, 'belly50'], [0.3, 'belly30'], [0.25, 'belly25'], [0, BELLY_TARGET],
 ];
-/** The clothes' material names (`scripts/growClothes.mjs`). */
-export const GARMENTS = ['shirt', 'leggings', 'bikini', 'swimsuit'] as const;
+/**
+ * The clothes' material names (`scripts/growClothes.mjs`), and `shirtAthletic`, the
+ * same tee fitted close to her (`scripts/fitAthleticTee.mjs`). `shirt` is the RELAXED
+ * fit (Joshua, 2026-10-14: "preserve it as an optional Relaxed Fit and make the
+ * improved version Athletic Fit").
+ */
+export const GARMENTS = ['shirt', 'leggings', 'bikini', 'swimsuit', 'shirtAthletic'] as const;
 export type Garment = (typeof GARMENTS)[number];
 
+/**
+ * THE SKIN UNDER WORN CLOTHES IS NOT DRAWN (Joshua, 2026-10-14: "consider masking covered
+ * skin if necessary to eliminate clipping, while preserving visible skin outside"). The
+ * bake marks, on every body vertex, which garments cover it (`_CLOTH_COVER`, one bit per
+ * garment in `GARMENTS` order). Skin a shown garment covers entirely cannot poke through
+ * it, however the pose folds her. The modelled bikini is left out: its cut is not the
+ * grown one the bits describe.
+ */
+export const MASKING_GARMENTS: readonly Garment[] = ['shirt', 'leggings', 'swimsuit', 'shirtAthletic'];
+export function coverMask(shown: readonly Garment[]): number {
+  let m = 0;
+  for (const g of shown) if (MASKING_GARMENTS.includes(g)) m |= 1 << GARMENTS.indexOf(g);
+  return m;
+}
+/** The leggings under the athletic tee, away from its hem, are not drawn while it is worn (`_UNDER_TOP`, `scripts/fitAthleticTee.mjs`). */
+export const UNDER_TOP_GARMENT: Garment = 'shirtAthletic';
 /** Keep skin at garment boundaries; remove only faces fully covered by one shown garment. */
 export function uncoveredSkinIndices(indices: ArrayLike<number>, coverage: ArrayLike<number>, shown: number): Uint32Array {
   const kept: number[] = [];
@@ -99,11 +120,24 @@ export function uncoveredSkinIndices(indices: ArrayLike<number>, coverage: Array
  * flare, jackets, shorts) wait for a real second mesh.
  */
 export const OUTFITS: readonly { readonly name: string; readonly garments: readonly Garment[] }[] = [
-  { name: 'tee + leggings', garments: ['shirt', 'leggings'] },
+  { name: 'tee + leggings', garments: ['shirtAthletic', 'leggings'] },
   { name: 'bikini', garments: ['bikini'] },
   { name: 'swimsuit', garments: ['swimsuit'] },
   { name: 'none', garments: [] },
 ];
+/**
+ * THE ATHLETIC FIT IS THE TEE (Joshua, 2026-10-14: "keep Athletic Fit as the default
+ * shirt; remove the old Relaxed Fit option once Athletic Fit is validated"). The grown
+ * tee (`shirt`) stays in the file only for a model with no athletic tee yet (v2), which
+ * wears it in its place.
+ */
+export function wornGarments(index: number, available: readonly Garment[]): Garment[] {
+  const outfit = OUTFITS[((index % OUTFITS.length) + OUTFITS.length) % OUTFITS.length];
+  return outfit.garments.map((g) => (g === 'shirtAthletic' && !available.includes(g) ? 'shirt' : g)).filter((g) => available.includes(g));
+}
+export function nextOutfit(index: number, _available: readonly Garment[] = []): number {
+  return (index + 1) % OUTFITS.length;
+}
 export function outfitLine(index: number): string {
   return `OUTFIT · ${OUTFITS[((index % OUTFITS.length) + OUTFITS.length) % OUTFITS.length].name}`;
 }

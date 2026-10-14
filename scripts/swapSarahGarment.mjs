@@ -42,6 +42,7 @@ export async function swapSarahGarment(fromFile, intoFile, garments, { log = () 
     const xform = (arr, w, normalize) => { for (let i = 0; i < n; i += 1) { let q = apply(M, [arr[i * 3], arr[i * 3 + 1], arr[i * 3 + 2]], w); if (normalize) { const l = Math.hypot(...q) || 1; q = q.map((x) => x / l); } arr.set(q, i * 3); } return arr; };
     const acc = (type, array) => dst.createAccessor().setType(type).setArray(array).setBuffer(buffer);
     for (const sem of sp.listSemantics()) {
+      if (sem.startsWith('_SKIN_')) continue; // a bake-time record for the fitters, not shipped
       const A = sp.getAttribute(sem), size = A.getElementSize();
       let arr = read(A, size);
       if (sem === 'POSITION') arr = xform(arr, 1, false);
@@ -49,7 +50,7 @@ export async function swapSarahGarment(fromFile, intoFile, garments, { log = () 
       else if (sem.startsWith('JOINTS')) { for (let i = 0; i < arr.length; i += 1) { const k = dJoints.indexOf(sJoints[arr[i]]); if (k < 0) throw new Error('joint missing'); arr[i] = k; } arr = Uint16Array.from(arr); }
       dp.setAttribute(sem, acc(A.getType(), arr));
     }
-    for (const sem of dp.listSemantics()) if (!sp.getAttribute(sem)) dp.setAttribute(sem, null);
+    for (const sem of dp.listSemantics()) if (!sp.getAttribute(sem) || sem.startsWith('_SKIN_')) dp.setAttribute(sem, null);
     dp.setIndices(acc('SCALAR', Uint32Array.from(sp.getIndices().getArray())));
     // shapes, by name: the destination keeps its own order of targets
     for (const t of [...dp.listTargets()]) { dp.removeTarget(t); t.dispose(); }

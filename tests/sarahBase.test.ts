@@ -385,6 +385,29 @@ describe("Sarah v2's own belly (public/models/sarah-v2.glb; scripts/bellyV2.mjs)
   });
 });
 
+describe('the athletic-fit tee (scripts/fitAthleticTee.mjs)', () => {
+  it('ships in v1 with every shape, is the tee every outfit wears, and masks the skin under it', async () => {
+    await MeshoptDecoder.ready;
+    const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'meshopt.decoder': MeshoptDecoder });
+    const doc = await io.read(`public/${SARAH_BASE_MODEL}`);
+    const mesh = doc.getRoot().listMeshes()[0], names = (mesh.getExtras() as { targetNames: string[] }).targetNames;
+    const byName = (n: string) => mesh.listPrimitives().find((p) => p.getMaterial()?.getName() === n);
+    const relaxed = byName('shirt')!, athletic = byName('shirtAthletic')!;
+    expect(athletic).toBeTruthy();
+    expect(athletic.listTargets().length).toBe(names.length);
+    expect((relaxed.getExtras() as { fit?: string }).fit).toBe('relaxed');
+    expect((athletic.getExtras() as { fit?: string }).fit).toBe('athletic');
+    expect(labTool.OUTFITS[0].garments).toEqual(['shirtAthletic', 'leggings']);
+    expect(labTool.OUTFITS.some((o) => o.garments.includes('shirt'))).toBe(false);
+    expect(labTool.wornGarments(0, ['shirtAthletic', 'shirt', 'leggings'])).toEqual(['shirtAthletic', 'leggings']);
+    // a model with no athletic tee (v2) wears the grown one in its place
+    expect(labTool.wornGarments(0, ['shirt', 'leggings'])).toEqual(['shirt', 'leggings']);
+    // the skin under a worn tee and leggings is masked; the modelled bikini masks nothing
+    expect(labTool.coverMask(['shirtAthletic', 'leggings'])).toBe((1 << 4) | (1 << 1));
+    expect(labTool.coverMask(['bikini'])).toBe(0);
+  }, 60000);
+});
+
 describe('the seated corrective (scripts/addSeatCorrective.mjs)', () => {
   it('is carried by every primitive of v1 and is nothing standing', async () => {
     await MeshoptDecoder.ready;

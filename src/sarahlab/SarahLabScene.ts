@@ -38,7 +38,7 @@ import { release } from '../tombs/LabPeople';
 import { HumanRig, findSkinnedMesh } from '../view/HumanRig';
 import { UNITS_PER_METRE } from '../world/dem';
 import {
-  BELLY_MOTION, BELLY_TARGET, BREAST_TARGETS, BUMP_MAX_PERCENT, GARMENTS, OUTFITS, outfitLine, modelLine, refineLine, refineWeight, BELLY_REFINE_TARGET, SEAT_TARGET, seatCorrectiveWeight, SARAH_LAB_MODELS, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID,
+  BELLY_MOTION, BELLY_TARGET, BREAST_TARGETS, BUMP_MAX_PERCENT, GARMENTS, OUTFITS, outfitLine, modelLine, refineLine, refineWeight, nextOutfit, wornGarments, coverMask, uncoveredSkinIndices, UNDER_TOP_GARMENT, BELLY_REFINE_TARGET, SEAT_TARGET, seatCorrectiveWeight, SARAH_LAB_MODELS, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID,
   bellyMotionWeights, bellyWeights, breastBobWeight, breastWeights, navelWeights, fingerBend, THUMB_TO_PALM, bumpLine, fingersLine, restingBellySpring, statusLine, stepBellySpring, stepBreastSpring, walkBounceAccel,
   type Garment, type SarahLabPose,
 } from './sarahLabTool';
@@ -172,7 +172,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   const tmp = new THREE.Vector3();
   let outfit = 0;
   let modelIndex = 0;
-  const shownNow = (g: Garment) => OUTFITS[outfit].garments.includes(g);
+  const shownNow = (g: Garment) => wornGarments(outfit, garments).includes(g);
   let turning = false;
   // v2's switchable curve refinement (CURVE), off: her master as modelled
   let refine = false;
@@ -247,6 +247,30 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       }
       const name = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material).name as Garment;
       if ((GARMENTS as readonly string[]).includes(name)) mesh.visible = shownNow(name);
+      // the leggings under a worn athletic tee, the same way
+      const underTop = mesh.geometry.getAttribute('_under_top');
+      if (underTop && mesh.geometry.index) {
+        const all = (mesh.userData.allIndices ??= mesh.geometry.index.array.slice()) as ArrayLike<number>;
+        const on = shownNow(UNDER_TOP_GARMENT) ? 1 : 0;
+        if (mesh.userData.coverMask !== on) {
+          mesh.userData.coverMask = on;
+          const bits = (mesh.userData.coverBits ??= Uint8Array.from({ length: underTop.count }, (_, i) => underTop.getX(i))) as Uint8Array;
+          mesh.geometry.setIndex(new THREE.BufferAttribute(on ? uncoveredSkinIndices(all, bits, 1) : Uint32Array.from(all), 1));
+        }
+      }
+      // the body: the skin the shown clothes cover is left out of the draw
+      const cover = mesh.geometry.getAttribute('_cloth_cover');
+      if (cover && mesh.geometry.index) {
+        const all = (mesh.userData.allIndices ??= mesh.geometry.index.array.slice()) as ArrayLike<number>;
+        const mask = coverMask(wornGarments(outfit, garments));
+        if (mesh.userData.coverMask !== mask) {
+          mesh.userData.coverMask = mask;
+          // read through getX: the file stores the bits with a stride (vertex data is 4-byte
+          // aligned), so the raw array is not one entry a vertex
+          const bits = (mesh.userData.coverBits ??= Uint8Array.from({ length: cover.count }, (_, i) => cover.getX(i))) as Uint8Array;
+          mesh.geometry.setIndex(new THREE.BufferAttribute(mask ? uncoveredSkinIndices(all, bits, mask) : Uint32Array.from(all), 1));
+        }
+      }
     }
   }
 
@@ -327,7 +351,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     slider(SARAH_LAB_FIELD.fingers, curl, (v) => { curl = v; });
     const row = document.createElement('div');
     row.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap';
-    buttons.outfit = btn(outfitLine(outfit), SARAH_LAB_ACTION.outfit, () => { outfit = (outfit + 1) % OUTFITS.length; applyLook(); });
+    buttons.outfit = btn(outfitLine(outfit), SARAH_LAB_ACTION.outfit, () => { outfit = nextOutfit(outfit, garments); applyLook(); });
     buttons.model = btn(modelLine(modelIndex), SARAH_LAB_ACTION.model, () => { modelIndex = (modelIndex + 1) % SARAH_LAB_MODELS.length; loadSarah(); });
     buttons.refine = btn(refineLine(refine), SARAH_LAB_ACTION.refine, () => { refine = !refine; applyLook(); refresh(); });
     buttons.turn = btn('TURN', SARAH_LAB_ACTION.turn, () => { turning = !turning; });

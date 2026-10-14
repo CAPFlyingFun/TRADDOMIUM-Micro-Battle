@@ -1005,6 +1005,12 @@ export async function growClothes(doc, { log = () => {}, which = ['shirt', 'legg
       .setAttribute('WEIGHTS_0', acc3(gw, 'VEC4'))
       .setMaterial(material);
     if (UV) prim.setAttribute('TEXCOORD_0', acc3(guv, 'VEC2'));
+    // WHERE ON HER SKIN each garment vertex was grown from: the point of her skin it
+    // mixes (before any bridging lifted it off). A fitter that wants the cloth on her own
+    // surface (scripts/fitAthleticTee.mjs) reads this instead of searching for the
+    // nearest skin, which a stretched span or a fold sends to the wrong place. A POINT,
+    // not vertex numbers: the bake welds the body after this, which renumbers it.
+    prim.setAttribute('_SKIN_AT', acc3(Float32Array.from(base), 'VEC3'));
     if(name==='shirt') {
       const colour=new Float32Array(m*3);
       for(let k=0;k<m;k++) {
