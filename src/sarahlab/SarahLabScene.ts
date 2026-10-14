@@ -369,7 +369,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   function turnsFor(): readonly JointTurn[] {
     if (!rig || !measure) return [];
     let base: readonly JointTurn[];
-    if (pose === 'sit') base = poseSeated(measure, rig.bind, { style: 'sit', seconds, posture: 'pregnant' }, poseOut);
+    if (pose === 'sit') base = poseSeated(measure, rig.bind, { style: 'sit', seconds, posture: 'pregnant', bump: bump / 100 }, poseOut);
     else {
       const stance = pose === 'walk' ? 'walk' : 'stand';
       // the stride is in bind units, `bindScale` of them to the metre

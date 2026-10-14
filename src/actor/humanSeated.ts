@@ -85,6 +85,13 @@ export interface SeatedPose {
    * naturally"). Applies to `sit`; a doze keeps its own slump.
    */
   readonly posture?: 'pregnant';
+  /**
+   * How big the belly is, as the Lab's slider over 100 (1 is full term, 2 twice it).
+   * Past 1 the pregnant sit opens: the knees part further and the thighs drop a little,
+   * so a bigger belly still has room between them (Joshua, 2026-10-13: "sitting at
+   * 200% will need some minor adjustments... legs/hips slightly more open").
+   */
+  readonly bump?: number;
 }
 
 /** Every seated pose writes these sixteen joints, parent before child, every frame. */
@@ -214,6 +221,8 @@ const dozeNeckFix = new WeakMap<readonly BindJoint[], number>();
  */
 const PREGNANT_SIT = {
   thigh: 80 * DEG, spread: 13 * DEG, spine: -3 * DEG, chest: -1 * DEG,
+  /** at twice full term: each knee this much further out, each thigh this much lower */
+  bigSpread: 7 * DEG, bigThighDrop: 4 * DEG,
   arm: { down: 82 * DEG, forward: 28 * DEG, twist: 0, elbow: 24 * DEG, wristBend: -20 * DEG, wristTilt: 0, pronate: 170 * DEG } as ArmSpec,
 };
 
@@ -407,8 +416,9 @@ export function poseSeated(
   // swings it; the flexions are what take each bone from there to its
   // target, and the ankle undoes whatever the two left the foot tilted by.
   const lean = (a: number, b: number) => Math.atan2(-(bind[b].z - bind[a].z), -(bind[b].y - bind[a].y));
-  const thighTarget = pregnant ? PREGNANT_SIT.thigh : THIGH_TARGET;
-  const spread = pregnant ? PREGNANT_SIT.spread : THIGH_SPREAD;
+  const past = pregnant ? Math.min(1, Math.max(0, (pose.bump ?? 1) - 1)) : 0;
+  const thighTarget = pregnant ? PREGNANT_SIT.thigh - past * PREGNANT_SIT.bigThighDrop : THIGH_TARGET;
+  const spread = pregnant ? PREGNANT_SIT.spread + past * PREGNANT_SIT.bigSpread : THIGH_SPREAD;
   const leg = (i: number, hip: number, knee: number, ankle: number, out_: number) => {
     const hipFlex = thighTarget + lean(hip, knee);
     const kneeFlex = hipFlex - SHIN_TARGET - lean(knee, ankle);

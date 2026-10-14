@@ -71,8 +71,8 @@ export const REFINE_ROUNDS = 6;
 export const SWIM = {
   bandBelowTip: 0.095, bandTopBelowTip: 0.062, scoopCentre: 0.03, scoopCup: 0.065,
   cupStrapX: 0.085, strapX: 0.105, strapTop: 0.03, strap: 0.024, crossTo: 0.075,
-  waistFront: -0.05, waistSide: 0.005, waistBack: 0.025,
-  crotch: 0.1, legCutFront: 0.085, legCutBack: 0.045, backScoop: 0.06,
+  waistFront: -0.05, waistSide: 0.045, waistBack: 0.025, bumpMove: 0.03, belowBump: 0.008,
+  crotch: 0.1, legCutFront: 0.085, briefLegCutFront: 0.11, legCutBack: 0.045, backScoop: 0.06,
   trim: 0.0045, overShoulder: 0.025, armFrom: 0.15, archBelowTip: 0.011, archSlope: 0.6,
 };
 /**
@@ -362,11 +362,37 @@ export async function growClothes(doc, { log = () => {}, which = ['shirt', 'legg
   // the brief: a waist under the bump at the front, over the hips at the sides and
   // back; high-cut leg openings from the crotch up to the hip at the front, fuller
   // over the seat at the back
+  // THE BRIEF STAYS BELOW THE BUMP (Joshua, 2026-10-13: "the bottom bikini shouldn't be
+  // stretching with the belly, and stays fixed below the belly... make the bottoms a
+  // high rider so they curve upwards with the hips"). Measured on the baked body: per
+  // 2 cm column of the front, the lowest height at which the biggest size moves the
+  // skin by `SWIM.bumpMove` or more. The front of the brief stops under that line, so
+  // it sits on skin the belly barely moves, and the cut rises up over the hips instead.
+  const bumpLine = (() => {
+    const names = mesh.getExtras().targetNames || [];
+    const t = targets[names.indexOf('belly200')]; if (!t) return null;
+    const D = t.getAttribute('POSITION'), d = [0, 0, 0], COL = 0.02, cols = 20;
+    const low = new Float32Array(cols).fill(hipY + SWIM.waistSide);
+    for (let i = 0; i < n; i += 1) {
+      const z = pos[i * 3 + 2]; if (z < 0) continue;
+      const y = pos[i * 3 + 1]; if (y > hipY + 0.1 || y < hipY - SWIM.crotch) continue;
+      D.getElement(i, d); if (Math.hypot(d[0], d[1], d[2]) < SWIM.bumpMove) continue;
+      const c = Math.min(cols - 1, Math.floor(Math.abs(pos[i * 3]) / COL)); low[c] = Math.min(low[c], y);
+    }
+    for (let p = 0; p < 12; p += 1) { const o = low.slice(); for (let c = 1; c < cols - 1; c += 1) low[c] = (o[c - 1] + 2 * o[c] + o[c + 1]) / 4; }
+    return (x) => { const f = Math.min(cols - 1.001, Math.abs(x) / COL), c = Math.floor(f), u = f - c; return low[c] * (1 - u) + low[Math.min(cols - 1, c + 1)] * u; };
+  })();
   const swimBottom = (i) => {
     if (!skinOnly(i)) return -1;
     const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2], fr = front(z), o = outer(x);
-    const waist = hipY + fr * (SWIM.waistFront * (1 - o) + SWIM.waistSide * o) + (1 - fr) * SWIM.waistBack;
-    const legLine = hipY - SWIM.crotch + o * (fr * SWIM.legCutFront + (1 - fr) * SWIM.legCutBack);
+    let frontWaist = hipY + SWIM.waistFront;
+    if (bumpLine) frontWaist = Math.min(frontWaist, bumpLine(x) - SWIM.belowBump);
+    // the hips: the cut sweeps up over each hip bone in one long curve, whatever the
+    // front does
+    const rise = smoothstep(0.04, 0.2, Math.abs(x));
+    frontWaist = frontWaist * (1 - rise) + (hipY + SWIM.waistSide) * rise;
+    const waist = fr * frontWaist + (1 - fr) * (hipY + SWIM.waistBack);
+    const legLine = hipY - SWIM.crotch + o * (fr * SWIM.briefLegCutFront + (1 - fr) * SWIM.legCutBack);
     return Math.min(waist - y, y - legLine);
   };
   // the one-piece: everything from the leg openings up to a scoop neckline, open at

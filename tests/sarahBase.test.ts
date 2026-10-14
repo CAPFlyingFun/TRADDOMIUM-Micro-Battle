@@ -383,3 +383,20 @@ describe("Sarah v2's own belly (public/models/sarah-v2.glb; scripts/bellyV2.mjs)
     expect(labTool.refineLine(true)).toBe('CURVE · refined');
   });
 });
+
+describe('the pregnant sit opens for a bigger belly', () => {
+  it('parts the knees further past 100% and keeps the 100% sit exactly', async () => {
+    const { poseSeated } = await import('../src/actor/humanSeated');
+    const { measureHuman } = await import('../src/actor/humanSkeleton');
+    await MeshoptDecoder.ready;
+    const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'meshopt.decoder': MeshoptDecoder });
+    const doc = await io.read(`public/${SARAH_BASE_MODEL}`);
+    const joints = doc.getRoot().listSkins()[0].listJoints();
+    const bind = joints.map((j) => { const m = j.getWorldMatrix(); const p = j.getParentNode(); return { x: m[12], y: m[13], z: m[14], parent: p ? joints.indexOf(p as never) : -1 }; });
+    const me = measureHuman(bind as never);
+    const sit = (bump?: number) => JSON.stringify(poseSeated(me, bind as never, { style: 'sit', seconds: 0, posture: 'pregnant', bump }, []));
+    expect(sit(1)).toBe(sit(undefined));
+    expect(sit(0.5)).toBe(sit(1));
+    expect(sit(2)).not.toBe(sit(1));
+  }, 60000);
+});
