@@ -172,14 +172,6 @@ export async function fitMeshyBikini(meshyFile, sarahFile, { log = console.log }
   // her trunk's centre and width at a height, for placing a part
   const slice = (y, h = 0.01) => { let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity; for (let i = 0; i < bn; i += 1) { if (Math.abs(bPos[i * 3 + 1] - y) > h || Math.abs(bPos[i * 3]) > 0.3) continue; x0 = Math.min(x0, bPos[i * 3]); x1 = Math.max(x1, bPos[i * 3]); z0 = Math.min(z0, bPos[i * 3 + 2]); z1 = Math.max(z1, bPos[i * 3 + 2]); } return { x0, x1, z0, z1 }; };
 
-  // her legs, from the hip joints down, and the pelvis they hang from
-  const jointNodes = doc.getRoot().listSkins()[0].listJoints();
-  const hips = jointNodes.filter((j) => { const [x, y] = j.getWorldTranslation(); return Math.abs(x) > 0.05 && Math.abs(x) < 0.12 && y > 0.8 && y < 0.95; });
-  const legJoints = new Set(), down = (node) => { const k = jointNodes.indexOf(node); if (k >= 0) legJoints.add(k); node.listChildren().forEach(down); };
-  hips.forEach(down);
-  const pelvisJ = jointNodes.indexOf(hips[0].getParentNode()), hipJ = { y: hips[0].getWorldTranslation()[1], z: hips[0].getWorldTranslation()[2] };
-  const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
-  log(`fit: legs ${[...legJoints].map((k) => jointNodes[k].getName()).join(' ')} from ${jointNodes[pelvisJ]?.getName()}`);
   const parts = meshy.getRoot().listMeshes().map((m) => m.listPrimitives()[0]);
   const pieces = [];
   for (const [label, place] of Object.entries(PLACE)) {
@@ -358,18 +350,6 @@ export async function fitMeshyBikini(meshyFile, sarahFile, { log = console.log }
     for (let i = 0; i < n; i += 1) {
       const b = bind[anchor[i]], acc = new Map();
       for (let v = 0; v < 3; v += 1) for (let c = 0; c < 4; c += 1) { const w = bW[b.tri[v] * 4 + c] * b.bc[v]; if (w > 0) acc.set(bJ[b.tri[v] * 4 + c], (acc.get(bJ[b.tri[v] * 4 + c]) || 0) + w); }
-      // THE BRIEF'S WAIST RIDES THE PELVIS (Joshua, 2026-10-14: "the top strings on her
-      // bottom bikini is not in the same position standing vs sitting… it should stay at
-      // the same location… at the top of the hips"): its band and side ties take none of
-      // the thighs' weight, so a raised thigh cannot drag them down; the leg openings,
-      // below the hip joints, still follow the thighs
-      if (label === 'bottom') {
-        // over the front of the hip the band lies across the crease a raised thigh makes, so
-        // there it shares the thigh's motion half and half rather than being buried by it
-        const keep = Math.max(smooth(hipJ.y + 0.02, hipJ.y - 0.04, b.q[1]), 0.6 * smooth(hipJ.z - 0.03, hipJ.z + 0.03, b.q[2]));
-        let moved = 0; for (const [j, w] of acc) if (legJoints.has(j)) { acc.set(j, w * keep); moved += w * (1 - keep); }
-        if (moved > 0) acc.set(pelvisJ, (acc.get(pelvisJ) || 0) + moved);
-      }
       const top = [...acc].sort((p, q) => q[1] - p[1]).slice(0, 4), sum = top.reduce((a, [, w]) => a + w, 0);
       top.forEach(([j, w], c) => { joints[i * 4 + c] = j; weights[i * 4 + c] = w / sum; });
       bTargets.forEach((d, t) => { for (let k = 0; k < 3; k += 1) deltas[t][i * 3 + k] = b.bc[0] * d[b.tri[0] * 3 + k] + b.bc[1] * d[b.tri[1] * 3 + k] + b.bc[2] * d[b.tri[2] * 3 + k]; });
