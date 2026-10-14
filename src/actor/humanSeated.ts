@@ -221,8 +221,13 @@ const dozeNeckFix = new WeakMap<readonly BindJoint[], number>();
  */
 const PREGNANT_SIT = {
   thigh: 80 * DEG, spread: 13 * DEG, spine: -3 * DEG, chest: -1 * DEG,
-  /** at twice full term: each knee this much further out, each thigh this much lower */
-  bigSpread: 7 * DEG, bigThighDrop: 4 * DEG,
+  /**
+   * at twice full term: each knee this much further out, each thigh this much lower,
+   * and each thigh turned out about its own length by `bigRoll` (Joshua, 2026-10-14:
+   * "rotating each hip slightly outward to allow more space in the middle"), which
+   * rolls the inner thighs down and away from the underside of the bump
+   */
+  bigSpread: 10 * DEG, bigThighDrop: 6 * DEG, bigRoll: 14 * DEG,
   arm: { down: 82 * DEG, forward: 28 * DEG, twist: 0, elbow: 24 * DEG, wristBend: -20 * DEG, wristTilt: 0, pronate: 170 * DEG } as ArmSpec,
 };
 
@@ -419,10 +424,13 @@ export function poseSeated(
   const past = pregnant ? Math.min(1, Math.max(0, (pose.bump ?? 1) - 1)) : 0;
   const thighTarget = pregnant ? PREGNANT_SIT.thigh - past * PREGNANT_SIT.bigThighDrop : THIGH_TARGET;
   const spread = pregnant ? PREGNANT_SIT.spread + past * PREGNANT_SIT.bigSpread : THIGH_SPREAD;
+  const thighRoll = past * (pregnant ? PREGNANT_SIT.bigRoll : 0);
   const leg = (i: number, hip: number, knee: number, ankle: number, out_: number) => {
     const hipFlex = thighTarget + lean(hip, knee);
     const kneeFlex = hipFlex - SHIN_TARGET - lean(knee, ankle);
-    write(out[i], hip, qMul(ry(out_ * spread), rx(-hipFlex)));
+    // read right to left: turned out about the hanging thigh's own length, raised,
+    // then swung out
+    write(out[i], hip, qMul(ry(out_ * spread), qMul(rx(-hipFlex), ry(out_ * thighRoll))));
     write(out[i + 1], knee, rx(kneeFlex));
     write(out[i + 2], ankle, rx(hipFlex - kneeFlex));
   };
