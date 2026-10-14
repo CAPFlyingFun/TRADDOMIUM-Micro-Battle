@@ -38,7 +38,7 @@ import { release } from '../tombs/LabPeople';
 import { HumanRig, findSkinnedMesh } from '../view/HumanRig';
 import { UNITS_PER_METRE } from '../world/dem';
 import {
-  BELLY_MOTION, BELLY_TARGET, BREAST_TARGETS, BUMP_MAX_PERCENT, GARMENTS, OUTFITS, outfitLine, modelLine, refineLine, refineWeight, BELLY_REFINE_TARGET, SARAH_LAB_MODELS, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID,
+  BELLY_MOTION, BELLY_TARGET, BREAST_TARGETS, BUMP_MAX_PERCENT, GARMENTS, OUTFITS, outfitLine, modelLine, refineLine, refineWeight, BELLY_REFINE_TARGET, SEAT_TARGET, seatCorrectiveWeight, SARAH_LAB_MODELS, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID,
   bellyMotionWeights, bellyWeights, breastBobWeight, breastWeights, navelWeights, fingerBend, THUMB_TO_PALM, bumpLine, fingersLine, restingBellySpring, statusLine, stepBellySpring, stepBreastSpring, walkBounceAccel,
   type Garment, type SarahLabPose,
 } from './sarahLabTool';
@@ -241,7 +241,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   function applyLook(): void {
     for (const mesh of skinned) {
       const dict = mesh.morphTargetDictionary, influences = mesh.morphTargetInfluences;
-      if (dict && influences) for (const [name, w] of Object.entries({ ...bellyWeights(bump), ...breastWeights(bump), ...navelWeights(bump), [BELLY_REFINE_TARGET]: refineWeight(refine, bump) })) {
+      if (dict && influences) for (const [name, w] of Object.entries({ ...bellyWeights(bump), ...breastWeights(bump), ...navelWeights(bump), [BELLY_REFINE_TARGET]: refineWeight(refine, bump), [SEAT_TARGET]: seatCorrectiveWeight(pose === 'sit' ? 1 : 0, bump) })) {
         const at = dict[name];
         if (at !== undefined) influences[at] = w;
       }
@@ -302,7 +302,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     const poses = document.createElement('div');
     poses.style.cssText = `${panel}left:max(12px,env(safe-area-inset-left));bottom:16px`;
     for (const [p, label, action] of [['stand', 'STAND', SARAH_LAB_ACTION.stand], ['walk', 'WALK', SARAH_LAB_ACTION.walk], ['sit', 'SIT', SARAH_LAB_ACTION.sit], ['tpose', 'T-POSE', SARAH_LAB_ACTION.tpose]] as const) {
-      buttons[p] = btn(label, action, () => { pose = p; });
+      buttons[p] = btn(label, action, () => { pose = p; applyLook(); });
       poses.appendChild(buttons[p]);
     }
     root.appendChild(poses);

@@ -16,6 +16,12 @@
  * WEIGHTS only, on the shipped file: no position or shape moves, so the approved belly
  * is the same belly standing; only what carries it when she sits changes.
  *
+ * THREE LAYERS, KEPT APART (Joshua, 2026-10-14). This file decides only which BONE
+ * carries the bump. The seated corrective (`addSeatCorrective.mjs`) is a fixed shape
+ * turned on by the pose. Natural soft-tissue compression of the lower belly, thighs
+ * and hips when she sits or raises a knee, with fullness pushed elsewhere, is a third,
+ * later layer and is not built yet; it should not be folded into either of these.
+ *
  *   node scripts/protectGrownBump.mjs <sarah.glb>      (writes it in place)
  */
 import { NodeIO } from '@gltf-transform/core';

@@ -126,6 +126,27 @@ export const BUMP_MAX_PERCENT = 200;
  */
 export const BELLY_REFINE_TARGET = 'bellyRefine';
 
+/**
+ * THE SEATED CORRECTIVE (Joshua, 2026-10-14: "if the lower belly still has a slight
+ * point while sitting, try a subtle pose-specific corrective morph. Do not modify the
+ * approved standing geometry"). `scripts/addSeatCorrective.mjs` bakes `bellySeat`,
+ * which carries the bump's lower flanks forward over the thighs; it is on only while
+ * she sits, scaled by how far into the sit she is (`seated`, 0..1, so a transition can
+ * ease it). It is full from 90% to 110% and gone by 50% and by 150%: under 50% the
+ * bump is too small to be covered, and past 150% the pelvis weighting
+ * (`scripts/protectGrownBump.mjs`) already keeps the underside round, where this shape,
+ * written on the 100% body, would flatten a facet into the bigger flank.
+ * It is a shape, not soft tissue: nothing here answers to contact.
+ */
+export const SEAT_TARGET = 'bellySeat';
+
+export function seatCorrectiveWeight(seated: number, bumpPercent: number): number {
+  const s = Math.min(1, Math.max(0, Number.isFinite(seated) ? seated : 0));
+  const b = Math.min(BUMP_MAX_PERCENT, Math.max(0, Number.isFinite(bumpPercent) ? bumpPercent : 100)) / 100;
+  const ease = (t: number) => { const u = Math.min(1, Math.max(0, t)); return u * u * (3 - 2 * u); };
+  return s * ease((b - 0.5) / 0.4) * (1 - ease((b - 1.1) / 0.4));
+}
+
 export function refineWeight(on: boolean, bumpPercent: number): number {
   if (!on) return 0;
   const b = Math.min(BUMP_MAX_PERCENT, Math.max(0, Number.isFinite(bumpPercent) ? bumpPercent : 100)) / 100;

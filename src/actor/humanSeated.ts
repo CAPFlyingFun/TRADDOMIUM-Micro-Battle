@@ -429,8 +429,10 @@ export function poseSeated(
     const hipFlex = thighTarget + lean(hip, knee);
     const kneeFlex = hipFlex - SHIN_TARGET - lean(knee, ankle);
     // read right to left: turned out about the hanging thigh's own length, raised,
-    // then swung out
-    write(out[i], hip, qMul(ry(out_ * spread), qMul(rx(-hipFlex), ry(out_ * thighRoll))));
+    // then swung out. The turn is the OPPOSITE sense to the swing: measured on the
+    // posed body, the same sense turned the thighs IN and laid more of them over the
+    // bump (239 bump vertices behind the thighs at 200%, against 154 turned out).
+    write(out[i], hip, qMul(ry(out_ * spread), qMul(rx(-hipFlex), ry(-out_ * thighRoll))));
     write(out[i + 1], knee, rx(kneeFlex));
     write(out[i + 2], ankle, rx(hipFlex - kneeFlex));
   };

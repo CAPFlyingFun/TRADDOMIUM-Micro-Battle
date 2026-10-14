@@ -100,8 +100,9 @@ describe('the base mannequin (public/models/sarah-base.glb)', () => {
     for (const name of [BELLY_MOTION.tilt, BELLY_MOTION.bob, BELLY_MOTION.sway]) expect(names0).toContain(name);
     // the four sizes and the three motions, on every primitive, so the clothes move with her
     for (const name of ['breast0', 'breast100', 'breastBob', 'navelIn', 'navelOut']) expect(names0).toContain(name);
-    // the six sizes, the three motions, the two breast ends and the breasts' bounce, on every primitive, so the clothes move with her
-    for (const p of mesh.listPrimitives()) expect(p.listTargets().length).toBe(BELLY_KEYS.length - 1 + 3 + 3 + 2);
+    // the six sizes, the three motions, the two breast ends and the breasts' bounce, the
+    // navel pair and the seated corrective, on every primitive, so the clothes move with her
+    for (const p of mesh.listPrimitives()) expect(p.listTargets().length).toBe(BELLY_KEYS.length - 1 + 3 + 3 + 2 + 1);
   }, 60000);
 
   it('the flat key narrows the waist while preserving back depth, bust and legs', async () => {
@@ -381,6 +382,29 @@ describe("Sarah v2's own belly (public/models/sarah-v2.glb; scripts/bellyV2.mjs)
     expect(labTool.refineWeight(true, 150)).toBe(0);
     expect(labTool.refineLine(false)).toBe('CURVE · as modelled');
     expect(labTool.refineLine(true)).toBe('CURVE · refined');
+  });
+});
+
+describe('the seated corrective (scripts/addSeatCorrective.mjs)', () => {
+  it('is carried by every primitive of v1 and is nothing standing', async () => {
+    await MeshoptDecoder.ready;
+    const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'meshopt.decoder': MeshoptDecoder });
+    const doc = await io.read(`public/${SARAH_BASE_MODEL}`);
+    const mesh = doc.getRoot().listMeshes()[0];
+    const names = (mesh.getExtras() as { targetNames: string[] }).targetNames;
+    expect(names).toContain(labTool.SEAT_TARGET);
+    for (const prim of mesh.listPrimitives()) expect(prim.listTargets().length).toBe(names.length);
+  }, 60000);
+
+  it('is on only while she sits, around 100%, fading out by 50% and by 150%', () => {
+    expect(labTool.seatCorrectiveWeight(0, 100)).toBe(0);
+    expect(labTool.seatCorrectiveWeight(0, 200)).toBe(0);
+    expect(labTool.seatCorrectiveWeight(1, 100)).toBe(1);
+    expect(labTool.seatCorrectiveWeight(0.5, 100)).toBeCloseTo(0.5);
+    expect(labTool.seatCorrectiveWeight(1, 20)).toBe(0);
+    expect(labTool.seatCorrectiveWeight(1, 130)).toBeCloseTo(0.5);
+    expect(labTool.seatCorrectiveWeight(1, 150)).toBe(0);
+    expect(labTool.seatCorrectiveWeight(1, 200)).toBe(0);
   });
 });
 

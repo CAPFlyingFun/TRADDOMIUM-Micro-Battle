@@ -40,6 +40,10 @@ export const PLACE = Object.freeze({
   // the top: its cups centred on her breasts
   top: { part: 1, scale: 0.33, contactM: 0.05, triangles: 40000, ease: 3, easeM: 0.005 },
 });
+/** In the scan's frame, the brief's fabric ends and its side ties begin this far out. */
+export const TIE_FROM = 0.44;
+/** Extra lift off the skin, metres, per part (brief, side tie, cup, halter strap, knot). */
+export const STRING_CLEAR = [0, 0.0045, 0, 0.0035, 0.001];
 /** The fabric's inner face this far off her skin. */
 export const GAP_M = 0.003;
 /** The neighbourhood whose nearest point decides a vertex's push: wider than the fabric is thick. */
@@ -195,6 +199,13 @@ export async function fitMeshyBikini(meshyFile, sarahFile, { log = console.log }
     // which vertices are cup or the string between the cups, and which face of the
     // fabric each is on (its scan normal toward the front or toward her)
     const scanNrm = vertexNormals(pos, idx), printed = new Uint8Array(n), layer = new Float32Array(n);
+    // what each vertex is, read in the scan's own frame: 0 brief, 1 a side tie, 2 cup,
+    // 3 halter strap, 4 the halter's knot and bow
+    const part = new Uint8Array(n);
+    for (let i = 0; i < n; i += 1) {
+      const ax = Math.abs(pos[i * 3]), y = pos[i * 3 + 1];
+      part[i] = label === 'bottom' ? (ax > TIE_FROM ? 1 : 0) : y < 0.45 ? 2 : y < 0.8 ? 3 : 4; // the knot and bow: the top of the halter
+    }
     if (label === 'top') for (let i = 0; i < n; i += 1) if (pos[i * 3 + 1] < 0.45) { printed[i] = 1; layer[i] = (scanNrm[i * 3 + 2] + 1) / 2; }
     // 2. place
     let y0 = Infinity, y1 = -Infinity, zc = 0; for (let i = 0; i < n; i += 1) { y0 = Math.min(y0, pos[i * 3 + 1]); y1 = Math.max(y1, pos[i * 3 + 1]); }
@@ -343,6 +354,21 @@ export async function fitMeshyBikini(meshyFile, sarahFile, { log = console.log }
     }
     for (let i = 0; i < pos.length; i += 1) pos[i] += push[i];
     if (process.env.FIT_DEBUG) { let under = 0, lo = Infinity; for (let i = 0; i < n; i += 1) { const q = nearest([pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]]); if (q) { lo = Math.min(lo, q.dist); if (q.dist < 0.001) under += 1; } } log(`debug: ${label} ${under} vertices under 1 mm, least ${(lo * 1000).toFixed(1)} mm`); }
+    // THE STRINGS KEEP THEIR OWN CLEARANCE (Joshua, 2026-10-14: "the side ties, knots,
+    // and loose ends must stay above the deformed skin… fix their local clearance
+    // independently rather than moving the entire bikini outward"). Measured on the
+    // posed, skinned body through the sit (scratch checker): the halter straps went
+    // 2.3 mm under her shoulders mid-sit and the side ties 0.1 mm under her hips seated
+    // at 200%. Each string is lifted by its own `STRING_CLEAR` off the skin under it, and
+    // a side tie is bound to the skin directly under it rather than to the knot it hangs
+    // from, so it rides that skin when the hip bends instead of being swallowed by it.
+    // The brief and cups do not move.
+    for (let i = 0; i < n; i += 1) {
+      const lift = STRING_CLEAR[part[i]]; if (!lift) continue;
+      const q = nearest([pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]]); if (!q) continue;
+      for (let d = 0; d < 3; d += 1) pos[i * 3 + d] += q.n[d] * lift;
+      if (part[i] === 1 && q.dist < 0.06) { anchor[i] = i; if (!touching[i]) { touching[i] = 1; touchList.push(i); } }
+    }
     // 4. bind: the skin point under each touching vertex, after the wrap
     const bind = new Array(n);
     for (const i of touchList) bind[i] = nearest([pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]]);
@@ -355,7 +381,7 @@ export async function fitMeshyBikini(meshyFile, sarahFile, { log = console.log }
       bTargets.forEach((d, t) => { for (let k = 0; k < 3; k += 1) deltas[t][i * 3 + k] = b.bc[0] * d[b.tri[0] * 3 + k] + b.bc[1] * d[b.tri[1] * 3 + k] + b.bc[2] * d[b.tri[2] * 3 + k]; });
     }
     log(`fit: ${label} ${n.toLocaleString('en-US')} vertices, ${(idx.length / 3).toLocaleString('en-US')} triangles, ${touchList.length.toLocaleString('en-US')} on her skin`);
-    pieces.push({ pos, idx, joints, weights, deltas, col });
+    pieces.push({ pos, idx, joints, weights, deltas, col, part });
   }
 
   // ── one primitive, both parts, in her skin space ──
@@ -383,6 +409,7 @@ export async function fitMeshyBikini(meshyFile, sarahFile, { log = console.log }
     t.setAttribute('NORMAL', acc('VEC3', nlocal(tNrm[k])));
     dp.addTarget(t);
   });
+  if (process.env.FIT_DEBUG) { const tag = new Uint8Array(N); let k = 0; for (const p of pieces) { tag.set(p.part, k); k += p.part.length; } dp.setAttribute('_TAG', acc('SCALAR', tag)); }
   dp.setExtras({ source: 'meshy', fitted: 'scripts/fitMeshyBikini.mjs' });
   // plain fabric until it has a texture of its own
   const mat = dp.getMaterial();
