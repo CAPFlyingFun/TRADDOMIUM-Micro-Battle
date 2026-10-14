@@ -36,16 +36,16 @@ import { MeshoptDecoder, MeshoptEncoder, MeshoptSimplifier } from 'meshoptimizer
 /** GAME TUNING: where each part goes, in metres on her bind (100%) body. */
 export const PLACE = Object.freeze({
   // the brief: its side corners on the tops of her hips, its centre over hers
-  bottom: { part: 0, scale: 0.43, topY: 0.915, contactM: 0.035, triangles: 20000 },
+  bottom: { part: 0, scale: 0.43, topY: 0.915, contactM: 0.035, triangles: 20000, ease: 12, easeM: 0.009 },
   // the top: its cups centred on her breasts
-  top: { part: 1, scale: 0.36, cupY: 1.235, contactM: 0.05, triangles: 40000 },
+  top: { part: 1, scale: 0.33, contactM: 0.05, triangles: 40000, ease: 3, easeM: 0.005 },
 });
 /** The fabric's inner face this far off her skin. */
 export const GAP_M = 0.003;
 /** The neighbourhood whose nearest point decides a vertex's push: wider than the fabric is thick. */
 export const SHELL_M = 0.008;
-/** Passes of easing over the push. */
-export const PUSH_EASE = 12;
+/** A printed cup's fabric, inner face to outer. */
+export const FABRIC_M = 0.002;
 
 const mul = (x, y) => { const o = new Array(16).fill(0); for (let c = 0; c < 4; c += 1) for (let r = 0; r < 4; r += 1) for (let k = 0; k < 4; k += 1) o[c * 4 + r] += x[k * 4 + r] * y[c * 4 + k]; return o; };
 const invert = (m) => {
@@ -192,9 +192,13 @@ export async function fitMeshyBikini(meshyFile, sarahFile, { log = console.log }
     const np = new Float32Array(m * 3); for (let i = 0; i < remap.length; i += 1) if (remap[i] >= 0) np.set(pos.subarray(i * 3, i * 3 + 3), remap[i] * 3);
     pos = np; idx = Uint32Array.from(simp, (v) => remap[v]);
     const n = pos.length / 3;
+    // which vertices are cup or the string between the cups, and which face of the
+    // fabric each is on (its scan normal toward the front or toward her)
+    const scanNrm = vertexNormals(pos, idx), printed = new Uint8Array(n), layer = new Float32Array(n);
+    if (label === 'top') for (let i = 0; i < n; i += 1) if (pos[i * 3 + 1] < 0.45) { printed[i] = 1; layer[i] = (scanNrm[i * 3 + 2] + 1) / 2; }
     // 2. place
     let y0 = Infinity, y1 = -Infinity, zc = 0; for (let i = 0; i < n; i += 1) { y0 = Math.min(y0, pos[i * 3 + 1]); y1 = Math.max(y1, pos[i * 3 + 1]); }
-    const s = place.scale;
+    const s = place.scale, tip = {};
     let dy, dz;
     if (label === 'bottom') {
       dy = place.topY - y1 * s;
@@ -204,13 +208,96 @@ export async function fitMeshyBikini(meshyFile, sarahFile, { log = console.log }
       dz = her.z0 + 0.004 - z0 * s; // its back on her seat; the wrap brings the front onto her
       log(`fit: brief ring ${((z1 - z0) * s * 100).toFixed(1)} cm deep at ${midY.toFixed(3)} m, her ${((her.z1 - her.z0) * 100).toFixed(1)} cm, width hers ${((her.x1 - her.x0) * 100).toFixed(1)} cm`);
     } else {
-      // the cups' lowest edge (the scan's y=0) at her cup line; their back face on her chest
-      let cupLo = Infinity; for (let i = 0; i < n; i += 1) if (pos[i * 3 + 1] < y0 + 0.5 * (y1 - y0)) cupLo = Math.min(cupLo, pos[i * 3 + 1]);
-      dy = place.cupY - 0.25 * s - cupLo * s; // cup centre (a quarter of the cup's height up) at cupY
-      const her = slice(place.cupY, 0.01); let zf = -Infinity; for (let i = 0; i < n; i += 1) if (pos[i * 3 + 1] < 0.4) zf = Math.max(zf, pos[i * 3 + 2]);
-      dz = her.z1 + 0.004 - zf * s;
+      // EACH CUP ON HER BREAST (Joshua, 2026-10-14: "make sure the bikini top's shape
+      // matches her breast size and shape... it goes just a little too long and flat"):
+      // a cup is scaled about its own middle and that middle put on her breast's tip,
+      // its lower edge in the crease under it; the string between the cups stretches to
+      // meet them, and the straps follow their cups up to the knot
+      Object.assign(tip, { x: 0, y: 0, z: -Infinity });
+      for (let i = 0; i < bn; i += 1) { const x = bPos[i * 3], y = bPos[i * 3 + 1], z = bPos[i * 3 + 2]; if (x > 0.05 && x < 0.16 && y > 1.17 && y < 1.36 && z > tip.z) Object.assign(tip, { x, y, z }); }
+      // the crease: under the tip, the height where her front comes furthest back
+      const front = new Float32Array(24).fill(-Infinity);
+      for (let i = 0; i < bn; i += 1) { const x = bPos[i * 3], y = bPos[i * 3 + 1], z = bPos[i * 3 + 2], b = Math.floor((tip.y - y) / 0.005); if (Math.abs(x - tip.x) < 0.012 && b >= 0 && b < 24) front[b] = Math.max(front[b], z); }
+      let fb = 0; for (let b = 1; b < 24; b += 1) if (front[b] < front[fb]) fb = b;
+      const foldY = tip.y - (fb + 0.5) * 0.005;
+      let cupLo = Infinity, xi = Infinity, cx = 0, cc = 0, cupZ = -Infinity;
+      for (let i = 0; i < n; i += 1) {
+        const ax = Math.abs(pos[i * 3]), y = pos[i * 3 + 1];
+        if (y > 0.45) continue;
+        cupLo = Math.min(cupLo, y); cupZ = Math.max(cupZ, pos[i * 3 + 2]);
+        if (y > 0.06) { xi = Math.min(xi, ax); cx += ax; cc += 1; }
+      }
+      cx /= cc;
+      const inner = tip.x + (xi - cx) * s;
+      for (let i = 0; i < n; i += 1) {
+        const x = pos[i * 3], ax = Math.abs(x), X = ax >= xi ? tip.x + (ax - cx) * s : (ax / xi) * inner;
+        pos[i * 3] = Math.sign(x) * X;
+        pos[i * 3 + 1] = (pos[i * 3 + 1] - cupLo) * s + foldY;
+        pos[i * 3 + 2] = (pos[i * 3 + 2] - cupZ) * s + tip.z + GAP_M;
+      }
+      log(`fit: her breast tip at x ${tip.x.toFixed(3)} y ${tip.y.toFixed(3)}, crease at y ${foldY.toFixed(3)}; cups ${(((0.42 - xi) * s) * 100).toFixed(1)} cm wide`);
     }
-    for (let i = 0; i < n; i += 1) { pos[i * 3] *= s; pos[i * 3 + 1] = pos[i * 3 + 1] * s + dy; pos[i * 3 + 2] = pos[i * 3 + 2] * s + dz; }
+    if (label === 'bottom') for (let i = 0; i < n; i += 1) { pos[i * 3] *= s; pos[i * 3 + 1] = pos[i * 3 + 1] * s + dy; pos[i * 3 + 2] = pos[i * 3 + 2] * s + dz; }
+    // THE CUPS ARE PRINTED ON HER (Joshua: "almost have it match the body's mesh
+    // exactly"): seen from the front, each cup's outline stays where it was placed, and
+    // it is laid on the skin under that outline, the fabric's inner face GAP_M off her
+    // and its outer face FABRIC_M further, so a cup is her breast's own shape
+    if (label === 'top') {
+      const R = 0.0015, X0 = -0.26, Y0 = 0.95, W = Math.ceil(0.52 / R), H = Math.ceil(0.55 / R);
+      const zb = new Float32Array(W * H).fill(-Infinity), nb = new Float32Array(W * H * 3);
+      for (let t = 0; t < bIdx.length; t += 3) {
+        const ia = bIdx[t], ib = bIdx[t + 1], ic = bIdx[t + 2];
+        const ax = bPos[ia * 3], ay = bPos[ia * 3 + 1], bx = bPos[ib * 3], by = bPos[ib * 3 + 1], cx2 = bPos[ic * 3], cy2 = bPos[ic * 3 + 1];
+        if (Math.max(ax, bx, cx2) < X0 || Math.min(ax, bx, cx2) > X0 + W * R || Math.max(ay, by, cy2) < Y0 || Math.min(ay, by, cy2) > Y0 + H * R) continue;
+        const den = (by - cy2) * (ax - cx2) + (cx2 - bx) * (ay - cy2); if (Math.abs(den) < 1e-12) continue;
+        const u0 = Math.max(0, Math.floor((Math.min(ax, bx, cx2) - X0) / R)), u1 = Math.min(W - 1, Math.ceil((Math.max(ax, bx, cx2) - X0) / R));
+        const v0 = Math.max(0, Math.floor((Math.min(ay, by, cy2) - Y0) / R)), v1 = Math.min(H - 1, Math.ceil((Math.max(ay, by, cy2) - Y0) / R));
+        for (let v = v0; v <= v1; v += 1) for (let u = u0; u <= u1; u += 1) {
+          const px = X0 + (u + 0.5) * R, py = Y0 + (v + 0.5) * R;
+          const l1 = ((by - cy2) * (px - cx2) + (cx2 - bx) * (py - cy2)) / den, l2 = ((cy2 - ay) * (px - cx2) + (ax - cx2) * (py - cy2)) / den, l3 = 1 - l1 - l2;
+          if (l1 < -1e-6 || l2 < -1e-6 || l3 < -1e-6) continue;
+          const z = l1 * bPos[ia * 3 + 2] + l2 * bPos[ib * 3 + 2] + l3 * bPos[ic * 3 + 2], k = v * W + u;
+          if (z <= zb[k]) continue;
+          zb[k] = z; for (let d = 0; d < 3; d += 1) nb[k * 3 + d] = l1 * bNrm[ia * 3 + d] + l2 * bNrm[ib * 3 + d] + l3 * bNrm[ic * 3 + d];
+        }
+      }
+      const at = (x, y) => { // bilinear over the front surface
+        const fu = (x - X0) / R - 0.5, fv = (y - Y0) / R - 0.5, u = Math.max(0, Math.min(W - 2, Math.floor(fu))), v = Math.max(0, Math.min(H - 2, Math.floor(fv))), tu = fu - u, tv = fv - v;
+        let z = 0, nn = [0, 0, 0], ws = 0;
+        for (const [du, dv, w] of [[0, 0, (1 - tu) * (1 - tv)], [1, 0, tu * (1 - tv)], [0, 1, (1 - tu) * tv], [1, 1, tu * tv]]) { const k = (v + dv) * W + u + du; if (!Number.isFinite(zb[k]) || w <= 0) continue; z += zb[k] * w; for (let d = 0; d < 3; d += 1) nn[d] += nb[k * 3 + d] * w; ws += w; }
+        if (!ws) return null; const l = Math.hypot(...nn) || 1; return { z: z / ws, n: nn.map((c) => c / l) };
+      };
+      // the crease under each breast, column by column: the height, below the tip, where
+      // her front comes furthest back. Under it the front is her bump, which a cup never
+      // reaches, so the cup's lower edge is gathered into the crease instead of being
+      // laid on the belly
+      const tipV = Math.round((tip.y - Y0) / R), reach = Math.round(0.12 / R), crease = new Float32Array(W).fill(NaN);
+      for (let u = 0; u < W; u += 1) {
+        const ax = Math.abs(X0 + (u + 0.5) * R); if (ax < tip.x - 0.03 || ax > 0.25) continue;
+        let best = Infinity, bv = -1; for (let v = tipV; v > tipV - reach; v -= 1) { const z = zb[v * W + u]; if (Number.isFinite(z) && z < best) { best = z; bv = v; } }
+        if (bv >= 0) crease[u] = Y0 + (bv + 0.5) * R;
+      }
+      const creaseAt = (x) => { const ax = Math.min(0.25, Math.max(tip.x - 0.03, Math.abs(x))), u = Math.round((Math.sign(x || 1) * ax - X0) / R - 0.5); let c = 0, k = 0; for (let d = -8; d <= 8; d += 1) if (Number.isFinite(crease[u + d])) { c += crease[u + d]; k += 1; } return k ? c / k : -Infinity; };
+      const BAND = 0.015, LIFT = 0.01; // the edge stops just above the fold, never in it
+      for (let i = 0; i < n; i += 1) {
+        if (!printed[i]) continue; const c = creaseAt(pos[i * 3]) + LIFT, d = pos[i * 3 + 1] - c;
+        if (d < BAND) pos[i * 3 + 1] = c + BAND * Math.exp((d - BAND) / BAND);
+      }
+      for (let i = 0; i < n; i += 1) {
+        if (!printed[i]) continue; const f = at(pos[i * 3], pos[i * 3 + 1]); if (!f) { printed[i] = 0; continue; }
+        const off = GAP_M + layer[i] * FABRIC_M;
+        // where her skin turns away from the front (the side of the breast, under its
+        // outer corner) a straight-on print would stretch the cup into a ledge; there it
+        // is laid on the nearest skin instead, and the two blend between
+        const p0 = [pos[i * 3], pos[i * 3 + 1], f.z], pf = [0, 1, 2].map((d) => p0[d] + f.n[d] * off);
+        const w = 1 - Math.min(1, Math.max(0, (f.n[2] - 0.35) / 0.3));
+        if (w > 0) {
+          const q = nearest([pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]]);
+          if (q) for (let d = 0; d < 3; d += 1) pf[d] = pf[d] * (1 - w) + (q.q[d] + q.n[d] * off) * w;
+        }
+        pos.set(pf, i * 3);
+      }
+    }
     // 3. wrap
     const near = new Array(n);
     for (let i = 0; i < n; i += 1) near[i] = nearest([pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]]);
@@ -220,16 +307,18 @@ export async function fitMeshyBikini(meshyFile, sarahFile, { log = console.log }
       const me = near[i]; if (!me) continue;
       let dmin = Infinity;
       g.near(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2], SHELL_M, (q) => { if (near[q] && Math.hypot(pos[q * 3] - pos[i * 3], pos[q * 3 + 1] - pos[i * 3 + 1], pos[q * 3 + 2] - pos[i * 3 + 2]) <= SHELL_M) dmin = Math.min(dmin, near[q].dist); });
+      if (printed[i]) { touching[i] = 1; continue; } // already on her
       if (dmin > place.contactM) continue;
       touching[i] = 1;
       const k = GAP_M - dmin; for (let d = 0; d < 3; d += 1) push[i * 3 + d] = me.n[d] * k;
     }
     // ease the push over touching neighbours so it reads as cloth, not as her triangles
-    const EASE_M = 0.009, eg = grid(pos, EASE_M);
-    for (let pass = 0; pass < PUSH_EASE; pass += 1) {
+    // (the top eases least: a cup has to follow her breast and the crease under it)
+    const EASE_M = place.easeM, eg = grid(pos, EASE_M);
+    for (let pass = 0; pass < place.ease; pass += 1) {
       const next = new Float32Array(push);
       for (let i = 0; i < n; i += 1) {
-        if (!touching[i]) continue; const acc = [0, 0, 0]; let c = 0;
+        if (!touching[i] || printed[i]) continue; const acc = [0, 0, 0]; let c = 0;
         eg.near(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2], EASE_M, (q) => { if (!touching[q]) return; for (let d = 0; d < 3; d += 1) acc[d] += push[q * 3 + d]; c += 1; });
         for (let d = 0; d < 3; d += 1) next[i * 3 + d] = acc[d] / c;
       }
