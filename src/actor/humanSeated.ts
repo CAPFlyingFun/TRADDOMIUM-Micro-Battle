@@ -48,6 +48,15 @@ import { newJointTurn } from './humanRig';
 const DEG = Math.PI / 180;
 /** A bind whose upper arm hangs more than this below level is an arms-down rig. */
 const ARMS_DOWN_FROM = 30 * DEG;
+/**
+ * How much of a forearm's roll (`pronate`) is taken at the elbow rather than at the
+ * shoulder. These rigs have no forearm twist bone, so whatever the elbow rolls it
+ * rolls in a bent joint, and the skin there wrings: half (the old split) skewed the
+ * arm into a fin where it meets her side when she sat (Joshua, 2026-10-13: "part of
+ * the arm is skewed... v1 had the same issue"). The upper arm turns in its socket
+ * instead, which the shoulder's weights carry smoothly. GAME TUNING.
+ */
+const ELBOW_TWIST_SHARE = 0;
 const TAU = Math.PI * 2;
 
 export type SeatedStyle = 'doze' | 'sit';
@@ -368,7 +377,8 @@ export function poseSeated(
     // towel; half is taken at the shoulder instead, with the elbow's hinge
     // turned back by the same amount so the bend still points forward —
     // the elbow joint itself then only bends.
-    const roll = ((a.pronate ?? 0) - fix) / 2;
+    const total = (a.pronate ?? 0) - fix;
+    const roll = total * (1 - ELBOW_TWIST_SHARE);
     // A master rigged with its arms already DOWN (Sarah v2): the specs are turns
     // of an arm held out in a T, so the arm is first raised back to that T in the
     // turn (the shoulder's turn ends with D⁻¹, the droop undone) and the joints
@@ -382,7 +392,7 @@ export function poseSeated(
     const inT = (q: Q) => (lowered ? qMul(D, qMul(q, Dinv)) : q);
     const shoulderTurn = qMul(rx(-a.forward), qMul(rz(-s * a.down), rx(a.twist + roll)));
     write(out[i], shoulder, lowered ? qMul(shoulderTurn, Dinv) : shoulderTurn);
-    write(out[i + 1], elbow, inT(roll ? qMul(rx(-roll), qMul(ry(-s * a.elbow), rx(2 * roll))) : ry(-s * a.elbow)));
+    write(out[i + 1], elbow, inT(total ? qMul(rx(-roll), qMul(ry(-s * a.elbow), rx(total))) : ry(-s * a.elbow)));
     write(out[i + 2], wrist, inT(qMul(ry(-s * a.wristBend), rz(-s * a.wristTilt))));
   };
   // The right forearm over the left, the commoner fold (and either reads).

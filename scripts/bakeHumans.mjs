@@ -103,6 +103,7 @@ import { bellyMorph } from './bellyMorph.mjs';
 import { growClothes, jointPositions, partsOf } from './growClothes.mjs';
 import { bakeRoundBelly } from './roundBelly.mjs';
 import { bakeBellyV2, paintOutFoldShadow } from './bellyV2.mjs';
+import { cleanArmWeights } from './cleanArmWeights.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
@@ -1053,6 +1054,12 @@ async function main() {
     if (human.smoothCrease) smoothCreaseWeights(doc, { log: (line) => console.log(`[bake:humans]   ${human.who}: ${line}`) });
     // The bump as a slider, then clothes grown from the skin: last of the body
     // passes, so the clothes copy the final weights and the morph.
+    // An arms-down master's arms carry the waist and hips they hang beside: cleaned
+    // last of the weight passes, so the arm follows its own bones when it moves.
+    if (human.armsDown) {
+      const skin = doc.getRoot().listSkins()[0], at = jointPositions(skin);
+      cleanArmWeights(doc, partsOf(skin, at), at, { log: (line) => console.log(`[bake:humans]   ${human.who}: ${line}`) });
+    }
     if (human.bellyV2) {
       // v2's own belly: her master IS 100%, never reshaped (Joshua, 2026-10-13)
       const skin = doc.getRoot().listSkins()[0];
