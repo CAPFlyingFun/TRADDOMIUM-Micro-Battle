@@ -30,6 +30,8 @@ import { MeshoptDecoder, MeshoptEncoder } from 'meshoptimizer';
 export const REGION_M = 0.3;
 /** The upper arm held fully to the arm: this far down its axis from the shoulder joint, and within this of the axis. */
 export const ARM_FROM_M = 0.12;
+/** Where the arm is held whole on its INNER face, the side against her ribs (lower: the hollow there belongs to the armpit). */
+export const ARM_INNER_FROM_M = 0.15;
 export const ARM_RADIUS_M = 0.06;
 /** Her midline and neck held to the torso (|x| under this). */
 export const MIDLINE_M = 0.07;
@@ -37,6 +39,11 @@ export const MIDLINE_M = 0.07;
 export const SWEEPS = 2500;
 /** How far, at most, the web's middle is drawn toward the shoulder's pivot with the arm level (a share of the way). */
 export const TUCK = 0.5;
+/** Height above the shoulder pivot (raised pose) where the tuck starts fading out over the deltoid. */
+export const TOP_FROM_M = -0.06;
+/** The shoulder's top is blended back to the approved weights: none where the arm's skin faces less than FACE_FROM toward her outside, all from FACE_TO (1 = straight out). */
+export const FACE_FROM = 0.2;
+export const FACE_TO = 0.65;
 
 const mul = (x, y) => { const o = new Array(16).fill(0); for (let c = 0; c < 4; c += 1) for (let r = 0; r < 4; r += 1) for (let k = 0; k < 4; k += 1) o[c * 4 + r] += x[k * 4 + r] * y[c * 4 + k]; return o; };
 const invert = (m) => {
@@ -46,6 +53,7 @@ const invert = (m) => {
   return r;
 };
 const apply = (m, v, w) => [m[0] * v[0] + m[4] * v[1] + m[8] * v[2] + w * m[12], m[1] * v[0] + m[5] * v[1] + m[9] * v[2] + w * m[13], m[2] * v[0] + m[6] * v[1] + m[10] * v[2] + w * m[14]];
+const smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 const read = (A) => { const n = A.getCount(), s = A.getElementSize(), out = new Float32Array(n * s), v = []; for (let i = 0; i < n; i += 1) { A.getElement(i, v); for (let c = 0; c < s; c += 1) out[i * s + c] = v[c]; } return out; };
 
 export async function sarahV2ArmWeights(src, dst, { log = console.log } = {}) {
@@ -75,7 +83,8 @@ export async function sarahV2ArmWeights(src, dst, { log = console.log } = {}) {
         if (Math.sign(p[0]) !== Math.sign(s[0])) { fixed[u] = 0; continue; }
         const r = [p[0] - s[0], p[1] - s[1], p[2] - s[2]], along = r[0] * au[0] + r[1] * au[1] + r[2] * au[2], radial = Math.hypot(r[0] - along * au[0], r[1] - along * au[1], r[2] - along * au[2]);
         const breast = bd ? Math.hypot(...apply(T, [bd[i * 3], bd[i * 3 + 1], bd[i * 3 + 2]], 0)) : 0;
-        if (along > ARM_FROM_M && radial < ARM_RADIUS_M && a0[u] > 0.9) fixed[u] = 1; // the upper arm itself
+        const inner = (r[0] - along * au[0]) * Math.sign(s[0]) < -0.01; // facing her ribs
+        if (along > (inner ? ARM_INNER_FROM_M : ARM_FROM_M) && radial < ARM_RADIUS_M && a0[u] > 0.9) fixed[u] = 1; // the upper arm itself (from lower on its inner face, where held whole it pulled a fin out of her right armpit)
         else if (Math.hypot(...r) > REGION_M) fixed[u] = a0[u] > 0.97 && radial < ARM_RADIUS_M ? 1 : 0; // the region's edge
         else if (Math.abs(p[0]) < MIDLINE_M || breast > 0.003) fixed[u] = 0; // midline, neck, breast core
         else inReg[u] = 1;
@@ -84,6 +93,23 @@ export async function sarahV2ArmWeights(src, dst, { log = console.log } = {}) {
       const a = new Float32Array(U); for (let u = 0; u < U; u += 1) a[u] = fixed[u] >= 0 ? fixed[u] : a0[u];
       const free = []; for (let u = 0; u < U; u += 1) if (inReg[u] && nb[u].size) free.push(u);
       for (let sweep = 0; sweep < SWEEPS; sweep += 1) for (const u of free) { let sum = 0; for (const v of nb[u]) sum += a[v]; a[u] = sum / nb[u].size; }
+      // THE SHOULDER'S TOP goes back toward the approved weights. Solved, the cap and the arm's
+      // outward face lagged the arm and the top line sagged 2 cm between cap and arm (and the
+      // trapezius rose); the approved file held that line level. So the solution is blended
+      // back to the approved share by a weight that turns smoothly round the arm: whole on the
+      // outward face (which a sideways raise turns into the top line) and on the top of the
+      // shoulder, nothing on the front and back creases or in the armpit, where the approved
+      // weights made the flaps. Smooth, so no seam opens where the two meet.
+      let blended = 0;
+      for (const u of free) {
+        const i = rep[u], p = [P[i * 3], P[i * 3 + 1], P[i * 3 + 2]], r = [p[0] - s[0], p[1] - s[1], p[2] - s[2]], along = r[0] * au[0] + r[1] * au[1] + r[2] * au[2];
+        const rad = [r[0] - along * au[0], r[1] - along * au[1], r[2] - along * au[2]], rl = Math.hypot(...rad), lateral = rl > 1e-4 ? rad[0] * Math.sign(s[0]) / rl : 0;
+        const face = smooth(FACE_FROM, FACE_TO, lateral) * smooth(-0.1, -0.05, along) * (1 - smooth(ARM_RADIUS_M, ARM_RADIUS_M + 0.03, rl));
+        const top = smooth(-0.01, 0.025, p[1] - s[1]) * smooth(MIDLINE_M - 0.02, MIDLINE_M + 0.01, Math.abs(p[0]));
+        const g = Math.max(face, top); if (g <= 0) continue;
+        a[u] += g * (a0[u] - a[u]); blended += 1;
+      }
+      log(`${joints[up].getName()}: ${blended} points on the shoulder's top blended back toward the approved weights`);
       // the new share written back: the arm's bones keep their split of it, the rest goes to the bones that held it (or the collarbone)
       let changed = 0, most = 0;
       for (const u of free) {
@@ -110,16 +136,34 @@ export async function sarahV2ArmWeights(src, dst, { log = console.log } = {}) {
       const arm = new Set(joints.map((_, j) => (under(j, up) ? j : -1)).filter((j) => j >= 0)), d = new Float32Array(n * 3); let moved = 0, most = 0;
       for (let i = 0; i < n; i += 1) {
         const p = [P[i * 3], P[i * 3 + 1], P[i * 3 + 2]]; if (Math.sign(p[0]) !== Math.sign(sp[0])) continue;
-        let a = 0; for (const [j, x] of wmap[id[i]]) if (arm.has(j)) a += x; a = Math.min(1, Math.max(0, a)); const tuck = 4 * a * (1 - a) * TUCK; if (tuck < 0.01) continue;
+        let a = 0; for (const [j, x] of wmap[id[i]]) if (arm.has(j)) a += x; a = Math.min(1, Math.max(0, a));
+        const r0 = [p[0] - sp[0], p[1] - sp[1], p[2] - sp[2]], al0 = r0[0] * u[0] + r0[1] * u[1] + r0[2] * u[2], rad0 = Math.hypot(r0[0] - al0 * u[0], r0[1] - al0 * u[1], r0[2] - al0 * u[2]);
+        const tuck = 4 * a * (1 - a) * TUCK; if (tuck < 0.01) continue;
         const r = [p[0] - sp[0], p[1] - sp[1], p[2] - sp[2]], rr = R.map((row) => row[0] * r[0] + row[1] * r[1] + row[2] * r[2]);
-        const posed = [0, 1, 2].map((m) => (1 - a) * p[m] + a * (sp[m] + rr[m])), cpo = [0, 1, 2].map((m) => (sp[m] - posed[m]) * tuck);
+        const posed = [0, 1, 2].map((m) => (1 - a) * p[m] + a * (sp[m] + rr[m]));
+        // the web hangs BELOW the raised arm; the deltoid's top is above the pivot and is
+        // left alone (pulled in, it dented into a notch over the shoulder cap)
+        const below = 1 - smooth(TOP_FROM_M, TOP_FROM_M + 0.04, posed[1] - sp[1]); if (below <= 0) continue;
+        const cpo = [0, 1, 2].map((m) => (sp[m] - posed[m]) * tuck * below);
+        // the arm's own skin keeps its distance from the raised arm's axis (the tuck alone
+        // thinned a raised arm by up to 40% beside a lowered one)
+        const armness = (1 - smooth(ARM_RADIUS_M, ARM_RADIUS_M + 0.025, rad0)) * smooth(-0.01, 0.07, al0); // faded in over the top of the arm, so no step forms at the shoulder cap; and only what the tuck took is given back, never more
+        if (armness > 0) {
+          const ru = R.map((row) => row[0] * u[0] + row[1] * u[1] + row[2] * u[2]), t = [0, 1, 2].map((m) => posed[m] + cpo[m]), tr = [t[0] - sp[0], t[1] - sp[1], t[2] - sp[2]], ta = tr[0] * ru[0] + tr[1] * ru[1] + tr[2] * ru[2];
+          const radv = [0, 1, 2].map((m) => tr[m] - ta * ru[m]), rl = Math.hypot(...radv);
+          const pr = [posed[0] - sp[0], posed[1] - sp[1], posed[2] - sp[2]], pa = pr[0] * ru[0] + pr[1] * ru[1] + pr[2] * ru[2], radp = Math.hypot(pr[0] - pa * ru[0], pr[1] - pa * ru[1], pr[2] - pa * ru[2]);
+          // out to the arm's own radius underneath; toward the deltoid's top, where the tuck fades,
+          // only back to the radius the skinning gave it (more raised knobs on the shoulder)
+          const lim = Math.min(rad0, radp) + below * Math.max(0, rad0 - radp);
+          if (rl > 1e-5) { const want = rl + Math.max(0, lim - rl) * armness; for (let m = 0; m < 3; m += 1) cpo[m] = sp[m] + ta * ru[m] + radv[m] / rl * want - posed[m]; }
+        }
         const B = [0, 1, 2].map((r2) => [0, 1, 2].map((q) => (r2 === q ? 1 - a : 0) + a * R[r2][q])), det = B[0][0] * (B[1][1] * B[2][2] - B[1][2] * B[2][1]) - B[0][1] * (B[1][0] * B[2][2] - B[1][2] * B[2][0]) + B[0][2] * (B[1][0] * B[2][1] - B[1][1] * B[2][0]);
         const inv = [[B[1][1] * B[2][2] - B[1][2] * B[2][1], B[0][2] * B[2][1] - B[0][1] * B[2][2], B[0][1] * B[1][2] - B[0][2] * B[1][1]], [B[1][2] * B[2][0] - B[1][0] * B[2][2], B[0][0] * B[2][2] - B[0][2] * B[2][0], B[0][2] * B[1][0] - B[0][0] * B[1][2]], [B[1][0] * B[2][1] - B[1][1] * B[2][0], B[0][1] * B[2][0] - B[0][0] * B[2][1], B[0][0] * B[1][1] - B[0][1] * B[1][0]]].map((row) => row.map((x) => x / det));
         const bm = inv.map((row) => row[0] * cpo[0] + row[1] * cpo[1] + row[2] * cpo[2]);
         d.set(apply(Ti, bm, 0), i * 3); moved += 1; most = Math.max(most, Math.hypot(...cpo));
       }
-      raise.push({ name: sp[0] < 0 ? 'armRaiseR' : 'armRaiseL', d });
       log(`${joints[up].getName()}: raised-arm corrective tucks ${moved} points, up to ${(most * 1000).toFixed(0)} mm toward the shoulder pivot`);
+      raise.push({ name: sp[0] < 0 ? 'armRaiseR' : 'armRaiseL', d });
     }
     raise.sort((p2, q) => (p2.name < q.name ? -1 : 1));
     for (const { name, d } of raise) prim.addTarget(doc.createPrimitiveTarget(name).setAttribute('POSITION', doc.createAccessor().setType('VEC3').setArray(d)).setAttribute('NORMAL', doc.createAccessor().setType('VEC3').setArray(new Float32Array(n * 3))));
@@ -128,7 +172,7 @@ export async function sarahV2ArmWeights(src, dst, { log = console.log } = {}) {
     prim.getAttribute('JOINTS_0').setArray(Jn).setNormalized(false); prim.getAttribute('WEIGHTS_0').setArray(Wn).setNormalized(false);
   }
   const was = mesh.getWeights() ?? [];
-  mesh.setExtras({ ...(mesh.getExtras() ?? {}), targetNames: [...names, 'armRaiseL', 'armRaiseR'], armWeights: '2026-10-15 harmonic armpits + raised-arm tuck' });
+  mesh.setExtras({ ...(mesh.getExtras() ?? {}), targetNames: [...names, 'armRaiseL', 'armRaiseR'], armWeights: '2026-10-15 harmonic armpits, approved shoulder top, raised-arm tuck' });
   mesh.setWeights([...(was.length === names.length ? was : new Array(names.length).fill(0)), 0, 0]);
   await io.write(dst, doc);
 }
