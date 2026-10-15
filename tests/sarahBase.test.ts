@@ -29,6 +29,13 @@ describe('the base mannequin (public/models/sarah-base.glb)', () => {
       expect(labTool.navelWeights(percent).navelIn).toBe(0);
     }
     expect(labTool.navelWeights(200)).toEqual({navelIn:0,navelOut:1});
+    // v2's outie: settled to 75%, rising smoothly to as modelled by 100%, kept past it
+    expect(labTool.navelFlatWeight(0)).toBe(1);
+    expect(labTool.navelFlatWeight(75)).toBe(1);
+    expect(labTool.navelFlatWeight(87.5)).toBeCloseTo(0.5);
+    expect(labTool.navelFlatWeight(100)).toBe(0);
+    expect(labTool.navelFlatWeight(200)).toBe(0);
+    for (let p = 75; p < 100; p += 1) expect(labTool.navelFlatWeight(p + 1)).toBeLessThanOrEqual(labTool.navelFlatWeight(p));
   });
   it('carries a sewn hem band on the shirt and a real projecting navel on the body', async () => {
     const {mesh}=await load();

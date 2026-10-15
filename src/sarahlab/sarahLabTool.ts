@@ -252,6 +252,21 @@ export function navelWeights(bumpPercent: number): Record<string, number> {
   return {navelIn:0,navelOut:out};
 }
 
+/**
+ * Sarah v2's outie arrives at 75% (Joshua, 2026-10-14: "starts protruding at
+ * approximately 75% belly instead of 50%"). Her outie is modelled into the 100% master;
+ * `navelFlat` (scripts/sarahV2Correctives.mjs) settles it into an ordinary navel. Fully
+ * on to 75%, eased off by 100%, off past it, so the outie rises smoothly over the last
+ * quarter and stays as modelled through 200%. A model without the target ignores it.
+ */
+export const NAVEL_FLAT_TARGET = 'navelFlat';
+export const NAVEL_OUT_FROM_PERCENT = 75;
+export function navelFlatWeight(bumpPercent: number): number {
+  const p = Math.min(BUMP_MAX_PERCENT, Math.max(0, Number.isFinite(bumpPercent) ? bumpPercent : 100));
+  const t = Math.min(1, Math.max(0, (p - NAVEL_OUT_FROM_PERCENT) / (100 - NAVEL_OUT_FROM_PERCENT)));
+  return 1 - t * t * (3 - 2 * t);
+}
+
 export function bumpLine(bumpPercent: number): string {
   const p = Math.round(Math.min(BUMP_MAX_PERCENT, Math.max(0, bumpPercent)));
   const breasts = ` · bust volume target ${breastVolumeRatio(p).toFixed(2)}×`;
