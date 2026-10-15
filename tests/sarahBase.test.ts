@@ -537,3 +537,9 @@ describe('the settled pregnant sit (Sarah v2)', () => {
     }
   }, 60000);
 });
+
+describe('the Lab opens on the newest v2', () => {
+  it('starts on v2-arms, the model carrying the repaired arms, the rounder bust and the upper belly', () => {
+    expect(labTool.SARAH_LAB_MODELS[labTool.SARAH_LAB_DEFAULT_MODEL].id).toBe('v2-arms');
+  });
+});

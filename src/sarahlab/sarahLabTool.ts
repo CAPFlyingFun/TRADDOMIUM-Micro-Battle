@@ -33,6 +33,14 @@ export const SARAH_LAB_MODELS = Object.freeze([
   Object.freeze({ id: 'v2-arms', path: SARAH_V2_ARMS_MODEL }),
 ]);
 
+/**
+ * THE LAB OPENS ON THE NEWEST v2 (Joshua, 2026-10-15: "the model I see online doesn't have
+ * your fix of the belly, breasts, arms, and shoulder"). The fixes live in `v2-arms`, the
+ * repaired asset beside the untouched approved files; opening on v1 hid them behind two
+ * taps of MODEL. v1 and v2 stay one tap away for comparison.
+ */
+export const SARAH_LAB_DEFAULT_MODEL = SARAH_LAB_MODELS.findIndex((m) => m.id === 'v2-arms');
+
 export function modelLine(index: number): string {
   return `MODEL · ${SARAH_LAB_MODELS[((index % SARAH_LAB_MODELS.length) + SARAH_LAB_MODELS.length) % SARAH_LAB_MODELS.length].id}`;
 }

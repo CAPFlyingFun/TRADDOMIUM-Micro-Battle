@@ -97,11 +97,17 @@ async function main() {
     log('bare URL -> EDITORS -> OPEN -> the Sarah lab is up');
 
     const status = '[data-field="sarahlab-status"]';
+    // The Lab opens on the newest v2 (v2-arms); the checks below were written on v1, the
+    // only model with clothes, so step MODEL round to it (v2-arms -> v1).
+    await page.waitForFunction((sel) => (document.querySelector(sel)?.textContent ?? '').startsWith('model v2-arms'), status, { timeout: 180_000 })
+      .then(() => check(true, 'the Lab opened on v2-arms'))
+      .catch(async () => check(false, `the Lab opened on v2-arms: ${await page.textContent(status)}`));
+    await page.click('[data-action="sarahlab:model"]');
     await page.waitForFunction((sel) => (document.querySelector(sel)?.textContent ?? '').startsWith('base model'), status, { timeout: 180_000 })
       .then(() => check(true, 'the base model loaded'))
       .catch(async () => check(false, `the base model loaded: ${await page.textContent(status)}`));
     const line = await page.textContent(status);
-    check(/belly slider/.test(line) && /4 garments/.test(line), `the file has the belly slider and all four garments: "${line}"`);
+    check(/belly slider/.test(line) && /5 garments/.test(line), `the file has the belly slider and all five garments (the athletic tee is the fifth): "${line}"`);
     if (process.env.SARAH_TEXTURE_ONLY) {
       await page.click('[data-action="sarahlab:tpose"]');
       await page.click('[data-role="sarahlab-textures"] summary');
