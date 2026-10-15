@@ -6,7 +6,7 @@ import {
   BODY_CONTROLS, clampShape, controlLine, defaultBodyShape, isDefaultShape, lerpShape, parseShape, resetControl, serializeShape, setControl, variedShape,
 } from '../src/actor/bodyShape';
 import {
-  BELLY_LOWER_SCALE, BELLY_SHAPE_SCALE, BELLY_HEIGHT_END_CM, bellyHeightWeights, bellyMotionWeights, bodyShapeFieldWeights, effectiveTiltDeg, restingBellySpring,
+  BELLY_LOWER_SCALE, BREAST_MANUAL_MAX_VOLUME, bustVolume, breastVolumeRatio, breastWeightsForShape, BREAST_GROW_TARGET, BELLY_SHAPE_SCALE, BELLY_HEIGHT_END_CM, bellyHeightWeights, bellyMotionWeights, bodyShapeFieldWeights, effectiveTiltDeg, restingBellySpring,
   SEATED_TILT_DOWN_SECONDS, SEATED_TILT_MAX_DEG, SEATED_TILT_UP_SECONDS, SIZE_TILT_PRESETS_DEG, sizeTiltDeg, stepSeated, SARAH_LAB_MODELS,
 } from '../src/sarahlab/sarahLabTool';
 
@@ -92,6 +92,28 @@ describe('the tilt', () => {
     while (s > 0) { s = stepSeated(s, 0, 1 / 60); t += 1 / 60; }
     expect(t).toBeCloseTo(SEATED_TILT_UP_SECONDS, 1);
     expect(stepSeated(0.4, 1, 0)).toBe(0.4);
+  });
+});
+
+describe('the bust\'s manual size', () => {
+  it('leaves the slider\'s bust alone at 0, reaches 2.0x at +100% at every belly size, and takes 30% off at -30%', () => {
+    expect(BREAST_MANUAL_MAX_VOLUME).toBe(2);
+    for (const p of [0, 30, 100, 150, 200]) {
+      expect(bustVolume(p, 0)).toBe(breastVolumeRatio(p));
+      expect(bustVolume(p, 100)).toBeCloseTo(2, 12);
+      expect(bustVolume(p, 500)).toBeCloseTo(2, 12);
+      expect(bustVolume(p, -30)).toBeCloseTo(breastVolumeRatio(p) * 0.7, 12);
+    }
+    expect(breastVolumeRatio(200)).toBeCloseTo(1.55, 12);
+    expect(bustVolume(200, 50)).toBeCloseTo(1.775, 12);
+  });
+
+  it('grows past 1.55x with the midline-guarded field, breastGrow itself holding at its own end', () => {
+    const shaped = (size: number) => ({ ...defaultBodyShape(), breastSize: size });
+    expect(breastWeightsForShape(200, true, 100)[BREAST_GROW_TARGET]).toBe(1);
+    expect(bodyShapeFieldWeights(shaped(100), 200)['shape:breastGrowMore']).toBeCloseTo((Math.cbrt(2) - 1) / (Math.cbrt(1.55) - 1) - 1, 10);
+    expect(bodyShapeFieldWeights(shaped(0), 200)['shape:breastGrowMore']).toBe(0);
+    expect(bodyShapeFieldWeights(shaped(20), 30)['shape:breastGrowMore']).toBe(0);
   });
 });
 

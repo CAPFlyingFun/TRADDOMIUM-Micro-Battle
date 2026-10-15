@@ -50,7 +50,7 @@ import { BREAST_DEPTH_M, BREAST_REACH_M, BREAST_HOLD_FROM, BREAST_HOLD_TO, BREAS
 export const SHAPE_UNITS = Object.freeze({
   bellyHeightUp: '2 cm up at 100%', bellyHeightDown: '2 cm down at 100%', bellyHeightUp150: '2 cm up at 150%', bellyHeightDown150: '2 cm down at 150%', bellyHeightUp200: '2 cm up at 200%', bellyHeightDown200: '2 cm down at 200%',
   bellyWidth: '10%', bellyDepth: '10%', bellyUpper: '10%', bellyLower: '10%',
-  breastWidth: '10%', breastHeight: '10%', breastDepth: '10%', breastPosition: '1 cm', breastDroop: '5°', breastUpper: '10%', breastLower: '10%',
+  breastGrowMore: 'one breastGrow unit past 1.55x, kept off the midline', breastWidth: '10%', breastHeight: '10%', breastDepth: '10%', breastPosition: '1 cm', breastDroop: '5°', breastUpper: '10%', breastLower: '10%',
 });
 export const STAMP = '2026-10-15 body-shape fields';
 /** Passes of averaging along her skin each field is smoothed with. */
@@ -278,7 +278,20 @@ export async function sarahV2Shape(src, dst = src, { log = console.log } = {}) {
       return out;
     };
     const toLocal = (d) => { const out = new Float32Array(n * 3); for (let i = 0; i < n; i += 1) out.set(apply(Ti, [d[i * 3], d[i * 3 + 1], d[i * 3 + 2]], 0), i * 3); return out; };
-    const fields = { ...heightFields, bellyWidth: width, bellyDepth: depth, bellyUpper: upper, bellyLower: lower, breastWidth: bw, breastHeight: bh, breastDepth: bd, breastPosition: bp, breastDroop: bdr, breastUpper: bu, breastLower: blo };
+    // past the slider's 1.55x (manual SIZE, up to 2.0x): the same even growth as
+    // `breastGrow`, one unit more, except that nothing moves toward her midline once it is
+    // close to it, so the two breasts meet in the cleavage instead of passing through each
+    // other (extrapolating breastGrow itself crossed them at 2.0x)
+    const more = new Float32Array(n * 3);
+    if (names.includes('breastGrow')) {
+      const G = tgt('breastGrow');
+      for (let i = 0; i < n; i += 1) {
+        const x = P[i * 3], dx = G[i * 3];
+        const inward = dx * Math.sign(x) < 0 ? smooth(BREAST_MIDLINE_M * 0.5, 0.06, Math.abs(x)) : 1;
+        more.set([dx * inward, G[i * 3 + 1], G[i * 3 + 2]], i * 3);
+      }
+    }
+    const fields = { ...heightFields, breastGrowMore: more, bellyWidth: width, bellyDepth: depth, bellyUpper: upper, bellyLower: lower, breastWidth: bw, breastHeight: bh, breastDepth: bd, breastPosition: bp, breastDroop: bdr, breastUpper: bu, breastLower: blo };
     for (const [name, raw] of Object.entries(fields)) {
       const f = finish(raw, WIDE_PASSES[name] ?? 0);
       // the arm never moves with the chest

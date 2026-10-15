@@ -654,9 +654,32 @@ function scaleAt(table: readonly (readonly [number, number])[], bumpPercent: num
   return 0;
 }
 
-/** The bust's linear scale against her own 0% breast, with the SIZE control's volume on top. */
+/**
+ * MANUAL SIZE MAY GO PAST THE SLIDER'S BUST (Joshua, 2026-10-15: "for manual control, allow
+ * the breast size to go up to x2.0, but if using the simple slider, only that x1.55 we
+ * have... allow manual control to override the normal default max size").
+ *
+ * The belly slider alone still carries the bust from 1.0x to 1.55x volume. The SIZE control
+ * starts from whatever the slider gives: upward, +100% is `BREAST_MANUAL_MAX_VOLUME` at every
+ * belly size (+50% is halfway there), so the whole travel of the control does something and
+ * its top is the same 2.0x whether she is at 30% or 200%; downward, -30% is 30% less volume.
+ * `breastGrow` is one even scaling about the breast's middle, so taking its weight past 1 is
+ * that same even scaling, larger: nothing new is invented past 1.55x.
+ */
+export const BREAST_MANUAL_MAX_VOLUME = 2.0;
+/** How many `breastGrow` units the bust is: 1 at the slider's 1.55x, about 1.81 at 2.0x. */
+export function breastGrowUnits(bumpPercent: number, sizePercent = 0): number {
+  return (bustScale(bumpPercent, sizePercent) - 1) / (Math.cbrt(BREAST_GROW_MAX_VOLUME) - 1);
+}
+/** The bust's volume against her own 0% breast: the slider's, with the SIZE control on top. */
+export function bustVolume(bumpPercent: number, sizePercent = 0): number {
+  const base = breastVolumeRatio(bumpPercent), s = Number.isFinite(sizePercent) ? sizePercent : 0;
+  if (s >= 0) return base + Math.max(0, BREAST_MANUAL_MAX_VOLUME - base) * Math.min(1, s / 100);
+  return Math.max(0.05, base * (1 + s / 100));
+}
+/** The bust's linear scale against her own 0% breast. */
 export function bustScale(bumpPercent: number, sizePercent = 0): number {
-  return Math.cbrt(Math.max(0.05, breastVolumeRatio(bumpPercent) * (1 + sizePercent / 100)));
+  return Math.cbrt(bustVolume(bumpPercent, sizePercent));
 }
 
 /**
@@ -696,6 +719,7 @@ export function bodyShapeFieldWeights(shape: BodyShape, bumpPercent: number): Re
     'shape:bellyDepth': (shape.bellyDepth / 10) * S,
     'shape:bellyUpper': (shape.bellyUpper / 10) * Up,
     'shape:bellyLower': (shape.bellyLower / 10) * Lo,
+    'shape:breastGrowMore': Math.max(0, breastGrowUnits(bumpPercent, shape.breastSize) - 1),
     'shape:breastWidth': (shape.breastWidth / 10) * s,
     'shape:breastHeight': (shape.breastHeight / 10) * s,
     'shape:breastDepth': (shape.breastDepth / 10) * s,
@@ -709,5 +733,6 @@ export function bodyShapeFieldWeights(shape: BodyShape, bumpPercent: number): Re
 /** The bust's own GPU weights with the SIZE control: the same even scaling, to a little more or less volume. */
 export function breastWeightsForShape(bumpPercent: number, grows: boolean, sizePercent: number): Record<string, number> {
   if (!grows || !sizePercent) return breastWeightsFor(bumpPercent, grows);
-  return { [BREAST_TARGETS.small]: 0, [BREAST_TARGETS.big]: 0, [BREAST_GROW_TARGET]: (bustScale(bumpPercent, sizePercent) - 1) / (Math.cbrt(BREAST_GROW_MAX_VOLUME) - 1) };
+  // past 1.55x the rest of the growth is `shape:breastGrowMore` (bodyShapeFieldWeights), which keeps the cleavage
+  return { [BREAST_TARGETS.small]: 0, [BREAST_TARGETS.big]: 0, [BREAST_GROW_TARGET]: Math.min(1, breastGrowUnits(bumpPercent, sizePercent)) };
 }
