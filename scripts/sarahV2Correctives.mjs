@@ -55,10 +55,6 @@ export const NAVEL_DIMPLE_M = 0.003;
 /** The band each side of a knee its weights are eased over, and how many passes. */
 export const KNEE_BAND_M = 0.15;
 export const KNEE_PASSES = 100;
-/** The armpit's share of a raised arm: the radius around the upper-arm joint, the most it takes, and the easing passes. */
-export const ARMPIT_R = 0.16;
-export const ARMPIT_SHARE = 0.7;
-export const ARMPIT_PASSES = 30;
 /**
  * The seated corrective, metres on her 100% body: the bump's lower half (full below
  * LOW[0], nothing by LOW[1], her navel), in front (FRONT), within her flanks (FLANK),
@@ -218,39 +214,6 @@ export async function sarahV2Correctives(file, { log = console.log } = {}) {
       log(`knees: weights eased across ${KNEE_BAND_M * 100} cm each side of ${knees.length} knees (${eased} vertices)`);
     }
   }
-  // 5. the armpits follow a raised arm: within ARMPIT_R of each upper-arm joint, the
-  // skin of her armpit and the side of her chest takes a share of that arm bone (none at
-  // her midline, none past the radius), then the weights are eased so no seam forms.
-  // At rest she is arms-down, so nothing moves until an arm is raised
-  {
-    const joints = skin.listJoints(), wt = joints.map((j) => j.getWorldTranslation());
-    const uppers = []; joints.forEach((j, k) => { const c = j.listChildren().find((ch) => joints.includes(ch)); if (!c) return; const t = wt[k], e = c.getWorldTranslation(); if (Math.abs(t[0]) > 0.1 && Math.abs(t[0]) < 0.2 && t[1] > 1.3 && t[1] < 1.45 && e[1] < t[1] - 0.15) uppers.push(k); });
-    for (const prim of mesh.listPrimitives()) {
-      const P = read(prim.getAttribute('POSITION')), n = P.length / 3; for (let i = 0; i < n; i += 1) P.set(apply(T, [P[i * 3], P[i * 3 + 1], P[i * 3 + 2]], 1), i * 3);
-      const J = read(prim.getAttribute('JOINTS_0')), W = read(prim.getAttribute('WEIGHTS_0')), idx = prim.getIndices().getArray();
-      const key = new Map(), id = new Int32Array(n); for (let i = 0; i < n; i += 1) { const k = `${P[i * 3].toFixed(6)},${P[i * 3 + 1].toFixed(6)},${P[i * 3 + 2].toFixed(6)}`; if (!key.has(k)) key.set(k, key.size); id[i] = key.get(k); }
-      const U = key.size, nb = Array.from({ length: U }, () => new Set()), rep = new Int32Array(U); for (let i = 0; i < n; i += 1) rep[id[i]] = i;
-      for (let t = 0; t < idx.length; t += 3) for (const [a, b] of [[idx[t], idx[t + 1]], [idx[t + 1], idx[t + 2]], [idx[t + 2], idx[t]]]) { nb[id[a]].add(id[b]); nb[id[b]].add(id[a]); }
-      let w = Array.from({ length: U }, (_, u) => { const m = new Map(), i = rep[u]; for (let c = 0; c < 4; c += 1) if (W[i * 4 + c] > 0) m.set(J[i * 4 + c], (m.get(J[i * 4 + c]) || 0) + W[i * 4 + c]); return m; });
-      const region = new Float32Array(U); let given = 0;
-      for (let u = 0; u < U; u += 1) {
-        const i = rep[u], x = P[i * 3], y = P[i * 3 + 1], z = P[i * 3 + 2];
-        for (const k of uppers) {
-          const t = wt[k]; if (Math.sign(x) !== Math.sign(t[0])) continue;
-          const d = Math.hypot(x - t[0], y - t[1], z - t[2]), share = ARMPIT_SHARE * (1 - smooth(ARMPIT_R * 0.35, ARMPIT_R, d)) * smooth(0.06, 0.12, Math.abs(x)) * (1 - smooth(1.42, 1.5, y));
-          if (share <= 0) continue; region[u] = Math.max(region[u], 1 - smooth(ARMPIT_R, ARMPIT_R * 1.4, d));
-          const m = w[u], have = m.get(k) || 0; if (have >= share) continue;
-          const take = share - have, rest = 1 - have; if (rest <= 0) continue;
-          for (const [j, x2] of m) if (j !== k) m.set(j, x2 * (1 - take / rest)); m.set(k, share); given += 1;
-        }
-      }
-      for (let pass = 0; pass < ARMPIT_PASSES; pass += 1) w = w.map((m, u) => { if (!region[u] || !nb[u].size) return m; const avg = new Map(); for (const v of nb[u]) for (const [k, x] of w[v]) avg.set(k, (avg.get(k) || 0) + x / nb[u].size); const f = 0.5 * region[u], out = new Map(); for (const k of new Set([...m.keys(), ...avg.keys()])) out.set(k, (m.get(k) || 0) * (1 - f) + (avg.get(k) || 0) * f); return out; });
-      const Jn = new Uint8Array(n * 4), Wn = new Float32Array(n * 4);
-      for (let i = 0; i < n; i += 1) { const top = [...w[id[i]]].sort((a, b) => b[1] - a[1]).slice(0, 4), sum = top.reduce((a, [, x]) => a + x, 0) || 1; top.forEach(([k, x], c) => { Jn[i * 4 + c] = k; Wn[i * 4 + c] = x / sum; }); }
-      prim.getAttribute('JOINTS_0').setArray(Jn).setNormalized(false); prim.getAttribute('WEIGHTS_0').setArray(Wn).setNormalized(false);
-      log(`armpits: ${given} points of her armpits and chest sides follow ${uppers.length} upper arms (up to ${ARMPIT_SHARE * 100}%)`);
-    }
-  }
   // 4. seated, the lower bump rides up over her thighs instead of dropping between them:
   // the lower half of the bump eased up and a little forward, fully at its bottom and
   // nothing by the navel, nothing below the groin crease or past her flanks. The Lab
@@ -270,7 +233,7 @@ export async function sarahV2Correctives(file, { log = console.log } = {}) {
   }
   names.push('navelFlat');
   names.push('bellySeatV2');
-  mesh.setExtras({ ...extras, targetNames: names, v2Correctives: '2026-10-14 fair+groin+flat+navel+knees+armpits+seat' });
+  mesh.setExtras({ ...extras, targetNames: names, v2Correctives: '2026-10-14 fair+groin+flat+navel+knees+seat' });
   // every primitive's weights for the new target, so the dictionary lines up
   const was = mesh.getWeights() ?? [];
   mesh.setWeights([...(was.length === names.length - 2 ? was : new Array(names.length - 2).fill(0)), 0, 0]);
