@@ -36,6 +36,12 @@ describe('the base mannequin (public/models/sarah-base.glb)', () => {
     expect(labTool.navelFlatWeight(100)).toBe(0);
     expect(labTool.navelFlatWeight(200)).toBe(0);
     for (let p = 75; p < 100; p += 1) expect(labTool.navelFlatWeight(p + 1)).toBeLessThanOrEqual(labTool.navelFlatWeight(p));
+    // v2's seated corrective: never standing, nothing by 50%, all at 100%, growing to 200%
+    for (const p of [0, 50, 100, 150, 200]) expect(labTool.seatCorrectiveV2Weight(0, p)).toBe(0);
+    expect(labTool.seatCorrectiveV2Weight(1, 50)).toBe(0);
+    expect(labTool.seatCorrectiveV2Weight(1, 100)).toBe(1);
+    expect(labTool.seatCorrectiveV2Weight(1, 200)).toBe(2);
+    for (let p = 50; p < 200; p += 1) expect(labTool.seatCorrectiveV2Weight(1, p + 1)).toBeGreaterThanOrEqual(labTool.seatCorrectiveV2Weight(1, p));
   });
   it('carries a sewn hem band on the shirt and a real projecting navel on the body', async () => {
     const {mesh}=await load();

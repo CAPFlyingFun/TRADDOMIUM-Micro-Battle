@@ -181,6 +181,22 @@ export function seatCorrectiveWeight(seated: number, bumpPercent: number): numbe
   return s * ease((b - 0.5) / 0.4) * (1 - ease((b - 1.1) / 0.4));
 }
 
+/**
+ * SARAH v2's SEATED CORRECTIVE (Joshua, 2026-10-14: "As the legs bend upward, gradually
+ * reduce the belly's downward tilt only as much as needed to avoid intersection... minimal
+ * or no correction when standing"). `bellySeatV2` (scripts/sarahV2Correctives.mjs) eases
+ * the lower half of her bump up and a little forward; seated it is nothing by 50%, all of
+ * it at 100%, and grows on to twice that at 200%, where the bump hangs lowest. Standing it
+ * is nothing at every size. v1 has no such target and ignores it.
+ */
+export const SEAT_V2_TARGET = 'bellySeatV2';
+export function seatCorrectiveV2Weight(seated: number, bumpPercent: number): number {
+  const s = Math.min(1, Math.max(0, Number.isFinite(seated) ? seated : 0));
+  const b = Math.min(BUMP_MAX_PERCENT, Math.max(0, Number.isFinite(bumpPercent) ? bumpPercent : 100)) / 100;
+  const u = Math.min(1, Math.max(0, (b - 0.5) / 0.5));
+  return s * (b <= 1 ? u * u * (3 - 2 * u) : b);
+}
+
 export function refineWeight(on: boolean, bumpPercent: number): number {
   if (!on) return 0;
   const b = Math.min(BUMP_MAX_PERCENT, Math.max(0, Number.isFinite(bumpPercent) ? bumpPercent : 100)) / 100;
