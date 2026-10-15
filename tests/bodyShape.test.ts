@@ -96,13 +96,14 @@ describe('the tilt', () => {
 });
 
 describe('the bust\'s manual size', () => {
-  it('leaves the slider\'s bust alone at 0, reaches 2.0x at +100% at every belly size, and takes 30% off at -30%', () => {
+  it('leaves the slider\'s bust alone at 0, reaches 2.0x at +100% and 0.5x at -100% at every belly size', () => {
     expect(BREAST_MANUAL_MAX_VOLUME).toBe(2);
     for (const p of [0, 30, 100, 150, 200]) {
       expect(bustVolume(p, 0)).toBe(breastVolumeRatio(p));
       expect(bustVolume(p, 100)).toBeCloseTo(2, 12);
       expect(bustVolume(p, 500)).toBeCloseTo(2, 12);
-      expect(bustVolume(p, -30)).toBeCloseTo(breastVolumeRatio(p) * 0.7, 12);
+      expect(bustVolume(p, -100)).toBeCloseTo(0.5, 12);
+      expect(bustVolume(p, -500)).toBeCloseTo(0.5, 12);
     }
     expect(breastVolumeRatio(200)).toBeCloseTo(1.55, 12);
     expect(bustVolume(200, 50)).toBeCloseTo(1.775, 12);

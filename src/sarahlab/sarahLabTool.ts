@@ -662,20 +662,24 @@ function scaleAt(table: readonly (readonly [number, number])[], bumpPercent: num
  * The belly slider alone still carries the bust from 1.0x to 1.55x volume. The SIZE control
  * starts from whatever the slider gives: upward, +100% is `BREAST_MANUAL_MAX_VOLUME` at every
  * belly size (+50% is halfway there), so the whole travel of the control does something and
- * its top is the same 2.0x whether she is at 30% or 200%; downward, -30% is 30% less volume.
+ * its top is the same 2.0x whether she is at 30% or 200%; downward the same way, -100% is
+ * 0.5x. All of it is volume against her own unpregnant (0%) bust, the 1.0x the slider starts
+ * from (100% belly carries 1.30x).
  * `breastGrow` is one even scaling about the breast's middle, so taking its weight past 1 is
  * that same even scaling, larger: nothing new is invented past 1.55x.
  */
 export const BREAST_MANUAL_MAX_VOLUME = 2.0;
+/** ...and down to half (Joshua, 2026-10-15: "minimum at 0.5x, max at 2.0x"): -100% is 0.5x at every belly size. */
+export const BREAST_MANUAL_MIN_VOLUME = 0.5;
 /** How many `breastGrow` units the bust is: 1 at the slider's 1.55x, about 1.81 at 2.0x. */
 export function breastGrowUnits(bumpPercent: number, sizePercent = 0): number {
   return (bustScale(bumpPercent, sizePercent) - 1) / (Math.cbrt(BREAST_GROW_MAX_VOLUME) - 1);
 }
 /** The bust's volume against her own 0% breast: the slider's, with the SIZE control on top. */
 export function bustVolume(bumpPercent: number, sizePercent = 0): number {
-  const base = breastVolumeRatio(bumpPercent), s = Number.isFinite(sizePercent) ? sizePercent : 0;
-  if (s >= 0) return base + Math.max(0, BREAST_MANUAL_MAX_VOLUME - base) * Math.min(1, s / 100);
-  return Math.max(0.05, base * (1 + s / 100));
+  const base = breastVolumeRatio(bumpPercent), s = Math.min(100, Math.max(-100, Number.isFinite(sizePercent) ? sizePercent : 0));
+  const end = s >= 0 ? BREAST_MANUAL_MAX_VOLUME : BREAST_MANUAL_MIN_VOLUME;
+  return base + (end - base) * Math.abs(s) / 100;
 }
 /** The bust's linear scale against her own 0% breast. */
 export function bustScale(bumpPercent: number, sizePercent = 0): number {
