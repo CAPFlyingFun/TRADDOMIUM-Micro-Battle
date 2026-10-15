@@ -27,10 +27,10 @@ import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { MeshoptDecoder, MeshoptEncoder } from 'meshoptimizer';
 
 /** The groin crease, metres: height at the centre line and how fast it climbs outward. */
-export const CREASE_Y0 = 0.82;
+export const CREASE_Y0 = 0.80;
 export const CREASE_SLOPE = 1.0;
 /** The fade's band below and above that line. */
-export const CREASE_BELOW_M = 0.02;
+export const CREASE_BELOW_M = 0.05;
 export const CREASE_ABOVE_M = 0.02;
 /** How much longer the fade grows per metre out from the centre line. */
 export const CREASE_WIDEN = 0.8;
@@ -39,6 +39,12 @@ export const BUMP_DEPTH_M = [0.041, 0.048];
 /** The falloff ring faired in every belly shape (its move as a share of its largest: in, full, full, out) and the passes. */
 export const FAIR_RING = [0.02, 0.1, 0.5, 0.8];
 export const FAIR_PASSES = 60;
+/** How strongly each small size's lower belly settles flat, the passes, and its region (metres: y in/full/full/out, |x| full/out). */
+export const LOW_FLAT = Object.freeze({ belly: 1, belly25: 0.8, belly30: 0.75, belly50: 0.5, belly60: 0.25 });
+/** Passes filling the groove between the held groin and a small size's lower belly. */
+export const LOW_FILL_PASSES = 300;
+export const LOW_FLAT_Y = [0.80, 0.84, 0.95, 1.0];
+export const LOW_FLAT_X = [0.14, 0.19];
 /** Belly shapes the groin is held against. */
 export const BELLY_SHAPES = /^belly(\d+)?$|^bellyRefine$/;
 /** Her navel (the bake's `navel`), the radius the outie is settled within, the ring read for the surface, and the dimple left. */
@@ -117,6 +123,23 @@ export async function sarahV2Correctives(file, { log = console.log } = {}) {
       for (let u = 0; u < U; u += 1) { if (!rate[u]) continue; const nn = baseN[u], c = [0, 1, 2].map((e) => w[u * 3 + e] - w0[u * 3 + e]), along = c[0] * nn[0] + c[1] * nn[1] + c[2] * nn[2]; for (let e = 0; e < 3; e += 1) w[u * 3 + e] = w0[u * 3 + e] + along * nn[e]; }
       const d = new Float32Array(n * 3);
       for (let i = 0; i < n; i += 1) { const u = id[i]; for (let e = 0; e < 3; e += 1) d[i * 3 + e] = w[u * 3 + e] * keep[i]; if (keep[i] < 1 && Math.hypot(d0[i * 3], d0[i * 3 + 1], d0[i * 3 + 2])) { held += 1; worst = Math.max(worst, Math.hypot(...apply(T, [d0[i * 3], d0[i * 3 + 1], d0[i * 3 + 2]], 0)) * (1 - keep[i])); } }
+      // the small sizes' lower belly settles flat: within the lower abdomen (above the
+      // groin crease, below the navel, inside the hip bones) the shape's own surface is
+      // relaxed toward the smooth surface spanning that area, along the normal only, so
+      // the shrunken bump no longer sits forward as a pouch. Strongest at 0%, gone by 60%.
+      const flat = LOW_FLAT[name] ?? 0;
+      if (flat) {
+        // the groin holds its 100% place, so at small sizes a groove opens between it and
+        // the retracted lower belly, and the belly reads as a pouch with an edge. The groove
+        // is filled, outward only, so belly and groin run into each other as one surface
+        let S = new Float32Array(U * 3); const reg = new Float32Array(U), nm = [];
+        for (let i = 0; i < n; i += 1) { const u = id[i], m = apply(T, [d[i * 3], d[i * 3 + 1], d[i * 3 + 2]], 0); for (let e = 0; e < 3; e += 1) S[u * 3 + e] = P[i * 3 + e] + m[e]; if (!nm[u]) { const q = apply(T, baseN[u], 0), l = Math.hypot(...q) || 1; nm[u] = [q[0] / l, q[1] / l, q[2] / l]; } const x = P[i * 3], y = P[i * 3 + 1]; reg[u] = flat * smooth(LOW_FLAT_Y[0], LOW_FLAT_Y[1], y) * (1 - smooth(LOW_FLAT_Y[2], LOW_FLAT_Y[3], y)) * (1 - smooth(LOW_FLAT_X[0], LOW_FLAT_X[1], Math.abs(x))) * smooth(0.0, 0.02, P[i * 3 + 2]); }
+        const S0 = new Float32Array(S);
+        for (let pass = 0; pass < LOW_FILL_PASSES; pass += 1) { const next = new Float32Array(S); for (let u = 0; u < U; u += 1) { if (!reg[u] || !nb[u].size) continue; const a = [0, 0, 0]; for (const v of nb[u]) for (let e = 0; e < 3; e += 1) a[e] += S[v * 3 + e]; let along = 0; for (let e = 0; e < 3; e += 1) along += (a[e] / nb[u].size - S[u * 3 + e]) * nm[u][e]; if (along <= 0) continue; for (let e = 0; e < 3; e += 1) next[u * 3 + e] = S[u * 3 + e] + nm[u][e] * along * 0.5 * reg[u]; } S = next; }
+        let most = 0;
+        for (let i = 0; i < n; i += 1) { const u = id[i], c = [0, 1, 2].map((e) => S[u * 3 + e] - S0[u * 3 + e]), m = Math.hypot(...c); if (!m) continue; most = Math.max(most, m); const l = apply(Ti, c, 0); for (let e = 0; e < 3; e += 1) d[i * 3 + e] += l[e]; }
+        log(`${name}: groove beside the lower belly filled up to ${(most * 1000).toFixed(1)} mm (${Math.round(flat * 100)}%)`);
+      }
       A.setArray(d).setNormalized(false);
       // its shading: the baked normal deltas faired and faded exactly as the move was
       const NA = target.getAttribute('NORMAL'); if (!NA) return;
@@ -210,7 +233,7 @@ export async function sarahV2Correctives(file, { log = console.log } = {}) {
   }
   names.push('navelFlat');
   names.push('bellySeatV2');
-  mesh.setExtras({ ...extras, targetNames: names, v2Correctives: '2026-10-14 fair+groin+navel+knees+seat' });
+  mesh.setExtras({ ...extras, targetNames: names, v2Correctives: '2026-10-14 fair+groin+flat+navel+knees+seat' });
   // every primitive's weights for the new target, so the dictionary lines up
   const was = mesh.getWeights() ?? [];
   mesh.setWeights([...(was.length === names.length - 2 ? was : new Array(names.length - 2).fill(0)), 0, 0]);
