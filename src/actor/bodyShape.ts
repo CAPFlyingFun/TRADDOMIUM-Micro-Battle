@@ -24,7 +24,7 @@
 
 export type BodyControl =
   | 'bellyTilt' | 'bellyHeight' | 'bellyWidth' | 'bellyDepth' | 'bellyUpper' | 'bellyLower'
-  | 'breastSize' | 'breastWidth' | 'breastHeight' | 'breastDepth' | 'breastPosition' | 'breastDroop' | 'breastUpper' | 'breastLower';
+  | 'breastSize' | 'breastWidth' | 'breastHeight' | 'breastDepth' | 'breastSpacing' | 'breastPosition' | 'breastDroop' | 'breastUpper' | 'breastLower';
 
 export interface BodyControlSpec {
   readonly key: BodyControl;
@@ -53,9 +53,10 @@ export const BODY_CONTROLS: readonly BodyControlSpec[] = Object.freeze([
   { key: 'bellyUpper', group: 'belly', label: 'Upper fullness', unit: '%', min: -20, max: 20, step: 1, fallback: 0, spread: 6, help: 'the bump above the navel' },
   { key: 'bellyLower', group: 'belly', label: 'Lower fullness', unit: '%', min: -20, max: 20, step: 1, fallback: 0, spread: 6, help: 'the bump below the navel' },
   { key: 'breastSize', group: 'breasts', label: 'Size', unit: '%', min: -100, max: 100, step: 1, fallback: 0, spread: 10, help: 'volume from the bust the belly slider gives: +100% is 2.0x, -100% is 0.5x, at any belly size' },
-  { key: 'breastWidth', group: 'breasts', label: 'Width', unit: '%', min: -15, max: 15, step: 1, fallback: 0, spread: 4, help: 'side to side' },
-  { key: 'breastHeight', group: 'breasts', label: 'Height', unit: '%', min: -15, max: 15, step: 1, fallback: 0, spread: 4, help: 'top to bottom' },
-  { key: 'breastDepth', group: 'breasts', label: 'Depth', unit: '%', min: -15, max: 15, step: 1, fallback: 0, spread: 4, help: 'forward projection' },
+  { key: 'breastWidth', group: 'breasts', label: 'Width', unit: '%', min: -25, max: 25, step: 1, fallback: 0, spread: 4, help: 'side to side' },
+  { key: 'breastHeight', group: 'breasts', label: 'Height', unit: '%', min: -25, max: 25, step: 1, fallback: 0, spread: 4, help: 'top to bottom' },
+  { key: 'breastDepth', group: 'breasts', label: 'Depth', unit: '%', min: -25, max: 25, step: 1, fallback: 0, spread: 4, help: 'forward projection' },
+  { key: 'breastSpacing', group: 'breasts', label: 'Spacing', unit: 'cm', min: -1.5, max: 1.5, step: 0.1, fallback: 0, spread: 0.4, help: 'closer together or farther apart, round her chest' },
   { key: 'breastPosition', group: 'breasts', label: 'Position', unit: 'cm', min: -1.5, max: 1.5, step: 0.1, fallback: 0, spread: 0.5, help: 'higher or lower on the chest' },
   { key: 'breastDroop', group: 'breasts', label: 'Droop', unit: '°', min: -5, max: 15, step: 0.5, fallback: 0, spread: 3, help: 'natural downward tilt' },
   { key: 'breastUpper', group: 'breasts', label: 'Upper fullness', unit: '%', min: -20, max: 20, step: 1, fallback: 0, spread: 5, help: 'the upper pole' },
@@ -153,9 +154,42 @@ export function variedShape(seed: number, base: BodyShape = defaultBodyShape(), 
   return clampShape(out);
 }
 
+/**
+ * LINKED DIMENSIONS (Joshua, 2026-10-15: "add the ability to link or unlink dimensions,
+ * similar to an aspect-ratio lock... Width and Height could be linked while Depth remains
+ * independent, or all three could be linked together").
+ *
+ * Width, height and depth are each a factor on the bust (1 + value/100). Moving one LINKED
+ * dimension multiplies every other linked dimension by the same ratio, so their proportions
+ * to one another hold, whatever they were when they were linked: linking or unlinking is
+ * only a flag and never changes a value. If the move would carry any linked dimension past
+ * its range, the ratio is cut back so that none does, and the proportions still hold.
+ */
+export const BREAST_DIMENSIONS: readonly BodyControl[] = Object.freeze(['breastWidth', 'breastHeight', 'breastDepth'] as BodyControl[]);
+export function setLinkedControl(shape: BodyShape, key: BodyControl, value: number, linked: ReadonlySet<BodyControl> | readonly BodyControl[]): BodyShape {
+  const set = new Set(linked);
+  const group = BREAST_DIMENSIONS.filter((k) => set.has(k));
+  if (!group.includes(key) || group.length < 2) return setControl(shape, key, value);
+  const spec = controlSpec(key), from = 1 + shape[key] / 100;
+  const want = 1 + Math.min(spec.max, Math.max(spec.min, Number.isFinite(value) ? value : shape[key])) / 100;
+  if (!(from > 0)) return setControl(shape, key, value);
+  let r = want / from;
+  // no linked dimension may leave its range: shorten the step until every one fits
+  for (const k of group) {
+    const c = controlSpec(k), f = 1 + shape[k] / 100;
+    if (!(f > 0)) continue;
+    const hi = (1 + c.max / 100) / f, lo = (1 + c.min / 100) / f;
+    r = Math.min(hi, Math.max(lo, r));
+  }
+  const out: Record<string, number> = { ...shape };
+  for (const k of group) out[k] = Math.round(((1 + shape[k] / 100) * r - 1) * 100 * 1e6) / 1e6;
+  return clampShape(out);
+}
+
 export function controlLine(key: BodyControl, value: number): string {
   const s = controlSpec(key);
-  const shown = s.step < 1 ? value.toFixed(1) : value.toFixed(0);
+  // a linked move can leave a whole-number control between whole numbers: show the tenth then
+  const shown = s.step < 1 || Math.abs(value - Math.round(value)) > 0.05 ? value.toFixed(1) : value.toFixed(0);
   const signed = s.unit !== '°' && value > 0 ? `+${shown}` : shown;
   return `${s.label.toUpperCase()} · ${signed}${s.unit === '%' ? '%' : s.unit === 'cm' ? ' cm' : '°'}${value === s.fallback ? ' (approved)' : ''}`;
 }

@@ -86,6 +86,9 @@ export const SARAH_LAB_ACTION = Object.freeze({
   /** `${bodyReset}<control>` resets one body control; `${tiltPreset}<deg>` sets the belly tilt */
   bodyReset: 'sarahlab:body-reset:',
   bodyResetAll: 'sarahlab:body-reset-all',
+  /** `${bodyLink}<control>` links or unlinks one breast dimension; `bodyLinkAll` links all three, or unlinks them */
+  bodyLink: 'sarahlab:body-link:',
+  bodyLinkAll: 'sarahlab:body-link-all',
   tiltPreset: 'sarahlab:tilt:',
 });
 
@@ -724,6 +727,9 @@ export function bodyShapeFieldWeights(shape: BodyShape, bumpPercent: number): Re
     'shape:bellyUpper': (shape.bellyUpper / 10) * Up,
     'shape:bellyLower': (shape.bellyLower / 10) * Lo,
     'shape:breastGrowMore': Math.max(0, breastGrowUnits(bumpPercent, shape.breastSize) - 1),
+    // spacing is two fields: apart, and together (held off her midline so the breasts meet, never cross)
+    'shape:breastSpacingOut': Math.max(0, shape.breastSpacing),
+    'shape:breastSpacingIn': Math.max(0, -shape.breastSpacing),
     'shape:breastWidth': (shape.breastWidth / 10) * s,
     'shape:breastHeight': (shape.breastHeight / 10) * s,
     'shape:breastDepth': (shape.breastDepth / 10) * s,

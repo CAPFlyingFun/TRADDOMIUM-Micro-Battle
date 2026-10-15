@@ -35,7 +35,7 @@ import { measureHuman } from '../actor/humanSkeleton';
 import type { AppScene, FrameInfo, SceneContext, SceneFactory } from '../app/Scene';
 import { assets } from '../assets/assets';
 import { release } from '../tombs/LabPeople';
-import { BODY_CONTROLS, controlLine, defaultBodyShape, resetControl, setControl, type BodyControl, type BodyShape } from '../actor/bodyShape';
+import { BODY_CONTROLS, BREAST_DIMENSIONS, controlLine, defaultBodyShape, resetControl, setControl, setLinkedControl, type BodyControl, type BodyShape } from '../actor/bodyShape';
 import { applyShapeFields, liftShapeFields, type ShapeFields } from '../view/bodyShapeView';
 import { HumanRig, findSkinnedMesh } from '../view/HumanRig';
 import { UNITS_PER_METRE } from '../world/dem';
@@ -162,6 +162,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let pose: SarahLabPose = 'stand';
   /** 0 standing, 1 fully seated: how far the thighs have taken over the bump's tilt (`effectiveTiltDeg`). */
   let seated = 0;
+  /** Breast dimensions moved together, as by an aspect-ratio lock: a flag only, never a value. */
+  const linked = new Set<BodyControl>();
   let bump = 100;
   let curl = 0;
   // the ARMS slider: how far T-POSE raises the arms, and which (Joshua, 2026-10-15)
@@ -232,6 +234,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       b.style.background = on ? 'rgba(212,168,83,0.92)' : 'rgba(16,20,26,0.72)';
       b.style.color = on ? '#15110a' : '#e8e2d8';
     };
+    for (const k of BREAST_DIMENSIONS) lit(buttons[`link-${k}`], linked.has(k));
+    if (buttons.linkAll) { const all = BREAST_DIMENSIONS.every((k) => linked.has(k)); buttons.linkAll.textContent = all ? 'UNLINK W·H·D' : 'LINK W·H·D'; lit(buttons.linkAll, all); }
     lit(buttons.stand, pose === 'stand');
     lit(buttons.walk, pose === 'walk');
     lit(buttons.sit, pose === 'sit');
@@ -426,15 +430,28 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         const reset = btn('↺', `${SARAH_LAB_ACTION.bodyReset}${c.key}`, () => setBody(resetControl(body, c.key)));
         reset.title = `reset ${c.label.toLowerCase()} to the approved value`;
         reset.style.padding = '2px 8px'; reset.style.fontSize = '12px';
-        line.append(label, reset);
+        if (BREAST_DIMENSIONS.includes(c.key)) {
+          // the lock: linking changes nothing on her; it decides what the next move carries with it
+          const link = btn('LINK', `${SARAH_LAB_ACTION.bodyLink}${c.key}`, () => { if (linked.has(c.key)) linked.delete(c.key); else linked.add(c.key); });
+          link.title = `move ${c.label.toLowerCase()} together with the other linked dimensions, keeping their proportions`;
+          link.style.padding = '2px 6px'; link.style.fontSize = '10px';
+          buttons[`link-${c.key}`] = link;
+          const pair = document.createElement('span'); pair.style.cssText = 'display:flex;gap:4px';
+          pair.append(link, reset);
+          line.append(label, pair);
+        } else line.append(label, reset);
         const input = document.createElement('input');
         input.type = 'range'; input.min = String(c.min); input.max = String(c.max); input.step = String(c.step); input.value = String(body[c.key]);
         input.style.cssText = 'width:100%;accent-color:#d4a853;height:24px';
-        input.addEventListener('input', () => setBody(setControl(body, c.key, Number(input.value))));
+        input.addEventListener('input', () => setBody(linked.has(c.key) ? setLinkedControl(body, c.key, Number(input.value), linked) : setControl(body, c.key, Number(input.value))));
         bodyInputs.set(c.key, input);
         box.append(line, input);
       }
       if (group === 'breasts') {
+        const linkAll = btn('LINK W·H·D', SARAH_LAB_ACTION.bodyLinkAll, () => { const all = BREAST_DIMENSIONS.every((k) => linked.has(k)); for (const k of BREAST_DIMENSIONS) if (all) linked.delete(k); else linked.add(k); });
+        linkAll.style.padding = '6px 8px'; linkAll.style.fontSize = '11px'; linkAll.style.marginTop = '6px'; linkAll.style.marginRight = '6px';
+        buttons.linkAll = linkAll;
+        box.appendChild(linkAll);
         const all = btn('RESET ALL SHAPE', SARAH_LAB_ACTION.bodyResetAll, () => setBody(defaultBodyShape()));
         all.style.padding = '6px 8px'; all.style.fontSize = '11px'; all.style.marginTop = '6px';
         box.appendChild(all);

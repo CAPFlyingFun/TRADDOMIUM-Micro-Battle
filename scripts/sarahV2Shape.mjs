@@ -50,7 +50,7 @@ import { BREAST_DEPTH_M, BREAST_REACH_M, BREAST_HOLD_FROM, BREAST_HOLD_TO, BREAS
 export const SHAPE_UNITS = Object.freeze({
   bellyHeightUp: '2 cm up at 100%', bellyHeightDown: '2 cm down at 100%', bellyHeightUp150: '2 cm up at 150%', bellyHeightDown150: '2 cm down at 150%', bellyHeightUp200: '2 cm up at 200%', bellyHeightDown200: '2 cm down at 200%',
   bellyWidth: '10%', bellyDepth: '10%', bellyUpper: '10%', bellyLower: '10%',
-  breastGrowMore: 'one breastGrow unit past 1.55x, kept off the midline', breastWidth: '10%', breastHeight: '10%', breastDepth: '10%', breastPosition: '1 cm', breastDroop: '5°', breastUpper: '10%', breastLower: '10%',
+  breastGrowMore: 'one breastGrow unit past 1.55x, kept off the midline', breastSpacingOut: '1 cm apart round her chest', breastSpacingIn: '1 cm closer, held off the midline', breastWidth: '10%', breastHeight: '10%', breastDepth: '10%', breastPosition: '1 cm', breastDroop: '5°', breastUpper: '10%', breastLower: '10%',
 });
 export const STAMP = '2026-10-15 body-shape fields';
 /** Passes of averaging along her skin each field is smoothed with. */
@@ -70,7 +70,9 @@ const HEIGHT_EDGE_M = 0.1;
 /** ...and over this much at the bottom, where the bump hangs over her groin and thighs. */
 const HEIGHT_EDGE_LOW_M = 0.17;
 /** Fields that carry the whole breast spread past its edge by this many rings of her skin. */
-const WIDE_PASSES = Object.freeze({ breastPosition: 30, breastDroop: 20 });
+const WIDE_PASSES = Object.freeze({ breastPosition: 30, breastDroop: 20, breastSpacingOut: 30, breastSpacingIn: 30, breastHeight: 20, breastWidth: 20 });
+/** The upright axis the breasts are turned about for spacing, this far behind the chest wall, metres. */
+const SPACING_AXIS_DEPTH_M = 0.1;
 /** Passes each field's normal change is smoothed with. */
 const NORMAL_SMOOTH_PASSES = 20;
 
@@ -226,7 +228,7 @@ export async function sarahV2Shape(src, dst = src, { log = console.log } = {}) {
     }
 
     // ---- the breasts' fields, on her own 0% breast
-    const bw = new Float32Array(n * 3), bh = new Float32Array(n * 3), bd = new Float32Array(n * 3), bp = new Float32Array(n * 3), bdr = new Float32Array(n * 3), bu = new Float32Array(n * 3), blo = new Float32Array(n * 3);
+    const bsp = new Float32Array(n * 3), bw = new Float32Array(n * 3), bh = new Float32Array(n * 3), bd = new Float32Array(n * 3), bp = new Float32Array(n * 3), bdr = new Float32Array(n * 3), bu = new Float32Array(n * 3), blo = new Float32Array(n * 3);
     const wgtAll = new Float32Array(n);
     for (const sg of [1, -1]) {
       let tip = -1;
@@ -242,11 +244,23 @@ export async function sarahV2Shape(src, dst = src, { log = console.log } = {}) {
         const wgt = (1 - smooth(BREAST_HOLD_FROM, BREAST_HOLD_TO, r)) * smooth(bz, bz + 0.04, z) * (1 - smooth(0.002, 0.012, dl(i))) * (1 - smooth(0.02, 0.15, armShare(i)));
         if (!(wgt > 0)) continue;
         wgtAll[i] = wgt;
-        const inward = (x - c[0]) * sg < 0 ? smooth(BREAST_MIDLINE_M * 0.25, BREAST_MIDLINE_M, Math.abs(x)) : 1;
+        // the inner side does not grow toward her midline past a few centimetres from it: at
+        // +25% on a 2.0x bust the two pressed flat against each other with the narrower guard
+        const inward = (x - c[0]) * sg < 0 ? smooth(BREAST_MIDLINE_M * 0.5, 0.06, Math.abs(x)) : 1;
         bw.set([0.1 * (x - c[0]) * wgt * inward, 0, 0], i * 3);
         bh.set([0, 0.1 * (y - c[1]) * wgt, 0], i * 3);
         bd.set([0, 0, 0.1 * (z - bz) * wgt], i * 3);
         bp.set([0, 0.01 * wgt, 0], i * 3);
+        // spacing: the breast carried 1 cm round her chest, away from her middle. Turned about
+        // an upright axis inside her ribcage (`SPACING_AXIS_DEPTH_M` behind the chest wall),
+        // so it follows the chest's curve back toward her side instead of sliding off it in a
+        // straight line; anything that would move toward her midline near it is held, so at
+        // a negative spacing the two meet in the cleavage instead of passing through.
+        {
+          const az = bz - SPACING_AXIS_DEPTH_M, R = Math.hypot(c[0], bz + BREAST_DEPTH_M / 2 - az), th = (sg * 0.01) / R; // 1 cm at the middle of the breast
+          const rx = x * Math.cos(th) + (z - az) * Math.sin(th) - x, rz = -x * Math.sin(th) + (z - az) * Math.cos(th) - (z - az);
+          bsp.set([rx * wgt, 0, rz * wgt], i * 3);
+        }
         // turned down about its top: the front drops, the top holds
         const dy = y - pivot[0], dz = z - pivot[1], cs = Math.cos(droop), sn = Math.sin(droop);
         bdr.set([0, (dy * cs - dz * sn - dy) * wgt, (dy * sn + dz * cs - dz) * wgt], i * 3);
@@ -291,7 +305,14 @@ export async function sarahV2Shape(src, dst = src, { log = console.log } = {}) {
         more.set([dx * inward, G[i * 3 + 1], G[i * 3 + 2]], i * 3);
       }
     }
-    const fields = { ...heightFields, breastGrowMore: more, bellyWidth: width, bellyDepth: depth, bellyUpper: upper, bellyLower: lower, breastWidth: bw, breastHeight: bh, breastDepth: bd, breastPosition: bp, breastDroop: bdr, breastUpper: bu, breastLower: blo };
+    // spacing closer: the same turn the other way, except that nothing is carried toward her
+    // midline once it is near it, so the breasts meet in the cleavage rather than cross
+    const bspIn = new Float32Array(n * 3);
+    for (let i = 0; i < n; i += 1) {
+      const x = P[i * 3], dx = -bsp[i * 3];
+      bspIn.set([dx * (dx * Math.sign(x) < 0 ? smooth(BREAST_MIDLINE_M * 0.5, 0.06, Math.abs(x)) : 1), -bsp[i * 3 + 1], -bsp[i * 3 + 2]], i * 3);
+    }
+    const fields = { ...heightFields, breastGrowMore: more, breastSpacingIn: bspIn, bellyWidth: width, bellyDepth: depth, bellyUpper: upper, bellyLower: lower, breastSpacingOut: bsp, breastWidth: bw, breastHeight: bh, breastDepth: bd, breastPosition: bp, breastDroop: bdr, breastUpper: bu, breastLower: blo };
     for (const [name, raw] of Object.entries(fields)) {
       const f = finish(raw, WIDE_PASSES[name] ?? 0);
       // the arm never moves with the chest

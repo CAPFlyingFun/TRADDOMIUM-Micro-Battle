@@ -116,7 +116,24 @@ async function main() {
       await page.click('[data-action="sarahlab:sit"]'); await page.waitForTimeout(1200);
       check(/seated 5\.0°/.test(await page.textContent('[data-field="sarahlab-body-bellyTilt"]')), 'seated, the tilt line names the seated 5°');
       await shot(page, 'sarahlab-body-shaped-sit.png', 'BODY SHAPED SEATED');
+      // LINK: an aspect-ratio lock on width, height and depth (Joshua, 2026-10-15)
       await page.click('[data-action="sarahlab:body-reset-all"]'); await page.click('[data-action="sarahlab:stand"]'); await page.waitForTimeout(1200);
+      const lines = async () => Promise.all(['breastWidth', 'breastHeight', 'breastDepth'].map((k) => page.textContent(`[data-field="sarahlab-body-${k}"]`)));
+      for (const [k, v] of [['breastWidth', 15], ['breastHeight', -5], ['breastDepth', 10]]) await slide(k, v);
+      const before = await lines();
+      await shot(page, 'sarahlab-link-independent.png', 'W +15 H -5 D +10, independent');
+      await page.click('[data-action="sarahlab:body-link-all"]'); await page.waitForTimeout(400);
+      check(JSON.stringify(await lines()) === JSON.stringify(before), `linking changes no value: ${before.join(' | ')}`);
+      await shot(page, 'sarahlab-link-linked.png', 'the same values, linked');
+      await slide('breastWidth', 25);
+      const after = await lines();
+      check(/WIDTH · \+25%/.test(after[0]) && /HEIGHT · \+3\.3%/.test(after[1]) && /DEPTH · \+19\.6%/.test(after[2]), `linked, width to +25 carries the others by the same ratio: ${after.join(' | ')}`);
+      await shot(page, 'sarahlab-link-moved.png', 'linked, width moved to +25');
+      await page.click('[data-action="sarahlab:body-link:breastDepth"]');
+      await slide('breastHeight', -10); // down: width, at the top of its range, could not follow up
+      const part = await lines();
+      check(/DEPTH · \+19\.6%/.test(part[2]) && !/WIDTH · \+25%/.test(part[0]), `depth unlinked stays put while width follows height: ${part.join(' | ')}`);
+      await page.click('[data-action="sarahlab:body-reset-all"]'); await page.waitForTimeout(1200);
       await shot(page, 'sarahlab-body-reset.png', 'BODY RESET');
       check(/HEIGHT · 0\.0 cm \(approved\)/.test(await page.textContent('[data-field="sarahlab-body-bellyHeight"]')), 'RESET ALL SHAPE puts height back to the approved value');
       check(errors.length === 0, errors.length ? `no console errors:\n${errors.join('\n')}` : 'no console errors');

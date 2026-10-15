@@ -3,7 +3,7 @@ import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { MeshoptDecoder } from 'meshoptimizer';
 import {
-  BODY_CONTROLS, clampShape, controlLine, defaultBodyShape, isDefaultShape, lerpShape, parseShape, resetControl, serializeShape, setControl, variedShape,
+  BODY_CONTROLS, BREAST_DIMENSIONS, setLinkedControl, clampShape, controlLine, defaultBodyShape, isDefaultShape, lerpShape, parseShape, resetControl, serializeShape, setControl, variedShape,
 } from '../src/actor/bodyShape';
 import {
   BELLY_LOWER_SCALE, BREAST_MANUAL_MAX_VOLUME, bustVolume, breastVolumeRatio, breastWeightsForShape, BREAST_GROW_TARGET, BELLY_SHAPE_SCALE, BELLY_HEIGHT_END_CM, bellyHeightWeights, bellyMotionWeights, bodyShapeFieldWeights, effectiveTiltDeg, restingBellySpring,
@@ -60,6 +60,39 @@ describe('a body shape, as numbers', () => {
   it('prints a control the way the HUD shows it', () => {
     expect(controlLine('bellyHeight', 1.5)).toBe('HEIGHT · +1.5 cm');
     expect(controlLine('bellyTilt', 20)).toBe('TILT · 20.0° (approved)');
+  });
+});
+
+describe('linked breast dimensions', () => {
+  const start = { ...defaultBodyShape(), breastWidth: 15, breastHeight: -5, breastDepth: 10 };
+  it('move together by one ratio, keeping the proportions they had when linked', () => {
+    const next = setLinkedControl(start, 'breastWidth', 25, BREAST_DIMENSIONS);
+    const r = 1.25 / 1.15;
+    expect(next.breastWidth).toBeCloseTo(25, 6);
+    expect(next.breastHeight).toBeCloseTo((0.95 * r - 1) * 100, 4);
+    expect(next.breastDepth).toBeCloseTo((1.1 * r - 1) * 100, 4);
+    expect((1 + next.breastDepth / 100) / (1 + next.breastHeight / 100)).toBeCloseTo(1.1 / 0.95, 6);
+    // and back again: the same body
+    const back = setLinkedControl(next, 'breastWidth', 15, BREAST_DIMENSIONS);
+    for (const k of BREAST_DIMENSIONS) expect(back[k]).toBeCloseTo(start[k], 6);
+  });
+  it('carry only what is linked, and leave everything else alone', () => {
+    const next = setLinkedControl(start, 'breastHeight', 3, ['breastWidth', 'breastHeight']);
+    expect(next.breastDepth).toBe(10);
+    expect(next.breastWidth).toBeCloseTo((1.15 * (1.03 / 0.95) - 1) * 100, 4);
+    expect(setLinkedControl(start, 'breastDepth', 0, ['breastWidth', 'breastHeight'])).toEqual({ ...start, breastDepth: 0 });
+    expect(setLinkedControl(start, 'breastWidth', 0, ['breastWidth'])).toEqual({ ...start, breastWidth: 0 });
+  });
+  it('stop every linked dimension at its range together, proportions intact', () => {
+    const next = setLinkedControl(start, 'breastHeight', 25, BREAST_DIMENSIONS);
+    expect(next.breastWidth).toBeCloseTo(25, 6); // width reached its end first
+    expect((1 + next.breastWidth / 100) / (1 + next.breastHeight / 100)).toBeCloseTo(1.15 / 0.95, 6);
+    for (const k of BREAST_DIMENSIONS) { expect(next[k]).toBeLessThanOrEqual(25); expect(next[k]).toBeGreaterThanOrEqual(-25); }
+  });
+  it('spacing is two fields, apart and together', () => {
+    expect(bodyShapeFieldWeights({ ...defaultBodyShape(), breastSpacing: 1.2 }, 100)['shape:breastSpacingOut']).toBeCloseTo(1.2);
+    expect(bodyShapeFieldWeights({ ...defaultBodyShape(), breastSpacing: -1.5 }, 100)['shape:breastSpacingIn']).toBeCloseTo(1.5);
+    expect(bodyShapeFieldWeights({ ...defaultBodyShape(), breastSpacing: -1.5 }, 100)['shape:breastSpacingOut']).toBe(0);
   });
 });
 
