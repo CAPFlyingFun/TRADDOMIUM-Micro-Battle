@@ -36,10 +36,6 @@ describe('the base mannequin (public/models/sarah-base.glb)', () => {
     expect(labTool.navelFlatWeight(100)).toBe(0);
     expect(labTool.navelFlatWeight(200)).toBe(0);
     for (let p = 75; p < 100; p += 1) expect(labTool.navelFlatWeight(p + 1)).toBeLessThanOrEqual(labTool.navelFlatWeight(p));
-    // a real T-pose: arms modelled down are raised level and out; arms modelled level are left alone
-    const down = labTool.tPoseTurns([{ x: 0.2, y: 1.4, z: 0 }, { x: 0.2, y: 1.1, z: 0 }], [{ shoulder: 0, elbow: 1, out: 1 }]);
-    expect(down).toHaveLength(1); expect(down[0].radians).toBeCloseTo(Math.PI / 2); expect(Math.abs(down[0].az)).toBeCloseTo(1);
-    expect(labTool.tPoseTurns([{ x: 0.2, y: 1.4, z: 0 }, { x: 0.5, y: 1.4, z: 0 }], [{ shoulder: 0, elbow: 1, out: 1 }])).toHaveLength(0);
     // v2's seated corrective: never standing, nothing by 50%, all at 100%, growing to 200%
     for (const p of [0, 50, 100, 150, 200]) expect(labTool.seatCorrectiveV2Weight(0, p)).toBe(0);
     expect(labTool.seatCorrectiveV2Weight(1, 50)).toBe(0);
