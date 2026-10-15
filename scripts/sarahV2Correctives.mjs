@@ -14,6 +14,7 @@
  *    around it, carried across, with a shallow dimple); the Lab holds it fully on to
  *    75% and lets it go by 100% (`navelFlatWeight`).
  *
+ * 1b. ONE SURFACE: each belly shape faired across its falloff ring, along the normal only.
  * 3. THE KNEES BEND WITHOUT CRUMPLING: thigh-to-shin weights eased across each knee.
  * 4. SEATED, THE BUMP RIDES OVER HER THIGHS: `bellySeatV2`, on only while she sits.
  *
@@ -33,6 +34,11 @@ export const CREASE_BELOW_M = 0.02;
 export const CREASE_ABOVE_M = 0.02;
 /** How much longer the fade grows per metre out from the centre line. */
 export const CREASE_WIDEN = 0.8;
+/** Depth (metres forward) past which a point is the bump's own underside, not groin or thigh: the groin and thighs measure 41 mm or less there, the bump 46 mm or more. */
+export const BUMP_DEPTH_M = [0.041, 0.048];
+/** The falloff ring faired in every belly shape (its move as a share of its largest: in, full, full, out) and the passes. */
+export const FAIR_RING = [0.02, 0.1, 0.5, 0.8];
+export const FAIR_PASSES = 60;
 /** Belly shapes the groin is held against. */
 export const BELLY_SHAPES = /^belly(\d+)?$|^bellyRefine$/;
 /** Her navel (the bake's `navel`), the radius the outie is settled within, the ring read for the surface, and the dimple left. */
@@ -89,19 +95,35 @@ export async function sarahV2Correctives(file, { log = console.log } = {}) {
     const P = read(prim.getAttribute('POSITION')), n = P.length / 3;
     for (let i = 0; i < n; i += 1) P.set(apply(T, [P[i * 3], P[i * 3 + 1], P[i * 3 + 2]], 1), i * 3);
     const keep = new Float32Array(n); for (let i = 0; i < n; i += 1) keep[i] = groinKeep(P[i * 3], P[i * 3 + 1]);
-    // 1. every belly shape faded under the groin crease (positions and normals alike)
+    // 1. every belly shape faired across its falloff ring, then faded under the groin
+    // crease (the bump's own underside, which overhangs the pubis, is spared by its
+    // depth), (its shading faired and faded alike)
+    const L = read(prim.getAttribute('POSITION')), idx = prim.getIndices().getArray();
+    const wkey = new Map(), id = new Int32Array(n); for (let i = 0; i < n; i += 1) { const k = `${L[i * 3].toFixed(6)},${L[i * 3 + 1].toFixed(6)},${L[i * 3 + 2].toFixed(6)}`; if (!wkey.has(k)) wkey.set(k, wkey.size); id[i] = wkey.get(k); }
+    const NB = read(prim.getAttribute('NORMAL')), baseN = []; for (let i = 0; i < n; i += 1) { const u = id[i]; if (!baseN[u]) { const l = Math.hypot(NB[i * 3], NB[i * 3 + 1], NB[i * 3 + 2]) || 1; baseN[u] = [NB[i * 3] / l, NB[i * 3 + 1] / l, NB[i * 3 + 2] / l]; } }
+    const U = wkey.size, nb = Array.from({ length: U }, () => new Set()); for (let t = 0; t < idx.length; t += 3) for (const [a, b] of [[idx[t], idx[t + 1]], [idx[t + 1], idx[t + 2]], [idx[t + 2], idx[t]]]) { nb[id[a]].add(id[b]); nb[id[b]].add(id[a]); }
+    for (let i = 0; i < n; i += 1) keep[i] = Math.max(keep[i], smooth(BUMP_DEPTH_M[0], BUMP_DEPTH_M[1], P[i * 3 + 2]) * smooth(0.79, 0.81, P[i * 3 + 1]) * (1 - smooth(0.08, 0.11, Math.abs(P[i * 3])))); // the bump's underside lies within 9 cm of the midline; the flanks sit at that depth too and are not it
     names.forEach((name, t) => {
       if (!BELLY_SHAPES.test(name)) return;
-      const target = prim.listTargets()[t];
-      for (const sem of target.listSemantics()) {
-        const A = target.getAttribute(sem), d = read(A);
-        for (let i = 0; i < n; i += 1) {
-          if (keep[i] >= 1) continue;
-          if (sem === 'POSITION') { const m = Math.hypot(d[i * 3], d[i * 3 + 1], d[i * 3 + 2]); const s = apply(T, [d[i * 3], d[i * 3 + 1], d[i * 3 + 2]], 0); worst = Math.max(worst, Math.hypot(...s) * (1 - keep[i])); if (m) held += 1; }
-          for (let c = 0; c < 3; c += 1) d[i * 3 + c] *= keep[i];
-        }
-        A.setArray(d).setNormalized(false);
-      }
+      const target = prim.listTargets()[t], A = target.getAttribute('POSITION'), d0 = read(A);
+      // the falloff ring: where the move is between a few percent and most of its largest
+      let w = new Float32Array(U * 3), big = 0; for (let i = 0; i < n; i += 1) { w.set(d0.subarray(i * 3, i * 3 + 3), id[i] * 3); }
+      for (let u = 0; u < U; u += 1) big = Math.max(big, Math.hypot(w[u * 3], w[u * 3 + 1], w[u * 3 + 2]));
+      const w0 = new Float32Array(w);
+      const rate = new Float32Array(U); for (let u = 0; u < U; u += 1) { const r = Math.hypot(w[u * 3], w[u * 3 + 1], w[u * 3 + 2]) / (big || 1); rate[u] = smooth(FAIR_RING[0], FAIR_RING[1], r) * (1 - smooth(FAIR_RING[2], FAIR_RING[3], r)); }
+      for (let pass = 0; pass < FAIR_PASSES; pass += 1) { const next = new Float32Array(w); for (let u = 0; u < U; u += 1) { if (!rate[u] || !nb[u].size) continue; const a = [0, 0, 0]; for (const v of nb[u]) for (let e = 0; e < 3; e += 1) a[e] += w[v * 3 + e]; const f = 0.5 * rate[u]; for (let e = 0; e < 3; e += 1) next[u * 3 + e] = w[u * 3 + e] * (1 - f) + f * a[e] / nb[u].size; } w = next; }
+      // only the fairing's move ALONG her surface normal is kept: sliding points along the
+      // surface folded the fine triangles over her ribs into hairline creases
+      for (let u = 0; u < U; u += 1) { if (!rate[u]) continue; const nn = baseN[u], c = [0, 1, 2].map((e) => w[u * 3 + e] - w0[u * 3 + e]), along = c[0] * nn[0] + c[1] * nn[1] + c[2] * nn[2]; for (let e = 0; e < 3; e += 1) w[u * 3 + e] = w0[u * 3 + e] + along * nn[e]; }
+      const d = new Float32Array(n * 3);
+      for (let i = 0; i < n; i += 1) { const u = id[i]; for (let e = 0; e < 3; e += 1) d[i * 3 + e] = w[u * 3 + e] * keep[i]; if (keep[i] < 1 && Math.hypot(d0[i * 3], d0[i * 3 + 1], d0[i * 3 + 2])) { held += 1; worst = Math.max(worst, Math.hypot(...apply(T, [d0[i * 3], d0[i * 3 + 1], d0[i * 3 + 2]], 0)) * (1 - keep[i])); } }
+      A.setArray(d).setNormalized(false);
+      // its shading: the baked normal deltas faired and faded exactly as the move was
+      const NA = target.getAttribute('NORMAL'); if (!NA) return;
+      const nd0 = read(NA); let wn = new Float32Array(U * 3); for (let i = 0; i < n; i += 1) wn.set(nd0.subarray(i * 3, i * 3 + 3), id[i] * 3);
+      for (let pass = 0; pass < FAIR_PASSES; pass += 1) { const next = new Float32Array(wn); for (let u = 0; u < U; u += 1) { if (!rate[u] || !nb[u].size) continue; const a = [0, 0, 0]; for (const v of nb[u]) for (let e = 0; e < 3; e += 1) a[e] += wn[v * 3 + e]; const f = 0.5 * rate[u]; for (let e = 0; e < 3; e += 1) next[u * 3 + e] = wn[u * 3 + e] * (1 - f) + f * a[e] / nb[u].size; } wn = next; }
+      const nd = new Float32Array(n * 3); for (let i = 0; i < n; i += 1) for (let e = 0; e < 3; e += 1) nd[i * 3 + e] = wn[id[i] * 3 + e] * keep[i];
+      NA.setArray(nd).setNormalized(false);
     });
     // 2. navelFlat: the outie settled onto the surface its ring describes
     const ring = [];
@@ -188,7 +210,7 @@ export async function sarahV2Correctives(file, { log = console.log } = {}) {
   }
   names.push('navelFlat');
   names.push('bellySeatV2');
-  mesh.setExtras({ ...extras, targetNames: names, v2Correctives: '2026-10-14 groin+navel+knees+seat' });
+  mesh.setExtras({ ...extras, targetNames: names, v2Correctives: '2026-10-14 fair+groin+navel+knees+seat' });
   // every primitive's weights for the new target, so the dictionary lines up
   const was = mesh.getWeights() ?? [];
   mesh.setWeights([...(was.length === names.length - 2 ? was : new Array(names.length - 2).fill(0)), 0, 0]);
