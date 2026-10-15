@@ -39,7 +39,7 @@ import { HumanRig, findSkinnedMesh } from '../view/HumanRig';
 import { UNITS_PER_METRE } from '../world/dem';
 import {
   BELLY_MOTION, BELLY_TARGET, BREAST_TARGETS, BUMP_MAX_PERCENT, GARMENTS, OUTFITS, outfitLine, modelLine, refineLine, refineWeight, nextOutfit, wornGarments, coverMask, uncoveredSkinIndices, UNDER_TOP_GARMENT, BELLY_REFINE_TARGET, SEAT_TARGET, seatCorrectiveWeight, SARAH_LAB_MODELS, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID,
-  bellyMotionWeights, bellyWeights, breastBobWeight, breastWeights, navelWeights, NAVEL_FLAT_TARGET, navelFlatWeight, tPoseTurns, ARM_SIDES, armsLine, ARM_RAISE_TARGETS, armRaiseWeight, SEAT_V2_TARGET, seatCorrectiveV2Weight, fingerBend, THUMB_TO_PALM, bumpLine, fingersLine, restingBellySpring, statusLine, stepBellySpring, stepBreastSpring, walkBounceAccel,
+  bellyMotionWeights, bellyWeights, breastBobWeight, breastWeightsFor, BREAST_GROW_TARGET, settledSitFor, bellyUpperWeight, BELLY_UPPER_TARGET, navelWeights, NAVEL_FLAT_TARGET, navelFlatWeight, tPoseTurns, ARM_SIDES, armsLine, ARM_RAISE_TARGETS, armRaiseWeight, SEAT_V2_TARGET, seatCorrectiveV2Weight, fingerBend, THUMB_TO_PALM, bumpLine, fingersLine, restingBellySpring, statusLine, stepBellySpring, stepBreastSpring, walkBounceAccel,
   type Garment, type SarahLabPose,
 } from './sarahLabTool';
 
@@ -258,7 +258,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   function applyLook(): void {
     for (const mesh of skinned) {
       const dict = mesh.morphTargetDictionary, influences = mesh.morphTargetInfluences;
-      if (dict && influences) for (const [name, w] of Object.entries({ ...bellyWeights(bump), ...breastWeights(bump), ...navelWeights(bump), [NAVEL_FLAT_TARGET]: navelFlatWeight(bump), [BELLY_REFINE_TARGET]: refineWeight(refine, bump), [SEAT_TARGET]: seatCorrectiveWeight(pose === 'sit' ? 1 : 0, bump), [SEAT_V2_TARGET]: seatCorrectiveV2Weight(pose === 'sit' ? 1 : 0, bump), ...armRaiseWeights() })) {
+      if (dict && influences) for (const [name, w] of Object.entries({ ...bellyWeights(bump), ...breastWeightsFor(bump, dict[BREAST_GROW_TARGET] !== undefined), [BELLY_UPPER_TARGET]: bellyUpperWeight(bump), ...navelWeights(bump), [NAVEL_FLAT_TARGET]: navelFlatWeight(bump), [BELLY_REFINE_TARGET]: refineWeight(refine, bump), [SEAT_TARGET]: seatCorrectiveWeight(pose === 'sit' ? 1 : 0, bump), [SEAT_V2_TARGET]: seatCorrectiveV2Weight(pose === 'sit' ? 1 : 0, bump), ...armRaiseWeights() })) {
         const at = dict[name];
         if (at !== undefined) influences[at] = w;
       }
@@ -412,7 +412,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   function turnsFor(): readonly JointTurn[] {
     if (!rig || !measure) return [];
     let base: readonly JointTurn[];
-    if (pose === 'sit') base = poseSeated(measure, rig.bind, { style: 'sit', seconds, posture: 'pregnant', bump: bump / 100 }, poseOut);
+    if (pose === 'sit') base = poseSeated(measure, rig.bind, { style: 'sit', seconds, posture: 'pregnant', bump: bump / 100, settled: settledSitFor(SARAH_LAB_MODELS[modelIndex].id) }, poseOut);
     else {
       const stance = pose === 'walk' ? 'walk' : 'stand';
       // the stride is in bind units, `bindScale` of them to the metre

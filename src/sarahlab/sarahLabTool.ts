@@ -270,6 +270,57 @@ export function breastWeights(bumpPercent: number): Record<string, number> {
   };
 }
 
+/**
+ * THE BUST GROWS THE WAY THE BELLY DOES (Joshua, 2026-10-15: "make the breasts look more
+ * rounded from the front... do the breasts similar to the belly and how it gets bigger and
+ * smaller"). `breastGrow` (scripts/sarahV2Refine.mjs) is her own 0% breast scaled evenly in
+ * every direction to BREAST_GROW_MAX_VOLUME; a blend of one even scaling is an even scaling,
+ * so each size is her round 0% shape, at the same nominal volume targets as before
+ * (`breastVolumeRatio`). A model that carries it uses it in place of `breast100`; one that
+ * does not (v1) keeps `breast100` exactly.
+ */
+export const BREAST_GROW_TARGET = 'breastGrow';
+
+/**
+ * Sarah v2 sits the settled way (`SeatedPose.settled`, Joshua, 2026-10-15: "refine the seated
+ * pose so it still looks natural and comfortable with the belly"); v1 keeps the sit it was
+ * tuned with.
+ */
+export function settledSitFor(modelId: string): boolean {
+  return modelId.startsWith('v2');
+}
+export const BREAST_GROW_MAX_VOLUME = 1.55;
+export function breastGrowWeight(bumpPercent: number): number {
+  return (Math.cbrt(breastVolumeRatio(bumpPercent)) - 1) / (Math.cbrt(BREAST_GROW_MAX_VOLUME) - 1);
+}
+export function breastWeightsFor(bumpPercent: number, grows: boolean): Record<string, number> {
+  if (!grows) return breastWeights(bumpPercent);
+  return { [BREAST_TARGETS.small]: 0, [BREAST_TARGETS.big]: 0, [BREAST_GROW_TARGET]: breastGrowWeight(bumpPercent) };
+}
+
+/**
+ * THE UPPER BELLY, A LITTLE TALLER AND FULLER (Joshua, 2026-10-15: "from around the belly
+ * button upward, by about 5% more height/fullness... keep this subtle"). `bellyUpper`
+ * (scripts/sarahV2Refine.mjs) is written on the 100% bump; each size takes it by how big its
+ * own upper bump is against 100%'s, crossfaded between the keys the way `bellyWeights` is.
+ * Measured on v2 by the script and stamped in the file (`bellyUpperScale`); the test holds
+ * this table to the file.
+ */
+export const BELLY_UPPER_TARGET = 'bellyUpper';
+export const BELLY_UPPER_SCALE: readonly (readonly [number, number])[] = [
+  [2, 1.649], [1.5, 1.32], [1, 1], [0.75, 0.513], [0.6, 0.306], [0.5, 0.169], [0.3, 0.042], [0.25, 0.01], [0, 0],
+];
+export function bellyUpperWeight(bumpPercent: number): number {
+  const b = Math.min(BUMP_MAX_PERCENT, Math.max(0, Number.isFinite(bumpPercent) ? bumpPercent : 100)) / 100;
+  for (let i = 0; i < BELLY_UPPER_SCALE.length - 1; i += 1) {
+    const [s0, r0] = BELLY_UPPER_SCALE[i], [s1, r1] = BELLY_UPPER_SCALE[i + 1];
+    if (b > s0 || b < s1) continue;
+    const f = (s0 - b) / (s0 - s1);
+    return r0 * (1 - f) + r1 * f;
+  }
+  return 0;
+}
+
 /** 0.075 mm per percent, capped at the baked 10.5 mm projection (140%). */
 export function navelWeights(bumpPercent: number): Record<string, number> {
   const p=Math.min(BUMP_MAX_PERCENT,Math.max(0,Number.isFinite(bumpPercent)?bumpPercent:100));

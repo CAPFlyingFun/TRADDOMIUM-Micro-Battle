@@ -468,3 +468,72 @@ describe('the pregnant sit opens for a bigger belly', () => {
     expect(sit(2)).not.toBe(sit(1));
   }, 60000);
 });
+
+describe("Sarah v2's refinement (scripts/sarahV2Refine.mjs, 2026-10-15)", () => {
+  it('carries the upper-belly and breast-growth shapes, and the Lab weighs the upper belly by the ratios stamped in the file', async () => {
+    await MeshoptDecoder.ready;
+    const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'meshopt.decoder': MeshoptDecoder });
+    const doc = await io.read(`public/${labTool.SARAH_V2_ARMS_MODEL}`);
+    const extras = doc.getRoot().listMeshes()[0].getExtras() as { targetNames: string[]; bellyUpperScale: [number, number][] };
+    expect(extras.targetNames).toContain(labTool.BELLY_UPPER_TARGET);
+    expect(extras.targetNames).toContain(labTool.BREAST_GROW_TARGET);
+    expect(extras.bellyUpperScale).toEqual(labTool.BELLY_UPPER_SCALE.map(([s, r]) => [s, r]));
+    // the approved v2 itself is untouched
+    const approved = await io.read(`public/${labTool.SARAH_V2_MODEL}`);
+    expect((approved.getRoot().listMeshes()[0].getExtras() as { targetNames: string[] }).targetNames).not.toContain(labTool.BREAST_GROW_TARGET);
+  }, 60000);
+
+  it('grows the upper belly with each size: nothing flat, all of it at 100%, more past it', () => {
+    expect(labTool.bellyUpperWeight(0)).toBe(0);
+    expect(labTool.bellyUpperWeight(100)).toBe(1);
+    expect(labTool.bellyUpperWeight(200)).toBeCloseTo(1.649);
+    expect(labTool.bellyUpperWeight(125)).toBeCloseTo((1 + 1.32) / 2);
+    for (let p = 0; p < 200; p += 5) expect(labTool.bellyUpperWeight(p + 5)).toBeGreaterThanOrEqual(labTool.bellyUpperWeight(p));
+  });
+
+  it('grows the bust evenly to the same volume targets, and only on a model that carries the shape', () => {
+    expect(labTool.breastGrowWeight(0)).toBe(0);
+    expect(labTool.breastGrowWeight(200)).toBeCloseTo(1);
+    // an even scaling by (1 + w·(∛1.55 − 1)) holds the nominal volume target at every size
+    for (const p of [25, 50, 100, 150, 200]) {
+      const s = 1 + labTool.breastGrowWeight(p) * (Math.cbrt(labTool.BREAST_GROW_MAX_VOLUME) - 1);
+      expect(s ** 3).toBeCloseTo(labTool.breastVolumeRatio(p), 6);
+    }
+    expect(labTool.breastWeightsFor(100, false)).toEqual(labTool.breastWeights(100));
+    expect(labTool.breastWeightsFor(100, true)).toEqual({ breast0: 0, breast100: 0, breastGrow: labTool.breastGrowWeight(100) });
+  });
+
+  it('sits v2 the settled way and leaves v1 its own sit', () => {
+    expect(labTool.settledSitFor('v1')).toBe(false);
+    expect(labTool.settledSitFor('v2')).toBe(true);
+    expect(labTool.settledSitFor('v2-arms')).toBe(true);
+  });
+});
+
+describe('the settled pregnant sit (Sarah v2)', () => {
+  it('parts the knees by the belly, brings the feet in under them, and leaves the older sit exactly', async () => {
+    const { poseSeated, posedJoints } = await import('../src/actor/humanSeated');
+    const { measureHuman } = await import('../src/actor/humanSkeleton');
+    await MeshoptDecoder.ready;
+    const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'meshopt.decoder': MeshoptDecoder });
+    const doc = await io.read(`public/${labTool.SARAH_V2_ARMS_MODEL}`);
+    const joints = doc.getRoot().listSkins()[0].listJoints();
+    const bind = joints.map((j) => { const m = j.getWorldMatrix(); const p = j.getParentNode(); return { x: m[12], y: m[13], z: m[14], parent: p ? joints.indexOf(p as never) : -1 }; });
+    const me = measureHuman(bind as never), J = me.joints;
+    const sit = (bump: number, settled?: boolean) => poseSeated(me, bind as never, { style: 'sit', seconds: 0, posture: 'pregnant', bump, settled }, []);
+    // not asking for it changes nothing
+    expect(JSON.stringify(sit(1, false))).toBe(JSON.stringify(sit(1)));
+    let lastKnees = 0;
+    for (const bump of [0, 1, 1.5, 2]) {
+      const P = posedJoints(bind as never, sit(bump, true));
+      const knees = Math.abs(P[J.kneeL][0] - P[J.kneeR][0]), feet = Math.abs(P[J.ankleL][0] - P[J.ankleR][0]);
+      // Joshua, 2026-10-15: "the feet could be closer together while the legs/knees are spread out more"
+      expect(feet).toBeLessThan(knees);
+      expect(knees).toBeGreaterThan(lastKnees);
+      lastKnees = knees;
+      // and never splayed past the older sit's
+      const O = posedJoints(bind as never, sit(bump));
+      expect(feet).toBeLessThan(Math.abs(O[J.ankleL][0] - O[J.ankleR][0]));
+    }
+  }, 60000);
+});

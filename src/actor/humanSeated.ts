@@ -92,6 +92,13 @@ export interface SeatedPose {
    * 200% will need some minor adjustments... legs/hips slightly more open").
    */
   readonly bump?: number;
+  /**
+   * The settled pregnant sit (Joshua, 2026-10-15, of Sarah v2: "refine the seated pose so it
+   * still looks natural and comfortable with the belly"): `PREGNANT_SIT_SETTLED` in place of
+   * `PREGNANT_SIT`. Only for `posture: 'pregnant'`; the owner chooses it per body, so a body
+   * tuned on the older sit (v1) keeps it exactly.
+   */
+  readonly settled?: boolean;
 }
 
 /** Every seated pose writes these sixteen joints, parent before child, every frame. */
@@ -229,6 +236,37 @@ const PREGNANT_SIT = {
    */
   bigSpread: 10 * DEG, bigThighDrop: 6 * DEG, bigRoll: 14 * DEG,
   arm: { down: 82 * DEG, forward: 28 * DEG, twist: 0, elbow: 24 * DEG, wristBend: -20 * DEG, wristTilt: 0, pronate: 170 * DEG } as ArmSpec,
+};
+
+/**
+ * THE SETTLED PREGNANT SIT: the pregnant sit eased into the chair. GAME TUNING, chosen from
+ * front, side and three-quarter renders of Sarah v2 at 0%, 100% and 200%:
+ *   - she leans back a little further (−7° at the spine) and the chest stays open, so the
+ *     bump's weight sits back over her pelvis rather than forward over her thighs;
+ *   - the arms are relaxed: upper arms hanging close by her sides, elbows bent, forearms
+ *     resting along the thighs with the hands palm-down at mid-thigh, not propped straight
+ *     onto the knees;
+ *   - the shins nearly plumb, feet under the knees rather than slid out in front;
+ *   - the knees parted by the belly's size (`kneeSpread`, about half the older sit's angle
+ *     with no bump), the feet brought in under them (`feetIn`) rather than splayed past
+ *     them, and the arms opening with the knees past 100% so the hands stay on the thighs.
+ */
+const PREGNANT_SIT_SETTLED = {
+  ...PREGNANT_SIT,
+  spine: -7 * DEG, chest: 1 * DEG, neck: 3 * DEG, shin: 3 * DEG,
+  /**
+   * The knees part by the belly's size, about half the older sit's angle with no bump and
+   * opening as it grows (Joshua, 2026-10-15: "I don't think the legs need to spread out so
+   * far, but maybe about half that angle... the feet could be closer together while the
+   * legs/knees are spread out more to accommodate the belly"): each thigh's swing out, by
+   * the slider over 100, between these stops.
+   */
+  kneeSpread: [[0, 7 * DEG], [1, 12 * DEG], [1.5, 15 * DEG], [2, 17 * DEG]] as readonly (readonly [number, number])[],
+  /** each thigh turned out about its own length so the feet come in under the parted knees, by the same stops */
+  feetIn: [[0, 3 * DEG], [1, 7 * DEG], [1.5, 9 * DEG], [2, 11 * DEG]] as readonly (readonly [number, number])[],
+  /** at twice full term each arm opens this much further, so the hands follow the parted knees out past the bump */
+  bigArmOut: 7 * DEG,
+  arm: { down: 81 * DEG, forward: 12 * DEG, twist: 0, elbow: 40 * DEG, wristBend: -8 * DEG, wristTilt: 0, pronate: 170 * DEG } as ArmSpec,
 };
 
 // ------------------------------------------------------------ the palms
@@ -371,9 +409,10 @@ export function poseSeated(
   }
 
   const pregnant = pose.style === 'sit' && pose.posture === 'pregnant';
-  write(out[0], j.spine, rx(pregnant ? PREGNANT_SIT.spine : st.spine));
-  write(out[1], j.chest, rx((pregnant ? PREGNANT_SIT.chest : st.chest) - breath));
-  write(out[2], j.neck, qMul(rz(roll * 0.6), rx(st.neck + neckFix + breath * 0.5)));
+  const ps = pregnant && pose.settled ? PREGNANT_SIT_SETTLED : PREGNANT_SIT;
+  write(out[0], j.spine, rx(pregnant ? ps.spine : st.spine));
+  write(out[1], j.chest, rx((pregnant ? ps.chest : st.chest) - breath));
+  write(out[2], j.neck, qMul(rz(roll * 0.6), rx(st.neck + neckFix + breath * 0.5 + (pregnant && pose.settled ? PREGNANT_SIT_SETTLED.neck : 0))));
   write(out[3], j.head, qMul(rz(roll * 0.4), rx(st.head)));
 
   // Arms. `s` is the direction the arm runs in the bind: +1 along +X.
@@ -381,7 +420,7 @@ export function poseSeated(
     // the pregnant sit was tuned on the toon Sarah, palms forward in her T: a rig whose
     // palms face elsewhere is turned back by the difference (bindPalmRoll). The other
     // arms were tuned on each rig as it is, Jack's palms-down included, and keep them.
-    const fix = a === PREGNANT_SIT.arm ? bindPalmRoll(bind, wrist) : 0;
+    const fix = pregnant && a !== CRADLE.over && a !== CRADLE.under && !(a === st.over || a === st.under) ? bindPalmRoll(bind, wrist) : 0;
     // Read right to left: twist about its own length, bring it down, then
     // pitch the lowered arm forward. The pitch is about X, not Y: `Ry`
     // swings a HORIZONTAL arm fore and aft, but by then the arm hangs, and
@@ -410,8 +449,9 @@ export function poseSeated(
     write(out[i + 2], wrist, inT(qMul(ry(-s * a.wristBend), rz(-s * a.wristTilt))));
   };
   // The right forearm over the left, the commoner fold (and either reads).
+  const openArm = pregnant && pose.settled ? { ...ps.arm, down: ps.arm.down - Math.min(1, Math.max(0, (pose.bump ?? 1) - 1)) * PREGNANT_SIT_SETTLED.bigArmOut } : ps.arm;
   const arms = pose.style === 'doze' && pose.arms === 'cradle' ? CRADLE
-    : pregnant ? { over: PREGNANT_SIT.arm, under: PREGNANT_SIT.arm } : st;
+    : pregnant ? { over: openArm, under: openArm } : st;
   arm(4, j.shoulderL, j.elbowL, j.wristL, L, arms.under);
   arm(7, j.shoulderR, j.elbowR, j.wristR, -L, arms.over);
 
@@ -422,12 +462,22 @@ export function poseSeated(
   // target, and the ankle undoes whatever the two left the foot tilted by.
   const lean = (a: number, b: number) => Math.atan2(-(bind[b].z - bind[a].z), -(bind[b].y - bind[a].y));
   const past = pregnant ? Math.min(1, Math.max(0, (pose.bump ?? 1) - 1)) : 0;
-  const thighTarget = pregnant ? PREGNANT_SIT.thigh - past * PREGNANT_SIT.bigThighDrop : THIGH_TARGET;
-  const spread = pregnant ? PREGNANT_SIT.spread + past * PREGNANT_SIT.bigSpread : THIGH_SPREAD;
-  const thighRoll = past * (pregnant ? PREGNANT_SIT.bigRoll : 0);
+  const thighTarget = pregnant ? ps.thigh - past * ps.bigThighDrop : THIGH_TARGET;
+  const settled = pregnant && pose.settled;
+  const stops = (table: readonly (readonly [number, number])[], b: number) => {
+    if (b <= table[0][0]) return table[0][1];
+    for (let k = 1; k < table.length; k += 1) if (b <= table[k][0]) { const [b0, v0] = table[k - 1], [b1, v1] = table[k]; return v0 + (v1 - v0) * (b - b0) / (b1 - b0); }
+    return table[table.length - 1][1];
+  };
+  const size = Math.min(2, Math.max(0, pose.bump ?? 1));
+  const spread = settled ? stops(PREGNANT_SIT_SETTLED.kneeSpread, size) : pregnant ? ps.spread + past * ps.bigSpread : THIGH_SPREAD;
+  // the settled sit turns the thighs the other way from the older sit's: out at the knee, so
+  // the feet come in under them
+  const thighRoll = settled ? -stops(PREGNANT_SIT_SETTLED.feetIn, size) : past * (pregnant ? ps.bigRoll : 0);
+  const shinTarget = pregnant && pose.settled ? PREGNANT_SIT_SETTLED.shin : SHIN_TARGET;
   const leg = (i: number, hip: number, knee: number, ankle: number, out_: number) => {
     const hipFlex = thighTarget + lean(hip, knee);
-    const kneeFlex = hipFlex - SHIN_TARGET - lean(knee, ankle);
+    const kneeFlex = hipFlex - shinTarget - lean(knee, ankle);
     // read right to left: turned out about the hanging thigh's own length, raised,
     // then swung out. The turn is the OPPOSITE sense to the swing: measured on the
     // posed body, the same sense turned the thighs IN and laid more of them over the
