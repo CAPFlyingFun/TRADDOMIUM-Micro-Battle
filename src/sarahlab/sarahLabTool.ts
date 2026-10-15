@@ -450,3 +450,28 @@ export function bellyMotionWeights(bumpPercent: number, tiltDeg: number, s: Bell
     [BELLY_MOTION.sway]: swing * (s.x / BELLY_MOTION.bobM),
   };
 }
+
+/**
+ * A REAL T-POSE FOR EITHER MASTER (Joshua, 2026-10-14: "make T-pose a real T-pose by
+ * rotating at the shoulders"). v1 is modelled in a T, so its bind pose already is one;
+ * v2 is modelled arms-down, so zeroing every turn left her standing. Each upper arm is
+ * turned at its shoulder, in the bind pose's world frame, from the direction it was
+ * modelled in to straight out to its side and level: about 90 degrees for v2, nothing for
+ * v1. v2's armpits follow a raised arm through their weights (sarahV2Correctives.mjs).
+ */
+export interface TPoseJoint { readonly x: number; readonly y: number; readonly z: number }
+export interface TPoseTurn { readonly joint: number; readonly ax: number; readonly ay: number; readonly az: number; readonly radians: number }
+export function tPoseTurns(bind: readonly TPoseJoint[], arms: readonly { shoulder: number; elbow: number; out: 1 | -1 }[]): TPoseTurn[] {
+  const turns: TPoseTurn[] = [];
+  for (const { shoulder, elbow, out } of arms) {
+    const s = bind[shoulder], e = bind[elbow];
+    if (!s || !e) continue;
+    const v = [e.x - s.x, e.y - s.y, e.z - s.z], l = Math.hypot(v[0], v[1], v[2]);
+    if (!l) continue;
+    const u = [v[0] / l, v[1] / l, v[2] / l], t = [out, 0, 0];
+    const c = [u[1] * t[2] - u[2] * t[1], u[2] * t[0] - u[0] * t[2], u[0] * t[1] - u[1] * t[0]], sin = Math.hypot(c[0], c[1], c[2]), cos = u[0] * t[0] + u[1] * t[1] + u[2] * t[2];
+    if (sin < 1e-6) continue;
+    turns.push({ joint: shoulder, ax: c[0] / sin, ay: c[1] / sin, az: c[2] / sin, radians: Math.atan2(sin, cos) });
+  }
+  return turns;
+}
