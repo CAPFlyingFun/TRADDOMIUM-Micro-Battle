@@ -8,6 +8,7 @@
  * So nothing here is the game's Sarah: the lab loads `models/sarah-base.glb`,
  * which no other scene reads.
  */
+import type { BodyShape } from '../actor/bodyShape';
 import type { DevTool } from '../devtools/DevTool';
 
 export const SARAH_LAB_SCENE_ID = 'lab:sarah';
@@ -22,6 +23,14 @@ export const SARAH_V2_MODEL = 'models/sarah-v2.glb';
  * her armpit weights along her skin and adds the raised-arm shapes armRaiseL/R.
  */
 export const SARAH_V2_ARMS_MODEL = 'models/sarah-v2-arms.glb';
+/**
+ * The approved v2-arms body with its BODY-SHAPE FIELDS (`scripts/sarahV2Shape.mjs`, Joshua,
+ * 2026-10-15): the same geometry and every approved shape, plus one field per body control,
+ * applied on the CPU by the Lab. A separate file, so the approved v2-arms stays exactly as
+ * it was beside it for comparison; with every control at its approved value it draws the
+ * same body.
+ */
+export const SARAH_V2_BODY_MODEL = 'models/sarah-v2-body.glb';
 
 /**
  * The models the lab can show, in the order MODEL cycles them (Joshua, 2026-10-13:
@@ -31,15 +40,17 @@ export const SARAH_LAB_MODELS = Object.freeze([
   Object.freeze({ id: 'v1', path: SARAH_BASE_MODEL }),
   Object.freeze({ id: 'v2', path: SARAH_V2_MODEL }),
   Object.freeze({ id: 'v2-arms', path: SARAH_V2_ARMS_MODEL }),
+  Object.freeze({ id: 'v2-body', path: SARAH_V2_BODY_MODEL }),
 ]);
 
 /**
  * THE LAB OPENS ON THE NEWEST v2 (Joshua, 2026-10-15: "the model I see online doesn't have
  * your fix of the belly, breasts, arms, and shoulder"). The fixes live in `v2-arms`, the
  * repaired asset beside the untouched approved files; opening on v1 hid them behind two
- * taps of MODEL. v1 and v2 stay one tap away for comparison.
+ * taps of MODEL. It now opens on `v2-body`, the same body with its shape fields, which
+ * draws exactly as v2-arms until a body control moves; v1, v2 and v2-arms stay on MODEL.
  */
-export const SARAH_LAB_DEFAULT_MODEL = SARAH_LAB_MODELS.findIndex((m) => m.id === 'v2-arms');
+export const SARAH_LAB_DEFAULT_MODEL = SARAH_LAB_MODELS.findIndex((m) => m.id === 'v2-body');
 
 export function modelLine(index: number): string {
   return `MODEL · ${SARAH_LAB_MODELS[((index % SARAH_LAB_MODELS.length) + SARAH_LAB_MODELS.length) % SARAH_LAB_MODELS.length].id}`;
@@ -72,6 +83,10 @@ export const SARAH_LAB_ACTION = Object.freeze({
   model: 'sarahlab:model',
   refine: 'sarahlab:refine',
   armSide: 'sarahlab:armside',
+  /** `${bodyReset}<control>` resets one body control; `${tiltPreset}<deg>` sets the belly tilt */
+  bodyReset: 'sarahlab:body-reset:',
+  bodyResetAll: 'sarahlab:body-reset-all',
+  tiltPreset: 'sarahlab:tilt:',
 });
 
 export const SARAH_LAB_FIELD = Object.freeze({
@@ -79,6 +94,9 @@ export const SARAH_LAB_FIELD = Object.freeze({
   bump: 'sarahlab-bump',
   fingers: 'sarahlab-fingers',
   arms: 'sarahlab-arms',
+  /** `${body}<control>`: a body control's line; its slider follows it */
+  body: 'sarahlab-body-',
+  bodyNote: 'sarahlab-body-note',
 });
 
 /** The flat morph target the bake writes (`scripts/bellyMorph.mjs`). */
@@ -436,10 +454,59 @@ export const BELLY_TILT_MAX_DEG = 10;
  * a fifth of a degree for every percent over 100. The WEIGHT slider adds to it, from 0.
  */
 export const SIZE_TILT_DEG_PER_PERCENT = 0.2;
-export function sizeTiltDeg(bumpPercent: number): number {
+/**
+ * THE TILT IS A DIAL (Joshua, 2026-10-15: "add a Belly Tilt control with three comparison
+ * presets: 0°... 10°: half of our current 20°... 20°: current shape, preserved exactly").
+ * The "degrees" are what the size tilt reaches at 200%; it still begins at 100% and rises
+ * evenly, so 20 is the approved behaviour exactly and 10 is half of it at every size.
+ * NOT a rotation: the degrees name a weight on `bellyTilt`, a sag shape that drops the
+ * bump's lower front (6 cm at weight 1, along a line 30° forward of straight down, a third
+ * of that under the bust). See `scripts/bellyMorph.mjs`, `sag`.
+ */
+export const SIZE_TILT_DEFAULT_DEG = 20;
+export const SIZE_TILT_MAX_DEG = 20;
+export const SIZE_TILT_PRESETS_DEG = [0, 10, 20] as const;
+export function sizeTiltDeg(bumpPercent: number, atFullDeg: number = SIZE_TILT_DEFAULT_DEG): number {
   const p = Math.min(BUMP_MAX_PERCENT, Math.max(100, Number.isFinite(bumpPercent) ? bumpPercent : 100));
-  return (p - 100) * SIZE_TILT_DEG_PER_PERCENT;
+  const full = Math.min(SIZE_TILT_MAX_DEG, Math.max(0, Number.isFinite(atFullDeg) ? atFullDeg : SIZE_TILT_DEFAULT_DEG));
+  return (p - 100) * SIZE_TILT_DEG_PER_PERCENT * (full / SIZE_TILT_DEFAULT_DEG);
 }
+/**
+ * SEATED, HER THIGHS CARRY THE BUMP (Joshua, 2026-10-15: "Sitting should use an effective
+ * belly tilt of approximately 0–5°, regardless of the character's standing tilt... implement
+ * this as a pose-dependent adjustment rather than permanently changing the character's
+ * selected tilt").
+ *
+ * The selected tilt is never written: what changes is the tilt USED. Fully seated it is the
+ * selected tilt scaled onto 0–5° (20° sits at 5°, 10° at 2.5°, 0° at 0°), so two characters
+ * who differ standing still differ seated, by a quarter as much. `seated` is 0 standing and 1
+ * fully down; anything between is a sit or a rise in progress, eased (smoothstep) so the tilt
+ * leaves and returns with no kink. A future sit animation drives `seated` from its own
+ * progress; the Lab, whose legs switch at once, ramps it: quickly going down
+ * (`SEATED_TILT_DOWN_SECONDS`), because until it arrives the standing tilt hangs the bump
+ * into thighs that are already there, and more slowly coming up (`SEATED_TILT_UP_SECONDS`),
+ * where the legs have already left and the bump simply settles back to her own tilt.
+ *
+ * Measured (sections through each thigh, settled sit): with the standing 20° the bump's
+ * underside passes 7-12 mm into the far half of her thighs at 150-200%; at the seated 5°,
+ * nothing does. What remains is the fold where her lower belly meets the top of the thigh
+ * near the hip, the same at every size and already there on the approved 100% body.
+ */
+export const SEATED_TILT_MAX_DEG = 5;
+export const SEATED_TILT_DOWN_SECONDS = 0.35;
+export const SEATED_TILT_UP_SECONDS = 0.8;
+export function effectiveTiltDeg(selectedDeg: number, seated: number): number {
+  const sel = Math.min(SIZE_TILT_MAX_DEG, Math.max(0, Number.isFinite(selectedDeg) ? selectedDeg : SIZE_TILT_DEFAULT_DEG));
+  const u = Math.min(1, Math.max(0, Number.isFinite(seated) ? seated : 0)), e = u * u * (3 - 2 * u);
+  return sel + (sel * (SEATED_TILT_MAX_DEG / SIZE_TILT_MAX_DEG) - sel) * e;
+}
+/** One frame of a sit or a rise: `seated` walks linearly toward its target (0 or 1), the whole way in the down or up time. */
+export function stepSeated(seated: number, target: number, dt: number): number {
+  const s = Math.min(1, Math.max(0, Number.isFinite(seated) ? seated : 0)), t = target >= 0.5 ? 1 : 0;
+  if (!(dt > 0)) return s;
+  return t > s ? Math.min(t, s + dt / SEATED_TILT_DOWN_SECONDS) : Math.max(t, s - dt / SEATED_TILT_UP_SECONDS);
+}
+
 /** Each centimetre the bump drops also pitches it this many tilt-target weights: it swings, not slides. */
 const BOUNCE_TILT = 0.25 * (0.1 / ((20 * Math.PI) / 180)); // the same swing as before the tilt target became 20°
 
@@ -503,7 +570,7 @@ export function walkBounceAccel(phase: number, strideSeconds: number): number {
 export const BELLY_SWING = 0.45;
 
 /** The three motion targets' weights for a bump size, a resting tilt and the spring. */
-export function bellyMotionWeights(bumpPercent: number, tiltDeg: number, s: BellySpring): Record<string, number> {
+export function bellyMotionWeights(bumpPercent: number, tiltDeg: number, s: BellySpring, sizeTiltAtFullDeg: number = SIZE_TILT_DEFAULT_DEG): Record<string, number> {
   // a bigger belly is heavier: it tilts and swings by its size, the model's own being 1
   const size = Math.min(BUMP_MAX_PERCENT, Math.max(0, bumpPercent)) / 100;
   const tilt = Math.min(BELLY_TILT_MAX_DEG, Math.max(0, tiltDeg)) * (Math.PI / 180);
@@ -513,7 +580,7 @@ export function bellyMotionWeights(bumpPercent: number, tiltDeg: number, s: Bell
   // exaggerated... lower even more"). A bigger belly is heavier, which moves less.
   const swing = BELLY_SWING * Math.min(1, size);
   return {
-    [BELLY_MOTION.tilt]: (Math.min(1, size) * tilt + sizeTiltDeg(bumpPercent) * (Math.PI / 180)) / BELLY_MOTION.tiltRad + swing * BOUNCE_TILT * bob,
+    [BELLY_MOTION.tilt]: (Math.min(1, size) * tilt + sizeTiltDeg(bumpPercent, sizeTiltAtFullDeg) * (Math.PI / 180)) / BELLY_MOTION.tiltRad + swing * BOUNCE_TILT * bob,
     [BELLY_MOTION.bob]: swing * bob,
     [BELLY_MOTION.sway]: swing * (s.x / BELLY_MOTION.bobM),
   };
@@ -560,4 +627,87 @@ export const ARM_RAISE_TARGETS = Object.freeze({ plusX: 'armRaiseL', minusX: 'ar
 export function armRaiseWeight(degrees: number): number {
   const t = Math.min(1, Math.max(0, (Number.isFinite(degrees) ? degrees : 0) / 90));
   return 1 - (1 - t) * (1 - t);
+}
+
+// ------------------------------------------------------------ body shape (Joshua, 2026-10-15)
+
+/**
+ * The bump's size, in the shape fields' terms: how big each size's bump is against 100%'s,
+ * over the whole bump and below the navel (`scripts/sarahV2Shape.mjs` measures and stamps
+ * them as `bellyShapeScale` / `bellyLowerScale`; the test holds these to the file). The
+ * upper one is `BELLY_UPPER_SCALE`.
+ */
+export const BELLY_SHAPE_SCALE: readonly (readonly [number, number])[] = [
+  [2, 1.565], [1.5, 1.279], [1, 1], [0.75, 0.59], [0.6, 0.397], [0.5, 0.27], [0.3, 0.088], [0.25, 0.044], [0, 0],
+];
+export const BELLY_LOWER_SCALE: readonly (readonly [number, number])[] = [
+  [2, 1.506], [1.5, 1.25], [1, 1], [0.75, 0.643], [0.6, 0.46], [0.5, 0.339], [0.3, 0.12], [0.25, 0.067], [0, 0],
+];
+function scaleAt(table: readonly (readonly [number, number])[], bumpPercent: number): number {
+  const b = Math.min(BUMP_MAX_PERCENT, Math.max(0, Number.isFinite(bumpPercent) ? bumpPercent : 100)) / 100;
+  for (let i = 0; i < table.length - 1; i += 1) {
+    const [s0, r0] = table[i], [s1, r1] = table[i + 1];
+    if (b > s0 || b < s1) continue;
+    const f = (s0 - b) / (s0 - s1);
+    return r0 * (1 - f) + r1 * f;
+  }
+  return 0;
+}
+
+/** The bust's linear scale against her own 0% breast, with the SIZE control's volume on top. */
+export function bustScale(bumpPercent: number, sizePercent = 0): number {
+  return Math.cbrt(Math.max(0.05, breastVolumeRatio(bumpPercent) * (1 + sizePercent / 100)));
+}
+
+/**
+ * HEIGHT is not a scale, it is a shift, and a shift is not linear: a field written for 1 cm
+ * at 100% and multiplied up to 3 cm of a 200% bump turned the bump pointed and ridged. So
+ * `scripts/sarahV2Shape.mjs` writes the shift EXACTLY at the slider's ends (2 cm up, 2 cm
+ * down) for each size key's own bump (100, 150, 200%), and this crossfades: from nothing to
+ * the end by how far the slider is moved, and between the two keys either side of the size
+ * shown (below 100% the 100% field, by how big the bump is against 100%'s).
+ */
+export const BELLY_HEIGHT_END_CM = 2;
+export function bellyHeightWeights(heightCm: number, bumpPercent: number): Record<string, number> {
+  const h = Math.min(BELLY_HEIGHT_END_CM, Math.max(-BELLY_HEIGHT_END_CM, Number.isFinite(heightCm) ? heightCm : 0));
+  const dir = h >= 0 ? 'Up' : 'Down', other = h >= 0 ? 'Down' : 'Up', t = Math.abs(h) / BELLY_HEIGHT_END_CM;
+  const b = Math.min(BUMP_MAX_PERCENT, Math.max(0, Number.isFinite(bumpPercent) ? bumpPercent : 100)) / 100;
+  const keys: Record<string, number> = { '': 0, '150': 0, '200': 0 };
+  if (b <= 1) keys[''] = scaleAt(BELLY_SHAPE_SCALE, bumpPercent);
+  else if (b <= 1.5) { const u = (b - 1) / 0.5; keys[''] = 1 - u; keys['150'] = u; }
+  else { const u = (b - 1.5) / 0.5; keys['150'] = 1 - u; keys['200'] = u; }
+  const out: Record<string, number> = {};
+  for (const [k, w] of Object.entries(keys)) { out[`shape:bellyHeight${dir}${k}`] = t * w; out[`shape:bellyHeight${other}${k}`] = 0; }
+  return out;
+}
+
+/**
+ * Each shape field's strength for a body and a belly size (`scripts/sarahV2Shape.mjs` writes
+ * one field per control at one unit: 10%, 1 cm or 5°). Every belly field is relative to the
+ * size shown (a +10% width is 10% of THAT bump), every breast field to the bust as big as it
+ * is; position is in centimetres whatever the size. All defaults give all zeros.
+ */
+export function bodyShapeFieldWeights(shape: BodyShape, bumpPercent: number): Record<string, number> {
+  const S = scaleAt(BELLY_SHAPE_SCALE, bumpPercent), Up = bellyUpperWeight(bumpPercent), Lo = scaleAt(BELLY_LOWER_SCALE, bumpPercent);
+  const s = bustScale(bumpPercent, shape.breastSize);
+  return {
+    ...bellyHeightWeights(shape.bellyHeight, bumpPercent),
+    'shape:bellyWidth': (shape.bellyWidth / 10) * S,
+    'shape:bellyDepth': (shape.bellyDepth / 10) * S,
+    'shape:bellyUpper': (shape.bellyUpper / 10) * Up,
+    'shape:bellyLower': (shape.bellyLower / 10) * Lo,
+    'shape:breastWidth': (shape.breastWidth / 10) * s,
+    'shape:breastHeight': (shape.breastHeight / 10) * s,
+    'shape:breastDepth': (shape.breastDepth / 10) * s,
+    'shape:breastPosition': shape.breastPosition,
+    'shape:breastDroop': (shape.breastDroop / 5) * s,
+    'shape:breastUpper': (shape.breastUpper / 10) * s,
+    'shape:breastLower': (shape.breastLower / 10) * s,
+  };
+}
+
+/** The bust's own GPU weights with the SIZE control: the same even scaling, to a little more or less volume. */
+export function breastWeightsForShape(bumpPercent: number, grows: boolean, sizePercent: number): Record<string, number> {
+  if (!grows || !sizePercent) return breastWeightsFor(bumpPercent, grows);
+  return { [BREAST_TARGETS.small]: 0, [BREAST_TARGETS.big]: 0, [BREAST_GROW_TARGET]: (bustScale(bumpPercent, sizePercent) - 1) / (Math.cbrt(BREAST_GROW_MAX_VOLUME) - 1) };
 }

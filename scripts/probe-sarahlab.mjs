@@ -32,7 +32,7 @@ const ROOT = path.resolve(HERE, '..');
 const SHOTS = path.join(ROOT, 'shots');
 const CHROMIUM_ARGS = ['--use-gl=angle', '--use-angle=swiftshader', '--disable-dev-shm-usage'];
 /** Joshua's phone in landscape. */
-const VIEWPORT = (process.env.SARAH_TEXTURE_ONLY || process.env.SARAH_CLOSE_ONLY || process.env.SARAH_TEE_ONLY || process.env.SARAH_SWEEP || process.env.SARAH_HEM_ONLY || process.env.SARAH_NAVEL_ONLY) ? { width: 1400, height: 800 } : { width: 932, height: 430 };
+const VIEWPORT = (process.env.SARAH_TEXTURE_ONLY || process.env.SARAH_CLOSE_ONLY || process.env.SARAH_TEE_ONLY || process.env.SARAH_SWEEP || process.env.SARAH_HEM_ONLY || process.env.SARAH_NAVEL_ONLY || process.env.SARAH_BODY_SHAPE) ? { width: 1400, height: 800 } : { width: 932, height: 430 };
 const APP_PORT = 4197;
 const TOOL = 'lab.sarah';
 const HUD = 'sarah-lab-hud';
@@ -97,11 +97,32 @@ async function main() {
     log('bare URL -> EDITORS -> OPEN -> the Sarah lab is up');
 
     const status = '[data-field="sarahlab-status"]';
-    // The Lab opens on the newest v2 (v2-arms); the checks below were written on v1, the
-    // only model with clothes, so step MODEL round to it (v2-arms -> v1).
-    await page.waitForFunction((sel) => (document.querySelector(sel)?.textContent ?? '').startsWith('model v2-arms'), status, { timeout: 180_000 })
-      .then(() => check(true, 'the Lab opened on v2-arms'))
-      .catch(async () => check(false, `the Lab opened on v2-arms: ${await page.textContent(status)}`));
+    // The Lab opens on the newest v2 (v2-body); the checks below were written on v1, the
+    // only model with clothes, so step MODEL round to it (v2-body, the last, -> v1).
+    await page.waitForFunction((sel) => (document.querySelector(sel)?.textContent ?? '').startsWith('model v2-body'), status, { timeout: 180_000 })
+      .then(() => check(true, 'the Lab opened on v2-body'))
+      .catch(async () => check(false, `the Lab opened on v2-body: ${await page.textContent(status)}`));
+    if (process.env.SARAH_BODY_SHAPE) {
+      // the BELLY SHAPE and BREAST SHAPE sections, on the Lab's own CPU path (Joshua, 2026-10-15)
+      const slide = async (key, value) => { await page.locator(`div:has(> [data-field="sarahlab-body-${key}"]) + input`).evaluate((input, v) => { input.value = String(v); input.dispatchEvent(new Event('input', { bubbles: true })); }, value); await page.waitForTimeout(400); };
+      const bump = async (value) => { await page.locator('[data-field="sarahlab-bump"] + input').evaluate((input, v) => { input.value = String(v); input.dispatchEvent(new Event('input', { bubbles: true })); }, value); await page.waitForTimeout(600); };
+      for (let i = 0; i < 3; i += 1) await page.click('[data-action="sarahlab:outfit"]'); // none
+      for (const d of await page.$$('[data-role="sarah-lab-hud"] details')) await d.evaluate((el) => { el.open = true; });
+      await bump(150);
+      await shot(page, 'sarahlab-body-default.png', 'BODY DEFAULT 150%');
+      for (const [k, v] of [['bellyHeight', 2], ['bellyWidth', 15], ['bellyLower', -20], ['breastSize', 20], ['breastDroop', 10]]) await slide(k, v);
+      await shot(page, 'sarahlab-body-shaped.png', 'BODY SHAPED 150%');
+      check(/HEIGHT · \+2\.0 cm/.test(await page.textContent('[data-field="sarahlab-body-bellyHeight"]')), 'the height line reads +2.0 cm');
+      await page.click('[data-action="sarahlab:sit"]'); await page.waitForTimeout(1200);
+      check(/seated 5\.0°/.test(await page.textContent('[data-field="sarahlab-body-bellyTilt"]')), 'seated, the tilt line names the seated 5°');
+      await shot(page, 'sarahlab-body-shaped-sit.png', 'BODY SHAPED SEATED');
+      await page.click('[data-action="sarahlab:body-reset-all"]'); await page.click('[data-action="sarahlab:stand"]'); await page.waitForTimeout(1200);
+      await shot(page, 'sarahlab-body-reset.png', 'BODY RESET');
+      check(/HEIGHT · 0\.0 cm \(approved\)/.test(await page.textContent('[data-field="sarahlab-body-bellyHeight"]')), 'RESET ALL SHAPE puts height back to the approved value');
+      check(errors.length === 0, errors.length ? `no console errors:\n${errors.join('\n')}` : 'no console errors');
+      if (failures) throw new Error(`${failures} check(s) failed`);
+      log('PASS'); return;
+    }
     await page.click('[data-action="sarahlab:model"]');
     await page.waitForFunction((sel) => (document.querySelector(sel)?.textContent ?? '').startsWith('base model'), status, { timeout: 180_000 })
       .then(() => check(true, 'the base model loaded'))

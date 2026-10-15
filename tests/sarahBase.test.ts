@@ -361,7 +361,7 @@ describe('the Sarah Lab', () => {
     expect(statusLine(true, false, [], true, 1)).toBe('model v2 · belly slider · no clothes in this file yet');
     expect(modelLine(0)).toBe('MODEL · v1');
     expect(modelLine(1)).toBe('MODEL · v2');
-    expect(SARAH_LAB_MODELS.map((m) => m.path)).toEqual(['models/sarah-base.glb', 'models/sarah-v2.glb', 'models/sarah-v2-arms.glb']);
+    expect(SARAH_LAB_MODELS.map((m) => m.path)).toEqual(['models/sarah-base.glb', 'models/sarah-v2.glb', 'models/sarah-v2-arms.glb', 'models/sarah-v2-body.glb']);
   });
 });
 
@@ -507,6 +507,7 @@ describe("Sarah v2's refinement (scripts/sarahV2Refine.mjs, 2026-10-15)", () => 
     expect(labTool.settledSitFor('v1')).toBe(false);
     expect(labTool.settledSitFor('v2')).toBe(true);
     expect(labTool.settledSitFor('v2-arms')).toBe(true);
+    expect(labTool.settledSitFor('v2-body')).toBe(true);
   });
 });
 
@@ -539,7 +540,7 @@ describe('the settled pregnant sit (Sarah v2)', () => {
 });
 
 describe('the Lab opens on the newest v2', () => {
-  it('starts on v2-arms, the model carrying the repaired arms, the rounder bust and the upper belly', () => {
-    expect(labTool.SARAH_LAB_MODELS[labTool.SARAH_LAB_DEFAULT_MODEL].id).toBe('v2-arms');
+  it('starts on v2-body: v2-arms with the body-shape fields, which at their defaults is v2-arms', () => {
+    expect(labTool.SARAH_LAB_MODELS[labTool.SARAH_LAB_DEFAULT_MODEL].id).toBe('v2-body');
   });
 });

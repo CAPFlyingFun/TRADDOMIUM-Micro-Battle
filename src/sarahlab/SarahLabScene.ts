@@ -35,11 +35,13 @@ import { measureHuman } from '../actor/humanSkeleton';
 import type { AppScene, FrameInfo, SceneContext, SceneFactory } from '../app/Scene';
 import { assets } from '../assets/assets';
 import { release } from '../tombs/LabPeople';
+import { BODY_CONTROLS, controlLine, defaultBodyShape, resetControl, setControl, type BodyControl, type BodyShape } from '../actor/bodyShape';
+import { applyShapeFields, liftShapeFields, type ShapeFields } from '../view/bodyShapeView';
 import { HumanRig, findSkinnedMesh } from '../view/HumanRig';
 import { UNITS_PER_METRE } from '../world/dem';
 import {
   BELLY_MOTION, BELLY_TARGET, BREAST_TARGETS, BUMP_MAX_PERCENT, GARMENTS, OUTFITS, outfitLine, modelLine, refineLine, refineWeight, nextOutfit, wornGarments, coverMask, uncoveredSkinIndices, UNDER_TOP_GARMENT, BELLY_REFINE_TARGET, SEAT_TARGET, seatCorrectiveWeight, SARAH_LAB_MODELS, SARAH_LAB_DEFAULT_MODEL, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID,
-  bellyMotionWeights, bellyWeights, breastBobWeight, breastWeightsFor, BREAST_GROW_TARGET, settledSitFor, bellyUpperWeight, BELLY_UPPER_TARGET, navelWeights, NAVEL_FLAT_TARGET, navelFlatWeight, tPoseTurns, ARM_SIDES, armsLine, ARM_RAISE_TARGETS, armRaiseWeight, SEAT_V2_TARGET, seatCorrectiveV2Weight, fingerBend, THUMB_TO_PALM, bumpLine, fingersLine, restingBellySpring, statusLine, stepBellySpring, stepBreastSpring, walkBounceAccel,
+  bellyMotionWeights, bellyWeights, breastBobWeight, breastWeightsForShape, bodyShapeFieldWeights, SIZE_TILT_PRESETS_DEG, effectiveTiltDeg, stepSeated, BREAST_GROW_TARGET, settledSitFor, bellyUpperWeight, BELLY_UPPER_TARGET, navelWeights, NAVEL_FLAT_TARGET, navelFlatWeight, tPoseTurns, ARM_SIDES, armsLine, ARM_RAISE_TARGETS, armRaiseWeight, SEAT_V2_TARGET, seatCorrectiveV2Weight, fingerBend, THUMB_TO_PALM, bumpLine, fingersLine, restingBellySpring, statusLine, stepBellySpring, stepBreastSpring, walkBounceAccel,
   type Garment, type SarahLabPose,
 } from './sarahLabTool';
 
@@ -158,6 +160,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let disposed = false;
 
   let pose: SarahLabPose = 'stand';
+  /** 0 standing, 1 fully seated: how far the thighs have taken over the bump's tilt (`effectiveTiltDeg`). */
+  let seated = 0;
   let bump = 100;
   let curl = 0;
   // the ARMS slider: how far T-POSE raises the arms, and which (Joshua, 2026-10-15)
@@ -174,6 +178,11 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   const tmp = new THREE.Vector3();
   let outfit = 0;
   let modelIndex = SARAH_LAB_DEFAULT_MODEL;
+  // the body's own proportions (Joshua, 2026-10-15): all approved values to start, so she
+  // looks exactly as approved until a control moves
+  let body: BodyShape = defaultBodyShape();
+  let shaped: { mesh: THREE.SkinnedMesh; fields: ShapeFields }[] = [];
+  const bodyInputs = new Map<BodyControl, HTMLInputElement>();
   const shownNow = (g: Garment) => wornGarments(outfit, garments).includes(g);
   let turning = false;
   // v2's switchable curve refinement (CURVE), off: her master as modelled
@@ -210,6 +219,14 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     const armsField = fields[SARAH_LAB_FIELD.arms];
     if (armsField) armsField.textContent = armsLine(armsDeg, ARM_SIDES[armSide]);
     if (buttons.armSide) buttons.armSide.textContent = `ARMS · ${ARM_SIDES[armSide]}`;
+    for (const c of BODY_CONTROLS) {
+      const line = fields[`${SARAH_LAB_FIELD.body}${c.key}`];
+      // seated, the tilt in use is not the one chosen: say both, so a sitting body never reads as the slider's
+      if (line) line.textContent = controlLine(c.key, body[c.key]) + (c.key === 'bellyTilt' && pose === 'sit' ? ` · seated ${effectiveTiltDeg(body.bellyTilt, 1).toFixed(1)}°` : '');
+      const input = bodyInputs.get(c.key);
+      if (input && Number(input.value) !== body[c.key]) input.value = String(body[c.key]);
+    }
+    if (fields[SARAH_LAB_FIELD.bodyNote]) fields[SARAH_LAB_FIELD.bodyNote].textContent = loaded && !shaped.length ? 'this model has no shape fields: TILT and SIZE work, the rest are in v2-body' : '';
     const lit = (b: HTMLButtonElement | undefined, on: boolean) => {
       if (!b) return;
       b.style.background = on ? 'rgba(212,168,83,0.92)' : 'rgba(16,20,26,0.72)';
@@ -220,6 +237,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     lit(buttons.sit, pose === 'sit');
     lit(buttons.tpose, pose === 'tpose');
     lit(buttons.turn, turning);
+    for (const t of SIZE_TILT_PRESETS_DEG) lit(buttons[`tilt${t}`], body.bellyTilt === t);
     if (buttons.outfit) buttons.outfit.textContent = outfitLine(outfit);
     if (buttons.model) buttons.model.textContent = modelLine(modelIndex);
     if (buttons.refine) {
@@ -232,7 +250,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
 
   /** The bump's weight, every frame: its resting tilt and where the spring has it. */
   function applyMotion(): void {
-    const w: Record<string, number> = { ...bellyMotionWeights(bump, 0, spring), [BREAST_TARGETS.bob]: breastBobWeight(bump, breastSpring) };
+    const w: Record<string, number> = { ...bellyMotionWeights(bump, 0, spring, effectiveTiltDeg(body.bellyTilt, seated)), [BREAST_TARGETS.bob]: breastBobWeight(bump, breastSpring) };
     for (const mesh of skinned) {
       const dict = mesh.morphTargetDictionary, influences = mesh.morphTargetInfluences;
       if (!dict || !influences) continue;
@@ -256,9 +274,11 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   }
 
   function applyLook(): void {
+    const fieldWeights = bodyShapeFieldWeights(body, bump);
+    for (const { mesh, fields } of shaped) applyShapeFields(mesh, fields, fieldWeights);
     for (const mesh of skinned) {
       const dict = mesh.morphTargetDictionary, influences = mesh.morphTargetInfluences;
-      if (dict && influences) for (const [name, w] of Object.entries({ ...bellyWeights(bump), ...breastWeightsFor(bump, dict[BREAST_GROW_TARGET] !== undefined), [BELLY_UPPER_TARGET]: bellyUpperWeight(bump), ...navelWeights(bump), [NAVEL_FLAT_TARGET]: navelFlatWeight(bump), [BELLY_REFINE_TARGET]: refineWeight(refine, bump), [SEAT_TARGET]: seatCorrectiveWeight(pose === 'sit' ? 1 : 0, bump), [SEAT_V2_TARGET]: seatCorrectiveV2Weight(pose === 'sit' ? 1 : 0, bump), ...armRaiseWeights() })) {
+      if (dict && influences) for (const [name, w] of Object.entries({ ...bellyWeights(bump), ...breastWeightsForShape(bump, dict[BREAST_GROW_TARGET] !== undefined, body.breastSize), [BELLY_UPPER_TARGET]: bellyUpperWeight(bump), ...navelWeights(bump), [NAVEL_FLAT_TARGET]: navelFlatWeight(bump), [BELLY_REFINE_TARGET]: refineWeight(refine, bump), [SEAT_TARGET]: seatCorrectiveWeight(pose === 'sit' ? 1 : 0, bump), [SEAT_V2_TARGET]: seatCorrectiveV2Weight(pose === 'sit' ? 1 : 0, bump), ...armRaiseWeights() })) {
         const at = dict[name];
         if (at !== undefined) influences[at] = w;
       }
@@ -343,7 +363,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     const poses = document.createElement('div');
     poses.style.cssText = `${panel}left:max(12px,env(safe-area-inset-left));bottom:16px`;
     for (const [p, label, action] of [['stand', 'STAND', SARAH_LAB_ACTION.stand], ['walk', 'WALK', SARAH_LAB_ACTION.walk], ['sit', 'SIT', SARAH_LAB_ACTION.sit], ['tpose', 'T-POSE', SARAH_LAB_ACTION.tpose]] as const) {
-      buttons[p] = btn(label, action, () => { pose = p; applyLook(); });
+      buttons[p] = btn(label, action, () => { pose = p; applyLook(); refresh(); });
       poses.appendChild(buttons[p]);
     }
     root.appendChild(poses);
@@ -378,6 +398,54 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     buttons.bounce = btn('BOUNCE', SARAH_LAB_ACTION.bounce, () => { spring.vy += 0.3; breastSpring.vy += 0.3; });
     for (const b of [buttons.model, buttons.refine, buttons.outfit, buttons.armSide, buttons.turn, buttons.bounce]) { b.style.padding = '8px 10px'; b.style.fontSize = '12px'; row.appendChild(b); }
     right.appendChild(row);
+    // BELLY SHAPE and BREAST SHAPE: each control a slider with its own reset, relative to the size shown
+    const setBody = (next: BodyShape) => { body = next; applyLook(); applyMotion(); refresh(); };
+    for (const [group, title] of [['belly', 'BELLY SHAPE'], ['breasts', 'BREAST SHAPE']] as const) {
+      const box = document.createElement('details');
+      box.style.cssText = 'border-top:1px solid rgba(255,255,255,0.12);padding-top:6px';
+      const head = document.createElement('summary');
+      head.textContent = title;
+      head.style.cssText = 'cursor:pointer;font:700 12px system-ui,sans-serif;letter-spacing:.08em;padding:4px 0';
+      box.appendChild(head);
+      if (group === 'belly') {
+        const presets = document.createElement('div');
+        presets.style.cssText = 'display:flex;gap:6px;margin:4px 0';
+        for (const t of SIZE_TILT_PRESETS_DEG) {
+          const b = btn(`TILT ${t}°`, `${SARAH_LAB_ACTION.tiltPreset}${t}`, () => setBody(setControl(body, 'bellyTilt', t)));
+          b.style.padding = '6px 8px'; b.style.fontSize = '11px';
+          buttons[`tilt${t}`] = b; presets.appendChild(b);
+        }
+        box.appendChild(presets);
+      }
+      for (const c of BODY_CONTROLS.filter((k) => k.group === group)) {
+        const line = document.createElement('div');
+        line.style.cssText = 'display:flex;justify-content:space-between;align-items:center;font-size:11px;letter-spacing:.04em;margin-top:4px';
+        const label = document.createElement('span');
+        label.dataset.field = `${SARAH_LAB_FIELD.body}${c.key}`;
+        fields[`${SARAH_LAB_FIELD.body}${c.key}`] = label;
+        const reset = btn('↺', `${SARAH_LAB_ACTION.bodyReset}${c.key}`, () => setBody(resetControl(body, c.key)));
+        reset.title = `reset ${c.label.toLowerCase()} to the approved value`;
+        reset.style.padding = '2px 8px'; reset.style.fontSize = '12px';
+        line.append(label, reset);
+        const input = document.createElement('input');
+        input.type = 'range'; input.min = String(c.min); input.max = String(c.max); input.step = String(c.step); input.value = String(body[c.key]);
+        input.style.cssText = 'width:100%;accent-color:#d4a853;height:24px';
+        input.addEventListener('input', () => setBody(setControl(body, c.key, Number(input.value))));
+        bodyInputs.set(c.key, input);
+        box.append(line, input);
+      }
+      if (group === 'breasts') {
+        const all = btn('RESET ALL SHAPE', SARAH_LAB_ACTION.bodyResetAll, () => setBody(defaultBodyShape()));
+        all.style.padding = '6px 8px'; all.style.fontSize = '11px'; all.style.marginTop = '6px';
+        box.appendChild(all);
+      }
+      right.appendChild(box);
+    }
+    const note = document.createElement('div');
+    note.dataset.field = SARAH_LAB_FIELD.bodyNote;
+    note.style.cssText = 'font-size:10px;opacity:.7';
+    fields[SARAH_LAB_FIELD.bodyNote] = note;
+    right.appendChild(note);
     right.style.maxHeight = 'calc(100% - 85px)';
     right.style.overflowY = 'auto';
     right.style.touchAction = 'pan-y';
@@ -465,6 +533,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
    * spring takes it from there.
    */
   function feelMotion(dt: number): void {
+    seated = stepSeated(seated, pose === 'sit' ? 1 : 0, dt);
     if (!feel || !(dt > 0)) { applyMotion(); return; }
     feel.bone.localToWorld(tmp.copy(feel.local)).multiplyScalar(1 / M);
     let up = 0, left = 0;
@@ -487,7 +556,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   /** Load the chosen model, putting away the one shown (MODEL switches v1 and v2). */
   function loadSarah(): void {
     if (model) { three.remove(model); rig?.dispose(); release(model); model = null; }
-    rig = null; measure = null; fingers = []; skinned = []; garments = []; hasBelly = false; feel = null;
+    rig = null; measure = null; fingers = []; skinned = []; shaped = []; garments = []; hasBelly = false; feel = null;
     felt.primed = 0; loaded = false; failed = false;
     refresh();
     const path = SARAH_LAB_MODELS[modelIndex].path;
@@ -510,6 +579,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         if (mesh.isSkinnedMesh !== true) return;
         mesh.frustumCulled = false;
         skinned.push(mesh);
+        // the body's shape fields come off the GPU's list before the first draw (bodyShapeView)
+        const lifted = liftShapeFields(mesh);
+        if (lifted) shaped.push({ mesh, fields: lifted });
         if (mesh.morphTargetDictionary?.[BELLY_TARGET] !== undefined) hasBelly = true;
         const name = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material).name;
         if ((GARMENTS as readonly string[]).includes(name)) found.add(name as Garment);
