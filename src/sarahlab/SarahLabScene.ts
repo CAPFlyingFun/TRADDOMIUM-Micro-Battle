@@ -39,7 +39,7 @@ import { HumanRig, findSkinnedMesh } from '../view/HumanRig';
 import { UNITS_PER_METRE } from '../world/dem';
 import {
   BELLY_MOTION, BELLY_TARGET, BREAST_TARGETS, BUMP_MAX_PERCENT, GARMENTS, OUTFITS, outfitLine, modelLine, refineLine, refineWeight, nextOutfit, wornGarments, coverMask, uncoveredSkinIndices, UNDER_TOP_GARMENT, BELLY_REFINE_TARGET, SEAT_TARGET, seatCorrectiveWeight, SARAH_LAB_MODELS, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID,
-  bellyMotionWeights, bellyWeights, breastBobWeight, breastWeights, navelWeights, NAVEL_FLAT_TARGET, navelFlatWeight, SEAT_V2_TARGET, seatCorrectiveV2Weight, fingerBend, THUMB_TO_PALM, bumpLine, fingersLine, restingBellySpring, statusLine, stepBellySpring, stepBreastSpring, walkBounceAccel,
+  bellyMotionWeights, bellyWeights, breastBobWeight, breastWeights, navelWeights, NAVEL_FLAT_TARGET, navelFlatWeight, tPoseTurns, SEAT_V2_TARGET, seatCorrectiveV2Weight, fingerBend, THUMB_TO_PALM, bumpLine, fingersLine, restingBellySpring, statusLine, stepBellySpring, stepBreastSpring, walkBounceAccel,
   type Garment, type SarahLabPose,
 } from './sarahLabTool';
 
@@ -402,7 +402,15 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       base = poseHuman(measure, rig.bind, { stance, phase, seconds, lean: 0, carry }, poseOut);
     }
     // The master bind pose holds both arms out, exposing the shirt's sides.
-    if (pose === 'tpose') base = base.map(turn => ({ ...turn, radians: 0 }));
+    if (pose === 'tpose') {
+      // every turn undone back to the modelled pose, then the arms raised level wherever
+      // the master was modelled with them down (v2); v1's are already level
+      const j = measure.joints;
+      base = [...base.map(turn => ({ ...turn, radians: 0 })), ...tPoseTurns(rig.bind, [
+        { shoulder: j.shoulderL, elbow: j.elbowL, out: measure.leftSign > 0 ? 1 : -1 },
+        { shoulder: j.shoulderR, elbow: j.elbowR, out: measure.leftSign > 0 ? -1 : 1 },
+      ])];
+    }
     if (curl <= 0 || fingers.length === 0) return base;
     const extra: JointTurn[] = [];
     for (const f of fingers) {
