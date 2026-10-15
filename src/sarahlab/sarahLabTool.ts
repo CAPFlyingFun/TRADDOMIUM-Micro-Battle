@@ -16,6 +16,12 @@ export const SARAH_LAB_TOOL_ID = 'lab.sarah';
 export const SARAH_BASE_MODEL = 'models/sarah-base.glb';
 /** Sarah v2 (Joshua, 2026-10-13): the newer master, arms down, outie navel modelled, five fingers rigged. */
 export const SARAH_V2_MODEL = 'models/sarah-v2.glb';
+/**
+ * Sarah v2 with her armpits repaired for raised arms (Joshua, 2026-10-15), a separate
+ * file so the approved v2 stays the reference: `scripts/sarahV2ArmWeights.mjs` rebuilds
+ * her armpit weights along her skin and adds the raised-arm shapes armRaiseL/R.
+ */
+export const SARAH_V2_ARMS_MODEL = 'models/sarah-v2-arms.glb';
 
 /**
  * The models the lab can show, in the order MODEL cycles them (Joshua, 2026-10-13:
@@ -24,6 +30,7 @@ export const SARAH_V2_MODEL = 'models/sarah-v2.glb';
 export const SARAH_LAB_MODELS = Object.freeze([
   Object.freeze({ id: 'v1', path: SARAH_BASE_MODEL }),
   Object.freeze({ id: 'v2', path: SARAH_V2_MODEL }),
+  Object.freeze({ id: 'v2-arms', path: SARAH_V2_ARMS_MODEL }),
 ]);
 
 export function modelLine(index: number): string {
@@ -56,12 +63,14 @@ export const SARAH_LAB_ACTION = Object.freeze({
   outfit: 'sarahlab:outfit',
   model: 'sarahlab:model',
   refine: 'sarahlab:refine',
+  armSide: 'sarahlab:armside',
 });
 
 export const SARAH_LAB_FIELD = Object.freeze({
   status: 'sarahlab-status',
   bump: 'sarahlab-bump',
   fingers: 'sarahlab-fingers',
+  arms: 'sarahlab-arms',
 });
 
 /** The flat morph target the bake writes (`scripts/bellyMorph.mjs`). */
@@ -449,4 +458,47 @@ export function bellyMotionWeights(bumpPercent: number, tiltDeg: number, s: Bell
     [BELLY_MOTION.bob]: swing * bob,
     [BELLY_MOTION.sway]: swing * (s.x / BELLY_MOTION.bobM),
   };
+}
+
+/**
+ * A REAL T-POSE, AND EVERY ANGLE ON THE WAY (Joshua, 2026-10-15: "test the arms at 0, 30,
+ * 45, 60 and 90 degrees... both arms together and individually"). v1 is modelled in a T,
+ * so its bind pose already is one; v2 is modelled arms-down. Each chosen upper arm is
+ * turned at its shoulder, in the bind pose's world frame, from the direction it was
+ * modelled in toward level and straight out, by `fraction` of the way: 1 is the T
+ * (about 90 degrees for v2, nothing for v1).
+ */
+export interface TPoseJoint { readonly x: number; readonly y: number; readonly z: number }
+export interface TPoseTurn { readonly joint: number; readonly ax: number; readonly ay: number; readonly az: number; readonly radians: number }
+export function tPoseTurns(bind: readonly TPoseJoint[], arms: readonly { shoulder: number; elbow: number; out: 1 | -1; fraction?: number }[]): TPoseTurn[] {
+  const turns: TPoseTurn[] = [];
+  for (const { shoulder, elbow, out, fraction = 1 } of arms) {
+    const s = bind[shoulder], e = bind[elbow];
+    if (!s || !e || fraction <= 0) continue;
+    const v = [e.x - s.x, e.y - s.y, e.z - s.z], l = Math.hypot(v[0], v[1], v[2]);
+    if (!l) continue;
+    const u = [v[0] / l, v[1] / l, v[2] / l], t = [out, 0, 0];
+    const c = [u[1] * t[2] - u[2] * t[1], u[2] * t[0] - u[0] * t[2], u[0] * t[1] - u[1] * t[0]], sin = Math.hypot(c[0], c[1], c[2]), cos = u[0] * t[0] + u[1] * t[1] + u[2] * t[2];
+    if (sin < 1e-6) continue;
+    turns.push({ joint: shoulder, ax: c[0] / sin, ay: c[1] / sin, az: c[2] / sin, radians: Math.atan2(sin, cos) * Math.min(1, fraction) });
+  }
+  return turns;
+}
+/** Which arms the ARMS slider raises, in the order its button cycles them. */
+export const ARM_SIDES = Object.freeze(['both', 'left', 'right'] as const);
+export type ArmSide = (typeof ARM_SIDES)[number];
+export function armsLine(degrees: number, side: ArmSide = 'both'): string {
+  const d = Math.round(Math.min(90, Math.max(0, degrees)));
+  return `ARMS · ${d}°${side === 'both' ? '' : ` · ${side} only`}`;
+}
+/**
+ * The raised-arm shapes (armRaiseL for the arm modelled toward +x, armRaiseR toward -x)
+ * tuck the skin shared by arm and torso into the armpit. They come in sooner than the
+ * angle does, because the web forms early: 1 - (1 - t)^2 of the shape at t of the raise
+ * (56% at 30 degrees, 75% at 45, 89% at 60, all of it level). GAME TUNING against renders.
+ */
+export const ARM_RAISE_TARGETS = Object.freeze({ plusX: 'armRaiseL', minusX: 'armRaiseR' });
+export function armRaiseWeight(degrees: number): number {
+  const t = Math.min(1, Math.max(0, (Number.isFinite(degrees) ? degrees : 0) / 90));
+  return 1 - (1 - t) * (1 - t);
 }

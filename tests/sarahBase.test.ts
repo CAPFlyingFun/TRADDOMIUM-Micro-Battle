@@ -36,6 +36,14 @@ describe('the base mannequin (public/models/sarah-base.glb)', () => {
     expect(labTool.navelFlatWeight(100)).toBe(0);
     expect(labTool.navelFlatWeight(200)).toBe(0);
     for (let p = 75; p < 100; p += 1) expect(labTool.navelFlatWeight(p + 1)).toBeLessThanOrEqual(labTool.navelFlatWeight(p));
+    // a real T-pose at any angle: arms modelled down are raised toward level, arms modelled level are left alone
+    const down = labTool.tPoseTurns([{ x: 0.2, y: 1.4, z: 0 }, { x: 0.2, y: 1.1, z: 0 }], [{ shoulder: 0, elbow: 1, out: 1 }]);
+    expect(down).toHaveLength(1); expect(down[0].radians).toBeCloseTo(Math.PI / 2); expect(Math.abs(down[0].az)).toBeCloseTo(1);
+    expect(labTool.tPoseTurns([{ x: 0.2, y: 1.4, z: 0 }, { x: 0.2, y: 1.1, z: 0 }], [{ shoulder: 0, elbow: 1, out: 1, fraction: 1 / 3 }])[0].radians).toBeCloseTo(Math.PI / 6);
+    expect(labTool.tPoseTurns([{ x: 0.2, y: 1.4, z: 0 }, { x: 0.2, y: 1.1, z: 0 }], [{ shoulder: 0, elbow: 1, out: 1, fraction: 0 }])).toHaveLength(0);
+    expect(labTool.tPoseTurns([{ x: 0.2, y: 1.4, z: 0 }, { x: 0.5, y: 1.4, z: 0 }], [{ shoulder: 0, elbow: 1, out: 1 }])).toHaveLength(0);
+    expect(labTool.armRaiseWeight(0)).toBe(0); expect(labTool.armRaiseWeight(90)).toBe(1); expect(labTool.armRaiseWeight(45)).toBeCloseTo(0.75);
+    expect(labTool.armsLine(30, 'left')).toBe('ARMS · 30° · left only'); expect(labTool.armsLine(90)).toBe('ARMS · 90°');
     // v2's seated corrective: never standing, nothing by 50%, all at 100%, growing to 200%
     for (const p of [0, 50, 100, 150, 200]) expect(labTool.seatCorrectiveV2Weight(0, p)).toBe(0);
     expect(labTool.seatCorrectiveV2Weight(1, 50)).toBe(0);
@@ -353,7 +361,7 @@ describe('the Sarah Lab', () => {
     expect(statusLine(true, false, [], true, 1)).toBe('model v2 · belly slider · no clothes in this file yet');
     expect(modelLine(0)).toBe('MODEL · v1');
     expect(modelLine(1)).toBe('MODEL · v2');
-    expect(SARAH_LAB_MODELS.map((m) => m.path)).toEqual(['models/sarah-base.glb', 'models/sarah-v2.glb']);
+    expect(SARAH_LAB_MODELS.map((m) => m.path)).toEqual(['models/sarah-base.glb', 'models/sarah-v2.glb', 'models/sarah-v2-arms.glb']);
   });
 });
 

@@ -39,7 +39,7 @@ import { HumanRig, findSkinnedMesh } from '../view/HumanRig';
 import { UNITS_PER_METRE } from '../world/dem';
 import {
   BELLY_MOTION, BELLY_TARGET, BREAST_TARGETS, BUMP_MAX_PERCENT, GARMENTS, OUTFITS, outfitLine, modelLine, refineLine, refineWeight, nextOutfit, wornGarments, coverMask, uncoveredSkinIndices, UNDER_TOP_GARMENT, BELLY_REFINE_TARGET, SEAT_TARGET, seatCorrectiveWeight, SARAH_LAB_MODELS, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID,
-  bellyMotionWeights, bellyWeights, breastBobWeight, breastWeights, navelWeights, NAVEL_FLAT_TARGET, navelFlatWeight, SEAT_V2_TARGET, seatCorrectiveV2Weight, fingerBend, THUMB_TO_PALM, bumpLine, fingersLine, restingBellySpring, statusLine, stepBellySpring, stepBreastSpring, walkBounceAccel,
+  bellyMotionWeights, bellyWeights, breastBobWeight, breastWeights, navelWeights, NAVEL_FLAT_TARGET, navelFlatWeight, tPoseTurns, ARM_SIDES, armsLine, ARM_RAISE_TARGETS, armRaiseWeight, SEAT_V2_TARGET, seatCorrectiveV2Weight, fingerBend, THUMB_TO_PALM, bumpLine, fingersLine, restingBellySpring, statusLine, stepBellySpring, stepBreastSpring, walkBounceAccel,
   type Garment, type SarahLabPose,
 } from './sarahLabTool';
 
@@ -160,6 +160,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let pose: SarahLabPose = 'stand';
   let bump = 100;
   let curl = 0;
+  // the ARMS slider: how far T-POSE raises the arms, and which (Joshua, 2026-10-15)
+  let armsDeg = 90, armSide = 0;
   // The bump's spring and the breasts' (lighter, quicker), fed the same motion. The
   // bump's weight is its size's own (`bellyMotionWeights`): the WEIGHT slider that
   // added to it is gone (Joshua, 2026-10-08: "keep the current weights... just not
@@ -205,6 +207,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     const bumpField = fields[SARAH_LAB_FIELD.bump], fingerField = fields[SARAH_LAB_FIELD.fingers];
     if (bumpField) bumpField.textContent = bumpLine(bump);
     if (fingerField) fingerField.textContent = fingersLine(curl);
+    const armsField = fields[SARAH_LAB_FIELD.arms];
+    if (armsField) armsField.textContent = armsLine(armsDeg, ARM_SIDES[armSide]);
+    if (buttons.armSide) buttons.armSide.textContent = `ARMS · ${ARM_SIDES[armSide]}`;
     const lit = (b: HTMLButtonElement | undefined, on: boolean) => {
       if (!b) return;
       b.style.background = on ? 'rgba(212,168,83,0.92)' : 'rgba(16,20,26,0.72)';
@@ -219,7 +224,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     if (buttons.model) buttons.model.textContent = modelLine(modelIndex);
     if (buttons.refine) {
       // only v2 has the switchable curve: the button is not shown for v1
-      buttons.refine.style.display = SARAH_LAB_MODELS[modelIndex].id === 'v2' ? '' : 'none';
+      buttons.refine.style.display = SARAH_LAB_MODELS[modelIndex].id.startsWith('v2') ? '' : 'none';
       buttons.refine.textContent = refineLine(refine);
       lit(buttons.refine, refine);
     }
@@ -238,10 +243,22 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     }
   }
 
+  /** The raised-arm shapes, for whichever arms T-POSE has raised (named by the side of her each arm was modelled on). */
+  function armRaiseWeights(): Record<string, number> {
+    const out: Record<string, number> = { [ARM_RAISE_TARGETS.plusX]: 0, [ARM_RAISE_TARGETS.minusX]: 0 };
+    if (pose !== 'tpose' || !rig || !measure) return out;
+    const side = ARM_SIDES[armSide], w = armRaiseWeight(armsDeg);
+    for (const [arm, on] of [[measure.joints.shoulderL, side !== 'right'], [measure.joints.shoulderR, side !== 'left']] as const) {
+      if (!on) continue;
+      out[(rig.bind[arm]?.x ?? 0) >= 0 ? ARM_RAISE_TARGETS.plusX : ARM_RAISE_TARGETS.minusX] = w;
+    }
+    return out;
+  }
+
   function applyLook(): void {
     for (const mesh of skinned) {
       const dict = mesh.morphTargetDictionary, influences = mesh.morphTargetInfluences;
-      if (dict && influences) for (const [name, w] of Object.entries({ ...bellyWeights(bump), ...breastWeights(bump), ...navelWeights(bump), [NAVEL_FLAT_TARGET]: navelFlatWeight(bump), [BELLY_REFINE_TARGET]: refineWeight(refine, bump), [SEAT_TARGET]: seatCorrectiveWeight(pose === 'sit' ? 1 : 0, bump), [SEAT_V2_TARGET]: seatCorrectiveV2Weight(pose === 'sit' ? 1 : 0, bump) })) {
+      if (dict && influences) for (const [name, w] of Object.entries({ ...bellyWeights(bump), ...breastWeights(bump), ...navelWeights(bump), [NAVEL_FLAT_TARGET]: navelFlatWeight(bump), [BELLY_REFINE_TARGET]: refineWeight(refine, bump), [SEAT_TARGET]: seatCorrectiveWeight(pose === 'sit' ? 1 : 0, bump), [SEAT_V2_TARGET]: seatCorrectiveV2Weight(pose === 'sit' ? 1 : 0, bump), ...armRaiseWeights() })) {
         const at = dict[name];
         if (at !== undefined) influences[at] = w;
       }
@@ -349,15 +366,17 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     };
     slider(SARAH_LAB_FIELD.bump, bump, (v) => { bump = v; }, BUMP_MAX_PERCENT);
     slider(SARAH_LAB_FIELD.fingers, curl, (v) => { curl = v; });
+    slider(SARAH_LAB_FIELD.arms, armsDeg, (v) => { armsDeg = v; }, 90);
     const row = document.createElement('div');
     row.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap';
     buttons.outfit = btn(outfitLine(outfit), SARAH_LAB_ACTION.outfit, () => { outfit = nextOutfit(outfit, garments); applyLook(); });
     buttons.model = btn(modelLine(modelIndex), SARAH_LAB_ACTION.model, () => { modelIndex = (modelIndex + 1) % SARAH_LAB_MODELS.length; loadSarah(); });
     buttons.refine = btn(refineLine(refine), SARAH_LAB_ACTION.refine, () => { refine = !refine; applyLook(); refresh(); });
+    buttons.armSide = btn('ARMS · both', SARAH_LAB_ACTION.armSide, () => { armSide = (armSide + 1) % ARM_SIDES.length; applyLook(); refresh(); });
     buttons.turn = btn('TURN', SARAH_LAB_ACTION.turn, () => { turning = !turning; });
     // a nudge up, as a hop would: the bump lags, drops and settles
     buttons.bounce = btn('BOUNCE', SARAH_LAB_ACTION.bounce, () => { spring.vy += 0.3; breastSpring.vy += 0.3; });
-    for (const b of [buttons.model, buttons.refine, buttons.outfit, buttons.turn, buttons.bounce]) { b.style.padding = '8px 10px'; b.style.fontSize = '12px'; row.appendChild(b); }
+    for (const b of [buttons.model, buttons.refine, buttons.outfit, buttons.armSide, buttons.turn, buttons.bounce]) { b.style.padding = '8px 10px'; b.style.fontSize = '12px'; row.appendChild(b); }
     right.appendChild(row);
     right.style.maxHeight = 'calc(100% - 85px)';
     right.style.overflowY = 'auto';
@@ -402,7 +421,15 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       base = poseHuman(measure, rig.bind, { stance, phase, seconds, lean: 0, carry }, poseOut);
     }
     // The master bind pose holds both arms out, exposing the shirt's sides.
-    if (pose === 'tpose') base = base.map(turn => ({ ...turn, radians: 0 }));
+    if (pose === 'tpose') {
+      // every turn undone back to the modelled pose, then the chosen arms raised by the
+      // ARMS slider toward level (v2 is modelled arms-down; v1's are already level)
+      const j = measure.joints, f = armsDeg / 90, side = ARM_SIDES[armSide];
+      base = [...base.map(turn => ({ ...turn, radians: 0 })), ...tPoseTurns(rig.bind, [
+        { shoulder: j.shoulderL, elbow: j.elbowL, out: measure.leftSign > 0 ? 1 : -1, fraction: side === 'right' ? 0 : f },
+        { shoulder: j.shoulderR, elbow: j.elbowR, out: measure.leftSign > 0 ? -1 : 1, fraction: side === 'left' ? 0 : f },
+      ])];
+    }
     if (curl <= 0 || fingers.length === 0) return base;
     const extra: JointTurn[] = [];
     for (const f of fingers) {
