@@ -38,10 +38,10 @@
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { MeshoptDecoder, MeshoptEncoder } from 'meshoptimizer';
-import { closestBary, vertexNormals } from './fitMeshyBikini.mjs';
+import { closestBary, vertexNormals, NORMAL_CARRY_M, NORMAL_SHIFT_M } from './fitMeshyBikini.mjs';
 
 export const TIE_REACH_M = 0.011;
-export const CUP_ON_BREAST = 0.65;
+export const CUP_ON_BREAST = 0.65, CORNER_SMOOTH_ROUNDS = 30, CUP_BREAST_TRI = 0.3, CUP_BREAST_REACH_M = 0.02;
 export const STRAP_W_M = 0.0065;
 export const STRAP_T_M = 0.0018;
 export const STRAP_CLEAR_M = 0.0035;
@@ -92,7 +92,7 @@ export async function sarahV2BikiniFinish(src, dst = src, { log = console.log } 
   const armJ = new Set(joints.map((_, k) => k).filter((k) => Math.abs(jw[k][0]) > 0.13 && jw[k][1] > 0.6));
   const armShare = (i) => { let a = 0; for (let c = 0; c < 4; c += 1) if (armJ.has(bJ[i * 4 + c])) a += bW[i * 4 + c]; return a; };
   const armTri = new Uint8Array(bIdx.length / 3); for (let t = 0; t < bIdx.length; t += 3) armTri[t / 3] = armShare(bIdx[t]) + armShare(bIdx[t + 1]) + armShare(bIdx[t + 2]) > 1.5 ? 1 : 0;
-  const nearest = (p) => {
+  const nearest = (p, only = null) => {
     let best = null;
     for (let r = 0; r <= 8; r += 1) {
       if (best && Math.sqrt(best.d2) <= r * CELL) break;
@@ -101,7 +101,7 @@ export async function sarahV2BikiniFinish(src, dst = src, { log = console.log } 
         if (Math.max(Math.abs(i), Math.abs(j), Math.abs(k)) !== r) continue;
         for (const t of triCells.get(`${cx + i},${cy + j},${cz + k}`) ?? []) {
           const ia = bIdx[t], ib = bIdx[t + 1], ic = bIdx[t + 2];
-          if (armTri[t / 3]) continue;
+          if (armTri[t / 3] || (only && !only[t / 3])) continue;
           const bc = closestBary(p, BP(ia), BP(ib), BP(ic)), q = [0, 1, 2].map((d) => bc[0] * bPos[ia * 3 + d] + bc[1] * bPos[ib * 3 + d] + bc[2] * bPos[ic * 3 + d]);
           const d2 = (p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2 + (p[2] - q[2]) ** 2;
           if (!best || d2 < best.d2) best = { d2, tri: [ia, ib, ic], bc, q };
@@ -113,6 +113,10 @@ export async function sarahV2BikiniFinish(src, dst = src, { log = console.log } 
     const s = dot(sub(p, best.q), n);
     return { ...best, n, dist: Math.sign(s || 1) * Math.sqrt(best.d2) };
   };
+  // HER BREAST, AS SKIN: the triangles the breast shapes carry (mean `breastGrow` reach at
+  // least CUP_BREAST_TRI of its most)
+  const growAt = (i) => Math.hypot(grow[i * 3], grow[i * 3 + 1], grow[i * 3 + 2]) / growMax;
+  const breastTri = new Uint8Array(bIdx.length / 3); for (let t = 0; t < bIdx.length; t += 3) breastTri[t / 3] = (growAt(bIdx[t]) + growAt(bIdx[t + 1]) + growAt(bIdx[t + 2])) / 3 >= CUP_BREAST_TRI ? 1 : 0;
   const breastness = (b) => b.bc.reduce((a, w, k) => a + w * Math.hypot(grow[b.tri[k] * 3], grow[b.tri[k] * 3 + 1], grow[b.tri[k] * 3 + 2]), 0) / growMax;
   // ── the bikini, in metres ──
   const kRaw = read(kini.getAttribute('POSITION')), kn = kRaw.length / 3, kPos = new Float32Array(kRaw.length);
@@ -140,7 +144,7 @@ export async function sarahV2BikiniFinish(src, dst = src, { log = console.log } 
 
   // 2. the cups' outer corners, onto her breast
   const tips = [1, -1].map((sg) => { let t = null; for (let i = 0; i < bn; i += 1) { const x = sg * bPos[i * 3], y = bPos[i * 3 + 1], z = bPos[i * 3 + 2]; if (x > 0.06 && x < 0.15 && y > 1.21 && y < 1.36 && (!t || z > t[2])) t = BP(i); } return t; });
-  let drawn = 0;
+  let drawn = 0; const cornerMove = new Map();
   for (let i = 0; i < kn; i += 1) {
     if (tag[i] !== 2) continue;
     const p = KP(i), tip = tips[p[0] >= 0 ? 0 : 1];
@@ -153,11 +157,41 @@ export async function sarahV2BikiniFinish(src, dst = src, { log = console.log } 
       cur = add(cur, scl(toward, 0.003 / l)); q = nearest(cur); if (!q) break;
       cur = add(q.q, scl(q.n, off));
     }
-    kPos.set(cur, i * 3); rebind.set(i, {}); drawn += 1;
+    cornerMove.set(i, sub(cur, p)); drawn += 1;
+  }
+  // ...and, like the fit's print, the MOVE is smoothed over the cup's surface before it is
+  // applied, so the corner bends onto her breast as one piece instead of tearing where moved
+  // vertices meet unmoved ones (the fins left at a small bust)
+  {
+    const adj = new Map();
+    for (let t = 0; t < kIdx.length; t += 3) for (let e = 0; e < 3; e += 1) { const a = kIdx[t + e], b = kIdx[t + (e + 1) % 3]; if (tag[a] !== 2 || tag[b] !== 2) continue; (adj.get(a) ?? adj.set(a, []).get(a)).push(b); (adj.get(b) ?? adj.set(b, []).get(b)).push(a); }
+    let mv = new Map([...adj.keys()].map((v) => [v, cornerMove.get(v) ?? [0, 0, 0]]));
+    for (let r = 0; r < CORNER_SMOOTH_ROUNDS; r += 1) {
+      const nx = new Map();
+      for (const [v, m] of mv) { const ns = adj.get(v), a = [0, 0, 0]; for (const w of ns) { const o = mv.get(w); a[0] += o[0]; a[1] += o[1]; a[2] += o[2]; } nx.set(v, add(scl(m, 0.5), scl(a, 0.5 / ns.length))); }
+      // the moved vertices keep at least their own move: the corner still reaches the breast
+      for (const [v, m] of cornerMove) { const o = nx.get(v); if (o && len(o) < len(m)) nx.set(v, m); }
+      mv = nx;
+    }
+    let spread = 0;
+    for (const [v, m] of mv) { if (len(m) < 0.0002) continue; const p = add(KP(v), m), q = nearest(p), h = q ? Math.max(0.0025, Math.min(0.0055, q.dist)) : 0; kPos.set(q ? add(q.q, scl(q.n, h)) : p, v * 3); rebind.set(v, {}); spread += 1; }
+    log(`finish: the corners' move smoothed over the cup (${spread} vertices carried)`);
   }
   log(`finish: ${drawn} cup vertices off her breast drawn back onto it`);
+
   if (process.env.FINISH_DEBUG) { let longT = 0; const vs = new Set(); for (let t = 0; t < kIdx.length; t += 3) { const a = kIdx[t], b = kIdx[t + 1], c = kIdx[t + 2]; if (tag[a] !== 2) continue; const e = Math.max(len(sub(KP(a), KP(b))), len(sub(KP(b), KP(c))), len(sub(KP(c), KP(a)))); if (e > 0.012) { longT += 1; vs.add(a); vs.add(b); vs.add(c); } } log(`debug: ${longT} cup triangles with an edge over 12 mm`); const ex = [...vs].slice(0, 12).map((i) => { const q = nearest(KP(i)); return KP(i).map((v) => v.toFixed(3)).join(',') + ' b' + breastness(q).toFixed(2) + ' d' + (q.dist * 1000).toFixed(0); }); log(ex.join(' | ')); }
   if (process.env.FINISH_DEBUG) { const h = new Map(); for (let i = 0; i < kn; i += 1) { if (tag[i] !== 2 || Math.abs(kPos[i * 3]) < 0.11) continue; const q = nearest(KP(i)); const b = Math.round(breastness(q) * 10) / 10; const k = `${b}`; const e = h.get(k) ?? [0, 9, -9]; e[0] += 1; e[1] = Math.min(e[1], kPos[i * 3 + 2]); e[2] = Math.max(e[2], kPos[i * 3 + 2]); h.set(k, e); } log([...h].sort().map(([k, e]) => `b${k}: ${e[0]} z ${e[1].toFixed(3)}..${e[2].toFixed(3)}`).join(' | ')); }
+
+  // 2b. THE WHOLE CUP RIDES HER BREAST (Joshua, 2026-10-15, on the 0.5x side view: "a slight
+  // stick out"). The fit bound each cup vertex to the nearest skin, and at the cup's outer
+  // lower corner that was her ribs, which do not shrink with the breast: at a small bust that
+  // corner stayed where the full breast had been and stood out in front of her. Every cup
+  // vertex is bound to the nearest BREAST skin instead (within CUP_BREAST_REACH_M; the bridge
+  // string over her sternum keeps its own), so the whole cup grows, shrinks, droops and
+  // spreads with the breast. Nothing is moved; only what it rides.
+  let rideBreast = 0;
+  for (let i = 0; i < kn; i += 1) { if (tag[i] !== 2) continue; const q = nearest(KP(i), breastTri); if (!q || Math.abs(q.dist) > CUP_BREAST_REACH_M) continue; rebind.set(i, { ...(rebind.get(i) ?? {}), breast: true }); rideBreast += 1; }
+  log(`finish: ${rideBreast} cup vertices ride her breast`);
 
   // 3. the halter straps, rebuilt as taut bands
   const strapTris = new Set(), straps = [];
@@ -226,20 +260,22 @@ export async function sarahV2BikiniFinish(src, dst = src, { log = console.log } 
   const D = kT.map((d) => { const o = new Float32Array(N * 3); o.set(d); return o; });
 
   // bound again: everything moved, and the new bands (each ring at the skin under its centre)
-  const bindAt = (v, p, ring) => {
-    const q = nearest(ring ?? p); if (!q) return;
+  const bindAt = (v, p, ring, only = null) => {
+    const q = nearest(ring ?? p, only); if (!q) return;
     const accW = new Map();
     for (let k = 0; k < 3; k += 1) for (let c = 0; c < 4; c += 1) { const j = bJ[q.tri[k] * 4 + c]; const w = bW[q.tri[k] * 4 + c] * q.bc[k]; if (!(w > 0)) continue; accW.set(j, (accW.get(j) || 0) + w); }
     const top = [...accW].sort((a, b) => b[1] - a[1]).slice(0, 4), sum = top.reduce((a, [, w]) => a + w, 0);
     for (let c = 0; c < 4; c += 1) { J[v * 4 + c] = top[c] ? top[c][0] : 0; Wt[v * 4 + c] = top[c] ? top[c][1] / sum : 0; }
     const off = Math.max(0, dot(sub(p, q.q), q.n));
     D.forEach((d, t) => {
-      const dt = bT[t], dn = bTN[t]; const o = [0, 0, 0];
-      for (let k = 0; k < 3; k += 1) for (let e = 0; e < 3; e += 1) o[e] += q.bc[k] * (dt[q.tri[k] * 3 + e] + (dn ? off * dn[q.tri[k] * 3 + e] : 0));
+      const dt = bT[t], dn = bTN[t]; const o = [0, 0, 0], sh = [0, 0, 0];
+      for (let k = 0; k < 3; k += 1) for (let e = 0; e < 3; e += 1) { o[e] += q.bc[k] * dt[q.tri[k] * 3 + e]; if (dn) sh[e] += q.bc[k] * Math.min(off, NORMAL_CARRY_M) * dn[q.tri[k] * 3 + e]; }
+      // bounded as in the fit: a skin normal turned nearly round must not fling the fabric
+      const l = Math.hypot(...sh); for (let e = 0; e < 3; e += 1) o[e] += l > NORMAL_SHIFT_M ? sh[e] * NORMAL_SHIFT_M / l : sh[e];
       d.set(apply(Ti, o, 0), v * 3);
     });
   };
-  for (const v of rebind.keys()) bindAt(v, KP(v), null);
+  for (const [v, r] of rebind) bindAt(v, KP(v), null, r.breast ? breastTri : null);
   newPos.forEach((p, j) => bindAt(kn + j, p, newRing[j]));
   // Where it leaves the cup, a band rides with the cup, not with the chest under it: the cup is
   // carried forward and down as her breast grows, and a band bound only to her chest would stay
