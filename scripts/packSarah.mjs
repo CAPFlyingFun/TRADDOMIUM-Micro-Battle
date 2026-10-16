@@ -44,7 +44,7 @@ export async function packSarah(file, { log = console.log } = {}) {
       W.setArray(u).setNormalized(true); quantized += 1;
     }
     const J = prim.getAttribute('JOINTS_0');
-    if (J && !(J.getArray() instanceof Uint8Array) && Math.max(...J.getArray()) < 256) J.setArray(Uint8Array.from(J.getArray()));
+    if (J && !(J.getArray() instanceof Uint8Array) && J.getArray().every((j) => j < 256)) J.setArray(Uint8Array.from(J.getArray()));
   }
   // what earlier edits replaced but left in the file (old garment accessors, old shape
   // data, textures no material uses) is dropped

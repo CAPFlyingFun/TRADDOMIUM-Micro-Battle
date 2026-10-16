@@ -22,6 +22,7 @@
  *   node scripts/packSarah.mjs <out>
  */
 import { fitMeshyBikini } from './fitMeshyBikini.mjs';
+import { sarahV2BikiniFinish } from './sarahV2BikiniFinish.mjs';
 
 /** Her breast's tip is looked for here: above the 100% bump, which on v2 reaches past the breasts below 1.2 m. */
 export const TIP_BOX = [0.06, 0.15, 1.21, 1.36];
@@ -37,7 +38,9 @@ export const PLACE_V2 = { bottom: { part: 0, scale: 0.43, topY: 0.94, contactM: 
 export const MESHY_BIKINI = 'art/humans/outfits/bikini-string-meshy.glb';
 
 export async function sarahV2Bikini(src, dst = src, { log = console.log } = {}) {
-  await fitMeshyBikini(MESHY_BIKINI, src, { log, create: true, followNormals: true, out: dst, tipBox: TIP_BOX, place: PLACE_V2 });
+  await fitMeshyBikini(MESHY_BIKINI, src, { log, create: true, followNormals: true, out: dst, tipBox: TIP_BOX, place: PLACE_V2, keepTags: true });
+  // then finished: no fabric on her arms, the ties against her hip, the cups' outer corners on her breast, the halter straps rebuilt as taut bands
+  await sarahV2BikiniFinish(dst, dst, { log });
 }
 
 if (process.argv[1]?.endsWith('sarahV2Bikini.mjs')) await sarahV2Bikini(process.argv[2], process.argv[3] ?? process.argv[2]);

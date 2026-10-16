@@ -65,7 +65,7 @@ const apply = (m, v, w) => [m[0] * v[0] + m[4] * v[1] + m[8] * v[2] + w * m[12],
 const readAttr = (A) => { const n = A.getCount(), s = A.getElementSize(), out = new Float32Array(n * s), v = []; for (let i = 0; i < n; i += 1) { A.getElement(i, v); for (let c = 0; c < s; c += 1) out[i * s + c] = v[c]; } return out; };
 
 /** Closest point on triangle abc to p (Ericson), as barycentrics. */
-function closestBary(p, a, b, c) {
+export function closestBary(p, a, b, c) {
   const ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]], ap = [p[0] - a[0], p[1] - a[1], p[2] - a[2]];
   const dot = (u, v) => u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
   const d1 = dot(ab, ap), d2 = dot(ac, ap); if (d1 <= 0 && d2 <= 0) return [1, 0, 0];
@@ -77,7 +77,7 @@ function closestBary(p, a, b, c) {
   const den = 1 / (va + vb + vc), v = vb * den, w = vc * den; return [1 - v - w, v, w];
 }
 
-function vertexNormals(pos, idx) {
+export function vertexNormals(pos, idx) {
   const n = new Float32Array(pos.length);
   for (let t = 0; t < idx.length; t += 3) {
     const a = idx[t] * 3, b = idx[t + 1] * 3, c = idx[t + 2] * 3;
@@ -131,7 +131,7 @@ export function flipKnot(pos) {
  * bikini as a new primitive and material when the file has none (v2 is one primitive);
  * `followNormals` carries the fabric's offset off the skin along the skin's TURNED normal
  * in every shape, not only its moved position, so a cup keeps its clearance when a shape
- * tips or swells the breast under it; `place` overrides `PLACE`; `tipBox` is where to look for her breast's tip ([x0, x1, y0, y1], metres; v2's 100% bump reaches higher than v1's); `out` writes elsewhere.
+ * tips or swells the breast under it; `place` overrides `PLACE`; `tipBox` is where to look for her breast's tip ([x0, x1, y0, y1], metres; v2's 100% bump reaches higher than v1's); `out` writes elsewhere; `keepTags` keeps each vertex's part as `_TAG` (0 brief, 1 side tie, 2 cup, 3 halter strap, 4 knot) for a later step.
  * With none of them, v1's fit is exactly what it was.
  */
 /**
@@ -176,7 +176,7 @@ export function reshapeBack(pos, { top, legLower = 0, legDrop = 0, zFade = [-0.0
   log(`fit: rear panel reshaped (${moved} scan vertices; its top edge to ${top} in the scan, at most ${(most * 100).toFixed(1)} scan-cm moved)`);
 }
 
-export async function fitMeshyBikini(meshyFile, sarahFile, { log = console.log, create = false, followNormals = false, place: placeOverride = null, out = sarahFile, tipBox = [0.05, 0.16, 1.17, 1.36] } = {}) {
+export async function fitMeshyBikini(meshyFile, sarahFile, { log = console.log, create = false, followNormals = false, place: placeOverride = null, out = sarahFile, tipBox = [0.05, 0.16, 1.17, 1.36], keepTags = false } = {}) {
   await Promise.all([MeshoptDecoder.ready, MeshoptEncoder.ready, MeshoptSimplifier.ready]);
   const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'meshopt.decoder': MeshoptDecoder, 'meshopt.encoder': MeshoptEncoder });
   const doc = await io.read(sarahFile), meshy = await io.read(meshyFile);
@@ -527,7 +527,7 @@ export async function fitMeshyBikini(meshyFile, sarahFile, { log = console.log, 
     t.setAttribute('NORMAL', acc('VEC3', nlocal(tNrm[k])));
     dp.addTarget(t);
   });
-  if (process.env.FIT_DEBUG) { const tag = new Uint8Array(N); let k = 0; for (const p of pieces) { tag.set(p.part, k); k += p.part.length; } dp.setAttribute('_TAG', acc('SCALAR', tag)); }
+  if (process.env.FIT_DEBUG || keepTags) { const tag = new Uint8Array(N); let k = 0; for (const p of pieces) { tag.set(p.part, k); k += p.part.length; } dp.setAttribute('_TAG', acc('SCALAR', tag)); }
   dp.setExtras({ source: 'meshy', fitted: 'scripts/fitMeshyBikini.mjs' });
   // plain fabric until it has a texture of its own
   const mat = dp.getMaterial();
