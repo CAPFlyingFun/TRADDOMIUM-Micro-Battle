@@ -60,7 +60,7 @@ const read = (A) => { const n = A.getCount(), s = A.getElementSize(), out = new 
 const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], add = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]], scl = (a, s) => [a[0] * s, a[1] * s, a[2] * s];
 const len = (a) => Math.hypot(a[0], a[1], a[2]), nrmz = (a) => { const l = len(a) || 1; return scl(a, 1 / l); }, cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]], dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 
-export async function sarahV2BikiniFinish(src, dst = src, { log = console.log } = {}) {
+export async function sarahV2BikiniFinish(src, dst = src, { log = console.log, keepCupShape = false } = {}) {
   await Promise.all([MeshoptDecoder.ready, MeshoptEncoder.ready]);
   const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'meshopt.decoder': MeshoptDecoder, 'meshopt.encoder': MeshoptEncoder });
   const doc = await io.read(src), skin = doc.getRoot().listSkins()[0], joints = skin.listJoints();
@@ -145,7 +145,8 @@ export async function sarahV2BikiniFinish(src, dst = src, { log = console.log } 
   // 2. the cups' outer corners, onto her breast
   const tips = [1, -1].map((sg) => { let t = null; for (let i = 0; i < bn; i += 1) { const x = sg * bPos[i * 3], y = bPos[i * 3 + 1], z = bPos[i * 3 + 2]; if (x > 0.06 && x < 0.15 && y > 1.21 && y < 1.36 && (!t || z > t[2])) t = BP(i); } return t; });
   let drawn = 0; const cornerMove = new Map();
-  for (let i = 0; i < kn; i += 1) {
+  // (keepCupShape: a cup placed whole, keeping its own shape, is not reshaped here)
+  for (let i = 0; i < kn && !keepCupShape; i += 1) {
     if (tag[i] !== 2) continue;
     const p = KP(i), tip = tips[p[0] >= 0 ? 0 : 1];
     if (Math.abs(p[0]) < Math.abs(tip[0])) continue; // her inner side and the bridge: untouched
