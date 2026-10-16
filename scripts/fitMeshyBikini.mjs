@@ -53,7 +53,7 @@ export const FABRIC_M = 0.002;
 /** How far along a strap the move of its printed cup is carried (followNormals fits only). */
 export const STRAP_FOLLOW_M = 0.06;
 /** (v2) Rounds of smoothing the print's MOVE over the cup's own surface (each spreads it about one edge). */
-export const PRINT_SMOOTH_ROUNDS = 80, IRON_ROUNDS = 10;
+export const PRINT_SMOOTH_ROUNDS = 80, IRON_ROUNDS = 10, HEM_IRON_ROUNDS = 40, HEM_RAMP_M = 0.035;
 /** (v2) The most of the fabric's height carried along the skin normal's turn in a shape, and the most that turn may shift it. */
 export const NORMAL_CARRY_M = 0.006, NORMAL_SHIFT_M = 0.004;
 /** (v2) A printed cup triangle whose facing turned past this cosine (over: flipped), or whose area fell below this share of the scan's, is a fold. */
@@ -373,31 +373,9 @@ export async function fitMeshyBikini(meshyFile, sarahFile, { log = console.log, 
       }
       const creaseAt = (x) => { const ax = Math.min(0.25, Math.max(tip.x - 0.03, Math.abs(x))), u = Math.round((Math.sign(x || 1) * ax - X0) / R - 0.5); let c = 0, k = 0; for (let d = -8; d <= 8; d += 1) if (Number.isFinite(crease[u + d])) { c += crease[u + d]; k += 1; } return k ? c / k : -Infinity; };
       const BAND = 0.015, LIFT = 0.01; // the edge stops just above the fold, never in it
-      if (!followNormals) {
-        for (let i = 0; i < n; i += 1) {
-          if (!printed[i]) continue; const c = creaseAt(pos[i * 3]) + LIFT, d = pos[i * 3 + 1] - c;
-          if (d < BAND) pos[i * 3 + 1] = c + BAND * Math.exp((d - BAND) / BAND);
-        }
-      } else {
-        // (v2) THE CUP'S LOWER HALF IS SHORTENED, NOT CRUSHED (Joshua, 2026-10-15: "fix the
-        // edges to look the same as v1"). v1 squeezed every cup vertex that came within
-        // BAND of the crease into that band, which on v1 touched only the hem; v2's breast
-        // sits lower against the cup, so the band took whole centimetres of fabric and folded
-        // them into pleats, a crumpled hem and fins at its corners. Here each column of the
-        // cup below the tip is scaled evenly toward the tip so its lowest point lands where
-        // v1's band put it: the same edge height, with nothing folded.
-        const BIN = 0.002, low = new Map();
-        for (let i = 0; i < n; i += 1) { if (!printed[i] || pos[i * 3 + 1] >= tip.y) continue; const b = Math.round(pos[i * 3] / BIN); low.set(b, Math.min(low.get(b) ?? Infinity, pos[i * 3 + 1])); }
-        const lowAt = (x) => { const b = Math.round(x / BIN); let m = 0, k = 0; for (let d = -6; d <= 6; d += 1) { const v = low.get(b + d); if (v !== undefined) { m += v; k += 1; } } return k ? m / k : tip.y; };
-        let shortened = 0;
-        for (let i = 0; i < n; i += 1) {
-          if (!printed[i] || pos[i * 3 + 1] >= tip.y) continue;
-          const x = pos[i * 3], target = creaseAt(x) + LIFT, lo = lowAt(x);
-          if (!(lo < target) || tip.y - lo < 0.01 || !(target < tip.y)) continue;
-          const k = (tip.y - target) / (tip.y - lo);
-          pos[i * 3 + 1] = Math.max(target, tip.y - (tip.y - pos[i * 3 + 1]) * k); shortened += 1;
-        }
-        log(`fit: ${shortened} cup vertices below the tip shortened evenly to clear the crease`);
+      for (let i = 0; i < n; i += 1) {
+        if (!printed[i]) continue; const c = creaseAt(pos[i * 3]) + LIFT, d = pos[i * 3 + 1] - c;
+        if (d < BAND) pos[i * 3 + 1] = c + BAND * Math.exp((d - BAND) / BAND);
       }
       const placed = followNormals ? Float32Array.from(pos) : null; // before printing, for the straps below
       for (let i = 0; i < n; i += 1) {
@@ -452,6 +430,8 @@ export async function fitMeshyBikini(meshyFile, sarahFile, { log = console.log, 
         let folds = 0;
         for (let t = 0; t < idx.length; t += 3) {
           const a = idx[t], b = idx[t + 1], c = idx[t + 2]; if (!printed[a] || !printed[b] || !printed[c]) continue;
+          // the cup's own rim, where its front and back faces meet, is meant to be pressed flat: not a fold
+          if (Math.max(layer[a], layer[b], layer[c]) - Math.min(layer[a], layer[b], layer[c]) > 0.5) continue;
           const n0 = tn(placed, a, b, c), n1 = tn(pos, a, b, c), l0 = Math.hypot(...n0), l1 = Math.hypot(...n1); if (!(l0 > 0)) continue;
           const turn = (n0[0] * n1[0] + n0[1] * n1[1] + n0[2] * n1[2]) / (l0 * (l1 || 1));
           if (turn < PRINT_FOLD_TURN || l1 / l0 < PRINT_FOLD_AREA) { w[a] = w[b] = w[c] = 0; folds += 1; }
@@ -489,6 +469,18 @@ export async function fitMeshyBikini(meshyFile, sarahFile, { log = console.log, 
           for (let i = 0; i < n; i += 1) { if (!printed[i] || !adj[i].length) continue; const m = [0, 0, 0]; for (const j of adj[i]) for (let d = 0; d < 3; d += 1) m[d] += pos[j * 3 + d]; for (let d = 0; d < 3; d += 1) nx[i * 3 + d] = pos[i * 3 + d] + lam * (m[d] / adj[i].length - pos[i * 3 + d]); }
           pos.set(nx);
           if (lam < 0) for (let i = 0; i < n; i += 1) { if (!printed[i]) continue; const off = GAP_M + layer[i] * FABRIC_M, q = nearest([pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]]); if (q && q.dist < off) for (let d = 0; d < 3; d += 1) pos[i * 3 + d] += q.n[d] * (off - q.dist); }
+        }
+        // the cup's LOWER HALF is ironed harder (Joshua, 2026-10-15: "the bottom of the cups
+        // are not smooth around like v1"): the scan's rolled hem kept small bumps along the
+        // bottom edge. The extra ironing ramps in below the tip, strongest at the hem, so there is
+        // no line where it starts; each round is held clear of her as before.
+        const hemW = new Float32Array(n);
+        for (let i = 0; i < n; i += 1) if (printed[i]) { const t = Math.min(1, Math.max(0, (tip.y - pos[i * 3 + 1]) / HEM_RAMP_M)); hemW[i] = t * t * (3 - 2 * t); }
+        for (let r = 0; r < HEM_IRON_ROUNDS; r += 1) for (const lam of [0.5, -0.53]) {
+          const nx = Float32Array.from(pos);
+          for (let i = 0; i < n; i += 1) { if (!printed[i] || !adj[i].length || !hemW[i]) continue; const m = [0, 0, 0]; for (const j of adj[i]) for (let d = 0; d < 3; d += 1) m[d] += pos[j * 3 + d]; for (let d = 0; d < 3; d += 1) nx[i * 3 + d] = pos[i * 3 + d] + hemW[i] * lam * (m[d] / adj[i].length - pos[i * 3 + d]); }
+          pos.set(nx);
+          if (lam < 0) for (let i = 0; i < n; i += 1) { if (!printed[i] || !hemW[i]) continue; const off = GAP_M + layer[i] * FABRIC_M, q = nearest([pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]]); if (q && q.dist < off) for (let d = 0; d < 3; d += 1) pos[i * 3 + d] += q.n[d] * (off - q.dist); }
         }
         log(`fit: the cups' print smoothed over their own surface (${PRINT_SMOOTH_ROUNDS} rounds), ${lifted} vertices lifted clear of her`);
       }

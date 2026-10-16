@@ -46,7 +46,7 @@ export const STRAP_W_M = 0.0065;
 export const STRAP_T_M = 0.0018;
 export const STRAP_CLEAR_M = 0.0035;
 export const STRAP_STEP_M = 0.004;
-export const STRAP_ITERS = 400, STRAP_KEEP_BEHIND_M = 0.03, STRAP_CUP_BLEND_M = 0.05;
+export const STRAP_ITERS = 400, STRAP_KEEP_BEHIND_M = 0.03, STRAP_CUP_BLEND_M = 0.05, STRAP_ONTO_CUP_M = 0.008;
 
 const mul = (x, y) => { const o = new Array(16).fill(0); for (let c = 0; c < 4; c += 1) for (let r = 0; r < 4; r += 1) for (let k = 0; k < 4; k += 1) o[c * 4 + r] += x[k * 4 + r] * y[c * 4 + k]; return o; };
 const invert = (m) => {
@@ -200,6 +200,11 @@ export async function sarahV2BikiniFinish(src, dst = src, { log = console.log } 
   // becomes the bow's loops and tails, which hang from the knot and are kept exactly as modelled;
   // the new band ends where the kept strap begins.
   const zCut = knot[2] + STRAP_KEEP_BEHIND_M, rebuilt = (i) => tag[i] === 3 && kPos[i * 3 + 2] >= zCut;
+  // WHERE THE CUP ENDS, exactly: the cup vertices that share a triangle with the strap being
+  // rebuilt. Each new band starts at the middle of its side's ring of them and moves as they do
+  // (Joshua, 2026-10-15: "it appears like the strap is missing a small section": a band started
+  // from a vertex chosen by nearness or height could miss the cup's real end).
+  const junction = new Set(); for (let t = 0; t < kIdx.length; t += 3) { const v = [kIdx[t], kIdx[t + 1], kIdx[t + 2]]; if (!v.some(rebuilt)) continue; for (const i of v) if (tag[i] === 2) junction.add(i); }
   for (let t = 0; t < kIdx.length; t += 3) if (rebuilt(kIdx[t]) || rebuilt(kIdx[t + 1]) || rebuilt(kIdx[t + 2])) strapTris.add(t);
   log(`finish: the halter's knot at ${knot.map((v) => v.toFixed(3)).join(', ')}; strap behind z ${zCut.toFixed(3)} kept as modelled`);
   for (const sg of [1, -1]) {
@@ -216,8 +221,10 @@ export async function sarahV2BikiniFinish(src, dst = src, { log = console.log } 
     log(`finish: ${kept.length} kept strap vertices to overlap`);
     const E = kept.length ? scl(kept.reduce((a, i) => add(a, KP(i)), [0, 0, 0]), 1 / kept.length) : mean(far);
     // it starts AT the cup's tip, the cup vertex nearest the scan's strap end, and rides with it
-    let tipV = -1; { const s0 = mean(lo); for (let i = 0; i < kn; i += 1) if (tag[i] === 2 && Math.sign(kPos[i * 3] || 1) === sg && (tipV < 0 || len(sub(KP(i), s0)) < len(sub(KP(tipV), s0)))) tipV = i; }
-    const S = KP(tipV), chord = sub(E, S), L = len(chord), u = scl(chord, 1 / L);
+    const ring = [...junction].filter((i) => Math.sign(kPos[i * 3] || 1) === sg);
+    const S = ring.length ? scl(ring.reduce((a, i) => add(a, KP(i)), [0, 0, 0]), 1 / ring.length) : mean(lo);
+    log(`finish: ${sg > 0 ? 'left' : 'right'} strap leaves its cup at a ring of ${ring.length} vertices`);
+    const chord = sub(E, S), L = len(chord), u = scl(chord, 1 / L);
     // the scan's own path, as a start: its vertices averaged in bins along the chord
     const BINS = 24, acc = Array.from({ length: BINS }, () => [0, 0, 0, 0]);
     for (const i of vs) { const t = dot(sub(KP(i), S), u) / L; if (t < 0 || t > 1) continue; const b = Math.min(BINS - 1, Math.floor(t * BINS)); for (let d = 0; d < 3; d += 1) acc[b][d] += kPos[i * 3 + d]; acc[b][3] += 1; }
@@ -234,7 +241,10 @@ export async function sarahV2BikiniFinish(src, dst = src, { log = console.log } 
       path = nx;
       if (it % 50 === 49) path = resample(path, STRAP_STEP_M);
     }
-    straps.push({ sg, path, S, E, lo: tipV });
+    // ...and it runs on past its start, straight down over the kept stub, by STRAP_ONTO_CUP_M, so
+    // the two overlap and the join cannot open (not snapped to her skin: the stub stands off her)
+    { const dir = nrmz(sub(path[0], path[1])), onCup = []; for (let j = Math.round(STRAP_ONTO_CUP_M / STRAP_STEP_M); j >= 1; j -= 1) onCup.push(add(path[0], scl(dir, j * STRAP_STEP_M))); path = [...onCup, ...path]; }
+    straps.push({ sg, path, S, E, ring });
     log(`finish: ${sg > 0 ? 'left' : 'right'} strap ${(L * 100).toFixed(1)} cm chord, ${path.length} rings, ${(path.reduce((a, p, k) => a + (k ? len(sub(p, path[k - 1])) : 0), 0) * 100).toFixed(1)} cm along her`);
   }
   // the old straps go
@@ -247,7 +257,7 @@ export async function sarahV2BikiniFinish(src, dst = src, { log = console.log } 
     path.forEach((p, k) => {
       const t = nrmz(sub(path[Math.min(path.length - 1, k + 1)], path[Math.max(0, k - 1)])), q = nearest(p), n0 = q ? q.n : [0, 0, 1];
       const b = nrmz(cross(t, n0)), n = nrmz(cross(b, t));
-      const toEnd = (path.length - 1 - k) * STRAP_STEP_M, fromCup = k * STRAP_STEP_M, w = STRAP_W_M * Math.min(toEnd >= 0.02 ? 1 : 0.6 + 0.4 * (toEnd / 0.02), fromCup >= 0.015 ? 1 : 0.7 + 0.3 * (fromCup / 0.015));
+      const toEnd = (path.length - 1 - k) * STRAP_STEP_M, fromCup = k * STRAP_STEP_M, w = STRAP_W_M * Math.min(toEnd >= 0.02 ? 1 : 0.6 + 0.4 * (toEnd / 0.02), fromCup >= 0.02 ? 1 : 0.55 + 0.45 * (fromCup / 0.02));
       for (let s = 0; s < SEG; s += 1) { const a = (s / SEG) * Math.PI * 2; newPos.push(add(p, add(scl(b, Math.cos(a) * w / 2), scl(n, Math.sin(a) * STRAP_T_M / 2)))); newRing.push(p); }
     });
     for (let k = 0; k < path.length - 1; k += 1) for (let s = 0; s < SEG; s += 1) {
@@ -280,18 +290,26 @@ export async function sarahV2BikiniFinish(src, dst = src, { log = console.log } 
   // Where it leaves the cup, a band rides with the cup, not with the chest under it: the cup is
   // carried forward and down as her breast grows, and a band bound only to her chest would stay
   // behind and open a gap. Over its first STRAP_CUP_BLEND_M its morphs ease from the cup's own
-  // (the scan's strap vertex where it met the cup) to her skin's.
+  // (as the cup tip is FINALLY bound, after the cups were bound to her breast) to her skin's.
   let blended = 0;
-  for (const { path, base, lo } of straps) for (let k = 0; k < path.length; k += 1) {
-    const along = k * STRAP_STEP_M; if (along >= STRAP_CUP_BLEND_M) break;
-    const x = along / STRAP_CUP_BLEND_M, w = 1 - x * x * (3 - 2 * x);
-    for (let s2 = 0; s2 < SEG; s2 += 1) {
-      const v = base + k * SEG + s2, m = new Map();
-      for (let c = 0; c < 4; c += 1) { m.set(kJ[lo * 4 + c], (m.get(kJ[lo * 4 + c]) || 0) + w * kW[lo * 4 + c]); m.set(J[v * 4 + c], (m.get(J[v * 4 + c]) || 0) + (1 - w) * Wt[v * 4 + c]); }
-      const top = [...m].filter(([, x]) => x > 0).sort((a, b) => b[1] - a[1]).slice(0, 4), sum = top.reduce((a, [, x]) => a + x, 0);
-      for (let c = 0; c < 4; c += 1) { J[v * 4 + c] = top[c] ? top[c][0] : 0; Wt[v * 4 + c] = top[c] ? top[c][1] / sum : 0; }
+  for (const { path, base, ring } of straps) {
+    if (!ring.length) continue;
+    // the junction ring's own motion: its weights and shape offsets, averaged
+    const rw = new Map(); for (const r of ring) for (let c = 0; c < 4; c += 1) rw.set(J[r * 4 + c], (rw.get(J[r * 4 + c]) || 0) + Wt[r * 4 + c] / ring.length);
+    const rd = D.map((d) => { const o = [0, 0, 0]; for (const r of ring) for (let e = 0; e < 3; e += 1) o[e] += d[r * 3 + e] / ring.length; return o; });
+    for (let k = 0; k < path.length; k += 1) {
+      const along = Math.max(0, k * STRAP_STEP_M - STRAP_ONTO_CUP_M); if (along >= STRAP_CUP_BLEND_M) break;
+      const x = along / STRAP_CUP_BLEND_M, w = 1 - x * x * (3 - 2 * x);
+      for (let s2 = 0; s2 < SEG; s2 += 1) {
+        const v = base + k * SEG + s2, m = new Map();
+        for (const [j, x2] of rw) m.set(j, (m.get(j) || 0) + w * x2);
+        for (let c = 0; c < 4; c += 1) m.set(J[v * 4 + c], (m.get(J[v * 4 + c]) || 0) + (1 - w) * Wt[v * 4 + c]);
+        const top = [...m].filter(([, x2]) => x2 > 0).sort((p2, q2) => q2[1] - p2[1]).slice(0, 4), sum = top.reduce((acc, [, x2]) => acc + x2, 0);
+        for (let c = 0; c < 4; c += 1) { J[v * 4 + c] = top[c] ? top[c][0] : 0; Wt[v * 4 + c] = top[c] ? top[c][1] / sum : 0; }
+        D.forEach((d, t) => { for (let e = 0; e < 3; e += 1) d[v * 3 + e] += w * (rd[t][e] - d[v * 3 + e]); });
+        blended += 1;
+      }
     }
-    for (let s2 = 0; s2 < SEG; s2 += 1) { const v = base + k * SEG + s2; D.forEach((d, t) => { for (let e = 0; e < 3; e += 1) d[v * 3 + e] += w * (kT[t][lo * 3 + e] - d[v * 3 + e]); }); blended += 1; }
   }
   log(`finish: ${blended} strap vertices near the cups ride with the cups`);
 
