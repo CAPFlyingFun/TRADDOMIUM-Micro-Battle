@@ -53,11 +53,11 @@ export const FABRIC_M = 0.002;
 /** How far along a strap the move of its printed cup is carried (followNormals fits only). */
 export const STRAP_FOLLOW_M = 0.06;
 /** (v2) Rounds of smoothing the print's MOVE over the cup's own surface (each spreads it about one edge). */
-export const PRINT_SMOOTH_ROUNDS = 80, IRON_ROUNDS = 10, HEM_IRON_ROUNDS = 40, HEM_RAMP_M = 0.035;
+export const PRINT_SMOOTH_ROUNDS = 80, IRON_ROUNDS = 10, HEM_IRON_ROUNDS = 40, HEM_RAMP_M = 0.035, LOWER_LAY_RAMP_M = 0.02, UNDER_VIEW_DEG = 35;
 /** (v2) The most of the fabric's height carried along the skin normal's turn in a shape, and the most that turn may shift it. */
 export const NORMAL_CARRY_M = 0.006, NORMAL_SHIFT_M = 0.004;
-/** (v2) A printed cup triangle whose facing turned past this cosine (over: flipped), or whose area fell below this share of the scan's, is a fold. */
-export const PRINT_FOLD_TURN = -0.2, PRINT_FOLD_AREA = 0.25;
+/** (v2) A printed cup triangle whose facing turned past this cosine against the scan's (it flipped over) is a fold. Squeezed triangles are not: printed flat they lie on her, as on v1. */
+export const PRINT_FOLD_TURN = -0.2;
 
 const mul = (x, y) => { const o = new Array(16).fill(0); for (let c = 0; c < 4; c += 1) for (let r = 0; r < 4; r += 1) for (let k = 0; k < 4; k += 1) o[c * 4 + r] += x[k * 4 + r] * y[c * 4 + k]; return o; };
 const invert = (m) => {
@@ -338,29 +338,45 @@ export async function fitMeshyBikini(meshyFile, sarahFile, { log = console.log, 
     // and its outer face FABRIC_M further, so a cup is her breast's own shape
     if (label === 'top') {
       const R = 0.0015, X0 = -0.26, Y0 = 0.95, W = Math.ceil(0.52 / R), H = Math.ceil(0.55 / R);
-      const zb = new Float32Array(W * H).fill(-Infinity), nb = new Float32Array(W * H * 3);
-      for (let t = 0; t < bIdx.length; t += 3) {
-        const ia = bIdx[t], ib = bIdx[t + 1], ic = bIdx[t + 2];
-        const ax = bPos[ia * 3], ay = bPos[ia * 3 + 1], bx = bPos[ib * 3], by = bPos[ib * 3 + 1], cx2 = bPos[ic * 3], cy2 = bPos[ic * 3 + 1];
-        if (Math.max(ax, bx, cx2) < X0 || Math.min(ax, bx, cx2) > X0 + W * R || Math.max(ay, by, cy2) < Y0 || Math.min(ay, by, cy2) > Y0 + H * R) continue;
-        const den = (by - cy2) * (ax - cx2) + (cx2 - bx) * (ay - cy2); if (Math.abs(den) < 1e-12) continue;
-        const u0 = Math.max(0, Math.floor((Math.min(ax, bx, cx2) - X0) / R)), u1 = Math.min(W - 1, Math.ceil((Math.max(ax, bx, cx2) - X0) / R));
-        const v0 = Math.max(0, Math.floor((Math.min(ay, by, cy2) - Y0) / R)), v1 = Math.min(H - 1, Math.ceil((Math.max(ay, by, cy2) - Y0) / R));
-        for (let v = v0; v <= v1; v += 1) for (let u = u0; u <= u1; u += 1) {
-          const px = X0 + (u + 0.5) * R, py = Y0 + (v + 0.5) * R;
-          const l1 = ((by - cy2) * (px - cx2) + (cx2 - bx) * (py - cy2)) / den, l2 = ((cy2 - ay) * (px - cx2) + (ax - cx2) * (py - cy2)) / den, l3 = 1 - l1 - l2;
-          if (l1 < -1e-6 || l2 < -1e-6 || l3 < -1e-6) continue;
-          const z = l1 * bPos[ia * 3 + 2] + l2 * bPos[ib * 3 + 2] + l3 * bPos[ic * 3 + 2], k = v * W + u;
-          if (z <= zb[k]) continue;
-          zb[k] = z; for (let d = 0; d < 3; d += 1) nb[k * 3 + d] = l1 * bNrm[ia * 3 + d] + l2 * bNrm[ib * 3 + d] + l3 * bNrm[ic * 3 + d];
+      // her front as seen along +z: the depth and normal of the skin nearest the viewer in each
+      // R-sized cell (a function so v2 can also look from a second, tilted viewpoint)
+      const makeView = (P, Nm) => {
+        const zb = new Float32Array(W * H).fill(-Infinity), nb = new Float32Array(W * H * 3);
+        for (let t = 0; t < bIdx.length; t += 3) {
+          const ia = bIdx[t], ib = bIdx[t + 1], ic = bIdx[t + 2];
+          const ax = P[ia * 3], ay = P[ia * 3 + 1], bx = P[ib * 3], by = P[ib * 3 + 1], cx2 = P[ic * 3], cy2 = P[ic * 3 + 1];
+          if (Math.max(ax, bx, cx2) < X0 || Math.min(ax, bx, cx2) > X0 + W * R || Math.max(ay, by, cy2) < Y0 || Math.min(ay, by, cy2) > Y0 + H * R) continue;
+          const den = (by - cy2) * (ax - cx2) + (cx2 - bx) * (ay - cy2); if (Math.abs(den) < 1e-12) continue;
+          const u0 = Math.max(0, Math.floor((Math.min(ax, bx, cx2) - X0) / R)), u1 = Math.min(W - 1, Math.ceil((Math.max(ax, bx, cx2) - X0) / R));
+          const v0 = Math.max(0, Math.floor((Math.min(ay, by, cy2) - Y0) / R)), v1 = Math.min(H - 1, Math.ceil((Math.max(ay, by, cy2) - Y0) / R));
+          for (let v = v0; v <= v1; v += 1) for (let u = u0; u <= u1; u += 1) {
+            const px = X0 + (u + 0.5) * R, py = Y0 + (v + 0.5) * R;
+            const l1 = ((by - cy2) * (px - cx2) + (cx2 - bx) * (py - cy2)) / den, l2 = ((cy2 - ay) * (px - cx2) + (ax - cx2) * (py - cy2)) / den, l3 = 1 - l1 - l2;
+            if (l1 < -1e-6 || l2 < -1e-6 || l3 < -1e-6) continue;
+            const z = l1 * P[ia * 3 + 2] + l2 * P[ib * 3 + 2] + l3 * P[ic * 3 + 2], k = v * W + u;
+            if (z <= zb[k]) continue;
+            zb[k] = z; for (let d = 0; d < 3; d += 1) nb[k * 3 + d] = l1 * Nm[ia * 3 + d] + l2 * Nm[ib * 3 + d] + l3 * Nm[ic * 3 + d];
+          }
         }
-      }
-      const at = (x, y) => { // bilinear over the front surface
-        const fu = (x - X0) / R - 0.5, fv = (y - Y0) / R - 0.5, u = Math.max(0, Math.min(W - 2, Math.floor(fu))), v = Math.max(0, Math.min(H - 2, Math.floor(fv))), tu = fu - u, tv = fv - v;
-        let z = 0, nn = [0, 0, 0], ws = 0;
-        for (const [du, dv, w] of [[0, 0, (1 - tu) * (1 - tv)], [1, 0, tu * (1 - tv)], [0, 1, (1 - tu) * tv], [1, 1, tu * tv]]) { const k = (v + dv) * W + u + du; if (!Number.isFinite(zb[k]) || w <= 0) continue; z += zb[k] * w; for (let d = 0; d < 3; d += 1) nn[d] += nb[k * 3 + d] * w; ws += w; }
-        if (!ws) return null; const l = Math.hypot(...nn) || 1; return { z: z / ws, n: nn.map((c) => c / l) };
+        const sample = (x, y) => { // bilinear over the surface seen
+          const fu = (x - X0) / R - 0.5, fv = (y - Y0) / R - 0.5, u = Math.max(0, Math.min(W - 2, Math.floor(fu))), v = Math.max(0, Math.min(H - 2, Math.floor(fv))), tu = fu - u, tv = fv - v;
+          let z = 0, nn = [0, 0, 0], ws = 0;
+          for (const [du, dv, w] of [[0, 0, (1 - tu) * (1 - tv)], [1, 0, tu * (1 - tv)], [0, 1, (1 - tu) * tv], [1, 1, tu * tv]]) { const k = (v + dv) * W + u + du; if (!Number.isFinite(zb[k]) || w <= 0) continue; z += zb[k] * w; for (let d = 0; d < 3; d += 1) nn[d] += nb[k * 3 + d] * w; ws += w; }
+          if (!ws) return null; const l = Math.hypot(...nn) || 1; return { z: z / ws, n: nn.map((c) => c / l) };
+        };
+        return { sample, zb };
       };
+      const front = makeView(bPos, bNrm), at = front.sample, zb = front.zb;
+      // (v2) HER BREAST SEEN FROM BELOW: the same view tilted UNDER_VIEW_DEG about her breast's
+      // tip, looking up, so the breast's underside and the crease under it are surfaces the print
+      // can land on rather than a jump in depth (see the print below)
+      const rot = (v, w, sgn) => { const c = Math.cos(sgn * UNDER_VIEW_DEG * Math.PI / 180), sn = Math.sin(sgn * UNDER_VIEW_DEG * Math.PI / 180), y = v[1] - (w ? tip.y : 0), z = v[2] - (w ? tip.z : 0); return [v[0], y * c - z * sn + (w ? tip.y : 0), y * sn + z * c + (w ? tip.z : 0)]; };
+      let atUnder = null;
+      if (followNormals) {
+        const Pr = new Float32Array(bPos.length), Nr = new Float32Array(bNrm.length);
+        for (let i = 0; i < bn; i += 1) { Pr.set(rot([bPos[i * 3], bPos[i * 3 + 1], bPos[i * 3 + 2]], 1, -1), i * 3); Nr.set(rot([bNrm[i * 3], bNrm[i * 3 + 1], bNrm[i * 3 + 2]], 0, -1), i * 3); }
+        atUnder = makeView(Pr, Nr).sample;
+      }
       // the crease under each breast, column by column: the height, below the tip, where
       // her front comes furthest back. Under it the front is her bump, which a cup never
       // reaches, so the cup's lower edge is gathered into the crease instead of being
@@ -399,6 +415,17 @@ export async function fitMeshyBikini(meshyFile, sarahFile, { log = console.log, 
           const q = nearest([pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]]);
           if (q) for (let d = 0; d < 3; d += 1) pf[d] = pf[d] * (1 - w) + (q.q[d] + q.n[d] * off) * w;
         }
+        // (v2) THE LOWER CUP IS PRINTED FROM BELOW (Joshua, 2026-10-15: "V1 almost looks
+        // painted... matching the breast mesh exactly"). Straight-on, v2's fuller breast hides its
+        // own underside: the view jumps from the breast to the chest behind it and the hem was
+        // printed across that jump into facets and crumples. Below the tip the cup is printed in
+        // the view from below as well, where the underside and the crease are plain surfaces,
+        // blended in over LOWER_LAY_RAMP_M under the tip, so every vertex still lands on her skin.
+        if (atUnder && pos[i * 3 + 1] < tip.y) {
+          const t = Math.min(1, (tip.y - pos[i * 3 + 1]) / LOWER_LAY_RAMP_M), u = t * t * (3 - 2 * t);
+          const r = rot([pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]], 1, -1), g = atUnder(r[0], r[1]);
+          if (g) { const pu = rot([0, 1, 2].map((d) => [r[0], r[1], g.z][d] + g.n[d] * off), 1, 1); for (let d = 0; d < 3; d += 1) pf[d] = pf[d] * (1 - u) + pu[d] * u; }
+        }
         pos.set(pf, i * 3);
       }
       // (v2) THE CUP BENDS ONTO HER AS ONE PIECE (Joshua, 2026-10-15: "the bikini bra is
@@ -421,10 +448,10 @@ export async function fitMeshyBikini(meshyFile, sarahFile, { log = console.log, 
           mv.set(nx);
         }
         // The print is kept exactly wherever it did not fold the fabric (her breast's own smooth
-        // shape, as on v1). A FOLD is a triangle the print turned over or crushed against the
-        // scan's own: its facing turned by more than PRINT_FOLD_TURN, or its area cut below
-        // PRINT_FOLD_AREA. Only there, and a few rings round it, does the smoothed bend take
-        // over, blended out so no seam shows.
+        // shape, as on v1). A FOLD is a triangle the print turned over against the scan's own
+        // (its facing turned past PRINT_FOLD_TURN); a squeezed triangle printed flat still lies
+        // on her, as on v1, and keeps the print. Only at the folds, and a ring or two round
+        // them, does the smoothed bend take over, blended out so no seam shows.
         const w = new Float32Array(n).fill(1);
         const tn = (P, a, b, c) => { const e1 = [P[b * 3] - P[a * 3], P[b * 3 + 1] - P[a * 3 + 1], P[b * 3 + 2] - P[a * 3 + 2]], e2 = [P[c * 3] - P[a * 3], P[c * 3 + 1] - P[a * 3 + 1], P[c * 3 + 2] - P[a * 3 + 2]]; return [e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0]]; };
         let folds = 0;
@@ -434,9 +461,9 @@ export async function fitMeshyBikini(meshyFile, sarahFile, { log = console.log, 
           if (Math.max(layer[a], layer[b], layer[c]) - Math.min(layer[a], layer[b], layer[c]) > 0.5) continue;
           const n0 = tn(placed, a, b, c), n1 = tn(pos, a, b, c), l0 = Math.hypot(...n0), l1 = Math.hypot(...n1); if (!(l0 > 0)) continue;
           const turn = (n0[0] * n1[0] + n0[1] * n1[1] + n0[2] * n1[2]) / (l0 * (l1 || 1));
-          if (turn < PRINT_FOLD_TURN || l1 / l0 < PRINT_FOLD_AREA) { w[a] = w[b] = w[c] = 0; folds += 1; }
+          if (turn < PRINT_FOLD_TURN) { w[a] = w[b] = w[c] = 0; folds += 1; }
         }
-        for (let r = 0; r < 4; r += 1) { const nx = Float32Array.from(w); for (let i = 0; i < n; i += 1) { if (!printed[i]) continue; for (const j of adj[i]) nx[i] = Math.min(nx[i], w[j]); } w.set(nx); }
+        for (let r = 0; r < 2; r += 1) { const nx = Float32Array.from(w); for (let i = 0; i < n; i += 1) { if (!printed[i]) continue; for (const j of adj[i]) nx[i] = Math.min(nx[i], w[j]); } w.set(nx); }
         for (let r = 0; r < 8; r += 1) { const nx = Float32Array.from(w); for (let i = 0; i < n; i += 1) { if (!printed[i] || !adj[i].length) continue; let m = 0; for (const j of adj[i]) m += w[j]; nx[i] = 0.5 * w[i] + 0.5 * m / adj[i].length; } w.set(nx); }
         let kept = 0;
         for (let i = 0; i < n; i += 1) if (printed[i]) { for (let d = 0; d < 3; d += 1) pos[i * 3 + d] = w[i] * pos[i * 3 + d] + (1 - w[i]) * (placed[i * 3 + d] + mv[i * 3 + d]); if (w[i] > 0.5) kept += 1; }
