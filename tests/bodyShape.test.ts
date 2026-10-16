@@ -183,3 +183,16 @@ describe('the shape fields\' weights', () => {
     for (const k of named) expect(extras.targetNames, k).toContain(k);
   }, 60000);
 });
+
+describe('v2-body wears the bikini', () => {
+  it('as its own primitive, carrying every shape the body has, so the cups follow every control', async () => {
+    await MeshoptDecoder.ready;
+    const doc = await new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'meshopt.decoder': MeshoptDecoder }).read('public/models/sarah-v2-body.glb');
+    const mesh = doc.getRoot().listMeshes()[0], names = (mesh.getExtras() as { targetNames: string[] }).targetNames;
+    const prims = mesh.listPrimitives(), body = prims[0], bikini = prims.find((p) => p.getMaterial()?.getName() === 'bikini');
+    expect(bikini).toBeDefined();
+    expect(bikini!.listTargets().length).toBe(names.length);
+    expect(body.listTargets().length).toBe(names.length);
+    expect(names).toContain('shape:breastGrowMore');
+  }, 60000);
+});

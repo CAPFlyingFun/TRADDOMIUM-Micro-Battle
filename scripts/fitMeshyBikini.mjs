@@ -50,6 +50,8 @@ export const GAP_M = 0.003;
 export const SHELL_M = 0.008;
 /** A printed cup's fabric, inner face to outer. */
 export const FABRIC_M = 0.002;
+/** How far along a strap the move of its printed cup is carried (followNormals fits only). */
+export const STRAP_FOLLOW_M = 0.06;
 
 const mul = (x, y) => { const o = new Array(16).fill(0); for (let c = 0; c < 4; c += 1) for (let r = 0; r < 4; r += 1) for (let k = 0; k < 4; k += 1) o[c * 4 + r] += x[k * 4 + r] * y[c * 4 + k]; return o; };
 const invert = (m) => {
@@ -124,7 +126,57 @@ export function flipKnot(pos) {
   return moved;
 }
 
-export async function fitMeshyBikini(meshyFile, sarahFile, { log = console.log } = {}) {
+/**
+ * Options for a body other than v1's (`scripts/sarahV2Bikini.mjs`): `create` adds the
+ * bikini as a new primitive and material when the file has none (v2 is one primitive);
+ * `followNormals` carries the fabric's offset off the skin along the skin's TURNED normal
+ * in every shape, not only its moved position, so a cup keeps its clearance when a shape
+ * tips or swells the breast under it; `place` overrides `PLACE`; `tipBox` is where to look for her breast's tip ([x0, x1, y0, y1], metres; v2's 100% bump reaches higher than v1's); `out` writes elsewhere.
+ * With none of them, v1's fit is exactly what it was.
+ */
+/**
+ * THE BRIEF'S REAR PANEL, RESHAPED ON ITS OWN (Joshua, 2026-10-15: "the bikini bottom
+ * looks like it's about to fall off her butt from the rear view... raise the rear fabric
+ * panel and improve its coverage... preserve the front panel and side-tie design").
+ *
+ * In the scan's own frame (y up, the front +z), column by column across her: the back
+ * panel's top edge is raised to `top` across the middle, easing back to the scan's own
+ * edge before the side ties; its leg edge is let down by `legLower` of the way toward the
+ * gusset (and `legDrop` further, round under each cheek, as a brief's leg line follows
+ * the crease under the seat), for a fuller seat. Each column is stretched between its two edges, so the
+ * fabric stays one continuous sheet: the gusset under her (which sits at the column's
+ * bottom) does not move, and the front, where the weight is nothing, is exactly the
+ * scan. The weight fades from the back to the sides of the brief over `zFade`, so the
+ * hips carry the change round smoothly into the ties.
+ */
+export function reshapeBack(pos, { top, legLower = 0, legDrop = 0, zFade = [-0.02, -0.12], keepFrom = 0.22, keepTo = 0.4 }, log = () => {}) {
+  const n = pos.length / 3, smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+  const BIN = 0.02, NB = Math.ceil(TIE_FROM / BIN) + 1, hi = new Float32Array(NB).fill(-Infinity), lo = new Float32Array(NB).fill(Infinity);
+  let crotch = Infinity;
+  for (let i = 0; i < n; i += 1) {
+    const ax = Math.abs(pos[i * 3]), y = pos[i * 3 + 1], z = pos[i * 3 + 2]; crotch = Math.min(crotch, y);
+    if (ax > TIE_FROM || z > zFade[0]) continue;
+    const b = Math.min(NB - 1, Math.floor(ax / BIN)); hi[b] = Math.max(hi[b], y); lo[b] = Math.min(lo[b], y);
+  }
+  for (let b = 1; b < NB; b += 1) if (!Number.isFinite(hi[b])) { hi[b] = hi[b - 1]; lo[b] = lo[b - 1]; }
+  // smoothed across columns, so neither edge carries a step from one bin to the next
+  const sm = (a) => { const o = Float32Array.from(a); for (let p = 0; p < 3; p += 1) for (let b = 1; b < NB - 1; b += 1) o[b] = (o[b - 1] + 2 * o[b] + o[b + 1]) / 4; return o; };
+  const H = sm(hi), L = sm(lo);
+  const at = (A, ax) => { const f = Math.min(NB - 1.001, ax / BIN), b = Math.floor(f), t = f - b; return A[b] * (1 - t) + A[b + 1] * t; };
+  let moved = 0, most = 0;
+  for (let i = 0; i < n; i += 1) {
+    const ax = Math.abs(pos[i * 3]), y = pos[i * 3 + 1], z = pos[i * 3 + 2];
+    if (ax > TIE_FROM) continue;
+    const w = smooth(zFade[0], zFade[1], z) * (1 - smooth(keepFrom, keepTo, ax)); if (!(w > 0)) continue;
+    const t0 = at(H, ax), b0 = at(L, ax), t1 = Math.max(t0, top), b1 = b0 - legLower * (b0 - crotch) - legDrop * smooth(0, 0.07, ax) * (1 - smooth(0.14, 0.26, ax));
+    if (!(t0 - b0 > 1e-4)) continue;
+    const u = (y - b0) / (t0 - b0), y1 = b1 + u * (t1 - b1), ny = y + (y1 - y) * w;
+    most = Math.max(most, Math.abs(ny - y)); pos[i * 3 + 1] = ny; moved += 1;
+  }
+  log(`fit: rear panel reshaped (${moved} scan vertices; its top edge to ${top} in the scan, at most ${(most * 100).toFixed(1)} scan-cm moved)`);
+}
+
+export async function fitMeshyBikini(meshyFile, sarahFile, { log = console.log, create = false, followNormals = false, place: placeOverride = null, out = sarahFile, tipBox = [0.05, 0.16, 1.17, 1.36] } = {}) {
   await Promise.all([MeshoptDecoder.ready, MeshoptEncoder.ready, MeshoptSimplifier.ready]);
   const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'meshopt.decoder': MeshoptDecoder, 'meshopt.encoder': MeshoptEncoder });
   const doc = await io.read(sarahFile), meshy = await io.read(meshyFile);
@@ -138,6 +190,9 @@ export async function fitMeshyBikini(meshyFile, sarahFile, { log = console.log }
   const bIdx = body.getIndices().getArray(), bNrm = vertexNormals(bPos, bIdx);
   const bJ = readAttr(body.getAttribute('JOINTS_0')), bW = readAttr(body.getAttribute('WEIGHTS_0'));
   const bTargets = body.listTargets().map((t) => { const d = readAttr(t.getAttribute('POSITION')); for (let i = 0; i < bn; i += 1) d.set(apply(T, [d[i * 3], d[i * 3 + 1], d[i * 3 + 2]], 0), i * 3); return d; });
+  // a normal's change is a direction: turned into her frame without the frame's scale
+  const tScale = Math.hypot(T[0], T[1], T[2]);
+  const bTargetNrm = followNormals ? body.listTargets().map((t) => { const A = t.getAttribute('NORMAL'); if (!A) return null; const d = readAttr(A); for (let i = 0; i < bn; i += 1) d.set(apply(T, [d[i * 3], d[i * 3 + 1], d[i * 3 + 2]], 0).map((v) => v / tScale), i * 3); return d; }) : null;
   // her triangles by cell, for closest-point queries; only the trunk, not the arms
   const CELL = 0.02, triCells = new Map();
   const tkey = (x, y, z) => `${Math.floor(x / CELL)},${Math.floor(y / CELL)},${Math.floor(z / CELL)}`;
@@ -177,8 +232,10 @@ export async function fitMeshyBikini(meshyFile, sarahFile, { log = console.log }
   const slice = (y, h = 0.01) => { let x0 = Infinity, x1 = -Infinity, z0 = Infinity, z1 = -Infinity; for (let i = 0; i < bn; i += 1) { if (Math.abs(bPos[i * 3 + 1] - y) > h || Math.abs(bPos[i * 3]) > 0.3) continue; x0 = Math.min(x0, bPos[i * 3]); x1 = Math.max(x1, bPos[i * 3]); z0 = Math.min(z0, bPos[i * 3 + 2]); z1 = Math.max(z1, bPos[i * 3 + 2]); } return { x0, x1, z0, z1 }; };
 
   const parts = meshy.getRoot().listMeshes().map((m) => m.listPrimitives()[0]);
+  let tipX = 0;
   const pieces = [];
-  for (const [label, place] of Object.entries(PLACE)) {
+  const PLACES = placeOverride ? { ...PLACE, ...placeOverride } : PLACE;
+  for (const [label, place] of Object.entries(PLACES)) {
     const prim = parts[place.part];
     let pos = readAttr(prim.getAttribute('POSITION'));
     const col = prim.getAttribute('COLOR_0') ? readAttr(prim.getAttribute('COLOR_0')) : null;
@@ -188,6 +245,17 @@ export async function fitMeshyBikini(meshyFile, sarahFile, { log = console.log }
     // loops and ends hanging FORWARD of the knot, which on her is into her neck. They
     // are turned about the knot to hang back, down her nape.
     if (label === 'top') flipKnot(pos);
+    if (label === 'bottom' && place.back) reshapeBack(pos, place.back, log);
+    // THE BRIEF TIPPED FORWARD (Joshua, 2026-10-15: "angle the whole bikini bottom forward
+    // maybe 10° down so the front is lower and the back is higher naturally"): turned about
+    // its own middle, in the scan's frame, the front down and the back up, before placing
+    if (label === 'bottom' && place.pitchDeg) {
+      // about the side ties' middle, so the ties and their knots stay where they were
+      let yc = 0, zc = 0, k = 0; const m = pos.length / 3; for (let i = 0; i < m; i += 1) { if (Math.abs(pos[i * 3]) < TIE_FROM) continue; yc += pos[i * 3 + 1]; zc += pos[i * 3 + 2]; k += 1; } yc /= k; zc /= k;
+      const a = (place.pitchDeg * Math.PI) / 180, c = Math.cos(a), sn = Math.sin(a);
+      for (let i = 0; i < m; i += 1) { const y = pos[i * 3 + 1] - yc, z = pos[i * 3 + 2] - zc; pos[i * 3 + 1] = yc + y * c - z * sn; pos[i * 3 + 2] = zc + y * sn + z * c; }
+      log(`fit: brief tipped ${place.pitchDeg}° forward about its middle`);
+    }
     // 1. simplify
     const target = place.triangles * 3;
     const [simp] = MeshoptSimplifier.simplify(idx, pos, 3, target, 0.01, ['LockBorder']);
@@ -212,7 +280,9 @@ export async function fitMeshyBikini(meshyFile, sarahFile, { log = console.log }
     const s = place.scale, tip = {};
     let dy, dz;
     if (label === 'bottom') {
-      dy = place.topY - y1 * s;
+      // tipped, the brief is placed by its ties' tops, not by its highest point (now its back)
+      let ref = y1; if (place.pitchDeg) { ref = -Infinity; for (let i = 0; i < n; i += 1) if (Math.abs(pos[i * 3]) > TIE_FROM) ref = Math.max(ref, pos[i * 3 + 1]); }
+      dy = place.topY - ref * s;
       // the brief's ring centred front-to-back on her at its own middle height
       const midY = ((y0 + y1) / 2) * s + dy, her = slice(midY); let z0 = Infinity, z1 = -Infinity;
       for (let i = 0; i < n; i += 1) if (Math.abs(pos[i * 3 + 1] * s + dy - midY) < 0.01 && Math.abs(pos[i * 3]) < 0.15 / s) { z0 = Math.min(z0, pos[i * 3 + 2]); z1 = Math.max(z1, pos[i * 3 + 2]); }
@@ -225,7 +295,7 @@ export async function fitMeshyBikini(meshyFile, sarahFile, { log = console.log }
       // its lower edge in the crease under it; the string between the cups stretches to
       // meet them, and the straps follow their cups up to the knot
       Object.assign(tip, { x: 0, y: 0, z: -Infinity });
-      for (let i = 0; i < bn; i += 1) { const x = bPos[i * 3], y = bPos[i * 3 + 1], z = bPos[i * 3 + 2]; if (x > 0.05 && x < 0.16 && y > 1.17 && y < 1.36 && z > tip.z) Object.assign(tip, { x, y, z }); }
+      for (let i = 0; i < bn; i += 1) { const x = bPos[i * 3], y = bPos[i * 3 + 1], z = bPos[i * 3 + 2]; if (x > tipBox[0] && x < tipBox[1] && y > tipBox[2] && y < tipBox[3] && z > tip.z) Object.assign(tip, { x, y, z }); }
       // the crease: under the tip, the height where her front comes furthest back
       const front = new Float32Array(24).fill(-Infinity);
       for (let i = 0; i < bn; i += 1) { const x = bPos[i * 3], y = bPos[i * 3 + 1], z = bPos[i * 3 + 2], b = Math.floor((tip.y - y) / 0.005); if (Math.abs(x - tip.x) < 0.012 && b >= 0 && b < 24) front[b] = Math.max(front[b], z); }
@@ -240,12 +310,19 @@ export async function fitMeshyBikini(meshyFile, sarahFile, { log = console.log }
       }
       cx /= cc;
       const inner = tip.x + (xi - cx) * s;
+      // the halter above the cups may be scaled on its own (`strapScale`), so a smaller cup
+      // does not shorten the straps and bring the knot round to the front of her neck;
+      // the scale eases from the cup's to the strap's over the strap's first stretch
+      const sS = place.strapScale ?? s, sy = (y) => { const t = Math.min(1, Math.max(0, (y - 0.45) / 0.17)); return s + (sS - s) * t * t * (3 - 2 * t); };
+      // the height a scan height lands at: the integral of the varying scale from the cup's foot
+      const Y = (y) => { if (y <= 0.45 || sS === s) return (y - cupLo) * s + foldY; let acc = (0.45 - cupLo) * s; const steps = 24, dy = (y - 0.45) / steps; for (let k = 0; k < steps; k += 1) acc += sy(0.45 + (k + 0.5) * dy) * dy; return acc + foldY; };
       for (let i = 0; i < n; i += 1) {
-        const x = pos[i * 3], ax = Math.abs(x), X = ax >= xi ? tip.x + (ax - cx) * s : (ax / xi) * inner;
+        const x = pos[i * 3], ax = Math.abs(x), y = pos[i * 3 + 1], se = sy(y), X = ax >= xi ? tip.x + (ax - cx) * se : (ax / xi) * inner;
         pos[i * 3] = Math.sign(x) * X;
-        pos[i * 3 + 1] = (pos[i * 3 + 1] - cupLo) * s + foldY;
-        pos[i * 3 + 2] = (pos[i * 3 + 2] - cupZ) * s + tip.z + GAP_M;
+        pos[i * 3 + 1] = Y(y);
+        pos[i * 3 + 2] = (pos[i * 3 + 2] - cupZ) * se + tip.z + GAP_M;
       }
+      tipX = tip.x;
       log(`fit: her breast tip at x ${tip.x.toFixed(3)} y ${tip.y.toFixed(3)}, crease at y ${foldY.toFixed(3)}; cups ${(((0.42 - xi) * s) * 100).toFixed(1)} cm wide`);
     }
     if (label === 'bottom') for (let i = 0; i < n; i += 1) { pos[i * 3] *= s; pos[i * 3 + 1] = pos[i * 3 + 1] * s + dy; pos[i * 3 + 2] = pos[i * 3 + 2] * s + dz; }
@@ -294,9 +371,16 @@ export async function fitMeshyBikini(meshyFile, sarahFile, { log = console.log }
         if (!printed[i]) continue; const c = creaseAt(pos[i * 3]) + LIFT, d = pos[i * 3 + 1] - c;
         if (d < BAND) pos[i * 3 + 1] = c + BAND * Math.exp((d - BAND) / BAND);
       }
+      const placed = followNormals ? Float32Array.from(pos) : null; // before printing, for the straps below
       for (let i = 0; i < n; i += 1) {
-        if (!printed[i]) continue; const f = at(pos[i * 3], pos[i * 3 + 1]); if (!f) { printed[i] = 0; continue; }
-        const off = GAP_M + layer[i] * FABRIC_M;
+        if (!printed[i]) continue; const off = GAP_M + layer[i] * FABRIC_M, f = at(pos[i * 3], pos[i * 3 + 1]);
+        if (!f) {
+          // past the front of her (a cup's outer tip, round her side): v1 left it where it
+          // was placed, which on v2 stood out sideways as a spike; laid on her skin instead
+          const q = followNormals ? nearest([pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]]) : null;
+          if (!q) { printed[i] = 0; continue; }
+          pos.set([0, 1, 2].map((d) => q.q[d] + q.n[d] * off), i * 3); continue;
+        }
         // where her skin turns away from the front (the side of the breast, under its
         // outer corner) a straight-on print would stretch the cup into a ledge; there it
         // is laid on the nearest skin instead, and the two blend between
@@ -307,6 +391,25 @@ export async function fitMeshyBikini(meshyFile, sarahFile, { log = console.log }
           if (q) for (let d = 0; d < 3; d += 1) pf[d] = pf[d] * (1 - w) + (q.q[d] + q.n[d] * off) * w;
         }
         pos.set(pf, i * 3);
+      }
+      // THE STRAPS LEAVE THE CUPS WHERE THE CUPS ARE (v2): printing moves each cup onto her
+      // breast, and a strap that started at the cup's placed top was left behind, a step
+      // where the two met. Each strap vertex near a cup takes the move of the nearest
+      // printed cup vertex, fading out over `STRAP_FOLLOW_M` along the strap.
+      if (placed) {
+        const pr = []; for (let i = 0; i < n; i += 1) if (printed[i]) pr.push(i);
+        const pg = grid(Float32Array.from(pr.flatMap((i) => [placed[i * 3], placed[i * 3 + 1], placed[i * 3 + 2]])), 0.01);
+        let carried = 0;
+        for (let i = 0; i < n; i += 1) {
+          if (printed[i] || part[i] !== 3) continue;
+          let best = -1, bd = Infinity;
+          pg.near(placed[i * 3], placed[i * 3 + 1], placed[i * 3 + 2], STRAP_FOLLOW_M, (k) => { const q = pr[k], d = Math.hypot(placed[q * 3] - placed[i * 3], placed[q * 3 + 1] - placed[i * 3 + 1], placed[q * 3 + 2] - placed[i * 3 + 2]); if (d < bd) { bd = d; best = q; } });
+          if (best < 0 || bd > STRAP_FOLLOW_M) continue;
+          const t = 1 - bd / STRAP_FOLLOW_M, w = t * t * (3 - 2 * t);
+          for (let d = 0; d < 3; d += 1) pos[i * 3 + d] += (pos[best * 3 + d] - placed[best * 3 + d]) * w;
+          carried += 1;
+        }
+        log(`fit: ${carried} strap vertices follow their cups' print`);
       }
     }
     // 3. wrap
@@ -353,6 +456,17 @@ export async function fitMeshyBikini(meshyFile, sarahFile, { log = console.log }
       anchor[i] = best; for (let d = 0; d < 3; d += 1) push[i * 3 + d] = push[best * 3 + d];
     }
     for (let i = 0; i < pos.length; i += 1) pos[i] += push[i];
+    // (v2) nothing of a cup stands off her: a scrap of its edge that the print missed and the
+    // wrap left out in the air is laid back on the skin under it
+    if (followNormals && label === 'top') {
+      let laid = 0;
+      for (let i = 0; i < n; i += 1) {
+        if (part[i] !== 2 || Math.abs(pos[i * 3]) < tipX + 0.035) continue; const q = nearest([pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]]); // its outer side only: over the nipple a cup stands off her by right
+        if (!q || q.dist < GAP_M + FABRIC_M + 0.004) continue;
+        pos.set([0, 1, 2].map((d) => q.q[d] + q.n[d] * (GAP_M + FABRIC_M)), i * 3); laid += 1;
+      }
+      log(`fit: ${laid} loose cup vertices laid back on her`);
+    }
     if (process.env.FIT_DEBUG) { let under = 0, lo = Infinity; for (let i = 0; i < n; i += 1) { const q = nearest([pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]]); if (q) { lo = Math.min(lo, q.dist); if (q.dist < 0.001) under += 1; } } log(`debug: ${label} ${under} vertices under 1 mm, least ${(lo * 1000).toFixed(1)} mm`); }
     // THE STRINGS KEEP THEIR OWN CLEARANCE (Joshua, 2026-10-14: "the side ties, knots,
     // and loose ends must stay above the deformed skin… fix their local clearance
@@ -378,7 +492,9 @@ export async function fitMeshyBikini(meshyFile, sarahFile, { log = console.log }
       for (let v = 0; v < 3; v += 1) for (let c = 0; c < 4; c += 1) { const w = bW[b.tri[v] * 4 + c] * b.bc[v]; if (w > 0) acc.set(bJ[b.tri[v] * 4 + c], (acc.get(bJ[b.tri[v] * 4 + c]) || 0) + w); }
       const top = [...acc].sort((p, q) => q[1] - p[1]).slice(0, 4), sum = top.reduce((a, [, w]) => a + w, 0);
       top.forEach(([j, w], c) => { joints[i * 4 + c] = j; weights[i * 4 + c] = w / sum; });
-      bTargets.forEach((d, t) => { for (let k = 0; k < 3; k += 1) deltas[t][i * 3 + k] = b.bc[0] * d[b.tri[0] * 3 + k] + b.bc[1] * d[b.tri[1] * 3 + k] + b.bc[2] * d[b.tri[2] * 3 + k]; });
+      // the fabric's own offset off the skin, carried by the skin normal's turn in each shape (followNormals)
+      const off = followNormals && anchor[i] === i ? Math.max(0, b.dist) : 0;
+      bTargets.forEach((d, t) => { const dn = off && bTargetNrm[t]; for (let k = 0; k < 3; k += 1) deltas[t][i * 3 + k] = b.bc[0] * d[b.tri[0] * 3 + k] + b.bc[1] * d[b.tri[1] * 3 + k] + b.bc[2] * d[b.tri[2] * 3 + k] + (dn ? off * (b.bc[0] * dn[b.tri[0] * 3 + k] + b.bc[1] * dn[b.tri[1] * 3 + k] + b.bc[2] * dn[b.tri[2] * 3 + k]) : 0); });
     }
     log(`fit: ${label} ${n.toLocaleString('en-US')} vertices, ${(idx.length / 3).toLocaleString('en-US')} triangles, ${touchList.length.toLocaleString('en-US')} on her skin`);
     pieces.push({ pos, idx, joints, weights, deltas, col, part });
@@ -394,7 +510,9 @@ export async function fitMeshyBikini(meshyFile, sarahFile, { log = console.log }
   const local = (arr, w) => { const out = new Float32Array(arr.length); for (let i = 0; i < arr.length / 3; i += 1) out.set(apply(Ti, [arr[i * 3], arr[i * 3 + 1], arr[i * 3 + 2]], w), i * 3); return out; };
   const nlocal = (arr) => { const out = local(arr, 0); return out; };
   const buffer = doc.getRoot().listBuffers()[0], acc = (type, array) => doc.createAccessor().setType(type).setArray(array).setBuffer(buffer);
-  const dp = mesh.listPrimitives().find((p) => p.getMaterial()?.getName() === 'bikini');
+  let dp = mesh.listPrimitives().find((p) => p.getMaterial()?.getName() === 'bikini');
+  if (!dp && create) { dp = doc.createPrimitive().setMaterial(doc.createMaterial('bikini')); mesh.addPrimitive(dp); log('fit: the file had no bikini; added one as its own primitive and material'); }
+  if (!dp) throw new Error('no bikini primitive in the file (pass create)');
   for (const sem of dp.listSemantics()) dp.setAttribute(sem, null);
   dp.setAttribute('POSITION', acc('VEC3', local(pos, 1)));
   const ln = nlocal(nrm); for (let i = 0; i < N; i += 1) { const l = Math.hypot(ln[i * 3], ln[i * 3 + 1], ln[i * 3 + 2]) || 1; ln[i * 3] /= l; ln[i * 3 + 1] /= l; ln[i * 3 + 2] /= l; }
@@ -416,7 +534,7 @@ export async function fitMeshyBikini(meshyFile, sarahFile, { log = console.log }
   for (const slot of ['BaseColor', 'Normal', 'MetallicRoughness', 'Occlusion', 'Emissive']) mat[`set${slot}Texture`](null);
   mat.setBaseColorFactor([0.13, 0.26, 0.12, 1]).setRoughnessFactor(0.75).setMetallicFactor(0).setDoubleSided(true);
   for (const tex of doc.getRoot().listTextures()) if (!tex.listParents().some((p) => p.propertyType !== 'Root')) tex.dispose();
-  await io.write(sarahFile, doc);
+  await io.write(out, doc);
   log(`fit: bikini replaced (${N.toLocaleString('en-US')} vertices, ${names.length} shapes); every other primitive untouched`);
 }
 
