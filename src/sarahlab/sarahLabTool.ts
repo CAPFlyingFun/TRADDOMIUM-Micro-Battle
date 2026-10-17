@@ -61,7 +61,7 @@ export const sarahLabTool: DevTool = {
   title: 'Sarah Lab (base model)',
   description:
     "Sarah rebuilt from the base mannequin, to try before she goes live: the BUMP slider runs from twice full term (twins and more, her breasts growing with it) to "
-    + 'nearly flat, its own weight sags the belly past full term, BOUNCE (or WALK) shows it and her breasts move, FINGERS curls all ten, MODEL switches between v1 and the newer v2 to compare, OUTFIT cycles the clothes grown from her body (a red tee over black leggings, a bikini, a swimsuit, none), and STAND, '
+    + 'nearly flat, its own weight sags the belly past full term, BOUNCE (or WALK) shows it and her breasts move, FINGERS curls all ten, MODEL switches between v1 and the newer v2 to compare, OUTFIT cycles the clothes grown from her body (on v1 a red tee over black leggings; on v2 a white tank over grey maternity leggings, over the belly or under it; a bikini, a swimsuit, none), and STAND, '
     + 'WALK and SIT pose her. Drag to turn round her, pinch or scroll to come closer. Not used by the story or the game.',
   sceneId: SARAH_LAB_SCENE_ID,
 };
@@ -122,7 +122,7 @@ export const BELLY_KEYS: readonly (readonly [number, string | null])[] = [
  * fit (Joshua, 2026-10-14: "preserve it as an optional Relaxed Fit and make the
  * improved version Athletic Fit").
  */
-export const GARMENTS = ['shirt', 'leggings', 'bikini', 'swimsuit', 'shirtAthletic'] as const;
+export const GARMENTS = ['shirt', 'leggings', 'bikini', 'swimsuit', 'shirtAthletic', 'leggingsLow'] as const;
 export type Garment = (typeof GARMENTS)[number];
 
 /**
@@ -133,7 +133,7 @@ export type Garment = (typeof GARMENTS)[number];
  * it, however the pose folds her. The modelled bikini is left out: its cut is not the
  * grown one the bits describe.
  */
-export const MASKING_GARMENTS: readonly Garment[] = ['shirt', 'leggings', 'swimsuit', 'shirtAthletic'];
+export const MASKING_GARMENTS: readonly Garment[] = ['shirt', 'leggings', 'swimsuit', 'shirtAthletic', 'leggingsLow'];
 export function coverMask(shown: readonly Garment[]): number {
   let m = 0;
   for (const g of shown) if (MASKING_GARMENTS.includes(g)) m |= 1 << GARMENTS.indexOf(g);
@@ -159,6 +159,7 @@ export function uncoveredSkinIndices(indices: ArrayLike<number>, coverage: Array
  */
 export const OUTFITS: readonly { readonly name: string; readonly garments: readonly Garment[] }[] = [
   { name: 'tee + leggings', garments: ['shirtAthletic', 'leggings'] },
+  { name: 'top + low leggings', garments: ['shirtAthletic', 'leggingsLow'] },
   { name: 'bikini', garments: ['bikini'] },
   { name: 'swimsuit', garments: ['swimsuit'] },
   { name: 'none', garments: [] },
@@ -173,8 +174,30 @@ export function wornGarments(index: number, available: readonly Garment[]): Garm
   const outfit = OUTFITS[((index % OUTFITS.length) + OUTFITS.length) % OUTFITS.length];
   return outfit.garments.map((g) => (g === 'shirtAthletic' && !available.includes(g) ? 'shirt' : g)).filter((g) => available.includes(g));
 }
-export function nextOutfit(index: number, _available: readonly Garment[] = []): number {
+/**
+ * An outfit a model cannot dress (v1 has no under-the-belly leggings) is skipped, not shown
+ * half-worn. With no list of what the model carries, every outfit is offered.
+ */
+export function nextOutfit(index: number, available: readonly Garment[] = []): number {
+  for (let step = 1; step <= OUTFITS.length; step += 1) {
+    const next = (index + step) % OUTFITS.length;
+    const wanted = OUTFITS[next].garments.map((g) => (g === 'shirtAthletic' && !available.includes(g) ? 'shirt' : g));
+    if (!available.length || wanted.every((g) => available.includes(g))) return next;
+  }
   return (index + 1) % OUTFITS.length;
+}
+/**
+ * THE v2 OUTFIT (Joshua, 2026-10-16/17): a white tank over grey maternity leggings, in two
+ * rises, over the belly and under it. Each edge is a bound trim, its own primitive named
+ * `<garment>Trim` (`.scratch/outfit/trim.mjs`), shown with its garment; the high leggings'
+ * waistband is under the tank, so its trim is not drawn while the tank is worn.
+ */
+export function trimShown(material: string, shown: readonly Garment[]): boolean | null {
+  if (!material.endsWith('Trim')) return null;
+  const of = material.slice(0, -4) as Garment;
+  if (!(GARMENTS as readonly string[]).includes(of)) return null;
+  if (of === 'leggings' && shown.includes('shirt')) return false;
+  return shown.includes(of);
 }
 export function outfitLine(index: number): string {
   return `OUTFIT · ${OUTFITS[((index % OUTFITS.length) + OUTFITS.length) % OUTFITS.length].name}`;

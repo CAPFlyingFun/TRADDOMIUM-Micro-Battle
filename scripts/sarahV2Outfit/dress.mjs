@@ -1,0 +1,14 @@
+import { NodeIO } from '@gltf-transform/core';
+import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
+import { MeshoptDecoder, MeshoptEncoder } from 'meshoptimizer';
+import { readFileSync } from 'node:fs';
+import { fabricUV } from './fabricUV.mjs';
+await Promise.all([MeshoptDecoder.ready, MeshoptEncoder.ready]);
+const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'meshopt.decoder': MeshoptDecoder, 'meshopt.encoder': MeshoptEncoder });
+const [src, out, matName, texFile, tileM] = process.argv.slice(2);
+const doc = await io.read(src);
+const prim = doc.getRoot().listMeshes()[0].listPrimitives().find((p) => p.getMaterial()?.getName() === matName);
+const r = fabricUV(prim, doc, { tile: Number(tileM) });
+const tex = doc.createTexture(matName + '-knit').setImage(readFileSync(texFile)).setMimeType(texFile.endsWith('.png') ? 'image/png' : 'image/jpeg');
+prim.getMaterial().setBaseColorTexture(tex).setBaseColorFactor([1, 1, 1, 1]).setRoughnessFactor(0.9);
+await io.write(out, doc); console.log(matName, 'uv done', r);

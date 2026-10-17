@@ -111,12 +111,14 @@ describe('the base mannequin (public/models/sarah-base.glb)', () => {
     for (const [, name] of BELLY_KEYS) if (name) expect(names0).toContain(name);
     expect(names0).toContain(BELLY_TARGET);
     const names = mesh.listPrimitives().map((p) => p.getMaterial()?.getName());
-    for (const g of GARMENTS) expect(names).toContain(g);
+    // v1 carries every garment but the under-the-belly leggings, which are v2's (scripts/sarahV2Outfit)
+    const V1_GARMENTS = GARMENTS.filter((g) => g !== 'leggingsLow');
+    for (const g of V1_GARMENTS) expect(names).toContain(g);
     const body = mesh.listPrimitives().find((p) => p.getMaterial()?.getName() === 'Material_0')!;
     const cover = body.getAttribute('_CLOTH_COVER')!;
     expect(cover.getCount()).toBe(body.getAttribute('POSITION')!.getCount());
     const bits = [...cover.getArray()!];
-    for (let g = 0; g < GARMENTS.length; g += 1) expect(bits.some((b) => b & (1 << g))).toBe(true);
+    for (const g of V1_GARMENTS) expect(bits.some((b) => b & (1 << GARMENTS.indexOf(g)))).toBe(true);
     expect(bits.some((b) => b === 0)).toBe(true);
     for (const name of [BELLY_MOTION.tilt, BELLY_MOTION.bob, BELLY_MOTION.sway]) expect(names0).toContain(name);
     // the four sizes and the three motions, on every primitive, so the clothes move with her
@@ -427,6 +429,21 @@ describe('the athletic-fit tee (scripts/fitAthleticTee.mjs)', () => {
     expect(labTool.coverMask(['shirtAthletic', 'leggings'])).toBe((1 << 4) | (1 << 1));
     expect(labTool.coverMask(['bikini'])).toBe(0);
   }, 60000);
+
+  it('offers the under-the-belly leggings only to a model that carries them, with their trims', () => {
+    const v2 = ['shirt', 'leggings', 'leggingsLow', 'bikini'] as const, v1 = ['shirtAthletic', 'shirt', 'leggings', 'bikini', 'swimsuit'] as const;
+    const low = labTool.OUTFITS.findIndex((o) => o.garments.includes('leggingsLow'));
+    expect(low).toBeGreaterThan(0);
+    expect(labTool.nextOutfit(low - 1, [...v2])).toBe(low);
+    expect(labTool.nextOutfit(low - 1, [...v1])).not.toBe(low);
+    expect(labTool.wornGarments(low, [...v2])).toEqual(['shirt', 'leggingsLow']);
+    expect(labTool.coverMask(['leggingsLow'])).toBe(1 << 5);
+    expect(labTool.trimShown('shirtTrim', ['shirt', 'leggings'])).toBe(true);
+    expect(labTool.trimShown('leggingsTrim', ['shirt', 'leggings'])).toBe(false);
+    expect(labTool.trimShown('leggingsLowTrim', ['shirt', 'leggingsLow'])).toBe(true);
+    expect(labTool.trimShown('leggingsLowTrim', ['shirt', 'leggings'])).toBe(false);
+    expect(labTool.trimShown('shirt', ['shirt'])).toBeNull();
+  });
 });
 
 describe('the seated corrective (scripts/addSeatCorrective.mjs)', () => {

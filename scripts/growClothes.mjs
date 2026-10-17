@@ -45,6 +45,10 @@ export const HEM_BACK = -0.015;
 /** Leggings' waistband over the hip joints, front (under the bump) and back. */
 export const WAIST_FRONT = 0.03;
 export const WAIST_BACK = 0.1;
+/** Over-the-belly leggings: the panel's top, this far under the bust's tips, level all round. */
+export const LEGGINGS_OVER_BELOW_TIP = 0.13;
+/** Under-the-belly leggings' waistline over the hip joints: front centre, sides, back centre. */
+export const UNDER = { front: 0.02, side: 0.12, back: 0.13 };
 /** The leggings' panel runs up under the top's hem by this much. */
 export const PANEL_OVERLAP = 0.03;
 /** The neckline under the neck joint: a scoop at the front, high at the back. */
@@ -75,6 +79,14 @@ export const SWIM = {
   crotch: 0.1, legCutFront: 0.085, briefLegCutFront: 0.075, briefLegCutBack: 0.1, legCutBack: 0.045, backScoop: 0.06,
   trim: 0.0045, overShoulder: 0.025, armFrom: 0.15, archBelowTip: 0.011, archSlope: 0.6,
 };
+/**
+ * A TANK TOP (Joshua, 2026-10-16: v2's outfit, "a white tank top"): metres from the breasts'
+ * tips (`tipY`) and the body's centre line. A scoop at the front, a higher one at the back,
+ * open at the arms down to `armpit` over the tips, and straps `strap` wide from the top of
+ * the front, over each shoulder at `overX` out, to the top of the back. GAME TUNING against
+ * renders.
+ */
+export const TANK = { scoopCentre: 0.055, backCentre: 0.1, neckRise: 0.15, strapIn: 0.06, strapOut: 0.095, armTop: 0.16, armpit: 0.03, armW: 0.09, round: 0.02, hemFront: 0.055, hemBack: 0.075, armShare: 0.45 };
 /**
  * The red tee and black leggings of Joshua's reference sheet (2026-10-08: "I would
  * probably start with the red shirt and black leggings so it matches what we had
@@ -156,7 +168,7 @@ export function partsOf(skin, at) {
   return { part, pelvis, hipY, ankleY, chestY: at[chest].y, neckY: at[children[0]].y, shoulders };
 }
 
-export async function growClothes(doc, { log = () => {}, which = ['shirt', 'leggings', 'bikini', 'swimsuit'], paint = true } = {}) {
+export async function growClothes(doc, { log = () => {}, which = ['shirt', 'leggings', 'bikini', 'swimsuit'], paint = true, specs = {} } = {}) {
   const root = doc.getRoot();
   const skin = root.listSkins()[0];
   const mesh = root.listMeshes()[0];
@@ -287,8 +299,8 @@ export async function growClothes(doc, { log = () => {}, which = ['shirt', 'legg
     }
     return null;
   };
-  const strapPath = (fx, fy, bx, by, sx) => {
-    const X = sx * shoulderX;
+  const strapPath = (fx, fy, bx, by, sx, overX = shoulderX) => {
+    const X = sx * overX;
     // the top of the shoulder at the strap's x, seen from above, front to back
     const ridge = [];
     for (let z = 0.12; z >= -0.16; z -= 0.01) { const q = outermost(1, 1, X, z); if (q) ridge.push(q); }
@@ -330,10 +342,10 @@ export async function growClothes(doc, { log = () => {}, which = ['shirt', 'legg
   const strapSets = new Map();
   const straps = (x, y, z, toward) => {
     const key = JSON.stringify(toward);
-    if (!strapSets.has(key)) strapSets.set(key, [1, -1].map((sx) => strapPath(sx * SWIM.cupStrapX, toward.frontY, toward.cross ? -sx * SWIM.crossTo : sx * toward.backX, toward.backY, sx)));
+    if (!strapSets.has(key)) strapSets.set(key, [1, -1].map((sx) => strapPath(sx * (toward.frontX ?? SWIM.cupStrapX), toward.frontY, toward.cross ? -sx * SWIM.crossTo : sx * toward.backX, toward.backY, sx, toward.overX)));
     let d = Infinity;
     for (const path of strapSets.get(key)) d = Math.min(d, pathDist([x, y, z], path));
-    return SWIM.strap / 2 - d;
+    return (toward.width ?? SWIM.strap) / 2 - d;
   };
   // the bralette: a band round the ribs under the bust, a front panel up to a scoop
   // neckline across both cups, and straps that run up over the shoulders and cross
@@ -388,8 +400,35 @@ export async function growClothes(doc, { log = () => {}, which = ['shirt', 'legg
     const f = Math.min(y - legLine, topEdge - y);
     return Math.max(f, straps(x, y, z, { frontY: tipY + SWIM.scoopCup - 0.005, cross: false, backX: SWIM.cupStrapX, backY: bandHi + SWIM.backScoop - 0.005 }));
   };
+  // THE TANK: the tee's hem, a scoop neckline, open at the arms, straps over the shoulders
+  const tankTop = (i) => {
+    const x = pos[i * 3], y = pos[i * 3 + 1], z = pos[i * 3 + 2], ax = Math.abs(x), fr = front(z), s = share[i];
+    const k = TANK.round, smin = (a, b) => (a + b - Math.sqrt((a - b) ** 2 + k * k)) / 2;
+    // the hem: nearly level, round the hips above the groin creases (a hem that dipped toward the front
+    // waistband ran into the creases and broke into flaps there), a little higher at the back
+    const hemY = hipY + TANK.hemFront + (TANK.hemBack - TANK.hemFront) * (1 - smoothstep(-0.06, 0.08, z));
+    // THE NECKLINE, one curve: a round scoop from the centre (front lower than back) rising to
+    // vertical at the strap's inner edge, `strapIn` out
+    const t = Math.min(ax / TANK.strapIn, 1);
+    const yNeck = tipY + fr * TANK.scoopCentre + (1 - fr) * TANK.backCentre + TANK.neckRise * (1 - Math.sqrt(1 - t * t)) + Math.max(0, ax - TANK.strapIn) * 20;
+    // THE ARMHOLE, one curve, the same front and back: straight down from the strap's outer edge at
+    // the top of the shoulder, rounding out into the armpit (a quarter ellipse), so the strap is
+    // whatever cloth lies between the two curves over the shoulder
+    const top = tipY + TANK.armTop, pit = tipY + TANK.armpit;
+    const u = Math.min(1, Math.max(0, (top - y) / (top - pit)));
+    const xa = TANK.strapOut + TANK.armW * (1 - Math.sqrt(1 - u * u)) + Math.max(0, pit - y) * 20;
+    // (below the armpit the hanging arm is a separate surface; growing leaves it an island, removed after)
+    // below the armpit the arm hangs against her flank and joins it at the crease: there the arm's own
+    // skin leaves by its bone share (the cut runs hidden in the crease between arm and body)
+    const below = smoothstep(pit, pit - 0.02, y);
+    // the arm's own skin leaves by its bone share everywhere (above the armpit too, so the cut never wraps
+    // round the top of the upper arm), the curve above still shaping the armhole on her body
+    void below; const armSkin = (TANK.armShare - s.upperArm - s.arms) * 0.3;
+    return Math.min(smin(smin(y - hemY, yNeck - y), xa - ax), (0.3 - s.head) * 0.5, armSkin);
+  };
   const field = {
     shirt: (i, spec) => {
+      if (spec.cut === 'tank') return tankTop(i);
       const s = share[i], y = pos[i * 3 + 1], z = pos[i * 3 + 2];
       // The neckline itself excludes the head; a bone-weight cutoff here
       // introduced notches where neck influences changed.
@@ -427,6 +466,18 @@ export async function growClothes(doc, { log = () => {}, which = ['shirt', 'legg
       // `PANEL_OVERLAP`. Otherwise a waistband under the bump at the front and up at
       // the back, always over the tee's hem so no skin shows between them.
       if (spec.rise === 'panel') return Math.min(f, cropY + PANEL_OVERLAP - y);
+      // OVER THE BELLY (Joshua, 2026-10-16, with photos of grey maternity leggings): a wide, level
+      // panel all the way round, up over the bump to the lower ribs, `overBelowTip` under the bust's
+      // tips, the same height pregnant or not
+      if (spec.rise === 'over') return Math.min(f, tipY - LEGGINGS_OVER_BELOW_TIP - y);
+      // UNDER THE BELLY (Joshua, 2026-10-16, drawn on his renders): a smooth U across the front from
+      // the hip bones down to just over the pubic bone, sloping up round the sides to high on the back.
+      // Read round the pelvis: 0 straight ahead, 90 degrees at the sides, 180 at the back.
+      if (spec.rise === 'under') {
+        const a = Math.atan2(Math.abs(pos[i * 3]), z - at[pelvis].z) / (Math.PI / 2);
+        const h = a <= 1 ? UNDER.front + (UNDER.side - UNDER.front) * a * a : UNDER.side + (UNDER.back - UNDER.side) * smoothstep(1, 2, a);
+        return Math.min(f, hipY + h - y);
+      }
       const waist = hipY + WAIST_FRONT + (WAIST_BACK - WAIST_FRONT) * (1 - smoothstep(-0.04, 0.06, z));
       return Math.min(f, waist - y);
     },
@@ -444,7 +495,7 @@ export async function growClothes(doc, { log = () => {}, which = ['shirt', 'legg
   const cover = new Uint8Array(n);
   const garmentNames = Object.keys(GARMENTS);
   for (const name of which) {
-    const spec = GARMENTS[name];
+    const spec = { ...GARMENTS[name], ...(specs[name] ?? {}) };
     const fv = new Float32Array(n);
     let bodySheet = null;
     if (spec.coverFrom) {
