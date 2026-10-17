@@ -20,6 +20,7 @@ export type Destination = (() => void) | null;
 
 /** Registry ids of the ui's own screens. Integration registers these (see ui/index.ts). */
 export const SCREEN_ID = {
+  tombs: 'lab:tombs',
   menu: 'menu',
   session: 'session',
   settings: 'settings',

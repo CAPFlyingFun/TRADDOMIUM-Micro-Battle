@@ -595,7 +595,7 @@ export function registerScenes(options: RegisterScenesOptions = {}): void {
   registerScene(
     TOMBS_SCENE_ID,
     createTombsLabScene((ctx) => ({
-      onBack: () => goToScreen(ctx, SCREEN_ID.editors),
+      onBack: () => goToScreen(ctx, SCREEN_ID.menu),
       // The same store the world reads, so the Lab can never draw at a detail
       // rung his Settings do not show.
       settings: () => openSettings(ctx.storage).read(),

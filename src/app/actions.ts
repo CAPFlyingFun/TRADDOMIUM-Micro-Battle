@@ -10,6 +10,9 @@
  * layout, is part of the fix.
  */
 export const ACTION = {
+  playTombs: 'play-tombs',
+  extras: 'extras',
+  island: 'island',
   /** The menu's NEW GAME: start over, in a slot the player then chooses. */
   newGame: 'new-game',
   /** The loader's press-to-continue. */
