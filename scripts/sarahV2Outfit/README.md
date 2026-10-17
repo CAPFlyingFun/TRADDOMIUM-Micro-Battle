@@ -85,6 +85,33 @@ inflation scales with that distance. Check the leggings never show through it.
 5. **File size**: 39 MB for the phone. Worth checking load time; trims and the two leggings could be split into their own file later.
 6. **Next big piece**: the Clothing and Body Paint Designer, reusing the ribbon and binding modules here and in `scripts/sarahV2ProcBikini/`.
 
+## Next tasks (Joshua, 2026-10-17, from his phone on the deployed alpha.97)
+
+Start from the latest `main` (`git pull`); alpha.97 or later is the base.
+
+1. **Sliders and clothing.** The ARMS slider reads 90° but her arms stay down while standing. BELLY TILT and some
+   other sliders seem to do nothing, or the clothes don't follow the new size. Check every control on v2-body,
+   with each outfit:
+   - BUMP, the BELLY SHAPE fields (tilt, height, width, depth, upper/lower) and the breast fields;
+   - ARMS, plus WALK and SIT.
+   Find which drive the body but not the garments or trims. The body-shape fields are lifted off the GPU and
+   applied on the CPU (`src/view/bodyShapeView.ts`). Make sure the garment and `*Trim` primitives are lifted
+   and driven too, and that every shape the body has is carried by every garment primitive.
+2. **Bikini bottom.** It looked fine in screenshots but on the phone the green print has rough, jagged edges and
+   the side ties are messy. Redo it procedurally, like the approved top (`scripts/sarahV2ProcBikini/`): smooth
+   ribbon edges, its fabric painted on her skin inside them. Keep the current bottom's shape, cleaned up.
+   Joshua can draw the exact outline if wanted. The top is approved; don't touch it.
+3. **The navel under clothes (the main one).** While the tank and/or leggings are worn, her navel's round front
+   (height and width) should be **60% smaller**, and its depth (how far it stands out) **30% less**. With no
+   clothes or with the bikini she stays exactly as approved.
+   - Build it as new shapes that are off by default. Don't change the approved body or any approved shape.
+   - The navel's size comes from several shapes at once (`navelOut`, `navelFlat`, the belly keys). So one added
+     shape won't hold at every size: check 0, 50, 100, 140 and 200%.
+   - The garments must carry the new shapes too (rebuild with `build.sh` from a body that has them).
+   - The Lab turns them on only while a garment that covers the navel is worn.
+   - Compare skin vs. through-the-tank renders at each size.
+   Bringing the tank closer (see above) helps too.
+
 ## Rules that came with it
 
 - Do not change the approved body or its morphs.
