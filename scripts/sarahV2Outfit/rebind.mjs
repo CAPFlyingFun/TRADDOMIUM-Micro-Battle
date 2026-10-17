@@ -64,8 +64,62 @@ for (const pr of pairs) {
         const floor = DMIN[name] + overW(w) * 0.0015; const mv = Math.min(bump * 0.8, h - floor); if (mv <= 0) continue;
         for (let e = 0; e < 3; e += 1) cur[a][e] -= q.n[e] * mv; if (it === 0) moved += 1; most = Math.max(most, mv); } }
     console.log(`${name}: ${moved} points over small bumps drawn in toward her (most ${(most * 1000).toFixed(1)} mm), never under ${(DMIN[name] * 1000).toFixed(1)} mm; ${folds().c} folded edges after`); }
+  // A LOOSE GARMENT DRAPES OVER A SMALL BUMP; IT DOES NOT GROW IT. Held a fixed clearance off her skin the
+  // tank carried her navel out ~6-10 mm wider than it is (42-46 mm against her 36). Here it is held that
+  // clearance off her SMOOTHED skin (small features averaged away over a few cm), and never closer to her
+  // real skin than SMALL_BUMP_MIN (more over the leggings): over her navel and nipples the cloth lies on the
+  // bump itself, so it shows at her size; everywhere smooth nothing moves.
+  const SB = Object.fromEntries((process.env.SMALL_BUMP_MIN ?? '').split(',').filter(Boolean).map((kv) => { const [k, v2] = kv.split('='); return [k, Number(v2)]; }));
+  if (SB[name] !== undefined) {
+    if (!s.smoothP) { const nb2 = Array.from({ length: s.n }, () => new Set()); for (let t = 0; t < s.I.length; t += 3) for (let e = 0; e < 3; e += 1) { const a = s.I[t + e], b2 = s.I[t + (e + 1) % 3]; nb2[a].add(b2); nb2[b2].add(a); }
+      const key = new Map(); for (let i = 0; i < s.n; i += 1) { const k = `${Math.round(s.P[i*3]*1e5)},${Math.round(s.P[i*3+1]*1e5)},${Math.round(s.P[i*3+2]*1e5)}`; if (key.has(k)) { const j = key.get(k); for (const x of nb2[i]) nb2[j].add(x); nb2[i] = nb2[j]; } else key.set(k, i); }
+      const L = nb2.map((x) => [...x]); let A = Float64Array.from(s.P);
+      for (let r = 0; r < Number(process.env.SMALL_BUMP_PASSES ?? 80); r += 1) { const B = new Float64Array(A.length); for (let i = 0; i < s.n; i += 1) { const ns = L[i]; if (!ns.length) { for (let e = 0; e < 3; e += 1) B[i*3+e] = A[i*3+e]; continue; } for (let e = 0; e < 3; e += 1) { let m = 0; for (const j of ns) m += A[j*3+e]; B[i*3+e] = 0.5 * A[i*3+e] + 0.5 * m / ns.length; } } A = B; }
+      s.smoothP = A; }
+    // only real small bumps (the navel stands ~15 mm proud of her smoothed skin, a nipple ~8): the hips, ribs
+    // and waist stand a few mm and are left alone; the weight and the move are both eased over the cloth
+    const lo = Number(process.env.SMALL_BUMP_FROM ?? 0.004), hi = Number(process.env.SMALL_BUMP_FULL ?? 0.008);
+    const want = new Map(), wgt = new Map();
+    for (const a of repsW) { const w = cur[a], q = s.nearest(w); if (!q || !q.tri) continue;
+      const qs = [0, 1, 2].map((e) => q.bc[0] * s.smoothP[q.tri[0]*3+e] + q.bc[1] * s.smoothP[q.tri[1]*3+e] + q.bc[2] * s.smoothP[q.tri[2]*3+e]);
+      const detail = (q.q[0] - qs[0]) * q.n[0] + (q.q[1] - qs[1]) * q.n[1] + (q.q[2] - qs[2]) * q.n[2];
+      const t = Math.min(1, Math.max(0, (detail - lo) / (hi - lo))); wgt.set(a, t * t * (3 - 2 * t)); if (detail <= 0) continue;
+      const ow = overW(w), C = C0 + ow * Number(extra || 0), floor = SB[name] + ow * 0.0015;
+      const h = (w[0] - q.q[0]) * q.n[0] + (w[1] - q.q[1]) * q.n[1] + (w[2] - q.q[2]) * q.n[2];
+      // only cloth that is held at its clearance: where it spans a hollow (under the bust, the cleavage) it stays
+      if (h > C + 0.004) continue;
+      const target = Math.max(C - detail, floor); if (h > target) want.set(a, [h - target, q.n]); }
+    const ease = (M, rounds) => { let X = M; for (let r = 0; r < rounds; r += 1) { const Y = new Map(); for (const a of repsW) { const ns = nbW.get(a); const x = X.get(a) ?? 0; if (!ns) { Y.set(a, x); continue; } let m = 0; for (const b2 of ns) m += X.get(b2) ?? 0; Y.set(a, Math.max(x, 0.5 * x + 0.5 * m / ns.size)); } X = Y; } return X; };
+    const W2 = ease(wgt, 8);
+    let mvm = new Map(); for (const a of repsW) { const v = want.get(a); if (v) mvm.set(a, v[0] * (W2.get(a) ?? 0)); }
+    for (let r = 0; r < 6; r += 1) { const Y = new Map(); for (const a of repsW) { const ns = nbW.get(a); const x = mvm.get(a) ?? 0; if (!ns) { Y.set(a, x); continue; } let m = 0; for (const b2 of ns) m += mvm.get(b2) ?? 0; Y.set(a, 0.5 * x + 0.5 * m / ns.size); } mvm = Y; }
+    let moved = 0, most = 0;
+    for (const a of repsW) { const mv = Math.min(mvm.get(a) ?? 0, want.get(a)?.[0] ?? 0); if (mv <= 1e-4) continue; const nn = want.get(a)[1]; for (let e = 0; e < 3; e += 1) cur[a][e] -= nn[e] * mv; moved += 1; most = Math.max(most, mv); }
+    console.log(`${name}: ${moved} points over small bumps lie on the bump (most ${(most * 1000).toFixed(1)} mm in), never under ${(SB[name] * 1000).toFixed(1)} mm off her; ${folds().c} folded edges after`); }
   for (let i = 0; i < n; i += 1) pts.push(cur[repW[i]].slice());
-  const b = bind(pts);
+  // EACH POINT FOLLOWS THE SKIN UNDER IT, NOT THE NEAREST SKIN. Bound to its nearest skin point, tank cloth
+  // standing 7-16 mm off her took the shape offsets of a point nearer the middle of every small bump (her
+  // navel's navelOut, her nipples' breast growth), so through the tank her navel grew to 42-46 mm against her
+  // 36. Here each point is bound to the skin straight beneath it along her SMOOTHED surface's normal (small
+  // features averaged away over a few cm), so over a bump it moves as the bump does at its own radius.
+  const UNDER = (process.env.BIND_UNDER ?? '').split(',').filter(Boolean);
+  let at = null;
+  if (UNDER.includes(name)) {
+    if (!s.smoothP) { const nb2 = Array.from({ length: s.n }, () => new Set()); for (let t = 0; t < s.I.length; t += 3) for (let e = 0; e < 3; e += 1) { const a = s.I[t + e], b2 = s.I[t + (e + 1) % 3]; nb2[a].add(b2); nb2[b2].add(a); }
+      const key = new Map(); for (let i = 0; i < s.n; i += 1) { const k = `${Math.round(s.P[i*3]*1e5)},${Math.round(s.P[i*3+1]*1e5)},${Math.round(s.P[i*3+2]*1e5)}`; if (key.has(k)) { const j = key.get(k); for (const x of nb2[i]) nb2[j].add(x); nb2[i] = nb2[j]; } else key.set(k, i); }
+      const L = nb2.map((x) => [...x]); let A = Float64Array.from(s.P);
+      for (let r = 0; r < Number(process.env.SMALL_BUMP_PASSES ?? 80); r += 1) { const B = new Float64Array(A.length); for (let i = 0; i < s.n; i += 1) { const ns = L[i]; if (!ns.length) { for (let e = 0; e < 3; e += 1) B[i*3+e] = A[i*3+e]; continue; } for (let e = 0; e < 3; e += 1) { let m = 0; for (const j of ns) m += A[j*3+e]; B[i*3+e] = 0.5 * A[i*3+e] + 0.5 * m / ns.length; } } A = B; }
+      s.smoothP = A; }
+    let changed = 0;
+    at = pts.map((w) => { const q = s.nearest(w); if (!q || !q.tri) return w;
+      const qs = [0, 1, 2].map((e) => q.bc[0] * s.smoothP[q.tri[0]*3+e] + q.bc[1] * s.smoothP[q.tri[1]*3+e] + q.bc[2] * s.smoothP[q.tri[2]*3+e]);
+      const d = [w[0] - qs[0], w[1] - qs[1], w[2] - qs[2]], l = Math.hypot(...d); if (l < 1e-6) return w;
+      // walk in from the cloth along that direction until the real skin is the nearest thing, and bind there
+      const nb = d.map((x) => x / l); let p2 = w;
+      for (let k = 0; k < 40; k += 1) { const h = s.nearest(p2); if (!h) break; const sd = (p2[0] - h.q[0]) * h.n[0] + (p2[1] - h.q[1]) * h.n[1] + (p2[2] - h.q[2]) * h.n[2]; if (sd < 0.0005) break; const step = Math.min(sd, 0.004); p2 = p2.map((x, e) => x - nb[e] * step); }
+      const h0 = s.nearest(p2); if (h0 && h0.tri.some((v2, e) => v2 !== q.tri[e])) changed += 1; return p2; });
+    console.log(`${name}: bound to the skin beneath it along her smoothed normal (${changed} points take a different skin point than the nearest)`); }
+  const b = bind(pts, at ? { at } : {});
   // A SPAN MOVES WITH THE CLOTH AROUND IT: where the cloth stands off her (bridging under the bust,
   // across the cleavage), its shape offsets are eased toward its neighbours', weighted by how far it
   // stands off, so a growing breast carries the span over the fold instead of tucking it in.

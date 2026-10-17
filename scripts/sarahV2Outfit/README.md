@@ -60,11 +60,18 @@ Measured (`bumpw.mjs`, front centreline, her navel at quarter height):
 | 100% | 36 mm tall, 15.4 mm high | 38 mm | 42 mm |
 | 200% | 36 mm, 26.0 mm high | 38 mm | 46 mm |
 
-So her own outie navel is most of what reads as big; the leggings add ~2 mm, the tank 6-10 mm. The nipples under the
-tank swell the same way (about the tank's 7 mm clearance on each side). Tried and switched OFF: drawing the cloth in
-toward its own smoothed surface over small bumps (`DEFLATE_MIN` in `rebind.mjs`) made the bump LOWER but WIDER (tank
-42 -> 56 mm). The next idea to try: offset the tank along a broadly smoothed skin normal, so a small bump is carried
-out as a translation and keeps her size.
+In side-by-side renders (her skin / tank) the navel and nipples DO read clearly bigger through the tank than on
+her skin, more than the centreline numbers suggest: the tank stands 7 mm off her, 12-16 mm over the leggings on the
+bump, and a small bump through cloth grows by about twice that.
+
+Tried on 2026-10-17, all left in `rebind.mjs` but OFF by default (each env setting turns one back on):
+- `DEFLATE_MIN`: draw the cloth in toward its own smoothed surface over small bumps. Made the bump lower but WIDER.
+- `SMALL_BUMP_MIN`: hold the tank its clearance off her *smoothed* skin over real bumps. Barely changed the navel and
+  broke the hem.
+- `BIND_UNDER`: bind each tank point to the skin straight beneath it rather than the nearest. No measurable change.
+The next thing to try (started, not finished): bring the tank in, `shirt:0.004:leggings:0.0015` in `build.sh` (4 mm
+off her, 5.5 mm over the leggings) instead of `shirt:0.007:leggings:0.005`. A maternity tank hugs the bump; the
+inflation scales with that distance. Check the leggings never show through it.
 
 ## Still to do (in order)
 
