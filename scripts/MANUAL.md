@@ -42,6 +42,29 @@ as listed, prose included, so a path is written there only to list it.
 
 # Manual-only
 
+
+
+- `scripts/sarahV2Recovery/review-details.mjs` — Sarah v2 recovery builder or manual verification probe; see the outfit README.
+- `scripts/sarahV2Recovery/shirt-package.mjs` — Sarah v2 recovery builder or manual verification probe; see the outfit README.
+- `scripts/sarahV2Recovery/shirt-package.test.mjs` — Sarah v2 recovery builder or manual verification probe; see the outfit README.
+- `scripts/sarahV2Recovery/verify-sliders.mjs` — Sarah v2 recovery builder or manual verification probe; see the outfit README.
+
+- `scripts/sarahV2Recovery/bikini/approvedBottom.mjs` — Sarah v2 recovery builder, fitting audit, or manual runtime render probe; see `scripts/sarahV2Outfit/README.md`.
+- `scripts/sarahV2Recovery/bikini/build-report.json` — Sarah v2 recovery builder, fitting audit, or manual runtime render probe; see `scripts/sarahV2Outfit/README.md`.
+- `scripts/sarahV2Recovery/bikini/build.mjs` — Sarah v2 recovery builder, fitting audit, or manual runtime render probe; see `scripts/sarahV2Outfit/README.md`.
+- `scripts/sarahV2Recovery/bikini/collider.mjs` — Sarah v2 recovery builder, fitting audit, or manual runtime render probe; see `scripts/sarahV2Outfit/README.md`.
+- `scripts/sarahV2Recovery/bikini/endpoints.mjs` — Sarah v2 recovery builder, fitting audit, or manual runtime render probe; see `scripts/sarahV2Outfit/README.md`.
+- `scripts/sarahV2Recovery/bikini/morphs.mjs` — Sarah v2 recovery builder, fitting audit, or manual runtime render probe; see `scripts/sarahV2Outfit/README.md`.
+- `scripts/sarahV2Recovery/bikini/verification-report.json` — Sarah v2 recovery builder, fitting audit, or manual runtime render probe; see `scripts/sarahV2Outfit/README.md`.
+- `scripts/sarahV2Recovery/bikini/verify.mjs` — Sarah v2 recovery builder, fitting audit, or manual runtime render probe; see `scripts/sarahV2Outfit/README.md`.
+- `scripts/sarahV2Recovery/leggings-build.mjs` — Sarah v2 recovery builder, fitting audit, or manual runtime render probe; see `scripts/sarahV2Outfit/README.md`.
+- `scripts/sarahV2Recovery/leggings-hem.mjs` — Sarah v2 recovery builder, fitting audit, or manual runtime render probe; see `scripts/sarahV2Outfit/README.md`.
+- `scripts/sarahV2Recovery/review.html` — Sarah v2 recovery builder, fitting audit, or manual runtime render probe; see `scripts/sarahV2Outfit/README.md`.
+- `scripts/sarahV2Recovery/review.js` — Sarah v2 recovery builder, fitting audit, or manual runtime render probe; see `scripts/sarahV2Outfit/README.md`.
+- `scripts/sarahV2Recovery/review.mjs` — Sarah v2 recovery builder, fitting audit, or manual runtime render probe; see `scripts/sarahV2Outfit/README.md`.
+- `scripts/sarahV2Recovery/shirt-bind.mjs` — Sarah v2 recovery builder, fitting audit, or manual runtime render probe; see `scripts/sarahV2Outfit/README.md`.
+- `scripts/sarahV2Recovery/shirt-bind.test.mjs` — Sarah v2 recovery builder, fitting audit, or manual runtime render probe; see `scripts/sarahV2Outfit/README.md`.
+
 One entry is run by hand; the rest are helper modules, which cannot be
 wired because they are never run on their own:
 

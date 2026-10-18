@@ -123,7 +123,8 @@ export const BELLY_KEYS: readonly (readonly [number, string | null])[] = [
  * improved version Athletic Fit").
  */
 export const GARMENTS = ['shirt', 'leggings', 'bikini', 'swimsuit', 'shirtAthletic', 'leggingsLow'] as const;
-export type Garment = (typeof GARMENTS)[number];
+export const RECOVERED_SHIRTS = ['shirtRelaxedHigh', 'shirtRelaxedLow', 'shirtSpandexHigh', 'shirtSpandexLow'] as const;
+export type Garment = (typeof GARMENTS)[number] | (typeof RECOVERED_SHIRTS)[number];
 
 /**
  * THE SKIN UNDER WORN CLOTHES IS NOT DRAWN (Joshua, 2026-10-14: "consider masking covered
@@ -136,7 +137,7 @@ export type Garment = (typeof GARMENTS)[number];
 export const MASKING_GARMENTS: readonly Garment[] = ['shirt', 'leggings', 'swimsuit', 'shirtAthletic', 'leggingsLow'];
 export function coverMask(shown: readonly Garment[]): number {
   let m = 0;
-  for (const g of shown) if (MASKING_GARMENTS.includes(g)) m |= 1 << GARMENTS.indexOf(g);
+  for (const g of shown) if (MASKING_GARMENTS.includes(g)) m |= 1 << GARMENTS.indexOf(g as (typeof GARMENTS)[number]);
   return m;
 }
 /** The leggings under the athletic tee, away from its hem, are not drawn while it is worn (`_UNDER_TOP`, `scripts/fitAthleticTee.mjs`). */
@@ -163,6 +164,8 @@ export const OUTFITS: readonly { readonly name: string; readonly garments: reado
   { name: 'bikini', garments: ['bikini'] },
   { name: 'swimsuit', garments: ['swimsuit'] },
   { name: 'none', garments: [] },
+  { name: 'spandex + high leggings', garments: ['shirtSpandexHigh', 'leggings'] },
+  { name: 'spandex + low leggings', garments: ['shirtSpandexLow', 'leggingsLow'] },
 ];
 /**
  * THE ATHLETIC FIT IS THE TEE (Joshua, 2026-10-14: "keep Athletic Fit as the default
@@ -172,6 +175,7 @@ export const OUTFITS: readonly { readonly name: string; readonly garments: reado
  */
 export function wornGarments(index: number, available: readonly Garment[]): Garment[] {
   const outfit = OUTFITS[((index % OUTFITS.length) + OUTFITS.length) % OUTFITS.length];
+  if (available.includes('shirtRelaxedHigh') && (index === 0 || index === 1)) return index === 0 ? ['shirtRelaxedHigh', 'leggings'] : ['shirtRelaxedLow', 'leggingsLow'];
   return outfit.garments.map((g) => (g === 'shirtAthletic' && !available.includes(g) ? 'shirt' : g)).filter((g) => available.includes(g));
 }
 /**
@@ -196,7 +200,7 @@ export function trimShown(material: string, shown: readonly Garment[]): boolean 
   if (!material.endsWith('Trim')) return null;
   const of = material.slice(0, -4) as Garment;
   if (!(GARMENTS as readonly string[]).includes(of)) return null;
-  if (of === 'leggings' && shown.includes('shirt')) return false;
+  if (of === 'leggings' && (shown.includes('shirt') || shown.includes('shirtRelaxedHigh') || shown.includes('shirtSpandexHigh'))) return false;
   return shown.includes(of);
 }
 export function outfitLine(index: number): string {

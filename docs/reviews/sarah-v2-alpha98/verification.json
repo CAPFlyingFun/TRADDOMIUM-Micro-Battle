@@ -1,0 +1,48 @@
+{
+  "version": "1.0.0-alpha.98",
+  "bodySHA256": "47e990f0f28097efca488b4274f2cac0e0fa588904bc2c10cb00695600897f42",
+  "tests": {
+    "vitestPassed": 3775,
+    "vitestSkipped": 3,
+    "bindingPackagingPassed": 16,
+    "typecheck": "pass",
+    "relayTypecheck": "pass",
+    "build": "pass",
+    "boot": "pass"
+  },
+  "runtime": {
+    "outfits": [
+      "relaxed-high",
+      "relaxed-low",
+      "spandex-high",
+      "spandex-low",
+      "bikini"
+    ],
+    "bellyKeys": [
+      0,
+      50,
+      100,
+      200
+    ],
+    "angles": [
+      0,
+      90,
+      45
+    ],
+    "bodyControls": 15,
+    "interpolationSamples": 41,
+    "armPoseChecks": 12,
+    "consoleErrors": 0
+  },
+  "knownLimits": [
+    "Shirt length controls remain a separate pending feature.",
+    "Extreme belly height/fullness combinations can cause up to1.64mm bikini contact at nonconvex source folds.",
+    "Raised arms can expose Meshy fabric folds; full cloth simulation is not implemented."
+  ],
+  "assets": {
+    "models/sarah-v2-spandex-high.gltf": "711d55b1e9433c6719be5179aff0b5562a737cfacf62be8a5f6f9d0da53771c3",
+    "models/sarah-v2-relaxed-high.gltf": "6144a88eaa20bd37b637e666aa838cb1120e42899ef0c72776d5d76cf1e7a162",
+    "models/sarah-v2-relaxed-low.gltf": "576b4b43c051b251ccd068c4fa77220dc3ab1e2bd1fe92b78fa67d68208cc029",
+    "models/sarah-v2-spandex-low.gltf": "bd4f31861c5cfa006c4948d59ef0eb80626a3d41e57b84d7f2f2667b46cbbe86"
+  }
+}

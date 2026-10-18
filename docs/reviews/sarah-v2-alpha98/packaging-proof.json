@@ -1,0 +1,178 @@
+[
+  {
+    "variant": "relaxed-high",
+    "inputPath": "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-relaxed-high.glb",
+    "outPath": "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-relaxed-high.gltf",
+    "sourceSha256": "6bf20a859d153232e6c850957ebce8cd71361532ba7905c368bc83d5df365cd7",
+    "jsonBytes": 64374,
+    "parts": 18,
+    "partBytes": 66053909,
+    "maxPartBytes": 4105511,
+    "partFiles": [
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/f16e3c5471d714489f36a1fc627015914b1c330d80907ffc0949e846faad8863.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/9f2b48e443bdb8c5ec8cdd49fad32fb8a3a036854a960063abc2aac41b60cc81.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/c6756d6733b2f3899341496962b4fcb1df052bcfa8ba6048408f7eb7b717fc15.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/5999182b8c400e5bdb653c22172aa0539aa3b746eb338583abfdb1b9be255bfe.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/78c1c1ffb21cc2952109da186a7719d69e7996902d954f51553d73389c1a8071.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/c2b1bc62b0086aa214709000f73ae0a33584951fe0690bb01b710fb03be6d5bd.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/bdd11406c6d52b351ebc11845dd5c7e86e94f8dc4f63555ea8689ce52c828466.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/0c8e979e6991ce02a2b19616114abb94c36608a840a84be103dc24e45fef1ba1.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/364fcf577f0010b89937b40527c4350b89a580b13c83f9218adc18e76e40489f.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/bb67c87d8bb70ea2bfe266cb707396442cc47d0971de532b0365f1a37f5db92c.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/074d46a63b30e1f9917b0226110873eb205d8b736daadd8bfb2a53d5d5470972.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/eea086afb774610fd6b6577c735364ed3a5044d7154690aa4c9c1a688a743166.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/d2b52b3690ee4efd5fdd559e767e0e30cd49ea1e1793369d1fd20050b5a069d2.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/e0f9420a5481660a1f5efec0e21536721d8a37962f5cefb8591ff4c2b793a945.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/c2628ee1ec90a4b05a95c8558e05821384de466fb7874f37a77f1b6d8aba42d5.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/814a3b7857ccafd0a626c69f82ae3b82d885117e5288019b4ffdd9f723a5074d.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/f24e7599b3911a414aca1803c7965ea0a6c3dfcb23daedd9a3fb947ae6cdda24.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/74b8898b1eb8f489204e04ac4268a8cab7d664cd73654bb010d2ae894d5c6c93.bin"
+    ],
+    "verified": true,
+    "accessors": {
+      "count": 105,
+      "byteLength": 190927320,
+      "sourceSha256": "c34da20b08c24c57c6edff3b6671c1c2522d82420bd1dc70ba1776db7b597d6c",
+      "packagedSha256": "c34da20b08c24c57c6edff3b6671c1c2522d82420bd1dc70ba1776db7b597d6c"
+    },
+    "textures": {
+      "count": 3,
+      "byteLength": 2925851,
+      "sourceSha256": "c4bce5cb92be2e51b3519a0d7d4f33a644e0685db7b44991ed999c652aa2d6af",
+      "packagedSha256": "c4bce5cb92be2e51b3519a0d7d4f33a644e0685db7b44991ed999c652aa2d6af"
+    }
+  },
+  {
+    "variant": "relaxed-low",
+    "inputPath": "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-relaxed-low.glb",
+    "outPath": "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-relaxed-low.gltf",
+    "sourceSha256": "bcbb9158c0db4fa901a0813ea543204c633a277f08637d58e8e32baa893a0367",
+    "jsonBytes": 64371,
+    "parts": 18,
+    "partBytes": 66053909,
+    "maxPartBytes": 4105511,
+    "partFiles": [
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/f16e3c5471d714489f36a1fc627015914b1c330d80907ffc0949e846faad8863.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/9f2b48e443bdb8c5ec8cdd49fad32fb8a3a036854a960063abc2aac41b60cc81.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/c6756d6733b2f3899341496962b4fcb1df052bcfa8ba6048408f7eb7b717fc15.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/5999182b8c400e5bdb653c22172aa0539aa3b746eb338583abfdb1b9be255bfe.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/78c1c1ffb21cc2952109da186a7719d69e7996902d954f51553d73389c1a8071.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/c2b1bc62b0086aa214709000f73ae0a33584951fe0690bb01b710fb03be6d5bd.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/bdd11406c6d52b351ebc11845dd5c7e86e94f8dc4f63555ea8689ce52c828466.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/0c8e979e6991ce02a2b19616114abb94c36608a840a84be103dc24e45fef1ba1.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/364fcf577f0010b89937b40527c4350b89a580b13c83f9218adc18e76e40489f.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/bb67c87d8bb70ea2bfe266cb707396442cc47d0971de532b0365f1a37f5db92c.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/074d46a63b30e1f9917b0226110873eb205d8b736daadd8bfb2a53d5d5470972.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/eea086afb774610fd6b6577c735364ed3a5044d7154690aa4c9c1a688a743166.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/d2b52b3690ee4efd5fdd559e767e0e30cd49ea1e1793369d1fd20050b5a069d2.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/e0f9420a5481660a1f5efec0e21536721d8a37962f5cefb8591ff4c2b793a945.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/c2628ee1ec90a4b05a95c8558e05821384de466fb7874f37a77f1b6d8aba42d5.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/814a3b7857ccafd0a626c69f82ae3b82d885117e5288019b4ffdd9f723a5074d.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/f24e7599b3911a414aca1803c7965ea0a6c3dfcb23daedd9a3fb947ae6cdda24.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/74b8898b1eb8f489204e04ac4268a8cab7d664cd73654bb010d2ae894d5c6c93.bin"
+    ],
+    "verified": true,
+    "accessors": {
+      "count": 105,
+      "byteLength": 190927320,
+      "sourceSha256": "c34da20b08c24c57c6edff3b6671c1c2522d82420bd1dc70ba1776db7b597d6c",
+      "packagedSha256": "c34da20b08c24c57c6edff3b6671c1c2522d82420bd1dc70ba1776db7b597d6c"
+    },
+    "textures": {
+      "count": 3,
+      "byteLength": 2925851,
+      "sourceSha256": "c4bce5cb92be2e51b3519a0d7d4f33a644e0685db7b44991ed999c652aa2d6af",
+      "packagedSha256": "c4bce5cb92be2e51b3519a0d7d4f33a644e0685db7b44991ed999c652aa2d6af"
+    }
+  },
+  {
+    "variant": "spandex-high",
+    "inputPath": "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-spandex-high.glb",
+    "outPath": "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-spandex-high.gltf",
+    "sourceSha256": "e1940d5c643e3973d51c82e29071cd0be589dc7ed141953efd1d57353f6cd1e9",
+    "jsonBytes": 64644,
+    "parts": 20,
+    "partBytes": 72111537,
+    "maxPartBytes": 4150052,
+    "partFiles": [
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/f16e3c5471d714489f36a1fc627015914b1c330d80907ffc0949e846faad8863.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/731bbf0c37d50556debba7f52901c95ee0cefb5937757177f441be7663193da9.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/ce0ad533e27ecf2d6c402242ca42d1b309bf4b8bb7717272e1258b84f7d0a75c.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/ec245a5c8f8973c6338ba63bca37e726d954d515fc8eb5bb650a99da576be3d5.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/8a65f788798fdd32704150d773a7e87d4184a6659bdd4dcfc8e1a683aa8ed57e.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/46886c4fee142fa1a6169123f5fa630fd2099de562d8487d66be4cd6babe244c.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/b9d42adc06e246180f6d6ff3d2a723573f1cf40b29b738de724a67378d915915.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/d8a8fe0bfb58bb087b6a4817aa0fa367fb5d00aa83848886b17f0953c3f1894c.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/948d763538aa0c32fb7d6debca5d5b56d37feccb1a708264f3c3cc4b9234bdc1.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/e06ed4602fb727bc0a1e6d3dc217526b6c5c8a674dfa95c0dd6797ebe2b95100.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/d751c088dabd41c0c8dd623aeebfe7d404271f6ec2bccc60068d69b48e1befc4.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/cf690958396567080f031df93f03204d3c79730c6bfcba30f236d05d2ab78058.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/d396af5b2349137e8ee2c18f34445262bfbe97ebcef7c7bdde5ef551baa65237.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/39564969189b5b172feb619ab3a82378d08ac3fb71d4fe6c5412b559de47df9e.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/738d4b61f1a2f0ecb9cc7f68e0afa9ef020685614f67ba16611a44b89244bcfc.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/8d0ba12511c55ca18177f4fb94207cd675bb5ece12b6ca313d0f0330f751a155.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/502fde697402be0b9a3f1c7e8292e39a35f507912d7ecc2f8cf6496515f22dd3.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/154f5e82ec32e951b5ba031c4df4dcd3f4f82de8418ff7fb4b1da84b25990293.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/5d32c13e69e097bb77772659f9d987d3058196a398f7bad5aee542e79f413dbb.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/9f7efaa2bb9c1ae35ddf4aea4fc1bdcfb26c32f8d2288d22045316a3088802ca.bin"
+    ],
+    "verified": true,
+    "accessors": {
+      "count": 105,
+      "byteLength": 208631816,
+      "sourceSha256": "df85b19beda5e0cf120f67921d4f76a69985f143265056c1a808b4c79f60aeae",
+      "packagedSha256": "df85b19beda5e0cf120f67921d4f76a69985f143265056c1a808b4c79f60aeae"
+    },
+    "textures": {
+      "count": 3,
+      "byteLength": 2925851,
+      "sourceSha256": "c4bce5cb92be2e51b3519a0d7d4f33a644e0685db7b44991ed999c652aa2d6af",
+      "packagedSha256": "c4bce5cb92be2e51b3519a0d7d4f33a644e0685db7b44991ed999c652aa2d6af"
+    }
+  },
+  {
+    "variant": "spandex-low",
+    "inputPath": "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-spandex-low.glb",
+    "outPath": "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-spandex-low.gltf",
+    "sourceSha256": "2c0fa0ced327f329677700a5a949ce301b622a68fafb3012f29fbcd20c8e1264",
+    "jsonBytes": 64652,
+    "parts": 20,
+    "partBytes": 72074815,
+    "maxPartBytes": 4154451,
+    "partFiles": [
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/f16e3c5471d714489f36a1fc627015914b1c330d80907ffc0949e846faad8863.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/df29d6489a10e033608264362457174b4f9c8435f55e94076b8ddee1f84d2ee3.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/c53513aaa15328cf9efc2f0618037372c912c3f32c0953ffd15f3dfbb4fa52ed.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/2a4aaa0186811adb16d2d1b9911d6b1645cfb9600e4af919f3ee363b6d299583.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/68365038f28c56e6ece10274bbfe57f5265200e23943a82fbba25b308dea97d5.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/49257e75137dc2b98ee8c282a1de15394e0b853537e5cd59ca8d9bf60c6f24d1.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/e1c97ca30bee3e63ed502999cb8fe840b8d43545b01e89fd37bf94e563a38152.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/284b67d71e1d76b9a5e92b55366bb80caabd27c7be5806b3150082c01717e29e.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/45ec12bfa1b28cfa703fa367af6ae8c94c386499b16ae66f00c8c3b9b1ab8afb.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/d5536e623a3a9cd20709adb58b4a9fcd0ec5e9ab5af59987650a75d9d7f1d7ab.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/40c1e99604c8793d97e9f845af36a3644675ba49c79a226ef8c7bdc106051ed5.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/ca1a7105401cb031d698b825db6ae61c7140b6e02e2cff4ba622c0b8dfd590df.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/374f1317c7143460042a14ed9e8a29aadd23c878df14b3ffbc06742d5e9247b7.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/81f1ad30f85ed7f06534fa0f22d60783247898832d3e9cadc9384e919dccbd20.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/45a7d464cdf40fadd0416592b313f58c51efbb73fef4dfc29eb478c338496d74.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/24f6c3b2eea0727b4b5cea0dc0dad4ad947f3e3ccb1163e5342ea01849918d2b.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/c1975e9c0cd778b3bf1ca9711613e4083d1f7cc833c5c0aff187f43979ebb11d.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/bf3ed7b042539bad0499570815c44e1415beeeba4e824c205d017673a53576fb.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/67082159bb52a409fe57aba0f14480992303ad08ffa97da19e119e99885f3ed4.bin",
+      "/workspace/scratch/32de5feef88e/tmb-sarah-integration/public/models/sarah-v2-cloth-parts/2b7dd49ef12dfe9142b9a62bbd84552988aa6da773c41ab4698c97c204859b16.bin"
+    ],
+    "verified": true,
+    "accessors": {
+      "count": 105,
+      "byteLength": 208631816,
+      "sourceSha256": "b08058854b2e0593bd75e37c2a0107275c13f8d14ad8affe86f51a90dd1323e0",
+      "packagedSha256": "b08058854b2e0593bd75e37c2a0107275c13f8d14ad8affe86f51a90dd1323e0"
+    },
+    "textures": {
+      "count": 3,
+      "byteLength": 2925851,
+      "sourceSha256": "c4bce5cb92be2e51b3519a0d7d4f33a644e0685db7b44991ed999c652aa2d6af",
+      "packagedSha256": "c4bce5cb92be2e51b3519a0d7d4f33a644e0685db7b44991ed999c652aa2d6af"
+    }
+  }
+]

@@ -1,0 +1,246 @@
+{
+  "errors": [],
+  "controls": [
+    {
+      "key": "bellyTilt",
+      "value": 18.5,
+      "changed": -498157236
+    },
+    {
+      "key": "bellyHeight",
+      "value": -0.30000000000000004,
+      "changed": -763466341
+    },
+    {
+      "key": "bellyWidth",
+      "value": -3,
+      "changed": -407465109
+    },
+    {
+      "key": "bellyDepth",
+      "value": -3,
+      "changed": -3467219830
+    },
+    {
+      "key": "bellyUpper",
+      "value": -3,
+      "changed": 414708127
+    },
+    {
+      "key": "bellyLower",
+      "value": -3,
+      "changed": -3149659219
+    },
+    {
+      "key": "breastSize",
+      "value": -3,
+      "changed": -2177219958
+    },
+    {
+      "key": "breastWidth",
+      "value": -3,
+      "changed": -299478976
+    },
+    {
+      "key": "breastHeight",
+      "value": -3,
+      "changed": -2563203809
+    },
+    {
+      "key": "breastDepth",
+      "value": -3,
+      "changed": -1486229786
+    },
+    {
+      "key": "breastSpacing",
+      "value": -0.30000000000000004,
+      "changed": -2047793843
+    },
+    {
+      "key": "breastPosition",
+      "value": -0.30000000000000004,
+      "changed": -1951876643
+    },
+    {
+      "key": "breastDroop",
+      "value": -1.5,
+      "changed": -1651048107
+    },
+    {
+      "key": "breastUpper",
+      "value": -3,
+      "changed": -2072932580
+    },
+    {
+      "key": "breastLower",
+      "value": -3,
+      "changed": -370641664
+    }
+  ],
+  "interpolation": [
+    {
+      "b": 0,
+      "finite": true
+    },
+    {
+      "b": 5,
+      "finite": true
+    },
+    {
+      "b": 10,
+      "finite": true
+    },
+    {
+      "b": 15,
+      "finite": true
+    },
+    {
+      "b": 20,
+      "finite": true
+    },
+    {
+      "b": 25,
+      "finite": true
+    },
+    {
+      "b": 30,
+      "finite": true
+    },
+    {
+      "b": 35,
+      "finite": true
+    },
+    {
+      "b": 40,
+      "finite": true
+    },
+    {
+      "b": 45,
+      "finite": true
+    },
+    {
+      "b": 50,
+      "finite": true
+    },
+    {
+      "b": 55,
+      "finite": true
+    },
+    {
+      "b": 60,
+      "finite": true
+    },
+    {
+      "b": 65,
+      "finite": true
+    },
+    {
+      "b": 70,
+      "finite": true
+    },
+    {
+      "b": 75,
+      "finite": true
+    },
+    {
+      "b": 80,
+      "finite": true
+    },
+    {
+      "b": 85,
+      "finite": true
+    },
+    {
+      "b": 90,
+      "finite": true
+    },
+    {
+      "b": 95,
+      "finite": true
+    },
+    {
+      "b": 100,
+      "finite": true
+    },
+    {
+      "b": 105,
+      "finite": true
+    },
+    {
+      "b": 110,
+      "finite": true
+    },
+    {
+      "b": 115,
+      "finite": true
+    },
+    {
+      "b": 120,
+      "finite": true
+    },
+    {
+      "b": 125,
+      "finite": true
+    },
+    {
+      "b": 130,
+      "finite": true
+    },
+    {
+      "b": 135,
+      "finite": true
+    },
+    {
+      "b": 140,
+      "finite": true
+    },
+    {
+      "b": 145,
+      "finite": true
+    },
+    {
+      "b": 150,
+      "finite": true
+    },
+    {
+      "b": 155,
+      "finite": true
+    },
+    {
+      "b": 160,
+      "finite": true
+    },
+    {
+      "b": 165,
+      "finite": true
+    },
+    {
+      "b": 170,
+      "finite": true
+    },
+    {
+      "b": 175,
+      "finite": true
+    },
+    {
+      "b": 180,
+      "finite": true
+    },
+    {
+      "b": 185,
+      "finite": true
+    },
+    {
+      "b": 190,
+      "finite": true
+    },
+    {
+      "b": 195,
+      "finite": true
+    },
+    {
+      "b": 200,
+      "finite": true
+    }
+  ]
+}

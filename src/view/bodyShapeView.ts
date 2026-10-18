@@ -66,10 +66,15 @@ export function liftShapeFields(mesh: THREE.Mesh): ShapeFields | null {
   return { fields, basePos, baseNrm, last: '' };
 }
 
-/** Rest shape = original + Σ weight × field; weights by field name, missing ones zero. */
-export function applyShapeFields(mesh: THREE.Mesh, shape: ShapeFields, weights: Readonly<Record<string, number>>): void {
+/**
+ * Rest shape = original + Σ weight × field; weights by field name, missing ones zero.
+ * Recovered clothing leaves normal sums raw until GPU normal morphs are added,
+ * so CPU fit residuals and native GPU deltas cancel before shader normalization.
+ */
+export function applyShapeFields(mesh: THREE.Mesh, shape: ShapeFields, weights: Readonly<Record<string, number>>, options: { normalizeNormals?: boolean } = {}): void {
+  const normalizeNormals = options.normalizeNormals ?? true;
   const live = [...shape.fields.keys()].map((n) => [n, Number.isFinite(weights[n]) ? weights[n] : 0] as const).filter(([, w]) => w !== 0);
-  const key = live.map(([n, w]) => `${n}:${w.toFixed(5)}`).join('|');
+  const key = live.map(([n, w]) => `${n}:${w.toFixed(5)}`).join('|') + (normalizeNormals ? '' : '|raw-normals');
   if (key === shape.last) return;
   shape.last = key;
   const geom = mesh.geometry as THREE.BufferGeometry;
@@ -86,7 +91,7 @@ export function applyShapeFields(mesh: THREE.Mesh, shape: ShapeFields, weights: 
       if (N && f.nrm) { N[i] += w * f.nrm[k * 3]; N[i + 1] += w * f.nrm[k * 3 + 1]; N[i + 2] += w * f.nrm[k * 3 + 2]; touched[f.index[k]] = 1; }
     }
   }
-  if (N) for (let v = 0; v < touched.length; v += 1) if (touched[v]) { const i = v * 3, l = Math.hypot(N[i], N[i + 1], N[i + 2]) || 1; N[i] /= l; N[i + 1] /= l; N[i + 2] /= l; }
+  if (N && normalizeNormals) for (let v = 0; v < touched.length; v += 1) if (touched[v]) { const i = v * 3, l = Math.hypot(N[i], N[i + 1], N[i + 2]) || 1; N[i] /= l; N[i + 1] /= l; N[i + 2] /= l; }
   pos.needsUpdate = true;
   if (nrmAttr) nrmAttr.needsUpdate = true;
 }

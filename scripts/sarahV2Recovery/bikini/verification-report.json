@@ -1,0 +1,1159 @@
+{
+  "outputSha256": "e82042f9a7721388bc2cba68085e2d4fe7d33f976101a44580c82455c34e1c59",
+  "cases": [
+    {
+      "name": "belly0",
+      "parts": [
+        {
+          "part": "continuous-cloth",
+          "minVertexCm": 0.07496876571287059,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.07504798442378571,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 0,
+          "minVertexCm": 0.057679485167648564,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.06329835122114802,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 1,
+          "minVertexCm": 0.025208891956913063,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.02603584154693947,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 2,
+          "minVertexCm": 0.02492947223067598,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.026407921772273718,
+          "penetratingCentroids": 0
+        }
+      ]
+    },
+    {
+      "name": "belly25",
+      "parts": [
+        {
+          "part": "continuous-cloth",
+          "minVertexCm": 0.07499245799699086,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.07502942886429514,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 0,
+          "minVertexCm": 0.05989189991567089,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.06663310438464987,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 1,
+          "minVertexCm": 0.026000007048798707,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.025997392623881573,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 2,
+          "minVertexCm": 0.025997545355497812,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.02654873301633062,
+          "penetratingCentroids": 0
+        }
+      ]
+    },
+    {
+      "name": "belly50",
+      "parts": [
+        {
+          "part": "continuous-cloth",
+          "minVertexCm": 0.07509540674980561,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.07523802237448625,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 0,
+          "minVertexCm": 0.06763940465236253,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.07192778618587843,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 1,
+          "minVertexCm": 0.025018199208166763,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.028544755819981386,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 2,
+          "minVertexCm": 0.026003173632617622,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.030098423110954058,
+          "penetratingCentroids": 0
+        }
+      ]
+    },
+    {
+      "name": "belly75",
+      "parts": [
+        {
+          "part": "continuous-cloth",
+          "minVertexCm": 0.08908166761588834,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.0833526657270655,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 0,
+          "minVertexCm": 0.0705350582158294,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.0679418089706604,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 1,
+          "minVertexCm": 0.037468203306143616,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.03483287641062066,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 2,
+          "minVertexCm": 0.03103861229913821,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.027506767208812583,
+          "penetratingCentroids": 0
+        }
+      ]
+    },
+    {
+      "name": "belly100",
+      "parts": [
+        {
+          "part": "continuous-cloth",
+          "minVertexCm": 0.15999143495767543,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.11492109711681545,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 0,
+          "minVertexCm": 0.07048937512174004,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.07610011454975074,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 1,
+          "minVertexCm": 0.04551874342297585,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.05251834493015666,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 2,
+          "minVertexCm": 0.03254841412905795,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.03195858295999157,
+          "penetratingCentroids": 0
+        }
+      ]
+    },
+    {
+      "name": "belly150",
+      "parts": [
+        {
+          "part": "continuous-cloth",
+          "minVertexCm": 0.12611459978224446,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.11861246234850187,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 0,
+          "minVertexCm": 0.07048503619980036,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.07610461729412252,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 1,
+          "minVertexCm": 0.04551874342297585,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.05251834493015666,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 2,
+          "minVertexCm": 0.03221474782332546,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.03317861393280287,
+          "penetratingCentroids": 0
+        }
+      ]
+    },
+    {
+      "name": "belly200",
+      "parts": [
+        {
+          "part": "continuous-cloth",
+          "minVertexCm": 0.07551089488620995,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.07490834707775072,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 0,
+          "minVertexCm": 0.07047846668066066,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.07610833826437803,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 1,
+          "minVertexCm": 0.03463041467871131,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.03388291803630949,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 2,
+          "minVertexCm": 0.025997972971980584,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.026002153125153363,
+          "penetratingCentroids": 0
+        }
+      ]
+    },
+    {
+      "name": "belly200-tilt0",
+      "parts": [
+        {
+          "part": "continuous-cloth",
+          "minVertexCm": 0.15611733501733477,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.11075726842121787,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 0,
+          "minVertexCm": 0.07047846668066066,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.07610833826437803,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 1,
+          "minVertexCm": 0.04551874342297585,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.05251834493015666,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 2,
+          "minVertexCm": 0.03254841412905795,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.03195858295999157,
+          "penetratingCentroids": 0
+        }
+      ]
+    },
+    {
+      "name": "belly200-tilt10",
+      "parts": [
+        {
+          "part": "continuous-cloth",
+          "minVertexCm": 0.12886142191446714,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.10698588346644916,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 0,
+          "minVertexCm": 0.07047846668066066,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.07610833826437803,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 1,
+          "minVertexCm": 0.04551874342297585,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.05251834493015666,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 2,
+          "minVertexCm": 0.03221474782332546,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.03317861393280287,
+          "penetratingCentroids": 0
+        }
+      ]
+    },
+    {
+      "name": "belly100-bellyHeight--2",
+      "parts": [
+        {
+          "part": "continuous-cloth",
+          "minVertexCm": -0.08425960007355536,
+          "penetratingVertices": 40,
+          "minCentroidCm": -0.07761543818928167,
+          "penetratingCentroids": 91
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 0,
+          "minVertexCm": 0.07048937512174004,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.07498849715505725,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 1,
+          "minVertexCm": -0.07838574257033862,
+          "penetratingVertices": 14,
+          "minCentroidCm": -0.06747936231611708,
+          "penetratingCentroids": 23
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 2,
+          "minVertexCm": -0.01707129569960347,
+          "penetratingVertices": 9,
+          "minCentroidCm": -0.021191717636330216,
+          "penetratingCentroids": 19
+        }
+      ]
+    },
+    {
+      "name": "belly100-bellyHeight-2",
+      "parts": [
+        {
+          "part": "continuous-cloth",
+          "minVertexCm": -0.03535293050218615,
+          "penetratingVertices": 2,
+          "minCentroidCm": -0.05679397924519037,
+          "penetratingCentroids": 13
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 0,
+          "minVertexCm": 0.028118375232109926,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.029265064823692143,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 1,
+          "minVertexCm": 0.04552735601687693,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.05253340825169538,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 2,
+          "minVertexCm": 0.032533785961637605,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.03193900835180976,
+          "penetratingCentroids": 0
+        }
+      ]
+    },
+    {
+      "name": "belly100-bellyWidth--15",
+      "parts": [
+        {
+          "part": "continuous-cloth",
+          "minVertexCm": 0.15875171343779723,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.11506809726116861,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 0,
+          "minVertexCm": 0.07046860857713123,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.07576895326351385,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 1,
+          "minVertexCm": 0.04550460650018498,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.05249685461914461,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 2,
+          "minVertexCm": 0.03257307153935605,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.03198735239690639,
+          "penetratingCentroids": 0
+        }
+      ]
+    },
+    {
+      "name": "belly100-bellyWidth-15",
+      "parts": [
+        {
+          "part": "continuous-cloth",
+          "minVertexCm": 0.15846818150915595,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.11478522870343241,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 0,
+          "minVertexCm": 0.07050734591583686,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.07359749985668608,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 1,
+          "minVertexCm": 0.04553284966533913,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.0525398090030498,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 2,
+          "minVertexCm": 0.032523737215634854,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.03192982938204054,
+          "penetratingCentroids": 0
+        }
+      ]
+    },
+    {
+      "name": "belly100-bellyDepth--15",
+      "parts": [
+        {
+          "part": "continuous-cloth",
+          "minVertexCm": 0.1582108709507894,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.11344283896237578,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 0,
+          "minVertexCm": 0.07050943529018092,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.07617665975599323,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 1,
+          "minVertexCm": 0.04550743667315459,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.05245756567840153,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 2,
+          "minVertexCm": 0.032554733080319406,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.032099382329611854,
+          "penetratingCentroids": 0
+        }
+      ]
+    },
+    {
+      "name": "belly100-bellyDepth-15",
+      "parts": [
+        {
+          "part": "continuous-cloth",
+          "minVertexCm": 0.15896161428812725,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.1163822539600565,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 0,
+          "minVertexCm": 0.07047263504932083,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.07602580936163658,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 1,
+          "minVertexCm": 0.045530001962978434,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.05257767754909646,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 2,
+          "minVertexCm": 0.032541831388695285,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.03182261499644474,
+          "penetratingCentroids": 0
+        }
+      ]
+    },
+    {
+      "name": "belly100-bellyUpper--20",
+      "parts": [
+        {
+          "part": "continuous-cloth",
+          "minVertexCm": 0.15989017946342796,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.11492109711681545,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 0,
+          "minVertexCm": 0.0705076321806235,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.07572073536548876,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 1,
+          "minVertexCm": 0.04551874342297585,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.05251834493015666,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 2,
+          "minVertexCm": 0.03254841412905795,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.03195858295999157,
+          "penetratingCentroids": 0
+        }
+      ]
+    },
+    {
+      "name": "belly100-bellyUpper-20",
+      "parts": [
+        {
+          "part": "continuous-cloth",
+          "minVertexCm": 0.15984055647868342,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.11492109711681545,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 0,
+          "minVertexCm": 0.07047435481824701,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.07648818994557378,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 1,
+          "minVertexCm": 0.04551874342297585,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.05251834493015666,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 2,
+          "minVertexCm": 0.03254841412905795,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.03195858295999157,
+          "penetratingCentroids": 0
+        }
+      ]
+    },
+    {
+      "name": "belly100-bellyLower--20",
+      "parts": [
+        {
+          "part": "continuous-cloth",
+          "minVertexCm": 0.15498185837982595,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.11397135243757195,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 0,
+          "minVertexCm": 0.07046624494451112,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.07635826321541644,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 1,
+          "minVertexCm": 0.04553538524798395,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.053018830177705346,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 2,
+          "minVertexCm": 0.032700358302532775,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.03179682741869507,
+          "penetratingCentroids": 0
+        }
+      ]
+    },
+    {
+      "name": "belly100-bellyLower-20",
+      "parts": [
+        {
+          "part": "continuous-cloth",
+          "minVertexCm": 0.15346999810491016,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.11582807571811456,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 0,
+          "minVertexCm": 0.07051747141343609,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.0758360971803052,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 1,
+          "minVertexCm": 0.045507232563966285,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.05204978425692936,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 2,
+          "minVertexCm": 0.03240651765177301,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.03188407489860819,
+          "penetratingCentroids": 0
+        }
+      ]
+    },
+    {
+      "name": "belly200-bellyHeight--2",
+      "parts": [
+        {
+          "part": "continuous-cloth",
+          "minVertexCm": -0.16396660316492812,
+          "penetratingVertices": 185,
+          "minCentroidCm": -0.14995244257393442,
+          "penetratingCentroids": 346
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 0,
+          "minVertexCm": 0.04134410109504228,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.04975110599882975,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 1,
+          "minVertexCm": -0.08026568007104931,
+          "penetratingVertices": 29,
+          "minCentroidCm": -0.0685677750879797,
+          "penetratingCentroids": 66
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 2,
+          "minVertexCm": -0.0027071182116793794,
+          "penetratingVertices": 2,
+          "minCentroidCm": -0.015290659964599196,
+          "penetratingCentroids": 4
+        }
+      ]
+    },
+    {
+      "name": "belly200-bellyHeight-2",
+      "parts": [
+        {
+          "part": "continuous-cloth",
+          "minVertexCm": -0.09777044022120743,
+          "penetratingVertices": 78,
+          "minCentroidCm": -0.14260769869441714,
+          "penetratingCentroids": 227
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 0,
+          "minVertexCm": -0.0075924685059700165,
+          "penetratingVertices": 1,
+          "minCentroidCm": -0.035436155846406185,
+          "penetratingCentroids": 26
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 1,
+          "minVertexCm": 0.0455272731182499,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.052533421370744134,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 2,
+          "minVertexCm": 0.03180232008843165,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.03374974306876841,
+          "penetratingCentroids": 0
+        }
+      ]
+    },
+    {
+      "name": "belly200-bellyWidth--15",
+      "parts": [
+        {
+          "part": "continuous-cloth",
+          "minVertexCm": 0.051670228710043294,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.05854550610532354,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 0,
+          "minVertexCm": 0.0704481875335817,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.072787596697406,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 1,
+          "minVertexCm": 0.039913109517437026,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.02219195675101568,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 2,
+          "minVertexCm": 0.007780960626088639,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.02341666669009699,
+          "penetratingCentroids": 0
+        }
+      ]
+    },
+    {
+      "name": "belly200-bellyWidth-15",
+      "parts": [
+        {
+          "part": "continuous-cloth",
+          "minVertexCm": 0.07082466357789938,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.06718691341023907,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 0,
+          "minVertexCm": 0.0705032857410973,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.06017339961600769,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 1,
+          "minVertexCm": 0.03675808947781881,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.03641633172735125,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 2,
+          "minVertexCm": 0.028205287486169153,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.030077269711954988,
+          "penetratingCentroids": 0
+        }
+      ]
+    },
+    {
+      "name": "belly200-bellyDepth--15",
+      "parts": [
+        {
+          "part": "continuous-cloth",
+          "minVertexCm": 0.0665055753101744,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.05628572933010608,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 0,
+          "minVertexCm": 0.07050757602303993,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.07622570235215027,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 1,
+          "minVertexCm": 0.04549635431020866,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.04595188664392887,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 2,
+          "minVertexCm": 0.03183310501450699,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.03402214975941585,
+          "penetratingCentroids": 0
+        }
+      ]
+    },
+    {
+      "name": "belly200-bellyDepth-15",
+      "parts": [
+        {
+          "part": "continuous-cloth",
+          "minVertexCm": 0.0636041673479816,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.056604999544790154,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 0,
+          "minVertexCm": 0.07044842618218754,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.07599004953747575,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 1,
+          "minVertexCm": 0.034569104642989214,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.026683039479807772,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 2,
+          "minVertexCm": 0.016552172372936203,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.01194523328030251,
+          "penetratingCentroids": 0
+        }
+      ]
+    },
+    {
+      "name": "belly200-bellyUpper--20",
+      "parts": [
+        {
+          "part": "continuous-cloth",
+          "minVertexCm": 0.07551089488620995,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.07490834707775072,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 0,
+          "minVertexCm": 0.07050662405939777,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.07472162877678876,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 1,
+          "minVertexCm": 0.03463041467871131,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.03388291803630949,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 2,
+          "minVertexCm": 0.025997972971980584,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.026002153125153363,
+          "penetratingCentroids": 0
+        }
+      ]
+    },
+    {
+      "name": "belly200-bellyUpper-20",
+      "parts": [
+        {
+          "part": "continuous-cloth",
+          "minVertexCm": 0.07551089488620995,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.07490834707775072,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 0,
+          "minVertexCm": 0.0704503093019128,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.07674859670903028,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 1,
+          "minVertexCm": 0.03463041467871131,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.03388291803630949,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 2,
+          "minVertexCm": 0.025997972971980584,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.026002153125153363,
+          "penetratingCentroids": 0
+        }
+      ]
+    },
+    {
+      "name": "belly200-bellyLower--20",
+      "parts": [
+        {
+          "part": "continuous-cloth",
+          "minVertexCm": -0.09915741482805525,
+          "penetratingVertices": 1,
+          "minCentroidCm": 0.05647785186645644,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 0,
+          "minVertexCm": 0.07043511649412924,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.07598605321722465,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 1,
+          "minVertexCm": 0.045550139227150274,
+          "penetratingVertices": 0,
+          "minCentroidCm": -0.1334480086625851,
+          "penetratingCentroids": 1
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 2,
+          "minVertexCm": 0.03203868283865357,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.03464528422045043,
+          "penetratingCentroids": 0
+        }
+      ]
+    },
+    {
+      "name": "belly200-bellyLower-20",
+      "parts": [
+        {
+          "part": "continuous-cloth",
+          "minVertexCm": 0.05762292067865766,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.048929917637883416,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 0,
+          "minVertexCm": 0.0705168725046469,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.0719167939706527,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 1,
+          "minVertexCm": 0.028196181518193822,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.025215783604817247,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 2,
+          "minVertexCm": 0.011191187008354374,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.001694355356167236,
+          "penetratingCentroids": 0
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    {
+      "name": "belly100-bellyHeight--2",
+      "parts": [
+        {
+          "part": "continuous-cloth",
+          "minVertexCm": -0.08425960007355536,
+          "penetratingVertices": 40,
+          "minCentroidCm": -0.07761543818928167,
+          "penetratingCentroids": 91
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 1,
+          "minVertexCm": -0.07838574257033862,
+          "penetratingVertices": 14,
+          "minCentroidCm": -0.06747936231611708,
+          "penetratingCentroids": 23
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 2,
+          "minVertexCm": -0.01707129569960347,
+          "penetratingVertices": 9,
+          "minCentroidCm": -0.021191717636330216,
+          "penetratingCentroids": 19
+        }
+      ]
+    },
+    {
+      "name": "belly100-bellyHeight-2",
+      "parts": [
+        {
+          "part": "continuous-cloth",
+          "minVertexCm": -0.03535293050218615,
+          "penetratingVertices": 2,
+          "minCentroidCm": -0.05679397924519037,
+          "penetratingCentroids": 13
+        }
+      ]
+    },
+    {
+      "name": "belly200-bellyHeight--2",
+      "parts": [
+        {
+          "part": "continuous-cloth",
+          "minVertexCm": -0.16396660316492812,
+          "penetratingVertices": 185,
+          "minCentroidCm": -0.14995244257393442,
+          "penetratingCentroids": 346
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 1,
+          "minVertexCm": -0.08026568007104931,
+          "penetratingVertices": 29,
+          "minCentroidCm": -0.0685677750879797,
+          "penetratingCentroids": 66
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 2,
+          "minVertexCm": -0.0027071182116793794,
+          "penetratingVertices": 2,
+          "minCentroidCm": -0.015290659964599196,
+          "penetratingCentroids": 4
+        }
+      ]
+    },
+    {
+      "name": "belly200-bellyHeight-2",
+      "parts": [
+        {
+          "part": "continuous-cloth",
+          "minVertexCm": -0.09777044022120743,
+          "penetratingVertices": 78,
+          "minCentroidCm": -0.14260769869441714,
+          "penetratingCentroids": 227
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 0,
+          "minVertexCm": -0.0075924685059700165,
+          "penetratingVertices": 1,
+          "minCentroidCm": -0.035436155846406185,
+          "penetratingCentroids": 26
+        }
+      ]
+    },
+    {
+      "name": "belly200-bellyLower--20",
+      "parts": [
+        {
+          "part": "continuous-cloth",
+          "minVertexCm": -0.09915741482805525,
+          "penetratingVertices": 1,
+          "minCentroidCm": 0.05647785186645644,
+          "penetratingCentroids": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 1,
+          "minVertexCm": 0.045550139227150274,
+          "penetratingVertices": 0,
+          "minCentroidCm": -0.1334480086625851,
+          "penetratingCentroids": 1
+        }
+      ]
+    }
+  ]
+}

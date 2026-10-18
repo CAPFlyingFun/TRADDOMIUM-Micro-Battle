@@ -1,0 +1,320 @@
+{
+  "sourceSha256": "47e990f0f28097efca488b4274f2cac0e0fa588904bc2c10cb00695600897f42",
+  "referenceSha256": "502d07d68dfcafb47da8124506d900900f9ca451abe3965296e3b41d8277d9fd",
+  "source": "approved bottom.js (continuous raised hips/back, low front)",
+  "cloth": {
+    "vertices": 5759,
+    "triangles": 11136,
+    "minClearanceCm": 0.1599929431272626,
+    "penetrating": 0
+  },
+  "openings": 3,
+  "targets": [
+    "belly200",
+    "belly150",
+    "belly75",
+    "belly50",
+    "belly25",
+    "belly",
+    "bellyTilt",
+    "bellyBob",
+    "bellySway",
+    "breast0",
+    "breast100",
+    "breastBob",
+    "navelIn",
+    "navelOut",
+    "bellyRefine",
+    "belly30",
+    "belly60",
+    "navelFlat",
+    "bellySeatV2",
+    "armRaiseL",
+    "armRaiseR",
+    "bellyUpper",
+    "breastGrow",
+    "shape:bellyHeightUp",
+    "shape:bellyHeightDown",
+    "shape:bellyHeightUp150",
+    "shape:bellyHeightDown150",
+    "shape:bellyHeightUp200",
+    "shape:bellyHeightDown200",
+    "shape:breastGrowMore",
+    "shape:breastSpacingIn",
+    "shape:bellyWidth",
+    "shape:bellyDepth",
+    "shape:bellyUpper",
+    "shape:bellyLower",
+    "shape:breastSpacingOut",
+    "shape:breastWidth",
+    "shape:breastHeight",
+    "shape:breastDepth",
+    "shape:breastPosition",
+    "shape:breastDroop",
+    "shape:breastUpper",
+    "shape:breastLower"
+  ],
+  "joints": 68,
+  "parts": [
+    {
+      "part": "continuous-cloth",
+      "vertices": 5759,
+      "triangles": 11136
+    },
+    {
+      "part": "rounded-binding",
+      "opening": 0,
+      "vertices": 1737,
+      "triangles": 3072
+    },
+    {
+      "part": "rounded-binding",
+      "opening": 1,
+      "vertices": 1737,
+      "triangles": 3072
+    },
+    {
+      "part": "rounded-binding",
+      "opening": 2,
+      "vertices": 1737,
+      "triangles": 3072
+    }
+  ],
+  "maxAnchorDistanceCm": 1.7796117846366533,
+  "maxReferenceAnchorErrorCm": 0.000007421893940406532,
+  "sizeEndpoints": [
+    {
+      "size": 0,
+      "target": "belly",
+      "parts": [
+        {
+          "part": "continuous-cloth",
+          "iterations": 12,
+          "maxMoveCm": 0.1835458409789615
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 0,
+          "iterations": 0,
+          "maxMoveCm": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 1,
+          "iterations": 6,
+          "maxMoveCm": 0.13016684218395963
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 2,
+          "iterations": 5,
+          "maxMoveCm": 0.1135100338210054
+        }
+      ]
+    },
+    {
+      "size": 25,
+      "target": "belly25",
+      "parts": [
+        {
+          "part": "continuous-cloth",
+          "iterations": 10,
+          "maxMoveCm": 0.21122888168895876
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 0,
+          "iterations": 0,
+          "maxMoveCm": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 1,
+          "iterations": 7,
+          "maxMoveCm": 0.15869728710216421
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 2,
+          "iterations": 6,
+          "maxMoveCm": 0.14160182858196402
+        }
+      ]
+    },
+    {
+      "size": 30,
+      "target": "belly30",
+      "parts": [
+        {
+          "part": "continuous-cloth",
+          "iterations": 5,
+          "maxMoveCm": 0.16545485239398688
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 0,
+          "iterations": 0,
+          "maxMoveCm": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 1,
+          "iterations": 7,
+          "maxMoveCm": 0.15655370992389464
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 2,
+          "iterations": 7,
+          "maxMoveCm": 0.13843702027121021
+        }
+      ]
+    },
+    {
+      "size": 50,
+      "target": "belly50",
+      "parts": [
+        {
+          "part": "continuous-cloth",
+          "iterations": 4,
+          "maxMoveCm": 0.07393505117705433
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 0,
+          "iterations": 0,
+          "maxMoveCm": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 1,
+          "iterations": 6,
+          "maxMoveCm": 0.09784896006299564
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 2,
+          "iterations": 3,
+          "maxMoveCm": 0.033411244695647255
+        }
+      ]
+    },
+    {
+      "size": 60,
+      "target": "belly60",
+      "parts": [
+        {
+          "part": "continuous-cloth",
+          "iterations": 0,
+          "maxMoveCm": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 0,
+          "iterations": 0,
+          "maxMoveCm": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 1,
+          "iterations": 0,
+          "maxMoveCm": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 2,
+          "iterations": 0,
+          "maxMoveCm": 0
+        }
+      ]
+    },
+    {
+      "size": 75,
+      "target": "belly75",
+      "parts": [
+        {
+          "part": "continuous-cloth",
+          "iterations": 0,
+          "maxMoveCm": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 0,
+          "iterations": 0,
+          "maxMoveCm": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 1,
+          "iterations": 0,
+          "maxMoveCm": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 2,
+          "iterations": 0,
+          "maxMoveCm": 0
+        }
+      ]
+    },
+    {
+      "size": 150,
+      "target": "belly150",
+      "parts": [
+        {
+          "part": "continuous-cloth",
+          "iterations": 0,
+          "maxMoveCm": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 0,
+          "iterations": 0,
+          "maxMoveCm": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 1,
+          "iterations": 0,
+          "maxMoveCm": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 2,
+          "iterations": 0,
+          "maxMoveCm": 0
+        }
+      ]
+    },
+    {
+      "size": 200,
+      "target": "belly200",
+      "parts": [
+        {
+          "part": "continuous-cloth",
+          "iterations": 3,
+          "maxMoveCm": 0.024679807943063282
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 0,
+          "iterations": 0,
+          "maxMoveCm": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 1,
+          "iterations": 0,
+          "maxMoveCm": 0
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 2,
+          "iterations": 4,
+          "maxMoveCm": 0.05061715291052638
+        }
+      ]
+    }
+  ],
+  "outputSha256": "e82042f9a7721388bc2cba68085e2d4fe7d33f976101a44580c82455c34e1c59"
+}

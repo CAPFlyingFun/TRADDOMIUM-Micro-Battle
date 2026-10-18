@@ -1,3 +1,4 @@
+import { attachRecoveredMeshes, applyRecoveredBaseline, fitWeights, updateLeggingsHem, releaseRecoveredMeshes } from './recoveredClothes';
 import { garmentTexturePanel } from './garmentTexturePanel';
 /**
  * THE SARAH LAB — Sarah rebuilt from Joshua's base mannequin, on a turntable,
@@ -40,7 +41,7 @@ import { applyShapeFields, liftShapeFields, type ShapeFields } from '../view/bod
 import { HumanRig, findSkinnedMesh } from '../view/HumanRig';
 import { UNITS_PER_METRE } from '../world/dem';
 import {
-  BELLY_MOTION, BELLY_TARGET, trimShown, BREAST_TARGETS, BUMP_MAX_PERCENT, GARMENTS, OUTFITS, outfitLine, modelLine, refineLine, refineWeight, nextOutfit, wornGarments, coverMask, uncoveredSkinIndices, UNDER_TOP_GARMENT, BELLY_REFINE_TARGET, SEAT_TARGET, seatCorrectiveWeight, SARAH_LAB_MODELS, SARAH_LAB_DEFAULT_MODEL, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID,
+  BELLY_MOTION, BELLY_TARGET, trimShown, BREAST_TARGETS, BUMP_MAX_PERCENT, GARMENTS, RECOVERED_SHIRTS, OUTFITS, outfitLine, modelLine, refineLine, refineWeight, nextOutfit, wornGarments, coverMask, uncoveredSkinIndices, UNDER_TOP_GARMENT, BELLY_REFINE_TARGET, SEAT_TARGET, seatCorrectiveWeight, SARAH_LAB_MODELS, SARAH_LAB_DEFAULT_MODEL, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID,
   bellyMotionWeights, bellyWeights, breastBobWeight, breastWeightsForShape, bodyShapeFieldWeights, SIZE_TILT_PRESETS_DEG, effectiveTiltDeg, stepSeated, bustVolume, BREAST_GROW_TARGET, settledSitFor, bellyUpperWeight, BELLY_UPPER_TARGET, navelWeights, NAVEL_FLAT_TARGET, navelFlatWeight, tPoseTurns, ARM_SIDES, armsLine, ARM_RAISE_TARGETS, armRaiseWeight, SEAT_V2_TARGET, seatCorrectiveV2Weight, fingerBend, THUMB_TO_PALM, bumpLine, fingersLine, restingBellySpring, statusLine, stepBellySpring, stepBreastSpring, walkBounceAccel,
   type Garment, type SarahLabPose,
 } from './sarahLabTool';
@@ -51,6 +52,8 @@ const WALK_SPEED = 1.1;
 
 export interface SarahLabHooks {
   onBack(): void;
+  /** Offline fitting uses native garments to avoid loading its own generated outputs. */
+  readonly nativeOutfitPreview?: boolean;
 }
 
 export type SarahLabWire = (ctx: SceneContext) => SarahLabHooks;
@@ -155,6 +158,10 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let skinned: THREE.SkinnedMesh[] = [];
   let garments: Garment[] = [];
   let hasBelly = false;
+  let recovered = false;
+  let recoveredShirt: Garment | null = null;
+  let shirtRequest = 0;
+  let shirtLoading: Garment | null = null;
   let loaded = false;
   let failed = false;
   let disposed = false;
@@ -166,8 +173,10 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   const linked = new Set<BodyControl>();
   let bump = 100;
   let curl = 0;
-  // the ARMS slider: how far T-POSE raises the arms, and which (Joshua, 2026-10-15)
-  let armsDeg = 90, armSide = 0;
+  // v2's ARMS control can override any pose; until used, the pose keeps its natural arms.
+  // v1 keeps the original T-POSE-only control and its level-arm default.
+  let armsDeg = SARAH_LAB_MODELS[SARAH_LAB_DEFAULT_MODEL].id === 'v1' ? 90 : 0, armSide = 0;
+  let armsOverride = false;
   // The bump's spring and the breasts' (lighter, quicker), fed the same motion. The
   // bump's weight is its size's own (`bellyMotionWeights`): the WEIGHT slider that
   // added to it is gone (Joshua, 2026-10-08: "keep the current weights... just not
@@ -210,16 +219,18 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let texturePanel: ReturnType<typeof garmentTexturePanel> | null = null;
   const fields: Record<string, HTMLElement> = {};
   const buttons: Record<string, HTMLButtonElement> = {};
+  let armsInput: HTMLInputElement | null = null;
   const pointers = new Map<number, { x: number; y: number }>();
   let pinch = 0;
 
   function refresh(): void {
-    if (fields.status) fields.status.textContent = statusLine(loaded, failed, garments, hasBelly, modelIndex);
+    if (fields.status) fields.status.textContent = statusLine(loaded, failed, garments, hasBelly, modelIndex) + (shirtLoading ? ' · loading shirt…' : '');
     const bumpField = fields[SARAH_LAB_FIELD.bump], fingerField = fields[SARAH_LAB_FIELD.fingers];
     if (bumpField) bumpField.textContent = bumpLine(bump);
     if (fingerField) fingerField.textContent = fingersLine(curl);
     const armsField = fields[SARAH_LAB_FIELD.arms];
     if (armsField) armsField.textContent = armsLine(armsDeg, ARM_SIDES[armSide]);
+    if (armsInput && Number(armsInput.value) !== armsDeg) armsInput.value = String(armsDeg);
     if (buttons.armSide) buttons.armSide.textContent = `ARMS · ${ARM_SIDES[armSide]}`;
     for (const c of BODY_CONTROLS) {
       const line = fields[`${SARAH_LAB_FIELD.body}${c.key}`];
@@ -242,7 +253,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     lit(buttons.tpose, pose === 'tpose');
     lit(buttons.turn, turning);
     for (const t of SIZE_TILT_PRESETS_DEG) lit(buttons[`tilt${t}`], body.bellyTilt === t);
-    if (buttons.outfit) buttons.outfit.textContent = outfitLine(outfit);
+    if (buttons.outfit) buttons.outfit.textContent = recovered && outfit < 2 ? `OUTFIT · relaxed + ${outfit === 0 ? 'high' : 'low'} leggings` : outfitLine(outfit);
     if (buttons.model) buttons.model.textContent = modelLine(modelIndex);
     if (buttons.refine) {
       // only v2 has the switchable curve: the button is not shown for v1
@@ -262,13 +273,14 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         const at = dict[name];
         if (at !== undefined) influences[at] = w[name];
       }
+      applyRecoveredBaseline(mesh, bump, [BELLY_MOTION.tilt, BELLY_MOTION.bob, BELLY_MOTION.sway, BREAST_TARGETS.bob]);
     }
   }
 
-  /** The raised-arm shapes, for whichever arms T-POSE has raised (named by the side of her each arm was modelled on). */
+  /** The raised-arm shapes follow the same override as the bones, on every skinned surface. */
   function armRaiseWeights(): Record<string, number> {
     const out: Record<string, number> = { [ARM_RAISE_TARGETS.plusX]: 0, [ARM_RAISE_TARGETS.minusX]: 0 };
-    if (pose !== 'tpose' || !rig || !measure) return out;
+    if (!rig || !measure || (pose !== 'tpose' && (SARAH_LAB_MODELS[modelIndex].id === 'v1' || !armsOverride))) return out;
     const side = ARM_SIDES[armSide], w = armRaiseWeight(armsDeg);
     for (const [arm, on] of [[measure.joints.shoulderL, side !== 'right'], [measure.joints.shoulderR, side !== 'left']] as const) {
       if (!on) continue;
@@ -279,16 +291,24 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
 
   function applyLook(): void {
     const fieldWeights = bodyShapeFieldWeights(body, bump);
-    for (const { mesh, fields } of shaped) applyShapeFields(mesh, fields, fieldWeights);
+    for (const { mesh, fields } of shaped) applyShapeFields(mesh, fields, {
+      ...fieldWeights,
+      ...(mesh.userData.recoveredShirt ? fitWeights(bump, 'shape:fitBelly') : {}),
+      ...(mesh.userData.recoveredLeggings ? fitWeights(bump, 'shape:recoveryLeggings') : {}),
+    }, { normalizeNormals: !mesh.userData.recoveredShirt });
+    ensureRecoveredShirt();
     for (const mesh of skinned) {
       const dict = mesh.morphTargetDictionary, influences = mesh.morphTargetInfluences;
       if (dict && influences) for (const [name, w] of Object.entries({ ...bellyWeights(bump), ...breastWeightsForShape(bump, dict[BREAST_GROW_TARGET] !== undefined, body.breastSize), [BELLY_UPPER_TARGET]: bellyUpperWeight(bump), ...navelWeights(bump), [NAVEL_FLAT_TARGET]: navelFlatWeight(bump), [BELLY_REFINE_TARGET]: refineWeight(refine, bump), [SEAT_TARGET]: seatCorrectiveWeight(pose === 'sit' ? 1 : 0, bump), [SEAT_V2_TARGET]: seatCorrectiveV2Weight(pose === 'sit' ? 1 : 0, bump), ...armRaiseWeights() })) {
         const at = dict[name];
         if (at !== undefined) influences[at] = w;
       }
+      applyRecoveredBaseline(mesh, bump);
       const name = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material).name as Garment;
-      if ((GARMENTS as readonly string[]).includes(name)) mesh.visible = shownNow(name);
+      if (([...GARMENTS, ...RECOVERED_SHIRTS] as readonly string[]).includes(name)) mesh.visible = shownNow(name);
       { const t = trimShown(name, wornGarments(outfit, garments)); if (t !== null) mesh.visible = t; }
+      if (mesh.userData.replacedByRecovered) mesh.visible = false;
+      if (mesh.userData.recoveredLeggings) updateLeggingsHem(mesh, bump, shownNow('shirtSpandexHigh') ? 'spandex' : 'relaxed');
       // the leggings under a worn athletic tee, the same way
       const underTop = mesh.geometry.getAttribute('_under_top');
       if (underTop && mesh.geometry.index) {
@@ -314,6 +334,30 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         }
       }
     }
+  }
+
+  /** Keep one imported shirt in memory; the four fits share the body's live skeleton. */
+  function ensureRecoveredShirt(): void {
+    if (!recovered || !loaded || !model) return;
+    const wanted = wornGarments(outfit, garments).find(g => (RECOVERED_SHIRTS as readonly string[]).includes(g));
+    if (!wanted || wanted === recoveredShirt || shirtLoading) return;
+    const bodyMesh = findSkinnedMesh(model), expectedModel = model, request = ++shirtRequest;
+    if (!bodyMesh) return;
+    shirtLoading = wanted;
+    const slug = wanted.replace('shirt', '').replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase();
+    void assets.loadModel(`models/sarah-v2-${slug}.gltf`, () => new THREE.Object3D()).then(part => {
+      if (disposed || model !== expectedModel || request !== shirtRequest) { release(part); return; }
+      shirtLoading = null;
+      if (wornGarments(outfit, garments).find(g => (RECOVERED_SHIRTS as readonly string[]).includes(g)) !== wanted) { release(part); ensureRecoveredShirt(); refresh(); return; }
+      if (part.userData.isPlaceholder) { console.error('[sarahlab] recovered shirt unavailable', slug); return; }
+      const old = skinned.filter(m => !!m.userData.recoveredShirt);
+      skinned = skinned.filter(m => !old.includes(m)); shaped = shaped.filter(s => !old.includes(s.mesh));
+      releaseRecoveredMeshes(old);
+      for (const mesh of attachRecoveredMeshes(part, bodyMesh, wanted)) {
+        skinned.push(mesh); const fields = liftShapeFields(mesh); if (fields) shaped.push({mesh, fields});
+      }
+      recoveredShirt = wanted; applyLook(); applyMotion(); refresh();
+    }).catch(error => { shirtLoading = null; console.error('[sarahlab] shirt preparation failed', error); });
   }
 
   function buildHud(): void {
@@ -368,7 +412,11 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     const poses = document.createElement('div');
     poses.style.cssText = `${panel}left:max(12px,env(safe-area-inset-left));bottom:16px`;
     for (const [p, label, action] of [['stand', 'STAND', SARAH_LAB_ACTION.stand], ['walk', 'WALK', SARAH_LAB_ACTION.walk], ['sit', 'SIT', SARAH_LAB_ACTION.sit], ['tpose', 'T-POSE', SARAH_LAB_ACTION.tpose]] as const) {
-      buttons[p] = btn(label, action, () => { pose = p; applyLook(); refresh(); });
+      buttons[p] = btn(label, action, () => {
+        pose = p;
+        if (p === 'tpose' && SARAH_LAB_MODELS[modelIndex].id !== 'v1') { armsDeg = 90; armsOverride = true; }
+        applyLook(); refresh();
+      });
       poses.appendChild(buttons[p]);
     }
     root.appendChild(poses);
@@ -388,14 +436,20 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       input.style.cssText = 'width:100%;accent-color:#d4a853;height:28px';
       input.addEventListener('input', () => { onInput(Number(input.value)); applyLook(); refresh(); });
       right.append(label, input);
+      return input;
     };
     slider(SARAH_LAB_FIELD.bump, bump, (v) => { bump = v; }, BUMP_MAX_PERCENT);
     slider(SARAH_LAB_FIELD.fingers, curl, (v) => { curl = v; });
-    slider(SARAH_LAB_FIELD.arms, armsDeg, (v) => { armsDeg = v; }, 90);
+    armsInput = slider(SARAH_LAB_FIELD.arms, armsDeg, (v) => { armsDeg = v; armsOverride = true; }, 90);
     const row = document.createElement('div');
     row.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap';
     buttons.outfit = btn(outfitLine(outfit), SARAH_LAB_ACTION.outfit, () => { outfit = nextOutfit(outfit, garments); applyLook(); });
-    buttons.model = btn(modelLine(modelIndex), SARAH_LAB_ACTION.model, () => { modelIndex = (modelIndex + 1) % SARAH_LAB_MODELS.length; loadSarah(); });
+    buttons.model = btn(modelLine(modelIndex), SARAH_LAB_ACTION.model, () => {
+      modelIndex = (modelIndex + 1) % SARAH_LAB_MODELS.length;
+      armsDeg = SARAH_LAB_MODELS[modelIndex].id === 'v1' || pose === 'tpose' ? 90 : 0;
+      armsOverride = pose === 'tpose';
+      loadSarah();
+    });
     buttons.refine = btn(refineLine(refine), SARAH_LAB_ACTION.refine, () => { refine = !refine; applyLook(); refresh(); });
     buttons.armSide = btn('ARMS · both', SARAH_LAB_ACTION.armSide, () => { armSide = (armSide + 1) % ARM_SIDES.length; applyLook(); refresh(); });
     buttons.turn = btn('TURN', SARAH_LAB_ACTION.turn, () => { turning = !turning; });
@@ -506,12 +560,19 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       const phase = pose === 'walk' ? ((walked * rig.bindScale) / humanStride(measure, 'walk', carry)) % 1 : 0;
       base = poseHuman(measure, rig.bind, { stance, phase, seconds, lean: 0, carry }, poseOut);
     }
-    // The master bind pose holds both arms out, exposing the shirt's sides.
-    if (pose === 'tpose') {
-      // every turn undone back to the modelled pose, then the chosen arms raised by the
-      // ARMS slider toward level (v2 is modelled arms-down; v1's are already level)
+    const overrideArms = pose === 'tpose' || (SARAH_LAB_MODELS[modelIndex].id !== 'v1' && armsOverride);
+    // T-POSE restores the whole bind pose. Other poses keep their torso and legs,
+    // and the unselected arm keeps its normal animation.
+    if (pose === 'tpose') base = base.map(turn => ({ ...turn, radians: 0 }));
+    if (overrideArms) {
       const j = measure.joints, f = armsDeg / 90, side = ARM_SIDES[armSide];
-      base = [...base.map(turn => ({ ...turn, radians: 0 })), ...tPoseTurns(rig.bind, [
+      const selected = [
+        ...(side !== 'right' ? [j.shoulderL, j.elbowL, j.wristL] : []),
+        ...(side !== 'left' ? [j.shoulderR, j.elbowR, j.wristR] : []),
+      ];
+      // Removing all selected arm turns also restores elbows/wrists to bind at 0°,
+      // instead of leaving a seated bend or walk swing underneath the slider.
+      base = [...base.filter(turn => !selected.includes(turn.joint)), ...tPoseTurns(rig.bind, [
         { shoulder: j.shoulderL, elbow: j.elbowL, out: measure.leftSign > 0 ? 1 : -1, fraction: side === 'right' ? 0 : f },
         { shoulder: j.shoulderR, elbow: j.elbowR, out: measure.leftSign > 0 ? -1 : 1, fraction: side === 'left' ? 0 : f },
       ])];
@@ -575,10 +636,11 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   function loadSarah(): void {
     if (model) { three.remove(model); rig?.dispose(); release(model); model = null; }
     rig = null; measure = null; fingers = []; skinned = []; shaped = []; garments = []; hasBelly = false; feel = null;
+    recovered = false; recoveredShirt = null; shirtLoading = null; shirtRequest++;
     felt.primed = 0; loaded = false; failed = false;
     refresh();
     const path = SARAH_LAB_MODELS[modelIndex].path;
-    void assets.loadModel(path, () => new THREE.Object3D()).then((loadedModel) => {
+    void assets.loadModel(path, () => new THREE.Object3D()).then(async (loadedModel) => {
       if (disposed || path !== SARAH_LAB_MODELS[modelIndex].path) { release(loadedModel); return; }
       if (loadedModel.userData.isPlaceholder === true) { failed = true; refresh(); return; }
       try {
@@ -591,6 +653,29 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         measure = null;
       }
       loadedModel.scale.setScalar(M);
+      const approvedSkin = findSkinnedMesh(loadedModel);
+      recovered = hooks.nativeOutfitPreview !== true && SARAH_LAB_MODELS[modelIndex].id === 'v2-body' && approvedSkin?.geometry.attributes.position.count === 115710 && approvedSkin.skeleton.bones.length === 68;
+      if (recovered) {
+        const skin = findSkinnedMesh(loadedModel)!;
+        loadedModel.updateMatrixWorld(true);
+        loadedModel.traverse(n => {
+          const m = n as THREE.SkinnedMesh;
+          if (!m.isSkinnedMesh) return;
+          const name = (Array.isArray(m.material) ? m.material[0] : m.material).name;
+          if (name === 'leggings' || name === 'leggingsTrim') m.userData.replacedByRecovered = true;
+          if (name === 'bikini' && m.geometry.index) {
+            const v = new THREE.Vector3(); let max = -Infinity;
+            for (const i of m.geometry.index.array) { m.getVertexPosition(i, v).applyMatrix4(m.matrixWorld); max = Math.max(max, v.y); }
+            if (max < 110) m.userData.replacedByRecovered = true;
+          }
+        });
+        const parts = await Promise.all(['bottom', 'leggings', 'relaxed-high'].map(part => assets.loadModel(`models/sarah-v2-${part}.${part === 'bottom' || part === 'leggings' ? 'glb' : 'gltf'}`, () => new THREE.Object3D())));
+        if (disposed || path !== SARAH_LAB_MODELS[modelIndex].path) { for (const p of parts) release(p); release(loadedModel); return; }
+        if (parts.some(p => p.userData.isPlaceholder)) throw new Error('Recovered v2 clothing asset could not be loaded');
+        attachRecoveredMeshes(parts[0], skin);
+        for (const m of attachRecoveredMeshes(parts[1], skin)) m.userData.recoveredLeggings = true;
+        attachRecoveredMeshes(parts[2], skin, 'shirtRelaxedHigh'); recoveredShirt = 'shirtRelaxedHigh';
+      }
       const found = new Set<Garment>();
       loadedModel.traverse((n) => {
         const mesh = n as THREE.SkinnedMesh;
@@ -602,10 +687,11 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         if (lifted) shaped.push({ mesh, fields: lifted });
         if (mesh.morphTargetDictionary?.[BELLY_TARGET] !== undefined) hasBelly = true;
         const name = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material).name;
-        if ((GARMENTS as readonly string[]).includes(name)) found.add(name as Garment);
+        if (([...GARMENTS, ...RECOVERED_SHIRTS] as readonly string[]).includes(name)) found.add(name as Garment);
 
       });
-      garments = GARMENTS.filter((g) => found.has(g));
+      garments = [...GARMENTS, ...RECOVERED_SHIRTS].filter((g) => found.has(g) || (recovered && (RECOVERED_SHIRTS as readonly string[]).includes(g)));
+      if (!recovered && outfit >= 5) outfit = 0;
       model = loadedModel;
       three.add(loadedModel);
       // the spring feels a point at the front of her middle, carried by her spine
@@ -618,7 +704,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       loaded = true;
       applyLook();
       refresh();
-    });
+    }).catch(error => { console.error('[sarahlab] model/outfit preparation failed', error); failed = true; loaded = false; refresh(); });
   }
 
   return {
