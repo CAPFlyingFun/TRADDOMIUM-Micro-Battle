@@ -21,3 +21,12 @@ An internet connection is required: Three.js 0.164.1 is loaded from the jsDelivr
 
 See [AUDIT.md](AUDIT.md) for the v0.4 audit, known limitations, and the roadmap
 (including morph-target / pregnancy shape-key blending for Sarah).
+
+## Merged into the Sarah Lab
+
+The painting features (🎥 Camera / 🎨 Paint mode with camera lock, brush, true erase,
+per-material transparent paint layers, clear, export PNG) are now merged into the in-game
+dev tool **Character Creator / Clothing Creator (Sarah)** (`src/sarahlab/paintPanel.ts`).
+There they work alongside the body sliders, poses and outfits. This standalone HTML is kept
+as a reference for loading arbitrary GLB/GLTF models and for vertex-colour painting,
+which the merged panel doesn't port yet.

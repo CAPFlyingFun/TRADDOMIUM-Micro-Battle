@@ -1,5 +1,6 @@
 import { attachRecoveredMeshes, applyRecoveredBaseline, fitWeights, updateLeggingsHem, releaseRecoveredMeshes } from './recoveredClothes';
 import { garmentTexturePanel } from './garmentTexturePanel';
+import { paintPanel } from './paintPanel';
 /**
  * THE SARAH LAB — Sarah rebuilt from Joshua's base mannequin, on a turntable,
  * to try before anything of it goes live (Joshua, 2026-10-07: "Good to test
@@ -217,6 +218,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   // ------------------------------------------------------------------ HUD
   let hud: HTMLElement | null = null;
   let texturePanel: ReturnType<typeof garmentTexturePanel> | null = null;
+  let painter: ReturnType<typeof paintPanel> | null = null;
   const fields: Record<string, HTMLElement> = {};
   const buttons: Record<string, HTMLButtonElement> = {};
   let armsInput: HTMLInputElement | null = null;
@@ -372,14 +374,16 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       if (pointers.size === 2) {
         const [a, b] = [...pointers.values()];
         pinch = Math.hypot(a.x - b.x, a.y - b.y);
-      }
+      } else if (pointers.size === 1) painter?.pointer('down', e, root.getBoundingClientRect());
     });
     root.addEventListener('pointermove', (e) => {
       const was = pointers.get(e.pointerId);
       if (!was) return;
       const now = { x: e.clientX, y: e.clientY };
       pointers.set(e.pointerId, now);
-      if (pointers.size === 1) {
+      if (pointers.size === 1 && painter?.painting()) {
+        painter.pointer('move', e, root.getBoundingClientRect());
+      } else if (pointers.size === 1) {
         orbit.yaw -= (now.x - was.x) * 0.008;
         orbit.pitch = Math.min(1.2, Math.max(-0.35, orbit.pitch + (now.y - was.y) * 0.006));
         turning = false;
@@ -391,7 +395,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         pinch = d;
       }
     });
-    const up = (e: PointerEvent) => { pointers.delete(e.pointerId); pinch = 0; };
+    const up = (e: PointerEvent) => { painter?.pointer('up', e, root.getBoundingClientRect()); pointers.delete(e.pointerId); pinch = 0; };
     root.addEventListener('pointerup', up);
     root.addEventListener('pointercancel', up);
     root.addEventListener('wheel', (e) => { e.preventDefault(); zoom(Math.exp(e.deltaY * 0.001)); }, { passive: false });
@@ -528,12 +532,14 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       applyLook(); refresh();
     });
     right.appendChild(texturePanel.element);
+    painter = paintPanel(() => skinned, () => camera);
+    right.appendChild(painter.element);
     root.appendChild(right);
 
     const info = document.createElement('div');
     info.style.cssText = 'position:absolute;top:14px;left:50%;transform:translateX(-50%);text-align:center;text-shadow:0 1px 3px #000;opacity:.92;pointer-events:none;max-width:40vw';
     const title = document.createElement('div');
-    title.textContent = 'Sarah Lab · dev';
+    title.textContent = 'Character Creator / Clothing Creator · dev';
     title.style.cssText = 'font:700 14px Georgia,serif;letter-spacing:.04em';
     fields.status = document.createElement('div');
     fields.status.dataset.field = SARAH_LAB_FIELD.status;
@@ -635,6 +641,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   /** Load the chosen model, putting away the one shown (MODEL switches v1 and v2). */
   function loadSarah(): void {
     if (model) { three.remove(model); rig?.dispose(); release(model); model = null; }
+    painter?.reset();
     rig = null; measure = null; fingers = []; skinned = []; shaped = []; garments = []; hasBelly = false; feel = null;
     recovered = false; recoveredShirt = null; shirtLoading = null; shirtRequest++;
     felt.primed = 0; loaded = false; failed = false;
@@ -740,6 +747,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       disposed = true;
       texturePanel?.dispose();
       texturePanel = null;
+      painter?.dispose();
+      painter = null;
       hud?.remove();
       hud = null;
       if (model) { three.remove(model); rig?.dispose(); release(model); model = null; }
