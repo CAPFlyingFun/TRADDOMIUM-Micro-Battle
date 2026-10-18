@@ -1,0 +1,300 @@
+{
+  "format": "sha256-verified-concatenated-archive-parts-v1",
+  "archives": [
+    {
+      "path": "recovery/sarah-v2-2026-10-18/historical-archives/sarah-v2-100-contour-review.zip",
+      "sha256": "628b0e51327ccffc6571bd4e43d07b8912c1d68c6240e94122f97076fadec283",
+      "bytes": 32216397,
+      "parts": [
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/sarah-v2-100-contour-review.zip.part000",
+          "bytes": 4194304,
+          "sha256": "de8aefed539641d6d222e71d1c61a4cdd45da283d8dea862230ffe6634444d35"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/sarah-v2-100-contour-review.zip.part001",
+          "bytes": 4194304,
+          "sha256": "f46d4d08027f6f1dd580fb46e9067f92bcbdcc63b76b4251b1691fde54c651d3"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/sarah-v2-100-contour-review.zip.part002",
+          "bytes": 4194304,
+          "sha256": "bce9a9d13e350a5df5b616e920fccc1ed77a64f3e9656b67c865c6788717e830"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/sarah-v2-100-contour-review.zip.part003",
+          "bytes": 4194304,
+          "sha256": "71f3e95608ece39032e448ba3a190aa28b7afd93db3b9c742457ad6b81650f2d"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/sarah-v2-100-contour-review.zip.part004",
+          "bytes": 4194304,
+          "sha256": "91dd991918b0b58f95d18ed44f1028dab82de88213ad5aeec502734f80e5a28d"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/sarah-v2-100-contour-review.zip.part005",
+          "bytes": 4194304,
+          "sha256": "eb47be31b8b833a68d67ceb9ecf21f91734e945cc0cc8956f7a646a242ef3575"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/sarah-v2-100-contour-review.zip.part006",
+          "bytes": 4194304,
+          "sha256": "75ee3fbf1a7b1fba4d45b3d07906eed4d19dad69c46b22247cbb22dec0e35ddd"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/sarah-v2-100-contour-review.zip.part007",
+          "bytes": 2856269,
+          "sha256": "dcd4f07ecbedfdfeb6e60eddaea79ed2eff651954eb5cb05d6779d22fa09edaf"
+        }
+      ]
+    },
+    {
+      "path": "recovery/sarah-v2-2026-10-18/historical-archives/sarah-v2-alpha98-review.zip",
+      "sha256": "56ccf784f1956c6bdf36d2ffd83f20c3090e4fe9a0e0ffb07a17b4185f9ce6fb",
+      "bytes": 45382707,
+      "parts": [
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/sarah-v2-alpha98-review.zip.part000",
+          "bytes": 4194304,
+          "sha256": "ed6c1542b22d644b5149ba9bdd6d9aee8c9b44e62bae98537d2db204a919f272"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/sarah-v2-alpha98-review.zip.part001",
+          "bytes": 4194304,
+          "sha256": "7cec51001eb484d75cbca34dad046ca4949418a9d1bc1e4d4be2d07caae0148f"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/sarah-v2-alpha98-review.zip.part002",
+          "bytes": 4194304,
+          "sha256": "b8ed094dd5ea61bb0e14926053712eef74516b50b7027f5900bf0fcf9a2af1ca"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/sarah-v2-alpha98-review.zip.part003",
+          "bytes": 4194304,
+          "sha256": "0797a7ee367c42ac835eeedbe8dc67bb111b195613b65a14066c0f31f402a5b0"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/sarah-v2-alpha98-review.zip.part004",
+          "bytes": 4194304,
+          "sha256": "b12063db6155e26cc60c88c090cb4b9dbbd676dfc9c9f6699728522ad38c5250"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/sarah-v2-alpha98-review.zip.part005",
+          "bytes": 4194304,
+          "sha256": "fab7fb35b34e8b2aeb2ba0e0022254ef59cc1bdebf6007385acb67c9c9522501"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/sarah-v2-alpha98-review.zip.part006",
+          "bytes": 4194304,
+          "sha256": "c15546179a4b252b880eedff0d70b4e2e868d40e37f94c04dcc333f3a71f8b30"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/sarah-v2-alpha98-review.zip.part007",
+          "bytes": 4194304,
+          "sha256": "07317e2cb6d82f120598c4a880e59ad2e9e2dd6bf1ef06a6242fe3fbffc9c30b"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/sarah-v2-alpha98-review.zip.part008",
+          "bytes": 4194304,
+          "sha256": "1132c9613b80dca7c9a567fdc10ab06be0ed19178dcab0de6b2a79b516b77b81"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/sarah-v2-alpha98-review.zip.part009",
+          "bytes": 4194304,
+          "sha256": "c7353c36c10c479df786c83ce4a2af2f9506cbb68c6fd2a2cda7bf91aec2ce58"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/sarah-v2-alpha98-review.zip.part010",
+          "bytes": 3439667,
+          "sha256": "7c14e675db8d246385cb3242c1bb5fb8be1bbb14086fcb25b35e97bbd116f122"
+        }
+      ]
+    },
+    {
+      "path": "recovery/sarah-v2-2026-10-18/historical-archives/sarah-v2-alpha98-screenshots.zip",
+      "sha256": "c15fff6443219a3550d2c661b9c5d9c6c1a368b66e3f8fba451ff31958b39b87",
+      "bytes": 47222590,
+      "parts": [
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/sarah-v2-alpha98-screenshots.zip.part000",
+          "bytes": 4194304,
+          "sha256": "0af392532dac72fbb38f2a103f186f0fab5e2e1929b2ecd8ae4f1ff4a2ea5e0d"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/sarah-v2-alpha98-screenshots.zip.part001",
+          "bytes": 4194304,
+          "sha256": "4f1b2d04da1ef4e80a72743e834b10a8a3e65dc258f322803261823a8cfa60b8"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/sarah-v2-alpha98-screenshots.zip.part002",
+          "bytes": 4194304,
+          "sha256": "cec40dcbacbf6e9cbd35828d9280041fce077e08bad6ecb3c13b456ec8acbf9d"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/sarah-v2-alpha98-screenshots.zip.part003",
+          "bytes": 4194304,
+          "sha256": "4e9fbaba9792e3da64ec7ba403b4c55485921222eb9221bd563087d1d8ee2a18"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/sarah-v2-alpha98-screenshots.zip.part004",
+          "bytes": 4194304,
+          "sha256": "c261bdf1ac7b0a3bfc6818996daf02c7178b7fea1ea7e1d9b4d3af10cedbbe40"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/sarah-v2-alpha98-screenshots.zip.part005",
+          "bytes": 4194304,
+          "sha256": "68131722213fc100954c8ee285c5fcf2839750ddab9b86644fcb7ea073a0dbdb"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/sarah-v2-alpha98-screenshots.zip.part006",
+          "bytes": 4194304,
+          "sha256": "4b760c75e2443a0e38a0c324667174af9a50557c147209ac11908664ac6d4f67"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/sarah-v2-alpha98-screenshots.zip.part007",
+          "bytes": 4194304,
+          "sha256": "4b6ff1153d77c82fd80a28e5c4f4b6e95837466d7e981d544e22e8475018b289"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/sarah-v2-alpha98-screenshots.zip.part008",
+          "bytes": 4194304,
+          "sha256": "50f4784585c9f05f2afd3c125cd7c4ace38710e5ba563c2a5c75d70862345d12"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/sarah-v2-alpha98-screenshots.zip.part009",
+          "bytes": 4194304,
+          "sha256": "162789f7ed51fb73388b5a15fe7f9f5033bfa1aca367a9ae9e443a40fa400526"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/sarah-v2-alpha98-screenshots.zip.part010",
+          "bytes": 4194304,
+          "sha256": "a8987c9a52db19fb69a7ceff22cf661193e160504a40cdb0d11a458fb672c476"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/sarah-v2-alpha98-screenshots.zip.part011",
+          "bytes": 1085246,
+          "sha256": "e7d6491ea8659a7bcf163394313ad9e1f621ff6af1a52ce90210ba408da163fb"
+        }
+      ]
+    },
+    {
+      "path": "recovery/sarah-v2-2026-10-18/historical-archives/sarah-v2-shirt-spot-review.zip",
+      "sha256": "a9543c0ffaa16b4078dae52f9d53987a65b29028368ed7661c3f7997c253bd94",
+      "bytes": 22784538,
+      "parts": [
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/sarah-v2-shirt-spot-review.zip.part000",
+          "bytes": 4194304,
+          "sha256": "454961d2047f95d0cf1bf9693b9cf5a37b375271090d6218f8ed50ec770f5a95"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/sarah-v2-shirt-spot-review.zip.part001",
+          "bytes": 4194304,
+          "sha256": "c83f3f5356ab4c4056bcf9a3bebeee2926d1c9ffbbe4f53ae6e5d0dcd40affa3"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/sarah-v2-shirt-spot-review.zip.part002",
+          "bytes": 4194304,
+          "sha256": "746824029dfcfe6c81ae5dca8aca8f7d96dde77e84e97434f48b35ac00dddb52"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/sarah-v2-shirt-spot-review.zip.part003",
+          "bytes": 4194304,
+          "sha256": "1ad12b7cf965bb00e981f09bf3e5d8a32cfd31f94c9c907b12626e5644ece260"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/sarah-v2-shirt-spot-review.zip.part004",
+          "bytes": 4194304,
+          "sha256": "49df1ef6b845878a380d9d6411d3dbaeef10153e69893a7c44a03ac8b0c4d238"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/sarah-v2-shirt-spot-review.zip.part005",
+          "bytes": 1813018,
+          "sha256": "61fa7b69796e84287e33a38c5aa031f5c05ff17c478a4daaf9798190f2b9509f"
+        }
+      ]
+    },
+    {
+      "path": "recovery/sarah-v2-2026-10-18/current-working-copy-and-renders.zip",
+      "sha256": "21894811632646a1e99784effe393394e57943fad56239310ec08dd3f5c75d83",
+      "bytes": 58961573,
+      "parts": [
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/current-working-copy-and-renders.zip.part000",
+          "bytes": 4194304,
+          "sha256": "c0a0cc0999a6a19f64adb51a0d7b070b7168f3c4dafaa913c97a3ef147bdac26"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/current-working-copy-and-renders.zip.part001",
+          "bytes": 4194304,
+          "sha256": "480600a468ea41b472e4a8223168cc2f2afdab7d5b0b5a942a57ad03181b31b9"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/current-working-copy-and-renders.zip.part002",
+          "bytes": 4194304,
+          "sha256": "a49e87079cbefe74e967c746cbbabc0c21cc02decdceb93b00ad46fc73b6b1a5"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/current-working-copy-and-renders.zip.part003",
+          "bytes": 4194304,
+          "sha256": "b72db65b1cb1f3e987827298c1e39d6271781aa748f1a01fad6c679c5759b23c"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/current-working-copy-and-renders.zip.part004",
+          "bytes": 4194304,
+          "sha256": "cf2472cb39565c2d5c4d8cd89f92569e461421994c4a3f93add7e9d8367fffa0"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/current-working-copy-and-renders.zip.part005",
+          "bytes": 4194304,
+          "sha256": "61320f916e449cd50b44686f628b32c10927c888aa55f629f8606950f7736cd1"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/current-working-copy-and-renders.zip.part006",
+          "bytes": 4194304,
+          "sha256": "3a547eeda5be752423678e4b03173a73a1af4da1c3e05f7bd70c722438ffbf9c"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/current-working-copy-and-renders.zip.part007",
+          "bytes": 4194304,
+          "sha256": "f84203e76fae147f4c4ec693686c82defcc66994b783aebf82a982c8718043fb"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/current-working-copy-and-renders.zip.part008",
+          "bytes": 4194304,
+          "sha256": "a76868633763a44e48d11df1b734d076da7b7b35aac2e7661a538e54542fb8a6"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/current-working-copy-and-renders.zip.part009",
+          "bytes": 4194304,
+          "sha256": "b6667a2217f56313c4ea2afe325140ec8b4df27e60c5bfceb128305ff3a45e0e"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/current-working-copy-and-renders.zip.part010",
+          "bytes": 4194304,
+          "sha256": "0a16b6addb1e4058239c2297c51806896e4d16038a767d9342e4e0c6425c53c0"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/current-working-copy-and-renders.zip.part011",
+          "bytes": 4194304,
+          "sha256": "f379e90048841da5fd23237afd8c239e00c95baa899f08418784acfd22d50b4e"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/current-working-copy-and-renders.zip.part012",
+          "bytes": 4194304,
+          "sha256": "977bd106a8a9f54f98adfed0991d9db2faa84d28f4e37e4ddb1b301255ac3b5c"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/current-working-copy-and-renders.zip.part013",
+          "bytes": 4194304,
+          "sha256": "8c0cb69e23f1a1ed36d327871ad021c7ae595a7331341396680f198880b55292"
+        },
+        {
+          "path": "recovery/sarah-v2-2026-10-18/archive-parts/current-working-copy-and-renders.zip.part014",
+          "bytes": 241317,
+          "sha256": "f546471412bd64080c99d36ece4b2a491350ea46f466eaff1ca65030504c8f5c"
+        }
+      ]
+    }
+  ]
+}

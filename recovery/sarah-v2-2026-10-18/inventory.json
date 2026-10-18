@@ -1,0 +1,914 @@
+{
+  "baseCommit": "bcd63ef10bc3ed8a50f20f72a5c07bcd1b971891",
+  "branch": "recovery/sarah-v2-approved-work-2026-10-18",
+  "releaseReady": false,
+  "missingCandidateCommit": "7b1c08c",
+  "missingCandidateBodySha256": "67ff41d30d75ee155d4edc696ebb65c7e987eac8155396089b5535ebbdb9fdc8",
+  "archives": [
+    {
+      "path": "recovery/sarah-v2-2026-10-18/historical-archives/sarah-v2-100-contour-review.zip",
+      "sha256": "628b0e51327ccffc6571bd4e43d07b8912c1d68c6240e94122f97076fadec283",
+      "bytes": 32216397
+    },
+    {
+      "path": "recovery/sarah-v2-2026-10-18/historical-archives/sarah-v2-alpha98-review.zip",
+      "sha256": "56ccf784f1956c6bdf36d2ffd83f20c3090e4fe9a0e0ffb07a17b4185f9ce6fb",
+      "bytes": 45382707
+    },
+    {
+      "path": "recovery/sarah-v2-2026-10-18/historical-archives/sarah-v2-alpha98-screenshots.zip",
+      "sha256": "c15fff6443219a3550d2c661b9c5d9c6c1a368b66e3f8fba451ff31958b39b87",
+      "bytes": 47222590
+    },
+    {
+      "path": "recovery/sarah-v2-2026-10-18/historical-archives/sarah-v2-shirt-spot-review.zip",
+      "sha256": "a9543c0ffaa16b4078dae52f9d53987a65b29028368ed7661c3f7997c253bd94",
+      "bytes": 22784538
+    },
+    {
+      "path": "recovery/sarah-v2-2026-10-18/current-working-copy-and-renders.zip",
+      "sha256": "21894811632646a1e99784effe393394e57943fad56239310ec08dd3f5c75d83",
+      "bytes": 58961573
+    }
+  ],
+  "workingSnapshotEntries": [
+    {
+      "path": ".scratch/bikini-garment-working/bottom.js",
+      "sha256": "93c67d70636657edc0d7a589c982740b7b543c90d5d6a3d2ce5b127f0a000958",
+      "bytes": 4627
+    },
+    {
+      "path": ".scratch/bikini-garment-working/bottom.test.mjs",
+      "sha256": "aab9602869fdab04b4cd24a7b7fa227a4b56e137fb8cdc8020cb9bdc33159831",
+      "bytes": 2002
+    },
+    {
+      "path": ".scratch/bikini-garment-working/compose.py",
+      "sha256": "402e867ff99d1c551c20b23ce186ca18e854db1c70ed4f2876501a140d2d2fc5",
+      "bytes": 1987
+    },
+    {
+      "path": ".scratch/bikini-garment-working/export.mjs",
+      "sha256": "05c77fbedf6a1839fcc6e0a1d2bbe91f5412cd4c5d9f25820e725753f053d0ed",
+      "bytes": 1098
+    },
+    {
+      "path": ".scratch/bikini-garment-working/index.html",
+      "sha256": "511a3d66ddc3ed3365b03f9b8718019c3ae0e36e0cd09c4d21c4057c024f5542",
+      "bytes": 243
+    },
+    {
+      "path": ".scratch/bikini-garment-working/preview.js",
+      "sha256": "f19086576a97f00aab6775abe0d15ca3db97e8cd4be77b4e20bd0e74c4e1ec10",
+      "bytes": 6536
+    },
+    {
+      "path": ".scratch/bikini-garment-working/render.mjs",
+      "sha256": "143fe768a644b2e71dbd8ee31d48f21cfe416190f8b10ef69ef0a2ae4e189fd5",
+      "bytes": 1700
+    },
+    {
+      "path": ".scratch/bikini-hip-rise-trial/compose.py",
+      "sha256": "e8b376bcff433e9feaf8c2314a46c21d33bbbb2bace86455f51d65d44cc6ff87",
+      "bytes": 1679
+    },
+    {
+      "path": ".scratch/bikini-hip-rise-trial/hip-rise.js",
+      "sha256": "3f7f85b7c8e5083f80371d78a339ef5e45a5b9daf7dd6fec591f47a9ce6a7cf7",
+      "bytes": 1642
+    },
+    {
+      "path": ".scratch/bikini-hip-rise-trial/hip-rise.test.mjs",
+      "sha256": "2eb003c5d6a2f0b142c87c7b110f56c4dfa09c8addf45e9cc7535e52322243a1",
+      "bytes": 1793
+    },
+    {
+      "path": ".scratch/bikini-hip-rise-trial/index.html",
+      "sha256": "511a3d66ddc3ed3365b03f9b8718019c3ae0e36e0cd09c4d21c4057c024f5542",
+      "bytes": 243
+    },
+    {
+      "path": ".scratch/bikini-hip-rise-trial/preview.js",
+      "sha256": "2ea1cb6db0a29ff6b582e23284e00a0c46e7e0d64d335505c7732b8d6182f1b7",
+      "bytes": 5234
+    },
+    {
+      "path": ".scratch/bikini-hip-rise-trial/render.mjs",
+      "sha256": "aacd573d549731cbd4f6901749ae3f38e659a278e81675f0613e7b50eebec6f5",
+      "bytes": 1705
+    },
+    {
+      "path": ".scratch/bikini-placement-reference/compose.py",
+      "sha256": "87ab35d527cbfa0dc95a82e22eaa6de883f095d854aa32155da9def75a8fcfb4",
+      "bytes": 1352
+    },
+    {
+      "path": ".scratch/bikini-placement-reference/index.html",
+      "sha256": "511a3d66ddc3ed3365b03f9b8718019c3ae0e36e0cd09c4d21c4057c024f5542",
+      "bytes": 243
+    },
+    {
+      "path": ".scratch/bikini-placement-reference/preview.js",
+      "sha256": "1d318ffd9c85b10325fe993de3866e526eaedd96a5d83e9d6ced77f09a3e55cd",
+      "bytes": 2778
+    },
+    {
+      "path": ".scratch/bikini-placement-reference/render.mjs",
+      "sha256": "c811c5df05b1899948707cfaf6f30f4a64d90f1c080cd26ba560a7a84c7341bb",
+      "bytes": 1504
+    },
+    {
+      "path": ".scratch/tank-navel-transition-probe/compose.py",
+      "sha256": "3c1d95c78c87ca1792c075f5ffed0810c2b9270271bad21042fdba7ef4468bbe",
+      "bytes": 911
+    },
+    {
+      "path": ".scratch/tank-navel-transition-probe/review.mjs",
+      "sha256": "bb948dc2f8a2b9425e6729d7b066850f5e0d404d43918d629b2c13a569a62aee",
+      "bytes": 2853
+    },
+    {
+      "path": ".scratch/tank-navel-transition-probe/validate.py",
+      "sha256": "c28f685de28af9ca1f498c5261458337e651ef8479c69fa952e48fdc6b02f703",
+      "bytes": 2652
+    },
+    {
+      "path": ".scratch/tank-navel-transition-working/back-layer.js",
+      "sha256": "add5a98aaab901a1f976087d61f2ec4387ec94f56f29a70ac86b2bbdd91a8aa0",
+      "bytes": 4226
+    },
+    {
+      "path": ".scratch/tank-navel-transition-working/belly-contour.js",
+      "sha256": "f7ce087a95c4f95dcbf82e44cea034bbebe56a2c45286d81791f76a5b880dca3",
+      "bytes": 7785
+    },
+    {
+      "path": ".scratch/tank-navel-transition-working/belly-contour.test.mjs",
+      "sha256": "f7d1a27ece34177af122fc9d39cceeb1a1ec05333e917b2e9eb338c107ad1c7d",
+      "bytes": 4120
+    },
+    {
+      "path": ".scratch/tank-navel-transition-working/closer-profile.js",
+      "sha256": "e2e7d9fb7bc86f9e8920ab9cfcf1941d02221115f11ec5fc7707c9f9b08c9439",
+      "bytes": 1571
+    },
+    {
+      "path": ".scratch/tank-navel-transition-working/collision.js",
+      "sha256": "b424a1f2c95798018ebe490ca6d37d34ba91189878dc00237a4126f29b6d8ec1",
+      "bytes": 17187
+    },
+    {
+      "path": ".scratch/tank-navel-transition-working/correction-tests.log",
+      "sha256": "22e401fe5b18c5a8cc8c47184255167524126915a1fe998dad23372cf8a05f2b",
+      "bytes": 1854
+    },
+    {
+      "path": ".scratch/tank-navel-transition-working/dome.js",
+      "sha256": "8f6e5e2c191afeb625d7f012a686b5be972de308dee4cd318c19397360fcbd7d",
+      "bytes": 14309
+    },
+    {
+      "path": ".scratch/tank-navel-transition-working/failed-100-wide-hem/collision.js",
+      "sha256": "b424a1f2c95798018ebe490ca6d37d34ba91189878dc00237a4126f29b6d8ec1",
+      "bytes": 17187
+    },
+    {
+      "path": ".scratch/tank-navel-transition-working/failed-100-wide-hem/high-hem-correction.js",
+      "sha256": "8336fb289d953e92bbfa4c455097476ff082410d43214db9e692019fe579ae96",
+      "bytes": 15222
+    },
+    {
+      "path": ".scratch/tank-navel-transition-working/failed-100-wide-hem/high-hem-correction.test.mjs",
+      "sha256": "e55eb2e2343c771e1d3c518c5c61acf36dca7f6b2fdc49f483c45aef0c09b50a",
+      "bytes": 8604
+    },
+    {
+      "path": ".scratch/tank-navel-transition-working/failed-100-wide-hem/leggings-mask.js",
+      "sha256": "5af480a7994dbdd8157e8a43e60b482422824587270c2838dcc37cbcbb846422",
+      "bytes": 6381
+    },
+    {
+      "path": ".scratch/tank-navel-transition-working/failed-100-wide-hem/preview.js",
+      "sha256": "c4791f174fd8c122a20467e7222cacf9df16154e5bd56d379eeb2a54cd7853b5",
+      "bytes": 66330
+    },
+    {
+      "path": ".scratch/tank-navel-transition-working/hem-shading.js",
+      "sha256": "16fdedd928471c65ae7462f7fbd6949f8e99c40d82d043aa1d463989a49ed219",
+      "bytes": 5036
+    },
+    {
+      "path": ".scratch/tank-navel-transition-working/hem-shading.test.mjs",
+      "sha256": "5c4191a13bd1cbd70d528e665045c4b8e90d6d34c9efbce2e838dd510109558d",
+      "bytes": 4044
+    },
+    {
+      "path": ".scratch/tank-navel-transition-working/high-hem-correction.js",
+      "sha256": "e271622ed334ed218cb748ea2a4d92ed6a8541c71a5fa572e216af124c47a41a",
+      "bytes": 19934
+    },
+    {
+      "path": ".scratch/tank-navel-transition-working/high-hem-correction.test.mjs",
+      "sha256": "002d75917fce15ed28f20e69f66f1ecf202a1bccc81ab699d61c4d19aeb1c539",
+      "bytes": 11051
+    },
+    {
+      "path": ".scratch/tank-navel-transition-working/high-hem-inspect.js",
+      "sha256": "28a78ff78755e799fa68b1e77b6c8f1b3b3ad3f5862dc7ef32451f42b981c487",
+      "bytes": 3356
+    },
+    {
+      "path": ".scratch/tank-navel-transition-working/high-hem-inspect.test.mjs",
+      "sha256": "ad407eb92c921859c3bf85b834a4f8177184d4a4514ccb3d20e45f2faf540f19",
+      "bytes": 1732
+    },
+    {
+      "path": ".scratch/tank-navel-transition-working/high-hem-normal.test.mjs",
+      "sha256": "10248331c7288f3a88edf6f75475665b34e554be2b93be9ad6d7db1c82f0dc1b",
+      "bytes": 4837
+    },
+    {
+      "path": ".scratch/tank-navel-transition-working/high-hem-occlusion.js",
+      "sha256": "d12c2bfec8df65e67a6df3fbfef639c37463353b5b72c7fed7808dd491d63d9f",
+      "bytes": 9166
+    },
+    {
+      "path": ".scratch/tank-navel-transition-working/high-hem-occlusion.test.mjs",
+      "sha256": "b98edf7dad75ca63ff0cd965684cd9d7af88adab409134adcdd874d24580024f",
+      "bytes": 5359
+    },
+    {
+      "path": ".scratch/tank-navel-transition-working/hybrid-field.js",
+      "sha256": "245c0997e68226920c3941d13cb48ed1dfcad038ae7d5874feb34ee27826cea8",
+      "bytes": 1832
+    },
+    {
+      "path": ".scratch/tank-navel-transition-working/index.html",
+      "sha256": "9d73d186c855296d5fbd926182b6c83d3dcf8b58a174765e2357080cd6876d1e",
+      "bytes": 653
+    },
+    {
+      "path": ".scratch/tank-navel-transition-working/inner-spot.js",
+      "sha256": "b391ee359f4f4547b35c926bd316326ac5599e43b91c2d06535ab5bab3fb3318",
+      "bytes": 12675
+    },
+    {
+      "path": ".scratch/tank-navel-transition-working/inner-spot.test.mjs",
+      "sha256": "f6eaf7bead397bb2f3232d5af7d86e0383519289299084dc87bef69047599bf2",
+      "bytes": 5164
+    },
+    {
+      "path": ".scratch/tank-navel-transition-working/leggings-mask.js",
+      "sha256": "5af480a7994dbdd8157e8a43e60b482422824587270c2838dcc37cbcbb846422",
+      "bytes": 6381
+    },
+    {
+      "path": ".scratch/tank-navel-transition-working/navel-policy.js",
+      "sha256": "7bfdbd13f7bcac410809187c9a5b095284e4f50dfac78928c6afcd819bb22901",
+      "bytes": 434
+    },
+    {
+      "path": ".scratch/tank-navel-transition-working/navel-transition.js",
+      "sha256": "508ea758f9b8245713dcfe65fe20c2a2c8195634870c7f016be81f0be3cb80ac",
+      "bytes": 3097
+    },
+    {
+      "path": ".scratch/tank-navel-transition-working/navel-transition.test.mjs",
+      "sha256": "57cf0a187711ec5d54ee1a535ac2d26038514d520eedbb395a492309f537dbc8",
+      "bytes": 2686
+    },
+    {
+      "path": ".scratch/tank-navel-transition-working/preview.js",
+      "sha256": "3cdffb427fb7a90c1e8735fe314313972a01936449c40e58e1d07f2b406f526e",
+      "bytes": 69965
+    },
+    {
+      "path": ".scratch/tank-navel-transition-working/review-view.js",
+      "sha256": "1a5ae5f613e63d2fe93eacec9e78dbb9aabc9ab3653cc099c314738abf734358",
+      "bytes": 4604
+    },
+    {
+      "path": ".scratch/tank-navel-transition-working/shoulder-original.js",
+      "sha256": "8d61e12b828a6c9bc12eb56089d53273c2d6b1e34066771d658532473060eaeb",
+      "bytes": 4749
+    },
+    {
+      "path": ".scratch/tank-navel-transition-working/shoulder.js",
+      "sha256": "5a0d5886ee4456b407ee91730113869f29c5b93e2a710229ba64bd65b7342f5a",
+      "bytes": 5727
+    },
+    {
+      "path": ".scratch/tank-navel-transition-working/spot-shading.js",
+      "sha256": "72ab138d5a9749e537f59fd4f118004a93785d023d0ccb090f21692549f1e262",
+      "bytes": 2349
+    },
+    {
+      "path": ".scratch/tank-navel-transition-working/spot-shading.test.mjs",
+      "sha256": "10d7ff79397151e8bcfdbb7e37e7e5bc22256427801e5efa004f1181e03eb68b",
+      "bytes": 1984
+    },
+    {
+      "path": ".scratch/tank-spot-probe/compose.py",
+      "sha256": "5392d4883cad155e15860e70e70adc3c197d16ae62fbd992f506dae12e22ff42",
+      "bytes": 1702
+    },
+    {
+      "path": ".scratch/tank-spot-probe/recovery-check.mjs",
+      "sha256": "ff0a105f17c5209b983a1f594cc792d2b1a845f3c52191f3dd8e0ec478a154fb",
+      "bytes": 6238
+    },
+    {
+      "path": ".scratch/tank-spot-probe/review.mjs",
+      "sha256": "778df52e275fa590fb250bfc71976fb0d0bfa61c028c11b64b7b241713261053",
+      "bytes": 6213
+    },
+    {
+      "path": ".scratch/tank-spot-probe/trace.py",
+      "sha256": "02bb3551298144fc980ba3e42722bc273f74d070c179d3b5962e1da4fd14f201",
+      "bytes": 1663
+    },
+    {
+      "path": ".scratch/tank-spot-probe/validate.py",
+      "sha256": "5de183f24b4699fee64083aaba3b9464188842710ba464cecfd5ee9c31f5fd62",
+      "bytes": 4925
+    },
+    {
+      "path": ".scratch/tank-spot-working/back-layer.js",
+      "sha256": "add5a98aaab901a1f976087d61f2ec4387ec94f56f29a70ac86b2bbdd91a8aa0",
+      "bytes": 4226
+    },
+    {
+      "path": ".scratch/tank-spot-working/belly-contour.js",
+      "sha256": "f7ce087a95c4f95dcbf82e44cea034bbebe56a2c45286d81791f76a5b880dca3",
+      "bytes": 7785
+    },
+    {
+      "path": ".scratch/tank-spot-working/belly-contour.test.mjs",
+      "sha256": "f7d1a27ece34177af122fc9d39cceeb1a1ec05333e917b2e9eb338c107ad1c7d",
+      "bytes": 4120
+    },
+    {
+      "path": ".scratch/tank-spot-working/closer-profile.js",
+      "sha256": "e2e7d9fb7bc86f9e8920ab9cfcf1941d02221115f11ec5fc7707c9f9b08c9439",
+      "bytes": 1571
+    },
+    {
+      "path": ".scratch/tank-spot-working/collision.js",
+      "sha256": "b424a1f2c95798018ebe490ca6d37d34ba91189878dc00237a4126f29b6d8ec1",
+      "bytes": 17187
+    },
+    {
+      "path": ".scratch/tank-spot-working/correction-tests.log",
+      "sha256": "22e401fe5b18c5a8cc8c47184255167524126915a1fe998dad23372cf8a05f2b",
+      "bytes": 1854
+    },
+    {
+      "path": ".scratch/tank-spot-working/dome.js",
+      "sha256": "8f6e5e2c191afeb625d7f012a686b5be972de308dee4cd318c19397360fcbd7d",
+      "bytes": 14309
+    },
+    {
+      "path": ".scratch/tank-spot-working/hem-shading.js",
+      "sha256": "16fdedd928471c65ae7462f7fbd6949f8e99c40d82d043aa1d463989a49ed219",
+      "bytes": 5036
+    },
+    {
+      "path": ".scratch/tank-spot-working/hem-shading.test.mjs",
+      "sha256": "5c4191a13bd1cbd70d528e665045c4b8e90d6d34c9efbce2e838dd510109558d",
+      "bytes": 4044
+    },
+    {
+      "path": ".scratch/tank-spot-working/high-hem-correction.js",
+      "sha256": "e271622ed334ed218cb748ea2a4d92ed6a8541c71a5fa572e216af124c47a41a",
+      "bytes": 19934
+    },
+    {
+      "path": ".scratch/tank-spot-working/high-hem-correction.test.mjs",
+      "sha256": "002d75917fce15ed28f20e69f66f1ecf202a1bccc81ab699d61c4d19aeb1c539",
+      "bytes": 11051
+    },
+    {
+      "path": ".scratch/tank-spot-working/high-hem-inspect.js",
+      "sha256": "28a78ff78755e799fa68b1e77b6c8f1b3b3ad3f5862dc7ef32451f42b981c487",
+      "bytes": 3356
+    },
+    {
+      "path": ".scratch/tank-spot-working/high-hem-inspect.test.mjs",
+      "sha256": "ad407eb92c921859c3bf85b834a4f8177184d4a4514ccb3d20e45f2faf540f19",
+      "bytes": 1732
+    },
+    {
+      "path": ".scratch/tank-spot-working/high-hem-normal.test.mjs",
+      "sha256": "10248331c7288f3a88edf6f75475665b34e554be2b93be9ad6d7db1c82f0dc1b",
+      "bytes": 4837
+    },
+    {
+      "path": ".scratch/tank-spot-working/high-hem-occlusion.js",
+      "sha256": "d12c2bfec8df65e67a6df3fbfef639c37463353b5b72c7fed7808dd491d63d9f",
+      "bytes": 9166
+    },
+    {
+      "path": ".scratch/tank-spot-working/high-hem-occlusion.test.mjs",
+      "sha256": "b98edf7dad75ca63ff0cd965684cd9d7af88adab409134adcdd874d24580024f",
+      "bytes": 5359
+    },
+    {
+      "path": ".scratch/tank-spot-working/hybrid-field.js",
+      "sha256": "245c0997e68226920c3941d13cb48ed1dfcad038ae7d5874feb34ee27826cea8",
+      "bytes": 1832
+    },
+    {
+      "path": ".scratch/tank-spot-working/index.html",
+      "sha256": "9d73d186c855296d5fbd926182b6c83d3dcf8b58a174765e2357080cd6876d1e",
+      "bytes": 653
+    },
+    {
+      "path": ".scratch/tank-spot-working/inner-spot.js",
+      "sha256": "b391ee359f4f4547b35c926bd316326ac5599e43b91c2d06535ab5bab3fb3318",
+      "bytes": 12675
+    },
+    {
+      "path": ".scratch/tank-spot-working/inner-spot.test.mjs",
+      "sha256": "f6eaf7bead397bb2f3232d5af7d86e0383519289299084dc87bef69047599bf2",
+      "bytes": 5164
+    },
+    {
+      "path": ".scratch/tank-spot-working/leggings-mask.js",
+      "sha256": "5af480a7994dbdd8157e8a43e60b482422824587270c2838dcc37cbcbb846422",
+      "bytes": 6381
+    },
+    {
+      "path": ".scratch/tank-spot-working/navel-policy.js",
+      "sha256": "7bfdbd13f7bcac410809187c9a5b095284e4f50dfac78928c6afcd819bb22901",
+      "bytes": 434
+    },
+    {
+      "path": ".scratch/tank-spot-working/preview.js",
+      "sha256": "2bd5bab60cb6ffeddd39992d423bc34bdb61d6f88d98d1420343b7cded9d591c",
+      "bytes": 69576
+    },
+    {
+      "path": ".scratch/tank-spot-working/review-view.js",
+      "sha256": "1a5ae5f613e63d2fe93eacec9e78dbb9aabc9ab3653cc099c314738abf734358",
+      "bytes": 4604
+    },
+    {
+      "path": ".scratch/tank-spot-working/shoulder-original.js",
+      "sha256": "8d61e12b828a6c9bc12eb56089d53273c2d6b1e34066771d658532473060eaeb",
+      "bytes": 4749
+    },
+    {
+      "path": ".scratch/tank-spot-working/shoulder.js",
+      "sha256": "5a0d5886ee4456b407ee91730113869f29c5b93e2a710229ba64bd65b7342f5a",
+      "bytes": 5727
+    },
+    {
+      "path": ".scratch/tank-spot-working/spot-shading.js",
+      "sha256": "72ab138d5a9749e537f59fd4f118004a93785d023d0ccb090f21692549f1e262",
+      "bytes": 2349
+    },
+    {
+      "path": ".scratch/tank-spot-working/spot-shading.test.mjs",
+      "sha256": "10d7ff79397151e8bcfdbb7e37e7e5bc22256427801e5efa004f1181e03eb68b",
+      "bytes": 1984
+    },
+    {
+      "path": "shots/bikini-garment-review/REVIEW.md",
+      "sha256": "2c861c84044b2c84e2abf391a5732e8b064b788caf7f124eb09de83185fc9d98",
+      "bytes": 2172
+    },
+    {
+      "path": "shots/bikini-garment-review/before-0.png",
+      "sha256": "e8d22992677409387148d02695c6842313f5aa2e7aff6bf3e1f46122a6c85dc2",
+      "bytes": 482143
+    },
+    {
+      "path": "shots/bikini-garment-review/before-135.png",
+      "sha256": "5b5eb0e64da8a0dfeba718f30da223088c721279b1f0da2b63307bd9e8eded93",
+      "bytes": 472876
+    },
+    {
+      "path": "shots/bikini-garment-review/before-180.png",
+      "sha256": "919c5265518bee5dbd8dbc2f2d90c8055cc7b4a7f1ad1efa421ec7e838e87f21",
+      "bytes": 427507
+    },
+    {
+      "path": "shots/bikini-garment-review/before-45.png",
+      "sha256": "0e88ac0f904f987e97bd24ce309d035224456d35c026bc33807d47f125fc39db",
+      "bytes": 483707
+    },
+    {
+      "path": "shots/bikini-garment-review/before-90.png",
+      "sha256": "c3b61c69b3ade9b12565043c651155f71bfa3b1d0172137ea5d6e47d8ce12bac",
+      "bytes": 384783
+    },
+    {
+      "path": "shots/bikini-garment-review/bikini-bottom-five-view-review.png",
+      "sha256": "7df502070db74c47c77da39cb25380bef146a810c1df292752dfd16138f12511",
+      "bytes": 896193
+    },
+    {
+      "path": "shots/bikini-garment-review/body-posed.json",
+      "sha256": "502d07d68dfcafb47da8124506d900900f9ca451abe3965296e3b41d8277d9fd",
+      "bytes": 10329063
+    },
+    {
+      "path": "shots/bikini-garment-review/manifest.json",
+      "sha256": "369a1eb45a0f403fad9e95ad5b8a4fdfe20b1d0b95f41483d0355b7179a6abde",
+      "bytes": 6939
+    },
+    {
+      "path": "shots/bikini-garment-review/proposed-0.png",
+      "sha256": "d19f677178f35acf8a7debbba6913001f37e817da81636cac3015dbeafa05b00",
+      "bytes": 468485
+    },
+    {
+      "path": "shots/bikini-garment-review/proposed-135.png",
+      "sha256": "839b916e49522fe427e42ff817d8a4c4d1973ef590cee2d0f09515530e6e0696",
+      "bytes": 435943
+    },
+    {
+      "path": "shots/bikini-garment-review/proposed-180.png",
+      "sha256": "fdbb87a78561fa7015475fd84997d28de11810356d6a6b0cc5f7f57e8ac6b65d",
+      "bytes": 370884
+    },
+    {
+      "path": "shots/bikini-garment-review/proposed-45.png",
+      "sha256": "82c211d2c435aba870c61ebfab4174ac5fc2f4b405b913b757f7d9f04173ca49",
+      "bytes": 477805
+    },
+    {
+      "path": "shots/bikini-garment-review/proposed-90.png",
+      "sha256": "57177d9c658f7ba5d9f3b400558433703d7d72175c28d7da9e91679b69a5f0a2",
+      "bytes": 377738
+    },
+    {
+      "path": "shots/bikini-hip-rise-trial/REVIEW.md",
+      "sha256": "41c6304b4711fdae83dbdf3d8d71a82c2b4e672d8ac0d9fc95f5bbd4466ac3af",
+      "bytes": 841
+    },
+    {
+      "path": "shots/bikini-hip-rise-trial/before-0.png",
+      "sha256": "e8d22992677409387148d02695c6842313f5aa2e7aff6bf3e1f46122a6c85dc2",
+      "bytes": 482143
+    },
+    {
+      "path": "shots/bikini-hip-rise-trial/before-180.png",
+      "sha256": "919c5265518bee5dbd8dbc2f2d90c8055cc7b4a7f1ad1efa421ec7e838e87f21",
+      "bytes": 427507
+    },
+    {
+      "path": "shots/bikini-hip-rise-trial/before-90.png",
+      "sha256": "c3b61c69b3ade9b12565043c651155f71bfa3b1d0172137ea5d6e47d8ce12bac",
+      "bytes": 384783
+    },
+    {
+      "path": "shots/bikini-hip-rise-trial/bikini-higher-hip-comparison.png",
+      "sha256": "3c4efdbdb5362baaa739adb144527c354a4bf8ead20b58584a5653c4584ca798",
+      "bytes": 957791
+    },
+    {
+      "path": "shots/bikini-hip-rise-trial/manifest.json",
+      "sha256": "376317ef1358bc9ffc965bb88531e0b5a541b4ca9a393fa6544d0dd084062c77",
+      "bytes": 7652
+    },
+    {
+      "path": "shots/bikini-hip-rise-trial/proposed-0.png",
+      "sha256": "32ef6e57e358a563c1714e3f1dbbcfc87cf364724d605b15c96453c26da2323d",
+      "bytes": 482665
+    },
+    {
+      "path": "shots/bikini-hip-rise-trial/proposed-180.png",
+      "sha256": "7459783f3cb466879fc16288d355e22da7aa684219e332006c943211aa0fb5c2",
+      "bytes": 433606
+    },
+    {
+      "path": "shots/bikini-hip-rise-trial/proposed-90.png",
+      "sha256": "fd7823705477510d927a890561522536ccba3be370cefcdf8cfb7ff0a2a2cf88",
+      "bytes": 386849
+    },
+    {
+      "path": "shots/bikini-placement-reference/0.png",
+      "sha256": "e8d22992677409387148d02695c6842313f5aa2e7aff6bf3e1f46122a6c85dc2",
+      "bytes": 482143
+    },
+    {
+      "path": "shots/bikini-placement-reference/180.png",
+      "sha256": "919c5265518bee5dbd8dbc2f2d90c8055cc7b4a7f1ad1efa421ec7e838e87f21",
+      "bytes": 427507
+    },
+    {
+      "path": "shots/bikini-placement-reference/90.png",
+      "sha256": "c3b61c69b3ade9b12565043c651155f71bfa3b1d0172137ea5d6e47d8ce12bac",
+      "bytes": 384783
+    },
+    {
+      "path": "shots/bikini-placement-reference/bikini-front-side-back-reference.png",
+      "sha256": "9c82162f38efd0fa29ae82d4a74d75e675e179988d53437e76b98c748af9130a",
+      "bytes": 479132
+    },
+    {
+      "path": "shots/bikini-placement-reference/manifest.json",
+      "sha256": "b9dd5c417ca4c29397124ad4630bfa87c3dd6089b8f38ba9100a66cd0323270e",
+      "bytes": 3430
+    },
+    {
+      "path": "shots/navel-transition-review/REVIEW.md",
+      "sha256": "79ff4c0137c0efc091e34cbb74871187c38a09a4b53d4c1065c10a7523929fc2",
+      "bytes": 2728
+    },
+    {
+      "path": "shots/navel-transition-review/after-0.png",
+      "sha256": "31a7241831c671a10bd89e2e839424708d97aaad97fafac10ce1bae25cb7aa1d",
+      "bytes": 783817
+    },
+    {
+      "path": "shots/navel-transition-review/after-45.png",
+      "sha256": "4bf55bd9c7d8bb159ac93f348088869c6f01d7255141925e3ff8836ebb45e321",
+      "bytes": 495719
+    },
+    {
+      "path": "shots/navel-transition-review/after-90.png",
+      "sha256": "b3ace6aa6c1422eb2be68dad713406216d4d363bc6a89284c075e5ed08c3f05e",
+      "bytes": 271233
+    },
+    {
+      "path": "shots/navel-transition-review/after-region.json",
+      "sha256": "388f09f7e6bc1370d896810e9cc49cb6c15f6323a860162e896ea887c31baad4",
+      "bytes": 3360224
+    },
+    {
+      "path": "shots/navel-transition-review/before-0.png",
+      "sha256": "ff42724e8c5f57e970df6daecf5f3e00b80f31b982b90c32a6670e5bb5fc99c0",
+      "bytes": 786498
+    },
+    {
+      "path": "shots/navel-transition-review/before-45.png",
+      "sha256": "1327cd313b8da8fba3bb58ec0ef812464b8739c01d1144ac6798637a9ef88063",
+      "bytes": 497482
+    },
+    {
+      "path": "shots/navel-transition-review/before-90.png",
+      "sha256": "a475b18e675dda41f626e46f48e101fdfa47477560356bbd1a20a5fab8476600",
+      "bytes": 271737
+    },
+    {
+      "path": "shots/navel-transition-review/before-region.json",
+      "sha256": "f2eb8dfc2aa32ca46dfd82188c6abe16e981f1b5cf85c893fc1129e6c8343d35",
+      "bytes": 3360052
+    },
+    {
+      "path": "shots/navel-transition-review/manifest.json",
+      "sha256": "34d6260ac19dcf73299516f1bbaeec7646dfde42f9c24ec6b5cbdc742b4982f0",
+      "bytes": 52820349
+    },
+    {
+      "path": "shots/navel-transition-review/navel-transition-before-after.png",
+      "sha256": "e61360567f2e5fcc315e78ca59dd12c4f8bfe70c2e300d3d8794d4e42fb52f16",
+      "bytes": 418451
+    },
+    {
+      "path": "shots/navel-transition-review/validation.json",
+      "sha256": "6ca16db3c07c3e9fd45197faee44113e547392341d303b13f948b55a6819ed9b",
+      "bytes": 634
+    },
+    {
+      "path": "shots/recovery-check/manifest.json",
+      "sha256": "41bd28497a88d825aee5324dc63d907c1505570140b4cfee44cf642fa6c4fe80",
+      "bytes": 3786943
+    },
+    {
+      "path": "shots/recovery-check/spandex-spot-100-0-close.png",
+      "sha256": "ec670175ef2271654620187df4efa6c2cdb76906d0c72b103756ddb2dc1bb0e3",
+      "bytes": 661252
+    },
+    {
+      "path": "shots/recovery-check/spandex-spot-100-0.png",
+      "sha256": "fe192b1ede7c911608ebc48096117954b71b833cdc8f84898cfcf4d36fe9ba44",
+      "bytes": 276682
+    },
+    {
+      "path": "shots/recovery-check/spandex-spot-100-45-close.png",
+      "sha256": "759b53705ebdabe49023240bd6c9907d5beba847948d0f971eccfb896bbd6dab",
+      "bytes": 614447
+    },
+    {
+      "path": "shots/recovery-check/spandex-spot-100-45.png",
+      "sha256": "ffb6d8bc97f0a41c0c69cf12ec89b34b12b1e2a0b7a40886285e67746e70b15a",
+      "bytes": 265495
+    },
+    {
+      "path": "shots/recovery-check/spandex-spot-100-90-close.png",
+      "sha256": "f6f734bc42fbcee10f3e5243c70b98837a9b450b8d03c165c6e780d8cc4f461c",
+      "bytes": 504208
+    },
+    {
+      "path": "shots/recovery-check/spandex-spot-100-90.png",
+      "sha256": "554a34beefcef93a60a9ecdd269ca315c21a3b72e02c0a60c369f50abd8db765",
+      "bytes": 217804
+    },
+    {
+      "path": "shots/recovery-check/spot-detail-after.png",
+      "sha256": "c239e1765f99c2c484d2420894f95654a217d52421e3f873ff9d714540e8f086",
+      "bytes": 872789
+    },
+    {
+      "path": "shots/recovery-check/spot-detail-view.json",
+      "sha256": "f8598b836de755cfba8d9982b6301ea16af81ecba27caf930d3293608a77ef56",
+      "bytes": 15309
+    },
+    {
+      "path": "shots/recovery-check/spot-positions.json",
+      "sha256": "fa9277ffd1219c08a4dd9d12ec8c53448e646871453ee11ebe09bf79ba59dad2",
+      "bytes": 9429089
+    },
+    {
+      "path": "shots/recovery-check/spot-region.json",
+      "sha256": "a15cf0ff3135181ecde09065b0cd611c7025727204ee27be58f5dfe1cb622c39",
+      "bytes": 4626688
+    },
+    {
+      "path": "shots/tank-spot-review/100-three-way-final-close.png",
+      "sha256": "f378191bf796b8a5623466ecfa8568388bc32bc73580750a0f24aa28d6b2788e",
+      "bytes": 1806135
+    },
+    {
+      "path": "shots/tank-spot-review/100-three-way-final.png",
+      "sha256": "170db8c97bec9f662bb6bd85c3b2d0284b7d9392b55bbce65236ceb94321fe4c",
+      "bytes": 1141813
+    },
+    {
+      "path": "shots/tank-spot-review/REVIEW.md",
+      "sha256": "6e261405fd16345172a9e7d2db4e66cc876425173f3b90cefe2c68cf981d4913",
+      "bytes": 1914
+    },
+    {
+      "path": "shots/tank-spot-review/bikini-100-0-close.png",
+      "sha256": "9ed96c6788717a162cad36848fe411fed919ebe024495f4233bdb8662be67281",
+      "bytes": 519908
+    },
+    {
+      "path": "shots/tank-spot-review/bikini-100-0.png",
+      "sha256": "7997406581265cdfb350ab1604a1450f5f2c72bd24dfc8a4002023c14fd0f05a",
+      "bytes": 260091
+    },
+    {
+      "path": "shots/tank-spot-review/bikini-100-45-close.png",
+      "sha256": "326b7c3190042fca530a59fa0570fe29a64c3a70a245353fce5a74f07b428c1e",
+      "bytes": 472345
+    },
+    {
+      "path": "shots/tank-spot-review/bikini-100-45.png",
+      "sha256": "e72976bb413fbba3c4f052ca39373f677867ab5c15b6d8a98cdd276f64cfd559",
+      "bytes": 243298
+    },
+    {
+      "path": "shots/tank-spot-review/bikini-100-90-close.png",
+      "sha256": "09ae58446157be63c51df0b134adc59e6b7a4432b017035a87e4d332f278595f",
+      "bytes": 360523
+    },
+    {
+      "path": "shots/tank-spot-review/bikini-100-90.png",
+      "sha256": "2816a202f7d22ad22d5077d07168bcfffe1fc6a04c3a8ce4aba6d529d70843d6",
+      "bytes": 192953
+    },
+    {
+      "path": "shots/tank-spot-review/manifest.json",
+      "sha256": "b6bcf573c8b58f1ab8708c29fcd9159872e931c4c58ed6ad7d3b959a41f7632a",
+      "bytes": 3921458
+    },
+    {
+      "path": "shots/tank-spot-review/relaxed-100-0-close.png",
+      "sha256": "5c8c1ae00d7b4672eb0ba8f8dc4818b2bbd455dd2b5e3ed40aa70daea533ba9b",
+      "bytes": 644628
+    },
+    {
+      "path": "shots/tank-spot-review/relaxed-100-0.png",
+      "sha256": "b61878d1e1a52a7c7796167b4af0577a95fa9317adce26c21f840f6f5306dcc6",
+      "bytes": 266591
+    },
+    {
+      "path": "shots/tank-spot-review/relaxed-100-45-close.png",
+      "sha256": "4cce5a24330f9c4e87ed110eb89ddfba85963000cfae6f8e83769d40edf28425",
+      "bytes": 612888
+    },
+    {
+      "path": "shots/tank-spot-review/relaxed-100-45.png",
+      "sha256": "b5ec9c27ad8c7cc5b135c1552407f7d304e756f73a8245ceb68682b32f0ef540",
+      "bytes": 259519
+    },
+    {
+      "path": "shots/tank-spot-review/relaxed-100-90-close.png",
+      "sha256": "2c8178160113cc800940fc2b0274d11677ba73ca607c97a56353bdbbbecee9ee",
+      "bytes": 516822
+    },
+    {
+      "path": "shots/tank-spot-review/relaxed-100-90.png",
+      "sha256": "4ed15144a294c4fdcd8fa0ff41b287deb0554485ea49a5aedbde46478d81eeca",
+      "bytes": 219376
+    },
+    {
+      "path": "shots/tank-spot-review/spandex-before-100-0-close.png",
+      "sha256": "c9be9fb88e4eb670a1258547467089d809a6c56c823c9121658c7ec7d21ed6e0",
+      "bytes": 665109
+    },
+    {
+      "path": "shots/tank-spot-review/spandex-before-100-0.png",
+      "sha256": "440d16287f34f68bf45ed13cbca95b22685417bf32c73c7e1818e1d0ef1ea1ec",
+      "bytes": 277641
+    },
+    {
+      "path": "shots/tank-spot-review/spandex-before-100-45-close.png",
+      "sha256": "537fc4d42d4ad2c7ed9043cbd0fef30861947e990a25f9ddf52b49d3420832e7",
+      "bytes": 617480
+    },
+    {
+      "path": "shots/tank-spot-review/spandex-before-100-45.png",
+      "sha256": "2b9177e6e66335de96f8453a7b8f9a2b0f463d41db00fde5c3195eb0acb5798d",
+      "bytes": 265809
+    },
+    {
+      "path": "shots/tank-spot-review/spandex-before-100-90-close.png",
+      "sha256": "496bbcb62cd514fe1d05ed2c58f232496916eff66144894c063943ac8efa7b77",
+      "bytes": 504648
+    },
+    {
+      "path": "shots/tank-spot-review/spandex-before-100-90.png",
+      "sha256": "3af4171eb2e7fc24a7546f0dff20b384300d98c620c8207986ae7234d6d742fe",
+      "bytes": 218066
+    },
+    {
+      "path": "shots/tank-spot-review/spandex-spot-100-0-close.png",
+      "sha256": "3e60c1f15b27b2dccab35f310a9dbd53266297c0f41a40af9b5c7104039fbc74",
+      "bytes": 664001
+    },
+    {
+      "path": "shots/tank-spot-review/spandex-spot-100-0.png",
+      "sha256": "f1910bcbc6ee3a306483fcc786098ffbc5412729155fefda94b226ee768f00f7",
+      "bytes": 277107
+    },
+    {
+      "path": "shots/tank-spot-review/spandex-spot-100-45-close.png",
+      "sha256": "6908298b06f679236a5ec9eb9a11045f584d31962777a57e1fe9587340f839bc",
+      "bytes": 617424
+    },
+    {
+      "path": "shots/tank-spot-review/spandex-spot-100-45.png",
+      "sha256": "7c5fa92439ed2b49012bbb21b3bcc821f38616be5bc7392e8e2b8413d5cf4f49",
+      "bytes": 265790
+    },
+    {
+      "path": "shots/tank-spot-review/spandex-spot-100-90-close.png",
+      "sha256": "496bbcb62cd514fe1d05ed2c58f232496916eff66144894c063943ac8efa7b77",
+      "bytes": 504648
+    },
+    {
+      "path": "shots/tank-spot-review/spandex-spot-100-90.png",
+      "sha256": "3af4171eb2e7fc24a7546f0dff20b384300d98c620c8207986ae7234d6d742fe",
+      "bytes": 218066
+    },
+    {
+      "path": "shots/tank-spot-review/spot-before-after.png",
+      "sha256": "6d3ade4a8b8dc6a8de89b0cd144a31c1775c694dfb3a7091d0edb5e40da77a81",
+      "bytes": 222289
+    },
+    {
+      "path": "shots/tank-spot-review/spot-detail-after.png",
+      "sha256": "83b87c9c89f00def15c25b18bb251c3298298f9057be4d485e62cfb3135651cd",
+      "bytes": 870185
+    },
+    {
+      "path": "shots/tank-spot-review/spot-detail-view.json",
+      "sha256": "3e633e72956aa1273823423900899409ae63cb10ecee56b7c7beaa94e7ba8c0d",
+      "bytes": 24505
+    },
+    {
+      "path": "shots/tank-spot-review/trace.json",
+      "sha256": "a541f0d4953a630792abe08657fa33dd692b5b97e5c0c00e97b626f4b9d1a802",
+      "bytes": 8177
+    },
+    {
+      "path": "shots/tank-spot-review/validation-check.log",
+      "sha256": "d0170e67e0aab3de9074bed17171a512e292109788c1380d80e2d084719d6558",
+      "bytes": 986
+    },
+    {
+      "path": "shots/tank-spot-review/validation.json",
+      "sha256": "42f4cc07ce1f6ae56957bad659e86f07241e644591f89a4f1e452618380bce20",
+      "bytes": 3829
+    },
+    {
+      "path": "inputs/sarah-meshy-tank.glb",
+      "sha256": "f91a431c2d859c0e2430f2d29f1ab0750a08c23f8cfb3e7427daa6283d0699b3",
+      "bytes": 11173944
+    }
+  ],
+  "verification": {
+    "fullSuite": "3752 passed, 3 skipped",
+    "focused": "38 passed",
+    "typecheck": "passed",
+    "build": "passed",
+    "archiveVerification": "5 archives CRC/SHA256 and 174 working entries verified",
+    "protectedRuntimeUnchanged": true
+  }
+}

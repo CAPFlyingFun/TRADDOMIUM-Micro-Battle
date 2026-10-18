@@ -1,0 +1,35 @@
+✔ C2 fields protect upper belly, back, legs and navel with bounded values (1.413885ms)
+✔ flat radial surface is a no-op and an outward envelope cannot flatten or exceed its cap (10.494451ms)
+✔ same curved surface moves continuously across fixed grid-cell boundaries (255.839661ms)
+✔ inverse blended skinning maps a world radial delta without Y/tangent drift (1.625694ms)
+✔ native correction resets exactly and repeat solve does not accumulate; upper region unchanged (307.838264ms)
+✔ hem solves true rendered-pants overlap coherently, preserves Y/layers, and leaves clear Relaxed geometry exact (80.899011ms)
+✔ navel core remains exact and blocked layering reports failure instead of moving it (119.37524ms)
+✖ measured3.7mm embedding in real triangles1.25cm above hem exposes old attenuation failure and clear in the full-strength1.5cm band (253.282207ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 7
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1155.129302
+
+✖ failing tests:
+
+test at .scratch/tank-high-hem-working/high-hem-correction.test.mjs:12:1
+✖ measured3.7mm embedding in real triangles1.25cm above hem exposes old attenuation failure and clear in the full-strength1.5cm band (253.282207ms)
+  AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
+  
+    assert.ok(a.after.records.some(r=>Math.abs(r.sourceHemDistanceCm-1.25)<.15&&r.gapCm<.05))
+  
+      at TestContext.<anonymous> (file:///workspace/scratch/32de5feef88e/tmb-sarah-followup/.scratch/tank-high-hem-working/high-hem-correction.test.mjs:12:672)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }

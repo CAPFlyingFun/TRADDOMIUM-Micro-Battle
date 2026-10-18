@@ -1,0 +1,4 @@
+# Reassembled files are derived from the tracked, verified archive parts.
+/*.zip
+/historical-archives/*.zip
+*.restore-partial
