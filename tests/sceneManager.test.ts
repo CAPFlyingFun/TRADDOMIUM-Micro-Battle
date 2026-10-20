@@ -140,3 +140,29 @@ describe('SceneManager.goTo', () => {
     expect(log.at(-1)).toBe('update a');
   });
 });
+
+describe('SceneManager and the upright (portrait) rooms', () => {
+  it('stands the rotate prompt down only while a scene that may be upright is current', async () => {
+    const log: string[] = [], said: boolean[] = [];
+    const manager = new SceneManager({
+      uiLayer: document.body.appendChild(document.createElement('div')),
+      input: { clearHandlers: () => {} },
+      viewport: () => ({ width: 390, height: 844 }),
+      context: () => ({}) as unknown as SceneContext,
+      fallback: () => () => fakeScene('menu', log),
+      fadeMs: 0,
+      portrait: (allowed) => said.push(allowed),
+    });
+    const upright = (name: string, enter?: () => Promise<void>): SceneFactory => () => ({ ...fakeScene(name, log, enter), portrait: true });
+    // the first scene: nothing is left to clear (a link may already have stood the prompt down), then its answer
+    await manager.goTo(upright('room'));
+    expect(said).toEqual([true]);
+    // leaving it puts the prompt back before anything else, and an ordinary scene keeps it
+    await manager.goTo(() => fakeScene('menu', log));
+    expect(said).toEqual([true, false, false]);
+    // an upright scene that fails to enter falls back to the menu, which keeps the prompt
+    await manager.goTo(upright('broken', async () => { throw new Error('no'); }));
+    expect(manager.current?.name).toBe('menu');
+    expect(said.at(-1)).toBe(false);
+  });
+});

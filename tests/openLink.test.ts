@@ -5,15 +5,16 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { DevTool } from '../src/devtools/DevTool';
-import { openLinkScene } from '../src/app/openLink';
+import { readFileSync } from 'node:fs';
+import { openLinkScene, PORTRAIT_LINKS } from '../src/app/openLink';
 import { SARAH_LAB_SCENE_ID, sarahLabTool } from '../src/sarahlab/sarahLabTool';
 
 const tool = (id: string, sceneId?: string): DevTool => ({ id, title: id, description: id, ...(sceneId ? { sceneId } : { open: () => {} }) });
 const tools: DevTool[] = [tool('perf-world', 'world:perf'), tool('lab.creatures', 'lab:creatures'), tool('panel.thing'), sarahLabTool];
 
 describe('?open= links', () => {
-  it('opens the Sarah Lab from ?open=sarah, its full id, and any case', () => {
-    for (const search of ['?open=sarah', '?open=lab.sarah', '?open=Sarah', '?open=%20SARAH%20', '?tier=low&open=sarah']) {
+  it('opens the character room from ?open=CharacterRoom, its first name sarah, its full id, and any case', () => {
+    for (const search of ['?open=CharacterRoom', '?open=characterroom', '?open=CHARACTERROOM', '?open=sarah', '?open=lab.sarah', '?open=Sarah', '?open=%20SARAH%20', '?tier=low&open=CharacterRoom']) {
       expect(openLinkScene(search, tools), search).toBe(SARAH_LAB_SCENE_ID);
     }
   });
@@ -26,5 +27,12 @@ describe('?open= links', () => {
     for (const search of ['', '?open=', '?open=perf-world', '?open=thing', '?open=panel.thing', '?open=nowhere', '?tier=low']) {
       expect(openLinkScene(search, tools), search).toBeNull();
     }
+  });
+
+  it('stands the rotate prompt down from the first paint for exactly the links that open the upright room', () => {
+    const html = readFileSync('index.html', 'utf8'), list = /\[([^\]]*)\]\.indexOf\(open\)/.exec(html);
+    expect(list, 'index.html has its early upright-link script').not.toBeNull();
+    expect(JSON.parse(`[${list![1].replace(/'/g, '"')}]`)).toEqual([...PORTRAIT_LINKS]);
+    for (const name of PORTRAIT_LINKS) expect(openLinkScene(`?open=${name}`, tools), name).toBe(SARAH_LAB_SCENE_ID);
   });
 });

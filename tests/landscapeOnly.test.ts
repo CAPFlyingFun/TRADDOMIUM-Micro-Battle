@@ -52,6 +52,20 @@ describe('landscape only', () => {
     expect(block).toContain('visibility: hidden');
   });
 
+  it('stands down only for the character room, by one attribute nothing else sets', () => {
+    // Joshua, 2026-10-20: "Just in this room, allow both portraits and landscape views". The gate and the hiding
+    // behind it both read `data-any-orientation` on <html>; with it absent -- every other screen, and any failure --
+    // the gate is exactly as before.
+    const query = HTML.slice(HTML.search(/@media \(orientation: portrait\) and \(pointer: coarse\)/)).slice(0, 1400);
+    expect(query).toContain('html:not([data-any-orientation]) #orient');
+    for (const id of ['#app', '#ui', '#boot']) expect(query).toContain(`html:not([data-any-orientation]) ${id}`);
+    // set before the first paint only for a link into that room, and afterwards only by the scene manager's switch
+    const SOURCES = ['src/app/App.ts', 'src/app/SceneManager.ts', 'src/app/openLink.ts', 'src/main.ts', 'src/sarahlab/SarahLabScene.ts'];
+    const setters = SOURCES.filter((f) => /data-any-orientation|PORTRAIT_ATTRIBUTE/.test(readFileSync(`${ROOT}${f}`, 'utf8')));
+    expect(setters).toEqual(['src/app/App.ts', 'src/app/openLink.ts']);
+    expect(readFileSync(`${ROOT}src/sarahlab/SarahLabScene.ts`, 'utf8')).toContain('portrait: true');
+  });
+
   it('asks an installed app for landscape too, which is the half that IS an API', () => {
     expect(MANIFEST.orientation).toBe('landscape');
   });

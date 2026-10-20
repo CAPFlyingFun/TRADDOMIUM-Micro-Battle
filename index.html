@@ -1,6 +1,14 @@
 <!doctype html>
 <html lang="en">
   <head>
+    <!-- A link straight into the character room (`?open=CharacterRoom`, src/app/openLink.ts) may be held upright from
+         the first paint: the rotate prompt below stands down for it. PORTRAIT_LINKS there is this list (a test pins it). -->
+    <script>
+      try {
+        var open = (new URLSearchParams(location.search).get('open') || '').trim().toLowerCase();
+        if (['characterroom', 'sarah', 'lab.sarah'].indexOf(open) >= 0) document.documentElement.setAttribute('data-any-orientation', '');
+      } catch (e) {}
+    </script>
     <meta charset="UTF-8" />
     <meta
       name="viewport"
@@ -138,12 +146,22 @@
          window and not a phone nobody has turned. `manifest.webmanifest`
          already asks for `"orientation": "landscape"`, which an
          INSTALLED app honours on Android; this is what covers Safari,
-         the browser tab, and every phone that ignores it. */
+         the browser tab, and every phone that ignores it.
+
+         ONE EXCEPTION, THE CHARACTER ROOM (Joshua, 2026-10-20: "Just in
+         this room, allow both portraits and landscape views by removing
+         that force rotate screen message"). The gate stands down while
+         <html> carries `data-any-orientation`. Only the scene manager sets
+         it, for a scene that says it may be upright (AppScene.portrait),
+         and it clears it as every scene goes; the inline script at the top
+         of <head> sets it before the first paint for a link that opens
+         that room. With no attribute, which is every other screen and any
+         failure, the gate works exactly as before. */
       #orient {
         display: none;
       }
       @media (orientation: portrait) and (pointer: coarse) {
-        #orient {
+        html:not([data-any-orientation]) #orient {
           display: flex;
           position: fixed;
           inset: 0;
@@ -155,9 +173,9 @@
           background: #06090c;
         }
         /* Nothing behind the gate may be touched, scrolled or read out. */
-        #app,
-        #ui,
-        #boot {
+        html:not([data-any-orientation]) #app,
+        html:not([data-any-orientation]) #ui,
+        html:not([data-any-orientation]) #boot {
           visibility: hidden;
         }
       }

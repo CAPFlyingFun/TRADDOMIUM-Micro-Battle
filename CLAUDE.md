@@ -135,6 +135,17 @@ manifest's `"orientation": "landscape"` is the other half, for an
 installed app. Do not build a portrait layout for anything; the gate
 means nobody will ever see one.
 
+*The one exception, the character room* (Joshua, 2026-10-20: "Just in
+this room, allow both portraits and landscape views by removing that
+force rotate screen message"). The Sarah Lab (`?open=CharacterRoom`)
+may be held upright: its scene sets `AppScene.portrait`, the scene
+manager is the only thing that raises `data-any-orientation` on
+`<html>` for it (and clears it as every scene goes), and the gate's CSS
+reads that one attribute. Its HUD has a portrait layout of its own.
+Every other screen is landscape only, as above; do not widen this to
+another screen without his say-so. `tests/landscapeOnly.test.ts` pins
+it.
+
 **Controls belong to the thumbs, not the screen.** Screen space near the
 thumbs is the scarcest resource; action controls have first claim.
 Before adding a control, check whether a gesture can carry it. Movement

@@ -23,7 +23,7 @@ import { Renderer } from './Renderer';
 import type { AppHandle, SceneContext } from './Scene';
 import { SceneManager } from './SceneManager';
 import { listTools } from '../devtools/DevTool';
-import { openLinkScene } from './openLink';
+import { openLinkScene, PORTRAIT_ATTRIBUTE } from './openLink';
 import { registerScenes } from './registerScenes';
 import { sceneFactory } from './registry';
 
@@ -68,6 +68,8 @@ export class App {
       viewport: () => this.renderer.size(),
       context: () => this.ctx,
       fallback: () => sceneFactory('menu'),
+      // the static rotate prompt (#orient in index.html) stands down while a scene that may be upright is current
+      portrait: (allowed) => document.documentElement.toggleAttribute(PORTRAIT_ATTRIBUTE, allowed),
       onFallback: () => {
         // A scene that could not be entered has no session worth keeping.
         void this.handle.endSession();

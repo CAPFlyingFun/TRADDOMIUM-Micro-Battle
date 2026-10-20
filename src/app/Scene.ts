@@ -34,6 +34,13 @@ export interface AppScene {
   dispose(): void;
   /** Anything drawn after the main render pass (a HUD pass, a second camera). */
   renderOverlays?(): void;
+  /**
+   * True for the one kind of screen that may be held upright on a phone (Joshua, 2026-10-20: the character room, "allow
+   * both portraits and landscape views by removing that force rotate screen message"). The game is landscape only,
+   * so every other screen leaves this unset and keeps the rotate prompt; the scene manager lifts the prompt only
+   * while a scene that says true is current.
+   */
+  readonly portrait?: boolean;
 }
 
 /**

@@ -1,5 +1,6 @@
 import { attachRecoveredMeshes, applyRecoveredBaseline, fitWeights, LEGGINGS_FIT_KEYS, SHIRT_FINE_FIT_KEYS, updateLeggingsHem, releaseRecoveredMeshes } from './recoveredClothes';
 import { garmentTexturePanel } from './garmentTexturePanel';
+import { uprightLayout, type UprightLayout } from './uprightTabs';
 /**
  * THE SARAH LAB — Sarah rebuilt from Joshua's base mannequin, on a turntable,
  * to try before anything of it goes live (Joshua, 2026-10-07: "Good to test
@@ -47,6 +48,10 @@ import {
 } from './sarahLabTool';
 
 const M = UNITS_PER_METRE;
+/** The camera's vertical view on a landscape screen (degrees). */
+const LANDSCAPE_FOV = 38;
+/** Held upright: the CSS pixels BACK and the title take at the top of the screen, kept clear of her. */
+const UPRIGHT_TOP = 56;
 /** A walk on the spot, metres a second: an unhurried pace. */
 const WALK_SPEED = 1.1;
 
@@ -126,7 +131,7 @@ function findFingers(bind: readonly BindJoint[], measure: HumanMeasure): Finger[
 export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): AppScene {
   const three = new THREE.Scene();
   three.background = new THREE.Color(0x1b2028);
-  const camera = new THREE.PerspectiveCamera(38, 1, 2, 4_000);
+  const camera = new THREE.PerspectiveCamera(LANDSCAPE_FOV, 1, 2, 4_000);
 
   const hemi = new THREE.HemisphereLight(0xe8eef6, 0x30343a, 1.2);
   const key = new THREE.DirectionalLight(0xfff2e2, 2.0);
@@ -203,7 +208,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   const poseOut: MutableJointTurn[] = Array.from({ length: Math.max(HUMAN_POSE_TURNS, SEATED_TURNS) }, newJointTurn);
 
   // ------------------------------------------------------------ the orbit
-  const orbit = { yaw: 0.5, pitch: 0.12, distance: 2.9 * M, target: new THREE.Vector3(0, 0.95 * M, 0) };
+  const ORBIT_START = Object.freeze({ yaw: 0.5, pitch: 0.12, distance: 2.9 * M, target: Object.freeze(new THREE.Vector3(0, 0.95 * M, 0)) });
+  const orbit: { yaw: number; pitch: number; distance: number; target: THREE.Vector3 } = { yaw: ORBIT_START.yaw, pitch: ORBIT_START.pitch, distance: ORBIT_START.distance, target: ORBIT_START.target.clone() };
   function placeCamera(): void {
     const c = Math.cos(orbit.pitch);
     camera.position.set(
@@ -212,6 +218,25 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       orbit.target.z + orbit.distance * c * Math.cos(orbit.yaw),
     );
     camera.lookAt(orbit.target);
+  }
+
+  // HELD UPRIGHT the tab bar (and an open tab's sheet) cover the bottom of the screen and BACK and the title the top,
+  // so she is framed in the room between them: the view widens until what a landscape screen shows of her fits that
+  // part, and slides so its middle is that part's middle. The camera's own place and the orbit are as they were.
+  let upright_: UprightLayout | null = null;
+  function frame(width: number, height: number, lay = true): void {
+    camera.aspect = width / Math.max(1, height);
+    if (lay) upright_?.setPortrait(height > width);
+    if (upright_?.portrait && height > width) {
+      const cssHeight = Math.max(1, hud?.clientHeight ?? height), top = UPRIGHT_TOP / cssHeight, bottom = Math.min(0.7, upright_.covered() / cssHeight);
+      const shown = Math.max(0.2, 1 - top - bottom), middle = top + shown / 2;
+      camera.fov = 2 * THREE.MathUtils.radToDeg(Math.atan(Math.tan(THREE.MathUtils.degToRad(LANDSCAPE_FOV / 2)) / shown));
+      camera.setViewOffset(width, height, 0, height * (0.5 - middle), width, height);
+    } else {
+      camera.fov = LANDSCAPE_FOV;
+      camera.clearViewOffset();
+    }
+    camera.updateProjectionMatrix();
   }
 
   // ------------------------------------------------------------------ HUD
@@ -368,6 +393,16 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   function buildHud(): void {
     const root = document.createElement('div');
     root.dataset.role = SARAH_LAB_HUD_ROLE;
+    // UPRIGHT ON A PHONE (Joshua, 2026-10-20: "allow both portraits and landscape views", then "maybe optimize UI for
+    // portrait better... tabs or buttons similar to the storm tracker at the bottom"): held portrait, the controls
+    // are sorted into tabs along the bottom (uprightTabs.ts) and the title keeps to one line between BACK and the
+    // corner; the camera frames her above what the controls cover (frame()). Landscape is as it was.
+    const upright = document.createElement('style');
+    upright.textContent = `@media (orientation: portrait) {
+      [data-role="${SARAH_LAB_HUD_ROLE}"] .slab-info { max-width: calc(100vw - 200px) !important; }
+      [data-role="${SARAH_LAB_HUD_ROLE}"] .slab-info > div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    }`;
+    root.appendChild(upright);
     root.style.cssText = 'position:absolute;inset:0;font:600 13px system-ui,sans-serif;color:#e8e2d8;touch-action:none;user-select:none';
     // the orbit: the whole screen under the controls
     root.addEventListener('pointerdown', (e) => {
@@ -415,6 +450,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     root.appendChild(back);
 
     const poses = document.createElement('div');
+    poses.className = 'slab-poses';
+    poses.dataset.tab = 'pose'; poses.dataset.uprightWhole = '';
     poses.style.cssText = `${panel}left:max(12px,env(safe-area-inset-left));bottom:16px`;
     for (const [p, label, action] of [['stand', 'STAND', SARAH_LAB_ACTION.stand], ['walk', 'WALK', SARAH_LAB_ACTION.walk], ['sit', 'SIT', SARAH_LAB_ACTION.sit], ['tpose', 'T-POSE', SARAH_LAB_ACTION.tpose]] as const) {
       buttons[p] = btn(label, action, () => {
@@ -427,9 +464,11 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     root.appendChild(poses);
 
     const right = document.createElement('div');
+    right.className = 'slab-panel';
     right.style.cssText = `${panel}flex-direction:column;align-items:stretch;right:max(12px,env(safe-area-inset-right));top:12px;width:min(230px,40vw);padding:10px;border-radius:12px;background:rgba(10,13,18,0.66);border:1px solid rgba(255,255,255,0.1)`;
-    const slider = (field: string, value: number, onInput: (v: number) => void, max = 100) => {
+    const slider = (field: string, value: number, onInput: (v: number) => void, max = 100, tab = 'body') => {
       const label = document.createElement('div');
+      label.dataset.tab = tab;
       label.dataset.field = field;
       label.style.cssText = 'font-size:12px;letter-spacing:.05em';
       fields[field] = label;
@@ -439,13 +478,14 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       input.max = String(max);
       input.value = String(value);
       input.style.cssText = 'width:100%;accent-color:#d4a853;height:28px';
+      input.dataset.tab = tab;
       input.addEventListener('input', () => { onInput(Number(input.value)); applyLook(); refresh(); });
       right.append(label, input);
       return input;
     };
     slider(SARAH_LAB_FIELD.bump, bump, (v) => { bump = v; }, BUMP_MAX_PERCENT);
-    slider(SARAH_LAB_FIELD.fingers, curl, (v) => { curl = v; });
-    armsInput = slider(SARAH_LAB_FIELD.arms, armsDeg, (v) => { armsDeg = v; armsOverride = true; }, 90);
+    slider(SARAH_LAB_FIELD.fingers, curl, (v) => { curl = v; }, 100, 'pose');
+    armsInput = slider(SARAH_LAB_FIELD.arms, armsDeg, (v) => { armsDeg = v; armsOverride = true; }, 90, 'pose');
     const row = document.createElement('div');
     row.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap';
     buttons.outfit = btn(outfitLine(outfit), SARAH_LAB_ACTION.outfit, () => { outfit = nextOutfit(outfit, garments); applyLook(); });
@@ -461,11 +501,13 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     // a nudge up, as a hop would: the bump lags, drops and settles
     buttons.bounce = btn('BOUNCE', SARAH_LAB_ACTION.bounce, () => { spring.vy += 0.3; breastSpring.vy += 0.3; });
     for (const b of [buttons.model, buttons.refine, buttons.outfit, buttons.armSide, buttons.turn, buttons.bounce]) { b.style.padding = '8px 10px'; b.style.fontSize = '12px'; row.appendChild(b); }
+    for (const [b, tab] of [[buttons.model, 'body'], [buttons.refine, 'body'], [buttons.outfit, 'clothes'], [buttons.armSide, 'pose'], [buttons.turn, 'camera'], [buttons.bounce, 'pose']] as const) b.dataset.tab = tab;
     right.appendChild(row);
     // BELLY SHAPE and BREAST SHAPE: each control a slider with its own reset, relative to the size shown
     const setBody = (next: BodyShape) => { body = next; applyLook(); applyMotion(); refresh(); };
     for (const [group, title] of [['belly', 'BELLY SHAPE'], ['breasts', 'BREAST SHAPE']] as const) {
       const box = document.createElement('details');
+      box.dataset.tab = 'body';
       box.style.cssText = 'border-top:1px solid rgba(255,255,255,0.12);padding-top:6px';
       const head = document.createElement('summary');
       head.textContent = title;
@@ -520,6 +562,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     }
     const note = document.createElement('div');
     note.dataset.field = SARAH_LAB_FIELD.bodyNote;
+    note.dataset.tab = 'body';
     note.style.cssText = 'font-size:10px;opacity:.7';
     fields[SARAH_LAB_FIELD.bodyNote] = note;
     right.appendChild(note);
@@ -532,10 +575,19 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       if (next >= 0) outfit = next;
       applyLook(); refresh();
     });
+    texturePanel.element.dataset.tab = 'clothes';
     right.appendChild(texturePanel.element);
     root.appendChild(right);
+    // the CAMERA tab's own buttons: held upright only (landscape has the wheel and the pinch beside its panel)
+    const cameraOnly = document.createElement('div');
+    cameraOnly.style.display = 'none';
+    for (const [label, action, go] of [['ZOOM −', SARAH_LAB_ACTION.zoomOut, () => zoom(1.25)], ['ZOOM +', SARAH_LAB_ACTION.zoomIn, () => zoom(0.8)], ['RESET VIEW', SARAH_LAB_ACTION.resetView, () => { orbit.yaw = ORBIT_START.yaw; orbit.pitch = ORBIT_START.pitch; orbit.distance = ORBIT_START.distance; orbit.target.copy(ORBIT_START.target); turning = false; }]] as const) {
+      const b = btn(label, action, go); b.style.padding = '8px 10px'; b.style.fontSize = '12px'; b.dataset.tab = 'camera'; b.dataset.uprightOnly = ''; cameraOnly.appendChild(b);
+    }
+    root.appendChild(cameraOnly);
 
     const info = document.createElement('div');
+    info.className = 'slab-info';
     info.style.cssText = 'position:absolute;top:14px;left:50%;transform:translateX(-50%);text-align:center;text-shadow:0 1px 3px #000;opacity:.92;pointer-events:none;max-width:40vw';
     const title = document.createElement('div');
     title.textContent = 'Sarah Lab · dev';
@@ -547,6 +599,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     root.appendChild(info);
     ctx.uiLayer.appendChild(root);
     hud = root;
+    upright_ = uprightLayout(root, () => { right.style.display = upright_?.portrait ? 'none' : 'flex'; const size = ctx.renderer.size(); frame(size.width, size.height, false); refresh(); });
     refresh();
   }
   function zoom(factor: number): void {
@@ -719,13 +772,14 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     name: SARAH_LAB_SCENE_ID,
     three,
     camera,
+    // the one room that may be held upright on a phone (Joshua, 2026-10-20); the rotate prompt stands down for it
+    portrait: true,
 
     async enter() {
       const size = ctx.renderer.size();
-      camera.aspect = size.width / Math.max(1, size.height);
-      camera.updateProjectionMatrix();
       placeCamera();
       buildHud();
+      frame(size.width, size.height);
       loadSarah();
     },
 
@@ -740,8 +794,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     },
 
     resize(width: number, height: number) {
-      camera.aspect = width / Math.max(1, height);
-      camera.updateProjectionMatrix();
+      frame(width, height);
     },
 
     dispose() {
