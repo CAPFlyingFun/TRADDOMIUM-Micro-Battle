@@ -22,6 +22,8 @@ import { FrameClock } from './FrameClock';
 import { Renderer } from './Renderer';
 import type { AppHandle, SceneContext } from './Scene';
 import { SceneManager } from './SceneManager';
+import { listTools } from '../devtools/DevTool';
+import { openLinkScene } from './openLink';
 import { registerScenes } from './registerScenes';
 import { sceneFactory } from './registry';
 
@@ -90,7 +92,9 @@ export class App {
     // Every scene and dev tool this build contains, in one list.
     registerScenes();
 
-    await this.scenes.goTo(sceneFactory('menu'));
+    // `?open=sarah` and the like: a bookmark straight into an Editors tool (openLink.ts); the menu otherwise.
+    const opened = typeof globalThis.location === 'undefined' ? null : openLinkScene(globalThis.location.search, listTools());
+    await this.scenes.goTo(sceneFactory(opened ?? 'menu'));
     this.state.set('menu');
     this.rafId = requestAnimationFrame(this.frame);
   }
