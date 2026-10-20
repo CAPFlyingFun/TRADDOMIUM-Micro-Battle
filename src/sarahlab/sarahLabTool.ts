@@ -58,11 +58,11 @@ export function modelLine(index: number): string {
 
 export const sarahLabTool: DevTool = {
   id: SARAH_LAB_TOOL_ID,
-  title: 'Sarah Lab (base model)',
+  title: 'Character Creator / Clothing Creator (Sarah)',
   description:
     "Sarah rebuilt from the base mannequin, to try before she goes live: the BUMP slider runs from twice full term (twins and more, her breasts growing with it) to "
     + 'nearly flat, its own weight sags the belly past full term, BOUNCE (or WALK) shows it and her breasts move, FINGERS curls all ten, MODEL switches between v1 and the newer v2 to compare, OUTFIT cycles the clothes grown from her body (on v1 a red tee over black leggings; on v2 a white tank over grey maternity leggings, over the belly or under it; a bikini, a swimsuit, none), and STAND, '
-    + 'WALK and SIT pose her. Drag to turn round her, pinch or scroll to come closer. Not used by the story or the game.',
+    + 'WALK and SIT pose her. TEXTURE tries an image on a garment and PAINT (🎥 camera / 🎨 paint, brush, erase, export PNG) paints her skin and clothes. Drag to turn round her, pinch or scroll to come closer. Not used by the story or the game.',
   sceneId: SARAH_LAB_SCENE_ID,
 };
 
