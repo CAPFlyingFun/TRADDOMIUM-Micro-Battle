@@ -60,6 +60,7 @@ export interface SoloPlay {
 }
 
 export interface MainMenuHooks {
+  readonly onPlayTombs?: Destination;
   /** The sessions and slots the in-place flow offers. */
   readonly sessions: SessionOffers;
   /** MULTIPLAYER was chosen; it takes no slot, so the session starts as it stands. */
@@ -92,7 +93,7 @@ export class MainMenuScene extends Screen {
   }
 
   protected build(root: HTMLElement): void {
-    this.panel = titledPanel(root, GAME_TITLE, { hero: true, subtitle: 'You are the ant.', wide: true });
+    this.panel = titledPanel(root, GAME_TITLE, { hero: true, subtitle: this.hooks.onPlayTombs ? 'TOMBS Laboratory · progress is not saved' : 'You are the ant.', wide: true });
     const saved = this.hooks.savedGame();
     // With a save, resuming is the point of the screen and takes the gold; NEW GAME steps back to a plain button.
     const newGame = actionRow(ACTION.newGame, 'New game', () => this.openFlow('sessions'), { primary: saved === null });
@@ -104,6 +105,17 @@ export class MainMenuScene extends Screen {
       destinationButton(ACTION.editors, 'Editors', this.hooks.onEditors),
       destinationButton(ACTION.about, 'About', this.hooks.onAbout),
     ]);
+    if (this.hooks.onPlayTombs) {
+      this.column.replaceChildren(
+        actionRow(ACTION.playTombs, 'Play — TOMBS Laboratory', () => this.hooks.onPlayTombs?.(), { primary: true }),
+        actionRow(ACTION.extras, 'Extras', () => this.showExtras()),
+        destinationButton(ACTION.settings, 'Settings', this.hooks.onSettings),
+        destinationButton(ACTION.about, 'About', this.hooks.onAbout),
+      );
+      const note = document.createElement('p');
+      note.textContent = 'Laboratory progress is not saved. Play starts a fresh laboratory visit.';
+      this.column.appendChild(note);
+    }
     this.stamp = footer(this.panel, buildStamp());
     this.flow = new PlayFlow(this.panel, this.stamp, {
       sessions: this.hooks.sessions,
@@ -118,6 +130,25 @@ export class MainMenuScene extends Screen {
     this.flow?.dispose();
     this.flow = null;
     super.dispose();
+  }
+
+  private showExtras(): void {
+    if (!this.column) return;
+    const saved = this.hooks.savedGame();
+    this.column.replaceChildren(
+      actionRow(ACTION.island, 'Island — new game / multiplayer', () => this.openFlow('sessions')),
+      ...(saved ? [actionRow(ACTION.resume, 'Resume Island', () => this.resume(saved))] : []),
+      destinationButton(ACTION.editors, 'Editors', this.hooks.onEditors),
+      destinationButton(ACTION.profile, 'Profile', this.hooks.onProfile),
+      actionRow(ACTION.back, 'Back to main menu', () => {
+        this.column!.replaceChildren(
+          actionRow(ACTION.playTombs, 'Play — TOMBS Laboratory', () => this.hooks.onPlayTombs?.(), { primary: true }),
+          actionRow(ACTION.extras, 'Extras', () => this.showExtras()),
+          destinationButton(ACTION.settings, 'Settings', this.hooks.onSettings),
+          destinationButton(ACTION.about, 'About', this.hooks.onAbout),
+        );
+      }),
+    );
   }
 
   /**
@@ -184,6 +215,7 @@ export function createMainMenuScene(offers: Wire<SessionOffers>, play: Wire<Solo
     const solo = play(ctx);
     return new MainMenuScene(ctx, {
       sessions,
+      onPlayTombs: destination(ctx, SCREEN_ID.tombs),
       onStart: (session) => startSession(ctx, session),
       savedGame: () => sessions.saved?.() ?? null,
       onNewGame: (slot) => solo.newGame(slot),
