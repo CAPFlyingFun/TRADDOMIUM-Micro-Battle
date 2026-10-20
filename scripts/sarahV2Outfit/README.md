@@ -1,6 +1,36 @@
 # Sarah v2's outfit: white tank, grey maternity leggings
 
-## Where it stands (alpha.98 recovery release, 2026-10-18)
+## Where it stands (alpha.99 candidate, 2026-10-20)
+
+Joshua's corrections to alpha.98, from his circled screenshots. The approved body
+(`sarah-v2-body.glb`, SHA256 `47e990f0…`), the bikini top, the shirt defaults and his approved
+navel are unchanged; the body is never hidden under clothes.
+
+- **High leggings** (`leggings-fit.mjs`): corrected at every native belly key
+  (0/25/30/50/60/75/100/150/200), so the lumpy native in-between shapes no longer show; a smooth
+  top edge, no groin shelf, and at least 1.2 mm off her at every key (tested).
+- **Low leggings** (`leggings-low-build.mjs`): their own fitted garment, copied byte for byte out
+  of the approved body and fitted like the high ones, so the waistband no longer digs into her
+  belly at 140–200%.
+- **Shirt hems**: the spandex hem clears the high leggings; the relaxed shirt's rear flare is reduced.
+- **Fitted (spandex) shirts** (`shirt-fine-fit.mjs`, both rises):
+  - *The folds down her sides* (100–160%): each fit's own surface and shading are smoothed over her belly,
+    except his approved navel.
+  - *"3 bellybuttons"*: between two fits the shirt is their blend, and it held each fit's navel at
+    part strength where her navel was at that fit, 4–5 cm apart, and none where her navel was. Each
+    fit's navel is measured as a relief over the thin plate of the cloth round it; between fits, both
+    come back out of the blend, and one, the approved one, goes in where hers is.
+  - *Her navel poking through*: small lifts keep the cloth off her, and her skin round her navel is
+    kept 0.3 mm under the cloth's surface so the outie's tip cannot come up between cloth points.
+    The approved 150% fit itself had the tip 0.09 mm through; there the cloth moves out by
+    0.7 mm at most, and the fit's normals are kept.
+  - The fine fit lives in `shape:fineFit<key>` fields every 10% to 100% and every 5% past it
+    (`SHIRT_FINE_FIT_KEYS`), blended like fit keys. `tests/sarahV2FittedShirtNavel.test.ts` checks her
+    navel is under both shirts every 5% from 100% to 200%.
+  - With the high leggings, the shirt also stays over the leggings the Lab draws under its hem band;
+    before this, they came through at her front at 160–180%.
+
+## Where it stood (alpha.98 recovery release, 2026-10-18)
 
 The approved preview source is now integrated into the **live Sarah Lab, MODEL · v2-body**.
 This is a reconstruction from the preserved fitting source, not a claim that the missing

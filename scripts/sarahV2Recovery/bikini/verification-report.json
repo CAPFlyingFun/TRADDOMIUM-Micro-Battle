@@ -1,5 +1,5 @@
 {
-  "outputSha256": "e82042f9a7721388bc2cba68085e2d4fe7d33f976101a44580c82455c34e1c59",
+  "outputSha256": "9aa5e3459ead4ba6e69a5ff5001d25166ad013099363659b1505f24c7e756694",
   "cases": [
     {
       "name": "belly0",
@@ -186,33 +186,33 @@
       "parts": [
         {
           "part": "continuous-cloth",
-          "minVertexCm": 0.12611459978224446,
+          "minVertexCm": 0.16033180510491182,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.11861246234850187,
+          "minCentroidCm": 0.13879616745987602,
           "penetratingCentroids": 0
         },
         {
           "part": "rounded-binding",
           "opening": 0,
-          "minVertexCm": 0.07048503619980036,
+          "minVertexCm": 0.8394894963878916,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.07610461729412252,
+          "minCentroidCm": 0.8479216232478937,
           "penetratingCentroids": 0
         },
         {
           "part": "rounded-binding",
           "opening": 1,
-          "minVertexCm": 0.04551874342297585,
+          "minVertexCm": 0.325091423589345,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.05251834493015666,
+          "minCentroidCm": 0.3299023607848662,
           "penetratingCentroids": 0
         },
         {
           "part": "rounded-binding",
           "opening": 2,
-          "minVertexCm": 0.03221474782332546,
+          "minVertexCm": 0.3616456357283505,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.03317861393280287,
+          "minCentroidCm": 0.3623197152034451,
           "penetratingCentroids": 0
         }
       ]
@@ -222,33 +222,33 @@
       "parts": [
         {
           "part": "continuous-cloth",
-          "minVertexCm": 0.07551089488620995,
+          "minVertexCm": 0.16033180510491182,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.07490834707775072,
+          "minCentroidCm": 0.13879616745987602,
           "penetratingCentroids": 0
         },
         {
           "part": "rounded-binding",
           "opening": 0,
-          "minVertexCm": 0.07047846668066066,
+          "minVertexCm": 0.5975160044094193,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.07610833826437803,
+          "minCentroidCm": 0.6118150685583532,
           "penetratingCentroids": 0
         },
         {
           "part": "rounded-binding",
           "opening": 1,
-          "minVertexCm": 0.03463041467871131,
+          "minVertexCm": 0.2897833686126463,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.03388291803630949,
+          "minCentroidCm": 0.2989128682796236,
           "penetratingCentroids": 0
         },
         {
           "part": "rounded-binding",
           "opening": 2,
-          "minVertexCm": 0.025997972971980584,
+          "minVertexCm": 0.3268731450374383,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.026002153125153363,
+          "minCentroidCm": 0.32698405678979947,
           "penetratingCentroids": 0
         }
       ]
@@ -258,33 +258,33 @@
       "parts": [
         {
           "part": "continuous-cloth",
-          "minVertexCm": 0.15611733501733477,
+          "minVertexCm": 0.16033180510491182,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.11075726842121787,
+          "minCentroidCm": 0.13879616745987602,
           "penetratingCentroids": 0
         },
         {
           "part": "rounded-binding",
           "opening": 0,
-          "minVertexCm": 0.07047846668066066,
+          "minVertexCm": 0.5975160044094193,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.07610833826437803,
+          "minCentroidCm": 0.6118150685583532,
           "penetratingCentroids": 0
         },
         {
           "part": "rounded-binding",
           "opening": 1,
-          "minVertexCm": 0.04551874342297585,
+          "minVertexCm": 0.2897833686126463,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.05251834493015666,
+          "minCentroidCm": 0.2989128682796236,
           "penetratingCentroids": 0
         },
         {
           "part": "rounded-binding",
           "opening": 2,
-          "minVertexCm": 0.03254841412905795,
+          "minVertexCm": 0.17643203407257393,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.03195858295999157,
+          "minCentroidCm": 0.2191691901851069,
           "penetratingCentroids": 0
         }
       ]
@@ -294,33 +294,33 @@
       "parts": [
         {
           "part": "continuous-cloth",
-          "minVertexCm": 0.12886142191446714,
+          "minVertexCm": 0.16033180510491182,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.10698588346644916,
+          "minCentroidCm": 0.13879616745987602,
           "penetratingCentroids": 0
         },
         {
           "part": "rounded-binding",
           "opening": 0,
-          "minVertexCm": 0.07047846668066066,
+          "minVertexCm": 0.5975160044094193,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.07610833826437803,
+          "minCentroidCm": 0.6118150685583532,
           "penetratingCentroids": 0
         },
         {
           "part": "rounded-binding",
           "opening": 1,
-          "minVertexCm": 0.04551874342297585,
+          "minVertexCm": 0.2897833686126463,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.05251834493015666,
+          "minCentroidCm": 0.2989128682796236,
           "penetratingCentroids": 0
         },
         {
           "part": "rounded-binding",
           "opening": 2,
-          "minVertexCm": 0.03221474782332546,
+          "minVertexCm": 0.3268731450374383,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.03317861393280287,
+          "minCentroidCm": 0.32698405678979947,
           "penetratingCentroids": 0
         }
       ]
@@ -690,34 +690,34 @@
       "parts": [
         {
           "part": "continuous-cloth",
-          "minVertexCm": -0.16396660316492812,
-          "penetratingVertices": 185,
-          "minCentroidCm": -0.14995244257393442,
-          "penetratingCentroids": 346
+          "minVertexCm": -0.7325118505571483,
+          "penetratingVertices": 62,
+          "minCentroidCm": -0.8414712139426,
+          "penetratingCentroids": 113
         },
         {
           "part": "rounded-binding",
           "opening": 0,
-          "minVertexCm": 0.04134410109504228,
-          "penetratingVertices": 0,
-          "minCentroidCm": 0.04975110599882975,
-          "penetratingCentroids": 0
+          "minVertexCm": -0.18794649882944214,
+          "penetratingVertices": 26,
+          "minCentroidCm": -0.20233359036634369,
+          "penetratingCentroids": 50
         },
         {
           "part": "rounded-binding",
           "opening": 1,
-          "minVertexCm": -0.08026568007104931,
-          "penetratingVertices": 29,
-          "minCentroidCm": -0.0685677750879797,
-          "penetratingCentroids": 66
+          "minVertexCm": -0.04396078694565342,
+          "penetratingVertices": 2,
+          "minCentroidCm": -0.03798355904267459,
+          "penetratingCentroids": 7
         },
         {
           "part": "rounded-binding",
           "opening": 2,
-          "minVertexCm": -0.0027071182116793794,
-          "penetratingVertices": 2,
-          "minCentroidCm": -0.015290659964599196,
-          "penetratingCentroids": 4
+          "minVertexCm": 0.12303216585692153,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.12846558287793924,
+          "penetratingCentroids": 0
         }
       ]
     },
@@ -726,33 +726,33 @@
       "parts": [
         {
           "part": "continuous-cloth",
-          "minVertexCm": -0.09777044022120743,
-          "penetratingVertices": 78,
-          "minCentroidCm": -0.14260769869441714,
-          "penetratingCentroids": 227
+          "minVertexCm": -0.0545387918793341,
+          "penetratingVertices": 7,
+          "minCentroidCm": -0.025190893050522703,
+          "penetratingCentroids": 3
         },
         {
           "part": "rounded-binding",
           "opening": 0,
-          "minVertexCm": -0.0075924685059700165,
-          "penetratingVertices": 1,
-          "minCentroidCm": -0.035436155846406185,
-          "penetratingCentroids": 26
+          "minVertexCm": 0.5975160044094193,
+          "penetratingVertices": 0,
+          "minCentroidCm": 0.6118150685583532,
+          "penetratingCentroids": 0
         },
         {
           "part": "rounded-binding",
           "opening": 1,
-          "minVertexCm": 0.0455272731182499,
+          "minVertexCm": 0.2897833686126463,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.052533421370744134,
+          "minCentroidCm": 0.2989128682796236,
           "penetratingCentroids": 0
         },
         {
           "part": "rounded-binding",
           "opening": 2,
-          "minVertexCm": 0.03180232008843165,
-          "penetratingVertices": 0,
-          "minCentroidCm": 0.03374974306876841,
+          "minVertexCm": -0.05343748651619087,
+          "penetratingVertices": 2,
+          "minCentroidCm": 0.024571697275823905,
           "penetratingCentroids": 0
         }
       ]
@@ -762,33 +762,33 @@
       "parts": [
         {
           "part": "continuous-cloth",
-          "minVertexCm": 0.051670228710043294,
+          "minVertexCm": 0.16033180510491182,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.05854550610532354,
+          "minCentroidCm": 0.13879616745987602,
           "penetratingCentroids": 0
         },
         {
           "part": "rounded-binding",
           "opening": 0,
-          "minVertexCm": 0.0704481875335817,
+          "minVertexCm": 0.14233014646948117,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.072787596697406,
+          "minCentroidCm": 0.1582903914562125,
           "penetratingCentroids": 0
         },
         {
           "part": "rounded-binding",
           "opening": 1,
-          "minVertexCm": 0.039913109517437026,
+          "minVertexCm": 0.2897833686126463,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.02219195675101568,
+          "minCentroidCm": 0.2989128682796236,
           "penetratingCentroids": 0
         },
         {
           "part": "rounded-binding",
           "opening": 2,
-          "minVertexCm": 0.007780960626088639,
+          "minVertexCm": 0.3268731450374383,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.02341666669009699,
+          "minCentroidCm": 0.32698405678979947,
           "penetratingCentroids": 0
         }
       ]
@@ -798,33 +798,33 @@
       "parts": [
         {
           "part": "continuous-cloth",
-          "minVertexCm": 0.07082466357789938,
+          "minVertexCm": 0.16033180510491182,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.06718691341023907,
+          "minCentroidCm": 0.13879616745987602,
           "penetratingCentroids": 0
         },
         {
           "part": "rounded-binding",
           "opening": 0,
-          "minVertexCm": 0.0705032857410973,
+          "minVertexCm": 0.2734957299536287,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.06017339961600769,
+          "minCentroidCm": 0.2648014659824556,
           "penetratingCentroids": 0
         },
         {
           "part": "rounded-binding",
           "opening": 1,
-          "minVertexCm": 0.03675808947781881,
+          "minVertexCm": 0.2897833686126463,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.03641633172735125,
+          "minCentroidCm": 0.2989128682796236,
           "penetratingCentroids": 0
         },
         {
           "part": "rounded-binding",
           "opening": 2,
-          "minVertexCm": 0.028205287486169153,
+          "minVertexCm": 0.3268731450374383,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.030077269711954988,
+          "minCentroidCm": 0.32698405678979947,
           "penetratingCentroids": 0
         }
       ]
@@ -834,33 +834,33 @@
       "parts": [
         {
           "part": "continuous-cloth",
-          "minVertexCm": 0.0665055753101744,
+          "minVertexCm": 0.004369058978372545,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.05628572933010608,
+          "minCentroidCm": 0.07096641582471253,
           "penetratingCentroids": 0
         },
         {
           "part": "rounded-binding",
           "opening": 0,
-          "minVertexCm": 0.07050757602303993,
+          "minVertexCm": 0.566315712273769,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.07622570235215027,
+          "minCentroidCm": 0.568044910642305,
           "penetratingCentroids": 0
         },
         {
           "part": "rounded-binding",
           "opening": 1,
-          "minVertexCm": 0.04549635431020866,
+          "minVertexCm": 0.2897833686126463,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.04595188664392887,
+          "minCentroidCm": 0.2989128682796236,
           "penetratingCentroids": 0
         },
         {
           "part": "rounded-binding",
           "opening": 2,
-          "minVertexCm": 0.03183310501450699,
+          "minVertexCm": 0.28066441751388327,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.03402214975941585,
+          "minCentroidCm": 0.2918092184439336,
           "penetratingCentroids": 0
         }
       ]
@@ -870,33 +870,33 @@
       "parts": [
         {
           "part": "continuous-cloth",
-          "minVertexCm": 0.0636041673479816,
+          "minVertexCm": 0.16033180510491182,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.056604999544790154,
+          "minCentroidCm": 0.13879616745987602,
           "penetratingCentroids": 0
         },
         {
           "part": "rounded-binding",
           "opening": 0,
-          "minVertexCm": 0.07044842618218754,
+          "minVertexCm": 0.4572747715855583,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.07599004953747575,
+          "minCentroidCm": 0.43294150954745964,
           "penetratingCentroids": 0
         },
         {
           "part": "rounded-binding",
           "opening": 1,
-          "minVertexCm": 0.034569104642989214,
+          "minVertexCm": 0.2897833686126463,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.026683039479807772,
+          "minCentroidCm": 0.2989128682796236,
           "penetratingCentroids": 0
         },
         {
           "part": "rounded-binding",
           "opening": 2,
-          "minVertexCm": 0.016552172372936203,
+          "minVertexCm": 0.3268731450374383,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.01194523328030251,
+          "minCentroidCm": 0.32698405678979947,
           "penetratingCentroids": 0
         }
       ]
@@ -906,33 +906,33 @@
       "parts": [
         {
           "part": "continuous-cloth",
-          "minVertexCm": 0.07551089488620995,
+          "minVertexCm": 0.16033180510491182,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.07490834707775072,
+          "minCentroidCm": 0.13879616745987602,
           "penetratingCentroids": 0
         },
         {
           "part": "rounded-binding",
           "opening": 0,
-          "minVertexCm": 0.07050662405939777,
+          "minVertexCm": 0.5975160044094193,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.07472162877678876,
+          "minCentroidCm": 0.6118150685583532,
           "penetratingCentroids": 0
         },
         {
           "part": "rounded-binding",
           "opening": 1,
-          "minVertexCm": 0.03463041467871131,
+          "minVertexCm": 0.2897833686126463,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.03388291803630949,
+          "minCentroidCm": 0.2989128682796236,
           "penetratingCentroids": 0
         },
         {
           "part": "rounded-binding",
           "opening": 2,
-          "minVertexCm": 0.025997972971980584,
+          "minVertexCm": 0.3268731450374383,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.026002153125153363,
+          "minCentroidCm": 0.32698405678979947,
           "penetratingCentroids": 0
         }
       ]
@@ -942,33 +942,33 @@
       "parts": [
         {
           "part": "continuous-cloth",
-          "minVertexCm": 0.07551089488620995,
+          "minVertexCm": 0.16033180510491182,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.07490834707775072,
+          "minCentroidCm": 0.13879616745987602,
           "penetratingCentroids": 0
         },
         {
           "part": "rounded-binding",
           "opening": 0,
-          "minVertexCm": 0.0704503093019128,
+          "minVertexCm": 0.5975160044094193,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.07674859670903028,
+          "minCentroidCm": 0.6043643297220476,
           "penetratingCentroids": 0
         },
         {
           "part": "rounded-binding",
           "opening": 1,
-          "minVertexCm": 0.03463041467871131,
+          "minVertexCm": 0.2897833686126463,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.03388291803630949,
+          "minCentroidCm": 0.2989128682796236,
           "penetratingCentroids": 0
         },
         {
           "part": "rounded-binding",
           "opening": 2,
-          "minVertexCm": 0.025997972971980584,
+          "minVertexCm": 0.3268731450374383,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.026002153125153363,
+          "minCentroidCm": 0.32698405678979947,
           "penetratingCentroids": 0
         }
       ]
@@ -978,33 +978,33 @@
       "parts": [
         {
           "part": "continuous-cloth",
-          "minVertexCm": -0.09915741482805525,
-          "penetratingVertices": 1,
-          "minCentroidCm": 0.05647785186645644,
-          "penetratingCentroids": 0
+          "minVertexCm": -0.19339535758870124,
+          "penetratingVertices": 20,
+          "minCentroidCm": -0.12530091260492768,
+          "penetratingCentroids": 28
         },
         {
           "part": "rounded-binding",
           "opening": 0,
-          "minVertexCm": 0.07043511649412924,
+          "minVertexCm": 0.33218522430306924,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.07598605321722465,
+          "minCentroidCm": 0.3305371848362955,
           "penetratingCentroids": 0
         },
         {
           "part": "rounded-binding",
           "opening": 1,
-          "minVertexCm": 0.045550139227150274,
+          "minVertexCm": 0.2897833686126463,
           "penetratingVertices": 0,
-          "minCentroidCm": -0.1334480086625851,
-          "penetratingCentroids": 1
+          "minCentroidCm": 0.2989128682796236,
+          "penetratingCentroids": 0
         },
         {
           "part": "rounded-binding",
           "opening": 2,
-          "minVertexCm": 0.03203868283865357,
+          "minVertexCm": 0.16708664031910395,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.03464528422045043,
+          "minCentroidCm": 0.1754882810929689,
           "penetratingCentroids": 0
         }
       ]
@@ -1014,33 +1014,33 @@
       "parts": [
         {
           "part": "continuous-cloth",
-          "minVertexCm": 0.05762292067865766,
+          "minVertexCm": 0.16033180510491182,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.048929917637883416,
+          "minCentroidCm": 0.13879616745987602,
           "penetratingCentroids": 0
         },
         {
           "part": "rounded-binding",
           "opening": 0,
-          "minVertexCm": 0.0705168725046469,
+          "minVertexCm": 0.37971489998413954,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.0719167939706527,
+          "minCentroidCm": 0.3609952794772679,
           "penetratingCentroids": 0
         },
         {
           "part": "rounded-binding",
           "opening": 1,
-          "minVertexCm": 0.028196181518193822,
+          "minVertexCm": 0.2897833686126463,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.025215783604817247,
+          "minCentroidCm": 0.2989128682796236,
           "penetratingCentroids": 0
         },
         {
           "part": "rounded-binding",
           "opening": 2,
-          "minVertexCm": 0.011191187008354374,
+          "minVertexCm": 0.3268731450374383,
           "penetratingVertices": 0,
-          "minCentroidCm": 0.001694355356167236,
+          "minCentroidCm": 0.32698405678979947,
           "penetratingCentroids": 0
         }
       ]
@@ -1092,26 +1092,26 @@
       "parts": [
         {
           "part": "continuous-cloth",
-          "minVertexCm": -0.16396660316492812,
-          "penetratingVertices": 185,
-          "minCentroidCm": -0.14995244257393442,
-          "penetratingCentroids": 346
+          "minVertexCm": -0.7325118505571483,
+          "penetratingVertices": 62,
+          "minCentroidCm": -0.8414712139426,
+          "penetratingCentroids": 113
+        },
+        {
+          "part": "rounded-binding",
+          "opening": 0,
+          "minVertexCm": -0.18794649882944214,
+          "penetratingVertices": 26,
+          "minCentroidCm": -0.20233359036634369,
+          "penetratingCentroids": 50
         },
         {
           "part": "rounded-binding",
           "opening": 1,
-          "minVertexCm": -0.08026568007104931,
-          "penetratingVertices": 29,
-          "minCentroidCm": -0.0685677750879797,
-          "penetratingCentroids": 66
-        },
-        {
-          "part": "rounded-binding",
-          "opening": 2,
-          "minVertexCm": -0.0027071182116793794,
+          "minVertexCm": -0.04396078694565342,
           "penetratingVertices": 2,
-          "minCentroidCm": -0.015290659964599196,
-          "penetratingCentroids": 4
+          "minCentroidCm": -0.03798355904267459,
+          "penetratingCentroids": 7
         }
       ]
     },
@@ -1120,18 +1120,18 @@
       "parts": [
         {
           "part": "continuous-cloth",
-          "minVertexCm": -0.09777044022120743,
-          "penetratingVertices": 78,
-          "minCentroidCm": -0.14260769869441714,
-          "penetratingCentroids": 227
+          "minVertexCm": -0.0545387918793341,
+          "penetratingVertices": 7,
+          "minCentroidCm": -0.025190893050522703,
+          "penetratingCentroids": 3
         },
         {
           "part": "rounded-binding",
-          "opening": 0,
-          "minVertexCm": -0.0075924685059700165,
-          "penetratingVertices": 1,
-          "minCentroidCm": -0.035436155846406185,
-          "penetratingCentroids": 26
+          "opening": 2,
+          "minVertexCm": -0.05343748651619087,
+          "penetratingVertices": 2,
+          "minCentroidCm": 0.024571697275823905,
+          "penetratingCentroids": 0
         }
       ]
     },
@@ -1140,18 +1140,10 @@
       "parts": [
         {
           "part": "continuous-cloth",
-          "minVertexCm": -0.09915741482805525,
-          "penetratingVertices": 1,
-          "minCentroidCm": 0.05647785186645644,
-          "penetratingCentroids": 0
-        },
-        {
-          "part": "rounded-binding",
-          "opening": 1,
-          "minVertexCm": 0.045550139227150274,
-          "penetratingVertices": 0,
-          "minCentroidCm": -0.1334480086625851,
-          "penetratingCentroids": 1
+          "minVertexCm": -0.19339535758870124,
+          "penetratingVertices": 20,
+          "minCentroidCm": -0.12530091260492768,
+          "penetratingCentroids": 28
         }
       ]
     }

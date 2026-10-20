@@ -1,4 +1,4 @@
-import { attachRecoveredMeshes, applyRecoveredBaseline, fitWeights, updateLeggingsHem, releaseRecoveredMeshes } from './recoveredClothes';
+import { attachRecoveredMeshes, applyRecoveredBaseline, fitWeights, LEGGINGS_FIT_KEYS, SHIRT_FINE_FIT_KEYS, updateLeggingsHem, releaseRecoveredMeshes } from './recoveredClothes';
 import { garmentTexturePanel } from './garmentTexturePanel';
 /**
  * THE SARAH LAB — Sarah rebuilt from Joshua's base mannequin, on a turntable,
@@ -41,7 +41,7 @@ import { applyShapeFields, liftShapeFields, type ShapeFields } from '../view/bod
 import { HumanRig, findSkinnedMesh } from '../view/HumanRig';
 import { UNITS_PER_METRE } from '../world/dem';
 import {
-  BELLY_MOTION, BELLY_TARGET, trimShown, BREAST_TARGETS, BUMP_MAX_PERCENT, GARMENTS, RECOVERED_SHIRTS, OUTFITS, outfitLine, modelLine, refineLine, refineWeight, nextOutfit, wornGarments, coverMask, uncoveredSkinIndices, UNDER_TOP_GARMENT, BELLY_REFINE_TARGET, SEAT_TARGET, seatCorrectiveWeight, SARAH_LAB_MODELS, SARAH_LAB_DEFAULT_MODEL, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID,
+  BELLY_MOTION, BELLY_TARGET, trimShown, BREAST_TARGETS, BUMP_MAX_PERCENT, GARMENTS, RECOVERED_SHIRTS, OUTFITS, outfitLine, modelLine, refineLine, refineWeight, nextOutfit, wornGarments, coverMask, bodyNeverHidden, uncoveredSkinIndices, UNDER_TOP_GARMENT, BELLY_REFINE_TARGET, SEAT_TARGET, seatCorrectiveWeight, SARAH_LAB_MODELS, SARAH_LAB_DEFAULT_MODEL, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID,
   bellyMotionWeights, bellyWeights, breastBobWeight, breastWeightsForShape, bodyShapeFieldWeights, SIZE_TILT_PRESETS_DEG, effectiveTiltDeg, stepSeated, bustVolume, BREAST_GROW_TARGET, settledSitFor, bellyUpperWeight, BELLY_UPPER_TARGET, navelWeights, NAVEL_FLAT_TARGET, navelFlatWeight, tPoseTurns, ARM_SIDES, armsLine, ARM_RAISE_TARGETS, armRaiseWeight, SEAT_V2_TARGET, seatCorrectiveV2Weight, fingerBend, THUMB_TO_PALM, bumpLine, fingersLine, restingBellySpring, statusLine, stepBellySpring, stepBreastSpring, walkBounceAccel,
   type Garment, type SarahLabPose,
 } from './sarahLabTool';
@@ -294,8 +294,11 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     for (const { mesh, fields } of shaped) applyShapeFields(mesh, fields, {
       ...fieldWeights,
       ...(mesh.userData.recoveredShirt ? fitWeights(bump, 'shape:fitBelly') : {}),
-      ...(mesh.userData.recoveredLeggings ? fitWeights(bump, 'shape:recoveryLeggings') : {}),
-    }, { normalizeNormals: !mesh.userData.recoveredShirt });
+      ...(mesh.userData.recoveredShirt ? fitWeights(bump, 'shape:fineFit', SHIRT_FINE_FIT_KEYS) : {}),
+      ...(mesh.userData.recoveredLeggings ? fitWeights(bump, 'shape:recoveryLeggings', LEGGINGS_FIT_KEYS) : {}),
+    // recovered clothes keep RAW normal sums so the GPU's belly offsets land on what their fit expects; the leggings
+    // were normalized here too, and at 0-50% the large belly offsets flipped normals in the fold under her belly
+    }, { normalizeNormals: !(mesh.userData.recoveredShirt || mesh.userData.recoveredLeggings) });
     ensureRecoveredShirt();
     for (const mesh of skinned) {
       const dict = mesh.morphTargetDictionary, influences = mesh.morphTargetInfluences;
@@ -320,11 +323,13 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
           mesh.geometry.setIndex(new THREE.BufferAttribute(on ? uncoveredSkinIndices(all, bits, 1) : Uint32Array.from(all), 1));
         }
       }
-      // the body: the skin the shown clothes cover is left out of the draw
+      // the body: on v1 the skin the shown clothes cover is left out of the draw. On v2 the body is NEVER
+      // hidden (Joshua, 2026-10-19: "the base body should never be hidden... clothing needs to sit over the body,
+      // and/or be painted on"): every garment has to clear her skin by itself.
       const cover = mesh.geometry.getAttribute('_cloth_cover');
       if (cover && mesh.geometry.index) {
         const all = (mesh.userData.allIndices ??= mesh.geometry.index.array.slice()) as ArrayLike<number>;
-        const mask = coverMask(wornGarments(outfit, garments));
+        const mask = bodyNeverHidden(SARAH_LAB_MODELS[modelIndex].id) ? 0 : coverMask(wornGarments(outfit, garments));
         if (mesh.userData.coverMask !== mask) {
           mesh.userData.coverMask = mask;
           // read through getX: the file stores the bits with a stride (vertex data is 4-byte
@@ -662,19 +667,22 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
           const m = n as THREE.SkinnedMesh;
           if (!m.isSkinnedMesh) return;
           const name = (Array.isArray(m.material) ? m.material[0] : m.material).name;
-          if (name === 'leggings' || name === 'leggingsTrim') m.userData.replacedByRecovered = true;
+          // both rises are replaced by their recovered, fitted copies (the low pair too, Joshua 2026-10-20: its waistband
+          // dug into her belly from ~140% once her body was never hidden)
+          if (name === 'leggings' || name === 'leggingsTrim' || name === 'leggingsLow' || name === 'leggingsLowTrim') m.userData.replacedByRecovered = true;
           if (name === 'bikini' && m.geometry.index) {
             const v = new THREE.Vector3(); let max = -Infinity;
             for (const i of m.geometry.index.array) { m.getVertexPosition(i, v).applyMatrix4(m.matrixWorld); max = Math.max(max, v.y); }
             if (max < 110) m.userData.replacedByRecovered = true;
           }
         });
-        const parts = await Promise.all(['bottom', 'leggings', 'relaxed-high'].map(part => assets.loadModel(`models/sarah-v2-${part}.${part === 'bottom' || part === 'leggings' ? 'glb' : 'gltf'}`, () => new THREE.Object3D())));
+        const parts = await Promise.all(['bottom', 'leggings', 'relaxed-high', 'leggings-low'].map(part => assets.loadModel(`models/sarah-v2-${part}.${part === 'bottom' || part.startsWith('leggings') ? 'glb' : 'gltf'}`, () => new THREE.Object3D())));
         if (disposed || path !== SARAH_LAB_MODELS[modelIndex].path) { for (const p of parts) release(p); release(loadedModel); return; }
         if (parts.some(p => p.userData.isPlaceholder)) throw new Error('Recovered v2 clothing asset could not be loaded');
         attachRecoveredMeshes(parts[0], skin);
         for (const m of attachRecoveredMeshes(parts[1], skin)) m.userData.recoveredLeggings = true;
         attachRecoveredMeshes(parts[2], skin, 'shirtRelaxedHigh'); recoveredShirt = 'shirtRelaxedHigh';
+        for (const m of attachRecoveredMeshes(parts[3], skin)) m.userData.recoveredLeggings = true;
       }
       const found = new Set<Garment>();
       loadedModel.traverse((n) => {

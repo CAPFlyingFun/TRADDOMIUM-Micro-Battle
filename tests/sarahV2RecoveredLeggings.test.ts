@@ -5,11 +5,14 @@ import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { MeshoptDecoder } from 'meshoptimizer';
 import { Matrix4, Vector3 } from 'three';
 import { beforeAll, describe, expect, it } from 'vitest';
+import { LEGGINGS_FIT_KEYS } from '../src/sarahlab/recoveredClothes';
+import { bellyMotionWeights, bellyUpperWeight, bellyWeights, breastWeightsFor, navelFlatWeight, navelWeights, restingBellySpring } from '../src/sarahlab/sarahLabTool';
+import { SkinCollider } from '../scripts/sarahV2Recovery/bikini/collider.mjs';
 
 const sourceHash = '47e990f0f28097efca488b4274f2cac0e0fa588904bc2c10cb00695600897f42';
 const steps = [0, 50, 100, 150, 200];
 type Frame = { step: number; bodyMatrix: number[]; bindMatrix: number[]; bindMatrixInverse: number[]; boneMatrices: number[]; dict: Record<string, number>; weights: number[] };
-const targetNames = steps.map(step => `shape:recoveryLeggings${step}`);
+const targetNames = LEGGINGS_FIT_KEYS.map(key => `shape:recoveryLeggings${key}`);
 let original: Document, recovered: Document, native: Primitive[], pants: Primitive[];
 
 beforeAll(async () => {
@@ -43,7 +46,7 @@ describe('recovered Sarah v2 native high leggings', () => {
     expect(pants.map(p => p.getMaterial()!.getName())).toEqual(['leggings', 'leggingsTrim', 'leggingsTrim', 'leggingsTrim']);
     expect(recovered.getRoot().listMaterials().map(m => m.getName()).sort()).toEqual(['leggings', 'leggingsTrim']);
     expect(recovered.getRoot().listMeshes()).toHaveLength(1);
-    expect(recovered.getRoot().listMeshes()[0].getExtras().recoveryLeggings).toMatchObject({ sourceSHA256: sourceHash, originalTargets: 43, steps });
+    expect(recovered.getRoot().listMeshes()[0].getExtras().recoveryLeggings).toMatchObject({ sourceSHA256: sourceHash, originalTargets: 43, steps, fitKeys: [...LEGGINGS_FIT_KEYS] });
   });
 
   it('retains the original 68-bone skin, native attributes and all 43 morph targets byte-for-byte, with full oriented topology', () => {
@@ -65,7 +68,7 @@ describe('recovered Sarah v2 native high leggings', () => {
         if (!same) changedTriangles++;
       }
       expect(changedTriangles).toBe(0);
-      expect(primitive.listTargets()).toHaveLength(48);
+      expect(primitive.listTargets()).toHaveLength(43 + LEGGINGS_FIT_KEYS.length);
       for (let i = 0; i < 43; i++) {
         const actual = primitive.listTargets()[i], expected = source.listTargets()[i];
         expect(actual.getName()).toBe(expected.getName());
@@ -74,7 +77,7 @@ describe('recovered Sarah v2 native high leggings', () => {
       }
       expect(primitive.listTargets().slice(43).map(t => t.getName())).toEqual(targetNames);
     });
-    expect(recovered.getRoot().listMeshes()[0].getWeights()).toEqual([...original.getRoot().listMeshes()[0].getWeights(), 0, 0, 0, 0, 0]);
+    expect(recovered.getRoot().listMeshes()[0].getWeights()).toEqual([...original.getRoot().listMeshes()[0].getWeights(), ...LEGGINGS_FIT_KEYS.map(() => 0)]);
     expect(recovered.getRoot().listMeshes()[0].getExtras().targetNames).toEqual(pants[0].listTargets().map(t => t.getName()));
   });
 
@@ -102,7 +105,7 @@ describe('recovered Sarah v2 native high leggings', () => {
       const bind = new Matrix4().fromArray(frame.bindMatrix), blend = new Matrix4(), map = new Matrix4(), vertex = new Vector3();
       const step = Number(profile.semantic.split('_').at(-1));
       for (const primitive of pants) {
-        const base = values(primitive.getAttribute('POSITION')!), delta = values(primitive.listTargets()[43 + steps.indexOf(step)].getAttribute('POSITION')!);
+        const base = values(primitive.getAttribute('POSITION')!), delta = values(primitive.listTargets().find(t => t.getName() === `shape:recoveryLeggings${step}`)!.getAttribute('POSITION')!);
         const joints = values(primitive.getAttribute('JOINTS_0')!), skin = values(primitive.getAttribute('WEIGHTS_0')!), distances = primitive.getAttribute(profile.semantic)!.getArray()!;
         const morphs = primitive.listTargets().slice(0, 43).map(target => ({ weight: frame.weights[frame.dict[target.getName()]] ?? 0, target })).filter(m => m.weight).map(m => ({ weight: m.weight, array: values(m.target.getAttribute('POSITION')!) }));
         // Sample all surfaces across their vertex order, independently replaying the
@@ -125,48 +128,36 @@ describe('recovered Sarah v2 native high leggings', () => {
     }
   });
 
-  it('replays each additive correction only in the front 82–94 cm strip, radially outward by at most 0.8 cm', () => {
-    const frames = (recovered.getRoot().listMeshes()[0].getExtras().recoveryLeggings as { snapshots: Frame[] }).snapshots;
-    expect(frames.map(f => f.step)).toEqual(steps);
-    for (const frame of frames) {
-      const outer = new Matrix4().fromArray(frame.bodyMatrix).multiply(new Matrix4().fromArray(frame.bindMatrixInverse));
-      const bind = new Matrix4().fromArray(frame.bindMatrix), blend = new Matrix4(), map = new Matrix4();
-      let moved = 0, maxLift = 0;
-      for (const primitive of pants) {
-        const base = values(primitive.getAttribute('POSITION')!), joints = values(primitive.getAttribute('JOINTS_0')!), skin = values(primitive.getAttribute('WEIGHTS_0')!);
-        const correction = primitive.listTargets()[43 + steps.indexOf(frame.step)], delta = values(correction.getAttribute('POSITION')!), normalDelta = values(correction.getAttribute('NORMAL')!);
-        const shaped = base.slice();
-        for (let t = 0; t < 43; t++) {
-          const target = primitive.listTargets()[t], weight = frame.weights[frame.dict[target.getName()]] ?? 0;
-          if (!weight) continue;
-          const attr = values(target.getAttribute('POSITION')!);
-          for (let i = 0; i < shaped.length; i++) shaped[i] += weight * attr[i];
-        }
-        const position = new Vector3(), displacement = new Vector3();
-        for (let v = 0; v < base.length / 3; v++) {
-          const offset = v * 3;
-          if (delta[offset] === 0 && delta[offset + 1] === 0 && delta[offset + 2] === 0 && normalDelta[offset] === 0 && normalDelta[offset + 1] === 0 && normalDelta[offset + 2] === 0) continue;
-          blend.elements.fill(0);
-          for (let c = 0; c < 4; c++) for (let d = 0; d < 16; d++) blend.elements[d] += skin[v * 4 + c] * frame.boneMatrices[joints[v * 4 + c] * 16 + d];
-          map.copy(outer).multiply(blend).multiply(bind);
-          position.fromArray(shaped, offset).applyMatrix4(map);
-          displacement.fromArray(delta, offset);
-          const e = map.elements, x = displacement.x, y = displacement.y, z = displacement.z;
-          displacement.set(e[0] * x + e[4] * y + e[8] * z, e[1] * x + e[5] * y + e[9] * z, e[2] * x + e[6] * y + e[10] * z);
-          const radius = Math.hypot(position.x, position.z + 6), rx = position.x / radius, rz = (position.z + 6) / radius;
-          const radial = displacement.x * rx + displacement.z * rz;
-          expect(position.y).toBeGreaterThan(82 - 1e-4);
-          expect(position.y).toBeLessThan(94 + 1e-4);
-          expect(rz).toBeGreaterThan(.35 - 1e-4);
-          expect(radial).toBeGreaterThanOrEqual(-1e-5);
-          expect(radial).toBeLessThanOrEqual(.8001);
-          expect(Math.abs(displacement.y)).toBeLessThan(1e-4);
-          expect(Math.abs(displacement.x * rz - displacement.z * rx)).toBeLessThan(1e-4);
-          maxLift = Math.max(maxLift, radial); moved++;
-        }
+  // THE LEGGINGS CLEAR HER AT EVERY FIT KEY (Joshua, 2026-10-19: her body is never hidden under clothes, so the
+  // cloth must stay outside it by itself). Replaces alpha.98's check that corrections stayed inside an 82-94 cm front
+  // strip: that strip's edge printed a ridge along the groin, and its corrections are gone. Each key's correction is
+  // replayed with the Lab's default weights at that size, against her body at the same size, in world centimetres.
+  it('keeps the high leggings at least 1.2 mm off her body at every one of the nine fit keys', () => {
+    const weightsAt = (p: number): Record<string, number> => ({ ...bellyWeights(p), ...breastWeightsFor(p, true), bellyUpper: bellyUpperWeight(p), ...navelWeights(p), navelFlat: navelFlatWeight(p), ...bellyMotionWeights(p, 0, restingBellySpring(), 20) });
+    // the bind pose in world space: the skin's root joint times its inverse bind matrix (as the fit scripts measure)
+    const worldOf = (doc: Document) => { const skinNode = doc.getRoot().listSkins()[0]; return new Matrix4().fromArray(skinNode.listJoints()[0].getWorldMatrix()).multiply(new Matrix4().fromArray(Array.from(skinNode.getInverseBindMatrices()!.getArray()!.slice(0, 16)))); };
+    const replay = (doc: Document, primitive: Primitive, weights: Record<string, number>) => {
+      const names = doc.getRoot().listMeshes()[0].getExtras().targetNames as string[], out = values(primitive.getAttribute('POSITION')!);
+      primitive.listTargets().forEach((target, k) => { const w = weights[names[k]] ?? 0; if (!w) return; const d = values(target.getAttribute('POSITION')!); for (let i = 0; i < out.length; i++) out[i] += w * d[i]; });
+      const m = worldOf(doc), v = new Vector3(), world = new Float64Array(out.length);
+      for (let i = 0; i < out.length; i += 3) { v.set(out[i], out[i + 1], out[i + 2]).applyMatrix4(m); world[i] = v.x * 100; world[i + 1] = v.y * 100; world[i + 2] = v.z * 100; }
+      return world;
+    };
+    const skin = original.getRoot().listMeshes()[0].listPrimitives().find(p => p.getMaterial()!.getName() === 'Material_0')!, cloth = pants[0], skinIndices = skin.getIndices()!.getArray()!;
+    for (const key of LEGGINGS_FIT_KEYS) {
+      const weights = weightsAt(key), body = replay(original, skin, weights), torso: number[] = [];
+      for (let i = 0; i < skinIndices.length; i += 3) if ([0, 1, 2].some(e => body[skinIndices[i + e] * 3 + 1] > 35 && body[skinIndices[i + e] * 3 + 1] < 130)) torso.push(skinIndices[i], skinIndices[i + 1], skinIndices[i + 2]);
+      const collider = new SkinCollider(body, torso), legs = replay(recovered, cloth, { ...weights, [`shape:recoveryLeggings${key}`]: 1 });
+      let checked = 0, close = 0, nearest = Infinity;
+      for (let i = 0; i < legs.length; i += 6) {
+        if (legs[i + 1] < 35) continue;
+        const hit = collider.closest([legs[i], legs[i + 1], legs[i + 2]]);
+        if (!hit) continue;
+        checked++; nearest = Math.min(nearest, hit.signedDistance);
+        if (hit.signedDistance < 0.12) close++;
       }
-      expect(moved).toBeGreaterThan(100);
-      expect(maxLift).toBeGreaterThan(.01);
+      expect(checked, `${key}%`).toBeGreaterThan(10000);
+      expect(close, `${key}%: cloth points closer than 1.2 mm (nearest ${nearest.toFixed(3)} cm)`).toBe(0);
     }
-  }, 30000);
+  }, 120000);
 });

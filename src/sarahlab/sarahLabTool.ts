@@ -135,6 +135,10 @@ export type Garment = (typeof GARMENTS)[number] | (typeof RECOVERED_SHIRTS)[numb
  * grown one the bits describe.
  */
 export const MASKING_GARMENTS: readonly Garment[] = ['shirt', 'leggings', 'swimsuit', 'shirtAthletic', 'leggingsLow'];
+/** v2's body is never hidden under clothes (Joshua, 2026-10-19); v1 keeps its cover masking. */
+export function bodyNeverHidden(modelId: string): boolean {
+  return modelId.startsWith('v2');
+}
 export function coverMask(shown: readonly Garment[]): number {
   let m = 0;
   for (const g of shown) if (MASKING_GARMENTS.includes(g)) m |= 1 << GARMENTS.indexOf(g as (typeof GARMENTS)[number]);
