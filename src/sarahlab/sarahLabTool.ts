@@ -131,6 +131,27 @@ export const RECOVERED_SHIRTS = ['shirtRelaxedHigh', 'shirtRelaxedLow', 'shirtSp
 export type Garment = (typeof GARMENTS)[number] | (typeof RECOVERED_SHIRTS)[number];
 
 /**
+ * THE RECOVERED v2 CLOTHES, ONE FILE EACH, LOADED AS THEY ARE WORN (Joshua, 2026-10-20: "load the room and selected
+ * character first, followed by the currently selected clothing and its textures. Other outfits should load only when
+ * needed"). Opening the room used to fetch the bikini bottom and both rises of leggings whatever she wore -- 23 MB of
+ * the 128 MB she waited for. The shirt files are one in memory at a time; the rest stay once fetched.
+ */
+export type RecoveredPart = 'leggings' | 'leggings-low' | 'bottom' | 'relaxed-high' | 'relaxed-low' | 'spandex-high' | 'spandex-low';
+const PART_OF: Partial<Record<Garment, RecoveredPart>> = {
+  leggings: 'leggings', leggingsLow: 'leggings-low', bikini: 'bottom',
+  shirtRelaxedHigh: 'relaxed-high', shirtRelaxedLow: 'relaxed-low', shirtSpandexHigh: 'spandex-high', shirtSpandexLow: 'spandex-low',
+};
+/** The recovered files a set of worn garments needs, in the order they are worth fetching: smallest first. */
+export function recoveredPartsFor(worn: readonly Garment[]): RecoveredPart[] {
+  const parts = worn.map((g) => PART_OF[g]).filter((p): p is RecoveredPart => !!p);
+  return [...new Set(parts)].sort((a, b) => Number(isShirtPart(a)) - Number(isShirtPart(b)));
+}
+export const isShirtPart = (part: RecoveredPart): boolean => part.startsWith('relaxed') || part.startsWith('spandex');
+export const recoveredPartPath = (part: RecoveredPart): string => `models/sarah-v2-${part}.${isShirtPart(part) ? 'gltf' : 'glb'}`;
+/** The garment a shirt file is worn as. */
+export const shirtOfPart = (part: RecoveredPart): Garment => (Object.entries(PART_OF).find(([, p]) => p === part)?.[0] ?? 'shirt') as Garment;
+
+/**
  * THE SKIN UNDER WORN CLOTHES IS NOT DRAWN (Joshua, 2026-10-14: "consider masking covered
  * skin if necessary to eliminate clipping, while preserving visible skin outside"). The
  * bake marks, on every body vertex, which garments cover it (`_CLOTH_COVER`, one bit per

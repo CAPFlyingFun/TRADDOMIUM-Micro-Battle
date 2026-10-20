@@ -13,8 +13,9 @@
  * can see in the world and read in the console.
  */
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { GLTFLoader, type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
+import type { LoadMeter } from './loadMeter';
 
 const gltfLoader = new GLTFLoader();
 // The ant rigs (v0's queen, TCS's worker) are meshopt-compressed and a
@@ -31,6 +32,15 @@ const BACKOFF_MS = [500, 1000, 2000] as const;
 export interface LoadModelOptions {
   /** Attempts after the first. Default 3, matching BACKOFF_MS. */
   readonly retries?: number;
+  /**
+   * Count the bytes into this meter as they arrive, under the model's path (`loadMeter.ts`). The model is then
+   * fetched by `fetchBytes` and handed to the same GLTFLoader parse, so measuring it never downloads it twice.
+   */
+  readonly meter?: LoadMeter;
+  /** Called once, when every byte of the model is in and only parsing is left: the moment to start the next download. */
+  readonly onDownloaded?: () => void;
+  /** Cancels the load: it rejects with an AbortError, and is neither retried nor replaced by the placeholder. */
+  readonly signal?: AbortSignal;
 }
 
 export interface Assets {
@@ -41,6 +51,7 @@ export interface Assets {
     options?: LoadModelOptions,
   ): Promise<THREE.Object3D>;
   loadTexture(path: string): Promise<THREE.Texture | null>;
+  assetBytes(path: string): number | null;
 }
 
 /**
@@ -84,6 +95,19 @@ function revisionOf(path: string): string {
   }
 }
 
+/**
+ * What `path` costs to load, in decoded bytes -- a `.gltf` with every buffer it names -- or null for a file the build
+ * did not see (`__PUBLIC_SIZE__`, `vite.config.ts`). Never throws.
+ */
+export function assetBytes(path: string): number | null {
+  try {
+    const bytes = __PUBLIC_SIZE__[path.replace(/^\/+/, '')];
+    return typeof bytes === 'number' && bytes >= 0 ? bytes : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function loadModel(
   path: string,
   placeholderFactory: () => THREE.Object3D,
@@ -92,12 +116,21 @@ export async function loadModel(
   const url = assetUrl(path);
   const attempts = 1 + (options.retries ?? BACKOFF_MS.length);
   let lastError: unknown;
+  const { meter, signal } = options;
+  const clean = path.replace(/^\/+/, '');
+  meter?.expect(clean, assetBytes(clean));
+  let told = false;
+  const downloaded = () => { if (!told) { told = true; meter?.downloaded(clean); options.onDownloaded?.(); } };
   for (let attempt = 0; attempt < attempts; attempt++) {
     try {
-      const gltf = await gltfLoader.loadAsync(url);
+      if (signal?.aborted) throw abortError();
+      const gltf = meter || signal || options.onDownloaded ? await loadMetered(clean, url, meter, signal, downloaded) : await gltfLoader.loadAsync(url);
+      downloaded();
       return gltf.scene;
     } catch (error) {
+      if (signal?.aborted || (error as Error)?.name === 'AbortError') { meter?.drop(clean); throw error; }
       lastError = error;
+      meter?.restart(clean);
       if (attempt < attempts - 1) {
         await sleep(BACKOFF_MS[Math.min(attempt, BACKOFF_MS.length - 1)]);
       }
@@ -120,7 +153,100 @@ export async function loadTexture(path: string): Promise<THREE.Texture | null> {
   }
 }
 
-export const assets: Assets = { assetUrl, loadModel, loadTexture };
+export const assets: Assets = { assetUrl, loadModel, loadTexture, assetBytes };
+
+/**
+ * The model fetched by us and parsed by GLTFLoader, so every byte is counted once, as it arrives. A `.glb` is one
+ * fetch; a `.gltf` is its JSON and then each external buffer it names, which GLTFLoader asks for as it parses --
+ * those requests come here too (`parser.loadBuffer`, replaced for this one parse) at the same URL GLTFLoader would
+ * have used, so the browser's cache serves them exactly as before. Images embedded in buffer views come with them;
+ * an external image would still go to GLTFLoader's own loader (none of the meter's models has one).
+ */
+async function loadMetered(path: string, url: string, meter: LoadMeter | undefined, signal: AbortSignal | undefined, downloaded: () => void): Promise<GLTF> {
+  const resourcePath = THREE.LoaderUtils.extractUrlBase(url);
+  const isGlb = /\.glb$/i.test(path);
+  const ownBytes = isGlb ? assetBytes(path) : null;
+  // every byte of the model is in once the count reaches what the build says it costs (a gltf asks for its buffers
+  // as it parses, so no single request knows when the last one has landed); the parse's end says so at the latest
+  const total = assetBytes(path);
+  let got = 0;
+  const count = (n: number, source: string) => { meter?.progress(path, n, source); got += n; if (total !== null && got >= total) downloaded(); };
+  const main = await fetchBytes(url, ownBytes, (n) => count(n, url), signal);
+  if (main.cached) meter?.cached(path, url);
+  if (isGlb) downloaded();
+  const loader = new GLTFLoader();
+  loader.setMeshoptDecoder(MeshoptDecoder);
+  const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/') + 1) : '';
+  loader.register((parser) => {
+    const original = parser.loadBuffer.bind(parser);
+    parser.loadBuffer = (index: number) => {
+      const def = parser.json.buffers?.[index] as { uri?: string } | undefined;
+      if (!def?.uri || def.uri.startsWith('data:')) return original(index);
+      const bufferUrl = THREE.LoaderUtils.resolveURL(def.uri, resourcePath);
+      const own = assetBytes(`${dir}${decodeURIComponent(def.uri)}`);
+      return fetchBytes(bufferUrl, own, (n) => count(n, bufferUrl), signal).then((fetched) => {
+        if (fetched.cached) meter?.cached(path, bufferUrl);
+        return fetched.buffer;
+      });
+    };
+    return { name: 'TRADDOMIUM_metered_buffers' };
+  });
+  return loader.parseAsync(main.buffer, resourcePath);
+}
+
+/**
+ * One response, streamed into ONE buffer sized from what the build says the file weighs, so a 66 MB shirt never sits
+ * in memory as a list of chunks AND a copy of them -- the thing a phone runs out of first. `onBytes` hears each chunk.
+ * `cached` is the browser's own word (Resource Timing: nothing crossed the network) where it gives one.
+ */
+export async function fetchBytes(url: string, expected: number | null, onBytes: (bytes: number) => void, signal?: AbortSignal): Promise<{ buffer: ArrayBuffer; cached: boolean }> {
+  const response = await fetch(url, signal ? { signal } : undefined);
+  if (!response.ok) throw new Error(`HTTP ${response.status} for ${url}`);
+  const reader = response.body?.getReader();
+  let buffer: ArrayBuffer;
+  if (!reader) {
+    buffer = await response.arrayBuffer();
+    onBytes(buffer.byteLength);
+  } else {
+    const header = Number(response.headers.get('content-length'));
+    // a compressed response's length is the compressed size, not what the stream will hand over
+    const sized = expected ?? (!response.headers.get('content-encoding') && header > 0 ? header : 0);
+    let out = new Uint8Array(sized > 0 ? sized : 1 << 20), at = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (at + value.byteLength > out.byteLength) {
+        const grown = new Uint8Array(Math.max(out.byteLength * 2, at + value.byteLength));
+        grown.set(out.subarray(0, at));
+        out = grown;
+      }
+      out.set(value, at);
+      at += value.byteLength;
+      onBytes(value.byteLength);
+    }
+    buffer = at === out.byteLength ? out.buffer : out.buffer.slice(0, at);
+  }
+  return { buffer, cached: servedFromCache(response.url || url) };
+}
+
+function servedFromCache(url: string): boolean {
+  try {
+    const absolute = new URL(url, globalThis.location?.href).href;
+    const entries = performance.getEntriesByName(absolute) as PerformanceResourceTiming[];
+    const last = entries[entries.length - 1];
+    // nothing crossed the network (0), or only headers did (a 304 revalidation: GitHub Pages' cache lasts ten minutes,
+    // then asks again) -- either way the body came off this device
+    return !!last && last.decodedBodySize > 0 && last.transferSize < last.encodedBodySize;
+  } catch {
+    return false;
+  }
+}
+
+function abortError(): Error {
+  const error = new Error('The load was cancelled');
+  error.name = 'AbortError';
+  return error;
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));

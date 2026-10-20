@@ -48,3 +48,9 @@ declare const __RELAY_URL__: string;
  * string, never a broken URL.
  */
 declare const __PUBLIC_REV__: Record<string, string>;
+
+/**
+ * What each `public/` file costs to load, in decoded bytes: its own size, or for a `.gltf` its JSON plus every
+ * external buffer and image it names (`vite.config.ts`). The loading meter's totals. Missing under a bare `tsc`.
+ */
+declare const __PUBLIC_SIZE__: Record<string, number>;

@@ -1,6 +1,8 @@
 import { attachRecoveredMeshes, applyRecoveredBaseline, fitWeights, LEGGINGS_FIT_KEYS, SHIRT_FINE_FIT_KEYS, updateLeggingsHem, releaseRecoveredMeshes } from './recoveredClothes';
 import { garmentTexturePanel } from './garmentTexturePanel';
 import { uprightLayout, type UprightLayout } from './uprightTabs';
+import { loadingCard, LOADING_COVERED_VAR, type LoadingCard, type LoadingPlace } from './loadingCard';
+import { LoadMeter } from '../assets/loadMeter';
 /**
  * THE SARAH LAB — Sarah rebuilt from Joshua's base mannequin, on a turntable,
  * to try before anything of it goes live (Joshua, 2026-10-07: "Good to test
@@ -44,10 +46,12 @@ import { UNITS_PER_METRE } from '../world/dem';
 import {
   BELLY_MOTION, BELLY_TARGET, trimShown, BREAST_TARGETS, BUMP_MAX_PERCENT, GARMENTS, RECOVERED_SHIRTS, OUTFITS, outfitLine, modelLine, refineLine, refineWeight, nextOutfit, wornGarments, coverMask, bodyNeverHidden, uncoveredSkinIndices, UNDER_TOP_GARMENT, BELLY_REFINE_TARGET, SEAT_TARGET, seatCorrectiveWeight, SARAH_LAB_MODELS, SARAH_LAB_DEFAULT_MODEL, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID,
   bellyMotionWeights, bellyWeights, breastBobWeight, breastWeightsForShape, bodyShapeFieldWeights, SIZE_TILT_PRESETS_DEG, effectiveTiltDeg, stepSeated, bustVolume, BREAST_GROW_TARGET, settledSitFor, bellyUpperWeight, BELLY_UPPER_TARGET, navelWeights, NAVEL_FLAT_TARGET, navelFlatWeight, tPoseTurns, ARM_SIDES, armsLine, ARM_RAISE_TARGETS, armRaiseWeight, SEAT_V2_TARGET, seatCorrectiveV2Weight, fingerBend, THUMB_TO_PALM, bumpLine, fingersLine, restingBellySpring, statusLine, stepBellySpring, stepBreastSpring, walkBounceAccel,
-  type Garment, type SarahLabPose,
+  type Garment, type SarahLabPose, recoveredPartsFor, recoveredPartPath, isShirtPart, shirtOfPart, type RecoveredPart,
 } from './sarahLabTool';
 
 const M = UNITS_PER_METRE;
+/** What the card says while the room opens. */
+const OPENING_LABEL = 'Opening the character room';
 /** The camera's vertical view on a landscape screen (degrees). */
 const LANDSCAPE_FOV = 38;
 /** Held upright: the CSS pixels BACK and the title take at the top of the screen, kept clear of her. */
@@ -164,11 +168,21 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let garments: Garment[] = [];
   let hasBelly = false;
   let recovered = false;
-  let recoveredShirt: Garment | null = null;
-  let shirtRequest = 0;
-  let shirtLoading: Garment | null = null;
   let loaded = false;
   let failed = false;
+  // ------------------------------------------------------------ loading (Joshua, 2026-10-20): what is downloading,
+  // drawn by the card; each recovered file fetched when an outfit first needs it (recoveredPartsFor), its meshes kept
+  // on her once fetched -- one shirt at a time -- and a shirt download for an outfit no longer wanted cancelled
+  const meter = new LoadMeter();
+  let card: LoadingCard | null = null;
+  let cardPlace: LoadingPlace = 'centre';
+  let batch = 0, readyBatch = -1, readyIn = 0;
+  let retry: () => void = () => {};
+  const partMeshes = new Map<RecoveredPart, THREE.SkinnedMesh[]>();
+  const inflight = new Map<RecoveredPart, { promise: Promise<THREE.Object3D>; abort: AbortController }>();
+  /** An outfit whose clothes are on their way; she wears `outfit` until they are on. */
+  let wantedOutfit: number | null = null;
+  let outfitRequest = 0;
   let disposed = false;
 
   let pose: SarahLabPose = 'stand';
@@ -249,7 +263,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let pinch = 0;
 
   function refresh(): void {
-    if (fields.status) fields.status.textContent = statusLine(loaded, failed, garments, hasBelly, modelIndex) + (shirtLoading ? ' · loading shirt…' : '');
+    if (fields.status) fields.status.textContent = statusLine(loaded && model?.visible === true, failed, garments, hasBelly, modelIndex) + (wantedOutfit !== null ? ' · loading outfit…' : '');
     const bumpField = fields[SARAH_LAB_FIELD.bump], fingerField = fields[SARAH_LAB_FIELD.fingers];
     if (bumpField) bumpField.textContent = bumpLine(bump);
     if (fingerField) fingerField.textContent = fingersLine(curl);
@@ -278,7 +292,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     lit(buttons.tpose, pose === 'tpose');
     lit(buttons.turn, turning);
     for (const t of SIZE_TILT_PRESETS_DEG) lit(buttons[`tilt${t}`], body.bellyTilt === t);
-    if (buttons.outfit) buttons.outfit.textContent = recovered && outfit < 2 ? `OUTFIT · relaxed + ${outfit === 0 ? 'high' : 'low'} leggings` : outfitLine(outfit);
+    if (buttons.outfit) buttons.outfit.textContent = `OUTFIT · ${outfitName(wantedOutfit ?? outfit)}${wantedOutfit !== null ? ' …' : ''}`;
     if (buttons.model) buttons.model.textContent = modelLine(modelIndex);
     if (buttons.refine) {
       // only v2 has the switchable curve: the button is not shown for v1
@@ -324,7 +338,6 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     // recovered clothes keep RAW normal sums so the GPU's belly offsets land on what their fit expects; the leggings
     // were normalized here too, and at 0-50% the large belly offsets flipped normals in the fold under her belly
     }, { normalizeNormals: !(mesh.userData.recoveredShirt || mesh.userData.recoveredLeggings) });
-    ensureRecoveredShirt();
     for (const mesh of skinned) {
       const dict = mesh.morphTargetDictionary, influences = mesh.morphTargetInfluences;
       if (dict && influences) for (const [name, w] of Object.entries({ ...bellyWeights(bump), ...breastWeightsForShape(bump, dict[BREAST_GROW_TARGET] !== undefined, body.breastSize), [BELLY_UPPER_TARGET]: bellyUpperWeight(bump), ...navelWeights(bump), [NAVEL_FLAT_TARGET]: navelFlatWeight(bump), [BELLY_REFINE_TARGET]: refineWeight(refine, bump), [SEAT_TARGET]: seatCorrectiveWeight(pose === 'sit' ? 1 : 0, bump), [SEAT_V2_TARGET]: seatCorrectiveV2Weight(pose === 'sit' ? 1 : 0, bump), ...armRaiseWeights() })) {
@@ -366,28 +379,114 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     }
   }
 
-  /** Keep one imported shirt in memory; the four fits share the body's live skeleton. */
-  function ensureRecoveredShirt(): void {
-    if (!recovered || !loaded || !model) return;
-    const wanted = wornGarments(outfit, garments).find(g => (RECOVERED_SHIRTS as readonly string[]).includes(g));
-    if (!wanted || wanted === recoveredShirt || shirtLoading) return;
-    const bodyMesh = findSkinnedMesh(model), expectedModel = model, request = ++shirtRequest;
-    if (!bodyMesh) return;
-    shirtLoading = wanted;
-    const slug = wanted.replace('shirt', '').replace(/([a-z])([A-Z])/g, '$1-$2').toLowerCase();
-    void assets.loadModel(`models/sarah-v2-${slug}.gltf`, () => new THREE.Object3D()).then(part => {
-      if (disposed || model !== expectedModel || request !== shirtRequest) { release(part); return; }
-      shirtLoading = null;
-      if (wornGarments(outfit, garments).find(g => (RECOVERED_SHIRTS as readonly string[]).includes(g)) !== wanted) { release(part); ensureRecoveredShirt(); refresh(); return; }
-      if (part.userData.isPlaceholder) { console.error('[sarahlab] recovered shirt unavailable', slug); return; }
-      const old = skinned.filter(m => !!m.userData.recoveredShirt);
-      skinned = skinned.filter(m => !old.includes(m)); shaped = shaped.filter(s => !old.includes(s.mesh));
-      releaseRecoveredMeshes(old);
-      for (const mesh of attachRecoveredMeshes(part, bodyMesh, wanted)) {
-        skinned.push(mesh); const fields = liftShapeFields(mesh); if (fields) shaped.push({mesh, fields});
+  /** The outfit as the OUTFIT button names it: on v2 the first two are the relaxed tee over either rise. */
+  function outfitName(index: number): string {
+    return recovered && index < 2 ? `relaxed + ${index === 0 ? 'high' : 'low'} leggings` : outfitLine(index).replace(/^OUTFIT · /, '');
+  }
+
+  /** A new load for the card: what it is called and where it sits. */
+  function begin(label: string, place: LoadingPlace): void {
+    meter.start(label);
+    cardPlace = place;
+    batch++;
+  }
+
+  /** The room is usable once the GPU has her: compile what is new, then two frames drawn, then the card goes. */
+  function settle(): void {
+    const b = batch;
+    void ctx.renderer.gl.compileAsync(three, camera).catch(() => {}).then(() => { if (b === batch) { readyBatch = b; readyIn = 2; } });
+  }
+
+  const offline = () => typeof navigator !== 'undefined' && navigator.onLine === false;
+  function failLoad(what: string, again: () => void): void {
+    retry = again;
+    meter.fail(offline() ? `This device is offline, so ${what} could not be downloaded. Connect, then tap Retry.` : `${what[0].toUpperCase()}${what.slice(1)} could not be downloaded. Check your connection, then tap Retry.`);
+  }
+
+  /** Fetch one recovered file, or join the fetch already under way. */
+  function requestPart(part: RecoveredPart, onDownloaded?: () => void): Promise<THREE.Object3D> {
+    const running = inflight.get(part);
+    if (running) { meter.expect(recoveredPartPath(part), assets.assetBytes(recoveredPartPath(part))); return running.promise; }
+    const abort = new AbortController();
+    const promise = assets.loadModel(recoveredPartPath(part), () => new THREE.Object3D(), { meter, signal: abort.signal, onDownloaded });
+    inflight.set(part, { promise, abort });
+    // a small file goes on her the moment it lands, whatever became of the outfit that asked for it (the opening's
+    // land before her body is built, and the opening puts them on)
+    const body = model;
+    if (!isShirtPart(part)) promise.then((scene) => { if (!disposed && body && model === body && !scene.userData.isPlaceholder && !partMeshes.has(part)) wearPart(part, scene); }, () => {});
+    const forget = () => { if (inflight.get(part)?.promise === promise) inflight.delete(part); };
+    promise.then(forget, forget);
+    return promise;
+  }
+
+  /** Put a fetched file's meshes on her (bound to her live skeleton, hidden until an outfit shows them). */
+  function wearPart(part: RecoveredPart, scene: THREE.Object3D): void {
+    const skin = model ? findSkinnedMesh(model) : null;
+    if (!skin || scene.userData.isPlaceholder || partMeshes.has(part)) { release(scene); return; }
+    if (isShirtPart(part)) {
+      // one imported shirt in memory: the one she is putting on replaces the last
+      for (const [p, old] of [...partMeshes]) {
+        if (!isShirtPart(p)) continue;
+        skinned = skinned.filter(m => !old.includes(m)); shaped = shaped.filter(x => !old.includes(x.mesh));
+        releaseRecoveredMeshes(old); partMeshes.delete(p);
       }
-      recoveredShirt = wanted; applyLook(); applyMotion(); refresh();
-    }).catch(error => { shirtLoading = null; console.error('[sarahlab] shirt preparation failed', error); });
+    }
+    const meshes = attachRecoveredMeshes(scene, skin, isShirtPart(part) ? shirtOfPart(part) : undefined);
+    for (const mesh of meshes) {
+      if (part.startsWith('leggings')) mesh.userData.recoveredLeggings = true;
+      skinned.push(mesh);
+      const fields = liftShapeFields(mesh);
+      if (fields) shaped.push({ mesh, fields });
+    }
+    partMeshes.set(part, meshes);
+  }
+
+  /**
+   * PUT ON OUTFIT `next`. With all its clothes on hand it is immediate; otherwise she keeps what she has on while the
+   * missing files download (the card at the top says how far), and changes when they are all in. `opening` is the
+   * room's first dressing: it carries on the opening's load rather than starting its own.
+   */
+  function dress(next: number, opening = false): void {
+    // chosen before she is in: the opening dresses her in it
+    if (!loaded && !opening) { outfit = next; refresh(); return; }
+    const parts = recovered ? recoveredPartsFor(wornGarments(next, garments)) : [];
+    const missing = parts.filter(p => !partMeshes.has(p));
+    // a shirt download for an outfit no longer wanted is cancelled: 66-77 MB a phone should not finish for nothing
+    for (const [p, run] of [...inflight]) if (isShirtPart(p) && !parts.includes(p)) { run.abort.abort(); inflight.delete(p); }
+    const request = ++outfitRequest;
+    if (!missing.length) {
+      wantedOutfit = null; outfit = next;
+      if (model) model.visible = true;
+      applyLook(); applyMotion(); refresh();
+      if (opening) settle(); else if (meter.snapshot().phase !== 'idle') meter.ready();
+      return;
+    }
+    wantedOutfit = opening ? null : next;
+    if (!opening) begin(`Loading ${outfitName(next)}`, model?.visible ? 'aside' : 'centre');
+    for (const p of missing) meter.expect(recoveredPartPath(p), assets.assetBytes(recoveredPartPath(p)));
+    refresh();
+    const expectedModel = model;
+    void Promise.all(missing.map(p => requestPart(p))).then(scenes => {
+      const stale = disposed || model !== expectedModel || request !== outfitRequest;
+      const broken = scenes.some(x => x.userData.isPlaceholder);
+      // the small files are worth keeping whatever happened; a shirt is kept only by the outfit it was fetched for
+      const sameBody = !disposed && model === expectedModel;
+      missing.forEach((p, i) => { if (sameBody && (isShirtPart(p) ? !stale && !broken : true)) wearPart(p, scenes[i]); else release(scenes[i]); });
+      if (stale) return;
+      if (broken) { failLoad(opening ? 'her outfit' : `the ${outfitName(next)} outfit`, () => again(next, opening)); refresh(); return; }
+      wantedOutfit = null; outfit = next;
+      if (model) model.visible = true;
+      applyLook(); applyMotion(); refresh(); settle();
+    }).catch(error => {
+      if ((error as Error)?.name === 'AbortError' || request !== outfitRequest) return;
+      console.error('[sarahlab] outfit preparation failed', error);
+      failLoad('her outfit', () => again(next, opening)); refresh();
+    });
+  }
+  /** Retry an outfit: a fresh count, then dress again (what did arrive is on her already and is not fetched twice). */
+  function again(next: number, opening: boolean): void {
+    if (opening) begin(OPENING_LABEL, 'centre');
+    dress(next, opening);
   }
 
   function buildHud(): void {
@@ -488,7 +587,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     armsInput = slider(SARAH_LAB_FIELD.arms, armsDeg, (v) => { armsDeg = v; armsOverride = true; }, 90, 'pose');
     const row = document.createElement('div');
     row.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap';
-    buttons.outfit = btn(outfitLine(outfit), SARAH_LAB_ACTION.outfit, () => { outfit = nextOutfit(outfit, garments); applyLook(); });
+    buttons.outfit = btn(outfitLine(outfit), SARAH_LAB_ACTION.outfit, () => { dress(nextOutfit(wantedOutfit ?? outfit, garments)); });
     buttons.model = btn(modelLine(modelIndex), SARAH_LAB_ACTION.model, () => {
       modelIndex = (modelIndex + 1) % SARAH_LAB_MODELS.length;
       armsDeg = SARAH_LAB_MODELS[modelIndex].id === 'v1' || pose === 'tpose' ? 90 : 0;
@@ -572,8 +671,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     for (const event of ['pointerdown', 'pointermove', 'pointerup', 'wheel']) right.addEventListener(event, e => e.stopPropagation());
     texturePanel = garmentTexturePanel(() => skinned, (garment) => {
       const next = OUTFITS.findIndex(look => look.garments.includes(garment));
-      if (next >= 0) outfit = next;
-      applyLook(); refresh();
+      if (next >= 0 && next !== outfit) dress(next);
+      else { applyLook(); refresh(); }
     });
     texturePanel.element.dataset.tab = 'clothes';
     right.appendChild(texturePanel.element);
@@ -597,6 +696,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     fields.status.style.cssText = 'font-weight:400;font-size:11px;opacity:.8';
     info.append(title, fields.status);
     root.appendChild(info);
+    card = loadingCard(document, () => retry());
+    root.appendChild(card.element);
     ctx.uiLayer.appendChild(root);
     hud = root;
     upright_ = uprightLayout(root, () => { right.style.display = upright_?.portrait ? 'none' : 'flex'; const size = ctx.renderer.size(); frame(size.width, size.height, false); refresh(); });
@@ -694,13 +795,23 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   function loadSarah(): void {
     if (model) { three.remove(model); rig?.dispose(); release(model); model = null; }
     rig = null; measure = null; fingers = []; skinned = []; shaped = []; garments = []; hasBelly = false; feel = null;
-    recovered = false; recoveredShirt = null; shirtLoading = null; shirtRequest++;
+    recovered = false; partMeshes.clear(); wantedOutfit = null; outfitRequest++;
+    for (const run of inflight.values()) run.abort.abort();
+    inflight.clear();
     felt.primed = 0; loaded = false; failed = false;
+    const entry = SARAH_LAB_MODELS[modelIndex], path = entry.path;
+    // THE ORDER (Joshua, 2026-10-20): the room, then her, then what she has on -- only that outfit, its files asked for
+    // the moment her body's bytes are in, so its download runs while her body is being built rather than after it
+    const planned = hooks.nativeOutfitPreview !== true && entry.id === 'v2-body' ? recoveredPartsFor(wornGarments(outfit, [...GARMENTS, ...RECOVERED_SHIRTS])) : [];
+    begin(OPENING_LABEL, 'centre');
+    meter.expect(path, assets.assetBytes(path));
+    for (const p of planned) meter.expect(recoveredPartPath(p), assets.assetBytes(recoveredPartPath(p)));
     refresh();
-    const path = SARAH_LAB_MODELS[modelIndex].path;
-    void assets.loadModel(path, () => new THREE.Object3D()).then(async (loadedModel) => {
+    let asked = false;
+    const askForClothes = () => { if (!asked) { asked = true; for (const p of planned) void requestPart(p); } };
+    void assets.loadModel(path, () => new THREE.Object3D(), { meter, onDownloaded: askForClothes }).then(async (loadedModel) => {
       if (disposed || path !== SARAH_LAB_MODELS[modelIndex].path) { release(loadedModel); return; }
-      if (loadedModel.userData.isPlaceholder === true) { failed = true; refresh(); return; }
+      if (loadedModel.userData.isPlaceholder === true) { failed = true; failLoad('Sarah', () => loadSarah()); refresh(); return; }
       try {
         rig = new HumanRig(loadedModel);
         measure = measureHuman(rig.bind);
@@ -714,7 +825,6 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       const approvedSkin = findSkinnedMesh(loadedModel);
       recovered = hooks.nativeOutfitPreview !== true && SARAH_LAB_MODELS[modelIndex].id === 'v2-body' && approvedSkin?.geometry.attributes.position.count === 115710 && approvedSkin.skeleton.bones.length === 68;
       if (recovered) {
-        const skin = findSkinnedMesh(loadedModel)!;
         loadedModel.updateMatrixWorld(true);
         loadedModel.traverse(n => {
           const m = n as THREE.SkinnedMesh;
@@ -729,13 +839,10 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
             if (max < 110) m.userData.replacedByRecovered = true;
           }
         });
-        const parts = await Promise.all(['bottom', 'leggings', 'relaxed-high', 'leggings-low'].map(part => assets.loadModel(`models/sarah-v2-${part}.${part === 'bottom' || part.startsWith('leggings') ? 'glb' : 'gltf'}`, () => new THREE.Object3D())));
-        if (disposed || path !== SARAH_LAB_MODELS[modelIndex].path) { for (const p of parts) release(p); release(loadedModel); return; }
-        if (parts.some(p => p.userData.isPlaceholder)) throw new Error('Recovered v2 clothing asset could not be loaded');
-        attachRecoveredMeshes(parts[0], skin);
-        for (const m of attachRecoveredMeshes(parts[1], skin)) m.userData.recoveredLeggings = true;
-        attachRecoveredMeshes(parts[2], skin, 'shirtRelaxedHigh'); recoveredShirt = 'shirtRelaxedHigh';
-        for (const m of attachRecoveredMeshes(parts[3], skin)) m.userData.recoveredLeggings = true;
+      } else {
+        // not the body the recovered clothes were fitted to: nothing fetched for it is any use
+        for (const run of inflight.values()) run.abort.abort();
+        inflight.clear();
       }
       const found = new Set<Garment>();
       loadedModel.traverse((n) => {
@@ -754,6 +861,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       garments = [...GARMENTS, ...RECOVERED_SHIRTS].filter((g) => found.has(g) || (recovered && (RECOVERED_SHIRTS as readonly string[]).includes(g)));
       if (!recovered && outfit >= 5) outfit = 0;
       model = loadedModel;
+      // she stays out of sight until what she has on is on: never undressed, then dressed a moment later
+      loadedModel.visible = !recovered;
       three.add(loadedModel);
       // the spring feels a point at the front of her middle, carried by her spine
       const skinMesh = findSkinnedMesh(loadedModel);
@@ -763,9 +872,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         if (bone) feel = { bone, local: bone.worldToLocal(new THREE.Vector3(0, 1.0 * M, 0.2 * M)) };
       }
       loaded = true;
-      applyLook();
-      refresh();
-    }).catch(error => { console.error('[sarahlab] model/outfit preparation failed', error); failed = true; loaded = false; refresh(); });
+      dress(outfit, true);
+    }).catch(error => { console.error('[sarahlab] model/outfit preparation failed', error); failed = true; loaded = false; failLoad('Sarah', () => loadSarah()); refresh(); });
   }
 
   return {
@@ -784,6 +892,12 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     },
 
     update(frame: FrameInfo) {
+      if (readyIn > 0 && --readyIn === 0 && readyBatch === batch) meter.ready();
+      if (card) {
+        const covered = `${Math.round(upright_?.covered() ?? 0)}px`;
+        if (card.element.style.getPropertyValue(LOADING_COVERED_VAR) !== covered) card.element.style.setProperty(LOADING_COVERED_VAR, covered);
+        card.show(meter.snapshot(), cardPlace);
+      }
       seconds += frame.rawDt;
       if (pose === 'walk') walked += WALK_SPEED * frame.rawDt;
       if (turning) orbit.yaw += frame.rawDt * 0.35;
@@ -799,6 +913,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
 
     dispose() {
       disposed = true;
+      for (const run of inflight.values()) run.abort.abort();
+      inflight.clear();
       texturePanel?.dispose();
       texturePanel = null;
       hud?.remove();

@@ -98,6 +98,37 @@ function publicRevisions(): Record<string, string> {
 
 const PUBLIC_REV = publicRevisions();
 
+/**
+ * WHAT EACH PUBLIC FILE COSTS TO LOAD, in bytes, for the loading meter (Joshua, 2026-10-20: "the indicator should
+ * track the actual assets required for the selected character and outfit... 15.0 MB / 30.0 MB").
+ *
+ * A file's own size, except a `.gltf`, which costs its own JSON PLUS every external buffer and image it names: the
+ * shirts are a few kB of JSON over twenty-odd parts of 2-5 MB, and a meter that knew only the JSON would reach 100%
+ * before the shirt had begun. Keyed exactly like `__PUBLIC_REV__`. The sizes are the DECODED bytes the browser
+ * hands the page, which is what a stream counts whether or not the server compressed the response; that is why the
+ * meter reads this rather than Content-Length.
+ */
+function publicSizes(): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const key of Object.keys(PUBLIC_REV)) out[key] = statSync(join('public', key)).size;
+  for (const key of Object.keys(out)) {
+    if (!key.endsWith('.gltf')) continue;
+    try {
+      const json = JSON.parse(readFileSync(join('public', key), 'utf8')) as { buffers?: { uri?: string }[]; images?: { uri?: string }[] };
+      const deps = new Set<string>();
+      for (const item of [...(json.buffers ?? []), ...(json.images ?? [])]) {
+        if (item.uri && !item.uri.startsWith('data:')) deps.add(posix.normalize(posix.join(posix.dirname(key), decodeURIComponent(item.uri))));
+      }
+      for (const dep of deps) out[key] += out[dep] ?? 0;
+    } catch {
+      // an unreadable gltf costs what it weighs; the meter then under-counts it rather than the build failing
+    }
+  }
+  return out;
+}
+
+const PUBLIC_SIZE = publicSizes();
+
 const stampJson = (): string =>
   `${JSON.stringify({ version, commit: HEAD, built: new Date().toISOString() }, null, 2)}\n`;
 
@@ -141,6 +172,7 @@ export default defineConfig({
     __BUILD_DATE__: JSON.stringify(new Date().toISOString().slice(0, 10)),
     __RELAY_URL__: JSON.stringify(RELAY_URL),
     __PUBLIC_REV__: JSON.stringify(PUBLIC_REV),
+    __PUBLIC_SIZE__: JSON.stringify(PUBLIC_SIZE),
   },
   build: {
     // three alone is ~600 kB minified; the default 500 kB warning would
