@@ -1,5 +1,7 @@
 import { attachRecoveredMeshes, applyRecoveredBaseline, fitWeights, LEGGINGS_FIT_KEYS, SHIRT_FINE_FIT_KEYS, updateLeggingsHem, releaseRecoveredMeshes } from './recoveredClothes';
 import { garmentTexturePanel } from './garmentTexturePanel';
+import { fabricPanel, type FabricPanel } from './fabricPanel';
+import { mapBody } from './bodyRegions';
 import { uprightLayout, type UprightLayout } from './uprightTabs';
 import { loadingCard, LOADING_COVERED_VAR, type LoadingCard, type LoadingPlace } from './loadingCard';
 import { LoadMeter } from '../assets/loadMeter';
@@ -50,6 +52,12 @@ import {
 } from './sarahLabTool';
 
 const M = UNITS_PER_METRE;
+/** What the fabric editor calls each garment. */
+const GARMENT_LABEL: Partial<Record<Garment, string>> = {
+  shirt: 'Tee', shirtAthletic: 'Athletic tee', shirtRelaxedHigh: 'Relaxed tee', shirtRelaxedLow: 'Relaxed tee',
+  shirtSpandexHigh: 'Spandex tee', shirtSpandexLow: 'Spandex tee', leggings: 'High leggings', leggingsLow: 'Low leggings',
+  bikini: 'Bikini', swimsuit: 'Swimsuit',
+};
 /** What the card says while the room opens. */
 const OPENING_LABEL = 'Opening the character room';
 /** The camera's vertical view on a landscape screen (degrees). */
@@ -256,6 +264,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   // ------------------------------------------------------------------ HUD
   let hud: HTMLElement | null = null;
   let texturePanel: ReturnType<typeof garmentTexturePanel> | null = null;
+  // the fabric editor (fabricPanel.ts); while it paints onto her body every garment is hidden (Joshua, 2026-10-20)
+  let fabric: FabricPanel | null = null;
+  let painting = false;
   const fields: Record<string, HTMLElement> = {};
   const buttons: Record<string, HTMLButtonElement> = {};
   let armsInput: HTMLInputElement | null = null;
@@ -340,7 +351,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     }, { normalizeNormals: !(mesh.userData.recoveredShirt || mesh.userData.recoveredLeggings) });
     for (const mesh of skinned) {
       const dict = mesh.morphTargetDictionary, influences = mesh.morphTargetInfluences;
-      if (dict && influences) for (const [name, w] of Object.entries({ ...bellyWeights(bump), ...breastWeightsForShape(bump, dict[BREAST_GROW_TARGET] !== undefined, body.breastSize), [BELLY_UPPER_TARGET]: bellyUpperWeight(bump), ...navelWeights(bump), [NAVEL_FLAT_TARGET]: navelFlatWeight(bump), [BELLY_REFINE_TARGET]: refineWeight(refine, bump), [SEAT_TARGET]: seatCorrectiveWeight(pose === 'sit' ? 1 : 0, bump), [SEAT_V2_TARGET]: seatCorrectiveV2Weight(pose === 'sit' ? 1 : 0, bump), ...armRaiseWeights() })) {
+      if (dict && influences) for (const [name, w] of Object.entries({ ...bellyWeights(bump), ...breastWeightsForShape(bump, dict[BREAST_GROW_TARGET] !== undefined, body.breastSize), [BELLY_UPPER_TARGET]: bellyUpperWeight(bump), ...navelWeights(bump), [NAVEL_FLAT_TARGET]: Math.max(navelFlatWeight(bump), fabric?.navelFlatten() ?? 0), [BELLY_REFINE_TARGET]: refineWeight(refine, bump), [SEAT_TARGET]: seatCorrectiveWeight(pose === 'sit' ? 1 : 0, bump), [SEAT_V2_TARGET]: seatCorrectiveV2Weight(pose === 'sit' ? 1 : 0, bump), ...armRaiseWeights() })) {
         const at = dict[name];
         if (at !== undefined) influences[at] = w;
       }
@@ -349,6 +360,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       if (([...GARMENTS, ...RECOVERED_SHIRTS] as readonly string[]).includes(name)) mesh.visible = shownNow(name);
       { const t = trimShown(name, wornGarments(outfit, garments)); if (t !== null) mesh.visible = t; }
       if (mesh.userData.replacedByRecovered) mesh.visible = false;
+      // painting onto her body: "don't show any clothing since you would be painting over the body"
+      if (painting && !mesh.geometry.getAttribute('_cloth_cover')) mesh.visible = false;
       if (mesh.userData.recoveredLeggings) updateLeggingsHem(mesh, bump, shownNow('shirtSpandexHigh') ? 'spandex' : 'relaxed');
       // the leggings under a worn athletic tee, the same way
       const underTop = mesh.geometry.getAttribute('_under_top');
@@ -367,7 +380,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       const cover = mesh.geometry.getAttribute('_cloth_cover');
       if (cover && mesh.geometry.index) {
         const all = (mesh.userData.allIndices ??= mesh.geometry.index.array.slice()) as ArrayLike<number>;
-        const mask = bodyNeverHidden(SARAH_LAB_MODELS[modelIndex].id) ? 0 : coverMask(wornGarments(outfit, garments));
+        const mask = painting || bodyNeverHidden(SARAH_LAB_MODELS[modelIndex].id) ? 0 : coverMask(wornGarments(outfit, garments));
         if (mesh.userData.coverMask !== mask) {
           mesh.userData.coverMask = mask;
           // read through getX: the file stores the bits with a stride (vertex data is 4-byte
@@ -377,6 +390,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         }
       }
     }
+    fabric?.sync();
   }
 
   /** The outfit as the OUTFIT button names it: on v2 the first two are the relaxed tee over either rise. */
@@ -455,7 +469,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     for (const [p, run] of [...inflight]) if (isShirtPart(p) && !parts.includes(p)) { run.abort.abort(); inflight.delete(p); }
     const request = ++outfitRequest;
     if (!missing.length) {
-      wantedOutfit = null; outfit = next;
+      wantedOutfit = null; outfit = next; fabric?.refreshTargets();
       if (model) model.visible = true;
       applyLook(); applyMotion(); refresh();
       if (opening) settle(); else if (meter.snapshot().phase !== 'idle') meter.ready();
@@ -474,7 +488,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       missing.forEach((p, i) => { if (sameBody && (isShirtPart(p) ? !stale && !broken : true)) wearPart(p, scenes[i]); else release(scenes[i]); });
       if (stale) return;
       if (broken) { failLoad(opening ? 'her outfit' : `the ${outfitName(next)} outfit`, () => again(next, opening)); refresh(); return; }
-      wantedOutfit = null; outfit = next;
+      wantedOutfit = null; outfit = next; fabric?.refreshTargets();
       if (model) model.visible = true;
       applyLook(); applyMotion(); refresh(); settle();
     }).catch(error => {
@@ -508,6 +522,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       if ((e.target as HTMLElement).closest('button,input,select,summary')) return;
       root.setPointerCapture(e.pointerId);
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      // painting her body: one finger is the brush, a second takes over as turn and zoom
+      if (fabric?.tool()) { if (pointers.size === 1) fabric.strokeStart(e.clientX, e.clientY); else fabric.strokeEnd(); }
       if (pointers.size === 2) {
         const [a, b] = [...pointers.values()];
         pinch = Math.hypot(a.x - b.x, a.y - b.y);
@@ -518,6 +534,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       if (!was) return;
       const now = { x: e.clientX, y: e.clientY };
       pointers.set(e.pointerId, now);
+      if (pointers.size === 1 && fabric?.tool()) { fabric.strokeMove(now.x, now.y); return; }
       if (pointers.size === 1) {
         orbit.yaw -= (now.x - was.x) * 0.008;
         orbit.pitch = Math.min(1.2, Math.max(-0.35, orbit.pitch + (now.y - was.y) * 0.006));
@@ -530,7 +547,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         pinch = d;
       }
     });
-    const up = (e: PointerEvent) => { pointers.delete(e.pointerId); pinch = 0; };
+    const up = (e: PointerEvent) => { pointers.delete(e.pointerId); pinch = 0; fabric?.strokeEnd(); };
     root.addEventListener('pointerup', up);
     root.addEventListener('pointercancel', up);
     root.addEventListener('wheel', (e) => { e.preventDefault(); zoom(Math.exp(e.deltaY * 0.001)); }, { passive: false });
@@ -675,6 +692,52 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       else { applyLook(); refresh(); }
     });
     texturePanel.element.dataset.tab = 'clothes';
+    const scaleOf = new THREE.Vector3();
+    fabric = fabricPanel({
+      meshes: () => skinned,
+      body: () => skinned.find(m => !!m.geometry.getAttribute('_cloth_cover')) ?? null,
+      worn: () => wornGarments(outfit, garments).map(g => ({ name: g, label: GARMENT_LABEL[g] ?? g, trim: skinned.some(m => (Array.isArray(m.material) ? m.material : [m.material]).some(x => x.name === `${g}Trim`)) })),
+      rest: (mesh) => shaped.find(x => x.mesh === mesh)?.fields ?? null,
+      unitsPerCm: (mesh) => { mesh.getWorldScale(scaleOf); return (M / 100) / (scaleOf.x || 1); },
+      loadImage: (path) => assets.loadTexture(path).then(t => { const image = (t?.image ?? null) as (CanvasImageSource & { width: number; height: number }) | null; t?.dispose(); return image; }),
+      painting: (on) => { painting = on; applyLook(); refresh(); },
+      view: () => ({ camera, ...ctx.renderer.size() }),
+      describe: () => ({ base: SARAH_LAB_MODELS[modelIndex].id, outfit: OUTFITS[outfit].name }),
+      reshape: () => { applyLook(); },
+      navelHint: () => {
+        // her navel: the vertex her own navel morphs move most
+        const body = skinned.find(m => !!m.geometry.getAttribute('_cloth_cover'));
+        const dict = body?.morphTargetDictionary, targets = body?.geometry.morphAttributes.position;
+        if (!body || !dict || !targets) return undefined;
+        let best = -1, most = 0;
+        for (const name of [...Object.keys(navelWeights(150)), NAVEL_FLAT_TARGET]) {
+          const t = dict[name] !== undefined ? targets[dict[name]] : undefined;
+          if (!t) continue;
+          for (let i = 0; i < t.count; i++) { const m = t.getX(i) ** 2 + t.getY(i) ** 2 + t.getZ(i) ** 2; if (m > most) { most = m; best = i; } }
+        }
+        return best >= 0 ? best : undefined;
+      },
+      regions: () => {
+        const body = skinned.find(m => !!m.geometry.getAttribute('_cloth_cover'));
+        if (!body || !rig || !measure) return null;
+        const g = body.geometry, si = g.getAttribute('skinIndex'), sw = g.getAttribute('skinWeight'), n = g.getAttribute('position').count;
+        if (!si || !sw) return null;
+        const four = (a: THREE.BufferAttribute | THREE.InterleavedBufferAttribute) => Float32Array.from({ length: n * 4 }, (_, i) => a.getComponent(Math.floor(i / 4), i % 4));
+        const fields = shaped.find(x => x.mesh === body)?.fields;
+        const three3 = (a: THREE.BufferAttribute | THREE.InterleavedBufferAttribute) => Float32Array.from({ length: n * 3 }, (_, i) => a.getComponent(Math.floor(i / 3), i % 3));
+        // into the skeleton's bind space, where the joints are measured (the bind matrix is identity on her today)
+        const position = Float32Array.from(fields?.basePos ?? three3(g.getAttribute('position'))), normal = Float32Array.from(fields?.baseNrm ?? three3(g.getAttribute('normal')));
+        const at = new THREE.Vector3(), bindNormal = new THREE.Matrix3().getNormalMatrix(body.bindMatrix);
+        for (let i = 0; i < n; i++) {
+          at.fromArray(position, i * 3).applyMatrix4(body.bindMatrix).toArray(position, i * 3);
+          at.fromArray(normal, i * 3).applyMatrix3(bindNormal).toArray(normal, i * 3);
+        }
+        const bindRig = rig, jointAt = Object.fromEntries(Object.entries(measure.joints).map(([k, j]) => [k, [bindRig.bind[j].x, bindRig.bind[j].y, bindRig.bind[j].z]])) as Record<keyof typeof measure.joints, [number, number, number]>;
+        return mapBody({ skinIndex: four(si), skinWeight: four(sw), parents: rig.bind.map(j => j.parent), joints: measure.joints, restNormal: normal, restPosition: position, jointAt });
+      },
+    });
+    fabric.element.dataset.tab = 'clothes';
+    right.appendChild(fabric.element);
     right.appendChild(texturePanel.element);
     root.appendChild(right);
     // the CAMERA tab's own buttons: held upright only (landscape has the wheel and the pinch beside its panel)
@@ -917,6 +980,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       inflight.clear();
       texturePanel?.dispose();
       texturePanel = null;
+      fabric?.dispose();
+      fabric = null;
       hud?.remove();
       hud = null;
       if (model) { three.remove(model); rig?.dispose(); release(model); model = null; }

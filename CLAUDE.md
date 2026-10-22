@@ -146,6 +146,16 @@ Every other screen is landscape only, as above; do not widen this to
 another screen without his say-so. `tests/landscapeOnly.test.ts` pins
 it.
 
+**A character appears dressed, all at once, in the game** (Joshua,
+2026-10-20: "When Sarah, Lena, or another character appears, I want the
+complete equipped character revealed together once its required body,
+clothing, and materials are ready"). Her files may download separately
+and progressively behind the scenes, and nothing is merged into one big
+file for it; what is held back is the REVEAL. The character room is the
+exception, the way it is for orientation: it may show the base body on
+its own (body paint hides her clothes on purpose) while the rest loads,
+with the loading card saying how far (`sarahlab/loadingCard.ts`).
+
 **Controls belong to the thumbs, not the screen.** Screen space near the
 thumbs is the scarcest resource; action controls have first claim.
 Before adding a control, check whether a gesture can carry it. Movement
