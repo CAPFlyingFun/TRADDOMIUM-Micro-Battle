@@ -212,6 +212,8 @@ export const OUTFITS: readonly { readonly name: string; readonly garments: reado
   // every belly and breast shape for free). Layers paint bottom first. Only on the approved v2 body.
   { name: 'painted tee + leggings', garments: [], paint: [{ template: 'leggingsFull', fabric: { family: 'athletic', colour: 1 } }, { template: 'teeShort', fabric: { family: 'jersey', colour: 0 } }] },
   { name: 'painted tee + low leggings', garments: [], paint: [{ template: 'leggingsUnder', fabric: { family: 'athletic', colour: 1 } }, { template: 'teeShort', fabric: { family: 'jersey', colour: 0 } }] },
+  { name: 'painted U-neck tee + leggings', garments: [], paint: [{ template: 'leggingsFull', fabric: { family: 'athletic', colour: 1 } }, { template: 'teeU', fabric: { family: 'jersey', colour: 0 } }] },
+  { name: 'painted V-neck tee + leggings', garments: [], paint: [{ template: 'leggingsFull', fabric: { family: 'athletic', colour: 1 } }, { template: 'teeV', fabric: { family: 'jersey', colour: 0 } }] },
   { name: 'painted swimsuit', garments: [], paint: [{ template: 'swimsuit', fabric: { family: 'athletic', colour: 14 } }] },
   { name: 'painted leotard', garments: [], paint: [{ template: 'bodysuit', fabric: { family: 'athletic', colour: 15 } }] },
 ];
@@ -243,6 +245,10 @@ export function nextOutfit(index: number, available: readonly Garment[] = []): n
     const next = (index + step) % OUTFITS.length;
     const wanted = wantedGarments(next, available);
     if (OUTFITS[next].paint && available.length && !paintedOutfitsAvailable(available)) continue;
+    // where painted outfits are, the modelled clothes that need their own files are kept but never offered, so never
+    // downloaded (Joshua, 2026-10-22: "keep the modeled clothing, but not load them"); the bikini stays (its design is
+    // protected, and its top is in her own file)
+    if (paintedOutfitsAvailable(available) && recoveredPartsFor(wanted).some((part) => part !== 'bottom')) continue;
     if (!available.length || wanted.every((g) => available.includes(g))) return next;
   }
   return (index + 1) % OUTFITS.length;

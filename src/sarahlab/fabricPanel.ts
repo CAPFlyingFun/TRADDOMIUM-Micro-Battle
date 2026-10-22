@@ -26,6 +26,7 @@ import { KEEP_PRESETS, type DetailKeep } from './bodyDetail';
 import { DEFAULT_LAYER_DETAIL, DETAIL_MATERIALS, resolveDetail, type DetailMode, type LayerDetail } from './detailMaterials';
 import { BRUSH_RANGE_CM, BodyPaint, PAINT_LAYER_COUNT, packLayer } from './bodyPaint';
 import { BODY_REGIONS, REGION_GROUPS, groupOf, groupRegions, type BodyMap, type RegionSide } from './bodyRegions';
+import { CleavageBridge } from './cleavageBridge';
 import { COVERAGE_DIALS, COVERAGE_TEMPLATES, TEMPLATE_GROUPS, coverage, dialValue, dialsFor, withDial, type CoverageParams } from './paintTemplates';
 
 export const FABRIC_PANEL_ROLE = 'sarahlab-fabric';
@@ -102,6 +103,12 @@ export interface FabricPanel {
    * paint covers her navel, so a bare or bikini navel is never touched. 0 with nothing painted there.
    */
   navelFlatten(): number;
+  /**
+   * The cleavage bridge of a painted top (`cleavageBridge.ts`): `frame` re-lays it where her breasts are now (once a
+   * frame, after her skeleton moves); `reshaped` chooses its ends again after her belly or breast shape changes.
+   */
+  frame(): void;
+  reshaped(): void;
   dispose(): void;
 }
 
@@ -506,7 +513,28 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
         const l = p && p.has(i) ? layerFor(body, c, c.fabric, 'plain') : null;
         setFabricLayer(body, material, i, l, { layers: PAINT_LAYER_COUNT, masked: true, rest: hooks.rest(body) });
       }
+      dressBridge(body, p);
     }
+  }
+  /**
+   * The cleavage bridge goes on with the topmost painted top (a template with an upper part), in its fabric, cut to its
+   * neckline; with no painted top, or while she is being painted (her clothes are hidden then), it comes off.
+   */
+  let bridge: CleavageBridge | null = null;
+  function dressBridge(body: THREE.Mesh, p: BodyPaint | null): void {
+    let top = -1;
+    for (let i = PAINT_LAYER_COUNT - 1; i >= 0 && top < 0; i--) {
+      if (p && p.has(i) && paintChoices[i].fabric && templates[i] && templates[i]!.params.hemFront !== null && templates[i]!.params.topFront === null) top = i;
+    }
+    if (top < 0 || painting || !p || !(body as THREE.SkinnedMesh).isSkinnedMesh) { bridge?.wear(null); return; }
+    const map = regionMap();
+    if (!map) return;
+    if (bridge && bridge.mesh.parent !== body) { bridge.dispose(); bridge = null; }
+    if (!bridge) bridge = new CleavageBridge(body as THREE.SkinnedMesh, map);
+    const c = paintChoices[top], layer = top;
+    bridge.wear({ params: templates[top]!.params, covered: (v) => p.coverAt(v, [layer]) });
+    setFabricLayer(bridge.mesh, bridge.mesh.material as THREE.Material, 0, layerFor(body, c, c.fabric, 'plain'), { layers: 1, masked: false, rest: null });
+    bridge.feathered();
   }
 
   // ------------------------------------------------------------ strokes
@@ -597,7 +625,10 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
     exportConfig,
     wearOutfit,
     navelFlatten,
+    frame() { bridge?.update(); },
+    reshaped() { bridge?.reshape(); },
     dispose() {
+      bridge?.dispose(); bridge = null;
       garmentChoices.clear();
       paintChoices.fill(DEFAULT_CHOICE);
       if (paint) for (let i = 0; i < PAINT_LAYER_COUNT; i++) paint.clear(i);

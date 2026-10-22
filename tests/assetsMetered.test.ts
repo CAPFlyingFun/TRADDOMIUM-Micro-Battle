@@ -109,15 +109,16 @@ describe('the room opens with only what she has on', () => {
     // the painted outfits (Joshua, 2026-10-21) download nothing: they are paint on her own skin
     for (let i = 7; i < OUTFITS.length; i++) expect(OUTFITS[i].paint?.length ?? 0).toBeGreaterThan(0);
     for (let i = 7; i < OUTFITS.length; i++) expect(recoveredPartsFor(wornGarments(i, all))).toEqual([]);
-    expect(OUTFITS).toHaveLength(11);
+    expect(OUTFITS).toHaveLength(13);
   });
 
-  it('cycles through every outfit the slim v2 body can wear, modelled and painted (its own file no longer carries the grown tee or leggings)', () => {
+  it('cycles through the painted outfits, the bikini and none on the slim v2 body, never the modelled shirts and leggings', () => {
     // what the slim body file carries, plus every garment with its own file
     const slim: Garment[] = [...new Set<Garment>(['bikini', ...RECOVERED_GARMENTS, ...RECOVERED_SHIRTS])];
     const seen: number[] = [];
     for (let i = PAINTED_DEFAULT_OUTFIT, n = 0; n < OUTFITS.length; n++) { i = nextOutfit(i, slim); seen.push(i); }
-    expect([...new Set(seen)].sort((a, b) => a - b)).toEqual([0, 1, 2, 4, 5, 6, 7, 8, 9, 10]);
+    // the modelled shirts and leggings are kept but not offered (Joshua, 2026-10-22): bikini, none and the painted ones
+    expect([...new Set(seen)].sort((a, b) => a - b)).toEqual([2, 4, ...OUTFITS.map((o, i) => (o.paint ? i : -1)).filter((i) => i >= 0)]);
   });
 
   it('downloads less than the four files it used to wait for, and every file has a size', () => {

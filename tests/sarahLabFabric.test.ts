@@ -360,3 +360,28 @@ describe("the leotard's front, traced from Joshua's lines (2026-10-21)", () => {
     expect(covered / marked).toBeLessThan(0.85);
   });
 });
+
+import { necklineCut, necklineHalfWidth } from '../src/sarahlab/paintTemplates';
+
+describe('U- and V-neck necklines (Joshua, 2026-10-22)', () => {
+  const t = (id: string) => COVERAGE_TEMPLATES.find((x) => x.id === id)!.params;
+  it('cut down to the dip and widen to the base of her neck: straight for a V, round for a U', () => {
+    const v = t('teeV'), u = t('teeU');
+    expect(v.neckStyle).toBe('v'); expect(u.neckStyle).toBe('u');
+    expect(necklineHalfWidth(v, v.neckFront! - 0.01)).toBe(0);
+    expect(necklineHalfWidth(u, u.neckFront! - 0.01)).toBe(0);
+    // halfway up, a V is half as wide as at the top, a U already most of the way
+    const mid = (p: typeof v) => necklineHalfWidth(p, (p.neckFront! + 0.97) / 2) / necklineHalfWidth(p, 0.97);
+    expect(mid(v)).toBeCloseTo(0.5, 5);
+    expect(mid(u)).toBeGreaterThan(0.8);
+    expect(necklineHalfWidth(t('teeShort'), 0.95)).toBe(0);
+  });
+  it('the cut height is the inverse of the width, so the bridge and the paint share one edge', () => {
+    for (const p of [t('teeV'), t('teeU')]) for (const lat of [0, 0.3, 0.8, 1.2, 1.6]) {
+      const cut = necklineCut(p, lat);
+      expect(necklineHalfWidth(p, cut)).toBeCloseTo(lat, 5);
+    }
+    expect(necklineCut(t('teeShort'), 0.5)).toBe(Infinity);
+    expect(necklineCut(t('teeV'), 5)).toBe(Infinity);
+  });
+});

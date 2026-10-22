@@ -60,6 +60,12 @@ export interface CoverageParams {
   /** Upper body: an armhole -- skin beyond the straps above this trunk height is bare (a tank, a bra). Null: none. */
   readonly armhole: number | null;
   /**
+   * The front neckline's shape (Joshua, 2026-10-22: "depending on the type of shirt... U-neck and V-neck"): `crew`, the
+   * plain opening round her neck; `u`, a round dip down to `neckFront`; `v`, a point down to `neckFront`. Behind, every
+   * style is the crew's. The cleavage bridge (`cleavageBridge.ts`) is cut to the same line.
+   */
+  readonly neckStyle: 'crew' | 'u' | 'v';
+  /**
    * A one-piece's leg openings, cut high (a leotard; see `legCutLine`). Heights are on the trunk: `crotch` where the
    * strip between her legs ends; `side` / `sideBack` the top of the cut over her hips in front and behind. Widths are
    * hip-joint spacings from her midline: `gusset` / `gussetFront` the half-width at the crotch behind and in front;
@@ -70,7 +76,7 @@ export interface CoverageParams {
   readonly legCut: { readonly crotch: number; readonly side: number; readonly sideBack: number; readonly gusset: number; readonly gussetFront: number; readonly traced?: boolean; readonly backSpan: number } | null;
 }
 
-const NONE: CoverageParams = Object.freeze({ riseFront: null, riseSide: null, riseBack: null, riseFrontWidth: 1, legStart: 0, legEnd: 0, feet: false, hemFront: null, hemBack: null, neckFront: null, neckBack: null, sleeve: -1, topFront: null, topBack: null, topSide: null, strap: 0, strapIn: 0, armhole: null, legCut: null });
+const NONE: CoverageParams = Object.freeze({ riseFront: null, riseSide: null, riseBack: null, riseFrontWidth: 1, legStart: 0, legEnd: 0, feet: false, hemFront: null, hemBack: null, neckFront: null, neckBack: null, sleeve: -1, topFront: null, topBack: null, topSide: null, strap: 0, strapIn: 0, armhole: null, neckStyle: 'crew', legCut: null });
 
 export const TEMPLATE_GROUPS = ['Leggings', 'Shorts', 'Shirts', 'Bras & bands', 'Other'] as const;
 export interface CoverageTemplate {
@@ -100,6 +106,8 @@ export const RISES = Object.freeze({
 });
 export const LINES = Object.freeze({
   hemHip: -0.1, hemMaternity: -0.04, hemCrop: 0.62, neckCrew: 0.94, neckScoop: 0.86, neckTank: 0.8,
+  /** the dips of a U- and a V-neck, down into her cleavage */
+  neckU: 0.76, neckV: 0.72,
   /** under her bust (her map's underbust is 0.6), and the band of a bra or bandeau behind */
   underbust: 0.56, bandBack: 0.56, bandTopBack: 0.7, bandeauTop: 0.82,
   /** where an armhole's bottom sits, a little above her underarm */
@@ -153,6 +161,29 @@ export function legCutLine(g: NonNullable<CoverageParams['legCut']>, across: num
   const back = g.crotch + (g.sideBack - g.crotch) * (1 - (1 - u) ** 2);
   return back + (legCutFront(g, across) - back) * front;
 }
+/**
+ * A U or V neckline's half-width, in neck radii sideways from her neck's axis, at trunk height `t`: nothing below its
+ * dip (`neckFront`), widening to NECK_WIDTH at the base of her neck -- straight for a V, round for a U.
+ */
+export function necklineHalfWidth(p: Pick<CoverageParams, 'neckFront' | 'neckStyle'>, t: number): number {
+  if (p.neckFront === null || p.neckStyle === 'crew') return 0;
+  const u = Math.max(0, Math.min(1, (t - p.neckFront) / Math.max(1e-3, NECK_TOP - p.neckFront)));
+  return NECK_WIDTH * (p.neckStyle === 'v' ? u : Math.sqrt(Math.max(0, 1 - (1 - u) ** 2)));
+}
+/**
+ * The highest trunk height a U or V neckline leaves covered at `lateral` neck radii from her neck's axis (the inverse of
+ * `necklineHalfWidth`); Infinity where it cuts nothing (a crew, or out past the opening).
+ */
+export function necklineCut(p: Pick<CoverageParams, 'neckFront' | 'neckStyle'>, lateral: number): number {
+  if (p.neckFront === null || p.neckStyle === 'crew' || lateral >= NECK_WIDTH) return Infinity;
+  const w = Math.max(0, lateral) / NECK_WIDTH;
+  const u = p.neckStyle === 'v' ? w : 1 - Math.sqrt(Math.max(0, 1 - w * w));
+  return p.neckFront + u * (NECK_TOP - p.neckFront);
+}
+/** Where a U or V neckline reaches its full width (just under the base of her neck) and how wide that is, in neck radii. */
+const NECK_TOP = 0.97, NECK_WIDTH = 1.7;
+/** The crew opening's width round her neck, in neck radii (what `open` is for a crew at LINES.neckCrew). */
+const CREW_OPEN = 1.5 + (0.97 - LINES.neckCrew) * 4;
 /** How far down the back strip, as a share of the cut's height behind, its rounded corner into the top edge begins. */
 const BACK_FILLET = 0.38;
 /**
@@ -186,6 +217,9 @@ export const COVERAGE_TEMPLATES: readonly CoverageTemplate[] = Object.freeze(([
   ['tank', 'Tank top', 'Shirts', upper(LINES.hemHip, LINES.hemHip, LINES.neckTank, -1, { strapIn: 1.0, strap: 0.55, neckBack: 0.9, armhole: LINES.armhole })],
   ['sleeveless', 'Sleeveless shirt', 'Shirts', upper(LINES.hemHip, LINES.hemHip, LINES.neckCrew, 0.07)],
   ['teeShort', 'Short-sleeve T-shirt', 'Shirts', upper(LINES.hemHip, LINES.hemHip, LINES.neckCrew, 0.32)],
+  // U- and V-neck tees (Joshua, 2026-10-22): the dip goes down between her breasts, and the cleavage bridge follows it
+  ['teeU', 'U-neck T-shirt', 'Shirts', upper(LINES.hemHip, LINES.hemHip, LINES.neckU, 0.32, { neckStyle: 'u' })],
+  ['teeV', 'V-neck T-shirt', 'Shirts', upper(LINES.hemHip, LINES.hemHip, LINES.neckV, 0.32, { neckStyle: 'v' })],
   ['teeThreeQuarter', '3/4-sleeve T-shirt', 'Shirts', upper(LINES.hemHip, LINES.hemHip, LINES.neckCrew, 0.72)],
   ['teeLong', 'Long-sleeve shirt', 'Shirts', upper(LINES.hemHip, LINES.hemHip, LINES.neckCrew, 1.0)],
   ['crop', 'Crop top', 'Shirts', upper(LINES.hemCrop, LINES.hemCrop - 0.04, LINES.neckScoop, 0.25)],
@@ -344,7 +378,11 @@ export function coverage(map: BodyMap, p: CoverageParams): Float32Array {
         ? soft(aroundLine(p.topFront, p.topSide ?? (p.topFront + (p.topBack ?? p.topFront)) / 2, p.topBack ?? p.topFront, p.topSide !== null ? 0.82 : 1, 0.5, map.around[v]) - t)
         // inside the straps, a scoop: the neckline's bottom corners are rounded
         : p.strap > 0 ? 1 - soft(insideCorner((p.strapIn - lat) * k, t - neck, ROUND.neckline))
-        : Math.max(soft(neck - t), soft(map.collar[v] - open));
+        : p.neckStyle !== 'crew' && p.neckFront !== null
+          // a U or V in front: the crew's opening round her neck, cut down the front to the dip
+          ? Math.min(Math.max(soft(blend(LINES.neckCrew, p.neckBack ?? LINES.neckCrew, map.around[v]) - t), soft(map.collar[v] - CREW_OPEN)),
+            1 - smooth01((map.around[v] - 0.55) / 0.2) * Math.min(soft(t - p.neckFront), softSideways(necklineHalfWidth(p, t) - lat)))
+          : Math.max(soft(neck - t), soft(map.collar[v] - open));
       // straps over her shoulders; beyond them, above the armhole, bare -- the armhole sweeps round from the strap's
       // outer edge down to the underarm instead of turning a square corner
       const strap = p.strap > 0 ? Math.min(softSideways(lat - p.strapIn), softSideways(outer - lat)) : 0;

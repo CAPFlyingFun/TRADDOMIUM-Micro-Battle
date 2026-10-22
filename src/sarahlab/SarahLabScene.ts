@@ -394,6 +394,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       }
     }
     fabric?.sync();
+    // her shape may have changed: the cleavage bridge chooses its ends again
+    fabric?.reshaped();
   }
 
   /** The outfit as the OUTFIT button names it: on v2 the first two are the relaxed tee over either rise. */
@@ -980,6 +982,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       if (rig) rig.apply(turnsFor());
       place();
       feelMotion(frame.rawDt);
+      // a painted top's cleavage bridge is laid where her breasts are this frame
+      if (fabric && model) { model.updateMatrixWorld(true); fabric.frame(); }
     },
 
     resize(width: number, height: number) {
