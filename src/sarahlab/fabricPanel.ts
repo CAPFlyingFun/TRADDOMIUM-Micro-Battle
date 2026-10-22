@@ -92,6 +92,12 @@ export interface FabricPanel {
   strokeEnd(): void;
   exportConfig(): OutfitConfig;
   /**
+   * Put on a painted outfit: each of its layers a coverage template in a fabric swatch, bottom first. Layers a previous
+   * painted outfit filled and this one does not are cleared; layers painted by hand are left alone unless this outfit
+   * needs them. Null takes a painted outfit off. False if her body is not ready to paint yet.
+   */
+  wearOutfit(layers: readonly { readonly template: string; readonly fabric: FabricPick }[] | null): boolean;
+  /**
    * How far toward flat her navel's own `navelFlat` morph should go under paint: (1 - NAVEL DETAIL) times how much
    * paint covers her navel, so a bare or bikini navel is never touched. 0 with nothing painted there.
    */
@@ -549,6 +555,28 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
   }
   function strokeEnd(): void { if (stroking) { stroking = false; paint?.endStroke(); draw(); } }
 
+  // which layers the last painted outfit filled (so taking it off clears them and nothing painted by hand)
+  const outfitLayers: boolean[] = Array.from({ length: PAINT_LAYER_COUNT }, () => false);
+  function wearOutfit(layers: readonly { readonly template: string; readonly fabric: FabricPick }[] | null): boolean {
+    const p = bodyPaint(), map = regionMap();
+    if (!p || !map) return false;
+    for (let i = 0; i < PAINT_LAYER_COUNT; i++) {
+      const want = layers?.[i], t = want ? COVERAGE_TEMPLATES.find((x) => x.id === want.template) : undefined;
+      if (want && t) {
+        templates[i] = { id: t.id, params: t.params };
+        p.setLayer(i, coverage(map, t.params));
+        paintChoices[i] = { ...DEFAULT_CHOICE, fabric: want.fabric };
+        details[i] = DEFAULT_LAYER_DETAIL;
+        outfitLayers[i] = true;
+      } else if (outfitLayers[i]) {
+        p.clear(i); templates[i] = null; paintChoices[i] = DEFAULT_CHOICE; details[i] = DEFAULT_LAYER_DETAIL;
+        outfitLayers[i] = false;
+      }
+    }
+    void apply(); draw();
+    return true;
+  }
+
   function exportConfig(): OutfitConfig {
     const d = hooks.describe();
     return {
@@ -567,6 +595,7 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
     tool: () => (painting && tool !== 'orbit' ? tool : null),
     strokeStart, strokeMove, strokeEnd,
     exportConfig,
+    wearOutfit,
     navelFlatten,
     dispose() {
       garmentChoices.clear();

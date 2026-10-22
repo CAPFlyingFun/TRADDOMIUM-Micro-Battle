@@ -43,12 +43,13 @@ import { assets } from '../assets/assets';
 import { release } from '../tombs/LabPeople';
 import { BODY_CONTROLS, BREAST_DIMENSIONS, controlLine, defaultBodyShape, resetControl, setControl, setLinkedControl, type BodyControl, type BodyShape } from '../actor/bodyShape';
 import { applyShapeFields, liftShapeFields, type ShapeFields } from '../view/bodyShapeView';
+import { dropIdleMorphs } from '../view/morphPrune';
 import { HumanRig, findSkinnedMesh } from '../view/HumanRig';
 import { UNITS_PER_METRE } from '../world/dem';
 import {
   BELLY_MOTION, BELLY_TARGET, trimShown, BREAST_TARGETS, BUMP_MAX_PERCENT, GARMENTS, RECOVERED_SHIRTS, OUTFITS, outfitLine, modelLine, refineLine, refineWeight, nextOutfit, wornGarments, coverMask, bodyNeverHidden, uncoveredSkinIndices, UNDER_TOP_GARMENT, BELLY_REFINE_TARGET, SEAT_TARGET, seatCorrectiveWeight, SARAH_LAB_MODELS, SARAH_LAB_DEFAULT_MODEL, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID,
   bellyMotionWeights, bellyWeights, breastBobWeight, breastWeightsForShape, bodyShapeFieldWeights, SIZE_TILT_PRESETS_DEG, effectiveTiltDeg, stepSeated, bustVolume, BREAST_GROW_TARGET, settledSitFor, bellyUpperWeight, BELLY_UPPER_TARGET, navelWeights, NAVEL_FLAT_TARGET, navelFlatWeight, tPoseTurns, ARM_SIDES, armsLine, ARM_RAISE_TARGETS, armRaiseWeight, SEAT_V2_TARGET, seatCorrectiveV2Weight, fingerBend, THUMB_TO_PALM, bumpLine, fingersLine, restingBellySpring, statusLine, stepBellySpring, stepBreastSpring, walkBounceAccel,
-  type Garment, type SarahLabPose, recoveredPartsFor, recoveredPartPath, isShirtPart, shirtOfPart, type RecoveredPart,
+  type Garment, type SarahLabPose, recoveredPartsFor, recoveredPartPath, isShirtPart, shirtOfPart, type RecoveredPart, PAINTED_DEFAULT_OUTFIT, RECOVERED_GARMENTS,
 } from './sarahLabTool';
 
 const M = UNITS_PER_METRE;
@@ -214,7 +215,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let feel: { bone: THREE.Bone; local: THREE.Vector3 } | null = null;
   const felt = { p: new THREE.Vector3(), v: new THREE.Vector3(), primed: 0 };
   const tmp = new THREE.Vector3();
-  let outfit = 0;
+  // she opens in the painted tee and leggings: nothing to download for it (Joshua, 2026-10-21); a model without
+  // painted outfits (v1) falls back to the first modelled one as it loads
+  let outfit = PAINTED_DEFAULT_OUTFIT;
   let modelIndex = SARAH_LAB_DEFAULT_MODEL;
   // the body's own proportions (Joshua, 2026-10-15): all approved values to start, so she
   // looks exactly as approved until a control moves
@@ -451,6 +454,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       skinned.push(mesh);
       const fields = liftShapeFields(mesh);
       if (fields) shaped.push({ mesh, fields });
+      dropIdleMorphs(mesh);
     }
     partMeshes.set(part, meshes);
   }
@@ -460,6 +464,10 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
    * missing files download (the card at the top says how far), and changes when they are all in. `opening` is the
    * room's first dressing: it carries on the opening's load rather than starting its own.
    */
+  /** A painted outfit's paint goes on with it (and comes off when a modelled one is chosen). */
+  function wearPaint(): void {
+    fabric?.wearOutfit(recovered ? OUTFITS[outfit]?.paint ?? null : null);
+  }
   function dress(next: number, opening = false): void {
     // chosen before she is in: the opening dresses her in it
     if (!loaded && !opening) { outfit = next; refresh(); return; }
@@ -469,7 +477,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     for (const [p, run] of [...inflight]) if (isShirtPart(p) && !parts.includes(p)) { run.abort.abort(); inflight.delete(p); }
     const request = ++outfitRequest;
     if (!missing.length) {
-      wantedOutfit = null; outfit = next; fabric?.refreshTargets();
+      wantedOutfit = null; outfit = next; fabric?.refreshTargets(); wearPaint();
       if (model) model.visible = true;
       applyLook(); applyMotion(); refresh();
       if (opening) settle(); else if (meter.snapshot().phase !== 'idle') meter.ready();
@@ -488,7 +496,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       missing.forEach((p, i) => { if (sameBody && (isShirtPart(p) ? !stale && !broken : true)) wearPart(p, scenes[i]); else release(scenes[i]); });
       if (stale) return;
       if (broken) { failLoad(opening ? 'her outfit' : `the ${outfitName(next)} outfit`, () => again(next, opening)); refresh(); return; }
-      wantedOutfit = null; outfit = next; fabric?.refreshTargets();
+      wantedOutfit = null; outfit = next; fabric?.refreshTargets(); wearPaint();
       if (model) model.visible = true;
       applyLook(); applyMotion(); refresh(); settle();
     }).catch(error => {
@@ -916,12 +924,16 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         // the body's shape fields come off the GPU's list before the first draw (bodyShapeView)
         const lifted = liftShapeFields(mesh);
         if (lifted) shaped.push({ mesh, fields: lifted });
+        // shapes that move nothing on this part are not sent to the GPU (morphPrune.ts)
+        dropIdleMorphs(mesh);
         if (mesh.morphTargetDictionary?.[BELLY_TARGET] !== undefined) hasBelly = true;
         const name = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material).name;
         if (([...GARMENTS, ...RECOVERED_SHIRTS] as readonly string[]).includes(name)) found.add(name as Garment);
 
       });
-      garments = [...GARMENTS, ...RECOVERED_SHIRTS].filter((g) => found.has(g) || (recovered && (RECOVERED_SHIRTS as readonly string[]).includes(g)));
+      // on the approved v2 body every garment with its own file is on hand (the slim body file no longer carries the
+      // leggings it replaced)
+      garments = [...GARMENTS, ...RECOVERED_SHIRTS].filter((g) => found.has(g) || (recovered && RECOVERED_GARMENTS.includes(g)));
       if (!recovered && outfit >= 5) outfit = 0;
       model = loadedModel;
       // she stays out of sight until what she has on is on: never undressed, then dressed a moment later

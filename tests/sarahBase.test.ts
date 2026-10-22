@@ -363,7 +363,7 @@ describe('the Sarah Lab', () => {
     expect(statusLine(true, false, [], true, 1)).toBe('model v2 · belly slider · no clothes in this file yet');
     expect(modelLine(0)).toBe('MODEL · v1');
     expect(modelLine(1)).toBe('MODEL · v2');
-    expect(SARAH_LAB_MODELS.map((m) => m.path)).toEqual(['models/sarah-base.glb', 'models/sarah-v2.glb', 'models/sarah-v2-arms.glb', 'models/sarah-v2-body.glb']);
+    expect(SARAH_LAB_MODELS.map((m) => m.path)).toEqual(['models/sarah-base.glb', 'models/sarah-v2.glb', 'models/sarah-v2-arms.glb', 'models/sarah-v2-body-slim.glb']);
   });
 });
 

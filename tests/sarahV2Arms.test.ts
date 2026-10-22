@@ -157,10 +157,12 @@ describe('Sarah v2 ARMS scene control', () => {
     l.model().traverse(node => {
       const mesh = node as THREE.SkinnedMesh; if (!mesh.isSkinnedMesh) return;
       surfaces++;
-      expect(mesh.morphTargetDictionary!['shape:bellyWidth']).toBeUndefined();
+      expect(mesh.morphTargetDictionary?.['shape:bellyWidth']).toBeUndefined(); // a part left with no shapes has no dictionary at all (morphPrune.ts)
       expect(mesh.geometry.getAttribute('position').getX(0)).toBeCloseTo(.01);
     });
-    expect(surfaces).toBeGreaterThan(3);
+    // every surface the loaded file carries (the slim v2 body: her body and the bikini; its garments have their own files)
+    expect(surfaces).toBe(sources.get('v2-body')!.materials.length);
+    expect(surfaces).toBeGreaterThanOrEqual(2);
   });
 
   it('keeps v1 ARMS restricted to T-POSE with its existing 90 degree default', async () => {

@@ -10,6 +10,7 @@
  */
 import type { BodyShape } from '../actor/bodyShape';
 import type { DevTool } from '../devtools/DevTool';
+import type { FabricFamilyId } from './fabricLibrary';
 
 export const SARAH_LAB_SCENE_ID = 'lab:sarah';
 export const SARAH_LAB_TOOL_ID = 'lab.sarah';
@@ -30,7 +31,14 @@ export const SARAH_V2_ARMS_MODEL = 'models/sarah-v2-arms.glb';
  * it was beside it for comparison; with every control at its approved value it draws the
  * same body.
  */
-export const SARAH_V2_BODY_MODEL = 'models/sarah-v2-body.glb';
+export const SARAH_V2_BODY_MODEL = 'models/sarah-v2-body-slim.glb';
+/**
+ * The room loads the approved body's SLIM copy (Joshua, 2026-10-21: save download and memory): `sarah-v2-body.glb`
+ * stays byte for byte as approved, and `scripts/sarahV2Recovery/body-slim.mjs` writes this file from it without the
+ * garments the room no longer draws from it (both rises of leggings, each replaced by its own fitted file, and the
+ * grown tee, with their trims), proving every part it keeps -- her body, the whole bikini, every morph target and
+ * vertex order -- identical. 37.4 MB to 18.1 MB.
+ */
 
 /**
  * The models the lab can show, in the order MODEL cycles them (Joshua, 2026-10-13:
@@ -141,6 +149,8 @@ const PART_OF: Partial<Record<Garment, RecoveredPart>> = {
   leggings: 'leggings', leggingsLow: 'leggings-low', bikini: 'bottom',
   shirtRelaxedHigh: 'relaxed-high', shirtRelaxedLow: 'relaxed-low', shirtSpandexHigh: 'spandex-high', shirtSpandexLow: 'spandex-low',
 };
+/** The garments the approved v2 body can wear from their own files, whatever its own file still carries. */
+export const RECOVERED_GARMENTS = Object.freeze(Object.keys(PART_OF) as Garment[]);
 /** The recovered files a set of worn garments needs, in the order they are worth fetching: smallest first. */
 export function recoveredPartsFor(worn: readonly Garment[]): RecoveredPart[] {
   const parts = worn.map((g) => PART_OF[g]).filter((p): p is RecoveredPart => !!p);
@@ -187,7 +197,9 @@ export function uncoveredSkinIndices(indices: ArrayLike<number>, coverage: Array
  * swimsuit... all one piece outfit"). Clothes that hang off the body (shirts that
  * flare, jackets, shorts) wait for a real second mesh.
  */
-export const OUTFITS: readonly { readonly name: string; readonly garments: readonly Garment[] }[] = [
+/** One layer of a painted outfit: a coverage template (`paintTemplates.ts`) in a fabric swatch (`fabricLibrary.ts`). */
+export interface PaintedLayer { readonly template: string; readonly fabric: { readonly family: FabricFamilyId; readonly colour: number } }
+export const OUTFITS: readonly { readonly name: string; readonly garments: readonly Garment[]; readonly paint?: readonly PaintedLayer[] }[] = [
   { name: 'tee + leggings', garments: ['shirtAthletic', 'leggings'] },
   { name: 'top + low leggings', garments: ['shirtAthletic', 'leggingsLow'] },
   { name: 'bikini', garments: ['bikini'] },
@@ -195,7 +207,18 @@ export const OUTFITS: readonly { readonly name: string; readonly garments: reado
   { name: 'none', garments: [] },
   { name: 'spandex + high leggings', garments: ['shirtSpandexHigh', 'leggings'] },
   { name: 'spandex + low leggings', garments: ['shirtSpandexLow', 'leggingsLow'] },
+  // PAINTED OUTFITS (Joshua, 2026-10-21: "try body paint for all the clothing"): the same white tee over grey
+  // leggings, in both rises, as paint on her skin -- no garment file to download, no morphs of its own (it follows
+  // every belly and breast shape for free). Layers paint bottom first. Only on the approved v2 body.
+  { name: 'painted tee + leggings', garments: [], paint: [{ template: 'leggingsFull', fabric: { family: 'athletic', colour: 1 } }, { template: 'teeShort', fabric: { family: 'jersey', colour: 0 } }] },
+  { name: 'painted tee + low leggings', garments: [], paint: [{ template: 'leggingsUnder', fabric: { family: 'athletic', colour: 1 } }, { template: 'teeShort', fabric: { family: 'jersey', colour: 0 } }] },
+  { name: 'painted swimsuit', garments: [], paint: [{ template: 'swimsuit', fabric: { family: 'athletic', colour: 14 } }] },
+  { name: 'painted leotard', garments: [], paint: [{ template: 'bodysuit', fabric: { family: 'athletic', colour: 15 } }] },
 ];
+/** The outfit the room opens in on the approved v2 body: the painted tee and leggings, nothing to download. */
+export const PAINTED_DEFAULT_OUTFIT = OUTFITS.findIndex((o) => o.name === 'painted tee + leggings');
+/** Painted outfits are masks on the approved v2 body's own vertices: offered only where that body is (its recovered shirts are listed). */
+export const paintedOutfitsAvailable = (available: readonly Garment[]): boolean => available.includes('shirtRelaxedHigh');
 /**
  * THE ATHLETIC FIT IS THE TEE (Joshua, 2026-10-14: "keep Athletic Fit as the default
  * shirt; remove the old Relaxed Fit option once Athletic Fit is validated"). The grown
@@ -203,9 +226,13 @@ export const OUTFITS: readonly { readonly name: string; readonly garments: reado
  * wears it in its place.
  */
 export function wornGarments(index: number, available: readonly Garment[]): Garment[] {
+  return wantedGarments(index, available).filter((g) => available.includes(g));
+}
+/** What outfit `index` asks for on a model offering `available` (on the approved v2 body, its first two wear the recovered relaxed shirts). */
+function wantedGarments(index: number, available: readonly Garment[]): Garment[] {
   const outfit = OUTFITS[((index % OUTFITS.length) + OUTFITS.length) % OUTFITS.length];
   if (available.includes('shirtRelaxedHigh') && (index === 0 || index === 1)) return index === 0 ? ['shirtRelaxedHigh', 'leggings'] : ['shirtRelaxedLow', 'leggingsLow'];
-  return outfit.garments.map((g) => (g === 'shirtAthletic' && !available.includes(g) ? 'shirt' : g)).filter((g) => available.includes(g));
+  return outfit.garments.map((g) => (g === 'shirtAthletic' && !available.includes(g) ? 'shirt' : g));
 }
 /**
  * An outfit a model cannot dress (v1 has no under-the-belly leggings) is skipped, not shown
@@ -214,7 +241,8 @@ export function wornGarments(index: number, available: readonly Garment[]): Garm
 export function nextOutfit(index: number, available: readonly Garment[] = []): number {
   for (let step = 1; step <= OUTFITS.length; step += 1) {
     const next = (index + step) % OUTFITS.length;
-    const wanted = OUTFITS[next].garments.map((g) => (g === 'shirtAthletic' && !available.includes(g) ? 'shirt' : g));
+    const wanted = wantedGarments(next, available);
+    if (OUTFITS[next].paint && available.length && !paintedOutfitsAvailable(available)) continue;
     if (!available.length || wanted.every((g) => available.includes(g))) return next;
   }
   return (index + 1) % OUTFITS.length;
