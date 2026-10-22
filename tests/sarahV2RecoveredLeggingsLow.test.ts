@@ -21,7 +21,7 @@ let original: Document, low: Document, native: Primitive[], pants: Primitive[];
 beforeAll(async () => {
   await MeshoptDecoder.ready;
   const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'meshopt.decoder': MeshoptDecoder });
-  [original, low] = await Promise.all(['public/models/sarah-v2-body.glb', 'public/models/sarah-v2-leggings-low.glb'].map(path => io.read(path)));
+  [original, low] = await Promise.all(['assets-archive/models/sarah-v2-body.glb', 'assets-archive/models/sarah-v2-leggings-low.glb'].map(path => io.read(path)));
   native = original.getRoot().listMeshes()[0].listPrimitives().filter(p => ['leggingsLow', 'leggingsLowTrim'].includes(p.getMaterial()!.getName()));
   pants = low.getRoot().listMeshes()[0].listPrimitives();
 }, 60000);
@@ -39,7 +39,7 @@ const same = (a: Accessor | null, b: Accessor | null) => {
 
 describe('recovered Sarah v2 native low leggings', () => {
   it('copies the native low leggings out of the unchanged approved body, byte for byte, with nine corrections after the 43 native targets', () => {
-    expect(createHash('sha256').update(readFileSync('public/models/sarah-v2-body.glb')).digest('hex')).toBe(sourceHash);
+    expect(createHash('sha256').update(readFileSync('assets-archive/models/sarah-v2-body.glb')).digest('hex')).toBe(sourceHash);
     expect(pants.map(p => p.getMaterial()!.getName())).toEqual(['leggingsLow', 'leggingsLowTrim', 'leggingsLowTrim', 'leggingsLowTrim']);
     const extras = low.getRoot().listMeshes()[0].getExtras();
     expect(extras.recoveryLeggings).toMatchObject({ sourceSHA256: sourceHash, originalTargets: 43, rise: 'low', fitKeys: [...LEGGINGS_FIT_KEYS] });

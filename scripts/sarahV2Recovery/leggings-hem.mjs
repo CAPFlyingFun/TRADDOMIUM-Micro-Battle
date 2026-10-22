@@ -82,7 +82,7 @@ export function signedHemDistances(world, profile) {
   return distances;
 }
 
-export async function bakeRecoveredLeggingsHems({ snapshots = '.scratch/recovered-fits', output = 'public/models/sarah-v2-leggings.glb' } = {}) {
+export async function bakeRecoveredLeggingsHems({ snapshots = '.scratch/recovered-fits', output = 'assets-archive/models/sarah-v2-leggings.glb' } = {}) {
   await Promise.all([MeshoptDecoder.ready, MeshoptEncoder.ready]);
   const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'meshopt.decoder': MeshoptDecoder, 'meshopt.encoder': MeshoptEncoder });
   const document = await io.read(output), root = document.getRoot(), mesh = root.listMeshes()[0], buffer = root.listBuffers()[0], reports = [];

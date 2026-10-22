@@ -18,7 +18,7 @@
  * each shape, so a cup keeps its gap when droop tips the breast or size swells it.
  *
  * Run after `sarahV2Shape.mjs`, then pack:
- *   node scripts/sarahV2Bikini.mjs public/models/sarah-v2-body.glb [out.glb]
+ *   node scripts/sarahV2Bikini.mjs assets-archive/models/sarah-v2-body.glb [out.glb]
  *   node scripts/packSarah.mjs <out>
  */
 import { fitMeshyBikini } from './fitMeshyBikini.mjs';

@@ -39,11 +39,11 @@ const shirts = new Map<string, { doc: Document; idx: ArrayLike<number>; pose: Re
 beforeAll(async () => {
   await MeshoptDecoder.ready;
   const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'meshopt.decoder': MeshoptDecoder });
-  body = await io.read('public/models/sarah-v2-body.glb');
+  body = await io.read('assets-archive/models/sarah-v2-body.glb');
   const skin = body.getRoot().listMeshes()[0].listPrimitives().find(p => p.getMaterial()!.getName() === 'Material_0')!;
   bodyIdx = skin.getIndices()!.getArray()! as Uint32Array; poseBody = poser(body, skin);
   for (const look of ['spandex-low', 'spandex-high']) {
-    const doc = await io.read(`public/models/sarah-v2-${look}.gltf`), prim = doc.getRoot().listMeshes()[0].listPrimitives()[0];
+    const doc = await io.read(`assets-archive/models/sarah-v2-${look}.gltf`), prim = doc.getRoot().listMeshes()[0].listPrimitives()[0];
     shirts.set(look, { doc, idx: prim.getIndices()!.getArray()!, pose: poser(doc, prim) });
   }
 }, 120000);

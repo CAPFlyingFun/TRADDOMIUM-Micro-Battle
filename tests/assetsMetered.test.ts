@@ -5,11 +5,27 @@
  * The totals come from the build's size manifest, which counts a .gltf with every buffer it names.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { assetBytes, fetchBytes, loadModel } from '../src/assets/assets';
 import { LoadMeter } from '../src/assets/loadMeter';
 import { recoveredPartPath, recoveredPartsFor, wornGarments, GARMENTS, RECOVERED_SHIRTS, OUTFITS, PAINTED_DEFAULT_OUTFIT, SARAH_V2_BODY_MODEL, RECOVERED_GARMENTS, nextOutfit, type Garment } from '../src/sarahlab/sarahLabTool';
 import * as THREE from 'three';
+
+/**
+ * What a model weighs wherever it is kept: the shipped site's manifest for what is in `public/`, and the same rule (a
+ * .gltf is its JSON plus every buffer it names) read from `assets-archive/` for the modelled outfits moved out of the
+ * site (Joshua, 2026-10-22, after Replit's audit). The comparisons below are of what the room USED to wait for.
+ */
+function bytesOf(path: string): number {
+  const shipped = assetBytes(path);
+  if (shipped !== null) return shipped;
+  const file = `assets-archive/${path}`;
+  if (!existsSync(file)) return NaN;
+  if (!path.endsWith('.gltf')) return statSync(file).size;
+  const json = JSON.parse(readFileSync(file, 'utf8')) as { buffers: { uri?: string }[] };
+  const parts = new Set(json.buffers.filter((b) => b.uri).map((b) => `assets-archive/models/${b.uri}`));
+  return statSync(file).size + [...parts].reduce((sum, q) => sum + statSync(q).size, 0);
+}
 
 /** A response that streams `bytes` in `chunk`-sized pieces. */
 function streamed(bytes: Uint8Array, chunk: number, headers: Record<string, string> = {}): Response {
@@ -85,14 +101,21 @@ describe('loadModel with a meter', () => {
 
 describe('the size manifest', () => {
   it('weighs a .glb as its file and a .gltf as its JSON plus every buffer it names', () => {
-    expect(assetBytes('models/sarah-v2-body.glb')).toBe(statSync('public/models/sarah-v2-body.glb').size);
-    const path = 'models/sarah-v2-relaxed-high.gltf';
-    const json = JSON.parse(readFileSync(`public/${path}`, 'utf8')) as { buffers: { uri?: string }[] };
-    const parts = new Set(json.buffers.filter((b) => b.uri).map((b) => `public/models/${b.uri}`));
-    const expected = statSync(`public/${path}`).size + [...parts].reduce((sum, p) => sum + statSync(p).size, 0);
-    expect(parts.size).toBeGreaterThan(10);
-    expect(assetBytes(path)).toBe(expected);
+    expect(assetBytes(SARAH_V2_BODY_MODEL)).toBe(statSync(`public/${SARAH_V2_BODY_MODEL}`).size);
+    for (const file of readdirSync('public/models').filter((f) => f.endsWith('.gltf'))) {
+      const path = `models/${file}`;
+      const json = JSON.parse(readFileSync(`public/${path}`, 'utf8')) as { buffers: { uri?: string }[] };
+      const parts = new Set(json.buffers.filter((b) => b.uri).map((b) => `public/models/${b.uri}`));
+      expect(assetBytes(path)).toBe(statSync(`public/${path}`).size + [...parts].reduce((sum, p) => sum + statSync(p).size, 0));
+    }
     expect(assetBytes('models/no-such-file.glb')).toBeNull();
+  });
+  it('ships none of the modelled outfits the room no longer offers (Joshua, 2026-10-22): they are kept in assets-archive', () => {
+    for (const path of ['models/sarah-v2-body.glb', 'models/sarah-v2-leggings.glb', 'models/sarah-v2-leggings-low.glb', 'models/sarah-v2-relaxed-high.gltf', 'models/sarah-v2-spandex-low.gltf']) {
+      expect(assetBytes(path), path).toBeNull();
+      expect(existsSync(`assets-archive/${path}`), path).toBe(true);
+    }
+    expect(Number.isFinite(bytesOf('models/sarah-v2-relaxed-high.gltf'))).toBe(true);
   });
 });
 
@@ -124,15 +147,15 @@ describe('the room opens with only what she has on', () => {
   it('downloads less than the four files it used to wait for, and every file has a size', () => {
     const opening = ['models/sarah-v2-body.glb', ...recoveredPartsFor(wornGarments(0, all)).map(recoveredPartPath)];
     const before = ['models/sarah-v2-body.glb', ...['bottom', 'leggings', 'relaxed-high', 'leggings-low'].map((p) => recoveredPartPath(p as never))];
-    const sum = (paths: string[]) => paths.reduce((s, p) => s + (assetBytes(p) ?? NaN), 0);
+    const sum = (paths: string[]) => paths.reduce((s, p) => s + bytesOf(p), 0);
     expect(Number.isFinite(sum(before))).toBe(true);
-    expect(sum(before) - sum(opening)).toBe((assetBytes('models/sarah-v2-bottom.glb') ?? 0) + (assetBytes('models/sarah-v2-leggings-low.glb') ?? 0));
+    expect(sum(before) - sum(opening)).toBe(bytesOf('models/sarah-v2-bottom.glb') + bytesOf('models/sarah-v2-leggings-low.glb'));
   });
 
   it('opens in the painted tee and leggings: the slim body and nothing else, under a fifth of what it used to wait for', () => {
     const opening = [SARAH_V2_BODY_MODEL, ...recoveredPartsFor(wornGarments(PAINTED_DEFAULT_OUTFIT, all)).map(recoveredPartPath)];
     const before = ['models/sarah-v2-body.glb', ...['bottom', 'leggings', 'relaxed-high', 'leggings-low'].map((p) => recoveredPartPath(p as never))];
-    const sum = (paths: string[]) => paths.reduce((s, p) => s + (assetBytes(p) ?? NaN), 0);
+    const sum = (paths: string[]) => paths.reduce((s, p) => s + bytesOf(p), 0);
     expect(opening).toEqual(['models/sarah-v2-body-slim.glb']);
     expect(sum(opening)).toBeLessThan(sum(before) / 5);
   });

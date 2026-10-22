@@ -2,9 +2,9 @@
  * appears to overlap or clip around the belly and leggings transition"; "Check the relaxed shirt's rear hem. It flares
  * outward noticeably behind the hips... reduce while preserving a natural relaxed fit").
  *
- *   node scripts/sarahV2Recovery/shirt-hem-fit.mjs --shirt public/models/sarah-v2-spandex-high.gltf --mode spandex \
- *        --leggings public/models/sarah-v2-leggings.glb --body public/models/sarah-v2-body.glb --out .scratch/spandex-high.glb
- *   then package: node scripts/sarahV2Recovery/shirt-package.mjs --input .scratch/spandex-high.glb --out public/models/sarah-v2-spandex-high.gltf
+ *   node scripts/sarahV2Recovery/shirt-hem-fit.mjs --shirt assets-archive/models/sarah-v2-spandex-high.gltf --mode spandex \
+ *        --leggings assets-archive/models/sarah-v2-leggings.glb --body assets-archive/models/sarah-v2-body.glb --out .scratch/spandex-high.glb
+ *   then package: node scripts/sarahV2Recovery/shirt-package.mjs --input .scratch/spandex-high.glb --out assets-archive/models/sarah-v2-spandex-high.gltf
  *
  * Only the shirt's own `shape:fitBelly<key>` corrections change (positions and normal offsets); its native targets,
  * skin, UVs and baseline metadata do not. Measured on the default body at each fit key, posed world centimetres:

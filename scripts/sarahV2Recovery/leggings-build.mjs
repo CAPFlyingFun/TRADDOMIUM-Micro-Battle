@@ -46,7 +46,7 @@ export function correctionArray(accessor, values) {
   return delta;
 }
 
-export async function buildRecoveredLeggings({ source = 'public/models/sarah-v2-body.glb', snapshots = '.scratch/recovered-fits', output = 'public/models/sarah-v2-leggings.glb' } = {}) {
+export async function buildRecoveredLeggings({ source = 'assets-archive/models/sarah-v2-body.glb', snapshots = '.scratch/recovered-fits', output = 'assets-archive/models/sarah-v2-leggings.glb' } = {}) {
   await Promise.all([MeshoptDecoder.ready, MeshoptEncoder.ready]);
   const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'meshopt.decoder': MeshoptDecoder, 'meshopt.encoder': MeshoptEncoder });
   const sourceBytes = readFileSync(source), document = await io.readBinary(sourceBytes);

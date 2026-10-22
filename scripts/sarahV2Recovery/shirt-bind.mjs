@@ -357,7 +357,7 @@ export async function quantizeShirtAsset({inputPath,outPath,snapshots,positionSt
 
 async function main(){
   const args=process.argv.slice(2),option=name=>{const i=args.indexOf(`--${name}`);return i<0?null:args[i+1];};
-  const snapshotDirectory=option('snapshots'),nativePath=option('native')??'public/models/sarah-v2-body.glb',meshyPath=option('meshy')??'/tmp/sarah-meshy-tank.glb',outDirectory=option('out-dir');
+  const snapshotDirectory=option('snapshots'),nativePath=option('native')??'assets-archive/models/sarah-v2-body.glb',meshyPath=option('meshy')??'/tmp/sarah-meshy-tank.glb',outDirectory=option('out-dir');
   const precisionInput=option('quantize'),precisionOutput=option('out');
   if(!snapshotDirectory||(!outDirectory&&!precisionInput)||(precisionInput&&!precisionOutput))throw new Error('Usage: node scripts/sarahV2Recovery/shirt-bind.mjs --snapshots DIR --out-dir DIR [--native GLB] [--meshy GLB]; postprocess: --quantize STRICT_GLB --snapshots DIR --out SMALL_GLB');
   const files=(await readdir(snapshotDirectory)).filter(file=>file.endsWith('.json'));

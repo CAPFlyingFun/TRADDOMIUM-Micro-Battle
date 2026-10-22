@@ -28,9 +28,9 @@
  * place under the outer layer and its depth below it. Normals get the geometric turn of each move, as raw sums like
  * the shirt's own targets.
  *
- *   node scripts/sarahV2Recovery/shirt-fine-fit.mjs --shirt S.(glb|gltf) --body public/models/sarah-v2-body.glb --out OUT.glb
- *        [--leggings public/models/sarah-v2-leggings.glb]   (the spandex-high shirt, worn over the high leggings)
- *   then: node scripts/sarahV2Recovery/shirt-package.mjs --input OUT.glb --out public/models/sarah-v2-spandex-*.gltf
+ *   node scripts/sarahV2Recovery/shirt-fine-fit.mjs --shirt S.(glb|gltf) --body assets-archive/models/sarah-v2-body.glb --out OUT.glb
+ *        [--leggings assets-archive/models/sarah-v2-leggings.glb]   (the spandex-high shirt, worn over the high leggings)
+ *   then: node scripts/sarahV2Recovery/shirt-package.mjs --input OUT.glb --out assets-archive/models/sarah-v2-spandex-*.gltf
  *   (--smooth-only stops after step 1, for looking at the folds alone; such a shirt has no lifts and is not for use)
  */
 import { NodeIO } from '@gltf-transform/core';

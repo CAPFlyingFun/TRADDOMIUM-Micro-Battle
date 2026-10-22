@@ -3,6 +3,9 @@ import { garmentTexturePanel } from './garmentTexturePanel';
 import { fabricPanel, type FabricPanel } from './fabricPanel';
 import { mapBody } from './bodyRegions';
 import { DEFAULT_SHIRT_LENGTH } from './paintTemplates';
+import { EMPTY_BOOK, type CharacterBook, type SavedBody, type SavedClothes } from './characterSaves';
+import { characterPanel, type CharacterPanel } from './characterPanel';
+import { NO_RULES, isLocked, randomize, ruleFor, withGroupLock, withRule, type RandomRules, type RandomSpec } from '../actor/bodyRandom';
 import { uprightLayout, type UprightLayout } from './uprightTabs';
 import { loadingCard, LOADING_COVERED_VAR, type LoadingCard, type LoadingPlace } from './loadingCard';
 import { LoadMeter } from '../assets/loadMeter';
@@ -42,13 +45,13 @@ import { measureHuman } from '../actor/humanSkeleton';
 import type { AppScene, FrameInfo, SceneContext, SceneFactory } from '../app/Scene';
 import { assets } from '../assets/assets';
 import { release } from '../tombs/LabPeople';
-import { BODY_CONTROLS, BREAST_DIMENSIONS, controlLine, defaultBodyShape, resetControl, setControl, setLinkedControl, type BodyControl, type BodyShape } from '../actor/bodyShape';
+import { BODY_CONTROLS, BREAST_DIMENSIONS, clampShape, controlLine, defaultBodyShape, parseShape, resetControl, serializeShape, setControl, setLinkedControl, type BodyControl, type BodyShape } from '../actor/bodyShape';
 import { applyShapeFields, liftShapeFields, type ShapeFields } from '../view/bodyShapeView';
 import { dropIdleMorphs } from '../view/morphPrune';
 import { HumanRig, findSkinnedMesh } from '../view/HumanRig';
 import { UNITS_PER_METRE } from '../world/dem';
 import {
-  BELLY_MOTION, BELLY_TARGET, trimShown, BREAST_TARGETS, BUMP_MAX_PERCENT, GARMENTS, RECOVERED_SHIRTS, OUTFITS, outfitLine, modelLine, refineLine, refineWeight, nextOutfit, wornGarments, coverMask, bodyNeverHidden, uncoveredSkinIndices, UNDER_TOP_GARMENT, BELLY_REFINE_TARGET, SEAT_TARGET, seatCorrectiveWeight, SARAH_LAB_MODELS, SARAH_LAB_DEFAULT_MODEL, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID, shirtLengthLine,
+  BELLY_MOTION, BELLY_TARGET, trimShown, BREAST_TARGETS, BUMP_MAX_PERCENT, GARMENTS, RECOVERED_SHIRTS, OUTFITS, outfitLine, modelLine, refineLine, refineWeight, nextOutfit, wornGarments, coverMask, bodyNeverHidden, uncoveredSkinIndices, UNDER_TOP_GARMENT, BELLY_REFINE_TARGET, SEAT_TARGET, seatCorrectiveWeight, SARAH_LAB_MODELS, SARAH_LAB_DEFAULT_MODEL, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID, shirtLengthLine, sarahModelPath, BODY_RANDOM_SPECS,
   bellyMotionWeights, bellyWeights, breastBobWeight, breastWeightsForShape, bodyShapeFieldWeights, SIZE_TILT_PRESETS_DEG, effectiveTiltDeg, stepSeated, bustVolume, BREAST_GROW_TARGET, settledSitFor, bellyUpperWeight, BELLY_UPPER_TARGET, navelWeights, NAVEL_FLAT_TARGET, navelFlatWeight, tPoseTurns, ARM_SIDES, armsLine, ARM_RAISE_TARGETS, armRaiseWeight, SEAT_V2_TARGET, seatCorrectiveV2Weight, fingerBend, THUMB_TO_PALM, bumpLine, fingersLine, restingBellySpring, statusLine, stepBellySpring, stepBreastSpring, walkBounceAccel,
   type Garment, type SarahLabPose, recoveredPartsFor, recoveredPartPath, isShirtPart, shirtOfPart, type RecoveredPart, PAINTED_DEFAULT_OUTFIT, RECOVERED_GARMENTS,
 } from './sarahLabTool';
@@ -73,6 +76,16 @@ export interface SarahLabHooks {
   onBack(): void;
   /** Offline fitting uses native garments to avoid loading its own generated outputs. */
   readonly nativeOutfitPreview?: boolean;
+  /**
+   * `?skin=ktx2`: the KTX2 skin pilot (`SARAH_V2_BODY_KTX2_MODEL`). An override from the address, never a setting; the
+   * status line says so while it is in force.
+   */
+  readonly skin?: 'ktx2' | null;
+  /**
+   * The character book (`characterSaves.ts`): where saved characters and the outfit library are kept. The app gives the
+   * device's storage; without it the panel keeps them for the session only.
+   */
+  readonly characters?: { read(): CharacterBook; write(book: CharacterBook): void };
 }
 
 export type SarahLabWire = (ctx: SceneContext) => SarahLabHooks;
@@ -229,6 +242,18 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let turning = false;
   // v2's switchable curve refinement (CURVE), off: her master as modelled
   let refine = false;
+  // RANDOMIZE's ranges and locks (`actor/bodyRandom.ts`; Joshua, 2026-10-22), saved with her body
+  let randomRules: RandomRules = NO_RULES;
+  let rangesShown = false;
+  const lockButtons = new Map<string, HTMLButtonElement>();
+  const rangeRows: { spec: RandomSpec; row: HTMLElement; lo: HTMLInputElement; hi: HTMLInputElement }[] = [];
+  let bumpInput: HTMLInputElement | null = null;
+  // the library outfit she last put on (her changes to it save as hers), and saved clothes waiting for their outfit to load
+  let wornFrom: string | null = null;
+  let pendingClothes: Omit<SavedClothes, 'outfit'> | null = null;
+  let characters: CharacterPanel | null = null;
+  let sessionBook: CharacterBook = EMPTY_BOOK;
+  const book = hooks.characters ?? { read: () => sessionBook, write: (b: CharacterBook) => { sessionBook = b; } };
   let seconds = 0;
   let walked = 0;
   const poseOut: MutableJointTurn[] = Array.from({ length: Math.max(HUMAN_POSE_TURNS, SEATED_TURNS) }, newJointTurn);
@@ -279,10 +304,29 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let pinch = 0;
 
   function refresh(): void {
-    if (fields.status) fields.status.textContent = statusLine(loaded && model?.visible === true, failed, garments, hasBelly, modelIndex) + (wantedOutfit !== null ? ' · loading outfit…' : '');
+    if (fields.status) fields.status.textContent = statusLine(loaded && model?.visible === true, failed, garments, hasBelly, modelIndex) + (hooks.skin === 'ktx2' ? ' · KTX2 skin' : '') + (wantedOutfit !== null ? ' · loading outfit…' : '');
     const bumpField = fields[SARAH_LAB_FIELD.bump], fingerField = fields[SARAH_LAB_FIELD.fingers];
     if (bumpField) bumpField.textContent = bumpLine(bump);
     if (fingerField) fingerField.textContent = fingersLine(curl);
+    if (bumpInput && Number(bumpInput.value) !== bump) bumpInput.value = String(bump);
+    for (const spec of BODY_RANDOM_SPECS) {
+      const b = lockButtons.get(spec.key);
+      if (!b) continue;
+      const own = ruleFor(randomRules, spec).locked, held = isLocked(randomRules, spec);
+      b.textContent = held ? '🔒' : '🔓';
+      b.style.opacity = held && !own ? '.55' : '1';
+      b.title = own ? 'locked: RANDOMIZE keeps this value (tap to unlock)' : held ? 'held by its group lock' : 'lock: RANDOMIZE keeps this value';
+    }
+    for (const group of ['belly', 'breasts'] as const) {
+      const b = buttons[`groupLock-${group}`];
+      if (b) b.textContent = `${group === 'belly' ? 'BELLY' : 'BREAST'} ${randomRules.groups.includes(group) ? '🔒' : '🔓'}`;
+    }
+    for (const r of rangeRows) {
+      r.row.style.display = rangesShown ? 'flex' : 'none';
+      const rule = ruleFor(randomRules, r.spec);
+      if (document.activeElement !== r.lo) r.lo.value = String(rule.min);
+      if (document.activeElement !== r.hi) r.hi.value = String(rule.max);
+    }
     const lengthField = fields[SARAH_LAB_FIELD.shirtLength], length = fabric?.shirtLength() ?? DEFAULT_SHIRT_LENGTH;
     // it moves a painted shirt and nothing else: with none on, it says so and cannot be moved
     const shirtOn = fabric?.wearsShirt() ?? false;
@@ -313,6 +357,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     lit(buttons.sit, pose === 'sit');
     lit(buttons.tpose, pose === 'tpose');
     lit(buttons.turn, turning);
+    lit(buttons.ranges, rangesShown);
+    lit(buttons['groupLock-belly'], randomRules.groups.includes('belly'));
+    lit(buttons['groupLock-breasts'], randomRules.groups.includes('breasts'));
     for (const t of SIZE_TILT_PRESETS_DEG) lit(buttons[`tilt${t}`], body.bellyTilt === t);
     if (buttons.outfit) buttons.outfit.textContent = `OUTFIT · ${outfitName(wantedOutfit ?? outfit)}${wantedOutfit !== null ? ' …' : ''}`;
     if (buttons.model) buttons.model.textContent = modelLine(modelIndex);
@@ -477,6 +524,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   /** A painted outfit's paint goes on with it (and comes off when a modelled one is chosen). */
   function wearPaint(): void {
     fabric?.wearOutfit(recovered ? OUTFITS[outfit]?.paint ?? null : null);
+    // saved clothes put on with this outfit go on over its defaults
+    if (pendingClothes && fabric?.putOnClothes(pendingClothes)) pendingClothes = null;
   }
   function dress(next: number, opening = false): void {
     // chosen before she is in: the opening dresses her in it
@@ -617,14 +666,22 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       right.append(label, input);
       return input;
     };
-    slider(SARAH_LAB_FIELD.bump, bump, (v) => { bump = v; }, BUMP_MAX_PERCENT);
+    bumpInput = slider(SARAH_LAB_FIELD.bump, bump, (v) => { bump = v; }, BUMP_MAX_PERCENT);
+    {
+      // the bump's own lock and random range (it is in the BELLY group)
+      const spec = BODY_RANDOM_SPECS.find((x) => x.key === 'bump')!;
+      const r = document.createElement('div'); r.dataset.tab = 'body';
+      r.style.cssText = 'display:flex;justify-content:flex-end;gap:4px;margin-top:-4px';
+      r.append(lockButton(spec));
+      right.append(r, rangeRow(spec));
+    }
     slider(SARAH_LAB_FIELD.fingers, curl, (v) => { curl = v; }, 100, 'pose');
     armsInput = slider(SARAH_LAB_FIELD.arms, armsDeg, (v) => { armsDeg = v; armsOverride = true; }, 90, 'pose');
     // a painted shirt's length, for every painted shirt she puts on (its drape follows: tunicDrape.ts)
     shirtLengthInput = slider(SARAH_LAB_FIELD.shirtLength, Math.round(DEFAULT_SHIRT_LENGTH * 100), (v) => { fabric?.setShirtLength(v / 100); }, 100, 'clothes');
     const row = document.createElement('div');
     row.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap';
-    buttons.outfit = btn(outfitLine(outfit), SARAH_LAB_ACTION.outfit, () => { dress(nextOutfit(wantedOutfit ?? outfit, garments)); });
+    buttons.outfit = btn(outfitLine(outfit), SARAH_LAB_ACTION.outfit, () => { wornFrom = null; pendingClothes = null; dress(nextOutfit(wantedOutfit ?? outfit, garments)); });
     buttons.model = btn(modelLine(modelIndex), SARAH_LAB_ACTION.model, () => {
       modelIndex = (modelIndex + 1) % SARAH_LAB_MODELS.length;
       armsDeg = SARAH_LAB_MODELS[modelIndex].id === 'v1' || pose === 'tpose' ? 90 : 0;
@@ -641,6 +698,51 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     right.appendChild(row);
     // BELLY SHAPE and BREAST SHAPE: each control a slider with its own reset, relative to the size shown
     const setBody = (next: BodyShape) => { body = next; applyLook(); applyMotion(); refresh(); };
+    // RANDOMIZE (Joshua, 2026-10-22): every unlocked control picked within its own range; a lock (🔒) on a control or
+    // its group keeps it exactly as set. RANGES shows each control's range to change it
+    function lockButton(spec: RandomSpec): HTMLButtonElement {
+      const b = btn('🔓', `${SARAH_LAB_ACTION.randomLock}${spec.key}`, () => { randomRules = withRule(randomRules, spec, { locked: !ruleFor(randomRules, spec).locked }); refresh(); });
+      b.title = 'lock: RANDOMIZE keeps this value'; b.style.padding = '2px 6px'; b.style.fontSize = '12px';
+      lockButtons.set(spec.key, b);
+      return b;
+    }
+    function rangeRow(spec: RandomSpec): HTMLElement {
+      const row = document.createElement('div');
+      row.dataset.tab = 'body';
+      row.style.cssText = 'display:none;align-items:center;gap:4px;font-size:10px;opacity:.85;margin:2px 0 4px';
+      const box = (value: number, which: 'min' | 'max') => {
+        const i = document.createElement('input');
+        i.type = 'number'; i.min = String(spec.min); i.max = String(spec.max); i.step = String(spec.step); i.value = String(value);
+        i.dataset.field = `${SARAH_LAB_FIELD.randomRange}${spec.key}-${which}`;
+        i.style.cssText = 'width:62px;height:24px;border-radius:6px;border:1px solid #ffffff30;background:#0d1117;color:#e8e2d8;font:600 11px system-ui;padding:0 4px';
+        i.addEventListener('change', () => { if (Number.isFinite(Number(i.value))) randomRules = withRule(randomRules, spec, { [which]: Number(i.value) }); refresh(); });
+        i.addEventListener('keydown', (e) => e.stopPropagation());
+        return i;
+      };
+      const r = ruleFor(randomRules, spec), lo = box(r.min, 'min'), hi = box(r.max, 'max');
+      const label = document.createElement('span'); label.textContent = 'random';
+      const dash = document.createElement('span'); dash.textContent = 'to';
+      row.append(label, lo, dash, hi);
+      rangeRows.push({ spec, row, lo, hi });
+      return row;
+    }
+    {
+      const row = document.createElement('div');
+      row.dataset.tab = 'body';
+      row.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;border-top:1px solid rgba(255,255,255,0.12);padding-top:6px';
+      buttons.randomize = btn('RANDOMIZE', SARAH_LAB_ACTION.randomize, () => {
+        const next = randomize({ bump, ...body }, BODY_RANDOM_SPECS, randomRules);
+        bump = Math.round(next.bump);
+        body = clampShape(Object.fromEntries(BODY_CONTROLS.map((c) => [c.key, next[c.key]])) as BodyShape);
+        applyLook(); applyMotion(); refresh();
+      });
+      for (const [group, label] of [['belly', 'BELLY'], ['breasts', 'BREAST']] as const) {
+        buttons[`groupLock-${group}`] = btn(`${label} 🔓`, `${SARAH_LAB_ACTION.randomGroupLock}${group}`, () => { randomRules = withGroupLock(randomRules, group, !randomRules.groups.includes(group)); refresh(); });
+      }
+      buttons.ranges = btn('RANGES', SARAH_LAB_ACTION.randomRanges, () => { rangesShown = !rangesShown; refresh(); });
+      for (const b of [buttons.randomize, buttons['groupLock-belly'], buttons['groupLock-breasts'], buttons.ranges]) { b.style.padding = '8px 10px'; b.style.fontSize = '12px'; row.appendChild(b); }
+      right.appendChild(row);
+    }
     for (const [group, title] of [['belly', 'BELLY SHAPE'], ['breasts', 'BREAST SHAPE']] as const) {
       const box = document.createElement('details');
       box.dataset.tab = 'body';
@@ -675,15 +777,19 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
           link.style.padding = '2px 6px'; link.style.fontSize = '10px';
           buttons[`link-${c.key}`] = link;
           const pair = document.createElement('span'); pair.style.cssText = 'display:flex;gap:4px';
-          pair.append(link, reset);
+          pair.append(lockButton(BODY_RANDOM_SPECS.find((x) => x.key === c.key)!), link, reset);
           line.append(label, pair);
-        } else line.append(label, reset);
+        } else {
+          const pair = document.createElement('span'); pair.style.cssText = 'display:flex;gap:4px';
+          pair.append(lockButton(BODY_RANDOM_SPECS.find((x) => x.key === c.key)!), reset);
+          line.append(label, pair);
+        }
         const input = document.createElement('input');
         input.type = 'range'; input.min = String(c.min); input.max = String(c.max); input.step = String(c.step); input.value = String(body[c.key]);
         input.style.cssText = 'width:100%;accent-color:#d4a853;height:24px';
         input.addEventListener('input', () => setBody(linked.has(c.key) ? setLinkedControl(body, c.key, Number(input.value), linked) : setControl(body, c.key, Number(input.value))));
         bodyInputs.set(c.key, input);
-        box.append(line, input);
+        box.append(line, input, rangeRow(BODY_RANDOM_SPECS.find((x) => x.key === c.key)!));
       }
       if (group === 'breasts') {
         const linkAll = btn('LINK W·H·D', SARAH_LAB_ACTION.bodyLinkAll, () => { const all = BREAST_DIMENSIONS.every((k) => linked.has(k)); for (const k of BREAST_DIMENSIONS) if (all) linked.delete(k); else linked.add(k); });
@@ -696,6 +802,43 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       }
       right.appendChild(box);
     }
+    // CHARACTERS & OUTFITS (Joshua, 2026-10-22): save all / body / clothes under a name, the outfit library, the file
+    characters = characterPanel({
+      read: () => book.read(),
+      write: (b) => book.write(b),
+      body: (): SavedBody => ({ model: SARAH_LAB_MODELS[modelIndex].id, bump, shape: serializeShape(body), refine, random: randomRules }),
+      clothes: (): SavedClothes => ({ outfit: OUTFITS[outfit].name, ...(fabric?.clothes() ?? { shirtLength: DEFAULT_SHIRT_LENGTH, layers: [], garments: {} }) }),
+      wornFrom: () => wornFrom,
+      putOnBody: (saved) => {
+        bump = Math.max(0, Math.min(BUMP_MAX_PERCENT, Math.round(saved.bump)));
+        body = parseShape(saved.shape);
+        refine = saved.refine;
+        randomRules = saved.random;
+        const index = SARAH_LAB_MODELS.findIndex((m) => m.id === saved.model);
+        if (index >= 0 && index !== modelIndex) {
+          modelIndex = index;
+          armsDeg = SARAH_LAB_MODELS[modelIndex].id === 'v1' || pose === 'tpose' ? 90 : 0;
+          armsOverride = pose === 'tpose';
+          loadSarah();
+        } else { applyLook(); applyMotion(); }
+        refresh();
+      },
+      putOnClothes: (saved, from) => {
+        wornFrom = from;
+        const { outfit: name, ...rest } = saved;
+        const index = OUTFITS.findIndex((o) => o.name === name);
+        pendingClothes = rest;
+        if (index >= 0 && index !== outfit) dress(index);
+        else { if (fabric?.putOnClothes(rest)) pendingClothes = null; applyLook(); refresh(); }
+      },
+      download: (name, text) => {
+        const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+        const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 10_000);
+      },
+    });
+    characters.element.dataset.tab = 'body';
+    right.appendChild(characters.element);
     const note = document.createElement('div');
     note.dataset.field = SARAH_LAB_FIELD.bodyNote;
     note.dataset.tab = 'body';
@@ -882,7 +1025,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     for (const run of inflight.values()) run.abort.abort();
     inflight.clear();
     felt.primed = 0; loaded = false; failed = false;
-    const entry = SARAH_LAB_MODELS[modelIndex], path = entry.path;
+    const entry = SARAH_LAB_MODELS[modelIndex], skin = hooks.skin ?? null, path = sarahModelPath(entry, skin);
+    if (skin === 'ktx2') assets.enableKtx2(ctx.renderer.gl);
     // THE ORDER (Joshua, 2026-10-20): the room, then her, then what she has on -- only that outfit, its files asked for
     // the moment her body's bytes are in, so its download runs while her body is being built rather than after it
     const planned = hooks.nativeOutfitPreview !== true && entry.id === 'v2-body' ? recoveredPartsFor(wornGarments(outfit, [...GARMENTS, ...RECOVERED_SHIRTS])) : [];
@@ -893,7 +1037,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     let asked = false;
     const askForClothes = () => { if (!asked) { asked = true; for (const p of planned) void requestPart(p); } };
     void assets.loadModel(path, () => new THREE.Object3D(), { meter, onDownloaded: askForClothes }).then(async (loadedModel) => {
-      if (disposed || path !== SARAH_LAB_MODELS[modelIndex].path) { release(loadedModel); return; }
+      if (disposed || path !== sarahModelPath(SARAH_LAB_MODELS[modelIndex], skin)) { release(loadedModel); return; }
       if (loadedModel.userData.isPlaceholder === true) { failed = true; failLoad('Sarah', () => loadSarah()); refresh(); return; }
       try {
         rig = new HumanRig(loadedModel);

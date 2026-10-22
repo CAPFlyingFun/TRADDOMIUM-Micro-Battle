@@ -51,7 +51,7 @@ export function bindApprovedPoints(skin, reference, collider, points, anchors=po
   });
   return {pos,J,W,T,maxDistanceCm,maxReferenceAnchorErrorCm};
 }
-export async function build(referenceFile,source='public/models/sarah-v2-body.glb',out='public/models/sarah-v2-bottom.glb') {
+export async function build(referenceFile,source='assets-archive/models/sarah-v2-body.glb',out='public/models/sarah-v2-bottom.glb') {
   const before=await fs.readFile(source),reference=JSON.parse(await fs.readFile(referenceFile,'utf8')),skin=await loadSkin(source);
   if(reference.positions.length!==skin.P.length||reference.indices.length!==skin.I.length||reference.indices.some((v,i)=>v!==skin.I[i]))throw Error('Reference must preserve original body vertex/triangle identity');
   const collider=new SkinCollider(reference.positions,reference.indices),cloth=createBottom({enabled:true,collider});

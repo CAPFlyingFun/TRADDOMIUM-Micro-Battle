@@ -69,10 +69,10 @@ it('fine-fits the fitted shirts every 10% to 100% and every 5% past it, and leav
  expect(fitWeights(85,'n',SHIRT_FINE_FIT_KEYS)).toEqual({n80:0.5,n90:0.5});
  expect(fitWeights(0,'n',SHIRT_FINE_FIT_KEYS)).toEqual({n0:1});
  for(let b=0;b<=200;b+=2.5){const s=Object.values(fitWeights(b,'n',SHIRT_FINE_FIT_KEYS)).reduce((a,x)=>a+x,0);expect(s).toBeCloseTo(1,10);}
- for(const v of ['spandex-high','spandex-low']){const extras=JSON.parse(readFileSync(`public/models/sarah-v2-${v}.gltf`,'utf8')).meshes[0].extras,names=extras.targetNames as string[];
+ for(const v of ['spandex-high','spandex-low']){const extras=JSON.parse(readFileSync(`assets-archive/models/sarah-v2-${v}.gltf`,'utf8')).meshes[0].extras,names=extras.targetNames as string[];
   expect(names.filter(n=>n.startsWith('shape:fineFit'))).toEqual(SHIRT_FINE_FIT_KEYS.map(k=>`shape:fineFit${k}`));
   expect(names.filter(n=>n.startsWith('shape:fitBelly'))).toEqual([0,50,100,150,200].map(k=>`shape:fitBelly${k}`));
   expect(names.some(n=>n.startsWith('shape:navelFit'))).toBe(false);
   expect(extras.recoveredShirt.fineFit.fitsSmoothed).toEqual([0,50,100,150,200]);}
- for(const v of ['relaxed-high','relaxed-low']){const names=JSON.parse(readFileSync(`public/models/sarah-v2-${v}.gltf`,'utf8')).meshes[0].extras.targetNames as string[];expect(names.some(n=>n.startsWith('shape:fineFit')||n.startsWith('shape:navelFit'))).toBe(false);}
+ for(const v of ['relaxed-high','relaxed-low']){const names=JSON.parse(readFileSync(`assets-archive/models/sarah-v2-${v}.gltf`,'utf8')).meshes[0].extras.targetNames as string[];expect(names.some(n=>n.startsWith('shape:fineFit')||n.startsWith('shape:navelFit'))).toBe(false);}
 });

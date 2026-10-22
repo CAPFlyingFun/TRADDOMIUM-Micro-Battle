@@ -17,7 +17,7 @@
 import * as THREE from 'three';
 import type { ShapeFields } from '../view/bodyShapeView';
 import {
-  DEFAULT_CHOICE, FABRIC_FAMILIES, OPACITY_RANGE, PAINT_LAYER_NAMES, STITCH_RANGE, SWATCH_HEX, bytesToBase64, colourName,
+  DEFAULT_CHOICE, FABRIC_FAMILIES, OPACITY_RANGE, PAINT_LAYER_NAMES, STITCH_RANGE, SWATCH_HEX, base64ToBytes, bytesToBase64, colourName,
   fabricFamily, opacityOf, swatchRect, tileUnits, trimPick, type FabricChoice, type FabricFamilyId, type FabricLayout, type FabricMode,
   type FabricPick, type OutfitConfig, type PaintTool,
 } from './fabricLibrary';
@@ -28,6 +28,7 @@ import { BRUSH_RANGE_CM, BodyPaint, PAINT_LAYER_COUNT, packLayer } from './bodyP
 import { BODY_REGIONS, REGION_GROUPS, groupOf, groupRegions, type BodyMap, type RegionSide } from './bodyRegions';
 import { CleavageBridge } from './cleavageBridge';
 import { TunicDrape } from './tunicDrape';
+import type { SavedClothes } from './characterSaves';
 import { COVERAGE_DIALS, COVERAGE_TEMPLATES, DEFAULT_SHIRT_LENGTH, TEMPLATE_GROUPS, coverage, dialValue, dialsFor, shirtHem, withDial, type CoverageParams } from './paintTemplates';
 
 export const FABRIC_PANEL_ROLE = 'sarahlab-fabric';
@@ -118,6 +119,13 @@ export interface FabricPanel {
   shirtLength(): number;
   /** Whether she has a painted shirt on that SHIRT LENGTH moves. */
   wearsShirt(): boolean;
+  /**
+   * Her clothes as a save holds them (`characterSaves.ts`), but for the outfit's name, which the room knows: each paint
+   * layer's template and dials (or its hand-painted mask), fabric and detail; each garment's fabric; the shirt length.
+   */
+  clothes(): Omit<SavedClothes, 'outfit'>;
+  /** Put saved clothes on: every paint layer as saved (an empty one cleared), the garments' fabrics, the length. */
+  putOnClothes(saved: Omit<SavedClothes, 'outfit'>): boolean;
   dispose(): void;
 }
 
@@ -650,6 +658,40 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
     return true;
   }
 
+  function clothes(): Omit<SavedClothes, 'outfit'> {
+    const p = paint;
+    return {
+      shirtLength,
+      garments: Object.fromEntries(garmentChoices),
+      layers: paintChoices.map((choice, i) => {
+        if (!p || !p.has(i)) return null;
+        const t = templates[i];
+        return { choice, detail: details[i], template: t ? { id: t.id, params: t.params } : null, mask: t ? '' : bytesToBase64(packLayer(p.weights, i)) };
+      }),
+    };
+  }
+  function putOnClothes(saved: Omit<SavedClothes, 'outfit'>): boolean {
+    const p = bodyPaint(), map = regionMap();
+    if (!p || !map) return false;
+    shirtLength = Math.max(0, Math.min(1, saved.shirtLength));
+    for (let i = 0; i < PAINT_LAYER_COUNT; i++) {
+      const l = saved.layers[i] ?? null;
+      if (l) {
+        templates[i] = l.template ? { id: l.template.id, params: l.template.params } : null;
+        p.setLayer(i, l.template ? coverage(map, l.template.params) : Float32Array.from(base64ToBytes(l.mask), (b) => b / 255));
+        paintChoices[i] = l.choice;
+        details[i] = l.detail;
+        outfitLayers[i] = true;
+      } else if (p.has(i) || templates[i]) {
+        p.clear(i); templates[i] = null; paintChoices[i] = DEFAULT_CHOICE; details[i] = DEFAULT_LAYER_DETAIL; outfitLayers[i] = false;
+      }
+    }
+    garmentChoices.clear();
+    for (const [k, v] of Object.entries(saved.garments)) garmentChoices.set(k, v);
+    void apply(); draw();
+    return true;
+  }
+
   function exportConfig(): OutfitConfig {
     const d = hooks.describe();
     return {
@@ -674,6 +716,8 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
     reshaped() { bridge?.reshape(); drape?.reshape(); },
     setShirtLength,
     shirtLength: () => shirtLength,
+    clothes,
+    putOnClothes,
     wearsShirt: () => !!paint && templates.some((t, i) => !!t && t.params.length !== null && paint!.has(i) && !!paintChoices[i].fabric),
     dispose() {
       bridge?.dispose(); bridge = null;

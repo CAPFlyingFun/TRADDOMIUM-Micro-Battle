@@ -1,7 +1,7 @@
 {
   "name": "traddomium-micro-battle",
   "private": true,
-  "version": "1.0.0-alpha.106",
+  "version": "1.0.0-alpha.107",
   "type": "module",
   "scripts": {
     "dev": "npm --prefix prototype run dev",
@@ -57,7 +57,9 @@
     "@gltf-transform/functions": "^4.5.0",
     "@types/node": "^24.0.0",
     "@types/three": "^0.185.0",
+    "fast-png": "^8.0.0",
     "jsdom": "^26.1.0",
+    "ktx2-encoder": "^0.6.0",
     "meshoptimizer": "^1.2.0",
     "playwright": "^1.62.1",
     "sharp": "^0.35.4",

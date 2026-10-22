@@ -37,7 +37,7 @@ This is a reconstruction from the preserved fitting source, not a claim that the
 old candidate GLB/commit was recovered. The complete recovery archive remains on
 `recovery/sarah-v2-approved-work-2026-10-18` (commit `535029c`).
 
-- **Protected source:** `public/models/sarah-v2-body.glb` is unchanged byte for byte:
+- **Protected source:** `assets-archive/models/sarah-v2-body.glb` is unchanged byte for byte:
   SHA256 `47e990f0f28097efca488b4274f2cac0e0fa588904bc2c10cb00695600897f42`.
   All original body shapes and approved bikini-top primitives remain in that file.
   v1 geometry and posing behavior are unchanged.
@@ -129,8 +129,8 @@ for the work to continue from here.
 
 ```
 sh scripts/sarahV2Outfit/build.sh            # about 15 minutes; intermediates in .scratch/outfit
-cp .scratch/outfit/a8.glb public/models/sarah-v2-body.glb
-node scripts/packSarah.mjs public/models/sarah-v2-body.glb
+cp .scratch/outfit/a8.glb assets-archive/models/sarah-v2-body.glb
+node scripts/packSarah.mjs assets-archive/models/sarah-v2-body.glb
 ```
 
 The build always starts from the clothes-free body at `2b9adfc` (or `SRC=<file>`). Never

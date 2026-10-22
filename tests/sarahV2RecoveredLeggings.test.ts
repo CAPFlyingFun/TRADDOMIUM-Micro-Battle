@@ -18,7 +18,7 @@ let original: Document, recovered: Document, native: Primitive[], pants: Primiti
 beforeAll(async () => {
   await MeshoptDecoder.ready;
   const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'meshopt.decoder': MeshoptDecoder });
-  [original, recovered] = await Promise.all(['public/models/sarah-v2-body.glb', 'public/models/sarah-v2-leggings.glb'].map(path => io.read(path)));
+  [original, recovered] = await Promise.all(['assets-archive/models/sarah-v2-body.glb', 'assets-archive/models/sarah-v2-leggings.glb'].map(path => io.read(path)));
   native = original.getRoot().listMeshes()[0].listPrimitives().filter(p => ['leggings', 'leggingsTrim'].includes(p.getMaterial()!.getName()));
   pants = recovered.getRoot().listMeshes()[0].listPrimitives();
 }, 60000);
@@ -42,7 +42,7 @@ function values(accessor: Accessor): Float32Array {
 
 describe('recovered Sarah v2 native high leggings', () => {
   it('leaves the approved source immutable and contains only the four high leggings primitives', () => {
-    expect(createHash('sha256').update(readFileSync('public/models/sarah-v2-body.glb')).digest('hex')).toBe(sourceHash);
+    expect(createHash('sha256').update(readFileSync('assets-archive/models/sarah-v2-body.glb')).digest('hex')).toBe(sourceHash);
     expect(pants.map(p => p.getMaterial()!.getName())).toEqual(['leggings', 'leggingsTrim', 'leggingsTrim', 'leggingsTrim']);
     expect(recovered.getRoot().listMaterials().map(m => m.getName()).sort()).toEqual(['leggings', 'leggingsTrim']);
     expect(recovered.getRoot().listMeshes()).toHaveLength(1);

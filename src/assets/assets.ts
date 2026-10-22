@@ -15,6 +15,7 @@
 import * as THREE from 'three';
 import { GLTFLoader, type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
+import { KTX2Loader } from 'three/examples/jsm/loaders/KTX2Loader.js';
 import type { LoadMeter } from './loadMeter';
 
 const gltfLoader = new GLTFLoader();
@@ -25,6 +26,19 @@ const gltfLoader = new GLTFLoader();
 // uncompressed file is unaffected by its presence.
 gltfLoader.setMeshoptDecoder(MeshoptDecoder);
 const textureLoader = new THREE.TextureLoader();
+
+/**
+ * GPU-COMPRESSED TEXTURES (KTX2 / Basis, KHR_texture_basisu), for a model that carries them. Off until a scene that
+ * may load one says so with its renderer (the loader has to know which compressed formats this device's graphics
+ * card takes). The transcoder (`public/libs/basis/`, about 260 KB gzipped) is fetched only when the first KTX2
+ * texture is actually parsed; a model without one never asks for it.
+ */
+let ktx2: KTX2Loader | null = null;
+export function enableKtx2(renderer: THREE.WebGLRenderer): void {
+  if (ktx2) return;
+  ktx2 = new KTX2Loader().setTranscoderPath(assetUrl('libs/basis/')).detectSupport(renderer);
+  gltfLoader.setKTX2Loader(ktx2);
+}
 
 /** Backoff between attempts, in ms: 0.5 s, 1 s, 2 s. */
 const BACKOFF_MS = [500, 1000, 2000] as const;
@@ -52,6 +66,7 @@ export interface Assets {
   ): Promise<THREE.Object3D>;
   loadTexture(path: string): Promise<THREE.Texture | null>;
   assetBytes(path: string): number | null;
+  enableKtx2(renderer: THREE.WebGLRenderer): void;
 }
 
 /**
@@ -153,7 +168,7 @@ export async function loadTexture(path: string): Promise<THREE.Texture | null> {
   }
 }
 
-export const assets: Assets = { assetUrl, loadModel, loadTexture, assetBytes };
+export const assets: Assets = { assetUrl, loadModel, loadTexture, assetBytes, enableKtx2 };
 
 /**
  * The model fetched by us and parsed by GLTFLoader, so every byte is counted once, as it arrives. A `.glb` is one
@@ -176,6 +191,7 @@ async function loadMetered(path: string, url: string, meter: LoadMeter | undefin
   if (isGlb) downloaded();
   const loader = new GLTFLoader();
   loader.setMeshoptDecoder(MeshoptDecoder);
+  if (ktx2) loader.setKTX2Loader(ktx2);
   const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/') + 1) : '';
   loader.register((parser) => {
     const original = parser.loadBuffer.bind(parser);

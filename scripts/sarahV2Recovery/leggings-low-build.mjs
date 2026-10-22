@@ -8,7 +8,7 @@
  * native targets), into their own file with nine EMPTY `shape:recoveryLeggings<key>` corrections; leggings-fit.mjs then
  * fills them. The approved body file is only read.
  *   node scripts/sarahV2Recovery/leggings-low-build.mjs [body.glb] [out.glb]
- *   node scripts/sarahV2Recovery/leggings-fit.mjs out.glb public/models/sarah-v2-body.glb public/models/sarah-v2-leggings-low.glb
+ *   node scripts/sarahV2Recovery/leggings-fit.mjs out.glb assets-archive/models/sarah-v2-body.glb assets-archive/models/sarah-v2-leggings-low.glb
  */
 import { createHash } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
@@ -23,7 +23,7 @@ export const LOW_MATERIALS = ['leggingsLow', 'leggingsLowTrim'];
 const KEYS = [0, 25, 30, 50, 60, 75, 100, 150, 200];
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 
-export async function buildLowLeggings({ source = 'public/models/sarah-v2-body.glb', output = 'public/models/sarah-v2-leggings-low.glb' } = {}) {
+export async function buildLowLeggings({ source = 'assets-archive/models/sarah-v2-body.glb', output = 'assets-archive/models/sarah-v2-leggings-low.glb' } = {}) {
   await Promise.all([MeshoptDecoder.ready, MeshoptEncoder.ready]);
   const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'meshopt.decoder': MeshoptDecoder, 'meshopt.encoder': MeshoptEncoder });
   const sourceBytes = readFileSync(source), document = await io.readBinary(sourceBytes);

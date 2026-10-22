@@ -4,7 +4,7 @@ import {createHash}from'node:crypto';
 import {loadSkin}from'../../sarahV2ProcBikini/skin.mjs';
 import {SkinCollider}from'./collider.mjs';
 import {labWeights,defaults,evaluate,lowerBodyCollider}from'./morphs.mjs';
-const source=process.argv[2]??'public/models/sarah-v2-body.glb',out=process.argv[3]??'public/models/sarah-v2-bottom.glb';
+const source=process.argv[2]??'assets-archive/models/sarah-v2-body.glb',out=process.argv[3]??'public/models/sarah-v2-bottom.glb';
 const lab=await labWeights(),s=await loadSkin(source),doc=await s.io.read(out),prims=doc.getRoot().listMeshes()[0].listPrimitives();
 const cases=[0,25,50,75,100,150,200].map(p=>({name:'belly'+p,w:defaults(lab,p)}));
 for(const tilt of [0,10])cases.push({name:'belly200-tilt'+tilt,w:{...defaults(lab,200),...lab.bellyMotionWeights(200,0,lab.restingBellySpring(),tilt)}});

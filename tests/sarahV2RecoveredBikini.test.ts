@@ -5,7 +5,7 @@ import { MeshoptDecoder } from 'meshoptimizer';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 
-const original='public/models/sarah-v2-body.glb';
+const original='assets-archive/models/sarah-v2-body.glb';
 let source: any, bottom: any, primitives: any[], names: string[];
 beforeAll(async()=>{
   await MeshoptDecoder.ready;

@@ -8,7 +8,8 @@
  * So nothing here is the game's Sarah: the lab loads `models/sarah-base.glb`,
  * which no other scene reads.
  */
-import type { BodyShape } from '../actor/bodyShape';
+import { BODY_CONTROLS, type BodyShape } from '../actor/bodyShape';
+import type { RandomSpec } from '../actor/bodyRandom';
 import type { DevTool } from '../devtools/DevTool';
 import type { FabricFamilyId } from './fabricLibrary';
 
@@ -32,6 +33,15 @@ export const SARAH_V2_ARMS_MODEL = 'models/sarah-v2-arms.glb';
  * same body.
  */
 export const SARAH_V2_BODY_MODEL = 'models/sarah-v2-body-slim.glb';
+/**
+ * The same body with her two skin maps GPU-compressed (KTX2; `scripts/sarahV2Recovery/body-ktx2.mjs`), a pilot to compare
+ * on the phone: the room loads it in place of the slim body only when the address says `?skin=ktx2`.
+ */
+export const SARAH_V2_BODY_KTX2_MODEL = 'models/sarah-v2-body-slim-ktx2.glb';
+/** The model file the room loads for an entry: the KTX2 pilot replaces the slim body when asked for. */
+export function sarahModelPath(entry: { readonly id: string; readonly path: string }, skin: 'ktx2' | null): string {
+  return skin === 'ktx2' && entry.path === SARAH_V2_BODY_MODEL ? SARAH_V2_BODY_KTX2_MODEL : entry.path;
+}
 /**
  * The room loads the approved body's SLIM copy (Joshua, 2026-10-21: save download and memory): `sarah-v2-body.glb`
  * stays byte for byte as approved, and `scripts/sarahV2Recovery/body-slim.mjs` writes this file from it without the
@@ -102,6 +112,11 @@ export const SARAH_LAB_ACTION = Object.freeze({
   zoomIn: 'sarahlab:zoom-in',
   zoomOut: 'sarahlab:zoom-out',
   resetView: 'sarahlab:reset-view',
+  /** RANDOMIZE, its group locks (`${randomGroupLock}belly`), a control's lock (`${randomLock}<key>`) and RANGES */
+  randomize: 'sarahlab:randomize',
+  randomGroupLock: 'sarahlab:random-group-lock:',
+  randomLock: 'sarahlab:random-lock:',
+  randomRanges: 'sarahlab:random-ranges',
 });
 
 export const SARAH_LAB_FIELD = Object.freeze({
@@ -114,6 +129,8 @@ export const SARAH_LAB_FIELD = Object.freeze({
   bodyNote: 'sarahlab-body-note',
   /** a painted shirt's length (Joshua, 2026-10-22: "from knee-length up to just above the crotch") */
   shirtLength: 'sarahlab-shirt-length',
+  /** `${randomRange}<key>-min` / `-max`: a control's random range */
+  randomRange: 'sarahlab-random-range-',
 });
 
 /** The SHIRT LENGTH line: 0 just above her crotch, 1 just above her knee. */
@@ -285,6 +302,18 @@ export function outfitLine(index: number): string {
  */
 /** The bump slider's top: twice the model's own belly. */
 export const BUMP_MAX_PERCENT = 200;
+
+/**
+ * RANDOMIZE's controls (Joshua, 2026-10-22): the bump (in the BELLY group, so the group lock holds it too) and every
+ * body-shape control, each with the range RANDOMIZE picks from until it is changed -- the bump its whole slider, a shape
+ * control twice its natural spread either side of the approved value (`BodyControlSpec.spread`). A control added to
+ * BODY_CONTROLS later (height, hips, waist, arms, face) joins here with no other change.
+ */
+export const BODY_RANDOM_SPECS: readonly RandomSpec[] = Object.freeze([
+  Object.freeze({ key: 'bump', group: 'belly', min: 0, max: BUMP_MAX_PERCENT, step: 1, defaultMin: 0, defaultMax: BUMP_MAX_PERCENT }),
+  ...BODY_CONTROLS.map((c) => Object.freeze({ key: c.key, group: c.group, min: c.min, max: c.max, step: c.step, defaultMin: Math.max(c.min, c.fallback - 2 * c.spread), defaultMax: Math.min(c.max, c.fallback + 2 * c.spread) })),
+]);
+
 
 /**
  * SARAH v2'S CURVE, SWITCHABLE (Joshua, 2026-10-13: "If a curvature correction is
