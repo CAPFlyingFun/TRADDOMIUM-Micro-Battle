@@ -27,7 +27,8 @@ import { DEFAULT_LAYER_DETAIL, DETAIL_MATERIALS, resolveDetail, type DetailMode,
 import { BRUSH_RANGE_CM, BodyPaint, PAINT_LAYER_COUNT, packLayer } from './bodyPaint';
 import { BODY_REGIONS, REGION_GROUPS, groupOf, groupRegions, type BodyMap, type RegionSide } from './bodyRegions';
 import { CleavageBridge } from './cleavageBridge';
-import { COVERAGE_DIALS, COVERAGE_TEMPLATES, TEMPLATE_GROUPS, coverage, dialValue, dialsFor, withDial, type CoverageParams } from './paintTemplates';
+import { TunicDrape } from './tunicDrape';
+import { COVERAGE_DIALS, COVERAGE_TEMPLATES, DEFAULT_SHIRT_LENGTH, TEMPLATE_GROUPS, coverage, dialValue, dialsFor, shirtHem, withDial, type CoverageParams } from './paintTemplates';
 
 export const FABRIC_PANEL_ROLE = 'sarahlab-fabric';
 export const FABRIC_ACTION = Object.freeze({
@@ -109,6 +110,14 @@ export interface FabricPanel {
    */
   frame(): void;
   reshaped(): void;
+  /**
+   * A painted shirt's LENGTH, 0 just above her crotch to 1 just above her knee (Joshua, 2026-10-22). It holds for every
+   * painted shirt worn from now on, and moves the one she has on. Its drape (`tunicDrape.ts`) follows it.
+   */
+  setShirtLength(length: number): void;
+  shirtLength(): number;
+  /** Whether she has a painted shirt on that SHIRT LENGTH moves. */
+  wearsShirt(): boolean;
   dispose(): void;
 }
 
@@ -321,6 +330,7 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
   function moveDial(dial: (typeof COVERAGE_DIALS)[number]['id'], value: number): void {
     const t = templates[layer], p = bodyPaint(), map = regionMap();
     if (!t || !p || !map) return;
+    if (dial === 'length') shirtLength = value;
     templates[layer] = { id: t.id, params: withDial(t.params, dial, value) };
     p.setLayer(layer, coverage(map, templates[layer]!.params));
     sync(); draw();
@@ -514,7 +524,40 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
         setFabricLayer(body, material, i, l, { layers: PAINT_LAYER_COUNT, masked: true, rest: hooks.rest(body) });
       }
       dressBridge(body, p);
+      dressDrape(body, p);
     }
+  }
+  /**
+   * The drape goes on with the topmost painted shirt (a template with a LENGTH), in its fabric, down to its hem; with
+   * none, or while she is being painted, it comes off.
+   */
+  let drape: TunicDrape | null = null;
+  let shirtLength = DEFAULT_SHIRT_LENGTH;
+  function dressDrape(body: THREE.Mesh, p: BodyPaint | null): void {
+    let top = -1;
+    for (let i = PAINT_LAYER_COUNT - 1; i >= 0 && top < 0; i--) {
+      if (p && p.has(i) && paintChoices[i].fabric && templates[i] && templates[i]!.params.length !== null) top = i;
+    }
+    const map = regionMap();
+    if (top < 0 || painting || !p || !map || !(body as THREE.SkinnedMesh).isSkinnedMesh) { drape?.wear(null); return; }
+    if (drape && drape.mesh.parent !== body) { drape.dispose(); drape = null; }
+    if (!drape) drape = new TunicDrape(body as THREE.SkinnedMesh, map, shirtHem(map, 1));
+    const c = paintChoices[top];
+    drape.wear(shirtHem(map, templates[top]!.params.length!));
+    setFabricLayer(drape.mesh, drape.mesh.material as THREE.Material, 0, layerFor(body, c, c.fabric, 'plain'), { layers: 1, masked: false, rest: null });
+    drape.feathered();
+  }
+  function setShirtLength(length: number): void {
+    shirtLength = Math.max(0, Math.min(1, length));
+    const p = bodyPaint(), map = regionMap();
+    if (!p || !map) return;
+    for (let i = 0; i < PAINT_LAYER_COUNT; i++) {
+      const t = templates[i];
+      if (!t || t.params.length === null || t.params.length === shirtLength) continue;
+      templates[i] = { id: t.id, params: withDial(t.params, 'length', shirtLength) };
+      p.setLayer(i, coverage(map, templates[i]!.params));
+    }
+    sync(); draw();
   }
   /**
    * The cleavage bridge goes on with the topmost painted top (a template with an upper part), in its fabric, cut to its
@@ -591,8 +634,10 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
     for (let i = 0; i < PAINT_LAYER_COUNT; i++) {
       const want = layers?.[i], t = want ? COVERAGE_TEMPLATES.find((x) => x.id === want.template) : undefined;
       if (want && t) {
-        templates[i] = { id: t.id, params: t.params };
-        p.setLayer(i, coverage(map, t.params));
+        // a shirt keeps the length chosen for shirts
+        const params = t.params.length !== null ? withDial(t.params, 'length', shirtLength) : t.params;
+        templates[i] = { id: t.id, params };
+        p.setLayer(i, coverage(map, params));
         paintChoices[i] = { ...DEFAULT_CHOICE, fabric: want.fabric };
         details[i] = DEFAULT_LAYER_DETAIL;
         outfitLayers[i] = true;
@@ -625,10 +670,14 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
     exportConfig,
     wearOutfit,
     navelFlatten,
-    frame() { bridge?.update(); },
-    reshaped() { bridge?.reshape(); },
+    frame() { bridge?.update(); drape?.update(); },
+    reshaped() { bridge?.reshape(); drape?.reshape(); },
+    setShirtLength,
+    shirtLength: () => shirtLength,
+    wearsShirt: () => !!paint && templates.some((t, i) => !!t && t.params.length !== null && paint!.has(i) && !!paintChoices[i].fabric),
     dispose() {
       bridge?.dispose(); bridge = null;
+      drape?.dispose(); drape = null;
       garmentChoices.clear();
       paintChoices.fill(DEFAULT_CHOICE);
       if (paint) for (let i = 0; i < PAINT_LAYER_COUNT; i++) paint.clear(i);

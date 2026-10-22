@@ -74,9 +74,16 @@ export interface CoverageParams {
    * Null: the openings are where `legEnd` says.
    */
   readonly legCut: { readonly crotch: number; readonly side: number; readonly sideBack: number; readonly gusset: number; readonly gussetFront: number; readonly traced?: boolean; readonly backSpan: number } | null;
+  /**
+   * A shirt's LENGTH (Joshua, 2026-10-22: "make the shirt length adjustable from knee-length up to just above the
+   * crotch"): 0 just above her crotch, 1 just above her knee, measured on her own body (`shirtHem`). The hem is level all round,
+   * as a real one hangs, and the shirt's drape (`tunicDrape.ts`) spans her thighs and falls from her belly and seat down
+   * to it. Null: the hem is `hemFront` / `hemBack`.
+   */
+  readonly length: number | null;
 }
 
-const NONE: CoverageParams = Object.freeze({ riseFront: null, riseSide: null, riseBack: null, riseFrontWidth: 1, legStart: 0, legEnd: 0, feet: false, hemFront: null, hemBack: null, neckFront: null, neckBack: null, sleeve: -1, topFront: null, topBack: null, topSide: null, strap: 0, strapIn: 0, armhole: null, neckStyle: 'crew', legCut: null });
+const NONE: CoverageParams = Object.freeze({ riseFront: null, riseSide: null, riseBack: null, riseFrontWidth: 1, legStart: 0, legEnd: 0, feet: false, hemFront: null, hemBack: null, neckFront: null, neckBack: null, sleeve: -1, topFront: null, topBack: null, topSide: null, strap: 0, strapIn: 0, armhole: null, neckStyle: 'crew', legCut: null, length: null });
 
 export const TEMPLATE_GROUPS = ['Leggings', 'Shorts', 'Shirts', 'Bras & bands', 'Other'] as const;
 export interface CoverageTemplate {
@@ -182,6 +189,39 @@ export function necklineCut(p: Pick<CoverageParams, 'neckFront' | 'neckStyle'>, 
 }
 /** Where a U or V neckline reaches its full width (just under the base of her neck) and how wide that is, in neck radii. */
 const NECK_TOP = 0.97, NECK_WIDTH = 1.7;
+/**
+ * Where on her trunk (her own height, 0 her hip joints) her crotch and her knees are: the lowest skin of her crotch,
+ * and the tops of her knees (Joshua, 2026-10-22, marked on her front: 0% just above the crotch, 100% just above the
+ * knee). Measured once a map. A map without those regions (a test's) gets her proportions.
+ */
+const landmarks = new WeakMap<BodyMap, { readonly crotch: number; readonly knee: number }>();
+export function legLandmarks(map: BodyMap): { readonly crotch: number; readonly knee: number } {
+  const known = landmarks.get(map);
+  if (known) return known;
+  const crotchId = BODY_REGIONS.findIndex((r) => r.id === 'crotch') + 1;
+  const knees = new Set(['kneeL', 'kneeR'].map((id) => BODY_REGIONS.findIndex((r) => r.id === id) + 1));
+  let crotch = Infinity;
+  const kneeTs: number[] = [];
+  for (let v = 0; v < map.region.length; v++) {
+    if (map.region[v] === crotchId) crotch = Math.min(crotch, map.trunk[v]);
+    else if (knees.has(map.region[v])) kneeTs.push(map.trunk[v]);
+  }
+  // the top of her knees: high in the knee band, clear of a stray vertex behind it
+  kneeTs.sort((a, b) => a - b);
+  const out = Object.freeze({ crotch: Number.isFinite(crotch) ? crotch : -0.15, knee: kneeTs.length ? kneeTs[Math.floor(kneeTs.length * 0.95)] : -0.7 });
+  landmarks.set(map, out);
+  return out;
+}
+/** How far above her crotch the shortest shirt ends, in trunk heights (about 5 cm on her): at the groin creases, on the
+ * line Joshua drew for 0% (2026-10-22: the first 0% was "a little" below it). */
+const ABOVE_CROTCH = 0.09;
+/** A shirt's level hem on her trunk for a LENGTH (0 just above her crotch, 1 just above her knee). */
+export function shirtHem(map: BodyMap, length: number): number {
+  const { crotch, knee } = legLandmarks(map), top = crotch + ABOVE_CROTCH;
+  return top + (knee - top) * Math.max(0, Math.min(1, length));
+}
+/** The shirts' length until it is moved: 0%, his marked line just above her crotch (Joshua, 2026-10-22). */
+export const DEFAULT_SHIRT_LENGTH = 0;
 /** The crew opening's width round her neck, in neck radii (what `open` is for a crew at LINES.neckCrew). */
 const CREW_OPEN = 1.5 + (0.97 - LINES.neckCrew) * 4;
 /** How far down the back strip, as a share of the cut's height behind, its rounded corner into the top edge begins. */
@@ -202,6 +242,8 @@ export function legCutBack(g: NonNullable<CoverageParams['legCut']>, across: num
   } else inside = Math.min(X, Y);
   return Math.min(soft(-inside), soft(t - g.crotch));
 }
+/** A shirt: its hem is its LENGTH, level all round (the tank, the tees, the sleeveless shirt). */
+const SHIRT: Partial<CoverageParams> = Object.freeze({ length: DEFAULT_SHIRT_LENGTH });
 const NO_RISE = Object.freeze({ front: -9, side: -9, back: -9 });
 const FULL = Object.freeze({ riseFront: 1, riseSide: 1, riseBack: 1 });
 
@@ -214,14 +256,14 @@ export const COVERAGE_TEMPLATES: readonly CoverageTemplate[] = Object.freeze(([
   ['shortsMid', 'Mid-thigh shorts', 'Shorts', lower(RISES.underBelly, 0.26)],
   ['shortsBike', 'Bike shorts', 'Shorts', lower(RISES.underBelly, 0.36)],
   ['shortsKnee', 'Knee-length shorts', 'Shorts', lower(RISES.overBelly, 0.44)],
-  ['tank', 'Tank top', 'Shirts', upper(LINES.hemHip, LINES.hemHip, LINES.neckTank, -1, { strapIn: 1.0, strap: 0.55, neckBack: 0.9, armhole: LINES.armhole })],
-  ['sleeveless', 'Sleeveless shirt', 'Shirts', upper(LINES.hemHip, LINES.hemHip, LINES.neckCrew, 0.07)],
-  ['teeShort', 'Short-sleeve T-shirt', 'Shirts', upper(LINES.hemHip, LINES.hemHip, LINES.neckCrew, 0.32)],
+  ['tank', 'Tank top', 'Shirts', upper(LINES.hemHip, LINES.hemHip, LINES.neckTank, -1, { strapIn: 1.0, strap: 0.55, neckBack: 0.9, armhole: LINES.armhole, length: DEFAULT_SHIRT_LENGTH })],
+  ['sleeveless', 'Sleeveless shirt', 'Shirts', upper(LINES.hemHip, LINES.hemHip, LINES.neckCrew, 0.07, SHIRT)],
+  ['teeShort', 'Short-sleeve T-shirt', 'Shirts', upper(LINES.hemHip, LINES.hemHip, LINES.neckCrew, 0.32, SHIRT)],
   // U- and V-neck tees (Joshua, 2026-10-22): the dip goes down between her breasts, and the cleavage bridge follows it
-  ['teeU', 'U-neck T-shirt', 'Shirts', upper(LINES.hemHip, LINES.hemHip, LINES.neckU, 0.32, { neckStyle: 'u' })],
-  ['teeV', 'V-neck T-shirt', 'Shirts', upper(LINES.hemHip, LINES.hemHip, LINES.neckV, 0.32, { neckStyle: 'v' })],
-  ['teeThreeQuarter', '3/4-sleeve T-shirt', 'Shirts', upper(LINES.hemHip, LINES.hemHip, LINES.neckCrew, 0.72)],
-  ['teeLong', 'Long-sleeve shirt', 'Shirts', upper(LINES.hemHip, LINES.hemHip, LINES.neckCrew, 1.0)],
+  ['teeU', 'U-neck T-shirt', 'Shirts', upper(LINES.hemHip, LINES.hemHip, LINES.neckU, 0.32, { ...SHIRT, neckStyle: 'u' })],
+  ['teeV', 'V-neck T-shirt', 'Shirts', upper(LINES.hemHip, LINES.hemHip, LINES.neckV, 0.32, { ...SHIRT, neckStyle: 'v' })],
+  ['teeThreeQuarter', '3/4-sleeve T-shirt', 'Shirts', upper(LINES.hemHip, LINES.hemHip, LINES.neckCrew, 0.72, SHIRT)],
+  ['teeLong', 'Long-sleeve shirt', 'Shirts', upper(LINES.hemHip, LINES.hemHip, LINES.neckCrew, 1.0, SHIRT)],
   ['crop', 'Crop top', 'Shirts', upper(LINES.hemCrop, LINES.hemCrop - 0.04, LINES.neckScoop, 0.25)],
   ['maternity', 'Maternity T-shirt', 'Shirts', upper(LINES.hemMaternity, LINES.hemHip + 0.06, LINES.neckCrew, 0.32)],
   ['sportsBra', 'Sports bra', 'Bras & bands', upper(LINES.underbust, LINES.bandBack, LINES.neckScoop - 0.02, -1, { strapIn: 0.85, strap: 0.65, neckBack: 0.86, armhole: LINES.armhole - 0.02 }), 'sportsBra'],
@@ -238,7 +280,7 @@ export const COVERAGE_TEMPLATES: readonly CoverageTemplate[] = Object.freeze(([
   Object.freeze({ id, name, group, params: Object.freeze(params), ...(construction ? { construction } : {}) })));
 
 /** The sliders a template offers, and the parameter each moves. */
-export interface CoverageDial { readonly id: 'rise' | 'riseBack' | 'legCut' | 'legEnd' | 'legStart' | 'hem' | 'neck' | 'sleeve'; readonly name: string; readonly min: number; readonly max: number }
+export interface CoverageDial { readonly id: 'rise' | 'riseBack' | 'legCut' | 'legEnd' | 'legStart' | 'hem' | 'length' | 'neck' | 'sleeve'; readonly name: string; readonly min: number; readonly max: number }
 export const COVERAGE_DIALS: readonly CoverageDial[] = Object.freeze([
   { id: 'rise', name: 'WAISTBAND (FRONT)', min: -0.2, max: 0.7 },
   { id: 'riseBack', name: 'HIPS & BACK RISE', min: 0, max: 0.6 },
@@ -246,6 +288,7 @@ export const COVERAGE_DIALS: readonly CoverageDial[] = Object.freeze([
   { id: 'legEnd', name: 'LEG LENGTH', min: 0, max: 1 },
   { id: 'legCut', name: 'LEG CUT HEIGHT', min: -0.2, max: 0.35 },
   { id: 'hem', name: 'HEM / BELLY', min: -0.3, max: 0.75 },
+  { id: 'length', name: 'SHIRT LENGTH', min: 0, max: 1 },
   { id: 'neck', name: 'NECKLINE / TOP EDGE', min: 0.7, max: 1 },
   { id: 'sleeve', name: 'SLEEVE', min: -0.05, max: 1 },
 ].map((d) => Object.freeze(d)) as CoverageDial[]);
@@ -256,7 +299,8 @@ export function dialsFor(p: CoverageParams): CoverageDial['id'][] {
   if (p.riseFront !== null && p.riseFront > -5 && p.riseFront < 1) out.push('rise', 'riseBack');
   if (p.riseFront !== null && p.legStart > 0) out.push('legStart');
   if (p.legCut) out.push('legCut'); else if (p.riseFront !== null) out.push('legEnd');
-  if (p.hemFront !== null && p.hemFront > -1) out.push('hem');
+  if (p.length !== null) out.push('length');
+  else if (p.hemFront !== null && p.hemFront > -1) out.push('hem');
   if (p.neckFront !== null) out.push('neck');
   if (p.hemFront !== null) out.push('sleeve');
   return out;
@@ -271,6 +315,7 @@ export function dialValue(p: CoverageParams, dial: CoverageDial['id']): number {
     case 'legEnd': return p.legEnd;
     case 'legCut': return p.legCut?.side ?? 0;
     case 'hem': return p.hemFront ?? 0;
+    case 'length': return p.length ?? 0;
     case 'neck': return p.topFront ?? p.neckFront ?? 1;
     case 'sleeve': return p.sleeve;
   }
@@ -284,6 +329,7 @@ export function withDial(p: CoverageParams, dial: CoverageDial['id'], value: num
     case 'legEnd': return { ...p, legEnd: Math.max(value, p.legStart) };
     case 'legCut': return p.legCut ? { ...p, legCut: { ...p.legCut, side: value } } : p;
     case 'hem': return { ...p, hemFront: value, hemBack: (p.hemBack ?? value) + value - (p.hemFront ?? value) };
+    case 'length': return { ...p, length: Math.max(0, Math.min(1, value)) };
     // a bandeau's top edge, front and back together; otherwise the neckline's depth
     case 'neck': return p.topFront !== null ? { ...p, topFront: value, topBack: (p.topBack ?? value) + value - p.topFront } : { ...p, neckFront: value };
     case 'sleeve': return { ...p, sleeve: value };
@@ -366,7 +412,9 @@ export function coverage(map: BodyMap, p: CoverageParams): Float32Array {
     // top edge instead. A tank, a sports bra or a swimsuit has straps: a band over each shoulder, the neckline open
     // inside them, an armhole outside them
     if (p.hemFront !== null) {
-      const hem = blend(p.hemFront, p.hemBack ?? p.hemFront, map.around[v]);
+      // a shirt's hem is level, and its paint has faded out by the hem itself: the drape's hem band (`tunicDrape.ts`)
+      // is the crisp edge there, over the paint's soft one
+      const hem = p.length !== null ? shirtHem(map, p.length) + EDGE : blend(p.hemFront, p.hemBack ?? p.hemFront, map.around[v]);
       const neck = blend(p.neckFront ?? 1, p.neckBack ?? p.neckFront ?? 1, map.around[v]);
       const lat = map.lateral[v];
       // the neckline: a straight top edge (a bandeau); inside a strapped garment's straps, open down to its depth; or

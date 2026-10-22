@@ -112,7 +112,16 @@ export const SARAH_LAB_FIELD = Object.freeze({
   /** `${body}<control>`: a body control's line; its slider follows it */
   body: 'sarahlab-body-',
   bodyNote: 'sarahlab-body-note',
+  /** a painted shirt's length (Joshua, 2026-10-22: "from knee-length up to just above the crotch") */
+  shirtLength: 'sarahlab-shirt-length',
 });
+
+/** The SHIRT LENGTH line: 0 just above her crotch, 1 just above her knee. */
+export function shirtLengthLine(length: number): string {
+  const pct = Math.round(Math.max(0, Math.min(1, length)) * 100);
+  const where = pct <= 3 ? 'just above the crotch' : pct >= 97 ? 'just above the knee' : pct < 40 ? 'upper thigh' : pct < 70 ? 'mid-thigh' : 'above the knee';
+  return `SHIRT LENGTH · ${pct}% · ${where}`;
+}
 
 /** The flat morph target the bake writes (`scripts/bellyMorph.mjs`). */
 export const BELLY_TARGET = 'belly';

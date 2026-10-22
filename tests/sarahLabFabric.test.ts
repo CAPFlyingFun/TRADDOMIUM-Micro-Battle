@@ -215,8 +215,9 @@ describe('templates wrap round her (Joshua, 2026-10-20: no gaps at the hips, smo
       const c = coverage(m, t(id));
       expect(Array.from(c).every((x) => x === 1), `${id}: ${Array.from(c).join(',')}`).toBe(true);
     }
-    // and a regular-length shirt reaches the hip's side too
-    expect(coverage(m, t('teeShort'))[1]).toBe(1);
+    // and a shirt reaching the top of her thighs covers the hip's side too (at 0%, Joshua's line, its hem is right at
+    // her hip joints' height, so that side is the hem itself)
+    expect(coverage(m, withDial(t('teeShort'), 'length', 0.2))[1]).toBe(1);
   });
 });
 
@@ -383,5 +384,45 @@ describe('U- and V-neck necklines (Joshua, 2026-10-22)', () => {
     }
     expect(necklineCut(t('teeShort'), 0.5)).toBe(Infinity);
     expect(necklineCut(t('teeV'), 5)).toBe(Infinity);
+  });
+});
+
+import { DEFAULT_SHIRT_LENGTH, dialValue, dialsFor, legLandmarks, shirtHem } from '../src/sarahlab/paintTemplates';
+import { shirtLengthLine } from '../src/sarahlab/sarahLabTool';
+describe('shirt length (Joshua, 2026-10-22: "from knee-length up to just above the crotch")', () => {
+  // her crotch's lowest skin at -0.2, knee skin from -0.9 to -0.7, thigh skin at -0.25 and -0.6
+  const ids = ['crotch', 'kneeL', 'kneeL', 'kneeR', 'kneeR', 'thighL', 'thighR'], trunk = [-0.2, -0.9, -0.7, -0.9, -0.7, -0.25, -0.6], n = ids.length;
+  const m = {
+    region: Uint8Array.from(ids.map(regionNumber)), trunk: Float32Array.from(trunk), leg: Float32Array.from([NaN, 0.5, 0.5, 0.5, 0.5, 0.2, 0.4]),
+    arm: new Float32Array(n).fill(NaN), side: new Int8Array(n), front: new Int8Array(n).fill(1), across: new Float32Array(n), collar: new Float32Array(n).fill(9),
+    lateral: new Float32Array(n).fill(9), around: new Float32Array(n).fill(1), mirror: new Int32Array(n).fill(-1), trunkLength: 1, neckRadius: 0.14, hipSpan: 0.3,
+    sideFacing: new Float32Array(n), upFacing: new Float32Array(n), legAround: new Float32Array(n).fill(0.5), facing: 1,
+  };
+  const t = (id: string) => COVERAGE_TEMPLATES.find((x) => x.id === id)!.params;
+  it('runs from just above her crotch to the tops of her knees, measured on her', () => {
+    expect(legLandmarks(m).crotch).toBeCloseTo(-0.2, 6);
+    expect(legLandmarks(m).knee).toBeCloseTo(-0.7, 6);
+    expect(shirtHem(m, 0)).toBeGreaterThan(-0.2);
+    expect(shirtHem(m, 1)).toBeCloseTo(-0.7, 6);
+    expect(shirtHem(m, 2)).toBe(shirtHem(m, 1));
+  });
+  it('is the dial every tee offers in place of the hem, and its hem is level', () => {
+    for (const id of ['teeShort', 'teeU', 'teeV', 'teeLong', 'tank']) {
+      expect(t(id).length, id).toBe(DEFAULT_SHIRT_LENGTH);
+      expect(dialsFor(t(id))).toContain('length');
+      expect(dialsFor(t(id))).not.toContain('hem');
+    }
+    expect(t('crop').length).toBeNull();
+    const long = withDial(t('teeShort'), 'length', 1), short = withDial(t('teeShort'), 'length', 0);
+    expect(dialValue(long, 'length')).toBe(1);
+    // the thigh at -0.6 is under a knee-length shirt, not under the shortest; the one at -0.25 under the long one too
+    expect(coverage(m, long)[6]).toBe(1);
+    expect(coverage(m, short)[6]).toBe(0);
+    expect(coverage(m, long)[5]).toBe(1);
+  });
+  it('says where it ends', () => {
+    expect(shirtLengthLine(0)).toContain('just above the crotch');
+    expect(shirtLengthLine(1)).toContain('just above the knee');
+    expect(shirtLengthLine(0.2)).toContain('20%');
   });
 });
