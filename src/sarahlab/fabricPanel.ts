@@ -31,7 +31,7 @@ import {
   fabricFamily, opacityOf, swatchRect, tileUnits, trimPick, type FabricChoice, type FabricFamilyId, type FabricLayout,
   type FabricPick, type OutfitConfig, type PaintTool,
 } from './fabricLibrary';
-import { ensureRest, setDetailKeep, setFabricLayer, setHang, setRegionOverlay } from './fabricMaterial';
+import { ensureRest, setDetailKeep, setFabricLayer, setHang, setRegionOverlay, setUnder } from './fabricMaterial';
 import type { DetailKeep } from './bodyDetail';
 import { DEFAULT_LAYER_DETAIL, resolveDetail, type LayerDetail, type ResolvedDetail } from './detailMaterials';
 import { BRUSH_RANGE_CM, BodyPaint, PAINT_LAYER_COUNT, packLayer } from './bodyPaint';
@@ -822,16 +822,28 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
    * fabric, cut to its neckline; with no painted top shown, or while she is being painted, it comes off.
    */
   let bridge: CleavageBridge | null = null;
+  /** The paint layer the bridge is the top of, and the bridge's "behind it" values last laid on her skin. */
+  let bridgeLayer = -1, underLaid = '';
+  /** The skin behind the bridge loses its top's paint (only the outside layer is the shirt), whenever that changes. */
+  function layUnder(): void {
+    const body = hooks.body();
+    if (!body) return;
+    const key = bridge && bridgeLayer >= 0 && bridge.mesh.visible ? `${bridgeLayer}:${bridge.underVersion}` : '';
+    if (key === underLaid) return;
+    underLaid = key;
+    setUnder(body, bodyMaterial(body), key ? bridgeLayer : -1, key ? bridge!.under : null, { layers: PAINT_LAYER_COUNT, rest: hooks.rest(body) });
+  }
   function dressBridge(body: THREE.Mesh, p: BodyPaint | null): void {
     let top = -1;
     for (let i = PAINT_LAYER_COUNT - 1; i >= 0 && top < 0; i--) {
       if (p && p.has(i) && layerShown(i) && paintChoices[i].fabric && templates[i] && templates[i]!.params.hemFront !== null && templates[i]!.params.topFront === null) top = i;
     }
-    if (top < 0 || painting || !p || !(body as THREE.SkinnedMesh).isSkinnedMesh) { bridge?.wear(null); return; }
+    if (top < 0 || painting || !p || !(body as THREE.SkinnedMesh).isSkinnedMesh) { bridge?.wear(null); bridgeLayer = -1; layUnder(); return; }
     const map = regionMap();
     if (!map) return;
     if (bridge && bridge.mesh.parent !== body) { bridge.dispose(); bridge = null; }
     if (!bridge) bridge = new CleavageBridge(body as THREE.SkinnedMesh, map);
+    bridgeLayer = top;
     const c = paintChoices[top], under = top;
     bridge.wear({ params: templates[top]!.params, covered: (v) => p.coverAt(v, [under]) });
     setFabricLayer(bridge.mesh, bridge.mesh.material as THREE.Material, 0, layerFor(body, c, c.fabric, 'plain'), { layers: 1, masked: false, rest: null });
@@ -977,7 +989,7 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
     wearOutfit,
     clearAll,
     navelFlatten,
-    frame() { bridge?.update(); drape?.update(); layHang(); },
+    frame() { bridge?.update(); drape?.update(); layHang(); layUnder(); },
     reshaped() { bridge?.reshape(); drape?.reshape(); },
     setShirtLength,
     shirtLength: () => shirtLength,
