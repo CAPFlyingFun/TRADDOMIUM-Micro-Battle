@@ -3,8 +3,9 @@ import { garmentTexturePanel } from './garmentTexturePanel';
 import { fabricPanel, type FabricPanel } from './fabricPanel';
 import { mapBody } from './bodyRegions';
 import { DEFAULT_SHIRT_LENGTH } from './paintTemplates';
-import { EMPTY_BOOK, type CharacterBook, type SavedBody, type SavedClothes } from './characterSaves';
+import { AUTO_DETAIL, EMPTY_BOOK, type CharacterBook, type SavedBody, type SavedClothes } from './characterSaves';
 import { characterPanel, type CharacterPanel } from './characterPanel';
+import { outfitPanel, type OutfitPanel, type OutfitSource } from './outfitPanel';
 import { NO_RULES, isLocked, randomize, ruleFor, withGroupLock, withRule, type RandomRules, type RandomSpec } from '../actor/bodyRandom';
 import { uprightLayout, type UprightLayout } from './uprightTabs';
 import { loadingCard, LOADING_COVERED_VAR, type LoadingCard, type LoadingPlace } from './loadingCard';
@@ -252,6 +253,10 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let wornFrom: string | null = null;
   let pendingClothes: Omit<SavedClothes, 'outfit'> | null = null;
   let characters: CharacterPanel | null = null;
+  // the outfit editor's SAVE workspace, and where the clothes going on now came from (a character, a shared outfit, a
+  // new one); null is the built-in outfit itself
+  let outfits: OutfitPanel | null = null;
+  let nextSource: OutfitSource | null = null;
   let sessionBook: CharacterBook = EMPTY_BOOK;
   const book = hooks.characters ?? { read: () => sessionBook, write: (b: CharacterBook) => { sessionBook = b; } };
   let seconds = 0;
@@ -295,7 +300,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let texturePanel: ReturnType<typeof garmentTexturePanel> | null = null;
   // the fabric editor (fabricPanel.ts); while it paints onto her body every garment is hidden (Joshua, 2026-10-20)
   let fabric: FabricPanel | null = null;
-  let painting = false;
+  /** Which modelled garments the outfit editor lets the room draw (`fabricPanel.ts`): all, none while painting her body, or one ISOLATED. */
+  let garmentView: 'all' | 'none' | string = 'all';
   const fields: Record<string, HTMLElement> = {};
   const buttons: Record<string, HTMLButtonElement> = {};
   let armsInput: HTMLInputElement | null = null;
@@ -418,8 +424,12 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       if (([...GARMENTS, ...RECOVERED_SHIRTS] as readonly string[]).includes(name)) mesh.visible = shownNow(name);
       { const t = trimShown(name, wornGarments(outfit, garments)); if (t !== null) mesh.visible = t; }
       if (mesh.userData.replacedByRecovered) mesh.visible = false;
-      // painting onto her body: "don't show any clothing since you would be painting over the body"
-      if (painting && !mesh.geometry.getAttribute('_cloth_cover')) mesh.visible = false;
+      // painting onto her body: "don't show any clothing since you would be painting over the body"; a garment
+      // ISOLATED in the editor shows on its own (its trim with it)
+      if (garmentView !== 'all' && !mesh.geometry.getAttribute('_cloth_cover')) {
+        const own = name.endsWith('Trim') ? name.slice(0, -4) : name;
+        if (garmentView === 'none' || own !== garmentView) mesh.visible = false;
+      }
       if (mesh.userData.recoveredLeggings) updateLeggingsHem(mesh, bump, shownNow('shirtSpandexHigh') ? 'spandex' : 'relaxed');
       // the leggings under a worn athletic tee, the same way
       const underTop = mesh.geometry.getAttribute('_under_top');
@@ -438,7 +448,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       const cover = mesh.geometry.getAttribute('_cloth_cover');
       if (cover && mesh.geometry.index) {
         const all = (mesh.userData.allIndices ??= mesh.geometry.index.array.slice()) as ArrayLike<number>;
-        const mask = painting || bodyNeverHidden(SARAH_LAB_MODELS[modelIndex].id) ? 0 : coverMask(wornGarments(outfit, garments));
+        const mask = garmentView !== 'all' || bodyNeverHidden(SARAH_LAB_MODELS[modelIndex].id) ? 0 : coverMask(wornGarments(outfit, garments));
         if (mesh.userData.coverMask !== mask) {
           mesh.userData.coverMask = mask;
           // read through getX: the file stores the bits with a stride (vertex data is 4-byte
@@ -526,6 +536,21 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     fabric?.wearOutfit(recovered ? OUTFITS[outfit]?.paint ?? null : null);
     // saved clothes put on with this outfit go on over its defaults
     if (pendingClothes && fabric?.putOnClothes(pendingClothes)) pendingClothes = null;
+    // what she has on now is what the editor's SAVE compares against
+    if (fabric && !pendingClothes) { outfits?.editing(nextSource ?? { kind: 'builtin', name: OUTFITS[outfit].name }); nextSource = null; }
+  }
+  /** Put saved clothes on her: their outfit first if it is another, then every piece as saved. */
+  function putOnSaved(saved: SavedClothes, from: string | null, source: OutfitSource): void {
+    wornFrom = from;
+    nextSource = source;
+    const { outfit: name, ...rest } = saved;
+    const index = OUTFITS.findIndex((o) => o.name === name);
+    pendingClothes = rest;
+    if (index >= 0 && index !== outfit) dress(index);
+    else {
+      if (fabric?.putOnClothes(rest)) { pendingClothes = null; outfits?.editing(source); nextSource = null; }
+      applyLook(); refresh();
+    }
   }
   function dress(next: number, opening = false): void {
     // chosen before she is in: the opening dresses her in it
@@ -681,7 +706,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     shirtLengthInput = slider(SARAH_LAB_FIELD.shirtLength, Math.round(DEFAULT_SHIRT_LENGTH * 100), (v) => { fabric?.setShirtLength(v / 100); }, 100, 'clothes');
     const row = document.createElement('div');
     row.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap';
-    buttons.outfit = btn(outfitLine(outfit), SARAH_LAB_ACTION.outfit, () => { wornFrom = null; pendingClothes = null; dress(nextOutfit(wantedOutfit ?? outfit, garments)); });
+    buttons.outfit = btn(outfitLine(outfit), SARAH_LAB_ACTION.outfit, () => { wornFrom = null; pendingClothes = null; nextSource = null; dress(nextOutfit(wantedOutfit ?? outfit, garments)); });
     buttons.model = btn(modelLine(modelIndex), SARAH_LAB_ACTION.model, () => {
       modelIndex = (modelIndex + 1) % SARAH_LAB_MODELS.length;
       armsDeg = SARAH_LAB_MODELS[modelIndex].id === 'v1' || pose === 'tpose' ? 90 : 0;
@@ -823,14 +848,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         } else { applyLook(); applyMotion(); }
         refresh();
       },
-      putOnClothes: (saved, from) => {
-        wornFrom = from;
-        const { outfit: name, ...rest } = saved;
-        const index = OUTFITS.findIndex((o) => o.name === name);
-        pendingClothes = rest;
-        if (index >= 0 && index !== outfit) dress(index);
-        else { if (fabric?.putOnClothes(rest)) pendingClothes = null; applyLook(); refresh(); }
-      },
+      putOnClothes: (saved, from, character) => putOnSaved(saved, from, { kind: 'personal', name: character }),
       download: (name, text) => {
         const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
         const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
@@ -839,6 +857,38 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     });
     characters.element.dataset.tab = 'body';
     right.appendChild(characters.element);
+    // BREAST & NAVEL DETAIL through her clothes: the outfit editor's own setting, shown here too (filled in once the
+    // editor exists, below), so the BODY tab and BODY PAINT can never disagree (Joshua, 2026-10-22)
+    const bodyDetail = document.createElement('details');
+    bodyDetail.dataset.tab = 'body';
+    bodyDetail.style.cssText = 'border-top:1px solid rgba(255,255,255,0.12);padding-top:6px';
+    const bodyDetailHead = document.createElement('summary');
+    bodyDetailHead.textContent = 'BREAST & NAVEL DETAIL THROUGH CLOTHES';
+    bodyDetailHead.style.cssText = 'cursor:pointer;font:700 12px system-ui,sans-serif;letter-spacing:.08em;padding:4px 0';
+    bodyDetail.appendChild(bodyDetailHead);
+    right.appendChild(bodyDetail);
+    // the outfit editor's SAVE workspace (outfitPanel.ts)
+    const clothesNow = (): SavedClothes => ({ outfit: OUTFITS[outfit].name, ...(fabric?.clothes() ?? { shirtLength: DEFAULT_SHIRT_LENGTH, layers: [], garments: {} }) });
+    outfits = outfitPanel({
+      read: () => book.read(),
+      write: (b) => { book.write(b); characters?.refresh(); },
+      clothes: clothesNow,
+      body: (): SavedBody => ({ model: SARAH_LAB_MODELS[modelIndex].id, bump, shape: serializeShape(body), refine, random: randomRules }),
+      characterName: () => characters?.name() ?? '',
+      builtins: () => OUTFITS.filter((o) => (o.paint ? recovered : o.name !== 'none')).map((o) => o.name),
+      wearBuiltin: (name) => {
+        const index = OUTFITS.findIndex((o) => o.name === name);
+        if (index < 0) return;
+        wornFrom = null; pendingClothes = null; nextSource = null;
+        dress(index);
+      },
+      startBlank: () => {
+        // a modelled outfit's garments come off too: a blank outfit is her body, ready for paint
+        const name = OUTFITS[outfit].garments.length ? 'none' : OUTFITS[outfit].name;
+        putOnSaved({ outfit: name, shirtLength: fabric?.shirtLength() ?? DEFAULT_SHIRT_LENGTH, layers: [], garments: {}, detail: AUTO_DETAIL }, null, { kind: 'new', name: '' });
+      },
+      putOn: (clothes, source) => putOnSaved(clothes, source.kind === 'shared' ? source.name : null, source),
+    });
     const note = document.createElement('div');
     note.dataset.field = SARAH_LAB_FIELD.bodyNote;
     note.dataset.tab = 'body';
@@ -863,10 +913,12 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       rest: (mesh) => shaped.find(x => x.mesh === mesh)?.fields ?? null,
       unitsPerCm: (mesh) => { mesh.getWorldScale(scaleOf); return (M / 100) / (scaleOf.x || 1); },
       loadImage: (path) => assets.loadTexture(path).then(t => { const image = (t?.image ?? null) as (CanvasImageSource & { width: number; height: number }) | null; t?.dispose(); return image; }),
-      painting: (on) => { painting = on; applyLook(); refresh(); },
+      garmentsShown: (which) => { garmentView = which; applyLook(); refresh(); },
       view: () => ({ camera, ...ctx.renderer.size() }),
       describe: () => ({ base: SARAH_LAB_MODELS[modelIndex].id, outfit: OUTFITS[outfit].name }),
       reshape: () => { applyLook(); },
+      saveSection: () => outfits?.element ?? null,
+      changed: () => outfits?.changed(),
       navelHint: () => {
         // her navel: the vertex her own navel morphs move most
         const body = skinned.find(m => !!m.geometry.getAttribute('_cloth_cover'));
@@ -901,6 +953,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     });
     fabric.element.dataset.tab = 'clothes';
     right.appendChild(fabric.element);
+    bodyDetail.appendChild(fabric.detailControl());
     right.appendChild(texturePanel.element);
     root.appendChild(right);
     // the CAMERA tab's own buttons: held upright only (landscape has the wheel and the pinch beside its panel)
@@ -926,7 +979,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     root.appendChild(card.element);
     ctx.uiLayer.appendChild(root);
     hud = root;
-    upright_ = uprightLayout(root, () => { right.style.display = upright_?.portrait ? 'none' : 'flex'; const size = ctx.renderer.size(); frame(size.width, size.height, false); refresh(); });
+    upright_ = uprightLayout(root, () => { right.style.display = upright_?.portrait ? 'none' : 'flex'; fabric?.setActive(!upright_?.portrait || upright_.open === 'clothes'); const size = ctx.renderer.size(); frame(size.width, size.height, false); refresh(); });
     refresh();
   }
   function zoom(factor: number): void {

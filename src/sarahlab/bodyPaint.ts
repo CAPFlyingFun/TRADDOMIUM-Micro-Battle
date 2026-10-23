@@ -127,6 +127,8 @@ export class BodyPaint {
   private neighbours: Uint32Array[] | null = null;
   /** Her navel, once `prepareDetail` has found it; -1 before. */
   navelVertex = -1;
+  /** Her nipples (`bodyDetail.ts`), -1 where one was not found; empty before `prepareDetail`. */
+  nippleVertices: readonly number[] = [];
   /** How much paint covers vertex `v`, on the layers listed (0 to 1). */
   coverAt(v: number, layers: readonly number[]): number {
     let c = 0;
@@ -225,6 +227,7 @@ export class BodyPaint {
     this.neighbours ??= vertexNeighbours(index, rest.count);
     const d = bodyDetail({ map, restPosition: rest.array as ArrayLike<number>, restNormal: nrm.array as ArrayLike<number>, neighbours: this.neighbours, trunkLength: map.trunkLength, navelHint });
     this.navelVertex = d.navel;
+    this.nippleVertices = d.nipples;
     g.setAttribute('fabricDetail', new THREE.BufferAttribute(d.offset, 4));
     g.setAttribute('fabricDetailN', new THREE.BufferAttribute(d.normal, 4));
   }

@@ -9,7 +9,7 @@ overrides... Editing that character's copy should not unexpectedly change the sh
 
 ## Characters and outfits
 
-The **CHARACTERS & OUTFITS** section is in the body controls.
+The **CHARACTERS & OUTFITS** section is in the body controls. (Later the same day the shared outfit library moved to CLOTHES › EDIT OUTFIT › SAVE: see `docs/reviews/sarah-editor/`.)
 
 - **SAVE ALL / SAVE BODY / SAVE CLOTHES** under a name (Sarah, Lena, ...).
   - The body is: the model, her bump (her starting size), every belly and breast shape control, CURVE, and her

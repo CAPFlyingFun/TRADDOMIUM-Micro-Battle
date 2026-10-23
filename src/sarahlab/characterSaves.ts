@@ -8,7 +8,7 @@
  *     later), every body-shape control, the belly refinement, and RANDOMIZE's ranges and locks (`actor/bodyRandom.ts`);
  *   - the CLOTHES: the outfit she wears, each paint layer (its template and dial settings, or the hand-painted mask
  *     when there is no template), its fabric, colour, stitch and detail-through-paint, each modelled garment's fabric,
- *     and the shirt length.
+ *     the shirt length, and the outfit's BREAST and NAVEL DETAIL (each AUTO or a manual value: `DetailOverride`).
  * Saving one part under a name keeps the other part that name already holds, so a body and an outfit can be built and
  * saved separately and still make one character. Loading puts on only what the save holds.
  *
@@ -54,10 +54,20 @@ export interface SavedLayer {
   readonly mask: string;
 }
 
+/**
+ * BREAST and NAVEL DETAIL through the clothes (Joshua, 2026-10-22: "one shared underlying setting... Each should have its
+ * own AUTO/MANUAL state"): null is AUTO (each piece's own fabric and construction decides, `detailMaterials.ts`), a number
+ * is MANUAL, 0 to 1, for every piece over that detail. One per outfit, saved with the clothes, never with the body.
+ */
+export interface DetailOverride { readonly nipple: number | null; readonly navel: number | null }
+export const AUTO_DETAIL: DetailOverride = Object.freeze({ nipple: null, navel: null });
+
 export interface SavedClothes {
   /** `OUTFITS` name. */
   readonly outfit: string;
   readonly shirtLength: number;
+  /** Absent in saves made before it existed: AUTO. */
+  readonly detail?: DetailOverride;
   /** One per paint layer, bottom first; null for an empty layer. */
   readonly layers: readonly (SavedLayer | null)[];
   /** A modelled garment's fabric choice, by garment name. */
@@ -69,6 +79,8 @@ export interface ClothesOverrides {
   readonly layers: readonly ({ readonly choice: FabricChoice; readonly detail: LayerDetail } | null)[];
   readonly garments: Readonly<Record<string, FabricChoice>>;
   readonly shirtLength: number | null;
+  /** Her breast and navel detail when it differs from the outfit's; absent or null keeps the outfit's. */
+  readonly detail?: DetailOverride | null;
 }
 
 /** A character's clothes as a library outfit plus her own changes. */
@@ -171,7 +183,14 @@ export function clothesFor(book: CharacterBook, current: SavedClothes, wornFrom:
   });
   const garments: Record<string, FabricChoice> = {};
   for (const [k, g] of Object.entries(current.garments)) if (json(g) !== json(base.clothes.garments[k])) garments[k] = g;
-  return { basedOn: base.name, overrides: { layers, garments, shirtLength: current.shirtLength !== base.clothes.shirtLength ? current.shirtLength : null } };
+  const detail = json(current.detail ?? AUTO_DETAIL) !== json(base.clothes.detail ?? AUTO_DETAIL) ? { detail: current.detail ?? AUTO_DETAIL } : {};
+  return { basedOn: base.name, overrides: { layers, garments, shirtLength: current.shirtLength !== base.clothes.shirtLength ? current.shirtLength : null, ...detail } };
+}
+
+/** Two sets of clothes that put on the same: every layer, fabric, garment, length and detail (for "changed?"). */
+export function sameClothes(a: SavedClothes, b: SavedClothes): boolean {
+  const norm = (c: SavedClothes) => json({ ...c, detail: c.detail ?? AUTO_DETAIL, layers: c.layers.map((l) => l ?? null) });
+  return norm(a) === norm(b);
 }
 
 /** What a character wears: her own outfit, or the library outfit her reference names with her changes on top (a copy). */
@@ -192,6 +211,7 @@ export function resolveClothes(book: CharacterBook, clothes: SavedClothes | Outf
       return { ...l, ...own, template };
     }),
     garments: { ...base.clothes.garments, ...o.garments },
+    detail: o.detail ?? base.clothes.detail ?? AUTO_DETAIL,
   };
 }
 
@@ -227,6 +247,11 @@ function readChoice(v: unknown): FabricChoice | null {
     opacity: v.opacity === null || v.opacity === undefined ? null : num(v.opacity, 0, 1, 1),
   };
 }
+function readDetail(v: unknown): DetailOverride {
+  if (!isRecord(v)) return AUTO_DETAIL;
+  const one = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) ? Math.min(1, Math.max(0, x)) : null);
+  return { nipple: one(v.nipple), navel: one(v.navel) };
+}
 function readLayer(v: unknown): SavedLayer | null {
   if (!isRecord(v)) return null;
   const choice = readChoice(v.choice);
@@ -261,7 +286,7 @@ function readRef(v: unknown): OutfitRef | null {
     const choice = readChoice(l.choice);
     return choice ? { choice, detail: (isRecord(l.detail) ? l.detail : {}) as unknown as LayerDetail } : null;
   }) : [];
-  return { basedOn: str(v.basedOn, 80), overrides: { layers, garments, shirtLength: typeof o.shirtLength === 'number' ? num(o.shirtLength, 0, 1, 0) : null } };
+  return { basedOn: str(v.basedOn, 80), overrides: { layers, garments, shirtLength: typeof o.shirtLength === 'number' ? num(o.shirtLength, 0, 1, 0) : null, ...(isRecord(o.detail) ? { detail: readDetail(o.detail) } : {}) } };
 }
 function readClothes(v: unknown): SavedClothes | null {
   if (!isRecord(v) || typeof v.outfit !== 'string') return null;
@@ -272,6 +297,7 @@ function readClothes(v: unknown): SavedClothes | null {
     shirtLength: num(v.shirtLength, 0, 1, 0),
     layers: Array.isArray(v.layers) ? v.layers.slice(0, 8).map(readLayer) : [],
     garments,
+    ...(isRecord(v.detail) ? { detail: readDetail(v.detail) } : {}),
   };
 }
 

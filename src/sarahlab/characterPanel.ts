@@ -1,26 +1,22 @@
 /**
- * THE CHARACTERS & OUTFITS PANEL (Joshua, 2026-10-22): save a character under a name -- SAVE ALL, SAVE BODY or SAVE
- * CLOTHES -- and load her back; keep an outfit library any character can wear; export the whole book to a file and
- * import one. The book and its rules are `characterSaves.ts`; this is only its controls. The room supplies what she is
- * now and how to put a save on her.
+ * THE CHARACTERS PANEL (Joshua, 2026-10-22): save a character under a name -- SAVE ALL, SAVE BODY or SAVE CLOTHES -- and
+ * load her back; export the whole book (characters and shared outfits) to a file and import one. The shared outfits
+ * themselves are made and kept in the outfit editor's SAVE workspace (`outfitPanel.ts`). The book and its rules are
+ * `characterSaves.ts`; this is only its controls. The room supplies what she is now and how to put a save on her.
  */
 import {
   type CharacterBook, type OutfitRef, type SaveScope, type SavedBody, type SavedClothes,
-  clothesFor, exportBook, findOutfit, holds, importBook, mergeBooks, removeFrom, removeOutfit, resolveClothes, saveInto, saveOutfit,
+  clothesFor, exportBook, holds, importBook, mergeBooks, removeFrom, resolveClothes, saveInto,
 } from './characterSaves';
 
 export const CHARACTER_FIELD = Object.freeze({
   name: 'sarahlab-character-name',
-  outfitName: 'sarahlab-outfit-name',
   status: 'sarahlab-character-status',
   list: 'sarahlab-character-list',
-  outfits: 'sarahlab-outfit-list',
 });
 export const CHARACTER_ACTION = Object.freeze({
   save: (scope: SaveScope) => `sarahlab:character:save:${scope}`,
-  saveOutfit: 'sarahlab:outfit:save',
   load: (name: string) => `sarahlab:character:load:${name}`,
-  wear: (name: string) => `sarahlab:outfit:wear:${name}`,
   export: 'sarahlab:character:export',
   import: 'sarahlab:character:import',
 });
@@ -34,8 +30,8 @@ export interface CharacterPanelHooks {
   /** The library outfit she last put on, if she is still wearing it (her changes to it are kept as hers). */
   wornFrom(): string | null;
   putOnBody(body: SavedBody): void;
-  /** `from`: the library outfit these clothes come from, if any. */
-  putOnClothes(clothes: SavedClothes, from: string | null): void;
+  /** `from`: the shared outfit these clothes come from, if any; `character`: whose clothes they are. */
+  putOnClothes(clothes: SavedClothes, from: string | null, character: string): void;
   /** Hand the user a file (EXPORT). */
   download(name: string, text: string): void;
 }
@@ -43,13 +39,20 @@ export interface CharacterPanelHooks {
 const BTN = 'min-height:34px;padding:4px 8px;border:1px solid #ffffff30;border-radius:8px;background:#151b23;color:#e8e2d8;font:600 11px system-ui;cursor:pointer';
 const INPUT = 'flex:1;min-width:0;height:32px;padding:0 8px;border-radius:8px;border:1px solid #ffffff30;background:#0d1117;color:#e8e2d8;font:600 12px system-ui';
 
-export interface CharacterPanel { readonly element: HTMLElement; refresh(): void }
+export interface CharacterPanel {
+  readonly element: HTMLElement;
+  refresh(): void;
+  /** The name typed in it (whose save SAVE ALL / BODY / CLOTHES writes). */
+  name(): string;
+  /** Show a name in it (after the outfit editor saves a character's clothes). */
+  setName(name: string): void;
+}
 
 export function characterPanel(hooks: CharacterPanelHooks): CharacterPanel {
   const panel = document.createElement('details');
   panel.style.cssText = 'border-top:1px solid rgba(255,255,255,0.12);padding-top:6px';
   const summary = document.createElement('summary');
-  summary.textContent = 'CHARACTERS & OUTFITS';
+  summary.textContent = 'CHARACTERS';
   summary.style.cssText = 'cursor:pointer;font:700 12px system-ui,sans-serif;letter-spacing:.08em;padding:4px 0';
   panel.appendChild(summary);
   const button = (label: string, action: string, onClick: () => void) => {
@@ -88,12 +91,6 @@ export function characterPanel(hooks: CharacterPanelHooks): CharacterPanel {
   list.dataset.field = CHARACTER_FIELD.list;
   list.style.cssText = 'display:flex;flex-direction:column;gap:4px;margin-top:6px';
 
-  // ---------------------------------------------------------------- outfits
-  const outfitName = input(CHARACTER_FIELD.outfitName, 'Outfit name (Academy uniform...)', '');
-  const outfits = document.createElement('div');
-  outfits.dataset.field = CHARACTER_FIELD.outfits;
-  outfits.style.cssText = 'display:flex;flex-direction:column;gap:4px;margin-top:6px';
-
   /** A delete that asks once: the first tap arms it for a few seconds, the second deletes. */
   const deleteButton = (action: string, onDelete: () => void) => {
     const b = button('✕', action, () => {
@@ -124,7 +121,7 @@ export function characterPanel(hooks: CharacterPanelHooks): CharacterPanel {
         if (c.body) hooks.putOnBody(c.body);
         if (c.clothes) {
           const worn = resolveClothes(hooks.read(), c.clothes);
-          if (worn) hooks.putOnClothes(worn, 'basedOn' in c.clothes ? c.clothes.basedOn : null);
+          if (worn) hooks.putOnClothes(worn, 'basedOn' in c.clothes ? c.clothes.basedOn : null, c.name);
           else if ('basedOn' in c.clothes) { say(`${c.name}'s outfit is based on "${c.clothes.basedOn}", which is not in the outfit library any more.`); return; }
         }
         name.value = c.name;
@@ -132,15 +129,6 @@ export function characterPanel(hooks: CharacterPanelHooks): CharacterPanel {
       }),
       deleteButton(`sarahlab:character:delete:${c.name}`, () => { hooks.write(removeFrom(hooks.read(), c.name)); say(`Deleted ${c.name}.`); refresh(); }),
     )) : [placeholder('No characters saved yet.')]));
-    outfits.replaceChildren(...(book.outfits.length ? book.outfits.map((o) => line(o.name, `${o.clothes.outfit}${o.clothes.layers.some((l) => l && !l.template) ? ' · hand painted' : ''}`,
-      button('WEAR', CHARACTER_ACTION.wear(o.name), () => { hooks.putOnClothes(o.clothes, o.name); say(`Wearing "${o.name}". Change its colours or fabrics and SAVE CLOTHES to keep them as hers; "${o.name}" itself stays as it is.`); }),
-      deleteButton(`sarahlab:outfit:delete:${o.name}`, () => {
-        const users = hooks.read().characters.filter((c) => c.clothes && 'basedOn' in c.clothes && c.clothes.basedOn.toLowerCase() === o.name.toLowerCase()).map((c) => c.name);
-        hooks.write(removeOutfit(hooks.read(), o.name));
-        say(users.length ? `Deleted "${o.name}". ${users.join(', ')} still refer to it: load and re-save them with another outfit.` : `Deleted "${o.name}".`);
-        refresh();
-      }),
-    )) : [placeholder('No outfits saved yet.')]));
   }
   function placeholder(text: string): HTMLElement { const d = document.createElement('div'); d.textContent = text; d.style.cssText = 'font-size:11px;opacity:.6'; return d; }
 
@@ -164,17 +152,8 @@ export function characterPanel(hooks: CharacterPanelHooks): CharacterPanel {
     row(name),
     row(button('SAVE ALL', CHARACTER_ACTION.save('all'), () => save('all')), button('SAVE BODY', CHARACTER_ACTION.save('body'), () => save('body')), button('SAVE CLOTHES', CHARACTER_ACTION.save('clothes'), () => save('clothes'))),
     list,
-    heading('OUTFIT LIBRARY · any character can wear these'),
-    row(outfitName, button('SAVE OUTFIT', CHARACTER_ACTION.saveOutfit, () => {
-      const n = outfitName.value.trim();
-      if (!n) { say('Type an outfit name first.'); return; }
-      const replacing = !!findOutfit(hooks.read(), n);
-      hooks.write(saveOutfit(hooks.read(), n, hooks.clothes(), now()));
-      say(replacing ? `Replaced "${n}" in the library. Characters based on it keep their own changes.` : `Saved "${n}" to the outfit library.`);
-      refresh();
-    })),
-    outfits,
-    heading('FILE'),
+    heading('SHARED OUTFITS are made and saved in CLOTHES › EDIT OUTFIT › SAVE'),
+    heading('FILE · every character and shared outfit'),
     row(button('EXPORT', CHARACTER_ACTION.export, () => { hooks.download('traddomium-characters.json', exportBook(hooks.read())); say('Exported every character and outfit.'); }),
       button('IMPORT', CHARACTER_ACTION.import, () => file.click())),
     file,
@@ -182,5 +161,5 @@ export function characterPanel(hooks: CharacterPanelHooks): CharacterPanel {
   );
   for (const ev of ['pointerdown', 'pointermove', 'pointerup', 'wheel', 'keydown']) panel.addEventListener(ev, (e) => e.stopPropagation());
   refresh();
-  return { element: panel, refresh };
+  return { element: panel, refresh, name: () => name.value, setName: (n) => { name.value = n; } };
 }

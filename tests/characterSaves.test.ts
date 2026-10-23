@@ -5,8 +5,9 @@
 import { describe, expect, it } from 'vitest';
 import { NO_RULES, isLocked, randomize, ruleFor, sanitizeRules, withGroupLock, withRule, type RandomSpec } from '../src/actor/bodyRandom';
 import {
-  EMPTY_BOOK, clothesFor, exportBook, holds, importBook, mergeBooks, removeFrom, resolveClothes, saveInto, saveOutfit, type SavedBody, type SavedClothes,
+  AUTO_DETAIL, EMPTY_BOOK, clothesFor, exportBook, holds, importBook, mergeBooks, removeFrom, resolveClothes, sameClothes, saveInto, saveOutfit, type SavedBody, type SavedClothes,
 } from '../src/sarahlab/characterSaves';
+import { COVERAGE_TEMPLATES, pieceKind } from '../src/sarahlab/paintTemplates';
 import { BODY_RANDOM_SPECS } from '../src/sarahlab/sarahLabTool';
 
 const spec = (key: string, group: string, min = 0, max = 100, step = 1): RandomSpec => ({ key, group, min, max, step, defaultMin: min, defaultMax: max });
@@ -112,5 +113,55 @@ describe('character saves', () => {
     expect(merged.outfits.map((o) => o.name)).toEqual(['Combat']);
     // the body's ranges and locks come back
     expect(back.characters[0].body?.random.groups).toEqual(['belly']);
+  });
+
+  it('keeps BREAST and NAVEL DETAIL with the clothes, each AUTO or MANUAL, never with the body (Joshua, 2026-10-22)', () => {
+    const manual: SavedClothes = { ...tee(0), detail: { nipple: 0.2, navel: null } };
+    let book = saveInto(EMPTY_BOOK, 'Sarah', 'all', body(90), manual, 't1');
+    // a body-only save leaves her clothes' detail alone
+    book = saveInto(book, 'Sarah', 'body', body(120), tee(9), 't2');
+    expect((book.characters[0].clothes as SavedClothes).detail).toEqual({ nipple: 0.2, navel: null });
+    // and it comes back through a file, clamped, and absent stays absent (AUTO)
+    const back = importBook(exportBook(saveOutfit(book, 'Plain', tee(1), 't3')))!;
+    expect((back.characters[0].clothes as SavedClothes).detail).toEqual({ nipple: 0.2, navel: null });
+    expect(back.outfits[0].clothes.detail).toBeUndefined();
+    const odd = importBook(JSON.stringify({ version: 1, outfits: [{ name: 'x', clothes: { ...tee(0), detail: { nipple: 7, navel: 'no' } } }] }))!;
+    expect(odd.outfits[0].clothes.detail).toEqual({ nipple: 1, navel: null });
+    // a character's detail on a shared outfit is one of her overrides, and resolves back
+    book = saveOutfit(EMPTY_BOOK, 'Casual', tee(0), 't1');
+    const ref = clothesFor(book, { ...tee(0), detail: { nipple: null, navel: 0.5 } }, 'Casual');
+    expect('basedOn' in ref && ref.overrides.detail).toEqual({ nipple: null, navel: 0.5 });
+    book = saveInto(book, 'Lena', 'clothes', body(0), ref, 't2');
+    expect(resolveClothes(book, book.characters[0].clothes)!.detail).toEqual({ nipple: null, navel: 0.5 });
+    // unchanged detail adds nothing to a reference
+    const same = clothesFor(book, tee(0), 'Casual');
+    expect('basedOn' in same && 'detail' in same.overrides).toBe(false);
+    expect(resolveClothes(book, same)!.detail).toEqual(AUTO_DETAIL);
+  });
+
+  it('tells changed clothes from unchanged ones, and saving a copy as new never touches the original', () => {
+    expect(sameClothes(tee(0), { ...tee(0), detail: AUTO_DETAIL })).toBe(true);
+    expect(sameClothes(tee(0), tee(12))).toBe(false);
+    expect(sameClothes(tee(0), { ...tee(0), detail: { nipple: 0.3, navel: null } })).toBe(false);
+    // "Sarah Casual": the default in red jersey and charcoal athletic knit, saved as new; the default is unchanged
+    const casual: SavedClothes = { ...tee(11), layers: [{ ...tee(0).layers[0]!, choice: { ...pick(2), fabric: { family: 'athletic', colour: 2 } } }, tee(11).layers[1], null] };
+    const book = saveOutfit(saveOutfit(EMPTY_BOOK, 'Default copy', tee(0), 't0'), 'Sarah Casual', casual, 't1');
+    expect(book.outfits.map((o) => o.name)).toEqual(['Sarah Casual', 'Default copy']);
+    expect(book.outfits[1].clothes.layers[1]?.choice.fabric?.colour).toBe(0);
+    expect(book.outfits[0].clothes.layers[0]?.choice.fabric).toEqual({ family: 'athletic', colour: 2 });
+  });
+});
+
+describe('outfit pieces', () => {
+  it('names every coverage template as a TOP, BOTTOM, ONE-PIECE or LEGWEAR', () => {
+    expect(pieceKind('teeShort')).toBe('top');
+    expect(pieceKind('sportsBra')).toBe('top');
+    expect(pieceKind('leggingsFull')).toBe('bottom');
+    expect(pieceKind('shortsBike')).toBe('bottom');
+    expect(pieceKind('swimsuit')).toBe('onePiece');
+    expect(pieceKind('bodysuit')).toBe('onePiece');
+    expect(pieceKind('socks')).toBe('legwear');
+    expect(pieceKind('nope')).toBeNull();
+    for (const t of COVERAGE_TEMPLATES) expect(pieceKind(t.id)).not.toBeNull();
   });
 });

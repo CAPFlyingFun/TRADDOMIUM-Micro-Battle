@@ -279,6 +279,21 @@ export const COVERAGE_TEMPLATES: readonly CoverageTemplate[] = Object.freeze(([
 ] as const).map(([id, name, group, params, construction]: readonly [string, string, CoverageTemplate['group'], CoverageParams, CoverageTemplate['construction']?]) =>
   Object.freeze({ id, name, group, params: Object.freeze(params), ...(construction ? { construction } : {}) })));
 
+/**
+ * WHAT KIND OF PIECE a template makes (Joshua, 2026-10-22: "Select TOP or BOTTOM directly"): the editor names a paint
+ * layer by it, so the default outfit's tee reads TOP and its leggings BOTTOM, and offers the styles of the same kind
+ * first. Legwear (stockings, socks) is its own kind: it goes under shorts or a skirt, not instead of them.
+ */
+export type PieceKind = 'top' | 'bottom' | 'onePiece' | 'legwear';
+export const PIECE_KIND_NAMES: Readonly<Record<PieceKind, string>> = Object.freeze({ top: 'TOP', bottom: 'BOTTOM', onePiece: 'ONE-PIECE', legwear: 'LEGWEAR' });
+export function pieceKind(templateId: string): PieceKind | null {
+  const t = COVERAGE_TEMPLATES.find((x) => x.id === templateId);
+  if (!t) return null;
+  if (t.group === 'Leggings' || t.group === 'Shorts') return 'bottom';
+  if (t.group === 'Shirts' || t.group === 'Bras & bands') return 'top';
+  return t.params.feet ? 'legwear' : 'onePiece';
+}
+
 /** The sliders a template offers, and the parameter each moves. */
 export interface CoverageDial { readonly id: 'rise' | 'riseBack' | 'legCut' | 'legEnd' | 'legStart' | 'hem' | 'length' | 'neck' | 'sleeve'; readonly name: string; readonly min: number; readonly max: number }
 export const COVERAGE_DIALS: readonly CoverageDial[] = Object.freeze([
