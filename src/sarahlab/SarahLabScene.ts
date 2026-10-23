@@ -1,3 +1,4 @@
+import { BELLY_CURVES, BELLY_CURVE_NAMES, type BellyCurve } from './bellyInterpolation';
 import { attachRecoveredMeshes, applyRecoveredBaseline, fitWeights, LEGGINGS_FIT_KEYS, SHIRT_FINE_FIT_KEYS, updateLeggingsHem, releaseRecoveredMeshes } from './recoveredClothes';
 import { garmentTexturePanel } from './garmentTexturePanel';
 import { fabricPanel, type FabricPanel } from './fabricPanel';
@@ -302,6 +303,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let fabric: FabricPanel | null = null;
   /** Which modelled garments the outfit editor lets the room draw (`fabricPanel.ts`): all, none while painting her body, or one ISOLATED. */
   let garmentView: 'all' | 'none' | string = 'all';
+  /** THE BELLY CURVE EXPERIMENT (`bellyInterpolation.ts`): the approved slider unless chosen; for this session only. */
+  let bellyCurve: BellyCurve = 'approved';
   const fields: Record<string, HTMLElement> = {};
   const buttons: Record<string, HTMLButtonElement> = {};
   let armsInput: HTMLInputElement | null = null;
@@ -404,7 +407,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   }
 
   function applyLook(): void {
-    const fieldWeights = bodyShapeFieldWeights(body, bump);
+    const fieldWeights = bodyShapeFieldWeights(body, bump, bellyCurve);
     for (const { mesh, fields } of shaped) applyShapeFields(mesh, fields, {
       ...fieldWeights,
       ...(mesh.userData.recoveredShirt ? fitWeights(bump, 'shape:fitBelly') : {}),
@@ -415,7 +418,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     }, { normalizeNormals: !(mesh.userData.recoveredShirt || mesh.userData.recoveredLeggings) });
     for (const mesh of skinned) {
       const dict = mesh.morphTargetDictionary, influences = mesh.morphTargetInfluences;
-      if (dict && influences) for (const [name, w] of Object.entries({ ...bellyWeights(bump), ...breastWeightsForShape(bump, dict[BREAST_GROW_TARGET] !== undefined, body.breastSize), [BELLY_UPPER_TARGET]: bellyUpperWeight(bump), ...navelWeights(bump), [NAVEL_FLAT_TARGET]: Math.max(navelFlatWeight(bump), fabric?.navelFlatten() ?? 0), [BELLY_REFINE_TARGET]: refineWeight(refine, bump), [SEAT_TARGET]: seatCorrectiveWeight(pose === 'sit' ? 1 : 0, bump), [SEAT_V2_TARGET]: seatCorrectiveV2Weight(pose === 'sit' ? 1 : 0, bump), ...armRaiseWeights() })) {
+      if (dict && influences) for (const [name, w] of Object.entries({ ...bellyWeights(bump, bellyCurve), ...breastWeightsForShape(bump, dict[BREAST_GROW_TARGET] !== undefined, body.breastSize), [BELLY_UPPER_TARGET]: bellyUpperWeight(bump, bellyCurve), ...navelWeights(bump), [NAVEL_FLAT_TARGET]: Math.max(navelFlatWeight(bump), fabric?.navelFlatten() ?? 0), [BELLY_REFINE_TARGET]: refineWeight(refine, bump), [SEAT_TARGET]: seatCorrectiveWeight(pose === 'sit' ? 1 : 0, bump), [SEAT_V2_TARGET]: seatCorrectiveV2Weight(pose === 'sit' ? 1 : 0, bump), ...armRaiseWeights() })) {
         const at = dict[name];
         if (at !== undefined) influences[at] = w;
       }
@@ -714,12 +717,18 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       loadSarah();
     });
     buttons.refine = btn(refineLine(refine), SARAH_LAB_ACTION.refine, () => { refine = !refine; applyLook(); refresh(); });
+    // the belly curve experiment (Joshua, 2026-10-22): CURRENT is the approved slider; the others are for comparing
+    buttons.bellyCurve = btn(`BELLY CURVE · ${BELLY_CURVE_NAMES[bellyCurve]}`, SARAH_LAB_ACTION.bellyCurve, () => {
+      bellyCurve = BELLY_CURVES[(BELLY_CURVES.indexOf(bellyCurve) + 1) % BELLY_CURVES.length];
+      buttons.bellyCurve.textContent = `BELLY CURVE · ${BELLY_CURVE_NAMES[bellyCurve]}${bellyCurve === 'approved' ? '' : ' (experiment)'}`;
+      applyLook(); applyMotion(); refresh();
+    });
     buttons.armSide = btn('ARMS · both', SARAH_LAB_ACTION.armSide, () => { armSide = (armSide + 1) % ARM_SIDES.length; applyLook(); refresh(); });
     buttons.turn = btn('TURN', SARAH_LAB_ACTION.turn, () => { turning = !turning; });
     // a nudge up, as a hop would: the bump lags, drops and settles
     buttons.bounce = btn('BOUNCE', SARAH_LAB_ACTION.bounce, () => { spring.vy += 0.3; breastSpring.vy += 0.3; });
-    for (const b of [buttons.model, buttons.refine, buttons.outfit, buttons.armSide, buttons.turn, buttons.bounce]) { b.style.padding = '8px 10px'; b.style.fontSize = '12px'; row.appendChild(b); }
-    for (const [b, tab] of [[buttons.model, 'body'], [buttons.refine, 'body'], [buttons.outfit, 'clothes'], [buttons.armSide, 'pose'], [buttons.turn, 'camera'], [buttons.bounce, 'pose']] as const) b.dataset.tab = tab;
+    for (const b of [buttons.model, buttons.refine, buttons.bellyCurve, buttons.outfit, buttons.armSide, buttons.turn, buttons.bounce]) { b.style.padding = '8px 10px'; b.style.fontSize = '12px'; row.appendChild(b); }
+    for (const [b, tab] of [[buttons.model, 'body'], [buttons.refine, 'body'], [buttons.bellyCurve, 'body'], [buttons.outfit, 'clothes'], [buttons.armSide, 'pose'], [buttons.turn, 'camera'], [buttons.bounce, 'pose']] as const) b.dataset.tab = tab;
     right.appendChild(row);
     // BELLY SHAPE and BREAST SHAPE: each control a slider with its own reset, relative to the size shown
     const setBody = (next: BodyShape) => { body = next; applyLook(); applyMotion(); refresh(); };

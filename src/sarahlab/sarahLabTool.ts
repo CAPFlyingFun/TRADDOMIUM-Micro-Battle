@@ -8,6 +8,7 @@
  * So nothing here is the game's Sarah: the lab loads `models/sarah-base.glb`,
  * which no other scene reads.
  */
+import { BELLY_KNOTS, bellyKeyWeights, type BellyCurve } from './bellyInterpolation';
 import { BODY_CONTROLS, type BodyShape } from '../actor/bodyShape';
 import type { RandomSpec } from '../actor/bodyRandom';
 import type { DevTool } from '../devtools/DevTool';
@@ -100,6 +101,7 @@ export const SARAH_LAB_ACTION = Object.freeze({
   outfit: 'sarahlab:outfit',
   model: 'sarahlab:model',
   refine: 'sarahlab:refine',
+  bellyCurve: 'sarahlab:belly-curve',
   armSide: 'sarahlab:armside',
   /** `${bodyReset}<control>` resets one body control; `${tiltPreset}<deg>` sets the belly tilt */
   bodyReset: 'sarahlab:body-reset:',
@@ -374,7 +376,24 @@ export function refineLine(on: boolean): string {
   return on ? 'CURVE · refined' : 'CURVE · as modelled';
 }
 
-export function bellyWeights(bumpPercent: number): Record<string, number> {
+/**
+ * A value tabulated at the belly keys (largest first), at a belly size, along a belly curve: the approved straight
+ * crossfade, or the experiment's (`bellyInterpolation.ts`), which weighs every key.
+ */
+function keyed(table: readonly (readonly [number, number])[], bumpPercent: number, curve: BellyCurve): number {
+  const w = bellyKeyWeights(bumpPercent, curve);
+  let v = 0;
+  for (const [s, r] of table) { const k = BELLY_KNOTS.indexOf(s); if (k >= 0) v += w[k] * r; }
+  return v;
+}
+
+/** Each belly key target's weight at a size. `curve` is the experiment (default: exactly the approved slider). */
+export function bellyWeights(bumpPercent: number, curve: BellyCurve = 'approved'): Record<string, number> {
+  if (curve !== 'approved') {
+    const w = bellyKeyWeights(bumpPercent, curve), out: Record<string, number> = {};
+    for (const [s, name] of BELLY_KEYS) if (name) out[name] = w[BELLY_KNOTS.indexOf(s)];
+    return out;
+  }
   const b = Math.min(BUMP_MAX_PERCENT, Math.max(0, Number.isFinite(bumpPercent) ? bumpPercent : 100)) / 100;
   const out: Record<string, number> = {};
   for (const [, name] of BELLY_KEYS) if (name) out[name] = 0;
@@ -467,7 +486,8 @@ export const BELLY_UPPER_TARGET = 'bellyUpper';
 export const BELLY_UPPER_SCALE: readonly (readonly [number, number])[] = [
   [2, 1.649], [1.5, 1.32], [1, 1], [0.75, 0.513], [0.6, 0.306], [0.5, 0.169], [0.3, 0.042], [0.25, 0.01], [0, 0],
 ];
-export function bellyUpperWeight(bumpPercent: number): number {
+export function bellyUpperWeight(bumpPercent: number, curve: BellyCurve = 'approved'): number {
+  if (curve !== 'approved') return keyed(BELLY_UPPER_SCALE, bumpPercent, curve);
   const b = Math.min(BUMP_MAX_PERCENT, Math.max(0, Number.isFinite(bumpPercent) ? bumpPercent : 100)) / 100;
   for (let i = 0; i < BELLY_UPPER_SCALE.length - 1; i += 1) {
     const [s0, r0] = BELLY_UPPER_SCALE[i], [s1, r1] = BELLY_UPPER_SCALE[i + 1];
@@ -774,7 +794,8 @@ export const BELLY_SHAPE_SCALE: readonly (readonly [number, number])[] = [
 export const BELLY_LOWER_SCALE: readonly (readonly [number, number])[] = [
   [2, 1.506], [1.5, 1.25], [1, 1], [0.75, 0.643], [0.6, 0.46], [0.5, 0.339], [0.3, 0.12], [0.25, 0.067], [0, 0],
 ];
-function scaleAt(table: readonly (readonly [number, number])[], bumpPercent: number): number {
+function scaleAt(table: readonly (readonly [number, number])[], bumpPercent: number, curve: BellyCurve = 'approved'): number {
+  if (curve !== 'approved') return keyed(table, bumpPercent, curve);
   const b = Math.min(BUMP_MAX_PERCENT, Math.max(0, Number.isFinite(bumpPercent) ? bumpPercent : 100)) / 100;
   for (let i = 0; i < table.length - 1; i += 1) {
     const [s0, r0] = table[i], [s1, r1] = table[i + 1];
@@ -826,12 +847,17 @@ export function bustScale(bumpPercent: number, sizePercent = 0): number {
  * shown (below 100% the 100% field, by how big the bump is against 100%'s).
  */
 export const BELLY_HEIGHT_END_CM = 2;
-export function bellyHeightWeights(heightCm: number, bumpPercent: number): Record<string, number> {
+export function bellyHeightWeights(heightCm: number, bumpPercent: number, curve: BellyCurve = 'approved'): Record<string, number> {
   const h = Math.min(BELLY_HEIGHT_END_CM, Math.max(-BELLY_HEIGHT_END_CM, Number.isFinite(heightCm) ? heightCm : 0));
   const dir = h >= 0 ? 'Up' : 'Down', other = h >= 0 ? 'Down' : 'Up', t = Math.abs(h) / BELLY_HEIGHT_END_CM;
   const b = Math.min(BUMP_MAX_PERCENT, Math.max(0, Number.isFinite(bumpPercent) ? bumpPercent : 100)) / 100;
   const keys: Record<string, number> = { '': 0, '150': 0, '200': 0 };
-  if (b <= 1) keys[''] = scaleAt(BELLY_SHAPE_SCALE, bumpPercent);
+  if (curve !== 'approved') {
+    // every key's weight: below 100% the 100% field by each key's size, above it the 150% and 200% fields
+    const w = bellyKeyWeights(bumpPercent, curve);
+    keys[''] = keyed(BELLY_SHAPE_SCALE.filter(([s]) => s <= 1), bumpPercent, curve);
+    keys['150'] = w[BELLY_KNOTS.indexOf(1.5)]; keys['200'] = w[BELLY_KNOTS.indexOf(2)];
+  } else if (b <= 1) keys[''] = scaleAt(BELLY_SHAPE_SCALE, bumpPercent);
   else if (b <= 1.5) { const u = (b - 1) / 0.5; keys[''] = 1 - u; keys['150'] = u; }
   else { const u = (b - 1.5) / 0.5; keys['150'] = 1 - u; keys['200'] = u; }
   const out: Record<string, number> = {};
@@ -845,11 +871,11 @@ export function bellyHeightWeights(heightCm: number, bumpPercent: number): Recor
  * size shown (a +10% width is 10% of THAT bump), every breast field to the bust as big as it
  * is; position is in centimetres whatever the size. All defaults give all zeros.
  */
-export function bodyShapeFieldWeights(shape: BodyShape, bumpPercent: number): Record<string, number> {
-  const S = scaleAt(BELLY_SHAPE_SCALE, bumpPercent), Up = bellyUpperWeight(bumpPercent), Lo = scaleAt(BELLY_LOWER_SCALE, bumpPercent);
+export function bodyShapeFieldWeights(shape: BodyShape, bumpPercent: number, curve: BellyCurve = 'approved'): Record<string, number> {
+  const S = scaleAt(BELLY_SHAPE_SCALE, bumpPercent, curve), Up = bellyUpperWeight(bumpPercent, curve), Lo = scaleAt(BELLY_LOWER_SCALE, bumpPercent, curve);
   const s = bustScale(bumpPercent, shape.breastSize);
   return {
-    ...bellyHeightWeights(shape.bellyHeight, bumpPercent),
+    ...bellyHeightWeights(shape.bellyHeight, bumpPercent, curve),
     'shape:bellyWidth': (shape.bellyWidth / 10) * S,
     'shape:bellyDepth': (shape.bellyDepth / 10) * S,
     'shape:bellyUpper': (shape.bellyUpper / 10) * Up,
