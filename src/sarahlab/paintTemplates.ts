@@ -308,6 +308,12 @@ export function legCutBack(g: NonNullable<CoverageParams['legCut']>, across: num
 const SHIRT: Partial<CoverageParams> = Object.freeze({ length: DEFAULT_SHIRT_LENGTH });
 const NO_RISE = Object.freeze({ front: -9, side: -9, back: -9 });
 const FULL = Object.freeze({ riseFront: 1, riseSide: 1, riseBack: 1 });
+/**
+ * A one-piece's leg openings, cut high (Joshua, 2026-10-21, marked on the render: "rise higher along the hips, with a
+ * cleaner upward curve from the crotch toward the upper hip"), with his own traced line along the front creases: the
+ * leotard's, and the swimsuit's.
+ */
+const ONE_PIECE_CUT = Object.freeze({ crotch: -0.15, side: 0.28, sideBack: 0.3, gusset: 0.035, gussetFront: 0.07, backSpan: 0.5, traced: true });
 
 export const COVERAGE_TEMPLATES: readonly CoverageTemplate[] = Object.freeze(([
   ['leggingsFull', 'Over-belly leggings', 'Leggings', lower(RISES.overBelly, 1.0)],
@@ -331,10 +337,12 @@ export const COVERAGE_TEMPLATES: readonly CoverageTemplate[] = Object.freeze(([
   ['sportsBra', 'Sports bra', 'Bras & bands', upper(LINES.underbust, LINES.bandBack, LINES.neckScoop - 0.02, -1, { strapIn: 0.85, strap: 0.65, neckBack: 0.86, armhole: LINES.armhole - 0.02 }), 'sportsBra'],
   ['bandeau', 'Bandeau', 'Bras & bands', upper(LINES.underbust, LINES.bandBack, LINES.neckCrew, -1, { topFront: LINES.bandeauTop, topSide: LINES.bandeauSide, topBack: LINES.bandTopBack })],
   ['bodysuitFull', 'Full bodysuit', 'Other', { ...upper(-1, -1, LINES.neckCrew, 1.0), ...FULL, legEnd: 1.0 }],
-  // a leotard cut high (Joshua, 2026-10-21, marked on the render: "rise higher along the hips, with a cleaner upward
-  // curve from the crotch toward the upper hip"), front and back, distinct from the swimsuit's straight openings
-  ['bodysuit', 'Long-sleeve leotard', 'Other', { ...upper(-1, -1, LINES.neckCrew, 1.0), ...FULL, legEnd: 0.4, legCut: { crotch: -0.15, side: 0.28, sideBack: 0.3, gusset: 0.035, gussetFront: 0.07, backSpan: 0.5, traced: true } }],
-  ['swimsuit', 'One-piece swimsuit', 'Other', { ...upper(-1, -1, LINES.neckScoop, -1, { strapIn: 0.98, strap: 0.47, neckBack: 0.86, armhole: LINES.armhole }), ...FULL, legEnd: 0.02 }, 'swimsuit'],
+  // a leotard cut high, front and back (`ONE_PIECE_CUT`)
+  ['bodysuit', 'Long-sleeve leotard', 'Other', { ...upper(-1, -1, LINES.neckCrew, 1.0), ...FULL, legEnd: 0.4, legCut: ONE_PIECE_CUT }],
+  // a one-piece swimsuit's bottom is cut the leotard's way, a strip between her legs and the openings over her hips
+  // (Joshua, 2026-10-23: "the swimsuit has no bottom covering the crotch and underside like the Leotard"): cut straight
+  // across the tops of her thighs instead, it left her crotch bare
+  ['swimsuit', 'One-piece swimsuit', 'Other', { ...upper(-1, -1, LINES.neckScoop, -1, { strapIn: 0.98, strap: 0.47, neckBack: 0.86, armhole: LINES.armhole }), ...FULL, legEnd: 0.4, legCut: ONE_PIECE_CUT }, 'swimsuit'],
   ['stockings', 'Thigh-high stockings', 'Other', lower(NO_RISE, 1.0, { legStart: 0.22, feet: true })],
   ['socksKnee', 'Knee-high socks', 'Other', lower(NO_RISE, 1.0, { legStart: 0.58, feet: true })],
   ['socks', 'Crew socks', 'Other', lower(NO_RISE, 1.0, { legStart: 0.86, feet: true })],

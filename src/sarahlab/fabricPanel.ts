@@ -37,7 +37,7 @@ import { DEFAULT_LAYER_DETAIL, resolveDetail, type LayerDetail, type ResolvedDet
 import { BRUSH_RANGE_CM, BodyPaint, PAINT_LAYER_COUNT, packLayer } from './bodyPaint';
 import { BODY_REGIONS, REGION_GROUPS, groupOf, groupRegions, type BodyMap, type RegionSide } from './bodyRegions';
 import { CleavageBridge } from './cleavageBridge';
-import { TunicDrape } from './tunicDrape';
+import { HEM_LIFT_FLAT, HEM_LIFT_RIBBED, TunicDrape } from './tunicDrape';
 import { AUTO_DETAIL, type DetailOverride, type SavedClothes } from './characterSaves';
 import {
   COVERAGE_DIALS, COVERAGE_TEMPLATES, DEFAULT_SHIRT_LENGTH, PIECE_KIND_NAMES, TEMPLATE_GROUPS, coverage, dialValue, dialsFor, pieceKind, shirtHem,
@@ -801,7 +801,8 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
     if (drape && drape.mesh.parent !== body) { drape.dispose(); drape = null; }
     if (!drape) drape = new TunicDrape(body as THREE.SkinnedMesh, map, shirtHem(map, 1));
     const c = paintChoices[top];
-    drape.wear(shirtHem(map, templates[top]!.params.length!));
+    // a sweater's hem is turned and ribbed, and stands a little proud; every other fabric's lies flat (Joshua, 2026-10-23)
+    drape.wear(shirtHem(map, templates[top]!.params.length!), paintChoices[top].fabric?.family === 'sweater' ? HEM_LIFT_RIBBED : HEM_LIFT_FLAT);
     setFabricLayer(drape.mesh, drape.mesh.material as THREE.Material, 0, layerFor(body, c, c.fabric, 'plain'), { layers: 1, masked: false, rest: null });
     drape.feathered();
   }
