@@ -25,7 +25,7 @@
  * Both are only new WEIGHTS for the same nine approved targets: no new geometry, nothing to download.
  *
  * The modes:
- *   approved            -- exactly the approved slider (the default; `bellyWeights` unchanged, byte for byte).
+ *   approved            -- exactly the approved slider, kept as the backup (`bellyWeights` unchanged, byte for byte).
  *   continuous          -- the smooth path, each key still at its approved slider position.
  *   eased               -- the approved straight path, paced evenly: the slider spends its travel in proportion to how
  *                          much her shape changes, separately below and above 100%, with the pace eased across 100%.
@@ -48,7 +48,10 @@
  */
 
 export type BellyCurve = 'approved' | 'hybrid' | 'continuous' | 'eased' | 'continuousEased';
-export const BELLY_CURVES: readonly BellyCurve[] = Object.freeze(['approved', 'hybrid', 'continuous', 'eased', 'continuousEased']);
+/** The room's order: the default first, then its backup, then the other experiments. */
+export const BELLY_CURVES: readonly BellyCurve[] = Object.freeze(['hybrid', 'approved', 'continuous', 'eased', 'continuousEased']);
+/** HYBRID is the room's belly curve (Joshua, 2026-10-22, after the comparison renders: "Hybrid looks good... change the default as hybrid, but make the current as a backup"). */
+export const DEFAULT_BELLY_CURVE: BellyCurve = 'hybrid';
 export const BELLY_CURVE_NAMES: Readonly<Record<BellyCurve, string>> = Object.freeze({
   approved: 'CURRENT', hybrid: 'HYBRID', continuous: 'CONTINUOUS', eased: 'EASED', continuousEased: 'CONTINUOUS + EASED',
 });

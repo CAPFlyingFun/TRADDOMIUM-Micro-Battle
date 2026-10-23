@@ -14,13 +14,13 @@
  *   bridge, so it starts and ends where the gap does.
  * - The ends are vertices of her body, so every frame the bridge is re-laid between where they are now: it follows
  *   every belly and breast shape, every pose and every bounce. The ends are chosen again whenever her shape changes.
- * - Its top edge is the top's neckline (`necklineCut`): a crew neck bridges the whole cleavage; a U or V cuts it down
- *   to the dip in the same curve the paint's neckline follows. Rows whose ends the top's paint does not cover (a
- *   bandeau's top edge) are left off too.
+ * - Its top is cut level just under the lowest point of the top's neckline (`necklineTop`, `cutAt`): a crew neck
+ *   bridges the whole cleavage; a scoop, a U or a V stops it at the dip, the paint's own edge drawing the rest of the
+ *   neckline. Rows whose ends the top's paint does not cover (a bandeau's top edge) are left off too.
  */
 import * as THREE from 'three';
 import { BODY_REGIONS, type BodyMap } from './bodyRegions';
-import { necklineCut, type CoverageParams } from './paintTemplates';
+import { necklineTop, type CoverageParams } from './paintTemplates';
 
 /** The slices, on her trunk (0 hip joints, 1 base of her neck): from below her bust to above it, this far apart. */
 const T_LOW = 0.5, T_HIGH = 0.96, ROW_STEP = 0.008, SLAB = 0.006;
@@ -44,6 +44,8 @@ const REACH = 4;
 const SMOOTH_NORMAL = 5;
 /** The sheet fades into her over this share of its width at each end, and this much of her trunk at its top. */
 const FEATHER_SIDE = 0.22, FEATHER_TOP = 0.016;
+/** The sheet stops this far (a share of her trunk, about 2 mm on her) under the neckline the paint is cut to. */
+const CUT_UNDER = 0.004;
 
 const smooth01 = (x: number) => { const c = Math.max(0, Math.min(1, x)); return c * c * (3 - 2 * c); };
 
@@ -86,7 +88,7 @@ export class CleavageBridge {
   private rows: Row[] = [];
   private readonly at = new THREE.Vector3();
   private midX = 0;
-  private params: Pick<CoverageParams, 'neckFront' | 'neckStyle'> | null = null;
+  private params: (Pick<CoverageParams, 'neckFront' | 'neckStyle'> & { readonly strap?: number }) | null = null;
   private covered: ((v: number) => number) | null = null;
 
   constructor(private readonly body: THREE.SkinnedMesh, private readonly map: BodyMap) {
@@ -167,10 +169,23 @@ export class CleavageBridge {
   }
 
   /**
+   * Where the sheet's top is cut, as a trunk height: level, a hair under the lowest point of the top's neckline (at her
+   * midline: a crew's depth, the dip of a scoop, a U or a V -- `necklineTop`). The sheet only spans her cleavage, and
+   * above a neckline's lowest point the middle of her cleavage is the opening, so there is nothing for it to span; on
+   * the neckline's rising sides the paint is the shirt, and its edge the neckline. Cut to the curve instead, its top on
+   * her breasts stood above the paint's edge in a notch and in teeth (Joshua, 2026-10-23: "there are some remaining
+   * color on her breasts").
+   */
+  private cutAt(): number {
+    const cut = necklineTop(this.params!, 0);
+    return Number.isFinite(cut) ? cut - CUT_UNDER : cut;
+  }
+
+  /**
    * Dress the bridge for a top (its neckline, and how much of each vertex its paint covers), or take it off (null).
    * Who dresses its material: the caller, with the top's fabric (`setFabricLayer`).
    */
-  wear(top: { readonly params: Pick<CoverageParams, 'neckFront' | 'neckStyle'>; readonly covered: (v: number) => number } | null): void {
+  wear(top: { readonly params: Pick<CoverageParams, 'neckFront' | 'neckStyle'> & { readonly strap?: number }; readonly covered: (v: number) => number } | null): void {
     this.params = top?.params ?? null;
     this.covered = top?.covered ?? null;
     if (top && !this.rows.length) this.reshape();
@@ -212,10 +227,6 @@ export class CleavageBridge {
     const restOf = (v: number) => (rest ? new THREE.Vector3(rest.getX(v), rest.getY(v), rest.getZ(v)) : this.body.getVertexPosition(v, new THREE.Vector3()));
     // the pattern is laid from the same smoothed ends, or the knit zigzags from row to row
     const restEnds = rows.map((row) => [restOf(row.a), restOf(row.b)] as const);
-    // her midline in the rest shape, where `lateral` (the neckline's measure, sideways from it in neck radii) is zero:
-    // each end says where it is, the left end inside it and the right end outside
-    const radius = this.map.neckRadius;
-    const neckX = restEnds.reduce((s, [a, b], j) => s + (a.x + this.map.lateral[rows[j].a] * radius + b.x - this.map.lateral[rows[j].b] * radius) / 2, 0) / rows.length;
     smoothEnds(restEnds, SMOOTH, false);
     const restMids = rows.map((row) => restOf(row.m));
     const total = this.rowCount(), tEnd = rows[rows.length - 1].t;
@@ -225,19 +236,20 @@ export class CleavageBridge {
       while (k + 2 < rows.length && rows[k + 1].t < t) k++;
       f = Math.max(0, Math.min(1, (t - rows[k].t) / Math.max(1e-6, rows[k + 1].t - rows[k].t)));
     };
+    const cut = this.cutAt();
+    // a neckline that dips below where her cleavage opens leaves no gap under it to span: nothing is drawn (laid flat
+    // at its lowest slice instead, the sheet showed as a strip across the opening, above the paint's neckline)
+    if (cut <= rows[0].t + ROW_STEP) {
+      for (let i = 0; i < C.count; i++) C.setW(i, 0);
+      C.needsUpdate = true;
+      return;
+    }
     for (let c = 0; c <= COLUMNS; c++) {
       u = c / COLUMNS;
       for (let r = 0; r < total; r++) {
-        // rows past the last one (or above the neckline) fold onto the neckline: where the neckline is, is read from
-        // where on her this point of the sheet lies (its rest place, sideways from her midline), as her paint's is
+        // rows past the last one (or above the neckline's lowest point) fold onto its cut
         const want = rows[0].t + (r / (total - 1)) * (tEnd - rows[0].t);
-        let t = want, cut = Infinity;
-        for (let pass = 0; pass < 3; pass++) {
-          place(t);
-          const x = restEnds[k][0].x + (restEnds[k][1].x - restEnds[k][0].x) * u, x1 = restEnds[k + 1][0].x + (restEnds[k + 1][1].x - restEnds[k + 1][0].x) * u;
-          cut = necklineCut(this.params, Math.abs(x + (x1 - x) * f - neckX) / radius);
-          t = Math.min(want, cut);
-        }
+        const t = Math.min(want, cut);
         place(t);
         // the span (straight from end to end), and her cleavage under it (end, midline, end), blended by how far up
         // the bridge this is: at its bottom it lies on her and straightens into the span within EMERGE

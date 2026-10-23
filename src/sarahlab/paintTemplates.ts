@@ -187,6 +187,68 @@ export function necklineCut(p: Pick<CoverageParams, 'neckFront' | 'neckStyle'>, 
   const u = p.neckStyle === 'v' ? w : 1 - Math.sqrt(Math.max(0, 1 - w * w));
   return p.neckFront + u * (NECK_TOP - p.neckFront);
 }
+/**
+ * A crew neckline taken lower than a crew's depth becomes a SCOOP (Joshua, 2026-10-23: "it appears to actually remove
+ * some of her top as well... make sure the sliders isn't taking more than what the slider says", then, marked on her:
+ * "smooth the shape of the neckline"): one round curve from the crew's own opening at a crew's depth down to the dip,
+ * no wider at the top than a crew opens a little lower -- so the slider takes her front down and never her shoulders,
+ * and moves through a crew's depth with no jump. A strapped top keeps its own neckline.
+ */
+export function isScoop(p: Pick<CoverageParams, 'neckFront' | 'neckStyle'> & { readonly strap?: number }): boolean {
+  return p.neckStyle === 'crew' && !(p.strap && p.strap > 0) && p.neckFront !== null && p.neckFront < LINES.neckCrew;
+}
+/** A scoop's width at its top (neck radii sideways from her midline): a crew's front opening, a little wider as it deepens. */
+function scoopWidth(neckFront: number): number {
+  const d = Math.max(0, Math.min(1, (LINES.neckCrew - neckFront) / 0.08));
+  return SCOOP_FROM + (SCOOP_WIDTH - SCOOP_FROM) * d * d * (3 - 2 * d);
+}
+const SCOOP_FROM = 1.1, SCOOP_WIDTH = 1.35;
+/**
+ * How much a point is on her FRONT, by where it is (0 behind her neck, 1 in front of it): its distance forward of her
+ * neck's axis (`forward`). Not which way her skin faces: across her upper chest and the tops of her shoulders, which
+ * face up as much as forward or back, that flips from vertex to vertex, and a neckline cut by it drew teeth there.
+ */
+function frontOf(map: BodyMap, v: number): number {
+  const fwd = map.forward ? map.forward[v] : Math.sqrt(Math.max(0, map.collar[v] ** 2 - map.lateral[v] ** 2)) * (map.front[v] > 0 ? 1 : -1);
+  return smooth01((fwd + 0.2) / 0.5);
+}
+/**
+ * How far inside a front opening (half-width `halfWidth(t)` sideways, neck radii) a point at trunk height `t`, `lateral`
+ * neck radii from her midline, is: measured square to the opening's edge, in trunk heights (`k` neck radii to trunk
+ * heights). Square to the edge, not sideways: low in a round opening its sides run nearly level, and a sideways measure
+ * there changes from nothing to everything within one of her triangles -- the edge drew as teeth along them.
+ */
+export function openingDistance(halfWidth: (t: number) => number, t: number, lateral: number, k: number): number {
+  const dt = 0.002, slope = (halfWidth(t + dt) - halfWidth(t - dt)) / (2 * dt);
+  return ((halfWidth(t) - lateral) * k) / Math.sqrt(1 + (slope * k) ** 2);
+}
+/**
+ * A scoop's half-width at trunk height `t`: round from its dip up to its width at a crew's depth, then curving out to
+ * the crew's own opening round her neck (SCOOP_NECK, at NECK_TOP) -- so where the two openings meet, they meet on one
+ * line, not in a step (at the scoop's top the crew's opening is the wider of the two, and a shelf showed there).
+ */
+export function scoopHalfWidth(neckFront: number, t: number): number {
+  const w = scoopWidth(neckFront);
+  if (t >= LINES.neckCrew) { const e = Math.min(1, (t - LINES.neckCrew) / (NECK_TOP - LINES.neckCrew)); return w + (SCOOP_NECK - w) * e * e * (3 - 2 * e); }
+  const u = Math.max(0, Math.min(1, (t - neckFront) / Math.max(1e-3, LINES.neckCrew - neckFront)));
+  return w * Math.sqrt(Math.max(0, 1 - (1 - u) ** 2));
+}
+/** The crew's opening round her neck, sideways at her front's top, where a scoop's sides end. */
+const SCOOP_NECK = 1.62;
+/**
+ * The neckline's height at `lateral` neck radii from her midline, for any top: a crew's level depth, a scoop's or a U's
+ * or V's curve (Infinity out past an opening). What the cleavage bridge is cut to, the same line the paint is.
+ */
+export function necklineTop(p: Pick<CoverageParams, 'neckFront' | 'neckStyle'> & { readonly strap?: number }, lateral: number): number {
+  if (p.neckFront === null) return Infinity;
+  if (isScoop(p)) {
+    const w = scoopWidth(p.neckFront), lat = Math.abs(lateral);
+    if (lat >= SCOOP_NECK) return Infinity;
+    if (lat >= w) { const y = (lat - w) / (SCOOP_NECK - w); return LINES.neckCrew + (0.5 - Math.sin(Math.asin(1 - 2 * y) / 3)) * (NECK_TOP - LINES.neckCrew); }
+    return p.neckFront + (1 - Math.sqrt(Math.max(0, 1 - (lat / w) ** 2))) * (LINES.neckCrew - p.neckFront);
+  }
+  return p.neckStyle === 'crew' ? p.neckFront : necklineCut(p, lateral);
+}
 /** Where a U or V neckline reaches its full width (just under the base of her neck) and how wide that is, in neck radii. */
 const NECK_TOP = 0.97, NECK_WIDTH = 1.7;
 /**
@@ -357,7 +419,30 @@ export function withDial(p: CoverageParams, dial: CoverageDial['id'], value: num
  * its jagged and not smooth").
  */
 export const EDGE = 0.035;
-const soft = (x: number) => (x <= -EDGE ? 0 : x >= EDGE ? 1 : ((t) => t * t * (3 - 2 * t))((x + EDGE) / (2 * EDGE)));
+/**
+ * A STRAIGHT ramp, not an eased one (Joshua, 2026-10-22: "add defined cloth edges... not like a solid line boundary of
+ * the clothing, but something fussy and has streaks at the ends"). The material draws the edge crisp where the paint
+ * crosses one half (`fabricMaterial.ts`), and the paint between vertices is a straight blend of theirs: with a straight
+ * ramp that half-way line is exactly the line the template asks for, across every triangle; an eased ramp bends it
+ * toward the triangles' own edges, which is the saw-tooth that showed along her neckline and sleeve ends.
+ */
+const soft = (x: number) => (x <= -EDGE ? 0 : x >= EDGE ? 1 : (x + EDGE) / (2 * EDGE));
+/**
+ * A sleeve's end has a wider ramp (in arm lengths, about 4 cm either side of the line on her). Her upper arm's skin has
+ * long thin triangles along its seam, three to four centimetres from end to end; a ramp narrower than one of them has
+ * already reached 1 at one end, so the half-way line inside it bends toward that corner and the sleeve's end showed small
+ * notches (Joshua, 2026-10-22: "the sleeve has a small tear in it"). The edge itself is still drawn crisp, at the line.
+ */
+export const SLEEVE_EDGE = 0.08;
+const softSleeve = (x: number) => Math.max(0, Math.min(1, (x + SLEEVE_EDGE) / (2 * SLEEVE_EDGE)));
+/**
+ * A front opening's edge (a U, a V, a scoop) has a wide ramp too, in trunk heights (about 4 cm either side on her):
+ * the skin of her upper chest is in triangles several centimetres across, and with a narrower ramp a whole triangle
+ * is past it at both ends, so the half-way line ran along the triangles' own edges in kinks (Joshua, 2026-10-23,
+ * marked on her: "smooth the shape of the neckline"). The edge itself is drawn crisp, on the line.
+ */
+const OPENING_EDGE = 0.08;
+const softOpening = (x: number) => Math.max(0, Math.min(1, (x + OPENING_EDGE) / (2 * OPENING_EDGE)));
 /** The same edge across her shoulders, in neck radii (one is about 8 cm on her, so this edge is about 1.4 cm either side). */
 const softSideways = (x: number) => soft(x * 0.2);
 
@@ -427,13 +512,16 @@ export function coverage(map: BodyMap, p: CoverageParams): Float32Array {
     // top edge instead. A tank, a sports bra or a swimsuit has straps: a band over each shoulder, the neckline open
     // inside them, an armhole outside them
     if (p.hemFront !== null) {
-      // a shirt's hem is level, and its paint has faded out by the hem itself: the drape's hem band (`tunicDrape.ts`)
-      // is the crisp edge there, over the paint's soft one
-      const hem = p.length !== null ? shirtHem(map, p.length) + EDGE : blend(p.hemFront, p.hemBack ?? p.hemFront, map.around[v]);
+      // a shirt's hem is level, and its paint stops just short of the hem itself: the drape's hem band (`tunicDrape.ts`)
+      // is the edge there. The paint's own edge is as crisp as the drape's now, so it runs on almost to the hem: where
+      // the drape dips to her skin by her seat, her skin under it is the shirt's colour, not the leggings' showing
+      // through in dark slivers (Joshua, 2026-10-22: "a little tar on sides")
+      const hem = p.length !== null ? shirtHem(map, p.length) + 0.3 * EDGE : blend(p.hemFront, p.hemBack ?? p.hemFront, map.around[v]);
       const neck = blend(p.neckFront ?? 1, p.neckBack ?? p.neckFront ?? 1, map.around[v]);
       const lat = map.lateral[v];
-      // the neckline: a straight top edge (a bandeau); inside a strapped garment's straps, open down to its depth; or
-      // an opening round her neck, wider the deeper it is
+      // the neckline: a straight top edge (a bandeau); inside a strapped garment's straps, open down to its depth; an
+      // opening round her neck; or, cut down her front from it, a U, a V or a crew taken lower (`necklineShape`)
+      const scoop = isScoop(p);
       const open = p.strap > 0 ? 0 : 1.5 + Math.max(0, 0.97 - (p.neckFront ?? 0.97)) * 4;
       // sideways distances (neck radii) as trunk heights, so a corner can be round in both directions at once
       const k = map.neckRadius / map.trunkLength, outer = p.strapIn + p.strap;
@@ -441,18 +529,23 @@ export function coverage(map: BodyMap, p: CoverageParams): Float32Array {
         ? soft(aroundLine(p.topFront, p.topSide ?? (p.topFront + (p.topBack ?? p.topFront)) / 2, p.topBack ?? p.topFront, p.topSide !== null ? 0.82 : 1, 0.5, map.around[v]) - t)
         // inside the straps, a scoop: the neckline's bottom corners are rounded
         : p.strap > 0 ? 1 - soft(insideCorner((p.strapIn - lat) * k, t - neck, ROUND.neckline))
-        : p.neckStyle !== 'crew' && p.neckFront !== null
-          // a U or V in front: the crew's opening round her neck, cut down the front to the dip
-          ? Math.min(Math.max(soft(blend(LINES.neckCrew, p.neckBack ?? LINES.neckCrew, map.around[v]) - t), soft(map.collar[v] - CREW_OPEN)),
-            1 - smooth01((map.around[v] - 0.55) / 0.2) * Math.min(soft(t - p.neckFront), softSideways(necklineHalfWidth(p, t) - lat)))
-          : Math.max(soft(neck - t), soft(map.collar[v] - open));
+        : (scoop || p.neckStyle !== 'crew') && p.neckFront !== null
+          ? scoop
+            // a scoop: in front of her neck its own curve is the whole neckline, from its dip up to the base of her
+            // neck; behind, the crew's opening round her neck as ever -- one line, with no shelf where two meet
+            ? Math.min(1 - (1 - Math.max(soft(blend(LINES.neckCrew, p.neckBack ?? LINES.neckCrew, map.around[v]) - t), softSideways(map.collar[v] - CREW_OPEN))) * (1 - frontOf(map, v)),
+              1 - frontOf(map, v) * Math.min(softOpening(t - p.neckFront), softOpening(openingDistance((tt) => scoopHalfWidth(p.neckFront!, tt), t, lat, k))))
+            // a U or V in front: the crew's opening round her neck, cut down the front to the dip
+            : Math.min(Math.max(soft(blend(LINES.neckCrew, p.neckBack ?? LINES.neckCrew, map.around[v]) - t), softSideways(map.collar[v] - CREW_OPEN)),
+              1 - smooth01((map.around[v] - 0.55) / 0.2) * Math.min(soft(t - p.neckFront), softSideways(necklineHalfWidth(p, t) - lat)))
+          : Math.max(soft(neck - t), softSideways(map.collar[v] - open));
       // straps over her shoulders; beyond them, above the armhole, bare -- the armhole sweeps round from the strap's
       // outer edge down to the underarm instead of turning a square corner
       const strap = p.strap > 0 ? Math.min(softSideways(lat - p.strapIn), softSideways(outer - lat)) : 0;
       const armhole = p.armhole !== null ? soft(insideCorner((lat - outer) * k, t - p.armhole, ROUND.armhole)) : 0;
       if (Number.isFinite(a)) {
         if (id !== 'handL' && id !== 'handR') {
-          const sleeve = p.sleeve >= -0.04 ? Math.min(soft(p.sleeve - a), top) : 0;
+          const sleeve = p.sleeve >= -0.04 ? Math.min(softSleeve(p.sleeve - a), top) : 0;
           // where her arm's skin meets her back and side (her skin weights mix the two there), a sleeveless garment
           // treats it as the torso it sits on, so the armhole's curve is one clean line rather than a fringe
           // -- skin near the shoulder joint, or no further out from her neck than just past the strap (the back of the

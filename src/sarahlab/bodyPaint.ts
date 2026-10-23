@@ -27,12 +27,33 @@ export const PAINT_ATTRIBUTE = 'fabricPaint';
 export const PAINT_LAYER_COUNT = 3;
 export const BRUSH_RANGE_CM = Object.freeze({ min: 1, max: 20, step: 0.5, initial: 5 });
 
-/** Neighbours of every vertex, from the triangles: what softening walks. */
-export function vertexNeighbours(index: ArrayLike<number>, count: number): Uint32Array[] {
+/**
+ * Neighbours of every vertex, from the triangles: what softening walks. With `position` (xyz per vertex), vertices that
+ * stand in the same place -- her mesh is split along its texture seams, one copy for each side -- share one
+ * neighbourhood, the whole ring round the point, each other included. Otherwise each copy sees only its own side of the
+ * seam: a copy whose side is a few long triangles averaged with points three centimetres off, and a sleeve's end had a
+ * bare notch in it where the other copy, a millimetre away on screen, stayed painted (Joshua, 2026-10-22: "the sleeve
+ * has a small tear in it").
+ */
+export function vertexNeighbours(index: ArrayLike<number>, count: number, position?: ArrayLike<number>): Uint32Array[] {
   const sets: Set<number>[] = Array.from({ length: count }, () => new Set());
   for (let i = 0; i + 2 < index.length; i += 3) {
     const a = index[i], b = index[i + 1], c = index[i + 2];
     sets[a].add(b); sets[a].add(c); sets[b].add(a); sets[b].add(c); sets[c].add(a); sets[c].add(b);
+  }
+  if (position && position.length >= count * 3) {
+    const groups = new Map<string, number[]>();
+    for (let v = 0; v < count; v++) {
+      const key = `${Math.round(position[v * 3] * 1e5)},${Math.round(position[v * 3 + 1] * 1e5)},${Math.round(position[v * 3 + 2] * 1e5)}`;
+      const g = groups.get(key);
+      if (g) g.push(v); else groups.set(key, [v]);
+    }
+    for (const g of groups.values()) {
+      if (g.length < 2) continue;
+      const all = new Set<number>();
+      for (const v of g) { all.add(v); for (const u of sets[v]) all.add(u); }
+      for (const v of g) { const own = new Set(all); own.delete(v); sets[v] = own; }
+    }
   }
   return sets.map((s) => Uint32Array.from(s));
 }
@@ -147,6 +168,11 @@ export class BodyPaint {
   }
 
   private changed(): void { this.attribute.needsUpdate = true; }
+  /** Her vertices' places, for finding the copies split along a texture seam (any one shape of her will do). */
+  private restPositions(): ArrayLike<number> | undefined {
+    const g = this.mesh.geometry as THREE.BufferGeometry, p = g.getAttribute('position');
+    return p && !(p as THREE.InterleavedBufferAttribute).isInterleavedBufferAttribute ? (p.array as ArrayLike<number>) : undefined;
+  }
 
   /** Remember layer `layer` as it is, before a change, so UNDO can bring it back. */
   checkpoint(layer: number): void {
@@ -171,7 +197,7 @@ export class BodyPaint {
   /** The layer becomes `coverage` (a template), with any lone stray vertices along its edges cleaned up. */
   setLayer(layer: number, coverage: Float32Array): void {
     const g = this.mesh.geometry as THREE.BufferGeometry;
-    this.neighbours ??= g.index ? vertexNeighbours(g.index.array, coverage.length) : null;
+    this.neighbours ??= g.index ? vertexNeighbours(g.index.array, coverage.length, this.restPositions()) : null;
     const clean = Float32Array.from(coverage);
     if (this.neighbours) despeckle(clean, this.neighbours);
     for (let v = 0; v < clean.length; v++) this.weights[v * PAINT_LAYER_COUNT + layer] = clean[v];
@@ -197,7 +223,7 @@ export class BodyPaint {
   /** Paint (or with `erase`, clear) every vertex where `mask` is set, its edge softened a few rings. */
   fillMask(layer: number, mask: Uint8Array, erase: boolean): void {
     const g = this.mesh.geometry as THREE.BufferGeometry;
-    this.neighbours ??= g.index ? vertexNeighbours(g.index.array, mask.length) : null;
+    this.neighbours ??= g.index ? vertexNeighbours(g.index.array, mask.length, this.restPositions()) : null;
     if (!erase) fillLayer(this.weights, layer, mask, 1, this.neighbours, 6);
     else {
       const keep = new Float32Array(mask.length);
@@ -224,7 +250,7 @@ export class BodyPaint {
     if (!rest || !nrm) return;
     const index = (this.mesh.userData.allIndices as ArrayLike<number> | undefined) ?? g.index?.array;
     if (!index) return;
-    this.neighbours ??= vertexNeighbours(index, rest.count);
+    this.neighbours ??= vertexNeighbours(index, rest.count, this.restPositions());
     const d = bodyDetail({ map, restPosition: rest.array as ArrayLike<number>, restNormal: nrm.array as ArrayLike<number>, neighbours: this.neighbours, trunkLength: map.trunkLength, navelHint });
     this.navelVertex = d.navel;
     this.nippleVertices = d.nipples;

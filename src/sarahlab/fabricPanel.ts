@@ -31,7 +31,7 @@ import {
   fabricFamily, opacityOf, swatchRect, tileUnits, trimPick, type FabricChoice, type FabricFamilyId, type FabricLayout,
   type FabricPick, type OutfitConfig, type PaintTool,
 } from './fabricLibrary';
-import { ensureRest, setDetailKeep, setFabricLayer, setRegionOverlay } from './fabricMaterial';
+import { ensureRest, setDetailKeep, setFabricLayer, setHang, setRegionOverlay } from './fabricMaterial';
 import type { DetailKeep } from './bodyDetail';
 import { DEFAULT_LAYER_DETAIL, resolveDetail, type LayerDetail, type ResolvedDetail } from './detailMaterials';
 import { BRUSH_RANGE_CM, BodyPaint, PAINT_LAYER_COUNT, packLayer } from './bodyPaint';
@@ -777,13 +777,27 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
    */
   let drape: TunicDrape | null = null;
   let shirtLength = DEFAULT_SHIRT_LENGTH;
+  /** The paint layer the drape is the shirt of, and the drape fit its "hangs clear" values were last laid from. */
+  let drapeLayer = -1, hangLaid = '';
+  const bodyMaterial = (body: THREE.Mesh) => (Array.isArray(body.material) ? body.material[0] : body.material);
+  /** The drape's "hangs clear of her" values onto her skin, whenever it has been fitted again (or taken off). */
+  function layHang(): void {
+    const body = hooks.body();
+    if (!body) return;
+    const key = drape && drapeLayer >= 0 ? `${drapeLayer}:${drape.hangVersion}` : '';
+    if (key === hangLaid) return;
+    hangLaid = key;
+    setHang(body, bodyMaterial(body), key ? drapeLayer : -1, key ? drape!.hang : null, { layers: PAINT_LAYER_COUNT, rest: hooks.rest(body) });
+  }
+  function unhang(): void { drapeLayer = -1; }
   function dressDrape(body: THREE.Mesh, p: BodyPaint | null): void {
     let top = -1;
     for (let i = PAINT_LAYER_COUNT - 1; i >= 0 && top < 0; i--) {
       if (p && p.has(i) && layerShown(i) && paintChoices[i].fabric && templates[i] && templates[i]!.params.length !== null) top = i;
     }
     const map = regionMap();
-    if (top < 0 || painting || !p || !map || !(body as THREE.SkinnedMesh).isSkinnedMesh) { drape?.wear(null); return; }
+    if (top < 0 || painting || !p || !map || !(body as THREE.SkinnedMesh).isSkinnedMesh) { drape?.wear(null); unhang(); layHang(); return; }
+    drapeLayer = top;
     if (drape && drape.mesh.parent !== body) { drape.dispose(); drape = null; }
     if (!drape) drape = new TunicDrape(body as THREE.SkinnedMesh, map, shirtHem(map, 1));
     const c = paintChoices[top];
@@ -963,7 +977,7 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
     wearOutfit,
     clearAll,
     navelFlatten,
-    frame() { bridge?.update(); drape?.update(); },
+    frame() { bridge?.update(); drape?.update(); layHang(); },
     reshaped() { bridge?.reshape(); drape?.reshape(); },
     setShirtLength,
     shirtLength: () => shirtLength,

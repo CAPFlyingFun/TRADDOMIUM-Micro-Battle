@@ -1,4 +1,4 @@
-import { BELLY_CURVES, BELLY_CURVE_NAMES, type BellyCurve } from './bellyInterpolation';
+import { BELLY_CURVES, BELLY_CURVE_NAMES, DEFAULT_BELLY_CURVE, type BellyCurve } from './bellyInterpolation';
 import { attachRecoveredMeshes, applyRecoveredBaseline, fitWeights, LEGGINGS_FIT_KEYS, SHIRT_FINE_FIT_KEYS, updateLeggingsHem, releaseRecoveredMeshes } from './recoveredClothes';
 import { garmentTexturePanel } from './garmentTexturePanel';
 import { fabricPanel, type FabricPanel } from './fabricPanel';
@@ -162,12 +162,17 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   three.background = new THREE.Color(0x1b2028);
   const camera = new THREE.PerspectiveCamera(LANDSCAPE_FOV, 1, 2, 4_000);
 
-  const hemi = new THREE.HemisphereLight(0xe8eef6, 0x30343a, 1.2);
+  // the ground half of the sky light is brighter than a dark floor would give, and a soft fill comes up from in front
+  // of her, low: so what is under her belly can be seen, not lost in black (Joshua, 2026-10-23: "try adding more
+  // lights to see underneath better and/or raise the ambient lighting as well")
+  const hemi = new THREE.HemisphereLight(0xe8eef6, 0x5a5f68, 1.35);
   const key = new THREE.DirectionalLight(0xfff2e2, 2.0);
   key.position.set(1.5 * M, 2.8 * M, 2.2 * M);
   const rim = new THREE.DirectionalLight(0xbfd8ff, 0.9);
   rim.position.set(-2 * M, 1.8 * M, -2 * M);
-  three.add(hemi, key, rim);
+  const under = new THREE.DirectionalLight(0xffeedd, 0.7);
+  under.position.set(0.6 * M, -1.0 * M, 2.0 * M);
+  three.add(hemi, key, rim, under);
   const floor = new THREE.Mesh(
     new THREE.CircleGeometry(1.4 * M, 64),
     new THREE.MeshStandardMaterial({ color: 0x2b313a, roughness: 0.95, metalness: 0 }),
@@ -303,8 +308,11 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let fabric: FabricPanel | null = null;
   /** Which modelled garments the outfit editor lets the room draw (`fabricPanel.ts`): all, none while painting her body, or one ISOLATED. */
   let garmentView: 'all' | 'none' | string = 'all';
-  /** THE BELLY CURVE EXPERIMENT (`bellyInterpolation.ts`): the approved slider unless chosen; for this session only. */
-  let bellyCurve: BellyCurve = 'approved';
+  /**
+   * THE BELLY CURVE (`bellyInterpolation.ts`): HYBRID by default (Joshua, 2026-10-22: "change the default as hybrid,
+   * but make the current as a backup"); CURRENT, the approved slider, stays one tap away. For this session only.
+   */
+  let bellyCurve: BellyCurve = DEFAULT_BELLY_CURVE;
   const fields: Record<string, HTMLElement> = {};
   const buttons: Record<string, HTMLButtonElement> = {};
   let armsInput: HTMLInputElement | null = null;
@@ -718,9 +726,10 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     });
     buttons.refine = btn(refineLine(refine), SARAH_LAB_ACTION.refine, () => { refine = !refine; applyLook(); refresh(); });
     // the belly curve experiment (Joshua, 2026-10-22): CURRENT is the approved slider; the others are for comparing
-    buttons.bellyCurve = btn(`BELLY CURVE · ${BELLY_CURVE_NAMES[bellyCurve]}`, SARAH_LAB_ACTION.bellyCurve, () => {
+    const curveLabel = () => `BELLY CURVE · ${BELLY_CURVE_NAMES[bellyCurve]}${bellyCurve === DEFAULT_BELLY_CURVE ? '' : bellyCurve === 'approved' ? ' (backup)' : ' (experiment)'}`;
+    buttons.bellyCurve = btn(curveLabel(), SARAH_LAB_ACTION.bellyCurve, () => {
       bellyCurve = BELLY_CURVES[(BELLY_CURVES.indexOf(bellyCurve) + 1) % BELLY_CURVES.length];
-      buttons.bellyCurve.textContent = `BELLY CURVE · ${BELLY_CURVE_NAMES[bellyCurve]}${bellyCurve === 'approved' ? '' : ' (experiment)'}`;
+      buttons.bellyCurve.textContent = curveLabel();
       applyLook(); applyMotion(); refresh();
     });
     buttons.armSide = btn('ARMS · both', SARAH_LAB_ACTION.armSide, () => { armSide = (armSide + 1) % ARM_SIDES.length; applyLook(); refresh(); });

@@ -127,6 +127,11 @@ export interface BodyMap {
   readonly across: Float32Array;
   /** Distance from her neck's axis, across (ignoring height), in neck radii: where a neckline opens. */
   readonly collar: Float32Array;
+  /**
+   * How far in front of her neck's axis each vertex is, in neck radii (negative behind it), by where it is: what a
+   * neckline's front is told apart by. Optional: a map made without it (a test's) is told apart by `front`.
+   */
+  readonly forward?: Float32Array;
   /** Distance from her neck's axis sideways only, in neck radii: where a strap runs over her shoulder. */
   readonly lateral: Float32Array;
   /**
@@ -231,7 +236,7 @@ export function mapBody(input: BodyMapInput): BodyMap {
   const elbowAtL = along(J.elbowL, J.shoulderL, J.wristL), elbowAtR = along(J.elbowR, J.shoulderR, J.wristR);
   const num = new Map(BODY_REGIONS.map((r, i) => [r.id, i + 1]));
   const region = new Uint8Array(n), trunk = new Float32Array(n), leg = new Float32Array(n).fill(NaN), arm = new Float32Array(n).fill(NaN);
-  const side = new Int8Array(n), front = new Int8Array(n), across = new Float32Array(n), collar = new Float32Array(n), lateral = new Float32Array(n), around = new Float32Array(n), sideFacing = new Float32Array(n), upFacing = new Float32Array(n), legAround = new Float32Array(n).fill(NaN);
+  const side = new Int8Array(n), front = new Int8Array(n), across = new Float32Array(n), collar = new Float32Array(n), forward = new Float32Array(n), lateral = new Float32Array(n), around = new Float32Array(n), sideFacing = new Float32Array(n), upFacing = new Float32Array(n), legAround = new Float32Array(n).fill(NaN);
 
   // her spine as a line through the torso's joints, for skin facing sideways (the flanks of her belly)
   const spine = (['pelvis', 'spine', 'chest', 'neck'] as const).map((k) => J[k]).sort((a, b) => a[1] - b[1]);
@@ -254,6 +259,7 @@ export function mapBody(input: BodyMapInput): BodyMap {
     const radius = Number.isFinite(neckRadius) && neckRadius > 0 ? neckRadius : 1;
     collar[v] = Math.hypot(p[0] - J.neck[0], p[2] - J.neck[2]) / radius;
     lateral[v] = Math.abs(p[0] - J.neck[0]) / radius;
+    forward[v] = ((p[2] - J.neck[2]) * facing) / radius;
     let id: string;
     const k = limb[v];
     if (k === 'legL' || k === 'legR') {
@@ -287,7 +293,7 @@ export function mapBody(input: BodyMapInput): BodyMap {
     }
     region[v] = num.get(id)!;
   }
-  return { region, trunk, leg, arm, side, front, across, collar, lateral, around, trunkLength: trunkLen, neckRadius: Number.isFinite(neckRadius) && neckRadius > 0 ? neckRadius : 1, hipSpan, sideFacing, upFacing, legAround, facing, mirror };
+  return { region, trunk, leg, arm, side, front, across, collar, forward, lateral, around, trunkLength: trunkLen, neckRadius: Number.isFinite(neckRadius) && neckRadius > 0 ? neckRadius : 1, hipSpan, sideFacing, upFacing, legAround, facing, mirror };
 }
 
 /** Each vertex's partner across the midline x = `mid`: the nearest vertex to its reflection, by a spatial hash. */

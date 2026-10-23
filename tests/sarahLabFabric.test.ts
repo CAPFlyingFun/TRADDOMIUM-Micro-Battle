@@ -234,6 +234,25 @@ describe('straps and band tops (Joshua, 2026-10-20: the tank "proper two straps"
   it('runs a tank\'s straps over the middle of her shoulders, bare by the neck and past the strap', () => {
     expect(Array.from(coverage(m, t('tank')))).toEqual([0, 1, 0, 1]);
   });
+  it('takes a deep crew neckline down her front only: her shoulders stay covered (Joshua, 2026-10-23)', () => {
+    // her shoulder tops (front of them, near the neck and out toward her arm) and her chest between her breasts, low
+    const s = {
+      ...m,
+      region: Uint8Array.from([regionNumber('chest'), regionNumber('chest'), regionNumber('chest'), regionNumber('chest')]),
+      trunk: Float32Array.from([0.96, 0.96, 0.8, 0.8]), lateral: Float32Array.from([1.8, 2.1, 0.3, 1.9]),
+      collar: Float32Array.from([1.9, 2.2, 1.6, 2.4]), around: Float32Array.from([0.62, 0.55, 0.98, 0.8]), front: Int8Array.from([1, 1, 1, 1]),
+    };
+    for (const deep of [0.7, 0.76, 0.82, 0.88]) {
+      const c = Array.from(coverage(s, withDial(t('teeShort'), 'neck', deep)));
+      // covered: the edge is drawn where the paint crosses one half (its ramp is wide, its line crisp)
+      expect(c[0], `shoulder near the neck at ${deep}`).toBeGreaterThan(0.5);
+      expect(c[1], `outer shoulder at ${deep}`).toBeGreaterThan(0.5);
+      expect(c[3], `the side of her chest at ${deep}`).toBeGreaterThan(0.5);
+    }
+    // the middle of her chest is bare once the neckline is below it, and covered at a crew's depth
+    expect(coverage(s, withDial(t('teeShort'), 'neck', 0.7))[2]).toBe(0);
+    expect(coverage(s, t('teeShort'))[2]).toBe(1);
+  });
   it("gives a one-piece swimsuit the same straps: its body below doesn't fill her shoulders", () => {
     expect(Array.from(coverage(m, t('swimsuit')))).toEqual([0, 1, 0, 1]);
   });

@@ -52,7 +52,7 @@ export function ensureRest(geometry: THREE.BufferGeometry, rest: ShapeFields | n
 function patch(material: THREE.Material, layers: number, masked: boolean): Patched {
   const known = patched.get(material);
   if (known) return known;
-  const uniforms: Record<string, THREE.IUniform> = { fabricShowRegions: { value: 0 } };
+  const uniforms: Record<string, THREE.IUniform> = { fabricShowRegions: { value: 0 }, fabricHangLayer: { value: -1 } };
   for (let i = 0; i < layers; i++) {
     uniforms[`fabricOn${i}`] = { value: 0 };
     uniforms[`fabricMap${i}`] = { value: null };
@@ -70,12 +70,14 @@ function patch(material: THREE.Material, layers: number, masked: boolean): Patch
     shader.vertexShader = [
       'attribute vec3 fabricRest;', 'attribute vec3 fabricRestNormal;', 'varying vec3 vFabricPos;', 'varying vec3 vFabricNrm;',
       ...(masked ? ['attribute vec3 fabricPaint;', 'attribute vec4 fabricRegionTint;', 'varying vec3 vFabricMask;', 'varying vec4 vFabricTint;',
+        // where a shirt's drape hangs clear of her (tunicDrape.ts), that shirt's paint comes off the skin under it
+        'attribute float fabricHang;', 'varying float vFabricHang;',
         // detail through paint (bodyDetail.ts): her nipples' and navel's surface detail, taken back under paint only
         'attribute vec4 fabricDetail;', 'attribute vec4 fabricDetailN;', 'varying float vFabricDetailKeep;',
         ...idx.flatMap((i) => [`uniform float fabricOn${i};`, `uniform float fabricNippleKeep${i};`, `uniform float fabricNavelKeep${i};`])] : []),
       shader.vertexShader,
     ].join('\n');
-    const mask = masked ? '\nvFabricMask = fabricPaint;\nvFabricTint = fabricRegionTint;' : '';
+    const mask = masked ? '\nvFabricMask = fabricPaint;\nvFabricTint = fabricRegionTint;\nvFabricHang = fabricHang;' : '';
     // each layer keeps its own share of her detail (detailMaterials.ts): where layers overlap, the one that hides most
     // decides, and every share is scaled by how much of that layer covers the vertex
     const fmax = (xs: string[]) => xs.reduce((a, b) => `max(${a}, ${b})`);
@@ -94,14 +96,20 @@ function patch(material: THREE.Material, layers: number, masked: boolean): Patch
         vec3 fq = vFabricPos / fabricTile${i};
         vec3 fc = texture2D(fabricMap${i}, fq.zy).rgb * fw.x + texture2D(fabricMap${i}, fq.xz).rgb * fw.y + texture2D(fabricMap${i}, fq.xy).rgb * fw.z;
         ${masked
-          // painted hosiery's cover is a perceived amount: 50% reads as half-covered skin, not the faint tint a linear
-          // mix gives
-          ? `float fk = smoothstep(0.15, 0.85, vFabricMask[${i}]) * (1.0 - pow(1.0 - fabricOpacity${i}, 2.2));\n        diffuseColor.rgb = mix(diffuseColor.rgb, fc, fk);`
+          // a CRISP edge (Joshua, 2026-10-22: "need to add defined cloth edges... not like a solid line boundary of the
+          // clothing, but something fussy and has streaks at the ends"): the paint is stored per vertex, and blending
+          // across its soft ramp drew a fuzzy band with streaks along long triangles. The edge is now the line where the
+          // ramp crosses one half, drawn one pixel wide whatever the distance (fwidth), so a neckline, a sleeve end and a
+          // hem read as a seam. Painted hosiery's cover is a perceived amount: 50% reads as half-covered skin, not the
+          // faint tint a linear mix gives
+          ? `float fk = fabricEdge(vFabricMask[${i}]) * (1.0 - pow(1.0 - fabricOpacity${i}, 2.2)) * (1.0 - fabricEdge(vFabricHang) * step(abs(fabricHangLayer - ${i}.0), 0.5));\n        diffuseColor.rgb = mix(diffuseColor.rgb, fc, fk);`
           : `float fk = 1.0;\n        diffuseColor.rgb = fc;\n        diffuseColor.a *= fabricOpacity${i};`}
         if (fabricRough${i} >= 0.0) { fabricMatte = max(fabricMatte, fk); fabricRoughness = fabricRough${i}; }
       }`;
     shader.fragmentShader = [
-      'varying vec3 vFabricPos;', 'varying vec3 vFabricNrm;', ...(masked ? ['varying vec3 vFabricMask;', 'varying vec4 vFabricTint;', 'uniform float fabricShowRegions;', 'varying float vFabricDetailKeep;'] : []),
+      'varying vec3 vFabricPos;', 'varying vec3 vFabricNrm;', ...(masked ? ['varying vec3 vFabricMask;', 'varying vec4 vFabricTint;', 'uniform float fabricShowRegions;', 'varying float vFabricDetailKeep;', 'varying float vFabricHang;', 'uniform float fabricHangLayer;',
+        // where the paint's ramp crosses one half, antialiased over about a pixel
+        'float fabricEdge(float m) { float w = max(fwidth(m) * 0.75, 0.002); return smoothstep(0.5 - w, 0.5 + w, m); }'] : []),
       ...idx.flatMap((i) => [`uniform float fabricOn${i};`, `uniform sampler2D fabricMap${i};`, `uniform float fabricTile${i};`, `uniform float fabricOpacity${i};`, `uniform float fabricRough${i};`]),
       shader.fragmentShader,
     ].join('\n').replace('#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\nroughnessFactor = mix(roughnessFactor, fabricRoughness, fabricMatte);')
@@ -118,7 +126,7 @@ function patch(material: THREE.Material, layers: number, masked: boolean): Patch
       ${masked ? 'if (fabricShowRegions > 0.5) diffuseColor.rgb = mix(diffuseColor.rgb, vFabricTint.rgb, 0.78 * vFabricTint.a);' : ''}
     }`);
   };
-  material.customProgramCacheKey = function () { return `${cacheKey.call(this)}|fabric-${layers}${masked ? '-painted' : ''}-v6`; };
+  material.customProgramCacheKey = function () { return `${cacheKey.call(this)}|fabric-${layers}${masked ? '-painted' : ''}-v9`; };
   material.needsUpdate = true;
   const entry = { uniforms, layers, masked };
   patched.set(material, entry);
@@ -133,6 +141,7 @@ export function setFabricLayer(mesh: THREE.Mesh, material: THREE.Material, index
   if (!layer?.texture && !patched.has(material)) return; // nothing to take off a material never dressed
   ensureRest(mesh.geometry as THREE.BufferGeometry, opts.rest);
   const { uniforms, masked } = patch(material, opts.layers, opts.masked);
+  if (masked) ensureHang(mesh.geometry as THREE.BufferGeometry);
   const on = !!layer?.texture;
   uniforms[`fabricOn${index}`].value = on ? 1 : 0;
   uniforms[`fabricMap${index}`].value = layer?.texture ?? null;
@@ -153,12 +162,31 @@ export function setFabricLayer(mesh: THREE.Mesh, material: THREE.Material, index
 export function setRegionOverlay(mesh: THREE.Mesh, material: THREE.Material, on: boolean, opts: { readonly layers: number; readonly rest: ShapeFields | null }): void {
   if (!on && !patched.has(material)) return;
   ensureRest(mesh.geometry as THREE.BufferGeometry, opts.rest);
+  ensureHang(mesh.geometry as THREE.BufferGeometry);
   patch(material, opts.layers, true).uniforms.fabricShowRegions.value = on ? 1 : 0;
+}
+
+/**
+ * Where a shirt's drape hangs clear of her skin (`TunicDrape.hang`, one value a vertex), and which paint layer that
+ * shirt is: that layer's paint comes off the skin there. `layer` -1 (or no values) puts every layer's paint back.
+ */
+export function setHang(mesh: THREE.Mesh, material: THREE.Material, layer: number, hang: Float32Array | null, opts: { readonly layers: number; readonly rest: ShapeFields | null }): void {
+  if (layer < 0 && !patched.has(material)) return;
+  const g = mesh.geometry as THREE.BufferGeometry;
+  ensureRest(g, opts.rest);
+  ensureHang(g);
+  const a = g.getAttribute('fabricHang') as THREE.BufferAttribute;
+  if (hang && hang.length === a.count) { (a.array as Float32Array).set(hang); a.needsUpdate = true; }
+  patch(material, opts.layers, true).uniforms.fabricHangLayer.value = hang ? layer : -1;
+}
+function ensureHang(g: THREE.BufferGeometry): void {
+  if (!g.getAttribute('fabricHang')) g.setAttribute('fabricHang', new THREE.BufferAttribute(new Float32Array(g.getAttribute('position').count), 1));
 }
 
 /** How much nipple and navel detail stays visible under each paint layer (`bodyDetail.ts`): 1 all, 0 none. */
 export function setDetailKeep(mesh: THREE.Mesh, material: THREE.Material, keep: readonly { readonly nipple: number; readonly navel: number }[], opts: { readonly layers: number; readonly rest: ShapeFields | null }): void {
   ensureRest(mesh.geometry as THREE.BufferGeometry, opts.rest);
+  ensureHang(mesh.geometry as THREE.BufferGeometry);
   const u = patch(material, opts.layers, true).uniforms;
   for (let i = 0; i < opts.layers; i++) {
     u[`fabricNippleKeep${i}`].value = keep[i]?.nipple ?? 1;
