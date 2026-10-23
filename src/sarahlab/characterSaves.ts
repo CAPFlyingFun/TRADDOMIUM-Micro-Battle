@@ -8,7 +8,8 @@
  *     later), every body-shape control, the belly refinement, and RANDOMIZE's ranges and locks (`actor/bodyRandom.ts`);
  *   - the CLOTHES: the outfit she wears, each paint layer (its template and dial settings, or the hand-painted mask
  *     when there is no template), its fabric, colour, stitch and detail-through-paint, each modelled garment's fabric,
- *     the shirt length, and the outfit's BREAST and NAVEL DETAIL (each AUTO or a manual value: `DetailOverride`).
+ *     the shirt length, the outfit's BREAST and NAVEL DETAIL (each AUTO or a manual value: `DetailOverride`), and the
+ *     pieces made in the clothing builder (`built`: straps and cords as data, `strapData.ts`).
  * Saving one part under a name keeps the other part that name already holds, so a body and an outfit can be built and
  * saved separately and still make one character. Loading puts on only what the save holds.
  *
@@ -30,6 +31,7 @@ import type { FabricChoice } from './fabricLibrary';
 import type { LayerDetail } from './detailMaterials';
 import type { CoverageParams } from './paintTemplates';
 import type { RandomRule, RandomRules } from '../actor/bodyRandom';
+import { builtToJson, sanitizeBuilt, type BuiltPieces } from './strapData';
 
 export type SaveScope = 'all' | 'body' | 'clothes';
 
@@ -72,6 +74,12 @@ export interface SavedClothes {
   readonly layers: readonly (SavedLayer | null)[];
   /** A modelled garment's fabric choice, by garment name. */
   readonly garments: Readonly<Record<string, FabricChoice>>;
+  /**
+   * Pieces made in the clothing builder (`strapBuilder.ts`): straps and cords pinned to her skin by triangle and
+   * barycentric weights, as editable data; their meshes are made from it. Absent in saves made before it existed, and
+   * when nothing is built.
+   */
+  readonly built?: BuiltPieces;
 }
 
 /** What a character changed on a library outfit: per paint layer her fabric choice and detail, her garments, her length. */
@@ -160,6 +168,8 @@ const make = (t: SavedLayer['template']) => json(t ? { id: t.id, params: { ...t.
 /** Two outfits built the same way: same outfit, same templates and dials, same hand-painted masks, layer for layer. */
 function sameMake(a: SavedClothes, b: SavedClothes): boolean {
   if (a.outfit !== b.outfit) return false;
+  // built pieces are part of how an outfit is made: a character's own straps make it her own outfit
+  if (json(a.built ? builtToJson(a.built) : null) !== json(b.built ? builtToJson(b.built) : null)) return false;
   const n = Math.max(a.layers.length, b.layers.length);
   for (let i = 0; i < n; i++) {
     const x = a.layers[i] ?? null, y = b.layers[i] ?? null;
@@ -298,7 +308,13 @@ function readClothes(v: unknown): SavedClothes | null {
     layers: Array.isArray(v.layers) ? v.layers.slice(0, 8).map(readLayer) : [],
     garments,
     ...(isRecord(v.detail) ? { detail: readDetail(v.detail) } : {}),
+    ...built(v.built),
   };
+}
+/** Built pieces from untrusted data: only a readable set with something in it. */
+function built(v: unknown): { built?: BuiltPieces } {
+  const b = v === undefined ? null : sanitizeBuilt(v);
+  return b && b.pieces.length ? { built: b } : {};
 }
 
 /** A book from untrusted parsed JSON: known fields only, numbers clamped, unreadable characters dropped. */

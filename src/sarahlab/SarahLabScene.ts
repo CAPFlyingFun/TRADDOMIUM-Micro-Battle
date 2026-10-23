@@ -2,6 +2,7 @@ import { BELLY_CURVES, BELLY_CURVE_NAMES, DEFAULT_BELLY_CURVE, type BellyCurve }
 import { attachRecoveredMeshes, applyRecoveredBaseline, fitWeights, LEGGINGS_FIT_KEYS, SHIRT_FINE_FIT_KEYS, updateLeggingsHem, releaseRecoveredMeshes } from './recoveredClothes';
 import { garmentTexturePanel } from './garmentTexturePanel';
 import { fabricPanel, type FabricPanel } from './fabricPanel';
+import { strapBuilder, type StrapBuilder } from './strapBuilder';
 import { mapBody } from './bodyRegions';
 import { DEFAULT_SHIRT_LENGTH } from './paintTemplates';
 import { AUTO_DETAIL, EMPTY_BOOK, type CharacterBook, type SavedBody, type SavedClothes } from './characterSaves';
@@ -306,6 +307,13 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let texturePanel: ReturnType<typeof garmentTexturePanel> | null = null;
   // the fabric editor (fabricPanel.ts); while it paints onto her body every garment is hidden (Joshua, 2026-10-20)
   let fabric: FabricPanel | null = null;
+  /** The clothing builder (strapBuilder.ts): straps and cords pinned to her skin (Joshua, 2026-10-23). */
+  let builder: StrapBuilder | null = null;
+  /**
+   * Her animation clock, for watching a built strap ride her (Joshua, 2026-10-23: "play, pause, slow and step Walk,
+   * Sit"): paused, how fast it runs, and a step owed while paused (one frame of a 30 fps clock).
+   */
+  const clock = { paused: false, speed: 1, step: 0 };
   /** Which modelled garments the outfit editor lets the room draw (`fabricPanel.ts`): all, none while painting her body, or one ISOLATED. */
   let garmentView: 'all' | 'none' | string = 'all';
   /**
@@ -319,6 +327,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let shirtLengthInput: HTMLInputElement | null = null;
   const pointers = new Map<number, { x: number; y: number }>();
   let pinch = 0;
+  /** One finger builds (places and moves a built strap's points) while the builder's EDIT is on and nothing is painting. */
+  const building = () => !fabric?.tool() && !!builder?.editing();
 
   function refresh(): void {
     if (fields.status) fields.status.textContent = statusLine(loaded && model?.visible === true, failed, garments, hasBelly, modelIndex) + (hooks.skin === 'ktx2' ? ' · KTX2 skin' : '') + (wantedOutfit !== null ? ' · loading outfit…' : '');
@@ -546,9 +556,14 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   function wearPaint(): void {
     fabric?.wearOutfit(recovered ? OUTFITS[outfit]?.paint ?? null : null);
     // saved clothes put on with this outfit go on over its defaults
-    if (pendingClothes && fabric?.putOnClothes(pendingClothes)) pendingClothes = null;
+    if (pendingClothes && fabric?.putOnClothes(pendingClothes)) { builder?.load(pendingClothes.built ?? null); pendingClothes = null; }
     // what she has on now is what the editor's SAVE compares against
     if (fabric && !pendingClothes) { outfits?.editing(nextSource ?? { kind: 'builtin', name: OUTFITS[outfit].name }); nextSource = null; }
+  }
+  /** What she wears now, as a save holds it: the outfit, the editor's paint and fabrics, and any built pieces. */
+  function currentClothes(): SavedClothes {
+    const built = builder?.built() ?? null;
+    return { outfit: OUTFITS[outfit].name, ...(fabric?.clothes() ?? { shirtLength: DEFAULT_SHIRT_LENGTH, layers: [], garments: {} }), ...(built ? { built } : {}) };
   }
   /** Put saved clothes on her: their outfit first if it is another, then every piece as saved. */
   function putOnSaved(saved: SavedClothes, from: string | null, source: OutfitSource): void {
@@ -559,7 +574,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     pendingClothes = rest;
     if (index >= 0 && index !== outfit) dress(index);
     else {
-      if (fabric?.putOnClothes(rest)) { pendingClothes = null; outfits?.editing(source); nextSource = null; }
+      if (fabric?.putOnClothes(rest)) { builder?.load(rest.built ?? null); pendingClothes = null; outfits?.editing(source); nextSource = null; }
       applyLook(); refresh();
     }
   }
@@ -627,6 +642,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
       // painting her body: one finger is the brush, a second takes over as turn and zoom
       if (fabric?.tool()) { if (pointers.size === 1) fabric.strokeStart(e.clientX, e.clientY); else fabric.strokeEnd(); }
+      // building: one finger places and moves the points, a second takes over as turn and zoom, the same way
+      else if (building()) { if (pointers.size === 1) builder!.pointerDown(e.clientX, e.clientY); else builder!.pointerUp(); }
       if (pointers.size === 2) {
         const [a, b] = [...pointers.values()];
         pinch = Math.hypot(a.x - b.x, a.y - b.y);
@@ -638,6 +655,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       const now = { x: e.clientX, y: e.clientY };
       pointers.set(e.pointerId, now);
       if (pointers.size === 1 && fabric?.tool()) { fabric.strokeMove(now.x, now.y); return; }
+      if (pointers.size === 1 && building()) { builder!.pointerMove(now.x, now.y); return; }
       if (pointers.size === 1) {
         orbit.yaw -= (now.x - was.x) * 0.008;
         orbit.pitch = Math.min(1.2, Math.max(-0.35, orbit.pitch + (now.y - was.y) * 0.006));
@@ -650,7 +668,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         pinch = d;
       }
     });
-    const up = (e: PointerEvent) => { pointers.delete(e.pointerId); pinch = 0; fabric?.strokeEnd(); };
+    const up = (e: PointerEvent) => { pointers.delete(e.pointerId); pinch = 0; fabric?.strokeEnd(); builder?.pointerUp(); };
     root.addEventListener('pointerup', up);
     root.addEventListener('pointercancel', up);
     root.addEventListener('wheel', (e) => { e.preventDefault(); zoom(Math.exp(e.deltaY * 0.001)); }, { passive: false });
@@ -850,7 +868,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       read: () => book.read(),
       write: (b) => book.write(b),
       body: (): SavedBody => ({ model: SARAH_LAB_MODELS[modelIndex].id, bump, shape: serializeShape(body), refine, random: randomRules }),
-      clothes: (): SavedClothes => ({ outfit: OUTFITS[outfit].name, ...(fabric?.clothes() ?? { shirtLength: DEFAULT_SHIRT_LENGTH, layers: [], garments: {} }) }),
+      clothes: () => currentClothes(),
       wornFrom: () => wornFrom,
       putOnBody: (saved) => {
         bump = Math.max(0, Math.min(BUMP_MAX_PERCENT, Math.round(saved.bump)));
@@ -886,7 +904,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     bodyDetail.appendChild(bodyDetailHead);
     right.appendChild(bodyDetail);
     // the outfit editor's SAVE workspace (outfitPanel.ts)
-    const clothesNow = (): SavedClothes => ({ outfit: OUTFITS[outfit].name, ...(fabric?.clothes() ?? { shirtLength: DEFAULT_SHIRT_LENGTH, layers: [], garments: {} }) });
+    const clothesNow = currentClothes;
     outfits = outfitPanel({
       read: () => book.read(),
       write: (b) => { book.write(b); characters?.refresh(); },
@@ -971,6 +989,31 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     });
     fabric.element.dataset.tab = 'clothes';
     right.appendChild(fabric.element);
+    builder = strapBuilder({
+      body: () => skinned.find(m => !!m.geometry.getAttribute('_cloth_cover')) ?? null,
+      // her FULL triangle list: the index as loaded, kept before any garment hid skin from the draw
+      triangles: (mesh) => (mesh.userData.allIndices as ArrayLike<number> | undefined) ?? mesh.geometry.index?.array ?? [],
+      // her approved shape before any slider moved it: where the builder measures, as the paint brush does
+      rest: (mesh) => {
+        const base = shaped.find(x => x.mesh === mesh)?.fields.basePos;
+        const position = mesh.geometry.getAttribute('position');
+        return base && base.length === position.count * 3 ? base : Float32Array.from({ length: position.count * 3 }, (_, i) => position.getComponent(Math.floor(i / 3), i % 3));
+      },
+      unitsPerCm: (mesh) => { mesh.getWorldScale(scaleOf); return (M / 100) / (scaleOf.x || 1); },
+      view: () => ({ camera, ...ctx.renderer.size() }),
+      loadImage: (path) => assets.loadTexture(path).then(t => { const image = (t?.image ?? null) as (CanvasImageSource & { width: number; height: number }) | null; t?.dispose(); return image; }),
+      base: () => SARAH_LAB_MODELS[modelIndex].id,
+      changed: () => outfits?.changed(),
+      clock: {
+        paused: () => clock.paused,
+        setPaused: (p) => { clock.paused = p; },
+        speed: () => clock.speed,
+        setSpeed: (v) => { clock.speed = v; },
+        step: () => { clock.paused = true; clock.step += 1 / 30; },
+      },
+    });
+    builder.element.dataset.tab = 'clothes';
+    right.appendChild(builder.element);
     bodyDetail.appendChild(fabric.detailControl());
     right.appendChild(texturePanel.element);
     root.appendChild(right);
@@ -997,7 +1040,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     root.appendChild(card.element);
     ctx.uiLayer.appendChild(root);
     hud = root;
-    upright_ = uprightLayout(root, () => { right.style.display = upright_?.portrait ? 'none' : 'flex'; fabric?.setActive(!upright_?.portrait || upright_.open === 'clothes'); const size = ctx.renderer.size(); frame(size.width, size.height, false); refresh(); });
+    upright_ = uprightLayout(root, () => { right.style.display = upright_?.portrait ? 'none' : 'flex'; fabric?.setActive(!upright_?.portrait || upright_.open === 'clothes'); builder?.setActive(!upright_?.portrait || upright_.open === 'clothes'); const size = ctx.renderer.size(); frame(size.width, size.height, false); refresh(); });
     refresh();
   }
   function zoom(factor: number): void {
@@ -1200,15 +1243,20 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         if (card.element.style.getPropertyValue(LOADING_COVERED_VAR) !== covered) card.element.style.setProperty(LOADING_COVERED_VAR, covered);
         card.show(meter.snapshot(), cardPlace);
       }
-      seconds += frame.rawDt;
-      if (pose === 'walk') walked += WALK_SPEED * frame.rawDt;
+      // her animation's own time: paused, slowed, or stepped one frame at a time (the builder's MOTION controls)
+      const dt = clock.paused ? clock.step : frame.rawDt * clock.speed;
+      clock.step = 0;
+      seconds += dt;
+      if (pose === 'walk') walked += WALK_SPEED * dt;
       if (turning) orbit.yaw += frame.rawDt * 0.35;
       placeCamera();
       if (rig) rig.apply(turnsFor());
       place();
-      feelMotion(frame.rawDt);
+      feelMotion(dt);
       // a painted top's cleavage bridge is laid where her breasts are this frame
       if (fabric && model) { model.updateMatrixWorld(true); fabric.frame(); }
+      // and every built strap laid on her skin as she is this frame
+      if (builder && model) builder.frame();
     },
 
     resize(width: number, height: number) {
@@ -1223,6 +1271,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       texturePanel = null;
       fabric?.dispose();
       fabric = null;
+      builder?.dispose();
+      builder = null;
       hud?.remove();
       hud = null;
       if (model) { three.remove(model); rig?.dispose(); release(model); model = null; }
