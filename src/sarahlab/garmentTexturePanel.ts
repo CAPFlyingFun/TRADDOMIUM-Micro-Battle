@@ -10,7 +10,7 @@ export function garmentTexturePanel(meshes: () => THREE.SkinnedMesh[], onSelect:
   let target: Garment = 'shirt', request = 0, disposed = false;
   const panel = document.createElement('details');
   panel.dataset.role = 'sarahlab-textures';
-  panel.style.cssText = 'border-top:1px solid #ffffff25;padding-top:8px;touch-action:pan-y';
+  panel.style.cssText = 'border-top:1px solid var(--sl-line,#ffffff20);padding-top:8px;touch-action:pan-y';
   const summary = document.createElement('summary');
   summary.textContent = 'TEXTURE · custom image';
   summary.style.cssText = 'cursor:pointer;padding:8px 0;font-size:12px';
@@ -34,11 +34,11 @@ export function garmentTexturePanel(meshes: () => THREE.SkinnedMesh[], onSelect:
   const scale = document.createElement('input');
   scale.type = 'range'; scale.min = '.25'; scale.max = '12'; scale.step = '.25'; scale.value = '1';
   scale.dataset.field = 'texture-scale'; scale.setAttribute('aria-label','Texture repeat scale');
-  scale.style.cssText = 'width:100%;accent-color:#d4a853';
+  scale.style.cssText = 'width:100%;accent-color:var(--sl-accent,#d4a853)';
   const row = document.createElement('div'); row.style.cssText = 'display:flex;gap:5px;flex-wrap:wrap';
   const button = (title: string, action: string, click: () => void) => {
     const b = document.createElement('button'); b.textContent = title; b.dataset.action = action;
-    b.style.cssText = 'min-height:40px;padding:8px;border:1px solid #ffffff30;border-radius:8px;background:#151b23;color:#e8e2d8;font:600 11px system-ui';
+    b.style.cssText = 'min-height:40px;padding:8px;border:1px solid var(--sl-btn-line,#ffffff30);border-radius:8px;background:var(--sl-btn,#151b23);color:var(--sl-ink,#e8e2d8);font:600 11px system-ui';
     b.onclick = click; row.append(b); return b;
   };
   const status = document.createElement('div'); status.dataset.field = 'texture-status';
@@ -73,7 +73,7 @@ export function garmentTexturePanel(meshes: () => THREE.SkinnedMesh[], onSelect:
     mode.value=c?.mode ?? 'auto'; scale.value=String(c?.scale ?? 1);
     label.textContent=`Scale · ${(c?.scale ?? 1).toFixed(2)}×`;
     mx.setAttribute('aria-pressed',String(c?.mirrorX ?? false)); my.setAttribute('aria-pressed',String(c?.mirrorY ?? false));
-    mx.style.background=c?.mirrorX ? '#806020' : '#151b23'; my.style.background=c?.mirrorY ? '#806020' : '#151b23';
+    mx.style.background=c?.mirrorX ? 'var(--sl-on,#806020)' : 'var(--sl-btn,#151b23)'; my.style.background=c?.mirrorY ? 'var(--sl-on,#806020)' : 'var(--sl-btn,#151b23)';
     status.textContent=c ? `${c.name} · ${target}` : `Original ${target} material. Images stay in this lab session.`;
   }
   const mx=button('MIRROR X','sarahlab:texture-mirror-x',()=>{const c=custom.get(target);if(c)c.mirrorX=!c.mirrorX;update();});

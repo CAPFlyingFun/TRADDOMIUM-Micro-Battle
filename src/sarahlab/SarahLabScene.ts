@@ -9,7 +9,10 @@ import { AUTO_DETAIL, EMPTY_BOOK, type CharacterBook, type SavedBody, type Saved
 import { characterPanel, type CharacterPanel } from './characterPanel';
 import { outfitPanel, type OutfitPanel, type OutfitSource } from './outfitPanel';
 import { NO_RULES, isLocked, randomize, ruleFor, withGroupLock, withRule, type RandomRules, type RandomSpec } from '../actor/bodyRandom';
-import { uprightLayout, type UprightLayout } from './uprightTabs';
+import { studioLayout, studioSectionAction, type StudioLayout } from './studioLayout';
+import { THEME_STAGE, otherTheme, readTheme, storeTheme, type StudioTheme } from './studioTheme';
+import { frameBox, shoot, shootDataUrl, savePicture } from './snapshot';
+import { History } from './strapData';
 import { loadingCard, LOADING_COVERED_VAR, type LoadingCard, type LoadingPlace } from './loadingCard';
 import { LoadMeter } from '../assets/loadMeter';
 /**
@@ -46,7 +49,7 @@ import { newJointTurn, type BindJoint, type HumanMeasure, type JointTurn, type M
 import { SEATED_TURNS, poseSeated } from '../actor/humanSeated';
 import { measureHuman } from '../actor/humanSkeleton';
 import type { AppScene, FrameInfo, SceneContext, SceneFactory } from '../app/Scene';
-import { assets } from '../assets/assets';
+import { assets, assetUrl } from '../assets/assets';
 import { release } from '../tombs/LabPeople';
 import { BODY_CONTROLS, BREAST_DIMENSIONS, clampShape, controlLine, defaultBodyShape, parseShape, resetControl, serializeShape, setControl, setLinkedControl, type BodyControl, type BodyShape } from '../actor/bodyShape';
 import { applyShapeFields, liftShapeFields, type ShapeFields } from '../view/bodyShapeView';
@@ -56,6 +59,7 @@ import { UNITS_PER_METRE } from '../world/dem';
 import {
   BELLY_MOTION, BELLY_TARGET, trimShown, BREAST_TARGETS, BUMP_MAX_PERCENT, GARMENTS, RECOVERED_SHIRTS, OUTFITS, outfitLine, modelLine, refineLine, refineWeight, nextOutfit, wornGarments, coverMask, bodyNeverHidden, uncoveredSkinIndices, UNDER_TOP_GARMENT, BELLY_REFINE_TARGET, SEAT_TARGET, seatCorrectiveWeight, SARAH_LAB_MODELS, SARAH_LAB_DEFAULT_MODEL, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID, shirtLengthLine, sarahModelPath, BODY_RANDOM_SPECS,
   bellyMotionWeights, bellyWeights, breastBobWeight, breastWeightsForShape, bodyShapeFieldWeights, SIZE_TILT_PRESETS_DEG, effectiveTiltDeg, stepSeated, bustVolume, BREAST_GROW_TARGET, settledSitFor, bellyUpperWeight, BELLY_UPPER_TARGET, navelWeights, NAVEL_FLAT_TARGET, navelFlatWeight, tPoseTurns, ARM_SIDES, armsLine, ARM_RAISE_TARGETS, armRaiseWeight, SEAT_V2_TARGET, seatCorrectiveV2Weight, fingerBend, THUMB_TO_PALM, bumpLine, fingersLine, restingBellySpring, statusLine, stepBellySpring, stepBreastSpring, walkBounceAccel,
+  offeredOutfits, outfitThumbPath,
   type Garment, type SarahLabPose, recoveredPartsFor, recoveredPartPath, isShirtPart, shirtOfPart, type RecoveredPart, PAINTED_DEFAULT_OUTFIT, RECOVERED_GARMENTS,
 } from './sarahLabTool';
 
@@ -70,8 +74,23 @@ const GARMENT_LABEL: Partial<Record<Garment, string>> = {
 const OPENING_LABEL = 'Opening the character room';
 /** The camera's vertical view on a landscape screen (degrees). */
 const LANDSCAPE_FOV = 38;
-/** Held upright: the CSS pixels BACK and the title take at the top of the screen, kept clear of her. */
+/** Held upright: the CSS pixels BACK and the title take at the top of the stage, kept clear of her. */
 const UPRIGHT_TOP = 56;
+/** The camera's angles (Joshua, 2026-10-23, from the Character Studio preview): yaw about her, radians. */
+const VIEW_ANGLES = Object.freeze([
+  { id: 'front', label: 'FRONT', yaw: 0 },
+  { id: 'three-quarter', label: '¾', yaw: 0.5 },
+  { id: 'side', label: 'SIDE', yaw: Math.PI / 2 },
+  { id: 'back', label: 'BACK', yaw: Math.PI },
+] as const);
+/** How long her body must hold still before a change becomes an UNDO step (ms). */
+const BODY_SETTLE_MS = 450;
+/** This device's storage, or null where it cannot be had (a private window). */
+function localStore(): Storage | null { try { return globalThis.localStorage ?? null; } catch { return null; } }
+/** A card's picture, in pixels (3:4, sharp at twice a card's width on a phone). */
+const THUMB_SIZE = Object.freeze({ width: 168, height: 224 });
+/** The quick sizes under the bump slider (percent). */
+const QUICK_SIZES = Object.freeze([0, 50, 100, 150, 200]);
 /** A walk on the spot, metres a second: an unhurried pace. */
 const WALK_SPEED = 1.1;
 
@@ -283,18 +302,27 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     camera.lookAt(orbit.target);
   }
 
-  // HELD UPRIGHT the tab bar (and an open tab's sheet) cover the bottom of the screen and BACK and the title the top,
-  // so she is framed in the room between them: the view widens until what a landscape screen shows of her fits that
-  // part, and slides so its middle is that part's middle. The camera's own place and the orbit are as they were.
-  let upright_: UprightLayout | null = null;
+  // SHE IS FRAMED IN THE STAGE (studioLayout.ts): the rail and the inspector cover part of the screen -- the left and
+  // right held landscape, the bottom held upright, where BACK and the title also take the top -- so the view slides
+  // until its middle is the stage's middle, and widens until what a landscape screen shows of her, top to bottom, fits
+  // the stage's height. The camera's own place and the orbit are as they were.
+  let studio: StudioLayout | null = null;
+  /** LIGHT or DARK, as this device last chose (studioTheme.ts). */
+  let theme: StudioTheme = readTheme(localStore());
+  /** Her name over the stage: the CHARACTERS panel's name. */
+  let nameLine: HTMLElement | null = null;
   function frame(width: number, height: number, lay = true): void {
     camera.aspect = width / Math.max(1, height);
-    if (lay) upright_?.setPortrait(height > width);
-    if (upright_?.portrait && height > width) {
-      const cssHeight = Math.max(1, hud?.clientHeight ?? height), top = UPRIGHT_TOP / cssHeight, bottom = Math.min(0.7, upright_.covered() / cssHeight);
-      const shown = Math.max(0.2, 1 - top - bottom), middle = top + shown / 2;
-      camera.fov = 2 * THREE.MathUtils.radToDeg(Math.atan(Math.tan(THREE.MathUtils.degToRad(LANDSCAPE_FOV / 2)) / shown));
-      camera.setViewOffset(width, height, 0, height * (0.5 - middle), width, height);
+    if (lay) studio?.setPortrait(height > width);
+    const c = studio?.covered() ?? { left: 0, right: 0, top: 0, bottom: 0 };
+    const cssWidth = Math.max(1, hud?.clientWidth ?? width), cssHeight = Math.max(1, hud?.clientHeight ?? height);
+    // the angles' row floats over the stage's bottom: she stands above it, not behind it
+    const top = c.top + (studio?.portrait ? UPRIGHT_TOP : 0), bottom = c.bottom + (studio ? studio.stage.bottom.getBoundingClientRect().height + 12 : 0);
+    const shownX = Math.max(0.2, 1 - (c.left + c.right) / cssWidth), shownY = Math.max(0.2, 1 - (top + bottom) / cssHeight);
+    if (shownX < 0.999 || shownY < 0.999) {
+      const middleX = c.left / cssWidth + shownX / 2, middleY = top / cssHeight + shownY / 2;
+      camera.fov = 2 * THREE.MathUtils.radToDeg(Math.atan(Math.tan(THREE.MathUtils.degToRad(LANDSCAPE_FOV / 2)) / shownY));
+      camera.setViewOffset(width, height, width * (0.5 - middleX), height * (0.5 - middleY), width, height);
     } else {
       camera.fov = LANDSCAPE_FOV;
       camera.clearViewOffset();
@@ -329,6 +357,33 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let pinch = 0;
   /** One finger builds (places and moves a built strap's points) while the builder's EDIT is on and nothing is painting. */
   const building = () => !fabric?.tool() && !!builder?.editing();
+
+  // UNDO / REDO FOR HER BODY (from the Character Studio preview): every settled change to her size and shape -- a
+  // slider let go, RANDOMIZE, a reset, a quick size, a saved body put on -- is a step. A drag is one step: the change is
+  // recorded once it has been still for BODY_SETTLE_MS.
+  interface BodyStep { readonly bump: number; readonly body: BodyShape }
+  const stepKey = (s: BodyStep) => `${s.bump}|${serializeShape(s.body)}`;
+  let bodyHistory: History<BodyStep> | null = null, bodyKey = '', bodyTimer: ReturnType<typeof setTimeout> | null = null;
+  function noteBody(): void {
+    const now: BodyStep = { bump, body }, key = stepKey(now);
+    if (!bodyHistory) { bodyHistory = new History(now, 60); bodyKey = key; return; }
+    if (key === bodyKey) return;
+    bodyKey = key;
+    if (bodyTimer) clearTimeout(bodyTimer);
+    bodyTimer = setTimeout(() => { bodyTimer = null; settleBody(); refresh(); }, BODY_SETTLE_MS);
+  }
+  function settleBody(): void {
+    if (bodyTimer) { clearTimeout(bodyTimer); bodyTimer = null; }
+    if (bodyHistory && stepKey(bodyHistory.current) !== stepKey({ bump, body })) bodyHistory.push({ bump, body });
+  }
+  function travelBody(direction: -1 | 1): void {
+    if (!bodyHistory) return;
+    settleBody();
+    const to = direction < 0 ? bodyHistory.undo() : bodyHistory.redo();
+    if (!to) return;
+    bump = to.bump; body = to.body; bodyKey = stepKey(to);
+    applyLook(); applyMotion();
+  }
 
   function refresh(): void {
     if (fields.status) fields.status.textContent = statusLine(loaded && model?.visible === true, failed, garments, hasBelly, modelIndex) + (hooks.skin === 'ktx2' ? ' · KTX2 skin' : '') + (wantedOutfit !== null ? ' · loading outfit…' : '');
@@ -374,8 +429,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     if (fields[SARAH_LAB_FIELD.bodyNote]) fields[SARAH_LAB_FIELD.bodyNote].textContent = loaded && !shaped.length ? 'this model has no shape fields: TILT and SIZE work, the rest are in v2-body' : '';
     const lit = (b: HTMLButtonElement | undefined, on: boolean) => {
       if (!b) return;
-      b.style.background = on ? 'rgba(212,168,83,0.92)' : 'rgba(16,20,26,0.72)';
-      b.style.color = on ? '#15110a' : '#e8e2d8';
+      b.setAttribute('aria-pressed', String(on));
+      b.style.background = on ? 'var(--sl-on,#806020)' : 'var(--sl-btn,#151b23)';
+      b.style.borderColor = on ? 'var(--sl-accent,#d4a853)' : 'var(--sl-btn-line,#ffffff30)';
     };
     for (const k of BREAST_DIMENSIONS) lit(buttons[`link-${k}`], linked.has(k));
     if (buttons.linkAll) { const all = BREAST_DIMENSIONS.every((k) => linked.has(k)); buttons.linkAll.textContent = all ? 'UNLINK W·H·D' : 'LINK W·H·D'; lit(buttons.linkAll, all); }
@@ -383,7 +439,6 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     lit(buttons.walk, pose === 'walk');
     lit(buttons.sit, pose === 'sit');
     lit(buttons.tpose, pose === 'tpose');
-    lit(buttons.turn, turning);
     lit(buttons.ranges, rangesShown);
     lit(buttons['groupLock-belly'], randomRules.groups.includes('belly'));
     lit(buttons['groupLock-breasts'], randomRules.groups.includes('breasts'));
@@ -396,6 +451,14 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       buttons.refine.textContent = refineLine(refine);
       lit(buttons.refine, refine);
     }
+    noteBody();
+    for (const v of QUICK_SIZES) lit(buttons[`size${v}`], bump === v);
+    for (const [b, can] of [[buttons.undoBody, !!bodyHistory?.canUndo || bodyTimer !== null], [buttons.redoBody, !!bodyHistory?.canRedo && bodyTimer === null]] as const) if (b) b.disabled = !can;
+    const yaw = ((orbit.yaw % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+    for (const a of VIEW_ANGLES) { const b = buttons[`view-${a.id}`]; if (b) b.setAttribute('aria-pressed', String(!turning && Math.abs(Math.atan2(Math.sin(yaw - a.yaw), Math.cos(yaw - a.yaw))) < 0.03)); }
+    if (buttons.turn) buttons.turn.setAttribute('aria-pressed', String(turning));
+    if (buttons.theme) buttons.theme.textContent = theme === 'light' ? '☾ DARK' : '☀ LIGHT';
+    if (nameLine) nameLine.textContent = characters?.name().trim() || 'Sarah';
   }
 
   /** The bump's weight, every frame: its resting tilt and where the spring has it. */
@@ -624,17 +687,10 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   function buildHud(): void {
     const root = document.createElement('div');
     root.dataset.role = SARAH_LAB_HUD_ROLE;
-    // UPRIGHT ON A PHONE (Joshua, 2026-10-20: "allow both portraits and landscape views", then "maybe optimize UI for
-    // portrait better... tabs or buttons similar to the storm tracker at the bottom"): held portrait, the controls
-    // are sorted into tabs along the bottom (uprightTabs.ts) and the title keeps to one line between BACK and the
-    // corner; the camera frames her above what the controls cover (frame()). Landscape is as it was.
-    const upright = document.createElement('style');
-    upright.textContent = `@media (orientation: portrait) {
-      [data-role="${SARAH_LAB_HUD_ROLE}"] .slab-info { max-width: calc(100vw - 200px) !important; }
-      [data-role="${SARAH_LAB_HUD_ROLE}"] .slab-info > div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    }`;
-    root.appendChild(upright);
-    root.style.cssText = 'position:absolute;inset:0;font:600 13px system-ui,sans-serif;color:#e8e2d8;touch-action:none;user-select:none';
+    // THE STUDIO (Joshua, 2026-10-23: "Use the new UI look, but let's keep both themes like a dark/light color"): the
+    // controls are built here as they always were, each marked with the section it belongs to (`data-tab`), and
+    // studioLayout.ts sorts them into the inspector, rail and stage at the end of this function
+    root.style.cssText = 'position:absolute;inset:0;font:600 13px system-ui,sans-serif;color:var(--sl-ink,#e8e2d8);touch-action:none;user-select:none;-webkit-user-select:none';
     // the orbit: the whole screen under the controls
     root.addEventListener('pointerdown', (e) => {
       if ((e.target as HTMLElement).closest('button,input,select,summary')) return;
@@ -673,36 +729,35 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     root.addEventListener('pointercancel', up);
     root.addEventListener('wheel', (e) => { e.preventDefault(); zoom(Math.exp(e.deltaY * 0.001)); }, { passive: false });
 
-    const panel = 'position:absolute;display:flex;gap:8px;';
     const btn = (label: string, action: string, onClick: () => void) => {
       const b = document.createElement('button');
       b.textContent = label;
       b.dataset.action = action;
-      b.style.cssText = 'padding:10px 14px;border-radius:10px;border:1px solid rgba(255,255,255,0.18);background:rgba(16,20,26,0.72);color:#e8e2d8;font:700 13px system-ui,sans-serif;letter-spacing:.06em';
+      b.type = 'button';
+      b.style.cssText = 'padding:9px 12px;border-radius:10px;border:1px solid var(--sl-btn-line,#ffffff30);background:var(--sl-btn,#151b23);color:var(--sl-ink,#e8e2d8);font:700 12px system-ui,sans-serif;letter-spacing:.05em;cursor:pointer';
       b.addEventListener('click', (e) => { e.stopPropagation(); onClick(); refresh(); });
       return b;
     };
-    const back = btn('BACK', SARAH_LAB_ACTION.back, () => hooks.onBack());
-    back.style.cssText += ';position:absolute;left:max(12px,env(safe-area-inset-left));top:12px';
-    root.appendChild(back);
+    const back = btn('‹ BACK', SARAH_LAB_ACTION.back, () => hooks.onBack());
 
     const poses = document.createElement('div');
     poses.className = 'slab-poses';
-    poses.dataset.tab = 'pose'; poses.dataset.uprightWhole = '';
-    poses.style.cssText = `${panel}left:max(12px,env(safe-area-inset-left));bottom:16px`;
+    poses.dataset.tab = 'pose';
+    poses.style.cssText = 'display:grid;grid-template-columns:repeat(4,1fr);gap:6px';
     for (const [p, label, action] of [['stand', 'STAND', SARAH_LAB_ACTION.stand], ['walk', 'WALK', SARAH_LAB_ACTION.walk], ['sit', 'SIT', SARAH_LAB_ACTION.sit], ['tpose', 'T-POSE', SARAH_LAB_ACTION.tpose]] as const) {
       buttons[p] = btn(label, action, () => {
         pose = p;
         if (p === 'tpose' && SARAH_LAB_MODELS[modelIndex].id !== 'v1') { armsDeg = 90; armsOverride = true; }
         applyLook(); refresh();
       });
+      buttons[p].style.padding = '9px 2px'; buttons[p].style.minWidth = '0';
       poses.appendChild(buttons[p]);
     }
     root.appendChild(poses);
 
     const right = document.createElement('div');
+    // every control is built into this, marked with its section, and moved to that section when the studio is laid out
     right.className = 'slab-panel';
-    right.style.cssText = `${panel}flex-direction:column;align-items:stretch;right:max(12px,env(safe-area-inset-right));top:12px;width:min(230px,40vw);padding:10px;border-radius:12px;background:rgba(10,13,18,0.66);border:1px solid rgba(255,255,255,0.1)`;
     const slider = (field: string, value: number, onInput: (v: number) => void, max = 100, tab = 'body') => {
       const label = document.createElement('div');
       label.dataset.tab = tab;
@@ -714,13 +769,24 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       input.min = '0';
       input.max = String(max);
       input.value = String(value);
-      input.style.cssText = 'width:100%;accent-color:#d4a853;height:28px';
+      input.style.cssText = 'width:100%;accent-color:var(--sl-accent,#d4a853);height:28px';
       input.dataset.tab = tab;
       input.addEventListener('input', () => { onInput(Number(input.value)); applyLook(); refresh(); });
       right.append(label, input);
       return input;
     };
     bumpInput = slider(SARAH_LAB_FIELD.bump, bump, (v) => { bump = v; }, BUMP_MAX_PERCENT);
+    {
+      // QUICK SIZES (from the Character Studio preview): the five sizes the belly is keyed at, one tap each
+      const sizes = document.createElement('div'); sizes.dataset.tab = 'body';
+      sizes.style.cssText = 'display:grid;grid-template-columns:repeat(5,1fr);gap:4px;margin-top:-2px';
+      for (const v of QUICK_SIZES) {
+        const b = btn(`${v}%`, `${SARAH_LAB_ACTION.quickSize}${v}`, () => { bump = v; applyLook(); applyMotion(); });
+        b.style.padding = '5px 0'; b.style.fontSize = '11px';
+        buttons[`size${v}`] = b; sizes.appendChild(b);
+      }
+      right.appendChild(sizes);
+    }
     {
       // the bump's own lock and random range (it is in the BELLY group)
       const spec = BODY_RANDOM_SPECS.find((x) => x.key === 'bump')!;
@@ -732,7 +798,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     slider(SARAH_LAB_FIELD.fingers, curl, (v) => { curl = v; }, 100, 'pose');
     armsInput = slider(SARAH_LAB_FIELD.arms, armsDeg, (v) => { armsDeg = v; armsOverride = true; }, 90, 'pose');
     // a painted shirt's length, for every painted shirt she puts on (its drape follows: tunicDrape.ts)
-    shirtLengthInput = slider(SARAH_LAB_FIELD.shirtLength, Math.round(DEFAULT_SHIRT_LENGTH * 100), (v) => { fabric?.setShirtLength(v / 100); }, 100, 'clothes');
+    shirtLengthInput = slider(SARAH_LAB_FIELD.shirtLength, Math.round(DEFAULT_SHIRT_LENGTH * 100), (v) => { fabric?.setShirtLength(v / 100); }, 100, 'outfit');
     const row = document.createElement('div');
     row.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap';
     buttons.outfit = btn(outfitLine(outfit), SARAH_LAB_ACTION.outfit, () => { wornFrom = null; pendingClothes = null; nextSource = null; dress(nextOutfit(wantedOutfit ?? outfit, garments)); });
@@ -754,8 +820,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     buttons.turn = btn('TURN', SARAH_LAB_ACTION.turn, () => { turning = !turning; });
     // a nudge up, as a hop would: the bump lags, drops and settles
     buttons.bounce = btn('BOUNCE', SARAH_LAB_ACTION.bounce, () => { spring.vy += 0.3; breastSpring.vy += 0.3; });
-    for (const b of [buttons.model, buttons.refine, buttons.bellyCurve, buttons.outfit, buttons.armSide, buttons.turn, buttons.bounce]) { b.style.padding = '8px 10px'; b.style.fontSize = '12px'; row.appendChild(b); }
-    for (const [b, tab] of [[buttons.model, 'body'], [buttons.refine, 'body'], [buttons.bellyCurve, 'body'], [buttons.outfit, 'clothes'], [buttons.armSide, 'pose'], [buttons.turn, 'camera'], [buttons.bounce, 'pose']] as const) b.dataset.tab = tab;
+    for (const b of [buttons.model, buttons.refine, buttons.bellyCurve, buttons.outfit, buttons.armSide, buttons.bounce]) { b.style.padding = '8px 10px'; b.style.fontSize = '12px'; row.appendChild(b); }
+    for (const [b, tab] of [[buttons.model, 'body'], [buttons.refine, 'body'], [buttons.bellyCurve, 'body'], [buttons.outfit, 'outfit'], [buttons.armSide, 'pose'], [buttons.bounce, 'pose']] as const) b.dataset.tab = tab;
     right.appendChild(row);
     // BELLY SHAPE and BREAST SHAPE: each control a slider with its own reset, relative to the size shown
     const setBody = (next: BodyShape) => { body = next; applyLook(); applyMotion(); refresh(); };
@@ -885,13 +951,18 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         refresh();
       },
       putOnClothes: (saved, from, character) => putOnSaved(saved, from, { kind: 'personal', name: character }),
+      thumbnail: () => thumbnail(),
       download: (name, text) => {
         const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
         const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
         setTimeout(() => URL.revokeObjectURL(url), 10_000);
       },
     });
-    characters.element.dataset.tab = 'body';
+    characters.element.dataset.tab = 'library';
+    characters.element.dataset.slWhole = '';
+    (characters.element as HTMLDetailsElement).open = true;
+    // the section's own title says CHARACTERS: the drawer's is not needed there
+    characters.element.querySelector('summary')?.style.setProperty('display', 'none');
     right.appendChild(characters.element);
     // BREAST & NAVEL DETAIL through her clothes: the outfit editor's own setting, shown here too (filled in once the
     // editor exists, below), so the BODY tab and BODY PAINT can never disagree (Joshua, 2026-10-22)
@@ -912,6 +983,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       body: (): SavedBody => ({ model: SARAH_LAB_MODELS[modelIndex].id, bump, shape: serializeShape(body), refine, random: randomRules }),
       characterName: () => characters?.name() ?? '',
       builtins: () => OUTFITS.filter((o) => (o.paint ? recovered : o.name !== 'none')).map((o) => o.name),
+      wearable: () => offeredOutfits(garments).map((i) => ({ name: OUTFITS[i].name, thumb: assetUrl(outfitThumbPath(OUTFITS[i].name)) })),
+      thumbnail: () => thumbnail(),
       wearBuiltin: (name) => {
         const index = OUTFITS.findIndex((o) => o.name === name);
         if (index < 0) return;
@@ -931,16 +1004,12 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     note.style.cssText = 'font-size:10px;opacity:.7';
     fields[SARAH_LAB_FIELD.bodyNote] = note;
     right.appendChild(note);
-    right.style.maxHeight = 'calc(100% - 85px)';
-    right.style.overflowY = 'auto';
-    right.style.touchAction = 'pan-y';
-    for (const event of ['pointerdown', 'pointermove', 'pointerup', 'wheel']) right.addEventListener(event, e => e.stopPropagation());
     texturePanel = garmentTexturePanel(() => skinned, (garment) => {
       const next = OUTFITS.findIndex(look => look.garments.includes(garment));
       if (next >= 0 && next !== outfit) dress(next);
       else { applyLook(); refresh(); }
     });
-    texturePanel.element.dataset.tab = 'clothes';
+    texturePanel.element.dataset.tab = 'fabric';
     const scaleOf = new THREE.Vector3();
     fabric = fabricPanel({
       meshes: () => skinned,
@@ -953,7 +1022,14 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       view: () => ({ camera, ...ctx.renderer.size() }),
       describe: () => ({ base: SARAH_LAB_MODELS[modelIndex].id, outfit: OUTFITS[outfit].name }),
       reshape: () => { applyLook(); },
-      saveSection: () => outfits?.element ?? null,
+      // saving an outfit lives in the OUTFIT section now: the editor's SAVE space points there
+      saveSection: () => {
+        const box = document.createElement('div'); box.style.cssText = 'display:flex;flex-direction:column;gap:6px;font-size:11px;line-height:1.4';
+        const note = document.createElement('div'); note.textContent = 'Outfits are saved, named and worn in OUTFIT, with a picture of her in each.';
+        const go = btn('OPEN OUTFIT', studioSectionAction('outfit'), () => studio?.show('outfit'));
+        box.append(note, go);
+        return box;
+      },
       changed: () => outfits?.changed(),
       navelHint: () => {
         // her navel: the vertex her own navel morphs move most
@@ -987,7 +1063,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         return mapBody({ skinIndex: four(si), skinWeight: four(sw), parents: rig.bind.map(j => j.parent), joints: measure.joints, restNormal: normal, restPosition: position, jointAt });
       },
     });
-    fabric.element.dataset.tab = 'clothes';
+    fabric.element.dataset.tab = 'fabric';
+    fabric.element.dataset.slWhole = '';
+    (fabric.element as HTMLDetailsElement).open = true;
     right.appendChild(fabric.element);
     builder = strapBuilder({
       body: () => skinned.find(m => !!m.geometry.getAttribute('_cloth_cover')) ?? null,
@@ -1012,36 +1090,163 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         step: () => { clock.paused = true; clock.step += 1 / 30; },
       },
     });
-    builder.element.dataset.tab = 'clothes';
+    builder.element.dataset.tab = 'build';
+    builder.element.dataset.slWhole = '';
+    (builder.element as HTMLDetailsElement).open = true;
     right.appendChild(builder.element);
     bodyDetail.appendChild(fabric.detailControl());
     right.appendChild(texturePanel.element);
-    root.appendChild(right);
-    // the CAMERA tab's own buttons: held upright only (landscape has the wheel and the pinch beside its panel)
-    const cameraOnly = document.createElement('div');
-    cameraOnly.style.display = 'none';
-    for (const [label, action, go] of [['ZOOM −', SARAH_LAB_ACTION.zoomOut, () => zoom(1.25)], ['ZOOM +', SARAH_LAB_ACTION.zoomIn, () => zoom(0.8)], ['RESET VIEW', SARAH_LAB_ACTION.resetView, () => { orbit.yaw = ORBIT_START.yaw; orbit.pitch = ORBIT_START.pitch; orbit.distance = ORBIT_START.distance; orbit.target.copy(ORBIT_START.target); turning = false; }]] as const) {
-      const b = btn(label, action, go); b.style.padding = '8px 10px'; b.style.fontSize = '12px'; b.dataset.tab = 'camera'; b.dataset.uprightOnly = ''; cameraOnly.appendChild(b);
+    // the outfit cards and saves (outfitPanel.ts): the OUTFIT section's own, not a space inside the fabric editor
+    outfits.element.dataset.tab = 'outfit';
+    right.appendChild(outfits.element);
+    // the view: zoom and the start view sit with the poses (the angles float over her, below)
+    for (const [label, action, go] of [['ZOOM −', SARAH_LAB_ACTION.zoomOut, () => zoom(1.25)], ['ZOOM +', SARAH_LAB_ACTION.zoomIn, () => zoom(0.8)], ['RESET VIEW', SARAH_LAB_ACTION.resetView, resetView]] as const) {
+      const b = btn(label, action, go); b.style.padding = '8px 10px'; b.style.fontSize = '12px'; b.dataset.tab = 'pose'; right.appendChild(b);
     }
-    root.appendChild(cameraOnly);
+    root.appendChild(right);
 
+    // ------------------------------------------------------------ the studio
+    studio = studioLayout(root, {
+      first: 'body',
+      theme,
+      eyebrow: 'Sarah Lab',
+      changed: () => {
+        // an editor listens to her only while its section is open: a finger on her otherwise turns her
+        fabric?.setActive(studio?.open === 'fabric' && !studio.folded);
+        builder?.setActive(studio?.open === 'build' && !studio.folded);
+        const size = ctx.renderer.size(); frame(size.width, size.height, false); refresh();
+      },
+    });
+    right.remove();
+    studio.section('outfit').prepend(outfits.element);
+
+    // the stage's top row: BACK, her name and the room's status line, then UNDO / REDO for her body and the theme
+    const pill = () => { const p = document.createElement('div'); p.className = 'sl-pill'; return p; };
+    const pillButton = (label: string, action: string, onClick: () => void, title = '') => {
+      const b = document.createElement('button'); b.type = 'button'; b.textContent = label; b.dataset.action = action; if (title) { b.title = title; b.setAttribute('aria-label', title); }
+      b.addEventListener('click', (e) => { e.stopPropagation(); onClick(); refresh(); });
+      return b;
+    };
+    const backPill = pill(); back.removeAttribute('style'); backPill.appendChild(back);
     const info = document.createElement('div');
     info.className = 'slab-info';
-    info.style.cssText = 'position:absolute;top:14px;left:50%;transform:translateX(-50%);text-align:center;text-shadow:0 1px 3px #000;opacity:.92;pointer-events:none;max-width:40vw';
-    const title = document.createElement('div');
-    title.textContent = 'Sarah Lab · dev';
-    title.style.cssText = 'font:700 14px Georgia,serif;letter-spacing:.04em';
+    info.style.cssText = 'flex:1;min-width:0;pointer-events:none;padding:2px 2px 0';
+    const eyebrow = document.createElement('div');
+    eyebrow.textContent = 'CHARACTER STUDIO';
+    eyebrow.style.cssText = 'font:700 8.5px system-ui,sans-serif;letter-spacing:.18em;color:var(--sl-muted,#9aa0a8)';
+    nameLine = document.createElement('div');
+    nameLine.style.cssText = 'font:750 17px system-ui,sans-serif;letter-spacing:-.02em;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
     fields.status = document.createElement('div');
     fields.status.dataset.field = SARAH_LAB_FIELD.status;
-    fields.status.style.cssText = 'font-weight:400;font-size:11px;opacity:.8';
-    info.append(title, fields.status);
-    root.appendChild(info);
+    fields.status.style.cssText = 'font:500 10px system-ui,sans-serif;color:var(--sl-muted,#9aa0a8);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+    info.append(eyebrow, nameLine, fields.status);
+    const history = pill();
+    buttons.undoBody = pillButton('↶', SARAH_LAB_ACTION.undoBody, () => travelBody(-1), 'Undo body change');
+    buttons.redoBody = pillButton('↷', SARAH_LAB_ACTION.redoBody, () => travelBody(1), 'Redo body change');
+    history.append(buttons.undoBody, buttons.redoBody);
+    const themePill = pill();
+    buttons.theme = pillButton('', SARAH_LAB_ACTION.theme, () => applyTheme(otherTheme(theme)), 'Light or dark');
+    themePill.appendChild(buttons.theme);
+    studio.stage.top.append(backPill, info, history, themePill);
+    // the bottom row: the camera's angles, the start view and TURN
+    const views = pill();
+    for (const a of VIEW_ANGLES) {
+      buttons[`view-${a.id}`] = pillButton(a.label, `${SARAH_LAB_ACTION.view}${a.id}`, () => { orbit.yaw = a.yaw; orbit.pitch = ORBIT_START.pitch; turning = false; });
+      views.appendChild(buttons[`view-${a.id}`]);
+    }
+    views.appendChild(pillButton('⛶', SARAH_LAB_ACTION.fit, resetView, 'Whole figure'));
+    buttons.turn.removeAttribute('style'); buttons.turn.textContent = '⟳'; buttons.turn.title = 'Turn her'; buttons.turn.setAttribute('aria-label', 'Turn her');
+    views.appendChild(buttons.turn);
+    studio.stage.bottom.appendChild(views);
+    // the corner: a PHOTO of her as she is on screen
+    const photoPill = pill();
+    buttons.photo = pillButton('▣', SARAH_LAB_ACTION.photo, () => { void takePhoto(); }, 'Save a picture');
+    photoPill.appendChild(buttons.photo);
+    studio.stage.corner.appendChild(photoPill);
     card = loadingCard(document, () => retry());
-    root.appendChild(card.element);
+    studio.stage.element.appendChild(card.element);
     ctx.uiLayer.appendChild(root);
     hud = root;
-    upright_ = uprightLayout(root, () => { right.style.display = upright_?.portrait ? 'none' : 'flex'; fabric?.setActive(!upright_?.portrait || upright_.open === 'clothes'); builder?.setActive(!upright_?.portrait || upright_.open === 'clothes'); const size = ctx.renderer.size(); frame(size.width, size.height, false); refresh(); });
+    applyTheme(theme);
     refresh();
+  }
+  function resetView(): void { orbit.yaw = ORBIT_START.yaw; orbit.pitch = ORBIT_START.pitch; orbit.distance = ORBIT_START.distance; orbit.target.copy(ORBIT_START.target); turning = false; }
+  /** LIGHT or DARK (studioTheme.ts): the panels, and the stage behind her. Remembered on this device. */
+  function applyTheme(next: StudioTheme): void {
+    theme = next;
+    studio?.setTheme(next);
+    const look = THEME_STAGE[next];
+    (three.background as THREE.Color).setHex(look.background);
+    (floor.material as THREE.MeshStandardMaterial).color.setHex(look.floor);
+    (ring.material as THREE.MeshBasicMaterial).color.setHex(look.rim);
+    storeTheme(localStore(), next);
+  }
+  /** Resolves after `n` more frames of the room (the bake below waits on the paint and the fabric to settle). */
+  const frameWaiters: { left: number; done: () => void }[] = [];
+  const frames = (n: number) => new Promise<void>((done) => frameWaiters.push({ left: n, done }));
+  /**
+   * THE BUILT-IN OUTFITS' PICTURES, for `npm run bake:outfits` (scripts/bakeOutfitThumbs.mjs), which opens the room with
+   * `?bake=outfits`: each outfit the room offers is put on her in turn and pictured the way a saved one is.
+   */
+  async function bakeOutfitPictures(): Promise<{ name: string; path: string; picture: string | null }[]> {
+    const out: { name: string; path: string; picture: string | null }[] = [];
+    for (const i of offeredOutfits(garments)) {
+      wornFrom = null; pendingClothes = null; nextSource = null;
+      dress(i);
+      for (let tries = 0; tries < 600 && !(outfit === i && wantedOutfit === null && model?.visible); tries++) await frames(1);
+      await frames(12);
+      out.push({ name: OUTFITS[i].name, path: outfitThumbPath(OUTFITS[i].name), picture: thumbnail() });
+    }
+    return out;
+  }
+  /**
+   * A CARD'S PICTURE (Joshua, 2026-10-23: "we could have little screenshots for the outfit"): her, head to foot, from
+   * the front three-quarter, whatever the view on screen -- so every card shows her the same way -- small enough to
+   * keep in a save (a 3:4 JPEG of THUMB_SIZE). Null before she is on.
+   */
+  function thumbnail(): string | null {
+    const bodyMesh = skinned.find(m => !!m.geometry.getAttribute('_cloth_cover')) ?? skinned[0];
+    if (!model?.visible || !bodyMesh) return null;
+    model.updateMatrixWorld(true);
+    // her height from her own skeleton as posed (the floor up to a head's width over her highest joint, so she is whole
+    // sitting as well as standing); her width a fixed allowance about her middle, as her arms may be out
+    const at = new THREE.Vector3(), mid = new THREE.Vector3();
+    let low = 0, high = -Infinity;
+    for (const bone of bodyMesh.skeleton.bones) { bone.getWorldPosition(at); low = Math.min(low, at.y); high = Math.max(high, at.y); mid.add(at); }
+    if (!Number.isFinite(high)) return null;
+    mid.divideScalar(Math.max(1, bodyMesh.skeleton.bones.length));
+    const box = new THREE.Box3(new THREE.Vector3(mid.x - 0.3 * M, low, mid.z - 0.28 * M), new THREE.Vector3(mid.x + 0.3 * M, high + 0.1 * M, mid.z + 0.28 * M));
+    const size = ctx.renderer.size(), lens = new THREE.PerspectiveCamera(30, 1, 1, 10);
+    frameBox(lens, box, { yaw: 0.5, pitch: 0.06, renderAspect: size.width / Math.max(1, size.height), fitAspect: THUMB_SIZE.width / THUMB_SIZE.height, margin: 1.04 });
+    // the floor runs on behind her: the far plane reaches past it, not just past her
+    lens.far = lens.position.distanceTo(box.getCenter(new THREE.Vector3())) + 3 * M; lens.updateProjectionMatrix();
+    const picture = shootDataUrl(ctx.renderer.gl, three, lens, { width: THUMB_SIZE.width, height: THUMB_SIZE.height, quality: 0.8 });
+    ctx.renderer.render(three, camera);
+    return picture;
+  }
+  /**
+   * PHOTO (from the Character Studio preview): what the stage shows of her, at the screen's full resolution, handed to
+   * the share sheet where there is one (an iPhone home-screen app) and downloaded elsewhere.
+   */
+  async function takePhoto(): Promise<void> {
+    const gl = ctx.renderer.gl, whole = shoot(gl, three, camera);
+    ctx.renderer.render(three, camera);
+    if (!whole || !studio) return;
+    const canvasRect = gl.domElement.getBoundingClientRect(), stageRect = studio.stage.element.getBoundingClientRect();
+    const k = whole.width / Math.max(1, canvasRect.width);
+    const x = Math.max(0, Math.round((stageRect.left - canvasRect.left) * k)), y = Math.max(0, Math.round((stageRect.top - canvasRect.top) * k));
+    const w = Math.min(whole.width - x, Math.round(stageRect.width * k)), h = Math.min(whole.height - y, Math.round(stageRect.height * k));
+    const crop = document.createElement('canvas'); crop.width = Math.max(1, w); crop.height = Math.max(1, h);
+    crop.getContext('2d')?.drawImage(whole, x, y, w, h, 0, 0, crop.width, crop.height);
+    const blob = await new Promise<Blob | null>((resolve) => crop.toBlob(resolve, 'image/jpeg', 0.92));
+    if (!blob) return;
+    const name = `${(characters?.name() || 'sarah').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-') || 'sarah'}-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.jpg`;
+    // a share sheet that will not open this late after the tap: the picture is downloaded instead
+    if (await savePicture(blob, name) === 'failed') {
+      const url = URL.createObjectURL(blob), a = document.createElement('a');
+      a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    }
   }
   function zoom(factor: number): void {
     orbit.distance = Math.min(4.5 * M, Math.max(0.45 * M, orbit.distance * factor));
@@ -1234,12 +1439,15 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       buildHud();
       frame(size.width, size.height);
       loadSarah();
+      // a bake of the built-in outfits' card pictures asks for it by address (scripts/bakeOutfitThumbs.mjs)
+      if (new URLSearchParams(globalThis.location?.search ?? '').get('bake') === 'outfits') (globalThis as unknown as Record<string, unknown>).__sarahLabBakeOutfits = bakeOutfitPictures;
     },
 
     update(frame: FrameInfo) {
       if (readyIn > 0 && --readyIn === 0 && readyBatch === batch) meter.ready();
+      for (let k = frameWaiters.length - 1; k >= 0; k--) if (--frameWaiters[k].left <= 0) frameWaiters.splice(k, 1)[0].done();
       if (card) {
-        const covered = `${Math.round(upright_?.covered() ?? 0)}px`;
+        const covered = `${Math.round(studio?.stage.bottom.getBoundingClientRect().height ?? 0) + 10}px`;
         if (card.element.style.getPropertyValue(LOADING_COVERED_VAR) !== covered) card.element.style.setProperty(LOADING_COVERED_VAR, covered);
         card.show(meter.snapshot(), cardPlace);
       }

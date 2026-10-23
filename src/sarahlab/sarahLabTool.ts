@@ -92,6 +92,15 @@ export type SarahLabPose = 'stand' | 'walk' | 'sit' | 'tpose';
 
 export const SARAH_LAB_ACTION = Object.freeze({
   back: 'sarahlab:back',
+  /** `${quickSize}<percent>`: the bump at one of its keyed sizes */
+  quickSize: 'sarahlab:size:',
+  undoBody: 'sarahlab:body-undo',
+  redoBody: 'sarahlab:body-redo',
+  theme: 'sarahlab:theme',
+  /** `${view}<front|three-quarter|side|back>`: the camera at that angle */
+  view: 'sarahlab:view:',
+  fit: 'sarahlab:view-fit',
+  photo: 'sarahlab:photo',
   stand: 'sarahlab:stand',
   walk: 'sarahlab:walk',
   sit: 'sarahlab:sit',
@@ -271,16 +280,26 @@ function wantedGarments(index: number, available: readonly Garment[]): Garment[]
 export function nextOutfit(index: number, available: readonly Garment[] = []): number {
   for (let step = 1; step <= OUTFITS.length; step += 1) {
     const next = (index + step) % OUTFITS.length;
-    const wanted = wantedGarments(next, available);
-    if (OUTFITS[next].paint && available.length && !paintedOutfitsAvailable(available)) continue;
-    // where painted outfits are, the modelled clothes that need their own files are kept but never offered, so never
-    // downloaded (Joshua, 2026-10-22: "keep the modeled clothing, but not load them"); the bikini stays (its design is
-    // protected, and its top is in her own file)
-    if (paintedOutfitsAvailable(available) && recoveredPartsFor(wanted).some((part) => part !== 'bottom')) continue;
-    if (!available.length || wanted.every((g) => available.includes(g))) return next;
+    if (offered(next, available)) return next;
   }
   return (index + 1) % OUTFITS.length;
 }
+/** Whether a model offering `available` offers outfit `index` (what OUTFIT steps through, and the WEAR cards show). */
+function offered(index: number, available: readonly Garment[]): boolean {
+  const wanted = wantedGarments(index, available);
+  if (OUTFITS[index].paint && available.length && !paintedOutfitsAvailable(available)) return false;
+  // where painted outfits are, the modelled clothes that need their own files are kept but never offered, so never
+  // downloaded (Joshua, 2026-10-22: "keep the modeled clothing, but not load them"); the bikini stays (its design is
+  // protected, and its top is in her own file)
+  if (paintedOutfitsAvailable(available) && recoveredPartsFor(wanted).some((part) => part !== 'bottom')) return false;
+  return !available.length || wanted.every((g) => available.includes(g));
+}
+/** Every outfit a model offering `available` offers, in OUTFITS order, without 'none' (a blank outfit is NEW OUTFIT's). */
+export function offeredOutfits(available: readonly Garment[]): number[] {
+  return OUTFITS.map((_, i) => i).filter((i) => OUTFITS[i].name !== 'none' && offered(i, available));
+}
+/** Where a built-in outfit's baked card picture is served (`scripts/bakeOutfitThumbs.mjs` writes it). */
+export const outfitThumbPath = (name: string): string => `sarahlab/outfits/${name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}.jpg`;
 /**
  * THE v2 OUTFIT (Joshua, 2026-10-16/17): a white tank over grey maternity leggings, in two
  * rises, over the belly and under it. Each edge is a bound trim, its own primitive named

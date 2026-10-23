@@ -77,8 +77,12 @@ export function swatchRect(layout: FabricLayout, index: number, size: number): R
   return { x: 0, y: Math.round(i * strip + strip * 0.3), w: size, h: Math.max(1, Math.round(strip * 0.4)) };
 }
 
-/** What a choice is: a family's colour, or nothing (the garment's own material). */
-export interface FabricPick { readonly family: FabricFamilyId; readonly colour: number }
+/**
+ * What a choice is: a family's colour, or nothing (the garment's own material). A CUSTOM colour (Joshua, 2026-10-23,
+ * from the Character Studio preview) is `tint`: the family's White swatch dyed that colour (`fabricTint.ts`), with
+ * `colour` kept at White.
+ */
+export interface FabricPick { readonly family: FabricFamilyId; readonly colour: number; readonly tint?: string }
 
 export interface FabricChoice {
   readonly fabric: FabricPick | null;

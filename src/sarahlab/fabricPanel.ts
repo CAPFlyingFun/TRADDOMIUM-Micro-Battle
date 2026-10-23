@@ -37,6 +37,7 @@ import { DEFAULT_LAYER_DETAIL, resolveDetail, type LayerDetail, type ResolvedDet
 import { BRUSH_RANGE_CM, BodyPaint, PAINT_LAYER_COUNT, packLayer } from './bodyPaint';
 import { BODY_REGIONS, REGION_GROUPS, groupOf, groupRegions, type BodyMap, type RegionSide } from './bodyRegions';
 import { CleavageBridge } from './cleavageBridge';
+import { TINT_BASE_COLOUR, readTint, tintLabel, tintPixels } from './fabricTint';
 import { HEM_LIFT_FLAT, HEM_LIFT_RIBBED, TunicDrape } from './tunicDrape';
 import { AUTO_DETAIL, type DetailOverride, type SavedClothes } from './characterSaves';
 import {
@@ -55,6 +56,8 @@ export const FABRIC_ACTION = Object.freeze({
   isolate: 'sarahlab:fabric:isolate',
   family: (id: FabricFamilyId | 'original') => `sarahlab:fabric:family:${id}`,
   colour: (i: number) => `sarahlab:fabric:colour:${i}`,
+  /** The CUSTOM colour: any colour, dyed into the family's White (fabricTint.ts). */
+  custom: 'sarahlab:fabric:colour:custom',
   trimFamily: (id: FabricFamilyId) => `sarahlab:fabric:trim-family:${id}`,
   trimColour: (i: number) => `sarahlab:fabric:trim-colour:${i}`,
   match: 'sarahlab:fabric:match',
@@ -179,9 +182,9 @@ export interface FabricPanel {
   dispose(): void;
 }
 
-const BTN = 'min-height:40px;padding:6px 9px;border:1px solid #ffffff30;border-radius:8px;background:#151b23;color:#e8e2d8;font:600 11px system-ui';
-const ON = '#806020', OFF = '#151b23';
-const GOLD = '#d4a853';
+const BTN = 'min-height:40px;padding:6px 9px;border:1px solid var(--sl-btn-line,#ffffff30);border-radius:8px;background:var(--sl-btn,#151b23);color:var(--sl-ink,#e8e2d8);font:600 11px system-ui';
+const ON = 'var(--sl-on,#806020)', OFF = 'var(--sl-btn,#151b23)';
+const GOLD = 'var(--sl-accent,#d4a853)';
 
 /** What kind of piece a modelled garment is, by its material name. */
 function garmentKind(name: string): Piece['kind'] {
@@ -236,17 +239,17 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
   };
   /** A button that asks once: the first tap arms it for a few seconds, the second does it. */
   const twoTap = (label: string, armed: string, action: string, onConfirm: () => void) => {
-    const reset = () => { b.dataset.armed = ''; b.textContent = label; b.style.borderColor = '#ffffff30'; };
+    const reset = () => { b.dataset.armed = ''; b.textContent = label; b.style.borderColor = 'var(--sl-btn-line,#ffffff30)'; };
     const b = button(label, action, () => {
       if (b.dataset.armed === '1') { reset(); onConfirm(); return; }
-      b.dataset.armed = '1'; b.textContent = armed; b.style.borderColor = '#d46a53';
+      b.dataset.armed = '1'; b.textContent = armed; b.style.borderColor = 'var(--sl-danger,#d46a53)';
       setTimeout(() => { if (b.dataset.armed === '1') reset(); }, 3000);
     });
     return b;
   };
 
   // ------------------------------------------------------------ the drawer
-  const panel = el('details', 'border-top:1px solid #ffffff25;padding-top:8px;touch-action:pan-y');
+  const panel = el('details', 'border-top:1px solid var(--sl-line,#ffffff20);padding-top:8px;touch-action:pan-y');
   panel.dataset.role = FABRIC_PANEL_ROLE;
   const summary = el('summary', 'cursor:pointer;padding:8px 0;font:700 12px system-ui;letter-spacing:.06em');
   const content = el('div', 'display:flex;flex-direction:column;gap:8px;padding:4px 0');
@@ -257,7 +260,7 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
   const pieceButtons = new Map<string, HTMLButtonElement>();
 
   // the workspaces
-  const spaces = el('div', 'display:grid;grid-template-columns:repeat(3,1fr);gap:4px;background:#0b0f14;border-radius:10px;padding:3px');
+  const spaces = el('div', 'display:grid;grid-template-columns:repeat(3,1fr);gap:4px;background:var(--sl-well,#0b0f14);border-radius:10px;padding:3px');
   const spaceButtons = new Map<EditorSpace, HTMLButtonElement>((['design', 'paint', 'save'] as const).map((s) => {
     const b = button(s === 'paint' ? 'BODY PAINT' : s.toUpperCase(), FABRIC_ACTION.space(s), () => setSpace(s));
     b.style.minHeight = '36px'; b.style.border = '0'; return [s, b];
@@ -291,10 +294,30 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
   const families = row(), colours = grid();
   const familyButtons = new Map<string, HTMLButtonElement>();
   familyButtons.set('original', button('ORIGINAL', FABRIC_ACTION.family('original'), () => set({ fabric: null })));
-  for (const f of FABRIC_FAMILIES) familyButtons.set(f.id, button(f.name.toUpperCase(), FABRIC_ACTION.family(f.id), () => set({ fabric: { family: f.id, colour: current().fabric?.colour ?? 0 } })));
+  // a custom colour stays when the family changes: the new family's White, dyed the same
+  for (const f of FABRIC_FAMILIES) familyButtons.set(f.id, button(f.name.toUpperCase(), FABRIC_ACTION.family(f.id), () => { const was = current().fabric; set({ fabric: { family: f.id, colour: was?.tint ? TINT_BASE_COLOUR : was?.colour ?? 0, ...(was?.tint ? { tint: was.tint } : {}) } }); }));
   families.append(...familyButtons.values());
   const colourButtons = Array.from({ length: 16 }, (_, i) => swatch(FABRIC_ACTION.colour(i), () => set({ fabric: { family: current().fabric?.family ?? 'jersey', colour: i } })));
   colours.append(...colourButtons);
+  // CUSTOM COLOUR (Joshua, 2026-10-23, from the Character Studio preview): the seventeenth swatch is the system's colour
+  // picker; what it picks dyes the family's White, so the knit stays the knit
+  const custom = el('label', 'position:relative;aspect-ratio:1;min-height:32px;border-radius:7px;border:2px solid transparent;box-sizing:border-box;overflow:hidden;cursor:pointer;'
+    + 'background:conic-gradient(#e53935,#fdd835,#43a047,#1e88e5,#8e24aa,#e53935)');
+  custom.dataset.action = FABRIC_ACTION.custom; custom.title = 'Any colour';
+  const customInput = el('input', 'position:absolute;inset:0;width:100%;height:100%;opacity:0;border:0;padding:0;cursor:pointer');
+  customInput.type = 'color'; customInput.dataset.field = 'fabric-custom-colour'; customInput.setAttribute('aria-label', 'Any colour');
+  let customTimer: ReturnType<typeof setTimeout> | null = null;
+  const pickCustom = () => {
+    const tint = readTint(customInput.value);
+    if (!tint) return;
+    set({ fabric: { family: current().fabric?.family ?? 'jersey', colour: TINT_BASE_COLOUR, tint } });
+  };
+  // the picker reports every move: a new dye is cut at most every 120 ms, and once more where it stops
+  customInput.addEventListener('input', () => { if (customTimer) clearTimeout(customTimer); customTimer = setTimeout(() => { customTimer = null; pickCustom(); }, 120); });
+  customInput.addEventListener('change', () => { if (customTimer) { clearTimeout(customTimer); customTimer = null; } pickCustom(); });
+  custom.addEventListener('click', (e) => e.stopPropagation());
+  custom.appendChild(customInput);
+  colours.append(custom);
   const trimBox = el('div', 'display:flex;flex-direction:column;gap:8px');
   const trimOwn = el('div', 'display:flex;flex-direction:column;gap:8px');
   const match = button('MATCH', FABRIC_ACTION.match, () => { const c = current(); set({ match: !c.match, trim: c.trim ?? c.fabric }); });
@@ -359,7 +382,7 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
     refreshTargets(); touched();
   }));
   const showRegions = button('SHOW REGIONS', FABRIC_ACTION.showRegions, () => { showingRegions = !showingRegions; overlay(); draw(); });
-  const regionsBox = el('details', 'border-top:1px solid #ffffff18;padding-top:4px');
+  const regionsBox = el('details', 'border-top:1px solid var(--sl-line,#ffffff20);padding-top:4px');
   const regionsHead = el('summary', 'cursor:pointer;font-size:11px;opacity:.8;padding:4px 0'); regionsHead.textContent = 'REGIONS · tap to fill or clear a whole region';
   const regionsShow = row(); regionsShow.append(showRegions);
   regionsBox.append(regionsHead, sides, regions, regionsShow);
@@ -370,7 +393,7 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
 
   // ---- DETAIL, shared with the BODY tab
   const detailViews: { draw(): void }[] = [];
-  const detailFold = el('details', 'border-top:1px solid #ffffff18;padding-top:4px');
+  const detailFold = el('details', 'border-top:1px solid var(--sl-line,#ffffff20);padding-top:4px');
   const detailHead = el('summary', 'cursor:pointer;font-size:11px;opacity:.8;padding:4px 0'); detailHead.textContent = 'BREAST & NAVEL DETAIL THROUGH CLOTHES';
 
   const status = el('div', 'font-size:11px;line-height:1.4;overflow-wrap:anywhere;opacity:.85');
@@ -546,7 +569,7 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
     return paint && paint.has(i) ? 'paint' : null;
   }
   function titleOf(i: number): string { const k = kindOf(i); return k ? KIND_TITLE[k] : `LAYER ${i + 1}`; }
-  function fabricName(c: FabricChoice): string { return c.fabric ? `${fabricFamily(c.fabric.family).name} ${colourName(c.fabric.family, c.fabric.colour).toLowerCase()}` : ''; }
+  function fabricName(c: FabricChoice): string { return c.fabric ? `${fabricFamily(c.fabric.family).name} ${c.fabric.tint ? tintLabel(c.fabric.tint) : colourName(c.fabric.family, c.fabric.colour).toLowerCase()}` : ''; }
   function pieces(): Piece[] {
     const out: Piece[] = [];
     for (let i = 0; i < PAINT_LAYER_COUNT; i++) {
@@ -578,7 +601,7 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
     if (gone || emptied) target = list[0]?.target ?? { kind: 'layer', index: 0 };
     pieceButtons.clear();
     pieceRow.replaceChildren(...list.map((p) => {
-      const b = el('button', 'flex:none;display:flex;flex-direction:column;align-items:flex-start;gap:1px;min-height:44px;max-width:160px;padding:5px 10px;border-radius:9px;border:1px solid #ffffff30;background:#151b23;color:#e8e2d8;text-align:left');
+      const b = el('button', 'flex:none;display:flex;flex-direction:column;align-items:flex-start;gap:1px;min-height:44px;max-width:160px;padding:5px 10px;border-radius:9px;border:1px solid var(--sl-btn-line,#ffffff30);background:var(--sl-btn,#151b23);color:var(--sl-ink,#e8e2d8);text-align:left');
       b.type = 'button'; b.dataset.action = FABRIC_ACTION.piece(p.id);
       const t = el('span', 'font:800 12px system-ui;letter-spacing:.06em'); t.textContent = p.title;
       const n = el('span', 'font:500 10px system-ui;opacity:.8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:140px'); n.textContent = p.name;
@@ -596,7 +619,7 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
     const selectedId = idOf(target);
     for (const [id, b] of pieceButtons) {
       const on = id === selectedId;
-      b.style.background = on ? '#3a2c10' : '#151b23'; b.style.borderColor = on ? GOLD : '#ffffff30'; b.setAttribute('aria-pressed', String(on));
+      b.style.background = on ? 'var(--sl-on-soft,#3a2c10)' : 'var(--sl-btn,#151b23)'; b.style.borderColor = on ? GOLD : 'var(--sl-btn-line,#ffffff30)'; b.setAttribute('aria-pressed', String(on));
     }
     for (const [s, b] of spaceButtons) press(b, s === space);
     designBox.style.display = space === 'design' ? 'flex' : 'none';
@@ -633,13 +656,21 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
     familyButtons.get('original')!.textContent = onLayer ? 'NONE' : 'ORIGINAL';
     for (const [id, b] of familyButtons) press(b, (id === 'original' && !fam) || id === fam);
     const show = (pick: FabricPick | null, family: FabricFamilyId | null, buttons: HTMLButtonElement[]) => buttons.forEach((b, k) => {
+      const chosen = !!pick && !pick.tint && pick.colour === k;
       b.style.background = SWATCH_HEX[family ?? 'jersey'][k];
       b.style.opacity = family ? '1' : '.45';
-      b.style.borderColor = pick && pick.colour === k && family ? GOLD : 'transparent';
+      b.style.borderColor = chosen && family ? GOLD : 'transparent';
       b.setAttribute('aria-label', colourName(family ?? 'jersey', k));
-      b.setAttribute('aria-pressed', String(!!pick && pick.colour === k));
+      b.setAttribute('aria-pressed', String(chosen));
     });
     show(c.fabric, fam, colourButtons);
+    const tint = c.fabric?.tint ?? null;
+    custom.style.background = tint ?? 'conic-gradient(#e53935,#fdd835,#43a047,#1e88e5,#8e24aa,#e53935)';
+    custom.style.borderColor = tint && fam ? GOLD : 'transparent';
+    custom.style.opacity = fam ? '1' : '.45';
+    custom.setAttribute('aria-pressed', String(!!tint));
+    custom.title = tint ? `Custom ${tintLabel(tint)}` : 'Any colour';
+    if (tint && customInput.value !== tint && document.activeElement !== customInput) customInput.value = tint;
     // trim: a garment with a separate edging only. The recovered shirts' edging is baked into their texture and
     // follows the shirt (Joshua: don't risk their approved geometry for it)
     const isShirt = /^shirt/.test(garmentName());
@@ -676,7 +707,7 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
   }
 
   // ------------------------------------------------------------ swatches
-  const swatchKey = (pick: FabricPick, which: 'plain' | 'trim') => `${which === 'plain' ? fabricFamily(pick.family).plain : fabricFamily(pick.family).trim}#${pick.colour}`;
+  const swatchKey = (pick: FabricPick, which: 'plain' | 'trim') => `${which === 'plain' ? fabricFamily(pick.family).plain : fabricFamily(pick.family).trim}#${pick.colour}${pick.tint ? `~${pick.tint}` : ''}`;
   /** A swatch as a tiling texture, cut from its atlas once, at the atlas's own resolution and proportions. */
   async function swatchTexture(pick: FabricPick, which: 'plain' | 'trim'): Promise<THREE.Texture | null> {
     const fam = fabricFamily(pick.family), path = which === 'plain' ? fam.plain : fam.trim;
@@ -703,6 +734,12 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
         ctx2d.restore();
       }
     }
+    // a custom colour: the White swatch just cut, dyed (fabricTint.ts)
+    if (pick.tint) {
+      const pixels = ctx2d.getImageData(0, 0, canvas.width, canvas.height);
+      tintPixels(pixels.data, pick.tint, SWATCH_HEX[pick.family][TINT_BASE_COLOUR]);
+      ctx2d.putImageData(pixels, 0, 0);
+    }
     const texture = new THREE.CanvasTexture(canvas);
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.wrapS = texture.wrapT = THREE.MirroredRepeatWrapping;
@@ -726,6 +763,9 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
       if (got.some((t) => !t)) status.textContent = 'That fabric could not be downloaded. Check your connection, then pick it again.';
     }
     sync();
+    // dyes no longer worn are let go: a colour picker dragged across the wheel cuts one for every stop
+    const worn = new Set(wanted.map(([p, w]) => swatchKey(p, w)));
+    for (const [key, texture] of swatches) if (key.includes('~') && !worn.has(key)) { texture.dispose(); swatches.delete(key); }
   }
 
   const cached = (pick: FabricPick | null, which: 'plain' | 'trim') => (pick ? swatches.get(swatchKey(pick, which)) ?? null : null);

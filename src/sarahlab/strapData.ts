@@ -18,6 +18,7 @@
  *
  * Pure: no three, no DOM, no storage. Reading is defensive -- an imported file is untrusted -- and never throws.
  */
+import { readTint } from './fabricTint';
 import { FABRIC_FAMILIES, type FabricFamilyId } from './fabricLibrary';
 
 export const STRAP_DATA_VERSION = 1;
@@ -34,7 +35,8 @@ export interface StrapPoint extends StrapAnchor {
   readonly bridge: boolean;
 }
 
-export interface StrapFabric { readonly family: FabricFamilyId; readonly colour: number /* 0..15 */ }
+/** A family's colour (0..15), or its White dyed a custom colour (`tint`, '#rrggbb', `fabricTint.ts`). */
+export interface StrapFabric { readonly family: FabricFamilyId; readonly colour: number /* 0..15 */; readonly tint?: string }
 
 export interface StrapPiece {
   readonly id: string;
@@ -121,7 +123,8 @@ const cleanName = (v: unknown, kind: StrapKind): string => cleanString(v, NAME_C
 /** A family the pack has and a colour 0..15 (rounded), or null -- the builder's plain white. */
 function cleanFabric(v: unknown): StrapFabric | null {
   if (!isObject(v) || !isFamily(v.family)) return null;
-  return Object.freeze({ family: v.family, colour: Math.round(clampNum(v.colour, 0, 15, 0)) });
+  const tint = readTint(v.tint);
+  return Object.freeze({ family: v.family, colour: tint ? 0 : Math.round(clampNum(v.colour, 0, 15, 0)), ...(tint ? { tint } : {}) });
 }
 
 /**
@@ -360,7 +363,7 @@ export function builtToJson(built: BuiltPieces): unknown {
       width: p.width,
       thickness: p.thickness,
       clearance: p.clearance,
-      fabric: p.fabric ? { family: p.fabric.family, colour: p.fabric.colour } : null,
+      fabric: p.fabric ? { family: p.fabric.family, colour: p.fabric.colour, ...(p.fabric.tint ? { tint: p.fabric.tint } : {}) } : null,
       edging: p.edging,
     })),
   };

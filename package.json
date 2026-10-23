@@ -1,7 +1,7 @@
 {
   "name": "traddomium-micro-battle",
   "private": true,
-  "version": "1.0.0-alpha.113",
+  "version": "1.0.0-alpha.114",
   "type": "module",
   "scripts": {
     "dev": "npm --prefix prototype run dev",
@@ -37,6 +37,7 @@
     "bake:humans": "node scripts/bakeHumans.mjs",
     "bake:sarah-clothes": "node scripts/rebakeSarah.mjs",
     "bake:panels": "node scripts/bakeHumans.mjs --panels",
+    "bake:outfits": "node scripts/bakeOutfitThumbs.mjs",
     "probe:humans": "node scripts/probe-humans.mjs",
     "probe:storylab": "node scripts/probe-storylab.mjs",
     "probe:sarahlab": "node scripts/probe-sarahlab.mjs",

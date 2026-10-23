@@ -14,7 +14,7 @@ import { downloadLine, etaLine, formatMegabytes, type LoadSnapshot } from '../as
 export const LOADING_CARD_ROLE = 'sarahlab-loading';
 export const LOADING_RETRY_ACTION = 'sarahlab:loading:retry';
 export type LoadingPlace = 'centre' | 'aside';
-/** The CSS variable the scene sets to how much of the bottom its controls cover, held upright (`uprightTabs.covered`). */
+/** The CSS variable the scene sets to how much of the stage's bottom its floating controls take (`studioLayout.ts`). */
 export const LOADING_COVERED_VAR = '--sarahlab-covered';
 
 export interface LoadingCard {
@@ -32,9 +32,9 @@ export function loadingCard(doc: Document, onRetry: () => void): LoadingCard {
   const style = doc.createElement('style');
   style.textContent = `
     [data-role="${LOADING_CARD_ROLE}"] { position:absolute; left:50%; transform:translateX(-50%); box-sizing:border-box;
-      width:min(340px, calc(100vw - 32px)); padding:14px 16px; border-radius:14px; background:rgba(10,13,18,0.92);
-      border:1px solid rgba(255,255,255,0.12); color:#e8e2d8; font:600 13px system-ui,sans-serif; display:none;
-      pointer-events:auto; touch-action:none; box-shadow:0 8px 30px rgba(0,0,0,0.35); z-index:5 }
+      width:min(340px, calc(100vw - 32px)); padding:14px 16px; border-radius:14px; background:var(--sl-panel,rgba(10,13,18,0.92));
+      border:1px solid var(--sl-line,rgba(255,255,255,0.12)); color:var(--sl-ink,#e8e2d8); font:600 13px system-ui,sans-serif; display:none;
+      pointer-events:auto; touch-action:none; box-shadow:0 8px 30px var(--sl-shadow,rgba(0,0,0,0.35)); z-index:5 }
     [data-role="${LOADING_CARD_ROLE}"][data-place="centre"] { top:50%; transform:translate(-50%,-50%) }
     [data-role="${LOADING_CARD_ROLE}"][data-place="aside"] { top:calc(64px + env(safe-area-inset-top)); left:max(12px, env(safe-area-inset-left)); transform:none;
       width:min(280px, calc(50vw - 80px)); padding:10px 12px }
@@ -42,16 +42,16 @@ export function loadingCard(doc: Document, onRetry: () => void): LoadingCard {
       width:min(340px, calc(100vw - 32px)); bottom:calc(var(${LOADING_COVERED_VAR}, 0px) + 8px) } }
     [data-role="${LOADING_CARD_ROLE}"] .ld-title { font-size:14px; margin-bottom:9px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
     [data-role="${LOADING_CARD_ROLE}"][data-place="aside"] .ld-title { font-size:12px; margin-bottom:6px }
-    [data-role="${LOADING_CARD_ROLE}"] .ld-track { position:relative; height:8px; border-radius:4px; background:rgba(255,255,255,0.12); overflow:hidden }
-    [data-role="${LOADING_CARD_ROLE}"] .ld-fill { position:absolute; left:0; top:0; bottom:0; width:0; border-radius:4px; background:#d4a853; transition:width .2s linear }
+    [data-role="${LOADING_CARD_ROLE}"] .ld-track { position:relative; height:8px; border-radius:4px; background:var(--sl-line,rgba(255,255,255,0.12)); overflow:hidden }
+    [data-role="${LOADING_CARD_ROLE}"] .ld-fill { position:absolute; left:0; top:0; bottom:0; width:0; border-radius:4px; background:var(--sl-accent,#d4a853); transition:width .2s linear }
     [data-role="${LOADING_CARD_ROLE}"][data-indeterminate] .ld-fill { width:35% !important; transition:none; animation:ld-slide 1.2s ease-in-out infinite }
     [data-role="${LOADING_CARD_ROLE}"][data-phase="preparing"] .ld-fill { width:100% !important; transition:none;
-      background:repeating-linear-gradient(-45deg,#d4a853 0 10px,#b38a3e 10px 20px); background-size:28px 28px; animation:ld-stripes .8s linear infinite }
+      background:repeating-linear-gradient(-45deg,var(--sl-accent,#d4a853) 0 10px,var(--sl-accent-deep,#b38a3e) 10px 20px); background-size:28px 28px; animation:ld-stripes .8s linear infinite }
     [data-role="${LOADING_CARD_ROLE}"] .ld-line { margin-top:8px; font-variant-numeric:tabular-nums; white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
-    [data-role="${LOADING_CARD_ROLE}"] .ld-sub { margin-top:3px; font-size:11px; color:#9aa0a8; min-height:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
-    [data-role="${LOADING_CARD_ROLE}"] .ld-error { margin-top:8px; font-size:12px; color:#f0b8a8; display:none; white-space:normal }
-    [data-role="${LOADING_CARD_ROLE}"] button { margin-top:10px; min-height:44px; width:100%; border-radius:10px; border:1px solid rgba(212,168,83,.6);
-      background:rgba(212,168,83,.16); color:#f2dfb4; font:700 13px system-ui,sans-serif; letter-spacing:.08em; display:none }
+    [data-role="${LOADING_CARD_ROLE}"] .ld-sub { margin-top:3px; font-size:11px; color:var(--sl-muted,#9aa0a8); min-height:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+    [data-role="${LOADING_CARD_ROLE}"] .ld-error { margin-top:8px; font-size:12px; color:var(--sl-danger,#f0b8a8); display:none; white-space:normal }
+    [data-role="${LOADING_CARD_ROLE}"] button { margin-top:10px; min-height:44px; width:100%; border-radius:10px; border:1px solid var(--sl-accent,rgba(212,168,83,.6));
+      background:var(--sl-on-soft,rgba(212,168,83,.16)); color:var(--sl-ink,#f2dfb4); font:700 13px system-ui,sans-serif; letter-spacing:.08em; display:none }
     [data-role="${LOADING_CARD_ROLE}"][data-phase="failed"] .ld-error, [data-role="${LOADING_CARD_ROLE}"][data-phase="failed"] button { display:block }
     [data-role="${LOADING_CARD_ROLE}"][data-phase="failed"] .ld-track { opacity:.4 }
     @keyframes ld-slide { 0% { left:-35% } 100% { left:100% } }

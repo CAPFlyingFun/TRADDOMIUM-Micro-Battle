@@ -32,6 +32,7 @@
  */
 import * as THREE from 'three';
 import { FABRIC_FAMILIES, SWATCH_HEX, colourName, fabricFamily, swatchRect, type FabricFamilyId, type FabricLayout } from './fabricLibrary';
+import { TINT_BASE_COLOUR, readTint, tintPixels } from './fabricTint';
 import { BodySurface, type SurfaceAnchor } from './bodySurface';
 import { StrapMesh, type StrapShape } from './strapMesh';
 import {
@@ -43,6 +44,8 @@ export const BUILDER_ROLE = 'sarahlab-builder';
 export type BuilderMode = 'edit' | 'camera';
 export type BuilderTool = 'add' | 'move';
 export const BUILDER_ACTION = Object.freeze({
+  /** The custom colour swatch (a colour picker). */
+  custom: 'sarahlab:build:colour:custom',
   piece: (id: string) => `sarahlab:build:piece:${id}`,
   add: (kind: StrapKind) => `sarahlab:build:add:${kind}`,
   mode: (m: BuilderMode) => `sarahlab:build:mode:${m}`,
@@ -126,8 +129,10 @@ const HANDLE_PX = 24, FIRST_PX = 14, DOT_PX = 9, GRAB_PX = 30;
 const PICK_SLOP_PX = 14;
 const SPEEDS = [1, 0.5, 0.25] as const;
 
-const BTN = 'min-height:42px;padding:6px 10px;border:1px solid #ffffff30;border-radius:9px;background:#151b23;color:#e8e2d8;font:700 11px system-ui;letter-spacing:.04em';
-const ON = '#806020', OFF = '#151b23', GOLD = '#d4a853';
+const BTN = 'min-height:42px;padding:6px 10px;border:1px solid var(--sl-btn-line,#ffffff30);border-radius:9px;background:var(--sl-btn,#151b23);color:var(--sl-ink,#e8e2d8);font:700 11px system-ui;letter-spacing:.04em';
+const ON = 'var(--sl-on,#806020)', OFF = 'var(--sl-btn,#151b23)', GOLD_CSS = 'var(--sl-accent,#d4a853)';
+/** The selected handle's colour on her (a 3D material, so a hex, not a CSS variable). */
+const GOLD = '#d4a853';
 
 type Drag = { kind: 'handle'; index: number; moved: boolean } | { kind: 'draw'; last: THREE.Vector3; added: boolean } | null;
 
@@ -167,7 +172,7 @@ export function strapBuilder(hooks: StrapBuilderHooks): StrapBuilder {
   const press = (b: HTMLButtonElement, on: boolean) => { b.setAttribute('aria-pressed', String(on)); b.style.background = on ? ON : OFF; };
   const slider = (field: string, range: { min: number; max: number; step: number }, onInput: (v: number) => void, onDone: () => void) => {
     const label = el('label', 'font-size:12px');
-    const input = el('input', `width:100%;accent-color:${GOLD};height:28px`); input.type = 'range'; input.dataset.field = field;
+    const input = el('input', `width:100%;accent-color:${GOLD_CSS};height:28px`); input.type = 'range'; input.dataset.field = field;
     input.min = String(range.min); input.max = String(range.max); input.step = String(range.step);
     input.addEventListener('input', () => onInput(Number(input.value)));
     input.addEventListener('change', onDone);
@@ -176,7 +181,7 @@ export function strapBuilder(hooks: StrapBuilderHooks): StrapBuilder {
   };
 
   // ------------------------------------------------------------ the drawer
-  const panel = el('details', 'border-top:1px solid #ffffff25;padding-top:8px;touch-action:pan-y');
+  const panel = el('details', 'border-top:1px solid var(--sl-line,#ffffff20);padding-top:8px;touch-action:pan-y');
   panel.dataset.role = BUILDER_ROLE;
   const summary = el('summary', 'cursor:pointer;padding:8px 0;font:700 12px system-ui;letter-spacing:.06em');
   const content = el('div', 'display:flex;flex-direction:column;gap:8px;padding:4px 0');
@@ -186,7 +191,7 @@ export function strapBuilder(hooks: StrapBuilderHooks): StrapBuilder {
   addRow.append(button('+ STRIP', BUILDER_ACTION.add('strip'), () => addPiece('strip')), button('+ CORD', BUILDER_ACTION.add('cord'), () => addPiece('cord')));
 
   // EDIT / CAMERA: big, so the switch is easy to find with a thumb
-  const modes = el('div', 'display:grid;grid-template-columns:1fr 1fr;gap:4px;background:#0b0f14;border-radius:10px;padding:3px');
+  const modes = el('div', 'display:grid;grid-template-columns:1fr 1fr;gap:4px;background:var(--sl-well,#0b0f14);border-radius:10px;padding:3px');
   const modeButtons = new Map<BuilderMode, HTMLButtonElement>((['edit', 'camera'] as const).map((m) => {
     const b = button(m === 'edit' ? 'EDIT POINTS' : 'MOVE CAMERA', BUILDER_ACTION.mode(m), () => { mode = m; drag = null; });
     b.style.minHeight = '46px'; b.style.border = '0'; return [m, b];
@@ -238,7 +243,7 @@ export function strapBuilder(hooks: StrapBuilderHooks): StrapBuilder {
   const familyButtons = new Map<FabricFamilyId | 'none', HTMLButtonElement>();
   familyButtons.set('none', button('PLAIN', BUILDER_ACTION.family('none'), () => { const p = current(); if (p) commit(replace(selected, setPiece(p, { fabric: null }))); }));
   for (const f of FABRIC_FAMILIES) familyButtons.set(f.id, button(f.name.toUpperCase(), BUILDER_ACTION.family(f.id), () => {
-    const p = current(); if (p) commit(replace(selected, setPiece(p, { fabric: { family: f.id, colour: p.fabric?.colour ?? 8 } })));
+    const p = current(); if (p) commit(replace(selected, setPiece(p, { fabric: { family: f.id, colour: p.fabric?.colour ?? 8, ...(p.fabric?.tint ? { tint: p.fabric.tint } : {}) } })));
   }));
   families.append(...familyButtons.values());
   const colours = el('div', 'display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:5px');
@@ -248,6 +253,18 @@ export function strapBuilder(hooks: StrapBuilderHooks): StrapBuilder {
     return b;
   });
   colours.append(...colourButtons);
+  // CUSTOM COLOUR: the system's colour picker, dyeing the family's White (fabricTint.ts), as in the outfit editor
+  const custom = el('label', 'position:relative;aspect-ratio:1;min-height:32px;border-radius:7px;border:2px solid transparent;box-sizing:border-box;overflow:hidden;cursor:pointer');
+  custom.dataset.action = BUILDER_ACTION.custom; custom.title = 'Any colour';
+  const customInput = el('input', 'position:absolute;inset:0;width:100%;height:100%;opacity:0;border:0;padding:0;cursor:pointer');
+  customInput.type = 'color'; customInput.dataset.field = 'builder-custom-colour'; customInput.setAttribute('aria-label', 'Any colour');
+  let customTimer: ReturnType<typeof setTimeout> | null = null;
+  const pickCustom = () => { const tint = readTint(customInput.value), p = current(); if (tint && p) { commit(replace(selected, setPiece(p, { fabric: { family: p.fabric?.family ?? 'athletic', colour: 0, tint } }))); draw(); } };
+  customInput.addEventListener('input', () => { if (customTimer) clearTimeout(customTimer); customTimer = setTimeout(() => { customTimer = null; pickCustom(); }, 150); });
+  customInput.addEventListener('change', () => { if (customTimer) { clearTimeout(customTimer); customTimer = null; } pickCustom(); });
+  custom.addEventListener('click', (e) => e.stopPropagation());
+  custom.appendChild(customInput);
+  colours.append(custom);
   shapeBox.append(heading('SHAPE'), width.wrap, thickness.wrap, clearance.wrap, toggles, heading('FABRIC'), families, colours);
 
   // the piece's edits
@@ -277,10 +294,10 @@ export function strapBuilder(hooks: StrapBuilderHooks): StrapBuilder {
   panel.addEventListener('toggle', () => { drag = null; draw(); });
 
   function twoTap(label: string, armed: string, action: string, onConfirm: () => void): HTMLButtonElement {
-    const reset = () => { b.dataset.armed = ''; b.textContent = label; b.style.borderColor = '#ffffff30'; };
+    const reset = () => { b.dataset.armed = ''; b.textContent = label; b.style.borderColor = 'var(--sl-btn-line,#ffffff30)'; };
     const b = button(label, action, () => {
       if (b.dataset.armed === '1') { reset(); onConfirm(); return; }
-      b.dataset.armed = '1'; b.textContent = armed; b.style.borderColor = '#d46a53';
+      b.dataset.armed = '1'; b.textContent = armed; b.style.borderColor = 'var(--sl-danger,#d46a53)';
       setTimeout(() => { if (b.dataset.armed === '1') reset(); }, 3000);
     });
     return b;
@@ -529,16 +546,16 @@ export function strapBuilder(hooks: StrapBuilderHooks): StrapBuilder {
     return p.kind === 'strip' && p.edging ? p.width * 16 : fam.tileCm;
   }
   function dress(p: StrapPiece, v: PieceView): void {
-    const look = p.fabric ? `${p.fabric.family}:${p.fabric.colour}:${p.kind === 'strip' && p.edging ? 'trim' : 'plain'}:${p.kind}:${p.width}` : 'plain-white';
+    const look = p.fabric ? `${p.fabric.family}:${p.fabric.colour}:${p.fabric.tint ?? ''}:${p.kind === 'strip' && p.edging ? 'trim' : 'plain'}:${p.kind}:${p.width}` : 'plain-white';
     if (look === v.look) return;
     const m = v.material;
     if (!p.fabric) { v.look = look; m.map?.dispose(); m.map = null; m.color.set(0xffffff); m.roughness = 0.85; m.needsUpdate = true; return; }
     const which = p.kind === 'strip' && p.edging ? 'trim' : 'plain';
-    const base = texture(p.fabric.family, p.fabric.colour, which);
+    const base = texture(p.fabric.family, p.fabric.colour, which, p.fabric.tint ?? null);
     if (base === undefined) return; // still loading: tried again next frame
     v.look = look;
     m.map?.dispose();
-    if (!base) { m.map = null; m.color.set(SWATCH_HEX[p.fabric.family][p.fabric.colour] ?? '#ffffff'); m.needsUpdate = true; return; }
+    if (!base) { m.map = null; m.color.set(p.fabric.tint ?? SWATCH_HEX[p.fabric.family][p.fabric.colour] ?? '#ffffff'); m.needsUpdate = true; return; }
     const map = base.clone();
     map.needsUpdate = true;
     // across the strap: a trim strip's full height; the plain knit at its own gauge (a cord: round its girth)
@@ -547,8 +564,8 @@ export function strapBuilder(hooks: StrapBuilderHooks): StrapBuilder {
     m.map = map; m.color.set(0xffffff); m.roughness = fam.roughness; m.needsUpdate = true;
   }
   /** A swatch as a texture: a plain cell, or a trim colour's whole strip with its stitched edges. Undefined while loading. */
-  function texture(family: FabricFamilyId, colour: number, which: 'plain' | 'trim'): THREE.Texture | null | undefined {
-    const key = `${family}:${colour}:${which}`;
+  function texture(family: FabricFamilyId, colour: number, which: 'plain' | 'trim', tint: string | null = null): THREE.Texture | null | undefined {
+    const key = `${family}:${colour}:${which}${tint ? `~${tint}` : ''}`;
     if (textures.has(key)) return textures.get(key)!;
     if (loading.has(key)) return undefined;
     loading.add(key);
@@ -571,6 +588,8 @@ export function strapBuilder(hooks: StrapBuilderHooks): StrapBuilder {
         canvas.width = image.width; canvas.height = Math.max(1, Math.round(strip));
         ctx.drawImage(image, 0, y, image.width, Math.round(strip), 0, 0, canvas.width, canvas.height);
       }
+      // a custom colour: the White just cut, dyed
+      if (tint) { const px = ctx.getImageData(0, 0, canvas.width, canvas.height); tintPixels(px.data, tint, SWATCH_HEX[family][TINT_BASE_COLOUR]); ctx.putImageData(px, 0, 0); }
       const t = new THREE.CanvasTexture(canvas);
       t.colorSpace = THREE.SRGBColorSpace;
       t.wrapS = THREE.RepeatWrapping; t.wrapT = layout === 'grid' ? THREE.MirroredRepeatWrapping : THREE.ClampToEdgeWrapping;
@@ -586,9 +605,9 @@ export function strapBuilder(hooks: StrapBuilderHooks): StrapBuilder {
     const p = current();
     summary.textContent = `BUILD · ${p ? `${p.name} · ${p.points.length} point${p.points.length === 1 ? '' : 's'}` : 'straps & cords (beta)'}`;
     pieceRow.replaceChildren(...pieces.map((x, i) => {
-      const b = el('button', 'flex:none;min-height:44px;max-width:150px;padding:5px 10px;border-radius:9px;border:1px solid #ffffff30;background:#151b23;color:#e8e2d8;font:700 11px system-ui;white-space:nowrap;overflow:hidden;text-overflow:ellipsis');
+      const b = el('button', 'flex:none;min-height:44px;max-width:150px;padding:5px 10px;border-radius:9px;border:1px solid var(--sl-btn-line,#ffffff30);background:var(--sl-btn,#151b23);color:var(--sl-ink,#e8e2d8);font:700 11px system-ui;white-space:nowrap;overflow:hidden;text-overflow:ellipsis');
       b.type = 'button'; b.dataset.action = BUILDER_ACTION.piece(x.id); b.textContent = `${x.kind === 'cord' ? 'CORD' : 'STRIP'} · ${x.name}`;
-      const on = i === selected; b.style.background = on ? '#3a2c10' : '#151b23'; b.style.borderColor = on ? GOLD : '#ffffff30'; b.setAttribute('aria-pressed', String(on));
+      const on = i === selected; b.style.background = on ? 'var(--sl-on-soft,#3a2c10)' : 'var(--sl-btn,#151b23)'; b.style.borderColor = on ? GOLD_CSS : 'var(--sl-btn-line,#ffffff30)'; b.setAttribute('aria-pressed', String(on));
       b.addEventListener('click', (e) => { e.stopPropagation(); selected = i; point = Math.min(point, pieces[i].points.length - 1); draw(); });
       return b;
     }));
@@ -614,10 +633,16 @@ export function strapBuilder(hooks: StrapBuilderHooks): StrapBuilder {
       for (const [id, b] of familyButtons) press(b, (id === 'none' && !fam) || id === fam);
       colours.style.display = fam ? 'grid' : 'none';
       colourButtons.forEach((b, k) => {
+        const chosen = !!p.fabric && !p.fabric.tint && p.fabric.colour === k;
         b.style.background = SWATCH_HEX[fam ?? 'jersey'][k];
-        b.style.borderColor = p.fabric && p.fabric.colour === k ? GOLD : 'transparent';
-        b.setAttribute('aria-label', colourName(fam ?? 'jersey', k)); b.setAttribute('aria-pressed', String(!!p.fabric && p.fabric.colour === k));
+        b.style.borderColor = chosen ? GOLD_CSS : 'transparent';
+        b.setAttribute('aria-label', colourName(fam ?? 'jersey', k)); b.setAttribute('aria-pressed', String(chosen));
       });
+      const tint = p.fabric?.tint ?? null;
+      custom.style.background = tint ?? 'conic-gradient(#e53935,#fdd835,#43a047,#1e88e5,#8e24aa,#e53935)';
+      custom.style.borderColor = tint ? GOLD_CSS : 'transparent';
+      custom.setAttribute('aria-pressed', String(!!tint));
+      if (tint && customInput.value !== tint && document.activeElement !== customInput) customInput.value = tint;
     }
     undoButton.disabled = !history.canUndo; redoButton.disabled = !history.canRedo;
     undoButton.style.opacity = history.canUndo ? '1' : '.4'; redoButton.style.opacity = history.canRedo ? '1' : '.4';

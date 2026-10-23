@@ -32,6 +32,7 @@ import type { LayerDetail } from './detailMaterials';
 import type { CoverageParams } from './paintTemplates';
 import type { RandomRule, RandomRules } from '../actor/bodyRandom';
 import { builtToJson, sanitizeBuilt, type BuiltPieces } from './strapData';
+import { readTint } from './fabricTint';
 
 export type SaveScope = 'all' | 'body' | 'clothes';
 
@@ -99,6 +100,8 @@ export interface OutfitRef {
 
 export interface CharacterSave {
   readonly name: string;
+  /** A small picture of her as saved (a JPEG data URL, `readThumb`), for her card. */
+  readonly thumb?: string;
   /** ISO time of the last save into it. */
   readonly savedAt: string;
   readonly body: SavedBody | null;
@@ -108,6 +111,8 @@ export interface CharacterSave {
 /** A library outfit. */
 export interface OutfitSave {
   readonly name: string;
+  /** A small picture of the outfit on her when it was saved (a JPEG data URL, `readThumb`), for its card. */
+  readonly thumb?: string;
   readonly savedAt: string;
   readonly clothes: SavedClothes;
 }
@@ -134,14 +139,16 @@ export function cleanName(name: string): string {
  * Save into `book` under `name`: `all` replaces both parts, `body` or `clothes` only that one (the other part the
  * name already holds is kept). The save moves to the top of the list.
  */
-export function saveInto(book: CharacterBook, name: string, scope: SaveScope, body: SavedBody, clothes: SavedClothes | OutfitRef, now: string): CharacterBook {
+export function saveInto(book: CharacterBook, name: string, scope: SaveScope, body: SavedBody, clothes: SavedClothes | OutfitRef, now: string, thumb?: string | null): CharacterBook {
   const clean = cleanName(name);
   const had = book.characters.find((c) => same(c.name, clean));
+  const picture = readThumb(thumb) ?? had?.thumb;
   const next: CharacterSave = {
     name: had?.name ?? clean,
     savedAt: now,
     body: scope === 'clothes' ? had?.body ?? null : body,
     clothes: scope === 'body' ? had?.clothes ?? null : clothes,
+    ...(picture ? { thumb: picture } : {}),
   };
   return { ...book, characters: [next, ...book.characters.filter((c) => !same(c.name, clean))] };
 }
@@ -151,9 +158,10 @@ export function removeFrom(book: CharacterBook, name: string): CharacterBook {
 }
 
 /** Save an outfit into the library under `name` (replacing one of that name). */
-export function saveOutfit(book: CharacterBook, name: string, clothes: SavedClothes, now: string): CharacterBook {
+export function saveOutfit(book: CharacterBook, name: string, clothes: SavedClothes, now: string, thumb?: string | null): CharacterBook {
   const clean = cleanName(name);
-  return { ...book, outfits: [{ name: clean, savedAt: now, clothes }, ...book.outfits.filter((o) => !same(o.name, clean))] };
+  const picture = readThumb(thumb) ?? findOutfit(book, clean)?.thumb;
+  return { ...book, outfits: [{ name: clean, savedAt: now, clothes, ...(picture ? { thumb: picture } : {}) }, ...book.outfits.filter((o) => !same(o.name, clean))] };
 }
 export function removeOutfit(book: CharacterBook, name: string): CharacterBook {
   return { ...book, outfits: book.outfits.filter((o) => !same(o.name, name)) };
@@ -245,7 +253,14 @@ const str = (v: unknown, max: number) => (typeof v === 'string' ? v.slice(0, max
 
 function readPick(v: unknown): FabricChoice['fabric'] {
   if (!isRecord(v) || typeof v.family !== 'string') return null;
-  return { family: v.family as NonNullable<FabricChoice['fabric']>['family'], colour: Math.round(num(v.colour, 0, 255, 0)) };
+  const tint = readTint(v.tint);
+  return { family: v.family as NonNullable<FabricChoice['fabric']>['family'], colour: Math.round(num(v.colour, 0, 255, 0)), ...(tint ? { tint } : {}) };
+}
+/** The most a card's picture may weigh, in characters of its data URL (a 168 × 224 JPEG is about 15 000). */
+export const THUMB_MAX_CHARS = 80_000;
+/** A card's picture from untrusted data: a base64 JPEG, WebP or PNG data URL no larger than THUMB_MAX_CHARS, or undefined. */
+export function readThumb(v: unknown): string | undefined {
+  return typeof v === 'string' && v.length <= THUMB_MAX_CHARS && /^data:image\/(?:jpeg|webp|png);base64,[A-Za-z0-9+/]+={0,2}$/.test(v) ? v : undefined;
 }
 function readChoice(v: unknown): FabricChoice | null {
   if (!isRecord(v)) return null;
@@ -326,13 +341,15 @@ export function sanitizeBook(raw: unknown): CharacterBook {
     const body = readBody(c.body), clothes = readRef(c.clothes) ?? readClothes(c.clothes);
     if (!body && !clothes) continue;
     if (characters.some((k) => same(k.name, c.name as string))) continue;
-    characters.push({ name: cleanName(c.name), savedAt: str(c.savedAt, 40), body, clothes });
+    const thumb = readThumb(c.thumb);
+    characters.push({ name: cleanName(c.name), savedAt: str(c.savedAt, 40), body, clothes, ...(thumb ? { thumb } : {}) });
   }
   for (const o of Array.isArray(raw.outfits) ? raw.outfits.slice(0, 200) : []) {
     if (!isRecord(o) || typeof o.name !== 'string') continue;
     const clothes = readClothes(o.clothes);
     if (!clothes || outfits.some((k) => same(k.name, o.name as string))) continue;
-    outfits.push({ name: cleanName(o.name), savedAt: str(o.savedAt, 40), clothes });
+    const thumb = readThumb(o.thumb);
+    outfits.push({ name: cleanName(o.name), savedAt: str(o.savedAt, 40), clothes, ...(thumb ? { thumb } : {}) });
   }
   return { version: 1, characters, outfits };
 }

@@ -87,6 +87,19 @@ async function main() {
     const errors = [];
     page.on('pageerror', (e) => errors.push(e.message));
     page.on('console', (m) => { if (m.type() === 'error') errors.push(`console: ${m.text()}`); });
+    // THE STUDIO (studioLayout.ts): a control lives in a section of the inspector, shown only while its section is
+    // open. A click opens that section first, as a person would, so every check below reads as it always did
+    const rawClick = page.click.bind(page);
+    page.click = async (selector, options) => {
+      await page.evaluate((sel) => {
+        const node = document.querySelector(sel), section = node?.closest('[data-section]');
+        if (!section) return;
+        const root = section.closest('.sl-studio');
+        if (section.hasAttribute('data-open') && !root?.hasAttribute('data-folded')) return;
+        document.querySelector(`[data-action="sarahlab:section:${section.dataset.section}"]`)?.click();
+      }, selector).catch(() => {});
+      return rawClick(selector, options);
+    };
 
     await page.goto(url, { waitUntil: 'load' });
     await page.waitForSelector('[data-action="new-game"]', { timeout: 120_000 });

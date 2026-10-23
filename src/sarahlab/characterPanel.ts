@@ -3,7 +3,11 @@
  * load her back; export the whole book (characters and shared outfits) to a file and import one. The shared outfits
  * themselves are made and kept in the outfit editor's SAVE workspace (`outfitPanel.ts`). The book and its rules are
  * `characterSaves.ts`; this is only its controls. The room supplies what she is now and how to put a save on her.
+ *
+ * Each saved character is a card with a picture of her as she was saved (Joshua, 2026-10-23, from the Character Studio
+ * preview); a tap on it loads her, its ✕ deletes her after a second tap.
  */
+import { outfitCards } from './outfitCards';
 import {
   type CharacterBook, type OutfitRef, type SaveScope, type SavedBody, type SavedClothes,
   clothesFor, exportBook, holds, importBook, mergeBooks, removeFrom, resolveClothes, saveInto,
@@ -17,6 +21,7 @@ export const CHARACTER_FIELD = Object.freeze({
 export const CHARACTER_ACTION = Object.freeze({
   save: (scope: SaveScope) => `sarahlab:character:save:${scope}`,
   load: (name: string) => `sarahlab:character:load:${name}`,
+  remove: (name: string) => `sarahlab:character:delete:${name}`,
   export: 'sarahlab:character:export',
   import: 'sarahlab:character:import',
 });
@@ -34,10 +39,12 @@ export interface CharacterPanelHooks {
   putOnClothes(clothes: SavedClothes, from: string | null, character: string): void;
   /** Hand the user a file (EXPORT). */
   download(name: string, text: string): void;
+  /** A picture of her as she is now, for her card (null when one cannot be taken). */
+  thumbnail?(): string | null;
 }
 
-const BTN = 'min-height:34px;padding:4px 8px;border:1px solid #ffffff30;border-radius:8px;background:#151b23;color:#e8e2d8;font:600 11px system-ui;cursor:pointer';
-const INPUT = 'flex:1;min-width:0;height:32px;padding:0 8px;border-radius:8px;border:1px solid #ffffff30;background:#0d1117;color:#e8e2d8;font:600 12px system-ui';
+const BTN = 'min-height:34px;padding:4px 8px;border:1px solid var(--sl-btn-line,#ffffff30);border-radius:8px;background:var(--sl-btn,#151b23);color:var(--sl-ink,#e8e2d8);font:600 11px system-ui;cursor:pointer';
+const INPUT = 'flex:1;min-width:0;height:32px;padding:0 8px;border-radius:8px;border:1px solid var(--sl-btn-line,#ffffff30);background:var(--sl-field,#0d1117);color:var(--sl-ink,#e8e2d8);font:600 12px system-ui';
 
 export interface CharacterPanel {
   readonly element: HTMLElement;
@@ -50,7 +57,7 @@ export interface CharacterPanel {
 
 export function characterPanel(hooks: CharacterPanelHooks): CharacterPanel {
   const panel = document.createElement('details');
-  panel.style.cssText = 'border-top:1px solid rgba(255,255,255,0.12);padding-top:6px';
+  panel.style.cssText = 'border-top:1px solid var(--sl-line,rgba(255,255,255,0.12));padding-top:6px';
   const summary = document.createElement('summary');
   summary.textContent = 'CHARACTERS';
   summary.style.cssText = 'cursor:pointer;font:700 12px system-ui,sans-serif;letter-spacing:.08em;padding:4px 0';
@@ -83,52 +90,36 @@ export function characterPanel(hooks: CharacterPanelHooks): CharacterPanel {
     const book = hooks.read();
     // her clothes as a reference to the library outfit she put on, when they are still that outfit
     const clothes: SavedClothes | OutfitRef = clothesFor(book, hooks.clothes(), hooks.wornFrom());
-    hooks.write(saveInto(book, n, scope, hooks.body(), clothes, now()));
+    hooks.write(saveInto(book, n, scope, hooks.body(), clothes, now(), hooks.thumbnail?.() ?? null));
     say(scope === 'all' ? `Saved ${n}: body and clothes.` : scope === 'body' ? `Saved ${n}'s body. Her clothes in the save are unchanged.` : `Saved ${n}'s clothes${'basedOn' in clothes ? ` (based on "${clothes.basedOn}", only her changes)` : ''}. Her body in the save is unchanged.`);
     refresh();
   };
-  const list = document.createElement('div');
+  const load = (c: CharacterBook['characters'][number]) => {
+    if (c.body) hooks.putOnBody(c.body);
+    if (c.clothes) {
+      const worn = resolveClothes(hooks.read(), c.clothes);
+      if (worn) hooks.putOnClothes(worn, 'basedOn' in c.clothes ? c.clothes.basedOn : null, c.name);
+      else if ('basedOn' in c.clothes) { say(`${c.name}'s outfit is based on "${c.clothes.basedOn}", which is not in the outfit library any more.`); return; }
+    }
+    name.value = c.name;
+    say(`Loaded ${c.name}: ${holds(c)}.`);
+  };
+  const cards = outfitCards({
+    onPick: (id) => { const c = hooks.read().characters.find((k) => k.name === id); if (c) load(c); refresh(); },
+    onRemove: (id) => { hooks.write(removeFrom(hooks.read(), id)); say(`Deleted ${id}.`); refresh(); },
+  });
+  const list = cards.element;
   list.dataset.field = CHARACTER_FIELD.list;
-  list.style.cssText = 'display:flex;flex-direction:column;gap:4px;margin-top:6px';
-
-  /** A delete that asks once: the first tap arms it for a few seconds, the second deletes. */
-  const deleteButton = (action: string, onDelete: () => void) => {
-    const b = button('✕', action, () => {
-      if (b.dataset.armed === '1') { onDelete(); return; }
-      b.dataset.armed = '1'; b.textContent = 'DELETE?'; b.style.borderColor = '#d46a53';
-      setTimeout(() => { b.dataset.armed = ''; b.textContent = '✕'; b.style.borderColor = '#ffffff30'; }, 3000);
-    });
-    b.title = 'delete (tap twice)';
-    return b;
-  };
-  const line = (title: string, detail: string, ...actions: HTMLElement[]) => {
-    const r = document.createElement('div');
-    r.style.cssText = 'display:flex;gap:6px;align-items:center;justify-content:space-between';
-    const t = document.createElement('div');
-    t.style.cssText = 'font-size:12px;line-height:1.25;min-width:0;overflow-wrap:anywhere';
-    const strong = document.createElement('b'); strong.textContent = title;
-    const small = document.createElement('div'); small.textContent = detail; small.style.cssText = 'font-size:10px;opacity:.7';
-    t.append(strong, small);
-    const a = document.createElement('div'); a.style.cssText = 'display:flex;gap:4px;flex:none'; a.append(...actions);
-    r.append(t, a);
-    return r;
-  };
+  const empty = placeholder('No characters saved yet.');
 
   function refresh(): void {
     const book = hooks.read();
-    list.replaceChildren(...(book.characters.length ? book.characters.map((c) => line(c.name, holds(c),
-      button('LOAD', CHARACTER_ACTION.load(c.name), () => {
-        if (c.body) hooks.putOnBody(c.body);
-        if (c.clothes) {
-          const worn = resolveClothes(hooks.read(), c.clothes);
-          if (worn) hooks.putOnClothes(worn, 'basedOn' in c.clothes ? c.clothes.basedOn : null, c.name);
-          else if ('basedOn' in c.clothes) { say(`${c.name}'s outfit is based on "${c.clothes.basedOn}", which is not in the outfit library any more.`); return; }
-        }
-        name.value = c.name;
-        say(`Loaded ${c.name}: ${holds(c)}.`);
-      }),
-      deleteButton(`sarahlab:character:delete:${c.name}`, () => { hooks.write(removeFrom(hooks.read(), c.name)); say(`Deleted ${c.name}.`); refresh(); }),
-    )) : [placeholder('No characters saved yet.')]));
+    cards.set(book.characters.map((c) => ({
+      id: c.name, name: c.name, note: holds(c), thumb: c.thumb ?? null,
+      worn: c.name.toLowerCase() === name.value.trim().toLowerCase(),
+      action: CHARACTER_ACTION.load(c.name), remove: { action: CHARACTER_ACTION.remove(c.name) },
+    })));
+    empty.style.display = book.characters.length ? 'none' : '';
   }
   function placeholder(text: string): HTMLElement { const d = document.createElement('div'); d.textContent = text; d.style.cssText = 'font-size:11px;opacity:.6'; return d; }
 
@@ -151,8 +142,10 @@ export function characterPanel(hooks: CharacterPanelHooks): CharacterPanel {
     heading('CHARACTER'),
     row(name),
     row(button('SAVE ALL', CHARACTER_ACTION.save('all'), () => save('all')), button('SAVE BODY', CHARACTER_ACTION.save('body'), () => save('body')), button('SAVE CLOTHES', CHARACTER_ACTION.save('clothes'), () => save('clothes'))),
+    heading('SAVED CHARACTERS · tap one to load her'),
     list,
-    heading('SHARED OUTFITS are made and saved in CLOTHES › EDIT OUTFIT › SAVE'),
+    empty,
+    heading('SHARED OUTFITS are saved and worn in OUTFIT'),
     heading('FILE · every character and shared outfit'),
     row(button('EXPORT', CHARACTER_ACTION.export, () => { hooks.download('traddomium-characters.json', exportBook(hooks.read())); say('Exported every character and outfit.'); }),
       button('IMPORT', CHARACTER_ACTION.import, () => file.click())),
