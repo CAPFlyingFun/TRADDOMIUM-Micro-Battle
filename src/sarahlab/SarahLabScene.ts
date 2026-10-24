@@ -20,8 +20,8 @@ import { setClothNeckline } from './clothNeckline';
 import { setClothDetail } from './clothDetail';
 import { DetailSpots, SARAH_V2_DETAIL_POINTS, SARAH_V2_LITE_TEE_NAVEL, TeeNavel } from './detailSpots';
 import { SkinPose } from './skinPose';
-import { SKIN_BRUSH_CM, SKIN_CHOICES, SKIN_ORIGINAL_IMAGE, SKIN_SWATCHES, hexRgb, nextSkin, skinBrushLine, skinLine, skinNote, skinStrengthLine, type SkinId } from './skinChoices';
-import { SkinPainter } from './skinPaint';
+import { SKIN_BRUSH_CM, SKIN_CHOICES, SKIN_ORIGINAL_IMAGE, SKIN_SWATCHES, SKIN_TEXTURE_CM, hexRgb, nextSkin, skinBrushLine, skinLine, skinNote, skinStrengthLine, skinTextureLine, type SkinId } from './skinChoices';
+import { SkinPainter, tilePattern, type SkinImage, type SkinPattern, type SkinStrokeSettings } from './skinPaint';
 import { ensureRest } from './fabricMaterial';
 /**
  * THE SARAH LAB — Sarah rebuilt from Joshua's base mannequin, on a turntable,
@@ -375,7 +375,17 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let skinPaintOn = false, skinPainting = false;
   /** Her clothes off while her skin is painted (CLOTHES · HIDDEN), as the fabric editor's brush hides them. */
   let skinBare = false;
-  const brush: { cm: number; strength: number; hard: boolean; erase: boolean; hex: string } = { cm: SKIN_BRUSH_CM.initial, strength: 0.5, hard: false, erase: false, hex: SKIN_SWATCHES[0].hex };
+  const brush: { cm: number; strength: number; hard: boolean; erase: boolean; hex: string; texture: boolean; stamp: boolean; textureCm: number } = { cm: SKIN_BRUSH_CM.initial, strength: 0.5, hard: false, erase: false, hex: SKIN_SWATCHES[0].hex, texture: false, stamp: false, textureCm: SKIN_TEXTURE_CM.initial };
+  /**
+   * A picture to paint WITH (Joshua, 2026-10-24: "can you upload custom paint textures like with the clothing?"): TILE
+   * repeats it over her every TEXTURE SIZE, as the clothing's patterns do; STAMP lays it once, TEXTURE SIZE wide, where a
+   * stroke starts, and the stroke rubs it in. Its pixels are read once, at most 1024 square.
+   */
+  let paintTexture: { readonly name: string; readonly image: SkinImage } | null = null;
+  /** The TILE pattern for the picture at the size set, made again only when either changes. */
+  let tileCache: { readonly image: SkinImage; readonly units: number; readonly pattern: SkinPattern } | null = null;
+  /** Mesh units a centimetre on her body (for the TILE pattern), from the painter's mesh. */
+  let paintUnitsPerCm = 1;
   let paintMeta = '';
   function readSkin(): SkinId {
     const v = localStore()?.getItem(SKIN_KEY);
@@ -472,6 +482,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     ensureRest(b.mesh.geometry as THREE.BufferGeometry, shaped.find((x) => x.mesh === b.mesh)?.fields ?? null);
     const scale = b.mesh.getWorldScale(new THREE.Vector3()).x || 1;
     const painter = new SkinPainter(b.mesh, source, under, scale / M);
+    paintUnitsPerCm = (M / 100) / scale;
     painted = { painter, under };
     b.material.map = painter.texture; b.material.needsUpdate = true;
     paintMeta = `${source.width}×${source.height}`;
@@ -485,7 +496,28 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     const p = painted?.painter;
     if (!p) return;
     if (first) { model?.updateMatrixWorld(true); const { width, height } = ctx.renderer.size(); p.beginStroke(camera, width, height); skinPainting = true; }
-    p.stroke(x, y, { colour: hexRgb(brush.hex), radiusCm: brush.cm, strength: brush.strength, hardness: brush.hard ? 0.85 : 0.2, erase: brush.erase });
+    p.stroke(x, y, brushSettings());
+  }
+  /** The brush as FACE sets it: a colour, or the uploaded picture as a tile or a stamp. */
+  function brushSettings(): SkinStrokeSettings {
+    const base: SkinStrokeSettings = { colour: hexRgb(brush.hex), radiusCm: brush.cm, strength: brush.strength, hardness: brush.hard ? 0.85 : 0.2, erase: brush.erase };
+    if (!brush.texture || !paintTexture || brush.erase) return base;
+    if (brush.stamp) return { ...base, stamp: { image: paintTexture.image, widthCm: brush.textureCm } };
+    const units = brush.textureCm * paintUnitsPerCm;
+    if (!tileCache || tileCache.image !== paintTexture.image || tileCache.units !== units) tileCache = { image: paintTexture.image, units, pattern: tilePattern(paintTexture.image, units) };
+    return { ...base, pattern: tileCache.pattern };
+  }
+  /** A picture from the phone to paint with: TEXTURE comes on with it. */
+  async function uploadPaintTexture(file: File): Promise<void> {
+    let image: (CanvasImageSource & { width: number; height: number }) | null = null;
+    try { image = await createImageBitmap(file); } catch {
+      image = await new Promise<HTMLImageElement | null>((resolve) => { const i = new Image(), url = URL.createObjectURL(file); i.onload = () => { URL.revokeObjectURL(url); resolve(i); }; i.onerror = () => { URL.revokeObjectURL(url); resolve(null); }; i.src = url; });
+    }
+    if (!image || disposed) return;
+    paintTexture = { name: file.name, image: SkinPainter.imageOf(image, 1024) };
+    if ('close' in image && typeof image.close === 'function') image.close();
+    tileCache = null; brush.texture = true; brush.erase = false;
+    refresh();
   }
   function endSkinStroke(): void {
     if (!skinPainting) return;
@@ -500,6 +532,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   const buttons: Record<string, HTMLButtonElement> = {};
   /** FACE's brush controls (shown while PAINT SKIN is on) and its colour swatches, by colour. */
   let skinTools: HTMLElement | null = null;
+  /** The TEXTURE SIZE slider and its line, shown only with a picture to paint with. */
+  let textureSize: HTMLInputElement | null = null, textureLabel: HTMLElement | null = null;
   const swatchButtons = new Map<string, HTMLButtonElement>();
   let armsInput: HTMLInputElement | null = null;
   let shirtLengthInput: HTMLInputElement | null = null;
@@ -576,6 +610,12 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     if (strengthLine) strengthLine.textContent = skinStrengthLine(brush.strength);
     if (buttons.skinHard) buttons.skinHard.textContent = `EDGE · ${brush.hard ? 'HARD' : 'SOFT'}`;
     if (buttons.skinErase) buttons.skinErase.textContent = `ERASE · ${brush.erase ? 'ON' : 'OFF'}`;
+    const withTexture = !!paintTexture && brush.texture && !brush.erase;
+    if (buttons.skinTexture) { buttons.skinTexture.textContent = `PAINT WITH · ${withTexture ? 'TEXTURE' : 'COLOUR'}`; buttons.skinTexture.disabled = !paintTexture; buttons.skinTexture.style.opacity = paintTexture ? '1' : '.4'; }
+    if (buttons.skinStamp) { buttons.skinStamp.textContent = `TEXTURE · ${brush.stamp ? 'STAMP' : 'TILE'}`; buttons.skinStamp.style.display = paintTexture ? '' : 'none'; }
+    if (textureSize) textureSize.style.display = paintTexture ? '' : 'none';
+    if (textureLabel) { textureLabel.style.display = paintTexture ? '' : 'none'; textureLabel.textContent = skinTextureLine(brush.textureCm, brush.stamp, paintTexture?.name ?? '', withTexture); }
+    for (const [, b] of swatchButtons) if (withTexture) b.style.borderColor = 'var(--sl-btn-line,#ffffff30)';
     const p = painted?.painter;
     for (const [b, on] of [[buttons.skinUndo, !!p?.canUndo], [buttons.skinRedo, !!p?.canRedo], [buttons.skinClear, !!p], [buttons.skinSave, !!p]] as const) {
       if (!b) continue;
@@ -1464,6 +1504,18 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       any.addEventListener('input', () => { brush.hex = any.value; brush.erase = false; refresh(); });
       swatches.appendChild(any);
       tools.appendChild(swatches);
+      // ...or a picture of his own, as the clothing takes one (Joshua, 2026-10-24)
+      const picker = document.createElement('input');
+      picker.type = 'file'; picker.accept = 'image/*'; picker.style.display = 'none'; picker.dataset.role = 'sarahlab-paint-texture-file';
+      picker.addEventListener('change', () => { const f = picker.files?.[0]; picker.value = ''; if (f) void uploadPaintTexture(f); });
+      root.appendChild(picker);
+      const textureRow = document.createElement('div');
+      textureRow.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;align-items:center';
+      buttons.skinTextureUpload = btn('UPLOAD PAINT TEXTURE…', SARAH_LAB_ACTION.skinTextureUpload, () => picker.click());
+      buttons.skinTexture = btn('PAINT WITH · COLOUR', SARAH_LAB_ACTION.skinTexture, () => { if (paintTexture) { brush.texture = !brush.texture; if (brush.texture) brush.erase = false; } });
+      buttons.skinStamp = btn('TEXTURE · TILE', SARAH_LAB_ACTION.skinStamp, () => { brush.stamp = !brush.stamp; });
+      for (const b of [buttons.skinTextureUpload, buttons.skinTexture, buttons.skinStamp]) textureRow.appendChild(small(b));
+      tools.appendChild(textureRow);
       const range = (field: string, value: number, min: number, max: number, onInput: (v: number) => void) => {
         const label = document.createElement('div'); label.dataset.field = field; label.style.cssText = 'font-size:12px;letter-spacing:.05em'; fields[field] = label;
         const input = document.createElement('input'); input.type = 'range'; input.min = String(min); input.max = String(max); input.value = String(value);
@@ -1473,6 +1525,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       };
       range(SARAH_LAB_FIELD.skinBrush, Math.round(brush.cm * 10), Math.round(SKIN_BRUSH_CM.min * 10), Math.round(SKIN_BRUSH_CM.max * 10), (v) => { brush.cm = v / 10; });
       range(SARAH_LAB_FIELD.skinStrength, Math.round(brush.strength * 100), 5, 100, (v) => { brush.strength = v / 100; });
+      range(SARAH_LAB_FIELD.skinTextureSize, Math.round(brush.textureCm * 10), Math.round(SKIN_TEXTURE_CM.min * 10), Math.round(SKIN_TEXTURE_CM.max * 10), (v) => { brush.textureCm = v / 10; });
+      textureSize = tools.lastElementChild as HTMLInputElement;
+      textureLabel = textureSize.previousElementSibling as HTMLElement;
       const row = document.createElement('div');
       row.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap';
       buttons.skinHard = btn('EDGE · SOFT', SARAH_LAB_ACTION.skinHard, () => { brush.hard = !brush.hard; });
@@ -1936,7 +1991,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
           const { width, height } = ctx.renderer.size();
           p.beginStroke(camera, width, height);
           let any = false;
-          for (const [x, y] of points) any = p.stroke(x, y, { colour: hexRgb(brush.hex), radiusCm: brush.cm, strength: brush.strength, hardness: brush.hard ? 0.85 : 0.2, erase: brush.erase }) || any;
+          for (const [x, y] of points) any = p.stroke(x, y, brushSettings()) || any;
           p.endStroke(); refresh();
           return any;
         },

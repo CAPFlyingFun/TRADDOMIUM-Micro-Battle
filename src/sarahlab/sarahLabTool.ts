@@ -148,6 +148,10 @@ export const SARAH_LAB_ACTION = Object.freeze({
   skinRedo: 'sarahlab:skin-redo',
   skinClear: 'sarahlab:skin-clear',
   skinSave: 'sarahlab:skin-save',
+  /** a picture to paint WITH: upload it, colour or texture, tile or stamp */
+  skinTextureUpload: 'sarahlab:skin-texture-upload',
+  skinTexture: 'sarahlab:skin-texture',
+  skinStamp: 'sarahlab:skin-stamp',
 });
 
 export const SARAH_LAB_FIELD = Object.freeze({
@@ -173,6 +177,7 @@ export const SARAH_LAB_FIELD = Object.freeze({
   skinNote: 'sarahlab-skin-note',
   skinBrush: 'sarahlab-skin-brush',
   skinStrength: 'sarahlab-skin-strength',
+  skinTextureSize: 'sarahlab-skin-texture-size',
 });
 
 /** Where the cloth tee is: the light tee as one sheet, with rows below its hem to mid-thigh (`scripts/sarahV2Recovery/shirt-cloth.mjs`). */

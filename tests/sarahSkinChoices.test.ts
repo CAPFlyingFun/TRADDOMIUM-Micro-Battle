@@ -2,7 +2,7 @@ import { existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import sharp from 'sharp';
 import { describe, expect, it } from 'vitest';
-import { SKIN_CHOICES, SKIN_ORIGINAL_IMAGE, SKIN_SWATCHES, hexRgb, nextSkin, skinBrushLine, skinGpuMb, skinLine, skinNote, skinStrengthLine } from '../src/sarahlab/skinChoices';
+import { SKIN_CHOICES, SKIN_ORIGINAL_IMAGE, SKIN_SWATCHES, SKIN_TEXTURE_CM, hexRgb, nextSkin, skinBrushLine, skinGpuMb, skinLine, skinNote, skinStrengthLine, skinTextureLine } from '../src/sarahlab/skinChoices';
 import { STUDIO_SECTIONS } from '../src/sarahlab/studioLayout';
 
 const PUBLIC = join(__dirname, '..', 'public');
@@ -62,6 +62,15 @@ describe("Sarah's skin choices (Joshua, 2026-10-24: switch between the enhanced 
     expect(hexRgb('#ff8000')).toEqual([255, 128, 0]);
     expect(hexRgb('nonsense')).toEqual(hexRgb(SKIN_SWATCHES[0].hex));
     for (const s of SKIN_SWATCHES) expect(s.hex).toMatch(/^#[0-9a-f]{6}$/);
+  });
+
+  it('says how big a painted picture is on her, as a tile or a stamp (Joshua: "upload custom paint textures like with the clothing")', () => {
+    expect(skinTextureLine(6, false, 'stripes.png', true)).toBe('TEXTURE SIZE · repeats every 6.0 cm · stripes.png');
+    expect(skinTextureLine(12, true, 'star.png', true)).toBe('TEXTURE SIZE · a 12 cm stamp · star.png');
+    expect(skinTextureLine(6, false, 'x.png', false)).toContain('painting colour');
+    expect(SKIN_TEXTURE_CM.min).toBeGreaterThan(0);
+    expect(SKIN_TEXTURE_CM.initial).toBeGreaterThanOrEqual(SKIN_TEXTURE_CM.min);
+    expect(SKIN_TEXTURE_CM.initial).toBeLessThanOrEqual(SKIN_TEXTURE_CM.max);
   });
 
   it('has a FACE section in the studio for them', () => {

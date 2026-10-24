@@ -36,3 +36,21 @@ Sheets:
 - `01-skins.jpg`: the four skins.
 - `02-paint.jpg`: strokes, a side view, then undo.
 - `03-upload-portrait.jpg`: an upload, held upright, clothes hidden.
+
+## Painting with a picture (alpha.124, waiting for his approval)
+
+Joshua, 2026-10-24: "can you upload custom paint textures like with the clothing?"
+
+With PAINT SKIN on, **UPLOAD PAINT TEXTURE…** takes any picture. Its pixels are read once, at most 1024 px on a
+side. **PAINT WITH** then switches the brush between the swatch colour and the picture.
+
+- **TEXTURE · TILE** repeats the picture over her every TEXTURE SIZE (0.5 to 40 cm). It is laid on her rest surface in
+  three planes, the way the clothing's patterns are.
+- **TEXTURE · STAMP** lays the picture down once, TEXTURE SIZE wide, centred where the stroke lands. Rubbing over it
+  paints the decal in. A transparent background leaves no edge, and the decal fades out where her surface turns
+  away.
+
+The eraser still paints back to the skin underneath.
+
+Sheet: `04-paint-texture.jpg`: a tiled stripe band across her belly and a stamped star on her upper arm. CLOTHES
+HIDDEN.

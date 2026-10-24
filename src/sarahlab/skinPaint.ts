@@ -24,7 +24,25 @@
  * nothing of the file changes -- the painted image is a texture of its own, and a PNG only when asked for one. Undo is
  * by stroke: before a stroke first changes a row of the image, that row's bytes are kept, once per stroke.
  *
- * The core (the grid, the rasteriser, the undo) is plain arrays and imports nothing, tested without a GPU;
+ * PATTERNS AND DECALS (Joshua, 2026-10-24: "can you upload custom paint textures like with the clothing?"): the brush
+ * can paint a PICTURE instead of a flat colour. A `SkinPattern` says what colour a texel should become from where the
+ * texel is on her at rest -- its rest point and its triangle's rest face normal -- so a picture is laid on HER, the way
+ * the fabric swatches are (`fabricMaterial.ts`), and never on the atlas, where it would be cut into the islands'
+ * pieces. The brush still decides how much of it lands (its radius, falloff and strength), and the picture's own alpha
+ * scales that, so a transparent background paints nothing. Two kinds:
+ *
+ * - `tilePattern`, a REPEAT: the picture tiles every `tile` along the three axis planes, blended by how squarely the
+ *   surface faces each (triplanar, the fabric's own projection and planes), so it has no seam anywhere on her.
+ * - `stampPattern`, a DECAL: one picture projected straight along a normal onto her, centred on a point, upright by
+ *   the world's up, and fading out where the surface turns away so it never smears round her side. The painter
+ *   anchors one at the first touch of a stroke and the rest of the stroke rubs that same decal in.
+ *
+ * Both sample the picture bilinearly with its colour weighted by alpha, so a decal's transparent edge does not draw a
+ * dark fringe. Where triangles overlap, a texel still blends once, and its colour is the one the strongest weight
+ * found (ties broken the same way whatever order the triangles come in: a texel inside a triangle beats one in its
+ * padding, then the higher colour).
+ *
+ * The core (the grid, the rasteriser, the patterns, the undo) is plain arrays and imports nothing, tested without a GPU;
  * `SkinPainter` at the bottom reads three's posed vertices to find what is under the finger, exactly as `BodyPaint`
  * does, and sends the GPU only the rows a dab changed.
  */
@@ -45,6 +63,11 @@ export interface SkinMesh {
 }
 /** 0..255 a channel. */
 export type Rgb = readonly [number, number, number];
+/**
+ * What a texel's goal colour is, from where it is on her at rest (x, y, z) and the way its triangle faces there at rest
+ * (nx, ny, nz, unit): rgba 0..255 written into `out` (alpha 0 = leave it).
+ */
+export type SkinPattern = (x: number, y: number, z: number, nx: number, ny: number, nz: number, out: Float32Array) => void;
 export interface SkinDab {
   /** Mesh units, rest space. */
   readonly centre: { readonly x: number; readonly y: number; readonly z: number };
@@ -60,6 +83,9 @@ export interface SkinDab {
   /** Her rest normal at the hit: a triangle facing away from it (rest face normal · this < -0.1) is not painted, so a
    *  dab on the front of an arm never reaches its back. */
   readonly normal?: readonly [number, number, number];
+  /** A picture instead of `colour`: each texel's goal is the pattern's at its rest point, its weight scaled by the
+   *  pattern's alpha. Ignored when erasing. */
+  readonly pattern?: SkinPattern;
 }
 /** Rows of the image, inclusive. */
 export interface DirtyRows { readonly from: number; readonly to: number }
@@ -198,6 +224,8 @@ interface Brush {
   /** The unit normal to face, or null for no test. */
   readonly facing: readonly [number, number, number] | null;
   readonly colour: readonly [number, number, number];
+  /** The picture to paint instead of `colour`; null when there is none or the dab erases. */
+  readonly pattern: SkinPattern | null;
   /** Vertices both `rest` and `uv` hold. */
   readonly count: number;
 }
@@ -219,26 +247,27 @@ function brushFor(target: SkinImage, mesh: SkinMesh, dab: SkinDab): Brush | null
   return {
     c, r, r2: r * r, core: clamp01(dab.hardness) * r, strength, facing,
     colour: [channel(dab.colour[0]), channel(dab.colour[1]), channel(dab.colour[2])],
+    pattern: dab.erase ? null : dab.pattern ?? null,
     count: Math.min(Math.floor(mesh.rest.length / 3), Math.floor(mesh.uv.length / 2)),
   };
 }
 
 /**
- * Triangle `t` as the rasteriser sees it, into `out`: its corners in image pixels (0-5), at rest (6-14), and the pixels
- * it may cover, padded and clipped to the image (x0, x1, y0, y1 at 15-18). False when the dab cannot reach it: out of
- * the mesh, too far, facing away, too small in the image, or wholly off the image.
+ * Triangle `t` as the rasteriser sees it, into `out`: its corners in image pixels (0-5), at rest (6-14), the pixels it
+ * may cover, padded and clipped to the image (x0, x1, y0, y1 at 15-18), and its unit rest face normal (19-21, zero for
+ * a triangle with no area at rest). False when the dab cannot reach it: out of the mesh, too far, facing away, too
+ * small in the image, or wholly off the image.
  */
 function triangleFor(mesh: SkinMesh, t: number, image: SkinImage, b: Brush, out: Float64Array): boolean {
   if (!restBox(mesh.rest, mesh.index, b.count, t, BOX)) return false;
   if (boxDistanceSq(BOX, b.c.x, b.c.y, b.c.z) >= b.r2) return false;
   const ia = mesh.index[t * 3], ib = mesh.index[t * 3 + 1], ic = mesh.index[t * 3 + 2], rest = mesh.rest, uv = mesh.uv;
   for (let k = 0; k < 3; k++) { out[6 + k] = rest[ia * 3 + k]; out[9 + k] = rest[ib * 3 + k]; out[12 + k] = rest[ic * 3 + k]; }
-  if (b.facing) {
-    const e1x = out[9] - out[6], e1y = out[10] - out[7], e1z = out[11] - out[8];
-    const e2x = out[12] - out[6], e2y = out[13] - out[7], e2z = out[14] - out[8];
-    const nx = e1y * e2z - e1z * e2y, ny = e1z * e2x - e1x * e2z, nz = e1x * e2y - e1y * e2x, len = Math.hypot(nx, ny, nz);
-    if (len > 0 && (nx * b.facing[0] + ny * b.facing[1] + nz * b.facing[2]) / len < BACK_FACING) return false;
-  }
+  const e1x = out[9] - out[6], e1y = out[10] - out[7], e1z = out[11] - out[8];
+  const e2x = out[12] - out[6], e2y = out[13] - out[7], e2z = out[14] - out[8];
+  const nx = e1y * e2z - e1z * e2y, ny = e1z * e2x - e1x * e2z, nz = e1x * e2y - e1y * e2x, len = Math.hypot(nx, ny, nz);
+  out[19] = len > 0 ? nx / len : 0; out[20] = len > 0 ? ny / len : 0; out[21] = len > 0 ? nz / len : 0;
+  if (b.facing && len > 0 && out[19] * b.facing[0] + out[20] * b.facing[1] + out[21] * b.facing[2] < BACK_FACING) return false;
   const w = image.width, h = image.height;
   out[0] = uv[ia * 2] * w; out[1] = uv[ia * 2 + 1] * h;
   out[2] = uv[ib * 2] * w; out[3] = uv[ib * 2 + 1] * h;
@@ -252,7 +281,7 @@ function triangleFor(mesh: SkinMesh, t: number, image: SkinImage, b: Brush, out:
   out[18] = Math.min(h - 1, Math.floor(Math.max(out[1], out[3], out[5]) + PAD - 0.5));
   return out[15] <= out[16] && out[17] <= out[18];
 }
-const TRIANGLE = new Float64Array(19), BOX = new Float64Array(6);
+const TRIANGLE = new Float64Array(22), BOX = new Float64Array(6);
 
 /** Squared distance from (px, py) to the segment a-b. */
 function segmentSq(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
@@ -265,54 +294,67 @@ function segmentSq(px: number, py: number, ax: number, ay: number, bx: number, b
 /**
  * The weights of one dab, gathered per texel as the MAX over every triangle covering it, so each texel is blended once.
  * One array, reused from dab to dab over the dab's box of pixels; a dab spread wider than `DENSE_LIMIT` texels (islands
- * at opposite corners of the image) gathers into a map instead.
+ * at opposite corners of the image) gathers into a map instead. Weights are held at float32 precision either way, so a
+ * dab blends to the same bytes whichever way it was gathered.
+ *
+ * A pattern dab also keeps, beside each weight, the GOAL the strongest weight came with, packed as one number:
+ * inside << 24 | r << 16 | g << 8 | b, where `inside` is 1 when the texel's centre is inside that triangle rather than in
+ * its padding. A tie in weight goes to the larger number, so the result never depends on the triangles' order.
  */
 class Weights {
   private dense = new Float32Array(0);
+  private goals = new Uint32Array(0);
   private keys = new Int32Array(1024);
   private n = 0;
   private sparse: Map<number, number> | null = null;
+  private sparseGoals: Map<number, number> | null = null;
+  private patterned = false;
   private x0 = 0;
   private y0 = 0;
   private span = 1;
   private stride = 1;
 
-  open(x0: number, y0: number, x1: number, y1: number, stride: number): void {
-    this.x0 = x0; this.y0 = y0; this.span = x1 - x0 + 1; this.stride = stride; this.n = 0;
+  open(x0: number, y0: number, x1: number, y1: number, stride: number, patterned: boolean): void {
+    this.x0 = x0; this.y0 = y0; this.span = x1 - x0 + 1; this.stride = stride; this.n = 0; this.patterned = patterned;
     const area = this.span * (y1 - y0 + 1);
-    if (area > DENSE_LIMIT) { this.sparse = new Map(); return; }
-    this.sparse = null;
+    if (area > DENSE_LIMIT) { this.sparse = new Map(); this.sparseGoals = patterned ? new Map() : null; return; }
+    this.sparse = null; this.sparseGoals = null;
     if (this.dense.length < area) this.dense = new Float32Array(Math.min(DENSE_LIMIT, Math.max(area, this.dense.length * 2)));
+    if (patterned && this.goals.length < this.dense.length) this.goals = new Uint32Array(this.dense.length); // only once a pattern is painted
   }
 
-  max(x: number, y: number, w: number): void {
+  /** Texel (x, y) is offered weight `w` with goal `goal` (0 for a flat colour). */
+  max(x: number, y: number, w: number, goal: number): void {
+    const f = Math.fround(w);
     if (this.sparse) {
-      // held at the array's precision, so a dab blends to the same bytes whichever way it was gathered
-      const k = y * this.stride + x, f = Math.fround(w);
-      if (f > (this.sparse.get(k) ?? 0)) this.sparse.set(k, f);
+      const k = y * this.stride + x, was = this.sparse.get(k) ?? 0;
+      if (f < was || (f === was && (!this.sparseGoals || goal <= (this.sparseGoals.get(k) ?? 0)))) return;
+      this.sparse.set(k, f);
+      this.sparseGoals?.set(k, goal);
       return;
     }
     const k = (y - this.y0) * this.span + (x - this.x0), was = this.dense[k];
-    if (w <= was) return;
+    if (f < was || (f === was && (!this.patterned || goal <= this.goals[k]))) return;
     if (was === 0) {
       if (this.n === this.keys.length) { const grown = new Int32Array(this.keys.length * 2); grown.set(this.keys); this.keys = grown; }
       this.keys[this.n++] = k;
     }
-    this.dense[k] = w;
+    this.dense[k] = f;
+    if (this.patterned) this.goals[k] = goal;
   }
 
-  /** Every texel gathered, as (pixel index, weight), each once; the array is left empty for the next dab. */
-  drain(each: (pixel: number, w: number) => void): void {
+  /** Every texel gathered, as (pixel index, weight, goal), each once; the array is left empty for the next dab. */
+  drain(each: (pixel: number, w: number, goal: number) => void): void {
     if (this.sparse) {
-      const s = this.sparse;
-      this.sparse = null;
-      for (const [k, w] of s) each(k, w);
+      const s = this.sparse, g = this.sparseGoals;
+      this.sparse = null; this.sparseGoals = null;
+      for (const [k, w] of s) each(k, w, g?.get(k) ?? 0);
       return;
     }
     for (let i = 0; i < this.n; i++) {
       const k = this.keys[i], w = this.dense[k];
       this.dense[k] = 0;
-      each((this.y0 + Math.floor(k / this.span)) * this.stride + this.x0 + (k % this.span), w);
+      each((this.y0 + Math.floor(k / this.span)) * this.stride + this.x0 + (k % this.span), w, this.patterned ? this.goals[k] : 0);
     }
     this.n = 0;
   }
@@ -325,30 +367,44 @@ function rasterise(t: Float64Array, b: Brush, into: Weights): void {
   const e1x = u1 - u0, e1y = v1 - v0, e2x = u2 - u0, e2y = v2 - v0;
   const inv = 1 / (e1x * e2y - e1y * e2x);
   const ax = t[6], ay = t[7], az = t[8], bx = t[9], by = t[10], bz = t[11], cx = t[12], cy = t[13], cz = t[14];
+  const fnx = t[19], fny = t[20], fnz = t[21], pattern = b.pattern, rgba = PATTERN_OUT;
   const soft = b.r - b.core;
   for (let y = t[17]; y <= t[18]; y++) {
     const qy = y + 0.5;
     for (let x = t[15]; x <= t[16]; x++) {
       const qx = x + 0.5, wx = qx - u0, wy = qy - v0;
       let l1 = (wx * e2y - wy * e2x) * inv, l2 = (e1x * wy - e1y * wx) * inv, l0 = 1 - l1 - l2;
-      if (l0 < 0 || l1 < 0 || l2 < 0) {
+      const inside = l0 >= 0 && l1 >= 0 && l2 >= 0;
+      if (!inside) {
         // outside: covered within a pixel of it, at a point ON the triangle (proportions clamped; never extrapolated off her)
         if (Math.min(segmentSq(qx, qy, u0, v0, u1, v1), segmentSq(qx, qy, u1, v1, u2, v2), segmentSq(qx, qy, u2, v2, u0, v0)) > PAD * PAD) continue;
         l0 = Math.max(l0, 0); l1 = Math.max(l1, 0); l2 = Math.max(l2, 0);
         const s = l0 + l1 + l2;
         l0 /= s; l1 /= s; l2 /= s;
       }
-      const dx = l0 * ax + l1 * bx + l2 * cx - b.c.x, dy = l0 * ay + l1 * by + l2 * cy - b.c.y, dz = l0 * az + l1 * bz + l2 * cz - b.c.z;
+      const px = l0 * ax + l1 * bx + l2 * cx, py = l0 * ay + l1 * by + l2 * cy, pz = l0 * az + l1 * bz + l2 * cz;
+      const dx = px - b.c.x, dy = py - b.c.y, dz = pz - b.c.z;
       const d2 = dx * dx + dy * dy + dz * dz;
       if (d2 >= b.r2) continue;
       const d = Math.sqrt(d2);
       let f = 1;
       if (d > b.core) { const s = (d - b.core) / soft; f = 1 - s * s * (3 - 2 * s); }
-      const w = b.strength * f;
-      if (w >= MIN_WEIGHT) into.max(x, y, w);
+      let w = b.strength * f;
+      if (w < MIN_WEIGHT) continue;
+      if (!pattern) { into.max(x, y, w, 0); continue; }
+      rgba[0] = rgba[1] = rgba[2] = rgba[3] = 0;
+      pattern(px, py, pz, fnx, fny, fnz, rgba);
+      const alpha = rgba[3];
+      if (!(alpha > 0)) continue;
+      w *= alpha < 255 ? alpha / 255 : 1;
+      if (w < MIN_WEIGHT) continue;
+      into.max(x, y, w, (inside ? 1 << 24 : 0) | (byte(rgba[0]) << 16) | (byte(rgba[1]) << 8) | byte(rgba[2]));
     }
   }
 }
+const PATTERN_OUT = new Float32Array(4);
+/** A pattern's channel as a whole 0..255 (NaN 0). */
+const byte = (v: number) => (v > 0 ? (v < 255 ? Math.round(v) : 255) : 0);
 
 /**
  * Paint one dab into `target` (and nothing else); returns the rows it changed, or null if none. `triangles` are the
@@ -367,15 +423,20 @@ export function paintDab(target: SkinImage, base: SkinImage | null, mesh: SkinMe
     x0 = Math.min(x0, T[15]); x1 = Math.max(x1, T[16]); y0 = Math.min(y0, T[17]); y1 = Math.max(y1, T[18]);
   }
   if (!reach.length) return null;
-  WEIGHTS.open(x0, y0, x1, y1, target.width);
+  const patterned = !!b.pattern;
+  WEIGHTS.open(x0, y0, x1, y1, target.width, patterned);
   for (const t of reach) if (triangleFor(mesh, t, target, b, T)) rasterise(T, b, WEIGHTS);
   const data = target.data, width = target.width, [cr, cg, cb] = b.colour;
   let from = Infinity, to = -Infinity;
-  WEIGHTS.drain((pixel, w) => {
+  WEIGHTS.drain((pixel, w, packed) => {
     const o = pixel * 4, r = data[o], g = data[o + 1], bl = data[o + 2];
-    const nr = Math.round(r + ((goal ? goal[o] : cr) - r) * w);
-    const ng = Math.round(g + ((goal ? goal[o + 1] : cg) - g) * w);
-    const nb = Math.round(bl + ((goal ? goal[o + 2] : cb) - bl) * w);
+    // the goal: the base's texel (erasing), the pattern's colour the strongest weight came with, or the flat colour
+    const gr = goal ? goal[o] : patterned ? (packed >> 16) & 255 : cr;
+    const gg = goal ? goal[o + 1] : patterned ? (packed >> 8) & 255 : cg;
+    const gb = goal ? goal[o + 2] : patterned ? packed & 255 : cb;
+    const nr = Math.round(r + (gr - r) * w);
+    const ng = Math.round(g + (gg - g) * w);
+    const nb = Math.round(bl + (gb - bl) * w);
     if (nr === r && ng === g && nb === bl) return;
     data[o] = nr; data[o + 1] = ng; data[o + 2] = nb; // alpha untouched
     const row = Math.floor(pixel / width);
@@ -399,6 +460,110 @@ export function dabRows(target: SkinImage, mesh: SkinMesh, triangles: Iterable<n
     to = Math.max(to, TRIANGLE[18]);
   }
   return from <= to ? { from, to } : null;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// PATTERNS: a picture laid on her at rest
+
+/** The triplanar blend: each plane's share is |n| along its axis to this power, normalised. */
+const TRIPLANAR_SHARPNESS = 4;
+/** A decal fades in as the surface turns toward it: none at or below this cosine to its normal... */
+const STAMP_EDGE = 0.2;
+/** ...all of it from this one. */
+const STAMP_FULL = 0.4;
+/** A decal whose normal is this near vertical (|n.y|, about 8°) takes its up from +z instead of +y. */
+const STAMP_VERTICAL = 0.99;
+
+function checkImage(image: SkinImage, who: string): void {
+  if (!(image.width >= 1 && image.height >= 1) || image.data.length < image.width * image.height * 4) throw new RangeError(`skinPaint.${who}: an image with no pixels`);
+}
+
+/**
+ * Add `share` of the picture at pixel point (px, py) (texel centres at i + 0.5) into `acc`, bilinearly and weighted by
+ * alpha: acc[0..2] += share · a · rgb, acc[3] += share · a. `wrap` repeats the picture; otherwise its edge texels hold.
+ */
+function sampleInto(image: SkinImage, px: number, py: number, wrap: boolean, share: number, acc: Float64Array): void {
+  const W = image.width, H = image.height, d = image.data;
+  const fx = px - 0.5, fy = py - 0.5, ix = Math.floor(fx), iy = Math.floor(fy), tx = fx - ix, ty = fy - iy;
+  for (let j = 0; j < 2; j++) {
+    const ry = iy + j, row = wrap ? ((ry % H) + H) % H : ry < 0 ? 0 : ry >= H ? H - 1 : ry, sy = j ? ty : 1 - ty;
+    for (let i = 0; i < 2; i++) {
+      const c = share * sy * (i ? tx : 1 - tx);
+      if (!(c > 0)) continue;
+      const rx = ix + i, col = wrap ? ((rx % W) + W) % W : rx < 0 ? 0 : rx >= W ? W - 1 : rx;
+      const o = (row * W + col) * 4, a = d[o + 3] * c;
+      acc[0] += a * d[o]; acc[1] += a * d[o + 1]; acc[2] += a * d[o + 2]; acc[3] += a;
+    }
+  }
+}
+
+/** What `acc` gathered, its colour no longer weighted by alpha, into `out` (rgba 0..255), alpha times `fade`. */
+function finish(acc: Float64Array, out: Float32Array, fade: number): void {
+  const a = acc[3];
+  if (a > 0) { out[0] = acc[0] / a; out[1] = acc[1] / a; out[2] = acc[2] / a; out[3] = a * fade; }
+  else out[0] = out[1] = out[2] = out[3] = 0;
+}
+
+/**
+ * A REPEAT: `image` tiled every `tile` mesh units along the three axis planes -- yz where she faces along x, xz where
+ * she faces up or down, xy where she faces forward or back -- each plane's share |n| on its axis to the fourth,
+ * normalised (the fabric swatches' own projection and planes, `fabricMaterial.ts`). Row 0 of the image is its top;
+ * image up is +y on the xy and yz planes and +z on xz. Bilinear, wrapping round; alpha is the image's.
+ */
+export function tilePattern(image: SkinImage, tile: number): SkinPattern {
+  checkImage(image, 'tilePattern');
+  if (!(tile > 0) || !Number.isFinite(tile)) throw new RangeError(`skinPaint.tilePattern: tile must be positive, not ${tile}`);
+  const W = image.width, H = image.height, acc = new Float64Array(4);
+  return (x, y, z, nx, ny, nz, out) => {
+    let wx = Math.abs(nx) ** TRIPLANAR_SHARPNESS, wy = Math.abs(ny) ** TRIPLANAR_SHARPNESS, wz = Math.abs(nz) ** TRIPLANAR_SHARPNESS;
+    const sum = wx + wy + wz;
+    if (sum > 0 && Number.isFinite(sum)) { wx /= sum; wy /= sum; wz /= sum; } else wx = wy = wz = 1 / 3;
+    acc.fill(0);
+    if (wx > 0) sampleInto(image, (z / tile) * W, (1 - y / tile) * H, true, wx, acc); // yz: across z, up y
+    if (wy > 0) sampleInto(image, (x / tile) * W, (1 - z / tile) * H, true, wy, acc); // xz: across x, up z
+    if (wz > 0) sampleInto(image, (x / tile) * W, (1 - y / tile) * H, true, wz, acc); // xy: across x, up y
+    finish(acc, out, 1);
+  };
+}
+
+/**
+ * A DECAL: `image` projected straight along `normal` onto her, centred on `centre`, `width` mesh units wide and as
+ * tall as its aspect makes it. Its up is the world's +y laid flat across `normal` (+z when `normal` is within about 8°
+ * of vertical), turned `angle` radians about `normal`, anticlockwise as seen from in front. Bilinear, the picture's
+ * edge texels holding to the rectangle's edge; outside the rectangle alpha is 0, and alpha fades to 0 as the surface
+ * turns away from `normal` (all of it while face normal · normal is 0.4 or more, none at 0.2 or less), so the decal
+ * never smears round her side.
+ */
+export function stampPattern(image: SkinImage, centre: { readonly x: number; readonly y: number; readonly z: number }, normal: readonly [number, number, number], width: number, angle = 0): SkinPattern {
+  checkImage(image, 'stampPattern');
+  if (!(width > 0) || !Number.isFinite(width)) throw new RangeError(`skinPaint.stampPattern: width must be positive, not ${width}`);
+  let [n0, n1, n2] = normal;
+  const nl = Math.hypot(n0, n1, n2);
+  if (nl > 0 && Number.isFinite(nl)) { n0 /= nl; n1 /= nl; n2 /= nl; } else { n0 = 0; n1 = 0; n2 = 1; }
+  // up: world +y (near vertical, +z) with its part along the normal taken away
+  let u0: number, u1: number, u2: number;
+  if (Math.abs(n1) < STAMP_VERTICAL) { u0 = -n1 * n0; u1 = 1 - n1 * n1; u2 = -n1 * n2; } else { u0 = -n2 * n0; u1 = -n2 * n1; u2 = 1 - n2 * n2; }
+  const ul = Math.hypot(u0, u1, u2);
+  u0 /= ul; u1 /= ul; u2 /= ul;
+  // right = up × normal: to the right of someone facing the decal
+  const r0 = u1 * n2 - u2 * n1, r1 = u2 * n0 - u0 * n2, r2 = u0 * n1 - u1 * n0;
+  const cos = Math.cos(angle), sin = Math.sin(angle);
+  const R0 = cos * r0 + sin * u0, R1 = cos * r1 + sin * u1, R2 = cos * r2 + sin * u2;
+  const U0 = cos * u0 - sin * r0, U1 = cos * u1 - sin * r1, U2 = cos * u2 - sin * r2;
+  const W = image.width, H = image.height, height = (width * H) / W, acc = new Float64Array(4);
+  const cx = centre.x, cy = centre.y, cz = centre.z;
+  return (x, y, z, fnx, fny, fnz, out) => {
+    out[0] = out[1] = out[2] = out[3] = 0;
+    const fl = Math.hypot(fnx, fny, fnz);
+    const fade = fl > 0 ? clamp01(((fnx * n0 + fny * n1 + fnz * n2) / fl - STAMP_EDGE) / (STAMP_FULL - STAMP_EDGE)) : 0;
+    if (!(fade > 0)) return;
+    const dx = x - cx, dy = y - cy, dz = z - cz;
+    const px = ((dx * R0 + dy * R1 + dz * R2) / width + 0.5) * W, py = (0.5 - (dx * U0 + dy * U1 + dz * U2) / height) * H;
+    if (!(px >= 0 && px <= W && py >= 0 && py <= H)) return;
+    acc.fill(0);
+    sampleInto(image, px, py, false, 1, acc);
+    finish(acc, out, fade);
+  };
 }
 
 /** One stroke's kept rows: each row's bytes as they were before the stroke (or, on the redo side, after it). */
@@ -476,7 +641,18 @@ export class SkinUndo {
 // ---------------------------------------------------------------------------------------------------------------------
 // THE PAINTER: her mesh and the GPU
 
-export interface SkinStrokeSettings { colour: Rgb; radiusCm: number; strength: number; hardness: number; erase: boolean }
+export interface SkinStrokeSettings {
+  colour: Rgb;
+  radiusCm: number;
+  strength: number;
+  hardness: number;
+  erase: boolean;
+  /** A picture to paint instead of `colour` (a `tilePattern`, say), handed to every dab as it is. */
+  pattern?: SkinPattern | null;
+  /** A DECAL instead: one `stampPattern` per stroke, `widthCm` wide, anchored where the stroke first touches her, so
+   *  a tap-and-rub reveals one decal there. Wins over `pattern`. */
+  stamp?: { readonly image: SkinImage; readonly widthCm: number; readonly angle?: number } | null;
+}
 
 /** How near the finger a vertex has to be on screen, CSS pixels (as `BodyPaint.pick`). */
 const PICK_SLOP = 8;
@@ -513,8 +689,21 @@ export class SkinPainter {
   private surface: { readonly mesh: SkinMesh; readonly grid: TriangleGrid } | null = null;
   /** The last dab of this stroke, to join the next one to. */
   private last: { readonly centre: Point; readonly normal: readonly [number, number, number] } | null = null;
+  /** This stroke's decal, anchored at its first touch (null until then, and between strokes). */
+  private decal: SkinPattern | null = null;
   /** Until the GPU holds the texture once, every upload is the whole image: rows alone would leave the rest blank. */
   private uploaded = false;
+
+  /**
+   * An uploaded picture's pixels, for `tilePattern`, `stampPattern` or a stroke's `stamp`: read through a canvas and
+   * scaled down so its longer side is at most `maxSize` (a pattern is sampled, not stored per texel of her, so it
+   * needs no more).
+   */
+  static imageOf(source: CanvasImageSource & { width: number; height: number }, maxSize = 1024): SkinImage {
+    const w = Math.max(1, source.width), h = Math.max(1, source.height), scale = Math.min(1, Math.max(1, maxSize) / Math.max(w, h));
+    const width = Math.max(1, Math.round(w * scale)), height = Math.max(1, Math.round(h * scale));
+    return { width, height, data: readPixels(source, width, height) };
+  }
 
   /**
    * `source` is the image she wears now (an ImageBitmap, image, canvas or OffscreenCanvas); `template` the map this
@@ -571,6 +760,7 @@ export class SkinPainter {
     }
     this.screen = { x, y, depth };
     this.last = null;
+    this.decal = null;
     this.history.begin();
   }
 
@@ -623,6 +813,13 @@ export class SkinPainter {
     if (!(radius > 0) || !Number.isFinite(radius)) return false;
     const centre: Point = { x: restAttr.getX(hit), y: restAttr.getY(hit), z: restAttr.getZ(hit) };
     const normal: [number, number, number] = [nrmAttr.getX(hit), nrmAttr.getY(hit), nrmAttr.getZ(hit)];
+    let pattern = settings.pattern ?? undefined;
+    if (settings.stamp) {
+      const width = settings.stamp.widthCm / 100 / this.metresPerUnit;
+      if (!(width > 0) || !Number.isFinite(width)) return false;
+      // one decal a stroke, laid where the stroke first touched her: every dab after rubs in that same one
+      pattern = this.decal ??= stampPattern(settings.stamp.image, centre, normal, width, settings.stamp.angle ?? 0);
+    }
     const dabs: { centre: Point; normal: readonly [number, number, number] }[] = [];
     const from = this.last;
     if (from) {
@@ -640,7 +837,7 @@ export class SkinPainter {
     this.last = { centre, normal };
     let lo = Infinity, hi = -Infinity;
     for (const d of dabs) {
-      const dab: SkinDab = { centre: d.centre, radius, colour: settings.colour, strength: settings.strength, hardness: settings.hardness, erase: settings.erase, normal: d.normal };
+      const dab: SkinDab = { centre: d.centre, radius, colour: settings.colour, strength: settings.strength, hardness: settings.hardness, erase: settings.erase, normal: d.normal, pattern };
       const triangles = surface.grid.near(d.centre, radius);
       const rows = dabRows(this.image, surface.mesh, triangles, dab);
       if (!rows) continue;
@@ -657,6 +854,7 @@ export class SkinPainter {
     this.history.end();
     this.screen = null;
     this.last = null;
+    this.decal = null;
   }
 
   undo(): boolean { return this.restored(this.history.undo(this.image)); }
@@ -709,6 +907,7 @@ export class SkinPainter {
     this.history.clear();
     this.screen = null;
     this.last = null;
+    this.decal = null;
   }
 
   /**

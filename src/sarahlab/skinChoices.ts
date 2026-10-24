@@ -105,3 +105,11 @@ export function skinBrushLine(cm: number, hard: boolean, erase: boolean): string
 export function skinStrengthLine(strength: number): string {
   return `STRENGTH · ${Math.round(Math.max(0, Math.min(1, strength)) * 100)}% a dab`;
 }
+
+/** A painted picture's size on her: a TILE's repeat or a STAMP's width, centimetres. */
+export const SKIN_TEXTURE_CM = Object.freeze({ min: 0.5, max: 40, initial: 6 });
+
+export function skinTextureLine(cm: number, stamp: boolean, name: string, on: boolean): string {
+  const size = `${cm < 10 ? cm.toFixed(1) : Math.round(cm)} cm`;
+  return `TEXTURE SIZE · ${stamp ? `a ${size} stamp` : `repeats every ${size}`}${name ? ` · ${name}` : ''}${on ? '' : ' · (painting colour)'}`;
+}

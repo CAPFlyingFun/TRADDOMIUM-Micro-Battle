@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dabRows, paintDab, SkinUndo, TriangleGrid, type DirtyRows, type SkinDab, type SkinImage, type SkinMesh } from '../src/sarahlab/skinPaint';
+import { dabRows, paintDab, SkinUndo, stampPattern, tilePattern, TriangleGrid, type DirtyRows, type SkinDab, type SkinImage, type SkinMesh, type SkinPattern } from '../src/sarahlab/skinPaint';
 
 /**
  * SKIN PAINT (Joshua, 2026-10-24: "maybe a simple body texture uploaded/paint"). Her skin map is one atlas of hundreds
@@ -202,17 +202,21 @@ describe('a texel two triangles cover', () => {
     const W = 1450, side = 40 / W, corner = (u: number, v: number) => [u, v, u + side, v + side] as const;
     const a = { rest: [0, 0, 1, 1, 0], uv: corner(0, 0) } as const, aFar = { rest: [0, 0, 1, 1, 0.06], uv: corner(0, 0) } as const;
     const b = { rest: [1, 0, 2, 1, 0], uv: corner(1 - side, 1 - side) } as const, mesh = meshOf(a, aFar, b);
-    const dab = brush({ centre: { x: 1, y: 0.5, z: 0 }, radius: 0.5, strength: 0.9, hardness: 0.2 });
-    const expected = blank(W, W);
-    paintDab(expected, null, mesh, [0, 1], dab); // each island on its own: a small box
-    paintDab(expected, null, mesh, [4, 5], dab);
     const firstDifference = (x: SkinImage, y: SkinImage) => x.data.findIndex((v, i) => v !== y.data[i]);
-    for (const order of [[0, 1, 2, 3, 4, 5], [5, 4, 3, 2, 1, 0]]) {
-      const img = blank(W, W);
-      const rows = paintDab(img, null, mesh, order, dab);
-      expect(firstDifference(img, expected)).toBe(-1);
-      expect(rows?.from).toBeLessThan(41);
-      expect(rows?.to).toBeGreaterThan(W - 42);
+    // a flat colour, and a pattern whose colour says which sheet it came from (the map keeps the goals too)
+    const bySheet: SkinPattern = (x, _y, z, _nx, _ny, _nz, out) => { out[0] = z > 0.03 ? 0 : 255; out[1] = x > 1 ? 255 : 0; out[2] = z > 0.03 ? 255 : 0; out[3] = 255; };
+    for (const pattern of [undefined, bySheet]) {
+      const dab = brush({ centre: { x: 1, y: 0.5, z: 0 }, radius: 0.5, strength: 0.9, hardness: 0.2, pattern });
+      const expected = blank(W, W);
+      paintDab(expected, null, mesh, [0, 1], dab); // each island on its own: a small box
+      paintDab(expected, null, mesh, [4, 5], dab);
+      for (const order of [[0, 1, 2, 3, 4, 5], [5, 4, 3, 2, 1, 0]]) {
+        const img = blank(W, W);
+        const rows = paintDab(img, null, mesh, order, dab);
+        expect(firstDifference(img, expected)).toBe(-1);
+        expect(rows?.from).toBeLessThan(41);
+        expect(rows?.to).toBeGreaterThan(W - 42);
+      }
     }
   });
   it('even when the same triangle is offered twice', () => {
@@ -452,5 +456,225 @@ describe('SkinUndo', () => {
     expect(undo.redo(img)).toBeNull();
     undo.clear();
     expect(undo.canUndo).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// PATTERNS AND DECALS (Joshua, 2026-10-24: "can you upload custom paint textures like with the clothing?")
+
+/** A picture from rows of [r, g, b] or [r, g, b, a] texels, row 0 the top. */
+function picture(rows: readonly (readonly (readonly number[])[])[]): SkinImage {
+  const h = rows.length, w = rows[0].length, data = new Uint8ClampedArray(w * h * 4);
+  rows.forEach((row, y) => row.forEach((c, x) => data.set([c[0], c[1], c[2], c[3] ?? 255], (y * w + x) * 4)));
+  return { width: w, height: h, data };
+}
+/** What a pattern says at a point, for a surface facing `n`. */
+function sample(p: SkinPattern, at: readonly [number, number, number], n: readonly [number, number, number]): number[] {
+  const out = new Float32Array(4);
+  p(at[0], at[1], at[2], n[0], n[1], n[2], out);
+  return Array.from(out);
+}
+function expectRgba(got: number[], want: readonly number[]): void {
+  for (let i = 0; i < 4; i++) expect(got[i]).toBeCloseTo(want[i], 3);
+}
+/** A pattern of one colour everywhere. */
+const solid = (r: number, g: number, b: number, a = 255): SkinPattern => (_x, _y, _z, _nx, _ny, _nz, out) => { out[0] = r; out[1] = g; out[2] = b; out[3] = a; };
+
+/** The unit square at rest across `axis`, facing +axis; its in-plane coordinates (a, b) are its UVs. */
+function facing(axis: 'x' | 'y' | 'z'): SkinMesh {
+  const at = (a: number, b: number) => (axis === 'z' ? [a, b, 0] : axis === 'x' ? [0, a, b] : [b, 0, a]);
+  return { rest: [...at(0, 0), ...at(1, 0), ...at(1, 1), ...at(0, 1)], uv: [0, 0, 1, 0, 1, 1, 0, 1], index: [0, 1, 2, 0, 2, 3] };
+}
+
+const RED = [252, 0, 0], GREEN = [0, 252, 0], BLUE = [0, 0, 252], YELLOW = [252, 252, 0];
+/** Red top-left, green top-right, blue bottom-left, yellow bottom-right. */
+const QUARTERS = picture([[RED, GREEN], [BLUE, YELLOW]]);
+
+describe('tilePattern', () => {
+  it('repeats exactly every tile along a flat sheet facing each axis', () => {
+    // values in 64s, so a bilinear sample between them is a whole number and nothing rounds by luck
+    const pic = picture([0, 1, 2, 3].map((j) => [0, 1, 2, 3].map((i) => [64 * ((i + 2 * j) % 4), 64 * j, 64 * ((3 * i + j) % 4)])));
+    for (const axis of ['x', 'y', 'z'] as const) {
+      const mesh = facing(axis), c = mesh.rest;
+      const img = blank(64, 64);
+      paintDab(img, null, mesh, [0, 1], brush({ centre: { x: (c[0] + c[6]) / 2, y: (c[1] + c[7]) / 2, z: (c[2] + c[8]) / 2 }, radius: 2, pattern: tilePattern(pic, 0.25) }));
+      let varies = false;
+      for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) {
+        if (x + 16 < 64) expect(texel(img, x + 16, y)).toEqual(texel(img, x, y)); // a quarter of the sheet is one tile
+        if (y + 16 < 64) expect(texel(img, x, y + 16)).toEqual(texel(img, x, y));
+        if (x + 8 < 64 && texel(img, x + 8, y).join() !== texel(img, x, y).join()) varies = true;
+      }
+      expect(varies).toBe(true);
+    }
+  });
+  it('and as a function: one tile along on its plane is the same colour', () => {
+    const pic = picture([[[10, 200, 30], [250, 0, 90], [0, 0, 0]], [[60, 60, 255], [5, 5, 5], [128, 64, 32]]]), tile = 0.37;
+    const p = tilePattern(pic, tile), rand = random(9);
+    const planes = [[[1, 0, 0], [0, 1, 0], [0, 0, 1]], [[0, 1, 0], [1, 0, 0], [0, 0, 1]], [[0, 0, 1], [1, 0, 0], [0, 1, 0]]] as const;
+    for (const [n, e1, e2] of planes) for (let k = 0; k < 20; k++) {
+      const at = [rand() * 3 - 1, rand() * 3 - 1, rand() * 3 - 1] as const;
+      const here = sample(p, at, n);
+      for (const e of [e1, e2]) expectRgba(sample(p, [at[0] + e[0] * tile, at[1] + e[1] * tile, at[2] + e[2] * tile], n), here);
+    }
+  });
+  it('is upright: image up is +y on xy and yz, +z on xz, and row 0 is the top', () => {
+    const p = tilePattern(QUARTERS, 1);
+    expectRgba(sample(p, [0.25, 0.75, 0], [0, 0, 1]), [...RED, 255]); // xy: across x, up y
+    expectRgba(sample(p, [0.75, 0.75, 0], [0, 0, 1]), [...GREEN, 255]);
+    expectRgba(sample(p, [0.25, 0.25, 0], [0, 0, 1]), [...BLUE, 255]);
+    expectRgba(sample(p, [0, 0.75, 0.25], [1, 0, 0]), [...RED, 255]); // yz: across z, up y
+    expectRgba(sample(p, [0, 0.75, 0.75], [1, 0, 0]), [...GREEN, 255]);
+    expectRgba(sample(p, [0.25, 0, 0.75], [0, 1, 0]), [...RED, 255]); // xz: across x, up z
+    expectRgba(sample(p, [0.25, 0, 0.25], [0, 1, 0]), [...BLUE, 255]);
+  });
+  it("blends its planes by |n|^4, the shares summing to one", () => {
+    const one = tilePattern(picture([[[100, 150, 200], [100, 150, 200]], [[100, 150, 200], [100, 150, 200]]]), 0.2), rand = random(13);
+    for (let k = 0; k < 30; k++) {
+      const n = [rand() * 2 - 1, rand() * 2 - 1, rand() * 2 - 1] as const;
+      expectRgba(sample(one, [rand(), rand(), rand()], n), [100, 150, 200, 255]);
+    }
+    expectRgba(sample(one, [0.3, 0.1, 0.7], [0, 0, 0]), [100, 150, 200, 255]); // no normal at all: a third each
+    // red on the left, blue on the right: where she faces along x+y, the yz plane reads red and the xz plane blue
+    const halves = tilePattern(picture([[[255, 0, 0], [0, 0, 255]]]), 1);
+    expectRgba(sample(halves, [0.75, 0.4, 0.25], [Math.SQRT1_2, Math.SQRT1_2, 0]), [127.5, 0, 127.5, 255]);
+    expectRgba(sample(halves, [0.75, 0.4, 0.25], [1, 2, 0]), [15, 0, 240, 255]); // 1 : 16
+  });
+  it("takes its alpha from the picture, and a clear texel's colour never bleeds into its neighbour's", () => {
+    expectRgba(sample(tilePattern(picture([[[10, 20, 30, 102]]]), 1), [0.3, 0.3, 0], [0, 0, 1]), [10, 20, 30, 102]);
+    // halfway between an opaque red texel and a clear black one: half as opaque, and still red, not dark red
+    expectRgba(sample(tilePattern(picture([[[255, 0, 0, 255], [0, 0, 0, 0]]]), 1), [0.5, 0.3, 0], [0, 0, 1]), [255, 0, 0, 127.5]);
+  });
+});
+
+describe('stampPattern', () => {
+  // the quad's texel (x, y) is its rest point ((x + 0.5) / 64, (y + 0.5) / 64): the decal 0.5 wide, centred on texel 32
+  const centre = { x: 32.5 / 64, y: 32.5 / 64, z: 0 };
+  const stamp = (pic: SkinImage, angle = 0) => {
+    const img = blank(64, 64, [255, 255, 255]);
+    paintDab(img, null, QUAD, allOf(QUAD), brush({ centre, radius: 2, pattern: stampPattern(pic, centre, [0, 0, 1], 0.5, angle) }));
+    return img;
+  };
+  const rgb = (img: SkinImage, x: number, y: number) => texel(img, x, y).slice(0, 3);
+  const white = [255, 255, 255];
+
+  it('lands centred, the right way up and the right way round', () => {
+    const img = stamp(QUARTERS);
+    expect(rgb(img, 24, 40)).toEqual(RED); // up and left of the centre on her
+    expect(rgb(img, 40, 40)).toEqual(GREEN);
+    expect(rgb(img, 24, 24)).toEqual(BLUE);
+    expect(rgb(img, 40, 24)).toEqual(YELLOW);
+    expect(rgb(img, 32, 32)).toEqual([126, 126, 63]); // its very middle, all four at once
+  });
+  it('is as wide as asked, as tall as its aspect, and nothing outside it', () => {
+    const img = stamp(QUARTERS);
+    expect(rgb(img, 17, 32)).not.toEqual(white);
+    expect(rgb(img, 15, 32)).toEqual(white);
+    expect(rgb(img, 47, 32)).not.toEqual(white);
+    expect(rgb(img, 49, 32)).toEqual(white);
+    expect(rgb(img, 32, 17)).not.toEqual(white);
+    expect(rgb(img, 32, 15)).toEqual(white);
+    expect(rgb(img, 32, 47)).not.toEqual(white);
+    expect(rgb(img, 32, 49)).toEqual(white);
+    // a picture twice as wide as tall: 0.5 wide, 0.25 tall
+    const wide = stamp(picture([[RED, RED, RED, RED], [BLUE, BLUE, BLUE, BLUE]]));
+    expect(rgb(wide, 32, 39)).toEqual(RED);
+    expect(rgb(wide, 32, 41)).toEqual(white);
+    expect(rgb(wide, 32, 25)).toEqual(BLUE);
+    expect(rgb(wide, 32, 23)).toEqual(white);
+    expect(rgb(wide, 17, 32)).not.toEqual(white);
+    expect(rgb(wide, 15, 32)).toEqual(white);
+    expect(sample(stampPattern(QUARTERS, centre, [0, 0, 1], 0.5), [5, 5, 0], [0, 0, 1])).toEqual([0, 0, 0, 0]);
+  });
+  it('turns by its angle, anticlockwise as seen from in front', () => {
+    const img = stamp(QUARTERS, Math.PI / 2);
+    expect(rgb(img, 24, 24)).toEqual(RED);
+    expect(rgb(img, 24, 40)).toEqual(GREEN);
+    expect(rgb(img, 40, 24)).toEqual(BLUE);
+    expect(rgb(img, 40, 40)).toEqual(YELLOW);
+  });
+  it('facing straight up or down, takes +z for its up', () => {
+    // from above, up +z puts its right toward -x
+    const p = stampPattern(QUARTERS, { x: 0, y: 0, z: 0 }, [0, 1, 0], 0.5);
+    expectRgba(sample(p, [0.125, 0, 0.125], [0, 1, 0]), [...RED, 255]);
+    expectRgba(sample(p, [-0.125, 0, 0.125], [0, 1, 0]), [...GREEN, 255]);
+    expectRgba(sample(p, [0.125, 0, -0.125], [0, 1, 0]), [...BLUE, 255]);
+  });
+  it('fades out where the surface turns away from it', () => {
+    const p = stampPattern(QUARTERS, centre, [0, 0, 1], 0.5), at = [24.5 / 64, 40.5 / 64, 0] as const;
+    const turned = (cos: number) => sample(p, at, [0, Math.sqrt(1 - cos * cos), cos])[3];
+    expect(turned(1)).toBeCloseTo(255, 3);
+    expect(turned(0.45)).toBeCloseTo(255, 3);
+    expect(turned(0.3)).toBeCloseTo(127.5, 3);
+    expect(turned(0.15)).toBe(0);
+    expect(turned(-1)).toBe(0);
+    // on a thin slab, the decal on the front never comes through onto the back (no brush normal to stop it)
+    const slab = meshOf({ rest: [0, 0, 1, 1, 0], uv: [0, 0, 0.5, 1] }, { rest: [0, 0, 1, 1, -0.01], uv: [0.5, 0, 1, 1], back: true });
+    const img = blank(64, 64, [255, 255, 255]), mid = { x: 0.5, y: 0.5, z: 0 };
+    paintDab(img, null, slab, allOf(slab), brush({ centre: mid, radius: 2, pattern: stampPattern(QUARTERS, mid, [0, 0, 1], 0.5) }));
+    const front = rgb(img, 12, 40); // the front's up-left quarter (between its red and green texels)
+    expect(front[0]).toBeGreaterThan(200);
+    expect(front[2]).toBe(0);
+    for (let y = 0; y < 64; y++) for (let x = 33; x < 64; x++) expect(rgb(img, x, y)).toEqual(white);
+  });
+});
+
+describe('painting a pattern', () => {
+  const at = { x: 0.5, y: 0.5, z: 0 };
+
+  it("scales the brush by the pattern's alpha, ignores the flat colour, and alpha 0 leaves texels alone", () => {
+    const img = blank(64, 64);
+    expect(paintDab(img, null, QUAD, allOf(QUAD), brush({ centre: at, radius: 2, colour: [9, 9, 9], pattern: solid(255, 255, 255, 0) }))).toBeNull();
+    expect(diffRows(img, blank(64, 64))).toBeNull();
+    paintDab(img, null, QUAD, allOf(QUAD), brush({ centre: at, radius: 2, colour: [9, 9, 9], pattern: solid(255, 255, 255, 51) }));
+    for (let i = 0; i < img.data.length; i += 4) expect(Array.from(img.data.subarray(i, i + 4))).toEqual([51, 51, 51, 255]); // 0.2 of the way
+  });
+  it('still blends each texel once, across the overlapping pads', () => {
+    const img = blank(64, 64);
+    paintDab(img, null, QUAD, allOf(QUAD), brush({ centre: at, radius: 10, strength: 0.5, pattern: tilePattern(picture([[[200, 100, 50]]]), 0.1) }));
+    for (let i = 0; i < img.data.length; i += 4) expect(Array.from(img.data.subarray(i, i + 4))).toEqual([100, 50, 25, 255]); // twice: 150, 75, 38
+  });
+  it('takes its colour from the triangle with the strongest weight, whatever the order', () => {
+    // two sheets on the same texels, the far one 10 cm off: red where near her centre, blue on the far sheet
+    const byDepth: SkinPattern = (_x, _y, z, _nx, _ny, _nz, out) => { out[0] = z > 0.05 ? 0 : 255; out[1] = 0; out[2] = z > 0.05 ? 255 : 0; out[3] = 255; };
+    const near = { rest: [0, 0, 1, 1, 0], uv: [0, 0, 1, 1] } as const, far = { rest: [0, 0, 1, 1, 0.1], uv: [0, 0, 1, 1] } as const;
+    for (const hardness of [0.2, 1]) { // soft: the near sheet is stronger; hard: the two tie, and the tie is broken the same way
+      const dab = brush({ centre: at, radius: hardness === 1 ? 1 : 0.3, strength: 0.9, hardness, pattern: byDepth });
+      const alone = blank(64, 64);
+      paintDab(alone, null, meshOf(near), [0, 1], dab);
+      const results = [meshOf(near, far), meshOf(far, near)].map((mesh) => { const img = blank(64, 64); paintDab(img, null, mesh, [0, 1, 2, 3], dab); return Array.from(img.data); });
+      expect(results[1]).toEqual(results[0]);
+      if (hardness < 1) expect(results[0]).toEqual(Array.from(alone.data));
+    }
+  });
+  it('through the grid it paints exactly what it paints with every triangle', () => {
+    const grid = new TriangleGrid(wavy, 0.03), rand = random(17);
+    const pic = picture([[[10, 200, 30], [250, 0, 90]], [[60, 60, 255, 128], [5, 5, 5]]]);
+    for (let k = 0; k < 12; k++) {
+      const c = { x: rand(), y: rand(), z: 0 };
+      const pattern = k % 2 ? tilePattern(pic, 0.05 + rand() * 0.2) : stampPattern(pic, c, [0, 0, 1], 0.1 + rand() * 0.3, rand() * 6);
+      const dab = brush({ centre: c, radius: 0.05 + rand() * 0.2, strength: 0.4 + rand() * 0.6, hardness: rand() < 0.5 ? 1 : rand(), pattern });
+      const a = gradient(64, 64), b = copy(a);
+      paintDab(a, null, wavy, grid.near(dab.centre, dab.radius), dab);
+      paintDab(b, null, wavy, allOf(wavy), dab);
+      expect(Array.from(a.data)).toEqual(Array.from(b.data));
+    }
+  });
+  it('the eraser ignores the pattern', () => {
+    const base = gradient(64, 64), img = copy(base);
+    paintDab(img, base, QUAD, allOf(QUAD), brush({ centre: at, radius: 0.3, pattern: tilePattern(QUARTERS, 0.1) }));
+    expect(diffRows(img, base)).not.toBeNull();
+    paintDab(img, base, QUAD, allOf(QUAD), brush({ centre: at, radius: 0.3, erase: true, pattern: solid(1, 2, 3, 0) }));
+    expect(Array.from(img.data)).toEqual(Array.from(base.data));
+  });
+  it('dabRows still covers every row a pattern dab changes', () => {
+    const rand = random(19);
+    for (let k = 0; k < 30; k++) {
+      const c = { x: rand(), y: rand(), z: 0 };
+      const dab = brush({ centre: c, radius: 0.02 + rand() * 0.3, strength: rand(), hardness: rand(), pattern: k % 2 ? tilePattern(QUARTERS, 0.1) : stampPattern(QUARTERS, c, [0, 0, 1], 0.2) });
+      const img = gradient(64, 64), before = copy(img);
+      const rows = dabRows(img, wavy, allOf(wavy), dab), changed = paintDab(img, null, wavy, allOf(wavy), dab);
+      expect(changed).toEqual(diffRows(before, img));
+      if (changed) { expect(rows!.from).toBeLessThanOrEqual(changed.from); expect(rows!.to).toBeGreaterThanOrEqual(changed.to); }
+    }
   });
 });
