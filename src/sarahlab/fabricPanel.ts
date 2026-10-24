@@ -182,6 +182,8 @@ export interface FabricPanel {
    * nothing is painted: her outfit is whole again.
    */
   setActive(on: boolean): void;
+  /** Every paint layer hidden (true) or as the editor shows them (false): her skin bare for the FACE section's brush; nothing is lost. */
+  setBare(on: boolean): void;
   /** The shared BREAST and NAVEL DETAIL as saved, and a way to set either (null: AUTO). */
   detail(): DetailOverride;
   /** How much of her shows through a modelled garment: the MANUAL values where set, else AUTO from its fabric. */
@@ -514,6 +516,8 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
   const editing = () => panel.open && active;
   /** Whether paint layer `i` is drawn now. Hidden only while the editor shows it hidden; its paint is kept. */
   function layerShown(i: number): boolean {
+    // her skin painted bare in FACE (CLOTHES · HIDDEN): no paint layer shows, and every one is kept
+    if (bare) return false;
     if (!editing()) return true;
     if (space === 'paint') return paintView === 'all' || (paintView === 'layer' && layer() === i);
     if (space === 'design' && isolated) return layer() === i;
@@ -526,6 +530,8 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
     return 'all';
   }
   let shownGarments: 'all' | 'none' | string = 'all';
+  /** Every paint layer hidden for the room's FACE section (`setBare`). */
+  let bare = false;
   function updateView(): void {
     const next = editing() && space === 'paint' && target.kind === 'layer';
     if (next !== painting) { painting = next; if (!next) strokeEnd(); overlay(); }
@@ -1068,6 +1074,7 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
     setSpace,
     space: () => space,
     setActive(on) { if (on === active) return; active = on; updateView(); draw(); },
+    setBare(on) { if (on === bare) return; bare = on; sync(); },
     detail: () => override,
     garmentDetail,
     setDetail: setDetailValue,

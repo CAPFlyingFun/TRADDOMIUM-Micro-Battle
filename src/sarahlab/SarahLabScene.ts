@@ -20,6 +20,9 @@ import { setClothNeckline } from './clothNeckline';
 import { setClothDetail } from './clothDetail';
 import { DetailSpots, SARAH_V2_DETAIL_POINTS, SARAH_V2_LITE_TEE_NAVEL, TeeNavel } from './detailSpots';
 import { SkinPose } from './skinPose';
+import { SKIN_BRUSH_CM, SKIN_CHOICES, SKIN_ORIGINAL_IMAGE, SKIN_SWATCHES, hexRgb, nextSkin, skinBrushLine, skinLine, skinNote, skinStrengthLine, type SkinId } from './skinChoices';
+import { SkinPainter } from './skinPaint';
+import { ensureRest } from './fabricMaterial';
 /**
  * THE SARAH LAB — Sarah rebuilt from Joshua's base mannequin, on a turntable,
  * to try before anything of it goes live (Joshua, 2026-10-07: "Good to test
@@ -92,6 +95,10 @@ const VIEW_ANGLES = Object.freeze([
 const BODY_SETTLE_MS = 450;
 /** This device's storage, or null where it cannot be had (a private window). */
 function localStore(): Storage | null { try { return globalThis.localStorage ?? null; } catch { return null; } }
+/** Where the room remembers which skin she wears (SKIN; an uploaded picture is not kept). */
+const SKIN_KEY = 'traddomium.sarahlab.skin';
+/** The brush paints on a copy of her map at most this many pixels square (skinPaint.ts holds two copies in memory). */
+const PAINT_MAX_SIZE = 2048;
 /** A card's picture, in pixels (3:4, sharp at twice a card's width on a phone). */
 const THUMB_SIZE = Object.freeze({ width: 168, height: 224 });
 /** The quick sizes under the bump slider (percent). */
@@ -349,6 +356,141 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   const clock = { paused: false, speed: 1, step: 0 };
   /** Which modelled garments the outfit editor lets the room draw (`fabricPanel.ts`): all, none while painting her body, or one ISOLATED. */
   let garmentView: 'all' | 'none' | string = 'all';
+
+  // ------------------------------------------------------------ HER SKIN (skinChoices.ts, skinPaint.ts)
+  // Joshua, 2026-10-24: "compress all the images and add a button to switch between them, and maybe a simple body
+  // texture uploaded/paint". SKIN steps through the file's own map and his enhanced candidates; UPLOAD adds a picture
+  // from the phone; PAINT SKIN paints on whichever she wears. Nothing of the body file changes: each is a map laid on
+  // her material, the file's own kept to come back to.
+  /** The skin chosen, and the one she wears (they differ while a candidate downloads, and after one fails). */
+  let skinId: SkinId = readSkin();
+  let skinWorn: SkinId = 'original';
+  let skinUpload: { readonly name: string; readonly width: number; readonly height: number; readonly texture: THREE.Texture } | null = null;
+  let skinState: 'loading' | 'ready' | 'failed' = 'ready';
+  let skinRequest = 0;
+  /** The candidate fetched last: one at a time is kept on the GPU, the one she wears. */
+  let skinFetched: { readonly id: SkinId; readonly texture: THREE.Texture } | null = null;
+  /** The brush's copy of her map, once PAINT SKIN has been switched on for this map; the map it was copied from is `under`. */
+  let painted: { readonly painter: SkinPainter; readonly under: THREE.Texture | null } | null = null;
+  let skinPaintOn = false, skinPainting = false;
+  /** Her clothes off while her skin is painted (CLOTHES · HIDDEN), as the fabric editor's brush hides them. */
+  let skinBare = false;
+  const brush: { cm: number; strength: number; hard: boolean; erase: boolean; hex: string } = { cm: SKIN_BRUSH_CM.initial, strength: 0.5, hard: false, erase: false, hex: SKIN_SWATCHES[0].hex };
+  let paintMeta = '';
+  function readSkin(): SkinId {
+    const v = localStore()?.getItem(SKIN_KEY);
+    return SKIN_CHOICES.some((c) => c.id === v) ? (v as SkinId) : 'original';
+  }
+  function bodyOf(): { readonly mesh: THREE.SkinnedMesh; readonly material: THREE.MeshStandardMaterial } | null {
+    const mesh = skinned.find((m) => !!m.geometry.getAttribute('_cloth_cover'));
+    const material = mesh && ((Array.isArray(mesh.material) ? mesh.material[0] : mesh.material) as THREE.MeshStandardMaterial);
+    return mesh && material ? { mesh, material } : null;
+  }
+  /** The file's own map, kept the first time anything else is laid on her. */
+  const ownMap = (material: THREE.MeshStandardMaterial) => (material.userData.ownMap ??= material.map) as THREE.Texture | null;
+  /** A map set up as the file's own is: sRGB, glTF's flipY, its sampler, its transform. */
+  function likeOwn(t: THREE.Texture, own: THREE.Texture | null): THREE.Texture {
+    t.flipY = false; t.colorSpace = THREE.SRGBColorSpace;
+    if (own) { t.colorSpace = own.colorSpace; t.wrapS = own.wrapS; t.wrapT = own.wrapT; t.channel = own.channel; t.anisotropy = own.anisotropy; t.offset.copy(own.offset); t.repeat.copy(own.repeat); t.rotation = own.rotation; t.center.copy(own.center); t.matrixAutoUpdate = own.matrixAutoUpdate; t.matrix.copy(own.matrix); }
+    t.needsUpdate = true;
+    return t;
+  }
+  function freeFetched(keep?: THREE.Texture): void {
+    if (skinFetched && skinFetched.texture !== keep) skinFetched.texture.dispose();
+    if (skinFetched?.texture !== keep) skinFetched = null;
+  }
+  /** The brush's copy goes; her material gets back the map it was copied from. */
+  function dropPainter(): void {
+    if (!painted) return;
+    const b = bodyOf();
+    if (b && b.material.map === painted.painter.texture) { b.material.map = painted.under; b.material.needsUpdate = true; }
+    painted.painter.dispose();
+    painted = null; skinPainting = false;
+  }
+  /** Put the chosen skin on her, fetching a candidate the first time; a fresh map is a fresh start for the brush. */
+  function applySkin(): void {
+    const b = bodyOf();
+    if (!b) return;
+    const own = ownMap(b.material), request = ++skinRequest;
+    const wear = (t: THREE.Texture | null, id: SkinId) => {
+      dropPainter();
+      if (b.material.map !== t) { b.material.map = t; b.material.needsUpdate = true; }
+      skinWorn = id; skinState = 'ready';
+      if (id !== 'upload') { try { localStore()?.setItem(SKIN_KEY, id); } catch { /* a private window: the choice is not kept */ } }
+      refresh();
+    };
+    if (skinId === 'original') { wear(own, 'original'); freeFetched(); return; }
+    if (skinId === 'upload') { if (skinUpload) { wear(skinUpload.texture, 'upload'); freeFetched(); } else { skinId = 'original'; wear(own, 'original'); } return; }
+    if (skinFetched?.id === skinId) { wear(skinFetched.texture, skinId); return; }
+    const choice = SKIN_CHOICES.find((c) => c.id === skinId);
+    if (!choice?.path) { skinId = 'original'; wear(own, 'original'); return; }
+    skinState = 'loading'; refresh();
+    void assets.loadTexture(choice.path).then((t) => {
+      if (request !== skinRequest || disposed) { t?.dispose(); return; }
+      // she keeps the skin she had, and SKIN says it is still that one
+      if (!t) { skinState = 'failed'; skinId = skinWorn; refresh(); return; }
+      const texture = likeOwn(t, own);
+      wear(texture, choice.id);
+      freeFetched(texture);
+      skinFetched = { id: choice.id, texture };
+    });
+  }
+  /** A picture from the phone becomes UPLOAD, and she wears it. */
+  async function uploadSkin(file: File): Promise<void> {
+    let image: (CanvasImageSource & { width: number; height: number }) | null = null;
+    try { image = await createImageBitmap(file); } catch {
+      image = await new Promise<HTMLImageElement | null>((resolve) => { const i = new Image(), url = URL.createObjectURL(file); i.onload = () => { URL.revokeObjectURL(url); resolve(i); }; i.onerror = () => { URL.revokeObjectURL(url); resolve(null); }; i.src = url; });
+    }
+    if (!image || disposed) { skinState = 'failed'; refresh(); return; }
+    const b = bodyOf();
+    const texture = likeOwn(new THREE.Texture(image as THREE.Texture['image']), b ? ownMap(b.material) : null);
+    const old = skinUpload;
+    skinUpload = { name: file.name, width: image.width, height: image.height, texture };
+    skinId = 'upload'; applySkin();
+    if (old) old.texture.dispose();
+  }
+  /** The brush's copy of the map she wears, made the first time PAINT SKIN comes on for it. */
+  async function ensurePainter(): Promise<SkinPainter | null> {
+    if (painted) return painted.painter;
+    const b = bodyOf();
+    if (!b) return null;
+    const under = b.material.map;
+    const drawable = (im: unknown): im is CanvasImageSource & { width: number; height: number } =>
+      (typeof ImageBitmap !== 'undefined' && im instanceof ImageBitmap) || (typeof HTMLImageElement !== 'undefined' && im instanceof HTMLImageElement)
+      || (typeof HTMLCanvasElement !== 'undefined' && im instanceof HTMLCanvasElement) || (typeof OffscreenCanvas !== 'undefined' && im instanceof OffscreenCanvas);
+    let source: (CanvasImageSource & { width: number; height: number }) | null = drawable(under?.image) ? under.image : null;
+    // the KTX2 pilot's map has no pixels a canvas can read: the brush starts from the original as an image
+    if (!source) { const t = await assets.loadTexture(SKIN_ORIGINAL_IMAGE); source = drawable(t?.image) ? t.image : null; t?.dispose(); }
+    if (!source || disposed || bodyOf()?.mesh !== b.mesh || b.material.map !== under) return null;
+    // the brush paints at 2048 at most: a 4096 map would hold 128 MB of pixels in the phone's memory to paint on
+    if (source.width > PAINT_MAX_SIZE || source.height > PAINT_MAX_SIZE) {
+      const s = PAINT_MAX_SIZE / Math.max(source.width, source.height), c = document.createElement('canvas');
+      c.width = Math.round(source.width * s); c.height = Math.round(source.height * s);
+      c.getContext('2d')?.drawImage(source, 0, 0, c.width, c.height);
+      source = c;
+    }
+    ensureRest(b.mesh.geometry as THREE.BufferGeometry, shaped.find((x) => x.mesh === b.mesh)?.fields ?? null);
+    const scale = b.mesh.getWorldScale(new THREE.Vector3()).x || 1;
+    const painter = new SkinPainter(b.mesh, source, under, scale / M);
+    painted = { painter, under };
+    b.material.map = painter.texture; b.material.needsUpdate = true;
+    paintMeta = `${source.width}×${source.height}`;
+    refresh();
+    return painter;
+  }
+  /** One finger paints her skin: PAINT SKIN on, the FACE section open, and a copy of her map to paint on. */
+  const paintingSkin = () => skinPaintOn && !!painted && studio?.open === 'face' && !studio.folded;
+  /** A dab where the finger is (a stroke's first one also finds where every vertex of her is on screen now). */
+  function skinStroke(x: number, y: number, first: boolean): void {
+    const p = painted?.painter;
+    if (!p) return;
+    if (first) { model?.updateMatrixWorld(true); const { width, height } = ctx.renderer.size(); p.beginStroke(camera, width, height); skinPainting = true; }
+    p.stroke(x, y, { colour: hexRgb(brush.hex), radiusCm: brush.cm, strength: brush.strength, hardness: brush.hard ? 0.85 : 0.2, erase: brush.erase });
+  }
+  function endSkinStroke(): void {
+    if (!skinPainting) return;
+    painted?.painter.endStroke(); skinPainting = false; refresh();
+  }
   /**
    * THE BELLY CURVE (`bellyInterpolation.ts`): HYBRID by default (Joshua, 2026-10-22: "change the default as hybrid,
    * but make the current as a backup"); CURRENT, the approved slider, stays one tap away. For this session only.
@@ -356,6 +498,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let bellyCurve: BellyCurve = DEFAULT_BELLY_CURVE;
   const fields: Record<string, HTMLElement> = {};
   const buttons: Record<string, HTMLButtonElement> = {};
+  /** FACE's brush controls (shown while PAINT SKIN is on) and its colour swatches, by colour. */
+  let skinTools: HTMLElement | null = null;
+  const swatchButtons = new Map<string, HTMLButtonElement>();
   let armsInput: HTMLInputElement | null = null;
   let shirtLengthInput: HTMLInputElement | null = null;
   /**
@@ -417,8 +562,29 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     applyLook(); applyMotion();
   }
 
+  /** FACE's lines and buttons: which skin, its state, and the brush (an action with nothing to act on looks it). */
+  function refreshSkin(): void {
+    if (buttons.skin) buttons.skin.textContent = skinLine(skinId, skinUpload);
+    const note = fields[SARAH_LAB_FIELD.skinNote];
+    if (note) note.textContent = skinNote(skinId, skinUpload, skinState, !!painted?.painter.canUndo) + (painted ? ` · brush on a ${paintMeta} copy` : '');
+    if (buttons.skinPaint) buttons.skinPaint.textContent = `PAINT SKIN · ${skinPaintOn ? (painted ? 'ON' : 'preparing…') : 'OFF'}`;
+    if (buttons.skinBare) buttons.skinBare.textContent = `CLOTHES · ${skinBare ? 'HIDDEN' : 'SHOWN'}`;
+    if (skinTools) skinTools.style.display = skinPaintOn ? 'flex' : 'none';
+    for (const [hex, b] of swatchButtons) b.style.borderColor = !brush.erase && hex === brush.hex ? 'var(--sl-accent,#d4a853)' : 'var(--sl-btn-line,#ffffff30)';
+    const sizeLine = fields[SARAH_LAB_FIELD.skinBrush], strengthLine = fields[SARAH_LAB_FIELD.skinStrength];
+    if (sizeLine) sizeLine.textContent = skinBrushLine(brush.cm, brush.hard, brush.erase);
+    if (strengthLine) strengthLine.textContent = skinStrengthLine(brush.strength);
+    if (buttons.skinHard) buttons.skinHard.textContent = `EDGE · ${brush.hard ? 'HARD' : 'SOFT'}`;
+    if (buttons.skinErase) buttons.skinErase.textContent = `ERASE · ${brush.erase ? 'ON' : 'OFF'}`;
+    const p = painted?.painter;
+    for (const [b, on] of [[buttons.skinUndo, !!p?.canUndo], [buttons.skinRedo, !!p?.canRedo], [buttons.skinClear, !!p], [buttons.skinSave, !!p]] as const) {
+      if (!b) continue;
+      b.disabled = !on; b.style.opacity = on ? '1' : '.4';
+    }
+  }
   function refresh(): void {
     if (fields.status) fields.status.textContent = statusLine(loaded && model?.visible === true, failed, garments, hasBelly, modelIndex) + (hooks.skin === 'ktx2' ? ' · KTX2 skin' : '') + (wantedOutfit !== null ? ' · loading outfit…' : '');
+    refreshSkin();
     const bumpField = fields[SARAH_LAB_FIELD.bump], fingerField = fields[SARAH_LAB_FIELD.fingers];
     if (bumpField) bumpField.textContent = bumpLine(bump);
     if (fingerField) fingerField.textContent = fingersLine(curl);
@@ -548,6 +714,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     // recovered clothes keep RAW normal sums so the GPU's belly offsets land on what their fit expects; the leggings
     // were normalized here too, and at 0-50% the large belly offsets flipped normals in the fold under her belly
     }, { normalizeNormals: !(mesh.userData.recoveredShirt || mesh.userData.recoveredLeggings) });
+    // which garments are drawn: the outfit editor's choice, or none while her skin is painted bare (CLOTHES · HIDDEN)
+    const view = skinBare ? 'none' : garmentView;
     for (const mesh of skinned) {
       const dict = mesh.morphTargetDictionary, influences = mesh.morphTargetInfluences;
       // the fitted light tee keeps its own navel's shape as fitted for her size: NAVEL DETAIL settles it in the shader
@@ -565,12 +733,12 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       if (mesh.userData.replacedByRecovered) mesh.visible = false;
       // the cloth experiment draws the light tee as cloth: the fitted one stands aside (and keeps its fabric on)
       if (clothOn && cloth && name === 'shirtSpandexLite') mesh.visible = false;
-      if (cloth && name === 'shirtSpandexLite') cloth.mesh.visible = clothOn && shownNow('shirtSpandexLite') && garmentView === 'all';
+      if (cloth && name === 'shirtSpandexLite') cloth.mesh.visible = clothOn && shownNow('shirtSpandexLite') && view === 'all';
       // painting onto her body: "don't show any clothing since you would be painting over the body"; a garment
       // ISOLATED in the editor shows on its own (its trim with it)
-      if (garmentView !== 'all' && !mesh.geometry.getAttribute('_cloth_cover')) {
+      if (view !== 'all' && !mesh.geometry.getAttribute('_cloth_cover')) {
         const own = name.endsWith('Trim') ? name.slice(0, -4) : name;
-        if (garmentView === 'none' || own !== garmentView) mesh.visible = false;
+        if (view === 'none' || own !== view) mesh.visible = false;
       }
       if (mesh.userData.recoveredLeggings) updateLeggingsHem(mesh, bump, shownNow('shirtSpandexHigh') ? 'spandex' : 'relaxed');
       // the leggings under a worn athletic tee, the same way
@@ -590,7 +758,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       const cover = mesh.geometry.getAttribute('_cloth_cover');
       if (cover && mesh.geometry.index) {
         const all = (mesh.userData.allIndices ??= mesh.geometry.index.array.slice()) as ArrayLike<number>;
-        const mask = garmentView !== 'all' || bodyNeverHidden(SARAH_LAB_MODELS[modelIndex].id) ? 0 : coverMask(wornGarments(outfit, garments));
+        const mask = view !== 'all' || bodyNeverHidden(SARAH_LAB_MODELS[modelIndex].id) ? 0 : coverMask(wornGarments(outfit, garments));
         if (mesh.userData.coverMask !== mask) {
           mesh.userData.coverMask = mask;
           // read through getX: the file stores the bits with a stride (vertex data is 4-byte
@@ -827,8 +995,10 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       if ((e.target as HTMLElement).closest('button,input,select,summary')) return;
       root.setPointerCapture(e.pointerId);
       pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      // painting her skin's map (FACE · PAINT SKIN): one finger is the brush, a second takes over as turn and zoom
+      if (paintingSkin()) { if (pointers.size === 1) skinStroke(e.clientX, e.clientY, true); else endSkinStroke(); }
       // painting her body: one finger is the brush, a second takes over as turn and zoom
-      if (fabric?.tool()) { if (pointers.size === 1) fabric.strokeStart(e.clientX, e.clientY); else fabric.strokeEnd(); }
+      else if (fabric?.tool()) { if (pointers.size === 1) fabric.strokeStart(e.clientX, e.clientY); else fabric.strokeEnd(); }
       // building: one finger places and moves the points, a second takes over as turn and zoom, the same way
       else if (building()) { if (pointers.size === 1) builder!.pointerDown(e.clientX, e.clientY); else builder!.pointerUp(); }
       if (pointers.size === 2) {
@@ -841,6 +1011,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       if (!was) return;
       const now = { x: e.clientX, y: e.clientY };
       pointers.set(e.pointerId, now);
+      if (pointers.size === 1 && skinPainting) { skinStroke(now.x, now.y, false); return; }
       if (pointers.size === 1 && fabric?.tool()) { fabric.strokeMove(now.x, now.y); return; }
       if (pointers.size === 1 && building()) { builder!.pointerMove(now.x, now.y); return; }
       if (pointers.size === 1) {
@@ -855,7 +1026,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         pinch = d;
       }
     });
-    const up = (e: PointerEvent) => { pointers.delete(e.pointerId); pinch = 0; fabric?.strokeEnd(); builder?.pointerUp(); };
+    const up = (e: PointerEvent) => { pointers.delete(e.pointerId); pinch = 0; endSkinStroke(); fabric?.strokeEnd(); builder?.pointerUp(); };
     root.addEventListener('pointerup', up);
     root.addEventListener('pointercancel', up);
     root.addEventListener('wheel', (e) => { e.preventDefault(); zoom(Math.exp(e.deltaY * 0.001)); }, { passive: false });
@@ -1255,6 +1426,72 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     // the outfit cards and saves (outfitPanel.ts): the OUTFIT section's own, not a space inside the fabric editor
     outfits.element.dataset.tab = 'outfit';
     right.appendChild(outfits.element);
+    // ------------------------------------------------------------ FACE: her skin's map (skinChoices.ts, skinPaint.ts)
+    {
+      const small = (b: HTMLButtonElement) => { b.style.padding = '7px 10px'; b.style.fontSize = '11px'; return b; };
+      buttons.skin = btn(skinLine(skinId, skinUpload), SARAH_LAB_ACTION.skin, () => { skinId = nextSkin(skinId, !!skinUpload); applySkin(); });
+      // the picker sits in the room's root, not the panel (the studio moves the panel's things and drops the rest)
+      const file = document.createElement('input');
+      file.type = 'file'; file.accept = 'image/*'; file.style.display = 'none'; file.dataset.role = 'sarahlab-skin-file';
+      file.addEventListener('change', () => { const f = file.files?.[0]; file.value = ''; if (f) { skinState = 'loading'; refresh(); void uploadSkin(f); } });
+      root.appendChild(file);
+      buttons.skinUpload = btn('UPLOAD SKIN…', SARAH_LAB_ACTION.skinUpload, () => file.click());
+      for (const b of [buttons.skin, buttons.skinUpload]) { b.dataset.tab = 'face'; b.style.padding = '8px 10px'; b.style.fontSize = '12px'; right.appendChild(b); }
+      const note = document.createElement('div');
+      note.dataset.tab = 'face'; note.dataset.field = SARAH_LAB_FIELD.skinNote;
+      note.style.cssText = 'font:500 11px system-ui,sans-serif;color:var(--sl-muted,#9aa0a8);line-height:1.35';
+      fields[SARAH_LAB_FIELD.skinNote] = note; right.appendChild(note);
+      buttons.skinPaint = btn('PAINT SKIN · OFF', SARAH_LAB_ACTION.skinPaint, () => { skinPaintOn = !skinPaintOn; if (skinPaintOn) void ensurePainter(); else endSkinStroke(); });
+      buttons.skinBare = btn('CLOTHES · SHOWN', SARAH_LAB_ACTION.skinBare, () => { skinBare = !skinBare; fabric?.setBare(skinBare); applyLook(); });
+      for (const b of [buttons.skinPaint, buttons.skinBare]) { b.dataset.tab = 'face'; small(b); right.appendChild(b); }
+      // the brush: shown while PAINT SKIN is on
+      const tools = document.createElement('div');
+      tools.dataset.tab = 'face'; tools.dataset.role = 'sarahlab-skin-brush';
+      tools.style.cssText = 'display:none;flex-direction:column;gap:6px';
+      skinTools = tools;
+      const swatches = document.createElement('div');
+      swatches.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap;align-items:center';
+      for (const c of SKIN_SWATCHES) {
+        const b = document.createElement('button');
+        b.type = 'button'; b.dataset.action = `${SARAH_LAB_ACTION.skinColour}${c.name}`; b.title = c.name; b.setAttribute('aria-label', c.name);
+        b.style.cssText = `width:28px;height:28px;border-radius:50%;border:2px solid var(--sl-btn-line,#ffffff30);background:${c.hex};padding:0;cursor:pointer`;
+        b.addEventListener('click', (e) => { e.stopPropagation(); brush.hex = c.hex; brush.erase = false; refresh(); });
+        swatchButtons.set(c.hex, b); swatches.appendChild(b);
+      }
+      const any = document.createElement('input');
+      any.type = 'color'; any.value = brush.hex; any.title = 'any colour'; any.setAttribute('aria-label', 'any colour');
+      any.style.cssText = 'width:36px;height:30px;border:0;background:none;padding:0;cursor:pointer';
+      any.addEventListener('input', () => { brush.hex = any.value; brush.erase = false; refresh(); });
+      swatches.appendChild(any);
+      tools.appendChild(swatches);
+      const range = (field: string, value: number, min: number, max: number, onInput: (v: number) => void) => {
+        const label = document.createElement('div'); label.dataset.field = field; label.style.cssText = 'font-size:12px;letter-spacing:.05em'; fields[field] = label;
+        const input = document.createElement('input'); input.type = 'range'; input.min = String(min); input.max = String(max); input.value = String(value);
+        input.style.cssText = 'width:100%;accent-color:var(--sl-accent,#d4a853);height:28px';
+        input.addEventListener('input', () => { onInput(Number(input.value)); refresh(); });
+        tools.append(label, input);
+      };
+      range(SARAH_LAB_FIELD.skinBrush, Math.round(brush.cm * 10), Math.round(SKIN_BRUSH_CM.min * 10), Math.round(SKIN_BRUSH_CM.max * 10), (v) => { brush.cm = v / 10; });
+      range(SARAH_LAB_FIELD.skinStrength, Math.round(brush.strength * 100), 5, 100, (v) => { brush.strength = v / 100; });
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap';
+      buttons.skinHard = btn('EDGE · SOFT', SARAH_LAB_ACTION.skinHard, () => { brush.hard = !brush.hard; });
+      buttons.skinErase = btn('ERASE · OFF', SARAH_LAB_ACTION.skinErase, () => { brush.erase = !brush.erase; });
+      buttons.skinUndo = btn('UNDO', SARAH_LAB_ACTION.skinUndo, () => { painted?.painter.undo(); });
+      buttons.skinRedo = btn('REDO', SARAH_LAB_ACTION.skinRedo, () => { painted?.painter.redo(); });
+      buttons.skinClear = btn('CLEAR PAINT', SARAH_LAB_ACTION.skinClear, () => { painted?.painter.clear(); });
+      buttons.skinSave = btn('SAVE PNG', SARAH_LAB_ACTION.skinSave, () => {
+        const p = painted?.painter;
+        if (p) void p.png().then((blob) => savePicture(blob, `sarah-skin-${skinWorn}-painted.png`)).catch((e) => console.error('[sarahlab] the painted skin could not be saved', e));
+      });
+      for (const b of [buttons.skinHard, buttons.skinErase, buttons.skinUndo, buttons.skinRedo, buttons.skinClear, buttons.skinSave]) row.appendChild(small(b));
+      tools.appendChild(row);
+      const tip = document.createElement('div');
+      tip.style.cssText = 'font:500 10.5px system-ui,sans-serif;color:var(--sl-muted,#9aa0a8);line-height:1.35';
+      tip.textContent = 'One finger paints her, two turn and zoom. Paint stays on this skin until SKIN changes; SAVE PNG keeps it, and UPLOAD SKIN puts a saved one back on her.';
+      tools.appendChild(tip);
+      right.appendChild(tools);
+    }
     // the view: zoom and the start view sit with the poses (the angles float over her, below)
     for (const [label, action, go] of [['ZOOM −', SARAH_LAB_ACTION.zoomOut, () => zoom(1.25)], ['ZOOM +', SARAH_LAB_ACTION.zoomIn, () => zoom(0.8)], ['RESET VIEW', SARAH_LAB_ACTION.resetView, resetView]] as const) {
       const b = btn(label, action, go); b.style.padding = '8px 10px'; b.style.fontSize = '12px'; b.dataset.tab = 'pose'; right.appendChild(b);
@@ -1270,6 +1507,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         // an editor listens to her only while its section is open: a finger on her otherwise turns her
         fabric?.setActive(studio?.open === 'fabric' && !studio.folded);
         builder?.setActive(studio?.open === 'build' && !studio.folded);
+        // her skin's brush listens only in FACE, and her clothes come back on as it closes
+        if (studio?.open !== 'face' || studio.folded) { endSkinStroke(); if (skinBare) { skinBare = false; fabric?.setBare(false); applyLook(); } }
         const size = ctx.renderer.size(); frame(size.width, size.height, false); refresh();
       },
     });
@@ -1498,6 +1737,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   /** Load the chosen model, putting away the one shown (MODEL switches v1 and v2). */
   function loadSarah(): void {
     dropCloth();
+    // the brush's copy belongs to this body's material, which goes now
+    dropPainter();
     if (model) { three.remove(model); rig?.dispose(); release(model); model = null; }
     rig = null; measure = null; fingers = []; skinned = []; shaped = []; garments = []; hasBelly = false; feel = null;
     recovered = false; partMeshes.clear(); wantedOutfit = null; outfitRequest++;
@@ -1571,6 +1812,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       garments = [...GARMENTS, ...RECOVERED_SHIRTS].filter((g) => found.has(g) || (recovered && RECOVERED_GARMENTS.includes(g)));
       if (!recovered && outfit >= 5) outfit = 0;
       model = loadedModel;
+      // and the skin chosen in FACE goes on (a candidate fetched once is kept for a body loaded again)
+      applySkin();
       // she stays out of sight until what she has on is on: never undressed, then dressed a moment later
       loadedModel.visible = !recovered;
       three.add(loadedModel);
@@ -1682,6 +1925,22 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
           const im = t.image as { width: number; height: number };
           return [im.width, im.height];
         },
+        // FACE's SKIN as the button sets it (a candidate's file fetched the first time), and what she wears now
+        skinChoice: (id?: SkinId) => { if (id) { skinId = id; applySkin(); } return { chosen: skinId, worn: skinWorn, state: skinState, painted: !!painted, map: bodyOf()?.material.map?.name ?? null, size: (bodyOf()?.material.map?.image as { width?: number } | undefined)?.width ?? null }; },
+        // a stroke of FACE's brush through screen points (CSS pixels), PAINT SKIN switched on for it; what changed
+        skinStroke: async (points: readonly (readonly [number, number])[], set?: Partial<typeof brush>) => {
+          skinPaintOn = true; Object.assign(brush, set ?? {});
+          const p = await ensurePainter();
+          if (!p || points.length === 0) return false;
+          model?.updateMatrixWorld(true);
+          const { width, height } = ctx.renderer.size();
+          p.beginStroke(camera, width, height);
+          let any = false;
+          for (const [x, y] of points) any = p.stroke(x, y, { colour: hexRgb(brush.hex), radiusCm: brush.cm, strength: brush.strength, hardness: brush.hard ? 0.85 : 0.2, erase: brush.erase }) || any;
+          p.endStroke(); refresh();
+          return any;
+        },
+        skinUndo: () => painted?.painter.undo() ?? false,
         // every mesh drawn now (name, material, vertices): to tell what is what on screen
         drawn: () => { const out: string[] = []; three.traverseVisible((n) => { const m = n as THREE.Mesh; if (m.isMesh) out.push(`${m.name}|${(Array.isArray(m.material) ? m.material[0] : m.material).name}|${m.geometry.getAttribute('position')?.count}`); }); return out; },
         // the cloth's triangles folded over into her, and the particles they hold
@@ -1731,6 +1990,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
 
     dispose() {
       disposed = true;
+      dropPainter();
+      skinFetched?.texture.dispose(); skinFetched = null;
+      skinUpload?.texture.dispose(); skinUpload = null;
       for (const run of inflight.values()) run.abort.abort();
       inflight.clear();
       texturePanel?.dispose();

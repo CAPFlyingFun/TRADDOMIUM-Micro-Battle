@@ -3,7 +3,7 @@
  * look, but let's keep both themes like a dark/light color"). Its layout replaces the room's floating panel and its
  * upright tabs (`uprightTabs.ts`, retired):
  *
- *   - a RAIL of sections -- BODY, OUTFIT, FABRIC, BUILD, POSE, LIBRARY -- down the left side held landscape, along the
+ *   - a RAIL of sections -- BODY, FACE, OUTFIT, FABRIC, BUILD, POSE, LIBRARY -- down the left side held landscape, along the
  *     bottom held upright;
  *   - an INSPECTOR showing the open section's controls under its title, on the right held landscape and as a sheet
  *     above the rail held upright. FOLD tucks it away (landscape) or down to its title (upright), so she has the room;
@@ -21,6 +21,8 @@ import { DEFAULT_THEME, themeCss, type StudioTheme } from './studioTheme';
 
 export const STUDIO_SECTIONS = Object.freeze([
   { id: 'body', label: 'Body', title: 'Body & proportions', icon: '<circle cx="12" cy="4.6" r="2.4"/><path d="M8.2 9.5h7.6l1.6 6.2h-3.2V21h-4.4v-5.3H6.6z"/>' },
+  // her face and skin (Joshua, 2026-10-24): the skin's map chosen, uploaded or painted, and her face's own controls
+  { id: 'face', label: 'Face', title: 'Face & skin', icon: '<circle cx="12" cy="12" r="8.5"/><path d="M9 10.2v.6M15 10.2v.6M8.8 14.6c.9 1.3 2 1.9 3.2 1.9s2.3-.6 3.2-1.9"/>' },
   { id: 'outfit', label: 'Outfit', title: 'Outfits', icon: '<path d="M8 3l-5 3 2 4 3-1.5V21h8V8.5l3 1.5 2-4-5-3c-.5 1.6-2 2.5-4 2.5S8.5 4.6 8 3z"/>' },
   { id: 'fabric', label: 'Fabric', title: 'Fabric & paint', icon: '<path d="M4 4l16 1-1 15-15-1z"/><path d="M8.5 4.3v15M14 4.6v15.2M4.2 9.5h15.5M4.1 14.8h15.3"/>' },
   { id: 'build', label: 'Build', title: 'Straps & cords', icon: '<path d="M4 17c3-6 6-9 9-9s5 2 7 1"/><circle cx="4" cy="17" r="1.6"/><circle cx="13" cy="8" r="1.6"/><circle cx="20" cy="9" r="1.6"/>' },

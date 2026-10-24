@@ -135,6 +135,19 @@ export const SARAH_LAB_ACTION = Object.freeze({
   clothDefaults: 'sarahlab:cloth-defaults',
   /** the cloth tee's neckline, cut deeper as a U or a V (Joshua, 2026-10-24) */
   neckShape: 'sarahlab:neck-shape',
+  /** FACE: her skin's map stepped through the candidates, a picture from the phone, and the brush (Joshua, 2026-10-24) */
+  skin: 'sarahlab:skin',
+  skinUpload: 'sarahlab:skin-upload',
+  skinPaint: 'sarahlab:skin-paint',
+  skinBare: 'sarahlab:skin-bare',
+  /** `${skinColour}<swatch name>` */
+  skinColour: 'sarahlab:skin-colour:',
+  skinHard: 'sarahlab:skin-hard',
+  skinErase: 'sarahlab:skin-erase',
+  skinUndo: 'sarahlab:skin-undo',
+  skinRedo: 'sarahlab:skin-redo',
+  skinClear: 'sarahlab:skin-clear',
+  skinSave: 'sarahlab:skin-save',
 });
 
 export const SARAH_LAB_FIELD = Object.freeze({
@@ -156,6 +169,10 @@ export const SARAH_LAB_FIELD = Object.freeze({
   cloth: 'sarahlab-cloth',
   /** `${clothDial}<dial>`: one of the cloth's dials */
   clothDial: 'sarahlab-cloth-dial-',
+  /** FACE: what the skin she wears is, and the brush's size and strength */
+  skinNote: 'sarahlab-skin-note',
+  skinBrush: 'sarahlab-skin-brush',
+  skinStrength: 'sarahlab-skin-strength',
 });
 
 /** Where the cloth tee is: the light tee as one sheet, with rows below its hem to mid-thigh (`scripts/sarahV2Recovery/shirt-cloth.mjs`). */
