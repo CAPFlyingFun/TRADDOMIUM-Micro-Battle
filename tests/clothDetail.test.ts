@@ -3,8 +3,11 @@
  * have a visible effect", "the bellybutton also doesn't appear with the slider"). `clothDetail.ts` draws her nipples and
  * navel through the tee in shading. Here: the relief's gradient is the true slope of its height field, rises toward a
  * bump's centre and away from a dimple's, reaches nothing far off or a body's depth behind; a dimple darkens within its
- * limit and a bump never does; the patch is applied once, chains whatever the material already had, keeps every hook
- * the fabric patch needs in either order; and the spots land in the uniforms the shader reads.
+ * limit and a bump never does; the fitted tee's own modelled relief is taken back by exactly `flatten` of it at a
+ * spot's centre, falling off with the same footprint, its slope tilted back out of the shading, and nothing at all
+ * without a flatten; the patch is applied once, chains whatever the material already had, keeps every hook the fabric
+ * patch needs in either order, and leaves three's clip position alone unless something was moved; and the spots land
+ * in the uniforms both stages read.
  */
 import { describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
@@ -118,6 +121,88 @@ describe('the relief on the CPU', () => {
   });
 });
 
+describe('taking the garment\'s own relief back', () => {
+  /** A spot at the origin facing +z, with the garment's own relief `relief` there, `flatten` of it taken back. */
+  const flat = (flatten: number | undefined, relief: number | undefined, height = 0, radius = 1.5): ClothDetailState =>
+    only({ center: [0, 0, 0], normal: [0, 0, 1], height, radius, flatten, relief });
+
+  it('moves nothing when flatten is absent, zero, or there is no relief', () => {
+    for (const s of [flat(undefined, -0.6), flat(0, -0.6), flat(1, 0), flat(undefined, undefined), only(spot([0, 0, 0], 0.4, 1))]) {
+      for (const p of [[0, 0, 0], [0.4, -0.2, 0.1], [3, 1, -2]] as Vec[]) {
+        const at = clothDetailAt(p, s);
+        expect(at.displacement).toEqual([0, 0, 0]);
+      }
+    }
+    expect(clothDetailAt([0, 0, 0], flat(undefined, -0.6)).flattenWeight).toEqual([0, 0, 0]);
+    // and an absent flatten leaves everything the relief already drew as it was
+    const before = clothDetailAt([0.4, 0.3, 0], only(spot([0, 0, 0], -0.4, 1.5)));
+    const after = clothDetailAt([0.4, 0.3, 0], flat(undefined, -0.6, -0.4));
+    expect(after.gradient).toEqual(before.gradient);
+    expect(after.shade).toBe(before.shade);
+  });
+
+  it('takes all of it back at the centre: the point moves by exactly -relief along the normal', () => {
+    for (const relief of [-0.6, 0.25]) {
+      const at = clothDetailAt([0, 0, 0], flat(1, relief));
+      expect(at.displacement).toEqual([0, 0, -relief]);
+      expect(at.flattenWeight).toEqual([1, 0, 0]);
+    }
+    // along a tilted normal too
+    const n: Vec = [0, Math.SQRT1_2, Math.SQRT1_2], c: Vec = [2, 3, 4];
+    const d = clothDetailAt(c, only({ center: c, normal: n, height: 0, radius: 1, flatten: 1, relief: -0.5 })).displacement;
+    for (let k = 0; k < 3; k++) expect(d[k]).toBeCloseTo(0.5 * n[k], 12);
+    // half the flatten, half the move
+    expect(clothDetailAt([0, 0, 0], flat(0.5, -0.6)).displacement[2]).toBeCloseTo(0.3, 12);
+  });
+
+  it('falls off with the footprint across the skin (g) and off it (fade)', () => {
+    const R = 1.5, relief = -0.6, s = flat(1, relief, 0, R);
+    const across = 1.2, off = 0.9;
+    const side = clothDetailAt([across, 0, 0], s), above = clothDetailAt([0, 0, off], s), both = clothDetailAt([across, 0, off], s);
+    const g = Math.exp(-(across * across) / (R * R)), fade = Math.exp(-(off * off) / (4 * R * R));
+    expect(side.displacement[2]).toBeCloseTo(-relief * g, 12);
+    expect(above.displacement[2]).toBeCloseTo(-relief * fade, 12);
+    expect(both.displacement[2]).toBeCloseTo(-relief * g * fade, 12);
+    expect(side.displacement[0]).toBe(0); // only ever along the spot's normal
+    expect(both.flattenWeight[0]).toBeCloseTo(g * fade, 12);
+    expect(Math.abs(clothDetailAt([20, 0, 0], s).displacement[2])).toBeLessThan(1e-50);
+  });
+
+  it('tilts the shading back by the slope of what it took away, as a relief of the opposite sign would', () => {
+    const R = 1.5, p: Vec = [0.7, -0.4, 0.2];
+    // all of a 0.6 dent taken back shades like a 0.6 bump over smooth fabric: the dent's slope, cancelled
+    const taken = clothDetailAt(p, flat(1, -0.6, 0, R)).gradient, bump = clothDetailAt(p, only(spot([0, 0, 0], 0.6, R))).gradient;
+    for (let k = 0; k < 3; k++) expect(taken[k]).toBeCloseTo(bump[k], 12);
+    // with her own detail on top, the two slopes add: height less flatten × relief
+    const both = clothDetailAt(p, flat(0.5, -0.6, 0.2, R)).gradient, sum = clothDetailAt(p, only(spot([0, 0, 0], 0.2 + 0.3, R))).gradient;
+    for (let k = 0; k < 3; k++) expect(both[k]).toBeCloseTo(sum[k], 12);
+    // taking a dent back never darkens anything: only her own dimples do
+    expect(clothDetailAt([0, 0, 0], flat(1, -0.6, 0, R)).shade).toBe(1);
+  });
+
+  it('clamps flatten to 0..1', () => {
+    expect(clothDetailAt([0, 0, 0], flat(2, -0.6))).toEqual(clothDetailAt([0, 0, 0], flat(1, -0.6)));
+    expect(clothDetailAt([0.3, 0, 0], flat(-1, -0.6))).toEqual(clothDetailAt([0.3, 0, 0], flat(0, -0.6)));
+  });
+
+  it('moves nothing a body\'s depth behind (the back of the shirt)', () => {
+    const R = 1, s = flat(1, -0.6, 0, R);
+    const back = clothDetailAt([0.2, 0, -25 * R], s);
+    expect(len(back.displacement)).toBeLessThan(1e-50);
+    expect(back.flattenWeight[0]).toBeLessThan(1e-50);
+  });
+
+  it('works spot by spot: each slot its own weight, the moves summed', () => {
+    const navel = { ...spot([0, -10, 0], -0.3, 1.5), flatten: 1, relief: -0.5 };
+    const nipple = { ...spot([4, 8, 0], 0.4, 1), flatten: 0.5, relief: 0.2 };
+    const at = clothDetailAt([4, 8, 0], { navel, nipples: [spot([-4, 8, 0], 0.4, 1), nipple] });
+    expect(at.flattenWeight[0]).toBeLessThan(1e-20);
+    expect(at.flattenWeight[1]).toBe(0);
+    expect(at.flattenWeight[2]).toBeCloseTo(0.5, 12);
+    expect(at.displacement[2]).toBeCloseTo(-0.5 * 0.2, 12);
+  });
+});
+
 describe('the patch', () => {
   it('is applied once', () => {
     const material = new THREE.MeshStandardMaterial();
@@ -142,8 +227,8 @@ describe('the patch', () => {
     expect(before).toHaveBeenCalledTimes(1);
     expect(before.mock.calls[0][0]).toBe(shader);
     expect(material.customProgramCacheKey()).toContain('hem-cut-v3');
-    expect(material.customProgramCacheKey()).toContain('cloth-detail-v1');
-    expect(material.customProgramCacheKey()).toBe('hem-cut-v3|cloth-detail-v1');
+    expect(material.customProgramCacheKey()).toContain('cloth-detail-v2');
+    expect(material.customProgramCacheKey()).toBe('hem-cut-v3|cloth-detail-v2');
   });
 
   it('writes its code into three\'s standard shader and keeps every hook once', () => {
@@ -151,8 +236,23 @@ describe('the patch', () => {
     patchClothDetail(material);
     const shader = compiled(material);
     expect(shader.vertexShader).toContain('varying vec3 vClothWorld;');
-    expect(shader.vertexShader).toContain('#include <project_vertex>\nvClothWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;');
-    expect(shader.fragmentShader).toContain('uniform vec3 clothSpotC[3];');
+    // the vertex stage reads the same spots, to take the garment's own relief back
+    for (const decl of ['uniform float clothDetailOn;', 'uniform vec3 clothSpotC[3];', 'uniform vec3 clothSpotN[3];', 'uniform float clothSpotR[3];', 'uniform float clothSpotF[3];', 'uniform float clothSpotE[3];']) {
+      expect(count(shader.vertexShader, decl), decl).toBe(1);
+      expect(count(shader.fragmentShader, decl), decl).toBe(1);
+    }
+    const vert = shader.vertexShader, at = vert.indexOf('#include <project_vertex>');
+    expect(vert.indexOf('vec4 clothW = modelMatrix * vec4(transformed, 1.0);')).toBeGreaterThan(at);
+    expect(vert).toContain('clothDisp -= clothSpotF[clothI] * clothSpotE[clothI] * clothG * clothFade * clothN;');
+    // the varying is the drawn (displaced) point, written after any displacement
+    expect(vert.indexOf('vClothWorld = clothW.xyz;')).toBeGreaterThan(vert.indexOf('clothW.xyz += clothDisp;'));
+    // nothing to flatten: the clip position is three's own (in project_vertex), rewritten only inside the guard below
+    expect(count(vert, 'gl_Position =')).toBe(1);
+    expect(vert).toMatch(/if \(dot\(clothDisp, clothDisp\) > 0\.0\) \{\s*clothW\.xyz \+= clothDisp;\s*mvPosition = viewMatrix \* clothW;\s*gl_Position = projectionMatrix \* mvPosition;\s*\}/);
+    expect(vert.indexOf('if (clothDetailOn > 0.5)')).toBeLessThan(vert.indexOf('if (dot(clothDisp, clothDisp) > 0.0)'));
+    // the slope of what is taken back of the garment's own relief is summed into the same tilt as her detail
+    expect(shader.fragmentShader).toContain('clothGrad += (clothH - clothSpotF[clothI] * clothSpotE[clothI]) * clothG * clothFade * (-2.0 / clothR2) * clothT;');
+    expect(count(shader.fragmentShader, 'normal = normalize(')).toBe(1);
     expect(shader.fragmentShader).toContain('diffuseColor.rgb *= clothShade;');
     expect(shader.fragmentShader).toContain('normal = normalize(normal - faceDirection * (mat3(viewMatrix) * clothGrad));');
     // the same constants as the CPU
@@ -164,7 +264,7 @@ describe('the patch', () => {
     expect(frag.indexOf('#include <normal_fragment_maps>')).toBeLessThan(frag.indexOf('mat3(viewMatrix) * clothGrad'));
     for (const token of ['#include <project_vertex>', '#include <begin_vertex>', '#include <beginnormal_vertex>']) expect(count(shader.vertexShader, token), token).toBe(1);
     for (const token of ['#include <color_fragment>', '#include <normal_fragment_maps>', '#include <map_fragment>']) expect(count(shader.fragmentShader, token), token).toBe(1);
-    expect(Object.keys(shader.uniforms).sort()).toEqual(['clothDetailOn', 'clothSpotC', 'clothSpotH', 'clothSpotN', 'clothSpotR']);
+    expect(Object.keys(shader.uniforms).sort()).toEqual(['clothDetailOn', 'clothSpotC', 'clothSpotE', 'clothSpotF', 'clothSpotH', 'clothSpotN', 'clothSpotR']);
     expect(shader.uniforms.clothDetailOn.value).toBe(0); // starts off
   });
 
@@ -179,7 +279,10 @@ describe('the patch', () => {
       expect(shader.fragmentShader).toContain('roughnessFactor = mix(roughnessFactor, fabricRoughness, fabricMatte);');
       expect(shader.uniforms.fabricOn0.value).toBe(1);
       // and the detail's
-      expect(shader.vertexShader).toContain('vClothWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+      expect(shader.vertexShader).toContain('vec4 clothW = modelMatrix * vec4(transformed, 1.0);');
+      expect(shader.vertexShader).toContain('vClothWorld = clothW.xyz;');
+      expect(shader.vertexShader).toContain('uniform float clothSpotF[3];');
+      expect(shader.fragmentShader).toContain('clothSpotF[clothI] * clothSpotE[clothI]');
       expect(shader.fragmentShader).toContain('diffuseColor.rgb *= clothShade;');
       expect(shader.fragmentShader).toContain('mat3(viewMatrix) * clothGrad');
       expect(shader.uniforms.clothDetailOn).toBeDefined();
@@ -189,7 +292,7 @@ describe('the patch', () => {
       for (const token of ['#include <color_fragment>', '#include <normal_fragment_maps>', '#include <map_fragment>', '#include <roughnessmap_fragment>', '#include <metalnessmap_fragment>']) expect(count(shader.fragmentShader, token), token).toBe(1);
       const key = material.customProgramCacheKey();
       expect(key).toContain('|fabric-1-v10');
-      expect(key).toContain('|cloth-detail-v1');
+      expect(key).toContain('|cloth-detail-v2');
     });
   }
 });
@@ -214,6 +317,11 @@ describe('the spots', () => {
     expect(n[2].toArray()).toEqual([0, 0, 1]);
     expect(u.clothSpotH.value).toEqual([-0.4, 0.3, 0.25]);
     expect(u.clothSpotR.value).toEqual([0.8, 0.6, 0.5]);
+    expect(u.clothSpotF.value).toEqual([0, 0, 0]); // absent: nothing taken back
+    expect(u.clothSpotE.value).toEqual([0, 0, 0]);
+    setClothDetail(material, { navel: { ...navel, flatten: 0.75, relief: -0.6 }, nipples: [{ ...left, flatten: 1, relief: 0.1 }, right] });
+    expect(u.clothSpotF.value).toEqual([0.75, 1, 0]);
+    expect(u.clothSpotE.value).toEqual([-0.6, 0.1, 0]);
   });
 
   it('ignores extra nipples and empties a missing spot', () => {
@@ -233,6 +341,8 @@ describe('the spots', () => {
     const u = compiled(material).uniforms;
     expect(u.clothDetailOn.value).toBe(0);
     expect(u.clothSpotH.value).toEqual([0, 0, 0]);
+    expect(u.clothSpotF.value).toEqual([0, 0, 0]);
+    expect(u.clothSpotE.value).toEqual([0, 0, 0]);
     const plain = new THREE.MeshStandardMaterial();
     const version = plain.version, hook = plain.onBeforeCompile;
     setClothDetail(plain, null);

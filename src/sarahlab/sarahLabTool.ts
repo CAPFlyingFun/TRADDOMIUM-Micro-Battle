@@ -195,8 +195,17 @@ export const CLOTH_DIALS: readonly ClothDialSpec[] = Object.freeze([
   { key: 'grip', line: (v) => `GRIP · friction ${clothFriction(v).toFixed(2)}` },
   { key: 'steps', line: (v) => `QUALITY · ${clothSubsteps(v)} steps a frame` },
 ]);
-/** Weighty and form-fitting (Joshua, 2026-10-24): heavier than real, settling fast, snug, close to her. */
-export const CLOTH_TUNE_DEFAULT: ClothTune = Object.freeze({ weight: 65, calm: 35, fit: 65, close: 75, stretch: 50, grip: 80, steps: 43 });
+/**
+ * Joshua's own setting, found on his phone (2026-10-24: "I found I believe the perfect setting that I would like to be
+ * used as the default for the cloth simulation"): half real gravity, settling fast, the snuggest pattern, half a
+ * millimetre off her, a middling grip, 8 steps. STRETCH is the one change, to the middle (Joshua, the same morning:
+ * "Stretch 50… I can always adjust per outfit's settings"): at his 0 the snug pattern could not give, so the tee rode
+ * up her when she sat and above a 150% belly standing. (The first defaults, "weighty and form-fitting", were
+ * 65 35 65 75 50 80 43.)
+ */
+export const CLOTH_TUNE_DEFAULT: ClothTune = Object.freeze({ weight: 25, calm: 100, fit: 100, close: 100, stretch: 50, grip: 50, steps: 43 });
+/** The cloth tee's length when CLOTH SIM first comes on (his setting too): a fifth of the way to mid-thigh, over her hips. */
+export const CLOTH_TEE_LENGTH_DEFAULT = 0.2;
 /** The cloth settings a set of dials gives (`ClothSettings` in clothSim.ts), and its stand-off in world units (100 a metre). */
 export function clothTuning(t: ClothTune): { readonly settings: { substeps: number; stretchCompliance: number; bendCompliance: number; restScale: number; maxStretch: number; damping: number; gravity: [number, number, number]; friction: number }; readonly standOff: number } {
   return {

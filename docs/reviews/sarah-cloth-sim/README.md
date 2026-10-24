@@ -24,7 +24,7 @@ It lives in the Character Studio, under **Outfit**, while Sarah wears the light 
 - **CLOTH DEFAULTS** puts the dials back.
 - The stage's info line shows what the cloth costs every frame: `CLOTH · points · skin + cloth + draw = ms · steps · fps`.
 
-The dials open **weighty and form-fitting**, as asked:
+In alpha.117 the dials opened **weighty and form-fitting**, as asked. Since alpha.119 they open at Joshua's own setting instead (below, under alpha.119):
 
 | Dial | Default |
 |---|---|
@@ -136,3 +136,54 @@ The CLOTH line now starts with the frame's milliseconds and fps. Held upright, t
 - The fitted (non-cloth) light tee still ignores BREAST and NAVEL DETAIL. It carries its own modelled navel. It could share the cloth's shading if Joshua wants it to.
 - At the top of a 200% belly, where the cloth crosses its sharpest curve, a sliver of skin can show between particles. A lower CLOSENESS, which leaves more gap, should hide it; that has not been checked yet.
 - Creases can form when the belly is resized quickly. Joshua (2026-10-24): "don't read too much into the creases on belly size change as part of it could be physics working correctly".
+
+## alpha.119: Joshua's setting as the default, and the tee re-cut at the right moment
+
+### The defaults (`8-stretch.jpg`, `9-defaults.jpg`)
+
+Joshua found his setting on his phone on 2026-10-24: "I found I believe the perfect setting that I would like to be used as the default for the cloth simulation". Asked about STRETCH, he said: "Stretch 50… I can always adjust per outfit's settings". The cloth now opens at:
+
+| Dial | Default |
+|---|---|
+| TEE LENGTH | 20% |
+| WEIGHT | 0.5× gravity |
+| CALM | damping 12/s |
+| FIT | pattern 85% of the tee |
+| CLOSENESS | 0.5 mm |
+| STRETCH | the middle: compliance 1e-6, up to 1.4× |
+| GRIP | 0.5 |
+| QUALITY | 8 steps a frame |
+
+STRETCH is the only dial that is not at his setting.
+- At his 0, the snug pattern cannot give. In the renders the tee rode up her when she sat, and above a 150% belly when she stood.
+- At 50 it covers her in both (`8-stretch.jpg`: seated at 100% after walking).
+- `9-defaults.jpg` shows the new defaults after walking 3 s, then switching pose. It covers 100% and 200% standing, and 200% and 100% seated.
+
+### Creases after a belly change
+
+- **The cause.** When the belly slider moved, the tee was cut again for her new shape at once, before her springs had followed the new size. On the next frame they did. That left the cloth's pattern one frame out of step with her, and the cloth took up the difference as crumples.
+- **The fix.** A shape change now only marks the tee for a new cut. The cut is made on the cloth's next frame, after her springs have moved.
+- Cutting inside LAY CLOTH AGAIN was tried first. It picked up her seated correction and cropped the tee when she sat, so it was taken out.
+- The 200% → 50% side views no longer balloon.
+
+### The seated spot and the navel
+
+Joshua reported two things from his phone:
+- seated: "no matter how far I say to offset, it still shows in this one spot";
+- standing: the navel "still kept poking through, but better".
+
+Neither showed in the renders at these defaults, taken after walking 3 s and then switching pose. They may have come from the early re-cut above, but that has not been confirmed. If either still shows with alpha.119, a screenshot with her pose and belly size will let me reproduce it.
+
+### Also
+
+- **Probe hooks.** The cloth probe (`?probe=cloth`) gained `animate(seconds)`, `hold(on)` and `look(yaw, pitch)`. With them the test browser can run her own frames (walk, springs, cloth) at a fixed step, between pictures.
+- **Shared measurement.** Measuring her navel and nipples moved into `detailSpots.ts`, so that the fitted tee can share it.
+- **`skinPose.ts`.** It poses a handful of her vertices on the CPU without the cloth. It is not used yet: it is for the fitted tee.
+
+### Still open
+
+- **The fitted (non-cloth) tee and BREAST/NAVEL DETAIL.** Work in progress. The fitted tee's shape differs from the cloth's:
+  - it carries its own navel, a broad dome over her outie at 100%;
+  - it has nothing at her nipples, because it bridges her bust about 8–10 mm off them.
+  So its navel has to be taken back by the tee's own relief, not by hers.
+- **The skin sliver at the top of a 200% belly.** It did not show at these defaults (`9-defaults.jpg`). It has not yet been checked more closely.

@@ -59,7 +59,7 @@ import { dropIdleMorphs } from '../view/morphPrune';
 import { HumanRig, findSkinnedMesh } from '../view/HumanRig';
 import { UNITS_PER_METRE } from '../world/dem';
 import {
-  BELLY_MOTION, BELLY_TARGET, trimShown, BREAST_TARGETS, BUMP_MAX_PERCENT, GARMENTS, RECOVERED_SHIRTS, OUTFITS, outfitLine, modelLine, refineLine, refineWeight, nextOutfit, wornGarments, coverMask, bodyNeverHidden, uncoveredSkinIndices, UNDER_TOP_GARMENT, BELLY_REFINE_TARGET, SEAT_TARGET, seatCorrectiveWeight, SARAH_LAB_MODELS, SARAH_LAB_DEFAULT_MODEL, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID, shirtLengthLine, sarahModelPath, BODY_RANDOM_SPECS, CLOTH_SHIRT_PATH, teeLengthLine, clothLine, CLOTH_DIALS, CLOTH_TUNE_DEFAULT, clothTuning, type ClothTune,
+  BELLY_MOTION, BELLY_TARGET, trimShown, BREAST_TARGETS, BUMP_MAX_PERCENT, GARMENTS, RECOVERED_SHIRTS, OUTFITS, outfitLine, modelLine, refineLine, refineWeight, nextOutfit, wornGarments, coverMask, bodyNeverHidden, uncoveredSkinIndices, UNDER_TOP_GARMENT, BELLY_REFINE_TARGET, SEAT_TARGET, seatCorrectiveWeight, SARAH_LAB_MODELS, SARAH_LAB_DEFAULT_MODEL, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID, shirtLengthLine, sarahModelPath, BODY_RANDOM_SPECS, CLOTH_SHIRT_PATH, teeLengthLine, clothLine, CLOTH_DIALS, CLOTH_TUNE_DEFAULT, CLOTH_TEE_LENGTH_DEFAULT, clothTuning, type ClothTune,
   bellyMotionWeights, bellyWeights, breastBobWeight, breastWeightsForShape, bodyShapeFieldWeights, SIZE_TILT_PRESETS_DEG, effectiveTiltDeg, stepSeated, bustVolume, BREAST_GROW_TARGET, settledSitFor, bellyUpperWeight, BELLY_UPPER_TARGET, navelWeights, NAVEL_FLAT_TARGET, navelFlatWeight, tPoseTurns, ARM_SIDES, armsLine, ARM_RAISE_TARGETS, armRaiseWeight, SEAT_V2_TARGET, seatCorrectiveV2Weight, fingerBend, THUMB_TO_PALM, bumpLine, fingersLine, restingBellySpring, statusLine, stepBellySpring, stepBreastSpring, walkBounceAccel,
   offeredOutfits, outfitThumbPath,
   type Garment, type SarahLabPose, recoveredPartsFor, recoveredPartPath, isShirtPart, shirtOfPart, type RecoveredPart, SARAH_DEFAULT_OUTFIT, RECOVERED_GARMENTS,
@@ -361,7 +361,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
    * as one simulated sheet (clothShirt.ts), on while CLOTH SIM is, its length from the tee as made to mid-thigh, and what
    * it costs each frame on the stage. Fetched the first time it is turned on.
    */
-  let cloth: ClothShirt | null = null, clothOn = false, clothLoading = false, clothRestart = false, teeLength = 0, frameMs = 1000 / 60;
+  let cloth: ClothShirt | null = null, clothOn = false, clothLoading = false, clothRestart = false, clothRefit = false, teeLength = CLOTH_TEE_LENGTH_DEFAULT, frameMs = 1000 / 60;
   let teeLengthInput: HTMLInputElement | null = null;
   /** The cloth's dials (CLOTH_DIALS), kept across a reload of the cloth, and their sliders. */
   let clothTune: ClothTune = CLOTH_TUNE_DEFAULT;
@@ -585,9 +585,12 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     fabric?.sync();
     // her shape may have changed: the cleavage bridge chooses its ends again
     fabric?.reshaped();
-    // and the cloth tee is cut again for her shape (never for her pose)
+    // and the cloth tee is cut again for her shape (never for her pose) -- on the cloth's next frame, once her belly's
+    // motion shapes have followed the new size too. A quick size changes her in two steps (the size here, those shapes
+    // in the frame's feelMotion), and a tee cut at once, for the first, and laid on the second ballooned out in front of
+    // her and creased as it fell (Joshua, 2026-10-24: "it's possible it's something else")
     const shapeKey = `${bump}|${serializeShape(body)}|${bellyCurve}|${refine}`;
-    if (cloth && shapeKey !== clothShapeKey) { clothShapeKey = shapeKey; cloth.refit(); }
+    if (cloth && shapeKey !== clothShapeKey) { clothShapeKey = shapeKey; clothRefit = true; }
   }
 
   /** The outfit as the OUTFIT button names it: on v2 the first two are the relaxed tee over either rise. */
@@ -904,7 +907,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     buttons.cloth = btn('CLOTH SIM · OFF', SARAH_LAB_ACTION.cloth, () => { void toggleCloth(); });
     buttons.cloth.dataset.tab = 'outfit';
     right.appendChild(buttons.cloth);
-    teeLengthInput = slider(SARAH_LAB_FIELD.teeLength, 0, (v) => { teeLength = v / 100; cloth?.setLength(teeLength); }, 100, 'outfit');
+    teeLengthInput = slider(SARAH_LAB_FIELD.teeLength, Math.round(CLOTH_TEE_LENGTH_DEFAULT * 100), (v) => { teeLength = v / 100; cloth?.setLength(teeLength); }, 100, 'outfit');
     // ...and its dials, live (Joshua, 2026-10-24: "Could potentially even add sliders to play with values in real time")
     for (const d of CLOTH_DIALS) clothDialInputs.set(d.key, slider(`${SARAH_LAB_FIELD.clothDial}${d.key}`, clothTune[d.key], (v) => { clothTune = { ...clothTune, [d.key]: v }; tuneCloth(); }, 100, 'outfit'));
     {
@@ -1548,6 +1551,32 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     }).catch(error => { console.error('[sarahlab] model/outfit preparation failed', error); failed = true; loaded = false; failLoad('Sarah', () => loadSarah()); refresh(); });
   }
 
+  /** One frame of her: her walk, her pose, her springs, what is laid on her, and the cloth tee over her. */
+  function advance(dt: number): void {
+      seconds += dt;
+      if (pose === 'walk') walked += WALK_SPEED * dt;
+      if (rig) rig.apply(turnsFor());
+      place();
+      feelMotion(dt);
+      // a painted top's cleavage bridge is laid where her breasts are this frame
+      if (fabric && model) { model.updateMatrixWorld(true); fabric.frame(); }
+      // and every built strap laid on her skin as she is this frame
+      if (builder && model) builder.frame();
+      // and the cloth tee, moved over her as she is this frame (its cost on the stage)
+      if (cloth && clothOn && cloth.mesh.visible && model?.visible && !clothLoading) {
+        model.updateMatrixWorld(true);
+        if (clothRefit) { cloth.refit(); clothRefit = false; }
+        if (clothRestart) { cloth.restart(); clothRestart = false; }
+        cloth.frame(dt);
+        // her navel and nipples through it, at the editor's BREAST and NAVEL DETAIL; her navel softened under it to match
+        const keep = clothKeep();
+        cloth.keep = keep;
+        setClothDetail(cloth.mesh.material as THREE.Material, cloth.detail(keep));
+        if (Math.abs(1 - keep.navel - clothFlattenLaid) > 1e-3) applyLook();
+        if (fields.cloth) fields.cloth.textContent = clothLine(cloth.stats(), frameMs);
+      }
+  }
+
   return {
     name: SARAH_LAB_SCENE_ID,
     three,
@@ -1565,8 +1594,17 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       if (new URLSearchParams(globalThis.location?.search ?? '').get('bake') === 'outfits') (globalThis as unknown as Record<string, unknown>).__sarahLabBakeOutfits = bakeOutfitPictures;
       // ?probe=cloth: run the cloth tee N frames at a fixed step between pictures (a software renderer draws ~1 a second)
       if (new URLSearchParams(globalThis.location?.search ?? '').get('probe') === 'cloth') (globalThis as unknown as Record<string, unknown>).__sarahLabCloth = {
-        settle: (frames: number, dt = 1 / 60) => { if (!cloth || !model) return null; for (let k = 0; k < frames; k++) { model.updateMatrixWorld(true); cloth.frame(dt); } return cloth.stats(); },
+        settle: (frames: number, dt = 1 / 60) => { if (!cloth || !model) return null; for (let k = 0; k < frames; k++) { model.updateMatrixWorld(true); if (clothRefit) { cloth.refit(); clothRefit = false; } cloth.frame(dt); } return cloth.stats(); },
         settings: () => cloth?.simSettings ?? null,
+        // her own frame run `seconds` at a fixed step -- walk, springs, the cloth -- between pictures (a software renderer
+        // draws about one frame a second, so the room's own clock cannot show her moving)
+        // the room's own clock held (its frames then move nothing), so only animate() moves her: a software renderer's
+        // second-long frames are no measure of her motion
+        hold: (on: boolean) => { clock.paused = on; clock.step = 0; },
+        // the camera at any angle about her (yaw radians, 0 her front; pitch radians, below 0 from beneath)
+        look: (yaw: number, pitch?: number) => { orbit.yaw = yaw; if (pitch !== undefined) orbit.pitch = pitch; turning = false; },
+        animate: (secondsToRun: number, step = 1 / 60) => { const n = Math.max(0, Math.round(secondsToRun / step)); for (let k = 0; k < n; k++) advance(step); return cloth?.stats() ?? null; },
+        strain: () => { if (!cloth) return null; const r = { ...cloth.strain(), jumps: cloth.jumps, moved: cloth.moved }; cloth.moved = 0; return r; },
         // what shows through the tee now (her navel's height above the skin round it, the spots the shading draws)
         detail: () => (cloth ? { heights: cloth.detailHeights, keep: clothKeep(), spots: cloth.detail(clothKeep()) } : null),
         // BREAST or NAVEL DETAIL set (null: AUTO), as the outfit editor's sliders do
@@ -1601,31 +1639,12 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       // her animation's own time: paused, slowed, or stepped one frame at a time (the builder's MOTION controls)
       const dt = clock.paused ? clock.step : frame.rawDt * clock.speed;
       clock.step = 0;
-      seconds += dt;
-      if (pose === 'walk') walked += WALK_SPEED * dt;
       if (turning) orbit.yaw += frame.rawDt * 0.35;
       placeCamera();
-      if (rig) rig.apply(turnsFor());
-      place();
-      feelMotion(dt);
-      // a painted top's cleavage bridge is laid where her breasts are this frame
-      if (fabric && model) { model.updateMatrixWorld(true); fabric.frame(); }
-      // and every built strap laid on her skin as she is this frame
-      if (builder && model) builder.frame();
-      // and the cloth tee, moved over her as she is this frame (its cost on the stage)
       frameMs += (frame.rawDt * 1000 - frameMs) / 20;
-      if (cloth && clothOn && cloth.mesh.visible && model?.visible && !clothLoading) {
-        model.updateMatrixWorld(true);
-        if (clothRestart) { cloth.restart(); clothRestart = false; }
-        cloth.frame(dt);
-        // her navel and nipples through it, at the editor's BREAST and NAVEL DETAIL; her navel softened under it to match
-        const keep = clothKeep();
-        cloth.keep = keep;
-        setClothDetail(cloth.mesh.material as THREE.Material, cloth.detail(keep));
-        if (Math.abs(1 - keep.navel - clothFlattenLaid) > 1e-3) applyLook();
-        if (fields.cloth) fields.cloth.textContent = clothLine(cloth.stats(), frameMs);
-      }
+      advance(dt);
     },
+
 
     resize(width: number, height: number) {
       frame(width, height);

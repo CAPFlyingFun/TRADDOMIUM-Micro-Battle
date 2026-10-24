@@ -13,9 +13,10 @@ import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { MeshoptDecoder } from 'meshoptimizer';
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
-  CLOTH_DIALS, CLOTH_SHIRT_PATH, CLOTH_TUNE_DEFAULT, type ClothDial, clothCompliance, clothDamping, clothFriction, clothGravityScale, clothLine,
+  CLOTH_DIALS, CLOTH_SHIRT_PATH, CLOTH_TEE_LENGTH_DEFAULT, CLOTH_TUNE_DEFAULT, type ClothDial, clothCompliance, clothDamping, clothFriction, clothGravityScale, clothLine,
   clothMaxStretch, clothRestScale, clothStandOffMm, clothSubsteps, clothTuning, teeLengthLine,
 } from '../src/sarahlab/sarahLabTool';
+import { SARAH_V2_DETAIL_POINTS } from '../src/sarahlab/detailSpots';
 
 const CLOTH = `public/${CLOTH_SHIRT_PATH}`;
 interface ClothExtras { detail: { navel: number; navelRings: number[][]; nipples: number[]; nippleRings: number[][][]; navelZoneM: number[]; ringsM: number[][] }; version: number; particles: number; teeParticles: number; rows: number; columns: number; armBones: number[]; rowStepM: number; midThighM: number; localToMetres: number; pinIn: number; pinOut: number }
@@ -84,6 +85,15 @@ describe('the cloth tee file', () => {
     for (let v = 0; v < zone.length; v++) { expect(zone[v]).toBeGreaterThanOrEqual(0); expect(zone[v]).toBeLessThanOrEqual(1); if (zone[v] > 0) { inZone++; expect(row[v]).toBe(0); } }
     expect(inZone).toBeGreaterThan(20);
     expect(inZone).toBeLessThan(zone.length / 20);
+  });
+
+  it('names the same navel and nipples, and the same rings, as the room holds for the fitted tee', () => {
+    // detailSpots.ts keeps a copy for the fitted tee, which never loads the cloth file: the two must not drift
+    const d = cloth.detail, p = SARAH_V2_DETAIL_POINTS;
+    expect(p.navel).toBe(d.navel);
+    expect(p.navelRings).toEqual(d.navelRings);
+    expect(p.nipples).toEqual(d.nipples);
+    expect(p.nippleRings).toEqual(d.nippleRings);
   });
 
   it('has a hem spaced like the rest of the cloth, not the modelled fold\'s every point', () => {
@@ -177,17 +187,20 @@ describe('the cloth dials', () => {
     }
   });
 
-  it('opens weighty and form-fitting, as Joshua asked: heavier than real, settling, snug and close to her', () => {
+  it('opens at Joshua\'s own setting, found on his phone: half gravity, settling fast, snug, half a millimetre off her, STRETCH in the middle', () => {
+    expect(CLOTH_TUNE_DEFAULT).toEqual({ weight: 25, calm: 100, fit: 100, close: 100, stretch: 50, grip: 50, steps: 43 });
     const { settings, standOff } = clothTuning(CLOTH_TUNE_DEFAULT);
-    expect(-settings.gravity[1]).toBeGreaterThan(981);
-    expect(settings.damping).toBeGreaterThan(2);
-    expect(settings.restScale).toBeLessThan(1);
-    expect(standOff).toBeLessThan(0.3); // world units, 100 a metre: under 3 mm
-    expect(standOff).toBeGreaterThan(0);
-    expect(settings.friction).toBeGreaterThan(0.5);
-    expect(settings.substeps).toBeGreaterThanOrEqual(6);
+    expect(-settings.gravity[1]).toBeCloseTo(981 * 0.5);
+    expect(settings.damping).toBeCloseTo(12);
+    expect(settings.restScale).toBeCloseTo(0.85);
+    expect(standOff).toBeCloseTo(0.05); // world units, 100 a metre: 0.5 mm
+    expect(settings.maxStretch).toBeCloseTo(1.4);
+    expect(settings.stretchCompliance).toBeCloseTo(1e-6, 9);
+    expect(settings.friction).toBeCloseTo(0.5);
+    expect(settings.substeps).toBe(8);
     expect(settings.gravity[0]).toBe(0);
     expect(settings.gravity[2]).toBe(0);
+    expect(CLOTH_TEE_LENGTH_DEFAULT).toBeCloseTo(0.2);
   });
 });
 
