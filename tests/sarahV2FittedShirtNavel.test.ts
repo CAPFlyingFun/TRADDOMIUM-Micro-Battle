@@ -34,6 +34,7 @@ function poser(doc: Document, primitive: Primitive) {
 }
 const bodyWeights = (p: number): Record<string, number> => ({ ...bellyWeights(p), ...breastWeightsFor(p, true), bellyUpper: bellyUpperWeight(p), ...navelWeights(p), navelFlat: navelFlatWeight(p), ...bellyMotionWeights(p, 0, restingBellySpring(), 20) });
 
+const LOOKS = ['spandex-low', 'spandex-high', 'spandex-lite'] as const;
 let body: Document, bodyIdx: Uint32Array | Uint16Array, poseBody: ReturnType<typeof poser>;
 const shirts = new Map<string, { doc: Document; idx: ArrayLike<number>; pose: ReturnType<typeof poser> }>();
 beforeAll(async () => {
@@ -42,14 +43,15 @@ beforeAll(async () => {
   body = await io.read('assets-archive/models/sarah-v2-body.glb');
   const skin = body.getRoot().listMeshes()[0].listPrimitives().find(p => p.getMaterial()!.getName() === 'Material_0')!;
   bodyIdx = skin.getIndices()!.getArray()! as Uint32Array; poseBody = poser(body, skin);
-  for (const look of ['spandex-low', 'spandex-high']) {
-    const doc = await io.read(`assets-archive/models/sarah-v2-${look}.gltf`), prim = doc.getRoot().listMeshes()[0].listPrimitives()[0];
+  for (const look of LOOKS) {
+    // the light tee (Joshua, 2026-10-23) is shipped; the modelled tees it was made from are kept in the archive
+    const doc = await io.read(look === 'spandex-lite' ? 'public/models/sarah-v2-spandex-lite.glb' : `assets-archive/models/sarah-v2-${look}.gltf`), prim = doc.getRoot().listMeshes()[0].listPrimitives()[0];
     shirts.set(look, { doc, idx: prim.getIndices()!.getArray()!, pose: poser(doc, prim) });
   }
 }, 120000);
 
 describe('the fitted shirts over her navel', () => {
-  for (const look of ['spandex-low', 'spandex-high']) it(`keeps her navel under the ${look} shirt every 5% from 100% to 200%`, () => {
+  for (const look of LOOKS) it(`keeps her navel under the ${look} shirt every 5% from 100% to 200%`, () => {
     const { doc, idx, pose } = shirts.get(look)!, meta = doc.getRoot().listMeshes()[0].getExtras().recoveredShirt as { baselineMode?: string; baselineWeightsByBump: Record<string, Record<string, number>> };
     expect(meta.baselineMode).toBe('reference100');
     const covered: number[] = [];

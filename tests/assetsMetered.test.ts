@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { assetBytes, fetchBytes, loadModel } from '../src/assets/assets';
 import { LoadMeter } from '../src/assets/loadMeter';
-import { recoveredPartPath, recoveredPartsFor, wornGarments, GARMENTS, RECOVERED_SHIRTS, OUTFITS, PAINTED_DEFAULT_OUTFIT, SARAH_V2_BODY_MODEL, RECOVERED_GARMENTS, nextOutfit, type Garment } from '../src/sarahlab/sarahLabTool';
+import { recoveredPartPath, recoveredPartsFor, wornGarments, GARMENTS, RECOVERED_SHIRTS, OUTFITS, PAINTED_DEFAULT_OUTFIT, SARAH_DEFAULT_OUTFIT, SARAH_V2_BODY_MODEL, RECOVERED_GARMENTS, nextOutfit, type Garment } from '../src/sarahlab/sarahLabTool';
 import * as THREE from 'three';
 
 /**
@@ -129,20 +129,25 @@ describe('the room opens with only what she has on', () => {
     expect(recoveredPartsFor(wornGarments(4, all))).toEqual([]);
     expect(recoveredPartsFor(wornGarments(5, all))).toEqual(['leggings', 'spandex-high']);
     expect(recoveredPartsFor(wornGarments(6, all))).toEqual(['leggings-low', 'spandex-low']);
+    // Sarah's red light spandex tee (2026-10-23): its one small file, with the leggings painted under it
+    expect(recoveredPartsFor(wornGarments(7, all))).toEqual(['spandex-lite']);
+    expect(OUTFITS[7].paint?.length).toBe(1);
     // the painted outfits (Joshua, 2026-10-21) download nothing: they are paint on her own skin
-    for (let i = 7; i < OUTFITS.length; i++) expect(OUTFITS[i].paint?.length ?? 0).toBeGreaterThan(0);
-    for (let i = 7; i < OUTFITS.length; i++) expect(recoveredPartsFor(wornGarments(i, all))).toEqual([]);
-    // seven modelled, then the painted ones: Sarah's own red tee and leggings (2026-10-23) and the white tee's six
-    expect(OUTFITS).toHaveLength(14);
+    for (let i = 8; i < OUTFITS.length; i++) expect(OUTFITS[i].paint?.length ?? 0).toBeGreaterThan(0);
+    for (let i = 8; i < OUTFITS.length; i++) expect(recoveredPartsFor(wornGarments(i, all))).toEqual([]);
+    // seven modelled, the light tee, then the painted ones: Sarah's own red tee and leggings (2026-10-23) and the white tee's six
+    expect(OUTFITS).toHaveLength(15);
   });
 
-  it('cycles through the painted outfits, the bikini and none on the slim v2 body, never the modelled shirts and leggings', () => {
+  it('cycles through the painted outfits, the light tee, the bikini and none on the slim v2 body, never the big modelled shirts and leggings', () => {
     // what the slim body file carries, plus every garment with its own file
     const slim: Garment[] = [...new Set<Garment>(['bikini', ...RECOVERED_GARMENTS, ...RECOVERED_SHIRTS])];
     const seen: number[] = [];
     for (let i = PAINTED_DEFAULT_OUTFIT, n = 0; n < OUTFITS.length; n++) { i = nextOutfit(i, slim); seen.push(i); }
-    // the modelled shirts and leggings are kept but not offered (Joshua, 2026-10-22): bikini, none and the painted ones
+    // the big modelled shirts and leggings are kept but not offered (Joshua, 2026-10-22): bikini, none, the light tee and
+    // the painted ones (the light tee is the one outfit with both a garment and paint)
     expect([...new Set(seen)].sort((a, b) => a - b)).toEqual([2, 4, ...OUTFITS.map((o, i) => (o.paint ? i : -1)).filter((i) => i >= 0)]);
+    expect(seen).toContain(SARAH_DEFAULT_OUTFIT);
   });
 
   it('downloads less than the four files it used to wait for, and every file has a size', () => {
@@ -153,11 +158,15 @@ describe('the room opens with only what she has on', () => {
     expect(sum(before) - sum(opening)).toBe(bytesOf('models/sarah-v2-bottom.glb') + bytesOf('models/sarah-v2-leggings-low.glb'));
   });
 
-  it('opens in the painted tee and leggings: the slim body and nothing else, under a fifth of what it used to wait for', () => {
-    const opening = [SARAH_V2_BODY_MODEL, ...recoveredPartsFor(wornGarments(PAINTED_DEFAULT_OUTFIT, all)).map(recoveredPartPath)];
+  it('opens in the light spandex tee: the slim body and its one small file, under a fifth of what it used to wait for', () => {
+    const opening = [SARAH_V2_BODY_MODEL, ...recoveredPartsFor(wornGarments(SARAH_DEFAULT_OUTFIT, all)).map(recoveredPartPath)];
     const before = ['models/sarah-v2-body.glb', ...['bottom', 'leggings', 'relaxed-high', 'leggings-low'].map((p) => recoveredPartPath(p as never))];
     const sum = (paths: string[]) => paths.reduce((s, p) => s + bytesOf(p), 0);
-    expect(opening).toEqual(['models/sarah-v2-body-slim.glb']);
+    expect(opening).toEqual(['models/sarah-v2-body-slim.glb', 'models/sarah-v2-spandex-lite.glb']);
     expect(sum(opening)).toBeLessThan(sum(before) / 5);
+    // the light tee is a twentieth of the modelled tee it was made from
+    expect(bytesOf('models/sarah-v2-spandex-lite.glb')).toBeLessThan(5 * 1024 * 1024);
+    // the painted outfit still downloads nothing
+    expect(recoveredPartsFor(wornGarments(PAINTED_DEFAULT_OUTFIT, all))).toEqual([]);
   });
 });

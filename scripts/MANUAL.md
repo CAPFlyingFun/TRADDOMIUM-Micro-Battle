@@ -48,6 +48,9 @@ as listed, prose included, so a path is written there only to list it.
 - `scripts/sarahV2Recovery/shirt-package.mjs` — Sarah v2 recovery builder or manual verification probe; see the outfit README.
 - `scripts/sarahV2Recovery/shirt-package.test.mjs` — Sarah v2 recovery builder or manual verification probe; see the outfit README.
 - `scripts/sarahV2Recovery/verify-sliders.mjs` — Sarah v2 recovery builder or manual verification probe; see the outfit README.
+- `scripts/sarahV2Recovery/shirt-lite.mjs` — writes `public/models/sarah-v2-spandex-lite.glb`, the light spandex tee Sarah opens in, from the archived 81 MB modelled tee (Joshua, 2026-10-23): simplified for every belly size at once, her navel's cloth kept whole, the bust laid again; measures what it gave up and refuses past 1.5 mm. See `docs/reviews/sarah-light-tee/README.md`.
+- `scripts/sarahV2Recovery/shirt-bust.mjs` — the bust laying `shirt-lite.mjs` uses: each breast shape smoothed over the cloth and held off her grown skin, so the SIZE and shape sliders no longer crease a modelled shirt.
+- `scripts/sarahV2Recovery/shirt-bust.d.mts` — the types for `shirt-bust.mjs`, so `tests/sarahLightTee.test.ts` can try it on a toy.
 
 - `scripts/sarahV2Recovery/bikini/approvedBottom.mjs` — Sarah v2 recovery builder, fitting audit, or manual runtime render probe; see `scripts/sarahV2Outfit/README.md`.
 - `scripts/sarahV2Recovery/bikini/build-report.json` — Sarah v2 recovery builder, fitting audit, or manual runtime render probe; see `scripts/sarahV2Outfit/README.md`.

@@ -172,7 +172,7 @@ export const BELLY_KEYS: readonly (readonly [number, string | null])[] = [
  * improved version Athletic Fit").
  */
 export const GARMENTS = ['shirt', 'leggings', 'bikini', 'swimsuit', 'shirtAthletic', 'leggingsLow'] as const;
-export const RECOVERED_SHIRTS = ['shirtRelaxedHigh', 'shirtRelaxedLow', 'shirtSpandexHigh', 'shirtSpandexLow'] as const;
+export const RECOVERED_SHIRTS = ['shirtRelaxedHigh', 'shirtRelaxedLow', 'shirtSpandexHigh', 'shirtSpandexLow', 'shirtSpandexLite'] as const;
 export type Garment = (typeof GARMENTS)[number] | (typeof RECOVERED_SHIRTS)[number];
 
 /**
@@ -181,11 +181,19 @@ export type Garment = (typeof GARMENTS)[number] | (typeof RECOVERED_SHIRTS)[numb
  * needed"). Opening the room used to fetch the bikini bottom and both rises of leggings whatever she wore -- 23 MB of
  * the 128 MB she waited for. The shirt files are one in memory at a time; the rest stay once fetched.
  */
-export type RecoveredPart = 'leggings' | 'leggings-low' | 'bottom' | 'relaxed-high' | 'relaxed-low' | 'spandex-high' | 'spandex-low';
+export type RecoveredPart = 'leggings' | 'leggings-low' | 'bottom' | 'relaxed-high' | 'relaxed-low' | 'spandex-high' | 'spandex-low' | 'spandex-lite';
 const PART_OF: Partial<Record<Garment, RecoveredPart>> = {
   leggings: 'leggings', leggingsLow: 'leggings-low', bikini: 'bottom',
   shirtRelaxedHigh: 'relaxed-high', shirtRelaxedLow: 'relaxed-low', shirtSpandexHigh: 'spandex-high', shirtSpandexLow: 'spandex-low',
+  shirtSpandexLite: 'spandex-lite',
 };
+/**
+ * THE LIGHT SPANDEX TEE (Joshua, 2026-10-23: "use that shirt ChatGPT used, but then basically compress it/make it a lot
+ * less vertices and try and optimize it for speed, size, and quality"). The high-waisted spandex tee simplified for
+ * every belly size at once (`scripts/sarahV2Recovery/shirt-lite.mjs`): one small file where the original is 81 MB, so
+ * it is offered beside the painted outfits, which the big modelled shirts are not.
+ */
+const LIGHT_PARTS: readonly RecoveredPart[] = ['bottom', 'spandex-lite'];
 /** The garments the approved v2 body can wear from their own files, whatever its own file still carries. */
 export const RECOVERED_GARMENTS = Object.freeze(Object.keys(PART_OF) as Garment[]);
 /** The recovered files a set of worn garments needs, in the order they are worth fetching: smallest first. */
@@ -194,7 +202,7 @@ export function recoveredPartsFor(worn: readonly Garment[]): RecoveredPart[] {
   return [...new Set(parts)].sort((a, b) => Number(isShirtPart(a)) - Number(isShirtPart(b)));
 }
 export const isShirtPart = (part: RecoveredPart): boolean => part.startsWith('relaxed') || part.startsWith('spandex');
-export const recoveredPartPath = (part: RecoveredPart): string => `models/sarah-v2-${part}.${isShirtPart(part) ? 'gltf' : 'glb'}`;
+export const recoveredPartPath = (part: RecoveredPart): string => `models/sarah-v2-${part}.${isShirtPart(part) && part !== 'spandex-lite' ? 'gltf' : 'glb'}`;
 /** The garment a shirt file is worn as. */
 export const shirtOfPart = (part: RecoveredPart): Garment => (Object.entries(PART_OF).find(([, p]) => p === part)?.[0] ?? 'shirt') as Garment;
 
@@ -239,7 +247,9 @@ export function uncoveredSkinIndices(indices: ArrayLike<number>, coverage: Array
 export const SARAH_RED = '#be0f2a', SARAH_LEGGINGS = '#3a3b52';
 /** One layer of a built-in outfit: a template and its fabric, a pack colour or a custom one (`tint`, fabricTint.ts). */
 export interface PaintedLayer { readonly template: string; readonly fabric: { readonly family: FabricFamilyId; readonly colour: number; readonly tint?: string } }
-export const OUTFITS: readonly { readonly name: string; readonly garments: readonly Garment[]; readonly paint?: readonly PaintedLayer[] }[] = [
+/** A modelled garment's fabric in a built-in outfit, as the editor's FABRIC would set it. */
+export type OutfitFabric = PaintedLayer['fabric'];
+export const OUTFITS: readonly { readonly name: string; readonly garments: readonly Garment[]; readonly paint?: readonly PaintedLayer[]; readonly fabrics?: Partial<Record<Garment, OutfitFabric>> }[] = [
   { name: 'tee + leggings', garments: ['shirtAthletic', 'leggings'] },
   { name: 'top + low leggings', garments: ['shirtAthletic', 'leggingsLow'] },
   { name: 'bikini', garments: ['bikini'] },
@@ -254,6 +264,9 @@ export const OUTFITS: readonly { readonly name: string; readonly garments: reado
   // one"): a red tee over charcoal leggings, both custom colours measured off the picture. The picture's neckline is a
   // round scoop; a scoop painted on her today draws a wavy edge across the large triangles of her upper chest, so she
   // wears the crew, whose edge is clean, until a scoop can be drawn as cleanly
+  // ...and the same outfit in the modelled spandex tee, light enough to offer: its round scoop neck and curved hem are
+  // the picture's, its red is the same dye on jersey; the leggings stay painted under it
+  { name: 'Sarah · red spandex tee + charcoal leggings', garments: ['shirtSpandexLite'], paint: [{ template: 'leggingsFull', fabric: { family: 'athletic', colour: 0, tint: SARAH_LEGGINGS } }], fabrics: { shirtSpandexLite: { family: 'jersey', colour: 0, tint: SARAH_RED } } },
   { name: 'Sarah · red tee + charcoal leggings', garments: [], paint: [{ template: 'leggingsFull', fabric: { family: 'athletic', colour: 0, tint: SARAH_LEGGINGS } }, { template: 'teeShort', fabric: { family: 'jersey', colour: 0, tint: SARAH_RED } }] },
   { name: 'painted tee + leggings', garments: [], paint: [{ template: 'leggingsFull', fabric: { family: 'athletic', colour: 1 } }, { template: 'teeShort', fabric: { family: 'jersey', colour: 0 } }] },
   { name: 'painted tee + low leggings', garments: [], paint: [{ template: 'leggingsUnder', fabric: { family: 'athletic', colour: 1 } }, { template: 'teeShort', fabric: { family: 'jersey', colour: 0 } }] },
@@ -262,8 +275,14 @@ export const OUTFITS: readonly { readonly name: string; readonly garments: reado
   { name: 'painted swimsuit', garments: [], paint: [{ template: 'swimsuit', fabric: { family: 'athletic', colour: 14 } }] },
   { name: 'painted leotard', garments: [], paint: [{ template: 'bodysuit', fabric: { family: 'athletic', colour: 15 } }] },
 ];
-/** The outfit the room opens in on the approved v2 body: Sarah's own red tee and charcoal leggings, painted, nothing to download. */
+/** Sarah's own red tee and charcoal leggings, all painted: nothing to download. */
 export const PAINTED_DEFAULT_OUTFIT = OUTFITS.findIndex((o) => o.name === 'Sarah · red tee + charcoal leggings');
+/**
+ * The outfit the room opens in on the approved v2 body (Joshua, 2026-10-23: "use that shirt ChatGPT used, but ...
+ * compress it"): the modelled spandex tee, light, in her red, over the painted charcoal leggings. Its round scoop neck
+ * and curved hem are his picture's, which the painted tee's crew neck and straight hem were not.
+ */
+export const SARAH_DEFAULT_OUTFIT = OUTFITS.findIndex((o) => o.name === 'Sarah · red spandex tee + charcoal leggings');
 /** Painted outfits are masks on the approved v2 body's own vertices: offered only where that body is (its recovered shirts are listed). */
 export const paintedOutfitsAvailable = (available: readonly Garment[]): boolean => available.includes('shirtRelaxedHigh');
 /**
@@ -299,7 +318,7 @@ function offered(index: number, available: readonly Garment[]): boolean {
   // where painted outfits are, the modelled clothes that need their own files are kept but never offered, so never
   // downloaded (Joshua, 2026-10-22: "keep the modeled clothing, but not load them"); the bikini stays (its design is
   // protected, and its top is in her own file)
-  if (paintedOutfitsAvailable(available) && recoveredPartsFor(wanted).some((part) => part !== 'bottom')) return false;
+  if (paintedOutfitsAvailable(available) && recoveredPartsFor(wanted).some((part) => !LIGHT_PARTS.includes(part))) return false;
   return !available.length || wanted.every((g) => available.includes(g));
 }
 /** Every outfit a model offering `available` offers, in OUTFITS order, without 'none' (a blank outfit is NEW OUTFIT's). */
@@ -318,7 +337,7 @@ export function trimShown(material: string, shown: readonly Garment[]): boolean 
   if (!material.endsWith('Trim')) return null;
   const of = material.slice(0, -4) as Garment;
   if (!(GARMENTS as readonly string[]).includes(of)) return null;
-  if (of === 'leggings' && (shown.includes('shirt') || shown.includes('shirtRelaxedHigh') || shown.includes('shirtSpandexHigh'))) return false;
+  if (of === 'leggings' && (shown.includes('shirt') || shown.includes('shirtRelaxedHigh') || shown.includes('shirtSpandexHigh') || shown.includes('shirtSpandexLite'))) return false;
   return shown.includes(of);
 }
 export function outfitLine(index: number): string {

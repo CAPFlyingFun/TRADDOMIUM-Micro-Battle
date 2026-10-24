@@ -60,14 +60,14 @@ import {
   BELLY_MOTION, BELLY_TARGET, trimShown, BREAST_TARGETS, BUMP_MAX_PERCENT, GARMENTS, RECOVERED_SHIRTS, OUTFITS, outfitLine, modelLine, refineLine, refineWeight, nextOutfit, wornGarments, coverMask, bodyNeverHidden, uncoveredSkinIndices, UNDER_TOP_GARMENT, BELLY_REFINE_TARGET, SEAT_TARGET, seatCorrectiveWeight, SARAH_LAB_MODELS, SARAH_LAB_DEFAULT_MODEL, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID, shirtLengthLine, sarahModelPath, BODY_RANDOM_SPECS,
   bellyMotionWeights, bellyWeights, breastBobWeight, breastWeightsForShape, bodyShapeFieldWeights, SIZE_TILT_PRESETS_DEG, effectiveTiltDeg, stepSeated, bustVolume, BREAST_GROW_TARGET, settledSitFor, bellyUpperWeight, BELLY_UPPER_TARGET, navelWeights, NAVEL_FLAT_TARGET, navelFlatWeight, tPoseTurns, ARM_SIDES, armsLine, ARM_RAISE_TARGETS, armRaiseWeight, SEAT_V2_TARGET, seatCorrectiveV2Weight, fingerBend, THUMB_TO_PALM, bumpLine, fingersLine, restingBellySpring, statusLine, stepBellySpring, stepBreastSpring, walkBounceAccel,
   offeredOutfits, outfitThumbPath,
-  type Garment, type SarahLabPose, recoveredPartsFor, recoveredPartPath, isShirtPart, shirtOfPart, type RecoveredPart, PAINTED_DEFAULT_OUTFIT, RECOVERED_GARMENTS,
+  type Garment, type SarahLabPose, recoveredPartsFor, recoveredPartPath, isShirtPart, shirtOfPart, type RecoveredPart, SARAH_DEFAULT_OUTFIT, RECOVERED_GARMENTS,
 } from './sarahLabTool';
 
 const M = UNITS_PER_METRE;
 /** What the fabric editor calls each garment. */
 const GARMENT_LABEL: Partial<Record<Garment, string>> = {
   shirt: 'Tee', shirtAthletic: 'Athletic tee', shirtRelaxedHigh: 'Relaxed tee', shirtRelaxedLow: 'Relaxed tee',
-  shirtSpandexHigh: 'Spandex tee', shirtSpandexLow: 'Spandex tee', leggings: 'High leggings', leggingsLow: 'Low leggings',
+  shirtSpandexHigh: 'Spandex tee', shirtSpandexLow: 'Spandex tee', shirtSpandexLite: 'Spandex tee', leggings: 'High leggings', leggingsLow: 'Low leggings',
   bikini: 'Bikini', swimsuit: 'Swimsuit',
 };
 /** What the card says while the room opens. */
@@ -256,9 +256,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let feel: { bone: THREE.Bone; local: THREE.Vector3 } | null = null;
   const felt = { p: new THREE.Vector3(), v: new THREE.Vector3(), primed: 0 };
   const tmp = new THREE.Vector3();
-  // she opens in the painted tee and leggings: nothing to download for it (Joshua, 2026-10-21); a model without
-  // painted outfits (v1) falls back to the first modelled one as it loads
-  let outfit = PAINTED_DEFAULT_OUTFIT;
+  // she opens in her red light spandex tee over painted leggings (Joshua, 2026-10-23), one small file; a model without
+  // the v2 clothes (v1) falls back to the first modelled outfit it has as it loads
+  let outfit = SARAH_DEFAULT_OUTFIT;
   let modelIndex = SARAH_LAB_DEFAULT_MODEL;
   // the body's own proportions (Joshua, 2026-10-15): all approved values to start, so she
   // looks exactly as approved until a control moves
@@ -617,7 +617,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
    */
   /** A painted outfit's paint goes on with it (and comes off when a modelled one is chosen). */
   function wearPaint(): void {
-    fabric?.wearOutfit(recovered ? OUTFITS[outfit]?.paint ?? null : null);
+    fabric?.wearOutfit(recovered ? OUTFITS[outfit]?.paint ?? null : null, recovered ? OUTFITS[outfit]?.fabrics : undefined);
     // saved clothes put on with this outfit go on over its defaults
     if (pendingClothes && fabric?.putOnClothes(pendingClothes)) { builder?.load(pendingClothes.built ?? null); pendingClothes = null; }
     // what she has on now is what the editor's SAVE compares against
@@ -984,7 +984,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       characterName: () => characters?.name() ?? '',
       builtins: () => OUTFITS.filter((o) => (o.paint ? recovered : o.name !== 'none')).map((o) => o.name),
       // her own outfit first, then the rest in the room's order
-      wearable: () => offeredOutfits(garments).sort((a, b) => Number(b === PAINTED_DEFAULT_OUTFIT) - Number(a === PAINTED_DEFAULT_OUTFIT)).map((i) => ({ name: OUTFITS[i].name, thumb: assetUrl(outfitThumbPath(OUTFITS[i].name)) })),
+      wearable: () => offeredOutfits(garments).sort((a, b) => Number(b === SARAH_DEFAULT_OUTFIT) - Number(a === SARAH_DEFAULT_OUTFIT)).map((i) => ({ name: OUTFITS[i].name, thumb: assetUrl(outfitThumbPath(OUTFITS[i].name)) })),
       thumbnail: () => thumbnail(),
       wearBuiltin: (name) => {
         const index = OUTFITS.findIndex((o) => o.name === name);

@@ -7,7 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import { EMPTY_BOOK, THUMB_MAX_CHARS, exportBook, importBook, readThumb, saveInto, saveOutfit, sameClothes, type SavedBody, type SavedClothes } from '../src/sarahlab/characterSaves';
 import { NO_RULES } from '../src/actor/bodyRandom';
-import { OUTFITS, PAINTED_DEFAULT_OUTFIT, SARAH_LEGGINGS, SARAH_RED, nextOutfit, offeredOutfits, outfitThumbPath, recoveredPartsFor, wornGarments, RECOVERED_SHIRTS, type Garment } from '../src/sarahlab/sarahLabTool';
+import { OUTFITS, PAINTED_DEFAULT_OUTFIT, SARAH_DEFAULT_OUTFIT, SARAH_LEGGINGS, SARAH_RED, nextOutfit, offeredOutfits, outfitThumbPath, recoveredPartsFor, wornGarments, RECOVERED_SHIRTS, type Garment } from '../src/sarahlab/sarahLabTool';
 import { COVERAGE_TEMPLATES } from '../src/sarahlab/paintTemplates';
 import { sanitizeBuilt } from '../src/sarahlab/strapData';
 
@@ -86,7 +86,19 @@ describe('the WEAR cards', () => {
 });
 
 describe('Sarah\'s own outfit (Joshua, 2026-10-23, from his reference picture)', () => {
-  it('is what she opens in: a red tee over charcoal leggings, painted, nothing to download', () => {
+  it('is what she opens in: the light modelled spandex tee in her red, over painted charcoal leggings', () => {
+    const o = OUTFITS[SARAH_DEFAULT_OUTFIT];
+    expect(o.garments).toEqual(['shirtSpandexLite']);
+    expect(o.fabrics).toEqual({ shirtSpandexLite: { family: 'jersey', colour: 0, tint: SARAH_RED } });
+    expect(o.paint).toEqual([{ template: 'leggingsFull', fabric: { family: 'athletic', colour: 0, tint: SARAH_LEGGINGS } }]);
+    const v2: Garment[] = ['leggings', 'leggingsLow', 'bikini', 'swimsuit', ...RECOVERED_SHIRTS];
+    expect(recoveredPartsFor(wornGarments(SARAH_DEFAULT_OUTFIT, v2))).toEqual(['spandex-lite']);
+    // the light tee is offered where the painted outfits are; the big modelled shirts it came from are not
+    expect(offeredOutfits(v2)).toContain(SARAH_DEFAULT_OUTFIT);
+    expect(offeredOutfits(v2).map((i) => OUTFITS[i].garments).flat()).not.toContain('shirtSpandexHigh');
+  });
+
+  it('is also there all painted: a red tee over charcoal leggings, nothing to download', () => {
     const o = OUTFITS[PAINTED_DEFAULT_OUTFIT];
     expect(o.garments).toEqual([]);
     expect(o.paint).toEqual([

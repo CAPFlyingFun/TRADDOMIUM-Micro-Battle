@@ -142,8 +142,10 @@ export interface FabricPanel {
    * Put on a painted outfit: each of its layers a coverage template in a fabric swatch, bottom first. Layers a previous
    * painted outfit filled and this one does not are cleared; layers painted by hand are left alone unless this outfit
    * needs them. Null takes a painted outfit off. Its detail goes back to AUTO. False if her body is not ready yet.
+   * `garments` dresses the outfit's modelled garments in their fabrics (a garment the last outfit dressed and this one
+   * does not goes back to its own look; fabrics picked by hand on other garments are left alone).
    */
-  wearOutfit(layers: readonly { readonly template: string; readonly fabric: FabricPick }[] | null): boolean;
+  wearOutfit(layers: readonly { readonly template: string; readonly fabric: FabricPick }[] | null, garments?: Readonly<Record<string, FabricPick | undefined>>): boolean;
   /** Every paint layer and garment fabric off (a blank NEW OUTFIT); the detail back to AUTO. */
   clearAll(): boolean;
   /**
@@ -940,9 +942,14 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
 
   // which layers the last painted outfit filled (so taking it off clears them and nothing painted by hand)
   const outfitLayers: boolean[] = Array.from({ length: PAINT_LAYER_COUNT }, () => false);
-  function wearOutfit(layers: readonly { readonly template: string; readonly fabric: FabricPick }[] | null): boolean {
+  // ...and which garments it dressed
+  const outfitGarments = new Set<string>();
+  function wearOutfit(layers: readonly { readonly template: string; readonly fabric: FabricPick }[] | null, garments: Readonly<Record<string, FabricPick | undefined>> = {}): boolean {
     const p = bodyPaint(), map = regionMap();
     if (!p || !map) return false;
+    for (const name of outfitGarments) if (!garments[name]) garmentChoices.delete(name);
+    outfitGarments.clear();
+    for (const [name, pick] of Object.entries(garments)) if (pick) { garmentChoices.set(name, { ...DEFAULT_CHOICE, fabric: pick }); outfitGarments.add(name); }
     for (let i = 0; i < PAINT_LAYER_COUNT; i++) {
       const want = layers?.[i], t = want ? COVERAGE_TEMPLATES.find((x) => x.id === want.template) : undefined;
       if (want && t) {
@@ -967,7 +974,7 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
     const p = bodyPaint();
     if (!p) return false;
     for (let i = 0; i < PAINT_LAYER_COUNT; i++) { p.clear(i); templates[i] = null; paintChoices[i] = DEFAULT_CHOICE; details[i] = DEFAULT_LAYER_DETAIL; outfitLayers[i] = false; }
-    garmentChoices.clear();
+    garmentChoices.clear(); outfitGarments.clear();
     override = AUTO_DETAIL;
     void apply(); refreshTargets(); selectFirst(); touched();
     return true;
@@ -1002,7 +1009,7 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
         p.clear(i); templates[i] = null; paintChoices[i] = DEFAULT_CHOICE; details[i] = DEFAULT_LAYER_DETAIL; outfitLayers[i] = false;
       }
     }
-    garmentChoices.clear();
+    garmentChoices.clear(); outfitGarments.clear();
     for (const [k, v] of Object.entries(saved.garments)) garmentChoices.set(k, v);
     override = saved.detail ?? AUTO_DETAIL;
     void apply(); refreshTargets(); selectFirst();
