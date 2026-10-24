@@ -91,6 +91,39 @@ function expectedPin(world: THREE.Vector3[], tris: number[], b: ClothBinding, i:
 
 const at = (a: Float32Array, i: number) => new THREE.Vector3(a[i * 3], a[i * 3 + 1], a[i * 3 + 2]);
 
+/**
+ * Where a particle is laid and pinned since alpha.121: its bound skin point in her shape now (morphs, no bones), out by
+ * its offset along her normal there, then skinned by its triangle's corners' bones blended by its barycentrics -- as a
+ * garment's own vertex is skinned, worked here with three's own matrices.
+ */
+function expectedSkinnedPin(mesh: THREE.SkinnedMesh, b: ClothBinding, i: number): THREE.Vector3 {
+  const g = mesh.geometry, pos = g.getAttribute('position'), morphs = g.morphAttributes.position ?? [], inf = mesh.morphTargetInfluences ?? [];
+  const SI = g.getAttribute('skinIndex'), SW = g.getAttribute('skinWeight');
+  const local = (v: number) => {
+    const p = new THREE.Vector3().fromBufferAttribute(pos, v);
+    morphs.forEach((m, k) => { if (inf[k]) p.addScaledVector(new THREE.Vector3().fromBufferAttribute(m as THREE.BufferAttribute, v), inf[k]); });
+    return p;
+  };
+  const c = [0, 1, 2].map((k) => local(b.tri[i * 3 + k]));
+  const n = new THREE.Vector3().subVectors(c[1], c[0]).cross(new THREE.Vector3().subVectors(c[2], c[0])).normalize();
+  const p = new THREE.Vector3();
+  for (let k = 0; k < 3; k++) p.addScaledVector(c[k], b.bary[i * 3 + k]);
+  if (n.dot(p) < 0) n.negate(); // outward: the sphere's middle is her local origin
+  p.addScaledVector(n, b.offset[i]);
+  const bind = p.clone().applyMatrix4(mesh.bindMatrix), sum = new THREE.Vector3(), m = new THREE.Matrix4();
+  for (let k = 0; k < 3; k++) {
+    const v = b.tri[i * 3 + k], share = b.bary[i * 3 + k];
+    for (let j = 0; j < 4; j++) {
+      const w = SW.getComponent(v, j) * share;
+      if (!w) continue;
+      const bone = SI.getComponent(v, j);
+      m.multiplyMatrices(mesh.skeleton.bones[bone].matrixWorld, mesh.skeleton.boneInverses[bone]);
+      sum.addScaledVector(bind.clone().applyMatrix4(m), w);
+    }
+  }
+  return sum.applyMatrix4(mesh.bindMatrixInverse).applyMatrix4(mesh.matrixWorld);
+}
+
 /** The triangle whose rest centroid is nearest `c`. */
 function triangleNear(g: THREE.BufferGeometry, c: THREE.Vector3): number {
   const pos = g.getAttribute('position'), tris = triangles(g), m = new THREE.Vector3(), v = new THREE.Vector3();
@@ -116,7 +149,7 @@ function distinctPositions(g: THREE.BufferGeometry): number {
 const toWorld = (b: Body, x: number, y: number, z: number) => new THREE.Vector3(x, y, z).applyMatrix4(b.mesh.matrixWorld);
 
 describe('ClothSkin: her posed skin under every cloth particle', () => {
-  it('starts each particle on its bound skin point plus its offset along the outward normal, whatever order the file names the corners in', () => {
+  it('starts each particle on its bound skin point plus its offset along the outward normal, skinned as a garment vertex is, whatever order the file names the corners in', () => {
     const g = new THREE.SphereGeometry(1, 24, 16), b = body(g), tris = triangles(g);
     expect(distinctPositions(g)).toBeLessThan(g.getAttribute('position').count); // the seam and the poles are split
     const picks = [
@@ -126,11 +159,13 @@ describe('ClothSkin: her posed skin under every cloth particle', () => {
       { t: 500, bary: [1 / 3, 1 / 3, 1 / 3] as [number, number, number], offset: 0 },
     ];
     const binding = bindingOf(tris, picks), skin = new ClothSkin(b.mesh, binding);
-    const check = () => {
+    const check = (posed: boolean) => {
       const world = posedWorld(b.mesh), out = skin.initial(new Float32Array(binding.count * 3));
       picks.forEach((p, i) => {
-        const want = expectedPin(world, tris, binding, i, p.t, 100);
-        expect(at(out, i).distanceTo(want)).toBeLessThan(1e-3);
+        // her own skinning carries the whole place, offset and all (alpha.121); unposed that is the posed skin point
+        // out along the posed normal exactly, and posed it stays within a hair of it on a triangle this size
+        expect(at(out, i).distanceTo(expectedSkinnedPin(b.mesh, binding, i))).toBeLessThan(1e-3);
+        expect(at(out, i).distanceTo(expectedPin(world, tris, binding, i, p.t, 100))).toBeLessThan(posed ? 1 : 1e-3);
       });
       // the offset points out of her: each particle stands off its skin point away from the sphere's middle
       const centre = toWorld(b, 0, 0, 0);
@@ -141,10 +176,10 @@ describe('ClothSkin: her posed skin under every cloth particle', () => {
         expect(at(out, i).sub(skinPoint).dot(skinPoint.clone().sub(centre))).toBeGreaterThan(0);
       });
     };
-    check();
+    check(false);
     // and posed: the upper bone bent and the morph half on
     b.upper.rotation.set(0.4, 0, 0.3); b.mesh.morphTargetInfluences![0] = 0.5; b.root.updateMatrixWorld(true);
-    check();
+    check(true);
   });
 
   it('finds a seam-split triple by position when the file names a duplicate vertex rather than the triangle\'s own', () => {

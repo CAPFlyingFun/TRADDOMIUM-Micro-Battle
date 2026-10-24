@@ -149,6 +149,8 @@ export class ClothSkin {
   // --- per update ---
   /** Each vertex posed this update, world (vertex × 3). */
   private readonly world: Float32Array;
+  /** Each vertex posed this frame, before her bones: her shape now in her own (bind) space (vertex × 3). */
+  private readonly bindPos: Float32Array;
   /** The update a vertex was last posed in. */
   private readonly stamp: Uint32Array;
   private frame = 0;
@@ -320,6 +322,7 @@ export class ClothSkin {
     }
 
     this.world = new Float32Array(nV * 3);
+    this.bindPos = new Float32Array(nV * 3);
     this.stamp = new Uint32Array(nV);
   }
 
@@ -332,10 +335,13 @@ export class ClothSkin {
    */
   restShape(out: Float32Array): Float32Array {
     this.refresh();
-    const bt = this.binding.tri, bb = this.binding.bary, off = this.binding.offset, s = this.scale, n = this.count, q = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+    const bt = this.binding.tri, bb = this.binding.bary, off = this.binding.offset, s = this.scale, n = this.count, q = [0, 0, 0, 0, 0, 0, 0, 0, 0], r = [0, 0, 0, 0, 0, 0, 0, 0, 0], T = this.tris;
     for (let i = 0; i < n; i++) {
       for (let c = 0; c < 3; c++) this.local(bt[i * 3 + c], q, c * 3);
-      const ux = q[3] - q[0], uy = q[4] - q[1], uz = q[5] - q[2], vx = q[6] - q[0], vy = q[7] - q[1], vz = q[8] - q[2];
+      // her normal from the bound triangle's own corners, in its own winding (the file may name them in any order)
+      const t = this.bound[i];
+      for (let c = 0; c < 3; c++) this.local(T[t * 3 + c], r, c * 3);
+      const ux = r[3] - r[0], uy = r[4] - r[1], uz = r[5] - r[2], vx = r[6] - r[0], vy = r[7] - r[1], vz = r[8] - r[2];
       let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx; const l = Math.hypot(nx, ny, nz);
       const k = l > 0 ? this.restSign / l : 0; nx *= k; ny *= k; nz *= k;
       const u = bb[i * 3], v = bb[i * 3 + 1], w = bb[i * 3 + 2], o = off[i];
@@ -599,6 +605,7 @@ export class ClothSkin {
       }
       x += dx; y += dy; z += dz;
     }
+    { const bp = this.bindPos, o = v * 3; bp[o] = x; bp[o + 1] = y; bp[o + 2] = z; }
     if (this.skinned) {
       const SI = this.skinI!, SW = this.skinW!, B = this.bones, o4 = v * 4;
       let sx = 0, sy = 0, sz = 0;
@@ -714,8 +721,48 @@ export class ClothSkin {
       const T = this.tris;
       for (let k = 0; k < 3; k++) { const q = T[t * 3 + k]; if (st[q] !== f) this.pose(q); }
     }
-    const ok = this.normalOf(t), off = ok ? this.binding.offset[i] * this.scale : 0;
-    out[o] = x + this.nx * off; out[o + 1] = y + this.ny * off; out[o + 2] = z + this.nz * off;
+    const ok = this.normalOf(t);
+    if (!this.skinned || !this.skinI || !this.skinW) {
+      const off = ok ? this.binding.offset[i] * this.scale : 0;
+      out[o] = x + this.nx * off; out[o + 1] = y + this.ny * off; out[o + 2] = z + this.nz * off;
+      return ok;
+    }
+    // Its own place in her shape now, before her bones: its bound skin point, out by its offset along her normal there
+    // (her own space, as restShape lays the pattern); then SKINNED, by the bones of its triangle's three corners
+    // blended by where on the triangle it is -- as a garment's own vertex is skinned. Laid on her posed skin instead
+    // (the posed point, out along the posed normal), a particle off her skin by a sleeve's or a shoulder's width was
+    // carried by triangles her shoulder folds and shears when her arms come forward, and the cloth there was laid
+    // crumpled and held crumpled by its pins: torn-looking sleeves and neckline whenever she sat (Joshua, 2026-10-24:
+    // "around the top and sleeves, it's all messed up and jagged looking like something ripped it").
+    const Bp = this.bindPos, a3 = a * 3, b3 = b * 3, c3 = c * 3;
+    // her normal from the bound triangle's own corners, in its own winding (the file may name them in any order)
+    const T = this.tris, t0 = T[t * 3] * 3, t1 = T[t * 3 + 1] * 3, t2 = T[t * 3 + 2] * 3;
+    const ex = Bp[t1] - Bp[t0], ey = Bp[t1 + 1] - Bp[t0 + 1], ez = Bp[t1 + 2] - Bp[t0 + 2];
+    const fx = Bp[t2] - Bp[t0], fy = Bp[t2 + 1] - Bp[t0 + 1], fz = Bp[t2 + 2] - Bp[t0 + 2];
+    let nx = ey * fz - ez * fy, ny = ez * fx - ex * fz, nz = ex * fy - ey * fx;
+    const nl = Math.hypot(nx, ny, nz), k = nl > 0 ? this.restSign / nl : 0, off = this.binding.offset[i];
+    nx *= k; ny *= k; nz *= k;
+    const px = u * Bp[a3] + v * Bp[b3] + w * Bp[c3] + nx * off;
+    const py = u * Bp[a3 + 1] + v * Bp[b3 + 1] + w * Bp[c3 + 1] + ny * off;
+    const pz = u * Bp[a3 + 2] + v * Bp[b3 + 2] + w * Bp[c3 + 2] + nz * off;
+    const SI = this.skinI, SW = this.skinW, B = this.bones;
+    let sx = 0, sy = 0, sz = 0;
+    for (let corner = 0; corner < 3; corner++) {
+      const cv = corner === 0 ? a : corner === 1 ? b : c, share = corner === 0 ? u : corner === 1 ? v : w, o4 = cv * 4;
+      if (share === 0) continue;
+      for (let j = 0; j < 4; j++) {
+        const wt = SW[o4 + j] * share;
+        if (wt === 0) continue;
+        const r = SI[o4 + j] * 12;
+        sx += wt * (B[r] * px + B[r + 1] * py + B[r + 2] * pz + B[r + 3]);
+        sy += wt * (B[r + 4] * px + B[r + 5] * py + B[r + 6] * pz + B[r + 7]);
+        sz += wt * (B[r + 8] * px + B[r + 9] * py + B[r + 10] * pz + B[r + 11]);
+      }
+    }
+    const P = this.P;
+    out[o] = P[0] * sx + P[1] * sy + P[2] * sz + P[3];
+    out[o + 1] = P[4] * sx + P[5] * sy + P[6] * sz + P[7];
+    out[o + 2] = P[8] * sx + P[9] * sy + P[10] * sz + P[11];
     return ok;
   }
 }

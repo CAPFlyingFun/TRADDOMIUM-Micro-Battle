@@ -114,6 +114,24 @@ describe('the cloth tee file', () => {
     const gaps = hem.map((p, i) => gap(p, hem[(i + 1) % hem.length])).sort((a, b) => a - b);
     expect(gaps[gaps.length >> 1]).toBeGreaterThan(8);
     expect(gaps[0]).toBeGreaterThan(1);
+    // and the neckline and sleeves thinned too (Joshua, 2026-10-24: "around the top and sleeves, it's all messed up
+    // and jagged looking like something ripped it"): they kept the modelled folds' every point, 2-3 mm apart (the
+    // neckline 242 of them, the sleeves 146 and 126), where the cloth is 11 mm apart
+    for (const edge of loops.filter((l) => l !== hem)) {
+      const g = edge.map((p, i) => gap(p, edge[(i + 1) % edge.length])).sort((a, b) => a - b);
+      expect(edge.length).toBeLessThan(110);
+      expect(g[g.length >> 1]).toBeGreaterThan(4.5);
+    }
+  });
+
+  it('holds each sleeve to her arm at its edge, easing off up the sleeve', () => {
+    // seated, her arms come forward; held only at its very edge the sleeve's front stayed with her trunk and her arm
+    // went through it
+    const pin = column('_PIN'), row = column('_ROW');
+    let soft = 0, easing = 0;
+    for (let v = 0; v < pin.length; v++) { if (row[v] !== 0) continue; if (Math.abs(pin[v] - 0.35) < 1e-3) soft++; else if (pin[v] > 0.01 && pin[v] < 0.34) easing++; }
+    expect(soft).toBeGreaterThan(20);
+    expect(easing).toBeGreaterThan(soft);
   });
 
   it('carries every column the room reads, one value per drawn vertex', () => {

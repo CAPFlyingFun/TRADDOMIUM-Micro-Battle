@@ -41,8 +41,8 @@ const PARTICLES = Number(option('particles', 5000));
 const ROW_STEP = 0.012, COLUMN_STEP = 0.012, SLOPE = 0.45, BAND_OFF = 0.004;
 /** Metres from the neckline: fully pinned inside PIN_IN, free past PIN_OUT. */
 const PIN_IN = 0.012, PIN_OUT = 0.03;
-/** Metres, and how strongly: the sleeves' edges, held softly to her arms. */
-const SLEEVE_PIN_IN = 0.008, SLEEVE_PIN = 0.35;
+/** Metres, and how strongly: the sleeves' edges, held softly to her arms, the hold easing off to nothing by SLEEVE_PIN_OUT. */
+const SLEEVE_PIN_IN = 0.008, SLEEVE_PIN = 0.35, SLEEVE_PIN_OUT = 0.04;
 /** Metres: a particle over her arm is SLEEVE (bound to her arm) only when her trunk is at least this far from it. */
 const SLEEVE_CLEAR = 0.02;
 /** Metres: a point's layer is told by her skin when her nearer skin is within SKIN_NEAR and nearer than the other by SKIN_MARGIN. */
@@ -51,8 +51,12 @@ const SKIN_NEAR = 0.03, SKIN_MARGIN = 0.012;
 const FOLD = -0.5;
 /** Metres: how far a ray from the tee looks for her body. */
 const RAY = 0.08, RAY_CLOSE = 0.025, RAY_RATIO = 3;
-/** Body-local units (about 0.9 m each): how far the hem may stray from the modelled one as its points are thinned. */
-const HEM_ERROR = 0.002;
+/** Body-local units (about 0.9 m each): how far an open edge (hem, neckline, sleeve) may stray from the modelled one as its points are thinned. */
+const EDGE_ERROR = 0.002;
+/** Of the cloth's spacing (COLUMN_STEP): an open edge's point is let go when its edge is shorter than EDGE_SHORT, if the edge it leaves stays under EDGE_LONG. */
+const EDGE_SHORT = 0.6, EDGE_LONG = 1.5;
+/** Body-local units: how far a neckline or sleeve point may stand off the line its neighbours make and still be let go. The modelled folds step 2-4 mm there, and those steps are the jagged edge; the edges are smoothed along themselves after. */
+const EDGE_STRAY = 0.005;
 /** Metres from her navel: the tee's own navel impression is smoothed away fully inside the first, not at all past the second. */
 const NAVEL_ZONE = [0.025, 0.045];
 /**
@@ -256,10 +260,81 @@ for (let t = 0; t < I.length; t += 3) if (outerNode[nodeOf[I[t]]] + outerNode[no
 }
 const outer = outerTris.flatMap((t) => [I[t], I[t + 1], I[t + 2]]);
 console.log(`outer layer: ${outer.length / 3} of ${I.length / 3} triangles`);
-// compact, then simplify the sheet. The neckline and sleeves are LOCKED (they stay exactly where they are); the hem is
-// simplified with the rest. Locked too, it kept every point of the modelled tee's fold -- 327 of them, some 0.1 mm
-// apart, where the cloth is 11 mm apart everywhere else -- and at 0% length those tiny edges crumpled into a ragged
-// hem (Joshua, 2026-10-24: "the 0% shirt bottom hem/seams, was not straight but when I added more length, it did").
+/**
+ * Thin a sheet's open edges toward the cloth's spacing by collapsing points along them, one at a time, never changing
+ * the sheet's shape or topology: a point goes into its nearer neighbour along the edge when that edge is shorter than
+ * EDGE_SHORT of the cloth's spacing, the edge it leaves stays within EDGE_LONG of it, the point lies within EDGE_STRAY
+ * of the line it leaves, its triangles do not flip, and the two share only the one triangle between them (the link
+ * condition: no new hole, no fold). A point with more than one copy (a UV seam) stays. `edge(p)` says which welded
+ * points may go. Returns the new index buffer (same vertices).
+ */
+function thinEdges(index, VP, weldedOf, welded, edge) {
+  const I = Array.from(index), copies = new Uint16Array(welded), only = new Int32Array(welded).fill(-1);
+  for (let v = 0; v < weldedOf.length; v++) { copies[weldedOf[v]]++; only[weldedOf[v]] = v; }
+  const step = COLUMN_STEP / scale, short = EDGE_SHORT * step, long = EDGE_LONG * step;
+  const P = (w) => { const v = only[w]; return [VP[v * 3], VP[v * 3 + 1], VP[v * 3 + 2]]; };
+  const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], len = (a) => Math.hypot(a[0], a[1], a[2]);
+  const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+  let collapsed = 0;
+  for (let round = 0; round < 60; round++) {
+    const W = (i) => weldedOf[I[i]];
+    const live = []; for (let t = 0; t < I.length; t += 3) { const a = W(t), b = W(t + 1), c = W(t + 2); if (a !== b && b !== c && c !== a) live.push(t); }
+    const around = new Map(), use = new Map(), next = new Map(), prev = new Map();
+    for (const t of live) for (let e = 0; e < 3; e++) {
+      const a = W(t + e), b = W(t + (e + 1) % 3);
+      (around.get(a) ?? around.set(a, []).get(a)).push(t);
+      const k = a < b ? `${a},${b}` : `${b},${a}`; use.set(k, (use.get(k) ?? 0) + 1);
+    }
+    for (const t of live) for (let e = 0; e < 3; e++) { const a = W(t + e), b = W(t + (e + 1) % 3); if (use.get(a < b ? `${a},${b}` : `${b},${a}`) === 1) { next.set(a, b); prev.set(b, a); } }
+    const touched = new Set();
+    let changed = 0;
+    for (const [u, b] of next) {
+      const a = prev.get(u);
+      if (a === undefined || touched.has(u) || touched.has(a) || touched.has(b) || !edge(u) || copies[u] !== 1) continue;
+      const pu = P(u), da = copies[a] === 1 ? len(sub(P(a), pu)) : Infinity, db = copies[b] === 1 ? len(sub(P(b), pu)) : Infinity;
+      const v = da <= db ? a : b, other = v === a ? b : a, d = Math.min(da, db);
+      if (!(d < short) || other === v) continue;
+      const pv = P(v), po = P(other), span = sub(po, pv), sl = len(span);
+      if (!(sl < long)) continue;
+      // the edge keeps its shape: u lies near the line it leaves
+      if (sl > 0 && len(cross(sub(pu, pv), span)) / sl > EDGE_STRAY) continue;
+      // the link condition: u and v share exactly one neighbour (the third corner of the one triangle on their edge)
+      const near = (w) => { const s = new Set(); for (const t of around.get(w) ?? []) for (let k = 0; k < 3; k++) s.add(W(t + k)); s.delete(w); return s; };
+      const nu = near(u), nv = near(v); let shared = 0; for (const x of nu) if (nv.has(x)) shared++;
+      if (shared !== 1) continue;
+      // no triangle of u's flips or collapses when u moves onto v
+      let ok = true;
+      for (const t of around.get(u)) {
+        const c = [W(t), W(t + 1), W(t + 2)];
+        if (c.includes(v)) continue;
+        const was = c.map(P), now = c.map((w) => (w === u ? pv : P(w)));
+        const n0 = cross(sub(was[1], was[0]), sub(was[2], was[0])), n1 = cross(sub(now[1], now[0]), sub(now[2], now[0]));
+        const l0 = len(n0), l1 = len(n1);
+        if (!(l1 > 1e-12) || (n0[0] * n1[0] + n0[1] * n1[1] + n0[2] * n1[2]) / (l0 * l1) < 0.5) { ok = false; break; }
+      }
+      if (!ok) continue;
+      for (const t of around.get(u)) for (let k = 0; k < 3; k++) if (W(t + k) === u) I[t + k] = only[v];
+      touched.add(u); touched.add(v); touched.add(a); touched.add(b);
+      changed++;
+    }
+    collapsed += changed;
+    if (!changed) break;
+  }
+  const out = [];
+  for (let t = 0; t < I.length; t += 3) { const a = weldedOf[I[t]], b = weldedOf[I[t + 1]], c = weldedOf[I[t + 2]]; if (a !== b && b !== c && c !== a) out.push(I[t], I[t + 1], I[t + 2]); }
+  console.log(`neckline and sleeves: ${collapsed} points let go along them`);
+  return Uint32Array.from(out);
+}
+
+// compact, then simplify the sheet: first with every open edge LOCKED, then each open edge thinned along itself. Locked,
+// an edge keeps every point of the modelled tee's fold there -- the hem 327 of them, some 0.1 mm apart, the neckline 242
+// and the sleeves 146 and 126, 2-3 mm apart, where the cloth is 11 mm apart everywhere else -- and those tiny edges
+// crumple: at 0% length into a ragged hem (Joshua, 2026-10-24: "the 0% shirt bottom hem/seams, was not straight but
+// when I added more length, it did"), and round her neck and arms into a sheet that looked torn there (the same day:
+// "around the top and sleeves, it's all messed up and jagged looking like something ripped it"). So every edge is
+// thinned toward the cloth's own spacing, within EDGE_ERROR of its shape: the hem by the simplifier, which managed it;
+// the neckline and sleeves by `thinEdges` below, since the simplifier, let loose on them, tore holes in the sheet beside
+// a sleeve.
 let used = [...new Set(outer)].sort((x, y) => x - y);
 const remapOuter = new Map(used.map((v, i) => [v, i]));
 let VP = Float32Array.from(used.flatMap((v) => [P[v * 3], P[v * 3 + 1], P[v * 3 + 2]])), VUV = Float32Array.from(used.flatMap((v) => [UV[v * 2], UV[v * 2 + 1]]));
@@ -273,14 +348,16 @@ let VI = Uint32Array.from(outer, (v) => remapOuter.get(v));
   const at = new Float64Array(welded * 3); for (let v = 0; v < weldedOf.length; v++) for (let k = 0; k < 3; k++) at[weldedOf[v] * 3 + k] = VP[v * 3 + k];
   const edges = [], seenEdge = new Set();
   for (const s of next.keys()) { if (seenEdge.has(s)) continue; const l = []; let v = s; while (v !== undefined && !seenEdge.has(v)) { seenEdge.add(v); l.push(v); v = next.get(v); } edges.push(l); }
+  const edgePoint = new Uint8Array(welded); for (const l of edges) if (l.length >= 12) for (const p of l) edgePoint[p] = 1;
   const heightOf = (l) => l.reduce((s, p) => s + toWorld(at[p * 3], at[p * 3 + 1], at[p * 3 + 2])[1], 0) / l.length;
   const hemEdge = edges.filter((l) => l.length >= 12).reduce((a, b) => (heightOf(a) < heightOf(b) ? a : b));
   const hemPoint = new Uint8Array(welded); for (const p of hemEdge) hemPoint[p] = 1;
-  // first the sheet, every edge locked; then the hem alone, along itself, within HEM_ERROR of its shape
+  // first the sheet, every edge locked; then its open edges alone, each along itself, within EDGE_ERROR of its shape
   const ratio = Math.min(1, PARTICLES / welded);
   const [sheet] = MeshoptSimplifier.simplify(VI, VP, 3, Math.floor(VI.length * ratio / 3) * 3, 1, ['LockBorder']);
   const lock = Uint8Array.from(weldedOf, (p) => (hemPoint[p] ? 0 : 1));
-  const [simple] = MeshoptSimplifier.simplifyWithAttributes(sheet, VP, 3, VUV, 2, [0.01, 0.01], lock, 0, HEM_ERROR, ['ErrorAbsolute']);
+  const [hemmed] = MeshoptSimplifier.simplifyWithAttributes(sheet, VP, 3, VUV, 2, [0.01, 0.01], lock, 0, EDGE_ERROR, ['ErrorAbsolute']);
+  const simple = thinEdges(hemmed, VP, weldedOf, welded, (p) => edgePoint[p] && !hemPoint[p]);
   const keep = [...new Set(simple)].sort((x, y) => x - y), map = new Map(keep.map((v, i) => [v, i]));
   VP = Float32Array.from(keep.flatMap((v) => [VP[v * 3], VP[v * 3 + 1], VP[v * 3 + 2]])); VUV = Float32Array.from(keep.flatMap((v) => [VUV[v * 2], VUV[v * 2 + 1]]));
   VI = Uint32Array.from(simple, (v) => map.get(v));
@@ -313,19 +390,19 @@ if (big.length !== 4) console.warn(`expected 4 open edges (neck, two sleeves, he
 console.log(`open edges: ${loops.length} loops, ${big.map((l) => `${l.length}@y${meanWorld(l)[1].toFixed(2)},x${meanWorld(l)[0].toFixed(2)}`).join('  ')}`);
 const hem = big.reduce((a, b) => (meanWorld(a)[1] < meanWorld(b)[1] ? a : b));
 const neck = big.filter((l) => l !== hem).reduce((a, b) => (Math.abs(meanWorld(a)[0]) < Math.abs(meanWorld(b)[0]) ? a : b));
-{
-  // the hem as a line: smoothed along itself (Taubin, which does not shrink it), so what the simplifier left of the
-  // modelled fold's steps is not a zigzag; then how evenly it is spaced
-  const H = hem.length, at = (i) => hem[(i + H) % H];
+for (const [name, edge] of [['hem', hem], ['neckline', neck], ...big.filter((l) => l !== hem && l !== neck).map((l, i) => [`sleeve ${i + 1}`, l])]) {
+  // each open edge as a line: smoothed along itself (Taubin, which does not shrink it), so what the simplifier left of
+  // the modelled fold's steps is not a zigzag; then how evenly it is spaced
+  const H = edge.length, at = (i) => edge[(i + H) % H];
   for (let pass = 0; pass < 8; pass++) for (const k of [0.5, -0.53]) {
-    const was = Float64Array.from(hem.flatMap((p) => [particleRest[p * 3], particleRest[p * 3 + 1], particleRest[p * 3 + 2]]));
+    const was = Float64Array.from(edge.flatMap((p) => [particleRest[p * 3], particleRest[p * 3 + 1], particleRest[p * 3 + 2]]));
     for (let i = 0; i < H; i++) for (let c = 0; c < 3; c++) {
       const prev = was[((i - 1 + H) % H) * 3 + c], nextC = was[((i + 1) % H) * 3 + c];
       particleRest[at(i) * 3 + c] = was[i * 3 + c] + k * ((prev + nextC) / 2 - was[i * 3 + c]);
     }
   }
-  const gaps = hem.map((p, i) => Math.hypot(...[0, 1, 2].map((c) => particleRest[p * 3 + c] - particleRest[at(i + 1) * 3 + c])) * scale * 1000).sort((x, y) => x - y);
-  console.log(`hem: ${H} points ${gaps[0].toFixed(1)} to ${gaps.at(-1).toFixed(1)} mm apart (median ${gaps[H >> 1].toFixed(1)})`);
+  const gaps = edge.map((p, i) => Math.hypot(...[0, 1, 2].map((c) => particleRest[p * 3 + c] - particleRest[at(i + 1) * 3 + c])) * scale * 1000).sort((x, y) => x - y);
+  console.log(`${name}: ${H} points ${gaps[0].toFixed(1)} to ${gaps.at(-1).toFixed(1)} mm apart (median ${gaps[H >> 1].toFixed(1)})`);
 }
 
 // ---- 3. rows below the hem, to mid-thigh ---------------------------------------------------------------------------
@@ -434,18 +511,27 @@ const tri = new Uint32Array(nP * 3), bary = new Float32Array(nP * 3), offset = n
 const neckWorld = neck.map(restWorld), sleeveWorld = big.filter((l) => l !== hem && l !== neck).slice(0, 2).flatMap((l) => l.map(restWorld));
 let worstOff = 0, sleeves = 0;
 for (let p = 0; p < nP; p++) {
-  // bound to her trunk, unless it is sleeve: over her arm, and well clear of her trunk (her side under her arm is trunk)
+  // bound to her trunk, unless it is sleeve: over her arm, and well clear of her trunk (her side under her arm is trunk);
+  // or over her arm within SLEEVE_PIN_OUT of a sleeve's edge, where it is held to her arm, however near her trunk -- the
+  // front and back of the sleeve by her armpit, which as her arms come forward (seated) must come with them, carried
+  // and held by her arm's own bones, or her arm goes through them (Joshua, 2026-10-24: "around the top and sleeves… like
+  // something ripped it")
   const q = [rest[p * 3], rest[p * 3 + 1], rest[p * 3 + 2]], trunk = trunkSkin(q), any = rowOf[p] > 0 ? trunk : anySkin(q);
-  const s = any.tri.some((v) => armVertex[v]) && trunk.distance * scale > SLEEVE_CLEAR ? any : trunk;
+  const wq = toWorld(...q);
+  let edgeNear = Infinity; if (rowOf[p] === 0) for (const n of sleeveWorld) edgeNear = Math.min(edgeNear, Math.hypot(wq[0] - n[0], wq[1] - n[1], wq[2] - n[2]));
+  const s = any.tri.some((v) => armVertex[v]) && (trunk.distance * scale > SLEEVE_CLEAR || edgeNear < SLEEVE_PIN_OUT) ? any : trunk;
   if (s !== trunk) sleeves++;
   tri.set(s.tri, p * 3); bary.set(s.bc ?? s.bary, p * 3); offset[p] = s.offset; worstOff = Math.max(worstOff, Math.abs(s.offset));
   if (rowOf[p] === 0) {
     const w = toWorld(...q);
     let d = Infinity; for (const n of neckWorld) d = Math.min(d, Math.hypot(w[0] - n[0], w[1] - n[1], w[2] - n[2]));
     pin[p] = d <= PIN_IN ? 1 : d >= PIN_OUT ? 0 : 1 - (d - PIN_IN) / (PIN_OUT - PIN_IN);
-    // the sleeves' edges are held softly to her arms, so they ride with them and do not slide down them
+    // the sleeves' edges are held softly to her arms, so they ride with them and do not slide down them; and the sleeve
+    // above its edge, ever more lightly, so that as her arms come forward (seated) the sleeve comes with them instead
+    // of her arm going through its front (Joshua, 2026-10-24: "around the top and sleeves… like something ripped it")
     let e = Infinity; for (const n of sleeveWorld) e = Math.min(e, Math.hypot(w[0] - n[0], w[1] - n[1], w[2] - n[2]));
-    if (e <= SLEEVE_PIN_IN) pin[p] = Math.max(pin[p], SLEEVE_PIN);
+    const held = e <= SLEEVE_PIN_IN ? SLEEVE_PIN : e >= SLEEVE_PIN_OUT ? 0 : SLEEVE_PIN * (1 - (e - SLEEVE_PIN_IN) / (SLEEVE_PIN_OUT - SLEEVE_PIN_IN));
+    pin[p] = Math.max(pin[p], held);
   }
 }
 console.log(`bound to her: the furthest particle ${(worstOff * scale * 100).toFixed(1)} cm off her skin; ${sleeves} on her arms (sleeves); ${[...pin].filter((x) => x > 0).length} particles held (her neckline, softly her sleeves' edges)`);

@@ -243,3 +243,38 @@ This is the regular tee, with the cloth off. It is what she opens in.
 
 - **A few edges at one sleeve's edge.** Where the cloth is held softly at the sleeve, a few of its edges (particles 1003–1008) stand up to 13× their pattern length from the moment it is laid. The soft pins hold them to places the pattern does not agree with. Nothing shows in the renders. It is noted here so the number is not mistaken for a tear.
 - **The skin sliver at the top of a 200% belly.** It has not shown at the new defaults.
+
+## alpha.121: the neckline and sleeves when she sits (`13-sleeves-seated.jpg`)
+
+Joshua, 2026-10-24, on alpha.120: "Everything you did seems to work, but around the top and sleeves, it's all messed up and jagged looking like something ripped it". His screenshot was seated at 200%. Standing, the neckline and sleeves were clean. Seated, with her arms forward, they looked torn. The problem has been there since the cloth tee first arrived; it shows most at 200%, and was not caused by alpha.120.
+
+Three things caused it, and each is fixed:
+
+- **The cloth was laid on her crumpled.** Every particle was laid (and its pin held) at its bound skin point, out along her posed skin's normal.
+  - Her shoulder's skin folds and shears as her arms come forward. So a particle standing a sleeve's or a shoulder's width off her was carried crumpled, and its pin held it there. This is plain to see with her body hidden (`13`, middle row).
+  - `clothSkin.ts` now lays and pins each particle the way a garment's own vertex is skinned:
+    - its bound point in her current shape, before her bones, out by its offset along her normal there;
+    - then skinned by its triangle's corners' bones, blended by where on the triangle it lies.
+  - Unposed, that is the same place as before; it changes only once she moves.
+- **Her arm went through the sleeve's front.** The front and back of the sleeve by her armpit were bound to her trunk, because her trunk was within 2 cm.
+  - A particle bound to her trunk never touches her arm, so when her arm came forward it went through them.
+  - The bake (`shirt-cloth.mjs`) now binds the sleeve within 4 cm of its edge to her arm wherever it lies over her arm.
+  - The sleeve's hold eases from 0.35 at its edge to nothing 4 cm up, so the sleeve comes with her arm.
+  - The side of the tee under her arm stays bound to her trunk, so it does not pinch between her arm and her side.
+- **The neckline and sleeves kept every point of the modelled folds**, 2–3 mm apart where the cloth is 11 mm apart. That is the same fault that crumpled the hem in alpha.117.
+  - The bake now lets points go along those edges as well: neckline 242 → 97 points, sleeves 146/126 → 105/87. It uses its own careful collapse, because the simplifier tore holes beside a sleeve.
+  - The edges are then smoothed along themselves, as the hem is.
+
+The bake is reproducible: two runs give byte-identical files.
+
+### Checked
+
+- **Seated at 200%, from her right and left:** the sleeves wrap her arms and the neckline is clean (`13`, top and bottom).
+- **Standing at 100% and 200%, walking, and from the side and back:** as before.
+- **The T-pose:** the tee rides up her with her arms raised, under the old binding and the new one alike.
+- **Her navel at 200% seated:** the cloth still clears it (`navelGap` 3.4 mm).
+
+### Left
+
+- **The T-pose** crops the tee and crumples its back at the shoulders. The cloth has no collision with itself, and raising her arms pulls the sleeves up with the tee.
+- **With her body hidden**, the sleeve on her near side still shows a fold behind her arm, both standing and seated. It cannot be seen with her body shown.
