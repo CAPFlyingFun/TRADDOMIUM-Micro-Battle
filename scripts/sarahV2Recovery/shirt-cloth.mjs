@@ -51,6 +51,20 @@ const SKIN_NEAR = 0.03, SKIN_MARGIN = 0.012;
 const FOLD = -0.5;
 /** Metres: how far a ray from the tee looks for her body. */
 const RAY = 0.08, RAY_CLOSE = 0.025, RAY_RATIO = 3;
+/** Body-local units (about 0.9 m each): how far the hem may stray from the modelled one as its points are thinned. */
+const HEM_ERROR = 0.002;
+/** Metres from her navel: the tee's own navel impression is smoothed away fully inside the first, not at all past the second. */
+const NAVEL_ZONE = [0.025, 0.045];
+/**
+ * Metres: two rings of skin round her navel and each nipple, an inner and an outer, that say how her surface lies there
+ * without the detail: its normal, and its curvature (the outer ring lies lower round a curved belly or breast than the
+ * inner one does), so the room can tell how far the detail itself stands above her smooth surface.
+ */
+const DETAIL_RINGS = [[0.022, 0.03], [0.036, 0.044]];
+/** Metres, in her rest world (her approved body at 100%): where a nipple is looked for (out from her middle, and up from
+ * her feet: above the top of her bump, at 1.2 m, and below her collarbones), and how far behind her most forward point
+ * a breast's apex reaches. */
+const NIPPLE_WINDOW = { across: [0.06, 0.14], up: [1.22, 1.32] }, NIPPLE_APEX = 0.003;
 
 await Promise.all([MeshoptDecoder.ready, MeshoptEncoder.ready, MeshoptSimplifier.ready]);
 const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'meshopt.decoder': MeshoptDecoder, 'meshopt.encoder': MeshoptEncoder });
@@ -242,14 +256,31 @@ for (let t = 0; t < I.length; t += 3) if (outerNode[nodeOf[I[t]]] + outerNode[no
 }
 const outer = outerTris.flatMap((t) => [I[t], I[t + 1], I[t + 2]]);
 console.log(`outer layer: ${outer.length / 3} of ${I.length / 3} triangles`);
-// compact, then simplify the sheet (its edges locked: neckline, sleeves and hem stay where they are)
+// compact, then simplify the sheet. The neckline and sleeves are LOCKED (they stay exactly where they are); the hem is
+// simplified with the rest. Locked too, it kept every point of the modelled tee's fold -- 327 of them, some 0.1 mm
+// apart, where the cloth is 11 mm apart everywhere else -- and at 0% length those tiny edges crumpled into a ragged
+// hem (Joshua, 2026-10-24: "the 0% shirt bottom hem/seams, was not straight but when I added more length, it did").
 let used = [...new Set(outer)].sort((x, y) => x - y);
 const remapOuter = new Map(used.map((v, i) => [v, i]));
 let VP = Float32Array.from(used.flatMap((v) => [P[v * 3], P[v * 3 + 1], P[v * 3 + 2]])), VUV = Float32Array.from(used.flatMap((v) => [UV[v * 2], UV[v * 2 + 1]]));
 let VI = Uint32Array.from(outer, (v) => remapOuter.get(v));
 {
-  const { count: welded } = weld(VP);
-  const ratio = Math.min(1, PARTICLES / welded), [simple] = MeshoptSimplifier.simplify(VI, VP, 3, Math.floor(VI.length * ratio / 3) * 3, 1, ['LockBorder']);
+  const { ids: weldedOf, count: welded } = weld(VP);
+  // the sheet's open edges, by welded point (a UV seam is not an edge), and which of them is the hem: the lowest
+  const use = new Map(), next = new Map();
+  for (let t = 0; t < VI.length; t += 3) for (let e = 0; e < 3; e++) { const a = weldedOf[VI[t + e]], b = weldedOf[VI[t + (e + 1) % 3]]; const k = a < b ? `${a},${b}` : `${b},${a}`; use.set(k, (use.get(k) ?? 0) + 1); }
+  for (let t = 0; t < VI.length; t += 3) for (let e = 0; e < 3; e++) { const a = weldedOf[VI[t + e]], b = weldedOf[VI[t + (e + 1) % 3]]; if (use.get(a < b ? `${a},${b}` : `${b},${a}`) === 1) next.set(a, b); }
+  const at = new Float64Array(welded * 3); for (let v = 0; v < weldedOf.length; v++) for (let k = 0; k < 3; k++) at[weldedOf[v] * 3 + k] = VP[v * 3 + k];
+  const edges = [], seenEdge = new Set();
+  for (const s of next.keys()) { if (seenEdge.has(s)) continue; const l = []; let v = s; while (v !== undefined && !seenEdge.has(v)) { seenEdge.add(v); l.push(v); v = next.get(v); } edges.push(l); }
+  const heightOf = (l) => l.reduce((s, p) => s + toWorld(at[p * 3], at[p * 3 + 1], at[p * 3 + 2])[1], 0) / l.length;
+  const hemEdge = edges.filter((l) => l.length >= 12).reduce((a, b) => (heightOf(a) < heightOf(b) ? a : b));
+  const hemPoint = new Uint8Array(welded); for (const p of hemEdge) hemPoint[p] = 1;
+  // first the sheet, every edge locked; then the hem alone, along itself, within HEM_ERROR of its shape
+  const ratio = Math.min(1, PARTICLES / welded);
+  const [sheet] = MeshoptSimplifier.simplify(VI, VP, 3, Math.floor(VI.length * ratio / 3) * 3, 1, ['LockBorder']);
+  const lock = Uint8Array.from(weldedOf, (p) => (hemPoint[p] ? 0 : 1));
+  const [simple] = MeshoptSimplifier.simplifyWithAttributes(sheet, VP, 3, VUV, 2, [0.01, 0.01], lock, 0, HEM_ERROR, ['ErrorAbsolute']);
   const keep = [...new Set(simple)].sort((x, y) => x - y), map = new Map(keep.map((v, i) => [v, i]));
   VP = Float32Array.from(keep.flatMap((v) => [VP[v * 3], VP[v * 3 + 1], VP[v * 3 + 2]])); VUV = Float32Array.from(keep.flatMap((v) => [VUV[v * 2], VUV[v * 2 + 1]]));
   VI = Uint32Array.from(simple, (v) => map.get(v));
@@ -282,6 +313,20 @@ if (big.length !== 4) console.warn(`expected 4 open edges (neck, two sleeves, he
 console.log(`open edges: ${loops.length} loops, ${big.map((l) => `${l.length}@y${meanWorld(l)[1].toFixed(2)},x${meanWorld(l)[0].toFixed(2)}`).join('  ')}`);
 const hem = big.reduce((a, b) => (meanWorld(a)[1] < meanWorld(b)[1] ? a : b));
 const neck = big.filter((l) => l !== hem).reduce((a, b) => (Math.abs(meanWorld(a)[0]) < Math.abs(meanWorld(b)[0]) ? a : b));
+{
+  // the hem as a line: smoothed along itself (Taubin, which does not shrink it), so what the simplifier left of the
+  // modelled fold's steps is not a zigzag; then how evenly it is spaced
+  const H = hem.length, at = (i) => hem[(i + H) % H];
+  for (let pass = 0; pass < 8; pass++) for (const k of [0.5, -0.53]) {
+    const was = Float64Array.from(hem.flatMap((p) => [particleRest[p * 3], particleRest[p * 3 + 1], particleRest[p * 3 + 2]]));
+    for (let i = 0; i < H; i++) for (let c = 0; c < 3; c++) {
+      const prev = was[((i - 1 + H) % H) * 3 + c], nextC = was[((i + 1) % H) * 3 + c];
+      particleRest[at(i) * 3 + c] = was[i * 3 + c] + k * ((prev + nextC) / 2 - was[i * 3 + c]);
+    }
+  }
+  const gaps = hem.map((p, i) => Math.hypot(...[0, 1, 2].map((c) => particleRest[p * 3 + c] - particleRest[at(i + 1) * 3 + c])) * scale * 1000).sort((x, y) => x - y);
+  console.log(`hem: ${H} points ${gaps[0].toFixed(1)} to ${gaps.at(-1).toFixed(1)} mm apart (median ${gaps[H >> 1].toFixed(1)})`);
+}
 
 // ---- 3. rows below the hem, to mid-thigh ---------------------------------------------------------------------------
 const axis = meanWorld(hem);
@@ -405,6 +450,62 @@ for (let p = 0; p < nP; p++) {
 }
 console.log(`bound to her: the furthest particle ${(worstOff * scale * 100).toFixed(1)} cm off her skin; ${sleeves} on her arms (sleeves); ${[...pin].filter((x) => x > 0).length} particles held (her neckline, softly her sleeves' edges)`);
 
+// ---- 4b. her navel and nipples, for the room to find on her each frame --------------------------------------------
+// (Joshua, 2026-10-24: "there are two bellybuttons, the top is the real one, the bottom for some reason is fixed on the
+// shirt and it shouldn't be"; and the BREAST and NAVEL DETAIL sliders should reach the cloth.) The modelled tee carries
+// its own navel impression; `_NAVEL` says how much each particle is in its zone, where clothShirt.ts smooths the
+// pattern flat, so the only navel is hers. And her navel and nipples, each with a ring of skin round it, are recorded
+// by vertex: the room poses them each frame, to lift the cloth over her navel and show both through the fabric.
+const at = (v) => [BW[v * 3], BW[v * 3 + 1], BW[v * 3 + 2]];
+const dist3 = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+// her navel: the vertex her navel shapes move most (as the room's own navelHint finds it)
+let navelVertex = -1;
+{
+  let most = 0;
+  for (const name of ['navelOut', 'navelIn', 'navelFlat']) {
+    const d = skinOffsets.get(name);
+    if (!d) continue;
+    for (let v = 0; v < d.length / 3; v++) { const m = d[v * 3] ** 2 + d[v * 3 + 1] ** 2 + d[v * 3 + 2] ** 2; if (m > most) { most = m; navelVertex = v; } }
+  }
+}
+if (navelVertex < 0) throw new Error('her navel shapes are missing from the body file');
+// her nipples: each breast's apex, the middle of its most forward few millimetres (her front is +z), in a window above
+// her bump and out from her cleavage. (Her breasts' growth shape moves most at the cleavage, and "the most forward
+// point" over a taller window found the top of her belly.)
+const nipples = [-1, -1];
+for (const s of [0, 1]) {
+  const sign = s === 0 ? -1 : 1, inWindow = (v) => { const [x, y] = at(v); return x * sign >= NIPPLE_WINDOW.across[0] && x * sign <= NIPPLE_WINDOW.across[1] && y >= NIPPLE_WINDOW.up[0] && y <= NIPPLE_WINDOW.up[1]; };
+  let front = -Infinity; for (const v of trunk) if (inWindow(v)) front = Math.max(front, at(v)[2]);
+  const m = [0, 0, 0]; let n = 0;
+  for (const v of trunk) if (inWindow(v) && at(v)[2] >= front - NIPPLE_APEX) { at(v).forEach((x, k) => (m[k] += x)); n++; }
+  if (!n) continue;
+  m.forEach((_, k) => (m[k] /= n));
+  // the skin point nearest that middle, on the front
+  let best = Infinity; for (const v of trunk) if (inWindow(v)) { const d = dist3(at(v), [m[0], m[1], front]); if (d < best) { best = d; nipples[s] = v; } }
+}
+if (nipples.includes(-1)) throw new Error('could not find both nipples in their window');
+/** A ring of her skin round a point, `n` vertices evenly round it (counter-clockwise seen from the front), between the radii. */
+function ringRound(c, inner, outer, n = 16) {
+  const centre = at(c), bins = Array.from({ length: n }, () => ({ v: -1, off: Infinity })), mid = (inner + outer) / 2;
+  for (const v of trunk) {
+    const p = at(v), d = dist3(p, centre);
+    if (d < inner || d > outer || p[2] < centre[2] - outer) continue;
+    const a = Math.atan2(p[1] - centre[1], p[0] - centre[0]), k = Math.min(n - 1, Math.floor(((a + Math.PI) / (2 * Math.PI)) * n));
+    if (Math.abs(d - mid) < bins[k].off) bins[k] = { v, off: Math.abs(d - mid) };
+  }
+  const ring = bins.map((b) => b.v).filter((v) => v >= 0);
+  if (ring.length < n * 0.75) throw new Error(`a ring round vertex ${c} found only ${ring.length} of ${n} points`);
+  return ring;
+}
+const navelRings = DETAIL_RINGS.map(([a, b]) => ringRound(navelVertex, a, b));
+const nippleRings = nipples.map((v) => DETAIL_RINGS.map(([a, b]) => ringRound(v, a, b)));
+const navelZone = new Float32Array(nP);
+for (let p = 0; p < teeParticles; p++) {
+  const d = dist3(toWorld(rest[p * 3], rest[p * 3 + 1], rest[p * 3 + 2]), at(navelVertex));
+  navelZone[p] = d <= NAVEL_ZONE[0] ? 1 : d >= NAVEL_ZONE[1] ? 0 : ((t) => t * t * (3 - 2 * t))((NAVEL_ZONE[1] - d) / (NAVEL_ZONE[1] - NAVEL_ZONE[0]));
+}
+console.log(`her navel: vertex ${navelVertex} at ${at(navelVertex).map((x) => x.toFixed(3))} m, ${[...navelZone].filter((w) => w > 0).length} particles in its zone; nipples ${nipples.join(', ')} at ${nipples.map((v) => at(v).map((x) => x.toFixed(3)).join(',')).join(' and ')}`);
+
 // ---- 5. the file: render vertices (the tee's own, with their UVs; one per extension particle), per-particle data -----
 const renderCount = particleOf.length + ROWS * columns;
 const vertexParticle = new Uint32Array(renderCount), vertexUV = new Float32Array(renderCount * 2);
@@ -434,10 +535,14 @@ const clothPrim = out.createPrimitive()
   .setAttribute('_PIN', acc(perVertex(pin, 1), 'SCALAR'))
   .setAttribute('_ROW', acc(perVertex(rowOf, 1), 'SCALAR'))
   .setAttribute('_ANCHOR', acc(perVertex(anchorOf, 1), 'SCALAR'))
+  .setAttribute('_NAVEL', acc(perVertex(navelZone, 1), 'SCALAR'))
   .setIndices(acc(renderIndex, 'SCALAR'))
   .setMaterial(material);
 const clothMesh = out.createMesh('sarah-v2-shirt-spandex-cloth').addPrimitive(clothPrim).setExtras({
-  cloth: { version: 1, source: SOURCE.split('/').pop(), particles: nP, teeParticles, rows: ROWS, columns, armBones: [...armJoint].sort((a, b) => a - b), rowStepM: ROW_STEP, midThighM: +MID_THIGH.toFixed(4), localToMetres: +scale.toFixed(6), pinIn: PIN_IN, pinOut: PIN_OUT },
+  cloth: {
+    version: 2, source: SOURCE.split('/').pop(), particles: nP, teeParticles, rows: ROWS, columns, armBones: [...armJoint].sort((a, b) => a - b), rowStepM: ROW_STEP, midThighM: +MID_THIGH.toFixed(4), localToMetres: +scale.toFixed(6), pinIn: PIN_IN, pinOut: PIN_OUT,
+    detail: { navel: navelVertex, navelRings, nipples, nippleRings, navelZoneM: NAVEL_ZONE, ringsM: DETAIL_RINGS },
+  },
 });
 out.getRoot().listScenes()[0].addChild(out.createNode('sarah-v2-shirt-spandex-cloth').setMesh(clothMesh));
 await out.transform(prune({ keepAttributes: true, keepLeaves: false }));

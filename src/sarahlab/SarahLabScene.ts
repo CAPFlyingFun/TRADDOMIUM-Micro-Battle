@@ -16,6 +16,7 @@ import { History } from './strapData';
 import { loadingCard, LOADING_COVERED_VAR, type LoadingCard, type LoadingPlace } from './loadingCard';
 import { LoadMeter } from '../assets/loadMeter';
 import { ClothShirt } from './clothShirt';
+import { setClothDetail } from './clothDetail';
 /**
  * THE SARAH LAB — Sarah rebuilt from Joshua's base mannequin, on a turntable,
  * to try before anything of it goes live (Joshua, 2026-10-07: "Good to test
@@ -535,7 +536,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     }, { normalizeNormals: !(mesh.userData.recoveredShirt || mesh.userData.recoveredLeggings) });
     for (const mesh of skinned) {
       const dict = mesh.morphTargetDictionary, influences = mesh.morphTargetInfluences;
-      if (dict && influences) for (const [name, w] of Object.entries({ ...bellyWeights(bump, bellyCurve), ...breastWeightsForShape(bump, dict[BREAST_GROW_TARGET] !== undefined, body.breastSize), [BELLY_UPPER_TARGET]: bellyUpperWeight(bump, bellyCurve), ...navelWeights(bump), [NAVEL_FLAT_TARGET]: Math.max(navelFlatWeight(bump), fabric?.navelFlatten() ?? 0), [BELLY_REFINE_TARGET]: refineWeight(refine, bump), [SEAT_TARGET]: seatCorrectiveWeight(pose === 'sit' ? 1 : 0, bump), [SEAT_V2_TARGET]: seatCorrectiveV2Weight(pose === 'sit' ? 1 : 0, bump), ...armRaiseWeights() })) {
+      if (dict && influences) for (const [name, w] of Object.entries({ ...bellyWeights(bump, bellyCurve), ...breastWeightsForShape(bump, dict[BREAST_GROW_TARGET] !== undefined, body.breastSize), [BELLY_UPPER_TARGET]: bellyUpperWeight(bump, bellyCurve), ...navelWeights(bump), [NAVEL_FLAT_TARGET]: Math.max(navelFlatWeight(bump), fabric?.navelFlatten() ?? 0, clothFlatten()), [BELLY_REFINE_TARGET]: refineWeight(refine, bump), [SEAT_TARGET]: seatCorrectiveWeight(pose === 'sit' ? 1 : 0, bump), [SEAT_V2_TARGET]: seatCorrectiveV2Weight(pose === 'sit' ? 1 : 0, bump), ...armRaiseWeights() })) {
         const at = dict[name];
         if (at !== undefined) influences[at] = w;
       }
@@ -691,7 +692,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   async function toggleCloth(): Promise<void> {
     if (clothLoading) return;
     clothOn = !clothOn;
-    if (!clothOn || cloth) { if (cloth) { cloth.mesh.visible = clothOn; if (clothOn) clothRestart = true; } applyLook(); refresh(); return; }
+    // her detail through the tee is the cloth's: the fitted tee shares its material, and shows its own
+    if (!clothOn && cloth) setClothDetail(cloth.mesh.material as THREE.Material, null);
+    if (!clothOn || cloth) { if (cloth) { cloth.mesh.visible = clothOn; if (clothOn) clothRestart = true; } applyLook(); refresh(); fabric?.refreshTargets(); return; }
     const body = skinned.find((m) => !!m.geometry.getAttribute('_cloth_cover')), tee = partMeshes.get('spandex-lite')?.[0];
     if (!model || !body || !tee) { clothOn = false; refresh(); return; }
     clothLoading = true; refresh();
@@ -716,11 +719,26 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       console.error('[sarahlab] the cloth tee could not be laid on her', error);
       clothOn = false;
       meter.fail('The cloth tee could not be downloaded. Check your connection, then tap CLOTH SIM again.');
-    } finally { clothLoading = false; applyLook(); refresh(); }
+    } finally { clothLoading = false; applyLook(); refresh(); fabric?.refreshTargets(); }
   }
   /** The cloth goes with the light tee it is a copy of (its material is the tee's). */
   function dropCloth(): void {
-    cloth?.dispose(); cloth = null; clothOn = false; clothShapeKey = '';
+    if (cloth) setClothDetail(cloth.mesh.material as THREE.Material, null);
+    cloth?.dispose(); cloth = null; clothOn = false; clothShapeKey = ''; clothFlattenLaid = 0;
+  }
+  /**
+   * How much of her shows through the cloth tee (Joshua, 2026-10-24: "the breast slider has no effect on the outfit… it
+   * still should have a visible effect"; "the bellybutton also doesn't appear with the slider… the overrides should be
+   * working"): BREAST and NAVEL DETAIL as the outfit editor holds them, MANUAL where set, else AUTO from the tee's fabric.
+   */
+  function clothKeep(): { nipple: number; navel: number } {
+    return fabric?.garmentDetail('shirtSpandexLite') ?? { nipple: 0.45, navel: 0.8 };
+  }
+  /** Under the cloth tee her navel is softened the way paint softens it: toward flat by what NAVEL DETAIL hides. */
+  let clothFlattenLaid = 0;
+  function clothFlatten(): number {
+    clothFlattenLaid = clothOn && cloth ? 1 - clothKeep().navel : 0;
+    return clothFlattenLaid;
   }
   function dress(next: number, opening = false): void {
     // chosen before she is in: the opening dresses her in it
@@ -1129,6 +1147,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         return box;
       },
       changed: () => outfits?.changed(),
+      // the CLOTH SIM tee lies over her nipples and navel: it counts for AUTO's detail
+      clothOver: () => (clothOn && cloth ? { name: 'shirtSpandexLite', label: 'cloth tee' } : null),
       navelHint: () => {
         // her navel: the vertex her own navel morphs move most
         const body = skinned.find(m => !!m.geometry.getAttribute('_cloth_cover'));
@@ -1547,6 +1567,10 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       if (new URLSearchParams(globalThis.location?.search ?? '').get('probe') === 'cloth') (globalThis as unknown as Record<string, unknown>).__sarahLabCloth = {
         settle: (frames: number, dt = 1 / 60) => { if (!cloth || !model) return null; for (let k = 0; k < frames; k++) { model.updateMatrixWorld(true); cloth.frame(dt); } return cloth.stats(); },
         settings: () => cloth?.simSettings ?? null,
+        // what shows through the tee now (her navel's height above the skin round it, the spots the shading draws)
+        detail: () => (cloth ? { heights: cloth.detailHeights, keep: clothKeep(), spots: cloth.detail(clothKeep()) } : null),
+        // BREAST or NAVEL DETAIL set (null: AUTO), as the outfit editor's sliders do
+        keep: (which: 'nipple' | 'navel', value: number | null) => fabric?.setDetail(which, value),
         restart: () => { cloth?.restart(); },
         // where the drawn sheet's hem hangs, each side of her (world units): to read a lopsided hang as a number
         hem: () => {
@@ -1594,6 +1618,11 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         model.updateMatrixWorld(true);
         if (clothRestart) { cloth.restart(); clothRestart = false; }
         cloth.frame(dt);
+        // her navel and nipples through it, at the editor's BREAST and NAVEL DETAIL; her navel softened under it to match
+        const keep = clothKeep();
+        cloth.keep = keep;
+        setClothDetail(cloth.mesh.material as THREE.Material, cloth.detail(keep));
+        if (Math.abs(1 - keep.navel - clothFlattenLaid) > 1e-3) applyLook();
         if (fields.cloth) fields.cloth.textContent = clothLine(cloth.stats(), frameMs);
       }
     },

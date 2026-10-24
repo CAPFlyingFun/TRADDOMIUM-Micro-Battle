@@ -122,6 +122,12 @@ export interface FabricHooks {
   saveSection?(): HTMLElement | null;
   /** Her clothes changed (a fabric, a style, a stroke, the detail): the room's SAVE status follows. */
   changed?(): void;
+  /**
+   * A garment lying over her nipples and navel as cloth (the CLOTH SIM tee), by material name and label, or null: it
+   * counts for AUTO's BREAST and NAVEL DETAIL as a painted piece over them does (Joshua, 2026-10-24: "the overrides
+   * should be working").
+   */
+  clothOver?(): { readonly name: string; readonly label: string } | null;
 }
 
 export interface FabricPanel {
@@ -178,6 +184,8 @@ export interface FabricPanel {
   setActive(on: boolean): void;
   /** The shared BREAST and NAVEL DETAIL as saved, and a way to set either (null: AUTO). */
   detail(): DetailOverride;
+  /** How much of her shows through a modelled garment: the MANUAL values where set, else AUTO from its fabric. */
+  garmentDetail(name: string): DetailKeep;
   setDetail(which: 'nipple' | 'navel', value: number | null): void;
   /** Another view of the same BREAST and NAVEL DETAIL controls, for the BODY tab. */
   detailControl(): HTMLElement;
@@ -449,17 +457,28 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
   const drawDetail = () => { for (const v of detailViews) v.draw(); };
   detailFold.append(detailHead, detailControl());
 
+  /** A modelled garment's own detail: AUTO from the fabric it is dyed in (its family's row). */
+  const garmentResolved = (name: string): ResolvedDetail => resolveDetail(DEFAULT_LAYER_DETAIL, garmentChoices.get(name)?.fabric?.family ?? null, undefined);
+  /** What a modelled garment shows of her: the outfit's MANUAL values where set, else its own AUTO. */
+  const garmentDetail = (name: string): DetailKeep => { const own = garmentResolved(name).keep; return { nipple: override.nipple ?? own.nipple, navel: override.navel ?? own.navel }; };
   /** A layer's own detail: its mode, its fabric's family and its template's construction. */
   const resolved = (i: number): ResolvedDetail => resolveDetail(details[i], paintChoices[i].fabric?.family ?? null, templates[i] ? COVERAGE_TEMPLATES.find((t) => t.id === templates[i]!.id)?.construction : undefined);
   /** What a layer keeps: the outfit's MANUAL values where set, else the layer's own. */
   const keepOf = (i: number): DetailKeep => { const own = resolved(i).keep; return { nipple: override.nipple ?? own.nipple, navel: override.navel ?? own.navel }; };
   /** AUTO's value for a detail: of the pieces shown over it, the one that hides most, as the shader decides. */
   function autoDetail(which: 'nipple' | 'navel'): { keep: number; piece: string; material: string } | null {
-    const p = paint;
-    if (!p) return null;
-    const at = (which === 'navel' ? [p.navelVertex] : p.nippleVertices).filter((v) => v >= 0);
-    if (!at.length) return null;
     let best: { keep: number; piece: string; material: string } | null = null, most = -1;
+    // a simulated garment over her lies over both, wholly
+    const over = hooks.clothOver?.();
+    if (over) {
+      const r = garmentResolved(over.name);
+      best = { keep: r.keep[which], piece: over.label, material: r.material?.name.toLowerCase() ?? 'its fabric' };
+      most = 1 - r.keep[which];
+    }
+    const p = paint;
+    if (!p) return best;
+    const at = (which === 'navel' ? [p.navelVertex] : p.nippleVertices).filter((v) => v >= 0);
+    if (!at.length) return best;
     for (let i = 0; i < PAINT_LAYER_COUNT; i++) {
       if (!p.has(i) || !paintChoices[i].fabric || !layerShown(i)) continue;
       const c = Math.max(...at.map((v) => Math.min(1, p.coverAt(v, [i]) * 1.4)));
@@ -1050,6 +1069,7 @@ export function fabricPanel(hooks: FabricHooks): FabricPanel {
     space: () => space,
     setActive(on) { if (on === active) return; active = on; updateView(); draw(); },
     detail: () => override,
+    garmentDetail,
     setDetail: setDetailValue,
     detailControl() { const e = detailControl(); drawDetail(); return e; },
     wearsShirt: () => !!paint && templates.some((t, i) => !!t && t.params.length !== null && paint!.has(i) && !!paintChoices[i].fabric),

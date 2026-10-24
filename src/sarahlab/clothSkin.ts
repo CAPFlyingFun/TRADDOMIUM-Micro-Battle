@@ -358,6 +358,7 @@ export class ClothSkin {
     this.refresh();
     const n = Math.min(this.count, Math.floor(cloth.length / 3));
     const { tris, weld, rowStart, rowTri, adj, last, maxWalk, thickness } = this, clearance = this.restClearance, offset = this.binding.offset, scale = this.scale;
+    const extra = this.extraStandOff && this.extraStandOff.length >= n ? this.extraStandOff : null;
     const P = out.point, Nn = out.normal, S = out.standOff, bound = this.bound;
     for (let i = 0; i < n; i++) {
       const i3 = i * 3;
@@ -402,9 +403,26 @@ export class ClothSkin {
       if (t === bound[i] && pinOk) { Nn[i3] = pnx; Nn[i3 + 1] = pny; Nn[i3 + 2] = pnz; }
       else if (this.normalOf(t)) { Nn[i3] = this.nx; Nn[i3 + 1] = this.ny; Nn[i3 + 2] = this.nz; }
       else keepNormal(Nn, i3);
-      S[i] = clearance > thickness ? Math.max(thickness, Math.min(clearance, offset[i] * scale)) : thickness;
+      S[i] = (clearance > thickness ? Math.max(thickness, Math.min(clearance, offset[i] * scale)) : thickness) + (extra ? extra[i] : 0);
     }
     return performance.now() - t0;
+  }
+
+  /**
+   * More stand-off for some particles this frame (world units, one a particle; null for none): where a detail of her
+   * skin smaller than the cloth's spacing stands proud -- her navel past 75% -- the cloth over it keeps clear of it, or
+   * the detail comes up between particles.
+   */
+  extraStandOff: Float32Array | null = null;
+
+  /**
+   * Body vertex v as she is posed now, world, into out at o: for points the room follows on her (her navel, her
+   * nipples). Valid after `update` or `initial` this frame, which read her pose.
+   */
+  posedVertex(v: number, out: Float32Array | number[], o = 0): void {
+    if (this.stamp[v] !== this.frame) this.pose(v);
+    const W = this.world;
+    out[o] = W[v * 3]; out[o + 1] = W[v * 3 + 1]; out[o + 2] = W[v * 3 + 2];
   }
 
   // ---------------------------------------------------------------------------------------------------------------

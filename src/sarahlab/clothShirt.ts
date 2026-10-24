@@ -18,6 +18,7 @@ import * as THREE from 'three';
 import { ClothSim, type ClothSettings } from './clothSim';
 import { ClothSkin } from './clothSkin';
 import { copyContacts, createContacts, type ClothBinding, type SkinContacts } from './clothTypes';
+import type { ClothDetailState } from './clothDetail';
 
 export interface ClothShirtStats {
   /** Milliseconds this frame, smoothed: finding her skin under the cloth, moving the cloth, writing it for drawing. */
@@ -48,6 +49,36 @@ const WARM_SECONDS = 0.4, WARM_DAMPING = 25;
 const JUMP = 4;
 /** How quickly the shown milliseconds follow the frame's (an exponential mean over about this many frames). */
 const SMOOTHING = 20;
+/**
+ * How much the hem weighs against the cloth above it, a particle for a particle. A tee's hem is turned up and stitched,
+ * and its weight is what hangs the tee straight. (The first cloth file kept every point of the modelled tee's fold at
+ * its hem, 327 of them, and weighed it so by accident; its hem now has the cloth's own spacing, about a quarter as many
+ * points, and this gives it its weight back.)
+ */
+const HEM_MASS = 3.5;
+/** Taubin passes over the navel zone of the pattern (each a smoothing and an un-shrinking step). */
+const NAVEL_SMOOTHING = 12;
+/**
+ * How her navel and nipples show through the tee. Art-direction numbers, Joshua's to change; the BREAST and NAVEL
+ * DETAIL sliders scale what they give.
+ * - The shading (clothDetail.ts): each relief's radius against the detail's own inner ring of skin, how much of an
+ *   innie's depth the fabric dips into (it bridges the rest), and a nipple's relief at full detail (world units, cm).
+ * - The cloth over a detail standing proud (an outie navel, a nipple): kept clear of it in a dome reaching DOME_IN
+ *   to DOME_OUT of that ring's radius, which widens to WIDE_OUT as the detail is hidden, so a hidden one is a gentle
+ *   rise rather than a bump. A nipple is domed only as BREAST DETAIL hides it; a proud navel always, or it comes up
+ *   through the cloth between particles (the dark spot on the phone, 2026-10-24).
+ */
+export const DETAIL_LOOK = Object.freeze({ navelRadius: 0.35, innieThrough: 0.5, nippleRadius: 0.3, nippleRelief: 0.3, domeIn: 0.35, domeOut: 0.8, wideOut: 1.6 });
+
+/** Where her navel and nipples are on her body, as the cloth file records them (scripts/sarahV2Recovery/shirt-cloth.mjs). */
+interface DetailPoints { readonly navel: number; readonly navelRings: readonly (readonly number[])[]; readonly nipples: readonly number[]; readonly nippleRings: readonly (readonly (readonly number[])[])[] }
+/**
+ * One of her details as posed this frame: its centre, her smooth surface's outward normal there, the inner ring's
+ * radius, and how far the detail stands above her SMOOTH surface (negative an innie's depth): the outer ring's plane
+ * lifted by the curvature the two rings show, so a curved belly or breast is not counted as the detail.
+ */
+interface Posed { readonly c: [number, number, number]; readonly n: [number, number, number]; readonly base: [number, number, number]; rho: number; curve: number; reach2: number; h: number }
+const posed = (): Posed => ({ c: [0, 0, 0], n: [0, 0, 1], base: [0, 0, 0], rho: 1, curve: 0, reach2: 1, h: 0 });
 
 export class ClothShirt {
   readonly mesh: THREE.Mesh;
@@ -63,6 +94,20 @@ export class ClothShirt {
   private readonly anchor: Uint32Array;
   /** Every particle's place in the file (body-local, her approved body at 100%): the rows below the hem keep this pattern. */
   private readonly filed: Float32Array;
+  /** The tee's own hem, its lowest open edge: the hem while no row below it is worn. */
+  private readonly teeHem: Uint32Array;
+  /** How much each particle is in her navel's zone (0 to 1), and the tee's particles' neighbours, for smoothing it. */
+  private readonly navelZone: Float32Array;
+  private readonly zone: Uint32Array;
+  private readonly neighbourStart: Uint32Array;
+  private readonly neighbourList: Uint32Array;
+  /** Her navel and nipples on her body (null for an older file without them), and as posed this frame. */
+  private readonly points: DetailPoints | null;
+  private readonly navel: Posed = posed();
+  private readonly nipples: Posed[] = [posed(), posed()];
+  /** BREAST and NAVEL DETAIL (0 hidden, 1 all of it): how the cloth lies over her details, set by the room. */
+  keep: { nipple: number; navel: number } = { nipple: 0.45, navel: 0.8 };
+  private readonly lift: Float32Array;
   /** Each render vertex's particle. */
   private readonly vertexParticle: Uint32Array;
   /** Triangles by particle, ordered by the lowest row they reach, and how many are in each length. */
@@ -83,10 +128,10 @@ export class ClothShirt {
   private readonly shown = { skinMs: 0, simMs: 0, drawMs: 0, posed: 0, substeps: 0, contacts: 0 };
 
   constructor(source: THREE.Mesh, body: THREE.SkinnedMesh, material: THREE.Material | THREE.Material[], settings: Partial<ClothSettings> = {}, thickness = CLOTH_STAND_OFF) {
-    const g = source.geometry, info = (source.userData.cloth ?? {}) as { teeParticles?: number; rows?: number; columns?: number; armBones?: number[] };
+    const g = source.geometry, info = (source.userData.cloth ?? {}) as { teeParticles?: number; rows?: number; columns?: number; armBones?: number[]; detail?: DetailPoints };
     const read = (name: string) => g.getAttribute(name) as THREE.BufferAttribute;
     const particleAttr = read('_particle'), restAttr = read('position'), triAttr = read('_body_tri'), baryAttr = read('_body_bary');
-    const offsetAttr = read('_offset'), pinAttr = read('_pin'), rowAttr = read('_row'), anchorAttr = read('_anchor'), uvAttr = read('uv');
+    const offsetAttr = read('_offset'), pinAttr = read('_pin'), rowAttr = read('_row'), anchorAttr = read('_anchor'), uvAttr = read('uv'), navelAttr = read('_navel');
     if (!particleAttr || !triAttr || !baryAttr || !offsetAttr || !pinAttr || !rowAttr) throw new Error('ClothShirt: the cloth file is missing its particle data');
     const nV = restAttr.count;
     this.vertexParticle = new Uint32Array(nV);
@@ -98,15 +143,37 @@ export class ClothShirt {
     this.columns = info.columns ?? 0;
     // per particle, from any of its vertices
     const tri = new Uint32Array(count * 3), bary = new Float32Array(count * 3), offset = new Float32Array(count), pin = new Float32Array(count), row = new Uint16Array(count), anchor = new Uint32Array(count);
-    const filed = new Float32Array(count * 3);
+    const filed = new Float32Array(count * 3), navelZone = new Float32Array(count);
     for (let v = 0; v < nV; v++) {
       const p = this.vertexParticle[v];
       tri[p * 3] = triAttr.getX(v); tri[p * 3 + 1] = triAttr.getY(v); tri[p * 3 + 2] = triAttr.getZ(v);
       bary[p * 3] = baryAttr.getX(v); bary[p * 3 + 1] = baryAttr.getY(v); bary[p * 3 + 2] = baryAttr.getZ(v);
       filed[p * 3] = restAttr.getX(v); filed[p * 3 + 1] = restAttr.getY(v); filed[p * 3 + 2] = restAttr.getZ(v);
       offset[p] = offsetAttr.getX(v); pin[p] = pinAttr.getX(v); row[p] = Math.round(rowAttr.getX(v)); anchor[p] = anchorAttr ? Math.round(anchorAttr.getX(v)) : p;
+      if (navelAttr) navelZone[p] = navelAttr.getX(v);
     }
-    this.pin = pin; this.anchor = anchor; this.filed = filed;
+    this.pin = pin; this.anchor = anchor; this.filed = filed; this.navelZone = navelZone;
+    this.points = info.detail && info.detail.navel >= 0 ? info.detail : null;
+    this.lift = new Float32Array(count);
+    // the tee's particles' neighbours (across its triangles), and which are in her navel's zone
+    {
+      const index = g.index!, sets: Set<number>[] = Array.from({ length: this.teeParticles }, () => new Set<number>());
+      for (let t = 0; t < index.count; t += 3) {
+        const a = this.vertexParticle[index.getX(t)], b = this.vertexParticle[index.getX(t + 1)], c = this.vertexParticle[index.getX(t + 2)];
+        if (a >= this.teeParticles || b >= this.teeParticles || c >= this.teeParticles) continue;
+        sets[a].add(b).add(c); sets[b].add(a).add(c); sets[c].add(a).add(b);
+      }
+      this.neighbourStart = new Uint32Array(this.teeParticles + 1);
+      for (let p = 0; p < this.teeParticles; p++) this.neighbourStart[p + 1] = this.neighbourStart[p] + sets[p].size;
+      this.neighbourList = new Uint32Array(this.neighbourStart[this.teeParticles]);
+      for (let p = 0; p < this.teeParticles; p++) this.neighbourList.set([...sets[p]], this.neighbourStart[p]);
+      this.zone = Uint32Array.from({ length: this.teeParticles }, (_, p) => p).filter((p) => navelZone[p] > 0);
+      // the tee's own navel impression, out of how far it keeps off her too: the zone stands off her as the cloth
+      // round it does
+      let sum = 0, n = 0;
+      for (const p of this.zone) if (navelZone[p] < 0.25) { sum += offset[p]; n++; }
+      if (n) for (const p of this.zone) offset[p] += (sum / n - offset[p]) * navelZone[p];
+    }
     const binding: ClothBinding = { count, tri, bary, offset };
     this.skin = new ClothSkin(body, binding, { armBones: info.armBones ?? [], thickness, restClearance: REST_CLEARANCE });
     this.settings = settings;
@@ -119,6 +186,23 @@ export class ClothShirt {
     order.forEach((t, k) => { for (let c = 0; c < 3; c++) { const v = index.getX(t * 3 + c); sorted[k * 3 + c] = v; particleTris[k * 3 + c] = this.vertexParticle[v]; } upTo[triRow(t)]++; });
     for (let r = 1; r <= this.rows; r++) upTo[r] += upTo[r - 1];
     this.particleTris = particleTris; this.trisUpToRow = upTo;
+    // the tee's own hem: of its open edges, the lowest (its neckline and sleeves are the others)
+    {
+      const use = new Map<number, number>(), next = new Map<number, number>(), key = (a: number, b: number) => (a < b ? a * count + b : b * count + a);
+      const teeTris = particleTris.subarray(0, upTo[0] * 3);
+      for (let t = 0; t < teeTris.length; t += 3) for (let e = 0; e < 3; e++) { const k = key(teeTris[t + e], teeTris[t + (e + 1) % 3]); use.set(k, (use.get(k) ?? 0) + 1); }
+      for (let t = 0; t < teeTris.length; t += 3) for (let e = 0; e < 3; e++) { const a = teeTris[t + e], b = teeTris[t + (e + 1) % 3]; if (use.get(key(a, b)) === 1) next.set(a, b); }
+      const seen = new Set<number>();
+      let lowest = Infinity, hem: number[] = [];
+      for (const s0 of next.keys()) {
+        if (seen.has(s0)) continue;
+        const loop: number[] = [];
+        for (let v: number | undefined = s0; v !== undefined && !seen.has(v); v = next.get(v)) { seen.add(v); loop.push(v); }
+        const y = loop.reduce((m, p) => m + filed[p * 3 + 1], 0) / loop.length;
+        if (loop.length >= 12 && y < lowest) { lowest = y; hem = loop; }
+      }
+      this.teeHem = Uint32Array.from(hem);
+    }
 
     // the sheet as drawn: world positions written every frame; the fabric laid by its rest shape, as the fitted tee's is
     const geometry = new THREE.BufferGeometry();
@@ -179,12 +263,120 @@ export class ClothShirt {
    */
   private pattern(out: Float32Array): void {
     this.skin.restShape(out);
+    // her navel's zone smoothed flat: the modelled tee's own navel impression is not a navel of hers (Joshua,
+    // 2026-10-24: "the bottom for some reason is fixed on the shirt and it shouldn't be"); hers shows through instead
+    // (`frame`, and the shading in clothDetail.ts). Taubin's two steps, so the belly's curve is not shrunk with it.
+    const Z = this.zone, W = this.navelZone, S0 = this.neighbourStart, L = this.neighbourList;
+    if (Z.length) {
+      const was = new Float32Array(Z.length * 3);
+      for (let pass = 0; pass < NAVEL_SMOOTHING; pass++) for (const k of [0.5, -0.53]) {
+        Z.forEach((p, i) => { for (let c = 0; c < 3; c++) was[i * 3 + c] = out[p * 3 + c]; });
+        Z.forEach((p, i) => {
+          const from = S0[p], to = S0[p + 1];
+          if (to === from) return;
+          for (let c = 0; c < 3; c++) {
+            let m = 0; for (let j = from; j < to; j++) m += out[L[j] * 3 + c];
+            m /= to - from;
+            out[p * 3 + c] = was[i * 3 + c] + k * W[p] * (m - was[i * 3 + c]);
+          }
+        });
+      }
+    }
     const F = this.filed, A = this.anchor, s = this.skin.worldScale || 1;
     for (let p = this.teeParticles; p < this.count; p++) {
       const a = A[p];
       for (let k = 0; k < 3; k++) out[p * 3 + k] = out[a * 3 + k] + (F[p * 3 + k] - F[a * 3 + k]) * s;
     }
   }
+
+  /**
+   * Her navel and nipples as she is posed and shaped this frame (`Posed`), and the cloth over them. A detail standing
+   * proud keeps the cloth clear of it in a dome (DETAIL_LOOK): her navel always, so it never comes up through the
+   * cloth between particles; a nipple as BREAST DETAIL hides it. The dome is measured from where each particle IS on her
+   * now, not from where it was cut, because the cloth slides on her.
+   */
+  private follow(): void {
+    const pts = this.points;
+    if (!pts) return;
+    this.measure(pts.navel, pts.navelRings, this.navel);
+    pts.nipples.forEach((v, i) => { if (i < 2 && pts.nippleRings[i]) this.measure(v, pts.nippleRings[i], this.nipples[i]); });
+    const lift = this.lift, q = this.after.point, n = this.active, k = this.keep, clamp01 = (x: number) => Math.max(0, Math.min(1, Number.isFinite(x) ? x : 0));
+    lift.fill(0);
+    this.dome(this.navel, 1, 1 - clamp01(k.navel), q, n, lift);
+    for (const d of this.nipples) this.dome(d, 1 - clamp01(k.nipple), 1 - clamp01(k.nipple), q, n, lift);
+    this.skin.extraStandOff = lift;
+  }
+
+  /** One detail measured: its centre, and its inner and outer rings of skin (counter-clockwise from the front). */
+  private measure(centre: number, rings: readonly (readonly number[])[], out: Posed): void {
+    const sk = this.skin;
+    sk.posedVertex(centre, out.c);
+    const ring = (around: readonly number[], m: number[], nrm: number[] | null): number => {
+      const count = around.length, P = this.ringAt.length >= count * 3 ? this.ringAt : (this.ringAt = new Float32Array(count * 3));
+      m[0] = m[1] = m[2] = 0;
+      for (let j = 0; j < count; j++) { sk.posedVertex(around[j], P, j * 3); m[0] += P[j * 3]; m[1] += P[j * 3 + 1]; m[2] += P[j * 3 + 2]; }
+      m[0] /= count; m[1] /= count; m[2] /= count;
+      let r = 0, nx = 0, ny = 0, nz = 0;
+      for (let j = 0; j < count; j++) {
+        const a = j * 3, b = ((j + 1) % count) * 3;
+        const ax = P[a] - m[0], ay = P[a + 1] - m[1], az = P[a + 2] - m[2], bx = P[b] - m[0], by = P[b + 1] - m[1], bz = P[b + 2] - m[2];
+        nx += ay * bz - az * by; ny += az * bx - ax * bz; nz += ax * by - ay * bx;
+        r += Math.hypot(ax, ay, az);
+      }
+      if (nrm) { const l = Math.hypot(nx, ny, nz) || 1; nrm[0] = nx / l; nrm[1] = ny / l; nrm[2] = nz / l; }
+      return r / count;
+    };
+    const inner = this.ringM[0], outer = this.ringM[1];
+    out.rho = ring(rings[0], inner, null);
+    const rhoB = ring(rings[rings.length - 1], outer, out.n);
+    const nn = out.n, dot = (a: ArrayLike<number>, b: ArrayLike<number>) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    out.base[0] = outer[0]; out.base[1] = outer[1]; out.base[2] = outer[2];
+    // the smooth surface over the outer ring's plane, rising by curve x (outer radius^2 - r^2): through the inner ring
+    const rise = dot([inner[0] - outer[0], inner[1] - outer[1], inner[2] - outer[2]], nn), span = rhoB * rhoB - out.rho * out.rho;
+    out.curve = span > 1e-6 ? rise / span : 0;
+    out.reach2 = rhoB * rhoB;
+    out.h = dot([out.c[0] - outer[0], out.c[1] - outer[1], out.c[2] - outer[2]], nn) - out.curve * out.reach2;
+  }
+  private readonly ringM = [[0, 0, 0], [0, 0, 0]];
+
+  /**
+   * Lift the cloth over a proud detail: every particle whose place on her skin is within the dome keeps that far above
+   * her smooth surface, less what her skin under it already stands above it. `amount` scales the dome's height (0 none),
+   * `hide` widens it from DOME_OUT toward WIDE_OUT.
+   */
+  private dome(d: Posed, amount: number, hide: number, q: Float32Array, n: number, lift: Float32Array): void {
+    const top = Math.max(0, d.h) * amount;
+    if (top <= 0) return;
+    const L = DETAIL_LOOK, rin = L.domeIn * d.rho, rout = (L.domeOut + (L.wideOut - L.domeOut) * hide) * d.rho, rout2 = rout * rout;
+    const [bx, by, bz] = d.base, [nx, ny, nz] = d.n;
+    for (let i = 0; i < n; i++) {
+      const dx = q[i * 3] - bx, dy = q[i * 3 + 1] - by, dz = q[i * 3 + 2] - bz, along = dx * nx + dy * ny + dz * nz;
+      const tx = dx - along * nx, ty = dy - along * ny, tz = dz - along * nz, r2 = tx * tx + ty * ty + tz * tz;
+      if (r2 >= rout2 || Math.abs(along - d.curve * d.reach2) > rout) continue;
+      const r = Math.sqrt(r2), t = r <= rin ? 1 : (rout - r) / (rout - rin), f = t * t * (3 - 2 * t);
+      // her skin under the particle, above her smooth surface there (on the detail itself, most of its height)
+      const above = Math.max(0, along - d.curve * (d.reach2 - r2));
+      const want = top * f - above;
+      if (want > lift[i]) lift[i] = want;
+    }
+  }
+  private ringAt = new Float32Array(48);
+
+  /**
+   * What shows through the tee this frame, at the room's BREAST and NAVEL DETAIL (0 none, 1 all): for clothDetail.ts.
+   * Null for a cloth file that does not know where her navel and nipples are.
+   */
+  detail(keep: { readonly nipple: number; readonly navel: number }): ClothDetailState | null {
+    if (!this.points || !this.active) return null;
+    const k = (x: number) => Math.max(0, Math.min(1, Number.isFinite(x) ? x : 0)), nv = this.navel, L = DETAIL_LOOK;
+    const navelHeight = (nv.h >= 0 ? nv.h : nv.h * L.innieThrough) * k(keep.navel);
+    return {
+      navel: { center: nv.c, normal: nv.n, height: navelHeight, radius: L.navelRadius * nv.rho },
+      nipples: this.nipples.slice(0, this.points.nipples.length).map((d) => ({ center: d.c, normal: d.n, height: L.nippleRelief * k(keep.nipple), radius: L.nippleRadius * d.rho })),
+    };
+  }
+  /** How far her navel and nipples stand above her smooth surface, world units (negative an innie's depth), as last followed. */
+  get detailHeights(): { navel: number; nipples: number[] } { return { navel: this.navel.h, nipples: this.nipples.map((d) => d.h) }; }
 
   /** Put the cloth back where her body places it (a pose switch: the cloth would otherwise be flung). */
   restart(): void {
@@ -223,6 +415,8 @@ export class ClothShirt {
       if (most > JUMP * JUMP) { this.restart(); skinMs += this.skin.update(this.sim.positions.subarray(0, n * 3), this.after); }
     }
     if (!this.primed) { copyContacts(this.after, this.before); this.primed = true; }
+    // her navel and nipples this frame; the cloth over a proud navel lifted clear of it from the next frame's skin on
+    this.follow();
     // just laid (a restart, a new length): calm for a moment, so the cloth settles onto her instead of whipping
     const damping = this.sim.settings.damping;
     if (this.warm > 0) { this.warm -= dt; this.sim.settings.damping = Math.max(damping, WARM_DAMPING); }
@@ -265,7 +459,11 @@ export class ClothShirt {
     const n = this.teeParticles + rows * this.columns;
     const rest = this.restNow.slice(0, n * 3);
     const tris = this.particleTris.subarray(0, this.trisUpToRow[rows] * 3);
-    const sim = new ClothSim({ count: n, triangles: tris, rest, pin: this.pin.subarray(0, n) }, { ...(this.sim?.settings ?? this.settings) });
+    // the hem worn now -- the tee's own, or the last row below it -- weighs HEM_MASS: a hem is turned up and stitched
+    const mass = new Float32Array(n).fill(1);
+    if (rows === 0) for (const p of this.teeHem) mass[p] = HEM_MASS;
+    else mass.fill(HEM_MASS, this.teeParticles + (rows - 1) * this.columns, n);
+    const sim = new ClothSim({ count: n, triangles: tris, rest, pin: this.pin.subarray(0, n), mass }, { ...(this.sim?.settings ?? this.settings) });
     sim.reset(start.subarray(0, n * 3));
     this.mesh.geometry.setDrawRange(0, this.trisUpToRow[rows] * 3);
     this.activeRows = rows; this.active = n; this.primed = false; this.warm = WARM_SECONDS;

@@ -211,7 +211,8 @@ export function clothTuning(t: ClothTune): { readonly settings: { substeps: numb
 /** What the cloth costs, for the stage: particles, her skin, the cloth, the drawing, and the frame rate. */
 export function clothLine(s: { readonly particles: number; readonly skinMs: number; readonly simMs: number; readonly drawMs: number; readonly substeps: number; readonly posed: number }, frameMs: number): string {
   const ms = (x: number) => x.toFixed(x < 10 ? 1 : 0);
-  return `CLOTH · ${s.particles.toLocaleString('en-US')} points · skin ${ms(s.skinMs)} + cloth ${ms(s.simMs)} + draw ${ms(s.drawMs)} = ${ms(s.skinMs + s.simMs + s.drawMs)} ms · ${s.substeps} steps · ${Math.round(1000 / Math.max(1, frameMs))} fps`;
+  // the frame's cost and rate first: held upright the stage line is cut short, and those are the reading
+  return `CLOTH · ${ms(s.skinMs + s.simMs + s.drawMs)} ms · ${Math.round(1000 / Math.max(1, frameMs))} fps · ${s.particles.toLocaleString('en-US')} points · skin ${ms(s.skinMs)} + cloth ${ms(s.simMs)} + draw ${ms(s.drawMs)} · ${s.substeps} steps`;
 }
 
 /** The SHIRT LENGTH line: 0 just above her crotch, 1 just above her knee. */

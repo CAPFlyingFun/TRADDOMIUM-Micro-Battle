@@ -18,7 +18,7 @@ import {
 } from '../src/sarahlab/sarahLabTool';
 
 const CLOTH = `public/${CLOTH_SHIRT_PATH}`;
-interface ClothExtras { version: number; particles: number; teeParticles: number; rows: number; columns: number; armBones: number[]; rowStepM: number; midThighM: number; localToMetres: number; pinIn: number; pinOut: number }
+interface ClothExtras { detail: { navel: number; navelRings: number[][]; nipples: number[]; nippleRings: number[][][]; navelZoneM: number[]; ringsM: number[][] }; version: number; particles: number; teeParticles: number; rows: number; columns: number; armBones: number[]; rowStepM: number; midThighM: number; localToMetres: number; pinIn: number; pinOut: number }
 let doc: Document, prim: Primitive, cloth: ClothExtras;
 beforeAll(async () => {
   await MeshoptDecoder.ready;
@@ -36,7 +36,7 @@ describe('the cloth tee file', () => {
     expect(doc.getRoot().listMeshes()).toHaveLength(1);
     expect(doc.getRoot().listSkins()).toHaveLength(0); // it is not skinned: the cloth moves it
     expect(prim.listTargets()).toHaveLength(0);
-    expect(cloth.version).toBe(1);
+    expect(cloth.version).toBe(2);
     expect(cloth.particles).toBe(cloth.teeParticles + cloth.rows * cloth.columns);
     expect(cloth.teeParticles).toBeGreaterThan(3000);
     expect(cloth.teeParticles).toBeLessThan(8000);
@@ -64,9 +64,51 @@ describe('the cloth tee file', () => {
     expect(left).toBeGreaterThan(3);
   }, 60000);
 
+  it('knows where her navel and nipples are, each with a ring of skin round it, and smooths only round her navel', () => {
+    // Joshua, 2026-10-24: "there are two bellybuttons, the top is the real one, the bottom for some reason is fixed on
+    // the shirt": the tee's own navel impression is the _NAVEL zone, smoothed away in the room (clothShirt.ts)
+    const d = cloth.detail;
+    expect(d.navel).toBeGreaterThanOrEqual(0);
+    expect(d.nipples).toHaveLength(2);
+    expect(new Set([d.navel, ...d.nipples]).size).toBe(3);
+    // an inner and an outer ring round each, the outer wider: her smooth surface and its curve without the detail
+    expect(d.ringsM).toHaveLength(2);
+    expect(d.ringsM[0][1]).toBeLessThan(d.ringsM[1][0]);
+    for (const rings of [d.navelRings, ...d.nippleRings]) {
+      expect(rings).toHaveLength(2);
+      for (const ring of rings) { expect(ring.length).toBeGreaterThanOrEqual(12); expect(new Set(ring).size).toBe(ring.length); }
+    }
+    expect(d.navelZoneM[0]).toBeLessThan(d.navelZoneM[1]);
+    const zone = column('_NAVEL'), row = column('_ROW');
+    let inZone = 0;
+    for (let v = 0; v < zone.length; v++) { expect(zone[v]).toBeGreaterThanOrEqual(0); expect(zone[v]).toBeLessThanOrEqual(1); if (zone[v] > 0) { inZone++; expect(row[v]).toBe(0); } }
+    expect(inZone).toBeGreaterThan(20);
+    expect(inZone).toBeLessThan(zone.length / 20);
+  });
+
+  it('has a hem spaced like the rest of the cloth, not the modelled fold\'s every point', () => {
+    // Joshua, 2026-10-24: "the 0% shirt bottom hem/seams, was not straight": 327 points, some 0.1 mm apart, crumpled
+    const particle = column('_PARTICLE'), row = column('_ROW'), pos = prim.getAttribute('POSITION')!.getArray() as Float32Array, I = prim.getIndices()!.getArray()!;
+    const use = new Map<string, number>(), next = new Map<number, number>();
+    const tee: number[][] = [];
+    for (let t = 0; t < I.length; t += 3) { const v = [I[t], I[t + 1], I[t + 2]]; if (v.some((x) => row[x] !== 0)) continue; tee.push(v.map((x) => particle[x])); }
+    for (const [a, b, c] of tee) for (const [x, y] of [[a, b], [b, c], [c, a]]) { const k = x < y ? `${x},${y}` : `${y},${x}`; use.set(k, (use.get(k) ?? 0) + 1); }
+    for (const [a, b, c] of tee) for (const [x, y] of [[a, b], [b, c], [c, a]]) if (use.get(x < y ? `${x},${y}` : `${y},${x}`) === 1) next.set(x, y);
+    const at = new Map<number, number>(); for (let v = 0; v < particle.length; v++) at.set(particle[v], v);
+    const y = (p: number) => pos[at.get(p)! * 3 + 1];
+    const loops: number[][] = [], seen = new Set<number>();
+    for (const s of next.keys()) { if (seen.has(s)) continue; const l: number[] = []; let v: number | undefined = s; while (v !== undefined && !seen.has(v)) { seen.add(v); l.push(v); v = next.get(v); } loops.push(l); }
+    expect(loops).toHaveLength(4); // neckline, two sleeves, hem
+    const hem = loops.reduce((a, b) => (a.reduce((s, p) => s + y(p), 0) / a.length < b.reduce((s, p) => s + y(p), 0) / b.length ? a : b));
+    const gap = (a: number, b: number) => { const i = at.get(a)! * 3, j = at.get(b)! * 3; return Math.hypot(pos[i] - pos[j], pos[i + 1] - pos[j + 1], pos[i + 2] - pos[j + 2]) * cloth.localToMetres * 1000; };
+    const gaps = hem.map((p, i) => gap(p, hem[(i + 1) % hem.length])).sort((a, b) => a - b);
+    expect(gaps[gaps.length >> 1]).toBeGreaterThan(8);
+    expect(gaps[0]).toBeGreaterThan(1);
+  });
+
   it('carries every column the room reads, one value per drawn vertex', () => {
     const count = prim.getAttribute('POSITION')!.getCount();
-    for (const name of ['TEXCOORD_0', '_PARTICLE', '_BODY_TRI', '_BODY_BARY', '_OFFSET', '_PIN', '_ROW', '_ANCHOR']) {
+    for (const name of ['TEXCOORD_0', '_PARTICLE', '_BODY_TRI', '_BODY_BARY', '_OFFSET', '_PIN', '_ROW', '_ANCHOR', '_NAVEL']) {
       expect(prim.getAttribute(name), name).not.toBeNull();
       expect(prim.getAttribute(name)!.getCount(), name).toBe(count);
     }
@@ -161,7 +203,7 @@ describe('the cloth lines', () => {
 
   it('prints what the cloth costs, part by part, and the frame rate', () => {
     const line = clothLine({ particles: 5160, skinMs: 1.24, simMs: 2.5, drawMs: 0.3, substeps: 8, posed: 5160 }, 16.7);
-    expect(line).toBe('CLOTH · 5,160 points · skin 1.2 + cloth 2.5 + draw 0.3 = 4.0 ms · 8 steps · 60 fps');
+    expect(line).toBe('CLOTH · 4.0 ms · 60 fps · 5,160 points · skin 1.2 + cloth 2.5 + draw 0.3 · 8 steps');
     expect(clothLine({ particles: 1, skinMs: 0, simMs: 0, drawMs: 0, substeps: 2, posed: 1 }, 0)).toContain('1000 fps');
   });
 });

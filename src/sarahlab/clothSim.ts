@@ -44,6 +44,11 @@ export interface ClothTopology {
   readonly rest: Float32Array;
   /** 0..1 per particle: 0 free, 1 held exactly at its SkinContacts.pinTarget, between: a soft hold. */
   readonly pin: Float32Array;
+  /**
+   * Mass per particle, 1 where missing: a hem's turned-up band weighs more than the cloth above it, and pulls it down
+   * the harder (gravity accelerates every particle alike; mass decides who gives way in a constraint).
+   */
+  readonly mass?: Float32Array;
 }
 
 export interface ClothSettings {
@@ -142,7 +147,7 @@ export class ClothSim {
   private readonly stats: StatsSlot = { ms: 0, substeps: 0, contacts: 0, deepest: 0 };
 
   constructor(topology: ClothTopology, settings?: Partial<ClothSettings>) {
-    const { count, triangles, rest, pin } = topology;
+    const { count, triangles, rest, pin, mass } = topology;
     if (rest.length < count * 3) throw new Error(`ClothSim: rest holds ${rest.length / 3} points, count is ${count}`);
     if (pin.length < count) throw new Error(`ClothSim: pin holds ${pin.length} values, count is ${count}`);
     if (triangles.length % 3 !== 0) throw new Error('ClothSim: triangles is not a multiple of 3');
@@ -162,7 +167,7 @@ export class ClothSim {
     for (let i = 0; i < count; i++) {
       const p = Math.min(1, Math.max(0, pin[i] || 0));
       this.pin[i] = p;
-      this.invMass[i] = 1 - p;
+      this.invMass[i] = (1 - p) / Math.max(1e-3, mass && Number.isFinite(mass[i]) ? mass[i] : 1);
     }
 
     // Unique edges and bend pairs, once. An edge is keyed lo·count + hi (exact in a double up to ~94 million particles);

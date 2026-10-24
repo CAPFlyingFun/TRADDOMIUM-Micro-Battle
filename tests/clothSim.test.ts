@@ -237,4 +237,21 @@ describe('the cloth sim', () => {
     expect(allFinite(sim.positions)).toBe(true);
     expect(mean).toBeLessThan(50);
   });
+
+  it('a heavier particle gives way less: the weighted hem pulls the cloth, not the cloth the hem', () => {
+    // a 2 × 2 sheet stretched to twice its width, nothing else acting: each side comes back in by its inverse mass
+    const run = (mass?: Float32Array) => {
+      const top = sheet(2, 2, (i, j) => [i * 10, -j * 10, 0]);
+      const sim = new ClothSim({ ...top, mass }, { gravity: [0, 0, 0], damping: 0, substeps: 1, maxStretch: 10, stretchCompliance: 0, bendCompliance: 1 });
+      sim.reset(Float32Array.from([0, 0, 0, 20, 0, 0, 0, -10, 0, 20, -10, 0]));
+      const far = planeContacts(4, [0, 0, -1000], [0, 0, 1], 0);
+      sim.step(FRAME, far, far);
+      return [sim.positions[0], sim.positions[3]];
+    };
+    // how far the left side came in against the right (one Gauss-Seidel pass is not symmetric, so compare the two runs)
+    const share = ([left, right]: number[]) => left / (20 - right);
+    const even = share(run()), weighted = share(run(Float32Array.from([1, 4, 1, 4])));
+    expect(even).toBeGreaterThan(0);
+    expect(weighted).toBeGreaterThan(even * 2.5); // the right side, four times heavier, gave way about a quarter as much
+  });
 });

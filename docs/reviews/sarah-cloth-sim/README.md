@@ -1,4 +1,4 @@
-# The cloth tee experiment (alpha.117)
+# The cloth tee experiment (alpha.117, alpha.118)
 
 Joshua asked for this in three steps:
 
@@ -96,3 +96,43 @@ The cheapest lever is QUALITY. The cloth's own share grows with its steps, so at
 - **The cloth sits on her, never inside her, but only against her body.** It does not collide with itself. Her arms do not push it: a sleeve rides on her arm, and the body of the tee only feels her trunk and legs.
 - **At 200% the tee rides up the belly**, as a real non-maternity tee would. The bottom of the belly can show under the hem. The fitted tee covers it, because it was fitted for that size.
 - **Just after it is laid**, or after a big jump in her belly, the cloth needs a moment, a few dozen frames, to settle. On the phone that is under a second.
+
+## alpha.118: one navel, her detail through the cloth, a straight hem
+
+Joshua tested alpha.117 on his phone on 2026-10-24. "Very impressed... the simulation ran with no issues and actually seemed smoother." He found three problems:
+- "there are two bellybuttons, the top is the real one, the bottom for some reason is fixed on the shirt and it shouldn't be";
+- "the breast slider has no effect on the outfit… it still should have a visible effect", and "the bellybutton also doesn't appear with the slider… the overrides should be working";
+- "the 0% shirt bottom hem/seams, was not straight but when I added more length, it did".
+
+### One navel, hers (`5-one-navel.jpg`)
+
+- **The second navel was the modelled tee's own.** Its navel impression was in the cloth's pattern, so the cloth carried a dimple of its own. When the cloth slid a little under gravity, that dimple moved below her real navel.
+- **The dark dot was her real navel coming up through the cloth.** At 200% it stands proud, as an outie, and broke through between particles a centimetre apart.
+
+The fix:
+- The cloth file now marks the tee's navel zone (`_NAVEL`), and `clothShirt.ts` smooths the pattern flat there, so the tee carries no navel of its own.
+- The file also names her navel and nipples by body vertex, each with an inner and an outer ring of skin round it. Every frame the room poses those, so it knows her smooth surface there (its normal and its curve, from the two rings) and how far each detail stands above it.
+- Over a proud navel, the cloth keeps clear in a soft dome. The dome is measured from where each particle is on her *now*, because the cloth slides.
+
+### BREAST and NAVEL DETAIL reach the cloth (`6-detail.jpg`)
+
+- **The sliders now act on the cloth tee.** Before, they only ever acted on clothes painted on her.
+- **The tee counts as a piece over her.** Its AUTO values come from its fabric (fine jersey: breast 48%, navel 81%), and MANUAL overrides them.
+- **The detail is drawn in shading, from her real navel and nipples, by a patch on the tee's material (`clothDetail.ts`).** It tilts the shading around each spot and darkens an innie's dimple a little. A detail is smaller than the cloth's centimetre spacing, so it cannot be drawn as cloth shape.
+- **The same sliders set how the cloth lies.** At 0, the cloth domes broadly over her nipples and her navel is softened under it, so neither shows. At 100%, it follows them.
+
+### The hem (`7-hem.jpg`)
+
+- **The old hem was too dense.** The first file kept every point of the modelled tee's fold at its hem: 327 points, some 0.1 mm apart, where the rest of the cloth is 11 mm apart. At 0% length those tiny edges crumpled.
+- **The new hem matches the rest of the cloth.** It is thinned to the cloth's own spacing (94 points, about 12 mm apart, within 2 mm of the modelled hem) and smoothed along itself.
+- **The hem keeps its weight.** It now has about a quarter as many points, and each one weighs 3.5 times a point above it, like a turned and stitched hem. Without that weight, the lighter tee rode up off a 200% belly.
+
+### Also
+
+The CLOTH line now starts with the frame's milliseconds and fps. Held upright, the line is cut short, and those were the part that was missing.
+
+### Left as it is
+
+- The fitted (non-cloth) light tee still ignores BREAST and NAVEL DETAIL. It carries its own modelled navel. It could share the cloth's shading if Joshua wants it to.
+- At the top of a 200% belly, where the cloth crosses its sharpest curve, a sliver of skin can show between particles. A lower CLOSENESS, which leaves more gap, should hide it; that has not been checked yet.
+- Creases can form when the belly is resized quickly. Joshua (2026-10-24): "don't read too much into the creases on belly size change as part of it could be physics working correctly".
