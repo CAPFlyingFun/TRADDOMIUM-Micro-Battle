@@ -15,6 +15,7 @@ import { frameBox, shoot, shootDataUrl, savePicture } from './snapshot';
 import { History } from './strapData';
 import { loadingCard, LOADING_COVERED_VAR, type LoadingCard, type LoadingPlace } from './loadingCard';
 import { LoadMeter } from '../assets/loadMeter';
+import { ClothShirt } from './clothShirt';
 /**
  * THE SARAH LAB — Sarah rebuilt from Joshua's base mannequin, on a turntable,
  * to try before anything of it goes live (Joshua, 2026-10-07: "Good to test
@@ -57,7 +58,7 @@ import { dropIdleMorphs } from '../view/morphPrune';
 import { HumanRig, findSkinnedMesh } from '../view/HumanRig';
 import { UNITS_PER_METRE } from '../world/dem';
 import {
-  BELLY_MOTION, BELLY_TARGET, trimShown, BREAST_TARGETS, BUMP_MAX_PERCENT, GARMENTS, RECOVERED_SHIRTS, OUTFITS, outfitLine, modelLine, refineLine, refineWeight, nextOutfit, wornGarments, coverMask, bodyNeverHidden, uncoveredSkinIndices, UNDER_TOP_GARMENT, BELLY_REFINE_TARGET, SEAT_TARGET, seatCorrectiveWeight, SARAH_LAB_MODELS, SARAH_LAB_DEFAULT_MODEL, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID, shirtLengthLine, sarahModelPath, BODY_RANDOM_SPECS,
+  BELLY_MOTION, BELLY_TARGET, trimShown, BREAST_TARGETS, BUMP_MAX_PERCENT, GARMENTS, RECOVERED_SHIRTS, OUTFITS, outfitLine, modelLine, refineLine, refineWeight, nextOutfit, wornGarments, coverMask, bodyNeverHidden, uncoveredSkinIndices, UNDER_TOP_GARMENT, BELLY_REFINE_TARGET, SEAT_TARGET, seatCorrectiveWeight, SARAH_LAB_MODELS, SARAH_LAB_DEFAULT_MODEL, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID, shirtLengthLine, sarahModelPath, BODY_RANDOM_SPECS, CLOTH_SHIRT_PATH, teeLengthLine, clothLine, CLOTH_DIALS, CLOTH_TUNE_DEFAULT, clothTuning, type ClothTune,
   bellyMotionWeights, bellyWeights, breastBobWeight, breastWeightsForShape, bodyShapeFieldWeights, SIZE_TILT_PRESETS_DEG, effectiveTiltDeg, stepSeated, bustVolume, BREAST_GROW_TARGET, settledSitFor, bellyUpperWeight, BELLY_UPPER_TARGET, navelWeights, NAVEL_FLAT_TARGET, navelFlatWeight, tPoseTurns, ARM_SIDES, armsLine, ARM_RAISE_TARGETS, armRaiseWeight, SEAT_V2_TARGET, seatCorrectiveV2Weight, fingerBend, THUMB_TO_PALM, bumpLine, fingersLine, restingBellySpring, statusLine, stepBellySpring, stepBreastSpring, walkBounceAccel,
   offeredOutfits, outfitThumbPath,
   type Garment, type SarahLabPose, recoveredPartsFor, recoveredPartPath, isShirtPart, shirtOfPart, type RecoveredPart, SARAH_DEFAULT_OUTFIT, RECOVERED_GARMENTS,
@@ -353,6 +354,26 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   const buttons: Record<string, HTMLButtonElement> = {};
   let armsInput: HTMLInputElement | null = null;
   let shirtLengthInput: HTMLInputElement | null = null;
+  /**
+   * THE CLOTH EXPERIMENT (Joshua, 2026-10-23: "make that one a true soft body/cloth with simulation over the whole
+   * thing... I want to be able to see how much or little having a full soft body cloth fabric would be"): the light tee
+   * as one simulated sheet (clothShirt.ts), on while CLOTH SIM is, its length from the tee as made to mid-thigh, and what
+   * it costs each frame on the stage. Fetched the first time it is turned on.
+   */
+  let cloth: ClothShirt | null = null, clothOn = false, clothLoading = false, clothRestart = false, teeLength = 0, frameMs = 1000 / 60;
+  let teeLengthInput: HTMLInputElement | null = null;
+  /** The cloth's dials (CLOTH_DIALS), kept across a reload of the cloth, and their sliders. */
+  let clothTune: ClothTune = CLOTH_TUNE_DEFAULT;
+  /** Her shape the cloth was last cut for. */
+  let clothShapeKey = '';
+  const clothDialInputs = new Map<string, HTMLInputElement>();
+  /** Put the dials on the cloth, live. */
+  function tuneCloth(): void {
+    if (!cloth) return;
+    const { settings, standOff } = clothTuning(clothTune);
+    Object.assign(cloth.simSettings, settings);
+    cloth.standOff = standOff;
+  }
   const pointers = new Map<number, { x: number; y: number }>();
   let pinch = 0;
   /** One finger builds (places and moves a built strap's points) while the builder's EDIT is on and nothing is painting. */
@@ -433,6 +454,21 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       b.style.background = on ? 'var(--sl-on,#806020)' : 'var(--sl-btn,#151b23)';
       b.style.borderColor = on ? 'var(--sl-accent,#d4a853)' : 'var(--sl-btn-line,#ffffff30)';
     };
+    {
+      // the cloth experiment's controls: only with the light tee on (the cloth is a copy of it)
+      const lite = recovered && shownNow('shirtSpandexLite');
+      if (buttons.cloth) { buttons.cloth.style.display = lite ? '' : 'none'; buttons.cloth.textContent = clothLoading ? 'CLOTH SIM · loading…' : `CLOTH SIM · ${clothOn ? 'ON' : 'OFF'} (experiment)`; lit(buttons.cloth, clothOn); }
+      const teeField = fields[SARAH_LAB_FIELD.teeLength];
+      if (teeField) { teeField.textContent = teeLengthLine(teeLength, clothOn); teeField.style.display = lite ? '' : 'none'; }
+      if (teeLengthInput) { teeLengthInput.style.display = lite ? '' : 'none'; teeLengthInput.disabled = !clothOn; }
+      if (fields.cloth) fields.cloth.style.display = clothOn && cloth ? '' : 'none';
+      for (const d of CLOTH_DIALS) {
+        const f = fields[`${SARAH_LAB_FIELD.clothDial}${d.key}`], i = clothDialInputs.get(d.key);
+        if (f) { f.textContent = d.line(clothTune[d.key]); f.style.display = lite && clothOn ? '' : 'none'; }
+        if (i) i.style.display = lite && clothOn ? '' : 'none';
+      }
+      if (buttons.clothReset?.parentElement) buttons.clothReset.parentElement.style.display = lite && clothOn ? 'flex' : 'none';
+    }
     for (const k of BREAST_DIMENSIONS) lit(buttons[`link-${k}`], linked.has(k));
     if (buttons.linkAll) { const all = BREAST_DIMENSIONS.every((k) => linked.has(k)); buttons.linkAll.textContent = all ? 'UNLINK W·H·D' : 'LINK W·H·D'; lit(buttons.linkAll, all); }
     lit(buttons.stand, pose === 'stand');
@@ -508,6 +544,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       if (([...GARMENTS, ...RECOVERED_SHIRTS] as readonly string[]).includes(name)) mesh.visible = shownNow(name);
       { const t = trimShown(name, wornGarments(outfit, garments)); if (t !== null) mesh.visible = t; }
       if (mesh.userData.replacedByRecovered) mesh.visible = false;
+      // the cloth experiment draws the light tee as cloth: the fitted one stands aside (and keeps its fabric on)
+      if (clothOn && cloth && name === 'shirtSpandexLite') mesh.visible = false;
+      if (cloth && name === 'shirtSpandexLite') cloth.mesh.visible = clothOn && shownNow('shirtSpandexLite') && garmentView === 'all';
       // painting onto her body: "don't show any clothing since you would be painting over the body"; a garment
       // ISOLATED in the editor shows on its own (its trim with it)
       if (garmentView !== 'all' && !mesh.geometry.getAttribute('_cloth_cover')) {
@@ -545,6 +584,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     fabric?.sync();
     // her shape may have changed: the cleavage bridge chooses its ends again
     fabric?.reshaped();
+    // and the cloth tee is cut again for her shape (never for her pose)
+    const shapeKey = `${bump}|${serializeShape(body)}|${bellyCurve}|${refine}`;
+    if (cloth && shapeKey !== clothShapeKey) { clothShapeKey = shapeKey; cloth.refit(); }
   }
 
   /** The outfit as the OUTFIT button names it: on v2 the first two are the relaxed tee over either rise. */
@@ -596,6 +638,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       for (const [p, old] of [...partMeshes]) {
         if (!isShirtPart(p)) continue;
         skinned = skinned.filter(m => !old.includes(m)); shaped = shaped.filter(x => !old.includes(x.mesh));
+        if (p === 'spandex-lite') dropCloth();
         releaseRecoveredMeshes(old); partMeshes.delete(p);
       }
     }
@@ -640,6 +683,44 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       if (fabric?.putOnClothes(rest)) { builder?.load(rest.built ?? null); pendingClothes = null; outfits?.editing(source); nextSource = null; }
       applyLook(); refresh();
     }
+  }
+  /**
+   * CLOTH SIM on or off. The first time, the cloth file is fetched (a third of a megabyte) and laid on her as she stands;
+   * after that it is kept, hidden while off, and started again from her body when it comes back on.
+   */
+  async function toggleCloth(): Promise<void> {
+    if (clothLoading) return;
+    clothOn = !clothOn;
+    if (!clothOn || cloth) { if (cloth) { cloth.mesh.visible = clothOn; if (clothOn) clothRestart = true; } applyLook(); refresh(); return; }
+    const body = skinned.find((m) => !!m.geometry.getAttribute('_cloth_cover')), tee = partMeshes.get('spandex-lite')?.[0];
+    if (!model || !body || !tee) { clothOn = false; refresh(); return; }
+    clothLoading = true; refresh();
+    begin('Loading the cloth tee', 'aside');
+    meter.expect(CLOTH_SHIRT_PATH, assets.assetBytes(CLOTH_SHIRT_PATH));
+    const expected = model;
+    try {
+      const scene = await assets.loadModel(CLOTH_SHIRT_PATH, () => new THREE.Object3D(), { meter });
+      let source: THREE.Mesh | null = null;
+      scene.traverse((n) => { if (!source && (n as THREE.Mesh).isMesh) source = n as THREE.Mesh; });
+      if (disposed || model !== expected || !source || scene.userData.isPlaceholder) { release(scene); clothOn = false; return; }
+      model.updateMatrixWorld(true);
+      // its dials as they stand (CLOTH_DIALS: weighty and snug to start)
+      const tuning = clothTuning(clothTune);
+      cloth = new ClothShirt(source, body, tee.material, tuning.settings, tuning.standOff);
+      release(scene);
+      cloth.setLength(teeLength);
+      cloth.mesh.visible = clothOn;
+      three.add(cloth.mesh);
+      meter.ready();
+    } catch (error) {
+      console.error('[sarahlab] the cloth tee could not be laid on her', error);
+      clothOn = false;
+      meter.fail('The cloth tee could not be downloaded. Check your connection, then tap CLOTH SIM again.');
+    } finally { clothLoading = false; applyLook(); refresh(); }
+  }
+  /** The cloth goes with the light tee it is a copy of (its material is the tee's). */
+  function dropCloth(): void {
+    cloth?.dispose(); cloth = null; clothOn = false; clothShapeKey = '';
   }
   function dress(next: number, opening = false): void {
     // chosen before she is in: the opening dresses her in it
@@ -747,6 +828,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     for (const [p, label, action] of [['stand', 'STAND', SARAH_LAB_ACTION.stand], ['walk', 'WALK', SARAH_LAB_ACTION.walk], ['sit', 'SIT', SARAH_LAB_ACTION.sit], ['tpose', 'T-POSE', SARAH_LAB_ACTION.tpose]] as const) {
       buttons[p] = btn(label, action, () => {
         pose = p;
+        // a pose switch moves her at once: the cloth starts again from her body rather than being flung
+        clothRestart = true;
         if (p === 'tpose' && SARAH_LAB_MODELS[modelIndex].id !== 'v1') { armsDeg = 90; armsOverride = true; }
         applyLook(); refresh();
       });
@@ -799,6 +882,20 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     armsInput = slider(SARAH_LAB_FIELD.arms, armsDeg, (v) => { armsDeg = v; armsOverride = true; }, 90, 'pose');
     // a painted shirt's length, for every painted shirt she puts on (its drape follows: tunicDrape.ts)
     shirtLengthInput = slider(SARAH_LAB_FIELD.shirtLength, Math.round(DEFAULT_SHIRT_LENGTH * 100), (v) => { fabric?.setShirtLength(v / 100); }, 100, 'outfit');
+    // THE CLOTH EXPERIMENT: the light tee as cloth, and its length to mid-thigh (Joshua, 2026-10-23)
+    buttons.cloth = btn('CLOTH SIM · OFF', SARAH_LAB_ACTION.cloth, () => { void toggleCloth(); });
+    buttons.cloth.dataset.tab = 'outfit';
+    right.appendChild(buttons.cloth);
+    teeLengthInput = slider(SARAH_LAB_FIELD.teeLength, 0, (v) => { teeLength = v / 100; cloth?.setLength(teeLength); }, 100, 'outfit');
+    // ...and its dials, live (Joshua, 2026-10-24: "Could potentially even add sliders to play with values in real time")
+    for (const d of CLOTH_DIALS) clothDialInputs.set(d.key, slider(`${SARAH_LAB_FIELD.clothDial}${d.key}`, clothTune[d.key], (v) => { clothTune = { ...clothTune, [d.key]: v }; tuneCloth(); }, 100, 'outfit'));
+    {
+      const r = document.createElement('div'); r.dataset.tab = 'outfit'; r.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap';
+      buttons.clothReset = btn('LAY CLOTH AGAIN', SARAH_LAB_ACTION.clothReset, () => { clothRestart = true; });
+      buttons.clothDefaults = btn('CLOTH DEFAULTS', SARAH_LAB_ACTION.clothDefaults, () => { clothTune = CLOTH_TUNE_DEFAULT; for (const [k, i] of clothDialInputs) i.value = String(clothTune[k as keyof ClothTune]); tuneCloth(); clothRestart = true; });
+      for (const b of [buttons.clothReset, buttons.clothDefaults]) { b.style.padding = '7px 10px'; b.style.fontSize = '11px'; r.appendChild(b); }
+      right.appendChild(r);
+    }
     const row = document.createElement('div');
     row.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap';
     buttons.outfit = btn(outfitLine(outfit), SARAH_LAB_ACTION.outfit, () => { wornFrom = null; pendingClothes = null; nextSource = null; dress(nextOutfit(wantedOutfit ?? outfit, garments)); });
@@ -1140,7 +1237,10 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     fields.status = document.createElement('div');
     fields.status.dataset.field = SARAH_LAB_FIELD.status;
     fields.status.style.cssText = 'font:500 10px system-ui,sans-serif;color:var(--sl-muted,#9aa0a8);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
-    info.append(eyebrow, nameLine, fields.status);
+    fields.cloth = document.createElement('div');
+    fields.cloth.dataset.field = SARAH_LAB_FIELD.cloth;
+    fields.cloth.style.cssText = 'font:600 10px system-ui,sans-serif;color:var(--sl-accent-deep,#2f6f5e);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:none';
+    info.append(eyebrow, nameLine, fields.status, fields.cloth);
     const history = pill();
     buttons.undoBody = pillButton('↶', SARAH_LAB_ACTION.undoBody, () => travelBody(-1), 'Undo body change');
     buttons.redoBody = pillButton('↷', SARAH_LAB_ACTION.redoBody, () => travelBody(1), 'Redo body change');
@@ -1339,6 +1439,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
 
   /** Load the chosen model, putting away the one shown (MODEL switches v1 and v2). */
   function loadSarah(): void {
+    dropCloth();
     if (model) { three.remove(model); rig?.dispose(); release(model); model = null; }
     rig = null; measure = null; fingers = []; skinned = []; shaped = []; garments = []; hasBelly = false; feel = null;
     recovered = false; partMeshes.clear(); wantedOutfit = null; outfitRequest++;
@@ -1442,6 +1543,27 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       loadSarah();
       // a bake of the built-in outfits' card pictures asks for it by address (scripts/bakeOutfitThumbs.mjs)
       if (new URLSearchParams(globalThis.location?.search ?? '').get('bake') === 'outfits') (globalThis as unknown as Record<string, unknown>).__sarahLabBakeOutfits = bakeOutfitPictures;
+      // ?probe=cloth: run the cloth tee N frames at a fixed step between pictures (a software renderer draws ~1 a second)
+      if (new URLSearchParams(globalThis.location?.search ?? '').get('probe') === 'cloth') (globalThis as unknown as Record<string, unknown>).__sarahLabCloth = {
+        settle: (frames: number, dt = 1 / 60) => { if (!cloth || !model) return null; for (let k = 0; k < frames; k++) { model.updateMatrixWorld(true); cloth.frame(dt); } return cloth.stats(); },
+        settings: () => cloth?.simSettings ?? null,
+        restart: () => { cloth?.restart(); },
+        // where the drawn sheet's hem hangs, each side of her (world units): to read a lopsided hang as a number
+        hem: () => {
+          if (!cloth) return null;
+          const g = cloth.mesh.geometry, P = g.getAttribute('position').array as Float32Array, I = g.index!.array, end = Math.min(I.length, g.drawRange.count);
+          let cx = 0, n = 0; for (let k = 0; k < end; k++) { cx += P[I[k] * 3]; n++; } cx /= Math.max(1, n);
+          let left = Infinity, right = Infinity, front = Infinity, back = Infinity, cz = 0; for (let k = 0; k < end; k++) cz += P[I[k] * 3 + 2] / Math.max(1, n);
+          for (let k = 0; k < end; k++) { const v = I[k] * 3, y = P[v + 1]; if (P[v] < cx) left = Math.min(left, y); else right = Math.min(right, y); if (P[v + 2] > cz) front = Math.min(front, y); else back = Math.min(back, y); }
+          const r = (x: number) => Math.round(x * 10) / 10;
+          return { left: r(left), right: r(right), front: r(front), back: r(back) };
+        },
+        tune: (t: Partial<ClothTune>) => { clothTune = { ...clothTune, ...t }; for (const [k, i] of clothDialInputs) i.value = String(clothTune[k as keyof ClothTune]); tuneCloth(); refresh(); },
+        // her body hidden or shown, the cloth alone (her model's own visibility: the frame loop then leaves the cloth be)
+        body: (on: boolean) => { if (model) model.visible = on; },
+        // her skin alone undrawn (her clothes still drawn): to see a garment's own shape
+        skin: (on: boolean) => { const b = skinned.find((m) => !!m.geometry.getAttribute('_cloth_cover')); for (const m of b ? (Array.isArray(b.material) ? b.material : [b.material]) : []) { m.colorWrite = on; m.depthWrite = on; } },
+      };
     },
 
     update(frame: FrameInfo) {
@@ -1466,6 +1588,14 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       if (fabric && model) { model.updateMatrixWorld(true); fabric.frame(); }
       // and every built strap laid on her skin as she is this frame
       if (builder && model) builder.frame();
+      // and the cloth tee, moved over her as she is this frame (its cost on the stage)
+      frameMs += (frame.rawDt * 1000 - frameMs) / 20;
+      if (cloth && clothOn && cloth.mesh.visible && model?.visible && !clothLoading) {
+        model.updateMatrixWorld(true);
+        if (clothRestart) { cloth.restart(); clothRestart = false; }
+        cloth.frame(dt);
+        if (fields.cloth) fields.cloth.textContent = clothLine(cloth.stats(), frameMs);
+      }
     },
 
     resize(width: number, height: number) {
@@ -1482,6 +1612,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       fabric = null;
       builder?.dispose();
       builder = null;
+      dropCloth();
       hud?.remove();
       hud = null;
       if (model) { three.remove(model); rig?.dispose(); release(model); model = null; }
