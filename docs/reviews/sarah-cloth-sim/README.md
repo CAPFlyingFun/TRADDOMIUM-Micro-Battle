@@ -278,3 +278,49 @@ The bake is reproducible: two runs give byte-identical files.
 
 - **The T-pose** crops the tee and crumples its back at the shoulders. The cloth has no collision with itself, and raising her arms pulls the sleeves up with the tee.
 - **With her body hidden**, the sleeve on her near side still shows a fold behind her arm, both standing and seated. It cannot be seen with her body shown.
+
+## alpha.122: an adjustable neckline (`14-neckline.jpg`)
+
+Joshua, 2026-10-24: "can the neckline also be adjustable like the length so you can do U/V shape and select how deep up to turtleneck? I would set the deepest/lowest point between the breasts and top belly…"
+
+The cloth tee has a **NECKLINE** slider under TEE LENGTH, from −100 to +100, and a **NECK SHAPE** button (U or V). Both work while CLOTH SIM is on.
+
+- **Below 0, the collar rises up her neck.** The cloth file now carries 16 rows of cloth above the neckline, up to a level ring 2 cm under her chin. The slider shows a share of them, the way TEE LENGTH shows the rows below the hem: about −30 is a crew neck, −60 a mock neck, −100 a turtleneck.
+  - The rows were laid as a film pulled over her from the neckline to the ring, kept 3 mm off her. They lie on her chest and shoulders and bridge the notch of her throat instead of following into it.
+  - The collar's top edge is held to her the way the neckline as made is.
+- **0 is the scoop as made.**
+- **Above 0, the front is cut deeper,** to 12.6 cm below the scoop at +100: her breasts' lower crease, between her breasts and the top of her belly. The width at her shoulders stays as made, and the back is never cut.
+  - **U** rounds in to its lowest point, so a deep U comes down between her breasts.
+  - **V** runs straight from each shoulder point to its tip. A shallow V is a notch at the bottom of the scoop.
+
+How it is done:
+
+- **A smooth edge, not the cloth's triangles.** Every point of the tee's front records where it stands against the two curves. The material works the cut out at every pixel (`clothNeckline.ts`), so the edge is a smooth curve through the cloth rather than a zigzag along its 1 cm triangles.
+- **What is cut away is not simulated.** The cut edge is held to her skin under it, the way the neckline as made is. Without that, a deep V hung in the air where the whole tee had bridged her breasts.
+- **The simulation now runs only the particles shown.** The rows below the hem, the collar and the cut front switch in and out separately, so the cloth's particles run in compact slots (`ClothSkin.setOrder`). It is rebuilt at most once a frame while a slider moves.
+- **The cost:** the tee as made is unchanged (5,252 points at TEE LENGTH 20%). A full turtleneck adds 1,552 points, about 30% more. A deep cut removes 50–150.
+
+The bake is reproducible: two runs give byte-identical files.
+
+### And the sleeves' edges (`15-sleeves.jpg`)
+
+Joshua, on the first sheet of this: "Looks good, but these don't have a straight shoulder edge like all the rest". He had circled the sleeves from the side and in every seated view. Those edges were the same on alpha.121, and the fitted tee breaks up the same way when she sits. Here they were ragged because the sleeve's hem was pulled apart:
+
+- **The hem was held in two directions.** Most of each hem was bound to her arm; the run under her arm, nearest her side, was bound to her side and held 3–4 cm off it. When her arm came forward the two holds pulled that corner apart, and the cloth there folded into teeth. Now the hem is held only where it is bound to her arm, fully (as the neckline is) and easing off 4 cm up the sleeve; the run under her arm hangs free between.
+- **The tee's underarms passed through her arms** in the modelled tee, by up to 3.7 cm. The bake now moves every point that lies inside her out to her skin first (140 points).
+- **Points in her armpit's hollow were bound along a triangle's plane far past its edges.** The bake now binds each point to a triangle it stands over where there is one nearby (908 such points down to 119).
+- **A fully held point is never left inside her.** If her bones carry its hold into her, it is put back out on her skin.
+
+Standing, a notch remains at the front of each armpit, where the cap sleeve's edge runs up into it. That is the light tee's own cut; the fitted tee has the same one, and its edge is clean now.
+
+### Checked
+
+- Standing at 100%, every setting from front and side; seated at 150%, V, U and turtleneck (`14`).
+- Sleeves standing from the side and seated from both sides and close up, at the default CLOSENESS (`15`).
+- `typecheck`, `relay:typecheck`, the tests, the build and `probe:sarahlab` all pass.
+
+### Left
+
+- **The neckline is not saved with an outfit.** Like TEE LENGTH and the cloth's dials, it is kept while you are in the room. Nothing of the cloth experiment is saved with an outfit yet.
+- **The fitted (non-cloth) tee** has no neckline slider. It could take the same cut, deeper only.
+- **At +100 V, seen from the side,** the far edge lifts a little off the hollow above her bust.

@@ -20,6 +20,11 @@
  *   where `clothSkin.ts` starts it, and where a pinned one is held.
  * - HUNG FROM HER NECKLINE. `_PIN` is 1 within PIN_IN of the neckline, 0 past PIN_OUT: real cloth hangs from her
  *   shoulders by friction, and the collar keeps it from walking off her while the experiment is tuned.
+ * - A COLLAR, AND A DEEPER FRONT (Joshua, 2026-10-24: "can the neckline also be adjustable like the length so you can do
+ *   U/V shape and select how deep up to turtleneck?"). Above the neckline, rows of cloth up her neck to a ring below
+ *   her chin (the particles after the rows below the hem); the room shows a share of them, as it shows the rows below
+ *   the hem. And `_NECK` says where every point of the tee's front stands against the neckline's U and V curves, so the
+ *   room can cut it deeper, to her breasts' lower crease (section 4c says how).
  *
  *   node scripts/sarahV2Recovery/shirt-cloth.mjs [--particles 5000] [--out public/models/sarah-v2-spandex-cloth.glb]
  */
@@ -41,8 +46,15 @@ const PARTICLES = Number(option('particles', 5000));
 const ROW_STEP = 0.012, COLUMN_STEP = 0.012, SLOPE = 0.45, BAND_OFF = 0.004;
 /** Metres from the neckline: fully pinned inside PIN_IN, free past PIN_OUT. */
 const PIN_IN = 0.012, PIN_OUT = 0.03;
-/** Metres, and how strongly: the sleeves' edges, held softly to her arms, the hold easing off to nothing by SLEEVE_PIN_OUT. */
-const SLEEVE_PIN_IN = 0.008, SLEEVE_PIN = 0.35, SLEEVE_PIN_OUT = 0.04;
+/**
+ * Metres, and how strongly: the sleeves' hems, held to her arms as the neckline is held to her (fully within
+ * SLEEVE_PIN_IN), the hold easing off to nothing by SLEEVE_PIN_OUT. Held at 0.35 (alpha.121), a hem whose arm came
+ * forward ruffled between its holds, and seated its edge was ragged (Joshua, 2026-10-24: "these don't have a straight
+ * shoulder edge like all the rest").
+ */
+const SLEEVE_PIN_IN = 0.008, SLEEVE_PIN = 1, SLEEVE_PIN_OUT = 0.04;
+/** Metres: the sleeve's hem and this much above it is bound to her ARM wherever it lies, its edge under her arm too. */
+const SLEEVE_HEM = 0.015, SLEEVE_HEM_OFF = 0.015;
 /** Metres: a particle over her arm is SLEEVE (bound to her arm) only when her trunk is at least this far from it. */
 const SLEEVE_CLEAR = 0.02;
 /** Metres: a point's layer is told by her skin when her nearer skin is within SKIN_NEAR and nearer than the other by SKIN_MARGIN. */
@@ -51,6 +63,12 @@ const SKIN_NEAR = 0.03, SKIN_MARGIN = 0.012;
 const FOLD = -0.5;
 /** Metres: how far a ray from the tee looks for her body. */
 const RAY = 0.08, RAY_CLOSE = 0.025, RAY_RATIO = 3;
+/**
+ * Binding to her skin: a point is bound to the triangle whose plane it stands over, its foot within BIND_SLACK of the
+ * triangle (in barycentrics) and no more than BIND_UNDER (metres) under its plane, the nearest such within BIND_REACH
+ * (metres) of her nearest point -- when her nearest triangle is not one (see skinLookup).
+ */
+const BIND_SLACK = 0.1, BIND_UNDER = 0.002, BIND_REACH = 0.02;
 /** Body-local units (about 0.9 m each): how far an open edge (hem, neckline, sleeve) may stray from the modelled one as its points are thinned. */
 const EDGE_ERROR = 0.002;
 /** Of the cloth's spacing (COLUMN_STEP): an open edge's point is let go when its edge is shorter than EDGE_SHORT, if the edge it leaves stays under EDGE_LONG. */
@@ -69,6 +87,18 @@ const DETAIL_RINGS = [[0.022, 0.03], [0.036, 0.044]];
  * her feet: above the top of her bump, at 1.2 m, and below her collarbones), and how far behind her most forward point
  * a breast's apex reaches. */
 const NIPPLE_WINDOW = { across: [0.06, 0.14], up: [1.22, 1.32] }, NIPPLE_APEX = 0.003;
+/**
+ * Metres. THE COLLAR (rows above the neckline, up her neck to a turtleneck): its top stands COLLAR_UNDER_CHIN below her
+ * chin, COLLAR_OFF off her; its rows are about COLLAR_ROW apart at the front, where the collar is longest; her neck's
+ * outline is read within COLLAR_REACH of its middle.
+ */
+const COLLAR_UNDER_CHIN = 0.02, COLLAR_OFF = 0.003, COLLAR_ROW = 0.011, COLLAR_REACH = 0.085;
+/** How many times the collar is relaxed toward a film drawn between the neckline and its top, kept off her. */
+const COLLAR_RELAX = 120;
+/** Metres: a particle no front neckline ever reaches is given this as the depth that would cut it. */
+const NECK_FAR = 9;
+/** Metres: cloth this far above the front neckline's own line is over her shoulder, not along the neckline, and never cut. */
+const NECK_ABOVE = 0.006;
 
 await Promise.all([MeshoptDecoder.ready, MeshoptEncoder.ready, MeshoptSimplifier.ready]);
 const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'meshopt.decoder': MeshoptDecoder, 'meshopt.encoder': MeshoptEncoder });
@@ -151,15 +181,38 @@ function skinLookup(keep) {
       }
     }
     if (!best) return { tri: [0, 0, 0], bary: [1, 0, 0], normal: [0, 1, 0], offset: 0, distance: Infinity };
-    const n = [nrm[best.t] * out, nrm[best.t + 1] * out, nrm[best.t + 2] * out];
     // the binding is the point's foot on the triangle's PLANE (barycentrics past its edges where it falls outside): the
     // skin point plus the offset along that triangle's normal is then the point itself exactly, as clothSkin.ts rebuilds it
-    const a = BI[best.t] * 3, b = BI[best.t + 1] * 3, c = BI[best.t + 2] * 3;
-    const offset = (p[0] - B[a]) * n[0] + (p[1] - B[a + 1]) * n[1] + (p[2] - B[a + 2]) * n[2], foot = [0, 1, 2].map((k) => p[k] - offset * n[k]);
-    const e0 = [0, 1, 2].map((k) => B[b + k] - B[a + k]), e1 = [0, 1, 2].map((k) => B[c + k] - B[a + k]), r = [0, 1, 2].map((k) => foot[k] - B[a + k]);
-    const dot = (u, v) => u[0] * v[0] + u[1] * v[1] + u[2] * v[2], d00 = dot(e0, e0), d01 = dot(e0, e1), d11 = dot(e1, e1), d20 = dot(r, e0), d21 = dot(r, e1), den = d00 * d11 - d01 * d01 || 1e-30;
-    const v = (d11 * d20 - d01 * d21) / den, w = (d00 * d21 - d01 * d20) / den;
-    return { tri: [BI[best.t], BI[best.t + 1], BI[best.t + 2]], bary: [1 - v - w, v, w], normal: n, offset, distance: Math.sqrt(best.d2) };
+    const plane = (t) => {
+      const n = [nrm[t] * out, nrm[t + 1] * out, nrm[t + 2] * out], a = BI[t] * 3, b = BI[t + 1] * 3, c = BI[t + 2] * 3;
+      const offset = (p[0] - B[a]) * n[0] + (p[1] - B[a + 1]) * n[1] + (p[2] - B[a + 2]) * n[2], foot = [0, 1, 2].map((k) => p[k] - offset * n[k]);
+      const e0 = [0, 1, 2].map((k) => B[b + k] - B[a + k]), e1 = [0, 1, 2].map((k) => B[c + k] - B[a + k]), r = [0, 1, 2].map((k) => foot[k] - B[a + k]);
+      const dot = (u, v) => u[0] * v[0] + u[1] * v[1] + u[2] * v[2], d00 = dot(e0, e0), d01 = dot(e0, e1), d11 = dot(e1, e1), d20 = dot(r, e0), d21 = dot(r, e1), den = d00 * d11 - d01 * d01 || 1e-30;
+      const v = (d11 * d20 - d01 * d21) / den, w = (d00 * d21 - d01 * d20) / den;
+      return { t, n, offset, bary: [1 - v - w, v, w] };
+    };
+    let pick = plane(best.t);
+    // ...but not when that foot lies well past the triangle, or the point lies under its plane: in a hollow (the armpit's
+    // crease) the nearest triangle is often one the point lies BEYOND, reached along its plane by barycentrics far
+    // outside it -- 3.7 cm under her skin, by the plane, for points at the underside of her sleeves -- and carried that
+    // far by her bones the point swings: the sleeve's hem folded over whenever her arm moved (Joshua, 2026-10-24: "these
+    // don't have a straight shoulder edge like all the rest"). Then the triangle nearby that the point lies OVER is
+    // taken instead, the nearest such by its offset, if there is one within BIND_REACH of the nearest point.
+    if (Math.min(...pick.bary) < -BIND_SLACK || pick.offset < -BIND_UNDER / scale) {
+      const reach = Math.sqrt(best.d2) + BIND_REACH / scale, seen = new Set();
+      let over = null;
+      for (let r = 0; r <= 14 && (r - 1) * CELL <= reach; r++) for (let x = -r; x <= r; x++) for (let y = -r; y <= r; y++) for (let z = -r; z <= r; z++) {
+        if (Math.max(Math.abs(x), Math.abs(y), Math.abs(z)) !== r) continue;
+        for (const t of cells.get(key(cx + x, cy + y, cz + z)) ?? []) {
+          if (seen.has(t)) continue; seen.add(t);
+          const q = plane(t);
+          if (Math.min(...q.bary) < -BIND_SLACK || q.offset < -BIND_UNDER / scale || q.offset > reach) continue;
+          if (!over || q.offset < over.offset) over = q;
+        }
+      }
+      if (over) pick = over;
+    }
+    return { tri: [BI[pick.t], BI[pick.t + 1], BI[pick.t + 2]], bary: pick.bary, normal: pick.n, offset: pick.offset, distance: Math.sqrt(best.d2), near: best.q, nearNormal: [nrm[best.t] * out, nrm[best.t + 1] * out, nrm[best.t + 2] * out] };
   };
 }
 function closestBary(p, a, b, c) {
@@ -182,7 +235,7 @@ function closestBary(p, a, b, c) {
   const q = [0, 1, 2].map((k) => B[a + k] * bc[0] + B[b + k] * bc[1] + B[c + k] * bc[2]);
   return { bc, q, d2: (p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2 + (p[2] - q[2]) ** 2 };
 }
-const anySkin = skinLookup(() => true), trunkSkin = skinLookup((t) => !armTri(t));
+const anySkin = skinLookup(() => true), trunkSkin = skinLookup((t) => !armTri(t)), armSkin = skinLookup((t) => armTri(t));
 
 // ---- 1. the tee's outer layer --------------------------------------------------------------------------------------
 const P = floats(prim.getAttribute('POSITION')), UV = floats(prim.getAttribute('TEXCOORD_0')), I = Uint32Array.from(prim.getIndices().getArray());
@@ -405,6 +458,43 @@ for (const [name, edge] of [['hem', hem], ['neckline', neck], ...big.filter((l) 
   console.log(`${name}: ${H} points ${gaps[0].toFixed(1)} to ${gaps.at(-1).toFixed(1)} mm apart (median ${gaps[H >> 1].toFixed(1)})`);
 }
 
+// ---- 2b. nothing of the tee inside her ---------------------------------------------------------------------------
+// The modelled tee's underarms pass THROUGH her arms at rest, up to 3.7 cm deep at the underside of each sleeve. Bound
+// there, the cloth was held inside her arm and pushed out of it at once, and the two fought: its hem folded over at
+// her armpits, and her arm's skin showed through in front of it -- a notch standing, a ragged edge sitting (Joshua,
+// 2026-10-24: "these don't have a straight shoulder edge like all the rest"). So every point of the tee that lies
+// inside her (her body's winding number round it over a half) is moved out first, to her nearest skin and INSIDE_CLEAR
+// off it, before anything is bound or measured from it.
+{
+  const INSIDE_CLEAR = 0.002;
+  const winding = (q) => {
+    let sum = 0;
+    for (let t = 0; t < BI.length; t += 3) {
+      const a = BI[t] * 3, b = BI[t + 1] * 3, c = BI[t + 2] * 3;
+      const ax = B[a] - q[0], ay = B[a + 1] - q[1], az = B[a + 2] - q[2], bx = B[b] - q[0], by = B[b + 1] - q[1], bz = B[b + 2] - q[2], cx = B[c] - q[0], cy = B[c + 1] - q[1], cz = B[c + 2] - q[2];
+      const la = Math.hypot(ax, ay, az), lb = Math.hypot(bx, by, bz), lc = Math.hypot(cx, cy, cz);
+      const det = ax * (by * cz - bz * cy) - ay * (bx * cz - bz * cx) + az * (bx * cy - by * cx);
+      sum += 2 * Math.atan2(det, la * lb * lc + (ax * bx + ay * by + az * bz) * lc + (ax * cx + ay * cy + az * cz) * lb + (bx * cx + by * cy + bz * cz) * la);
+    }
+    return sum / (4 * Math.PI);
+  };
+  // her triangles wind one way throughout; which way is out, by the winding at a point far outside her (0 either way)
+  // and at her own middle
+  const centre = [0, 1, 2].map((k) => { let m = 0; for (let v = 0; v < B.length / 3; v++) m += B[v * 3 + k]; return m / (B.length / 3); });
+  const sign = Math.sign(winding(centre)) || 1;
+  let moved = 0, deepest = 0;
+  for (let p = 0; p < teeParticles; p++) {
+    const q = [particleRest[p * 3], particleRest[p * 3 + 1], particleRest[p * 3 + 2]], s = anySkin(q);
+    // plainly outside -- over her skin's plane and clear of it -- needs no counting
+    if (s.offset >= 0 && s.distance * scale > 0.0005) continue;
+    if (winding(q) * sign < 0.5) continue;
+    const out = [0, 1, 2].map((k) => s.near[k] + s.nearNormal[k] * INSIDE_CLEAR / scale);
+    for (let k = 0; k < 3; k++) particleRest[p * 3 + k] = out[k];
+    moved++; deepest = Math.max(deepest, s.distance * scale);
+  }
+  console.log(`inside her: ${moved} points of the tee moved out to her skin (the deepest ${(deepest * 1000).toFixed(1)} mm in)`);
+}
+
 // ---- 3. rows below the hem, to mid-thigh ---------------------------------------------------------------------------
 const axis = meanWorld(hem);
 // the hem goes round her one way: make it counter-clockwise seen from above (+y), so rows wind like the cloth above them
@@ -475,12 +565,86 @@ for (let k = 1; k <= ROWS; k++) {
 }
 console.log(`below the hem: ${ROWS} rows of ${columns} to mid-thigh (${((sideY - MID_THIGH) * 100).toFixed(1)} cm at her sides)`);
 
+// ---- 3b. the collar: rows above the neckline, up her neck to a turtleneck -------------------------------------------
+// (Joshua, 2026-10-24: "can the neckline also be adjustable like the length so you can do U/V shape and select how deep
+// up to turtleneck?") The neckline's own points are the collar's first row, every column runs from one of them to a
+// ring round her neck below her chin, and the sheet between is relaxed toward the film a cloth tube pulled over her would
+// make -- each point toward the mean of its four neighbours, round the collar and up it, and never closer to her than
+// COLLAR_OFF -- so it lies on her chest and shoulders where they are full and spans the hollows (the notch of her throat,
+// the corner where her neck meets her shoulders) rather than following into them. The room shows its rows up to a share
+// of the top, as TEE LENGTH shows the rows below the hem: halfway is about a crew neck, all of it a turtleneck.
+const offLocal = COLLAR_OFF / scale;
+/** A point (her rest world) kept COLLAR_OFF off her trunk: where it is closer, or inside her, it is put out to COLLAR_OFF. */
+const keepOff = (w) => {
+  const q = toLocal(w[0], w[1], w[2]), s = trunkSkin(q);
+  if (s.offset >= offLocal) return w;
+  const out = [0, 1, 2].map((k) => q[k] + (offLocal - s.offset) * s.normal[k]);
+  return toWorld(out[0], out[1], out[2]);
+};
+// her chin: going up her middle from the neckline's highest point, the first height whose front stands 3 cm in front of
+// her throat (the front of her neck, the furthest back her middle's front has come)
+const midFront = (y) => { let f = -Infinity; for (const v of trunk) if (Math.abs(BW[v * 3]) < 0.015 && Math.abs(BW[v * 3 + 1] - y) < 0.002) f = Math.max(f, BW[v * 3 + 2]); return f; };
+const neckTopY = Math.max(...neck.map((p) => restWorld(p)[1]));
+let chinY = NaN;
+{ let throat = Infinity; for (let y = neckTopY; y < neckTopY + 0.2; y += 0.002) { const f = midFront(y); if (!Number.isFinite(f)) continue; throat = Math.min(throat, f); if (f > throat + 0.03) { chinY = y; break; } } }
+if (!Number.isFinite(chinY)) throw new Error('could not find her chin above the neckline');
+const collarTop = chinY - COLLAR_UNDER_CHIN;
+// her neck's middle at the collar's top: half way between its front and back on her middle line
+const neckAxis = (() => { let f = -Infinity, b = Infinity; for (const v of trunk) if (Math.abs(BW[v * 3]) < 0.015 && Math.abs(BW[v * 3 + 1] - collarTop) < 0.003) { f = Math.max(f, BW[v * 3 + 2]); b = Math.min(b, BW[v * 3 + 2]); } return [0, (f + b) / 2]; })();
+/** Her neck's convex outline at height y, within COLLAR_REACH of its middle: how far from the middle along `angle`. */
+function neckRadius(y, angle) {
+  const pts = [];
+  for (const v of trunk) { const dx = BW[v * 3] - neckAxis[0], dz = BW[v * 3 + 2] - neckAxis[1]; if (Math.abs(BW[v * 3 + 1] - y) < 0.004 && Math.hypot(dx, dz) < COLLAR_REACH) pts.push([dx, dz]); }
+  if (pts.length < 3) return 0;
+  pts.sort((p, q) => p[0] - q[0] || p[1] - q[1]);
+  const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lower = [], upper = [];
+  for (const p of pts) { while (lower.length >= 2 && cross(lower.at(-2), lower.at(-1), p) <= 0) lower.pop(); lower.push(p); }
+  for (const p of pts.slice().reverse()) { while (upper.length >= 2 && cross(upper.at(-2), upper.at(-1), p) <= 0) upper.pop(); upper.push(p); }
+  const hull = lower.slice(0, -1).concat(upper.slice(0, -1)), dx = Math.sin(angle), dz = Math.cos(angle);
+  let reach = 0;
+  for (let i = 0; i < hull.length; i++) {
+    const a = hull[i], b = hull[(i + 1) % hull.length], ex = b[0] - a[0], ez = b[1] - a[1], den = dx * ez - dz * ex;
+    if (Math.abs(den) < 1e-12) continue;
+    const s = (a[0] * ez - a[1] * ex) / den, u = (a[0] * dz - a[1] * dx) / den;
+    if (s > 0 && u >= -1e-9 && u <= 1 + 1e-9) reach = Math.max(reach, s);
+  }
+  return reach;
+}
+// the columns: one from each point of the neckline (in the order its open edge runs), each to the ring at its angle
+const C = neck.length, neckW = neck.map(restWorld);
+const ringRadius = neckW.map((w) => neckRadius(collarTop, Math.atan2(w[0] - neckAxis[0], w[2] - neckAxis[1])));
+for (let pass = 0; pass < 3; pass++) { const r = ringRadius.slice(); for (let j = 0; j < C; j++) ringRadius[j] = (r[(j + C - 1) % C] + 2 * r[j] + r[(j + 1) % C]) / 4; }
+const ring = neckW.map((w, j) => { const a = Math.atan2(w[0] - neckAxis[0], w[2] - neckAxis[1]), r = ringRadius[j] + COLLAR_OFF; return [neckAxis[0] + r * Math.sin(a), collarTop, neckAxis[1] + r * Math.cos(a)]; });
+const R = Math.max(2, Math.ceil(Math.max(...neckW.map((w, j) => Math.hypot(...[0, 1, 2].map((k) => ring[j][k] - w[k])))) / COLLAR_ROW));
+// the grid: row 0 the neckline, row R the ring; between, first straight up each column (kept off her), then relaxed
+const grid = Array.from({ length: R + 1 }, (_, k) => neckW.map((w, j) => (k === 0 ? w : k === R ? ring[j] : keepOff([0, 1, 2].map((c) => w[c] + (ring[j][c] - w[c]) * (k / R))))));
+for (let pass = 0; pass < COLLAR_RELAX; pass++) {
+  for (let k = 1; k < R; k++) {
+    const was = grid[k].map((p) => p.slice());
+    for (let j = 0; j < C; j++) {
+      const m = [0, 1, 2].map((c) => (was[(j + C - 1) % C][c] + was[(j + 1) % C][c] + grid[k - 1][j][c] + grid[k + 1][j][c]) / 4);
+      const p = [0, 1, 2].map((c) => was[j][c] + 0.6 * (m[c] - was[j][c]));
+      // kept off her every few passes and on the last (the lookup is the cost; the film moves little in between)
+      grid[k][j] = pass % 4 === 3 || pass === COLLAR_RELAX - 1 ? keepOff(p) : p;
+    }
+  }
+}
+const columnLength = neckW.map((_, j) => { let s = 0; for (let k = 1; k <= R; k++) s += Math.hypot(...[0, 1, 2].map((c) => grid[k][j][c] - grid[k - 1][j][c])); return s; });
+const collarLength = columnLength.reduce((a, b) => a + b, 0) / C;
+console.log(`the collar: ${R} rows of ${C} up her neck to ${collarTop.toFixed(3)} m (her chin ${chinY.toFixed(3)} m), columns ${(Math.min(...columnLength) * 100).toFixed(1)} to ${(Math.max(...columnLength) * 100).toFixed(1)} cm (mean ${(collarLength * 100).toFixed(1)}); her neck's middle at x ${neckAxis[0].toFixed(3)} z ${neckAxis[1].toFixed(3)}`);
+
 // ---- 4. every particle: rest place, binding, pin, row ----------------------------------------------------------------
-const nP = teeParticles + ROWS * columns;
+const collarStart = teeParticles + ROWS * columns;
+const nP = collarStart + R * C;
 const rest = new Float32Array(nP * 3); rest.set(Float32Array.from(particleRest));
 const rowOf = new Float32Array(nP);
 const ext = (k, j) => teeParticles + (k - 1) * columns + j;
 for (let k = 1; k <= ROWS; k++) for (let j = 0; j < columns; j++) { rest.set(toLocal(...extension[k - 1][j]), ext(k, j) * 3); rowOf[ext(k, j)] = k; }
+/** The collar's particle in column j at row k (row 0 is the neckline's own point). */
+const col = (k, j) => (k === 0 ? neck[j] : collarStart + (k - 1) * C + j);
+const collarOf = new Float32Array(nP);
+for (let k = 1; k <= R; k++) for (let j = 0; j < C; j++) { rest.set(toLocal(...grid[k][j]), col(k, j) * 3); collarOf[col(k, j)] = k / R; }
 const extTris = [];
 // the hem zipped to the first row: walk both loops by the fraction of the way round, always advancing the one behind
 {
@@ -503,14 +667,29 @@ for (let k = 2; k <= ROWS; k++) for (let j = 0; j < columns; j++) {
   const outward = [p[0][0] - axis[0], 0, p[0][2] - axis[2]];
   if (n[0] * outward[0] + n[2] * outward[2] < 0) for (let i = 0; i < extTris.length; i += 3) [extTris[i + 1], extTris[i + 2]] = [extTris[i + 2], extTris[i + 1]];
 }
+// the collar's quads, wound as the tee is: the neckline's open edge runs neck[j] -> neck[j + 1] in the tee's own
+// triangles, so the collar's triangle along it runs it the other way, and every row above follows
+const collarTris = [];
+for (let k = 0; k < R; k++) for (let j = 0; j < C; j++) {
+  const a = col(k, j), b = col(k, (j + 1) % C), c = col(k + 1, j), d = col(k + 1, (j + 1) % C);
+  collarTris.push(b, a, c, b, c, d);
+}
+if (borderNext.get(neck[0]) !== neck[1]) throw new Error('the neckline does not run the way its open edge does');
 // each particle below the hem hangs from the point of the hem its column starts at: where it is laid on her at first
 // (clothShirt.ts), carried from that point as she is posed, rather than from a far-off skin triangle bound to it
 const anchorOf = new Float32Array(nP).map((_, p) => p);
 for (let k = 1; k <= ROWS; k++) for (let j = 0; j < columns; j++) anchorOf[ext(k, j)] = columnFoot[j].near;
 const tri = new Uint32Array(nP * 3), bary = new Float32Array(nP * 3), offset = new Float32Array(nP), pin = new Float32Array(nP);
 const neckWorld = neck.map(restWorld), sleeveWorld = big.filter((l) => l !== hem && l !== neck).slice(0, 2).flatMap((l) => l.map(restWorld));
-let worstOff = 0, sleeves = 0;
+let worstOff = 0, sleeves = 0, hemMoved = 0, hemOff = 0;
 for (let p = 0; p < nP; p++) {
+  if (p >= collarStart) {
+    // the collar: bound to her trunk (her neck, her chest, her shoulders), never held by the file -- the room holds the
+    // edge it shows
+    const s = trunkSkin([rest[p * 3], rest[p * 3 + 1], rest[p * 3 + 2]]);
+    tri.set(s.tri, p * 3); bary.set(s.bary, p * 3); offset[p] = s.offset; worstOff = Math.max(worstOff, Math.abs(s.offset));
+    continue;
+  }
   // bound to her trunk, unless it is sleeve: over her arm, and well clear of her trunk (her side under her arm is trunk);
   // or over her arm within SLEEVE_PIN_OUT of a sleeve's edge, where it is held to her arm, however near her trunk -- the
   // front and back of the sleeve by her armpit, which as her arms come forward (seated) must come with them, carried
@@ -519,8 +698,13 @@ for (let p = 0; p < nP; p++) {
   const q = [rest[p * 3], rest[p * 3 + 1], rest[p * 3 + 2]], trunk = trunkSkin(q), any = rowOf[p] > 0 ? trunk : anySkin(q);
   const wq = toWorld(...q);
   let edgeNear = Infinity; if (rowOf[p] === 0) for (const n of sleeveWorld) edgeNear = Math.min(edgeNear, Math.hypot(wq[0] - n[0], wq[1] - n[1], wq[2] - n[2]));
-  const s = any.tri.some((v) => armVertex[v]) && (trunk.distance * scale > SLEEVE_CLEAR || edgeNear < SLEEVE_PIN_OUT) ? any : trunk;
+  // ...and the hem itself, and a little above it, on her arm wherever it lies: its lowest points, under her arm, were
+  // nearest her side and bound to it, so when her arm moved the hem was carried by two bodies and kinked where they met
+  // (Joshua, 2026-10-24: "these don't have a straight shoulder edge like all the rest")
+  const hemArm = edgeNear < SLEEVE_HEM ? armSkin(q) : null, hemBand = !!hemArm && hemArm.offset * scale < SLEEVE_HEM_OFF;
+  const s = hemBand ? hemArm : any.tri.some((v) => armVertex[v]) && (trunk.distance * scale > SLEEVE_CLEAR || edgeNear < SLEEVE_PIN_OUT) ? any : trunk;
   if (s !== trunk) sleeves++;
+  if (hemBand && !any.tri.some((v) => armVertex[v])) { hemMoved++; hemOff = Math.max(hemOff, s.offset * scale); }
   tri.set(s.tri, p * 3); bary.set(s.bc ?? s.bary, p * 3); offset[p] = s.offset; worstOff = Math.max(worstOff, Math.abs(s.offset));
   if (rowOf[p] === 0) {
     const w = toWorld(...q);
@@ -529,12 +713,15 @@ for (let p = 0; p < nP; p++) {
     // the sleeves' edges are held softly to her arms, so they ride with them and do not slide down them; and the sleeve
     // above its edge, ever more lightly, so that as her arms come forward (seated) the sleeve comes with them instead
     // of her arm going through its front (Joshua, 2026-10-24: "around the top and sleeves… like something ripped it")
+    // -- held only where it is bound to her ARM: the hem's run under her arm, bound to her side, held 3-4 cm off her side
+    // while the rest was held to her arm, was pulled apart into teeth whenever her arm came forward (Joshua, 2026-10-24:
+    // "these don't have a straight shoulder edge like all the rest"); it hangs free between them instead
     let e = Infinity; for (const n of sleeveWorld) e = Math.min(e, Math.hypot(w[0] - n[0], w[1] - n[1], w[2] - n[2]));
-    const held = e <= SLEEVE_PIN_IN ? SLEEVE_PIN : e >= SLEEVE_PIN_OUT ? 0 : SLEEVE_PIN * (1 - (e - SLEEVE_PIN_IN) / (SLEEVE_PIN_OUT - SLEEVE_PIN_IN));
+    const held = s === trunk ? 0 : e <= SLEEVE_PIN_IN ? SLEEVE_PIN : e >= SLEEVE_PIN_OUT ? 0 : SLEEVE_PIN * (1 - (e - SLEEVE_PIN_IN) / (SLEEVE_PIN_OUT - SLEEVE_PIN_IN));
     pin[p] = Math.max(pin[p], held);
   }
 }
-console.log(`bound to her: the furthest particle ${(worstOff * scale * 100).toFixed(1)} cm off her skin; ${sleeves} on her arms (sleeves); ${[...pin].filter((x) => x > 0).length} particles held (her neckline, softly her sleeves' edges)`);
+console.log(`bound to her: the furthest particle ${(worstOff * scale * 100).toFixed(1)} cm off her skin; ${sleeves} on her arms (sleeves), ${hemMoved} of the hem's band moved from her side to her arm (at most ${(hemOff * 1000).toFixed(1)} mm off it); ${[...pin].filter((x) => x > 0).length} particles held (her neckline, her sleeves' hems)`);
 
 // ---- 4b. her navel and nipples, for the room to find on her each frame --------------------------------------------
 // (Joshua, 2026-10-24: "there are two bellybuttons, the top is the real one, the bottom for some reason is fixed on the
@@ -592,16 +779,78 @@ for (let p = 0; p < teeParticles; p++) {
 }
 console.log(`her navel: vertex ${navelVertex} at ${at(navelVertex).map((x) => x.toFixed(3))} m, ${[...navelZone].filter((w) => w > 0).length} particles in its zone; nipples ${nipples.join(', ')} at ${nipples.map((v) => at(v).map((x) => x.toFixed(3)).join(',')).join(' and ')}`);
 
+// ---- 4c. a deeper front neckline, U or V: where each particle stands against the curve -----------------------------
+// (Joshua, 2026-10-24: "U/V shape and select how deep… I would set the deepest/lowest point between the breasts and top
+// belly".) Seen from the front, the neckline as made is a curve y = n(x) between the two points where it crosses her
+// neck's middle plane at her shoulders (x = ±w, height y_s each side), lowest at y0 in the middle. Cut D deeper:
+// - U: y = n(x) - D·(1 - u²), u = |x| / w -- the same width at her shoulders, rounding in to its lowest point, so a deep
+//   U comes down BETWEEN her breasts (her nipples stand at about 0.86 w: a U whose sides fell straight from her
+//   shoulders, as an ellipse's do, opened over both breasts by half its depth);
+// - V: y = y0 + (y_s - y0)·u - D·(1 - u) -- straight from each shoulder point to a tip D below the scoop's lowest point
+//   (never less than the neckline as made: a shallow V is a notch at the bottom of the scoop).
+// Cloth in front of her neck's middle and above the curve is gone. So each particle records how far below each curve's
+// line AS MADE it stands, and its u: `_NECK` = (n(x) - y, y0 + (y_s - y0)·u - y, u, collar), metres. Cut D deep, a point
+// is gone where the first is less than D·(1 - u²) (U), or the second less than D·(1 - u) (V). The room's shader works
+// that out at every pixel from the three, which are smooth over the cloth, so the edge it draws is the curve itself
+// between particles a centimetre apart; a depth stored per particle instead -- (n - y) / (1 - u²) -- runs off to
+// infinity at her shoulder points, and drawn between particles it bent the edge into waves there. Where no front
+// neckline reaches, the first two are NECK_FAR and u is 0. `_NECK` w is the collar's share of its height (0 elsewhere).
+const front = (() => {
+  // the neckline's front: the run of it in front of her neck's middle, ordered across her
+  const z0 = neckAxis[1], H = neck.length, inFront = neckW.map((w) => w[2] > z0);
+  let start = inFront.findIndex((f, i) => f && !inFront[(i + H - 1) % H]);
+  if (start < 0) throw new Error('the neckline has no front');
+  const run = []; for (let i = 0; i < H && inFront[(start + i) % H]; i++) run.push(neckW[(start + i) % H]);
+  // where it crosses the middle plane at each end
+  const cross = (a, b) => { const t = (z0 - a[2]) / (b[2] - a[2]); return [a[0] + t * (b[0] - a[0]), a[1] + t * (b[1] - a[1])]; };
+  const e0 = cross(neckW[(start + H - 1) % H], run[0]), e1 = cross(neckW[(start + run.length) % H], run.at(-1));
+  const pts = [e0, ...run.map((w) => [w[0], w[1]]), e1].sort((p, q) => p[0] - q[0]);
+  return { pts, left: pts[0], right: pts.at(-1) };
+})();
+const nAt = (x) => { const P = front.pts; if (x <= P[0][0]) return P[0][1]; for (let i = 1; i < P.length; i++) if (x <= P[i][0]) { const t = (x - P[i - 1][0]) / Math.max(1e-9, P[i][0] - P[i - 1][0]); return P[i - 1][1] + t * (P[i][1] - P[i - 1][1]); } return P.at(-1)[1]; };
+const scoopY = nAt(neckAxis[0]);
+// the deepest: her breasts' lower crease (the fold between each breast and her belly, below its nipple: where her
+// front comes furthest back), both sides' mean
+const foldY = (() => {
+  const ys = nipples.map((v) => {
+    const [nx, ny] = at(v); let best = Infinity, y0 = ny;
+    for (let y = ny - 0.02; y > ny - 0.15; y -= 0.005) { let f = -Infinity; for (const u of trunk) if (Math.abs(BW[u * 3] - nx) < 0.01 && Math.abs(BW[u * 3 + 1] - y) < 0.0025) f = Math.max(f, BW[u * 3 + 2]); if (Number.isFinite(f) && f < best) { best = f; y0 = y; } }
+    return y0;
+  });
+  return (ys[0] + ys[1]) / 2;
+})();
+const deepest = scoopY - foldY;
+const neckCut = new Float32Array(nP * 4);
+let insideU = 0, insideV = 0;
+for (let p = 0; p < nP; p++) {
+  neckCut[p * 4 + 3] = collarOf[p];
+  let vu = NECK_FAR, vv = NECK_FAR, uu = 0;
+  if (p < teeParticles) {
+    const [x, y, z] = restWorld(p), side = x < neckAxis[0] ? front.left : front.right, u = Math.abs(x - neckAxis[0]) / Math.abs(side[0] - neckAxis[0]), n = nAt(x);
+    // in front of her neck's middle, between her shoulder points, and not well above the neckline as made: the cloth
+    // along the neckline lies up to a few millimetres above the line its points make (it was smoothed after), and is cut
+    // first; cloth over her shoulder that the front's curve passes over is never cut
+    if (z > neckAxis[1] && u < 1 && y <= n + NECK_ABOVE) {
+      vu = n - y; vv = scoopY + (side[1] - scoopY) * u - y; uu = u;
+      if (vu < deepest * (1 - u * u)) insideU++;
+      if (vv < deepest * (1 - u)) insideV++;
+    }
+  }
+  neckCut[p * 4] = vu; neckCut[p * 4 + 1] = vv; neckCut[p * 4 + 2] = uu;
+}
+console.log(`the neckline: scoop at ${scoopY.toFixed(3)} m, across ${front.left[0].toFixed(3)} to ${front.right[0].toFixed(3)} at ${front.left[1].toFixed(3)} / ${front.right[1].toFixed(3)} m; her breasts' crease at ${foldY.toFixed(3)} m, so the deepest is ${(deepest * 100).toFixed(1)} cm below the scoop; ${insideU} particles inside a U that deep, ${insideV} inside a V`);
+
 // ---- 5. the file: render vertices (the tee's own, with their UVs; one per extension particle), per-particle data -----
-const renderCount = particleOf.length + ROWS * columns;
+const renderCount = particleOf.length + ROWS * columns + R * C;
 const vertexParticle = new Uint32Array(renderCount), vertexUV = new Float32Array(renderCount * 2);
 vertexParticle.set(particleOf); vertexUV.set(VUV);
 const uvOfParticle = (p) => { const v = particleOf.indexOf(p); return [VUV[v * 2], VUV[v * 2 + 1]]; };
 for (let k = 1; k <= ROWS; k++) for (let j = 0; j < columns; j++) { const v = particleOf.length + (k - 1) * columns + j; vertexParticle[v] = ext(k, j); vertexUV.set(uvOfParticle(columnFoot[j].near), v * 2); }
-// render triangles: the tee's own vertex triangles, the extension's through its one vertex per particle
+for (let k = 1; k <= R; k++) for (let j = 0; j < C; j++) { const v = particleOf.length + (col(k, j) - teeParticles); vertexParticle[v] = col(k, j); vertexUV.set(uvOfParticle(neck[j]), v * 2); }
+// render triangles: the tee's own vertex triangles, the extension's and the collar's through their one vertex a particle
 const extVertex = (p) => (p < teeParticles ? null : particleOf.length + (p - teeParticles));
-const hemVertex = new Map(hem.map((p) => [p, particleOf.indexOf(p)]));
-const renderIndex = Uint32Array.from([...VI, ...extTris.map((p) => (p < teeParticles ? hemVertex.get(p) : extVertex(p)))]);
+const edgeVertex = new Map([...hem, ...neck].map((p) => [p, particleOf.indexOf(p)]));
+const renderIndex = Uint32Array.from([...VI, ...[...extTris, ...collarTris].map((p) => (p < teeParticles ? edgeVertex.get(p) : extVertex(p)))]);
 const perVertex = (array, size) => { const out = new array.constructor(renderCount * size); for (let v = 0; v < renderCount; v++) for (let k = 0; k < size; k++) out[v * size + k] = array[vertexParticle[v] * size + k]; return out; };
 
 const out = doc; // reuse its material, textures and nothing else
@@ -622,12 +871,15 @@ const clothPrim = out.createPrimitive()
   .setAttribute('_ROW', acc(perVertex(rowOf, 1), 'SCALAR'))
   .setAttribute('_ANCHOR', acc(perVertex(anchorOf, 1), 'SCALAR'))
   .setAttribute('_NAVEL', acc(perVertex(navelZone, 1), 'SCALAR'))
+  .setAttribute('_NECK', acc(perVertex(neckCut, 4), 'VEC4'))
   .setIndices(acc(renderIndex, 'SCALAR'))
   .setMaterial(material);
 const clothMesh = out.createMesh('sarah-v2-shirt-spandex-cloth').addPrimitive(clothPrim).setExtras({
   cloth: {
-    version: 2, source: SOURCE.split('/').pop(), particles: nP, teeParticles, rows: ROWS, columns, armBones: [...armJoint].sort((a, b) => a - b), rowStepM: ROW_STEP, midThighM: +MID_THIGH.toFixed(4), localToMetres: +scale.toFixed(6), pinIn: PIN_IN, pinOut: PIN_OUT,
+    version: 3, source: SOURCE.split('/').pop(), particles: nP, teeParticles, rows: ROWS, columns, armBones: [...armJoint].sort((a, b) => a - b), rowStepM: ROW_STEP, midThighM: +MID_THIGH.toFixed(4), localToMetres: +scale.toFixed(6), pinIn: PIN_IN, pinOut: PIN_OUT,
     detail: { navel: navelVertex, navelRings, nipples, nippleRings, navelZoneM: NAVEL_ZONE, ringsM: DETAIL_RINGS },
+    collar: { start: collarStart, rows: R, columns: C, neck: [...neck], lengthM: +collarLength.toFixed(4), topM: +collarTop.toFixed(4), chinM: +chinY.toFixed(4) },
+    neckline: { deepestM: +deepest.toFixed(4), scoopM: +scoopY.toFixed(4), foldM: +foldY.toFixed(4), acrossM: [+front.left[0].toFixed(4), +front.right[0].toFixed(4)], farM: NECK_FAR },
   },
 });
 out.getRoot().listScenes()[0].addChild(out.createNode('sarah-v2-shirt-spandex-cloth').setMesh(clothMesh));

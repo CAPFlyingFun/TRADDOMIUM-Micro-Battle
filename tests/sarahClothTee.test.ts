@@ -4,8 +4,8 @@
  * mid-thigh"; 2026-10-24: "test making the fabric more weighty… tight/form fitting… Could potentially even add sliders").
  *
  * `scripts/sarahV2Recovery/shirt-cloth.mjs` writes the cloth from the light tee; this holds what the room reads from it
- * (`sarahlab/clothShirt.ts`), and what the room's dials mean (`sarahLabTool.ts`). The solver and the skin reader have
- * their own tests (`clothSim.test.ts`, `clothSkin.test.ts`).
+ * (`sarahlab/clothShirt.ts`), and what the room's dials mean (`sarahLabTool.ts`). The solver, the skin reader and the
+ * neckline's cut have their own tests (`clothSim.test.ts`, `clothSkin.test.ts`, `clothNeckline.test.ts`).
  */
 import { statSync } from 'node:fs';
 import { NodeIO, type Document, type Primitive } from '@gltf-transform/core';
@@ -13,13 +13,18 @@ import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { MeshoptDecoder } from 'meshoptimizer';
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
-  CLOTH_DIALS, CLOTH_SHIRT_PATH, CLOTH_TEE_LENGTH_DEFAULT, CLOTH_TUNE_DEFAULT, type ClothDial, clothCompliance, clothDamping, clothFriction, clothFrictionAcross, clothGravityScale, clothLine,
-  clothMaxStretch, clothRestScale, clothStandOffMm, clothSubsteps, clothTuning, teeLengthLine,
+  CLOTH_DIALS, CLOTH_NECKLINE_DEFAULT, CLOTH_SHIRT_PATH, CLOTH_TEE_LENGTH_DEFAULT, CLOTH_TUNE_DEFAULT, type ClothDial, clothCompliance, clothDamping, clothFriction, clothFrictionAcross, clothGravityScale, clothLine,
+  clothMaxStretch, clothRestScale, clothStandOffMm, clothSubsteps, clothTuning, necklineLine, neckShapeLine, teeLengthLine,
 } from '../src/sarahlab/sarahLabTool';
+import { clothNecklineBelow } from '../src/sarahlab/clothNeckline';
 import { SARAH_V2_DETAIL_POINTS } from '../src/sarahlab/detailSpots';
 
 const CLOTH = `public/${CLOTH_SHIRT_PATH}`;
-interface ClothExtras { detail: { navel: number; navelRings: number[][]; nipples: number[]; nippleRings: number[][][]; navelZoneM: number[]; ringsM: number[][] }; version: number; particles: number; teeParticles: number; rows: number; columns: number; armBones: number[]; rowStepM: number; midThighM: number; localToMetres: number; pinIn: number; pinOut: number }
+interface ClothExtras {
+  detail: { navel: number; navelRings: number[][]; nipples: number[]; nippleRings: number[][][]; navelZoneM: number[]; ringsM: number[][] }; version: number; particles: number; teeParticles: number; rows: number; columns: number; armBones: number[]; rowStepM: number; midThighM: number; localToMetres: number; pinIn: number; pinOut: number;
+  collar: { start: number; rows: number; columns: number; neck: number[]; lengthM: number; topM: number; chinM: number };
+  neckline: { deepestM: number; scoopM: number; foldM: number; acrossM: number[]; farM: number };
+}
 let doc: Document, prim: Primitive, cloth: ClothExtras;
 beforeAll(async () => {
   await MeshoptDecoder.ready;
@@ -37,8 +42,9 @@ describe('the cloth tee file', () => {
     expect(doc.getRoot().listMeshes()).toHaveLength(1);
     expect(doc.getRoot().listSkins()).toHaveLength(0); // it is not skinned: the cloth moves it
     expect(prim.listTargets()).toHaveLength(0);
-    expect(cloth.version).toBe(2);
-    expect(cloth.particles).toBe(cloth.teeParticles + cloth.rows * cloth.columns);
+    expect(cloth.version).toBe(3);
+    expect(cloth.collar.start).toBe(cloth.teeParticles + cloth.rows * cloth.columns);
+    expect(cloth.particles).toBe(cloth.collar.start + cloth.collar.rows * cloth.collar.columns);
     expect(cloth.teeParticles).toBeGreaterThan(3000);
     expect(cloth.teeParticles).toBeLessThan(8000);
     expect(cloth.rows).toBeGreaterThan(10);
@@ -101,7 +107,7 @@ describe('the cloth tee file', () => {
     const particle = column('_PARTICLE'), row = column('_ROW'), pos = prim.getAttribute('POSITION')!.getArray() as Float32Array, I = prim.getIndices()!.getArray()!;
     const use = new Map<string, number>(), next = new Map<number, number>();
     const tee: number[][] = [];
-    for (let t = 0; t < I.length; t += 3) { const v = [I[t], I[t + 1], I[t + 2]]; if (v.some((x) => row[x] !== 0)) continue; tee.push(v.map((x) => particle[x])); }
+    for (let t = 0; t < I.length; t += 3) { const v = [I[t], I[t + 1], I[t + 2]]; if (v.some((x) => row[x] !== 0 || particle[x] >= cloth.collar.start)) continue; tee.push(v.map((x) => particle[x])); }
     for (const [a, b, c] of tee) for (const [x, y] of [[a, b], [b, c], [c, a]]) { const k = x < y ? `${x},${y}` : `${y},${x}`; use.set(k, (use.get(k) ?? 0) + 1); }
     for (const [a, b, c] of tee) for (const [x, y] of [[a, b], [b, c], [c, a]]) if (use.get(x < y ? `${x},${y}` : `${y},${x}`) === 1) next.set(x, y);
     const at = new Map<number, number>(); for (let v = 0; v < particle.length; v++) at.set(particle[v], v);
@@ -124,19 +130,43 @@ describe('the cloth tee file', () => {
     }
   });
 
-  it('holds each sleeve to her arm at its edge, easing off up the sleeve', () => {
+  it('holds each sleeve\'s hem fully to her arm, easing off up the sleeve', () => {
     // seated, her arms come forward; held only at its very edge the sleeve's front stayed with her trunk and her arm
-    // went through it
-    const pin = column('_PIN'), row = column('_ROW');
-    let soft = 0, easing = 0;
-    for (let v = 0; v < pin.length; v++) { if (row[v] !== 0) continue; if (Math.abs(pin[v] - 0.35) < 1e-3) soft++; else if (pin[v] > 0.01 && pin[v] < 0.34) easing++; }
-    expect(soft).toBeGreaterThan(20);
-    expect(easing).toBeGreaterThan(soft);
+    // went through it. Held softly (0.35) the hem ruffled between its holds, and its run under her arm, held to her side
+    // while the rest was held to her arm, was pulled apart into teeth (Joshua, 2026-10-24: "these don't have a straight
+    // shoulder edge like all the rest"): the hem is held as the neckline is, and only where it is on her arm.
+    const pin = column('_PIN'), particle = column('_PARTICLE'), pos = prim.getAttribute('POSITION')!.getArray() as Float32Array;
+    const at = new Map<number, number>(); for (let v = 0; v < particle.length; v++) at.set(particle[v], v);
+    const neck = cloth.collar.neck.map((p) => at.get(p)!), m = cloth.localToMetres;
+    let full = 0, easing = 0;
+    for (let v = 0; v < pin.length; v++) {
+      if (particle[v] >= cloth.teeParticles || pin[v] <= 0) continue;
+      // a sleeve's hold: further from the neckline than the neckline's own hold reaches
+      let d = Infinity; for (const n of neck) d = Math.min(d, Math.hypot(pos[v * 3] - pos[n * 3], pos[v * 3 + 1] - pos[n * 3 + 1], pos[v * 3 + 2] - pos[n * 3 + 2]) * m);
+      if (d < cloth.pinOut) continue;
+      if (pin[v] === 1) full++; else easing++;
+    }
+    expect(full).toBeGreaterThan(20);
+    expect(easing).toBeGreaterThan(20);
+  });
+
+  it('lays the tee over her skin, never inside it, and binds each point to skin it stands over', () => {
+    // the modelled tee's underarms passed through her arms by up to 3.7 cm, and points in the hollow of her armpit were
+    // bound to her arm along a triangle's plane far past its edges: carried that far, they swung as she moved
+    const off = column('_OFFSET'), bary = column('_BODY_BARY'), particle = column('_PARTICLE');
+    const seen = new Set<number>(); let under = 0, past = 0;
+    for (let v = 0; v < particle.length; v++) {
+      const p = particle[v]; if (p >= cloth.teeParticles || seen.has(p)) continue; seen.add(p);
+      if (off[v] * cloth.localToMetres < -0.003) under++;
+      if (Math.min(bary[v * 3], bary[v * 3 + 1], bary[v * 3 + 2]) < -0.1) past++;
+    }
+    expect(under).toBeLessThanOrEqual(5);   // was 126
+    expect(past).toBeLessThan(200);         // was 908
   });
 
   it('carries every column the room reads, one value per drawn vertex', () => {
     const count = prim.getAttribute('POSITION')!.getCount();
-    for (const name of ['TEXCOORD_0', '_PARTICLE', '_BODY_TRI', '_BODY_BARY', '_OFFSET', '_PIN', '_ROW', '_ANCHOR', '_NAVEL']) {
+    for (const name of ['TEXCOORD_0', '_PARTICLE', '_BODY_TRI', '_BODY_BARY', '_OFFSET', '_PIN', '_ROW', '_ANCHOR', '_NAVEL', '_NECK']) {
       expect(prim.getAttribute(name), name).not.toBeNull();
       expect(prim.getAttribute(name)!.getCount(), name).toBe(count);
     }
@@ -152,10 +182,10 @@ describe('the cloth tee file', () => {
       expect(Number.isInteger(p) && p >= 0 && p < cloth.particles).toBe(true);
       seen[p] = 1;
       rows = Math.max(rows, row[v]);
-      // the tee's own particles are row 0; the rows below it are the particles past the tee
-      expect(row[v] === 0).toBe(p < cloth.teeParticles);
+      // the tee's own particles are row 0, and the collar's; the rows below the hem are the particles between them
+      expect(row[v] === 0).toBe(p < cloth.teeParticles || p >= cloth.collar.start);
       // every particle below the hem is laid from a particle of the tee's hem
-      if (p >= cloth.teeParticles) expect(anchor[v]).toBeLessThan(cloth.teeParticles);
+      if (p >= cloth.teeParticles && p < cloth.collar.start) expect(anchor[v]).toBeLessThan(cloth.teeParticles);
       expect(pin[v]).toBeGreaterThanOrEqual(0);
       expect(pin[v]).toBeLessThanOrEqual(1);
       const b = bary[v * 3] + bary[v * 3 + 1] + bary[v * 3 + 2];
@@ -163,10 +193,75 @@ describe('the cloth tee file', () => {
     }
     expect(seen.every((s) => s === 1)).toBe(true);
     expect(rows).toBe(cloth.rows);
-    // it hangs from her neckline: some particles are held, most are free
+    // it hangs from her neckline: some particles are held, most are free; the collar is held by the room, not the file
     const held = [...pin].filter((x) => x > 0).length;
     expect(held).toBeGreaterThan(0);
     expect(held).toBeLessThan(pin.length / 3);
+    for (let v = 0; v < particle.length; v++) if (particle[v] >= cloth.collar.start) expect(pin[v]).toBe(0);
+  });
+
+  it('carries a collar up her neck from the neckline to below her chin, wound as the tee is', () => {
+    // Joshua, 2026-10-24: "can the neckline also be adjustable like the length so you can do U/V shape and select how
+    // deep up to turtleneck?"
+    const c = cloth.collar, particle = column('_PARTICLE'), neck = column('_NECK'), pos = prim.getAttribute('POSITION')!.getArray() as Float32Array, I = prim.getIndices()!.getArray()!;
+    expect(c.columns).toBe(c.neck.length);
+    expect(c.rows).toBeGreaterThanOrEqual(8);
+    expect(c.rows).toBeLessThanOrEqual(24);
+    for (const p of c.neck) expect(p).toBeLessThan(cloth.teeParticles);
+    // its top 1-3 cm under her chin; its columns a few cm (at her back) to a hand's width (down her front)
+    expect(c.chinM - c.topM).toBeGreaterThan(0.01);
+    expect(c.chinM - c.topM).toBeLessThan(0.03);
+    expect(c.lengthM).toBeGreaterThan(0.05);
+    expect(c.lengthM).toBeLessThan(0.15);
+    // each collar particle's share of its height is its row over the rows, and only the collar has one
+    for (let v = 0; v < particle.length; v++) {
+      const p = particle[v], share = neck[v * 4 + 3];
+      if (p < c.start) expect(share).toBe(0);
+      else expect(share).toBeCloseTo(Math.floor((p - c.start) / c.columns + 1) / c.rows, 5);
+    }
+    // wound as the tee is: every edge two triangles share runs one way in one and the other way in the other, across
+    // the neckline too (the collar's normals face out from her as the tee's do)
+    const runs = new Map<string, number>();
+    for (let t = 0; t < I.length; t += 3) for (let e = 0; e < 3; e++) { const a = particle[I[t + e]], b = particle[I[t + (e + 1) % 3]]; runs.set(`${a},${b}`, (runs.get(`${a},${b}`) ?? 0) + 1); }
+    let across = 0;
+    for (const [k, n] of runs) { expect(n, k).toBe(1); const [a, b] = k.split(',').map(Number); if (c.neck.includes(a) && c.neck.includes(b) && runs.has(`${b},${a}`)) across++; }
+    expect(across).toBeGreaterThan(c.columns * 1.5); // the neckline's edges, each once each way
+    // its top row is a ring round her neck, level: within 2 mm of one height
+    const at = new Map<number, number>(); for (let v = 0; v < particle.length; v++) at.set(particle[v], v);
+    const top = Array.from({ length: c.columns }, (_, j) => pos[at.get(c.start + (c.rows - 1) * c.columns + j)! * 3 + 1] * cloth.localToMetres);
+    expect(Math.max(...top) - Math.min(...top)).toBeLessThan(0.004);
+  });
+
+  it('knows how far below the neckline each point of its front stands, so a U or a V can be cut to under her bust', () => {
+    // Joshua, 2026-10-24: "I would set the deepest/lowest point between the breasts and top belly"
+    const n = cloth.neckline, particle = column('_PARTICLE'), neck = column('_NECK');
+    expect(n.deepestM).toBeGreaterThan(0.08);
+    expect(n.deepestM).toBeLessThan(0.16);
+    expect(n.scoopM - n.foldM).toBeCloseTo(n.deepestM, 3);
+    expect(n.acrossM[0]).toBeLessThan(-0.06);
+    expect(n.acrossM[1]).toBeGreaterThan(0.06);
+    let front = 0, inU = 0, inV = 0;
+    const seen = new Set<number>();
+    for (let v = 0; v < particle.length; v++) {
+      const p = particle[v], q: [number, number, number, number] = [neck[v * 4], neck[v * 4 + 1], neck[v * 4 + 2], neck[v * 4 + 3]];
+      if (q[0] >= n.farM) { expect(q[1]).toBe(n.farM); expect(q[2]).toBe(0); continue; }
+      // only the tee's own front is ever cut: never the rows below its hem or the collar
+      expect(p).toBeLessThan(cloth.teeParticles);
+      expect(q[2]).toBeGreaterThanOrEqual(0); expect(q[2]).toBeLessThan(1);
+      // never above the neckline by more than its own smoothing, and as made nothing is cut
+      expect(q[0]).toBeGreaterThan(-0.007);
+      expect(clothNecklineBelow(q, 0, 'U')).toBe(q[0]);
+      if (seen.has(p)) continue;
+      seen.add(p); front++;
+      if (clothNecklineBelow(q, n.deepestM, 'U') < 0) inU++;
+      if (clothNecklineBelow(q, n.deepestM, 'V') < 0) inV++;
+    }
+    // a front of a few thousand points, of which a U at its deepest takes a couple of hundred and a V about half that
+    expect(front).toBeGreaterThan(500);
+    expect(inU).toBeGreaterThan(100);
+    expect(inU).toBeLessThan(400);
+    expect(inV).toBeGreaterThan(50);
+    expect(inV).toBeLessThan(inU);
   });
 });
 
@@ -233,6 +328,22 @@ describe('the cloth lines', () => {
     expect(teeLengthLine(0.3, true)).toContain('over her hips');
     expect(teeLengthLine(0.6, true)).toContain('upper thigh');
     expect(teeLengthLine(0.6, false)).toContain('with CLOTH SIM');
+  });
+
+  it('reads the neckline from a turtleneck through the scoop as made to a U or a V under her bust', () => {
+    expect(CLOTH_NECKLINE_DEFAULT).toBe(0);
+    expect(necklineLine(0, 'U', 12.6, true)).toBe('NECKLINE · as made (scoop)');
+    expect(necklineLine(-100, 'U', 12.6, true)).toBe('NECKLINE · turtleneck · 100% of the collar');
+    expect(necklineLine(-60, 'U', 12.6, true)).toContain('mock neck');
+    expect(necklineLine(-30, 'U', 12.6, true)).toContain('crew neck');
+    expect(necklineLine(-10, 'U', 12.6, true)).toContain('higher scoop');
+    expect(necklineLine(50, 'U', 12.6, true)).toBe('NECKLINE · U · 6.3 cm deeper');
+    expect(necklineLine(100, 'V', 12.6, true)).toBe('NECKLINE · V · 12.6 cm deeper · to under her bust');
+    expect(necklineLine(250, 'V', 12.6, true)).toBe(necklineLine(100, 'V', 12.6, true));
+    expect(necklineLine(Number.NaN, 'V', 12.6, true)).toBe(necklineLine(0, 'V', 12.6, true));
+    expect(necklineLine(40, 'U', 12.6, false)).toContain('with CLOTH SIM');
+    expect(neckShapeLine('V', 40)).toBe('NECK SHAPE · V');
+    expect(neckShapeLine('U', 0)).toBe('NECK SHAPE · U · for a deeper cut');
   });
 
   it('prints what the cloth costs, part by part, and the frame rate', () => {

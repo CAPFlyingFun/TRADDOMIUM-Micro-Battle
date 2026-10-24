@@ -46,6 +46,15 @@
  *   measures, so its corners are posed this update either way; what is added is a weighted sum of three corners and
  *   remembering two weights -- measured on the 6,000-particle bench below, about 0.1 ms on a 2.9 ms update, and not
  *   one vertex more posed.
+ * - A PARTICLE IS NOT A SLOT. A particle is one of the binding's `count` places on her, and everything this module
+ *   remembers belongs to it: its bound triangle, the triangle it was nearest last update, the spot of her it carries.
+ *   A SLOT is a place in the arrays the simulation runs on -- the `cloth` positions in and every field of
+ *   `SkinContacts` out -- and `setOrder` says which particle each slot is: slot i is particle `order[i]`. By default
+ *   slot i is particle i, over all of them, and nothing here is any different. The tee needs the difference because
+ *   its rows are switched in and out on their own -- below the hem by its length, above the neckline by its collar, a
+ *   front region cut away by a deeper neckline -- so the particles it runs are no longer the first n of the binding,
+ *   and the simulation runs them packed into a compact array. A particle whose slot changes between two updates keeps
+ *   its last contact, because that is the particle's and not the slot's.
  *
  * What it reads, so whoever calls it keeps these current first: her bones' and her mesh's world matrices (her model's
  * `updateMatrixWorld(true)` -- the bones are read through `matrixWorld`, so `skeleton.update()` is not needed), her
@@ -94,7 +103,8 @@ const FACE = 0, EDGE_01 = 1, EDGE_12 = 2, EDGE_20 = 3, CORNER_0 = 4, CORNER_1 = 
  * What a particle's last contact was, so it can be carried (`SkinContacts.carried`):
  * - FRESH: there was none (a new ClothSkin, or just after `initial`): `carried` is this update's own point, no motion.
  * - BOUND: its own bound place (binding.tri at binding.bary), where a blown-up particle was put: the pin's skin point.
- * - WALKED: triangle `last[i]` at the barycentric weights `contactBary` holds, in that triangle's own corner order.
+ * - WALKED: triangle `last[f]` at the barycentric weights `contactBary` holds, in that triangle's own corner order.
+ * All three are by PARTICLE (f), never by slot.
  */
 const CARRY_FRESH = 0, CARRY_BOUND = 1, CARRY_WALKED = 2;
 
@@ -133,11 +143,20 @@ export class ClothSkin {
   private readonly armTri: Uint8Array;
   private readonly trunkOnly: Uint8Array;
 
-  // --- per particle, carried between updates ---
+  // --- which particle each slot is (`setOrder`) ---
+  /**
+   * Slot i is binding particle `order[i]`, for i < `nSlots` (count long, the rest unused). Built once as identity over
+   * all `count` and overwritten in place by `setOrder`, so nothing is allocated for it after the constructor.
+   */
+  private readonly order: Uint32Array;
+  /** How many slots `order` maps: `count` by default. */
+  private nSlots: number;
+
+  // --- per particle (by binding index, never by slot), carried between updates ---
   /** The triangle each particle was nearest last update. */
   private readonly last: Uint32Array;
   /**
-   * Where on `last[i]` that nearest point was, barycentric in the triangle's own corner order (count × 3): with `last`,
+   * Where on `last[f]` that nearest point was, barycentric in the triangle's own corner order (count × 3): with `last`,
    * the spot of her skin the particle touched, which the next update poses again to say where it has gone. Starts as
    * the binding's own weights, but is read only under CARRY_WALKED: FRESH carries nothing, and BOUND's place is the
    * pin's skin point, already posed in the binding's own corner order (which need not be the bound triangle's).
@@ -310,6 +329,10 @@ export class ClothSkin {
     this.last = bound.slice();
     this.contactBary = binding.bary.slice(0, n * 3);
     this.contactKind = new Uint8Array(n).fill(CARRY_FRESH);
+    // every particle, each in its own slot
+    this.order = new Uint32Array(n);
+    for (let i = 0; i < n; i++) this.order[i] = i;
+    this.nSlots = n;
 
     // her arms, and the particles bound to her trunk, which keep off them
     this.armTri = new Uint8Array(nT); this.trunkOnly = new Uint8Array(n);
@@ -328,10 +351,59 @@ export class ClothSkin {
 
   /** How many body vertices the last update (or `initial`) posed (for the HUD). */
   get posed(): number { return this.posedCount; }
+
+  /** Whether binding particle p is bound to her ARM (its bound triangle is her arm's): for a probe. */
+  boundToArm(p: number): boolean { return this.armTri[this.bound[p]] === 1; }
+
+  /** How many slots `initial` and `update` serve: `count` until `setOrder` says otherwise. */
+  get slots(): number { return this.nSlots; }
+
+  /**
+   * Which binding particle each slot is, from now on: slot i is particle `order[i]`, for every i < `order.length`;
+   * null puts every particle back in its own slot (slot i is particle i, all `count` of them), which is also where a new
+   * ClothSkin starts. The order is copied, so the caller may reuse its array. Any subset of the particles in any order
+   * is allowed -- the tee's hem, collar and neckline switch rows in and out independently, so the active set is not a
+   * prefix of the binding. Throws RangeError, and keeps the order it had, when `order` is longer than `count` or names
+   * a particle that is not in the binding. Nothing a particle carries is touched: a particle that changes slot, or
+   * leaves and comes back, keeps its last contact.
+   */
+  setOrder(order: Uint32Array | null): void {
+    const n = this.count;
+    if (order === null) {
+      for (let i = 0; i < n; i++) this.order[i] = i;
+      this.nSlots = n;
+      return;
+    }
+    if (order.length > n) throw new RangeError(`ClothSkin.setOrder: ${order.length} slots for a binding of ${n} particles`);
+    for (let i = 0; i < order.length; i++) {
+      if (order[i] >= n) throw new RangeError(`ClothSkin.setOrder: slot ${i} names particle ${order[i]}, outside the binding's ${n}`);
+    }
+    this.order.set(order);
+    this.nSlots = order.length;
+  }
+
+  /**
+   * Each particle's rest offset for its PIN, in place of the binding's (BODY-LOCAL units like `ClothBinding.offset`, one
+   * a binding particle, by binding index and not by slot, at least `count` long; null for the binding's own). The room
+   * uses it to hold a freshly cut neckline edge to her skin -- a hug -- rather than where the made tee stood off her
+   * there. It moves the pin target only, in both the skinned and the unskinned reckoning: the contact's `standOff`
+   * keeps the binding's offset, because that is the clearance the made tee had there, and `restShape` (the pattern)
+   * keeps it too. Read at every `initial` and `update`, so it may be changed or cleared between them; throws
+   * RangeError when set shorter than `count`.
+   */
+  get pinOffset(): Float32Array | null { return this.pinOffsetArr; }
+  set pinOffset(offsets: Float32Array | null) {
+    if (offsets && offsets.length < this.count) throw new RangeError(`ClothSkin.pinOffset: ${offsets.length} offsets for a binding of ${this.count} particles`);
+    this.pinOffsetArr = offsets;
+  }
+  private pinOffsetArr: Float32Array | null = null;
+
   /**
    * Her bound places with her SHAPE but not her pose (count × 3, world-sized units about her own origin): each
    * particle's bound skin point on her morphed, unposed body plus its rest offset along that triangle's normal. Only the
    * lengths between them mean anything: it is the pattern of a tee cut for her as she is shaped now (`ClothSim.setRest`).
+   * It is the pattern of the WHOLE garment, so it is in binding order over all `count` particles whatever `setOrder`
+   * says, and it lays each one out by the binding's own offset, never `pinOffset`.
    */
   restShape(out: Float32Array): Float32Array {
     this.refresh();
@@ -378,55 +450,61 @@ export class ClothSkin {
   get worldScale(): number { return this.scale; }
 
   /**
-   * Where each particle starts, world (count×3): its bound skin point as she is posed NOW, plus its rest offset (scaled
-   * to world) along her normal there. Every particle's walk starts again from its bound triangle, and has no last
+   * Where each slot's particle starts, world (slots × 3, slot i at i × 3): its bound skin point as she is posed NOW,
+   * plus its rest offset (scaled to world; `pinOffset`'s where that is set) along her normal there -- its pin target.
+   * Every particle's walk starts again from its bound triangle, the ones no slot holds as well, and none has a last
    * contact to carry: the next update's `carried` is its own `point`.
    */
   initial(out: Float32Array): Float32Array {
     this.refresh();
-    const n = this.count;
-    for (let i = 0; i < n; i++) { this.pinOf(i, out, i * 3); this.last[i] = this.bound[i]; }
+    const n = this.nSlots, order = this.order;
+    for (let i = 0; i < n; i++) this.pinOf(order[i], out, i * 3);
+    this.last.set(this.bound);
     this.contactKind.fill(CARRY_FRESH);
     return out;
   }
 
   /**
-   * Her skin under the cloth now. For each particle (given its current world position in `cloth`): first, last
-   * update's contact -- the same triangle at the same barycentric place -- posed as she stands now, into `carried`;
-   * then, starting from that triangle (first time: its bound triangle), walk to the nearest triangle around it, and
-   * write the closest point, the triangle's outward unit normal (posed, world) and standOff = thickness. pinTarget is
-   * always from the particle's FIXED bound triangle and bary (never walked). Returns the milliseconds spent.
+   * Her skin under the cloth now. For each slot (given its current world position in `cloth`, slot i at i × 3), whose
+   * particle f is `order[i]`: first, f's last contact -- the same triangle at the same barycentric place -- posed as
+   * she stands now, into `carried`; then, starting from that triangle (first time: f's bound triangle), walk to the
+   * nearest triangle around it, and write the closest point, the triangle's outward unit normal (posed, world) and
+   * standOff = thickness (or f's own clearance, see `restClearance`). pinTarget is always from f's FIXED bound
+   * triangle and bary (never walked). What is the PARTICLE's -- its binding, bound triangle, last contact, the arm
+   * rule -- is read and kept by f; what is the SLOT's -- `cloth`, every field of `out`, `extraStandOff` -- by i. Serves
+   * min(`slots`, cloth.length / 3) slots and touches nothing in `out` past them. Returns the milliseconds spent.
    */
   update(cloth: Float32Array, out: SkinContacts): number {
     const t0 = performance.now();
     this.refresh();
-    const n = Math.min(this.count, Math.floor(cloth.length / 3));
-    const { tris, weld, rowStart, rowTri, adj, last, maxWalk, thickness } = this, clearance = this.restClearance, offset = this.binding.offset, scale = this.scale;
+    const n = Math.min(this.nSlots, Math.floor(cloth.length / 3));
+    const { tris, weld, rowStart, rowTri, adj, last, maxWalk, thickness, order } = this, clearance = this.restClearance, offset = this.binding.offset, scale = this.scale;
     const extra = this.extraStandOff && this.extraStandOff.length >= n ? this.extraStandOff : null;
     const P = out.point, Nn = out.normal, S = out.standOff, C = out.carried, bound = this.bound;
     const kind = this.contactKind, cb = this.contactBary, W = this.world;
     for (let i = 0; i < n; i++) {
-      const i3 = i * 3;
+      // i is the slot (cloth, out, extra); f is the particle (binding, bound, last, contactBary, contactKind, trunkOnly)
+      const i3 = i * 3, f = order[i], f3 = f * 3;
       const px = cloth[i3], py = cloth[i3 + 1], pz = cloth[i3 + 2];
       // the pin first: its bound triangle's normal is also the contact's whenever the particle has not walked off it
-      const pinOk = this.pinOf(i, out.pinTarget, i3);
+      const pinOk = this.pinOf(f, out.pinTarget, i3);
       const pnx = this.nx, pny = this.ny, pnz = this.nz;
-      const was = kind[i];
+      const was = kind[f];
       if (!(Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz))) {
         // a particle that has blown up gets its own bound place on her as its floor, and starts there next time; that
         // place is where its contact is now, so nothing of her is carried this time
         P[i3] = this.sx; P[i3 + 1] = this.sy; P[i3 + 2] = this.sz;
         C[i3] = this.sx; C[i3 + 1] = this.sy; C[i3 + 2] = this.sz;
         if (pinOk) { Nn[i3] = pnx; Nn[i3 + 1] = pny; Nn[i3 + 2] = pnz; } else keepNormal(Nn, i3);
-        S[i] = thickness; last[i] = bound[i]; kind[i] = CARRY_BOUND;
+        S[i] = thickness; last[f] = bound[f]; kind[f] = CARRY_BOUND;
         continue;
       }
-      let t = last[i];
-      const keepOff = this.trunkOnly[i] === 1, armTri = this.armTri;
+      let t = last[f];
+      const keepOff = this.trunkOnly[f] === 1, armTri = this.armTri;
       let d = this.closest(t, px, py, pz);
       // last update's contact, carried: `closest` has just posed t's corners, so this poses nothing more
       if (was === CARRY_WALKED) {
-        const a = tris[t * 3] * 3, b = tris[t * 3 + 1] * 3, c = tris[t * 3 + 2] * 3, u = cb[i3], v = cb[i3 + 1], w = cb[i3 + 2];
+        const a = tris[t * 3] * 3, b = tris[t * 3 + 1] * 3, c = tris[t * 3 + 2] * 3, u = cb[f3], v = cb[f3 + 1], w = cb[f3 + 2];
         C[i3] = u * W[a] + v * W[b] + w * W[c];
         C[i3 + 1] = u * W[a + 1] + v * W[b + 1] + w * W[c + 1];
         C[i3 + 2] = u * W[a + 2] + v * W[b + 2] + w * W[c + 2];
@@ -452,23 +530,24 @@ export class ClothSkin {
         if (bestT < 0) break;
         t = bestT; d = bestD; qx = bx; qy = by; qz = bz; reg = br; qv = bv; qw = bw;
       }
-      last[i] = t;
+      last[f] = t;
       P[i3] = qx; P[i3 + 1] = qy; P[i3 + 2] = qz;
       // this contact is the spot of her the next update carries; with no last one, nothing of her was carried
-      cb[i3] = 1 - qv - qw; cb[i3 + 1] = qv; cb[i3 + 2] = qw; kind[i] = CARRY_WALKED;
+      cb[f3] = 1 - qv - qw; cb[f3 + 1] = qv; cb[f3 + 2] = qw; kind[f] = CARRY_WALKED;
       if (was === CARRY_FRESH) { C[i3] = qx; C[i3 + 1] = qy; C[i3 + 2] = qz; }
       // t's corners were posed when it was measured, so its normal needs no posing
-      if (t === bound[i] && pinOk) { Nn[i3] = pnx; Nn[i3 + 1] = pny; Nn[i3 + 2] = pnz; }
+      if (t === bound[f] && pinOk) { Nn[i3] = pnx; Nn[i3 + 1] = pny; Nn[i3 + 2] = pnz; }
       else if (this.normalOf(t)) { Nn[i3] = this.nx; Nn[i3 + 1] = this.ny; Nn[i3 + 2] = this.nz; }
       else keepNormal(Nn, i3);
-      S[i] = (clearance > thickness ? Math.max(thickness, Math.min(clearance, offset[i] * scale)) : thickness) + (extra ? extra[i] : 0);
+      // the clearance is the made tee's own there (the binding's offset, never `pinOffset`)
+      S[i] = (clearance > thickness ? Math.max(thickness, Math.min(clearance, offset[f] * scale)) : thickness) + (extra ? extra[i] : 0);
     }
     return performance.now() - t0;
   }
 
   /**
-   * More stand-off for some particles this frame (world units, one a particle; null for none), along her normal under
-   * each. The cloth tee kept clear of her proud navel this way until alpha.120; on a navel's flank that normal leans away
+   * More stand-off for some slots this frame (world units, one a SLOT, as `cloth` and `SkinContacts` are; null for
+   * none), along her normal under each. The cloth tee kept clear of her proud navel this way until alpha.120; on a navel's flank that normal leans away
    * from it and the push shoved the cloth off her navel, so the tee now lays a dome along the navel's own axis in place
    * of her skin there instead (`clothShirt.ts`) and leaves this null.
    */
@@ -702,28 +781,31 @@ export class ClothSkin {
   }
 
   /**
-   * Particle i's pin into `out` at o: its three bound vertices, posed, blended by its bary (left in sx/sy/sz) plus its
-   * rest offset, scaled to world, along the bound triangle's normal (left in nx/ny/nz). False when that triangle has no
-   * area this frame, and then the pin is the bare skin point.
+   * Binding particle p's pin into `out` at o (its SLOT's place, slot × 3; p indexes everything else): its three bound
+   * vertices, posed, blended by its bary (left in sx/sy/sz) plus its rest offset -- `pinOffset[p]` where that is set,
+   * else the binding's -- scaled to world, along the bound triangle's normal (left in nx/ny/nz). False when that
+   * triangle has no area this frame, and then the pin is the bare skin point.
    */
-  private pinOf(i: number, out: Float32Array, o: number): boolean {
-    const bt = this.binding.tri, bb = this.binding.bary, i3 = i * 3, st = this.stamp, f = this.frame;
-    const a = bt[i3], b = bt[i3 + 1], c = bt[i3 + 2];
+  private pinOf(p: number, out: Float32Array, o: number): boolean {
+    const bt = this.binding.tri, bb = this.binding.bary, p3 = p * 3, st = this.stamp, f = this.frame;
+    const a = bt[p3], b = bt[p3 + 1], c = bt[p3 + 2];
     if (st[a] !== f) this.pose(a);
     if (st[b] !== f) this.pose(b);
     if (st[c] !== f) this.pose(c);
-    const W = this.world, u = bb[i3], v = bb[i3 + 1], w = bb[i3 + 2];
+    const W = this.world, u = bb[p3], v = bb[p3 + 1], w = bb[p3 + 2];
     const x = this.sx = u * W[a * 3] + v * W[b * 3] + w * W[c * 3];
     const y = this.sy = u * W[a * 3 + 1] + v * W[b * 3 + 1] + w * W[c * 3 + 1];
     const z = this.sz = u * W[a * 3 + 2] + v * W[b * 3 + 2] + w * W[c * 3 + 2];
-    const t = this.bound[i];
-    if (!this.exact[i]) {
+    const t = this.bound[p];
+    if (!this.exact[p]) {
       const T = this.tris;
       for (let k = 0; k < 3; k++) { const q = T[t * 3 + k]; if (st[q] !== f) this.pose(q); }
     }
     const ok = this.normalOf(t);
+    // the pin's rest offset, body-local: the room's own (`pinOffset`, a hug for a fresh neckline) or the made tee's
+    const rest = (this.pinOffsetArr ?? this.binding.offset)[p];
     if (!this.skinned || !this.skinI || !this.skinW) {
-      const off = ok ? this.binding.offset[i] * this.scale : 0;
+      const off = ok ? rest * this.scale : 0;
       out[o] = x + this.nx * off; out[o + 1] = y + this.ny * off; out[o + 2] = z + this.nz * off;
       return ok;
     }
@@ -740,7 +822,7 @@ export class ClothSkin {
     const ex = Bp[t1] - Bp[t0], ey = Bp[t1 + 1] - Bp[t0 + 1], ez = Bp[t1 + 2] - Bp[t0 + 2];
     const fx = Bp[t2] - Bp[t0], fy = Bp[t2 + 1] - Bp[t0 + 1], fz = Bp[t2 + 2] - Bp[t0 + 2];
     let nx = ey * fz - ez * fy, ny = ez * fx - ex * fz, nz = ex * fy - ey * fx;
-    const nl = Math.hypot(nx, ny, nz), k = nl > 0 ? this.restSign / nl : 0, off = this.binding.offset[i];
+    const nl = Math.hypot(nx, ny, nz), k = nl > 0 ? this.restSign / nl : 0, off = rest;
     nx *= k; ny *= k; nz *= k;
     const px = u * Bp[a3] + v * Bp[b3] + w * Bp[c3] + nx * off;
     const py = u * Bp[a3 + 1] + v * Bp[b3 + 1] + w * Bp[c3 + 1] + ny * off;

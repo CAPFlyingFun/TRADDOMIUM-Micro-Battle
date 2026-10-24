@@ -133,6 +133,8 @@ export const SARAH_LAB_ACTION = Object.freeze({
   /** the cloth laid on her again, and its dials back to their defaults */
   clothReset: 'sarahlab:cloth-reset',
   clothDefaults: 'sarahlab:cloth-defaults',
+  /** the cloth tee's neckline, cut deeper as a U or a V (Joshua, 2026-10-24) */
+  neckShape: 'sarahlab:neck-shape',
 });
 
 export const SARAH_LAB_FIELD = Object.freeze({
@@ -149,6 +151,8 @@ export const SARAH_LAB_FIELD = Object.freeze({
   randomRange: 'sarahlab-random-range-',
   /** the cloth tee's length (Joshua, 2026-10-23: "0% and make 100% at mid-thigh"), and what the cloth costs each frame */
   teeLength: 'sarahlab-tee-length',
+  /** the cloth tee's neckline (Joshua, 2026-10-24: "U/V shape and select how deep up to turtleneck") */
+  neckline: 'sarahlab-neckline',
   cloth: 'sarahlab-cloth',
   /** `${clothDial}<dial>`: one of the cloth's dials */
   clothDial: 'sarahlab-cloth-dial-',
@@ -160,6 +164,28 @@ export const CLOTH_SHIRT_PATH = 'models/sarah-v2-spandex-cloth.glb';
 export function teeLengthLine(length: number, cloth: boolean): string {
   const pct = Math.round(Math.max(0, Math.min(1, length)) * 100);
   return `TEE LENGTH · ${pct}% · ${pct === 0 ? 'as made' : pct >= 97 ? 'mid-thigh' : pct < 50 ? 'over her hips' : 'upper thigh'}${cloth ? '' : ' · with CLOTH SIM'}`;
+}
+/**
+ * THE CLOTH TEE'S NECKLINE (Joshua, 2026-10-24: "can the neckline also be adjustable like the length so you can do U/V
+ * shape and select how deep up to turtleneck? I would set the deepest/lowest point between the breasts and top belly"):
+ * one slider from -100 to 100. Below 0 the collar rises up her neck, a share of the rows the cloth file carries there
+ * (-100 all of them, a turtleneck); 0 is the scoop as made; above 0 the front is cut deeper, in the shape NECK SHAPE
+ * says, to `deepestCm` below the scoop at 100 (her breasts' lower crease).
+ */
+export const CLOTH_NECKLINE_DEFAULT = 0;
+export function necklineLine(value: number, shape: 'U' | 'V', deepestCm: number, cloth: boolean): string {
+  const v = Math.round(Math.max(-100, Math.min(100, Number.isFinite(value) ? value : 0)));
+  const off = cloth ? '' : ' · with CLOTH SIM';
+  if (v === 0) return `NECKLINE · as made (scoop)${off}`;
+  if (v < 0) {
+    const s = -v / 100;
+    return `NECKLINE · ${s >= 0.85 ? 'turtleneck' : s >= 0.5 ? 'mock neck' : s >= 0.25 ? 'crew neck' : 'higher scoop'} · ${-v}% of the collar${off}`;
+  }
+  return `NECKLINE · ${shape} · ${((v / 100) * deepestCm).toFixed(1)} cm deeper${v >= 97 ? ' · to under her bust' : ''}${off}`;
+}
+/** The NECK SHAPE button: which shape a neckline cut deeper than made takes. */
+export function neckShapeLine(shape: 'U' | 'V', value: number): string {
+  return `NECK SHAPE · ${shape === 'V' ? 'V' : 'U'}${value > 0 ? '' : ' · for a deeper cut'}`;
 }
 /**
  * THE CLOTH'S DIALS (Joshua, 2026-10-24: "test making the fabric more weighty (more gravity focused and less moving

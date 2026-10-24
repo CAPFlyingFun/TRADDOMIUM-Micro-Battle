@@ -16,6 +16,7 @@ import { History } from './strapData';
 import { loadingCard, LOADING_COVERED_VAR, type LoadingCard, type LoadingPlace } from './loadingCard';
 import { LoadMeter } from '../assets/loadMeter';
 import { ClothShirt } from './clothShirt';
+import { setClothNeckline } from './clothNeckline';
 import { setClothDetail } from './clothDetail';
 import { DetailSpots, SARAH_V2_DETAIL_POINTS, SARAH_V2_LITE_TEE_NAVEL, TeeNavel } from './detailSpots';
 import { SkinPose } from './skinPose';
@@ -61,7 +62,7 @@ import { dropIdleMorphs } from '../view/morphPrune';
 import { HumanRig, findSkinnedMesh } from '../view/HumanRig';
 import { UNITS_PER_METRE } from '../world/dem';
 import {
-  BELLY_MOTION, BELLY_TARGET, trimShown, BREAST_TARGETS, BUMP_MAX_PERCENT, GARMENTS, RECOVERED_SHIRTS, OUTFITS, outfitLine, modelLine, refineLine, refineWeight, nextOutfit, wornGarments, coverMask, bodyNeverHidden, uncoveredSkinIndices, UNDER_TOP_GARMENT, BELLY_REFINE_TARGET, SEAT_TARGET, seatCorrectiveWeight, SARAH_LAB_MODELS, SARAH_LAB_DEFAULT_MODEL, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID, shirtLengthLine, sarahModelPath, BODY_RANDOM_SPECS, CLOTH_SHIRT_PATH, teeLengthLine, clothLine, CLOTH_DIALS, CLOTH_TUNE_DEFAULT, CLOTH_TEE_LENGTH_DEFAULT, clothTuning, type ClothTune,
+  BELLY_MOTION, BELLY_TARGET, trimShown, BREAST_TARGETS, BUMP_MAX_PERCENT, GARMENTS, RECOVERED_SHIRTS, OUTFITS, outfitLine, modelLine, refineLine, refineWeight, nextOutfit, wornGarments, coverMask, bodyNeverHidden, uncoveredSkinIndices, UNDER_TOP_GARMENT, BELLY_REFINE_TARGET, SEAT_TARGET, seatCorrectiveWeight, SARAH_LAB_MODELS, SARAH_LAB_DEFAULT_MODEL, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID, shirtLengthLine, sarahModelPath, BODY_RANDOM_SPECS, CLOTH_SHIRT_PATH, teeLengthLine, necklineLine, neckShapeLine, CLOTH_NECKLINE_DEFAULT, clothLine, CLOTH_DIALS, CLOTH_TUNE_DEFAULT, CLOTH_TEE_LENGTH_DEFAULT, clothTuning, type ClothTune,
   bellyMotionWeights, bellyWeights, breastBobWeight, breastWeightsForShape, bodyShapeFieldWeights, SIZE_TILT_PRESETS_DEG, effectiveTiltDeg, stepSeated, bustVolume, BREAST_GROW_TARGET, settledSitFor, bellyUpperWeight, BELLY_UPPER_TARGET, navelWeights, NAVEL_FLAT_TARGET, navelFlatWeight, tPoseTurns, ARM_SIDES, armsLine, ARM_RAISE_TARGETS, armRaiseWeight, SEAT_V2_TARGET, seatCorrectiveV2Weight, fingerBend, THUMB_TO_PALM, bumpLine, fingersLine, restingBellySpring, statusLine, stepBellySpring, stepBreastSpring, walkBounceAccel,
   offeredOutfits, outfitThumbPath,
   type Garment, type SarahLabPose, recoveredPartsFor, recoveredPartPath, isShirtPart, shirtOfPart, type RecoveredPart, SARAH_DEFAULT_OUTFIT, RECOVERED_GARMENTS,
@@ -369,6 +370,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let fittedLaid = false;
   let cloth: ClothShirt | null = null, clothOn = false, clothLoading = false, clothRestart = false, clothRefit = false, teeLength = CLOTH_TEE_LENGTH_DEFAULT, frameMs = 1000 / 60;
   let teeLengthInput: HTMLInputElement | null = null;
+  /** NECKLINE (-100 a turtleneck, 0 as made, 100 the front cut to under her bust) and the deeper cut's shape (Joshua, 2026-10-24). */
+  let neckline = CLOTH_NECKLINE_DEFAULT, neckShape: 'U' | 'V' = 'U';
+  let necklineInput: HTMLInputElement | null = null;
   /** The cloth's dials (CLOTH_DIALS), kept across a reload of the cloth, and their sliders. */
   let clothTune: ClothTune = CLOTH_TUNE_DEFAULT;
   /** Her shape the cloth was last cut for. */
@@ -468,6 +472,10 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       const teeField = fields[SARAH_LAB_FIELD.teeLength];
       if (teeField) { teeField.textContent = teeLengthLine(teeLength, clothOn); teeField.style.display = lite ? '' : 'none'; }
       if (teeLengthInput) { teeLengthInput.style.display = lite ? '' : 'none'; teeLengthInput.disabled = !clothOn; }
+      const neckField = fields[SARAH_LAB_FIELD.neckline];
+      if (neckField) { neckField.textContent = necklineLine(neckline, neckShape, (cloth?.necklineDeepest ?? 0) * 100, clothOn); neckField.style.display = lite ? '' : 'none'; }
+      if (necklineInput) { necklineInput.style.display = lite ? '' : 'none'; necklineInput.disabled = !clothOn; }
+      if (buttons.neckShape) { buttons.neckShape.style.display = lite ? '' : 'none'; buttons.neckShape.textContent = neckShapeLine(neckShape, neckline); lit(buttons.neckShape, neckShape === 'V'); }
       if (fields.cloth) fields.cloth.style.display = clothOn && cloth ? '' : 'none';
       for (const d of CLOTH_DIALS) {
         const f = fields[`${SARAH_LAB_FIELD.clothDial}${d.key}`], i = clothDialInputs.get(d.key);
@@ -706,7 +714,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     if (clothLoading) return;
     clothOn = !clothOn;
     // her detail through the tee is the cloth's: the fitted tee shares its material, and shows its own
-    if (!clothOn && cloth) setClothDetail(cloth.mesh.material as THREE.Material, null);
+    if (!clothOn && cloth) { setClothDetail(cloth.mesh.material as THREE.Material, null); setClothNeckline(cloth.mesh.material as THREE.Material, null); }
     if (!clothOn || cloth) { if (cloth) { cloth.mesh.visible = clothOn; if (clothOn) clothRestart = true; } applyLook(); refresh(); fabric?.refreshTargets(); return; }
     const body = skinned.find((m) => !!m.geometry.getAttribute('_cloth_cover')), tee = partMeshes.get('spandex-lite')?.[0];
     if (!model || !body || !tee) { clothOn = false; refresh(); return; }
@@ -725,6 +733,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       cloth = new ClothShirt(source, body, tee.material, tuning.settings, tuning.standOff);
       release(scene);
       cloth.setLength(teeLength);
+      cloth.setNeckline(neckline / 100, neckShape);
       cloth.mesh.visible = clothOn;
       three.add(cloth.mesh);
       meter.ready();
@@ -736,7 +745,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   }
   /** The cloth goes with the light tee it is a copy of (its material is the tee's). */
   function dropCloth(): void {
-    if (cloth) setClothDetail(cloth.mesh.material as THREE.Material, null);
+    if (cloth) { setClothDetail(cloth.mesh.material as THREE.Material, null); setClothNeckline(cloth.mesh.material as THREE.Material, null); }
     cloth?.dispose(); cloth = null; clothOn = false; clothShapeKey = ''; clothFlattenLaid = 0;
   }
   /**
@@ -882,7 +891,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     const right = document.createElement('div');
     // every control is built into this, marked with its section, and moved to that section when the studio is laid out
     right.className = 'slab-panel';
-    const slider = (field: string, value: number, onInput: (v: number) => void, max = 100, tab = 'body') => {
+    const slider = (field: string, value: number, onInput: (v: number) => void, max = 100, tab = 'body', min = 0) => {
       const label = document.createElement('div');
       label.dataset.tab = tab;
       label.dataset.field = field;
@@ -890,7 +899,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       fields[field] = label;
       const input = document.createElement('input');
       input.type = 'range';
-      input.min = '0';
+      input.min = String(min);
       input.max = String(max);
       input.value = String(value);
       input.style.cssText = 'width:100%;accent-color:var(--sl-accent,#d4a853);height:28px';
@@ -928,6 +937,12 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     buttons.cloth.dataset.tab = 'outfit';
     right.appendChild(buttons.cloth);
     teeLengthInput = slider(SARAH_LAB_FIELD.teeLength, Math.round(CLOTH_TEE_LENGTH_DEFAULT * 100), (v) => { teeLength = v / 100; cloth?.setLength(teeLength); }, 100, 'outfit');
+    // ...and its neckline, up to a turtleneck or down in a U or a V (Joshua, 2026-10-24: "can the neckline also be adjustable
+    // like the length so you can do U/V shape and select how deep up to turtleneck?")
+    necklineInput = slider(SARAH_LAB_FIELD.neckline, CLOTH_NECKLINE_DEFAULT, (v) => { neckline = v; cloth?.setNeckline(neckline / 100, neckShape); }, 100, 'outfit', -100);
+    buttons.neckShape = btn(neckShapeLine(neckShape, neckline), SARAH_LAB_ACTION.neckShape, () => { neckShape = neckShape === 'U' ? 'V' : 'U'; cloth?.setNeckline(neckline / 100, neckShape); refresh(); });
+    buttons.neckShape.dataset.tab = 'outfit'; buttons.neckShape.style.padding = '7px 10px'; buttons.neckShape.style.fontSize = '11px';
+    right.appendChild(buttons.neckShape);
     // ...and its dials, live (Joshua, 2026-10-24: "Could potentially even add sliders to play with values in real time")
     for (const d of CLOTH_DIALS) clothDialInputs.set(d.key, slider(`${SARAH_LAB_FIELD.clothDial}${d.key}`, clothTune[d.key], (v) => { clothTune = { ...clothTune, [d.key]: v }; tuneCloth(); }, 100, 'outfit'));
     {
@@ -1592,6 +1607,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         const keep = clothKeep();
         cloth.keep = keep;
         setClothDetail(cloth.mesh.material as THREE.Material, cloth.detail(keep));
+        // and its neckline, cut by the material along a smooth line
+        setClothNeckline(cloth.mesh.material as THREE.Material, cloth.neckline());
         if (Math.abs(1 - keep.navel - clothFlattenLaid) > 1e-3) applyLook();
         if (fields.cloth) fields.cloth.textContent = clothLine(cloth.stats(), frameMs);
       }
@@ -1640,7 +1657,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         // second-long frames are no measure of her motion
         hold: (on: boolean) => { clock.paused = on; clock.step = 0; },
         // the camera at any angle about her (yaw radians, 0 her front; pitch radians, below 0 from beneath)
-        look: (yaw: number, pitch?: number) => { orbit.yaw = yaw; if (pitch !== undefined) orbit.pitch = pitch; turning = false; },
+        // (and how far off, world units, and at what height: for a close look at her neckline)
+        look: (yaw: number, pitch?: number, distance?: number, height?: number) => { orbit.yaw = yaw; if (pitch !== undefined) orbit.pitch = pitch; if (distance !== undefined) orbit.distance = distance; if (height !== undefined) orbit.target.y = height; turning = false; },
         animate: (secondsToRun: number, step = 1 / 60) => { const n = Math.max(0, Math.round(secondsToRun / step)); for (let k = 0; k < n; k++) advance(step); return cloth?.stats() ?? null; },
         strain: () => { if (!cloth) return null; const r = { ...cloth.strain(), jumps: cloth.jumps, moved: cloth.moved, worst: cloth.worstEdge }; cloth.moved = 0; return r; },
         // what shows through the tee now (her navel's height above the skin round it, the spots the shading draws)
@@ -1650,6 +1668,26 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         // BREAST or NAVEL DETAIL set (null: AUTO), as the outfit editor's sliders do
         keep: (which: 'nipple' | 'navel', value: number | null) => fabric?.setDetail(which, value),
         restart: () => { cloth?.restart(); },
+        // her skin's colour map swapped for another image (a URL), set up as the file's own was (sRGB, glTF's flipY): to
+        // compare an enhanced skin on her before any file changes (Joshua, 2026-10-24); null puts the file's back
+        skinMap: async (url: string | null) => {
+          const b = skinned.find((m) => !!m.geometry.getAttribute('_cloth_cover'));
+          const mat = b && (Array.isArray(b.material) ? b.material[0] : b.material) as THREE.MeshStandardMaterial;
+          if (!mat) return null;
+          const own = (mat.userData.ownMap ??= mat.map) as THREE.Texture | null;
+          if (!url) { mat.map = own; mat.needsUpdate = true; return null; }
+          const t = await new THREE.TextureLoader().loadAsync(url);
+          if (own) { t.flipY = own.flipY; t.colorSpace = own.colorSpace; t.wrapS = own.wrapS; t.wrapT = own.wrapT; t.channel = own.channel; t.anisotropy = own.anisotropy; t.offset.copy(own.offset); t.repeat.copy(own.repeat); t.rotation = own.rotation; t.center.copy(own.center); t.matrixAutoUpdate = own.matrixAutoUpdate; t.matrix.copy(own.matrix); }
+          mat.map = t; mat.needsUpdate = true;
+          const im = t.image as { width: number; height: number };
+          return [im.width, im.height];
+        },
+        // every mesh drawn now (name, material, vertices): to tell what is what on screen
+        drawn: () => { const out: string[] = []; three.traverseVisible((n) => { const m = n as THREE.Mesh; if (m.isMesh) out.push(`${m.name}|${(Array.isArray(m.material) ? m.material[0] : m.material).name}|${m.geometry.getAttribute('position')?.count}`); }); return out; },
+        // the cloth's triangles folded over into her, and the particles they hold
+        folds: (cos?: number) => cloth?.folds(cos) ?? null,
+        // NECKLINE (-100 a turtleneck, 0 as made, 100 to under her bust) and its shape, as the slider and button set them
+        neckline: (value: number, shape?: 'U' | 'V') => { neckline = value; if (shape) neckShape = shape; if (necklineInput) necklineInput.value = String(value); cloth?.setNeckline(neckline / 100, neckShape); cloth?.layOut(); refresh(); return cloth ? { particles: cloth.stats().particles, state: cloth.neckline(), deepestCm: cloth.necklineDeepest * 100 } : null; },
         navelGap: (radius?: number) => { const b = skinned.find((m) => !!m.geometry.getAttribute('_cloth_cover')); return cloth && b ? cloth.navelGap(b, radius) : null; },
         // where the drawn sheet's hem hangs, each side of her (world units): to read a lopsided hang as a number
         hem: () => {

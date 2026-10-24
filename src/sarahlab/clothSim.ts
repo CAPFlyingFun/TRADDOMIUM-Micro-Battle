@@ -21,7 +21,8 @@
  *      (inverse mass 1 - pin), so the cloth hangs from them rather than dragging them;
  *   5. the strain limit: no edge left longer than maxStretch × its (unscaled) rest length, the end nearer the pins
  *      holding (why is in the constructor);
- *   6. her skin: a particle closer to her than its standOff along her normal is pushed out to it, and loses some of its
+ *   6. her skin: a particle closer to her than its standOff along her normal is pushed out to it -- a fully pinned one
+ *      too, since her bones can carry its hold into her (it then takes no friction: it moves with its hold) -- and loses some of its
  *      slip over her: the tangential part of its motion this substep RELATIVE to her skin's own motion this substep, so
  *      cloth lying on skin that moves is carried with it. Two things about that, both learned the hard way:
  *      - "her skin's own motion" is the motion of the SPOT of skin the particle touched -- `after.carried -
@@ -376,7 +377,6 @@ export class ClothSim {
       // `friction` of it up and down her and `frictionAcross` of it across.
       const last = sub === substeps - 1;
       for (let i = 0, i3 = 0; i < n; i++, i3 += 3) {
-        if (w[i] <= 0) continue;
         let nx = g * bn[i3] + f * an[i3], ny = g * bn[i3 + 1] + f * an[i3 + 1], nz = g * bn[i3 + 2] + f * an[i3 + 2];
         const nl = nx * nx + ny * ny + nz * nz;
         if (nl < TINY) continue;
@@ -388,6 +388,11 @@ export class ClothSim {
         x[i3] -= nx * d; x[i3 + 1] -= ny * d; x[i3 + 2] -= nz * d;
         if (-d > deepest) deepest = -d;
         if (last) contacts++;
+        // A fully held particle is put out of her too, and only that: its hold is a place on her carried by her bones, and
+        // where her shoulder bulges as her arm comes forward that place sinks into her. Held there, the hem of a sleeve
+        // stayed inside her shoulder and her skin showed through it in a ragged line whenever she sat (Joshua,
+        // 2026-10-24: "these don't have a straight shoulder edge like all the rest"). It slides with its hold, not over her.
+        if (w[i] <= 0) continue;
         if (friction > 0 || across > 0) {
           // Her skin's motion this substep is that of the spot the particle touched: (after.carried - before.point) /
           // substeps (never after.point - before.point, which has the particle's own slide in it: see the header). The

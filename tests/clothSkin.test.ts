@@ -6,12 +6,14 @@
  * posed skin with an outward unit normal; a bone and a morph carry the contacts; a particle moved several triangles away,
  * across a seam, is walked to the true nearest point (checked by brute force); its pin stays on its own triangle; last
  * frame's contact is carried with her when she moves (`carried`, what the cloth's friction holds to); and 6,000
- * particles on a 20,000-triangle body are timed.
+ * particles on a 20,000-triangle body are timed. Then SLOTS (`setOrder`): particles served in another order, or only
+ * some of them, give slot for slot exactly what each particle gives in its own slot, and a particle keeps its carried
+ * contact when its slot changes or it leaves and comes back; and a pin held by the room's own offset (`pinOffset`).
  */
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
 import { ClothSkin } from '../src/sarahlab/clothSkin';
-import { createContacts, type ClothBinding } from '../src/sarahlab/clothTypes';
+import { createContacts, type ClothBinding, type SkinContacts } from '../src/sarahlab/clothTypes';
 
 interface Body { root: THREE.Group; mesh: THREE.SkinnedMesh; upper: THREE.Bone; geometry: THREE.BufferGeometry }
 
@@ -397,5 +399,233 @@ describe('ClothSkin: her posed skin under every cloth particle', () => {
     console.log(`ClothSkin: built over ${g.getAttribute('position').count} vertices / ${tris.length / 3} triangles in ${ms.toFixed(0)} ms`);
     expect(ms).toBeLessThan(10000);
     expect(skin.initial(new Float32Array(3)).every(Number.isFinite)).toBe(true);
+  });
+});
+
+/** A sphere body and `count` particles bound at seeded random places on it, each a little off her. */
+function particlesOn(seed: number, count = 40) {
+  const g = new THREE.SphereGeometry(1, 24, 16), b = body(g), tris = triangles(g), nT = tris.length / 3;
+  let s = seed;
+  const rand = () => (s = (s * 16807) % 2147483647) / 2147483647;
+  const picks: { t: number; bary: [number, number, number]; offset: number }[] = [];
+  for (let i = 0; i < count; i++) { const u = rand(), v = rand() * (1 - u); picks.push({ t: Math.floor(rand() * nT), bary: [u, v, 1 - u - v], offset: 0.002 + rand() * 0.003 }); }
+  return { b, tris, picks, binding: bindingOf(tris, picks), rand };
+}
+
+/** The cloth slid over her by up to `by` each way, and kept on the outside of her (as the carried test above does). */
+function slideOver(b: Body, cloth: Float32Array, by: number, rand: () => number): void {
+  const centre = toWorld(b, 0, 0, 0), p = new THREE.Vector3();
+  for (let i = 0; i < cloth.length / 3; i++) {
+    p.set(cloth[i * 3] + (rand() - 0.5) * by, cloth[i * 3 + 1] + (rand() - 0.5) * by, cloth[i * 3 + 2] + (rand() - 0.5) * by);
+    p.sub(centre).setLength(100.3).add(centre);
+    cloth.set([p.x, p.y, p.z], i * 3);
+  }
+}
+
+/** A by-particle array laid out by slot: slot s holds particle order[s]'s `width` numbers. */
+function bySlot(src: Float32Array, order: ArrayLike<number>, width: number): Float32Array {
+  const out = new Float32Array(order.length * width);
+  for (let s = 0; s < order.length; s++) for (let k = 0; k < width; k++) out[s * width + k] = src[order[s] * width + k];
+  return out;
+}
+
+/** 0..n-1 in a seeded random order. */
+function shuffled(n: number, rand: () => number): Uint32Array {
+  const o = new Uint32Array(n);
+  for (let i = 0; i < n; i++) o[i] = i;
+  for (let i = n - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); const t = o[i]; o[i] = o[j]; o[j] = t; }
+  return o;
+}
+
+const FIELDS = [['point', 3], ['normal', 3], ['standOff', 1], ['pinTarget', 3], ['carried', 3]] as const;
+
+/** Every field of `got`, slot for slot over `order`, is exactly what `ref` (every particle in its own slot) says. */
+function expectSlots(got: SkinContacts, ref: SkinContacts, order: ArrayLike<number>): void {
+  for (const [k, w] of FIELDS) expect(got[k].subarray(0, order.length * w), k).toEqual(bySlot(ref[k], order, w));
+}
+
+const SENTINEL = 12345;
+function sentinelContacts(n: number): SkinContacts {
+  const c = createContacts(n);
+  for (const [k] of FIELDS) c[k].fill(SENTINEL);
+  return c;
+}
+
+describe('ClothSkin: slots and particles (setOrder), and the pin\'s own offset (pinOffset)', () => {
+  it('serves a permuted order slot for slot exactly as every particle in its own slot is served, at the start and over two updates', () => {
+    const { b, binding, rand } = particlesOn(5), n = binding.count;
+    const ref = new ClothSkin(b.mesh, binding), perm = new ClothSkin(b.mesh, binding), order = shuffled(n, rand);
+    perm.setOrder(order);
+    expect(perm.slots).toBe(n);
+    expect(ref.slots).toBe(n);
+
+    const start = ref.initial(new Float32Array(n * 3));
+    expect(perm.initial(new Float32Array(n * 3))).toEqual(bySlot(start, order, 3));
+    // the pattern is the whole garment's, in binding order, whatever the slots
+    expect(perm.restShape(new Float32Array(n * 3))).toEqual(ref.restShape(new Float32Array(n * 3)));
+
+    const cloth = start.slice(), rc = createContacts(n), pc = createContacts(n);
+    slideOver(b, cloth, 3, rand);
+    ref.update(cloth, rc); perm.update(bySlot(cloth, order, 3), pc);
+    expectSlots(pc, rc, order);
+
+    // she moves -- a bone bends, the morph comes half on -- and the cloth slides on over her: now `carried` is last
+    // update's contact carried with her, which is the particle's, wherever its slot is
+    b.upper.rotation.set(0.3, 0, 0.2); b.mesh.morphTargetInfluences![0] = 0.5; b.root.updateMatrixWorld(true);
+    slideOver(b, cloth, 12, rand);
+    ref.update(cloth, rc); perm.update(bySlot(cloth, order, 3), pc);
+    expectSlots(pc, rc, order);
+    let apart = 0;
+    for (let s = 0; s < n; s++) if (at(pc.carried, s).distanceTo(at(pc.point, s)) > 1) apart++;
+    expect(apart).toBeGreaterThan(n / 2);
+  });
+
+  it('serves only the particles a partial order names (a subset, not a prefix), from a cloth array that many slots long, and writes nothing past them', () => {
+    const { b, binding, rand } = particlesOn(9), n = binding.count;
+    const sub = Uint32Array.from([31, 4, 17, 9, 22, 0, 38]), m = sub.length;
+    const ref = new ClothSkin(b.mesh, binding), part = new ClothSkin(b.mesh, binding);
+    part.setOrder(sub);
+    expect(part.slots).toBe(m);
+
+    const start = ref.initial(new Float32Array(n * 3)), partStart = part.initial(new Float32Array(n * 3).fill(SENTINEL));
+    expect(partStart.subarray(0, m * 3)).toEqual(bySlot(start, sub, 3));
+    expect(partStart.subarray(m * 3).every(x => x === SENTINEL)).toBe(true);
+
+    const cloth = start.slice(), rc = createContacts(n), pc = sentinelContacts(n);
+    const untouchedPast = (c: SkinContacts, slots: number) => { for (const [k, w] of FIELDS) expect(c[k].subarray(slots * w).every(x => x === SENTINEL), k).toBe(true); };
+    slideOver(b, cloth, 3, rand);
+    ref.update(cloth, rc); part.update(bySlot(cloth, sub, 3), pc);
+    expectSlots(pc, rc, sub); untouchedPast(pc, m);
+    b.upper.rotation.set(-0.25, 0, 0.1); b.root.updateMatrixWorld(true);
+    slideOver(b, cloth, 12, rand);
+    ref.update(cloth, rc); part.update(bySlot(cloth, sub, 3), pc);
+    expectSlots(pc, rc, sub); untouchedPast(pc, m);
+
+    // a cloth array shorter than the order serves only the slots it has
+    const few = sentinelContacts(n);
+    part.update(bySlot(cloth, sub, 3).subarray(0, 9), few);
+    untouchedPast(few, 3);
+    expect(few.point.subarray(0, 9).every(x => x !== SENTINEL)).toBe(true);
+  });
+
+  it('carries a particle\'s last contact with it when its slot changes between updates, and when it leaves the slots and comes back', () => {
+    const { b, binding, rand } = particlesOn(13), n = binding.count;
+    // ref: every particle in its own slot throughout. moved: reordered for the second update. gap: only some served in
+    // the second update. skip: sits the second update out altogether.
+    const [ref, moved, gap, skip] = [0, 1, 2, 3].map(() => new ClothSkin(b.mesh, binding));
+    const cloth = ref.initial(new Float32Array(n * 3));
+    for (const s of [moved, gap, skip]) s.initial(new Float32Array(n * 3));
+    const [rc, mc, gc, sc] = [0, 1, 2, 3].map(() => createContacts(n));
+    const moveHer = () => { b.root.rotation.y += 0.2; b.upper.rotation.x += 0.15; b.root.updateMatrixWorld(true); slideOver(b, cloth, 12, rand); };
+
+    slideOver(b, cloth, 3, rand);
+    ref.update(cloth, rc); moved.update(cloth, mc); gap.update(cloth, gc); skip.update(cloth, sc);
+    const own = Array.from({ length: n }, (_, i) => i);
+    for (const c of [mc, gc, sc]) expectSlots(c, rc, own); // all four agree, every particle in its own slot
+
+    moveHer();
+    const order = shuffled(n, rand), some = Uint32Array.from(shuffled(n, rand).subarray(0, n / 2));
+    moved.setOrder(order); gap.setOrder(some);
+    ref.update(cloth, rc); moved.update(bySlot(cloth, order, 3), mc); gap.update(bySlot(cloth, some, 3), gc);
+    // the particle's last contact followed it to its new slot: carried as she moved, not this update's point
+    expectSlots(mc, rc, order);
+    let apart = 0;
+    for (let s = 0; s < n; s++) if (at(mc.carried, s).distanceTo(at(mc.point, s)) > 1) apart++;
+    expect(apart).toBeGreaterThan(n / 2);
+
+    // everyone back in their own slots: a particle `gap` served last time is where `ref` has it; one it left out still
+    // carries its contact from the first update, exactly as `skip`'s every particle does
+    moveHer();
+    gap.setOrder(null);
+    ref.update(cloth, rc); gap.update(cloth, gc); skip.update(cloth, sc);
+    const served = new Set(some);
+    let left = 0;
+    for (let i = 0; i < n; i++) {
+      const want = served.has(i) ? rc : sc;
+      if (!served.has(i)) left++;
+      for (const [k, w] of FIELDS) expect(gc[k].subarray(i * w, i * w + w), `${k} of particle ${i}`).toEqual(want[k].subarray(i * w, i * w + w));
+    }
+    expect(left).toBe(n / 2);
+    // and the two histories really did differ: what a left-out particle carries is not what `ref`'s carries
+    let differ = 0;
+    for (let i = 0; i < n; i++) if (!served.has(i) && at(sc.carried, i).distanceTo(at(rc.carried, i)) > 1e-3) differ++;
+    expect(differ).toBeGreaterThan(n / 4);
+  });
+
+  it('holds a pin by pinOffset in place of the binding\'s offset, along her normal at its bound triangle, skinned or not, and leaves standOff and the contact alone', () => {
+    for (const skinned of [true, false]) {
+      const g = new THREE.SphereGeometry(1, 24, 16), tris = triangles(g), nT = tris.length / 3;
+      let mesh: THREE.SkinnedMesh;
+      if (skinned) mesh = body(g).mesh;
+      else {
+        // no skin attributes and no skeleton: the unskinned reckoning, under the same room
+        mesh = new THREE.SkinnedMesh(g, new THREE.MeshBasicMaterial());
+        const root = new THREE.Group();
+        root.position.set(12, -7, 3); root.rotation.set(0.3, 0.7, -0.2); root.scale.setScalar(100);
+        root.add(mesh); root.updateMatrixWorld(true);
+      }
+      const world = skinned ? posedWorld(mesh) : Array.from({ length: g.getAttribute('position').count }, (_, v) => new THREE.Vector3().fromBufferAttribute(g.getAttribute('position'), v).applyMatrix4(mesh.matrixWorld));
+      const pins = [0, 0.001, 0.006, -0.001, 0.003, 0.01], picks = pins.map((_, i) => ({ t: (i * 53 + 17) % nT, bary: [0.2, 0.3, 0.5] as [number, number, number], offset: 0.003 }));
+      const binding = bindingOf(tris, picks), n = binding.count;
+      // a rest clearance above the thickness, so standOff is the offset's own (0.3) and would show pinOffset's
+      const skin = new ClothSkin(mesh, binding, { thickness: 0.15, restClearance: 1 });
+      const plain = skin.initial(new Float32Array(n * 3)), cloth = plain.slice(), c0 = createContacts(n);
+      skin.update(cloth, c0);
+      const pattern = skin.restShape(new Float32Array(n * 3));
+
+      expect(() => { skin.pinOffset = new Float32Array(n - 1); }).toThrow(RangeError);
+      expect(skin.pinOffset).toBeNull();
+      skin.pinOffset = Float32Array.from(pins);
+      const hug = skin.initial(new Float32Array(n * 3)), c1 = createContacts(n);
+      skin.update(cloth, c1);
+      const scale = skin.worldScale;
+      expect(scale).toBeCloseTo(100, 4);
+      for (let i = 0; i < n; i++) {
+        const along = faceNormal(world, tris, picks[i].t).multiplyScalar((pins[i] - binding.offset[i]) * scale);
+        expect(at(hug, i).distanceTo(at(plain, i).add(along)), `${skinned ? 'skinned' : 'unskinned'} start ${i}`).toBeLessThan(1e-4);
+        expect(at(c1.pinTarget, i).distanceTo(at(c0.pinTarget, i).add(along)), `${skinned ? 'skinned' : 'unskinned'} pin ${i}`).toBeLessThan(1e-4);
+        expect(c0.standOff[i]).toBeCloseTo(0.3, 5);
+      }
+      // the contact and its clearance are the made tee's, and so is the pattern
+      expect(c1.standOff).toEqual(c0.standOff);
+      expect(c1.point).toEqual(c0.point);
+      expect(c1.normal).toEqual(c0.normal);
+      expect(skin.restShape(new Float32Array(n * 3))).toEqual(pattern);
+
+      skin.pinOffset = null;
+      expect(skin.initial(new Float32Array(n * 3))).toEqual(plain);
+      const c2 = createContacts(n);
+      skin.update(cloth, c2);
+      expect(c2.pinTarget).toEqual(c0.pinTarget);
+    }
+  });
+
+  it('refuses an order naming a particle outside the binding or longer than it, keeping the order it had; null puts every particle back in its own slot', () => {
+    const { b, binding, rand } = particlesOn(21), n = binding.count;
+    const skin = new ClothSkin(b.mesh, binding), ref = new ClothSkin(b.mesh, binding);
+    const start = ref.initial(new Float32Array(n * 3)), keep = Uint32Array.from([5, 3, 1]);
+    skin.setOrder(keep);
+    expect(() => skin.setOrder(Uint32Array.from([0, n]))).toThrow(RangeError);
+    expect(() => skin.setOrder(new Uint32Array(n + 1))).toThrow(RangeError);
+    expect(skin.slots).toBe(3);
+    expect(skin.initial(new Float32Array(9))).toEqual(bySlot(start, [5, 3, 1], 3));
+    // the order is copied: the caller's array is its own again
+    keep[0] = 7;
+    expect(skin.initial(new Float32Array(9))).toEqual(bySlot(start, [5, 3, 1], 3));
+
+    skin.setOrder(null);
+    expect(skin.slots).toBe(n);
+    expect(skin.initial(new Float32Array(n * 3))).toEqual(start);
+    const cloth = start.slice(), rc = createContacts(n), sc = createContacts(n);
+    slideOver(b, cloth, 3, rand);
+    ref.update(cloth, rc); skin.update(cloth, sc);
+    for (const [k] of FIELDS) expect(sc[k], k).toEqual(rc[k]);
+
+    // no slots at all is an order too: nothing is served and nothing is written
+    skin.setOrder(new Uint32Array(0));
+    expect(skin.slots).toBe(0);
+    const none = sentinelContacts(n);
+    skin.update(cloth, none);
+    for (const [k] of FIELDS) expect(none[k].every(x => x === SENTINEL), k).toBe(true);
   });
 });

@@ -204,6 +204,21 @@ describe('the cloth sim', () => {
     expect(allFinite(sim.positions)).toBe(true);
   });
 
+  it('a fully held particle whose hold has sunk into her is put back out on her, and slides with its hold, not over her', () => {
+    // Joshua, 2026-10-24: "these don't have a straight shoulder edge like all the rest" -- a sleeve's hem held fully to a
+    // place her bones carry into her shoulder stayed inside her, and her skin showed through it
+    const top = sheet(4, 4, (i, j) => [i, j, 0], () => 1);
+    const sim = new ClothSim(top, { gravity: [0, 0, -981], friction: 1, frictionAcross: 1 });
+    const skin = planeContacts(top.count, [0, 0, 0], [0, 0, 1], 0.5);
+    for (let i = 0; i < top.count; i++) { skin.pinTarget[i * 3] = top.rest[i * 3] + 0.3; skin.pinTarget[i * 3 + 1] = top.rest[i * 3 + 1]; skin.pinTarget[i * 3 + 2] = -2; }
+    sim.step(FRAME, skin, skin);
+    for (let i = 0; i < top.count; i++) {
+      // out on her skin at its stand-off, where its hold is across her (friction does not hold a held particle back)
+      expect(sim.positions[i * 3 + 2]).toBeCloseTo(0.5, 5);
+      expect(sim.positions[i * 3]).toBeCloseTo(top.rest[i * 3] + 0.3, 5);
+    }
+  });
+
   it('skin that moves carries the sheet lying on it', () => {
     const top = sheet(12, 12, (i, j) => [i, j, 0.5]);
     const sim = new ClothSim(top, { gravity: [0, 0, -981] });
