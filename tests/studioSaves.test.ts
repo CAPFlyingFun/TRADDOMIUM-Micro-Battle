@@ -7,7 +7,8 @@
 import { describe, expect, it } from 'vitest';
 import { EMPTY_BOOK, THUMB_MAX_CHARS, exportBook, importBook, readThumb, saveInto, saveOutfit, sameClothes, type SavedBody, type SavedClothes } from '../src/sarahlab/characterSaves';
 import { NO_RULES } from '../src/actor/bodyRandom';
-import { OUTFITS, nextOutfit, offeredOutfits, outfitThumbPath, RECOVERED_SHIRTS, type Garment } from '../src/sarahlab/sarahLabTool';
+import { OUTFITS, PAINTED_DEFAULT_OUTFIT, SARAH_LEGGINGS, SARAH_RED, nextOutfit, offeredOutfits, outfitThumbPath, recoveredPartsFor, wornGarments, RECOVERED_SHIRTS, type Garment } from '../src/sarahlab/sarahLabTool';
+import { COVERAGE_TEMPLATES } from '../src/sarahlab/paintTemplates';
 import { sanitizeBuilt } from '../src/sarahlab/strapData';
 
 const body: SavedBody = { model: 'v2-body', bump: 100, shape: '', refine: false, random: NO_RULES };
@@ -81,5 +82,20 @@ describe('the WEAR cards', () => {
   it('find each picture at a stable, URL-safe path', () => {
     expect(outfitThumbPath('painted tee + leggings')).toBe('sarahlab/outfits/painted-tee-leggings.jpg');
     expect(outfitThumbPath('painted U-neck tee + leggings')).toBe('sarahlab/outfits/painted-u-neck-tee-leggings.jpg');
+  });
+});
+
+describe('Sarah\'s own outfit (Joshua, 2026-10-23, from his reference picture)', () => {
+  it('is what she opens in: a red tee over charcoal leggings, painted, nothing to download', () => {
+    const o = OUTFITS[PAINTED_DEFAULT_OUTFIT];
+    expect(o.garments).toEqual([]);
+    expect(o.paint).toEqual([
+      { template: 'leggingsFull', fabric: { family: 'athletic', colour: 0, tint: SARAH_LEGGINGS } },
+      { template: 'teeShort', fabric: { family: 'jersey', colour: 0, tint: SARAH_RED } },
+    ]);
+    for (const layer of o.paint!) expect(COVERAGE_TEMPLATES.some((t) => t.id === layer.template)).toBe(true);
+    const v2: Garment[] = ['leggings', 'leggingsLow', 'bikini', 'swimsuit', ...RECOVERED_SHIRTS];
+    expect(recoveredPartsFor(wornGarments(PAINTED_DEFAULT_OUTFIT, v2))).toEqual([]);
+    expect(offeredOutfits(v2)).toContain(PAINTED_DEFAULT_OUTFIT);
   });
 });

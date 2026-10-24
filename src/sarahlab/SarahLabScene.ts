@@ -983,7 +983,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       body: (): SavedBody => ({ model: SARAH_LAB_MODELS[modelIndex].id, bump, shape: serializeShape(body), refine, random: randomRules }),
       characterName: () => characters?.name() ?? '',
       builtins: () => OUTFITS.filter((o) => (o.paint ? recovered : o.name !== 'none')).map((o) => o.name),
-      wearable: () => offeredOutfits(garments).map((i) => ({ name: OUTFITS[i].name, thumb: assetUrl(outfitThumbPath(OUTFITS[i].name)) })),
+      // her own outfit first, then the rest in the room's order
+      wearable: () => offeredOutfits(garments).sort((a, b) => Number(b === PAINTED_DEFAULT_OUTFIT) - Number(a === PAINTED_DEFAULT_OUTFIT)).map((i) => ({ name: OUTFITS[i].name, thumb: assetUrl(outfitThumbPath(OUTFITS[i].name)) })),
       thumbnail: () => thumbnail(),
       wearBuiltin: (name) => {
         const index = OUTFITS.findIndex((o) => o.name === name);

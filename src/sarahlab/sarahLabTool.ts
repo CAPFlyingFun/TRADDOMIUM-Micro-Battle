@@ -235,7 +235,10 @@ export function uncoveredSkinIndices(indices: ArrayLike<number>, coverage: Array
  * flare, jackets, shorts) wait for a real second mesh.
  */
 /** One layer of a painted outfit: a coverage template (`paintTemplates.ts`) in a fabric swatch (`fabricLibrary.ts`). */
-export interface PaintedLayer { readonly template: string; readonly fabric: { readonly family: FabricFamilyId; readonly colour: number } }
+/** Sarah's red and her leggings' charcoal, from Joshua's reference picture of her (2026-10-23). */
+export const SARAH_RED = '#be0f2a', SARAH_LEGGINGS = '#3a3b52';
+/** One layer of a built-in outfit: a template and its fabric, a pack colour or a custom one (`tint`, fabricTint.ts). */
+export interface PaintedLayer { readonly template: string; readonly fabric: { readonly family: FabricFamilyId; readonly colour: number; readonly tint?: string } }
 export const OUTFITS: readonly { readonly name: string; readonly garments: readonly Garment[]; readonly paint?: readonly PaintedLayer[] }[] = [
   { name: 'tee + leggings', garments: ['shirtAthletic', 'leggings'] },
   { name: 'top + low leggings', garments: ['shirtAthletic', 'leggingsLow'] },
@@ -247,6 +250,11 @@ export const OUTFITS: readonly { readonly name: string; readonly garments: reado
   // PAINTED OUTFITS (Joshua, 2026-10-21: "try body paint for all the clothing"): the same white tee over grey
   // leggings, in both rises, as paint on her skin -- no garment file to download, no morphs of its own (it follows
   // every belly and breast shape for free). Layers paint bottom first. Only on the approved v2 body.
+  // SARAH'S OUTFIT (Joshua, 2026-10-23, from his reference picture: "match and make the default outfit for Sarah, this
+  // one"): a red tee over charcoal leggings, both custom colours measured off the picture. The picture's neckline is a
+  // round scoop; a scoop painted on her today draws a wavy edge across the large triangles of her upper chest, so she
+  // wears the crew, whose edge is clean, until a scoop can be drawn as cleanly
+  { name: 'Sarah · red tee + charcoal leggings', garments: [], paint: [{ template: 'leggingsFull', fabric: { family: 'athletic', colour: 0, tint: SARAH_LEGGINGS } }, { template: 'teeShort', fabric: { family: 'jersey', colour: 0, tint: SARAH_RED } }] },
   { name: 'painted tee + leggings', garments: [], paint: [{ template: 'leggingsFull', fabric: { family: 'athletic', colour: 1 } }, { template: 'teeShort', fabric: { family: 'jersey', colour: 0 } }] },
   { name: 'painted tee + low leggings', garments: [], paint: [{ template: 'leggingsUnder', fabric: { family: 'athletic', colour: 1 } }, { template: 'teeShort', fabric: { family: 'jersey', colour: 0 } }] },
   { name: 'painted U-neck tee + leggings', garments: [], paint: [{ template: 'leggingsFull', fabric: { family: 'athletic', colour: 1 } }, { template: 'teeU', fabric: { family: 'jersey', colour: 0 } }] },
@@ -254,8 +262,8 @@ export const OUTFITS: readonly { readonly name: string; readonly garments: reado
   { name: 'painted swimsuit', garments: [], paint: [{ template: 'swimsuit', fabric: { family: 'athletic', colour: 14 } }] },
   { name: 'painted leotard', garments: [], paint: [{ template: 'bodysuit', fabric: { family: 'athletic', colour: 15 } }] },
 ];
-/** The outfit the room opens in on the approved v2 body: the painted tee and leggings, nothing to download. */
-export const PAINTED_DEFAULT_OUTFIT = OUTFITS.findIndex((o) => o.name === 'painted tee + leggings');
+/** The outfit the room opens in on the approved v2 body: Sarah's own red tee and charcoal leggings, painted, nothing to download. */
+export const PAINTED_DEFAULT_OUTFIT = OUTFITS.findIndex((o) => o.name === 'Sarah · red tee + charcoal leggings');
 /** Painted outfits are masks on the approved v2 body's own vertices: offered only where that body is (its recovered shirts are listed). */
 export const paintedOutfitsAvailable = (available: readonly Garment[]): boolean => available.includes('shirtRelaxedHigh');
 /**

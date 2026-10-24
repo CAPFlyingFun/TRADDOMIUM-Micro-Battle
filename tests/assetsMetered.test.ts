@@ -132,7 +132,8 @@ describe('the room opens with only what she has on', () => {
     // the painted outfits (Joshua, 2026-10-21) download nothing: they are paint on her own skin
     for (let i = 7; i < OUTFITS.length; i++) expect(OUTFITS[i].paint?.length ?? 0).toBeGreaterThan(0);
     for (let i = 7; i < OUTFITS.length; i++) expect(recoveredPartsFor(wornGarments(i, all))).toEqual([]);
-    expect(OUTFITS).toHaveLength(13);
+    // seven modelled, then the painted ones: Sarah's own red tee and leggings (2026-10-23) and the white tee's six
+    expect(OUTFITS).toHaveLength(14);
   });
 
   it('cycles through the painted outfits, the bikini and none on the slim v2 body, never the modelled shirts and leggings', () => {

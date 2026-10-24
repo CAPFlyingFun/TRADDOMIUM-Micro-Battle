@@ -59,6 +59,14 @@ const PAINT_HEM_SLAB = 0.012;
 /** How far it lifts off her where it shows fully (a share of her trunk: about 5 mm on her). Not where it is still fading
  * in, so a half-seen edge never stands out over the background at her outline. */
 const STAND_OFF = 0.008;
+/** Passes smoothing her skin as measured, down her, and how far the drape stands off it, round her and down her: so the
+ * drape's edge at her sides is a smooth line, not a tooth for every row. */
+const SKIN_PASSES = 16, OFF_PASSES = 8;
+/** A faded point lies under her skin where the outline is within this much of it (a share of her trunk, about 7 mm),
+ * and under the outline where it stands twice that clear. */
+const FADED_UNDER = 0.012;
+/** Below this opacity the drape lies on her skin, wherever it is: only what is nearly solid may stand off her. */
+const OPAQUE_FROM = 0.75;
 /** How far (trunk heights) the drape must hang clear of her skin before the skin under it loses the shirt's paint; fully by twice that. */
 const HANG_FROM = 0.012;
 /**
@@ -521,31 +529,84 @@ export class TunicDrape {
     const targets = g.morphAttributes.position as THREE.BufferAttribute[] | undefined;
     const boneOf = [...bones.keys()];
     const boneMatrices = body.skeleton.boneMatrices!, blend = new THREE.Matrix4(), unpose = new THREE.Matrix4(), at = new THREE.Vector3();
+    // where each point lies, round the axis: first by the rules below, point by point; then how far each stands off her
+    // skin is smoothed across its neighbours, so the edge of a part that stands off meets the parts lying on her in a
+    // slope, not a step from one point to the next (Joshua, 2026-10-23, from the front: "each side of the belly... looks
+    // like part of the shirt is frayed out just a little bit" -- where neighbours took turns standing off and lying on
+    // her, her outline at her sides was a row of teeth)
+    const radius = new Float64Array(n);
     for (let r = 0; r < rows; r++) {
-      const y = hipY + (T_TOP - r * step) * T;
       for (let c = 0; c < COLUMNS; c++) {
-        // wherever any of it shows it lies ON her outline (its depth bias, `feathered`, draws it over her skin there), so a
-        // fading edge neither weaves in and out of her skin (a ragged line) nor stands out over the background (a fuzzy
-        // rim round her hips); where it has faded out entirely, just under her skin, hidden by the depth test
-        const i = r * COLUMNS + c, o = i * CH;
+        const i = r * COLUMNS + c;
         // and where it truly stands off her at her SIDES (falling from her belly or seat, across her thighs) a little
         // further, up to STAND_OFF (Joshua, 2026-10-22: "make the sides on the belly from 100-200% slightly more off the
         // skin"). Not in front or behind, where it already hangs from her bump or seat: pushed out there too, it
         // stepped out just under her navel where it leaves her skin, a bow rather than a peel (2026-10-23: "bows out
         // slightly just underneath the bellybutton")
-        let rr = R[i] + (alpha[i] > 0.01 ? STAND_OFF * T * smooth01((standOff[i] - 0.6) / 0.4) * (1 - hangs[c]) : -LIFT * T);
+        // Where it has faded out entirely it lies just under her SKIN, not under the outline: where the outline spans a
+        // hollow (her waist above a bump, her hip's side below it) it stands centimetres off her, and a faded point left
+        // out there drew, between it and its shown neighbour, a wedge of half-seen shirt out past her side -- the frayed
+        // teeth on each side of her belly (Joshua, 2026-10-23)
+        // (Not where the outline stands well clear of her -- beside where the shirt hangs from her bump -- or the triangles
+        // from a hanging point down under her skin uncovered the skin the hanging shirt had taken the paint off.)
+        const under = skin[i] > 0 ? smooth01(((R[i] - skin[i]) / T - FADED_UNDER) / FADED_UNDER) : 1;
+        let rr = alpha[i] > 0.01 ? R[i] + STAND_OFF * T * smooth01((standOff[i] - 0.6) / 0.4) * (1 - hangs[c])
+          : (1 - under) * (Math.min(R[i], skin[i]) - 2 * LIFT * T) + under * (R[i] - LIFT * T);
         // what does not stand off her lies ON her skin, not on the outline round her: the outline can sit a few
         // millimetres out where it bridges a hollow. A half-faded strip there showed past her silhouette as torn fabric
         // (Joshua, 2026-10-22: "frills... a little tear on sides of the belly"), and the solid hem band, kept on the
         // outline all round her, stood out from the painted shirt above it as a flared seam (2026-10-23). Only what
         // truly stands off her keeps its place
-        if (skin[i] > 0 && alpha[i] > 0.01 && rr > skin[i]) rr -= (1 - standOff[i]) * (rr - skin[i]);
+        // And only what is (nearly) OPAQUE stands off at all: a strip still fading in -- at the top of the drape, where it
+        // spans the hollow of her waist above a bump, or between a side that falls and a front that hangs -- stood a few
+        // millimetres off her, half see-through against the background, and read as frayed fabric on each side of her belly
+        // from the front (Joshua, 2026-10-23: "looks like part of the shirt is frayed out just a little bit"). Laid on her
+        // skin, over the shirt's own paint, its fading cannot be seen
+        if (skin[i] > 0 && alpha[i] > 0.01 && rr > skin[i]) rr -= (1 - Math.min(standOff[i], smooth01((alpha[i] - OPAQUE_FROM) / (1 - OPAQUE_FROM)))) * (rr - skin[i]);
         // wherever it shows at all, never inside her: the smoothed outline may dip a millimetre under her skin, and where
         // it was still fading in (where it starts to fall from her seat) nothing lifted it back out -- her skin stood
         // through the shirt there, worst over her seat with a big bump, whose stance leans her back (Joshua, 2026-10-23:
         // "parts of the shirt end up in her behind"). Where it shows fully, a hair out, so it is always drawn in front of
         // what her skin wears
         if (skin[i] > 0 && alpha[i] > 0.01) rr = Math.max(rr, skin[i] + this.hemLift * T * smooth01(alpha[i] / 0.5));
+        radius[i] = rr;
+      }
+    }
+    {
+      // her skin as measured here is the farthest of a few vertices in each direction of each row, and those vertices sit
+      // a little above or below the row: down a slope (her hips widening below her belly) that reads as a staircase,
+      // in and out from row to row, which her real surface is not. Laid on it, the drape's edge at her sides drew a tooth
+      // for every step (Joshua, 2026-10-23, from the front: "each side of the belly... looks like part of the shirt is
+      // frayed out just a little bit"). So her skin is smoothed down her (over about SKIN_PASSES rows), how far the drape
+      // stands off it is smoothed round her and down her, and the drape is laid at the sum
+      const shown = (i: number) => skin[i] > 0 && alpha[i] > 0.01;
+      const smooth = (field: Float64Array, passes: number, across: boolean) => {
+        for (let pass = 0; pass < passes; pass++) {
+          const was = field.slice();
+          for (let r = 0; r < rows; r++) for (let c = 0; c < COLUMNS; c++) {
+            const i = r * COLUMNS + c;
+            if (!shown(i)) continue;
+            let sum = 2 * was[i], w = 2;
+            const around = across ? [r * COLUMNS + ((c + 1) % COLUMNS), r * COLUMNS + ((c + COLUMNS - 1) % COLUMNS)] : [];
+            for (const j of [...around, r > 0 ? i - COLUMNS : -1, r + 1 < rows ? i + COLUMNS : -1]) if (j >= 0 && shown(j)) { sum += was[j]; w++; }
+            field[i] = sum / w;
+          }
+        }
+      };
+      const skinSmooth = Float64Array.from(skin), off = new Float64Array(n);
+      for (let i = 0; i < n; i++) off[i] = shown(i) ? radius[i] - skin[i] : 0;
+      smooth(skinSmooth, SKIN_PASSES, false);
+      smooth(off, OFF_PASSES, true);
+      // never inside her where it shows, and a hair out where it shows fully (the rule above, against her smoothed skin)
+      for (let i = 0; i < n; i++) if (shown(i)) radius[i] = skinSmooth[i] + Math.max(off[i], this.hemLift * T * smooth01(alpha[i] / 0.5));
+    }
+    for (let r = 0; r < rows; r++) {
+      const y = hipY + (T_TOP - r * step) * T;
+      for (let c = 0; c < COLUMNS; c++) {
+        // wherever any of it shows it lies ON her outline (its depth bias, `feathered`, draws it over her skin there), so a
+        // fading edge neither weaves in and out of her skin (a ragged line) nor stands out over the background (a fuzzy
+        // rim round her hips); where it has faded out entirely, just under her skin, hidden by the depth test
+        const i = r * COLUMNS + c, o = i * CH, rr = radius[i];
         const x = ax + rr * cosA[c], z = az + rr * sinA[c];
         C.setXYZW(i, 1, 1, 1, alpha[i]);
         FR.setXYZ(i, x + val[o + B], y + val[o + B + 1], z + val[o + B + 2]);
