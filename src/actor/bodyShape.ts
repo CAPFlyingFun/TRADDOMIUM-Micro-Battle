@@ -23,7 +23,7 @@
  */
 
 export type BodyControl =
-  | 'bellyTilt' | 'bellyHeight' | 'bellyWidth' | 'bellyDepth' | 'bellyUpper' | 'bellyLower'
+  | 'bellyTilt' | 'bellyHeight' | 'bellyWidth' | 'bellyDepth' | 'bellyUpper' | 'bellyLower' | 'navel'
   | 'breastSize' | 'breastWidth' | 'breastHeight' | 'breastDepth' | 'breastSpacing' | 'breastPosition' | 'breastDroop' | 'breastUpper' | 'breastLower';
 
 export interface BodyControlSpec {
@@ -52,6 +52,9 @@ export const BODY_CONTROLS: readonly BodyControlSpec[] = Object.freeze([
   { key: 'bellyDepth', group: 'belly', label: 'Depth', unit: '%', min: -15, max: 15, step: 1, fallback: 0, spread: 5, help: 'forward projection of the bump' },
   { key: 'bellyUpper', group: 'belly', label: 'Upper fullness', unit: '%', min: -20, max: 20, step: 1, fallback: 0, spread: 6, help: 'the bump above the navel' },
   { key: 'bellyLower', group: 'belly', label: 'Lower fullness', unit: '%', min: -20, max: 20, step: 1, fallback: 0, spread: 6, help: 'the bump below the navel' },
+  // Joshua, 2026-10-24: "a manual bellybutton in/out slider... how much of an innie or outie bellybutton is there
+  // independent of the automatic bellybutton size per belly % like the breast size"
+  { key: 'navel', group: 'belly', label: 'Navel', unit: '%', min: -100, max: 100, step: 1, fallback: 0, spread: 15, help: 'innie or outie from what the belly size gives: below 0 deeper in, above 0 further out, at any belly size' },
   { key: 'breastSize', group: 'breasts', label: 'Size', unit: '%', min: -100, max: 100, step: 1, fallback: 0, spread: 10, help: 'volume from the bust the belly slider gives: +100% is 2.0x, -100% is 0.5x, at any belly size' },
   { key: 'breastWidth', group: 'breasts', label: 'Width', unit: '%', min: -25, max: 25, step: 1, fallback: 0, spread: 4, help: 'side to side' },
   { key: 'breastHeight', group: 'breasts', label: 'Height', unit: '%', min: -25, max: 25, step: 1, fallback: 0, spread: 4, help: 'top to bottom' },

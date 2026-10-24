@@ -681,10 +681,11 @@ export function bellyUpperWeight(bumpPercent: number, curve: BellyCurve = 'appro
 }
 
 /** 0.075 mm per percent, capped at the baked 10.5 mm projection (140%). */
-export function navelWeights(bumpPercent: number): Record<string, number> {
+export function navelWeights(bumpPercent: number, navelPercent = 0): Record<string, number> {
   const p=Math.min(BUMP_MAX_PERCENT,Math.max(0,Number.isFinite(bumpPercent)?bumpPercent:100));
-  const out=Math.min(1,p/140);
-  return {navelIn:0,navelOut:out};
+  // v1's own navel shapes, with the NAVEL control added on (Sarah v2's navel is `navelFlat`, below)
+  const n = Number.isFinite(navelPercent) ? navelPercent / 100 : 0, out = Math.min(1, p / 140) + n;
+  return {navelIn:Math.min(1,Math.max(0,-out)),navelOut:Math.min(1,Math.max(0,out))};
 }
 
 /**
@@ -700,6 +701,39 @@ export function navelFlatWeight(bumpPercent: number): number {
   const p = Math.min(BUMP_MAX_PERCENT, Math.max(0, Number.isFinite(bumpPercent) ? bumpPercent : 100));
   const t = Math.min(1, Math.max(0, (p - NAVEL_OUT_FROM_PERCENT) / (100 - NAVEL_OUT_FROM_PERCENT)));
   return 1 - t * t * (3 - 2 * t);
+}
+
+/**
+ * THE NAVEL CONTROL (Joshua, 2026-10-24: "a manual bellybutton in/out slider under the body section which is separate
+ * from the clothing so I can adjust how much of an innie or outie bellybutton is there independent of the automatic
+ * bellybutton size per belly % like the breast size"). Like the bust's SIZE it sits ON TOP of what the belly slider
+ * gives. The automatic navel is `navelFlatWeight` (1 an ordinary innie, 0 her modelled outie), so how far OUT she is
+ * at a size is `1 - navelFlatWeight(bump)`, and 0 on the control is exactly that.
+ *
+ * The control slides her from that point toward either end of what her navel can be:
+ *   - -100 is the deepest innie: the same `navelFlat` shape carried on inward, `NAVEL_INNIE_EXTRA` of it again;
+ *   - +100 is the fullest outie: her modelled outie and `NAVEL_OUTIE_EXTRA` more.
+ * Both ends are the same at every belly size, and so is 0. In between it is a straight line each side, so there is
+ * no stretch of the slider that moves nothing, at a small belly or a big one. Both limits were chosen from renders.
+ *
+ * It is her body, not her clothes. NAVEL DETAIL under fabric still settles it as before, and a tee over it never
+ * follows it in deeper than an ordinary navel, because fabric bridges an innie.
+ */
+export const NAVEL_INNIE_EXTRA = 0.6;
+export const NAVEL_OUTIE_EXTRA = 0.3;
+export function navelFlatFor(bumpPercent: number, navelPercent: number): number {
+  const n = Number.isFinite(navelPercent) ? Math.min(100, Math.max(-100, navelPercent)) / 100 : 0;
+  const auto = 1 - navelFlatWeight(bumpPercent);
+  const outie = n < 0 ? auto + n * (auto + NAVEL_INNIE_EXTRA) : auto + n * (1 + NAVEL_OUTIE_EXTRA - auto);
+  return 1 - outie;
+}
+/** What the NAVEL control's line adds: where her navel stands now, at this belly size. */
+export function navelState(bumpPercent: number, navelPercent: number): string {
+  const outie = 1 - navelFlatFor(bumpPercent, navelPercent);
+  if (outie < -0.02) return `deeper innie (${Math.round(-outie / NAVEL_INNIE_EXTRA * 100)}% of the way)`;
+  if (outie < 0.05) return 'innie';
+  if (outie <= 1.001) return `outie ${Math.round(outie * 100)}%`;
+  return `fuller outie (+${Math.round((outie - 1) / NAVEL_OUTIE_EXTRA * 100)}%)`;
 }
 
 export function bumpLine(bumpPercent: number): string {
