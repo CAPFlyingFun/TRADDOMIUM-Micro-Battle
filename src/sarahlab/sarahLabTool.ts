@@ -182,8 +182,15 @@ export const clothStandOffMm = (v: number) => 6 - 5.5 * dialAt(v);
 /** How easily it stretches (XPBD compliance, 1e-8 firm to 1e-4 very stretchy) and how far it may (1.15 to 1.65 times). */
 export const clothCompliance = (v: number) => 10 ** (-8 + 4 * dialAt(v));
 export const clothMaxStretch = (v: number) => 1.15 + 0.5 * dialAt(v);
-/** How it holds on her skin: friction 0 to 1. */
+/**
+ * How it holds on her skin: friction 0 to 1 UP AND DOWN her, and a fifth of that ACROSS her (Joshua, 2026-10-24: "I
+ * would make grip instead how fast the animation moves vertically, with small changes to horizontally… with only a max
+ * of 20% loss horizontally"). So GRIP sets how readily the tee rides up or slides down her and barely changes how it
+ * eases round her.
+ */
 export const clothFriction = (v: number) => dialAt(v);
+export const CLOTH_GRIP_ACROSS = 0.2;
+export const clothFrictionAcross = (v: number) => CLOTH_GRIP_ACROSS * dialAt(v);
 /** Solver substeps a frame, 2 to 16: smoothness against cost. */
 export const clothSubsteps = (v: number) => Math.round(2 + 14 * dialAt(v));
 export const CLOTH_DIALS: readonly ClothDialSpec[] = Object.freeze([
@@ -192,7 +199,7 @@ export const CLOTH_DIALS: readonly ClothDialSpec[] = Object.freeze([
   { key: 'fit', line: (v) => `FIT · pattern ${Math.round(clothRestScale(v) * 100)}% of the tee${clothRestScale(v) < 0.95 ? ' · snug' : clothRestScale(v) > 1 ? ' · roomy' : ''}` },
   { key: 'close', line: (v) => `CLOSENESS · ${clothStandOffMm(v).toFixed(1)} mm off her skin` },
   { key: 'stretch', line: (v) => `STRETCH · up to ${clothMaxStretch(v).toFixed(2)}× · give 1e${(-8 + 4 * dialAt(v)).toFixed(1)}` },
-  { key: 'grip', line: (v) => `GRIP · friction ${clothFriction(v).toFixed(2)}` },
+  { key: 'grip', line: (v) => `GRIP · up and down ${clothFriction(v).toFixed(2)} · across ${clothFrictionAcross(v).toFixed(2)}` },
   { key: 'steps', line: (v) => `QUALITY · ${clothSubsteps(v)} steps a frame` },
 ]);
 /**
@@ -207,11 +214,12 @@ export const CLOTH_TUNE_DEFAULT: ClothTune = Object.freeze({ weight: 25, calm: 1
 /** The cloth tee's length when CLOTH SIM first comes on (his setting too): a fifth of the way to mid-thigh, over her hips. */
 export const CLOTH_TEE_LENGTH_DEFAULT = 0.2;
 /** The cloth settings a set of dials gives (`ClothSettings` in clothSim.ts), and its stand-off in world units (100 a metre). */
-export function clothTuning(t: ClothTune): { readonly settings: { substeps: number; stretchCompliance: number; bendCompliance: number; restScale: number; maxStretch: number; damping: number; gravity: [number, number, number]; friction: number }; readonly standOff: number } {
+export function clothTuning(t: ClothTune): { readonly settings: { substeps: number; stretchCompliance: number; bendCompliance: number; restScale: number; maxStretch: number; damping: number; gravity: [number, number, number]; friction: number; frictionAcross: number }; readonly standOff: number } {
   return {
     settings: {
       substeps: clothSubsteps(t.steps), stretchCompliance: clothCompliance(t.stretch), bendCompliance: 1e-4, restScale: clothRestScale(t.fit),
       maxStretch: clothMaxStretch(t.stretch), damping: clothDamping(t.calm), gravity: [0, -981 * clothGravityScale(t.weight), 0], friction: clothFriction(t.grip),
+      frictionAcross: clothFrictionAcross(t.grip),
     },
     standOff: clothStandOffMm(t.close) / 10,
   };

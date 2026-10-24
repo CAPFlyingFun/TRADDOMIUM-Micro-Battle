@@ -14,7 +14,10 @@
  * Every position here is in WORLD units (the room's, `UNITS_PER_METRE` to the metre) unless it says body-local.
  */
 
-/** Where her skin is under each cloth particle this frame, and where each pinned particle is held. */
+/**
+ * Where her skin is under each cloth particle this frame, where each pinned particle is held, and where the spot of her
+ * skin each particle touched last frame has been carried to.
+ */
 export interface SkinContacts {
   /** The point on her skin nearest each particle, world (count × 3). */
   readonly point: Float32Array;
@@ -27,15 +30,30 @@ export interface SkinContacts {
    * plus its rest offset along her normal there. Unpinned particles' entries are written too and simply not used.
    */
   readonly pinTarget: Float32Array;
+  /**
+   * Where LAST frame's contact point on her skin is now (count × 3, world): the same spot of her skin -- the triangle
+   * and the barycentric place on it that last frame's `point` was -- posed as she stands this frame. So
+   * `carried - before.point` is how far her SKIN moved under the particle, and nothing else.
+   *
+   * Why it is its own field (Joshua, 2026-10-24, GRIP at its top: the tee "starts ripping up the outfit and does weird
+   * stuff about 3s after I adjust the slider"): `point` is the nearest skin to the particle, so it moves when the
+   * PARTICLE slides as well as when she does. Friction measured against `after.point - before.point` was told the skin
+   * itself had made last frame's slide, and at friction 1 made the particle repeat it, every frame, undamped: stuck
+   * cloth walked across her and tore within seconds. The material point is what moves with her, so friction holds to it.
+   *
+   * On the first update after `ClothSkin.initial` (or a new ClothSkin) there is no last frame's contact; it is `point`
+   * then, so a caller that starts with `before` a copy of `after` sees no skin motion at all.
+   */
+  readonly carried: Float32Array;
 }
 
 export function createContacts(count: number): SkinContacts {
-  return { point: new Float32Array(count * 3), normal: new Float32Array(count * 3), standOff: new Float32Array(count), pinTarget: new Float32Array(count * 3) };
+  return { point: new Float32Array(count * 3), normal: new Float32Array(count * 3), standOff: new Float32Array(count), pinTarget: new Float32Array(count * 3), carried: new Float32Array(count * 3) };
 }
 
 /** Copy every field of `from` into `to` (same count). */
 export function copyContacts(from: SkinContacts, to: SkinContacts): void {
-  to.point.set(from.point); to.normal.set(from.normal); to.standOff.set(from.standOff); to.pinTarget.set(from.pinTarget);
+  to.point.set(from.point); to.normal.set(from.normal); to.standOff.set(from.standOff); to.pinTarget.set(from.pinTarget); to.carried.set(from.carried);
 }
 
 /** Where each cloth particle sat on her body at rest (her approved body at 100%), as the cloth file records it. */

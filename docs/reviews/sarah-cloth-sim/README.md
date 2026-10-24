@@ -18,7 +18,7 @@ It lives in the Character Studio, under **Outfit**, while Sarah wears the light 
   - **FIT**: the pattern's size, from roomy to snug.
   - **CLOSENESS**: how far it keeps off her skin, from 6 mm to 0.5 mm.
   - **STRETCH**: how much it gives.
-  - **GRIP**: how much it holds on her skin.
+  - **GRIP**: how much it holds on her skin. Since alpha.120 it holds mostly up and down her, and a fifth as much across.
   - **QUALITY**: solver steps a frame. More steps are smoother and cost more.
 - **LAY CLOTH AGAIN** puts the cloth back on her.
 - **CLOTH DEFAULTS** puts the dials back.
@@ -187,3 +187,59 @@ Neither showed in the renders at these defaults, taken after walking 3 s and the
   - it has nothing at her nipples, because it bridges her bust about 8–10 mm off them.
   So its navel has to be taken back by the tee's own relief, not by hers.
 - **The skin sliver at the top of a 200% belly.** It did not show at these defaults (`9-defaults.jpg`). It has not yet been checked more closely.
+
+## alpha.120: GRIP holds up and down, the seated navel dot, and the fitted tee's detail
+
+Joshua, 2026-10-24, from his phone, on alpha.119: "grip when the slider is at max starts ripping up the outfit and does weird stuff about 3s after I adjust the slider… I would make grip instead how fast the animation moves vertically, with small changes to horizontally… with only a max of 20% loss horizontally". His screenshots also showed the dark dot on her lower belly while she sits.
+
+### GRIP (`11-grip.jpg`)
+
+- **Why it tore.** Friction held each particle to "her skin's motion", but what it measured was the motion of the skin point *nearest* the particle. That point moves along with the particle, so when the particle slid, friction read the slide as her skin moving and made the particle repeat it, every frame, without fading. At the top of GRIP, cloth walked across her and tore within a few seconds. At 0.5 the echo still kept 99.6% of itself each frame.
+- **The fix.** Friction now follows the spot of her skin each particle actually touched, carried along by her pose (`clothSkin.ts` keeps where on that triangle the contact was, and `clothSim.ts` holds to it).
+  - In a test, a particle nudged once now stops, where before it slid 61 units.
+  - A sheet on a sliding floor drifts less than 0.001 units over 44 units of travel.
+- **GRIP now works mostly up and down her**, as asked:
+  - `GRIP · up and down 0.50 · across 0.10`: the dial sets the friction up and down her, and a fifth of that applies across her.
+  - "Up" is against gravity, laid on her skin.
+  - Where her skin faces nearly straight up or down, the grip blends smoothly into the across value.
+- `11-grip.jpg` shows GRIP at its top for 6 s each, seated, walking and standing. None of them tore.
+
+### The seated dot (`10-navel-seated.jpg`)
+
+- **What it was.** It was her navel, at 200%, coming up through the cloth by 3–6 mm, 4–5 mm from its tip. It showed most when seated and with NAVEL DETAIL at 100%.
+- **Cause 1: the dome pushed the wrong way.** The dome over her navel added stand-off along her skin's normal. On the navel's flank that normal leans away from the navel, so the push shoved the cloth sideways, off her navel, and the cloth between two such particles crossed below the tip. Pushing harder made the hole wider. That is why a bigger offset never helped.
+- **Cause 2: the dome was off-centre.** It was centred on the rings round her navel, while the tip stands about 5 mm off that centre.
+- **The fix.** Within the dome, a floor square to the navel's own axis now stands in for her skin wherever it is higher. It is centred on the tip, flat across 9–13 mm (wider than the cloth's 11 mm spacing), and 0.5 mm above the tip.
+  - Friction still follows her skin under the floor.
+- **Measured** with a new probe, `navelGap()`, which poses every vertex of her body round the navel and reads the cloth above each one:
+  - in 7 states (standing and seated, 100% and 200%, NAVEL DETAIL 0, AUTO and 100%, CLOSENESS 0.5 and 6 mm), the cloth now clears her navel by at least 1.3 mm;
+  - before, it was 3–6 mm through, at 82–163 vertices.
+
+### The fitted tee follows BREAST and NAVEL DETAIL (`12-fitted-detail.jpg`)
+
+This is the regular tee, with the cloth off. It is what she opens in.
+
+- **What the tee is made of.** Its navel is modelled in: a dome over her outie, 8–9 mm high at 100%. It has nothing at her nipples, because it bridges her bust about 9 mm off them.
+- **NAVEL DETAIL settles the tee's own navel.**
+  - Each frame the room poses a few of the tee's points round her navel (`skinPose.ts`) and fits the tee's smooth surface through them.
+  - The shader (`clothDetail.ts`) moves the tee toward that surface by what NAVEL DETAIL hides: all of it at 0, none at 100%. Its shading follows.
+  - The points were found once by `scripts/sarahV2Recovery/tee-detail.mjs`.
+  - Her own navel under the tee is softened to match, as it is under paint and under the cloth.
+- **BREAST DETAIL draws her nipples on the tee's surface**, as on the cloth.
+- **AUTO comes from the tee's fabric** (fine jersey: breast 48%, navel 81%). The outfit editor now names it as "spandex tee".
+- **Above about 115% the tee's own navel no longer sits over hers.** The tee's fitting shapes carry it up to 8 cm away by 200%, and by 200% her navel is below the hem, on the leggings.
+  - So the settle stands down at those sizes. The leggings' detail then hides her navel.
+  - At 150%, NAVEL DETAIL 0 leaves a soft bump at the hem.
+- **Fixed on the way: a hole in the tee.**
+  - At a low NAVEL DETAIL, the paint under the tee (the leggings over her navel) settled every garment's navel with her own, the fitted tee included.
+  - Past 125% the tee's modelled navel stands above hers, so that settle pushed it into her and opened a hole.
+  - The fitted tee's navel now follows only its own fit.
+
+### Also
+
+- The CLOTH probe's `strain()` counts only the rows being simulated.
+
+### Still open
+
+- **A few edges at one sleeve's edge.** Where the cloth is held softly at the sleeve, a few of its edges (particles 1003–1008) stand up to 13× their pattern length from the moment it is laid. The soft pins hold them to places the pattern does not agree with. Nothing shows in the renders. It is noted here so the number is not mistaken for a tear.
+- **The skin sliver at the top of a 200% belly.** It has not shown at the new defaults.

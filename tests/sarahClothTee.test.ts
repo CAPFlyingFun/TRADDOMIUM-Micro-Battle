@@ -13,7 +13,7 @@ import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { MeshoptDecoder } from 'meshoptimizer';
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
-  CLOTH_DIALS, CLOTH_SHIRT_PATH, CLOTH_TEE_LENGTH_DEFAULT, CLOTH_TUNE_DEFAULT, type ClothDial, clothCompliance, clothDamping, clothFriction, clothGravityScale, clothLine,
+  CLOTH_DIALS, CLOTH_SHIRT_PATH, CLOTH_TEE_LENGTH_DEFAULT, CLOTH_TUNE_DEFAULT, type ClothDial, clothCompliance, clothDamping, clothFriction, clothFrictionAcross, clothGravityScale, clothLine,
   clothMaxStretch, clothRestScale, clothStandOffMm, clothSubsteps, clothTuning, teeLengthLine,
 } from '../src/sarahlab/sarahLabTool';
 import { SARAH_V2_DETAIL_POINTS } from '../src/sarahlab/detailSpots';
@@ -178,9 +178,11 @@ describe('the cloth dials', () => {
     expect(clothCompliance(100)).toBeCloseTo(1e-4);
     expect(clothMaxStretch(0)).toBeCloseTo(1.15);
     expect(clothFriction(100)).toBe(1);
+    expect(clothFrictionAcross(100)).toBeCloseTo(0.2); // "only a max of 20% loss horizontally"
+    expect(CLOTH_DIALS.find((d) => d.key === 'grip')!.line(50)).toBe('GRIP · up and down 0.50 · across 0.10');
     expect(clothSubsteps(0)).toBe(2);
     expect(clothSubsteps(100)).toBe(16);
-    for (const f of [clothGravityScale, clothDamping, clothRestScale, clothStandOffMm, clothCompliance, clothMaxStretch, clothFriction, clothSubsteps]) {
+    for (const f of [clothGravityScale, clothDamping, clothRestScale, clothStandOffMm, clothCompliance, clothMaxStretch, clothFriction, clothFrictionAcross, clothSubsteps]) {
       expect(f(-50)).toBe(f(0));
       expect(f(250)).toBe(f(100));
       expect(f(Number.NaN)).toBe(f(0));
@@ -197,6 +199,7 @@ describe('the cloth dials', () => {
     expect(settings.maxStretch).toBeCloseTo(1.4);
     expect(settings.stretchCompliance).toBeCloseTo(1e-6, 9);
     expect(settings.friction).toBeCloseTo(0.5);
+    expect(settings.frictionAcross).toBeCloseTo(0.1); // GRIP holds mostly up and down: a fifth of it across her
     expect(settings.substeps).toBe(8);
     expect(settings.gravity[0]).toBe(0);
     expect(settings.gravity[2]).toBe(0);

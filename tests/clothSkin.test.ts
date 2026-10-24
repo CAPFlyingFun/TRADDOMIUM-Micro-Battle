@@ -4,8 +4,9 @@
  * and a box, both split along seams the way her mesh is, each with two bones and a relative morph target, under a room
  * that scales them 100 to the metre -- a particle starts on its bound skin point plus its offset; its contact is on the
  * posed skin with an outward unit normal; a bone and a morph carry the contacts; a particle moved several triangles away,
- * across a seam, is walked to the true nearest point (checked by brute force); its pin stays on its own triangle; and
- * 6,000 particles on a 20,000-triangle body are timed.
+ * across a seam, is walked to the true nearest point (checked by brute force); its pin stays on its own triangle; last
+ * frame's contact is carried with her when she moves (`carried`, what the cloth's friction holds to); and 6,000
+ * particles on a 20,000-triangle body are timed.
  */
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
@@ -263,6 +264,61 @@ describe('ClothSkin: her posed skin under every cloth particle', () => {
     skin.update(new Float32Array([NaN, 0, 0]), c);
     expect(at(c.point, 0).distanceTo(pin)).toBeLessThan(1); // the skin point, under the offset pin
     expect(Number.isFinite(c.normal[0])).toBe(true);
+  });
+
+  it('carries last frame\'s contact with her: moved rigidly, the spot of skin under each particle goes with her while the contact is the new nearest point', () => {
+    // `carried` is what the cloth's friction holds to (Joshua, 2026-10-24, GRIP at its top tearing the tee): the spot of
+    // her each particle touched last frame, posed as she stands now -- not the nearest point, which moves with the cloth
+    const g = new THREE.SphereGeometry(1, 24, 16), b = body(g), tris = triangles(g), nT = tris.length / 3;
+    let seed = 5;
+    const rand = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    const picks: { t: number; bary: [number, number, number]; offset: number }[] = [];
+    for (let i = 0; i < 40; i++) { const u = rand(), v = rand() * (1 - u); picks.push({ t: Math.floor(rand() * nT), bary: [u, v, 1 - u - v], offset: 0.003 }); }
+    const binding = bindingOf(tris, picks), skin = new ClothSkin(b.mesh, binding), c = createContacts(binding.count);
+    const cloth = skin.initial(new Float32Array(binding.count * 3));
+    // the cloth slid over her by up to `by` each way, and kept on the outside of her (a local walk finds the true nearest
+    // point from outside a convex body; from inside one it can stop on a face with a nearer one beside it)
+    const slide = (by: number) => {
+      const centre = toWorld(b, 0, 0, 0), p = new THREE.Vector3();
+      for (let i = 0; i < binding.count; i++) {
+        p.set(cloth[i * 3] + (rand() - 0.5) * by, cloth[i * 3 + 1] + (rand() - 0.5) * by, cloth[i * 3 + 2] + (rand() - 0.5) * by);
+        p.sub(centre).setLength(100.3).add(centre);
+        cloth.set([p.x, p.y, p.z], i * 3);
+      }
+    };
+    slide(3); // a centimetre or so off their bound places
+
+    // the first update after `initial` has no last contact: nothing of her is carried
+    skin.update(cloth, c);
+    for (let i = 0; i < binding.count; i++) expect(at(c.carried, i).distanceTo(at(c.point, i))).toBe(0);
+    const was = c.point.slice();
+
+    // her room turns and moves -- a rigid motion of all of her, world to world -- and the cloth goes with her and on
+    // over her, some particles a triangle or more
+    const from = b.mesh.matrixWorld.clone();
+    b.root.position.add(new THREE.Vector3(4, -2, 7)); b.root.rotation.y += 0.35; b.root.rotation.x -= 0.2; b.root.updateMatrixWorld(true);
+    const rigid = b.mesh.matrixWorld.clone().multiply(from.invert());
+    for (let i = 0; i < binding.count; i++) cloth.set(at(cloth, i).applyMatrix4(rigid).toArray(), i * 3);
+    slide(12);
+    skin.update(cloth, c);
+    const world = posedWorld(b.mesh);
+    let apart = 0, worst = 0;
+    for (let i = 0; i < binding.count; i++) {
+      const carried = at(c.carried, i), point = at(c.point, i);
+      worst = Math.max(worst, carried.distanceTo(at(was, i).applyMatrix4(rigid)));
+      expect(bruteClosest(world, tris, at(cloth, i)).distanceTo(point)).toBeLessThan(1e-3); // the new nearest point
+      if (carried.distanceTo(point) > 1) apart++;
+    }
+    expect(worst).toBeLessThan(1e-4); // last frame's contact, moved as she moved
+    expect(apart).toBeGreaterThan(binding.count / 2); // and the contact went with the cloth, not with her
+
+    // a particle that blows up is given its bound place, and carries nothing; next time that place is what is carried
+    const bad = cloth.slice(); bad[0] = Number.NaN;
+    skin.update(bad, c);
+    expect(at(c.carried, 0).distanceTo(at(c.point, 0))).toBe(0);
+    const boundPlace = at(c.point, 0);
+    skin.update(cloth, c);
+    expect(at(c.carried, 0).distanceTo(boundPlace)).toBeLessThan(1e-4);
   });
 
   it('serves 6,000 particles on a 20,000-triangle body each frame', () => {

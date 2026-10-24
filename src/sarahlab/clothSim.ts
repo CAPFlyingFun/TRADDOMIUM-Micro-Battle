@@ -21,9 +21,20 @@
  *      (inverse mass 1 - pin), so the cloth hangs from them rather than dragging them;
  *   5. the strain limit: no edge left longer than maxStretch × its (unscaled) rest length, the end nearer the pins
  *      holding (why is in the constructor);
- *   6. her skin: a particle closer to her than its standOff along her normal is pushed out to it, and loses `friction` of
- *      its slip across her: the tangential part of its motion this substep RELATIVE to the skin point's own motion this
- *      substep, so cloth lying on skin that moves is carried with it;
+ *   6. her skin: a particle closer to her than its standOff along her normal is pushed out to it, and loses some of its
+ *      slip over her: the tangential part of its motion this substep RELATIVE to her skin's own motion this substep, so
+ *      cloth lying on skin that moves is carried with it. Two things about that, both learned the hard way:
+ *      - "her skin's own motion" is the motion of the SPOT of skin the particle touched -- `after.carried -
+ *        before.point`, last frame's contact carried by her pose -- and not of the nearest point, `after.point -
+ *        before.point`. The nearest point moves with the particle: when the particle slid, so did it, and friction 1 was
+ *        told her skin had made the slide and made the particle repeat it, every frame, never decaying. At GRIP's top
+ *        stuck cloth walked across her and tore the tee in about three seconds (Joshua, 2026-10-24); at 0.5 a substep
+ *        the same echo still kept 99.6% of itself a frame.
+ *      - the grip is mostly UP AND DOWN her (Joshua, 2026-10-24: "I would make grip instead how fast the animation moves
+ *        vertically, with small changes to horizontally… with only a max of 20% loss horizontally"). The slip is split
+ *        along "up across her skin" -- against gravity, laid flat on her tangent plane -- and square to it: `friction`
+ *        of the first is taken, `frictionAcross` of the second. Where her skin faces nearly straight up or down there is
+ *        no "up across her" to speak of, so the vertical share fades smoothly to `frictionAcross` there (see step()).
  *   7. v = (x - x_prev) / h.
  * Her skin under each particle comes from the caller at the start and end of the frame (`before`, `after`) and is
  * interpolated linearly to (s + 1) / substeps for substep s, so a body that moves a long way in one frame is met a slice
@@ -66,8 +77,18 @@ export interface ClothSettings {
   damping: number;
   /** World units / s² (the room is 100 units to the metre). */
   gravity: [number, number, number];
-  /** 0..1, the share of a touching particle's slip over her skin removed each substep: 1 sticks while in contact. */
+  /**
+   * 0..1, the share of a touching particle's slip UP AND DOWN her skin (along "up", against gravity, laid on her tangent
+   * plane) removed each substep: 1 holds the cloth from sliding down her, or being dragged up her, while in contact.
+   */
   friction: number;
+  /**
+   * 0..1, the share of a touching particle's slip ACROSS her -- square to "up" on her skin -- removed each substep. The
+   * room sets it to a fifth of `friction` (GRIP holds mostly vertically, "with only a max of 20% loss horizontally"),
+   * so the tee can still ease round her as she turns. Where her skin faces nearly straight up or down (the top of her
+   * shoulder, under her bust) every direction is "across" and this is the whole grip.
+   */
+  frictionAcross: number;
 }
 
 export interface ClothStepStats {
@@ -92,7 +113,10 @@ export interface ClothStepStats {
  * - bendCompliance 1e-4: a thousand times softer, so one particle's weight folds a bend pair by about 0.1 unit. Jersey
  *   folds easily; her skin, not the bend, gives the tee its shape, and the bend only keeps the folds from being a lattice.
  * - restScale 0.98, maxStretch 1.15, damping 1.5, friction 0.6: the brief's. Friction is applied per substep, so at 8
- *   substeps 0.6 keeps 0.4⁸ ≈ 0.07% of a frame's slip: the knob grips from about 0.2 up, which suits spandex on skin.
+ *   substeps 0.6 keeps 0.4⁸ ≈ 0.07% of a frame's slip up and down her: the knob grips from about 0.2 up, which suits
+ *   spandex on skin.
+ * - frictionAcross 0.12, a fifth of friction, as the room keeps it: 0.88⁸ ≈ 36% of a frame's slip across her is kept,
+ *   so the cloth holds its height on her and still settles round her.
  */
 export const CLOTH_DEFAULTS: Readonly<ClothSettings> = Object.freeze({
   substeps: 8,
@@ -103,12 +127,20 @@ export const CLOTH_DEFAULTS: Readonly<ClothSettings> = Object.freeze({
   damping: 1.5,
   gravity: [0, -981, 0] as [number, number, number],
   friction: 0.6,
+  frictionAcross: 0.12,
 });
 
 /** The longest step: a hitch longer than this is taken as this, so a stalled frame cannot fling the cloth. */
 const MAX_DT = 1 / 20;
 /** Shorter than this, an edge or a normal has no direction and is left alone rather than divided by. */
 const TINY = 1e-12;
+/**
+ * The grip's "up across her skin" is (-gravity) laid on her tangent plane; its length is the sine of her skin's tilt
+ * from facing straight up (or down). Below UP_FADE_FROM (her skin within about 6° of level) it is all `frictionAcross`;
+ * above UP_FADE_TO (about 17°) the vertical share is all `friction`; between, a smoothstep, so a fold of cloth rolling
+ * over her shoulder meets no step in its grip.
+ */
+const UP_FADE_FROM = 0.1, UP_FADE_TO = 0.3;
 
 /** `limitSide` values: the strain limit moves both ends by inverse mass, or holds end a, or holds end b. */
 const SHARE = 0, HOLD_A = 1, HOLD_B = 2;
@@ -251,8 +283,10 @@ export class ClothSim {
   /**
    * Advance dt seconds (clamped to [0, 1/20]). `before` and `after` are her skin under the cloth at the start and the
    * end of this frame; substep s uses them interpolated at (s + 1) / substeps (point, normal re-normalized, standOff,
-   * pinTarget). A particle whose interpolated normal has no length has no skin under it this substep. Returns the SAME
-   * stats object every call: copy it to keep it.
+   * pinTarget). A particle whose interpolated normal has no length has no skin under it this substep. Friction holds
+   * to her skin's motion `(after.carried - before.point) / substeps` a substep: the spot of her the particle touched
+   * at the start of the frame, carried by her pose (`SkinContacts.carried`). Returns the SAME stats object every call:
+   * copy it to keep it.
    */
   step(dt: number, before: SkinContacts, after: SkinContacts): ClothStepStats {
     const t0 = now();
@@ -260,7 +294,8 @@ export class ClothSim {
     stats.substeps = 0; stats.contacts = 0; stats.deepest = 0;
     const n = this.count;
     if (before.point.length < n * 3 || after.point.length < n * 3 || before.normal.length < n * 3 || after.normal.length < n * 3
-      || before.standOff.length < n || after.standOff.length < n || before.pinTarget.length < n * 3 || after.pinTarget.length < n * 3) {
+      || before.standOff.length < n || after.standOff.length < n || before.pinTarget.length < n * 3 || after.pinTarget.length < n * 3
+      || after.carried.length < n * 3) {
       throw new Error(`ClothSim.step: contacts hold fewer than ${n} particles`);
     }
     dt = dt > 0 ? Math.min(dt, MAX_DT) : 0; // NaN lands here too
@@ -276,10 +311,13 @@ export class ClothSim {
     const bendAlpha = Math.max(0, s.bendCompliance) / (h * h);
     const restScale = s.restScale;
     const maxStretchSq = s.maxStretch * s.maxStretch;
-    const friction = Math.min(1, Math.max(0, s.friction));
+    const friction = unit(s.friction), across = unit(s.frictionAcross);
+    // "up" for the grip: against gravity; straight up the world when there is no gravity to be against
+    const gl = Math.hypot(s.gravity[0], s.gravity[1], s.gravity[2]);
+    const upx = gl > TINY ? -s.gravity[0] / gl : 0, upy = gl > TINY ? -s.gravity[1] / gl : 1, upz = gl > TINY ? -s.gravity[2] / gl : 0;
 
     const x = this.positions, xp = this.prev, v = this.velocities, w = this.invMass, pin = this.pin;
-    const bp = before.point, ap = after.point, bn = before.normal, an = after.normal;
+    const bp = before.point, ap = after.point, bn = before.normal, an = after.normal, ac = after.carried;
     const bs = before.standOff, as = after.standOff, bt = before.pinTarget, at = after.pinTarget;
     let deepest = 0, contacts = 0;
 
@@ -334,7 +372,8 @@ export class ClothSim {
         x[b3] -= dx * kb; x[b3 + 1] -= dy * kb; x[b3 + 2] -= dz * kb;
       }
 
-      // 6. her skin: push out to standOff along her normal, then friction on the slip relative to her skin's own motion.
+      // 6. her skin: push out to standOff along her normal, then friction on the slip relative to her skin's own motion,
+      // `friction` of it up and down her and `frictionAcross` of it across.
       const last = sub === substeps - 1;
       for (let i = 0, i3 = 0; i < n; i++, i3 += 3) {
         if (w[i] <= 0) continue;
@@ -349,16 +388,29 @@ export class ClothSim {
         x[i3] -= nx * d; x[i3 + 1] -= ny * d; x[i3 + 2] -= nz * d;
         if (-d > deepest) deepest = -d;
         if (last) contacts++;
-        if (friction > 0) {
-          // The skin point's motion this substep is (after - before) / substeps; the slip is the particle's motion less it.
+        if (friction > 0 || across > 0) {
+          // Her skin's motion this substep is that of the spot the particle touched: (after.carried - before.point) /
+          // substeps (never after.point - before.point, which has the particle's own slide in it: see the header). The
+          // slip is the particle's motion less it, laid on her tangent plane.
           const inv = 1 / substeps;
-          const rx = x[i3] - xp[i3] - (ap[i3] - bp[i3]) * inv;
-          const ry = x[i3 + 1] - xp[i3 + 1] - (ap[i3 + 1] - bp[i3 + 1]) * inv;
-          const rz = x[i3 + 2] - xp[i3 + 2] - (ap[i3 + 2] - bp[i3 + 2]) * inv;
+          const rx = x[i3] - xp[i3] - (ac[i3] - bp[i3]) * inv;
+          const ry = x[i3 + 1] - xp[i3 + 1] - (ac[i3 + 1] - bp[i3 + 1]) * inv;
+          const rz = x[i3 + 2] - xp[i3 + 2] - (ac[i3 + 2] - bp[i3 + 2]) * inv;
           const rn = rx * nx + ry * ny + rz * nz;
-          x[i3] -= friction * (rx - rn * nx);
-          x[i3 + 1] -= friction * (ry - rn * ny);
-          x[i3 + 2] -= friction * (rz - rn * nz);
+          const tx = rx - rn * nx, ty = ry - rn * ny, tz = rz - rn * nz;
+          // "up across her": up laid on her tangent plane (length: the sine of her skin's tilt from level). All of the
+          // slip loses `across`; the part along up loses `friction - across` more, faded out where she is nearly level.
+          const un = upx * nx + upy * ny + upz * nz;
+          const ux = upx - un * nx, uy = upy - un * ny, uz = upz - un * nz;
+          const ul2 = ux * ux + uy * uy + uz * uz;
+          let k = 0;
+          if (ul2 > UP_FADE_FROM * UP_FADE_FROM) {
+            const q = Math.min(1, (Math.sqrt(ul2) - UP_FADE_FROM) / (UP_FADE_TO - UP_FADE_FROM));
+            k = q * q * (3 - 2 * q) * (friction - across) * (tx * ux + ty * uy + tz * uz) / ul2;
+          }
+          x[i3] -= across * tx + k * ux;
+          x[i3 + 1] -= across * ty + k * uy;
+          x[i3 + 2] -= across * tz + k * uz;
         }
       }
 
@@ -462,6 +514,11 @@ function sortedPairs(pairs: readonly number[], rank: (a: number, b: number) => n
   const order = new Uint32Array(n);
   for (let e = 0; e < n; e++) { ranks[e] = rank(pairs[e * 2], pairs[e * 2 + 1]); order[e] = e; }
   return order.sort((p, q) => ranks[p] - ranks[q] || pairs[p * 2] - pairs[q * 2] || pairs[p * 2 + 1] - pairs[q * 2 + 1]);
+}
+
+/** A share, 0..1: clamped, and 0 for a value that is not a number (a setting left unset by a plain-JS caller). */
+function unit(v: number): number {
+  return v > 0 ? (v < 1 ? v : 1) : 0;
 }
 
 function distance(p: Float32Array, a: number, b: number): number {

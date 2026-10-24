@@ -46,6 +46,8 @@ export const CLOTH_STAND_OFF = 0.25;
 const REST_CLEARANCE = 0.6;
 /** After the cloth is laid, this long (seconds) at no less than this damping (per second). */
 const WARM_SECONDS = 0.4, WARM_DAMPING = 25;
+/** How far a dome's top stands above her detail's tip, world units (0.5 mm): the cloth is flat between its particles. */
+const DOME_MARGIN = 0.05;
 /** World units (4 cm): a bound place moving further than this in one frame is a jump, not motion. */
 const JUMP = 4;
 /** How quickly the shown milliseconds follow the frame's (an exponential mean over about this many frames). */
@@ -89,6 +91,8 @@ export class ClothShirt {
   /** BREAST and NAVEL DETAIL (0 hidden, 1 all of it): how the cloth lies over her details, set by the room. */
   keep: { nipple: number; navel: number } = { nipple: 0.45, navel: 0.8 };
   private readonly lift: Float32Array;
+  /** Her skin under each particle last frame, as `ClothSkin` found it (before a dome stood in for it): friction's reference. */
+  private readonly lastSkin: Float32Array;
   /** Each render vertex's particle. */
   private readonly vertexParticle: Uint32Array;
   /** Triangles by particle, ordered by the lowest row they reach, and how many are in each length. */
@@ -136,6 +140,7 @@ export class ClothShirt {
     this.pin = pin; this.anchor = anchor; this.filed = filed; this.navelZone = navelZone;
     this.spots = info.detail && info.detail.navel >= 0 ? new DetailSpots(info.detail) : null;
     this.lift = new Float32Array(count);
+    this.lastSkin = new Float32Array(count * 3);
     // the tee's particles' neighbours (across its triangles), and which are in her navel's zone
     {
       const index = g.index!, sets: Set<number>[] = Array.from({ length: this.teeParticles }, () => new Set<number>());
@@ -276,36 +281,59 @@ export class ClothShirt {
    * cloth between particles; a nipple as BREAST DETAIL hides it. The dome is measured from where each particle IS on her
    * now, not from where it was cut, because the cloth slides on her.
    */
-  private follow(): void {
-    const sp = this.spots;
+  private follow(fresh: boolean): void {
+    const sp = this.spots, n = this.active, A = this.after, B = this.before, last = this.lastSkin;
+    // Friction holds the cloth to her skin's own motion: the spot of her each particle touched last frame, carried by her
+    // pose (`after.carried`), less where that spot was (her skin last frame). Where a dome stood in for her skin last
+    // frame, `before.point` is the dome's floor, not her skin, so the carried point is moved to match: the floor carried
+    // by her skin's motion under it. Everywhere else `before.point` IS her skin last frame and nothing changes.
+    if (!fresh) for (let k = 0; k < n * 3; k++) A.carried[k] = B.point[k] + (A.carried[k] - last[k]);
+    last.set(A.point.subarray(0, n * 3));
+    this.lift.fill(0);
+    this.skin.extraStandOff = null;
     if (!sp) return;
     sp.measure(this.skin);
-    const lift = this.lift, q = this.after.point, n = this.active, k = this.keep, clamp01 = (x: number) => Math.max(0, Math.min(1, Number.isFinite(x) ? x : 0));
-    lift.fill(0);
-    this.dome(sp.navel, 1, 1 - clamp01(k.navel), q, n, lift);
-    for (const d of sp.nipples) this.dome(d, 1 - clamp01(k.nipple), 1 - clamp01(k.nipple), q, n, lift);
-    this.skin.extraStandOff = lift;
+    const k = this.keep, clamp01 = (x: number) => Math.max(0, Math.min(1, Number.isFinite(x) ? x : 0)), p = this.sim.positions;
+    this.dome(sp.navel, 1, 1 - clamp01(k.navel), p, A, n);
+    for (const d of sp.nipples) this.dome(d, 1 - clamp01(k.nipple), 1 - clamp01(k.nipple), p, A, n);
   }
 
   /**
-   * Lift the cloth over a proud detail: every particle whose place on her skin is within the dome keeps that far above
-   * her smooth surface, less what her skin under it already stands above it. `amount` scales the dome's height (0 none),
-   * `hide` widens it from DOME_OUT toward WIDE_OUT.
+   * Keep the cloth over a proud detail: a DOME stands in for her skin under every particle within it, where it stands
+   * higher than her skin -- a floor square to the detail's axis, right under the particle, at the dome's height there.
+   * The dome is centred on the detail's own tip (her navel vertex stands about 5 mm off the centre of the rings round
+   * it), flat across DOME_IN of the inner ring's radius at the tip's height and DOME_MARGIN more, falling smoothly to
+   * her smooth surface at DOME_OUT (widening toward WIDE_OUT as `hide` rises). `amount` scales its height (0 none).
+   *
+   * Why a floor along the axis, and not more stand-off along her skin's normal (what this did until alpha.119): a
+   * particle beside the tip has its nearest skin on the tip's flank, whose normal leans away from the axis, so pushing
+   * it out along that normal shoved it sideways, off her navel, and the cloth between two such particles crossed below
+   * the tip. Her navel came through there, 4-5 mm from the axis, by up to 6 mm at 200% and most when seated (Joshua's
+   * dark spot, 2026-10-24); pushing harder along the normal opened the hole wider. Along the axis the cloth only rises.
    */
-  private dome(d: Posed, amount: number, hide: number, q: Float32Array, n: number, lift: Float32Array): void {
+  private dome(d: Posed, amount: number, hide: number, p: Float32Array, A: SkinContacts, n: number): void {
     const top = Math.max(0, d.h) * amount;
     if (top <= 0) return;
     const L = DETAIL_LOOK, rin = L.domeIn * d.rho, rout = (L.domeOut + (L.wideOut - L.domeOut) * hide) * d.rho, rout2 = rout * rout;
-    const [bx, by, bz] = d.base, [nx, ny, nz] = d.n;
+    const [bx, by, bz] = d.base, [nx, ny, nz] = d.n, smooth0 = d.curve * d.reach2, q = A.point, qn = A.normal, lift = this.lift;
+    // the tip, across the axis from the rings' centre
+    const cx = d.c[0] - bx, cy = d.c[1] - by, cz = d.c[2] - bz, ca = cx * nx + cy * ny + cz * nz;
+    const kx = cx - ca * nx, ky = cy - ca * ny, kz = cz - ca * nz;
     for (let i = 0; i < n; i++) {
-      const dx = q[i * 3] - bx, dy = q[i * 3 + 1] - by, dz = q[i * 3 + 2] - bz, along = dx * nx + dy * ny + dz * nz;
-      const tx = dx - along * nx, ty = dy - along * ny, tz = dz - along * nz, r2 = tx * tx + ty * ty + tz * tz;
-      if (r2 >= rout2 || Math.abs(along - d.curve * d.reach2) > rout) continue;
+      const i3 = i * 3, dx = p[i3] - bx, dy = p[i3 + 1] - by, dz = p[i3 + 2] - bz, along = dx * nx + dy * ny + dz * nz;
+      const tx = dx - along * nx, ty = dy - along * ny, tz = dz - along * nz;
+      const ex = tx - kx, ey = ty - ky, ez = tz - kz, r2 = ex * ex + ey * ey + ez * ez;
+      // outside the dome, or a body's depth away along the axis (the back of the tee)
+      if (r2 >= rout2 || Math.abs(along - smooth0) > rout + top) continue;
       const r = Math.sqrt(r2), t = r <= rin ? 1 : (rout - r) / (rout - rin), f = t * t * (3 - 2 * t);
-      // her skin under the particle, above her smooth surface there (on the detail itself, most of its height)
-      const above = Math.max(0, along - d.curve * (d.reach2 - r2));
-      const want = top * f - above;
-      if (want > lift[i]) lift[i] = want;
+      // the dome's height over this particle, along the axis from the outer ring's plane; her skin under it, the same way
+      const floor = d.curve * (d.reach2 - (tx * tx + ty * ty + tz * tz)) + (top + DOME_MARGIN) * f;
+      const skin = (q[i3] - bx) * nx + (q[i3 + 1] - by) * ny + (q[i3 + 2] - bz) * nz;
+      if (floor <= skin) continue;
+      const drop = along - floor;
+      q[i3] = p[i3] - nx * drop; q[i3 + 1] = p[i3 + 1] - ny * drop; q[i3 + 2] = p[i3 + 2] - nz * drop;
+      qn[i3] = nx; qn[i3 + 1] = ny; qn[i3 + 2] = nz;
+      if (floor - skin > lift[i]) lift[i] = floor - skin;
     }
   }
 
@@ -323,17 +351,69 @@ export class ClothShirt {
   /** For a probe: how many times her body jumped and the cloth was laid again, and the largest one-frame move of a bound place since last asked. */
   jumps = 0;
   moved = 0;
+  /** For a probe: the most stretched edge at the last `strain()`: its two particles, its rest length and its length now (world). */
+  worstEdge: [number, number, number, number] = [0, 0, 0, 0];
   strain(): { min: number; max: number; slack: number; taut: number } {
     const x = this.sim.positions, R = this.restNow, E = this.sim.edges, k = this.sim.settings.restScale;
     let min = Infinity, max = 0, slack = 0, taut = 0;
+    let edges = 0;
     for (let e = 0; e < E.length; e += 2) {
+      if (E[e] >= this.active || E[e + 1] >= this.active) continue; // rows past TEE LENGTH are not simulated
+      edges++;
       const a = E[e] * 3, b = E[e + 1] * 3;
       const now = Math.hypot(x[b] - x[a], x[b + 1] - x[a + 1], x[b + 2] - x[a + 2]), rest = Math.hypot(R[b] - R[a], R[b + 1] - R[a + 1], R[b + 2] - R[a + 2]) * k;
       const r = now / Math.max(rest, 1e-6);
-      if (r < min) min = r; if (r > max) max = r; if (r < 0.9) slack++; if (r > 1.1) taut++;
+      if (r < min) min = r; if (r > max) { max = r; this.worstEdge = [E[e], E[e + 1], rest, now]; } if (r < 0.9) slack++; if (r > 1.1) taut++;
     }
-    const n = E.length / 2 || 1;
+    const n = edges || 1;
     return { min, max, slack: slack / n, taut: taut / n };
+  }
+  /**
+   * For a probe: how the cloth clears her skin over her navel. Every vertex of her body within `radius` (world) of her
+   * navel's axis is posed (slowly: a probe's), and the cloth's height over it along the axis read from the cloth
+   * triangle above it: the least gap, where it is, and how many of her vertices stand above the cloth.
+   */
+  navelGap(body: THREE.Mesh, radius = 2.5): { gap: number; r: number; through: number; checked: number; top: number; lift: number; h: number; tipH: number; tipR: number } | null {
+    const sp = this.spots;
+    if (!sp) return null;
+    const d = sp.navel, [bx, by, bz] = d.base, [nx, ny, nz] = d.n;
+    let ux = 1 - nx * nx, uy = -nx * ny, uz = -nx * nz; const ul = Math.hypot(ux, uy, uz) || 1; ux /= ul; uy /= ul; uz /= ul;
+    const wx = ny * uz - nz * uy, wy = nz * ux - nx * uz, wz = nx * uy - ny * ux;
+    const frame = (x: number, y: number, z: number): [number, number, number] => { const dx = x - bx, dy = y - by, dz = z - bz; return [dx * ux + dy * uy + dz * uz, dx * wx + dy * wy + dz * wz, dx * nx + dy * ny + dz * nz]; };
+    // the cloth's triangles near the axis, in the axis frame
+    const x = this.sim.positions, idx = this.mesh.geometry.index!.array, vp = this.vertexParticle, tris: number[][] = [];
+    for (let t = 0; t < idx.length; t += 3) {
+      const ps = [vp[idx[t]], vp[idx[t + 1]], vp[idx[t + 2]]];
+      if (ps.some((p) => p >= this.active)) continue;
+      const f = ps.map((p) => frame(x[p * 3], x[p * 3 + 1], x[p * 3 + 2]));
+      if (f.every((q) => Math.hypot(q[0], q[1]) > radius + 2)) continue;
+      tris.push(f.flat());
+    }
+    const n = (body.geometry.getAttribute('position') as THREE.BufferAttribute).count, P = this.vec;
+    let gap = Infinity, at = 0, through = 0, checked = 0, top = -Infinity, tipH = -Infinity, tipR = 0;
+    for (let v = 0; v < n; v++) {
+      this.skin.posedVertex(v, P);
+      const [a, b, h] = frame(P[0], P[1], P[2]), r = Math.hypot(a, b);
+      if (r > radius || Math.abs(h) > 6) continue;
+      top = Math.max(top, h);
+      const rel = h - d.curve * (d.reach2 - r * r);
+      if (rel > tipH) { tipH = rel; tipR = r; }
+      for (const T of tris) {
+        const x0 = T[0], y0 = T[1], x1 = T[3], y1 = T[4], x2 = T[6], y2 = T[7];
+        const den = (y1 - y2) * (x0 - x2) + (x2 - x1) * (y0 - y2);
+        if (Math.abs(den) < 1e-12) continue;
+        const l0 = ((y1 - y2) * (a - x2) + (x2 - x1) * (b - y2)) / den, l1 = ((y2 - y0) * (a - x2) + (x0 - x2) * (b - y2)) / den, l2 = 1 - l0 - l1;
+        if (l0 < 0 || l1 < 0 || l2 < 0) continue;
+        const g = l0 * T[2] + l1 * T[5] + l2 * T[8] - h;
+        if (g < -4) continue; // a triangle on her far side
+        checked++;
+        if (g < gap) { gap = g; at = r; }
+        if (g < 0) through++;
+        break;
+      }
+    }
+    let lift = 0; for (let i = 0; i < this.active; i++) lift = Math.max(lift, this.lift[i]);
+    return { gap, r: at, through, checked, top, lift, h: d.h, tipH, tipR };
   }
   /** How far her navel and nipples stand above her smooth surface, world units (negative an innie's depth), as last followed. */
   get detailHeights(): { navel: number; nipples: number[] } { const sp = this.spots; return { navel: sp?.navel.h ?? 0, nipples: sp?.nipples.map((d) => d.h) ?? [] }; }
@@ -375,9 +455,10 @@ export class ClothShirt {
       this.moved = Math.max(this.moved, Math.sqrt(most));
       if (most > JUMP * JUMP) { this.jumps++; this.restart(); skinMs += this.skin.update(this.sim.positions.subarray(0, n * 3), this.after); }
     }
-    if (!this.primed) { copyContacts(this.after, this.before); this.primed = true; }
-    // her navel and nipples this frame; the cloth over a proud navel lifted clear of it from the next frame's skin on
-    this.follow();
+    const fresh = !this.primed;
+    if (fresh) { copyContacts(this.after, this.before); this.primed = true; }
+    // her navel and nipples this frame, and the cloth over a proud one kept clear of it
+    this.follow(fresh);
     // just laid (a restart, a new length): calm for a moment, so the cloth settles onto her instead of whipping
     const damping = this.sim.settings.damping;
     if (this.warm > 0) { this.warm -= dt; this.sim.settings.damping = Math.max(damping, WARM_DAMPING); }

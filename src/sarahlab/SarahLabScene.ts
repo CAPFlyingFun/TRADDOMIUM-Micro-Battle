@@ -17,6 +17,8 @@ import { loadingCard, LOADING_COVERED_VAR, type LoadingCard, type LoadingPlace }
 import { LoadMeter } from '../assets/loadMeter';
 import { ClothShirt } from './clothShirt';
 import { setClothDetail } from './clothDetail';
+import { DetailSpots, SARAH_V2_DETAIL_POINTS, SARAH_V2_LITE_TEE_NAVEL, TeeNavel } from './detailSpots';
+import { SkinPose } from './skinPose';
 /**
  * THE SARAH LAB — Sarah rebuilt from Joshua's base mannequin, on a turntable,
  * to try before anything of it goes live (Joshua, 2026-10-07: "Good to test
@@ -361,6 +363,10 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
    * as one simulated sheet (clothShirt.ts), on while CLOTH SIM is, its length from the tee as made to mid-thigh, and what
    * it costs each frame on the stage. Fetched the first time it is turned on.
    */
+  // the FITTED light tee's detail (BREAST and NAVEL DETAIL on the modelled tee, the cloth off): a few points of her and
+  // of the tee posed on the CPU each frame -- her navel and nipples, and the tee's own navel against its smooth surface
+  let fitted: { body: THREE.SkinnedMesh; tee: THREE.SkinnedMesh; bodyPose: SkinPose; teePose: SkinPose; spots: DetailSpots; navel: TeeNavel } | null = null;
+  let fittedLaid = false;
   let cloth: ClothShirt | null = null, clothOn = false, clothLoading = false, clothRestart = false, clothRefit = false, teeLength = CLOTH_TEE_LENGTH_DEFAULT, frameMs = 1000 / 60;
   let teeLengthInput: HTMLInputElement | null = null;
   /** The cloth's dials (CLOTH_DIALS), kept across a reload of the cloth, and their sliders. */
@@ -536,7 +542,11 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     }, { normalizeNormals: !(mesh.userData.recoveredShirt || mesh.userData.recoveredLeggings) });
     for (const mesh of skinned) {
       const dict = mesh.morphTargetDictionary, influences = mesh.morphTargetInfluences;
-      if (dict && influences) for (const [name, w] of Object.entries({ ...bellyWeights(bump, bellyCurve), ...breastWeightsForShape(bump, dict[BREAST_GROW_TARGET] !== undefined, body.breastSize), [BELLY_UPPER_TARGET]: bellyUpperWeight(bump, bellyCurve), ...navelWeights(bump), [NAVEL_FLAT_TARGET]: Math.max(navelFlatWeight(bump), fabric?.navelFlatten() ?? 0, clothFlatten()), [BELLY_REFINE_TARGET]: refineWeight(refine, bump), [SEAT_TARGET]: seatCorrectiveWeight(pose === 'sit' ? 1 : 0, bump), [SEAT_V2_TARGET]: seatCorrectiveV2Weight(pose === 'sit' ? 1 : 0, bump), ...armRaiseWeights() })) {
+      // the fitted light tee keeps its own navel's shape as fitted for her size: NAVEL DETAIL settles it in the shader
+      // (clothFlatten). Settled by the morph instead -- as paint under it at a low NAVEL DETAIL used to do (the painted
+      // leggings over her navel) -- its navel, which past 125% stands above hers, was pushed into her: a hole in the tee.
+      const liteTee = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material).name === 'shirtSpandexLite';
+      if (dict && influences) for (const [name, w] of Object.entries({ ...bellyWeights(bump, bellyCurve), ...breastWeightsForShape(bump, dict[BREAST_GROW_TARGET] !== undefined, body.breastSize), [BELLY_UPPER_TARGET]: bellyUpperWeight(bump, bellyCurve), ...navelWeights(bump), [NAVEL_FLAT_TARGET]: liteTee ? navelFlatWeight(bump) : Math.max(navelFlatWeight(bump), fabric?.navelFlatten() ?? 0, clothFlatten()), [BELLY_REFINE_TARGET]: refineWeight(refine, bump), [SEAT_TARGET]: seatCorrectiveWeight(pose === 'sit' ? 1 : 0, bump), [SEAT_V2_TARGET]: seatCorrectiveV2Weight(pose === 'sit' ? 1 : 0, bump), ...armRaiseWeights() })) {
         const at = dict[name];
         if (at !== undefined) influences[at] = w;
       }
@@ -642,7 +652,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       for (const [p, old] of [...partMeshes]) {
         if (!isShirtPart(p)) continue;
         skinned = skinned.filter(m => !old.includes(m)); shaped = shaped.filter(x => !old.includes(x.mesh));
-        if (p === 'spandex-lite') dropCloth();
+        if (p === 'spandex-lite') { dropCloth(); fitted = null; fittedLaid = false; }
         releaseRecoveredMeshes(old); partMeshes.delete(p);
       }
     }
@@ -737,11 +747,21 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   function clothKeep(): { nipple: number; navel: number } {
     return fabric?.garmentDetail('shirtSpandexLite') ?? { nipple: 0.45, navel: 0.8 };
   }
-  /** Under the cloth tee her navel is softened the way paint softens it: toward flat by what NAVEL DETAIL hides. */
+  /**
+   * Under the light tee -- the cloth or the fitted one -- her navel is softened the way paint softens it: toward an
+   * ordinary navel by what NAVEL DETAIL hides. (Not the fitted tee's own navel: its shapes follow hers, and settled to
+   * an ordinary navel it would dip where hers does; that one is settled onto its smooth surface instead, in the shader.)
+   */
   let clothFlattenLaid = 0;
   function clothFlatten(): number {
-    clothFlattenLaid = clothOn && cloth ? 1 - clothKeep().navel : 0;
+    clothFlattenLaid = (clothOn && cloth) || fittedTee() ? 1 - clothKeep().navel : 0;
     return clothFlattenLaid;
+  }
+  /** The fitted light tee, when it is what she wears over her middle (the cloth off), or null. */
+  function fittedTee(): THREE.SkinnedMesh | null {
+    if (clothOn && cloth) return null;
+    const tee = partMeshes.get('spandex-lite')?.[0];
+    return tee && recovered && shownNow('shirtSpandexLite') ? tee : null;
   }
   function dress(next: number, opening = false): void {
     // chosen before she is in: the opening dresses her in it
@@ -1150,8 +1170,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         return box;
       },
       changed: () => outfits?.changed(),
-      // the CLOTH SIM tee lies over her nipples and navel: it counts for AUTO's detail
-      clothOver: () => (clothOn && cloth ? { name: 'shirtSpandexLite', label: 'cloth tee' } : null),
+      // the light tee lies over her nipples and navel, as cloth or as the fitted tee: it counts for AUTO's detail
+      clothOver: () => (clothOn && cloth ? { name: 'shirtSpandexLite', label: 'cloth tee' } : fittedTee() ? { name: 'shirtSpandexLite', label: 'spandex tee' } : null),
       navelHint: () => {
         // her navel: the vertex her own navel morphs move most
         const body = skinned.find(m => !!m.geometry.getAttribute('_cloth_cover'));
@@ -1575,6 +1595,24 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         if (Math.abs(1 - keep.navel - clothFlattenLaid) > 1e-3) applyLook();
         if (fields.cloth) fields.cloth.textContent = clothLine(cloth.stats(), frameMs);
       }
+      // the fitted light tee (the cloth off): her nipples drawn through it and its own navel settled onto its smooth
+      // surface, at the editor's BREAST and NAVEL DETAIL; her navel softened under it to match
+      const tee = fittedTee(), bodyMesh = tee ? skinned.find((m) => !!m.geometry.getAttribute('_cloth_cover')) : undefined;
+      if (tee && bodyMesh && tee.visible && model?.visible) {
+        if (!fitted || fitted.tee !== tee || fitted.body !== bodyMesh) fitted = { body: bodyMesh, tee, bodyPose: new SkinPose(bodyMesh), teePose: new SkinPose(tee), spots: new DetailSpots(SARAH_V2_DETAIL_POINTS), navel: new TeeNavel(SARAH_V2_LITE_TEE_NAVEL) };
+        model.updateMatrixWorld(true);
+        fitted.bodyPose.refresh(); fitted.teePose.refresh();
+        fitted.spots.measure(fitted.bodyPose);
+        fitted.navel.measure(fitted.teePose, fitted.spots.navel);
+        const keep = clothKeep();
+        setClothDetail(tee.material as THREE.Material, fitted.spots.fitted(keep, fitted.navel));
+        fittedLaid = true;
+        if (Math.abs(1 - keep.navel - clothFlattenLaid) > 1e-3) applyLook();
+      } else if (fittedLaid && !(clothOn && cloth)) {
+        const material = partMeshes.get('spandex-lite')?.[0]?.material;
+        if (material) setClothDetail(material as THREE.Material, null);
+        fittedLaid = false;
+      }
   }
 
   return {
@@ -1604,12 +1642,15 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         // the camera at any angle about her (yaw radians, 0 her front; pitch radians, below 0 from beneath)
         look: (yaw: number, pitch?: number) => { orbit.yaw = yaw; if (pitch !== undefined) orbit.pitch = pitch; turning = false; },
         animate: (secondsToRun: number, step = 1 / 60) => { const n = Math.max(0, Math.round(secondsToRun / step)); for (let k = 0; k < n; k++) advance(step); return cloth?.stats() ?? null; },
-        strain: () => { if (!cloth) return null; const r = { ...cloth.strain(), jumps: cloth.jumps, moved: cloth.moved }; cloth.moved = 0; return r; },
+        strain: () => { if (!cloth) return null; const r = { ...cloth.strain(), jumps: cloth.jumps, moved: cloth.moved, worst: cloth.worstEdge }; cloth.moved = 0; return r; },
         // what shows through the tee now (her navel's height above the skin round it, the spots the shading draws)
         detail: () => (cloth ? { heights: cloth.detailHeights, keep: clothKeep(), spots: cloth.detail(clothKeep()) } : null),
+        // the fitted tee's: her detail's heights, the tee's own navel over its smooth surface, and what is laid on it
+        fitted: () => (fitted ? { heights: { navel: fitted.spots.navel.h, nipples: fitted.spots.nipples.map((d) => d.h) }, relief: fitted.navel.relief, fit: fitted.navel.last, keep: clothKeep(), state: fitted.spots.fitted(clothKeep(), fitted.navel), laid: fittedLaid } : null),
         // BREAST or NAVEL DETAIL set (null: AUTO), as the outfit editor's sliders do
         keep: (which: 'nipple' | 'navel', value: number | null) => fabric?.setDetail(which, value),
         restart: () => { cloth?.restart(); },
+        navelGap: (radius?: number) => { const b = skinned.find((m) => !!m.geometry.getAttribute('_cloth_cover')); return cloth && b ? cloth.navelGap(b, radius) : null; },
         // where the drawn sheet's hem hangs, each side of her (world units): to read a lopsided hang as a number
         hem: () => {
           if (!cloth) return null;

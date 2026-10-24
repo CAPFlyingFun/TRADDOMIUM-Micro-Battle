@@ -37,6 +37,15 @@
  *   way is checked ONCE against her rest normals when this is built (and against her world matrix's handedness each
  *   frame, for the case of a mirrored room). The pin's "her normal" is the same face normal of its bound triangle, so the
  *   cloth file should measure its rest offsets along that.
+ * - THE CONTACT IS A SPOT OF HER, AND IT IS CARRIED (`SkinContacts.carried`). Each particle remembers not only the
+ *   triangle it was nearest but WHERE on it (barycentric), and before walking poses that same spot as she stands now:
+ *   where last frame's contact has gone. The cloth's friction holds to that, because the nearest point moves when the
+ *   particle slides and the spot of skin does not (Joshua at GRIP's top, 2026-10-24: the tee "starts ripping up the
+ *   outfit… about 3s after I adjust the slider" -- friction against the nearest point's own motion made every stuck
+ *   particle repeat last frame's slide, undamped). It costs no posing: last frame's triangle is the first one the walk
+ *   measures, so its corners are posed this update either way; what is added is a weighted sum of three corners and
+ *   remembering two weights -- measured on the 6,000-particle bench below, about 0.1 ms on a 2.9 ms update, and not
+ *   one vertex more posed.
  *
  * What it reads, so whoever calls it keeps these current first: her bones' and her mesh's world matrices (her model's
  * `updateMatrixWorld(true)` -- the bones are read through `matrixWorld`, so `skeleton.update()` is not needed), her
@@ -81,6 +90,14 @@ const STEP_GAIN = 1 - 1e-6;
 /** Where on a triangle its closest point lies: inside, on an edge (v0-v1, v1-v2, v2-v0), or at a corner (v0, v1, v2). */
 const FACE = 0, EDGE_01 = 1, EDGE_12 = 2, EDGE_20 = 3, CORNER_0 = 4, CORNER_1 = 5, CORNER_2 = 6;
 
+/**
+ * What a particle's last contact was, so it can be carried (`SkinContacts.carried`):
+ * - FRESH: there was none (a new ClothSkin, or just after `initial`): `carried` is this update's own point, no motion.
+ * - BOUND: its own bound place (binding.tri at binding.bary), where a blown-up particle was put: the pin's skin point.
+ * - WALKED: triangle `last[i]` at the barycentric weights `contactBary` holds, in that triangle's own corner order.
+ */
+const CARRY_FRESH = 0, CARRY_BOUND = 1, CARRY_WALKED = 2;
+
 type Attr = THREE.BufferAttribute | THREE.InterleavedBufferAttribute;
 
 export class ClothSkin {
@@ -119,6 +136,15 @@ export class ClothSkin {
   // --- per particle, carried between updates ---
   /** The triangle each particle was nearest last update. */
   private readonly last: Uint32Array;
+  /**
+   * Where on `last[i]` that nearest point was, barycentric in the triangle's own corner order (count × 3): with `last`,
+   * the spot of her skin the particle touched, which the next update poses again to say where it has gone. Starts as
+   * the binding's own weights, but is read only under CARRY_WALKED: FRESH carries nothing, and BOUND's place is the
+   * pin's skin point, already posed in the binding's own corner order (which need not be the bound triangle's).
+   */
+  private readonly contactBary: Float32Array;
+  /** CARRY_FRESH, CARRY_BOUND or CARRY_WALKED per particle: what `last` and `contactBary` describe. */
+  private readonly contactKind: Uint8Array;
 
   // --- per update ---
   /** Each vertex posed this update, world (vertex × 3). */
@@ -153,6 +179,13 @@ export class ClothSkin {
   private readonly m4 = new THREE.Matrix4();
   private readonly m4b = new THREE.Matrix4();
   private qx = 0; private qy = 0; private qz = 0; private reg = FACE;
+  /**
+   * The last closest point's barycentric weights on corners 1 and 2 (corner 0's is 1 - bv - bw). Kept up by `closest`
+   * for every triangle the walk tries, and carried by the walk with its best, because that measured cheaper than
+   * working them out afresh for the walk's last triangle: on the 6,000-particle bench, 0.1-0.2 ms an update for the
+   * whole carried point against 0.5 ms (the division-heavy afresh sum costs more than a few stores per try).
+   */
+  private bv = 0; private bw = 0;
   private nx = 0; private ny = 0; private nz = 0;
   /** The last pin's bare skin point. */
   private sx = 0; private sy = 0; private sz = 0;
@@ -273,6 +306,8 @@ export class ClothSkin {
     }
     this.bound = bound; this.exact = exact;
     this.last = bound.slice();
+    this.contactBary = binding.bary.slice(0, n * 3);
+    this.contactKind = new Uint8Array(n).fill(CARRY_FRESH);
 
     // her arms, and the particles bound to her trunk, which keep off them
     this.armTri = new Uint8Array(nT); this.trunkOnly = new Uint8Array(n);
@@ -338,18 +373,21 @@ export class ClothSkin {
 
   /**
    * Where each particle starts, world (count×3): its bound skin point as she is posed NOW, plus its rest offset (scaled
-   * to world) along her normal there. Every particle's walk starts again from its bound triangle.
+   * to world) along her normal there. Every particle's walk starts again from its bound triangle, and has no last
+   * contact to carry: the next update's `carried` is its own `point`.
    */
   initial(out: Float32Array): Float32Array {
     this.refresh();
     const n = this.count;
     for (let i = 0; i < n; i++) { this.pinOf(i, out, i * 3); this.last[i] = this.bound[i]; }
+    this.contactKind.fill(CARRY_FRESH);
     return out;
   }
 
   /**
-   * Her skin under the cloth now. For each particle (given its current world position in `cloth`): starting from the
-   * triangle it was nearest last time (first time: its bound triangle), walk to the nearest triangle around it, then
+   * Her skin under the cloth now. For each particle (given its current world position in `cloth`): first, last
+   * update's contact -- the same triangle at the same barycentric place -- posed as she stands now, into `carried`;
+   * then, starting from that triangle (first time: its bound triangle), walk to the nearest triangle around it, and
    * write the closest point, the triangle's outward unit normal (posed, world) and standOff = thickness. pinTarget is
    * always from the particle's FIXED bound triangle and bary (never walked). Returns the milliseconds spent.
    */
@@ -359,31 +397,42 @@ export class ClothSkin {
     const n = Math.min(this.count, Math.floor(cloth.length / 3));
     const { tris, weld, rowStart, rowTri, adj, last, maxWalk, thickness } = this, clearance = this.restClearance, offset = this.binding.offset, scale = this.scale;
     const extra = this.extraStandOff && this.extraStandOff.length >= n ? this.extraStandOff : null;
-    const P = out.point, Nn = out.normal, S = out.standOff, bound = this.bound;
+    const P = out.point, Nn = out.normal, S = out.standOff, C = out.carried, bound = this.bound;
+    const kind = this.contactKind, cb = this.contactBary, W = this.world;
     for (let i = 0; i < n; i++) {
       const i3 = i * 3;
       const px = cloth[i3], py = cloth[i3 + 1], pz = cloth[i3 + 2];
       // the pin first: its bound triangle's normal is also the contact's whenever the particle has not walked off it
       const pinOk = this.pinOf(i, out.pinTarget, i3);
       const pnx = this.nx, pny = this.ny, pnz = this.nz;
+      const was = kind[i];
       if (!(Number.isFinite(px) && Number.isFinite(py) && Number.isFinite(pz))) {
-        // a particle that has blown up gets its own bound place on her as its floor, and starts there next time
+        // a particle that has blown up gets its own bound place on her as its floor, and starts there next time; that
+        // place is where its contact is now, so nothing of her is carried this time
         P[i3] = this.sx; P[i3 + 1] = this.sy; P[i3 + 2] = this.sz;
+        C[i3] = this.sx; C[i3 + 1] = this.sy; C[i3 + 2] = this.sz;
         if (pinOk) { Nn[i3] = pnx; Nn[i3 + 1] = pny; Nn[i3 + 2] = pnz; } else keepNormal(Nn, i3);
-        S[i] = thickness; last[i] = bound[i];
+        S[i] = thickness; last[i] = bound[i]; kind[i] = CARRY_BOUND;
         continue;
       }
       let t = last[i];
       const keepOff = this.trunkOnly[i] === 1, armTri = this.armTri;
       let d = this.closest(t, px, py, pz);
-      let qx = this.qx, qy = this.qy, qz = this.qz, reg = this.reg;
+      // last update's contact, carried: `closest` has just posed t's corners, so this poses nothing more
+      if (was === CARRY_WALKED) {
+        const a = tris[t * 3] * 3, b = tris[t * 3 + 1] * 3, c = tris[t * 3 + 2] * 3, u = cb[i3], v = cb[i3 + 1], w = cb[i3 + 2];
+        C[i3] = u * W[a] + v * W[b] + w * W[c];
+        C[i3 + 1] = u * W[a + 1] + v * W[b + 1] + w * W[c + 1];
+        C[i3 + 2] = u * W[a + 2] + v * W[b + 2] + w * W[c + 2];
+      } else if (was === CARRY_BOUND) { C[i3] = this.sx; C[i3 + 1] = this.sy; C[i3 + 2] = this.sz; }
+      let qx = this.qx, qy = this.qy, qz = this.qz, reg = this.reg, qv = this.bv, qw = this.bw;
       for (let step = 0; step < maxWalk && reg !== FACE; step++) {
-        let bestT = -1, bestD = d * STEP_GAIN, bx = 0, by = 0, bz = 0, br = FACE;
+        let bestT = -1, bestD = d * STEP_GAIN, bx = 0, by = 0, bz = 0, br = FACE, bv = 0, bw = 0;
         if (reg <= EDGE_20) {
           const u = adj[t * 3 + reg - EDGE_01];
           if (u >= 0 && !(keepOff && armTri[u])) {
             const du = this.closest(u, px, py, pz);
-            if (du < bestD) { bestT = u; bestD = du; bx = this.qx; by = this.qy; bz = this.qz; br = this.reg; }
+            if (du < bestD) { bestT = u; bestD = du; bx = this.qx; by = this.qy; bz = this.qz; br = this.reg; bv = this.bv; bw = this.bw; }
           }
         } else {
           const w = weld[tris[t * 3 + reg - CORNER_0]];
@@ -391,14 +440,17 @@ export class ClothSkin {
             const u = rowTri[k];
             if (u === t || (keepOff && armTri[u])) continue;
             const du = this.closest(u, px, py, pz);
-            if (du < bestD) { bestT = u; bestD = du; bx = this.qx; by = this.qy; bz = this.qz; br = this.reg; }
+            if (du < bestD) { bestT = u; bestD = du; bx = this.qx; by = this.qy; bz = this.qz; br = this.reg; bv = this.bv; bw = this.bw; }
           }
         }
         if (bestT < 0) break;
-        t = bestT; d = bestD; qx = bx; qy = by; qz = bz; reg = br;
+        t = bestT; d = bestD; qx = bx; qy = by; qz = bz; reg = br; qv = bv; qw = bw;
       }
       last[i] = t;
       P[i3] = qx; P[i3 + 1] = qy; P[i3 + 2] = qz;
+      // this contact is the spot of her the next update carries; with no last one, nothing of her was carried
+      cb[i3] = 1 - qv - qw; cb[i3 + 1] = qv; cb[i3 + 2] = qw; kind[i] = CARRY_WALKED;
+      if (was === CARRY_FRESH) { C[i3] = qx; C[i3 + 1] = qy; C[i3 + 2] = qz; }
       // t's corners were posed when it was measured, so its normal needs no posing
       if (t === bound[i] && pinOk) { Nn[i3] = pnx; Nn[i3 + 1] = pny; Nn[i3 + 2] = pnz; }
       else if (this.normalOf(t)) { Nn[i3] = this.nx; Nn[i3 + 1] = this.ny; Nn[i3 + 2] = this.nz; }
@@ -409,9 +461,10 @@ export class ClothSkin {
   }
 
   /**
-   * More stand-off for some particles this frame (world units, one a particle; null for none): where a detail of her
-   * skin smaller than the cloth's spacing stands proud -- her navel past 75% -- the cloth over it keeps clear of it, or
-   * the detail comes up between particles.
+   * More stand-off for some particles this frame (world units, one a particle; null for none), along her normal under
+   * each. The cloth tee kept clear of her proud navel this way until alpha.120; on a navel's flank that normal leans away
+   * from it and the push shoved the cloth off her navel, so the tee now lays a dome along the navel's own axis in place
+   * of her skin there instead (`clothShirt.ts`) and leaves this null.
    */
   extraStandOff: Float32Array | null = null;
 
@@ -567,7 +620,8 @@ export class ClothSkin {
 
   /**
    * The closest point of triangle t to (px, py, pz), posed: into qx/qy/qz, with where on the triangle it fell into
-   * `reg`. Returns the squared distance. Ericson's region test (Real-Time Collision Detection, 5.1.5), with every
+   * `reg` and its barycentric weights on corners 1 and 2 into bv/bw (what the next update carries, `contactBary`).
+   * Returns the squared distance. Ericson's region test (Real-Time Collision Detection, 5.1.5), with every
    * division guarded so a sliver of her mesh answers with a point rather than NaN.
    */
   private closest(t: number, px: number, py: number, pz: number): number {
@@ -581,36 +635,39 @@ export class ClothSkin {
     const acx = W[c] - ax, acy = W[c + 1] - ay, acz = W[c + 2] - az;
     const apx = px - ax, apy = py - ay, apz = pz - az;
     const d1 = abx * apx + aby * apy + abz * apz, d2 = acx * apx + acy * apy + acz * apz;
-    let qx: number, qy: number, qz: number, reg: number;
+    // (bv, bw): q's barycentric weights on corners 1 and 2, so q = a + bv·ab + bw·ac in every region
+    let qx: number, qy: number, qz: number, reg: number, bv = 0, bw = 0;
     if (d1 <= 0 && d2 <= 0) { qx = ax; qy = ay; qz = az; reg = CORNER_0; }
     else {
       const bpx = px - W[b], bpy = py - W[b + 1], bpz = pz - W[b + 2];
       const d3 = abx * bpx + aby * bpy + abz * bpz, d4 = acx * bpx + acy * bpy + acz * bpz;
-      if (d3 >= 0 && d4 <= d3) { qx = W[b]; qy = W[b + 1]; qz = W[b + 2]; reg = CORNER_1; }
+      if (d3 >= 0 && d4 <= d3) { qx = W[b]; qy = W[b + 1]; qz = W[b + 2]; reg = CORNER_1; bv = 1; }
       else {
         const vc = d1 * d4 - d3 * d2;
         if (vc <= 0 && d1 >= 0 && d3 <= 0) {
           const den = d1 - d3, s = den > 0 ? d1 / den : 0;
-          qx = ax + s * abx; qy = ay + s * aby; qz = az + s * abz; reg = EDGE_01;
+          qx = ax + s * abx; qy = ay + s * aby; qz = az + s * abz; reg = EDGE_01; bv = s;
         } else {
           const cpx = px - W[c], cpy = py - W[c + 1], cpz = pz - W[c + 2];
           const d5 = abx * cpx + aby * cpy + abz * cpz, d6 = acx * cpx + acy * cpy + acz * cpz;
-          if (d6 >= 0 && d5 <= d6) { qx = W[c]; qy = W[c + 1]; qz = W[c + 2]; reg = CORNER_2; }
+          if (d6 >= 0 && d5 <= d6) { qx = W[c]; qy = W[c + 1]; qz = W[c + 2]; reg = CORNER_2; bw = 1; }
           else {
             const vb = d5 * d2 - d1 * d6;
             if (vb <= 0 && d2 >= 0 && d6 <= 0) {
               const den = d2 - d6, s = den > 0 ? d2 / den : 0;
-              qx = ax + s * acx; qy = ay + s * acy; qz = az + s * acz; reg = EDGE_20;
+              qx = ax + s * acx; qy = ay + s * acy; qz = az + s * acz; reg = EDGE_20; bw = s;
             } else {
               const va = d3 * d6 - d5 * d4, e1 = d4 - d3, e2 = d5 - d6;
               if (va <= 0 && e1 >= 0 && e2 >= 0) {
                 const den = e1 + e2, s = den > 0 ? e1 / den : 0;
                 qx = W[b] + s * (W[c] - W[b]); qy = W[b + 1] + s * (W[c + 1] - W[b + 1]); qz = W[b + 2] + s * (W[c + 2] - W[b + 2]); reg = EDGE_12;
+                bv = 1 - s; bw = s;
               } else {
                 const sum = va + vb + vc;
                 if (sum > 0) {
                   const v = vb / sum, w = vc / sum;
                   qx = ax + abx * v + acx * w; qy = ay + aby * v + acy * w; qz = az + abz * v + acz * w; reg = FACE;
+                  bv = v; bw = w;
                 } else { qx = ax; qy = ay; qz = az; reg = CORNER_0; }
               }
             }
@@ -618,7 +675,7 @@ export class ClothSkin {
         }
       }
     }
-    this.qx = qx; this.qy = qy; this.qz = qz; this.reg = reg;
+    this.qx = qx; this.qy = qy; this.qz = qz; this.reg = reg; this.bv = bv; this.bw = bw;
     const dx = px - qx, dy = py - qy, dz = pz - qz;
     return dx * dx + dy * dy + dz * dz;
   }
