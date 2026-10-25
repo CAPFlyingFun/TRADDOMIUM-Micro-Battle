@@ -1,4 +1,4 @@
-# Sarah as Joshua set her, and the cloth tee on by default
+# Sarah as Joshua set her, and the cloth tee on by default (alpha.125)
 
 Joshua, 2026-10-24: "Here is Sarah and the minor tweaks I did… we need to make sure the cloth sim is on by default,
 you have it off…"
