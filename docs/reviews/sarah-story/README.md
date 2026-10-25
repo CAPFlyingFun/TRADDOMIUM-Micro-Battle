@@ -51,3 +51,4 @@ Not in the Watch: the cloth simulation. She wears the fitted tee, skinned.
   - eyes on the viewer, talking, looking aside, blinking;
   - standing, and the settled sit from the side and the front.
 - `03-other-chapters.jpg`: Chapters 2, 4, 6 and 10. All ten 3D chapters were loaded with her: each reports the 3D people ready, with no page errors.
+- `04-on-their-marks.jpg`: the scene-code fixes Joshua asked for (2026-10-25: "check that Jack and Sarah's position doesn't randomly change places and that it matches the scene"). It shows Chapter 1 before and after (Jack no longer rolls across in front of Sarah's screen; her hand rests on her thigh), Chapter 2 at the window (walked round the consoles), and Chapter 9 outdoors (Jack back in the shot). TMB-Story decision 0038 has the frame-by-frame audit behind it.
