@@ -17,16 +17,26 @@
  * other morph normals already take (KHR_mesh_quantization). The check holds those to half a step (1/65534) of the
  * original and every other array to exact equality. One with a value outside [-1, 1] is left as it is.
  *
- *   node scripts/sarahV2Recovery/body-slim.mjs
+ * HER SKIN IS THE TOUCHED-UP SKIN (Joshua, 2026-10-25: "Good to push the updated textures", approving the region sheets
+ * in `docs/reviews/base-touchups/`). Meshy baked shading into her colour map in hundreds of small atlas patches whose
+ * edges showed on her skin; `scripts/baseTouchup/touch.py` evened them out on her body's surface and kept her skin's
+ * grain. The two maps it wrote are `art/humans/base-touchup/sarah-v2/{base,normal}.png`, and this script puts them in
+ * place of Material_0's colour and normal maps (the same texture objects, so names and samplers stay). Every texel the
+ * touch-up did not edit is the archive's own byte. Her geometry is untouched, which the check below still proves.
+ *
+ *   node scripts/sarahV2Recovery/body-slim.mjs [--out public/models/sarah-v2-body-slim.glb]
  */
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { prune } from '@gltf-transform/functions';
 import { MeshoptDecoder, MeshoptEncoder } from 'meshoptimizer';
-import { statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 
 const SOURCE = 'assets-archive/models/sarah-v2-body.glb';
-const TARGET = 'public/models/sarah-v2-body-slim.glb';
+const outAt = process.argv.indexOf('--out');
+const TARGET = outAt > 0 ? process.argv[outAt + 1] : 'public/models/sarah-v2-body-slim.glb';
+/** The approved touched-up skin maps (see the header); the archive's own maps are used if they are not there. */
+const SKIN = { base: 'art/humans/base-touchup/sarah-v2/base.png', normal: 'art/humans/base-touchup/sarah-v2/normal.png' };
 /** The parts no outfit on the v2 body draws from this file. */
 /** The grid a float morph normal past [-1, 1] is rounded to: 1/1024 (under a tenth of a degree of light direction), far below what light on her can show. */
 const GRID = 1024;
@@ -62,6 +72,22 @@ for (const mesh of doc.getRoot().listMeshes()) for (const p of mesh.listPrimitiv
 }
 // what only the dropped parts used (their materials, knit textures, accessors) goes with them; nothing else is touched
 await doc.transform(prune({ keepAttributes: true, keepIndices: true, keepLeaves: true, keepSolidTextures: true }));
+
+// her touched-up skin in place of the archive's maps (see the header)
+let skinned = 0;
+if (existsSync(SKIN.base) && existsSync(SKIN.normal)) {
+  const body = doc.getRoot().listMaterials().find((m) => m.getName() === 'Material_0');
+  const base = body?.getBaseColorTexture(), normal = body?.getNormalTexture();
+  if (!base || !normal) throw new Error('Material_0 has no colour or normal map to replace');
+  for (const [texture, file] of [[base, SKIN.base], [normal, SKIN.normal]]) {
+    const png = readFileSync(file);
+    if (texture.getMimeType() !== 'image/png') throw new Error(`${file}: the map it replaces is ${texture.getMimeType()}, not PNG`);
+    const [w0, h0] = texture.getSize(), w1 = png.readUInt32BE(16), h1 = png.readUInt32BE(20);
+    if (w0 !== w1 || h0 !== h1) throw new Error(`${file} is ${w1}x${h1}, the map it replaces ${w0}x${h0}`);
+    texture.setImage(new Uint8Array(png));
+    skinned += 1;
+  }
+}
 
 // morph normals stored as 16-bit normalized integers where they fit (see the header)
 let quantized = 0, skipped = 0;
@@ -111,4 +137,5 @@ await io.write(TARGET, doc);
 const mb = (f) => (statSync(f).size / 1048576).toFixed(1);
 console.log(`dropped ${dropped} primitives (${droppedVerts} vertices); kept ${before.length}, every array identical`
   + `${quantized ? ` but ${quantized} float morph normals now 16-bit (within half a step)` : ''}${skipped ? `; ${skipped} float morph normals rounded to 1/${GRID} (values past 1)` : ''}`);
+console.log(skinned ? `her skin: the touched-up maps (${SKIN.base}, ${SKIN.normal})` : 'her skin: the archive\'s own maps');
 console.log(`${SOURCE} ${mb(SOURCE)} MB -> ${TARGET} ${mb(TARGET)} MB`);

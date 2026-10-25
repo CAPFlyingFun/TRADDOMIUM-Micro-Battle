@@ -1,0 +1,659 @@
+{
+ "ops": [
+  {
+   "op": "seams",
+   "sigma_mm": 9,
+   "detect_mm": 4,
+   "threshold": [
+    0.006,
+    0.025
+   ],
+   "grow_mm": 8,
+   "name": "face: none",
+   "zone": {
+    "shapes": [
+     {
+      "box": [
+       0,
+       0,
+       0,
+       0,
+       0,
+       0
+      ],
+      "feather": 0.02
+     }
+    ]
+   }
+  },
+  {
+   "op": "seams",
+   "sigma_mm": 9,
+   "detect_mm": 4,
+   "threshold": [
+    0.006,
+    0.025
+   ],
+   "grow_mm": 8,
+   "name": "arms and hands",
+   "zone": {
+    "shapes": [
+     {
+      "box": [
+       0.17,
+       0.68,
+       -0.15,
+       0.42,
+       1.45,
+       0.15
+      ],
+      "feather": 0.02
+     },
+     {
+      "box": [
+       -0.42,
+       0.68,
+       -0.15,
+       -0.17,
+       1.45,
+       0.15
+      ],
+      "feather": 0.02
+     }
+    ],
+    "except": [
+     {
+      "box": [
+       -0.3,
+       1.43,
+       -0.3,
+       0.3,
+       1.8,
+       0.3
+      ],
+      "feather": 0.02
+     },
+     {
+      "box": [
+       0.22,
+       0.73,
+       -0.06,
+       0.32,
+       0.778,
+       0.05
+      ],
+      "feather": 0.006,
+      "tag": "nail"
+     },
+     {
+      "box": [
+       -0.32,
+       0.73,
+       -0.06,
+       -0.22,
+       0.778,
+       0.05
+      ],
+      "feather": 0.006,
+      "tag": "nail"
+     },
+     {
+      "ellipsoid": [
+       0.25,
+       0.812,
+       0.025
+      ],
+      "r": [
+       0.016,
+       0.016,
+       0.016
+      ],
+      "feather": 0.005,
+      "tag": "nail"
+     },
+     {
+      "ellipsoid": [
+       -0.25,
+       0.811,
+       0.025
+      ],
+      "r": [
+       0.016,
+       0.016,
+       0.016
+      ],
+      "feather": 0.005,
+      "tag": "nail"
+     },
+     {
+      "box": [
+       0.058,
+       0.0,
+       0.072,
+       0.126,
+       0.036,
+       0.11
+      ],
+      "feather": 0.006,
+      "tag": "nail"
+     },
+     {
+      "box": [
+       -0.126,
+       0.0,
+       0.072,
+       -0.058,
+       0.036,
+       0.11
+      ],
+      "feather": 0.006,
+      "tag": "nail"
+     }
+    ]
+   }
+  },
+  {
+   "op": "seams",
+   "sigma_mm": 9,
+   "detect_mm": 4,
+   "threshold": [
+    0.005,
+    0.02
+   ],
+   "grow_mm": 8,
+   "name": "chest: the line under the breasts",
+   "zone": {
+    "shapes": [
+     {
+      "box": [
+       -0.2,
+       1.17,
+       -0.02,
+       0.2,
+       1.43,
+       0.25
+      ],
+      "feather": 0.02
+     }
+    ],
+    "except": [
+     {
+      "ellipsoid": [
+       0.089,
+       1.273,
+       0.072
+      ],
+      "r": [
+       0.028,
+       0.028,
+       0.028
+      ],
+      "feather": 0.01
+     },
+     {
+      "ellipsoid": [
+       -0.091,
+       1.274,
+       0.072
+      ],
+      "r": [
+       0.028,
+       0.028,
+       0.028
+      ],
+      "feather": 0.01
+     },
+     {
+      "box": [
+       -0.3,
+       1.43,
+       -0.3,
+       0.3,
+       1.8,
+       0.3
+      ],
+      "feather": 0.02
+     }
+    ]
+   },
+   "flatten": 0.6
+  },
+  {
+   "op": "smooth",
+   "name": "chest: the dark line baked along the under-breast crease",
+   "sigma_mm": 5,
+   "grain": 0.5,
+   "grain_px": 1.0,
+   "zone": {
+    "shapes": [
+     {
+      "polyline_xy": [
+       [
+        0,
+        1.24
+       ],
+       [
+        0.02,
+        1.239
+       ],
+       [
+        0.04,
+        1.235
+       ],
+       [
+        0.06,
+        1.227
+       ],
+       [
+        0.08,
+        1.219
+       ],
+       [
+        0.09,
+        1.217
+       ],
+       [
+        0.1,
+        1.22
+       ],
+       [
+        0.11,
+        1.232
+       ]
+      ],
+      "mirror": true,
+      "width": 0.006,
+      "feather": 0.006,
+      "zmin": 0.0
+     }
+    ]
+   }
+  },
+  {
+   "op": "seams",
+   "sigma_mm": 9,
+   "detect_mm": 4,
+   "threshold": [
+    0.006,
+    0.025
+   ],
+   "grow_mm": 8,
+   "name": "belly: the seam down the middle and the patches at the bottom",
+   "zone": {
+    "shapes": [
+     {
+      "box": [
+       -0.26,
+       0.84,
+       0.0,
+       0.26,
+       1.2,
+       0.3
+      ],
+      "feather": 0.02
+     }
+    ],
+    "except": [
+     {
+      "ellipsoid": [
+       0.0,
+       1.013,
+       0.216
+      ],
+      "r": [
+       0.04,
+       0.04,
+       0.04
+      ],
+      "feather": 0.012
+     }
+    ]
+   }
+  },
+  {
+   "op": "seams",
+   "sigma_mm": 9,
+   "detect_mm": 4,
+   "threshold": [
+    0.006,
+    0.025
+   ],
+   "grow_mm": 8,
+   "name": "groin and leg creases",
+   "zone": {
+    "shapes": [
+     {
+      "box": [
+       -0.23,
+       0.6,
+       -0.12,
+       0.23,
+       0.93,
+       0.26
+      ],
+      "feather": 0.03
+     }
+    ]
+   }
+  },
+  {
+   "op": "seams",
+   "sigma_mm": 9,
+   "detect_mm": 4,
+   "threshold": [
+    0.006,
+    0.025
+   ],
+   "grow_mm": 8,
+   "name": "legs",
+   "zone": {
+    "shapes": [
+     {
+      "box": [
+       -0.25,
+       0.06,
+       -0.2,
+       0.25,
+       0.64,
+       0.2
+      ],
+      "feather": 0.02
+     }
+    ],
+    "except": [
+     {
+      "box": [
+       0.22,
+       0.73,
+       -0.06,
+       0.32,
+       0.778,
+       0.05
+      ],
+      "feather": 0.006,
+      "tag": "nail"
+     },
+     {
+      "box": [
+       -0.32,
+       0.73,
+       -0.06,
+       -0.22,
+       0.778,
+       0.05
+      ],
+      "feather": 0.006,
+      "tag": "nail"
+     },
+     {
+      "ellipsoid": [
+       0.25,
+       0.812,
+       0.025
+      ],
+      "r": [
+       0.016,
+       0.016,
+       0.016
+      ],
+      "feather": 0.005,
+      "tag": "nail"
+     },
+     {
+      "ellipsoid": [
+       -0.25,
+       0.811,
+       0.025
+      ],
+      "r": [
+       0.016,
+       0.016,
+       0.016
+      ],
+      "feather": 0.005,
+      "tag": "nail"
+     },
+     {
+      "box": [
+       0.058,
+       0.0,
+       0.072,
+       0.126,
+       0.036,
+       0.11
+      ],
+      "feather": 0.006,
+      "tag": "nail"
+     },
+     {
+      "box": [
+       -0.126,
+       0.0,
+       0.072,
+       -0.058,
+       0.036,
+       0.11
+      ],
+      "feather": 0.006,
+      "tag": "nail"
+     }
+    ]
+   }
+  },
+  {
+   "op": "seams",
+   "sigma_mm": 9,
+   "detect_mm": 4,
+   "threshold": [
+    0.006,
+    0.025
+   ],
+   "grow_mm": 8,
+   "name": "feet",
+   "zone": {
+    "shapes": [
+     {
+      "box": [
+       -0.25,
+       0.0,
+       -0.25,
+       0.25,
+       0.09,
+       0.15
+      ],
+      "feather": 0.02
+     }
+    ],
+    "except": [
+     {
+      "box": [
+       0.22,
+       0.73,
+       -0.06,
+       0.32,
+       0.778,
+       0.05
+      ],
+      "feather": 0.006,
+      "tag": "nail"
+     },
+     {
+      "box": [
+       -0.32,
+       0.73,
+       -0.06,
+       -0.22,
+       0.778,
+       0.05
+      ],
+      "feather": 0.006,
+      "tag": "nail"
+     },
+     {
+      "ellipsoid": [
+       0.25,
+       0.812,
+       0.025
+      ],
+      "r": [
+       0.016,
+       0.016,
+       0.016
+      ],
+      "feather": 0.005,
+      "tag": "nail"
+     },
+     {
+      "ellipsoid": [
+       -0.25,
+       0.811,
+       0.025
+      ],
+      "r": [
+       0.016,
+       0.016,
+       0.016
+      ],
+      "feather": 0.005,
+      "tag": "nail"
+     },
+     {
+      "box": [
+       0.058,
+       0.0,
+       0.072,
+       0.126,
+       0.036,
+       0.11
+      ],
+      "feather": 0.006,
+      "tag": "nail"
+     },
+     {
+      "box": [
+       -0.126,
+       0.0,
+       0.072,
+       -0.058,
+       0.036,
+       0.11
+      ],
+      "feather": 0.006,
+      "tag": "nail"
+     }
+    ]
+   }
+  },
+  {
+   "op": "seams",
+   "sigma_mm": 9,
+   "detect_mm": 4,
+   "threshold": [
+    0.006,
+    0.025
+   ],
+   "grow_mm": 8,
+   "name": "back and seat: the bikini outline",
+   "zone": {
+    "shapes": [
+     {
+      "box": [
+       -0.26,
+       0.62,
+       -0.35,
+       0.26,
+       1.43,
+       0.0
+      ],
+      "feather": 0.02
+     }
+    ],
+    "except": [
+     {
+      "box": [
+       -0.3,
+       1.43,
+       -0.3,
+       0.3,
+       1.8,
+       0.3
+      ],
+      "feather": 0.02
+     }
+    ]
+   }
+  },
+  {
+   "op": "smooth",
+   "name": "belly centre: the seam down the middle (colour)",
+   "sigma_mm": 4,
+   "zone": {
+    "shapes": [
+     {
+      "box": [
+       -0.005,
+       0.8,
+       0.0,
+       0.005,
+       1.22,
+       0.35
+      ],
+      "feather": 0.006
+     }
+    ],
+    "except": [
+     {
+      "ellipsoid": [
+       0.0,
+       1.013,
+       0.216
+      ],
+      "r": [
+       0.02,
+       0.02,
+       0.02
+      ],
+      "feather": 0.006
+     }
+    ]
+   },
+   "grain": 0.5,
+   "grain_px": 1.0
+  },
+  {
+   "op": "flatten",
+   "name": "belly centre: the seam down the middle (normal map)",
+   "amount": 0.9,
+   "zone": {
+    "shapes": [
+     {
+      "box": [
+       -0.005,
+       0.8,
+       0.0,
+       0.005,
+       1.22,
+       0.35
+      ],
+      "feather": 0.006
+     }
+    ],
+    "except": [
+     {
+      "ellipsoid": [
+       0.0,
+       1.013,
+       0.216
+      ],
+      "r": [
+       0.02,
+       0.02,
+       0.02
+      ],
+      "feather": 0.006
+     }
+    ]
+   }
+  }
+ ]
+}

@@ -1,0 +1,221 @@
+{
+ "seams": [
+  {
+   "name": "hip line (moulded briefs' top edge)",
+   "kind": "loop",
+   "y": [
+    0.88,
+    1.02
+   ],
+   "rmax": 0.2,
+   "core": 0.01,
+   "feather": 0.02,
+   "clean_in": 0.013,
+   "clean_out": 0.045
+  },
+  {
+   "name": "sternum pleat",
+   "kind": "plane_x",
+   "x0": 0.005,
+   "y": [
+    1.12,
+    1.4
+   ],
+   "yfeather": 0.02,
+   "zmin": 0.04,
+   "core": 0.007,
+   "feather": 0.013,
+   "clean_in": 0.01,
+   "clean_out": 0.04,
+   "except": [
+    {
+     "ellipsoid": [
+      0.0087,
+      1.0437,
+      0.113
+     ],
+     "r": [
+      0.025,
+      0.025,
+      0.03
+     ],
+     "feather_r": 0.6
+    }
+   ]
+  },
+  {
+   "name": "knee-backs: shading where the mesh changes density",
+   "kind": "smooth_normals",
+   "y": [
+    0.52,
+    0.68
+   ],
+   "yfeather": 0.04,
+   "back_only": true,
+   "zcut": -0.0,
+   "xabs": [
+    0.01,
+    0.25
+   ],
+   "iterations": 8,
+   "amount": 1.0
+  },
+  {
+   "name": "hands: torn finger clefts",
+   "kind": "rough",
+   "boxes": [
+    [
+     0.24,
+     0.7,
+     -0.01,
+     0.35,
+     0.86,
+     0.13
+    ],
+    [
+     -0.35,
+     0.7,
+     -0.01,
+     -0.24,
+     0.86,
+     0.13
+    ]
+   ],
+   "threshold": 6.0,
+   "grow": 4,
+   "iterations": 40,
+   "shrink_iterations": 30
+  },
+  {
+   "name": "toes: lumpy merged toes",
+   "kind": "rough",
+   "boxes": [
+    [
+     0.12,
+     0.0,
+     0.05,
+     0.27,
+     0.06,
+     0.16
+    ],
+    [
+     -0.27,
+     0.0,
+     0.05,
+     -0.12,
+     0.06,
+     0.16
+    ]
+   ],
+   "threshold": 6.0,
+   "grow": 4,
+   "iterations": 40,
+   "shrink_iterations": 20
+  },
+  {
+   "name": "neck: the seam where the head was joined on",
+   "kind": "polyline_xy",
+   "side": "front",
+   "zcut": -0.027,
+   "y": [
+    1.36,
+    1.46
+   ],
+   "lines": [
+    [
+     [
+      -0.16,
+      1.412
+     ],
+     [
+      -0.03,
+      1.406
+     ],
+     [
+      0.0,
+      1.402
+     ],
+     [
+      0.03,
+      1.41
+     ],
+     [
+      0.16,
+      1.413
+     ]
+    ]
+   ],
+   "core": 0.007,
+   "feather": 0.015,
+   "clean_in": 0.011,
+   "clean_out": 0.04,
+   "R": 0.035,
+   "post_smooth": 4
+  },
+  {
+   "name": "back: the moulded V panel's two edges",
+   "kind": "polyline_xy",
+   "side": "back",
+   "zcut": -0.02,
+   "y": [
+    0.97,
+    1.36
+   ],
+   "lines": [
+    [
+     [
+      0.0,
+      0.995
+     ],
+     [
+      0.098,
+      1.188
+     ],
+     [
+      0.16,
+      1.31
+     ]
+    ],
+    [
+     [
+      0.0,
+      0.995
+     ],
+     [
+      -0.098,
+      1.188
+     ],
+     [
+      -0.16,
+      1.31
+     ]
+    ]
+   ],
+   "core": 0.012,
+   "feather": 0.024,
+   "clean_in": 0.016,
+   "clean_out": 0.055,
+   "R": 0.045,
+   "post_smooth": 6,
+   "normal_agree": 0.5,
+   "max_move": 0.004
+  },
+  {
+   "name": "lower back: lumps where the V panel's edges meet the spine",
+   "kind": "smooth_normals",
+   "y": [
+    1.0,
+    1.16
+   ],
+   "yfeather": 0.03,
+   "back_only": true,
+   "zcut": -0.03,
+   "xabs": [
+    0.0,
+    0.085
+   ],
+   "iterations": 8,
+   "amount": 0.85
+  }
+ ]
+}

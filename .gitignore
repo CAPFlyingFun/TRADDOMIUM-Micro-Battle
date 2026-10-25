@@ -56,7 +56,16 @@ art/humans/*
 # garments from (scripts/paintGarment.mjs). Committed: the bake reads them.
 !art/humans/outfits/
 !art/humans/outfits/*.png
+# The base-body touch-up (scripts/baseTouchup, docs/reviews/base-touchups):
+# its region specs, the two per-vertex fields the male spec reads, and the
+# approved touched skin maps `body-slim.mjs` puts on Sarah v2. Authored and
+# approved (Joshua, 2026-10-25), the only copies, so tracked.
+!art/humans/base-touchup/
+!art/humans/base-touchup/**
 
 # The occlusion bake, derived from a master and cached so the next run does
 # not pay two minutes a body for it again.
 art/humans/cache/
+
+# Python bytecode from the tools in scripts/ (scripts/baseTouchup)
+__pycache__/

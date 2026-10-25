@@ -1,0 +1,75 @@
+<!doctype html><html><body style="margin:0;background:#d9d9d6"><canvas id="c" width="1200" height="1200"></canvas>
+<script type="module">
+// Region views of a base body. ?f=<glb> ; window.shot(region, mode, swaps) renders one view.
+import * as T from 'three';
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
+const r = new T.WebGLRenderer({ canvas: document.getElementById('c'), antialias: true, preserveDrawingBuffer: true });
+r.setSize(1200, 1200, false); r.outputColorSpace = T.SRGBColorSpace; r.toneMapping = T.ACESFilmicToneMapping;
+const s = new T.Scene(); s.background = new T.Color(0xd9d9d6);
+// studio (default): soft light from the front like the reference pictures; ?light=top keeps the old overhead key
+if (new URLSearchParams(location.search).get('light') === 'top') {
+  s.add(new T.HemisphereLight(0xffffff, 0x8a8a84, 1.6));
+  const key = new T.DirectionalLight(0xffffff, 2.2); key.position.set(1.5, 3, 3); s.add(key);
+  const rim = new T.DirectionalLight(0xffffff, 0.8); rim.position.set(-2, 2, -2); s.add(rim);
+} else {
+  s.add(new T.HemisphereLight(0xffffff, 0xb4b0aa, 1.5));
+  const key = new T.DirectionalLight(0xffffff, 1.7); key.position.set(0.8, 1.6, 3); s.add(key);
+  const fill = new T.DirectionalLight(0xffffff, 0.7); fill.position.set(-2.5, 0.6, 2); s.add(fill);
+  const back = new T.DirectionalLight(0xffffff, 0.9); back.position.set(0, 2, -3); s.add(back);
+}
+const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
+const g = await loader.loadAsync(new URLSearchParams(location.search).get('f'));
+s.add(g.scene); g.scene.updateMatrixWorld(true);
+const bodies = []; g.scene.traverse((o) => { if (o.isMesh) { const m = Array.isArray(o.material) ? o.material[0] : o.material; if (m.name === 'Material_0') bodies.push(o); else o.visible = false; } });
+// ?lpos=&lnor= : preview a mesh change by replacing the skin's local positions/normals (float32, per vertex)
+{ const q = new URLSearchParams(location.search); if (q.get('lpos')) {
+  const lp = new Float32Array(await (await fetch(q.get('lpos'))).arrayBuffer()), ln = new Float32Array(await (await fetch(q.get('lnor'))).arrayBuffer());
+  for (const b of bodies) { const g = b.geometry; if (g.attributes.position.count * 3 !== lp.length) continue;
+    g.setAttribute('position', new T.BufferAttribute(lp, 3)); g.setAttribute('normal', new T.BufferAttribute(ln, 3)); g.computeBoundingSphere(); }
+} }
+const orig = bodies.map((b) => b.material);
+const box = new T.Box3(); bodies.forEach((b) => box.expandByObject(b)); const H = box.max.y - box.min.y, k = H / 1.70;
+// the face's depth differs by body (Sarah's head sits further back): face views aim at the nose tip
+let noseZ = 0; { const v = new T.Vector3(); for (const b of bodies) { const pa = b.geometry.attributes.position; for (let i = 0; i < pa.count; i++) { b.getVertexPosition(i, v); b.localToWorld(v); if (v.y > box.min.y + 1.45 * k && Math.abs(v.x) < 0.03 * k && v.z > noseZ) noseZ = v.z; } } }
+window.info = { noseZ, min: box.min.toArray(), max: box.max.toArray(), morphs: bodies.map((b) => Object.keys(b.morphTargetDictionary ?? {})) };
+const swapped = {};
+window.swap = async (slot, url) => { const tex = await new T.TextureLoader().loadAsync(url); tex.flipY = false; tex.colorSpace = slot === 'map' ? T.SRGBColorSpace : T.NoColorSpace; swapped[slot] = tex; };
+window.unswap = () => { for (const k2 of Object.keys(swapped)) delete swapped[k2]; };
+window.morph = (name, w) => bodies.forEach((b) => { const i = b.morphTargetDictionary?.[name]; if (i !== undefined) b.morphTargetInfluences[i] = w; });
+const make = (mode, m0) => {
+  const m = m0.clone();
+  for (const [slot, tex] of Object.entries(swapped)) m[slot] = tex;
+  if (mode === 'albedo') return new T.MeshBasicMaterial({ map: m.map });
+  if (mode === 'normal') { const n = new T.MeshStandardMaterial({ color: 0xc8b4a6, roughness: 0.55, metalness: 0, normalMap: m.normalMap }); return n; }
+  if (mode === 'geom') return new T.MeshStandardMaterial({ color: 0xc8b4a6, roughness: 0.55, metalness: 0 });
+  if (mode === 'wire') return new T.MeshStandardMaterial({ color: 0xc8b4a6, roughness: 0.55, metalness: 0, wireframe: true });
+  if (mode === 'flat') return new T.MeshStandardMaterial({ color: 0xc8b4a6, roughness: 0.55, metalness: 0, flatShading: true });
+  return m;
+};
+// Regions in metres for a 1.70 m body, scaled to this body's height: [target x,y,z], distance, yaw degrees
+const R = {
+  full: [[0, 0.86, 0], 2.9, 0], face: [[0, 1.6, 0.04], 0.55, 0], faceside: [[0, 1.6, 0.0], 0.55, 90], faceclose: [[0, 1.575, 0], 0.3, 0], facethree: [[0, 1.58, 0], 0.4, 35],
+  arms: [[0, 1.12, 0], 1.6, 0], hand: [[0.30, 0.82, 0.02], 0.5, 90], chest: [[0, 1.32, 0.04], 0.75, 0], chestside: [[0, 1.3, 0.05], 0.8, 90],
+  belly: [[0, 1.02, 0.06], 0.75, 0], bellyside: [[0, 1.02, 0.06], 0.8, 90], groin: [[0, 0.86, 0.06], 0.55, 0], groinlow: [[0, 0.80, 0.06], 0.6, 0],
+  lineclose: [[0.06, 0.915, 0.10], 0.18, 0], lineside: [[0.17, 0.93, 0.0], 0.25, 70],
+  sternum: [[0, 1.22, 0.12], 0.4, 0], ribside: [[0.15, 1.2, 0.04], 0.5, 60], kneeback: [[0.1, 0.45, -0.05], 0.55, 180], underbreast: [[0, 1.24, 0.1], 0.5, 0], bellyline: [[0, 1.0, 0.2], 0.55, 0], seat: [[0, 0.82, -0.1], 0.8, 180],
+  kneeclose: [[0.1, 0.62, -0.06], 0.25, 180], kneeclose2: [[0.1, 0.62, -0.06], 0.25, 140],
+  handout: [[0.296, 0.809, 0.061], 0.34, 90], handin: [[0.296, 0.809, 0.061], 0.34, -90], handfront: [[0.296, 0.809, 0.061], 0.34, 0], handfingers: [[0.296, 0.769, 0.061], 0.17, 90],
+  shandout: [[0.273, 0.840, -0.026], 0.34, 90], shandin: [[0.273, 0.840, -0.026], 0.34, -90], shandfront: [[0.273, 0.840, -0.026], 0.34, 0],
+  toes: [[0.19, 0.03, 0.11], 0.3, 25], toesfront: [[0.19, 0.03, 0.11], 0.26, 0], stoes: [[0.105, 0.03, 0.06], 0.26, 25],
+  backlow: [[0, 1.0, -0.1], 0.7, 180], hipback: [[0, 0.95, -0.12], 0.6, 160], neckbase: [[0, 1.42, 0.05], 0.4, 0], bellyc: [[0, 0.95, 0.2], 0.3, 0],
+  shoulderL: [[0.14, 1.43, 0.0], 0.35, 30], shoulderR: [[-0.14, 1.43, 0.0], 0.35, -30],
+  legs: [[0, 0.5, 0], 1.5, 0], legsback: [[0, 0.5, 0], 1.5, 180], feet: [[0, 0.06, 0.06], 0.7, 25], back: [[0, 1.15, 0], 1.7, 180],
+};
+window.regions = Object.keys(R);
+window.shot = (region, mode = 'full', pitch = 0) => {
+  bodies.forEach((b, i) => { b.material = make(mode, orig[i]); });
+  const [t, d, yaw] = R[region]; const a = yaw * Math.PI / 180, p = pitch * Math.PI / 180;
+  const tgt = new T.Vector3(t[0] * k, box.min.y + t[1] * k, region.startsWith('face') ? noseZ - 0.03 * k : t[2] * k), dist = d * k;
+  const cam = new T.PerspectiveCamera(30, 1, 0.01, 50);
+  cam.position.set(tgt.x + Math.sin(a) * Math.cos(p) * dist, tgt.y + Math.sin(p) * dist, tgt.z + Math.cos(a) * Math.cos(p) * dist);
+  cam.lookAt(tgt); cam.updateMatrixWorld(true); r.render(s, cam);
+};
+window.ready = true;
+</script></body></html>
