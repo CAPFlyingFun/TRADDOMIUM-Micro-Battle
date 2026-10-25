@@ -27,6 +27,7 @@ import { patchFaceRig, restFromWorld, setFaceRig } from './faceRig';
 import { FaceMotion } from './faceMotion';
 import { patchHairMaterial } from './hairMaterial';
 import { SARAH_LOOK } from './sarahLook';
+import { collectStoryBake, type StoryBake } from './storyBake';
 import { IRIS_CHOICES, browsLine, eyesLine, lipsLine, mouthLine, nextEyeMode } from './faceChoices';
 /**
  * THE SARAH LAB — Sarah rebuilt from Joshua's base mannequin, on a turntable,
@@ -1748,6 +1749,53 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     return out;
   }
   /**
+   * SARAH FOR THE STORY PLAYER, for `scripts/sarahV2Recovery/story-sarah.mjs`, which opens the room with `?bake=story`
+   * (storyBake.ts). READY once she is in, dressed, her hair on, the cloth tee laid and nothing loading.
+   */
+  function storyReady(): boolean {
+    const phase = meter.snapshot().phase;
+    return loaded && !failed && recovered && model?.visible === true && wantedOutfit === null && !clothLoading && skinState === 'ready'
+      && !!partMeshes.get('spandex-lite')?.length && hairMeshes.length > 0 && !!faceMaterial && phase !== 'downloading' && phase !== 'preparing';
+  }
+  /**
+   * The bake: the room's clock held, the cloth sim off so the fitted, skinned tee is what she wears (the story player
+   * cannot run the cloth), her bind pose (T-POSE with ARMS at 0: every turn nothing, her arms down), her face OFF (the
+   * story player lays it on `Material_0` itself), her springs at rest and two seconds of her own frames at a fixed step,
+   * so what is measured on her each frame -- the fitted tee's navel -- is measured at rest, the same every run.
+   */
+  async function bakeForStory(options: { readonly splitPaint?: boolean } = {}): Promise<StoryBake> {
+    if (!storyReady() || !model) throw new Error('[sarahlab] the story bake was asked for before she was ready');
+    clock.paused = true; clock.step = 0;
+    try {
+      clothWanted = false;
+      if (clothOn) await toggleCloth();
+      pose = 'tpose'; armsDeg = 0; armsOverride = false; curl = 0; faceOn = false; seated = 0;
+      Object.assign(spring, restingBellySpring()); Object.assign(breastSpring, restingBellySpring()); felt.primed = 0;
+      applyLook(); refresh();
+      for (let k = 0; k < 120; k++) advance(1 / 60);
+      model.updateMatrixWorld(true);
+      const b = bodyOf();
+      if (!b) throw new Error('[sarahlab] the story bake found no body');
+      const meshes: THREE.SkinnedMesh[] = [];
+      model.traverseVisible((n) => { if ((n as THREE.SkinnedMesh).isSkinnedMesh) meshes.push(n as THREE.SkinnedMesh); });
+      const keep = clothKeep();
+      return collectStoryBake({
+        renderer: ctx.renderer.gl, camera, meshes, body: b.mesh, hair: hairMeshes, splitPaint: options.splitPaint,
+        // SIT as the room sits her: its correctives, and her bump's tilt handed to her thighs (`seated` 1)
+        seat: (on) => { pose = on ? 'sit' : 'tpose'; seated = on ? 1 : 0; applyLook(); applyMotion(); },
+        facts: {
+          look: SARAH_LOOK?.clothes.outfit ?? null, outfit: OUTFITS[outfit].name, bump, shape: serializeShape(body), bellyCurve, refine,
+          skin: { chosen: skinId, worn: skinWorn, own: b.material.map === ownMap(b.material), painted: !!painted },
+          cloth: { on: clothOn, wanted: clothWanted, made: !!cloth }, fittedTee: !!fittedTee(), fittedLaid, keep,
+          teeDetail: fitted ? fitted.spots.fitted(keep, fitted.navel) : null,
+          face: { on: faceOn, laid: !!faceMaterial }, hair: hairOn, pose, armsDeg, armsOverride, curl, garmentView, skinBare,
+          springs: { belly: { ...spring }, breast: { ...breastSpring } },
+          drawn: (() => { const out: string[] = []; three.traverseVisible((n) => { const m = n as THREE.Mesh; if (m.isMesh) out.push(`${m.name}|${(Array.isArray(m.material) ? m.material[0] : m.material).name}|${m.geometry.getAttribute('position')?.count}`); }); return out; })(),
+        },
+      });
+    } finally { clock.paused = false; }
+  }
+  /**
    * A CARD'S PICTURE (Joshua, 2026-10-23: "we could have little screenshots for the outfit"): her, head to foot, from
    * the front three-quarter, whatever the view on screen -- so every card shows her the same way -- small enough to
    * keep in a save (a 3:4 JPEG of THUMB_SIZE). Null before she is on.
@@ -2048,6 +2096,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       loadSarah();
       // a bake of the built-in outfits' card pictures asks for it by address (scripts/bakeOutfitThumbs.mjs)
       if (new URLSearchParams(globalThis.location?.search ?? '').get('bake') === 'outfits') (globalThis as unknown as Record<string, unknown>).__sarahLabBakeOutfits = bakeOutfitPictures;
+      // ...and a bake of her for the story player (scripts/sarahV2Recovery/story-sarah.mjs)
+      if (new URLSearchParams(globalThis.location?.search ?? '').get('bake') === 'story') (globalThis as unknown as Record<string, unknown>).__sarahLabStory = { ready: storyReady, bake: bakeForStory };
       // ?probe=cloth: run the cloth tee N frames at a fixed step between pictures (a software renderer draws ~1 a second)
       if (new URLSearchParams(globalThis.location?.search ?? '').get('probe') === 'cloth') (globalThis as unknown as Record<string, unknown>).__sarahLabCloth = {
         settle: (frames: number, dt = 1 / 60) => { if (!cloth || !model) return null; for (let k = 0; k < frames; k++) { model.updateMatrixWorld(true); if (clothRefit) { cloth.refit(); clothRefit = false; } cloth.frame(dt); } return cloth.stats(); },
