@@ -23,6 +23,9 @@ import { SkinPose } from './skinPose';
 import { SKIN_BRUSH_CM, SKIN_CHOICES, SKIN_ORIGINAL_IMAGE, SKIN_SWATCHES, SKIN_TEXTURE_CM, hexRgb, nextSkin, skinBrushLine, skinLine, skinNote, skinStrengthLine, skinTextureLine, type SkinId } from './skinChoices';
 import { SkinPainter, tilePattern, type SkinImage, type SkinPattern, type SkinStrokeSettings } from './skinPaint';
 import { ensureRest } from './fabricMaterial';
+import { patchFaceRig, restFromWorld, setFaceRig } from './faceRig';
+import { FaceMotion } from './faceMotion';
+import { IRIS_CHOICES, browsLine, eyesLine, lipsLine, mouthLine, nextEyeMode } from './faceChoices';
 /**
  * THE SARAH LAB — Sarah rebuilt from Joshua's base mannequin, on a turntable,
  * to try before anything of it goes live (Joshua, 2026-10-07: "Good to test
@@ -357,6 +360,25 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   /** Which modelled garments the outfit editor lets the room draw (`fabricPanel.ts`): all, none while painting her body, or one ISOLATED. */
   let garmentView: 'all' | 'none' | string = 'all';
 
+  // ------------------------------------------------------------ HER FACE (faceRig.ts, faceMotion.ts)
+  // Joshua, 2026-10-24: "would like to somehow add bones 🦴 in or something around the mouth to open and close like
+  // talking, and maybe the illusion of the eyes being able to look around in sync". Her sculpt's mouth is shut and its
+  // eyes blank, and the file is approved: the face is a shader layer on her body's own material, moved each frame.
+  const faceMotion = new FaceMotion(7);
+  /** The material the face is laid on (only her approved v2 body's: every number in faceRig.ts is measured on it). */
+  let faceMaterial: THREE.Material | null = null;
+  let faceOn = true, irisIndex = 0, browPct = 100, lipPct = 55;
+  const cameraRest: [number, number, number] = [0, 0, 1];
+  /** One frame of her face: where the camera is in her head's rest frame, the animator, then the shader's uniforms. */
+  function faceFrame(dt: number): void {
+    const b = bodyOf();
+    if (!faceMaterial || !b || b.material !== faceMaterial || !model?.visible) return;
+    model.updateMatrixWorld(true);
+    const cam = faceMotion.mode === 'camera' ? restFromWorld(b.mesh, camera.position, cameraRest) : null;
+    faceMotion.step(dt, cam);
+    setFaceRig(faceMaterial, faceOn ? { jaw: faceMotion.jaw, gazeRight: faceMotion.gazeRight, gazeLeft: faceMotion.gazeLeft, blink: faceMotion.blink, iris: IRIS_CHOICES[irisIndex].linear, brow: browPct / 100, lips: lipPct / 100 } : null);
+  }
+
   // ------------------------------------------------------------ HER SKIN (skinChoices.ts, skinPaint.ts)
   // Joshua, 2026-10-24: "compress all the images and add a button to switch between them, and maybe a simple body
   // texture uploaded/paint". SKIN steps through the file's own map and his enhanced candidates; UPLOAD adds a picture
@@ -530,6 +552,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let bellyCurve: BellyCurve = DEFAULT_BELLY_CURVE;
   const fields: Record<string, HTMLElement> = {};
   const buttons: Record<string, HTMLButtonElement> = {};
+  /** FACE's own controls: the held-open mouth, and the eye-colour swatches. */
+  let faceMouthInput: HTMLInputElement | null = null;
+  const irisButtons: HTMLButtonElement[] = [];
   /** FACE's brush controls (shown while PAINT SKIN is on) and its colour swatches, by colour. */
   let skinTools: HTMLElement | null = null;
   /** The TEXTURE SIZE slider and its line, shown only with a picture to paint with. */
@@ -598,6 +623,18 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
 
   /** FACE's lines and buttons: which skin, its state, and the brush (an action with nothing to act on looks it). */
   function refreshSkin(): void {
+    const noFace = !faceMaterial;
+    if (buttons.face) { buttons.face.textContent = noFace ? 'FACE · v2 body only' : `FACE · ${faceOn ? 'ON' : 'OFF (the sculpt)'}`; buttons.face.disabled = noFace; buttons.face.style.opacity = noFace ? '.4' : '1'; }
+    if (buttons.eyes) buttons.eyes.textContent = eyesLine(faceMotion.mode);
+    if (buttons.blink) buttons.blink.textContent = `BLINK · ${faceMotion.blinking ? 'ON' : 'OFF'}`;
+    if (buttons.talk) buttons.talk.textContent = `TALK · ${faceMotion.talking ? 'ON' : 'OFF'}`;
+    const mouthField = fields[SARAH_LAB_FIELD.faceMouth];
+    if (mouthField) mouthField.textContent = mouthLine(faceMotion.mouth * 100, faceMotion.talking);
+    if (faceMouthInput && Number(faceMouthInput.value) !== Math.round(faceMotion.mouth * 100)) faceMouthInput.value = String(Math.round(faceMotion.mouth * 100));
+    const browField = fields[SARAH_LAB_FIELD.faceBrows], lipField = fields[SARAH_LAB_FIELD.faceLips];
+    if (browField) browField.textContent = browsLine(browPct);
+    if (lipField) lipField.textContent = lipsLine(lipPct);
+    irisButtons.forEach((b, i) => { b.style.borderColor = i === irisIndex ? 'var(--sl-accent,#d4a853)' : 'var(--sl-btn-line,#ffffff30)'; });
     if (buttons.skin) buttons.skin.textContent = skinLine(skinId, skinUpload);
     const note = fields[SARAH_LAB_FIELD.skinNote];
     if (note) note.textContent = skinNote(skinId, skinUpload, skinState, !!painted?.painter.canUndo) + (painted ? ` · brush on a ${paintMeta} copy` : '');
@@ -1466,6 +1503,29 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     // the outfit cards and saves (outfitPanel.ts): the OUTFIT section's own, not a space inside the fabric editor
     outfits.element.dataset.tab = 'outfit';
     right.appendChild(outfits.element);
+    // ------------------------------------------------------------ FACE: her face (faceRig.ts, faceMotion.ts)
+    {
+      buttons.face = btn('FACE · ON', SARAH_LAB_ACTION.face, () => { faceOn = !faceOn; });
+      buttons.eyes = btn(eyesLine(faceMotion.mode), SARAH_LAB_ACTION.eyes, () => { faceMotion.mode = nextEyeMode(faceMotion.mode); });
+      buttons.blink = btn('BLINK · ON', SARAH_LAB_ACTION.blink, () => { faceMotion.blinking = !faceMotion.blinking; });
+      buttons.talk = btn('TALK · OFF', SARAH_LAB_ACTION.talk, () => { faceMotion.talking = !faceMotion.talking; });
+      for (const b of [buttons.face, buttons.eyes, buttons.blink, buttons.talk]) { b.dataset.tab = 'face'; b.style.padding = '8px 10px'; b.style.fontSize = '12px'; right.appendChild(b); }
+      faceMouthInput = slider(SARAH_LAB_FIELD.faceMouth, 0, (v) => { faceMotion.mouth = v / 100; }, 100, 'face');
+      const irises = document.createElement('div');
+      irises.dataset.tab = 'face';
+      irises.style.cssText = 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;font-size:12px;letter-spacing:.05em';
+      const irisLabel = document.createElement('span'); irisLabel.textContent = 'EYE COLOUR'; irises.appendChild(irisLabel);
+      IRIS_CHOICES.forEach((c, i) => {
+        const b = document.createElement('button');
+        b.type = 'button'; b.dataset.action = `${SARAH_LAB_ACTION.faceIris}${c.name}`; b.title = c.name; b.setAttribute('aria-label', `${c.name} eyes`);
+        b.style.cssText = `width:26px;height:26px;border-radius:50%;border:2px solid var(--sl-btn-line,#ffffff30);background:${c.swatch};padding:0;cursor:pointer`;
+        b.addEventListener('click', (e) => { e.stopPropagation(); irisIndex = i; refresh(); });
+        irisButtons.push(b); irises.appendChild(b);
+      });
+      right.appendChild(irises);
+      slider(SARAH_LAB_FIELD.faceBrows, browPct, (v) => { browPct = v; }, 100, 'face');
+      slider(SARAH_LAB_FIELD.faceLips, lipPct, (v) => { lipPct = v; }, 100, 'face');
+    }
     // ------------------------------------------------------------ FACE: her skin's map (skinChoices.ts, skinPaint.ts)
     {
       const small = (b: HTMLButtonElement) => { b.style.padding = '7px 10px'; b.style.fontSize = '11px'; return b; };
@@ -1869,6 +1929,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       model = loadedModel;
       // and the skin chosen in FACE goes on (a candidate fetched once is kept for a body loaded again)
       applySkin();
+      // and her face, on her approved v2 body only (its measurements are that file's)
+      { const b = bodyOf(); faceMaterial = recovered && b ? b.material : null; if (faceMaterial) patchFaceRig(faceMaterial); }
       // she stays out of sight until what she has on is on: never undressed, then dressed a moment later
       loadedModel.visible = !recovered;
       three.add(loadedModel);
@@ -1891,6 +1953,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       if (rig) rig.apply(turnsFor());
       place();
       feelMotion(dt);
+      // her face: her eyes, her blinks, her jaw
+      faceFrame(dt);
       // a painted top's cleavage bridge is laid where her breasts are this frame
       if (fabric && model) { model.updateMatrixWorld(true); fabric.frame(); }
       // and every built strap laid on her skin as she is this frame
@@ -1996,6 +2060,24 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
           return any;
         },
         skinUndo: () => painted?.painter.undo() ?? false,
+        // FACE as its buttons set it, and the face's state now
+        face: (set?: { on?: boolean; mode?: 'around' | 'camera' | 'ahead'; blinking?: boolean; talking?: boolean; mouth?: number; iris?: number; brows?: number; lips?: number }) => {
+          if (set) {
+            if (set.on !== undefined) faceOn = set.on;
+            if (set.mode) faceMotion.mode = set.mode;
+            if (set.blinking !== undefined) faceMotion.blinking = set.blinking;
+            if (set.talking !== undefined) faceMotion.talking = set.talking;
+            if (set.mouth !== undefined) faceMotion.mouth = set.mouth;
+            if (set.iris !== undefined) irisIndex = set.iris;
+            if (set.brows !== undefined) browPct = set.brows;
+            if (set.lips !== undefined) lipPct = set.lips;
+            refresh();
+          }
+          const b = bodyOf(); model?.updateMatrixWorld(true);
+          // where the camera is in her head's rest frame (metres), and where the face's own probe point (her nose tip) lands in the world
+          const cam = b ? restFromWorld(b.mesh, camera.position) : null;
+          return { on: faceOn, laid: !!faceMaterial, mode: faceMotion.mode, jaw: faceMotion.jaw, blink: faceMotion.blink, gazeRight: [...faceMotion.gazeRight], gazeLeft: [...faceMotion.gazeLeft], cameraRest: cam, cameraWorld: camera.position.toArray() };
+        },
         // every mesh drawn now (name, material, vertices): to tell what is what on screen
         drawn: () => { const out: string[] = []; three.traverseVisible((n) => { const m = n as THREE.Mesh; if (m.isMesh) out.push(`${m.name}|${(Array.isArray(m.material) ? m.material[0] : m.material).name}|${m.geometry.getAttribute('position')?.count}`); }); return out; },
         // the cloth's triangles folded over into her, and the particles they hold

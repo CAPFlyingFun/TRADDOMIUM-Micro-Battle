@@ -135,6 +135,12 @@ export const SARAH_LAB_ACTION = Object.freeze({
   clothDefaults: 'sarahlab:cloth-defaults',
   /** the cloth tee's neckline, cut deeper as a U or a V (Joshua, 2026-10-24) */
   neckShape: 'sarahlab:neck-shape',
+  /** FACE: her face drawn or bare, where her eyes look, blinking, talking, and `${faceIris}<name>` her eye colour */
+  face: 'sarahlab:face',
+  eyes: 'sarahlab:eyes',
+  blink: 'sarahlab:blink',
+  talk: 'sarahlab:talk',
+  faceIris: 'sarahlab:face-iris:',
   /** FACE: her skin's map stepped through the candidates, a picture from the phone, and the brush (Joshua, 2026-10-24) */
   skin: 'sarahlab:skin',
   skinUpload: 'sarahlab:skin-upload',
@@ -173,6 +179,10 @@ export const SARAH_LAB_FIELD = Object.freeze({
   cloth: 'sarahlab-cloth',
   /** `${clothDial}<dial>`: one of the cloth's dials */
   clothDial: 'sarahlab-cloth-dial-',
+  /** FACE: the mouth held open, the brows' and lips' amounts */
+  faceMouth: 'sarahlab-face-mouth',
+  faceBrows: 'sarahlab-face-brows',
+  faceLips: 'sarahlab-face-lips',
   /** FACE: what the skin she wears is, and the brush's size and strength */
   skinNote: 'sarahlab-skin-note',
   skinBrush: 'sarahlab-skin-brush',
