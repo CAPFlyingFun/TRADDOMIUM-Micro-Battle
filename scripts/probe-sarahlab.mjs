@@ -308,10 +308,6 @@ async function main() {
       if (failures) throw new Error(`${failures} check(s) failed`);
       log('PASS'); return;
     }
-    await page.waitForTimeout(1500);
-    await shot(page, 'sarahlab-1-full.png', 'FULL BUMP, dressed');
-    check(/bust volume target 1.30×/.test(await page.textContent('[data-field="sarahlab-bump"]')), '100% belly has 1.30× nominal bust volume');
-
     const setSlider = (field, value) => page.evaluate(([f, v]) => {
       const label = document.querySelector(`[data-field="${f}"]`);
       const input = label?.nextElementSibling;
@@ -320,6 +316,12 @@ async function main() {
       input.dispatchEvent(new Event('input', { bubbles: true }));
       return true;
     }, [field, value]);
+    // she opens as Joshua set her (sarahLook.ts: 73%); the checks below start from her full-term 100%
+    check(/BUMP 73%/.test(await page.textContent('[data-field="sarahlab-bump"]')), 'she opens at 73%, as Joshua saved her');
+    check(await setSlider('sarahlab-bump', 100), 'the BUMP slider moved to 100');
+    await page.waitForTimeout(1500);
+    await shot(page, 'sarahlab-1-full.png', 'FULL BUMP, dressed');
+    check(/bust volume target 1.30×/.test(await page.textContent('[data-field="sarahlab-bump"]')), '100% belly has 1.30× nominal bust volume');
     check(await setSlider('sarahlab-bump', 0), 'the BUMP slider moved to 0');
     await page.waitForTimeout(800);
     check(/nearly flat/.test(await page.textContent('[data-field="sarahlab-bump"]')), 'the BUMP line reads nearly flat');

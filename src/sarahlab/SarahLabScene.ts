@@ -26,6 +26,7 @@ import { ensureRest } from './fabricMaterial';
 import { patchFaceRig, restFromWorld, setFaceRig } from './faceRig';
 import { FaceMotion } from './faceMotion';
 import { patchHairMaterial } from './hairMaterial';
+import { SARAH_LOOK } from './sarahLook';
 import { IRIS_CHOICES, browsLine, eyesLine, lipsLine, mouthLine, nextEyeMode } from './faceChoices';
 /**
  * THE SARAH LAB — Sarah rebuilt from Joshua's base mannequin, on a turntable,
@@ -256,7 +257,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let seated = 0;
   /** Breast dimensions moved together, as by an aspect-ratio lock: a flag only, never a value. */
   const linked = new Set<BodyControl>();
-  let bump = 100;
+  // she opens as Joshua set her (sarahLook.ts, 2026-10-24): 73%, her navel a little out, his tee and leggings
+  let bump = SARAH_LOOK?.body.bump ?? 100;
   let curl = 0;
   // v2's ARMS control can override any pose; until used, the pose keeps its natural arms.
   // v1 keeps the original T-POSE-only control and its level-arm default.
@@ -274,11 +276,12 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   const tmp = new THREE.Vector3();
   // she opens in her red light spandex tee over painted leggings (Joshua, 2026-10-23), one small file; a model without
   // the v2 clothes (v1) falls back to the first modelled outfit it has as it loads
-  let outfit = SARAH_DEFAULT_OUTFIT;
+  const lookOutfit = OUTFITS.findIndex((o) => o.name === SARAH_LOOK?.clothes.outfit);
+  let outfit = lookOutfit >= 0 ? lookOutfit : SARAH_DEFAULT_OUTFIT;
   let modelIndex = SARAH_LAB_DEFAULT_MODEL;
   // the body's own proportions (Joshua, 2026-10-15): all approved values to start, so she
   // looks exactly as approved until a control moves
-  let body: BodyShape = defaultBodyShape();
+  let body: BodyShape = SARAH_LOOK ? parseShape(SARAH_LOOK.body.shape) : defaultBodyShape();
   let shaped: { mesh: THREE.SkinnedMesh; fields: ShapeFields }[] = [];
   const bodyInputs = new Map<BodyControl, HTMLInputElement>();
   const shownNow = (g: Garment) => wornGarments(outfit, garments).includes(g);
@@ -293,7 +296,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let bumpInput: HTMLInputElement | null = null;
   // the library outfit she last put on (her changes to it save as hers), and saved clothes waiting for their outfit to load
   let wornFrom: string | null = null;
-  let pendingClothes: Omit<SavedClothes, 'outfit'> | null = null;
+  // ...and in his fabrics, put on as her outfit is dressed the first time
+  let pendingClothes: Omit<SavedClothes, 'outfit'> | null = SARAH_LOOK ? (({ outfit: _name, ...rest }) => rest)(SARAH_LOOK.clothes) : null;
   let characters: CharacterPanel | null = null;
   // the outfit editor's SAVE workspace, and where the clothes going on now came from (a character, a shared outfit, a
   // new one); null is the built-in outfit itself
@@ -590,6 +594,11 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   // of the tee posed on the CPU each frame -- her navel and nipples, and the tee's own navel against its smooth surface
   let fitted: { body: THREE.SkinnedMesh; tee: THREE.SkinnedMesh; bodyPose: SkinPose; teePose: SkinPose; spots: DetailSpots; navel: TeeNavel } | null = null;
   let fittedLaid = false;
+  /**
+   * CLOTH SIM ON BY DEFAULT (Joshua, 2026-10-24: "we need to make sure the cloth sim is on by default, you have it
+   * off"): she wears the light tee as cloth whenever she has it on, unless CLOTH SIM has been switched off.
+   */
+  let clothWanted = true;
   let cloth: ClothShirt | null = null, clothOn = false, clothLoading = false, clothRestart = false, clothRefit = false, teeLength = CLOTH_TEE_LENGTH_DEFAULT, frameMs = 1000 / 60;
   let teeLengthInput: HTMLInputElement | null = null;
   /** NECKLINE (-100 a turtleneck, 0 as made, 100 the front cut to under her bust) and the deeper cut's shape (Joshua, 2026-10-24). */
@@ -730,7 +739,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     {
       // the cloth experiment's controls: only with the light tee on (the cloth is a copy of it)
       const lite = recovered && shownNow('shirtSpandexLite');
-      if (buttons.cloth) { buttons.cloth.style.display = lite ? '' : 'none'; buttons.cloth.textContent = clothLoading ? 'CLOTH SIM · loading…' : `CLOTH SIM · ${clothOn ? 'ON' : 'OFF'} (experiment)`; lit(buttons.cloth, clothOn); }
+      if (buttons.cloth) { buttons.cloth.style.display = lite ? '' : 'none'; buttons.cloth.textContent = clothLoading ? 'CLOTH SIM · loading…' : `CLOTH SIM · ${clothOn ? 'ON' : 'OFF'}`; lit(buttons.cloth, clothOn); }
       const teeField = fields[SARAH_LAB_FIELD.teeLength];
       if (teeField) { teeField.textContent = teeLengthLine(teeLength, clothOn); teeField.style.display = lite ? '' : 'none'; }
       if (teeLengthInput) { teeLengthInput.style.display = lite ? '' : 'none'; teeLengthInput.disabled = !clothOn; }
@@ -1007,6 +1016,10 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       meter.fail('The cloth tee could not be downloaded. Check your connection, then tap CLOTH SIM again.');
     } finally { clothLoading = false; applyLook(); refresh(); fabric?.refreshTargets(); }
   }
+  /** The cloth comes on by itself when she has the light tee on and CLOTH SIM has not been switched off. */
+  function wantCloth(): void {
+    if (clothWanted && !clothOn && !clothLoading && recovered && partMeshes.get('spandex-lite')?.[0] && shownNow('shirtSpandexLite')) void toggleCloth();
+  }
   /** The cloth goes with the light tee it is a copy of (its material is the tee's). */
   function dropCloth(): void {
     if (cloth) { setClothDetail(cloth.mesh.material as THREE.Material, null); setClothNeckline(cloth.mesh.material as THREE.Material, null); }
@@ -1067,6 +1080,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       wantedOutfit = null; outfit = next; fabric?.refreshTargets(); wearPaint();
       if (model) model.visible = true;
       applyLook(); applyMotion(); refresh(); settle();
+      // the light tee as cloth, as she is meant to wear it
+      wantCloth();
     }).catch(error => {
       if ((error as Error)?.name === 'AbortError' || request !== outfitRequest) return;
       console.error('[sarahlab] outfit preparation failed', error);
@@ -1200,7 +1215,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     // a painted shirt's length, for every painted shirt she puts on (its drape follows: tunicDrape.ts)
     shirtLengthInput = slider(SARAH_LAB_FIELD.shirtLength, Math.round(DEFAULT_SHIRT_LENGTH * 100), (v) => { fabric?.setShirtLength(v / 100); }, 100, 'outfit');
     // THE CLOTH EXPERIMENT: the light tee as cloth, and its length to mid-thigh (Joshua, 2026-10-23)
-    buttons.cloth = btn('CLOTH SIM · OFF', SARAH_LAB_ACTION.cloth, () => { void toggleCloth(); });
+    buttons.cloth = btn('CLOTH SIM · ON', SARAH_LAB_ACTION.cloth, () => { clothWanted = !clothOn; void toggleCloth(); });
     buttons.cloth.dataset.tab = 'outfit';
     right.appendChild(buttons.cloth);
     teeLengthInput = slider(SARAH_LAB_FIELD.teeLength, Math.round(CLOTH_TEE_LENGTH_DEFAULT * 100), (v) => { teeLength = v / 100; cloth?.setLength(teeLength); }, 100, 'outfit');
