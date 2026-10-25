@@ -50,3 +50,4 @@ Not in the Watch: the cloth simulation. She wears the fitted tee, skinned.
 - `02-face-and-poses.jpg`: her face under the Watch's own lights:
   - eyes on the viewer, talking, looking aside, blinking;
   - standing, and the settled sit from the side and the front.
+- `03-other-chapters.jpg`: Chapters 2, 4, 6 and 10. All ten 3D chapters were loaded with her: each reports the 3D people ready, with no page errors.
