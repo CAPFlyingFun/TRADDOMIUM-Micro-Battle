@@ -39,6 +39,8 @@ export const SARAH_V2_BODY_MODEL = 'models/sarah-v2-body-slim.glb';
  * on the phone: the room loads it in place of the slim body only when the address says `?skin=ktx2`.
  */
 export const SARAH_V2_BODY_KTX2_MODEL = 'models/sarah-v2-body-slim-ktx2.glb';
+/** Sarah v2's hair (`scripts/sarahV2Recovery/hair-bake.mjs`, Joshua 2026-10-24): one skinned mesh on her own skeleton. */
+export const SARAH_V2_HAIR_MODEL = 'models/sarah-v2-hair.glb';
 /** The model file the room loads for an entry: the KTX2 pilot replaces the slim body when asked for. */
 export function sarahModelPath(entry: { readonly id: string; readonly path: string }, skin: 'ktx2' | null): string {
   return skin === 'ktx2' && entry.path === SARAH_V2_BODY_MODEL ? SARAH_V2_BODY_KTX2_MODEL : entry.path;
@@ -140,6 +142,7 @@ export const SARAH_LAB_ACTION = Object.freeze({
   eyes: 'sarahlab:eyes',
   blink: 'sarahlab:blink',
   talk: 'sarahlab:talk',
+  hair: 'sarahlab:hair',
   faceIris: 'sarahlab:face-iris:',
   /** FACE: her skin's map stepped through the candidates, a picture from the phone, and the brush (Joshua, 2026-10-24) */
   skin: 'sarahlab:skin',

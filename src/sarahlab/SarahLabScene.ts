@@ -25,6 +25,7 @@ import { SkinPainter, tilePattern, type SkinImage, type SkinPattern, type SkinSt
 import { ensureRest } from './fabricMaterial';
 import { patchFaceRig, restFromWorld, setFaceRig } from './faceRig';
 import { FaceMotion } from './faceMotion';
+import { patchHairMaterial } from './hairMaterial';
 import { IRIS_CHOICES, browsLine, eyesLine, lipsLine, mouthLine, nextEyeMode } from './faceChoices';
 /**
  * THE SARAH LAB — Sarah rebuilt from Joshua's base mannequin, on a turntable,
@@ -68,7 +69,7 @@ import { dropIdleMorphs } from '../view/morphPrune';
 import { HumanRig, findSkinnedMesh } from '../view/HumanRig';
 import { UNITS_PER_METRE } from '../world/dem';
 import {
-  BELLY_MOTION, BELLY_TARGET, trimShown, BREAST_TARGETS, BUMP_MAX_PERCENT, GARMENTS, RECOVERED_SHIRTS, OUTFITS, outfitLine, modelLine, refineLine, refineWeight, nextOutfit, wornGarments, coverMask, bodyNeverHidden, uncoveredSkinIndices, UNDER_TOP_GARMENT, BELLY_REFINE_TARGET, SEAT_TARGET, seatCorrectiveWeight, SARAH_LAB_MODELS, SARAH_LAB_DEFAULT_MODEL, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID, shirtLengthLine, sarahModelPath, BODY_RANDOM_SPECS, CLOTH_SHIRT_PATH, teeLengthLine, necklineLine, neckShapeLine, CLOTH_NECKLINE_DEFAULT, clothLine, CLOTH_DIALS, CLOTH_TUNE_DEFAULT, CLOTH_TEE_LENGTH_DEFAULT, clothTuning, type ClothTune,
+  SARAH_V2_HAIR_MODEL, BELLY_MOTION, BELLY_TARGET, trimShown, BREAST_TARGETS, BUMP_MAX_PERCENT, GARMENTS, RECOVERED_SHIRTS, OUTFITS, outfitLine, modelLine, refineLine, refineWeight, nextOutfit, wornGarments, coverMask, bodyNeverHidden, uncoveredSkinIndices, UNDER_TOP_GARMENT, BELLY_REFINE_TARGET, SEAT_TARGET, seatCorrectiveWeight, SARAH_LAB_MODELS, SARAH_LAB_DEFAULT_MODEL, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID, shirtLengthLine, sarahModelPath, BODY_RANDOM_SPECS, CLOTH_SHIRT_PATH, teeLengthLine, necklineLine, neckShapeLine, CLOTH_NECKLINE_DEFAULT, clothLine, CLOTH_DIALS, CLOTH_TUNE_DEFAULT, CLOTH_TEE_LENGTH_DEFAULT, clothTuning, type ClothTune,
   bellyMotionWeights, bellyWeights, breastBobWeight, breastWeightsForShape, bodyShapeFieldWeights, SIZE_TILT_PRESETS_DEG, effectiveTiltDeg, stepSeated, bustVolume, BREAST_GROW_TARGET, settledSitFor, bellyUpperWeight, BELLY_UPPER_TARGET, navelWeights, NAVEL_FLAT_TARGET, navelFlatFor, navelState, tPoseTurns, ARM_SIDES, armsLine, ARM_RAISE_TARGETS, armRaiseWeight, SEAT_V2_TARGET, seatCorrectiveV2Weight, fingerBend, THUMB_TO_PALM, bumpLine, fingersLine, restingBellySpring, statusLine, stepBellySpring, stepBreastSpring, walkBounceAccel,
   offeredOutfits, outfitThumbPath,
   type Garment, type SarahLabPose, recoveredPartsFor, recoveredPartPath, isShirtPart, shirtOfPart, type RecoveredPart, SARAH_DEFAULT_OUTFIT, RECOVERED_GARMENTS,
@@ -369,6 +370,23 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let faceMaterial: THREE.Material | null = null;
   let faceOn = true, irisIndex = 0, browPct = 100, lipPct = 55;
   const cameraRest: [number, number, number] = [0, 0, 1];
+  /**
+   * HER HAIR (`scripts/sarahV2Recovery/hair-bake.mjs`): one skinned mesh on her own skeleton, bound to her as every
+   * recovered garment is. It is not a garment: CLOTHES · HIDDEN and the outfit editor leave it on.
+   */
+  let hairMeshes: THREE.SkinnedMesh[] = [];
+  let hairOn = true, hairRequest = 0;
+  function loadHair(): void {
+    const b = bodyOf();
+    if (!b || !recovered) return;
+    const request = ++hairRequest;
+    void assets.loadModel(SARAH_V2_HAIR_MODEL, () => new THREE.Object3D()).then((root) => {
+      if (request !== hairRequest || disposed || bodyOf()?.mesh !== b.mesh || root.userData.isPlaceholder === true) { release(root); return; }
+      hairMeshes = attachRecoveredMeshes(root, b.mesh, 'sarahHair');
+      for (const m of hairMeshes) { m.visible = hairOn; m.castShadow = b.mesh.castShadow; m.receiveShadow = b.mesh.receiveShadow; for (const mat of Array.isArray(m.material) ? m.material : [m.material]) patchHairMaterial(mat); }
+      refresh();
+    });
+  }
   /** One frame of her face: where the camera is in her head's rest frame, the animator, then the shader's uniforms. */
   function faceFrame(dt: number): void {
     const b = bodyOf();
@@ -625,6 +643,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   function refreshSkin(): void {
     const noFace = !faceMaterial;
     if (buttons.face) { buttons.face.textContent = noFace ? 'FACE · v2 body only' : `FACE · ${faceOn ? 'ON' : 'OFF (the sculpt)'}`; buttons.face.disabled = noFace; buttons.face.style.opacity = noFace ? '.4' : '1'; }
+    if (buttons.hair) { const none = hairMeshes.length === 0; buttons.hair.textContent = none ? (faceMaterial ? 'HAIR · loading…' : 'HAIR · v2 body only') : `HAIR · ${hairOn ? 'ON' : 'OFF'}`; buttons.hair.disabled = none; buttons.hair.style.opacity = none ? '.4' : '1'; }
     if (buttons.eyes) buttons.eyes.textContent = eyesLine(faceMotion.mode);
     if (buttons.blink) buttons.blink.textContent = `BLINK · ${faceMotion.blinking ? 'ON' : 'OFF'}`;
     if (buttons.talk) buttons.talk.textContent = `TALK · ${faceMotion.talking ? 'ON' : 'OFF'}`;
@@ -1509,7 +1528,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       buttons.eyes = btn(eyesLine(faceMotion.mode), SARAH_LAB_ACTION.eyes, () => { faceMotion.mode = nextEyeMode(faceMotion.mode); });
       buttons.blink = btn('BLINK · ON', SARAH_LAB_ACTION.blink, () => { faceMotion.blinking = !faceMotion.blinking; });
       buttons.talk = btn('TALK · OFF', SARAH_LAB_ACTION.talk, () => { faceMotion.talking = !faceMotion.talking; });
-      for (const b of [buttons.face, buttons.eyes, buttons.blink, buttons.talk]) { b.dataset.tab = 'face'; b.style.padding = '8px 10px'; b.style.fontSize = '12px'; right.appendChild(b); }
+      buttons.hair = btn('HAIR · ON', SARAH_LAB_ACTION.hair, () => { hairOn = !hairOn; for (const m of hairMeshes) m.visible = hairOn; });
+      for (const b of [buttons.face, buttons.hair, buttons.eyes, buttons.blink, buttons.talk]) { b.dataset.tab = 'face'; b.style.padding = '8px 10px'; b.style.fontSize = '12px'; right.appendChild(b); }
       faceMouthInput = slider(SARAH_LAB_FIELD.faceMouth, 0, (v) => { faceMotion.mouth = v / 100; }, 100, 'face');
       const irises = document.createElement('div');
       irises.dataset.tab = 'face';
@@ -1854,6 +1874,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     dropCloth();
     // the brush's copy belongs to this body's material, which goes now
     dropPainter();
+    // her hair goes with her body (it is in her model's tree); a request still under way is no longer wanted
+    hairMeshes = []; hairRequest++;
     if (model) { three.remove(model); rig?.dispose(); release(model); model = null; }
     rig = null; measure = null; fingers = []; skinned = []; shaped = []; garments = []; hasBelly = false; feel = null;
     recovered = false; partMeshes.clear(); wantedOutfit = null; outfitRequest++;
@@ -1929,6 +1951,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       model = loadedModel;
       // and the skin chosen in FACE goes on (a candidate fetched once is kept for a body loaded again)
       applySkin();
+      // and her hair, made for her approved v2 body
+      loadHair();
       // and her face, on her approved v2 body only (its measurements are that file's)
       { const b = bodyOf(); faceMaterial = recovered && b ? b.material : null; if (faceMaterial) patchFaceRig(faceMaterial); }
       // she stays out of sight until what she has on is on: never undressed, then dressed a moment later
@@ -2061,8 +2085,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         },
         skinUndo: () => painted?.painter.undo() ?? false,
         // FACE as its buttons set it, and the face's state now
-        face: (set?: { on?: boolean; mode?: 'around' | 'camera' | 'ahead'; blinking?: boolean; talking?: boolean; mouth?: number; iris?: number; brows?: number; lips?: number }) => {
+        face: (set?: { hair?: boolean; on?: boolean; mode?: 'around' | 'camera' | 'ahead'; blinking?: boolean; talking?: boolean; mouth?: number; iris?: number; brows?: number; lips?: number }) => {
           if (set) {
+            if (set.hair !== undefined) { hairOn = set.hair; for (const m of hairMeshes) m.visible = hairOn; }
             if (set.on !== undefined) faceOn = set.on;
             if (set.mode) faceMotion.mode = set.mode;
             if (set.blinking !== undefined) faceMotion.blinking = set.blinking;
