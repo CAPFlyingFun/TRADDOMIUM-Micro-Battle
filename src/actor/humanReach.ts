@@ -57,7 +57,11 @@
  *     tip on it, fingers tipped a few degrees down onto what they hold.
  *
  *  7. THE PALM lies flat on what it holds. In the T-pose bind both palms
- *     face DOWN (−Y); the hand is turned so its long axis runs wrist →
+ *     face DOWN (−Y); an arm that HANGS in the bind (Sarah v2's master is
+ *     rigged arms down, palms to her thighs) reads its palm from its own
+ *     fingers instead (`ARMS_DOWN_FROM`, `bindPalm`), because a hand that
+ *     points down has no "down" left across it to call a palm, and the old
+ *     rule then rolled it anywhere. The hand is turned so its long axis runs wrist →
  *     target and its palm faces the target's `palm` direction (default
  *     world down), orthogonalised against that axis. The roll this takes
  *     — a forward reach hangs the palm inward, a keyboard wants it down —
@@ -151,6 +155,13 @@ export const ANGLE_IN = 85 * DEG;
 
 /** Seconds for a hold or a rest to blend fully in or out. GAME TUNING (Joshua, 2026-09-30). */
 export const BLEND_TIME = 0.25;
+
+/**
+ * A bind arm that hangs more than this below level is an arms-down rig: its
+ * palm is read from its fingers (rule 7). The same 30° as
+ * `humanSeated`'s arms-down test: the T-pose masters droop a few degrees.
+ */
+export const ARMS_DOWN_FROM = 30 * DEG;
 
 /** A seated hand rests this share of the way from hip to knee. GAME TUNING (Joshua, 2026-09-30). */
 export const REST_ALONG = 0.62;
@@ -337,6 +348,11 @@ export interface ArmRig {
   readonly uh: Vec;
   readonly fb: Vec;
   readonly fh: Vec;
+  /**
+   * Which way the palm faces in the bind (unit): −Y for a T-pose arm, or
+   * read from the fingers for an arm that hangs (rule 7, `bindPalm`).
+   */
+  readonly palm: Vec;
   /** The leg this hand rests on. */
   readonly hip: number;
   readonly knee: number;
@@ -709,6 +725,8 @@ function readArm(
   const fh = { x: 0, y: 0, z: 0 };
   hingeOf(bind, shoulder, elbow, ub, uh);
   hingeOf(bind, elbow, wrist, fb, fh);
+  const droop = Math.atan2(bind[shoulder].y - bind[elbow].y, Math.abs(bind[elbow].x - bind[shoulder].x));
+  const palm = (droop > ARMS_DOWN_FROM ? bindPalm(bind, wrist) : null) ?? { x: 0, y: -1, z: 0 };
   const upper = span(bind, shoulder, elbow);
   const fore = span(bind, elbow, wrist);
   return {
@@ -728,9 +746,52 @@ function readArm(
     uh,
     fb,
     fh,
+    palm,
     hip,
     knee,
   };
+}
+
+/**
+ * The way a hand's palm faces in the bind, read from its fingers (unit), or
+ * null for a hand without them — `humanSeated.bindPalmRoll`'s reading: under
+ * the wrist, the first joint with four or more branches is the hand; each
+ * branch's second joint is a finger's; the one furthest from the others is
+ * the thumb, and of the rest the nearest it is the index and the furthest
+ * the little finger. The palm faces along (wrist to knuckles) × (little
+ * finger to index), signed by the side the wrist is on.
+ */
+export function bindPalm(bind: readonly BindJoint[], wrist: number): Vec | null {
+  const kids: number[][] = bind.map(() => []);
+  bind.forEach((b, i) => {
+    if (b.parent >= 0) kids[b.parent].push(i);
+  });
+  let hand = -1;
+  const queue = [wrist];
+  while (queue.length) {
+    const at = queue.shift()!;
+    if (kids[at].length >= 4) {
+      hand = at;
+      break;
+    }
+    queue.push(...kids[at]);
+  }
+  if (hand < 0) return null;
+  const bases = kids[hand].map((k) => bind[kids[k][0] ?? k]);
+  const c = { x: 0, y: 0, z: 0 };
+  for (const b of bases) vSet(c, c.x + b.x / bases.length, c.y + b.y / bases.length, c.z + b.z / bases.length);
+  const far = (b: BindJoint, o: { x: number; y: number; z: number }) => Math.hypot(b.x - o.x, b.y - o.y, b.z - o.z);
+  const thumb = bases.reduce((best, b, i) => (far(b, c) > far(bases[best], c) ? i : best), 0);
+  const rest = bases.filter((_, i) => i !== thumb).sort((a, b) => far(a, bases[thumb]) - far(b, bases[thumb]));
+  if (rest.length < 2) return null;
+  const index = rest[0];
+  const little = rest[rest.length - 1];
+  const w = bind[wrist];
+  const ax = c.x - w.x, ay = c.y - w.y, az = c.z - w.z;
+  const cx = index.x - little.x, cy = index.y - little.y, cz = index.z - little.z;
+  const side = Math.sign(w.x) || 1;
+  const palm = vSet({ x: 0, y: 0, z: 0 }, (ay * cz - az * cy) * side, (az * cx - ax * cz) * side, (ax * cy - ay * cx) * side);
+  return Math.hypot(palm.x, palm.y, palm.z) > 1e-12 ? vUnit(palm) : null;
 }
 
 function newStatus(): HandStatus {
@@ -966,8 +1027,14 @@ function solveArm(state: ReachState, arm: ArmRig, T: Vec, palm: Vec, into: ArmSo
   qInv(inv, inv);
   qRotate(a0, inv, tipX, tipY, tipZ);
   vUnit(a0);
-  // The bind palm faces down: −Y, less its part along the hand.
-  vUnit(vSet(n0, a0.y * a0.x, -1 + a0.y * a0.y, a0.y * a0.z));
+  // The bind palm, less its part along the hand: −Y on a T-pose arm (the
+  // same arithmetic as ever, bit for bit), the fingers' on one that hangs.
+  const bp = arm.palm;
+  if (bp.x === 0 && bp.y === -1 && bp.z === 0) vUnit(vSet(n0, a0.y * a0.x, -1 + a0.y * a0.y, a0.y * a0.z));
+  else {
+    const bd = bp.x * a0.x + bp.y * a0.y + bp.z * a0.z;
+    vUnit(vSet(n0, bp.x - a0.x * bd, bp.y - a0.y * bd, bp.z - a0.z * bd));
+  }
   vUnit(vSet(a1, T.x - W.x, T.y - W.y, T.z - W.z));
   if (a1.x === 0 && a1.y === 0 && a1.z === 0) vSet(a1, apx, 0, apz);
   const pd = palm.x * a1.x + palm.y * a1.y + palm.z * a1.z;

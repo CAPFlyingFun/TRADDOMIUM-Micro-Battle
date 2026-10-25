@@ -40,6 +40,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import {
+  bindPalm,
   BLEND_TIME,
   CAPSULE_MARGIN_M,
   CAPSULE_RADIUS_M,
@@ -811,6 +812,47 @@ describe.each(BODIES)('humanReach on $who', (body) => {
       expect(rx.turns).toEqual(ry.turns);
       expect(rx.L).toEqual(ry.L);
       expect(rx.R).toEqual(ry.R);
+    }
+  });
+});
+
+/**
+ * A HANGING ARM'S PALM (Sarah v2's master is rigged arms down, palms to her
+ * thighs). A hand that points down has no "down" across it, and the T-pose
+ * rule's −Y rolled it anywhere; such an arm reads its palm from its fingers.
+ */
+describe('humanReach: the bind palm', () => {
+  // a left hand at +x hanging down, thumb forward: wrist, hand, five fingers of two joints
+  const hanging = (): BindJoint[] => {
+    const at = (x: number, y: number, z: number, parent: number): BindJoint => ({ x, y, z, parent }) as BindJoint;
+    const bind = [at(0, 1, 0, -1), at(0.3, 0.1, 0, 0), at(0.3, 0.05, 0, 1)];
+    for (const [x, z] of [[0.31, 0.05], [0.3, 0.02], [0.3, 0], [0.3, -0.02], [0.3, -0.04]]) {
+      bind.push(at(x, 0.03, z * 0.8, 2));
+      bind.push(at(x, 0, z, bind.length - 1));
+    }
+    return bind;
+  };
+
+  it('reads a hanging left hand, thumb forward, as palm in toward the body', () => {
+    const p = bindPalm(hanging(), 1)!;
+    expect(p.x).toBeLessThan(-0.99);
+    expect(Math.hypot(p.x, p.y, p.z)).toBeCloseTo(1, 9);
+  });
+
+  it('mirrors for a right hand', () => {
+    const right = hanging().map((b) => ({ ...b, x: -b.x }));
+    expect(bindPalm(right, 1)!.x).toBeGreaterThan(0.99);
+  });
+
+  it('is null for a hand without fingers', () => {
+    const at = (x: number, y: number, z: number, parent: number): BindJoint => ({ x, y, z, parent }) as BindJoint;
+    expect(bindPalm([at(0, 1, 0, -1), at(0.3, 0.1, 0, 0), at(0.3, 0, 0, 1)], 1)).toBeNull();
+  });
+
+  it('keeps −Y on both T-pose masters, bit for bit', () => {
+    for (const body of BODIES) {
+      const state = createReach(body.measure, body.bind, FLOOR_Y);
+      for (const arm of state.arms) expect([arm.palm.x, arm.palm.y, arm.palm.z]).toEqual([0, -1, 0]);
     }
   });
 });
