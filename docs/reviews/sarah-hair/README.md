@@ -1,4 +1,4 @@
-# Sarah v2's hair (waiting for his approval)
+# Sarah v2's hair (alpha.124)
 
 Joshua, 2026-10-24: "Start with one face and one hairstyle for Sarah v2. Use our existing Sarah references and assets
 where they help... Check that the hair follows her head cleanly, avoids obvious clipping through her shoulders or

@@ -1,4 +1,4 @@
-# Sarah's NAVEL control (waiting for his approval)
+# Sarah's NAVEL control (alpha.124)
 
 Joshua, 2026-10-24: "a manual bellybutton in/out slider under the body section which is separate from the clothing so
 I can adjust how much of an innie or outie bellybutton is there independent of the automatic bellybutton size per

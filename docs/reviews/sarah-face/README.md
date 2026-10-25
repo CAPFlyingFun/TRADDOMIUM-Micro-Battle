@@ -1,4 +1,4 @@
-# Sarah's face: eyes that look, a mouth that talks (waiting for his approval)
+# Sarah's face: eyes that look, a mouth that talks (alpha.124)
 
 Joshua, 2026-10-24: "would like to somehow add bones 🦴 in or something around the mouth to open and close like
 talking, and maybe the illusion of the eyes being able to look around in sync."

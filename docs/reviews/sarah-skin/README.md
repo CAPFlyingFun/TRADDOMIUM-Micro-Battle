@@ -37,7 +37,7 @@ Sheets:
 - `02-paint.jpg`: strokes, a side view, then undo.
 - `03-upload-portrait.jpg`: an upload, held upright, clothes hidden.
 
-## Painting with a picture (alpha.124, waiting for his approval)
+## Painting with a picture (alpha.124)
 
 Joshua, 2026-10-24: "can you upload custom paint textures like with the clothing?"
 
