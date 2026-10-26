@@ -12,7 +12,7 @@ const browser = await chromium.launch({ executablePath: exe, args: ['--use-gl=an
 try {
   const p = await browser.newPage({ viewport: { width: 1200, height: 1200 } });
   p.on('pageerror', (e) => console.log('PAGEERROR', e.message));
-  await p.goto(`http://127.0.0.1:${port}/scripts/baseTouchup/view.html?f=/${glb}` + (process.env.LPOS ? `&lpos=/${process.env.LPOS}&lnor=/${process.env.LNOR}` : ''));
+  await p.goto(`http://127.0.0.1:${port}/scripts/baseTouchup/view.html?f=/${glb}` + (process.env.LPOS ? `&lpos=/${process.env.LPOS}&lnor=/${process.env.LNOR}` : '') + (process.env.ALL ? '&all=1' : ''));
   await p.waitForFunction(() => window.ready, null, { timeout: 600000 });
   console.log(JSON.stringify(await p.evaluate(() => window.info)));
   for (const sw of swaps.split(',').filter(Boolean)) { const [slot, url] = sw.split('='); await p.evaluate(([s, u]) => window.swap(s, u), [slot, url]); }

@@ -11,6 +11,7 @@ zone: a list of shapes unioned; "except": shapes cut out. Each shape has a feath
   {"ellipsoid": [cx,cy,cz], "r": [rx,ry,rz]}
   {"box": [x0,y0,z0,x1,y1,z1]}
   {"curve": "<tag>/line_dy.npy" , "width": m}   per-vertex distance field saved by a fix script
+  {"polyline_xy": [[x, y], ...], "width": m, "zmin"/"zmax": z, "mirror": true}   a line drawn on the body seen from the front
 Positions are metres for a body standing 0..1.70 m, +Z the front, +X the body's left."""
 import sys, json, numpy as np, os
 sys.path.insert(0, os.path.dirname(__file__))
@@ -59,7 +60,27 @@ def grain_ratio(lin, op):
     loc = skin.chart_blur(lin, C, op.get('grain_px', 3.0))
     r = np.clip(lin / np.maximum(loc, 1e-4), 1 - clip, 1 + clip)
     r[~cov] = 1.0
+    if op.get('edge_grain_px'):
+        # a chart's own edge is where the bake left its seam: a rim of texels lighter or darker than the
+        # chart inside. Measured against an average that stops at that edge, the rim reads as "grain" and
+        # would come back with it, a step along the chart's outline (under her right breast it outlined a
+        # whole small chart). Near the edge the grain fades out.
+        r = r ** smooth01(chart_edge_px() / op['edge_grain_px'])[..., None]
     return r ** g
+
+_edge = None
+def chart_edge_px():
+    """Per texel, the distance in texels to the nearest edge of a UV chart."""
+    global _edge
+    if _edge is None:
+        import cv2
+        Cp = np.pad(C, 1, constant_values=-1)
+        border = np.zeros(C.shape, bool)
+        for dy in (-1, 0, 1):
+            for dx in (-1, 0, 1):
+                border |= Cp[1 + dy:1 + dy + H, 1 + dx:1 + dx + W] != C
+        _edge = cv2.distanceTransform((~border).astype(np.uint8), cv2.DIST_L2, 5)
+    return _edge
 
 def shape_w(s):
     f = s.get('feather', 0.01)
@@ -90,12 +111,18 @@ def shape_w(s):
         w = smooth01((s['width'] + f - d) / f)
         if 'zmin' in s:
             w = w * (P[..., 2] > s['zmin'])
+        if 'zmax' in s:
+            w = w * (P[..., 2] < s['zmax'])
         return w
     raise ValueError(s)
 
+def facing(s, w):
+    # "ny_min": only skin whose normal points at least this much up (keeps a zone off the underside of a breast)
+    return w * (N[..., 1] > s['ny_min']) if 'ny_min' in s else w
+
 def zone_w(z):
     w = np.zeros((H, W), np.float32)
-    for s in z['shapes']: w = np.maximum(w, shape_w(s))
+    for s in z['shapes']: w = np.maximum(w, facing(s, shape_w(s)))
     for s in z.get('except', []): w = w * (1 - shape_w(s))
     w[~cov] = 0
     return w

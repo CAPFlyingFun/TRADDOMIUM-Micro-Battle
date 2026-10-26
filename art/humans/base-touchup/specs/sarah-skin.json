@@ -216,7 +216,8 @@
      }
     ]
    },
-   "flatten": 0.6
+   "flatten": 0.6,
+   "edge_grain_px": 4
   },
   {
    "op": "smooth",
@@ -649,6 +650,284 @@
        0.02,
        0.02,
        0.02
+      ],
+      "feather": 0.006
+     }
+    ]
+   }
+  },
+  {
+   "op": "flatten",
+   "name": "neck: the seam's line in the normal map",
+   "amount": 0.85,
+   "zone": {
+    "shapes": [
+     {
+      "polyline_xy": [
+       [
+        -0.14,
+        1.414
+       ],
+       [
+        -0.1,
+        1.415
+       ],
+       [
+        -0.07,
+        1.411
+       ],
+       [
+        -0.04,
+        1.41
+       ],
+       [
+        -0.02,
+        1.404
+       ],
+       [
+        0.0,
+        1.401
+       ],
+       [
+        0.02,
+        1.404
+       ],
+       [
+        0.04,
+        1.41
+       ],
+       [
+        0.07,
+        1.411
+       ],
+       [
+        0.1,
+        1.415
+       ],
+       [
+        0.14,
+        1.414
+       ]
+      ],
+      "width": 0.003,
+      "feather": 0.006,
+      "zmin": -0.12
+     }
+    ]
+   }
+  },
+  {
+   "op": "smooth",
+   "name": "neck: the seam's line in the colour map",
+   "sigma_mm": 4,
+   "grain": 1.0,
+   "grain_px": 2.0,
+   "zone": {
+    "shapes": [
+     {
+      "polyline_xy": [
+       [
+        -0.14,
+        1.414
+       ],
+       [
+        -0.1,
+        1.415
+       ],
+       [
+        -0.07,
+        1.411
+       ],
+       [
+        -0.04,
+        1.41
+       ],
+       [
+        -0.02,
+        1.404
+       ],
+       [
+        0.0,
+        1.401
+       ],
+       [
+        0.02,
+        1.404
+       ],
+       [
+        0.04,
+        1.41
+       ],
+       [
+        0.07,
+        1.411
+       ],
+       [
+        0.1,
+        1.415
+       ],
+       [
+        0.14,
+        1.414
+       ]
+      ],
+      "width": 0.004,
+      "feather": 0.006,
+      "zmin": -0.12
+     }
+    ]
+   }
+  },
+  {
+   "op": "flatten",
+   "name": "knees: the line behind each knee in the normal map",
+   "amount": 0.85,
+   "zone": {
+    "shapes": [
+     {
+      "polyline_xy": [
+       [
+        0.025,
+        0.534
+       ],
+       [
+        0.15,
+        0.534
+       ]
+      ],
+      "width": 0.003,
+      "feather": 0.006,
+      "zmax": -0.1
+     },
+     {
+      "polyline_xy": [
+       [
+        -0.15,
+        0.534
+       ],
+       [
+        -0.025,
+        0.534
+       ]
+      ],
+      "width": 0.003,
+      "feather": 0.006,
+      "zmax": -0.1
+     }
+    ]
+   }
+  },
+  {
+   "op": "smooth",
+   "name": "knees: the line behind each knee in the colour map",
+   "sigma_mm": 4,
+   "grain": 1.0,
+   "grain_px": 2.0,
+   "zone": {
+    "shapes": [
+     {
+      "polyline_xy": [
+       [
+        0.025,
+        0.534
+       ],
+       [
+        0.15,
+        0.534
+       ]
+      ],
+      "width": 0.004,
+      "feather": 0.006,
+      "zmax": -0.1
+     },
+     {
+      "polyline_xy": [
+       [
+        -0.15,
+        0.534
+       ],
+       [
+        -0.025,
+        0.534
+       ]
+      ],
+      "width": 0.004,
+      "feather": 0.006,
+      "zmax": -0.1
+     }
+    ]
+   }
+  },
+  {
+   "op": "smooth",
+   "name": "seat: the dark V of the bikini crease over the top of the buttocks",
+   "sigma_mm": 8,
+   "grain": 1.0,
+   "zone": {
+    "shapes": [
+     {
+      "polyline_xy": [
+       [
+        -0.19,
+        1.01
+       ],
+       [
+        -0.15,
+        1.012
+       ],
+       [
+        -0.1,
+        1.005
+       ],
+       [
+        -0.05,
+        0.993
+       ],
+       [
+        -0.025,
+        0.985
+       ],
+       [
+        0.0,
+        0.975
+       ],
+       [
+        0.025,
+        0.985
+       ],
+       [
+        0.05,
+        0.993
+       ],
+       [
+        0.1,
+        1.005
+       ],
+       [
+        0.15,
+        1.012
+       ],
+       [
+        0.19,
+        1.01
+       ]
+      ],
+      "width": 0.007,
+      "feather": 0.012,
+      "zmax": -0.05
+     }
+    ],
+    "except": [
+     {
+      "ellipsoid": [
+       0.0,
+       0.955,
+       -0.17
+      ],
+      "r": [
+       0.012,
+       0.03,
+       0.06
       ],
       "feather": 0.006
      }

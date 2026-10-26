@@ -8,7 +8,13 @@ const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies(
 const [file, out] = process.argv.slice(2); mkdirSync(out, { recursive: true });
 const doc = await io.read(file);
 const mul = (m, v) => [m[0] * v[0] + m[4] * v[1] + m[8] * v[2] + m[12], m[1] * v[0] + m[5] * v[1] + m[9] * v[2] + m[13], m[2] * v[0] + m[6] * v[1] + m[10] * v[2] + m[14]];
-const rot = (m, v) => [m[0] * v[0] + m[4] * v[1] + m[8] * v[2], m[1] * v[0] + m[5] * v[1] + m[9] * v[2], m[2] * v[0] + m[6] * v[1] + m[10] * v[2]];
+// a normal is carried by the INVERSE TRANSPOSE of the skin matrix: Sarah's mesh is quantized into a box scaled
+// differently on each axis, and carrying her normals by the matrix itself tilts them by up to ten degrees
+const rot = (m, v) => { const a = m[0], b = m[4], c = m[8], d = m[1], e = m[5], f = m[9], g = m[2], h = m[6], i = m[10];
+  const A = e * i - f * h, B = -(d * i - f * g), C = d * h - e * g, D = -(b * i - c * h), E = a * i - c * g, F = -(a * h - b * g), G = b * f - c * e, H = -(a * f - c * d), I = a * e - b * d;
+  // cofactor matrix = det * inverse transpose; its sign does not matter once normalized, but keep it facing out
+  const det = a * A + b * B + c * C, s = det < 0 ? -1 : 1;
+  return [s * (A * v[0] + B * v[1] + C * v[2]), s * (D * v[0] + E * v[1] + F * v[2]), s * (G * v[0] + H * v[1] + I * v[2])]; };
 let n = 0;
 for (const node of doc.getRoot().listNodes()) {
   const mesh = node.getMesh(); if (!mesh) continue;

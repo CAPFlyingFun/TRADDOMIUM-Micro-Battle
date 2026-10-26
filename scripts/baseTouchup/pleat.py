@@ -11,6 +11,10 @@ seam kinds:
   {"kind": "loop", "y": [lo, hi], "rmax": m}                 a ring round the torso, height found per 10 deg
   {"kind": "leg_loop", "side": +1|-1, "y": [lo, hi], "back_only": true}   a ring round one leg
   {"kind": "plane_x", "x0": 0.006, "y": [lo, hi], "zmin": 0.0} a line down the front (the mirror seam)
+  {"kind": "polyline_xy", "lines": [[[x, y], ...]], "side": "front"|"back", "zcut": z, "y": [lo, hi]}   drawn lines
+  {"kind": "smooth_normals", ...}, {"kind": "rough", "boxes": [...]}   shading only; jagged patches
+A seam with "mode": "fillet" is ROUNDED (Laplacian steps in its band) instead of projected: for a sharp
+corner or a shelf, where a surface fitted across it would leave the edges of the step behind.
 """
 import os, sys, json, numpy as np
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -170,8 +174,33 @@ for sd in spec['seams']:
         c, rr = np.array(ex['ellipsoid']), np.array(ex['r'])
         q = np.sqrt((((Q - c) / rr) ** 2).sum(1)); t = np.clip(q - 1, 0, 1) / max(ex.get('feather_r', 0.5), 1e-6); t = np.clip(t, 0, 1)
         wmul = (wmul if wmul is not None else 1) * (t * t * (3 - 2 * t))
-    Q, QN, moved, mx, w = project(Q, QN, dist, sd.get('core', 0.009), sd.get('feather', 0.018), sd.get('clean_in', 0.012), sd.get('clean_out', 0.045), sd.get('R', 0.035), region, wmul, sd.get('normal_agree'), sd.get('max_move'))
-    if sd.get('post_smooth'):
+    if sd.get('mode') == 'fillet':
+        # ROUND a sharp corner or a shelf instead of fitting a surface across it (a fit across a step leaves
+        # the step's edges): plain Laplacian steps in the band move each vertex toward its neighbours'
+        # average, which fills a concave corner and eases a convex one, fading out by `feather`
+        core, feather = sd.get('core', 0.009), sd.get('feather', 0.018)
+        w = np.clip((feather - dist) / (feather - core), 0, 1); w = w * w * (3 - 2 * w); w[~region] = 0
+        if wmul is not None: w = w * wmul
+        Q0 = Q.copy()
+        steps = (0.5, -0.53) if sd.get('taubin') else (0.5,)
+        for _ in range(sd.get('iterations', 30)):
+            for lam in steps:
+                Q = Q + lam * ((Dm @ Q) - Q) * w[:, None]
+        dq = Q - Q0; mag = np.linalg.norm(dq, axis=1)
+        if sd.get('max_move'):
+            Q = Q0 + dq * np.minimum(1, sd['max_move'] / np.maximum(mag, 1e-12))[:, None]; mag = np.minimum(mag, sd['max_move'])
+        # the normals turn by as much as the SHAPE turned: each keeps its own smoothing and gains the change in the
+        # surface's geometric normal (replacing them with geometric normals drew a seam where the band ends, since the
+        # file's own normals are smoother than its triangles)
+        def vnormals(X):
+            fn = np.cross(X[F[:, 1]] - X[F[:, 0]], X[F[:, 2]] - X[F[:, 0]]); V = np.zeros_like(X)
+            for k in range(3): np.add.at(V, F[:, k], fn)
+            return V / (np.linalg.norm(V, axis=1, keepdims=True) + 1e-12)
+        QN = QN + (vnormals(Q) - vnormals(Q0)); QN /= np.linalg.norm(QN, axis=1, keepdims=True)
+        moved, mx = int((mag > 1e-7).sum()), float(mag.max())
+    else:
+        Q, QN, moved, mx, w = project(Q, QN, dist, sd.get('core', 0.009), sd.get('feather', 0.018), sd.get('clean_in', 0.012), sd.get('clean_out', 0.045), sd.get('R', 0.035), region, wmul, sd.get('normal_agree'), sd.get('max_move'))
+    if sd.get('post_smooth') and sd.get('mode') != 'fillet':
         # settle the small disagreements between neighbouring fitted patches (shrink-free)
         for _ in range(sd['post_smooth']):
             for lam in (0.5, -0.53):
@@ -183,4 +212,11 @@ for sd in spec['seams']:
         a = w[:, None]; QN = QN * (1 - a) + VN * a; QN /= np.linalg.norm(QN, axis=1, keepdims=True)
     print(sd.get('name', sd['kind']), 'moved', moved, 'max mm', round(mx * 1000, 2))
     np.save(f'{skin.ROOT}/{tag}/pleat-w-{sd.get("name", sd["kind"]).split()[0]}.npy', w[inv])
-Q[inv].astype(np.float32).tofile(f'{skin.ROOT}/{tag}/new-pos.bin'); QN[inv].astype(np.float32).tofile(f'{skin.ROOT}/{tag}/new-nor.bin')
+# a welded vertex nothing moved keeps every copy's OWN position and normal (copies along a UV seam can carry
+# different normals); only what a seam changed is written from the welded mesh
+changed = (np.abs(Q - P).max(1) > 1e-7) | (np.abs(QN / np.linalg.norm(QN, axis=1, keepdims=True) - Nw / np.linalg.norm(Nw, axis=1, keepdims=True)).max(1) > 1e-4)
+outP = pos.copy(); outN = nor.copy()
+cv = changed[inv]
+outP[cv] = Q[inv][cv]; outN[cv] = QN[inv][cv]
+print('vertices changed', int(cv.sum()), 'of', len(cv))
+outP.astype(np.float32).tofile(f'{skin.ROOT}/{tag}/new-pos.bin'); outN.astype(np.float32).tofile(f'{skin.ROOT}/{tag}/new-nor.bin')

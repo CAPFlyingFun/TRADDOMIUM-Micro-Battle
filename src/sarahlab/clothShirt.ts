@@ -504,6 +504,20 @@ export class ClothShirt {
     return { min, max, slack: slack / n, taut: taut / n };
   }
   /**
+   * For a probe: every edge stretched past `limit` × its rest length now, worst first: its two particles (file order),
+   * how far stretched, how hard each is held, and whether each is bound to her arm.
+   */
+  tears(limit = 2): { a: number; b: number; ratio: number; pinA: number; pinB: number; armA: boolean; armB: boolean }[] {
+    const x = this.sim.positions, R = this.restSlot, E = this.sim.edges, k = this.sim.settings.restScale, out = [];
+    for (let e = 0; e < E.length; e += 2) {
+      const a = E[e] * 3, b = E[e + 1] * 3;
+      const now = Math.hypot(x[b] - x[a], x[b + 1] - x[a + 1], x[b + 2] - x[a + 2]), rest = Math.hypot(R[b] - R[a], R[b + 1] - R[a + 1], R[b + 2] - R[a + 2]) * k;
+      const ratio = now / Math.max(rest, 1e-6);
+      if (ratio > limit) { const pa = this.order[E[e]], pb = this.order[E[e + 1]]; out.push({ a: pa, b: pb, ratio, pinA: this.pinNow[E[e]], pinB: this.pinNow[E[e + 1]], armA: this.skin.boundToArm(pa), armB: this.skin.boundToArm(pb) }); }
+    }
+    return out.sort((p, q) => q.ratio - p.ratio);
+  }
+  /**
    * For a probe: how the cloth clears her skin over her navel. Every vertex of her body within `radius` (world) of her
    * navel's axis is posed (slowly: a probe's), and the cloth's height over it along the axis read from the cloth
    * triangle above it: the least gap, where it is, and how many of her vertices stand above the cloth.
@@ -718,6 +732,7 @@ export class ClothShirt {
   }
   /** Scratch for `layout`: how far below the cut each of the tee's particles stands. */
   private readonly below: Float32Array;
+
 
   /**
    * Lay out the cloth again (`layout`): a new simulation when what is simulated or how it is held has changed, null when

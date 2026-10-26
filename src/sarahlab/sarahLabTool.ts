@@ -164,6 +164,8 @@ export const SARAH_LAB_ACTION = Object.freeze({
 });
 
 export const SARAH_LAB_FIELD = Object.freeze({
+  /** the room's name and build at the top (`labTitle`) */
+  title: 'sarahlab-title',
   status: 'sarahlab-status',
   bump: 'sarahlab-bump',
   fingers: 'sarahlab-fingers',
@@ -292,6 +294,20 @@ export function clothLine(s: { readonly particles: number; readonly skinMs: numb
   // the frame's cost and rate first: held upright the stage line is cut short, and those are the reading
   return `CLOTH · ${ms(s.skinMs + s.simMs + s.drawMs)} ms · ${Math.round(1000 / Math.max(1, frameMs))} fps · ${s.particles.toLocaleString('en-US')} points · skin ${ms(s.skinMs)} + cloth ${ms(s.simMs)} + draw ${ms(s.drawMs)} · ${s.substeps} steps`;
 }
+
+/**
+ * The room's name and the build it is, over her name at the top (Joshua, 2026-10-25: "let's add the version number at
+ * the top header like 'Character Lab v0.127'"): the package's own version, `1.0.0-alpha.N` read as v0.N, so a phone
+ * says which build it is showing without opening anything.
+ */
+export function labTitle(version: string): string {
+  const alpha = /alpha\.(\d+)/.exec(version);
+  const v = alpha ? `v0.${alpha[1]}` : version && version !== 'unversioned' ? `v${version}` : '';
+  return v ? `CHARACTER LAB ${v}` : 'CHARACTER LAB';
+}
+
+/** The cloth's line while she is seated: the fitted tee is worn then, and the cloth waits for her to stand. */
+export const CLOTH_SEATED_LINE = 'CLOTH · seated: the fitted tee is worn until she stands';
 
 /** The SHIRT LENGTH line: 0 just above her crotch, 1 just above her knee. */
 export function shirtLengthLine(length: number): string {

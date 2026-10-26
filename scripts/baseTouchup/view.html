@@ -21,7 +21,7 @@ if (new URLSearchParams(location.search).get('light') === 'top') {
 const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
 const g = await loader.loadAsync(new URLSearchParams(location.search).get('f'));
 s.add(g.scene); g.scene.updateMatrixWorld(true);
-const bodies = []; g.scene.traverse((o) => { if (o.isMesh) { const m = Array.isArray(o.material) ? o.material[0] : o.material; if (m.name === 'Material_0') bodies.push(o); else o.visible = false; } });
+const bodies = []; g.scene.traverse((o) => { if (o.isMesh) { const m = Array.isArray(o.material) ? o.material[0] : o.material; if (m.name === 'Material_0') bodies.push(o); else o.visible = new URLSearchParams(location.search).has('all'); } });
 // ?lpos=&lnor= : preview a mesh change by replacing the skin's local positions/normals (float32, per vertex)
 { const q = new URLSearchParams(location.search); if (q.get('lpos')) {
   const lp = new Float32Array(await (await fetch(q.get('lpos'))).arrayBuffer()), ln = new Float32Array(await (await fetch(q.get('lnor'))).arrayBuffer());
@@ -60,6 +60,11 @@ const R = {
   toes: [[0.19, 0.03, 0.11], 0.3, 25], toesfront: [[0.19, 0.03, 0.11], 0.26, 0], stoes: [[0.105, 0.03, 0.06], 0.26, 25],
   backlow: [[0, 1.0, -0.1], 0.7, 180], hipback: [[0, 0.95, -0.12], 0.6, 160], neckbase: [[0, 1.42, 0.05], 0.4, 0], bellyc: [[0, 0.95, 0.2], 0.3, 0],
   shoulderL: [[0.14, 1.43, 0.0], 0.35, 30], shoulderR: [[-0.14, 1.43, 0.0], 0.35, -30],
+  // Sarah v2's four mesh spots (her neck sits back at z -0.07, the back of her knees at -0.15)
+  sneck: [[0, 1.41, -0.06], 0.32, 0], sneckclose: [[0.0, 1.406, -0.06], 0.1, 0], sneckside: [[0.06, 1.41, -0.06], 0.14, 0], snecklow: [[0, 1.40, -0.06], 0.32, 0], sneck3: [[0.03, 1.41, -0.06], 0.32, 35],
+  sseat: [[0, 0.99, -0.17], 0.5, 180], sseat3: [[0.08, 0.99, -0.15], 0.45, 145],
+  sknees: [[0, 0.534, -0.15], 0.55, 180], skneeL: [[0.09, 0.534, -0.15], 0.28, 180],
+  sunder: [[0, 1.23, 0.05], 0.42, 0], sunderclose: [[0.06, 1.226, 0.04], 0.09, 0], sunderlow: [[0.06, 1.226, 0.04], 0.12, 0], sunderL: [[0.09, 1.222, 0.03], 0.24, 25], sunderR: [[-0.09, 1.222, 0.03], 0.24, -25],
   legs: [[0, 0.5, 0], 1.5, 0], legsback: [[0, 0.5, 0], 1.5, 180], feet: [[0, 0.06, 0.06], 0.7, 25], back: [[0, 1.15, 0], 1.7, 180],
 };
 window.regions = Object.keys(R);

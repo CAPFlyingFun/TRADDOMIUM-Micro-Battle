@@ -24,7 +24,14 @@
  * place of Material_0's colour and normal maps (the same texture objects, so names and samplers stay). Every texel the
  * touch-up did not edit is the archive's own byte. Her geometry is untouched, which the check below still proves.
  *
- *   node scripts/sarahV2Recovery/body-slim.mjs [--out public/models/sarah-v2-body-slim.glb]
+ * HER MESH FIX (Joshua, 2026-10-25: "do the fix for 4 things for Sarah"): the seam across the front of her neck, the
+ * line behind each knee, the bikini crease over her seat and the serrated fringe along the crease under each breast,
+ * rounded by `scripts/baseTouchup/pleat.py` and listed vertex by vertex by `scripts/baseTouchup/mesh_fix.mjs`
+ * (`art/humans/base-touchup/sarah-v2/mesh-fix.json`, once approved). Only those vertices of Material_0's base POSITION and
+ * NORMAL change, on the accessors' own int16 grid; every morph target is a change FROM the base, so each belly size
+ * carries the fix with it. The check below holds every other array to exact equality and those two to the fix.
+ *
+ *   node scripts/sarahV2Recovery/body-slim.mjs [--out public/models/sarah-v2-body-slim.glb] [--skin <dir>] [--mesh-fix <file.json>]
  */
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
@@ -35,8 +42,12 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 const SOURCE = 'assets-archive/models/sarah-v2-body.glb';
 const outAt = process.argv.indexOf('--out');
 const TARGET = outAt > 0 ? process.argv[outAt + 1] : 'public/models/sarah-v2-body-slim.glb';
+const arg = (name, fallback) => { const i = process.argv.indexOf(name); return i > 0 ? process.argv[i + 1] : fallback; };
 /** The approved touched-up skin maps (see the header); the archive's own maps are used if they are not there. */
-const SKIN = { base: 'art/humans/base-touchup/sarah-v2/base.png', normal: 'art/humans/base-touchup/sarah-v2/normal.png' };
+const SKIN_DIR = arg('--skin', 'art/humans/base-touchup/sarah-v2');
+const SKIN = { base: `${SKIN_DIR}/base.png`, normal: `${SKIN_DIR}/normal.png` };
+/** The approved mesh fix (see the header), if there is one. */
+const MESH_FIX = arg('--mesh-fix', 'art/humans/base-touchup/sarah-v2/mesh-fix.json');
 /** The parts no outfit on the v2 body draws from this file. */
 /** The grid a float morph normal past [-1, 1] is rounded to: 1/1024 (under a tenth of a degree of light direction), far below what light on her can show. */
 const GRID = 1024;
@@ -62,6 +73,22 @@ function arrays(doc) {
 
 const original = await io.read(SOURCE);
 const before = arrays(original);
+const fix = existsSync(MESH_FIX) ? JSON.parse(readFileSync(MESH_FIX, 'utf8')) : null;
+/** A copy of an array with the fix's values written at its vertices. */
+function patched(array, values) {
+  const out = array.slice();
+  fix.indices.forEach((v, i) => { for (let k = 0; k < 3; k++) out[v * 3 + k] = values[i * 3 + k]; });
+  return out;
+}
+if (fix) {
+  // what the check expects: the approved arrays with the fix written in, and nothing else different
+  const body = before.find((b) => b.name === fix.material);
+  if (!body) throw new Error(`no ${fix.material} primitive for the mesh fix`);
+  for (const entry of body.list) {
+    if (entry[0] === 'POSITION') { if (entry[1].length !== fix.vertices * 3 || entry[1].constructor.name !== fix.position_type) throw new Error('the mesh fix was made for another file'); entry[1] = patched(entry[1], fix.position); }
+    if (entry[0] === 'NORMAL') { if (entry[1].constructor.name !== fix.normal_type) throw new Error('the mesh fix was made for another file'); entry[1] = patched(entry[1], fix.normal); }
+  }
+}
 
 const doc = await io.read(SOURCE);
 let dropped = 0, droppedVerts = 0;
@@ -72,6 +99,15 @@ for (const mesh of doc.getRoot().listMeshes()) for (const p of mesh.listPrimitiv
 }
 // what only the dropped parts used (their materials, knit textures, accessors) goes with them; nothing else is touched
 await doc.transform(prune({ keepAttributes: true, keepIndices: true, keepLeaves: true, keepSolidTextures: true }));
+
+// her mesh fix (see the header)
+if (fix) {
+  const prim = doc.getRoot().listMeshes().flatMap((m) => m.listPrimitives()).find((p) => p.getMaterial()?.getName() === fix.material);
+  for (const [semantic, values] of [['POSITION', fix.position], ['NORMAL', fix.normal]]) {
+    const accessor = prim.getAttribute(semantic);
+    accessor.setArray(patched(accessor.getArray(), values));
+  }
+}
 
 // her touched-up skin in place of the archive's maps (see the header)
 let skinned = 0;
@@ -138,4 +174,5 @@ const mb = (f) => (statSync(f).size / 1048576).toFixed(1);
 console.log(`dropped ${dropped} primitives (${droppedVerts} vertices); kept ${before.length}, every array identical`
   + `${quantized ? ` but ${quantized} float morph normals now 16-bit (within half a step)` : ''}${skipped ? `; ${skipped} float morph normals rounded to 1/${GRID} (values past 1)` : ''}`);
 console.log(skinned ? `her skin: the touched-up maps (${SKIN.base}, ${SKIN.normal})` : 'her skin: the archive\'s own maps');
+console.log(fix ? `her mesh: ${fix.changed} vertices fixed (${MESH_FIX}, largest move ${fix.max_move_mm} mm)` : 'her mesh: the archive\'s own');
 console.log(`${SOURCE} ${mb(SOURCE)} MB -> ${TARGET} ${mb(TARGET)} MB`);
