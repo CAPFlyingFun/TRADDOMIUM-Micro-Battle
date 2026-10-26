@@ -142,6 +142,25 @@ describe('her crease, on her', () => {
     expect(arrays(m)).toEqual(b);
   });
 
+  it('looks for the fold on her shape as her bones carry it: a fold her build\'s bones undo is no fold', () => {
+    // her build moves skin on different bones apart in rest space for the moved bones to bring back together: here the
+    // morph drags a row up past its neighbours, and the bones (the shift) carry that row back down again
+    const m = sheet(), b = base(m), crease = new BodyCrease(['spring']);
+    m.morphTargetInfluences![0] = 1;
+    const dragged = m.geometry.morphAttributes.position![0];
+    crease.shift = (_mesh, vertices) => Float32Array.from(Array.from(vertices).flatMap((v) => [0, -dragged.getY(v), 0]));
+    crease.relay(m, 'k', b.P, b.N);
+    crease.request();
+    expect(crease.last?.found.folds).toBe(0);
+    expect(crease.last?.vertices.length).toBe(0);
+    expect(arrays(m)).toEqual(b);
+    // ...and with no shift the same rest shape is the fold the repair untangles
+    const again = new BodyCrease(['spring']);
+    again.relay(m, 'k', b.P, b.N);
+    again.request();
+    expect(again.last!.found.folds).toBeGreaterThan(0);
+  });
+
   it('works an answer out but lays nothing while the room has the repair off', () => {
     const m = sheet(), b = base(m), crease = new BodyCrease(['spring']);
     m.morphTargetInfluences![0] = 1;

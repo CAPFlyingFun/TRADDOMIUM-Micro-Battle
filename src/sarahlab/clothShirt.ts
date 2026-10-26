@@ -409,6 +409,9 @@ export class ClothShirt {
    * bound places on her morphed, unposed body (`ClothSkin.restShape`), so a 200% bump wears a tee made for it -- as a
    * maternity tee is -- instead of a 100% tee riding up over it, and a 0% one is not a sack.
    */
+  /** Where her bones carry her rest shape (her build), for the pattern to be cut for her as she stands (`ClothSkin.restShift`). */
+  setRestShift(shift: Float32Array | null): void { this.skin.restShift = shift; }
+
   refit(): void {
     this.pattern(this.restNow);
     this.gather(this.restNow, this.restSlot);

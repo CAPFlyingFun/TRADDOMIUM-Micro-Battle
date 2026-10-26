@@ -411,10 +411,10 @@ export class ClothSkin {
     this.refresh();
     const bt = this.binding.tri, bb = this.binding.bary, off = this.binding.offset, s = this.scale, n = this.count, q = [0, 0, 0, 0, 0, 0, 0, 0, 0], r = [0, 0, 0, 0, 0, 0, 0, 0, 0], T = this.tris;
     for (let i = 0; i < n; i++) {
-      for (let c = 0; c < 3; c++) this.local(bt[i * 3 + c], q, c * 3);
+      for (let c = 0; c < 3; c++) this.restLocal(bt[i * 3 + c], q, c * 3);
       // her normal from the bound triangle's own corners, in its own winding (the file may name them in any order)
       const t = this.bound[i];
-      for (let c = 0; c < 3; c++) this.local(T[t * 3 + c], r, c * 3);
+      for (let c = 0; c < 3; c++) this.restLocal(T[t * 3 + c], r, c * 3);
       const ux = r[3] - r[0], uy = r[4] - r[1], uz = r[5] - r[2], vx = r[6] - r[0], vy = r[7] - r[1], vz = r[8] - r[2];
       let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx; const l = Math.hypot(nx, ny, nz);
       const k = l > 0 ? this.restSign / l : 0; nx *= k; ny *= k; nz *= k;
@@ -424,6 +424,21 @@ export class ClothSkin {
       out[i * 3 + 2] = (u * q[2] + v * q[5] + w * q[8] + nz * o) * s;
     }
     return out;
+  }
+
+  /**
+   * Where her bones carry her rest shape before it is drawn, body-local, 3 per body vertex, or null: her BUILD moves her
+   * bones at rest (`view/bodyBuild.ts`), and her shape is only whole with that added. Only the PATTERN reads it
+   * (`restShape`, the tee cut for her as she is shaped): the particles' own places are skinned by her bones, which carry
+   * it already.
+   */
+  restShift: Float32Array | null = null;
+
+  /** `local`, and where her bones carry it at rest (`restShift`). */
+  private restLocal(v: number, out: number[], o: number): void {
+    this.local(v, out, o);
+    const S = this.restShift;
+    if (S && 3 * v + 2 < S.length) { out[o] += S[3 * v]; out[o + 1] += S[3 * v + 1]; out[o + 2] += S[3 * v + 2]; }
   }
 
   /** Vertex v with her morphs but no bones, body-local, into out at o. */

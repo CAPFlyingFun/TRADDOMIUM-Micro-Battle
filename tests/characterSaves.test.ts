@@ -56,7 +56,8 @@ describe('RANDOMIZE within ranges, with locks', () => {
   it('covers the bump and every body control in the room, each default range inside its slider', () => {
     expect(BODY_RANDOM_SPECS[0]).toMatchObject({ key: 'bump', group: 'belly', min: 0 });
     for (const s of BODY_RANDOM_SPECS) { expect(s.defaultMin).toBeGreaterThanOrEqual(s.min); expect(s.defaultMax).toBeLessThanOrEqual(s.max); expect(s.defaultMin).toBeLessThan(s.defaultMax); }
-    expect(new Set(BODY_RANDOM_SPECS.map((s) => s.group))).toEqual(new Set(['belly', 'breasts']));
+    // BUILD (2026-10-26) joins as its own group: height, lengths, widths and sizes
+    expect(new Set(BODY_RANDOM_SPECS.map((s) => s.group))).toEqual(new Set(['belly', 'breasts', 'build']));
   });
 });
 

@@ -86,6 +86,14 @@ export class BodyCrease {
   enabled = true;
   /** called when an answer is laid after the room summed her (garments that read her skin may follow it) */
   onLaid: (() => void) | null = null;
+  /**
+   * Where her bones carry her rest shape before it is drawn, at the vertices asked for (geometry units, 3 a vertex), or
+   * null where they carry it nowhere: her BUILD (`view/bodyBuild.ts`) moves bones at rest. Her shape is only whole once
+   * that is added -- the build's field moves skin on different bones apart in rest space, for the moved bones to bring
+   * back together -- so her crease is looked for on that sum. Its answer is laid as it comes: a move at rest is the same
+   * move however far her bones carry it.
+   */
+  shift: ((mesh: THREE.Mesh, vertices: Uint32Array) => Float32Array | null) | null = null;
 
   /** The morph targets whose weights move every frame (her belly's spring and the like): not part of her shape's key. */
   constructor(private readonly moving: readonly string[] = []) {}
@@ -173,7 +181,7 @@ export class BodyCrease {
     const reps = this.workerBody.reps;
     if (!reps) return; // posted once the worker says it is prepared
     this.lift();
-    const sum = summed(c.mesh, reps);
+    const sum = summed(c.mesh, reps, this.shift);
     if (!sum) { this.wanted = false; return; }
     this.wanted = false;
     this.inflight = { seq: ++this.seq, mesh: c.mesh, key };
@@ -215,7 +223,7 @@ export class BodyCrease {
       this.prepareMs = performance.now() - t0;
     }
     this.lift();
-    const sum = summed(c.mesh, this.local.crease.reps);
+    const sum = summed(c.mesh, this.local.crease.reps, this.shift);
     if (!sum) return;
     const t0 = performance.now();
     const result = relaxCrease(this.local.crease, sum.position, sum.normal);
@@ -287,8 +295,11 @@ function indexOf(mesh: THREE.Mesh): ArrayLike<number> | null {
   return (mesh.userData.allIndices as ArrayLike<number> | undefined) ?? mesh.geometry.index?.array ?? null;
 }
 
-/** Her summed rest shape at the given vertices: the attributes, and every morph as weighted now, as the GPU adds it. */
-function summed(mesh: THREE.Mesh, reps: Uint32Array): { position: Float32Array; normal: Float32Array } | null {
+/**
+ * Her summed rest shape at the given vertices: the attributes, and every morph as weighted now, as the GPU adds it, and
+ * where her bones carry it at rest (`BodyCrease.shift`).
+ */
+function summed(mesh: THREE.Mesh, reps: Uint32Array, shift: BodyCrease['shift'] = null): { position: Float32Array; normal: Float32Array } | null {
   const g = mesh.geometry, pa = g.getAttribute('position'), na = g.getAttribute('normal');
   if (!(pa instanceof THREE.BufferAttribute) || !(na instanceof THREE.BufferAttribute)) return null;
   if (!g.morphTargetsRelative && (g.morphAttributes.position?.length ?? 0) > 0) return null;
@@ -306,6 +317,8 @@ function summed(mesh: THREE.Mesh, reps: Uint32Array): { position: Float32Array; 
       if (dn) { normal[3 * i] += w * dn.getX(v); normal[3 * i + 1] += w * dn.getY(v); normal[3 * i + 2] += w * dn.getZ(v); }
     }
   });
+  const moved = shift?.(mesh, reps);
+  if (moved) for (let i = 0; i < 3 * n; i += 1) position[i] += moved[i];
   return { position, normal };
 }
 

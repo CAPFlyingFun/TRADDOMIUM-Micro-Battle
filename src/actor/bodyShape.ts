@@ -8,8 +8,10 @@
  * A `BodyShape` is a flat record of named controls, each a number with a range, a step and
  * a default. Every default is the approved body exactly: a shape of all defaults changes
  * nothing. The belly-size slider is NOT here: it stays the primary control, and every
- * number here is a modifier RELATIVE to whatever size is selected (a +10% width is 10% of
- * that size's own bump, at 30% and at 200% alike).
+ * belly and breast number here is a modifier RELATIVE to whatever size is selected (a +10%
+ * width is 10% of that size's own bump, at 30% and at 200% alike). The third group, BUILD
+ * (height, lengths, widths and sizes), does not depend on the belly size; `bodyBuild.ts`
+ * turns it into what a renderer applies.
  *
  * What this file gives a future cast of characters, all pure and testable in node:
  *   - `defaultBodyShape`, `resetControl`: the approved values, whole or one at a time;
@@ -24,11 +26,12 @@
 
 export type BodyControl =
   | 'bellyTilt' | 'bellyHeight' | 'bellyWidth' | 'bellyDepth' | 'bellyUpper' | 'bellyLower' | 'navel'
-  | 'breastSize' | 'breastWidth' | 'breastHeight' | 'breastDepth' | 'breastSpacing' | 'breastPosition' | 'breastDroop' | 'breastUpper' | 'breastLower';
+  | 'breastSize' | 'breastWidth' | 'breastHeight' | 'breastDepth' | 'breastSpacing' | 'breastPosition' | 'breastDroop' | 'breastUpper' | 'breastLower'
+  | 'height' | 'upperLeg' | 'lowerLeg' | 'torso' | 'neck' | 'upperArm' | 'forearm' | 'shoulders' | 'waist' | 'hips' | 'head' | 'hands' | 'feet';
 
 export interface BodyControlSpec {
   readonly key: BodyControl;
-  readonly group: 'belly' | 'breasts';
+  readonly group: 'belly' | 'breasts' | 'build';
   readonly label: string;
   readonly unit: '°' | 'cm' | '%';
   readonly min: number;
@@ -64,6 +67,25 @@ export const BODY_CONTROLS: readonly BodyControlSpec[] = Object.freeze([
   { key: 'breastDroop', group: 'breasts', label: 'Droop', unit: '°', min: -5, max: 15, step: 0.5, fallback: 0, spread: 3, help: 'natural downward tilt' },
   { key: 'breastUpper', group: 'breasts', label: 'Upper fullness', unit: '%', min: -20, max: 20, step: 1, fallback: 0, spread: 5, help: 'the upper pole' },
   { key: 'breastLower', group: 'breasts', label: 'Lower fullness', unit: '%', min: -20, max: 20, step: 1, fallback: 0, spread: 5, help: 'the lower pole' },
+  // Joshua, 2026-10-26: "add a height adjuster so you can raise or shorten the length of the legs, hips, arms, hands and
+  // more basic body controls... I would say maybe the max/min per section is +/-30cm from the default positions".
+  // What `bodyBuild.ts` turns into lengths and scales. The LENGTH ranges are MEASURED on sarah-v2-body-slim.glb: a
+  // length may shrink to half itself and grow by the smaller of 30 cm and its own length (thigh 36.6 cm, shin 41.5,
+  // torso band 27.2, neck 12.2, upper arm 26.1, forearm 22.5) -- but the torso stops at -8 cm, RENDERED: shortened by
+  // half it folded her belly across. Shoulders, waist, hips, head, hands and feet are GAME TUNING.
+  { key: 'height', group: 'build', label: 'Height', unit: 'cm', min: -30, max: 30, step: 0.5, fallback: 0, spread: 4, help: 'her standing height, spread over legs, torso and neck in their own proportions (her arms follow); head, hands and feet keep their size' },
+  { key: 'upperLeg', group: 'build', label: 'Upper legs', unit: 'cm', min: -18, max: 30, step: 0.5, fallback: 0, spread: 1.5, help: 'hip to knee, both legs' },
+  { key: 'lowerLeg', group: 'build', label: 'Lower legs', unit: 'cm', min: -20, max: 30, step: 0.5, fallback: 0, spread: 1.5, help: 'knee to ankle, both legs' },
+  { key: 'torso', group: 'build', label: 'Torso', unit: 'cm', min: -8, max: 27, step: 0.5, fallback: 0, spread: 1.5, help: 'hips to under the bust: a longer or shorter middle (bust, shoulders, arms and head ride on it)' },
+  { key: 'neck', group: 'build', label: 'Neck', unit: 'cm', min: -6, max: 12, step: 0.5, fallback: 0, spread: 0.5, help: 'base of the neck to the head' },
+  { key: 'upperArm', group: 'build', label: 'Upper arms', unit: 'cm', min: -13, max: 26, step: 0.5, fallback: 0, spread: 1, help: 'shoulder to elbow, both arms' },
+  { key: 'forearm', group: 'build', label: 'Forearms', unit: 'cm', min: -11, max: 22, step: 0.5, fallback: 0, spread: 1, help: 'elbow to wrist, both arms' },
+  { key: 'shoulders', group: 'build', label: 'Shoulders', unit: 'cm', min: -6, max: 10, step: 0.5, fallback: 0, spread: 1, help: 'collarbone to shoulder, both sides together; the arms are carried out with them' },
+  { key: 'waist', group: 'build', label: 'Waist', unit: '%', min: -25, max: 35, step: 1, fallback: 0, spread: 5, help: 'girth at the waist (her bump\'s front is left where it is)' },
+  { key: 'hips', group: 'build', label: 'Hips', unit: '%', min: -20, max: 30, step: 1, fallback: 0, spread: 5, help: 'width at the hips and upper thighs' },
+  { key: 'head', group: 'build', label: 'Head', unit: '%', min: -30, max: 30, step: 1, fallback: 0, spread: 2, help: 'head size, her hair with it' },
+  { key: 'hands', group: 'build', label: 'Hands', unit: '%', min: -30, max: 30, step: 1, fallback: 0, spread: 3, help: 'hand size' },
+  { key: 'feet', group: 'build', label: 'Feet', unit: '%', min: -30, max: 30, step: 1, fallback: 0, spread: 3, help: 'foot size' },
 ] as BodyControlSpec[]);
 
 export type BodyShape = Readonly<Record<BodyControl, number>>;

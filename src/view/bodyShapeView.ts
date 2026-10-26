@@ -66,15 +66,46 @@ export function liftShapeFields(mesh: THREE.Mesh): ShapeFields | null {
   return { fields, basePos, baseNrm, last: '' };
 }
 
+/** The rest shape as plain floats, so a step after the fields (her build) can move it; the same conversion `liftShapeFields` makes. */
+function floatBase(geom: THREE.BufferGeometry, name: 'position' | 'normal'): Float32Array | null {
+  const attr = geom.getAttribute(name) as THREE.BufferAttribute | THREE.InterleavedBufferAttribute | undefined;
+  if (!attr) return null;
+  const out = new Float32Array(attr.count * 3);
+  for (let i = 0; i < attr.count; i += 1) { out[i * 3] = attr.getX(i); out[i * 3 + 1] = attr.getY(i); out[i * 3 + 2] = attr.getZ(i); }
+  geom.setAttribute(name, new THREE.BufferAttribute(out.slice(), 3));
+  return out;
+}
+
+/**
+ * A mesh with no `shape:*` targets of its own (her hair, a garment fitted without any), given a rest shape that a step
+ * AFTER the fields can still move: `applyShapeFields` with a `post` (her build, `view/bodyBuild.ts`). Call it before the
+ * mesh's first draw, as `liftShapeFields`: it swaps a quantized attribute for plain floats.
+ */
+export function baseShapeFields(mesh: THREE.Mesh): ShapeFields {
+  const geom = mesh.geometry as THREE.BufferGeometry;
+  return { fields: new Map(), basePos: floatBase(geom, 'position')!, baseNrm: floatBase(geom, 'normal'), last: '' };
+}
+
+/**
+ * A change made after the fields are summed, every time they are (her build: `view/bodyBuild.ts` stretches the rest
+ * shape and turns its normals). `key` is part of the applied key, so a new build applies again and an empty key is no
+ * step at all; `apply` gets the summed rest shape and whether its normals are kept unit.
+ */
+export interface ShapePost {
+  readonly key: string;
+  apply(position: Float32Array, normal: Float32Array | null, normalized: boolean): void;
+}
+
 /**
  * Rest shape = original + Σ weight × field; weights by field name, missing ones zero.
  * Recovered clothing leaves normal sums raw until GPU normal morphs are added,
  * so CPU fit residuals and native GPU deltas cancel before shader normalization.
  */
-export function applyShapeFields(mesh: THREE.Mesh, shape: ShapeFields, weights: Readonly<Record<string, number>>, options: { normalizeNormals?: boolean } = {}): void {
+export function applyShapeFields(mesh: THREE.Mesh, shape: ShapeFields, weights: Readonly<Record<string, number>>, options: { normalizeNormals?: boolean; post?: ShapePost | null } = {}): void {
   const normalizeNormals = options.normalizeNormals ?? true;
+  const post = options.post?.key ? options.post : null;
   const live = [...shape.fields.keys()].map((n) => [n, Number.isFinite(weights[n]) ? weights[n] : 0] as const).filter(([, w]) => w !== 0);
-  const key = live.map(([n, w]) => `${n}:${w.toFixed(5)}`).join('|') + (normalizeNormals ? '' : '|raw-normals');
+  const key = live.map(([n, w]) => `${n}:${w.toFixed(5)}`).join('|') + (normalizeNormals ? '' : '|raw-normals') + (post ? `|post:${post.key}` : '');
   if (key === shape.last) return;
   shape.last = key;
   const geom = mesh.geometry as THREE.BufferGeometry;
@@ -92,6 +123,7 @@ export function applyShapeFields(mesh: THREE.Mesh, shape: ShapeFields, weights: 
     }
   }
   if (N && normalizeNormals) for (let v = 0; v < touched.length; v += 1) if (touched[v]) { const i = v * 3, l = Math.hypot(N[i], N[i + 1], N[i + 2]) || 1; N[i] /= l; N[i + 1] /= l; N[i + 2] /= l; }
+  post?.apply(P, N, normalizeNormals);
   pos.needsUpdate = true;
   if (nrmAttr) nrmAttr.needsUpdate = true;
 }

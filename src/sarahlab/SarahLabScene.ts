@@ -25,7 +25,7 @@ import { SKIN_BRUSH_CM, SKIN_CHOICES, SKIN_ORIGINAL_IMAGE, SKIN_SWATCHES, SKIN_T
 import { SkinPainter, tilePattern, type SkinImage, type SkinPattern, type SkinStrokeSettings } from './skinPaint';
 import { ensureRest } from './fabricMaterial';
 import { BodyCrease, CREASE_SETTLE_MS, unitBefore } from './bodyCrease';
-import { patchFaceRig, restFromWorld, setFaceRig } from './faceRig';
+import { FACE_REST_SCALE, patchFaceRig, restFromWorld, setFaceRig } from './faceRig';
 import { FaceMotion } from './faceMotion';
 import { patchHairMaterial } from './hairMaterial';
 import { SARAH_LOOK } from './sarahLook';
@@ -69,7 +69,9 @@ import type { AppScene, FrameInfo, SceneContext, SceneFactory } from '../app/Sce
 import { assets, assetUrl } from '../assets/assets';
 import { release } from '../tombs/LabPeople';
 import { BODY_CONTROLS, BREAST_DIMENSIONS, clampShape, controlLine, defaultBodyShape, parseShape, resetControl, serializeShape, setControl, setLinkedControl, type BodyControl, type BodyShape } from '../actor/bodyShape';
-import { applyShapeFields, liftShapeFields, type ShapeFields } from '../view/bodyShapeView';
+import { applyShapeFields, baseShapeFields, liftShapeFields, type ShapeFields, type ShapePost } from '../view/bodyShapeView';
+import { BUILD_PROFILES, buildAmounts, buildKey, heightLine, heldSegments, profileOf, withProfile, type BuildAmounts, type BuildSegment } from '../actor/bodyBuild';
+import { applyBuildToBones, applyBuildToMesh, buildBoneOffsets, buildMeshFields, prepareBuildRig, standingLift, type BuildMeshFields, type BuildRig } from '../view/bodyBuild';
 import { dropIdleMorphs } from '../view/morphPrune';
 import { HumanRig, findSkinnedMesh } from '../view/HumanRig';
 import { UNITS_PER_METRE } from '../world/dem';
@@ -81,6 +83,11 @@ import {
 } from './sarahLabTool';
 
 const M = UNITS_PER_METRE;
+/** RANDOMIZE's group locks, as their buttons read. */
+// (`build` reads PROPORTIONS on screen: the room's Build tab is the strap builder's)
+const RANDOM_GROUPS = [['build', 'PROPORTIONS'], ['belly', 'BELLY'], ['breasts', 'BREAST']] as const;
+/** A BUILD control's own segment, where it has one (its slider can be held at the segment's shortest or longest). */
+const SEGMENT_OF: Partial<Record<BodyControl, BuildSegment>> = { upperLeg: 'upperLeg', lowerLeg: 'lowerLeg', torso: 'torso', neck: 'neck', upperArm: 'upperArm', forearm: 'forearm' };
 /** What the fabric editor calls each garment. */
 const GARMENT_LABEL: Partial<Record<Garment, string>> = {
   shirt: 'Tee', shirtAthletic: 'Athletic tee', shirtRelaxedHigh: 'Relaxed tee', shirtRelaxedLow: 'Relaxed tee',
@@ -287,11 +294,22 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   // looks exactly as approved until a control moves
   let body: BodyShape = SARAH_LOOK ? parseShape(SARAH_LOOK.body.shape) : defaultBodyShape();
   let shaped: { mesh: THREE.SkinnedMesh; fields: ShapeFields }[] = [];
+  // HER BUILD (Joshua, 2026-10-26: "a height adjuster so you can raise or shorten the length of the legs, hips, arms,
+  // hands and more basic body controls"; actor/bodyBuild.ts, view/bodyBuild.ts): measured on her approved v2 body once
+  // it is in. Every mesh on her skeleton has its stretch worked out the first time a build needs it; her bones take the
+  // build's offsets and sizes, and standing she is lifted so her soles stay on the floor
+  let buildRig: BuildRig | null = null;
+  const buildFields = new WeakMap<THREE.SkinnedMesh, BuildMeshFields>();
+  let bonesBuilt = '';
+  let standLift = 0;
+  let buildBox: HTMLElement | null = null;
   // her crease under her breasts, untangled where her summed shapes fold it (bodyCrease.ts); the spring's shapes move
   // every frame and are not part of what it was worked out for
   const crease = new BodyCrease([BELLY_MOTION.tilt, BELLY_MOTION.bob, BELLY_MOTION.sway, BREAST_TARGETS.bob]);
   // laid after the room summed her: the cleavage bridge chooses its ends on her repaired skin
   crease.onLaid = () => fabric?.reshaped();
+  // ...and looked for on her shape as her build's bones carry it at rest (bodyCrease.ts `shift`)
+  crease.shift = (mesh, vertices) => buildShift(mesh as THREE.SkinnedMesh, vertices);
   let creaseTimer = 0;
   // a probe's switch: her crease left as summed, to compare
   let creaseDisabled = false;
@@ -400,6 +418,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       if (request !== hairRequest || disposed || bodyOf()?.mesh !== b.mesh || root.userData.isPlaceholder === true) { release(root); return; }
       hairMeshes = attachRecoveredMeshes(root, b.mesh, 'sarahHair');
       for (const m of hairMeshes) { m.visible = hairOn; m.castShadow = b.mesh.castShadow; m.receiveShadow = b.mesh.receiveShadow; for (const mat of Array.isArray(m.material) ? m.material : [m.material]) patchHairMaterial(mat); }
+      // her hair takes her build too (its weights on her neck and head)
+      const build = currentBuild();
+      for (const m of hairMeshes) { const fields = liftShapeFields(m) ?? baseShapeFields(m); shaped.push({ mesh: m, fields }); applyShapeFields(m, fields, {}, { post: buildPost(m, fields, build) }); }
       refresh();
     });
   }
@@ -730,10 +751,13 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       b.style.opacity = held && !own ? '.55' : '1';
       b.title = own ? 'locked: RANDOMIZE keeps this value (tap to unlock)' : held ? 'held by its group lock' : 'lock: RANDOMIZE keeps this value';
     }
-    for (const group of ['belly', 'breasts'] as const) {
+    for (const [group, label] of RANDOM_GROUPS) {
       const b = buttons[`groupLock-${group}`];
-      if (b) b.textContent = `${group === 'belly' ? 'BELLY' : 'BREAST'} ${randomRules.groups.includes(group) ? '🔒' : '🔓'}`;
+      if (b) b.textContent = `${label} ${randomRules.groups.includes(group) ? '🔒' : '🔓'}`;
     }
+    // her proportions are measured on her approved v2 body: on another, the section and its lock are not shown at all
+    if (buildBox) buildBox.style.display = buildRig ? '' : 'none';
+    if (buttons['groupLock-build']) buttons['groupLock-build'].style.display = buildRig ? '' : 'none';
     for (const r of rangeRows) {
       r.row.style.display = rangesShown ? 'flex' : 'none';
       const rule = ruleFor(randomRules, r.spec);
@@ -753,7 +777,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     for (const c of BODY_CONTROLS) {
       const line = fields[`${SARAH_LAB_FIELD.body}${c.key}`];
       // seated, the tilt in use is not the one chosen: say both, so a sitting body never reads as the slider's
-      if (line) line.textContent = controlLine(c.key, body[c.key]) + (c.key === 'bellyTilt' && pose === 'sit' ? ` · seated ${effectiveTiltDeg(body.bellyTilt, 1).toFixed(1)}°` : '') + (c.key === 'breastSize' ? ` · bust ${bustVolume(bump, body.breastSize).toFixed(2)}×` : '') + (c.key === 'navel' ? ` · ${navelState(bump, body.navel)}` : '');
+      if (line) line.textContent = controlLine(c.key, body[c.key]) + (c.key === 'bellyTilt' && pose === 'sit' ? ` · seated ${effectiveTiltDeg(body.bellyTilt, 1).toFixed(1)}°` : '') + (c.key === 'breastSize' ? ` · bust ${bustVolume(bump, body.breastSize).toFixed(2)}×` : '') + (c.key === 'navel' ? ` · ${navelState(bump, body.navel)}` : '') + buildNote(c.key);
       const input = bodyInputs.get(c.key);
       if (input && Number(input.value) !== body[c.key]) input.value = String(body[c.key]);
     }
@@ -791,8 +815,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     lit(buttons.sit, pose === 'sit');
     lit(buttons.tpose, pose === 'tpose');
     lit(buttons.ranges, rangesShown);
-    lit(buttons['groupLock-belly'], randomRules.groups.includes('belly'));
-    lit(buttons['groupLock-breasts'], randomRules.groups.includes('breasts'));
+    for (const [group] of RANDOM_GROUPS) lit(buttons[`groupLock-${group}`], randomRules.groups.includes(group));
+    { const p = profileOf(body); for (const pr of BUILD_PROFILES) lit(buttons[`profile-${pr.id}`], p === pr.id); }
     for (const t of SIZE_TILT_PRESETS_DEG) lit(buttons[`tilt${t}`], body.bellyTilt === t);
     if (buttons.outfit) buttons.outfit.textContent = `OUTFIT · ${outfitName(wantedOutfit ?? outfit)}${wantedOutfit !== null ? ' …' : ''}`;
     if (buttons.model) buttons.model.textContent = modelLine(modelIndex);
@@ -838,8 +862,94 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     return out;
   }
 
+  /**
+   * What a BUILD line adds: her standing height on HEIGHT, and on a length its limit when it holds there -- a segment
+   * never shorter than 40% of itself nor longer than 2.3x, so HEIGHT and its own slider together can reach a point past
+   * which the slider moves nothing, and the line says so rather than looking as if it still worked.
+   */
+  function buildNote(key: BodyControl): string {
+    if (!buildRig) return '';
+    if (key === 'height') return ` · ${heightLine(buildAmounts(body, buildRig.measure), buildRig.measure)}`;
+    const seg = SEGMENT_OF[key];
+    if (!seg || !heldSegments(body, buildRig.measure).includes(seg)) return '';
+    return buildAmounts(body, buildRig.measure).add[seg] < 0 ? ' · at its shortest' : ' · at its longest';
+  }
+
+  /** Her build as the controls ask for it, on the body measured (approved while there is none). */
+  function currentBuild(): { readonly amounts: BuildAmounts | null; readonly key: string } {
+    if (!buildRig) return { amounts: null, key: '' };
+    const amounts = buildAmounts(body, buildRig.measure);
+    return { amounts, key: buildKey(amounts) };
+  }
+
+  /** The step after her shape fields that lays her build on one mesh (nothing for the approved build). */
+  function buildPost(mesh: THREE.SkinnedMesh, fields: ShapeFields, build: ReturnType<typeof currentBuild>): ShapePost | null {
+    const rig = buildRig, amounts = build.amounts;
+    if (!rig || !amounts || !build.key) return null;
+    return {
+      key: build.key,
+      apply: (position, normal, normalized) => {
+        let f = buildFields.get(mesh);
+        if (!f) { f = buildMeshFields(rig, mesh, fields.basePos, slimRest(mesh, fields.basePos)); buildFields.set(mesh, f); }
+        applyBuildToMesh(f, amounts, position, normal, normalized);
+      },
+    };
+  }
+
+  /**
+   * Her rest shape at 0% (her base mesh carries the 100% bump; the `belly` target takes it to none), which her waist and
+   * hips are widened from: on her real waist, with the bump riding out on it rather than stretched sideways.
+   */
+  function slimRest(mesh: THREE.SkinnedMesh, base: Float32Array): Float32Array {
+    const k = mesh.morphTargetDictionary?.[BELLY_TARGET], delta = k === undefined ? undefined : mesh.geometry.morphAttributes.position?.[k];
+    if (!delta || !mesh.geometry.morphTargetsRelative) return base;
+    const out = base.slice();
+    for (let i = 0; i < Math.min(delta.count, out.length / 3); i += 1) { out[3 * i] += delta.getX(i); out[3 * i + 1] += delta.getY(i); out[3 * i + 2] += delta.getZ(i); }
+    return out;
+  }
+
+  /**
+   * Where her build's bones carry the given vertices of a mesh at rest (geometry units, 3 a vertex): Σ weight × that
+   * bone's offset. Null for the approved build. Her crease is looked for on her shape with this added (bodyCrease.ts).
+   */
+  function buildShift(mesh: THREE.SkinnedMesh, vertices: Uint32Array): Float32Array | null {
+    const rig = buildRig, build = currentBuild();
+    if (!rig || !build.amounts || !build.key || !mesh.isSkinnedMesh) return null;
+    const offsets = buildBoneOffsets(rig, build.amounts, new Float64Array(3 * rig.bones.length));
+    const si = mesh.geometry.getAttribute('skinIndex'), sw = mesh.geometry.getAttribute('skinWeight');
+    if (!si || !sw) return null;
+    const map = mesh.skeleton.bones.map((bone) => rig.index.get(bone) ?? -1), out = new Float32Array(3 * vertices.length);
+    for (let i = 0; i < vertices.length; i += 1) {
+      const v = vertices[i];
+      for (let j = 0; j < 4; j += 1) {
+        const w = sw.getComponent(v, j), k = map[si.getComponent(v, j)] ?? -1;
+        if (!(w > 0) || k < 0) continue;
+        out[3 * i] += w * offsets[3 * k]; out[3 * i + 1] += w * offsets[3 * k + 1]; out[3 * i + 2] += w * offsets[3 * k + 2];
+      }
+    }
+    return out;
+  }
+
+  /** The cloth tee cut again for her shape: her build's bones included, so a longer torso is a longer tee. */
+  function refitCloth(c: ClothShirt): void {
+    const b = bodyOf();
+    c.setRestShift(b ? buildShift(b.mesh, Uint32Array.from({ length: b.mesh.geometry.getAttribute('position').count }, (_, i) => i)) : null);
+    c.refit();
+  }
+
+  /** Her bones take the build (offsets and sizes), and standing she is lifted onto her soles; only when it changed. */
+  function layBuildBones(build: ReturnType<typeof currentBuild>): void {
+    if (!buildRig || build.key === bonesBuilt) return;
+    bonesBuilt = build.key;
+    const amounts = build.amounts ?? buildAmounts(defaultBodyShape(), buildRig.measure);
+    applyBuildToBones(buildRig, amounts);
+    standLift = standingLift(buildRig, amounts);
+    place();
+  }
+
   function applyLook(): void {
     const fieldWeights = bodyShapeFieldWeights(body, bump, bellyCurve);
+    const build = currentBuild();
     for (const { mesh, fields } of shaped) applyShapeFields(mesh, fields, {
       ...fieldWeights,
       ...(mesh.userData.recoveredShirt ? fitWeights(bump, 'shape:fitBelly') : {}),
@@ -847,7 +957,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       ...(mesh.userData.recoveredLeggings ? fitWeights(bump, 'shape:recoveryLeggings', LEGGINGS_FIT_KEYS) : {}),
     // recovered clothes keep RAW normal sums so the GPU's belly offsets land on what their fit expects; the leggings
     // were normalized here too, and at 0-50% the large belly offsets flipped normals in the fold under her belly
-    }, { normalizeNormals: !(mesh.userData.recoveredShirt || mesh.userData.recoveredLeggings) });
+    }, { normalizeNormals: !(mesh.userData.recoveredShirt || mesh.userData.recoveredLeggings), post: buildPost(mesh, fields, build) });
+    layBuildBones(build);
     // which garments are drawn: the outfit editor's choice, or none while her skin is painted bare (CLOTHES · HIDDEN)
     const view = skinBare ? 'none' : garmentView;
     for (const mesh of skinned) {
@@ -983,7 +1094,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     for (const mesh of meshes) {
       if (part.startsWith('leggings')) mesh.userData.recoveredLeggings = true;
       skinned.push(mesh);
-      const fields = liftShapeFields(mesh);
+      const fields = liftShapeFields(mesh) ?? (recovered ? baseShapeFields(mesh) : null);
       if (fields) shaped.push({ mesh, fields });
       dropIdleMorphs(mesh);
     }
@@ -1346,14 +1457,14 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         body = clampShape(Object.fromEntries(BODY_CONTROLS.map((c) => [c.key, next[c.key]])) as BodyShape);
         applyLook(); applyMotion(); refresh();
       });
-      for (const [group, label] of [['belly', 'BELLY'], ['breasts', 'BREAST']] as const) {
+      for (const [group, label] of RANDOM_GROUPS) {
         buttons[`groupLock-${group}`] = btn(`${label} 🔓`, `${SARAH_LAB_ACTION.randomGroupLock}${group}`, () => { randomRules = withGroupLock(randomRules, group, !randomRules.groups.includes(group)); refresh(); });
       }
       buttons.ranges = btn('RANGES', SARAH_LAB_ACTION.randomRanges, () => { rangesShown = !rangesShown; refresh(); });
-      for (const b of [buttons.randomize, buttons['groupLock-belly'], buttons['groupLock-breasts'], buttons.ranges]) { b.style.padding = '8px 10px'; b.style.fontSize = '12px'; row.appendChild(b); }
+      for (const b of [buttons.randomize, buttons['groupLock-build'], buttons['groupLock-belly'], buttons['groupLock-breasts'], buttons.ranges]) { b.style.padding = '8px 10px'; b.style.fontSize = '12px'; row.appendChild(b); }
       right.appendChild(row);
     }
-    for (const [group, title] of [['belly', 'BELLY SHAPE'], ['breasts', 'BREAST SHAPE']] as const) {
+    for (const [group, title] of [['build', 'HEIGHT & PROPORTIONS'], ['belly', 'BELLY SHAPE'], ['breasts', 'BREAST SHAPE']] as const) {
       const box = document.createElement('details');
       box.dataset.tab = 'body';
       box.style.cssText = 'border-top:1px solid rgba(255,255,255,0.12);padding-top:6px';
@@ -1368,6 +1479,19 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
           const b = btn(`TILT ${t}°`, `${SARAH_LAB_ACTION.tiltPreset}${t}`, () => setBody(setControl(body, 'bellyTilt', t)));
           b.style.padding = '6px 8px'; b.style.fontSize = '11px';
           buttons[`tilt${t}`] = b; presets.appendChild(b);
+        }
+        box.appendChild(presets);
+      }
+      if (group === 'build') {
+        // THE FIVE CLASSIC SHAPES (Joshua, 2026-10-26): each sets her shoulders, waist, hips and bust and nothing else
+        buildBox = box;
+        const presets = document.createElement('div');
+        presets.style.cssText = 'display:flex;gap:6px;margin:4px 0;flex-wrap:wrap';
+        for (const pr of BUILD_PROFILES) {
+          const b = btn(pr.label, `${SARAH_LAB_ACTION.buildProfile}${pr.id}`, () => setBody(withProfile(body, pr.id)));
+          b.title = `${pr.help} (sets shoulders, waist, hips and bust size)`;
+          b.style.padding = '6px 8px'; b.style.fontSize = '11px';
+          buttons[`profile-${pr.id}`] = b; presets.appendChild(b);
         }
         box.appendChild(presets);
       }
@@ -1400,6 +1524,11 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         input.addEventListener('input', () => setBody(linked.has(c.key) ? setLinkedControl(body, c.key, Number(input.value), linked) : setControl(body, c.key, Number(input.value))));
         bodyInputs.set(c.key, input);
         box.append(line, input, rangeRow(BODY_RANDOM_SPECS.find((x) => x.key === c.key)!));
+      }
+      if (group === 'build') {
+        const reset = btn('RESET PROPORTIONS', SARAH_LAB_ACTION.buildReset, () => setBody(clampShape({ ...body, ...Object.fromEntries(BODY_CONTROLS.filter((k) => k.group === 'build').map((k) => [k.key, k.fallback])) })));
+        reset.style.padding = '6px 8px'; reset.style.fontSize = '11px'; reset.style.marginTop = '6px';
+        box.appendChild(reset);
       }
       if (group === 'breasts') {
         const linkAll = btn('LINK W·H·D', SARAH_LAB_ACTION.bodyLinkAll, () => { const all = BREAST_DIMENSIONS.every((k) => linked.has(k)); for (const k of BREAST_DIMENSIONS) if (all) linked.delete(k); else linked.add(k); });
@@ -1813,6 +1942,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
    */
   async function bakeForStory(options: { readonly splitPaint?: boolean } = {}): Promise<StoryBake> {
     if (!storyReady() || !model) throw new Error('[sarahlab] the story bake was asked for before she was ready');
+    // her BUILD lives in her bones as much as in her skin, and the bake reads her rest shape through one bone
+    // (`restSkinMatrix`): baked as she is, she would come out torn. Until the story file carries a build, it says so
+    if (currentBuild().key) throw new Error('[sarahlab] the story bake does not carry her proportions yet (height, lengths, widths, sizes): RESET PROPORTIONS to bake her');
     clock.paused = true; clock.step = 0;
     try {
       clothWanted = false;
@@ -1936,7 +2068,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   function place(): void {
     if (!model || !rig || !measure) return;
     const skin = findSkinnedMesh(model);
-    model.position.set(0, 0, 0);
+    // standing, her build lifts her so her soles stay on the floor (a longer leg, bigger feet); seated, the stool decides
+    model.position.set(0, pose === 'sit' ? 0 : standLift * M, 0);
     model.updateMatrixWorld(true);
     if (pose !== 'sit' || !skin) {
       stool.visible = false;
@@ -1989,6 +2122,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     hairMeshes = []; hairRequest++;
     if (model) { three.remove(model); rig?.dispose(); release(model); model = null; }
     rig = null; measure = null; fingers = []; skinned = []; shaped = []; garments = []; hasBelly = false; feel = null;
+    buildRig = null; bonesBuilt = ''; standLift = 0;
     crease.reset(); if (creaseTimer) { clearTimeout(creaseTimer); creaseTimer = 0; }
     recovered = false; partMeshes.clear(); wantedOutfit = null; outfitRequest++;
     for (const run of inflight.values()) run.abort.abort();
@@ -2049,6 +2183,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         // the body's shape fields come off the GPU's list before the first draw (bodyShapeView)
         const lifted = liftShapeFields(mesh);
         if (lifted) shaped.push({ mesh, fields: lifted });
+        // on the approved v2 body every part can take her build, shape fields or none
+        else if (recovered) shaped.push({ mesh, fields: baseShapeFields(mesh) });
         // shapes that move nothing on this part are not sent to the GPU (morphPrune.ts)
         dropIdleMorphs(mesh);
         if (mesh.morphTargetDictionary?.[BELLY_TARGET] !== undefined) hasBelly = true;
@@ -2059,6 +2195,11 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       // on the approved v2 body every garment with its own file is on hand (the slim body file no longer carries the
       // leggings it replaced)
       garments = [...GARMENTS, ...RECOVERED_SHIRTS].filter((g) => found.has(g) || (recovered && RECOVERED_GARMENTS.includes(g)));
+      // her build is measured on her approved v2 body (its rest, as approved, before any shape is laid on it)
+      if (recovered && measure) {
+        const b = bodyOf(), s = b ? shaped.find((x) => x.mesh === b.mesh) : undefined;
+        try { buildRig = b && s ? prepareBuildRig(b.mesh, s.fields.basePos, measure.joints, FACE_REST_SCALE) : null; } catch (error) { console.error('[sarahlab] her build could not be measured; BUILD is off', error); buildRig = null; }
+      }
       if (!recovered && outfit >= 5) outfit = 0;
       model = loadedModel;
       // and the skin chosen in FACE goes on (a candidate fetched once is kept for a body loaded again)
@@ -2107,7 +2248,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       // and the cloth tee, moved over her as she is this frame (its cost on the stage)
       if (cloth && clothWorn() && cloth.mesh.visible && model?.visible && !clothLoading) {
         model.updateMatrixWorld(true);
-        if (clothRefit) { cloth.refit(); clothRefit = false; }
+        if (clothRefit) { refitCloth(cloth); clothRefit = false; }
         if (clothRestart) { cloth.restart(); clothRestart = false; }
         cloth.frame(dt);
         // her navel and nipples through it, at the editor's BREAST and NAVEL DETAIL; her navel softened under it to match
@@ -2160,7 +2301,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       if (new URLSearchParams(globalThis.location?.search ?? '').get('bake') === 'story') (globalThis as unknown as Record<string, unknown>).__sarahLabStory = { ready: storyReady, bake: bakeForStory };
       // ?probe=cloth: run the cloth tee N frames at a fixed step between pictures (a software renderer draws ~1 a second)
       if (new URLSearchParams(globalThis.location?.search ?? '').get('probe') === 'cloth') (globalThis as unknown as Record<string, unknown>).__sarahLabCloth = {
-        settle: (frames: number, dt = 1 / 60) => { if (!cloth || !model) return null; for (let k = 0; k < frames; k++) { model.updateMatrixWorld(true); if (clothRefit) { cloth.refit(); clothRefit = false; } cloth.frame(dt); } return cloth.stats(); },
+        settle: (frames: number, dt = 1 / 60) => { if (!cloth || !model) return null; for (let k = 0; k < frames; k++) { model.updateMatrixWorld(true); if (clothRefit) { refitCloth(cloth); clothRefit = false; } cloth.frame(dt); } return cloth.stats(); },
         settings: () => cloth?.simSettings ?? null,
         // her own frame run `seconds` at a fixed step -- walk, springs, the cloth -- between pictures (a software renderer
         // draws about one frame a second, so the room's own clock cannot show her moving)

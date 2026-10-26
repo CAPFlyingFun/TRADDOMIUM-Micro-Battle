@@ -121,6 +121,9 @@ export const SARAH_LAB_ACTION = Object.freeze({
   bodyLink: 'sarahlab:body-link:',
   bodyLinkAll: 'sarahlab:body-link-all',
   tiltPreset: 'sarahlab:tilt:',
+  /** `${buildProfile}<id>` puts on one of the five classic shapes; `buildReset` puts her build back as approved */
+  buildProfile: 'sarahlab:build-profile:',
+  buildReset: 'sarahlab:build-reset',
   /** the CAMERA tab, held upright: closer, further, and back to where the room starts */
   zoomIn: 'sarahlab:zoom-in',
   zoomOut: 'sarahlab:zoom-out',
