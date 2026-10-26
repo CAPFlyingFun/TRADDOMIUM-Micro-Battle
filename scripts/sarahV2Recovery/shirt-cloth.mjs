@@ -26,7 +26,7 @@
  *   the hem. And `_NECK` says where every point of the tee's front stands against the neckline's U and V curves, so the
  *   room can cut it deeper, to her breasts' lower crease (section 4c says how).
  *
- *   node scripts/sarahV2Recovery/shirt-cloth.mjs [--particles 5000] [--out public/models/sarah-v2-spandex-cloth.glb]
+ *   node scripts/sarahV2Recovery/shirt-cloth.mjs [--particles 5000] [--out public/models/sarah-v2-spandex-cloth.glb] [--no-mirror]
  */
 import { statSync } from 'node:fs';
 import { NodeIO } from '@gltf-transform/core';
@@ -99,6 +99,30 @@ const COLLAR_RELAX = 120;
 const NECK_FAR = 9;
 /** Metres: cloth this far above the front neckline's own line is over her shoulder, not along the neckline, and never cut. */
 const NECK_ABOVE = 0.006;
+/**
+ * Metres, in her rest world (her approved body at 100%). THE CROP and THE TANK (Joshua, 2026-10-25: "make 0 like a
+ * cropped tank athletic top", a SLEEVES switch picking tank or cap sleeve at any length). The crop's hem stands
+ * CROP_SIDE_Y at her sides and back, dipping CROP_FRONT_DIP at her front (the pattern's crop line is longer at the
+ * centre front): about four centimetres under her breasts' crease, over the top of her belly. The tank's armhole: its
+ * strap reaches TANK_STRAP_X from her middle over her shoulder, falls to TANK_SIDE_X at her side by TANK_SIDE_Y, and the
+ * opening's bottom stands at TANK_FLOOR_Y, a little under her armpit (1.245 m), rounded over TANK_ROUND.
+ */
+const CROP_SIDE_Y = 1.165, CROP_FRONT_DIP = 0.02;
+/**
+ * Metres: the least the sleeve -- its hems, and every particle above the armhole's floor bound to her ARM -- stands
+ * outside the tank's armhole. Under her arm the sleeve lies about a centimetre off her side, as near her middle as her
+ * side is, so the armhole's line from the front cannot tell them apart: the sleeve is cut because it is the sleeve.
+ */
+const TANK_ARM = 0.01;
+/**
+ * Passes of smoothing over the cloth (each moving a point's value halfway to its neighbours' mean) for the armhole's
+ * measure once the sleeve is cut out of it: where the sleeve meets her side the cut follows which skin each point is
+ * bound to, a zigzag a particle deep, and smoothed it is a curve again.
+ */
+const TANK_SMOOTHING = 20;
+/** The same for the crop's two hems' measures: the modelled tee's own folds put a line level on her a few millimetres up and down the cloth. */
+const CROP_SMOOTHING = 24;
+const TANK_STRAP_X = 0.158, TANK_STRAP_Y = 1.40, TANK_SIDE_X = 0.128, TANK_SIDE_Y = 1.245, TANK_FLOOR_Y = 1.215, TANK_ROUND = 0.012;
 
 await Promise.all([MeshoptDecoder.ready, MeshoptEncoder.ready, MeshoptSimplifier.ready]);
 const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'meshopt.decoder': MeshoptDecoder, 'meshopt.encoder': MeshoptEncoder });
@@ -147,6 +171,26 @@ const fromChest = (j) => { for (let n = parentOf.get(j); n; n = parentOf.get(n))
 const armJoint = new Set(joints.map((j, k) => [k, j]).filter(([, j]) => Math.abs(j.getWorldTranslation()[0]) > 0.1 && fromChest(j)).map(([k]) => k));
 const armVertex = new Uint8Array(B.length / 3);
 for (let v = 0; v < armVertex.length; v++) { let w = 0; for (let k = 0; k < 4; k++) if (armJoint.has(jointsAt[v * 4 + k])) w += weightsAt[v * 4 + k]; armVertex[v] = w > 0.5 ? 1 : 0; }
+// ...the same on both sides: her skin weights are not symmetric (behind her right armpit and over the front of her
+// right shoulder, skin that is trunk on her left is carried by the arm), so an arm vertex whose mirror image within 2 cm
+// is trunk is trunk too -- as the room's skin search takes it (clothSkin.ts `symmetricArms`), and her outfit's body map.
+{
+  const nV = armVertex.length, C = 0.01, grid = new Map(), key = (x, y, z) => `${x},${y},${z}`;
+  for (let v = 0; v < nV; v++) { const k = key(Math.floor(BW[v * 3] / C), Math.floor(BW[v * 3 + 1] / C), Math.floor(BW[v * 3 + 2] / C)); (grid.get(k) ?? grid.set(k, []).get(k)).push(v); }
+  const mirror = new Int32Array(nV).fill(-1), dist = new Float64Array(nV).fill(Infinity);
+  for (let v = 0; v < nV; v++) {
+    const x = -BW[v * 3], y = BW[v * 3 + 1], z = BW[v * 3 + 2], cx = Math.floor(x / C), cy = Math.floor(y / C), cz = Math.floor(z / C);
+    for (let i = -2; i <= 2; i++) for (let j = -2; j <= 2; j++) for (let k = -2; k <= 2; k++) for (const w of grid.get(key(cx + i, cy + j, cz + k)) ?? []) {
+      const d = Math.hypot(BW[w * 3] - x, BW[w * 3 + 1] - y, BW[w * 3 + 2] - z); if (d < dist[v]) { dist[v] = d; mirror[v] = w; }
+    }
+  }
+  let made = 0;
+  for (let pass = 0, changed = true; changed && pass < 4; pass++) {
+    changed = false; const was = armVertex.slice();
+    for (let v = 0; v < nV; v++) if (was[v] && mirror[v] >= 0 && !was[mirror[v]] && dist[v] <= 0.02) { armVertex[v] = 0; changed = true; made++; }
+  }
+  console.log(`her arms, the same on both sides: ${made} arm vertices whose mirror image is trunk taken as trunk`);
+}
 const armTri = (t) => armVertex[BI[t]] + armVertex[BI[t + 1]] + armVertex[BI[t + 2]] >= 2;
 const jointY = (name) => joints.find((j) => j.getName() === name).getWorldTranslation()[1];
 // mid-thigh: half way between her hip and knee joints, both legs (Bone_009/Bone_008, Bone_014/Bone_013)
@@ -311,8 +355,70 @@ for (let t = 0; t < I.length; t += 3) if (outerNode[nodeOf[I[t]]] + outerNode[no
   console.log(`layers: ${plain} of ${nodes} points told by rays to her body; outer pieces ${ranked.slice(0, 5).map(([, n]) => n).join(', ')} triangles`);
   outerTris = outerTris.filter((t) => find(nodeOf[I[t]]) === main);
 }
-const outer = outerTris.flatMap((t) => [I[t], I[t + 1], I[t + 2]]);
+let outer = outerTris.flatMap((t) => [I[t], I[t + 1], I[t + 2]]);
 console.log(`outer layer: ${outer.length / 3} of ${I.length / 3} triangles`);
+/**
+ * THE TEE MADE THE SAME ON BOTH SIDES: her left half, and its mirror image for her right (Joshua, 2026-10-25: "on the
+ * current shirt, the only place messed up is the model's right arm area… the left is fine"). The modelled tee is not
+ * symmetric under her right arm: its outer layer there folds back on itself behind her armpit, and its right sleeve's
+ * hem came out of the bake with 105 points to the left's 87, zigzagging in a clump at the back of her armpit. That hem
+ * is held to her arm, so the clump stayed where it was pinned, a torn-looking flap standing off her arm behind her
+ * right armpit, worse seated. So the sheet is cut at her middle (the plane x = 0 of her rest world), every triangle of
+ * her left kept (those across the middle clipped to it, the cut's new points shared along it), and the same triangles
+ * mirrored for her right, wound the other way so they still face out. Her body is not quite symmetric either, but
+ * within millimetres; everything after this (the layers' fit to her, the binding, the pins) is measured on her own
+ * right side as before. `--no-mirror` keeps the tee as modelled.
+ */
+/** Metres: how near her middle a point of the tee is moved onto it before the tee is cut there. */
+const MIRROR_SNAP = 0.001;
+let MP = P, MUV = UV;
+if (!process.argv.includes('--no-mirror')) {
+  const mid = toLocal(0, 1, 0)[0], EPS = 1e-6;
+  const pos = Array.from(P), uv = Array.from(UV), side = (v) => pos[v * 3] - mid;
+  // a point within MIRROR_SNAP of her middle is moved onto it first: cut a hair's breadth from a point, a triangle left
+  // a sliver a fraction of a millimetre wide, and down her front those folded into dark specks
+  let snapped = 0;
+  for (let v = 0; v < pos.length / 3; v++) if (side(v) !== 0 && Math.abs(side(v)) * scale < MIRROR_SNAP) { pos[v * 3] = mid; snapped++; }
+  const cut = new Map();
+  const onPlane = (a, b) => {
+    const k = a < b ? `${a},${b}` : `${b},${a}`;
+    if (cut.has(k)) return cut.get(k);
+    const sa = side(a), sb = side(b), t = sa / (sa - sb), v = pos.length / 3;
+    for (let c = 0; c < 3; c++) pos.push(pos[a * 3 + c] + t * (pos[b * 3 + c] - pos[a * 3 + c]));
+    pos[v * 3] = mid;
+    for (let c = 0; c < 2; c++) uv.push(uv[a * 2 + c] + t * (uv[b * 2 + c] - uv[a * 2 + c]));
+    cut.set(k, v); return v;
+  };
+  const half = [];
+  for (let t = 0; t < outer.length; t += 3) {
+    const c = [outer[t], outer[t + 1], outer[t + 2]], s3 = c.map(side);
+    if (s3.every((x) => Math.abs(x) <= EPS)) continue; // flat on her middle: nothing of it is either side
+    if (s3.every((x) => x >= -EPS)) { half.push(...c); continue; }
+    if (s3.every((x) => x < EPS)) continue;
+    // Sutherland-Hodgman against x >= mid, then a fan
+    const poly = [];
+    for (let k = 0; k < 3; k++) {
+      const a = c[k], b = c[(k + 1) % 3], sa = s3[k], sb = s3[(k + 1) % 3];
+      if (sa >= -EPS) poly.push(a);
+      if ((sa >= -EPS) !== (sb >= -EPS) && Math.abs(sa) > EPS && Math.abs(sb) > EPS) poly.push(onPlane(a, b));
+    }
+    for (let k = 1; k + 1 < poly.length; k++) half.push(poly[0], poly[k], poly[k + 1]);
+  }
+  // her middle exactly on the plane, so its points and their mirror images are the same points
+  const keepV = [...new Set(half)];
+  for (const v of keepV) if (Math.abs(side(v)) < 1e-5) pos[v * 3] = mid;
+  const mirrorOf = new Map();
+  for (const v of keepV) {
+    if (pos[v * 3] === mid) { mirrorOf.set(v, v); continue; }
+    const m = pos.length / 3;
+    pos.push(2 * mid - pos[v * 3], pos[v * 3 + 1], pos[v * 3 + 2]); uv.push(uv[v * 2], uv[v * 2 + 1]);
+    mirrorOf.set(v, m);
+  }
+  const whole = [...half];
+  for (let t = 0; t < half.length; t += 3) whole.push(mirrorOf.get(half[t]), mirrorOf.get(half[t + 2]), mirrorOf.get(half[t + 1]));
+  MP = Float32Array.from(pos); MUV = Float32Array.from(uv); outer = whole;
+  console.log(`mirrored: her left half of the tee (${half.length / 3} triangles, ${snapped} points moved onto her middle and ${cut.size} cut along it) and its mirror image for her right`);
+}
 /**
  * Thin a sheet's open edges toward the cloth's spacing by collapsing points along them, one at a time, never changing
  * the sheet's shape or topology: a point goes into its nearer neighbour along the edge when that edge is shorter than
@@ -390,7 +496,7 @@ function thinEdges(index, VP, weldedOf, welded, edge) {
 // a sleeve.
 let used = [...new Set(outer)].sort((x, y) => x - y);
 const remapOuter = new Map(used.map((v, i) => [v, i]));
-let VP = Float32Array.from(used.flatMap((v) => [P[v * 3], P[v * 3 + 1], P[v * 3 + 2]])), VUV = Float32Array.from(used.flatMap((v) => [UV[v * 2], UV[v * 2 + 1]]));
+let VP = Float32Array.from(used.flatMap((v) => [MP[v * 3], MP[v * 3 + 1], MP[v * 3 + 2]])), VUV = Float32Array.from(used.flatMap((v) => [MUV[v * 2], MUV[v * 2 + 1]]));
 let VI = Uint32Array.from(outer, (v) => remapOuter.get(v));
 {
   const { ids: weldedOf, count: welded } = weld(VP);
@@ -682,6 +788,8 @@ for (let k = 1; k <= ROWS; k++) for (let j = 0; j < columns; j++) anchorOf[ext(k
 const tri = new Uint32Array(nP * 3), bary = new Float32Array(nP * 3), offset = new Float32Array(nP), pin = new Float32Array(nP);
 const neckWorld = neck.map(restWorld), sleeveWorld = big.filter((l) => l !== hem && l !== neck).slice(0, 2).flatMap((l) => l.map(restWorld));
 let worstOff = 0, sleeves = 0, hemMoved = 0, hemOff = 0;
+/** 1 for a particle bound to her arm (the sleeve), for the tank's cut (4d). */
+const armBound = new Uint8Array(nP);
 for (let p = 0; p < nP; p++) {
   if (p >= collarStart) {
     // the collar: bound to her trunk (her neck, her chest, her shoulders), never held by the file -- the room holds the
@@ -703,7 +811,7 @@ for (let p = 0; p < nP; p++) {
   // (Joshua, 2026-10-24: "these don't have a straight shoulder edge like all the rest")
   const hemArm = edgeNear < SLEEVE_HEM ? armSkin(q) : null, hemBand = !!hemArm && hemArm.offset * scale < SLEEVE_HEM_OFF;
   const s = hemBand ? hemArm : any.tri.some((v) => armVertex[v]) && (trunk.distance * scale > SLEEVE_CLEAR || edgeNear < SLEEVE_PIN_OUT) ? any : trunk;
-  if (s !== trunk) sleeves++;
+  if (s !== trunk) { sleeves++; armBound[p] = 1; }
   if (hemBand && !any.tri.some((v) => armVertex[v])) { hemMoved++; hemOff = Math.max(hemOff, s.offset * scale); }
   tri.set(s.tri, p * 3); bary.set(s.bc ?? s.bary, p * 3); offset[p] = s.offset; worstOff = Math.max(worstOff, Math.abs(s.offset));
   if (rowOf[p] === 0) {
@@ -840,6 +948,89 @@ for (let p = 0; p < nP; p++) {
 }
 console.log(`the neckline: scoop at ${scoopY.toFixed(3)} m, across ${front.left[0].toFixed(3)} to ${front.right[0].toFixed(3)} at ${front.left[1].toFixed(3)} / ${front.right[1].toFixed(3)} m; her breasts' crease at ${foldY.toFixed(3)} m, so the deepest is ${(deepest * 100).toFixed(1)} cm below the scoop; ${insideU} particles inside a U that deep, ${insideV} inside a V`);
 
+// ---- 4d. the crop and the tank: where each particle stands against the crop's hem and the tank's armholes ----------------
+// `_TRIM` = (above the hem as made, above the crop's hem, inside the tank's armhole edge), metres. The room shortens the
+// tee toward the crop by a share s of the way: a point is cut where (1 - s)·x + s·y < 0, the hem as made raised
+// smoothly into the crop's line, so the shader draws the hem as a curve between particles (clothTrim.ts). The tank cuts
+// where z < 0: z is the larger of how far inside the armhole's edge the point stands, |x| below the edge's x at its
+// height, and how far below the opening's floor -- joined round over TANK_ROUND, so the opening's bottom is a curve,
+// not a corner. Seen from the front, the edge runs from the strap's end over her shoulder down to her side under her arm.
+// The rows below the hem and the collar are never cropped (x and y NECK_FAR); every point has its z.
+const trimCut = new Float32Array(nP * 3);
+const trimInfo = (() => {
+  const H = hem.map((p) => restWorld(p)), cx = H.reduce((m, q) => m + q[0], 0) / H.length, cz = H.reduce((m, q) => m + q[2], 0) / H.length;
+  const ang = (q) => Math.atan2(q[0] - cx, q[2] - cz);
+  const ring = H.map((q) => [ang(q), q[1]]).sort((u, v) => u[0] - v[0]);
+  const hemAt = (t) => {
+    const n = ring.length;
+    for (let i = 0; i < n; i++) {
+      const a = ring[i], b = ring[(i + 1) % n], span = i + 1 < n ? b[0] - a[0] : b[0] + 2 * Math.PI - a[0];
+      const d = t - a[0] < 0 ? t - a[0] + 2 * Math.PI : t - a[0];
+      if (d <= span) return a[1] + (b[1] - a[1]) * (span > 1e-9 ? d / span : 0);
+    }
+    return ring[0][1];
+  };
+  const cropAt = (t) => CROP_SIDE_Y - CROP_FRONT_DIP * Math.max(0, Math.cos(t)) ** 2;
+  const edgeX = (y) => { const k = Math.min(1, Math.max(0, (y - TANK_SIDE_Y) / (TANK_STRAP_Y - TANK_SIDE_Y))); const e = k * k * (3 - 2 * k); return TANK_SIDE_X + (TANK_STRAP_X - TANK_SIDE_X) * Math.sqrt(e); };
+  const softMax = (a, b, k) => (Math.max(a, b) + k * Math.log(Math.exp(-Math.abs(a - b) / k) + 1));
+  let cropped = 0, tanked = 0;
+  for (let p = 0; p < nP; p++) {
+    const q = toWorld(rest[p * 3], rest[p * 3 + 1], rest[p * 3 + 2]), t = ang(q);
+    const own = p < teeParticles;
+    trimCut[p * 3] = own ? q[1] - hemAt(t) : NECK_FAR;
+    trimCut[p * 3 + 1] = own ? q[1] - cropAt(t) : NECK_FAR;
+    trimCut[p * 3 + 2] = softMax(edgeX(q[1]) - Math.abs(q[0]), TANK_FLOOR_Y - q[1], TANK_ROUND);
+    if (own && trimCut[p * 3 + 1] < 0) cropped++;
+  }
+  // the armhole's measure smoothed over the tee (its own neighbours, across its triangles), so the edge is a curve on the
+  // cloth where the sleeve's cut met the armhole's line; and the crop's hems' the same way
+  {
+    const near = Array.from({ length: teeParticles }, () => new Set());
+    for (let t = 0; t < tris.length; t += 3) { const [a, b, c] = [tris[t], tris[t + 1], tris[t + 2]]; near[a].add(b).add(c); near[b].add(a).add(c); near[c].add(a).add(b); }
+    const lists = near.map((n) => [...n]), was = new Float64Array(teeParticles);
+    const smooth = (k, passes, keep = null, most = null) => {
+      for (let pass = 0; pass < passes; pass++) {
+        for (let p = 0; p < teeParticles; p++) was[p] = trimCut[p * 3 + k];
+        for (let p = 0; p < teeParticles; p++) {
+          const l = lists[p]; if (!l.length || keep?.has(p)) continue;
+          let m = 0; for (const q of l) m += was[q];
+          trimCut[p * 3 + k] = 0.5 * was[p] + 0.5 * m / l.length;
+          if (most?.has(p)) trimCut[p * 3 + k] = Math.min(trimCut[p * 3 + k], -TANK_ARM);
+        }
+      }
+    };
+    // (the hem as made stays exactly on its own line: smoothed, the open edge took its neighbours' height above it; and
+    // the sleeve -- every point bound to her arm, and both its hems -- stays TANK_ARM outside the armhole, the cloth round
+    // it smoothed against that)
+    // (the cloth at her side below the armhole's floor, bound to her arm because her arm hangs nearest it, is not sleeve)
+    const sleeve = new Set(big.filter((l) => l !== hem && l !== neck).slice(0, 2).flat());
+    for (let p = 0; p < teeParticles; p++) if (armBound[p] && restWorld(p)[1] > TANK_FLOOR_Y) sleeve.add(p);
+    for (const p of sleeve) trimCut[p * 3 + 2] = Math.min(trimCut[p * 3 + 2], -TANK_ARM);
+    smooth(0, CROP_SMOOTHING, new Set(hem)); smooth(1, CROP_SMOOTHING); smooth(2, TANK_SMOOTHING, null, sleeve);
+    cropped = 0; for (let p = 0; p < teeParticles; p++) if (trimCut[p * 3 + 1] < 0) cropped++;
+  }
+  // what the armholes leave of a sleeve -- its hem, hanging below the opening's floor on her arm -- is not joined to the
+  // tank and goes with the sleeve: of the tee's own cloth a tank draws (a triangle with any corner inside its edge), only
+  // the piece joined to its body stays
+  const up = Int32Array.from({ length: teeParticles }, (_, p) => p), find = (p) => { while (up[p] !== p) { up[p] = up[up[p]]; p = up[p]; } return p; };
+  for (let t = 0; t < VI.length; t += 3) {
+    const a = particleOf[VI[t]], b = particleOf[VI[t + 1]], c = particleOf[VI[t + 2]];
+    if (Math.max(trimCut[a * 3 + 2], trimCut[b * 3 + 2], trimCut[c * 3 + 2]) <= 0) continue;
+    up[find(b)] = find(a); up[find(c)] = find(a);
+  }
+  const size = new Map();
+  for (let p = 0; p < teeParticles; p++) if (trimCut[p * 3 + 2] > 0) size.set(find(p), (size.get(find(p)) ?? 0) + 1);
+  const body = [...size.entries()].sort((u, v) => v[1] - u[1])[0]?.[0];
+  let loose = 0;
+  for (let p = 0; p < teeParticles; p++) if (trimCut[p * 3 + 2] > 0 && find(p) !== body) { trimCut[p * 3 + 2] = -TANK_ARM; loose++; }
+  // ...and every point a tank cuts away, either side
+  const side = [0, 0];
+  for (let p = 0; p < teeParticles; p++) if (trimCut[p * 3 + 2] < 0) { tanked++; side[restWorld(p)[0] < 0 ? 0 : 1]++; }
+  console.log(`the tank: ${loose} particles of the sleeves' hems left loose by the armholes, cut with them; ${side[0]} / ${side[1]} cut each side`);
+  console.log(`the crop: its hem at ${CROP_SIDE_Y} m at her sides, ${(CROP_SIDE_Y - CROP_FRONT_DIP).toFixed(3)} m at her front (the hem as made ${hemAt(Math.PI / 2).toFixed(3)} / ${hemAt(0).toFixed(3)} m); ${cropped} of the tee's particles below it. The tank: ${tanked} particles inside its armholes`);
+  return { sideM: CROP_SIDE_Y, frontDipM: CROP_FRONT_DIP, armM: TANK_ARM, strapXM: TANK_STRAP_X, strapYM: TANK_STRAP_Y, sideXM: TANK_SIDE_X, sideYM: TANK_SIDE_Y, floorM: TANK_FLOOR_Y, roundM: TANK_ROUND, farM: NECK_FAR };
+})();
+
 // ---- 5. the file: render vertices (the tee's own, with their UVs; one per extension particle), per-particle data -----
 const renderCount = particleOf.length + ROWS * columns + R * C;
 const vertexParticle = new Uint32Array(renderCount), vertexUV = new Float32Array(renderCount * 2);
@@ -872,6 +1063,7 @@ const clothPrim = out.createPrimitive()
   .setAttribute('_ANCHOR', acc(perVertex(anchorOf, 1), 'SCALAR'))
   .setAttribute('_NAVEL', acc(perVertex(navelZone, 1), 'SCALAR'))
   .setAttribute('_NECK', acc(perVertex(neckCut, 4), 'VEC4'))
+  .setAttribute('_TRIM', acc(perVertex(trimCut, 3), 'VEC3'))
   .setIndices(acc(renderIndex, 'SCALAR'))
   .setMaterial(material);
 const clothMesh = out.createMesh('sarah-v2-shirt-spandex-cloth').addPrimitive(clothPrim).setExtras({
@@ -880,6 +1072,7 @@ const clothMesh = out.createMesh('sarah-v2-shirt-spandex-cloth').addPrimitive(cl
     detail: { navel: navelVertex, navelRings, nipples, nippleRings, navelZoneM: NAVEL_ZONE, ringsM: DETAIL_RINGS },
     collar: { start: collarStart, rows: R, columns: C, neck: [...neck], lengthM: +collarLength.toFixed(4), topM: +collarTop.toFixed(4), chinM: +chinY.toFixed(4) },
     neckline: { deepestM: +deepest.toFixed(4), scoopM: +scoopY.toFixed(4), foldM: +foldY.toFixed(4), acrossM: [+front.left[0].toFixed(4), +front.right[0].toFixed(4)], farM: NECK_FAR },
+    trim: trimInfo,
   },
 });
 out.getRoot().listScenes()[0].addChild(out.createNode('sarah-v2-shirt-spandex-cloth').setMesh(clothMesh));

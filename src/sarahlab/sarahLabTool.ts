@@ -137,6 +137,8 @@ export const SARAH_LAB_ACTION = Object.freeze({
   clothDefaults: 'sarahlab:cloth-defaults',
   /** the cloth tee's neckline, cut deeper as a U or a V (Joshua, 2026-10-24) */
   neckShape: 'sarahlab:neck-shape',
+  /** the cloth tee's SLEEVES: its cap sleeves as made, or a tank's armholes (Joshua, 2026-10-25) */
+  sleeves: 'sarahlab:sleeves',
   /** FACE: her face drawn or bare, where her eyes look, blinking, talking, and `${faceIris}<name>` her eye colour */
   face: 'sarahlab:face',
   eyes: 'sarahlab:eyes',
@@ -197,10 +199,27 @@ export const SARAH_LAB_FIELD = Object.freeze({
 
 /** Where the cloth tee is: the light tee as one sheet, with rows below its hem to mid-thigh (`scripts/sarahV2Recovery/shirt-cloth.mjs`). */
 export const CLOTH_SHIRT_PATH = 'models/sarah-v2-spandex-cloth.glb';
-/** The cloth tee's LENGTH line: 0 the tee as made, 1 mid-thigh. */
-export function teeLengthLine(length: number, cloth: boolean): string {
-  const pct = Math.round(Math.max(0, Math.min(1, length)) * 100);
-  return `TEE LENGTH · ${pct}% · ${pct === 0 ? 'as made' : pct >= 97 ? 'mid-thigh' : pct < 50 ? 'over her hips' : 'upper thigh'}${cloth ? '' : ' · with CLOTH SIM'}`;
+/**
+ * TEE LENGTH, one slider from a crop top to mid-thigh (Joshua, 2026-10-25: "make 0 like a cropped tank athletic top";
+ * before, 0 was the tee as made and 100% mid-thigh, Joshua, 2026-10-23). The tee as made stands at TEE_AS_MADE_AT of the
+ * way: below it the hem is raised toward the crop's, under her bust, `crop` 1 at 0; above it `length` is the share of
+ * the rows below the hem worn, 1 at 100%. So the old 0..1 is TEE_AS_MADE_AT..1 now, and every length it reached is
+ * still on the slider.
+ */
+export const TEE_AS_MADE_AT = 0.4;
+export function teeLengthParts(value: number): { readonly crop: number; readonly length: number } {
+  const t = Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : TEE_AS_MADE_AT;
+  return t < TEE_AS_MADE_AT ? { crop: 1 - t / TEE_AS_MADE_AT, length: 0 } : { crop: 0, length: (t - TEE_AS_MADE_AT) / (1 - TEE_AS_MADE_AT) };
+}
+/** The cloth tee's LENGTH line: a crop top at 0, the tee as made at TEE_AS_MADE_AT, mid-thigh at 1. */
+export function teeLengthLine(value: number, cloth: boolean): string {
+  const pct = Math.round(Math.max(0, Math.min(1, Number.isFinite(value) ? value : TEE_AS_MADE_AT)) * 100), { crop, length } = teeLengthParts(pct / 100);
+  const where = crop >= 0.97 ? 'crop top' : crop > 0 ? (crop >= 0.5 ? 'cropped · above her navel' : 'shortened') : length === 0 ? 'as made' : length >= 0.97 ? 'mid-thigh' : length < 0.5 ? 'over her hips' : 'upper thigh';
+  return `TEE LENGTH · ${pct}% · ${where}${cloth ? '' : ' · with CLOTH SIM'}`;
+}
+/** The SLEEVES button: the cap sleeves as made, or a tank's armholes. */
+export function sleevesLine(sleeves: boolean, cloth: boolean): string {
+  return `SLEEVES · ${sleeves ? 'cap sleeve' : 'tank'}${cloth ? '' : ' · with CLOTH SIM'}`;
 }
 /**
  * THE CLOTH TEE'S NECKLINE (Joshua, 2026-10-24: "can the neckline also be adjustable like the length so you can do U/V
@@ -274,8 +293,11 @@ export const CLOTH_DIALS: readonly ClothDialSpec[] = Object.freeze([
  * 65 35 65 75 50 80 43.)
  */
 export const CLOTH_TUNE_DEFAULT: ClothTune = Object.freeze({ weight: 25, calm: 100, fit: 100, close: 100, stretch: 50, grip: 50, steps: 43 });
-/** The cloth tee's length when CLOTH SIM first comes on (his setting too): a fifth of the way to mid-thigh, over her hips. */
-export const CLOTH_TEE_LENGTH_DEFAULT = 0.2;
+/**
+ * The cloth tee's length when CLOTH SIM first comes on (his setting too): a fifth of the way from the tee as made to
+ * mid-thigh, over her hips -- 20% on the slider before the crop was added below the tee as made, 52% now.
+ */
+export const CLOTH_TEE_LENGTH_DEFAULT = TEE_AS_MADE_AT + 0.2 * (1 - TEE_AS_MADE_AT);
 /** The cloth settings a set of dials gives (`ClothSettings` in clothSim.ts), and its stand-off in world units (100 a metre). */
 export function clothTuning(t: ClothTune): { readonly settings: { substeps: number; stretchCompliance: number; bendCompliance: number; restScale: number; maxStretch: number; damping: number; gravity: [number, number, number]; friction: number; frictionAcross: number }; readonly standOff: number } {
   return {

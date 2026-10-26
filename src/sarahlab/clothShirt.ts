@@ -18,7 +18,13 @@
  *   smooth edge by the material (`clothNeckline.ts`, from each particle's `_NECK` depths); what is not is not simulated
  *   either, and the edge it leaves is held to her the way the neckline as made is -- so a deep V lies down on her
  *   between her breasts instead of hanging where the whole tee bridged them.
- * - So the cloth's particles are switched in and out three ways at once (the hem's rows, the collar's, the front), and
+ * - THE CROP AND THE TANK (Joshua, 2026-10-25: "make 0 like a cropped tank athletic top", and a SLEEVES switch picking
+ *   tank or cap sleeve at any length). `setCrop` raises the hem from the tee as made toward a crop top's, under her
+ *   bust; `setSleeves(false)` cuts the sleeves away at a tank's armholes. Both are drawn with a smooth edge by the
+ *   material (`clothTrim.ts`, from each particle's `_TRIM`). Neither edge is held, as the tee's own hem is not: held as
+ *   the neckline is, they tore (`layout`). Nothing the sleeve held to her arm is held once it is cut away.
+ * - So the cloth's particles are switched in and out five ways at once (the hem's rows, the collar's, the front, the
+ *   crop, the armholes), and
  *   the set that is simulated is no longer the first n of the file. The simulation runs them packed into SLOTS: slot i
  *   is file particle `order[i]` (and `ClothSkin.setOrder` is told the same); everything that belongs to a particle --
  *   its pattern, its anchor, its pin in the file -- stays in file order.
@@ -32,6 +38,7 @@ import { ClothSkin } from './clothSkin';
 import { copyContacts, createContacts, type ClothBinding, type SkinContacts } from './clothTypes';
 import type { ClothDetailState } from './clothDetail';
 import { CLOTH_NECKLINE_ATTRIBUTE, clothNecklineBelow, type ClothNecklineState } from './clothNeckline';
+import { CLOTH_TRIM_ATTRIBUTE, cropShare, type ClothTrimState } from './clothTrim';
 import { DETAIL_LOOK, DetailSpots, type DetailPoints, type Posed } from './detailSpots';
 
 export interface ClothShirtStats {
@@ -80,6 +87,8 @@ export { DETAIL_LOOK } from './detailSpots';
 const EDGE_HOLD = [0.012, 0.03] as const;
 /** A depth no front neckline reaches, metres (the file's NECK_FAR, for a file without the neckline). */
 const NECK_FAR = 9;
+/** Metres either side of the crop's hem: the particles there weigh HEM_MASS, as the hem as made does. */
+const CROP_HEM_BAND = 0.012;
 
 /** The cloth file's collar (`shirt-cloth.mjs`): its first particle, rows of `columns`, the neckline it rises from, its mean height (metres). */
 interface CollarInfo { readonly start: number; readonly rows: number; readonly columns: number; readonly neck: readonly number[]; readonly lengthM: number }
@@ -155,6 +164,11 @@ export class ClothShirt {
   /** NECKLINE: -1 the whole collar (a turtleneck), 0 as made, 1 the front cut to its deepest; and the cut's shape. */
   private neckValue = 0;
   private neckShape: 'U' | 'V' = 'U';
+  /** THE CROP (0 the hem as made, 1 the crop top's) and THE TANK (the sleeves cut away), where the file carries them. */
+  private cropValue = 0;
+  private tankOn = false;
+  /** Per particle (file order), three each, as the file's `_TRIM` (clothTrim.ts); null for a file without them. */
+  private readonly trimAt: Float32Array | null;
   /**
    * Per particle (file order), four each, as the file's `_NECK` (clothNeckline.ts): how far below the U's and the V's
    * line as made it stands (metres), its u across the neckline, and its share of the collar's height.
@@ -175,7 +189,7 @@ export class ClothShirt {
     const g = source.geometry, info = (source.userData.cloth ?? {}) as { teeParticles?: number; rows?: number; columns?: number; armBones?: number[]; detail?: DetailPoints; collar?: CollarInfo; neckline?: NecklineInfo; pinIn?: number; pinOut?: number; localToMetres?: number };
     const read = (name: string) => g.getAttribute(name) as THREE.BufferAttribute;
     const particleAttr = read('_particle'), restAttr = read('position'), triAttr = read('_body_tri'), baryAttr = read('_body_bary');
-    const offsetAttr = read('_offset'), pinAttr = read('_pin'), rowAttr = read('_row'), anchorAttr = read('_anchor'), uvAttr = read('uv'), navelAttr = read('_navel'), neckAttr = read('_neck');
+    const offsetAttr = read('_offset'), pinAttr = read('_pin'), rowAttr = read('_row'), anchorAttr = read('_anchor'), uvAttr = read('uv'), navelAttr = read('_navel'), neckAttr = read('_neck'), trimAttr = read('_trim');
     if (!particleAttr || !triAttr || !baryAttr || !offsetAttr || !pinAttr || !rowAttr) throw new Error('ClothShirt: the cloth file is missing its particle data');
     const nV = restAttr.count;
     this.vertexParticle = new Uint32Array(nV);
@@ -190,6 +204,7 @@ export class ClothShirt {
     const filed = new Float32Array(count * 3), navelZone = new Float32Array(count), neck = new Float32Array(count * 4);
     for (let p = 0; p < count; p++) { neck[p * 4] = NECK_FAR; neck[p * 4 + 1] = NECK_FAR; }
     const necked = neckAttr && neckAttr.itemSize === 4 ? neckAttr : null;
+    const trimmed = trimAttr && trimAttr.itemSize === 3 ? trimAttr : null, trimAt = trimmed ? new Float32Array(count * 3) : null;
     for (let v = 0; v < nV; v++) {
       const p = this.vertexParticle[v];
       tri[p * 3] = triAttr.getX(v); tri[p * 3 + 1] = triAttr.getY(v); tri[p * 3 + 2] = triAttr.getZ(v);
@@ -198,7 +213,9 @@ export class ClothShirt {
       offset[p] = offsetAttr.getX(v); pin[p] = pinAttr.getX(v); row[p] = Math.round(rowAttr.getX(v)); anchor[p] = anchorAttr ? Math.round(anchorAttr.getX(v)) : p;
       if (navelAttr) navelZone[p] = navelAttr.getX(v);
       if (necked) { neck[p * 4] = necked.getX(v); neck[p * 4 + 1] = necked.getY(v); neck[p * 4 + 2] = necked.getZ(v); neck[p * 4 + 3] = necked.getW(v); }
+      if (trimmed && trimAt) { trimAt[p * 3] = trimmed.getX(v); trimAt[p * 3 + 1] = trimmed.getY(v); trimAt[p * 3 + 2] = trimmed.getZ(v); }
     }
+    this.trimAt = trimAt;
     this.pin = pin; this.anchor = anchor; this.filed = filed; this.navelZone = navelZone; this.neck = neck;
     // the collar and the deeper front, where the file carries them (an older file: neither, and NECKLINE does nothing)
     const collar = necked && info.collar && info.collar.rows > 0 && info.collar.start + info.collar.rows * info.collar.columns === count ? info.collar : null;
@@ -211,6 +228,7 @@ export class ClothShirt {
     this.slotOf = new Int32Array(count).fill(-1);
     this.restSlot = new Float32Array(count * 3);
     this.below = new Float32Array(count).fill(NECK_FAR);
+    this.above = new Float32Array(count).fill(NECK_FAR);
     this.spots = info.detail && info.detail.navel >= 0 ? new DetailSpots(info.detail) : null;
     this.lift = new Float32Array(count);
     this.lastSkin = new Float32Array(count * 3);
@@ -284,6 +302,12 @@ export class ClothShirt {
       for (let v = 0; v < nV; v++) { const p = vp[v]; for (let c = 0; c < 4; c++) n[v * 4 + c] = neck[p * 4 + c]; }
       geometry.setAttribute(CLOTH_NECKLINE_ATTRIBUTE, new THREE.BufferAttribute(n, 4));
     }
+    // ...and where it stands against the crop's hem and the tank's armholes (clothTrim.ts)
+    if (trimAt) {
+      const t = new Float32Array(nV * 3);
+      for (let v = 0; v < nV; v++) { const p = vp[v]; for (let c = 0; c < 3; c++) t[v * 3 + c] = trimAt[p * 3 + c]; }
+      geometry.setAttribute(CLOTH_TRIM_ATTRIBUTE, new THREE.BufferAttribute(t, 3));
+    }
     this.index = new THREE.BufferAttribute(new Uint32Array(nT * 3), 1).setUsage(THREE.DynamicDrawUsage);
     geometry.setIndex(this.index);
     // the fabric is laid by the tee as made, the collar with it but not across it: the neckline's rest normals are the
@@ -347,6 +371,27 @@ export class ClothShirt {
     const sim = this.relayout(this.sim);
     if (sim) this.sim = sim;
   }
+  /**
+   * THE CROP: 0 the hem as made, 1 the crop top's hem under her bust; between, the hem raised smoothly from the one to the
+   * other. A crop wears no rows below the hem, whatever LENGTH says. A file without the crop does nothing with it.
+   */
+  setCrop(share: number): void {
+    const s = this.trimAt ? cropShare(share) : 0;
+    if (s === this.cropValue) return;
+    this.cropValue = s; this.laidOut = false;
+  }
+  /** SLEEVES: true the cap sleeves as made, false a tank's armholes. A file without the tank does nothing with it. */
+  setSleeves(on: boolean): void {
+    const tank = !!this.trimAt && !on;
+    if (tank === this.tankOn) return;
+    this.tankOn = tank; this.laidOut = false;
+  }
+  /** What the material trims this frame (clothTrim.ts), or null for a file that carries neither the crop nor the tank. */
+  trim(): ClothTrimState | null {
+    return this.trimAt ? { crop: this.cropValue, tank: this.tankOn } : null;
+  }
+  /** Whether the file carries the crop and the tank. */
+  get hasTrim(): boolean { return !!this.trimAt; }
   /** The collar's share shown (0 to 1), and how deep the front is cut (metres), as NECKLINE now stands. */
   private get collarShare(): number { return this.collar ? Math.max(0, -this.neckValue) : 0; }
   private get cutDepth(): number { return Math.max(0, this.neckValue) * this.deepest; }
@@ -507,13 +552,19 @@ export class ClothShirt {
    * For a probe: every edge stretched past `limit` × its rest length now, worst first: its two particles (file order),
    * how far stretched, how hard each is held, and whether each is bound to her arm.
    */
-  tears(limit = 2): { a: number; b: number; ratio: number; pinA: number; pinB: number; armA: boolean; armB: boolean }[] {
+  /** For a probe: every simulated particle as [file particle, x, y, z (world), pin, bound to her arm (0/1), row], flat. */
+  particles(): number[] {
+    const x = this.sim.positions, out: number[] = [];
+    for (let i = 0; i < this.active; i++) { const p = this.order[i]; out.push(p, x[i * 3], x[i * 3 + 1], x[i * 3 + 2], this.pinNow[i], this.skin.boundToArm(p) ? 1 : 0, 0); }
+    return out;
+  }
+  tears(limit = 2): { a: number; b: number; ratio: number; open: number; pinA: number; pinB: number; armA: boolean; armB: boolean; at: number[] }[] {
     const x = this.sim.positions, R = this.restSlot, E = this.sim.edges, k = this.sim.settings.restScale, out = [];
     for (let e = 0; e < E.length; e += 2) {
       const a = E[e] * 3, b = E[e + 1] * 3;
       const now = Math.hypot(x[b] - x[a], x[b + 1] - x[a + 1], x[b + 2] - x[a + 2]), rest = Math.hypot(R[b] - R[a], R[b + 1] - R[a + 1], R[b + 2] - R[a + 2]) * k;
       const ratio = now / Math.max(rest, 1e-6);
-      if (ratio > limit) { const pa = this.order[E[e]], pb = this.order[E[e + 1]]; out.push({ a: pa, b: pb, ratio, pinA: this.pinNow[E[e]], pinB: this.pinNow[E[e + 1]], armA: this.skin.boundToArm(pa), armB: this.skin.boundToArm(pb) }); }
+      if (ratio > limit) { const pa = this.order[E[e]], pb = this.order[E[e + 1]]; out.push({ a: pa, b: pb, ratio, open: Math.round((now - rest) * 100) / 100, pinA: this.pinNow[E[e]], pinB: this.pinNow[E[e + 1]], armA: this.skin.boundToArm(pa), armB: this.skin.boundToArm(pb), at: [x[a], x[a + 1], x[a + 2]].map((v) => Math.round(v * 10) / 10) }); }
     }
     return out.sort((p, q) => q.ratio - p.ratio);
   }
@@ -677,29 +728,38 @@ export class ClothShirt {
   }
 
   /**
-   * What is shown as things stand -- TEE LENGTH's rows below the hem, NECKLINE's collar or its cut front -- and so which
-   * particles are simulated (in file order, packed into slots) and how each is held.
-   * - A row below the hem is shown up to TEE LENGTH's; a collar triangle while any corner of it stands below the share of
-   *   the collar shown (the material draws the share's own line across it); a front triangle while any corner of it is
-   *   deeper than the cut. What is not shown is not simulated: a particle is simulated when a triangle shown has it.
+   * What is shown as things stand -- TEE LENGTH's rows below the hem, NECKLINE's collar or its cut front, the crop and
+   * the tank -- and so which particles are simulated (in file order, packed into slots) and how each is held.
+   * - A row below the hem is shown up to TEE LENGTH's (none with a crop); a collar triangle while any corner of it stands
+   *   below the share of the collar shown (the material draws the share's own line across it); a front triangle while any
+   *   corner of it is deeper than the cut, above the crop's hem and inside the tank's armhole. What is not shown is not
+   *   simulated: a particle is simulated when a triangle shown has it.
    * - Every particle is held as the file holds it (its neckline, its sleeves' edges), and a cut edge -- the collar's top
    *   or the front's new neckline -- as the neckline as made is: fully within the file's PIN_IN of the edge, easing off
    *   to nothing at its PIN_OUT, measured down from the edge in metres. The front's edge is held to her skin under it
    *   (`hug`: no further off her than the cloth keeps anywhere) rather than where the whole tee stood, which between her
    *   breasts was a bridge from one to the other: cut there and held there, a deep V hung in the air.
+   * - The crop's hem and the tank's armholes are not held (see below), and a tank's cut-away side holds nothing.
    */
   private layout(): Layout {
-    const T = this.triParticle, nT = this.triRow.length, rows = this.hemRows, share = this.collarShare, depth = this.cutDepth;
+    const crop = this.cropValue, tank = this.tankOn, X = this.trimAt;
+    const T = this.triParticle, nT = this.triRow.length, rows = crop > 0 ? 0 : this.hemRows, share = this.collarShare, depth = this.cutDepth;
     const shape = this.neckShape, N = this.neck, tee = this.teeParticles, used = new Uint8Array(this.count), tris: number[] = [];
     // how far below the cut each of the tee's particles stands (metres, up and down: negative is cut away)
     const below = this.below;
     if (depth > 0) for (let p = 0; p < tee; p++) below[p] = N[p * 4] >= NECK_FAR ? NECK_FAR : clothNecklineBelow([N[p * 4], N[p * 4 + 1], N[p * 4 + 2], 0], depth, shape);
     const left = (p: number) => (depth > 0 && p < tee ? below[p] : NECK_FAR);
+    // how far above the crop's hem as it stands, and inside the tank's armhole (metres, clothTrim.ts: negative is cut away)
+    const above = this.above;
+    if (X && crop > 0) for (let p = 0; p < tee; p++) above[p] = X[p * 3] + (X[p * 3 + 1] - X[p * 3]) * crop;
+    const up = (p: number) => (X && crop > 0 && p < tee ? above[p] : NECK_FAR);
+    const inside = (p: number) => (X && tank ? X[p * 3 + 2] : NECK_FAR);
     for (let t = 0; t < nT; t++) {
       if (this.triRow[t] > rows) continue;
       const a = T[t * 3], b = T[t * 3 + 1], c = T[t * 3 + 2];
       if (this.triCollar[t]) { if (!(Math.min(N[a * 4 + 3], N[b * 4 + 3], N[c * 4 + 3]) < share)) continue; }
-      else if (!(Math.max(left(a), left(b), left(c)) > 0)) continue;
+      else if (!(Math.max(left(a), left(b), left(c)) > 0) || !(Math.max(up(a), up(b), up(c)) > 0)) continue;
+      if (!(Math.max(inside(a), inside(b), inside(c)) > 0)) continue;
       tris.push(t); used[a] = used[b] = used[c] = 1;
     }
     let n = 0; for (let p = 0; p < this.count; p++) n += used[p];
@@ -707,31 +767,45 @@ export class ClothShirt {
     const [hold, free] = this.edgeHold, held = (d: number) => (d <= hold ? 1 : d >= free ? 0 : 1 - (d - hold) / (free - hold));
     const pin = new Float32Array(n), hugAt = this.hug, bind = this.bindOffset, close = REST_CLEARANCE / (this.skin.worldScale || 1);
     const F = this.filed, S0 = this.neighbourStart, L = this.neighbourList, m = this.toMetres;
+    // across the cloth to a cut line: how far from it (one of the tee's particles, by `value`), over how fast that changes
+    // across the cloth here (the most it changes to any neighbour, a metre along the cloth) -- near her shoulder points
+    // the neckline runs steep, and a centimetre across it is several up and down
+    const across = (value: (q: number) => number, p: number) => {
+      const v = value(p);
+      let fall = 0;
+      for (let j = S0[p]; j < S0[p + 1]; j++) {
+        const q = L[j], w = value(q);
+        if (w >= NECK_FAR) continue;
+        const len = Math.hypot(F[q * 3] - F[p * 3], F[q * 3 + 1] - F[p * 3 + 1], F[q * 3 + 2] - F[p * 3 + 2]) * m;
+        if (len > 1e-6) fall = Math.max(fall, Math.abs(w - v) / len);
+      }
+      return v / Math.max(fall, 1);
+    };
+    const hug = (p: number) => { hugAt[p] = Math.min(bind[p], close); };
     hugAt.set(bind);
     for (let i = 0; i < n; i++) {
       const p = order[i];
       let h = this.pin[p];
       if (p >= this.collarStart) h = Math.max(h, held((share - N[p * 4 + 3]) * (this.collar?.lengthM ?? 0)));
       else if (depth > 0 && p < tee && below[p] < NECK_FAR) {
-        // across the cloth to the cut line: how far below it, over how fast that falls across the cloth here (the most
-        // it changes to any neighbour, a metre along the cloth) -- near her shoulder points the line runs steep, and a
-        // centimetre across it is several up and down
-        let fall = 0;
-        for (let j = S0[p]; j < S0[p + 1]; j++) {
-          const q = L[j];
-          if (below[q] >= NECK_FAR) continue;
-          const len = Math.hypot(F[q * 3] - F[p * 3], F[q * 3 + 1] - F[p * 3 + 1], F[q * 3 + 2] - F[p * 3 + 2]) * m;
-          if (len > 1e-6) fall = Math.max(fall, Math.abs(below[q] - below[p]) / len);
-        }
-        const e = held(below[p] / Math.max(fall, 1));
-        if (e > 0) { h = Math.max(h, e); hugAt[p] = Math.min(bind[p], close); }
+        const e = held(across(left, p));
+        if (e > 0) { h = Math.max(h, e); hug(p); }
       }
+      // THE CROP'S HEM AND THE TANK'S ARMHOLES ARE NOT HELD. Held as the neckline is, they tore: pulled onto her skin,
+      // across the small of her back (the tee stands nearly 3 cm off her there, over the hollow of her spine, and the
+      // points either side of it are bound to either side of the hollow) and up into the hollow of her armpit; held where
+      // the tee stood, seated, where her skin under the armhole stretches as her arms come forward. Free, they lie on
+      // her as the tee's own hem does. What a tank cuts away is not held either: outside the armhole's edge (the
+      // sleeve's side, simulated only as a corner of a triangle drawn in part) the file held the sleeve to her ARM, and a
+      // corner dragged by her arm would drag the edge with it.
+      if (p < tee && X && tank && inside(p) < 0) h = 0;
       pin[i] = h;
     }
     return { order, pin, tris };
   }
-  /** Scratch for `layout`: how far below the cut each of the tee's particles stands. */
+  /** Scratch for `layout`: how far below the cut each of the tee's particles stands, and above the crop's hem. */
   private readonly below: Float32Array;
+  private readonly above: Float32Array;
 
 
   /**
@@ -762,9 +836,11 @@ export class ClothShirt {
     // its triangles by slot
     const tris = new Uint32Array(L.tris.length * 3);
     L.tris.forEach((t, j) => { for (let c = 0; c < 3; c++) tris[j * 3 + c] = slotOf[this.triParticle[t * 3 + c]]; });
-    // the hem worn now -- the tee's own, or the last row below it -- weighs HEM_MASS: a hem is turned up and stitched
+    // the hem worn now -- the tee's own, the crop's, or the last row below it -- weighs HEM_MASS: a hem is turned up and
+    // stitched
     const mass = new Float32Array(n).fill(1), rows = this.hemRows;
-    if (rows === 0) { for (const p of this.teeHem) if (slotOf[p] >= 0) mass[slotOf[p]] = HEM_MASS; }
+    if (this.trimAt && this.cropValue > 0) { for (let i = 0; i < n; i++) { const p = L.order[i]; if (p < this.teeParticles && Math.abs(this.above[p]) < CROP_HEM_BAND) mass[i] = HEM_MASS; } }
+    else if (rows === 0) { for (const p of this.teeHem) if (slotOf[p] >= 0) mass[slotOf[p]] = HEM_MASS; }
     else for (let j = 0; j < this.columns; j++) { const s = slotOf[this.teeParticles + (rows - 1) * this.columns + j]; if (s >= 0) mass[s] = HEM_MASS; }
     const sim = new ClothSim({ count: n, triangles: tris, rest: this.restSlot.subarray(0, n * 3), pin: L.pin, mass }, { ...(was?.settings ?? this.settings) });
     sim.reset(this.scratch.subarray(0, n * 3));

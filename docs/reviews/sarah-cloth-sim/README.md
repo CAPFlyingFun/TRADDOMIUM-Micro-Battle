@@ -324,3 +324,67 @@ Standing, a notch remains at the front of each armpit, where the cap sleeve's ed
 - **The neckline is not saved with an outfit.** Like TEE LENGTH and the cloth's dials, it is kept while you are in the room. Nothing of the cloth experiment is saved with an outfit yet.
 - **The fitted (non-cloth) tee** has no neckline slider. It could take the same cut, deeper only.
 - **At +100 V, seen from the side,** the far edge lifts a little off the hollow above her bust.
+
+## alpha.129: the same on both sides, a crop top and a tank (`16`–`20`)
+
+**Approved** (Joshua, 2026-10-26: "Go ahead and push").
+
+Joshua, 2026-10-25: "on the current shirt, the only place messed up is the model's right arm area… the left is fine… how about fixing that first since it already can be a dress, but what you can do is make 0 like a cropped tank athletic top instead". He chose **TEE LENGTH 0 as a crop top, and a SLEEVES switch for tank or cap sleeve at any length**.
+
+### Her right arm
+
+The modelled tee is not symmetric under her right arm. Its outer layer folds back on itself behind her armpit, and its right sleeve's hem came out of the bake with 105 points to the left's 87, zigzagging in a clump. That hem is held to her arm, so the clump stood off her arm behind her right armpit: the torn-looking flap.
+
+- **The bake mirrors the tee.** It cuts the sheet at her middle, keeps her left half, and mirrors it for her right (`--no-mirror` keeps the tee as modelled). Points within a millimetre of her middle are moved onto it first, so the cut leaves no slivers. Each sleeve now has 87 and 85 points along its hem.
+- **Her arms are the same on both sides.** The bake and `clothSkin.ts` both take an arm vertex whose mirror image is trunk as trunk (`symmetricArms`; 538 of her vertices in the bake), the rule the body regions already use.
+- A faint line shows down her front at 200%, where the knit's pattern meets its mirror image.
+
+### TEE LENGTH and SLEEVES
+
+- **TEE LENGTH** now runs from a crop top at 0% through the tee as made at 40% to mid-thigh at 100%. Every length the old slider reached is still on it: the old 0–100% is 40–100% now. The default is 52%, the old 20%.
+  - Below 40% the hem rises smoothly toward the crop's. At 0% it stands about 4 cm under her breasts' crease at her sides (1.165 m), 2 cm lower at the centre front, as the pattern's crop line is.
+- **SLEEVES** (under NECK SHAPE) switches between the cap sleeves as made and a **tank**. Its armhole runs from a 4 cm strap over her shoulder down to her side, 3 cm under her armpit.
+- **Both edges are smooth curves through the cloth,** drawn the way the neckline is (`clothTrim.ts`). Each point of the tee records how far it stands above the hem as made, above the crop's hem and inside the armhole (`_TRIM`); the material cuts at every pixel.
+  - The armhole's measure is smoothed over the cloth with the sleeve held outside it, so the sleeve is always cut whole and the edge is a curve.
+  - The crop's measures are smoothed over the cloth too, with the hem as made held on its own line.
+- **What is cut is not simulated.** A crop wears no rows below the hem.
+- **Neither edge is held,** as the tee's own hem is not. Held as the neckline is, they tore: pulled onto her skin across the small of her back and up into her armpit, and, seated, where the skin under the armhole stretches. Free, they lie on her. A tank's cut-away side holds nothing, because the file held the sleeve to her arm.
+- **Seated,** the fitted tee still stands in for a cloth tee with sleeves at 40% and above. A tank and a crop are worn seated as they are standing: a tank has no sleeves to tear, and the fitted tee is far longer than a crop.
+
+### Cost
+
+Points simulated at 73% (the stage's line):
+
+| Setting | Points |
+|---|---|
+| Crop top, tank | 2,063 |
+| Crop top, cap sleeves | 2,740 |
+| 20%, tank | 2,847 |
+| Tee as made (40%), tank | 3,989 |
+| 52% (the default), tank | 4,539 |
+| 52%, cap sleeves | 5,216 (5,252 before) |
+| Mid-thigh, tank | 6,519 |
+
+The file is 0.53 MB (0.48 MB before). The bake is reproducible: two runs give byte-identical files.
+
+### Sheets
+
+- `16-crop-tank.jpg`: TEE LENGTH 0–40%, tank and cap sleeves.
+- `17-tank-lengths.jpg`: 52% and mid-thigh with the tank; the default tee from behind her right arm.
+- `18-seated.jpg`: seated, crop top and 40% with the tank, crop top with cap sleeves.
+- `19-belly.jpg`: belly 0% and 200%.
+- `20-panel.jpg`: TEE LENGTH and SLEEVES in Outfit.
+
+### Checked
+
+- Standing at 73%: crop top with tank and cap sleeves, 20% (tank), 40% (tank), 52% (tank and cap sleeves), mid-thigh (tank). Front, side, back, three-quarter and behind her right arm.
+- Seated: crop top (tank and cap sleeves) and 40% tank.
+- Belly 0% and 200%: crop top and 40% tank; 200% 52% with cap sleeves.
+- Edges opened more than 5 mm past their length: standing, none, except 2 and 4 at 200%; seated, 16–19 with the tank, and about 300 with the cap-sleeved crop.
+- `typecheck`, the tests and the build pass. New tests: `clothTrim.test.ts`; the file's crop and tank, the length's split and the SLEEVES line in `sarahClothTee.test.ts`.
+
+### Left
+
+- The crop's hem and the back of the armholes are a little wavy, a few millimetres, where the cloth's own folds run.
+- A crop with cap sleeves, seated, has the sleeves' old trouble: the caps ruffle under her arms.
+- Nothing of the cloth experiment is saved with an outfit yet, SLEEVES included.

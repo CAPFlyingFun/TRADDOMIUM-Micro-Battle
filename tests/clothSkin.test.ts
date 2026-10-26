@@ -12,7 +12,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { ClothSkin } from '../src/sarahlab/clothSkin';
+import { ClothSkin, symmetricArms } from '../src/sarahlab/clothSkin';
 import { createContacts, type ClothBinding, type SkinContacts } from '../src/sarahlab/clothTypes';
 
 interface Body { root: THREE.Group; mesh: THREE.SkinnedMesh; upper: THREE.Bone; geometry: THREE.BufferGeometry }
@@ -627,5 +627,25 @@ describe('ClothSkin: slots and particles (setOrder), and the pin\'s own offset (
     const none = sentinelContacts(n);
     skin.update(cloth, none);
     for (const [k] of FIELDS) expect(none[k].every(x => x === SENTINEL), k).toBe(true);
+  });
+});
+
+describe('her arms, the same on both sides (symmetricArms)', () => {
+  // her skin weights put skin behind her right armpit on the arm and the same skin on her left on her trunk: the tee's
+  // particles there were SLEEVE on one side only (Joshua, 2026-10-25: "the only place messed up is the model's right arm area")
+  const at = (pts: number[][]) => ({ count: pts.length, getX: (i: number) => pts[i][0], getY: (i: number) => pts[i][1], getZ: (i: number) => pts[i][2] });
+  it('takes an arm vertex whose mirror image is trunk for trunk, and leaves a true arm alone', () => {
+    // a body 1.7 tall, its middle at x 0: pairs at ±0.15 (one side arm, the other trunk), a pair both arm, a lone arm vertex
+    const pts = [[0, 0, 0], [0, 1.7, 0], [-0.3, 1, 0], [0.3, 1, 0], [-0.15, 1.3, -0.1], [0.15, 1.3, -0.1], [-0.25, 1.1, 0], [0.25, 1.1, 0], [-0.2, 0.9, 0.05]];
+    const arm = Uint8Array.from([0, 0, 0, 0, 1, 0, 1, 1, 1]);
+    const made = symmetricArms(arm, at(pts));
+    expect(made).toBe(1);
+    expect([...arm]).toEqual([0, 0, 0, 0, 0, 0, 1, 1, 1]);
+  });
+  it('does not take a vertex whose mirror image is far off (her mesh is not quite symmetric, but within 2 cm)', () => {
+    const pts = [[0, 0, 0], [0, 1.7, 0], [-0.3, 1, 0], [0.3, 1, 0], [-0.15, 1.3, -0.1], [0.15, 1.36, -0.1]];
+    const arm = Uint8Array.from([0, 0, 0, 0, 1, 0]);
+    expect(symmetricArms(arm, at(pts))).toBe(0);
+    expect(arm[4]).toBe(1);
   });
 });

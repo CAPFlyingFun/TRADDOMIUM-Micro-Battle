@@ -64,6 +64,7 @@
  */
 import * as THREE from 'three';
 import type { ClothBinding, SkinContacts } from './clothTypes';
+import { mirrorIndex } from './bodyRegions';
 
 export interface ClothSkinOptions {
   /** World units: every `SkinContacts.standOff` is this (default 0.15 = 1.5 mm in a 100-units-per-metre room). */
@@ -340,6 +341,7 @@ export class ClothSkin {
     if (arm.size && this.skinI && this.skinW) {
       const onArm = (v: number) => { let w = 0; for (let k = 0; k < 4; k++) if (arm.has(this.skinI![v * 4 + k])) w += this.skinW![v * 4 + k]; return w > 0.5; };
       const armVertex = new Uint8Array(nV); for (let v = 0; v < nV; v++) armVertex[v] = onArm(v) ? 1 : 0;
+      symmetricArms(armVertex, g.getAttribute('position') as Attr);
       for (let t = 0; t < nT; t++) this.armTri[t] = armVertex[tris[t * 3]] + armVertex[tris[t * 3 + 1]] + armVertex[tris[t * 3 + 2]] >= 2 ? 1 : 0;
       for (let i = 0; i < n; i++) this.trunkOnly[i] = this.armTri[bound[i]] ? 0 : 1;
     }
@@ -897,4 +899,37 @@ function affineRows(m: THREE.Matrix4, out: Float64Array, o: number): void {
   out[o] = e[0]; out[o + 1] = e[4]; out[o + 2] = e[8]; out[o + 3] = e[12];
   out[o + 4] = e[1]; out[o + 5] = e[5]; out[o + 6] = e[9]; out[o + 7] = e[13];
   out[o + 8] = e[2]; out[o + 9] = e[6]; out[o + 10] = e[10]; out[o + 11] = e[14];
+}
+
+/**
+ * Her arms, the same on both sides (Joshua, 2026-10-25: "on the current shirt, the only place messed up is the model's
+ * right arm area… the left is fine"). Her skin weights are not symmetric: behind her right armpit and over the front of
+ * her right shoulder, skin that is her trunk on the left is carried by the arm (about 300 vertices more on the right).
+ * The tee's particles bound there were taken for SLEEVE on that side alone, so they met her arm and stood out round it
+ * behind her right armpit as a torn flap, while on the left the same cloth lies against her trunk under her arm.
+ * So an arm vertex whose mirror image is trunk, where the two really are mirror images (within about 2 cm, since her
+ * mesh is itself not quite symmetric), is trunk too: the rule the outfit's body map already follows for the same
+ * weights (`bodyRegions.ts`, a tank's strap, 2026-10-21). Mirror pairs are not always mutual on a mesh, so a few passes.
+ * The midline is the middle of her widest reach (her hands), which her symmetric pose centres.
+ */
+export function symmetricArms(armVertex: Uint8Array, position: { count: number; getX(i: number): number; getY(i: number): number; getZ(i: number): number }): number {
+  const n = Math.min(armVertex.length, position.count), P = new Float32Array(n * 3);
+  let lo = Infinity, hi = -Infinity, bottom = Infinity, top = -Infinity;
+  for (let v = 0; v < n; v++) {
+    const x = position.getX(v), y = position.getY(v);
+    P[v * 3] = x; P[v * 3 + 1] = y; P[v * 3 + 2] = position.getZ(v);
+    lo = Math.min(lo, x); hi = Math.max(hi, x); bottom = Math.min(bottom, y); top = Math.max(top, y);
+  }
+  const mid = (lo + hi) / 2, near = (top - bottom) * 0.012, mirror = mirrorIndex(P, mid);
+  let made = 0;
+  for (let pass = 0, changed = true; changed && pass < 4; pass++) {
+    changed = false;
+    const was = armVertex.slice();
+    for (let v = 0; v < n; v++) {
+      const m = mirror[v];
+      if (!was[v] || m < 0 || was[m]) continue;
+      if (Math.hypot(P[m * 3] - (2 * mid - P[v * 3]), P[m * 3 + 1] - P[v * 3 + 1], P[m * 3 + 2] - P[v * 3 + 2]) <= near) { armVertex[v] = 0; changed = true; made++; }
+    }
+  }
+  return made;
 }

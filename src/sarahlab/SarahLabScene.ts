@@ -17,6 +17,7 @@ import { loadingCard, LOADING_COVERED_VAR, type LoadingCard, type LoadingPlace }
 import { LoadMeter } from '../assets/loadMeter';
 import { ClothShirt } from './clothShirt';
 import { setClothNeckline } from './clothNeckline';
+import { setClothTrim } from './clothTrim';
 import { setClothDetail } from './clothDetail';
 import { DetailSpots, SARAH_V2_DETAIL_POINTS, SARAH_V2_LITE_TEE_NAVEL, TeeNavel } from './detailSpots';
 import { SkinPose } from './skinPose';
@@ -72,7 +73,7 @@ import { dropIdleMorphs } from '../view/morphPrune';
 import { HumanRig, findSkinnedMesh } from '../view/HumanRig';
 import { UNITS_PER_METRE } from '../world/dem';
 import {
-  SARAH_V2_HAIR_MODEL, BELLY_MOTION, BELLY_TARGET, trimShown, BREAST_TARGETS, BUMP_MAX_PERCENT, GARMENTS, RECOVERED_SHIRTS, OUTFITS, outfitLine, modelLine, refineLine, refineWeight, nextOutfit, wornGarments, coverMask, bodyNeverHidden, uncoveredSkinIndices, UNDER_TOP_GARMENT, BELLY_REFINE_TARGET, SEAT_TARGET, seatCorrectiveWeight, SARAH_LAB_MODELS, SARAH_LAB_DEFAULT_MODEL, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID, shirtLengthLine, sarahModelPath, BODY_RANDOM_SPECS, CLOTH_SHIRT_PATH, teeLengthLine, necklineLine, neckShapeLine, CLOTH_NECKLINE_DEFAULT, clothLine, CLOTH_DIALS, CLOTH_TUNE_DEFAULT, CLOTH_TEE_LENGTH_DEFAULT, clothTuning, type ClothTune,
+  SARAH_V2_HAIR_MODEL, BELLY_MOTION, BELLY_TARGET, trimShown, BREAST_TARGETS, BUMP_MAX_PERCENT, GARMENTS, RECOVERED_SHIRTS, OUTFITS, outfitLine, modelLine, refineLine, refineWeight, nextOutfit, wornGarments, coverMask, bodyNeverHidden, uncoveredSkinIndices, UNDER_TOP_GARMENT, BELLY_REFINE_TARGET, SEAT_TARGET, seatCorrectiveWeight, SARAH_LAB_MODELS, SARAH_LAB_DEFAULT_MODEL, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID, shirtLengthLine, sarahModelPath, BODY_RANDOM_SPECS, CLOTH_SHIRT_PATH, teeLengthLine, teeLengthParts, sleevesLine, necklineLine, neckShapeLine, CLOTH_NECKLINE_DEFAULT, clothLine, CLOTH_DIALS, CLOTH_TUNE_DEFAULT, CLOTH_TEE_LENGTH_DEFAULT, clothTuning, type ClothTune,
   labTitle, CLOTH_SEATED_LINE, bellyMotionWeights, bellyWeights, breastBobWeight, breastWeightsForShape, bodyShapeFieldWeights, SIZE_TILT_PRESETS_DEG, effectiveTiltDeg, stepSeated, bustVolume, BREAST_GROW_TARGET, settledSitFor, bellyUpperWeight, BELLY_UPPER_TARGET, navelWeights, NAVEL_FLAT_TARGET, navelFlatFor, navelState, tPoseTurns, ARM_SIDES, armsLine, ARM_RAISE_TARGETS, armRaiseWeight, SEAT_V2_TARGET, seatCorrectiveV2Weight, fingerBend, THUMB_TO_PALM, bumpLine, fingersLine, restingBellySpring, statusLine, stepBellySpring, stepBreastSpring, walkBounceAccel,
   offeredOutfits, outfitThumbPath,
   type Garment, type SarahLabPose, recoveredPartsFor, recoveredPartPath, isShirtPart, shirtOfPart, type RecoveredPart, SARAH_DEFAULT_OUTFIT, RECOVERED_GARMENTS,
@@ -610,9 +611,15 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
    * has stood up again it is what she wears, and the cloth is laid on her afresh when she is standing.
    */
   let clothSeated = false;
+  /** Whether seated she wears the fitted tee instead of the cloth (a probe can turn this off to watch the cloth seated). */
+  let seatedStandIn = true;
   const clothWorn = (): boolean => clothOn && !!cloth && !clothSeated;
   let cloth: ClothShirt | null = null, clothOn = false, clothLoading = false, clothRestart = false, clothRefit = false, teeLength = CLOTH_TEE_LENGTH_DEFAULT, frameMs = 1000 / 60;
   let teeLengthInput: HTMLInputElement | null = null;
+  /** SLEEVES (Joshua, 2026-10-25): the cloth tee's cap sleeves as made, or a tank's armholes. */
+  let sleeves = true;
+  /** TEE LENGTH (a crop top at 0, the tee as made, mid-thigh at 1) put to the cloth: the crop and the rows below the hem. */
+  const applyTeeLength = (): void => { const { crop, length } = teeLengthParts(teeLength); cloth?.setLength(length); cloth?.setCrop(crop); };
   /** NECKLINE (-100 a turtleneck, 0 as made, 100 the front cut to under her bust) and the deeper cut's shape (Joshua, 2026-10-24). */
   let neckline = CLOTH_NECKLINE_DEFAULT, neckShape: 'U' | 'V' = 'U';
   let necklineInput: HTMLInputElement | null = null;
@@ -759,6 +766,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       if (neckField) { neckField.textContent = necklineLine(neckline, neckShape, (cloth?.necklineDeepest ?? 0) * 100, clothOn); neckField.style.display = lite ? '' : 'none'; }
       if (necklineInput) { necklineInput.style.display = lite ? '' : 'none'; necklineInput.disabled = !clothOn; }
       if (buttons.neckShape) { buttons.neckShape.style.display = lite ? '' : 'none'; buttons.neckShape.textContent = neckShapeLine(neckShape, neckline); lit(buttons.neckShape, neckShape === 'V'); }
+      if (buttons.sleeves) { buttons.sleeves.style.display = lite ? '' : 'none'; buttons.sleeves.textContent = sleevesLine(sleeves, clothOn); lit(buttons.sleeves, !sleeves); buttons.sleeves.disabled = !clothOn; }
       if (fields.cloth) { fields.cloth.style.display = clothOn && cloth ? '' : 'none'; if (clothOn && cloth && clothSeated) fields.cloth.textContent = CLOTH_SEATED_LINE; }
       for (const d of CLOTH_DIALS) {
         const f = fields[`${SARAH_LAB_FIELD.clothDial}${d.key}`], i = clothDialInputs.get(d.key);
@@ -999,7 +1007,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     if (clothLoading) return;
     clothOn = !clothOn;
     // her detail through the tee is the cloth's: the fitted tee shares its material, and shows its own
-    if (!clothOn && cloth) { setClothDetail(cloth.mesh.material as THREE.Material, null); setClothNeckline(cloth.mesh.material as THREE.Material, null); }
+    if (!clothOn && cloth) { setClothDetail(cloth.mesh.material as THREE.Material, null); setClothNeckline(cloth.mesh.material as THREE.Material, null); setClothTrim(cloth.mesh.material as THREE.Material, null); }
     if (!clothOn || cloth) { if (cloth) { cloth.mesh.visible = clothOn; if (clothOn) clothRestart = true; } applyLook(); refresh(); fabric?.refreshTargets(); return; }
     const body = skinned.find((m) => !!m.geometry.getAttribute('_cloth_cover')), tee = partMeshes.get('spandex-lite')?.[0];
     if (!model || !body || !tee) { clothOn = false; refresh(); return; }
@@ -1017,7 +1025,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       const tuning = clothTuning(clothTune);
       cloth = new ClothShirt(source, body, tee.material, tuning.settings, tuning.standOff);
       release(scene);
-      cloth.setLength(teeLength);
+      applyTeeLength();
+      cloth.setSleeves(sleeves);
       cloth.setNeckline(neckline / 100, neckShape);
       cloth.mesh.visible = clothOn;
       three.add(cloth.mesh);
@@ -1034,7 +1043,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   }
   /** The cloth goes with the light tee it is a copy of (its material is the tee's). */
   function dropCloth(): void {
-    if (cloth) { setClothDetail(cloth.mesh.material as THREE.Material, null); setClothNeckline(cloth.mesh.material as THREE.Material, null); }
+    if (cloth) { setClothDetail(cloth.mesh.material as THREE.Material, null); setClothNeckline(cloth.mesh.material as THREE.Material, null); setClothTrim(cloth.mesh.material as THREE.Material, null); }
     cloth?.dispose(); cloth = null; clothOn = false; clothShapeKey = ''; clothFlattenLaid = 0;
   }
   /**
@@ -1230,7 +1239,12 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     buttons.cloth = btn('CLOTH SIM · ON', SARAH_LAB_ACTION.cloth, () => { clothWanted = !clothOn; void toggleCloth(); });
     buttons.cloth.dataset.tab = 'outfit';
     right.appendChild(buttons.cloth);
-    teeLengthInput = slider(SARAH_LAB_FIELD.teeLength, Math.round(CLOTH_TEE_LENGTH_DEFAULT * 100), (v) => { teeLength = v / 100; cloth?.setLength(teeLength); }, 100, 'outfit');
+    teeLengthInput = slider(SARAH_LAB_FIELD.teeLength, Math.round(CLOTH_TEE_LENGTH_DEFAULT * 100), (v) => { teeLength = v / 100; applyTeeLength(); }, 100, 'outfit');
+    // ...and its sleeves, as made or a tank's armholes (Joshua, 2026-10-25: TEE LENGTH 0 a cropped tank athletic top, and
+    // a SLEEVES switch for tank or cap sleeve at any length)
+    buttons.sleeves = btn(sleevesLine(sleeves, clothOn), SARAH_LAB_ACTION.sleeves, () => { sleeves = !sleeves; cloth?.setSleeves(sleeves); refresh(); });
+    buttons.sleeves.dataset.tab = 'outfit'; buttons.sleeves.style.padding = '7px 10px'; buttons.sleeves.style.fontSize = '11px';
+    right.appendChild(buttons.sleeves);
     // ...and its neckline, up to a turtleneck or down in a U or a V (Joshua, 2026-10-24: "can the neckline also be adjustable
     // like the length so you can do U/V shape and select how deep up to turtleneck?")
     necklineInput = slider(SARAH_LAB_FIELD.neckline, CLOTH_NECKLINE_DEFAULT, (v) => { neckline = v; cloth?.setNeckline(neckline / 100, neckShape); }, 100, 'outfit', -100);
@@ -2059,11 +2073,13 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       // and every built strap laid on her skin as she is this frame
       if (builder && model) builder.frame();
       // seated (or still standing up), the fitted tee is worn; standing again, the cloth is laid on her afresh
-      const seatedNow = pose === 'sit' || seated > 0.02;
+      // -- with its sleeves, and not cropped: a tank has no sleeves to tear under her arms, and the fitted tee is far
+      // longer than a crop, so both are worn seated as they are standing
+      const seatedNow = seatedStandIn && sleeves && teeLengthParts(teeLength).crop === 0 && (pose === 'sit' || seated > 0.02);
       if (seatedNow !== clothSeated) {
         clothSeated = seatedNow;
         if (!seatedNow && cloth && clothOn) clothRestart = true;
-        if (cloth && clothOn) { if (seatedNow) { setClothDetail(cloth.mesh.material as THREE.Material, null); setClothNeckline(cloth.mesh.material as THREE.Material, null); } applyLook(); refresh(); }
+        if (cloth && clothOn) { if (seatedNow) { setClothDetail(cloth.mesh.material as THREE.Material, null); setClothNeckline(cloth.mesh.material as THREE.Material, null); setClothTrim(cloth.mesh.material as THREE.Material, null); } applyLook(); refresh(); }
       }
       // and the cloth tee, moved over her as she is this frame (its cost on the stage)
       if (cloth && clothWorn() && cloth.mesh.visible && model?.visible && !clothLoading) {
@@ -2077,6 +2093,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         setClothDetail(cloth.mesh.material as THREE.Material, cloth.detail(keep));
         // and its neckline, cut by the material along a smooth line
         setClothNeckline(cloth.mesh.material as THREE.Material, cloth.neckline());
+        // and its crop's hem and tank's armholes, the same way
+        setClothTrim(cloth.mesh.material as THREE.Material, cloth.trim());
         if (Math.abs(1 - keep.navel - clothFlattenLaid) > 1e-3) applyLook();
         if (fields.cloth) fields.cloth.textContent = clothLine(cloth.stats(), frameMs);
       }
@@ -2131,6 +2149,11 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         look: (yaw: number, pitch?: number, distance?: number, height?: number) => { orbit.yaw = yaw; if (pitch !== undefined) orbit.pitch = pitch; if (distance !== undefined) orbit.distance = distance; if (height !== undefined) orbit.target.y = height; turning = false; },
         animate: (secondsToRun: number, step = 1 / 60) => { const n = Math.max(0, Math.round(secondsToRun / step)); for (let k = 0; k < n; k++) advance(step); return cloth?.stats() ?? null; },
         tears: (limit = 2) => cloth?.tears(limit) ?? null,
+        // seated, the cloth stays on (the fitted tee does not stand in): to watch the cloth itself seated
+        standIn: (on: boolean) => { seatedStandIn = on; },
+        // her body hidden or shown (the cloth alone, to see what it does where her skin would hide it)
+        showBody: (on: boolean) => { for (const m of skinned) m.visible = on; },
+        particles: () => cloth?.particles() ?? null,
         strain: () => { if (!cloth) return null; const r = { ...cloth.strain(), jumps: cloth.jumps, moved: cloth.moved, worst: cloth.worstEdge }; cloth.moved = 0; return r; },
         // what shows through the tee now (her navel's height above the skin round it, the spots the shading draws)
         detail: () => (cloth ? { heights: cloth.detailHeights, keep: clothKeep(), spots: cloth.detail(clothKeep()) } : null),
@@ -2194,6 +2217,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         folds: (cos?: number) => cloth?.folds(cos) ?? null,
         // NECKLINE (-100 a turtleneck, 0 as made, 100 to under her bust) and its shape, as the slider and button set them
         neckline: (value: number, shape?: 'U' | 'V') => { neckline = value; if (shape) neckShape = shape; if (necklineInput) necklineInput.value = String(value); cloth?.setNeckline(neckline / 100, neckShape); cloth?.layOut(); refresh(); return cloth ? { particles: cloth.stats().particles, state: cloth.neckline(), deepestCm: cloth.necklineDeepest * 100 } : null; },
+        /** SLEEVES as the button sets them (true the cap sleeves as made, false the tank), and what the cloth then trims. */
+        sleeves: (on: boolean) => { sleeves = on; cloth?.setSleeves(sleeves); cloth?.layOut(); refresh(); return cloth ? { particles: cloth.stats().particles, trim: cloth.trim() } : null; },
         navelGap: (radius?: number) => { const b = skinned.find((m) => !!m.geometry.getAttribute('_cloth_cover')); return cloth && b ? cloth.navelGap(b, radius) : null; },
         // where the drawn sheet's hem hangs, each side of her (world units): to read a lopsided hang as a number
         hem: () => {
