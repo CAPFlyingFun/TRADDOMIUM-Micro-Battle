@@ -90,7 +90,9 @@ function patch(material: THREE.Material, layers: number, masked: boolean): Patch
       float fabricHideNavel = ${fmax(idx.map((i) => `fabricC${i} * (1.0 - fabricNavelKeep${i})`))};
       // the nipples are softened here; the navel by her own navelFlat morph (SarahLabScene), its relief map below
       float fabricSoften = fabricDetail.w * fabricHideNipple;
-      objectNormal = normalize(objectNormal - fabricDetailN.xyz * fabricSoften);` : '';
+      // only where a nipple is softened: elsewhere her normal goes on exactly as given, so a normal written to be summed
+      // with her morphs' (bodyCrease.ts, under her breasts) is not made unit before they are added
+      if (fabricSoften > 0.0) objectNormal = normalize(objectNormal - fabricDetailN.xyz * fabricSoften);` : '';
     if (masked) shader.vertexShader = shader.vertexShader.replace('#include <beginnormal_vertex>', `#include <beginnormal_vertex>${soften}`);
     shader.vertexShader = shader.vertexShader.replace('#include <begin_vertex>', `#include <begin_vertex>\nvFabricPos = fabricRest;\nvFabricNrm = fabricRestNormal;${mask}${masked ? '\ntransformed -= fabricDetail.xyz * fabricSoften;\nvFabricDetailKeep = clamp(fabricDetail.w * (1.0 - fabricHideNipple / max(fabricCovered, 1e-3)) + fabricDetailN.w * (1.0 - fabricHideNavel / max(fabricCovered, 1e-3)), 0.0, 1.0);' : ''}`);
     const sample = (i: number) => `
@@ -128,7 +130,7 @@ function patch(material: THREE.Material, layers: number, masked: boolean): Patch
       ${masked ? 'if (fabricShowRegions > 0.5) diffuseColor.rgb = mix(diffuseColor.rgb, vFabricTint.rgb, 0.78 * vFabricTint.a);' : ''}
     }`);
   };
-  material.customProgramCacheKey = function () { return `${cacheKey.call(this)}|fabric-${layers}${masked ? '-painted' : ''}-v10`; };
+  material.customProgramCacheKey = function () { return `${cacheKey.call(this)}|fabric-${layers}${masked ? '-painted' : ''}-v11`; };
   material.needsUpdate = true;
   const entry = { uniforms, layers, masked };
   patched.set(material, entry);

@@ -24,6 +24,7 @@ import { SkinPose } from './skinPose';
 import { SKIN_BRUSH_CM, SKIN_CHOICES, SKIN_ORIGINAL_IMAGE, SKIN_SWATCHES, SKIN_TEXTURE_CM, hexRgb, nextSkin, skinBrushLine, skinLine, skinNote, skinStrengthLine, skinTextureLine, type SkinId } from './skinChoices';
 import { SkinPainter, tilePattern, type SkinImage, type SkinPattern, type SkinStrokeSettings } from './skinPaint';
 import { ensureRest } from './fabricMaterial';
+import { BodyCrease, CREASE_SETTLE_MS, unitBefore } from './bodyCrease';
 import { patchFaceRig, restFromWorld, setFaceRig } from './faceRig';
 import { FaceMotion } from './faceMotion';
 import { patchHairMaterial } from './hairMaterial';
@@ -286,6 +287,14 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   // looks exactly as approved until a control moves
   let body: BodyShape = SARAH_LOOK ? parseShape(SARAH_LOOK.body.shape) : defaultBodyShape();
   let shaped: { mesh: THREE.SkinnedMesh; fields: ShapeFields }[] = [];
+  // her crease under her breasts, untangled where her summed shapes fold it (bodyCrease.ts); the spring's shapes move
+  // every frame and are not part of what it was worked out for
+  const crease = new BodyCrease([BELLY_MOTION.tilt, BELLY_MOTION.bob, BELLY_MOTION.sway, BREAST_TARGETS.bob]);
+  // laid after the room summed her: the cleavage bridge chooses its ends on her repaired skin
+  crease.onLaid = () => fabric?.reshaped();
+  let creaseTimer = 0;
+  // a probe's switch: her crease left as summed, to compare
+  let creaseDisabled = false;
   const bodyInputs = new Map<BodyControl, HTMLInputElement>();
   const shownNow = (g: Garment) => wornGarments(outfit, garments).includes(g);
   let turning = false;
@@ -893,6 +902,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         }
       }
     }
+    layCrease();
     fabric?.sync();
     // her shape may have changed: the cleavage bridge chooses its ends again
     fabric?.reshaped();
@@ -902,6 +912,18 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     // her and creased as it fell (Joshua, 2026-10-24: "it's possible it's something else")
     const shapeKey = `${bump}|${serializeShape(body)}|${bellyCurve}|${refine}`;
     if (cloth && shapeKey !== clothShapeKey) { clothShapeKey = shapeKey; clothRefit = true; }
+  }
+
+  /**
+   * Her crease (`bodyCrease.ts`, Joshua, 2026-10-26: "blend and merge that area smoother"): a shape it was worked out for
+   * is laid again at once; a new one is worked out once her controls have rested, so a drag stays quick.
+   */
+  function layCrease(): void {
+    const s = shaped.find((x) => !!x.mesh.geometry.getAttribute('_cloth_cover'));
+    if (!s?.fields.baseNrm || creaseDisabled) return;
+    if (crease.relay(s.mesh, s.fields.last, s.fields.basePos, s.fields.baseNrm)) { if (creaseTimer) { clearTimeout(creaseTimer); creaseTimer = 0; } return; }
+    if (creaseTimer) clearTimeout(creaseTimer);
+    creaseTimer = window.setTimeout(() => { creaseTimer = 0; if (!disposed && !creaseDisabled) crease.request(); }, CREASE_SETTLE_MS);
   }
 
   /** The outfit as the OUTFIT button names it: on v2 the first two are the relaxed tee over either rise. */
@@ -1967,6 +1989,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     hairMeshes = []; hairRequest++;
     if (model) { three.remove(model); rig?.dispose(); release(model); model = null; }
     rig = null; measure = null; fingers = []; skinned = []; shaped = []; garments = []; hasBelly = false; feel = null;
+    crease.reset(); if (creaseTimer) { clearTimeout(creaseTimer); creaseTimer = 0; }
     recovered = false; partMeshes.clear(); wantedOutfit = null; outfitRequest++;
     for (const run of inflight.values()) run.abort.abort();
     inflight.clear();
@@ -2154,6 +2177,120 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         // her body hidden or shown (the cloth alone, to see what it does where her skin would hide it)
         showBody: (on: boolean) => { for (const m of skinned) m.visible = on; },
         particles: () => cloth?.particles() ?? null,
+        // her skin as she is posed and shaped now (world, every vertex), and its triangles: for a probe to measure her
+        posedBody: () => {
+          const b = skinned.find((m) => !!m.geometry.getAttribute('_cloth_cover'));
+          if (!b) return null;
+          b.updateMatrixWorld(true);
+          const n = b.geometry.getAttribute('position').count, out = new Array<number>(n * 3), v = new THREE.Vector3();
+          for (let i = 0; i < n; i++) { b.getVertexPosition(i, v); v.applyMatrix4(b.matrixWorld); out[i * 3] = v.x; out[i * 3 + 1] = v.y; out[i * 3 + 2] = v.z; }
+          return { position: out, index: Array.from(b.geometry.index?.array ?? []) };
+        },
+        // every mesh in her model, with whether it is drawn (for a probe hunting what shows through her skin)
+        meshes: () => { const out: { name: string; material: string; visible: boolean; count: number }[] = []; model?.traverse((n) => { const m = n as THREE.Mesh; if (!m.isMesh) return; let v = true; for (let p: THREE.Object3D | null = m; p; p = p.parent) if (!p.visible) v = false; out.push({ name: m.name, material: (Array.isArray(m.material) ? m.material[0] : m.material).name, visible: v, count: m.geometry.getAttribute('position').count }); }); return out; },
+        // ...and any of them hidden by name (a probe's question, until her look next changes)
+        hideMesh: (name: string) => { let k = 0; model?.traverse((n) => { if ((n as THREE.Mesh).isMesh && (n.name === name || (Array.isArray((n as THREE.Mesh).material) ? false : ((n as THREE.Mesh).material as THREE.Material).name === name))) { n.visible = false; k++; } }); return k; },
+        // her rest shape replaced by one given (body-local, every vertex, as `restBody` reads it: shape fields and morphs
+        // included) and its normals, for a probe to try a correction on her: what the morphs add now is taken back off, so
+        // drawn with them it is the shape given. Until her look next changes.
+        setRest: (position: number[], normal: number[]) => {
+          const b = skinned.find((m) => !!m.geometry.getAttribute('_cloth_cover'));
+          if (!b) return false;
+          const g = b.geometry, n = g.getAttribute('position').count;
+          const P = new Float32Array(position), N = new Float32Array(normal), D = new Float32Array(n * 3);
+          const dict = b.morphTargetDictionary ?? {}, infl = b.morphTargetInfluences ?? [], mp = g.morphAttributes.position ?? [], mn = g.morphAttributes.normal ?? [];
+          for (const [, k] of Object.entries(dict)) {
+            const w = infl[k] ?? 0, a = mp[k], c = mn[k]; if (!w) continue;
+            for (let i = 0; i < n; i++) {
+              if (a) { P[i * 3] -= w * a.getX(i); P[i * 3 + 1] -= w * a.getY(i); P[i * 3 + 2] -= w * a.getZ(i); }
+              if (c) { D[i * 3] += w * c.getX(i); D[i * 3 + 1] += w * c.getY(i); D[i * 3 + 2] += w * c.getZ(i); }
+            }
+          }
+          // the unit attribute that, with the morphs' normal offsets added, shades along the normal given (bodyCrease.ts)
+          const u = [0, 0, 0];
+          for (let i = 0; i < n; i++) {
+            const l = Math.hypot(N[i * 3], N[i * 3 + 1], N[i * 3 + 2]) || 1;
+            unitBefore(N[i * 3] / l, N[i * 3 + 1] / l, N[i * 3 + 2] / l, D[i * 3], D[i * 3 + 1], D[i * 3 + 2], u);
+            N[i * 3] = u[0]; N[i * 3 + 1] = u[1]; N[i * 3 + 2] = u[2];
+          }
+          g.setAttribute('position', new THREE.BufferAttribute(P, 3));
+          g.setAttribute('normal', new THREE.BufferAttribute(N, 3));
+          return true;
+        },
+        // her skin coloured per vertex (rgb 0..1, every vertex) with her maps off, or back as it was with null: a probe
+        // showing on her where a measurement points
+        paintSkin: (rgb: number[] | null) => {
+          const b = skinned.find((m) => !!m.geometry.getAttribute('_cloth_cover'));
+          if (!b) return false;
+          if (rgb) b.geometry.setAttribute('color', new THREE.BufferAttribute(new Float32Array(rgb), 3));
+          for (const m of (Array.isArray(b.material) ? b.material : [b.material]) as THREE.MeshStandardMaterial[]) {
+            const keep = (m.userData.probeMaps ??= { map: m.map, normalMap: m.normalMap, roughnessMap: m.roughnessMap, metalnessMap: m.metalnessMap }) as { map: THREE.Texture | null; normalMap: THREE.Texture | null };
+            m.vertexColors = !!rgb; m.map = rgb ? null : keep.map; m.normalMap = rgb ? null : keep.normalMap; m.needsUpdate = true;
+          }
+          return true;
+        },
+        // her crease's repair: still to come, and the last one worked out (what was found, what was left, how long)
+        crease: () => ({ pending: creaseTimer !== 0 || crease.busy, where: crease.where, ms: crease.ms, prepareMs: crease.prepareMs, last: crease.last && { found: crease.last.found, left: crease.last.left, rounds: crease.last.rounds, moved: crease.last.moved, shaded: crease.last.shaded, most: crease.last.most, vertices: crease.last.vertices.length } }),
+        // her crease's repair taken off and kept off (`on` false), or back to how the room does it
+        creaseOff: (off: boolean) => { creaseDisabled = off; crease.enabled = !off; if (off) { crease.lift(); if (creaseTimer) { clearTimeout(creaseTimer); creaseTimer = 0; } } else applyLook(); return true; },
+        // what of her skin is under a point of the screen (css px): the triangle's vertices, the point and how far
+        pick: (x: number, y: number) => {
+          const b = skinned.find((m) => !!m.geometry.getAttribute('_cloth_cover'));
+          if (!b) return null;
+          const { width, height } = ctx.renderer.size();
+          const ray = new THREE.Raycaster();
+          ray.setFromCamera(new THREE.Vector2((x / width) * 2 - 1, -(y / height) * 2 + 1), camera);
+          const hit = ray.intersectObject(b, false)[0];
+          return hit ? { face: hit.face ? [hit.face.a, hit.face.b, hit.face.c] : null, point: hit.point.toArray(), distance: hit.distance, normal: hit.face?.normal.toArray() ?? null } : null;
+        },
+        // her skin drawn as its normals (a probe seeing what the GPU shades with), or back as it was
+        normalSkin: (on: boolean | 'plain' | 'clone') => {
+          const b = skinned.find((m) => !!m.geometry.getAttribute('_cloth_cover'));
+          if (!b) return false;
+          const keep = (b.userData.probeMaterial ??= b.material) as THREE.Material | THREE.Material[];
+          const unpatched = () => { const c = (Array.isArray(keep) ? keep[0] : keep).clone(); c.onBeforeCompile = () => {}; c.customProgramCacheKey = () => 'probe-unpatched'; return c; };
+          b.material = on === 'clone' ? unpatched() : on === 'plain' ? new THREE.MeshStandardMaterial({ color: 0xd9cfc7, roughness: 0.55 }) : on ? new THREE.MeshNormalMaterial() : keep;
+          return true;
+        },
+        // her skin drawn one-sided (true) or as the file has it (a probe asking whether a mark is a triangle seen from behind)
+        frontSide: (on: boolean) => {
+          const b = skinned.find((m) => !!m.geometry.getAttribute('_cloth_cover'));
+          if (!b) return false;
+          for (const m of (Array.isArray(b.material) ? b.material : [b.material])) { m.userData.probeSide ??= m.side; m.side = on ? THREE.FrontSide : m.userData.probeSide; m.needsUpdate = true; }
+          return true;
+        },
+        // which patches her skin's material carries (its program cache key)
+        skinKey: () => { const b = skinned.find((m) => !!m.geometry.getAttribute('_cloth_cover')); const m = b && (Array.isArray(b.material) ? b.material[0] : b.material); return m ? { key: m.customProgramCacheKey(), side: m.side, type: m.type, attrs: Object.keys(b.geometry.attributes) } : null; },
+        // her shape worked out again from her controls (undoing a probe's setRest)
+        relook: () => { crease.lift(); for (const s of shaped) s.fields.last = ''; applyLook(); },
+        // her skin's maps switched off or back on (a probe telling a mark painted on her from one her shape draws)
+        skinMaps: (map: boolean, normalMap: boolean, mr = true) => {
+          const b = skinned.find((m) => !!m.geometry.getAttribute('_cloth_cover'));
+          if (!b) return false;
+          for (const m of (Array.isArray(b.material) ? b.material : [b.material]) as THREE.MeshStandardMaterial[]) {
+            const keep = (m.userData.probeMaps ??= { map: m.map, normalMap: m.normalMap, roughnessMap: m.roughnessMap, metalnessMap: m.metalnessMap }) as { map: THREE.Texture | null; normalMap: THREE.Texture | null; roughnessMap: THREE.Texture | null; metalnessMap: THREE.Texture | null };
+            m.map = map ? keep.map : null; m.normalMap = normalMap ? keep.normalMap : null;
+            m.roughnessMap = mr ? keep.roughnessMap : null; m.metalnessMap = mr ? keep.metalnessMap : null; m.needsUpdate = true;
+          }
+          return true;
+        },
+        // ...and unposed (her rest shape with the shape fields and every morph as weighted now, body-local), with the
+        // weights: the GPU's by name and the shape fields' (applied on the CPU)
+        restBody: () => {
+          const b = skinned.find((m) => !!m.geometry.getAttribute('_cloth_cover'));
+          if (!b) return null;
+          const g = b.geometry, p = g.getAttribute('position'), n = p.count, out = new Float32Array(n * 3);
+          for (let i = 0; i < n; i++) { out[i * 3] = p.getX(i); out[i * 3 + 1] = p.getY(i); out[i * 3 + 2] = p.getZ(i); }
+          const nr = g.getAttribute('normal'), nout = new Float32Array(n * 3);
+          for (let i = 0; i < n; i++) { nout[i * 3] = nr.getX(i); nout[i * 3 + 1] = nr.getY(i); nout[i * 3 + 2] = nr.getZ(i); }
+          const dict = b.morphTargetDictionary ?? {}, infl = b.morphTargetInfluences ?? [], mp = g.morphAttributes.position ?? [], mn = g.morphAttributes.normal ?? [];
+          for (const [, k] of Object.entries(dict)) {
+            const w = infl[k] ?? 0, a = mp[k], c = mn[k]; if (!w) continue;
+            if (a) for (let i = 0; i < n; i++) { out[i * 3] += w * a.getX(i); out[i * 3 + 1] += w * a.getY(i); out[i * 3 + 2] += w * a.getZ(i); }
+            if (c) for (let i = 0; i < n; i++) { nout[i * 3] += w * c.getX(i); nout[i * 3 + 1] += w * c.getY(i); nout[i * 3 + 2] += w * c.getZ(i); }
+          }
+          return { position: Array.from(out), normal: Array.from(nout), gpu: Object.fromEntries(Object.entries(dict).map(([name, k]) => [name, infl[k] ?? 0])), cpu: bodyShapeFieldWeights(body, bump, bellyCurve), relative: g.morphTargetsRelative };
+        },
         strain: () => { if (!cloth) return null; const r = { ...cloth.strain(), jumps: cloth.jumps, moved: cloth.moved, worst: cloth.worstEdge }; cloth.moved = 0; return r; },
         // what shows through the tee now (her navel's height above the skin round it, the spots the shading draws)
         detail: () => (cloth ? { heights: cloth.detailHeights, keep: clothKeep(), spots: cloth.detail(clothKeep()) } : null),
@@ -2262,6 +2399,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
 
     dispose() {
       disposed = true;
+      if (creaseTimer) clearTimeout(creaseTimer);
+      crease.dispose();
       dropPainter();
       skinFetched?.texture.dispose(); skinFetched = null;
       skinUpload?.texture.dispose(); skinUpload = null;

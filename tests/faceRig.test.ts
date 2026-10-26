@@ -725,7 +725,7 @@ describe('the patch', () => {
       for (const name of [...UNIFORMS, 'fabricOn0', 'fabricOn1', 'fabricShowRegions']) expect(shader.uniforms[name], name).toBeDefined();
       const key = material.customProgramCacheKey();
       expect(key).toContain('|face-rig-v2');
-      expect(key).toContain('|fabric-2-painted-v10');
+      expect(key).toContain('|fabric-2-painted-v11');
     });
   }
 });
