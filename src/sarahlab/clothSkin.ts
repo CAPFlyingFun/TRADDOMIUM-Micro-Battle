@@ -85,6 +85,12 @@ export interface ClothSkinOptions {
    * under her arms. (A tee's sleeve, bound to her arm, walks anywhere.)
    */
   armBones?: readonly number[];
+  /**
+   * Per particle (binding order), 1 where the particle is TRUNK cloth and must never take her arm as its floor, 0 where
+   * it may. Given, it replaces the rule above that reads it off the bound triangle: a garment knows which of its pieces
+   * are its body and which its sleeves.
+   */
+  trunkOnly?: Uint8Array;
 }
 
 /** 1.5 mm of fabric off her skin, in the room's 100 units to the metre. */
@@ -345,6 +351,7 @@ export class ClothSkin {
       for (let t = 0; t < nT; t++) this.armTri[t] = armVertex[tris[t * 3]] + armVertex[tris[t * 3 + 1]] + armVertex[tris[t * 3 + 2]] >= 2 ? 1 : 0;
       for (let i = 0; i < n; i++) this.trunkOnly[i] = this.armTri[bound[i]] ? 0 : 1;
     }
+    if (options?.trunkOnly && options.trunkOnly.length >= n && arm.size) for (let i = 0; i < n; i++) this.trunkOnly[i] = options.trunkOnly[i] ? 1 : 0;
 
     this.world = new Float32Array(nV * 3);
     this.bindPos = new Float32Array(nV * 3);
@@ -560,6 +567,31 @@ export class ClothSkin {
       S[i] = (clearance > thickness ? Math.max(thickness, Math.min(clearance, offset[f] * scale)) : thickness) + (extra ? extra[i] : 0);
     }
     return performance.now() - t0;
+  }
+
+  /**
+   * Where each slot's particle lies on her NOW, as a binding (`ClothBinding`, in slot order over `slots` particles): the
+   * triangle the last `update` found nearest it, as that triangle's three vertex indices, the barycentric place on it,
+   * and how far off it the particle stands along its outward normal, body-local units (at least `minOffset`). Pose-free,
+   * like any binding: a garment settled on her in one pose is bound where it lies and is carried from there in every
+   * other. Call it straight after an `update` with the same `cloth` positions.
+   */
+  contactBinding(cloth: Float32Array, minOffset = 0): ClothBinding {
+    const n = Math.min(this.nSlots, Math.floor(cloth.length / 3)), T = this.tris, W = this.world, order = this.order, cb = this.contactBary;
+    const tri = new Uint32Array(n * 3), bary = new Float32Array(n * 3), offset = new Float32Array(n);
+    for (let i = 0; i < n; i++) {
+      const f = order[i], t = this.last[f], f3 = f * 3;
+      for (let k = 0; k < 3; k++) tri[i * 3 + k] = T[t * 3 + k];
+      let u = this.contactKind[f] === CARRY_WALKED ? cb[f3] : 1 / 3, v = this.contactKind[f] === CARRY_WALKED ? cb[f3 + 1] : 1 / 3, w = 1 - u - v;
+      if (!(u >= 0 && v >= 0 && w >= 0)) { u = Math.max(0, u); v = Math.max(0, v); w = Math.max(0, w); const sm = u + v + w || 1; u /= sm; v /= sm; w /= sm; }
+      bary[i * 3] = u; bary[i * 3 + 1] = v; bary[i * 3 + 2] = w;
+      for (let k = 0; k < 3; k++) { const q = T[t * 3 + k]; if (this.stamp[q] !== this.frame) this.pose(q); }
+      const a = T[t * 3] * 3, b = T[t * 3 + 1] * 3, c = T[t * 3 + 2] * 3;
+      const qx = u * W[a] + v * W[b] + w * W[c], qy = u * W[a + 1] + v * W[b + 1] + w * W[c + 1], qz = u * W[a + 2] + v * W[b + 2] + w * W[c + 2];
+      const d = this.normalOf(t) ? (cloth[i * 3] - qx) * this.nx + (cloth[i * 3 + 1] - qy) * this.ny + (cloth[i * 3 + 2] - qz) * this.nz : 0;
+      offset[i] = Math.max(minOffset, d / (this.scale || 1));
+    }
+    return { count: n, tri, bary, offset };
   }
 
   /**

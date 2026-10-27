@@ -61,6 +61,29 @@ export interface ClothTopology {
    * the harder (gravity accelerates every particle alike; mass decides who gives way in a constraint).
    */
   readonly mass?: Float32Array;
+  /**
+   * A garment's own rest length for an edge (its length in the flat pattern), when given; an edge it does not answer for
+   * (undefined) is measured from `rest` as before. Bend pairs then rest as `bendFlat` says.
+   */
+  readonly restLength?: (a: number, b: number) => number | undefined;
+  /**
+   * True: every bend pair rests FLAT -- its two triangles unfolded into one plane at their rest lengths -- as fabric does
+   * when it is cut flat; false or absent: measured from `rest` as before.
+   */
+  readonly bendFlat?: boolean;
+  /** Per particle, 1 where it is pushed out of the capsules `step` is handed (her arms, legs, a seat), 0 or absent: never. */
+  readonly capsuleMask?: Uint8Array;
+}
+
+/**
+ * Capsules a step pushes the masked particles out of (her upper arms and forearms, say): segment a -> b of `radius`,
+ * world units, `count` of them, given at the start and the end of the frame and interpolated per substep like her skin.
+ */
+export interface Capsules {
+  readonly count: number;
+  readonly a: Float32Array;
+  readonly b: Float32Array;
+  readonly radius: Float32Array;
 }
 
 export interface ClothSettings {
@@ -99,6 +122,8 @@ export interface ClothStepStats {
   readonly substeps: number;
   /** Particles touching her skin in the step's last substep. */
   readonly contacts: number;
+  /** Particles a capsule pushed in the step's last substep. */
+  readonly capsuleContacts: number;
   /** The largest push out of her skin in any substep of the step, world units. */
   readonly deepest: number;
 }
@@ -151,7 +176,10 @@ const UNREACHED = 0x7fffffff;
 const now: () => number = () => globalThis.performance?.now() ?? Date.now();
 
 /** Mutable behind the readonly face `step` hands out: one object, reused, so a step allocates nothing. */
-interface StatsSlot { ms: number; substeps: number; contacts: number; deepest: number }
+/** Numbers a substep keeps per capsule (`step` 6b). */
+const CAPSULE_STRIDE = 14;
+
+interface StatsSlot { ms: number; substeps: number; contacts: number; deepest: number; capsuleContacts: number }
 
 export class ClothSim {
   /** May be changed between steps; read afresh at the start of every step. */
@@ -177,7 +205,9 @@ export class ClothSim {
   private readonly limitSide: Uint8Array;
   private readonly bendRest: Float32Array;
   private normalsBuffer: Float32Array | null = null;
-  private readonly stats: StatsSlot = { ms: 0, substeps: 0, contacts: 0, deepest: 0 };
+  private readonly stats: StatsSlot = { ms: 0, substeps: 0, contacts: 0, deepest: 0, capsuleContacts: 0 };
+  private readonly capsuleMask: Uint8Array | null;
+  private capsuleScratch = new Float64Array(0);
 
   constructor(topology: ClothTopology, settings?: Partial<ClothSettings>) {
     const { count, triangles, rest, pin, mass } = topology;
@@ -209,6 +239,8 @@ export class ClothSim {
     const firstOpposite = new Map<number, number>();
     const edgeList: number[] = [];
     const bendList: number[] = [];
+    /** The edge each bend pair folds across (lo, hi), for resting it flat. */
+    const bendEdgeList: number[] = [];
     for (let t = 0; t < triangles.length; t += 3) {
       for (let k = 0; k < 3; k++) {
         const a = triangles[t + k], b = triangles[t + ((k + 1) % 3)], c = triangles[t + ((k + 2) % 3)];
@@ -220,7 +252,7 @@ export class ClothSim {
           firstOpposite.set(key, c);
           edgeList.push(lo, hi);
         } else if (seen >= 0) {
-          if (seen !== c) bendList.push(seen < c ? seen : c, seen < c ? c : seen);
+          if (seen !== c) { bendList.push(seen < c ? seen : c, seen < c ? c : seen); bendEdgeList.push(lo, hi); }
           firstOpposite.set(key, -1);
         }
       }
@@ -245,19 +277,30 @@ export class ClothSim {
     }
     const bendOrder = sortedPairs(bendList, () => 0);
     this.bendPairs = new Uint32Array(bendList.length);
+    const bendEdges = new Uint32Array(bendList.length);
     for (let e = 0; e < bendOrder.length; e++) {
       this.bendPairs[e * 2] = bendList[bendOrder[e] * 2];
       this.bendPairs[e * 2 + 1] = bendList[bendOrder[e] * 2 + 1];
+      bendEdges[e * 2] = bendEdgeList[bendOrder[e] * 2];
+      bendEdges[e * 2 + 1] = bendEdgeList[bendOrder[e] * 2 + 1];
     }
     this.edgeRest = new Float32Array(this.edges.length / 2);
     this.edgeRestSq = new Float32Array(this.edges.length / 2);
+    const lengthOf = new Map<number, number>();
     for (let e = 0; e < this.edgeRest.length; e++) {
-      const d = distance(rest, this.edges[e * 2], this.edges[e * 2 + 1]);
+      const a = this.edges[e * 2], b = this.edges[e * 2 + 1];
+      const given = topology.restLength?.(a, b);
+      const d = given !== undefined && Number.isFinite(given) && given > 0 ? given : distance(rest, a, b);
       this.edgeRest[e] = d;
       this.edgeRestSq[e] = d * d;
+      lengthOf.set(a < b ? a * count + b : b * count + a, d);
     }
     this.bendRest = new Float32Array(this.bendPairs.length / 2);
-    for (let e = 0; e < this.bendRest.length; e++) this.bendRest[e] = distance(rest, this.bendPairs[e * 2], this.bendPairs[e * 2 + 1]);
+    for (let e = 0; e < this.bendRest.length; e++) {
+      const c = this.bendPairs[e * 2], d = this.bendPairs[e * 2 + 1];
+      this.bendRest[e] = topology.bendFlat ? flatDistance(lengthOf, count, bendEdges[e * 2], bendEdges[e * 2 + 1], c, d) ?? distance(rest, c, d) : distance(rest, c, d);
+    }
+    this.capsuleMask = topology.capsuleMask && topology.capsuleMask.length >= count ? topology.capsuleMask : null;
   }
 
   /**
@@ -289,10 +332,10 @@ export class ClothSim {
    * at the start of the frame, carried by her pose (`SkinContacts.carried`). Returns the SAME stats object every call:
    * copy it to keep it.
    */
-  step(dt: number, before: SkinContacts, after: SkinContacts): ClothStepStats {
+  step(dt: number, before: SkinContacts, after: SkinContacts, capsules?: { readonly before: Capsules; readonly after: Capsules }): ClothStepStats {
     const t0 = now();
     const stats = this.stats;
-    stats.substeps = 0; stats.contacts = 0; stats.deepest = 0;
+    stats.substeps = 0; stats.contacts = 0; stats.deepest = 0; stats.capsuleContacts = 0;
     const n = this.count;
     if (before.point.length < n * 3 || after.point.length < n * 3 || before.normal.length < n * 3 || after.normal.length < n * 3
       || before.standOff.length < n || after.standOff.length < n || before.pinTarget.length < n * 3 || after.pinTarget.length < n * 3
@@ -419,6 +462,44 @@ export class ClothSim {
         }
       }
 
+      // 6b. the capsules (her arms, legs, a seat): a masked particle inside one is put out on its surface, radially.
+      const mask = this.capsuleMask;
+      if (mask && capsules && capsules.after.count > 0) {
+        const cb = capsules.before, ca = capsules.after, nc = Math.min(cb.count, ca.count);
+        // this substep's capsules, laid out once (start, axis, radius, |axis|^2, and the box round each, radius out),
+        // so a particle far from all of them costs six compares a capsule
+        const C = this.capsuleScratch.length >= nc * CAPSULE_STRIDE ? this.capsuleScratch : (this.capsuleScratch = new Float64Array(nc * CAPSULE_STRIDE));
+        for (let k = 0, k3 = 0; k < nc; k++, k3 += 3) {
+          const ax = g * cb.a[k3] + f * ca.a[k3], ay = g * cb.a[k3 + 1] + f * ca.a[k3 + 1], az = g * cb.a[k3 + 2] + f * ca.a[k3 + 2];
+          const bx = g * cb.b[k3] + f * ca.b[k3], by = g * cb.b[k3 + 1] + f * ca.b[k3 + 1], bz = g * cb.b[k3 + 2] + f * ca.b[k3 + 2];
+          const r = g * cb.radius[k] + f * ca.radius[k], o = k * CAPSULE_STRIDE;
+          C[o] = ax; C[o + 1] = ay; C[o + 2] = az; C[o + 3] = bx - ax; C[o + 4] = by - ay; C[o + 5] = bz - az; C[o + 6] = r;
+          C[o + 7] = C[o + 3] * C[o + 3] + C[o + 4] * C[o + 4] + C[o + 5] * C[o + 5];
+          C[o + 8] = Math.min(ax, bx) - r; C[o + 9] = Math.max(ax, bx) + r; C[o + 10] = Math.min(ay, by) - r; C[o + 11] = Math.max(ay, by) + r;
+          C[o + 12] = Math.min(az, bz) - r; C[o + 13] = Math.max(az, bz) + r;
+        }
+        let pushed = 0;
+        for (let i = 0, i3 = 0; i < n; i++, i3 += 3) {
+          if (!mask[i] || w[i] <= 0) continue;
+          let hit = false;
+          for (let k = 0; k < nc; k++) {
+            const o = k * CAPSULE_STRIDE, qx = x[i3], qy = x[i3 + 1], qz = x[i3 + 2];
+            if (qx < C[o + 8] || qx > C[o + 9] || qy < C[o + 10] || qy > C[o + 11] || qz < C[o + 12] || qz > C[o + 13]) continue;
+            const ax = C[o], ay = C[o + 1], az = C[o + 2], sx = C[o + 3], sy = C[o + 4], sz = C[o + 5], r = C[o + 6], ss = C[o + 7];
+            const px = qx - ax, py = qy - ay, pz = qz - az;
+            let t = ss > TINY ? (px * sx + py * sy + pz * sz) / ss : 0;
+            t = t < 0 ? 0 : t > 1 ? 1 : t;
+            const dx = px - t * sx, dy = py - t * sy, dz = pz - t * sz, d2 = dx * dx + dy * dy + dz * dz;
+            if (d2 >= r * r || d2 < TINY) continue;
+            const k2 = r / Math.sqrt(d2);
+            x[i3] = ax + t * sx + dx * k2; x[i3 + 1] = ay + t * sy + dy * k2; x[i3 + 2] = az + t * sz + dz * k2;
+            hit = true;
+          }
+          if (hit && last) pushed++;
+        }
+        if (last) stats.capsuleContacts = pushed;
+      }
+
       // 7. velocity from what actually happened.
       for (let i = 0, i3 = 0; i < n; i++, i3 += 3) {
         v[i3] = (x[i3] - xp[i3]) * invH;
@@ -485,6 +566,19 @@ function project(x: Float32Array, w: Float32Array, pairs: Uint32Array, rest: Flo
     x[a3] += dx * ka; x[a3 + 1] += dy * ka; x[a3 + 2] += dz * ka;
     x[b3] -= dx * kb; x[b3 + 1] -= dy * kb; x[b3 + 2] -= dz * kb;
   }
+}
+
+/**
+ * The rest distance of bend pair (c, d) folding across edge (a, b) when its two triangles lie flat: c and d laid either
+ * side of a-b at their edges' rest lengths. Undefined when a length is missing or the triangles cannot be laid.
+ */
+function flatDistance(lengthOf: Map<number, number>, count: number, a: number, b: number, c: number, d: number): number | undefined {
+  const len = (p: number, q: number) => lengthOf.get(p < q ? p * count + q : q * count + p);
+  const L = len(a, b), ac = len(a, c), bc = len(b, c), ad = len(a, d), bd = len(b, d);
+  if (L === undefined || ac === undefined || bc === undefined || ad === undefined || bd === undefined || L <= 0) return undefined;
+  const xc = (ac * ac - bc * bc + L * L) / (2 * L), yc = Math.sqrt(Math.max(0, ac * ac - xc * xc));
+  const xd = (ad * ad - bd * bd + L * L) / (2 * L), yd = -Math.sqrt(Math.max(0, ad * ad - xd * xd));
+  return Math.hypot(xc - xd, yc - yd);
 }
 
 /** Edges from each particle to the nearest particle with any pin (breadth first over `pairs`); UNREACHED where none. */

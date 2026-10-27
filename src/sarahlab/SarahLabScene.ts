@@ -25,7 +25,8 @@ import { SKIN_BRUSH_CM, SKIN_CHOICES, SKIN_ORIGINAL_IMAGE, SKIN_SWATCHES, SKIN_T
 import { SkinPainter, tilePattern, type SkinImage, type SkinPattern, type SkinStrokeSettings } from './skinPaint';
 import { ensureRest } from './fabricMaterial';
 import { BodyCrease, CREASE_SETTLE_MS, unitBefore } from './bodyCrease';
-import { FACE_REST_SCALE, patchFaceRig, restFromWorld, setFaceRig } from './faceRig';
+import { FACE_REST_OFFSET, FACE_REST_SCALE, patchFaceRig, restFromWorld, setFaceRig } from './faceRig';
+import { RoomGarment } from './garment/roomGarment';
 import { FaceMotion } from './faceMotion';
 import { patchHairMaterial } from './hairMaterial';
 import { SARAH_LOOK } from './sarahLook';
@@ -643,6 +644,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let clothSeated = false;
   /** Whether seated she wears the fitted tee instead of the cloth (a probe can turn this off to watch the cloth seated). */
   let seatedStandIn = true;
+  /** Stage 2b's procedural tee, put on her by a probe (`?probe=cloth` garment()) for review; never by the room itself. */
+  let garmentRoom: RoomGarment | null = null, garmentPoseKey = '';
   const clothWorn = (): boolean => clothOn && !!cloth && !clothSeated;
   let cloth: ClothShirt | null = null, clothOn = false, clothLoading = false, clothRestart = false, clothRefit = false, teeLength = CLOTH_TEE_LENGTH_DEFAULT, frameMs = 1000 / 60;
   let teeLengthInput: HTMLInputElement | null = null;
@@ -2228,6 +2231,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       seconds += dt;
       if (pose === 'walk') walked += WALK_SPEED * dt;
       if (rig) rig.apply(turnsFor());
+      garmentRoom?.applyPose();
       place();
       feelMotion(dt);
       // her face: her eyes, her blinks, her jaw
@@ -2261,6 +2265,17 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         setClothTrim(cloth.mesh.material as THREE.Material, cloth.trim());
         if (Math.abs(1 - keep.navel - clothFlattenLaid) > 1e-3) applyLook();
         if (fields.cloth) fields.cloth.textContent = clothLine(cloth.stats(), frameMs);
+      }
+      // the procedural tee a probe put on her (Stage 2b review): the room's tees stand aside while it is worn, it is laid
+      // on her afresh when she changes pose (as the cloth tee is), and it collides with the stool when she sits
+      if (garmentRoom && model?.visible) {
+        if (cloth) cloth.mesh.visible = false;
+        const lite = partMeshes.get('spandex-lite')?.[0];
+        if (lite) lite.visible = false;
+        if (pose !== garmentPoseKey) { garmentPoseKey = pose; garmentRoom.cloth.restart(); }
+        if (garmentRoom.capsules.stool !== null || pose === 'sit') garmentRoom.capsules = { ...garmentRoom.capsules, stool: pose === 'sit' && stool.visible ? { x: stool.position.x, z: stool.position.z, radius: 0.21 * M, top: stool.scale.y } : null };
+        model.updateMatrixWorld(true);
+        garmentRoom.frame(dt);
       }
       // the fitted light tee (the cloth off): her nipples drawn through it and its own navel settled onto its smooth
       // surface, at the editor's BREAST and NAVEL DETAIL; her navel softened under it to match
@@ -2310,7 +2325,39 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         hold: (on: boolean) => { clock.paused = on; clock.step = 0; },
         // the camera at any angle about her (yaw radians, 0 her front; pitch radians, below 0 from beneath)
         // (and how far off, world units, and at what height: for a close look at her neckline)
-        look: (yaw: number, pitch?: number, distance?: number, height?: number) => { orbit.yaw = yaw; if (pitch !== undefined) orbit.pitch = pitch; if (distance !== undefined) orbit.distance = distance; if (height !== undefined) orbit.target.y = height; turning = false; },
+        look: (yaw: number, pitch?: number, distance?: number, height?: number, across?: number) => { orbit.yaw = yaw; if (pitch !== undefined) orbit.pitch = pitch; if (distance !== undefined) orbit.distance = distance; if (height !== undefined) orbit.target.y = height; if (across !== undefined) orbit.target.x = across; turning = false; },
+        // Stage 2b: the procedural tee (garment/roomGarment.ts) tailored to her and put on her in place of the room's tees,
+        // or taken off (null). Its construction: 'raglan' or 'setIn', with a gusset share 0..1.
+        garment: (construction: 'raglan' | 'setIn' | null, gusset = 0.5, wire = false) => {
+          garmentRoom?.dispose(); garmentRoom = null; garmentPoseKey = '';
+          if (!construction) { if (cloth && clothOn) cloth.mesh.visible = true; applyLook(); return null; }
+          const body = skinned.find((m) => !!m.geometry.getAttribute('_cloth_cover'));
+          if (!body || !model) return null;
+          model.updateMatrixWorld(true);
+          const { settings, standOff } = clothTuning(clothTune);
+          // drawn a hair in front of her skin where the two touch (her skin under it is not masked as under the room's tees)
+          const material = new THREE.MeshStandardMaterial({ color: 0xe8e4dc, roughness: 0.85, side: THREE.DoubleSide, wireframe: wire, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -8 });
+          garmentRoom = new RoomGarment({ body, root: model, params: { construction, gusset }, settings, standOff, unitsPerMetre: M, scale: FACE_REST_SCALE, offset: FACE_REST_OFFSET, material });
+          three.add(garmentRoom.cloth.mesh);
+          garmentPoseKey = pose;
+          const t = garmentRoom.tailored;
+          return { ms: t.ms, report: { ...t.report, seams: t.report.seams.map((q) => ({ name: q.name, a: q.lengthA, b: q.lengthB })) }, notes: t.draft.notes, particles: t.sewn.count };
+        },
+        // her arms turned on top of her pose (radians): out to her side, forward, elbows bent
+        garmentPose: (raise: number, forward = 0, elbow = 0) => { if (!garmentRoom) return false; garmentRoom.pose.raise = raise; garmentRoom.pose.forward = forward; garmentRoom.pose.elbow = elbow; return true; },
+        // which of her limbs it collides with (the stool comes with SIT when legs are on)
+        garmentCapsules: (arms: boolean, legs: boolean) => { if (!garmentRoom) return false; garmentRoom.capsules = { arms, legs, stool: null }; return true; },
+        // bind it where it lies and hold its neckline there (after it is on her)
+        garmentSettle: () => { garmentRoom?.cloth.settle(); return !!garmentRoom; },
+        // weightless, it only draws itself to its pattern over her (how it is eased on before it is pinned and let hang)
+        garmentWeightless: (on: boolean) => { if (garmentRoom) garmentRoom.cloth.weightless = on; return !!garmentRoom; },
+        // its strain now (length / pattern length x FIT): everywhere, and over the underarm
+        garmentStrain: () => garmentRoom ? { all: garmentRoom.cloth.strain(), underarm: garmentRoom.cloth.strain((p) => garmentRoom!.underarm[p] === 1) } : null,
+        garmentNeck: () => garmentRoom?.neck() ?? null,
+        garmentStats: () => garmentRoom?.cloth.stats() ?? null,
+        garmentWire: (on: boolean) => { if (!garmentRoom) return false; (garmentRoom.cloth.mesh.material as THREE.MeshStandardMaterial).wireframe = on; return true; },
+        // her particles now (world), and which piece each is of, for a probe drawing its own pictures
+        garmentParticles: () => garmentRoom ? { positions: Array.from(garmentRoom.cloth.positions.subarray(0, garmentRoom.tailored.sewn.count * 3)), piece: Array.from(garmentRoom.tailored.sewn.particlePiece) } : null,
         animate: (secondsToRun: number, step = 1 / 60) => { const n = Math.max(0, Math.round(secondsToRun / step)); for (let k = 0; k < n; k++) advance(step); return cloth?.stats() ?? null; },
         tears: (limit = 2) => cloth?.tears(limit) ?? null,
         // seated, the cloth stays on (the fitted tee does not stand in): to watch the cloth itself seated
@@ -2554,6 +2601,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       builder?.dispose();
       builder = null;
       dropCloth();
+      garmentRoom?.dispose(); garmentRoom = null;
       hud?.remove();
       hud = null;
       if (model) { three.remove(model); rig?.dispose(); release(model); model = null; }
