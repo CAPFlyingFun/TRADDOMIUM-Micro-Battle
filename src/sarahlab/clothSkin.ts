@@ -91,6 +91,31 @@ export interface ClothSkinOptions {
    * are its body and which its sleeves.
    */
   trunkOnly?: Uint8Array;
+  /**
+   * A trunk-only particle whose nearest skin is shared with her arm by more than this (the mean share her arm bones carry
+   * of its triangle's corners) is not held to that skin as she moves her arm. Under and behind her armpit, where her
+   * skin faces level, down or only a little up at rest (`LOOSE_MAX_UP`), it has no floor there: it bridges the hollow,
+   * as fabric does. Elsewhere -- the top of her shoulder, which is half her arm's too and which the cloth rests on -- it
+   * keeps its floor, but her skin is not carried under it (`SkinContacts.carried` is its last contact), so friction holds
+   * it still rather than dragging it along. Stage 2b: one body particle at the back of each armpit was dragged 5 cm up
+   * into it, its edges stretched 5 to 7 times; no floor on all such skin cured it and sank a set-in's shoulders through
+   * her; not carrying alone left the room's tee tented (the floor pushes as well as the friction). Absent: every
+   * particle has its floor and is carried, as the cloth tee's are.
+   */
+  looseOverArm?: number;
+  /**
+   * A particle whose contact is further than this (world units) is looked for again over the triangles round it, a
+   * share of the particles each update (`RESCUE_EVERY`), and moved to a nearer one: the walk only ever steps to a nearer
+   * triangle, so across a fold of her (under her breast as her belly grows) it can stop on the far side, 4 to 6 cm off,
+   * while her nearest skin is under the cloth and shows through it (Stage 2 follow-up). Absent: never.
+   */
+  rescueOver?: number;
+  /**
+   * The cloth's own neighbours, particle by particle (CSR: particle f's are `list[start[f]]` up to `list[start[f + 1]]`):
+   * `rescueOver` starts its search from their contacts as well as from the particle's own, so a patch stuck across a
+   * fold is reached from its edge, where its neighbours lie on the right skin. Absent: its own contact only.
+   */
+  neighbours?: { readonly start: Uint32Array; readonly list: Uint32Array };
 }
 
 /** 1.5 mm of fabric off her skin, in the room's 100 units to the metre. */
@@ -116,6 +141,14 @@ const FACE = 0, EDGE_01 = 1, EDGE_12 = 2, EDGE_20 = 3, CORNER_0 = 4, CORNER_1 = 
 const CARRY_FRESH = 0, CARRY_BOUND = 1, CARRY_WALKED = 2;
 
 type Attr = THREE.BufferAttribute | THREE.InterleavedBufferAttribute;
+/** `rescueOver` looks again at one particle in this many each update, and over at most RESCUE_TRIANGLES round it. */
+const RESCUE_EVERY = 32, RESCUE_TRIANGLES = 250;
+/** ...and a particle looked at with nothing nearer found is looked at again only once it is this many times further off. */
+const RESCUE_AGAIN = 1.5;
+/** No floor (`looseOverArm`, under her arm). */
+const NO_FLOOR = -1e9;
+/** `looseOverArm` takes the floor away only over skin whose rest normal's upward share is under this (her shoulder's top is more). */
+const LOOSE_MAX_UP = 0.5;
 
 export class ClothSkin {
   private readonly body: THREE.SkinnedMesh;
@@ -149,6 +182,24 @@ export class ClothSkin {
   /** 1 for a triangle of her arm (see `armBones`); and 1 for a particle that must keep off them. */
   private readonly armTri: Uint8Array;
   private readonly trunkOnly: Uint8Array;
+  /** Per triangle, the mean share of its corners her arm bones carry, when `looseOverArm` is asked for; else null. */
+  private readonly triArm: Float32Array | null;
+  /** Per triangle, 1 where her skin faces level or down at rest (`LOOSE_MAX_UP`), when `looseOverArm` is asked for. */
+  private readonly triLoose: Uint8Array | null = null;
+  /** Each particle's contact point at the last update (world, 3 each), for `looseOverArm`: there, what is carried. */
+  private prevPoint: Float32Array | null = null;
+  /** `rescueOver`, squared (world units); Infinity: off. Which share of the particles is looked at next; and its scratch. */
+  private readonly rescue2: number;
+  private rescuePhase = 0;
+  private rescueSeen: Uint32Array | null = null;
+  /** Per particle, how far off its contact was when it was last looked at and nothing nearer was found (0: never). */
+  private rescueChecked: Float32Array | null = null;
+  private rescueStamp = 0;
+  private readonly rescueQueue: number[] = [];
+  private readonly neighbours: { readonly start: Uint32Array; readonly list: Uint32Array } | null;
+  /** How many particles the last update moved to a nearer triangle (for a probe). */
+  rescued = 0;
+  private readonly looseOverArm: number;
 
   // --- which particle each slot is (`setOrder`) ---
   /**
@@ -352,6 +403,28 @@ export class ClothSkin {
       for (let i = 0; i < n; i++) this.trunkOnly[i] = this.armTri[bound[i]] ? 0 : 1;
     }
     if (options?.trunkOnly && options.trunkOnly.length >= n && arm.size) for (let i = 0; i < n; i++) this.trunkOnly[i] = options.trunkOnly[i] ? 1 : 0;
+    this.looseOverArm = options?.looseOverArm ?? Infinity;
+    this.triArm = null;
+    if (Number.isFinite(this.looseOverArm) && arm.size && this.skinI && this.skinW) {
+      const share = new Float32Array(nV);
+      for (let v = 0; v < nV; v++) for (let k = 0; k < 4; k++) if (arm.has(this.skinI[v * 4 + k])) share[v] += this.skinW[v * 4 + k];
+      const triArm = new Float32Array(nT);
+      for (let t = 0; t < nT; t++) triArm[t] = (share[tris[t * 3]] + share[tris[t * 3 + 1]] + share[tris[t * 3 + 2]]) / 3;
+      this.triArm = triArm;
+      this.prevPoint = new Float32Array(n * 3);
+      const R = g.getAttribute('position') as Attr, triLoose = new Uint8Array(nT);
+      for (let t = 0; t < nT; t++) {
+        const a = tris[t * 3], b = tris[t * 3 + 1], c = tris[t * 3 + 2], ax = R.getX(a), ay = R.getY(a), az = R.getZ(a);
+        const ux = R.getX(b) - ax, uy = R.getY(b) - ay, uz = R.getZ(b) - az, vx = R.getX(c) - ax, vy = R.getY(c) - ay, vz = R.getZ(c) - az;
+        const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx, l = Math.hypot(nx, ny, nz);
+        triLoose[t] = l > 0 && this.restSign * ny / l < LOOSE_MAX_UP ? 1 : 0;
+      }
+      this.triLoose = triLoose;
+    }
+
+    this.rescue2 = options?.rescueOver !== undefined ? options.rescueOver * options.rescueOver : Infinity;
+    if (Number.isFinite(this.rescue2)) { this.rescueSeen = new Uint32Array(nT); this.rescueChecked = new Float32Array(this.count); }
+    this.neighbours = options?.neighbours ?? null;
 
     this.world = new Float32Array(nV * 3);
     this.bindPos = new Float32Array(nV * 3);
@@ -565,8 +638,57 @@ export class ClothSkin {
       else keepNormal(Nn, i3);
       // the clearance is the made tee's own there (the binding's offset, never `pinOffset`)
       S[i] = (clearance > thickness ? Math.max(thickness, Math.min(clearance, offset[f] * scale)) : thickness) + (extra ? extra[i] : 0);
+      // over arm-shared skin: under her arm no floor; elsewhere her skin is not carried, so friction holds the particle
+      // still, not to her (kept per particle, not per slot; a fresh contact carries nothing of her already)
+      const q = this.prevPoint;
+      if (q) {
+        const overArm = keepOff && this.triArm !== null && this.triArm[t] > this.looseOverArm;
+        if (overArm && this.triLoose![t]) S[i] = NO_FLOOR;
+        else if (was !== CARRY_FRESH && overArm) { C[i3] = q[f3]; C[i3 + 1] = q[f3 + 1]; C[i3 + 2] = q[f3 + 2]; }
+        q[f3] = P[i3]; q[f3 + 1] = P[i3 + 1]; q[f3 + 2] = P[i3 + 2];
+      }
     }
+    if (this.rescueSeen) this.rescueContacts(cloth, n, out.point);
     return performance.now() - t0;
+  }
+
+  /**
+   * `rescueOver`: for one particle in RESCUE_EVERY (a different share each update), when its contact is further than
+   * `rescueOver`, the nearest triangle among the RESCUE_TRIANGLES round its own (breadth first over shared edges, a
+   * trunk-only particle never onto her arm) becomes its contact from the next update on, carrying nothing of her then.
+   * Round each corner, so across her mesh's seams as the walk's corner steps are.
+   */
+  private rescueContacts(cloth: Float32Array, n: number, P: Float32Array): void {
+    const { tris, weld, rowStart, rowTri, last, order, armTri } = this, seen = this.rescueSeen!, q = this.rescueQueue;
+    this.rescued = 0;
+    const phase = this.rescuePhase = (this.rescuePhase + 1) % RESCUE_EVERY;
+    for (let i = phase; i < n; i += RESCUE_EVERY) {
+      const f = order[i], i3 = i * 3, px = cloth[i3], py = cloth[i3 + 1], pz = cloth[i3 + 2];
+      const d0 = (px - P[i3]) ** 2 + (py - P[i3 + 1]) ** 2 + (pz - P[i3 + 2]) ** 2;
+      if (!(d0 > this.rescue2)) continue;
+      // looked at before with nothing nearer round it: only again once it is a good deal further off
+      const checked = this.rescueChecked!, dist = Math.sqrt(d0);
+      if (checked[f] > 0 && dist < checked[f] * RESCUE_AGAIN) continue;
+      const keepOff = this.trunkOnly[f] === 1;
+      let best = last[f], bestD = d0 * 0.5;
+      const stamp = ++this.rescueStamp;
+      q.length = 0; q.push(last[f]); seen[last[f]] = stamp;
+      // its cloth neighbours' contacts first in line after its own
+      const nb = this.neighbours;
+      if (nb) for (let j = nb.start[f], end = nb.start[f + 1]; j < end; j++) { const u = last[nb.list[j]]; if (seen[u] !== stamp && !(keepOff && armTri[u])) { seen[u] = stamp; q.push(u); } }
+      for (let h = 0; h < q.length && h < RESCUE_TRIANGLES; h++) {
+        const t = q[h];
+        const d = this.closest(t, px, py, pz);
+        if (d < bestD) { bestD = d; best = t; }
+        // every triangle round each corner (her welded corners: across her mesh's seams too)
+        for (let k = 0; k < 3; k++) {
+          const w = weld[tris[t * 3 + k]];
+          for (let j = rowStart[w], end = rowStart[w + 1]; j < end; j++) { const u = rowTri[j]; if (seen[u] !== stamp && !(keepOff && armTri[u])) { seen[u] = stamp; q.push(u); } }
+        }
+      }
+      if (best !== last[f]) { last[f] = best; this.contactKind[f] = CARRY_FRESH; this.rescued++; checked[f] = 0; }
+      else checked[f] = dist;
+    }
   }
 
   /**

@@ -56,6 +56,22 @@ export interface TeeParams {
   readonly ease: { readonly bust: number; readonly waist: number; readonly hip: number; readonly sleeve: number };
   /** The underarm sits this far under her armpit, metres. */
   readonly armholeDrop: number;
+  /**
+   * How a set-in front takes her bust (raglan takes it in its raglan seams): 'none', the knit stretches over it; 'ease',
+   * the front's side seam is cut longer than the back's and gathered onto it; 'dart', a dart from the side seam toward
+   * her bust takes the extra length. Absent: 'none'.
+   */
+  readonly bustShaping?: 'none' | 'ease' | 'dart';
+  /**
+   * A set-in's body pieces within this far of their armholes (metres, flat) go with the sleeve: bound to her arm or her
+   * trunk, whichever is nearer, as the seam itself is (`place.ts`). Absent: 0, none.
+   */
+  readonly armholeBand?: number;
+  /**
+   * The neckline's own edge rests at this share of its cut length: a neck band sewn on shorter than the opening, as a
+   * tee's rib is, holds the neckline in when her arms pull at it (`garmentCloth.ts`). Absent: 1, no band.
+   */
+  readonly neckBand?: number;
 }
 
 export const TEE_DEFAULTS: TeeParams = Object.freeze({
@@ -63,11 +79,25 @@ export const TEE_DEFAULTS: TeeParams = Object.freeze({
   gusset: 0.5,
   hemY: null,
   sleeveLength: 0.215,
-  neckWidth: 0.20,
+  // R2, the raglan neckline Joshua approved as the default (2026-10-27): 18 cm across with a band at 90%. R0, the
+  // Stage 2 neckline, is neckWidth 0.20 with neckBand 1
+  neckWidth: 0.18,
+  neckBand: 0.9,
   neckDrop: 0.04,
+  // a set-in's armhole band (5 cm): measured on her, arms raised, its worst edge 6.7x -> 1.7x and nothing sunk into her
+  armholeBand: 0.05,
   ease: Object.freeze({ bust: 0.0, waist: 0.04, hip: 0.04, sleeve: 0.07 }),
   armholeDrop: 0.02,
 });
+
+/** A set-in's own neckline defaults: Stage 2's, which was already the rounder and steadier of the two. */
+export const SET_IN_NECK: Pick<TeeParams, 'neckWidth' | 'neckBand'> = Object.freeze({ neckWidth: 0.20, neckBand: 1 });
+
+/** The whole parameter set for `params`: the defaults, a set-in's own neckline, then what `params` says. */
+export function teeParams(params: Partial<TeeParams> = {}): TeeParams {
+  const construction = params.construction ?? TEE_DEFAULTS.construction;
+  return { ...TEE_DEFAULTS, ...(construction === 'setIn' ? SET_IN_NECK : {}), ...params };
+}
 
 /** The gusset's side at gusset = 1, metres (a diamond this wide on each side). */
 export const GUSSET_SIDE = 0.12;
@@ -79,6 +109,12 @@ const RAGLAN_CURVE = 0.012;
 const BACK_NECK_DIP = 0.018;
 /** The raglan meets the neckline this share of the way from the centre to the neckline's side. */
 const RAGLAN_AT = 0.7;
+/** A set-in front's bust shaping takes this share of the length her bust needs above what the plain front gives it. */
+const BUST_LIFT_SHARE = 0.6;
+/** ...at most this much, metres. */
+const BUST_LIFT_MAX = 0.06;
+/** A bust dart's mouth sits this far under the side seam's top, and stops this short of her bust's point, metres. */
+const BUST_DART_BELOW = 0.05, BUST_DART_SHORT = 0.025;
 
 /** The numbers the draft was made from and came out at, for the review sheet. */
 export interface DraftNotes {
@@ -96,6 +132,8 @@ export interface DraftNotes {
   readonly shoulderSeam: number;
   /** How much longer than her height her front (back) is developed from the underarm line to the neckline's side, metres. */
   readonly yokeLift: { readonly front: number; readonly back: number };
+  /** How much a set-in front's bust shaping raised its upper front, metres (0 without shaping). */
+  readonly bustLift: number;
 }
 
 export interface Draft {
@@ -237,7 +275,8 @@ export function draftTee(measure: BodyMeasure, params: TeeParams = TEE_DEFAULTS,
   const swapPM = (n: string) => n.endsWith('P') ? n.slice(0, -1) + 'M' : n.endsWith('M') ? n.slice(0, -1) + 'P' : n;
   const notesW: { y: number; front: number; back: number }[] = [];
   for (const y of [measure.bust.y, measure.waist.y, measure.hip.y, yHem]) notesW.push({ y, front: 2 * halfFront(y), back: 2 * halfBack(y) });
-  let frontLen = 0, backLen = 0, sleeveTop = 0, crown = 0, hemWidth = 0, shoulderSeam = 0;
+  let frontLen = 0, backLen = 0, sleeveTop = 0, crown = 0, hemWidth = 0, shoulderSeam = 0, bustLift = 0, sideEase = 0;
+  let sideSeams: string[] = ['side'];
 
   // the sleeve tube: half-width at a distance below the underarm, from her arm's girths plus ease
   const arm = measure.arms[0], arm2 = measure.arms[1];
@@ -338,13 +377,65 @@ export function draftTee(measure: BodyMeasure, params: TeeParams = TEE_DEFAULTS,
     for (let i = 0; i < 50; i++) { const m = (vlo + vhi) / 2; if (polyLength(armholeOf([uSp, m], frontUnder, creaseF)) < targetF) vlo = m; else vhi = m; }
     const spF: Vec2 = [uSp, (vlo + vhi) / 2];
     const seamLen = dist(neckB[0], spB);
-    const vNeckSideFront = spF[1] + Math.sqrt(Math.max(0, seamLen ** 2 - (uSp - uNeckF) ** 2));
-    const neckF = necklineOf(uNeckF, vNeckSideFront, devF.v(0, vFrontCentre), uNeckF);
-    shoulderSeam = dist(neckF[0], spF);
-    const ahF = armholeOf(spF, frontUnder, creaseF);
+    const vNeckSidePlain = spF[1] + Math.sqrt(Math.max(0, seamLen ** 2 - (uSp - uNeckF) ** 2));
+    // BUST SHAPING: the front above the side seam is raised by `lift` -- armhole, shoulder seam and neckline's side as
+    // they are, only higher -- so her front is that much longer over her bust, and the side seam takes the difference:
+    // gathered onto the back's ('ease') or folded into a dart toward her bust ('dart')
+    const shaping = p.bustShaping ?? 'none';
+    const lift = shaping === 'none' ? 0 : Math.max(0, Math.min(BUST_LIFT_MAX, BUST_LIFT_SHARE * (devF.v(uNeckF, vNeckSideF) - vNeckSidePlain)));
+    bustLift = lift;
+    const up = (q: Vec2): Vec2 => [q[0], q[1] + lift];
+    const spFl = up(spF), underFl = up(frontUnder);
+    const neckF = necklineOf(uNeckF, vNeckSidePlain + lift, devF.v(0, vFrontCentre) + lift, uNeckF);
+    shoulderSeam = dist(neckF[0], spFl);
+    const ahF = armholeOf(spFl, underFl, creaseF);
     frontLen = polyLength(ahF); backLen = polyLength(ahB);
-    const sidesF = [edge('sideP', frontSide, SPACING.side), ...(sG > 0 ? [edge('gusP', gusEdge(frontSide), SPACING.gus)] : []), edge('armholeP', ahF, SPACING.seam), edge('shoulderP', line(spF, neckF[0]), SPACING.seam)];
-    const sidesB = [edge('sideM', backSide, SPACING.side), ...(sG > 0 ? [edge('gusM', gusEdge(backSide), SPACING.gus)] : []), edge('armholeM', ahB, SPACING.seam), edge('shoulderM', line(spB, neckB[0]), SPACING.seam)];
+    let frontSides: PatternEdge[], backSides: PatternEdge[];
+    if (shaping === 'dart' && lift > 0) {
+      // the dart's mouth on the side seam BUST_DART_BELOW under its top; its point BUST_DART_SHORT short of her bust's
+      const yB = yS - BUST_DART_BELOW;
+      const split = (side: Vec2[], at: number): [Vec2[], Vec2[]] => {
+        const lo = side.filter((q) => q[1] < at), hi = side.filter((q) => q[1] > at);
+        const k = side.findIndex((q) => q[1] >= at), a = side[Math.max(0, k - 1)], b = side[Math.max(0, k)];
+        const t = b[1] === a[1] ? 0 : (at - a[1]) / (b[1] - a[1]), m: Vec2 = [a[0] + (b[0] - a[0]) * t, at];
+        return [densify([...lo, m]), densify([m, ...hi])];
+      };
+      const [fLo, fHiRaw] = split(frontSide, yB);
+      // the back's side split where its top part is as long as the front's (their sides slant differently, and the
+      // short top seam would carry all of that difference): the whole side's few millimetres go to the long lower seam
+      let lo = backSide[0][1], hi = yS - 1e-4;
+      for (let k = 0; k < 40; k++) { const mid = (lo + hi) / 2; if (polyLength(split(backSide, mid)[1]) > polyLength(fHiRaw)) lo = mid; else hi = mid; }
+      const [bLo, bHi] = split(backSide, (lo + hi) / 2);
+      const fHi = fHiRaw.map(up);
+      const mouthLo = fLo[fLo.length - 1], mouthHi = fHi[0];
+      // her bust's point: the lateral place her front stands furthest forward at her bust's height
+      let apexX = 0, best = -Infinity;
+      for (let x = 0.03; x <= 0.15; x += 0.0025) { const z = surfaceZ(frontForm, 'front', measure.bust.y, x); if (z > best) { best = z; apexX = x; } }
+      const apex: Vec2 = [acrossFront(frontForm, measure.bust.y, apexX), measure.bust.y];
+      // the point on the mouth's perpendicular through its middle, so the two legs are cut the same length and sew
+      // together; it runs in toward her bust's point and stops BUST_DART_SHORT short of it
+      const mid: Vec2 = [(mouthLo[0] + mouthHi[0]) / 2, (mouthLo[1] + mouthHi[1]) / 2];
+      const ax = mouthHi[0] - mouthLo[0], ay = mouthHi[1] - mouthLo[1], al = Math.hypot(ax, ay) || 1;
+      let nx = ay / al, ny = -ax / al;
+      if (nx * (apex[0] - mid[0]) + ny * (apex[1] - mid[1]) < 0) { nx = -nx; ny = -ny; }
+      const reach = Math.max(0.02, Math.abs(nx * (apex[0] - mid[0]) + ny * (apex[1] - mid[1])) - BUST_DART_SHORT);
+      const point: Vec2 = [mid[0] + nx * reach, mid[1] + ny * reach];
+      frontSides = [edge('sideLowP', fLo, SPACING.side), edge('dartLowP', line(mouthLo, point), SPACING.gus), edge('dartHighP', line(point, mouthHi), SPACING.gus), edge('sideHighP', fHi, SPACING.side)];
+      backSides = [edge('sideLowM', bLo, SPACING.side), edge('sideHighM', bHi, SPACING.side)];
+    } else if (shaping === 'ease' && lift > 0) {
+      // the whole front side stretched over its length to rise by `lift`: gathered onto the back's side seam
+      const span = frontSide[frontSide.length - 1][1] - yHem;
+      frontSides = [edge('sideP', frontSide.map(([u, v]) => [u, v + lift * (v - yHem) / Math.max(1e-6, span)] as Vec2), SPACING.side)];
+      backSides = [edge('sideM', backSide, SPACING.side)];
+    } else {
+      frontSides = [edge('sideP', frontSide, SPACING.side)];
+      backSides = [edge('sideM', backSide, SPACING.side)];
+    }
+    const sidesF = [...frontSides, ...(sG > 0 ? [edge('gusP', line(underFl, [underFl[0], underFl[1] - sG]).reverse(), SPACING.gus)] : []), edge('armholeP', ahF, SPACING.seam), edge('shoulderP', line(spFl, neckF[0]), SPACING.seam)];
+    const sidesB = [...backSides, ...(sG > 0 ? [edge('gusM', gusEdge(backSide), SPACING.gus)] : []), edge('armholeM', ahB, SPACING.seam), edge('shoulderM', line(spB, neckB[0]), SPACING.seam)];
+    sideSeams = shaping === 'dart' && lift > 0 ? ['sideLow', 'sideHigh'] : ['side'];
+    if (shaping === 'dart' && lift > 0) for (const s of ['P', 'M'] as const) seams.push({ name: `bustDart${s}`, a: { piece: 'front', edge: `dartLow${s}` }, b: { piece: 'front', edge: `dartHigh${s}` } });
+    sideEase = shaping === 'ease' ? lift / Math.max(1e-6, polyLength(backSide)) : 0;
     pieces.push(mirrored('front', 'torso', { hem: edge('hem', frontHem, SPACING.hem), sides: sidesF, top: edge('neck', neckF, SPACING.neck) }, swapPM));
     pieces.push(mirrored('back', 'torso', { hem: edge('hem', backHem, SPACING.hem), sides: sidesB, top: edge('neck', neckB, SPACING.neck) }, swapPM));
     // the cap: each half from its underarm corner to the crown (0, h), drawn to its armhole's length
@@ -404,7 +495,7 @@ export function draftTee(measure: BodyMeasure, params: TeeParams = TEE_DEFAULTS,
     }
   }
   for (const s of ['P', 'M'] as const) {
-    seams.push({ name: `side${s}`, a: { piece: 'front', edge: `side${s}` }, b: { piece: 'back', edge: `side${s}` } });
+    for (const side of sideSeams) seams.push({ name: `${side}${s}`, a: { piece: 'front', edge: `${side}${s}` }, b: { piece: 'back', edge: `${side}${s}` }, ...(side === 'side' && sideEase > 0 ? { ease: sideEase } : {}) });
     seams.push({ name: `underarm${s}`, a: { piece: `sleeve${s}`, edge: 'underBack' }, b: { piece: `sleeve${s}`, edge: 'underFront' } });
   }
 
@@ -415,6 +506,7 @@ export function draftTee(measure: BodyMeasure, params: TeeParams = TEE_DEFAULTS,
       frontRaglanOrArmhole: frontLen, backRaglanOrArmhole: backLen, sleeveTop, sleeveCrown: crown, sleeveHemWidth: hemWidth,
       gussetSide: sG, shoulderSeam: shoulderSeam || shoulderLen,
       yokeLift: { front: devF.lift(uNeckF, vNeckSideF), back: devB.lift(uNeckB, vNeckSideB) },
+      bustLift,
     },
     develop: { front: devF, back: devB, xOfU },
   };

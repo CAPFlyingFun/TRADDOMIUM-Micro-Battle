@@ -515,10 +515,10 @@ export function validate(garment: SewnGarment, pattern: Pattern, meshes: Readonl
     const lengthB = eb ? polylineLength(eb.points) : 0;
     const points = meshes.get(seam.a.piece)?.edgePoints.get(seam.a.edge)?.length ?? 0;
     const mean = (lengthA + lengthB) / 2;
-    if (mean > 0 && Math.abs(lengthA - lengthB) / mean > EASE_LIMIT) {
+    if (mean > 0 && Math.abs(lengthA - lengthB) / mean > EASE_LIMIT + (seam.ease ?? 0)) {
       problems.push(
         `seam '${seam.name}': its sides differ by ${((Math.abs(lengthA - lengthB) / mean) * 100).toFixed(1)}% ` +
-          `(${(lengthA * 100).toFixed(1)} cm against ${(lengthB * 100).toFixed(1)} cm), more ease than ${EASE_LIMIT * 100}%`,
+          `(${(lengthA * 100).toFixed(1)} cm against ${(lengthB * 100).toFixed(1)} cm), more ease than ${((EASE_LIMIT + (seam.ease ?? 0)) * 100).toFixed(0)}%`,
       );
     }
     return { name: seam.name, lengthA, lengthB, points };

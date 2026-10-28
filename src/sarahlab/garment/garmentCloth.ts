@@ -17,6 +17,9 @@ import { ClothSim, type Capsules, type ClothSettings, type ClothStepStats } from
 import { ClothSkin } from '../clothSkin';
 import { copyContacts, createContacts, type ClothBinding, type SkinContacts } from '../clothTypes';
 import type { SewnGarment } from './types';
+import type { DetailPoints } from '../detailSpots';
+import type { ClothDetailState } from '../clothDetail';
+import { DOME_MARGIN, GarmentDetail } from './garmentDetail';
 
 /** The neckline band held: fully within PIN_IN of the opening, easing to nothing at PIN_OUT (metres along the cloth). */
 const PIN_IN = 0.012, PIN_OUT = 0.03;
@@ -25,6 +28,45 @@ const EDGE_MASS = 3;
 /** After a (re)start: this long at no less than this damping, so the cloth settles instead of whipping. */
 const WARM_SECONDS = 0.4, WARM_DAMPING = 25;
 const SMOOTHING = 20;
+/**
+ * The body pieces are not held to skin her arm bones carry more than this of (clothSkin.ts looseOverArm): they bridge
+ * her armpit instead of being dragged up into it as she raises her arms. Measured in the room, arms raised, on the
+ * raglan: the worst edge fell from 6-7x to 1.9x at most, nothing showing through her. Not for a set-in (see `armpitRule`).
+ */
+export const LOOSE_OVER_ARM = 0.3;
+/**
+ * A particle further than this from its contact on her (metres) has its nearest skin looked for again round it
+ * (clothSkin.ts `rescueOver`): the walk had stopped across a fold under her breast at 100% belly with her arms up, 4 to
+ * 6 cm off, while her skin showed through the cloth.
+ */
+export const RESCUE_OVER = 0.02;
+/**
+ * The garment's bend compliance: ten times stiffer than the room's tee (1e-4), so its creases round over several rows
+ * instead of breaking sharp across one edge (Joshua, 2026-10-27: "the shirt needs smooth creases"; a hard limit on the
+ * fold was tried and dropped at his word, "shirts don't have limits"). Measured on her in node: the 99th percentile fold between neighbouring triangles fell
+ * from 65-83° to 54-69°, at no cost; ten times stiffer again sank her tee into her and tore it.
+ */
+export const BEND_COMPLIANCE = 1e-5;
+/**
+ * No two particles of the garment come closer than this (metres; clothSim.ts `selfDistance`): where it folds onto itself
+ * its layers lie on each other instead of crossing (Joshua, 2026-10-27: "a slight offset or collision ... so they don't
+ * cross").
+ */
+/** The most and least one refit scales an edge's pattern length by (a broken reading of her shape cannot fling the cloth). */
+export const FIT_MIN = 0.5;
+export const FIT_MAX = 3;
+export const SELF_DISTANCE = 0.005;
+
+
+/** The sewn sheet's particles' neighbours along its edges, CSR (for clothSkin.ts `neighbours`). */
+function neighboursOf(sewn: SewnGarment): { start: Uint32Array; list: Uint32Array } {
+  const n = sewn.count, E = sewn.edges, start = new Uint32Array(n + 1), list = new Uint32Array(E.length);
+  for (let e = 0; e < E.length; e++) start[E[e] + 1]++;
+  for (let i = 0; i < n; i++) start[i + 1] += start[i];
+  const at = start.slice(0, n);
+  for (let e = 0; e < E.length; e += 2) { list[at[E[e]]++] = E[e + 1]; list[at[E[e + 1]]++] = E[e]; }
+  return { start, list };
+}
 
 export interface GarmentClothOptions {
   readonly body: THREE.SkinnedMesh;
@@ -46,6 +88,19 @@ export interface GarmentClothOptions {
    * nipples under a tee with no ease -- the cloth is drawn over it; the simulation is untouched. Default 0.
    */
   readonly drawLift?: number;
+  /** The neckline's own edge rests at this share of its pattern length (a neck band; default 1, none). */
+  readonly neckBand?: number;
+  /**
+   * Whether the body pieces bridge her armpit (`LOOSE_OVER_ARM`). Default true. A set-in turns it off for now: its back
+   * piece lies over the back of her shoulder up to the armhole, skin her arm carries, and without a floor there her skin
+   * showed through at the back of each armhole; with the rule off it keeps Stage 2's small pinch at the back of the
+   * armpit when her arms go up (follow-up review, 2026-10-27).
+   */
+  readonly armpitRule?: boolean;
+  /** Her navel and nipples on her body (`detailSpots.ts`): domed over so they never come through it. Absent: none. */
+  readonly detail?: DetailPoints;
+  /** False: `detail` is followed (for `detailGap`) but not domed over -- a probe's before picture. Default true. */
+  readonly detailDomes?: boolean;
 }
 
 export interface GarmentClothStats {
@@ -69,12 +124,26 @@ export class GarmentCloth {
   private sim: ClothSim;
   private before: SkinContacts;
   private after: SkinContacts;
+  /** Her navel and nipples, domed over (`detail`); null without. */
+  private readonly detail: GarmentDetail | null;
   private primed = false;
   private warm = WARM_SECONDS;
   private readonly position: THREE.BufferAttribute;
   private readonly normal: THREE.BufferAttribute;
   private readonly options: GarmentClothOptions;
   private readonly restLengths: Map<number, number>;
+  /**
+   * CUT FOR HER AS SHE IS SHAPED NOW, as the cloth tee is (Joshua, 2026-10-27: "both should behave exactly the same
+   * way"; `ClothSim.setRest`: "the tee is cut for the body it is on (a maternity tee is), rather than a 100% tee pulled
+   * over 200%"). Each edge's pattern length is scaled by how far her skin under its two ends has stretched since the
+   * garment was tailored: `fit` per edge (by pair key), `fitBase` what it was when `baseShape` -- her shape under the
+   * binding then -- was taken (the binding changes when the garment settles, and the scale it had carries over).
+   * Her shape, never her pose: `ClothSkin.restShape`.
+   */
+  private readonly fit = new Map<number, number>();
+  private fitBase = new Map<number, number>();
+  private baseShape: Float32Array;
+  private restShiftNow: Float32Array | null = null;
   private readonly mass: Float32Array;
   private pin: Float32Array;
   private capsBefore: Capsules | null = null;
@@ -87,10 +156,9 @@ export class GarmentCloth {
     this.options = options;
     const { sewn, body } = options, n = sewn.count;
     this.sewn = sewn;
-    this.skin = new ClothSkin(body, options.binding, { thickness: options.standOff, armBones: options.armBones, trunkOnly: options.trunkOnly });
-    // the pattern's rest lengths, world units
-    this.restLengths = new Map();
-    for (let e = 0; e < sewn.edgeRest.length; e++) this.restLengths.set(sewn.edges[e * 2] * n + sewn.edges[e * 2 + 1], sewn.edgeRest[e] * options.unitsPerMetre);
+    const restP = body.geometry.getAttribute('position');
+    this.detail = options.detail ? new GarmentDetail(options.detail, n, options.detailDomes !== false, { count: restP.count, at: (v, o) => { o[0] = restP.getX(v); o[1] = restP.getY(v); o[2] = restP.getZ(v); } }, sewn.triangles) : null;
+    this.skin = new ClothSkin(body, options.binding, { thickness: options.standOff, armBones: options.armBones, trunkOnly: options.trunkOnly, ...(options.armpitRule === false ? {} : { looseOverArm: LOOSE_OVER_ARM }), rescueOver: RESCUE_OVER * options.unitsPerMetre, neighbours: neighboursOf(sewn) });
     // which openings are the neck (the one whose edges are named 'neck'), and the hems and cuffs
     this.mass = new Float32Array(n).fill(1);
     const neck: number[] = [];
@@ -98,7 +166,18 @@ export class GarmentCloth {
       if (o.edges.some((e) => e.endsWith(':neck'))) neck.push(...o.particles);
       else for (const p of o.particles) this.mass[p] = EDGE_MASS;
     }
+    // the pattern's rest lengths, world units; the neckline's own edge at `neckBand` of it (a band sewn on shorter than
+    // the opening, as a tee's rib is, holds the neckline in when her arms pull at it)
+    const onNeck = new Uint8Array(n);
+    for (const p of neck) onNeck[p] = 1;
+    const band = options.neckBand ?? 1;
+    this.restLengths = new Map();
+    for (let e = 0; e < sewn.edgeRest.length; e++) {
+      const a = sewn.edges[e * 2], b = sewn.edges[e * 2 + 1];
+      this.restLengths.set(a * n + b, sewn.edgeRest[e] * options.unitsPerMetre * (onNeck[a] && onNeck[b] ? band : 1));
+    }
     this.neckDistance = distanceAlong(sewn, neck);
+    this.baseShape = this.skin.restShape(new Float32Array(n * 3));
     this.pin = new Float32Array(n);
     // drawing
     const nv = sewn.vertexParticle.length, g = new THREE.BufferGeometry();
@@ -129,8 +208,8 @@ export class GarmentCloth {
     this.skin.initial(start);
     const sim = new ClothSim({
       count: n, triangles: sewn.triangles, rest: start, pin: this.pin, mass: this.mass,
-      restLength: (a, b) => this.restLengths.get(a < b ? a * n + b : b * n + a), bendFlat: true, capsuleMask: trunkOnly,
-    }, { ...(this.sim?.settings ?? settings) });
+      restLength: (a, b) => this.restOf(a, b), bendFlat: true, capsuleMask: trunkOnly,
+    }, { ...(this.sim?.settings ?? { selfDistance: SELF_DISTANCE * this.options.unitsPerMetre, ...settings, bendCompliance: BEND_COMPLIANCE }) });
     sim.reset(start);
     this.primed = false; this.warm = WARM_SECONDS;
     return sim;
@@ -142,6 +221,40 @@ export class GarmentCloth {
    * it the stretched neckline would slide down her back before anything held it (Stage 2b: 3 to 7 cm).
    */
   weightless = false;
+
+  /** An edge's pattern length now, world units: as drafted, cut for her shape now (`fit`). Undefined for a pair that is no edge. */
+  private restOf(a: number, b: number): number | undefined {
+    const k = a < b ? a * this.sewn.count + b : b * this.sewn.count + a, L = this.restLengths.get(k);
+    return L === undefined ? undefined : L * (this.fit.get(k) ?? 1);
+  }
+
+  /**
+   * Her BUILD's rest shift (`ClothSkin.restShift`, the room's `buildShift`), for the pattern's reading of her shape.
+   * `rebase`: her shape as it stands is the one the garment was tailored for (the room sets it as it puts the garment on).
+   */
+  setRestShift(shift: Float32Array | null, rebase = false): void {
+    this.restShiftNow = shift;
+    this.skin.restShift = shift;
+    if (rebase) { this.baseShape = this.skin.restShape(new Float32Array(this.sewn.count * 3)); this.fit.clear(); this.fitBase.clear(); }
+  }
+
+  /**
+   * Cut it again for her as she is shaped now (her belly, her build; never her pose), as the room cuts the cloth tee
+   * (`ClothShirt.refit`): every edge's pattern length scaled by how far her skin under it has stretched since it was
+   * tailored, the cloth kept where it lies.
+   */
+  refit(): void {
+    const n = this.sewn.count, now = this.skin.restShape(new Float32Array(n * 3)), B = this.baseShape;
+    const len = (P: Float32Array, a: number, b: number) => Math.hypot(P[b * 3] - P[a * 3], P[b * 3 + 1] - P[a * 3 + 1], P[b * 3 + 2] - P[a * 3 + 2]);
+    for (const k of this.restLengths.keys()) {
+      const a = Math.floor(k / n), b = k % n, lb = len(B, a, b), ln = len(now, a, b);
+      const r = lb > 1e-6 && Number.isFinite(ln) ? Math.min(FIT_MAX, Math.max(FIT_MIN, ln / lb)) : 1;
+      this.fit.set(k, (this.fitBase.get(k) ?? 1) * r);
+    }
+    const keep = this.sim.positions.slice(0, n * 3);
+    this.sim = this.build();
+    this.sim.reset(keep);
+  }
 
   /** Lay the cloth on her again where it is bound (a pose switch: otherwise it would be flung). */
   restart(): void { this.sim = this.build(); }
@@ -165,13 +278,19 @@ export class GarmentCloth {
 
   private rebind(binding: ClothBinding): void {
     // ClothSkin keeps its binding; a new one means a new reader over the same body
-    this.skin = new ClothSkin(this.options.body, binding, { thickness: this.skin.thickness, armBones: this.options.armBones, trunkOnly: this.options.trunkOnly });
+    this.skin = new ClothSkin(this.options.body, binding, { thickness: this.skin.thickness, armBones: this.options.armBones, trunkOnly: this.options.trunkOnly, ...(this.options.armpitRule === false ? {} : { looseOverArm: LOOSE_OVER_ARM }), rescueOver: RESCUE_OVER * this.options.unitsPerMetre, neighbours: neighboursOf(this.sewn) });
+    this.skin.restShift = this.restShiftNow;
+    // her shape is read through the new binding from here on: the scale it has now carries over
+    this.baseShape = this.skin.restShape(new Float32Array(this.sewn.count * 3));
+    this.fitBase = new Map(this.fit);
   }
 
   /** One frame. `capsules`: her arms (world), this frame; the previous frame's are interpolated from. */
   frame(dt: number, capsules?: Capsules): void {
     const n = this.sewn.count, x = this.sim.positions;
     const skinMs = this.skin.update(x.subarray(0, n * 3), this.after);
+    // her navel and nipples: domes over them stand in for her skin (garmentDetail.ts, the cloth tee's method)
+    this.detail?.follow(this.skin, x, this.after, this.before, n, !this.primed);
     if (!this.primed) { copyContacts(this.after, this.before); this.primed = true; }
     const damping = this.sim.settings.damping;
     if (this.warm > 0) { this.warm -= dt; this.sim.settings.damping = Math.max(damping, WARM_DAMPING); }
@@ -208,16 +327,180 @@ export class GarmentCloth {
    * says (all when absent): min, max, the 95th percentile, and how many are past 1.4 and 1.6.
    */
   strain(where?: (particle: number) => boolean): { min: number; max: number; p95: number; over14: number; over16: number; edges: number } {
-    const x = this.sim.positions, E = this.sim.edges, k = this.sim.settings.restScale, n = this.sewn.count, r: number[] = [];
+    const x = this.sim.positions, E = this.sim.edges, k = this.sim.settings.restScale, r: number[] = [];
     for (let e = 0; e < E.length; e += 2) {
       const a = E[e], b = E[e + 1];
       if (where && !(where(a) && where(b))) continue;
-      const rest = (this.restLengths.get(a < b ? a * n + b : b * n + a) ?? 0) * k;
+      const rest = (this.restOf(a, b) ?? 0) * k;
       if (!(rest > 0)) continue;
       r.push(Math.hypot(x[b * 3] - x[a * 3], x[b * 3 + 1] - x[a * 3 + 1], x[b * 3 + 2] - x[a * 3 + 2]) / rest);
     }
     r.sort((p, q) => p - q);
     return { min: r[0] ?? 0, max: r[r.length - 1] ?? 0, p95: r[Math.floor(r.length * 0.95)] ?? 0, over14: r.filter((v) => v > 1.4).length, over16: r.filter((v) => v > 1.6).length, edges: r.length };
+  }
+
+  /**
+   * The `k` most stretched edges now (length over rest), with their particles, where the first one is (world), how far
+   * each end stands off her skin at its last contact (world units; below 0, inside her) and the floor it was given: for a
+   * probe.
+   */
+  worst(k: number): { ratio: number; a: number; b: number; at: [number, number, number]; off: [number, number]; floor: [number, number] }[] {
+    const x = this.sim.positions, E = this.sim.edges, scale = this.sim.settings.restScale, r: { ratio: number; a: number; b: number; at: [number, number, number]; off: [number, number]; floor: [number, number] }[] = [];
+    // how far each end stands off her skin along her normal at its last contact (below 0: inside her), and its floor
+    const c = this.before, off = (p: number) => (x[p * 3] - c.point[p * 3]) * c.normal[p * 3] + (x[p * 3 + 1] - c.point[p * 3 + 1]) * c.normal[p * 3 + 1] + (x[p * 3 + 2] - c.point[p * 3 + 2]) * c.normal[p * 3 + 2];
+    for (let e = 0; e < E.length; e += 2) {
+      const a = E[e], b = E[e + 1], rest = (this.restOf(a, b) ?? 0) * scale;
+      if (!(rest > 0)) continue;
+      const ratio = Math.hypot(x[b * 3] - x[a * 3], x[b * 3 + 1] - x[a * 3 + 1], x[b * 3 + 2] - x[a * 3 + 2]) / rest;
+      if (r.length < k || ratio > r[r.length - 1].ratio) { r.push({ ratio, a, b, at: [x[a * 3], x[a * 3 + 1], x[a * 3 + 2]], off: [off(a), off(b)], floor: [c.standOff[a], c.standOff[b]] }); r.sort((p, q) => q.ratio - p.ratio); if (r.length > k) r.pop(); }
+    }
+    return r;
+  }
+
+  /** The `k` particles furthest inside her skin now (stand-off below 0, world units), where they are and their floors: for a probe. */
+  deepest(k: number): { p: number; off: number; floor: number; at: [number, number, number] }[] {
+    const x = this.sim.positions, c = this.before, r: { p: number; off: number; floor: number; at: [number, number, number] }[] = [];
+    for (let p = 0; p < this.sewn.count; p++) {
+      const o = (x[p * 3] - c.point[p * 3]) * c.normal[p * 3] + (x[p * 3 + 1] - c.point[p * 3 + 1]) * c.normal[p * 3 + 1] + (x[p * 3 + 2] - c.point[p * 3 + 2]) * c.normal[p * 3 + 2];
+      if (!(o < 0)) continue;
+      if (r.length < k || o < r[r.length - 1].off) { r.push({ p, off: o, floor: c.standOff[p], at: [x[p * 3], x[p * 3 + 1], x[p * 3 + 2]] }); r.sort((a, b) => a.off - b.off); if (r.length > k) r.pop(); }
+    }
+    return r;
+  }
+
+  /** How far particle `p` is from its last contact on her skin (world units): for a probe. */
+  contactOf(p: number): number {
+    const x = this.sim.positions, c = this.before;
+    return Math.hypot(x[p * 3] - c.point[p * 3], x[p * 3 + 1] - c.point[p * 3 + 1], x[p * 3 + 2] - c.point[p * 3 + 2]);
+  }
+
+  /**
+   * How sharply the sheet folds now: the angle between every two neighbouring triangles' planes (degrees), its largest,
+   * 99th percentile and how many pass `over` degrees, everywhere or only where `where` holds for all four corners: for
+   * a probe.
+   */
+  folds(over = 70, where?: (particle: number) => boolean): { max: number; p99: number; over: number; hinges: number } {
+    const T = this.sewn.triangles, x = this.sim.positions, nT = T.length / 3, N = new Float32Array(nT * 3);
+    for (let t = 0; t < nT; t++) {
+      const a = T[t * 3] * 3, b = T[t * 3 + 1] * 3, c = T[t * 3 + 2] * 3;
+      const ux = x[b] - x[a], uy = x[b + 1] - x[a + 1], uz = x[b + 2] - x[a + 2], vx = x[c] - x[a], vy = x[c + 1] - x[a + 1], vz = x[c + 2] - x[a + 2];
+      const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx, l = Math.hypot(nx, ny, nz) || 1;
+      N[t * 3] = nx / l; N[t * 3 + 1] = ny / l; N[t * 3 + 2] = nz / l;
+    }
+    const n = this.sewn.count, first = new Map<number, number>(), angles: number[] = [];
+    for (let t = 0; t < nT; t++) for (let k = 0; k < 3; k++) {
+      const p = T[t * 3 + k], q = T[t * 3 + (k + 1) % 3], key = p < q ? p * n + q : q * n + p;
+      const u = first.get(key);
+      if (u === undefined) { first.set(key, t); continue; }
+      if (where) { let ok = true; for (const v of [T[t * 3], T[t * 3 + 1], T[t * 3 + 2], T[u * 3], T[u * 3 + 1], T[u * 3 + 2]]) if (!where(v)) ok = false; if (!ok) continue; }
+      const d = N[t * 3] * N[u * 3] + N[t * 3 + 1] * N[u * 3 + 1] + N[t * 3 + 2] * N[u * 3 + 2];
+      angles.push((Math.acos(Math.max(-1, Math.min(1, d))) * 180) / Math.PI);
+    }
+    angles.sort((p, q) => p - q);
+    return { max: angles[angles.length - 1] ?? 0, p99: angles[Math.floor(angles.length * 0.99)] ?? 0, over: angles.filter((v) => v > over).length, hinges: angles.length };
+  }
+
+  /**
+   * How far the garment stands off each of her navel and nipples now, along the detail's axis, from its tip: the least
+   * over the particles within `DETAIL_LOOK.domeIn` of the inner ring's radius of the axis -- the dome's flat top, where
+   * the cloth must stand above the tip (world units; below 0, the tip is through the cloth). For a probe; null without
+   * `detail`.
+   */
+  /** BREAST and NAVEL DETAIL (0 hidden, 1 all of it): how the cloth lies over her navel and nipples, set by the room. */
+  set detailKeep(keep: { nipple: number; navel: number }) { if (this.detail) this.detail.keep = keep; }
+
+  /** What the room draws through the fabric at BREAST and NAVEL DETAIL (`clothDetail.ts`), as the cloth tee; null without `detail`. */
+  /** The detail softening (`GarmentDetail.shade`) and each detail's spacing and widening now: for a probe. */
+  detailShade(patch?: Partial<{ spread: number; widen: number; slope: number; grow: number }>): { shade: { spread: number; widen: number; slope: number; grow?: number }; spacing: number[]; widened: number[] } | null {
+    if (!this.detail) return null;
+    if (patch) this.detail.shade = { ...this.detail.shade, ...patch };
+    return { shade: this.detail.shade, spacing: [...this.detail.spacing], widened: [...this.detail.widened] };
+  }
+
+  detailShading(keep: { readonly nipple: number; readonly navel: number }): ClothDetailState | null {
+    // softened by how far the sheet stands off each tip beyond lying on it (her skin's stand-off and the dome's margin)
+    return this.detail ? this.detail.shading(keep, this.detailGap() ?? undefined, this.skin.thickness + DOME_MARGIN) : null;
+  }
+
+  /**
+   * The sheet's height over detail `i` (0 her navel, 1-2 her nipples) along its axis, measured from the tip, at radius
+   * r out from the tip's axis in 8 directions round it, for r = 0 to 3 cm in quarters: [r, min, max] (world units;
+   * NaN where no triangle crosses). For a probe of the dome's shape.
+   */
+  detailProfile(i = 0): number[][] | null {
+    if (!this.detail) return null;
+    const d = i === 0 ? this.detail.posed.navel : this.detail.posed.nipples[i - 1], t = this.detail.tips[i];
+    if (!d || !t) return null;
+    const x = this.sim.positions, T = this.sewn.triangles, [nx, ny, nz] = d.n;
+    // two directions square to the axis
+    let ux = -nz, uy = 0, uz = nx; if (Math.hypot(ux, uy, uz) < 0.1) { ux = 0; uy = nz; uz = -ny; }
+    const ul = Math.hypot(ux, uy, uz); ux /= ul; uy /= ul; uz /= ul;
+    const vx = ny * uz - nz * uy, vy = nz * ux - nx * uz, vz = nx * uy - ny * ux;
+    const cross = (ox: number, oy: number, oz: number): number => {
+      let best = NaN;
+      for (let k = 0; k < T.length; k += 3) {
+        const a = T[k] * 3, b = T[k + 1] * 3, c = T[k + 2] * 3;
+        if ((x[a] - ox) ** 2 + (x[a + 1] - oy) ** 2 + (x[a + 2] - oz) ** 2 > 25) continue;
+        const e1x = x[b] - x[a], e1y = x[b + 1] - x[a + 1], e1z = x[b + 2] - x[a + 2], e2x = x[c] - x[a], e2y = x[c + 1] - x[a + 1], e2z = x[c + 2] - x[a + 2];
+        const px = ny * e2z - nz * e2y, py = nz * e2x - nx * e2z, pz = nx * e2y - ny * e2x, det = e1x * px + e1y * py + e1z * pz;
+        if (Math.abs(det) < 1e-12) continue;
+        const inv = 1 / det, tx = ox - x[a], ty = oy - x[a + 1], tz = oz - x[a + 2], u = (tx * px + ty * py + tz * pz) * inv;
+        if (u < 0 || u > 1) continue;
+        const qx = ty * e1z - tz * e1y, qy = tz * e1x - tx * e1z, qz = tx * e1y - ty * e1x, v = (nx * qx + ny * qy + nz * qz) * inv;
+        if (v < 0 || u + v > 1) continue;
+        const h = (e2x * qx + e2y * qy + e2z * qz) * inv;
+        if (Number.isNaN(best) || Math.abs(h) < Math.abs(best)) best = h;
+      }
+      return best;
+    };
+    const out: number[][] = [];
+    for (let r = 0; r <= 3.0001; r += 0.25) {
+      let lo = Infinity, hi = -Infinity;
+      for (let k = 0; k < 8; k++) {
+        const ang = (k * Math.PI) / 4, cx = Math.cos(ang) * r, sy = Math.sin(ang) * r;
+        const h = cross(t.at[0] + ux * cx + vx * sy, t.at[1] + uy * cx + vy * sy, t.at[2] + uz * cx + vz * sy);
+        if (Number.isFinite(h)) { lo = Math.min(lo, h); hi = Math.max(hi, h); }
+      }
+      out.push([r, lo, hi]);
+    }
+    return out;
+  }
+
+  detailGap(): { navel: number; nipples: number[] } | null {
+    if (!this.detail) return null;
+    // the SHEET over each tip, not its particles: the line through the tip along the detail's axis, met by the sheet's
+    // triangles (Möller-Trumbore); the gap is the nearest crossing's height above the tip (below 0, the tip is through
+    // it). A detail's flat top can lie between particles, so a measure of the particles alone could miss the hole.
+    const x = this.sim.positions, T = this.sewn.triangles;
+    const gap = (d: { c: number[]; n: number[]; rho: number }) => {
+      const [ox, oy, oz] = d.c, [dx, dy, dz] = d.n, reach2 = (3 * d.rho) ** 2;
+      let best = Infinity;
+      for (let t = 0; t < T.length; t += 3) {
+        const a = T[t] * 3, b = T[t + 1] * 3, c = T[t + 2] * 3;
+        if ((x[a] - ox) ** 2 + (x[a + 1] - oy) ** 2 + (x[a + 2] - oz) ** 2 > reach2) continue;
+        const e1x = x[b] - x[a], e1y = x[b + 1] - x[a + 1], e1z = x[b + 2] - x[a + 2], e2x = x[c] - x[a], e2y = x[c + 1] - x[a + 1], e2z = x[c + 2] - x[a + 2];
+        const px = dy * e2z - dz * e2y, py = dz * e2x - dx * e2z, pz = dx * e2y - dy * e2x, det = e1x * px + e1y * py + e1z * pz;
+        if (Math.abs(det) < 1e-12) continue;
+        const inv = 1 / det, tx = ox - x[a], ty = oy - x[a + 1], tz = oz - x[a + 2], u = (tx * px + ty * py + tz * pz) * inv;
+        if (u < 0 || u > 1) continue;
+        const qx = ty * e1z - tz * e1y, qy = tz * e1x - tx * e1z, qz = tx * e1y - ty * e1x, v = (dx * qx + dy * qy + dz * qz) * inv;
+        if (v < 0 || u + v > 1) continue;
+        const h = (e2x * qx + e2y * qy + e2z * qz) * inv;
+        if (Math.abs(h) < Math.abs(best)) best = h;
+      }
+      return best;
+    };
+    // measured from each detail's TIP (the tallest vertex around its centre), on the axis through it
+    const p = this.detail.posed, tips = this.detail.tips;
+    return { navel: gap({ ...p.navel, c: tips[0].at }), nipples: p.nipples.map((d, i) => gap({ ...d, c: tips[i + 1].at })) };
+  }
+
+
+  /** The sheet's unit normals now, one per particle (world), each turned to face away from her skin: for a probe. */
+  drawNormals(): Float32Array {
+    const N = this.sim.normals().slice(), c = this.before.normal;
+    for (let p = 0; p < this.sewn.count; p++) if (N[p * 3] * c[p * 3] + N[p * 3 + 1] * c[p * 3 + 1] + N[p * 3 + 2] * c[p * 3 + 2] < 0) { N[p * 3] = -N[p * 3]; N[p * 3 + 1] = -N[p * 3 + 1]; N[p * 3 + 2] = -N[p * 3 + 2]; }
+    return N;
   }
 
   /** The particles' positions now (world, 3 each): for a probe. */

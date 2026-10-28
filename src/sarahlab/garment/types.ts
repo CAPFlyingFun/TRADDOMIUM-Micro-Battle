@@ -65,7 +65,13 @@ export interface SeamSide { readonly piece: string; readonly edge: string }
  * first), point for point: that is how two pieces sewn right side out meet. The two may differ in length (ease): the
  * welded edge's rest length is the mean of the two.
  */
-export interface Seam { readonly name: string; readonly a: SeamSide; readonly b: SeamSide }
+export interface Seam {
+  readonly name: string;
+  readonly a: SeamSide;
+  readonly b: SeamSide;
+  /** Ease the seam is cut with on purpose (a longer side gathered onto a shorter one), as a share of its length; 0 if absent. */
+  readonly ease?: number;
+}
 
 export interface Pattern {
   readonly pieces: readonly PatternPiece[];

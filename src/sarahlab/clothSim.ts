@@ -113,6 +113,14 @@ export interface ClothSettings {
    * shoulder, under her bust) every direction is "across" and this is the whole grip.
    */
   frictionAcross: number;
+  /**
+   * World units: no two particles of the cloth come closer than this (the cloth's own thickness, twice), so where it
+   * folds onto itself its layers lie on each other instead of passing through (Joshua, 2026-10-27: "fix ... with a
+   * slight offset or collision ... so they don't cross"). Pairs are found in a grid of this size once a step, on its
+   * last substep, before her skin and the capsules, which have the last word (every substep cost five times as much,
+   * for nothing a fold needed: one forms over frames). Absent or 0: none (the room's tee).
+   */
+  selfDistance?: number;
 }
 
 export interface ClothStepStats {
@@ -124,6 +132,8 @@ export interface ClothStepStats {
   readonly contacts: number;
   /** Particles a capsule pushed in the step's last substep. */
   readonly capsuleContacts: number;
+  /** Pairs of the cloth pushed apart (`selfDistance`) in the step (on its last substep). */
+  readonly selfContacts: number;
   /** The largest push out of her skin in any substep of the step, world units. */
   readonly deepest: number;
 }
@@ -176,10 +186,12 @@ const UNREACHED = 0x7fffffff;
 const now: () => number = () => globalThis.performance?.now() ?? Date.now();
 
 /** Mutable behind the readonly face `step` hands out: one object, reused, so a step allocates nothing. */
+/** `selfDistance`'s hashed grid: this many chains (a power of two). */
+const SELF_TABLE = 1 << 14;
 /** Numbers a substep keeps per capsule (`step` 6b). */
 const CAPSULE_STRIDE = 14;
 
-interface StatsSlot { ms: number; substeps: number; contacts: number; deepest: number; capsuleContacts: number }
+interface StatsSlot { ms: number; substeps: number; contacts: number; deepest: number; capsuleContacts: number; selfContacts: number }
 
 export class ClothSim {
   /** May be changed between steps; read afresh at the start of every step. */
@@ -205,7 +217,10 @@ export class ClothSim {
   private readonly limitSide: Uint8Array;
   private readonly bendRest: Float32Array;
   private normalsBuffer: Float32Array | null = null;
-  private readonly stats: StatsSlot = { ms: 0, substeps: 0, contacts: 0, deepest: 0, capsuleContacts: 0 };
+  private readonly stats: StatsSlot = { ms: 0, substeps: 0, contacts: 0, deepest: 0, capsuleContacts: 0, selfContacts: 0 };
+  /** `selfDistance`'s grid: the first particle in each cell's chain, and each particle's next. */
+  private selfHead: Int32Array | null = null;
+  private selfNext: Int32Array | null = null;
   private readonly capsuleMask: Uint8Array | null;
   private capsuleScratch = new Float64Array(0);
 
@@ -335,7 +350,7 @@ export class ClothSim {
   step(dt: number, before: SkinContacts, after: SkinContacts, capsules?: { readonly before: Capsules; readonly after: Capsules }): ClothStepStats {
     const t0 = now();
     const stats = this.stats;
-    stats.substeps = 0; stats.contacts = 0; stats.deepest = 0; stats.capsuleContacts = 0;
+    stats.substeps = 0; stats.contacts = 0; stats.deepest = 0; stats.capsuleContacts = 0; stats.selfContacts = 0;
     const n = this.count;
     if (before.point.length < n * 3 || after.point.length < n * 3 || before.normal.length < n * 3 || after.normal.length < n * 3
       || before.standOff.length < n || after.standOff.length < n || before.pinTarget.length < n * 3 || after.pinTarget.length < n * 3
@@ -365,6 +380,7 @@ export class ClothSim {
     const bs = before.standOff, as = after.standOff, bt = before.pinTarget, at = after.pinTarget;
     let deepest = 0, contacts = 0;
 
+    const selfD = s.selfDistance !== undefined && Number.isFinite(s.selfDistance) && s.selfDistance > 0 ? s.selfDistance : 0;
     for (let sub = 0; sub < substeps; sub++) {
       const f = (sub + 1) / substeps, g = 1 - f;
 
@@ -416,9 +432,13 @@ export class ClothSim {
         x[b3] -= dx * kb; x[b3 + 1] -= dy * kb; x[b3 + 2] -= dz * kb;
       }
 
+      const last = sub === substeps - 1;
+      // 5b. the cloth against itself (`selfDistance`), on the step's last substep: no two particles closer than that.
+      // Before her skin and the capsules, which have the last word.
+      if (selfD > 0 && last) stats.selfContacts = this.selfCollide(x, xp, w, selfD);
+
       // 6. her skin: push out to standOff along her normal, then friction on the slip relative to her skin's own motion,
       // `friction` of it up and down her and `frictionAcross` of it across.
-      const last = sub === substeps - 1;
       for (let i = 0, i3 = 0; i < n; i++, i3 += 3) {
         let nx = g * bn[i3] + f * an[i3], ny = g * bn[i3 + 1] + f * an[i3 + 1], nz = g * bn[i3 + 2] + f * an[i3 + 2];
         const nl = nx * nx + ny * ny + nz * nz;
@@ -513,6 +533,48 @@ export class ClothSim {
     stats.deepest = deepest;
     stats.ms = now() - t0;
     return stats;
+  }
+
+  /**
+   * `selfDistance`: every pair of particles closer than `d` pushed apart to it along their line, each by its share of
+   * the pair's inverse mass (a pinned particle holds), and their motion toward or away from each other this substep
+   * taken out of `xp` (where each was at the substep's start), so they come to rest on each other: neither sent apart
+   * nor still closing. Pairs are found in a hashed grid of cells `d` across -- a
+   * particle's own and the 26 round it -- built afresh each call. Returns how many pairs were pushed.
+   */
+  private selfCollide(x: Float32Array, xp: Float32Array, w: Float32Array, d: number): number {
+    const n = this.count, head = (this.selfHead ??= new Int32Array(SELF_TABLE)), next = (this.selfNext ??= new Int32Array(n));
+    head.fill(-1);
+    const inv = 1 / d, d2 = d * d;
+    const hash = (cx: number, cy: number, cz: number) => (Math.imul(cx, 73856093) ^ Math.imul(cy, 19349663) ^ Math.imul(cz, 83492791)) & (SELF_TABLE - 1);
+    for (let i = 0; i < n; i++) { const h = hash(Math.floor(x[i * 3] * inv), Math.floor(x[i * 3 + 1] * inv), Math.floor(x[i * 3 + 2] * inv)); next[i] = head[h]; head[h] = i; }
+    let pushed = 0;
+    for (let i = 0; i < n; i++) {
+      const i3 = i * 3, cx = Math.floor(x[i3] * inv), cy = Math.floor(x[i3 + 1] * inv), cz = Math.floor(x[i3 + 2] * inv);
+      for (let ox = -1; ox <= 1; ox++) for (let oy = -1; oy <= 1; oy++) for (let oz = -1; oz <= 1; oz++) {
+        for (let j = head[hash(cx + ox, cy + oy, cz + oz)]; j >= 0; j = next[j]) {
+          if (j <= i) continue;
+          const j3 = j * 3, dx = x[j3] - x[i3], dy = x[j3 + 1] - x[i3 + 1], dz = x[j3 + 2] - x[i3 + 2], l2 = dx * dx + dy * dy + dz * dz;
+          if (l2 >= d2 || l2 < TINY) continue;
+          const wi = w[i], wj = w[j];
+          if (wi + wj <= 0) continue;
+          const l = Math.sqrt(l2), k = (l - d) / ((wi + wj) * l);
+          const ki = k * wi, kj = k * wj;
+          x[i3] += dx * ki; x[i3 + 1] += dy * ki; x[i3 + 2] += dz * ki;
+          x[j3] -= dx * kj; x[j3 + 1] -= dy * kj; x[j3 + 2] -= dz * kj;
+          // and the pair's motion along their line this substep (x - xp) taken away, shared by inverse mass: they rest on
+          // each other, sliding along still kept. Left as motion, the once-a-step push became speed at the substep's
+          // rate and threw a resting layer 11 units up; moved with x, the approach was never stopped and it fell through
+          const nx = dx / l, ny = dy / l, nz = dz / l;
+          const rel = (x[j3] - xp[j3] - x[i3] + xp[i3]) * nx + (x[j3 + 1] - xp[j3 + 1] - x[i3 + 1] + xp[i3 + 1]) * ny + (x[j3 + 2] - xp[j3 + 2] - x[i3 + 2] + xp[i3 + 2]) * nz;
+          const ai = (rel * wi) / (wi + wj), aj = (rel * wj) / (wi + wj);
+          xp[i3] -= nx * ai; xp[i3 + 1] -= ny * ai; xp[i3 + 2] -= nz * ai;
+          xp[j3] += nx * aj; xp[j3 + 1] += ny * aj; xp[j3 + 2] += nz * aj;
+          pushed++;
+        }
+      }
+    }
+    return pushed;
   }
 
   /**

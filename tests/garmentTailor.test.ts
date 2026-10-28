@@ -7,7 +7,8 @@
  *   and her neck), the front piece in front of her side plane and the back behind it, each sleeve on its own side and
  *   near its own arm -- the gross failures of a first placing (cloth thrown to the wrong side of her) -- and few edges
  *   start stretched past three times their pattern length (the placing is a rough start; the cloth does the fitting);
- * - body-piece particles are trunk-only and bind to her trunk; sleeve particles do not.
+ * - body-piece particles are trunk-only and bind to her trunk, except those shared with a sleeve or gusset and a set-in's
+ *   armhole band, which go with the sleeve; sleeve particles do not.
  */
 import { beforeAll, describe, expect, it } from 'vitest';
 import { FACE_REST_OFFSET, FACE_REST_SCALE } from '../src/sarahlab/faceRig';
@@ -43,6 +44,23 @@ function rolesOf(t: Tailored): { torso: Uint8Array; front: Uint8Array; back: Uin
     else gusset[i] = 1;
   }
   return { torso, front, back, sleeve, gusset };
+}
+
+/** How far (flat, metres) particle i's nearest body-piece vertex lies from its piece's armhole edges (Infinity: none). */
+function nearArmhole(t: Tailored, i: number): number {
+  let best = Infinity;
+  for (let v = 0; v < t.sewn.vertexParticle.length; v++) {
+    if (t.sewn.vertexParticle[v] !== i) continue;
+    const piece = t.draft.pattern.pieces[t.sewn.vertexPiece[v]];
+    if (piece.role !== 'torso') continue;
+    const u = t.sewn.uv[v * 2], w = t.sewn.uv[v * 2 + 1];
+    for (const e of piece.edges) if (e.name.startsWith('armhole')) for (let k = 1; k < e.points.length; k++) {
+      const [ax, ay] = e.points[k - 1], dx = e.points[k][0] - ax, dy = e.points[k][1] - ay, l2 = dx * dx + dy * dy;
+      const q = l2 > 0 ? Math.max(0, Math.min(1, ((u - ax) * dx + (w - ay) * dy) / l2)) : 0;
+      best = Math.min(best, Math.hypot(u - ax - q * dx, w - ay - q * dy));
+    }
+  }
+  return best;
 }
 
 /** Distance from p to the segment a-b. */
@@ -148,11 +166,22 @@ describe.each(['raglan', 'setIn'] as const)('tailoring her a %s tee', (construct
     expect(under / m).toBeLessThan(0.15);
   });
 
-  it('binds the body pieces to her trunk only; the sleeves to her arm or either', () => {
+  it('binds the body pieces to her trunk only (a set-in\'s armhole band apart); the sleeves to her arm or either; what the body shares with a sleeve or gusset goes with them', () => {
     const t = get(), roles = rolesOf(t), { region, trunkOnly } = t.placed;
-    let arm = 0;
+    let arm = 0, shared = 0, banded = 0;
     for (let i = 0; i < t.sewn.count; i++) {
-      if (roles.torso[i]) {
+      if (roles.torso[i] && (roles.sleeve[i] || roles.gusset[i])) {
+        // a raglan or armhole seam's particle, or a gusset corner: held off her arm, it was dragged by the sleeve
+        expect(trunkOnly[i]).toBe(0);
+        expect(region[i]).toBe(BIND_ANY);
+        shared++;
+      } else if (roles.torso[i] && !trunkOnly[i]) {
+        // a set-in's armhole band (TEE_DEFAULTS.armholeBand) goes with the sleeve too: within that far of an armhole
+        expect(construction).toBe('setIn');
+        expect(region[i]).toBe(BIND_ANY);
+        expect(nearArmhole(t, i)).toBeLessThan(TEE_DEFAULTS.armholeBand! + 1e-6);
+        banded++;
+      } else if (roles.torso[i]) {
         expect(trunkOnly[i]).toBe(1);
         expect(region[i]).toBe(BIND_TRUNK);
       } else {
@@ -164,6 +193,10 @@ describe.each(['raglan', 'setIn'] as const)('tailoring her a %s tee', (construct
     }
     // the sleeve tubes below the underarm are most of each sleeve
     expect(arm).toBeGreaterThan(300);
+    // and every sleeve and gusset seam onto the body shares particles
+    expect(shared).toBeGreaterThan(40);
+    // and a set-in's armhole band is a real band; a raglan has no armhole
+    if (construction === 'setIn') expect(banded).toBeGreaterThan(100); else expect(banded).toBe(0);
   });
 
   it('keeps the measure it was given and times every step', () => {

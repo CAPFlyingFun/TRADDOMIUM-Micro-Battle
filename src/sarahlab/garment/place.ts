@@ -122,7 +122,7 @@ export function torsoPoint(draft: Draft, measure: BodyMeasure, frontForm: DressF
   return [x, y, z];
 }
 
-export function placeGarment(sewn: SewnGarment, pattern: Pattern, draft: Draft, measure: BodyMeasure, frontForm: DressForm = measure.form): Placed {
+export function placeGarment(sewn: SewnGarment, pattern: Pattern, draft: Draft, measure: BodyMeasure, frontForm: DressForm = measure.form, armholeBand = 0): Placed {
   const n = sewn.count, sum = new Float64Array(n * 3), hits = new Uint16Array(n);
   const region = new Uint8Array(n).fill(BIND_ANY), trunkOnly = new Uint8Array(n);
   const yU = draft.notes.underarmY, sG = draft.notes.gussetSide, H = draft.notes.sleeveCrown;
@@ -226,6 +226,30 @@ export function placeGarment(sewn: SewnGarment, pattern: Pattern, draft: Draft, 
       let wsum = 0; const acc = [0, 0, 0];
       corners.forEach((c, k) => { const q = P3[k]; if (!q) return; const d = Math.hypot(px - c[0], py - c[1]); const wk = 1 / Math.max(1e-4, d * d); wsum += wk; acc[0] += wk * q[0]; acc[1] += wk * q[1]; acc[2] += wk * q[2]; });
       if (wsum > 0 && hits[particle] === 0) add(particle, [acc[0] / wsum, acc[1] / wsum, acc[2] / wsum]);
+    }
+  }
+  // a particle the body shares with a sleeve or gusset (the raglan and armhole seams, the gusset's corners) goes where
+  // the sleeve goes: it is not trunk-only, nor bound to her trunk alone. Held off her arm while the sleeve it is sewn
+  // to rose with it, one such particle in each tee was stretched to 6x round it (Stage 2b, arms raised).
+  for (let v = 0; v < sewn.vertexParticle.length; v++) {
+    if (pattern.pieces[sewn.vertexPiece[v]].role === 'torso') continue;
+    const particle = sewn.vertexParticle[v];
+    if (trunkOnly[particle]) { trunkOnly[particle] = 0; region[particle] = BIND_ANY; }
+  }
+  // a set-in's armhole band (`TeeParams.armholeBand`): the body within that far of its armhole goes with the sleeve too
+  if (armholeBand > 0) {
+    const holes = pattern.pieces.map((p) => p.role === 'torso' ? p.edges.filter((e) => e.name.startsWith('armhole')).map((e) => e.points) : []);
+    for (let v = 0; v < sewn.vertexParticle.length; v++) {
+      const lines = holes[sewn.vertexPiece[v]], particle = sewn.vertexParticle[v];
+      if (!lines.length || !trunkOnly[particle]) continue;
+      const u = sewn.uv[v * 2], w = sewn.uv[v * 2 + 1];
+      let best = Infinity;
+      for (const pts of lines) for (let k = 1; k < pts.length; k++) {
+        const ax = pts[k - 1][0], ay = pts[k - 1][1], dx = pts[k][0] - ax, dy = pts[k][1] - ay, l2 = dx * dx + dy * dy;
+        const t = l2 > 0 ? Math.max(0, Math.min(1, ((u - ax) * dx + (w - ay) * dy) / l2)) : 0;
+        best = Math.min(best, Math.hypot(u - ax - t * dx, w - ay - t * dy));
+      }
+      if (best < armholeBand) { trunkOnly[particle] = 0; region[particle] = BIND_ANY; }
     }
   }
   const positions = new Float32Array(n * 3);

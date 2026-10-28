@@ -645,7 +645,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   /** Whether seated she wears the fitted tee instead of the cloth (a probe can turn this off to watch the cloth seated). */
   let seatedStandIn = true;
   /** Stage 2b's procedural tee, put on her by a probe (`?probe=cloth` garment()) for review; never by the room itself. */
-  let garmentRoom: RoomGarment | null = null, garmentPoseKey = '';
+  let garmentRoom: RoomGarment | null = null, garmentPoseKey = '', garmentShapeKey = '', garmentRefit = false;
+  /** A probe's look at the garment's shape alone: false draws her details through it as nothing (the shading off). */
+  let garmentShade = true;
   const clothWorn = (): boolean => clothOn && !!cloth && !clothSeated;
   let cloth: ClothShirt | null = null, clothOn = false, clothLoading = false, clothRestart = false, clothRefit = false, teeLength = CLOTH_TEE_LENGTH_DEFAULT, frameMs = 1000 / 60;
   let teeLengthInput: HTMLInputElement | null = null;
@@ -935,10 +937,16 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
 
   /** The cloth tee cut again for her shape: her build's bones included, so a longer torso is a longer tee. */
   function refitCloth(c: ClothShirt): void {
-    const b = bodyOf();
-    c.setRestShift(b ? buildShift(b.mesh, Uint32Array.from({ length: b.mesh.geometry.getAttribute('position').count }, (_, i) => i)) : null);
+    c.setRestShift(restShiftNow());
     c.refit();
   }
+  /** Her build's rest shift over every vertex of her body, for a garment's pattern (`ClothSkin.restShift`). */
+  function restShiftNow(): Float32Array | null {
+    const b = bodyOf();
+    return b ? buildShift(b.mesh, Uint32Array.from({ length: b.mesh.geometry.getAttribute('position').count }, (_, i) => i)) : null;
+  }
+  /** Her shape, as a key: when it changes, the tees are cut again for her. */
+  function shapeKeyNow(): string { return `${bump}|${serializeShape(body)}|${bellyCurve}|${refine}`; }
 
   /** Her bones take the build (offsets and sizes), and standing she is lifted onto her soles; only when it changed. */
   function layBuildBones(build: ReturnType<typeof currentBuild>): void {
@@ -1024,8 +1032,10 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     // motion shapes have followed the new size too. A quick size changes her in two steps (the size here, those shapes
     // in the frame's feelMotion), and a tee cut at once, for the first, and laid on the second ballooned out in front of
     // her and creased as it fell (Joshua, 2026-10-24: "it's possible it's something else")
-    const shapeKey = `${bump}|${serializeShape(body)}|${bellyCurve}|${refine}`;
+    const shapeKey = shapeKeyNow();
     if (cloth && shapeKey !== clothShapeKey) { clothShapeKey = shapeKey; clothRefit = true; }
+    // the procedural garment a probe put on her, the same way (on its next frame)
+    if (garmentRoom && shapeKey !== garmentShapeKey) { garmentShapeKey = shapeKey; garmentRefit = true; }
   }
 
   /**
@@ -1191,13 +1201,13 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     return fabric?.garmentDetail('shirtSpandexLite') ?? { nipple: 0.45, navel: 0.8 };
   }
   /**
-   * Under the light tee -- the cloth or the fitted one -- her navel is softened the way paint softens it: toward an
+   * Under the light tee -- the cloth or the fitted one, or the procedural garment a probe put on her -- her navel is softened the way paint softens it: toward an
    * ordinary navel by what NAVEL DETAIL hides. (Not the fitted tee's own navel: its shapes follow hers, and settled to
    * an ordinary navel it would dip where hers does; that one is settled onto its smooth surface instead, in the shader.)
    */
   let clothFlattenLaid = 0;
   function clothFlatten(): number {
-    clothFlattenLaid = clothWorn() || fittedTee() ? 1 - clothKeep().navel : 0;
+    clothFlattenLaid = clothWorn() || fittedTee() || garmentRoom ? 1 - clothKeep().navel : 0;
     return clothFlattenLaid;
   }
   /** The fitted light tee, when it is what she wears over her middle (the cloth off), or null. */
@@ -2275,7 +2285,17 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         if (pose !== garmentPoseKey) { garmentPoseKey = pose; garmentRoom.cloth.restart(); }
         if (garmentRoom.capsules.stool !== null || pose === 'sit') garmentRoom.capsules = { ...garmentRoom.capsules, stool: pose === 'sit' && stool.visible ? { x: stool.position.x, z: stool.position.z, radius: 0.21 * M, top: stool.scale.y } : null };
         model.updateMatrixWorld(true);
+        // BREAST and NAVEL DETAIL, exactly as on the cloth tee: the domes under it, her details drawn through it, and
+        // her navel softened under it to match
+        const keep = clothKeep();
+        garmentRoom.cloth.detailKeep = keep;
+        // cut again for her shape when it changed, as the cloth tee is
+        if (garmentRefit) { garmentRoom.cloth.setRestShift(restShiftNow()); garmentRoom.cloth.refit(); garmentRefit = false; }
         garmentRoom.frame(dt);
+        setClothDetail(garmentRoom.cloth.mesh.material as THREE.Material, garmentShade ? garmentRoom.cloth.detailShading(keep) : null);
+        // the cloth tee's cuts stay off a material the garment shares with it
+        setClothNeckline(garmentRoom.cloth.mesh.material as THREE.Material, null); setClothTrim(garmentRoom.cloth.mesh.material as THREE.Material, null);
+        if (Math.abs(1 - keep.navel - clothFlattenLaid) > 1e-3) applyLook();
       }
       // the fitted light tee (the cloth off): her nipples drawn through it and its own navel settled onto its smooth
       // surface, at the editor's BREAST and NAVEL DETAIL; her navel softened under it to match
@@ -2327,8 +2347,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         // (and how far off, world units, and at what height: for a close look at her neckline)
         look: (yaw: number, pitch?: number, distance?: number, height?: number, across?: number) => { orbit.yaw = yaw; if (pitch !== undefined) orbit.pitch = pitch; if (distance !== undefined) orbit.distance = distance; if (height !== undefined) orbit.target.y = height; if (across !== undefined) orbit.target.x = across; turning = false; },
         // Stage 2b: the procedural tee (garment/roomGarment.ts) tailored to her and put on her in place of the room's tees,
-        // or taken off (null). Its construction: 'raglan' or 'setIn', with a gusset share 0..1.
-        garment: (construction: 'raglan' | 'setIn' | null, gusset = 0.5, wire = false) => {
+        // or taken off (null). Its construction: 'raglan' or 'setIn', with a gusset share 0..1; `extra` for the follow-up's
+        // comparisons (neckline width and drop, a neck band, a set-in's bust shaping and armhole band).
+        garment: (construction: 'raglan' | 'setIn' | null, gusset = 0.5, wire = false, extra: { neckWidth?: number; neckDrop?: number; bustShaping?: 'none' | 'ease' | 'dart'; neckBand?: number; armholeBand?: number; detail?: boolean } = {}) => {
           garmentRoom?.dispose(); garmentRoom = null; garmentPoseKey = '';
           if (!construction) { if (cloth && clothOn) cloth.mesh.visible = true; applyLook(); return null; }
           const body = skinned.find((m) => !!m.geometry.getAttribute('_cloth_cover'));
@@ -2336,10 +2357,20 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
           model.updateMatrixWorld(true);
           const { settings, standOff } = clothTuning(clothTune);
           // drawn a hair in front of her skin where the two touch (her skin under it is not masked as under the room's tees)
-          const material = new THREE.MeshStandardMaterial({ color: 0xe8e4dc, roughness: 0.85, side: THREE.DoubleSide, wireframe: wire, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -8 });
-          garmentRoom = new RoomGarment({ body, root: model, params: { construction, gusset }, settings, standOff, unitsPerMetre: M, scale: FACE_REST_SCALE, offset: FACE_REST_OFFSET, material });
+          // it wears the cloth tee's own material, and so the room's FABRIC on it, as the cloth tee does (Joshua,
+          // 2026-10-27: "Made the new shirt also the same red color and compare"): the light tee's material, whose
+          // neckline and trim cuts are the cloth tee's own and are switched off while the garment is on. A wireframe,
+          // or a room without that tee, draws in a plain material of its own
+          const teeMaterial = partMeshes.get('spandex-lite')?.[0]?.material;
+          const shared = !wire && teeMaterial && !Array.isArray(teeMaterial) ? teeMaterial : null;
+          if (shared) { setClothNeckline(shared, null); setClothTrim(shared, null); }
+          const material = shared ?? new THREE.MeshStandardMaterial({ color: 0xe8e4dc, roughness: 0.85, side: THREE.DoubleSide, wireframe: wire, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -8 });
+          garmentRoom = new RoomGarment({ body, root: model, params: { construction, gusset, ...(extra.neckWidth !== undefined ? { neckWidth: extra.neckWidth } : {}), ...(extra.neckDrop !== undefined ? { neckDrop: extra.neckDrop } : {}), ...(extra.bustShaping ? { bustShaping: extra.bustShaping } : {}), ...(extra.armholeBand !== undefined ? { armholeBand: extra.armholeBand } : {}) }, neckBand: extra.neckBand, ...(extra.detail === false ? { detail: false } : {}), settings, standOff, unitsPerMetre: M, scale: FACE_REST_SCALE, offset: FACE_REST_OFFSET, material });
           three.add(garmentRoom.cloth.mesh);
           garmentPoseKey = pose;
+          // tailored for her as she is shaped now: her shape changing from here cuts it again (`GarmentCloth.refit`)
+          garmentRoom.cloth.setRestShift(restShiftNow(), true);
+          garmentShapeKey = shapeKeyNow(); garmentRefit = false;
           const t = garmentRoom.tailored;
           return { ms: t.ms, report: { ...t.report, seams: t.report.seams.map((q) => ({ name: q.name, a: q.lengthA, b: q.lengthB })) }, notes: t.draft.notes, particles: t.sewn.count };
         },
@@ -2354,7 +2385,91 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         // its strain now (length / pattern length x FIT): everywhere, and over the underarm
         garmentStrain: () => garmentRoom ? { all: garmentRoom.cloth.strain(), underarm: garmentRoom.cloth.strain((p) => garmentRoom!.underarm[p] === 1) } : null,
         garmentNeck: () => garmentRoom?.neck() ?? null,
+        // the most stretched edges now, which particles and where, and what her skin carries under them (a probe's look)
+        garmentWorst: (k = 8) => garmentRoom ? garmentRoom.cloth.worst(k).map((w) => ({ ...w, trunkOnly: garmentRoom!.tailored.placed.trunkOnly[w.a], piece: garmentRoom!.tailored.sewn.particlePiece[w.a] })) : null,
+        // the particles furthest inside her skin now, and their floors (a probe's look at skin showing through)
+        garmentDeepest: (k = 12) => garmentRoom ? garmentRoom.cloth.deepest(k).map((d) => ({ ...d, trunkOnly: garmentRoom!.tailored.placed.trunkOnly[d.p], piece: garmentRoom!.tailored.sewn.particlePiece[d.p] })) : null,
+        // how sharply it folds now: the angle between neighbouring triangles (degrees)
+        garmentFolds: (over = 70) => garmentRoom?.cloth.folds(over) ?? null,
+        // its simulation settings changed in place (bend compliance, the fold limit...): for a probe's comparison
+        garmentTune: (patch: Record<string, number>) => { if (!garmentRoom) return false; Object.assign(garmentRoom.cloth.simSettings, patch); return true; },
+        // how far it stands off her navel and nipples (below 0: through it)
+        garmentDetailGap: () => garmentRoom?.cloth.detailGap() ?? null,
+        // her skin in front of the garment: posed vertices of her body inside a box (world) that stand out past the drawn
+        // cloth over them (along its normal at the nearest particle, within `reach`), the furthest first, with the vertex
+        garmentPokes: (lo: number[], hi: number[], reach = 1.2, k = 12) => {
+          const body = skinned.find((m) => !!m.geometry.getAttribute('_cloth_cover'));
+          if (!garmentRoom || !body) return null;
+          body.updateMatrixWorld(true);
+          const x = garmentRoom.cloth.positions, N = garmentRoom.cloth.drawNormals(), n = garmentRoom.tailored.sewn.count, P = body.geometry.getAttribute('position'), v = new THREE.Vector3();
+          const out: { v: number; at: number[]; out: number }[] = [];
+          for (let i = 0; i < P.count; i++) {
+            body.getVertexPosition(i, v); v.applyMatrix4(body.matrixWorld);
+            if (v.x < lo[0] || v.x > hi[0] || v.y < lo[1] || v.y > hi[1] || v.z < lo[2] || v.z > hi[2]) continue;
+            let best = Infinity, bp = -1;
+            for (let p = 0; p < n; p++) { const d = (x[p * 3] - v.x) ** 2 + (x[p * 3 + 1] - v.y) ** 2 + (x[p * 3 + 2] - v.z) ** 2; if (d < best) { best = d; bp = p; } }
+            if (bp < 0 || best > reach * reach) continue;
+            const o = (v.x - x[bp * 3]) * N[bp * 3] + (v.y - x[bp * 3 + 1]) * N[bp * 3 + 1] + (v.z - x[bp * 3 + 2]) * N[bp * 3 + 2];
+            if (o > -0.05) out.push({ v: i, at: [v.x, v.y, v.z], out: o });
+          }
+          return out.sort((a, b) => b.out - a.out).slice(0, k);
+        },
+        // her skin the CAMERA sees in front of the garment: for each of her posed vertices inside a box (world), a ray
+        // from the eye to it; where the drawn garment is met behind the vertex within `depth`, her skin stands in front
+        // of the cloth there and shows. The drawn mesh, so the draw lift is included
+        garmentSeen: (lo: number[], hi: number[], depth = 3, k = 12) => {
+          const body = skinned.find((m) => !!m.geometry.getAttribute('_cloth_cover'));
+          if (!garmentRoom || !body) return null;
+          body.updateMatrixWorld(true);
+          const mesh = garmentRoom.cloth.mesh, P = body.geometry.getAttribute('position'), v = new THREE.Vector3(), eye = new THREE.Vector3(), dir = new THREE.Vector3();
+          mesh.geometry.computeBoundingSphere(); mesh.geometry.computeBoundingBox();
+          camera.getWorldPosition(eye);
+          const ray = new THREE.Raycaster();
+          const side = (mesh.material as THREE.Material).side; (mesh.material as THREE.Material).side = THREE.DoubleSide;
+          const out: { v: number; at: number[]; by: number }[] = [];
+          let tested = 0;
+          try {
+            for (let i = 0; i < P.count; i++) {
+              body.getVertexPosition(i, v); v.applyMatrix4(body.matrixWorld);
+              if (v.x < lo[0] || v.x > hi[0] || v.y < lo[1] || v.y > hi[1] || v.z < lo[2] || v.z > hi[2]) continue;
+              tested++;
+              dir.subVectors(v, eye); const tv = dir.length(); dir.divideScalar(tv);
+              ray.set(eye, dir); ray.near = 0; ray.far = tv + depth;
+              const hits = ray.intersectObject(mesh, false);
+              if (!hits.length || hits[0].distance <= tv) continue;
+              out.push({ v: i, at: [v.x, v.y, v.z], by: hits[0].distance - tv });
+            }
+          } finally { (mesh.material as THREE.Material).side = side; }
+          return { tested, seen: out.length, worst: out.sort((a, b) => b.by - a.by).slice(0, k) };
+        },
+        garmentShade: (on: boolean) => { garmentShade = on; return true; },
+        garmentProfile: (i = 0) => garmentRoom?.cloth.detailProfile(i) ?? null,
+        garmentDetailShade: (patch?: { spread?: number; widen?: number; slope?: number; grow?: number }) => garmentRoom?.cloth.detailShade(patch) ?? null,
         garmentStats: () => garmentRoom?.cloth.stats() ?? null,
+        // for the particles inside a box (world), the nearest of her posed vertices against the contact the cloth is using:
+        // a contact far further than her nearest skin is the wrong surface (a probe's look at skin showing through)
+        garmentContacts: (lo: number[], hi: number[]) => {
+          const body = skinned.find((m) => !!m.geometry.getAttribute('_cloth_cover'));
+          if (!garmentRoom || !body) return null;
+          body.updateMatrixWorld(true);
+          const x = garmentRoom.cloth.positions, P = body.geometry.getAttribute('position'), v = new THREE.Vector3(), pad = 4;
+          const near: number[] = [];
+          for (let i = 0; i < P.count; i++) {
+            body.getVertexPosition(i, v); v.applyMatrix4(body.matrixWorld);
+            if (v.x < lo[0] - pad || v.x > hi[0] + pad || v.y < lo[1] - pad || v.y > hi[1] + pad || v.z < lo[2] - pad || v.z > hi[2] + pad) continue;
+            near.push(v.x, v.y, v.z);
+          }
+          const out: { p: number; at: number[]; nearest: number; contact: number }[] = [];
+          const report = garmentRoom.cloth.contactOf.bind(garmentRoom.cloth);
+          for (let p = 0; p < garmentRoom.tailored.sewn.count; p++) {
+            const px = x[p * 3], py = x[p * 3 + 1], pz = x[p * 3 + 2];
+            if (px < lo[0] || px > hi[0] || py < lo[1] || py > hi[1] || pz < lo[2] || pz > hi[2]) continue;
+            let best = Infinity;
+            for (let k = 0; k < near.length; k += 3) best = Math.min(best, Math.hypot(near[k] - px, near[k + 1] - py, near[k + 2] - pz));
+            out.push({ p, at: [px, py, pz], nearest: best, contact: report(p) });
+          }
+          return out;
+        },
         garmentWire: (on: boolean) => { if (!garmentRoom) return false; (garmentRoom.cloth.mesh.material as THREE.MeshStandardMaterial).wireframe = on; return true; },
         // her particles now (world), and which piece each is of, for a probe drawing its own pictures
         garmentParticles: () => garmentRoom ? { positions: Array.from(garmentRoom.cloth.positions.subarray(0, garmentRoom.tailored.sewn.count * 3)), piece: Array.from(garmentRoom.tailored.sewn.particlePiece) } : null,
@@ -2362,8 +2477,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         tears: (limit = 2) => cloth?.tears(limit) ?? null,
         // seated, the cloth stays on (the fitted tee does not stand in): to watch the cloth itself seated
         standIn: (on: boolean) => { seatedStandIn = on; },
-        // her body hidden or shown (the cloth alone, to see what it does where her skin would hide it)
-        showBody: (on: boolean) => { for (const m of skinned) m.visible = on; },
+        // (there is no hook to hide her body: "Always keep the base body visible" -- Joshua, 2026-10-27; review shots
+        // show the garment on her as it is worn)
         particles: () => cloth?.particles() ?? null,
         // her skin as she is posed and shaped now (world, every vertex), and its triangles: for a probe to measure her
         posedBody: () => {

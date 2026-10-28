@@ -17,7 +17,8 @@ import * as THREE from 'three';
 import type { ClothSettings } from '../clothSim';
 import { bodyInputOf, SARAH_V2_ARM_BONES, SARAH_V2_JOINTS } from './bodyInput';
 import { bodyCapsules, type CapsuleRequest } from './capsules';
-import { TEE_DEFAULTS, type TeeParams } from './draft';
+import { teeParams, type TeeParams } from './draft';
+import { SARAH_V2_DETAIL_POINTS } from '../detailSpots';
 import { GarmentCloth } from './garmentCloth';
 import { tailor, type Tailored } from './tailor';
 
@@ -37,6 +38,10 @@ export interface RoomGarmentOptions {
   readonly scale: number;
   readonly offset: readonly [number, number, number];
   readonly material: THREE.Material;
+  /** The neckline's edge rests at this share of its pattern length, over the params' own `neckBand`: `GarmentCloth`'s. */
+  readonly neckBand?: number;
+  /** False: no domes over her navel and nipples (a probe's before picture). Absent: domed. */
+  readonly detail?: boolean;
 }
 
 export interface ArmPose { raise: number; forward: number; elbow: number }
@@ -59,12 +64,13 @@ export class RoomGarment {
   constructor(options: RoomGarmentOptions) {
     this.options = options;
     const input = bodyInputOf(options.body, { belly: 1 });
-    this.tailored = tailor(input, { ...TEE_DEFAULTS, ...options.params }, { scale: options.scale, offset: options.offset });
+    const params = teeParams(options.params);
+    this.tailored = tailor(input, params, { scale: options.scale, offset: options.offset });
     const t = this.tailored;
     this.cloth = new GarmentCloth({
       body: options.body, sewn: t.sewn, binding: t.binding, trunkOnly: t.placed.trunkOnly, armBones: SARAH_V2_ARM_BONES,
       settings: { ...options.settings, restScale: REST_SCALE }, standOff: options.standOff, material: options.material, unitsPerMetre: options.unitsPerMetre,
-      drawLift: DRAW_LIFT * options.unitsPerMetre,
+      drawLift: DRAW_LIFT * options.unitsPerMetre, fabricRest: fabricRestOf(t.placed.positions, options.scale, options.offset), neckBand: options.neckBand ?? params.neckBand ?? 1, armpitRule: params.construction !== 'setIn', detail: SARAH_V2_DETAIL_POINTS, ...(options.detail === false ? { detailDomes: false } : {}),
     });
     this.underarm = new Uint8Array(t.sewn.count);
     for (let i = 0; i < t.sewn.count; i++) for (const ap of t.measure.armpit) if (Math.hypot(t.placed.positions[i * 3] - ap[0], t.placed.positions[i * 3 + 1] - ap[1], t.placed.positions[i * 3 + 2] - ap[2]) < 0.07) this.underarm[i] = 1;
@@ -133,4 +139,11 @@ export class RoomGarment {
   }
 
   dispose(): void { this.cloth.dispose(); }
+}
+
+/** Rest metres into her geometry's units, per particle (`bind.ts`: geom = (rest - offset) / scale): the fabric's rest surface. */
+function fabricRestOf(rest: Float32Array, scale: number, offset: readonly [number, number, number]): Float32Array {
+  const out = new Float32Array(rest.length);
+  for (let i = 0; i < rest.length; i += 3) for (let c = 0; c < 3; c++) out[i + c] = (rest[i + c] - offset[c]) / scale;
+  return out;
 }
