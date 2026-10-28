@@ -34,6 +34,8 @@ export const DOME_MARGIN = 0.05;
 export const TENT_SLOPE = 0.35;
 /** How far from her navel's axis (in its inner ring's radii) a cloth point may be and still be laid on it as the apex. */
 export const APEX_REACH = 0.8;
+/** The farthest a corner of the triangle over a tip may stand from its axis (in its inner ring's radii) and be held. */
+export const COVER_REACH = 1.2;
 /** The highest the apex stands over her smooth surface, in her navel's own relief at its tip (DOME_MARGIN more). */
 export const APEX_MAX = 3;
 /** How much wider than the triangle over a tip its dome's flat top is kept (the cloth moves between frames). */
@@ -200,6 +202,10 @@ export class GarmentDetail {
         far = Math.max(far, Math.sqrt(Math.max(0, dx * dx + dy * dy + dz * dz - al * al)));
       }
     }
+    // a triangle reaching farther than COVER_REACH of the detail's inner ring is not cloth lying over the tip but cloth
+    // stretched past it (a fold, the underside of her breast): its corners are not held (Sarah at 73% belly, as the room
+    // opens: a corner 5 cm under her nipple held on its axis stayed inside her breast and her skin showed through)
+    if (far > COVER_REACH * d.rho) { C[i * 3] = C[i * 3 + 1] = C[i * 3 + 2] = -1; }
     return far * SPACING_SLACK;
   }
 

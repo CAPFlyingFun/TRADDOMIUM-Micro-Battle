@@ -129,14 +129,20 @@ describe('the room opens with only what she has on', () => {
     expect(recoveredPartsFor(wornGarments(4, all))).toEqual([]);
     expect(recoveredPartsFor(wornGarments(5, all))).toEqual(['leggings', 'spandex-high']);
     expect(recoveredPartsFor(wornGarments(6, all))).toEqual(['leggings-low', 'spandex-low']);
-    // Sarah's red light spandex tee (2026-10-23): its one small file, with the leggings painted under it
-    expect(recoveredPartsFor(wornGarments(7, all))).toEqual(['spandex-lite']);
-    expect(OUTFITS[7].paint?.length).toBe(1);
+    // Sarah's new raglan tee (2026-10-27) and her red light spandex tee (2026-10-23): each the light tee's one small file
+    // (the new tee wears its material), with the leggings painted under it
+    for (const i of [7, 8]) {
+      expect(recoveredPartsFor(wornGarments(i, all))).toEqual(['spandex-lite']);
+      expect(OUTFITS[i].paint?.length).toBe(1);
+    }
+    expect(OUTFITS[7].procedural).toBe('raglan');
+    expect(OUTFITS[8].procedural).toBeUndefined();
     // the painted outfits (Joshua, 2026-10-21) download nothing: they are paint on her own skin
-    for (let i = 8; i < OUTFITS.length; i++) expect(OUTFITS[i].paint?.length ?? 0).toBeGreaterThan(0);
-    for (let i = 8; i < OUTFITS.length; i++) expect(recoveredPartsFor(wornGarments(i, all))).toEqual([]);
-    // seven modelled, the light tee, then the painted ones: Sarah's own red tee and leggings (2026-10-23) and the white tee's six
-    expect(OUTFITS).toHaveLength(15);
+    for (let i = 9; i < OUTFITS.length; i++) expect(OUTFITS[i].paint?.length ?? 0).toBeGreaterThan(0);
+    for (let i = 9; i < OUTFITS.length; i++) expect(recoveredPartsFor(wornGarments(i, all))).toEqual([]);
+    // seven modelled, the new tee and the light tee, then the painted ones: Sarah's own red tee and leggings (2026-10-23)
+    // and the white tee's six
+    expect(OUTFITS).toHaveLength(16);
   });
 
   it('cycles through the painted outfits, the light tee, the bikini and none on the slim v2 body, never the big modelled shirts and leggings', () => {

@@ -35,7 +35,8 @@
  *   the cloth over the tip never sinks under it; keep is clamped (NaN as 0); `shading` is the cloth tee's own.
  * - `garmentDetail.ts` `spacing`/`flat`: each detail's spacing is SPACING_SLACK times the farthest corner (off its axis)
  *   of the one cloth triangle its axis crosses nearest its tip (a diagnostic now); that triangle's corners (`cover`) are
- *   held at the tip's height and DOME_MARGIN (`domeOver`'s `lift`) wherever they are. `domeOver`'s `flat` still widens
+ *   held at the tip's height and DOME_MARGIN (`domeOver`'s `lift`) wherever they are -- unless one reaches past
+ *   COVER_REACH·rho, when nothing is held. `domeOver`'s `flat` still widens
  *   the flat top and moves its fall out with it; 0, NaN, Infinity change nothing.
  *   `GarmentCloth.detailGap`: the sheet over a tip along its axis, positive above it, negative when the tip is through.
  * - `GarmentDetail.shading(keep, gaps, touch)`: the tee's own spots, each softened by how far the cloth stands off its tip
@@ -75,7 +76,7 @@ import { BIND_ANY, BIND_TRUNK } from '../src/sarahlab/garment/bind';
 import { draftTee, SET_IN_NECK, TEE_DEFAULTS, teeParams, type Draft, type TeeParams } from '../src/sarahlab/garment/draft';
 import { ClothSim, type ClothSettings } from '../src/sarahlab/clothSim';
 import { BEND_COMPLIANCE, FIT_MAX, FIT_MIN, GarmentCloth, LOOSE_OVER_ARM, RESCUE_OVER, SELF_DISTANCE } from '../src/sarahlab/garment/garmentCloth';
-import { APEX_MAX, APEX_REACH, DOME_MARGIN, domeOver, GarmentDetail, SHADE_NAVEL_GROW, SHADE_SLOPE, SHADE_SPREAD, SPACING_SLACK, TENT_SLOPE, type RestBody } from '../src/sarahlab/garment/garmentDetail';
+import { APEX_MAX, APEX_REACH, COVER_REACH, DOME_MARGIN, domeOver, GarmentDetail, SHADE_NAVEL_GROW, SHADE_SLOPE, SHADE_SPREAD, SPACING_SLACK, TENT_SLOPE, type RestBody } from '../src/sarahlab/garment/garmentDetail';
 import { DETAIL_LOOK, DetailSpots, type DetailPoints, type Poser } from '../src/sarahlab/detailSpots';
 import { measureBody } from '../src/sarahlab/garment/measure';
 import { placeGarment, type Placed } from '../src/sarahlab/garment/place';
@@ -1413,6 +1414,8 @@ describe('GarmentDetail.spacing and domeOver(flat): the flat top at least as wid
   const at = (x: number, y: number, z: number): [number, number, number] => posedAt([TIP_X + x, y, z]);
   /** The triangle over the tip, 1 up: a corner 1.5 out along +x and two 0.78 out behind the axis (it encloses it). */
   const OVER = [at(1.5, 0, 1), at(-0.5, 0.6, 1), at(-0.5, -0.6, 1)];
+  /** The same, its far corner 1.0 out: every corner within COVER_REACH·rho, so it is the cloth over the tip (`cover`). */
+  const NEAR = [at(1.0, 0, 1), at(-0.5, 0.6, 1), at(-0.5, -0.6, 1)];
 
   it('spacing is SPACING_SLACK times the farthest corner, off the axis, of the one triangle the axis crosses nearest the tip', () => {
     expect(SPACING_SLACK).toBe(1.15);
@@ -1438,8 +1441,8 @@ describe('GarmentDetail.spacing and domeOver(flat): the flat top at least as wid
   });
 
   it('follow holds the corners of the triangle over the tip at tip + DOME_MARGIN, however far out; others get the plain dome', () => {
-    // the three corners (1.5 and 0.78 out), and a particle 1.4 out that is no corner
-    const ps = [...OVER.map(([x, y, z]) => [x, y, z - 0.99] as [number, number, number]), at(0, 1.4, 0.01)];
+    // the three corners (1.0 out, past the dome's edge at BREAST DETAIL 1, and 0.78), and a particle 1.4 out that is no corner
+    const ps = [...NEAR.map(([x, y, z]) => [x, y, z - 0.99] as [number, number, number]), at(0, 1.4, 0.01)];
     const b = detailBody(), gd = new GarmentDetail(b.points, ps.length, true, restOf(b.rest), Uint32Array.from([0, 1, 2]));
     for (const keep of [{ nipple: 0, navel: 1 }, { nipple: 1, navel: 1 }]) {
       gd.keep = keep;
@@ -1449,7 +1452,7 @@ describe('GarmentDetail.spacing and domeOver(flat): the flat top at least as wid
       expect(heightOf(after, 3)).toBeLessThan(TIP[2] + DOME_MARGIN - 0.1);
     }
     // the flat top is no longer widened: spacing is measured (a diagnostic) and the 1.4 particle gets what it gets without triangles
-    expect(gd.spacing[1]).toBeCloseTo(SPACING_SLACK * 1.5, 6);
+    expect(gd.spacing[1]).toBeCloseTo(SPACING_SLACK * 1.0, 6);
     gd.keep = { nipple: 0, navel: 1 };
     const withT = particlesOver(ps), plainGd = new GarmentDetail(b.points, ps.length, true, restOf(b.rest)), without = particlesOver(ps);
     plainGd.keep = { nipple: 0, navel: 1 };
@@ -1459,14 +1462,39 @@ describe('GarmentDetail.spacing and domeOver(flat): the flat top at least as wid
   });
 
   it('cover holds the three particles of the triangle over each tip, -1 for none', () => {
-    const { gd } = followed(OVER, [0, 1, 2]);
+    const { gd } = followed(NEAR, [0, 1, 2]);
     expect(Array.from(gd.cover)).toEqual([-1, -1, -1, 0, 1, 2, -1, -1, -1]);
     // of two crossed, the nearer the tip
-    const higher = [at(2.5, 0, 3), at(-0.5, 0.6, 3), at(-0.5, -0.6, 3)];
-    expect(Array.from(followed([...higher, ...OVER], [0, 1, 2, 5, 3, 4]).gd.cover.subarray(3, 6))).toEqual([5, 3, 4]);
+    const higher = [at(1.1, 0, 3), at(-0.5, 0.6, 3), at(-0.5, -0.6, 3)];
+    expect(Array.from(followed([...higher, ...NEAR], [0, 1, 2, 5, 3, 4]).gd.cover.subarray(3, 6))).toEqual([5, 3, 4]);
+    expect(Array.from(followed([...NEAR, ...higher], [0, 1, 2, 5, 3, 4]).gd.cover.subarray(3, 6))).toEqual([0, 1, 2]);
     // no triangles, or none crossed: all -1
-    expect(Array.from(followed(OVER).gd.cover)).toEqual(new Array(9).fill(-1));
+    expect(Array.from(followed(NEAR).gd.cover)).toEqual(new Array(9).fill(-1));
     expect(Array.from(followed([at(0.8, 0, 1), at(4.5, 0.5, 1), at(0.8, 1, 1)], [0, 1, 2]).gd.cover)).toEqual(new Array(9).fill(-1));
+  });
+
+  it('a triangle over the tip reaching past COVER_REACH·rho is not the cloth over it: no cover, nothing held, the dome alone', () => {
+    expect(COVER_REACH).toBe(1.2);
+    // OVER: a corner 1.5 out (past 1.2), the triangle still the one the axis crosses nearest the tip
+    const ps = OVER.map(([x, y, z]) => [x, y, z - 0.99] as [number, number, number]);
+    const b = detailBody(), gd = new GarmentDetail(b.points, ps.length, true, restOf(b.rest), Uint32Array.from([0, 1, 2]));
+    const plainGd = new GarmentDetail(b.points, ps.length, true, restOf(b.rest));
+    for (const keep of [{ nipple: 0, navel: 1 }, { nipple: 1, navel: 1 }]) {
+      gd.keep = keep; plainGd.keep = keep;
+      const withT = particlesOver(ps), without = particlesOver(ps);
+      gd.follow(poserOf(b.rest), withT.positions, withT.after, withT.before, ps.length, true);
+      plainGd.follow(poserOf(b.rest), without.positions, without.after, without.before, ps.length, true);
+      expect(Array.from(gd.cover)).toEqual(new Array(9).fill(-1));
+      // its contacts are the dome's, exactly as with no triangles at all
+      expect(Array.from(withT.after.point)).toEqual(Array.from(without.after.point));
+      // the far corner, past the dome, on her skin
+      expect(heightOf(withT.after, 0)).toBeLessThan(TIP[2] + DOME_MARGIN - 0.1);
+    }
+    // spacing is still measured from it
+    expect(gd.spacing[1]).toBeCloseTo(SPACING_SLACK * 1.5, 6);
+    // just inside the reach it is held
+    const inside = followed([at(1.19, 0, 1), at(-0.5, 0.6, 1), at(-0.5, -0.6, 1)], [0, 1, 2]).gd;
+    expect(Array.from(inside.cover.subarray(3, 6))).toEqual([0, 1, 2]);
   });
 
   it('domeOver(lift): a held particle gets tip + DOME_MARGIN wherever it is; a contact already above, -1s and no lift change nothing', () => {
@@ -1774,8 +1802,8 @@ describe('GarmentDetail.apex: the cloth point nearest her navel\'s axis is laid 
   });
 
   it('with no apex the navel falls back to the corners of the triangle over its tip, held wherever they are', () => {
-    // a triangle round the navel's axis, its corners 1.5 out (past APEX_REACH and past the dome's edge)
-    const ps = [nav(1.5, 0, 0.05), nav(-0.75, 1.3, 0.05), nav(-0.75, -1.3, 0.05)];
+    // a triangle round the navel's axis, its corners 1.0 out (past APEX_REACH, within COVER_REACH)
+    const ps = [nav(1.0, 0, 0.05), nav(-0.5, 0.87, 0.05), nav(-0.5, -0.87, 0.05)];
     const { gd, positions, was, after } = run(ps, true, [0, 1, 2]);
     expect(gd.apex).toBe(-1);
     expect(Array.from(gd.cover.subarray(0, 3))).toEqual([0, 1, 2]);
@@ -1872,7 +1900,7 @@ describe('GarmentDetail.apexAlong: the apex held high enough that its triangles 
   });
 
   it('the nipples are unaffected: her navel\'s relief changes nothing over a nipple, and no apex is laid there', () => {
-    const ps = [...[[1.5, 0], [-0.5, 0.6], [-0.5, -0.6]].map(([x, y]) => posedAt([TIP[0] + x, y, 0.05])), posedAt([TIP[0] + 0.2, 0.1, 0.3])];
+    const ps = [...[[1.0, 0], [-0.5, 0.6], [-0.5, -0.6]].map(([x, y]) => posedAt([TIP[0] + x, y, 0.05])), posedAt([TIP[0] + 0.2, 0.1, 0.3])];
     const plain = run([], ps, [0, 1, 2]), raised = run([[R / 2, 0, 0.08]], ps, [0, 1, 2]);
     expect(plain.gd.apex).toBe(-1);
     expect(raised.gd.apex).toBe(-1);

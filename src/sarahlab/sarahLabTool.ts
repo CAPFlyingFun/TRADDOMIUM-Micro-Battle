@@ -439,7 +439,13 @@ export const SARAH_RED = '#be0f2a', SARAH_LEGGINGS = '#3a3b52';
 export interface PaintedLayer { readonly template: string; readonly fabric: { readonly family: FabricFamilyId; readonly colour: number; readonly tint?: string } }
 /** A modelled garment's fabric in a built-in outfit, as the editor's FABRIC would set it. */
 export type OutfitFabric = PaintedLayer['fabric'];
-export const OUTFITS: readonly { readonly name: string; readonly garments: readonly Garment[]; readonly paint?: readonly PaintedLayer[]; readonly fabrics?: Partial<Record<Garment, OutfitFabric>> }[] = [
+/**
+ * A built-in outfit. `procedural`: its tee is the PROCEDURAL GARMENT (`garment/roomGarment.ts`) in that construction,
+ * simulated as cloth and wearing the light tee's own material (so `garments` names the light tee, whose file carries
+ * the material and its FABRIC, and `fabrics` dyes it), in place of the light tee and its cloth copy.
+ */
+export interface BuiltInOutfit { readonly name: string; readonly garments: readonly Garment[]; readonly paint?: readonly PaintedLayer[]; readonly fabrics?: Partial<Record<Garment, OutfitFabric>>; readonly procedural?: 'raglan' | 'setIn' }
+export const OUTFITS: readonly BuiltInOutfit[] = [
   { name: 'tee + leggings', garments: ['shirtAthletic', 'leggings'] },
   { name: 'top + low leggings', garments: ['shirtAthletic', 'leggingsLow'] },
   { name: 'bikini', garments: ['bikini'] },
@@ -456,6 +462,10 @@ export const OUTFITS: readonly { readonly name: string; readonly garments: reado
   // wears the crew, whose edge is clean, until a scoop can be drawn as cleanly
   // ...and the same outfit in the modelled spandex tee, light enough to offer: its round scoop neck and curved hem are
   // the picture's, its red is the same dye on jersey; the leggings stay painted under it
+  // ...and THE NEW TEE, the procedural garment drafted from her (Joshua, 2026-10-27: "Make the new shirt the default,
+  // and the other shirt as the second option to compare"): a raglan tee simulated as cloth, in her red, over the same
+  // painted leggings. The light tee's cloth copy (CLOTH SIM) stays the next outfit, to compare
+  { name: 'Sarah · red raglan tee + charcoal leggings', garments: ['shirtSpandexLite'], paint: [{ template: 'leggingsFull', fabric: { family: 'athletic', colour: 0, tint: SARAH_LEGGINGS } }], fabrics: { shirtSpandexLite: { family: 'jersey', colour: 0, tint: SARAH_RED } }, procedural: 'raglan' },
   { name: 'Sarah · red spandex tee + charcoal leggings', garments: ['shirtSpandexLite'], paint: [{ template: 'leggingsFull', fabric: { family: 'athletic', colour: 0, tint: SARAH_LEGGINGS } }], fabrics: { shirtSpandexLite: { family: 'jersey', colour: 0, tint: SARAH_RED } } },
   { name: 'Sarah · red tee + charcoal leggings', garments: [], paint: [{ template: 'leggingsFull', fabric: { family: 'athletic', colour: 0, tint: SARAH_LEGGINGS } }, { template: 'teeShort', fabric: { family: 'jersey', colour: 0, tint: SARAH_RED } }] },
   { name: 'painted tee + leggings', garments: [], paint: [{ template: 'leggingsFull', fabric: { family: 'athletic', colour: 1 } }, { template: 'teeShort', fabric: { family: 'jersey', colour: 0 } }] },
@@ -468,11 +478,18 @@ export const OUTFITS: readonly { readonly name: string; readonly garments: reado
 /** Sarah's own red tee and charcoal leggings, all painted: nothing to download. */
 export const PAINTED_DEFAULT_OUTFIT = OUTFITS.findIndex((o) => o.name === 'Sarah · red tee + charcoal leggings');
 /**
- * The outfit the room opens in on the approved v2 body (Joshua, 2026-10-23: "use that shirt ChatGPT used, but ...
- * compress it"): the modelled spandex tee, light, in her red, over the painted charcoal leggings. Its round scoop neck
- * and curved hem are his picture's, which the painted tee's crew neck and straight hem were not.
+ * The outfit the room opens in on the approved v2 body: the NEW TEE, the procedural raglan tee simulated as cloth, in
+ * her red, over the painted charcoal leggings (Joshua, 2026-10-27: "Make the new shirt the default"). Until then it was
+ * the modelled spandex tee, light (2026-10-23: "use that shirt ChatGPT used, but ... compress it"), whose cloth copy
+ * is now the second option (SIM_TEE_OUTFIT).
  */
-export const SARAH_DEFAULT_OUTFIT = OUTFITS.findIndex((o) => o.name === 'Sarah · red spandex tee + charcoal leggings');
+export const SARAH_DEFAULT_OUTFIT = OUTFITS.findIndex((o) => o.name === 'Sarah · red raglan tee + charcoal leggings');
+/**
+ * The light tee simulated as cloth (CLOTH SIM), the room's default until 2026-10-27, when Joshua made the new
+ * procedural tee the default and kept this one "as the second option to compare". A look saved in it (her own,
+ * `sarahLook.ts`) opens in the new tee, with its fabrics.
+ */
+export const SIM_TEE_OUTFIT = OUTFITS.findIndex((o) => o.name === 'Sarah · red spandex tee + charcoal leggings');
 /** Painted outfits are masks on the approved v2 body's own vertices: offered only where that body is (its recovered shirts are listed). */
 export const paintedOutfitsAvailable = (available: readonly Garment[]): boolean => available.includes('shirtRelaxedHigh');
 /**
