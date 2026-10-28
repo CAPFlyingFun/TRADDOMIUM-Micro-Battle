@@ -8,8 +8,10 @@
  *     later), every body-shape control, the belly refinement, and RANDOMIZE's ranges and locks (`actor/bodyRandom.ts`);
  *   - the CLOTHES: the outfit she wears, each paint layer (its template and dial settings, or the hand-painted mask
  *     when there is no template), its fabric, colour, stitch and detail-through-paint, each modelled garment's fabric,
- *     the shirt length, the outfit's BREAST and NAVEL DETAIL (each AUTO or a manual value: `DetailOverride`), and the
- *     pieces made in the clothing builder (`built`: straps and cords as data, `strapData.ts`).
+ *     the shirt length, the outfit's BREAST and NAVEL DETAIL (each AUTO or a manual value: `DetailOverride`), the
+ *     pieces made in the clothing builder (`built`: straps and cords as data, `strapData.ts`), and the NEW TEE's
+ *     settings with the cloth dials it is worn with (`garment`, `garment/settings.ts`) -- never its mesh: loading
+ *     remakes the tee from them and her own body.
  * Saving one part under a name keeps the other part that name already holds, so a body and an outfit can be built and
  * saved separately and still make one character. Loading puts on only what the save holds.
  *
@@ -20,7 +22,8 @@
  * original"). An outfit is paint and fabric choices on the shared base model -- no geometry or image of its own -- so
  * any character on that model can wear it. A character's clothes are either a whole outfit of her own, or a REFERENCE
  * to a library outfit with only what she changed (`OutfitRef`): her colours, fabrics, detail, garment choices, shirt
- * length. Saving her copy writes only her overrides; the library outfit is never touched by it.
+ * length, and the new tee's settings and dials she moved. Saving her copy writes only her overrides; the library outfit
+ * is never touched by it.
  *
  * The whole book is one versioned document (`persistence/store.ts`); the room keeps it on the device and can export
  * it as a file and import one, which is how a character moves to another device and, later, into the game.
@@ -33,6 +36,10 @@ import type { CoverageParams } from './paintTemplates';
 import type { RandomRule, RandomRules } from '../actor/bodyRandom';
 import { builtToJson, sanitizeBuilt, type BuiltPieces } from './strapData';
 import { readTint } from './fabricTint';
+import {
+  GARMENT_DEFAULTS, GARMENT_RECORD_VERSION, clampGarmentSettings, sameGarment, type GarmentRecord, type GarmentSettings,
+} from './garment/settings';
+import { CLOTH_TUNE_DEFAULT, type ClothTune } from './sarahLabTool';
 
 export type SaveScope = 'all' | 'body' | 'clothes';
 
@@ -65,6 +72,12 @@ export interface SavedLayer {
 export interface DetailOverride { readonly nipple: number | null; readonly navel: number | null }
 export const AUTO_DETAIL: DetailOverride = Object.freeze({ nipple: null, navel: null });
 
+/**
+ * What the room puts on for an outfit whose save holds no garment record: the approved tee (GARMENT_DEFAULTS) worn with
+ * the cloth's own dials (CLOTH_TUNE_DEFAULT). No record and this one are the same clothes (`sameClothes`).
+ */
+export const GARMENT_RECORD_DEFAULT: GarmentRecord = Object.freeze({ version: GARMENT_RECORD_VERSION, settings: GARMENT_DEFAULTS, dials: CLOTH_TUNE_DEFAULT });
+
 export interface SavedClothes {
   /** `OUTFITS` name. */
   readonly outfit: string;
@@ -81,6 +94,12 @@ export interface SavedClothes {
    * when nothing is built.
    */
   readonly built?: BuiltPieces;
+  /**
+   * THE NEW TEE (Stage 3): its settings and the cloth dials it is worn with, one versioned record and never its mesh;
+   * loading remakes the tee from it and her own body. Present only for an outfit whose tee is the procedural garment:
+   * absent for every other outfit, and in saves made before it, which load exactly as they did.
+   */
+  readonly garment?: GarmentRecord;
 }
 
 /** What a character changed on a library outfit: per paint layer her fabric choice and detail, her garments, her length. */
@@ -90,6 +109,18 @@ export interface ClothesOverrides {
   readonly shirtLength: number | null;
   /** Her breast and navel detail when it differs from the outfit's; absent or null keeps the outfit's. */
   readonly detail?: DetailOverride | null;
+  /** Her changes to the outfit's new tee; absent or null keeps the outfit's. */
+  readonly garment?: GarmentOverride | null;
+}
+
+/**
+ * What a character changed on a library outfit's NEW TEE: only the settings and dials she moved, the way her colours
+ * are kept. EASE is one field -- when any of its three numbers differs, all three are carried -- so an override never
+ * holds half of one.
+ */
+export interface GarmentOverride {
+  readonly settings?: Partial<GarmentSettings>;
+  readonly dials?: Partial<ClothTune>;
 }
 
 /** A character's clothes as a library outfit plus her own changes. */
@@ -189,8 +220,9 @@ function sameMake(a: SavedClothes, b: SavedClothes): boolean {
 
 /**
  * A character's clothes as she wears them now, kept as a REFERENCE to the library outfit she put on (`wornFrom`) with
- * only her changes, when they are that outfit with different colours, fabrics, detail, garments or length; otherwise
- * (no library outfit, or she changed its make -- a template, a dial, a painted mask) as a whole outfit of her own.
+ * only her changes, when they are that outfit with different colours, fabrics, detail, garments, length or new-tee
+ * settings and dials; otherwise (no library outfit, or she changed its make -- a template, a dial, a painted mask) as a
+ * whole outfit of her own. The new tee is never part of the make: what she moved on it is an override, like a colour.
  */
 export function clothesFor(book: CharacterBook, current: SavedClothes, wornFrom: string | null): SavedClothes | OutfitRef {
   const base = wornFrom ? findOutfit(book, wornFrom) : undefined;
@@ -202,13 +234,16 @@ export function clothesFor(book: CharacterBook, current: SavedClothes, wornFrom:
   const garments: Record<string, FabricChoice> = {};
   for (const [k, g] of Object.entries(current.garments)) if (json(g) !== json(base.clothes.garments[k])) garments[k] = g;
   const detail = json(current.detail ?? AUTO_DETAIL) !== json(base.clothes.detail ?? AUTO_DETAIL) ? { detail: current.detail ?? AUTO_DETAIL } : {};
-  return { basedOn: base.name, overrides: { layers, garments, shirtLength: current.shirtLength !== base.clothes.shirtLength ? current.shirtLength : null, ...detail } };
+  // her tee against the outfit's, or against the default tee the room puts on for an outfit that holds no record
+  const garment = current.garment ? garmentOverride(base.clothes.garment ?? GARMENT_RECORD_DEFAULT, current.garment) : null;
+  return { basedOn: base.name, overrides: { layers, garments, shirtLength: current.shirtLength !== base.clothes.shirtLength ? current.shirtLength : null, ...detail, ...(garment ? { garment } : {}) } };
 }
 
-/** Two sets of clothes that put on the same: every layer, fabric, garment, length and detail (for "changed?"). */
+/** Two sets of clothes that put on the same: every layer, fabric, garment, length, detail and the new tee (for "changed?"). */
 export function sameClothes(a: SavedClothes, b: SavedClothes): boolean {
-  const norm = (c: SavedClothes) => json({ ...c, detail: c.detail ?? AUTO_DETAIL, layers: c.layers.map((l) => l ?? null) });
-  return norm(a) === norm(b);
+  const norm = (c: SavedClothes) => json({ ...c, garment: undefined, detail: c.detail ?? AUTO_DETAIL, layers: c.layers.map((l) => l ?? null) });
+  // no record is the default tee, so a save from before it never reads as changed once the room puts the tee on
+  return norm(a) === norm(b) && sameGarmentRecord(a.garment ?? GARMENT_RECORD_DEFAULT, b.garment ?? GARMENT_RECORD_DEFAULT);
 }
 
 /** What a character wears: her own outfit, or the library outfit her reference names with her changes on top (a copy). */
@@ -218,6 +253,7 @@ export function resolveClothes(book: CharacterBook, clothes: SavedClothes | Outf
   const base = findOutfit(book, clothes.basedOn);
   if (!base) return null;
   const o = clothes.overrides, length = o.shirtLength ?? base.clothes.shirtLength;
+  const mine = o.garment ? someOverride(o.garment.settings ?? {}, o.garment.dials ?? {}) : null;
   return {
     ...base.clothes,
     shirtLength: length,
@@ -230,7 +266,42 @@ export function resolveClothes(book: CharacterBook, clothes: SavedClothes | Outf
     }),
     garments: { ...base.clothes.garments, ...o.garments },
     detail: o.detail ?? base.clothes.detail ?? AUTO_DETAIL,
+    // with her changes, her tee whole: the outfit's record (the default when it holds none) under them; without, the
+    // outfit's record as it is, and no record stays none
+    ...(mine ? { garment: wornGarment(base.clothes.garment ?? GARMENT_RECORD_DEFAULT, mine) } : {}),
   };
+}
+
+// ------------------------------------------------------------------ the new tee's record
+
+const SETTING_KEYS = Object.keys(GARMENT_DEFAULTS) as (keyof GarmentSettings)[];
+const DIAL_KEYS = Object.keys(CLOTH_TUNE_DEFAULT) as (keyof ClothTune)[];
+
+/** An override holding only what it has: no empty settings or dials, and null when there is nothing at all. */
+function someOverride(settings: Partial<GarmentSettings>, dials: Partial<ClothTune>): GarmentOverride | null {
+  const s = Object.keys(settings).length > 0, d = Object.keys(dials).length > 0;
+  return s || d ? { ...(s ? { settings } : {}), ...(d ? { dials } : {}) } : null;
+}
+/** Her tee against the outfit's: each setting and dial that differs, as she has it (EASE compared and carried whole). */
+function garmentOverride(base: GarmentRecord, mine: GarmentRecord): GarmentOverride | null {
+  const bs = clampGarmentSettings(base.settings), ms = clampGarmentSettings(mine.settings);
+  const bd = readDials(base.dials), md = readDials(mine.dials);
+  const settings = Object.fromEntries(SETTING_KEYS.filter((k) => json(bs[k]) !== json(ms[k])).map((k) => [k, ms[k]])) as Partial<GarmentSettings>;
+  const dials = Object.fromEntries(DIAL_KEYS.filter((k) => bd[k] !== md[k]).map((k) => [k, md[k]])) as Partial<ClothTune>;
+  return someOverride(settings, dials);
+}
+/** The outfit's tee with her changes on top: a whole record, every setting and dial clamped. */
+function wornGarment(base: GarmentRecord, mine: GarmentOverride): GarmentRecord {
+  const settings = clampGarmentSettings(base.settings), dials = readDials(base.dials);
+  return {
+    version: GARMENT_RECORD_VERSION,
+    settings: clampGarmentSettings({ ...settings, ...mine.settings }, settings),
+    dials: readDials({ ...dials, ...mine.dials }, dials),
+  };
+}
+/** Two records that put on the same tee: every setting (`sameGarment`) and every dial. */
+function sameGarmentRecord(a: GarmentRecord, b: GarmentRecord): boolean {
+  return sameGarment(a.settings, b.settings) && json(readDials(a.dials)) === json(readDials(b.dials));
 }
 
 /** What a save holds, as the list says it. */
@@ -311,7 +382,10 @@ function readRef(v: unknown): OutfitRef | null {
     const choice = readChoice(l.choice);
     return choice ? { choice, detail: (isRecord(l.detail) ? l.detail : {}) as unknown as LayerDetail } : null;
   }) : [];
-  return { basedOn: str(v.basedOn, 80), overrides: { layers, garments, shirtLength: typeof o.shirtLength === 'number' ? num(o.shirtLength, 0, 1, 0) : null, ...(isRecord(o.detail) ? { detail: readDetail(o.detail) } : {}) } };
+  return {
+    basedOn: str(v.basedOn, 80),
+    overrides: { layers, garments, shirtLength: typeof o.shirtLength === 'number' ? num(o.shirtLength, 0, 1, 0) : null, ...(isRecord(o.detail) ? { detail: readDetail(o.detail) } : {}), ...readGarmentOverride(o.garment) },
+  };
 }
 function readClothes(v: unknown): SavedClothes | null {
   if (!isRecord(v) || typeof v.outfit !== 'string') return null;
@@ -324,12 +398,48 @@ function readClothes(v: unknown): SavedClothes | null {
     garments,
     ...(isRecord(v.detail) ? { detail: readDetail(v.detail) } : {}),
     ...built(v.built),
+    ...readGarment(v.garment),
   };
 }
 /** Built pieces from untrusted data: only a readable set with something in it. */
 function built(v: unknown): { built?: BuiltPieces } {
   const b = v === undefined ? null : sanitizeBuilt(v);
   return b && b.pieces.length ? { built: b } : {};
+}
+
+const finite = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+/** Every cloth dial from untrusted data: a finite number clamped to 0..100, else `base`'s; unknown keys dropped. */
+function readDials(v: unknown, base: ClothTune = CLOTH_TUNE_DEFAULT): ClothTune {
+  const r = isRecord(v) ? v : {};
+  return Object.fromEntries(DIAL_KEYS.map((k) => [k, num(r[k], 0, 100, base[k])])) as ClothTune;
+}
+/**
+ * The new tee's record from untrusted data: only this version (another is left out, never misread as this one), its
+ * settings through `clampGarmentSettings` and its dials through `readDials`; nothing else it carries is kept.
+ */
+function readGarment(v: unknown): { garment?: GarmentRecord } {
+  if (!isRecord(v) || v.version !== GARMENT_RECORD_VERSION) return {};
+  return { garment: { version: GARMENT_RECORD_VERSION, settings: clampGarmentSettings(v.settings), dials: readDials(v.dials) } };
+}
+/** Whether an override's setting can be read: a known construction, a width or null (the construction's own), all three of the ease, else a finite number. */
+function readableSetting(k: keyof GarmentSettings, v: unknown): boolean {
+  if (k === 'construction') return v === 'raglan' || v === 'setIn';
+  if (k === 'neckWidth') return v === null || finite(v);
+  if (k === 'ease') return isRecord(v) && finite(v.bust) && finite(v.waist) && finite(v.hip);
+  return finite(v);
+}
+/**
+ * Her changes to an outfit's tee from untrusted data: only the settings and dials present and readable, each clamped
+ * to its range (the settings as `clampGarmentSettings` clamps them); none at all is no override.
+ */
+function readGarmentOverride(v: unknown): { garment?: GarmentOverride } {
+  if (!isRecord(v)) return {};
+  const s = isRecord(v.settings) ? v.settings : {}, d = isRecord(v.dials) ? v.dials : {};
+  const clamped = clampGarmentSettings(s);
+  const settings = Object.fromEntries(SETTING_KEYS.filter((k) => readableSetting(k, s[k])).map((k) => [k, clamped[k]])) as Partial<GarmentSettings>;
+  const dials = Object.fromEntries(DIAL_KEYS.filter((k) => finite(d[k])).map((k) => [k, num(d[k], 0, 100, 0)])) as Partial<ClothTune>;
+  const garment = someOverride(settings, dials);
+  return garment ? { garment } : {};
 }
 
 /** A book from untrusted parsed JSON: known fields only, numbers clamped, unreadable characters dropped. */
