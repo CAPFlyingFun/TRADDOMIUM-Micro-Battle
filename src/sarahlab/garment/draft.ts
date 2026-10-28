@@ -22,6 +22,10 @@
  *   four-way corner where a tee usually tears becomes four corners a gusset's width apart, with fabric between them.
  * - The SLEEVE is a tube from her arm's own girths plus ease, from the underarm to its hem; its length is measured, as
  *   a sleeve is, from her shoulder point.
+ * - THE FULL EXTENT (Stage 3, `TeeParams.extend`): extension pieces sewn on under the plain tee -- FRONTEXT and BACKEXT
+ *   from the drafted hem down to her knee, SLEEVEEXTP and SLEEVEEXTM from each cuff down to her wrist -- so the instant
+ *   controls can CUT a longer tee instead of drafting one (`cuts.ts`). They come after every plain piece, which are
+ *   drafted exactly as without them, so every plain particle keeps its number (`sew.ts` numbers them in piece order).
  *
  * Every edge is named, every seam pairs two edges (types.ts), and the whole pattern is mirror-symmetric: the front and
  * back are drafted for x >= 0 and mirrored, the sleeve and gusset of her -x side are the mirror images of her +x
@@ -126,6 +130,16 @@ const BUST_LIFT_SHARE = 0.6;
 const BUST_LIFT_MAX = 0.06;
 /** A bust dart's mouth sits this far under the side seam's top, and stops this short of her bust's point, metres. */
 const BUST_DART_BELOW = 0.05, BUST_DART_SHORT = 0.025;
+/** The full extent's pieces stop at least this far past the drafted hem and cuff, metres (a hem drafted below her knee, a sleeve to her wrist). */
+const EXTENT_MIN = 0.02;
+/**
+ * The level-hem rule's centre extra is tabled every this many metres of her height (`centreExtras`): her dress form is
+ * only known every centimetre, and on Sarah a table every 2 mm and one every 1 cm agree to a hundredth of a millimetre.
+ */
+const EXTRA_STEP = 0.01;
+
+/** The pieces the full extent adds (`TeeParams.extend`), each with the plain piece it is sewn on under and continues. */
+export const EXTENSION_PARENT: ReadonlyMap<string, string> = new Map([['frontExt', 'front'], ['backExt', 'back'], ['sleeveExtP', 'sleeveP'], ['sleeveExtM', 'sleeveM']]);
 
 /** The numbers the draft was made from and came out at, for the review sheet. */
 export interface DraftNotes {
@@ -147,11 +161,76 @@ export interface DraftNotes {
   readonly bustLift: number;
 }
 
+/**
+ * What the instant cuts (`cuts.ts`) read off the draft, so they cut by the draft's own rules instead of a copy of them.
+ * Pattern-plane metres: a body piece's (x across, y her height at its side seam), a sleeve's (y up the arm, 0 at the
+ * underarm corners).
+ */
+export interface DraftGuide {
+  readonly construction: SleeveConstruction;
+  /** The underarm line, and the side seam's top (where the gusset begins; the underarm line without one). */
+  readonly underarmY: number;
+  readonly sideTopY: number;
+  /** The full extent's hem at the side seams: her knee (held EXTENT_MIN under the drafted hem), drafted or not. */
+  readonly kneeY: number;
+  /**
+   * Each body piece's side seam, its +x half, by the side-seam rule (before a set-in's bust shaping splits or stretches
+   * it): from the extension's hem (the drafted hem without `extend`) up to the side seam's top.
+   */
+  readonly side: { readonly front: readonly Vec2[]; readonly back: readonly Vec2[] };
+  /**
+   * The level hem's centre extra (`hemOf`) for a hem standing at side height `y`, front or back, metres: exactly the
+   * draft's at the drafted hem and at the extension's hem, the same rule between (`centreExtras`). Tabled on first use.
+   */
+  extra(side: 'front' | 'back', y: number): number;
+  /** The front neckline as drafted (NECK SHAPE included), its +x half: from its side end (u > 0) in to the centre front (u = 0). */
+  readonly frontNeck: readonly Vec2[];
+  /** The sleeve's frame (both sleeves'): her shoulder point's level, the drafted cuff, her wrist (the extension's cuff, drafted or not), its top edge's front and back ends (a set-in's crown, both). */
+  readonly sleeve: { readonly shoulderV: number; readonly cuffV: number; readonly wristV: number; readonly topFront: number; readonly topBack: number };
+}
+
 export interface Draft {
   readonly pattern: Pattern;
   readonly notes: DraftNotes;
   /** Her upper front and back developed flat (`develop.ts`): the bodices above the underarm are in these pattern heights. */
   readonly develop: { readonly front: Development; readonly back: Development; /** The pattern's across-arc -> her lateral |x|. */ readonly xOfU: (u: number) => number };
+  /** What the cuts read (Stage 3). */
+  readonly guide: DraftGuide;
+}
+
+/**
+ * The level-hem rule's centre extra (`hemOf`: how much further a tape down her centre front (back) from the underarm line
+ * `yU` bridges than her side drops) for every hem height from `y0` up to `yU`, in one walk up her centre: the tape to a
+ * hem at y is the upper convex envelope of her centre from y up (`profile`), and that of every such stretch comes out of
+ * one pass of Andrew's monotone chain run DOWN her (after the point at y is added, the stack is the envelope from y up),
+ * every EXTRA_STEP. Linear between samples, held at the ends.
+ */
+function centreExtras(form: DressForm, side: 'front' | 'back', y0: number, yU: number): (y: number) => number {
+  const n = Math.max(1, Math.ceil((yU - y0) / EXTRA_STEP)), out = side === 'front' ? 1 : -1;
+  const ys = new Float64Array(n + 1), zs = new Float64Array(n + 1);
+  for (let i = 0; i <= n; i++) { ys[i] = i === n ? yU : y0 + (yU - y0) * (i / n); zs[i] = out * surfaceZ(form, side, ys[i], 0); }
+  // where her outline misses her midline (it never should), the nearest height that does not
+  for (let pass = 0; pass < 2; pass++) for (let k = 0; k <= n; k++) {
+    const i = pass === 0 ? k : n - k, j = pass === 0 ? i - 1 : i + 1;
+    if (Number.isNaN(zs[i]) && j >= 0 && j <= n && !Number.isNaN(zs[j])) zs[i] = zs[j];
+  }
+  const extra = new Float64Array(n + 1), hull: number[] = [];
+  const seg = (a: number, b: number) => Math.hypot(ys[b] - ys[a], zs[b] - zs[a]);
+  let total = 0;
+  for (let i = n; i >= 0; i--) {
+    // `profile`'s rule in (-y, z), where this walk runs upward: drop the last point while the turn is not clockwise
+    while (hull.length >= 2) {
+      const a = hull[hull.length - 2], b = hull[hull.length - 1];
+      if ((ys[a] - ys[b]) * (zs[i] - zs[a]) - (zs[b] - zs[a]) * (ys[a] - ys[i]) >= 0) { total -= seg(a, b); hull.pop(); } else break;
+    }
+    if (hull.length) total += seg(hull[hull.length - 1], i);
+    hull.push(i);
+    extra[i] = total - (yU - ys[i]);
+  }
+  return (y: number): number => {
+    const f = Math.min(n, Math.max(0, (y - y0) / (yU - y0) * n)), i = Math.min(n - 1, Math.floor(f));
+    return extra[i] + (extra[i + 1] - extra[i]) * (f - i);
+  };
 }
 
 const edge = (name: string, points: readonly Vec2[], spacing: number): PatternEdge => ({ name, points, spacing });
@@ -210,9 +289,9 @@ export function draftTee(measure: BodyMeasure, params: TeeParams = TEE_DEFAULTS,
   // the centre is longer than the side by how much further a tape down her centre bridges than the side drops
   const extraF = profile(frontForm, 'front', 0, yHem, yU).length - (yU - yHem);
   const extraB = profile(form, 'back', 0, yHem, yU).length - (yU - yHem);
-  const hemOf = (side: Vec2[], extra: number): Vec2[] => {
+  const hemOf = (side: Vec2[], extra: number, y = yHem): Vec2[] => {
     const w = side[0][0], pts: Vec2[] = [];
-    for (let i = 0; i <= 24; i++) { const f = i / 24; pts.push([f * w, yHem - Math.max(0, extra) * (1 - f * f)]); }
+    for (let i = 0; i <= 24; i++) { const f = i / 24; pts.push([f * w, y - Math.max(0, extra) * (1 - f * f)]); }
     return densify(pts);
   };
   const frontHem = hemOf(frontSide, extraF), backHem = hemOf(backSide, extraB);
@@ -280,6 +359,19 @@ export function draftTee(measure: BodyMeasure, params: TeeParams = TEE_DEFAULTS,
     }
     return densify(pts);
   };
+  // NECK SHAPE (the front's only): each point of the drafted neckline moved `neckCurve` of the way to the straight line
+  // from its side end to its centre, at the same across; both ends kept, so no seam that meets them moves
+  const neckCurve = Math.max(0, Math.min(1, p.neckCurve ?? 0));
+  const shaped = (pts: Vec2[]): Vec2[] => {
+    if (!(neckCurve > 0)) return pts;
+    const a = pts[0], b = pts[pts.length - 1], last = pts.length - 1;
+    const straight = (u: number) => b[1] + (a[1] - b[1]) * (u - b[0]) / (a[0] - b[0]);
+    return densify(pts.map((q, i): Vec2 => (i === 0 || i === last ? q : [q[0], q[1] + neckCurve * (straight(q[0]) - q[1])])));
+  };
+  // the sleeve's frame as drafted (her shoulder point's level, the cuff, the top edge's two ends), its tube's under edge
+  // and the front neckline, for the full extent and the cuts
+  let shoulderV = 0, cuffV = 0, topFrontV = 0, topBackV = 0;
+  let under: Vec2[] = [], frontNeck: Vec2[] = [];
 
   const pieces: PatternPiece[] = [];
   const seams: Seam[] = [];
@@ -316,7 +408,7 @@ export function draftTee(measure: BodyMeasure, params: TeeParams = TEE_DEFAULTS,
       const s = Math.min(0.999, r[0] / uSide), depth = Math.max(0.005, (r[1] - vC) / (1 - Math.sqrt(1 - s * s)));
       return necklineOf(uSide, vC + depth, vC, to);
     };
-    const neckF = throughRaglan(neckFh, devF, uNeckF, rF), neckB = throughRaglan(neckBh, devB, uNeckB, rB);
+    const neckF = shaped(throughRaglan(neckFh, devF, uNeckF, rF)), neckB = throughRaglan(neckBh, devB, uNeckB, rB);
     const ragF = bowed(frontUnder, neckF[0], RAGLAN_CURVE), ragB = bowed(backUnder, neckB[0], RAGLAN_CURVE);
     frontLen = polyLength(ragF); backLen = polyLength(ragB);
     const sidesF = [edge('sideP', frontSide, SPACING.side), ...(sG > 0 ? [edge('gusP', gusEdge(frontSide), SPACING.gus)] : []), edge('raglanP', ragF, SPACING.seam)];
@@ -347,6 +439,7 @@ export function draftTee(measure: BodyMeasure, params: TeeParams = TEE_DEFAULTS,
     const ub = densify(smooth(underB, 4));
     for (const q of [...ub].reverse()) underF.push([-q[0], q[1]]);
     hemWidth = 2 * ub[0][0];
+    shoulderV = H - shoulderLen; cuffV = vHem; topFrontV = topF[1]; topBackV = topB[1]; under = ub; frontNeck = neckF;
     const gusB = sG > 0 ? line([W / 2, -sG], cornerB) : null, gusF = sG > 0 ? line(cornerF, [-W / 2, -sG]) : null;
     const sleeve: PatternPiece = {
       id: 'sleeveP', role: 'sleeve', side: 1, symmetric: false, spacing: SPACING.sleeve,
@@ -397,7 +490,7 @@ export function draftTee(measure: BodyMeasure, params: TeeParams = TEE_DEFAULTS,
     bustLift = lift;
     const up = (q: Vec2): Vec2 => [q[0], q[1] + lift];
     const spFl = up(spF), underFl = up(frontUnder);
-    const neckF = necklineOf(uNeckF, vNeckSidePlain + lift, devF.v(0, vFrontCentre) + lift, uNeckF);
+    const neckF = shaped(necklineOf(uNeckF, vNeckSidePlain + lift, devF.v(0, vFrontCentre) + lift, uNeckF));
     shoulderSeam = dist(neckF[0], spFl);
     const ahF = armholeOf(spFl, underFl, creaseF);
     frontLen = polyLength(ahF); backLen = polyLength(ahB);
@@ -468,6 +561,7 @@ export function draftTee(measure: BodyMeasure, params: TeeParams = TEE_DEFAULTS,
     for (let i = 0; i < underB.length; i++) { const v = underB[i][1], k = Math.max(0, Math.min(1, (v + sG + 0.04) / 0.04)); underB[i] = [underB[i][0] + (W / 2 - underB[i][0]) * k, v]; }
     const ub = densify(smooth(underB, 4)), underF = [...ub].reverse().map((q) => [-q[0], q[1]] as Vec2);
     hemWidth = 2 * ub[0][0];
+    shoulderV = h; cuffV = vHem; topFrontV = h; topBackV = h; under = ub; frontNeck = neckF;
     const gusB = sG > 0 ? line([W / 2, -sG], [W / 2, 0]) : null, gusF = sG > 0 ? line([-W / 2, 0], [-W / 2, -sG]) : null;
     const sleeve: PatternPiece = {
       id: 'sleeveP', role: 'sleeve', side: 1, symmetric: false, spacing: SPACING.sleeve,
@@ -510,6 +604,78 @@ export function draftTee(measure: BodyMeasure, params: TeeParams = TEE_DEFAULTS,
     seams.push({ name: `underarm${s}`, a: { piece: `sleeve${s}`, edge: 'underBack' }, b: { piece: `sleeve${s}`, edge: 'underFront' } });
   }
 
+  // --- the full extent (Stage 3): her knee and her wrists, held at least EXTENT_MIN past the drafted hem and cuff --------
+  const yK = Math.min(measure.kneeY, yHem - EXTENT_MIN);
+  const outside = (arm.outsideLength + arm2.outsideLength) / 2;
+  const wristV = Math.min(shoulderV - outside, cuffV - EXTENT_MIN);
+  // the level-hem rule's centre extra at any height from her knee to the underarm, tabled on first use
+  let rawFront: ((y: number) => number) | null = null, rawBack: ((y: number) => number) | null = null;
+  const rawExtra = (s: 'front' | 'back') => (s === 'front' ? (rawFront ??= centreExtras(frontForm, 'front', yK, yU)) : (rawBack ??= centreExtras(form, 'back', yK, yU)));
+  let sideFront: readonly Vec2[] = frontSide, sideBack: readonly Vec2[] = backSide;
+  if (p.extend) {
+    // FRONTEXT and BACKEXT: the side seams continued down to her knee by the same rule (below her hip the ease is the
+    // hip's), each ending exactly on its drafted hem's corner; a level hem at her knee by the drafted hem's rule with its
+    // own centre extra; the top the plain piece's hem, walked the other way, sewn to it.
+    // The side is read a centimetre apart down from the hem, so neighbouring heights' side planes (`zSide`, eleven
+    // outlines each) share ten of their eleven, and the front and back share all of them: remembered, they cost an
+    // eighth of what reading them afresh does (the plain sides are read as they always were)
+    const planeAt = new Map<number, number>();
+    const zSideOnce = (y: number): number => {
+      let s = 0, k = 0;
+      for (let d = -0.05; d <= 0.05 + 1e-9; d += 0.01) {
+        const key = Math.round((y + d) * 1e6);
+        let z = planeAt.get(key);
+        if (z === undefined) { z = midZ(form, y + d); planeAt.set(key, z); }
+        s += z; k++;
+      }
+      return s / k;
+    };
+    const extSide = (half: (y: number, z: number) => number, corner: Vec2): Vec2[] => {
+      const ys = [yK];
+      for (let k = Math.ceil((yHem - yK) / 0.01) - 1; k >= 1; k--) if (yHem - 0.01 * k > yK + 0.005) ys.push(yHem - 0.01 * k);
+      const pts: Vec2[] = ys.map((y) => [half(y, zSideOnce(y)), y]);
+      pts.push(corner);
+      return densify(smooth(pts, 6));
+    };
+    const fSide = extSide((y, z) => halves(frontForm, y, z).front / 2 + ease(y) / 4, frontSide[0]);
+    const bSide = extSide((y, z) => halves(form, y, z).back / 2 + ease(y) / 4, backSide[0]);
+    sideFront = [...fSide, ...frontSide.slice(1)]; sideBack = [...bSide, ...backSide.slice(1)];
+    pieces.push(mirrored('frontExt', 'torso', { hem: edge('hem', hemOf(fSide, rawExtra('front')(yK), yK), SPACING.hem), sides: [edge('sideP', fSide, SPACING.side)], top: edge('top', [...frontHem].reverse(), SPACING.hem) }, swapPM));
+    pieces.push(mirrored('backExt', 'torso', { hem: edge('hem', hemOf(bSide, rawExtra('back')(yK), yK), SPACING.hem), sides: [edge('sideM', bSide, SPACING.side)], top: edge('top', [...backHem].reverse(), SPACING.hem) }, swapPM));
+    // SLEEVEEXTP (and its mirror): the tube's under edge continued down to her wrist by the same rule, ending exactly on
+    // the drafted cuff's corner; a cuff at her wrist; the top the sleeve's cuff walked the other way, sewn to it
+    const cuff = pieces.find((q) => q.id === 'sleeveP')!.edges.find((e) => e.name === 'cuff')!.points;
+    const pts: Vec2[] = [], n = Math.max(2, Math.ceil((cuffV - wristV) / 0.01));
+    for (let i = 0; i < n; i++) {
+      const v = wristV + (cuffV - wristV) * (i / n), x = Math.max(tubeHalf(v), 0), k = Math.max(0, Math.min(1, (v + sG + 0.04) / 0.04));
+      pts.push([x + (W / 2 - x) * k, v]);
+    }
+    pts.push(under[0]);
+    const ub = densify(smooth(pts, 4)), uf = densify([...ub].reverse().map((q) => [-q[0], q[1]] as Vec2));
+    const ext: PatternPiece = {
+      id: 'sleeveExtP', role: 'sleeve', side: 1, symmetric: false, spacing: SPACING.sleeve,
+      edges: [edge('cuff', line([-ub[0][0], wristV], [ub[0][0], wristV]), SPACING.hem), edge('underBack', ub, SPACING.under), edge('top', [...cuff].reverse(), SPACING.hem), edge('underFront', uf, SPACING.under)],
+    };
+    pieces.push(ext, mirrorPiece(ext, 'sleeveExtM', (x) => x));
+    seams.push({ name: 'hemFront', a: { piece: 'front', edge: 'hem' }, b: { piece: 'frontExt', edge: 'top' } });
+    seams.push({ name: 'hemBack', a: { piece: 'back', edge: 'hem' }, b: { piece: 'backExt', edge: 'top' } });
+    for (const s of ['P', 'M'] as const) {
+      seams.push({ name: `sideExt${s}`, a: { piece: 'frontExt', edge: `side${s}` }, b: { piece: 'backExt', edge: `side${s}` } });
+      seams.push({ name: `cuff${s}`, a: { piece: `sleeve${s}`, edge: 'cuff' }, b: { piece: `sleeveExt${s}`, edge: 'top' } });
+      seams.push({ name: `underarmExt${s}`, a: { piece: `sleeveExt${s}`, edge: 'underBack' }, b: { piece: `sleeveExt${s}`, edge: 'underFront' } });
+    }
+  }
+  // the extra at the drafted hem is the plain draft's own: `profile` stops its tape at its last 2 mm step under the
+  // underarm line, so it reads up to that much less than the table, which runs to the line itself. The difference is
+  // taken out in full at the drafted hem and none of it at her knee (the table drew that hem) or at the underarm line
+  // (where every extra is 0), straight between
+  const extraAt = (s: 'front' | 'back', y: number): number => {
+    const raw = rawExtra(s), atHem = s === 'front' ? extraF : extraB;
+    if (y === yHem) return atHem;
+    const share = y > yHem ? (yU - y) / (yU - yHem) : (y - yK) / (yHem - yK);
+    return raw(y) + (atHem - raw(yHem)) * Math.max(0, Math.min(1, share));
+  };
+
   return {
     pattern: { pieces, seams },
     notes: {
@@ -520,6 +686,10 @@ export function draftTee(measure: BodyMeasure, params: TeeParams = TEE_DEFAULTS,
       bustLift,
     },
     develop: { front: devF, back: devB, xOfU },
+    guide: {
+      construction: p.construction, underarmY: yU, sideTopY: yS, kneeY: yK, side: { front: sideFront, back: sideBack }, extra: extraAt, frontNeck,
+      sleeve: { shoulderV, cuffV, wristV, topFront: topFrontV, topBack: topBackV },
+    },
   };
 }
 

@@ -10,7 +10,12 @@
  *   its seam under it; the crown above blends from the top of the tube up to where it is sewn (the neckline over her
  *   shoulder for a raglan, her shoulder point for a set-in sleeve), bowed out over her shoulder.
  * - GUSSET: filled between its four corners, which are particles the front, back and sleeve have placed.
- * A seam particle takes the mean of its places in each piece it belongs to.
+ * - THE FULL EXTENT's pieces (`draft.ts` EXTENSION_PARENT) each as the piece they continue: FRONTEXT as the front,
+ *   BACKEXT as the back (her trunk only), a sleeve's extension as its tube (her arm).
+ * A seam particle takes the mean of its places in each piece it belongs to -- except that a particle a plain piece places
+ * (the hem's, the cuff's) keeps exactly the plain tee's place, so the plain tee never moves: an extension would place a
+ * hem particle at the same point but for rounding, and a cuff particle round its tube at the tube's own width, where the
+ * plain sleeve has always placed its cuff at the tube's 5 cm floor (`floorOf`, below), up to 7 cm from there on Sarah.
  *
  * Also the REGION each particle may bind to: body pieces her trunk only (so the cloth at her side never takes her arm as
  * its skin), sleeve tubes her arm, crowns and gussets either. Plain TypeScript; rest metres.
@@ -18,7 +23,7 @@
 import { BIND_ANY, BIND_ARM, BIND_TRUNK } from './bind';
 import { surfaceZ } from './form';
 import { hullAt } from './measure';
-import type { Draft } from './draft';
+import { EXTENSION_PARENT, type Draft } from './draft';
 import type { BodyMeasure, DressForm, Pattern, SewnGarment, Vec3 } from './types';
 
 /** How far off her the body pieces start, and the sleeves past her arm's own radius, metres. */
@@ -173,17 +178,25 @@ export function placeGarment(sewn: SewnGarment, pattern: Pattern, draft: Draft, 
     return toBack <= 0 ? lerp(N, F, Math.min(1, -toBack / Math.max(1e-6, nf))) : lerp(N, B, Math.min(1, toBack / Math.max(1e-6, nb)));
   };
 
+  // the extension's pieces come after every plain one (draft.ts), so a plain piece has placed what it shares with them first
+  const extension = pattern.pieces.map((p) => EXTENSION_PARENT.has(p.id)), byPlain = new Uint8Array(n);
+  // a sleeve's tube is as wide as its outline at a vertex's height, and a cuff vertex's Float32 height can fall a hair
+  // under the outline's lowest point, where `halfWidthAt` finds nothing and the tube takes its 5 cm floor: the plain
+  // sleeve's cuff has always been placed so (bunched toward its seam, the cloth then fits it), and keeps that place. An
+  // extension's tube is read no lower than its own cuff
+  const floorOf = pattern.pieces.map((p, i) => (extension[i] ? Math.min(...p.edges.flatMap((e) => e.points.map((q) => q[1]))) : -Infinity));
   for (let v = 0; v < sewn.vertexParticle.length; v++) {
-    const piece = pattern.pieces[sewn.vertexPiece[v]], particle = sewn.vertexParticle[v];
+    const pi = sewn.vertexPiece[v], piece = pattern.pieces[pi], particle = sewn.vertexParticle[v];
+    if (extension[pi]) { if (byPlain[particle]) continue; } else byPlain[particle] = 1;
     const u = sewn.uv[v * 2], w = sewn.uv[v * 2 + 1];
     if (piece.role === 'torso') {
-      const front = piece.id === 'front';
+      const front = (EXTENSION_PARENT.get(piece.id) ?? piece.id) === 'front';
       add(particle, torsoAt(front, u, w));
       region[particle] = BIND_TRUNK; trunkOnly[particle] = 1;
     } else if (piece.role === 'sleeve') {
       const s: 0 | 1 = piece.id.endsWith('P') ? 0 : 1;
       const tube = (vv: number, xx: number) => {
-        const half = Math.max(0.05, halfWidthAt(piece, vv));
+        const half = Math.max(0.05, halfWidthAt(piece, Math.max(vv, floorOf[pi])));
         return ringAt(s, Math.min(0, vv), xx, half, (2 * half) / (2 * Math.PI) + SLEEVE_OFF);
       };
       if (w <= 0) { add(particle, tube(w, u)); if (region[particle] !== BIND_TRUNK) region[particle] = BIND_ARM; }
