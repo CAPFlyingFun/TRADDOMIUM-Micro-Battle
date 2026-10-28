@@ -66,6 +66,15 @@ export const SELF_DISTANCE = 0.005;
  * under her ("make sure the shirt retains the 100% belly rounded shape").
  */
 export const HANG_FROM = -0.4, HANG_TO = -0.9;
+/**
+ * ...but where her skin has grown far past the tee as tailored -- her belly at 150-200% -- it hangs from level, as the
+ * first cut did (Joshua, 2026-10-28, on the two cuts side by side: "the new 100% looks good, but the 200% is wrong… the
+ * last 200% was good"): HANG_BIG_FROM / HANG_BIG_TO, eased in as an edge's stretch goes from HANG_GROWN_FROM to
+ * HANG_GROWN_TO (measured on her shape as the cut reads it, her front under the belly at 100% stretches up to 2.0
+ * times, at 150% 2.3-2.6, at 200% 2.5-3).
+ */
+export const HANG_BIG_FROM = 0, HANG_BIG_TO = -0.35;
+export const HANG_GROWN_FROM = 2.0, HANG_GROWN_TO = 2.5;
 
 
 /**
@@ -312,12 +321,18 @@ export class GarmentCloth {
       // underside of her belly, where it hangs
       // (an edge's slope down her and the way her skin faces are both read from her shape as it is, not smoothed)
       const N = new Float32Array(n * 3), raw = this.skin.restShape(new Float32Array(n * 3), this.fitOffset, N), now = this.smoothed(raw.slice());
-      const [from, to] = this.hang, hang = (p: number) => { if (!(from > to)) return 0; const t = Math.min(1, Math.max(0, (from - N[p * 3 + 1]) / (from - to))); return t * t * (3 - 2 * t); };
+      const ease = (t: number) => { const u = Math.min(1, Math.max(0, t)); return u * u * (3 - 2 * u); };
+      const [from0, to0] = this.hang, g0 = HANG_GROWN_FROM, g1 = HANG_GROWN_TO, hangs = from0 > to0;
+      const hang = (p: number, from: number, to: number) => ease((from - N[p * 3 + 1]) / (from - to));
       for (const k of this.restLengths.keys()) {
         const a = Math.floor(k / n), b = k % n, lb = len(T, a, b), ln = len(now, a, b);
         let r = lb > 1e-6 && Number.isFinite(ln) ? ln / lb : 1;
         const lr = len(raw, a, b), down = lr > 1e-6 ? Math.abs(raw[b * 3 + 1] - raw[a * 3 + 1]) / lr : 0;
-        r = 1 + (r - 1) * (1 - down * (hang(a) + hang(b)) / 2);
+        if (hangs) {
+          // where she has grown far past the tee, it hangs from level (HANG_BIG_FROM)
+          const big = ease((r - g0) / (g1 - g0)), from = from0 + (HANG_BIG_FROM - from0) * big, to = to0 + (HANG_BIG_TO - to0) * big;
+          r = 1 + (r - 1) * (1 - down * (hang(a, from, to) + hang(b, from, to)) / 2);
+        }
         this.fit.set(k, Math.min(FIT_MAX, Math.max(FIT_MIN, r)));
       }
       const keep = this.sim.positions.slice(0, n * 3);

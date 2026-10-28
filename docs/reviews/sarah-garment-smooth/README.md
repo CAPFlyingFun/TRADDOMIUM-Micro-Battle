@@ -40,6 +40,38 @@ and flattened its curve.
 - **Recut rate.** While the slider is dragged, the tee is recut at most every 0.12 s, because a recut takes 40–100 ms.
   The last recut always lands once she stops changing.
 
+## Round 3 (Joshua, 2026-10-28: "the new 100% looks good, but the 200% is wrong… the last 200% was good")
+
+Round 1's hang (from level) suited a very big belly. Round 2's hang (from 0.4 down) suited 100%. Each edge now takes
+round 2's range, eased toward round 1's (`HANG_BIG_FROM` 0, `HANG_BIG_TO` −0.35) as her skin under it grows from 2 to
+2.5 times the tee as tailored (`HANG_GROWN_FROM` and `HANG_GROWN_TO`).
+
+That stretch, measured on her:
+
+- **100%:** up to 2.0 under her belly, so 100% keeps round 2's cut.
+- **150%:** 2.3 to 2.6.
+- **200%:** 2.5 to 3.
+
+Folds over 60° after round 3, slider dragged from 73%:
+
+| Belly | Folds |
+| --- | --- |
+| 0% | 71 |
+| 41% | 69 |
+| 67% | 68 |
+| 100% | 66 |
+| 200% | 96 (round 1: 119, round 2: 73) |
+
+At 200% the hem rounds under her belly the way it did in round 1.
+
+Checks:
+
+- 91 garment tests pass, including a new one for the eased hang.
+- The full suite passes: 4,569.
+- typecheck, relay:typecheck, build and probe:boot pass.
+
+The sheets now show round 1, round 2 and now.
+
 ## The fix (`garmentCloth.ts`, `roomGarment.ts`, `clothSkin.ts`)
 
 - **Measured from the shape it was tailored from.** Every cut is measured against her 0% design (`tailoredShape`), on

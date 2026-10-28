@@ -78,7 +78,7 @@ import { polyLength } from '../src/sarahlab/garment/curves';
 import { BIND_ANY, BIND_TRUNK } from '../src/sarahlab/garment/bind';
 import { draftTee, SET_IN_NECK, TEE_DEFAULTS, teeParams, type Draft, type TeeParams } from '../src/sarahlab/garment/draft';
 import { ClothSim, type ClothSettings } from '../src/sarahlab/clothSim';
-import { BEND_COMPLIANCE, FIT_MAX, FIT_MIN, FIT_SMOOTHING, GarmentCloth, HANG_FROM, HANG_TO, LOOSE_OVER_ARM, RESCUE_OVER, SELF_DISTANCE } from '../src/sarahlab/garment/garmentCloth';
+import { BEND_COMPLIANCE, FIT_MAX, FIT_MIN, FIT_SMOOTHING, GarmentCloth, HANG_BIG_FROM, HANG_BIG_TO, HANG_FROM, HANG_GROWN_FROM, HANG_GROWN_TO, HANG_TO, LOOSE_OVER_ARM, RESCUE_OVER, SELF_DISTANCE } from '../src/sarahlab/garment/garmentCloth';
 import { APEX_MAX, APEX_REACH, COVER_REACH, DOME_MARGIN, domeOver, GarmentDetail, SHADE_NAVEL_GROW, SHADE_SLOPE, SHADE_SPREAD, SPACING_SLACK, TENT_SLOPE, type RestBody } from '../src/sarahlab/garment/garmentDetail';
 import { DETAIL_LOOK, DetailSpots, type DetailPoints, type Poser } from '../src/sarahlab/detailSpots';
 import { measureBody } from '../src/sarahlab/garment/measure';
@@ -2064,6 +2064,62 @@ describe('GarmentCloth.refit with tailoredShape: the cut a function of her shape
     const smoothed = run(LEVEL);
     for (const f of smoothed.ring) expect(Math.abs(f - 1.2)).toBeLessThan(0.002);
     for (const f of smoothed.down) { expect(f).toBeGreaterThan(1); expect(f).toBeLessThan(1.12); }
+  });
+
+  it('hang when she has grown far past it: from level to HANG_BIG_TO, eased in as an edge stretches 2 to 2.5 times', () => {
+    expect([HANG_BIG_FROM, HANG_BIG_TO]).toEqual([0, -0.35]);
+    expect([HANG_GROWN_FROM, HANG_GROWN_TO]).toEqual([2.0, 2.5]);
+    // the hang test's cone (skin about 0.53 down), unsmoothed so the stretch each edge reads is exactly s
+    const g = new THREE.CylinderGeometry(0.3, 0.05, 0.4, 24, 8, true), nv = g.getAttribute('position').count;
+    const sw = new Float32Array(nv * 4);
+    for (let v = 0; v < nv; v++) sw[v * 4] = 1;
+    g.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(new Uint16Array(nv * 4), 4));
+    g.setAttribute('skinWeight', new THREE.Float32BufferAttribute(sw, 4));
+    const cone = (): THREE.SkinnedMesh => {
+      const mesh = new THREE.SkinnedMesh(g.clone(), new THREE.MeshBasicMaterial()), root = new THREE.Group(), bone = new THREE.Bone();
+      root.scale.setScalar(100); root.add(bone, mesh); root.updateMatrixWorld(true); mesh.bind(new THREE.Skeleton([bone]));
+      return mesh;
+    };
+    const rows = [0.15, 0.1, 0.05, 0, -0.05, -0.1, -0.15], radius = (y: number) => 0.05 + 0.25 * (y + 0.2) / 0.4 + 0.02;
+    const ease = (t: number) => { const u = Math.min(1, Math.max(0, t)); return u * u * (3 - 2 * u); };
+    /** Cut for her `sc` times with `hang`: each down and ring edge's cut, and the cut refit's rule gives it (from her skin now). */
+    const run = (sc: number, hang?: [number, number]) => {
+      const r = absolute(cone(), tube(radius, rows));
+      if (hang) r.gc.hang = hang;
+      r.gc.fitSmoothing = 0; r.gc.settle();
+      walk(r.gc, r.body, [sc]);
+      const skin = r.gc['skin'] as ClothSkin, N = new Float32Array(r.n * 3), raw = skin.restShape(new Float32Array(r.n * 3), 0, N);
+      const T = r.gc['tailoredBase'] as Float32Array, [from0, to0] = r.gc.hang;
+      const len = (P: Float32Array, a: number, b: number) => Math.hypot(P[b * 3] - P[a * 3], P[b * 3 + 1] - P[a * 3 + 1], P[b * 3 + 2] - P[a * 3 + 2]);
+      const ring: { got: number; want: number }[] = [], down: { got: number; want: number }[] = [];
+      for (const k of (r.gc['restLengths'] as Map<number, number>).keys()) {
+        const a = Math.floor(k / r.n), b = k % r.n, got = fits(r.gc).get(k)!;
+        let x = len(raw, a, b) / len(T, a, b);
+        if (from0 > to0) {
+          const big = ease((x - HANG_GROWN_FROM) / (HANG_GROWN_TO - HANG_GROWN_FROM)), from = from0 + (HANG_BIG_FROM - from0) * big, to = to0 + (HANG_BIG_TO - to0) * big;
+          const h = (p: number) => ease((from - N[p * 3 + 1]) / (from - to)), dn = Math.abs(raw[b * 3 + 1] - raw[a * 3 + 1]) / len(raw, a, b);
+          x = 1 + (x - 1) * (1 - dn * (h(a) + h(b)) / 2);
+        }
+        const want = Math.min(FIT_MAX, Math.max(FIT_MIN, x));
+        if (Math.floor(a / AROUND) === Math.floor(b / AROUND)) ring.push({ got, want }); else if (a % AROUND === b % AROUND) down.push({ got, want });
+      }
+      for (const e of [...ring, ...down]) expect(e.got).toBeCloseTo(e.want, 6);
+      return { ring: ring.map((e) => e.got), down: down.map((e) => e.got) };
+    };
+    // the cone's skin: 0.25 out over 0.4 down, its normal 0.53 down; a down edge 0.848 vertical
+    const ny = -0.25 / Math.hypot(0.4, 0.25), share = 0.05 / Math.hypot(0.05, 0.25 * 0.05 / 0.4);
+    // 1.2 (big 0): the room's hang (0.4 to 0.9 down) barely touches 0.53-down skin -- down edges close to 1.2
+    const small = run(1.2), hSmall = ease((HANG_FROM - ny) / (HANG_FROM - HANG_TO));
+    expect(hSmall).toBeGreaterThan(0.1); expect(hSmall).toBeLessThan(0.25);
+    for (const f of small.ring) expect(Math.abs(f - 1.2)).toBeLessThan(0.002);
+    for (const f of small.down) { expect(f).toBeCloseTo(1 + 0.2 * (1 - share * hSmall), 2); expect(f).toBeGreaterThan(1.15); }
+    // 3.0 (big 1): hung from level to 0.35 down, the cone wholly -- down edges grow only by their across share
+    const grown = run(3);
+    for (const f of grown.ring) expect(Math.abs(f - FIT_MAX)).toBeLessThan(0.01);
+    for (const f of grown.down) expect(f).toBeCloseTo(1 + 2 * (1 - share), 2);
+    // hang off: every edge s, at 3.0 as at 1.2 (to the Float32 her shape is read in)
+    const off = run(3, [0, 0]);
+    for (const f of [...off.ring, ...off.down]) expect(f).toBeCloseTo(3, 5);
   });
 
   it('strainMap: per particle the least and most strain of its edges and its sharpest fold, all finite', () => {
