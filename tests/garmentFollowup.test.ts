@@ -2005,7 +2005,7 @@ describe('GarmentCloth.refit with tailoredShape: the cut a function of her shape
   });
 
   it('smoothing (FIT_SMOOTHING passes, Taubin) leaves a uniform scale\'s cut alone; with none it reads the same', () => {
-    expect(FIT_SMOOTHING).toBe(60);
+    expect(FIT_SMOOTHING).toBe(150);
     for (const smoothing of [FIT_SMOOTHING, 0]) {
       const { gc, body } = absolute();
       // a probe sets it and settles, so her tailored shape is read again with it
@@ -2019,7 +2019,8 @@ describe('GarmentCloth.refit with tailoredShape: the cut a function of her shape
   });
 
   it('hang: where her skin faces down an edge grows across her but not down her; off ([0, 0]), every edge grows s', () => {
-    expect([HANG_FROM, HANG_TO]).toEqual([0, -0.35]);
+    // the room's: from 0.4 down, wholly by 0.9 (the lower half of her belly, which the tee covers, is left to grow)
+    expect([HANG_FROM, HANG_TO]).toEqual([-0.4, -0.9]);
     // a cone 30 cm across at the top, 5 below, 40 cm tall: its skin faces about 32 degrees down; the tube 2 cm off it
     const g = new THREE.CylinderGeometry(0.3, 0.05, 0.4, 24, 8, true), pos = g.getAttribute('position'), nv = pos.count;
     const si = new Uint16Array(nv * 4), sw = new Float32Array(nv * 4);
@@ -2032,14 +2033,14 @@ describe('GarmentCloth.refit with tailoredShape: the cut a function of her shape
       return mesh;
     };
     const rows = [0.15, 0.1, 0.05, 0, -0.05, -0.1, -0.15], radius = (y: number) => 0.05 + 0.25 * (y + 0.2) / 0.4 + 0.02;
-    /** The cone's tube cut for her 1.2 times, with `hang` (default when null) and `smoothing` (default when undefined). */
-    const run = (hang: [number, number] | null, smoothing?: number) => {
+    /** The cone's tube cut for her 1.2 times, with `hang` and `smoothing` (default when undefined). */
+    const run = (hang: [number, number], smoothing?: number) => {
       const r = absolute(cone(), tube(radius, rows));
       // her normals under the cloth face down: the hang has something to do
       const N = new Float32Array(r.n * 3);
       (r.gc['skin'] as ClothSkin).restShape(new Float32Array(r.n * 3), 0, N);
       for (let i = 0; i < r.n; i++) expect(N[i * 3 + 1]).toBeLessThan(-0.4);
-      if (hang) r.gc.hang = hang;
+      r.gc.hang = hang;
       if (smoothing !== undefined) { r.gc.fitSmoothing = smoothing; r.gc.settle(); }
       walk(r.gc, r.body, [1.2]);
       const ring: number[] = [], down: number[] = [];
@@ -2052,15 +2053,15 @@ describe('GarmentCloth.refit with tailoredShape: the cut a function of her shape
     // off: every edge 1.2
     const off = run([0, 0]);
     for (const f of [...off.ring, ...off.down]) expect(f).toBeCloseTo(1.2, 4);
-    // on, her shape unsmoothed: round the cone the full 1.2; down it -- an edge 85% vertical (0.05 down, 0.031 out),
+    // on from level to 0.35 down -- the cone's 0.5-down skin wholly hung -- her shape unsmoothed: round the cone the full 1.2; down it -- an edge 85% vertical (0.05 down, 0.031 out),
     // wholly hung -- grows by only the 15% of it that runs across her: 1 + 0.2 (1 - 0.848)
     // (a ring edge's ends are bound at heights a hair apart on the facets, so it is all but level: 1.2 within 0.002)
-    const plain = run(null, 0), share = 0.05 / Math.hypot(0.05, 0.25 * 0.05 / 0.4);
+    const LEVEL: [number, number] = [0, -0.35], plain = run(LEVEL, 0), share = 0.05 / Math.hypot(0.05, 0.25 * 0.05 / 0.4);
     for (const f of plain.ring) expect(Math.abs(f - 1.2)).toBeLessThan(0.002);
     for (const f of plain.down) expect(f).toBeCloseTo(1 + 0.2 * (1 - share), 2);
     // on, smoothed (the default): still round it 1.2 and down it far less; near the openings, where the smoothing bends
     // the tube's open ends, the edges read a little less vertical and grow a little more
-    const smoothed = run(null);
+    const smoothed = run(LEVEL);
     for (const f of smoothed.ring) expect(Math.abs(f - 1.2)).toBeLessThan(0.002);
     for (const f of smoothed.down) { expect(f).toBeGreaterThan(1); expect(f).toBeLessThan(1.12); }
   });

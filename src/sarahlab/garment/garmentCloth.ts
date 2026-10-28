@@ -58,13 +58,14 @@ export const FIT_MAX = 3;
 export const SELF_DISTANCE = 0.005;
 
 /**
- * Where her skin faces down -- the underside of her belly -- a garment hangs from the widest place above and does not
- * follow her down under it: an edge there takes her stretch across her (its girth) but not down her. Her outward
- * normal's height: from HANG_FROM (level) the edge's vertical share stops growing, entirely by HANG_TO (Joshua,
- * 2026-10-28: at 200% the tee's front had grown with all of her lower belly, its fabric three times the pattern, and hung
- * from her as a sack).
+ * Where her skin faces well down -- the underside of her belly -- a garment hangs and does not follow her down under it:
+ * an edge there takes her stretch across her (its girth) but not down her. Her outward normal's height: from HANG_FROM
+ * the edge's vertical share stops growing, entirely by HANG_TO (Joshua, 2026-10-28: at 200% the tee's front had grown
+ * with all of her lower belly and hung from her as a sack). Not from level: the lower half of her belly faces down too,
+ * and the tee covers it -- held from level, it was cut too short there, creased across her belly and tucked its hem
+ * under her ("make sure the shirt retains the 100% belly rounded shape").
  */
-export const HANG_FROM = 0, HANG_TO = -0.35;
+export const HANG_FROM = -0.4, HANG_TO = -0.9;
 
 
 /**
@@ -72,20 +73,23 @@ export const HANG_FROM = 0, HANG_TO = -0.35;
  * shrunk): a garment bridges the hollows of her -- under her bust, her waist between belly and hip -- that her skin dips
  * into, and an edge measured on her skin there grew with every stretch of the hollow and stood off her as a fold
  * (Joshua, 2026-10-28). Smoothed, a hollow narrower than the smoothing reads as the span the cloth takes across it.
+ * 150 passes (about 15 cm): 60 still let the hem under her belly read the crease above her thighs, and stand off her
+ * as a ripple at 67-100% (compared on her at 0, 60 and 150: folds over 60° at 100%, 90 / 71 / 65).
  */
-export const FIT_SMOOTHING = 60;
+export const FIT_SMOOTHING = 150;
 
 function smoothOver(P: Float32Array, graph: { start: Uint32Array; list: Uint32Array }, passes: number): Float32Array {
   const n = P.length / 3, was = new Float32Array(P.length);
   for (let pass = 0; pass < passes; pass++) for (const k of [0.5, -0.53]) {
     was.set(P);
+    const S = graph.start, L = graph.list;
     for (let p = 0; p < n; p++) {
-      const from = graph.start[p], to = graph.start[p + 1];
+      const from = S[p], to = S[p + 1];
       if (to === from) continue;
-      for (let c = 0; c < 3; c++) {
-        let m = 0; for (let j = from; j < to; j++) m += was[graph.list[j] * 3 + c];
-        P[p * 3 + c] = was[p * 3 + c] + k * (m / (to - from) - was[p * 3 + c]);
-      }
+      let mx = 0, my = 0, mz = 0;
+      for (let j = from; j < to; j++) { const q = L[j] * 3; mx += was[q]; my += was[q + 1]; mz += was[q + 2]; }
+      const w = k / (to - from), o = p * 3;
+      P[o] = was[o] + (mx * w - k * was[o]); P[o + 1] = was[o + 1] + (my * w - k * was[o + 1]); P[o + 2] = was[o + 2] + (mz * w - k * was[o + 2]);
     }
   }
   return P;

@@ -16,6 +16,30 @@ These two problems happened on every slider drag:
   hollows and stood off her as folds. At a big belly, the front was cut three times its pattern and hung as a sack with
   a lip at the hem.
 
+## Round 2 (Joshua, 2026-10-28: three spots circled)
+
+He circled three spots in round 1:
+
+- 41%: the lower belly.
+- 67%: a crease across the belly, with the hem tucked under.
+- 100% side: the round shape was lost.
+
+His ask: "make sure the shirt retains the 100% belly rounded shape and make sure the bottom edge and side isn't
+folded, unless it's a shadow."
+
+**The cause.** Round 1's hang began where her skin turns past level. The lower half of a round belly faces down too,
+and the tee covers it. So the tee was cut too short there: it creased across her belly, pulled the hem in under it,
+and flattened its curve.
+
+**The fix:**
+
+- **Hang.** The hang now starts only where her skin faces well down (`HANG_FROM` −0.4, wholly by `HANG_TO` −0.9).
+- **Smoothing.** Her shape is smoothed further before it is read (`FIT_SMOOTHING` 150, about 15 cm). Without that,
+  the hem under her belly read the crease above her thighs and rippled. These settings were picked by comparing 7
+  variants on her: no hang, three hang ranges, and 20, 60 and 150 smoothing passes.
+- **Recut rate.** While the slider is dragged, the tee is recut at most every 0.12 s, because a recut takes 40–100 ms.
+  The last recut always lands once she stops changing.
+
 ## The fix (`garmentCloth.ts`, `roomGarment.ts`, `clothSkin.ts`)
 
 - **Measured from the shape it was tailored from.** Every cut is measured against her 0% design (`tailoredShape`), on
@@ -28,24 +52,29 @@ These two problems happened on every slider drag:
 
 ## Measured (portrait phone view 430×932, slider dragged from 73% in 4% steps)
 
-| Belly | Folds over 60° before | after |
-| --- | --- | --- |
-| 0% | 75 | 63 |
-| 41% | 75 | 68 |
-| 67% | 75 | 68 |
-| 100% | 90 | 71 |
-| 200% | 109 | 119 |
+| Belly | Folds over 60°, alpha.134 | Round 1 | Now |
+| --- | --- | --- | --- |
+| 0% | 75 | 63 | 70 |
+| 41% | 75 | 68 | 69 |
+| 67% | 75 | 68 | 67 |
+| 100% | 90 | 71 | 67 |
+| 200% | 109 | 119 | 73 |
 
-At 200% the count is about the same, but the folds have moved: the hem tucks in under her belly instead of standing
-out as a lip.
+**Belly shape.** At 100% and 200% the tee keeps her belly's round shape from the side, and the hem drapes under the
+belly instead of standing out as a lip or tucking in.
 
-- **Skin showing through:** none of her torso shows through the cloth. The only hits are her forearms, which hang
-  outside the tee.
-- **Cloth sinking into her:** at most one particle, 1 mm inside her, behind her arm.
-- **Checks:** 90 garment tests (7 new for this cut), full suite of 4,568, typecheck, relay:typecheck, build and
-  probe:boot all pass.
+**Room as it opens (73%).** It opens smooth: the back has no band, and OUTFIT still switches to the sim tee.
+
+**Skin and contact.** No torso skin shows through. The only skin the check finds in front of the tee is her forearms,
+which hang outside it. Nothing of the tee sinks into her beyond 1 mm behind her arm.
+
+**Checks.**
+
+- 90 garment tests pass, 7 of them new.
+- The full suite passes: 4,568 tests.
+- typecheck, relay:typecheck, build and probe:boot all pass.
 
 ## Sheets
 
-1. `1-front-0-41-67.jpg`: front at 0%, 41% and 67%, before and after.
-2. `2-side-67-100-200.jpg`: side at 67%, 100% and 200%, before and after.
+1. `1-front-0-41-67.jpg`: front at 41%, 67% and 100%: alpha.134, round 1, now.
+2. `2-side-67-100-200.jpg`: side at 67%, 100% and 200%: alpha.134, round 1, now.

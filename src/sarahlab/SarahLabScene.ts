@@ -90,6 +90,11 @@ const M = UNITS_PER_METRE;
  * eased out to `raise` radians by `out`, held to `hold`, eased down by `down`; pinned again at `done`.
  */
 const DRESS = Object.freeze({ weightless: 1.2, raise: 0.55, out: 1.5, hold: 2.7, down: 3.7, done: 4.3 });
+/**
+ * While her shape is changing (the belly slider dragged), the new tee is cut again at most this often, seconds: a cut
+ * (`GarmentCloth.refit`, her shape smoothed over the sheet) is 40-100 ms, too long for every frame of a drag.
+ */
+const GARMENT_REFIT_EVERY = 0.12;
 /** RANDOMIZE's group locks, as their buttons read. */
 // (`build` reads PROPORTIONS on screen: the room's Build tab is the strap builder's)
 const RANDOM_GROUPS = [['build', 'PROPORTIONS'], ['belly', 'BELLY'], ['breasts', 'BREAST']] as const;
@@ -653,7 +658,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   /** Whether seated she wears the fitted tee instead of the cloth (a probe can turn this off to watch the cloth seated). */
   let seatedStandIn = true;
   /** Stage 2b's procedural tee, put on her by a probe (`?probe=cloth` garment()) for review; never by the room itself. */
-  let garmentRoom: RoomGarment | null = null, garmentPoseKey = '', garmentShapeKey = '', garmentRefit = false;
+  let garmentRoom: RoomGarment | null = null, garmentPoseKey = '', garmentShapeKey = '', garmentRefit = false, garmentRefitAge = Infinity;
   /**
    * The procedural tee an OUTFIT put on her (`OUTFITS[i].procedural`), its construction; null when none did. Once a
    * probe has put a garment on her (`?probe=cloth` garment()), the probe owns it and the outfit leaves it alone.
@@ -2371,7 +2376,10 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         const keep = clothKeep();
         garmentRoom.cloth.detailKeep = keep;
         // cut again for her shape when it changed, as the cloth tee is
-        if (garmentRefit) { garmentRoom.cloth.setRestShift(restShiftNow()); garmentRoom.cloth.refit(); garmentRefit = false; }
+        // (at most every GARMENT_REFIT_EVERY seconds while the slider is dragged: a cut is 40-100 ms of a phone's frame;
+        // the last one, once she stops changing, always lands)
+        garmentRefitAge += dt;
+        if (garmentRefit && garmentRefitAge >= GARMENT_REFIT_EVERY) { garmentRoom.cloth.setRestShift(restShiftNow()); garmentRoom.cloth.refit(); garmentRefit = false; garmentRefitAge = 0; }
         // the outfit's tee is eased on as the review probes ease it: weightless a moment and pinned at the neckline where it
         // settled, then let hang and pinned again; and seated, her legs and the stool hold it
         if (garmentAuto) {
