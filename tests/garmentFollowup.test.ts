@@ -51,6 +51,9 @@
  * - `garmentCloth.ts` `refit`: no change of her shape leaves every edge as drafted and the cloth where it lies; her
  *   body scaled (her BUILD's rest shift, as the room drives it) cuts each edge by how far her skin under it stretched,
  *   clamped to FIT_MIN..FIT_MAX; `settle` carries the scale over; `setRestShift(null, true)` resets it.
+ *   With `tailoredShape` the cut is ABSOLUTE: measured from the shape it was tailored from on her skin points
+ *   (`restShape`'s offsetShare 0), smoothed (FIT_SMOOTHING), and not down skin that faces down (HANG_FROM..HANG_TO):
+ *   the same for the same shape whatever path led there, a settle included; still clamped; `fitMap`/`strainMap` read it.
  * - `garmentCloth.ts` `neckBand`: the edges along the neckline opening rest at band x their pattern length, every other
  *   edge at its own; and the cloth hands ClothSkin looseOverArm = LOOSE_OVER_ARM unless `armpitRule` is false.
  * - `clothSkin.ts` `looseOverArm`: absent, no arm share, loose map or last contact is kept and every particle has its
@@ -75,7 +78,7 @@ import { polyLength } from '../src/sarahlab/garment/curves';
 import { BIND_ANY, BIND_TRUNK } from '../src/sarahlab/garment/bind';
 import { draftTee, SET_IN_NECK, TEE_DEFAULTS, teeParams, type Draft, type TeeParams } from '../src/sarahlab/garment/draft';
 import { ClothSim, type ClothSettings } from '../src/sarahlab/clothSim';
-import { BEND_COMPLIANCE, FIT_MAX, FIT_MIN, GarmentCloth, LOOSE_OVER_ARM, RESCUE_OVER, SELF_DISTANCE } from '../src/sarahlab/garment/garmentCloth';
+import { BEND_COMPLIANCE, FIT_MAX, FIT_MIN, FIT_SMOOTHING, GarmentCloth, HANG_FROM, HANG_TO, LOOSE_OVER_ARM, RESCUE_OVER, SELF_DISTANCE } from '../src/sarahlab/garment/garmentCloth';
 import { APEX_MAX, APEX_REACH, COVER_REACH, DOME_MARGIN, domeOver, GarmentDetail, SHADE_NAVEL_GROW, SHADE_SLOPE, SHADE_SPREAD, SPACING_SLACK, TENT_SLOPE, type RestBody } from '../src/sarahlab/garment/garmentDetail';
 import { DETAIL_LOOK, DetailSpots, type DetailPoints, type Poser } from '../src/sarahlab/detailSpots';
 import { measureBody } from '../src/sarahlab/garment/measure';
@@ -412,13 +415,15 @@ function cylinderBody(): THREE.SkinnedMesh {
 }
 
 /** The tube: rows of AROUND particles, welded round, its top row the neck opening and its bottom the hem. */
-function tube(): { sewn: SewnGarment; points: Float32Array } {
+/** The tube: rows of AROUND particles at `rows` heights, `radiusAt(y)` round (R_CLOTH by default). */
+function tube(radiusAt: (y: number) => number = () => R_CLOTH, rows: readonly number[] = ROWS): { sewn: SewnGarment; points: Float32Array } {
+  const ROWS = rows;
   const count = ROWS.length * AROUND, id = (r: number, m: number) => r * AROUND + (m % AROUND);
   const points = new Float32Array(count * 3);
   ROWS.forEach((y, r) => {
     for (let m = 0; m < AROUND; m++) {
-      const th = (2 * Math.PI * m) / AROUND + 0.05;
-      points.set([R_CLOTH * Math.sin(th), y, R_CLOTH * Math.cos(th)], (r * AROUND + m) * 3);
+      const th = (2 * Math.PI * m) / AROUND + 0.05, rad = radiusAt(y);
+      points.set([rad * Math.sin(th), y, rad * Math.cos(th)], (r * AROUND + m) * 3);
     }
   });
   const tri: number[] = [];
@@ -1908,5 +1913,171 @@ describe('GarmentDetail.apexAlong: the apex held high enough that its triangles 
     expect(Array.from(raised.after.point)).toEqual(Array.from(plain.after.point));
     // the nipple's corners still held at its tip and DOME_MARGIN
     for (let i = 0; i < 3; i++) expect(heightOf(raised.after, i)).toBeCloseTo(TIP[2] + DOME_MARGIN, 5);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// GarmentCloth's ABSOLUTE refit (`tailoredShape`): the same tube rig, her shape again changed by the build's rest shift,
+// and her tailored shape her body with no shift at all (GarmentCloth clears it while it measures). And a CONE -- wide at
+// the top, narrow below, so its skin faces down -- for the hang.
+
+describe('GarmentCloth.refit with tailoredShape: the cut a function of her shape now alone', () => {
+  /** The tube on `body`, bound to the triangle nearest each particle, measured from her unshifted shape. */
+  function absolute(body = cylinderBody(), made = tube()) {
+    const { sewn, points } = made;
+    const gc = new GarmentCloth({
+      body, sewn, binding: nearestBinding(body, points), trunkOnly: new Uint8Array(sewn.count).fill(1), armBones: [],
+      settings: { substeps: 2 }, standOff: 0.15, material: new THREE.MeshBasicMaterial(), unitsPerMetre: 100,
+      tailoredShape: (measure) => measure(),
+    });
+    return { gc, sewn, body, n: sewn.count };
+  }
+  /** Her body changed as a rest shift: scaled `s` times about its origin, or (`girth`) only across, more higher up. */
+  const shift = (body: THREE.SkinnedMesh, s: number, girth = false) => {
+    const pos = body.geometry.getAttribute('position'), out = new Float32Array(pos.count * 3);
+    for (let v = 0; v < pos.count; v++) {
+      const k = girth ? (s - 1) * (1 + pos.getY(v)) : s - 1;
+      out[v * 3] = k * pos.getX(v); out[v * 3 + 1] = girth ? 0 : k * pos.getY(v); out[v * 3 + 2] = k * pos.getZ(v);
+    }
+    return out;
+  };
+  const fits = (gc: GarmentCloth) => gc['fit'] as Map<number, number>;
+  const walk = (gc: GarmentCloth, body: THREE.SkinnedMesh, steps: number[], girth = false) => { for (const s of steps) { gc.setRestShift(shift(body, s, girth)); gc.refit(); } };
+
+  it('ClothSkin.restShape: offsetShare 0 her bound skin points, 1 the default, and her unit normals under them', () => {
+    const body = cylinderBody(), { points } = tube(), binding = nearestBinding(body, points), skin = new ClothSkin(body, binding), n = binding.count;
+    const plain = skin.restShape(new Float32Array(n * 3)), one = skin.restShape(new Float32Array(n * 3), 1), N = new Float32Array(n * 3);
+    const zero = skin.restShape(new Float32Array(n * 3), 0, N);
+    expect(Array.from(one)).toEqual(Array.from(plain));
+    const pos = body.geometry.getAttribute('position'), V = (v: number) => new THREE.Vector3().fromBufferAttribute(pos, v);
+    for (let i = 0; i < n; i++) {
+      // the barycentric place on the bound triangle, in the room's units (100 to the metre)
+      const q = new THREE.Vector3();
+      for (let c = 0; c < 3; c++) q.addScaledVector(V(binding.tri[i * 3 + c]), binding.bary[i * 3 + c]);
+      q.multiplyScalar(100);
+      for (let k = 0; k < 3; k++) expect(zero[i * 3 + k]).toBeCloseTo(q.getComponent(k), 3);
+      const nrm = new THREE.Vector3(N[i * 3], N[i * 3 + 1], N[i * 3 + 2]);
+      expect(nrm.length()).toBeCloseTo(1, 5);
+      // out of the cylinder, and the offset is along it: plain = zero + offset x normal (room units)
+      expect(nrm.x * q.x + nrm.z * q.z).toBeGreaterThan(0);
+      for (let k = 0; k < 3; k++) expect(plain[i * 3 + k]).toBeCloseTo(zero[i * 3 + k] + nrm.getComponent(k) * binding.offset[i] * 100, 3);
+    }
+  });
+
+  it('her shape unchanged: every cut 1', () => {
+    const { gc, n } = absolute();
+    expect(gc['tailoredBase']).toBeInstanceOf(Float32Array);
+    gc.refit();
+    const map = gc.fitMap();
+    expect(map.length).toBe(n);
+    for (const f of map) expect(f).toBeCloseTo(1, 6);
+    for (const f of fits(gc).values()) expect(f).toBeCloseTo(1, 6);
+  });
+
+  it('is independent of the path: 1 -> 1.3 -> 0.8 -> 1.2 cuts it as 1 -> 1.2 does, uniform or not, and across a settle', () => {
+    for (const girth of [false, true]) {
+      const straight = absolute(), long = absolute();
+      walk(straight.gc, straight.body, [1.2], girth);
+      walk(long.gc, long.body, [1.3, 0.8, 1.2], girth);
+      const a = straight.gc.fitMap(), b = long.gc.fitMap();
+      for (let i = 0; i < a.length; i++) expect(b[i]).toBeCloseTo(a[i], 6);
+      // a uniform 1.2 is 1.2 on every edge
+      if (!girth) for (const f of fits(long.gc).values()) expect(f).toBeCloseTo(1.2, 4);
+      // with a settle in the middle of the path (rebound where the cloth lies, her tailored shape read again through it)
+      const settled = absolute();
+      walk(settled.gc, settled.body, [1.3], girth);
+      for (let f = 0; f < 5; f++) settled.gc.frame(1 / 60);
+      settled.gc.settle();
+      walk(settled.gc, settled.body, [0.8, 1.2], girth);
+      const c = settled.gc.fitMap();
+      let worst = 0;
+      for (let i = 0; i < a.length; i++) worst = Math.max(worst, Math.abs(c[i] - a[i]));
+      expect(worst).toBeLessThan(girth ? 0.02 : 1e-4);
+    }
+  });
+
+  it('still clamps: ten times her size cuts at FIT_MAX, a tenth at FIT_MIN', () => {
+    for (const [s, bound] of [[10, FIT_MAX], [0.1, FIT_MIN]] as const) {
+      const { gc, body } = absolute();
+      walk(gc, body, [s]);
+      for (const f of fits(gc).values()) expect(f).toBeCloseTo(bound, 6);
+    }
+  });
+
+  it('smoothing (FIT_SMOOTHING passes, Taubin) leaves a uniform scale\'s cut alone; with none it reads the same', () => {
+    expect(FIT_SMOOTHING).toBe(60);
+    for (const smoothing of [FIT_SMOOTHING, 0]) {
+      const { gc, body } = absolute();
+      // a probe sets it and settles, so her tailored shape is read again with it
+      gc.fitSmoothing = smoothing;
+      gc.settle();
+      walk(gc, body, [1.2]);
+      for (const f of fits(gc).values()) expect(f).toBeCloseTo(1.2, 4);
+      walk(gc, body, [1]);
+      for (const f of fits(gc).values()) expect(f).toBeCloseTo(1, 6);
+    }
+  });
+
+  it('hang: where her skin faces down an edge grows across her but not down her; off ([0, 0]), every edge grows s', () => {
+    expect([HANG_FROM, HANG_TO]).toEqual([0, -0.35]);
+    // a cone 30 cm across at the top, 5 below, 40 cm tall: its skin faces about 32 degrees down; the tube 2 cm off it
+    const g = new THREE.CylinderGeometry(0.3, 0.05, 0.4, 24, 8, true), pos = g.getAttribute('position'), nv = pos.count;
+    const si = new Uint16Array(nv * 4), sw = new Float32Array(nv * 4);
+    for (let v = 0; v < nv; v++) sw[v * 4] = 1;
+    g.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(si, 4));
+    g.setAttribute('skinWeight', new THREE.Float32BufferAttribute(sw, 4));
+    const cone = (): THREE.SkinnedMesh => {
+      const mesh = new THREE.SkinnedMesh(g.clone(), new THREE.MeshBasicMaterial()), root = new THREE.Group(), bone = new THREE.Bone();
+      root.scale.setScalar(100); root.add(bone, mesh); root.updateMatrixWorld(true); mesh.bind(new THREE.Skeleton([bone]));
+      return mesh;
+    };
+    const rows = [0.15, 0.1, 0.05, 0, -0.05, -0.1, -0.15], radius = (y: number) => 0.05 + 0.25 * (y + 0.2) / 0.4 + 0.02;
+    /** The cone's tube cut for her 1.2 times, with `hang` (default when null) and `smoothing` (default when undefined). */
+    const run = (hang: [number, number] | null, smoothing?: number) => {
+      const r = absolute(cone(), tube(radius, rows));
+      // her normals under the cloth face down: the hang has something to do
+      const N = new Float32Array(r.n * 3);
+      (r.gc['skin'] as ClothSkin).restShape(new Float32Array(r.n * 3), 0, N);
+      for (let i = 0; i < r.n; i++) expect(N[i * 3 + 1]).toBeLessThan(-0.4);
+      if (hang) r.gc.hang = hang;
+      if (smoothing !== undefined) { r.gc.fitSmoothing = smoothing; r.gc.settle(); }
+      walk(r.gc, r.body, [1.2]);
+      const ring: number[] = [], down: number[] = [];
+      for (const k of (r.gc['restLengths'] as Map<number, number>).keys()) {
+        const p = Math.floor(k / r.n), q = k % r.n, f = fits(r.gc).get(k)!;
+        if (Math.floor(p / AROUND) === Math.floor(q / AROUND)) ring.push(f); else if (p % AROUND === q % AROUND) down.push(f);
+      }
+      return { ring, down };
+    };
+    // off: every edge 1.2
+    const off = run([0, 0]);
+    for (const f of [...off.ring, ...off.down]) expect(f).toBeCloseTo(1.2, 4);
+    // on, her shape unsmoothed: round the cone the full 1.2; down it -- an edge 85% vertical (0.05 down, 0.031 out),
+    // wholly hung -- grows by only the 15% of it that runs across her: 1 + 0.2 (1 - 0.848)
+    // (a ring edge's ends are bound at heights a hair apart on the facets, so it is all but level: 1.2 within 0.002)
+    const plain = run(null, 0), share = 0.05 / Math.hypot(0.05, 0.25 * 0.05 / 0.4);
+    for (const f of plain.ring) expect(Math.abs(f - 1.2)).toBeLessThan(0.002);
+    for (const f of plain.down) expect(f).toBeCloseTo(1 + 0.2 * (1 - share), 2);
+    // on, smoothed (the default): still round it 1.2 and down it far less; near the openings, where the smoothing bends
+    // the tube's open ends, the edges read a little less vertical and grow a little more
+    const smoothed = run(null);
+    for (const f of smoothed.ring) expect(Math.abs(f - 1.2)).toBeLessThan(0.002);
+    for (const f of smoothed.down) { expect(f).toBeGreaterThan(1); expect(f).toBeLessThan(1.12); }
+  });
+
+  it('strainMap: per particle the least and most strain of its edges and its sharpest fold, all finite', () => {
+    const { gc, body, n } = absolute();
+    walk(gc, body, [1.2]);
+    for (let f = 0; f < 10; f++) gc.frame(1 / 60);
+    const m = gc.strainMap();
+    expect(m.length).toBe(n * 3);
+    for (let i = 0; i < n; i++) {
+      const lo = m[i * 3], hi = m[i * 3 + 1], fold = m[i * 3 + 2];
+      for (const v of [lo, hi, fold]) expect(Number.isFinite(v)).toBe(true);
+      expect(lo).toBeGreaterThan(0);
+      expect(lo).toBeLessThanOrEqual(hi);
+      expect(fold).toBeGreaterThanOrEqual(0);
+      expect(fold).toBeLessThanOrEqual(180);
+    }
   });
 });

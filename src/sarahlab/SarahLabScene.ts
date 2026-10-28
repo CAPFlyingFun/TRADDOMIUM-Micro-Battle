@@ -1261,18 +1261,10 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     garmentRoom = new RoomGarment({ body, root: model, params: { construction, gusset, ...(extra.neckWidth !== undefined ? { neckWidth: extra.neckWidth } : {}), ...(extra.neckDrop !== undefined ? { neckDrop: extra.neckDrop } : {}), ...(extra.bustShaping ? { bustShaping: extra.bustShaping } : {}), ...(extra.armholeBand !== undefined ? { armholeBand: extra.armholeBand } : {}) }, neckBand: extra.neckBand, ...(extra.detail === false ? { detail: false } : {}), settings, standOff, unitsPerMetre: M, scale: FACE_REST_SCALE, offset: FACE_REST_OFFSET, material });
     three.add(garmentRoom.cloth.mesh);
     garmentPoseKey = pose;
-    // tailored from her design at 0% belly (`bodyInputOf`: her positions with her 'belly' target at 1, no other target,
-    // no build), so the pattern's reading of her shape starts there, and it is cut at once for her as she is now -- as
-    // the cloth tee is cut for the body it is on. Her shape changing from here cuts it again (`GarmentCloth.refit`)
-    const inf = body.morphTargetInfluences, bellyAt = body.morphTargetDictionary?.belly;
-    if (inf && bellyAt !== undefined) {
-      const now = inf.slice();
-      inf.fill(0); inf[bellyAt] = 1;
-      garmentRoom.cloth.setRestShift(null, true);
-      for (let j = 0; j < now.length; j++) inf[j] = now[j];
-      garmentRoom.cloth.setRestShift(restShiftNow());
-      garmentRoom.cloth.refit();
-    } else garmentRoom.cloth.setRestShift(restShiftNow(), true);
+    // cut at once for her as she is now, measured from the 0% design it was tailored from (`RoomGarment`'s
+    // `tailoredShape`), as the cloth tee is cut for the body it is on; her shape changing from here cuts it again
+    garmentRoom.cloth.setRestShift(restShiftNow());
+    garmentRoom.cloth.refit();
     garmentShapeKey = shapeKeyNow(); garmentRefit = false;
     return garmentRoom;
   }
@@ -2536,6 +2528,10 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         garmentProfile: (i = 0) => garmentRoom?.cloth.detailProfile(i) ?? null,
         garmentDetailShade: (patch?: { spread?: number; widen?: number; slope?: number; grow?: number }) => garmentRoom?.cloth.detailShade(patch) ?? null,
         garmentStats: () => garmentRoom?.cloth.stats() ?? null,
+        // per particle, where it is (world) and its least and most strain and sharpest fold: a probe's crease map
+        garmentStrainMap: () => garmentRoom ? { positions: Array.from(garmentRoom.cloth.positions.subarray(0, garmentRoom.tailored.sewn.count * 3)), map: Array.from(garmentRoom.cloth.strainMap()), fit: Array.from(garmentRoom.cloth.fitMap()), piece: Array.from(garmentRoom.tailored.sewn.particlePiece), pieces: garmentRoom.tailored.sewn.pieces } : null,
+        // where the underside of her belly starts to hang, and by where entirely (her normal's height; equal: never), cut again
+        garmentHang: (from: number, to: number, offset?: number, smoothing?: number) => { if (!garmentRoom) return false; garmentRoom.cloth.hang = [from, to]; if (offset !== undefined) garmentRoom.cloth.fitOffset = offset; if (smoothing !== undefined) garmentRoom.cloth.fitSmoothing = smoothing; garmentRoom.cloth.setRestShift(restShiftNow()); garmentRoom.cloth.refit(); return true; },
         // for the particles inside a box (world), the nearest of her posed vertices against the contact the cloth is using:
         // a contact far further than her nearest skin is the wrong surface (a probe's look at skin showing through)
         garmentContacts: (lo: number[], hi: number[]) => {

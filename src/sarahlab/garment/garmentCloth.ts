@@ -57,6 +57,39 @@ export const FIT_MIN = 0.5;
 export const FIT_MAX = 3;
 export const SELF_DISTANCE = 0.005;
 
+/**
+ * Where her skin faces down -- the underside of her belly -- a garment hangs from the widest place above and does not
+ * follow her down under it: an edge there takes her stretch across her (its girth) but not down her. Her outward
+ * normal's height: from HANG_FROM (level) the edge's vertical share stops growing, entirely by HANG_TO (Joshua,
+ * 2026-10-28: at 200% the tee's front had grown with all of her lower belly, its fabric three times the pattern, and hung
+ * from her as a sack).
+ */
+export const HANG_FROM = 0, HANG_TO = -0.35;
+
+
+/**
+ * Her shape as the cut reads it, smoothed over the garment's own sheet first (Taubin's two steps a pass, so it is not
+ * shrunk): a garment bridges the hollows of her -- under her bust, her waist between belly and hip -- that her skin dips
+ * into, and an edge measured on her skin there grew with every stretch of the hollow and stood off her as a fold
+ * (Joshua, 2026-10-28). Smoothed, a hollow narrower than the smoothing reads as the span the cloth takes across it.
+ */
+export const FIT_SMOOTHING = 60;
+
+function smoothOver(P: Float32Array, graph: { start: Uint32Array; list: Uint32Array }, passes: number): Float32Array {
+  const n = P.length / 3, was = new Float32Array(P.length);
+  for (let pass = 0; pass < passes; pass++) for (const k of [0.5, -0.53]) {
+    was.set(P);
+    for (let p = 0; p < n; p++) {
+      const from = graph.start[p], to = graph.start[p + 1];
+      if (to === from) continue;
+      for (let c = 0; c < 3; c++) {
+        let m = 0; for (let j = from; j < to; j++) m += was[graph.list[j] * 3 + c];
+        P[p * 3 + c] = was[p * 3 + c] + k * (m / (to - from) - was[p * 3 + c]);
+      }
+    }
+  }
+  return P;
+}
 
 /** The sewn sheet's particles' neighbours along its edges, CSR (for clothSkin.ts `neighbours`). */
 function neighboursOf(sewn: SewnGarment): { start: Uint32Array; list: Uint32Array } {
@@ -101,6 +134,13 @@ export interface GarmentClothOptions {
   readonly detail?: DetailPoints;
   /** False: `detail` is followed (for `detailGap`) but not domed over -- a probe's before picture. Default true. */
   readonly detailDomes?: boolean;
+  /**
+   * Runs `measure` with her body in the shape the garment was tailored from (the room: her 'belly' target at 1, her 0%
+   * design, nothing else on), and puts her back after. Given, every cut (`refit`) is measured from that shape, so the
+   * garment's size is a function of her shape now alone -- the same at 41% however the slider got there. Absent: each
+   * cut is measured from the last (`fitBase`), as before.
+   */
+  readonly tailoredShape?: (measure: () => void) => void;
 }
 
 export interface GarmentClothStats {
@@ -143,6 +183,20 @@ export class GarmentCloth {
   private readonly fit = new Map<number, number>();
   private fitBase = new Map<number, number>();
   private baseShape: Float32Array;
+  /** HANG_FROM and HANG_TO as this garment uses them (a probe's comparison may change them; equal: no hang). */
+  hang: [number, number] = [HANG_FROM, HANG_TO];
+  /** The share of each particle's binding offset its cut is measured at (0: her skin points), for a probe's comparison. */
+  get fitOffset(): number { return this.fitOffsetNow; }
+  set fitOffset(v: number) { this.fitOffsetNow = v; this.tailoredBase = this.measureTailored(); }
+  /** Smoothing passes over her shape before the cut reads it (`FIT_SMOOTHING`), for a probe's comparison. */
+  get fitSmoothing(): number { return this.fitSmoothingNow; }
+  set fitSmoothing(v: number) { this.fitSmoothingNow = v; this.tailoredBase = this.measureTailored(); }
+  private fitOffsetNow = 0;
+  private fitSmoothingNow = FIT_SMOOTHING;
+  private graph: { start: Uint32Array; list: Uint32Array } | null = null;
+  private smoothed(P: Float32Array): Float32Array { if (this.fitSmoothing > 0) { this.graph ??= neighboursOf(this.sewn); smoothOver(P, this.graph, this.fitSmoothing); } return P; }
+  /** Her skin under the binding in the shape the garment was tailored from (`tailoredShape`), or null. */
+  private tailoredBase: Float32Array | null = null;
   private restShiftNow: Float32Array | null = null;
   private readonly mass: Float32Array;
   private pin: Float32Array;
@@ -178,6 +232,7 @@ export class GarmentCloth {
     }
     this.neckDistance = distanceAlong(sewn, neck);
     this.baseShape = this.skin.restShape(new Float32Array(n * 3));
+    this.tailoredBase = this.measureTailored();
     this.pin = new Float32Array(n);
     // drawing
     const nv = sewn.vertexParticle.length, g = new THREE.BufferGeometry();
@@ -241,11 +296,32 @@ export class GarmentCloth {
   /**
    * Cut it again for her as she is shaped now (her belly, her build; never her pose), as the room cuts the cloth tee
    * (`ClothShirt.refit`): every edge's pattern length scaled by how far her skin under it has stretched since it was
-   * tailored, the cloth kept where it lies.
+   * tailored, the cloth kept where it lies. With `tailoredShape`, measured from the shape it was tailored from, on her
+   * shape smoothed over the sheet (`FIT_SMOOTHING`), and not down the underside of her belly (`HANG_FROM`): its size
+   * then depends on her shape now and on nothing she was before.
    */
   refit(): void {
-    const n = this.sewn.count, now = this.skin.restShape(new Float32Array(n * 3)), B = this.baseShape;
-    const len = (P: Float32Array, a: number, b: number) => Math.hypot(P[b * 3] - P[a * 3], P[b * 3 + 1] - P[a * 3 + 1], P[b * 3 + 2] - P[a * 3 + 2]);
+    const n = this.sewn.count, len = (P: Float32Array, a: number, b: number) => Math.hypot(P[b * 3] - P[a * 3], P[b * 3 + 1] - P[a * 3 + 1], P[b * 3 + 2] - P[a * 3 + 2]);
+    const T = this.tailoredBase;
+    if (T) {
+      // her skin points now and her normals under them; each edge her stretch since she was tailored, except down the
+      // underside of her belly, where it hangs
+      // (an edge's slope down her and the way her skin faces are both read from her shape as it is, not smoothed)
+      const N = new Float32Array(n * 3), raw = this.skin.restShape(new Float32Array(n * 3), this.fitOffset, N), now = this.smoothed(raw.slice());
+      const [from, to] = this.hang, hang = (p: number) => { if (!(from > to)) return 0; const t = Math.min(1, Math.max(0, (from - N[p * 3 + 1]) / (from - to))); return t * t * (3 - 2 * t); };
+      for (const k of this.restLengths.keys()) {
+        const a = Math.floor(k / n), b = k % n, lb = len(T, a, b), ln = len(now, a, b);
+        let r = lb > 1e-6 && Number.isFinite(ln) ? ln / lb : 1;
+        const lr = len(raw, a, b), down = lr > 1e-6 ? Math.abs(raw[b * 3 + 1] - raw[a * 3 + 1]) / lr : 0;
+        r = 1 + (r - 1) * (1 - down * (hang(a) + hang(b)) / 2);
+        this.fit.set(k, Math.min(FIT_MAX, Math.max(FIT_MIN, r)));
+      }
+      const keep = this.sim.positions.slice(0, n * 3);
+      this.sim = this.build();
+      this.sim.reset(keep);
+      return;
+    }
+    const now = this.skin.restShape(new Float32Array(n * 3)), B = this.baseShape;
     for (const k of this.restLengths.keys()) {
       const a = Math.floor(k / n), b = k % n, lb = len(B, a, b), ln = len(now, a, b);
       const r = lb > 1e-6 && Number.isFinite(ln) ? Math.min(FIT_MAX, Math.max(FIT_MIN, ln / lb)) : 1;
@@ -280,9 +356,21 @@ export class GarmentCloth {
     // ClothSkin keeps its binding; a new one means a new reader over the same body
     this.skin = new ClothSkin(this.options.body, binding, { thickness: this.skin.thickness, armBones: this.options.armBones, trunkOnly: this.options.trunkOnly, ...(this.options.armpitRule === false ? {} : { looseOverArm: LOOSE_OVER_ARM }), rescueOver: RESCUE_OVER * this.options.unitsPerMetre, neighbours: neighboursOf(this.sewn) });
     this.skin.restShift = this.restShiftNow;
-    // her shape is read through the new binding from here on: the scale it has now carries over
+    // her shape is read through the new binding from here on: the scale it has now carries over (or, tailored from a
+    // known shape, that shape is read again through it)
     this.baseShape = this.skin.restShape(new Float32Array(this.sewn.count * 3));
     this.fitBase = new Map(this.fit);
+    this.tailoredBase = this.measureTailored();
+  }
+
+  /** Her skin points under the binding with her body in the shape the garment was tailored from, no build (`tailoredShape`). */
+  private measureTailored(): Float32Array | null {
+    const shape = this.options.tailoredShape;
+    if (!shape) return null;
+    const out = new Float32Array(this.sewn.count * 3), keep = this.skin.restShift;
+    shape(() => { this.skin.restShift = null; this.skin.restShape(out, this.fitOffset); });
+    this.skin.restShift = keep;
+    return this.smoothed(out);
   }
 
   /** One frame. `capsules`: her arms (world), this frame; the previous frame's are interpolated from. */
@@ -337,6 +425,44 @@ export class GarmentCloth {
     }
     r.sort((p, q) => p - q);
     return { min: r[0] ?? 0, max: r[r.length - 1] ?? 0, p95: r[Math.floor(r.length * 0.95)] ?? 0, over14: r.filter((v) => v > 1.4).length, over16: r.filter((v) => v > 1.6).length, edges: r.length };
+  }
+
+  /** Per particle, the largest pattern scale (`fit`) of its edges now: how far the cut has grown it there, for a probe. */
+  fitMap(): Float32Array {
+    const n = this.sewn.count, out = new Float32Array(n);
+    for (const [k, f] of this.fit) { const a = Math.floor(k / n), b = k % n; out[a] = Math.max(out[a], f); out[b] = Math.max(out[b], f); }
+    return out;
+  }
+
+  /**
+   * Per particle now: the least and most strain of its edges (length over rest) and the sharpest fold between two
+   * triangles that meet at it (degrees), 3 numbers a particle -- where the cloth is squeezed, pulled and creased, for a
+   * probe's map.
+   */
+  strainMap(): Float32Array {
+    const n = this.sewn.count, x = this.sim.positions, E = this.sim.edges, k = this.sim.settings.restScale, out = new Float32Array(n * 3);
+    for (let p = 0; p < n; p++) { out[p * 3] = Infinity; out[p * 3 + 1] = 0; }
+    for (let e = 0; e < E.length; e += 2) {
+      const a = E[e], b = E[e + 1], rest = (this.restOf(a, b) ?? 0) * k;
+      if (!(rest > 0)) continue;
+      const r = Math.hypot(x[b * 3] - x[a * 3], x[b * 3 + 1] - x[a * 3 + 1], x[b * 3 + 2] - x[a * 3 + 2]) / rest;
+      for (const p of [a, b]) { out[p * 3] = Math.min(out[p * 3], r); out[p * 3 + 1] = Math.max(out[p * 3 + 1], r); }
+    }
+    const T = this.sewn.triangles, nT = T.length / 3, N = new Float32Array(nT * 3), first = new Map<number, number>();
+    for (let t = 0; t < nT; t++) {
+      const a = T[t * 3] * 3, b = T[t * 3 + 1] * 3, c = T[t * 3 + 2] * 3;
+      const ux = x[b] - x[a], uy = x[b + 1] - x[a + 1], uz = x[b + 2] - x[a + 2], vx = x[c] - x[a], vy = x[c + 1] - x[a + 1], vz = x[c + 2] - x[a + 2];
+      const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx, l = Math.hypot(nx, ny, nz) || 1;
+      N[t * 3] = nx / l; N[t * 3 + 1] = ny / l; N[t * 3 + 2] = nz / l;
+    }
+    for (let t = 0; t < nT; t++) for (let j = 0; j < 3; j++) {
+      const p = T[t * 3 + j], q = T[t * 3 + (j + 1) % 3], key = p < q ? p * n + q : q * n + p, u = first.get(key);
+      if (u === undefined) { first.set(key, t); continue; }
+      const d = N[t * 3] * N[u * 3] + N[t * 3 + 1] * N[u * 3 + 1] + N[t * 3 + 2] * N[u * 3 + 2];
+      const deg = (Math.acos(Math.max(-1, Math.min(1, d))) * 180) / Math.PI;
+      for (const v of [p, q]) out[v * 3 + 2] = Math.max(out[v * 3 + 2], deg);
+    }
+    return out;
   }
 
   /**

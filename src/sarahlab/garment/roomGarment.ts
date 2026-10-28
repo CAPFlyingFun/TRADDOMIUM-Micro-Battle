@@ -70,6 +70,8 @@ export class RoomGarment {
     this.cloth = new GarmentCloth({
       body: options.body, sewn: t.sewn, binding: t.binding, trunkOnly: t.placed.trunkOnly, armBones: SARAH_V2_ARM_BONES,
       settings: { ...options.settings, restScale: REST_SCALE }, standOff: options.standOff, material: options.material, unitsPerMetre: options.unitsPerMetre,
+      // her design at 0% belly, as `bodyInputOf` read her to tailor it: every cut is measured from there
+      tailoredShape: (measure) => tailoredShape(options.body, measure),
       drawLift: DRAW_LIFT * options.unitsPerMetre, fabricRest: fabricRestOf(t.placed.positions, options.scale, options.offset), neckBand: options.neckBand ?? params.neckBand ?? 1, armpitRule: params.construction !== 'setIn', detail: SARAH_V2_DETAIL_POINTS, ...(options.detail === false ? { detailDomes: false } : {}),
     });
     this.underarm = new Uint8Array(t.sewn.count);
@@ -139,6 +141,15 @@ export class RoomGarment {
   }
 
   dispose(): void { this.cloth.dispose(); }
+}
+
+/** Run `measure` with her morph targets as `bodyInputOf` reads her to tailor (her 'belly' target at 1, nothing else), then put them back. */
+function tailoredShape(body: THREE.SkinnedMesh, measure: () => void): void {
+  const inf = body.morphTargetInfluences, at = body.morphTargetDictionary?.belly;
+  if (!inf || at === undefined) { measure(); return; }
+  const now = inf.slice();
+  inf.fill(0); inf[at] = 1;
+  try { measure(); } finally { for (let j = 0; j < now.length; j++) inf[j] = now[j]; }
 }
 
 /** Rest metres into her geometry's units, per particle (`bind.ts`: geom = (rest - offset) / scale): the fabric's rest surface. */

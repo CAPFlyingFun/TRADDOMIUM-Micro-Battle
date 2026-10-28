@@ -486,8 +486,12 @@ export class ClothSkin {
    * lengths between them mean anything: it is the pattern of a tee cut for her as she is shaped now (`ClothSim.setRest`).
    * It is the pattern of the WHOLE garment, so it is in binding order over all `count` particles whatever `setOrder`
    * says, and it lays each one out by the binding's own offset, never `pinOffset`.
+   *
+   * `offsetShare` scales those offsets (0: her skin points themselves -- a garment measuring her stretch, where a point
+   * carried 12 cm off her along a small triangle's normal would amplify every change of her shape); `normals`, when
+   * given (count × 3), takes her outward unit normal under each particle, in the same frame.
    */
-  restShape(out: Float32Array): Float32Array {
+  restShape(out: Float32Array, offsetShare = 1, normals?: Float32Array): Float32Array {
     this.refresh();
     const bt = this.binding.tri, bb = this.binding.bary, off = this.binding.offset, s = this.scale, n = this.count, q = [0, 0, 0, 0, 0, 0, 0, 0, 0], r = [0, 0, 0, 0, 0, 0, 0, 0, 0], T = this.tris;
     for (let i = 0; i < n; i++) {
@@ -498,7 +502,8 @@ export class ClothSkin {
       const ux = r[3] - r[0], uy = r[4] - r[1], uz = r[5] - r[2], vx = r[6] - r[0], vy = r[7] - r[1], vz = r[8] - r[2];
       let nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx; const l = Math.hypot(nx, ny, nz);
       const k = l > 0 ? this.restSign / l : 0; nx *= k; ny *= k; nz *= k;
-      const u = bb[i * 3], v = bb[i * 3 + 1], w = bb[i * 3 + 2], o = off[i];
+      const u = bb[i * 3], v = bb[i * 3 + 1], w = bb[i * 3 + 2], o = off[i] * offsetShare;
+      if (normals) { normals[i * 3] = nx; normals[i * 3 + 1] = ny; normals[i * 3 + 2] = nz; }
       out[i * 3] = (u * q[0] + v * q[3] + w * q[6] + nx * o) * s;
       out[i * 3 + 1] = (u * q[1] + v * q[4] + w * q[7] + ny * o) * s;
       out[i * 3 + 2] = (u * q[2] + v * q[5] + w * q[8] + nz * o) * s;
