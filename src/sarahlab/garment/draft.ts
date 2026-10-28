@@ -72,6 +72,17 @@ export interface TeeParams {
    * tee's rib is, holds the neckline in when her arms pull at it (`garmentCloth.ts`). Absent: 1, no band.
    */
   readonly neckBand?: number;
+  /**
+   * THE FULL EXTENT (Stage 3): true drafts the tee as far as its instant controls can reach -- extra pieces sewn on under
+   * the hem down to her knee and under each cuff down to her wrist -- with every piece of the plain tee exactly as it is
+   * drafted without them. `cuts.ts` says which of it is worn (`settings.ts`). Absent or false: the plain tee.
+   */
+  readonly extend?: boolean;
+  /**
+   * The FRONT neckline's shape (Stage 3, NECK SHAPE): 0 the round neckline as drafted (U) to 1 a V, straight from its
+   * side to the centre front, both ends where the U has them. Absent or 0: the U, exactly as before.
+   */
+  readonly neckCurve?: number;
 }
 
 export const TEE_DEFAULTS: TeeParams = Object.freeze({
