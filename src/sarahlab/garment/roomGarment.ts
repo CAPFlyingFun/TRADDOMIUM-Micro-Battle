@@ -10,6 +10,9 @@
  *   front-to-back axis), brought forward (`forward`, about her side-to-side axis), her elbows bent -- the review's poses,
  *   which the room's own controls do not have.
  * - COLLIDING with her arms (and, asked for, her thighs and the stool) through `capsules.ts`.
+ * - CUT (Stage 3): given the new tee's settings (`garment`, `settings.ts`), it is drafted to its full extent and worn as
+ *   those settings cut it (`cuts.ts`); `cut` cuts it again as a finger drags an instant control, and the room tailors a
+ *   new one when a re-tailor setting is let go (`tailorKey`).
  *
  * three.js, the room's side.
  */
@@ -18,6 +21,8 @@ import type { ClothSettings } from '../clothSim';
 import { bodyInputOf, SARAH_V2_ARM_BONES, SARAH_V2_JOINTS } from './bodyInput';
 import { bodyCapsules, type CapsuleRequest } from './capsules';
 import { teeParams, type TeeParams } from './draft';
+import { garmentCuts, garmentStops } from './cuts';
+import { tailorKey, tailorParams, type GarmentSettings, type GarmentStops } from './settings';
 import { SARAH_V2_DETAIL_POINTS } from '../detailSpots';
 import { GarmentCloth } from './garmentCloth';
 import { tailor, type Tailored } from './tailor';
@@ -42,6 +47,15 @@ export interface RoomGarmentOptions {
   readonly neckBand?: number;
   /** False: no domes over her navel and nipples (a probe's before picture). Absent: domed. */
   readonly detail?: boolean;
+  /**
+   * The new tee's settings (Stage 3): drafted to its full extent from them (`tailorParams`, under `params`) and worn as
+   * they cut it. Absent: the plain tee `params` drafts, all of it worn.
+   */
+  readonly garment?: GarmentSettings;
+  /** Runs `measure` with her body as she is but for her belly, at `share` of 100% (BELLY ROOM: `GarmentCloth.roomShape`). */
+  readonly roomShape?: (share: number, measure: () => void) => void;
+  /** The cloth's FIT dial against its default: the drafted tee's rest scale (REST_SCALE) times this. Default 1. */
+  readonly fitScale?: number;
 }
 
 export interface ArmPose { raise: number; forward: number; elbow: number }
@@ -51,6 +65,8 @@ const Z = new THREE.Vector3(0, 0, 1), X = new THREE.Vector3(1, 0, 0);
 export class RoomGarment {
   readonly tailored: Tailored;
   readonly cloth: GarmentCloth;
+  /** The settings' `tailorKey` it was tailored for ('' without settings): equal settings cut it, others tailor a new one. */
+  readonly tailorKey: string;
   readonly pose: ArmPose = { raise: 0, forward: 0, elbow: 0 };
   capsules: CapsuleRequest = { arms: true, legs: false, stool: null };
   /** Particles that started within 7 cm of either armpit: the underarm the review measures. */
@@ -64,19 +80,37 @@ export class RoomGarment {
   constructor(options: RoomGarmentOptions) {
     this.options = options;
     const input = bodyInputOf(options.body, { belly: 1 });
-    const params = teeParams(options.params);
+    const g = options.garment;
+    const params = teeParams(g ? { ...tailorParams(g), ...options.params } : options.params);
+    this.tailorKey = g ? tailorKey(g) : '';
     this.tailored = tailor(input, params, { scale: options.scale, offset: options.offset });
     const t = this.tailored;
     this.cloth = new GarmentCloth({
       body: options.body, sewn: t.sewn, binding: t.binding, trunkOnly: t.placed.trunkOnly, armBones: SARAH_V2_ARM_BONES,
-      settings: { ...options.settings, restScale: REST_SCALE }, standOff: options.standOff, material: options.material, unitsPerMetre: options.unitsPerMetre,
+      settings: { ...options.settings, restScale: REST_SCALE * (options.fitScale ?? 1) }, standOff: options.standOff, material: options.material, unitsPerMetre: options.unitsPerMetre,
       // her design at 0% belly, as `bodyInputOf` read her to tailor it: every cut is measured from there
       tailoredShape: (measure) => tailoredShape(options.body, measure),
+      ...(options.roomShape ? { roomShape: options.roomShape } : {}),
+      // worn as its settings cut it from the start (the full extent is never simulated whole)
+      ...(g ? { cuts: garmentCuts(t, g) } : {}),
       drawLift: DRAW_LIFT * options.unitsPerMetre, fabricRest: fabricRestOf(t.placed.positions, options.scale, options.offset), neckBand: options.neckBand ?? params.neckBand ?? 1, armpitRule: params.construction !== 'setIn', detail: SARAH_V2_DETAIL_POINTS, ...(options.detail === false ? { detailDomes: false } : {}),
     });
+    if (g) this.cloth.bellyRoom = g.bellyRoom;
     this.underarm = new Uint8Array(t.sewn.count);
     for (let i = 0; i < t.sewn.count; i++) for (const ap of t.measure.armpit) if (Math.hypot(t.placed.positions[i * 3] - ap[0], t.placed.positions[i * 3 + 1] - ap[1], t.placed.positions[i * 3 + 2] - ap[2]) < 0.07) this.underarm[i] = 1;
   }
+
+  /**
+   * Cut it as `settings` say (their instant controls: length, hems, sleeves, a deeper neckline; and BELLY ROOM, which
+   * takes effect at the cloth's next `refit`): from the next frame. The re-tailor ones are the room's to act on.
+   */
+  cut(settings: GarmentSettings): void {
+    this.cloth.setCut(garmentCuts(this.tailored, settings));
+    this.cloth.bellyRoom = settings.bellyRoom;
+  }
+
+  /** Her landmarks for the instant controls, on this tee (`cuts.ts` garmentStops). */
+  stops(): GarmentStops { return garmentStops(this.tailored); }
 
   /** Turn her arms to `pose` on top of what her rig set this frame (call after the rig, before skinning reads her). */
   applyPose(): void {
@@ -111,9 +145,10 @@ export class RoomGarment {
     const o = this.tailored.sewn.openings.find((q) => q.edges.some((e) => e.endsWith(':neck')));
     const x = this.cloth.positions;
     if (!o) return { centre: [0, 0, 0], length: 0 };
-    let cx = 0, cy = 0, cz = 0;
-    for (const p of o.particles) { cx += x[p * 3]; cy += x[p * 3 + 1]; cz += x[p * 3 + 2]; }
-    const k = o.particles.length || 1;
+    let cx = 0, cy = 0, cz = 0, k = 0;
+    // (a cut neckline leaves some of the drafted one off: only what is worn)
+    for (const p of o.particles) { if (!Number.isFinite(x[p * 3])) continue; cx += x[p * 3]; cy += x[p * 3 + 1]; cz += x[p * 3 + 2]; k++; }
+    k ||= 1;
     return { centre: [cx / k, cy / k, cz / k], length: this.neckLength() };
   }
 
@@ -134,8 +169,8 @@ export class RoomGarment {
     let L = 0;
     for (const [key, c] of count) {
       if (c !== 1) continue;
-      const a = Math.floor(key / n), b = key % n;
-      L += Math.hypot(x[a * 3] - x[b * 3], x[a * 3 + 1] - x[b * 3 + 1], x[a * 3 + 2] - x[b * 3 + 2]);
+      const a = Math.floor(key / n), b = key % n, d = Math.hypot(x[a * 3] - x[b * 3], x[a * 3 + 1] - x[b * 3 + 1], x[a * 3 + 2] - x[b * 3 + 2]);
+      if (Number.isFinite(d)) L += d;
     }
     return L;
   }

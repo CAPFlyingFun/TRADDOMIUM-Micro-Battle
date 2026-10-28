@@ -182,6 +182,8 @@ export class ClothSkin {
   /** 1 for a triangle of her arm (see `armBones`); and 1 for a particle that must keep off them. */
   private readonly armTri: Uint8Array;
   private readonly trunkOnly: Uint8Array;
+  /** True when each particle's `trunkOnly` is read off its bound triangle (her arm bones given, the caller's own not). */
+  private readonly trunkRead: boolean;
   /** Per triangle, the mean share of its corners her arm bones carry, when `looseOverArm` is asked for; else null. */
   private readonly triArm: Float32Array | null;
   /** Per triangle, 1 where her skin faces level or down at rest (`LOOSE_MAX_UP`), when `looseOverArm` is asked for. */
@@ -402,7 +404,9 @@ export class ClothSkin {
       for (let t = 0; t < nT; t++) this.armTri[t] = armVertex[tris[t * 3]] + armVertex[tris[t * 3 + 1]] + armVertex[tris[t * 3 + 2]] >= 2 ? 1 : 0;
       for (let i = 0; i < n; i++) this.trunkOnly[i] = this.armTri[bound[i]] ? 0 : 1;
     }
-    if (options?.trunkOnly && options.trunkOnly.length >= n && arm.size) for (let i = 0; i < n; i++) this.trunkOnly[i] = options.trunkOnly[i] ? 1 : 0;
+    const given = !!(options?.trunkOnly && options.trunkOnly.length >= n && arm.size);
+    if (given) for (let i = 0; i < n; i++) this.trunkOnly[i] = options!.trunkOnly![i] ? 1 : 0;
+    this.trunkRead = !given && !!(arm.size && this.skinI && this.skinW);
     this.looseOverArm = options?.looseOverArm ?? Infinity;
     this.triArm = null;
     if (Number.isFinite(this.looseOverArm) && arm.size && this.skinI && this.skinW) {
@@ -436,6 +440,29 @@ export class ClothSkin {
 
   /** Whether binding particle p is bound to her ARM (its bound triangle is her arm's): for a probe. */
   boundToArm(p: number): boolean { return this.armTri[this.bound[p]] === 1; }
+
+  /**
+   * Binding particles `particles` have been bound afresh -- their entries in the binding's tri, bary and offset
+   * rewritten in place by the binding's owner: read them again, as a new ClothSkin would read them (each one's bound
+   * triangle, a fresh contact from it, its trunk rule where that is read off the triangle), and nothing else. Every
+   * other particle keeps all it carries. For a garment whose cut brings cloth back after it has settled on her
+   * (garmentCloth.ts), where building a new reader -- her whole body welded again -- would stall a slider.
+   */
+  rebound(particles: ArrayLike<number>): void {
+    const { binding, tris } = this;
+    for (let k = 0; k < particles.length; k++) {
+      const i = particles[k];
+      if (!(i >= 0 && i < this.count)) throw new RangeError(`ClothSkin.rebound: particle ${i} is outside the binding's ${this.count}`);
+      const a = binding.tri[i * 3], b = binding.tri[i * 3 + 1], c = binding.tri[i * 3 + 2];
+      const t = this.bound[i] = this.findTriangle(a, b, c);
+      this.exact[i] = sameSet(tris[t * 3], tris[t * 3 + 1], tris[t * 3 + 2], a, b, c) ? 1 : 0;
+      this.last[i] = t;
+      for (let j = 0; j < 3; j++) this.contactBary[i * 3 + j] = binding.bary[i * 3 + j];
+      this.contactKind[i] = CARRY_FRESH;
+      if (this.trunkRead) this.trunkOnly[i] = this.armTri[t] ? 0 : 1;
+      if (this.rescueChecked) this.rescueChecked[i] = 0;
+    }
+  }
 
   /** How many slots `initial` and `update` serve: `count` until `setOrder` says otherwise. */
   get slots(): number { return this.nSlots; }
@@ -563,6 +590,21 @@ export class ClothSkin {
     for (let i = 0; i < n; i++) this.pinOf(order[i], out, i * 3);
     this.last.set(this.bound);
     this.contactKind.fill(CARRY_FRESH);
+    return out;
+  }
+
+  /**
+   * Where binding particles `particles` would be pinned, world (3 each, in the list's order, into `out`), were their rest
+   * offsets `offsets` (body-local units, one a binding particle, by binding index) in place of `pinOffset` and the
+   * binding's: their bound skin points as she is posed now, out along her normal there. Nothing a particle carries is
+   * touched (a garment weighing a pin before it sets one: garmentCloth.ts's hug).
+   */
+  pinTargets(particles: ArrayLike<number>, offsets: Float32Array, out: Float32Array): Float32Array {
+    if (offsets.length < this.count) throw new RangeError(`ClothSkin.pinTargets: ${offsets.length} offsets for a binding of ${this.count} particles`);
+    this.refresh();
+    const keep = this.pinOffsetArr;
+    this.pinOffsetArr = offsets;
+    try { for (let k = 0; k < particles.length; k++) this.pinOf(particles[k], out, k * 3); } finally { this.pinOffsetArr = keep; }
     return out;
   }
 

@@ -8,21 +8,26 @@
  *   are drafted, planned, meshed and sewn exactly as without them, so every plain particle keeps its number, its place,
  *   its binding and its edges' rest lengths, and the first triangles are the plain tee's; the sheet is sound; the
  *   extension reaches her knee and her wrists.
+ * - `draft.ts` joinAlong: the extension's side seams (and its sleeves' underarm seams) leave the drafted hem's (cuff's)
+ *   corner along the plain seam's own direction, so the sheet closes flat round the hem's corners (the cone the dress
+ *   stood out in at her hips, 15 degrees short), and no particle of the side seams from there to her knee gathers more
+ *   than 9 degrees.
  * - `draft.ts` neckCurve: 0 drafts exactly the U; 1 a front neckline straight from its side end to its centre, both ends
  *   where the U has them and every other edge as it was.
  * - `cuts.ts`: GARMENT_DEFAULTS keeps exactly the plain tee. Her stops are in order, Standard and Short exactly as
  *   drafted, Knee and Wrist the extension's. LENGTH cuts the side seams at each stop's height, at Standard (nudged) runs
  *   through the drafted hem, FRONT HEM moves only the front pair and BACK HEM only the back, HEM CURVE raises the sides
  *   by HEM_CURVE_RISE and not the centre. SLEEVE nudged off Short runs along the drafted cuff, Wrist keeps all of the
- *   extensions, a raglan Tank leaves only a strap at the sleeve's top (a set-in's none), the gussets go once the cut is
- *   above them. NECKLINE cuts nothing until it is deeper than drafted; then it is 0 at the drafted neckline's side end,
+ *   extensions, a raglan Tank leaves only a strap at the sleeve's top (a set-in's none), a gusset is cut along its
+ *   diagonal once the cut is above it (its half sewn to the body worn). NECKLINE cuts nothing until it is deeper than
+ *   drafted; then it is 0 at the drafted neckline's side end,
  *   reaches the depth asked at her centre front, is clamped to neckDeepest and touches no piece but the front. And it is
  *   fast enough for a slider.
  */
 import { beforeAll, describe, expect, it } from 'vitest';
 import { FACE_REST_OFFSET, FACE_REST_SCALE } from '../src/sarahlab/faceRig';
 import { garmentCuts, garmentStops, HEM_CURVE_RISE, type GarmentCuts } from '../src/sarahlab/garment/cuts';
-import { draftTee, EXTENSION_PARENT, teeParams, type Draft, type SleeveConstruction, type TeeParams } from '../src/sarahlab/garment/draft';
+import { draftTee, EXTENSION_PARENT, JOIN_MAX, teeParams, type Draft, type SleeveConstruction, type TeeParams } from '../src/sarahlab/garment/draft';
 import { measureBody } from '../src/sarahlab/garment/measure';
 import { meshPiece } from '../src/sarahlab/garment/mesh';
 import { GARMENT_DEFAULTS, LENGTH_STOPS, SLEEVE_STOPS, tailorParams, withConstruction, type GarmentSettings } from '../src/sarahlab/garment/settings';
@@ -183,6 +188,40 @@ describe('the full extent (draft.ts extend)', () => {
         expect(ext.placed.region[i]).toBe(torso ? 0 : 1);
         expect(ext.placed.trunkOnly[i]).toBe(torso ? 1 : 0);
       }
+    }, TAILOR_MS);
+
+    it(`${c}: the extension leaves the drafted hem's and cuff's corners along the plain seams; the sheet closes flat round the hem's`, () => {
+      const t = tee(c, true), d = t.draft, deg = (r: number) => (r * 180) / Math.PI;
+      // each extension seam's stretch at the corner runs on along the plain seam's, to within half a degree: up the
+      // sides and the sleeve's back under edge (the extension's last stretch, the plain's first), down its front under
+      // edge (the plain's last, the extension's first); the other sleeve is this one's mirror
+      const dir = (a: Vec2, b: Vec2) => Math.atan2(b[0] - a[0], b[1] - a[1]);
+      const apart = (a: number, b: number) => deg(Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b))));
+      for (const [plain, ext, name] of [['front', 'frontExt', 'sideP'], ['back', 'backExt', 'sideM'], ['sleeveP', 'sleeveExtP', 'underBack']] as const) {
+        const p = edgeOf(d, plain, name), e = edgeOf(d, ext, name), n = e.length;
+        expect(e[n - 1]).toEqual(p[0]);
+        expect(apart(dir(p[0], p[1]), dir(e[n - 2], e[n - 1])), `${ext} ${name}`).toBeLessThan(0.5);
+      }
+      {
+        const p = edgeOf(d, 'sleeveP', 'underFront'), e = edgeOf(d, 'sleeveExtP', 'underFront'), n = p.length;
+        expect(e[0]).toEqual(p[n - 1]);
+        expect(apart(dir(p[n - 2], p[n - 1]), dir(e[0], e[1])), 'sleeveExtP underFront').toBeLessThan(0.5);
+      }
+      // what each particle of the side seams gathers (360 degrees less its triangles' corners, flat as drafted): at the
+      // hem's corner and all the way down the extension's side to her knee, under 9 degrees (the cone it stood out in: 15)
+      const S = t.sewn, R = S.renderTriangles, uv = S.uv, sum = new Float64Array(S.count);
+      for (let k = 0; k < R.length; k += 3) for (let j = 0; j < 3; j++) {
+        const a = R[k + j], b = R[k + ((j + 1) % 3)], cc = R[k + ((j + 2) % 3)];
+        const ux = uv[2 * b] - uv[2 * a], uy = uv[2 * b + 1] - uv[2 * a + 1], vx = uv[2 * cc] - uv[2 * a], vy = uv[2 * cc + 1] - uv[2 * a + 1];
+        sum[S.vertexParticle[a]] += Math.acos(Math.max(-1, Math.min(1, (ux * vx + uy * vy) / (Math.hypot(ux, uy) * Math.hypot(vx, vy)))));
+      }
+      const yH = d.notes.hemY, near = new Map<number, number>();
+      for (const v of [...sideSeam(t, 'front'), ...sideSeam(t, 'back')]) { const y = uv[2 * v + 1]; if (y <= yH + 1e-6 && y > d.guide.kneeY + 0.005) near.set(S.vertexParticle[v], y); }
+      expect(near.size).toBeGreaterThan(20);
+      expect(Math.min(...near.values())).toBeLessThan(yH - JOIN_MAX);
+      let worst = 0;
+      for (const p of near.keys()) worst = Math.max(worst, Math.abs(360 - deg(sum[p])));
+      expect(worst).toBeLessThan(9);
     }, TAILOR_MS);
 
     it(`${c}: the extension reaches her knee and her wrists`, () => {
@@ -413,14 +452,26 @@ describe('the cuts (cuts.ts)', () => {
         const cuts = garmentCuts(t, { ...settingsOf(c), sleeve: s });
         for (const id of ['front', 'back']) expect(keepOf(t, cuts, id).every((k) => k === 1), `${s} ${id}`).toBe(true);
       }
-      // a raglan's gusset: gone at Cap (the cut above it), worn from Short down
+      // a raglan's gusset: worn whole from Short down; at Cap and Tank (the cut above it) its lower half, cut along its
+      // diagonal -- keep is the depth under the diagonal, so its seams to the body are worn and the sleeve's corner is not
       const sG = t.draft.notes.gussetSide;
       if (sG > 0) {
         const st = garmentStops(t), capY = g.sleeve.shoulderV - st.sleeveLength[1];
         expect(capY).toBeGreaterThan(-sG - 0.01);
-        for (const [s, k] of [[0, -1], [20, -1], [40, 1], [40.01, 1], [60, 1], [100, 1]] as const) {
+        for (const s of [40, 40.01, 60, 100]) {
           const cuts = garmentCuts(t, { ...settingsOf(c), sleeve: s });
-          for (const id of ['gussetP', 'gussetM']) expect(keepOf(t, cuts, id).every((x) => x === k), `${s} ${id}`).toBe(true);
+          for (const id of ['gussetP', 'gussetM']) expect(keepOf(t, cuts, id).every((x) => x === 1), `${s} ${id}`).toBe(true);
+        }
+        for (const s of [0, 20]) {
+          const cuts = garmentCuts(t, { ...settingsOf(c), sleeve: s });
+          for (const id of ['gussetP', 'gussetM']) {
+            const [a, b] = runOf(t, id);
+            for (let v = a; v < b; v++) expect(cuts.keep[v]).toBeCloseTo(-t.sewn.uv[2 * v + 1], 6);
+            const body = onEdges(t, [id], (n) => n === 'front' || n === 'back'), sleeve = onEdges(t, [id], (n) => n.startsWith('sleeve'));
+            expect(body.length).toBeGreaterThan(4);
+            for (const v of body) expect(cuts.keep[v], `${s} ${id} body seam`).toBeGreaterThan(-1e-6);
+            expect(Math.min(...sleeve.map((v) => cuts.keep[v])), `${s} ${id} the sleeve's corner`).toBeLessThan(-sG / 2);
+          }
         }
       }
     }, TAILOR_MS);

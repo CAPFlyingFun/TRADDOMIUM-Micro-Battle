@@ -12,11 +12,14 @@
  *   w the piece's half-width where the line meets the side seam (at h + rise: `hemLine`), level past the side seams. At
  *   the Standard stop with nothing moved it IS the drafted hem; at the Knee stop, the extension's.
  * - SLEEVE, across each sleeve and its extension: level, at a height of the sleeve's frame between its stops. A gusset
- *   is worn whole while the cut is under it, and goes whole above. The body is never cut by a sleeve: on a raglan cut
- *   above the underarm, the body's raglan edges simply become the armhole.
+ *   is worn whole while the cut is under it; above, its lower half -- the half sewn to the body, between the front's and
+ *   the back's side seams -- is worn, cut along its diagonal between the sleeve's underarm corners, so the body stays
+ *   closed up under her arm (Stage 3: dropped whole, the gusset left a slit 6 cm down her side) and the armhole runs
+ *   under her arm from the front's raglan to the back's. The body is never cut by a sleeve: on a raglan cut above the
+ *   underarm, the body's raglan edges simply become the armhole.
  * - NECKLINE, the front only, deeper than drafted: from the drafted neckline's side end (the raglan point, a set-in's
- *   shoulder seam) to her centre front at the depth asked, a U (the drafted neckline let down by a smooth step that is 0
- *   at the side end) blended toward a V (straight from the side end) by NECK SHAPE. It is 0 at the side end, so a
+ *   shoulder seam) to her centre front at the depth asked, a U (the drafted neckline let down by a quarter ellipse that
+ *   is 0 at the side end) blended toward a V (straight from the side end) by NECK SHAPE. It is 0 at the side end, so a
  *   sleeve's and the back's neckline are never cut.
  * `keep` is the signed perpendicular distance to the line that crosses the vertex's piece, so a band of a width is that
  * wide everywhere; a piece its line does not cross reads +1 kept whole or -1 cut away whole. And when a pair's line is
@@ -69,7 +72,7 @@ const TANK_STRAP = 0.045, TANK_OVER_CROWN = 0.01;
 const ELBOW_PAST = 0.02, THREE_QUARTER = 0.75;
 /** A stop moved to keep the stops in order stands at least this far from its neighbours, metres. */
 const STOP_GAP = 0.01;
-/** A gusset is worn while the sleeve's cut is at least this far under it, metres. */
+/** A gusset is worn whole while the sleeve's cut is at least this far under it (above, its lower half), metres. */
 const GUSSET_CLEAR = 0.01;
 /**
  * A piece none of whose vertices is further than this on the far side of its line is kept whole (or cut away whole),
@@ -199,15 +202,17 @@ function hemLine(g: DraftGuide, side: 'front' | 'back', h: number, hem: number, 
 
 /**
  * The NECKLINE's cut line, to the centre front at `vDeep` (a pattern height of the front): at each node of the drafted
- * neckline's half (`DraftGuide.frontNeck`), a U -- the drafted neckline let down by (its centre - vDeep) times a smooth
- * step from 1 at the centre to 0 at the side end, level at both -- blended by `curve` toward a V, the drafted neckline
- * or the straight line from its side end to the deep centre, whichever is lower. Mirrored about the centre.
+ * neckline's half (`DraftGuide.frontNeck`), a U -- the drafted neckline let down by (its centre - vDeep) times a
+ * quarter ellipse, the whole drop at the centre (level there) and none at the side end (where it falls straight) --
+ * blended by `curve` toward a V, the drafted neckline or the straight line from its side end to the deep centre,
+ * whichever is lower. Mirrored about the centre. (The U was a smooth step first, level at both ends: halfway across it
+ * stood half as deep as at the centre, as the V does, and on her it read as a V.)
  */
 function neckLine(half: readonly Vec2[], vDeep: number, curve: number): Line {
   const q = half.length, [uSide, vSide] = half[0], drop = half[q - 1][1] - vDeep;
   const x = new Float64Array(2 * q - 1), y = new Float64Array(2 * q - 1);
   for (let i = 0; i < q; i++) {
-    const [u, v] = half[q - 1 - i], s = u / uSide, step = 1 - s * s * (3 - 2 * s);
+    const [u, v] = half[q - 1 - i], s = Math.min(1, u / uSide), step = Math.sqrt(Math.max(0, 1 - s * s));
     const U = v - drop * step, V = Math.min(v, vDeep + (vSide - vDeep) * s), at = U + curve * (V - U);
     x[q - 1 - i] = -u; y[q - 1 - i] = at;
     x[q - 1 + i] = u; y[q - 1 + i] = at;
@@ -290,15 +295,19 @@ export function garmentCuts(t: CutSource, settings: GarmentSettings = GARMENT_DE
     }
   }
 
-  // SLEEVE: level across both sleeves, or exactly as drafted; the gussets whole either way
+  // SLEEVE: level across both sleeves, or exactly as drafted. A gusset whole while the cut is under it; above, the half
+  // sewn to the body, cut along its diagonal between the sleeve's underarm corners
   const yCut = stopValue(s.sleeve, SLEEVE_STOPS, P.sleeveY), short = s.sleeve === SHORT_AT;
   for (const r of P.sleeves) {
     if (short) { keep.fill(r.extension ? -1 : 1, r.start, r.end); continue; }
     for (let v = r.start; v < r.end; v++) keep[v] = uv[2 * v + 1] - yCut;
     whole(keep, r);
   }
-  const gusset = short || yCut <= -t.draft.notes.gussetSide - GUSSET_CLEAR ? 1 : -1;
-  for (const r of P.gussets) keep.fill(gusset, r.start, r.end);
+  const gussetWhole = short || yCut <= -t.draft.notes.gussetSide - GUSSET_CLEAR;
+  for (const r of P.gussets) {
+    if (gussetWhole) { keep.fill(1, r.start, r.end); continue; }
+    for (let v = r.start; v < r.end; v++) keep[v] = -uv[2 * v + 1];
+  }
 
   // NECKLINE: only deeper than drafted, the front only
   const front = P.neckRun;

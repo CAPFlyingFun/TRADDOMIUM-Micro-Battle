@@ -103,7 +103,7 @@ export class GarmentDetail {
   /** How the drawn relief is softened (`shading`): by the cloth's distance off the tip, by the widened flat top, and the steepest it may be. */
   shade: { spread: number; widen: number; slope: number; grow?: number } = { spread: SHADE_SPREAD, widen: 0, slope: Infinity, grow: 1 };
 
-  constructor(points: DetailPoints, count: number, private readonly domes = true, rest?: RestBody, private readonly triangles?: Uint32Array) {
+  constructor(points: DetailPoints, count: number, private readonly domes = true, rest?: RestBody, private triangles?: Uint32Array) {
     this.spots = new DetailSpots(points);
     this.lastSkin = new Float32Array(count * 3);
     const details: [number, readonly (readonly number[])[]][] = [[points.navel, points.navelRings], ...points.nipples.slice(0, 2).map((v, i) => [v, points.nippleRings[i]] as [number, readonly (readonly number[])[]])];
@@ -111,6 +111,12 @@ export class GarmentDetail {
     // and full NAVEL DETAIL her outie spreads past the inner one and came up through the cloth beside its apex
     this.around = details.map(([centre, rings], i) => (rest && rings?.length ? aroundOf(rest, centre, i === 0 ? rings[rings.length - 1] : rings[0]) : null));
   }
+
+  /**
+   * The cloth's triangles from now on, by the indices `follow` is handed positions in: the garment's worn triangles by
+   * slot, once a cut decides what is worn (`garmentCloth.ts`).
+   */
+  setTriangles(triangles: Uint32Array): void { this.triangles = triangles; }
 
   /** Her navel and nipples as posed now (for a probe). */
   get posed(): { readonly navel: Posed; readonly nipples: readonly Posed[] } { return { navel: this.spots.navel, nipples: this.spots.nipples.slice(0, this.spots.points.nipples.length) }; }

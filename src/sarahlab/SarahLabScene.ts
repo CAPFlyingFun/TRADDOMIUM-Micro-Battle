@@ -26,7 +26,11 @@ import { SkinPainter, tilePattern, type SkinImage, type SkinPattern, type SkinSt
 import { ensureRest } from './fabricMaterial';
 import { BodyCrease, CREASE_SETTLE_MS, unitBefore } from './bodyCrease';
 import { FACE_REST_OFFSET, FACE_REST_SCALE, patchFaceRig, restFromWorld, setFaceRig } from './faceRig';
-import { RoomGarment } from './garment/roomGarment';
+import { REST_SCALE, RoomGarment } from './garment/roomGarment';
+import { BEND_COMPLIANCE } from './garment/garmentCloth';
+import { setCutEdge } from './garment/cutEdge';
+import { GARMENT_DEFAULTS, GARMENT_RECORD_VERSION, clampGarmentSettings, tailorKey, withConstruction, type GarmentRecord, type GarmentSettings } from './garment/settings';
+import { GarmentPanel } from './garmentPanel';
 import { FaceMotion } from './faceMotion';
 import { patchHairMaterial } from './hairMaterial';
 import { SARAH_LOOK } from './sarahLook';
@@ -77,7 +81,7 @@ import { dropIdleMorphs } from '../view/morphPrune';
 import { HumanRig, findSkinnedMesh } from '../view/HumanRig';
 import { UNITS_PER_METRE } from '../world/dem';
 import {
-  SARAH_V2_HAIR_MODEL, BELLY_MOTION, BELLY_TARGET, trimShown, BREAST_TARGETS, BUMP_MAX_PERCENT, GARMENTS, RECOVERED_SHIRTS, OUTFITS, outfitLine, modelLine, refineLine, refineWeight, nextOutfit, wornGarments, coverMask, bodyNeverHidden, uncoveredSkinIndices, UNDER_TOP_GARMENT, BELLY_REFINE_TARGET, SEAT_TARGET, seatCorrectiveWeight, SARAH_LAB_MODELS, SARAH_LAB_DEFAULT_MODEL, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID, shirtLengthLine, sarahModelPath, BODY_RANDOM_SPECS, CLOTH_SHIRT_PATH, teeLengthLine, teeLengthParts, sleevesLine, necklineLine, neckShapeLine, CLOTH_NECKLINE_DEFAULT, clothLine, CLOTH_DIALS, CLOTH_TUNE_DEFAULT, CLOTH_TEE_LENGTH_DEFAULT, clothTuning, type ClothTune,
+  SARAH_V2_HAIR_MODEL, BELLY_MOTION, BELLY_TARGET, trimShown, BREAST_TARGETS, BUMP_MAX_PERCENT, GARMENTS, RECOVERED_SHIRTS, OUTFITS, outfitLine, modelLine, refineLine, refineWeight, nextOutfit, wornGarments, coverMask, bodyNeverHidden, uncoveredSkinIndices, UNDER_TOP_GARMENT, BELLY_REFINE_TARGET, SEAT_TARGET, seatCorrectiveWeight, SARAH_LAB_MODELS, SARAH_LAB_DEFAULT_MODEL, SARAH_LAB_ACTION, SARAH_LAB_FIELD, SARAH_LAB_HUD_ROLE, SARAH_LAB_SCENE_ID, shirtLengthLine, sarahModelPath, BODY_RANDOM_SPECS, CLOTH_SHIRT_PATH, teeLengthLine, teeLengthParts, sleevesLine, necklineLine, neckShapeLine, CLOTH_NECKLINE_DEFAULT, clothLine, CLOTH_DIALS, CLOTH_TUNE_DEFAULT, CLOTH_TEE_LENGTH_DEFAULT, clothTuning, clothRestScale, type ClothTune,
   labTitle, CLOTH_SEATED_LINE, bellyMotionWeights, bellyWeights, breastBobWeight, breastWeightsForShape, bodyShapeFieldWeights, SIZE_TILT_PRESETS_DEG, effectiveTiltDeg, stepSeated, bustVolume, BREAST_GROW_TARGET, settledSitFor, bellyUpperWeight, BELLY_UPPER_TARGET, navelWeights, NAVEL_FLAT_TARGET, navelFlatFor, navelState, tPoseTurns, ARM_SIDES, armsLine, ARM_RAISE_TARGETS, armRaiseWeight, SEAT_V2_TARGET, seatCorrectiveV2Weight, fingerBend, THUMB_TO_PALM, bumpLine, fingersLine, restingBellySpring, statusLine, stepBellySpring, stepBreastSpring, walkBounceAccel,
   offeredOutfits, outfitThumbPath,
   type Garment, type SarahLabPose, recoveredPartsFor, recoveredPartPath, isShirtPart, shirtOfPart, type RecoveredPart, SARAH_DEFAULT_OUTFIT, SIM_TEE_OUTFIT, RECOVERED_GARMENTS,
@@ -666,6 +670,14 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let garmentAuto: 'raglan' | 'setIn' | null = null, garmentProbed = false, garmentDressT = 0, garmentTailoring = false;
   /** A probe's look at the garment's shape alone: false draws her details through it as nothing (the shading off). */
   let garmentShade = true;
+  /**
+   * THE NEW TEE'S SETTINGS (Stage 3, `garment/settings.ts`): what its panel shows, what it is cut and tailored from, and
+   * what a save of the outfit keeps. An outfit puts on its save's or its own (`adoptGarment`); the panel changes them.
+   * `garmentCommitted` is the pattern they ask for once a finger has let go (`tailorKey`): a re-tailor setting dragged
+   * cuts the tee it is on as it goes, and the tee is tailored again only when it is let go.
+   */
+  let garmentSettings: GarmentSettings = GARMENT_DEFAULTS, garmentCommitted = tailorKey(GARMENT_DEFAULTS);
+  let garmentPanel: GarmentPanel | null = null;
   const clothWorn = (): boolean => clothOn && !!cloth && !clothSeated;
   let cloth: ClothShirt | null = null, clothOn = false, clothLoading = false, clothRestart = false, clothRefit = false, teeLength = CLOTH_TEE_LENGTH_DEFAULT, frameMs = 1000 / 60;
   let teeLengthInput: HTMLInputElement | null = null;
@@ -681,13 +693,26 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   /** Her shape the cloth was last cut for. */
   let clothShapeKey = '';
   const clothDialInputs = new Map<string, HTMLInputElement>();
-  /** Put the dials on the cloth, live. */
+  /** Put the dials on the cloth, live (the cloth tee's and the new tee's). */
   function tuneCloth(): void {
+    tuneGarment();
     if (!cloth) return;
     const { settings, standOff } = clothTuning(clothTune);
     Object.assign(cloth.simSettings, settings);
     cloth.standOff = standOff;
   }
+  /**
+   * The dials on the new tee, live: as on the cloth tee, but its FIT scales the tee's own drafted size (REST_SCALE at the
+   * default) and its stiffer bend is kept (`garmentCloth.ts` BEND_COMPLIANCE).
+   */
+  function tuneGarment(): void {
+    if (!garmentRoom) return;
+    const { settings, standOff } = clothTuning(clothTune);
+    Object.assign(garmentRoom.cloth.simSettings, { ...settings, restScale: REST_SCALE * garmentFitScale(), bendCompliance: BEND_COMPLIANCE });
+    garmentRoom.cloth.standOff = standOff;
+  }
+  /** The FIT dial against its default, for the new tee (`RoomGarment.fitScale`). */
+  const garmentFitScale = (): number => clothRestScale(clothTune.fit) / clothRestScale(CLOTH_TUNE_DEFAULT.fit);
   const pointers = new Map<number, { x: number; y: number }>();
   let pinch = 0;
   /** One finger builds (places and moves a built strap's points) while the builder's EDIT is on and nothing is painting. */
@@ -824,12 +849,15 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       if (buttons.neckShape) { buttons.neckShape.style.display = lite ? '' : 'none'; buttons.neckShape.textContent = neckShapeLine(neckShape, neckline); lit(buttons.neckShape, neckShape === 'V'); }
       if (buttons.sleeves) { buttons.sleeves.style.display = lite ? '' : 'none'; buttons.sleeves.textContent = sleevesLine(sleeves, clothOn); lit(buttons.sleeves, !sleeves); buttons.sleeves.disabled = !clothOn; }
       if (fields.cloth) { fields.cloth.style.display = clothOn && cloth ? '' : 'none'; if (clothOn && cloth && clothSeated) fields.cloth.textContent = CLOTH_SEATED_LINE; }
+      // the new tee's controls, and the cloth's dials on it too (Stage 3: "The cloth dials show for the new tee too")
+      const newTee = recovered && !!OUTFITS[outfit]?.procedural && !!garmentRoom && !!garmentAuto, dials = (lite && clothOn) || newTee;
+      if (garmentPanel) { garmentPanel.element.style.display = recovered && OUTFITS[outfit]?.procedural ? '' : 'none'; garmentPanel.refresh(); }
       for (const d of CLOTH_DIALS) {
         const f = fields[`${SARAH_LAB_FIELD.clothDial}${d.key}`], i = clothDialInputs.get(d.key);
-        if (f) { f.textContent = d.line(clothTune[d.key]); f.style.display = lite && clothOn ? '' : 'none'; }
-        if (i) i.style.display = lite && clothOn ? '' : 'none';
+        if (f) { f.textContent = d.line(clothTune[d.key]); f.style.display = dials ? '' : 'none'; }
+        if (i) i.style.display = dials ? '' : 'none';
       }
-      if (buttons.clothReset?.parentElement) buttons.clothReset.parentElement.style.display = lite && clothOn ? 'flex' : 'none';
+      if (buttons.clothReset?.parentElement) buttons.clothReset.parentElement.style.display = dials ? 'flex' : 'none';
     }
     for (const k of BREAST_DIMENSIONS) lit(buttons[`link-${k}`], linked.has(k));
     if (buttons.linkAll) { const all = BREAST_DIMENSIONS.every((k) => linked.has(k)); buttons.linkAll.textContent = all ? 'UNLINK W·H·D' : 'LINK W·H·D'; lit(buttons.linkAll, all); }
@@ -997,8 +1025,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       // the fitted light tee keeps its own navel's shape as fitted for her size: NAVEL DETAIL settles it in the shader
       // (clothFlatten). Settled by the morph instead -- as paint under it at a low NAVEL DETAIL used to do (the painted
       // leggings over her navel) -- its navel, which past 125% stands above hers, was pushed into her: a hole in the tee.
-      const liteTee = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material).name === 'shirtSpandexLite';
-      if (dict && influences) for (const [name, w] of Object.entries({ ...bellyWeights(bump, bellyCurve), ...breastWeightsForShape(bump, dict[BREAST_GROW_TARGET] !== undefined, body.breastSize), [BELLY_UPPER_TARGET]: bellyUpperWeight(bump, bellyCurve), ...navelWeights(bump, body.navel), [NAVEL_FLAT_TARGET]: liteTee ? Math.min(1, Math.max(0, navelFlatFor(bump, body.navel))) : Math.max(navelFlatFor(bump, body.navel), fabric?.navelFlatten() ?? 0, clothFlatten()), [BELLY_REFINE_TARGET]: refineWeight(refine, bump), [SEAT_TARGET]: seatCorrectiveWeight(pose === 'sit' ? 1 : 0, bump), [SEAT_V2_TARGET]: seatCorrectiveV2Weight(pose === 'sit' ? 1 : 0, bump), ...armRaiseWeights() })) {
+      if (dict && influences) for (const [name, w] of Object.entries(lookWeights(mesh, bump))) {
         const at = dict[name];
         if (at !== undefined) influences[at] = w;
       }
@@ -1058,6 +1085,35 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     if (cloth && shapeKey !== clothShapeKey) { clothShapeKey = shapeKey; clothRefit = true; }
     // the procedural garment a probe put on her, the same way (on its next frame)
     if (garmentRoom && shapeKey !== garmentShapeKey) { garmentShapeKey = shapeKey; garmentRefit = true; }
+  }
+
+  /**
+   * A mesh's morph target weights for her look at bump `b` (applyLook's): her belly and bust at that size, her navel, the
+   * refinement, the seat's correctives and her raised arms.
+   */
+  function lookWeights(mesh: THREE.SkinnedMesh, b: number): Record<string, number> {
+    const dict = mesh.morphTargetDictionary ?? {};
+    // the fitted light tee keeps its own navel's shape as fitted for her size: NAVEL DETAIL settles it in the shader
+    const liteTee = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material).name === 'shirtSpandexLite';
+    return { ...bellyWeights(b, bellyCurve), ...breastWeightsForShape(b, dict[BREAST_GROW_TARGET] !== undefined, body.breastSize), [BELLY_UPPER_TARGET]: bellyUpperWeight(b, bellyCurve), ...navelWeights(b, body.navel), [NAVEL_FLAT_TARGET]: liteTee ? Math.min(1, Math.max(0, navelFlatFor(b, body.navel))) : Math.max(navelFlatFor(b, body.navel), fabric?.navelFlatten() ?? 0, clothFlatten()), [BELLY_REFINE_TARGET]: refineWeight(refine, b), [SEAT_TARGET]: seatCorrectiveWeight(pose === 'sit' ? 1 : 0, b), [SEAT_V2_TARGET]: seatCorrectiveV2Weight(pose === 'sit' ? 1 : 0, b), ...armRaiseWeights() };
+  }
+
+  /**
+   * BELLY ROOM's reading of her (`GarmentCloth.roomShape`): runs `measure` with her body shaped as she is but for her belly,
+   * at `share` of 100% -- her shape fields and morph targets as applyLook lays them at that size -- and puts her back.
+   * Only her body: no other mesh, nothing drawn in between.
+   */
+  function roomShape(share: number, measure: () => void): void {
+    const s = shaped.find((x) => !!x.mesh.geometry.getAttribute('_cloth_cover')), mesh = s?.mesh as THREE.SkinnedMesh | undefined;
+    if (!s || !mesh) { measure(); return; }
+    const inf = mesh.morphTargetInfluences, dict = mesh.morphTargetDictionary, keep = inf ? inf.slice() : null;
+    const opts = { normalizeNormals: true, post: buildPost(mesh, s.fields, currentBuild()) };
+    applyShapeFields(mesh, s.fields, bodyShapeFieldWeights(body, share * 100, bellyCurve), opts);
+    if (inf && dict) for (const [name, w] of Object.entries(lookWeights(mesh, share * 100))) { const at = dict[name]; if (at !== undefined) inf[at] = w; }
+    try { measure(); } finally {
+      applyShapeFields(mesh, s.fields, bodyShapeFieldWeights(body, bump, bellyCurve), opts);
+      if (inf && keep) for (let j = 0; j < keep.length; j++) inf[j] = keep[j];
+    }
   }
 
   /**
@@ -1144,6 +1200,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   /** A painted outfit's paint goes on with it (and comes off when a modelled one is chosen). */
   function wearPaint(): void {
     fabric?.wearOutfit(recovered ? OUTFITS[outfit]?.paint ?? null : null, recovered ? OUTFITS[outfit]?.fabrics : undefined);
+    // the new tee's settings: the save's, or the outfit's own
+    adoptGarment(pendingClothes?.garment ?? null);
     // saved clothes put on with this outfit go on over its defaults
     if (pendingClothes && fabric?.putOnClothes(pendingClothes)) { builder?.load(pendingClothes.built ?? null); pendingClothes = null; }
     // what she has on now is what the editor's SAVE compares against
@@ -1152,7 +1210,41 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   /** What she wears now, as a save holds it: the outfit, the editor's paint and fabrics, and any built pieces. */
   function currentClothes(): SavedClothes {
     const built = builder?.built() ?? null;
-    return { outfit: OUTFITS[outfit].name, ...(fabric?.clothes() ?? { shirtLength: DEFAULT_SHIRT_LENGTH, layers: [], garments: {} }), ...(built ? { built } : {}) };
+    // an outfit whose tee is the new one keeps its settings and the dials it is worn with (never its mesh)
+    const garment: GarmentRecord | null = OUTFITS[outfit]?.procedural ? { version: GARMENT_RECORD_VERSION, settings: garmentSettings, dials: clothTune } : null;
+    return { outfit: OUTFITS[outfit].name, ...(fabric?.clothes() ?? { shirtLength: DEFAULT_SHIRT_LENGTH, layers: [], garments: {} }), ...(built ? { built } : {}), ...(garment ? { garment } : {}) };
+  }
+  /**
+   * The new tee's settings as an outfit goes on (Stage 3): a save's record -- its settings and the cloth dials it was
+   * worn with -- or, with none (any save from before it, or the outfit chosen), the outfit's own: the approved tee in the
+   * outfit's construction. The tee she has on is cut to them at once, and tailored again if they draft another pattern.
+   */
+  function adoptGarment(record: GarmentRecord | null): void {
+    const own = OUTFITS[outfit]?.procedural;
+    if (!own) return;
+    garmentSettings = record ? clampGarmentSettings(record.settings) : withConstruction(GARMENT_DEFAULTS, own);
+    garmentCommitted = tailorKey(garmentSettings);
+    if (record) {
+      clothTune = { ...CLOTH_TUNE_DEFAULT, ...record.dials };
+      for (const [k, i] of clothDialInputs) i.value = String(clothTune[k as keyof ClothTune]);
+      tuneCloth();
+    }
+    if (garmentRoom && garmentAuto) garmentRoom.cut(garmentSettings);
+  }
+  /**
+   * The new tee's panel moved a control (`garmentPanel.ts`): kept at once, and the tee she has on cut to it -- an instant
+   * setting is the cut itself; a re-tailor one drafts another pattern, which is tailored when `final` (let go: `syncGarment`).
+   * BELLY ROOM cuts the cloth's own lengths: on its next refit.
+   */
+  function garmentChanged(next: GarmentSettings, final: boolean): void {
+    const was = garmentSettings;
+    garmentSettings = clampGarmentSettings(next);
+    if (final) garmentCommitted = tailorKey(garmentSettings);
+    if (garmentRoom && garmentAuto) {
+      garmentRoom.cut(garmentSettings);
+      if (garmentSettings.bellyRoom !== was.bellyRoom) garmentRefit = true;
+    }
+    refresh();
   }
   /** Put saved clothes on her: their outfit first if it is another, then every piece as saved. */
   function putOnSaved(saved: SavedClothes, from: string | null, source: OutfitSource): void {
@@ -1163,6 +1255,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     pendingClothes = rest;
     if (index >= 0 && index !== outfit) dress(index);
     else {
+      adoptGarment(rest.garment ?? null);
       if (fabric?.putOnClothes(rest)) { builder?.load(rest.built ?? null); pendingClothes = null; outfits?.editing(source); nextSource = null; }
       applyLook(); refresh();
     }
@@ -1221,7 +1314,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     const want = OUTFITS[outfit]?.procedural ?? null;
     const tee = partMeshes.get('spandex-lite')?.[0];
     if (want && loaded && recovered && tee && model) {
-      if (garmentRoom && garmentAuto === want) return;
+      // on her already, drafted as its settings ask once let go (a re-tailor control let go, a save put on, tailors anew;
+      // she keeps the one she has on until the new one is ready -- the Stage 1 plan's re-tailor)
+      if (garmentRoom && garmentAuto === want && garmentRoom.tailorKey === garmentCommitted) return;
       garmentTailoring = true;
       begin('Tailoring the new tee', model.visible ? 'aside' : 'centre');
       setTimeout(() => {
@@ -1229,7 +1324,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         if (disposed || OUTFITS[outfit]?.procedural !== want || garmentProbed) { settle(); return; }
         // the light tee's cloth copy stands aside: the new tee wears its material
         if (cloth) { cloth.mesh.visible = false; }
-        putOnGarment(want, want === 'raglan' ? 0.5 : 0, false, {});
+        putOnGarment(garmentSettings.construction, garmentSettings.gusset, false, {}, garmentSettings);
         garmentAuto = garmentRoom ? want : null; garmentDressT = 0;
         if (garmentRoom) garmentRoom.cloth.weightless = true;
         applyLook(); refresh(); settle();
@@ -1241,6 +1336,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   }
   /** The procedural tee off her, and the light tee's cloth copy drawn again if it is on. */
   function takeOffGarment(): void {
+    // its cut edge goes with it: the material is the light tee's, which the cloth and fitted tees wear too
+    if (garmentRoom) setCutEdge(garmentRoom.cloth.mesh.material as THREE.Material, false);
     garmentRoom?.dispose(); garmentRoom = null; garmentPoseKey = '';
     if (cloth && clothOn) cloth.mesh.visible = true;
   }
@@ -1248,7 +1345,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
    * Put the procedural tee on her, or take it off (null): tailored to her as she is now, in the light tee's own material
    * (its FABRIC), or a plain one for a wireframe or a room without that tee. For the outfit and for the review probes.
    */
-  function putOnGarment(construction: 'raglan' | 'setIn' | null, gusset = 0.5, wire = false, extra: { neckWidth?: number; neckDrop?: number; bustShaping?: 'none' | 'ease' | 'dart'; neckBand?: number; armholeBand?: number; detail?: boolean } = {}) {
+  function putOnGarment(construction: 'raglan' | 'setIn' | null, gusset = 0.5, wire = false, extra: { neckWidth?: number; neckDrop?: number; bustShaping?: 'none' | 'ease' | 'dart'; neckBand?: number; armholeBand?: number; detail?: boolean } = {}, garment?: GarmentSettings) {
     takeOffGarment();
     if (!construction) { applyLook(); return null; }
     const body = skinned.find((m) => !!m.geometry.getAttribute('_cloth_cover'));
@@ -1263,7 +1360,14 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     const shared = !wire && teeMaterial && !Array.isArray(teeMaterial) ? teeMaterial : null;
     if (shared) { setClothNeckline(shared, null); setClothTrim(shared, null); }
     const material = shared ?? new THREE.MeshStandardMaterial({ color: 0xe8e4dc, roughness: 0.85, side: THREE.DoubleSide, wireframe: wire, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -8 });
-    garmentRoom = new RoomGarment({ body, root: model, params: { construction, gusset, ...(extra.neckWidth !== undefined ? { neckWidth: extra.neckWidth } : {}), ...(extra.neckDrop !== undefined ? { neckDrop: extra.neckDrop } : {}), ...(extra.bustShaping ? { bustShaping: extra.bustShaping } : {}), ...(extra.armholeBand !== undefined ? { armholeBand: extra.armholeBand } : {}) }, neckBand: extra.neckBand, ...(extra.detail === false ? { detail: false } : {}), settings, standOff, unitsPerMetre: M, scale: FACE_REST_SCALE, offset: FACE_REST_OFFSET, material });
+    garmentRoom = new RoomGarment({
+      body, root: model, params: { construction, gusset, ...(extra.neckWidth !== undefined ? { neckWidth: extra.neckWidth } : {}), ...(extra.neckDrop !== undefined ? { neckDrop: extra.neckDrop } : {}), ...(extra.bustShaping ? { bustShaping: extra.bustShaping } : {}), ...(extra.armholeBand !== undefined ? { armholeBand: extra.armholeBand } : {}) },
+      neckBand: extra.neckBand, ...(extra.detail === false ? { detail: false } : {}), settings, standOff, unitsPerMetre: M, scale: FACE_REST_SCALE, offset: FACE_REST_OFFSET, material,
+      // the outfit's new tee (Stage 3): drafted to its full extent from its settings and worn as they cut it, its edge
+      // drawn by the material; BELLY ROOM reads her at the room's size; FIT scales its own size
+      ...(garment ? { garment, roomShape } : {}), fitScale: garmentFitScale(),
+    });
+    if (garment) setCutEdge(material, true);
     three.add(garmentRoom.cloth.mesh);
     garmentPoseKey = pose;
     // cut at once for her as she is now, measured from the 0% design it was tailored from (`RoomGarment`'s
@@ -1483,12 +1587,22 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     buttons.neckShape = btn(neckShapeLine(neckShape, neckline), SARAH_LAB_ACTION.neckShape, () => { neckShape = neckShape === 'U' ? 'V' : 'U'; cloth?.setNeckline(neckline / 100, neckShape); refresh(); });
     buttons.neckShape.dataset.tab = 'outfit'; buttons.neckShape.style.padding = '7px 10px'; buttons.neckShape.style.fontSize = '11px';
     right.appendChild(buttons.neckShape);
+    // THE NEW TEE'S CONTROLS (Stage 3): shown while an outfit's tee is the new one (`refresh`); every change comes back
+    // through `garmentChanged`
+    garmentPanel = new GarmentPanel({
+      settings: () => garmentSettings,
+      change: (next, final) => garmentChanged(next, final),
+      stops: () => (garmentRoom && garmentAuto ? garmentRoom.stops() : null),
+      tailoring: () => garmentTailoring,
+    });
+    right.appendChild(garmentPanel.element);
     // ...and its dials, live (Joshua, 2026-10-24: "Could potentially even add sliders to play with values in real time")
     for (const d of CLOTH_DIALS) clothDialInputs.set(d.key, slider(`${SARAH_LAB_FIELD.clothDial}${d.key}`, clothTune[d.key], (v) => { clothTune = { ...clothTune, [d.key]: v }; tuneCloth(); }, 100, 'outfit'));
     {
       const r = document.createElement('div'); r.dataset.tab = 'outfit'; r.style.cssText = 'display:flex;gap:6px;flex-wrap:wrap';
-      buttons.clothReset = btn('LAY CLOTH AGAIN', SARAH_LAB_ACTION.clothReset, () => { clothRestart = true; });
-      buttons.clothDefaults = btn('CLOTH DEFAULTS', SARAH_LAB_ACTION.clothDefaults, () => { clothTune = CLOTH_TUNE_DEFAULT; for (const [k, i] of clothDialInputs) i.value = String(clothTune[k as keyof ClothTune]); tuneCloth(); clothRestart = true; });
+      // (on the new tee as on the cloth tee: laid again where it settled)
+      buttons.clothReset = btn('LAY CLOTH AGAIN', SARAH_LAB_ACTION.clothReset, () => { clothRestart = true; garmentRoom?.cloth.restart(); });
+      buttons.clothDefaults = btn('CLOTH DEFAULTS', SARAH_LAB_ACTION.clothDefaults, () => { clothTune = CLOTH_TUNE_DEFAULT; for (const [k, i] of clothDialInputs) i.value = String(clothTune[k as keyof ClothTune]); tuneCloth(); clothRestart = true; garmentRoom?.cloth.restart(); });
       for (const b of [buttons.clothReset, buttons.clothDefaults]) { b.style.padding = '7px 10px'; b.style.fontSize = '11px'; r.appendChild(b); }
       right.appendChild(r);
     }
@@ -2400,8 +2514,10 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         const pieces = dt > 1 / 40 ? 2 : 1;
         for (let k = 0; k < pieces; k++) garmentRoom.frame(dt / pieces);
         setClothDetail(garmentRoom.cloth.mesh.material as THREE.Material, garmentShade ? garmentRoom.cloth.detailShading(keep) : null);
-        // the cloth tee's cuts stay off a material the garment shares with it
+        // the cloth tee's cuts stay off a material the garment shares with it, and the garment's own are on (a probe's
+        // plain tee carries no cut, so its edge is never dropped)
         setClothNeckline(garmentRoom.cloth.mesh.material as THREE.Material, null); setClothTrim(garmentRoom.cloth.mesh.material as THREE.Material, null);
+        if (garmentAuto) setCutEdge(garmentRoom.cloth.mesh.material as THREE.Material, true);
         if (Math.abs(1 - keep.navel - clothFlattenLaid) > 1e-3) applyLook();
       }
       // the fitted light tee (the cloth off): her nipples drawn through it and its own navel settled onto its smooth
@@ -2536,6 +2652,18 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         garmentProfile: (i = 0) => garmentRoom?.cloth.detailProfile(i) ?? null,
         garmentDetailShade: (patch?: { spread?: number; widen?: number; slope?: number; grow?: number }) => garmentRoom?.cloth.detailShade(patch) ?? null,
         garmentStats: () => garmentRoom?.cloth.stats() ?? null,
+        // Stage 3: the new tee's settings, as its panel moves them (`final` true: let go, so a re-tailor one tailors),
+        // its landmarks, and what of it is worn
+        garmentSettings: (patch?: Record<string, unknown>, final = true) => { if (patch) garmentChanged(clampGarmentSettings({ ...garmentSettings, ...patch }, garmentSettings), final); return garmentSettings; },
+        garmentStops: () => (garmentRoom && garmentAuto ? garmentRoom.stops() : null),
+        // the worn edges in a box (world), with each end's pattern place (piece, u, v): where the cloth is cut too long or short
+        garmentEdgesIn: (lo: number[], hi: number[]) => {
+          if (!garmentRoom) return null;
+          const t = garmentRoom.tailored.sewn, at = new Map<number, [number, number, number]>();
+          for (let v = 0; v < t.vertexParticle.length; v++) if (!at.has(t.vertexParticle[v])) at.set(t.vertexParticle[v], [t.vertexPiece[v], t.uv[v * 2], t.uv[v * 2 + 1]]);
+          return garmentRoom.cloth.edgesIn(lo, hi).map((e) => ({ ...e, pa: at.get(e.a), pb: at.get(e.b) }));
+        },
+        garmentWorn: () => (garmentRoom ? { worn: garmentRoom.cloth.active, of: garmentRoom.tailored.sewn.count, tailoring: garmentTailoring, tailorKey: garmentRoom.tailorKey, committed: garmentCommitted, outfit: !!garmentAuto } : null),
         // per particle, where it is (world) and its least and most strain and sharpest fold: a probe's crease map
         garmentStrainMap: () => garmentRoom ? { positions: Array.from(garmentRoom.cloth.positions.subarray(0, garmentRoom.tailored.sewn.count * 3)), map: Array.from(garmentRoom.cloth.strainMap()), fit: Array.from(garmentRoom.cloth.fitMap()), piece: Array.from(garmentRoom.tailored.sewn.particlePiece), pieces: garmentRoom.tailored.sewn.pieces } : null,
         // where the underside of her belly starts to hang, and by where entirely (her normal's height; equal: never), cut again
@@ -2811,6 +2939,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       builder = null;
       dropCloth();
       garmentRoom?.dispose(); garmentRoom = null;
+      garmentPanel?.dispose(); garmentPanel = null;
       hud?.remove();
       hud = null;
       if (model) { three.remove(model); rig?.dispose(); release(model); model = null; }

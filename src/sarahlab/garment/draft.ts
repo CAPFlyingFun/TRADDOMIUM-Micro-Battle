@@ -133,6 +133,18 @@ const BUST_DART_BELOW = 0.05, BUST_DART_SHORT = 0.025;
 /** The full extent's pieces stop at least this far past the drafted hem and cuff, metres (a hem drafted below her knee, a sleeve to her wrist). */
 const EXTENT_MIN = 0.02;
 /**
+ * An extension's side seam (its sleeve's underarm seam) bends from the plain piece's direction at its corner into its own
+ * course over between JOIN_MIN and JOIN_MAX of its length, searched every JOIN_STEP; where no even bend meets it there, it
+ * turns over JOIN_SIDE (JOIN_SLEEVE) instead, metres (`joinAlong`).
+ */
+export const JOIN_MIN = 0.01, JOIN_MAX = 0.16, JOIN_STEP = 0.0025, JOIN_SIDE = 0.16, JOIN_SLEEVE = 0.05;
+/**
+ * The extension's side seams are smoothed this many passes over their centimetre samples (about 3 cm), where the plain
+ * sides take 6: her dress form's outline kinks where her hips part into her thighs and again above her knees, and a
+ * dress's side seam runs past both (at 6 passes each kink folded the sheet 8 to 10 degrees at a single particle).
+ */
+const EXT_SIDE_SMOOTH = 20;
+/**
  * The level-hem rule's centre extra is tabled every this many metres of her height (`centreExtras`): her dress form is
  * only known every centimetre, and on Sarah a table every 2 mm and one every 1 cm agree to a hundredth of a millimetre.
  */
@@ -244,6 +256,65 @@ function mirrored(id: string, role: PatternPiece['role'], right: { hem: PatternE
   const top = edge(right.top.name, [...right.top.points, ...mirrorReverse(right.top.points).slice(1)], right.top.spacing);
   const left = [...right.sides].reverse().map((e) => edge(swap(e.name), mirrorReverse(e.points), e.spacing));
   return { id, role, side: 0, symmetric: true, spacing: SPACING.body, edges: [hem, ...right.sides, top, ...left] };
+}
+
+/**
+ * An extension's edge brought into the plain piece's corner along the plain edge's own direction: `pts` the extension's
+ * edge as smoothed (rising, ending under the corner), `corner` the plain edge's end and `next` the plain edge's next
+ * point (its direction leaving the corner). From the corner down, the edge bends at one even rate from that direction
+ * until it runs along the smoothed edge (a parabola, tangent to both: the least turning there can be, spread evenly);
+ * below, as smoothed. Where no such bend meets the smoothed edge within JOIN_MAX, a curve with no bend at either end
+ * runs from the smoothed edge `blend` down to the corner instead.
+ *
+ * Sewn, the four pieces at a hem's side corner (two at a cuff's) then lie flat round it. Smoothed on its own, each edge
+ * ran into the corner at its own slope -- her dress form narrowing under her hip, the plain side as its own smoothing
+ * left it -- and the corner closed 15 degrees short of flat: the cloth stood out from her hips in a cone at the drafted
+ * hem's side corners, whatever the length (Stage 3). What turning her hip asks for is now spread down the extension.
+ */
+export function joinAlong(pts: readonly Vec2[], corner: Vec2, next: Vec2, blend: number): Vec2[] {
+  const [xc, yc] = corner, dy = next[1] - yc, m1 = Math.abs(dy) > 1e-9 ? (next[0] - xc) / dy : 0;
+  // the smoothed edge at height y: its place and its slope there (the segment under y)
+  const at = (y: number): { x: number; m: number; i: number } => {
+    let i = 0;
+    while (i < pts.length - 2 && pts[i + 1][1] <= y) i++;
+    const a = pts[i], b = pts[Math.min(i + 1, pts.length - 1)], span = b[1] - a[1];
+    const t = span > 1e-12 ? Math.max(0, Math.min(1, (y - a[1]) / span)) : 0;
+    return { x: a[0] + (b[0] - a[0]) * t, m: span > 1e-12 ? (b[0] - a[0]) / span : 0, i };
+  };
+  // the bend: from the corner along m1, x = xc + m1 d + c d^2 (d = y - yc), meeting the edge B down with the edge's own
+  // slope when the edge there stands where the bend arrives, xc - B (m1 + m) / 2
+  const miss = (B: number) => { const e = at(yc - B); return e.x - (xc - (B * (m1 + e.m)) / 2); };
+  const top = yc - pts[0][1];
+  let B = -1;
+  for (let b = JOIN_MIN, was = miss(Math.min(JOIN_MIN, top)); b + JOIN_STEP <= Math.min(JOIN_MAX, top) + 1e-12; b += JOIN_STEP) {
+    const now = miss(b + JOIN_STEP);
+    if (Math.sign(now) !== Math.sign(was)) {
+      let lo = b, hi = b + JOIN_STEP;
+      for (let k = 0; k < 30; k++) { const mid = (lo + hi) / 2; if (Math.sign(miss(mid)) === Math.sign(was)) lo = mid; else hi = mid; }
+      B = (lo + hi) / 2;
+      break;
+    }
+    was = now;
+  }
+  const bent = B > 0;
+  if (!bent) B = Math.min(blend, top);
+  const y0 = yc - B, e = at(y0), x0 = e.x, m0 = e.m;
+  const out: Vec2[] = pts.slice(0, e.i + 1).map((q) => [q[0], q[1]] as Vec2);
+  if (y0 - pts[e.i][1] > 1e-9) out.push([x0, y0]);
+  // drawn every millimetre: its last stretch leaves the corner along the plain edge to within a fraction of a degree
+  const k = Math.max(2, Math.ceil(B / 0.001));
+  for (let j = 1; j <= k; j++) {
+    const t = j / k, d = B * (t - 1);
+    let x: number;
+    if (bent) x = xc + m1 * d + ((m1 - m0) / (2 * B)) * d * d;
+    else {
+      // the quintic with no bend at either end: its turning in its middle, none gathered at either end
+      const t3 = t * t * t, t4 = t3 * t, t5 = t4 * t;
+      x = (1 - 10 * t3 + 15 * t4 - 6 * t5) * x0 + (t - 6 * t3 + 8 * t4 - 3 * t5) * B * m0 + (10 * t3 - 15 * t4 + 6 * t5) * xc + (-4 * t3 + 7 * t4 - 3 * t5) * B * m1;
+    }
+    out.push(j === k ? [xc, yc] : [x, y0 + B * t]);
+  }
+  return out;
 }
 
 /** The mirror image of a piece about x = 0 (its edges reflected, the outline kept counter-clockwise), renamed. */
@@ -630,28 +701,28 @@ export function draftTee(measure: BodyMeasure, params: TeeParams = TEE_DEFAULTS,
       }
       return s / k;
     };
-    const extSide = (half: (y: number, z: number) => number, corner: Vec2): Vec2[] => {
+    // ...and turned into the plain side seam's own direction over JOIN_SIDE under the drafted hem (`joinAlong`)
+    const extSide = (half: (y: number, z: number) => number, plain: readonly Vec2[]): Vec2[] => {
       const ys = [yK];
       for (let k = Math.ceil((yHem - yK) / 0.01) - 1; k >= 1; k--) if (yHem - 0.01 * k > yK + 0.005) ys.push(yHem - 0.01 * k);
       const pts: Vec2[] = ys.map((y) => [half(y, zSideOnce(y)), y]);
-      pts.push(corner);
-      return densify(smooth(pts, 6));
+      return densify(joinAlong(pts.length > 2 ? smooth(pts, EXT_SIDE_SMOOTH) : pts, plain[0], plain[1], JOIN_SIDE));
     };
-    const fSide = extSide((y, z) => halves(frontForm, y, z).front / 2 + ease(y) / 4, frontSide[0]);
-    const bSide = extSide((y, z) => halves(form, y, z).back / 2 + ease(y) / 4, backSide[0]);
+    const fSide = extSide((y, z) => halves(frontForm, y, z).front / 2 + ease(y) / 4, frontSide);
+    const bSide = extSide((y, z) => halves(form, y, z).back / 2 + ease(y) / 4, backSide);
     sideFront = [...fSide, ...frontSide.slice(1)]; sideBack = [...bSide, ...backSide.slice(1)];
     pieces.push(mirrored('frontExt', 'torso', { hem: edge('hem', hemOf(fSide, rawExtra('front')(yK), yK), SPACING.hem), sides: [edge('sideP', fSide, SPACING.side)], top: edge('top', [...frontHem].reverse(), SPACING.hem) }, swapPM));
     pieces.push(mirrored('backExt', 'torso', { hem: edge('hem', hemOf(bSide, rawExtra('back')(yK), yK), SPACING.hem), sides: [edge('sideM', bSide, SPACING.side)], top: edge('top', [...backHem].reverse(), SPACING.hem) }, swapPM));
-    // SLEEVEEXTP (and its mirror): the tube's under edge continued down to her wrist by the same rule, ending exactly on
-    // the drafted cuff's corner; a cuff at her wrist; the top the sleeve's cuff walked the other way, sewn to it
+    // SLEEVEEXTP (and its mirror): the tube's under edge continued down to her wrist by the same rule, turned into the
+    // drafted under edge's direction over JOIN_SLEEVE under the cuff and ending exactly on its corner (`joinAlong`); a
+    // cuff at her wrist; the top the sleeve's cuff walked the other way, sewn to it
     const cuff = pieces.find((q) => q.id === 'sleeveP')!.edges.find((e) => e.name === 'cuff')!.points;
     const pts: Vec2[] = [], n = Math.max(2, Math.ceil((cuffV - wristV) / 0.01));
     for (let i = 0; i < n; i++) {
       const v = wristV + (cuffV - wristV) * (i / n), x = Math.max(tubeHalf(v), 0), k = Math.max(0, Math.min(1, (v + sG + 0.04) / 0.04));
       pts.push([x + (W / 2 - x) * k, v]);
     }
-    pts.push(under[0]);
-    const ub = densify(smooth(pts, 4)), uf = densify([...ub].reverse().map((q) => [-q[0], q[1]] as Vec2));
+    const ub = densify(joinAlong(pts.length > 2 ? smooth(pts, 4) : pts, under[0], under[1], JOIN_SLEEVE)), uf = densify([...ub].reverse().map((q) => [-q[0], q[1]] as Vec2));
     const ext: PatternPiece = {
       id: 'sleeveExtP', role: 'sleeve', side: 1, symmetric: false, spacing: SPACING.sleeve,
       edges: [edge('cuff', line([-ub[0][0], wristV], [ub[0][0], wristV]), SPACING.hem), edge('underBack', ub, SPACING.under), edge('top', [...cuff].reverse(), SPACING.hem), edge('underFront', uf, SPACING.under)],

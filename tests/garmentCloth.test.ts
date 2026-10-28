@@ -1,8 +1,10 @@
 /**
  * THE PROCEDURAL GARMENT AS CLOTH, ON HER (`garment/garmentCloth.ts`, Stage 2b): `weightless` (gravity off for the frame
  * and put back after it), `drawLift` (the drawn sheet lifted along its normals while the simulation is untouched), the
- * neckline held by `settle` (pin 1 within PIN_IN of the opening along the cloth, easing to 0 at PIN_OUT), and the body
- * pieces (`trunkOnly`) pushed out of the arm capsules a frame is handed.
+ * neckline held by `settle` (pin 1 within PIN_IN of the opening along the cloth, easing to 0 at PIN_OUT), the body
+ * pieces (`trunkOnly`) pushed out of the arm capsules a frame is handed, and cloth a cut brings back (Stage 3) laid
+ * level with the cloth round it -- moved as it has moved from where it is bound, and once settled bound there (the
+ * unworn cloth bound at `settle` as the worn cloth round it moved), so a restart lays it there too.
  *
  * The body is a skinned open cylinder 15 cm round, standing upright in a room 100 units to the metre. The garment is a
  * sewn TUBE built here to the `SewnGarment` contract -- 24 particles round, ten rows, 2 cm off her -- with its top
@@ -11,7 +13,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { GarmentCloth, type GarmentClothOptions } from '../src/sarahlab/garment/garmentCloth';
+import { GarmentCloth, HUG_CLEARANCE, HUG_STRETCH, type GarmentClothOptions } from '../src/sarahlab/garment/garmentCloth';
 import type { Capsules } from '../src/sarahlab/clothSim';
 import type { ClothBinding } from '../src/sarahlab/clothTypes';
 import type { SewnGarment } from '../src/sarahlab/garment/types';
@@ -26,10 +28,21 @@ const ROWS = [0.25, 0.24, 0.23, 0.21, 0.17, 0.12, 0.06, 0, -0.06, -0.12];
 
 interface Body { root: THREE.Group; mesh: THREE.SkinnedMesh; upper: THREE.Bone }
 
-/** An upright skinned open cylinder (two bones, split at y = 0), scaled 100 to the metre. */
-function cylinderBody(): Body {
-  const g = new THREE.CylinderGeometry(R_BODY, R_BODY, 0.8, 32, 16, true);
+/**
+ * An upright skinned open cylinder (two bones, split at y = 0), scaled 100 to the metre; `groove` (metres) presses a
+ * hollow that deep, 12 cm wide, down its front (+z), as the hollow between her breasts is.
+ */
+function cylinderBody(groove = 0): Body {
+  const g = new THREE.CylinderGeometry(R_BODY, R_BODY, 0.8, groove > 0 ? 96 : 32, 16, true);
   const pos = g.getAttribute('position'), n = pos.count;
+  if (groove > 0) {
+    for (let v = 0; v < n; v++) {
+      const x = pos.getX(v), z = pos.getZ(v), a = Math.atan2(x, z), w = Math.abs(a) < 0.4 ? 0.5 + 0.5 * Math.cos((Math.PI * a) / 0.4) : 0;
+      const r = R_BODY - groove * w, k = r / Math.hypot(x, z);
+      pos.setXYZ(v, x * k, pos.getY(v), z * k);
+    }
+    g.computeVertexNormals();
+  }
   const si = new Uint16Array(n * 4), sw = new Float32Array(n * 4);
   for (let v = 0; v < n; v++) {
     const t = THREE.MathUtils.clamp((pos.getY(v) + 0.1) / 0.2, 0, 1);
@@ -120,8 +133,8 @@ function bindTo(mesh: THREE.SkinnedMesh, points: Float32Array): ClothBinding {
 }
 
 interface Rig { body: Body; sewn: SewnGarment; binding: ClothBinding; points: Float32Array }
-function rig(): Rig {
-  const body = cylinderBody(), points = tubePoints();
+function rig(groove = 0): Rig {
+  const body = cylinderBody(groove), points = tubePoints();
   return { body, sewn: tube(points), binding: bindTo(body.mesh, points), points };
 }
 
@@ -293,5 +306,104 @@ describe('GarmentCloth on a synthetic sewn tube over a skinned cylinder', () => 
     let worst = 0;
     for (let i = 0; i < AROUND; i++) worst = Math.max(worst, Math.abs(gc.positions[i * 3 + 1] - settledAt[i * 3 + 1]));
     expect(worst).toBeLessThan(0.1);
+  });
+
+  // Stage 3: a cut that brings cloth back after the garment has settled lays it as the cloth round it lies and binds it
+  // there (`join`): laid and held where it was tailored, a band brought back met the settled cloth stretched and folded.
+  it('cloth a cut brings back after settling is laid as the cloth round it lies, and bound to her there', () => {
+    const r = rig(), n = r.sewn.count, KEPT = 5, SLID = 3;
+    const cutAt = (rows: number) => ({ keep: Float32Array.from({ length: n }, (_, v) => (rowOf(v) < rows ? 1 : -1)), neck: new Float32Array(n).fill(Infinity) });
+    const gc = garment(r, { cuts: cutAt(KEPT) });
+    gc.weightless = true;
+    for (let f = 0; f < 10; f++) gc.frame(FRAME);
+    // the worn cloth slides SLID units down her and settles there; the rest keeps the binding it was tailored with
+    const sim = (gc as unknown as { sim: { positions: Float32Array } }).sim, worn = gc.active;
+    expect(worn).toBe((KEPT + 1) * AROUND);
+    for (let i = 0; i < worn; i++) sim.positions[i * 3 + 1] -= SLID;
+    gc.settle();
+    const tailoredY = (i: number) => r.points[i * 3 + 1] * 100;
+    // how far the worn cloth's last row now stands from where it was tailored: the slide, and the hair it eased
+    let moved = 0;
+    for (let i = KEPT * AROUND; i < (KEPT + 1) * AROUND; i++) moved += (gc.positions[i * 3 + 1] - tailoredY(i)) / AROUND;
+    expect(Math.abs(moved + SLID)).toBeLessThan(0.3);
+    // all of it worn again: the rows that come back start that far from where they were tailored, as the cloth above
+    const before = gc.strain();
+    gc.setCut(cutAt(ROWS.length));
+    gc.layOut();
+    expect(gc.active).toBe(n);
+    let off = 0;
+    for (let i = (KEPT + 1) * AROUND; i < n; i++) off = Math.max(off, Math.abs(gc.positions[i * 3 + 1] - (tailoredY(i) + moved)));
+    expect(off).toBeLessThan(0.05);
+    // nothing between the cloth that stayed and the cloth that came back stretched or squeezed (laid where they were
+    // tailored, the rows that came back would have stood SLID over the row above them: half their length), and the
+    // cloth as a whole no more strained than before
+    const E = r.sewn.edges, P = gc.positions;
+    let seam = 0;
+    for (let e = 0; e < E.length; e += 2) {
+      const a = E[e], b = E[e + 1];
+      if (Math.min(rowOf(a), rowOf(b)) !== KEPT || Math.max(rowOf(a), rowOf(b)) !== KEPT + 1) continue;
+      const len = Math.hypot(P[b * 3] - P[a * 3], P[b * 3 + 1] - P[a * 3 + 1], P[b * 3 + 2] - P[a * 3 + 2]) / (r.sewn.edgeRest[e / 2] * 100);
+      seam = Math.max(seam, Math.abs(len - 1));
+    }
+    expect(seam).toBeLessThan(0.03);
+    const st = gc.strain();
+    expect(st.max).toBeLessThanOrEqual(before.max + 1e-6);
+    expect(st.min).toBeGreaterThanOrEqual(before.min - 1e-6);
+    // and bound where it came back: laid again where it is bound, it lands there, not where it was tailored
+    gc.restart();
+    off = 0;
+    for (let i = (KEPT + 1) * AROUND; i < n; i++) off = Math.max(off, Math.abs(gc.positions[i * 3 + 1] - (tailoredY(i) + moved)));
+    expect(off).toBeLessThan(0.05);
+  });
+
+  // Stage 3: a cut neckline is held to her skin (a hug) -- but not pulled down into a hollow it crosses (`easeHug`): held
+  // to the skin under each particle, the edge across the hollow between her breasts was stretched into it in teeth.
+  it('a cut neckline is held to her, and let off where it crosses a hollow it would have to stretch into', () => {
+    const GROOVE = 0.04, r = rig(GROOVE), n = r.sewn.count;
+    // all of it worn; the neckline cut along the top row (signed metres under it)
+    const cuts = { keep: new Float32Array(n).fill(1), neck: Float32Array.from({ length: n }, (_, v) => ROWS[0] - ROWS[rowOf(v)]) };
+    const gc = garment(r, { cuts });
+    gc.weightless = true;
+    for (let f = 0; f < 5; f++) gc.frame(FRAME);
+    gc.settle();
+    const hug = (gc as unknown as { hug: Float32Array | null }).hug;
+    expect(hug).not.toBeNull();
+    // the top row (held fully): round her, held at the hug's clearance; over the hollow's middle, let off well past it
+    const close = HUG_CLEARANCE, angle = (i: number) => (2 * Math.PI * (i % AROUND)) / AROUND + 0.05;
+    let away = 0, over = Infinity;
+    for (let i = 0; i < AROUND; i++) {
+      const a = Math.atan2(Math.sin(angle(i)), Math.cos(angle(i)));
+      if (Math.abs(a) > 0.8) away = Math.max(away, Math.abs(hug![i] - close));
+      if (Math.abs(a) < 0.15) over = Math.min(over, hug![i]);
+    }
+    expect(away).toBeLessThan(1e-6);
+    expect(over).toBeGreaterThan(close + 0.01);
+    // held where the hug puts it, no edge round the top row is longer than HUG_STRETCH of its length (and a hair)
+    for (let f = 0; f < 3; f++) gc.frame(FRAME);
+    const x = gc.positions, k = gc.simSettings.restScale;
+    let worst = 0;
+    for (let i = 0; i < AROUND; i++) {
+      const j = (i + 1) % AROUND, d = Math.hypot(x[j * 3] - x[i * 3], x[j * 3 + 1] - x[i * 3 + 1], x[j * 3 + 2] - x[i * 3 + 2]);
+      const rest = Math.hypot(r.points[j * 3] - r.points[i * 3], r.points[j * 3 + 1] - r.points[i * 3 + 1], r.points[j * 3 + 2] - r.points[i * 3 + 2]) * 100 * k;
+      worst = Math.max(worst, d / rest);
+    }
+    expect(worst).toBeLessThan(HUG_STRETCH + 0.02);
+  });
+
+  it('before it has settled, cloth a cut brings back is laid as the cloth round it lies and keeps the binding it was tailored with', () => {
+    const r = rig(), n = r.sewn.count, KEPT = 5, SLID = 3;
+    const cutAt = (rows: number) => ({ keep: Float32Array.from({ length: n }, (_, v) => (rowOf(v) < rows ? 1 : -1)), neck: new Float32Array(n).fill(Infinity) });
+    const gc = garment(r, { cuts: cutAt(KEPT) });
+    const sim = (gc as unknown as { sim: { positions: Float32Array } }).sim, worn = gc.active;
+    for (let i = 0; i < worn; i++) sim.positions[i * 3 + 1] -= SLID;
+    gc.setCut(cutAt(ROWS.length));
+    gc.layOut();
+    let off = 0;
+    for (let i = (KEPT + 1) * AROUND; i < n; i++) off = Math.max(off, Math.abs(gc.positions[i * 3 + 1] - (r.points[i * 3 + 1] * 100 - SLID)));
+    expect(off).toBeLessThan(0.05);
+    gc.restart();
+    off = 0;
+    for (let i = 0; i < n; i++) off = Math.max(off, Math.abs(gc.positions[i * 3 + 1] - r.points[i * 3 + 1] * 100));
+    expect(off).toBeLessThan(1e-3);
   });
 });
