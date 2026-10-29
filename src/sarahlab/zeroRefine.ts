@@ -26,7 +26,9 @@ export const ZERO_FIELD = 'shape:zeroRefine';
  * Her upper belly smoothed, navel up, one CPU field per belly key below 75% (Joshua, 2026-10-29: "between 0-60% smooth
  * more of the top half of the belly from the bellybutton upwards, but leave the bottom half alone"; of the renders, "just
  * the smooth looks best"): `shape:upper:<key>`, weighted by that key's own belly weight, so it fades with the keys and is
- * gone by 75%.
+ * gone by 75%. Each key's field also carries (Joshua, same day) the whole belly smoothed inside his approved mask below
+ * 60% -- the V crease and ripples her 25-50% shapes carried, "strong" -- and the bump rounded out from 20 to 60%, most
+ * at 40% ("the 40% looks too pointed... more round looks best").
  */
 export const UPPER_FIELD_PREFIX = 'shape:upper:';
 /** Her body's vertex count in the file the corrections were baked for (sarah-v2-body-slim.glb and its -ktx2 twin). */
