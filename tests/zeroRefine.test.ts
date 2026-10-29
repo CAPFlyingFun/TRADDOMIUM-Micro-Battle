@@ -8,13 +8,16 @@
  *   end further; nothing outside its shapes.
  * - Laid on her body at 0%, 100% and 200% (and a max outie at 0%, a bowl at 200%), the navel zone has no face turned
  *   over and stays where her skin is, and putting the same shape back lays the same navel.
+ * - Her sides and underside smoothed ("Gentle strength under the belly, max everywhere else"): one field per belly size
+ *   from 25% to 200%, a tent over them, nothing at 0% (her approved 0% body is left alone), on HYBRID only, every move
+ *   a few centimetres at most and nothing in the navel's own zone.
  */
 import { readFileSync } from 'node:fs';
 import * as THREE from 'three';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { applyShapeFields, liftShapeFields } from '../src/view/bodyShapeView';
 import { navelHeight, smallestAxis } from '../src/sarahlab/navelPiece';
-import { applyZeroRefine, fitsZeroRefine, parseZeroRefine, UPPER_FIELD_PREFIX, ZERO_FIELD, zeroRefineWeight, type ZeroRefine } from '../src/sarahlab/zeroRefine';
+import { anchorWeights, applyZeroRefine, fitsZeroRefine, parseZeroRefine, SIDES_FIELD_PREFIX, sidesAnchors, sidesFieldWeights, UPPER_FIELD_PREFIX, ZERO_FIELD, zeroRefineWeight, type ZeroRefine } from '../src/sarahlab/zeroRefine';
 import { bellyWeights } from '../src/sarahlab/sarahLabTool';
 import { loadSarahMesh } from './garmentSarahBody';
 
@@ -98,5 +101,41 @@ describe('laid on her', () => {
       if (b.clone().sub(a).cross(e.clone().sub(a)).dot(facing) < 0) turned++;
     }
     expect(turned).toBe(0);
+  });
+});
+
+describe('her sides smoothed', () => {
+  it('is baked at every quarter from 25% to 200%', () => {
+    expect(data.sides.map((p) => p.slider)).toEqual([25, 50, 75, 100, 125, 150, 175, 200]);
+    for (const p of data.sides) {
+      expect(p.index.length).toBeGreaterThan(10000);
+      let max = 0;
+      for (let i = 0; i < p.index.length; i += 1) max = Math.max(max, Math.hypot(p.pos[i * 3], p.pos[i * 3 + 1], p.pos[i * 3 + 2]));
+      expect(max).toBeLessThan(0.045);   // geometry units: under about 4 cm
+      for (let i = 1; i < p.index.length; i += 1) expect(p.index[i]).toBeGreaterThan(p.index[i - 1]);
+    }
+  });
+  it('leaves the navel\'s own zone to the navel piece', () => {
+    const inner = new Set<number>();
+    const n = data.navel;
+    for (let k = 0; k < n.count; k += 1) if (n.flags[k] & 1) for (let j = n.splitStart[k]; j < n.splitStart[k + 1]; j += 1) inner.add(n.splits[j]);
+    for (const p of data.sides) for (const i of p.index) expect(inner.has(i)).toBe(false);
+  });
+  it('weighs in by a tent: nothing at 0%, whole at each baked size, shared between, held past 200%', () => {
+    const at = [25, 50, 75, 100, 125, 150, 175, 200];
+    expect(anchorWeights(0, at).size).toBe(0);
+    expect(anchorWeights(12.5, at).get(25)).toBeCloseTo(0.5);
+    expect(anchorWeights(100, at).get(100)).toBe(1);
+    const mid = anchorWeights(110, at);
+    expect(mid.get(100)).toBeCloseTo(0.6); expect(mid.get(125)).toBeCloseTo(0.4);
+    for (const b of [25, 40, 63, 99, 137, 181, 200, 230]) expect([...anchorWeights(b, at).values()].reduce((x, y) => x + y, 0)).toBeCloseTo(1);
+  });
+  it('goes on with the other corrections, on HYBRID only', () => {
+    const m = mesh.clone(); m.geometry = mesh.geometry.clone();
+    const lifted = liftShapeFields(m)!;
+    const z = applyZeroRefine(m, lifted, data)!;
+    expect(sidesAnchors(z.fields)).toEqual([25, 50, 75, 100, 125, 150, 175, 200]);
+    expect(Object.keys(sidesFieldWeights(100, sidesAnchors(z.fields), 'hybrid'))).toEqual([SIDES_FIELD_PREFIX + '100']);
+    expect(sidesFieldWeights(100, sidesAnchors(z.fields), 'approved')).toEqual({});
   });
 });

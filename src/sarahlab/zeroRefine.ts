@@ -53,22 +53,94 @@ export function zeroRefineWeight(bumpPercent: number, curve: string = 'hybrid'):
 }
 
 interface Part { readonly index: Uint32Array; readonly pos: Float32Array; readonly nrm: Float32Array }
+
+/**
+ * Her sides smoothed and the underside of her belly smoothed into her pubic area, at normal baby weight (Joshua,
+ * 2026-10-29: "try smoothing more and around the sides... between the belly/back/armpit/hips"; of the labelled renders,
+ * "Gentle strength under the belly, max everywhere else"): one field per belly size, `shape:sides:<percent>`, weighted
+ * by a tent over the sizes it was baked at (`anchorWeights`), on HYBRID only -- the shapes it was measured on. At 0% it
+ * is nothing: her approved 0% body is left as it is.
+ */
+export const SIDES_FIELD_PREFIX = 'shape:sides:';
+
+/** What an anchored field carries (the file's own numbers). */
+export const ANCHOR_KIND = { sides: 0, light: 1, heavyHalf: 2, heavy: 3 } as const;
+export interface AnchoredPart extends Part { readonly kind: number; readonly slider: number }
+
+/**
+ * Tent weights over anchor sizes (percent, ascending): 1 at an anchor, falling to 0 at its neighbours; below the first
+ * anchor the field fades to nothing at 0% (`fromZero`), above the last it holds. Keyed by the anchor size.
+ */
+export function anchorWeights(bumpPercent: number, anchors: readonly number[], fromZero = true): Map<number, number> {
+  const out = new Map<number, number>();
+  if (!anchors.length) return out;
+  const b = Number.isFinite(bumpPercent) ? bumpPercent : 100;
+  const first = anchors[0], last = anchors[anchors.length - 1];
+  if (b <= first) { const w = fromZero ? Math.max(0, Math.min(1, b / first)) : 1; if (w > 0) out.set(first, w); return out; }
+  if (b >= last) { out.set(last, 1); return out; }
+  for (let i = 0; i + 1 < anchors.length; i += 1) {
+    const a = anchors[i], c = anchors[i + 1];
+    if (b >= a && b <= c) {
+      const t = (b - a) / (c - a);
+      if (1 - t > 0) out.set(a, 1 - t);
+      if (t > 0) out.set(c, t);
+      break;
+    }
+  }
+  return out;
+}
+
+/**
+ * Read anchored parts: u32 count, then per part u8 kind + 3 pad, f32 slider (percent), f32 position scale, f32 normal
+ * scale, u32 m; a bit mask over her vertices (LSB first) of the m it moves, ascending; i16 moves [3m] and i8 normal
+ * changes [3m], each times its scale; padded to 4 bytes.
+ */
+export function readAnchoredParts(buffer: ArrayBuffer, at: number, vertices: number): { parts: AnchoredPart[]; at: number } {
+  const view = new DataView(buffer);
+  const count = view.getUint32(at, true); at += 4;
+  const parts: AnchoredPart[] = [];
+  const maskBytes = (vertices + 7) >> 3;
+  for (let p = 0; p < count; p += 1) {
+    const kind = view.getUint8(at); at += 4;
+    const slider = view.getFloat32(at, true), posScale = view.getFloat32(at + 4, true), nrmScale = view.getFloat32(at + 8, true), m = view.getUint32(at + 12, true);
+    at += 16;
+    const mask = new Uint8Array(buffer, at, maskBytes); at += maskBytes;
+    const index = new Uint32Array(m);
+    let k = 0;
+    for (let byte = 0; byte < maskBytes && k < m; byte += 1) {
+      const bits = mask[byte];
+      if (!bits) continue;
+      for (let bit = 0; bit < 8; bit += 1) if (bits & (1 << bit)) index[k++] = (byte << 3) + bit;
+    }
+    if (k !== m) throw new Error('zero refine: an anchored field\'s mask and count disagree');
+    const pos = new Float32Array(m * 3), nrm = new Float32Array(m * 3);
+    for (let i = 0; i < m * 3; i += 1) pos[i] = view.getInt16(at + i * 2, true) * posScale;
+    at += m * 6;
+    for (let i = 0; i < m * 3; i += 1) nrm[i] = view.getInt8(at + i) * nrmScale;
+    at += m * 3; at += (4 - ((m * 9) % 4)) % 4;
+    parts.push({ kind, slider, index, pos, nrm });
+  }
+  return { parts, at };
+}
+
 export interface ZeroRefine {
   readonly vertices: number;
   readonly body: Part;
   readonly navel: NavelData;
   /** The upper-belly fields, by belly key ('belly', 'belly25'...). */
   readonly upper: ReadonlyMap<string, Part>;
+  /** Her sides and underside smoothed, by belly size (SZR5; empty in an SZR4 file). */
+  readonly sides: readonly AnchoredPart[];
   /** The file's own navelFlat as it was baked against: how many vertices it moves, and its largest move. */
   readonly flatMoved: number;
   readonly flatMax: number;
 }
 
-/** Read the baked file ('SZR4'). Throws on anything else. */
+/** Read the baked file ('SZR4', or 'SZR5' with her sides smoothed after it). Throws on anything else. */
 export function parseZeroRefine(buffer: ArrayBuffer): ZeroRefine {
   const view = new DataView(buffer);
   const magic = String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3));
-  if (magic !== 'SZR4') throw new Error(`zero refine: not a correction file (${magic})`);
+  if (magic !== 'SZR4' && magic !== 'SZR5') throw new Error(`zero refine: not a correction file (${magic})`);
   let at = 4;
   const u32 = () => { const v = view.getUint32(at, true); at += 4; return v; };
   const f32 = () => { const v = view.getFloat32(at, true); at += 4; return v; };
@@ -92,10 +164,16 @@ export function parseZeroRefine(buffer: ArrayBuffer): ZeroRefine {
     const m = u32();
     upper.set(name, { index: take((b) => new Uint32Array(b), m * 4), pos: take((b) => new Float32Array(b), m * 12), nrm: take((b) => new Float32Array(b), m * 12) });
   }
+  let sides: AnchoredPart[] = [];
+  if (magic === 'SZR5') {
+    const read = readAnchoredParts(buffer, at, vertices);
+    sides = read.parts.filter((p) => p.kind === ANCHOR_KIND.sides).sort((p, q) => p.slider - q.slider);
+    at = read.at;
+  }
   if (at !== buffer.byteLength) throw new Error(`zero refine: ${buffer.byteLength - at} bytes left over`);
-  for (const p of [body, ...upper.values()]) for (const i of p.index) if (i >= vertices) throw new Error('zero refine: a vertex past the mesh');
+  for (const p of [body, ...upper.values(), ...sides]) for (const i of p.index) if (i >= vertices) throw new Error('zero refine: a vertex past the mesh');
   for (const i of splits) if (i >= vertices) throw new Error('zero refine: a navel vertex past the mesh');
-  return { vertices, body, upper, flatMoved, flatMax, navel: { count, flags, splitStart, splits, neighbourStart, neighbours, triangles, seed, grid, gridRadius, outie, bowl } };
+  return { vertices, body, upper, sides, flatMoved, flatMax, navel: { count, flags, splitStart, splits, neighbourStart, neighbours, triangles, seed, grid, gridRadius, outie, bowl } };
 }
 
 /**
@@ -126,7 +204,22 @@ export function applyZeroRefine(mesh: THREE.Mesh, fields: ShapeFields, data: Zer
   const map = new Map(fields.fields);
   map.set(ZERO_FIELD, { index: data.body.index, pos: data.body.pos, nrm: data.body.nrm });
   for (const [key, p] of data.upper) map.set(UPPER_FIELD_PREFIX + key, { index: p.index, pos: p.pos, nrm: p.nrm });
+  for (const p of data.sides) map.set(SIDES_FIELD_PREFIX + p.slider, { index: p.index, pos: p.pos, nrm: p.nrm });
   return { fields: { ...fields, fields: map, last: '' }, navel: new NavelPiece(data.navel) };
+}
+
+/** The sizes her sides smoothing was baked at, from a field set (ascending). */
+export function sidesAnchors(fields: ShapeFields | null | undefined): number[] {
+  if (!fields) return [];
+  return [...fields.fields.keys()].filter((n) => n.startsWith(SIDES_FIELD_PREFIX)).map((n) => Number(n.slice(SIDES_FIELD_PREFIX.length))).filter(Number.isFinite).sort((a, b) => a - b);
+}
+
+/** Her sides smoothing's field weights at a belly size: a tent over the baked sizes, on HYBRID only. */
+export function sidesFieldWeights(bumpPercent: number, anchors: readonly number[], curve: string): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (curve !== 'hybrid') return out;
+  for (const [s, w] of anchorWeights(bumpPercent, anchors)) out[SIDES_FIELD_PREFIX + s] = w;
+  return out;
 }
 
 /** Fetch and read the corrections; null (her body loads as it always has) when they cannot be had. */

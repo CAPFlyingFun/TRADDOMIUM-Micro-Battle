@@ -78,7 +78,7 @@ import { applyShapeFields, baseShapeFields, liftShapeFields, type ShapeFields, t
 import { BUILD_PROFILES, buildAmounts, buildKey, heightLine, heldSegments, profileOf, withProfile, type BuildAmounts, type BuildSegment } from '../actor/bodyBuild';
 import { applyBuildToBones, applyBuildToMesh, buildBoneOffsets, buildMeshFields, prepareBuildRig, standingLift, type BuildMeshFields, type BuildRig } from '../view/bodyBuild';
 import { dropIdleMorphs } from '../view/morphPrune';
-import { applyZeroRefine, loadZeroRefine, zeroRefineWeight, UPPER_FIELD_PREFIX, ZERO_FIELD, ZERO_REFINE_PATH } from './zeroRefine';
+import { applyZeroRefine, loadZeroRefine, sidesAnchors, sidesFieldWeights, zeroRefineWeight, UPPER_FIELD_PREFIX, ZERO_FIELD, ZERO_REFINE_PATH } from './zeroRefine';
 import { NAVEL_MORPHS, type NavelPiece } from './navelPiece';
 import { HumanRig, findSkinnedMesh } from '../view/HumanRig';
 import { UNITS_PER_METRE } from '../world/dem';
@@ -634,6 +634,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
    * but make the current as a backup"); CURRENT, the approved slider, stays one tap away. For this session only.
    */
   let bellyCurve: BellyCurve = DEFAULT_BELLY_CURVE;
+  /** The belly sizes her sides smoothing was baked at, once her correction file is on (zeroRefine.ts). */
+  let sidesAt: number[] = [];
   const fields: Record<string, HTMLElement> = {};
   const buttons: Record<string, HTMLButtonElement> = {};
   /** FACE's own controls: the held-open mouth, and the eye-colour swatches. */
@@ -1027,6 +1029,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     const out: Record<string, number> = { ...bodyShapeFieldWeights(body, b, bellyCurve), [ZERO_FIELD]: zeroRefineWeight(b, bellyCurve) };
     // her upper belly smoothed, by each belly key's own weight (zeroRefine.ts)
     for (const [key, w] of Object.entries(bellyWeights(b, bellyCurve))) out[UPPER_FIELD_PREFIX + key] = w;
+    // her sides and the underside of her belly smoothed, by a tent over the sizes they were baked at (zeroRefine.ts)
+    Object.assign(out, sidesFieldWeights(b, sidesAt, bellyCurve));
     return out;
   }
 
@@ -2425,7 +2429,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     // her hair goes with her body (it is in her model's tree); a request still under way is no longer wanted
     hairMeshes = []; hairRequest++;
     if (model) { three.remove(model); rig?.dispose(); release(model); model = null; }
-    rig = null; measure = null; fingers = []; skinned = []; shaped = []; garments = []; hasBelly = false; feel = null; navel = null;
+    rig = null; measure = null; fingers = []; skinned = []; shaped = []; garments = []; hasBelly = false; feel = null; navel = null; sidesAt = [];
     buildRig = null; bonesBuilt = ''; standLift = 0;
     crease.reset(); if (creaseTimer) { clearTimeout(creaseTimer); creaseTimer = 0; }
     recovered = false; partMeshes.clear(); wantedOutfit = null; outfitRequest++;
@@ -2515,7 +2519,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         if (!zero || disposed || model !== loadedModel || !b || !s) return;
         const z = applyZeroRefine(s.mesh, s.fields, zero);
         if (!z) return;
-        s.fields = z.fields; navel = { mesh: b.mesh, piece: z.navel };
+        s.fields = z.fields; navel = { mesh: b.mesh, piece: z.navel }; sidesAt = sidesAnchors(z.fields);
         applyLook();
       });
       // and the skin chosen in FACE goes on (a candidate fetched once is kept for a body loaded again)
