@@ -1,0 +1,140 @@
+/**
+ * HER 0% SHAPE, REFINED, AND HER NAVEL AS ITS OWN PIECE (Joshua, 2026-10-29).
+ *
+ * The 0% shape was measured against a Meshy non-pregnant reference body
+ * (`assets-archive/models/female-base-nonpregnant-meshy/`) and approved from renders: her lower belly smooth into her
+ * pubic area and blending low into it, her belly fullest low as the reference's is, her sides smooth from under her
+ * breasts to her hips, the creases at her groin soft, her thighs and the crease under her breasts untouched. "Blend
+ * this new 0% and fade it into about 80%... past 80% will be good."
+ *
+ * Her navel: "I want the bellybutton independent of the belly size... make the bellybutton outie look the same from
+ * belly 0-200%, then work on the innie from 0-200%, but still allow the default sync." Her belly shapes squeeze the
+ * skin round her navel to half its width as she shrinks, so a navel carried by them crumples; `navelPiece.ts` lays it
+ * fresh on her skin at every size instead, from two fixed shapes -- her clean 100% outie and the reference's bowl
+ * ("same size and shape as the reference model... smoother and like a bowl").
+ *
+ * Her approved body file is not changed: `models/sarah-v2-body-zero.bin` (baked from the approved renders by
+ * `scripts/sarahV2ZeroRefine/`) carries both, put on her as she loads.
+ */
+import * as THREE from 'three';
+import type { ShapeFields } from '../view/bodyShapeView';
+import { NavelPiece, type NavelData } from './navelPiece';
+
+export const ZERO_REFINE_PATH = 'models/sarah-v2-body-zero.bin';
+export const ZERO_FIELD = 'shape:zeroRefine';
+/**
+ * Her upper belly smoothed, navel up, one CPU field per belly key below 75% (Joshua, 2026-10-29: "between 0-60% smooth
+ * more of the top half of the belly from the bellybutton upwards, but leave the bottom half alone"; of the renders, "just
+ * the smooth looks best"): `shape:upper:<key>`, weighted by that key's own belly weight, so it fades with the keys and is
+ * gone by 75%.
+ */
+export const UPPER_FIELD_PREFIX = 'shape:upper:';
+/** Her body's vertex count in the file the corrections were baked for (sarah-v2-body-slim.glb and its -ktx2 twin). */
+export const ZERO_REFINE_VERTICES = 115710;
+/** By this belly size (percent) the refined 0% shape has faded out entirely (Joshua: "fade it into about 80%"). */
+export const ZERO_FADE_TO = 80;
+
+const smooth = (t: number) => { const u = Math.min(1, Math.max(0, t)); return u * u * (3 - 2 * u); };
+
+/** On the HYBRID belly curve the refined 0% shape fades out over the whole slider, in one blend (percent). */
+export const ZERO_FADE_TO_HYBRID = 200;
+
+/**
+ * The refined 0% shape's weight at a belly size: 1 at 0%, eased to 0. On HYBRID, her default curve, in one blend from
+ * 0% to 200% (Joshua, 2026-10-29: "blending since we are using the hybrid from the new 0% to 200% directly and not use
+ * the 100% like a middle point, but keep it as an option for the other custom shapes"); on every other curve, gone by
+ * ZERO_FADE_TO.
+ */
+export function zeroRefineWeight(bumpPercent: number, curve: string = 'hybrid'): number {
+  const b = Number.isFinite(bumpPercent) ? bumpPercent : 100;
+  return 1 - smooth(b / (curve === 'hybrid' ? ZERO_FADE_TO_HYBRID : ZERO_FADE_TO));
+}
+
+interface Part { readonly index: Uint32Array; readonly pos: Float32Array; readonly nrm: Float32Array }
+export interface ZeroRefine {
+  readonly vertices: number;
+  readonly body: Part;
+  readonly navel: NavelData;
+  /** The upper-belly fields, by belly key ('belly', 'belly25'...). */
+  readonly upper: ReadonlyMap<string, Part>;
+  /** The file's own navelFlat as it was baked against: how many vertices it moves, and its largest move. */
+  readonly flatMoved: number;
+  readonly flatMax: number;
+}
+
+/** Read the baked file ('SZR4'). Throws on anything else. */
+export function parseZeroRefine(buffer: ArrayBuffer): ZeroRefine {
+  const view = new DataView(buffer);
+  const magic = String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3));
+  if (magic !== 'SZR4') throw new Error(`zero refine: not a correction file (${magic})`);
+  let at = 4;
+  const u32 = () => { const v = view.getUint32(at, true); at += 4; return v; };
+  const f32 = () => { const v = view.getFloat32(at, true); at += 4; return v; };
+  const take = <T>(make: (b: ArrayBuffer) => T, bytes: number): T => { const out = make(buffer.slice(at, at + bytes)); at += bytes; return out; };
+  const vertices = u32(), flatMoved = u32(), flatMax = f32();
+  const nb = u32();
+  const body: Part = { index: take((b) => new Uint32Array(b), nb * 4), pos: take((b) => new Float32Array(b), nb * 12), nrm: take((b) => new Float32Array(b), nb * 12) };
+  const count = u32();
+  const flags = take((b) => new Uint8Array(b), count); at += (4 - (count % 4)) % 4;
+  const splitStart = take((b) => new Uint32Array(b), (count + 1) * 4);
+  const splits = take((b) => new Uint32Array(b), u32() * 4);
+  const neighbourStart = take((b) => new Uint32Array(b), (count + 1) * 4);
+  const neighbours = take((b) => new Uint32Array(b), u32() * 4);
+  const triangles = take((b) => new Uint32Array(b), u32() * 4);
+  const seed = u32(), grid = u32(), gridRadius = f32();
+  const outie = take((b) => new Float32Array(b), grid * grid * 4);
+  const bowl = take((b) => new Float32Array(b), grid * grid * 4);
+  const upper = new Map<string, Part>();
+  for (let k = u32(); k > 0; k -= 1) {
+    const len = u32(), name = new TextDecoder().decode(new Uint8Array(buffer, at, len)); at += len + ((4 - (len % 4)) % 4);
+    const m = u32();
+    upper.set(name, { index: take((b) => new Uint32Array(b), m * 4), pos: take((b) => new Float32Array(b), m * 12), nrm: take((b) => new Float32Array(b), m * 12) });
+  }
+  if (at !== buffer.byteLength) throw new Error(`zero refine: ${buffer.byteLength - at} bytes left over`);
+  for (const p of [body, ...upper.values()]) for (const i of p.index) if (i >= vertices) throw new Error('zero refine: a vertex past the mesh');
+  for (const i of splits) if (i >= vertices) throw new Error('zero refine: a navel vertex past the mesh');
+  return { vertices, body, upper, flatMoved, flatMax, navel: { count, flags, splitStart, splits, neighbourStart, neighbours, triangles, seed, grid, gridRadius, outie, bowl } };
+}
+
+/**
+ * Whether `mesh` is the body the corrections were baked for: the vertex count, and its navelFlat as it was baked
+ * against (a file changed since would move different vertices, or by a different amount).
+ */
+export function fitsZeroRefine(mesh: THREE.Mesh, data: ZeroRefine): boolean {
+  const geom = mesh.geometry as THREE.BufferGeometry, dict = mesh.morphTargetDictionary;
+  if (geom.getAttribute('position')?.count !== data.vertices || data.vertices !== ZERO_REFINE_VERTICES || !dict) return false;
+  const k = dict.navelFlat, flat = k === undefined ? undefined : geom.morphAttributes.position?.[k];
+  if (!flat) return false;
+  let moved = 0, max = 0;
+  for (let i = 0; i < flat.count; i += 1) {
+    const x = Math.abs(flat.getX(i)), y = Math.abs(flat.getY(i)), z = Math.abs(flat.getZ(i));
+    if (x + y + z > 0) moved += 1;
+    max = Math.max(max, x, y, z);
+  }
+  return moved === data.flatMoved && Math.abs(max - data.flatMax) < 1e-4;
+}
+
+/**
+ * Put the corrections on her body: the 0% shape field into `fields` (returned as a new set) and her navel as its own
+ * piece. Call after `liftShapeFields` and before her first draw. Null, changing nothing, when the mesh is not the body
+ * they were baked for.
+ */
+export function applyZeroRefine(mesh: THREE.Mesh, fields: ShapeFields, data: ZeroRefine): { fields: ShapeFields; navel: NavelPiece } | null {
+  if (!fitsZeroRefine(mesh, data)) return null;
+  const map = new Map(fields.fields);
+  map.set(ZERO_FIELD, { index: data.body.index, pos: data.body.pos, nrm: data.body.nrm });
+  for (const [key, p] of data.upper) map.set(UPPER_FIELD_PREFIX + key, { index: p.index, pos: p.pos, nrm: p.nrm });
+  return { fields: { ...fields, fields: map, last: '' }, navel: new NavelPiece(data.navel) };
+}
+
+/** Fetch and read the corrections; null (her body loads as it always has) when they cannot be had. */
+export async function loadZeroRefine(url: string): Promise<ZeroRefine | null> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return parseZeroRefine(await res.arrayBuffer());
+  } catch (error) {
+    console.warn('[sarahlab] her refined 0% shape could not be loaded; she keeps the original', error);
+    return null;
+  }
+}

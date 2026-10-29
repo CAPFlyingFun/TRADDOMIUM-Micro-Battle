@@ -78,6 +78,8 @@ import { applyShapeFields, baseShapeFields, liftShapeFields, type ShapeFields, t
 import { BUILD_PROFILES, buildAmounts, buildKey, heightLine, heldSegments, profileOf, withProfile, type BuildAmounts, type BuildSegment } from '../actor/bodyBuild';
 import { applyBuildToBones, applyBuildToMesh, buildBoneOffsets, buildMeshFields, prepareBuildRig, standingLift, type BuildMeshFields, type BuildRig } from '../view/bodyBuild';
 import { dropIdleMorphs } from '../view/morphPrune';
+import { applyZeroRefine, loadZeroRefine, zeroRefineWeight, UPPER_FIELD_PREFIX, ZERO_FIELD, ZERO_REFINE_PATH } from './zeroRefine';
+import { NAVEL_MORPHS, type NavelPiece } from './navelPiece';
 import { HumanRig, findSkinnedMesh } from '../view/HumanRig';
 import { UNITS_PER_METRE } from '../world/dem';
 import {
@@ -652,6 +654,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
    */
   // the FITTED light tee's detail (BREAST and NAVEL DETAIL on the modelled tee, the cloth off): a few points of her and
   // of the tee posed on the CPU each frame -- her navel and nipples, and the tee's own navel against its smooth surface
+  /** Her navel as its own piece on her approved body (navelPiece.ts, zeroRefine.ts); null on any other body. */
+  let navel: { mesh: THREE.SkinnedMesh; piece: NavelPiece } | null = null;
   let fitted: { body: THREE.SkinnedMesh; tee: THREE.SkinnedMesh; bodyPose: SkinPose; teePose: SkinPose; spots: DetailSpots; navel: TeeNavel } | null = null;
   let fittedLaid = false;
   /**
@@ -1018,8 +1022,16 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     place();
   }
 
+  /** Her shape fields' weights at a belly size: her controls', and her refined 0% shape fading out (zeroRefine.ts: by 200% on HYBRID, 80% on the others). */
+  function fieldWeightsAt(b: number): Record<string, number> {
+    const out: Record<string, number> = { ...bodyShapeFieldWeights(body, b, bellyCurve), [ZERO_FIELD]: zeroRefineWeight(b, bellyCurve) };
+    // her upper belly smoothed, by each belly key's own weight (zeroRefine.ts)
+    for (const [key, w] of Object.entries(bellyWeights(b, bellyCurve))) out[UPPER_FIELD_PREFIX + key] = w;
+    return out;
+  }
+
   function applyLook(): void {
-    const fieldWeights = bodyShapeFieldWeights(body, bump, bellyCurve);
+    const fieldWeights = fieldWeightsAt(bump);
     const build = currentBuild();
     for (const { mesh, fields } of shaped) applyShapeFields(mesh, fields, {
       ...fieldWeights,
@@ -1030,6 +1042,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     // were normalized here too, and at 0-50% the large belly offsets flipped normals in the fold under her belly
     }, { normalizeNormals: !(mesh.userData.recoveredShirt || mesh.userData.recoveredLeggings), post: buildPost(mesh, fields, build) });
     layBuildBones(build);
+    // her navel, laid on her as just shaped (navelPiece.ts)
+    layNavel(bump);
     // which garments are drawn: the outfit editor's choice, or none while her skin is painted bare (CLOTHES · HIDDEN)
     const view = skinBare ? 'none' : garmentView;
     for (const mesh of skinned) {
@@ -1103,11 +1117,43 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
    * A mesh's morph target weights for her look at bump `b` (applyLook's): her belly and bust at that size, her navel, the
    * refinement, the seat's correctives and her raised arms.
    */
+  /** Her navel's in/out number at bump `b`: what navelFlat takes on her body (the automatic sync, NAVEL, and fabric). */
+  function navelX(b: number): number {
+    return Math.max(navelFlatFor(b, body.navel), fabric?.navelFlatten() ?? 0, clothFlatten());
+  }
+  /** Lay her navel (navelPiece.ts) on her body as shaped for bump `b`; after her shape fields and morphs are set. */
+  function layNavel(b: number): void {
+    if (!navel) return;
+    const lw = lookWeights(navel.mesh, b);
+    navel.piece.apply(navel.mesh, lw, navelX(b));
+  }
+
   function lookWeights(mesh: THREE.SkinnedMesh, b: number): Record<string, number> {
     const dict = mesh.morphTargetDictionary ?? {};
     // the fitted light tee keeps its own navel's shape as fitted for her size: NAVEL DETAIL settles it in the shader
     const liteTee = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material).name === 'shirtSpandexLite';
-    return { ...bellyWeights(b, bellyCurve), ...breastWeightsForShape(b, dict[BREAST_GROW_TARGET] !== undefined, body.breastSize), [BELLY_UPPER_TARGET]: bellyUpperWeight(b, bellyCurve), ...navelWeights(b, body.navel), [NAVEL_FLAT_TARGET]: liteTee ? Math.min(1, Math.max(0, navelFlatFor(b, body.navel))) : Math.max(navelFlatFor(b, body.navel), fabric?.navelFlatten() ?? 0, clothFlatten()), [BELLY_REFINE_TARGET]: refineWeight(refine, b), [SEAT_TARGET]: seatCorrectiveWeight(seatShare(), b), [SEAT_V2_TARGET]: seatCorrectiveV2Weight(seatShare(), b), ...armRaiseWeights() };
+    const w: Record<string, number> = { ...bellyWeights(b, bellyCurve), ...breastWeightsForShape(b, dict[BREAST_GROW_TARGET] !== undefined, body.breastSize), [BELLY_UPPER_TARGET]: bellyUpperWeight(b, bellyCurve), ...navelWeights(b, body.navel), [NAVEL_FLAT_TARGET]: liteTee ? Math.min(1, Math.max(0, navelFlatFor(b, body.navel))) : Math.max(navelFlatFor(b, body.navel), fabric?.navelFlatten() ?? 0, clothFlatten()), [BELLY_REFINE_TARGET]: refineWeight(refine, b), [SEAT_TARGET]: seatCorrectiveWeight(seatShare(), b), [SEAT_V2_TARGET]: seatCorrectiveV2Weight(seatShare(), b), ...armRaiseWeights() };
+    // her approved body's navel is its own piece (navelPiece.ts), laid from the number navelFlat always took: the file's
+    // navel morphs stay at zero on her
+    if (navel && mesh === navel.mesh) for (const name of NAVEL_MORPHS) if (name in w) w[name] = 0;
+    return w;
+  }
+
+  /**
+   * Her REST shape as designed at 0% belly, for `measure` (the new tee's readings of her design, `RoomGarment.designRest`):
+   * her 0% shape fields, and her navel laid for the 'belly' target alone -- all those readings add to her rest shape --
+   * then put back as she is. Only her body's rest shape: her morph weights are the reader's own business.
+   */
+  function designRest(measure: () => void): void {
+    const s = shaped.find((x) => !!x.mesh.geometry.getAttribute('_cloth_cover')), mesh = s?.mesh as THREE.SkinnedMesh | undefined;
+    if (!s || !mesh) { measure(); return; }
+    const opts = { normalizeNormals: true, post: buildPost(mesh, s.fields, currentBuild()) };
+    applyShapeFields(mesh, s.fields, fieldWeightsAt(0), opts);
+    if (navel && navel.mesh === mesh) navel.piece.apply(mesh, { belly: 1 }, navelX(0));
+    try { measure(); } finally {
+      applyShapeFields(mesh, s.fields, fieldWeightsAt(bump), opts);
+      if (navel && navel.mesh === mesh) layNavel(bump);
+    }
   }
 
   /**
@@ -1120,11 +1166,13 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     if (!s || !mesh) { measure(); return; }
     const inf = mesh.morphTargetInfluences, dict = mesh.morphTargetDictionary, keep = inf ? inf.slice() : null;
     const opts = { normalizeNormals: true, post: buildPost(mesh, s.fields, currentBuild()) };
-    applyShapeFields(mesh, s.fields, bodyShapeFieldWeights(body, share * 100, bellyCurve), opts);
+    applyShapeFields(mesh, s.fields, fieldWeightsAt(share * 100), opts);
     if (inf && dict) for (const [name, w] of Object.entries(lookWeights(mesh, share * 100))) { const at = dict[name]; if (at !== undefined) inf[at] = w; }
+    if (navel && navel.mesh === mesh) layNavel(share * 100);
     try { measure(); } finally {
-      applyShapeFields(mesh, s.fields, bodyShapeFieldWeights(body, bump, bellyCurve), opts);
+      applyShapeFields(mesh, s.fields, fieldWeightsAt(bump), opts);
       if (inf && keep) for (let j = 0; j < keep.length; j++) inf[j] = keep[j];
+      if (navel && navel.mesh === mesh) layNavel(bump);
     }
   }
 
@@ -1377,7 +1425,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       neckBand: extra.neckBand, ...(extra.detail === false ? { detail: false } : {}), settings, standOff, unitsPerMetre: M, scale: FACE_REST_SCALE, offset: FACE_REST_OFFSET, material,
       // the outfit's new tee (Stage 3): drafted to its full extent from its settings and worn as they cut it, its edge
       // drawn by the material; BELLY ROOM reads her at the room's size; FIT scales its own size
-      ...(garment ? { garment, roomShape } : {}), fitScale: garmentFitScale(),
+      ...(garment ? { garment, roomShape } : {}), designRest, fitScale: garmentFitScale(),
     });
     if (garment) setCutEdge(material, true);
     three.add(garmentRoom.cloth.mesh);
@@ -2377,7 +2425,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     // her hair goes with her body (it is in her model's tree); a request still under way is no longer wanted
     hairMeshes = []; hairRequest++;
     if (model) { three.remove(model); rig?.dispose(); release(model); model = null; }
-    rig = null; measure = null; fingers = []; skinned = []; shaped = []; garments = []; hasBelly = false; feel = null;
+    rig = null; measure = null; fingers = []; skinned = []; shaped = []; garments = []; hasBelly = false; feel = null; navel = null;
     buildRig = null; bonesBuilt = ''; standLift = 0;
     crease.reset(); if (creaseTimer) { clearTimeout(creaseTimer); creaseTimer = 0; }
     recovered = false; partMeshes.clear(); wantedOutfit = null; outfitRequest++;
@@ -2395,6 +2443,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     refresh();
     let asked = false;
     const askForClothes = () => { if (!asked) { asked = true; for (const p of planned) void requestPart(p); } };
+    // her refined 0% shape and round navel (zeroRefine.ts, Joshua 2026-10-29), fetched beside her body file
+    const zeroData = entry.id === 'v2-body' && hooks.nativeOutfitPreview !== true ? loadZeroRefine(assets.assetUrl(ZERO_REFINE_PATH)) : Promise.resolve(null);
     void assets.loadModel(path, () => new THREE.Object3D(), { meter, onDownloaded: askForClothes }).then(async (loadedModel) => {
       if (disposed || path !== sarahModelPath(SARAH_LAB_MODELS[modelIndex], skin)) { release(loadedModel); return; }
       if (loadedModel.userData.isPlaceholder === true) { failed = true; failLoad('Sarah', () => loadSarah()); refresh(); return; }
@@ -2458,6 +2508,16 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       }
       if (!recovered && outfit >= 5) outfit = 0;
       model = loadedModel;
+      // her refined 0% shape and her navel as its own piece (zeroRefine.ts), put on her approved body when the file is
+      // in -- fetched beside her body file and almost always there first; it never holds up her loading
+      if (recovered) void zeroData.then((zero) => {
+        const b = bodyOf(), s = b ? shaped.find((x) => x.mesh === b.mesh) : undefined;
+        if (!zero || disposed || model !== loadedModel || !b || !s) return;
+        const z = applyZeroRefine(s.mesh, s.fields, zero);
+        if (!z) return;
+        s.fields = z.fields; navel = { mesh: b.mesh, piece: z.navel };
+        applyLook();
+      });
       // and the skin chosen in FACE goes on (a candidate fetched once is kept for a body loaded again)
       applySkin();
       // and her hair, made for her approved v2 body

@@ -26,6 +26,7 @@ import { tailorKey, tailorParams, type GarmentSettings, type GarmentStops } from
 import { SARAH_V2_DETAIL_POINTS } from '../detailSpots';
 import { GarmentCloth } from './garmentCloth';
 import { tailor, type Tailored } from './tailor';
+import type { BodyInput } from './types';
 
 /** A drafted pattern is her size: its edges rest at this share of their pattern length (the cloth tee's FIT is 0.85). */
 export const REST_SCALE = 0.98;
@@ -54,6 +55,13 @@ export interface RoomGarmentOptions {
   readonly garment?: GarmentSettings;
   /** Runs `measure` with her body as she is but for her belly, at `share` of 100% (BELLY ROOM: `GarmentCloth.roomShape`). */
   readonly roomShape?: (share: number, measure: () => void) => void;
+  /**
+   * Runs `measure` with her REST shape as designed at 0% belly (her 0% shape fields, and her navel laid for the 'belly'
+   * target alone, which is all `bodyInputOf` and `tailoredShape` add), and puts her back (the room's own: her navel is
+   * laid on her rest shape for the morphs she has at her size, so read at 0% without this it lands centimetres out).
+   * Absent: her rest shape as it stands.
+   */
+  readonly designRest?: (measure: () => void) => void;
   /** The cloth's FIT dial against its default: the drafted tee's rest scale (REST_SCALE) times this. Default 1. */
   readonly fitScale?: number;
 }
@@ -79,7 +87,9 @@ export class RoomGarment {
 
   constructor(options: RoomGarmentOptions) {
     this.options = options;
-    const input = bodyInputOf(options.body, { belly: 1 });
+    const design = options.designRest ?? ((measure: () => void) => measure());
+    let input!: BodyInput;
+    design(() => { input = bodyInputOf(options.body, { belly: 1 }); });
     const g = options.garment;
     const params = teeParams(g ? { ...tailorParams(g), ...options.params } : options.params);
     this.tailorKey = g ? tailorKey(g) : '';
@@ -89,7 +99,7 @@ export class RoomGarment {
       body: options.body, sewn: t.sewn, binding: t.binding, trunkOnly: t.placed.trunkOnly, armBones: SARAH_V2_ARM_BONES,
       settings: { ...options.settings, restScale: REST_SCALE * (options.fitScale ?? 1) }, standOff: options.standOff, material: options.material, unitsPerMetre: options.unitsPerMetre,
       // her design at 0% belly, as `bodyInputOf` read her to tailor it: every cut is measured from there
-      tailoredShape: (measure) => tailoredShape(options.body, measure),
+      tailoredShape: (measure) => design(() => tailoredShape(options.body, measure)),
       ...(options.roomShape ? { roomShape: options.roomShape } : {}),
       // worn as its settings cut it from the start (the full extent is never simulated whole)
       ...(g ? { cuts: garmentCuts(t, g) } : {}),
