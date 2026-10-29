@@ -270,6 +270,21 @@ describe('the full extent (draft.ts extend)', () => {
         expect(Math.abs(cuff.r - above.r) / above.r).toBeLessThan(0.2);
       }
     }, TAILOR_MS);
+
+    // Joshua, 2026-10-28: "a knee high dress shouldn't rise up more than mid-thigh" seated. Cut close down her thighs
+    // (80 cm round above her knee) it was a pencil skirt, and her thighs apart on the stool slid it up to her lap.
+    it(`${c}: the skirt falls straight from where her hips are widest: no side seam comes in on its way down to her knee`, () => {
+      const d = tee(c, true).draft;
+      for (const [id, name] of [['frontExt', 'sideP'], ['backExt', 'sideM']] as const) {
+        // the side from her knee up (the extension's own run, short of where it turns into the plain seam)
+        const side = edgeOf(d, id, name).filter((q) => q[1] < d.notes.hemY - JOIN_MAX), x = side.map((q) => Math.abs(q[0]));
+        expect(side.length).toBeGreaterThan(10);
+        for (let k = 1; k < side.length; k++) expect(side[k][1]).toBeGreaterThan(side[k - 1][1]);
+        // going up, never wider than the stretch below it: at her knee as wide as anywhere on it
+        for (let k = 1; k < x.length; k++) expect(x[k], `${id} at ${side[k][1].toFixed(3)} m`).toBeLessThanOrEqual(x[k - 1] + 1e-9);
+        expect(x[0]).toBeCloseTo(Math.max(...x), 9);
+      }
+    }, TAILOR_MS);
   }
 
   it('any gusset, and a set-in with a dart: the plain pieces are drafted and cut into exactly as without the extension, and the sheet is sound', () => {

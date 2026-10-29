@@ -23,7 +23,8 @@
  * - The SLEEVE is a tube from her arm's own girths plus ease, from the underarm to its hem; its length is measured, as
  *   a sleeve is, from her shoulder point.
  * - THE FULL EXTENT (Stage 3, `TeeParams.extend`): extension pieces sewn on under the plain tee -- FRONTEXT and BACKEXT
- *   from the drafted hem down to her knee, SLEEVEEXTP and SLEEVEEXTM from each cuff down to her wrist -- so the instant
+ *   from the drafted hem down to her knee (falling straight from where her hips are widest, as a skirt does),
+ *   SLEEVEEXTP and SLEEVEEXTM from each cuff down to her wrist -- so the instant
  *   controls can CUT a longer tee instead of drafting one (`cuts.ts`). They come after every plain piece, which are
  *   drafted exactly as without them, so every plain particle keeps its number (`sew.ts` numbers them in piece order).
  *
@@ -685,7 +686,10 @@ export function draftTee(measure: BodyMeasure, params: TeeParams = TEE_DEFAULTS,
   let sideFront: readonly Vec2[] = frontSide, sideBack: readonly Vec2[] = backSide;
   if (p.extend) {
     // FRONTEXT and BACKEXT: the side seams continued down to her knee by the same rule (below her hip the ease is the
-    // hip's), each ending exactly on its drafted hem's corner; a level hem at her knee by the drafted hem's rule with its
+    // hip's) until her hips are widest, and straight down from there, as a skirt falls (Joshua, 2026-10-28: "a knee high
+    // dress shouldn't rise up more than mid-thigh" seated -- cut close down her thighs, 80 cm round above her knee, it
+    // was a pencil skirt, and her thighs apart on the stool slid it up to her lap), each ending exactly on its drafted
+    // hem's corner; a level hem at her knee by the drafted hem's rule with its
     // own centre extra; the top the plain piece's hem, walked the other way, sewn to it.
     // The side is read a centimetre apart down from the hem, so neighbouring heights' side planes (`zSide`, eleven
     // outlines each) share ten of their eleven, and the front and back share all of them: remembered, they cost an
@@ -706,6 +710,8 @@ export function draftTee(measure: BodyMeasure, params: TeeParams = TEE_DEFAULTS,
       const ys = [yK];
       for (let k = Math.ceil((yHem - yK) / 0.01) - 1; k >= 1; k--) if (yHem - 0.01 * k > yK + 0.005) ys.push(yHem - 0.01 * k);
       const pts: Vec2[] = ys.map((y) => [half(y, zSideOnce(y)), y]);
+      // a skirt falls straight from her hips: below the widest of her the side holds that width (`ys` runs up from her knee)
+      for (let i = pts.length - 2; i >= 0; i--) pts[i] = [Math.max(pts[i][0], pts[i + 1][0]), pts[i][1]];
       return densify(joinAlong(pts.length > 2 ? smooth(pts, EXT_SIDE_SMOOTH) : pts, plain[0], plain[1], JOIN_SIDE));
     };
     const fSide = extSide((y, z) => halves(frontForm, y, z).front / 2 + ease(y) / 4, frontSide);

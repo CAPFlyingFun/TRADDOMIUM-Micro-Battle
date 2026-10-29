@@ -58,6 +58,25 @@ export const HUG_CLEARANCE = 0.006;
  * of the way back to where the cloth lay at a time, for at most HUG_ROUNDS passes (`easeHug`).
  */
 export const HUG_STRETCH = 1.1, HUG_STEP = 0.1, HUG_ROUNDS = 40;
+/**
+ * A neckline lies on a smooth line, the same on both sides (Joshua, 2026-10-28: "make sure all the necklines are smooth
+ * lines (not jagged edges) and even on both sides"). Pinned where the cloth settled, a crew's edge kept every crumple
+ * the dressing left in it, and one side differed from the other; held to her skin, a cut V's edge followed every rise
+ * and dip of her collarbones. So at `settle` the drafted neckline's band (within PIN_OUT of it) is made the same on both
+ * sides (each particle averaged with its mirror, `mirrorOf`) and smoothed, its edge along itself, before it is bound
+ * (`evenNeck`, and `evenCut` for the cloth a neckline brought up brings back); and a cut neckline's hug is smoothed
+ * along its band (`easeHug`), lifted across her dips. NECK_SMOOTH_PASSES passes of Taubin smoothing (lambda, mu):
+ * smoothing that does not shrink the line it smooths.
+ */
+export const NECK_SMOOTH_PASSES = 12, NECK_SMOOTH_LAMBDA = 0.5, NECK_SMOOTH_MU = -0.53;
+/**
+ * Evening and smoothing a neckline's band never stretches an edge past this share of its pattern length (or past what it
+ * already was): smoothed along itself, her back neckline's edge cut its corners at her shoulders and held an edge there
+ * at 1.8 times its length. Held to 1.1 (the hug's HUG_STRETCH), it could not take the crumples out of a crew.
+ */
+export const NECK_STRETCH = 1.4;
+/** A particle's mirror is the one laid within this of its reflection (her rest metres, as `fabricRest` holds them). */
+const MIRROR_WITHIN = 0.006;
 /** Seconds the worn cloth must stand unchanged after a cut before it is cut again for her shape over what is worn. */
 export const REFIT_SETTLE = 0.25;
 /**
@@ -441,6 +460,7 @@ export class GarmentCloth {
     const lay = this.skin.pinTargets(joinedP, this.binding.offset, new Float32Array(joinedP.length * 3));
     joined.forEach((i, k) => { for (let c = 0; c < 3; c++) start[i * 3 + c] = lay[k * 3 + c] + disp[i * 3 + c]; });
     if (!this.settled) return;
+    this.evenCut(start, joinedP);
     this.skin.update(start, this.after);
     const now = this.skin.contactBinding(start, 0.0005 / 0.9), B = this.binding, close = (HUG_CLEARANCE * this.options.unitsPerMetre) / (this.skin.worldScale || 1);
     for (const i of joined) {
@@ -521,6 +541,21 @@ export class GarmentCloth {
       if (!over) break;
     }
     for (let i = 0; i < m; i++) { const p = list[i]; hug[p] = atHug[p] + s[i] * (atLay[p] - atHug[p]); }
+    // where the hug holds them, smoothed along the band, read back as how far off her skin each is held: lifted across
+    // her dips (bridging them), never pulled in nearer her than the let-off left it (that would stretch it into the
+    // hollow again) nor further off than it lay
+    const zero = new Float32Array(n), unit = new Float32Array(n).fill(1);
+    const P0 = this.skin.pinTargets(list, zero, new Float32Array(m * 3)), P1 = this.skin.pinTargets(list, unit, new Float32Array(m * 3));
+    const held = this.skin.pinTargets(list, hug, new Float32Array(m * 3)), P = new Float64Array(n * 3);
+    list.forEach((p, i) => { for (let c = 0; c < 3; c++) P[p * 3 + c] = held[i * 3 + c]; });
+    const nb: number[][] = list.map(() => []);
+    for (let q = 0; q < pairs.length; q += 2) { nb[pairs[q]].push(list[pairs[q + 1]]); nb[pairs[q + 1]].push(list[pairs[q]]); }
+    taubin(P, list, (p) => nb[at[p]]);
+    list.forEach((p, i) => {
+      let dot = 0, nn = 0;
+      for (let c = 0; c < 3; c++) { const nc = P1[i * 3 + c] - P0[i * 3 + c]; dot += (P[p * 3 + c] - P0[i * 3 + c]) * nc; nn += nc * nc; }
+      if (nn > 0) hug[p] = Math.min(atLay[p], Math.max(hug[p], dot / nn));
+    });
   }
 
   /** Each slot's hold now, for a probe or a test (slot i is particle i while all of it is worn). */
@@ -698,6 +733,8 @@ export class GarmentCloth {
   settle(): void {
     this.layOut();
     const m = this.active, x = this.sim.positions.subarray(0, m * 3);
+    // its neckline's band on a smooth line, the same both sides, before it is bound and held there
+    this.evenNeck(x);
     // her skin under every particle as it lies NOW (the frame's own reading was taken before its step moved them)
     this.skin.update(x, this.after);
     const now = this.skin.contactBinding(x, 0.0005 / 0.9), was = this.binding, n = this.sewn.count;
@@ -760,6 +797,123 @@ export class GarmentCloth {
       offset[p] = at.offset[p];
     }
     this.skin.setOrder(O);
+  }
+
+  /** Each particle's mirror across her middle (laid within MIRROR_WITHIN of its reflection), -1 for none; null without `fabricRest`. */
+  private mirrorOf(): Int32Array | null {
+    if (this.mirror !== undefined) return this.mirror;
+    const R = this.options.fabricRest, n = this.sewn.count;
+    if (!R) return (this.mirror = null);
+    const cell = MIRROR_WITHIN, key = (x: number, y: number, z: number) => `${Math.floor(x / cell)},${Math.floor(y / cell)},${Math.floor(z / cell)}`;
+    const grid = new Map<string, number[]>();
+    for (let p = 0; p < n; p++) { const k = key(R[p * 3], R[p * 3 + 1], R[p * 3 + 2]); const g = grid.get(k); if (g) g.push(p); else grid.set(k, [p]); }
+    const out = new Int32Array(n).fill(-1);
+    for (let p = 0; p < n; p++) {
+      const x = -R[p * 3], y = R[p * 3 + 1], z = R[p * 3 + 2], cx = Math.floor(x / cell), cy = Math.floor(y / cell), cz = Math.floor(z / cell);
+      let best = cell * cell, bq = -1;
+      for (let i = -1; i <= 1; i++) for (let j = -1; j <= 1; j++) for (let k = -1; k <= 1; k++) {
+        for (const q of grid.get(`${cx + i},${cy + j},${cz + k}`) ?? []) {
+          const d = (R[q * 3] - x) ** 2 + (R[q * 3 + 1] - y) ** 2 + (R[q * 3 + 2] - z) ** 2;
+          if (d < best) { best = d; bq = q; }
+        }
+      }
+      out[p] = bq;
+    }
+    return (this.mirror = out);
+  }
+  private mirror: Int32Array | null | undefined = undefined;
+
+  /**
+   * The drafted neckline's band, as the cloth lies (`x`, by slot), the same on both sides and smoothed (`evenBand`): the
+   * worn cloth within PIN_OUT of the neckline along the cloth, its edge the neckline. Written back into `x`: `settle`
+   * binds it there, and its pins hold it there.
+   */
+  private evenNeck(x: Float32Array): void {
+    const n = this.sewn.count, slot = this.slotOf, d = this.neckDistance, band: number[] = [];
+    for (let p = 0; p < n; p++) if (slot[p] >= 0 && d[p] < PIN_OUT) band.push(p);
+    this.evenBand(x, band, d, this.onNeck);
+  }
+
+  /**
+   * A cut neckline brought up (`join`): the cloth brought back within PIN_OUT of the new neckline, laid where its binding
+   * and the cloth round it put it (`x`, by slot), made the same on both sides and smoothed (`evenBand`) up to the cloth
+   * that never left, which holds where it is. Laid without, the cloth that came back met the cloth that stayed in a step
+   * on each side of a V raised from a deeper one (Joshua, 2026-10-28: "smooth lines… and even on both sides").
+   */
+  private evenCut(x: Float32Array, joinedP: readonly number[]): void {
+    const neck = this.cuts?.neck, n = this.sewn.count;
+    if (!neck || !joinedP.length) return;
+    // how far each particle is from the cut neckline (metres, on the side worn), and the worn particles on its edge
+    const vp = this.sewn.vertexParticle, d = new Float32Array(n).fill(Infinity), edge = new Uint8Array(n);
+    for (let v = 0; v < vp.length; v++) d[vp[v]] = Math.min(d[vp[v]], Math.max(0, neck[v]));
+    const G = neighboursOf(this.sewn), S = G.start, L = G.list;
+    for (let p = 0; p < n; p++) {
+      if (!this.worn[p] || !(d[p] < PIN_OUT)) continue;
+      for (let j = S[p]; j < S[p + 1]; j++) if (!this.worn[L[j]]) { edge[p] = 1; break; }
+    }
+    this.evenBand(x, joinedP.filter((p) => d[p] < PIN_OUT), d, edge);
+  }
+
+  /**
+   * A neckline's band (`band`, particles; `d`, each one's distance from the neckline in metres; `edge`, the particles on
+   * it), as the cloth lies (`x`, by slot): each one averaged with its mirror across her middle (the middle the band's
+   * own pairs put her at), then its lie smoothed (NECK_SMOOTH_PASSES), the edge along itself and the rest over the worn cloth
+   * round it (what is not in the band holding where it is), in full to PIN_IN of the neckline and fading to nothing at
+   * PIN_OUT, so it meets the cloth beyond without a ledge. Written back into `x`.
+   */
+  private evenBand(x: Float32Array, band: readonly number[], d: Float32Array, edge: Uint8Array): void {
+    if (!band.length) return;
+    const n = this.sewn.count, slot = this.slotOf, inBand = new Uint8Array(n), P = new Float64Array(n * 3);
+    for (const p of band) inBand[p] = 1;
+    for (let p = 0; p < n; p++) if (slot[p] >= 0) for (let c = 0; c < 3; c++) P[p * 3 + c] = x[slot[p] * 3 + c];
+    const mirror = this.mirrorOf(), paired = (q: number) => q >= 0 && slot[q] >= 0 && (inBand[q] || d[q] < PIN_OUT);
+    if (mirror) {
+      let sx = 0, k = 0;
+      for (const p of band) { const q = mirror[p]; if (paired(q)) { sx += P[p * 3] + P[q * 3]; k += 2; } }
+      if (k) {
+        const mid = sx / k, Q = P.slice();
+        for (const p of band) {
+          const q = mirror[p];
+          if (!paired(q)) continue;
+          Q[p * 3] = (P[p * 3] + 2 * mid - P[q * 3]) / 2; Q[p * 3 + 1] = (P[p * 3 + 1] + P[q * 3 + 1]) / 2; Q[p * 3 + 2] = (P[p * 3 + 2] + P[q * 3 + 2]) / 2;
+        }
+        P.set(Q);
+      }
+    }
+    const G = this.wornGraph(), S = G.start, L = G.list, at = new Int32Array(n).fill(-1);
+    band.forEach((p, i) => { at[p] = i; });
+    const nbs = band.map((p) => { const out: number[] = []; for (let j = S[p]; j < S[p + 1]; j++) { const q = L[j]; if (!edge[p] || edge[q]) out.push(q); } return out; });
+    // what is smoothed is how far each lies from its bound place (where its binding lays it on her as she is now), not
+    // where it lies: smoothed where it lies, the band's rows were evened out as a mesh is, and the cloth between rows a
+    // centimetre apart stretched by half to meet rows two apart, bound and held so
+    const worn: number[] = [];
+    for (let p = 0; p < n; p++) if (slot[p] >= 0) worn.push(p);
+    const laid = this.skin.pinTargets(worn, this.binding.offset, new Float32Array(worn.length * 3));
+    worn.forEach((p, i) => { for (let c = 0; c < 3; c++) P[p * 3 + c] -= laid[i * 3 + c]; });
+    taubin(P, band, (p) => nbs[at[p]]);
+    worn.forEach((p, i) => { for (let c = 0; c < 3; c++) P[p * 3 + c] += laid[i * 3 + c]; });
+    // how much of it each takes: in full to PIN_IN, nothing at PIN_OUT; and less wherever taking it would stretch an edge
+    // longer than it was and than NECK_STRETCH of its pattern length, HUG_STEP at a time
+    const share = Float64Array.from(band, (p) => (d[p] <= PIN_IN ? 1 : 1 - (d[p] - PIN_IN) / (PIN_OUT - PIN_IN)));
+    const E = this.sewn.edges, k = this.sim.settings.restScale, ends: number[] = [], most: number[] = [];
+    for (let e = 0; e < E.length; e += 2) {
+      const a = E[e], b = E[e + 1], L = this.restOf(a, b);
+      if (slot[a] < 0 || slot[b] < 0 || (at[a] < 0 && at[b] < 0) || !(L !== undefined && L > 0)) continue;
+      const was = Math.hypot(x[slot[a] * 3] - x[slot[b] * 3], x[slot[a] * 3 + 1] - x[slot[b] * 3 + 1], x[slot[a] * 3 + 2] - x[slot[b] * 3 + 2]);
+      ends.push(a, b); most.push(Math.max(was, L * k * NECK_STRETCH));
+    }
+    const to = (p: number, c: number) => { const i = at[p], o = x[slot[p] * 3 + c]; return i < 0 ? o : o + share[i] * (P[p * 3 + c] - o); };
+    for (let round = 0; round < HUG_ROUNDS; round++) {
+      let over = false;
+      for (let q = 0; q < most.length; q++) {
+        const a = ends[q * 2], b = ends[q * 2 + 1];
+        if (Math.hypot(to(a, 0) - to(b, 0), to(a, 1) - to(b, 1), to(a, 2) - to(b, 2)) <= most[q] * (1 + 1e-6)) continue;
+        for (const p of [a, b]) if (at[p] >= 0 && share[at[p]] > 0) { share[at[p]] = Math.max(0, share[at[p]] - HUG_STEP); over = true; }
+      }
+      if (!over) break;
+    }
+    const moved = band.map((p) => [to(p, 0), to(p, 1), to(p, 2)]);
+    band.forEach((p, i) => { for (let c = 0; c < 3; c++) x[slot[p] * 3 + c] = moved[i][c]; });
   }
 
   private rebind(binding: ClothBinding): void {
@@ -1092,6 +1246,27 @@ function triangleNormals(x: Float32Array, T: Uint32Array): Float32Array {
     N[t * 3] = nx / l; N[t * 3 + 1] = ny / l; N[t * 3 + 2] = nz / l;
   }
   return N;
+}
+
+/**
+ * Taubin smoothing of `P` (3 per particle) over `members`, each moved toward the mean of `neighbours(p)` (members or
+ * fixed particles alike): NECK_SMOOTH_PASSES passes of a step of lambda and one of mu, so the line or sheet is smoothed
+ * without being drawn in.
+ */
+function taubin(P: Float64Array, members: readonly number[], neighbours: (p: number) => readonly number[]): void {
+  const next = new Float64Array(members.length * 3);
+  for (let pass = 0; pass < NECK_SMOOTH_PASSES * 2; pass++) {
+    const k = pass % 2 === 0 ? NECK_SMOOTH_LAMBDA : NECK_SMOOTH_MU;
+    members.forEach((p, i) => {
+      const nb = neighbours(p);
+      for (let c = 0; c < 3; c++) {
+        let m = 0;
+        for (const q of nb) m += P[q * 3 + c];
+        next[i * 3 + c] = nb.length ? P[p * 3 + c] + k * (m / nb.length - P[p * 3 + c]) : P[p * 3 + c];
+      }
+    });
+    members.forEach((p, i) => { for (let c = 0; c < 3; c++) P[p * 3 + c] = next[i * 3 + c]; });
+  }
 }
 
 /** Per particle, the distance along the cloth (pattern metres) to the nearest of `from` (Dijkstra over the edges). */

@@ -86,6 +86,7 @@ import {
   offeredOutfits, outfitThumbPath,
   type Garment, type SarahLabPose, recoveredPartsFor, recoveredPartPath, isShirtPart, shirtOfPart, type RecoveredPart, SARAH_DEFAULT_OUTFIT, SIM_TEE_OUTFIT, RECOVERED_GARMENTS,
 } from './sarahLabTool';
+import { blendJointTurns, sitEase, stepSit } from './poseBlend';
 
 const M = UNITS_PER_METRE;
 /**
@@ -356,6 +357,14 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let seconds = 0;
   let walked = 0;
   const poseOut: MutableJointTurn[] = Array.from({ length: Math.max(HUMAN_POSE_TURNS, SEATED_TURNS) }, newJointTurn);
+  const standOut: MutableJointTurn[] = Array.from({ length: Math.max(HUMAN_POSE_TURNS, SEATED_TURNS) }, newJointTurn), blendOut: MutableJointTurn[] = [];
+  /**
+   * 0 standing, 1 seated: how far she has sat (Joshua, 2026-10-28: "a smooth procedural standing to sitting that lasts
+   * about 5s"). SIT from STAND, and STAND from SIT, move it over SIT_SECONDS (`sitMoving`); every other pose switch sets it.
+   */
+  let sitAmount = 0, sitMoving = false;
+  /** How far she has sat, as her shapes and her bump's tilt take it (eased as her bones are). */
+  const seatShare = () => sitEase(sitAmount);
 
   // ------------------------------------------------------------ the orbit
   const ORBIT_START = Object.freeze({ yaw: 0.5, pitch: 0.12, distance: 2.9 * M, target: Object.freeze(new THREE.Vector3(0, 0.95 * M, 0)) });
@@ -892,14 +901,17 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   /** The bump's weight, every frame: its resting tilt and where the spring has it. */
   function applyMotion(): void {
     const w: Record<string, number> = { ...bellyMotionWeights(bump, 0, spring, effectiveTiltDeg(body.bellyTilt, seated)), [BREAST_TARGETS.bob]: breastBobWeight(bump, breastSpring) };
+    // on the way between standing and seated, her seated shapes come and go with her (`applyLook` sets them otherwise)
+    const names: string[] = [BELLY_MOTION.tilt, BELLY_MOTION.bob, BELLY_MOTION.sway, BREAST_TARGETS.bob];
+    if (sitMoving) { w[SEAT_TARGET] = seatCorrectiveWeight(seatShare(), bump); w[SEAT_V2_TARGET] = seatCorrectiveV2Weight(seatShare(), bump); names.push(SEAT_TARGET, SEAT_V2_TARGET); }
     for (const mesh of skinned) {
       const dict = mesh.morphTargetDictionary, influences = mesh.morphTargetInfluences;
       if (!dict || !influences) continue;
-      for (const name of [BELLY_MOTION.tilt, BELLY_MOTION.bob, BELLY_MOTION.sway, BREAST_TARGETS.bob]) {
+      for (const name of names) {
         const at = dict[name];
         if (at !== undefined) influences[at] = w[name];
       }
-      applyRecoveredBaseline(mesh, bump, [BELLY_MOTION.tilt, BELLY_MOTION.bob, BELLY_MOTION.sway, BREAST_TARGETS.bob]);
+      applyRecoveredBaseline(mesh, bump, names);
     }
   }
 
@@ -1095,7 +1107,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     const dict = mesh.morphTargetDictionary ?? {};
     // the fitted light tee keeps its own navel's shape as fitted for her size: NAVEL DETAIL settles it in the shader
     const liteTee = (Array.isArray(mesh.material) ? mesh.material[0] : mesh.material).name === 'shirtSpandexLite';
-    return { ...bellyWeights(b, bellyCurve), ...breastWeightsForShape(b, dict[BREAST_GROW_TARGET] !== undefined, body.breastSize), [BELLY_UPPER_TARGET]: bellyUpperWeight(b, bellyCurve), ...navelWeights(b, body.navel), [NAVEL_FLAT_TARGET]: liteTee ? Math.min(1, Math.max(0, navelFlatFor(b, body.navel))) : Math.max(navelFlatFor(b, body.navel), fabric?.navelFlatten() ?? 0, clothFlatten()), [BELLY_REFINE_TARGET]: refineWeight(refine, b), [SEAT_TARGET]: seatCorrectiveWeight(pose === 'sit' ? 1 : 0, b), [SEAT_V2_TARGET]: seatCorrectiveV2Weight(pose === 'sit' ? 1 : 0, b), ...armRaiseWeights() };
+    return { ...bellyWeights(b, bellyCurve), ...breastWeightsForShape(b, dict[BREAST_GROW_TARGET] !== undefined, body.breastSize), [BELLY_UPPER_TARGET]: bellyUpperWeight(b, bellyCurve), ...navelWeights(b, body.navel), [NAVEL_FLAT_TARGET]: liteTee ? Math.min(1, Math.max(0, navelFlatFor(b, body.navel))) : Math.max(navelFlatFor(b, body.navel), fabric?.navelFlatten() ?? 0, clothFlatten()), [BELLY_REFINE_TARGET]: refineWeight(refine, b), [SEAT_TARGET]: seatCorrectiveWeight(seatShare(), b), [SEAT_V2_TARGET]: seatCorrectiveV2Weight(seatShare(), b), ...armRaiseWeights() };
   }
 
   /**
@@ -1516,9 +1528,12 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     poses.style.cssText = 'display:grid;grid-template-columns:repeat(4,1fr);gap:6px';
     for (const [p, label, action] of [['stand', 'STAND', SARAH_LAB_ACTION.stand], ['walk', 'WALK', SARAH_LAB_ACTION.walk], ['sit', 'SIT', SARAH_LAB_ACTION.sit], ['tpose', 'T-POSE', SARAH_LAB_ACTION.tpose]] as const) {
       buttons[p] = btn(label, action, () => {
+        // STAND to SIT and back is a move over SIT_SECONDS, the cloth on her all the way; any other switch is at once
+        sitMoving = (p === 'sit' || p === 'stand') && (pose === 'sit' || pose === 'stand' || sitMoving) && p !== pose;
+        if (!sitMoving) sitAmount = p === 'sit' ? 1 : 0;
         pose = p;
         // a pose switch moves her at once: the cloth starts again from her body rather than being flung
-        clothRestart = true;
+        if (!sitMoving) clothRestart = true;
         if (p === 'tpose' && SARAH_LAB_MODELS[modelIndex].id !== 'v1') { armsDeg = 90; armsOverride = true; }
         applyLook(); refresh();
       });
@@ -2162,7 +2177,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     try {
       clothWanted = false;
       if (clothOn) await toggleCloth();
-      pose = 'tpose'; armsDeg = 0; armsOverride = false; curl = 0; faceOn = false; seated = 0;
+      pose = 'tpose'; armsDeg = 0; armsOverride = false; curl = 0; faceOn = false; seated = 0; sitAmount = 0; sitMoving = false;
       Object.assign(spring, restingBellySpring()); Object.assign(breastSpring, restingBellySpring()); felt.primed = 0;
       applyLook(); refresh();
       for (let k = 0; k < 120; k++) advance(1 / 60);
@@ -2175,7 +2190,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
       return collectStoryBake({
         renderer: ctx.renderer.gl, camera, meshes, body: b.mesh, hair: hairMeshes, splitPaint: options.splitPaint,
         // SIT as the room sits her: its correctives, and her bump's tilt handed to her thighs (`seated` 1)
-        seat: (on) => { pose = on ? 'sit' : 'tpose'; seated = on ? 1 : 0; applyLook(); applyMotion(); },
+        seat: (on) => { pose = on ? 'sit' : 'tpose'; seated = on ? 1 : 0; sitAmount = on ? 1 : 0; sitMoving = false; applyLook(); applyMotion(); },
         facts: {
           look: SARAH_LOOK?.clothes.outfit ?? null, outfit: OUTFITS[outfit].name, bump, shape: serializeShape(body), bellyCurve, refine,
           skin: { chosen: skinId, worn: skinWorn, own: b.material.map === ownMap(b.material), painted: !!painted },
@@ -2242,21 +2257,22 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   }
 
   // ------------------------------------------------------------- posing
-  function turnsFor(): readonly JointTurn[] {
+  /** Her turns in pose `p` (the room's own by default), the base pose written into `out`. */
+  function turnsFor(p: SarahLabPose = pose, out: MutableJointTurn[] = poseOut): readonly JointTurn[] {
     if (!rig || !measure) return [];
     let base: readonly JointTurn[];
-    if (pose === 'sit') base = poseSeated(measure, rig.bind, { style: 'sit', seconds, posture: 'pregnant', bump: bump / 100, settled: settledSitFor(SARAH_LAB_MODELS[modelIndex].id) }, poseOut);
+    if (p === 'sit') base = poseSeated(measure, rig.bind, { style: 'sit', seconds, posture: 'pregnant', bump: bump / 100, settled: settledSitFor(SARAH_LAB_MODELS[modelIndex].id) }, out);
     else {
-      const stance = pose === 'walk' ? 'walk' : 'stand';
+      const stance = p === 'walk' ? 'walk' : 'stand';
       // the stride is in bind units, `bindScale` of them to the metre
       const carry = bump / 100;
-      const phase = pose === 'walk' ? ((walked * rig.bindScale) / humanStride(measure, 'walk', carry)) % 1 : 0;
-      base = poseHuman(measure, rig.bind, { stance, phase, seconds, lean: 0, carry }, poseOut);
+      const phase = p === 'walk' ? ((walked * rig.bindScale) / humanStride(measure, 'walk', carry)) % 1 : 0;
+      base = poseHuman(measure, rig.bind, { stance, phase, seconds, lean: 0, carry }, out);
     }
-    const overrideArms = pose === 'tpose' || (SARAH_LAB_MODELS[modelIndex].id !== 'v1' && armsOverride);
+    const overrideArms = p === 'tpose' || (SARAH_LAB_MODELS[modelIndex].id !== 'v1' && armsOverride);
     // T-POSE restores the whole bind pose. Other poses keep their torso and legs,
     // and the unselected arm keeps its normal animation.
-    if (pose === 'tpose') base = base.map(turn => ({ ...turn, radians: 0 }));
+    if (p === 'tpose') base = base.map(turn => ({ ...turn, radians: 0 }));
     if (overrideArms) {
       const j = measure.joints, f = armsDeg / 90, side = ARM_SIDES[armSide];
       const selected = [
@@ -2278,26 +2294,53 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     return [...base, ...extra];
   }
 
+  /** Her turns this frame: her pose, or on the way between standing and seated, the two blended (`poseBlend.ts`). */
+  function currentTurns(): readonly JointTurn[] {
+    if (!sitMoving || sitAmount <= 0 || sitAmount >= 1) return turnsFor();
+    return blendJointTurns(turnsFor('stand', standOut), turnsFor('sit', poseOut), sitEase(sitAmount), blendOut);
+  }
+
+  /**
+   * Her place on the floor. Standing, her build lifts her so her soles stay on the floor (a longer leg, bigger feet).
+   * Seated, and on the way there (`sitAmount`), her feet stay where she stood and the stool is set behind her: her hips
+   * 10 cm over its top, her ankles a sole's height off the floor, and her ankles' height moved from standing's to
+   * seated's as she goes (Joshua, 2026-10-28: a stand-to-sit move, `poseBlend.ts`). The view keeps her where it framed her
+   * seated before (`orbit.target.z`). Leaves her bones in this frame's pose.
+   */
   function place(): void {
     if (!model || !rig || !measure) return;
     const skin = findSkinnedMesh(model);
-    // standing, her build lifts her so her soles stay on the floor (a longer leg, bigger feet); seated, the stool decides
-    model.position.set(0, pose === 'sit' ? 0 : standLift * M, 0);
-    model.updateMatrixWorld(true);
-    if (pose !== 'sit' || !skin) {
+    if (sitAmount <= 0 || !skin) {
+      model.position.set(0, standLift * M, 0);
+      model.updateMatrixWorld(true);
       stool.visible = false;
+      orbit.target.z = ORBIT_START.target.z;
       return;
     }
-    // seat her: ankles a sole's height off the floor, hips 10 cm over the stool's top
-    const bones = skin.skeleton.bones;
-    const j = measure.joints;
-    const hips = bones[j.hipL].getWorldPosition(new THREE.Vector3()).add(bones[j.hipR].getWorldPosition(new THREE.Vector3())).multiplyScalar(0.5);
-    const ankle = Math.min(bones[j.ankleL].getWorldPosition(new THREE.Vector3()).y, bones[j.ankleR].getWorldPosition(new THREE.Vector3()).y);
-    const seatTop = Math.min(0.55, Math.max(0.4, (hips.y - ankle) / M + 0.08 - 0.1));
-    model.position.set(-hips.x, (seatTop + 0.1) * M - hips.y, -0.04 * M - hips.z);
+    const bones = skin.skeleton.bones, j = measure.joints, v = () => new THREE.Vector3();
+    // her hips, her feet (between her ankles) and her lower ankle's height in a pose, stood at the origin
+    const read = () => {
+      model!.position.set(0, 0, 0); model!.updateMatrixWorld(true);
+      const al = bones[j.ankleL].getWorldPosition(v()), ar = bones[j.ankleR].getWorldPosition(v());
+      return { hips: bones[j.hipL].getWorldPosition(v()).add(bones[j.hipR].getWorldPosition(v())).multiplyScalar(0.5), feet: al.clone().add(ar).multiplyScalar(0.5), low: Math.min(al.y, ar.y) };
+    };
+    rig.apply(turnsFor('stand', standOut)); const stand = read();
+    rig.apply(turnsFor('sit', poseOut)); const sit = read();
+    const seatTop = Math.min(0.55, Math.max(0.4, (sit.hips.y - sit.low) / M + 0.08 - 0.1));
+    // standing, her feet are here; seated, she is set so they stay there
+    const standFeet = stand.feet.clone().add(v().set(0, standLift * M, 0));
+    const seatedAt = v().set(standFeet.x - sit.feet.x, (seatTop + 0.1) * M - sit.hips.y, standFeet.z - sit.feet.z);
+    // this frame's pose, and her set so her feet are where she stood, at the height they have come to
+    rig.apply(currentTurns()); garmentRoom?.applyPose();
+    const now = read(), e = sitEase(sitAmount);
+    const lowStanding = stand.low + standLift * M, lowSeated = sit.low + seatedAt.y, low = lowStanding + (lowSeated - lowStanding) * e;
+    model.position.set(standFeet.x - now.feet.x, low - now.low, standFeet.z - now.feet.z);
+    model.updateMatrixWorld(true);
     stool.visible = true;
     stool.scale.set(1, seatTop * M, 1);
-    stool.position.set(0, (seatTop * M) / 2, -0.06 * M);
+    stool.position.set(seatedAt.x + sit.hips.x, (seatTop * M) / 2, seatedAt.z + sit.hips.z - 0.02 * M);
+    // seated she used to be set with her hips 4 cm behind the room's middle: the view follows her back to frame her so
+    orbit.target.z = ORBIT_START.target.z + (model.position.z + now.hips.z - (stand.hips.z + (-0.04 * M - stand.hips.z) * e));
   }
 
   /**
@@ -2306,7 +2349,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
    * spring takes it from there.
    */
   function feelMotion(dt: number): void {
-    seated = stepSeated(seated, pose === 'sit' ? 1 : 0, dt);
+    seated = sitMoving ? seatShare() : stepSeated(seated, pose === 'sit' ? 1 : 0, dt);
     if (!feel || !(dt > 0)) { applyMotion(); return; }
     feel.bone.localToWorld(tmp.copy(feel.local)).multiplyScalar(1 / M);
     let up = 0, left = 0;
@@ -2440,7 +2483,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   function advance(dt: number): void {
       seconds += dt;
       if (pose === 'walk') walked += WALK_SPEED * dt;
-      if (rig) rig.apply(turnsFor());
+      if (sitMoving) { sitAmount = stepSit(sitAmount, pose === 'sit' ? 1 : 0, dt); if (sitAmount === (pose === 'sit' ? 1 : 0)) { sitMoving = false; applyLook(); } }
+      else sitAmount = pose === 'sit' ? 1 : 0;
+      if (rig) rig.apply(currentTurns());
       garmentRoom?.applyPose();
       place();
       feelMotion(dt);
@@ -2482,8 +2527,9 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         if (cloth) cloth.mesh.visible = false;
         const lite = partMeshes.get('spandex-lite')?.[0];
         if (lite) lite.visible = false;
-        if (pose !== garmentPoseKey) { garmentPoseKey = pose; garmentRoom.cloth.restart(); }
-        if (garmentRoom.capsules.stool !== null || pose === 'sit') garmentRoom.capsules = { ...garmentRoom.capsules, stool: pose === 'sit' && stool.visible ? { x: stool.position.x, z: stool.position.z, radius: 0.21 * M, top: stool.scale.y } : null };
+        // a pose switch lays it on her afresh; STAND to SIT and back is a move, and it is worn all the way through it
+        if (pose !== garmentPoseKey) { garmentPoseKey = pose; if (!sitMoving) garmentRoom.cloth.restart(); }
+        if (garmentRoom.capsules.stool !== null || sitAmount > 0) garmentRoom.capsules = { ...garmentRoom.capsules, stool: sitAmount > 0 && stool.visible ? { x: stool.position.x, z: stool.position.z, radius: 0.21 * M, top: stool.scale.y } : null };
         model.updateMatrixWorld(true);
         // BREAST and NAVEL DETAIL, exactly as on the cloth tee: the domes under it, her details drawn through it, and
         // her navel softened under it to match
@@ -2507,7 +2553,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
             garmentRoom.pose.raise = D.raise * (ss(D.weightless, D.out) - ss(D.hold, D.down));
           } else if (was < D.done) garmentRoom.pose.raise = 0;
           if (at(D.done)) garmentRoom.cloth.settle();
-          garmentRoom.capsules = { ...garmentRoom.capsules, arms: true, legs: pose === 'sit' };
+          garmentRoom.capsules = { ...garmentRoom.capsules, arms: true, legs: sitAmount > 0 };
         }
         // a slow frame is taken in two halves: at a twentieth of a second a step, the cloth under her bust caught inside her
         // as the room opened at 73% belly (headless, a software renderer's frame), and halved it did not

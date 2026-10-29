@@ -38,6 +38,56 @@ All on your phone held upright (430 × 932, DPR 2), bump 73% unless a sheet says
 11. `11-neckline-brought-up.jpg`: a V raised from the deepest one, before and after the fix.
 12. `12-seated-fix.jpg`: the Knee dress and the Standard tee seated, before and after the fix (same run).
 13. `13-default-tee.jpg`: the default tee at 0, 41, 67, 100 and 200% belly, alpha.135 beside Stage 3.
+14. `14-necklines-smooth.jpg`: the scoop (the default) and the crew, before and after the follow-up below.
+15. `15-necklines-cut.jpg`: a 10 cm U, and a 6 cm V raised from a 12 cm one, before and after.
+16. `16-sit-knee-side.jpg` and `16-sit-knee-34.jpg`: the Knee dress through the 5-second sit, the old cut and the
+    straight one.
+17. `17-sit-mini-standard.jpg`: the Mini dress and the Standard tee through the 5-second sit.
+
+## Follow-up, 2026-10-28: necklines, and sitting down
+
+Joshua, on sheets 5 and 12: "Make sure all the necklines are smooth lines (not jagged edges) and even on both sides",
+and "a knee high dress shouldn't rise up more than mid-thigh… we probably need to add a smooth procedural standing to
+sitting that lasts about 5s, and then see if from standing to sitting the sim does the dress correctly".
+
+- **Necklines are smooth and even** (sheets 14 and 15). The neckline is held where the tee settled on her, so it kept
+  every crumple the dressing left in it, and one side sat higher than the other. When the tee settles, the band within
+  3 cm of the neckline is now made the same on both sides, and its crumples are smoothed out before it is held there.
+  What is smoothed is how the cloth lies against where it belongs, not the cloth's shape. Wherever it would still
+  stretch an edge past 1.4 times its pattern length (or past what it already was), it does less there: smoothed
+  without that, the back neckline's edge cut its corners at her shoulders and was held at 1.8 times its length. A neckline brought up from a deeper one gets the same pass for the cloth that comes back, which took the
+  step out of the side of the raised V. A cut neckline's hold on her may also lift across a dip in her skin, never
+  pull further into one.
+- **STAND to SIT and back is a 5-second move** (sheets 16 and 17). Her joints turn from one pose to the other, eased in
+  and out, and her feet stay where she stood while she lowers back onto the stool. The tee or dress stays on her and is
+  simulated the whole way, rather than being laid on her again in the seated pose. Pressing STAND part way down turns
+  her back up from where she is. Other pose switches are instant, as before.
+- **The dress skirt falls straight from her hips** (sheet 16). Below the widest point of her hips the dress followed her
+  thighs in, a pencil skirt about 80 cm round above her knee, and sitting slid it up to where her thighs fit. It now
+  falls straight down from her hips, as a plain dress skirt is cut. Measured as how far down her thigh the front of the
+  skirt reaches seated (0 her hip joint, 1 her knee), after the 5-second sit:
+
+| Knee dress | Standing | Seated |
+| --- | --- | --- |
+| Old cut (pencil) | 1.03 | 0.52 to 0.56 |
+| Straight | 1.03 | 0.58 to 0.59 |
+
+  So seated it ends just below mid-thigh. Halfway down it is still at 0.96 (the pencil cut was already at 0.63). The
+  Mini seated reaches 0.52 to 0.56 of her thigh (0.46 standing), and the Standard tee stays over her lap.
+- **The default tee's neckline changes slightly**: it is now the smooth, even curve on sheet 14. The same probe as the
+  table below, against alpha.135:
+
+| Belly | Folds over 60°, alpha.135 | Follow-up | Strain max, alpha.135 | Follow-up |
+| --- | --- | --- | --- | --- |
+| 0% | 71 | 90 | 1.56 | 1.54 |
+| 41% | 69 | 84 | 1.56 | 1.49 |
+| 67% | 68 | 83 | 1.56 | 1.49 |
+| 100% | 66 | 76 | 1.56 | 1.49 |
+| 200% | 96 | 111 | 1.56 | 1.58 |
+
+  The most stretched edge is a little shorter at every size but 200%. There are 10 to 20 more sharp folds. As the room
+  opens they are on her upper chest and shoulders (4 more there; none at the neckline itself). The shots differ from
+  alpha.135's by under one colour step on average, and side by side I could not see where they are.
 
 ## Found and fixed on the way to these sheets
 
@@ -89,9 +139,12 @@ on average (sheet 13).
   hips gathers there. It does not show at Standard length, but past her hips it stands out as a pouch on each side. A
   one-piece dress drafted by the tee's own rules to the same hem does the same, so it is the cut, not the extension.
   Proposed: hip darts in the front and back below the waist, or let FLARE (Stage 4) take it.
-- **Seated, the Knee and Mini dresses ride up to her lap** (sheet 8). Their skirts are cut close down her legs, about
-  80 cm round above the knee, which is less than her thighs need once they are apart on the stool. So they slide up to
-  where they fit. FLARE (Stage 4) widens a skirt so it can lie over her knees.
+- **Seated, a dress still rides up to just below mid-thigh** (sheet 16). The skirt now falls straight, and sitting
+  takes up its length over her lap and under her seat. FLARE (Stage 4) widens a skirt further, so it can lie over her
+  knees.
+- **A small step where the sleeve meets the front neckline** (sheets 14 and 15, at each shoulder). It is the corner of
+  the pattern where the raglan sleeve's top joins the neckline; it is the same on both sides, and shows most on a cut U
+  or V.
 - **TEE DEFAULTS after a long session** can tailor a tee a point or two different along one edge (5,391 points rather
   than 5,389). Tailoring reads her body as it stands, and that had changed by a hair since the room opened. It does not
   show.
@@ -103,9 +156,10 @@ on average (sheet 13).
   - a cut neckline is taken once the garment has settled;
   - what a cut neckline took keeps its binding.
   Each was checked to fail without its fix.
-- Full suite:
-  - 4,686 tests: 4,683 pass, 3 skipped.
-  - Five timing tests timed out with two browsers running beside them. Run alone, all four of their files pass.
+- Follow-up, new tests: the neckline settles smooth and even without stretching its band; the skirt falls straight from
+  her hips (both constructions); the 5-second sit's timing, easing and joint blend. The first two were checked to fail
+  without their fix.
+- Full suite (follow-up): 4,692 tests: 4,689 pass, 3 skipped.
 - typecheck, relay:typecheck, build and probe:boot all pass.
 - Her body file is unchanged: sarah-v2-body.glb 47e990f0…7f42.
 - The stage probe: every control and view on these sheets, 2,968 s headless, no page errors.

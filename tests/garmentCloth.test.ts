@@ -61,12 +61,12 @@ function cylinderBody(groove = 0): Body {
   return { root, mesh, upper };
 }
 
-/** The tube's particles, body-local metres. */
-function tubePoints(): Float32Array {
+/** The tube's particles, body-local metres, turned `turn` radians about its axis (off the cylinder's vertex columns). */
+function tubePoints(turn = 0.05): Float32Array {
   const p = new Float32Array(ROWS.length * AROUND * 3);
   ROWS.forEach((y, r) => {
     for (let m = 0; m < AROUND; m++) {
-      const th = (2 * Math.PI * m) / AROUND + 0.05;
+      const th = (2 * Math.PI * m) / AROUND + turn;
       p.set([R_CLOTH * Math.sin(th), y, R_CLOTH * Math.cos(th)], (r * AROUND + m) * 3);
     }
   });
@@ -133,8 +133,8 @@ function bindTo(mesh: THREE.SkinnedMesh, points: Float32Array): ClothBinding {
 }
 
 interface Rig { body: Body; sewn: SewnGarment; binding: ClothBinding; points: Float32Array }
-function rig(groove = 0): Rig {
-  const body = cylinderBody(groove), points = tubePoints();
+function rig(groove = 0, turn?: number): Rig {
+  const body = cylinderBody(groove), points = tubePoints(turn);
   return { body, sewn: tube(points), binding: bindTo(body.mesh, points), points };
 }
 
@@ -249,9 +249,17 @@ describe('GarmentCloth on a synthetic sewn tube over a skinned cylinder', () => 
     const r = rig(), gc = garment(r), free = garment(r), n = r.sewn.count;
     gc.weightless = true;
     for (let f = 0; f < 10; f++) gc.frame(FRAME);
-    const settledAt = gc.positions.slice();
+    const before = gc.positions.slice();
     gc.settle();
-    expect(Array.from(gc.positions)).toEqual(Array.from(settledAt));
+    // settle leaves the cloth where it lies but for the neckline's band, made even and smooth (`evenNeck`): on a tube
+    // already even, by under a millimetre (units here are centimetres)
+    let bandMove = 0;
+    for (let i = 0; i < n; i++) {
+      const d = Math.hypot(gc.positions[i * 3] - before[i * 3], gc.positions[i * 3 + 1] - before[i * 3 + 1], gc.positions[i * 3 + 2] - before[i * 3 + 2]);
+      if (ROWS[0] - ROWS[rowOf(i)] < PIN_OUT) bandMove = Math.max(bandMove, d); else expect(d).toBe(0);
+    }
+    expect(bandMove).toBeLessThan(0.1);
+    const settledAt = gc.positions.slice();
     gc.weightless = false;
     for (let f = 0; f < 30; f++) { gc.frame(FRAME); free.frame(FRAME); }
     let neckMove = 0, hemDrop = 0, freeNeckDrop = 0;
@@ -272,6 +280,36 @@ describe('GarmentCloth on a synthetic sewn tube over a skinned cylinder', () => 
     expect(hemDrop).toBeLessThan(freeNeckDrop / 2);
     // an unsettled garment's neck is not held: it fell with the rest
     expect(freeNeckDrop).toBeGreaterThan(2);
+  });
+
+  // Joshua, 2026-10-28: "make sure all the necklines are smooth lines (not jagged edges) and even on both sides". Pinned
+  // where it settled, the neckline kept every crumple the dressing left in it, one side higher than the other.
+  it('settles its neckline on a smooth line, the same on both sides, without stretching the band', () => {
+    // a tube square to x = 0, so its fabric (its own rest) and the way it is laid share one mirror
+    const r = rig(0, 0), n = r.sewn.count;
+    const gc = garment(r, { fabricRest: r.points });
+    gc.weightless = true;
+    for (let f = 0; f < 10; f++) gc.frame(FRAME);
+    // crumple the neckline: its band's +x half hanging half a centimetre low (the cloth under it slack), every other point
+    // of its edge out and in by 0.6 cm (units are centimetres)
+    const x = (gc as unknown as { sim: { positions: Float32Array } }).sim.positions;
+    for (let i = 0; i < n; i++) if (ROWS[0] - ROWS[rowOf(i)] < PIN_OUT && x[i * 3] > 0.5) x[i * 3 + 1] -= 0.5;
+    for (let m = 0; m < AROUND; m++) {
+      const i = m * 3, rr = Math.hypot(x[i], x[i + 2]), out = m % 2 ? 0.6 : -0.6;
+      x[i] *= (rr + out) / rr; x[i + 2] *= (rr + out) / rr;
+    }
+    const lopsided = (P: Float32Array) => { let w = 0; for (let m = 1; m < AROUND / 2; m++) w = Math.max(w, Math.abs(P[m * 3 + 1] - P[(AROUND - m) * 3 + 1])); return w; };
+    const zigzag = (P: Float32Array) => { let a = 0, b = 0; for (let m = 0; m < AROUND; m++) { const rr = Math.hypot(P[m * 3], P[m * 3 + 2]); if (m % 2) a += rr; else b += rr; } return Math.abs(a - b) / (AROUND / 2); };
+    const before = gc.positions, stretched = gc.strain().max;
+    expect(lopsided(before)).toBeGreaterThan(0.45);
+    expect(zigzag(before)).toBeGreaterThan(1);
+    gc.settle();
+    const after = gc.positions;
+    expect(lopsided(after)).toBeLessThan(0.05);
+    expect(zigzag(after)).toBeLessThan(0.25);
+    expect(gc.strain().max).toBeLessThan(stretched);
+    // below the band nothing moved
+    for (let i = 0; i < n; i++) if (ROWS[0] - ROWS[rowOf(i)] >= PIN_OUT) for (let c = 0; c < 3; c++) expect(after[i * 3 + c]).toBe(before[i * 3 + c]);
   });
 
   it('pushes its body pieces (trunkOnly) out of the arm capsules a frame is handed, and only those', () => {
@@ -376,7 +414,8 @@ describe('GarmentCloth on a synthetic sewn tube over a skinned cylinder', () => 
       if (Math.abs(a) > 0.8) away = Math.max(away, Math.abs(hug![i] - close));
       if (Math.abs(a) < 0.15) over = Math.min(over, hug![i]);
     }
-    expect(away).toBeLessThan(1e-6);
+    // (within a millimetre: the hug is smoothed along the band, so the let-off over the hollow eases out to either side)
+    expect(away).toBeLessThan(0.001);
     expect(over).toBeGreaterThan(close + 0.01);
     // held where the hug puts it, no edge round the top row is longer than HUG_STRETCH of its length (and a hair)
     for (let f = 0; f < 3; f++) gc.frame(FRAME);
