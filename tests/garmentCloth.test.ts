@@ -390,6 +390,72 @@ describe('GarmentCloth on a synthetic sewn tube over a skinned cylinder', () => 
     expect(worst).toBeLessThan(HUG_STRETCH + 0.02);
   });
 
+  // Stage 3: a neckline brought up from a deep one -- the cloth that comes back is laid and bound where it lay, neither
+  // pulled in by the hug that held the old neckline's edge nor bound at the new one's (`join`): both stood a 12 cm V
+  // brought up from her underbust as wide as the deep one, torn at its point.
+  it('cloth a neckline brought up brings back is laid and bound where it lay, not where a hug held the old edge or holds the new one', () => {
+    const r = rig(), n = r.sewn.count, LAY = R_CLOTH - R_BODY;
+    // a neckline cut at row `row` (signed metres under it, as cuts.ts makes it), the rows above it cut away
+    const neckAt = (row: number) => ({ keep: Float32Array.from({ length: n }, (_, v) => (rowOf(v) >= row ? 1 : -1)), neck: Float32Array.from({ length: n }, (_, v) => ROWS[row] - ROWS[rowOf(v)]) });
+    const gc = garment(r, { cuts: neckAt(6) });
+    gc.weightless = true;
+    for (let f = 0; f < 5; f++) gc.frame(FRAME);
+    gc.settle();
+    for (let f = 0; f < 5; f++) gc.frame(FRAME);
+    const B = () => (gc as unknown as { binding: ClothBinding }).binding;
+    const radius = (i: number) => Math.hypot(gc.positions[i * 3], gc.positions[i * 3 + 2]) / 100;
+    // the deep neckline's edge is held to her, well in from where the cloth lay
+    let edge = 0;
+    for (let i = 6 * AROUND; i < 7 * AROUND; i++) edge = Math.max(edge, Math.abs(radius(i) - (R_BODY + HUG_CLEARANCE)));
+    expect(edge).toBeLessThan(0.002);
+    // the cloth cut away is bound where it lay, about LAY off her (her facets a hair inside her radius, the cloth eased)
+    const lay = B().offset.slice(0, 5 * AROUND);
+    for (let i = 0; i < 5 * AROUND; i++) expect(Math.abs(lay[i] - LAY)).toBeLessThan(0.004);
+    // brought up to row 1: rows 0 to 4 come back, bound where they lay (laid as the edge the hug held had moved, rows 3
+    // and 4 were bound 14 mm nearer her, and rows 0 to 2, laid at the new hug, at her skin)
+    gc.setCut(neckAt(1));
+    gc.layOut();
+    expect(gc.active).toBe(n);
+    let bound = 0;
+    for (let i = 0; i < 5 * AROUND; i++) bound = Math.max(bound, Math.abs(B().offset[i] - lay[i]));
+    expect(bound).toBeLessThan(0.001);
+    // and laid there; a few frames on, below the new neckline's band (rows 3 and 4) still about there (the edge the hug
+    // let go of eases out to them), and the band (rows 0 and 1) at its hug
+    const below = () => { let w = 0; for (let i = 3 * AROUND; i < 5 * AROUND; i++) w = Math.max(w, Math.abs(radius(i) - (R_BODY + lay[i]))); return w; };
+    expect(below()).toBeLessThan(0.002);
+    for (let f = 0; f < 3; f++) gc.frame(FRAME);
+    let band = 0;
+    for (let i = 0; i < 2 * AROUND; i++) band = Math.max(band, Math.abs(radius(i) - (R_BODY + HUG_CLEARANCE)));
+    expect(below()).toBeLessThan(0.005);
+    expect(band).toBeLessThan(0.002);
+  });
+
+  // Stage 3: dressed with a deep V, its sides parted over her breasts as it was eased on, and the cloth it took away,
+  // bound as that edge lay, came back as wide as the deep one when the neckline was brought up. A cut neckline is now
+  // taken once the garment has settled, from cloth that lay on her, and what it took keeps the binding it lay at.
+  it('a cut neckline is taken once the garment has settled, and what it took keeps the binding it lay at however its edge moves', () => {
+    const r = rig(), n = r.sewn.count;
+    // cut under row 3 (rows 0 and 1 away; row 2 is the corner of the triangles the line runs through); put on: drafted
+    const keep = Float32Array.from({ length: n }, (_, v) => (rowOf(v) >= 3 ? 1 : -1));
+    const neck = Float32Array.from({ length: n }, (_, v) => ROWS[3] - ROWS[rowOf(v)]);
+    const gc = garment(r, { cuts: { keep, neck, keepDraftedNeck: new Float32Array(n).fill(1) } });
+    gc.weightless = true;
+    for (let f = 0; f < 5; f++) gc.frame(FRAME);
+    expect(gc.active).toBe(n);
+    gc.settle();
+    expect(gc.active).toBe((ROWS.length - 2) * AROUND);
+    const B = () => (gc as unknown as { binding: ClothBinding }).binding, lay = B().offset.slice(0, 2 * AROUND), tri = B().tri.slice(0, 6 * AROUND);
+    // its edge pulled 1 cm out from her (a V's sides parting), then settled again (as the room settles it twice)
+    for (let f = 0; f < 5; f++) gc.frame(FRAME);
+    const sim = (gc as unknown as { sim: { positions: Float32Array } }).sim;
+    for (let i = 0; i < 2 * AROUND; i++) { const x = sim.positions, k = 1 + 1 / Math.hypot(x[i * 3], x[i * 3 + 2]); x[i * 3] *= k; x[i * 3 + 2] *= k; }
+    gc.settle();
+    let moved = 0;
+    for (let i = 0; i < 2 * AROUND; i++) moved = Math.max(moved, Math.abs(B().offset[i] - lay[i]));
+    expect(moved).toBeLessThan(1e-6);
+    expect(Array.from(B().tri.slice(0, 6 * AROUND))).toEqual(Array.from(tri));
+  });
+
   it('before it has settled, cloth a cut brings back is laid as the cloth round it lies and keeps the binding it was tailored with', () => {
     const r = rig(), n = r.sewn.count, KEPT = 5, SLID = 3;
     const cutAt = (rows: number) => ({ keep: Float32Array.from({ length: n }, (_, v) => (rowOf(v) < rows ? 1 : -1)), neck: new Float32Array(n).fill(Infinity) });

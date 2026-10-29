@@ -20,7 +20,8 @@
  * - NECKLINE, the front only, deeper than drafted: from the drafted neckline's side end (the raglan point, a set-in's
  *   shoulder seam) to her centre front at the depth asked, a U (the drafted neckline let down by a quarter ellipse that
  *   is 0 at the side end) blended toward a V (straight from the side end) by NECK SHAPE. It is 0 at the side end, so a
- *   sleeve's and the back's neckline are never cut.
+ *   sleeve's and the back's neckline are never cut. The garment takes it only once it has settled on her
+ *   (`keepDraftedNeck`: put on, it wears the drafted neckline).
  * `keep` is the signed perpendicular distance to the line that crosses the vertex's piece, so a band of a width is that
  * wide everywhere; a piece its line does not cross reads +1 kept whole or -1 cut away whole. And when a pair's line is
  * exactly the drafted one (the Standard length with that pair's hem and the curve untouched; the Short sleeve), no
@@ -57,6 +58,11 @@ export interface GarmentCuts {
    * front); +Infinity on every vertex where no neckline cut runs -- every vertex while the neckline is the drafted one.
    */
   readonly neck: Float32Array;
+  /**
+   * `keep` with the neckline as drafted (no NECKLINE cut): what is worn while the garment is put on, a cut neckline being
+   * taken only once it has settled on her (`garmentCloth.ts` layout). Absent: `keep`.
+   */
+  readonly keepDraftedNeck?: Float32Array;
 }
 
 /** HEM CURVE at 1 raises the hem at the side seams this far, metres: a shirttail. */
@@ -309,9 +315,11 @@ export function garmentCuts(t: CutSource, settings: GarmentSettings = GARMENT_DE
     for (let v = r.start; v < r.end; v++) keep[v] = -uv[2 * v + 1];
   }
 
-  // NECKLINE: only deeper than drafted, the front only
+  // NECKLINE: only deeper than drafted, the front only (what is worn without it kept for the garment's dressing)
   const front = P.neckRun;
+  let keepDraftedNeck = keep;
   if (front && s.neckDepth > draftedNeckDrop(s)) {
+    keepDraftedNeck = keep.slice();
     const half = g.frontNeck, depth = Math.min(s.neckDepth, P.stops.neckDeepest);
     const vDeep = frontCentreV(t.draft, t.measure.neck.front[1] - depth);
     if (half[half.length - 1][1] - vDeep > 0) {
@@ -325,7 +333,7 @@ export function garmentCuts(t: CutSource, settings: GarmentSettings = GARMENT_DE
       }
     }
   }
-  return { keep, neck };
+  return { keep, neck, keepDraftedNeck };
 }
 
 /** Her landmarks for the instant controls, on this tee (see GarmentStops). */

@@ -7,7 +7,11 @@
  *   crown and the bodice meet and must be free to lie on her), to the elbow; forearm, elbow to wrist. Radius: her arm's
  *   own girth there (measure.ts) as a circle, times RADIUS_SHARE (inside her skin, so the capsule only ever catches
  *   cloth that has already gone into her).
- * - LEGS: thigh from LEG_START of the way down from hip to knee, to the knee; radius from her thigh's girth likewise.
+ * - LEGS (seated): thigh from LEG_START of the way down from hip to knee, to the knee; radius her thigh's girth just under
+ *   her crotch as a circle, times LEG_RADIUS_SHARE -- her thigh's own size, a little more, from right by her hip joint.
+ *   Laid on her afresh as she sits, the front of a tee or a dress started inside her thighs where they rise to her belly,
+ *   and a capsule inside her skin and clear of her hip let it stay there: the front dipped into her lap and a knee dress's
+ *   skirt went under her thighs (Stage 3). Her own size puts that cloth out over them.
  * - STOOL: a vertical capsule the stool's radius wide whose rounded top is the seat's height.
  *
  * Read from her skeleton every frame (posed bones, world), so they move with her. three.js, the room's side.
@@ -16,10 +20,10 @@ import * as THREE from 'three';
 import type { Capsules } from '../clothSim';
 import type { BodyMeasure } from './types';
 
-/** Upper arm and thigh capsules start this share of the way down the bone (clear of her shoulder and hip). */
-const ARM_START = 0.45, LEG_START = 0.35;
-/** A capsule's radius is this share of her limb's girth as a circle. */
-const RADIUS_SHARE = 0.85;
+/** Upper arm capsules start this share of the way down the bone (clear of her shoulder); thigh capsules this share (by her hip joint). */
+const ARM_START = 0.45, LEG_START = 0.05;
+/** An arm capsule's radius is this share of her limb's girth as a circle (inside her skin); a thigh's, LEG_RADIUS_SHARE. */
+const RADIUS_SHARE = 0.85, LEG_RADIUS_SHARE = 1.05;
 
 export interface CapsuleRequest {
   readonly arms: boolean;
@@ -62,7 +66,7 @@ export function bodyCapsules(body: THREE.SkinnedMesh, bones: CapsuleBones, measu
   }
   if (request.legs) for (let s = 0; s < 2; s++) {
     B[bones.hip[s]].getWorldPosition(tmpA); B[bones.knee[s]].getWorldPosition(tmpB);
-    put(tmpA.clone().lerp(tmpB, LEG_START), tmpB, circle(measure.thigh.girth));
+    put(tmpA.clone().lerp(tmpB, LEG_START), tmpB, (measure.thigh.girth / (2 * Math.PI)) * LEG_RADIUS_SHARE * unitsPerMetre);
   }
   if (request.stool) {
     const { x, z, radius, top } = request.stool;

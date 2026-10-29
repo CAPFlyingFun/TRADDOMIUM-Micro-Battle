@@ -2,8 +2,9 @@
  * HER LIMBS AS CAPSULES FOR THE CLOTH (`src/sarahlab/garment/capsules.ts`), on a hand-built skeleton of THREE.Bone
  * objects under a moved and scaled parent (so world positions are what is read) and a measure whose girths are made up:
  * capsuleCount counts 4 for the arms, 2 for the legs, 1 for a stool; bodyCapsules writes them in that order -- upper
- * arm from 45% of the way down shoulder to elbow, forearm elbow to wrist, thigh from 35% of the way down hip to knee,
- * each 85% of its girth's circle in radius, scaled by unitsPerMetre; the stool a vertical capsule whose rounded top is
+ * arm from 45% of the way down shoulder to elbow, forearm elbow to wrist, each 85% of its girth's circle in radius; thigh
+ * from 5% of the way down hip to knee, 105% of its girth's circle (her thigh's own size: seated, a dress's front laid
+ * inside her thighs is put out over them, Stage 3); scaled by unitsPerMetre; the stool a vertical capsule whose rounded top is
  * the seat -- reuses a buffer of the right size, makes a new one otherwise, and follows the bones when they move.
  */
 import * as THREE from 'three';
@@ -41,7 +42,7 @@ const girths = (top: number) => Array.from({ length: 21 }, (_, i) => top - 0.01 
 const MEASURE = { arms: [{ girths: girths(0.30) }, { girths: girths(0.32) }], thigh: { y: 0.8, girth: 0.55 } } as unknown as BodyMeasure;
 
 const world = (i: number) => new THREE.Vector3(...LOCAL[i]).multiplyScalar(ROOT_SCALE).add(ROOT_AT);
-const radiusOf = (girth: number, upm: number) => (girth / (2 * Math.PI)) * 0.85 * upm;
+const radiusOf = (girth: number, upm: number, share = 0.85) => (girth / (2 * Math.PI)) * share * upm;
 
 function expectCapsule(c: Capsules, k: number, a: THREE.Vector3, b: THREE.Vector3, r: number): void {
   for (let j = 0; j < 3; j++) {
@@ -82,7 +83,7 @@ describe('bodyCapsules', () => {
     }
     for (let s = 0; s < 2; s++) {
       const hip = world(BONES.hip[s]), knee = world(BONES.knee[s]);
-      expectCapsule(c, 4 + s, hip.clone().lerp(knee, 0.35), knee, radiusOf(0.55, upm));
+      expectCapsule(c, 4 + s, hip.clone().lerp(knee, 0.05), knee, radiusOf(0.55, upm, 1.05));
     }
     // the stool: from the floor up to its seat less its radius, so the rounded top is the seat
     expectCapsule(c, 6, new THREE.Vector3(0.3, 0, -0.2), new THREE.Vector3(0.3, 0.5 - 0.18, -0.2), 0.18);
@@ -105,7 +106,7 @@ describe('bodyCapsules', () => {
     const { mesh } = rig();
     const legs = bodyCapsules(mesh, BONES, MEASURE, { arms: false, legs: true, stool: null }, 1);
     expect(legs.count).toBe(2);
-    expectCapsule(legs, 0, world(6).lerp(world(8), 0.35), world(8), radiusOf(0.55, 1));
+    expectCapsule(legs, 0, world(6).lerp(world(8), 0.05), world(8), radiusOf(0.55, 1, 1.05));
     const low = bodyCapsules(mesh, BONES, MEASURE, { arms: false, legs: false, stool: { x: -1, z: 2, radius: 0.2, top: 0.1 } }, 1);
     expect(low.count).toBe(1);
     expectCapsule(low, 0, new THREE.Vector3(-1, 0, 2), new THREE.Vector3(-1, 0, 2), 0.2);

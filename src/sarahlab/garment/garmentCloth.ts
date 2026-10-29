@@ -20,14 +20,16 @@
  * particle order. With no cut everything is worn, slot i is particle i, and the garment is exactly as it was.
  * - Where the cloth now ends -- a drafted hem or cuff, a cut one, an armhole the sleeve's cut opened -- it weighs
  *   EDGE_MASS, the cut's line with a band either side of it (CUT_EDGE_BAND).
- * - A cut NECKLINE is held as the drafted one is, once settled, and to her skin under it (a hug, `ClothSkin.pinOffset`):
- *   where the whole tee bridged her breasts, a deep V held where the tee stood would hang in the air.
+ * - A cut NECKLINE is taken only once the garment has settled (put on, it wears the drafted neckline), and is then held
+ *   as the drafted one is and to her skin under it (a hug, `ClothSkin.pinOffset`): where the whole tee bridged her
+ *   breasts, a deep V held where the tee stood would hang in the air.
  * - Her shape is read over the worn cloth alone (`refit`'s smoothing): what the cut leaves off never pulls on the fit of
  *   what is worn, so the default tee is cut exactly as it was. After the worn cloth changes it is cut again for her
  *   once it has stood REFIT_SETTLE.
  * - Cloth a cut brings back is laid level with the cloth round it (`join`): moved as its neighbours have moved from
- *   where they are bound, and, once the garment has settled, bound to her where it starts. `settle` binds the cloth not
- *   worn as the worn cloth round it moved, so every particle's binding says where the settled garment has it.
+ *   where they are held, and, once the garment has settled, bound to her where it starts. `settle` binds the cloth not
+ *   worn as the worn cloth round it moved -- all but what a cut neckline took, which keeps where it lay -- so every
+ *   particle's binding says where the settled garment has it.
  */
 import * as THREE from 'three';
 import { ClothSim, type Capsules, type ClothSettings, type ClothStepStats } from '../clothSim';
@@ -378,7 +380,7 @@ export class GarmentCloth {
    * The cloth over the worn slots, laid on her where it is bound -- or, `carry` given, where those of its particles that
    * were worn already lie in it. Its settings are the last cloth's (the room's dials carry over).
    */
-  private build(carry: ClothSim | null, carrySlots: Int32Array | null = null): ClothSim {
+  private build(carry: ClothSim | null, carrySlots: Int32Array | null = null, carryHug: Float32Array | null = null): ClothSim {
     const { settings } = this.options, n = this.active;
     const start = new Float32Array(n * 3);
     this.skin.initial(start);
@@ -387,13 +389,13 @@ export class GarmentCloth {
       restLength: (a, b) => this.restOf(this.order[a], this.order[b]), bendFlat: true, capsuleMask: this.maskNow,
     }, { ...(this.sim?.settings ?? { selfDistance: SELF_DISTANCE * this.options.unitsPerMetre, ...settings, bendCompliance: BEND_COMPLIANCE }) });
     if (carry) {
-      const x = carry.positions, was = carrySlots ?? this.slotOf, bound = start.slice(), kept = new Uint8Array(n);
+      const x = carry.positions, was = carrySlots ?? this.slotOf, kept = new Uint8Array(n);
       let joined = 0;
       for (let i = 0; i < n; i++) {
         const j = was[this.order[i]];
         if (j >= 0 && j < carry.count) { start[i * 3] = x[j * 3]; start[i * 3 + 1] = x[j * 3 + 1]; start[i * 3 + 2] = x[j * 3 + 2]; kept[i] = 1; } else joined++;
       }
-      if (joined > 0 && joined < n) this.join(start, bound, kept);
+      if (joined > 0 && joined < n) this.join(start, kept, carryHug);
     }
     sim.reset(start);
     this.primed = false; this.warm = WARM_SECONDS;
@@ -402,16 +404,26 @@ export class GarmentCloth {
 
   /**
    * The cloth a cut brings back (worn now, not in the last cloth), into `start`: laid as the worn cloth round it lies --
-   * each slot moved from where it is bound (`bound`) by the mean of how far its neighbours already laid have moved from
-   * theirs, ring by ring out from the cloth that stayed (`kept`) -- and, once the garment has settled, bound to her where
-   * it now starts, as `settle` bound what was worn then: its pins, a cut neckline's hug and a restart all read the
-   * binding. Laid where it was tailored and held there, a band brought back after the cloth had settled met it stretched
-   * and folded (Stage 3: a V brought up 6 cm from her underbust stood in teeth, an edge at 4.9 times its length).
+   * each slot moved from where it is bound by the mean of how far its neighbours already laid have moved from theirs,
+   * ring by ring out from the cloth that stayed (`kept`) -- and, once the garment has settled, bound to her where it now
+   * starts, as `settle` bound what was worn then: its pins, a cut neckline's hug and a restart all read the binding. Laid
+   * where it was tailored and held there, a band brought back after the cloth had settled met it stretched and folded
+   * (Stage 3: a V brought up 6 cm from her underbust stood in teeth, an edge at 4.9 times its length).
+   * Both ends of that are measured from where the cloth LAY, never from where a hug held it. The cloth kept, from where
+   * the last layout held it (`wasHug`, that layout's pin offsets): read from its binding alone, the old neckline's hug
+   * into her hollows was a move, which the cloth brought back took on. The cloth brought back, from its binding's own
+   * offset, not the new neckline's hug: laid at the hug and bound there, it had nowhere to be let off to (`easeHug`). Both
+   * bound the cloth brought back nearer her than it lay, and held a V brought up from a deeper one apart at its point
+   * (Stage 3).
    */
-  private join(start: Float32Array, bound: Float32Array, kept: Uint8Array): void {
+  private join(start: Float32Array, kept: Uint8Array, wasHug: Float32Array | null): void {
     const n = this.active, O = this.order, slot = this.slotOf, G = this.wornGraph(), S = G.start, L = G.list;
     const disp = new Float32Array(n * 3), done = kept.slice();
-    for (let i = 0; i < n; i++) if (kept[i]) for (let c = 0; c < 3; c++) disp[i * 3 + c] = start[i * 3 + c] - bound[i * 3 + c];
+    const keptAt: number[] = [], keptP: number[] = [], joined: number[] = [], joinedP: number[] = [];
+    for (let i = 0; i < n; i++) if (kept[i]) { keptAt.push(i); keptP.push(O[i]); } else { joined.push(i); joinedP.push(O[i]); }
+    // the cloth kept, from where the last layout held it
+    const held = this.skin.pinTargets(keptP, wasHug ?? this.binding.offset, new Float32Array(keptP.length * 3));
+    keptAt.forEach((i, k) => { for (let c = 0; c < 3; c++) disp[i * 3 + c] = start[i * 3 + c] - held[k * 3 + c]; });
     let ring: number[];
     do {
       ring = [];
@@ -425,8 +437,9 @@ export class GarmentCloth {
       // a ring reads only the rings laid before it
       for (const i of ring) done[i] = 1;
     } while (ring.length);
-    const joined: number[] = [];
-    for (let i = 0; i < n; i++) if (!kept[i]) { for (let c = 0; c < 3; c++) start[i * 3 + c] = bound[i * 3 + c] + disp[i * 3 + c]; joined.push(i); }
+    // the cloth brought back, from where it lay
+    const lay = this.skin.pinTargets(joinedP, this.binding.offset, new Float32Array(joinedP.length * 3));
+    joined.forEach((i, k) => { for (let c = 0; c < 3; c++) start[i * 3 + c] = lay[k * 3 + c] + disp[i * 3 + c]; });
     if (!this.settled) return;
     this.skin.update(start, this.after);
     const now = this.skin.contactBinding(start, 0.0005 / 0.9), B = this.binding, close = (HUG_CLEARANCE * this.options.unitsPerMetre) / (this.skin.worldScale || 1);
@@ -464,9 +477,10 @@ export class GarmentCloth {
    */
   layOut(): void {
     if (this.laidOut) return;
-    const wasSim = this.sim, wasSlots = this.slotOf.slice(), wasPin = this.pinNow, wasMass = this.massNow;
+    // (the hug is rewritten in place by `layout`: where it held the cloth until now is kept for `join`)
+    const wasSim = this.sim, wasSlots = this.slotOf.slice(), wasPin = this.pinNow, wasMass = this.massNow, wasHug = this.hug ? this.hug.slice() : null;
     const moved = this.layout();
-    if (moved || !sameValues(wasPin, this.pinNow) || !sameValues(wasMass, this.massNow)) this.sim = this.build(wasSim, wasSlots);
+    if (moved || !sameValues(wasPin, this.pinNow) || !sameValues(wasMass, this.massNow)) this.sim = this.build(wasSim, wasSlots, wasHug);
     this.easeHug();
   }
 
@@ -517,11 +531,16 @@ export class GarmentCloth {
   /**
    * What is worn as the cut stands, and so which particles are simulated (in particle order, packed into slots) and how
    * each is held and weighted. True when the set of worn particles changed.
+   * A cut NECKLINE is taken only once the garment has settled on her (`settle`): until then the neckline is worn as
+   * drafted (`GarmentCuts.keepDraftedNeck`). Nothing holds a cut edge while a garment is eased on, and dressed with one, a
+   * V's sides parted over her breasts as it hung; what it took away was bound as that edge lay, and brought up again it
+   * came back as wide as the deep one, torn at its point (Stage 3). Taken from the dressed garment, it is cut from cloth
+   * that lay on her, as a neckline deepened after she is dressed always was, and comes back where that cloth lay.
    */
   private layout(): boolean {
     this.laidOut = true;
     const { sewn } = this, n = sewn.count, T = sewn.triangles, R = sewn.renderTriangles, vp = sewn.vertexParticle;
-    const keep = this.cuts?.keep ?? null, neckField = this.cuts?.neck ?? null;
+    const cut = this.cuts, keep = cut ? (this.settled ? cut.keep : cut.keepDraftedNeck ?? cut.keep) : null, neckField = cut && this.settled ? cut.neck : null;
     const nT = T.length / 3, kept: number[] = [], worn = new Uint8Array(n);
     for (let t = 0; t < nT; t++) {
       if (keep && !(Math.max(keep[R[t * 3]], keep[R[t * 3 + 1]], keep[R[t * 3 + 2]]) > 0)) continue;
@@ -713,6 +732,12 @@ export class GarmentCloth {
     this.skin.setOrder(null);
     const place = this.skin.initial(new Float32Array(n * 3)), disp = new Float32Array(n * 3), done = new Uint8Array(n);
     for (let i = 0; i < m; i++) { const p = O[i]; done[p] = 1; for (let c = 0; c < 3; c++) disp[p * 3 + c] = x[i * 3 + c] - place[p * 3 + c]; }
+    // what a cut NECKLINE took away keeps the binding it had (`kept`): it is taken from the dressed garment (`layout`),
+    // so it was bound where it lay on her; laid again as the edge left round it has moved since -- held to her by its hug,
+    // a V's sides parting over her breasts -- it would come back with that in it, its band then held there. A hem's edge
+    // moves as the cloth round it does, and what a hem took away goes with it
+    const neck = this.settled ? this.cuts?.neck ?? null : null, vp = this.sewn.vertexParticle, kept = new Uint8Array(n);
+    if (neck) for (let v = 0; v < vp.length; v++) { const p = vp[v]; if (!this.worn[p] && neck[v] < 0) kept[p] = done[p] = 1; }
     let ring: number[];
     do {
       ring = [];
@@ -730,7 +755,7 @@ export class GarmentCloth {
     this.skin.update(all, contacts);
     const at = this.skin.contactBinding(all, 0.0005 / 0.9);
     for (let p = 0; p < n; p++) {
-      if (this.worn[p]) continue;
+      if (this.worn[p] || kept[p]) continue;
       for (let c = 0; c < 3; c++) { tri[p * 3 + c] = at.tri[p * 3 + c]; bary[p * 3 + c] = at.bary[p * 3 + c]; }
       offset[p] = at.offset[p];
     }
