@@ -17,7 +17,7 @@ import * as THREE from 'three';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { applyShapeFields, liftShapeFields } from '../src/view/bodyShapeView';
 import { navelHeight, smallestAxis } from '../src/sarahlab/navelPiece';
-import { anchorWeights, applyZeroRefine, fitsZeroRefine, parseZeroRefine, SIDES_FIELD_PREFIX, sidesAnchors, sidesFieldWeights, UPPER_FIELD_PREFIX, ZERO_FIELD, zeroRefineWeight, type ZeroRefine } from '../src/sarahlab/zeroRefine';
+import { anchorWeights, applyWomb, applyZeroRefine, babyAnchors, babyFieldWeights, babyWeightShares, BABY_FIELD_PREFIX, parseWombFile, fitsZeroRefine, parseZeroRefine, SIDES_FIELD_PREFIX, sidesAnchors, sidesFieldWeights, UPPER_FIELD_PREFIX, ZERO_FIELD, zeroRefineWeight, type ZeroRefine } from '../src/sarahlab/zeroRefine';
 import { bellyWeights } from '../src/sarahlab/sarahLabTool';
 import { loadSarahMesh } from './garmentSarahBody';
 
@@ -137,5 +137,42 @@ describe('her sides smoothed', () => {
     expect(sidesAnchors(z.fields)).toEqual([25, 50, 75, 100, 125, 150, 175, 200]);
     expect(Object.keys(sidesFieldWeights(100, sidesAnchors(z.fields), 'hybrid'))).toEqual([SIDES_FIELD_PREFIX + '100']);
     expect(sidesFieldWeights(100, sidesAnchors(z.fields), 'approved')).toEqual({});
+  });
+});
+
+describe('her baby\'s weight', () => {
+  const b = readFileSync('public/models/sarah-v2-body-womb.bin');
+  const womb = parseWombFile(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength));
+  it('is baked light, heavy at half and heavy at full, at every quarter from 25% to 200%', () => {
+    expect(womb.vertices).toBe(115710);
+    for (const kind of [1, 2, 3]) expect(womb.parts.filter((p) => p.kind === kind).map((p) => p.slider)).toEqual([25, 50, 75, 100, 125, 150, 175, 200]);
+    for (const p of womb.parts) {
+      let max = 0;
+      for (let i = 0; i < p.index.length; i += 1) max = Math.max(max, Math.hypot(p.pos[i * 3], p.pos[i * 3 + 1], p.pos[i * 3 + 2]));
+      expect(max).toBeGreaterThan(0.02); expect(max).toBeLessThan(0.15);   // geometry units: 2 to 14 cm
+    }
+  });
+  it('goes through heavy\'s half, and light in a straight line; 0 is her approved belly', () => {
+    expect(babyWeightShares(0)).toEqual({ light: 0, heavyHalf: 0, heavy: 0 });
+    expect(babyWeightShares(-50).light).toBeCloseTo(0.5);
+    expect(babyWeightShares(50)).toEqual({ light: 0, heavyHalf: 1, heavy: 0 });
+    expect(babyWeightShares(75)).toEqual({ light: 0, heavyHalf: 0.5, heavy: 0.5 });
+    expect(babyWeightShares(100)).toEqual({ light: 0, heavyHalf: 0, heavy: 1 });
+    expect(babyWeightShares(400)).toEqual({ light: 0, heavyHalf: 0, heavy: 1 });
+  });
+  it('weighs in by belly size and weight, on HYBRID only', () => {
+    const at = [25, 50, 75, 100, 125, 150, 175, 200];
+    expect(babyFieldWeights(100, 0, at, 'hybrid')).toEqual({});
+    expect(babyFieldWeights(100, 100, at, 'hybrid')).toEqual({ [`${BABY_FIELD_PREFIX}3:100`]: 1 });
+    const w = babyFieldWeights(110, -100, at, 'hybrid');
+    expect(w[`${BABY_FIELD_PREFIX}1:100`]).toBeCloseTo(0.6); expect(w[`${BABY_FIELD_PREFIX}1:125`]).toBeCloseTo(0.4);
+    expect(babyFieldWeights(100, 100, at, 'approved')).toEqual({});
+  });
+  it('goes on her approved body, and on nothing else', () => {
+    const m = mesh.clone(); m.geometry = mesh.geometry.clone();
+    const f = applyWomb(m, liftShapeFields(m)!, womb)!;
+    expect(babyAnchors(f)).toEqual([25, 50, 75, 100, 125, 150, 175, 200]);
+    const small = new THREE.Mesh(new THREE.BoxGeometry());
+    expect(applyWomb(small, { fields: new Map(), basePos: new Float32Array(), baseNrm: null, last: '' }, womb)).toBeNull();
   });
 });

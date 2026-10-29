@@ -78,7 +78,7 @@ import { applyShapeFields, baseShapeFields, liftShapeFields, type ShapeFields, t
 import { BUILD_PROFILES, buildAmounts, buildKey, heightLine, heldSegments, profileOf, withProfile, type BuildAmounts, type BuildSegment } from '../actor/bodyBuild';
 import { applyBuildToBones, applyBuildToMesh, buildBoneOffsets, buildMeshFields, prepareBuildRig, standingLift, type BuildMeshFields, type BuildRig } from '../view/bodyBuild';
 import { dropIdleMorphs } from '../view/morphPrune';
-import { applyZeroRefine, loadZeroRefine, sidesAnchors, sidesFieldWeights, zeroRefineWeight, UPPER_FIELD_PREFIX, ZERO_FIELD, ZERO_REFINE_PATH } from './zeroRefine';
+import { applyWomb, applyZeroRefine, babyAnchors, babyWeightState, babyFieldWeights, loadWomb, loadZeroRefine, sidesAnchors, sidesFieldWeights, zeroRefineWeight, UPPER_FIELD_PREFIX, WOMB_PATH, ZERO_FIELD, ZERO_REFINE_PATH } from './zeroRefine';
 import { NAVEL_MORPHS, type NavelPiece } from './navelPiece';
 import { HumanRig, findSkinnedMesh } from '../view/HumanRig';
 import { UNITS_PER_METRE } from '../world/dem';
@@ -91,6 +91,8 @@ import {
 import { blendJointTurns, sitEase, stepSit } from './poseBlend';
 
 const M = UNITS_PER_METRE;
+/** How far two fingers may pan the camera's aim (metres above the floor): her feet to just above her head. GAME TUNING. */
+const PAN_BOTTOM = 0.05, PAN_TOP = 1.85;
 /**
  * How the outfit's new tee is put on her, in seconds from when it is tailored -- the review probes' own dressing
  * (`.scratch` probe `dress()`): weightless until `weightless` and pinned at the neckline where it settled; her arms
@@ -636,6 +638,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
   let bellyCurve: BellyCurve = DEFAULT_BELLY_CURVE;
   /** The belly sizes her sides smoothing was baked at, once her correction file is on (zeroRefine.ts). */
   let sidesAt: number[] = [];
+  /** The belly sizes her baby-weight shapes were baked at, once their file is in (zeroRefine.ts). */
+  let babyAt: number[] = [];
   const fields: Record<string, HTMLElement> = {};
   const buttons: Record<string, HTMLButtonElement> = {};
   /** FACE's own controls: the held-open mouth, and the eye-colour swatches. */
@@ -840,7 +844,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     for (const c of BODY_CONTROLS) {
       const line = fields[`${SARAH_LAB_FIELD.body}${c.key}`];
       // seated, the tilt in use is not the one chosen: say both, so a sitting body never reads as the slider's
-      if (line) line.textContent = controlLine(c.key, body[c.key]) + (c.key === 'bellyTilt' && pose === 'sit' ? ` · seated ${effectiveTiltDeg(body.bellyTilt, 1).toFixed(1)}°` : '') + (c.key === 'breastSize' ? ` · bust ${bustVolume(bump, body.breastSize).toFixed(2)}×` : '') + (c.key === 'navel' ? ` · ${navelState(bump, body.navel)}` : '') + buildNote(c.key);
+      if (line) line.textContent = controlLine(c.key, body[c.key]) + (c.key === 'bellyTilt' && pose === 'sit' ? ` · seated ${effectiveTiltDeg(body.bellyTilt, 1).toFixed(1)}°` : '') + (c.key === 'breastSize' ? ` · bust ${bustVolume(bump, body.breastSize).toFixed(2)}×` : '') + (c.key === 'navel' ? ` · ${navelState(bump, body.navel)}` : '') + (c.key === 'babyWeight' ? ` · ${babyWeightState(body.babyWeight, babyAt.length > 0, bellyCurve)}` : '') + buildNote(c.key);
       const input = bodyInputs.get(c.key);
       if (input && Number(input.value) !== body[c.key]) input.value = String(body[c.key]);
     }
@@ -1031,6 +1035,8 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     for (const [key, w] of Object.entries(bellyWeights(b, bellyCurve))) out[UPPER_FIELD_PREFIX + key] = w;
     // her sides and the underside of her belly smoothed, by a tent over the sizes they were baked at (zeroRefine.ts)
     Object.assign(out, sidesFieldWeights(b, sidesAt, bellyCurve));
+    // her baby's weight: her belly carried by the womb inside it (zeroRefine.ts), once its file is in
+    Object.assign(out, babyFieldWeights(b, body.babyWeight, babyAt, bellyCurve));
     return out;
   }
 
@@ -1556,6 +1562,10 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         const d = Math.hypot(a.x - b.x, a.y - b.y);
         if (pinch > 0) zoom(pinch / Math.max(1, d));
         pinch = d;
+        // two fingers moved together pan her up and down (Joshua, 2026-10-29: "place down two fingers on mobile to be
+        // able to pan the camera up and down as it's hard to see the model, paint, or whatever on mobile"): the point
+        // between them moves half as far as the finger that moved, and she follows it -- pinch and pan at once
+        panBy((now.y - was.y) / 2, root.getBoundingClientRect().height);
       }
     });
     const up = (e: PointerEvent) => { pointers.delete(e.pointerId); pinch = 0; endSkinStroke(); fabric?.strokeEnd(); builder?.pointerUp(); };
@@ -2308,6 +2318,20 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     orbit.distance = Math.min(4.5 * M, Math.max(0.45 * M, orbit.distance * factor));
   }
 
+  /**
+   * Slide the camera up or down by a move on screen (pixels, down positive, on a view `viewHeight` pixels tall): she moves
+   * with the fingers, as far on screen as they did at the distance she is seen from. Held between her feet and just above
+   * her head.
+   */
+  function panBy(dyPixels: number, viewHeight: number): void {
+    if (!Number.isFinite(dyPixels) || dyPixels === 0) return;
+    const h = Math.max(1, Number.isFinite(viewHeight) ? viewHeight : 1);
+    const perPixel = (2 * orbit.distance * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2)) / h;
+    orbit.target.y = Math.min(PAN_TOP * M, Math.max(PAN_BOTTOM * M, orbit.target.y + dyPixels * perPixel));
+    turning = false;
+    refresh();
+  }
+
   // ------------------------------------------------------------- posing
   /** Her turns in pose `p` (the room's own by default), the base pose written into `out`. */
   function turnsFor(p: SarahLabPose = pose, out: MutableJointTurn[] = poseOut): readonly JointTurn[] {
@@ -2429,7 +2453,7 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
     // her hair goes with her body (it is in her model's tree); a request still under way is no longer wanted
     hairMeshes = []; hairRequest++;
     if (model) { three.remove(model); rig?.dispose(); release(model); model = null; }
-    rig = null; measure = null; fingers = []; skinned = []; shaped = []; garments = []; hasBelly = false; feel = null; navel = null; sidesAt = [];
+    rig = null; measure = null; fingers = []; skinned = []; shaped = []; garments = []; hasBelly = false; feel = null; navel = null; sidesAt = []; babyAt = [];
     buildRig = null; bonesBuilt = ''; standLift = 0;
     crease.reset(); if (creaseTimer) { clearTimeout(creaseTimer); creaseTimer = 0; }
     recovered = false; partMeshes.clear(); wantedOutfit = null; outfitRequest++;
@@ -2521,6 +2545,16 @@ export function buildSarahLabScene(ctx: SceneContext, hooks: SarahLabHooks): App
         if (!z) return;
         s.fields = z.fields; navel = { mesh: b.mesh, piece: z.navel }; sidesAt = sidesAnchors(z.fields);
         applyLook();
+        // then her baby-weight shapes, in the background: at 0 she is her approved belly, so nothing waits for them
+        void loadWomb(assets.assetUrl(WOMB_PATH)).then((womb) => {
+          const b2 = bodyOf(), s2 = b2 ? shaped.find((x) => x.mesh === b2.mesh) : undefined;
+          if (!womb || disposed || model !== loadedModel || !b2 || !s2) return;
+          const f = applyWomb(s2.mesh, s2.fields, womb);
+          if (!f) return;
+          s2.fields = f; babyAt = babyAnchors(f);
+          refresh();
+          applyLook();
+        });
       });
       // and the skin chosen in FACE goes on (a candidate fetched once is kept for a body loaded again)
       applySkin();

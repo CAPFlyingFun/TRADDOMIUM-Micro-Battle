@@ -25,7 +25,7 @@
  */
 
 export type BodyControl =
-  | 'bellyTilt' | 'bellyHeight' | 'bellyWidth' | 'bellyDepth' | 'bellyUpper' | 'bellyLower' | 'navel'
+  | 'bellyTilt' | 'bellyHeight' | 'bellyWidth' | 'bellyDepth' | 'bellyUpper' | 'bellyLower' | 'navel' | 'babyWeight'
   | 'breastSize' | 'breastWidth' | 'breastHeight' | 'breastDepth' | 'breastSpacing' | 'breastPosition' | 'breastDroop' | 'breastUpper' | 'breastLower'
   | 'height' | 'upperLeg' | 'lowerLeg' | 'torso' | 'neck' | 'upperArm' | 'forearm' | 'shoulders' | 'waist' | 'hips' | 'head' | 'hands' | 'feet';
 
@@ -58,6 +58,11 @@ export const BODY_CONTROLS: readonly BodyControlSpec[] = Object.freeze([
   // Joshua, 2026-10-24: "a manual bellybutton in/out slider... how much of an innie or outie bellybutton is there
   // independent of the automatic bellybutton size per belly % like the breast size"
   { key: 'navel', group: 'belly', label: 'Navel', unit: '%', min: -100, max: 100, step: 1, fallback: 0, spread: 15, help: 'innie or outie from what the belly size gives: below 0 deeper in, above 0 further out, at any belly size' },
+  // Joshua, 2026-10-29: "the belly automatically adjusting to the womb/oval shape... could adjust the weight of the baby
+  // to allow more or less sag and depth". A womb inside her (seated on her pelvis) moves with the weight and her belly
+  // follows it: heavy drops lower and forward, fuller below; light sits higher and tighter, up to her ribs. 0 is her
+  // approved belly exactly. Needs her v2 body's womb file (sarah-v2-body-womb.bin); on another body it does nothing.
+  { key: 'babyWeight', group: 'belly', label: 'Baby weight', unit: '%', min: -100, max: 100, step: 1, fallback: 0, spread: 25, help: 'light (higher, tighter) to heavy (lower, fuller below): the womb inside her moves and her belly follows it' },
   { key: 'breastSize', group: 'breasts', label: 'Size', unit: '%', min: -100, max: 100, step: 1, fallback: 0, spread: 10, help: 'volume from the bust the belly slider gives: +100% is 2.0x, -100% is 0.5x, at any belly size' },
   { key: 'breastWidth', group: 'breasts', label: 'Width', unit: '%', min: -25, max: 25, step: 1, fallback: 0, spread: 4, help: 'side to side' },
   { key: 'breastHeight', group: 'breasts', label: 'Height', unit: '%', min: -25, max: 25, step: 1, fallback: 0, spread: 4, help: 'top to bottom' },

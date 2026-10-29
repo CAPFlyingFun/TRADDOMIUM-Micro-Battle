@@ -233,3 +233,97 @@ export async function loadZeroRefine(url: string): Promise<ZeroRefine | null> {
     return null;
   }
 }
+
+/**
+ * HER BABY'S WEIGHT (Joshua, 2026-10-29: "the belly automatically adjusting to the womb/oval shape... could adjust the
+ * weight of the baby to allow more or less sag and depth"; of the renders, "Looks good so far!").
+ *
+ * A womb (an egg seated on her pelvis, fitted inside each approved belly size) moves with the BABY WEIGHT control: heavy
+ * tips it forward and down over her pubic bone, deeper and fuller below; light sits it a little higher and tighter, up
+ * to her ribs. Her skin follows it most where it is closest, smoothed as approved ("Max" sides, "gentle" under the
+ * belly), never inside it, her navel laid fresh on top. Baked per belly size, 25% to 200%, in its own file -- light at
+ * full weight, heavy at half and at full (heavy is not a straight line) -- and fetched after her body, in the background:
+ * 0 is her approved belly exactly, so nothing waits for it.
+ */
+export const WOMB_PATH = 'models/sarah-v2-body-womb.bin';
+export const BABY_FIELD_PREFIX = 'shape:baby:';
+export interface WombFile { readonly vertices: number; readonly parts: readonly AnchoredPart[] }
+
+/** Read the baby-weight file ('SZW1'). Throws on anything else. */
+export function parseWombFile(buffer: ArrayBuffer): WombFile {
+  const view = new DataView(buffer);
+  const magic = String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3));
+  if (magic !== 'SZW1') throw new Error(`womb: not a baby-weight file (${magic})`);
+  const vertices = view.getUint32(4, true);
+  const { parts, at } = readAnchoredParts(buffer, 8, vertices);
+  if (at !== buffer.byteLength) throw new Error(`womb: ${buffer.byteLength - at} bytes left over`);
+  for (const p of parts) {
+    if (p.kind !== ANCHOR_KIND.light && p.kind !== ANCHOR_KIND.heavyHalf && p.kind !== ANCHOR_KIND.heavy) throw new Error(`womb: a field of kind ${p.kind}`);
+    for (const i of p.index) if (i >= vertices) throw new Error('womb: a vertex past the mesh');
+  }
+  return { vertices, parts };
+}
+
+/** Put the baby-weight fields into a field set (returned as a new one); null when the mesh is not the body they were baked for. */
+export function applyWomb(mesh: THREE.Mesh, fields: ShapeFields, data: WombFile): ShapeFields | null {
+  const geom = mesh.geometry as THREE.BufferGeometry;
+  if (geom.getAttribute('position')?.count !== data.vertices || data.vertices !== ZERO_REFINE_VERTICES) return null;
+  const map = new Map(fields.fields);
+  for (const p of data.parts) map.set(`${BABY_FIELD_PREFIX}${p.kind}:${p.slider}`, { index: p.index, pos: p.pos, nrm: p.nrm });
+  return { ...fields, fields: map, last: '' };
+}
+
+/** The belly sizes the baby-weight fields were baked at, from a field set (ascending). */
+export function babyAnchors(fields: ShapeFields | null | undefined): number[] {
+  if (!fields) return [];
+  const at = new Set<number>();
+  for (const n of fields.fields.keys()) if (n.startsWith(BABY_FIELD_PREFIX)) { const s = Number(n.split(':').pop()); if (Number.isFinite(s)) at.add(s); }
+  return [...at].sort((a, b) => a - b);
+}
+
+/**
+ * The share of each baked weight at a BABY WEIGHT value (-100 light .. 0 normal .. +100 heavy): light is a straight
+ * line; heavy goes through its half (0 -> half -> full), so 50 is exactly the baked half and 100 the baked full.
+ */
+export function babyWeightShares(weightPercent: number): { light: number; heavyHalf: number; heavy: number } {
+  const w = Math.min(1, Math.max(-1, (Number.isFinite(weightPercent) ? weightPercent : 0) / 100));
+  if (w <= 0) return { light: w < 0 ? -w : 0, heavyHalf: 0, heavy: 0 };
+  return w <= 0.5 ? { light: 0, heavyHalf: 2 * w, heavy: 0 } : { light: 0, heavyHalf: 2 - 2 * w, heavy: 2 * w - 1 };
+}
+
+/** The baby-weight fields' weights at a belly size and BABY WEIGHT: a tent over the baked sizes times the weight's shares, on HYBRID only. */
+export function babyFieldWeights(bumpPercent: number, weightPercent: number, anchors: readonly number[], curve: string): Record<string, number> {
+  const out: Record<string, number> = {};
+  if (curve !== 'hybrid' || !anchors.length) return out;
+  const share = babyWeightShares(weightPercent);
+  if (!share.light && !share.heavyHalf && !share.heavy) return out;
+  for (const [s, t] of anchorWeights(bumpPercent, anchors)) {
+    if (share.light) out[`${BABY_FIELD_PREFIX}${ANCHOR_KIND.light}:${s}`] = t * share.light;
+    if (share.heavyHalf) out[`${BABY_FIELD_PREFIX}${ANCHOR_KIND.heavyHalf}:${s}`] = t * share.heavyHalf;
+    if (share.heavy) out[`${BABY_FIELD_PREFIX}${ANCHOR_KIND.heavy}:${s}`] = t * share.heavy;
+  }
+  return out;
+}
+
+/** Fetch and read the baby-weight file; null (BABY WEIGHT does nothing) when it cannot be had. */
+export async function loadWomb(url: string): Promise<WombFile | null> {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return parseWombFile(await res.arrayBuffer());
+  } catch (error) {
+    console.warn('[sarahlab] her baby-weight shapes could not be loaded; BABY WEIGHT does nothing', error);
+    return null;
+  }
+}
+
+/** What the BABY WEIGHT line adds: how her baby sits, or why the control does nothing here. */
+export function babyWeightState(weightPercent: number, ready: boolean, curve: string): string {
+  if (!ready) return 'her v2 body only (loading or not this body)';
+  if (curve !== 'hybrid') return 'HYBRID belly curve only';
+  const w = Number.isFinite(weightPercent) ? weightPercent : 0;
+  if (w === 0) return 'normal';
+  const a = Math.abs(w);
+  const how = a < 35 ? 'a little ' : a < 75 ? '' : 'very ';
+  return w < 0 ? `${how}light · sits higher` : `${how}heavy · drops lower`;
+}
